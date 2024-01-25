@@ -1,0 +1,3 @@
+/proj/xsjhdstaff3/maxzhen2/amd-aie/amd-aie/core/build/example_build/CMakeFiles/example_noop_test.dir
+/proj/xsjhdstaff3/maxzhen2/amd-aie/amd-aie/core/build/example_build/CMakeFiles/edit_cache.dir
+/proj/xsjhdstaff3/maxzhen2/amd-aie/amd-aie/core/build/example_build/CMakeFiles/rebuild_cache.dir

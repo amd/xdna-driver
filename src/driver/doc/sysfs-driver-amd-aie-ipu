@@ -1,0 +1,146 @@
+What:           /sys/bus/pci/devices/<bdf>/aie/version/major
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the major version number for the device firmware.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/version/minor
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the minor version number for the device firmware.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/cols
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of AIE columns available in the device.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/rows
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of rows in each AIE column in the device.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/size
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the size of an information buffer for a single AIE column
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/version/major
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the major version number for the metadata interface.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/version/minor
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the minor version number for the metadata interface.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/core/row_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of rows dedicated to the core tile type.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/core/row_start
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the starting index of rows dedicated to the core tile
+                type. This indexes into the number of rows available in
+                a column.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/core/dma_channel_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of DMA channels dedicated to the core tile
+                type.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/core/lock_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of semaphores dedicated to protecting core
+                tile type buffers.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/core/event_reg_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of event registers dedicated to detecting
+                core tile type events.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/mem/row_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of rows dedicated to the memory tile type.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/mem/row_start
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the starting index of rows dedicated to the memory tile
+                type. This indexes into the number of rows available in
+                a column.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/mem/dma_channel_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of DMA channels dedicated to the memory tile
+                type.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/mem/lock_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of semaphores dedicated to protecting memory
+                tile type buffers.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/mem/event_reg_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of event registers dedicated to detecting
+                memory tile type events.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/shim/row_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of rows dedicated to the shim tile type.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/shim/row_start
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the starting index of rows dedicated to the shim tile
+                type. This indexes into the number of rows available in
+                a column.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/shim/dma_channel_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of DMA channels dedicated to the shim tile
+                type.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/shim/lock_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of semaphores dedicated to protecting shim
+                tile type buffers.
+
+What:           /sys/bus/pci/devices/<bdf>/aie/metadata/shim/event_reg_count
+Date:           September 14, 2023
+KernelVersion:  6.5.1
+Contact:        lizhi.hou@amd.com
+Description:    Shows the number of event registers dedicated to detecting
+                shim tile type events.

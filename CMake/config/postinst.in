@@ -1,0 +1,46 @@
+#! /bin/bash
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2023-2024 AMD, Inc. All rights reserved.
+
+RED="\e[31m"
+ENDCOLOR="\e[0m"
+
+build_type=@CMAKE_BUILD_TYPE@
+if [ "$build_type" = "Debug" ]; then
+	echo "========= Postinst Debug ========="
+	set -x
+fi
+
+installdir=/opt/xilinx/xrt
+udev_rules_d=/etc/udev/rules.d
+amdxdna_rules_file=99-amdxdna.rules
+
+export XILINX_XRT=$installdir
+echo "Installing new amdxdna Linux kernel module in dkms"
+if [ "$build_type" = "Debug" ]; then
+	DKMS_DRIVER_VERBOSE=true $installdir/amdxdna/dkms_driver.sh --install
+else
+	$installdir/amdxdna/dkms_driver.sh --install
+fi
+
+echo "Loading new amdxdna Linux kernel module"
+if [ ! -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
+	touch ${udev_rules_d}/${amdxdna_rules_file}
+fi
+echo "KERNEL==\"accel*\",DRIVERS==\"amdxdna\",MODE=\"0666\"" > ${udev_rules_d}/${amdxdna_rules_file}
+
+echo "Creating xclbin firmware symbolic link"
+if [ "$build_type" = "Debug" ]; then
+	$installdir/amdxdna/setup_xclbin_firmware.sh -v
+else
+	$installdir/amdxdna/setup_xclbin_firmware.sh
+fi
+
+modprobe amdxdna
+
+unset XILINX_XRT
+if [ "$build_type" = "Debug" ]; then
+	echo "========= Postinst Debug end ========="
+	set +x
+fi

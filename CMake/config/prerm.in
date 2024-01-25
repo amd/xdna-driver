@@ -1,0 +1,40 @@
+#! /bin/bash
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2023-2024 AMD, Inc. All rights reserved.
+
+RED="\e[31m"
+ENDCOLOR="\e[0m"
+
+build_type=@CMAKE_BUILD_TYPE@
+if [ "$build_type" = "Debug" ]; then
+	echo "========= Pretrm Debug ========="
+	set -x
+fi
+
+installdir=/opt/xilinx/xrt
+udev_rules_d=/etc/udev/rules.d
+amdxdna_rules_file=99-amdxdna.rules
+
+if lsmod | grep -q "amdxdna "; then
+	rmmod amdxdna
+fi
+
+if [ -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
+	rm -rf ${udev_rules_d}/${amdxdna_rules_file}
+fi
+
+export XILINX_XRT=$installdir
+if [ "$build_type" = "Debug" ]; then
+	$installdir/amdxdna/setup_xclbin_firmware.sh -v -clean
+	DKMS_DRIVER_VERBOSE=true $installdir/amdxdna/dkms_driver.sh --remove
+else
+	$installdir/amdxdna/setup_xclbin_firmware.sh -clean
+	$installdir/amdxdna/dkms_driver.sh --remove
+fi
+unset XILINX_XRT
+
+if [ "$build_type" = "Debug" ]; then
+	echo "========= Prerm Debug end ========="
+	set +x
+fi

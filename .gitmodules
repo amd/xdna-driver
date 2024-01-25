@@ -1,0 +1,3 @@
+[submodule "xrt"]
+	path = xrt
+	url = git@github.com:Xilinx/XRT.git

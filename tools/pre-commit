@@ -1,0 +1,23 @@
+#! /bin/bash --
+
+# Copy this file to .git/hooks/ in your repository.
+# This will be called in every 'git commit', unless you use '--no-verify' option to disable it.
+
+CHECKPATCH=/lib/modules/$(uname -r)/build/scripts/checkpatch.pl
+
+if [ -f ${CHECKPATCH} ]; then
+    echo "run check patch: ${CHECKPATCH}"
+else
+    echo "checkpatch script not found: ${CHECKPATCH}"
+    exit 2
+fi
+
+#IGNORE_DEFAULT="FILE_PATH_CHANGES,"
+IGNORE_DEFAULT="FILE_PATH_CHANGES,LINUX_VERSION_CODE,"
+IGNORE_CMD="--ignore ${IGNORE_DEFAULT}"
+
+if ! git diff --cached src/include src/driver | $CHECKPATCH ${IGNORE_CMD} --no-tree --strict -q -
+then
+	echo "Please follow Linux coding style and fix checkpatch reports"
+	exit 1
+fi
