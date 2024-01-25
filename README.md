@@ -29,7 +29,7 @@ To run AI applications, your system needs
 
 You need to manually build 6.7 Linux kernel packages by following below steps.
 
-The 6.7 Linux kernel with SVA source code can be downloaded from _iommu_sva_v4_v6.7_rc8 branch_ on https://github.com/AMDESE/linux
+The 6.7 Linux kernel with SVA source code can be downloaded from _iommu_sva_v4_v6.7-rc8 branch_ on https://github.com/AMDESE/linux
 ``` bash
 # Assuming you have knowledge of kernel compile, this just refreshing up a few key points.
 
