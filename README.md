@@ -1,5 +1,5 @@
-# AMD XDNA Driver for Linux
-This repository is for the AMD XDNA Driver (amdxdna.ko) for Linux and XRT SHIM library development.
+# AMD XDNA™️ Driver for Linux®️
+This repository is for the AMD XDNA™️ Driver (amdxdna.ko) for Linux®️ and XRT SHIM library development.
 
 ## Table of Contents
 - [Introduction](#introduction)
