@@ -285,8 +285,7 @@ static int amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	struct amdxdna_client *client = filp->driver_priv;
 	size_t aligned_sz = PAGE_ALIGN(args->size);
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_gem_obj *heap;
-	struct amdxdna_gem_obj *abo;
+	struct amdxdna_gem_obj *abo, *heap;
 	u64 offset;
 	int ret;
 
@@ -388,8 +387,11 @@ static int amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 	}
 
 	abo->mem.kva = vmap(abo->mem.pages, abo->mem.nr_pages, VM_MAP, PAGE_KERNEL);
-	if (!abo->mem.kva)
+	if (!abo->mem.kva) {
+		XDNA_ERR(xdna, "vmap failed");
+		ret = -EFAULT;
 		goto unpin;
+	}
 
 	abo->mem.kva += offset_in_page(abo->mem.userptr);
 

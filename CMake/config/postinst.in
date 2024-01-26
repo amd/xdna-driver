@@ -37,6 +37,8 @@ else
 	$installdir/amdxdna/setup_xclbin_firmware.sh
 fi
 
+# Loading new driver
+rmmod amdxdna > /dev/null 2>&1
 modprobe amdxdna
 
 unset XILINX_XRT

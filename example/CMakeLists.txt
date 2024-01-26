@@ -2,7 +2,7 @@
 # Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 cmake_minimum_required(VERSION 3.19.0)
-project("amd-xdma") 
+project("amdxdna-example") 
 
 # This required by XRT
 set(CMAKE_CXX_STANDARD 17)

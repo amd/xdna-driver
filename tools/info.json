@@ -9,7 +9,7 @@
 			"fw_name": "ipu.sbin"
 		},
 		{
-			"device": "Strix",
+			"device": "IPU2",
 			"url": "",
 			"pci_device_id": "17f0",
 			"version": "0.6.12.109",

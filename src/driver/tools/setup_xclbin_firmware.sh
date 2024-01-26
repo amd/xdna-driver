@@ -1,13 +1,13 @@
 #! /bin/bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Script to install driver source code and enable DKMS
 
 declare -A devices
 
 devices["Phoenix"]="1502"
-devices["Strix"]="17f0"
+devices["IPU2"]="17f0"
 
 usage()
 {

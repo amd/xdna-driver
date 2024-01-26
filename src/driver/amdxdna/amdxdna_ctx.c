@@ -667,7 +667,7 @@ err_out:
 	return ret;
 }
 
-static int amdxdna_hwctx_wait_for_idel(struct amdxdna_hwctx *hwctx)
+static int amdxdna_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 {
 	struct dma_fence *out_fence;
 	signed long remaining;
@@ -709,7 +709,7 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 		 * break the system. ipu_destroy_context() will destroy mailbox
 		 * and abort all commands.
 		 */
-		amdxdna_hwctx_wait_for_idel(hwctx);
+		amdxdna_hwctx_wait_for_idle(hwctx);
 		drm_sched_stop(&hwctx->sched, NULL);
 		ipu_destroy_context(xdna->dev_handle, hwctx);
 	}
@@ -741,7 +741,7 @@ static void amdxdna_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 	/* Timeout all outstanding jobs */
 	drm_sched_fault(&hwctx->sched);
 	hwctx->destroyed = true;
-	amdxdna_hwctx_wait_for_idel(hwctx);
+	amdxdna_hwctx_wait_for_idle(hwctx);
 	amdxdna_hwctx_release(hwctx);
 }
 

@@ -60,7 +60,7 @@ This repository has src/xrt as a git submodule. The path to XRT is set up to clo
 ``` bash
 sudo su 	#requires root permissions to run the script
 cd <root-of-source-tree>
-./xrt/src/runtime_src/tools/scripts/xrtdeps.sh
+./tools/amdxdna_deps.sh
 exit  		#exit from root
 ```
 
@@ -83,6 +83,7 @@ You will find "xrt_plugin\*-amdxdna.deb" in Release/ folder. This package includ
 If you haven't read [System Requirements](#system-requirements), double check it.
 
 ``` bash
+source /opt/xilinx/xrt/setup.sh
 cd <root-of-source-tree>/build
 
 # Build the test program

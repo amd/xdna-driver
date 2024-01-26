@@ -69,7 +69,6 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	}
 	client->pasid = iommu_sva_get_pasid(client->sva);
 	if (client->pasid == IOMMU_PASID_INVALID) {
-		iommu_sva_unbind_device(client->sva);
 		XDNA_ERR(xdna, "SVA get pasid failed");
 		ret = -ENODEV;
 		goto unbind_sva;
