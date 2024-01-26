@@ -83,6 +83,7 @@ You will find "xrt_plugin\*-amdxdna.deb" in Release/ folder. This package includ
 If you haven't read [System Requirements](#system-requirements), double check it.
 
 ``` bash
+source /opt/xilinx/xrt/setup.sh
 cd <root-of-source-tree>/build
 
 # Build the test program
