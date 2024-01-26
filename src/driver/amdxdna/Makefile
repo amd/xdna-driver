@@ -37,7 +37,7 @@ amdxdna-y := \
 	ipu_message.o \
 	ipu_sysfs.o \
 	ipu_phx_regs.o \
-	ipu_strix_regs.o \
+	ipu_ipu2_regs.o \
 	amdxdna_mailbox.o \
 	amdxdna_psp.o \
 	amdxdna_drv.o

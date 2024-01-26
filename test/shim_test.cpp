@@ -283,9 +283,6 @@ xclbin_info xclbin_infos[] = {
     .name = "1x4.xclbin",
     .device = phx_device_id,
     .ip_name2idx = {
-      { "PP_KERNEL_0:IPUV1PP",        {8} },
-      { "PP_KERNEL_1:IPUV1PP",        {9} },
-      { "PP_KERNEL_2:IPUV1PP",        {10} },
       { "DPU_PDI_0:IPUV1CNN",         {0} },
       { "DPU_PDI_1:IPUV1CNN",         {1} },
       { "DPU_PDI_2:IPUV1CNN",         {2} },
