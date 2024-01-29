@@ -62,9 +62,8 @@ struct amdxdna_xclbin {
 	u32				num_cus;
 };
 
-void amdxdna_xclbin_update_cu(struct amdxdna_dev *xdna, struct amdxdna_xclbin *cache);
-int amdxdna_xclbin_load(struct amdxdna_dev *xdna, uuid_t *uuid, struct amdxdna_xclbin **cache);
-void amdxdna_xclbin_unload(struct amdxdna_dev *xdna, struct amdxdna_xclbin *xclbin_cache);
+int amdxdna_xclbin_load(struct amdxdna_dev *xdna, uuid_t *uuid, struct amdxdna_xclbin **xclbin);
+void amdxdna_xclbin_unload(struct amdxdna_dev *xdna, struct amdxdna_xclbin *xclbin);
 int amdxdna_xclbin_load_by_ptr(struct amdxdna_dev *xdna, const void __user *xclbin_p,
 			       struct amdxdna_xclbin **xclbin);
 

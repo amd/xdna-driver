@@ -5,6 +5,7 @@
 
 #include <linux/types.h>
 #include <linux/delay.h>
+#include <linux/io.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/build_bug.h>
@@ -20,12 +21,14 @@
 #define MB_ERR(chann, fmt, args...) \
 ({ \
 	typeof(chann) _chann = chann; \
-	pr_err("%s.%d: "fmt, (_chann)->mb->name, (_chann)->msix_irq, ##args); \
+	dev_err((_chann)->mb->dev, "xdna_mailbox.%d: "fmt, \
+		(_chann)->msix_irq, ##args); \
 })
 #define MB_DBG(chann, fmt, args...) \
 ({ \
 	typeof(chann) _chann = chann; \
-	pr_debug("%s.%d: "fmt, (_chann)->mb->name, (_chann)->msix_irq, ##args); \
+	dev_dbg((_chann)->mb->dev, "xdna_mailbox.%d: "fmt, \
+		(_chann)->msix_irq, ##args); \
 })
 
 #define ASYNC_MSG_START_ID		0x80000000U
@@ -34,6 +37,7 @@
 #define MAGIC_VAL_MASK			0xFF000000
 #define MAX_MSG_ID_ENTRIES		256
 #define MSG_RX_TIMER			200 /* milliseconds */
+#define MAILBOX_NAME			"xdna_mailbox"
 
 enum channel_res_type {
 	CHAN_RES_X2I,
@@ -42,7 +46,7 @@ enum channel_res_type {
 };
 
 struct mailbox {
-	char			*name;
+	struct device		*dev;
 	struct xdna_mailbox_res	res;
 	/* protect channel list */
 	struct mutex		mbox_lock;
@@ -100,7 +104,7 @@ struct mailbox_pkg {
 
 struct mailbox_msg {
 	void			*handle;
-	void			(*notify_cb)(void *handle, const u8 *data, size_t size);
+	void			(*notify_cb)(void *handle, const u32 *data, size_t size);
 	size_t			pkg_size; /* package size in bytes */
 	struct mailbox_pkg	pkg;
 };
@@ -133,12 +137,6 @@ static u32 mailbox_reg_read(struct mailbox_channel *mb_chann, u32 mbox_reg)
 	u64 ringbuf_addr = mb_res->mbox_base + mbox_reg;
 
 	return ioread32((void *)ringbuf_addr);
-}
-
-static inline void mailbox_clear_msix_intr(struct mailbox_channel *mb_chann)
-{
-	/* Clear IOHUB register */
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
 }
 
 static inline void
@@ -256,7 +254,7 @@ mailbox_send_msg(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
 	memcpy_toio((void *)write_addr, &mb_msg->pkg, mb_msg->pkg_size);
 	mailbox_set_tailptr(mb_chann, tail + mb_msg->pkg_size);
 
-	trace_mbox_set_tail(mb_chann->mb->name, mb_chann->msix_irq,
+	trace_mbox_set_tail(MAILBOX_NAME, mb_chann->msix_irq,
 			    mb_msg->pkg.header.opcode,
 			    mb_msg->pkg.header.id);
 
@@ -369,7 +367,7 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 
 	mailbox_set_headptr(mb_chann, head + sizeof(header) + msg_size);
 	/* After update head, it can equal to ringbuf_size. This is expected. */
-	trace_mbox_set_head(mb_chann->mb->name, mb_chann->msix_irq,
+	trace_mbox_set_head(MAILBOX_NAME, mb_chann->msix_irq,
 			    header.opcode, header.id);
 
 	return 0;
@@ -379,10 +377,11 @@ static irqreturn_t mailbox_irq_handler(int irq, void *p)
 {
 	struct mailbox_channel *mb_chann = p;
 
-	trace_mbox_irq_handle(mb_chann->mb->name, irq);
+	trace_mbox_irq_handle(MAILBOX_NAME, irq);
 	/* Schedule a rx_work to call the callback functions */
 	queue_work(mb_chann->work_q, &mb_chann->rx_work);
-	mailbox_clear_msix_intr(mb_chann);
+	/* Clear IOHUB register */
+	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
 
 	return IRQ_HANDLED;
 }
@@ -612,6 +611,7 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 	record = kzalloc(sizeof(*record), GFP_KERNEL);
 	if (!record) {
 		MB_ERR(mb_chann, "No memory for record");
+		mutex_unlock(&mb->mbox_lock);
 		return NULL;
 	}
 
@@ -649,14 +649,14 @@ skip_record:
 	mb_chann->x2i_tail = mailbox_get_tailptr(mb_chann, CHAN_RES_X2I);
 
 	INIT_WORK(&mb_chann->rx_work, mailbox_rx_worker);
-	mb_chann->work_q = create_singlethread_workqueue(mb->name);
+	mb_chann->work_q = create_singlethread_workqueue(MAILBOX_NAME);
 	if (!mb_chann->work_q) {
 		MB_ERR(mb_chann, "Create workqueue failed");
 		goto free_and_out;
 	}
 
 	/* Everything look good. Time to enable irq handler */
-	ret = request_irq(mb_irq, mailbox_irq_handler, 0, mb->name, mb_chann);
+	ret = request_irq(mb_irq, mailbox_irq_handler, 0, MAILBOX_NAME, mb_chann);
 	if (ret) {
 		MB_ERR(mb_chann, "Failed to request irq %d ret %d", mb_irq, ret);
 		goto destroy_wq;
@@ -700,27 +700,23 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 		kfree(async_msg);
 	}
 
-	MB_DBG(mb_chann, "Mailbox channel destroyed (irq: %d)", mb_chann->msix_irq);
+	MB_DBG(mb_chann, "Mailbox channel destroyed, irq: %d", mb_chann->msix_irq);
 	kfree(mb_chann);
 	return 0;
 }
 
-struct mailbox *xdna_mailbox_create(const struct xdna_mailbox_res *res)
+struct mailbox *xdna_mailbox_create(struct device *dev,
+				    const struct xdna_mailbox_res *res)
 {
 	struct mailbox *mb;
 
-	mb = kzalloc(sizeof(*mb), GFP_KERNEL);
+	mb = devm_kzalloc(dev, sizeof(*mb), GFP_KERNEL);
 	if (!mb)
 		return NULL;
+	mb->dev = dev;
 
 	/* mailbox and ring buf base and size information */
 	memcpy(&mb->res, res, sizeof(*res));
-
-	mb->name = kasprintf(GFP_KERNEL, "%s", res->name);
-	if (!mb->name) {
-		kfree(mb);
-		return NULL;
-	}
 
 	mutex_init(&mb->mbox_lock);
 	INIT_LIST_HEAD(&mb->chann_list);
@@ -754,7 +750,4 @@ done_release_record:
 	mutex_unlock(&mb->mbox_lock);
 
 	mutex_destroy(&mb->mbox_lock);
-
-	kfree(mb->name);
-	kfree(mb);
 }

@@ -7,10 +7,7 @@
 
 #include <linux/bitops.h>
 #include <linux/bitmap.h>
-#include <linux/dev_printk.h>
-#include <linux/gfp.h>
-#include <linux/list.h>
-#include <linux/slab.h>
+#include <linux/device.h>
 
 #include "xrs.h"
 
@@ -35,7 +32,7 @@ struct solver_node {
 	struct list_head	list;
 	uuid_t			xclbin_uuid;
 	uuid_t			cdo_uuid;
-	u32			rid;		/* Request ID from consumer */
+	u64			rid;		/* Request ID from consumer */
 	u32			noly;		/* # overlay */
 	u32			ncol;		/* # columns */
 	u32			*oly;		/* start column array */

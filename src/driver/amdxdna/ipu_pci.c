@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright 2023-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
 #include <linux/errno.h>
 #include <linux/kthread.h>
 #include <linux/iommu.h>
+#include <linux/firmware.h>
 #include "drm_local/amdxdna_accel.h"
 
 #include "ipu_common.h"
@@ -282,7 +283,7 @@ int ipu_alloc_resource(struct amdxdna_hwctx *hwctx)
 	pmp.xclbin_uuid = &xclbin->uuid;
 	pmp.cdo = cdo;
 
-	xrs_req.rid = hwctx->id;
+	xrs_req.rid = (uintptr_t)hwctx;
 	xrs_req.rqos = &hwctx->qos;
 	xrs_req.pmp = &pmp;
 
@@ -302,7 +303,7 @@ int ipu_release_resource(struct amdxdna_hwctx *hwctx)
 	struct ipu_device *idev = xdna->dev_handle;
 	int ret;
 
-	ret = xrs_release_resource(idev->xrs_hdl, hwctx->id);
+	ret = xrs_release_resource(idev->xrs_hdl, (uintptr_t)hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "release AIE resource failed, ret %d", ret);
 
@@ -315,17 +316,25 @@ int ipu_init(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = xdna->pdev;
 	struct xdna_mailbox_res mbox_res;
 	struct psp_config psp_conf;
+	const struct firmware *fw;
 	void __iomem * const *tbl;
 	struct ipu_device *idev;
 	u32 xdna_mailbox_intr_reg;
 	int mgmt_mb_irq;
 	int i, ret;
 
+	ret = request_firmware(&fw, xdna->dev_info->dev_priv->fw_path, &pdev->dev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d",
+			 xdna->dev_info->dev_priv->fw_path, ret);
+		return ret;
+	}
+
 #ifdef AMDXDNA_DEVEL
 	ret = amdxdna_iommu_mode_setup(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
-		return ret;
+		goto release_fw;
 	}
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
@@ -333,7 +342,7 @@ int ipu_init(struct amdxdna_dev *xdna)
 	ret = iommu_dev_enable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
 		XDNA_ERR(xdna, "Enable PASID failed, ret %d", ret);
-		return ret;
+		goto release_fw;
 	}
 
 #ifdef AMDXDNA_DEVEL
@@ -370,7 +379,8 @@ skip_pasid:
 		goto teardown_pci_dev;
 	}
 
-	psp_conf.fw_path = idev->priv->fw_path;
+	psp_conf.fw_size = fw->size;
+	psp_conf.fw_buf = fw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(idev, i)] + PSP_REG_OFF(idev, i);
 	idev->psp_hdl = amdxdna_psp_create(&pdev->dev, &psp_conf);
@@ -391,7 +401,7 @@ skip_pasid:
 	mbox_res.mbox_base = (u64)tbl[xdna->dev_info->mbox_bar];
 	mbox_res.mbox_size = MBOX_SIZE(idev);
 	mbox_res.name = "xdna_mailbox";
-	xdna->mbox = xdna_mailbox_create(&mbox_res);
+	xdna->mbox = xdna_mailbox_create(&pdev->dev, &mbox_res);
 	if (!xdna->mbox) {
 		XDNA_ERR(xdna, "failed to create mailbox device");
 		ret = -ENODEV;
@@ -431,6 +441,7 @@ skip_pasid:
 	xrs_cfg.actions = &ipu_xrs_actions;
 	xrs_cfg.total_col = idev->metadata.cols;
 	xrs_cfg.mode = XRS_MODE_TEMPORAL_BEST;
+	xrs_cfg.dev = &xdna->pdev->dev;
 	idev->xrs_hdl = xrs_init(&xrs_cfg);
 	if (!idev->xrs_hdl) {
 		XDNA_ERR(xdna, "Initialize resolver failed");
@@ -443,7 +454,7 @@ skip_pasid:
 		ret = PTR_ERR(xdna->async_msgd);
 		xdna->async_msgd = NULL;
 		XDNA_ERR(xdna, "failed to create async message handler");
-		goto xrs_fini;
+		goto fw_fini;
 	}
 
 	xdna->dev_handle = idev;
@@ -451,10 +462,9 @@ skip_pasid:
 	XDNA_INFO(xdna, "Mailbox mgmt channel created (irq: %d, msix_id: %d)",
 		  mgmt_mb_irq, idev->mgmt_chan_idx);
 
+	release_firmware(fw);
 	return 0;
 
-xrs_fini:
-	xrs_fini(idev->xrs_hdl);
 fw_fini:
 	ipu_mgmt_fw_fini(idev);
 destroy_mgmt_chann:
@@ -469,6 +479,8 @@ teardown_pci_dev:
 	ipu_teardown_pcidev(idev);
 disable_pasid:
 	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
+release_fw:
+	release_firmware(fw);
 	return ret;
 }
 
@@ -508,7 +520,6 @@ void ipu_fini(struct amdxdna_dev *xdna)
 	if (xdna->async_msgd)
 		kthread_stop(xdna->async_msgd);
 
-	xrs_fini(idev->xrs_hdl);
 	ipu_mgmt_fw_fini(idev);
 
 	xdna_mailbox_destroy_channel(xdna->mgmt_chann);

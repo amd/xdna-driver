@@ -4,6 +4,7 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
+#include <linux/slab.h>
 #include "solver.h"
 
 static u32 calculate_gops(struct aie_qos *rqos)
@@ -73,7 +74,7 @@ static int sanity_check(struct part_meta *pmp, struct aie_qos *rqos, struct solv
 	return 0;
 }
 
-static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u32 rid)
+static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
 {
 	struct solver_node *node;
 
@@ -276,7 +277,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 	}
 
 	if (rg_search_node(&xrs->rgp, req->rid)) {
-		dev_err(xrs->cfg.dev, "rid %d is in-use", req->rid);
+		dev_err(xrs->cfg.dev, "rid %lld is in-use", req->rid);
 		return -EEXIST;
 	}
 
@@ -309,7 +310,7 @@ free_node:
 	return ret;
 }
 
-int xrs_release_resource(void *hdl, u32 rid)
+int xrs_release_resource(void *hdl, u64 rid)
 {
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
@@ -331,7 +332,7 @@ void *xrs_init(struct init_config *cfg)
 	struct solver_rgroup *rgp;
 	struct solver_state *xrs;
 
-	xrs = kzalloc(sizeof(*xrs), GFP_KERNEL);
+	xrs = devm_kzalloc(cfg->dev, sizeof(*xrs), GFP_KERNEL);
 	if (!xrs)
 		return NULL;
 
@@ -343,14 +344,3 @@ void *xrs_init(struct init_config *cfg)
 
 	return xrs;
 }
-
-void xrs_fini(void *hdl)
-{
-	struct solver_state *xrs = hdl;
-
-	if (!list_empty(&xrs->rgp.node_list) || !list_empty(&xrs->rgp.pt_node_list))
-		WARN(1, "xrs resource is not empty");
-
-	kfree(xrs);
-}
-

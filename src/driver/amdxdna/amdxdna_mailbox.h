@@ -9,8 +9,6 @@
 #ifndef _AMDXDNA_MAILBOX_H_
 #define _AMDXDNA_MAILBOX_H_
 
-#include <linux/pci.h>
-
 struct mailbox;
 struct mailbox_channel;
 
@@ -30,7 +28,7 @@ struct mailbox_channel;
 struct xdna_mailbox_msg {
 	u32		opcode;
 	void		*handle;
-	void		(*notify_cb)(void *handle, const u8 *data, size_t size);
+	void		(*notify_cb)(void *handle, const u32 *data, size_t size);
 	u8		*send_data;
 	size_t		send_size;
 };
@@ -48,7 +46,6 @@ struct xdna_mailbox_async {
  * @ringbuf_size:	ring buffer size
  * @mbox_base:		mailbox base address
  * @mbox_size:		mailbox size
- * @name:		name used for logging
  */
 struct xdna_mailbox_res {
 	u64		ringbuf_base;
@@ -76,12 +73,14 @@ struct xdna_mailbox_chann_res {
 /*
  * xdna_mailbox_create() -- create mailbox subsystem and initialize
  *
+ * @dev: device pointer
  * @res: SRAM and mailbox resources
  *
  * Return: If success, return a handle of mailbox subsystem.
  * Otherwise, return NULL pointer.
  */
-struct mailbox *xdna_mailbox_create(const struct xdna_mailbox_res *res);
+struct mailbox *xdna_mailbox_create(struct device *dev,
+				    const struct xdna_mailbox_res *res);
 
 /*
  * xdna_mailbox_destroy() -- destroy mailbox subsystem

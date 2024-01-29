@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
 #ifndef __AMDXDNA_PSP_H__
@@ -25,7 +25,8 @@ enum psp_reg_idx {
 };
 
 struct psp_config {
-	const char	*fw_path;
+	const void	*fw_buf;
+	u32		fw_size;
 	void __iomem	*psp_regs[PSP_MAX_REGS];
 };
 
