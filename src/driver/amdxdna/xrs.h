@@ -124,7 +124,7 @@ struct part_meta {
  * other inputs for the allocation like QoS and Priority.
  */
 struct alloc_requests {
-	u32			rid;
+	u64			rid;
 	struct part_meta	*pmp;
 	struct aie_qos		*rqos;		/* Requested QoS */
 };
@@ -277,5 +277,5 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
  * @hdl:	Resource solver handle obtained from xrs_init()
  * @rid:	The Request ID to identify the requesting context
  */
-int xrs_release_resource(void *hdl, u32 rid);
+int xrs_release_resource(void *hdl, u64 rid);
 #endif /* _XRS_H */

@@ -32,7 +32,7 @@ struct solver_node {
 	struct list_head	list;
 	uuid_t			xclbin_uuid;
 	uuid_t			cdo_uuid;
-	u32			rid;		/* Request ID from consumer */
+	u64			rid;		/* Request ID from consumer */
 	u32			noly;		/* # overlay */
 	u32			ncol;		/* # columns */
 	u32			*oly;		/* start column array */

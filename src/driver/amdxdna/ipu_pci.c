@@ -282,7 +282,7 @@ int ipu_alloc_resource(struct amdxdna_hwctx *hwctx)
 	pmp.xclbin_uuid = &xclbin->uuid;
 	pmp.cdo = cdo;
 
-	xrs_req.rid = hwctx->id;
+	xrs_req.rid = (uintptr_t)hwctx;
 	xrs_req.rqos = &hwctx->qos;
 	xrs_req.pmp = &pmp;
 
@@ -302,7 +302,7 @@ int ipu_release_resource(struct amdxdna_hwctx *hwctx)
 	struct ipu_device *idev = xdna->dev_handle;
 	int ret;
 
-	ret = xrs_release_resource(idev->xrs_hdl, hwctx->id);
+	ret = xrs_release_resource(idev->xrs_hdl, (uintptr_t)hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "release AIE resource failed, ret %d", ret);
 

@@ -74,7 +74,7 @@ static int sanity_check(struct part_meta *pmp, struct aie_qos *rqos, struct solv
 	return 0;
 }
 
-static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u32 rid)
+static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
 {
 	struct solver_node *node;
 
@@ -277,7 +277,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 	}
 
 	if (rg_search_node(&xrs->rgp, req->rid)) {
-		dev_err(xrs->cfg.dev, "rid %d is in-use", req->rid);
+		dev_err(xrs->cfg.dev, "rid %lld is in-use", req->rid);
 		return -EEXIST;
 	}
 
@@ -310,7 +310,7 @@ free_node:
 	return ret;
 }
 
-int xrs_release_resource(void *hdl, u32 rid)
+int xrs_release_resource(void *hdl, u64 rid)
 {
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
