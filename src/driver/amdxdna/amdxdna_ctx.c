@@ -178,7 +178,7 @@ static void amdxdna_sched_job_clean(struct amdxdna_sched_job *job)
 }
 
 static void
-amdxdna_sched_resp_handler(void *handle, const u8 *data, size_t size)
+amdxdna_sched_resp_handler(void *handle, const u32 *data, size_t size)
 {
 	struct amdxdna_sched_job *job = handle;
 	u32 status;
@@ -190,7 +190,7 @@ amdxdna_sched_resp_handler(void *handle, const u8 *data, size_t size)
 
 	print_hex_dump_debug("resp data: ", DUMP_PREFIX_OFFSET, 16, 4, data, size, true);
 
-	status = *(const u32 *)data;
+	status = *data;
 	if (status)
 		job->cmd->state = ERT_CMD_STATE_ERROR;
 	else
@@ -593,7 +593,7 @@ int amdxdna_hwctx_stop(struct amdxdna_client *client, u32 col_map)
 	struct amdxdna_hwctx *hwctx;
 	int next = 0, ret = 0;
 
-	WARN_ON(!mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	/*
 	 * Multiple HW context can reference same AIE partition.
 	 * To reset AIE partition, it needs to destroy all associated hardware

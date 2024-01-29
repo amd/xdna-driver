@@ -369,41 +369,41 @@ static struct amdxdna_xclbin *amdxdna_xclbin_get(struct amdxdna_dev *xdna, const
 }
 
 static int amdxdna_xclbin_register(struct amdxdna_dev *xdna, const struct axlf *axlf,
-				   size_t size, struct amdxdna_xclbin **xclbin_cache)
+				   size_t size, struct amdxdna_xclbin **xclbin)
 {
-	struct amdxdna_xclbin *xclbin;
+	struct amdxdna_xclbin *xp;
 	int ret;
 
-	xclbin = kzalloc(sizeof(*xclbin), GFP_KERNEL);
-	if (!xclbin)
+	xp = kzalloc(sizeof(*xp), GFP_KERNEL);
+	if (!xp)
 		return -ENOMEM;
 
-	uuid_copy(&xclbin->uuid, xclbin_get_uuid(axlf));
-	xclbin->xdna = xdna;
+	uuid_copy(&xp->uuid, xclbin_get_uuid(axlf));
+	xp->xdna = xdna;
 
-	ret = amdxdna_xclbin_parse(xdna, axlf, xclbin);
+	ret = amdxdna_xclbin_parse(xdna, axlf, xp);
 	if (ret) {
 		XDNA_ERR(xdna, "Parse XCLBIN failed, ret %d", ret);
 		goto xclbin_free;
 	}
 
-	ret = ipu_register_pdis(xdna->dev_handle, xclbin);
+	ret = ipu_register_pdis(xdna->dev_handle, xp);
 	if (ret) {
 		XDNA_ERR(xdna, "register xclbin failed, ret %d", ret);
 		goto xclbin_mem_free;
 	}
 
-	kref_init(&xclbin->ref);
+	kref_init(&xp->ref);
 
 	/* Finally, add XCLBIN cache to the XCLBIN list */
-	list_add_tail(&xclbin->entry, &xdna->xclbin_list);
+	list_add_tail(&xp->entry, &xdna->xclbin_list);
 
-	*xclbin_cache = xclbin;
-	XDNA_DBG(xdna, "cached XCLBIN, UUID %pUb", &xclbin->uuid);
+	*xclbin = xp;
+	XDNA_DBG(xdna, "cached XCLBIN, UUID %pUb", &xp->uuid);
 	return 0;
 
 xclbin_mem_free:
-	amdxdna_xclbin_mem_free(xdna, xclbin);
+	amdxdna_xclbin_mem_free(xdna, xp);
 xclbin_free:
 	kfree(xclbin);
 	return ret;

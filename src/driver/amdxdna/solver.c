@@ -4,6 +4,7 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
+#include <linux/slab.h>
 #include "solver.h"
 
 static u32 calculate_gops(struct aie_qos *rqos)
@@ -331,7 +332,7 @@ void *xrs_init(struct init_config *cfg)
 	struct solver_rgroup *rgp;
 	struct solver_state *xrs;
 
-	xrs = kzalloc(sizeof(*xrs), GFP_KERNEL);
+	xrs = devm_kzalloc(cfg->dev, sizeof(*xrs), GFP_KERNEL);
 	if (!xrs)
 		return NULL;
 
@@ -343,14 +344,3 @@ void *xrs_init(struct init_config *cfg)
 
 	return xrs;
 }
-
-void xrs_fini(void *hdl)
-{
-	struct solver_state *xrs = hdl;
-
-	if (!list_empty(&xrs->rgp.node_list) || !list_empty(&xrs->rgp.pt_node_list))
-		WARN(1, "xrs resource is not empty");
-
-	kfree(xrs);
-}
-

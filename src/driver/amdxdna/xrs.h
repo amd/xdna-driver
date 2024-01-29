@@ -253,13 +253,6 @@ struct init_config {
 void *xrs_init(struct init_config *cfg);
 
 /*
- * xrs_fini() - Unregister resource solver.
- *
- * @hdl:	Resource solver handle obtained from xrs_init()
- */
-void xrs_fini(void *hdl);
-
-/*
  * xrs_allocate_resource() - Request to allocate resources for a given context
  *                           and a partition metadata. (See struct part_meta)
  *

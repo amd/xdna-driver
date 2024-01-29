@@ -64,7 +64,7 @@ static int psp_load_firmware(struct psp_device *psp)
 	}
 
 	psp->fw_buf_sz = ALIGN(fw->size, PSP_FW_ALIGN) + PSP_FW_ALIGN;
-	psp->fw_buffer = kmalloc(psp->fw_buf_sz, GFP_KERNEL);
+	psp->fw_buffer = devm_kmalloc(psp->dev, psp->fw_buf_sz, GFP_KERNEL);
 	if (!psp->fw_buffer) {
 		ret = -ENOMEM;
 		goto failed;
@@ -121,9 +121,6 @@ void amdxdna_psp_remove(struct psp_device *psp)
 	ret = psp_exec(psp, reg_vals);
 	if (ret)
 		dev_err(psp->dev, "release tmr failed, ret %d", ret);
-
-	kfree(psp->fw_buffer);
-	kfree(psp);
 }
 
 struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *conf)
@@ -132,7 +129,7 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 	struct psp_device *psp;
 	int ret;
 
-	psp = kzalloc(sizeof(*psp), GFP_KERNEL);
+	psp = devm_kzalloc(dev, sizeof(*psp), GFP_KERNEL);
 	if (!psp)
 		return NULL;
 
@@ -142,7 +139,7 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 	ret = psp_load_firmware(psp);
 	if (ret) {
 		dev_err(psp->dev, "failed to load fw, ret %d", ret);
-		goto failed;
+		return NULL;
 	}
 
 	reg_vals[0] = PSP_VALIDATE;
@@ -153,7 +150,7 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 	ret = psp_exec(psp, reg_vals);
 	if (ret) {
 		dev_err(psp->dev, "failed to validate fw, ret %d", ret);
-		goto failed_free_fw_buf;
+		return NULL;
 	}
 
 	memset(reg_vals, 0, sizeof(reg_vals));
@@ -162,14 +159,8 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 	ret = psp_exec(psp, reg_vals);
 	if (ret) {
 		dev_err(psp->dev, "failed to start fw, ret %d", ret);
-		goto failed_free_fw_buf;
+		return NULL;
 	}
 
 	return psp;
-
-failed_free_fw_buf:
-	kfree(psp->fw_buffer);
-failed:
-	kfree(psp);
-	return NULL;
 }

@@ -236,7 +236,7 @@ static int test_case01(struct ipu_device *idev)
 	return 0;
 }
 
-static void test_case02_cb(void *handle, const u8 *data, size_t size)
+static void test_case02_cb(void *handle, const u32 *data, size_t size)
 {
 	struct completion *comp = handle;
 

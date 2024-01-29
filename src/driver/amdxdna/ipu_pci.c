@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright 2023-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
 #include <linux/errno.h>
@@ -391,7 +391,7 @@ skip_pasid:
 	mbox_res.mbox_base = (u64)tbl[xdna->dev_info->mbox_bar];
 	mbox_res.mbox_size = MBOX_SIZE(idev);
 	mbox_res.name = "xdna_mailbox";
-	xdna->mbox = xdna_mailbox_create(&mbox_res);
+	xdna->mbox = xdna_mailbox_create(&pdev->dev, &mbox_res);
 	if (!xdna->mbox) {
 		XDNA_ERR(xdna, "failed to create mailbox device");
 		ret = -ENODEV;
@@ -431,6 +431,7 @@ skip_pasid:
 	xrs_cfg.actions = &ipu_xrs_actions;
 	xrs_cfg.total_col = idev->metadata.cols;
 	xrs_cfg.mode = XRS_MODE_TEMPORAL_BEST;
+	xrs_cfg.dev = &xdna->pdev->dev;
 	idev->xrs_hdl = xrs_init(&xrs_cfg);
 	if (!idev->xrs_hdl) {
 		XDNA_ERR(xdna, "Initialize resolver failed");
@@ -443,7 +444,7 @@ skip_pasid:
 		ret = PTR_ERR(xdna->async_msgd);
 		xdna->async_msgd = NULL;
 		XDNA_ERR(xdna, "failed to create async message handler");
-		goto xrs_fini;
+		goto fw_fini;
 	}
 
 	xdna->dev_handle = idev;
@@ -453,8 +454,6 @@ skip_pasid:
 
 	return 0;
 
-xrs_fini:
-	xrs_fini(idev->xrs_hdl);
 fw_fini:
 	ipu_mgmt_fw_fini(idev);
 destroy_mgmt_chann:
@@ -508,7 +507,6 @@ void ipu_fini(struct amdxdna_dev *xdna)
 	if (xdna->async_msgd)
 		kthread_stop(xdna->async_msgd);
 
-	xrs_fini(idev->xrs_hdl);
 	ipu_mgmt_fw_fini(idev);
 
 	xdna_mailbox_destroy_channel(xdna->mgmt_chann);

@@ -45,7 +45,7 @@ int ipu_config_cu(struct ipu_device *idev, struct mailbox_channel *chann,
 		  struct amdxdna_xclbin *xclbin);
 int ipu_execbuf(struct ipu_device *idev, struct mailbox_channel *chann,
 		u32 cu_idx, u32 *payload, void *handle,
-		void (*notify_cb)(void *, const u8 *, size_t));
+		void (*notify_cb)(void *, const u32 *, size_t));
 int ipu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_status *args);
 
 #if defined(CONFIG_DEBUG_FS)

@@ -7,10 +7,7 @@
 
 #include <linux/bitops.h>
 #include <linux/bitmap.h>
-#include <linux/dev_printk.h>
-#include <linux/gfp.h>
-#include <linux/list.h>
-#include <linux/slab.h>
+#include <linux/device.h>
 
 #include "xrs.h"
 

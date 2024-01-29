@@ -23,25 +23,25 @@ struct ipu_notify {
 	int			error;
 };
 
-#define DECLARE_IPU_MSG(name, op)		\
-	struct name##_req	req = { 0 };	\
-	struct name##_resp	resp =		\
-{ IPU_STATUS_MAX_IPU_STATUS_CODE };	\
-struct ipu_notify	hdl = {			\
-	.error = 0,				\
-	.data = (u32 *)&resp,			\
-	.size = sizeof(resp),			\
-	.comp = COMPLETION_INITIALIZER(hdl.comp),	\
-};						\
-struct xdna_mailbox_msg msg = {			\
-	.send_data = (u8 *)&req,		\
-	.send_size = sizeof(req),		\
-	.handle = &hdl,				\
-	.opcode = op,				\
-	.notify_cb = ipu_msg_cb,		\
-}
+#define DECLARE_IPU_MSG(name, op)				\
+	struct name##_req	req = { 0 };			\
+	struct name##_resp	resp =				\
+		{ IPU_STATUS_MAX_IPU_STATUS_CODE };		\
+	struct ipu_notify	hdl = {				\
+		.error = 0,					\
+		.data = (u32 *)&resp,				\
+		.size = sizeof(resp),				\
+		.comp = COMPLETION_INITIALIZER(hdl.comp),	\
+	};							\
+	struct xdna_mailbox_msg msg = {				\
+		.send_data = (u8 *)&req,			\
+		.send_size = sizeof(req),			\
+		.handle = &hdl,					\
+		.opcode = op,					\
+		.notify_cb = ipu_msg_cb,			\
+	}
 
-static void ipu_msg_cb(void *handle, const u8 *data, size_t size)
+static void ipu_msg_cb(void *handle, const u32 *data, size_t size)
 {
 	struct ipu_notify *cb_arg = handle;
 
@@ -388,7 +388,7 @@ int ipu_config_cu(struct ipu_device *idev, struct mailbox_channel *chann,
 
 int ipu_execbuf(struct ipu_device *idev, struct mailbox_channel *chann,
 		u32 cu_idx, u32 *payload, void *handle,
-		void (*notify_cb)(void *, const u8 *, size_t))
+		void (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct amdxdna_dev *xdna = idev->xdna;
 	struct execute_buffer_req req;
