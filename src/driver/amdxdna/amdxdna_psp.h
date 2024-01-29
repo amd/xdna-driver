@@ -25,7 +25,8 @@ enum psp_reg_idx {
 };
 
 struct psp_config {
-	const char	*fw_path;
+	const void	*fw_buf;
+	u32		fw_size;
 	void __iomem	*psp_regs[PSP_MAX_REGS];
 };
 

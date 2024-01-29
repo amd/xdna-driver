@@ -611,6 +611,7 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 	record = kzalloc(sizeof(*record), GFP_KERNEL);
 	if (!record) {
 		MB_ERR(mb_chann, "No memory for record");
+		mutex_unlock(&mb->mbox_lock);
 		return NULL;
 	}
 

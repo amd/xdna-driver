@@ -6,6 +6,7 @@
 #include <linux/errno.h>
 #include <linux/kthread.h>
 #include <linux/iommu.h>
+#include <linux/firmware.h>
 #include "drm_local/amdxdna_accel.h"
 
 #include "ipu_common.h"
@@ -315,17 +316,25 @@ int ipu_init(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = xdna->pdev;
 	struct xdna_mailbox_res mbox_res;
 	struct psp_config psp_conf;
+	const struct firmware *fw;
 	void __iomem * const *tbl;
 	struct ipu_device *idev;
 	u32 xdna_mailbox_intr_reg;
 	int mgmt_mb_irq;
 	int i, ret;
 
+	ret = request_firmware(&fw, xdna->dev_info->dev_priv->fw_path, &pdev->dev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d",
+			 xdna->dev_info->dev_priv->fw_path, ret);
+		return ret;
+	}
+
 #ifdef AMDXDNA_DEVEL
 	ret = amdxdna_iommu_mode_setup(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
-		return ret;
+		goto release_fw;
 	}
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
@@ -333,7 +342,7 @@ int ipu_init(struct amdxdna_dev *xdna)
 	ret = iommu_dev_enable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
 		XDNA_ERR(xdna, "Enable PASID failed, ret %d", ret);
-		return ret;
+		goto release_fw;
 	}
 
 #ifdef AMDXDNA_DEVEL
@@ -370,7 +379,8 @@ skip_pasid:
 		goto teardown_pci_dev;
 	}
 
-	psp_conf.fw_path = idev->priv->fw_path;
+	psp_conf.fw_size = fw->size;
+	psp_conf.fw_buf = fw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(idev, i)] + PSP_REG_OFF(idev, i);
 	idev->psp_hdl = amdxdna_psp_create(&pdev->dev, &psp_conf);
@@ -452,6 +462,7 @@ skip_pasid:
 	XDNA_INFO(xdna, "Mailbox mgmt channel created (irq: %d, msix_id: %d)",
 		  mgmt_mb_irq, idev->mgmt_chan_idx);
 
+	release_firmware(fw);
 	return 0;
 
 fw_fini:
@@ -468,6 +479,8 @@ teardown_pci_dev:
 	ipu_teardown_pcidev(idev);
 disable_pasid:
 	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
+release_fw:
+	release_firmware(fw);
 	return ret;
 }
 

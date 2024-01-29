@@ -6,7 +6,6 @@
 #include <linux/bitfield.h>
 #include <linux/slab.h>
 #include <linux/iopoll.h>
-#include <linux/firmware.h>
 #include "amdxdna_psp.h"
 
 #define PSP_STATUS_READY	BIT(31)
@@ -28,14 +27,15 @@
 #define PSP_POLL_TIMEOUT	1000000	/* us */
 
 #define PSP_REG(p, reg) \
-	((p)->conf.psp_regs[reg])
+	((p)->psp_regs[reg])
 
 struct psp_device {
 	struct device	  *dev;
 	struct psp_config conf;
-	void		  *fw_buffer;
-	u64		  fw_paddr;
 	u32		  fw_buf_sz;
+	u64		  fw_paddr;
+	void		  *fw_buffer;
+	void __iomem	  *psp_regs[PSP_MAX_REGS];
 };
 
 static inline char *psp_decode_resp(u32 resp)
@@ -48,36 +48,6 @@ static inline char *psp_decode_resp(u32 resp)
 	default:
 		return "Error unknown";
 	};
-}
-
-static int psp_load_firmware(struct psp_device *psp)
-{
-	const struct firmware *fw;
-	u64 offset;
-	int ret;
-
-	ret = request_firmware(&fw, psp->conf.fw_path, psp->dev);
-	if (ret) {
-		dev_err(psp->dev, "failed to request_firmware %s, error = %d",
-			psp->conf.fw_path, ret);
-		return ret;
-	}
-
-	psp->fw_buf_sz = ALIGN(fw->size, PSP_FW_ALIGN) + PSP_FW_ALIGN;
-	psp->fw_buffer = devm_kmalloc(psp->dev, psp->fw_buf_sz, GFP_KERNEL);
-	if (!psp->fw_buffer) {
-		ret = -ENOMEM;
-		goto failed;
-	}
-
-	psp->fw_paddr = virt_to_phys(psp->fw_buffer);
-	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
-	psp->fw_paddr += offset;
-	memcpy(psp->fw_buffer + offset, fw->data, fw->size);
-
-failed:
-	release_firmware(fw);
-	return ret;
 }
 
 static int psp_exec(struct psp_device *psp, u32 *reg_vals)
@@ -127,6 +97,7 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 {
 	u32 reg_vals[PSP_NUM_IN_REGS];
 	struct psp_device *psp;
+	u64 offset;
 	int ret;
 
 	psp = devm_kzalloc(dev, sizeof(*psp), GFP_KERNEL);
@@ -134,13 +105,19 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 		return NULL;
 
 	psp->dev = dev;
-	memcpy(&psp->conf, conf, sizeof(psp->conf));
+	memcpy(psp->psp_regs, conf->psp_regs, sizeof(psp->psp_regs));
 
-	ret = psp_load_firmware(psp);
-	if (ret) {
-		dev_err(psp->dev, "failed to load fw, ret %d", ret);
+	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN) + PSP_FW_ALIGN;
+	psp->fw_buffer = devm_kmalloc(psp->dev, psp->fw_buf_sz, GFP_KERNEL);
+	if (!psp->fw_buffer) {
+		dev_err(psp->dev, "no memory for fw buffer");
 		return NULL;
 	}
+
+	psp->fw_paddr = virt_to_phys(psp->fw_buffer);
+	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
+	psp->fw_paddr += offset;
+	memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
 
 	reg_vals[0] = PSP_VALIDATE;
 	reg_vals[1] = lower_32_bits(psp->fw_paddr);
