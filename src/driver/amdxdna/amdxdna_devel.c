@@ -21,12 +21,12 @@ MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID, 2 = Bypass"
 
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
+	struct iommu_domain *domain = {};
+
 	switch (iommu_mode) {
 	case AMDXDNA_IOMMU_PASID:
 		break;
 	case AMDXDNA_IOMMU_NO_PASID:
-		struct iommu_domain *domain;
-
 		if (!iommu_present(xdna->pdev->dev.bus)) {
 			XDNA_ERR(xdna, "IOMMU not present");
 			return -ENODEV;
