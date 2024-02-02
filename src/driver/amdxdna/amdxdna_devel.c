@@ -12,9 +12,6 @@
 #include "amdxdna_devel.h"
 #include "amdxdna_trace.h"
 
-#define CREATE_TRACE_POINTS
-#include "amdxdna_trace.h"
-
 int iommu_mode;
 module_param(iommu_mode, int, 0644);
 MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID, 2 = Bypass");

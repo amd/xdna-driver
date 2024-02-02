@@ -20,6 +20,9 @@
 #include "amdxdna_devel.h"
 #endif
 
+#define CREATE_TRACE_POINTS
+#include "amdxdna_trace.h"
+
 static const struct pci_device_id pci_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1502),
 		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
