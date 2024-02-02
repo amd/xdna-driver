@@ -55,9 +55,9 @@ if [[ $1 == "--install" ]]; then
 	cp ${DRV_SRC_DIR}/dkms.conf .
 	# Enable DKMS for the driver
 	if [[ $verbose == 1 ]]; then
-		dkms install --verbose ${DKMS_DRV_MODULE_NAME}
+		dkms install --verbose --force ${DKMS_DRV_MODULE_NAME}
 	else
-		dkms install ${DKMS_DRV_MODULE_NAME}
+		dkms install --force ${DKMS_DRV_MODULE_NAME}
 	fi
 	if [ $? -ne 0 ]; then
 		echo "Failed to enable DKMS for ${DKMS_DRV_MODULE_NAME}"
@@ -71,9 +71,9 @@ else
 	dkms status | grep ${DKMS_DRV_MODULE_NAME}
 	if [[ $? -eq 0 ]]; then
 		if [[ $verbose == 1 ]]; then
-			dkms remove --verbose ${DKMS_DRV_MODULE_NAME}
+			dkms remove --verbose --all ${DKMS_DRV_MODULE_NAME}
 		else
-			dkms remove ${DKMS_DRV_MODULE_NAME}
+			dkms remove --all ${DKMS_DRV_MODULE_NAME}
 		fi
 		if [[ $? -ne 0 ]]; then
 			echo "Failed to remove ${DKMS_DRV_MODULE_NAME} from DKMS"

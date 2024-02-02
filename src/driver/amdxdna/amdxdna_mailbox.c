@@ -6,17 +6,18 @@
 #include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/idr.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/build_bug.h>
+#include <linux/interrupt.h>
+#include <linux/dev_printk.h>
 #if defined(CONFIG_DEBUG_FS)
 #include <linux/seq_file.h>
 #endif
 
 #include "amdxdna_mailbox.h"
-
-#define CREATE_TRACE_POINTS
-#include "amdxdna_mailbox_trace.h"
+#include "amdxdna_trace.h"
 
 #define MB_ERR(chann, fmt, args...) \
 ({ \

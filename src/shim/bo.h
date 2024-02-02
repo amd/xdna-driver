@@ -15,6 +15,7 @@
 #include "core/common/shim/buffer_handle.h"
 #include "drm_local/amdxdna_accel.h"
 #include <string>
+#include <atomic>
 
 namespace shim_xdna {
 
@@ -78,6 +79,10 @@ protected:
   void
   alloc_bo();
 
+  // Free DRM BO in driver
+  void
+  free_bo();
+
   void
   alloc_buf(size_t align = 0);
 
@@ -91,10 +96,11 @@ protected:
   flag_to_type(uint64_t);
 
   const pdev& m_pdev;
-  void* m_buf;
-  size_t m_size;
-  uint64_t m_flags;
-  amdxdna_bo_type m_type;
+  void* m_buf = nullptr;
+  std::atomic<int> m_mmap_cnt = 0;
+  size_t m_size = 0;
+  uint64_t m_flags = 0;
+  amdxdna_bo_type m_type = AMDXDNA_BO_INVALID;
   xrt_core::aligned_ptr_type m_private_buf{};
   std::unique_ptr<drm_bo> m_bo;
 

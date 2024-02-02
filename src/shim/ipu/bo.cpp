@@ -26,13 +26,10 @@ bo_ipu(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type)
   switch (m_type) {
   case AMDXDNA_BO_SHMEM:
     alloc_bo();
-    m_buf = nullptr;
-    if (m_bo->m_xdna_addr == AMDXDNA_INVALID_ADDR) {
-      m_buf = map(bo::map_type::write);
-      // Do NOT remove and change the order of below two lines
-      memset(m_buf, 0, size); // Make sure the mapping is settled
-      sync(direction::host2device, size, 0); // avoid cache flush issue on output bo
-    }
+    m_buf = map(bo::map_type::write);
+    // Do NOT remove and change the order of below two lines
+    memset(m_buf, 0, size); // Make sure the mapping is settled
+    sync(direction::host2device, size, 0); // avoid cache flush issue on output bo
     break;
   case AMDXDNA_BO_DEV:
     alloc_bo();
@@ -61,10 +58,12 @@ bo_ipu::
 {
   shim_debug("Freeing IPU BO, %s", describe().c_str());
 
+  // If BO is in use, we should block and wait in driver
+  free_bo();
+
   switch (m_type) {
   case AMDXDNA_BO_SHMEM:
-    if (m_bo->m_xdna_addr == AMDXDNA_INVALID_ADDR)
-      unmap(m_buf);
+    unmap(m_buf);
     break;
   default:
     break;
