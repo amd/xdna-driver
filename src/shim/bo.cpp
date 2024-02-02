@@ -144,6 +144,13 @@ alloc_bo()
   m_bo = std::make_unique<bo::drm_bo>(*this, bo_info);
 }
 
+void
+bo::
+free_bo()
+{
+  m_bo.reset();
+}
+
 bo::
 bo(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type)
   : m_pdev(device.get_pdev())
@@ -156,6 +163,8 @@ bo(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type)
 bo::
 ~bo()
 {
+  if (m_mmap_cnt)
+    shim_debug("Non-zero mmap cnt: %d", m_mmap_cnt.load());
 }
 
 bo::properties
@@ -171,7 +180,9 @@ map(bo::map_type type)
 {
   if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR) {
     int prot = (type == bo::map_type::write ? (PROT_READ | PROT_WRITE) : PROT_READ);
-    return map_drm_bo(m_pdev, m_size, prot, m_bo->m_map_offset);
+    void *p = map_drm_bo(m_pdev, m_size, prot, m_bo->m_map_offset);
+    m_mmap_cnt++;
+    return p;
   }
   return m_buf;
 }
@@ -180,8 +191,10 @@ void
 bo::
 unmap(void* addr)
 {
-  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
+  if (m_mmap_cnt > 0) {
     unmap_drm_bo(m_pdev, addr, m_size);
+    m_mmap_cnt--;
+  }
 }
 
 uint64_t
