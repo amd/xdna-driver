@@ -87,7 +87,9 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		break;
 	case AMDXDNA_BO_DEV:
 		XDNA_DBG(abo->client->xdna, "type dev bo");
+		mutex_lock(&abo->client->mm_lock);
 		drm_mm_remove_node(&abo->mm_node);
+		mutex_unlock(&abo->client->mm_lock);
 		drm_gem_object_put(&abo->dev_heap->base);
 		break;
 	case AMDXDNA_BO_CMD:
@@ -226,8 +228,6 @@ static int amdxdna_drm_create_dev_heap(struct drm_device *dev,
 	amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
 
 	abo->mem.dev_addr = client->xdna->dev_info->dev_mem_base;
-	XDNA_DBG(xdna, "userptr 0x%llx, dev_addr 0x%llx, nr pages 0x%x",
-		 abo->mem.userptr, abo->mem.dev_addr, abo->mem.nr_pages);
 
 	drm_mm_init(&abo->mm, abo->mem.dev_addr, abo->mem.size);
 
@@ -238,6 +238,8 @@ static int amdxdna_drm_create_dev_heap(struct drm_device *dev,
 		goto clean_bo_mem;
 	}
 	client->dev_heap = args->handle;
+	XDNA_DBG(xdna, "bo hdl %d userptr 0x%llx dev_addr 0x%llx nr_pages %d",
+		 args->handle, abo->mem.userptr, abo->mem.dev_addr, abo->mem.nr_pages);
 	mutex_unlock(&client->mm_lock);
 
 	/* dereference object reference. Handle holds it now */
@@ -316,8 +318,10 @@ static int amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	abo->client = client;
 	abo->dev_heap = heap;
 
+	mutex_lock(&client->mm_lock);
 	ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, aligned_sz,
 					 PAGE_SIZE, 0, DRM_MM_INSERT_BEST);
+	mutex_unlock(&client->mm_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		goto free_bo;
@@ -333,13 +337,15 @@ static int amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 
 	/* ready to publish object to usersapce */
 	ret = drm_gem_handle_create(filp, &abo->base, &args->handle);
-	if (ret)
+	if (ret) {
+		XDNA_ERR(xdna, "Create handle failed");
 		goto clean_bo_mem;
-
+	}
+	XDNA_DBG(xdna, "bo hdl %d userptr 0x%llx dev_addr 0x%llx nr_pages %d",
+		 args->handle, abo->mem.userptr, abo->mem.dev_addr, abo->mem.nr_pages);
 	/* dereference object reference. Handle holds it now */
 	drm_gem_object_put(&abo->base);
 
-	XDNA_DBG(xdna, "Device bo handle %d", args->handle);
 	return 0;
 
 clean_bo_mem:

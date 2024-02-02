@@ -489,6 +489,7 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 	ret = idr_alloc_cyclic(&client->hwctx_idr, hwctx, 0, MAX_HWCTX_ID, GFP_KERNEL);
 	if (ret < 0) {
 		mutex_unlock(&client->hwctx_lock);
+		XDNA_ERR(xdna, "Allocate hwctx ID failed, ret %d", ret);
 		goto free_hwctx;
 	}
 	hwctx->id = ret;
@@ -793,6 +794,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	heap = amdxdna_get_dev_heap(filp);
 	if (IS_ERR(heap)) {
 		ret = PTR_ERR(heap);
+		XDNA_ERR(xdna, "Cannot get dev heap object, ret %d", ret);
 		goto out;
 	}
 
@@ -1075,6 +1077,7 @@ int amdxdna_drm_create_hwctx_unsec_ioctl(struct drm_device *dev, void *data, str
 	heap = amdxdna_get_dev_heap(filp);
 	if (IS_ERR(heap)) {
 		ret = PTR_ERR(heap);
+		XDNA_ERR(xdna, "Cannot get dev heap object, ret %d", ret);
 		goto out;
 	}
 
