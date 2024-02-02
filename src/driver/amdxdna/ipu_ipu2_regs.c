@@ -86,8 +86,8 @@
 	BAR_OFFSET_PAIR(_dev##REG, PSP_RESP_REG), \
 }
 
-#define FW_API_HASH_HIGH		0x1a906358e5127548
-#define FW_API_HASH_LOW			0xfc47f366f4525ad8
+#define FW_API_HASH_HIGH                0x2a5e67698ea3b245
+#define FW_API_HASH_LOW                 0x1a9b7e088bbee092
 
 const IPU_DEFINE_DEV_INFO_PSP(IPU2, "RyzenAI-ipu2", 17f0, IPU2_PSP_OFFSETS,
 			      "amdipu/17f0/ipu.sbin", FW_API_HASH_HIGH, FW_API_HASH_LOW);

@@ -5,14 +5,14 @@
 			"device": "Phoenix",
 			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdipu/1502/ipu.sbin.255.0.5.260",
 			"pci_device_id": "1502",
-			"version": "255.0.5.260",
+			"version": "1.1.0.274",
 			"fw_name": "ipu.sbin"
 		},
 		{
 			"device": "IPU2",
 			"url": "",
 			"pci_device_id": "17f0",
-			"version": "0.6.12.109",
+			"version": "0.7.2.120",
 			"fw_name": "ipu.sbin"
 		},
 		{
