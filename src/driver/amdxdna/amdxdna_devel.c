@@ -21,7 +21,7 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 	switch (iommu_mode) {
 	case AMDXDNA_IOMMU_PASID:
 		break;
-	case AMDXDNA_IOMMU_NO_PASID:
+	case AMDXDNA_IOMMU_NO_PASID: {
 		struct iommu_domain *domain;
 
 		if (!iommu_present(xdna->pdev->dev.bus)) {
@@ -36,6 +36,7 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 		}
 
 		break;
+	}
 	case AMDXDNA_IOMMU_BYPASS:
 		/*
 		 * IOMMU bypass mode is always supported, but
