@@ -591,7 +591,7 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 			    u32 iohub_int_addr,
 			    int mb_irq)
 {
-	struct mailbox_channel *mb_chann = {};
+	struct mailbox_channel *mb_chann = NULL;
 	int ret;
 #if defined(CONFIG_DEBUG_FS)
 	struct mailbox_res_record *record;
