@@ -182,7 +182,7 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 {
 	struct amdxdna_drm_get_info *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	int ret;
+	int ret = -EINVAL;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	switch (args->param) {

@@ -15,7 +15,8 @@
 #if defined(CONFIG_DEBUG_FS)
 #include <linux/seq_file.h>
 #endif
-
+#include <linux/irqreturn.h>
+#include <linux/pci.h>
 #include "amdxdna_mailbox.h"
 #include "amdxdna_trace.h"
 
@@ -591,7 +592,7 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 			    u32 iohub_int_addr,
 			    int mb_irq)
 {
-	struct mailbox_channel *mb_chann;
+	struct mailbox_channel *mb_chann = NULL;
 	int ret;
 #if defined(CONFIG_DEBUG_FS)
 	struct mailbox_res_record *record;
