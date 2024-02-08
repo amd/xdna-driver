@@ -33,8 +33,7 @@ The 6.7 Linux kernel with SVA source code can be downloaded from _iommu_sva_v4_v
 ``` bash
 # Assuming you have knowledge of kernel compile, this just refreshing up a few key points.
 
-git clone git@github.com:AMDESE/linux.git
-git checkout iommu_sva_v4_v6.7-rc8
+git clone --branch iommu_sva_v4_v6.7-rc8 git@github.com:AMDESE/linux.git 
 cd linux/
 
 # Usually, when people compile kernel from source code, they use current config.
