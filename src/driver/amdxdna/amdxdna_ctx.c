@@ -588,84 +588,60 @@ static int amdxdna_hwctx_col_match(struct amdxdna_hwctx *hwctx, u32 col_map)
 	return col_map & GENMASK(end_col, start_col);
 }
 
-int amdxdna_hwctx_stop(struct amdxdna_client *client, u32 col_map)
+void amdxdna_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
-	int next = 0, ret = 0;
+	int next = 0, ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	/*
-	 * Multiple HW context can reference same AIE partition.
-	 * To reset AIE partition, it needs to destroy all associated hardware
-	 * contexts.
-	 *
-	 * 1. Find out each HW context that is using the error partition
-	 * 2. Stop scheduling in the context
-	 * 3. Abort all submitted messages by destroy IPUFW context
-	 * 4. Add stopped HW context into a list for later start
-	 *
-	 * Note, when this function return, it doesn't mean partition is reset.
-	 * The caller needs iterate all clients and call into this function
-	 * to make sure partition is reset on the hardware.
-	 */
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+		/* check if the HW context uses the error column */
 		if (!amdxdna_hwctx_col_match(hwctx, col_map))
 			continue;
-
 		hwctx->stopped = true;
+		XDNA_DBG(xdna, "Stop %s.%d", hwctx->name, hwctx->id);
 
-		XDNA_DBG(xdna, "Stop %s", hwctx->name);
 		drm_sched_stop(&hwctx->sched, NULL);
-
-		/*
-		 * If return error, it must be management issue.
-		 * For HW context, it is save to ignore this error.
-		 */
 		ret = ipu_destroy_context(xdna->dev_handle, hwctx);
-		WARN_ONCE(ret, "destroy context failed, ret %d", ret);
+		if (ret)
+			XDNA_ERR(xdna, "Destroy hwctx failed, ret %d", ret);
 	}
 	mutex_unlock(&client->hwctx_lock);
-	return ret;
 }
 
-int amdxdna_hwctx_reset_restart(struct amdxdna_client *client)
+void amdxdna_restart_ctx(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
-	int next = 0, ret = 0;
+	int next = 0, ret;
 
-	WARN_ON(!mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		if (!hwctx->stopped)
 			continue;
 
-		XDNA_DBG(xdna, "Resetting %s", hwctx->name);
+		XDNA_DBG(xdna, "Resetting %s.%d", hwctx->name, hwctx->id);
 		ret = ipu_create_context(xdna->dev_handle, hwctx);
-		if (unlikely(ret)) {
-			XDNA_ERR(xdna, "Create fwctx failed, ret %d", ret);
-			goto err_out;
+		if (ret) {
+			XDNA_ERR(xdna, "Create hwctx failed, ret %d", ret);
+			continue;
 		}
 
 		ret = ipu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
-		if (unlikely(ret)) {
+		if (ret) {
 			XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
-			goto err_out;
+			continue;
 		}
 
 		drm_sched_start(&hwctx->sched, true);
-		XDNA_DBG(xdna, "%s restarted", hwctx->name);
+		hwctx->stopped = false;
+		XDNA_DBG(xdna, "%s.%d restarted", hwctx->name, hwctx->id);
 	}
 	mutex_unlock(&client->hwctx_lock);
-	return 0;
-
-err_out:
-	mutex_unlock(&client->hwctx_lock);
-	WARN_ON(ret);
-	return ret;
 }
 
 static int amdxdna_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
@@ -756,12 +732,14 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 	struct amdxdna_hwctx *hwctx;
 	int next = 0;
 
+	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		XDNA_DBG(client->xdna, "PID %d close HW context %d",
 			 client->pid, hwctx->id);
 		idr_remove(&client->hwctx_idr, hwctx->id);
 		amdxdna_hwctx_destroy(hwctx);
 	}
+	mutex_unlock(&client->hwctx_lock);
 }
 
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
@@ -996,8 +974,7 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	int ret;
 
 	XDNA_DBG(xdna, "PID %d hwctx %d timeout set %d ms for cmd %lld",
-		 client->pid, args->hwctx,
-		 args->timeout, args->seq);
+		 client->pid, args->hwctx, args->timeout, args->seq);
 
 	hwctx = amdxdna_hwctx_find_by_id(client, args->hwctx);
 	if (!hwctx) {

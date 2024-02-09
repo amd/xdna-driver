@@ -50,8 +50,8 @@ struct amdxdna_hwctx {
 };
 
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
-int amdxdna_hwctx_stop(struct amdxdna_client *client, u32 col_map);
-int amdxdna_hwctx_reset_restart(struct amdxdna_client *client);
+void amdxdna_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
+void amdxdna_restart_ctx(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 

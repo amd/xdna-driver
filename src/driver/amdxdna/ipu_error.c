@@ -40,7 +40,7 @@ static u32 ipu_error_backtrack(struct ipu_device *idev, void *err_info, u32 num_
 	return err_col;
 }
 
-static int ipu_error_process(struct ipu_device *idev)
+static void ipu_error_process(struct ipu_device *idev)
 {
 	struct amdxdna_dev *xdna = idev->xdna;
 	u32 row = 0, col = 0, mod = 0;
@@ -53,7 +53,7 @@ static int ipu_error_process(struct ipu_device *idev)
 
 	async_buf = dma_alloc_coherent(&xdna->pdev->dev, AIE_ERROR_SIZE, &fw_addr, GFP_KERNEL);
 	if (!async_buf)
-		return -ENOMEM;
+		return;
 
 	do {
 		struct amdxdna_client *client;
@@ -71,36 +71,32 @@ static int ipu_error_process(struct ipu_device *idev)
 		if (!count) {
 			XDNA_WARN(xdna, "Spurious row %d, col %d, mod %d, count %d, next %d",
 				  row, col, mod, count, next);
-			break;
+			continue;
 		}
 
 		err_col = ipu_error_backtrack(idev, async_buf, count);
-		WARN_ON(!err_col);
+		if (!err_col) {
+			XDNA_WARN(xdna, "Did not get error column");
+			continue;
+		}
 
-		/* We have error column bitmap, let's start recovery */
+		/* found error columns, let's start recovery */
 		mutex_lock(&xdna->dev_lock);
-		list_for_each_entry(client, &xdna->client_list, node) {
-			ret = amdxdna_hwctx_stop(client, err_col);
-			if (ret) {
-				mutex_unlock(&xdna->dev_lock);
-				goto out;
-			}
-		}
+		list_for_each_entry(client, &xdna->client_list, node)
+			amdxdna_stop_ctx_by_col_map(client, err_col);
 
-		/* AIE partition should reset now. */
-		list_for_each_entry(client, &xdna->client_list, node) {
-			ret = amdxdna_hwctx_reset_restart(client);
-			if (ret) {
-				mutex_unlock(&xdna->dev_lock);
-				goto out;
-			}
-		}
+		/*
+		 * The error columns will be reset after all hardware
+		 * contexts which use these columns are destroyed.
+		 * So try to restart the hardware contexts.
+		 */
+		list_for_each_entry(client, &xdna->client_list, node)
+			amdxdna_restart_ctx(client);
+
 		mutex_unlock(&xdna->dev_lock);
 	} while (next);
 
-out:
 	dma_free_coherent(&xdna->pdev->dev, AIE_ERROR_SIZE, async_buf, fw_addr);
-	return ret;
 }
 
 int ipu_error_async_msg_thread(void *data)
@@ -125,9 +121,7 @@ int ipu_error_async_msg_thread(void *data)
 		}
 
 		/* FIXME: if error happen, mark board as bad status */
-		ret = ipu_error_process(xdna->dev_handle);
-		if (ret)
-			drm_WARN_ON(&xdna->ddev, 1);
+		ipu_error_process(xdna->dev_handle);
 	}
 	XDNA_DBG(xdna, "stop...");
 
