@@ -81,7 +81,7 @@ static const char *amdxdna_fence_get_driver_name(struct dma_fence *fence)
 static const char *amdxdna_fence_get_timeline_name(struct dma_fence *fence)
 {
 	struct amdxdna_fence *xdna_fence;
-       
+
 	xdna_fence = container_of(fence, struct amdxdna_fence, base);
 
 	return xdna_fence->hwctx->name;
@@ -136,6 +136,12 @@ static int amdxdna_sched_job_init(struct amdxdna_sched_job *job,
 		return -EINVAL;
 	}
 
+	if (abo->base.size <
+	    offsetof(struct amdxdna_cmd, data[job->cmd->extra_cu_masks])) {
+		XDNA_DBG(xdna, "invalid extra_cu_masks");
+		return -EINVAL;
+	}
+
 	job->cmd->state = ERT_CMD_STATE_NEW;
 	job->hwctx = hwctx;
 
@@ -143,12 +149,6 @@ static int amdxdna_sched_job_init(struct amdxdna_sched_job *job,
 	if (!job->fence) {
 		XDNA_ERR(xdna, "Failed to create fence");
 		return -ENOMEM;
-	}
-
-	if (abo->base.size <
-	    offsetof(struct amdxdna_cmd, data[job->cmd->extra_cu_masks])) {
-		XDNA_DBG(xdna, "invalid extra_cu_masks");
-		return -EINVAL;
 	}
 
 	cu_mask = &job->cmd->cu_mask;
@@ -826,7 +826,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	struct amdxdna_drm_destroy_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_hwctx *hwctx;
-	int idx;
+	int ret = 0, idx;
 
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
@@ -842,6 +842,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	hwctx = idr_find(&client->hwctx_idr, args->handle);
 	if (!hwctx) {
 		mutex_unlock(&client->hwctx_lock);
+		ret = -ENODEV;
 		XDNA_DBG(xdna, "PID %d HW context %d not exist",
 			 client->pid, args->handle);
 		goto out;
@@ -853,7 +854,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 out:
 	drm_dev_exit(idx);
 	XDNA_DBG(xdna, "PID %d destroyed HW context %d", client->pid, args->handle);
-	return 0;
+	return ret;
 }
 
 /*
