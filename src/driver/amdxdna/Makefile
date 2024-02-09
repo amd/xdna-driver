@@ -1,10 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Copyright 2022-2024 Advanced Micro Devices, Inc.
-# All Rights Reserved.
-#
-# Authors:
-#  Min Ma <min.ma@amd.com>
+# Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
 #
 
 KERNEL_VER ?= $(shell uname -r)
@@ -30,14 +26,14 @@ amdxdna-y := \
 	amdxdna_gem.o \
 	amdxdna_util.o \
 	amdxdna_sysfs.o \
-	ipu_smu.o \
-	ipu_error.o \
-	ipu_debugfs.o \
-	ipu_pci.o \
-	ipu_message.o \
-	ipu_sysfs.o \
-	ipu_phx_regs.o \
-	ipu_ipu2_regs.o \
+	npu_smu.o \
+	npu_error.o \
+	npu_debugfs.o \
+	npu_pci.o \
+	npu_message.o \
+	npu_sysfs.o \
+	npu_phx_regs.o \
+	npu_npu2_regs.o \
 	amdxdna_mailbox.o \
 	amdxdna_psp.o \
 	amdxdna_drv.o

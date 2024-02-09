@@ -1,15 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2023, Advanced Micro Devices, Inc.
- *
- * Authors:
- *	Min Ma <min.ma@amd.com>
+ * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_DRV_H_
 #define _AMDXDNA_DRV_H_
 
 #include <linux/pci.h>
+#include <linux/srcu.h>
 #include <linux/uuid.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_print.h>
@@ -32,12 +30,12 @@
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 
 #define DECLARE_DEV_INFO(id) \
-	struct amdxdna_dev_info ipu_##id##_info
+	struct amdxdna_dev_info npu_##id##_info
 #define DEV_INFO_TO_DATA(id) \
-	((kernel_ulong_t)&ipu_##id##_info)
+	((kernel_ulong_t)&npu_##id##_info)
 
-struct ipu_device;
-struct ipu_dev_priv;
+struct npu_device;
+struct npu_dev_priv;
 struct mailbox;
 struct mailbox_channel;
 
@@ -66,7 +64,7 @@ struct amdxdna_dev_info {
 	size_t				dev_mem_size;
 	char				*vbnv;
 	int				device_type;
-	const struct ipu_dev_priv	*dev_priv;
+	const struct npu_dev_priv	*dev_priv;
 };
 
 struct amdxdna_dev {
@@ -78,7 +76,7 @@ struct amdxdna_dev {
 	struct list_head	client_list;
 	struct list_head	xclbin_list;
 	struct ida		pdi_ida;
-	struct ipu_device	*dev_handle;
+	struct npu_device	*dev_handle;
 
 	/* Mailbox and the management channel */
 	struct mailbox		*mbox;
@@ -96,6 +94,7 @@ struct amdxdna_dev {
  * @node: entry node in clients list
  * @pid: PID of current client
  * @hwctx_lock: HW context lock for protect IDR
+ * @hwctx_srcu: Per client SRCU for synchronizing hwctx destroy with other ioctls.
  * @hwctx_idr: HW context IDR
  * @xdna: XDNA device pointer
  * @mm_lock: lock for client wide memory related
@@ -108,7 +107,10 @@ struct amdxdna_dev {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
-	struct mutex			hwctx_lock; /* protect hwctx_idr */
+	/* To protect hwctx_idr and exclusion of hwctx stop/restart/destroy etc. */
+	struct mutex			hwctx_lock;
+	/* To avoid deadlock, do NOT wait this srcu when hwctx_lock is hold */
+	struct srcu_struct		hwctx_srcu;
 	struct idr			hwctx_idr;
 	struct amdxdna_dev		*xdna;
 	struct sysfs_mgr_node		dir;

@@ -5,22 +5,22 @@
 
 namespace shim_xdna {
 
-bo_ipu::
-bo_ipu(const device& device, size_t size, uint64_t flags)
-  : bo_ipu(device, size, flags, flag_to_type(flags))
+bo_npu::
+bo_npu(const device& device, size_t size, uint64_t flags)
+  : bo_npu(device, size, flags, flag_to_type(flags))
 {
   if (m_type == AMDXDNA_BO_INVALID)
     shim_err(EINVAL, "Invalid BO flags: 0x%lx", flags);
 }
 
-bo_ipu::
-bo_ipu(const device& device, size_t size, amdxdna_bo_type type)
-  : bo_ipu(device, size, 0, type)
+bo_npu::
+bo_npu(const device& device, size_t size, amdxdna_bo_type type)
+  : bo_npu(device, size, 0, type)
 {
 }
 
-bo_ipu::
-bo_ipu(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type)
+bo_npu::
+bo_npu(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type)
   : bo(device, size, flags, type), m_device(device)
 {
   switch (m_type) {
@@ -49,14 +49,14 @@ bo_ipu(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type)
     break;
   }
 
-  shim_debug("Allocated IPU BO for: userptr=0x%lx, size=%ld, flags=0x%llx",
+  shim_debug("Allocated NPU BO for: userptr=0x%lx, size=%ld, flags=0x%llx",
     m_buf, m_size, m_flags);
 }
 
-bo_ipu::
-~bo_ipu()
+bo_npu::
+~bo_npu()
 {
-  shim_debug("Freeing IPU BO, %s", describe().c_str());
+  shim_debug("Freeing NPU BO, %s", describe().c_str());
 
   // If BO is in use, we should block and wait in driver
   free_bo();
@@ -71,8 +71,8 @@ bo_ipu::
 }
 
 void
-bo_ipu::
-sync(bo_ipu::direction dir, size_t size, size_t offset)
+bo_npu::
+sync(bo_npu::direction dir, size_t size, size_t offset)
 {
   amdxdna_drm_sync_bo sbo = {
     .handle = m_bo->m_handle,

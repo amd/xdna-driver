@@ -65,6 +65,13 @@ configure_file(
 
 install(FILES ${XDNA_VERSION_JSON_FILE} DESTINATION xrt/${XDNA_COMPONENT} COMPONENT ${XDNA_COMPONENT})
 
+execute_process(
+  COMMAND echo ${XRT_VERSION_STRING}
+  COMMAND awk -F. "{$NF = ${XRT_PLUGIN_VERSION_PATCH}} 1" OFS=.
+  OUTPUT_VARIABLE XRT_PLUGIN_VERSION_STRING
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+
 # Substitute driver version in the source code
 set(XDNA_TAR_GZ amdxdna.tar.gz)
 set(AMDXDNA_DRV_FILE driver/amdxdna/amdxdna_drv.c)
@@ -75,7 +82,7 @@ add_custom_command(
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/driver
   COMMAND $(CMAKE_COMMAND) -E make_directory tmp
   COMMAND tar xf ${CMAKE_BINARY_DIR}/driver/amdxdna.tar -C tmp
-  COMMAND find tmp -name amdxdna_drv.c -exec sed -i 's/MODULE_VERSION\(\".*\"\)/MODULE_VERSION\(\"${XRT_VERSION_STRING}_${XDNA_DATE},${XDNA_HASH}\"\)/' {} \\\;
+  COMMAND find tmp -name amdxdna_drv.c -exec sed -i 's/MODULE_VERSION\(\".*\"\)/MODULE_VERSION\(\"${XRT_PLUGIN_VERSION_STRING}_${XDNA_DATE},${XDNA_HASH}\"\)/' {} \\\;
   COMMAND tar zcf ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ} -C tmp .
   COMMAND $(CMAKE_COMMAND) -E rm -r tmp
   )

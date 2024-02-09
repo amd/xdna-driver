@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
- *
- * Authors:
- *	Min Ma <min.ma@amd.com>
  */
 
 #include <linux/module.h>
@@ -15,7 +12,7 @@
 
 #include "amdxdna_drv.h"
 #include "amdxdna_sysfs.h"
-#include "ipu_pci.h"
+#include "npu_pci.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -80,15 +77,16 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 skip_sva_bind:
 #endif
 	mutex_init(&client->hwctx_lock);
+	init_srcu_struct(&client->hwctx_srcu);
 	idr_init(&client->hwctx_idr);
 	mutex_init(&client->mm_lock);
 	INIT_LIST_HEAD(&client->shmem_list);
 	client->dev_heap = AMDXDNA_INVALID_BO_HANDLE;
+	dma_resv_init(&client->resv);
 
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
-	dma_resv_init(&client->resv);
 
 	filp->driver_priv = client;
 
@@ -121,6 +119,7 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	sysfs_mgr_remove_directory(xdna->sysfs_mgr, &client->dir);
 	amdxdna_hwctx_remove_all(client);
 	idr_destroy(&client->hwctx_idr);
+	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
 	mutex_destroy(&client->mm_lock);
 
@@ -137,11 +136,41 @@ skip_sva_unbind:
 	kfree(client);
 }
 
+static int get_info_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_aie_metadata *aie_struct;
+	int ret = 0;
+	int idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
+	if (!aie_struct) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	npu_get_aie_metadata(xdna, aie_struct);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to copy AIE request into user space");
+		goto fail_copy;
+	}
+
+fail_copy:
+	kfree(aie_struct);
+fail:
+	drm_dev_exit(idx);
+	return ret;
+}
+
 static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_status *aie_struct;
 	u32 input_buf_size;
-	int ret;
+	int ret, idx;
 
 	input_buf_size = args->buffer_size;
 	args->buffer_size = sizeof(*aie_struct);
@@ -151,6 +180,9 @@ static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 		ret = -EINVAL;
 		goto fail;
 	}
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
 
 	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
 	if (!aie_struct) {
@@ -164,7 +196,7 @@ static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 		goto fail_copy;
 	}
 
-	ret = ipu_get_aie_status(xdna, aie_struct);
+	ret = npu_get_aie_status(xdna, aie_struct);
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
 		ret = -EFAULT;
@@ -175,6 +207,37 @@ static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 fail_copy:
 	kfree(aie_struct);
 fail:
+	drm_dev_exit(idx);
+	return ret;
+}
+
+static int get_info_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_aie_version *aie_struct;
+	int ret = 0;
+	int idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
+	if (!aie_struct) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	npu_get_aie_version(xdna, aie_struct);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to copy AIE request into user space");
+		goto fail_copy;
+	}
+
+fail_copy:
+	kfree(aie_struct);
+fail:
+	drm_dev_exit(idx);
 	return ret;
 }
 
@@ -188,6 +251,12 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
 		ret = get_info_aie_status(xdna, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_METADATA:
+		ret = get_info_aie_metadata(xdna, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_VERSION:
+		ret = get_info_aie_version(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Bad request parameter %u", args->param);
@@ -250,7 +319,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	INIT_LIST_HEAD(&xdna->xclbin_list);
 	pci_set_drvdata(pdev, xdna);
 
-	ret = ipu_init(xdna);
+	ret = npu_init(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "hardware init failed, ret %d", ret);
 		goto failed;
@@ -259,7 +328,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "create amdxdna attrs failed: %d", ret);
-		goto failed_ipu_fini;
+		goto failed_npu_fini;
 	}
 
 	ret = drm_dev_register(&xdna->ddev, 0);
@@ -268,15 +337,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_sysfs_fini;
 	}
 
-	ipu_debugfs_add(xdna->dev_handle);
+	npu_debugfs_add(xdna->dev_handle);
 	ida_init(&xdna->pdi_ida);
 
 	return 0;
 
 failed_sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
-failed_ipu_fini:
-	ipu_fini(xdna);
+failed_npu_fini:
+	npu_fini(xdna);
 failed:
 	return ret;
 }
@@ -294,7 +363,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 		amdxdna_hwctx_remove_all(client);
 	mutex_unlock(&xdna->dev_lock);
 
-	ipu_fini(xdna);
+	npu_fini(xdna);
 	ida_destroy(&xdna->pdi_ida);
 }
 
@@ -310,9 +379,9 @@ static int amdxdna_do_suspend(struct device *dev)
 		amdxdna_hwctx_suspend(client);
 	mutex_unlock(&xdna->dev_lock);
 
-	ret = ipu_suspend_fw(xdna->dev_handle);
+	ret = npu_suspend_fw(xdna->dev_handle);
 	if (ret) {
-		XDNA_ERR(xdna, "suspend IPU firmware failed");
+		XDNA_ERR(xdna, "suspend NPU firmware failed");
 		return ret;
 	}
 
@@ -327,9 +396,9 @@ static int amdxdna_do_resume(struct device *dev)
 	int ret;
 
 	XDNA_INFO(xdna, "firmware resuming...");
-	ret = ipu_resume_fw(xdna->dev_handle);
+	ret = npu_resume_fw(xdna->dev_handle);
 	if (ret) {
-		XDNA_ERR(xdna, "resume IPU firmware failed");
+		XDNA_ERR(xdna, "resume NPU firmware failed");
 		return ret;
 	}
 

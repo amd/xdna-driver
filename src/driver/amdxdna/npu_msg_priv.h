@@ -1,17 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
- *
- * Authors:
- *	Min Ma <min.ma@amd.com>
  */
 
-#ifndef _AMDXDNA_MSG_PRIV_H_
-#define _AMDXDNA_MSG_PRIV_H_
+#ifndef _NPU_MSG_PRIV_H_
+#define _NPU_MSG_PRIV_H_
 
 #include <linux/uuid.h>
 
-enum ipu_msg_opcode {
+enum npu_msg_opcode {
 	MSG_OP_REGISTER_PDI                = 0x1,
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
@@ -40,41 +37,41 @@ enum ipu_msg_opcode {
 	MSG_OP_MAX_OPCODE
 };
 
-enum ipu_msg_status {
-	IPU_STATUS_SUCCESS				= 0x0,
+enum npu_msg_status {
+	NPU_STATUS_SUCCESS				= 0x0,
 	/* AIE Error codes */
-	IPU_STATUS_AIE_SATURATION_ERROR			= 0x1000001,
-	IPU_STATUS_AIE_FP_ERROR				= 0x1000002,
-	IPU_STATUS_AIE_STREAM_ERROR			= 0x1000003,
-	IPU_STATUS_AIE_ACCESS_ERROR			= 0x1000004,
-	IPU_STATUS_AIE_BUS_ERROR			= 0x1000005,
-	IPU_STATUS_AIE_INSTRUCTION_ERROR		= 0x1000006,
-	IPU_STATUS_AIE_ECC_ERROR			= 0x1000007,
-	IPU_STATUS_AIE_LOCK_ERROR			= 0x1000008,
-	IPU_STATUS_AIE_DMA_ERROR			= 0x1000009,
-	IPU_STATUS_AIE_MEM_PARITY_ERROR			= 0x100000a,
-	IPU_STATUS_MAX_AIE_STATUS_CODE,
+	NPU_STATUS_AIE_SATURATION_ERROR			= 0x1000001,
+	NPU_STATUS_AIE_FP_ERROR				= 0x1000002,
+	NPU_STATUS_AIE_STREAM_ERROR			= 0x1000003,
+	NPU_STATUS_AIE_ACCESS_ERROR			= 0x1000004,
+	NPU_STATUS_AIE_BUS_ERROR			= 0x1000005,
+	NPU_STATUS_AIE_INSTRUCTION_ERROR		= 0x1000006,
+	NPU_STATUS_AIE_ECC_ERROR			= 0x1000007,
+	NPU_STATUS_AIE_LOCK_ERROR			= 0x1000008,
+	NPU_STATUS_AIE_DMA_ERROR			= 0x1000009,
+	NPU_STATUS_AIE_MEM_PARITY_ERROR			= 0x100000a,
+	NPU_STATUS_MAX_AIE_STATUS_CODE,
 	/* MGMT ERT Error codes */
-	IPU_STATUS_MGMT_ERT_SELF_TEST_FAILURE		= 0x2000001,
-	IPU_STATUS_MGMT_ERT_HASH_MISMATCH,
-	IPU_STATUS_MGMT_ERT_NOAVAIL,
-	IPU_STATUS_MGMT_ERT_INVALID_PARAM,
-	IPU_STATUS_MGMT_ERT_ENTER_SUSPEND_FAILURE,
-	IPU_STATUS_MGMT_ERT_BUSY,
-	IPU_STATUS_MGMT_ERT_APPLICATION_ACTIVE,
-	IPU_STATUS_MAX_MGMT_ERT_STATUS_CODE,
+	NPU_STATUS_MGMT_ERT_SELF_TEST_FAILURE		= 0x2000001,
+	NPU_STATUS_MGMT_ERT_HASH_MISMATCH,
+	NPU_STATUS_MGMT_ERT_NOAVAIL,
+	NPU_STATUS_MGMT_ERT_INVALID_PARAM,
+	NPU_STATUS_MGMT_ERT_ENTER_SUSPEND_FAILURE,
+	NPU_STATUS_MGMT_ERT_BUSY,
+	NPU_STATUS_MGMT_ERT_APPLICATION_ACTIVE,
+	NPU_STATUS_MAX_MGMT_ERT_STATUS_CODE,
 	/* APP ERT Error codes */
-	IPU_STATUS_APP_ERT_FIRST_ERROR			= 0x3000001,
-	IPU_STATUS_MAX_APP_ERT_STATUS_CODE,
-	/* IPU RTOS Error Codes */
-	IPU_STATUS_INVALID_INPUT_BUFFER			= 0x4000001,
-	IPU_STATUS_INVALID_COMMAND,
-	IPU_STATUS_INVALID_PARAM,
-	IPU_STATUS_XCLBIN_REG_FAILED,
-	IPU_STATUS_XCLBIN_UNREG_FAILED,
-	IPU_STATUS_INVALID_OPERATION,
-	IPU_STATUS_MAX_RTOS_STATUS_CODE,
-	IPU_STATUS_MAX_IPU_STATUS_CODE
+	NPU_STATUS_APP_ERT_FIRST_ERROR			= 0x3000001,
+	NPU_STATUS_MAX_APP_ERT_STATUS_CODE,
+	/* NPU RTOS Error Codes */
+	NPU_STATUS_INVALID_INPUT_BUFFER			= 0x4000001,
+	NPU_STATUS_INVALID_COMMAND,
+	NPU_STATUS_INVALID_PARAM,
+	NPU_STATUS_XCLBIN_REG_FAILED,
+	NPU_STATUS_XCLBIN_UNREG_FAILED,
+	NPU_STATUS_INVALID_OPERATION,
+	NPU_STATUS_MAX_RTOS_STATUS_CODE,
+	NPU_STATUS_MAX_NPU_STATUS_CODE
 };
 
 struct assign_mgmt_pasid_req {
@@ -83,7 +80,7 @@ struct assign_mgmt_pasid_req {
 } __packed;
 
 struct assign_mgmt_pasid_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
 struct map_host_buffer_req {
@@ -93,10 +90,10 @@ struct map_host_buffer_req {
 } __packed;
 
 struct map_host_buffer_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
-#define IPU_MAX_PDI_ID	255
+#define NPU_MAX_PDI_ID	255
 struct pdi_info {
 	u32		pdi_id:8;
 	u32		registered:8;
@@ -114,7 +111,7 @@ struct register_pdi_req {
 } __packed;
 
 struct register_pdi_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 	u8			reg_index;
 	u8			pad[39];
 } __packed;
@@ -128,7 +125,7 @@ struct unregister_pdi_req {
 } __packed;
 
 struct unregister_pdi_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 	u32			pad[8];
 } __packed;
 
@@ -158,7 +155,7 @@ struct create_ctx_req {
 } __packed;
 
 struct create_ctx_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 	u32			context_id;
 	u32			msix_id:16;
 	u32			num_cq_pairs_allocated:8;
@@ -171,7 +168,7 @@ struct destroy_ctx_req {
 } __packed;
 
 struct destroy_ctx_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
 struct execute_buffer_req {
@@ -180,7 +177,7 @@ struct execute_buffer_req {
 } __packed;
 
 struct execute_buffer_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
 struct aie_tile_info {
@@ -212,7 +209,7 @@ struct aie_tile_info_req {
 } __packed;
 
 struct aie_tile_info_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 	struct aie_tile_info	info;
 } __packed;
 
@@ -221,7 +218,7 @@ struct aie_version_info_req {
 } __packed;
 
 struct aie_version_info_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 	u16			major;
 	u16			minor;
 } __packed;
@@ -234,7 +231,7 @@ struct aie_column_info_req {
 } __packed;
 
 struct aie_column_info_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 	u32 size;
 } __packed;
 
@@ -252,7 +249,7 @@ struct config_cu_req {
 } __packed;
 
 struct config_cu_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
 struct suspend_req {
@@ -260,7 +257,7 @@ struct suspend_req {
 } __packed;
 
 struct suspend_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
 struct resume_req {
@@ -268,7 +265,7 @@ struct resume_req {
 } __packed;
 
 struct resume_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
 struct check_header_hash_req {
@@ -277,7 +274,7 @@ struct check_header_hash_req {
 } __packed;
 
 struct check_header_hash_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 } __packed;
 
 #if defined(CONFIG_DEBUG_FS)
@@ -286,7 +283,7 @@ struct check_self_test_req {
 } __packed;
 
 struct check_self_test_resp {
-	enum ipu_msg_status status;
+	enum npu_msg_status status;
 } __packed;
 #endif
 
@@ -299,7 +296,7 @@ struct query_error_req {
 } __packed;
 
 struct query_error_resp {
-	enum ipu_msg_status	status;
+	enum npu_msg_status	status;
 	u32			num_err;
 	u32			has_next_err:1;
 	u32			reserved:31;
@@ -308,4 +305,4 @@ struct query_error_resp {
 	u32			next_module;
 } __packed;
 
-#endif /* _AMDXDNA_MSG_PRIV_H_ */
+#endif /* _NPU_MSG_PRIV_H_ */

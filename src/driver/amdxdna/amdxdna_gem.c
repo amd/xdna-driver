@@ -9,6 +9,11 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_gem.h"
 
+/*
+ * The amdxdna_pin_pages() and amdxdna_unpin_pages() are lockless.
+ * If this memory needs to be shared, the caller needs to protect this two
+ * calls in a common lock.
+ */
 int amdxdna_pin_pages(struct amdxdna_mem *mem)
 {
 	int pinned, total_pinned = 0;

@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
- *
- * Authors:
- *	Min Ma <min.ma@amd.com>
  */
 
 #ifndef _AMDXDNA_CTX_H_
@@ -37,7 +34,6 @@ struct amdxdna_hwctx {
 	struct amdxdna_xclbin		*xclbin;
 	struct amdxdna_gem_obj		*heap;
 	bool				stopped;
-	bool				destroyed;
 	char				*name;
 
 	struct drm_gpu_scheduler	sched;
@@ -50,8 +46,8 @@ struct amdxdna_hwctx {
 };
 
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
-int amdxdna_hwctx_stop(struct amdxdna_client *client, u32 col_map);
-int amdxdna_hwctx_reset_restart(struct amdxdna_client *client);
+void amdxdna_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
+void amdxdna_restart_ctx(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 

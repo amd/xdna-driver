@@ -104,40 +104,62 @@ struct aie_info
     switch (key) {
     case key_type::aie_status_version:
     {
-      auto pci_dev = get_pcidev(device);
+      amdxdna_drm_query_aie_version aie_version = {
+        .major = 0,
+        .minor = 0,
+      };
+
+      amdxdna_drm_get_info arg = {
+        .param = DRM_AMDXDNA_QUERY_AIE_VERSION,
+        .buffer_size = sizeof(aie_version),
+        .buffer = reinterpret_cast<uintptr_t>(&aie_version)
+      };
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
       query::aie_status_version::result_type output;
-      output.major = sysfs_fcn<uint16_t>::get(pci_dev, "aie/version/major");
-      output.minor = sysfs_fcn<uint16_t>::get(pci_dev, "aie/version/minor");
+      output.major = aie_version.major;
+      output.minor = aie_version.minor;
       return output;
     }
     case key_type::aie_tiles_stats:
     {
-      const std::string aie_path = "aie/metadata";
-      auto pci_dev = get_pcidev(device);
+      amdxdna_drm_query_aie_metadata aie_metadata;
+
+      amdxdna_drm_get_info arg = {
+        .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+        .buffer_size = sizeof(aie_metadata),
+        .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+      };
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
       query::aie_tiles_stats::result_type output;
-      output.col_size = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/size");
-      output.major = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/version/major");
-      output.minor = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/version/minor");
-      output.cols = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/cols");
-      output.rows = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/rows");
+      output.col_size = aie_metadata.col_size;
+      output.major = aie_metadata.version.major;
+      output.minor = aie_metadata.version.minor;
+      output.cols = aie_metadata.cols;
+      output.rows = aie_metadata.rows;
 
-      output.core_rows = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/core/row_count");
-      output.core_row_start = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/core/row_start");
-      output.core_dma_channels = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/core/dma_channel_count");
-      output.core_locks = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/core/lock_count");
-      output.core_events = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/core/event_reg_count");
+      output.core_rows = aie_metadata.core.row_count;
+      output.core_row_start = aie_metadata.core.row_start;
+      output.core_dma_channels = aie_metadata.core.dma_channel_count;
+      output.core_locks = aie_metadata.core.lock_count;
+      output.core_events = aie_metadata.core.event_reg_count;
 
-      output.mem_rows = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/mem/row_count");
-      output.mem_row_start = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/mem/row_start");
-      output.mem_dma_channels = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/mem/dma_channel_count");
-      output.mem_locks = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/mem/lock_count");
-      output.mem_events = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/mem/event_reg_count");
+      output.mem_rows = aie_metadata.mem.row_count;
+      output.mem_row_start = aie_metadata.mem.row_start;
+      output.mem_dma_channels = aie_metadata.mem.dma_channel_count;
+      output.mem_locks = aie_metadata.mem.lock_count;
+      output.mem_events = aie_metadata.mem.event_reg_count;
 
-      output.shim_rows = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/shim/row_count");
-      output.shim_row_start = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/shim/row_start");
-      output.shim_dma_channels = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/shim/dma_channel_count");
-      output.shim_locks = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/shim/lock_count");
-      output.shim_events = sysfs_fcn<uint16_t>::get(pci_dev, aie_path + "/shim/event_reg_count");
+      output.shim_rows = aie_metadata.shim.row_count;
+      output.shim_row_start = aie_metadata.shim.row_start;
+      output.shim_dma_channels = aie_metadata.shim.dma_channel_count;
+      output.shim_locks = aie_metadata.shim.lock_count;
+      output.shim_events = aie_metadata.shim.event_reg_count;
       return output;
     }
     default:

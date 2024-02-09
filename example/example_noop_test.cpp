@@ -7,7 +7,7 @@
 #include <chrono>
 
 /*
- * This is an example NO-OP test on IPU device.
+ * This is an example NO-OP test on NPU device.
  * The application is build with Xilinx Runtime(XRT) APIs.
  * XRT is open source and it is a submodule of amd-aie repository.
  * The XRT API document: https://xilinx.github.io/XRT/master/html/index.html
@@ -35,7 +35,7 @@ int main(int argc, char **argv)
     std::cout << "Host test code start..." << std::endl;
 
     std::cout << "Host test code is creating device object..." << std::endl;
-    // On Phoenix, there is only one IPU device, thus the device index will be 0
+    // On Phoenix, there is only one NPU device, thus the device index will be 0
     unsigned int device_index = 0;
     auto device = xrt::device(device_index);
 

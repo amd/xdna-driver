@@ -10,7 +10,7 @@
 namespace shim_xdna {
 
 void
-hw_ctx_ipu::
+hw_ctx_npu::
 create_ctx_unsecure(const device& device, const xrt::xclbin& xclbin)
 {
   amdxdna_drm_create_hwctx_unsecure arg = {};
@@ -31,7 +31,7 @@ create_ctx_unsecure(const device& device, const xrt::xclbin& xclbin)
 }
 
 void
-hw_ctx_ipu::
+hw_ctx_npu::
 create_ctx(const device& device, const xrt::xclbin& xclbin)
 {
   amdxdna_drm_create_hwctx arg = {};
@@ -51,30 +51,30 @@ create_ctx(const device& device, const xrt::xclbin& xclbin)
   init_cu_info(ip_buf.get());
 }
 
-hw_ctx_ipu::
-hw_ctx_ipu(const device& device, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
-  : hw_ctx(device, qos, std::make_unique<hw_q_ipu>(device))
+hw_ctx_npu::
+hw_ctx_npu(const device& device, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
+  : hw_ctx(device, qos, std::make_unique<hw_q_npu>(device))
 {
   if (xrt_core::config::detail::get_env_value("XRT_HACK_UNSECURE_LOADING_XCLBIN"))
     create_ctx_unsecure(device, xclbin);
   else
     create_ctx(device, xclbin);
 
-  auto queue = static_cast<hw_q_ipu*>(get_hw_queue());
+  auto queue = static_cast<hw_q_npu*>(get_hw_queue());
   queue->bind_hwctx(this);
-  shim_debug("Created IPU HW context (%d)", get_slotidx());
+  shim_debug("Created NPU HW context (%d)", get_slotidx());
 }
 
-hw_ctx_ipu::
-~hw_ctx_ipu()
+hw_ctx_npu::
+~hw_ctx_npu()
 {
   auto hdl = get_slotidx();
 
   if (hdl == INVALID_CTX_HANDLE)
     return;
 
-  shim_debug("Destroying IPU HW context (%d)...", hdl);
-  auto queue = static_cast<hw_q_ipu*>(get_hw_queue());
+  shim_debug("Destroying NPU HW context (%d)...", hdl);
+  auto queue = static_cast<hw_q_npu*>(get_hw_queue());
   queue->unbind_hwctx();
   struct amdxdna_drm_destroy_hwctx arg = {};
   arg.handle = hdl;
@@ -82,7 +82,7 @@ hw_ctx_ipu::
 }
 
 void
-hw_ctx_ipu::
+hw_ctx_npu::
 init_cu_info(const void *cu_idx_buf)
 {
   auto names_base = static_cast<const char*>(cu_idx_buf);

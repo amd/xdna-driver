@@ -83,7 +83,7 @@ build_example()
 	cd ..
 }
 
-download_ipufws()
+download_npufws()
 {
 	local firmware_dir=${DOWNLOAD_BINS_DIR}/firmware
 
@@ -96,11 +96,11 @@ download_ipufws()
 			local url=$(echo $line | jq -r '.url')
 
 			if [[ -z "$url" ]]; then
-				echo "Empty URL for $device IPUFW, SKIP."
+				echo "Empty URL for $device NPUFW, SKIP."
 				continue
 			fi
 
-			echo "Download $device IPUFW version $version:"
+			echo "Download $device NPUFW version $version:"
 			if [ ! -d "${firmware_dir}/$pci_dev_id" ]; then
 				mkdir -p ${firmware_dir}/$pci_dev_id
 			fi
@@ -217,7 +217,7 @@ if [[ $clean == 1 ]]; then
 fi
 
 if [[ $package == 1 ]]; then
-	download_ipufws
+	download_npufws
 	package_targets $DEBUG_BUILD_TYPE
 	package_targets $RELEASE_BUILD_TYPE
 	exit 0

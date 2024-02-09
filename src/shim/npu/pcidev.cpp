@@ -6,33 +6,33 @@
 
 namespace shim_xdna {
 
-pdev_ipu::
-pdev_ipu(std::shared_ptr<const drv> driver, std::string sysfs_name)
+pdev_npu::
+pdev_npu(std::shared_ptr<const drv> driver, std::string sysfs_name)
   : pdev(driver, sysfs_name)
 {
-  shim_debug("Created IPU pcidev");
+  shim_debug("Created NPU pcidev");
 }
 
-pdev_ipu::
-~pdev_ipu()
+pdev_npu::
+~pdev_npu()
 {
-  shim_debug("Destroying IPU pcidev");
+  shim_debug("Destroying NPU pcidev");
 }
 
 std::shared_ptr<xrt_core::device>
-pdev_ipu::
+pdev_npu::
 create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
 {
-  return std::make_shared<device_ipu>(*this, handle, id);
+  return std::make_shared<device_npu>(*this, handle, id);
 }
 
 void
-pdev_ipu::
+pdev_npu::
 open() const
 {
   m_dev_fd = xrt_core::pci::dev::open("", O_RDWR);
   if (m_dev_fd < 0)
-      shim_err(EINVAL, "Failed to open IPU device fd");
+      shim_err(EINVAL, "Failed to open NPU device fd");
 }
 
 } // namespace shim_xdna

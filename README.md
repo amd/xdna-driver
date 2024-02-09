@@ -76,7 +76,7 @@ cd <root-of-source-tree>/build
 You will find "xrt_plugin\*-amdxdna.deb" in Release/ folder. This package includes below content:
 * The .so library files, which will be install to /opt/xilinx/xrt/libs folder
 * The XDNA driver and DKMS script, which build, install and load amdxdna.ko driver when install DEB package on target machine
-* The firmware binary files, which will be installed to /lib/firmware/amdipu folder
+* The firmware binary files, which will be installed to /lib/firmware/amdnpu folder
 
 ## Test
 If you haven't read [System Requirements](#system-requirements), double check it.
@@ -88,7 +88,7 @@ cd <root-of-source-tree>/build
 # Build the test program
 ./build.sh -example
 
-# Run the test (test xclbins can be found under /lib/firwmare/amdipu/<deviceID>/validate.xclbin
+# Run the test (test xclbins can be found under /lib/firwmare/amdnpu/<deviceID>/validate.xclbin
 ./example_build/example_noop_test <path-to-xclbin>
 ```
 
@@ -113,7 +113,7 @@ A: Create a debug DEB package, see above question. Then install debug DEB packag
 
 ### Q: I see "Failed to load xclbin firmware" error in dmesg. How to fix this?
 
-A: In amdxdna driver, it will not directly use the xclbin passed from application. Instead, it loads verified xclbin from /lib/firmware/amdipu/ directory.
+A: In amdxdna driver, it will not directly use the xclbin passed from application. Instead, it loads verified xclbin from /lib/firmware/amdnpu/ directory.
 The driver will check if the UUID of the xclbin from application and firmware directory matched. If this match process failed, you will see this error.
 
 ### Q: I need to test a unverified xclbin . I know what I'm doing. Can I get rid of the "Failed to load xclbin firmware" error?
@@ -133,7 +133,8 @@ source /opt/xilinx/xrt/setup.sh
 /opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh -dev Phoenix -xclbin <test>.xclbin
 
 # When xrt_plugin package is removed, it will be automaticlly cleaned up.
-# If setup <test>.xclbin for a device twice, the previous one will be overwritten.
+# User is able to setup multiple xclbins. But if setup two xclbins with the same file name,
+# the previous one will be overwritten.
 ```
 
 ## Contributor Guidelines
