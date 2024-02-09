@@ -33,7 +33,7 @@ enum ert_cmd_state {
 };
 
 /* Exec buffer command header format */
-struct amdxdna_start_cmd {
+struct amdxdna_cmd {
 	union {
 		struct {
 			u32 state:4;
@@ -62,7 +62,7 @@ struct amdxdna_sched_job {
 	/* user can wait on this fence */
 	struct dma_fence	*out_fence;
 	u32			cu_idx;
-	struct amdxdna_start_cmd *cmd;
+	struct amdxdna_cmd	*cmd;
 	struct amdxdna_gem_obj	*cmd_abo;
 	u64			seq;
 };
@@ -145,6 +145,12 @@ static int amdxdna_sched_job_init(struct amdxdna_sched_job *job,
 		return -ENOMEM;
 	}
 
+	if (abo->base.size <
+	    offsetof(struct amdxdna_cmd, data[job->cmd->extra_cu_masks])) {
+		XDNA_DBG(xdna, "invalid extra_cu_masks");
+		return -EINVAL;
+	}
+
 	cu_mask = &job->cmd->cu_mask;
 	for (i = 0; i < 1 + job->cmd->extra_cu_masks; i++) {
 		job->cu_idx = ffs(cu_mask[i]) - 1;
@@ -207,9 +213,10 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 {
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_hwctx *hwctx = job->hwctx;
-	struct dma_fence *fence;
 	struct amdxdna_dev *xdna;
+	struct dma_fence *fence;
 	void *cmd_buf;
+	u32 buf_len;
 	int ret;
 
 	xdna = hwctx->client->xdna;
@@ -217,8 +224,10 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
 	cmd_buf = &job->cmd->data[job->cmd->extra_cu_masks];
+	buf_len = job->cmd_abo->base.size -
+		offsetof(struct amdxdna_cmd, data[job->cmd->extra_cu_masks]);
 	ret = ipu_execbuf(xdna->dev_handle, hwctx->mbox_chan, job->cu_idx,
-			  cmd_buf, job, amdxdna_sched_resp_handler);
+			  cmd_buf, buf_len, job, amdxdna_sched_resp_handler);
 	if (ret) {
 		dma_fence_put(job->fence);
 		amdxdna_job_put(job);
@@ -884,7 +893,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	}
 	mutex_unlock(&client->mm_lock);
 
-	if (abo->base.size < sizeof(struct amdxdna_start_cmd)) {
+	if (abo->base.size < sizeof(struct amdxdna_cmd)) {
 		XDNA_ERR(xdna, "Bad cmd BO size: %ld", abo->base.size);
 		ret = -EINVAL;
 		goto release_bo;

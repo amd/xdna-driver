@@ -387,7 +387,7 @@ int ipu_config_cu(struct ipu_device *idev, struct mailbox_channel *chann,
 }
 
 int ipu_execbuf(struct ipu_device *idev, struct mailbox_channel *chann,
-		u32 cu_idx, u32 *payload, void *handle,
+		u32 cu_idx, u32 *payload, u32 payload_len, void *handle,
 		void (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct amdxdna_dev *xdna = idev->xdna;
@@ -395,8 +395,10 @@ int ipu_execbuf(struct ipu_device *idev, struct mailbox_channel *chann,
 	struct xdna_mailbox_msg msg;
 	int ret;
 
-	if (!chann)
-		return -ENODEV;
+	if (payload_len < sizeof(req.payload)) {
+		XDNA_DBG(xdna, "Invalid payload len");
+		return -EINVAL;
+	}
 
 	req.cu_idx = cu_idx;
 	memcpy(req.payload, payload, sizeof(req.payload));
