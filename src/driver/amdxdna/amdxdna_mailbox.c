@@ -649,6 +649,7 @@ skip_record:
 	init_completion(&mb_chann->async_comp);
 	idr_init(&mb_chann->chan_idr);
 	mb_chann->x2i_tail = mailbox_get_tailptr(mb_chann, CHAN_RES_X2I);
+	mb_chann->i2x_head = mailbox_get_headptr(mb_chann, CHAN_RES_I2X);
 
 	INIT_WORK(&mb_chann->rx_work, mailbox_rx_worker);
 	mb_chann->work_q = create_singlethread_workqueue(MAILBOX_NAME);
