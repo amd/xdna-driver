@@ -381,7 +381,9 @@ static void amdxdna_hwctx_release(struct amdxdna_hwctx *hwctx)
 	}
 	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->seq);
 
+	mutex_lock(&hwctx->client->mm_lock);
 	amdxdna_unpin_pages(&hwctx->heap->mem);
+	mutex_unlock(&hwctx->client->mm_lock);
 	drm_gem_object_put(&hwctx->heap->base);
 	kfree(hwctx->name);
 	kfree(hwctx);
@@ -458,7 +460,9 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 	struct amdxdna_hwctx *hwctx;
 	int ret;
 
+	mutex_lock(&client->mm_lock);
 	ret = amdxdna_pin_pages(&heap->mem);
+	mutex_unlock(&client->mm_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Dev heap pin failed, ret %d", ret);
 		return ret;
@@ -558,7 +562,9 @@ rm_id:
 free_hwctx:
 	kfree(hwctx);
 unpin:
+	mutex_lock(&client->mm_lock);
 	amdxdna_unpin_pages(&heap->mem);
+	mutex_unlock(&client->mm_lock);
 	return ret;
 }
 
