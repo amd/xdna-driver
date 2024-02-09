@@ -12,7 +12,7 @@
 			"device": "IPU2",
 			"url": "",
 			"pci_device_id": "17f0",
-			"version": "0.7.2.120",
+			"version": "0.6.12.109",
 			"fw_name": "ipu.sbin"
 		},
 		{
