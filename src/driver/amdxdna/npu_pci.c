@@ -484,6 +484,62 @@ release_fw:
 	return ret;
 }
 
+void npu_fini(struct amdxdna_dev *xdna)
+{
+	struct npu_device *ndev = xdna->dev_handle;
+
+	if (xdna->async_msgd)
+		kthread_stop(xdna->async_msgd);
+
+	npu_mgmt_fw_fini(ndev);
+
+	xdna_mailbox_destroy_channel(xdna->mgmt_chann);
+	xdna_mailbox_destroy(xdna->mbox);
+
+	amdxdna_psp_remove(ndev->psp_hdl);
+	npu_smu_fini(ndev);
+
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode != AMDXDNA_IOMMU_PASID)
+		goto skip_pasid;
+#endif
+	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
+#ifdef AMDXDNA_DEVEL
+skip_pasid:
+#endif
+	npu_teardown_pcidev(ndev);
+}
+
+void npu_get_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_metadata *args)
+{
+	struct npu_device *ndev = xdna->dev_handle;
+
+	args->col_size = ndev->metadata.size;
+	args->cols = ndev->metadata.cols;
+	args->rows = ndev->metadata.rows;
+
+	args->version.major = ndev->metadata.version.major;
+	args->version.minor = ndev->metadata.version.minor;
+
+	args->core.row_count = ndev->metadata.core.row_count;
+	args->core.row_start = ndev->metadata.core.row_start;
+	args->core.dma_channel_count = ndev->metadata.core.dma_channel_count;
+	args->core.lock_count = ndev->metadata.core.lock_count;
+	args->core.event_reg_count = ndev->metadata.core.event_reg_count;
+
+	args->mem.row_count = ndev->metadata.mem.row_count;
+	args->mem.row_start = ndev->metadata.mem.row_start;
+	args->mem.dma_channel_count = ndev->metadata.mem.dma_channel_count;
+	args->mem.lock_count = ndev->metadata.mem.lock_count;
+	args->mem.event_reg_count = ndev->metadata.mem.event_reg_count;
+
+	args->shim.row_count = ndev->metadata.shim.row_count;
+	args->shim.row_start = ndev->metadata.shim.row_start;
+	args->shim.dma_channel_count = ndev->metadata.shim.dma_channel_count;
+	args->shim.lock_count = ndev->metadata.shim.lock_count;
+	args->shim.event_reg_count = ndev->metadata.shim.event_reg_count;
+}
+
 int npu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_status *args)
 {
 	struct npu_device *ndev = xdna->dev_handle;
@@ -513,30 +569,12 @@ int npu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_st
 	return ret;
 }
 
-void npu_fini(struct amdxdna_dev *xdna)
+void npu_get_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_version *args)
 {
 	struct npu_device *ndev = xdna->dev_handle;
 
-	if (xdna->async_msgd)
-		kthread_stop(xdna->async_msgd);
-
-	npu_mgmt_fw_fini(ndev);
-
-	xdna_mailbox_destroy_channel(xdna->mgmt_chann);
-	xdna_mailbox_destroy(xdna->mbox);
-
-	amdxdna_psp_remove(ndev->psp_hdl);
-	npu_smu_fini(ndev);
-
-#ifdef AMDXDNA_DEVEL
-	if (iommu_mode != AMDXDNA_IOMMU_PASID)
-		goto skip_pasid;
-#endif
-	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
-#ifdef AMDXDNA_DEVEL
-skip_pasid:
-#endif
-	npu_teardown_pcidev(ndev);
+	args->major = ndev->version.major;
+	args->minor = ndev->version.minor;
 }
 
 void npu_debugfs_add(struct npu_device *ndev)

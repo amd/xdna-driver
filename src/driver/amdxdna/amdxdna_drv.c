@@ -136,6 +136,36 @@ skip_sva_unbind:
 	kfree(client);
 }
 
+static int get_info_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_aie_metadata *aie_struct;
+	int ret = 0;
+	int idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
+	if (!aie_struct) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	npu_get_aie_metadata(xdna, aie_struct);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to copy AIE request into user space");
+		goto fail_copy;
+	}
+
+fail_copy:
+	kfree(aie_struct);
+fail:
+	drm_dev_exit(idx);
+	return ret;
+}
+
 static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_status *aie_struct;
@@ -181,6 +211,36 @@ fail:
 	return ret;
 }
 
+static int get_info_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_aie_version *aie_struct;
+	int ret = 0;
+	int idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
+	if (!aie_struct) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	npu_get_aie_version(xdna, aie_struct);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to copy AIE request into user space");
+		goto fail_copy;
+	}
+
+fail_copy:
+	kfree(aie_struct);
+fail:
+	drm_dev_exit(idx);
+	return ret;
+}
+
 static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_drm_get_info *args = data;
@@ -191,6 +251,12 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
 		ret = get_info_aie_status(xdna, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_METADATA:
+		ret = get_info_aie_metadata(xdna, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_VERSION:
+		ret = get_info_aie_version(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Bad request parameter %u", args->param);

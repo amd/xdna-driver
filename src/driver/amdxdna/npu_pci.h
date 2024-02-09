@@ -42,7 +42,9 @@ int npu_config_cu(struct npu_device *ndev, struct mailbox_channel *chann,
 int npu_execbuf(struct npu_device *ndev, struct mailbox_channel *chann,
 		u32 cu_idx, u32 *payload, u32 payload_len, void *handle,
 		void (*notify_cb)(void *, const u32 *, size_t));
+void npu_get_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_metadata *args);
 int npu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_status *args);
+void npu_get_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_version *args);
 
 #if defined(CONFIG_DEBUG_FS)
 int npu_self_test(struct npu_device *ndev);
