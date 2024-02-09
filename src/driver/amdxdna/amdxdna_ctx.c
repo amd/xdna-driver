@@ -70,6 +70,7 @@ struct amdxdna_sched_job {
 struct amdxdna_fence {
 	struct dma_fence	base;
 	spinlock_t		lock; /* for base */
+	struct amdxdna_hwctx	*hwctx;
 };
 
 static const char *amdxdna_fence_get_driver_name(struct dma_fence *fence)
@@ -79,18 +80,16 @@ static const char *amdxdna_fence_get_driver_name(struct dma_fence *fence)
 
 static const char *amdxdna_fence_get_timeline_name(struct dma_fence *fence)
 {
-	return "xdna_fence";
-}
+	struct amdxdna_fence *xdna_fence;
+       
+	xdna_fence = container_of(fence, struct amdxdna_fence, base);
 
-static void amdxdna_fence_release(struct dma_fence *fence)
-{
-	kfree(fence);
+	return xdna_fence->hwctx->name;
 }
 
 static const struct dma_fence_ops fence_ops = {
 	.get_driver_name = amdxdna_fence_get_driver_name,
 	.get_timeline_name = amdxdna_fence_get_timeline_name,
-	.release = amdxdna_fence_release,
 };
 
 static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
@@ -101,6 +100,7 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	if (!fence)
 		return NULL;
 
+	fence->hwctx = hwctx;
 	spin_lock_init(&fence->lock);
 	dma_fence_init(&fence->base, &fence_ops, &fence->lock, hwctx->id, 0);
 	return &fence->base;
