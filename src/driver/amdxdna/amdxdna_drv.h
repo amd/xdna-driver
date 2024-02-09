@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2023, Advanced Micro Devices, Inc.
- *
- * Authors:
- *	Min Ma <min.ma@amd.com>
+ * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_DRV_H_

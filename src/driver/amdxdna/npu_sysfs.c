@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
- *
- * Authors:
- *	Daniel Benusovich <daniel.benusovich@amd.com>
  */
 #include <linux/stringify.h>
 #include "npu_common.h"

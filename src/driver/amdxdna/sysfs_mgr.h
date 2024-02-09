@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023, Advanced Micro Devices, Inc.  All rights reserved.
- *
- * Authors:
- *	Daniel Benusovich <daniel.benusovich@amd.com>
+ * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 #ifndef SYSFS_MGR_H
 #define SYSFS_MGR_H

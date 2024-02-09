@@ -1,10 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
- * All Rights Reserved.
- *
- * Authors:
- *	Min Ma <min.ma@amd.com>
  */
 
 #ifndef _NPU_ERROR_H_
