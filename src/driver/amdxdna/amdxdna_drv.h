@@ -10,6 +10,7 @@
 #define _AMDXDNA_DRV_H_
 
 #include <linux/pci.h>
+#include <linux/srcu.h>
 #include <linux/uuid.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_print.h>
@@ -96,6 +97,7 @@ struct amdxdna_dev {
  * @node: entry node in clients list
  * @pid: PID of current client
  * @hwctx_lock: HW context lock for protect IDR
+ * @hwctx_srcu: Per client SRCU for synchronizing hwctx destroy with other ioctls.
  * @hwctx_idr: HW context IDR
  * @xdna: XDNA device pointer
  * @mm_lock: lock for client wide memory related
@@ -108,7 +110,10 @@ struct amdxdna_dev {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
-	struct mutex			hwctx_lock; /* protect hwctx_idr */
+	/* To protect hwctx_idr and exclusion of hwctx stop/restart/destroy etc. */
+	struct mutex			hwctx_lock;
+	/* To avoid deadlock, do NOT wait this srcu when hwctx_lock is hold */
+	struct srcu_struct		hwctx_srcu;
 	struct idr			hwctx_idr;
 	struct amdxdna_dev		*xdna;
 	struct sysfs_mgr_node		dir;

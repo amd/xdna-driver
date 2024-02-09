@@ -210,12 +210,9 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 	struct dma_fence *fence;
 	struct amdxdna_dev *xdna;
 	void *cmd_buf;
-	int ret, idx;
+	int ret;
 
 	xdna = hwctx->client->xdna;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return ERR_PTR(-ENODEV);
 
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
@@ -227,7 +224,6 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 		amdxdna_job_put(job);
 		fence = ERR_PTR(ret);
 	}
-	drm_dev_exit(idx);
 
 	return fence;
 }
@@ -391,17 +387,6 @@ static void amdxdna_hwctx_release(struct amdxdna_hwctx *hwctx)
 	kfree(hwctx);
 }
 
-static struct amdxdna_hwctx *
-amdxdna_hwctx_find_by_id(struct amdxdna_client *client, u32 hwctx_id)
-{
-	struct amdxdna_hwctx *hwctx;
-
-	mutex_lock(&client->hwctx_lock);
-	hwctx = idr_find(&client->hwctx_idr, hwctx_id);
-	mutex_unlock(&client->hwctx_lock);
-	return hwctx;
-}
-
 /*
  * The IP name and index buffer layout,
  * +----------------------+
@@ -554,7 +539,6 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 		goto hwctx_cleanup;
 	}
 
-	hwctx->destroyed = false;
 	*hwctx_id = hwctx->id;
 
 	return 0;
@@ -713,11 +697,13 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 	mutex_unlock(&client->hwctx_lock);
 }
 
-static void amdxdna_hwctx_destroy(struct amdxdna_hwctx *hwctx)
+static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
+				      struct srcu_struct *ss)
 {
+	synchronize_srcu(ss);
+
 	/* Timeout all outstanding jobs */
 	drm_sched_fault(&hwctx->sched);
-	hwctx->destroyed = true;
 	amdxdna_hwctx_wait_for_idle(hwctx);
 	amdxdna_hwctx_release(hwctx);
 }
@@ -737,7 +723,9 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 		XDNA_DBG(client->xdna, "PID %d close HW context %d",
 			 client->pid, hwctx->id);
 		idr_remove(&client->hwctx_idr, hwctx->id);
-		amdxdna_hwctx_destroy(hwctx);
+		mutex_unlock(&client->hwctx_lock);
+		amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
+		mutex_lock(&client->hwctx_lock);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -823,29 +811,34 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	struct amdxdna_drm_destroy_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_hwctx *hwctx;
-	int ret = 0, idx;
+	int idx;
 
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
-
+	/*
+	 * Use hwctx_lock to achieve exclusion with other hwctx writers.
+	 * Such as, stop/restart, suspend/resume context and remove device.
+	 *
+	 * Use SRCU to synchronize with exec/wait command ioctls.
+	 *
+	 * The pushed jobs are handled by DRM scheduler during destroy.
+	 */
 	mutex_lock(&client->hwctx_lock);
 	hwctx = idr_find(&client->hwctx_idr, args->handle);
 	if (!hwctx) {
 		mutex_unlock(&client->hwctx_lock);
-		ret = -ENODEV;
-		XDNA_DBG(xdna, "PID %d destroy HW context %d failed",
+		XDNA_DBG(xdna, "PID %d HW context %d not exist",
 			 client->pid, args->handle);
 		goto out;
 	}
 	idr_remove(&client->hwctx_idr, hwctx->id);
 	mutex_unlock(&client->hwctx_lock);
+	amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
 
-	amdxdna_hwctx_destroy(hwctx);
-
-	XDNA_DBG(xdna, "PID %d destroyed HW context %d", client->pid, args->handle);
 out:
 	drm_dev_exit(idx);
-	return ret;
+	XDNA_DBG(xdna, "PID %d destroyed HW context %d", client->pid, args->handle);
+	return 0;
 }
 
 /*
@@ -874,12 +867,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	}
 	abo = to_xdna_gem_obj(gobj);
 
-	if (abo->base.size < sizeof(struct amdxdna_start_cmd)) {
-		XDNA_ERR(xdna, "Bad cmd BO size: %ld", abo->base.size);
-		ret = -EINVAL;
-		goto release_bo;
-	}
-
+	/* TODO: Should use DRM gem object internal lock */
 	mutex_lock(&client->mm_lock);
 	list_for_each_entry(sbo, &client->shmem_list, entry) {
 		if (sbo->pinned)
@@ -890,29 +878,40 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	}
 	mutex_unlock(&client->mm_lock);
 
+	if (abo->base.size < sizeof(struct amdxdna_start_cmd)) {
+		XDNA_ERR(xdna, "Bad cmd BO size: %ld", abo->base.size);
+		ret = -EINVAL;
+		goto release_bo;
+	}
+
 	job = kzalloc(sizeof(*job), GFP_KERNEL);
 	if (!job) {
 		ret = -ENOMEM;
 		goto release_bo;
 	}
 
-	if (!drm_dev_enter(dev, &idx)) {
-		ret = -ENODEV;
-		goto free_job;
-	}
+	/*
+	 * SRCU lock for synchronizing with amdxdna_hwctx_destroy_rcu().
+	 * I don't worry about concurrently stop/restart context. Because this
+	 * ioctl just create job and push it to DRM's queue. When stop/restart
+	 * context, DRM scheduler has protection for the jobs in its queue.
+	 *
+	 * Just make sure before this ioctl exited, don't release context.
+	 */
+	idx = srcu_read_lock(&client->hwctx_srcu);
 
-	hwctx = amdxdna_hwctx_find_by_id(client, args->hwctx);
+	hwctx = idr_find(&client->hwctx_idr, args->hwctx);
 	if (!hwctx) {
 		XDNA_DBG(xdna, "PID %d failed to get hwctx %d",
 			 client->pid, args->hwctx);
 		ret = -EINVAL;
-		goto dev_exit;
+		goto unlock_hwctx_srcu;
 	}
 
 	ret = amdxdna_sched_job_init(job, hwctx, abo);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init DRM sched job. ret %d", ret);
-		goto dev_exit;
+		goto unlock_hwctx_srcu;
 	}
 
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
@@ -929,34 +928,33 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	dma_resv_unlock(&client->resv);
 
 	spin_lock(&hwctx->io_lock);
-	if (hwctx->destroyed) {
-		ret = -ENODEV;
-		goto unlock_and_cleanjob;
-	}
 	job->seq = amdxdna_hwctx_add_fence(job->hwctx, job->out_fence);
 	if (job->seq == AMDXDNA_INVALID_CMD_HANDLE) {
 		ret = -EAGAIN;
-		goto unlock_and_cleanjob;
+		goto unlock_io;
 	}
 	args->seq = job->seq;
 
 	drm_sched_entity_push_job(&job->base);
 	spin_unlock(&hwctx->io_lock);
+	/*
+	 * The amdxdna_hwctx_destroy_rcu() will destroy DRM sched entity
+	 * after synchronize_srcu(). DRM sched will handle pushed jobs. Now we
+	 * can unlock SRCU.
+	 */
+	srcu_read_unlock(&client->hwctx_srcu, idx);
 	XDNA_DBG(xdna, "pushed cmd %lld to scheduler", args->seq);
-
-	drm_dev_exit(idx);
 
 	return 0;
 
+unlock_io:
+	spin_unlock(&hwctx->io_lock);
 unlock_resv:
 	dma_resv_unlock(&client->resv);
-unlock_and_cleanjob:
-	spin_unlock(&hwctx->io_lock);
 	dma_fence_put(job->out_fence);
 	amdxdna_sched_job_clean(job);
-dev_exit:
-	drm_dev_exit(idx);
-free_job:
+unlock_hwctx_srcu:
+	srcu_read_unlock(&client->hwctx_srcu, idx);
 	kfree(job);
 release_bo:
 	drm_gem_object_put(gobj);
@@ -971,26 +969,25 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_hwctx *hwctx;
 	struct dma_fence *out_fence;
 	signed long remaining = MAX_SCHEDULE_TIMEOUT;
-	int ret;
+	int ret, idx;
 
 	XDNA_DBG(xdna, "PID %d hwctx %d timeout set %d ms for cmd %lld",
 		 client->pid, args->hwctx, args->timeout, args->seq);
 
-	hwctx = amdxdna_hwctx_find_by_id(client, args->hwctx);
+	/* For locking concerns, see amdxdna_drm_exec_cmd_ioctl. */
+	idx = srcu_read_lock(&client->hwctx_srcu);
+	hwctx = idr_find(&client->hwctx_idr, args->hwctx);
 	if (!hwctx) {
 		XDNA_DBG(xdna, "PID %d failed to get hwctx %d",
 			 client->pid, args->hwctx);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto unlock_hwctx_srcu;
 	}
 
 	spin_lock(&hwctx->io_lock);
-	if (hwctx->destroyed) {
-		spin_unlock(&hwctx->io_lock);
-		ret = -ENODEV;
-		goto out;
-	}
 	out_fence = amdxdna_hwctx_get_fence(hwctx, args->seq);
 	spin_unlock(&hwctx->io_lock);
+	srcu_read_unlock(&client->hwctx_srcu, idx);
 	if (IS_ERR(out_fence)) {
 		ret = PTR_ERR(out_fence);
 		XDNA_ERR(xdna, "Failed to get cmd %lld, ret %d", args->seq, ret);
@@ -1023,6 +1020,10 @@ put_fence:
 out:
 	XDNA_DBG(xdna, "PID %d hwctx %d cmd %lld wait finished, ret %d",
 		 client->pid, args->hwctx, args->seq, ret);
+	return ret;
+
+unlock_hwctx_srcu:
+	srcu_read_unlock(&client->hwctx_srcu, idx);
 	return ret;
 }
 

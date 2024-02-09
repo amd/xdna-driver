@@ -37,7 +37,6 @@ struct amdxdna_hwctx {
 	struct amdxdna_xclbin		*xclbin;
 	struct amdxdna_gem_obj		*heap;
 	bool				stopped;
-	bool				destroyed;
 	char				*name;
 
 	struct drm_gpu_scheduler	sched;

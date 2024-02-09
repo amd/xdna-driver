@@ -80,15 +80,16 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 skip_sva_bind:
 #endif
 	mutex_init(&client->hwctx_lock);
+	init_srcu_struct(&client->hwctx_srcu);
 	idr_init(&client->hwctx_idr);
 	mutex_init(&client->mm_lock);
 	INIT_LIST_HEAD(&client->shmem_list);
 	client->dev_heap = AMDXDNA_INVALID_BO_HANDLE;
+	dma_resv_init(&client->resv);
 
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
-	dma_resv_init(&client->resv);
 
 	filp->driver_priv = client;
 
@@ -121,6 +122,7 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	sysfs_mgr_remove_directory(xdna->sysfs_mgr, &client->dir);
 	amdxdna_hwctx_remove_all(client);
 	idr_destroy(&client->hwctx_idr);
+	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
 	mutex_destroy(&client->mm_lock);
 
@@ -141,7 +143,7 @@ static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 {
 	struct amdxdna_drm_query_aie_status *aie_struct;
 	u32 input_buf_size;
-	int ret;
+	int ret, idx;
 
 	input_buf_size = args->buffer_size;
 	args->buffer_size = sizeof(*aie_struct);
@@ -151,6 +153,9 @@ static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 		ret = -EINVAL;
 		goto fail;
 	}
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
 
 	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
 	if (!aie_struct) {
@@ -175,6 +180,7 @@ static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 fail_copy:
 	kfree(aie_struct);
 fail:
+	drm_dev_exit(idx);
 	return ret;
 }
 
