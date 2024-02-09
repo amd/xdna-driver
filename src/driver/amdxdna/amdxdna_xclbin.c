@@ -12,7 +12,7 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_axlf.h"
 #include "amdxdna_xclbin.h"
-#include "ipu_pci.h"
+#include "npu_pci.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -345,7 +345,7 @@ amdxdna_xclbin_release(struct kref *ref)
 	xdna = xclbin->xdna;
 
 	XDNA_DBG(xdna, "releasing XCLBIN, UUID %pUb", &xclbin->uuid);
-	if (ipu_unregister_pdis(xdna->dev_handle, xclbin))
+	if (npu_unregister_pdis(xdna->dev_handle, xclbin))
 		XDNA_WARN(xdna, "unregister PDI failed");
 
 	list_del(&xclbin->entry);
@@ -387,7 +387,7 @@ static int amdxdna_xclbin_register(struct amdxdna_dev *xdna, const struct axlf *
 		goto xclbin_free;
 	}
 
-	ret = ipu_register_pdis(xdna->dev_handle, xp);
+	ret = npu_register_pdis(xdna->dev_handle, xp);
 	if (ret) {
 		XDNA_ERR(xdna, "register xclbin failed, ret %d", ret);
 		goto xclbin_mem_free;
@@ -423,7 +423,7 @@ int amdxdna_xclbin_load(struct amdxdna_dev *xdna, uuid_t *uuid,
 		goto out;
 	}
 
-	snprintf(xclbin_path, sizeof(xclbin_path), "amdipu/%x/%pUb.xclbin",
+	snprintf(xclbin_path, sizeof(xclbin_path), "amdnpu/%x/%pUb.xclbin",
 		 xdna->pdev->device, uuid);
 
 	ret = request_firmware(&fw, xclbin_path, &xdna->pdev->dev);

@@ -3,8 +3,8 @@
  * Copyright 2022-2024 Advanced Micro Devices, Inc.
  */
 
-#ifndef __IPU_COMMON_H__
-#define __IPU_COMMON_H__
+#ifndef __NPU_COMMON_H__
+#define __NPU_COMMON_H__
 
 #include <linux/iopoll.h>
 #include "drm_local/amdxdna_accel.h"
@@ -12,48 +12,48 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_psp.h"
 
-#define IPU_INTERVAL	20000	/* us */
-#define IPU_TIMEOUT	1000000	/* us */
+#define NPU_INTERVAL	20000	/* us */
+#define NPU_TIMEOUT	1000000	/* us */
 
-#define IDEV2PDEV(idev) \
-	((idev)->xdna->pdev)
+#define NDEV2PDEV(ndev) \
+	((ndev)->xdna->pdev)
 
-#define IPU_SRAM_OFF(idev, addr) \
-	((addr) - (idev)->priv->sram_dev_addr)
-#define IPU_MBOX_OFF(idev, addr) \
-	((addr) - (idev)->priv->mbox_dev_addr)
+#define NPU_SRAM_OFF(ndev, addr) \
+	((addr) - (ndev)->priv->sram_dev_addr)
+#define NPU_MBOX_OFF(ndev, addr) \
+	((addr) - (ndev)->priv->mbox_dev_addr)
 
-#define PSP_REG_BAR(idev, idx) \
-	((idev)->priv->psp_regs_off[(idx)].bar_idx)
-#define PSP_REG_OFF(idev, idx) \
-	((idev)->priv->psp_regs_off[(idx)].offset)
-#define SRAM_REG_OFF(idev, idx) \
-	((idev)->priv->sram_offs[(idx)].offset)
+#define PSP_REG_BAR(ndev, idx) \
+	((ndev)->priv->psp_regs_off[(idx)].bar_idx)
+#define PSP_REG_OFF(ndev, idx) \
+	((ndev)->priv->psp_regs_off[(idx)].offset)
+#define SRAM_REG_OFF(ndev, idx) \
+	((ndev)->priv->sram_offs[(idx)].offset)
 
-#define SMU_REG(idev, idx) \
+#define SMU_REG(ndev, idx) \
 ({ \
-	typeof(idev) _idev = idev; \
-	((_idev)->smu_base + (_idev)->priv->smu_regs_off[(idx)].offset); \
+	typeof(ndev) _ndev = ndev; \
+	((_ndev)->smu_base + (_ndev)->priv->smu_regs_off[(idx)].offset); \
 })
-#define SRAM_GET_ADDR(idev, idx) \
+#define SRAM_GET_ADDR(ndev, idx) \
 ({ \
-	typeof(idev) _idev = idev; \
-	((_idev)->sram_base + SRAM_REG_OFF((_idev), (idx))); \
+	typeof(ndev) _ndev = ndev; \
+	((_ndev)->sram_base + SRAM_REG_OFF((_ndev), (idx))); \
 })
 
 /* Firmware determines device memory base address and size */
-#define IPU_DEVM_BASE	0x4000000
-#define IPU_DEVM_SIZE	(48 * 1024 * 1024)
+#define NPU_DEVM_BASE	0x4000000
+#define NPU_DEVM_SIZE	(48 * 1024 * 1024)
 
 #define CHAN_SLOT_SZ 0x2000
-#define CHANN_INDEX(idev, rbuf_off) \
-	(((rbuf_off) - SRAM_REG_OFF((idev), MBOX_CHANN_OFF)) / CHAN_SLOT_SZ)
+#define CHANN_INDEX(ndev, rbuf_off) \
+	(((rbuf_off) - SRAM_REG_OFF((ndev), MBOX_CHANN_OFF)) / CHAN_SLOT_SZ)
 
-#define MBOX_SIZE(idev) \
+#define MBOX_SIZE(ndev) \
 ({ \
-	typeof(idev) _idev = (idev); \
-	((_idev)->priv->mbox_size) ? (_idev)->priv->mbox_size : \
-	pci_resource_len(IDEV2PDEV(_idev), (_idev)->xdna->dev_info->mbox_bar); \
+	typeof(ndev) _ndev = (ndev); \
+	((_ndev)->priv->mbox_size) ? (_ndev)->priv->mbox_size : \
+	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
 })
 
 /*
@@ -63,7 +63,7 @@
  *    a. Adding a new device, copy existed macro and update <device name> ;)
  * 3. Name REG/MBOX/PSP/SMU/SRAM BAR macros like "<device name>_<bar>_BAR_*"
  *
- * Examples for Phoenix device (see ipu_phx_regs.c):
+ * Examples for Phoenix device (see npu_phx_regs.c):
  * 1. Define REG BAR info:
  * #define PHX_REG_BAR_INDEX <index>
  * #define PHX_REG_BAR_BASE  <address>
@@ -113,17 +113,17 @@
 
 #define _DEFINE_DEV_INFO(name, _vbnv, id, _sram, _psp, _smu, _fw_path, \
 			 _fw_hash_high, _fw_hash_low) \
-struct amdxdna_dev_info ipu_##id##_info = { \
+struct amdxdna_dev_info npu_##id##_info = { \
 	.reg_bar  = _BAR_IDX(name##_, REG), \
 	.mbox_bar = _BAR_IDX(name##_, MBOX), \
 	.sram_bar = _BAR_IDX(name##_, SRAM), \
 	.psp_bar  = _BAR_IDX(name##_, PSP), \
 	.smu_bar  = _BAR_IDX(name##_, SMU), \
-	.dev_mem_base = IPU_DEVM_BASE, \
-	.dev_mem_size = IPU_DEVM_SIZE, \
+	.dev_mem_base = NPU_DEVM_BASE, \
+	.dev_mem_size = NPU_DEVM_SIZE, \
 	.vbnv	  = _vbnv, \
-	.device_type = AMDXDNA_DEV_TYPE_IPU, \
-	.dev_priv = (&(struct ipu_dev_priv) { \
+	.device_type = AMDXDNA_DEV_TYPE_NPU, \
+	.dev_priv = (&(struct npu_dev_priv) { \
 		.fw_path = _fw_path, \
 		.fw_hash_high = _fw_hash_high, \
 		.fw_hash_low = _fw_hash_low, \
@@ -136,17 +136,17 @@ struct amdxdna_dev_info ipu_##id##_info = { \
 	}), \
 }
 
-#define IPU_DEFINE_DEV_INFO(name, _vbnv, id, fw_path, fw_hash_high, fw_hash_low) \
+#define NPU_DEFINE_DEV_INFO(name, _vbnv, id, fw_path, fw_hash_high, fw_hash_low) \
 	_DEFINE_DEV_INFO(name, _vbnv, id, DEFAULT_SRAM_OFFSETS, \
 			 DEFAULT_PSP_OFFSETS, DEFAULT_SMU_OFFSETS, \
 			 fw_path, fw_hash_high, fw_hash_low)
 
-#define IPU_DEFINE_DEV_INFO_PSP(name, _vbnv, id, _psp, fw_path, \
+#define NPU_DEFINE_DEV_INFO_PSP(name, _vbnv, id, _psp, fw_path, \
 				fw_hash_high, fw_hash_low) \
 	_DEFINE_DEV_INFO(name, _vbnv, id, DEFAULT_SRAM_OFFSETS, \
 			 _psp, DEFAULT_SMU_OFFSETS, fw_path, fw_hash_high, fw_hash_low)
 
-enum ipu_smu_reg_idx {
+enum npu_smu_reg_idx {
 	SMU_CMD_REG = 0,
 	SMU_ARG_REG,
 	SMU_INTR_REG,
@@ -155,18 +155,18 @@ enum ipu_smu_reg_idx {
 	SMU_MAX_REGS /* Kepp this at the end */
 };
 
-enum ipu_sram_reg_idx {
+enum npu_sram_reg_idx {
 	MBOX_CHANN_OFF = 0,
 	FW_ALIVE_OFF,
 	SRAM_MAX_INDEX /* Keep this at the end */
 };
 
-struct ipu_bar_off_pair {
+struct npu_bar_off_pair {
 	int	bar_idx;
 	u32	offset;
 };
 
-struct ipu_dev_priv {
+struct npu_dev_priv {
 	const char		*fw_path;
 	u64			fw_hash_high;
 	u64			fw_hash_low;
@@ -174,9 +174,9 @@ struct ipu_dev_priv {
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32			mbox_size;
 	u32			sram_dev_addr;
-	struct ipu_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
-	struct ipu_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
-	struct ipu_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
+	struct npu_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
+	struct npu_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
+	struct npu_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
 };
 
 struct aie_version {
@@ -211,9 +211,9 @@ struct clock_entry {
 	u32 freq_mhz;
 };
 
-struct ipu_device {
+struct npu_device {
 	struct amdxdna_dev		*xdna;
-	const struct ipu_dev_priv	*priv;
+	const struct npu_dev_priv	*priv;
 	void			__iomem *sram_base;
 	void			__iomem *smu_base;
 	struct psp_device		*psp_hdl;
@@ -228,19 +228,19 @@ struct ipu_device {
 	struct aie_metadata		metadata;
 
 	struct sysfs_mgr_node		clocks_dir;
-	struct clock_entry		mp_ipu_clock;
+	struct clock_entry		mp_npu_clock;
 	struct clock_entry		h_clock;
 };
 
-/* ipu_debugfs.c */
-void ipu_debugfs_init(struct ipu_device *idev);
+/* npu_debugfs.c */
+void npu_debugfs_init(struct npu_device *ndev);
 
-/* ipu_smu.c */
-int ipu_smu_init(struct ipu_device *idev);
-void ipu_smu_fini(struct ipu_device *idev);
-int ipu_smu_set_mpipu_clock_freq(struct ipu_device *idev, u32 freq_mhz);
-int ipu_smu_set_hclock_freq(struct ipu_device *idev, u32 freq_mhz);
-int ipu_smu_set_power_on(struct ipu_device *idev);
-int ipu_smu_set_power_off(struct ipu_device *idev);
+/* npu_smu.c */
+int npu_smu_init(struct npu_device *ndev);
+void npu_smu_fini(struct npu_device *ndev);
+int npu_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz);
+int npu_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz);
+int npu_smu_set_power_on(struct npu_device *ndev);
+int npu_smu_set_power_off(struct npu_device *ndev);
 
-#endif /* __IPU_COMMON_H__ */
+#endif /* __NPU_COMMON_H__ */

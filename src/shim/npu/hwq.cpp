@@ -6,20 +6,20 @@
 
 namespace shim_xdna {
 
-hw_q_ipu::
-hw_q_ipu(const device& device) : hw_q(device)
+hw_q_npu::
+hw_q_npu(const device& device) : hw_q(device)
 {
-  shim_debug("Created IPU HW queue");
+  shim_debug("Created NPU HW queue");
 }
 
-hw_q_ipu::
-~hw_q_ipu()
+hw_q_npu::
+~hw_q_npu()
 {
-  shim_debug("Destroying IPU HW queue");
+  shim_debug("Destroying NPU HW queue");
 }
 
 void
-hw_q_ipu::
+hw_q_npu::
 submit_command(xrt_core::buffer_handle *cmd_bo)
 {
   auto boh = static_cast<bo*>(cmd_bo);

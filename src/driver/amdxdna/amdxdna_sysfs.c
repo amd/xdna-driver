@@ -4,7 +4,7 @@
  */
 #include "amdxdna_sysfs.h"
 #include "amdxdna_ctx.h"
-#include "ipu_pci.h"
+#include "npu_pci.h"
 
 static ssize_t vbnv_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -97,9 +97,9 @@ int amdxdna_sysfs_init(struct amdxdna_dev *xdna)
 		goto mgr_fini;
 	}
 
-	ret = ipu_sysfs_init(xdna->dev_handle);
+	ret = npu_sysfs_init(xdna->dev_handle);
 	if (ret) {
-		XDNA_ERR(xdna, "IPU sysfs init failed, %d", ret);
+		XDNA_ERR(xdna, "NPU sysfs init failed, %d", ret);
 		goto mgr_fini;
 	}
 
@@ -115,7 +115,7 @@ remove_group:
 
 void amdxdna_sysfs_fini(struct amdxdna_dev *xdna)
 {
-	ipu_sysfs_fini(xdna->dev_handle);
+	npu_sysfs_fini(xdna->dev_handle);
 	sysfs_mgr_cleanup(xdna->sysfs_mgr);
 	sysfs_remove_group(&xdna->pdev->dev.kobj, &amdxdna_attr_group);
 }

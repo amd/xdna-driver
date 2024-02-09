@@ -15,7 +15,7 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_xclbin.h"
-#include "ipu_pci.h"
+#include "npu_pci.h"
 
 #define MAX_HWCTX_ID		255
 
@@ -226,7 +226,7 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 	cmd_buf = &job->cmd->data[job->cmd->extra_cu_masks];
 	buf_len = job->cmd_abo->base.size -
 		offsetof(struct amdxdna_cmd, data[job->cmd->extra_cu_masks]);
-	ret = ipu_execbuf(xdna->dev_handle, hwctx->mbox_chan, job->cu_idx,
+	ret = npu_execbuf(xdna->dev_handle, hwctx->mbox_chan, job->cu_idx,
 			  cmd_buf, buf_len, job, amdxdna_sched_resp_handler);
 	if (ret) {
 		dma_fence_put(job->fence);
@@ -256,10 +256,10 @@ amdxdna_sched_job_timeout(struct drm_sched_job *sched_job)
 	XDNA_DBG(xdna, "%s cmd %lld timedout", job->hwctx->name, job->seq);
 	mutex_lock(&xdna->dev_lock);
 	/* Destroy mailbox channel, abort all commands */
-	ipu_destroy_context(xdna->dev_handle, job->hwctx);
+	npu_destroy_context(xdna->dev_handle, job->hwctx);
 
-	/* Re-connect HW context and IPUFW */
-	ipu_create_context(xdna->dev_handle, job->hwctx);
+	/* Re-connect HW context and NPUFW */
+	npu_create_context(xdna->dev_handle, job->hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
 	drm_sched_start(sched_job->sched, true);
@@ -332,7 +332,7 @@ static void amdxdna_hwctx_cleanup(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret;
 
-	ret = ipu_release_resource(hwctx);
+	ret = npu_release_resource(hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "release hw resource failed, ret %d", ret);
 
@@ -344,7 +344,7 @@ static int amdxdna_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret;
 
-	ret = ipu_alloc_resource(hwctx);
+	ret = npu_alloc_resource(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "alloc hw resource failed, ret %d", ret);
 		goto out;
@@ -352,7 +352,7 @@ static int amdxdna_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	XDNA_DBG(xdna, "hwctx %s init completed", hwctx->name);
 
-	ret = ipu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
+	ret = npu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
 	if (ret) {
 		XDNA_ERR(xdna, "Config CU failed, ret %d", ret);
 		goto release_resource;
@@ -361,7 +361,7 @@ static int amdxdna_hwctx_init(struct amdxdna_hwctx *hwctx)
 	return 0;
 
 release_resource:
-	ipu_release_resource(hwctx);
+	npu_release_resource(hwctx);
 out:
 	return ret;
 }
@@ -545,7 +545,7 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 		goto free_entity;
 	}
 
-	ret = ipu_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
+	ret = npu_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
 			       heap->mem.userptr, heap->mem.size);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
@@ -603,7 +603,7 @@ void amdxdna_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
 		XDNA_DBG(xdna, "Stop %s.%d", hwctx->name, hwctx->id);
 
 		drm_sched_stop(&hwctx->sched, NULL);
-		ret = ipu_destroy_context(xdna->dev_handle, hwctx);
+		ret = npu_destroy_context(xdna->dev_handle, hwctx);
 		if (ret)
 			XDNA_ERR(xdna, "Destroy hwctx failed, ret %d", ret);
 	}
@@ -624,13 +624,13 @@ void amdxdna_restart_ctx(struct amdxdna_client *client)
 			continue;
 
 		XDNA_DBG(xdna, "Resetting %s.%d", hwctx->name, hwctx->id);
-		ret = ipu_create_context(xdna->dev_handle, hwctx);
+		ret = npu_create_context(xdna->dev_handle, hwctx);
 		if (ret) {
 			XDNA_ERR(xdna, "Create hwctx failed, ret %d", ret);
 			continue;
 		}
 
-		ret = ipu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
+		ret = npu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
 		if (ret) {
 			XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
 			continue;
@@ -682,12 +682,12 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		/*
 		 * Command timeout is unlikely. But if it happens, it doesn't
-		 * break the system. ipu_destroy_context() will destroy mailbox
+		 * break the system. npu_destroy_context() will destroy mailbox
 		 * and abort all commands.
 		 */
 		amdxdna_hwctx_wait_for_idle(hwctx);
 		drm_sched_stop(&hwctx->sched, NULL);
-		ipu_destroy_context(xdna->dev_handle, hwctx);
+		npu_destroy_context(xdna->dev_handle, hwctx);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -705,8 +705,8 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 		 * regenerated. If this happen, when submit message to this
 		 * mailbox channel, error will return.
 		 */
-		ipu_create_context(xdna->dev_handle, hwctx);
-		ipu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
+		npu_create_context(xdna->dev_handle, hwctx);
+		npu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
 		drm_sched_start(&hwctx->sched, true);
 	}
 	mutex_unlock(&client->hwctx_lock);

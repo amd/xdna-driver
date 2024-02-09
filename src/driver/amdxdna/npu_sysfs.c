@@ -6,7 +6,7 @@
  *	Daniel Benusovich <daniel.benusovich@amd.com>
  */
 #include <linux/stringify.h>
-#include "ipu_common.h"
+#include "npu_common.h"
 
 #include "sysfs_mgr.h"
 
@@ -183,67 +183,91 @@ static struct attribute_group tile_metadata_group = {
 	.attrs = tile_metadata_attrs,
 };
 
-#define GEN_DIR_AND_ATTRS(idev, parent, attrs, data, name, err, fail) \
-	err = sysfs_mgr_generate_directory(idev->xdna->sysfs_mgr, parent, attrs, data, name); \
-	if (err) { \
-		XDNA_ERR(idev->xdna, "Failed to generate %s directory", \
-			 __stringify(parent)" "name); \
-		goto fail; \
-	}
-
-int ipu_sysfs_init(struct ipu_device *idev)
+int npu_sysfs_init(struct npu_device *ndev)
 {
 	int ret;
 
-	ret = sysfs_mgr_generate_directory(idev->xdna->sysfs_mgr, NULL, NULL,
-					   &idev->clocks_dir, "clocks");
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, NULL, NULL,
+					   &ndev->clocks_dir, "clocks");
 	if (ret) {
-		XDNA_ERR(idev->xdna, "Failed to initialize clocks directory. ret: %d", ret);
+		XDNA_ERR(ndev->xdna, "Failed to initialize clocks directory. ret: %d", ret);
 		return ret;
 	}
 
-	ret = sysfs_mgr_generate_directory(idev->xdna->sysfs_mgr, NULL, NULL,
-					   &idev->aie_dir, "xdna");
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, NULL, NULL,
+					   &ndev->aie_dir, "xdna");
 	if (ret) {
-		XDNA_ERR(idev->xdna, "Failed to initialize xdna directory. ret: %d", ret);
+		XDNA_ERR(ndev->xdna, "Failed to initialize xdna directory. ret: %d", ret);
 		goto rm_clock_dir;
 	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->clocks_dir, &clock_entry_group,
-			  &idev->mp_ipu_clock.node, "0", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->clocks_dir,
+					   &clock_entry_group, &ndev->mp_npu_clock.node, "0");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate clocks/0 directory");
+		goto rm_aie_dir;
+	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->clocks_dir, &clock_entry_group,
-			  &idev->h_clock.node, "1", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->clocks_dir,
+					   &clock_entry_group, &ndev->h_clock.node, "1");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate clocks/1 directory");
+		goto rm_aie_dir;
+	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->aie_dir, &version_group,
-			  &idev->version.node, "version", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->aie_dir,
+					   &version_group, &ndev->version.node, "version");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate aie/version directory");
+		goto rm_aie_dir;
+	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->aie_dir, &metadata_group,
-			  &idev->metadata.node, "metadata", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->aie_dir,
+					   &metadata_group, &ndev->metadata.node, "metadata");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate aie/metadata directory");
+		goto rm_aie_dir;
+	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->metadata.node, &version_group,
-			  &idev->metadata.version.node, "version", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->metadata.node,
+					   &version_group, &ndev->metadata.version.node, "version");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate metadata/version directory");
+		goto rm_aie_dir;
+	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->metadata.node, &tile_metadata_group,
-			  &idev->metadata.core.node, "core", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->metadata.node,
+					   &tile_metadata_group, &ndev->metadata.core.node, "core");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate metadata/core directory");
+		goto rm_aie_dir;
+	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->metadata.node, &tile_metadata_group,
-			  &idev->metadata.mem.node, "mem", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->metadata.node,
+					   &tile_metadata_group, &ndev->metadata.mem.node, "mem");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate metadata/mem directory");
+		goto rm_aie_dir;
+	}
 
-	GEN_DIR_AND_ATTRS(idev, &idev->metadata.node, &tile_metadata_group,
-			  &idev->metadata.shim.node, "shim", ret, rm_aie_dir);
+	ret = sysfs_mgr_generate_directory(ndev->xdna->sysfs_mgr, &ndev->metadata.node,
+					   &tile_metadata_group, &ndev->metadata.shim.node, "shim");
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to generate metadata/shim directory");
+		goto rm_aie_dir;
+	}
 
 	return 0;
 
 rm_aie_dir:
-	sysfs_mgr_remove_directory(idev->xdna->sysfs_mgr, &idev->aie_dir);
+	sysfs_mgr_remove_directory(ndev->xdna->sysfs_mgr, &ndev->aie_dir);
 rm_clock_dir:
-	sysfs_mgr_remove_directory(idev->xdna->sysfs_mgr, &idev->clocks_dir);
+	sysfs_mgr_remove_directory(ndev->xdna->sysfs_mgr, &ndev->clocks_dir);
 	return ret;
 }
 
-void ipu_sysfs_fini(struct ipu_device *idev)
+void npu_sysfs_fini(struct npu_device *ndev)
 {
-	sysfs_mgr_remove_directory(idev->xdna->sysfs_mgr, &idev->clocks_dir);
-	sysfs_mgr_remove_directory(idev->xdna->sysfs_mgr, &idev->aie_dir);
+	sysfs_mgr_remove_directory(ndev->xdna->sysfs_mgr, &ndev->clocks_dir);
+	sysfs_mgr_remove_directory(ndev->xdna->sysfs_mgr, &ndev->aie_dir);
 }

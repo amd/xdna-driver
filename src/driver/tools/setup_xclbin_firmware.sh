@@ -7,7 +7,7 @@
 declare -A devices
 
 devices["Phoenix"]="1502"
-devices["IPU2"]="17f0"
+devices["NPU2"]="17f0"
 
 usage()
 {
@@ -15,7 +15,7 @@ usage()
 Usage: sudo setup_xclbin_firmware.sh [options]
 Options:
 	-help				Display this help
-	-dev <device name>	IPU Device VBNV
+	-dev <device name>	NPU Device VBNV
 	-xclbin	<xclbin>	xclbin to install
 	-list				List supported devices
 	-clean				cleanup binary and symbolic link
@@ -92,7 +92,7 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-AMDXDNA_FIRMWARE_DIR=/lib/firmware/amdipu
+AMDXDNA_FIRMWARE_DIR=/lib/firmware/amdnpu
 
 if [ "$verbose" == 1 ]; then
 	echo "===== Debug ====="

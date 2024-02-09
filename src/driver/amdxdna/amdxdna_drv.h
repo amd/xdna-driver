@@ -33,12 +33,12 @@
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 
 #define DECLARE_DEV_INFO(id) \
-	struct amdxdna_dev_info ipu_##id##_info
+	struct amdxdna_dev_info npu_##id##_info
 #define DEV_INFO_TO_DATA(id) \
-	((kernel_ulong_t)&ipu_##id##_info)
+	((kernel_ulong_t)&npu_##id##_info)
 
-struct ipu_device;
-struct ipu_dev_priv;
+struct npu_device;
+struct npu_dev_priv;
 struct mailbox;
 struct mailbox_channel;
 
@@ -67,7 +67,7 @@ struct amdxdna_dev_info {
 	size_t				dev_mem_size;
 	char				*vbnv;
 	int				device_type;
-	const struct ipu_dev_priv	*dev_priv;
+	const struct npu_dev_priv	*dev_priv;
 };
 
 struct amdxdna_dev {
@@ -79,7 +79,7 @@ struct amdxdna_dev {
 	struct list_head	client_list;
 	struct list_head	xclbin_list;
 	struct ida		pdi_ida;
-	struct ipu_device	*dev_handle;
+	struct npu_device	*dev_handle;
 
 	/* Mailbox and the management channel */
 	struct mailbox		*mbox;

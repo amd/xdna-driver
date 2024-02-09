@@ -8,15 +8,15 @@
 
 #include <linux/kthread.h>
 #include "amdxdna_drv.h"
-#include "ipu_common.h"
-#include "ipu_msg_priv.h"
+#include "npu_common.h"
+#include "npu_msg_priv.h"
 #include "amdxdna_util.h"
-#include "ipu_error.h"
-#include "ipu_pci.h"
+#include "npu_error.h"
+#include "npu_pci.h"
 
 #define AIE_ERROR_SIZE 0x3000
 
-static u32 ipu_error_backtrack(struct ipu_device *idev, void *err_info, u32 num_err)
+static u32 npu_error_backtrack(struct npu_device *ndev, void *err_info, u32 num_err)
 {
 	struct aie_error *errs = err_info;
 	u32 err_col = 0; /* assume that AIE has less than 32 columns */
@@ -28,7 +28,7 @@ static u32 ipu_error_backtrack(struct ipu_device *idev, void *err_info, u32 num_
 		enum aie_error_category cat;
 
 		cat = aie_get_error_category(err->row, err->event_id, err->mod_type);
-		XDNA_ERR(idev->xdna, "Row: %d, Col: %d, module %d, event ID %d, category %d",
+		XDNA_ERR(ndev->xdna, "Row: %d, Col: %d, module %d, event ID %d, category %d",
 			 err->row, err->col, err->mod_type,
 			 err->event_id, cat);
 
@@ -40,9 +40,9 @@ static u32 ipu_error_backtrack(struct ipu_device *idev, void *err_info, u32 num_
 	return err_col;
 }
 
-static void ipu_error_process(struct ipu_device *idev)
+static void npu_error_process(struct npu_device *ndev)
 {
-	struct amdxdna_dev *xdna = idev->xdna;
+	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 row = 0, col = 0, mod = 0;
 	dma_addr_t fw_addr;
 	void *async_buf;
@@ -58,7 +58,7 @@ static void ipu_error_process(struct ipu_device *idev)
 	do {
 		struct amdxdna_client *client;
 
-		ret = ipu_query_error(idev, fw_addr, AIE_ERROR_SIZE,
+		ret = npu_query_error(ndev, fw_addr, AIE_ERROR_SIZE,
 				      &row, &col, &mod, &count, &next);
 		if (ret) {
 			XDNA_ERR(xdna, "query AIE error, ret %d", ret);
@@ -74,7 +74,7 @@ static void ipu_error_process(struct ipu_device *idev)
 			continue;
 		}
 
-		err_col = ipu_error_backtrack(idev, async_buf, count);
+		err_col = npu_error_backtrack(ndev, async_buf, count);
 		if (!err_col) {
 			XDNA_WARN(xdna, "Did not get error column");
 			continue;
@@ -99,7 +99,7 @@ static void ipu_error_process(struct ipu_device *idev)
 	dma_free_coherent(&xdna->pdev->dev, AIE_ERROR_SIZE, async_buf, fw_addr);
 }
 
-int ipu_error_async_msg_thread(void *data)
+int npu_error_async_msg_thread(void *data)
 {
 	struct amdxdna_dev *xdna = (struct amdxdna_dev *)data;
 	struct xdna_mailbox_async amsg = { 0 };
@@ -121,7 +121,7 @@ int ipu_error_async_msg_thread(void *data)
 		}
 
 		/* FIXME: if error happen, mark board as bad status */
-		ipu_error_process(xdna->dev_handle);
+		npu_error_process(xdna->dev_handle);
 	}
 	XDNA_DBG(xdna, "stop...");
 

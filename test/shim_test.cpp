@@ -131,7 +131,7 @@ dev_filter_not_xdna(device::id_type id, std::shared_ptr<device> dev)
 }
 
 bool
-dev_filter_is_ipu(device::id_type id, std::shared_ptr<device> dev)
+dev_filter_is_npu(device::id_type id, std::shared_ptr<device> dev)
 {
   if (!is_xdna_dev(dev))
     return false;
@@ -660,7 +660,7 @@ struct submit_wait_config {
 #define NORMAL_RUN 0
 #define BAD_AND_GOOD_RUN 1
 void
-__ipu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type& arg, struct submit_wait_config *config)
+__npu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type& arg, struct submit_wait_config *config)
 {
   hw_ctx hwctx{dev};
   auto hwq = hwctx.get()->get_hw_queue();
@@ -882,7 +882,7 @@ __ipu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type&
 }
 
 void
-TEST_ipu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_npu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
     struct submit_wait_config config = {
         .perf = false,
@@ -890,11 +890,11 @@ TEST_ipu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_ty
         .iters = 1,
     };
 
-    __ipu_submit_wait_cmd(id, dev, arg, &config);
+    __npu_submit_wait_cmd(id, dev, arg, &config);
 }
 
 void
-TEST_ipu_real_kernel_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_npu_real_kernel_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
     struct submit_wait_config config = {
         .perf = true,
@@ -902,11 +902,11 @@ TEST_ipu_real_kernel_latency(device::id_type id, std::shared_ptr<device> dev, ar
         .iters = 1000,
     };
 
-    __ipu_submit_wait_cmd(id, dev, arg, &config);
+    __npu_submit_wait_cmd(id, dev, arg, &config);
 }
 
 void
-TEST_ipu_noop_kernel_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_npu_noop_kernel_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
     struct submit_wait_config config = {
         .perf = true,
@@ -914,7 +914,7 @@ TEST_ipu_noop_kernel_latency(device::id_type id, std::shared_ptr<device> dev, ar
         .iters = 1000,
     };
 
-    __ipu_submit_wait_cmd(id, dev, arg, &config);
+    __npu_submit_wait_cmd(id, dev, arg, &config);
 }
 
 // List of all test cases
@@ -956,7 +956,7 @@ std::vector<test_case> test_list {
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
   //},
   test_case{ "create_destroy_hw_context",
-    TEST_POSITIVE, dev_filter_is_ipu, TEST_create_destroy_hw_context, {}
+    TEST_POSITIVE, dev_filter_is_npu, TEST_create_destroy_hw_context, {}
   },
   test_case{ "create_invalid_bo",
     TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_P2P, 128}
@@ -979,7 +979,7 @@ std::vector<test_case> test_list {
     {XCL_BO_FLAGS_NONE, 0x10000, 0x23000, 0x2000}
   },
   test_case{ "create_and_free_input_output_bo huge pages",
-    TEST_POSITIVE, dev_filter_is_ipu, TEST_create_free_bo,
+    TEST_POSITIVE, dev_filter_is_npu, TEST_create_free_bo,
     {XCL_BO_FLAGS_NONE, 0x20000000}
   },
   //test_case{ "create_and_free_input_output_bo multiple pages from userptr",
@@ -1001,22 +1001,22 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0x1000}
   },
   test_case{ "open_close_cu_context",
-    TEST_POSITIVE, dev_filter_is_ipu, TEST_open_close_cu_context, {}
+    TEST_POSITIVE, dev_filter_is_npu, TEST_open_close_cu_context, {}
   },
   test_case{ "create_destroy_hw_queue",
-    TEST_POSITIVE, dev_filter_is_ipu, TEST_create_destroy_hw_queue, {}
+    TEST_POSITIVE, dev_filter_is_npu, TEST_create_destroy_hw_queue, {}
   },
-  test_case{ "ipu: submit_wait_cmd",
-    TEST_POSITIVE, dev_filter_is_ipu, TEST_ipu_submit_wait_cmd, { NORMAL_RUN }
+  test_case{ "npu: submit_wait_cmd",
+    TEST_POSITIVE, dev_filter_is_npu, TEST_npu_submit_wait_cmd, { NORMAL_RUN }
   },
-  test_case{ "ipu: measure no-op kernel latency",
-    TEST_POSITIVE, dev_filter_is_ipu, TEST_ipu_noop_kernel_latency, { NORMAL_RUN }
+  test_case{ "npu: measure no-op kernel latency",
+    TEST_POSITIVE, dev_filter_is_npu, TEST_npu_noop_kernel_latency, { NORMAL_RUN }
   },
-  test_case{ "ipu: measure real kernel latency",
-    TEST_POSITIVE, dev_filter_is_ipu, TEST_ipu_real_kernel_latency, { NORMAL_RUN }
+  test_case{ "npu: measure real kernel latency",
+    TEST_POSITIVE, dev_filter_is_npu, TEST_npu_real_kernel_latency, { NORMAL_RUN }
   },
-  //test_case{ "ipu: submit bad mc code, after recover, submit good mc code",
-  //  TEST_POSITIVE, dev_filter_is_ipu, TEST_submit_wait_cmd, { BAD_AND_GOOD_RUN }
+  //test_case{ "npu: submit bad mc code, after recover, submit good mc code",
+  //  TEST_POSITIVE, dev_filter_is_npu, TEST_submit_wait_cmd, { BAD_AND_GOOD_RUN }
   //},
 };
 
