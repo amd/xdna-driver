@@ -133,7 +133,8 @@ source /opt/xilinx/xrt/setup.sh
 /opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh -dev Phoenix -xclbin <test>.xclbin
 
 # When xrt_plugin package is removed, it will be automaticlly cleaned up.
-# If setup <test>.xclbin for a device twice, the previous one will be overwritten.
+# User is able to setup multiple xclbins. But if setup two xclbins with the same file name,
+# the previous one will be overwritten.
 ```
 
 ## Contributor Guidelines
