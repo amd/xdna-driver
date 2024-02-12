@@ -129,7 +129,7 @@ amdxdna_pdi_parse(struct amdxdna_dev *xdna, struct amdxdna_pdi *pdis,
 		if (pdis[i].id < 0) {
 			XDNA_ERR(xdna, "Cannot allocate PDI id");
 			ret = pdis[i].id;
-			goto cleanup_pdi_blobs;
+			goto free_image;
 		}
 		XDNA_DBG(xdna, "PDI id %d allocated", pdis[i].id);
 		pdis[i].num_dpu_ids = cdo_array[0].dpu_kernel_ids.size;
@@ -138,7 +138,7 @@ amdxdna_pdi_parse(struct amdxdna_dev *xdna, struct amdxdna_pdi *pdis,
 		dpu_ids = kmalloc(dpu_ids_bytes, GFP_KERNEL);
 		if (!dpu_ids) {
 			ret = -ENOMEM;
-			goto cleanup_pdi_blobs;
+			goto free_id;
 		}
 		memcpy(dpu_ids, get_array(part, &cdo_array[0].dpu_kernel_ids), dpu_ids_bytes);
 		pdis[i].dpu_ids = dpu_ids;
@@ -147,8 +147,13 @@ amdxdna_pdi_parse(struct amdxdna_dev *xdna, struct amdxdna_pdi *pdis,
 
 	return 0;
 
+free_id:
+	ida_free(&xdna->pdi_ida, pdis[i].id);
+free_image:
+	dma_free_noncoherent(&xdna->pdev->dev, pdis[i].size, pdis[i].image,
+			     pdis[i].addr, DMA_TO_DEVICE);
 cleanup_pdi_blobs:
-	amdxdna_pdi_cleanup(xdna, pdis, num_pdis);
+	amdxdna_pdi_cleanup(xdna, pdis, i);
 	return ret;
 }
 
@@ -203,6 +208,10 @@ amdxdna_xclbin_parse_iplayout(struct amdxdna_dev *xdna, const struct axlf *axlf,
 		ip = &ips->ip_data[i];
 		if (ip->type == IP_PS_KERNEL && ip->sub_type == ST_DPU)
 			xclbin->num_cus++;
+	}
+	if (!xclbin->num_cus) {
+		XDNA_ERR(xdna, "does not get cu");
+		return -EINVAL;
 	}
 
 	cu = kcalloc(xclbin->num_cus, sizeof(*cu), GFP_KERNEL);
@@ -259,6 +268,11 @@ amdxdna_xclbin_parse_aie(struct amdxdna_dev *xdna, const struct axlf *axlf,
 	xdna_part = &xclbin->partition;
 
 	part = get_section(axlf, hdr);
+	if (!part->aie_pdis.size || !part->info.start_columns.size) {
+		XDNA_ERR(xdna, "Invalid partition");
+		return -EINVAL;
+	}
+
 	pdis = kcalloc(part->aie_pdis.size, sizeof(*pdis), GFP_KERNEL);
 	if (!pdis) {
 		XDNA_ERR(xdna, "No memory for PDIs");
