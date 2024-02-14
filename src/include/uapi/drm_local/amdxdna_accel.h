@@ -281,6 +281,8 @@ struct amdxdna_drm_sync_bo {
  * @ext_flags: MBZ.
  * @handle: Command BO handle.
  * @hwctx: Hardware context handle.
+ * @arg_bo_handles: Array of BO handles for all BOs referenced by this command
+ * @arg_bo_count: Number of BO handles in the arg_bo_handles array
  * @seq: Returned sequence number for this command.
  */
 struct amdxdna_drm_exec_cmd {
@@ -288,6 +290,8 @@ struct amdxdna_drm_exec_cmd {
 	__u64 ext_flags;
 	__u32 handle;
 	__u32 hwctx;
+	__u64 arg_bo_handles;
+	__u32 arg_bo_count;
 	__u64 seq;
 };
 

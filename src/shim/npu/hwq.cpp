@@ -22,12 +22,15 @@ void
 hw_q_npu::
 submit_command(xrt_core::buffer_handle *cmd_bo)
 {
-  auto boh = static_cast<bo*>(cmd_bo);
+  auto boh = static_cast<bo_npu*>(cmd_bo);
   int ret = EAGAIN;
+  uint32_t arg_bos[20]; // Maximum 20 BO args for now
 
   amdxdna_drm_exec_cmd ecmd = {
     .handle = boh->get_drm_bo_handle(),
     .hwctx = m_hwctx->get_slotidx(),
+    .arg_bo_handles = reinterpret_cast<uintptr_t>(arg_bos),
+    .arg_bo_count = boh->get_arg_bo_handles(arg_bos, sizeof(arg_bos) / sizeof(arg_bos[0])),
   };
 
   while (ret == EAGAIN) {
