@@ -20,7 +20,7 @@ set(XRT_EXCLUDE_INCLUDE_FILE
   src/CMake/nativeTests.cmake
   )
 
-set(XDP_MINIMAL_BUILD "yes")
+set(XDP_CLIENT_BUILD_CMAKE "yes")
 
 set(XDNA_XRT_DIR xrt)
 set(XRT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_XRT_DIR}")
