@@ -56,3 +56,6 @@ install(TARGETS ${XDNA_TARGET} DESTINATION xrt/lib COMPONENT ${XDNA_COMPONENT})
 install(TARGETS xrt_core DESTINATION ${XDNA_BIN_DIR}/lib)
 install(TARGETS xrt_coreutil DESTINATION ${XDNA_BIN_DIR}/lib)
 install(TARGETS xrt_driver_xdna DESTINATION ${XDNA_BIN_DIR}/lib)
+
+# TODO update when dpu sequence location is decided
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/dpu/df_bw.txt DESTINATION xrt/test/DPU_Sequence COMPONENT ${XDNA_COMPONENT})

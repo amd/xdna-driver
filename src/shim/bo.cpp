@@ -89,11 +89,10 @@ amdxdna_bo_type
 bo::
 flag_to_type(uint64_t bo_flags)
 {
-  auto flag = xcl_bo_flags{bo_flags}.flags;
-  // Support 8 flags on the highest byte
-  switch (flag & 0xff000000) {
+  auto flags = xcl_bo_flags{bo_flags};
+  auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
+  switch (boflags) {
   case XCL_BO_FLAGS_NONE:
-  case XCL_BO_FLAGS_HOST_ONLY:
     return AMDXDNA_BO_SHMEM;
   case XCL_BO_FLAGS_CACHEABLE:
     return AMDXDNA_BO_DEV;
@@ -101,6 +100,12 @@ flag_to_type(uint64_t bo_flags)
     return AMDXDNA_BO_CMD;
   default:
     break;
+  }
+
+  if (boflags == XCL_BO_FLAGS_HOST_ONLY) {
+    // Extension flag is valid only when boflags is XCL_BO_FLAGS_HOST_ONLY.
+    // Will need to check extension flag for new BO type in the future.
+    return AMDXDNA_BO_SHMEM;
   }
   return AMDXDNA_BO_INVALID;
 }

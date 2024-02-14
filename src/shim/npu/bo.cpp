@@ -83,4 +83,31 @@ sync(bo_npu::direction dir, size_t size, size_t offset)
   m_pdev.ioctl(DRM_IOCTL_AMDXDNA_SYNC_BO, &sbo);
 }
 
+void
+bo_npu::
+bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
+{
+  std::lock_guard<std::mutex> lg(m_args_map_lock);
+
+  if (m_type != AMDXDNA_BO_CMD)
+    shim_err(EINVAL, "Can't call bind_at() on non-cmd BO");
+  m_args_map[pos] = static_cast<const bo*>(bh)->get_drm_bo_handle();
+}
+
+uint32_t
+bo_npu::
+get_arg_bo_handles(uint32_t *handles, size_t num)
+{
+  std::lock_guard<std::mutex> lg(m_args_map_lock);
+
+  auto sz = m_args_map.size();
+  if (sz > num)
+    shim_err(E2BIG, "There are %ld BO args, provided buffer can hold only %ld", sz, num);
+
+  for (auto const& m : m_args_map)
+    *(handles++) = m.second;
+
+  return sz;
+}
+
 } // namespace shim_xdna

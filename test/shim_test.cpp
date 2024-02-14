@@ -784,28 +784,34 @@ __npu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type&
   prop = bo_ifm.get()->get_properties();
   cmd_packet->data[2] = prop.paddr;
   cmd_packet->data[3] = prop.paddr >> 32;
+  exec_buf.get()->bind_at(1, bo_ifm.get(), 0, bo_ifm.size());
   // 0x10 - param dev addr
   prop = bo_param.get()->get_properties();
   cmd_packet->data[4] = prop.paddr;
   cmd_packet->data[5] = prop.paddr >> 32;
+  exec_buf.get()->bind_at(2, bo_param.get(), 0, bo_param.size());
   // 0x18 - ofm dev addr
   prop = bo_ofm.get()->get_properties();
   cmd_packet->data[6] = prop.paddr;
   cmd_packet->data[7] = prop.paddr >> 32;
+  exec_buf.get()->bind_at(3, bo_ofm.get(), 0, bo_ofm.size());
   // 0x20 - inter dev addr
   prop = bo_inter.get()->get_properties();
   cmd_packet->data[8] = prop.paddr;
   cmd_packet->data[9] = prop.paddr >> 32;
+  exec_buf.get()->bind_at(4, bo_inter.get(), 0, bo_inter.size());
   // 0x28 - instruct dev addr
   prop = bo_instr.get()->get_properties();
   cmd_packet->data[10] = prop.paddr;
   cmd_packet->data[11] = prop.paddr >> 32;
+  exec_buf.get()->bind_at(5, bo_instr.get(), 0, bo_instr.size());
   // 0x30 - ninstruct
   cmd_packet->data[12] = instr_word_size;
   // 0x34 - mc_blob dev addr
   prop = bo_mc.get()->get_properties();
   cmd_packet->data[13] = prop.paddr;
   cmd_packet->data[14] = prop.paddr >> 32;
+  exec_buf.get()->bind_at(7, bo_mc.get(), 0, bo_mc.size());
 
   if (DEBUG_TEST) {
     for (int i = 0; i < 15; i++)
