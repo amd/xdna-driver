@@ -324,12 +324,11 @@ mailbox_get_async_msg(struct mailbox_channel *mb_chann, struct xdna_msg_header *
 static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 {
 	struct xdna_msg_header header;
+	u32 msg_size, rest;
 	u32 ringbuf_size;
 	u32 head, tail;
 	u32 start_addr;
 	u64 read_addr;
-	u32 msg_size;
-	u32 val;
 
 	tail = mailbox_get_tailptr(mb_chann, CHAN_RES_I2X);
 	head = mb_chann->i2x_head;
@@ -345,29 +344,31 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 
 	/* Peek size of the message or TOMBSTONE */
 	read_addr = mb_chann->mb->res.ringbuf_base + start_addr + head;
-	val = ioread32((void *)read_addr);
+	header.total_size = ioread32((void *)read_addr);
+	rest = sizeof(header) - sizeof(u32);
+	read_addr += sizeof(u32);
 
-	/* The first word could be total size or TOMBSTONE */
-	if (val == TOMBSTONE) {
+	/* size is TOMBSTONE, set next read from 0 */
+	if (header.total_size == TOMBSTONE) {
 		mailbox_set_headptr(mb_chann, 0);
 		return 0;
 	}
+	msg_size = sizeof(header) + header.total_size;
 
-	msg_size = val;
-	memcpy_fromio(&header, (void *)read_addr, sizeof(header));
-	if (msg_size + sizeof(header) > tail - head) {
+	if (msg_size > ringbuf_size - head  || msg_size > tail - head) {
 		WARN_ONCE(1, "Invalid message size %d, tail %d, head %d\n",
 			  msg_size, tail, head);
 		return -EINVAL;
 	}
+	memcpy_fromio((u32 *)&header + 1, (void *)read_addr, rest);
+	read_addr += rest;
 
-	read_addr += sizeof(header);
 	if (header.id < ASYNC_MSG_START_ID)
 		mailbox_get_resp(mb_chann, &header, (u32 *)read_addr);
 	else
 		mailbox_get_async_msg(mb_chann, &header, (u32 *)read_addr);
 
-	mailbox_set_headptr(mb_chann, head + sizeof(header) + msg_size);
+	mailbox_set_headptr(mb_chann, head + msg_size);
 	/* After update head, it can equal to ringbuf_size. This is expected. */
 	trace_mbox_set_head(MAILBOX_NAME, mb_chann->msix_irq,
 			    header.opcode, header.id);
