@@ -25,6 +25,12 @@ set(XDNA_DRV_EXCLUDES
   --exclude=tools
   --exclude=doc
   )
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}
+  XDNA_DRV_SRC_MAIN
+  )
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/../include
+  XDNA_DRV_SRC_INCLUDE
+  )
 set(XDNA_DRV_SRC_TGT ${XDNA_DRV}.tar)
 add_custom_command(
   OUTPUT ${XDNA_DRV_SRC_TGT}
@@ -32,6 +38,7 @@ add_custom_command(
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND tar ${XDNA_DRV_EXCLUDES} -cf ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_SRC_TGT} -C .. ${XDNA_DRV_SRC_DIR}
   COMMAND $(CMAKE_COMMAND) -E copy ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_SRC_TGT} ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_SRC_TGT}
+  DEPENDS ${XDNA_DRV_SRC_MAIN} ${XDNA_DRV_SRC_INCLUDE}
   )
 add_custom_target(driver_tarball DEPENDS ${XDNA_DRV_SRC_TGT})
 
