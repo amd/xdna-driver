@@ -95,19 +95,19 @@ struct map_host_buffer_resp {
 
 #define NPU_MAX_PDI_ID	255
 struct pdi_info {
-	u32		pdi_id:8;
-	u32		registered:8;
-	u32		reserved:16;
-	u32		pad[3];
+	u8		pdi_id;
+	u32		registered;
+	u32		pad[2];
 	u64		address;
 	u32		size;
 	int		type;
-};
+} __packed;
 
 struct register_pdi_req {
 	u32			num_infos;
 	struct pdi_info		pdi_info;
-	u32			pad[56];
+	u8			reserved[3];
+	u32			pad[50];
 } __packed;
 
 struct register_pdi_resp {
@@ -118,10 +118,8 @@ struct register_pdi_resp {
 
 struct unregister_pdi_req {
 	u32			num_pdi;
-	u32			pdi_id:8;
-	u32			registered:8;
-	u32			reserved:16;
-	u32			pad[7];
+	u8			pdi_id;
+	u8			pad[7];
 } __packed;
 
 struct unregister_pdi_resp {
@@ -150,8 +148,9 @@ struct create_ctx_req {
 	u32	num_cq_pairs_requested:8;
 	u32	reserved1:8;
 	u32	pasid:16;
-	u32	pad[8];
+	u32	pad[2];
 	u32	sec_comm_target_type;
+	u32     context_priority;
 } __packed;
 
 struct create_ctx_resp {
@@ -236,15 +235,14 @@ struct aie_column_info_resp {
 } __packed;
 
 struct cu_cfg_info {
-	u32 cu_idx : 24;
+	u32 cu_idx : 16;
 	u32 cu_func : 8;
 	u32 cu_pdi_id : 8;
-	u32 reserved : 24;
 };
 
 struct config_cu_req {
 	u32			num_cus;
-#define MAX_CU_NUM 16
+#define MAX_CU_NUM 32
 	struct cu_cfg_info	configs[MAX_CU_NUM];
 } __packed;
 

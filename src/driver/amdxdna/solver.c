@@ -331,7 +331,7 @@ void *xrs_init(struct init_config *cfg)
 	struct solver_rgroup *rgp;
 	struct solver_state *xrs;
 
-	xrs = devm_kzalloc(cfg->dev, sizeof(*xrs), GFP_KERNEL);
+	xrs = kzalloc(sizeof(*xrs), GFP_KERNEL);
 	if (!xrs)
 		return NULL;
 

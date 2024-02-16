@@ -74,8 +74,11 @@ static int npu_setup_pcidev(struct npu_device *ndev)
 static void npu_teardown_pcidev(struct npu_device *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
+	int bar_mask;
 
 	pci_free_irq_vectors(xdna->pdev);
+	bar_mask = pci_select_bars(xdna->pdev, IORESOURCE_MEM);
+	pcim_iounmap_regions(xdna->pdev, bar_mask);
 	pci_clear_master(xdna->pdev);
 }
 
@@ -312,29 +315,26 @@ int npu_release_resource(struct amdxdna_hwctx *hwctx)
 
 int npu_init(struct amdxdna_dev *xdna)
 {
-	struct init_config xrs_cfg = { 0 };
 	struct pci_dev *pdev = xdna->pdev;
-	struct xdna_mailbox_res mbox_res;
-	struct psp_config psp_conf;
-	const struct firmware *fw;
-	void __iomem * const *tbl;
 	struct npu_device *ndev;
-	u32 xdna_mailbox_intr_reg;
-	int mgmt_mb_irq;
-	int i, ret;
+	int ret;
 
-	ret = request_firmware(&fw, xdna->dev_info->dev_priv->fw_path, &pdev->dev);
-	if (ret) {
-		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d",
-			 xdna->dev_info->dev_priv->fw_path, ret);
+	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
+	if (!ndev) {
+		ret = -ENOMEM;
 		return ret;
 	}
+
+	ndev->xdna = xdna;
+	ndev->priv = xdna->dev_info->dev_priv;
+	xdna->dev_handle = ndev;
+
 
 #ifdef AMDXDNA_DEVEL
 	ret = amdxdna_iommu_mode_setup(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
-		goto release_fw;
+		return ret;
 	}
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
@@ -342,21 +342,13 @@ int npu_init(struct amdxdna_dev *xdna)
 	ret = iommu_dev_enable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
 		XDNA_ERR(xdna, "Enable PASID failed, ret %d", ret);
-		goto release_fw;
+		goto disable_pasid;
 	}
 
 #ifdef AMDXDNA_DEVEL
 skip_pasid:
 	XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
 #endif
-	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
-	if (!ndev) {
-		ret = -ENOMEM;
-		goto disable_pasid;
-	}
-
-	ndev->xdna = xdna;
-	ndev->priv = xdna->dev_info->dev_priv;
 
 	ret = npu_setup_pcidev(ndev);
 	if (ret) {
@@ -364,23 +356,74 @@ skip_pasid:
 		goto disable_pasid;
 	}
 
-	tbl = pcim_iomap_table(pdev);
-	if (!tbl) {
+	ndev->tbl = pcim_iomap_table(pdev);
+	if (!ndev->tbl) {
 		XDNA_ERR(xdna, "Cannot get iomap table");
 		ret = -ENOMEM;
 		goto teardown_pci_dev;
 	}
-	ndev->sram_base = tbl[xdna->dev_info->sram_bar];
-	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
+	ndev->sram_base = ndev->tbl[xdna->dev_info->sram_bar];
+	ndev->smu_base = ndev->tbl[xdna->dev_info->smu_bar];
+
+	ret = npu_hw_init(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "XDNA NPU hardware init failed %d", ret);
+		goto teardown_pci_dev;
+	}
+
+	return 0;
+
+teardown_pci_dev:
+	npu_teardown_pcidev(ndev);
+disable_pasid:
+	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
+	return ret;
+}
+
+void npu_fini(struct amdxdna_dev *xdna)
+{
+	struct npu_device *ndev = xdna->dev_handle;
+
+	npu_hw_fini(xdna);
+
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode != AMDXDNA_IOMMU_PASID)
+		goto skip_pasid;
+#endif
+	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
+#ifdef AMDXDNA_DEVEL
+skip_pasid:
+#endif
+	npu_teardown_pcidev(ndev);
+}
+
+int npu_hw_init(struct amdxdna_dev *xdna)
+{
+	struct npu_device *ndev = xdna->dev_handle;
+	void __iomem * const *tbl = ndev->tbl;
+	struct init_config xrs_cfg = { 0 };
+	struct pci_dev *pdev = xdna->pdev;
+	struct xdna_mailbox_res mbox_res;
+	struct psp_config psp_conf;
+	u32 xdna_mailbox_intr_reg;
+	int mgmt_mb_irq;
+	int i, ret;
+
+	ret = request_firmware(&ndev->fw, xdna->dev_info->dev_priv->fw_path, &pdev->dev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d",
+			 xdna->dev_info->dev_priv->fw_path, ret);
+		return ret;
+	}
 
 	ret = npu_smu_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init smu, ret %d", ret);
-		goto teardown_pci_dev;
+		goto release_fw;
 	}
 
-	psp_conf.fw_size = fw->size;
-	psp_conf.fw_buf = fw->data;
+	psp_conf.fw_size = ndev->fw->size;
+	psp_conf.fw_buf = ndev->fw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
 	ndev->psp_hdl = amdxdna_psp_create(&pdev->dev, &psp_conf);
@@ -457,15 +500,15 @@ skip_pasid:
 		goto fw_fini;
 	}
 
-	xdna->dev_handle = ndev;
 
 	XDNA_INFO(xdna, "Mailbox mgmt channel created (irq: %d, msix_id: %d)",
 		  mgmt_mb_irq, ndev->mgmt_chan_idx);
 
-	release_firmware(fw);
+	release_firmware(ndev->fw);
 	return 0;
 
 fw_fini:
+	kfree(ndev->xrs_hdl);
 	npu_mgmt_fw_fini(ndev);
 destroy_mgmt_chann:
 	xdna_mailbox_destroy_channel(xdna->mgmt_chann);
@@ -475,22 +518,19 @@ remove_psp:
 	amdxdna_psp_remove(ndev->psp_hdl);
 fini_smu:
 	npu_smu_fini(ndev);
-teardown_pci_dev:
-	npu_teardown_pcidev(ndev);
-disable_pasid:
-	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
 release_fw:
-	release_firmware(fw);
+	release_firmware(ndev->fw);
 	return ret;
 }
 
-void npu_fini(struct amdxdna_dev *xdna)
+void npu_hw_fini(struct amdxdna_dev *xdna)
 {
 	struct npu_device *ndev = xdna->dev_handle;
 
 	if (xdna->async_msgd)
 		kthread_stop(xdna->async_msgd);
 
+	kfree(ndev->xrs_hdl);
 	npu_mgmt_fw_fini(ndev);
 
 	xdna_mailbox_destroy_channel(xdna->mgmt_chann);
@@ -499,15 +539,6 @@ void npu_fini(struct amdxdna_dev *xdna)
 	amdxdna_psp_remove(ndev->psp_hdl);
 	npu_smu_fini(ndev);
 
-#ifdef AMDXDNA_DEVEL
-	if (iommu_mode != AMDXDNA_IOMMU_PASID)
-		goto skip_pasid;
-#endif
-	iommu_dev_disable_feature(&xdna->pdev->dev, IOMMU_DEV_FEAT_SVA);
-#ifdef AMDXDNA_DEVEL
-skip_pasid:
-#endif
-	npu_teardown_pcidev(ndev);
 }
 
 void npu_get_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_metadata *args)
