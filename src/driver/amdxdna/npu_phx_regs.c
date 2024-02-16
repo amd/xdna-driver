@@ -56,8 +56,8 @@
 #define PHX_SMU_BAR_BASE  MPNPU_APERTURE0_BASE
 #define PHX_SRAM_BAR_BASE MPNPU_APERTURE1_BASE
 
-#define FW_API_HASH_HIGH		0x2a5e67698ea3b245
-#define FW_API_HASH_LOW			0x1a9b7e088bbee092
+#define FW_API_HASH_HIGH                0x025d29e860f79733
+#define FW_API_HASH_LOW                 0xc8882da30379c869
 
 const NPU_DEFINE_DEV_INFO(PHX, "RyzenAI-Phoenix", 1502, "amdnpu/1502/npu.sbin",
 			  FW_API_HASH_HIGH, FW_API_HASH_LOW);

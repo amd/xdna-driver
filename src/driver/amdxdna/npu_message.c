@@ -213,7 +213,6 @@ int npu_unregister_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin)
 			continue;
 
 		req.pdi_id = pdi->id;
-		req.registered = 1;
 		resp.status = NPU_STATUS_MAX_NPU_STATUS_CODE;
 		ret = npu_send_mgmt_msg_wait(xdna, &msg);
 		if (ret) {
@@ -245,6 +244,7 @@ int npu_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	req.num_col = hwctx->num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = hwctx->client->pasid;
+	req.context_priority = 2;
 
 	ret = npu_send_mgmt_msg_wait(xdna, &msg);
 	if (ret)
