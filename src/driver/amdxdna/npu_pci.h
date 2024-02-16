@@ -14,6 +14,8 @@
 struct npu_device;
 int npu_init(struct amdxdna_dev *xdna);
 void npu_fini(struct amdxdna_dev *xdna);
+int npu_hw_init(struct amdxdna_dev *xdna);
+void npu_hw_fini(struct amdxdna_dev *xdna);
 int npu_alloc_resource(struct amdxdna_hwctx *hwctx);
 int npu_release_resource(struct amdxdna_hwctx *hwctx);
 

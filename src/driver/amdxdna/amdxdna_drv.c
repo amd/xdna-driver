@@ -372,18 +372,14 @@ static int amdxdna_do_suspend(struct device *dev)
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
-	int ret;
 
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_suspend(client);
 	mutex_unlock(&xdna->dev_lock);
+	amdxdna_sysfs_fini(xdna);
 
-	ret = npu_suspend_fw(xdna->dev_handle);
-	if (ret) {
-		XDNA_ERR(xdna, "suspend NPU firmware failed");
-		return ret;
-	}
+	npu_hw_fini(xdna);
 
 	return 0;
 }
@@ -396,9 +392,16 @@ static int amdxdna_do_resume(struct device *dev)
 	int ret;
 
 	XDNA_INFO(xdna, "firmware resuming...");
-	ret = npu_resume_fw(xdna->dev_handle);
+
+	ret = npu_hw_init(xdna);
 	if (ret) {
-		XDNA_ERR(xdna, "resume NPU firmware failed");
+		XDNA_ERR(xdna, "hardware init failed, ret %d", ret);
+		return ret;
+	}
+
+	ret = amdxdna_sysfs_init(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "create amdxdna attrs failed: %d", ret);
 		return ret;
 	}
 

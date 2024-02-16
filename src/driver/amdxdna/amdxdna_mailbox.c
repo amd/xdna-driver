@@ -714,7 +714,7 @@ struct mailbox *xdna_mailbox_create(struct device *dev,
 {
 	struct mailbox *mb;
 
-	mb = devm_kzalloc(dev, sizeof(*mb), GFP_KERNEL);
+	mb = kzalloc(sizeof(*mb), GFP_KERNEL);
 	if (!mb)
 		return NULL;
 	mb->dev = dev;
@@ -754,4 +754,5 @@ done_release_record:
 	mutex_unlock(&mb->mbox_lock);
 
 	mutex_destroy(&mb->mbox_lock);
+	kfree(mb);
 }

@@ -216,8 +216,10 @@ struct npu_device {
 	const struct npu_dev_priv	*priv;
 	void			__iomem *sram_base;
 	void			__iomem *smu_base;
+	void			__iomem * const *tbl;
 	struct psp_device		*psp_hdl;
 	void				*xrs_hdl;
+	const struct firmware		*fw;
 
 	struct xdna_mailbox_chann_res	mgmt_x2i;
 	struct xdna_mailbox_chann_res	mgmt_i2x;
