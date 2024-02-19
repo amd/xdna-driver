@@ -10,6 +10,12 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
 
+enum amdxdna_obj_type {
+	AMDXDNA_UNKNOWN_OBJ = 0, /* Keep this as the first one */
+	AMDXDNA_GEM_OBJ,
+	AMDXDNA_SHMEM_OBJ,
+};
+
 struct amdxdna_mem {
 	u64			userptr;
 	void			*kva;
@@ -41,7 +47,6 @@ struct amdxdna_gem_shmem_obj {
 	struct drm_gem_shmem_object	base;
 	struct amdxdna_client		*client;
 	u8				type;
-	struct list_head		entry;
 	u64				mmap_offset;
 	bool				pinned;
 };
@@ -55,6 +60,7 @@ amdxdna_gem_create_object(struct drm_device *dev, size_t size);
 struct amdxdna_gem_obj *amdxdna_get_dev_heap(struct drm_file *filp);
 int amdxdna_pin_pages(struct amdxdna_mem *mem);
 void amdxdna_unpin_pages(struct amdxdna_mem *mem);
+enum amdxdna_obj_type amdxdna_gem_get_obj_type(struct drm_gem_object *gobj);
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

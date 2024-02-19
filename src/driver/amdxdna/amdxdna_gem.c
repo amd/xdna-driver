@@ -120,11 +120,9 @@ static void amdxdna_gem_shmem_free(struct drm_gem_object *gobj)
 	struct amdxdna_gem_shmem_obj *sbo;
 
 	sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
-	mutex_lock(&sbo->client->mm_lock);
+	XDNA_DBG(sbo->client->xdna, "SHMEM bo pinned %d", sbo->pinned);
 	if (sbo->pinned)
 		drm_gem_shmem_unpin(&sbo->base);
-	list_del(&sbo->entry);
-	mutex_unlock(&sbo->client->mm_lock);
 	drm_gem_shmem_object_free(gobj);
 }
 
@@ -172,16 +170,12 @@ static int amdxdna_drm_alloc_shmem(struct drm_device *dev,
 	if (IS_ERR(shmem))
 		return PTR_ERR(shmem);
 
-	shmem->base.resv = &client->resv;
 	shmem->map_wc = false;
 
 	sbo = to_xdna_gem_shmem_obj(shmem);
 	sbo->client = client;
 	sbo->mmap_offset = drm_vma_node_offset_addr(&shmem->base.vma_node);
-	mutex_lock(&client->mm_lock);
 	sbo->pinned = false;
-	list_add_tail(&sbo->entry, &client->shmem_list);
-	mutex_unlock(&client->mm_lock);
 
 	/* ready to publish object to userspace */
 	ret = drm_gem_handle_create(filp, &shmem->base, &args->handle);
@@ -428,6 +422,11 @@ fini_user_map:
 	return ret;
 }
 
+enum amdxdna_obj_type amdxdna_gem_get_obj_type(struct drm_gem_object *gobj)
+{
+	return (gobj->funcs == &amdxdna_gem_obj_funcs) ? AMDXDNA_GEM_OBJ : AMDXDNA_SHMEM_OBJ;
+}
+
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_drm_create_bo *args = data;
@@ -454,6 +453,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	struct amdxdna_drm_get_bo_info *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct drm_gem_object *gobj;
+	enum amdxdna_obj_type type;
 
 	if (args->ext_flags)
 		return -EINVAL;
@@ -464,7 +464,9 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 		return -ENOENT;
 	}
 
-	if (gobj->funcs == &amdxdna_gem_obj_funcs) {
+	type = amdxdna_gem_get_obj_type(gobj);
+	switch (type) {
+	case AMDXDNA_GEM_OBJ:
 		struct amdxdna_gem_obj *abo;
 
 		abo = to_xdna_gem_obj(gobj);
@@ -485,13 +487,17 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 			args->vaddr = AMDXDNA_INVALID_ADDR;
 			args->xdna_addr = AMDXDNA_INVALID_ADDR;
 		}
-	} else {
+		break;
+	case AMDXDNA_SHMEM_OBJ:
 		struct amdxdna_gem_shmem_obj *sbo;
 
 		sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
 		args->map_offset = sbo->mmap_offset;
 		args->vaddr = AMDXDNA_INVALID_ADDR;
 		args->xdna_addr = AMDXDNA_INVALID_ADDR;
+		break;
+	default:
+		drm_WARN_ON(&xdna->ddev, 1);
 	}
 
 	XDNA_DBG(xdna, "map_offset 0x%llx, vaddr 0x%llx, xdna_addr 0x%llx",
@@ -510,6 +516,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_sync_bo *args = data;
 	struct drm_gem_object *gobj;
+	enum amdxdna_obj_type type;
 	int ret = 0;
 
 	gobj = drm_gem_object_lookup(filp, args->handle);
@@ -518,20 +525,26 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		return -ENOENT;
 	}
 
-	if (gobj->funcs == &amdxdna_gem_obj_funcs) {
+	type = amdxdna_gem_get_obj_type(gobj);
+	switch (type) {
+	case AMDXDNA_GEM_OBJ:
 		struct amdxdna_gem_obj *abo;
 
 		abo = to_xdna_gem_obj(gobj);
 		XDNA_DBG(xdna, "type %d", abo->type);
 
 		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
-	} else {
+		break;
+	case AMDXDNA_SHMEM_OBJ:
 		struct amdxdna_gem_shmem_obj *sbo;
 
 		sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
 
 		if (sbo->base.pages)
 			drm_clflush_pages(sbo->base.pages, sbo->base.base.size >> PAGE_SHIFT);
+		break;
+	default:
+		drm_WARN_ON(&xdna->ddev, 1);
 	}
 
 	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx\n",

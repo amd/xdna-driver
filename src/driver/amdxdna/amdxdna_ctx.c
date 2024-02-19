@@ -15,6 +15,7 @@
 #include "npu_pci.h"
 
 #define MAX_HWCTX_ID		255
+#define MAX_ARG_BO_COUNT	4095
 
 enum ert_cmd_state {
 	ERT_CMD_STATE_INVALID,
@@ -62,6 +63,8 @@ struct amdxdna_sched_job {
 	struct amdxdna_cmd	*cmd;
 	struct amdxdna_gem_obj	*cmd_abo;
 	u64			seq;
+	size_t			bo_cnt;
+	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
 struct amdxdna_fence {
@@ -106,9 +109,12 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 static void amdxdna_sched_job_release(struct kref *ref)
 {
 	struct amdxdna_sched_job *job;
+	int i;
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
 
+	for (i = 0; i < job->bo_cnt; i++)
+		drm_gem_object_put(job->bos[i]);
 	drm_gem_object_put(&job->cmd_abo->base);
 	kfree(job);
 }
@@ -853,44 +859,31 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_drm_exec_cmd *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_gem_shmem_obj *sbo;
+	struct ww_acquire_ctx acquire_ctx;
 	struct amdxdna_sched_job *job;
 	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
 	struct amdxdna_hwctx *hwctx;
+	enum amdxdna_obj_type type;
+	u32 *bo_hdls;
 	int ret, idx;
+	int i;
 
 	if (args->ext_flags)
 		return -EINVAL;
 
-	gobj = drm_gem_object_lookup(filp, args->handle);
-	if (!gobj) {
-		XDNA_ERR(xdna, "Lookup GEM object failed");
-		return -ENOENT;
-	}
-	abo = to_xdna_gem_obj(gobj);
+	if (!args->arg_bo_count || args->arg_bo_count > MAX_ARG_BO_COUNT)
+		return -EINVAL;
 
-	/* TODO: Should use DRM gem object internal lock */
-	mutex_lock(&client->mm_lock);
-	list_for_each_entry(sbo, &client->shmem_list, entry) {
-		if (sbo->pinned)
-			continue;
+	bo_hdls = kcalloc(args->arg_bo_count, sizeof(u32), GFP_KERNEL);
+	if (!bo_hdls)
+		return -ENOMEM;
 
-		drm_gem_shmem_pin(&sbo->base);
-		sbo->pinned = true;
-	}
-	mutex_unlock(&client->mm_lock);
-
-	if (abo->base.size < sizeof(struct amdxdna_cmd)) {
-		XDNA_ERR(xdna, "Bad cmd BO size: %ld", abo->base.size);
-		ret = -EINVAL;
-		goto release_bo;
-	}
-
-	job = kzalloc(sizeof(*job), GFP_KERNEL);
-	if (!job) {
-		ret = -ENOMEM;
-		goto release_bo;
+	ret = copy_from_user(bo_hdls, u64_to_user_ptr(args->arg_bo_handles),
+			     args->arg_bo_count * sizeof(u32));
+	if (ret) {
+		ret = -EFAULT;
+		goto free_bo_hdls;
 	}
 
 	/*
@@ -903,32 +896,105 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	 */
 	idx = srcu_read_lock(&client->hwctx_srcu);
 
+	gobj = drm_gem_object_lookup(filp, args->handle);
+	if (!gobj) {
+		XDNA_ERR(xdna, "Lookup GEM object failed");
+		ret = -ENOENT;
+		goto unlock_hwctx_srcu;
+	}
+
+	type = amdxdna_gem_get_obj_type(gobj);
+	if (unlikely(type != AMDXDNA_GEM_OBJ)) {
+		XDNA_ERR(xdna, "Invalid exec cmd BO type %d", type);
+		ret = -EINVAL;
+		goto release_cmd_obj;
+	}
+	abo = to_xdna_gem_obj(gobj);
+
+	if (abo->base.size < sizeof(struct amdxdna_cmd)) {
+		XDNA_ERR(xdna, "Bad cmd BO size: %ld", abo->base.size);
+		ret = -EINVAL;
+		goto release_cmd_obj;
+	}
+
+	job = kzalloc(struct_size(job, bos, args->arg_bo_count), GFP_KERNEL);
+	if (!job) {
+		ret = -ENOMEM;
+		goto release_cmd_obj;
+	}
+
+	job->bo_cnt = args->arg_bo_count;
+	for (i = 0; i < job->bo_cnt; i++) {
+		struct drm_gem_object *gobj = drm_gem_object_lookup(filp, bo_hdls[i]);
+
+		if (!gobj) {
+			ret = -ENOENT;
+			goto free_job;
+		}
+
+		job->bos[i] = gobj;
+
+		type = amdxdna_gem_get_obj_type(gobj);
+		switch (type) {
+		case AMDXDNA_SHMEM_OBJ:
+			struct amdxdna_gem_shmem_obj *sbo;
+
+			sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+			if (sbo->pinned)
+				continue;
+
+			/*
+			 * Pin the backing physical pages.
+			 *
+			 * Note: Unpin the backing physical pages when free object.
+			 * When job is released, only put this object.
+			 * See amdxdna_gem_shmem_free().
+			 */
+			drm_gem_shmem_pin(&sbo->base);
+			sbo->pinned = true;
+			break;
+		default:
+			/*
+			 * For AMDXDNA_GEM_OBJ, don't need to pin.
+			 * If lookup a unknown type object, that should be a bug.
+			 */
+			drm_WARN_ON(&xdna->ddev, type == AMDXDNA_UNKNOWN_OBJ);
+		}
+	}
+
 	hwctx = idr_find(&client->hwctx_idr, args->hwctx);
 	if (!hwctx) {
 		XDNA_DBG(xdna, "PID %d failed to get hwctx %d",
 			 client->pid, args->hwctx);
 		ret = -EINVAL;
-		goto unlock_hwctx_srcu;
+		goto free_job;
 	}
 
 	ret = amdxdna_sched_job_init(job, hwctx, abo);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init DRM sched job. ret %d", ret);
-		goto unlock_hwctx_srcu;
+		goto free_job;
 	}
 
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 
-	/* Lock all of the shmem objects at once */
-	dma_resv_lock(&client->resv, NULL);
-	ret = dma_resv_reserve_fences(&client->resv, 1);
+	ret = drm_gem_lock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to reverve fence, ret %d", ret);
-		goto unlock_resv;
+		goto put_fence;
 	}
 
-	dma_resv_add_fence(&client->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
-	dma_resv_unlock(&client->resv);
+	for (i = 0; i < job->bo_cnt; i++) {
+		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
+		if (ret) {
+			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
+			goto unlock_resv;
+		}
+	}
+
+	for (i = 0; i < job->bo_cnt; i++)
+		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 
 	spin_lock(&hwctx->io_lock);
 	job->seq = amdxdna_hwctx_add_fence(job->hwctx, job->out_fence);
@@ -946,6 +1012,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	 * can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
+	kfree(bo_hdls);
 	XDNA_DBG(xdna, "pushed cmd %lld to scheduler", args->seq);
 
 	return 0;
@@ -953,14 +1020,23 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 unlock_io:
 	spin_unlock(&hwctx->io_lock);
 unlock_resv:
-	dma_resv_unlock(&client->resv);
+	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+put_fence:
 	dma_fence_put(job->out_fence);
 	amdxdna_sched_job_clean(job);
+free_job:
+	for (i = 0; i < job->bo_cnt; i++) {
+		if (!job->bos[i])
+			continue;
+		drm_gem_object_put(job->bos[i]);
+	}
+	kfree(job);
+release_cmd_obj:
+	drm_gem_object_put(gobj);
 unlock_hwctx_srcu:
 	srcu_read_unlock(&client->hwctx_srcu, idx);
-	kfree(job);
-release_bo:
-	drm_gem_object_put(gobj);
+free_bo_hdls:
+	kfree(bo_hdls);
 	return ret;
 }
 

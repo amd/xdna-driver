@@ -71,9 +71,7 @@ skip_sva_bind:
 	init_srcu_struct(&client->hwctx_srcu);
 	idr_init(&client->hwctx_idr);
 	mutex_init(&client->mm_lock);
-	INIT_LIST_HEAD(&client->shmem_list);
 	client->dev_heap = AMDXDNA_INVALID_BO_HANDLE;
-	dma_resv_init(&client->resv);
 
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
@@ -98,8 +96,6 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
 
 	XDNA_DBG(xdna, "closing pid %d", client->pid);
-
-	dma_resv_fini(&client->resv);
 
 	mutex_lock(&xdna->dev_lock);
 	list_del(&client->node);

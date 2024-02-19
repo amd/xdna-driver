@@ -95,8 +95,6 @@ struct amdxdna_dev {
  * @xdna: XDNA device pointer
  * @mm_lock: lock for client wide memory related
  * @dev_heap: Shared device heap memory
- * @shmem_list: SHMEM backed BO list
- * @resv: DMA resv object for SHMEM BOs
  * @client_sva: iommu SVA handle
  * @client_pasid: PASID
  */
@@ -112,12 +110,6 @@ struct amdxdna_client {
 
 	struct mutex			mm_lock; /* protect memory related */
 	int				dev_heap;
-	struct list_head		shmem_list;
-
-	/* A per client resv. The idea is that all the shmem bo obj shared this
-	 * DMA resv. So that all SHMEM objects can be locked at once.
-	 */
-	struct dma_resv			resv;
 
 	struct iommu_sva		*sva;
 	int				pasid;
