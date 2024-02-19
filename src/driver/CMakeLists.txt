@@ -25,22 +25,40 @@ set(XDNA_DRV_EXCLUDES
   --exclude=tools
   --exclude=doc
   )
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}
-  XDNA_DRV_SRC_MAIN
-  )
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/../include
-  XDNA_DRV_SRC_INCLUDE
+file(GLOB_RECURSE ALL_DRV_FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}/Makefile
+  ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}/*.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}/*.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/../include/*.h
   )
 set(XDNA_DRV_SRC_TGT ${XDNA_DRV}.tar)
 add_custom_command(
-  OUTPUT ${XDNA_DRV_SRC_TGT}
+  OUTPUT ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_SRC_TGT}
   COMMENT "Tar ${XDNA_DRV} driver source code"
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   COMMAND tar ${XDNA_DRV_EXCLUDES} -cf ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_SRC_TGT} -C .. ${XDNA_DRV_SRC_DIR}
   COMMAND $(CMAKE_COMMAND) -E copy ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_SRC_TGT} ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_SRC_TGT}
-  DEPENDS ${XDNA_DRV_SRC_MAIN} ${XDNA_DRV_SRC_INCLUDE}
+  DEPENDS ${ALL_DRV_FILES}
   )
-add_custom_target(driver_tarball DEPENDS ${XDNA_DRV_SRC_TGT})
+
+# Substitute driver version in the source code
+set(XDNA_TAR_GZ ${XDNA_DRV}.tar.gz)
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ}
+  COMMENT "Substitute amdxdna module version and re-tar"
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/driver
+  COMMAND $(CMAKE_COMMAND) -E make_directory tmp
+  COMMAND tar xf ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_SRC_TGT} -C tmp
+  COMMAND find tmp -name amdxdna_drv.c -exec sed -i 's/MODULE_VERSION\(\".*\"\)/MODULE_VERSION\(\"${XRT_PLUGIN_VERSION_STRING}_${XDNA_DATE},${XDNA_HASH}\"\)/' {} \\\;
+  COMMAND tar zcf ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ} -C tmp .
+  COMMAND $(CMAKE_COMMAND) -E rm -r tmp
+  DEPENDS ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_SRC_TGT}
+  )
+add_custom_target(driver_ver_tarball ALL DEPENDS ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ})
+install(FILES ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ}
+  DESTINATION xrt/${XDNA_COMPONENT}
+  COMPONENT ${XDNA_COMPONENT}
+  )
 
 # Install config file and driver related scripts for packaging
 set(XDNA_DKMS_PKG_NAME xrt-${XDNA_DRV})

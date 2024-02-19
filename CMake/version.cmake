@@ -71,23 +71,3 @@ execute_process(
   OUTPUT_VARIABLE XRT_PLUGIN_VERSION_STRING
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )
-
-# Substitute driver version in the source code
-set(XDNA_TAR_GZ amdxdna.tar.gz)
-set(AMDXDNA_DRV_FILE driver/amdxdna/amdxdna_drv.c)
-add_custom_command(
-  OUTPUT ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ}
-  COMMENT "Substitute amdxdna module version and re-tar"
-  DEPENDS driver_tarball
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/driver
-  COMMAND $(CMAKE_COMMAND) -E make_directory tmp
-  COMMAND tar xf ${CMAKE_BINARY_DIR}/driver/amdxdna.tar -C tmp
-  COMMAND find tmp -name amdxdna_drv.c -exec sed -i 's/MODULE_VERSION\(\".*\"\)/MODULE_VERSION\(\"${XRT_PLUGIN_VERSION_STRING}_${XDNA_DATE},${XDNA_HASH}\"\)/' {} \\\;
-  COMMAND tar zcf ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ} -C tmp .
-  COMMAND $(CMAKE_COMMAND) -E rm -r tmp
-  )
-add_custom_target(driver_ver_tarball ALL DEPENDS ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ})
-install(FILES ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ}
-  DESTINATION xrt/${XDNA_COMPONENT}
-  COMPONENT ${XDNA_COMPONENT}
-  )
