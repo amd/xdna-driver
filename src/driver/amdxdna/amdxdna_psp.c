@@ -83,7 +83,7 @@ static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 	return 0;
 }
 
-void amdxdna_psp_remove(struct psp_device *psp)
+void amdxdna_psp_stop(struct psp_device *psp)
 {
 	u32 reg_vals[PSP_NUM_IN_REGS] = { PSP_RELEASE_TMR, };
 	int ret;
@@ -91,36 +91,12 @@ void amdxdna_psp_remove(struct psp_device *psp)
 	ret = psp_exec(psp, reg_vals);
 	if (ret)
 		dev_err(psp->dev, "release tmr failed, ret %d", ret);
-
-	kfree(psp->fw_buffer);
-	kfree(psp);
 }
 
-struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *conf)
+int amdxdna_psp_start(struct psp_device *psp)
 {
 	u32 reg_vals[PSP_NUM_IN_REGS];
-	struct psp_device *psp;
-	u64 offset;
 	int ret;
-
-	psp = kzalloc(sizeof(*psp), GFP_KERNEL);
-	if (!psp)
-		return NULL;
-
-	psp->dev = dev;
-	memcpy(psp->psp_regs, conf->psp_regs, sizeof(psp->psp_regs));
-
-	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN) + PSP_FW_ALIGN;
-	psp->fw_buffer = kmalloc(psp->fw_buf_sz, GFP_KERNEL);
-	if (!psp->fw_buffer) {
-		dev_err(psp->dev, "no memory for fw buffer");
-		goto alloc_fail;
-	}
-
-	psp->fw_paddr = virt_to_phys(psp->fw_buffer);
-	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
-	psp->fw_paddr += offset;
-	memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
 
 	reg_vals[0] = PSP_VALIDATE;
 	reg_vals[1] = lower_32_bits(psp->fw_paddr);
@@ -130,7 +106,7 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 	ret = psp_exec(psp, reg_vals);
 	if (ret) {
 		dev_err(psp->dev, "failed to validate fw, ret %d", ret);
-		goto validate_fw_fail;
+		return ret;
 	}
 
 	memset(reg_vals, 0, sizeof(reg_vals));
@@ -139,14 +115,35 @@ struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *con
 	ret = psp_exec(psp, reg_vals);
 	if (ret) {
 		dev_err(psp->dev, "failed to start fw, ret %d", ret);
-		goto validate_fw_fail;
+		return ret;
 	}
 
-	return psp;
+	return 0;
+}
 
-validate_fw_fail:
-	kfree(psp->fw_buffer);
-alloc_fail:
-	kfree(psp);
-	return NULL;
+struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *conf)
+{
+	struct psp_device *psp;
+	u64 offset;
+
+	psp = devm_kzalloc(dev, sizeof(*psp), GFP_KERNEL);
+	if (!psp)
+		return NULL;
+
+	psp->dev = dev;
+	memcpy(psp->psp_regs, conf->psp_regs, sizeof(psp->psp_regs));
+
+	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN) + PSP_FW_ALIGN;
+	psp->fw_buffer = devm_kmalloc(psp->dev, psp->fw_buf_sz, GFP_KERNEL);
+	if (!psp->fw_buffer) {
+		dev_err(psp->dev, "no memory for fw buffer");
+		return NULL;
+	}
+
+	psp->fw_paddr = virt_to_phys(psp->fw_buffer);
+	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
+	psp->fw_paddr += offset;
+	memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
+
+	return psp;
 }

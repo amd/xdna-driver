@@ -16,7 +16,6 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_xclbin.h"
-#include "sysfs_mgr.h"
 #include "xrs.h"
 
 #define AMDXDNA_DRIVER_NAME "amdxdna"
@@ -82,9 +81,6 @@ struct amdxdna_dev {
 	struct mailbox		*mbox;
 	struct mailbox_channel	*mgmt_chann;
 	struct task_struct	*async_msgd;
-
-	struct sysfs_mgr	*sysfs_mgr;
-	struct sysfs_mgr_node	clients_dir;
 };
 
 /*
@@ -99,8 +95,6 @@ struct amdxdna_dev {
  * @xdna: XDNA device pointer
  * @mm_lock: lock for client wide memory related
  * @dev_heap: Shared device heap memory
- * @shmem_list: SHMEM backed BO list
- * @resv: DMA resv object for SHMEM BOs
  * @client_sva: iommu SVA handle
  * @client_pasid: PASID
  */
@@ -113,16 +107,9 @@ struct amdxdna_client {
 	struct srcu_struct		hwctx_srcu;
 	struct idr			hwctx_idr;
 	struct amdxdna_dev		*xdna;
-	struct sysfs_mgr_node		dir;
 
 	struct mutex			mm_lock; /* protect memory related */
 	int				dev_heap;
-	struct list_head		shmem_list;
-
-	/* A per client resv. The idea is that all the shmem bo obj shared this
-	 * DMA resv. So that all SHMEM objects can be locked at once.
-	 */
-	struct dma_resv			resv;
 
 	struct iommu_sva		*sva;
 	int				pasid;

@@ -2,35 +2,35 @@
 	"copyright": "Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.",
 	"firmwares": [
 		{
-			"device": "Phoenix",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/blob/amd-ipu-staging/amdnpu/1502/ipu.sbin.1.2.0.280",
+			"device": "npu1",
+			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502/ipu.sbin.1.2.0.280",
 			"pci_device_id": "1502",
 			"version": "1.2.0.280",
 			"fw_name": "npu.sbin"
 		},
 		{
-			"device": "NPU2",
+			"device": "npu2",
 			"url": "",
 			"pci_device_id": "17f0",
 			"version": "0.7.6.129",
 			"fw_name": "npu.sbin"
 		},
 		{
-			"device": "Phoenix",
+			"device": "npu1",
 			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502/1x4.xclbin.3.5.0.0-949",
 			"pci_device_id": "1502",
 			"version": "3.5.0.0-949",
 			"fw_name": "1x4.xclbin"
 		},
 		{
-			"device": "Phoenix",
+			"device": "npu1",
 			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502/5x4.xclbin.3.5.0.0-950",
 			"pci_device_id": "1502",
 			"version": "3.5.0.0-950",
 			"fw_name": "5x4.xclbin"
 		},
 		{
-			"device": "Phoenix",
+			"device": "npu1",
 			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502/5x4.xclbin.3.5.0.0-950",
 			"pci_device_id": "1502",
 			"version": "3.5.0.0-950",

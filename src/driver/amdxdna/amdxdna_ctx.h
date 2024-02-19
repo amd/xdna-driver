@@ -9,7 +9,6 @@
 #include <linux/kref.h>
 #include <linux/wait.h>
 #include <drm/gpu_scheduler.h>
-#include "sysfs_mgr.h"
 #include "xrs.h"
 
 /*
@@ -23,7 +22,6 @@ extern struct attribute_group hwctx_group;
 
 struct amdxdna_hwctx {
 	struct amdxdna_client		*client;
-	struct sysfs_mgr_node		dir;
 	u32				id;
 	u32				xrs_id;
 	u32				start_col;

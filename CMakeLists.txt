@@ -16,6 +16,8 @@ set(XDNA_COMPONENT "amdxdna" CACHE STRING "XDNA component name")
 
 # Bring in xrt git submodule before include any local directories
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/xrt.cmake)
+# version.cmake create XRT_PLUGIN_VERSION_STRING
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/version.cmake)
 
 # For saving all built artifacts for quick testing purpose
 # Should be redirected/prefixed by DESTDIR in make command line
@@ -30,7 +32,6 @@ set(AMDXDNA_BINS_DIR ${CMAKE_BINARY_DIR}/../amdxdna_bins)
 set(XRT_SUBMOD_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/xrt)
 set(XRT_SUBMOD_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/xrt)
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/version.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/pkg.cmake)
 
 add_subdirectory(test)

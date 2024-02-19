@@ -47,14 +47,14 @@ install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/shim_test DESTINATION ${XDNA_BIN_DI
 
 install(CODE "execute_process( \
   COMMAND ${CMAKE_COMMAND} -E create_symlink \
-  ${AMDXDNA_BINS_DIR}/workspaces/PHX_1x4_TESTCASES \
-  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/phx_workspace \
+  ${AMDXDNA_BINS_DIR}/workspaces/NPU1_1x4_TESTCASES \
+  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu1_workspace \
   )"
   )
 
 install(CODE "execute_process( \
   COMMAND ${CMAKE_COMMAND} -E create_symlink \
-  ${AMDXDNA_BINS_DIR}/workspaces/STX_1x4_TESTCASES \
-  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/stx_workspace \
+  ${AMDXDNA_BINS_DIR}/workspaces/NPU2_1x4_TESTCASES \
+  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu2_workspace \
   )"
   )
