@@ -63,13 +63,13 @@
  *    a. Adding a new device, copy existed macro and update <device name> ;)
  * 3. Name REG/MBOX/PSP/SMU/SRAM BAR macros like "<device name>_<bar>_BAR_*"
  *
- * Examples for Phoenix device (see npu_phx_regs.c):
+ * Examples for npu1 device (see npu1_regs.c):
  * 1. Define REG BAR info:
- * #define PHX_REG_BAR_INDEX <index>
- * #define PHX_REG_BAR_BASE  <address>
+ * #define NPU1_REG_BAR_INDEX <index>
+ * #define NPU1_REG_BAR_BASE  <address>
  *
  * 2. Define PSP_CMD_REG on PSP BAR:
- * #define PHX_REG_PSP_CMD_REG_ADDR <address>
+ * #define NPU1_REG_PSP_CMD_REG_ADDR <address>
  *
  * Please follow above naming rules, then use BAR_OFFSET_PAIR, _BAR_IDX,
  * _BAR_BASE, *_OFFSETS macros to create device info struct.

@@ -32,8 +32,8 @@ using Clock = std::chrono::high_resolution_clock;
 using us_t = std::chrono::microseconds;
 using ns_t = std::chrono::nanoseconds;
 
-const uint16_t phx_device_id = 0x1502;
-const uint16_t stx_device_id = 0x17f0;
+const uint16_t npu1_device_id = 0x1502;
+const uint16_t npu2_device_id = 0x17f0;
 
 std::string program;
 // Test harness setup helpers
@@ -136,7 +136,7 @@ dev_filter_is_npu(device::id_type id, std::shared_ptr<device> dev)
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == phx_device_id || device_id == stx_device_id;
+  return device_id == npu1_device_id || device_id == npu2_device_id;
 }
 
 int
@@ -281,7 +281,7 @@ struct xclbin_info {
 xclbin_info xclbin_infos[] = {
   {
     .name = "1x4.xclbin",
-    .device = phx_device_id,
+    .device = npu1_device_id,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
       { "DPU_PDI_1:IPUV1CNN",         {1} },
@@ -292,11 +292,11 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_6:IPUV1CNN",         {6} },
       { "DPU_PDI_7:IPUV1CNN",         {7} },
     },
-    .workspace = "phx_workspace",
+    .workspace = "npu1_workspace",
   },
   {
     .name = "1x4.xclbin",
-    .device = stx_device_id,
+    .device = npu2_device_id,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
       { "DPU_PDI_1:IPUV1CNN",         {1} },
@@ -307,7 +307,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_6:IPUV1CNN",         {6} },
       { "DPU_PDI_7:IPUV1CNN",         {7} },
     },
-    .workspace = "stx_workspace",
+    .workspace = "npu2_workspace",
   },
 };
 

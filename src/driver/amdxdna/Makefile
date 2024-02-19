@@ -30,8 +30,8 @@ amdxdna-y := \
 	npu_debugfs.o \
 	npu_pci.o \
 	npu_message.o \
-	npu_phx_regs.o \
-	npu_npu2_regs.o \
+	npu1_regs.o \
+	npu2_regs.o \
 	amdxdna_mailbox.o \
 	amdxdna_psp.o \
 	amdxdna_drv.o
