@@ -20,7 +20,6 @@ ccflags-y += -g -Werror
 obj-m	+= amdxdna.o
 amdxdna-y := \
 	solver.o \
-	sysfs_mgr.o \
 	amdxdna_xclbin.o \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
@@ -31,7 +30,6 @@ amdxdna-y := \
 	npu_debugfs.o \
 	npu_pci.o \
 	npu_message.o \
-	npu_sysfs.o \
 	npu_phx_regs.o \
 	npu_npu2_regs.o \
 	amdxdna_mailbox.o \

@@ -16,7 +16,6 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_xclbin.h"
-#include "sysfs_mgr.h"
 #include "xrs.h"
 
 #define AMDXDNA_DRIVER_NAME "amdxdna"
@@ -82,9 +81,6 @@ struct amdxdna_dev {
 	struct mailbox		*mbox;
 	struct mailbox_channel	*mgmt_chann;
 	struct task_struct	*async_msgd;
-
-	struct sysfs_mgr	*sysfs_mgr;
-	struct sysfs_mgr_node	clients_dir;
 };
 
 /*
@@ -113,7 +109,6 @@ struct amdxdna_client {
 	struct srcu_struct		hwctx_srcu;
 	struct idr			hwctx_idr;
 	struct amdxdna_dev		*xdna;
-	struct sysfs_mgr_node		dir;
 
 	struct mutex			mm_lock; /* protect memory related */
 	int				dev_heap;

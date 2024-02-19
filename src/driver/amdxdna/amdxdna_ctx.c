@@ -370,7 +370,6 @@ static void amdxdna_hwctx_release(struct amdxdna_hwctx *hwctx)
 	int idx;
 
 	xdna = hwctx->client->xdna;
-	sysfs_mgr_remove_directory(xdna->sysfs_mgr, &hwctx->dir);
 	mutex_lock(&xdna->dev_lock);
 	amdxdna_hwctx_cleanup(hwctx);
 	amdxdna_xclbin_unload(xdna, hwctx->xclbin);
@@ -507,13 +506,6 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 		goto rm_id;
 	}
 
-	ret = sysfs_mgr_generate_directory(xdna->sysfs_mgr, &client->dir, &hwctx_group,
-					   &hwctx->dir, hwctx->name);
-	if (ret) {
-		XDNA_ERR(xdna, "Create hwctx directory failed, ret %d", ret);
-		goto free_name;
-	}
-
 	sched = &hwctx->sched;
 #if KERNEL_VERSION(6, 7, 0) <= LINUX_VERSION_CODE
 	ret = drm_sched_init(sched, &sched_ops, DRM_SCHED_PRIORITY_COUNT, HWCTX_MAX_CMDS,
@@ -526,7 +518,7 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 #endif
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
-		goto rm_hwctx_dir;
+		goto free_name;
 	}
 
 	ret = drm_sched_entity_init(&hwctx->entity, DRM_SCHED_PRIORITY_NORMAL,
@@ -559,8 +551,6 @@ free_entity:
 	drm_sched_entity_destroy(&hwctx->entity);
 free_sched:
 	drm_sched_fini(&hwctx->sched);
-rm_hwctx_dir:
-	sysfs_mgr_remove_directory(xdna->sysfs_mgr, &hwctx->dir);
 free_name:
 	kfree(hwctx->name);
 rm_id:

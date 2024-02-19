@@ -39,7 +39,6 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
 	struct amdxdna_client *client;
-	char name[11];
 	int ret;
 
 	client = kzalloc(sizeof(*client), GFP_KERNEL);
@@ -49,14 +48,6 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	client->pid = pid_nr(filp->pid);
 	client->xdna = xdna;
 
-	snprintf(name, sizeof(name), "%d", client->pid);
-	ret = sysfs_mgr_generate_directory(xdna->sysfs_mgr, &xdna->clients_dir, NULL,
-					   &client->dir, name);
-	if (ret) {
-		XDNA_DBG(xdna, "Create client directory failed, ret %d", ret);
-		goto failed;
-	}
-
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_sva_bind;
@@ -65,7 +56,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	if (IS_ERR(client->sva)) {
 		ret = PTR_ERR(client->sva);
 		XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
-		goto rm_client_dir;
+		goto failed;
 	}
 	client->pasid = iommu_sva_get_pasid(client->sva);
 	if (client->pasid == IOMMU_PASID_INVALID) {
@@ -95,8 +86,6 @@ skip_sva_bind:
 
 unbind_sva:
 	iommu_sva_unbind_device(client->sva);
-rm_client_dir:
-	sysfs_mgr_remove_directory(xdna->sysfs_mgr, &client->dir);
 failed:
 	kfree(client);
 
@@ -116,7 +105,6 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	list_del(&client->node);
 	mutex_unlock(&xdna->dev_lock);
 
-	sysfs_mgr_remove_directory(xdna->sysfs_mgr, &client->dir);
 	amdxdna_hwctx_remove_all(client);
 	idr_destroy(&client->hwctx_idr);
 	cleanup_srcu_struct(&client->hwctx_srcu);

@@ -180,13 +180,11 @@ struct npu_dev_priv {
 };
 
 struct aie_version {
-	struct sysfs_mgr_node node;
 	u16 major;
 	u16 minor;
 };
 
 struct aie_tile_metadata {
-	struct sysfs_mgr_node node;
 	u16 row_count;
 	u16 row_start;
 	u16 dma_channel_count;
@@ -195,7 +193,6 @@ struct aie_tile_metadata {
 };
 
 struct aie_metadata {
-	struct sysfs_mgr_node node;
 	u32 size;
 	u16 cols;
 	u16 rows;
@@ -206,7 +203,6 @@ struct aie_metadata {
 };
 
 struct clock_entry {
-	struct sysfs_mgr_node node;
 	char name[16];
 	u32 freq_mhz;
 };
@@ -225,11 +221,9 @@ struct npu_device {
 	struct xdna_mailbox_chann_res	mgmt_i2x;
 	u32				mgmt_chan_idx;
 
-	struct sysfs_mgr_node		aie_dir;
 	struct aie_version		version;
 	struct aie_metadata		metadata;
 
-	struct sysfs_mgr_node		clocks_dir;
 	struct clock_entry		mp_npu_clock;
 	struct clock_entry		h_clock;
 };

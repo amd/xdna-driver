@@ -6,28 +6,6 @@ Description:    Shows the type of this device. One of
                 '-1' -> AMDXDNA_DEV_TYPE_UNKNOWN,
                 '0' -> AMDXDNA_DEV_TYPE_NPU,
 
-What:           /sys/bus/pci/devices/<bdf>/clocks/<m>/freq
-Date:           August 22, 2023
-KernelVersion:  6.5.0
-Contact:        lizhi.hou@amd.com
-Description:    Shows the frequency in Megahertz for the mth clock.
-
-What:           /sys/bus/pci/devices/<bdf>/clocks/<m>/type
-Date:           August 22, 2023
-KernelVersion:  6.5.0
-Contact:        lizhi.hou@amd.com
-Description:    Shows the type of the mth clock. One of
-                '0' -> CT_UNUSED,
-                '1' -> CT_DATA,
-                '2' -> CT_KERNEL,
-                '3' -> CT_SYSTEM
-
-What:           /sys/bus/pci/devices/<bdf>/clocks/<m>/name
-Date:           August 22, 2023
-KernelVersion:  6.5.0
-Contact:        lizhi.hou@amd.com
-Description:    Shows the name of the mth clock.
-
 What:           /sys/bus/pci/devices/<bdf>/vbnv
 Date:           July 11, 2023
 KernelVersion:  6.4.0

@@ -19,8 +19,6 @@ void npu_hw_fini(struct amdxdna_dev *xdna);
 int npu_alloc_resource(struct amdxdna_hwctx *hwctx);
 int npu_release_resource(struct amdxdna_hwctx *hwctx);
 
-int npu_sysfs_init(struct npu_device *ndev);
-void npu_sysfs_fini(struct npu_device *ndev);
 void npu_debugfs_add(struct npu_device *ndev);
 
 int npu_suspend_fw(struct npu_device *ndev);
