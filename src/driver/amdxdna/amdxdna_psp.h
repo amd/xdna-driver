@@ -31,5 +31,6 @@ struct psp_config {
 };
 
 struct psp_device *amdxdna_psp_create(struct device *dev, struct psp_config *conf);
-void amdxdna_psp_remove(struct psp_device *psp);
+int amdxdna_psp_start(struct psp_device *psp);
+void amdxdna_psp_stop(struct psp_device *psp);
 #endif /* __AMDXDNA_PSP_H__ */

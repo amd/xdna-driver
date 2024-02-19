@@ -166,7 +166,11 @@ static int amdxdna_sched_job_init(struct amdxdna_sched_job *job,
 		goto fail;
 	}
 
+#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
+	ret = drm_sched_job_init(&job->base, &hwctx->entity, 1, hwctx);
+#else
 	ret = drm_sched_job_init(&job->base, &hwctx->entity, hwctx);
+#endif
 	if (ret)
 		goto fail;
 
@@ -513,7 +517,11 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 	}
 
 	sched = &hwctx->sched;
-#if KERNEL_VERSION(6, 7, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
+	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
+			     HWCTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT, NULL,
+			     NULL, hwctx->name, &client->xdna->pdev->dev);
+#elif KERNEL_VERSION(6, 7, 0) <= LINUX_VERSION_CODE
 	ret = drm_sched_init(sched, &sched_ops, DRM_SCHED_PRIORITY_COUNT, HWCTX_MAX_CMDS,
 			     0, MAX_SCHEDULE_TIMEOUT, NULL, NULL,
 			     hwctx->name, &client->xdna->pdev->dev);
@@ -681,6 +689,7 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 		amdxdna_hwctx_wait_for_idle(hwctx);
 		drm_sched_stop(&hwctx->sched, NULL);
 		npu_destroy_context(xdna->dev_handle, hwctx);
+		npu_unregister_pdis(xdna->dev_handle, hwctx->xclbin);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -698,6 +707,7 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 		 * regenerated. If this happen, when submit message to this
 		 * mailbox channel, error will return.
 		 */
+		npu_register_pdis(xdna->dev_handle, hwctx->xclbin);
 		npu_create_context(xdna->dev_handle, hwctx);
 		npu_config_cu(xdna->dev_handle, hwctx->mbox_chan, hwctx->xclbin);
 		drm_sched_start(&hwctx->sched, true);

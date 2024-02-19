@@ -351,41 +351,31 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	ida_destroy(&xdna->pdi_ida);
 }
 
-static int amdxdna_do_suspend(struct device *dev)
+static int amdxdna_pmops_suspend(struct device *dev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
 	struct amdxdna_client *client;
 
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_suspend(client);
 	mutex_unlock(&xdna->dev_lock);
-	amdxdna_sysfs_fini(xdna);
 
-	npu_hw_fini(xdna);
+	npu_hw_stop(xdna->dev_handle);
 
 	return 0;
 }
 
-static int amdxdna_do_resume(struct device *dev)
+static int amdxdna_pmops_resume(struct device *dev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
 	struct amdxdna_client *client;
 	int ret;
 
 	XDNA_INFO(xdna, "firmware resuming...");
-
-	ret = npu_hw_init(xdna);
+	ret = npu_hw_start(xdna->dev_handle);
 	if (ret) {
-		XDNA_ERR(xdna, "hardware init failed, ret %d", ret);
-		return ret;
-	}
-
-	ret = amdxdna_sysfs_init(xdna);
-	if (ret) {
-		XDNA_ERR(xdna, "create amdxdna attrs failed: %d", ret);
+		XDNA_ERR(xdna, "resume NPU firmware failed");
 		return ret;
 	}
 
@@ -398,70 +388,8 @@ static int amdxdna_do_resume(struct device *dev)
 	return 0;
 }
 
-static int amdxdna_pmops_suspend(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
-	struct drm_device *drm_dev = &xdna->ddev;
-	int ret;
-
-	if (drm_dev->switch_power_state == DRM_SWITCH_POWER_OFF ||
-	    drm_dev->switch_power_state == DRM_SWITCH_POWER_DYNAMIC_OFF)
-		return 0;
-
-	ret = amdxdna_do_suspend(dev);
-	if (ret)
-		return ret;
-
-	pci_save_state(pdev);
-	pci_disable_device(pdev);
-	pci_set_power_state(pdev, PCI_D3hot);
-
-	return 0;
-}
-
-static int amdxdna_pmops_resume(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
-	struct drm_device *drm_dev = &xdna->ddev;
-	int ret;
-
-	if (drm_dev->switch_power_state == DRM_SWITCH_POWER_OFF ||
-	    drm_dev->switch_power_state == DRM_SWITCH_POWER_DYNAMIC_OFF)
-		return 0;
-
-	pci_set_power_state(pdev, PCI_D0);
-	pci_restore_state(pdev);
-	ret = pci_enable_device(pdev);
-	if (ret) {
-		XDNA_ERR(xdna, "pci_enable_device failed");
-		return ret;
-	}
-
-	pci_set_master(pdev);
-	ret = amdxdna_do_resume(dev);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
-static int amdxdna_pmops_freeze(struct device *dev)
-{
-	return amdxdna_do_suspend(dev);
-}
-
-static int amdxdna_pmops_thaw(struct device *dev)
-{
-	return amdxdna_do_resume(dev);
-}
-
 static const struct dev_pm_ops amdxdna_pm_ops = {
-	.suspend = amdxdna_pmops_suspend,
-	.resume = amdxdna_pmops_resume,
-	.freeze = amdxdna_pmops_freeze,
-	.thaw = amdxdna_pmops_thaw,
+	SET_SYSTEM_SLEEP_PM_OPS(amdxdna_pmops_suspend, amdxdna_pmops_resume)
 };
 
 static struct pci_driver amdxdna_pci_driver = {

@@ -212,7 +212,7 @@ struct npu_device {
 	const struct npu_dev_priv	*priv;
 	void			__iomem *sram_base;
 	void			__iomem *smu_base;
-	void			__iomem * const *tbl;
+	void			__iomem *mbox_base;
 	struct psp_device		*psp_hdl;
 	void				*xrs_hdl;
 	const struct firmware		*fw;
