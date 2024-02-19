@@ -3,7 +3,7 @@
 	"firmwares": [
 		{
 			"device": "npu1",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/blob/amd-ipu-staging/amdnpu/1502/ipu.sbin.1.2.0.280",
+			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502/ipu.sbin.1.2.0.280",
 			"pci_device_id": "1502",
 			"version": "1.2.0.280",
 			"fw_name": "npu.sbin"
