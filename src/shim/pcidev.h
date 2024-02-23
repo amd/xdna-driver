@@ -61,13 +61,11 @@ public:
   void
   munmap(void* addr, size_t len) const;
 
-protected:
-  mutable int m_dev_fd = -1;
-
-  virtual void
-  open() const = 0;
-
 private:
+  virtual void
+  open() const;
+
+  mutable int m_dev_fd = -1;
   mutable std::mutex m_lock;
 
   int

@@ -557,3 +557,25 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	drm_gem_object_put(gobj);
 	return ret;
 }
+
+int amdxdna_drm_attach_bo_ioctl(struct drm_device *dev,
+				void *data, struct drm_file *filp)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_drm_attach_detach_bo *args = data;
+
+	XDNA_DBG(xdna, "Attach bo %d to ctx %d\n", args->bo, args->hwctx);
+	// TODO: check BO type and send firmware command to assign to ctx
+	return 0;
+}
+
+int amdxdna_drm_detach_bo_ioctl(struct drm_device *dev,
+				void *data, struct drm_file *filp)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_drm_attach_detach_bo *args = data;
+
+	XDNA_DBG(xdna, "Detach bo %d from ctx %d\n", args->bo, args->hwctx);
+	// TODO: check BO type and send firmware command to remove from ctx
+	return 0;
+}

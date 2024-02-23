@@ -11,10 +11,8 @@ namespace shim_xdna {
 
 class bo_npu : public bo {
 public:
-  // Support BO creation from coreutil
-  bo_npu(const device& device, size_t size, uint64_t flags);
-  // Support BO creation from internal
-  bo_npu(const device& device, size_t size, amdxdna_bo_type type);
+  bo_npu(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+    size_t size, uint64_t flags);
 
   ~bo_npu();
 
@@ -24,13 +22,17 @@ public:
   void
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
 
+public:
+  // Support BO creation from internal
+  bo_npu(const device& device, size_t size, amdxdna_bo_type type);
+
   // Obtain array of arg BO handles, returns real number of handles
   uint32_t
   get_arg_bo_handles(uint32_t *handles, size_t num);
 
 private:
-  bo_npu(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type);
-  const device& m_device;
+  bo_npu(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+    size_t size, uint64_t flags, amdxdna_bo_type type);
 
   // Only for AMDXDNA_BO_CMD type
   std::map<size_t, uint32_t> m_args_map;

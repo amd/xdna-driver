@@ -467,4 +467,11 @@ alloc_bo(size_t size, uint64_t flags)
   return alloc_bo(nullptr, size, flags);
 }
 
+std::unique_ptr<xrt_core::buffer_handle>
+device::
+alloc_bo(void* userptr, size_t size, uint64_t flags)
+{
+  return alloc_bo(userptr, INVALID_CTX_HANDLE, size, flags);
+}
+
 } // namespace shim_xdna

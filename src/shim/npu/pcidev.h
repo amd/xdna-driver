@@ -17,9 +17,6 @@ public:
  
   std::shared_ptr<xrt_core::device>
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
-
-  void
-  open() const override;
 };
 
 } // namespace shim_xdna

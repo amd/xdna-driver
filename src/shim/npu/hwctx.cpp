@@ -96,4 +96,18 @@ init_cu_info(const void *cu_idx_buf)
   }
 }
 
+std::unique_ptr<xrt_core::buffer_handle>
+hw_ctx_npu::
+alloc_bo(void* userptr, size_t size, uint64_t flags)
+{
+  // const_cast: alloc_bo() is not const yet in device class
+  auto& dev = const_cast<device&>(m_device);
+
+  // Debug buffer is specific to one context.
+  if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG)
+    return dev.alloc_bo(userptr, get_slotidx(), size, flags);
+  // Other BOs are shared across all contexts.
+  return dev.alloc_bo(userptr, INVALID_CTX_HANDLE, size, flags);
+}
+
 } // shim_xdna

@@ -26,14 +26,5 @@ create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id
   return std::make_shared<device_npu>(*this, handle, id);
 }
 
-void
-pdev_npu::
-open() const
-{
-  m_dev_fd = xrt_core::pci::dev::open("", O_RDWR);
-  if (m_dev_fd < 0)
-      shim_err(EINVAL, "Failed to open NPU device fd");
-}
-
 } // namespace shim_xdna
 

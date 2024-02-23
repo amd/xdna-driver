@@ -44,6 +44,8 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_WAIT_CMD,
 	DRM_AMDXDNA_GET_INFO,
 	DRM_AMDXDNA_CREATE_HWCTX_UNSECURE,
+	DRM_AMDXDNA_ATTACH_BO,
+	DRM_AMDXDNA_DETACH_BO,
 	DRM_AMDXDNA_NUM_IOCTLS
 };
 
@@ -312,6 +314,19 @@ struct amdxdna_drm_wait_cmd {
 	__u64 seq;
 };
 
+/**
+ * struct amdxdna_drm_attach_detach_bo - Attach/detach a BO to/from a context.
+ *
+ * @hwctx: hardware context handle.
+ * @bo: BO handle.
+ *
+ * Assign/unassign a BO to a hardware context for its exclusive use.
+ */
+struct amdxdna_drm_attach_detach_bo {
+	__u32 bo;
+	__u32 hwctx;
+};
+
 #define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
 		 struct amdxdna_drm_create_hwctx)
@@ -347,6 +362,14 @@ struct amdxdna_drm_wait_cmd {
 #define DRM_IOCTL_AMDXDNA_GET_INFO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO, \
 		 struct amdxdna_drm_get_info)
+
+#define DRM_IOCTL_AMDXDNA_ATTACH_BO \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_ATTACH_BO, \
+		 struct amdxdna_drm_attach_detach_bo)
+
+#define DRM_IOCTL_AMDXDNA_DETACH_BO \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DETACH_BO, \
+		 struct amdxdna_drm_attach_detach_bo)
 
 #if defined(__cplusplus)
 } /* extern c end */

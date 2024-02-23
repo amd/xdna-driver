@@ -14,6 +14,9 @@ public:
 
   ~hw_ctx_npu();
 
+  std::unique_ptr<xrt_core::buffer_handle>
+  alloc_bo(void* userptr, size_t size, uint64_t flags) override;
+
 private:
   void
   init_cu_info(const void *cu_idx_buf);

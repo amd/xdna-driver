@@ -65,5 +65,7 @@ enum amdxdna_obj_type amdxdna_gem_get_obj_type(struct drm_gem_object *gobj);
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_attach_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_detach_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 
 #endif /* _AMDXDNA_GEM_H_ */

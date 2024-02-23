@@ -422,34 +422,32 @@ private:
 };
 
 uint64_t
-get_bo_flags(uint32_t flags)
+get_bo_flags(uint32_t flags, uint32_t ext_flags)
 {
   xcl_bo_flags f = {};
 
-  f.bank = 0;
-  f.slot = 0;
-  f.flags |= flags;
+  f.flags = flags;
+  f.extension = ext_flags;
   return f.all;
 }
 
 class bo {
 public:
-  bo(std::shared_ptr<device> dev, void *buf, size_t size, uint32_t xcl_boflags) : m_dev(dev)
+  bo(std::shared_ptr<device> dev, size_t size, uint32_t boflags, uint32_t ext_boflags)
+    : m_dev(dev)
   {
-    m_handle = m_dev->alloc_bo(buf, size, get_bo_flags(xcl_boflags));
+    m_handle = m_dev->alloc_bo(nullptr, size, get_bo_flags(boflags, ext_boflags));
     map_and_chk();
   }
 
-  bo(std::shared_ptr<device> dev, size_t size, uint32_t xcl_boflags) : m_dev(dev)
+  bo(std::shared_ptr<device> dev, size_t size, uint32_t xcl_boflags)
+    : bo(dev, size, xcl_boflags, 0)
   {
-    m_handle = m_dev->alloc_bo(size, get_bo_flags(xcl_boflags));
-    map_and_chk();
   }
 
-  bo(std::shared_ptr<device> dev, size_t size) : m_dev(dev)
+  bo(std::shared_ptr<device> dev, size_t size)
+    : bo(dev, size, XCL_BO_FLAGS_HOST_ONLY, 0)
   {
-    m_handle = m_dev->alloc_bo(nullptr, size, XCL_BO_FLAGS_HOST_ONLY);
-    map_and_chk();
   }
 
   ~bo()
@@ -538,19 +536,32 @@ get_and_show_bo_properties(std::shared_ptr<device> dev, buffer_handle *boh)
 }
 
 void
+TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+{
+  auto boflags = XRT_BO_FLAGS_CACHEABLE;
+  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
+  auto size = static_cast<size_t>(arg[0]);
+  hw_ctx hwctx{dev};
+
+  auto bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+}
+
+void
 TEST_create_free_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
-  auto boflags = static_cast<unsigned int>(arg[0]);
-  arg_type bos_size(arg.begin() + 1, arg.end());
+  uint32_t boflags = static_cast<unsigned int>(arg[0]);
+  uint32_t ext_boflags = static_cast<unsigned int>(arg[1]);
+  arg_type bos_size(arg.begin() + 2, arg.end());
   std::vector<std::unique_ptr<bo>> bos;
 
   for (auto& size : bos_size)
-    bos.push_back(std::make_unique<bo>(dev, static_cast<size_t>(size), boflags));
+    bos.push_back(std::make_unique<bo>(dev, static_cast<size_t>(size), boflags, ext_boflags));
 
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
 }
 
+#if 0
 void
 TEST_create_free_userptr_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
@@ -568,13 +579,15 @@ TEST_create_free_userptr_bo(device::id_type id, std::shared_ptr<device> dev, arg
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
 }
+#endif
 
 void
 TEST_sync_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
-  auto size = static_cast<size_t>(arg[1]);
-  bo bo{dev, size, boflags};
+  auto ext_boflags = static_cast<unsigned int>(arg[1]);
+  auto size = static_cast<size_t>(arg[2]);
+  bo bo{dev, size, boflags, ext_boflags};
 
   auto start = Clock::now();
   bo.get()->sync(buffer_handle::direction::host2device, size / 2, 0);
@@ -588,8 +601,9 @@ void
 TEST_map_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
-  auto size = static_cast<size_t>(arg[1]);
-  bo bo{dev, size, boflags};
+  auto ext_boflags = static_cast<unsigned int>(arg[1]);
+  auto size = static_cast<size_t>(arg[2]);
+  bo bo{dev, size, boflags, ext_boflags};
 
   // Intentionally not unmap to test error handling in driver
   bo.set_no_unmap();
@@ -965,28 +979,28 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu, TEST_create_destroy_hw_context, {}
   },
   test_case{ "create_invalid_bo",
-    TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_P2P, 128}
+    TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_P2P, 0, 128}
   },
   test_case{ "create_and_free_exec_buf_bo",
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 128}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 128}
   },
   test_case{ "create_and_free_dpu_sequence_bo 1 bo",
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_CACHEABLE, 128}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
   },
   test_case{ "create_and_free_dpu_sequence_bo multiple bos",
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo,
-    {XCL_BO_FLAGS_CACHEABLE, 0x2000, 0x400, 0x3000, 0x100}
+    {XCL_BO_FLAGS_CACHEABLE, 0, 0x2000, 0x400, 0x3000, 0x100}
   },
   test_case{ "create_and_free_input_output_bo 1 pages",
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_NONE, 128}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_NONE, 0, 128}
   },
   test_case{ "create_and_free_input_output_bo multiple pages",
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo,
-    {XCL_BO_FLAGS_NONE, 0x10000, 0x23000, 0x2000}
+    {XCL_BO_FLAGS_NONE, 0, 0x10000, 0x23000, 0x2000}
   },
   test_case{ "create_and_free_input_output_bo huge pages",
     TEST_POSITIVE, dev_filter_is_npu, TEST_create_free_bo,
-    {XCL_BO_FLAGS_NONE, 0x20000000}
+    {XCL_BO_FLAGS_NONE, 0, 0x20000000}
   },
   //test_case{ "create_and_free_input_output_bo multiple pages from userptr",
   //  TEST_POSITIVE, dev_filter_xdna, TEST_create_free_userptr_bo, {XCL_BO_FLAGS_NONE, 0x14, 0x10000, 0x23000, 0x2000, 0x20000000}
@@ -995,16 +1009,16 @@ std::vector<test_case> test_list {
   //  TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 128}
   //},
   test_case{ "sync_bo for input_output",
-    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_NONE, 128}
+    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_NONE, 0, 128}
   },
   test_case{ "map dpu sequence bo and test perf",
-    TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_CACHEABLE, 361264 /*0x10000*/}
+    TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 361264 /*0x10000*/}
   },
   test_case{ "map input_output bo and test perf",
-    TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_NONE, 361264}
+    TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_NONE, 0, 361264}
   },
   test_case{ "map exec_buf_bo and test perf",
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0x1000}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 0x1000}
   },
   test_case{ "open_close_cu_context",
     TEST_POSITIVE, dev_filter_is_npu, TEST_open_close_cu_context, {}
@@ -1024,6 +1038,9 @@ std::vector<test_case> test_list {
   //test_case{ "npu: submit bad mc code, after recover, submit good mc code",
   //  TEST_POSITIVE, dev_filter_is_npu, TEST_submit_wait_cmd, { BAD_AND_GOOD_RUN }
   //},
+  test_case{ "create and free debug bo",
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x4000 }
+  },
 };
 
 }
