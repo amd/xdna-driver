@@ -45,6 +45,8 @@ int npu_execbuf(struct npu_device *ndev, struct mailbox_channel *chann,
 void npu_get_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_metadata *args);
 int npu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_status *args);
 void npu_get_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_version *args);
+void npu_get_clock_metadata(struct amdxdna_dev *xdna,
+			    struct amdxdna_drm_query_clock_metadata *args);
 
 #if defined(CONFIG_DEBUG_FS)
 int npu_self_test(struct npu_device *ndev);

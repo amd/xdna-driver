@@ -224,23 +224,29 @@ struct clock_topology
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    auto pci_dev = get_pcidev(device);
-    auto dev_path = pci_dev->get_sysfs_path("", "clocks");
+    amdxdna_drm_query_clock_metadata clock_metadata;
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+      .buffer_size = sizeof(clock_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
     std::vector<clock_freq> clocks;
+    clock_freq mp_npu_clock;
+    strcpy(mp_npu_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name));
+    mp_npu_clock.m_type = CT_SYSTEM;
+    mp_npu_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
+    clocks.push_back(mp_npu_clock);
 
-    for (const auto& entry : std::filesystem::directory_iterator(dev_path)) {
-      auto clock_path = "clocks/" + entry.path().filename().string();
-      clock_freq dev_clock;
-
-      std::string name = sysfs_fcn<std::string>::get(pci_dev, clock_path + "/name");
-      strcpy(dev_clock.m_name, name.c_str());
-
-      dev_clock.m_type = sysfs_fcn<uint8_t>::get(pci_dev, clock_path + "/type");
-
-      dev_clock.m_freq_Mhz = sysfs_fcn<uint16_t>::get(pci_dev, clock_path + "/freq");
-
-      clocks.push_back(dev_clock);
-    }
+    clock_freq h_clock;
+    strcpy(h_clock.m_name, reinterpret_cast<const char*>(clock_metadata.h_clock.name));
+    h_clock.m_type = CT_SYSTEM;
+    h_clock.m_freq_Mhz = clock_metadata.h_clock.freq_mhz;
+    clocks.push_back(h_clock);
 
     std::vector<char> payload(sizeof(int16_t) + (clocks.size() * sizeof(struct clock_freq)));
     auto data = reinterpret_cast<struct clock_freq_topology*>(payload.data());

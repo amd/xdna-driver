@@ -225,6 +225,46 @@ fail:
 	return ret;
 }
 
+static int get_info_clock_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_clock_metadata *clock_struct;
+	u32 input_buf_size;
+	int ret = 0;
+	int idx;
+
+	input_buf_size = args->buffer_size;
+	args->buffer_size = sizeof(*clock_struct);
+	if (input_buf_size != sizeof(*clock_struct)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 input_buf_size, sizeof(*clock_struct));
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	clock_struct = kzalloc(sizeof(*clock_struct), GFP_KERNEL);
+	if (!clock_struct) {
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	npu_get_clock_metadata(xdna, clock_struct);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), clock_struct, sizeof(*clock_struct))) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to copy clock request into user space");
+		goto release;
+	}
+
+release:
+	kfree(clock_struct);
+exit:
+	drm_dev_exit(idx);
+	return ret;
+}
+
 static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_drm_get_info *args = data;
@@ -241,6 +281,9 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
 		ret = get_info_aie_version(xdna, args);
+		break;
+	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
+		ret = get_info_clock_metadata(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Bad request parameter %u", args->param);
