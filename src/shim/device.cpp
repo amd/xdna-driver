@@ -174,13 +174,13 @@ struct aie_info
     {
       query::aie_tiles_status_info::parameters query_param = std::any_cast<query::aie_tiles_status_info::parameters>(param);
 
-      const uint32_t output_size = query_param.col_size * query_param.num_cols;
+      const uint32_t output_size = query_param.col_size * query_param.max_num_cols;
 
       std::vector<char> payload(output_size);
 
       amdxdna_drm_query_aie_status aie_status = {
-        .start_col = query_param.start_col,
-        .num_cols = query_param.num_cols,
+        .start_col = 0,
+        .num_cols = query_param.max_num_cols,
         .buffer_size = output_size,
         .buffer = reinterpret_cast<uintptr_t>(payload.data())
       };
