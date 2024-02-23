@@ -36,6 +36,7 @@ int npu_query_version(struct npu_device *ndev, struct aie_version *version);
 int npu_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
 int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col,
 		     char *buf, u32 size, u32 *cols_filled);
+int npu_query_power_sensor(struct npu_device *ndev, struct amdxdna_drm_query_sensor *args);
 
 int npu_config_cu(struct npu_device *ndev, struct mailbox_channel *chann,
 		  struct amdxdna_xclbin *xclbin);

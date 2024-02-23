@@ -142,8 +142,7 @@ struct amdxdna_drm_query_aie_version {
  * @dma_channel_count: The number of dma channels.
  * @lock_count: The number of locks.
  * @event_reg_count: The number of events.
- * @pad_one: MBZ.
- * @pad_two: MBZ.
+ * @pad: MBZ.
  */
 struct amdxdna_drm_query_aie_tile_metadata {
 	__u16 row_count;
@@ -151,8 +150,7 @@ struct amdxdna_drm_query_aie_tile_metadata {
 	__u16 dma_channel_count;
 	__u16 lock_count;
 	__u16 event_reg_count;
-	__u16 pad_one;
-	__u32 pad_two;
+	__u8  pad[6];
 };
 
 /**
@@ -197,11 +195,42 @@ struct amdxdna_drm_query_clock_metadata {
 	struct amdxdna_drm_query_clock h_clock;
 };
 
+enum amdxdna_sensor_type {
+	AMDXDNA_SENSOR_TYPE_POWER
+};
+
+/**
+ * struct amdxdna_drm_query_sensor - The data for single sensor.
+ * @label: The name for a sensor.
+ * @input: The current value of the sensor.
+ * @max: The maximum value possible for the sensor.
+ * @average: The average value of the sensor.
+ * @highest: The highest recorded sensor value for this driver load for the sensor.
+ * @status: The sensor status.
+ * @units: The sensor units.
+ * @unitm: Translates value member variables into the correct unit via (pow(10, unitm) * value)
+ * @type: The sensor type from enum amdxdna_sensor_type
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_query_sensor {
+	__u8  label[64];
+	__u32 input;
+	__u32 max;
+	__u32 average;
+	__u32 highest;
+	__u8  status[64];
+	__u8  units[16];
+	__s8  unitm;
+	__u8  type;
+	__u8  pad[6];
+};
+
 enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_AIE_STATUS,
 	DRM_AMDXDNA_QUERY_AIE_METADATA,
 	DRM_AMDXDNA_QUERY_AIE_VERSION,
 	DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+	DRM_AMDXDNA_QUERY_SENSORS,
 	DRM_AMDXDNA_NUM_GET_PARAM,
 };
 

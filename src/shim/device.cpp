@@ -166,6 +166,7 @@ struct aie_info
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
   }
+
   static result_type
   get(const xrt_core::device* device, key_type key, const std::any& param)
   {
@@ -296,6 +297,101 @@ struct instance
 
 };
 
+struct sensor_info
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static bool
+  validate_sensor_type(const std::any& param, const amdxdna_drm_query_sensor& sensor)
+  {
+    switch (std::any_cast<xrt_core::query::sdm_sensor_info::sdr_req_type>(param)) {
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::power:
+      return sensor.type == AMDXDNA_SENSOR_TYPE_POWER;
+    // At the moment no sensors are expected for IPU other than power
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::current:
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::mechanical:
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::thermal:
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::voltage:
+      return false;
+    }
+    return false;
+  }
+
+  static amdxdna_drm_get_info
+  get_sensor_data(const xrt_core::device* device)
+  {
+    static std::map<const xrt_core::device*, std::vector<char>> data_map;
+
+    // If an entry does not exist for the current device, query the driver for sensor data
+    if (data_map.find(device) == data_map.end()) {
+      const uint32_t output_size = sizeof(amdxdna_drm_query_sensor);
+
+      std::vector<char> payload(output_size);
+      amdxdna_drm_get_info arg = {
+        .param = DRM_AMDXDNA_QUERY_SENSORS,
+        .buffer_size = output_size,
+        .buffer = reinterpret_cast<uintptr_t>(payload.data())
+      };
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+      if (output_size < arg.buffer_size) {
+        throw xrt_core::query::exception(
+          boost::str(boost::format("DRM_AMDXDNA_QUERY_SENSORS - Insufficient buffer size. Need: %u") % arg.buffer_size));
+      }
+
+      payload.resize(arg.buffer_size);
+      data_map.emplace(device, payload);
+    }
+
+    auto& payload = data_map.at(device);
+    amdxdna_drm_get_info output = {
+      .param = DRM_AMDXDNA_QUERY_SENSORS,
+      .buffer_size = static_cast<uint32_t>(payload.size()),
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+    return output;
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::sdm_sensor_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    amdxdna_drm_get_info arg = get_sensor_data(device);
+
+    amdxdna_drm_query_sensor* drv_sensors;
+    const uint32_t drv_sensor_count = arg.buffer_size / sizeof(*drv_sensors);
+    drv_sensors = reinterpret_cast<decltype(drv_sensors)>(arg.buffer);
+
+    // Parse the received sensor info into the user facing struct
+    xrt_core::query::sdm_sensor_info::result_type sensors;
+    for (uint32_t i = 0; i < drv_sensor_count; i++) {
+      const auto& drv_sensor = drv_sensors[i];
+      if (!validate_sensor_type(param, drv_sensor))
+        continue;
+
+      xrt_core::query::sdm_sensor_info::data_type sensor;
+      sensor.label = std::string(reinterpret_cast<const char*>(drv_sensor.label));
+      sensor.input = drv_sensor.input;
+      sensor.max = drv_sensor.max;
+      sensor.average = drv_sensor.average;
+      sensor.highest = drv_sensor.highest;
+      sensor.status = std::string(reinterpret_cast<const char*>(drv_sensor.status));
+      sensor.units = std::string(reinterpret_cast<const char*>(drv_sensor.units));
+      sensor.unitm = drv_sensor.unitm;
+      sensors.push_back(sensor);
+    }
+    return sensors;
+  }
+};
+
 template <typename QueryRequestType>
 struct sysfs_get : virtual QueryRequestType
 {
@@ -397,6 +493,7 @@ initialize_query_table()
   emplace_func0_request<query::rom_ddr_bank_count_max,         default_value>();
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
+  emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
 }
 
 struct X { X() { initialize_query_table(); }};

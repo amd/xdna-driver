@@ -544,6 +544,17 @@ fail:
 	return ret;
 }
 
+int npu_query_power_sensor(struct npu_device * /*ndev*/, struct amdxdna_drm_query_sensor *args)
+{
+	/* Somewhere in here we need to query the device and get the actual power data */
+	args->type = AMDXDNA_SENSOR_TYPE_POWER;
+	args->input = 1234; /* TODO get the real value from the device */
+	args->unitm = -3; /* Device returns values in milliwatts */
+	snprintf(args->label, sizeof(args->label), "Total Power");
+	snprintf(args->units, sizeof(args->units), "mW");
+	return 0;
+}
+
 int npu_query_firmware_version(struct npu_device *ndev)
 {
 	DECLARE_NPU_MSG(firmware_version, MSG_OP_GET_FIRMWARE_VERSION);
