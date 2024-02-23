@@ -79,14 +79,6 @@ close_cu_context(xrt_core::cuidx_type cuidx)
 
 std::unique_ptr<xrt_core::buffer_handle>
 hw_ctx::
-alloc_bo(void* userptr, size_t size, uint64_t flags)
-{
-  // const_cast: alloc_bo() is not const yet in device class
-  return const_cast<device&>(m_device).alloc_bo(userptr, size, flags);
-}
-
-std::unique_ptr<xrt_core::buffer_handle>
-hw_ctx::
 alloc_bo(size_t size, uint64_t flags)
 {
   return alloc_bo(nullptr, size, flags);

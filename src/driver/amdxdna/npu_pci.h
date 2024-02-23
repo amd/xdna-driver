@@ -23,7 +23,7 @@ void npu_debugfs_add(struct npu_device *ndev);
 
 int npu_suspend_fw(struct npu_device *ndev);
 int npu_resume_fw(struct npu_device *ndev);
-int npu_check_header_hash(struct npu_device *ndev);
+int npu_check_protocol_version(struct npu_device *ndev);
 int npu_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid);
 int npu_register_pdis(struct npu_device *ndev, struct amdxdna_xclbin *cache);
 int npu_unregister_pdis(struct npu_device *ndev, struct amdxdna_xclbin *cache);
@@ -36,6 +36,7 @@ int npu_query_version(struct npu_device *ndev, struct aie_version *version);
 int npu_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
 int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col,
 		     char *buf, u32 size, u32 *cols_filled);
+int npu_query_power_sensor(struct npu_device *ndev, struct amdxdna_drm_query_sensor *args);
 
 int npu_config_cu(struct npu_device *ndev, struct mailbox_channel *chann,
 		  struct amdxdna_xclbin *xclbin);
@@ -45,7 +46,10 @@ int npu_execbuf(struct npu_device *ndev, struct mailbox_channel *chann,
 void npu_get_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_metadata *args);
 int npu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_status *args);
 void npu_get_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_version *args);
+void npu_get_clock_metadata(struct amdxdna_dev *xdna,
+			    struct amdxdna_drm_query_clock_metadata *args);
 
+int npu_query_firmware_version(struct npu_device *ndev);
 #if defined(CONFIG_DEBUG_FS)
 int npu_self_test(struct npu_device *ndev);
 #endif /* CONFIG_DEBUG_FS */

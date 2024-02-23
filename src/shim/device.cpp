@@ -166,6 +166,7 @@ struct aie_info
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
   }
+
   static result_type
   get(const xrt_core::device* device, key_type key, const std::any& param)
   {
@@ -174,13 +175,13 @@ struct aie_info
     {
       query::aie_tiles_status_info::parameters query_param = std::any_cast<query::aie_tiles_status_info::parameters>(param);
 
-      const uint32_t output_size = query_param.col_size * query_param.num_cols;
+      const uint32_t output_size = query_param.col_size * query_param.max_num_cols;
 
       std::vector<char> payload(output_size);
 
       amdxdna_drm_query_aie_status aie_status = {
-        .start_col = query_param.start_col,
-        .num_cols = query_param.num_cols,
+        .start_col = 0,
+        .num_cols = query_param.max_num_cols,
         .buffer_size = output_size,
         .buffer = reinterpret_cast<uintptr_t>(payload.data())
       };
@@ -224,23 +225,29 @@ struct clock_topology
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    auto pci_dev = get_pcidev(device);
-    auto dev_path = pci_dev->get_sysfs_path("", "clocks");
+    amdxdna_drm_query_clock_metadata clock_metadata;
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+      .buffer_size = sizeof(clock_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
     std::vector<clock_freq> clocks;
+    clock_freq mp_npu_clock;
+    strcpy(mp_npu_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name));
+    mp_npu_clock.m_type = CT_SYSTEM;
+    mp_npu_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
+    clocks.push_back(mp_npu_clock);
 
-    for (const auto& entry : std::filesystem::directory_iterator(dev_path)) {
-      auto clock_path = "clocks/" + entry.path().filename().string();
-      clock_freq dev_clock;
-
-      std::string name = sysfs_fcn<std::string>::get(pci_dev, clock_path + "/name");
-      strcpy(dev_clock.m_name, name.c_str());
-
-      dev_clock.m_type = sysfs_fcn<uint8_t>::get(pci_dev, clock_path + "/type");
-
-      dev_clock.m_freq_Mhz = sysfs_fcn<uint16_t>::get(pci_dev, clock_path + "/freq");
-
-      clocks.push_back(dev_clock);
-    }
+    clock_freq h_clock;
+    strcpy(h_clock.m_name, reinterpret_cast<const char*>(clock_metadata.h_clock.name));
+    h_clock.m_type = CT_SYSTEM;
+    h_clock.m_freq_Mhz = clock_metadata.h_clock.freq_mhz;
+    clocks.push_back(h_clock);
 
     std::vector<char> payload(sizeof(int16_t) + (clocks.size() * sizeof(struct clock_freq)));
     auto data = reinterpret_cast<struct clock_freq_topology*>(payload.data());
@@ -288,6 +295,101 @@ struct instance
     return get_pcidev(device)->m_instance;
   }
 
+};
+
+struct sensor_info
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static bool
+  validate_sensor_type(const std::any& param, const amdxdna_drm_query_sensor& sensor)
+  {
+    switch (std::any_cast<xrt_core::query::sdm_sensor_info::sdr_req_type>(param)) {
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::power:
+      return sensor.type == AMDXDNA_SENSOR_TYPE_POWER;
+    // At the moment no sensors are expected for IPU other than power
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::current:
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::mechanical:
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::thermal:
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::voltage:
+      return false;
+    }
+    return false;
+  }
+
+  static amdxdna_drm_get_info
+  get_sensor_data(const xrt_core::device* device)
+  {
+    static std::map<const xrt_core::device*, std::vector<char>> data_map;
+
+    // If an entry does not exist for the current device, query the driver for sensor data
+    if (data_map.find(device) == data_map.end()) {
+      const uint32_t output_size = sizeof(amdxdna_drm_query_sensor);
+
+      std::vector<char> payload(output_size);
+      amdxdna_drm_get_info arg = {
+        .param = DRM_AMDXDNA_QUERY_SENSORS,
+        .buffer_size = output_size,
+        .buffer = reinterpret_cast<uintptr_t>(payload.data())
+      };
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+      if (output_size < arg.buffer_size) {
+        throw xrt_core::query::exception(
+          boost::str(boost::format("DRM_AMDXDNA_QUERY_SENSORS - Insufficient buffer size. Need: %u") % arg.buffer_size));
+      }
+
+      payload.resize(arg.buffer_size);
+      data_map.emplace(device, payload);
+    }
+
+    auto& payload = data_map.at(device);
+    amdxdna_drm_get_info output = {
+      .param = DRM_AMDXDNA_QUERY_SENSORS,
+      .buffer_size = static_cast<uint32_t>(payload.size()),
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+    return output;
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::sdm_sensor_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    amdxdna_drm_get_info arg = get_sensor_data(device);
+
+    amdxdna_drm_query_sensor* drv_sensors;
+    const uint32_t drv_sensor_count = arg.buffer_size / sizeof(*drv_sensors);
+    drv_sensors = reinterpret_cast<decltype(drv_sensors)>(arg.buffer);
+
+    // Parse the received sensor info into the user facing struct
+    xrt_core::query::sdm_sensor_info::result_type sensors;
+    for (uint32_t i = 0; i < drv_sensor_count; i++) {
+      const auto& drv_sensor = drv_sensors[i];
+      if (!validate_sensor_type(param, drv_sensor))
+        continue;
+
+      xrt_core::query::sdm_sensor_info::data_type sensor;
+      sensor.label = std::string(reinterpret_cast<const char*>(drv_sensor.label));
+      sensor.input = drv_sensor.input;
+      sensor.max = drv_sensor.max;
+      sensor.average = drv_sensor.average;
+      sensor.highest = drv_sensor.highest;
+      sensor.status = std::string(reinterpret_cast<const char*>(drv_sensor.status));
+      sensor.units = std::string(reinterpret_cast<const char*>(drv_sensor.units));
+      sensor.unitm = drv_sensor.unitm;
+      sensors.push_back(sensor);
+    }
+    return sensors;
+  }
 };
 
 template <typename QueryRequestType>
@@ -391,6 +493,7 @@ initialize_query_table()
   emplace_func0_request<query::rom_ddr_bank_count_max,         default_value>();
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
+  emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
 }
 
 struct X { X() { initialize_query_table(); }};
@@ -465,6 +568,13 @@ device::
 alloc_bo(size_t size, uint64_t flags)
 {
   return alloc_bo(nullptr, size, flags);
+}
+
+std::unique_ptr<xrt_core::buffer_handle>
+device::
+alloc_bo(void* userptr, size_t size, uint64_t flags)
+{
+  return alloc_bo(userptr, INVALID_CTX_HANDLE, size, flags);
 }
 
 } // namespace shim_xdna

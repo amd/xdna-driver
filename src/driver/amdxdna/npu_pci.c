@@ -120,12 +120,17 @@ static int npu_mgmt_fw_init(struct npu_device *ndev)
 {
 	int ret;
 
-	ret = npu_check_header_hash(ndev);
+	ret = npu_check_protocol_version(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Check header hash failed");
 		return ret;
 	}
 
+	ret = npu_query_firmware_version(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "query firmware version failed");
+		return ret;
+	}
 	/*
 	 * PASID is not supported yet. But, we need to send this command
 	 * to make firmware work. Any value of pasid will work for now.
@@ -572,6 +577,16 @@ void npu_get_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_
 
 	args->major = ndev->version.major;
 	args->minor = ndev->version.minor;
+}
+
+void npu_get_clock_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_query_clock_metadata *args)
+{
+	struct npu_device *ndev = xdna->dev_handle;
+
+	memcpy(args->mp_npu_clock.name, ndev->mp_npu_clock.name, sizeof(args->mp_npu_clock.name));
+	args->mp_npu_clock.freq_mhz = ndev->mp_npu_clock.freq_mhz;
+	memcpy(args->h_clock.name, ndev->h_clock.name, sizeof(args->h_clock.name));
+	args->h_clock.freq_mhz = ndev->h_clock.freq_mhz;
 }
 
 void npu_debugfs_add(struct npu_device *ndev)

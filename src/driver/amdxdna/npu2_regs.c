@@ -83,8 +83,8 @@
 	BAR_OFFSET_PAIR(_dev##REG, PSP_RESP_REG), \
 }
 
-#define FW_API_HASH_HIGH                0x7d6511b52de3e523
-#define FW_API_HASH_LOW                 0x9272e18fc0e7e076
+#define PROTOCOL_MAJOR                  0x3
+#define PROTOCOL_MINOR                  0x2
 
 const NPU_DEFINE_DEV_INFO_PSP(NPU2, "RyzenAI-npu2", 17f0, NPU2_PSP_OFFSETS,
-			      "amdnpu/17f0/npu.sbin", FW_API_HASH_HIGH, FW_API_HASH_LOW);
+			      "amdnpu/17f0/npu.sbin", PROTOCOL_MAJOR, PROTOCOL_MINOR);

@@ -44,6 +44,8 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_WAIT_CMD,
 	DRM_AMDXDNA_GET_INFO,
 	DRM_AMDXDNA_CREATE_HWCTX_UNSECURE,
+	DRM_AMDXDNA_ATTACH_BO,
+	DRM_AMDXDNA_DETACH_BO,
 	DRM_AMDXDNA_NUM_IOCTLS
 };
 
@@ -140,8 +142,7 @@ struct amdxdna_drm_query_aie_version {
  * @dma_channel_count: The number of dma channels.
  * @lock_count: The number of locks.
  * @event_reg_count: The number of events.
- * @pad_one: MBZ.
- * @pad_two: MBZ.
+ * @pad: MBZ.
  */
 struct amdxdna_drm_query_aie_tile_metadata {
 	__u16 row_count;
@@ -149,8 +150,7 @@ struct amdxdna_drm_query_aie_tile_metadata {
 	__u16 dma_channel_count;
 	__u16 lock_count;
 	__u16 event_reg_count;
-	__u16 pad_one;
-	__u32 pad_two;
+	__u8  pad[6];
 };
 
 /**
@@ -173,10 +173,64 @@ struct amdxdna_drm_query_aie_metadata {
 	struct amdxdna_drm_query_aie_tile_metadata shim;
 };
 
+/**
+ * struct amdxdna_drm_query_clock - Metadata for a clock
+ * @name: The clock name.
+ * @freq_mhz: The clock frequency.
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_query_clock {
+	__u8 name[16];
+	__u32 freq_mhz;
+	__u32 pad;
+};
+
+/**
+ * struct amdxdna_drm_query_clock_metadata - Query metadata for clocks
+ * @mp_npu_clock: The metadata for MP-NPU clock.
+ * @h_clock: The metadata for H clock.
+ */
+struct amdxdna_drm_query_clock_metadata {
+	struct amdxdna_drm_query_clock mp_npu_clock;
+	struct amdxdna_drm_query_clock h_clock;
+};
+
+enum amdxdna_sensor_type {
+	AMDXDNA_SENSOR_TYPE_POWER
+};
+
+/**
+ * struct amdxdna_drm_query_sensor - The data for single sensor.
+ * @label: The name for a sensor.
+ * @input: The current value of the sensor.
+ * @max: The maximum value possible for the sensor.
+ * @average: The average value of the sensor.
+ * @highest: The highest recorded sensor value for this driver load for the sensor.
+ * @status: The sensor status.
+ * @units: The sensor units.
+ * @unitm: Translates value member variables into the correct unit via (pow(10, unitm) * value)
+ * @type: The sensor type from enum amdxdna_sensor_type
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_query_sensor {
+	__u8  label[64];
+	__u32 input;
+	__u32 max;
+	__u32 average;
+	__u32 highest;
+	__u8  status[64];
+	__u8  units[16];
+	__s8  unitm;
+	__u8  type;
+	__u8  pad[6];
+};
+
 enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_AIE_STATUS,
 	DRM_AMDXDNA_QUERY_AIE_METADATA,
 	DRM_AMDXDNA_QUERY_AIE_VERSION,
+	DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+	DRM_AMDXDNA_QUERY_SENSORS,
 	DRM_AMDXDNA_NUM_GET_PARAM,
 };
 
@@ -312,6 +366,19 @@ struct amdxdna_drm_wait_cmd {
 	__u64 seq;
 };
 
+/**
+ * struct amdxdna_drm_attach_detach_bo - Attach/detach a BO to/from a context.
+ *
+ * @hwctx: hardware context handle.
+ * @bo: BO handle.
+ *
+ * Assign/unassign a BO to a hardware context for its exclusive use.
+ */
+struct amdxdna_drm_attach_detach_bo {
+	__u32 bo;
+	__u32 hwctx;
+};
+
 #define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
 		 struct amdxdna_drm_create_hwctx)
@@ -347,6 +414,14 @@ struct amdxdna_drm_wait_cmd {
 #define DRM_IOCTL_AMDXDNA_GET_INFO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO, \
 		 struct amdxdna_drm_get_info)
+
+#define DRM_IOCTL_AMDXDNA_ATTACH_BO \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_ATTACH_BO, \
+		 struct amdxdna_drm_attach_detach_bo)
+
+#define DRM_IOCTL_AMDXDNA_DETACH_BO \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DETACH_BO, \
+		 struct amdxdna_drm_attach_detach_bo)
 
 #if defined(__cplusplus)
 } /* extern c end */

@@ -118,19 +118,23 @@ int npu_resume_fw(struct npu_device *ndev)
 	return npu_send_mgmt_msg_wait(xdna, &msg);
 }
 
-int npu_check_header_hash(struct npu_device *ndev)
+int npu_check_protocol_version(struct npu_device *ndev)
 {
-	DECLARE_NPU_MSG(check_header_hash, MSG_OP_CHECK_HEADER_HASH);
+	DECLARE_NPU_MSG(protocol_version, MSG_OP_GET_PROTOCOL_VERSION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	req.hash_high = ndev->priv->fw_hash_high;
-	req.hash_low = ndev->priv->fw_hash_low;
-
 	ret = npu_send_mgmt_msg_wait(xdna, &msg);
 	if (ret) {
-		XDNA_ERR(xdna, "check header hash 0x%llx%llx failed, ret %d",
-			 req.hash_high, req.hash_low, ret);
+		XDNA_ERR(xdna, "failed to get protocol version, ret %d", ret);
+		return ret;
+	}
+
+	if (resp.major != ndev->priv->protocol_major ||
+	    resp.minor != ndev->priv->protocol_minor) {
+		ret = -EINVAL;
+		XDNA_ERR(xdna, "incompatible firmware protocol version major %d minor %d, ret %d",
+			 resp.major, resp.minor, ret);
 	}
 
 	return ret;
@@ -538,4 +542,33 @@ int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col, char _
 fail:
 	dma_free_noncoherent(&xdna->pdev->dev, size, buff_addr, xdna_dev_addr, DMA_TO_DEVICE);
 	return ret;
+}
+
+int npu_query_power_sensor(struct npu_device * /*ndev*/, struct amdxdna_drm_query_sensor *args)
+{
+	/* Somewhere in here we need to query the device and get the actual power data */
+	args->type = AMDXDNA_SENSOR_TYPE_POWER;
+	args->input = 1234; /* TODO get the real value from the device */
+	args->unitm = -3; /* Device returns values in milliwatts */
+	snprintf(args->label, sizeof(args->label), "Total Power");
+	snprintf(args->units, sizeof(args->units), "mW");
+	return 0;
+}
+
+int npu_query_firmware_version(struct npu_device *ndev)
+{
+	DECLARE_NPU_MSG(firmware_version, MSG_OP_GET_FIRMWARE_VERSION);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = npu_send_mgmt_msg_wait(xdna, &msg);
+	if (ret)
+		return ret;
+
+	ndev->fw_ver.major = resp.major;
+	ndev->fw_ver.minor = resp.minor;
+	ndev->fw_ver.sub = resp.sub;
+	ndev->fw_ver.build = resp.build;
+
+	return 0;
 }

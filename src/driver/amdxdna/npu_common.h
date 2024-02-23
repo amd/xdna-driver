@@ -112,7 +112,7 @@
 }
 
 #define _DEFINE_DEV_INFO(name, _vbnv, id, _sram, _psp, _smu, _fw_path, \
-			 _fw_hash_high, _fw_hash_low) \
+			 _protocol_major, _protocol_minor) \
 struct amdxdna_dev_info npu_##id##_info = { \
 	.reg_bar  = _BAR_IDX(name##_, REG), \
 	.mbox_bar = _BAR_IDX(name##_, MBOX), \
@@ -125,8 +125,8 @@ struct amdxdna_dev_info npu_##id##_info = { \
 	.device_type = AMDXDNA_DEV_TYPE_NPU, \
 	.dev_priv = (&(struct npu_dev_priv) { \
 		.fw_path = _fw_path, \
-		.fw_hash_high = _fw_hash_high, \
-		.fw_hash_low = _fw_hash_low, \
+		.protocol_major = _protocol_major, \
+		.protocol_minor = _protocol_minor, \
 		.mbox_dev_addr = _BAR_BASE(name##_, MBOX), \
 		.mbox_size = 0, \
 		.sram_dev_addr = _BAR_BASE(name##_, SRAM), \
@@ -136,15 +136,15 @@ struct amdxdna_dev_info npu_##id##_info = { \
 	}), \
 }
 
-#define NPU_DEFINE_DEV_INFO(name, _vbnv, id, fw_path, fw_hash_high, fw_hash_low) \
+#define NPU_DEFINE_DEV_INFO(name, _vbnv, id, fw_path, protocol_major, protocol_minor) \
 	_DEFINE_DEV_INFO(name, _vbnv, id, DEFAULT_SRAM_OFFSETS, \
 			 DEFAULT_PSP_OFFSETS, DEFAULT_SMU_OFFSETS, \
-			 fw_path, fw_hash_high, fw_hash_low)
+			 fw_path, protocol_major, protocol_minor)
 
 #define NPU_DEFINE_DEV_INFO_PSP(name, _vbnv, id, _psp, fw_path, \
-				fw_hash_high, fw_hash_low) \
+				protocol_major, protocol_minor) \
 	_DEFINE_DEV_INFO(name, _vbnv, id, DEFAULT_SRAM_OFFSETS, \
-			 _psp, DEFAULT_SMU_OFFSETS, fw_path, fw_hash_high, fw_hash_low)
+			 _psp, DEFAULT_SMU_OFFSETS, fw_path, protocol_major, protocol_minor)
 
 enum npu_smu_reg_idx {
 	SMU_CMD_REG = 0,
@@ -168,8 +168,8 @@ struct npu_bar_off_pair {
 
 struct npu_dev_priv {
 	const char		*fw_path;
-	u64			fw_hash_high;
-	u64			fw_hash_low;
+	u64			protocol_major;
+	u64			protocol_minor;
 	u32			mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32			mbox_size;
@@ -202,6 +202,13 @@ struct aie_metadata {
 	struct aie_tile_metadata shim;
 };
 
+struct npu_fw_version {
+	u32 major;
+	u32 minor;
+	u32 sub;
+	u32 build;
+};
+
 struct clock_entry {
 	char name[16];
 	u32 freq_mhz;
@@ -223,7 +230,7 @@ struct npu_device {
 
 	struct aie_version		version;
 	struct aie_metadata		metadata;
-
+	struct npu_fw_version		fw_ver;
 	struct clock_entry		mp_npu_clock;
 	struct clock_entry		h_clock;
 };

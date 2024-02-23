@@ -225,6 +225,94 @@ fail:
 	return ret;
 }
 
+static int get_info_clock_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_clock_metadata *clock_struct;
+	u32 input_buf_size;
+	int ret = 0;
+	int idx;
+
+	input_buf_size = args->buffer_size;
+	args->buffer_size = sizeof(*clock_struct);
+	if (input_buf_size != sizeof(*clock_struct)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 input_buf_size, sizeof(*clock_struct));
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	clock_struct = kzalloc(sizeof(*clock_struct), GFP_KERNEL);
+	if (!clock_struct) {
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	npu_get_clock_metadata(xdna, clock_struct);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), clock_struct, sizeof(*clock_struct))) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to copy clock request into user space");
+		goto release;
+	}
+
+release:
+	kfree(clock_struct);
+exit:
+	drm_dev_exit(idx);
+	return ret;
+}
+
+static int get_info_sensors(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_sensor *sensor;
+	u32 input_buf_size;
+	int ret = 0;
+	int idx;
+
+	input_buf_size = args->buffer_size;
+	args->buffer_size = sizeof(*sensor);
+	if (input_buf_size < args->buffer_size) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 input_buf_size, sizeof(*sensor));
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (!drm_dev_enter(&xdna->ddev, &idx)) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	sensor = kzalloc(sizeof(*sensor), GFP_KERNEL);
+	if (!sensor) {
+		ret = -ENOMEM;
+		goto out_mem;
+	}
+
+	ret = npu_query_power_sensor(xdna->dev_handle, sensor);
+	if (ret) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to query power sensor data");
+		goto out_copy;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), sensor, sizeof(*sensor))) {
+		ret = -EFAULT;
+		XDNA_ERR(xdna, "Failed to copy sensor data into user space");
+		goto out_copy;
+	}
+
+out_copy:
+	kfree(sensor);
+out_mem:
+	drm_dev_exit(idx);
+out:
+	return ret;
+}
+
 static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_drm_get_info *args = data;
@@ -241,6 +329,12 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
 		ret = get_info_aie_version(xdna, args);
+		break;
+	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
+		ret = get_info_clock_metadata(xdna, args);
+		break;
+	case DRM_AMDXDNA_QUERY_SENSORS:
+		ret = get_info_sensors(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Bad request parameter %u", args->param);
@@ -261,6 +355,8 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_BO, amdxdna_drm_create_bo_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_BO_INFO, amdxdna_drm_get_bo_info_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SYNC_BO, amdxdna_drm_sync_bo_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_ATTACH_BO, amdxdna_drm_attach_bo_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_DETACH_BO, amdxdna_drm_detach_bo_ioctl, 0),
 	/* Exectuion */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_EXEC_CMD, amdxdna_drm_exec_cmd_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_WAIT_CMD, amdxdna_drm_wait_cmd_ioctl, 0),

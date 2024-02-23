@@ -46,6 +46,25 @@ unmap_drm_bo(const shim_xdna::pdev& dev, void* addr, size_t size)
   dev.munmap(addr, size);
 }
 
+void
+attach_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
+{
+  amdxdna_drm_attach_detach_bo adbo = {
+    .bo = boh,
+    .hwctx = ctx_id,
+  };
+  dev.ioctl(DRM_IOCTL_AMDXDNA_ATTACH_BO, &adbo);
+}
+
+void
+detach_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
+{
+  amdxdna_drm_attach_detach_bo adbo = {
+    .bo = boh,
+    .hwctx = ctx_id,
+  };
+  dev.ioctl(DRM_IOCTL_AMDXDNA_DETACH_BO, &adbo);
+}
 }
 
 namespace shim_xdna {
@@ -70,14 +89,16 @@ bo::drm_bo::
 
 std::string
 bo::
-type_to_name(amdxdna_bo_type t)
+type_to_name() const
 {
-  switch (t) {
+  switch (m_type) {
   case AMDXDNA_BO_SHMEM:
     return std::string("AMDXDNA_BO_SHMEM");
   case AMDXDNA_BO_DEV_HEAP:
     return std::string("AMDXDNA_BO_DEV_HEAP");
   case AMDXDNA_BO_DEV:
+    if (xcl_bo_flags{m_flags}.use == XRT_BO_USE_DEBUG)
+      return std::string("AMDXDNA_BO_DEV_DEBUG");
     return std::string("AMDXDNA_BO_DEV");
   case AMDXDNA_BO_CMD:
     return std::string("AMDXDNA_BO_CMD");
@@ -85,37 +106,12 @@ type_to_name(amdxdna_bo_type t)
   return std::string("BO_UNKNOWN");
 }
 
-amdxdna_bo_type
-bo::
-flag_to_type(uint64_t bo_flags)
-{
-  auto flags = xcl_bo_flags{bo_flags};
-  auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
-  switch (boflags) {
-  case XCL_BO_FLAGS_NONE:
-    return AMDXDNA_BO_SHMEM;
-  case XCL_BO_FLAGS_CACHEABLE:
-    return AMDXDNA_BO_DEV;
-  case XCL_BO_FLAGS_EXECBUF:
-    return AMDXDNA_BO_CMD;
-  default:
-    break;
-  }
-
-  if (boflags == XCL_BO_FLAGS_HOST_ONLY) {
-    // Extension flag is valid only when boflags is XCL_BO_FLAGS_HOST_ONLY.
-    // Will need to check extension flag for new BO type in the future.
-    return AMDXDNA_BO_SHMEM;
-  }
-  return AMDXDNA_BO_INVALID;
-}
-
 std::string
 bo::
 describe() const
 {
   std::string desc = "type=";
-  desc += type_to_name(m_type);
+  desc += type_to_name();
   desc += ", ";
   desc += "drm_bo=";
   desc += std::to_string(m_bo->m_handle);
@@ -157,11 +153,13 @@ free_bo()
 }
 
 bo::
-bo(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type)
+bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  size_t size, uint64_t flags, amdxdna_bo_type type)
   : m_pdev(device.get_pdev())
   , m_size(size)
   , m_flags(flags)
   , m_type(type)
+  , m_owner_ctx_id(ctx_id)
 {
 }
 
@@ -230,6 +228,32 @@ bo::
 get_drm_bo_handle() const
 {
   return m_bo->m_handle;
+}
+
+void
+bo::
+attach_to_ctx()
+{
+  if (m_owner_ctx_id == INVALID_CTX_HANDLE)
+    return;
+
+  auto boh = get_drm_bo_handle();
+
+  shim_debug("Attaching drm_bo %d to ctx: %d", boh, m_owner_ctx_id);
+  attach_drm_bo(m_pdev, boh, m_owner_ctx_id);
+}
+
+void
+bo::
+detach_from_ctx()
+{
+  if (m_owner_ctx_id == INVALID_CTX_HANDLE)
+    return;
+
+  auto boh = get_drm_bo_handle();
+
+  shim_debug("Detaching drm_bo %d from ctx: %d", boh, m_owner_ctx_id);
+  detach_drm_bo(m_pdev, boh, m_owner_ctx_id);
 }
 
 } // namespace shim_xdna

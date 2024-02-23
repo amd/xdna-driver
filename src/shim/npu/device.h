@@ -16,7 +16,8 @@ public:
   ~device_npu();
 
   std::unique_ptr<xrt_core::buffer_handle>
-  alloc_bo(void* userptr, size_t size, uint64_t flags) override;
+  alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
+    size_t size, uint64_t flags) override;
 
 protected:
   std::unique_ptr<xrt_core::hwctx_handle>

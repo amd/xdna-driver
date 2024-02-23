@@ -22,7 +22,8 @@ namespace shim_xdna {
 class bo : public xrt_core::buffer_handle
 {
 public:
-  bo(const device& device, size_t size, uint64_t flags, amdxdna_bo_type type);
+  bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+    size_t size, uint64_t flags, amdxdna_bo_type type);
 
   ~bo();
 
@@ -89,11 +90,14 @@ protected:
   uint64_t
   get_paddr() const;
 
-  static std::string
-  type_to_name(amdxdna_bo_type);
+  std::string
+  type_to_name() const;
 
-  static amdxdna_bo_type
-  flag_to_type(uint64_t);
+  void
+  attach_to_ctx();
+
+  void
+  detach_from_ctx();
 
   const pdev& m_pdev;
   void* m_buf = nullptr;
@@ -105,7 +109,12 @@ protected:
   std::unique_ptr<drm_bo> m_bo;
 
   // Command ID in the queue after command submission.
+  // Only valid for cmd BO.
   uint64_t m_cmd_id = -1;
+
+  // Used when exclusively assigned to a HW context. By default, BO is shared
+  // among all HW contexts.
+  xrt_core::hwctx_handle::slot_id m_owner_ctx_id = INVALID_CTX_HANDLE;
 };
 
 } // namespace shim_xdna
