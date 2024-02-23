@@ -225,7 +225,7 @@ static int test_case01(struct npu_device *ndev)
 	}
 
 	XDNA_INFO(ndev->xdna, "Starting NPU health check");
-	ret = npu_check_header_hash(ndev);
+	ret = npu_check_protocol_version(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "NPU health check failed: ret=%d", ret);
 		return ret;

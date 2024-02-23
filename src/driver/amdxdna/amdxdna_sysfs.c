@@ -22,9 +22,23 @@ static ssize_t device_type_show(struct device *dev, struct device_attribute *att
 }
 static DEVICE_ATTR_RO(device_type);
 
+static ssize_t fw_version_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct amdxdna_dev *xdna = dev_get_drvdata(dev);
+	struct npu_device *ndev = xdna->dev_handle;
+	u32 major = ndev->fw_ver.major;
+	u32 minor = ndev->fw_ver.minor;
+	u32 sub = ndev->fw_ver.sub;
+	u32 build = ndev->fw_ver.build;
+
+	return sprintf(buf, "%d.%d.%d.%d\n", major, minor, sub, build);
+}
+static DEVICE_ATTR_RO(fw_version);
+
 static struct attribute *amdxdna_attrs[] = {
 	&dev_attr_device_type.attr,
 	&dev_attr_vbnv.attr,
+	&dev_attr_fw_version.attr,
 	NULL,
 };
 

@@ -31,9 +31,15 @@ enum npu_msg_opcode {
 	MSG_OP_CHECK_HEADER_HASH           = 0x105,
 	MSG_OP_MAP_HOST_BUFFER             = 0x106,
 	MSG_OP_AIE_ERROR_INJECT            = 0x107,
+	MSG_OP_GET_FIRMWARE_VERSION        = 0x108,
+	MSG_OP_QUERY_HARVEST_INFO          = 0x109,
+	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
+	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_ASYNC_MSG_AIE_ERROR         = 0x201,
 	MSG_OP_ASYNC_MSG_WATCHDOG_TIMEOUT  = 0x202,
+	MSG_OP_MAX_ASYNC_OPCODE,
+	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
 };
 
@@ -301,6 +307,28 @@ struct query_error_resp {
 	u32			next_row;
 	u32			next_column;
 	u32			next_module;
+} __packed;
+
+struct protocol_version_req {
+	u32		reserved;
+} __packed;
+
+struct protocol_version_resp {
+	enum npu_msg_status	status;
+	u32			major;
+	u32			minor;
+} __packed;
+
+struct firmware_version_req {
+	u32		reserved;
+} __packed;
+
+struct firmware_version_resp {
+	enum npu_msg_status	status;
+	u32			major;
+	u32			minor;
+	u32			sub;
+	u32			build;
 } __packed;
 
 #endif /* _NPU_MSG_PRIV_H_ */

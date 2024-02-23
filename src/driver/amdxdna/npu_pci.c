@@ -120,12 +120,17 @@ static int npu_mgmt_fw_init(struct npu_device *ndev)
 {
 	int ret;
 
-	ret = npu_check_header_hash(ndev);
+	ret = npu_check_protocol_version(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Check header hash failed");
 		return ret;
 	}
 
+	ret = npu_query_firmware_version(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "query firmware version failed");
+		return ret;
+	}
 	/*
 	 * PASID is not supported yet. But, we need to send this command
 	 * to make firmware work. Any value of pasid will work for now.
