@@ -509,6 +509,10 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 
 /*
  * The sync bo ioctl is to make sure the CPU cache is in sync with memory.
+ * This is required because NPU is not cache coherent device. CPU cache
+ * flushing/invalidation is expensive so it is best to handle this outside
+ * of the command submission path. This ioctl allows explicit cache
+ * flushing/invalidation outside of the critical path.
  */
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			      void *data, struct drm_file *filp)
