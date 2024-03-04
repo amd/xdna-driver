@@ -111,9 +111,9 @@
 	BAR_OFFSET_PAIR(_dev##SRAM, FW_ALIVE_OFF), \
 }
 
-#define _DEFINE_DEV_INFO(name, _vbnv, id, _sram, _psp, _smu, _fw_path, \
+#define _DEFINE_DEV_INFO(name, _vbnv, _sram, _psp, _smu, _fw_path, \
 			 _protocol_major, _protocol_minor) \
-struct amdxdna_dev_info npu_##id##_info = { \
+struct amdxdna_dev_info dev_##name##_info = { \
 	.reg_bar  = _BAR_IDX(name##_, REG), \
 	.mbox_bar = _BAR_IDX(name##_, MBOX), \
 	.sram_bar = _BAR_IDX(name##_, SRAM), \
@@ -136,14 +136,14 @@ struct amdxdna_dev_info npu_##id##_info = { \
 	}), \
 }
 
-#define NPU_DEFINE_DEV_INFO(name, _vbnv, id, fw_path, protocol_major, protocol_minor) \
-	_DEFINE_DEV_INFO(name, _vbnv, id, DEFAULT_SRAM_OFFSETS, \
+#define NPU_DEFINE_DEV_INFO(name, _vbnv, fw_path, protocol_major, protocol_minor) \
+	_DEFINE_DEV_INFO(name, _vbnv, DEFAULT_SRAM_OFFSETS, \
 			 DEFAULT_PSP_OFFSETS, DEFAULT_SMU_OFFSETS, \
 			 fw_path, protocol_major, protocol_minor)
 
-#define NPU_DEFINE_DEV_INFO_PSP(name, _vbnv, id, _psp, fw_path, \
+#define NPU_DEFINE_DEV_INFO_PSP(name, _vbnv, _psp, fw_path, \
 				protocol_major, protocol_minor) \
-	_DEFINE_DEV_INFO(name, _vbnv, id, DEFAULT_SRAM_OFFSETS, \
+	_DEFINE_DEV_INFO(name, _vbnv, DEFAULT_SRAM_OFFSETS, \
 			 _psp, DEFAULT_SMU_OFFSETS, fw_path, protocol_major, protocol_minor)
 
 enum npu_smu_reg_idx {

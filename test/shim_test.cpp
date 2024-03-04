@@ -34,6 +34,8 @@ using ns_t = std::chrono::nanoseconds;
 
 const uint16_t npu1_device_id = 0x1502;
 const uint16_t npu2_device_id = 0x17f0;
+const uint16_t npu2_revision_id = 0x0;
+const uint16_t npu4_revision_id = 0x10;
 
 std::string program;
 // Test harness setup helpers
@@ -274,6 +276,7 @@ TEST_query_userpf(device::id_type id, std::shared_ptr<device> dev, arg_type& arg
 struct xclbin_info {
   const char* name;
   const uint16_t device;
+  const uint16_t revision_id;
   const std::map<const char*, xrt_core::cuidx_type> ip_name2idx;
   const std::string workspace;
 };
@@ -282,6 +285,7 @@ xclbin_info xclbin_infos[] = {
   {
     .name = "1x4.xclbin",
     .device = npu1_device_id,
+    .revision_id = 0,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
       { "DPU_PDI_1:IPUV1CNN",         {1} },
@@ -297,6 +301,7 @@ xclbin_info xclbin_infos[] = {
   {
     .name = "1x4.xclbin",
     .device = npu2_device_id,
+    .revision_id = npu2_revision_id,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
       { "DPU_PDI_1:IPUV1CNN",         {1} },
@@ -309,15 +314,38 @@ xclbin_info xclbin_infos[] = {
     },
     .workspace = "npu2_workspace",
   },
+  {
+    .name = "1x4.xclbin",
+    .device = npu2_device_id,
+    .revision_id = npu4_revision_id,
+    .ip_name2idx = {
+      { "DPU_PDI_0:IPUV1CNN",         {0} },
+      { "DPU_PDI_1:IPUV1CNN",         {1} },
+      { "DPU_PDI_2:IPUV1CNN",         {2} },
+      { "DPU_PDI_3:IPUV1CNN",         {3} },
+      { "DPU_PDI_4:IPUV1CNN",         {4} },
+      { "DPU_PDI_5:IPUV1CNN",         {5} },
+      { "DPU_PDI_6:IPUV1CNN",         {6} },
+      { "DPU_PDI_7:IPUV1CNN",         {7} },
+      { "DPU_PDI_8:IPUV1CNN",         {8} },
+      { "DPU_PDI_9:IPUV1CNN",         {9} },
+      { "DPU_PDI_10:IPUV1CNN",         {10} },
+      { "DPU_PDI_11:IPUV1CNN",         {11} },
+      { "DPU_PDI_12:IPUV1CNN",         {12} },
+      { "DPU_PDI_13:IPUV1CNN",         {13} },
+      { "DPU_PDI_14:IPUV1CNN",         {14} },
+    },
+    .workspace = "npu4_workspace",
+  },
+
 };
 
 const xclbin_info&
-get_xclbin_info(const uint16_t pci_dev_id)
+get_xclbin_info(const uint16_t pci_dev_id, const uint16_t revision_id)
 {
   for (auto& xclbin : xclbin_infos) {
-    if (xclbin.device != pci_dev_id)
-      continue;
-    return xclbin;
+    if ((xclbin.device == pci_dev_id) && (xclbin.revision_id == revision_id))
+      return xclbin;
   }
   throw std::runtime_error("xclbin info not found");
 }
@@ -325,7 +353,7 @@ get_xclbin_info(const uint16_t pci_dev_id)
 std::string
 get_xclbin_name(std::shared_ptr<device> dev)
 {
-  return get_xclbin_info(device_query<query::pcie_device>(dev)).name;
+  return get_xclbin_info(device_query<query::pcie_device>(dev), device_query<query::pcie_id>(dev).revision_id).name;
 }
 
 std::string
@@ -337,19 +365,19 @@ get_xclbin_name(const xrt::device& dev)
   if (pos == std::string::npos)
     throw std::runtime_error("bad pcie info string: " + pcieinfo);
   pos += target.size();
-  return get_xclbin_info(std::stoi(pcieinfo.substr(pos), nullptr, 16)).name;
+  return get_xclbin_info(std::stoi(pcieinfo.substr(pos), nullptr, 16), 0).name;
 }
 
 std::string
 get_xclbin_workspace(std::shared_ptr<device> dev)
 {
-  return get_xclbin_info(device_query<query::pcie_device>(dev)).workspace;
+  return get_xclbin_info(device_query<query::pcie_device>(dev), device_query<query::pcie_id>(dev).revision_id).workspace;
 }
 
 const std::map<const char*, xrt_core::cuidx_type>&
 get_xclbin_ip_name2index(std::shared_ptr<device> dev)
 {
-  return get_xclbin_info(device_query<query::pcie_device>(dev)).ip_name2idx;
+  return get_xclbin_info(device_query<query::pcie_device>(dev), device_query<query::pcie_id>(dev).revision_id).ip_name2idx;
 }
 
 std::string find_first_match_ip_name(std::shared_ptr<device> dev, const std::string& pattern)

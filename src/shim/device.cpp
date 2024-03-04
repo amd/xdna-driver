@@ -218,6 +218,24 @@ struct bdf
   }
 };
 
+struct pcie_id
+{
+  using result_type = query::pcie_id::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    result_type pcie_id;
+
+    const auto pdev = get_pcidev(device);
+
+    pcie_id.device_id = sysfs_fcn<uint16_t>::get(pdev, "", "device");
+    pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
+
+    return pcie_id;
+  }
+};
+
 struct clock_topology
 {
   using result_type = query::clock_freq_topology_raw::result_type;
@@ -482,6 +500,7 @@ initialize_query_table()
   emplace_func0_request<query::is_versal,                      default_value>();
   emplace_func0_request<query::logic_uuids,                    default_value>();
   emplace_func0_request<query::pcie_bdf,                       bdf>();
+  emplace_func0_request<query::pcie_id,                        pcie_id>();
   emplace_sysfs_get<query::pcie_device>                        ("", "device");
   emplace_sysfs_get<query::pcie_express_lane_width>            ("", "link_width");
   emplace_sysfs_get<query::pcie_express_lane_width_max>        ("", "link_width_max");
@@ -490,6 +509,7 @@ initialize_query_table()
   emplace_sysfs_get<query::pcie_subsystem_id>                  ("", "subsystem_device");
   emplace_sysfs_get<query::pcie_subsystem_vendor>              ("", "subsystem_vendor");
   emplace_sysfs_get<query::pcie_vendor>                        ("", "vendor");
+
   emplace_func0_request<query::rom_ddr_bank_count_max,         default_value>();
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");

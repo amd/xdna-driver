@@ -434,8 +434,8 @@ int amdxdna_xclbin_load(struct amdxdna_dev *xdna, uuid_t *uuid,
 		goto out;
 	}
 
-	snprintf(xclbin_path, sizeof(xclbin_path), "amdnpu/%x/%pUb.xclbin",
-		 xdna->pdev->device, uuid);
+	snprintf(xclbin_path, sizeof(xclbin_path), "amdnpu/%x_%02x/%pUb.xclbin",
+		 xdna->pdev->device, xdna->pdev->revision, uuid);
 
 	ret = request_firmware(&fw, xclbin_path, &xdna->pdev->dev);
 	if (ret) {

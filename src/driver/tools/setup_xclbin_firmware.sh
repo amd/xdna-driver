@@ -6,8 +6,9 @@
 
 declare -A devices
 
-devices["NPU1"]="1502"
-devices["NPU2"]="17f0"
+devices["NPU1"]="1502_00"
+devices["NPU2"]="17f0_00"
+devices["NPU4"]="17f0_10"
 
 usage()
 {

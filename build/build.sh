@@ -94,6 +94,7 @@ download_npufws()
 			local version=$(echo $line | jq -r '.version')
 			local fw_name=$(echo $line | jq -r '.fw_name')
 			local url=$(echo $line | jq -r '.url')
+			local pci_rev_id=$(echo $line | jq -r '.pci_revision_id')
 
 			if [[ -z "$url" ]]; then
 				echo "Empty URL for $device NPUFW, SKIP."
@@ -101,10 +102,10 @@ download_npufws()
 			fi
 
 			echo "Download $device NPUFW version $version:"
-			if [ ! -d "${firmware_dir}/$pci_dev_id" ]; then
-				mkdir -p ${firmware_dir}/$pci_dev_id
+			if [ ! -d "${firmware_dir}/${pci_dev_id}_${pci_rev_id}" ]; then
+				mkdir -p ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
 			fi
-			wget -O ${firmware_dir}/$pci_dev_id/$fw_name $url
+			wget -O ${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name $url
 
 		done
 }

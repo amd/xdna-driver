@@ -28,10 +28,10 @@
 #define to_xdna_dev(drm_dev) \
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 
-#define DECLARE_DEV_INFO(id) \
-	struct amdxdna_dev_info npu_##id##_info
-#define DEV_INFO_TO_DATA(id) \
-	((kernel_ulong_t)&npu_##id##_info)
+#define DECLARE_DEV_INFO(name) \
+	struct amdxdna_dev_info dev_##name##_info
+#define DEV_INFO_TO_DATA(name) \
+	((struct amdxdna_dev_info *)&dev_##name##_info)
 
 struct npu_device;
 struct npu_dev_priv;
@@ -64,6 +64,19 @@ struct amdxdna_dev_info {
 	char				*vbnv;
 	int				device_type;
 	const struct npu_dev_priv	*dev_priv;
+};
+
+/*
+ * struct amdxdna_device_id - PCI device info
+ *
+ * @device: PCI device id
+ * @revision: PCI revision id
+ * @dev_info: device hardware information
+ */
+struct amdxdna_device_id {
+	unsigned short device;
+	u8 revision;
+	struct amdxdna_dev_info *dev_info;
 };
 
 struct amdxdna_fw_ver {
@@ -124,7 +137,8 @@ struct amdxdna_client {
 };
 
 /* Add device info below */
-extern const DECLARE_DEV_INFO(1502);
-extern const DECLARE_DEV_INFO(17f0);
+extern const DECLARE_DEV_INFO(NPU1);
+extern const DECLARE_DEV_INFO(NPU2);
+extern const DECLARE_DEV_INFO(NPU4);
 
 #endif /* _AMDXDNA_DRV_H_ */

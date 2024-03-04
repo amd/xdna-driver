@@ -58,6 +58,5 @@
 #define PROTOCOL_MAJOR                  0x3
 #define PROTOCOL_MINOR                  0x1
 
-
-const NPU_DEFINE_DEV_INFO(NPU1, "RyzenAI-npu1", 1502, "amdnpu/1502/npu.sbin",
+const NPU_DEFINE_DEV_INFO(NPU1, "RyzenAI-npu1", "amdnpu/1502_00/npu.sbin",
 			  PROTOCOL_MAJOR, PROTOCOL_MINOR);
