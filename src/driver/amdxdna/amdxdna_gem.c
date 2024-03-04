@@ -9,6 +9,8 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_gem.h"
 
+#define XDNA_32K_ALIGN 0x8000
+
 /*
  * The amdxdna_pin_pages() and amdxdna_unpin_pages() are lockless.
  * If this memory needs to be shared, the caller needs to protect this two
@@ -319,7 +321,7 @@ static int amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 
 	mutex_lock(&client->mm_lock);
 	ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, aligned_sz,
-					 PAGE_SIZE, 0, DRM_MM_INSERT_BEST);
+					 XDNA_32K_ALIGN, 0, DRM_MM_INSERT_BEST);
 	mutex_unlock(&client->mm_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
