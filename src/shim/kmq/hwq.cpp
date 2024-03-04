@@ -6,23 +6,23 @@
 
 namespace shim_xdna {
 
-hw_q_npu::
-hw_q_npu(const device& device) : hw_q(device)
+hw_q_kmq::
+hw_q_kmq(const device& device) : hw_q(device)
 {
-  shim_debug("Created NPU HW queue");
+  shim_debug("Created KMQ HW queue");
 }
 
-hw_q_npu::
-~hw_q_npu()
+hw_q_kmq::
+~hw_q_kmq()
 {
-  shim_debug("Destroying NPU HW queue");
+  shim_debug("Destroying KMQ HW queue");
 }
 
 void
-hw_q_npu::
+hw_q_kmq::
 submit_command(xrt_core::buffer_handle *cmd_bo)
 {
-  auto boh = static_cast<bo_npu*>(cmd_bo);
+  auto boh = static_cast<bo_kmq*>(cmd_bo);
   int ret = EAGAIN;
   uint32_t arg_bos[20]; // Maximum 20 BO args for now
 

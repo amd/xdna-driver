@@ -4,10 +4,10 @@
 set(XDNA_TARGET xrt_driver_xdna)
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} MAIN_SOURCES)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/npu NPU_SOURCES)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/kmq KMQ_SOURCES)
 add_library(${XDNA_TARGET} SHARED
   ${MAIN_SOURCES}
-  ${NPU_SOURCES}
+  ${KMQ_SOURCES}
   )
 
 set_target_properties(${XDNA_TARGET} PROPERTIES

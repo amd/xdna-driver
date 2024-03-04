@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _DEVICE_NPU_H_
-#define _DEVICE_NPU_H_
+#ifndef _DEVICE_KMQ_H_
+#define _DEVICE_KMQ_H_
 
 #include "../device.h"
 #include "core/common/memalign.h"
 
 namespace shim_xdna {
 
-class device_npu : public device {
+class device_kmq : public device {
 public:
-  device_npu(const pdev& pdev, handle_type shim_handle, id_type device_id);
+  device_kmq(const pdev& pdev, handle_type shim_handle, id_type device_id);
 
-  ~device_npu();
+  ~device_kmq();
 
   std::unique_ptr<xrt_core::buffer_handle>
   alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
@@ -30,4 +30,4 @@ private:
 
 } // namespace shim_xdna
 
-#endif // _DEVICE_NPU_H_
+#endif // _DEVICE_KMQ_H_

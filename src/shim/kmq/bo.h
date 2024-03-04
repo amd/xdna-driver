@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _BO_NPU_H_
-#define _BO_NPU_H_
+#ifndef _BO_KMQ_H_
+#define _BO_KMQ_H_
 
 #include "../bo.h"
 #include "drm_local/amdxdna_accel.h"
 
 namespace shim_xdna {
 
-class bo_npu : public bo {
+class bo_kmq : public bo {
 public:
-  bo_npu(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags);
 
-  ~bo_npu();
+  ~bo_kmq();
 
   void
   sync(direction dir, size_t size, size_t offset) override;
@@ -24,14 +24,14 @@ public:
 
 public:
   // Support BO creation from internal
-  bo_npu(const device& device, size_t size, amdxdna_bo_type type);
+  bo_kmq(const device& device, size_t size, amdxdna_bo_type type);
 
   // Obtain array of arg BO handles, returns real number of handles
   uint32_t
   get_arg_bo_handles(uint32_t *handles, size_t num);
 
 private:
-  bo_npu(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, amdxdna_bo_type type);
 
   // Only for AMDXDNA_BO_CMD type
@@ -41,4 +41,4 @@ private:
 
 } // namespace shim_xdna
 
-#endif // _BO_NPU_H_
+#endif // _BO_KMQ_H_

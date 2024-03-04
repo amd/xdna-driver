@@ -51,7 +51,7 @@ enum amdxdna_drm_ioctl_id {
 
 enum amdxdna_device_type {
 	AMDXDNA_DEV_TYPE_UNKNOWN = -1,
-	AMDXDNA_DEV_TYPE_NPU,
+	AMDXDNA_DEV_TYPE_KMQ,
 };
 
 /**

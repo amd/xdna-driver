@@ -28,23 +28,23 @@ flag_to_type(uint64_t bo_flags)
 
 namespace shim_xdna {
 
-bo_npu::
-bo_npu(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo_kmq::
+bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags)
-  : bo_npu(device, ctx_id, size, flags, flag_to_type(flags))
+  : bo_kmq(device, ctx_id, size, flags, flag_to_type(flags))
 {
   if (m_type == AMDXDNA_BO_INVALID)
     shim_err(EINVAL, "Invalid BO flags: 0x%lx", flags);
 }
 
-bo_npu::
-bo_npu(const device& device, size_t size, amdxdna_bo_type type)
-  : bo_npu(device, INVALID_CTX_HANDLE, size, 0, type)
+bo_kmq::
+bo_kmq(const device& device, size_t size, amdxdna_bo_type type)
+  : bo_kmq(device, INVALID_CTX_HANDLE, size, 0, type)
 {
 }
 
-bo_npu::
-bo_npu(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo_kmq::
+bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, amdxdna_bo_type type)
   : bo(device, ctx_id, size, flags, type)
 {
@@ -76,14 +76,14 @@ bo_npu(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 
   attach_to_ctx();
 
-  shim_debug("Allocated NPU BO for: userptr=0x%lx, size=%ld, flags=0x%llx",
+  shim_debug("Allocated KMQ BO for: userptr=0x%lx, size=%ld, flags=0x%llx",
     m_buf, m_size, m_flags);
 }
 
-bo_npu::
-~bo_npu()
+bo_kmq::
+~bo_kmq()
 {
-  shim_debug("Freeing NPU BO, %s", describe().c_str());
+  shim_debug("Freeing KMQ BO, %s", describe().c_str());
 
   detach_from_ctx();
 
@@ -100,8 +100,8 @@ bo_npu::
 }
 
 void
-bo_npu::
-sync(bo_npu::direction dir, size_t size, size_t offset)
+bo_kmq::
+sync(bo_kmq::direction dir, size_t size, size_t offset)
 {
   amdxdna_drm_sync_bo sbo = {
     .handle = m_bo->m_handle,
@@ -113,7 +113,7 @@ sync(bo_npu::direction dir, size_t size, size_t offset)
 }
 
 void
-bo_npu::
+bo_kmq::
 bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
 {
   std::lock_guard<std::mutex> lg(m_args_map_lock);
@@ -124,7 +124,7 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
 }
 
 uint32_t
-bo_npu::
+bo_kmq::
 get_arg_bo_handles(uint32_t *handles, size_t num)
 {
   std::lock_guard<std::mutex> lg(m_args_map_lock);

@@ -115,7 +115,7 @@ open() const
 {
   m_dev_fd = xrt_core::pci::dev::open("", O_RDWR);
   if (m_dev_fd < 0)
-      shim_err(EINVAL, "Failed to open NPU device fd");
+      shim_err(EINVAL, "Failed to open KMQ device fd");
 }
 
 } // namespace shim_xdna

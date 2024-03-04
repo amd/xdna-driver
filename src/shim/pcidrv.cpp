@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
 //
-#include "npu/pcidev.h"
+#include "kmq/pcidev.h"
 #include "drm_local/amdxdna_accel.h"
 #include "pcidev.h"
 #include "pcidrv.h"
@@ -75,8 +75,8 @@ create_pcidev(const std::string& sysfs) const
 {
   auto t = get_dev_type(sysfs);
   auto driver = std::static_pointer_cast<const drv>(shared_from_this());
-  if (t == AMDXDNA_DEV_TYPE_NPU)
-    return std::make_shared<pdev_npu>(driver, sysfs);
+  if (t == AMDXDNA_DEV_TYPE_KMQ)
+    return std::make_shared<pdev_kmq>(driver, sysfs);
   shim_err(-EINVAL, "Unknown device type: %d", t);
 }
 

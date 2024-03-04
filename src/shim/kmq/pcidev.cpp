@@ -6,24 +6,24 @@
 
 namespace shim_xdna {
 
-pdev_npu::
-pdev_npu(std::shared_ptr<const drv> driver, std::string sysfs_name)
+pdev_kmq::
+pdev_kmq(std::shared_ptr<const drv> driver, std::string sysfs_name)
   : pdev(driver, sysfs_name)
 {
-  shim_debug("Created NPU pcidev");
+  shim_debug("Created KMQ pcidev");
 }
 
-pdev_npu::
-~pdev_npu()
+pdev_kmq::
+~pdev_kmq()
 {
-  shim_debug("Destroying NPU pcidev");
+  shim_debug("Destroying KMQ pcidev");
 }
 
 std::shared_ptr<xrt_core::device>
-pdev_npu::
+pdev_kmq::
 create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
 {
-  return std::make_shared<device_npu>(*this, handle, id);
+  return std::make_shared<device_kmq>(*this, handle, id);
 }
 
 } // namespace shim_xdna
