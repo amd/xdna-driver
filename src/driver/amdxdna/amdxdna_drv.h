@@ -66,6 +66,13 @@ struct amdxdna_dev_info {
 	const struct npu_dev_priv	*dev_priv;
 };
 
+struct amdxdna_fw_ver {
+	u32 major;
+	u32 minor;
+	u32 sub;
+	u32 build;
+};
+
 struct amdxdna_dev {
 	struct drm_device	ddev;
 	struct pci_dev		*pdev;
@@ -76,6 +83,7 @@ struct amdxdna_dev {
 	struct list_head	xclbin_list;
 	struct ida		pdi_ida;
 	struct npu_device	*dev_handle;
+	struct amdxdna_fw_ver	fw_ver;
 
 	/* Mailbox and the management channel */
 	struct mailbox		*mbox;

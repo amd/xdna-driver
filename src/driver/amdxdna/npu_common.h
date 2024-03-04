@@ -202,13 +202,6 @@ struct aie_metadata {
 	struct aie_tile_metadata shim;
 };
 
-struct npu_fw_version {
-	u32 major;
-	u32 minor;
-	u32 sub;
-	u32 build;
-};
-
 struct clock_entry {
 	char name[16];
 	u32 freq_mhz;
@@ -222,7 +215,6 @@ struct npu_device {
 	void			__iomem *mbox_base;
 	struct psp_device		*psp_hdl;
 	void				*xrs_hdl;
-	const struct firmware		*fw;
 
 	struct xdna_mailbox_chann_res	mgmt_x2i;
 	struct xdna_mailbox_chann_res	mgmt_i2x;
@@ -230,7 +222,6 @@ struct npu_device {
 
 	struct aie_version		version;
 	struct aie_metadata		metadata;
-	struct npu_fw_version		fw_ver;
 	struct clock_entry		mp_npu_clock;
 	struct clock_entry		h_clock;
 };

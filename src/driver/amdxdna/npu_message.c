@@ -150,6 +150,82 @@ int npu_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid)
 	return npu_send_mgmt_msg_wait(xdna, &msg);
 }
 
+int npu_query_version(struct npu_device *ndev, struct aie_version *version)
+{
+	DECLARE_NPU_MSG(aie_version_info, MSG_OP_QUERY_AIE_VERSION);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = npu_send_mgmt_msg_wait(xdna, &msg);
+	if (ret)
+		return ret;
+
+	XDNA_DBG(xdna, "Query AIE version - major: %u minor: %u completed",
+		 resp.major, resp.minor);
+
+	version->major = resp.major;
+	version->minor = resp.minor;
+
+	return 0;
+}
+
+int npu_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata)
+{
+	DECLARE_NPU_MSG(aie_tile_info, MSG_OP_QUERY_AIE_TILE_INFO);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = npu_send_mgmt_msg_wait(xdna, &msg);
+	if (ret)
+		return ret;
+
+	metadata->size = resp.info.size;
+	metadata->cols = resp.info.cols;
+	metadata->rows = resp.info.rows;
+
+	metadata->version.major = resp.info.major;
+	metadata->version.minor = resp.info.minor;
+
+	metadata->core.row_count = resp.info.core_rows;
+	metadata->core.row_start = resp.info.core_row_start;
+	metadata->core.dma_channel_count = resp.info.core_dma_channels;
+	metadata->core.lock_count = resp.info.core_locks;
+	metadata->core.event_reg_count = resp.info.core_events;
+
+	metadata->mem.row_count = resp.info.mem_rows;
+	metadata->mem.row_start = resp.info.mem_row_start;
+	metadata->mem.dma_channel_count = resp.info.mem_dma_channels;
+	metadata->mem.lock_count = resp.info.mem_locks;
+	metadata->mem.event_reg_count = resp.info.mem_events;
+
+	metadata->shim.row_count = resp.info.shim_rows;
+	metadata->shim.row_start = resp.info.shim_row_start;
+	metadata->shim.dma_channel_count = resp.info.shim_dma_channels;
+	metadata->shim.lock_count = resp.info.shim_locks;
+	metadata->shim.event_reg_count = resp.info.shim_events;
+
+	return 0;
+}
+
+int npu_query_firmware_version(struct npu_device *ndev,
+			       struct amdxdna_fw_ver *fw_ver)
+{
+	DECLARE_NPU_MSG(firmware_version, MSG_OP_GET_FIRMWARE_VERSION);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = npu_send_mgmt_msg_wait(xdna, &msg);
+	if (ret)
+		return ret;
+
+	fw_ver->major = resp.major;
+	fw_ver->minor = resp.minor;
+	fw_ver->sub = resp.sub;
+	fw_ver->build = resp.build;
+
+	return 0;
+}
+
 int npu_register_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin)
 {
 	DECLARE_NPU_MSG(register_pdi, MSG_OP_REGISTER_PDI);
@@ -435,63 +511,6 @@ int npu_self_test(struct npu_device *ndev)
 }
 #endif
 
-int npu_query_version(struct npu_device *ndev, struct aie_version *version)
-{
-	DECLARE_NPU_MSG(aie_version_info, MSG_OP_QUERY_AIE_VERSION);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	int ret;
-
-	ret = npu_send_mgmt_msg_wait(xdna, &msg);
-	if (ret)
-		return ret;
-
-	XDNA_DBG(xdna, "Query AIE version - major: %u minor: %u completed",
-		 resp.major, resp.minor);
-
-	version->major = resp.major;
-	version->minor = resp.minor;
-
-	return 0;
-}
-
-int npu_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata)
-{
-	DECLARE_NPU_MSG(aie_tile_info, MSG_OP_QUERY_AIE_TILE_INFO);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	int ret;
-
-	ret = npu_send_mgmt_msg_wait(xdna, &msg);
-	if (ret)
-		return ret;
-
-	metadata->size = resp.info.size;
-	metadata->cols = resp.info.cols;
-	metadata->rows = resp.info.rows;
-
-	metadata->version.major = resp.info.major;
-	metadata->version.minor = resp.info.minor;
-
-	metadata->core.row_count = resp.info.core_rows;
-	metadata->core.row_start = resp.info.core_row_start;
-	metadata->core.dma_channel_count = resp.info.core_dma_channels;
-	metadata->core.lock_count = resp.info.core_locks;
-	metadata->core.event_reg_count = resp.info.core_events;
-
-	metadata->mem.row_count = resp.info.mem_rows;
-	metadata->mem.row_start = resp.info.mem_row_start;
-	metadata->mem.dma_channel_count = resp.info.mem_dma_channels;
-	metadata->mem.lock_count = resp.info.mem_locks;
-	metadata->mem.event_reg_count = resp.info.mem_events;
-
-	metadata->shim.row_count = resp.info.shim_rows;
-	metadata->shim.row_start = resp.info.shim_row_start;
-	metadata->shim.dma_channel_count = resp.info.shim_dma_channels;
-	metadata->shim.lock_count = resp.info.shim_locks;
-	metadata->shim.event_reg_count = resp.info.shim_events;
-
-	return 0;
-}
-
 int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col, char __user *buf,
 		     u32 size, u32 *cols_filled)
 {
@@ -558,23 +577,5 @@ int npu_query_power_sensor(struct npu_device * /*ndev*/, struct amdxdna_drm_quer
 	args->unitm = -3; /* Device returns values in milliwatts */
 	snprintf(args->label, sizeof(args->label), "Total Power");
 	snprintf(args->units, sizeof(args->units), "mW");
-	return 0;
-}
-
-int npu_query_firmware_version(struct npu_device *ndev)
-{
-	DECLARE_NPU_MSG(firmware_version, MSG_OP_GET_FIRMWARE_VERSION);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	int ret;
-
-	ret = npu_send_mgmt_msg_wait(xdna, &msg);
-	if (ret)
-		return ret;
-
-	ndev->fw_ver.major = resp.major;
-	ndev->fw_ver.minor = resp.minor;
-	ndev->fw_ver.sub = resp.sub;
-	ndev->fw_ver.build = resp.build;
-
 	return 0;
 }
