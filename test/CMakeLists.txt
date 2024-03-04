@@ -58,3 +58,10 @@ install(CODE "execute_process( \
   ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu2_workspace \
   )"
   )
+
+ install(CODE "execute_process( \
+  COMMAND ${CMAKE_COMMAND} -E create_symlink \
+  ${AMDXDNA_BINS_DIR}/workspaces/NPU4_1x4_TESTCASES \
+  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu4_workspace \
+  )"
+  )

@@ -25,15 +25,17 @@ int npu_suspend_fw(struct npu_device *ndev);
 int npu_resume_fw(struct npu_device *ndev);
 int npu_check_protocol_version(struct npu_device *ndev);
 int npu_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid);
-int npu_register_pdis(struct npu_device *ndev, struct amdxdna_xclbin *cache);
-int npu_unregister_pdis(struct npu_device *ndev, struct amdxdna_xclbin *cache);
+int npu_query_version(struct npu_device *ndev, struct aie_version *version);
+int npu_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
+int npu_query_firmware_version(struct npu_device *ndev,
+			       struct amdxdna_fw_ver *fw_ver);
+int npu_register_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin);
+int npu_unregister_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin);
 int npu_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size);
 int npu_query_error(struct npu_device *ndev, u64 addr, u32 size, u32 *row,
 		    u32 *col, u32 *mod, u32 *count, bool *next);
-int npu_query_version(struct npu_device *ndev, struct aie_version *version);
-int npu_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
 int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col,
 		     char *buf, u32 size, u32 *cols_filled);
 int npu_query_power_sensor(struct npu_device *ndev, struct amdxdna_drm_query_sensor *args);
@@ -49,7 +51,6 @@ void npu_get_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_
 void npu_get_clock_metadata(struct amdxdna_dev *xdna,
 			    struct amdxdna_drm_query_clock_metadata *args);
 
-int npu_query_firmware_version(struct npu_device *ndev);
 #if defined(CONFIG_DEBUG_FS)
 int npu_self_test(struct npu_device *ndev);
 #endif /* CONFIG_DEBUG_FS */

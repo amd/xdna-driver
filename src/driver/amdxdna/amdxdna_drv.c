@@ -20,19 +20,27 @@
 #define CREATE_TRACE_POINTS
 #include "amdxdna_trace.h"
 
+/*
+ *  There are platforms which share the same PCI device ID
+ *  but have different PCI revision IDs. So, let the PCI class
+ *  determine the probe and later use the (device_id, rev_id)
+ *  pair as a key to select the devices.
+ */
 static const struct pci_device_id pci_ids[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1502),
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_ANY_ID),
 		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
 		.class_mask = 0xFFFF00,
-		.driver_data = DEV_INFO_TO_DATA(1502),
-	},
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f0),
-		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
-		.class_mask = 0xFFFF00,
-		.driver_data = DEV_INFO_TO_DATA(17f0),
 	},
 	{0}
 };
+
+static const struct amdxdna_device_id amdxdna_ids[] = {
+	{ 0x1502, 0, DEV_INFO_TO_DATA(NPU1) },
+	{ 0x17f0, 0, DEV_INFO_TO_DATA(NPU2) },
+	{ 0x17f0, 0x10, DEV_INFO_TO_DATA(NPU4) },
+	{0}
+};
+
 MODULE_DEVICE_TABLE(pci, pci_ids);
 
 static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
@@ -99,9 +107,9 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 
 	mutex_lock(&xdna->dev_lock);
 	list_del(&client->node);
+	amdxdna_hwctx_remove_all(client);
 	mutex_unlock(&xdna->dev_lock);
 
-	amdxdna_hwctx_remove_all(client);
 	idr_destroy(&client->hwctx_idr);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
@@ -383,6 +391,18 @@ static const struct drm_driver amdxdna_drm_drv = {
 	.gem_create_object = amdxdna_gem_create_object,
 };
 
+static struct amdxdna_dev_info *amdxdna_get_dev_info(struct pci_dev *pdev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(amdxdna_ids); i++) {
+		if (pdev->device == amdxdna_ids[i].device &&
+		    pdev->revision == amdxdna_ids[i].revision)
+			return amdxdna_ids[i].dev_info;
+	}
+	return NULL;
+}
+
 static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct amdxdna_dev *xdna;
@@ -393,7 +413,10 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return PTR_ERR(xdna);
 
 	xdna->pdev = pdev;
-	xdna->dev_info = (struct amdxdna_dev_info *)id->driver_data;
+	xdna->dev_info = amdxdna_get_dev_info(pdev);
+	if (!xdna->dev_info)
+		return -ENODEV;
+
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
 	INIT_LIST_HEAD(&xdna->xclbin_list);

@@ -20,20 +20,20 @@ To run AI applications, your system needs
   - To run AI applications (test machine): RyzenAI processor
   - To build this repository (build machine): Any x86 processors, but recommend AMD processor :wink:
 * Operating System: Ubuntu 22.04
-* Linux Kernel: v6.7 with IOMMU SVA support (see below)
+* Linux Kernel: v6.8 with IOMMU SVA support (see below)
 * Installed XRT base package
   - To make sure the XRT base package works with the plug-in package, better build it from xrt submodule in this repo (<root-of-source-tree>/xrt)
   - Refer to https://github.com/Xilinx/XRT for more detailed information.
 
 *Important*: IOMMU SVA in Linux kernel support is required.
 
-You need to manually build 6.7 Linux kernel packages by following below steps.
+You need to manually build 6.8 Linux kernel packages by following below steps.
 
-The 6.7 Linux kernel with SVA source code can be downloaded from _iommu_sva_v4_v6.7-rc8 branch_ on https://github.com/AMDESE/linux
+The 6.8 Linux kernel with SVA source code can be downloaded from _iommu_sva_part4_v6_v6.8_rc2_ on https://github.com/AMDESE/linux
 ``` bash
 # Assuming you have knowledge of kernel compile, this just refreshing up a few key points.
 
-git clone --branch iommu_sva_v4_v6.7-rc8 git@github.com:AMDESE/linux.git 
+git clone --branch iommu_sva_part4_v6_v6.8_rc2 git@github.com:AMDESE/linux.git 
 cd linux/
 
 # Usually, when people compile kernel from source code, they use current config.

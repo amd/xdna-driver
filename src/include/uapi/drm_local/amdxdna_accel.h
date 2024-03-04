@@ -51,7 +51,7 @@ enum amdxdna_drm_ioctl_id {
 
 enum amdxdna_device_type {
 	AMDXDNA_DEV_TYPE_UNKNOWN = -1,
-	AMDXDNA_DEV_TYPE_NPU,
+	AMDXDNA_DEV_TYPE_KMQ,
 };
 
 /**
@@ -333,18 +333,21 @@ struct amdxdna_drm_sync_bo {
  * struct amdxdna_drm_exec_cmd - Execute command.
  * @ext: MBZ.
  * @ext_flags: MBZ.
- * @handle: Command BO handle.
  * @hwctx: Hardware context handle.
- * @arg_bo_handles: Array of BO handles for all BOs referenced by this command
+ * @cmd_bo_handles: Array of command BO handles
+ * @arg_bo_handles: Array of BO handles for all BOs referenced by these commands
+ * @cmd_bo_count: Number of BO handles in the cmd_bo_handles array
  * @arg_bo_count: Number of BO handles in the arg_bo_handles array
  * @seq: Returned sequence number for this command.
  */
 struct amdxdna_drm_exec_cmd {
 	__u64 ext;
 	__u64 ext_flags;
-	__u32 handle;
 	__u32 hwctx;
+	__u32 _pad;
+	__u64 cmd_bo_handles;
 	__u64 arg_bo_handles;
+	__u32 cmd_bo_count;
 	__u32 arg_bo_count;
 	__u64 seq;
 };

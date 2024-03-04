@@ -32,6 +32,7 @@ amdxdna-y := \
 	npu_message.o \
 	npu1_regs.o \
 	npu2_regs.o \
+	npu4_regs.o \
 	amdxdna_mailbox.o \
 	amdxdna_psp.o \
 	amdxdna_drv.o

@@ -4,7 +4,7 @@ KernelVersion:  6.4.0
 Contact:        lizhi.hou@amd.com
 Description:    Shows the type of this device. One of
                 '-1' -> AMDXDNA_DEV_TYPE_UNKNOWN,
-                '0' -> AMDXDNA_DEV_TYPE_NPU,
+                '0' -> AMDXDNA_DEV_TYPE_KMQ,
 
 What:           /sys/bus/pci/devices/<bdf>/vbnv
 Date:           July 11, 2023

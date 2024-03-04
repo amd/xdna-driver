@@ -126,7 +126,7 @@ static int npu_mgmt_fw_init(struct npu_device *ndev)
 		return ret;
 	}
 
-	ret = npu_query_firmware_version(ndev);
+	ret = npu_query_firmware_version(ndev, &ndev->xdna->fw_ver);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "query firmware version failed");
 		return ret;

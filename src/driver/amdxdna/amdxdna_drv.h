@@ -28,10 +28,10 @@
 #define to_xdna_dev(drm_dev) \
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 
-#define DECLARE_DEV_INFO(id) \
-	struct amdxdna_dev_info npu_##id##_info
-#define DEV_INFO_TO_DATA(id) \
-	((kernel_ulong_t)&npu_##id##_info)
+#define DECLARE_DEV_INFO(name) \
+	struct amdxdna_dev_info dev_##name##_info
+#define DEV_INFO_TO_DATA(name) \
+	((struct amdxdna_dev_info *)&dev_##name##_info)
 
 struct npu_device;
 struct npu_dev_priv;
@@ -66,6 +66,26 @@ struct amdxdna_dev_info {
 	const struct npu_dev_priv	*dev_priv;
 };
 
+/*
+ * struct amdxdna_device_id - PCI device info
+ *
+ * @device: PCI device id
+ * @revision: PCI revision id
+ * @dev_info: device hardware information
+ */
+struct amdxdna_device_id {
+	unsigned short device;
+	u8 revision;
+	struct amdxdna_dev_info *dev_info;
+};
+
+struct amdxdna_fw_ver {
+	u32 major;
+	u32 minor;
+	u32 sub;
+	u32 build;
+};
+
 struct amdxdna_dev {
 	struct drm_device	ddev;
 	struct pci_dev		*pdev;
@@ -76,6 +96,7 @@ struct amdxdna_dev {
 	struct list_head	xclbin_list;
 	struct ida		pdi_ida;
 	struct npu_device	*dev_handle;
+	struct amdxdna_fw_ver	fw_ver;
 
 	/* Mailbox and the management channel */
 	struct mailbox		*mbox;
@@ -116,7 +137,8 @@ struct amdxdna_client {
 };
 
 /* Add device info below */
-extern const DECLARE_DEV_INFO(1502);
-extern const DECLARE_DEV_INFO(17f0);
+extern const DECLARE_DEV_INFO(NPU1);
+extern const DECLARE_DEV_INFO(NPU2);
+extern const DECLARE_DEV_INFO(NPU4);
 
 #endif /* _AMDXDNA_DRV_H_ */
