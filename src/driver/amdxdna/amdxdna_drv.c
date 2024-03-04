@@ -99,9 +99,9 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 
 	mutex_lock(&xdna->dev_lock);
 	list_del(&client->node);
+	amdxdna_hwctx_remove_all(client);
 	mutex_unlock(&xdna->dev_lock);
 
-	amdxdna_hwctx_remove_all(client);
 	idr_destroy(&client->hwctx_idr);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);

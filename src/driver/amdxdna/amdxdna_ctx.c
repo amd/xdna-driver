@@ -166,11 +166,7 @@ static int amdxdna_sched_job_init(struct amdxdna_sched_job *job,
 		goto fail;
 	}
 
-#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
 	ret = drm_sched_job_init(&job->base, &hwctx->entity, 1, hwctx);
-#else
-	ret = drm_sched_job_init(&job->base, &hwctx->entity, hwctx);
-#endif
 	if (ret)
 		goto fail;
 
@@ -252,32 +248,9 @@ static void amdxdna_sched_job_free(struct drm_sched_job *sched_job)
 	amdxdna_job_put(job);
 }
 
-static enum drm_gpu_sched_stat
-amdxdna_sched_job_timeout(struct drm_sched_job *sched_job)
-{
-	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
-	struct amdxdna_dev *xdna = job->hwctx->client->xdna;
-
-	drm_sched_stop(sched_job->sched, sched_job);
-
-	XDNA_DBG(xdna, "%s cmd %lld timedout", job->hwctx->name, job->seq);
-	mutex_lock(&xdna->dev_lock);
-	/* Destroy mailbox channel, abort all commands */
-	npu_destroy_context(xdna->dev_handle, job->hwctx);
-
-	/* Re-connect HW context and NPUFW */
-	npu_create_context(xdna->dev_handle, job->hwctx);
-	mutex_unlock(&xdna->dev_lock);
-
-	drm_sched_start(sched_job->sched, true);
-
-	return DRM_GPU_SCHED_STAT_NOMINAL;
-}
-
 static const struct drm_sched_backend_ops sched_ops = {
 	.run_job = amdxdna_sched_job_run,
 	.free_job = amdxdna_sched_job_free,
-	.timedout_job = amdxdna_sched_job_timeout,
 };
 
 static inline u64
@@ -380,10 +353,8 @@ static void amdxdna_hwctx_release(struct amdxdna_hwctx *hwctx)
 	int idx;
 
 	xdna = hwctx->client->xdna;
-	mutex_lock(&xdna->dev_lock);
 	amdxdna_hwctx_cleanup(hwctx);
 	amdxdna_xclbin_unload(xdna, hwctx->xclbin);
-	mutex_unlock(&xdna->dev_lock);
 	drm_sched_entity_destroy(&hwctx->entity);
 	drm_sched_fini(&hwctx->sched);
 
@@ -517,19 +488,9 @@ amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbi
 	}
 
 	sched = &hwctx->sched;
-#if KERNEL_VERSION(6, 8, 0) <= LINUX_VERSION_CODE
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
 			     HWCTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT, NULL,
 			     NULL, hwctx->name, &client->xdna->pdev->dev);
-#elif KERNEL_VERSION(6, 7, 0) <= LINUX_VERSION_CODE
-	ret = drm_sched_init(sched, &sched_ops, DRM_SCHED_PRIORITY_COUNT, HWCTX_MAX_CMDS,
-			     0, MAX_SCHEDULE_TIMEOUT, NULL, NULL,
-			     hwctx->name, &client->xdna->pdev->dev);
-#else
-	ret = drm_sched_init(sched, &sched_ops, HWCTX_MAX_CMDS,
-			     0, MAX_SCHEDULE_TIMEOUT, NULL, NULL,
-			     hwctx->name, &client->xdna->pdev->dev);
-#endif
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
 		goto free_name;
@@ -679,6 +640,7 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 	struct amdxdna_hwctx *hwctx;
 	int next = 0;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		/*
@@ -700,6 +662,7 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 	struct amdxdna_hwctx *hwctx;
 	int next = 0;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		/*
@@ -718,11 +681,22 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 				      struct srcu_struct *ss)
 {
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+
 	synchronize_srcu(ss);
 
-	/* Timeout all outstanding jobs */
-	drm_sched_fault(&hwctx->sched);
-	amdxdna_hwctx_wait_for_idle(hwctx);
+	/* At this point, user is not able to submit new commands */
+	drm_sched_wqueue_stop(&hwctx->sched);
+
+	/* Now, scheduler will not send command to device. */
+	npu_destroy_context(xdna->dev_handle, hwctx);
+
+	/*
+	 * All submitted commands are aborted.
+	 * Restart scheduler queues to cleanup jobs. The amdxdna_sched_job_run()
+	 * will return NODEV if it is called.
+	 */
+	drm_sched_wqueue_start(&hwctx->sched);
 	amdxdna_hwctx_release(hwctx);
 }
 
@@ -733,8 +707,11 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
  */
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
 	int next = 0;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
@@ -833,6 +810,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
+
 	/*
 	 * Use hwctx_lock to achieve exclusion with other hwctx writers.
 	 * Such as, stop/restart, suspend/resume context and remove device.
@@ -852,7 +830,10 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	}
 	idr_remove(&client->hwctx_idr, hwctx->id);
 	mutex_unlock(&client->hwctx_lock);
+
+	mutex_lock(&xdna->dev_lock);
 	amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
+	mutex_unlock(&xdna->dev_lock);
 
 out:
 	drm_dev_exit(idx);

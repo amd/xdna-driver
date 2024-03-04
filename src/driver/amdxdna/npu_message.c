@@ -369,6 +369,9 @@ int npu_config_cu(struct npu_device *ndev, struct mailbox_channel *chann,
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret, i;
 
+	if (!chann)
+		return -ENODEV;
+
 	req.num_cus = xclbin->num_cus;
 	for (i = 0; i < req.num_cus; i++) {
 		struct amdxdna_cu *cu = &xclbin->cu[i];
@@ -395,6 +398,9 @@ int npu_execbuf(struct npu_device *ndev, struct mailbox_channel *chann,
 	struct execute_buffer_req req;
 	struct xdna_mailbox_msg msg;
 	int ret;
+
+	if (!chann)
+		return -ENODEV;
 
 	if (payload_len < sizeof(req.payload)) {
 		XDNA_DBG(xdna, "Invalid payload len");
