@@ -842,7 +842,8 @@ out:
 }
 
 /*
- * The submit command ioctl submits a command to firmware.
+ * The submit command ioctl submits a command to firmware. One firmware command
+ * may contain multiple command BOs for processing as a whole.
  * The command sequence number is returned which can be used for wait command ioctl.
  */
 int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
@@ -858,6 +859,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	enum amdxdna_obj_type type;
 	u32 *bo_hdls;
 	int ret, idx;
+	u32 cmd_bo;
 	int i;
 
 	if (args->ext_flags)
@@ -865,6 +867,14 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 
 	if (!args->arg_bo_count || args->arg_bo_count > MAX_ARG_BO_COUNT)
 		return -EINVAL;
+
+	if (args->cmd_bo_count != 1) {
+		XDNA_ERR(xdna, "Command list is not supported yet");
+		return -EOPNOTSUPP;
+	}
+	ret = copy_from_user(&cmd_bo, u64_to_user_ptr(args->cmd_bo_handles), sizeof(u32));
+	if (ret)
+		return -EFAULT;
 
 	bo_hdls = kcalloc(args->arg_bo_count, sizeof(u32), GFP_KERNEL);
 	if (!bo_hdls)
@@ -887,7 +897,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	 */
 	idx = srcu_read_lock(&client->hwctx_srcu);
 
-	gobj = drm_gem_object_lookup(filp, args->handle);
+	gobj = drm_gem_object_lookup(filp, cmd_bo);
 	if (!gobj) {
 		XDNA_ERR(xdna, "Lookup GEM object failed");
 		ret = -ENOENT;

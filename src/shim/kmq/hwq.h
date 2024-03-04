@@ -17,6 +17,9 @@ public:
 
   void
   submit_command(xrt_core::buffer_handle *) override;
+
+  void
+  submit_command(std::vector<xrt_core::buffer_handle *>&) override;
 };
 
 } // shim_xdna
