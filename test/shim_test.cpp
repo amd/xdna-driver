@@ -692,277 +692,373 @@ TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device> dev, ar
   auto hwq2 = hwctx.get()->get_hw_queue();
 }
 
-struct submit_wait_config {
-    bool perf;
-    bool noop;
-    int iters;
+// Global test parameters/configurations for all I/O test cases
+struct {
+  bool perf;
+  int iters;
+#define IO_TEST_NORMAL_RUN    0
+#define IO_TEST_NOOP_RUN      1
+#define IO_TEST_BAD_RUN       2
+  int type;
+  bool debug;
+} io_test_parameters;
+
+enum {
+  IO_TEST_BO_CMD = 0,
+  IO_TEST_BO_INSTRUCTION,
+  IO_TEST_BO_INPUT,
+  IO_TEST_BO_PARAMETERS,
+  IO_TEST_BO_OUTPUT,
+  IO_TEST_BO_INTERMEDIATE,
+  IO_TEST_BO_MC_CODE,
+  IO_TEST_BO_MAX_TYPES
+};
+const char *io_test_bo_type_names[] = {
+  "IO_TEST_BO_CMD",
+  "IO_TEST_BO_INSTRUCTION",
+  "IO_TEST_BO_INPUT",
+  "IO_TEST_BO_PARAMETERS",
+  "IO_TEST_BO_OUTPUT",
+  "IO_TEST_BO_INTERMEDIATE",
+  "IO_TEST_BO_MC_CODE",
+  "IO_TEST_BO_BAD_INSTRUCTION",
 };
 
-#define DEBUG_TEST 0
-#define NORMAL_RUN 0
-#define BAD_AND_GOOD_RUN 1
+struct io_test_bo {
+  size_t size;
+  size_t init_offset;
+  std::unique_ptr<bo> tbo;
+};
+
 void
-__npu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type& arg, struct submit_wait_config *config)
+checkpoint(const char *msg)
 {
-  hw_ctx hwctx{dev};
-  auto hwq = hwctx.get()->get_hw_queue();
-  auto test_type = static_cast<unsigned int>(arg[0]);
-  auto wrk = get_xclbin_workspace(dev);
-  auto data_path = wrk + "/data/";
-  void *instr_bk = nullptr;
+  std::cout << msg << std::endl;
+  if (io_test_parameters.debug)
+    test_pause();
+}
 
-  auto ip_name = find_first_match_ip_name(dev, "DPU.*");
-  if (ip_name.empty())
-    throw std::runtime_error("Cannot found any kernel name matched DPU.*");
-  auto cu_idx = hwctx.get()->open_cu_context(ip_name);
+void
+io_test_parameter_init(bool perf, int iters, int type, bool debug = false)
+{
+  io_test_parameters.perf = perf;
+  io_test_parameters.iters = iters;
+  io_test_parameters.type = type;
+  io_test_parameters.debug = debug;
+}
 
-  std::cout << "data path: " << data_path << std::endl;
-  if (!std::filesystem::exists(local_path(data_path)))
-    throw std::runtime_error("workspace doesn't exist");
+void
+io_test_bo_size_init(io_test_bo *io_test_bos, std::string& local_data_path)
+{
+  // Should only need to load and init sizes once.
+  if (io_test_bos[IO_TEST_BO_CMD].size)
+    return;
+  io_test_bos[IO_TEST_BO_CMD].size = 0x1000;
 
-  auto instr_word_size = get_instr_size(local_path(data_path + instr_file));
-  if (!instr_word_size)
-    throw std::runtime_error("instr word size cannot be 0");
-
-  auto tp = parse_config_file(local_path(data_path + config_file));
-
-  if (config->noop)
+  // Loading instruction size
+  size_t instr_word_size;
+  if (io_test_parameters.type == IO_TEST_NOOP_RUN) {
     instr_word_size = 32;
-  auto instr_size = instr_word_size * sizeof(int);
-  std::cout << "------- Test information -------" << std::endl;
-  std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
-  std::cout << "instr_size: " << instr_size << std::endl;
-  std::cout << "IFM_SIZE: " << IFM_SIZE(tp) << std::endl;
-  std::cout << "IFM_DIRTY_BYTES: " << IFM_DIRTY_BYTES(tp) << std::endl;
-  std::cout << "PARAM_SIZE: " << PARAM_SIZE(tp) << std::endl;
-  std::cout << "OFM_SIZE: " << OFM_SIZE(tp) << std::endl;
-  std::cout << "INTER_SIZE: " << INTER_SIZE(tp) << std::endl;
-  std::cout << "MC_CODE_SIZE: " << MC_CODE_SIZE(tp) << std::endl;
+  } else {
+    auto instruction_file = local_data_path + instr_file;
+    std::cout << "Getting instruction BO size from " << instruction_file << std::endl;
+    instr_word_size = get_instr_size(instruction_file);
+  }
+  // Loading other sizes
+  auto bo_size_config_file = local_data_path + config_file;
+  std::cout << "Getting non-instruction BO sizes from " << bo_size_config_file << std::endl;
+  auto tp = parse_config_file(bo_size_config_file);
 
-  auto bo_instr = bo(dev, instr_size, XCL_BO_FLAGS_CACHEABLE);
-  auto bo_ifm   = bo(dev, IFM_SIZE(tp));
-  auto bo_param = bo(dev, PARAM_SIZE(tp));
-  auto bo_ofm   = bo(dev, OFM_SIZE(tp));
-  auto bo_inter = bo(dev, INTER_SIZE(tp));
-  auto bo_mc    = bo(dev, std::max(MC_CODE_SIZE(tp), DUMMY_MC_CODE_BUFFER_SIZE));
-  buffer_handle::properties prop;
+  io_test_bos[IO_TEST_BO_INSTRUCTION].size = instr_word_size * sizeof(int32_t);
+  io_test_bos[IO_TEST_BO_INPUT].size = IFM_SIZE(tp);
+  io_test_bos[IO_TEST_BO_INPUT].init_offset = IFM_DIRTY_BYTES(tp);
+  io_test_bos[IO_TEST_BO_PARAMETERS].size = PARAM_SIZE(tp);
+  io_test_bos[IO_TEST_BO_OUTPUT].size = OFM_SIZE(tp);
+  io_test_bos[IO_TEST_BO_INTERMEDIATE].size = INTER_SIZE(tp);
+  io_test_bos[IO_TEST_BO_MC_CODE].size = MC_CODE_SIZE(tp);
 
-  std::cout << "Allocate buffer done" << std::endl;
-  if (DEBUG_TEST)
-    test_pause();
-
-  // map and fill input buffers
-  auto instr_p = bo_instr.map();
-  auto ifm_p = bo_ifm.map();
-  auto param_p = bo_param.map();
-  auto mc_blob_p = bo_mc.map();
-
-  if (config->noop)
-      std::memset(instr_p, 0, instr_size);
-  else
-      read_from_instr(local_path(data_path + instr_file), instr_p);
-  fill_buffer(ifm_p, IFM_SIZE(tp) - IFM_DIRTY_BYTES(tp), IFM_DIRTY_BYTES(tp),
-    local_path(data_path + ifm_file));
-  fill_buffer(param_p, PARAM_SIZE(tp), 0, local_path(data_path + param_file));
-
-  /* In the orignal test case, this MC_CODE_SIZE can be 0.
-   * If it is 0, use a constant value 16 to allocate bo_mc.
-   * In the current, conv_case_0, MC_CODE_SIZE is 0. Keep this code here.
-   */
-  if (MC_CODE_SIZE(tp)) {
-    std::cout << "!!! MC_CODE_SIZE is non zero !!!" << std::endl;
-    fill_buffer(mc_blob_p, MC_CODE_SIZE(tp), 0, local_path(data_path + mc_blob_file));
-    for (int i = 0; i < 16; i++) {
-      std::cout << "mc_blob data: " << std::hex << mc_blob_p[i] << std::dec << std::endl;
+  // Sanity test and dump
+  if (io_test_bos[IO_TEST_BO_INSTRUCTION].size == 0)
+    throw std::runtime_error("instruction size cannot be 0");
+  if (io_test_parameters.debug) {
+    for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+      std::cout << io_test_bo_type_names[i] << "'s size and init_offset: "
+                << io_test_bos[i].size << ", "
+                << io_test_bos[i].init_offset
+                << std::endl;
     }
-
-    prop = bo_ifm.get()->get_properties();
-    uint64_t ifm_paddr = prop.paddr;
-    prop = bo_param.get()->get_properties();
-    uint64_t param_paddr = prop.paddr;
-    prop = bo_ofm.get()->get_properties();
-    uint64_t ofm_paddr = prop.paddr;
-    prop = bo_inter.get()->get_properties();
-    uint64_t inter_paddr = prop.paddr;
-
-    patchMcCodeDDR(ifm_paddr, param_paddr, ofm_paddr, inter_paddr, (uint32_t *)(mc_blob_p), MC_CODE_SIZE(tp));
   }
+}
 
-  if (test_type == BAD_AND_GOOD_RUN) {
-    instr_bk = malloc(instr_size);
-    memcpy(instr_bk, instr_p, instr_size);
-    /* this is like hack line 180 and 181 in mc_code.txt */
-    instr_p[91] = 0xFFFFFFFF;
-    instr_p[92] = 0xFFFFFFFF;
+void
+io_test_bo_alloc(io_test_bo *io_test_bos, std::shared_ptr<device> dev)
+{
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    io_test_bo *ibo = &io_test_bos[i];
+    switch(i) {
+    case IO_TEST_BO_CMD:
+      ibo->tbo = std::make_unique<bo>(dev, ibo->size, XCL_BO_FLAGS_EXECBUF);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      ibo->tbo = std::make_unique<bo>(dev, ibo->size, XCL_BO_FLAGS_CACHEABLE);
+      break;
+    case IO_TEST_BO_MC_CODE:
+      ibo->tbo = std::make_unique<bo>(dev, std::max(ibo->size, DUMMY_MC_CODE_BUFFER_SIZE));
+      break;
+    default:
+      ibo->tbo = std::make_unique<bo>(dev, ibo->size);
+      break;
+    }
   }
+}
 
-  std::cout << "fill buffer done" << std::endl;
-  if (DEBUG_TEST)
-    test_pause();
+void
+io_test_bo_content_init(io_test_bo *io_test_bos, std::string& local_data_path)
+{
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    io_test_bo *ibo = &io_test_bos[i];
+    switch(i) {
+    case IO_TEST_BO_INSTRUCTION:
+      if (io_test_parameters.type == IO_TEST_NOOP_RUN) {
+        std::memset(ibo->tbo->map(), 0, ibo->tbo->size());
+      } else {
+        auto instruction_p = ibo->tbo->map();
+        read_instructions_from_txt(local_data_path + instr_file, instruction_p);
+        if (io_test_parameters.type == IO_TEST_BAD_RUN) {
+          /* this is like hack line 180 and 181 in mc_code.txt */
+          instruction_p[91] = 0xFFFFFFFF;
+          instruction_p[92] = 0xFFFFFFFF;
+        }
+      }
+      break;
+    case IO_TEST_BO_MC_CODE: {
+      if (ibo->size == 0)
+        break;
+      /* In the orignal test case, this MC_CODE_SIZE can be 0.
+       * If it is 0, use a constant value (16) to allocate bo_mc.
+       * In the current conv_case_0, MC_CODE_SIZE is 0. But, keep this code here.
+       */
+      std::cout << "!!! MC_CODE_SIZE is non zero !!!" << std::endl;
+      auto mc_blob_p = ibo->tbo->map();
+      read_data_from_bin(local_data_path + mc_blob_file, 0, ibo->size, mc_blob_p);
+      for (int i = 0; i < 16; i++)
+        std::cout << "mc_blob data: " << std::hex << mc_blob_p[i] << std::dec << std::endl;
 
-  bo_instr.get()->sync(buffer_handle::direction::host2device, instr_size, 0);
-  bo_ifm.get()->sync(buffer_handle::direction::host2device, IFM_SIZE(tp), 0);
-  bo_param.get()->sync(buffer_handle::direction::host2device, PARAM_SIZE(tp), 0);
-  bo_mc.get()->sync(buffer_handle::direction::host2device, std::max(MC_CODE_SIZE(tp), DUMMY_MC_CODE_BUFFER_SIZE), 0);
+      uint64_t ifm_paddr = io_test_bos[IO_TEST_BO_INPUT].tbo->get()->get_properties().paddr;
+      uint64_t param_paddr = io_test_bos[IO_TEST_BO_PARAMETERS].tbo->get()->get_properties().paddr;
+      uint64_t ofm_paddr = io_test_bos[IO_TEST_BO_OUTPUT].tbo->get()->get_properties().paddr;
+      uint64_t inter_paddr = io_test_bos[IO_TEST_BO_INTERMEDIATE].tbo->get()->get_properties().paddr;
+      patchMcCodeDDR(ifm_paddr, param_paddr, ofm_paddr, inter_paddr,
+        reinterpret_cast<uint32_t *>(mc_blob_p), ibo->size);
+      break;
+    }
+    case IO_TEST_BO_INPUT:
+      read_data_from_bin(local_data_path + ifm_file, ibo->init_offset,
+        ibo->size - ibo->init_offset, ibo->tbo->map());
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      read_data_from_bin(local_data_path + param_file, 0, ibo->tbo->size(), ibo->tbo->map());
+      break;
+    default:
+      break;
+    }
+  }
+}
 
-  std::cout << "sycn input buffer done" << std::endl;
-  if (DEBUG_TEST)
-    test_pause();
+void
+io_test_sync_bos_before_run(io_test_bo *io_test_bos)
+{
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    io_test_bo *ibo = &io_test_bos[i];
+    switch(i) {
+    case IO_TEST_BO_INPUT:
+    case IO_TEST_BO_INSTRUCTION:
+    case IO_TEST_BO_PARAMETERS:
+    case IO_TEST_BO_MC_CODE:
+      ibo->tbo->get()->sync(buffer_handle::direction::host2device, ibo->tbo->size(), 0);
+      break;
+    default:
+      break;
+    }
+  }
+}
 
-  auto exec_buf = bo(dev, 0x1000, XCL_BO_FLAGS_EXECBUF);
-  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(exec_buf.map());
+void
+io_test_sync_bos_after_run(io_test_bo *io_test_bos)
+{
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    io_test_bo *ibo = &io_test_bos[i];
+    switch(i) {
+    case IO_TEST_BO_OUTPUT:
+    case IO_TEST_BO_INTERMEDIATE:
+      ibo->tbo->get()->sync(buffer_handle::direction::device2host, ibo->tbo->size(), 0);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void
+io_test_cmd_add_arg_bo(bo *cmd_bo, int *payload_idx, int *arg_idx, bo *arg_bo)
+{
+  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->map());
+  auto prop = arg_bo->get()->get_properties();
+  cmd_packet->data[(*payload_idx)++] = prop.paddr;
+  cmd_packet->data[(*payload_idx)++] = prop.paddr >> 32;
+  cmd_bo->get()->bind_at(*arg_idx, arg_bo->get(), 0, arg_bo->size());
+  (*arg_idx)++;
+}
+
+void
+io_test_cmd_init(io_test_bo *io_test_bos)
+{
+  auto cmd_bo = io_test_bos[IO_TEST_BO_CMD].tbo.get();
+  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->map());
 
   cmd_packet->state = ERT_CMD_STATE_NEW;
   cmd_packet->count = 16;
   cmd_packet->opcode = ERT_SK_START;
   cmd_packet->type = ERT_SCU;
   cmd_packet->extra_cu_masks = 0;
+  // CU index will be set later after we know which hw ctx the command is for
+
+  int cur_payload = 0;
+  int cur_arg = 0;
+  // 0x00 - opcode. 1 is the DPU self test opcode
+  cmd_packet->data[cur_payload++] = 0x1;
+  cmd_packet->data[cur_payload++] = 0x0;
+  cur_arg++;
+  // 0x08 - ifm dev addr
+  io_test_cmd_add_arg_bo(cmd_bo, &cur_payload, &cur_arg,
+    io_test_bos[IO_TEST_BO_INPUT].tbo.get());
+  // 0x10 - param dev addr
+  io_test_cmd_add_arg_bo(cmd_bo, &cur_payload, &cur_arg,
+    io_test_bos[IO_TEST_BO_PARAMETERS].tbo.get());
+  // 0x18 - ofm dev addr
+  io_test_cmd_add_arg_bo(cmd_bo, &cur_payload, &cur_arg,
+    io_test_bos[IO_TEST_BO_OUTPUT].tbo.get());
+  // 0x20 - inter dev addr
+  io_test_cmd_add_arg_bo(cmd_bo, &cur_payload, &cur_arg,
+    io_test_bos[IO_TEST_BO_INTERMEDIATE].tbo.get());
+  // 0x28 - instruct dev addr
+  io_test_cmd_add_arg_bo(cmd_bo, &cur_payload, &cur_arg,
+    io_test_bos[IO_TEST_BO_INSTRUCTION].tbo.get());
+  // 0x30 - ninstruct
+  cmd_packet->data[cur_payload++] = io_test_bos[IO_TEST_BO_INSTRUCTION].tbo->size() / sizeof(int32_t);
+  cur_arg++;
+  // 0x34 - mc_blob dev addr
+  io_test_cmd_add_arg_bo(cmd_bo, &cur_payload, &cur_arg,
+    io_test_bos[IO_TEST_BO_MC_CODE].tbo.get());
+
+  if (io_test_parameters.debug) {
+    for (int i = 0; i < 15; i++) {
+      std::cout << "data[" << i << "]: 0x" << std::hex << cmd_packet->data[i]
+                << std::dec << std::endl;
+    }
+  }
+}
+
+// For debug only
+void
+io_test_dump_bo_content(io_test_bo *io_test_bos)
+{
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto ibo = io_test_bos[i].tbo.get();
+    auto ibo_p = reinterpret_cast<int8_t *>(ibo->map());
+    std::string p("/tmp/");
+    dump_buf_to_file(ibo_p, ibo->size(), p + io_test_bo_type_names[i]);
+  }
+}
+
+void
+io_test_cmd_submit_wait(std::shared_ptr<device> dev, bo *cmd_bo)
+{
+  auto ip_name = find_first_match_ip_name(dev, "DPU.*");
+  if (ip_name.empty())
+    throw std::runtime_error("Cannot find any kernel name matched DPU.*");
+
+  hw_ctx hwctx{dev};
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cu_idx = hwctx.get()->open_cu_context(ip_name);
+  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->map());
+  // Set CU index before submit the command
   cmd_packet->cu_mask = 0x1 << cu_idx.index;
 
-  // 0x00 - opcode. 1 is the DPU self test opcode
-  cmd_packet->data[0] = 0x1;
-  cmd_packet->data[1] = 0x0;
-  // 0x08 - ifm dev addr
-  prop = bo_ifm.get()->get_properties();
-  cmd_packet->data[2] = prop.paddr;
-  cmd_packet->data[3] = prop.paddr >> 32;
-  exec_buf.get()->bind_at(1, bo_ifm.get(), 0, bo_ifm.size());
-  // 0x10 - param dev addr
-  prop = bo_param.get()->get_properties();
-  cmd_packet->data[4] = prop.paddr;
-  cmd_packet->data[5] = prop.paddr >> 32;
-  exec_buf.get()->bind_at(2, bo_param.get(), 0, bo_param.size());
-  // 0x18 - ofm dev addr
-  prop = bo_ofm.get()->get_properties();
-  cmd_packet->data[6] = prop.paddr;
-  cmd_packet->data[7] = prop.paddr >> 32;
-  exec_buf.get()->bind_at(3, bo_ofm.get(), 0, bo_ofm.size());
-  // 0x20 - inter dev addr
-  prop = bo_inter.get()->get_properties();
-  cmd_packet->data[8] = prop.paddr;
-  cmd_packet->data[9] = prop.paddr >> 32;
-  exec_buf.get()->bind_at(4, bo_inter.get(), 0, bo_inter.size());
-  // 0x28 - instruct dev addr
-  prop = bo_instr.get()->get_properties();
-  cmd_packet->data[10] = prop.paddr;
-  cmd_packet->data[11] = prop.paddr >> 32;
-  exec_buf.get()->bind_at(5, bo_instr.get(), 0, bo_instr.size());
-  // 0x30 - ninstruct
-  cmd_packet->data[12] = instr_word_size;
-  // 0x34 - mc_blob dev addr
-  prop = bo_mc.get()->get_properties();
-  cmd_packet->data[13] = prop.paddr;
-  cmd_packet->data[14] = prop.paddr >> 32;
-  exec_buf.get()->bind_at(7, bo_mc.get(), 0, bo_mc.size());
+  std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
 
-  if (DEBUG_TEST) {
-    for (int i = 0; i < 15; i++)
-      std::cout << "data[" << i << "]: 0x"
-                << std::hex << cmd_packet->data[i]
-                << std::dec << std::endl;
-  }
+  auto start = Clock::now();
 
-  if (config->iters < 1)
-    config->iters = 1;
-
-  std::cout << "Submit command and wait..." << std::endl;
-  if (test_type != BAD_AND_GOOD_RUN) {
-    auto start = Clock::now();
-    for (int i = 0; i < config->iters; i++) {
-      hwq->submit_command(exec_buf.get());
-
-      hwq->wait_command(exec_buf.get(), 15000);
-
-      if (cmd_packet->state != ERT_CMD_STATE_COMPLETED)
-          throw std::runtime_error("Command error");
-    }
-    auto end = Clock::now();
-    if (config->perf) {
-      auto duration_us = std::chrono::duration_cast<us_t>(end - start).count();
-      auto fps = (config->iters * 1000000.0) / duration_us;
-      auto latency_us = 1000000.0 / fps;
-      std::cout << config->iters << " iterations finished in "
-                << duration_us << " us, FPS: " << fps
-                << " , latency " << latency_us << " us" << std::endl;
-    }
-  } else {
-    hwq->submit_command(exec_buf.get());
-    std::cout << "Command submitted, waiting..." << std::endl;
-
-    hwq->wait_command(exec_buf.get(), 15000);
-    std::cout << "Command state " << cmd_packet->state << std::endl;
-
-    if (cmd_packet->state != ERT_CMD_STATE_ABORT)
-      throw std::runtime_error("expected bad command, but pass??");
-
-    memcpy(instr_p, instr_bk, instr_size);
-    bo_instr.get()->sync(buffer_handle::direction::host2device, instr_size, 0);
-
-    std::cout << "fix mc code, ready to run good case" << std::endl;
-    if (DEBUG_TEST)
-      test_pause();
-
-    hwq->submit_command(exec_buf.get());
-    hwq->wait_command(exec_buf.get(), 15000);
-
+  for (int i = 0; i < io_test_parameters.iters; i++) {
+    hwq->submit_command(cmd_bo->get());
+    hwq->wait_command(cmd_bo->get(), 15000);
     if (cmd_packet->state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error("Command error");
   }
 
-  bo_ofm.get()->sync(buffer_handle::direction::device2host, OFM_SIZE(tp), 0);
-  bo_inter.get()->sync(buffer_handle::direction::device2host, INTER_SIZE(tp), 0);
+  auto end = Clock::now();
 
-  auto inter_p = reinterpret_cast<int8_t *>(bo_inter.map());
-  if (!inter_p)
-      throw std::runtime_error("map inter bo failed");
-
-  dump_buf_to_file(inter_p, INTER_SIZE(tp), local_path(data_path + dump_inter_file));
-
-  if (!config->noop) {
-      auto ofm_p = reinterpret_cast<int8_t *>(bo_ofm.map());
-      if (!ofm_p)
-          throw std::runtime_error("map ofm bo failed");
-
-      if (verify_output(ofm_p, local_path(data_path)))
-          throw std::runtime_error("Test failed!!!");
+  if (io_test_parameters.perf) {
+    auto duration_us = std::chrono::duration_cast<us_t>(end - start).count();
+    auto fps = (io_test_parameters.iters * 1000000.0) / duration_us;
+    auto latency_us = 1000000.0 / fps;
+    std::cout << io_test_parameters.iters << " iterations finished in "
+              << duration_us << " us, FPS: " << fps
+              << " , latency " << latency_us << " us" << std::endl;
   }
-
 }
 
 void
-TEST_npu_submit_wait_cmd(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+io_test_verify_result(io_test_bo *io_test_bos, std::string& local_data_path)
 {
-    struct submit_wait_config config = {
-        .perf = false,
-        .noop = false,
-        .iters = 1,
-    };
+  if (io_test_parameters.type == IO_TEST_NOOP_RUN)
+    return;
 
-    __npu_submit_wait_cmd(id, dev, arg, &config);
+  auto intr_bo = io_test_bos[IO_TEST_BO_INTERMEDIATE].tbo.get();
+  auto inter_p = reinterpret_cast<int8_t *>(intr_bo->map());
+  auto ofm_bo = io_test_bos[IO_TEST_BO_OUTPUT].tbo.get();
+  auto ofm_p = reinterpret_cast<int8_t *>(ofm_bo->map());
+
+  dump_buf_to_file(inter_p, intr_bo->size(), local_data_path + dump_inter_file);
+  if (verify_output(ofm_p, local_data_path))
+    throw std::runtime_error("Test failed!!!");
 }
 
 void
-TEST_npu_real_kernel_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+io_test(device::id_type id, std::shared_ptr<device> dev)
 {
-    struct submit_wait_config config = {
-        .perf = true,
-        .noop = false,
-        .iters = 1000,
-    };
+  io_test_bo bos[IO_TEST_BO_MAX_TYPES] = {};
+  auto wrk = get_xclbin_workspace(dev);
+  auto local_data_path = local_path(wrk + "/data/");
 
-    __npu_submit_wait_cmd(id, dev, arg, &config);
+  io_test_bo_size_init(bos, local_data_path);
+  io_test_bo_alloc(bos, dev);
+  checkpoint("Buffer allocation done");
+  io_test_bo_content_init(bos, local_data_path);
+  checkpoint("Input buffers' content initialization done");
+  io_test_sync_bos_before_run(bos);
+  checkpoint("Input buffers' content synchronization to device done");
+  io_test_cmd_init(bos);
+  checkpoint("Composing exec buf done");
+  io_test_cmd_submit_wait(dev, bos[IO_TEST_BO_CMD].tbo.get());
+  checkpoint("Cmd execution done");
+  io_test_sync_bos_after_run(bos);
+  checkpoint("Output buffers' content synchronization to host done");
+  io_test_verify_result(bos, local_data_path);
 }
 
 void
-TEST_npu_noop_kernel_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_io(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
-    struct submit_wait_config config = {
-        .perf = true,
-        .noop = true,
-        .iters = 1000,
-    };
+  io_test_parameter_init(false, 1, static_cast<unsigned int>(arg[0]));
+  io_test(id, dev);
+}
 
-    __npu_submit_wait_cmd(id, dev, arg, &config);
+void
+TEST_io_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+{
+  io_test_parameter_init(true, 1000, static_cast<unsigned int>(arg[0]));
+  io_test(id, dev);
 }
 
 // List of all test cases
@@ -1054,18 +1150,19 @@ std::vector<test_case> test_list {
   test_case{ "create_destroy_hw_queue",
     TEST_POSITIVE, dev_filter_is_npu, TEST_create_destroy_hw_queue, {}
   },
-  test_case{ "npu: submit_wait_cmd",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_npu_submit_wait_cmd, { NORMAL_RUN }
+  // Keep bad run before normal run to test recovery of hw ctx
+  test_case{ "io test real kernel bad run",
+    TEST_NEGATIVE, dev_filter_is_npu, TEST_io, { IO_TEST_BAD_RUN }
   },
-  test_case{ "npu: measure no-op kernel latency",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_npu_noop_kernel_latency, { NORMAL_RUN }
+  test_case{ "io test real kernel good run",
+    TEST_POSITIVE, dev_filter_is_npu, TEST_io, { IO_TEST_NORMAL_RUN }
   },
-  test_case{ "npu: measure real kernel latency",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_npu_real_kernel_latency, { NORMAL_RUN }
+  test_case{ "measure no-op kernel latency",
+    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NOOP_RUN }
   },
-  //test_case{ "npu: submit bad mc code, after recover, submit good mc code",
-  //  TEST_POSITIVE, dev_filter_is_npu, TEST_submit_wait_cmd, { BAD_AND_GOOD_RUN }
-  //},
+  test_case{ "measure real kernel latency",
+    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NORMAL_RUN }
+  },
   test_case{ "create and free debug bo",
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x4000 }
   },

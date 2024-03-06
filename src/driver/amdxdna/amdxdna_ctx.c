@@ -377,7 +377,7 @@ static void amdxdna_hwctx_release(struct amdxdna_hwctx *hwctx)
 	mutex_lock(&hwctx->client->mm_lock);
 	amdxdna_unpin_pages(&hwctx->heap->mem);
 	mutex_unlock(&hwctx->client->mm_lock);
-	drm_gem_object_put(&hwctx->heap->base);
+	amdxdna_put_dev_heap(hwctx->heap);
 	kfree(hwctx->name);
 	kfree(hwctx);
 }
@@ -737,9 +737,9 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_drm_create_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_gem_obj *heap;
-	struct amdxdna_xclbin *xclbin;
 	struct amdxdna_qos_info qos_info;
+	struct amdxdna_xclbin *xclbin;
+	struct amdxdna_gem_obj *heap;
 	uuid_t xclbin_uuid;
 	int ret, idx;
 
@@ -801,7 +801,7 @@ unload_xclbin:
 	amdxdna_xclbin_unload(xdna, xclbin);
 put_heap:
 	mutex_unlock(&xdna->dev_lock);
-	drm_gem_object_put(&heap->base);
+	amdxdna_put_dev_heap(heap);
 out:
 	drm_dev_exit(idx);
 	return ret;
@@ -1179,7 +1179,7 @@ unload_xclbin:
 	amdxdna_xclbin_unload(xdna, xclbin);
 put_heap:
 	mutex_unlock(&xdna->dev_lock);
-	drm_gem_object_put(&heap->base);
+	amdxdna_put_dev_heap(heap);
 out:
 	drm_dev_exit(idx);
 	return ret;

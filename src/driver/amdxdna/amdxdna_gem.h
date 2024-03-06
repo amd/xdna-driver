@@ -58,6 +58,7 @@ struct amdxdna_gem_shmem_obj {
 struct drm_gem_object *
 amdxdna_gem_create_object(struct drm_device *dev, size_t size);
 struct amdxdna_gem_obj *amdxdna_get_dev_heap(struct drm_file *filp);
+void amdxdna_put_dev_heap(struct amdxdna_gem_obj *heap_abo);
 int amdxdna_pin_pages(struct amdxdna_mem *mem);
 void amdxdna_unpin_pages(struct amdxdna_mem *mem);
 enum amdxdna_obj_type amdxdna_gem_get_obj_type(struct drm_gem_object *gobj);

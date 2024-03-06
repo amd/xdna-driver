@@ -98,7 +98,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		mutex_lock(&abo->client->mm_lock);
 		drm_mm_remove_node(&abo->mm_node);
 		mutex_unlock(&abo->client->mm_lock);
-		drm_gem_object_put(&abo->dev_heap->base);
+		amdxdna_put_dev_heap(abo->dev_heap);
 		break;
 	case AMDXDNA_BO_CMD:
 		amdxdna_unpin_pages(&abo->mem);
@@ -285,6 +285,11 @@ struct amdxdna_gem_obj *amdxdna_get_dev_heap(struct drm_file *filp)
 err_out:
 	drm_gem_object_put(gobj);
 	return ERR_PTR(-EINVAL);
+}
+
+void amdxdna_put_dev_heap(struct amdxdna_gem_obj *heap_abo)
+{
+	drm_gem_object_put(&heap_abo->base);
 }
 
 static int amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
@@ -518,6 +523,29 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	return 0;
 }
 
+static int amdxdna_drm_sync_gem_obj(struct drm_file *filp, struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_gem_obj *heap = amdxdna_get_dev_heap(filp);
+	struct amdxdna_client *client = filp->driver_priv;
+	int ret = 0;
+
+	if (IS_ERR(heap))
+		return PTR_ERR(heap);
+
+	mutex_lock(&client->mm_lock);
+
+	ret = amdxdna_pin_pages(&heap->mem);
+	if (ret == 0) {
+		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
+		amdxdna_unpin_pages(&heap->mem);
+	}
+
+	mutex_unlock(&client->mm_lock);
+
+	amdxdna_put_dev_heap(heap);
+	return ret;
+}
+
 /*
  * The sync bo ioctl is to make sure the CPU cache is in sync with memory.
  * This is required because NPU is not cache coherent device. CPU cache
@@ -548,7 +576,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		abo = to_xdna_gem_obj(gobj);
 		XDNA_DBG(xdna, "type %d", abo->type);
 
-		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
+		amdxdna_drm_sync_gem_obj(filp, abo);
 		break;
 	case AMDXDNA_SHMEM_OBJ:
 		sbo = to_xdna_gem_shmem_obj(gobj);
