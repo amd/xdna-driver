@@ -1,0 +1,104 @@
+name: XDNA DRIVER CI
+
+on:
+   push:
+     #branches: [ "master" ]
+   pull_request_target:
+     #types: [opened, reopened, synchronize]
+   #workflow_dispatch:
+
+concurrency:
+  group: ${{ github.event.pull_request.head.repo.full_name }}-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: true
+
+jobs:
+   authorize:
+    runs-on: Ubuntu-22.04
+    #permissions:
+    #  id-token: write
+    #  contents: read
+    #  issues: write
+    #  pull-requests: write
+    steps:
+      - name: Checkout private repository
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ secrets.INTERNAL_REPO }}/xdna-driver-int
+          path: xdna-driver-int
+          ref: main
+          token: ${{ secrets.XDNA_DRIVER_GHA_PAT }}
+          fetch-depth: 0
+      - name: authorize
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: ./xdna-driver-int/authorize
+        with:
+          pullRequestUser: ${{ github.event.pull_request.user.login }}
+
+   build:
+    needs: authorize
+    runs-on: [ Ubuntu-22.04 ]
+    steps:
+      - name: Checkout for Push
+        if: ${{ github.event_name != 'pull_request_target' }}
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.XDNA_DRIVER_GHA_PAT }}
+
+      - name: Checkout PR
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/checkout@v3
+        with:
+          repository: "${{ github.event.pull_request.head.repo.full_name }}"
+          ref: "${{ github.event.pull_request.head.ref }}"
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.XDNA_DRIVER_GHA_PAT }}
+      - name: Checkout private repository
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ secrets.INTERNAL_REPO }}/xdna-driver-int
+          path: xdna-driver-int
+          ref: main
+          token: ${{ secrets.XDNA_DRIVER_GHA_PAT }}
+          fetch-depth: 0
+          github-server-url: ${{ secrets.SERVER_URL }}
+
+      - name: Use composite action for build
+        uses: ./xdna-driver-int/build
+        with:
+           buildNumber: ${{ github.run_number }}
+           xrtPluginVersionPatch: ${{ github.run_number }}
+           githubRef: ${{ github.ref }}
+           artifactoryUrl: ${{ secrets.ARTIFACTORY_URL }}
+           jfrogCli: ${{ secrets.JFROG_CLI }}
+           vaultPwd: ${{ secrets.VAULT_PWD }}
+           vaultFile: ${{ secrets.VAULT_FILE }}
+           sshKey: ${{ secrets.SSH_PUBLIC_KEY }}
+           prheadRef: ${{ github.event.pull_request.head.ref }}
+           prNumber: ${{ github.event.pull_request.number }}
+           logFile: ${{ secrets.LOG_FILE }}
+           repoRoot: ${{ secrets.REPO_ROOT }}
+           user: ${{ secrets.USER }}
+           userPwd: ${{ secrets.USER_PASSWORD }}
+           ci: "true"
+           gitInternalRepo: ${{ secrets.GIT_INTERNAL_REPO }}
+           gitExternalRepo: ${{ secrets.GIT_EXTERNAL_REPO }}
+
+   upload:
+    if: ${{ always() }}
+    needs: build
+    runs-on: [ Ubuntu-22.04 ]
+    steps:
+      - name: Use composite action to upload-artifacts
+        uses: ./xdna-driver-int/upload-artifacts
+        with:
+           buildNumber: ${{ github.run_number }}
+           artifactoryUrl: ${{ secrets.ARTIFACTORY_URL }}
+           jfrogCli: ${{ secrets.JFROG_CLI }}
+           userPwd: ${{ secrets.USER_PASSWORD }}
+           user: ${{ secrets.USER }}
+           logFile: ${{ secrets.LOG_FILE }}
+           repoRoot: ${{ secrets.REPO_ROOT }}
