@@ -729,6 +729,7 @@ struct io_test_bo {
   size_t init_offset;
   std::unique_ptr<bo> tbo;
 };
+using io_test_bo_set = std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>;
 
 void
 checkpoint(const char *msg)
@@ -748,7 +749,7 @@ io_test_parameter_init(bool perf, int iters, int type, bool debug = false)
 }
 
 void
-io_test_bo_size_init(io_test_bo *io_test_bos, std::string& local_data_path)
+io_test_bo_size_init(io_test_bo_set& io_test_bos, std::string& local_data_path)
 {
   // Should only need to load and init sizes once.
   if (io_test_bos[IO_TEST_BO_CMD].size)
@@ -791,7 +792,7 @@ io_test_bo_size_init(io_test_bo *io_test_bos, std::string& local_data_path)
 }
 
 void
-io_test_bo_alloc(io_test_bo *io_test_bos, std::shared_ptr<device> dev)
+io_test_bo_alloc(io_test_bo_set& io_test_bos, std::shared_ptr<device> dev)
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     io_test_bo *ibo = &io_test_bos[i];
@@ -813,7 +814,7 @@ io_test_bo_alloc(io_test_bo *io_test_bos, std::shared_ptr<device> dev)
 }
 
 void
-io_test_bo_content_init(io_test_bo *io_test_bos, std::string& local_data_path)
+io_test_bo_content_init(io_test_bo_set& io_test_bos, std::string& local_data_path)
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     io_test_bo *ibo = &io_test_bos[i];
@@ -866,7 +867,7 @@ io_test_bo_content_init(io_test_bo *io_test_bos, std::string& local_data_path)
 }
 
 void
-io_test_sync_bos_before_run(io_test_bo *io_test_bos)
+io_test_sync_bos_before_run(io_test_bo_set& io_test_bos)
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     io_test_bo *ibo = &io_test_bos[i];
@@ -884,7 +885,7 @@ io_test_sync_bos_before_run(io_test_bo *io_test_bos)
 }
 
 void
-io_test_sync_bos_after_run(io_test_bo *io_test_bos)
+io_test_sync_bos_after_run(io_test_bo_set& io_test_bos)
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     io_test_bo *ibo = &io_test_bos[i];
@@ -911,7 +912,7 @@ io_test_cmd_add_arg_bo(bo *cmd_bo, int *payload_idx, int *arg_idx, bo *arg_bo)
 }
 
 void
-io_test_cmd_init(io_test_bo *io_test_bos)
+io_test_cmd_init(io_test_bo_set& io_test_bos)
 {
   auto cmd_bo = io_test_bos[IO_TEST_BO_CMD].tbo.get();
   auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->map());
@@ -972,8 +973,13 @@ io_test_dump_bo_content(io_test_bo *io_test_bos)
 }
 
 void
-io_test_cmd_submit_wait(std::shared_ptr<device> dev, bo *cmd_bo)
+io_test_cmd_submit_wait(std::shared_ptr<device> dev, std::vector<bo*> cmd_bos)
 {
+  // Can't support > 1 chained commands until hwqueue_handle::submit_command
+  // is updated to take a vector of buffer_handle *
+  if (cmd_bos.size() != 1)
+    throw std::runtime_error("Cannot support chaining > 1 commands");
+
   auto ip_name = find_first_match_ip_name(dev, "DPU.*");
   if (ip_name.empty())
     throw std::runtime_error("Cannot find any kernel name matched DPU.*");
@@ -981,17 +987,22 @@ io_test_cmd_submit_wait(std::shared_ptr<device> dev, bo *cmd_bo)
   hw_ctx hwctx{dev};
   auto hwq = hwctx.get()->get_hw_queue();
   auto cu_idx = hwctx.get()->open_cu_context(ip_name);
-  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->map());
-  // Set CU index before submit the command
-  cmd_packet->cu_mask = 0x1 << cu_idx.index;
-
   std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
+
+  std::vector<xrt_core::buffer_handle*> cmdlist;
+  ert_start_kernel_cmd *cmd_packet = nullptr;
+  for (auto cmd_bo : cmd_bos) {
+    cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->map());
+    // Set CU index before submit the command
+    cmd_packet->cu_mask = 0x1 << cu_idx.index;
+    cmdlist.push_back(cmd_bo->get());
+  }
 
   auto start = Clock::now();
 
   for (int i = 0; i < io_test_parameters.iters; i++) {
-    hwq->submit_command(cmd_bo->get());
-    hwq->wait_command(cmd_bo->get(), 15000);
+    hwq->submit_command(cmdlist[0]);
+    hwq->wait_command(cmdlist[0], 15000);
     if (cmd_packet->state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error("Command error");
   }
@@ -1009,7 +1020,7 @@ io_test_cmd_submit_wait(std::shared_ptr<device> dev, bo *cmd_bo)
 }
 
 void
-io_test_verify_result(io_test_bo *io_test_bos, std::string& local_data_path)
+io_test_verify_result(io_test_bo_set& io_test_bos, std::string& local_data_path)
 {
   if (io_test_parameters.type == IO_TEST_NOOP_RUN)
     return;
@@ -1025,40 +1036,50 @@ io_test_verify_result(io_test_bo *io_test_bos, std::string& local_data_path)
 }
 
 void
-io_test(device::id_type id, std::shared_ptr<device> dev)
+io_test(device::id_type id, std::shared_ptr<device> dev, size_t cmds_chained)
 {
-  io_test_bo bos[IO_TEST_BO_MAX_TYPES] = {};
+  std::vector<io_test_bo_set> chained_bos(cmds_chained);
+
   auto wrk = get_xclbin_workspace(dev);
   auto local_data_path = local_path(wrk + "/data/");
+  std::vector<bo*> cmd_bos;
 
-  io_test_bo_size_init(bos, local_data_path);
-  io_test_bo_alloc(bos, dev);
-  checkpoint("Buffer allocation done");
-  io_test_bo_content_init(bos, local_data_path);
-  checkpoint("Input buffers' content initialization done");
-  io_test_sync_bos_before_run(bos);
-  checkpoint("Input buffers' content synchronization to device done");
-  io_test_cmd_init(bos);
-  checkpoint("Composing exec buf done");
-  io_test_cmd_submit_wait(dev, bos[IO_TEST_BO_CMD].tbo.get());
+  for (auto& bos : chained_bos) {
+    io_test_bo_size_init(bos, local_data_path);
+    io_test_bo_alloc(bos, dev);
+    checkpoint("Buffer allocation done");
+    io_test_bo_content_init(bos, local_data_path);
+    checkpoint("Input buffers' content initialization done");
+    io_test_sync_bos_before_run(bos);
+    checkpoint("Input buffers' content synchronization to device done");
+    io_test_cmd_init(bos);
+    checkpoint("Composing exec buf done");
+    cmd_bos.push_back(bos[IO_TEST_BO_CMD].tbo.get());
+  }
+
+  io_test_cmd_submit_wait(dev, cmd_bos);
   checkpoint("Cmd execution done");
-  io_test_sync_bos_after_run(bos);
-  checkpoint("Output buffers' content synchronization to host done");
-  io_test_verify_result(bos, local_data_path);
+
+  for (auto& bos : chained_bos) {
+    io_test_sync_bos_after_run(bos);
+    checkpoint("Output buffers' content synchronization to host done");
+    io_test_verify_result(bos, local_data_path);
+  }
+
 }
 
 void
 TEST_io(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
   io_test_parameter_init(false, 1, static_cast<unsigned int>(arg[0]));
-  io_test(id, dev);
+  io_test(id, dev, arg[1]);
 }
 
 void
 TEST_io_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 {
   io_test_parameter_init(true, 1000, static_cast<unsigned int>(arg[0]));
-  io_test(id, dev);
+  io_test(id, dev, arg[1]);
 }
 
 // List of all test cases
@@ -1152,16 +1173,16 @@ std::vector<test_case> test_list {
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test real kernel bad run",
-    TEST_NEGATIVE, dev_filter_is_npu, TEST_io, { IO_TEST_BAD_RUN }
+    TEST_NEGATIVE, dev_filter_is_npu, TEST_io, { IO_TEST_BAD_RUN, 1 }
   },
   test_case{ "io test real kernel good run",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_io, { IO_TEST_NORMAL_RUN }
+    TEST_POSITIVE, dev_filter_is_npu, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "measure no-op kernel latency",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NOOP_RUN }
+    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NOOP_RUN, 1 }
   },
   test_case{ "measure real kernel latency",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NORMAL_RUN }
+    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NORMAL_RUN, 1}
   },
   test_case{ "create and free debug bo",
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x4000 }
