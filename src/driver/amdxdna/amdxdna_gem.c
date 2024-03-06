@@ -35,11 +35,14 @@ int amdxdna_pin_pages(struct amdxdna_mem *mem)
 			goto unpin;
 		total_pinned += pinned;
 	}
+	mem->pin_cnt = 1;
 
 	return 0;
 unpin:
-	if (total_pinned > 0)
+	if (total_pinned > 0) {
 		unpin_user_pages_dirty_lock(mem->pages, total_pinned, true);
+		memset(mem->pages, 0, sizeof(mem->pages) * total_pinned);
+	}
 	return pinned;
 }
 
