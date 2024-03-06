@@ -9,6 +9,7 @@
 #include <linux/kref.h>
 #include <linux/wait.h>
 #include <drm/gpu_scheduler.h>
+#include "drm_local/amdxdna_accel.h"
 #include "xrs.h"
 
 /*
@@ -48,6 +49,9 @@ void amdxdna_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
 void amdxdna_restart_ctx(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
+
+int amdxdna_hwctx_status(struct drm_device *dev, u32 *buf_size,
+			 struct amdxdna_drm_query_hwctx __user *buf);
 
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

@@ -344,6 +344,9 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 	case DRM_AMDXDNA_QUERY_SENSORS:
 		ret = get_info_sensors(xdna, args);
 		break;
+	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
+		ret = amdxdna_hwctx_status(dev, &args->buffer_size, u64_to_user_ptr(args->buffer));
+		break;
 	default:
 		XDNA_ERR(xdna, "Bad request parameter %u", args->param);
 		break;

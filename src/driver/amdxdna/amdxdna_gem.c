@@ -20,15 +20,10 @@ int amdxdna_pin_pages(struct amdxdna_mem *mem)
 {
 	int pinned, total_pinned = 0;
 
-	if (mem->pages) {
+	if (mem->pages[0]) {
 		mem->pin_cnt++;
 		return 0;
 	}
-
-	mem->pages = kvmalloc_array(mem->nr_pages, sizeof(struct page *),
-				    GFP_KERNEL);
-	if (!mem->pages)
-		return -ENOMEM;
 
 	while (total_pinned < mem->nr_pages) {
 		pinned = pin_user_pages_fast(mem->userptr +
@@ -40,12 +35,14 @@ int amdxdna_pin_pages(struct amdxdna_mem *mem)
 			goto unpin;
 		total_pinned += pinned;
 	}
+	mem->pin_cnt = 1;
 
 	return 0;
 unpin:
-	if (total_pinned > 0)
+	if (total_pinned > 0) {
 		unpin_user_pages_dirty_lock(mem->pages, total_pinned, true);
-	kvfree(mem->pages);
+		memset(mem->pages, 0, sizeof(mem->pages) * total_pinned);
+	}
 	return pinned;
 }
 
@@ -55,11 +52,10 @@ void amdxdna_unpin_pages(struct amdxdna_mem *mem)
 		return;
 
 	unpin_user_pages_dirty_lock(mem->pages, mem->nr_pages, true);
-	kvfree(mem->pages);
-	mem->pages = NULL;
+	memset(mem->pages, 0, sizeof(mem->pages) * mem->nr_pages);
 }
 
-static void
+static int
 amdxdna_user_mem_init(struct amdxdna_mem *mem, u64 vaddr, size_t size)
 {
 	mem->userptr = vaddr;
@@ -68,16 +64,21 @@ amdxdna_user_mem_init(struct amdxdna_mem *mem, u64 vaddr, size_t size)
 
 	mem->nr_pages = (PAGE_ALIGN(vaddr + mem->size) -
 			 (vaddr & PAGE_MASK)) >> PAGE_SHIFT;
+
+	mem->pages = kvcalloc(mem->nr_pages, sizeof(struct page *), GFP_KERNEL);
+	if (!mem->pages)
+		return -ENOMEM;
+
+	return 0;
 }
 
 static void
 amdxdna_user_mem_fini(struct amdxdna_mem *mem)
 {
-	if (mem->pages) {
+	if (mem->pages[0])
 		unpin_user_pages_dirty_lock(mem->pages, mem->nr_pages, true);
-		kvfree(mem->pages);
-	}
 
+	kvfree(mem->pages);
 	memset(mem, 0, sizeof(*mem));
 }
 
@@ -97,7 +98,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		mutex_lock(&abo->client->mm_lock);
 		drm_mm_remove_node(&abo->mm_node);
 		mutex_unlock(&abo->client->mm_lock);
-		drm_gem_object_put(&abo->dev_heap->base);
+		amdxdna_put_dev_heap(abo->dev_heap);
 		break;
 	case AMDXDNA_BO_CMD:
 		amdxdna_unpin_pages(&abo->mem);
@@ -121,7 +122,7 @@ static void amdxdna_gem_shmem_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_gem_shmem_obj *sbo;
 
-	sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+	sbo = to_xdna_gem_shmem_obj(gobj);
 	XDNA_DBG(sbo->client->xdna, "SHMEM bo pinned %d", sbo->pinned);
 	if (sbo->pinned)
 		drm_gem_shmem_unpin(&sbo->base);
@@ -174,7 +175,7 @@ static int amdxdna_drm_alloc_shmem(struct drm_device *dev,
 
 	shmem->map_wc = false;
 
-	sbo = to_xdna_gem_shmem_obj(shmem);
+	sbo = to_xdna_gem_shmem_obj(&shmem->base);
 	sbo->client = client;
 	sbo->mmap_offset = drm_vma_node_offset_addr(&shmem->base.vma_node);
 	sbo->pinned = false;
@@ -226,7 +227,11 @@ static int amdxdna_drm_create_dev_heap(struct drm_device *dev,
 	abo->type = AMDXDNA_BO_DEV_HEAP;
 	abo->client = client;
 
-	amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	if (ret) {
+		XDNA_ERR(xdna, "user mem init failed, ret %d", ret);
+		goto release_obj;
+	}
 
 	abo->mem.dev_addr = client->xdna->dev_info->dev_mem_base;
 
@@ -250,6 +255,7 @@ static int amdxdna_drm_create_dev_heap(struct drm_device *dev,
 
 clean_bo_mem:
 	amdxdna_user_mem_fini(&abo->mem);
+release_obj:
 	drm_gem_object_release(&abo->base);
 	kfree(abo);
 unlock_and_err:
@@ -279,6 +285,11 @@ struct amdxdna_gem_obj *amdxdna_get_dev_heap(struct drm_file *filp)
 err_out:
 	drm_gem_object_put(gobj);
 	return ERR_PTR(-EINVAL);
+}
+
+void amdxdna_put_dev_heap(struct amdxdna_gem_obj *heap_abo)
+{
+	drm_gem_object_put(&heap_abo->base);
 }
 
 static int amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
@@ -385,7 +396,11 @@ static int amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 	abo->client = client;
 	abo->type = AMDXDNA_BO_CMD;
 
-	amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	if (ret) {
+		XDNA_ERR(xdna, "user mem init failed, ret %d", ret);
+		goto release_obj;
+	}
 
 	ret = amdxdna_pin_pages(&abo->mem);
 	if (ret) {
@@ -419,6 +434,7 @@ unpin:
 	amdxdna_unpin_pages(&abo->mem);
 fini_user_map:
 	amdxdna_user_mem_fini(&abo->mem);
+release_obj:
 	drm_gem_object_release(&abo->base);
 	kfree(abo);
 	return ret;
@@ -454,6 +470,8 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 {
 	struct amdxdna_drm_get_bo_info *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_gem_shmem_obj *sbo;
+	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 	enum amdxdna_obj_type type;
 
@@ -469,8 +487,6 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	type = amdxdna_gem_get_obj_type(gobj);
 	switch (type) {
 	case AMDXDNA_GEM_OBJ:
-		struct amdxdna_gem_obj *abo;
-
 		abo = to_xdna_gem_obj(gobj);
 		switch (abo->type) {
 		case AMDXDNA_BO_DEV_HEAP:
@@ -491,9 +507,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 		}
 		break;
 	case AMDXDNA_SHMEM_OBJ:
-		struct amdxdna_gem_shmem_obj *sbo;
-
-		sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+		sbo = to_xdna_gem_shmem_obj(gobj);
 		args->map_offset = sbo->mmap_offset;
 		args->vaddr = AMDXDNA_INVALID_ADDR;
 		args->xdna_addr = AMDXDNA_INVALID_ADDR;
@@ -509,6 +523,29 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	return 0;
 }
 
+static int amdxdna_drm_sync_gem_obj(struct drm_file *filp, struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_gem_obj *heap = amdxdna_get_dev_heap(filp);
+	struct amdxdna_client *client = filp->driver_priv;
+	int ret = 0;
+
+	if (IS_ERR(heap))
+		return PTR_ERR(heap);
+
+	mutex_lock(&client->mm_lock);
+
+	ret = amdxdna_pin_pages(&heap->mem);
+	if (ret == 0) {
+		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
+		amdxdna_unpin_pages(&heap->mem);
+	}
+
+	mutex_unlock(&client->mm_lock);
+
+	amdxdna_put_dev_heap(heap);
+	return ret;
+}
+
 /*
  * The sync bo ioctl is to make sure the CPU cache is in sync with memory.
  * This is required because NPU is not cache coherent device. CPU cache
@@ -521,6 +558,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_sync_bo *args = data;
+	struct amdxdna_gem_shmem_obj *sbo;
+	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 	enum amdxdna_obj_type type;
 	int ret = 0;
@@ -534,17 +573,13 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	type = amdxdna_gem_get_obj_type(gobj);
 	switch (type) {
 	case AMDXDNA_GEM_OBJ:
-		struct amdxdna_gem_obj *abo;
-
 		abo = to_xdna_gem_obj(gobj);
 		XDNA_DBG(xdna, "type %d", abo->type);
 
-		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
+		amdxdna_drm_sync_gem_obj(filp, abo);
 		break;
 	case AMDXDNA_SHMEM_OBJ:
-		struct amdxdna_gem_shmem_obj *sbo;
-
-		sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+		sbo = to_xdna_gem_shmem_obj(gobj);
 
 		if (sbo->base.pages)
 			drm_clflush_pages(sbo->base.pages, sbo->base.base.size >> PAGE_SHIFT);

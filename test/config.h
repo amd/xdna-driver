@@ -42,8 +42,8 @@ size_t get_instr_size(const std::string& fname)
     return ret;
 }
 
-// Copy value from text file into a buffer
-void read_from_instr(const std::string& fname, int* buf)
+// Copy DPU instructions from text file into a buffer
+void read_instructions_from_txt(const std::string& fname, int* buf)
 {
     std::ifstream myfile(fname);
     unsigned int value;
@@ -70,7 +70,7 @@ void read_from_instr(const std::string& fname, int* buf)
 #define OFM_SIZE(t)        std::get<3>(t)
 #define INTER_SIZE(t)      std::get<4>(t)
 #define MC_CODE_SIZE(t)    std::get<5>(t)
-#define DUMMY_MC_CODE_BUFFER_SIZE (16) // use in case buffer doesn't exist, in bytes
+#define DUMMY_MC_CODE_BUFFER_SIZE (16UL) // use in case buffer doesn't exist, in bytes
 
 std::tuple<int, int, int, int, int, int>
 parse_config_file(const std::string& fname)
@@ -131,7 +131,7 @@ parse_config_file(const std::string& fname)
   return std::make_tuple(ifm_addr, ifm_size, param_size, ofm_size, inter_size, mc_code_size);
 }
 
-void fill_buffer(int* buf, size_t size, size_t offset, const std::string& fname)
+void read_data_from_bin(const std::string& fname, size_t offset, size_t size, int* buf)
 {
   std::ifstream myfile(fname, std::ios::in | std::ios::binary);
 
@@ -152,8 +152,9 @@ int comp_buf_strides(int8_t *buff, std::string &goldenFile, std::string &dumpFil
   
   std::ofstream ofs(dumpFile, std::ios::out | std::ios::binary);
   
+  std::string s("Failed to open dump file: ");
   if (!ofs.is_open())
-    throw std::runtime_error("Failed to open dump file");
+    throw std::runtime_error(s + dumpFile);
 
   std::istreambuf_iterator<char> it(ifs), end;
 
@@ -166,7 +167,7 @@ int comp_buf_strides(int8_t *buff, std::string &goldenFile, std::string &dumpFil
           char byt = *it;
 
           if (byt != buff[idx]) {
-            //std::cout << "Buffers differ at index " << idx << std::endl;
+            std::cout << "Buffers differ at index " << idx << std::endl;
             ret = 1; 
           }
           ofs.write((char*)(&(buff[idx])), 1);
@@ -251,8 +252,9 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
 void dump_buf_to_file(int8_t *buf, size_t size, const std::string &dumpfile)
 {
     std::ofstream ofs(dumpfile, std::ios::out | std::ios::binary);
+    std::string s("Failed to open dump file: ");
     if (!ofs.is_open())
-        throw std::runtime_error("Failed to open dump file");
+        throw std::runtime_error(s + dumpfile);
 
     for (int i = 0; i < size; i++) {
         ofs.write((char*)(&(buf[i])), 1);

@@ -55,6 +55,7 @@ struct amdxdna_sched_job {
 	struct drm_sched_job	base;
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
+	struct mm_struct	*mm;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
 	/* user can wait on this fence */
@@ -147,6 +148,7 @@ static int amdxdna_sched_job_init(struct amdxdna_sched_job *job,
 
 	job->cmd->state = ERT_CMD_STATE_NEW;
 	job->hwctx = hwctx;
+	job->mm = current->mm;
 
 	job->fence = amdxdna_fence_create(hwctx);
 	if (!job->fence) {
@@ -208,6 +210,7 @@ amdxdna_sched_resp_handler(void *handle, const u32 *data, size_t size)
 out:
 	dma_fence_signal(job->fence);
 	dma_fence_put(job->fence);
+	mmput(job->mm);
 	amdxdna_job_put(job);
 }
 
@@ -224,6 +227,9 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 
 	xdna = hwctx->client->xdna;
 
+	if (!mmget_not_zero(job->mm))
+		return ERR_PTR(-ESRCH);
+
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
 	cmd_buf = &job->cmd->data[job->cmd->extra_cu_masks];
@@ -234,6 +240,7 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 	if (ret) {
 		dma_fence_put(job->fence);
 		amdxdna_job_put(job);
+		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	}
 
@@ -370,7 +377,7 @@ static void amdxdna_hwctx_release(struct amdxdna_hwctx *hwctx)
 	mutex_lock(&hwctx->client->mm_lock);
 	amdxdna_unpin_pages(&hwctx->heap->mem);
 	mutex_unlock(&hwctx->client->mm_lock);
-	drm_gem_object_put(&hwctx->heap->base);
+	amdxdna_put_dev_heap(hwctx->heap);
 	kfree(hwctx->name);
 	kfree(hwctx);
 }
@@ -678,6 +685,83 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 	mutex_unlock(&client->hwctx_lock);
 }
 
+static void populate_hwctx(struct amdxdna_drm_query_hwctx *hwctx_user,
+			   struct amdxdna_hwctx *hwctx, pid_t pid)
+{
+	hwctx_user->pid = pid;
+	hwctx_user->context_id = hwctx->id;
+	hwctx_user->start_col = hwctx->start_col;
+	hwctx_user->num_col = hwctx->num_col;
+	hwctx_user->command_submissions = hwctx->seq;
+	/* TODO Not implemented section */
+	hwctx_user->command_completions = 0;
+	hwctx_user->migrations = 0;
+	hwctx_user->preemptions = 0;
+	hwctx_user->errors = 0;
+}
+
+int amdxdna_hwctx_status(struct drm_device *dev, u32 *buf_size,
+			 struct amdxdna_drm_query_hwctx __user *buf)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_client *client, *tmp_client;
+	struct amdxdna_drm_query_hwctx *hwctx_user;
+	struct amdxdna_hwctx *hwctx;
+	bool overflow = false;
+	u32 req_bytes = 0;
+	u32 hw_i = 0;
+	int next = 0;
+	int ret = 0;
+	int idx;
+
+	hwctx_user = kzalloc(sizeof(*hwctx_user), GFP_KERNEL);
+	if (!hwctx_user) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry_safe(client, tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&client->hwctx_srcu);
+		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+			req_bytes += sizeof(*hwctx_user);
+			if (*buf_size < req_bytes) {
+				/* Continue iterating to get the required size */
+				overflow = true;
+				continue;
+			}
+
+			populate_hwctx(hwctx_user, hwctx, client->pid);
+
+			if (copy_to_user(&buf[hw_i], hwctx_user, sizeof(*hwctx_user))) {
+				ret = -EFAULT;
+				goto fail_copy;
+			}
+			hw_i++;
+		}
+		srcu_read_unlock(&client->hwctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (overflow) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %u.",
+			 *buf_size, req_bytes);
+		ret = -EINVAL;
+	}
+
+	kfree(hwctx_user);
+	*buf_size = req_bytes;
+	return ret;
+
+fail_copy:
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+	mutex_unlock(&xdna->dev_lock);
+	kfree(hwctx_user);
+fail:
+	*buf_size = req_bytes;
+	return ret;
+}
+
 static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 				      struct srcu_struct *ss)
 {
@@ -730,9 +814,9 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_drm_create_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_gem_obj *heap;
-	struct amdxdna_xclbin *xclbin;
 	struct amdxdna_qos_info qos_info;
+	struct amdxdna_xclbin *xclbin;
+	struct amdxdna_gem_obj *heap;
 	uuid_t xclbin_uuid;
 	int ret, idx;
 
@@ -794,7 +878,7 @@ unload_xclbin:
 	amdxdna_xclbin_unload(xdna, xclbin);
 put_heap:
 	mutex_unlock(&xdna->dev_lock);
-	drm_gem_object_put(&heap->base);
+	amdxdna_put_dev_heap(heap);
 out:
 	drm_dev_exit(idx);
 	return ret;
@@ -852,6 +936,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_drm_exec_cmd *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct ww_acquire_ctx acquire_ctx;
+	struct amdxdna_gem_shmem_obj *sbo;
 	struct amdxdna_sched_job *job;
 	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
@@ -938,9 +1023,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 		type = amdxdna_gem_get_obj_type(gobj);
 		switch (type) {
 		case AMDXDNA_SHMEM_OBJ:
-			struct amdxdna_gem_shmem_obj *sbo;
-
-			sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+			sbo = to_xdna_gem_shmem_obj(gobj);
 			if (sbo->pinned)
 				continue;
 
@@ -1173,7 +1256,7 @@ unload_xclbin:
 	amdxdna_xclbin_unload(xdna, xclbin);
 put_heap:
 	mutex_unlock(&xdna->dev_lock);
-	drm_gem_object_put(&heap->base);
+	amdxdna_put_dev_heap(heap);
 out:
 	drm_dev_exit(idx);
 	return ret;
