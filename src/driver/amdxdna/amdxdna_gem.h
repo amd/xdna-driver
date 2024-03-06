@@ -23,7 +23,7 @@ struct amdxdna_mem {
 	size_t			size;
 	struct page		**pages;
 	u32			nr_pages;
-	u32			pin_cnt;
+	int			pin_cnt;
 };
 
 struct amdxdna_gem_obj {

@@ -20,15 +20,10 @@ int amdxdna_pin_pages(struct amdxdna_mem *mem)
 {
 	int pinned, total_pinned = 0;
 
-	if (mem->pages) {
+	if (mem->pages[0]) {
 		mem->pin_cnt++;
 		return 0;
 	}
-
-	mem->pages = kvmalloc_array(mem->nr_pages, sizeof(struct page *),
-				    GFP_KERNEL);
-	if (!mem->pages)
-		return -ENOMEM;
 
 	while (total_pinned < mem->nr_pages) {
 		pinned = pin_user_pages_fast(mem->userptr +
@@ -45,7 +40,6 @@ int amdxdna_pin_pages(struct amdxdna_mem *mem)
 unpin:
 	if (total_pinned > 0)
 		unpin_user_pages_dirty_lock(mem->pages, total_pinned, true);
-	kvfree(mem->pages);
 	return pinned;
 }
 
@@ -55,11 +49,10 @@ void amdxdna_unpin_pages(struct amdxdna_mem *mem)
 		return;
 
 	unpin_user_pages_dirty_lock(mem->pages, mem->nr_pages, true);
-	kvfree(mem->pages);
-	mem->pages = NULL;
+	memset(mem->pages, 0, sizeof(mem->pages) * mem->nr_pages);
 }
 
-static void
+static int
 amdxdna_user_mem_init(struct amdxdna_mem *mem, u64 vaddr, size_t size)
 {
 	mem->userptr = vaddr;
@@ -68,16 +61,21 @@ amdxdna_user_mem_init(struct amdxdna_mem *mem, u64 vaddr, size_t size)
 
 	mem->nr_pages = (PAGE_ALIGN(vaddr + mem->size) -
 			 (vaddr & PAGE_MASK)) >> PAGE_SHIFT;
+
+	mem->pages = kvcalloc(mem->nr_pages, sizeof(struct page *), GFP_KERNEL);
+	if (!mem->pages)
+		return -ENOMEM;
+
+	return 0;
 }
 
 static void
 amdxdna_user_mem_fini(struct amdxdna_mem *mem)
 {
-	if (mem->pages) {
+	if (mem->pages[0])
 		unpin_user_pages_dirty_lock(mem->pages, mem->nr_pages, true);
-		kvfree(mem->pages);
-	}
 
+	kvfree(mem->pages);
 	memset(mem, 0, sizeof(*mem));
 }
 
@@ -226,7 +224,11 @@ static int amdxdna_drm_create_dev_heap(struct drm_device *dev,
 	abo->type = AMDXDNA_BO_DEV_HEAP;
 	abo->client = client;
 
-	amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	if (ret) {
+		XDNA_ERR(xdna, "user mem init failed, ret %d", ret);
+		goto release_obj;
+	}
 
 	abo->mem.dev_addr = client->xdna->dev_info->dev_mem_base;
 
@@ -250,6 +252,7 @@ static int amdxdna_drm_create_dev_heap(struct drm_device *dev,
 
 clean_bo_mem:
 	amdxdna_user_mem_fini(&abo->mem);
+release_obj:
 	drm_gem_object_release(&abo->base);
 	kfree(abo);
 unlock_and_err:
@@ -385,7 +388,11 @@ static int amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 	abo->client = client;
 	abo->type = AMDXDNA_BO_CMD;
 
-	amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, abo->base.size);
+	if (ret) {
+		XDNA_ERR(xdna, "user mem init failed, ret %d", ret);
+		goto release_obj;
+	}
 
 	ret = amdxdna_pin_pages(&abo->mem);
 	if (ret) {
@@ -419,6 +426,7 @@ unpin:
 	amdxdna_unpin_pages(&abo->mem);
 fini_user_map:
 	amdxdna_user_mem_fini(&abo->mem);
+release_obj:
 	drm_gem_object_release(&abo->base);
 	kfree(abo);
 	return ret;
