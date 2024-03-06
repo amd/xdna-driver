@@ -685,6 +685,83 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 	mutex_unlock(&client->hwctx_lock);
 }
 
+static void populate_hwctx(struct amdxdna_drm_query_hwctx *hwctx_user,
+			   struct amdxdna_hwctx *hwctx, pid_t pid)
+{
+	hwctx_user->pid = pid;
+	hwctx_user->context_id = hwctx->id;
+	hwctx_user->start_col = hwctx->start_col;
+	hwctx_user->num_col = hwctx->num_col;
+	hwctx_user->command_submissions = hwctx->seq;
+	/* TODO Not implemented section */
+	hwctx_user->command_completions = 0;
+	hwctx_user->migrations = 0;
+	hwctx_user->preemptions = 0;
+	hwctx_user->errors = 0;
+}
+
+int amdxdna_hwctx_status(struct drm_device *dev, u32 *buf_size,
+			 struct amdxdna_drm_query_hwctx __user *buf)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_client *client, *tmp_client;
+	struct amdxdna_drm_query_hwctx *hwctx_user;
+	struct amdxdna_hwctx *hwctx;
+	bool overflow = false;
+	u32 req_bytes = 0;
+	u32 hw_i = 0;
+	int next = 0;
+	int ret = 0;
+	int idx;
+
+	hwctx_user = kzalloc(sizeof(*hwctx_user), GFP_KERNEL);
+	if (!hwctx_user) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry_safe(client, tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&client->hwctx_srcu);
+		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+			req_bytes += sizeof(*hwctx_user);
+			if (*buf_size < req_bytes) {
+				/* Continue iterating to get the required size */
+				overflow = true;
+				continue;
+			}
+
+			populate_hwctx(hwctx_user, hwctx, client->pid);
+
+			if (copy_to_user(&buf[hw_i], hwctx_user, sizeof(*hwctx_user))) {
+				ret = -EFAULT;
+				goto fail_copy;
+			}
+			hw_i++;
+		}
+		srcu_read_unlock(&client->hwctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (overflow) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %u.",
+			 *buf_size, req_bytes);
+		ret = -EINVAL;
+	}
+
+	kfree(hwctx_user);
+	*buf_size = req_bytes;
+	return ret;
+
+fail_copy:
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+	mutex_unlock(&xdna->dev_lock);
+	kfree(hwctx_user);
+fail:
+	*buf_size = req_bytes;
+	return ret;
+}
+
 static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 				      struct srcu_struct *ss)
 {

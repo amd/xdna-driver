@@ -206,6 +206,58 @@ struct aie_info
   }
 };
 
+struct partition_info
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::aie_partition_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    amdxdna_drm_query_hwctx* data;
+    const uint32_t output_size = 10 * sizeof(*data);
+
+    std::vector<char> payload(output_size);
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
+      .buffer_size = output_size,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    if (output_size < arg.buffer_size) {
+      throw xrt_core::query::exception(
+        boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Insufficient buffer size. Need: %u") % arg.buffer_size));
+    }
+
+    uint32_t data_size = arg.buffer_size / sizeof(*data);
+    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    query::aie_partition_info::result_type output;
+    for (uint32_t i = 0; i < data_size; i++) {
+      const auto& entry = data[i];
+
+      xrt_core::query::aie_partition_info::data new_entry;
+      new_entry.metadata.id = std::to_string(entry.context_id);
+      new_entry.metadata.xclbin_uuid = "N/A";
+      new_entry.start_col = entry.start_col;
+      new_entry.num_cols = entry.num_col;
+      new_entry.pid = entry.pid;
+      new_entry.command_submissions = entry.command_submissions;
+      new_entry.command_completions = entry.command_completions;
+      new_entry.migrations = entry.migrations;
+      new_entry.preemptions = entry.preemptions;
+      new_entry.errors = entry.errors;
+      output.push_back(new_entry);
+    }
+    return output;
+  }
+};
+
 struct bdf
 {
   using result_type = query::pcie_bdf::result_type;
@@ -490,6 +542,7 @@ emplace_func1_request()
 static void
 initialize_query_table()
 {
+  emplace_func0_request<query::aie_partition_info,             partition_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
