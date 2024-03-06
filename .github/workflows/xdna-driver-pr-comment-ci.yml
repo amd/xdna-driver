@@ -1,0 +1,81 @@
+name: XDNA DRIVER PR COMMENT CI
+
+on:
+   issue_comment:
+    types: [created]
+
+jobs:
+   check:
+    runs-on: [ Ubuntu-22.04 ]
+    if: contains('amd-akshatah, kingtamamd, maxzhen, raphaelbamd, sonals, shirishjo ', format('{0},', github.actor)) && github.event.comment.body == '/build' && github.event.issue.pull_request
+    steps:
+      - name: Check the build comment is from a valid authorizer
+        run: echo "${{ github.actor }} is a valid authorizer, running the build"
+   build:
+    needs: check
+    runs-on: [ Ubuntu-22.04 ]
+    steps:
+      - name: Checkout for Push
+        if: ${{ github.event_name != 'pull_request_target' }}
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.XDNA_DRIVER_GHA_PAT }}
+      - name: Checkout PR
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/checkout@v3
+        with:
+          repository: "${{ github.event.pull_request.head.repo.full_name }}"
+          ref: "${{ github.event.pull_request.head.ref }}"
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.XDNA_DRIVER_GHA_PAT }}
+
+      - name: Checkout private repository
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ secrets.INTERNAL_REPO }}/xdna-driver-int
+          path: xdna-driver-int
+          ref: main
+          token: ${{ secrets.XDNA_DRIVER_GHA_PAT }}
+          fetch-depth: 0
+          github-server-url: ${{ secrets.SERVER_URL }}
+
+      - name: Use composite action for build
+        uses: ./xdna-driver-int/build
+        with:
+           buildNumber: ${{ github.run_number }}
+           xrtPluginVersionPatch: ${{ github.run_number }}
+           githubRef: ${{ github.ref }}
+           artifactoryUrl: ${{ secrets.ARTIFACTORY_URL }}
+           jfrogCli: ${{ secrets.JFROG_CLI }}
+           vaultPwd: ${{ secrets.VAULT_PWD }}
+           vaultFile: ${{ secrets.VAULT_FILE }}
+           sshKey: ${{ secrets.SSH_PUBLIC_KEY }}
+           prheadRef: ${{ github.event.pull_request.head.ref }}
+           prNumber: ${{ github.event.pull_request.number }}
+           logFile: ${{ secrets.LOG_FILE }}
+           repoRoot: ${{ secrets.REPO_ROOT }}
+           user: ${{ secrets.USER }}
+           userPwd: ${{ secrets.USER_PASSWORD }}
+           ci: "true"
+           gitInternalRepo: ${{ secrets.GIT_INTERNAL_REPO }}
+           gitExternalRepo: ${{ secrets.GIT_EXTERNAL_REPO }}
+
+   upload:
+    if: ${{ always() }}
+    needs: build
+    runs-on: [ Ubuntu-22.04 ]
+    steps:
+      - name: Use composite action to upload-artifacts
+        uses: ./xdna-driver-int/upload-artifacts
+        with:
+           buildNumber: ${{ github.run_number }}
+           artifactoryUrl: ${{ secrets.ARTIFACTORY_URL }}
+           jfrogCli: ${{ secrets.JFROG_CLI }}
+           userPwd: ${{ secrets.USER_PASSWORD }}
+           user: ${{ secrets.USER }}
+           logFile: ${{ secrets.LOG_FILE }}
+           repoRoot: ${{ secrets.REPO_ROOT }}
+                                                     
