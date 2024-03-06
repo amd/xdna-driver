@@ -51,9 +51,9 @@ struct amdxdna_gem_shmem_obj {
 	bool				pinned;
 };
 
-#define to_xdna_gem_shmem_obj(shmem)				\
-	((struct amdxdna_gem_shmem_obj *)container_of((shmem),	\
-	struct amdxdna_gem_shmem_obj, base))
+#define to_xdna_gem_shmem_obj(obj)				\
+	((struct amdxdna_gem_shmem_obj *)container_of((obj),	\
+	struct amdxdna_gem_shmem_obj, base.base))
 
 struct drm_gem_object *
 amdxdna_gem_create_object(struct drm_device *dev, size_t size);

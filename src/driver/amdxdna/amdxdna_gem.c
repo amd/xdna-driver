@@ -119,7 +119,7 @@ static void amdxdna_gem_shmem_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_gem_shmem_obj *sbo;
 
-	sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+	sbo = to_xdna_gem_shmem_obj(gobj);
 	XDNA_DBG(sbo->client->xdna, "SHMEM bo pinned %d", sbo->pinned);
 	if (sbo->pinned)
 		drm_gem_shmem_unpin(&sbo->base);
@@ -172,7 +172,7 @@ static int amdxdna_drm_alloc_shmem(struct drm_device *dev,
 
 	shmem->map_wc = false;
 
-	sbo = to_xdna_gem_shmem_obj(shmem);
+	sbo = to_xdna_gem_shmem_obj(&shmem->base);
 	sbo->client = client;
 	sbo->mmap_offset = drm_vma_node_offset_addr(&shmem->base.vma_node);
 	sbo->pinned = false;
@@ -462,6 +462,8 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 {
 	struct amdxdna_drm_get_bo_info *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_gem_shmem_obj *sbo;
+	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 	enum amdxdna_obj_type type;
 
@@ -477,8 +479,6 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	type = amdxdna_gem_get_obj_type(gobj);
 	switch (type) {
 	case AMDXDNA_GEM_OBJ:
-		struct amdxdna_gem_obj *abo;
-
 		abo = to_xdna_gem_obj(gobj);
 		switch (abo->type) {
 		case AMDXDNA_BO_DEV_HEAP:
@@ -499,9 +499,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 		}
 		break;
 	case AMDXDNA_SHMEM_OBJ:
-		struct amdxdna_gem_shmem_obj *sbo;
-
-		sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+		sbo = to_xdna_gem_shmem_obj(gobj);
 		args->map_offset = sbo->mmap_offset;
 		args->vaddr = AMDXDNA_INVALID_ADDR;
 		args->xdna_addr = AMDXDNA_INVALID_ADDR;
@@ -529,6 +527,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_sync_bo *args = data;
+	struct amdxdna_gem_shmem_obj *sbo;
+	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 	enum amdxdna_obj_type type;
 	int ret = 0;
@@ -542,17 +542,13 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	type = amdxdna_gem_get_obj_type(gobj);
 	switch (type) {
 	case AMDXDNA_GEM_OBJ:
-		struct amdxdna_gem_obj *abo;
-
 		abo = to_xdna_gem_obj(gobj);
 		XDNA_DBG(xdna, "type %d", abo->type);
 
 		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
 		break;
 	case AMDXDNA_SHMEM_OBJ:
-		struct amdxdna_gem_shmem_obj *sbo;
-
-		sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+		sbo = to_xdna_gem_shmem_obj(gobj);
 
 		if (sbo->base.pages)
 			drm_clflush_pages(sbo->base.pages, sbo->base.base.size >> PAGE_SHIFT);

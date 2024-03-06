@@ -55,6 +55,7 @@ struct amdxdna_sched_job {
 	struct drm_sched_job	base;
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
+	struct mm_struct	*mm;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
 	/* user can wait on this fence */
@@ -147,6 +148,7 @@ static int amdxdna_sched_job_init(struct amdxdna_sched_job *job,
 
 	job->cmd->state = ERT_CMD_STATE_NEW;
 	job->hwctx = hwctx;
+	job->mm = current->mm;
 
 	job->fence = amdxdna_fence_create(hwctx);
 	if (!job->fence) {
@@ -208,6 +210,7 @@ amdxdna_sched_resp_handler(void *handle, const u32 *data, size_t size)
 out:
 	dma_fence_signal(job->fence);
 	dma_fence_put(job->fence);
+	mmput(job->mm);
 	amdxdna_job_put(job);
 }
 
@@ -224,6 +227,9 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 
 	xdna = hwctx->client->xdna;
 
+	if (!mmget_not_zero(job->mm))
+		return ERR_PTR(-ESRCH);
+
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
 	cmd_buf = &job->cmd->data[job->cmd->extra_cu_masks];
@@ -234,6 +240,7 @@ amdxdna_sched_job_run(struct drm_sched_job *sched_job)
 	if (ret) {
 		dma_fence_put(job->fence);
 		amdxdna_job_put(job);
+		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	}
 
@@ -852,6 +859,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_drm_exec_cmd *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct ww_acquire_ctx acquire_ctx;
+	struct amdxdna_gem_shmem_obj *sbo;
 	struct amdxdna_sched_job *job;
 	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
@@ -938,9 +946,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 		type = amdxdna_gem_get_obj_type(gobj);
 		switch (type) {
 		case AMDXDNA_SHMEM_OBJ:
-			struct amdxdna_gem_shmem_obj *sbo;
-
-			sbo = to_xdna_gem_shmem_obj(to_drm_gem_shmem_obj(gobj));
+			sbo = to_xdna_gem_shmem_obj(gobj);
 			if (sbo->pinned)
 				continue;
 
