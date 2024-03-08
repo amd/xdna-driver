@@ -54,6 +54,7 @@ int amdxdna_hwctx_status(struct drm_device *dev, u32 *buf_size,
 			 struct amdxdna_drm_query_hwctx __user *buf);
 
 int amdxdna_drm_create_hwctx_legacy_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

@@ -884,6 +884,11 @@ out:
 	return ret;
 }
 
+int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+{
+    return -EOPNOTSUPP;
+}
+
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
