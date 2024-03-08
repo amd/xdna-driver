@@ -809,10 +809,10 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 	mutex_unlock(&client->hwctx_lock);
 }
 
-int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+int amdxdna_drm_create_hwctx_legacy_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_create_hwctx *args = data;
+	struct amdxdna_drm_create_hwctx_legacy *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_qos_info qos_info;
 	struct amdxdna_xclbin *xclbin;

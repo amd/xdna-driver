@@ -34,7 +34,7 @@ void
 hw_ctx_kmq::
 create_ctx(const device& device, const xrt::xclbin& xclbin)
 {
-  amdxdna_drm_create_hwctx arg = {};
+  amdxdna_drm_create_hwctx_legacy arg = {};
   uuid_copy(arg.xclbin_uuid, xclbin.get_uuid().get());
 
   const size_t ip_buf_sz = 4 * 1024; // should be big enough
@@ -46,7 +46,7 @@ create_ctx(const device& device, const xrt::xclbin& xclbin)
   arg.qos_size = sizeof(amdxdna_qos_info);
   arg.qos_p = reinterpret_cast<uintptr_t>(get_qos_info());
 
-  device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX_LEGACY, &arg);
   set_slotidx(arg.handle);
   init_cu_info(ip_buf.get());
 }

@@ -35,7 +35,7 @@ extern "C" {
  */
 
 enum amdxdna_drm_ioctl_id {
-	DRM_AMDXDNA_CREATE_HWCTX,
+	DRM_AMDXDNA_CREATE_HWCTX_LEGACY,
 	DRM_AMDXDNA_DESTROY_HWCTX,
 	DRM_AMDXDNA_CREATE_BO,
 	DRM_AMDXDNA_GET_BO_INFO,
@@ -85,7 +85,7 @@ struct amdxdna_ip_name_index {
 };
 
 /**
- * struct amdxdna_drm_create_hwctx - Create hardware context.
+ * struct amdxdna_drm_create_hwctx_legacy - Create hardware context.
  * @ext: MBZ.
  * @ext_flags: MBZ.
  * @xclbin_uuid: UUID of xclbin binary.
@@ -97,7 +97,7 @@ struct amdxdna_ip_name_index {
  * @qos_size: QoS info buffer size.
  * @handle: Returned hardware context handle.
  */
-struct amdxdna_drm_create_hwctx {
+struct amdxdna_drm_create_hwctx_legacy {
 	__u64 ext;
 	__u64 ext_flags;
 	__u8  xclbin_uuid[16];
@@ -409,9 +409,9 @@ struct amdxdna_drm_attach_detach_bo {
 	__u32 hwctx;
 };
 
-#define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
-		 struct amdxdna_drm_create_hwctx)
+#define DRM_IOCTL_AMDXDNA_CREATE_HWCTX_LEGACY \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX_LEGACY, \
+		 struct amdxdna_drm_create_hwctx_legacy)
 
 #define DRM_IOCTL_AMDXDNA_DESTROY_HWCTX \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DESTROY_HWCTX, \
