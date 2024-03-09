@@ -1,0 +1,4 @@
+# ignore the folder called build anywhere, but not files called build
+build/
+version.h
+.gradle/
