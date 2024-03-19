@@ -46,7 +46,6 @@ struct solver_node {
 
 struct solver_rgroup {
 	u32				rgid;
-	u32				allocated;
 	u32				nnode;
 	u32				npartition_node;
 

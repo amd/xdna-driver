@@ -16,6 +16,9 @@
 #include "amdxdna_devel.h"
 #endif
 
+int npu_max_col = XRS_MAX_COL;
+module_param(npu_max_col, int, (S_IRUGO|S_IWUSR));
+MODULE_PARM_DESC(npu_max_col, "Maximum column could be used");
 /*
  * The management mailbox channel is allocated by NPU firmware.
  * The related register and ring buffer information is on SRAM BAR.
@@ -466,7 +469,7 @@ int npu_init(struct amdxdna_dev *xdna)
 	xrs_cfg.clk_list.cu_clk_list[2] = 1000;
 	xrs_cfg.sys_eff_factor = 1;
 	xrs_cfg.actions = &npu_xrs_actions;
-	xrs_cfg.total_col = ndev->metadata.cols;
+	xrs_cfg.total_col = min(npu_max_col, ndev->metadata.cols);
 	xrs_cfg.mode = XRS_MODE_TEMPORAL_BEST;
 	xrs_cfg.dev = &xdna->pdev->dev;
 	ndev->xrs_hdl = xrs_init(&xrs_cfg);

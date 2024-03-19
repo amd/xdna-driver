@@ -94,7 +94,6 @@ static void remove_partition_node(struct solver_rgroup *rgp,
 
 	list_del(&pt_node->list);
 	rgp->npartition_node--;
-	rgp->allocated -= pt_node->ncol;
 
 	bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncol);
 	kfree(pt_node);
@@ -189,7 +188,6 @@ static void add_partition_node(struct solver_rgroup *rgp,
 	list_add_tail(&pt_node->list, &rgp->pt_node_list);
 
 	rgp->npartition_node++;
-	rgp->allocated += pt_node->ncol;
 	bitmap_set(rgp->resbit, pt_node->start_col, pt_node->ncol);
 }
 
@@ -279,9 +277,6 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 		dev_err(xrs->cfg.dev, "rid %lld is in-use", req->rid);
 		return -EEXIST;
 	}
-
-	if (xrs->cfg.total_col - xrs->rgp.allocated < pmp->cdo->ncols)
-		return -EBUSY;
 
 	snode = allocate_solver_node(xrs, req);
 	if (!snode)
