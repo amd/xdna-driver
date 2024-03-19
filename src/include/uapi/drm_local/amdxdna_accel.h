@@ -247,15 +247,11 @@ struct amdxdna_drm_attach_detach_bo {
 
 /**
  * struct amdxdna_drm_query_aie_status - Query the status of the AIE hardware
- * @start_col: The index of the first AIE column to get data from
- * @num_col: The number of columns to gather data from, including the starting column
  * @buffer_size: The size of the user space buffer
  * @buffer: The user space buffer that will return the AIE status
  * @cols_filled: A bitmap of AIE columns whose data has been returned in the buffer.
  */
 struct amdxdna_drm_query_aie_status {
-	__u32 start_col; /* in */
-	__u32 num_cols; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* out */
 	__u32 cols_filled; /* out */

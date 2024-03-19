@@ -550,22 +550,13 @@ int npu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_st
 	struct npu_device *ndev = xdna->dev_handle;
 	int ret;
 
-	XDNA_DBG(xdna, "Start Col: %u Num Col: %u", args->start_col, args->num_cols);
-
-	if (args->start_col + args->num_cols > ndev->metadata.cols) {
-		XDNA_ERR(xdna, "Invalid Columnns. Start: %u. Req Size: %u. Avail Size: %u",
-			 args->start_col, args->num_cols, ndev->metadata.cols);
-		return -EINVAL;
-	}
-
-	if (args->num_cols * ndev->metadata.size < args->buffer_size) {
+	if (ndev->metadata.cols * ndev->metadata.size < args->buffer_size) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given Size: %u. Need Size: %u.",
-			 args->buffer_size, args->num_cols * ndev->metadata.size);
+			 args->buffer_size, ndev->metadata.cols * ndev->metadata.size);
 		return -EINVAL;
 	}
 
-	ret = npu_query_status(ndev, args->start_col, args->num_cols,
-			       u64_to_user_ptr(args->buffer), args->buffer_size,
+	ret = npu_query_status(ndev, u64_to_user_ptr(args->buffer), args->buffer_size,
 			       &args->cols_filled);
 
 	if (ret)

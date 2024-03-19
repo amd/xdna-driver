@@ -36,8 +36,7 @@ int npu_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size);
 int npu_query_error(struct npu_device *ndev, u64 addr, u32 size, u32 *row,
 		    u32 *col, u32 *mod, u32 *count, bool *next);
-int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col,
-		     char *buf, u32 size, u32 *cols_filled);
+int npu_query_status(struct npu_device *ndev, char *buf, u32 size, u32 *cols_filled);
 int npu_query_power_sensor(struct npu_device *ndev, struct amdxdna_drm_query_sensor *args);
 
 int npu_config_cu(struct npu_device *ndev, struct mailbox_channel *chann,
