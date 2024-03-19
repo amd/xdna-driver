@@ -109,17 +109,149 @@ struct amdxdna_drm_create_hwctx {
 	__u32 handle;
 };
 
+/* Hack: driver gets xclbin from user directly. */
+struct amdxdna_drm_create_hwctx_unsecure {
+	__u64	xclbin_p;
+	__u64	ip_buf_p;
+	__u32	ip_buf_size;
+	__u32	pad;
+	__u64	qos_p;
+	__u32	qos_size;
+	__u32	handle;
+};
+
+/**
+ * struct amdxdna_drm_destroy_hwctx - Destroy hardware context.
+ * @handle: Hardware context handle.
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_destroy_hwctx {
+	__u32 handle;
+	__u32 pad;
+};
+
+#define AMDXDNA_INVALID_BO_HANDLE 0
+
+enum amdxdna_bo_type {
+	AMDXDNA_BO_INVALID = 0,
+	AMDXDNA_BO_SHMEM,
+	AMDXDNA_BO_DEV_HEAP,
+	AMDXDNA_BO_DEV,
+	AMDXDNA_BO_CMD,
+};
+
+/**
+ * struct amdxdna_drm_create_bo - Create a buffer object.
+ * @flags: Buffer flags. MBZ.
+ * @type: Buffer type.
+ * @vaddr: User VA of buffer if applied.
+ * @size: Size in bytes.
+ * @handle: Returned DRM buffer object handle.
+ */
+struct amdxdna_drm_create_bo {
+	__u64	flags;
+	__u32	type;
+	__u32	_pad;
+	__u64	vaddr;
+	__u64	size;
+	__u32	handle;
+};
+
+/**
+ * struct amdxdna_drm_get_bo_info - Get buffer object information.
+ * @ext: MBZ.
+ * @ext_flags: MBZ.
+ * @handle: DRM buffer object handle.
+ * @map_offset: Returned DRM fake offset for mmap().
+ * @vaddr: Returned user VA of buffer. 0 in case user needs mmap().
+ * @xdna_addr: Returned XDNA device virtual address.
+ */
+struct amdxdna_drm_get_bo_info {
+	__u64 ext;
+	__u64 ext_flags;
+	__u32 handle;
+	__u32 _pad;
+	__u64 map_offset;
+	__u64 vaddr;
+	__u64 xdna_addr;
+};
+
+/**
+ * struct amdxdna_drm_sync_bo - Sync buffer object.
+ * @handle: Buffer object handle.
+ * @direction: Direction of sync, can be from device or to device.
+ * @offset: Offset in the buffer to sync.
+ * @size: Size in bytes.
+ */
+struct amdxdna_drm_sync_bo {
+	__u32 handle;
+#define SYNC_DIRECT_TO_DEVICE	0U
+#define SYNC_DIRECT_FROM_DEVICE	1U
+	__u32 direction;
+	__u64 offset;
+	__u64 size;
+};
+
+/**
+ * struct amdxdna_drm_exec_cmd - Execute command.
+ * @ext: MBZ.
+ * @ext_flags: MBZ.
+ * @hwctx: Hardware context handle.
+ * @cmd_bo_handles: Array of command BO handles
+ * @arg_bo_handles: Array of BO handles for all BOs referenced by these commands
+ * @cmd_bo_count: Number of BO handles in the cmd_bo_handles array
+ * @arg_bo_count: Number of BO handles in the arg_bo_handles array
+ * @seq: Returned sequence number for this command.
+ */
+struct amdxdna_drm_exec_cmd {
+	__u64 ext;
+	__u64 ext_flags;
+	__u32 hwctx;
+	__u32 _pad;
+	__u64 cmd_bo_handles;
+	__u64 arg_bo_handles;
+	__u32 cmd_bo_count;
+	__u32 arg_bo_count;
+	__u64 seq;
+};
+
+/**
+ * struct amdxdna_drm_wait_cmd - Wait exectuion command.
+ *
+ * @hwctx: hardware context handle.
+ * @timeout: timeout in ms, 0 implies infinite wait.
+ * @seq: sequence number of the command returned by execute command.
+ *
+ * Wait a command specified by seq to be completed.
+ * Using AMDXDNA_INVALID_CMD_HANDLE as seq means wait till there is a free slot
+ * to submit a new command.
+ */
+struct amdxdna_drm_wait_cmd {
+	__u32 hwctx;
+	__u32 timeout;
+	__u64 seq;
+};
+
+/**
+ * struct amdxdna_drm_attach_detach_bo - Attach/detach a BO to/from a context.
+ *
+ * @hwctx: hardware context handle.
+ * @bo: BO handle.
+ *
+ * Assign/unassign a BO to a hardware context for its exclusive use.
+ */
+struct amdxdna_drm_attach_detach_bo {
+	__u32 bo;
+	__u32 hwctx;
+};
+
 /**
  * struct amdxdna_drm_query_aie_status - Query the status of the AIE hardware
- * @start_col: The index of the first AIE column to get data from
- * @num_col: The number of columns to gather data from, including the starting column
  * @buffer_size: The size of the user space buffer
  * @buffer: The user space buffer that will return the AIE status
  * @cols_filled: A bitmap of AIE columns whose data has been returned in the buffer.
  */
 struct amdxdna_drm_query_aie_status {
-	__u32 start_col; /* in */
-	__u32 num_cols; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* out */
 	__u32 cols_filled; /* out */
@@ -271,142 +403,6 @@ struct amdxdna_drm_get_info {
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
-};
-
-/* Hack: driver gets xclbin from user directly. */
-struct amdxdna_drm_create_hwctx_unsecure {
-	__u64	xclbin_p;
-	__u64	ip_buf_p;
-	__u32	ip_buf_size;
-	__u32	pad;
-	__u64	qos_p;
-	__u32	qos_size;
-	__u32	handle;
-};
-
-/**
- * struct amdxdna_drm_destroy_hwctx - Destroy hardware context.
- * @handle: Hardware context handle.
- * @pad: MBZ.
- */
-struct amdxdna_drm_destroy_hwctx {
-	__u32 handle;
-	__u32 pad;
-};
-
-#define AMDXDNA_INVALID_BO_HANDLE 0
-
-enum amdxdna_bo_type {
-	AMDXDNA_BO_INVALID = 0,
-	AMDXDNA_BO_SHMEM,
-	AMDXDNA_BO_DEV_HEAP,
-	AMDXDNA_BO_DEV,
-	AMDXDNA_BO_CMD,
-};
-
-/**
- * struct amdxdna_drm_create_bo - Create a buffer object.
- * @flags: Buffer flags. MBZ.
- * @type: Buffer type.
- * @vaddr: User VA of buffer if applied.
- * @size: Size in bytes.
- * @handle: Returned DRM buffer object handle.
- */
-struct amdxdna_drm_create_bo {
-	__u64	flags;
-	__u32	type;
-	__u32	_pad;
-	__u64	vaddr;
-	__u64	size;
-	__u32	handle;
-};
-
-/**
- * struct amdxdna_drm_get_bo_info - Get buffer object information.
- * @ext: MBZ.
- * @ext_flags: MBZ.
- * @handle: DRM buffer object handle.
- * @map_offset: Returned DRM fake offset for mmap().
- * @vaddr: Returned user VA of buffer. 0 in case user needs mmap().
- * @xdna_addr: Returned XDNA device virtual address.
- */
-struct amdxdna_drm_get_bo_info {
-	__u64 ext;
-	__u64 ext_flags;
-	__u32 handle;
-	__u32 _pad;
-	__u64 map_offset;
-	__u64 vaddr;
-	__u64 xdna_addr;
-};
-
-/**
- * struct amdxdna_drm_sync_bo - Sync buffer object.
- * @handle: Buffer object handle.
- * @direction: Direction of sync, can be from device or to device.
- * @offset: Offset in the buffer to sync.
- * @size: Size in bytes.
- */
-struct amdxdna_drm_sync_bo {
-	__u32 handle;
-#define SYNC_DIRECT_TO_DEVICE	0U
-#define SYNC_DIRECT_FROM_DEVICE	1U
-	__u32 direction;
-	__u64 offset;
-	__u64 size;
-};
-
-/**
- * struct amdxdna_drm_exec_cmd - Execute command.
- * @ext: MBZ.
- * @ext_flags: MBZ.
- * @hwctx: Hardware context handle.
- * @cmd_bo_handles: Array of command BO handles
- * @arg_bo_handles: Array of BO handles for all BOs referenced by these commands
- * @cmd_bo_count: Number of BO handles in the cmd_bo_handles array
- * @arg_bo_count: Number of BO handles in the arg_bo_handles array
- * @seq: Returned sequence number for this command.
- */
-struct amdxdna_drm_exec_cmd {
-	__u64 ext;
-	__u64 ext_flags;
-	__u32 hwctx;
-	__u32 _pad;
-	__u64 cmd_bo_handles;
-	__u64 arg_bo_handles;
-	__u32 cmd_bo_count;
-	__u32 arg_bo_count;
-	__u64 seq;
-};
-
-/**
- * struct amdxdna_drm_wait_cmd - Wait exectuion command.
- *
- * @hwctx: hardware context handle.
- * @timeout: timeout in ms, 0 implies infinite wait.
- * @seq: sequence number of the command returned by execute command.
- *
- * Wait a command specified by seq to be completed.
- * Using AMDXDNA_INVALID_CMD_HANDLE as seq means wait till there is a free slot
- * to submit a new command.
- */
-struct amdxdna_drm_wait_cmd {
-	__u32 hwctx;
-	__u32 timeout;
-	__u64 seq;
-};
-
-/**
- * struct amdxdna_drm_attach_detach_bo - Attach/detach a BO to/from a context.
- *
- * @hwctx: hardware context handle.
- * @bo: BO handle.
- *
- * Assign/unassign a BO to a hardware context for its exclusive use.
- */
-struct amdxdna_drm_attach_detach_bo {
-	__u32 bo;
-	__u32 hwctx;
 };
 
 #define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \

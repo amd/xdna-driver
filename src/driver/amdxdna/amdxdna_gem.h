@@ -10,12 +10,6 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
 
-enum amdxdna_obj_type {
-	AMDXDNA_UNKNOWN_OBJ = 0, /* Keep this as the first one */
-	AMDXDNA_GEM_OBJ,
-	AMDXDNA_SHMEM_OBJ,
-};
-
 struct amdxdna_mem {
 	u64			userptr;
 	void			*kva;
@@ -27,41 +21,37 @@ struct amdxdna_mem {
 };
 
 struct amdxdna_gem_obj {
-	struct drm_gem_object	base;
-	struct amdxdna_client	*client;
-	struct amdxdna_mem	mem;
-	u8			type;
-	struct amdxdna_gem_obj	*dev_heap;
-
-	union {
-		struct drm_mm		mm;
-		struct drm_mm_node	mm_node;
-	};
-};
-
-#define to_xdna_gem_obj(obj)				\
-	((struct amdxdna_gem_obj *)container_of((obj),	\
-	struct amdxdna_gem_obj, base))
-
-struct amdxdna_gem_shmem_obj {
 	struct drm_gem_shmem_object	base;
 	struct amdxdna_client		*client;
 	u8				type;
-	u64				mmap_offset;
 	bool				pinned;
+	spinlock_t			lock; /* Protects: pinned */
+	u64				mmap_offset;
+	struct amdxdna_mem		mem;
+	struct amdxdna_gem_obj		*dev_heap;
+	struct drm_mm			mm;
+	struct drm_mm_node		mm_node;
 };
 
-#define to_xdna_gem_shmem_obj(obj)				\
-	((struct amdxdna_gem_shmem_obj *)container_of((obj),	\
-	struct amdxdna_gem_shmem_obj, base.base))
+#define to_gobj(obj)    (&(obj)->base.base)
+
+static inline struct amdxdna_gem_obj *to_xdna_obj(struct drm_gem_object *gobj)
+{
+	return container_of(gobj, struct amdxdna_gem_obj, base.base);
+}
+
+static inline void amdxdna_put_dev_heap(struct amdxdna_gem_obj *dev_heap)
+{
+	drm_gem_object_put(&dev_heap->base.base);
+}
 
 struct drm_gem_object *
 amdxdna_gem_create_object(struct drm_device *dev, size_t size);
-struct amdxdna_gem_obj *amdxdna_get_dev_heap(struct drm_file *filp);
-void amdxdna_put_dev_heap(struct amdxdna_gem_obj *heap_abo);
-int amdxdna_pin_pages(struct amdxdna_mem *mem);
-void amdxdna_unpin_pages(struct amdxdna_mem *mem);
-enum amdxdna_obj_type amdxdna_gem_get_obj_type(struct drm_gem_object *gobj);
+int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
+int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);
+void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo);
+struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct drm_device *dev, u32 bo_hdl,
+					    u8 bo_type, struct drm_file *filp);
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

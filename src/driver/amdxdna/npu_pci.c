@@ -16,6 +16,9 @@
 #include "amdxdna_devel.h"
 #endif
 
+int npu_max_col = XRS_MAX_COL;
+module_param(npu_max_col, int, (S_IRUGO|S_IWUSR));
+MODULE_PARM_DESC(npu_max_col, "Maximum column could be used");
 /*
  * The management mailbox channel is allocated by NPU firmware.
  * The related register and ring buffer information is on SRAM BAR.
@@ -466,7 +469,7 @@ int npu_init(struct amdxdna_dev *xdna)
 	xrs_cfg.clk_list.cu_clk_list[2] = 1000;
 	xrs_cfg.sys_eff_factor = 1;
 	xrs_cfg.actions = &npu_xrs_actions;
-	xrs_cfg.total_col = ndev->metadata.cols;
+	xrs_cfg.total_col = min(npu_max_col, ndev->metadata.cols);
 	xrs_cfg.mode = XRS_MODE_TEMPORAL_BEST;
 	xrs_cfg.dev = &xdna->pdev->dev;
 	ndev->xrs_hdl = xrs_init(&xrs_cfg);
@@ -547,22 +550,13 @@ int npu_get_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_query_aie_st
 	struct npu_device *ndev = xdna->dev_handle;
 	int ret;
 
-	XDNA_DBG(xdna, "Start Col: %u Num Col: %u", args->start_col, args->num_cols);
-
-	if (args->start_col + args->num_cols > ndev->metadata.cols) {
-		XDNA_ERR(xdna, "Invalid Columnns. Start: %u. Req Size: %u. Avail Size: %u",
-			 args->start_col, args->num_cols, ndev->metadata.cols);
-		return -EINVAL;
-	}
-
-	if (args->num_cols * ndev->metadata.size < args->buffer_size) {
+	if (ndev->metadata.cols * ndev->metadata.size < args->buffer_size) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given Size: %u. Need Size: %u.",
-			 args->buffer_size, args->num_cols * ndev->metadata.size);
+			 args->buffer_size, ndev->metadata.cols * ndev->metadata.size);
 		return -EINVAL;
 	}
 
-	ret = npu_query_status(ndev, args->start_col, args->num_cols,
-			       u64_to_user_ptr(args->buffer), args->buffer_size,
+	ret = npu_query_status(ndev, u64_to_user_ptr(args->buffer), args->buffer_size,
 			       &args->cols_filled);
 
 	if (ret)

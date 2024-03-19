@@ -511,15 +511,19 @@ int npu_self_test(struct npu_device *ndev)
 }
 #endif
 
-int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col, char __user *buf,
-		     u32 size, u32 *cols_filled)
+int npu_query_status(struct npu_device *ndev, char __user *buf, u32 size, u32 *cols_filled)
 {
 	DECLARE_NPU_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
+	struct amdxdna_client *client, *tmp_client;
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_hwctx *hwctx;
 	dma_addr_t xdna_dev_addr;
+	u32 aie_bitmap_copy;
 	u32 aie_bitmap = 0;
+	u32 num_col = 0;
 	u8 *buff_addr;
-	int ret;
+	int next = 0;
+	int ret, idx;
 	u32 i;
 
 	buff_addr = dma_alloc_noncoherent(&xdna->pdev->dev, size, &xdna_dev_addr,
@@ -527,9 +531,24 @@ int npu_query_status(struct npu_device *ndev, u32 start_col, u32 num_col, char _
 	if (!buff_addr)
 		return -ENOMEM;
 
-	WARN_ON(ndev->metadata.cols > 32);
-	for (i = start_col; i < start_col + num_col; i++)
-		aie_bitmap |= (1 << i);
+	/* Go through each hardware context and mark the AIE columns that are active */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry_safe(client, tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&client->hwctx_srcu);
+		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+			for (i = hwctx->start_col; i < hwctx->num_col; i++)
+				aie_bitmap = aie_bitmap | (1 << (i));
+		}
+		srcu_read_unlock(&client->hwctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	/* Hardware contexts may share AIE columns. Count columns after creating the bitmap */
+	aie_bitmap_copy = aie_bitmap;
+	while (aie_bitmap_copy != 0) {
+		aie_bitmap_copy = aie_bitmap_copy >> 1;
+		num_col++;
+	}
 
 	*cols_filled = 0;
 	req.dump_buff_addr = (u64)buff_addr;
