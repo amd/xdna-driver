@@ -105,11 +105,6 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 
 	XDNA_DBG(xdna, "closing pid %d", client->pid);
 
-	mutex_lock(&xdna->dev_lock);
-	list_del(&client->node);
-	amdxdna_hwctx_remove_all(client);
-	mutex_unlock(&xdna->dev_lock);
-
 	idr_destroy(&client->hwctx_idr);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
@@ -126,6 +121,21 @@ skip_sva_unbind:
 
 	XDNA_DBG(xdna, "pid %d closed", client->pid);
 	kfree(client);
+}
+
+static int amdxdna_flush(struct file *f, fl_owner_t id)
+{
+	struct drm_file *filp = f->private_data;
+	struct amdxdna_client *client = filp->driver_priv;
+	struct amdxdna_dev *xdna = client->xdna;
+
+	XDNA_DBG(xdna, "pid %d flushing...", client->pid);
+	mutex_lock(&xdna->dev_lock);
+	list_del(&client->node);
+	amdxdna_hwctx_remove_all(client);
+	mutex_unlock(&xdna->dev_lock);
+
+	return 0;
 }
 
 static int amdxdna_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma)
@@ -175,6 +185,7 @@ static const struct file_operations amdxdna_fops = {
 	.owner		= THIS_MODULE,
 	.open		= accel_open,
 	.release	= drm_release,
+	.flush		= amdxdna_flush,
 	.unlocked_ioctl	= drm_ioctl,
 	.compat_ioctl	= drm_compat_ioctl,
 	.poll		= drm_poll,
