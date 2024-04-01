@@ -144,6 +144,8 @@ struct npu_hwctx {
 	u64				seq;
 };
 
+struct async_events;
+
 struct npu_device {
 	struct amdxdna_dev		*xdna;
 	const struct npu_dev_priv	*priv;
@@ -156,6 +158,7 @@ struct npu_device {
 	struct xdna_mailbox_chann_res	mgmt_i2x;
 	u32				mgmt_chan_idx;
 
+	u32				total_col;
 	struct aie_version		version;
 	struct aie_metadata		metadata;
 	struct clock_entry		mp_npu_clock;
@@ -165,6 +168,7 @@ struct npu_device {
 	struct mailbox			*mbox;
 	struct mailbox_channel		*mgmt_chann;
 	struct task_struct		*async_msgd;
+	struct async_events		*async_events;
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
@@ -206,6 +210,9 @@ void npu1_psp_stop(struct psp_device *psp);
 void npu1_debugfs_init(struct amdxdna_dev *xdna);
 
 /* npu1_error.c */
+int npu1_error_async_events_alloc(struct npu_device *ndev);
+void npu1_error_async_events_free(struct npu_device *ndev);
+int npu1_error_async_events_send(struct npu_device *ndev);
 int npu1_error_async_msg_thread(void *data);
 
 /* npu1_message.c */
@@ -222,10 +229,9 @@ int npu1_query_firmware_version(struct npu_device *ndev,
 int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size);
-int npu1_query_error(struct npu_device *ndev, u64 addr, u32 size, u32 *row,
-		     u32 *col, u32 *mod, u32 *count, bool *next);
 int npu1_query_status(struct npu_device *ndev, char *buf, u32 size, u32 *cols_filled);
-int npu1_query_power_sensor(struct npu_device *ndev, struct amdxdna_drm_query_sensor *args);
+int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
+				 void *handle, void (*cb)(void*, const u32 *, size_t));
 int npu1_self_test(struct npu_device *ndev);
 
 int npu1_config_cu(struct amdxdna_hwctx *hwctx);

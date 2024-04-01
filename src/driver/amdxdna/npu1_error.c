@@ -5,13 +5,113 @@
 
 #include <linux/kthread.h>
 #include <linux/kernel.h>
+#include <drm/drm_cache.h>
 #include "npu1_msg_priv.h"
 #include "npu1_pci.h"
 
-#define AIE_ERROR_SIZE 0x3000
+struct async_event {
+	struct async_event_msg_resp	resp;
+	struct completion		*comp;
+	u8				*buf;
+	dma_addr_t			addr;
+	u32				size;
+};
+
+struct async_events {
+	struct completion		comp;
+	u8				*buf;
+	dma_addr_t			addr;
+	u32				size;
+	u32				event_cnt;
+	struct async_event		event[] __counted_by(event_cnt);
+};
+
+static void npu1_error_async_cb(void *handle, const u32 *data, size_t size)
+{
+	struct async_event_msg_resp *resp;
+	struct async_event *e = handle;
+
+	if (data) {
+		resp = (struct async_event_msg_resp *)data;
+		e->resp.type = resp->type;
+		wmb(); /* Update status in the end, so that no lock for here */
+		e->resp.status = resp->status;
+	}
+	complete(e->comp);
+}
+
+void npu1_error_async_events_free(struct npu_device *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct async_events *events;
+
+	events = ndev->async_events;
+	dma_free_noncoherent(xdna->ddev.dev, events->size, events->buf,
+			     events->addr, DMA_FROM_DEVICE);
+	kfree(events);
+}
+
+int npu1_error_async_events_alloc(struct npu_device *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	u32 total_col = ndev->total_col;
+	u32 total_size = ASYNC_BUF_SIZE * total_col;
+	struct async_events *events;
+	int i;
+
+	events = kzalloc(struct_size(events, event, total_col), GFP_KERNEL);
+	if (!events)
+		return -ENOMEM;
+
+	events->buf = dma_alloc_noncoherent(xdna->ddev.dev, total_size, &events->addr,
+					    DMA_FROM_DEVICE, GFP_KERNEL);
+	if (!events->buf) {
+		kfree(events);
+		return -ENOMEM;
+	}
+
+	init_completion(&events->comp);
+	events->size = total_size;
+	events->event_cnt = total_col;
+
+	for (i = 0; i < events->event_cnt; i++) {
+		struct async_event *e = &events->event[i];
+		u32 offset = i * ASYNC_BUF_SIZE;
+
+		e->comp = &events->comp;
+		e->buf = &events->buf[offset];
+		e->addr = events->addr + offset;
+		e->size = ASYNC_BUF_SIZE;
+		e->resp.status = NPU_STATUS_MAX_NPU_STATUS_CODE;
+	}
+
+	ndev->async_events = events;
+
+	XDNA_DBG(xdna, "Async event count %d, buf total size 0x%x",
+		 events->event_cnt, events->size);
+	return 0;
+}
+
+int npu1_error_async_events_send(struct npu_device *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct async_event *e;
+	int i, ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	for (i = 0; i < ndev->async_events->event_cnt; i++) {
+		e = &ndev->async_events->event[i];
+		ret = npu1_register_asyn_event_msg(ndev, e->addr, e->size,
+						   e, npu1_error_async_cb);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
 
 /*
- * This is porting from XAIE util header file.
+ * Below enum, struct and lookup tables are porting from XAIE util header file.
  *
  * Below data is defined by AIE device and it is used for decode error message
  * from the device.
@@ -47,8 +147,8 @@ struct aie_error {
 };
 
 struct aie_event_category {
-	enum aie_error_category category;
 	u8			event_id;
+	enum aie_error_category category;
 };
 
 #define EVENT_CATEGORY(id, cat) { id, cat }
@@ -176,39 +276,25 @@ static u32 npu1_error_backtrack(struct npu_device *ndev, void *err_info, u32 num
 
 static void npu1_error_process(struct npu_device *ndev)
 {
+	struct async_events *events = ndev->async_events;
 	struct amdxdna_dev *xdna = ndev->xdna;
-	u32 row = 0, col = 0, mod = 0;
-	dma_addr_t fw_addr;
-	void *async_buf;
-	u32 err_col;
-	u32 count;
-	bool next;
-	int ret;
+	struct amdxdna_client *client;
+	int i;
 
-	async_buf = dma_alloc_coherent(xdna->ddev.dev, AIE_ERROR_SIZE, &fw_addr, GFP_KERNEL);
-	if (!async_buf)
-		return;
+	for (i = 0; i < events->event_cnt; i++) {
+		struct async_event *e = &events->event[i];
+		u32 err_col;
 
-	do {
-		struct amdxdna_client *client;
-
-		ret = npu1_query_error(ndev, fw_addr, AIE_ERROR_SIZE,
-				       &row, &col, &mod, &count, &next);
-		if (ret) {
-			XDNA_ERR(xdna, "query AIE error, ret %d", ret);
-			break;
-		}
-
-		print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4, async_buf,
-				     sizeof(struct aie_error) * count, true);
-
-		if (!count) {
-			XDNA_WARN(xdna, "Spurious row %d, col %d, mod %d, count %d, next %d",
-				  row, col, mod, count, next);
+		if (e->resp.status == NPU_STATUS_MAX_NPU_STATUS_CODE)
 			continue;
-		}
 
-		err_col = npu1_error_backtrack(ndev, async_buf, count);
+		e->resp.status = NPU_STATUS_MAX_NPU_STATUS_CODE;
+		drm_clflush_virt_range(e->buf, e->size);
+
+		print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
+				     e->buf, sizeof(struct aie_error), false);
+
+		err_col = npu1_error_backtrack(ndev, e->buf, 1);
 		if (!err_col) {
 			XDNA_WARN(xdna, "Did not get error column");
 			continue;
@@ -227,34 +313,29 @@ static void npu1_error_process(struct npu_device *ndev)
 		list_for_each_entry(client, &xdna->client_list, node)
 			npu1_restart_ctx(client);
 
+		/* Re-sent this event to firmware */
+		if (npu1_register_asyn_event_msg(ndev, e->addr, e->size, e,
+						 npu1_error_async_cb))
+			XDNA_WARN(xdna, "Unable to register async event");
 		mutex_unlock(&xdna->dev_lock);
-	} while (next);
-
-	dma_free_coherent(xdna->ddev.dev, AIE_ERROR_SIZE, async_buf, fw_addr);
+	}
 }
 
 int npu1_error_async_msg_thread(void *data)
 {
 	struct amdxdna_dev *xdna = (struct amdxdna_dev *)data;
-	struct xdna_mailbox_async amsg = { 0 };
+	struct npu_device *ndev = xdna->dev_handle;
+	struct async_events *events;
 	int ret = 0;
 
 	XDNA_DBG(xdna, "start...");
+	events = ndev->async_events;
 	while (!kthread_should_stop()) {
-		memset(&amsg, 0, sizeof(amsg));
-		ret = xdna_mailbox_wait_async_msg(xdna->dev_handle->mgmt_chann, &amsg, true);
-		if (ret == -EAGAIN)
-			continue;
-
+		ret = wait_for_completion_interruptible(&events->comp);
 		if (ret == -ERESTARTSYS)
 			break;
 
-		if (amsg.opcode != MSG_OP_ASYNC_MSG_AIE_ERROR) {
-			XDNA_ERR(xdna, "Unknown ASYNC message op(0x%x)", amsg.opcode);
-			continue;
-		}
-
-		npu1_error_process(xdna->dev_handle);
+		npu1_error_process(ndev);
 	}
 	XDNA_DBG(xdna, "stop...");
 

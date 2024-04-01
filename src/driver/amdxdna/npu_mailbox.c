@@ -33,8 +33,6 @@
 		(_chann)->msix_irq, ##args); \
 })
 
-#define ASYNC_MSG_START_ID		0x80000000U
-/* Message IDs should not be greater than ASYNC_MSG_START_ID */
 #define MAGIC_VAL			0x1D000000U
 #define MAGIC_VAL_MASK			0xFF000000
 #define MAX_MSG_ID_ENTRIES		256
@@ -75,11 +73,6 @@ struct mailbox_channel {
 	struct workqueue_struct		*work_q;
 	struct work_struct		rx_work;
 	u32				i2x_head;
-
-	/* protect async message list */
-	spinlock_t			async_msg_lock;
-	struct list_head		async_msg_list;
-	struct completion		async_comp;
 };
 
 struct xdna_msg_header {
@@ -109,11 +102,6 @@ struct mailbox_msg {
 	void			(*notify_cb)(void *handle, const u32 *data, size_t size);
 	size_t			pkg_size; /* package size in bytes */
 	struct mailbox_pkg	pkg;
-};
-
-struct mailbox_async_msg {
-	struct list_head	 entry;
-	struct xdna_mailbox_async msg;
 };
 
 #if defined(CONFIG_DEBUG_FS)
@@ -299,30 +287,6 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 	kfree(mb_msg);
 }
 
-static inline void
-mailbox_get_async_msg(struct mailbox_channel *mb_chann, struct xdna_msg_header *header,
-		      u32 *data)
-{
-	struct mailbox_async_msg *async_msg;
-	unsigned long flags;
-
-	/*
-	 * Async message is error handling request from device. This is not
-	 * critical path. Don't worry about performance.
-	 */
-	async_msg = kzalloc(sizeof(*async_msg), GFP_KERNEL);
-	if (!async_msg)
-		return;
-
-	async_msg->msg.opcode = header->opcode;
-	memcpy_fromio(async_msg->msg.payload, data, header->size);
-
-	spin_lock_irqsave(&mb_chann->async_msg_lock, flags);
-	list_add_tail(&async_msg->entry, &mb_chann->async_msg_list);
-	spin_unlock_irqrestore(&mb_chann->async_msg_lock, flags);
-	complete(&mb_chann->async_comp);
-}
-
 static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 {
 	struct xdna_msg_header header;
@@ -365,10 +329,7 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	memcpy_fromio((u32 *)&header + 1, (void *)read_addr, rest);
 	read_addr += rest;
 
-	if (header.id < ASYNC_MSG_START_ID)
-		mailbox_get_resp(mb_chann, &header, (u32 *)read_addr);
-	else
-		mailbox_get_async_msg(mb_chann, &header, (u32 *)read_addr);
+	mailbox_get_resp(mb_chann, &header, (u32 *)read_addr);
 
 	mailbox_set_headptr(mb_chann, head + msg_size);
 	/* After update head, it can equal to ringbuf_size. This is expected. */
@@ -476,42 +437,6 @@ release_id:
 msg_id_failed:
 	kfree(mb_msg);
 	return ret;
-}
-
-int xdna_mailbox_wait_async_msg(struct mailbox_channel *mb_chann,
-				struct xdna_mailbox_async *buf, bool blocking)
-{
-	struct mailbox_async_msg *async_msg;
-	unsigned long flags;
-	int ret = 0;
-
-	if (!blocking)
-		goto skip_wait;
-
-	ret = wait_for_completion_interruptible(&mb_chann->async_comp);
-	if (ret)
-		return ret;
-
-skip_wait:
-	spin_lock_irqsave(&mb_chann->async_msg_lock, flags);
-	async_msg = list_first_entry_or_null(&mb_chann->async_msg_list,
-					     typeof(*async_msg), entry);
-	if (!async_msg) {
-		ret = -EAGAIN;
-		goto unlock_and_out;
-	}
-	list_del(&async_msg->entry);
-
-unlock_and_out:
-	spin_unlock_irqrestore(&mb_chann->async_msg_lock, flags);
-
-	if (ret)
-		return ret;
-
-	memcpy(buf, &async_msg->msg, sizeof(*buf));
-	kfree(async_msg);
-
-	return 0;
 }
 
 #if defined(CONFIG_DEBUG_FS)
@@ -646,10 +571,7 @@ skip_record:
 	memcpy(&mb_chann->res[CHAN_RES_X2I], x2i, sizeof(*x2i));
 	memcpy(&mb_chann->res[CHAN_RES_I2X], i2x, sizeof(*i2x));
 
-	INIT_LIST_HEAD(&mb_chann->async_msg_list);
 	spin_lock_init(&mb_chann->chan_idr_lock);
-	spin_lock_init(&mb_chann->async_msg_lock);
-	init_completion(&mb_chann->async_comp);
 	idr_init(&mb_chann->chan_idr);
 	mb_chann->x2i_tail = mailbox_get_tailptr(mb_chann, CHAN_RES_X2I);
 	mb_chann->i2x_head = mailbox_get_headptr(mb_chann, CHAN_RES_I2X);
@@ -684,9 +606,6 @@ free_and_out:
 
 int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 {
-	struct mailbox_async_msg *async_msg;
-	struct mailbox_async_msg *next;
-
 	if (!mb_chann)
 		return 0;
 
@@ -700,11 +619,6 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 
 	idr_for_each(&mb_chann->chan_idr, mailbox_release_msg, mb_chann);
 	idr_destroy(&mb_chann->chan_idr);
-
-	list_for_each_entry_safe(async_msg, next, &mb_chann->async_msg_list, entry) {
-		list_del(&async_msg->entry);
-		kfree(async_msg);
-	}
 
 	MB_DBG(mb_chann, "Mailbox channel destroyed, irq: %d", mb_chann->msix_irq);
 	kfree(mb_chann);

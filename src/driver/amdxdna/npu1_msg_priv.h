@@ -11,11 +11,6 @@
 enum npu_msg_opcode {
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
-	MSG_OP_GET_TELEMETRY               = 0x4,
-	MSG_OP_RESET_PARTITION             = 0x5,
-	MSG_OP_EXECUTE_BUFFER              = 0x6,
-	MSG_OP_DPU_SELF_TEST               = 0x8,
-	MSG_OP_QUERY_ERROR_INFO            = 0x9,
 	MSG_OP_EXECUTE_BUFFER_CF           = 0xC,
 	MSG_OP_QUERY_COL_STATUS            = 0xD,
 	MSG_OP_QUERY_AIE_TILE_INFO         = 0xE,
@@ -26,16 +21,12 @@ enum npu_msg_opcode {
 	MSG_OP_RESUME                      = 0x102,
 	MSG_OP_ASSIGN_MGMT_PASID           = 0x103,
 	MSG_OP_INVOKE_SELF_TEST            = 0x104,
-	MSG_OP_CHECK_HEADER_HASH           = 0x105,
 	MSG_OP_MAP_HOST_BUFFER             = 0x106,
 	MSG_OP_GET_FIRMWARE_VERSION        = 0x108,
 	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
 	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
 	MSG_OP_MAX_DRV_OPCODE,
-	MSG_OP_ASYNC_MSG_AIE_ERROR         = 0x201,
-	MSG_OP_ASYNC_MSG_WATCHDOG_TIMEOUT  = 0x202,
-	MSG_OP_MAX_ASYNC_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
 };
@@ -311,6 +302,23 @@ struct get_runtime_cfg_req {
 struct get_runtime_cfg_resp {
 	enum npu_msg_status	status;
 	u64			value;
+} __packed;
+
+enum async_event_type {
+	ASYNC_EVENT_TYPE_AIE_ERROR,
+	ASYNC_EVENT_TYPE_EXCEPTION,
+	MAX_ASYNC_EVENT_TYPE
+};
+
+#define ASYNC_BUF_SIZE 0x2000
+struct async_event_msg_req {
+	u64 buf_addr;
+	u32 buf_size;
+} __packed;
+
+struct async_event_msg_resp {
+	enum npu_msg_status	status;
+	enum async_event_type	type;
 } __packed;
 
 #endif /* _NPU1_MSG_PRIV_H_ */

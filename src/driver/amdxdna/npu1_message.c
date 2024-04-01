@@ -87,11 +87,13 @@ static int npu_send_msg_wait(struct npu_device *ndev,
 static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 				  struct xdna_mailbox_msg *msg)
 {
+	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
 	if (!ndev->mgmt_chann)
 		return -ENODEV;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	ret = npu_send_msg_wait(ndev, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
 		if (ndev->async_msgd)
@@ -351,31 +353,6 @@ int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 siz
 	return 0;
 }
 
-int npu1_query_error(struct npu_device *ndev, u64 addr, u32 size, u32 *row,
-		     u32 *col, u32 *mod, u32 *count, bool *next)
-{
-	DECLARE_NPU_MSG(query_error, MSG_OP_QUERY_ERROR_INFO);
-	int ret;
-
-	req.buf_addr = addr;
-	req.buf_size = size;
-	req.next_row = *row;
-	req.next_column = *col;
-	req.next_module = *mod;
-
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
-	if (ret)
-		return ret;
-
-	*row = resp.next_row;
-	*col = resp.next_column;
-	*mod = resp.next_module;
-	*next = resp.has_next_err;
-	*count = resp.num_err;
-
-	return 0;
-}
-
 #if defined(CONFIG_DEBUG_FS)
 int npu1_self_test(struct npu_device *ndev)
 {
@@ -466,6 +443,25 @@ fail:
 	dma_free_noncoherent(xdna->ddev.dev, size, buff_addr,
 			     xdna_dev_addr, DMA_TO_DEVICE);
 	return ret;
+}
+
+int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
+				 void *handle, void (*cb)(void*, const u32 *, size_t))
+{
+	struct async_event_msg_req req = { 0 };
+	struct xdna_mailbox_msg msg = {
+		.send_data = (u8 *)&req,
+		.send_size = sizeof(req),
+		.handle = handle,
+		.opcode = MSG_OP_REGISTER_ASYNC_EVENT_MSG,
+		.notify_cb = cb,
+	};
+
+	req.buf_addr = addr;
+	req.buf_size = size;
+
+	XDNA_DBG(ndev->xdna, "Register addr 0x%llx size 0x%x", addr, size);
+	return xdna_mailbox_send_msg(ndev->mgmt_chann, &msg, TX_TIMEOUT);
 }
 
 /* Below messages are to hardware context mailbox channel */

@@ -233,7 +233,9 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
 		return -EOPNOTSUPP;
 
+	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->init(xdna);
+	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
 		return ret;
@@ -260,7 +262,9 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 failed_sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
 failed_npu_fini:
+	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
+	mutex_unlock(&xdna->dev_lock);
 	return ret;
 }
 
@@ -275,9 +279,9 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry_safe(client, tmp, &xdna->client_list, node)
 		amdxdna_hwctx_remove_all(client);
-	mutex_unlock(&xdna->dev_lock);
 
 	xdna->dev_info->ops->fini(xdna);
+	mutex_unlock(&xdna->dev_lock);
 }
 
 static int amdxdna_pmops_suspend(struct device *dev)
@@ -288,10 +292,10 @@ static int amdxdna_pmops_suspend(struct device *dev)
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_suspend(client);
-	mutex_unlock(&xdna->dev_lock);
 
 	if (xdna->dev_info->ops->suspend)
 		xdna->dev_info->ops->suspend(xdna);
+	mutex_unlock(&xdna->dev_lock);
 
 	return 0;
 }
@@ -303,16 +307,17 @@ static int amdxdna_pmops_resume(struct device *dev)
 	int ret;
 
 	XDNA_INFO(xdna, "firmware resuming...");
+	mutex_lock(&xdna->dev_lock);
 	if (xdna->dev_info->ops->resume) {
 		ret = xdna->dev_info->ops->resume(xdna);
 		if (ret) {
 			XDNA_ERR(xdna, "resume NPU firmware failed");
+			mutex_unlock(&xdna->dev_lock);
 			return ret;
 		}
 	}
 
 	XDNA_INFO(xdna, "hardware context resuming...");
-	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_resume(client);
 	mutex_unlock(&xdna->dev_lock);

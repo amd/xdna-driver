@@ -112,7 +112,7 @@ struct amdxdna_dev {
 	const struct amdxdna_dev_info	*dev_info;
 	void				*xrs_hdl;
 
-	struct mutex			dev_lock; /* per device lock */
+	struct mutex			dev_lock; /* protect client list, dev_info->ops, xrt_hdl */
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
 };

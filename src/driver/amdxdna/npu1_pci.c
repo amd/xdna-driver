@@ -172,12 +172,6 @@ static int npu1_mgmt_fw_init(struct npu_device *ndev)
 		return ret;
 	}
 
-	ret = npu1_query_firmware_version(ndev, &ndev->xdna->fw_ver);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "query firmware version failed");
-		return ret;
-	}
-
 	ret = npu1_app_pdi_loading(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set APP PDI Loading mode failed");
@@ -193,6 +187,28 @@ static int npu1_mgmt_fw_init(struct npu_device *ndev)
 	ret = npu1_xdna_reset(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Reset firmware failed");
+		return ret;
+	}
+
+	if (!ndev->async_events)
+		return 0;
+
+	ret = npu1_error_async_events_send(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Send async events failed");
+		return ret;
+	}
+
+	return 0;
+}
+
+static int npu1_mgmt_fw_query(struct npu_device *ndev)
+{
+	int ret;
+
+	ret = npu1_query_firmware_version(ndev, &ndev->xdna->fw_ver);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "query firmware version failed");
 		return ret;
 	}
 
@@ -452,9 +468,16 @@ int npu1_init(struct amdxdna_dev *xdna)
 		goto disable_sva;
 	}
 
+	ret = npu1_mgmt_fw_query(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "Query firmware failed, ret %d", ret);
+		goto stop_hw;
+	}
+	ndev->total_col = min(npu1_max_col, ndev->metadata.cols);
+
 	npu_default_xrs_cfg(xdna, &xrs_cfg);
 	xrs_cfg.actions = &npu1_xrs_actions;
-	xrs_cfg.total_col = min(npu1_max_col, ndev->metadata.cols);
+	xrs_cfg.total_col = ndev->total_col;
 	xrs_cfg.num_core_row = ndev->metadata.core.row_count;
 
 	xdna->xrs_hdl = xrsm_init(&xrs_cfg);
@@ -464,17 +487,38 @@ int npu1_init(struct amdxdna_dev *xdna)
 		goto stop_hw;
 	}
 
+	ret = npu1_error_async_events_alloc(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
+		goto stop_hw;
+	}
+
+	ret = npu1_error_async_events_send(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "Send async events failed, ret %d", ret);
+		goto async_event_free;
+	}
+
+	/* Just to make sure firmware handled async events */
+	ret = npu1_query_firmware_version(ndev, &ndev->xdna->fw_ver);
+	if (ret) {
+		XDNA_ERR(xdna, "Re-query firmware version failed");
+		goto async_event_free;
+	}
+
 	ndev->async_msgd = kthread_run(npu1_error_async_msg_thread, xdna, "async_msgd");
 	if (IS_ERR(ndev->async_msgd)) {
 		ret = PTR_ERR(ndev->async_msgd);
 		ndev->async_msgd = NULL;
 		XDNA_ERR(xdna, "failed to create async message handler");
-		goto stop_hw;
+		goto async_event_free;
 	}
 
 	release_firmware(fw);
 	return 0;
 
+async_event_free:
+	npu1_error_async_events_free(ndev);
 stop_hw:
 	npu1_hw_stop(xdna);
 disable_sva:
@@ -492,10 +536,11 @@ void npu1_fini(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct npu_device *ndev = xdna->dev_handle;
 
+	npu1_hw_stop(xdna);
+
 	if (ndev->async_msgd)
 		kthread_stop(ndev->async_msgd);
-
-	npu1_hw_stop(xdna);
+	npu1_error_async_events_free(ndev);
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 	pci_free_irq_vectors(pdev);
 }

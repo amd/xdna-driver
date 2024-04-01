@@ -30,12 +30,6 @@ struct xdna_mailbox_msg {
 	size_t		send_size;
 };
 
-#define MAX_ASYNC_MSG_LEN 64
-struct xdna_mailbox_async {
-	u32		opcode;
-	u8		payload[MAX_ASYNC_MSG_LEN];
-};
-
 /*
  * xdna_mailbox_res - mailbox hardware resource
  *
@@ -124,18 +118,6 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
  */
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
 			  const struct xdna_mailbox_msg *msg, u64 tx_timeout);
-
-/*
- * xdna_mailbox_wait_async_msg() -- Wait an async message
- *
- * @mailbox_chann: Mailbox channel handle
- * @buf: buffer for the async message
- * @blocking: if this is a blocking call
- *
- * Return: if success, return 0; otherwise return error code
- */
-int xdna_mailbox_wait_async_msg(struct mailbox_channel *mailbox_chann,
-				struct xdna_mailbox_async *buf, bool blocking);
 
 #if defined(CONFIG_DEBUG_FS)
 /*
