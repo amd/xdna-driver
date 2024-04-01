@@ -506,14 +506,6 @@ int npu1_init(struct amdxdna_dev *xdna)
 		goto async_event_free;
 	}
 
-	ndev->async_msgd = kthread_run(npu1_error_async_msg_thread, xdna, "async_msgd");
-	if (IS_ERR(ndev->async_msgd)) {
-		ret = PTR_ERR(ndev->async_msgd);
-		ndev->async_msgd = NULL;
-		XDNA_ERR(xdna, "failed to create async message handler");
-		goto async_event_free;
-	}
-
 	release_firmware(fw);
 	return 0;
 
@@ -537,9 +529,6 @@ void npu1_fini(struct amdxdna_dev *xdna)
 	struct npu_device *ndev = xdna->dev_handle;
 
 	npu1_hw_stop(xdna);
-
-	if (ndev->async_msgd)
-		kthread_stop(ndev->async_msgd);
 	npu1_error_async_events_free(ndev);
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 	pci_free_irq_vectors(pdev);

@@ -96,10 +96,7 @@ static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	ret = npu_send_msg_wait(ndev, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
-		if (ndev->async_msgd)
-			kthread_stop(ndev->async_msgd);
 		xdna_mailbox_destroy_channel(ndev->mgmt_chann);
-		ndev->async_msgd = NULL;
 		ndev->mgmt_chann = NULL;
 	}
 

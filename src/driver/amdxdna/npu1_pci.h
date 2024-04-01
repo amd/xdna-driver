@@ -167,7 +167,6 @@ struct npu_device {
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
 	struct mailbox_channel		*mgmt_chann;
-	struct task_struct		*async_msgd;
 	struct async_events		*async_events;
 };
 
