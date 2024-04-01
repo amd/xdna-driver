@@ -147,8 +147,8 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 
 	hwctx->client = client;
-	/* The num_col and max_opc will be verified by solver */
-	hwctx->num_col = args->num_cols;
+	hwctx->num_tiles = args->num_tiles;
+	hwctx->mem_size = args->mem_size;
 	hwctx->max_opc = args->max_opc;
 	mutex_lock(&client->hwctx_lock);
 	ret = idr_alloc_cyclic(&client->hwctx_idr, hwctx, 0, MAX_HWCTX_ID, GFP_KERNEL);

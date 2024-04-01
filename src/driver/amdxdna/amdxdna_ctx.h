@@ -51,11 +51,12 @@ struct amdxdna_hwctx {
 	char				*name;
 
 	u32				id;
-	u32				xrs_id;
 	u32				max_opc;
+	u32				num_tiles;
+	u32				mem_size;
+	u32				fw_ctx_id;
 	u32				start_col;
 	u32				num_col;
-	u32				fw_ctx_id;
 #define HWCTX_STAT_INIT  0
 #define HWCTX_STAT_READY 1
 #define HWCTX_STAT_STOP  2

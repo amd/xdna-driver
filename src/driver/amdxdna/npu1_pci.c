@@ -455,6 +455,7 @@ int npu1_init(struct amdxdna_dev *xdna)
 	npu_default_xrs_cfg(xdna, &xrs_cfg);
 	xrs_cfg.actions = &npu1_xrs_actions;
 	xrs_cfg.total_col = min(npu1_max_col, ndev->metadata.cols);
+	xrs_cfg.num_core_row = ndev->metadata.core.row_count;
 
 	xdna->xrs_hdl = xrsm_init(&xrs_cfg);
 	if (!xdna->xrs_hdl) {

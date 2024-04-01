@@ -110,7 +110,7 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 	struct aie_qos *rqos = &req->rqos;
 	u32 cu_clk_freq;
 
-	if (cdop->ncols > xrs->cfg.total_col)
+	if (cdop->ntiles > xrs->cfg.total_col * xrs->cfg.num_core_row)
 		return -EINVAL;
 
 	/*
@@ -175,7 +175,7 @@ static struct solver_node *allocate_solver_node(struct solver_state *xrs,
 
 	node->rid = req->rid;
 	node->first_col = cdop->first_col;
-	node->ncols = cdop->ncols;
+	node->ncols = cdop->ntiles / xrs->cfg.num_core_row;
 
 	memcpy(&node->qos_cap, &cdop->qos_cap, sizeof(struct aie_qos_cap));
 	memcpy(&node->rqos, &req->rqos, sizeof(struct aie_qos));

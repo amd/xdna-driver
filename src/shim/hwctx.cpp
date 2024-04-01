@@ -6,6 +6,7 @@
 #include "hwq.h"
 
 #include "core/common/xclbin_parser.h"
+#include "core/common/query_requests.h"
 
 namespace {
 
@@ -180,7 +181,7 @@ create_ctx_on_device()
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
   arg.umq_p = reinterpret_cast<uintptr_t>(m_q->get_queue_addr());
   arg.max_opc = m_ops_per_cycle;
-  arg.num_cols = m_num_cols;
+  arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
 
   m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 

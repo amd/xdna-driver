@@ -81,7 +81,8 @@ struct amdxdna_qos_info {
  * @log_buf_p: Address of log buffer.
  * @log_size: Log buffer size.
  * @max_opc: Maximum operations per cycle.
- * @num_cols: Number of columns.
+ * @num_tiles: Number of AIE tiles.
+ * @mem_size: Size of AIE tile memory.
  * @umq_doorbell: Returned offset of doorbell associated with UMQ.
  * @handle: Returned hardware context handle.
  */
@@ -93,7 +94,8 @@ struct amdxdna_drm_create_hwctx {
 	__u64 log_buf_p;
 	__u32 log_size;
 	__u32 max_opc;
-	__u32 num_cols;
+	__u32 num_tiles;
+	__u32 mem_size;
 	__u32 umq_doorbell;
 	__u32 handle;
 };

@@ -125,42 +125,59 @@ struct aie_info
     }
     case key_type::aie_tiles_stats:
     {
-      amdxdna_drm_query_aie_metadata aie_metadata;
+      static std::map<const xrt_core::device *, query::aie_tiles_stats::result_type> cache;
 
-      amdxdna_drm_get_info arg = {
-        .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
-        .buffer_size = sizeof(aie_metadata),
-        .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
-      };
+      auto iter = cache.find(device);
+      if (iter != cache.end())
+        return cache.at(device);
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      {
+        static std::mutex lock; // Usually there is only one device was referenced, not per device lock..
+        std::lock_guard L(lock);
 
-      query::aie_tiles_stats::result_type output;
-      output.col_size = aie_metadata.col_size;
-      output.major = aie_metadata.version.major;
-      output.minor = aie_metadata.version.minor;
-      output.cols = aie_metadata.cols;
-      output.rows = aie_metadata.rows;
+        auto iter = cache.find(device);
+        if (iter != cache.end())
+          return cache.at(device);
 
-      output.core_rows = aie_metadata.core.row_count;
-      output.core_row_start = aie_metadata.core.row_start;
-      output.core_dma_channels = aie_metadata.core.dma_channel_count;
-      output.core_locks = aie_metadata.core.lock_count;
-      output.core_events = aie_metadata.core.event_reg_count;
+        amdxdna_drm_query_aie_metadata aie_metadata;
 
-      output.mem_rows = aie_metadata.mem.row_count;
-      output.mem_row_start = aie_metadata.mem.row_start;
-      output.mem_dma_channels = aie_metadata.mem.dma_channel_count;
-      output.mem_locks = aie_metadata.mem.lock_count;
-      output.mem_events = aie_metadata.mem.event_reg_count;
+        amdxdna_drm_get_info arg = {
+          .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+          .buffer_size = sizeof(aie_metadata),
+          .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+        };
 
-      output.shim_rows = aie_metadata.shim.row_count;
-      output.shim_row_start = aie_metadata.shim.row_start;
-      output.shim_dma_channels = aie_metadata.shim.dma_channel_count;
-      output.shim_locks = aie_metadata.shim.lock_count;
-      output.shim_events = aie_metadata.shim.event_reg_count;
-      return output;
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+        query::aie_tiles_stats::result_type output;
+        output.col_size = aie_metadata.col_size;
+        output.major = aie_metadata.version.major;
+        output.minor = aie_metadata.version.minor;
+        output.cols = aie_metadata.cols;
+        output.rows = aie_metadata.rows;
+
+        output.core_rows = aie_metadata.core.row_count;
+        output.core_row_start = aie_metadata.core.row_start;
+        output.core_dma_channels = aie_metadata.core.dma_channel_count;
+        output.core_locks = aie_metadata.core.lock_count;
+        output.core_events = aie_metadata.core.event_reg_count;
+
+        output.mem_rows = aie_metadata.mem.row_count;
+        output.mem_row_start = aie_metadata.mem.row_start;
+        output.mem_dma_channels = aie_metadata.mem.dma_channel_count;
+        output.mem_locks = aie_metadata.mem.lock_count;
+        output.mem_events = aie_metadata.mem.event_reg_count;
+
+        output.shim_rows = aie_metadata.shim.row_count;
+        output.shim_row_start = aie_metadata.shim.row_start;
+        output.shim_dma_channels = aie_metadata.shim.dma_channel_count;
+        output.shim_locks = aie_metadata.shim.lock_count;
+        output.shim_events = aie_metadata.shim.event_reg_count;
+
+        cache.emplace(device, output);
+        return output;
+      }
     }
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
