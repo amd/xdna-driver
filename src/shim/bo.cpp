@@ -47,24 +47,27 @@ unmap_drm_bo(const shim_xdna::pdev& dev, void* addr, size_t size)
 }
 
 void
-attach_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
+attach_dbg_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
 {
-  amdxdna_drm_attach_detach_bo adbo = {
-    .bo = boh,
-    .hwctx = ctx_id,
+  amdxdna_drm_config_hwctx adbo = {
+    .handle = ctx_id,
+    .param_type = DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
+    .param_val = boh,
   };
-  dev.ioctl(DRM_IOCTL_AMDXDNA_ATTACH_BO, &adbo);
+  dev.ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
 }
 
 void
-detach_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
+detach_dbg_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
 {
-  amdxdna_drm_attach_detach_bo adbo = {
-    .bo = boh,
-    .hwctx = ctx_id,
+   amdxdna_drm_config_hwctx adbo = {
+    .handle = ctx_id,
+    .param_type = DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
+    .param_val = boh,
   };
-  dev.ioctl(DRM_IOCTL_AMDXDNA_DETACH_BO, &adbo);
+  dev.ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
 }
+
 }
 
 namespace shim_xdna {
@@ -236,11 +239,14 @@ attach_to_ctx()
 {
   if (m_owner_ctx_id == INVALID_CTX_HANDLE)
     return;
+  // Currently, on debug BO is supported.
+  if (xcl_bo_flags{m_flags}.use != XRT_BO_USE_DEBUG)
+    shim_err(EINVAL, "Bad BO type to attach to HW ctx");
 
   auto boh = get_drm_bo_handle();
 
   shim_debug("Attaching drm_bo %d to ctx: %d", boh, m_owner_ctx_id);
-  attach_drm_bo(m_pdev, boh, m_owner_ctx_id);
+  attach_dbg_drm_bo(m_pdev, boh, m_owner_ctx_id);
 }
 
 void
@@ -249,11 +255,14 @@ detach_from_ctx()
 {
   if (m_owner_ctx_id == INVALID_CTX_HANDLE)
     return;
+  // Currently, on debug BO is supported.
+  if (xcl_bo_flags{m_flags}.use != XRT_BO_USE_DEBUG)
+    shim_err(EINVAL, "Bad BO type to detach from HW ctx");
 
   auto boh = get_drm_bo_handle();
 
   shim_debug("Detaching drm_bo %d from ctx: %d", boh, m_owner_ctx_id);
-  detach_drm_bo(m_pdev, boh, m_owner_ctx_id);
+  detach_dbg_drm_bo(m_pdev, boh, m_owner_ctx_id);
 }
 
 } // namespace shim_xdna

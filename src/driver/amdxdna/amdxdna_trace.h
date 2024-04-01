@@ -30,6 +30,23 @@ TRACE_EVENT(amdxdna_debug_point,
 		      __get_str(str))
 );
 
+TRACE_EVENT(xdna_job,
+	    TP_PROTO(const char *name, const char *str, u64 seq),
+
+	    TP_ARGS(name, str, seq),
+
+	    TP_STRUCT__entry(__string(name, name)
+			     __string(str, str)
+			     __field(u64, seq)),
+
+	    TP_fast_assign(__assign_str(name, name);
+			   __assign_str(str, str);
+			   __entry->seq = seq;),
+
+	    TP_printk("%s seq#:%lld %s", __get_str(name), __entry->seq,
+		      __get_str(str))
+);
+
 DECLARE_EVENT_CLASS(xdna_mbox_msg,
 		    TP_PROTO(char *name, u8 chann_id, u32 opcode, u32 msg_id),
 

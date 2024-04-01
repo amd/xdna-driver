@@ -3,11 +3,10 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _XRS_H
-#define _XRS_H
+#ifndef _NPU_SOLVER_H
+#define _NPU_SOLVER_H
 
 #include <linux/types.h>
-#include <linux/uuid.h>
 
 #define XRS_MAX_COL 128
 
@@ -56,7 +55,7 @@ enum xrs_mode {
  */
 struct aie_part {
 	u32	start_col;
-	u32	ncol;
+	u32	ncols;
 };
 
 /*
@@ -94,47 +93,32 @@ struct aie_qos {
 };
 
 /*
- * Structure used to describe a relocatable CDO. A relocatable CDO is
- * identified by its CDO UUID. This CDO can be loaded on multiple
+ * Structure used to describe a relocatable CDO. This CDO can be loaded on multiple
  * partition overlays.
  */
 struct cdo_parts {
-	uuid_t		   *cdo_uuid;
-	u32		   nparts;		/* # of partition overlays */
-	u32		   ncols;		/* # of columns */
-	u32		   *start_col_list;	/* Start column array */
-	struct aie_qos_cap *qos_cap;		/* CDO QoS capabilities */
-};
-
-/*
- * Structure used to describe the partition metadata as part of the
- * allocation requests. This is one of the inputs to resource solver
- * with a given XCLBIN identified by XCLBIN UUID. It also contains the
- * number of relocatable CDOs and the pointer to relocatable CDO array.
- */
-struct part_meta {
-	uuid_t			*xclbin_uuid;
-	struct cdo_parts	*cdo;
+	u32		   first_col;		/* First column can be allocated */
+	u32		   ntiles;		/* # of tiles */
+	u32		   mem_size;		/* size of tile memory */
+	struct aie_qos_cap qos_cap;		/* CDO QoS capabilities */
 };
 
 /*
  * Structure used to describe a request to allocate. This is the
- * input to resource solver for a allocation request. It contains
- * request id and partition metadata. And this can be extended to include
- * other inputs for the allocation like QoS and Priority.
+ * input to resource solver for a allocation request. And this can
+ * be extended to include other inputs for the allocation like QoS
+ * and Priority.
  */
 struct alloc_requests {
 	u64			rid;
-	struct part_meta	*pmp;
-	struct aie_qos		*rqos;		/* Requested QoS */
+	struct cdo_parts	cdo;
+	struct aie_qos		rqos;		/* Requested QoS */
 };
 
 /*
  * Load callback argument
  */
 struct xrs_action_load {
-	uuid_t                  *xclbin_uuid;
-	uuid_t                  *cdo_uuid;
 	u32                     rid;
 	struct aie_part         part;
 };
@@ -230,6 +214,7 @@ struct xrs_action_ops {
  */
 struct init_config {
 	u32			total_col;
+	u32			num_core_row;
 	enum xrs_mode		mode;
 	u32			sys_eff_factor; /* system efficiency factor */
 	u32			latency_adj;    /* latency adjustment in ms */
@@ -241,7 +226,7 @@ struct init_config {
 };
 
 /*
- * xrs_init() - Register resource solver. Resource solver client needs
+ * xrsm_init() - Register resource solver. Resource solver client needs
  *              to call this function to register itself.
  *
  * @cfg:	The system metrics for resource solver to use
@@ -250,7 +235,7 @@ struct init_config {
  *
  * Note: We should only create one handle per AIE array to be managed.
  */
-void *xrs_init(struct init_config *cfg);
+void *xrsm_init(struct init_config *cfg);
 
 /*
  * xrs_allocate_resource() - Request to allocate resources for a given context
@@ -278,4 +263,4 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
  * @rid:	The Request ID to identify the requesting context
  */
 int xrs_release_resource(void *hdl, u64 rid);
-#endif /* _XRS_H */
+#endif /* _NPU_SOLVER_H */

@@ -12,7 +12,6 @@
 
 #include "amdxdna_drv.h"
 #include "amdxdna_sysfs.h"
-#include "npu_pci.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -34,14 +33,14 @@ static const struct pci_device_id pci_ids[] = {
 	{0}
 };
 
+MODULE_DEVICE_TABLE(pci, pci_ids);
+
 static const struct amdxdna_device_id amdxdna_ids[] = {
-	{ 0x1502, 0, DEV_INFO_TO_DATA(NPU1) },
-	{ 0x17f0, 0, DEV_INFO_TO_DATA(NPU2) },
-	{ 0x17f0, 0x10, DEV_INFO_TO_DATA(NPU4) },
+	{ 0x1502, 0x0,  &dev_npu1_info },
+	{ 0x17f0, 0x0,  &dev_npu2_info },
+	{ 0x17f0, 0x10, &dev_npu4_info },
 	{0}
 };
-
-MODULE_DEVICE_TABLE(pci, pci_ids);
 
 static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 {
@@ -60,7 +59,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_sva_bind;
 #endif
-	client->sva = iommu_sva_bind_device(&xdna->pdev->dev, current->mm);
+	client->sva = iommu_sva_bind_device(xdna->ddev.dev, current->mm);
 	if (IS_ERR(client->sva)) {
 		ret = PTR_ERR(client->sva);
 		XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
@@ -86,6 +85,7 @@ skip_sva_bind:
 	mutex_unlock(&xdna->dev_lock);
 
 	filp->driver_priv = client;
+	client->filp = filp;
 
 	XDNA_DBG(xdna, "pid %d opened", client->pid);
 	return 0;
@@ -105,11 +105,6 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 
 	XDNA_DBG(xdna, "closing pid %d", client->pid);
 
-	mutex_lock(&xdna->dev_lock);
-	list_del(&client->node);
-	amdxdna_hwctx_remove_all(client);
-	mutex_unlock(&xdna->dev_lock);
-
 	idr_destroy(&client->hwctx_idr);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
@@ -128,246 +123,57 @@ skip_sva_unbind:
 	kfree(client);
 }
 
-static int get_info_aie_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+static int amdxdna_flush(struct file *f, fl_owner_t id)
 {
-	struct amdxdna_drm_query_aie_metadata *aie_struct;
-	int ret = 0;
-	int idx;
+	struct drm_file *filp = f->private_data;
+	struct amdxdna_client *client = filp->driver_priv;
+	struct amdxdna_dev *xdna = client->xdna;
 
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	XDNA_DBG(xdna, "pid %d flushing...", client->pid);
+	mutex_lock(&xdna->dev_lock);
+	list_del(&client->node);
+	amdxdna_hwctx_remove_all(client);
+	mutex_unlock(&xdna->dev_lock);
 
-	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
-	if (!aie_struct) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-
-	npu_get_aie_metadata(xdna, aie_struct);
-
-	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to copy AIE request into user space");
-		goto fail_copy;
-	}
-
-fail_copy:
-	kfree(aie_struct);
-fail:
-	drm_dev_exit(idx);
-	return ret;
+	return 0;
 }
 
-static int get_info_aie_status(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+static int amdxdna_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-	struct amdxdna_drm_query_aie_status *aie_struct;
-	u32 input_buf_size;
-	int ret, idx;
+	struct drm_file *drm_filp = filp->private_data;
+	struct amdxdna_client *client = drm_filp->driver_priv;
+	struct amdxdna_dev *xdna = client->xdna;
 
-	input_buf_size = args->buffer_size;
-	args->buffer_size = sizeof(*aie_struct);
-	if (input_buf_size != sizeof(*aie_struct)) {
-		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
-			 input_buf_size, sizeof(*aie_struct));
-		ret = -EINVAL;
-		goto fail;
-	}
+	if (likely(vma->vm_pgoff >= DRM_FILE_PAGE_OFFSET_START))
+		return drm_gem_mmap(filp, vma);
 
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	if (!xdna->dev_info->ops->mmap)
+		return -EOPNOTSUPP;
 
-	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
-	if (!aie_struct) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-
-	if (copy_from_user(aie_struct, u64_to_user_ptr(args->buffer), sizeof(*aie_struct))) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to copy AIE request into kernel");
-		goto fail_copy;
-	}
-
-	ret = npu_get_aie_status(xdna, aie_struct);
-
-	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to copy AIE request into user space");
-		goto fail_copy;
-	}
-
-fail_copy:
-	kfree(aie_struct);
-fail:
-	drm_dev_exit(idx);
-	return ret;
-}
-
-static int get_info_aie_version(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_drm_query_aie_version *aie_struct;
-	int ret = 0;
-	int idx;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
-
-	aie_struct = kzalloc(sizeof(*aie_struct), GFP_KERNEL);
-	if (!aie_struct) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-
-	npu_get_aie_version(xdna, aie_struct);
-
-	if (copy_to_user(u64_to_user_ptr(args->buffer), aie_struct, sizeof(*aie_struct))) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to copy AIE request into user space");
-		goto fail_copy;
-	}
-
-fail_copy:
-	kfree(aie_struct);
-fail:
-	drm_dev_exit(idx);
-	return ret;
-}
-
-static int get_info_clock_metadata(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_drm_query_clock_metadata *clock_struct;
-	u32 input_buf_size;
-	int ret = 0;
-	int idx;
-
-	input_buf_size = args->buffer_size;
-	args->buffer_size = sizeof(*clock_struct);
-	if (input_buf_size != sizeof(*clock_struct)) {
-		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
-			 input_buf_size, sizeof(*clock_struct));
-		ret = -EINVAL;
-		goto exit;
-	}
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
-
-	clock_struct = kzalloc(sizeof(*clock_struct), GFP_KERNEL);
-	if (!clock_struct) {
-		ret = -ENOMEM;
-		goto exit;
-	}
-
-	npu_get_clock_metadata(xdna, clock_struct);
-
-	if (copy_to_user(u64_to_user_ptr(args->buffer), clock_struct, sizeof(*clock_struct))) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to copy clock request into user space");
-		goto release;
-	}
-
-release:
-	kfree(clock_struct);
-exit:
-	drm_dev_exit(idx);
-	return ret;
-}
-
-static int get_info_sensors(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_drm_query_sensor *sensor;
-	u32 input_buf_size;
-	int ret = 0;
-	int idx;
-
-	input_buf_size = args->buffer_size;
-	args->buffer_size = sizeof(*sensor);
-	if (input_buf_size < args->buffer_size) {
-		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
-			 input_buf_size, sizeof(*sensor));
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (!drm_dev_enter(&xdna->ddev, &idx)) {
-		ret = -ENODEV;
-		goto out;
-	}
-
-	sensor = kzalloc(sizeof(*sensor), GFP_KERNEL);
-	if (!sensor) {
-		ret = -ENOMEM;
-		goto out_mem;
-	}
-
-	ret = npu_query_power_sensor(xdna->dev_handle, sensor);
-	if (ret) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to query power sensor data");
-		goto out_copy;
-	}
-
-	if (copy_to_user(u64_to_user_ptr(args->buffer), sensor, sizeof(*sensor))) {
-		ret = -EFAULT;
-		XDNA_ERR(xdna, "Failed to copy sensor data into user space");
-		goto out_copy;
-	}
-
-out_copy:
-	kfree(sensor);
-out_mem:
-	drm_dev_exit(idx);
-out:
-	return ret;
+	return xdna->dev_info->ops->mmap(xdna, vma);
 }
 
 static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_drm_get_info *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	int ret = -EINVAL;
+
+	if (!xdna->dev_info->ops->get_info)
+		return -EOPNOTSUPP;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
-	switch (args->param) {
-	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = get_info_aie_status(xdna, args);
-		break;
-	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		ret = get_info_aie_metadata(xdna, args);
-		break;
-	case DRM_AMDXDNA_QUERY_AIE_VERSION:
-		ret = get_info_aie_version(xdna, args);
-		break;
-	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
-		ret = get_info_clock_metadata(xdna, args);
-		break;
-	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = get_info_sensors(xdna, args);
-		break;
-	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = amdxdna_hwctx_status(dev, &args->buffer_size, u64_to_user_ptr(args->buffer));
-		break;
-	default:
-		XDNA_ERR(xdna, "Bad request parameter %u", args->param);
-		break;
-	}
-
-	return ret;
+	return xdna->dev_info->ops->get_info(xdna, args);
 }
 
 static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	/* Context */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_HWCTX, amdxdna_drm_create_hwctx_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_DESTROY_HWCTX, amdxdna_drm_destroy_hwctx_ioctl, 0),
-#ifdef AMDXDNA_DEVEL
-	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_HWCTX_UNSECURE, amdxdna_drm_create_hwctx_unsec_ioctl, 0),
-#endif
+	DRM_IOCTL_DEF_DRV(AMDXDNA_CONFIG_HWCTX, amdxdna_drm_config_hwctx_ioctl, 0),
 	/* BO */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_BO, amdxdna_drm_create_bo_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_BO_INFO, amdxdna_drm_get_bo_info_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SYNC_BO, amdxdna_drm_sync_bo_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_ATTACH_BO, amdxdna_drm_attach_bo_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_DETACH_BO, amdxdna_drm_detach_bo_ioctl, 0),
 	/* Exectuion */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_EXEC_CMD, amdxdna_drm_exec_cmd_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_WAIT_CMD, amdxdna_drm_wait_cmd_ioctl, 0),
@@ -375,7 +181,18 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_INFO, amdxdna_drm_get_info_ioctl, 0),
 };
 
-DEFINE_DRM_ACCEL_FOPS(amdxdna_fops);
+static const struct file_operations amdxdna_fops = {
+	.owner		= THIS_MODULE,
+	.open		= accel_open,
+	.release	= drm_release,
+	.flush		= amdxdna_flush,
+	.unlocked_ioctl	= drm_ioctl,
+	.compat_ioctl	= drm_compat_ioctl,
+	.poll		= drm_poll,
+	.read		= drm_read,
+	.llseek		= noop_llseek,
+	.mmap		= amdxdna_drm_gem_mmap
+};
 
 static const struct drm_driver amdxdna_drm_drv = {
 	.driver_features = DRIVER_GEM | DRIVER_COMPUTE_ACCEL,
@@ -394,7 +211,8 @@ static const struct drm_driver amdxdna_drm_drv = {
 	.gem_create_object = amdxdna_gem_create_object,
 };
 
-static struct amdxdna_dev_info *amdxdna_get_dev_info(struct pci_dev *pdev)
+static const struct amdxdna_dev_info *
+amdxdna_get_dev_info(struct pci_dev *pdev)
 {
 	int i;
 
@@ -415,25 +233,28 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (IS_ERR(xdna))
 		return PTR_ERR(xdna);
 
-	xdna->pdev = pdev;
 	xdna->dev_info = amdxdna_get_dev_info(pdev);
 	if (!xdna->dev_info)
 		return -ENODEV;
 
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
-	INIT_LIST_HEAD(&xdna->xclbin_list);
 	pci_set_drvdata(pdev, xdna);
 
-	ret = npu_init(xdna);
+	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
+		return -EOPNOTSUPP;
+
+	mutex_lock(&xdna->dev_lock);
+	ret = xdna->dev_info->ops->init(xdna);
+	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
-		XDNA_ERR(xdna, "hardware init failed, ret %d", ret);
-		goto failed;
+		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
+		return ret;
 	}
 
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
-		XDNA_ERR(xdna, "create amdxdna attrs failed: %d", ret);
+		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
 		goto failed_npu_fini;
 	}
 
@@ -443,16 +264,18 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_sysfs_fini;
 	}
 
-	npu_debugfs_add(xdna->dev_handle);
-	ida_init(&xdna->pdi_ida);
+	/* Debug fs needs to go after register DRM dev */
+	if (xdna->dev_info->ops->debugfs)
+		xdna->dev_info->ops->debugfs(xdna);
 
 	return 0;
 
 failed_sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
 failed_npu_fini:
-	npu_fini(xdna);
-failed:
+	mutex_lock(&xdna->dev_lock);
+	xdna->dev_info->ops->fini(xdna);
+	mutex_unlock(&xdna->dev_lock);
 	return ret;
 }
 
@@ -467,10 +290,9 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry_safe(client, tmp, &xdna->client_list, node)
 		amdxdna_hwctx_remove_all(client);
-	mutex_unlock(&xdna->dev_lock);
 
-	npu_fini(xdna);
-	ida_destroy(&xdna->pdi_ida);
+	xdna->dev_info->ops->fini(xdna);
+	mutex_unlock(&xdna->dev_lock);
 }
 
 static int amdxdna_pmops_suspend(struct device *dev)
@@ -481,9 +303,10 @@ static int amdxdna_pmops_suspend(struct device *dev)
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_suspend(client);
-	mutex_unlock(&xdna->dev_lock);
 
-	npu_hw_stop(xdna->dev_handle);
+	if (xdna->dev_info->ops->suspend)
+		xdna->dev_info->ops->suspend(xdna);
+	mutex_unlock(&xdna->dev_lock);
 
 	return 0;
 }
@@ -495,14 +318,17 @@ static int amdxdna_pmops_resume(struct device *dev)
 	int ret;
 
 	XDNA_INFO(xdna, "firmware resuming...");
-	ret = npu_hw_start(xdna->dev_handle);
-	if (ret) {
-		XDNA_ERR(xdna, "resume NPU firmware failed");
-		return ret;
+	mutex_lock(&xdna->dev_lock);
+	if (xdna->dev_info->ops->resume) {
+		ret = xdna->dev_info->ops->resume(xdna);
+		if (ret) {
+			XDNA_ERR(xdna, "resume NPU firmware failed");
+			mutex_unlock(&xdna->dev_lock);
+			return ret;
+		}
 	}
 
 	XDNA_INFO(xdna, "hardware context resuming...");
-	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_resume(client);
 	mutex_unlock(&xdna->dev_lock);

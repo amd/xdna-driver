@@ -31,9 +31,6 @@ target_include_directories(${XDNA_SHIM_TEST} PRIVATE
   ${XRT_SUBMOD_BINARY_DIR}/src/gen
   )
 
-add_dependencies(${XDNA_SHIM_TEST} driver)
-install(FILES ${CMAKE_BINARY_DIR}/driver/amdxdna.ko DESTINATION ${XDNA_BIN_DIR}/driver)
-
 target_compile_options(${XDNA_SHIM_TEST} PRIVATE -O3)
 
 configure_file(

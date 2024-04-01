@@ -83,6 +83,33 @@ build_example()
 	cd ..
 }
 
+download_xclbins()
+{
+	#TODO: figure out the validate.xclbin location
+	local firmware_dir=${DOWNLOAD_BINS_DIR}/firmware
+
+	jq -c '.xclbins[]' "$INFO_JSON" |
+		while IFS= read -r line; do
+			local device=$(echo $line | jq -r '.device')
+			local pci_dev_id=$(echo $line | jq -r '.pci_device_id')
+			local pci_rev_id=$(echo $line | jq -r '.pci_revision_id')
+			local name=$(echo $line | jq -r '.name')
+			local url=$(echo $line | jq -r '.url')
+
+			if [[ -z "$url" ]]; then
+				echo "Empty URL for $device xclbin $name"
+				exit 1
+			fi
+
+			echo "Download $device XCLBIN $name :"
+			if [ ! -d "${firmware_dir}/${pci_dev_id}_${pci_rev_id}" ]; then
+				mkdir -p ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
+			fi
+			wget -O ${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$name $url
+
+		done
+}
+
 download_npufws()
 {
 	local firmware_dir=${DOWNLOAD_BINS_DIR}/firmware
@@ -113,7 +140,7 @@ download_npufws()
 # Config variables
 clean=0
 distclean=0
-debug=0
+debug=1
 release=0
 package=0
 example=0
@@ -138,8 +165,10 @@ while [ $# -gt 0 ]; do
 			;;
 		-debug)
 			debug=1
+			release=0
 			;;
 		-release)
+			debug=0
 			release=1
 			;;
 		-example)
@@ -219,6 +248,7 @@ fi
 
 if [[ $package == 1 ]]; then
 	download_npufws
+	download_xclbins
 	package_targets $DEBUG_BUILD_TYPE
 	package_targets $RELEASE_BUILD_TYPE
 	exit 0

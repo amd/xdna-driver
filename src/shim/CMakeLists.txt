@@ -2,6 +2,8 @@
 # Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 set(XDNA_TARGET xrt_driver_xdna)
+set(XRT_CORE_TARGET xrt_core)
+set(XRT_COREUTIL_TARGET xrt_coreutil)
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} MAIN_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/kmq KMQ_SOURCES)
@@ -42,7 +44,8 @@ target_include_directories(${XDNA_TARGET} PRIVATE
 # at that time, so need to be fully solved here.
 target_link_libraries(${XDNA_TARGET} PRIVATE
   xrt_core
-  xrt_coreutil
+  ${XRT_CORE_TARGET}
+  ${XRT_COREUTIL_TARGET}
   )
 
 target_link_options(${XDNA_TARGET} PRIVATE
@@ -53,9 +56,9 @@ target_link_options(${XDNA_TARGET} PRIVATE
 install(TARGETS ${XDNA_TARGET} DESTINATION xrt/lib COMPONENT ${XDNA_COMPONENT})
 
 # install components for testing
-install(TARGETS xrt_core DESTINATION ${XDNA_BIN_DIR}/lib)
-install(TARGETS xrt_coreutil DESTINATION ${XDNA_BIN_DIR}/lib)
-install(TARGETS xrt_driver_xdna DESTINATION ${XDNA_BIN_DIR}/lib)
+install(TARGETS ${XRT_CORE_TARGET} DESTINATION ${XDNA_BIN_DIR}/lib)
+install(TARGETS ${XRT_COREUTIL_TARGET} DESTINATION ${XDNA_BIN_DIR}/lib)
+install(TARGETS ${XDNA_TARGET} DESTINATION ${XDNA_BIN_DIR}/lib)
 
 # TODO update when dpu sequence location is decided
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/dpu/df_bw.txt DESTINATION xrt/test/DPU_Sequence COMPONENT ${XDNA_COMPONENT})
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/dpu/df_bw.txt DESTINATION xrt/${XDNA_COMPONENT}/DPU_Sequence COMPONENT ${XDNA_COMPONENT})

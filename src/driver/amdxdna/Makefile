@@ -19,22 +19,22 @@ ccflags-y += -g -Werror
 
 obj-m	+= amdxdna.o
 amdxdna-y := \
-	solver.o \
-	amdxdna_xclbin.o \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
-	amdxdna_util.o \
 	amdxdna_sysfs.o \
-	npu_smu.o \
-	npu_error.o \
-	npu_debugfs.o \
-	npu_pci.o \
-	npu_message.o \
+	npu_solver.o \
+	npu_mailbox.o \
+	npu_common.o \
+	npu1_smu.o \
+	npu1_psp.o \
+	npu1_ctx.o \
+	npu1_error.o \
+	npu1_debugfs.o \
+	npu1_message.o \
+	npu1_pci.o \
 	npu1_regs.o \
 	npu2_regs.o \
 	npu4_regs.o \
-	amdxdna_mailbox.o \
-	amdxdna_psp.o \
 	amdxdna_drv.o
 
 # Helper functions for amdxdna development, but not for upstreaming

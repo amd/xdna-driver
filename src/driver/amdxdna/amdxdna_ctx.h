@@ -8,52 +8,93 @@
 
 #include <linux/kref.h>
 #include <linux/wait.h>
+#include <drm/drm_drv.h>
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
-#include "xrs.h"
 
-/*
- * Define the maximum number of pending commands in a hardware context.
- * Must be power of 2!
- */
-#define HWCTX_MAX_CMDS		8
-#define HWCTX_MAX_TIMEOUT	10000 /* miliseconds */
+struct npu_hwctx;
 
-extern struct attribute_group hwctx_group;
+enum ert_cmd_state {
+	ERT_CMD_STATE_INVALID,
+	ERT_CMD_STATE_NEW,
+	ERT_CMD_STATE_QUEUED,
+	ERT_CMD_STATE_RUNNING,
+	ERT_CMD_STATE_COMPLETED,
+	ERT_CMD_STATE_ERROR,
+	ERT_CMD_STATE_ABORT,
+	ERT_CMD_STATE_SUBMITTED,
+	ERT_CMD_STATE_TIMEOUT,
+	ERT_CMD_STATE_NORESPONSE,
+};
+
+/* Exec buffer command header format */
+struct amdxdna_cmd {
+	union {
+		struct {
+			u32 state:4;
+			u32 stat_enabled:1;
+			u32 unused:5;
+			u32 extra_cu_masks:2;
+			u32 count:11;
+			u32 opcode:5;
+			u32 type:4;
+		};
+		u32 header;
+	};
+	u32 cu_mask;
+	u32 data[];
+};
 
 struct amdxdna_hwctx {
 	struct amdxdna_client		*client;
-	u32				id;
-	u32				xrs_id;
-	u32				start_col;
-	u32				num_col;
-	u32				fw_ctx_id;
-	struct aie_qos			qos;
-	void				*mbox_chan;
-	struct amdxdna_xclbin		*xclbin;
-	struct amdxdna_gem_obj		*heap;
-	bool				stopped;
+	struct npu_hwctx		*priv;
 	char				*name;
 
-	struct drm_gpu_scheduler	sched;
-	struct drm_sched_entity		entity;
+	u32				id;
+	u32				max_opc;
+	u32				num_tiles;
+	u32				mem_size;
+	u32				fw_ctx_id;
+	u32				start_col;
+	u32				num_col;
+#define HWCTX_STAT_INIT  0
+#define HWCTX_STAT_READY 1
+#define HWCTX_STAT_STOP  2
+	u32				status;
+	u32				old_status;
 
-	spinlock_t			io_lock; /* protect seq and cmd order */
-	struct dma_fence		*pending[HWCTX_MAX_CMDS];
-	u32				num_pending;
-	u64				seq;
+	struct amdxdna_qos_info		     qos;
+	struct amdxdna_hwctx_param_config_cu *cus;
 };
 
+#define drm_job_to_xdna_job(j) \
+	container_of(j, struct amdxdna_sched_job, base)
+
+struct amdxdna_sched_job {
+	struct drm_sched_job	base;
+	struct kref		refcnt;
+	struct amdxdna_hwctx	*hwctx;
+	struct mm_struct	*mm;
+	/* The fence to notice DRM scheduler that job is done by hardware */
+	struct dma_fence	*fence;
+	/* user can wait on this fence */
+	struct dma_fence	*out_fence;
+	int			cu_idx;
+	struct amdxdna_cmd	*cmd;
+	struct amdxdna_gem_obj	*cmd_abo;
+	u64			seq;
+	size_t			bo_cnt;
+	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
+};
+
+void amdxdna_job_put(struct amdxdna_sched_job *job);
+
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
-void amdxdna_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
-void amdxdna_restart_ctx(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 
-int amdxdna_hwctx_status(struct drm_device *dev, u32 *buf_size,
-			 struct amdxdna_drm_query_hwctx __user *buf);
-
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

@@ -125,42 +125,59 @@ struct aie_info
     }
     case key_type::aie_tiles_stats:
     {
-      amdxdna_drm_query_aie_metadata aie_metadata;
+      static std::map<const xrt_core::device *, query::aie_tiles_stats::result_type> cache;
 
-      amdxdna_drm_get_info arg = {
-        .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
-        .buffer_size = sizeof(aie_metadata),
-        .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
-      };
+      auto iter = cache.find(device);
+      if (iter != cache.end())
+        return cache.at(device);
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      {
+        static std::mutex lock; // Usually there is only one device was referenced, not per device lock..
+        std::lock_guard L(lock);
 
-      query::aie_tiles_stats::result_type output;
-      output.col_size = aie_metadata.col_size;
-      output.major = aie_metadata.version.major;
-      output.minor = aie_metadata.version.minor;
-      output.cols = aie_metadata.cols;
-      output.rows = aie_metadata.rows;
+        auto iter = cache.find(device);
+        if (iter != cache.end())
+          return cache.at(device);
 
-      output.core_rows = aie_metadata.core.row_count;
-      output.core_row_start = aie_metadata.core.row_start;
-      output.core_dma_channels = aie_metadata.core.dma_channel_count;
-      output.core_locks = aie_metadata.core.lock_count;
-      output.core_events = aie_metadata.core.event_reg_count;
+        amdxdna_drm_query_aie_metadata aie_metadata;
 
-      output.mem_rows = aie_metadata.mem.row_count;
-      output.mem_row_start = aie_metadata.mem.row_start;
-      output.mem_dma_channels = aie_metadata.mem.dma_channel_count;
-      output.mem_locks = aie_metadata.mem.lock_count;
-      output.mem_events = aie_metadata.mem.event_reg_count;
+        amdxdna_drm_get_info arg = {
+          .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+          .buffer_size = sizeof(aie_metadata),
+          .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+        };
 
-      output.shim_rows = aie_metadata.shim.row_count;
-      output.shim_row_start = aie_metadata.shim.row_start;
-      output.shim_dma_channels = aie_metadata.shim.dma_channel_count;
-      output.shim_locks = aie_metadata.shim.lock_count;
-      output.shim_events = aie_metadata.shim.event_reg_count;
-      return output;
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+        query::aie_tiles_stats::result_type output;
+        output.col_size = aie_metadata.col_size;
+        output.major = aie_metadata.version.major;
+        output.minor = aie_metadata.version.minor;
+        output.cols = aie_metadata.cols;
+        output.rows = aie_metadata.rows;
+
+        output.core_rows = aie_metadata.core.row_count;
+        output.core_row_start = aie_metadata.core.row_start;
+        output.core_dma_channels = aie_metadata.core.dma_channel_count;
+        output.core_locks = aie_metadata.core.lock_count;
+        output.core_events = aie_metadata.core.event_reg_count;
+
+        output.mem_rows = aie_metadata.mem.row_count;
+        output.mem_row_start = aie_metadata.mem.row_start;
+        output.mem_dma_channels = aie_metadata.mem.dma_channel_count;
+        output.mem_locks = aie_metadata.mem.lock_count;
+        output.mem_events = aie_metadata.mem.event_reg_count;
+
+        output.shim_rows = aie_metadata.shim.row_count;
+        output.shim_row_start = aie_metadata.shim.row_start;
+        output.shim_dma_channels = aie_metadata.shim.dma_channel_count;
+        output.shim_locks = aie_metadata.shim.lock_count;
+        output.shim_events = aie_metadata.shim.event_reg_count;
+
+        cache.emplace(device, output);
+        return output;
+      }
     }
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
@@ -180,8 +197,8 @@ struct aie_info
       std::vector<char> payload(output_size);
 
       amdxdna_drm_query_aie_status aie_status = {
+        .buffer = reinterpret_cast<uintptr_t>(payload.data()),
         .buffer_size = output_size,
-        .buffer = reinterpret_cast<uintptr_t>(payload.data())
       };
 
       amdxdna_drm_get_info arg = {
@@ -460,6 +477,68 @@ struct sensor_info
   }
 };
 
+struct xclbin_name
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::xclbin_name)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+    auto fmt = boost::format("%04x_%02x/%s") % pcie_id.device_id % static_cast<uint16_t>(pcie_id.revision_id);
+
+    std::string xclbin_name;
+    const auto xclbin_type = std::any_cast<xrt_core::query::xclbin_name::type>(param);
+    switch (xclbin_type) {
+    case xrt_core::query::xclbin_name::type::validate:
+      xclbin_name = "validate.xclbin";
+      break;
+    }
+
+    return boost::str(fmt % xclbin_name);
+  }
+};
+
+struct sequence_name
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::sequence_name)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    auto fmt = boost::format("DPU_Sequence/%s");
+
+    std::string seq_name;
+    switch (std::any_cast<xrt_core::query::sequence_name::type>(param)) {
+    case xrt_core::query::sequence_name::type::df_bandwidth:
+      seq_name = "df_bw.txt";
+      break;
+    case xrt_core::query::sequence_name::type::tct_one_column:
+      seq_name = "tct_1col.txt";
+      break;
+    case xrt_core::query::sequence_name::type::tct_all_column:
+      seq_name = "tct_4col.txt";
+      break;
+    }
+
+    return boost::str(fmt % seq_name);
+  }
+};
+
 template <typename QueryRequestType>
 struct sysfs_get : virtual QueryRequestType
 {
@@ -565,6 +644,8 @@ initialize_query_table()
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
+  emplace_func1_request<query::sequence_name,                  sequence_name>();
+  emplace_func1_request<query::xclbin_name,                    xclbin_name>();
 }
 
 struct X { X() { initialize_query_table(); }};
@@ -588,7 +669,8 @@ lookup_query(query::key_type query_key) const
 
 device::
 device(const pdev& pdev, handle_type shim_handle, id_type device_id)
-  : device_linux(shim_handle, device_id, !pdev.m_is_mgmt), m_pdev(pdev)
+  : noshim<xrt_core::device_pcie>{shim_handle, device_id, !pdev.m_is_mgmt}
+  , m_pdev(pdev)
 {
 }
 

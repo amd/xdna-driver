@@ -3,8 +3,8 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _AMDXDNA_MAILBOX_H_
-#define _AMDXDNA_MAILBOX_H_
+#ifndef _NPU_MAILBOX_H_
+#define _NPU_MAILBOX_H_
 
 struct mailbox;
 struct mailbox_channel;
@@ -28,12 +28,6 @@ struct xdna_mailbox_msg {
 	void		(*notify_cb)(void *handle, const u32 *data, size_t size);
 	u8		*send_data;
 	size_t		send_size;
-};
-
-#define MAX_ASYNC_MSG_LEN 64
-struct xdna_mailbox_async {
-	u32		opcode;
-	u8		payload[MAX_ASYNC_MSG_LEN];
 };
 
 /*
@@ -125,18 +119,6 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
 			  const struct xdna_mailbox_msg *msg, u64 tx_timeout);
 
-/*
- * xdna_mailbox_wait_async_msg() -- Wait an async message
- *
- * @mailbox_chann: Mailbox channel handle
- * @buf: buffer for the async message
- * @blocking: if this is a blocking call
- *
- * Return: if success, return 0; otherwise return error code
- */
-int xdna_mailbox_wait_async_msg(struct mailbox_channel *mailbox_chann,
-				struct xdna_mailbox_async *buf, bool blocking);
-
 #if defined(CONFIG_DEBUG_FS)
 /*
  * xdna_mailbox_info_show() -- Show mailbox info for debug
@@ -161,4 +143,4 @@ int xdna_mailbox_ringbuf_show(struct mailbox *mailbox,
 			      struct seq_file *m);
 #endif
 
-#endif /* _AMDXDNA_MAILBOX_ */
+#endif /* _NPU_MAILBOX_ */

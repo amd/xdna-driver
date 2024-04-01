@@ -37,15 +37,13 @@ extern "C" {
 enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_CREATE_HWCTX,
 	DRM_AMDXDNA_DESTROY_HWCTX,
+	DRM_AMDXDNA_CONFIG_HWCTX,
 	DRM_AMDXDNA_CREATE_BO,
 	DRM_AMDXDNA_GET_BO_INFO,
 	DRM_AMDXDNA_SYNC_BO,
 	DRM_AMDXDNA_EXEC_CMD,
 	DRM_AMDXDNA_WAIT_CMD,
 	DRM_AMDXDNA_GET_INFO,
-	DRM_AMDXDNA_CREATE_HWCTX_UNSECURE,
-	DRM_AMDXDNA_ATTACH_BO,
-	DRM_AMDXDNA_DETACH_BO,
 	DRM_AMDXDNA_NUM_IOCTLS
 };
 
@@ -75,49 +73,31 @@ struct amdxdna_qos_info {
 };
 
 /**
- * struct amdxdna_ip_name_index - IP name to index mapping.
- * @name_off: IP name string offset in the buffer.
- * @index: IP index.
- */
-struct amdxdna_ip_name_index {
-	__u32 name_off;
-	__u32 index;
-};
-
-/**
  * struct amdxdna_drm_create_hwctx - Create hardware context.
  * @ext: MBZ.
  * @ext_flags: MBZ.
- * @xclbin_uuid: UUID of xclbin binary.
- * @ip_buf_p: Returned IP name array buffer.
- * @ip_buf_size: IP name array buffer size in bytes, driver returns actual
- *               used size.
- * @pad: MBZ.
- * @qos_p: Address of QoS info buffer.
- * @qos_size: QoS info buffer size.
+ * @qos_p: Address of QoS info.
+ * @umq_p: Address user mode queue(UMQ).
+ * @log_buf_p: Address of log buffer.
+ * @log_size: Log buffer size.
+ * @max_opc: Maximum operations per cycle.
+ * @num_tiles: Number of AIE tiles.
+ * @mem_size: Size of AIE tile memory.
+ * @umq_doorbell: Returned offset of doorbell associated with UMQ.
  * @handle: Returned hardware context handle.
  */
 struct amdxdna_drm_create_hwctx {
 	__u64 ext;
 	__u64 ext_flags;
-	__u8  xclbin_uuid[16];
-	__u64 ip_buf_p;
-	__u32 ip_buf_size;
-	__u32 pad;
 	__u64 qos_p;
-	__u32 qos_size;
+	__u64 umq_p;
+	__u64 log_buf_p;
+	__u32 log_size;
+	__u32 max_opc;
+	__u32 num_tiles;
+	__u32 mem_size;
+	__u32 umq_doorbell;
 	__u32 handle;
-};
-
-/* Hack: driver gets xclbin from user directly. */
-struct amdxdna_drm_create_hwctx_unsecure {
-	__u64	xclbin_p;
-	__u64	ip_buf_p;
-	__u32	ip_buf_size;
-	__u32	pad;
-	__u64	qos_p;
-	__u32	qos_size;
-	__u32	handle;
 };
 
 /**
@@ -127,6 +107,54 @@ struct amdxdna_drm_create_hwctx_unsecure {
  */
 struct amdxdna_drm_destroy_hwctx {
 	__u32 handle;
+	__u32 pad;
+};
+
+/**
+ * struct amdxdna_cu_config - configuration for one CU
+ * @xdna_addr: XDNA virtual address of configuration buffer
+ * @cu_func: Functional of a CU
+ * @pad: MBZ
+ */
+struct amdxdna_cu_config {
+	__u64 xdna_addr;
+	__u8  cu_func;
+	__u8  pad[7];
+};
+
+/**
+ * struct amdxdna_hwctx_param_config_cu - configuration for CUs in hardware context
+ * @num_cus: Number of CUs to configure
+ * @pad: MBZ
+ * @cu_configs: Array of CU configurations of struct amdxdna_cu_config
+ */
+struct amdxdna_hwctx_param_config_cu {
+	__u16 num_cus;
+	__u16 pad[3];
+	struct amdxdna_cu_config cu_configs[0];
+};
+
+enum amdxdna_drm_config_hwctx_param {
+	DRM_AMDXDNA_HWCTX_CONFIG_CU,
+	DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
+	DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
+	DRM_AMDXDNA_HWCTX_CONFIG_NUM
+};
+
+/**
+ * struct amdxdna_drm_config_hwctx - Configure hardware context.
+ * @handle: hardware context handle.
+ * @param_type: Value in enum amdxdna_drm_config_hwctx_param. Specifies the
+ *              structure passed in via param_val.
+ * @param_val: A structure specified by the param_type struct member.
+ * @param_val_size: Size of the parameter buffer pointed to by the param_val.
+ *		    if param_val is not a pointer, this should be 0.
+ */
+struct amdxdna_drm_config_hwctx {
+	__u32 handle;
+	__u32 param_type;
+	__u64 param_val;
+	__u32 param_val_size;
 	__u32 pad;
 };
 
@@ -233,27 +261,14 @@ struct amdxdna_drm_wait_cmd {
 };
 
 /**
- * struct amdxdna_drm_attach_detach_bo - Attach/detach a BO to/from a context.
- *
- * @hwctx: hardware context handle.
- * @bo: BO handle.
- *
- * Assign/unassign a BO to a hardware context for its exclusive use.
- */
-struct amdxdna_drm_attach_detach_bo {
-	__u32 bo;
-	__u32 hwctx;
-};
-
-/**
  * struct amdxdna_drm_query_aie_status - Query the status of the AIE hardware
- * @buffer_size: The size of the user space buffer
  * @buffer: The user space buffer that will return the AIE status
+ * @buffer_size: The size of the user space buffer
  * @cols_filled: A bitmap of AIE columns whose data has been returned in the buffer.
  */
 struct amdxdna_drm_query_aie_status {
-	__u32 buffer_size; /* in */
 	__u64 buffer; /* out */
+	__u32 buffer_size; /* in */
 	__u32 cols_filled; /* out */
 };
 
@@ -282,7 +297,7 @@ struct amdxdna_drm_query_aie_tile_metadata {
 	__u16 dma_channel_count;
 	__u16 lock_count;
 	__u16 event_reg_count;
-	__u8  pad[6];
+	__u16 pad[3];
 };
 
 /**
@@ -413,6 +428,10 @@ struct amdxdna_drm_get_info {
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DESTROY_HWCTX, \
 		 struct amdxdna_drm_destroy_hwctx)
 
+#define DRM_IOCTL_AMDXDNA_CONFIG_HWCTX \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CONFIG_HWCTX, \
+		 struct amdxdna_drm_config_hwctx)
+
 #define DRM_IOCTL_AMDXDNA_CREATE_BO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_BO, \
 		 struct amdxdna_drm_create_bo)
@@ -433,21 +452,9 @@ struct amdxdna_drm_get_info {
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_WAIT_CMD, \
 		 struct amdxdna_drm_wait_cmd)
 
-#define DRM_IOCTL_AMDXDNA_CREATE_HWCTX_UNSECURE \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX_UNSECURE, \
-		 struct amdxdna_drm_create_hwctx_unsecure)
-
 #define DRM_IOCTL_AMDXDNA_GET_INFO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO, \
 		 struct amdxdna_drm_get_info)
-
-#define DRM_IOCTL_AMDXDNA_ATTACH_BO \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_ATTACH_BO, \
-		 struct amdxdna_drm_attach_detach_bo)
-
-#define DRM_IOCTL_AMDXDNA_DETACH_BO \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DETACH_BO, \
-		 struct amdxdna_drm_attach_detach_bo)
 
 #if defined(__cplusplus)
 } /* extern c end */

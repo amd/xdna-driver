@@ -8,11 +8,11 @@
 #include "shim.h"
 #include "shim_debug.h"
 
-#include "core/pcie/linux/device_linux.h"
+#include "core/common/ishim.h"
 
 namespace shim_xdna {
 
-class device : public xrt_core::device_linux
+class device : public xrt_core::noshim<xrt_core::device_pcie>
 {
 private:
   // Private look up function for concrete query::request

@@ -3,10 +3,10 @@
 	"firmwares": [
 		{
 			"device": "npu1",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/ipu.sbin.1.2.0.280",
+			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.3.0.284",
 			"pci_device_id": "1502",
 			"pci_revision_id": "00",
-			"version": "1.2.0.280",
+			"version": "1.3.0.284",
 			"fw_name": "npu.sbin"
 		},
 		{
@@ -14,7 +14,7 @@
 			"url": "",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "00",
-			"version": "0.7.6.129",
+			"version": "0.7.11.139",
 			"fw_name": "npu.sbin"
 		},
 		{
@@ -22,32 +22,17 @@
 			"url": "",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "10",
-			"version": "0.7.6.54",
+			"version": "0.7.11.68",
 			"fw_name": "npu.sbin"
-		},
-		{
-			"device": "npu1",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/1x4.xclbin.3.5.0.0-949",
-			"pci_device_id": "1502",
-			"pci_revision_id": "00",
-			"version": "3.5.0.0-949",
-			"fw_name": "1x4.xclbin"
-		},
+		}
+	],
+	"xclbins": [
 		{
 			"device": "npu1",
 			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/5x4.xclbin.3.5.0.0-950",
 			"pci_device_id": "1502",
 			"pci_revision_id": "00",
-			"version": "3.5.0.0-950",
-			"fw_name": "5x4.xclbin"
-		},
-		{
-			"device": "npu1",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/5x4.xclbin.3.5.0.0-950",
-			"pci_device_id": "1502",
-			"pci_revision_id": "00",
-			"version": "3.5.0.0-950",
-			"fw_name": "validate.xclbin"
+			"name": "validate.xclbin"
 		}
 	]
 }

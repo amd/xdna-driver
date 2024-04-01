@@ -3,7 +3,8 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#include "npu_common.h"
+#include "drm_local/amdxdna_accel.h"
+#include "npu1_pci.h"
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
 #define MPNPU_PUB_SEC_INTR             0x3010060
@@ -24,40 +25,22 @@
 #define MPNPU_PUB_SCRATCH13            0x30100A0
 #define MPNPU_PUB_SCRATCH14            0x30100A4
 #define MPNPU_PUB_SCRATCH15            0x30100A8
-#define MP0_C2PMSG_73                       0x3810A24
-#define MP0_C2PMSG_123                     0x3810AEC
+#define MP0_C2PMSG_73                  0x3810A24
+#define MP0_C2PMSG_123                 0x3810AEC
 
-#define MP1_C2PMSG_0                        0x3B10900
-#define MP1_C2PMSG_60                       0x3B109F0
-#define MP1_C2PMSG_61                       0x3B109F4
+#define MP1_C2PMSG_0                   0x3B10900
+#define MP1_C2PMSG_60                  0x3B109F0
+#define MP1_C2PMSG_61                  0x3B109F4
 
 #define MPNPU_SRAM_X2I_MAILBOX_0       0x3600000
 #define MPNPU_SRAM_X2I_MAILBOX_15      0x361E000
 #define MPNPU_SRAM_X2I_MAILBOX_31      0x363E000
 #define MPNPU_SRAM_I2X_MAILBOX_31      0x363F000
 
-#define MMNPU_APERTURE0_BASE            0x3000000
-#define MMNPU_APERTURE1_BASE            0x3600000
-#define MMNPU_APERTURE3_BASE            0x3810000
-#define MMNPU_APERTURE4_BASE            0x3B10000
-
-/* <device name>_<bar>_<enum name>_ADDR, see enum psp_reg_idx */
-#define NPU4_PSP_PSP_CMD_REG_ADDR	MP0_C2PMSG_123
-#define NPU4_REG_PSP_ARG0_REG_ADDR	MPNPU_PUB_SCRATCH3
-#define NPU4_REG_PSP_ARG1_REG_ADDR	MPNPU_PUB_SCRATCH4
-#define NPU4_REG_PSP_ARG2_REG_ADDR	MPNPU_PUB_SCRATCH9
-#define NPU4_PSP_PSP_INTR_REG_ADDR	MP0_C2PMSG_73
-#define NPU4_PSP_PSP_STATUS_REG_ADDR	MP0_C2PMSG_123
-#define NPU4_REG_PSP_RESP_REG_ADDR	MPNPU_PUB_SCRATCH3
-/* <device name>_<bar>_<enum name>_ADDR, see enum npu_smu_reg_idx */
-#define NPU4_SMU_SMU_CMD_REG_ADDR	MP1_C2PMSG_0
-#define NPU4_SMU_SMU_ARG_REG_ADDR	MP1_C2PMSG_60
-#define NPU4_SMU_SMU_INTR_REG_ADDR	MMNPU_APERTURE4_BASE
-#define NPU4_SMU_SMU_RESP_REG_ADDR	MP1_C2PMSG_61
-#define NPU4_SMU_SMU_OUT_REG_ADDR	MP1_C2PMSG_60
-/* <device name>_<bar>_<enum name>_ADDR, see enum npu_sram_reg_idx */
-#define NPU4_SRAM_MBOX_CHANN_OFF_ADDR	MPNPU_SRAM_X2I_MAILBOX_0
-#define NPU4_SRAM_FW_ALIVE_OFF_ADDR	MPNPU_SRAM_X2I_MAILBOX_15
+#define MMNPU_APERTURE0_BASE           0x3000000
+#define MMNPU_APERTURE1_BASE           0x3600000
+#define MMNPU_APERTURE3_BASE           0x3810000
+#define MMNPU_APERTURE4_BASE           0x3B10000
 
 /* PCIe BAR Index for NPU4 */
 #define NPU4_REG_BAR_INDEX	0
@@ -72,19 +55,52 @@
 #define NPU4_SMU_BAR_BASE	MMNPU_APERTURE4_BASE
 #define NPU4_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
-#define NPU4_PSP_OFFSETS(_dev) \
-{ \
-	BAR_OFFSET_PAIR(_dev##PSP, PSP_CMD_REG), \
-	BAR_OFFSET_PAIR(_dev##REG, PSP_ARG0_REG), \
-	BAR_OFFSET_PAIR(_dev##REG, PSP_ARG1_REG), \
-	BAR_OFFSET_PAIR(_dev##REG, PSP_ARG2_REG), \
-	BAR_OFFSET_PAIR(_dev##PSP, PSP_INTR_REG), \
-	BAR_OFFSET_PAIR(_dev##PSP, PSP_STATUS_REG), \
-	BAR_OFFSET_PAIR(_dev##REG, PSP_RESP_REG), \
-}
+#define NPU4_RT_CFG_TYPE_PDI_LOAD 5
 
-#define PROTOCOL_MAJOR                  0x3
-#define PROTOCOL_MINOR                  0x2
+#define NPU4_RT_CFG_VAL_PDI_LOAD_APP 1
 
-const NPU_DEFINE_DEV_INFO_PSP(NPU4, "RyzenAI-npu4", NPU4_PSP_OFFSETS,
-			      "amdnpu/17f0_10/npu.sbin", PROTOCOL_MAJOR, PROTOCOL_MINOR);
+const struct npu_dev_priv npu4_dev_priv = {
+	.fw_path        = "amdnpu/17f0_10/npu.sbin",
+	.protocol_major = 0x6,
+	.protocol_minor = 0x1,
+	.rt_config	= {NPU4_RT_CFG_TYPE_PDI_LOAD, NPU4_RT_CFG_VAL_PDI_LOAD_APP},
+	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,
+	.mbox_size      = 0, /* Use BAR size */
+	.sram_dev_addr  = NPU4_SRAM_BAR_BASE,
+	.sram_offs      = {
+		DEFINE_BAR_OFFSET(MBOX_CHANN_OFF, NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_0),
+		DEFINE_BAR_OFFSET(FW_ALIVE_OFF,   NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_15),
+	},
+	.psp_regs_off   = {
+		DEFINE_BAR_OFFSET(PSP_CMD_REG,    NPU4_PSP, MP0_C2PMSG_123),
+		DEFINE_BAR_OFFSET(PSP_ARG0_REG,   NPU4_REG, MPNPU_PUB_SCRATCH3),
+		DEFINE_BAR_OFFSET(PSP_ARG1_REG,   NPU4_REG, MPNPU_PUB_SCRATCH4),
+		DEFINE_BAR_OFFSET(PSP_ARG2_REG,   NPU4_REG, MPNPU_PUB_SCRATCH9),
+		DEFINE_BAR_OFFSET(PSP_INTR_REG,   NPU4_PSP, MP0_C2PMSG_73),
+		DEFINE_BAR_OFFSET(PSP_STATUS_REG, NPU4_PSP, MP0_C2PMSG_123),
+		DEFINE_BAR_OFFSET(PSP_RESP_REG,   NPU4_REG, MPNPU_PUB_SCRATCH3),
+	},
+	.smu_regs_off   = {
+		DEFINE_BAR_OFFSET(SMU_CMD_REG,  NPU4_SMU, MP1_C2PMSG_0),
+		DEFINE_BAR_OFFSET(SMU_ARG_REG,  NPU4_SMU, MP1_C2PMSG_60),
+		DEFINE_BAR_OFFSET(SMU_INTR_REG, NPU4_SMU, MMNPU_APERTURE4_BASE),
+		DEFINE_BAR_OFFSET(SMU_RESP_REG, NPU4_SMU, MP1_C2PMSG_61),
+		DEFINE_BAR_OFFSET(SMU_OUT_REG,  NPU4_SMU, MP1_C2PMSG_60),
+	},
+};
+
+const struct amdxdna_dev_info dev_npu4_info = {
+	.reg_bar           = NPU4_REG_BAR_INDEX,
+	.mbox_bar          = NPU4_MBOX_BAR_INDEX,
+	.sram_bar          = NPU4_SRAM_BAR_INDEX,
+	.psp_bar           = NPU4_PSP_BAR_INDEX,
+	.smu_bar           = NPU4_SMU_BAR_INDEX,
+	.first_col         = 0,
+	.dev_mem_buf_shift = 15, /* 32 KiB aligned */
+	.dev_mem_base      = NPU_DEVM_BASE,
+	.dev_mem_size      = NPU_DEVM_SIZE,
+	.vbnv              = "RyzenAI-npu4",
+	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
+	.dev_priv          = &npu4_dev_priv,
+	.ops               = &npu1_ops, /* NPU4 can share NPU1's callback */
+};
