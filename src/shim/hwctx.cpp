@@ -21,7 +21,7 @@ get_pdi(const xrt_core::xclbin::aie_partition_obj& aie, uint16_t kernel_id)
       }
     }
   }
-  shim_err(ENOENT, "PDI for kernel ID %d not found", kernel_id);
+  shim_err(ENOENT, "PDI for kernel ID 0x%x not found", kernel_id);
 }
 
 }
@@ -144,12 +144,19 @@ parse_xclbin(const xrt::xclbin& xclbin)
       continue;
 
     //xrt_core::cuidx_type cuidx = { .index = idx, };
-    auto pdi = get_pdi(aie_partition, ip->ps_kernel.m_kernel_id);
-    auto cuname = std::string(reinterpret_cast<const char*>(ip->m_name));
-    m_cu_info.push_back( {
-      .m_name = cuname,
-      .m_func = static_cast<uint8_t>(ip->ps_kernel.m_functional),
-      .m_pdi = pdi } );
+    try {
+      auto pdi = get_pdi(aie_partition, ip->ps_kernel.m_kernel_id);
+      auto cuname = std::string(reinterpret_cast<const char*>(ip->m_name));
+      m_cu_info.push_back( {
+        .m_name = cuname,
+        .m_func = static_cast<uint8_t>(ip->ps_kernel.m_functional),
+        .m_pdi = pdi } );
+    } catch (xrt_core::system_error &ex) {
+      if (ex.get_code() != ENOENT)
+        throw;
+      shim_debug("%s", ex.what());
+      continue;
+    }
   }
 
   if (m_cu_info.empty())
