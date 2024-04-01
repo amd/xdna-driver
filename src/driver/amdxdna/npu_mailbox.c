@@ -291,6 +291,8 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 	idr_remove(&mb_chann->chan_idr, msg_id);
 	spin_unlock_irqrestore(&mb_chann->chan_idr_lock, flags);
 
+	MB_DBG(mb_chann, "opcode 0x%x size %d id 0x%x",
+	       header->opcode, header->total_size, header->id);
 	if (mb_msg->notify_cb)
 		mb_msg->notify_cb(mb_msg->handle, data, header->size);
 

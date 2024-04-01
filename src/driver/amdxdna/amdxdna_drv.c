@@ -35,11 +35,6 @@ static const struct pci_device_id pci_ids[] = {
 
 MODULE_DEVICE_TABLE(pci, pci_ids);
 
-/* Add device info below */
-extern const struct amdxdna_dev_info dev_npu1_info;
-extern const struct amdxdna_dev_info dev_npu2_info;
-extern const struct amdxdna_dev_info dev_npu4_info;
-
 static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x1502, 0x0,  &dev_npu1_info },
 	{ 0x17f0, 0x0,  &dev_npu2_info },
@@ -164,15 +159,11 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	/* Context */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_HWCTX, amdxdna_drm_create_hwctx_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_DESTROY_HWCTX, amdxdna_drm_destroy_hwctx_ioctl, 0),
-#ifdef AMDXDNA_DEVEL
-	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_HWCTX_UNSECURE, amdxdna_drm_create_hwctx_unsec_ioctl, 0),
-#endif
+	DRM_IOCTL_DEF_DRV(AMDXDNA_CONFIG_HWCTX, amdxdna_drm_config_hwctx_ioctl, 0),
 	/* BO */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_BO, amdxdna_drm_create_bo_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_BO_INFO, amdxdna_drm_get_bo_info_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SYNC_BO, amdxdna_drm_sync_bo_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_ATTACH_BO, amdxdna_drm_attach_bo_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_DETACH_BO, amdxdna_drm_detach_bo_ioctl, 0),
 	/* Exectuion */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_EXEC_CMD, amdxdna_drm_exec_cmd_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_WAIT_CMD, amdxdna_drm_wait_cmd_ioctl, 0),
@@ -237,22 +228,20 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
-	INIT_LIST_HEAD(&xdna->xclbin_list);
 	pci_set_drvdata(pdev, xdna);
-	ida_init(&xdna->pdi_ida);
 
 	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
 		return -EOPNOTSUPP;
 
 	ret = xdna->dev_info->ops->init(xdna);
 	if (ret) {
-		XDNA_ERR(xdna, "hardware init failed, ret %d", ret);
-		goto failed;
+		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
+		return ret;
 	}
 
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
-		XDNA_ERR(xdna, "create amdxdna attrs failed: %d", ret);
+		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
 		goto failed_npu_fini;
 	}
 
@@ -272,8 +261,6 @@ failed_sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
 failed_npu_fini:
 	xdna->dev_info->ops->fini(xdna);
-failed:
-	ida_destroy(&xdna->pdi_ida);
 	return ret;
 }
 
@@ -291,7 +278,6 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	mutex_unlock(&xdna->dev_lock);
 
 	xdna->dev_info->ops->fini(xdna);
-	ida_destroy(&xdna->pdi_ida);
 }
 
 static int amdxdna_pmops_suspend(struct device *dev)

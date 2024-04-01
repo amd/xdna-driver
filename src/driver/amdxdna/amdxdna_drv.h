@@ -15,7 +15,6 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
-#include "amdxdna_xclbin.h"
 
 #define AMDXDNA_DRIVER_NAME "amdxdna"
 
@@ -46,14 +45,11 @@ struct amdxdna_dev_ops {
 
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
+	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size);
 	void (*hwctx_suspend)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_resume)(struct amdxdna_hwctx *hwctx);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
-
-	/* Will be removed */
-	int (*reg_pdis)(struct npu_device *ndev, struct amdxdna_xclbin *xclbin);
-	int (*unreg_pdis)(struct npu_device *ndev, struct amdxdna_xclbin *xclbin);
 };
 
 /*
@@ -66,6 +62,8 @@ struct amdxdna_dev_ops {
  * @psp_bar: Index of PSP BAR
  * @smu_bar: Index of SMU BAR
  * @device_type: type of the device
+ * @first_col: First column for application
+ * @dev_mem_buf_shift: heap buffer alignment shift
  * @dev_mem_base: Base address of device heap memory
  * @dev_mem_size: Size of device heap memory
  * @vbnv: the VBNV string
@@ -79,6 +77,8 @@ struct amdxdna_dev_info {
 	int				psp_bar;
 	int				smu_bar;
 	int				device_type;
+	int				first_col;
+	u32				dev_mem_buf_shift;
 	u64				dev_mem_base;
 	size_t				dev_mem_size;
 	char				*vbnv;
@@ -114,8 +114,6 @@ struct amdxdna_dev {
 
 	struct mutex			dev_lock; /* per device lock */
 	struct list_head		client_list;
-	struct list_head		xclbin_list;
-	struct ida			pdi_ida;
 	struct amdxdna_fw_ver		fw_ver;
 };
 
@@ -152,4 +150,10 @@ struct amdxdna_client {
 	struct iommu_sva		*sva;
 	int				pasid;
 };
+
+/* Add device info below */
+extern const struct amdxdna_dev_info dev_npu1_info;
+extern const struct amdxdna_dev_info dev_npu2_info;
+extern const struct amdxdna_dev_info dev_npu4_info;
+
 #endif /* _AMDXDNA_DRV_H_ */

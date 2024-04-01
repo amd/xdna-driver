@@ -55,10 +55,15 @@
 #define NPU4_SMU_BAR_BASE	MMNPU_APERTURE4_BASE
 #define NPU4_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
+#define NPU4_RT_CFG_TYPE_PDI_LOAD 5
+
+#define NPU4_RT_CFG_VAL_PDI_LOAD_APP 1
+
 const struct npu_dev_priv npu4_dev_priv = {
 	.fw_path        = "amdnpu/17f0_10/npu.sbin",
-	.protocol_major = 0x3,
-	.protocol_minor = 0x2,
+	.protocol_major = 0x6,
+	.protocol_minor = 0x1,
+	.rt_config	= {NPU4_RT_CFG_TYPE_PDI_LOAD, NPU4_RT_CFG_VAL_PDI_LOAD_APP},
 	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
 	.sram_dev_addr  = NPU4_SRAM_BAR_BASE,
@@ -85,15 +90,17 @@ const struct npu_dev_priv npu4_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu4_info = {
-	.reg_bar      = NPU4_REG_BAR_INDEX,
-	.mbox_bar     = NPU4_MBOX_BAR_INDEX,
-	.sram_bar     = NPU4_SRAM_BAR_INDEX,
-	.psp_bar      = NPU4_PSP_BAR_INDEX,
-	.smu_bar      = NPU4_SMU_BAR_INDEX,
-	.dev_mem_base = NPU_DEVM_BASE,
-	.dev_mem_size = NPU_DEVM_SIZE,
-	.vbnv         = "RyzenAI-npu4",
-	.device_type  = AMDXDNA_DEV_TYPE_KMQ,
-	.dev_priv     = &npu4_dev_priv,
-	.ops          = &npu1_ops, /* NPU4 can share NPU1's callback */
+	.reg_bar           = NPU4_REG_BAR_INDEX,
+	.mbox_bar          = NPU4_MBOX_BAR_INDEX,
+	.sram_bar          = NPU4_SRAM_BAR_INDEX,
+	.psp_bar           = NPU4_PSP_BAR_INDEX,
+	.smu_bar           = NPU4_SMU_BAR_INDEX,
+	.first_col         = 0,
+	.dev_mem_buf_shift = 15, /* 32 KiB aligned */
+	.dev_mem_base      = NPU_DEVM_BASE,
+	.dev_mem_size      = NPU_DEVM_SIZE,
+	.vbnv              = "RyzenAI-npu4",
+	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
+	.dev_priv          = &npu4_dev_priv,
+	.ops               = &npu1_ops, /* NPU4 can share NPU1's callback */
 };

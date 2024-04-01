@@ -229,6 +229,7 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	size_t aligned_sz = PAGE_ALIGN(args->size);
 	struct amdxdna_gem_obj *abo, *heap;
 	u64 offset;
+	u32 align;
 	int ret;
 
 	XDNA_DBG(xdna, "size 0x%llx", args->size);
@@ -256,8 +257,9 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	abo->type = AMDXDNA_BO_DEV;
 	abo->dev_heap = heap;
 
+	align = 1 << xdna->dev_info->dev_mem_buf_shift;
 	ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, aligned_sz,
-					 XDNA_32K_ALIGN, 0, DRM_MM_INSERT_BEST);
+					 align, 0, DRM_MM_INSERT_BEST);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		goto free_bo;
@@ -571,26 +573,4 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 put_obj:
 	drm_gem_object_put(gobj);
 	return ret;
-}
-
-int amdxdna_drm_attach_bo_ioctl(struct drm_device *dev,
-				void *data, struct drm_file *filp)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_drm_attach_detach_bo *args = data;
-
-	XDNA_DBG(xdna, "Attach bo %d to ctx %d\n", args->bo, args->hwctx);
-	// TODO: check BO type and send firmware command to assign to ctx
-	return 0;
-}
-
-int amdxdna_drm_detach_bo_ioctl(struct drm_device *dev,
-				void *data, struct drm_file *filp)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_drm_attach_detach_bo *args = data;
-
-	XDNA_DBG(xdna, "Detach bo %d from ctx %d\n", args->bo, args->hwctx);
-	// TODO: check BO type and send firmware command to remove from ctx
-	return 0;
 }

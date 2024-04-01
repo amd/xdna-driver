@@ -55,8 +55,12 @@ public:
   void
   unbind_hwctx();
 
+  const void *
+  get_queue_addr();
+
 protected:
   const hw_ctx *m_hwctx;
+  const void *m_queue_ptr;
   const pdev& m_pdev;
 };
 

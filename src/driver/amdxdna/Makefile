@@ -19,7 +19,6 @@ ccflags-y += -g -Werror
 
 obj-m	+= amdxdna.o
 amdxdna-y := \
-	amdxdna_xclbin.o \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
 	amdxdna_sysfs.o \

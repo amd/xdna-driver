@@ -11,7 +11,7 @@
 
 #include "amdxdna_drv.h"
 #include "amdxdna_ctx.h"
-#include "amdxdna_xclbin.h"
+#include "amdxdna_trace.h"
 
 #define MAX_HWCTX_ID		255
 #define MAX_ARG_BO_COUNT	4095
@@ -53,119 +53,6 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	spin_lock_init(&fence->lock);
 	dma_fence_init(&fence->base, &fence_ops, &fence->lock, hwctx->id, 0);
 	return &fence->base;
-}
-
-/*
- * The IP name and index buffer layout,
- * +----------------------+
- * | IP name offset       |
- * | IP index             |
- * +----------------------+
- * | IP name offset       |
- * | IP index             |
- * +----------------------+
- * | ......               |
- * +----------------------+
- * | 0                    |
- * | 0                    |
- * +----------------------+
- * | IP name string       |
- * +----------------------+
- * | IP name string       |
- * +----------------------+
- * | ......               |
- * +----------------------+
- * The name string is end by '\0'.
- */
-static int amdxdna_hwctx_fill_ip_buf(struct amdxdna_xclbin *xclbin,
-				     void __user *ip_buf_p, u32 size)
-{
-	struct amdxdna_ip_name_index *header;
-	int i, ret = 0;
-	u32 name_off;
-	void *buf;
-
-	/* there is an empty entry at the end of ip name array */
-	name_off = (xclbin->num_cus + 1) * sizeof(*header);
-	if (name_off >= size)
-		return -EINVAL;
-
-	buf = kzalloc(size, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	header = (struct amdxdna_ip_name_index *)buf;
-	for (i = 0; i < xclbin->num_cus; i++) {
-		header[i].name_off = name_off;
-		header[i].index = xclbin->cu[i].index;
-
-		name_off += snprintf(buf + name_off, size - name_off, "%s",
-				     xclbin->cu[i].name);
-		name_off++;
-		if (name_off > size) {
-			ret = -EAGAIN;
-			goto free_and_out;
-		}
-	}
-
-	if (copy_to_user(ip_buf_p, buf, name_off))
-		ret = -EFAULT;
-
-free_and_out:
-	kfree(buf);
-	return ret;
-}
-
-static int
-amdxdna_hwctx_create(struct amdxdna_client *client, struct amdxdna_xclbin *xclbin,
-		     struct amdxdna_qos_info *qos, u32 *hwctx_id)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_hwctx *hwctx;
-	int ret;
-
-	hwctx = kzalloc(sizeof(*hwctx), GFP_KERNEL);
-	if (!hwctx)
-		return -ENOMEM;
-
-	mutex_lock(&client->hwctx_lock);
-	ret = idr_alloc_cyclic(&client->hwctx_idr, hwctx, 0, MAX_HWCTX_ID, GFP_KERNEL);
-	if (ret < 0) {
-		mutex_unlock(&client->hwctx_lock);
-		XDNA_ERR(xdna, "Allocate hwctx ID failed, ret %d", ret);
-		goto free_hwctx;
-	}
-	hwctx->id = ret;
-	mutex_unlock(&client->hwctx_lock);
-
-	hwctx->client = client;
-	hwctx->xclbin = xclbin;
-
-	memcpy(&hwctx->qos, qos, sizeof(hwctx->qos));
-
-	hwctx->name = kasprintf(GFP_KERNEL, "hwctx.%d.%d", client->pid, hwctx->id);
-	if (!hwctx->name) {
-		ret = -ENOMEM;
-		goto rm_id;
-	}
-
-	ret = xdna->dev_info->ops->hwctx_init(hwctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Init hwctx failed, ret %d", ret);
-		goto free_name;
-	}
-
-	*hwctx_id = hwctx->id;
-
-	return 0;
-
-free_name:
-	kfree(hwctx->name);
-rm_id:
-	idr_remove(&client->hwctx_idr, hwctx->id);
-free_hwctx:
-	kfree(hwctx);
-	return ret;
 }
 
 void amdxdna_hwctx_suspend(struct amdxdna_client *client)
@@ -238,62 +125,70 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_drm_create_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_qos_info qos_info;
-	struct amdxdna_xclbin *xclbin;
-	uuid_t xclbin_uuid;
+	struct amdxdna_hwctx *hwctx;
 	int ret, idx;
 
 	if (args->ext_flags)
 		return -EINVAL;
 
-	if (sizeof(qos_info) != args->qos_size) {
-		XDNA_DBG(xdna, "Invalid QoS info size");
-		return -EINVAL;
-	}
-
-	if (copy_from_user(&qos_info, u64_to_user_ptr(args->qos_p), sizeof(qos_info))) {
-		XDNA_ERR(xdna, "Access QoS info failed");
-		return -EFAULT;
-	}
-
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
 
-	import_uuid(&xclbin_uuid, args->xclbin_uuid);
+	hwctx = kzalloc(sizeof(*hwctx), GFP_KERNEL);
+	if (!hwctx) {
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	if (copy_from_user(&hwctx->qos, u64_to_user_ptr(args->qos_p), sizeof(hwctx->qos))) {
+		XDNA_ERR(xdna, "Access QoS info failed");
+		ret = -EFAULT;
+		goto free_hwctx;
+	}
+
+	hwctx->client = client;
+	/* The num_col and max_opc will be verified by solver */
+	hwctx->num_col = args->num_cols;
+	hwctx->max_opc = args->max_opc;
+	mutex_lock(&client->hwctx_lock);
+	ret = idr_alloc_cyclic(&client->hwctx_idr, hwctx, 0, MAX_HWCTX_ID, GFP_KERNEL);
+	if (ret < 0) {
+		mutex_unlock(&client->hwctx_lock);
+		XDNA_ERR(xdna, "Allocate hwctx ID failed, ret %d", ret);
+		goto free_hwctx;
+	}
+	hwctx->id = ret;
+	mutex_unlock(&client->hwctx_lock);
+
+	hwctx->name = kasprintf(GFP_KERNEL, "hwctx.%d.%d", client->pid, hwctx->id);
+	if (!hwctx->name) {
+		ret = -ENOMEM;
+		goto rm_id;
+	}
+
 	mutex_lock(&xdna->dev_lock);
-	ret = amdxdna_xclbin_load(xdna, &xclbin_uuid, &xclbin);
+	ret = xdna->dev_info->ops->hwctx_init(hwctx);
 	if (ret) {
-		XDNA_ERR(xdna, "Unable to register XCLBIN, ret %d", ret);
-		goto unlock;
+		mutex_unlock(&xdna->dev_lock);
+		XDNA_ERR(xdna, "Init hwctx failed, ret %d", ret);
+		goto free_name;
 	}
-
-	ret = amdxdna_hwctx_fill_ip_buf(xclbin, u64_to_user_ptr(args->ip_buf_p),
-					args->ip_buf_size);
-	if (ret) {
-		XDNA_ERR(xdna, "Fill name-index buffer failed, ret %d", ret);
-		goto unload_xclbin;
-	}
-
-	/*
-	 * HW context will be the owner of xclbin cache. The xclbin cache should
-	 * be unloaded when HW context is released.
-	 */
-	ret = amdxdna_hwctx_create(client, xclbin, &qos_info, &args->handle);
-	if (ret) {
-		XDNA_ERR(xdna, "PID %d create HW context %d failed, ret %d",
-			 client->pid, args->handle, ret);
-		goto unload_xclbin;
-	}
+	args->handle = hwctx->id;
 	mutex_unlock(&xdna->dev_lock);
 
-	XDNA_DBG(xdna, "PID %d create HW context %d", client->pid, args->handle);
+	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
 	return 0;
 
-unload_xclbin:
-	amdxdna_xclbin_unload(xdna, xclbin);
-unlock:
-	mutex_unlock(&xdna->dev_lock);
+free_name:
+	kfree(hwctx->name);
+rm_id:
+	mutex_lock(&client->hwctx_lock);
+	idr_remove(&client->hwctx_idr, hwctx->id);
+	mutex_unlock(&client->hwctx_lock);
+free_hwctx:
+	kfree(hwctx);
+exit:
 	drm_dev_exit(idx);
 	return ret;
 }
@@ -321,9 +216,9 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	hwctx = idr_find(&client->hwctx_idr, args->handle);
 	if (!hwctx) {
 		mutex_unlock(&client->hwctx_lock);
-		ret = -ENODEV;
+		ret = -EINVAL;
 		XDNA_DBG(xdna, "PID %d HW context %d not exist",
-			 client->pid, args->handle);
+			  client->pid, args->handle);
 		goto out;
 	}
 	idr_remove(&client->hwctx_idr, hwctx->id);
@@ -339,6 +234,42 @@ out:
 	return ret;
 }
 
+int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	struct amdxdna_drm_config_hwctx *args = data;
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_hwctx *hwctx;
+	int ret, idx;
+
+	if (args->param_type >= DRM_AMDXDNA_HWCTX_CONFIG_NUM) {
+		XDNA_ERR(xdna, "Invalid HW context param type: %d", args->param_type);
+		return -EINVAL;
+	}
+
+	idx = srcu_read_lock(&client->hwctx_srcu);
+	hwctx = idr_find(&client->hwctx_idr, args->handle);
+	if (!hwctx) {
+		XDNA_DBG(xdna, "PID %d failed to get hwctx %d", client->pid, args->handle);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	if (!xdna->dev_info->ops->hwctx_config) {
+		ret = -EOPNOTSUPP;
+		goto unlock_srcu;
+	}
+
+	mutex_lock(&xdna->dev_lock);
+	ret = xdna->dev_info->ops->hwctx_config(hwctx, args->param_type, args->param_val,
+						args->param_val_size);
+	mutex_unlock(&xdna->dev_lock);
+
+unlock_srcu:
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+	return ret;
+}
+
 static void amdxdna_sched_job_release(struct kref *ref)
 {
 	struct amdxdna_sched_job *job;
@@ -346,6 +277,7 @@ static void amdxdna_sched_job_release(struct kref *ref)
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
 
+	trace_xdna_job(job->hwctx->name, "job release", job->seq);
 	for (i = 0; i < job->bo_cnt; i++)
 		drm_gem_object_put(job->bos[i]);
 	drm_gem_object_put(to_gobj(job->cmd_abo));
@@ -365,7 +297,6 @@ amdxdna_arg_bos_put(struct amdxdna_sched_job *job)
 	for (i = 0; i < job->bo_cnt; i++) {
 		if (!job->bos[i])
 			break;
-		amdxdna_gem_unpin(to_xdna_obj(job->bos[i]));
 		drm_gem_object_put(job->bos[i]);
 	}
 }
@@ -445,6 +376,12 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client, u32 hwctx_id,
 		goto unlock_srcu;
 	}
 
+	if (hwctx->status != HWCTX_STAT_READY) {
+		XDNA_ERR(xdna, "HW Context is not ready");
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
 	job->cmd_abo = cmd_bo;
 	job->cmd = cmd_bo->mem.kva;
 	if (!job->cmd) {
@@ -495,6 +432,7 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client, u32 hwctx_id,
 	 * For here we can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
+	trace_xdna_job(job->hwctx->name, "job pushed", *seq);
 
 	return 0;
 
@@ -612,66 +550,3 @@ unlock_hwctx_srcu:
 	srcu_read_unlock(&client->hwctx_srcu, idx);
 	return ret;
 }
-
-#ifdef AMDXDNA_DEVEL
-/* HACK: driver gets xclbin from user directly */
-int amdxdna_drm_create_hwctx_unsec_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
-{
-	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_create_hwctx_unsecure *args = data;
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_xclbin *xclbin;
-	struct amdxdna_qos_info qos_info;
-	int ret, idx;
-
-	if (sizeof(qos_info) != args->qos_size) {
-		XDNA_ERR(xdna, "Invalid QoS info size");
-		return -EINVAL;
-	}
-
-	if (copy_from_user(&qos_info, u64_to_user_ptr(args->qos_p), sizeof(qos_info))) {
-		XDNA_ERR(xdna, "Access QoS info failed");
-		return -EFAULT;
-	}
-
-	if (!drm_dev_enter(dev, &idx))
-		return -ENODEV;
-
-	mutex_lock(&xdna->dev_lock);
-	ret = amdxdna_xclbin_load_by_ptr(xdna, u64_to_user_ptr(args->xclbin_p), &xclbin);
-	if (ret) {
-		XDNA_ERR(xdna, "Unable to register XCLBIN, ret %d", ret);
-		goto unlock;
-	}
-
-	ret = amdxdna_hwctx_fill_ip_buf(xclbin, u64_to_user_ptr(args->ip_buf_p),
-					args->ip_buf_size);
-	if (ret) {
-		XDNA_ERR(xdna, "Fill name-index buffer failed, ret %d", ret);
-		goto unload_xclbin;
-	}
-
-	/*
-	 * HW context will be the owner of xclbin cache. The xclbin cache should
-	 * be unloaded when HW context is released.
-	 */
-	ret = amdxdna_hwctx_create(client, xclbin, &qos_info, &args->handle);
-	if (ret) {
-		XDNA_ERR(xdna, "PID %d create HW context %d failed, ret %d",
-			 client->pid, args->handle, ret);
-		goto unload_xclbin;
-	}
-	mutex_unlock(&xdna->dev_lock);
-
-	XDNA_DBG(xdna, "PID %d create HW context %d", client->pid, args->handle);
-	drm_dev_exit(idx);
-	return 0;
-
-unload_xclbin:
-	amdxdna_xclbin_unload(xdna, xclbin);
-unlock:
-	mutex_unlock(&xdna->dev_lock);
-	drm_dev_exit(idx);
-	return ret;
-}
-#endif

@@ -5,15 +5,16 @@ set(XDNA_DRV amdxdna)
 
 set(XDNA_DRV_DIR amdxdna)
 set(XDNA_DRV_TGT ${XDNA_DRV}.ko)
+set(XDNA_DRV_PATH ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_TGT})
 set(XDNA_DRV_BLD_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR})
 set(XDNA_DRV_BLD_TGT ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_DIR})
 add_custom_command(
   OUTPUT ${XDNA_DRV_TGT}
   COMMENT "Build ${XDNA_DRV_TGT}"
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_DIR=${XDNA_DRV_BLD_TGT} SRC_DIR=${XDNA_DRV_BLD_SRC} ${KERNEL_VER}
-  COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_TGT}
+  COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
   )
-add_custom_target(driver DEPENDS ${XDNA_DRV_TGT})
+add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT})
 
 # Tar and install driver source code for packaging
 set(XDNA_DRV_SRC_DIR
@@ -74,10 +75,12 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dkms.conf
 
 set(amdxdna_drv_tools
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/dkms_driver.sh
-  ${CMAKE_CURRENT_SOURCE_DIR}/tools/setup_xclbin_firmware.sh
   )
 install(FILES ${amdxdna_drv_tools}
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
   DESTINATION xrt/${XDNA_COMPONENT}
   COMPONENT ${XDNA_COMPONENT}
   )
+
+# install .ko for testing
+install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)

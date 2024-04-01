@@ -395,14 +395,14 @@ const struct {
 	umode_t mode;
 } npu1_dbgfs_files[] = {
 	NPU_DBGFS_FILE(nputest, 0400),
-	//NPU_DBGFS_FILE(hclock, 0400),
-	//NPU_DBGFS_FILE(npuclock, 0600),
-	//NPU_DBGFS_FILE(pasid, 0600),
-	//NPU_DBGFS_FILE(state, 0600),
-	//NPU_DBGFS_FILE(powerstate, 0600),
+	NPU_DBGFS_FILE(hclock, 0400),
+	NPU_DBGFS_FILE(npuclock, 0600),
+	NPU_DBGFS_FILE(pasid, 0600),
+	NPU_DBGFS_FILE(state, 0600),
+	NPU_DBGFS_FILE(powerstate, 0600),
 };
 
-/* only for npu_debugfs_list */
+/* only for npu1_debugfs_list */
 #define seqf_to_xdna_dev(m) \
 	to_xdna_dev(((struct drm_info_node *)(m)->private)->minor->dev)
 

@@ -7,7 +7,6 @@
 #define _NPU_SOLVER_H
 
 #include <linux/types.h>
-#include <linux/uuid.h>
 
 #define XRS_MAX_COL 128
 
@@ -56,7 +55,7 @@ enum xrs_mode {
  */
 struct aie_part {
 	u32	start_col;
-	u32	ncol;
+	u32	ncols;
 };
 
 /*
@@ -94,47 +93,31 @@ struct aie_qos {
 };
 
 /*
- * Structure used to describe a relocatable CDO. A relocatable CDO is
- * identified by its CDO UUID. This CDO can be loaded on multiple
+ * Structure used to describe a relocatable CDO. This CDO can be loaded on multiple
  * partition overlays.
  */
 struct cdo_parts {
-	uuid_t		   *cdo_uuid;
-	u32		   nparts;		/* # of partition overlays */
+	u32		   first_col;		/* First column can be allocated */
 	u32		   ncols;		/* # of columns */
-	u32		   *start_col_list;	/* Start column array */
-	struct aie_qos_cap *qos_cap;		/* CDO QoS capabilities */
-};
-
-/*
- * Structure used to describe the partition metadata as part of the
- * allocation requests. This is one of the inputs to resource solver
- * with a given XCLBIN identified by XCLBIN UUID. It also contains the
- * number of relocatable CDOs and the pointer to relocatable CDO array.
- */
-struct part_meta {
-	uuid_t			*xclbin_uuid;
-	struct cdo_parts	*cdo;
+	struct aie_qos_cap qos_cap;		/* CDO QoS capabilities */
 };
 
 /*
  * Structure used to describe a request to allocate. This is the
- * input to resource solver for a allocation request. It contains
- * request id and partition metadata. And this can be extended to include
- * other inputs for the allocation like QoS and Priority.
+ * input to resource solver for a allocation request. And this can
+ * be extended to include other inputs for the allocation like QoS
+ * and Priority.
  */
 struct alloc_requests {
 	u64			rid;
-	struct part_meta	*pmp;
-	struct aie_qos		*rqos;		/* Requested QoS */
+	struct cdo_parts	cdo;
+	struct aie_qos		rqos;		/* Requested QoS */
 };
 
 /*
  * Load callback argument
  */
 struct xrs_action_load {
-	uuid_t                  *xclbin_uuid;
-	uuid_t                  *cdo_uuid;
 	u32                     rid;
 	struct aie_part         part;
 };

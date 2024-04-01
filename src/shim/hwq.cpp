@@ -8,7 +8,10 @@
 namespace shim_xdna {
 
 hw_q::
-hw_q(const device& device) : m_hwctx(nullptr), m_pdev(device.get_pdev())
+hw_q(const device& device)
+  : m_hwctx(nullptr)
+  , m_queue_ptr(nullptr)
+  , m_pdev(device.get_pdev())
 {
 }
 
@@ -26,6 +29,13 @@ unbind_hwctx()
 {
   shim_debug("Unbond HW queue from HW context %d", m_hwctx->get_slotidx());
   m_hwctx = nullptr;
+}
+
+const void *
+hw_q::
+get_queue_addr()
+{
+  return m_queue_ptr;
 }
 
 int

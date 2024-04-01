@@ -7,6 +7,7 @@
 #include <drm/drm_cache.h>
 
 #include "drm_local/amdxdna_accel.h"
+#include "amdxdna_ctx.h"
 #include "npu1_msg_priv.h"
 #include "npu1_pci.h"
 
@@ -53,10 +54,11 @@ static void npu_msg_cb(void *handle, const u32 *data, size_t size)
 	complete(&cb_arg->comp);
 }
 
-static int npu_send_msg_wait(struct amdxdna_dev *xdna,
+static int npu_send_msg_wait(struct npu_device *ndev,
 			     struct mailbox_channel *chann,
 			     struct xdna_mailbox_msg *msg)
 {
+	struct amdxdna_dev *xdna = ndev->xdna;
 	struct npu_notify *hdl = msg->handle;
 	int ret;
 
@@ -90,7 +92,7 @@ static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 	if (!ndev->mgmt_chann)
 		return -ENODEV;
 
-	ret = npu_send_msg_wait(ndev->xdna, ndev->mgmt_chann, msg);
+	ret = npu_send_msg_wait(ndev, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
 		if (ndev->async_msgd)
 			kthread_stop(ndev->async_msgd);
@@ -116,6 +118,32 @@ int npu1_resume_fw(struct npu_device *ndev)
 	return npu_send_mgmt_msg_wait(ndev, &msg);
 }
 
+int npu1_set_runtime_cfg(struct npu_device *ndev, u32 type, u64 value)
+{
+	DECLARE_NPU_MSG(set_runtime_cfg, MSG_OP_SET_RUNTIME_CONFIG);
+
+	req.type = type;
+	req.value = value;
+
+	return npu_send_mgmt_msg_wait(ndev, &msg);
+}
+
+int npu1_get_runtime_cfg(struct npu_device *ndev, u32 type, u64 *value)
+{
+	DECLARE_NPU_MSG(get_runtime_cfg, MSG_OP_GET_RUNTIME_CONFIG);
+	int ret;
+
+	req.type = type;
+	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to get runtime config, ret %d", ret);
+		return ret;
+	}
+
+	*value = resp.value;
+	return 0;
+}
+
 int npu1_check_protocol_version(struct npu_device *ndev)
 {
 	DECLARE_NPU_MSG(protocol_version, MSG_OP_GET_PROTOCOL_VERSION);
@@ -124,15 +152,14 @@ int npu1_check_protocol_version(struct npu_device *ndev)
 
 	ret = npu_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
-		XDNA_ERR(xdna, "failed to get protocol version, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to get protocol version, ret %d", ret);
 		return ret;
 	}
 
-	if (resp.major != ndev->priv->protocol_major ||
-	    resp.minor != ndev->priv->protocol_minor) {
+	if (resp.major != ndev->priv->protocol_major) {
 		ret = -EINVAL;
-		XDNA_ERR(xdna, "incompatible firmware protocol version major %d minor %d, ret %d",
-			 resp.major, resp.minor, ret);
+		XDNA_ERR(xdna, "Incompatible firmware protocol version major %d minor %d",
+			 resp.major, resp.minor);
 	}
 
 	return ret;
@@ -147,7 +174,7 @@ int npu1_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid)
 	return npu_send_mgmt_msg_wait(ndev, &msg);
 }
 
-int npu1_query_version(struct npu_device *ndev, struct aie_version *version)
+int npu1_query_aie_version(struct npu_device *ndev, struct aie_version *version)
 {
 	DECLARE_NPU_MSG(aie_version_info, MSG_OP_QUERY_AIE_VERSION);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -166,7 +193,7 @@ int npu1_query_version(struct npu_device *ndev, struct aie_version *version)
 	return 0;
 }
 
-int npu1_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata)
+int npu1_query_aie_metadata(struct npu_device *ndev, struct aie_metadata *metadata)
 {
 	DECLARE_NPU_MSG(aie_tile_info, MSG_OP_QUERY_AIE_TILE_INFO);
 	int ret;
@@ -217,89 +244,6 @@ int npu1_query_firmware_version(struct npu_device *ndev,
 	fw_ver->minor = resp.minor;
 	fw_ver->sub = resp.sub;
 	fw_ver->build = resp.build;
-
-	return 0;
-}
-
-int npu1_register_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin)
-{
-	DECLARE_NPU_MSG(register_pdi, MSG_OP_REGISTER_PDI);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct amdxdna_partition *part;
-	int ret, i;
-
-	part = &xclbin->partition;
-	req.num_infos = 1;
-	for (i = 0; i < part->num_pdis; i++) {
-		struct amdxdna_pdi *pdi = &part->pdis[i];
-
-		if (pdi->id > NPU_MAX_PDI_ID) {
-			XDNA_ERR(xdna, "PDI ID out of range, XCLBIN not supported");
-			ret = -EOPNOTSUPP;
-			goto cleanup;
-		}
-
-		req.pdi_info.pdi_id = pdi->id;
-		req.pdi_info.address = pdi->addr;
-		req.pdi_info.size = pdi->size;
-		req.pdi_info.type = pdi->type;
-		resp.status = NPU_STATUS_MAX_NPU_STATUS_CODE;
-		drm_clflush_virt_range(pdi->image, pdi->size);
-
-		ret = npu_send_mgmt_msg_wait(ndev, &msg);
-		if (ret) {
-			XDNA_ERR(xdna, "PDI %d register failed, ret %d", pdi->id, ret);
-			if (ret == -ETIME || ret == -ENODEV)
-				return ret;
-
-			goto cleanup;
-		}
-
-		pdi->registered = 1;
-		WARN_ONCE(pdi->id != resp.reg_index, "PDI ID and FW registered index mismatch");
-		XDNA_DBG(xdna, "PDI %d register completed, index %d",
-			 pdi->id, resp.reg_index);
-	}
-
-	XDNA_DBG(xdna, "XCLBIN %pUb PDIs register completed", &xclbin->uuid);
-
-	return 0;
-
-cleanup:
-	ret = npu1_unregister_pdis(ndev, xclbin);
-	if (ret)
-		XDNA_ERR(xdna, "Clean up PDIs failed, ret %d", ret);
-	return ret;
-}
-
-int npu1_unregister_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin)
-{
-	DECLARE_NPU_MSG(unregister_pdi, MSG_OP_UNREGISTER_PDI);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct amdxdna_partition *part;
-	int ret, i;
-
-	req.num_pdi = 1;
-	part = &xclbin->partition;
-	for (i = 0; i < part->num_pdis; i++) {
-		struct amdxdna_pdi *pdi = &part->pdis[i];
-
-		if (!pdi->registered)
-			continue;
-
-		req.pdi_id = pdi->id;
-		resp.status = NPU_STATUS_MAX_NPU_STATUS_CODE;
-		ret = npu_send_mgmt_msg_wait(ndev, &msg);
-		if (ret) {
-			XDNA_ERR(xdna, "PDI %d unregister failed, ret %d",
-				 pdi->id, ret);
-			return ret;
-		}
-
-		pdi->registered = 0;
-		XDNA_DBG(xdna, "PDI %d unregister completed", pdi->id);
-	}
-	XDNA_DBG(xdna, "XCLBIN %pUb unregister completed", &xclbin->uuid);
 
 	return 0;
 }
@@ -432,68 +376,6 @@ int npu1_query_error(struct npu_device *ndev, u64 addr, u32 size, u32 *row,
 	return 0;
 }
 
-int npu1_config_cu(struct npu_device *ndev, struct mailbox_channel *chann,
-		   struct amdxdna_xclbin *xclbin)
-{
-	DECLARE_NPU_MSG(config_cu, MSG_OP_CONFIG_CU);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	int ret, i;
-
-	if (!chann)
-		return -ENODEV;
-
-	req.num_cus = xclbin->num_cus;
-	for (i = 0; i < req.num_cus; i++) {
-		struct amdxdna_cu *cu = &xclbin->cu[i];
-
-		req.configs[i].cu_idx = cu->index;
-		req.configs[i].cu_func = cu->func;
-		req.configs[i].cu_pdi_id = cu->pdi_id;
-	}
-
-	ret = npu_send_msg_wait(xdna, chann, &msg);
-	if (ret)
-		return ret;
-
-	XDNA_DBG(xdna, "configure %d CUs completed", xclbin->num_cus);
-
-	return 0;
-}
-
-int npu1_execbuf(struct npu_device *ndev, struct mailbox_channel *chann,
-		 u32 cu_idx, u32 *payload, u32 payload_len, void *handle,
-		 void (*notify_cb)(void *, const u32 *, size_t))
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct execute_buffer_req req;
-	struct xdna_mailbox_msg msg;
-	int ret;
-
-	if (!chann)
-		return -ENODEV;
-
-	if (payload_len < sizeof(req.payload)) {
-		XDNA_DBG(xdna, "Invalid payload len");
-		return -EINVAL;
-	}
-
-	req.cu_idx = cu_idx;
-	memcpy(req.payload, payload, sizeof(req.payload));
-	msg.send_data = (u8 *)&req;
-	msg.send_size = sizeof(req);
-	msg.handle = handle;
-	msg.opcode = MSG_OP_EXECUTE_BUFFER_CF;
-	msg.notify_cb = notify_cb;
-
-	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
-	if (ret) {
-		XDNA_ERR(xdna, "Send message failed");
-		return ret;
-	}
-
-	return 0;
-}
-
 #if defined(CONFIG_DEBUG_FS)
 int npu1_self_test(struct npu_device *ndev)
 {
@@ -585,3 +467,80 @@ fail:
 			     xdna_dev_addr, DMA_TO_DEVICE);
 	return ret;
 }
+
+/* Below messages are to hardware context mailbox channel */
+int npu1_config_cu(struct amdxdna_hwctx *hwctx)
+{
+	struct mailbox_channel *chann = hwctx->priv->mbox_chan;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 shift = xdna->dev_info->dev_mem_buf_shift;
+	DECLARE_NPU_MSG(config_cu, MSG_OP_CONFIG_CU);
+	int ret, i;
+
+	if (!chann)
+		return -ENODEV;
+
+	if (!hwctx->cus) {
+		XDNA_DBG(xdna, "No CU config in hwctx");
+		return -EINVAL;
+	}
+
+	if (hwctx->cus->num_cus > MAX_NUM_CUS) {
+		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
+		return -EINVAL;
+	}
+
+	req.num_cus = hwctx->cus->num_cus;
+	for (i = 0; i < req.num_cus; i++) {
+		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
+
+		req.configs[i].pdi_addr = cu->xdna_addr >> shift;
+		req.configs[i].cu_func = cu->cu_func;
+		XDNA_DBG(xdna, "CU %d full addr 0x%llx, short addr 0x%x, cu func %d", i,
+			 cu->xdna_addr, req.configs[i].pdi_addr, req.configs[i].cu_func);
+	}
+
+	ret = npu_send_msg_wait(xdna->dev_handle, chann, &msg);
+	if (ret)
+		return ret;
+
+	XDNA_DBG(xdna, "configure %d CUs completed", hwctx->cus->num_cus);
+
+	return 0;
+}
+
+int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
+		 u32 *payload, u32 payload_len, void *handle,
+		 void (*notify_cb)(void *, const u32 *, size_t))
+{
+	struct mailbox_channel *chann = hwctx->priv->mbox_chan;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct execute_buffer_req req;
+	struct xdna_mailbox_msg msg;
+	int ret;
+
+	if (!chann)
+		return -ENODEV;
+
+	if (payload_len < sizeof(req.payload)) {
+		XDNA_DBG(xdna, "Invalid payload len");
+		return -EINVAL;
+	}
+
+	req.cu_idx = cu_idx;
+	memcpy(req.payload, payload, sizeof(req.payload));
+	msg.send_data = (u8 *)&req;
+	msg.send_size = sizeof(req);
+	msg.handle = handle;
+	msg.opcode = MSG_OP_EXECUTE_BUFFER_CF;
+	msg.notify_cb = notify_cb;
+
+	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	if (ret) {
+		XDNA_ERR(xdna, "Send message failed");
+		return ret;
+	}
+
+	return 0;
+}
+

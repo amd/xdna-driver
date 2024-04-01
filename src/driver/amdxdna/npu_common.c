@@ -20,58 +20,32 @@ void npu_default_xrs_cfg(struct amdxdna_dev *xdna, struct init_config *xrs_cfg)
 
 int npu_alloc_resource(struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_xclbin *xclbin = hwctx->xclbin;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct aie_qos_cap cqos = { 0 };
-	struct alloc_requests xrs_req;
-	struct amdxdna_partition *part;
-	struct cdo_parts *cdo;
-	struct part_meta pmp;
-	struct aie_qos qos;
-	int ret, i;
+	struct alloc_requests *xrs_req;
+	int ret;
 
-	cdo = kzalloc(sizeof(*cdo), GFP_KERNEL);
-	if (!cdo)
+	xrs_req = kzalloc(sizeof(*xrs_req), GFP_KERNEL);
+	if (!xrs_req)
 		return -ENOMEM;
 
-	part = &xclbin->partition;
-	cdo->cdo_uuid = &part->pdis[0].uuid;
-	cdo->ncols = part->ncols;
-	cdo->nparts = part->nparts;
-	cdo->qos_cap = &cqos;
-	cdo->qos_cap->opc = part->ops;
+	xrs_req->cdo.first_col = xdna->dev_info->first_col;
+	xrs_req->cdo.ncols = hwctx->num_col;
+	xrs_req->cdo.qos_cap.opc = hwctx->max_opc;
 
-	cdo->start_col_list = kcalloc(cdo->nparts, sizeof(u32), GFP_KERNEL);
-	if (!cdo->start_col_list) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	xrs_req->rqos.gops = hwctx->qos.gops;
+	xrs_req->rqos.fps = hwctx->qos.fps;
+	xrs_req->rqos.dma_bw = hwctx->qos.dma_bandwidth;
+	xrs_req->rqos.latency = hwctx->qos.latency;
+	xrs_req->rqos.exec_time = hwctx->qos.frame_exec_time;
+	xrs_req->rqos.priority = hwctx->qos.priority;
 
-	qos.gops = hwctx->qos.gops;
-	qos.fps = hwctx->qos.fps;
-	qos.dma_bw = hwctx->qos.dma_bandwidth;
-	qos.latency = hwctx->qos.latency;
-	qos.exec_time = hwctx->qos.frame_exec_time;
-	qos.priority = hwctx->qos.priority;
+	xrs_req->rid = (uintptr_t)hwctx;
 
-	for (i = 0; i < cdo->nparts; i++)
-		cdo->start_col_list[i] = part->start_cols[i];
-
-	pmp.xclbin_uuid = &xclbin->uuid;
-	pmp.cdo = cdo;
-
-	xrs_req.rid = (uintptr_t)hwctx;
-	xrs_req.rqos = &qos;
-
-	xrs_req.pmp = &pmp;
-
-	ret = xrs_allocate_resource(xdna->xrs_hdl, &xrs_req, hwctx);
+	ret = xrs_allocate_resource(xdna->xrs_hdl, xrs_req, hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "Allocate AIE resource failed, ret %d", ret);
 
-	kfree(cdo->start_col_list);
-out:
-	kfree(cdo);
+	kfree(xrs_req);
 	return ret;
 }
 

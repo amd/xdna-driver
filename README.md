@@ -111,32 +111,6 @@ TL;DR, run `sudo insmod amdxdna.ko dyndbg==p` to enable XDNA_DBG() globally.
 
 A: Create a debug DEB package, see above question. Then install debug DEB package in your environment. This time, you will have more verbose log. Share this log with us.
 
-### Q: I see "Failed to load xclbin firmware" error in dmesg. How to fix this?
-
-A: In amdxdna driver, it will not directly use the xclbin passed from application. Instead, it loads verified xclbin from /lib/firmware/amdnpu/ directory.
-The driver will check if the UUID of the xclbin from application and firmware directory matched. If this match process failed, you will see this error.
-
-### Q: I need to test a unverified xclbin . I know what I'm doing. Can I get rid of the "Failed to load xclbin firmware" error?
-
-A: Yes. Make sure you have root privilege of the system. Follow below steps,
-``` bash
-# Assume you already have xrt_plugin DEB package installed
-# You need root privilege to install firmware
-sudo bash
-
-source /opt/xilinx/xrt/setup.sh
-
-# List supported device(s)
-/opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh -list
-
-# Assume adding an unsigned xclbin on Phoenix, run
-/opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh -dev Phoenix -xclbin <test>.xclbin
-
-# When xrt_plugin package is removed, it will be automaticlly cleaned up.
-# User is able to setup multiple xclbins. But if setup two xclbins with the same file name,
-# the previous one will be overwritten.
-```
-
 ## Contributor Guidelines
 1. Read [Getting Started](#getting-started)
 2. Read [System Requirements](#system-requirements)

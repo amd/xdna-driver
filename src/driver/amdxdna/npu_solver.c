@@ -18,7 +18,7 @@ struct partition_node {
 	struct list_head	list;
 	u32			nshared;	/* # shared requests */
 	u32			start_col;	/* start column */
-	u32			ncol;		/* # columns */
+	u32			ncols;		/* # columns */
 	bool			exclusive;	/* can not be shared if set */
 	struct aie_qos		pqos;		/* QoS Information */
 };
@@ -29,13 +29,10 @@ struct partition_node {
  */
 struct solver_node {
 	struct list_head	list;
-	uuid_t			xclbin_uuid;
-	uuid_t			cdo_uuid;
 	u64			rid;		/* Request ID from consumer */
-	u32			noly;		/* # overlay */
-	u32			ncol;		/* # columns */
-	u32			*oly;		/* start column array */
-	u32			part;		/* selected partition */
+	u32			first_col;	/* First column can be allocated */
+	u32			ncols;		/* The width of column */
+	u32			start_col;	/* The index of column allocated */
 	struct aie_qos_cap	qos_cap;	/* CDO group QoS capabilities */
 	struct aie_qos		rqos;		/* Requested QoS */
 
@@ -54,7 +51,6 @@ struct solver_rgroup {
 };
 
 struct solver_state {
-	u32				total_col;
 	enum xrs_mode			mode;
 
 	struct solver_rgroup		rgp;
@@ -97,24 +93,24 @@ static int qos_meet(struct solver_state *xrs, struct aie_qos *rqos, u32 cgops)
 }
 
 /*
- * sanity_check() - Do a basic sanity check on allocation requests.
+ * sanity_check() - Do a basic sanity check on allocation request.
  *
- * @pmp:	Input partition metadata (for Fat-XCLBIN)
- * @rqos:	Requested QoS
  * @xrs:	Soft state of xrs
+ * @req:	Request
  *
  * Return:	0 when successful or standard error number when failing
  *		Failing scenarios
- *			1. Invalid rqos
+ *			1. Invalid request
  *			2. GOPs in requested QoS exceed all CDO groups
  *			   GOPs capabilities.
  */
-static int sanity_check(struct part_meta *pmp, struct aie_qos *rqos, struct solver_state *xrs)
+static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 {
-	struct cdo_parts *cdop = pmp->cdo;
+	struct cdo_parts *cdop = &req->cdo;
+	struct aie_qos *rqos = &req->rqos;
 	u32 cu_clk_freq;
 
-	if (!rqos)
+	if (cdop->ncols > xrs->cfg.total_col)
 		return -EINVAL;
 
 	/*
@@ -123,7 +119,7 @@ static int sanity_check(struct part_meta *pmp, struct aie_qos *rqos, struct solv
 	 */
 	cu_clk_freq = xrs->cfg.clk_list.cu_clk_list[xrs->cfg.clk_list.num_levels - 1];
 
-	if (qos_meet(xrs, rqos, cdop->qos_cap->opc * cu_clk_freq / 1000))
+	if (qos_meet(xrs, rqos, cdop->qos_cap.opc * cu_clk_freq / 1000))
 		return -EINVAL;
 
 	return 0;
@@ -151,7 +147,7 @@ static void remove_partition_node(struct solver_rgroup *rgp,
 	list_del(&pt_node->list);
 	rgp->npartition_node--;
 
-	bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncol);
+	bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncols);
 	kfree(pt_node);
 }
 
@@ -164,55 +160,40 @@ static void remove_solver_node(struct solver_rgroup *rgp,
 	if (node->pt_node)
 		remove_partition_node(rgp, node->pt_node);
 
-	kfree(node->oly);
 	kfree(node);
 }
 
 static struct solver_node *allocate_solver_node(struct solver_state *xrs,
 						struct alloc_requests *req)
 {
-	struct cdo_parts *cdop = req->pmp->cdo;
+	struct cdo_parts *cdop = &req->cdo;
 	struct solver_node *node;
 
 	node = kzalloc(sizeof(*node), GFP_KERNEL);
 	if (!node)
 		return NULL;
 
-	node->oly = kcalloc(cdop->nparts, sizeof(u32), GFP_KERNEL);
-	if (!node->oly)
-		goto free_node;
-
-	uuid_copy(&node->xclbin_uuid, req->pmp->xclbin_uuid);
-	uuid_copy(&node->cdo_uuid, cdop->cdo_uuid);
 	node->rid = req->rid;
-	node->noly = cdop->nparts;
-	node->ncol = cdop->ncols;
-	memcpy(node->oly, cdop->start_col_list, cdop->nparts * sizeof(u32));
+	node->first_col = cdop->first_col;
+	node->ncols = cdop->ncols;
 
-	memcpy(&node->qos_cap, cdop->qos_cap, sizeof(struct aie_qos_cap));
-	memcpy(&node->rqos, req->rqos, sizeof(struct aie_qos));
+	memcpy(&node->qos_cap, &cdop->qos_cap, sizeof(struct aie_qos_cap));
+	memcpy(&node->rqos, &req->rqos, sizeof(struct aie_qos));
 
 	list_add_tail(&node->list, &xrs->rgp.node_list);
 	xrs->rgp.nnode++;
 	return node;
-
-free_node:
-	kfree(node);
-	return NULL;
 }
 
-static int get_free_partition(struct solver_state *xrs, u32 *overlays,
-			      u32 num_overlay, u32 oly_start_idx, u32 ncol,
-			      u32 *part)
+static int get_free_partition(struct solver_state *xrs, u32 first_col, u32 ncols,
+			      u32 total_col, u32 *start_col)
 {
-	u32 start_col, j;
+	u32 idx;
 
-	for (j = oly_start_idx; j < num_overlay; j++) {
-		start_col = overlays[j];
-
-		if (find_next_bit(xrs->rgp.resbit, XRS_MAX_COL, start_col) >=
-		    start_col + ncol) {
-			*part = j;
+	for (idx = first_col; idx < total_col; idx++) {
+		if (find_next_bit(xrs->rgp.resbit, XRS_MAX_COL, idx) >=
+		    idx + ncols) {
+			*start_col = idx;
 			return 0;
 		}
 	}
@@ -221,11 +202,11 @@ static int get_free_partition(struct solver_state *xrs, u32 *overlays,
 }
 
 static void fill_partition_node(struct partition_node *pt_node,
-				u32 start_col, u32 ncol, struct aie_qos *rqos)
+				u32 start_col, u32 ncols, struct aie_qos *rqos)
 {
 	pt_node->nshared = 1;
 	pt_node->start_col = start_col;
-	pt_node->ncol = ncol;
+	pt_node->ncols = ncols;
 
 	/*
 	 * Before fully support latency in QoS, if a request
@@ -244,26 +225,25 @@ static void add_partition_node(struct solver_rgroup *rgp,
 	list_add_tail(&pt_node->list, &rgp->pt_node_list);
 
 	rgp->npartition_node++;
-	bitmap_set(rgp->resbit, pt_node->start_col, pt_node->ncol);
+	bitmap_set(rgp->resbit, pt_node->start_col, pt_node->ncols);
 }
 
-static int allocate_partition(struct solver_state *xrs, struct part_meta *pmp,
-			      struct aie_qos *rqos, struct solver_node *snode)
+static int allocate_partition(struct solver_state *xrs, struct solver_node *snode)
 {
 	struct partition_node *pt_node, *rpt_node = NULL;
-	struct cdo_parts *cdop = pmp->cdo;
+	u32 total_col = xrs->cfg.total_col;
 	int j, ret;
 
-	ret = get_free_partition(xrs, cdop->start_col_list, cdop->nparts, 0,
-				 cdop->ncols, &snode->part);
+	ret = get_free_partition(xrs, snode->first_col, snode->ncols, total_col,
+				 &snode->start_col);
 	if (!ret) {
 		/* got free partition */
 		pt_node = kzalloc(sizeof(*pt_node), GFP_KERNEL);
 		if (!pt_node)
 			return -ENOMEM;
 
-		fill_partition_node(pt_node, snode->oly[snode->part],
-				    snode->ncol, &snode->rqos);
+		fill_partition_node(pt_node, snode->start_col,
+				    snode->ncols, &snode->rqos);
 		add_partition_node(&xrs->rgp, pt_node);
 		snode->pt_node = pt_node;
 
@@ -283,11 +263,11 @@ static int allocate_partition(struct solver_state *xrs, struct part_meta *pmp,
 		if (rpt_node && pt_node->nshared >= rpt_node->nshared)
 			continue;
 
-		for (j = 0; j < cdop->nparts; j++) {
-			if (cdop->start_col_list[j] == pt_node->start_col &&
-			    cdop->ncols == pt_node->ncol) {
+		for (j = snode->first_col; j < total_col; j++) {
+			if (j == pt_node->start_col &&
+			    snode->ncols == pt_node->ncols) {
 				rpt_node = pt_node;
-				snode->part = j;
+				snode->start_col = j;
 				break;
 			}
 		}
@@ -307,15 +287,12 @@ static void fill_load_action(struct solver_state *xrs,
 			     struct xrs_action_load *action)
 {
 	action->rid = snode->rid;
-	action->xclbin_uuid = &snode->xclbin_uuid;
-	action->cdo_uuid = &snode->cdo_uuid;
 	action->part.start_col = snode->pt_node->start_col;
-	action->part.ncol = snode->pt_node->ncol;
+	action->part.ncols = snode->pt_node->ncols;
 }
 
 int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 {
-	struct part_meta *pmp = req->pmp;
 	struct xrs_action_load load_act;
 	struct solver_node *snode;
 	struct solver_state *xrs;
@@ -323,9 +300,9 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 
 	xrs = (struct solver_state *)hdl;
 
-	ret = sanity_check(pmp, req->rqos, xrs);
+	ret = sanity_check(xrs, req);
 	if (ret) {
-		dev_err(xrs->cfg.dev, "invalid QoS request");
+		dev_err(xrs->cfg.dev, "invalid request");
 		return ret;
 	}
 
@@ -338,7 +315,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 	if (!snode)
 		return -ENOMEM;
 
-	ret = allocate_partition(xrs, pmp, req->rqos, snode);
+	ret = allocate_partition(xrs, snode);
 	if (ret)
 		goto free_node;
 
@@ -349,8 +326,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 
 	snode->cb_arg = cb_arg;
 
-	dev_dbg(xrs->cfg.dev, "allocated part %d, start col %d\n",
-		snode->part, snode->pt_node->start_col);
+	dev_dbg(xrs->cfg.dev, "start col %d\n", snode->pt_node->start_col);
 
 	return 0;
 

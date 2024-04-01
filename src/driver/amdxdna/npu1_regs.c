@@ -38,10 +38,15 @@
 #define NPU1_SMU_BAR_BASE  MPNPU_APERTURE0_BASE
 #define NPU1_SRAM_BAR_BASE MPNPU_APERTURE1_BASE
 
+#define NPU1_RT_CFG_TYPE_PDI_LOAD 2
+
+#define NPU1_RT_CFG_VAL_PDI_LOAD_APP 1
+
 const struct npu_dev_priv npu1_dev_priv = {
 	.fw_path        = "amdnpu/1502_00/npu.sbin",
-	.protocol_major = 0x3,
+	.protocol_major = 0x5,
 	.protocol_minor = 0x1,
+	.rt_config	= {NPU1_RT_CFG_TYPE_PDI_LOAD, NPU1_RT_CFG_VAL_PDI_LOAD_APP},
 	.mbox_dev_addr  = NPU1_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
 	.sram_dev_addr  = NPU1_SRAM_BAR_BASE,
@@ -68,15 +73,17 @@ const struct npu_dev_priv npu1_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu1_info = {
-	.reg_bar      = NPU1_REG_BAR_INDEX,
-	.mbox_bar     = NPU1_MBOX_BAR_INDEX,
-	.sram_bar     = NPU1_SRAM_BAR_INDEX,
-	.psp_bar      = NPU1_PSP_BAR_INDEX,
-	.smu_bar      = NPU1_SMU_BAR_INDEX,
-	.dev_mem_base = NPU_DEVM_BASE,
-	.dev_mem_size = NPU_DEVM_SIZE,
-	.vbnv         = "RyzenAI-npu1",
-	.device_type  = AMDXDNA_DEV_TYPE_KMQ,
-	.dev_priv     = &npu1_dev_priv,
-	.ops          = &npu1_ops,
+	.reg_bar           = NPU1_REG_BAR_INDEX,
+	.mbox_bar          = NPU1_MBOX_BAR_INDEX,
+	.sram_bar          = NPU1_SRAM_BAR_INDEX,
+	.psp_bar           = NPU1_PSP_BAR_INDEX,
+	.smu_bar           = NPU1_SMU_BAR_INDEX,
+	.first_col         = 1,
+	.dev_mem_buf_shift = 15, /* 32 KiB aligned */
+	.dev_mem_base      = NPU_DEVM_BASE,
+	.dev_mem_size      = NPU_DEVM_SIZE,
+	.vbnv              = "RyzenAI-npu1",
+	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
+	.dev_priv          = &npu1_dev_priv,
+	.ops               = &npu1_ops,
 };

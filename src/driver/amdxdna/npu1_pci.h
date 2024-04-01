@@ -3,14 +3,16 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _NPU_PCI_H_
-#define _NPU_PCI_H_
+#ifndef _NPU1_PCI_H_
+#define _NPU1_PCI_H_
 
 #include <linux/device.h>
 #include <linux/iopoll.h>
 #include <linux/io.h>
+#include <drm/gpu_scheduler.h>
 
 #include "amdxdna_drv.h"
+#include "amdxdna_ctx.h"
 #include "npu_mailbox.h"
 
 #define NPU_INTERVAL	20000	/* us */
@@ -118,6 +120,16 @@ struct clock_entry {
 	u32 freq_mhz;
 };
 
+struct rt_config {
+	u32	type;
+	u32	value;
+};
+
+/*
+ * Define the maximum number of pending commands in a hardware context.
+ * Must be power of 2!
+ */
+#define HWCTX_MAX_CMDS		8
 struct npu_hwctx {
 	struct amdxdna_gem_obj		*heap;
 	void				*mbox_chan;
@@ -126,7 +138,8 @@ struct npu_hwctx {
 	struct drm_sched_entity		entity;
 
 	spinlock_t			io_lock; /* protect seq and cmd order */
-	struct dma_fence		*pending[HWCTX_MAX_CMDS];
+	struct wait_queue_head		job_free_wq;
+	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	u32				num_pending;
 	u64				seq;
 };
@@ -166,6 +179,7 @@ struct npu_dev_priv {
 	const char		*fw_path;
 	u64			protocol_major;
 	u64			protocol_minor;
+	struct rt_config	rt_config;
 	u32			mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32			mbox_size;
@@ -197,14 +211,14 @@ int npu1_error_async_msg_thread(void *data);
 /* npu1_message.c */
 int npu1_suspend_fw(struct npu_device *ndev);
 int npu1_resume_fw(struct npu_device *ndev);
+int npu1_set_runtime_cfg(struct npu_device *ndev, u32 type, u64 value);
+int npu1_get_runtime_cfg(struct npu_device *ndev, u32 type, u64 *value);
 int npu1_check_protocol_version(struct npu_device *ndev);
 int npu1_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid);
-int npu1_query_version(struct npu_device *ndev, struct aie_version *version);
-int npu1_query_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
+int npu1_query_aie_version(struct npu_device *ndev, struct aie_version *version);
+int npu1_query_aie_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
 int npu1_query_firmware_version(struct npu_device *ndev,
 				struct amdxdna_fw_ver *fw_ver);
-int npu1_register_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin);
-int npu1_unregister_pdis(struct npu_device *ndev, struct amdxdna_xclbin *xclbin);
 int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size);
@@ -214,15 +228,15 @@ int npu1_query_status(struct npu_device *ndev, char *buf, u32 size, u32 *cols_fi
 int npu1_query_power_sensor(struct npu_device *ndev, struct amdxdna_drm_query_sensor *args);
 int npu1_self_test(struct npu_device *ndev);
 
-int npu1_config_cu(struct npu_device *ndev, struct mailbox_channel *chann,
-		   struct amdxdna_xclbin *xclbin);
-int npu1_execbuf(struct npu_device *ndev, struct mailbox_channel *chann,
-		 u32 cu_idx, u32 *payload, u32 payload_len, void *handle,
+int npu1_config_cu(struct amdxdna_hwctx *hwctx);
+int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
+		 u32 *payload, u32 payload_len, void *handle,
 		 void (*notify_cb)(void *, const u32 *, size_t));
 
 /* npu1_hwctx.c */
 int npu1_hwctx_init(struct amdxdna_hwctx *hwctx);
 void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx);
+int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size);
 void npu1_hwctx_suspend(struct amdxdna_hwctx *hwctx);
 void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx);
 int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
@@ -239,4 +253,4 @@ int npu1_hw_start(struct amdxdna_dev *xdna);
 void npu1_hw_stop(struct amdxdna_dev *xdna);
 int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
 
-#endif /* _NPU_PCI_H_ */
+#endif /* _NPU1_PCI_H_ */

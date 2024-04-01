@@ -25,7 +25,7 @@ class hw_q; // forward declaration
 class hw_ctx : public xrt_core::hwctx_handle
 {
 public:
-  hw_ctx(const device& dev, const qos_type& qos, std::unique_ptr<hw_q> q);
+  hw_ctx(const device& dev, const qos_type& qos, std::unique_ptr<hw_q> q, const xrt::xclbin& xclbin);
 
   ~hw_ctx();
 
@@ -61,23 +61,51 @@ public:
   { shim_not_supported_err(__func__); }
 
 protected:
-  std::map< std::string, std::pair<xrt_core::cuidx_type, std::vector<uint8_t>> > m_cu_info;
+  const device&
+  get_device();
 
-  const amdxdna_qos_info *
-  get_qos_info() const;
+  struct cu_info {
+    std::string m_name;
+    uint8_t m_func;
+    std::vector<uint8_t> m_pdi;
+  };
+
+  const std::vector<cu_info>&
+  get_cu_info() const;
 
   void
   set_slotidx(slot_id id);
 
   void
-  print_cu_info();
+  set_doorbell(uint32_t db);
 
-  const device& m_device;
+  uint32_t
+  get_doorbell() const;
 
 private:
+  const device& m_device;
   slot_id m_handle = INVALID_CTX_HANDLE;
   amdxdna_qos_info m_qos = {};
+  std::vector<cu_info> m_cu_info;
   std::unique_ptr<hw_q> m_q;
+  uint32_t m_ops_per_cycle;
+  uint32_t m_num_cols;
+  uint32_t m_doorbell;
+
+  void
+  create_ctx_on_device();
+
+  void
+  delete_ctx_on_device();
+
+  void
+  init_qos_info(const qos_type& qos);
+
+  void
+  parse_xclbin(const xrt::xclbin& xclbin);
+
+  void
+  print_xclbin_info();
 };
 
 } // shim_xdna

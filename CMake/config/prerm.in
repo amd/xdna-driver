@@ -26,10 +26,8 @@ fi
 
 export XILINX_XRT=$installdir
 if [ "$build_type" = "Debug" ]; then
-	$installdir/amdxdna/setup_xclbin_firmware.sh -v -clean
 	DKMS_DRIVER_VERBOSE=true $installdir/amdxdna/dkms_driver.sh --remove
 else
-	$installdir/amdxdna/setup_xclbin_firmware.sh -clean
 	$installdir/amdxdna/dkms_driver.sh --remove
 fi
 unset XILINX_XRT

@@ -12,6 +12,7 @@
 #include "npu1_pci.h"
 #include "npu_solver.h"
 #include "npu_common.h"
+#include "npu1_msg_priv.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -29,12 +30,11 @@ const struct amdxdna_dev_ops npu1_ops = {
 	.get_info       = npu1_get_info,
 	.hwctx_init     = npu1_hwctx_init,
 	.hwctx_fini     = npu1_hwctx_fini,
+	.hwctx_config   = npu1_hwctx_config,
 	.hwctx_suspend  = npu1_hwctx_suspend,
 	.hwctx_resume   = npu1_hwctx_resume,
 	.cmd_submit     = npu1_cmd_submit,
 	.cmd_wait       = npu1_cmd_wait,
-	.reg_pdis	= npu1_register_pdis,
-	.unreg_pdis	= npu1_unregister_pdis,
 	.debugfs	= npu1_debugfs_init,
 };
 
@@ -119,6 +119,30 @@ static int npu1_get_mgmt_chann_info(struct npu_device *ndev)
 	return 0;
 }
 
+static int npu1_app_pdi_loading(struct npu_device *ndev)
+{
+	const struct rt_config *cfg = &ndev->priv->rt_config;
+	u64 value;
+	int ret;
+
+	ret = npu1_set_runtime_cfg(ndev, cfg->type, cfg->value);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Set PDI Loading to APP failed");
+		return ret;
+	}
+
+	ret = npu1_get_runtime_cfg(ndev, cfg->type, &value);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Get runtime cfg failed");
+		return ret;
+	}
+
+	if (value != cfg->value)
+		return -EINVAL;
+
+	return 0;
+}
+
 static int npu1_xdna_reset(struct npu_device *ndev)
 {
 	int ret;
@@ -153,10 +177,13 @@ static int npu1_mgmt_fw_init(struct npu_device *ndev)
 		XDNA_ERR(ndev->xdna, "query firmware version failed");
 		return ret;
 	}
-	/*
-	 * PASID is not supported yet. But, we need to send this command
-	 * to make firmware work. Any value of pasid will work for now.
-	 */
+
+	ret = npu1_app_pdi_loading(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Set APP PDI Loading mode failed");
+		return ret;
+	}
+
 	ret = npu1_assign_mgmt_pasid(ndev, 0);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Can not assign PASID");
@@ -169,13 +196,13 @@ static int npu1_mgmt_fw_init(struct npu_device *ndev)
 		return ret;
 	}
 
-	ret = npu1_query_version(ndev, &ndev->version);
+	ret = npu1_query_aie_version(ndev, &ndev->version);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Query AIE version failed");
 		return ret;
 	}
 
-	ret = npu1_query_metadata(ndev, &ndev->metadata);
+	ret = npu1_query_aie_metadata(ndev, &ndev->metadata);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Query AIE metadata failed");
 		return ret;
@@ -200,7 +227,7 @@ static int npu1_xrs_load(void *cb_arg, struct xrs_action_load *action)
 	xdna = hwctx->client->xdna;
 
 	hwctx->start_col = action->part.start_col;
-	hwctx->num_col = action->part.ncol;
+	hwctx->num_col = action->part.ncols;
 	ret = npu1_create_context(xdna->dev_handle, hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "create context failed, ret %d", ret);
@@ -472,8 +499,8 @@ void npu1_fini(struct amdxdna_dev *xdna)
 	pci_free_irq_vectors(pdev);
 }
 
-static int npu1_query_aie_status(struct amdxdna_dev *xdna,
-				 struct amdxdna_drm_get_info *args)
+static int npu1_get_aie_status(struct amdxdna_dev *xdna,
+			       struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_status status;
 	struct npu_device *ndev = xdna->dev_handle;
@@ -505,8 +532,8 @@ static int npu1_query_aie_status(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int npu1_query_aie_metadata(struct amdxdna_dev *xdna,
-				   struct amdxdna_drm_get_info *args)
+static int npu1_get_aie_metadata(struct amdxdna_dev *xdna,
+				 struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_metadata meta;
 	struct npu_device *ndev = xdna->dev_handle;
@@ -542,8 +569,8 @@ static int npu1_query_aie_metadata(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int npu1_query_aie_version(struct amdxdna_dev *xdna,
-				  struct amdxdna_drm_get_info *args)
+static int npu1_get_aie_version(struct amdxdna_dev *xdna,
+				struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_version version;
 	struct npu_device *ndev = xdna->dev_handle;
@@ -557,8 +584,8 @@ static int npu1_query_aie_version(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int npu1_query_clock_metadata(struct amdxdna_dev *xdna,
-				     struct amdxdna_drm_get_info *args)
+static int npu1_get_clock_metadata(struct amdxdna_dev *xdna,
+				   struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_clock_metadata clock;
 	struct npu_device *ndev = xdna->dev_handle;
@@ -575,8 +602,8 @@ static int npu1_query_clock_metadata(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int npu1_query_sensors(struct amdxdna_dev *xdna,
-			      struct amdxdna_drm_get_info *args)
+static int npu1_get_sensors(struct amdxdna_dev *xdna,
+			    struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_sensor sensor;
 
@@ -592,8 +619,8 @@ static int npu1_query_sensors(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int npu1_query_hwctx_status(struct amdxdna_dev *xdna,
-				   struct amdxdna_drm_get_info *args)
+static int npu1_get_hwctx_status(struct amdxdna_dev *xdna,
+				 struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_hwctx __user *buf;
 	struct amdxdna_drm_query_hwctx tmp;
@@ -661,22 +688,22 @@ int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
 
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = npu1_query_aie_status(xdna, args);
+		ret = npu1_get_aie_status(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		ret = npu1_query_aie_metadata(xdna, args);
+		ret = npu1_get_aie_metadata(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
-		ret = npu1_query_aie_version(xdna, args);
+		ret = npu1_get_aie_version(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
-		ret = npu1_query_clock_metadata(xdna, args);
+		ret = npu1_get_clock_metadata(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = npu1_query_sensors(xdna, args);
+		ret = npu1_get_sensors(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = npu1_query_hwctx_status(xdna, args);
+		ret = npu1_get_hwctx_status(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

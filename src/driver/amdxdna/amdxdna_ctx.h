@@ -12,13 +12,6 @@
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
 
-/*
- * Define the maximum number of pending commands in a hardware context.
- * Must be power of 2!
- */
-#define HWCTX_MAX_CMDS		8
-#define HWCTX_MAX_TIMEOUT	10000 /* miliseconds */
-
 struct npu_hwctx;
 
 enum ert_cmd_state {
@@ -54,17 +47,23 @@ struct amdxdna_cmd {
 
 struct amdxdna_hwctx {
 	struct amdxdna_client		*client;
-	struct amdxdna_xclbin		*xclbin;
 	struct npu_hwctx		*priv;
+	char				*name;
 
 	u32				id;
 	u32				xrs_id;
+	u32				max_opc;
 	u32				start_col;
 	u32				num_col;
 	u32				fw_ctx_id;
-	bool				stopped;
-	char				*name;
-	struct amdxdna_qos_info		qos;
+#define HWCTX_STAT_INIT  0
+#define HWCTX_STAT_READY 1
+#define HWCTX_STAT_STOP  2
+	u32				status;
+	u32				old_status;
+
+	struct amdxdna_qos_info		     qos;
+	struct amdxdna_hwctx_param_config_cu *cus;
 };
 
 #define drm_job_to_xdna_job(j) \
@@ -94,6 +93,7 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

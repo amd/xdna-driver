@@ -3,13 +3,12 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _NPU_MSG_PRIV_H_
-#define _NPU_MSG_PRIV_H_
+#ifndef _NPU1_MSG_PRIV_H_
+#define _NPU1_MSG_PRIV_H_
 
 #include <linux/uuid.h>
 
 enum npu_msg_opcode {
-	MSG_OP_REGISTER_PDI                = 0x1,
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
 	MSG_OP_GET_TELEMETRY               = 0x4,
@@ -17,12 +16,11 @@ enum npu_msg_opcode {
 	MSG_OP_EXECUTE_BUFFER              = 0x6,
 	MSG_OP_DPU_SELF_TEST               = 0x8,
 	MSG_OP_QUERY_ERROR_INFO            = 0x9,
-	MSG_OP_UNREGISTER_PDI              = 0xA,
-	MSG_OP_CONFIG_CU                   = 0xB,
 	MSG_OP_EXECUTE_BUFFER_CF           = 0xC,
 	MSG_OP_QUERY_COL_STATUS            = 0xD,
 	MSG_OP_QUERY_AIE_TILE_INFO         = 0xE,
 	MSG_OP_QUERY_AIE_VERSION           = 0xF,
+	MSG_OP_CONFIG_CU                   = 0x11,
 	MSG_OP_MAX_XRT_OPCODE,
 	MSG_OP_SUSPEND                     = 0x101,
 	MSG_OP_RESUME                      = 0x102,
@@ -30,11 +28,10 @@ enum npu_msg_opcode {
 	MSG_OP_INVOKE_SELF_TEST            = 0x104,
 	MSG_OP_CHECK_HEADER_HASH           = 0x105,
 	MSG_OP_MAP_HOST_BUFFER             = 0x106,
-	MSG_OP_AIE_ERROR_INJECT            = 0x107,
 	MSG_OP_GET_FIRMWARE_VERSION        = 0x108,
-	MSG_OP_QUERY_HARVEST_INFO          = 0x109,
 	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
 	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
+	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_ASYNC_MSG_AIE_ERROR         = 0x201,
 	MSG_OP_ASYNC_MSG_WATCHDOG_TIMEOUT  = 0x202,
@@ -56,6 +53,8 @@ enum npu_msg_status {
 	NPU_STATUS_AIE_LOCK_ERROR			= 0x1000008,
 	NPU_STATUS_AIE_DMA_ERROR			= 0x1000009,
 	NPU_STATUS_AIE_MEM_PARITY_ERROR			= 0x100000a,
+	NPU_STATUS_AIE_PWR_CFG_ERROR			= 0x100000b,
+	NPU_STATUS_AIE_BACKTRACK_ERROR			= 0x100000c,
 	NPU_STATUS_MAX_AIE_STATUS_CODE,
 	/* MGMT ERT Error codes */
 	NPU_STATUS_MGMT_ERT_SELF_TEST_FAILURE		= 0x2000001,
@@ -68,14 +67,15 @@ enum npu_msg_status {
 	NPU_STATUS_MAX_MGMT_ERT_STATUS_CODE,
 	/* APP ERT Error codes */
 	NPU_STATUS_APP_ERT_FIRST_ERROR			= 0x3000001,
+	NPU_STATUS_APP_INVALID_INSTR,
+	NPU_STATUS_APP_LOAD_PDI_FAIL,
 	NPU_STATUS_MAX_APP_ERT_STATUS_CODE,
 	/* NPU RTOS Error Codes */
 	NPU_STATUS_INVALID_INPUT_BUFFER			= 0x4000001,
 	NPU_STATUS_INVALID_COMMAND,
 	NPU_STATUS_INVALID_PARAM,
-	NPU_STATUS_XCLBIN_REG_FAILED,
-	NPU_STATUS_XCLBIN_UNREG_FAILED,
-	NPU_STATUS_INVALID_OPERATION,
+	NPU_STATUS_INVALID_OPERATION                    = 0x4000006,
+	NPU_STATUS_ASYNC_EVENT_MSGS_FULL,
 	NPU_STATUS_MAX_RTOS_STATUS_CODE,
 	NPU_STATUS_MAX_NPU_STATUS_CODE
 };
@@ -97,40 +97,6 @@ struct map_host_buffer_req {
 
 struct map_host_buffer_resp {
 	enum npu_msg_status	status;
-} __packed;
-
-#define NPU_MAX_PDI_ID	255
-struct pdi_info {
-	u8		pdi_id;
-	u32		registered;
-	u32		pad[2];
-	u64		address;
-	u32		size;
-	int		type;
-} __packed;
-
-struct register_pdi_req {
-	u32			num_infos;
-	struct pdi_info		pdi_info;
-	u8			reserved[3];
-	u32			pad[50];
-} __packed;
-
-struct register_pdi_resp {
-	enum npu_msg_status	status;
-	u8			reg_index;
-	u8			pad[39];
-} __packed;
-
-struct unregister_pdi_req {
-	u32			num_pdi;
-	u8			pdi_id;
-	u8			pad[7];
-} __packed;
-
-struct unregister_pdi_resp {
-	enum npu_msg_status	status;
-	u32			pad[8];
 } __packed;
 
 #define MAX_CQ_PAIRS		2
@@ -240,22 +206,6 @@ struct aie_column_info_resp {
 	u32 size;
 } __packed;
 
-struct cu_cfg_info {
-	u32 cu_idx : 16;
-	u32 cu_func : 8;
-	u32 cu_pdi_id : 8;
-};
-
-struct config_cu_req {
-	u32			num_cus;
-#define MAX_CU_NUM 32
-	struct cu_cfg_info	configs[MAX_CU_NUM];
-} __packed;
-
-struct config_cu_resp {
-	enum npu_msg_status	status;
-} __packed;
-
 struct suspend_req {
 	u32		place_holder;
 } __packed;
@@ -331,4 +281,36 @@ struct firmware_version_resp {
 	u32			build;
 } __packed;
 
-#endif /* _NPU_MSG_PRIV_H_ */
+#define MAX_NUM_CUS	32
+struct config_cu_req {
+	u32	num_cus;
+	struct {
+		u32	pdi_addr:17;
+		u32	cu_func:8;
+		u32	reserved:7;
+	} configs[MAX_NUM_CUS];
+} __packed;
+
+struct config_cu_resp {
+	enum npu_msg_status	status;
+} __packed;
+
+struct set_runtime_cfg_req {
+	u32	type;
+	u64	value;
+} __packed;
+
+struct set_runtime_cfg_resp {
+	enum npu_msg_status	status;
+} __packed;
+
+struct get_runtime_cfg_req {
+	u32	type;
+} __packed;
+
+struct get_runtime_cfg_resp {
+	enum npu_msg_status	status;
+	u64			value;
+} __packed;
+
+#endif /* _NPU1_MSG_PRIV_H_ */
