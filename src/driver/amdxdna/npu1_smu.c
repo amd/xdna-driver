@@ -3,7 +3,7 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#include "npu_common.h"
+#include "npu1_pci.h"
 
 #define SMU_RESULT_OK		1
 
@@ -16,7 +16,7 @@
 #define SMU_MPNPUCLK_FREQ_MAX		600
 #define SMU_HCLK_FREQ_MAX		1024
 
-static int npu_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
+static int npu1_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
 {
 	u32 resp;
 	int ret;
@@ -44,7 +44,7 @@ static int npu_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
 	return 0;
 }
 
-int npu_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz)
+int npu1_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz)
 {
 	if (!freq_mhz || freq_mhz > SMU_MPNPUCLK_FREQ_MAX) {
 		XDNA_ERR(ndev->xdna, "invalid mpnpu clock freq %d", freq_mhz);
@@ -52,10 +52,10 @@ int npu_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz)
 	}
 
 	ndev->mp_npu_clock.freq_mhz = freq_mhz;
-	return npu_smu_exec(ndev, NPU_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
+	return npu1_smu_exec(ndev, NPU_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
 }
 
-int npu_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz)
+int npu1_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz)
 {
 	if (!freq_mhz || freq_mhz > SMU_HCLK_FREQ_MAX) {
 		XDNA_ERR(ndev->xdna, "invalid hclock freq %d", freq_mhz);
@@ -63,37 +63,37 @@ int npu_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz)
 	}
 
 	ndev->h_clock.freq_mhz = freq_mhz;
-	return npu_smu_exec(ndev, NPU_SMU_SET_HCLK_FREQ, freq_mhz);
+	return npu1_smu_exec(ndev, NPU_SMU_SET_HCLK_FREQ, freq_mhz);
 }
 
-int npu_smu_set_power_on(struct npu_device *ndev)
+int npu1_smu_set_power_on(struct npu_device *ndev)
 {
-	return npu_smu_exec(ndev, NPU_SMU_POWER_ON, 0);
+	return npu1_smu_exec(ndev, NPU_SMU_POWER_ON, 0);
 }
 
-int npu_smu_set_power_off(struct npu_device *ndev)
+int npu1_smu_set_power_off(struct npu_device *ndev)
 {
-	return npu_smu_exec(ndev, NPU_SMU_POWER_OFF, 0);
+	return npu1_smu_exec(ndev, NPU_SMU_POWER_OFF, 0);
 }
 
-int npu_smu_init(struct npu_device *ndev)
+int npu1_smu_init(struct npu_device *ndev)
 {
 	int ret;
 
-	ret = npu_smu_set_power_on(ndev);
+	ret = npu1_smu_set_power_on(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Power on failed, ret %d", ret);
 		return ret;
 	}
 
-	ret = npu_smu_set_mpnpu_clock_freq(ndev, SMU_MPNPUCLK_FREQ_MAX);
+	ret = npu1_smu_set_mpnpu_clock_freq(ndev, SMU_MPNPUCLK_FREQ_MAX);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set mpnpu clk freq failed, ret %d", ret);
 		return ret;
 	}
 	snprintf(ndev->mp_npu_clock.name, sizeof(ndev->mp_npu_clock.name), "MP-NPU Clock");
 
-	ret = npu_smu_set_hclock_freq(ndev, SMU_HCLK_FREQ_MAX);
+	ret = npu1_smu_set_hclock_freq(ndev, SMU_HCLK_FREQ_MAX);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set hclk freq failed, ret %d", ret);
 		return ret;
@@ -103,11 +103,11 @@ int npu_smu_init(struct npu_device *ndev)
 	return 0;
 }
 
-void npu_smu_fini(struct npu_device *ndev)
+void npu1_smu_fini(struct npu_device *ndev)
 {
 	int ret;
 
-	ret = npu_smu_set_power_off(ndev);
+	ret = npu1_smu_set_power_off(ndev);
 	if (ret)
 		XDNA_WARN(ndev->xdna, "Power off failed, ret %d", ret);
 }

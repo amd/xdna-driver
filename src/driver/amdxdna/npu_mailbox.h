@@ -3,8 +3,8 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _AMDXDNA_MAILBOX_H_
-#define _AMDXDNA_MAILBOX_H_
+#ifndef _NPU_MAILBOX_H_
+#define _NPU_MAILBOX_H_
 
 struct mailbox;
 struct mailbox_channel;
@@ -161,4 +161,4 @@ int xdna_mailbox_ringbuf_show(struct mailbox *mailbox,
 			      struct seq_file *m);
 #endif
 
-#endif /* _AMDXDNA_MAILBOX_ */
+#endif /* _NPU_MAILBOX_ */

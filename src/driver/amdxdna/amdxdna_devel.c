@@ -21,12 +21,12 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 	case AMDXDNA_IOMMU_PASID:
 		break;
 	case AMDXDNA_IOMMU_NO_PASID:
-		if (!iommu_present(xdna->pdev->dev.bus)) {
+		if (!iommu_present(xdna->ddev.dev->bus)) {
 			XDNA_ERR(xdna, "IOMMU not present");
 			return -ENODEV;
 		}
 
-		domain = iommu_get_domain_for_dev(&xdna->pdev->dev);
+		domain = iommu_get_domain_for_dev(xdna->ddev.dev);
 		if (!iommu_is_dma_domain(domain)) {
 			XDNA_ERR(xdna, "Set amd_iommu=force_isolation for DMA domain");
 			return -EOPNOTSUPP;

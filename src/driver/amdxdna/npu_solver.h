@@ -3,8 +3,8 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _XRS_H
-#define _XRS_H
+#ifndef _NPU_SOLVER_H
+#define _NPU_SOLVER_H
 
 #include <linux/types.h>
 #include <linux/uuid.h>
@@ -241,7 +241,7 @@ struct init_config {
 };
 
 /*
- * xrs_init() - Register resource solver. Resource solver client needs
+ * xrsm_init() - Register resource solver. Resource solver client needs
  *              to call this function to register itself.
  *
  * @cfg:	The system metrics for resource solver to use
@@ -250,7 +250,7 @@ struct init_config {
  *
  * Note: We should only create one handle per AIE array to be managed.
  */
-void *xrs_init(struct init_config *cfg);
+void *xrsm_init(struct init_config *cfg);
 
 /*
  * xrs_allocate_resource() - Request to allocate resources for a given context
@@ -278,4 +278,4 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
  * @rid:	The Request ID to identify the requesting context
  */
 int xrs_release_resource(void *hdl, u64 rid);
-#endif /* _XRS_H */
+#endif /* _NPU_SOLVER_H */

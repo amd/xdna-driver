@@ -247,13 +247,13 @@ struct amdxdna_drm_attach_detach_bo {
 
 /**
  * struct amdxdna_drm_query_aie_status - Query the status of the AIE hardware
- * @buffer_size: The size of the user space buffer
  * @buffer: The user space buffer that will return the AIE status
+ * @buffer_size: The size of the user space buffer
  * @cols_filled: A bitmap of AIE columns whose data has been returned in the buffer.
  */
 struct amdxdna_drm_query_aie_status {
-	__u32 buffer_size; /* in */
 	__u64 buffer; /* out */
+	__u32 buffer_size; /* in */
 	__u32 cols_filled; /* out */
 };
 
@@ -282,7 +282,7 @@ struct amdxdna_drm_query_aie_tile_metadata {
 	__u16 dma_channel_count;
 	__u16 lock_count;
 	__u16 event_reg_count;
-	__u8  pad[6];
+	__u16 pad[3];
 };
 
 /**

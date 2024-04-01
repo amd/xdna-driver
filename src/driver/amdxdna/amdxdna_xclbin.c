@@ -9,7 +9,6 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_axlf.h"
 #include "amdxdna_xclbin.h"
-#include "npu_pci.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -75,7 +74,7 @@ amdxdna_pdi_cleanup(struct amdxdna_dev *xdna, struct amdxdna_pdi *pdis, int num_
 		if (iommu_mode == AMDXDNA_IOMMU_BYPASS)
 			continue;
 #endif
-		dma_free_noncoherent(&xdna->pdev->dev, pdis[i].size, pdis[i].image,
+		dma_free_noncoherent(xdna->ddev.dev, pdis[i].size, pdis[i].image,
 				     pdis[i].addr, DMA_TO_DEVICE);
 
 		XDNA_DBG(xdna, "PDI id %d free", pdis[i].id);
@@ -112,7 +111,7 @@ amdxdna_pdi_parse(struct amdxdna_dev *xdna, struct amdxdna_pdi *pdis,
 			goto cleanup_pdi_blobs;
 		}
 #endif
-		pdi_cpu_addr = dma_alloc_noncoherent(&xdna->pdev->dev, size, &pdi_dev_addr,
+		pdi_cpu_addr = dma_alloc_noncoherent(xdna->ddev.dev, size, &pdi_dev_addr,
 						     DMA_TO_DEVICE, GFP_KERNEL);
 		if (!pdi_cpu_addr) {
 			ret = -ENOMEM;
@@ -150,7 +149,7 @@ amdxdna_pdi_parse(struct amdxdna_dev *xdna, struct amdxdna_pdi *pdis,
 free_id:
 	ida_free(&xdna->pdi_ida, pdis[i].id);
 free_image:
-	dma_free_noncoherent(&xdna->pdev->dev, pdis[i].size, pdis[i].image,
+	dma_free_noncoherent(xdna->ddev.dev, pdis[i].size, pdis[i].image,
 			     pdis[i].addr, DMA_TO_DEVICE);
 cleanup_pdi_blobs:
 	amdxdna_pdi_cleanup(xdna, pdis, i);
@@ -356,7 +355,7 @@ amdxdna_xclbin_release(struct kref *ref)
 	xdna = xclbin->xdna;
 
 	XDNA_DBG(xdna, "releasing XCLBIN, UUID %pUb", &xclbin->uuid);
-	if (npu_unregister_pdis(xdna->dev_handle, xclbin))
+	if (xdna->dev_info->ops->unreg_pdis(xdna->dev_handle, xclbin))
 		XDNA_WARN(xdna, "unregister PDI failed");
 
 	list_del(&xclbin->entry);
@@ -398,7 +397,7 @@ static int amdxdna_xclbin_register(struct amdxdna_dev *xdna, const struct axlf *
 		goto xclbin_free;
 	}
 
-	ret = npu_register_pdis(xdna->dev_handle, xp);
+	ret = xdna->dev_info->ops->reg_pdis(xdna->dev_handle, xp);
 	if (ret) {
 		XDNA_ERR(xdna, "register xclbin failed, ret %d", ret);
 		goto xclbin_mem_free;
@@ -423,6 +422,7 @@ xclbin_free:
 int amdxdna_xclbin_load(struct amdxdna_dev *xdna, uuid_t *uuid,
 			struct amdxdna_xclbin **xclbin)
 {
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	const struct firmware *fw;
 	const struct axlf *axlf;
 	char xclbin_path[70];
@@ -435,9 +435,9 @@ int amdxdna_xclbin_load(struct amdxdna_dev *xdna, uuid_t *uuid,
 	}
 
 	snprintf(xclbin_path, sizeof(xclbin_path), "amdnpu/%x_%02x/%pUb.xclbin",
-		 xdna->pdev->device, xdna->pdev->revision, uuid);
+		 pdev->device, pdev->revision, uuid);
 
-	ret = request_firmware(&fw, xclbin_path, &xdna->pdev->dev);
+	ret = request_firmware(&fw, xclbin_path, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to load xclbin firmware, UUID %pUb", uuid);
 		goto out;

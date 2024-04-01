@@ -4,7 +4,6 @@
  */
 #include "amdxdna_sysfs.h"
 #include "amdxdna_ctx.h"
-#include "npu_pci.h"
 
 static ssize_t vbnv_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -47,7 +46,7 @@ int amdxdna_sysfs_init(struct amdxdna_dev *xdna)
 {
 	int ret;
 
-	ret = sysfs_create_group(&xdna->pdev->dev.kobj, &amdxdna_attr_group);
+	ret = sysfs_create_group(&xdna->ddev.dev->kobj, &amdxdna_attr_group);
 	if (ret)
 		XDNA_ERR(xdna, "Create attr group failed");
 
@@ -56,5 +55,5 @@ int amdxdna_sysfs_init(struct amdxdna_dev *xdna)
 
 void amdxdna_sysfs_fini(struct amdxdna_dev *xdna)
 {
-	sysfs_remove_group(&xdna->pdev->dev.kobj, &amdxdna_attr_group);
+	sysfs_remove_group(&xdna->ddev.dev->kobj, &amdxdna_attr_group);
 }

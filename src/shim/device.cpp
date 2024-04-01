@@ -180,8 +180,8 @@ struct aie_info
       std::vector<char> payload(output_size);
 
       amdxdna_drm_query_aie_status aie_status = {
+        .buffer = reinterpret_cast<uintptr_t>(payload.data()),
         .buffer_size = output_size,
-        .buffer = reinterpret_cast<uintptr_t>(payload.data())
       };
 
       amdxdna_drm_get_info arg = {
