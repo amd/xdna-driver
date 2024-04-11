@@ -523,7 +523,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 		goto free_bo_hdls;
 	}
 
-	if(to_gobj(cmd_bo)->size < sizeof(struct amdxdna_cmd)) {
+	if (to_gobj(cmd_bo)->size < sizeof(struct amdxdna_cmd)) {
 		XDNA_DBG(xdna, "Bad cmd BO size: %ld", to_gobj(cmd_bo)->size);
 		ret = -EINVAL;
 		goto put_cmd_bo;

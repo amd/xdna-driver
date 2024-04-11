@@ -96,16 +96,6 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 	return 0;
 }
 
-static int npu1_hwctx_col_match(struct amdxdna_hwctx *hwctx, u32 col_map)
-{
-	u32 start_col, end_col;
-
-	start_col = hwctx->start_col;
-	end_col = start_col + hwctx->num_col - 1;
-
-	return col_map & GENMASK(end_col, start_col);
-}
-
 void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -116,7 +106,7 @@ void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		/* check if the HW context uses the error column */
-		if (!npu1_hwctx_col_match(hwctx, col_map))
+		if (!(col_map & amdxdna_hwctx_col_map(hwctx)))
 			continue;
 
 		npu1_hwctx_stop(xdna, hwctx);

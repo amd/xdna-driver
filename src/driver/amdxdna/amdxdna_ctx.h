@@ -89,6 +89,12 @@ struct amdxdna_sched_job {
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
+static inline u32 amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx)
+{
+	return GENMASK(hwctx->start_col + hwctx->num_col - 1,
+		       hwctx->start_col);
+}
+
 void amdxdna_job_put(struct amdxdna_sched_job *job);
 
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);

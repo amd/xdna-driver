@@ -212,6 +212,13 @@ static void npu1_error_async_cb(void *handle, const u32 *data, size_t size)
 	queue_work(e->wq, &e->work);
 }
 
+static int npu1_error_event_send(struct async_event *e)
+{
+	drm_clflush_virt_range(e->buf, e->size); /* device can access */
+	return npu1_register_asyn_event_msg(e->ndev, e->addr, e->size, e,
+					    npu1_error_async_cb);
+}
+
 static void npu1_error_worker(struct work_struct *err_work)
 {
 	struct amdxdna_client *client;
@@ -228,7 +235,6 @@ static void npu1_error_worker(struct work_struct *err_work)
 		return;
 
 	e->resp.status = MAX_NPU_STATUS_CODE;
-	drm_clflush_virt_range(e->buf, e->size);
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     e->buf, 0x100, false);
@@ -256,8 +262,7 @@ static void npu1_error_worker(struct work_struct *err_work)
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     e->buf, 0x100, false);
 	/* Re-sent this event to firmware */
-	if (npu1_register_asyn_event_msg(e->ndev, e->addr, e->size, e,
-					 npu1_error_async_cb))
+	if (npu1_error_event_send(e))
 		XDNA_WARN(xdna, "Unable to register async event");
 	mutex_unlock(&xdna->dev_lock);
 }
@@ -271,8 +276,7 @@ int npu1_error_async_events_send(struct npu_device *ndev)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	for (i = 0; i < ndev->async_events->event_cnt; i++) {
 		e = &ndev->async_events->event[i];
-		ret = npu1_register_asyn_event_msg(ndev, e->addr, e->size,
-						   e, npu1_error_async_cb);
+		ret = npu1_error_event_send(e);
 		if (ret)
 			return ret;
 	}

@@ -157,12 +157,16 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 {
 	struct amdxdna_drm_get_info *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	int ret;
 
 	if (!xdna->dev_info->ops->get_info)
 		return -EOPNOTSUPP;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
-	return xdna->dev_info->ops->get_info(xdna, args);
+	mutex_lock(&xdna->dev_lock);
+	ret = xdna->dev_info->ops->get_info(xdna, args);
+	mutex_unlock(&xdna->dev_lock);
+	return ret;
 }
 
 static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
