@@ -508,18 +508,18 @@ int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *bu
 
 		XDNA_DBG(xdna, "Assgin bo %d to %s as debug buffer", bo_hdl, hwctx->name);
 		// TODO: check BO type and send firmware command to assign it to ctx
-		return 0;
+		return -EOPNOTSUPP;
 	}
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF: {
 		u32 bo_hdl = (u32)value;
 
 		XDNA_DBG(xdna, "Remove bo %d from %s as debug buffer", bo_hdl, hwctx->name);
 		// TODO: check BO handle/type and send firmware command to assign it to ctx
-		return 0;
+		return -EOPNOTSUPP;
 	}
 	default:
-		WARN_ON(1);
-		return -EINVAL;
+		XDNA_DBG(xdna, "Not supported type %d", type);
+		return -EOPNOTSUPP;
 	}
 }
 
