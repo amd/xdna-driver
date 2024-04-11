@@ -1,5 +1,9 @@
 {
 	"copyright": "Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.",
+	"xrt" : {
+		"version": "202410.2.17.239",
+		"os_rel": "22.04"
+	},
 	"firmwares": [
 		{
 			"device": "npu1",
