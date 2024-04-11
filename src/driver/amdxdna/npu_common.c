@@ -7,6 +7,44 @@
 #include "npu_common.h"
 #include "npu_solver.h"
 
+void npu_msg_cb(void *handle, const u32 *data, size_t size)
+{
+	struct npu_notify *cb_arg = handle;
+
+	if (!data) {
+		cb_arg->error = 1;
+		return;
+	}
+
+	print_hex_dump_debug("resp data: ", DUMP_PREFIX_OFFSET,
+			     16, 4, data, size, true);
+	memcpy(cb_arg->data, data, cb_arg->size);
+	complete(&cb_arg->comp);
+}
+
+int npu_send_msg_wait(struct amdxdna_dev *xdna,
+		      struct mailbox_channel *chann,
+		      struct xdna_mailbox_msg *msg)
+{
+	struct npu_notify *hdl = msg->handle;
+	int ret;
+
+	ret = xdna_mailbox_send_msg(chann, msg, TX_TIMEOUT);
+	if (ret) {
+		XDNA_ERR(xdna, "Send message failed, ret %d", ret);
+		return ret;
+	}
+
+	ret = wait_for_completion_timeout(&hdl->comp,
+					  msecs_to_jiffies(RX_TIMEOUT));
+	if (!ret) {
+		XDNA_ERR(xdna, "wait for completion timeout");
+		return -ETIME;
+	}
+
+	return 0;
+}
+
 void npu_default_xrs_cfg(struct amdxdna_dev *xdna, struct init_config *xrs_cfg)
 {
 	xrs_cfg->clk_list.num_levels = 3;

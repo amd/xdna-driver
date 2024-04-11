@@ -332,7 +332,8 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 
 	snode->cb_arg = cb_arg;
 
-	dev_dbg(xrs->cfg.dev, "start col %d\n", snode->pt_node->start_col);
+	dev_dbg(xrs->cfg.dev, "start col %d ncols %d\n",
+		snode->pt_node->start_col, snode->pt_node->ncols);
 
 	return 0;
 
