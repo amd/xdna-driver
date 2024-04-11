@@ -28,9 +28,9 @@ int npu_alloc_resource(struct amdxdna_hwctx *hwctx)
 	if (!xrs_req)
 		return -ENOMEM;
 
-	xrs_req->cdo.first_col = xdna->dev_info->first_col;
-	xrs_req->cdo.ntiles = hwctx->num_tiles;
-	xrs_req->cdo.mem_size = hwctx->mem_size;
+	xrs_req->cdo.start_cols = hwctx->col_list;
+	xrs_req->cdo.cols_len = hwctx->col_list_len;
+	xrs_req->cdo.ncols = hwctx->num_col;
 	xrs_req->cdo.qos_cap.opc = hwctx->max_opc;
 
 	xrs_req->rqos.gops = hwctx->qos.gops;

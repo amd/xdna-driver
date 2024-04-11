@@ -97,9 +97,9 @@ struct aie_qos {
  * partition overlays.
  */
 struct cdo_parts {
-	u32		   first_col;		/* First column can be allocated */
-	u32		   ntiles;		/* # of tiles */
-	u32		   mem_size;		/* size of tile memory */
+	u32		   *start_cols;		/* Start column array */
+	u32		   cols_len;		/* Length of start column array */
+	u32		   ncols;		/* # of column */
 	struct aie_qos_cap qos_cap;		/* CDO QoS capabilities */
 };
 
@@ -214,7 +214,6 @@ struct xrs_action_ops {
  */
 struct init_config {
 	u32			total_col;
-	u32			num_core_row;
 	enum xrs_mode		mode;
 	u32			sys_eff_factor; /* system efficiency factor */
 	u32			latency_adj;    /* latency adjustment in ms */

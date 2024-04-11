@@ -183,6 +183,9 @@ struct npu_dev_priv {
 	u64			protocol_major;
 	u64			protocol_minor;
 	struct rt_config	rt_config;
+#define COL_ALIGN_NONE   0
+#define COL_ALIGN_NATURE 1
+	u32			col_align;
 	u32			mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32			mbox_size;

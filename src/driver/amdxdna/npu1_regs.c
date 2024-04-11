@@ -47,6 +47,7 @@ const struct npu_dev_priv npu1_dev_priv = {
 	.protocol_major = 0x5,
 	.protocol_minor = 0x1,
 	.rt_config	= {NPU1_RT_CFG_TYPE_PDI_LOAD, NPU1_RT_CFG_VAL_PDI_LOAD_APP},
+	.col_align	= COL_ALIGN_NONE,
 	.mbox_dev_addr  = NPU1_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
 	.sram_dev_addr  = NPU1_SRAM_BAR_BASE,

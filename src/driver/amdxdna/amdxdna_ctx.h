@@ -55,6 +55,8 @@ struct amdxdna_hwctx {
 	u32				num_tiles;
 	u32				mem_size;
 	u32				fw_ctx_id;
+	u32				col_list_len;
+	u32				*col_list;
 	u32				start_col;
 	u32				num_col;
 #define HWCTX_STAT_INIT  0

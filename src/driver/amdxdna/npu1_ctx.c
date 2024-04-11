@@ -270,6 +270,66 @@ const struct drm_sched_backend_ops sched_ops = {
 	.free_job = npu1_sched_job_free,
 };
 
+static int npu1_hwctx_col_list(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct npu_device *ndev = xdna->dev_handle;
+	int start, end, first, last;
+	u32 width = 1, entries = 0;
+	int i;
+
+	if (!hwctx->num_tiles) {
+		XDNA_ERR(xdna, "Number of tiles is zero");
+		return -EINVAL;
+	}
+
+	if (unlikely(!ndev->metadata.core.row_count)) {
+		XDNA_WARN(xdna, "Core tile row count is zero");
+		return -EINVAL;
+	}
+
+	hwctx->num_col = hwctx->num_tiles / ndev->metadata.core.row_count;
+	if (!hwctx->num_col || hwctx->num_col > ndev->total_col) {
+		XDNA_ERR(xdna, "Invalid num_col %d", hwctx->num_col);
+		return -EINVAL;
+	}
+
+	if (ndev->priv->col_align == COL_ALIGN_NATURE)
+		width = hwctx->num_col;
+
+	/*
+	 * In range [start, end], find out columns that is multiple of width.
+	 *	'first' is the first column,
+	 *	'last' is the last column,
+	 *	'entries' is the total number of columns.
+	 */
+	start =  xdna->dev_info->first_col;
+	end =  ndev->total_col - width;
+	first = start + (width - start % width) % width;
+	last = end - end % width;
+	if (last >= first)
+		entries = (last - first) / width + 1;
+
+	if (unlikely(!entries)) {
+		XDNA_ERR(xdna, "Start %d end %d width %d",
+			 start, end, width);
+		return -EINVAL;
+	}
+
+	hwctx->col_list = kmalloc_array(entries, sizeof(*hwctx->col_list), GFP_KERNEL);
+	if (!hwctx->col_list)
+		return -ENOMEM;
+
+	hwctx->col_list_len = entries;
+	hwctx->col_list[0] = first;
+	for (i = 1; i < entries; i++)
+		hwctx->col_list[i] = hwctx->col_list[i - 1] + width;
+
+	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4, hwctx->col_list,
+			     entries * sizeof(*hwctx->col_list), false);
+	return 0;
+}
+
 int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
@@ -315,10 +375,16 @@ int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 	}
 	init_waitqueue_head(&hwctx->priv->job_free_wq);
 
+	ret = npu1_hwctx_col_list(hwctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
+		goto free_entity;
+	}
+
 	ret = npu_alloc_resource(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
-		goto free_entity;
+		goto free_col_list;
 	}
 
 	ret = npu1_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
@@ -335,6 +401,8 @@ int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 release_resource:
 	npu_release_resource(hwctx);
+free_col_list:
+	kfree(hwctx->col_list);
 free_entity:
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 free_sched:
@@ -384,6 +452,7 @@ void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	amdxdna_gem_unpin(hwctx->priv->heap);
 	amdxdna_put_dev_heap(hwctx->priv->heap);
 
+	kfree(hwctx->col_list);
 	kfree(hwctx->priv);
 	kfree(hwctx->cus);
 }
