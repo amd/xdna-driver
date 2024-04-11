@@ -492,7 +492,7 @@ struct xclbin_name
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     const auto pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-    auto fmt = boost::format("%04x_%02x/%s") % pcie_id.device_id % static_cast<uint16_t>(pcie_id.revision_id);
+    auto fmt = boost::format("bins/%04x_%02x/%s") % pcie_id.device_id % static_cast<uint16_t>(pcie_id.revision_id);
 
     std::string xclbin_name;
     const auto xclbin_type = std::any_cast<xrt_core::query::xclbin_name::type>(param);
@@ -520,7 +520,7 @@ struct sequence_name
     if (key != key_type::sequence_name)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    auto fmt = boost::format("DPU_Sequence/%s");
+    auto fmt = boost::format("bins/dpu_sequence/%s");
 
     std::string seq_name;
     switch (std::any_cast<xrt_core::query::sequence_name::type>(param)) {

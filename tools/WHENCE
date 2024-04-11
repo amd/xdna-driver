@@ -1,0 +1,12 @@
+             **********
+             * WHENCE *
+             **********
+
+This file attempts to document the licensing information for each binary
+distributed for use with the XRT plug-in for NPU device.
+
+--------------------------------------------------------------------------
+
+File: bins/1502_00/validate.xclbin
+
+Licence: Redistributable. See LICENSE.amdnpu for details.
