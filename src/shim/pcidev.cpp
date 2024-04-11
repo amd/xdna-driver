@@ -32,6 +32,8 @@ namespace {
       return "DRM_IOCTL_AMDXDNA_WAIT_CMD";
     case DRM_IOCTL_AMDXDNA_GET_INFO:
       return "DRM_IOCTL_AMDXDNA_GET_INFO";
+    case DRM_IOCTL_AMDXDNA_SET_STATE:
+      return "DRM_IOCTL_AMDXDNA_SET_STATE";
     case DRM_IOCTL_GEM_CLOSE:
       return "DRM_IOCTL_GEM_CLOSE";
     }

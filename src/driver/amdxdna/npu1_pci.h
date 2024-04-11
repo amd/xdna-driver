@@ -260,5 +260,6 @@ void npu1_fini(struct amdxdna_dev *xdna);
 int npu1_hw_start(struct amdxdna_dev *xdna);
 void npu1_hw_stop(struct amdxdna_dev *xdna);
 int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
+int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 
 #endif /* _NPU1_PCI_H_ */

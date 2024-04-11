@@ -40,6 +40,7 @@ struct amdxdna_dev_ops {
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
 	int (*get_info)(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
+	int (*set_state)(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 

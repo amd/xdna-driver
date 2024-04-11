@@ -7,6 +7,7 @@
 
 #include "core/common/query_requests.h"
 
+#include <any>
 #include <filesystem>
 
 namespace {
@@ -303,6 +304,35 @@ struct pcie_id
   }
 };
 
+struct performance_mode
+{
+  using result_type = query::performance_mode::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    result_type performance_mode = 0;
+
+    return performance_mode;
+  }
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    amdxdna_drm_set_power_mode state;
+    state.power_mode = static_cast<amdxdna_power_mode_type>(std::any_cast<xrt_core::query::performance_mode::power_type>(any));
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_SET_POWER_MODE,
+      .buffer_size = sizeof(state),
+      .buffer = reinterpret_cast<uintptr_t>(&state)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  }
+};
+
 struct clock_topology
 {
   using result_type = query::clock_freq_topology_raw::result_type;
@@ -590,6 +620,23 @@ struct function1_get : function0_get<QueryRequestType, Getter>
   }
 };
 
+template <typename QueryRequestType, typename Putter>
+struct function_putter : virtual QueryRequestType
+{
+  void
+  put(const xrt_core::device* device, const std::any& any) const
+  {
+    if (auto uhdl = device->get_user_handle())
+      Putter::put(device, QueryRequestType::key, any);
+    else
+      throw xrt_core::internal_error("No device handle");
+  }
+};
+
+template <typename QueryRequestType, typename GetPut>
+struct function0_getput : function0_get<QueryRequestType, GetPut>, function_putter<QueryRequestType, GetPut>
+{};
+
 static std::map<xrt_core::query::key_type, std::unique_ptr<query::request>> query_tbl;
 
 template <typename QueryRequestType>
@@ -616,6 +663,14 @@ emplace_func1_request()
   query_tbl.emplace(k, std::make_unique<function1_get<QueryRequestType, Getter>>());
 }
 
+template <typename QueryRequestType, typename GetPut>
+static void
+emplace_func0_getput()
+{
+  auto k = QueryRequestType::key;
+  query_tbl.emplace(k, std::make_unique<function0_getput<QueryRequestType, GetPut>>());
+}
+
 static void
 initialize_query_table()
 {
@@ -639,6 +694,8 @@ initialize_query_table()
   emplace_sysfs_get<query::pcie_subsystem_id>                  ("", "subsystem_device");
   emplace_sysfs_get<query::pcie_subsystem_vendor>              ("", "subsystem_vendor");
   emplace_sysfs_get<query::pcie_vendor>                        ("", "vendor");
+
+  emplace_func0_getput<query::performance_mode,                performance_mode>();
 
   emplace_func0_request<query::rom_ddr_bank_count_max,         default_value>();
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();

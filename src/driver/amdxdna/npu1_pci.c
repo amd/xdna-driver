@@ -28,6 +28,7 @@ const struct amdxdna_dev_ops npu1_ops = {
 	.resume         = npu1_hw_start,
 	.suspend        = npu1_hw_stop,
 	.get_info       = npu1_get_info,
+	.set_state      = npu1_set_state,
 	.hwctx_init     = npu1_hwctx_init,
 	.hwctx_fini     = npu1_hwctx_fini,
 	.hwctx_config   = npu1_hwctx_config,
@@ -738,6 +739,49 @@ int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
 		ret = npu1_get_hwctx_status(xdna, args);
+		break;
+	default:
+		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
+		ret = -EOPNOTSUPP;
+	}
+
+	drm_dev_exit(idx);
+	return ret;
+}
+
+static int npu1_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_set_power_mode power_state;
+
+	if (args->buffer_size != sizeof(power_state)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 args->buffer_size, sizeof(power_state));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&power_state, u64_to_user_ptr(args->buffer), sizeof(power_state))) {
+		XDNA_ERR(xdna, "Failed to copy power mode request into kernel");
+		return -EFAULT;
+	}
+
+	/* Interpret the given buf->power_mode into the correct power mode*/
+
+	/* Set resource solver power property to the user choice */
+
+	/* Set power level within the NPU */
+	return 0;
+}
+
+int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+{
+	int ret, idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	switch (args->param) {
+	case DRM_AMDXDNA_SET_POWER_MODE:
+		ret = npu1_set_power_mode(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

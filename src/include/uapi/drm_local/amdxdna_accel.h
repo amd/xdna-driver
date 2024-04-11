@@ -44,6 +44,7 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_EXEC_CMD,
 	DRM_AMDXDNA_WAIT_CMD,
 	DRM_AMDXDNA_GET_INFO,
+	DRM_AMDXDNA_SET_STATE,
 	DRM_AMDXDNA_NUM_IOCTLS
 };
 
@@ -421,6 +422,39 @@ struct amdxdna_drm_get_info {
 	__u64 buffer; /* in/out */
 };
 
+enum amdxdna_power_mode_type {
+    XRT_POWER_MODE_DEFAULT, /**< Fallback to calculated DPM */
+    XRT_POWER_MODE_LOW,     /**< Set frequency to lowest DPM */
+    XRT_POWER_MODE_MEDIUM,  /**< Set frequency to medium DPM */
+    XRT_POWER_MODE_HIGH,    /**< Set frequency to highest DPM */
+};
+
+/**
+ * struct amdxdna_drm_set_power_mode - Set the power mode of the AIE hardware
+ * @power_mode: The sensor type from enum amdxdna_power_mode_type
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_set_power_mode {
+	__u8 power_mode;
+	__u8 pad[7];
+};
+
+enum amdxdna_drm_set_param {
+	DRM_AMDXDNA_SET_POWER_MODE
+};
+
+/**
+ * struct amdxdna_drm_set_state - Set the state of some component within the AIE hardware.
+ * @param: Value in enum amdxdna_drm_set_param. Specifies the structure passed in the buffer.
+ * @buffer_size: Size of the input buffer.
+ * @buffer: A structure specified by the param struct member.
+ */
+struct amdxdna_drm_set_state {
+	__u32 param; /* in */
+	__u32 buffer_size; /* in */
+	__u64 buffer; /* in */
+};
+
 #define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
 		 struct amdxdna_drm_create_hwctx)
@@ -456,6 +490,10 @@ struct amdxdna_drm_get_info {
 #define DRM_IOCTL_AMDXDNA_GET_INFO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO, \
 		 struct amdxdna_drm_get_info)
+
+#define DRM_IOCTL_AMDXDNA_SET_STATE \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SET_STATE, \
+		 struct amdxdna_drm_set_state)
 
 #if defined(__cplusplus)
 } /* extern c end */
