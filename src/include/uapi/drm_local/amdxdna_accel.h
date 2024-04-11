@@ -77,9 +77,8 @@ struct amdxdna_qos_info {
  * @ext: MBZ.
  * @ext_flags: MBZ.
  * @qos_p: Address of QoS info.
- * @umq_p: Address user mode queue(UMQ).
- * @log_buf_p: Address of log buffer.
- * @log_size: Log buffer size.
+ * @umq_bo: BO handle for user mode queue(UMQ).
+ * @log_buf_bo: BO handle for log buffer.
  * @max_opc: Maximum operations per cycle.
  * @num_tiles: Number of AIE tiles.
  * @mem_size: Size of AIE tile memory.
@@ -90,9 +89,8 @@ struct amdxdna_drm_create_hwctx {
 	__u64 ext;
 	__u64 ext_flags;
 	__u64 qos_p;
-	__u64 umq_p;
-	__u64 log_buf_p;
-	__u32 log_size;
+	__u32 umq_bo;
+	__u32 log_buf_bo;
 	__u32 max_opc;
 	__u32 num_tiles;
 	__u32 mem_size;

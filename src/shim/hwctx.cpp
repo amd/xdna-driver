@@ -186,7 +186,8 @@ create_ctx_on_device()
 {
   amdxdna_drm_create_hwctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
-  arg.umq_p = reinterpret_cast<uintptr_t>(m_q->get_queue_addr());
+  arg.umq_bo = m_q->get_queue_bo();
+  arg.log_buf_bo = AMDXDNA_INVALID_BO_HANDLE;
   arg.max_opc = m_ops_per_cycle;
   arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
 

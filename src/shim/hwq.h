@@ -55,13 +55,13 @@ public:
   void
   unbind_hwctx();
 
-  const void *
-  get_queue_addr();
+  uint32_t
+  get_queue_bo();
 
 protected:
   const hw_ctx *m_hwctx;
-  const void *m_queue_ptr;
   const pdev& m_pdev;
+  uint32_t m_queue_boh;
 };
 
 } // shim_xdna

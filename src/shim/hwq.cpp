@@ -10,7 +10,7 @@ namespace shim_xdna {
 hw_q::
 hw_q(const device& device)
   : m_hwctx(nullptr)
-  , m_queue_ptr(nullptr)
+  , m_queue_boh(AMDXDNA_INVALID_BO_HANDLE)
   , m_pdev(device.get_pdev())
 {
 }
@@ -31,11 +31,11 @@ unbind_hwctx()
   m_hwctx = nullptr;
 }
 
-const void *
+uint32_t
 hw_q::
-get_queue_addr()
+get_queue_bo()
 {
-  return m_queue_ptr;
+  return m_queue_boh;
 }
 
 int
