@@ -18,6 +18,8 @@ namespace {
       return "DRM_IOCTL_AMDXDNA_CREATE_HWCTX";
     case DRM_IOCTL_AMDXDNA_DESTROY_HWCTX:
       return "DRM_IOCTL_AMDXDNA_DESTROY_HWCTX";
+    case DRM_IOCTL_AMDXDNA_CONFIG_HWCTX:
+      return "DRM_IOCTL_AMDXDNA_CONFIG_HWCTX";
     case DRM_IOCTL_AMDXDNA_CREATE_BO:
       return "DRM_IOCTL_AMDXDNA_CREATE_BO";
     case DRM_IOCTL_AMDXDNA_GET_BO_INFO:
@@ -28,8 +30,10 @@ namespace {
       return "DRM_IOCTL_AMDXDNA_EXEC_CMD";
     case DRM_IOCTL_AMDXDNA_WAIT_CMD:
       return "DRM_IOCTL_AMDXDNA_WAIT_CMD";
-    case DRM_AMDXDNA_GET_INFO:
-      return "DRM_AMDXDNA_GET_INFO";
+    case DRM_IOCTL_AMDXDNA_GET_INFO:
+      return "DRM_IOCTL_AMDXDNA_GET_INFO";
+    case DRM_IOCTL_GEM_CLOSE:
+      return "DRM_IOCTL_GEM_CLOSE";
     }
 
     return "UNKNOWN(" + std::to_string(cmd) + ")";
