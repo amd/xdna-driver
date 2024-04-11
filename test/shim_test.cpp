@@ -1185,7 +1185,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NORMAL_RUN, 1}
   },
   test_case{ "create and free debug bo",
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x4000 }
+    TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x4000 }
   },
 };
 

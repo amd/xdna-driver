@@ -157,12 +157,33 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 {
 	struct amdxdna_drm_get_info *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	int ret;
 
 	if (!xdna->dev_info->ops->get_info)
 		return -EOPNOTSUPP;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
-	return xdna->dev_info->ops->get_info(xdna, args);
+	mutex_lock(&xdna->dev_lock);
+	ret = xdna->dev_info->ops->get_info(xdna, args);
+	mutex_unlock(&xdna->dev_lock);
+	return ret;
+}
+
+static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+{
+	struct amdxdna_drm_set_state *args = data;
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	int ret = 0;
+
+	if (!xdna->dev_info->ops->set_state)
+		return -EOPNOTSUPP;
+
+	XDNA_DBG(xdna, "Request parameter %u", args->param);
+	mutex_lock(&xdna->dev_lock);
+	ret = xdna->dev_info->ops->set_state(xdna, args);
+	mutex_unlock(&xdna->dev_lock);
+
+	return ret;
 }
 
 static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
@@ -179,6 +200,7 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_WAIT_CMD, amdxdna_drm_wait_cmd_ioctl, 0),
 	/* Query */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_INFO, amdxdna_drm_get_info_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 
 static const struct file_operations amdxdna_fops = {

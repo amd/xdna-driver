@@ -55,6 +55,8 @@ struct amdxdna_hwctx {
 	u32				num_tiles;
 	u32				mem_size;
 	u32				fw_ctx_id;
+	u32				col_list_len;
+	u32				*col_list;
 	u32				start_col;
 	u32				num_col;
 #define HWCTX_STAT_INIT  0
@@ -86,6 +88,12 @@ struct amdxdna_sched_job {
 	size_t			bo_cnt;
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
+
+static inline u32 amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx)
+{
+	return GENMASK(hwctx->start_col + hwctx->num_col - 1,
+		       hwctx->start_col);
+}
 
 void amdxdna_job_put(struct amdxdna_sched_job *job);
 

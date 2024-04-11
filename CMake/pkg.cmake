@@ -50,8 +50,15 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
   COMPONENT ${XDNA_COMPONENT}
   FILES_MATCHING
   PATTERN "*.sbin"
-  PATTERN "*.xclbin"
   PATTERN "download_raw" EXCLUDE
+  )
+
+install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
+  DESTINATION xrt/${XDNA_COMPONENT}/bins
+  COMPONENT ${XDNA_COMPONENT}
+  FILES_MATCHING
+  PATTERN "*.xclbin"
+  PATTERN "*.txt"
   )
 
 configure_file(

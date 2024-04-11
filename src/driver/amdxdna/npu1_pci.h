@@ -183,6 +183,9 @@ struct npu_dev_priv {
 	u64			protocol_major;
 	u64			protocol_minor;
 	struct rt_config	rt_config;
+#define COL_ALIGN_NONE   0
+#define COL_ALIGN_NATURE 1
+	u32			col_align;
 	u32			mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32			mbox_size;
@@ -241,7 +244,7 @@ int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
 /* npu1_hwctx.c */
 int npu1_hwctx_init(struct amdxdna_hwctx *hwctx);
 void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx);
-int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size);
+int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 void npu1_hwctx_suspend(struct amdxdna_hwctx *hwctx);
 void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx);
 int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
@@ -257,5 +260,6 @@ void npu1_fini(struct amdxdna_dev *xdna);
 int npu1_hw_start(struct amdxdna_dev *xdna);
 void npu1_hw_stop(struct amdxdna_dev *xdna);
 int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
+int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 
 #endif /* _NPU1_PCI_H_ */

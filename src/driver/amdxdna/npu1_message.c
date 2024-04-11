@@ -9,95 +9,33 @@
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_ctx.h"
 #include "npu1_msg_priv.h"
+#include "npu_common.h"
 #include "npu1_pci.h"
 
-#define TX_TIMEOUT 2000 /* miliseconds */
-#define RX_TIMEOUT 5000 /* miliseconds */
-
-struct npu_notify {
-	struct completion       comp;
-	u32			*data;
-	size_t			size;
-	int			error;
-};
-
-#define DECLARE_NPU_MSG(name, op)				\
-	struct name##_req	req = { 0 };			\
-	struct name##_resp	resp =				\
-		{ NPU_STATUS_MAX_NPU_STATUS_CODE };		\
-	struct npu_notify	hdl = {				\
-		.error = 0,					\
-		.data = (u32 *)&resp,				\
-		.size = sizeof(resp),				\
-		.comp = COMPLETION_INITIALIZER(hdl.comp),	\
-	};							\
-	struct xdna_mailbox_msg msg = {				\
-		.send_data = (u8 *)&req,			\
-		.send_size = sizeof(req),			\
-		.handle = &hdl,					\
-		.opcode = op,					\
-		.notify_cb = npu_msg_cb,			\
-	}
-
-static void npu_msg_cb(void *handle, const u32 *data, size_t size)
-{
-	struct npu_notify *cb_arg = handle;
-
-	if (!data) {
-		cb_arg->error = 1;
-		return;
-	}
-
-	print_hex_dump_debug("resp data: ", DUMP_PREFIX_OFFSET,
-			     16, 4, data, size, true);
-	memcpy(cb_arg->data, data, cb_arg->size);
-	complete(&cb_arg->comp);
-}
-
-static int npu_send_msg_wait(struct npu_device *ndev,
-			     struct mailbox_channel *chann,
-			     struct xdna_mailbox_msg *msg)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct npu_notify *hdl = msg->handle;
-	int ret;
-
-	ret = xdna_mailbox_send_msg(chann, msg, TX_TIMEOUT);
-	if (ret) {
-		XDNA_ERR(xdna, "Send message failed, ret %d", ret);
-		return ret;
-	}
-
-	ret = wait_for_completion_timeout(&hdl->comp,
-					  msecs_to_jiffies(RX_TIMEOUT));
-	if (!ret) {
-		XDNA_ERR(xdna, "wait for completion timeout");
-		return -ETIME;
-	}
-
-	if (*hdl->data != NPU_STATUS_SUCCESS) {
-		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
-			 msg->opcode, *hdl->data);
-		return -EINVAL;
-	}
-
-	return 0;
-}
+#define DECLARE_NPU_MSG(name, op) \
+	DECLARE_NPU_MSG_COMMON(name, op, MAX_NPU_STATUS_CODE)
 
 static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 				  struct xdna_mailbox_msg *msg)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct npu_notify *hdl = msg->handle;
 	int ret;
 
 	if (!ndev->mgmt_chann)
 		return -ENODEV;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	ret = npu_send_msg_wait(ndev, ndev->mgmt_chann, msg);
+	ret = npu_send_msg_wait(xdna, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
 		xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 		ndev->mgmt_chann = NULL;
+	}
+
+	if (!ret && *hdl->data != NPU_STATUS_SUCCESS) {
+		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
+			 msg->opcode, *hdl->data);
+		ret = -EINVAL;
 	}
 
 	return ret;
@@ -367,48 +305,35 @@ int npu1_self_test(struct npu_device *ndev)
 int npu1_query_status(struct npu_device *ndev, char __user *buf, u32 size, u32 *cols_filled)
 {
 	DECLARE_NPU_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
-	struct amdxdna_client *client, *tmp_client;
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_client *client;
 	struct amdxdna_hwctx *hwctx;
-	dma_addr_t xdna_dev_addr;
-	u32 aie_bitmap_copy;
+	dma_addr_t dma_addr;
 	u32 aie_bitmap = 0;
-	u32 num_col = 0;
 	u8 *buff_addr;
 	int next = 0;
 	int ret, idx;
-	u32 i;
 
-	buff_addr = dma_alloc_noncoherent(xdna->ddev.dev, size, &xdna_dev_addr,
-					  DMA_TO_DEVICE, GFP_KERNEL);
+	buff_addr = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
+					  DMA_FROM_DEVICE, GFP_KERNEL);
 	if (!buff_addr)
 		return -ENOMEM;
 
 	/* Go through each hardware context and mark the AIE columns that are active */
-	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry_safe(client, tmp_client, &xdna->client_list, node) {
+	list_for_each_entry(client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&client->hwctx_srcu);
-		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
-			for (i = hwctx->start_col; i < hwctx->num_col; i++)
-				aie_bitmap = aie_bitmap | (1 << (i));
-		}
+		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next)
+			aie_bitmap |= amdxdna_hwctx_col_map(hwctx);
 		srcu_read_unlock(&client->hwctx_srcu, idx);
-	}
-	mutex_unlock(&xdna->dev_lock);
-
-	/* Hardware contexts may share AIE columns. Count columns after creating the bitmap */
-	aie_bitmap_copy = aie_bitmap;
-	while (aie_bitmap_copy != 0) {
-		aie_bitmap_copy = aie_bitmap_copy >> 1;
-		num_col++;
 	}
 
 	*cols_filled = 0;
-	req.dump_buff_addr = (u64)buff_addr;
+	req.dump_buff_addr = dma_addr;
 	req.dump_buff_size = size;
-	req.num_cols = num_col;
+	req.num_cols = hweight32(aie_bitmap);
 	req.aie_bitmap = aie_bitmap;
 
+	drm_clflush_virt_range(buff_addr, size); /* device can access */
 	ret = npu_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
@@ -437,8 +362,7 @@ int npu1_query_status(struct npu_device *ndev, char __user *buf, u32 size, u32 *
 	*cols_filled = aie_bitmap;
 
 fail:
-	dma_free_noncoherent(xdna->ddev.dev, size, buff_addr,
-			     xdna_dev_addr, DMA_TO_DEVICE);
+	dma_free_noncoherent(xdna->ddev.dev, size, buff_addr, dma_addr, DMA_FROM_DEVICE);
 	return ret;
 }
 
@@ -473,18 +397,12 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	if (!chann)
 		return -ENODEV;
 
-	if (!hwctx->cus) {
-		XDNA_DBG(xdna, "No CU config in hwctx");
-		return -EINVAL;
-	}
-
 	if (hwctx->cus->num_cus > MAX_NUM_CUS) {
 		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
 		return -EINVAL;
 	}
 
-	req.num_cus = hwctx->cus->num_cus;
-	for (i = 0; i < req.num_cus; i++) {
+	for (i = 0; i < hwctx->cus->num_cus; i++) {
 		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
 
 		req.configs[i].pdi_addr = cu->xdna_addr >> shift;
@@ -492,14 +410,20 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 		XDNA_DBG(xdna, "CU %d full addr 0x%llx, short addr 0x%x, cu func %d", i,
 			 cu->xdna_addr, req.configs[i].pdi_addr, req.configs[i].cu_func);
 	}
+	req.num_cus = hwctx->cus->num_cus;
 
-	ret = npu_send_msg_wait(xdna->dev_handle, chann, &msg);
-	if (ret)
-		return ret;
+	ret = npu_send_msg_wait(xdna, chann, &msg);
+	if (ret == -ETIME)
+		npu1_destroy_context(xdna->dev_handle, hwctx);
 
-	XDNA_DBG(xdna, "configure %d CUs completed", hwctx->cus->num_cus);
+	if (resp.status == NPU_STATUS_SUCCESS) {
+		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
+		return 0;
+	}
 
-	return 0;
+	XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x ret %d",
+		 msg.opcode, resp.status, ret);
+	return ret;
 }
 
 int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
@@ -536,4 +460,3 @@ int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
 
 	return 0;
 }
-

@@ -40,12 +40,13 @@ struct amdxdna_dev_ops {
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
 	int (*get_info)(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
+	int (*set_state)(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
-	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size);
+	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 	void (*hwctx_suspend)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_resume)(struct amdxdna_hwctx *hwctx);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);

@@ -82,6 +82,11 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		return ret;
 	}
 
+	if (hwctx->status != HWCTX_STAT_READY) {
+		XDNA_DBG(xdna, "hwctx is not ready, status %d", hwctx->status);
+		return 0;
+	}
+
 	ret = npu1_config_cu(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
@@ -89,16 +94,6 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 	}
 
 	return 0;
-}
-
-static int npu1_hwctx_col_match(struct amdxdna_hwctx *hwctx, u32 col_map)
-{
-	u32 start_col, end_col;
-
-	start_col = hwctx->start_col;
-	end_col = start_col + hwctx->num_col - 1;
-
-	return col_map & GENMASK(end_col, start_col);
 }
 
 void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
@@ -111,7 +106,7 @@ void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		/* check if the HW context uses the error column */
-		if (!npu1_hwctx_col_match(hwctx, col_map))
+		if (!(col_map & amdxdna_hwctx_col_map(hwctx)))
 			continue;
 
 		npu1_hwctx_stop(xdna, hwctx);
@@ -134,13 +129,15 @@ void npu1_restart_ctx(struct amdxdna_client *client)
 		if (hwctx->status != HWCTX_STAT_STOP)
 			continue;
 
+		hwctx->status = hwctx->old_status;
 		XDNA_DBG(xdna, "Resetting %s.%d", hwctx->name, hwctx->id);
 		ret = npu1_hwctx_restart(xdna, hwctx);
+		/* Need to restart DRM sched to handle aborted commands */
+		drm_sched_start(&hwctx->priv->sched, true);
+
 		if (ret)
 			continue;
 
-		drm_sched_start(&hwctx->priv->sched, true);
-		hwctx->status = hwctx->old_status;
 		XDNA_DBG(xdna, "%s.%d restarted", hwctx->name, hwctx->id);
 	}
 	mutex_unlock(&client->hwctx_lock);
@@ -177,8 +174,11 @@ void npu1_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 	 * break the system. npu1_hwctx_stop() will destroy mailbox
 	 * and abort all commands.
 	 */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	npu1_hwctx_wait_for_idle(hwctx);
 	npu1_hwctx_stop(xdna, hwctx);
+	hwctx->old_status = hwctx->status;
+	hwctx->status = HWCTX_STAT_STOP;
 }
 
 void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx)
@@ -190,6 +190,8 @@ void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	 * regenerated. If this happen, when submit message to this
 	 * mailbox channel, error will return.
 	 */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	hwctx->status = hwctx->old_status;
 	npu1_hwctx_restart(xdna, hwctx);
 	drm_sched_start(&hwctx->priv->sched, true);
 }
@@ -270,6 +272,66 @@ const struct drm_sched_backend_ops sched_ops = {
 	.free_job = npu1_sched_job_free,
 };
 
+static int npu1_hwctx_col_list(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct npu_device *ndev = xdna->dev_handle;
+	int start, end, first, last;
+	u32 width = 1, entries = 0;
+	int i;
+
+	if (!hwctx->num_tiles) {
+		XDNA_ERR(xdna, "Number of tiles is zero");
+		return -EINVAL;
+	}
+
+	if (unlikely(!ndev->metadata.core.row_count)) {
+		XDNA_WARN(xdna, "Core tile row count is zero");
+		return -EINVAL;
+	}
+
+	hwctx->num_col = hwctx->num_tiles / ndev->metadata.core.row_count;
+	if (!hwctx->num_col || hwctx->num_col > ndev->total_col) {
+		XDNA_ERR(xdna, "Invalid num_col %d", hwctx->num_col);
+		return -EINVAL;
+	}
+
+	if (ndev->priv->col_align == COL_ALIGN_NATURE)
+		width = hwctx->num_col;
+
+	/*
+	 * In range [start, end], find out columns that is multiple of width.
+	 *	'first' is the first column,
+	 *	'last' is the last column,
+	 *	'entries' is the total number of columns.
+	 */
+	start =  xdna->dev_info->first_col;
+	end =  ndev->total_col - width;
+	first = start + (width - start % width) % width;
+	last = end - end % width;
+	if (last >= first)
+		entries = (last - first) / width + 1;
+
+	if (unlikely(!entries)) {
+		XDNA_ERR(xdna, "Start %d end %d width %d",
+			 start, end, width);
+		return -EINVAL;
+	}
+
+	hwctx->col_list = kmalloc_array(entries, sizeof(*hwctx->col_list), GFP_KERNEL);
+	if (!hwctx->col_list)
+		return -ENOMEM;
+
+	hwctx->col_list_len = entries;
+	hwctx->col_list[0] = first;
+	for (i = 1; i < entries; i++)
+		hwctx->col_list[i] = hwctx->col_list[i - 1] + width;
+
+	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4, hwctx->col_list,
+			     entries * sizeof(*hwctx->col_list), false);
+	return 0;
+}
+
 int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
@@ -315,10 +377,16 @@ int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 	}
 	init_waitqueue_head(&hwctx->priv->job_free_wq);
 
+	ret = npu1_hwctx_col_list(hwctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
+		goto free_entity;
+	}
+
 	ret = npu_alloc_resource(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
-		goto free_entity;
+		goto free_col_list;
 	}
 
 	ret = npu1_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
@@ -335,6 +403,8 @@ int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 release_resource:
 	npu_release_resource(hwctx);
+free_col_list:
+	kfree(hwctx->col_list);
 free_entity:
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 free_sched:
@@ -384,70 +454,73 @@ void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	amdxdna_gem_unpin(hwctx->priv->heap);
 	amdxdna_put_dev_heap(hwctx->priv->heap);
 
+	kfree(hwctx->col_list);
 	kfree(hwctx->priv);
 	kfree(hwctx->cus);
 }
 
-int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size)
+static int npu1_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size)
 {
+	struct amdxdna_hwctx_param_config_cu *config = buf;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 total_size;
 	int ret;
 
+	XDNA_DBG(xdna, "Config %d CU to %s", config->num_cus, hwctx->name);
+	if (hwctx->status != HWCTX_STAT_INIT) {
+		XDNA_ERR(xdna, "Not support re-config CU");
+		return -EINVAL;
+	}
+
+	total_size = struct_size(config, cu_configs, config->num_cus);
+	if (total_size > size) {
+		XDNA_ERR(xdna, "CU config larger than size");
+		return -EINVAL;
+	}
+
+	hwctx->cus = kmemdup(config, total_size, GFP_KERNEL);
+	if (!hwctx->cus)
+		return -ENOMEM;
+
+	ret = npu1_config_cu(hwctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Configu CU to firmware failed, ret %d", ret);
+		kfree(hwctx->cus);
+		return ret;
+	}
+
+	wmb(); /* To avoid locking in command submit when check status */
+	hwctx->status = HWCTX_STAT_READY;
+
+	return ret;
+}
+
+int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	switch (type) {
 	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
-		struct amdxdna_hwctx_param_config_cu *config;
-
-		XDNA_DBG(xdna, "Config CU to %s", hwctx->name);
-		if (size > PAGE_SIZE) {
-			XDNA_ERR(xdna, "Config CU param buffer too large");
-			return -E2BIG;
-		}
-
-		if (hwctx->status != HWCTX_STAT_INIT) {
-			XDNA_ERR(xdna, "Not support re-config HW context");
-			return -EINVAL;
-		}
-
-		config = kzalloc(size, GFP_KERNEL);
-		if (!config)
-			return -ENOMEM;
-
-		if (copy_from_user(config, u64_to_user_ptr(value), size)) {
-			kfree(config);
-			return -EFAULT;
-		}
-
-		hwctx->cus = config;
-		ret = npu1_config_cu(hwctx);
-		if (ret) {
-			hwctx->cus = NULL;
-			kfree(config);
-			return ret;
-		}
-
-		hwctx->status = HWCTX_STAT_READY;
-		break;
+		return npu1_hwctx_cu_config(hwctx, buf, size);
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF: {
 		u32 bo_hdl = (u32)value;
 
 		XDNA_DBG(xdna, "Assgin bo %d to %s as debug buffer", bo_hdl, hwctx->name);
 		// TODO: check BO type and send firmware command to assign it to ctx
-		ret = 0;
-		break;
+		return -EOPNOTSUPP;
 	}
-	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF: {
 		u32 bo_hdl = (u32)value;
 
 		XDNA_DBG(xdna, "Remove bo %d from %s as debug buffer", bo_hdl, hwctx->name);
 		// TODO: check BO handle/type and send firmware command to assign it to ctx
-		ret = 0;
-		break;
-	default:
-		XDNA_DBG(xdna, "Unknown HW context config type %d", type);
-		ret = -EINVAL; /* Should never go here */
+		return -EOPNOTSUPP;
 	}
-
-	return ret;
+	default:
+		XDNA_DBG(xdna, "Not supported type %d", type);
+		return -EOPNOTSUPP;
+	}
 }
 
 int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)

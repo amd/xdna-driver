@@ -105,7 +105,7 @@ A: Yes. For example, if you have 6.6-rc1 linux header install on your build mach
 ### Q: I'm developing amdxdna.ko driver module. How to enable XDNA_DBG() print?
 
 A: XDNA_DBG() relies on Linux's CONFIG_DYNAMIC_DEBUG framework, see Linux's [dynamic debug howto page](https://www.kernel.org/doc/html/v6.5/admin-guide/dynamic-debug-howto.html) for details.
-TL;DR, run `sudo insmod amdxdna.ko dyndbg==p` to enable XDNA_DBG() globally.
+TL;DR, run `sudo insmod amdxdna.ko dyndbg=+pf` to enable XDNA_DBG() globally, where +pf means enable debug printing and print the function name.
 
 ### Q: When install XRT plugin DEB package, apt-get/dpkg tool failed. What to do next?
 

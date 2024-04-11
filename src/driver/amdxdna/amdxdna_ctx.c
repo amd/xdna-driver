@@ -241,9 +241,43 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_hwctx *hwctx;
 	int ret, idx;
+	u32 buf_size;
+	void *buf;
+	u64 val;
 
-	if (args->param_type >= DRM_AMDXDNA_HWCTX_CONFIG_NUM) {
-		XDNA_ERR(xdna, "Invalid HW context param type: %d", args->param_type);
+	if (!xdna->dev_info->ops->hwctx_config)
+		return -EOPNOTSUPP;
+
+	val = args->param_val;
+	buf_size = args->param_val_size;
+
+	switch (args->param_type) {
+	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
+		/* For those types that param_val is pointer */
+		if (buf_size > PAGE_SIZE) {
+			XDNA_ERR(xdna, "Config CU param buffer too large");
+			return -E2BIG;
+		}
+
+		/* Hwctx needs to keep buf */
+		buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+		if (!buf)
+			return -ENOMEM;
+
+		if (copy_from_user(buf, u64_to_user_ptr(val), buf_size)) {
+			kfree(buf);
+			return -EFAULT;
+		}
+
+		break;
+	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+		/* For those types that param_val is a value */
+		buf = NULL;
+		buf_size = 0;
+		break;
+	default:
+		XDNA_DBG(xdna, "Unknown HW context config type %d", args->param_type);
 		return -EINVAL;
 	}
 
@@ -255,17 +289,12 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto unlock_srcu;
 	}
 
-	if (!xdna->dev_info->ops->hwctx_config) {
-		ret = -EOPNOTSUPP;
-		goto unlock_srcu;
-	}
-
 	mutex_lock(&xdna->dev_lock);
-	ret = xdna->dev_info->ops->hwctx_config(hwctx, args->param_type, args->param_val,
-						args->param_val_size);
+	ret = xdna->dev_info->ops->hwctx_config(hwctx, args->param_type, val, buf, buf_size);
 	mutex_unlock(&xdna->dev_lock);
 
 unlock_srcu:
+	kfree(buf);
 	srcu_read_unlock(&client->hwctx_srcu, idx);
 	return ret;
 }
@@ -320,21 +349,21 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 		}
 		abo = to_xdna_obj(gobj);
 
-		spin_lock(&abo->lock);
+		mutex_lock(&abo->lock);
 		if (abo->pinned) {
-			spin_unlock(&abo->lock);
+			mutex_unlock(&abo->lock);
 			job->bos[i] = gobj;
 			continue;
 		}
 
 		ret = amdxdna_gem_pin_nolock(abo);
 		if (ret) {
-			spin_unlock(&abo->lock);
+			mutex_unlock(&abo->lock);
 			drm_gem_object_put(gobj);
 			goto put_shmem_bo;
 		}
 		abo->pinned = true;
-		spin_unlock(&abo->lock);
+		mutex_unlock(&abo->lock);
 
 		job->bos[i] = gobj;
 	}
@@ -346,11 +375,12 @@ put_shmem_bo:
 	return ret;
 }
 
-static int amdxdna_cmds_submit(struct amdxdna_client *client, u32 hwctx_id,
-			       struct amdxdna_gem_obj *cmd_bo, u32 cmd_bo_cnt,
-			       u32 *bo_hdls, u32 bo_cnt, u64 *seq)
+static int amdxdna_cmds_submit(struct amdxdna_client *client,
+			       struct amdxdna_gem_obj *cmd_bo, u32 *bo_hdls,
+			       struct amdxdna_drm_exec_cmd *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
+	u32 bo_cnt = args->arg_bo_count;
 	struct amdxdna_sched_job *job;
 	struct amdxdna_hwctx *hwctx;
 	u32 *cu_mask;
@@ -368,10 +398,10 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client, u32 hwctx_id,
 	}
 
 	idx = srcu_read_lock(&client->hwctx_srcu);
-	hwctx = idr_find(&client->hwctx_idr, hwctx_id);
+	hwctx = idr_find(&client->hwctx_idr, args->hwctx);
 	if (!hwctx) {
 		XDNA_DBG(xdna, "PID %d failed to get hwctx %d",
-			 client->pid, hwctx_id);
+			 client->pid, args->hwctx);
 		ret = -EINVAL;
 		goto unlock_srcu;
 	}
@@ -421,7 +451,7 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client, u32 hwctx_id,
 	}
 	kref_init(&job->refcnt);
 
-	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, seq);
+	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, &args->seq);
 	if (ret)
 		goto put_fence;
 
@@ -432,7 +462,7 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client, u32 hwctx_id,
 	 * For here we can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
-	trace_xdna_job(job->hwctx->name, "job pushed", *seq);
+	trace_xdna_job(hwctx->name, "job pushed", args->seq);
 
 	return 0;
 
@@ -493,14 +523,13 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 		goto free_bo_hdls;
 	}
 
-	if(to_gobj(cmd_bo)->size < sizeof(struct amdxdna_cmd)) {
+	if (to_gobj(cmd_bo)->size < sizeof(struct amdxdna_cmd)) {
 		XDNA_DBG(xdna, "Bad cmd BO size: %ld", to_gobj(cmd_bo)->size);
 		ret = -EINVAL;
 		goto put_cmd_bo;
 	}
 
-	ret = amdxdna_cmds_submit(client, args->hwctx, cmd_bo, args->cmd_bo_count,
-				  bo_hdls, args->arg_bo_count, &args->seq);
+	ret = amdxdna_cmds_submit(client, cmd_bo, bo_hdls, args);
 	if (ret) {
 		XDNA_DBG(xdna, "Submit cmds failed, ret %d", ret);
 		goto put_cmd_bo;

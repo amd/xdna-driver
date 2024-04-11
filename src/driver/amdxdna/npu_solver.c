@@ -30,7 +30,6 @@ struct partition_node {
 struct solver_node {
 	struct list_head	list;
 	u64			rid;		/* Request ID from consumer */
-	u32			first_col;	/* First column can be allocated */
 	u32			ncols;		/* The width of column */
 	u32			start_col;	/* The index of column allocated */
 	struct aie_qos_cap	qos_cap;	/* CDO group QoS capabilities */
@@ -38,6 +37,8 @@ struct solver_node {
 
 	struct partition_node	*pt_node;
 	void			*cb_arg;
+	u32			cols_len;
+	u32			start_cols[] __counted_by(cols_len);
 };
 
 struct solver_rgroup {
@@ -110,7 +111,7 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 	struct aie_qos *rqos = &req->rqos;
 	u32 cu_clk_freq;
 
-	if (cdop->ntiles > xrs->cfg.total_col * xrs->cfg.num_core_row)
+	if (cdop->ncols > xrs->cfg.total_col)
 		return -EINVAL;
 
 	/*
@@ -169,14 +170,15 @@ static struct solver_node *allocate_solver_node(struct solver_state *xrs,
 	struct cdo_parts *cdop = &req->cdo;
 	struct solver_node *node;
 
-	node = kzalloc(sizeof(*node), GFP_KERNEL);
+	node = kzalloc(struct_size(node, start_cols, cdop->cols_len), GFP_KERNEL);
 	if (!node)
 		return NULL;
 
 	node->rid = req->rid;
-	node->first_col = cdop->first_col;
-	node->ncols = cdop->ntiles / xrs->cfg.num_core_row;
+	node->ncols = cdop->ncols;
+	node->cols_len = cdop->cols_len;
 
+	memcpy(node->start_cols, cdop->start_cols, cdop->cols_len * sizeof(u32));
 	memcpy(&node->qos_cap, &cdop->qos_cap, sizeof(struct aie_qos_cap));
 	memcpy(&node->rqos, &req->rqos, sizeof(struct aie_qos));
 
@@ -185,15 +187,15 @@ static struct solver_node *allocate_solver_node(struct solver_state *xrs,
 	return node;
 }
 
-static int get_free_partition(struct solver_state *xrs, u32 first_col, u32 ncols,
-			      u32 total_col, u32 *start_col)
+static int get_free_partition(struct solver_state *xrs, struct solver_node *snode)
 {
-	u32 idx;
+	u32 ncols = snode->ncols;
+	u32 col, idx;
 
-	for (idx = first_col; idx < total_col; idx++) {
-		if (find_next_bit(xrs->rgp.resbit, XRS_MAX_COL, idx) >=
-		    idx + ncols) {
-			*start_col = idx;
+	for (idx = 0; idx < snode->cols_len; idx++) {
+		col = snode->start_cols[idx];
+		if (find_next_bit(xrs->rgp.resbit, XRS_MAX_COL, col) >= col + ncols) {
+			snode->start_col = col;
 			return 0;
 		}
 	}
@@ -202,8 +204,12 @@ static int get_free_partition(struct solver_state *xrs, u32 first_col, u32 ncols
 }
 
 static void fill_partition_node(struct partition_node *pt_node,
-				u32 start_col, u32 ncols, struct aie_qos *rqos)
+				struct solver_node *snode)
 {
+	struct aie_qos *rqos = &snode->rqos;
+	u32 start_col = snode->start_col;
+	u32 ncols = snode->ncols;
+
 	pt_node->nshared = 1;
 	pt_node->start_col = start_col;
 	pt_node->ncols = ncols;
@@ -231,19 +237,16 @@ static void add_partition_node(struct solver_rgroup *rgp,
 static int allocate_partition(struct solver_state *xrs, struct solver_node *snode)
 {
 	struct partition_node *pt_node, *rpt_node = NULL;
-	u32 total_col = xrs->cfg.total_col;
-	int j, ret;
+	int idx, ret;
 
-	ret = get_free_partition(xrs, snode->first_col, snode->ncols, total_col,
-				 &snode->start_col);
+	ret = get_free_partition(xrs, snode);
 	if (!ret) {
 		/* got free partition */
 		pt_node = kzalloc(sizeof(*pt_node), GFP_KERNEL);
 		if (!pt_node)
 			return -ENOMEM;
 
-		fill_partition_node(pt_node, snode->start_col,
-				    snode->ncols, &snode->rqos);
+		fill_partition_node(pt_node, snode);
 		add_partition_node(&xrs->rgp, pt_node);
 		snode->pt_node = pt_node;
 
@@ -263,13 +266,16 @@ static int allocate_partition(struct solver_state *xrs, struct solver_node *snod
 		if (rpt_node && pt_node->nshared >= rpt_node->nshared)
 			continue;
 
-		for (j = snode->first_col; j < total_col; j++) {
-			if (j == pt_node->start_col &&
-			    snode->ncols == pt_node->ncols) {
-				rpt_node = pt_node;
-				snode->start_col = j;
-				break;
-			}
+		for (idx = 0; idx < snode->cols_len; idx++) {
+			if (snode->start_cols[idx] != pt_node->start_col)
+				continue;
+
+			if (snode->ncols != pt_node->ncols)
+				continue;
+
+			snode->start_col = pt_node->start_col;
+			rpt_node = pt_node;
+			break;
 		}
 	}
 
@@ -326,7 +332,8 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 
 	snode->cb_arg = cb_arg;
 
-	dev_dbg(xrs->cfg.dev, "start col %d\n", snode->pt_node->start_col);
+	dev_dbg(xrs->cfg.dev, "start col %d ncols %d\n",
+		snode->pt_node->start_col, snode->pt_node->ncols);
 
 	return 0;
 
