@@ -82,6 +82,11 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		return ret;
 	}
 
+	if (hwctx->status != HWCTX_STAT_READY) {
+		XDNA_DBG(xdna, "hwctx is not ready, status %d", hwctx->status);
+		return 0;
+	}
+
 	ret = npu1_config_cu(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
@@ -134,13 +139,15 @@ void npu1_restart_ctx(struct amdxdna_client *client)
 		if (hwctx->status != HWCTX_STAT_STOP)
 			continue;
 
+		hwctx->status = hwctx->old_status;
 		XDNA_DBG(xdna, "Resetting %s.%d", hwctx->name, hwctx->id);
 		ret = npu1_hwctx_restart(xdna, hwctx);
+		/* Need to restart DRM sched to handle aborted commands */
+		drm_sched_start(&hwctx->priv->sched, true);
+
 		if (ret)
 			continue;
 
-		drm_sched_start(&hwctx->priv->sched, true);
-		hwctx->status = hwctx->old_status;
 		XDNA_DBG(xdna, "%s.%d restarted", hwctx->name, hwctx->id);
 	}
 	mutex_unlock(&client->hwctx_lock);
@@ -177,8 +184,11 @@ void npu1_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 	 * break the system. npu1_hwctx_stop() will destroy mailbox
 	 * and abort all commands.
 	 */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	npu1_hwctx_wait_for_idle(hwctx);
 	npu1_hwctx_stop(xdna, hwctx);
+	hwctx->old_status = hwctx->status;
+	hwctx->status = HWCTX_STAT_STOP;
 }
 
 void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx)
@@ -190,6 +200,8 @@ void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	 * regenerated. If this happen, when submit message to this
 	 * mailbox channel, error will return.
 	 */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	hwctx->status = hwctx->old_status;
 	npu1_hwctx_restart(xdna, hwctx);
 	drm_sched_start(&hwctx->priv->sched, true);
 }
@@ -457,66 +469,67 @@ void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	kfree(hwctx->cus);
 }
 
-int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size)
+static int npu1_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size)
 {
+	struct amdxdna_hwctx_param_config_cu *config = buf;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 total_size;
 	int ret;
 
+	XDNA_DBG(xdna, "Config %d CU to %s", config->num_cus, hwctx->name);
+	if (hwctx->status != HWCTX_STAT_INIT) {
+		XDNA_ERR(xdna, "Not support re-config CU");
+		return -EINVAL;
+	}
+
+	total_size = struct_size(config, cu_configs, config->num_cus);
+	if (total_size > size) {
+		XDNA_ERR(xdna, "CU config larger than size");
+		return -EINVAL;
+	}
+
+	hwctx->cus = kmemdup(config, total_size, GFP_KERNEL);
+	if (!hwctx->cus)
+		return -ENOMEM;
+
+	ret = npu1_config_cu(hwctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Configu CU to firmware failed, ret %d", ret);
+		return ret;
+	}
+
+	wmb(); /* To avoid locking in command submit when check status */
+	hwctx->status = HWCTX_STAT_READY;
+
+	return ret;
+}
+
+int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	switch (type) {
 	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
-		struct amdxdna_hwctx_param_config_cu *config;
-
-		XDNA_DBG(xdna, "Config CU to %s", hwctx->name);
-		if (size > PAGE_SIZE) {
-			XDNA_ERR(xdna, "Config CU param buffer too large");
-			return -E2BIG;
-		}
-
-		if (hwctx->status != HWCTX_STAT_INIT) {
-			XDNA_ERR(xdna, "Not support re-config HW context");
-			return -EINVAL;
-		}
-
-		config = kzalloc(size, GFP_KERNEL);
-		if (!config)
-			return -ENOMEM;
-
-		if (copy_from_user(config, u64_to_user_ptr(value), size)) {
-			kfree(config);
-			return -EFAULT;
-		}
-
-		hwctx->cus = config;
-		ret = npu1_config_cu(hwctx);
-		if (ret) {
-			hwctx->cus = NULL;
-			kfree(config);
-			return ret;
-		}
-
-		hwctx->status = HWCTX_STAT_READY;
-		break;
+		return npu1_hwctx_cu_config(hwctx, buf, size);
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF: {
 		u32 bo_hdl = (u32)value;
 
 		XDNA_DBG(xdna, "Assgin bo %d to %s as debug buffer", bo_hdl, hwctx->name);
 		// TODO: check BO type and send firmware command to assign it to ctx
-		ret = 0;
-		break;
+		return 0;
 	}
-	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF: {
 		u32 bo_hdl = (u32)value;
 
 		XDNA_DBG(xdna, "Remove bo %d from %s as debug buffer", bo_hdl, hwctx->name);
 		// TODO: check BO handle/type and send firmware command to assign it to ctx
-		ret = 0;
-		break;
-	default:
-		XDNA_DBG(xdna, "Unknown HW context config type %d", type);
-		ret = -EINVAL; /* Should never go here */
+		return 0;
 	}
-
-	return ret;
+	default:
+		WARN_ON(1);
+		return -EINVAL;
+	}
 }
 
 int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)

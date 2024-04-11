@@ -12,6 +12,9 @@
 #include "npu_common.h"
 #include "npu1_pci.h"
 
+#define DECLARE_NPU_MSG(name, op) \
+	DECLARE_NPU_MSG_COMMON(name, op, MAX_NPU_STATUS_CODE)
+
 static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 				  struct xdna_mailbox_msg *msg)
 {
@@ -408,18 +411,12 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	if (!chann)
 		return -ENODEV;
 
-	if (!hwctx->cus) {
-		XDNA_DBG(xdna, "No CU config in hwctx");
-		return -EINVAL;
-	}
-
 	if (hwctx->cus->num_cus > MAX_NUM_CUS) {
 		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
 		return -EINVAL;
 	}
 
-	req.num_cus = hwctx->cus->num_cus;
-	for (i = 0; i < req.num_cus; i++) {
+	for (i = 0; i < hwctx->cus->num_cus; i++) {
 		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
 
 		req.configs[i].pdi_addr = cu->xdna_addr >> shift;
@@ -427,18 +424,19 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 		XDNA_DBG(xdna, "CU %d full addr 0x%llx, short addr 0x%x, cu func %d", i,
 			 cu->xdna_addr, req.configs[i].pdi_addr, req.configs[i].cu_func);
 	}
+	req.num_cus = hwctx->cus->num_cus;
 
 	ret = npu_send_msg_wait(xdna, chann, &msg);
 	if (ret == -ETIME)
 		npu1_destroy_context(xdna->dev_handle, hwctx);
 
-	if (!ret && *hdl.data != NPU_STATUS_SUCCESS) {
-		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
-			 msg.opcode, *hdl.data);
-		ret = -EINVAL;
+	if (resp.status == NPU_STATUS_SUCCESS) {
+		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
+		return 0;
 	}
 
-	XDNA_DBG(xdna, "Configure %d CUs, ret %d", hwctx->cus->num_cus, ret);
+	XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x ret %d",
+		 msg.opcode, resp.status, ret);
 	return ret;
 }
 

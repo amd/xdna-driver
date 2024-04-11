@@ -45,7 +45,7 @@ struct amdxdna_dev_ops {
 
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
-	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size);
+	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 	void (*hwctx_suspend)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_resume)(struct amdxdna_hwctx *hwctx);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);

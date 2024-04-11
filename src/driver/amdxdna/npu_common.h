@@ -21,10 +21,9 @@ struct npu_notify {
 	int			error;
 };
 
-#define DECLARE_NPU_MSG(name, op)				\
+#define DECLARE_NPU_MSG_COMMON(name, op, status)		\
 	struct name##_req	req = { 0 };			\
-	struct name##_resp	resp =				\
-		{ NPU_STATUS_MAX_NPU_STATUS_CODE };		\
+	struct name##_resp	resp = { status	};		\
 	struct npu_notify	hdl = {				\
 		.error = 0,					\
 		.data = (u32 *)&resp,				\

@@ -217,10 +217,10 @@ static void npu1_error_worker(struct work_struct *err_work)
 
 	xdna = e->ndev->xdna;
 
-	if (e->resp.status == NPU_STATUS_MAX_NPU_STATUS_CODE)
+	if (e->resp.status == MAX_NPU_STATUS_CODE)
 		return;
 
-	e->resp.status = NPU_STATUS_MAX_NPU_STATUS_CODE;
+	e->resp.status = MAX_NPU_STATUS_CODE;
 	drm_clflush_virt_range(e->buf, e->size);
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
@@ -318,7 +318,7 @@ int npu1_error_async_events_alloc(struct npu_device *ndev)
 		e->buf = &events->buf[offset];
 		e->addr = events->addr + offset;
 		e->size = ASYNC_BUF_SIZE;
-		e->resp.status = NPU_STATUS_MAX_NPU_STATUS_CODE;
+		e->resp.status = MAX_NPU_STATUS_CODE;
 		INIT_WORK(&e->work, npu1_error_worker);
 	}
 

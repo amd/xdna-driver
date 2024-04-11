@@ -244,7 +244,7 @@ int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
 /* npu1_hwctx.c */
 int npu1_hwctx_init(struct amdxdna_hwctx *hwctx);
 void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx);
-int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, u32 size);
+int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 void npu1_hwctx_suspend(struct amdxdna_hwctx *hwctx);
 void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx);
 int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);

@@ -129,7 +129,7 @@ struct amdxdna_cu_config {
 struct amdxdna_hwctx_param_config_cu {
 	__u16 num_cus;
 	__u16 pad[3];
-	struct amdxdna_cu_config cu_configs[0];
+	struct amdxdna_cu_config cu_configs[] __counted_by(num_cus);
 };
 
 enum amdxdna_drm_config_hwctx_param {
@@ -146,7 +146,10 @@ enum amdxdna_drm_config_hwctx_param {
  *              structure passed in via param_val.
  * @param_val: A structure specified by the param_type struct member.
  * @param_val_size: Size of the parameter buffer pointed to by the param_val.
- *		    if param_val is not a pointer, this should be 0.
+ *		    If param_val is not a pointer, driver can ignore this.
+ *
+ * Note: if the param_val is a pointer pointing to a buffer, the maximum size
+ * of the buffer is 4KiB(PAGE_SIZE).
  */
 struct amdxdna_drm_config_hwctx {
 	__u32 handle;
