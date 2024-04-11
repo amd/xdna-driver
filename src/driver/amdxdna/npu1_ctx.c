@@ -495,6 +495,7 @@ static int npu1_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 	ret = npu1_config_cu(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Configu CU to firmware failed, ret %d", ret);
+		kfree(hwctx->cus);
 		return ret;
 	}
 

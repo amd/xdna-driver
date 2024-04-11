@@ -9,6 +9,8 @@
 #include "npu1_msg_priv.h"
 #include "npu1_pci.h"
 
+#define AIE_ERR_SENTINEL 0xFF
+
 struct async_event {
 	struct npu_device		*ndev;
 	struct async_event_msg_resp	resp;
@@ -60,7 +62,7 @@ enum aie_error_category {
 struct aie_error {
 	u8			row;
 	u8			col;
-	enum aie_module_type mod_type;
+	enum aie_module_type	mod_type;
 	u8			event_id;
 };
 
@@ -179,12 +181,16 @@ static u32 npu1_error_backtrack(struct npu_device *ndev, void *err_info, u32 num
 		struct aie_error *err = &errs[i];
 		enum aie_error_category cat;
 
+		if (err->col == AIE_ERR_SENTINEL && err->row == AIE_ERR_SENTINEL)
+			break;
+
 		cat = aie_get_error_category(err->row, err->event_id, err->mod_type);
 		XDNA_ERR(ndev->xdna, "Row: %d, Col: %d, module %d, event ID %d, category %d",
 			 err->row, err->col, err->mod_type,
 			 err->event_id, cat);
 
 		err_col |= (1 << err->col);
+		memset(err, AIE_ERR_SENTINEL, sizeof(*err));
 	}
 
 	/* TODO: Send AIE error to EDAC system */
@@ -211,6 +217,7 @@ static void npu1_error_worker(struct work_struct *err_work)
 	struct amdxdna_client *client;
 	struct amdxdna_dev *xdna;
 	struct async_event *e;
+	u32 max_err;
 	u32 err_col;
 
 	e = container_of(err_work, struct async_event, work);
@@ -224,9 +231,10 @@ static void npu1_error_worker(struct work_struct *err_work)
 	drm_clflush_virt_range(e->buf, e->size);
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     e->buf, sizeof(struct aie_error), false);
+			     e->buf, 0x100, false);
 
-	err_col = npu1_error_backtrack(e->ndev, e->buf, 1);
+	max_err = e->size / sizeof(struct aie_error);
+	err_col = npu1_error_backtrack(e->ndev, e->buf, max_err);
 	if (!err_col) {
 		XDNA_WARN(xdna, "Did not get error column");
 		return;
@@ -245,6 +253,8 @@ static void npu1_error_worker(struct work_struct *err_work)
 	list_for_each_entry(client, &xdna->client_list, node)
 		npu1_restart_ctx(client);
 
+	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     e->buf, 0x100, false);
 	/* Re-sent this event to firmware */
 	if (npu1_register_asyn_event_msg(e->ndev, e->addr, e->size, e,
 					 npu1_error_async_cb))
@@ -302,6 +312,7 @@ int npu1_error_async_events_alloc(struct npu_device *ndev)
 	}
 	events->size = total_size;
 	events->event_cnt = total_col;
+	memset(events->buf, AIE_ERR_SENTINEL, total_size);
 
 	events->wq = alloc_ordered_workqueue("async_wq", 0);
 	if (!events->wq) {
