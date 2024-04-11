@@ -349,21 +349,21 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 		}
 		abo = to_xdna_obj(gobj);
 
-		spin_lock(&abo->lock);
+		mutex_lock(&abo->lock);
 		if (abo->pinned) {
-			spin_unlock(&abo->lock);
+			mutex_unlock(&abo->lock);
 			job->bos[i] = gobj;
 			continue;
 		}
 
 		ret = amdxdna_gem_pin_nolock(abo);
 		if (ret) {
-			spin_unlock(&abo->lock);
+			mutex_unlock(&abo->lock);
 			drm_gem_object_put(gobj);
 			goto put_shmem_bo;
 		}
 		abo->pinned = true;
-		spin_unlock(&abo->lock);
+		mutex_unlock(&abo->lock);
 
 		job->bos[i] = gobj;
 	}
