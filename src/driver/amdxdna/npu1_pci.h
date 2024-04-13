@@ -195,6 +195,9 @@ struct npu_dev_priv {
 	struct npu_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
 };
 
+/* npu1_pci.c */
+extern const struct amdxdna_dev_ops npu1_ops;
+
 /* npu1_smu.c */
 int npu1_smu_init(struct npu_device *ndev);
 void npu1_smu_fini(struct npu_device *ndev);
@@ -251,15 +254,5 @@ int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 int npu1_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
 void npu1_restart_ctx(struct amdxdna_client *client);
-
-/* npu1_pci.c */
-extern const struct amdxdna_dev_ops npu1_ops;
-
-int npu1_init(struct amdxdna_dev *xdna);
-void npu1_fini(struct amdxdna_dev *xdna);
-int npu1_hw_start(struct amdxdna_dev *xdna);
-void npu1_hw_stop(struct amdxdna_dev *xdna);
-int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
-int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 
 #endif /* _NPU1_PCI_H_ */

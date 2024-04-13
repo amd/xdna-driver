@@ -92,6 +92,7 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
 		return ret;
 	}
+	XDNA_DBG(xdna, "%s.%d restarted", hwctx->name, hwctx->id);
 
 	return 0;
 }
@@ -134,11 +135,6 @@ void npu1_restart_ctx(struct amdxdna_client *client)
 		ret = npu1_hwctx_restart(xdna, hwctx);
 		/* Need to restart DRM sched to handle aborted commands */
 		drm_sched_start(&hwctx->priv->sched, true);
-
-		if (ret)
-			continue;
-
-		XDNA_DBG(xdna, "%s.%d restarted", hwctx->name, hwctx->id);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -154,7 +150,8 @@ static int npu1_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 	}
 
 	job = npu1_hwctx_get_job(hwctx, hwctx->priv->seq - 1);
-	if (unlikely(!job)) {
+	if (IS_ERR_OR_NULL(job)) {
+		spin_unlock(&hwctx->priv->io_lock);
 		XDNA_WARN(hwctx->client->xdna, "corrupted pending list\n");
 		return 0;
 	}
