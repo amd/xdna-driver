@@ -21,8 +21,8 @@ public:
   submit_command(xrt_core::buffer_handle *) override
   { shim_not_supported_err(__func__); }
 
-  virtual void
-  submit_command(std::vector<xrt_core::buffer_handle *>&)
+  void
+  submit_command(const std::vector<xrt_core::buffer_handle *>&) override
   { shim_not_supported_err(__func__); }
 
   int

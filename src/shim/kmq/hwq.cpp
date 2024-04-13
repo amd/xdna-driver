@@ -28,7 +28,7 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
 
 void
 hw_q_kmq::
-submit_command(std::vector<xrt_core::buffer_handle *>& cmd_bos)
+submit_command(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
 {
   // Assuming 256 max cmds and 256 max args per cmd bo
   const size_t max_cmd_bos = 256;

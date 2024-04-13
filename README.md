@@ -59,9 +59,6 @@ sudo apt reinstall ../linux-headers-6.8.5+iommu-sva-part4-v7+_6.8.5-00095-g88132
 
 ## Clone
 
-This repository has `src/xrt` as a git submodule. The path to XRT is
-set up to clone as ssh, so you need a public key registered with your
-GitHub.com account.
 ```
 git clone git@github.com:amd/xdna-driver.git
 cd <root-of-source-tree>
