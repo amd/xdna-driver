@@ -18,26 +18,8 @@
 #endif
 
 int npu1_max_col = XRS_MAX_COL;
-module_param(npu1_max_col, int, (S_IRUGO|S_IWUSR));
+module_param(npu1_max_col, int, 0600);
 MODULE_PARM_DESC(npu1_max_col, "Maximum column could be used");
-
-const struct amdxdna_dev_ops npu1_ops = {
-	.mmap           = NULL,
-	.init           = npu1_init,
-	.fini           = npu1_fini,
-	.resume         = npu1_hw_start,
-	.suspend        = npu1_hw_stop,
-	.get_info       = npu1_get_info,
-	.set_state      = npu1_set_state,
-	.hwctx_init     = npu1_hwctx_init,
-	.hwctx_fini     = npu1_hwctx_fini,
-	.hwctx_config   = npu1_hwctx_config,
-	.hwctx_suspend  = npu1_hwctx_suspend,
-	.hwctx_resume   = npu1_hwctx_resume,
-	.cmd_submit     = npu1_cmd_submit,
-	.cmd_wait       = npu1_cmd_wait,
-	.debugfs	= npu1_debugfs_init,
-};
 
 /*
  * The management mailbox channel is allocated by NPU firmware.
@@ -120,7 +102,7 @@ static int npu1_get_mgmt_chann_info(struct npu_device *ndev)
 	return 0;
 }
 
-static int npu1_app_pdi_loading(struct npu_device *ndev)
+static int npu1_runtime_cfg(struct npu_device *ndev)
 {
 	const struct rt_config *cfg = &ndev->priv->rt_config;
 	u64 value;
@@ -128,7 +110,8 @@ static int npu1_app_pdi_loading(struct npu_device *ndev)
 
 	ret = npu1_set_runtime_cfg(ndev, cfg->type, cfg->value);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "Set PDI Loading to APP failed");
+		XDNA_ERR(ndev->xdna, "Set runtime type %d value %d failed",
+			 cfg->type, cfg->value);
 		return ret;
 	}
 
@@ -150,13 +133,13 @@ static int npu1_xdna_reset(struct npu_device *ndev)
 
 	ret = npu1_suspend_fw(ndev);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "suspend firmware failed");
+		XDNA_ERR(ndev->xdna, "Suspend firmware failed");
 		return ret;
 	}
 
 	ret = npu1_resume_fw(ndev);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "resume firmware failed");
+		XDNA_ERR(ndev->xdna, "Resume firmware failed");
 		return ret;
 	}
 
@@ -173,9 +156,9 @@ static int npu1_mgmt_fw_init(struct npu_device *ndev)
 		return ret;
 	}
 
-	ret = npu1_app_pdi_loading(ndev);
+	ret = npu1_runtime_cfg(ndev);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "Set APP PDI Loading mode failed");
+		XDNA_ERR(ndev->xdna, "Runtime config failed");
 		return ret;
 	}
 
@@ -272,7 +255,7 @@ static struct xrs_action_ops npu1_xrs_actions = {
 	.unload = npu1_xrs_unload,
 };
 
-void npu1_hw_stop(struct amdxdna_dev *xdna)
+static void npu1_hw_stop(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct npu_device *ndev = xdna->dev_handle;
@@ -285,7 +268,7 @@ void npu1_hw_stop(struct amdxdna_dev *xdna)
 	pci_disable_device(pdev);
 }
 
-int npu1_hw_start(struct amdxdna_dev *xdna)
+static int npu1_hw_start(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct npu_device *ndev = xdna->dev_handle;
@@ -370,7 +353,7 @@ disable_dev:
 	return ret;
 }
 
-int npu1_init(struct amdxdna_dev *xdna)
+static int npu1_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct init_config xrs_cfg = { 0 };
@@ -523,7 +506,7 @@ release_fw:
 	return ret;
 }
 
-void npu1_fini(struct amdxdna_dev *xdna)
+static void npu1_fini(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct npu_device *ndev = xdna->dev_handle;
@@ -714,7 +697,7 @@ out:
 	return ret;
 }
 
-int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+static int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
 {
 	int ret, idx;
 
@@ -772,7 +755,7 @@ static int npu1_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_
 	return 0;
 }
 
-int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+static int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
 {
 	int ret, idx;
 
@@ -791,3 +774,21 @@ int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
 	drm_dev_exit(idx);
 	return ret;
 }
+
+const struct amdxdna_dev_ops npu1_ops = {
+	.mmap           = NULL,
+	.init           = npu1_init,
+	.fini           = npu1_fini,
+	.resume         = npu1_hw_start,
+	.suspend        = npu1_hw_stop,
+	.get_info       = npu1_get_info,
+	.set_state      = npu1_set_state,
+	.hwctx_init     = npu1_hwctx_init,
+	.hwctx_fini     = npu1_hwctx_fini,
+	.hwctx_config   = npu1_hwctx_config,
+	.hwctx_suspend  = npu1_hwctx_suspend,
+	.hwctx_resume   = npu1_hwctx_resume,
+	.cmd_submit     = npu1_cmd_submit,
+	.cmd_wait       = npu1_cmd_wait,
+	.debugfs	= npu1_debugfs_init,
+};
