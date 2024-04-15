@@ -130,10 +130,6 @@ cd <root-of-source-tree>/build
 A: We have debug version of library, which is compiled with `-g` option. You can run `./build.sh -debug` or `./build.sh`.
 To create a debug DEB package, run `./build.sh -package` afterward.
 
-### Q: When build -release or -debug, can I specify linux kernel version different than currently running linux kernel?
-
-A: Yes. For example, if you have 6.6-rc1 linux header install on your build machine. Run `./build.sh [-debug|-release] -kernel_ver 6.6-rc1`
-
 ### Q: I'm developing amdxdna.ko driver module. How to enable XDNA_DBG() print?
 
 A: XDNA_DBG() relies on Linux's CONFIG_DYNAMIC_DEBUG framework, see Linux's [dynamic debug howto page](https://www.kernel.org/doc/html/v6.8/admin-guide/dynamic-debug-howto.html) for details.
