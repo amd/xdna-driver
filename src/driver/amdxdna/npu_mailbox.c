@@ -613,6 +613,13 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 	list_del(&mb_chann->chann_entry);
 	mutex_unlock(&mb_chann->mb->mbox_lock);
 
+	/* Disalbe an irq and wait. This might sleep. */
+	disable_irq(mb_chann->msix_irq);
+
+	/* Cancel RX work and wait for it to finish */
+	cancel_work_sync(&mb_chann->rx_work);
+
+	MB_DBG(mb_chann, "IRQ disabled and RX work cancelled");
 	free_irq(mb_chann->msix_irq, mb_chann);
 	destroy_workqueue(mb_chann->work_q);
 	/* We can clean up and release resources */

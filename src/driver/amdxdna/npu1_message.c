@@ -255,13 +255,14 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	if (!hwctx->priv->mbox_chan)
 		return 0;
 
+	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chan);
+
 	req.context_id = hwctx->fw_ctx_id;
 	ret = npu_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		XDNA_WARN(xdna, "%s.%d destroy context failed, ret %d",
 			  hwctx->name, hwctx->id, ret);
 
-	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chan);
 	hwctx->priv->mbox_chan = NULL;
 	XDNA_DBG(xdna, "%s.%d destroyed fw ctx %d", hwctx->name,
 		 hwctx->id, hwctx->fw_ctx_id);
