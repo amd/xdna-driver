@@ -7,9 +7,11 @@ set(XRT_COREUTIL_TARGET xrt_coreutil)
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} MAIN_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/kmq KMQ_SOURCES)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/umq UMQ_SOURCES)
 add_library(${XDNA_TARGET} SHARED
   ${MAIN_SOURCES}
   ${KMQ_SOURCES}
+  ${UMQ_SOURCES}
   )
 
 set_target_properties(${XDNA_TARGET} PROPERTIES
@@ -26,6 +28,10 @@ target_compile_definitions(${XDNA_TARGET} PRIVATE
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   add_definitions(-DXDNA_SHIM_DEBUG)
+endif()
+
+if(${UMQ_HELLO_TEST})
+  add_definitions(-DUMQ_HELLO_TEST)
 endif()
 
 target_compile_options(${XDNA_TARGET} PRIVATE

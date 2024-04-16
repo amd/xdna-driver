@@ -20,6 +20,9 @@ public:
 
   void
   submit_command(const std::vector<xrt_core::buffer_handle *>&) override;
+
+  void
+  map_doorbell(uint32_t doorbell_offset);
 };
 
 } // shim_xdna
