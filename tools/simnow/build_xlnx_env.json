@@ -1,0 +1,15 @@
+{
+  "CONF_INSTALL_ART" : "/public/bugcases/CR/1147000-1147999/1147090/art",
+  "CONF_INSTALL_DOCKER" : "docker.centos7-dev-1.tar",
+  "CONF_INSTALL_DOCKER_NAME" : "maxz:centos7-dev-1",
+  "CONF_INSTALL_QEMU_UT22" : "QemuHybrid_ubuntu_2202",
+  "CONF_INSTALL_QEMU_UT20" : "QemuHybrid_ubuntu_2004",
+  "CONF_INSTALL_QCOW2" : "ubuntu22.04-dev-7.qcow2",
+  "CONF_INSTALL_QEMU_RHEL7" : "Qemu-6.1.0-r91900-aa038de528-rhel7",
+  "CONF_INSTALL_SIMNOW" : "https://atlartifactory.amd.com/artifactory/sw-simnowbuilds-rel-local/internal/nightly/simnow-linux64-gcc6-internal-20240301-ce5b7e0bc2.zip",
+  "CONF_INSTALL_MPAIE" : "https://mkmartifactory.amd.com/artifactory/fw-ivv-local/breithorn/mpaie/nightly/mpaiefw-2024-03-01-040041.zip",
+  "CONF_INSTALL_CERT" : "http://xcoartifactory/artifactory/turin-aie-prod/com/amd/cert/main/cert_repo_rel-20231213-fd65c93/amdaie-cert-pipeline_run/app.bin",
+  "CONF_INSTALL_HOST_IP" : "192.168.122.76",
+  "CONF_INSTALL_AMDAIE" : "/proj/rdi/staff/davidzha/medusa",
+  "CONF_INSTALL_DIR" : "/scratch/davidz"
+}

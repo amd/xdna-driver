@@ -1,0 +1,15 @@
+{
+  "CONF_INSTALL_ART" : "/public/bugcases/CR/1147000-1147999/1147090/art",
+  "CONF_INSTALL_DOCKER" : "docker.centos7-dev-1.tar",
+  "CONF_INSTALL_DOCKER_NAME" : "maxz:centos7-dev-1",
+  "CONF_INSTALL_QEMU_UT22" : "QemuHybrid_ubuntu_2202",
+  "CONF_INSTALL_QEMU_UT20" : "QemuHybrid_ubuntu_2004",
+  "CONF_INSTALL_QCOW2" : "ubuntu22.04-dev-6.qcow2",
+  "CONF_INSTALL_QEMU_RHEL7" : "Qemu-6.1.0-r91900-aa038de528-rhel7",
+  "CONF_INSTALL_SIMNOW" : "http://atlartifactory.amd.com/artifactory/sw-simnowbuilds-rel-local/internal/nightly/simnow-linux64-gcc6-internal-20230915-86449faf52.zip",
+  "CONF_INSTALL_MPAIE" : "https://mkmartifactory.amd.com/artifactory/fw-ivv-local/breithorn/mpaie/nightly/mpaiefw-2023-09-15-040058.zip",
+  "CONF_INSTALL_CERT" : "http://xcoartifactory/artifactory/turin-aie-prod/com/amd/cert/main/cert_repo_rel-20230921-a2624d9/amdaie-cert-pipeline_run/app.bin",
+  "CONF_INSTALL_HOST_IP" : "192.168.122.76",
+  "CONF_INSTALL_AMDAIE" : "/scratch/GHES_Actions_Runner_turinai_1/actions-runner/_work/amd-aie/amd-aie",
+  "CONF_INSTALL_DIR" : "/scratch/conf_install_dir"
+}

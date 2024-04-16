@@ -1,0 +1,31 @@
+@# Setup simulation environment and load MPAIE and CERT (on col2)
+shell.open $BSDPATH/oma/endpoint_oma_cosim.bsd
+
+xilinxaie2:0.SetDumpAxiMM 1
+
+@# Clear pDM on col2
+@#axitb:1.AxiRequest w 0x04088000 0x0
+@#axitb:1.AxiRequest w 0x04088004 0x0
+@#axitb:1.AxiRequest w 0x04088008 0x0
+@#axitb:1.AxiRequest w 0x0408800c 0x0
+@# Start CERT on col2
+@#axitb:1.AxiRequest w 0x040C0004 0x01
+
+@# Load CERT firmware into SRAM. In production, this will be done by the PF driver.
+mpaie_sram:0.Load ./Images/app.bin 0x1F4000
+
+@# Load CERT on col0,1,2
+xilinxaie2:0.LoadMemoryBin 0 0x0 ./Images/app.bin
+xilinxaie2:0.LoadMemoryBin 1 0x0 ./Images/app.bin
+xilinxaie2:0.LoadMemoryBin 2 0x0 ./Images/app.bin
+
+@# Clear pDM on col0
+@#axitb:1.AxiRequest w 0x00088000 0x0
+@#axitb:1.AxiRequest w 0x00088004 0x0
+@#axitb:1.AxiRequest w 0x00088008 0x0
+@#axitb:1.AxiRequest w 0x0008800c 0x0
+@# Start CERT on col0
+@#axitb:1.AxiRequest w 0x000C0004 0x01
+
+shell.go
+@shell.exit
