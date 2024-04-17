@@ -59,6 +59,11 @@
 	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
 })
 
+#define SMU_MPNPUCLK_FREQ_MAX(ndev) \
+	((ndev)->priv->smu_mpnpuclk_freq_max)
+#define SMU_HCLK_FREQ_MAX(ndev) \
+	((ndev)->priv->smu_hclk_freq_max)
+
 enum npu_smu_reg_idx {
 	SMU_CMD_REG = 0,
 	SMU_ARG_REG,
@@ -193,6 +198,8 @@ struct npu_dev_priv {
 	struct npu_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
 	struct npu_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
 	struct npu_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
+	u32			smu_mpnpuclk_freq_max;
+	u32			smu_hclk_freq_max;
 };
 
 /* npu1_pci.c */

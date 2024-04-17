@@ -13,9 +13,6 @@
 #define NPU_SMU_SET_MPNPUCLK_FREQ	0x5
 #define NPU_SMU_SET_HCLK_FREQ		0x6
 
-#define SMU_MPNPUCLK_FREQ_MAX		600
-#define SMU_HCLK_FREQ_MAX		1024
-
 static int npu1_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
 {
 	u32 resp;
@@ -46,24 +43,36 @@ static int npu1_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
 
 int npu1_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz)
 {
-	if (!freq_mhz || freq_mhz > SMU_MPNPUCLK_FREQ_MAX) {
+	int ret;
+
+	if (!freq_mhz || freq_mhz > SMU_MPNPUCLK_FREQ_MAX(ndev)) {
 		XDNA_ERR(ndev->xdna, "invalid mpnpu clock freq %d", freq_mhz);
 		return -EINVAL;
 	}
 
 	ndev->mp_npu_clock.freq_mhz = freq_mhz;
-	return npu1_smu_exec(ndev, NPU_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
+	ret = npu1_smu_exec(ndev, NPU_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
+	if (!ret)
+		XDNA_INFO(ndev->xdna, "set mpnpu_clock = %d mhz", freq_mhz);
+
+	return ret;
 }
 
 int npu1_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz)
 {
-	if (!freq_mhz || freq_mhz > SMU_HCLK_FREQ_MAX) {
+	int ret;
+
+	if (!freq_mhz || freq_mhz > SMU_HCLK_FREQ_MAX(ndev)) {
 		XDNA_ERR(ndev->xdna, "invalid hclock freq %d", freq_mhz);
 		return -EINVAL;
 	}
 
 	ndev->h_clock.freq_mhz = freq_mhz;
-	return npu1_smu_exec(ndev, NPU_SMU_SET_HCLK_FREQ, freq_mhz);
+	ret = npu1_smu_exec(ndev, NPU_SMU_SET_HCLK_FREQ, freq_mhz);
+	if (!ret)
+		XDNA_INFO(ndev->xdna, "set npu_hclock = %d mhz", freq_mhz);
+
+	return ret;
 }
 
 int npu1_smu_set_power_on(struct npu_device *ndev)
@@ -86,14 +95,14 @@ int npu1_smu_init(struct npu_device *ndev)
 		return ret;
 	}
 
-	ret = npu1_smu_set_mpnpu_clock_freq(ndev, SMU_MPNPUCLK_FREQ_MAX);
+	ret = npu1_smu_set_mpnpu_clock_freq(ndev, SMU_MPNPUCLK_FREQ_MAX(ndev));
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set mpnpu clk freq failed, ret %d", ret);
 		return ret;
 	}
 	snprintf(ndev->mp_npu_clock.name, sizeof(ndev->mp_npu_clock.name), "MP-NPU Clock");
 
-	ret = npu1_smu_set_hclock_freq(ndev, SMU_HCLK_FREQ_MAX);
+	ret = npu1_smu_set_hclock_freq(ndev, SMU_HCLK_FREQ_MAX(ndev));
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set hclk freq failed, ret %d", ret);
 		return ret;
