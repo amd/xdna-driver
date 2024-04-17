@@ -188,9 +188,8 @@ create_ctx_on_device()
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
   arg.umq_bo = m_q->get_queue_bo();
   arg.max_opc = m_ops_per_cycle;
-  //arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
+  arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
   arg.num_tiles = m_num_cols * 5;
-//  arg.log_buf_bo = init_log_buf(m_num_cols);
 
   m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 

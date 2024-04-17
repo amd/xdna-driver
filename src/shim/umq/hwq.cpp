@@ -216,7 +216,7 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
 
 void
 hw_q_umq::
-submit_command(std::vector<xrt_core::buffer_handle *>& cmd_bos)
+submit_command(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
 {
   if (cmd_bos.size() > 1)
     shim_err(EINVAL, "Do not support more than 1 cmd");
