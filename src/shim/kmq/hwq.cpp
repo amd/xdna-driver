@@ -85,4 +85,11 @@ submit_command(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
   shim_debug("Submitted command (%ld)", id);
 }
 
+void
+hw_q_kmq::
+map_doorbell(uint32_t doorbell_offset)
+{
+  //No-op
+}
+
 } // shim_xdna

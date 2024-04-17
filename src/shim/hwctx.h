@@ -91,6 +91,9 @@ private:
   uint32_t m_ops_per_cycle;
   uint32_t m_num_cols;
   uint32_t m_doorbell;
+  std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
+  size_t m_log_buf_size;
+  void *m_log_buf;
 
   void
   create_ctx_on_device();
@@ -100,6 +103,12 @@ private:
 
   void
   init_qos_info(const qos_type& qos);
+
+  uint32_t
+  init_log_buf(int m_num_cols);
+
+  void
+  fini_log_buf();
 
   void
   parse_xclbin(const xrt::xclbin& xclbin);

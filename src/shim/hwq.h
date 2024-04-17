@@ -58,7 +58,11 @@ public:
   uint32_t
   get_queue_bo();
 
+  virtual void
+  map_doorbell(uint32_t doorbell_offset){}
+
 protected:
+
   const hw_ctx *m_hwctx;
   const pdev& m_pdev;
   uint32_t m_queue_boh;

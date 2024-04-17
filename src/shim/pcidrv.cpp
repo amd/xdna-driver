@@ -2,6 +2,7 @@
 // Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
 //
 #include "kmq/pcidev.h"
+#include "umq/pcidev.h"
 #include "drm_local/amdxdna_accel.h"
 #include "pcidev.h"
 #include "pcidrv.h"
@@ -77,6 +78,8 @@ create_pcidev(const std::string& sysfs) const
   auto driver = std::static_pointer_cast<const drv>(shared_from_this());
   if (t == AMDXDNA_DEV_TYPE_KMQ)
     return std::make_shared<pdev_kmq>(driver, sysfs);
+  if (t == AMDXDNA_DEV_TYPE_UMQ)
+    return std::make_shared<pdev_umq>(driver, sysfs);
   shim_err(-EINVAL, "Unknown device type: %d", t);
 }
 
