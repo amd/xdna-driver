@@ -59,6 +59,9 @@
 
 #define NPU2_RT_CFG_VAL_PDI_LOAD_APP 1
 
+#define NPU2_MPNPUCLK_FREQ_MAX  1267
+#define NPU2_HCLK_FREQ_MAX      1800
+
 const struct npu_dev_priv npu2_dev_priv = {
 	.fw_path        = "amdnpu/17f0_00/npu.sbin",
 	.protocol_major = 0x6,
@@ -88,6 +91,8 @@ const struct npu_dev_priv npu2_dev_priv = {
 		DEFINE_BAR_OFFSET(SMU_RESP_REG, NPU2_SMU, MP1_C2PMSG_61),
 		DEFINE_BAR_OFFSET(SMU_OUT_REG,  NPU2_SMU, MP1_C2PMSG_60),
 	},
+	.smu_mpnpuclk_freq_max = NPU2_MPNPUCLK_FREQ_MAX,
+	.smu_hclk_freq_max     = NPU2_HCLK_FREQ_MAX,
 };
 
 const struct amdxdna_dev_info dev_npu2_info = {
