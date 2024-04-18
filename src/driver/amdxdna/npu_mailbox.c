@@ -422,11 +422,6 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 		return -EINVAL;
 	}
 
-	if (unlikely(!msg->notify_cb)) {
-		MB_ERR(mb_chann, "Message notify callback missed");
-		return -EINVAL;
-	}
-
 	/* The fist word in payload can NOT be TOMBSTONE */
 	if (unlikely(((u32 *)msg->send_data)[0] == TOMBSTONE)) {
 		MB_ERR(mb_chann, "Tomb stone in data");
