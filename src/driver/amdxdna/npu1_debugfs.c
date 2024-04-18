@@ -234,11 +234,12 @@ static int test_case01(struct npu_device *ndev)
 	return 0;
 }
 
-static void test_case02_cb(void *handle, const u32 *data, size_t size)
+static int test_case02_cb(void *handle, const u32 *data, size_t size)
 {
 	struct completion *comp = handle;
 
 	complete(comp);
+	return 0;
 }
 
 static int test_case02(struct npu_device *ndev, u32 argc, const u32 *args)

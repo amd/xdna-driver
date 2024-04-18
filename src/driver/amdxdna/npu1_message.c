@@ -28,6 +28,7 @@ static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	ret = npu_send_msg_wait(xdna, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(ndev->mgmt_chann);
 		xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 		ndev->mgmt_chann = NULL;
 	}
@@ -255,6 +256,8 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	if (!hwctx->priv->mbox_chan)
 		return 0;
 
+	xdna_mailbox_stop_channel(hwctx->priv->mbox_chan);
+
 	req.context_id = hwctx->fw_ctx_id;
 	ret = npu_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
@@ -367,7 +370,7 @@ fail:
 }
 
 int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
-				 void *handle, void (*cb)(void*, const u32 *, size_t))
+				 void *handle, int (*cb)(void*, const u32 *, size_t))
 {
 	struct async_event_msg_req req = { 0 };
 	struct xdna_mailbox_msg msg = {
@@ -428,7 +431,7 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 
 int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
 		 u32 *payload, u32 payload_len, void *handle,
-		 void (*notify_cb)(void *, const u32 *, size_t))
+		 int (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct mailbox_channel *chann = hwctx->priv->mbox_chan;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;

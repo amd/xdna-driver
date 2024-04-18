@@ -38,7 +38,7 @@ struct npu_notify {
 		.notify_cb = npu_msg_cb,			\
 	}
 
-void npu_msg_cb(void *handle, const u32 *data, size_t size);
+int npu_msg_cb(void *handle, const u32 *data, size_t size);
 int npu_send_msg_wait(struct amdxdna_dev *xdna,
 		      struct mailbox_channel *chann,
 		      struct xdna_mailbox_msg *msg);

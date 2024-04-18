@@ -32,6 +32,12 @@
 	dev_dbg((_chann)->mb->dev, "xdna_mailbox.%d: "fmt, \
 		(_chann)->msix_irq, ##args); \
 })
+#define MB_WARN_ONCE(chann, fmt, args...) \
+({ \
+	typeof(chann) _chann = chann; \
+	dev_warn_once((_chann)->mb->dev, "xdna_mailbox.%d: "fmt, \
+		      (_chann)->msix_irq, ##args); \
+})
 
 #define MAGIC_VAL			0x1D000000U
 #define MAGIC_VAL_MASK			0xFF000000
@@ -73,6 +79,7 @@ struct mailbox_channel {
 	struct workqueue_struct		*work_q;
 	struct work_struct		rx_work;
 	u32				i2x_head;
+	bool				bad_state;
 };
 
 struct xdna_msg_header {
@@ -99,7 +106,7 @@ struct mailbox_pkg {
 
 struct mailbox_msg {
 	void			*handle;
-	void			(*notify_cb)(void *handle, const u32 *data, size_t size);
+	int			(*notify_cb)(void *handle, const u32 *data, size_t size);
 	size_t			pkg_size; /* package size in bytes */
 	struct mailbox_pkg	pkg;
 };
@@ -203,8 +210,7 @@ static int mailbox_release_msg(int id, void *p, void *data)
 
 	MB_DBG(mb_chann, "msg_id 0x%x msg opcode 0x%x",
 	       mb_msg->pkg.header.id, mb_msg->pkg.header.opcode);
-	if (mb_msg->notify_cb)
-		mb_msg->notify_cb(mb_msg->handle, NULL, 0);
+	mb_msg->notify_cb(mb_msg->handle, NULL, 0);
 	kfree(mb_msg);
 
 	return 0;
@@ -254,37 +260,40 @@ no_space:
 	return -ENOSPC;
 }
 
-static inline void
+static inline int
 mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *header,
 		 void *data)
 {
 	struct mailbox_msg *mb_msg;
 	unsigned long flags;
 	int msg_id;
+	int ret;
 
 	msg_id = header->id;
 	if (!mailbox_validate_msgid(msg_id)) {
-		MB_DBG(mb_chann, "Bad message ID 0x%x", msg_id);
-		return;
+		MB_ERR(mb_chann, "Bad message ID 0x%x", msg_id);
+		return -EINVAL;
 	}
 
 	msg_id &= ~MAGIC_VAL_MASK;
 	spin_lock_irqsave(&mb_chann->chan_idr_lock, flags);
 	mb_msg = idr_find(&mb_chann->chan_idr, msg_id);
 	if (!mb_msg) {
-		WARN_ONCE(1, "Cannot find msg 0x%x\n", msg_id);
+		MB_ERR(mb_chann, "Cannot find msg 0x%x", msg_id);
 		spin_unlock_irqrestore(&mb_chann->chan_idr_lock, flags);
-		return;
+		return -EINVAL;
 	}
 	idr_remove(&mb_chann->chan_idr, msg_id);
 	spin_unlock_irqrestore(&mb_chann->chan_idr_lock, flags);
 
 	MB_DBG(mb_chann, "opcode 0x%x size %d id 0x%x",
 	       header->opcode, header->total_size, header->id);
-	if (mb_msg->notify_cb)
-		mb_msg->notify_cb(mb_msg->handle, data, header->size);
+	ret = mb_msg->notify_cb(mb_msg->handle, data, header->total_size);
+	if (unlikely(ret))
+		MB_ERR(mb_chann, "Message callback ret %d", ret);
 
 	kfree(mb_msg);
+	return ret;
 }
 
 static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
@@ -295,11 +304,17 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	u32 head, tail;
 	u32 start_addr;
 	u64 read_addr;
+	int ret;
 
 	tail = mailbox_get_tailptr(mb_chann, CHAN_RES_I2X);
 	head = mb_chann->i2x_head;
 	ringbuf_size = mailbox_get_ringbuf_size(mb_chann, CHAN_RES_I2X);
 	start_addr = mb_chann->res[CHAN_RES_I2X].rb_start_addr;
+
+	if (unlikely(tail > ringbuf_size || !IS_ALIGNED(tail, 4))) {
+		MB_WARN_ONCE(mb_chann, "Invalid tail 0x%x", tail);
+		return -EINVAL;
+	}
 
 	/* ringbuf empty */
 	if ((head & (ringbuf_size - 1)) == (tail & (ringbuf_size - 1)))
@@ -311,32 +326,42 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	/* Peek size of the message or TOMBSTONE */
 	read_addr = mb_chann->mb->res.ringbuf_base + start_addr + head;
 	header.total_size = ioread32((void *)read_addr);
-	rest = sizeof(header) - sizeof(u32);
-	read_addr += sizeof(u32);
-
 	/* size is TOMBSTONE, set next read from 0 */
 	if (header.total_size == TOMBSTONE) {
+		if (head < tail) {
+			MB_WARN_ONCE(mb_chann, "Tombstone, head 0x%x tail 0x%x",
+				     head, tail);
+			return -EINVAL;
+		}
 		mailbox_set_headptr(mb_chann, 0);
 		return 0;
 	}
-	msg_size = sizeof(header) + header.total_size;
 
-	if (msg_size > ringbuf_size - head  || msg_size > tail - head) {
-		WARN_ONCE(1, "Invalid message size %d, tail %d, head %d\n",
-			  msg_size, tail, head);
+	if (unlikely(!header.total_size || !IS_ALIGNED(header.total_size, 4))) {
+		MB_WARN_ONCE(mb_chann, "Invalid total size 0x%x", header.total_size);
 		return -EINVAL;
 	}
+	msg_size = sizeof(header) + header.total_size;
+
+	if (msg_size > ringbuf_size - head || msg_size > tail - head) {
+		MB_WARN_ONCE(mb_chann, "Invalid message size %d, tail %d, head %d",
+			     msg_size, tail, head);
+		return -EINVAL;
+	}
+
+	rest = sizeof(header) - sizeof(u32);
+	read_addr += sizeof(u32);
 	memcpy_fromio((u32 *)&header + 1, (void *)read_addr, rest);
 	read_addr += rest;
 
-	mailbox_get_resp(mb_chann, &header, (u32 *)read_addr);
+	ret = mailbox_get_resp(mb_chann, &header, (u32 *)read_addr);
 
 	mailbox_set_headptr(mb_chann, head + msg_size);
 	/* After update head, it can equal to ringbuf_size. This is expected. */
 	trace_mbox_set_head(MAILBOX_NAME, mb_chann->msix_irq,
 			    header.opcode, header.id);
 
-	return 0;
+	return ret;
 }
 
 static irqreturn_t mailbox_irq_handler(int irq, void *p)
@@ -359,14 +384,27 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 
 	mb_chann = container_of(rx_work, struct mailbox_channel, rx_work);
 
+	if (READ_ONCE(mb_chann->bad_state)) {
+		MB_ERR(mb_chann, "Channel in bad state, work aborted");
+		return;
+	}
+
 	while (1) {
 		/*
 		 * If return is 0, keep consuming next message, until there is
 		 * no messages or an error happened.
 		 */
 		ret = mailbox_get_msg(mb_chann);
-		if (ret)
+		if (ret == -ENOENT)
 			break;
+
+		/* Other error means device doesn't look good, disable irq. */
+		if (unlikely(ret)) {
+			MB_ERR(mb_chann, "Unexpected ret %d, disable irq", ret);
+			WRITE_ONCE(mb_chann->bad_state, true);
+			disable_irq(mb_chann->msix_irq);
+			break;
+		}
 	}
 }
 
@@ -390,9 +428,14 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 	}
 
 	/* The fist word in payload can NOT be TOMBSTONE */
-	if  (unlikely(((u32 *)msg->send_data)[0] == TOMBSTONE)) {
+	if (unlikely(((u32 *)msg->send_data)[0] == TOMBSTONE)) {
 		MB_ERR(mb_chann, "Tomb stone in data");
 		return -EINVAL;
+	}
+
+	if (READ_ONCE(mb_chann->bad_state)) {
+		MB_ERR(mb_chann, "Channel in bad state");
+		return -EPIPE;
 	}
 
 	mb_msg = kzalloc(sizeof(*mb_msg) + pkg_size, GFP_KERNEL);
@@ -590,6 +633,7 @@ skip_record:
 		goto destroy_wq;
 	}
 
+	mb_chann->bad_state = false;
 	mutex_lock(&mb->mbox_lock);
 	list_add(&mb_chann->chann_entry, &mb->chann_list);
 	mutex_unlock(&mb->mbox_lock);
@@ -613,6 +657,7 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 	list_del(&mb_chann->chann_entry);
 	mutex_unlock(&mb_chann->mb->mbox_lock);
 
+	MB_DBG(mb_chann, "IRQ disabled and RX work cancelled");
 	free_irq(mb_chann->msix_irq, mb_chann);
 	destroy_workqueue(mb_chann->work_q);
 	/* We can clean up and release resources */
@@ -623,6 +668,15 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 	MB_DBG(mb_chann, "Mailbox channel destroyed, irq: %d", mb_chann->msix_irq);
 	kfree(mb_chann);
 	return 0;
+}
+
+void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
+{
+	/* Disalbe an irq and wait. This might sleep. */
+	disable_irq(mb_chann->msix_irq);
+
+	/* Cancel RX work and wait for it to finish */
+	cancel_work_sync(&mb_chann->rx_work);
 }
 
 struct mailbox *xdna_mailbox_create(struct device *dev,

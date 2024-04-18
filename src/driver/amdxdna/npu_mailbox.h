@@ -25,7 +25,7 @@ struct mailbox_channel;
 struct xdna_mailbox_msg {
 	u32		opcode;
 	void		*handle;
-	void		(*notify_cb)(void *handle, const u32 *data, size_t size);
+	int		(*notify_cb)(void *handle, const u32 *data, size_t size);
 	u8		*send_data;
 	size_t		send_size;
 };
@@ -106,6 +106,15 @@ xdna_mailbox_create_channel(struct mailbox *mailbox,
  * Return: if success, return 0. otherwise return error code
  */
 int xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
+
+/*
+ * xdna_mailbox_stop_channel() -- stop mailbox channel
+ *
+ * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
+ *
+ * Return: if success, return 0. otherwise return error code
+ */
+void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 
 /*
  * xdna_mailbox_send_msg() -- Send a message

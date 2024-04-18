@@ -193,24 +193,30 @@ void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	drm_sched_start(&hwctx->priv->sched, true);
 }
 
-static void
+static int
 npu1_sched_resp_handler(void *handle, const u32 *data, size_t size)
 {
 	struct amdxdna_sched_job *job = handle;
+	u32 ret = 0;
 	u32 status;
 
-	if (!data) {
+	if (unlikely(!data)) {
 		job->cmd->state = ERT_CMD_STATE_ABORT;
 		goto out;
 	}
 
-	print_hex_dump_debug("resp data: ", DUMP_PREFIX_OFFSET, 16, 4, data, size, true);
+	if (unlikely(size != sizeof(u32))) {
+		job->cmd->state = ERT_CMD_STATE_ABORT;
+		ret = -EINVAL;
+		goto out;
+	}
 
 	status = *data;
 	if (status)
 		job->cmd->state = ERT_CMD_STATE_ERROR;
 	else
 		job->cmd->state = ERT_CMD_STATE_COMPLETED;
+	XDNA_DBG(job->hwctx->client->xdna, "status 0x%x", status);
 
 out:
 	dma_fence_signal(job->fence);
@@ -218,6 +224,7 @@ out:
 	dma_fence_put(job->fence);
 	mmput(job->mm);
 	amdxdna_job_put(job);
+	return ret;
 }
 
 static struct dma_fence *
