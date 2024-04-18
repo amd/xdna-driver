@@ -311,7 +311,7 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	ringbuf_size = mailbox_get_ringbuf_size(mb_chann, CHAN_RES_I2X);
 	start_addr = mb_chann->res[CHAN_RES_I2X].rb_start_addr;
 
-	if (unlikely(tail > ringbuf_size)) {
+	if (unlikely(tail > ringbuf_size || !IS_ALIGNED(tail, 4))) {
 		MB_WARN_ONCE(mb_chann, "Invalid tail 0x%x", tail);
 		return -EINVAL;
 	}
@@ -328,6 +328,11 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	header.total_size = ioread32((void *)read_addr);
 	/* size is TOMBSTONE, set next read from 0 */
 	if (header.total_size == TOMBSTONE) {
+		if (head < tail) {
+			MB_WARN_ONCE(mb_chann, "Tombstone, head 0x%x tail 0x%x",
+				     head, tail);
+			return -EINVAL;
+		}
 		mailbox_set_headptr(mb_chann, 0);
 		return 0;
 	}
@@ -426,6 +431,11 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 	if (unlikely(((u32 *)msg->send_data)[0] == TOMBSTONE)) {
 		MB_ERR(mb_chann, "Tomb stone in data");
 		return -EINVAL;
+	}
+
+	if (READ_ONCE(mb_chann->bad_state)) {
+		MB_ERR(mb_chann, "Channel in bad state");
+		return -EPIPE;
 	}
 
 	mb_msg = kzalloc(sizeof(*mb_msg) + pkg_size, GFP_KERNEL);
@@ -647,12 +657,6 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 	list_del(&mb_chann->chann_entry);
 	mutex_unlock(&mb_chann->mb->mbox_lock);
 
-	/* Disalbe an irq and wait. This might sleep. */
-	disable_irq(mb_chann->msix_irq);
-
-	/* Cancel RX work and wait for it to finish */
-	cancel_work_sync(&mb_chann->rx_work);
-
 	MB_DBG(mb_chann, "IRQ disabled and RX work cancelled");
 	free_irq(mb_chann->msix_irq, mb_chann);
 	destroy_workqueue(mb_chann->work_q);
@@ -664,6 +668,15 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 	MB_DBG(mb_chann, "Mailbox channel destroyed, irq: %d", mb_chann->msix_irq);
 	kfree(mb_chann);
 	return 0;
+}
+
+void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
+{
+	/* Disalbe an irq and wait. This might sleep. */
+	disable_irq(mb_chann->msix_irq);
+
+	/* Cancel RX work and wait for it to finish */
+	cancel_work_sync(&mb_chann->rx_work);
 }
 
 struct mailbox *xdna_mailbox_create(struct device *dev,

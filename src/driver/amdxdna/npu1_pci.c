@@ -261,6 +261,7 @@ static void npu1_hw_stop(struct amdxdna_dev *xdna)
 	struct npu_device *ndev = xdna->dev_handle;
 
 	npu1_mgmt_fw_fini(ndev);
+	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 	npu1_psp_stop(ndev->psp_hdl);
 	npu1_smu_fini(ndev);
@@ -341,6 +342,7 @@ static int npu1_hw_start(struct amdxdna_dev *xdna)
 	return 0;
 
 destroy_mgmt_chann:
+	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 stop_psp:
 	npu1_psp_stop(ndev->psp_hdl);

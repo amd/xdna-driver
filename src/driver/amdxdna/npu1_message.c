@@ -28,6 +28,7 @@ static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	ret = npu_send_msg_wait(xdna, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(ndev->mgmt_chann);
 		xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 		ndev->mgmt_chann = NULL;
 	}
@@ -255,7 +256,7 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	if (!hwctx->priv->mbox_chan)
 		return 0;
 
-	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chan);
+	xdna_mailbox_stop_channel(hwctx->priv->mbox_chan);
 
 	req.context_id = hwctx->fw_ctx_id;
 	ret = npu_send_mgmt_msg_wait(ndev, &msg);
@@ -263,6 +264,7 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 		XDNA_WARN(xdna, "%s.%d destroy context failed, ret %d",
 			  hwctx->name, hwctx->id, ret);
 
+	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chan);
 	hwctx->priv->mbox_chan = NULL;
 	XDNA_DBG(xdna, "%s.%d destroyed fw ctx %d", hwctx->name,
 		 hwctx->id, hwctx->fw_ctx_id);
