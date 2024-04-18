@@ -198,7 +198,7 @@ static u32 npu1_error_backtrack(struct npu_device *ndev, void *err_info, u32 num
 	return err_col;
 }
 
-static void npu1_error_async_cb(void *handle, const u32 *data, size_t size)
+static int npu1_error_async_cb(void *handle, const u32 *data, size_t size)
 {
 	struct async_event_msg_resp *resp;
 	struct async_event *e = handle;
@@ -210,6 +210,7 @@ static void npu1_error_async_cb(void *handle, const u32 *data, size_t size)
 		e->resp.status = resp->status;
 	}
 	queue_work(e->wq, &e->work);
+	return 0;
 }
 
 static int npu1_error_event_send(struct async_event *e)

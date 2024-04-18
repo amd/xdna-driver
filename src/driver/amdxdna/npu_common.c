@@ -7,19 +7,24 @@
 #include "npu_common.h"
 #include "npu_solver.h"
 
-void npu_msg_cb(void *handle, const u32 *data, size_t size)
+int npu_msg_cb(void *handle, const u32 *data, size_t size)
 {
 	struct npu_notify *cb_arg = handle;
 
-	if (!data) {
-		cb_arg->error = 1;
-		return;
+	if (unlikely(!data))
+		goto out;
+
+	if (unlikely(cb_arg->size != size)) {
+		cb_arg->error = -EINVAL;
+		goto out;
 	}
 
 	print_hex_dump_debug("resp data: ", DUMP_PREFIX_OFFSET,
-			     16, 4, data, size, true);
+			     16, 4, data, cb_arg->size, true);
 	memcpy(cb_arg->data, data, cb_arg->size);
+out:
 	complete(&cb_arg->comp);
+	return cb_arg->error;
 }
 
 int npu_send_msg_wait(struct amdxdna_dev *xdna,
@@ -38,11 +43,11 @@ int npu_send_msg_wait(struct amdxdna_dev *xdna,
 	ret = wait_for_completion_timeout(&hdl->comp,
 					  msecs_to_jiffies(RX_TIMEOUT));
 	if (!ret) {
-		XDNA_ERR(xdna, "wait for completion timeout");
+		XDNA_ERR(xdna, "Wait for completion timeout");
 		return -ETIME;
 	}
 
-	return 0;
+	return hdl->error;
 }
 
 void npu_default_xrs_cfg(struct amdxdna_dev *xdna, struct init_config *xrs_cfg)

@@ -243,13 +243,13 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
 int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size);
 int npu1_query_status(struct npu_device *ndev, char *buf, u32 size, u32 *cols_filled);
 int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
-				 void *handle, void (*cb)(void*, const u32 *, size_t));
+				 void *handle, int (*cb)(void*, const u32 *, size_t));
 int npu1_self_test(struct npu_device *ndev);
 
 int npu1_config_cu(struct amdxdna_hwctx *hwctx);
 int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
 		 u32 *payload, u32 payload_len, void *handle,
-		 void (*notify_cb)(void *, const u32 *, size_t));
+		 int (*notify_cb)(void *, const u32 *, size_t));
 
 /* npu1_hwctx.c */
 int npu1_hwctx_init(struct amdxdna_hwctx *hwctx);
