@@ -208,6 +208,7 @@ int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 		return ret;
 
 	hwctx->fw_ctx_id = resp.context_id;
+	WARN_ONCE(hwctx->fw_ctx_id == -1, "Unexpected context id");
 
 	cq_pair = &resp.cq_pair[0];
 	x2i.mb_head_ptr_reg = NPU_MBOX_OFF(ndev, cq_pair->x2i_q.head_addr);
@@ -227,18 +228,18 @@ int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	}
 
 	intr_reg = i2x.mb_head_ptr_reg + 4;
-	hwctx->priv->mbox_chan = xdna_mailbox_create_channel(ndev->mbox, &x2i, &i2x,
-							     intr_reg, ret);
-	if (!hwctx->priv->mbox_chan) {
+	hwctx->priv->mbox_chann = xdna_mailbox_create_channel(ndev->mbox, &x2i, &i2x,
+							      intr_reg, ret);
+	if (!hwctx->priv->mbox_chann) {
 		XDNA_ERR(xdna, "not able to create channel");
 		ret = -EINVAL;
 		goto out_destroy_context;
 	}
 
-	XDNA_DBG(xdna, "%s.%d mailbox channel irq: %d, msix_id: %d",
-		 hwctx->name, hwctx->id, ret, resp.msix_id);
-	XDNA_DBG(xdna, "%s.%d created fw ctx %d pasid %d", hwctx->name,
-		 hwctx->id, hwctx->fw_ctx_id, hwctx->client->pasid);
+	XDNA_DBG(xdna, "%s mailbox channel irq: %d, msix_id: %d",
+		 hwctx->name, ret, resp.msix_id);
+	XDNA_DBG(xdna, "%s created fw ctx %d pasid %d", hwctx->name,
+		 hwctx->fw_ctx_id, hwctx->client->pasid);
 
 	return 0;
 
@@ -253,21 +254,22 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	if (!hwctx->priv->mbox_chan)
+	if (hwctx->fw_ctx_id == -1)
 		return 0;
 
-	xdna_mailbox_stop_channel(hwctx->priv->mbox_chan);
+	xdna_mailbox_stop_channel(hwctx->priv->mbox_chann);
 
 	req.context_id = hwctx->fw_ctx_id;
 	ret = npu_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
-		XDNA_WARN(xdna, "%s.%d destroy context failed, ret %d",
-			  hwctx->name, hwctx->id, ret);
+		XDNA_WARN(xdna, "%s destroy context failed, ret %d",
+			  hwctx->name, ret);
 
-	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chan);
-	hwctx->priv->mbox_chan = NULL;
-	XDNA_DBG(xdna, "%s.%d destroyed fw ctx %d", hwctx->name,
-		 hwctx->id, hwctx->fw_ctx_id);
+	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chann);
+	hwctx->priv->mbox_chann = NULL;
+	hwctx->fw_ctx_id = -1;
+	XDNA_DBG(xdna, "%s destroyed fw ctx %d", hwctx->name,
+		 hwctx->fw_ctx_id);
 
 	return ret;
 }
@@ -391,7 +393,7 @@ int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 s
 /* Below messages are to hardware context mailbox channel */
 int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 {
-	struct mailbox_channel *chann = hwctx->priv->mbox_chan;
+	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	u32 shift = xdna->dev_info->dev_mem_buf_shift;
 	DECLARE_NPU_MSG(config_cu, MSG_OP_CONFIG_CU);
@@ -416,8 +418,10 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	req.num_cus = hwctx->cus->num_cus;
 
 	ret = npu_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME)
-		npu1_destroy_context(xdna->dev_handle, hwctx);
+	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(chann);
+		xdna_mailbox_destroy_channel(chann);
+	}
 
 	if (resp.status == NPU_STATUS_SUCCESS) {
 		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
@@ -433,7 +437,7 @@ int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
 		 u32 *payload, u32 payload_len, void *handle,
 		 int (*notify_cb)(void *, const u32 *, size_t))
 {
-	struct mailbox_channel *chann = hwctx->priv->mbox_chan;
+	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct execute_buffer_req req;
 	struct xdna_mailbox_msg msg;

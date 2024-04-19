@@ -137,7 +137,7 @@ struct rt_config {
 #define HWCTX_MAX_CMDS		8
 struct npu_hwctx {
 	struct amdxdna_gem_obj		*heap;
-	void				*mbox_chan;
+	void				*mbox_chann;
 
 	struct drm_gpu_scheduler	sched;
 	struct drm_sched_entity		entity;

@@ -15,10 +15,8 @@ static int amdxdna_pin_pages(struct amdxdna_mem *mem)
 {
 	int pinned, total_pinned = 0;
 
-	if (mem->pin_cnt > 0) {
-		mem->pin_cnt++;
+	if (mem->pin_cnt++ > 0)
 		return 0;
-	}
 
 	while (total_pinned < mem->nr_pages) {
 		pinned = pin_user_pages_fast(mem->userptr +
@@ -26,11 +24,12 @@ static int amdxdna_pin_pages(struct amdxdna_mem *mem)
 					     mem->nr_pages - total_pinned,
 					     FOLL_WRITE | FOLL_LONGTERM,
 					     &mem->pages[total_pinned]);
-		if (pinned < 0)
+		if (pinned < 0) {
+			mem->pin_cnt = 0;
 			goto unpin;
+		}
 		total_pinned += pinned;
 	}
-	mem->pin_cnt = 1;
 
 	return 0;
 
@@ -442,7 +441,7 @@ void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo)
 	if (abo->type == AMDXDNA_BO_SHMEM)
 		drm_gem_shmem_unpin(&abo->base);
 	else if (abo->type == AMDXDNA_BO_DEV)
-		amdxdna_unpin_pages(&abo->dev_heap->mem);
+		amdxdna_gem_unpin(abo->dev_heap);
 	else
 		amdxdna_unpin_pages(&abo->mem);
 
