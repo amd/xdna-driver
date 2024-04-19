@@ -266,10 +266,10 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 			  hwctx->name, ret);
 
 	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chann);
-	hwctx->priv->mbox_chann = NULL;
-	hwctx->fw_ctx_id = -1;
 	XDNA_DBG(xdna, "%s destroyed fw ctx %d", hwctx->name,
 		 hwctx->fw_ctx_id);
+	hwctx->priv->mbox_chann = NULL;
+	hwctx->fw_ctx_id = -1;
 
 	return ret;
 }
