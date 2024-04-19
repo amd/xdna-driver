@@ -418,10 +418,8 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	req.num_cus = hwctx->cus->num_cus;
 
 	ret = npu_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME) {
-		xdna_mailbox_stop_channel(chann);
-		xdna_mailbox_destroy_channel(chann);
-	}
+	if (ret == -ETIME)
+		npu1_destroy_context(xdna->dev_handle, hwctx);
 
 	if (resp.status == NPU_STATUS_SUCCESS) {
 		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
