@@ -9,7 +9,7 @@
 #include "npu_common.h"
 #include "npu1_pci.h"
 
-#define HWCTX_MAX_TIMEOUT	10000 /* miliseconds */
+#define HWCTX_MAX_TIMEOUT	5000 /* miliseconds */
 
 int start_col_index = -1;
 module_param(start_col_index, int, 0600);
@@ -62,9 +62,11 @@ out:
 	return hwctx->priv->pending[idx];
 }
 
-static void npu1_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
+/* The bad_job is used in npu1_sched_job_timedout, otherwise, set it to NULL */
+static void npu1_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
+			    struct drm_sched_job *bad_job)
 {
-	drm_sched_stop(&hwctx->priv->sched, NULL);
+	drm_sched_stop(&hwctx->priv->sched, bad_job);
 	npu1_destroy_context(xdna->dev_handle, hwctx);
 }
 
@@ -88,7 +90,7 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 
 	if (hwctx->status != HWCTX_STAT_READY) {
 		XDNA_DBG(xdna, "hwctx is not ready, status %d", hwctx->status);
-		return 0;
+		goto out;
 	}
 
 	ret = npu1_config_cu(hwctx);
@@ -96,8 +98,9 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
 		return ret;
 	}
-	XDNA_DBG(xdna, "%s.%d restarted", hwctx->name, hwctx->id);
-
+out:
+	drm_sched_start(&hwctx->priv->sched, true);
+	XDNA_DBG(xdna, "%s restarted", hwctx->name);
 	return 0;
 }
 
@@ -114,10 +117,10 @@ void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
 		if (!(col_map & amdxdna_hwctx_col_map(hwctx)))
 			continue;
 
-		npu1_hwctx_stop(xdna, hwctx);
+		npu1_hwctx_stop(xdna, hwctx, NULL);
 		hwctx->old_status = hwctx->status;
 		hwctx->status = HWCTX_STAT_STOP;
-		XDNA_DBG(xdna, "Stop %s.%d", hwctx->name, hwctx->id);
+		XDNA_DBG(xdna, "Stop %s", hwctx->name);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -126,7 +129,7 @@ void npu1_restart_ctx(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
-	int next = 0, ret;
+	int next = 0;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
@@ -135,10 +138,8 @@ void npu1_restart_ctx(struct amdxdna_client *client)
 			continue;
 
 		hwctx->status = hwctx->old_status;
-		XDNA_DBG(xdna, "Resetting %s.%d", hwctx->name, hwctx->id);
-		ret = npu1_hwctx_restart(xdna, hwctx);
-		/* Need to restart DRM sched to handle aborted commands */
-		drm_sched_start(&hwctx->priv->sched, true);
+		XDNA_DBG(xdna, "Resetting %s", hwctx->name);
+		npu1_hwctx_restart(xdna, hwctx);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -156,7 +157,7 @@ static int npu1_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 	job = npu1_hwctx_get_job(hwctx, hwctx->priv->seq - 1);
 	if (IS_ERR_OR_NULL(job)) {
 		spin_unlock(&hwctx->priv->io_lock);
-		XDNA_WARN(hwctx->client->xdna, "corrupted pending list\n");
+		XDNA_WARN(hwctx->client->xdna, "Corrupted pending list");
 		return 0;
 	}
 	spin_unlock(&hwctx->priv->io_lock);
@@ -177,7 +178,7 @@ void npu1_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	npu1_hwctx_wait_for_idle(hwctx);
-	npu1_hwctx_stop(xdna, hwctx);
+	npu1_hwctx_stop(xdna, hwctx, NULL);
 	hwctx->old_status = hwctx->status;
 	hwctx->status = HWCTX_STAT_STOP;
 }
@@ -194,7 +195,6 @@ void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	hwctx->status = hwctx->old_status;
 	npu1_hwctx_restart(xdna, hwctx);
-	drm_sched_start(&hwctx->priv->sched, true);
 }
 
 static int
@@ -275,9 +275,28 @@ static void npu1_sched_job_free(struct drm_sched_job *sched_job)
 	wake_up(&hwctx->priv->job_free_wq);
 }
 
+static enum drm_gpu_sched_stat
+npu1_sched_job_timedout(struct drm_sched_job *sched_job)
+{
+	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
+	struct amdxdna_hwctx *hwctx = job->hwctx;
+	struct amdxdna_dev *xdna;
+
+	xdna = hwctx->client->xdna;
+	trace_xdna_job(hwctx->name, "job timedout", job->seq);
+	mutex_lock(&xdna->dev_lock);
+	npu1_hwctx_stop(xdna, hwctx, sched_job);
+
+	npu1_hwctx_restart(xdna, hwctx);
+	mutex_unlock(&xdna->dev_lock);
+
+	return DRM_GPU_SCHED_STAT_NOMINAL;
+}
+
 const struct drm_sched_backend_ops sched_ops = {
 	.run_job = npu1_sched_job_run,
 	.free_job = npu1_sched_job_free,
+	.timedout_job = npu1_sched_job_timedout,
 };
 
 static int npu1_hwctx_col_list(struct amdxdna_hwctx *hwctx)
@@ -387,8 +406,8 @@ int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 	sched = &hwctx->priv->sched;
 	spin_lock_init(&hwctx->priv->io_lock);
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
-			     HWCTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT, NULL,
-			     NULL, hwctx->name, xdna->ddev.dev);
+			     HWCTX_MAX_CMDS, 0, msecs_to_jiffies(HWCTX_MAX_TIMEOUT),
+			     NULL, NULL, hwctx->name, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
 		goto unpin;
