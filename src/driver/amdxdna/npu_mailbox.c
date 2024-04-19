@@ -195,7 +195,7 @@ static int mailbox_acquire_msgid(struct mailbox_channel *mb_chann, struct mailbo
 
 static void mailbox_release_msgid(struct mailbox_channel *mb_chann, int msg_id)
 {
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	msg_id &= ~MAGIC_VAL_MASK;
 	spin_lock_irqsave(&mb_chann->chan_idr_lock, flags);
@@ -290,7 +290,8 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 	       header->opcode, header->total_size, header->id);
 	ret = mb_msg->notify_cb(mb_msg->handle, data, header->total_size);
 	if (unlikely(ret))
-		MB_ERR(mb_chann, "Message callback ret %d", ret);
+		MB_ERR(mb_chann, "Size %d opcode 0x%x ret %d",
+		       header->total_size, header->opcode, ret);
 
 	kfree(mb_msg);
 	return ret;
@@ -657,7 +658,6 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 	list_del(&mb_chann->chann_entry);
 	mutex_unlock(&mb_chann->mb->mbox_lock);
 
-	MB_DBG(mb_chann, "IRQ disabled and RX work cancelled");
 	free_irq(mb_chann->msix_irq, mb_chann);
 	destroy_workqueue(mb_chann->work_q);
 	/* We can clean up and release resources */
@@ -672,11 +672,15 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 {
+	if (!mb_chann)
+		return;
+
 	/* Disalbe an irq and wait. This might sleep. */
 	disable_irq(mb_chann->msix_irq);
 
 	/* Cancel RX work and wait for it to finish */
 	cancel_work_sync(&mb_chann->rx_work);
+	MB_DBG(mb_chann, "IRQ disabled and RX work cancelled");
 }
 
 struct mailbox *xdna_mailbox_create(struct device *dev,

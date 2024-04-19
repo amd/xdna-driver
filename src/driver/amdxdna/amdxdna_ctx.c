@@ -86,6 +86,7 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	synchronize_srcu(ss);
 
 	/* At this point, user is not able to submit new commands */
@@ -147,6 +148,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 
 	hwctx->client = client;
+	hwctx->fw_ctx_id = -1;
 	hwctx->num_tiles = args->num_tiles;
 	hwctx->mem_size = args->mem_size;
 	hwctx->max_opc = args->max_opc;
@@ -281,6 +283,7 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		return -EINVAL;
 	}
 
+	mutex_lock(&xdna->dev_lock);
 	idx = srcu_read_lock(&client->hwctx_srcu);
 	hwctx = idr_find(&client->hwctx_idr, args->handle);
 	if (!hwctx) {
@@ -289,13 +292,12 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto unlock_srcu;
 	}
 
-	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->hwctx_config(hwctx, args->param_type, val, buf, buf_size);
-	mutex_unlock(&xdna->dev_lock);
 
 unlock_srcu:
-	kfree(buf);
 	srcu_read_unlock(&client->hwctx_srcu, idx);
+	mutex_unlock(&xdna->dev_lock);
+	kfree(buf);
 	return ret;
 }
 

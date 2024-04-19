@@ -131,7 +131,7 @@ static int amdxdna_flush(struct file *f, fl_owner_t id)
 
 	XDNA_DBG(xdna, "pid %d flushing...", client->pid);
 	mutex_lock(&xdna->dev_lock);
-	list_del(&client->node);
+	list_del_init(&client->node);
 	amdxdna_hwctx_remove_all(client);
 	mutex_unlock(&xdna->dev_lock);
 

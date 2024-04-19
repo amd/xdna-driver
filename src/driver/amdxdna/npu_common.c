@@ -10,6 +10,7 @@
 int npu_msg_cb(void *handle, const u32 *data, size_t size)
 {
 	struct npu_notify *cb_arg = handle;
+	int ret;
 
 	if (unlikely(!data))
 		goto out;
@@ -23,8 +24,9 @@ int npu_msg_cb(void *handle, const u32 *data, size_t size)
 			     16, 4, data, cb_arg->size, true);
 	memcpy(cb_arg->data, data, cb_arg->size);
 out:
+	ret = cb_arg->error;
 	complete(&cb_arg->comp);
-	return cb_arg->error;
+	return ret;
 }
 
 int npu_send_msg_wait(struct amdxdna_dev *xdna,
