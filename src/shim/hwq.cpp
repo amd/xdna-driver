@@ -5,6 +5,8 @@
 #include "hwq.h"
 #include "shim_debug.h"
 
+#include "core/common/config_reader.h"
+
 namespace shim_xdna {
 
 hw_q::
@@ -12,7 +14,33 @@ hw_q(const device& device)
   : m_hwctx(nullptr)
   , m_queue_boh(AMDXDNA_INVALID_BO_HANDLE)
   , m_pdev(device.get_pdev())
+  // Default of force_unchained_command should be false once command
+  // chaining is natively supported by driver/firmware.
+  , m_force_unchained_command(xrt_core::config::detail::get_bool_value(
+    "Debug.force_unchained_command", true))
 {
+}
+
+void
+hw_q::
+submit_command(xrt_core::buffer_handle *cmd_bo)
+{
+  std::vector<xrt_core::buffer_handle *> cmd_bos {cmd_bo};
+  return submit_command(cmd_bos);
+}
+
+void
+hw_q::
+submit_command(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
+{
+  if (cmd_bos.size() > 1) {
+    if (m_force_unchained_command) {
+      for (auto& cmd : cmd_bos)
+        submit_command(cmd);
+      return;
+    }
+  }
+  submit_command_list(cmd_bos);
 }
 
 void

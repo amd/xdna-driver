@@ -4,8 +4,6 @@
 #include "bo.h"
 #include "hwq.h"
 
-#include "core/common/config_reader.h"
-
 namespace shim_xdna {
 
 hw_q_kmq::
@@ -22,15 +20,7 @@ hw_q_kmq::
 
 void
 hw_q_kmq::
-submit_command(xrt_core::buffer_handle *cmd_bo)
-{
-  std::vector<xrt_core::buffer_handle *> cmd_bos {cmd_bo};
-  return submit_command(cmd_bos);
-}
-
-void
-hw_q_kmq::
-submit_command(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
+submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
 {
   // Assuming 256 max cmds and 256 max args per cmd bo
   const size_t max_cmd_bos = 256;
@@ -43,18 +33,6 @@ submit_command(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
   uint32_t cmd_bo_hdls[max_cmd_bos];
   uint32_t arg_bo_hdls[max_arg_bos];
   size_t arg_cnt = 0;
-
-  if (cmd_bos.size() > 1) {
-    // Default of force_unchained_command should be false once command
-    // chaining is natively supported by driver/firmware.
-    if (xrt_core::config::detail::get_bool_value("Debug.force_unchained_command", true)) {
-      for (auto& cmd : cmd_bos)
-        submit_command(cmd);
-      return;
-    }
-    // Should be removed once command chaining is natively supported by driver/firmware.
-    throw std::runtime_error("Cannot support chaining > 1 commands");
-  }
 
   for (size_t cmd_cnt = 0; cmd_cnt < num_cmd_bos; cmd_cnt++) {
     auto boh = static_cast<bo_kmq*>(cmd_bos[cmd_cnt]);

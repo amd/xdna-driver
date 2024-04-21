@@ -18,12 +18,10 @@ public:
   hw_q(const device& device);
 
   void
-  submit_command(xrt_core::buffer_handle *) override
-  { shim_not_supported_err(__func__); }
+  submit_command(xrt_core::buffer_handle *) override;
 
   void
-  submit_command(const std::vector<xrt_core::buffer_handle *>&) override
-  { shim_not_supported_err(__func__); }
+  submit_command(const std::vector<xrt_core::buffer_handle *>&) override;
 
   int
   wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
@@ -59,13 +57,21 @@ public:
   get_queue_bo();
 
   virtual void
-  map_doorbell(uint32_t doorbell_offset){}
+  map_doorbell(uint32_t doorbell_offset)
+  {
+    // do nothing by default
+  }
 
 protected:
+  virtual void
+  submit_command_list(const std::vector<xrt_core::buffer_handle *>&) = 0;
 
   const hw_ctx *m_hwctx;
   const pdev& m_pdev;
   uint32_t m_queue_boh;
+
+private:
+  bool m_force_unchained_command;
 };
 
 } // shim_xdna

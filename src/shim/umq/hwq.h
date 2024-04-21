@@ -14,13 +14,6 @@ namespace shim_xdna {
 class hw_q_umq : public hw_q
 {
 public:
-  void
-  submit_command(xrt_core::buffer_handle *) override;
-
-  void
-  submit_command(const std::vector<xrt_core::buffer_handle *>&) override;
-
-public:
   hw_q_umq(const device& device, size_t nslots);
 
   ~hw_q_umq();
@@ -32,10 +25,14 @@ public:
   dump_raw() const;
 
   void
-  map_doorbell(uint32_t doorbell_offset);
+  map_doorbell(uint32_t doorbell_offset) override;
 
   volatile host_queue_header_t *
   get_header_ptr() const;
+
+protected:
+  void
+  submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos) override;
 
 private:
   std::unique_ptr<xrt_core::buffer_handle> umq_bo;
