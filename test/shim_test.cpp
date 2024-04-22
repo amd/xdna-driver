@@ -975,11 +975,6 @@ io_test_dump_bo_content(io_test_bo *io_test_bos)
 void
 io_test_cmd_submit_wait(std::shared_ptr<device> dev, std::vector<bo*> cmd_bos)
 {
-  // Can't support > 1 chained commands until hwqueue_handle::submit_command
-  // is updated to take a vector of buffer_handle *
-  if (cmd_bos.size() != 1)
-    throw std::runtime_error("Cannot support chaining > 1 commands");
-
   auto ip_name = find_first_match_ip_name(dev, "DPU.*");
   if (ip_name.empty())
     throw std::runtime_error("Cannot find any kernel name matched DPU.*");
@@ -1001,8 +996,8 @@ io_test_cmd_submit_wait(std::shared_ptr<device> dev, std::vector<bo*> cmd_bos)
   auto start = Clock::now();
 
   for (int i = 0; i < io_test_parameters.iters; i++) {
-    hwq->submit_command(cmdlist[0]);
-    hwq->wait_command(cmdlist[0], 15000);
+    hwq->submit_command(cmdlist);
+    hwq->wait_command(cmdlist.back(), 15000);
     if (cmd_packet->state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error("Command error");
   }
@@ -1186,6 +1181,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "create and free debug bo",
     TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x4000 }
+  },
+  test_case{ "multi-command io test real kernel good run",
+    TEST_POSITIVE, dev_filter_is_npu, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
 };
 

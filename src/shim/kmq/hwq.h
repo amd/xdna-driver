@@ -16,13 +16,11 @@ public:
   ~hw_q_kmq();
 
   void
-  submit_command(xrt_core::buffer_handle *) override;
-
-  void
-  submit_command(const std::vector<xrt_core::buffer_handle *>&) override;
-
-  void
   map_doorbell(uint32_t doorbell_offset);
+
+protected:
+  void
+  submit_command_list(const std::vector<xrt_core::buffer_handle *>&) override;
 };
 
 } // shim_xdna
