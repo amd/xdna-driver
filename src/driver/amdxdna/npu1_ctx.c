@@ -9,7 +9,7 @@
 #include "npu_common.h"
 #include "npu1_pci.h"
 
-#define HWCTX_MAX_TIMEOUT	5000 /* miliseconds */
+#define HWCTX_MAX_TIMEOUT	16000 /* miliseconds */
 
 int start_col_index = -1;
 module_param(start_col_index, int, 0600);
