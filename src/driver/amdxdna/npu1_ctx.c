@@ -78,14 +78,14 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 	ret = npu1_create_context(xdna->dev_handle, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Create hwctx failed, ret %d", ret);
-		return ret;
+		goto out;
 	}
 
 	ret = npu1_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
 				heap->mem.userptr, heap->mem.size);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buf failed, ret %d", ret);
-		return ret;
+		goto out;
 	}
 
 	if (hwctx->status != HWCTX_STAT_READY) {
@@ -96,12 +96,12 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 	ret = npu1_config_cu(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
-		return ret;
+		goto out;
 	}
 out:
 	drm_sched_start(&hwctx->priv->sched, true);
-	XDNA_DBG(xdna, "%s restarted", hwctx->name);
-	return 0;
+	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
+	return ret;
 }
 
 void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
