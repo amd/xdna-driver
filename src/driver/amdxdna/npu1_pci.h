@@ -142,7 +142,7 @@ struct npu_hwctx {
 	struct drm_gpu_scheduler	sched;
 	struct drm_sched_entity		entity;
 
-	spinlock_t			io_lock; /* protect seq and cmd order */
+	struct mutex			io_lock; /* protect seq and cmd order */
 	struct wait_queue_head		job_free_wq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	u32				num_pending;

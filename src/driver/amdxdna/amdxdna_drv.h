@@ -145,7 +145,7 @@ struct amdxdna_client {
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
 
-	spinlock_t			mm_lock; /* protect memory related */
+	struct mutex			mm_lock; /* protect memory related */
 	int				dev_heap;
 
 	struct iommu_sva		*sva;

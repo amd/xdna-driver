@@ -91,9 +91,9 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		abo->client->dev_heap = AMDXDNA_INVALID_BO_HANDLE;
 		break;
 	case AMDXDNA_BO_DEV:
-		spin_lock(&abo->client->mm_lock);
+		mutex_lock(&abo->client->mm_lock);
 		drm_mm_remove_node(&abo->mm_node);
-		spin_unlock(&abo->client->mm_lock);
+		mutex_unlock(&abo->client->mm_lock);
 		amdxdna_put_dev_heap(abo->dev_heap);
 		break;
 	case AMDXDNA_BO_CMD:
@@ -343,7 +343,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	XDNA_DBG(xdna, "type %d vaddr 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
-	spin_lock(&client->mm_lock);
+	mutex_lock(&client->mm_lock);
 	switch (args->type) {
 	case AMDXDNA_BO_SHMEM:
 		abo = amdxdna_drm_alloc_shmem(dev, args, filp);
@@ -392,7 +392,7 @@ put_bo:
 	/* dereference object reference. Handle holds it now */
 	drm_gem_object_put(to_gobj(abo));
 err_unlock:
-	spin_unlock(&client->mm_lock);
+	mutex_unlock(&client->mm_lock);
 	return ret;
 }
 
