@@ -77,7 +77,7 @@ skip_sva_bind:
 	mutex_init(&client->hwctx_lock);
 	init_srcu_struct(&client->hwctx_srcu);
 	idr_init(&client->hwctx_idr);
-	mutex_init(&client->mm_lock);
+	spin_lock_init(&client->mm_lock);
 	client->dev_heap = AMDXDNA_INVALID_BO_HANDLE;
 
 	mutex_lock(&xdna->dev_lock);
@@ -108,7 +108,6 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	idr_destroy(&client->hwctx_idr);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
-	mutex_destroy(&client->mm_lock);
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
