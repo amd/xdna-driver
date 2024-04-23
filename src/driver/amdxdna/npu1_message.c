@@ -442,7 +442,7 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 		return 0;
 	}
 
-	XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x ret %d",
+	XDNA_ERR(xdna, "Command opcode 0x%x failed, status 0x%x ret %d",
 		 msg.opcode, resp.status, ret);
 	return ret;
 }
@@ -481,3 +481,165 @@ int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
 
 	return 0;
 }
+
+#ifdef AMDXDNA_DEVEL
+int npu1_register_pdis(struct amdxdna_hwctx *hwctx)
+{
+	DECLARE_NPU_MSG(register_pdi, MSG_OP_REGISTER_PDI);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct npu_device *ndev = xdna->dev_handle;
+	int num_cus = hwctx->cus->num_cus;
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
+	struct hwctx_pdi *pdi;
+	int i, ret;
+
+	if (num_cus > MAX_NUM_CUS) {
+		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
+		return -EINVAL;
+	}
+
+	hwctx->priv->pdi_infos = kcalloc(num_cus, sizeof(*hwctx->priv->pdi_infos), GFP_KERNEL);
+	if (!hwctx->priv->pdi_infos)
+		return -ENOMEM;
+
+	req.num_infos = 1;
+	for (i = 0; i < num_cus; i++) {
+		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
+
+		pdi = &hwctx->priv->pdi_infos[i];
+		gobj = drm_gem_object_lookup(hwctx->client->filp, cu->cu_bo);
+		if (!gobj) {
+			XDNA_ERR(xdna, "Lookup GEM object failed");
+			ret = -EINVAL;
+			goto cleanup;
+		}
+		abo = to_xdna_obj(gobj);
+
+		if (abo->type != AMDXDNA_BO_DEV) {
+			drm_gem_object_put(gobj);
+			XDNA_ERR(xdna, "Invalid BO type");
+			ret = -EINVAL;
+			goto cleanup;
+		}
+
+		pdi->id = -1; /* Set to negative value, so that cleanup can work */
+		pdi->id = ida_alloc_range(&xdna->pdi_ida, 0, NPU_MAX_PDI_ID, GFP_KERNEL);
+		if (pdi->id < 0) {
+			XDNA_ERR(xdna, "Cannot allocate PDI id");
+			ret = pdi->id;
+			goto cleanup;
+		}
+		pdi->size = gobj->size;
+		pdi->addr = dma_alloc_noncoherent(xdna->ddev.dev, pdi->size, &pdi->dma_addr,
+						  DMA_TO_DEVICE, GFP_KERNEL);
+		if (!pdi->addr) {
+			drm_gem_object_put(gobj);
+			ret = -ENOMEM;
+			goto cleanup;
+		}
+
+		if (copy_from_user(pdi->addr, u64_to_user_ptr(abo->mem.userptr), pdi->size)) {
+			drm_gem_object_put(gobj);
+			ret = -EFAULT;
+			goto cleanup;
+		}
+
+		drm_gem_object_put(gobj);
+		req.pdi_info.pdi_id = pdi->id;
+		req.pdi_info.address = pdi->dma_addr;
+		req.pdi_info.size = pdi->size;
+		req.pdi_info.type = 3;
+		resp.status = MAX_NPU_STATUS_CODE;
+
+		drm_clflush_virt_range(pdi->addr, pdi->size); /* device can access */
+		ret = npu_send_mgmt_msg_wait(ndev, &msg);
+		if (ret) {
+			XDNA_ERR(xdna, "PDI %d register failed, ret %d", pdi->id, ret);
+			goto cleanup;
+		}
+
+		pdi->registered = 1;
+		WARN_ONCE(pdi->id != resp.reg_index, "PDI ID and FW registered index mismatch");
+		XDNA_DBG(xdna, "PDI %d register completed, index %d", pdi->id, resp.reg_index);
+	}
+
+	return 0;
+
+cleanup:
+	npu1_unregister_pdis(hwctx);
+	return ret;
+}
+
+int npu1_unregister_pdis(struct amdxdna_hwctx *hwctx)
+{
+	DECLARE_NPU_MSG(unregister_pdi, MSG_OP_UNREGISTER_PDI);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct npu_device *ndev = xdna->dev_handle;
+	int num_cus = hwctx->cus->num_cus;
+	struct hwctx_pdi *pdi;
+	int ret, i;
+
+	req.num_pdi = 1;
+	for (i = 0; i < num_cus; i++) {
+		pdi = &hwctx->priv->pdi_infos[i];
+
+		if (pdi->registered) {
+			req.pdi_id = pdi->id;
+			resp.status = MAX_NPU_STATUS_CODE;
+			ret = npu_send_mgmt_msg_wait(ndev, &msg);
+			if (ret) {
+				XDNA_ERR(xdna, "PDI %d unregister failed, ret %d",
+					 pdi->id, ret);
+				break;
+			}
+
+			pdi->registered = 0;
+			XDNA_DBG(xdna, "PDI %d unregister completed", pdi->id);
+		}
+
+		if (pdi->addr)
+			dma_free_noncoherent(xdna->ddev.dev, pdi->size, pdi->addr,
+					     pdi->dma_addr, DMA_TO_DEVICE);
+
+		if (pdi->id >= 0)
+			ida_free(&xdna->pdi_ida, pdi->id);
+	}
+
+	kfree(hwctx->priv->pdi_infos);
+	return 0;
+}
+
+int npu1_legacy_config_cu(struct amdxdna_hwctx *hwctx)
+{
+	DECLARE_NPU_MSG(legacy_config_cu, MSG_OP_LEGACY_CONFIG_CU);
+	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	int ret, i;
+
+	if (!chann)
+		return -ENODEV;
+
+	if (hwctx->cus->num_cus > MAX_NUM_CUS) {
+		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
+		return -EINVAL;
+	}
+
+	req.num_cus = hwctx->cus->num_cus;
+	for (i = 0; i < req.num_cus; i++) {
+		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
+
+		req.configs[i].cu_idx = i;
+		req.configs[i].cu_func = cu->cu_func;
+		req.configs[i].cu_pdi_id = hwctx->priv->pdi_infos[i].id;
+	}
+
+	ret = npu_send_msg_wait(xdna, chann, &msg);
+	if (ret == -ETIME)
+		npu1_destroy_context(xdna->dev_handle, hwctx);
+
+	XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
+
+	return ret;
+}
+#endif

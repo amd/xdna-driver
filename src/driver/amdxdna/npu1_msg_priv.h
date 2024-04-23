@@ -16,6 +16,11 @@ enum npu_msg_opcode {
 	MSG_OP_QUERY_AIE_TILE_INFO         = 0xE,
 	MSG_OP_QUERY_AIE_VERSION           = 0xF,
 	MSG_OP_CONFIG_CU                   = 0x11,
+#ifdef AMDXDNA_DEVEL
+	MSG_OP_REGISTER_PDI                = 0x1,
+	MSG_OP_UNREGISTER_PDI              = 0xA,
+	MSG_OP_LEGACY_CONFIG_CU            = 0xB,
+#endif
 	MSG_OP_MAX_XRT_OPCODE,
 	MSG_OP_SUSPEND                     = 0x101,
 	MSG_OP_RESUME                      = 0x102,
@@ -65,6 +70,10 @@ enum npu_msg_status {
 	NPU_STATUS_INVALID_INPUT_BUFFER			= 0x4000001,
 	NPU_STATUS_INVALID_COMMAND,
 	NPU_STATUS_INVALID_PARAM,
+#ifdef AMDXDNA_DEVEL
+	NPU_STATUS_PDI_REG_FAILED,
+	NPU_STATUS_PDI_UNREG_FAILED,
+#endif
 	NPU_STATUS_INVALID_OPERATION                    = 0x4000006,
 	NPU_STATUS_ASYNC_EVENT_MSGS_FULL,
 	NPU_STATUS_MAX_RTOS_STATUS_CODE,
@@ -321,4 +330,58 @@ struct async_event_msg_resp {
 	enum async_event_type	type;
 } __packed;
 
+#ifdef AMDXDNA_DEVEL
+#define NPU_MAX_PDI_ID	255
+struct pdi_info {
+	u32		registered;
+	u32		pad[2];
+	u64		address;
+	u32		size;
+	int		type;
+	u8		pdi_id;
+} __packed;
+
+struct register_pdi_req {
+	u32			num_infos;
+	struct pdi_info		pdi_info;
+	/*
+	 * sizeof(pdi_info) is 29 bytes, pad 7 pdi_info
+	 * total = 7 * 29 = 203 bytes
+	 */
+	u8			pad[203];
+} __packed;
+
+struct register_pdi_resp {
+	enum npu_msg_status	status;
+	u8			reg_index;
+	/* 7 + 4 * 8 = 39 bytes */
+	u8			pad[39];
+} __packed;
+
+struct unregister_pdi_req {
+	u32			num_pdi;
+	u8			pdi_id;
+	u8			pad[7];
+} __packed;
+
+struct unregister_pdi_resp {
+	enum npu_msg_status	status;
+	u32			pad[8];
+} __packed;
+
+struct cu_cfg_info {
+	u32 cu_idx : 16;
+	u32 cu_func : 8;
+	u32 cu_pdi_id : 8;
+};
+
+struct legacy_config_cu_req {
+	u32			num_cus;
+	struct cu_cfg_info	configs[MAX_NUM_CUS];
+} __packed;
+
+struct legacy_config_cu_resp {
+	enum npu_msg_status	status;
+} __packed;
+#endif /* AMDXDNA_DEVEL */
 #endif /* _NPU1_MSG_PRIV_H_ */
