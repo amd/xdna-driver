@@ -60,6 +60,9 @@ public:
   exec_buf(xrt_core::buffer_handle *) override
   { shim_not_supported_err(__func__); }
 
+  uint32_t
+  get_doorbell() const;
+
 protected:
   const device&
   get_device();
@@ -79,8 +82,8 @@ protected:
   void
   set_doorbell(uint32_t db);
 
-  uint32_t
-  get_doorbell() const;
+  void
+  create_ctx_on_device();
 
 private:
   const device& m_device;
@@ -96,16 +99,13 @@ private:
   void *m_log_buf;
 
   void
-  create_ctx_on_device();
-
-  void
   delete_ctx_on_device();
 
   void
   init_qos_info(const qos_type& qos);
 
   uint32_t
-  init_log_buf(int m_num_cols);
+  init_log_buf();
 
   void
   fini_log_buf();

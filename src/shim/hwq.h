@@ -47,20 +47,14 @@ public:
   { shim_not_supported_err(__func__); }
 
 public:
-  void
-  bind_hwctx(const hw_ctx *ctx);
+  virtual void
+  bind_hwctx(const hw_ctx *ctx) = 0;
 
   void
   unbind_hwctx();
 
   uint32_t
   get_queue_bo();
-
-  virtual void
-  map_doorbell(uint32_t doorbell_offset)
-  {
-    // do nothing by default
-  }
 
 protected:
   virtual void

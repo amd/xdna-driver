@@ -30,10 +30,6 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   add_definitions(-DXDNA_SHIM_DEBUG)
 endif()
 
-if(${UMQ_HELLO_TEST})
-  add_definitions(-DUMQ_HELLO_TEST)
-endif()
-
 target_compile_options(${XDNA_TARGET} PRIVATE
   "-fPIC"
   )

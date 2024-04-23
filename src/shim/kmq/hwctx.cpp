@@ -29,6 +29,8 @@ hw_ctx_kmq::
 hw_ctx_kmq(const device& device, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
   : hw_ctx(device, qos, std::make_unique<hw_q_kmq>(device), xclbin)
 {
+  hw_ctx::create_ctx_on_device();
+
   auto cu_info = get_cu_info();
   std::vector<char> cu_conf_param_buf(
     sizeof(amdxdna_hwctx_param_config_cu) + cu_info.size() * sizeof(amdxdna_cu_config));

@@ -16,7 +16,7 @@ public:
   ~hw_q_kmq();
 
   void
-  map_doorbell(uint32_t doorbell_offset);
+  bind_hwctx(const hw_ctx *ctx);
 
 protected:
   void
