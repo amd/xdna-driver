@@ -105,7 +105,7 @@ private:
   init_qos_info(const qos_type& qos);
 
   uint32_t
-  init_log_buf(int m_num_cols);
+  init_log_buf();
 
   void
   fini_log_buf();
