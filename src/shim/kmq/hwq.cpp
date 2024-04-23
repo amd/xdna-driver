@@ -79,9 +79,10 @@ submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
 
 void
 hw_q_kmq::
-map_doorbell(uint32_t doorbell_offset)
+bind_hwctx(const hw_ctx *ctx)
 {
-  //No-op
+  // link hwctx by parent class
+  hw_q::bind_hwctx(ctx);
 }
 
 } // shim_xdna

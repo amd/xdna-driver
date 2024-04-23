@@ -30,7 +30,7 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   add_definitions(-DXDNA_SHIM_DEBUG)
 endif()
 
-if(${UMQ_HELLO_TEST})
+if(${UMQ_HELLO_TEST} STREQUAL "UMQ_HELLO_TEST=y")
   add_definitions(-DUMQ_HELLO_TEST)
 endif()
 

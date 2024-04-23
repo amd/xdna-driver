@@ -25,7 +25,7 @@ public:
   dump_raw() const;
 
   void
-  map_doorbell(uint32_t doorbell_offset) override;
+  bind_hwctx(const hw_ctx *ctx);
 
   volatile host_queue_header_t *
   get_header_ptr() const;
@@ -35,12 +35,12 @@ protected:
   submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos) override;
 
 private:
-  std::unique_ptr<xrt_core::buffer_handle> umq_bo;
-  void *umq_bo_buf;
-  volatile host_queue_header_t *umq_hdr = nullptr;
-  volatile host_queue_packet_t *umq_pkt = nullptr;
+  std::unique_ptr<xrt_core::buffer_handle> m_umq_bo;
+  void *m_umq_bo_buf;
+  volatile host_queue_header_t *m_umq_hdr = nullptr;
+  volatile host_queue_packet_t *m_umq_pkt = nullptr;
 
-  volatile uint32_t *mapped_doorbell = nullptr;
+  volatile uint32_t *m_mapped_doorbell = nullptr;
 
   std::mutex m_mutex;
 
@@ -56,6 +56,8 @@ private:
   uint64_t
   issue_exec_buf(uint16_t cu_idx, ert_dpu_data *dpu_data, uint64_t comp);
 
+  void
+  map_doorbell(uint32_t doorbell_offset);
 };
 
 } // shim_xdna

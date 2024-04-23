@@ -34,7 +34,7 @@ hw_q_umq::
 hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
 {
 #ifdef UMQ_HELLO_TEST
-  const size_t header_sz = (2 << 20); // Hard code to 2MB
+  const size_t header_sz = 8192; // Hard code to 2 pages
   const size_t queue_sz = 0;
 #else
   const size_t header_sz = sizeof(host_queue_header_t);
@@ -42,24 +42,24 @@ hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
 #endif
   const size_t umq_sz = header_sz + queue_sz;
 
-  umq_bo = const_cast<device &>(dev).alloc_bo(umq_sz, XCL_BO_FLAGS_EXECBUF);
-  umq_bo_buf = umq_bo->map(bo::map_type::write);
-  umq_hdr = reinterpret_cast<volatile host_queue_header_t *>(umq_bo_buf);
-  umq_pkt = reinterpret_cast<volatile host_queue_packet_t *>
-    ((char *)umq_bo_buf + header_sz);
+  m_umq_bo = const_cast<device &>(dev).alloc_bo(umq_sz, XCL_BO_FLAGS_EXECBUF);
+  m_umq_bo_buf = m_umq_bo->map(bo::map_type::write);
+  m_umq_hdr = reinterpret_cast<volatile host_queue_header_t *>(m_umq_bo_buf);
+  m_umq_pkt = reinterpret_cast<volatile host_queue_packet_t *>
+    ((char *)m_umq_bo_buf + header_sz);
 
   // set all mapped memory to 0 
-  std::memset(umq_bo_buf, 0, umq_sz);
+  std::memset(m_umq_bo_buf, 0, umq_sz);
   
   for (int i = 0; i < nslots; i++)
-    mark_slot_invalid(&umq_pkt[i]);
+    mark_slot_invalid(&m_umq_pkt[i]);
 
-  umq_hdr->capacity = nslots;
+  m_umq_hdr->capacity = nslots;
   // data_address starts after header
-  umq_hdr->data_address = umq_bo->get_properties().paddr + header_sz;
+  m_umq_hdr->data_address = m_umq_bo->get_properties().paddr + header_sz;
 
   // this is the bo handler defined in parent class
-  m_queue_boh = static_cast<bo_umq*>(umq_bo.get())->get_drm_bo_handle();
+  m_queue_boh = static_cast<bo*>(m_umq_bo.get())->get_drm_bo_handle();
 
   shim_debug("Created UMQ HW queue");
 }
@@ -69,15 +69,15 @@ hw_q_umq::
 {
   shim_debug("Destroying UMA HW queue");
 
-  umq_bo->unmap(umq_bo_buf);
-  m_pdev.munmap(const_cast<uint32_t*>(mapped_doorbell), sizeof(uint32_t));
+  m_umq_bo->unmap(m_umq_bo_buf);
+  m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
 }
 
 void
 hw_q_umq::
 map_doorbell(uint32_t doorbell_offset)
 { 
-  mapped_doorbell = reinterpret_cast<volatile uint32_t *>(
+  m_mapped_doorbell = reinterpret_cast<volatile uint32_t *>(
     m_pdev.mmap(sizeof(uint32_t), PROT_WRITE, MAP_SHARED, doorbell_offset));
 }
 
@@ -85,7 +85,7 @@ volatile host_queue_header_t *
 hw_q_umq::
 get_header_ptr() const
 { 
-  return reinterpret_cast<volatile host_queue_header_t *>(umq_bo_buf);
+  return reinterpret_cast<volatile host_queue_header_t *>(m_umq_bo_buf);
 }
 
 void
@@ -99,9 +99,9 @@ dump() const
   shim_debug("\tCapacity:\t%d", h->capacity);
   shim_debug("\tData Addr:\t%p", h->data_address);
 
-  shim_debug("Dumping UMQ queue slot @%p:", umq_pkt);
+  shim_debug("Dumping UMQ queue slot @%p:", m_umq_pkt);
   for (int i = 0; i < h->capacity; i++) {
-    auto pkt = &umq_pkt[i];
+    auto pkt = &m_umq_pkt[i];
     shim_debug("==========slot %d==========", i);
     shim_debug("\ttype:\t\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.type));
     shim_debug("\tbarrier:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.barrier));
@@ -121,9 +121,9 @@ void
 hw_q_umq::
 dump_raw() const
 {
-  auto d = reinterpret_cast<volatile uint32_t *>(umq_pkt);
+  auto d = reinterpret_cast<volatile uint32_t *>(m_umq_pkt);
   auto sz = get_header_ptr()->capacity * sizeof(host_queue_packet_t) / sizeof(uint32_t);
-  shim_debug("Dumping raw UMQ queue slot data @%p, len=%ld WORDs:", umq_pkt, sz);
+  shim_debug("Dumping raw UMQ queue slot data @%p, len=%ld WORDs:", m_umq_pkt, sz);
   for (int i = 0; i < sz; i++)
     shim_debug("0x%08x", d[i]);
 }
@@ -159,7 +159,7 @@ volatile host_queue_packet_t *
 hw_q_umq::
 get_slot(uint64_t index)
 {
-  auto pkt = &umq_pkt[index & (get_header_ptr()->capacity - 1)];
+  auto pkt = &m_umq_pkt[index & (get_header_ptr()->capacity - 1)];
   if (is_slot_valid(pkt)) {
     shim_err(EINVAL, "Slot is ready before use! index=0x%lx", index);
     dump();
@@ -203,7 +203,7 @@ fill_slot_and_send(volatile host_queue_packet_t *pkt, void *payload, size_t size
   /* Always done as last step. */
   mark_slot_valid(pkt);
   /* Wake up CERT */
-  *mapped_doorbell = 0;
+  *m_mapped_doorbell = 0;
 }
 
 void
@@ -237,6 +237,16 @@ submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
   auto id = issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
   boh->set_cmd_id(id);
   shim_debug("Submitted command (%ld)", id);
+}
+
+void
+hw_q_umq::
+bind_hwctx(const hw_ctx *ctx)
+{
+  // link hwctx by parent class
+  hw_q::bind_hwctx(ctx);
+  // setup doorbell mapping by child class
+  map_doorbell(m_hwctx->get_doorbell());
 }
 
 } // shim_xdna
