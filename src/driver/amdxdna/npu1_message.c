@@ -397,6 +397,8 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	u32 shift = xdna->dev_info->dev_mem_buf_shift;
 	DECLARE_NPU_MSG(config_cu, MSG_OP_CONFIG_CU);
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
 	int ret, i;
 
 	if (!chann)
@@ -410,10 +412,24 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	for (i = 0; i < hwctx->cus->num_cus; i++) {
 		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
 
-		req.configs[i].pdi_addr = cu->xdna_addr >> shift;
-		req.configs[i].cu_func = cu->cu_func;
+		gobj = drm_gem_object_lookup(hwctx->client->filp, cu->cu_bo);
+		if (!gobj) {
+			XDNA_ERR(xdna, "Lookup GEM object failed");
+			return -EINVAL;
+		}
+		abo = to_xdna_obj(gobj);
+
+		if (abo->type != AMDXDNA_BO_DEV) {
+			drm_gem_object_put(gobj);
+			XDNA_ERR(xdna, "Invalid BO type");
+			return -EINVAL;
+		}
+
+		req.cfgs[i].pdi_addr = abo->mem.dev_addr >> shift;
+		req.cfgs[i].cu_func = cu->cu_func;
 		XDNA_DBG(xdna, "CU %d full addr 0x%llx, short addr 0x%x, cu func %d", i,
-			 cu->xdna_addr, req.configs[i].pdi_addr, req.configs[i].cu_func);
+			 abo->mem.dev_addr, req.cfgs[i].pdi_addr, req.cfgs[i].cu_func);
+		drm_gem_object_put(gobj);
 	}
 	req.num_cus = hwctx->cus->num_cus;
 

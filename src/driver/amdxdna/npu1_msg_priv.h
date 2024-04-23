@@ -279,7 +279,7 @@ struct config_cu_req {
 		u32	pdi_addr:17;
 		u32	cu_func:8;
 		u32	reserved:7;
-	} configs[MAX_NUM_CUS];
+	} cfgs[MAX_NUM_CUS];
 } __packed;
 
 struct config_cu_resp {

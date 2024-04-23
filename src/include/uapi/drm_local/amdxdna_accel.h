@@ -112,14 +112,14 @@ struct amdxdna_drm_destroy_hwctx {
 
 /**
  * struct amdxdna_cu_config - configuration for one CU
- * @xdna_addr: XDNA virtual address of configuration buffer
+ * @cu_bo: CU configuration buffer bo handle
  * @cu_func: Functional of a CU
  * @pad: MBZ
  */
 struct amdxdna_cu_config {
-	__u64 xdna_addr;
+	__u32 cu_bo;
 	__u8  cu_func;
-	__u8  pad[7];
+	__u8  pad[3];
 };
 
 /**
