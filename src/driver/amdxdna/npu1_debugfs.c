@@ -348,6 +348,7 @@ static ssize_t npu1_dbgfs_nputest(struct file *file, const char __user *ptr,
 	}
 	XDNA_DBG(ndev->xdna, "Got %d parameters\n", argc);
 
+	mutex_lock(&ndev->xdna->dev_lock);
 	/* args[0] is test case ID */
 	switch (args[0]) {
 	case 1:
@@ -362,6 +363,7 @@ static ssize_t npu1_dbgfs_nputest(struct file *file, const char __user *ptr,
 	default:
 		XDNA_ERR(ndev->xdna, "Unknown test case ID %d\n", args[0]);
 	}
+	mutex_unlock(&ndev->xdna->dev_lock);
 
 free_and_out:
 	kfree(kern_buff);

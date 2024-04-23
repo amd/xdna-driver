@@ -9,7 +9,7 @@
 #include "npu_common.h"
 #include "npu1_pci.h"
 
-#define HWCTX_MAX_TIMEOUT	5000 /* miliseconds */
+#define HWCTX_MAX_TIMEOUT	16000 /* miliseconds */
 
 int start_col_index = -1;
 module_param(start_col_index, int, 0600);
@@ -78,14 +78,14 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 	ret = npu1_create_context(xdna->dev_handle, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Create hwctx failed, ret %d", ret);
-		return ret;
+		goto out;
 	}
 
 	ret = npu1_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
 				heap->mem.userptr, heap->mem.size);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buf failed, ret %d", ret);
-		return ret;
+		goto out;
 	}
 
 	if (hwctx->status != HWCTX_STAT_READY) {
@@ -96,12 +96,12 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 	ret = npu1_config_cu(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
-		return ret;
+		goto out;
 	}
 out:
 	drm_sched_start(&hwctx->priv->sched, true);
-	XDNA_DBG(xdna, "%s restarted", hwctx->name);
-	return 0;
+	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
+	return ret;
 }
 
 void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
@@ -148,19 +148,19 @@ static int npu1_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_sched_job *job;
 
-	spin_lock(&hwctx->priv->io_lock);
+	mutex_lock(&hwctx->priv->io_lock);
 	if (!hwctx->priv->seq) {
-		spin_unlock(&hwctx->priv->io_lock);
+		mutex_unlock(&hwctx->priv->io_lock);
 		return 0;
 	}
 
 	job = npu1_hwctx_get_job(hwctx, hwctx->priv->seq - 1);
 	if (IS_ERR_OR_NULL(job)) {
-		spin_unlock(&hwctx->priv->io_lock);
+		mutex_unlock(&hwctx->priv->io_lock);
 		XDNA_WARN(hwctx->client->xdna, "Corrupted pending list");
 		return 0;
 	}
-	spin_unlock(&hwctx->priv->io_lock);
+	mutex_unlock(&hwctx->priv->io_lock);
 
 	wait_event(hwctx->priv->job_free_wq, !job->fence);
 
@@ -404,7 +404,7 @@ int npu1_hwctx_init(struct amdxdna_hwctx *hwctx)
 	hwctx->priv->heap = heap;
 
 	sched = &hwctx->priv->sched;
-	spin_lock_init(&hwctx->priv->io_lock);
+	mutex_init(&hwctx->priv->io_lock);
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
 			     HWCTX_MAX_CMDS, 0, msecs_to_jiffies(HWCTX_MAX_TIMEOUT),
 			     NULL, NULL, hwctx->name, xdna->ddev.dev);
@@ -498,6 +498,7 @@ void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	amdxdna_gem_unpin(hwctx->priv->heap);
 	amdxdna_put_dev_heap(hwctx->priv->heap);
 
+	mutex_destroy(&hwctx->priv->io_lock);
 	kfree(hwctx->col_list);
 	kfree(hwctx->priv);
 	kfree(hwctx->cus);
@@ -600,16 +601,16 @@ int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 
-	spin_lock(&hwctx->priv->io_lock);
+	mutex_lock(&hwctx->priv->io_lock);
 	ret = npu1_hwctx_add_job(hwctx, job);
 	if (ret) {
-		spin_unlock(&hwctx->priv->io_lock);
+		mutex_unlock(&hwctx->priv->io_lock);
 		goto unlock_resv;
 	}
 
 	*seq = job->seq;
 	drm_sched_entity_push_job(&job->base);
-	spin_unlock(&hwctx->priv->io_lock);
+	mutex_unlock(&hwctx->priv->io_lock);
 
 	return 0;
 
@@ -628,21 +629,21 @@ int npu1_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	struct dma_fence *out_fence;
 	int ret;
 
-	spin_lock(&hwctx->priv->io_lock);
+	mutex_lock(&hwctx->priv->io_lock);
 	job = npu1_hwctx_get_job(hwctx, seq);
 	if (IS_ERR(job)) {
-		spin_unlock(&hwctx->priv->io_lock);
+		mutex_unlock(&hwctx->priv->io_lock);
 		ret = PTR_ERR(job);
 		goto out;
 	}
 
 	if (unlikely(!job)) {
-		spin_unlock(&hwctx->priv->io_lock);
+		mutex_unlock(&hwctx->priv->io_lock);
 		ret = 0;
 		goto out;
 	}
 	out_fence = dma_fence_get(job->out_fence);
-	spin_unlock(&hwctx->priv->io_lock);
+	mutex_unlock(&hwctx->priv->io_lock);
 
 	if (timeout)
 		remaining = msecs_to_jiffies(timeout);
