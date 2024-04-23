@@ -3,6 +3,7 @@
 
 #include "hwctx.h"
 #include "hwq.h"
+#include "../bo.h"
 
 #include "core/common/config_reader.h"
 #include "core/common/memalign.h"
@@ -17,7 +18,7 @@ print_cu_config(amdxdna_hwctx_param_config_cu *config)
   auto conf = config->cu_configs;
 
   for (uint16_t i = 0; i < n; i++)
-    shim_debug("CU_CONF: paddr=%p, func=%d", conf[i].xdna_addr, conf[i].cu_func);
+    shim_debug("CU_CONF: bo %d func=%d", conf[i].cu_bo, conf[i].cu_func);
 }
 
 }
@@ -43,12 +44,11 @@ hw_ctx_kmq(const device& device, const xrt::xclbin& xclbin, const xrt::hw_contex
     auto& pdi_bo = m_pdi_bos[i];
     auto pdi_vaddr = reinterpret_cast<char *>(
       pdi_bo->map(xrt_core::buffer_handle::map_type::write));
-    auto pdi_paddr = pdi_bo->get_properties().paddr;
 
     auto& cf = cu_conf_param->cu_configs[i];
     std::memcpy(pdi_vaddr, ci.m_pdi.data(), ci.m_pdi.size());
     pdi_bo->sync(xrt_core::buffer_handle::direction::host2device, pdi_bo->get_properties().size, 0);
-    cf.xdna_addr = pdi_paddr;
+    cf.cu_bo = static_cast<bo*>(pdi_bo.get())->get_drm_bo_handle();
     cf.cu_func = ci.m_func;
   }
 
