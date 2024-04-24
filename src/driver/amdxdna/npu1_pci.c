@@ -559,38 +559,44 @@ static int npu1_get_aie_status(struct amdxdna_dev *xdna,
 static int npu1_get_aie_metadata(struct amdxdna_dev *xdna,
 				 struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_aie_metadata meta;
+	struct amdxdna_drm_query_aie_metadata *meta;
 	struct npu_device *ndev = xdna->dev_handle;
+	int ret = 0;
 
-	meta.col_size = ndev->metadata.size;
-	meta.cols = ndev->metadata.cols;
-	meta.rows = ndev->metadata.rows;
+	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
+	if (!meta)
+		return -ENOMEM;
 
-	meta.version.major = ndev->metadata.version.major;
-	meta.version.minor = ndev->metadata.version.minor;
+	meta->col_size = ndev->metadata.size;
+	meta->cols = ndev->metadata.cols;
+	meta->rows = ndev->metadata.rows;
 
-	meta.core.row_count = ndev->metadata.core.row_count;
-	meta.core.row_start = ndev->metadata.core.row_start;
-	meta.core.dma_channel_count = ndev->metadata.core.dma_channel_count;
-	meta.core.lock_count = ndev->metadata.core.lock_count;
-	meta.core.event_reg_count = ndev->metadata.core.event_reg_count;
+	meta->version.major = ndev->metadata.version.major;
+	meta->version.minor = ndev->metadata.version.minor;
 
-	meta.mem.row_count = ndev->metadata.mem.row_count;
-	meta.mem.row_start = ndev->metadata.mem.row_start;
-	meta.mem.dma_channel_count = ndev->metadata.mem.dma_channel_count;
-	meta.mem.lock_count = ndev->metadata.mem.lock_count;
-	meta.mem.event_reg_count = ndev->metadata.mem.event_reg_count;
+	meta->core.row_count = ndev->metadata.core.row_count;
+	meta->core.row_start = ndev->metadata.core.row_start;
+	meta->core.dma_channel_count = ndev->metadata.core.dma_channel_count;
+	meta->core.lock_count = ndev->metadata.core.lock_count;
+	meta->core.event_reg_count = ndev->metadata.core.event_reg_count;
 
-	meta.shim.row_count = ndev->metadata.shim.row_count;
-	meta.shim.row_start = ndev->metadata.shim.row_start;
-	meta.shim.dma_channel_count = ndev->metadata.shim.dma_channel_count;
-	meta.shim.lock_count = ndev->metadata.shim.lock_count;
-	meta.shim.event_reg_count = ndev->metadata.shim.event_reg_count;
+	meta->mem.row_count = ndev->metadata.mem.row_count;
+	meta->mem.row_start = ndev->metadata.mem.row_start;
+	meta->mem.dma_channel_count = ndev->metadata.mem.dma_channel_count;
+	meta->mem.lock_count = ndev->metadata.mem.lock_count;
+	meta->mem.event_reg_count = ndev->metadata.mem.event_reg_count;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &meta, sizeof(meta)))
-		return -EFAULT;
+	meta->shim.row_count = ndev->metadata.shim.row_count;
+	meta->shim.row_start = ndev->metadata.shim.row_start;
+	meta->shim.dma_channel_count = ndev->metadata.shim.dma_channel_count;
+	meta->shim.lock_count = ndev->metadata.shim.lock_count;
+	meta->shim.event_reg_count = ndev->metadata.shim.event_reg_count;
 
-	return 0;
+	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, sizeof(*meta)))
+		ret = -EFAULT;
+
+	kfree(meta);
+	return ret;
 }
 
 static int npu1_get_aie_version(struct amdxdna_dev *xdna,
@@ -611,56 +617,73 @@ static int npu1_get_aie_version(struct amdxdna_dev *xdna,
 static int npu1_get_clock_metadata(struct amdxdna_dev *xdna,
 				   struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_clock_metadata clock;
+	struct amdxdna_drm_query_clock_metadata *clock;
 	struct npu_device *ndev = xdna->dev_handle;
+	int ret = 0;
 
-	memcpy(clock.mp_npu_clock.name, ndev->mp_npu_clock.name,
-	       sizeof(clock.mp_npu_clock.name));
-	clock.mp_npu_clock.freq_mhz = ndev->mp_npu_clock.freq_mhz;
-	memcpy(clock.h_clock.name, ndev->h_clock.name, sizeof(clock.h_clock.name));
-	clock.h_clock.freq_mhz = ndev->h_clock.freq_mhz;
+	clock = kzalloc(sizeof(*clock), GFP_KERNEL);
+	if (!clock)
+		return -ENOMEM;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &clock, sizeof(clock)))
-		return -EFAULT;
+	memcpy(clock->mp_npu_clock.name, ndev->mp_npu_clock.name,
+	       sizeof(clock->mp_npu_clock.name));
+	clock->mp_npu_clock.freq_mhz = ndev->mp_npu_clock.freq_mhz;
+	memcpy(clock->h_clock.name, ndev->h_clock.name, sizeof(clock->h_clock.name));
+	clock->h_clock.freq_mhz = ndev->h_clock.freq_mhz;
 
-	return 0;
+	if (copy_to_user(u64_to_user_ptr(args->buffer), clock, sizeof(*clock)))
+		ret = -EFAULT;
+
+	kfree(clock);
+	return ret;
 }
 
 static int npu1_get_sensors(struct amdxdna_dev *xdna,
 			    struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_sensor sensor;
+	struct amdxdna_drm_query_sensor *sensor;
+	int ret = 0;
 
-	sensor.type = AMDXDNA_SENSOR_TYPE_POWER;
-	sensor.input = 1234; /* TODO: query the device and get the power data */
-	sensor.unitm = -3; /* in milliwatts */
-	snprintf(sensor.label, sizeof(sensor.label), "Total Power");
-	snprintf(sensor.units, sizeof(sensor.units), "mW");
+	sensor = kzalloc(sizeof(*sensor), GFP_KERNEL);
+	if (!sensor)
+		return -ENOMEM;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &sensor, sizeof(sensor)))
-		return -EFAULT;
+	sensor->type = AMDXDNA_SENSOR_TYPE_POWER;
+	sensor->input = 1234; /* TODO: query the device and get the power data */
+	sensor->unitm = -3; /* in milliwatts */
+	snprintf(sensor->label, sizeof(sensor->label), "Total Power");
+	snprintf(sensor->units, sizeof(sensor->units), "mW");
 
-	return 0;
+	if (copy_to_user(u64_to_user_ptr(args->buffer), sensor, sizeof(*sensor)))
+		ret = -EFAULT;
+
+	kfree(sensor);
+	return ret;
 }
 
 static int npu1_get_hwctx_status(struct amdxdna_dev *xdna,
 				 struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_hwctx __user *buf;
-	struct amdxdna_drm_query_hwctx tmp;
+	struct amdxdna_drm_query_hwctx *tmp;
 	struct amdxdna_client *client;
 	struct amdxdna_hwctx *hwctx;
 	bool overflow = false;
 	u32 req_bytes = 0;
 	u32 hw_i = 0;
-	int next = 0;
 	int ret = 0;
+	int next;
 	int idx;
+
+	tmp = kzalloc(sizeof(*tmp), GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
 
 	buf = u64_to_user_ptr(args->buffer);
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&client->hwctx_srcu);
+		next = 0;
 		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 			req_bytes += sizeof(tmp);
 			if (args->buffer_size < req_bytes) {
@@ -669,18 +692,18 @@ static int npu1_get_hwctx_status(struct amdxdna_dev *xdna,
 				continue;
 			}
 
-			tmp.pid = client->pid;
-			tmp.context_id = hwctx->id;
-			tmp.start_col = hwctx->start_col;
-			tmp.num_col = hwctx->num_col;
-			tmp.command_submissions = hwctx->priv->seq;
+			tmp->pid = client->pid;
+			tmp->context_id = hwctx->id;
+			tmp->start_col = hwctx->start_col;
+			tmp->num_col = hwctx->num_col;
+			tmp->command_submissions = hwctx->priv->seq;
 			/* TODO Not implemented section */
-			tmp.command_completions = 0;
-			tmp.migrations = 0;
-			tmp.preemptions = 0;
-			tmp.errors = 0;
+			tmp->command_completions = 0;
+			tmp->migrations = 0;
+			tmp->preemptions = 0;
+			tmp->errors = 0;
 
-			if (copy_to_user(&buf[hw_i], &tmp, sizeof(tmp))) {
+			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;
 				srcu_read_unlock(&client->hwctx_srcu, idx);
 				mutex_unlock(&xdna->dev_lock);
@@ -699,6 +722,7 @@ static int npu1_get_hwctx_status(struct amdxdna_dev *xdna,
 	}
 
 out:
+	kfree(tmp);
 	args->buffer_size = req_bytes;
 	return ret;
 }
