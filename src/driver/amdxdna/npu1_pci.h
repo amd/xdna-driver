@@ -14,6 +14,9 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_ctx.h"
 #include "npu_mailbox.h"
+#ifdef AMDXDNA_DEVEL
+#include "amdxdna_devel.h"
+#endif
 
 #define NPU_INTERVAL	20000	/* us */
 #define NPU_TIMEOUT	1000000	/* us */
@@ -130,6 +133,15 @@ struct rt_config {
 	u32	value;
 };
 
+#ifdef AMDXDNA_DEVEL
+struct hwctx_pdi {
+	int			id;
+	int			registered;
+	size_t			size;
+	void			*addr;
+	dma_addr_t		dma_addr;
+};
+#endif
 /*
  * Define the maximum number of pending commands in a hardware context.
  * Must be power of 2!
@@ -138,6 +150,9 @@ struct rt_config {
 struct npu_hwctx {
 	struct amdxdna_gem_obj		*heap;
 	void				*mbox_chann;
+#ifdef AMDXDNA_DEVEL
+	struct hwctx_pdi		*pdi_infos;
+#endif
 
 	struct drm_gpu_scheduler	sched;
 	struct drm_sched_entity		entity;
@@ -200,6 +215,9 @@ struct npu_dev_priv {
 	struct npu_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
 	u32			smu_mpnpuclk_freq_max;
 	u32			smu_hclk_freq_max;
+#ifdef AMDXDNA_DEVEL
+	struct rt_config	dbg_rt_cfgs;
+#endif
 };
 
 /* npu1_pci.c */
@@ -245,6 +263,11 @@ int npu1_query_status(struct npu_device *ndev, char *buf, u32 size, u32 *cols_fi
 int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void*, const u32 *, size_t));
 int npu1_self_test(struct npu_device *ndev);
+#ifdef AMDXDNA_DEVEL
+int npu1_register_pdis(struct amdxdna_hwctx *hwctx);
+int npu1_unregister_pdis(struct amdxdna_hwctx *hwctx);
+int npu1_legacy_config_cu(struct amdxdna_hwctx *hwctx);
+#endif
 
 int npu1_config_cu(struct amdxdna_hwctx *hwctx);
 int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,

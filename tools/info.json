@@ -7,10 +7,10 @@
 	"firmwares": [
 		{
 			"device": "npu1",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.3.0.284",
+			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.3.0.288",
 			"pci_device_id": "1502",
 			"pci_revision_id": "00",
-			"version": "1.3.0.284",
+			"version": "1.3.0.288",
 			"fw_name": "npu.sbin"
 		},
 		{
@@ -18,7 +18,7 @@
 			"url": "",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "00",
-			"version": "0.7.11.139",
+			"version": "0.7.11.147",
 			"fw_name": "npu.sbin"
 		},
 		{
@@ -26,7 +26,7 @@
 			"url": "",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "10",
-			"version": "0.7.11.68",
+			"version": "0.7.11.78",
 			"fw_name": "npu.sbin"
 		}
 	]

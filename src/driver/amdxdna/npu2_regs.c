@@ -56,7 +56,7 @@
 #define NPU2_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
 #define NPU2_RT_CFG_TYPE_PDI_LOAD 5
-
+#define NPU2_RT_CFG_VAL_PDI_LOAD_MGMT 0
 #define NPU2_RT_CFG_VAL_PDI_LOAD_APP 1
 
 #define NPU2_MPNPUCLK_FREQ_MAX  1267
@@ -93,6 +93,9 @@ const struct npu_dev_priv npu2_dev_priv = {
 	},
 	.smu_mpnpuclk_freq_max = NPU2_MPNPUCLK_FREQ_MAX,
 	.smu_hclk_freq_max     = NPU2_HCLK_FREQ_MAX,
+#ifdef AMDXDNA_DEVEL
+	.dbg_rt_cfgs = {NPU2_RT_CFG_TYPE_PDI_LOAD, NPU2_RT_CFG_VAL_PDI_LOAD_MGMT},
+#endif
 };
 
 const struct amdxdna_dev_info dev_npu2_info = {

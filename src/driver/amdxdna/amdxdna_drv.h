@@ -116,6 +116,9 @@ struct amdxdna_dev {
 	struct mutex			dev_lock; /* protect client list, dev_info->ops, xrt_hdl */
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
+#ifdef AMDXDNA_DEVEL
+	struct ida			pdi_ida;
+#endif
 };
 
 /*

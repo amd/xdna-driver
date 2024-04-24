@@ -93,11 +93,24 @@ static int npu1_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
+#ifdef AMDXDNA_DEVEL
+	if (priv_load) {
+		ret = npu1_legacy_config_cu(hwctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Legacy config cu failed, ret %d", ret);
+			goto out;
+		}
+		goto skip_config_cu;
+	}
+#endif
 	ret = npu1_config_cu(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
 		goto out;
 	}
+#ifdef AMDXDNA_DEVEL
+skip_config_cu:
+#endif
 out:
 	drm_sched_start(&hwctx->priv->sched, true);
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
@@ -497,6 +510,10 @@ void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	amdxdna_gem_unpin(hwctx->priv->heap);
 	amdxdna_put_dev_heap(hwctx->priv->heap);
+#ifdef AMDXDNA_DEVEL
+	if (priv_load)
+		npu1_unregister_pdis(hwctx);
+#endif
 
 	mutex_destroy(&hwctx->priv->io_lock);
 	kfree(hwctx->col_list);
@@ -517,6 +534,11 @@ static int npu1_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 		return -EINVAL;
 	}
 
+	if (!config->num_cus) {
+		XDNA_ERR(xdna, "Number of CU is zero");
+		return -EINVAL;
+	}
+
 	total_size = struct_size(config, cu_configs, config->num_cus);
 	if (total_size > size) {
 		XDNA_ERR(xdna, "CU config larger than size");
@@ -527,17 +549,41 @@ static int npu1_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 	if (!hwctx->cus)
 		return -ENOMEM;
 
+#ifdef AMDXDNA_DEVEL
+	if (priv_load) {
+		ret = npu1_register_pdis(hwctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Register PDIs failed, ret %d", ret);
+			goto free_cus;
+		}
+
+		ret = npu1_legacy_config_cu(hwctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Legacy config cu failed, ret %d", ret);
+			npu1_unregister_pdis(hwctx);
+			goto free_cus;
+		}
+
+		goto skip_config_cu;
+	}
+#endif
 	ret = npu1_config_cu(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Configu CU to firmware failed, ret %d", ret);
-		kfree(hwctx->cus);
-		hwctx->cus = NULL;
-		return ret;
+		goto free_cus;
 	}
 
+#ifdef AMDXDNA_DEVEL
+skip_config_cu:
+#endif
 	wmb(); /* To avoid locking in command submit when check status */
 	hwctx->status = HWCTX_STAT_READY;
 
+	return 0;
+
+free_cus:
+	kfree(hwctx->cus);
+	hwctx->cus = NULL;
 	return ret;
 }
 

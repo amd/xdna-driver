@@ -56,7 +56,7 @@
 #define NPU4_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
 #define NPU4_RT_CFG_TYPE_PDI_LOAD 5
-
+#define NPU4_RT_CFG_VAL_PDI_LOAD_MGMT 0
 #define NPU4_RT_CFG_VAL_PDI_LOAD_APP 1
 
 #define NPU4_MPNPUCLK_FREQ_MAX  1267
@@ -91,9 +91,11 @@ const struct npu_dev_priv npu4_dev_priv = {
 		DEFINE_BAR_OFFSET(SMU_RESP_REG, NPU4_SMU, MP1_C2PMSG_61),
 		DEFINE_BAR_OFFSET(SMU_OUT_REG,  NPU4_SMU, MP1_C2PMSG_60),
 	},
-
 	.smu_mpnpuclk_freq_max = NPU4_MPNPUCLK_FREQ_MAX,
 	.smu_hclk_freq_max     = NPU4_HCLK_FREQ_MAX,
+#ifdef AMDXDNA_DEVEL
+	.dbg_rt_cfgs = {NPU4_RT_CFG_TYPE_PDI_LOAD, NPU4_RT_CFG_VAL_PDI_LOAD_MGMT},
+#endif
 };
 
 const struct amdxdna_dev_info dev_npu4_info = {

@@ -290,6 +290,9 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
 
+#ifdef AMDXDNA_DEVEL
+	ida_init(&xdna->pdi_ida);
+#endif
 	return 0;
 
 failed_sysfs_fini:
@@ -315,6 +318,9 @@ static void amdxdna_remove(struct pci_dev *pdev)
 
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
+#ifdef AMDXDNA_DEVEL
+	ida_destroy(&xdna->pdi_ida);
+#endif
 }
 
 static int amdxdna_pmops_suspend(struct device *dev)

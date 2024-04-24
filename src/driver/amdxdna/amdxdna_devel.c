@@ -13,6 +13,10 @@ int iommu_mode;
 module_param(iommu_mode, int, 0644);
 MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID, 2 = Bypass");
 
+bool priv_load;
+module_param(priv_load, bool, 0644);
+MODULE_PARM_DESC(priv_load, "Privileged loading runtime configure (Default false)");
+
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = NULL;

@@ -13,9 +13,6 @@
 #include "npu_solver.h"
 #include "npu_common.h"
 #include "npu1_msg_priv.h"
-#ifdef AMDXDNA_DEVEL
-#include "amdxdna_devel.h"
-#endif
 
 int npu1_max_col = XRS_MAX_COL;
 module_param(npu1_max_col, int, 0600);
@@ -108,6 +105,13 @@ static int npu1_runtime_cfg(struct npu_device *ndev)
 	u64 value;
 	int ret;
 
+#ifdef AMDXDNA_DEVEL
+	if (priv_load) {
+		cfg = &ndev->priv->dbg_rt_cfgs;
+		XDNA_INFO(ndev->xdna, "Set runtime type %d value %d",
+			  cfg->type, cfg->value);
+	}
+#endif
 	ret = npu1_set_runtime_cfg(ndev, cfg->type, cfg->value);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set runtime type %d value %d failed",
