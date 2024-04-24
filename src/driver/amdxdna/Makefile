@@ -35,6 +35,7 @@ amdxdna-y := \
 	npu1_regs.o \
 	npu2_regs.o \
 	npu4_regs.o \
+	npu5_regs.o \
 	amdxdna_drv.o
 
 # Helper functions for amdxdna development, but not for upstreaming

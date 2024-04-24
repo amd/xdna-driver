@@ -159,5 +159,6 @@ struct amdxdna_client {
 extern const struct amdxdna_dev_info dev_npu1_info;
 extern const struct amdxdna_dev_info dev_npu2_info;
 extern const struct amdxdna_dev_info dev_npu4_info;
+extern const struct amdxdna_dev_info dev_npu5_info;
 
 #endif /* _AMDXDNA_DRV_H_ */
