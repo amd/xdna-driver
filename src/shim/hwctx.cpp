@@ -188,7 +188,7 @@ create_ctx_on_device()
   arg.umq_bo = m_q->get_queue_bo();
   arg.max_opc = m_ops_per_cycle;
   arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
-  //arg.log_buf_bo = init_log_buf();
+  arg.log_buf_bo = init_log_buf();
   m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 
   set_slotidx(arg.handle);
@@ -209,10 +209,9 @@ delete_ctx_on_device()
   arg.handle = m_handle;
   m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
 
-  //fini_log_buf();
+  fini_log_buf();
 }
 
-/*
 uint32_t
 hw_ctx::
 init_log_buf()
@@ -231,7 +230,6 @@ fini_log_buf(void)
 {
   m_log_bo->unmap(m_log_buf);
 }
-*/
 
 void
 hw_ctx::

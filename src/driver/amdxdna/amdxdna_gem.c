@@ -9,7 +9,8 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_gem.h"
 
-#define XDNA_32K_ALIGN 0x8000
+#define XDNA_32K_ALIGN		0x8000
+#define XDNA_MAX_CMD_BO_SIZE	0x8000
 
 static int amdxdna_pin_pages(struct amdxdna_mem *mem)
 {
@@ -284,7 +285,7 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 	struct amdxdna_gem_obj *abo;
 	int ret;
 
-	if (args->size > PAGE_SIZE) {
+	if (args->size > XDNA_MAX_CMD_BO_SIZE) {
 		XDNA_ERR(xdna, "Command bo size 0x%llx too large", args->size);
 		return ERR_PTR(-EINVAL);
 	}
