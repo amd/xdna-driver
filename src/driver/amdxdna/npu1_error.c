@@ -189,6 +189,12 @@ static u32 npu1_error_backtrack(struct npu_device *ndev, void *err_info, u32 num
 			 err->row, err->col, err->mod_type,
 			 err->event_id, cat);
 
+		if (err->col >= 32) {
+			/* If you see this, contact NPU firmware team */
+			XDNA_WARN(ndev->xdna, "Device has more than 32 columns?");
+			break;
+		}
+
 		err_col |= (1 << err->col);
 		memset(err, AIE_ERR_SENTINEL, sizeof(*err));
 	}
