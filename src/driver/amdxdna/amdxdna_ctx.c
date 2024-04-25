@@ -423,7 +423,7 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client,
 	}
 
 	if (to_gobj(cmd_bo)->size <
-	    offsetof(struct amdxdna_cmd, data[job->cmd->extra_cu_masks])) {
+	    offsetof(struct amdxdna_cmd, data[1 + job->cmd->extra_cu_masks])) {
 		XDNA_DBG(xdna, "Invalid extra_cu_masks");
 		ret = -EINVAL;
 		goto unlock_srcu;
@@ -433,7 +433,7 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client,
 	job->hwctx = hwctx;
 	job->mm = current->mm;
 
-	cu_mask = &job->cmd->cu_mask;
+	cu_mask = job->cmd->data;
 	for (i = 0; i < 1 + job->cmd->extra_cu_masks; i++) {
 		job->cu_idx = ffs(cu_mask[i]) - 1;
 

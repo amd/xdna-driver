@@ -259,9 +259,9 @@ npu1_sched_job_run(struct drm_sched_job *sched_job)
 
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
-	cmd_buf = &job->cmd->data[job->cmd->extra_cu_masks];
+	cmd_buf = &job->cmd->data[1 + job->cmd->extra_cu_masks];
 	buf_len = to_gobj(job->cmd_abo)->size -
-		offsetof(struct amdxdna_cmd, data[job->cmd->extra_cu_masks]);
+		offsetof(struct amdxdna_cmd, data[1 + job->cmd->extra_cu_masks]);
 	ret = npu1_execbuf(hwctx, job->cu_idx, cmd_buf, buf_len, job,
 			   npu1_sched_resp_handler);
 	if (ret) {
