@@ -826,9 +826,12 @@ io_test_bo_content_init(io_test_bo_set& io_test_bos, std::string& local_data_pat
         auto instruction_p = ibo->tbo->map();
         read_instructions_from_txt(local_data_path + instr_file, instruction_p);
         if (io_test_parameters.type == IO_TEST_BAD_RUN) {
-          /* this is like hack line 180 and 181 in mc_code.txt */
-          instruction_p[91] = 0xFFFFFFFF;
-          instruction_p[92] = 0xFFFFFFFF;
+          std::memset(instruction_p, 0, ibo->tbo->size());
+          // Error Event ID: 64
+          instruction_p[0] = 0x02000000;
+          instruction_p[1] = 0x00034008;
+          instruction_p[2] = 0x00000040;
+          std::cout << "Expected \"Row: 0, Col: 1, module 2, event ID 64, category 4\" on dmesg" << std::endl;
         }
       }
       break;
