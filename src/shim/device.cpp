@@ -28,6 +28,8 @@ inline const shim_xdna::pdev&
 get_pcidev_impl(const xrt_core::device* device)
 {
   auto device_impl = dynamic_cast<const shim_xdna::device*>(device);
+  if (!device_impl)
+    throw xrt_core::error("Invalid device handle");
   return device_impl->get_pdev();
 }
 
@@ -395,7 +397,6 @@ struct default_value
     default:
       throw xrt_core::query::no_such_key(key);
     }
-    throw xrt_core::query::no_such_key(key);
   }
 
 };
@@ -521,8 +522,8 @@ struct xclbin_name
     if (key != key_type::xclbin_name)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    const auto pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-    auto fmt = boost::format("bins/%04x_%02x/%s") % pcie_id.device_id % static_cast<uint16_t>(pcie_id.revision_id);
+    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+    auto& fmt = boost::format("bins/%04x_%02x/%s") % pcie_id.device_id % static_cast<uint16_t>(pcie_id.revision_id);
 
     std::string xclbin_name;
     const auto xclbin_type = std::any_cast<xrt_core::query::xclbin_name::type>(param);

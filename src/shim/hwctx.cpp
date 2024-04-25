@@ -39,7 +39,11 @@ hw_ctx(const device& dev, const qos_type& qos, std::unique_ptr<hw_q> q, const xr
 hw_ctx::
 ~hw_ctx()
 {
-  delete_ctx_on_device();
+	try {
+    delete_ctx_on_device();
+  } catch (const xrt_core::system_error& e) {
+    shim_debug("Failed to delete context on device: %s", e.what());
+  }
   shim_debug("Destroyed HW context (%d)...", m_handle);
 }
 
@@ -216,10 +220,10 @@ uint32_t
 hw_ctx::
 init_log_buf()
 {
-  m_log_buf_size = m_num_cols * 1024;
-  m_log_bo = alloc_bo(nullptr, m_log_buf_size, XCL_BO_FLAGS_EXECBUF);
+  auto log_buf_size = m_num_cols * 1024;
+  m_log_bo = alloc_bo(nullptr, log_buf_size, XCL_BO_FLAGS_EXECBUF);
   m_log_buf = m_log_bo->map(bo::map_type::write);
-  std::memset(m_log_buf, 0, m_log_buf_size);
+  std::memset(m_log_buf, 0, log_buf_size);
 
   return static_cast<bo*>(m_log_bo.get())->get_drm_bo_handle();
 }

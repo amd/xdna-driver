@@ -199,6 +199,8 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
   std::stringstream ss(line);
   ss >> key >> num_outputs;
   ss.clear();
+  if (num_outputs > 10000)
+      throw std::runtime_error("num_outputs is too big");
 
   for (int i = 0; i < num_outputs; i++) {
     getline(myfile, line);
