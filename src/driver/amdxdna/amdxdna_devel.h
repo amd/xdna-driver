@@ -16,6 +16,7 @@
 #define AMDXDNA_IOMMU_BYPASS 2
 extern int iommu_mode;
 extern bool priv_load;
+extern int start_col_index;
 
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *aie);
 struct sg_table *amdxdna_alloc_sgt(struct amdxdna_dev *aie, size_t sz,

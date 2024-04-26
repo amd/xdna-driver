@@ -17,6 +17,10 @@ bool priv_load;
 module_param(priv_load, bool, 0644);
 MODULE_PARM_DESC(priv_load, "Privileged loading runtime configure (Default false)");
 
+int start_col_index = -1;
+module_param(start_col_index, int, 0600);
+MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)");
+
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = NULL;
