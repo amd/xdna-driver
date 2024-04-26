@@ -38,6 +38,7 @@ const uint16_t npu2_device_id = 0x17f0;
 const uint16_t npu3_device_id = 0x1569;
 const uint16_t npu2_revision_id = 0x0;
 const uint16_t npu4_revision_id = 0x10;
+const uint16_t npu5_revision_id = 0x11;
 
 std::string program;
 // Test harness setup helpers
@@ -366,7 +367,29 @@ xclbin_info xclbin_infos[] = {
     },
     .workspace = "npu4_workspace",
   },
-
+  {
+    .name = "1x4.xclbin",
+    .device = npu2_device_id,
+    .revision_id = npu5_revision_id,
+    .ip_name2idx = {
+      { "DPU_PDI_0:IPUV1CNN",         {0} },
+      { "DPU_PDI_1:IPUV1CNN",         {1} },
+      { "DPU_PDI_2:IPUV1CNN",         {2} },
+      { "DPU_PDI_3:IPUV1CNN",         {3} },
+      { "DPU_PDI_4:IPUV1CNN",         {4} },
+      { "DPU_PDI_5:IPUV1CNN",         {5} },
+      { "DPU_PDI_6:IPUV1CNN",         {6} },
+      { "DPU_PDI_7:IPUV1CNN",         {7} },
+      { "DPU_PDI_8:IPUV1CNN",         {8} },
+      { "DPU_PDI_9:IPUV1CNN",         {9} },
+      { "DPU_PDI_10:IPUV1CNN",        {10} },
+      { "DPU_PDI_11:IPUV1CNN",        {11} },
+      { "DPU_PDI_12:IPUV1CNN",        {12} },
+      { "DPU_PDI_13:IPUV1CNN",        {13} },
+      { "DPU_PDI_14:IPUV1CNN",        {14} },
+    },
+    .workspace = "npu5_workspace",
+  }
 };
 
 const xclbin_info&
