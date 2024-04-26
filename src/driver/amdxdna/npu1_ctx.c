@@ -11,10 +11,6 @@
 
 #define HWCTX_MAX_TIMEOUT	16000 /* miliseconds */
 
-int start_col_index = -1;
-module_param(start_col_index, int, 0600);
-MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)");
-
 static inline int
 npu1_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 {
@@ -339,27 +335,8 @@ static int npu1_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 	if (ndev->priv->col_align == COL_ALIGN_NATURE)
 		width = hwctx->num_col;
 
-	if (start_col_index == -1) {
-		/*
-		 * In range [start, end], find out columns that is multiple of width.
-		 *	'first' is the first column,
-		 *	'last' is the last column,
-		 *	'entries' is the total number of columns.
-		 */
-		start =  xdna->dev_info->first_col;
-		end =  ndev->total_col - hwctx->num_col;
-		first = start + (width - start % width) % width;
-		last = end - end % width;
-		if (last >= first)
-			entries = (last - first) / width + 1;
-		XDNA_DBG(xdna, "start %d end %d first %d last %d",
-			 start, end, first, last);
-	} else {
-		if (start_col_index < 0) {
-			XDNA_ERR(xdna, "Negative start_col_index");
-			return -EINVAL;
-		}
-
+#ifdef AMDXDNA_DEVEL
+	if (start_col_index >= 0) {
 		if (start_col_index + hwctx->num_col > ndev->total_col) {
 			XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d",
 				 start_col_index, hwctx->num_col);
@@ -367,7 +344,27 @@ static int npu1_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 		}
 		entries = 1;
 		first = start_col_index;
+		goto skip_list_cal;
 	}
+#endif
+	/*
+	 * In range [start, end], find out columns that is multiple of width.
+	 *	'first' is the first column,
+	 *	'last' is the last column,
+	 *	'entries' is the total number of columns.
+	 */
+	start =  xdna->dev_info->first_col;
+	end =  ndev->total_col - hwctx->num_col;
+	if (start > 0 && end == 0) {
+		XDNA_DBG(xdna, "Force start from col 0");
+		start = 0;
+	}
+	first = start + (width - start % width) % width;
+	last = end - end % width;
+	if (last >= first)
+		entries = (last - first) / width + 1;
+	XDNA_DBG(xdna, "start %d end %d first %d last %d",
+		 start, end, first, last);
 
 	if (unlikely(!entries)) {
 		XDNA_ERR(xdna, "Start %d end %d width %d",
@@ -375,6 +372,9 @@ static int npu1_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 		return -EINVAL;
 	}
 
+#ifdef AMDXDNA_DEVEL
+skip_list_cal:
+#endif
 	hwctx->col_list = kmalloc_array(entries, sizeof(*hwctx->col_list), GFP_KERNEL);
 	if (!hwctx->col_list)
 		return -ENOMEM;
