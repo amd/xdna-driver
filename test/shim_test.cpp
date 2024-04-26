@@ -144,6 +144,8 @@ dev_filter_is_npu(device::id_type id, device* dev)
 int
 get_speed_and_print(std::string prefix, size_t size, Clock::time_point &start, Clock::time_point &end)
 {
+  std::ios_base::fmtflags f(std::cout.flags());
+
   auto dur = std::chrono::duration_cast<ns_t>(end - start).count();
   int speed = (size * 1000000000.0) / dur / 1024 / 1024.0;
   auto prec = std::cout.precision();
@@ -153,6 +155,7 @@ get_speed_and_print(std::string prefix, size_t size, Clock::time_point &start, C
             << "speed " << speed << " MB/sec"
             << std::setprecision(prec) << std::endl;
 
+  std::cout.flags(f);
   return speed;
 }
 
@@ -638,6 +641,8 @@ TEST_map_bo(device::id_type id, device* dev, arg_type& arg)
 
   if (!base_write_speed || !base_read_speed)
     speed_test_base_line(size);
+  if (!base_write_speed || !base_read_speed)
+    throw std::runtime_error("Failed to obtain speed test baseline.");
 
   std::vector<int> ref_vec(size/sizeof(int));
   speed_test_fill_buf(ref_vec);
@@ -1240,14 +1245,20 @@ void
 run_all_test(std::set<int>& tests)
 {
   auto all = tests.empty();
+  device::id_type total_dev = 0;
 
-  auto devinfo = get_total_devices(true);
-  if (devinfo.second == 0) {
+  try {
+    auto devinfo = get_total_devices(true);
+    total_dev = devinfo.second;
+  } catch (const std::runtime_error& e) {
+    std::cout << e.what();
+  }
+
+  if (total_dev == 0) {
     std::cout << "No testable devices on this machine. Failing all tests.\n";
     test_failed = test_list.size();
     return;
   }
-
 
   for (int i = 0; i < test_list.size(); i++) {
     if (!all) {
@@ -1257,7 +1268,7 @@ run_all_test(std::set<int>& tests)
         tests.erase(i);
     }
     const auto& t = test_list[i];
-    run_test(i, t, !all, devinfo.second);
+    run_test(i, t, !all, total_dev);
     std::cout << std::endl;
   }
 }

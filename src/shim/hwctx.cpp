@@ -29,7 +29,7 @@ namespace shim_xdna {
 
 hw_ctx::
 hw_ctx(const device& dev, const qos_type& qos, std::unique_ptr<hw_q> q, const xrt::xclbin& xclbin)
-  : m_device(dev), m_q(std::move(q))
+  : m_device(dev), m_q(std::move(q)), m_doorbell(0), m_log_buf(nullptr)
 {
   shim_debug("Creating HW context...");
   init_qos_info(qos);

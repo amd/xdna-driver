@@ -214,7 +214,7 @@ struct aie_info
       pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
 
       query::aie_tiles_status_info::result_type output;
-      output.buf = payload;
+      output.buf = std::move(payload);
       output.cols_filled = aie_status.cols_filled;
       return output;
     }
