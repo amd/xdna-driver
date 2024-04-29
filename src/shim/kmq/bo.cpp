@@ -85,10 +85,13 @@ bo_kmq::
 {
   shim_debug("Freeing KMQ BO, %s", describe().c_str());
 
-  detach_from_ctx();
-
-  // If BO is in use, we should block and wait in driver
-  free_bo();
+  try {
+    detach_from_ctx();
+    // If BO is in use, we should block and wait in driver
+    free_bo();
+  } catch (const xrt_core::system_error& e) {
+    shim_debug("Failed to free BO: %s", e.what());
+  }
 
   switch (m_type) {
   case AMDXDNA_BO_SHMEM:

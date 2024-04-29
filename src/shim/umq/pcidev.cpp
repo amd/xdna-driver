@@ -8,7 +8,7 @@ namespace shim_xdna {
 
 pdev_umq::
 pdev_umq(std::shared_ptr<const drv> driver, std::string sysfs_name)
-  : pdev(driver, sysfs_name)
+  : pdev(driver, std::move(sysfs_name))
 {
   shim_debug("Created UMQ pcidev");
 }

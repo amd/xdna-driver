@@ -95,7 +95,6 @@ private:
   uint32_t m_num_cols;
   uint32_t m_doorbell;
   std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
-  size_t m_log_buf_size;
   void *m_log_buf;
 
   void

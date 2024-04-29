@@ -32,17 +32,15 @@ struct amdxdna_cmd {
 	union {
 		struct {
 			u32 state:4;
-			u32 stat_enabled:1;
-			u32 unused:5;
+			u32 unused:6;
 			u32 extra_cu_masks:2;
 			u32 count:11;
 			u32 opcode:5;
-			u32 type:4;
+			u32 reserved:4;
 		};
 		u32 header;
 	};
-	u32 cu_mask;
-	u32 data[];
+	u32 data[] __counted_by(count);
 };
 
 struct amdxdna_hwctx {
