@@ -3,8 +3,8 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _NPU1_PCI_H_
-#define _NPU1_PCI_H_
+#ifndef _AIE2_PCI_H_
+#define _AIE2_PCI_H_
 
 #include <linux/device.h>
 #include <linux/iopoll.h>
@@ -13,7 +13,7 @@
 
 #include "amdxdna_drv.h"
 #include "amdxdna_ctx.h"
-#include "npu_mailbox.h"
+#include "amdxdna_mailbox.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -220,69 +220,69 @@ struct npu_dev_priv {
 #endif
 };
 
-/* npu1_pci.c */
-extern const struct amdxdna_dev_ops npu1_ops;
+/* aie2_pci.c */
+extern const struct amdxdna_dev_ops aie2_ops;
 
-/* npu1_smu.c */
-int npu1_smu_init(struct npu_device *ndev);
-void npu1_smu_fini(struct npu_device *ndev);
-int npu1_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz);
-int npu1_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz);
-int npu1_smu_set_power_on(struct npu_device *ndev);
-int npu1_smu_set_power_off(struct npu_device *ndev);
+/* aie2_smu.c */
+int aie2_smu_init(struct npu_device *ndev);
+void aie2_smu_fini(struct npu_device *ndev);
+int aie2_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz);
+int aie2_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz);
+int aie2_smu_set_power_on(struct npu_device *ndev);
+int aie2_smu_set_power_off(struct npu_device *ndev);
 
-/* npu1_psp.c */
-struct psp_device *npu1m_psp_create(struct device *dev, struct psp_config *conf);
-int npu1_psp_start(struct psp_device *psp);
-void npu1_psp_stop(struct psp_device *psp);
+/* aie2_psp.c */
+struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
+int aie2_psp_start(struct psp_device *psp);
+void aie2_psp_stop(struct psp_device *psp);
 
-/* npu1_debugfs.c */
-void npu1_debugfs_init(struct amdxdna_dev *xdna);
+/* aie2_debugfs.c */
+void aie2_debugfs_init(struct amdxdna_dev *xdna);
 
-/* npu1_error.c */
-int npu1_error_async_events_alloc(struct npu_device *ndev);
-void npu1_error_async_events_free(struct npu_device *ndev);
-int npu1_error_async_events_send(struct npu_device *ndev);
-int npu1_error_async_msg_thread(void *data);
+/* aie2_error.c */
+int aie2_error_async_events_alloc(struct npu_device *ndev);
+void aie2_error_async_events_free(struct npu_device *ndev);
+int aie2_error_async_events_send(struct npu_device *ndev);
+int aie2_error_async_msg_thread(void *data);
 
-/* npu1_message.c */
-int npu1_suspend_fw(struct npu_device *ndev);
-int npu1_resume_fw(struct npu_device *ndev);
-int npu1_set_runtime_cfg(struct npu_device *ndev, u32 type, u64 value);
-int npu1_get_runtime_cfg(struct npu_device *ndev, u32 type, u64 *value);
-int npu1_check_protocol_version(struct npu_device *ndev);
-int npu1_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid);
-int npu1_query_aie_version(struct npu_device *ndev, struct aie_version *version);
-int npu1_query_aie_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
-int npu1_query_firmware_version(struct npu_device *ndev,
+/* aie2_message.c */
+int aie2_suspend_fw(struct npu_device *ndev);
+int aie2_resume_fw(struct npu_device *ndev);
+int aie2_set_runtime_cfg(struct npu_device *ndev, u32 type, u64 value);
+int aie2_get_runtime_cfg(struct npu_device *ndev, u32 type, u64 *value);
+int aie2_check_protocol_version(struct npu_device *ndev);
+int aie2_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid);
+int aie2_query_aie_version(struct npu_device *ndev, struct aie_version *version);
+int aie2_query_aie_metadata(struct npu_device *ndev, struct aie_metadata *metadata);
+int aie2_query_firmware_version(struct npu_device *ndev,
 				struct amdxdna_fw_ver *fw_ver);
-int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
-int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
-int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size);
-int npu1_query_status(struct npu_device *ndev, char *buf, u32 size, u32 *cols_filled);
-int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
+int aie2_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
+int aie2_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx);
+int aie2_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size);
+int aie2_query_status(struct npu_device *ndev, char *buf, u32 size, u32 *cols_filled);
+int aie2_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void*, const u32 *, size_t));
-int npu1_self_test(struct npu_device *ndev);
+int aie2_self_test(struct npu_device *ndev);
 #ifdef AMDXDNA_DEVEL
-int npu1_register_pdis(struct amdxdna_hwctx *hwctx);
-int npu1_unregister_pdis(struct amdxdna_hwctx *hwctx);
-int npu1_legacy_config_cu(struct amdxdna_hwctx *hwctx);
+int aie2_register_pdis(struct amdxdna_hwctx *hwctx);
+int aie2_unregister_pdis(struct amdxdna_hwctx *hwctx);
+int aie2_legacy_config_cu(struct amdxdna_hwctx *hwctx);
 #endif
 
-int npu1_config_cu(struct amdxdna_hwctx *hwctx);
-int npu1_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx,
+int aie2_config_cu(struct amdxdna_hwctx *hwctx);
+int aie2_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx,
 		 u32 *payload, u32 payload_len, void *handle,
 		 int (*notify_cb)(void *, const u32 *, size_t));
 
-/* npu1_hwctx.c */
-int npu1_hwctx_init(struct amdxdna_hwctx *hwctx);
-void npu1_hwctx_fini(struct amdxdna_hwctx *hwctx);
-int npu1_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
-void npu1_hwctx_suspend(struct amdxdna_hwctx *hwctx);
-void npu1_hwctx_resume(struct amdxdna_hwctx *hwctx);
-int npu1_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
-int npu1_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
-void npu1_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
-void npu1_restart_ctx(struct amdxdna_client *client);
+/* aie2_hwctx.c */
+int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);
+void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx);
+int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
+void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx);
+void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx);
+int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
+int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
+void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
+void aie2_restart_ctx(struct amdxdna_client *client);
 
-#endif /* _NPU1_PCI_H_ */
+#endif /* _AIE2_PCI_H_ */

@@ -3,8 +3,8 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _NPU1_MSG_PRIV_H_
-#define _NPU1_MSG_PRIV_H_
+#ifndef _AIE2_MSG_PRIV_H_
+#define _AIE2_MSG_PRIV_H_
 
 #include <linux/uuid.h>
 
@@ -393,4 +393,4 @@ struct legacy_config_cu_resp {
 	enum npu_msg_status	status;
 } __packed;
 #endif /* AMDXDNA_DEVEL */
-#endif /* _NPU1_MSG_PRIV_H_ */
+#endif /* _AIE2_MSG_PRIV_H_ */

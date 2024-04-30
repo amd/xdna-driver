@@ -4,7 +4,7 @@
  */
 
 #include "drm_local/amdxdna_accel.h"
-#include "npu1_pci.h"
+#include "aie2_pci.h"
 
 /* Address definition from NPU1 docs */
 #define MPNPU_PUB_SEC_INTR		0x3010090
@@ -94,5 +94,5 @@ const struct amdxdna_dev_info dev_npu1_info = {
 	.vbnv              = "RyzenAI-npu1",
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
 	.dev_priv          = &npu1_dev_priv,
-	.ops               = &npu1_ops,
+	.ops               = &aie2_ops,
 };

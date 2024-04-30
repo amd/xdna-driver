@@ -6,8 +6,8 @@
 #include <linux/kthread.h>
 #include <linux/kernel.h>
 #include <drm/drm_cache.h>
-#include "npu1_msg_priv.h"
-#include "npu1_pci.h"
+#include "aie2_msg_priv.h"
+#include "aie2_pci.h"
 
 #define AIE_ERR_SENTINEL 0xFF
 
@@ -170,7 +170,7 @@ aie_get_error_category(u8 row, u8 event_id, enum aie_module_type mod_type)
 	return AIE_ERROR_UNKNOWN;
 }
 
-static u32 npu1_error_backtrack(struct npu_device *ndev, void *err_info, u32 num_err)
+static u32 aie2_error_backtrack(struct npu_device *ndev, void *err_info, u32 num_err)
 {
 	struct aie_error *errs = err_info;
 	u32 err_col = 0; /* assume that AIE has less than 32 columns */
@@ -204,7 +204,7 @@ static u32 npu1_error_backtrack(struct npu_device *ndev, void *err_info, u32 num
 	return err_col;
 }
 
-static int npu1_error_async_cb(void *handle, const u32 *data, size_t size)
+static int aie2_error_async_cb(void *handle, const u32 *data, size_t size)
 {
 	struct async_event_msg_resp *resp;
 	struct async_event *e = handle;
@@ -219,14 +219,14 @@ static int npu1_error_async_cb(void *handle, const u32 *data, size_t size)
 	return 0;
 }
 
-static int npu1_error_event_send(struct async_event *e)
+static int aie2_error_event_send(struct async_event *e)
 {
 	drm_clflush_virt_range(e->buf, e->size); /* device can access */
-	return npu1_register_asyn_event_msg(e->ndev, e->addr, e->size, e,
-					    npu1_error_async_cb);
+	return aie2_register_asyn_event_msg(e->ndev, e->addr, e->size, e,
+					    aie2_error_async_cb);
 }
 
-static void npu1_error_worker(struct work_struct *err_work)
+static void aie2_error_worker(struct work_struct *err_work)
 {
 	struct amdxdna_client *client;
 	struct amdxdna_dev *xdna;
@@ -247,7 +247,7 @@ static void npu1_error_worker(struct work_struct *err_work)
 			     e->buf, 0x100, false);
 
 	max_err = e->size / sizeof(struct aie_error);
-	err_col = npu1_error_backtrack(e->ndev, e->buf, max_err);
+	err_col = aie2_error_backtrack(e->ndev, e->buf, max_err);
 	if (!err_col) {
 		XDNA_WARN(xdna, "Did not get error column");
 		return;
@@ -256,7 +256,7 @@ static void npu1_error_worker(struct work_struct *err_work)
 	/* Found error columns, let's start recovery */
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
-		npu1_stop_ctx_by_col_map(client, err_col);
+		aie2_stop_ctx_by_col_map(client, err_col);
 
 	/*
 	 * The error columns will be reset after all hardware
@@ -264,17 +264,17 @@ static void npu1_error_worker(struct work_struct *err_work)
 	 * So try to restart the hardware contexts.
 	 */
 	list_for_each_entry(client, &xdna->client_list, node)
-		npu1_restart_ctx(client);
+		aie2_restart_ctx(client);
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     e->buf, 0x100, false);
 	/* Re-sent this event to firmware */
-	if (npu1_error_event_send(e))
+	if (aie2_error_event_send(e))
 		XDNA_WARN(xdna, "Unable to register async event");
 	mutex_unlock(&xdna->dev_lock);
 }
 
-int npu1_error_async_events_send(struct npu_device *ndev)
+int aie2_error_async_events_send(struct npu_device *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_event *e;
@@ -283,7 +283,7 @@ int npu1_error_async_events_send(struct npu_device *ndev)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	for (i = 0; i < ndev->async_events->event_cnt; i++) {
 		e = &ndev->async_events->event[i];
-		ret = npu1_error_event_send(e);
+		ret = aie2_error_event_send(e);
 		if (ret)
 			return ret;
 	}
@@ -291,7 +291,7 @@ int npu1_error_async_events_send(struct npu_device *ndev)
 	return 0;
 }
 
-void npu1_error_async_events_free(struct npu_device *ndev)
+void aie2_error_async_events_free(struct npu_device *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_events *events;
@@ -303,7 +303,7 @@ void npu1_error_async_events_free(struct npu_device *ndev)
 	kfree(events);
 }
 
-int npu1_error_async_events_alloc(struct npu_device *ndev)
+int aie2_error_async_events_alloc(struct npu_device *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 total_col = ndev->total_col;
@@ -341,7 +341,7 @@ int npu1_error_async_events_alloc(struct npu_device *ndev)
 		e->addr = events->addr + offset;
 		e->size = ASYNC_BUF_SIZE;
 		e->resp.status = MAX_NPU_STATUS_CODE;
-		INIT_WORK(&e->work, npu1_error_worker);
+		INIT_WORK(&e->work, aie2_error_worker);
 	}
 
 	ndev->async_events = events;

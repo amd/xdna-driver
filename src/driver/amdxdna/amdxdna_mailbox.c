@@ -18,7 +18,7 @@
 #include <linux/irqreturn.h>
 #include <linux/pci.h>
 #include "amdxdna_trace.h"
-#include "npu_mailbox.h"
+#include "amdxdna_mailbox.h"
 
 #define MB_ERR(chann, fmt, args...) \
 ({ \

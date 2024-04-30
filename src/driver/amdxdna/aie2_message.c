@@ -7,26 +7,26 @@
 #include <drm/drm_cache.h>
 
 #include "drm_local/amdxdna_accel.h"
+#include "amdxdna_mailbox_helper.h"
 #include "amdxdna_ctx.h"
-#include "npu1_msg_priv.h"
-#include "npu_common.h"
-#include "npu1_pci.h"
+#include "aie2_msg_priv.h"
+#include "aie2_pci.h"
 
 #define DECLARE_NPU_MSG(name, op) \
-	DECLARE_NPU_MSG_COMMON(name, op, MAX_NPU_STATUS_CODE)
+	DECLARE_XDNA_MSG_COMMON(name, op, MAX_NPU_STATUS_CODE)
 
-static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
-				  struct xdna_mailbox_msg *msg)
+static int aie2_send_mgmt_msg_wait(struct npu_device *ndev,
+				   struct xdna_mailbox_msg *msg)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct npu_notify *hdl = msg->handle;
+	struct xdna_notify *hdl = msg->handle;
 	int ret;
 
 	if (!ndev->mgmt_chann)
 		return -ENODEV;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	ret = npu_send_msg_wait(xdna, ndev->mgmt_chann, msg);
+	ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
 		xdna_mailbox_stop_channel(ndev->mgmt_chann);
 		xdna_mailbox_destroy_channel(ndev->mgmt_chann);
@@ -42,37 +42,37 @@ static int npu_send_mgmt_msg_wait(struct npu_device *ndev,
 	return ret;
 }
 
-int npu1_suspend_fw(struct npu_device *ndev)
+int aie2_suspend_fw(struct npu_device *ndev)
 {
 	DECLARE_NPU_MSG(suspend, MSG_OP_SUSPEND);
 
-	return npu_send_mgmt_msg_wait(ndev, &msg);
+	return aie2_send_mgmt_msg_wait(ndev, &msg);
 }
 
-int npu1_resume_fw(struct npu_device *ndev)
+int aie2_resume_fw(struct npu_device *ndev)
 {
 	DECLARE_NPU_MSG(suspend, MSG_OP_RESUME);
 
-	return npu_send_mgmt_msg_wait(ndev, &msg);
+	return aie2_send_mgmt_msg_wait(ndev, &msg);
 }
 
-int npu1_set_runtime_cfg(struct npu_device *ndev, u32 type, u64 value)
+int aie2_set_runtime_cfg(struct npu_device *ndev, u32 type, u64 value)
 {
 	DECLARE_NPU_MSG(set_runtime_cfg, MSG_OP_SET_RUNTIME_CONFIG);
 
 	req.type = type;
 	req.value = value;
 
-	return npu_send_mgmt_msg_wait(ndev, &msg);
+	return aie2_send_mgmt_msg_wait(ndev, &msg);
 }
 
-int npu1_get_runtime_cfg(struct npu_device *ndev, u32 type, u64 *value)
+int aie2_get_runtime_cfg(struct npu_device *ndev, u32 type, u64 *value)
 {
 	DECLARE_NPU_MSG(get_runtime_cfg, MSG_OP_GET_RUNTIME_CONFIG);
 	int ret;
 
 	req.type = type;
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Failed to get runtime config, ret %d", ret);
 		return ret;
@@ -82,13 +82,13 @@ int npu1_get_runtime_cfg(struct npu_device *ndev, u32 type, u64 *value)
 	return 0;
 }
 
-int npu1_check_protocol_version(struct npu_device *ndev)
+int aie2_check_protocol_version(struct npu_device *ndev)
 {
 	DECLARE_NPU_MSG(protocol_version, MSG_OP_GET_PROTOCOL_VERSION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get protocol version, ret %d", ret);
 		return ret;
@@ -103,22 +103,22 @@ int npu1_check_protocol_version(struct npu_device *ndev)
 	return ret;
 }
 
-int npu1_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid)
+int aie2_assign_mgmt_pasid(struct npu_device *ndev, u16 pasid)
 {
 	DECLARE_NPU_MSG(assign_mgmt_pasid, MSG_OP_ASSIGN_MGMT_PASID);
 
 	req.pasid = pasid;
 
-	return npu_send_mgmt_msg_wait(ndev, &msg);
+	return aie2_send_mgmt_msg_wait(ndev, &msg);
 }
 
-int npu1_query_aie_version(struct npu_device *ndev, struct aie_version *version)
+int aie2_query_aie_version(struct npu_device *ndev, struct aie_version *version)
 {
 	DECLARE_NPU_MSG(aie_version_info, MSG_OP_QUERY_AIE_VERSION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		return ret;
 
@@ -131,12 +131,12 @@ int npu1_query_aie_version(struct npu_device *ndev, struct aie_version *version)
 	return 0;
 }
 
-int npu1_query_aie_metadata(struct npu_device *ndev, struct aie_metadata *metadata)
+int aie2_query_aie_metadata(struct npu_device *ndev, struct aie_metadata *metadata)
 {
 	DECLARE_NPU_MSG(aie_tile_info, MSG_OP_QUERY_AIE_TILE_INFO);
 	int ret;
 
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		return ret;
 
@@ -168,13 +168,13 @@ int npu1_query_aie_metadata(struct npu_device *ndev, struct aie_metadata *metada
 	return 0;
 }
 
-int npu1_query_firmware_version(struct npu_device *ndev,
+int aie2_query_firmware_version(struct npu_device *ndev,
 				struct amdxdna_fw_ver *fw_ver)
 {
 	DECLARE_NPU_MSG(firmware_version, MSG_OP_GET_FIRMWARE_VERSION);
 	int ret;
 
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		return ret;
 
@@ -186,7 +186,7 @@ int npu1_query_firmware_version(struct npu_device *ndev,
 	return 0;
 }
 
-int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
+int aie2_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_NPU_MSG(create_ctx, MSG_OP_CREATE_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -203,7 +203,7 @@ int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	req.pasid = hwctx->client->pasid;
 	req.context_priority = 2;
 
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		return ret;
 
@@ -244,11 +244,11 @@ int npu1_create_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	return 0;
 
 out_destroy_context:
-	npu1_destroy_context(ndev, hwctx);
+	aie2_destroy_context(ndev, hwctx);
 	return ret;
 }
 
-int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
+int aie2_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_NPU_MSG(destroy_ctx, MSG_OP_DESTROY_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -260,7 +260,7 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	xdna_mailbox_stop_channel(hwctx->priv->mbox_chann);
 
 	req.context_id = hwctx->fw_ctx_id;
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		XDNA_WARN(xdna, "%s destroy context failed, ret %d",
 			  hwctx->name, ret);
@@ -274,7 +274,7 @@ int npu1_destroy_context(struct npu_device *ndev, struct amdxdna_hwctx *hwctx)
 	return ret;
 }
 
-int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size)
+int aie2_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 size)
 {
 	DECLARE_NPU_MSG(map_host_buffer, MSG_OP_MAP_HOST_BUFFER);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -283,7 +283,7 @@ int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 siz
 	req.context_id = context_id;
 	req.buf_addr = addr;
 	req.buf_size = size;
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		return ret;
 
@@ -294,20 +294,20 @@ int npu1_map_host_buf(struct npu_device *ndev, u32 context_id, u64 addr, u64 siz
 }
 
 #if defined(CONFIG_DEBUG_FS)
-int npu1_self_test(struct npu_device *ndev)
+int aie2_self_test(struct npu_device *ndev)
 {
 	DECLARE_NPU_MSG(check_self_test, MSG_OP_INVOKE_SELF_TEST);
 
 	req.test_mask = 0x3F;
-	return npu_send_mgmt_msg_wait(ndev, &msg);
+	return aie2_send_mgmt_msg_wait(ndev, &msg);
 }
 #else
-int npu1_self_test(struct npu_device *ndev)
+int aie2_self_test(struct npu_device *ndev)
 {
 }
 #endif
 
-int npu1_query_status(struct npu_device *ndev, char __user *buf, u32 size, u32 *cols_filled)
+int aie2_query_status(struct npu_device *ndev, char __user *buf, u32 size, u32 *cols_filled)
 {
 	DECLARE_NPU_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -339,7 +339,7 @@ int npu1_query_status(struct npu_device *ndev, char __user *buf, u32 size, u32 *
 	req.aie_bitmap = aie_bitmap;
 
 	drm_clflush_virt_range(buff_addr, size); /* device can access */
-	ret = npu_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
 		goto fail;
@@ -371,7 +371,7 @@ fail:
 	return ret;
 }
 
-int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
+int aie2_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void*, const u32 *, size_t))
 {
 	struct async_event_msg_req req = { 0 };
@@ -391,7 +391,7 @@ int npu1_register_asyn_event_msg(struct npu_device *ndev, dma_addr_t addr, u32 s
 }
 
 /* Below messages are to hardware context mailbox channel */
-int npu1_config_cu(struct amdxdna_hwctx *hwctx)
+int aie2_config_cu(struct amdxdna_hwctx *hwctx)
 {
 	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -433,9 +433,9 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	}
 	req.num_cus = hwctx->cus->num_cus;
 
-	ret = npu_send_msg_wait(xdna, chann, &msg);
+	ret = xdna_send_msg_wait(xdna, chann, &msg);
 	if (ret == -ETIME)
-		npu1_destroy_context(xdna->dev_handle, hwctx);
+		aie2_destroy_context(xdna->dev_handle, hwctx);
 
 	if (resp.status == NPU_STATUS_SUCCESS) {
 		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
@@ -447,7 +447,7 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	return ret;
 }
 
-int npu1_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx,
+int aie2_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx,
 		 u32 *payload, u32 payload_len, void *handle,
 		 int (*notify_cb)(void *, const u32 *, size_t))
 {
@@ -510,7 +510,7 @@ int npu1_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx
 }
 
 #ifdef AMDXDNA_DEVEL
-int npu1_register_pdis(struct amdxdna_hwctx *hwctx)
+int aie2_register_pdis(struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_NPU_MSG(register_pdi, MSG_OP_REGISTER_PDI);
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -580,7 +580,7 @@ int npu1_register_pdis(struct amdxdna_hwctx *hwctx)
 		resp.status = MAX_NPU_STATUS_CODE;
 
 		drm_clflush_virt_range(pdi->addr, pdi->size); /* device can access */
-		ret = npu_send_mgmt_msg_wait(ndev, &msg);
+		ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 		if (ret) {
 			XDNA_ERR(xdna, "PDI %d register failed, ret %d", pdi->id, ret);
 			goto cleanup;
@@ -594,11 +594,11 @@ int npu1_register_pdis(struct amdxdna_hwctx *hwctx)
 	return 0;
 
 cleanup:
-	npu1_unregister_pdis(hwctx);
+	aie2_unregister_pdis(hwctx);
 	return ret;
 }
 
-int npu1_unregister_pdis(struct amdxdna_hwctx *hwctx)
+int aie2_unregister_pdis(struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_NPU_MSG(unregister_pdi, MSG_OP_UNREGISTER_PDI);
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -614,7 +614,7 @@ int npu1_unregister_pdis(struct amdxdna_hwctx *hwctx)
 		if (pdi->registered) {
 			req.pdi_id = pdi->id;
 			resp.status = MAX_NPU_STATUS_CODE;
-			ret = npu_send_mgmt_msg_wait(ndev, &msg);
+			ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 			if (ret) {
 				XDNA_ERR(xdna, "PDI %d unregister failed, ret %d",
 					 pdi->id, ret);
@@ -637,7 +637,7 @@ int npu1_unregister_pdis(struct amdxdna_hwctx *hwctx)
 	return 0;
 }
 
-int npu1_legacy_config_cu(struct amdxdna_hwctx *hwctx)
+int aie2_legacy_config_cu(struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_NPU_MSG(legacy_config_cu, MSG_OP_LEGACY_CONFIG_CU);
 	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
@@ -661,9 +661,9 @@ int npu1_legacy_config_cu(struct amdxdna_hwctx *hwctx)
 		req.configs[i].cu_pdi_id = hwctx->priv->pdi_infos[i].id;
 	}
 
-	ret = npu_send_msg_wait(xdna, chann, &msg);
+	ret = xdna_send_msg_wait(xdna, chann, &msg);
 	if (ret == -ETIME)
-		npu1_destroy_context(xdna->dev_handle, hwctx);
+		aie2_destroy_context(xdna->dev_handle, hwctx);
 
 	XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
 

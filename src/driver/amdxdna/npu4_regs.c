@@ -4,7 +4,7 @@
  */
 
 #include "drm_local/amdxdna_accel.h"
-#include "npu1_pci.h"
+#include "aie2_pci.h"
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
 #define MPNPU_PUB_SEC_INTR             0x3010060
@@ -111,5 +111,5 @@ const struct amdxdna_dev_info dev_npu4_info = {
 	.vbnv              = "RyzenAI-npu4",
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
 	.dev_priv          = &npu4_dev_priv,
-	.ops               = &npu1_ops, /* NPU4 can share NPU1's callback */
+	.ops               = &aie2_ops, /* NPU4 can share NPU1's callback */
 };

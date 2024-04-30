@@ -22,16 +22,15 @@ amdxdna-y := \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
 	amdxdna_sysfs.o \
-	npu_solver.o \
-	npu_mailbox.o \
-	npu_common.o \
-	npu1_smu.o \
-	npu1_psp.o \
-	npu1_ctx.o \
-	npu1_error.o \
-	npu1_debugfs.o \
-	npu1_message.o \
-	npu1_pci.o \
+	amdxdna_mailbox.o \
+	aie2_solver.o \
+	aie2_smu.o \
+	aie2_psp.o \
+	aie2_ctx.o \
+	aie2_error.o \
+	aie2_debugfs.o \
+	aie2_message.o \
+	aie2_pci.o \
 	npu1_regs.o \
 	npu2_regs.o \
 	npu4_regs.o \

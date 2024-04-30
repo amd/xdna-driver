@@ -6,7 +6,7 @@
 #include <linux/bitfield.h>
 #include <linux/slab.h>
 #include <linux/iopoll.h>
-#include "npu1_pci.h"
+#include "aie2_pci.h"
 
 #define PSP_STATUS_READY	BIT(31)
 
@@ -83,7 +83,7 @@ static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 	return 0;
 }
 
-void npu1_psp_stop(struct psp_device *psp)
+void aie2_psp_stop(struct psp_device *psp)
 {
 	u32 reg_vals[PSP_NUM_IN_REGS] = { PSP_RELEASE_TMR, };
 	int ret;
@@ -93,7 +93,7 @@ void npu1_psp_stop(struct psp_device *psp)
 		dev_err(psp->dev, "release tmr failed, ret %d", ret);
 }
 
-int npu1_psp_start(struct psp_device *psp)
+int aie2_psp_start(struct psp_device *psp)
 {
 	u32 reg_vals[PSP_NUM_IN_REGS];
 	int ret;
@@ -121,7 +121,7 @@ int npu1_psp_start(struct psp_device *psp)
 	return 0;
 }
 
-struct psp_device *npu1m_psp_create(struct device *dev, struct psp_config *conf)
+struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf)
 {
 	struct psp_device *psp;
 	u64 offset;
