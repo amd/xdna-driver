@@ -15,6 +15,7 @@ enum npu_msg_opcode {
 	MSG_OP_QUERY_COL_STATUS            = 0xD,
 	MSG_OP_QUERY_AIE_TILE_INFO         = 0xE,
 	MSG_OP_QUERY_AIE_VERSION           = 0xF,
+	MSG_OP_EXEC_DPU                    = 0x10,
 	MSG_OP_CONFIG_CU                   = 0x11,
 #ifdef AMDXDNA_DEVEL
 	MSG_OP_REGISTER_PDI                = 0x1,
@@ -145,6 +146,14 @@ struct destroy_ctx_resp {
 struct execute_buffer_req {
 	u32	cu_idx;
 	u32	payload[19];
+} __packed;
+
+struct exec_dpu_req {
+	u64	inst_buf_addr;
+	u32     inst_size;
+	u32     inst_prop_cnt;
+	u32     cu_idx;
+	u32	payload[35];
 } __packed;
 
 struct execute_buffer_resp {

@@ -258,12 +258,13 @@ npu1_sched_job_run(struct drm_sched_job *sched_job)
 	cmd_buf = &job->cmd->data[1 + job->cmd->extra_cu_masks];
 	buf_len = to_gobj(job->cmd_abo)->size -
 		offsetof(struct amdxdna_cmd, data[1 + job->cmd->extra_cu_masks]);
-	ret = npu1_execbuf(hwctx, job->cu_idx, cmd_buf, buf_len, job,
-			   npu1_sched_resp_handler);
+	ret = npu1_execbuf(hwctx, job->cmd->opcode, job->cu_idx, cmd_buf,
+			   buf_len, job, npu1_sched_resp_handler);
 	if (ret) {
 		dma_fence_put(job->fence);
 		amdxdna_job_put(job);
 		mmput(job->mm);
+		job->cmd->state = ERT_CMD_STATE_ERROR;
 		fence = ERR_PTR(ret);
 	}
 	trace_xdna_job(hwctx->name, "sent to device", job->seq);
