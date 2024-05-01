@@ -312,7 +312,7 @@ const struct drm_sched_backend_ops sched_ops = {
 static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct npu_device *ndev = xdna->dev_handle;
+	struct amdxdna_dev_hdl *ndev;
 	int start, end, first, last;
 	u32 width = 1, entries = 0;
 	int i;
@@ -322,6 +322,7 @@ static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 		return -EINVAL;
 	}
 
+	ndev = xdna->dev_handle;
 	if (unlikely(!ndev->metadata.core.row_count)) {
 		XDNA_WARN(xdna, "Core tile row count is zero");
 		return -EINVAL;

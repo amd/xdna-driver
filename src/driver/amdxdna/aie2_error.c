@@ -12,7 +12,7 @@
 #define AIE_ERR_SENTINEL 0xFF
 
 struct async_event {
-	struct npu_device		*ndev;
+	struct amdxdna_dev_hdl	*ndev;
 	struct async_event_msg_resp	resp;
 	struct workqueue_struct		*wq;
 	struct work_struct		work;
@@ -170,7 +170,7 @@ aie_get_error_category(u8 row, u8 event_id, enum aie_module_type mod_type)
 	return AIE_ERROR_UNKNOWN;
 }
 
-static u32 aie2_error_backtrack(struct npu_device *ndev, void *err_info, u32 num_err)
+static u32 aie2_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u32 num_err)
 {
 	struct aie_error *errs = err_info;
 	u32 err_col = 0; /* assume that AIE has less than 32 columns */
@@ -238,10 +238,10 @@ static void aie2_error_worker(struct work_struct *err_work)
 
 	xdna = e->ndev->xdna;
 
-	if (e->resp.status == MAX_NPU_STATUS_CODE)
+	if (e->resp.status == MAX_AIE2_STATUS_CODE)
 		return;
 
-	e->resp.status = MAX_NPU_STATUS_CODE;
+	e->resp.status = MAX_AIE2_STATUS_CODE;
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     e->buf, 0x100, false);
@@ -274,7 +274,7 @@ static void aie2_error_worker(struct work_struct *err_work)
 	mutex_unlock(&xdna->dev_lock);
 }
 
-int aie2_error_async_events_send(struct npu_device *ndev)
+int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_event *e;
@@ -291,7 +291,7 @@ int aie2_error_async_events_send(struct npu_device *ndev)
 	return 0;
 }
 
-void aie2_error_async_events_free(struct npu_device *ndev)
+void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_events *events;
@@ -303,7 +303,7 @@ void aie2_error_async_events_free(struct npu_device *ndev)
 	kfree(events);
 }
 
-int aie2_error_async_events_alloc(struct npu_device *ndev)
+int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 total_col = ndev->total_col;
@@ -340,7 +340,7 @@ int aie2_error_async_events_alloc(struct npu_device *ndev)
 		e->buf = &events->buf[offset];
 		e->addr = events->addr + offset;
 		e->size = ASYNC_BUF_SIZE;
-		e->resp.status = MAX_NPU_STATUS_CODE;
+		e->resp.status = MAX_AIE2_STATUS_CODE;
 		INIT_WORK(&e->work, aie2_error_worker);
 	}
 

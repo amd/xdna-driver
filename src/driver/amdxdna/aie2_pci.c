@@ -18,7 +18,7 @@ module_param(aie2_max_col, int, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
 
 /*
- * The management mailbox channel is allocated by NPU firmware.
+ * The management mailbox channel is allocated by firmware.
  * The related register and ring buffer information is on SRAM BAR.
  * This struct is the register layout.
  */
@@ -33,7 +33,7 @@ struct mgmt_mbox_chann_info {
 	u32	i2x_buf_sz;
 };
 
-static inline void aie2_dump_chann_info_debug(struct npu_device *ndev)
+static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 
@@ -48,7 +48,7 @@ static inline void aie2_dump_chann_info_debug(struct npu_device *ndev)
 	XDNA_DBG(xdna, "x2i chann index 0x%x", ndev->mgmt_chan_idx);
 }
 
-static int aie2_get_mgmt_chann_info(struct npu_device *ndev)
+static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 {
 	struct mgmt_mbox_chann_info info_regs;
 	struct xdna_mailbox_chann_res *i2x;
@@ -59,7 +59,7 @@ static int aie2_get_mgmt_chann_info(struct npu_device *ndev)
 	int i;
 
 	/*
-	 * Once NPU firmware is alive, it will write management channel
+	 * Once firmware is alive, it will write management channel
 	 * information in SRAM BAR and write the address of that information
 	 * at FW_ALIVE_OFF offset in SRMA BAR.
 	 *
@@ -67,11 +67,11 @@ static int aie2_get_mgmt_chann_info(struct npu_device *ndev)
 	 * is alive.
 	 */
 	ret = readx_poll_timeout(readl, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF),
-				 addr, addr, NPU_INTERVAL, NPU_TIMEOUT);
+				 addr, addr, AIE2_INTERVAL, AIE2_TIMEOUT);
 	if (ret || !addr)
 		return -ETIME;
 
-	off = NPU_SRAM_OFF(ndev, addr);
+	off = AIE2_SRAM_OFF(ndev, addr);
 	reg = (u32 *)&info_regs;
 	for (i = 0; i < sizeof(info_regs) / sizeof(u32); i++)
 		reg[i] = readl(ndev->sram_base + off + i * sizeof(u32));
@@ -79,14 +79,14 @@ static int aie2_get_mgmt_chann_info(struct npu_device *ndev)
 	i2x = &ndev->mgmt_i2x;
 	x2i = &ndev->mgmt_x2i;
 
-	i2x->mb_head_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.i2x_head);
-	i2x->mb_tail_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.i2x_tail);
-	i2x->rb_start_addr   = NPU_SRAM_OFF(ndev, info_regs.i2x_buf);
+	i2x->mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_head);
+	i2x->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_tail);
+	i2x->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.i2x_buf);
 	i2x->rb_size         = info_regs.i2x_buf_sz;
 
-	x2i->mb_head_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.x2i_head);
-	x2i->mb_tail_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.x2i_tail);
-	x2i->rb_start_addr   = NPU_SRAM_OFF(ndev, info_regs.x2i_buf);
+	x2i->mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_head);
+	x2i->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_tail);
+	x2i->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.x2i_buf);
 	x2i->rb_size         = info_regs.x2i_buf_sz;
 	ndev->mgmt_chan_idx  = CHANN_INDEX(ndev, x2i->rb_start_addr);
 
@@ -98,7 +98,7 @@ static int aie2_get_mgmt_chann_info(struct npu_device *ndev)
 	return 0;
 }
 
-static int aie2_runtime_cfg(struct npu_device *ndev)
+static int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev)
 {
 	const struct rt_config *cfg = &ndev->priv->rt_config;
 	u64 value;
@@ -130,7 +130,7 @@ static int aie2_runtime_cfg(struct npu_device *ndev)
 	return 0;
 }
 
-static int aie2_xdna_reset(struct npu_device *ndev)
+static int aie2_xdna_reset(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
@@ -149,7 +149,7 @@ static int aie2_xdna_reset(struct npu_device *ndev)
 	return 0;
 }
 
-static int aie2_mgmt_fw_init(struct npu_device *ndev)
+static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
@@ -189,7 +189,7 @@ static int aie2_mgmt_fw_init(struct npu_device *ndev)
 	return 0;
 }
 
-static int aie2_mgmt_fw_query(struct npu_device *ndev)
+static int aie2_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
@@ -214,7 +214,7 @@ static int aie2_mgmt_fw_query(struct npu_device *ndev)
 	return 0;
 }
 
-static void aie2_mgmt_fw_fini(struct npu_device *ndev)
+static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 {
 	if (aie2_suspend_fw(ndev))
 		XDNA_ERR(ndev->xdna, "suspend_fw failed");
@@ -260,8 +260,8 @@ static struct xrs_action_ops aie2_xrs_actions = {
 
 static void aie2_hw_stop(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct npu_device *ndev = xdna->dev_handle;
 
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
@@ -274,8 +274,8 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 
 static int aie2_hw_start(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct npu_device *ndev = xdna->dev_handle;
 	struct xdna_mailbox_res mbox_res;
 	u32 xdna_mailbox_intr_reg;
 	int mgmt_mb_irq, ret;
@@ -361,11 +361,11 @@ disable_dev:
 static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev;
 	struct init_config xrs_cfg = { 0 };
 	struct psp_config psp_conf;
 	const struct firmware *fw;
 	void __iomem * const *tbl;
-	struct npu_device *ndev;
 	int i, bars, nvec, ret;
 
 	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
@@ -519,8 +519,8 @@ release_fw:
 
 static void aie2_fini(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct npu_device *ndev = xdna->dev_handle;
 
 	aie2_hw_stop(xdna);
 	aie2_error_async_events_free(ndev);
@@ -531,8 +531,8 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 static int aie2_get_aie_status(struct amdxdna_dev *xdna,
 			       struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_status status;
-	struct npu_device *ndev = xdna->dev_handle;
 	int ret;
 
 	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), sizeof(status))) {
@@ -564,8 +564,8 @@ static int aie2_get_aie_status(struct amdxdna_dev *xdna,
 static int aie2_get_aie_metadata(struct amdxdna_dev *xdna,
 				 struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_metadata *meta;
-	struct npu_device *ndev = xdna->dev_handle;
 	int ret = 0;
 
 	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
@@ -607,8 +607,8 @@ static int aie2_get_aie_metadata(struct amdxdna_dev *xdna,
 static int aie2_get_aie_version(struct amdxdna_dev *xdna,
 				struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_version version;
-	struct npu_device *ndev = xdna->dev_handle;
 
 	version.major = ndev->version.major;
 	version.minor = ndev->version.minor;
@@ -622,8 +622,8 @@ static int aie2_get_aie_version(struct amdxdna_dev *xdna,
 static int aie2_get_clock_metadata(struct amdxdna_dev *xdna,
 				   struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_clock_metadata *clock;
-	struct npu_device *ndev = xdna->dev_handle;
 	int ret = 0;
 
 	clock = kzalloc(sizeof(*clock), GFP_KERNEL);
@@ -786,7 +786,7 @@ static int aie2_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_
 
 	/* Set resource solver power property to the user choice */
 
-	/* Set power level within the NPU */
+	/* Set power level within the device */
 	return 0;
 }
 

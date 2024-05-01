@@ -27,8 +27,8 @@
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 
 struct amdxdna_dev;
-struct npu_device;
-struct npu_dev_priv;
+struct amdxdna_dev_hdl;
+struct amdxdna_dev_priv;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
@@ -83,7 +83,7 @@ struct amdxdna_dev_info {
 	u64				dev_mem_base;
 	size_t				dev_mem_size;
 	char				*vbnv;
-	const struct npu_dev_priv	*dev_priv;
+	const struct amdxdna_dev_priv	*dev_priv;
 	const struct amdxdna_dev_ops	*ops;
 };
 
@@ -109,7 +109,7 @@ struct amdxdna_fw_ver {
 
 struct amdxdna_dev {
 	struct drm_device		ddev;
-	struct npu_device		*dev_handle;
+	struct amdxdna_dev_hdl		*dev_handle;
 	const struct amdxdna_dev_info	*dev_info;
 	void				*xrs_hdl;
 

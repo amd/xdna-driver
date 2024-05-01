@@ -62,7 +62,7 @@
 #define NPU2_MPNPUCLK_FREQ_MAX  1267
 #define NPU2_HCLK_FREQ_MAX      1800
 
-const struct npu_dev_priv npu2_dev_priv = {
+const struct amdxdna_dev_priv npu2_dev_priv = {
 	.fw_path        = "amdnpu/17f0_00/npu.sbin",
 	.protocol_major = 0x6,
 	.protocol_minor = 0x1,
@@ -106,8 +106,8 @@ const struct amdxdna_dev_info dev_npu2_info = {
 	.smu_bar           = NPU2_SMU_BAR_INDEX,
 	.first_col         = 0,
 	.dev_mem_buf_shift = 15, /* 32 KiB aligned */
-	.dev_mem_base      = NPU_DEVM_BASE,
-	.dev_mem_size      = NPU_DEVM_SIZE,
+	.dev_mem_base      = AIE2_DEVM_BASE,
+	.dev_mem_size      = AIE2_DEVM_SIZE,
 	.vbnv              = "RyzenAI-npu2",
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
 	.dev_priv          = &npu2_dev_priv,

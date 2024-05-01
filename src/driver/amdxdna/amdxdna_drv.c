@@ -277,7 +277,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
-		goto failed_npu_fini;
+		goto failed_dev_fini;
 	}
 
 	ret = drm_dev_register(&xdna->ddev, 0);
@@ -297,7 +297,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 failed_sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
-failed_npu_fini:
+failed_dev_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
