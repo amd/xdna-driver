@@ -927,7 +927,7 @@ io_test_cmd_init(io_test_bo_set& io_test_bos)
 
   cmd_packet->state = ERT_CMD_STATE_NEW;
   cmd_packet->count = 16;
-  cmd_packet->opcode = ERT_SK_START;
+  cmd_packet->opcode = ERT_START_CU;
   cmd_packet->type = ERT_SCU;
   cmd_packet->extra_cu_masks = 0;
   // CU index will be set later after we know which hw ctx the command is for

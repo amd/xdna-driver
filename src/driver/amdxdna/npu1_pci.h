@@ -270,7 +270,7 @@ int npu1_legacy_config_cu(struct amdxdna_hwctx *hwctx);
 #endif
 
 int npu1_config_cu(struct amdxdna_hwctx *hwctx);
-int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
+int npu1_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx,
 		 u32 *payload, u32 payload_len, void *handle,
 		 int (*notify_cb)(void *, const u32 *, size_t));
 

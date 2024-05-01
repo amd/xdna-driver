@@ -7,6 +7,7 @@
 
 #include "core/common/xclbin_parser.h"
 #include "core/common/query_requests.h"
+#include "core/common/api/xclbin_int.h"
 
 namespace {
 
@@ -138,22 +139,16 @@ parse_xclbin(const xrt::xclbin& xclbin)
 {
   auto axlf = xclbin.get_axlf();
   auto aie_partition = xrt_core::xclbin::get_aie_partition(axlf);
-  auto ips = xrt_core::xclbin::axlf_section_type<const ip_layout*>::get(
-    axlf, axlf_section_kind::IP_LAYOUT);
 
-  for (uint32_t idx = 0; idx < ips->m_count; idx++) {
-    auto ip = &ips->m_ip_data[idx];
-    if (ip->m_type != IP_PS_KERNEL || ip->ps_kernel.m_subtype != ST_DPU)
-      continue;
-
-    //xrt_core::cuidx_type cuidx = { .index = idx, };
+  for (const auto& k : xclbin.get_kernels()) {
+    auto& props = xrt_core::xclbin_int::get_properties(k);
     try {
-      auto pdi = get_pdi(aie_partition, ip->ps_kernel.m_kernel_id);
-      auto cuname = std::string(reinterpret_cast<const char*>(ip->m_name));
-      m_cu_info.push_back( {
-        .m_name = cuname,
-        .m_func = static_cast<uint8_t>(ip->ps_kernel.m_functional),
-        .m_pdi = pdi } );
+      for (const auto& cu : k.get_cus()) {
+        m_cu_info.push_back( {
+          .m_name = cu.get_name(),
+          .m_func = props.functional,
+          .m_pdi = get_pdi(aie_partition, props.kernel_id) } );
+      }
     } catch (xrt_core::system_error &ex) {
       if (ex.get_code() != ENOENT)
         throw;
@@ -164,6 +159,7 @@ parse_xclbin(const xrt::xclbin& xclbin)
 
   if (m_cu_info.empty())
     shim_err(EINVAL, "No valid DPU kernel found in xclbin");
+  print_xclbin_info();
 
   m_ops_per_cycle = aie_partition.ops_per_cycle;
   m_num_cols = aie_partition.ncol;

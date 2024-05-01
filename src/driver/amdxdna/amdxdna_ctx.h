@@ -14,6 +14,11 @@
 
 struct npu_hwctx;
 
+enum ert_cmd_opcode {
+	ERT_START_CU      = 0,
+	ERT_START_DPU     = 18,
+};
+
 enum ert_cmd_state {
 	ERT_CMD_STATE_INVALID,
 	ERT_CMD_STATE_NEW,
@@ -25,6 +30,17 @@ enum ert_cmd_state {
 	ERT_CMD_STATE_SUBMITTED,
 	ERT_CMD_STATE_TIMEOUT,
 	ERT_CMD_STATE_NORESPONSE,
+};
+
+/*
+ * Interpretation of the beginning of data payload for ERT_START_DPU in
+ * amdxdna_cmd. The rest of the payload in amdxdna_cmd is regular kernel args.
+ */
+struct amdxdna_cmd_start_dpu {
+  uint64_t instruction_buffer;       /* buffer address 2 words */
+  uint32_t instruction_buffer_size;  /* size of buffer in bytes */
+  uint32_t chained;                  /* MBZ */
+  /* Regular kernel args followed here. */
 };
 
 /* Exec buffer command header format */

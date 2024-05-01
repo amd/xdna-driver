@@ -69,7 +69,7 @@ protected:
 
   struct cu_info {
     std::string m_name;
-    uint8_t m_func;
+    size_t m_func;
     std::vector<uint8_t> m_pdi;
   };
 

@@ -447,31 +447,58 @@ int npu1_config_cu(struct amdxdna_hwctx *hwctx)
 	return ret;
 }
 
-int npu1_execbuf(struct amdxdna_hwctx *hwctx, u32 cu_idx,
+int npu1_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx,
 		 u32 *payload, u32 payload_len, void *handle,
 		 int (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct execute_buffer_req req;
+	union {
+		struct execute_buffer_req ebuf;
+		struct exec_dpu_req dpu;
+	} req;
 	struct xdna_mailbox_msg msg;
 	int ret;
 
 	if (!chann)
 		return -ENODEV;
 
-	if (payload_len < sizeof(req.payload)) {
-		XDNA_DBG(xdna, "Invalid payload len");
+	switch (op) {
+	case ERT_START_CU:
+		if (payload_len < sizeof(req.ebuf.payload)) {
+			XDNA_DBG(xdna, "Invalid payload len: %d", payload_len);
+			return -EINVAL;
+		}
+		req.ebuf.cu_idx = cu_idx;
+		memcpy(req.ebuf.payload, payload, sizeof(req.ebuf.payload));
+		msg.send_size = sizeof(req.ebuf);
+		msg.opcode = MSG_OP_EXECUTE_BUFFER_CF;
+		break;
+	case ERT_START_DPU: {
+		struct amdxdna_cmd_start_dpu *sd =
+			(struct amdxdna_cmd_start_dpu *)payload;
+
+		if (sd->chained) {
+			XDNA_DBG(xdna, "Chained ERT_START_DPU is not supported");
+			return -ENOTSUPP;
+		}
+		req.dpu.inst_buf_addr = sd->instruction_buffer;
+		req.dpu.inst_size = sd->instruction_buffer_size;
+		req.dpu.inst_prop_cnt = 0;
+		req.dpu.cu_idx = cu_idx;
+		memcpy(req.dpu.payload, ((char *)payload) + sizeof(*sd),
+		       sizeof(req.dpu.payload));
+		msg.send_size = sizeof(req.dpu);
+		msg.opcode = MSG_OP_EXEC_DPU;
+		break;
+	}
+	default:
+		XDNA_DBG(xdna, "Invalid ERT cmd op code: %d", op);
 		return -EINVAL;
 	}
-
-	req.cu_idx = cu_idx;
-	memcpy(req.payload, payload, sizeof(req.payload));
-	msg.send_data = (u8 *)&req;
-	msg.send_size = sizeof(req);
 	msg.handle = handle;
-	msg.opcode = MSG_OP_EXECUTE_BUFFER_CF;
 	msg.notify_cb = notify_cb;
+	msg.send_data = (u8 *)&req;
 
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
