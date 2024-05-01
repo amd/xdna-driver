@@ -4,7 +4,7 @@
  */
 
 #include "drm_local/amdxdna_accel.h"
-#include "npu1_pci.h"
+#include "aie2_pci.h"
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
 #define MPNPU_PUB_SEC_INTR             0x3010060
@@ -62,7 +62,7 @@
 #define NPU4_MPNPUCLK_FREQ_MAX  1267
 #define NPU4_HCLK_FREQ_MAX      1800
 
-const struct npu_dev_priv npu4_dev_priv = {
+const struct amdxdna_dev_priv npu4_dev_priv = {
 	.fw_path        = "amdnpu/17f0_10/npu.sbin",
 	.protocol_major = 0x6,
 	.protocol_minor = 0x1,
@@ -106,10 +106,10 @@ const struct amdxdna_dev_info dev_npu4_info = {
 	.smu_bar           = NPU4_SMU_BAR_INDEX,
 	.first_col         = 0,
 	.dev_mem_buf_shift = 15, /* 32 KiB aligned */
-	.dev_mem_base      = NPU_DEVM_BASE,
-	.dev_mem_size      = NPU_DEVM_SIZE,
+	.dev_mem_base      = AIE2_DEVM_BASE,
+	.dev_mem_size      = AIE2_DEVM_SIZE,
 	.vbnv              = "RyzenAI-npu4",
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
 	.dev_priv          = &npu4_dev_priv,
-	.ops               = &npu1_ops, /* NPU4 can share NPU1's callback */
+	.ops               = &aie2_ops, /* NPU4 can share NPU1's callback */
 };

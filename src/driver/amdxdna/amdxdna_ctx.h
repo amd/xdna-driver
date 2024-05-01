@@ -12,7 +12,7 @@
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
 
-struct npu_hwctx;
+struct amdxdna_hwctx_priv;
 
 enum ert_cmd_opcode {
 	ERT_START_CU      = 0,
@@ -61,7 +61,7 @@ struct amdxdna_cmd {
 
 struct amdxdna_hwctx {
 	struct amdxdna_client		*client;
-	struct npu_hwctx		*priv;
+	struct amdxdna_hwctx_priv	*priv;
 	char				*name;
 
 	u32				id;

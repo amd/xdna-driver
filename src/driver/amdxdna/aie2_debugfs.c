@@ -10,8 +10,8 @@
 #include <linux/completion.h>
 #include <drm/drm_debugfs.h>
 
-#include "npu1_msg_priv.h"
-#include "npu1_pci.h"
+#include "aie2_msg_priv.h"
+#include "aie2_pci.h"
 
 #if defined(CONFIG_DEBUG_FS)
 #define SIZE            31
@@ -37,18 +37,18 @@
 	.write = _write, \
 }
 
-#define NPU_DBGFS_FOPS(_name, _show, _write) \
-	static int npu1_dbgfs_##_name##_open(struct inode *inode, struct file *file) \
+#define AIE2_DBGFS_FOPS(_name, _show, _write) \
+	static int aie2_dbgfs_##_name##_open(struct inode *inode, struct file *file) \
 { \
 	return single_open(file, _show, inode->i_private); \
 } \
-const struct file_operations npu_fops_##_name = \
-_DBGFS_FOPS(npu1_dbgfs_##_name##_open, _write)
+const struct file_operations aie2_fops_##_name = \
+_DBGFS_FOPS(aie2_dbgfs_##_name##_open, _write)
 
-#define NPU_DBGFS_FOPS_WO(_name, _write) \
-	const struct file_operations npu_fops_##_name = _DBGFS_FOPS_WO(_write)
+#define AIE2_DBGFS_FOPS_WO(_name, _write) \
+	const struct file_operations aie2_fops_##_name = _DBGFS_FOPS_WO(_write)
 
-#define NPU_DBGFS_FILE(_name, _mode) { #_name, &npu_fops_##_name, _mode }
+#define AIE2_DBGFS_FILE(_name, _mode) { #_name, &aie2_fops_##_name, _mode }
 
 #define file_to_ndev_wo(file) \
 	((file)->private_data)
@@ -56,10 +56,10 @@ _DBGFS_FOPS(npu1_dbgfs_##_name##_open, _write)
 #define file_to_ndev_rw(file) \
 	(((struct seq_file *)(file)->private_data)->private)
 
-static ssize_t npu1_clock_write(struct file *file, const char __user *ptr,
+static ssize_t aie2_clock_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
 {
-	struct npu_device *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	u32 val;
 	int ret;
 
@@ -69,21 +69,21 @@ static ssize_t npu1_clock_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	npu1_smu_set_mpnpu_clock_freq(ndev, val);
+	aie2_smu_set_mpnpu_clock_freq(ndev, val);
 	return len;
 }
 
-static int npu1_clock_show(struct seq_file *m, void *unused)
+static int aie2_clock_show(struct seq_file *m, void *unused)
 {
 	return 0;
 }
 
-NPU_DBGFS_FOPS(npuclock, npu1_clock_show, npu1_clock_write);
+AIE2_DBGFS_FOPS(npuclock, aie2_clock_show, aie2_clock_write);
 
-static ssize_t npu1_pasid_write(struct file *file, const char __user *ptr,
+static ssize_t aie2_pasid_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
 {
-	struct npu_device *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	u32 val;
 	int ret;
 
@@ -93,7 +93,7 @@ static ssize_t npu1_pasid_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	ret = npu1_assign_mgmt_pasid(ndev, val);
+	ret = aie2_assign_mgmt_pasid(ndev, val);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Assigning pasid: %d failed, ret: %d", val, ret);
 		return ret;
@@ -101,17 +101,17 @@ static ssize_t npu1_pasid_write(struct file *file, const char __user *ptr,
 	return len;
 }
 
-static int npu1_pasid_show(struct seq_file *m, void *unused)
+static int aie2_pasid_show(struct seq_file *m, void *unused)
 {
 	return 0;
 }
 
-NPU_DBGFS_FOPS(pasid, npu1_pasid_show, npu1_pasid_write);
+AIE2_DBGFS_FOPS(pasid, aie2_pasid_show, aie2_pasid_write);
 
-static ssize_t npu1_power_state_write(struct file *file, const char __user *ptr,
+static ssize_t aie2_power_state_write(struct file *file, const char __user *ptr,
 				      size_t len, loff_t *off)
 {
-	struct npu_device *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	char input[SIZE + 1];
 	int ret;
 
@@ -127,9 +127,9 @@ static ssize_t npu1_power_state_write(struct file *file, const char __user *ptr,
 	}
 
 	if (!strncmp(input, "on", strlen("on"))) {
-		ret = npu1_smu_set_power_on(ndev);
+		ret = aie2_smu_set_power_on(ndev);
 	} else if (!strncmp(input, "off", strlen("off"))) {
-		ret = npu1_smu_set_power_off(ndev);
+		ret = aie2_smu_set_power_off(ndev);
 	} else {
 		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
 		return -EINVAL;
@@ -144,17 +144,17 @@ static ssize_t npu1_power_state_write(struct file *file, const char __user *ptr,
 	return len;
 }
 
-static int npu1_power_state_show(struct seq_file *m, void *unused)
+static int aie2_power_state_show(struct seq_file *m, void *unused)
 {
 	return 0;
 }
 
-NPU_DBGFS_FOPS(powerstate, npu1_power_state_show, npu1_power_state_write);
+AIE2_DBGFS_FOPS(powerstate, aie2_power_state_show, aie2_power_state_write);
 
-static ssize_t npu1_state_write(struct file *file, const char __user *ptr,
+static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
 {
-	struct npu_device *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	char input[SIZE + 1];
 	int ret;
 
@@ -170,9 +170,9 @@ static ssize_t npu1_state_write(struct file *file, const char __user *ptr,
 	}
 
 	if (!strncmp(input, "suspend", strlen("suspend"))) {
-		ret = npu1_suspend_fw(ndev);
+		ret = aie2_suspend_fw(ndev);
 	} else if (!strncmp(input, "resume", strlen("resume"))) {
-		ret = npu1_resume_fw(ndev);
+		ret = aie2_resume_fw(ndev);
 	} else {
 		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
 		return -EINVAL;
@@ -187,17 +187,17 @@ static ssize_t npu1_state_write(struct file *file, const char __user *ptr,
 	return len;
 }
 
-static int npu1_state_show(struct seq_file *m, void *unused)
+static int aie2_state_show(struct seq_file *m, void *unused)
 {
 	return 0;
 }
 
-NPU_DBGFS_FOPS(state, npu1_state_show, npu1_state_write);
+AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
 
-static ssize_t npu1_dbgfs_hclock_write(struct file *file, const char __user *ptr,
+static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr,
 				       size_t len, loff_t *off)
 {
-	struct npu_device *ndev = file_to_ndev_wo(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_wo(file);
 	u32 val;
 	int ret;
 
@@ -207,14 +207,14 @@ static ssize_t npu1_dbgfs_hclock_write(struct file *file, const char __user *ptr
 		return ret;
 	}
 
-	npu1_smu_set_hclock_freq(ndev, val);
+	aie2_smu_set_hclock_freq(ndev, val);
 
 	return len;
 }
 
-NPU_DBGFS_FOPS_WO(hclock, npu1_dbgfs_hclock_write);
+AIE2_DBGFS_FOPS_WO(hclock, aie2_dbgfs_hclock_write);
 
-static int test_case01(struct npu_device *ndev)
+static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
@@ -224,7 +224,7 @@ static int test_case01(struct npu_device *ndev)
 	}
 
 	XDNA_INFO(ndev->xdna, "Starting NPU health check");
-	ret = npu1_check_protocol_version(ndev);
+	ret = aie2_check_protocol_version(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "NPU health check failed: ret=%d", ret);
 		return ret;
@@ -242,7 +242,7 @@ static int test_case02_cb(void *handle, const u32 *data, size_t size)
 	return 0;
 }
 
-static int test_case02(struct npu_device *ndev, u32 argc, const u32 *args)
+static int test_case02(struct amdxdna_dev_hdl *ndev, u32 argc, const u32 *args)
 {
 	struct xdna_mailbox_msg msg;
 	DECLARE_COMPLETION(comp);
@@ -318,10 +318,10 @@ static int test_case02(struct npu_device *ndev, u32 argc, const u32 *args)
 }
 
 #define NPUTEST_MAX_PARAM 5
-static ssize_t npu1_dbgfs_nputest(struct file *file, const char __user *ptr,
+static ssize_t aie2_dbgfs_nputest(struct file *file, const char __user *ptr,
 				  size_t len, loff_t *off)
 {
-	struct npu_device *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	char *kern_buff, *tmp_buff, *sub_str;
 	u32 args[NPUTEST_MAX_PARAM];
 	int argc = 0;
@@ -358,7 +358,7 @@ static ssize_t npu1_dbgfs_nputest(struct file *file, const char __user *ptr,
 		ret = test_case02(ndev, argc, args);
 		break;
 	case 3:
-		ret = npu1_self_test(ndev);
+		ret = aie2_self_test(ndev);
 		break;
 	default:
 		XDNA_ERR(ndev->xdna, "Unknown test case ID %d\n", args[0]);
@@ -370,7 +370,7 @@ free_and_out:
 	return (ret) ? ret : len;
 }
 
-static int npu1_dbgfs_nputest_show(struct seq_file *m, void *unused)
+static int aie2_dbgfs_nputest_show(struct seq_file *m, void *unused)
 {
 	seq_puts(m, "nputest usage:\n");
 	seq_puts(m, "\techo id [args] > <debugfs_path>/dri/<render_id>/nputest\n");
@@ -390,49 +390,49 @@ static int npu1_dbgfs_nputest_show(struct seq_file *m, void *unused)
 	return 0;
 }
 
-NPU_DBGFS_FOPS(nputest, npu1_dbgfs_nputest_show, npu1_dbgfs_nputest);
+AIE2_DBGFS_FOPS(nputest, aie2_dbgfs_nputest_show, aie2_dbgfs_nputest);
 
 const struct {
 	const char *name;
 	const struct file_operations *fops;
 	umode_t mode;
-} npu1_dbgfs_files[] = {
-	NPU_DBGFS_FILE(nputest, 0400),
-	NPU_DBGFS_FILE(hclock, 0400),
-	NPU_DBGFS_FILE(npuclock, 0600),
-	NPU_DBGFS_FILE(pasid, 0600),
-	NPU_DBGFS_FILE(state, 0600),
-	NPU_DBGFS_FILE(powerstate, 0600),
+} aie2_dbgfs_files[] = {
+	AIE2_DBGFS_FILE(nputest, 0400),
+	AIE2_DBGFS_FILE(hclock, 0400),
+	AIE2_DBGFS_FILE(npuclock, 0600),
+	AIE2_DBGFS_FILE(pasid, 0600),
+	AIE2_DBGFS_FILE(state, 0600),
+	AIE2_DBGFS_FILE(powerstate, 0600),
 };
 
-/* only for npu1_debugfs_list */
+/* only for aie2_debugfs_list */
 #define seqf_to_xdna_dev(m) \
 	to_xdna_dev(((struct drm_info_node *)(m)->private)->minor->dev)
 
 static int
-mpnpu1_ringbuf_show(struct seq_file *m, void *unused)
+aie2_ringbuf_show(struct seq_file *m, void *unused)
 {
-	struct npu_device *ndev = seqf_to_xdna_dev(m)->dev_handle;
+	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
 
 	return xdna_mailbox_ringbuf_show(ndev->mbox, m);
 }
 
 static int
-mpnpu1_msg_queue_show(struct seq_file *m, void *unused)
+aie2_msg_queue_show(struct seq_file *m, void *unused)
 {
-	struct npu_device *ndev = seqf_to_xdna_dev(m)->dev_handle;
+	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
 
 	return xdna_mailbox_info_show(ndev->mbox, m);
 }
 
-static const struct drm_info_list npu1_debugfs_list[] = {
-	{"ringbuf", mpnpu1_ringbuf_show, 0},
-	{"msg_queues", mpnpu1_msg_queue_show, 0},
+static const struct drm_info_list aie2_debugfs_list[] = {
+	{"ringbuf", aie2_ringbuf_show, 0},
+	{"msg_queues", aie2_msg_queue_show, 0},
 };
 
-#define INFO_LIST_ENTRIES ARRAY_SIZE(npu1_debugfs_list)
+#define INFO_LIST_ENTRIES ARRAY_SIZE(aie2_debugfs_list)
 
-void npu1_debugfs_init(struct amdxdna_dev *xdna)
+void aie2_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct drm_minor *minor = xdna->ddev.accel;
 	int i;
@@ -444,20 +444,20 @@ void npu1_debugfs_init(struct amdxdna_dev *xdna)
 	 *
 	 * BTW, we rely on DRM framework to finish debugfs.
 	 */
-	for (i = 0; i < ARRAY_SIZE(npu1_dbgfs_files); i++) {
-		debugfs_create_file(npu1_dbgfs_files[i].name,
-				    npu1_dbgfs_files[i].mode,
+	for (i = 0; i < ARRAY_SIZE(aie2_dbgfs_files); i++) {
+		debugfs_create_file(aie2_dbgfs_files[i].name,
+				    aie2_dbgfs_files[i].mode,
 				    minor->debugfs_root,
 				    xdna->dev_handle,
-				    npu1_dbgfs_files[i].fops);
+				    aie2_dbgfs_files[i].fops);
 	}
 
 	/* DRM debugfs handles readonly files */
-	drm_debugfs_create_files(npu1_debugfs_list, INFO_LIST_ENTRIES,
+	drm_debugfs_create_files(aie2_debugfs_list, INFO_LIST_ENTRIES,
 				 minor->debugfs_root, minor);
 }
 #else
-void npu1_debugfs_init(struct amdxdna_dev *xdna)
+void aie2_debugfs_init(struct amdxdna_dev *xdna)
 {
 }
 #endif /* CONFIG_DEBUG_FS */

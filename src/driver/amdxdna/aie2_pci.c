@@ -9,17 +9,16 @@
 #include <linux/firmware.h>
 #include "drm_local/amdxdna_accel.h"
 
-#include "npu1_pci.h"
-#include "npu_solver.h"
-#include "npu_common.h"
-#include "npu1_msg_priv.h"
+#include "aie2_pci.h"
+#include "aie2_solver.h"
+#include "aie2_msg_priv.h"
 
-int npu1_max_col = XRS_MAX_COL;
-module_param(npu1_max_col, int, 0600);
-MODULE_PARM_DESC(npu1_max_col, "Maximum column could be used");
+int aie2_max_col = XRS_MAX_COL;
+module_param(aie2_max_col, int, 0600);
+MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
 
 /*
- * The management mailbox channel is allocated by NPU firmware.
+ * The management mailbox channel is allocated by firmware.
  * The related register and ring buffer information is on SRAM BAR.
  * This struct is the register layout.
  */
@@ -34,7 +33,7 @@ struct mgmt_mbox_chann_info {
 	u32	i2x_buf_sz;
 };
 
-static inline void npu1_dump_chann_info_debug(struct npu_device *ndev)
+static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 
@@ -49,7 +48,7 @@ static inline void npu1_dump_chann_info_debug(struct npu_device *ndev)
 	XDNA_DBG(xdna, "x2i chann index 0x%x", ndev->mgmt_chan_idx);
 }
 
-static int npu1_get_mgmt_chann_info(struct npu_device *ndev)
+static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 {
 	struct mgmt_mbox_chann_info info_regs;
 	struct xdna_mailbox_chann_res *i2x;
@@ -60,7 +59,7 @@ static int npu1_get_mgmt_chann_info(struct npu_device *ndev)
 	int i;
 
 	/*
-	 * Once NPU firmware is alive, it will write management channel
+	 * Once firmware is alive, it will write management channel
 	 * information in SRAM BAR and write the address of that information
 	 * at FW_ALIVE_OFF offset in SRMA BAR.
 	 *
@@ -68,11 +67,11 @@ static int npu1_get_mgmt_chann_info(struct npu_device *ndev)
 	 * is alive.
 	 */
 	ret = readx_poll_timeout(readl, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF),
-				 addr, addr, NPU_INTERVAL, NPU_TIMEOUT);
+				 addr, addr, AIE2_INTERVAL, AIE2_TIMEOUT);
 	if (ret || !addr)
 		return -ETIME;
 
-	off = NPU_SRAM_OFF(ndev, addr);
+	off = AIE2_SRAM_OFF(ndev, addr);
 	reg = (u32 *)&info_regs;
 	for (i = 0; i < sizeof(info_regs) / sizeof(u32); i++)
 		reg[i] = readl(ndev->sram_base + off + i * sizeof(u32));
@@ -80,18 +79,18 @@ static int npu1_get_mgmt_chann_info(struct npu_device *ndev)
 	i2x = &ndev->mgmt_i2x;
 	x2i = &ndev->mgmt_x2i;
 
-	i2x->mb_head_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.i2x_head);
-	i2x->mb_tail_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.i2x_tail);
-	i2x->rb_start_addr   = NPU_SRAM_OFF(ndev, info_regs.i2x_buf);
+	i2x->mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_head);
+	i2x->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_tail);
+	i2x->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.i2x_buf);
 	i2x->rb_size         = info_regs.i2x_buf_sz;
 
-	x2i->mb_head_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.x2i_head);
-	x2i->mb_tail_ptr_reg = NPU_MBOX_OFF(ndev, info_regs.x2i_tail);
-	x2i->rb_start_addr   = NPU_SRAM_OFF(ndev, info_regs.x2i_buf);
+	x2i->mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_head);
+	x2i->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_tail);
+	x2i->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.x2i_buf);
 	x2i->rb_size         = info_regs.x2i_buf_sz;
 	ndev->mgmt_chan_idx  = CHANN_INDEX(ndev, x2i->rb_start_addr);
 
-	npu1_dump_chann_info_debug(ndev);
+	aie2_dump_chann_info_debug(ndev);
 
 	/* Must clear address at FW_ALIVE_OFF */
 	writel(0, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF));
@@ -99,7 +98,7 @@ static int npu1_get_mgmt_chann_info(struct npu_device *ndev)
 	return 0;
 }
 
-static int npu1_runtime_cfg(struct npu_device *ndev)
+static int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev)
 {
 	const struct rt_config *cfg = &ndev->priv->rt_config;
 	u64 value;
@@ -112,14 +111,14 @@ static int npu1_runtime_cfg(struct npu_device *ndev)
 			  cfg->type, cfg->value);
 	}
 #endif
-	ret = npu1_set_runtime_cfg(ndev, cfg->type, cfg->value);
+	ret = aie2_set_runtime_cfg(ndev, cfg->type, cfg->value);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set runtime type %d value %d failed",
 			 cfg->type, cfg->value);
 		return ret;
 	}
 
-	ret = npu1_get_runtime_cfg(ndev, cfg->type, &value);
+	ret = aie2_get_runtime_cfg(ndev, cfg->type, &value);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Get runtime cfg failed");
 		return ret;
@@ -131,17 +130,17 @@ static int npu1_runtime_cfg(struct npu_device *ndev)
 	return 0;
 }
 
-static int npu1_xdna_reset(struct npu_device *ndev)
+static int aie2_xdna_reset(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = npu1_suspend_fw(ndev);
+	ret = aie2_suspend_fw(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Suspend firmware failed");
 		return ret;
 	}
 
-	ret = npu1_resume_fw(ndev);
+	ret = aie2_resume_fw(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Resume firmware failed");
 		return ret;
@@ -150,29 +149,29 @@ static int npu1_xdna_reset(struct npu_device *ndev)
 	return 0;
 }
 
-static int npu1_mgmt_fw_init(struct npu_device *ndev)
+static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = npu1_check_protocol_version(ndev);
+	ret = aie2_check_protocol_version(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Check header hash failed");
 		return ret;
 	}
 
-	ret = npu1_runtime_cfg(ndev);
+	ret = aie2_runtime_cfg(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Runtime config failed");
 		return ret;
 	}
 
-	ret = npu1_assign_mgmt_pasid(ndev, 0);
+	ret = aie2_assign_mgmt_pasid(ndev, 0);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Can not assign PASID");
 		return ret;
 	}
 
-	ret = npu1_xdna_reset(ndev);
+	ret = aie2_xdna_reset(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Reset firmware failed");
 		return ret;
@@ -181,7 +180,7 @@ static int npu1_mgmt_fw_init(struct npu_device *ndev)
 	if (!ndev->async_events)
 		return 0;
 
-	ret = npu1_error_async_events_send(ndev);
+	ret = aie2_error_async_events_send(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Send async events failed");
 		return ret;
@@ -190,23 +189,23 @@ static int npu1_mgmt_fw_init(struct npu_device *ndev)
 	return 0;
 }
 
-static int npu1_mgmt_fw_query(struct npu_device *ndev)
+static int aie2_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = npu1_query_firmware_version(ndev, &ndev->xdna->fw_ver);
+	ret = aie2_query_firmware_version(ndev, &ndev->xdna->fw_ver);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "query firmware version failed");
 		return ret;
 	}
 
-	ret = npu1_query_aie_version(ndev, &ndev->version);
+	ret = aie2_query_aie_version(ndev, &ndev->version);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Query AIE version failed");
 		return ret;
 	}
 
-	ret = npu1_query_aie_metadata(ndev, &ndev->metadata);
+	ret = aie2_query_aie_metadata(ndev, &ndev->metadata);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Query AIE metadata failed");
 		return ret;
@@ -215,14 +214,14 @@ static int npu1_mgmt_fw_query(struct npu_device *ndev)
 	return 0;
 }
 
-static void npu1_mgmt_fw_fini(struct npu_device *ndev)
+static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 {
-	if (npu1_suspend_fw(ndev))
+	if (aie2_suspend_fw(ndev))
 		XDNA_ERR(ndev->xdna, "suspend_fw failed");
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
 
-static int npu1_xrs_load(void *cb_arg, struct xrs_action_load *action)
+static int aie2_xrs_load(void *cb_arg, struct xrs_action_load *action)
 {
 	struct amdxdna_hwctx *hwctx = cb_arg;
 	struct amdxdna_dev *xdna;
@@ -232,14 +231,14 @@ static int npu1_xrs_load(void *cb_arg, struct xrs_action_load *action)
 
 	hwctx->start_col = action->part.start_col;
 	hwctx->num_col = action->part.ncols;
-	ret = npu1_create_context(xdna->dev_handle, hwctx);
+	ret = aie2_create_context(xdna->dev_handle, hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "create context failed, ret %d", ret);
 
 	return ret;
 }
 
-static int npu1_xrs_unload(void *cb_arg)
+static int aie2_xrs_unload(void *cb_arg)
 {
 	struct amdxdna_hwctx *hwctx = cb_arg;
 	struct amdxdna_dev *xdna;
@@ -247,36 +246,36 @@ static int npu1_xrs_unload(void *cb_arg)
 
 	xdna = hwctx->client->xdna;
 
-	ret = npu1_destroy_context(xdna->dev_handle, hwctx);
+	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
 
 	return ret;
 }
 
-static struct xrs_action_ops npu1_xrs_actions = {
-	.load = npu1_xrs_load,
-	.unload = npu1_xrs_unload,
+static struct xrs_action_ops aie2_xrs_actions = {
+	.load = aie2_xrs_load,
+	.unload = aie2_xrs_unload,
 };
 
-static void npu1_hw_stop(struct amdxdna_dev *xdna)
+static void aie2_hw_stop(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct npu_device *ndev = xdna->dev_handle;
 
-	npu1_mgmt_fw_fini(ndev);
+	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
-	npu1_psp_stop(ndev->psp_hdl);
-	npu1_smu_fini(ndev);
+	aie2_psp_stop(ndev->psp_hdl);
+	aie2_smu_fini(ndev);
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
 }
 
-static int npu1_hw_start(struct amdxdna_dev *xdna)
+static int aie2_hw_start(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct npu_device *ndev = xdna->dev_handle;
 	struct xdna_mailbox_res mbox_res;
 	u32 xdna_mailbox_intr_reg;
 	int mgmt_mb_irq, ret;
@@ -288,19 +287,19 @@ static int npu1_hw_start(struct amdxdna_dev *xdna)
 	}
 	pci_set_master(pdev);
 
-	ret = npu1_smu_init(ndev);
+	ret = aie2_smu_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init smu, ret %d", ret);
 		goto disable_dev;
 	}
 
-	ret = npu1_psp_start(ndev->psp_hdl);
+	ret = aie2_psp_start(ndev->psp_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to start psp, ret %d", ret);
 		goto fini_smu;
 	}
 
-	ret = npu1_get_mgmt_chann_info(ndev);
+	ret = aie2_get_mgmt_chann_info(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "firmware is not alive");
 		goto stop_psp;
@@ -337,7 +336,7 @@ static int npu1_hw_start(struct amdxdna_dev *xdna)
 		goto stop_psp;
 	}
 
-	ret = npu1_mgmt_fw_init(ndev);
+	ret = aie2_mgmt_fw_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "initial mgmt firmware failed, ret %d", ret);
 		goto destroy_mgmt_chann;
@@ -349,9 +348,9 @@ destroy_mgmt_chann:
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 stop_psp:
-	npu1_psp_stop(ndev->psp_hdl);
+	aie2_psp_stop(ndev->psp_hdl);
 fini_smu:
-	npu1_smu_fini(ndev);
+	aie2_smu_fini(ndev);
 disable_dev:
 	pci_disable_device(pdev);
 	pci_clear_master(pdev);
@@ -359,14 +358,14 @@ disable_dev:
 	return ret;
 }
 
-static int npu1_init(struct amdxdna_dev *xdna)
+static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev;
 	struct init_config xrs_cfg = { 0 };
 	struct psp_config psp_conf;
 	const struct firmware *fw;
 	void __iomem * const *tbl;
-	struct npu_device *ndev;
 	int i, bars, nvec, ret;
 
 	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
@@ -444,7 +443,7 @@ static int npu1_init(struct amdxdna_dev *xdna)
 	psp_conf.fw_buf = fw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
-	ndev->psp_hdl = npu1m_psp_create(&pdev->dev, &psp_conf);
+	ndev->psp_hdl = aie2m_psp_create(&pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
 		ret = -ENOMEM;
@@ -452,21 +451,27 @@ static int npu1_init(struct amdxdna_dev *xdna)
 	}
 	xdna->dev_handle = ndev;
 
-	ret = npu1_hw_start(xdna);
+	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);
 		goto disable_sva;
 	}
 
-	ret = npu1_mgmt_fw_query(ndev);
+	ret = aie2_mgmt_fw_query(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Query firmware failed, ret %d", ret);
 		goto stop_hw;
 	}
-	ndev->total_col = min(npu1_max_col, ndev->metadata.cols);
+	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
 
-	npu_default_xrs_cfg(xdna, &xrs_cfg);
-	xrs_cfg.actions = &npu1_xrs_actions;
+	xrs_cfg.clk_list.num_levels = 3;
+	xrs_cfg.clk_list.cu_clk_list[0] = 0;
+	xrs_cfg.clk_list.cu_clk_list[1] = 800;
+	xrs_cfg.clk_list.cu_clk_list[2] = 1000;
+	xrs_cfg.sys_eff_factor = 1;
+	xrs_cfg.mode = XRS_MODE_TEMPORAL_BEST;
+	xrs_cfg.dev = xdna->ddev.dev;
+	xrs_cfg.actions = &aie2_xrs_actions;
 	xrs_cfg.total_col = ndev->total_col;
 
 	xdna->xrs_hdl = xrsm_init(&xrs_cfg);
@@ -476,20 +481,20 @@ static int npu1_init(struct amdxdna_dev *xdna)
 		goto stop_hw;
 	}
 
-	ret = npu1_error_async_events_alloc(ndev);
+	ret = aie2_error_async_events_alloc(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
 		goto stop_hw;
 	}
 
-	ret = npu1_error_async_events_send(ndev);
+	ret = aie2_error_async_events_send(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Send async events failed, ret %d", ret);
 		goto async_event_free;
 	}
 
 	/* Just to make sure firmware handled async events */
-	ret = npu1_query_firmware_version(ndev, &ndev->xdna->fw_ver);
+	ret = aie2_query_firmware_version(ndev, &ndev->xdna->fw_ver);
 	if (ret) {
 		XDNA_ERR(xdna, "Re-query firmware version failed");
 		goto async_event_free;
@@ -499,9 +504,9 @@ static int npu1_init(struct amdxdna_dev *xdna)
 	return 0;
 
 async_event_free:
-	npu1_error_async_events_free(ndev);
+	aie2_error_async_events_free(ndev);
 stop_hw:
-	npu1_hw_stop(xdna);
+	aie2_hw_stop(xdna);
 disable_sva:
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 free_irq:
@@ -512,22 +517,22 @@ release_fw:
 	return ret;
 }
 
-static void npu1_fini(struct amdxdna_dev *xdna)
+static void aie2_fini(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct npu_device *ndev = xdna->dev_handle;
 
-	npu1_hw_stop(xdna);
-	npu1_error_async_events_free(ndev);
+	aie2_hw_stop(xdna);
+	aie2_error_async_events_free(ndev);
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 	pci_free_irq_vectors(pdev);
 }
 
-static int npu1_get_aie_status(struct amdxdna_dev *xdna,
+static int aie2_get_aie_status(struct amdxdna_dev *xdna,
 			       struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_status status;
-	struct npu_device *ndev = xdna->dev_handle;
 	int ret;
 
 	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), sizeof(status))) {
@@ -541,7 +546,7 @@ static int npu1_get_aie_status(struct amdxdna_dev *xdna,
 		return -EINVAL;
 	}
 
-	ret = npu1_query_status(ndev, u64_to_user_ptr(status.buffer),
+	ret = aie2_query_status(ndev, u64_to_user_ptr(status.buffer),
 				status.buffer_size, &status.cols_filled);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get AIE status info. Ret: %d", ret);
@@ -556,11 +561,11 @@ static int npu1_get_aie_status(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int npu1_get_aie_metadata(struct amdxdna_dev *xdna,
+static int aie2_get_aie_metadata(struct amdxdna_dev *xdna,
 				 struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_metadata *meta;
-	struct npu_device *ndev = xdna->dev_handle;
 	int ret = 0;
 
 	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
@@ -599,11 +604,11 @@ static int npu1_get_aie_metadata(struct amdxdna_dev *xdna,
 	return ret;
 }
 
-static int npu1_get_aie_version(struct amdxdna_dev *xdna,
+static int aie2_get_aie_version(struct amdxdna_dev *xdna,
 				struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_version version;
-	struct npu_device *ndev = xdna->dev_handle;
 
 	version.major = ndev->version.major;
 	version.minor = ndev->version.minor;
@@ -614,11 +619,11 @@ static int npu1_get_aie_version(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int npu1_get_clock_metadata(struct amdxdna_dev *xdna,
+static int aie2_get_clock_metadata(struct amdxdna_dev *xdna,
 				   struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_clock_metadata *clock;
-	struct npu_device *ndev = xdna->dev_handle;
 	int ret = 0;
 
 	clock = kzalloc(sizeof(*clock), GFP_KERNEL);
@@ -638,7 +643,7 @@ static int npu1_get_clock_metadata(struct amdxdna_dev *xdna,
 	return ret;
 }
 
-static int npu1_get_sensors(struct amdxdna_dev *xdna,
+static int aie2_get_sensors(struct amdxdna_dev *xdna,
 			    struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_sensor *sensor;
@@ -661,7 +666,7 @@ static int npu1_get_sensors(struct amdxdna_dev *xdna,
 	return ret;
 }
 
-static int npu1_get_hwctx_status(struct amdxdna_dev *xdna,
+static int aie2_get_hwctx_status(struct amdxdna_dev *xdna,
 				 struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_hwctx __user *buf;
@@ -727,7 +732,7 @@ out:
 	return ret;
 }
 
-static int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+static int aie2_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
 {
 	int ret, idx;
 
@@ -736,22 +741,22 @@ static int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *
 
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = npu1_get_aie_status(xdna, args);
+		ret = aie2_get_aie_status(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		ret = npu1_get_aie_metadata(xdna, args);
+		ret = aie2_get_aie_metadata(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
-		ret = npu1_get_aie_version(xdna, args);
+		ret = aie2_get_aie_version(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
-		ret = npu1_get_clock_metadata(xdna, args);
+		ret = aie2_get_clock_metadata(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = npu1_get_sensors(xdna, args);
+		ret = aie2_get_sensors(xdna, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = npu1_get_hwctx_status(xdna, args);
+		ret = aie2_get_hwctx_status(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -762,7 +767,7 @@ static int npu1_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *
 	return ret;
 }
 
-static int npu1_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+static int aie2_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_set_power_mode power_state;
 
@@ -781,11 +786,11 @@ static int npu1_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_
 
 	/* Set resource solver power property to the user choice */
 
-	/* Set power level within the NPU */
+	/* Set power level within the device */
 	return 0;
 }
 
-static int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+static int aie2_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
 {
 	int ret, idx;
 
@@ -794,7 +799,7 @@ static int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state
 
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
-		ret = npu1_set_power_mode(xdna, args);
+		ret = aie2_set_power_mode(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -805,20 +810,20 @@ static int npu1_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state
 	return ret;
 }
 
-const struct amdxdna_dev_ops npu1_ops = {
+const struct amdxdna_dev_ops aie2_ops = {
 	.mmap           = NULL,
-	.init           = npu1_init,
-	.fini           = npu1_fini,
-	.resume         = npu1_hw_start,
-	.suspend        = npu1_hw_stop,
-	.get_info       = npu1_get_info,
-	.set_state      = npu1_set_state,
-	.hwctx_init     = npu1_hwctx_init,
-	.hwctx_fini     = npu1_hwctx_fini,
-	.hwctx_config   = npu1_hwctx_config,
-	.hwctx_suspend  = npu1_hwctx_suspend,
-	.hwctx_resume   = npu1_hwctx_resume,
-	.cmd_submit     = npu1_cmd_submit,
-	.cmd_wait       = npu1_cmd_wait,
-	.debugfs	= npu1_debugfs_init,
+	.init           = aie2_init,
+	.fini           = aie2_fini,
+	.resume         = aie2_hw_start,
+	.suspend        = aie2_hw_stop,
+	.get_info       = aie2_get_info,
+	.set_state      = aie2_set_state,
+	.hwctx_init     = aie2_hwctx_init,
+	.hwctx_fini     = aie2_hwctx_fini,
+	.hwctx_config   = aie2_hwctx_config,
+	.hwctx_suspend  = aie2_hwctx_suspend,
+	.hwctx_resume   = aie2_hwctx_resume,
+	.cmd_submit     = aie2_cmd_submit,
+	.cmd_wait       = aie2_cmd_wait,
+	.debugfs	= aie2_debugfs_init,
 };

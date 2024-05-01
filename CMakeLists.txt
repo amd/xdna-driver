@@ -11,6 +11,7 @@ else(DEFINED $ENV{XRT_PLUGIN_VERSION_PATCH})
   SET(XRT_PLUGIN_VERSION_PATCH 0)
 endif(DEFINED ENV{XRT_PLUGIN_VERSION_PATCH})
 
+message("-- XRT_INSTALL_PREFIX is set ${XRT_INSTALL_PREFIX}")
 # Set install component that will be packaged
 set(XDNA_COMPONENT "amdxdna" CACHE STRING "XDNA component name")
 

@@ -3,17 +3,17 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#include "npu1_pci.h"
+#include "aie2_pci.h"
 
 #define SMU_RESULT_OK		1
 
 /* SMU commands */
-#define NPU_SMU_POWER_ON		0x3
-#define NPU_SMU_POWER_OFF		0x4
-#define NPU_SMU_SET_MPNPUCLK_FREQ	0x5
-#define NPU_SMU_SET_HCLK_FREQ		0x6
+#define AIE2_SMU_POWER_ON		0x3
+#define AIE2_SMU_POWER_OFF		0x4
+#define AIE2_SMU_SET_MPNPUCLK_FREQ	0x5
+#define AIE2_SMU_SET_HCLK_FREQ		0x6
 
-static int npu1_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
+static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd, u32 reg_arg)
 {
 	u32 resp;
 	int ret;
@@ -27,7 +27,7 @@ static int npu1_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
 	writel(1, SMU_REG(ndev, SMU_INTR_REG));
 
 	ret = readx_poll_timeout(readl, SMU_REG(ndev, SMU_RESP_REG), resp,
-				 resp, NPU_INTERVAL, NPU_TIMEOUT);
+				 resp, AIE2_INTERVAL, AIE2_TIMEOUT);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "smu cmd %d timed out", reg_cmd);
 		return ret;
@@ -41,7 +41,7 @@ static int npu1_smu_exec(struct npu_device *ndev, u32 reg_cmd, u32 reg_arg)
 	return 0;
 }
 
-int npu1_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz)
+int aie2_smu_set_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev, u32 freq_mhz)
 {
 	int ret;
 
@@ -51,14 +51,14 @@ int npu1_smu_set_mpnpu_clock_freq(struct npu_device *ndev, u32 freq_mhz)
 	}
 
 	ndev->mp_npu_clock.freq_mhz = freq_mhz;
-	ret = npu1_smu_exec(ndev, NPU_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
 	if (!ret)
 		XDNA_INFO(ndev->xdna, "set mpnpu_clock = %d mhz", freq_mhz);
 
 	return ret;
 }
 
-int npu1_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz)
+int aie2_smu_set_hclock_freq(struct amdxdna_dev_hdl *ndev, u32 freq_mhz)
 {
 	int ret;
 
@@ -68,41 +68,41 @@ int npu1_smu_set_hclock_freq(struct npu_device *ndev, u32 freq_mhz)
 	}
 
 	ndev->h_clock.freq_mhz = freq_mhz;
-	ret = npu1_smu_exec(ndev, NPU_SMU_SET_HCLK_FREQ, freq_mhz);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HCLK_FREQ, freq_mhz);
 	if (!ret)
 		XDNA_INFO(ndev->xdna, "set npu_hclock = %d mhz", freq_mhz);
 
 	return ret;
 }
 
-int npu1_smu_set_power_on(struct npu_device *ndev)
+int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
 {
-	return npu1_smu_exec(ndev, NPU_SMU_POWER_ON, 0);
+	return aie2_smu_exec(ndev, AIE2_SMU_POWER_ON, 0);
 }
 
-int npu1_smu_set_power_off(struct npu_device *ndev)
+int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev)
 {
-	return npu1_smu_exec(ndev, NPU_SMU_POWER_OFF, 0);
+	return aie2_smu_exec(ndev, AIE2_SMU_POWER_OFF, 0);
 }
 
-int npu1_smu_init(struct npu_device *ndev)
+int aie2_smu_init(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = npu1_smu_set_power_on(ndev);
+	ret = aie2_smu_set_power_on(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Power on failed, ret %d", ret);
 		return ret;
 	}
 
-	ret = npu1_smu_set_mpnpu_clock_freq(ndev, SMU_MPNPUCLK_FREQ_MAX(ndev));
+	ret = aie2_smu_set_mpnpu_clock_freq(ndev, SMU_MPNPUCLK_FREQ_MAX(ndev));
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set mpnpu clk freq failed, ret %d", ret);
 		return ret;
 	}
 	snprintf(ndev->mp_npu_clock.name, sizeof(ndev->mp_npu_clock.name), "MP-NPU Clock");
 
-	ret = npu1_smu_set_hclock_freq(ndev, SMU_HCLK_FREQ_MAX(ndev));
+	ret = aie2_smu_set_hclock_freq(ndev, SMU_HCLK_FREQ_MAX(ndev));
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set hclk freq failed, ret %d", ret);
 		return ret;
@@ -112,11 +112,11 @@ int npu1_smu_init(struct npu_device *ndev)
 	return 0;
 }
 
-void npu1_smu_fini(struct npu_device *ndev)
+void aie2_smu_fini(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = npu1_smu_set_power_off(ndev);
+	ret = aie2_smu_set_power_off(ndev);
 	if (ret)
 		XDNA_WARN(ndev->xdna, "Power off failed, ret %d", ret);
 }

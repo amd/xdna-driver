@@ -3,8 +3,8 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _NPU_SOLVER_H
-#define _NPU_SOLVER_H
+#ifndef _AIE2_SOLVER_H
+#define _AIE2_SOLVER_H
 
 #include <linux/types.h>
 
@@ -262,4 +262,4 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
  * @rid:	The Request ID to identify the requesting context
  */
 int xrs_release_resource(void *hdl, u64 rid);
-#endif /* _NPU_SOLVER_H */
+#endif /* _AIE2_SOLVER_H */

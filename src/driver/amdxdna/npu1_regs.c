@@ -4,7 +4,7 @@
  */
 
 #include "drm_local/amdxdna_accel.h"
-#include "npu1_pci.h"
+#include "aie2_pci.h"
 
 /* Address definition from NPU1 docs */
 #define MPNPU_PUB_SEC_INTR		0x3010090
@@ -45,7 +45,7 @@
 #define NPU1_MPNPUCLK_FREQ_MAX  600
 #define NPU1_HCLK_FREQ_MAX      1024
 
-const struct npu_dev_priv npu1_dev_priv = {
+const struct amdxdna_dev_priv npu1_dev_priv = {
 	.fw_path        = "amdnpu/1502_00/npu.sbin",
 	.protocol_major = 0x5,
 	.protocol_minor = 0x1,
@@ -89,10 +89,10 @@ const struct amdxdna_dev_info dev_npu1_info = {
 	.smu_bar           = NPU1_SMU_BAR_INDEX,
 	.first_col         = 1,
 	.dev_mem_buf_shift = 15, /* 32 KiB aligned */
-	.dev_mem_base      = NPU_DEVM_BASE,
-	.dev_mem_size      = NPU_DEVM_SIZE,
+	.dev_mem_base      = AIE2_DEVM_BASE,
+	.dev_mem_size      = AIE2_DEVM_SIZE,
 	.vbnv              = "RyzenAI-npu1",
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
 	.dev_priv          = &npu1_dev_priv,
-	.ops               = &npu1_ops,
+	.ops               = &aie2_ops,
 };

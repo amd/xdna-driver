@@ -8,7 +8,7 @@
 #include <linux/bitmap.h>
 #include <linux/device.h>
 
-#include "npu_solver.h"
+#include "aie2_solver.h"
 
 /*
  * Each partition node contains the information of partition which can be
