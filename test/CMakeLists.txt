@@ -5,6 +5,7 @@ set(XDNA_SHIM_TEST shim_test.elf)
 
 add_executable(${XDNA_SHIM_TEST}
   shim_test.cpp
+  elf_loader.cpp
   )
 
 target_compile_definitions(${XDNA_SHIM_TEST} PRIVATE
@@ -53,6 +54,13 @@ install(CODE "execute_process( \
   COMMAND ${CMAKE_COMMAND} -E create_symlink \
   ${AMDXDNA_BINS_DIR}/workspaces/NPU2_1x4_TESTCASES \
   ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu2_workspace \
+  )"
+  )
+
+install(CODE "execute_process( \
+  COMMAND ${CMAKE_COMMAND} -E create_symlink \
+  ${AMDXDNA_BINS_DIR}/workspaces/NPU3_1x4_TESTCASES \
+  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu3_workspace \
   )"
   )
 

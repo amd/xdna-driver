@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "patch_DDR_address.h"
+#include "elf_loader.h"
 
 #include "core/common/device.h"
 #include "core/common/dlfcn.h"
@@ -34,6 +35,7 @@ using ns_t = std::chrono::nanoseconds;
 
 const uint16_t npu1_device_id = 0x1502;
 const uint16_t npu2_device_id = 0x17f0;
+const uint16_t npu3_device_id = 0x1569;
 const uint16_t npu2_revision_id = 0x0;
 const uint16_t npu4_revision_id = 0x10;
 
@@ -133,12 +135,27 @@ dev_filter_not_xdna(device::id_type id, device* dev)
 }
 
 bool
-dev_filter_is_npu(device::id_type id, device* dev)
+dev_filter_is_aie2(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
   return device_id == npu1_device_id || device_id == npu2_device_id;
+}
+
+bool
+dev_filter_is_aie4(device::id_type id, device* dev)
+{
+  if (!is_xdna_dev(dev))
+    return false;
+  auto device_id = device_query<query::pcie_device>(dev);
+  return device_id == npu3_device_id;
+}
+
+bool
+dev_filter_is_aie(device::id_type id, device* dev)
+{
+  return dev_filter_is_aie2 || dev_filter_is_aie4;
 }
 
 int
@@ -316,6 +333,15 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_7:IPUV1CNN",         {7} },
     },
     .workspace = "npu2_workspace",
+  },
+  {
+    .name = "vadd.xclbin",
+    .device = npu3_device_id,
+    .revision_id = 0,
+    .ip_name2idx = {
+      { "dpu:vadd", {0} },
+    },
+    .workspace = "npu3_workspace",
   },
   {
     .name = "1x4.xclbin",
@@ -843,7 +869,7 @@ io_test_bo_content_init(io_test_bo_set& io_test_bos, std::string& local_data_pat
     case IO_TEST_BO_MC_CODE: {
       if (ibo->size == 0)
         break;
-      /* In the orignal test case, this MC_CODE_SIZE can be 0.
+      /* In the original test case, this MC_CODE_SIZE can be 0.
        * If it is 0, use a constant value (16) to allocate bo_mc.
        * In the current conv_case_0, MC_CODE_SIZE is 0. But, keep this code here.
        */
@@ -1085,6 +1111,135 @@ TEST_io_latency(device::id_type id, device* dev, arg_type& arg)
   io_test(id, dev, arg[1]);
 }
 
+template <typename TEST_BO>
+void init_umq_vadd_buffers(TEST_BO& ifm, TEST_BO& wts, TEST_BO& ofm)
+{
+  auto p = ifm.map();
+  for (uint32_t i = 0; i < ifm.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = wts.map();
+  for (uint32_t i = 0; i < wts.size() / sizeof (uint32_t); i++)
+    p[i] = i * 10000;
+  p = ofm.map();
+  for (uint32_t i = 0; i < ofm.size() / sizeof (uint32_t); i++)
+    p[i] = 0;
+}
+
+void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
+{
+  int err = 0;
+  for (uint32_t i = 0; i < 16 * 2; i++) {
+    auto exp = ifm[i] + 2 * wts[i % 16];
+    if (ofm[i] != exp) {
+      std::cout << "error@" << i <<": " << ofm[i] << ", expecting: " << exp << std::endl;
+      err++;
+    }
+  }
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+}
+
+void
+umq_cmd_submit(xrt_core::hwqueue_handle *hwq,
+  xrt_core::cuidx_type::domain_index_type cu_idx, bo& exec_buf_bo, bo& ctrl_bo)
+{
+  if (cu_idx != 0)
+    throw std::runtime_error("Non-zero CU index is not supported!!!");
+
+  // Prepare exec buf
+  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(exec_buf_bo.map());
+  cmd_packet->state = ERT_CMD_STATE_NEW;
+  cmd_packet->count = sizeof (ert_dpu_data) / sizeof (uint32_t) + 1;
+  cmd_packet->opcode = ERT_START_DPU;
+  cmd_packet->type = ERT_CU;
+  cmd_packet->extra_cu_masks = 0;
+  cmd_packet->cu_mask = 0x1 << cu_idx;
+  auto dpu_data = get_ert_dpu_data(cmd_packet);
+  dpu_data->instruction_buffer = ctrl_bo.get()->get_properties().paddr;
+  dpu_data->instruction_buffer_size = ctrl_bo.size();
+  dpu_data->chained = 0;
+
+  // Send command through HSA queue and wait for it to complete
+  hwq->submit_command(exec_buf_bo.get());
+}
+
+void
+umq_cmd_wait(xrt_core::hwqueue_handle *hwq, bo& exec_buf_bo, uint32_t timeout_ms)
+{
+  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(exec_buf_bo.map());
+
+  while (cmd_packet->state < ERT_CMD_STATE_COMPLETED) {
+    if (!hwq->wait_command(exec_buf_bo.get(), timeout_ms))
+      throw std::runtime_error(std::string("exec buf timed out."));
+    else
+      break;
+  }
+  if (cmd_packet->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(cmd_packet->header));
+}
+
+void
+umq_cmd_submit_and_wait(xrt_core::hwqueue_handle *hwq,
+  xrt_core::cuidx_type::domain_index_type cu_idx, bo& exec_buf_bo, bo& ctrl_bo)
+{
+  umq_cmd_submit(hwq, cu_idx, exec_buf_bo, ctrl_bo);
+  umq_cmd_wait(hwq, exec_buf_bo, 600000 /* 600 sec, some simnow server are slow */);
+}
+
+void
+TEST_shim_umq_vadd(device::id_type id, device* dev, arg_type& arg)
+{
+  const uint32_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  const uint32_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
+  const uint32_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  bo bo_ifm{dev, IFM_BYTE_SIZE}, bo_wts{dev, WTS_BYTE_SIZE}, bo_ofm{dev, OFM_BYTE_SIZE};
+  std::cout << "Allocated vadd ifm, wts and ofm BOs" << std::endl;
+
+  // Obtain vadd control code
+  std::map<std::string, uint64_t> symbols {
+      {"g.ifm_ddr", bo_ifm.get()->get_properties().paddr},
+      {"g.wts_ddr", bo_wts.get()->get_properties().paddr},
+      {"g.ofm_ddr", bo_ofm.get()->get_properties().paddr}
+  };
+  const std::string ctrl_code_elf("vadd.elf");
+  auto ctrlcode = get_ctrl_from_elf(local_path(ctrl_code_elf), symbols);
+  bo bo_ctrl_code{dev, ctrlcode.at(0).ccode.size()};
+  std::memcpy(bo_ctrl_code.map(), ctrlcode.at(0).ccode.data(), bo_ctrl_code.size());
+  std::cout << "Obtained vadd ctrl-code BO" << std::endl;
+
+  // Obtain no-op control code
+  // ASM code:
+  // START_JOB 0
+  // END_JOB
+  // EOF
+  uint32_t nop_ctrlcode[] =
+    { 0x0000FFFF, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000000C, 0x00000007, 0x000000FF };
+  bo bo_nop_ctrl_code{dev, 0x2000UL};
+  std::memcpy(bo_nop_ctrl_code.map(), nop_ctrlcode, sizeof(nop_ctrlcode));
+  std::cout << "Obtained nop ctrl-code BO" << std::endl;
+
+  bo bo_exec_buf{dev, 0x1000};
+
+  {
+    hw_ctx hwctx{dev, "vadd.xclbin"};
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto cu_idx = hwctx.get()->open_cu_context("dpu:vadd");
+
+    for (int i = 0; i < 2; i++) {
+      sleep(5);
+      std::cout << "Running vadd command" << std::endl;
+      init_umq_vadd_buffers<bo>(bo_ifm, bo_wts, bo_ofm);
+      umq_cmd_submit_and_wait(hwq, cu_idx.domain_index, bo_exec_buf, bo_ctrl_code);
+      check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
+
+      sleep(5);
+      std::cout << "Running nop command" << std::endl;
+      umq_cmd_submit_and_wait(hwq, cu_idx.domain_index, bo_exec_buf, bo_nop_ctrl_code);
+    }
+  }
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info",
@@ -1124,7 +1279,7 @@ std::vector<test_case> test_list {
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
   //},
   test_case{ "create_destroy_hw_context",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_create_destroy_hw_context, {}
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_hw_context, {}
   },
   test_case{ "create_invalid_bo",
     TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_P2P, 0, 128}
@@ -1147,7 +1302,7 @@ std::vector<test_case> test_list {
     {XCL_BO_FLAGS_NONE, 0, 0x10000, 0x23000, 0x2000}
   },
   test_case{ "create_and_free_input_output_bo huge pages",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_create_free_bo,
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_bo,
     {XCL_BO_FLAGS_NONE, 0, 0x20000000}
   },
   //test_case{ "create_and_free_input_output_bo multiple pages from userptr",
@@ -1169,29 +1324,32 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 0x1000}
   },
   test_case{ "open_close_cu_context",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_open_close_cu_context, {}
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_open_close_cu_context, {}
   },
   test_case{ "create_destroy_hw_queue",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_create_destroy_hw_queue, {}
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_hw_queue, {}
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test real kernel bad run",
-    TEST_NEGATIVE, dev_filter_is_npu, TEST_io, { IO_TEST_BAD_RUN, 1 }
+    TEST_NEGATIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_BAD_RUN, 1 }
   },
   test_case{ "io test real kernel good run",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "measure no-op kernel latency",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NOOP_RUN, 1 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, 1 }
   },
   test_case{ "measure real kernel latency",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_io_latency, { IO_TEST_NORMAL_RUN, 1}
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, 1}
   },
   test_case{ "create and free debug bo",
-    TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x4000 }
+    TEST_NEGATIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x4000 }
   },
   test_case{ "multi-command io test real kernel good run",
-    TEST_POSITIVE, dev_filter_is_npu, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
+  },
+  test_case{ "npu3 shim vadd",
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
   },
 };
 
