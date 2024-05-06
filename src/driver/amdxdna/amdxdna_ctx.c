@@ -152,6 +152,8 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	hwctx->num_tiles = args->num_tiles;
 	hwctx->mem_size = args->mem_size;
 	hwctx->max_opc = args->max_opc;
+	hwctx->umq_bo = args->umq_bo;
+	hwctx->log_buf_bo = args->log_buf_bo;
 	mutex_lock(&client->hwctx_lock);
 	ret = idr_alloc_cyclic(&client->hwctx_idr, hwctx, 0, MAX_HWCTX_ID, GFP_KERNEL);
 	if (ret < 0) {
@@ -176,6 +178,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto free_name;
 	}
 	args->handle = hwctx->id;
+	args->umq_doorbell = hwctx->doorbell_offset;
 	mutex_unlock(&xdna->dev_lock);
 
 	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
@@ -220,7 +223,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 		mutex_unlock(&client->hwctx_lock);
 		ret = -EINVAL;
 		XDNA_DBG(xdna, "PID %d HW context %d not exist",
-			  client->pid, args->handle);
+			 client->pid, args->handle);
 		goto out;
 	}
 	idr_remove(&client->hwctx_idr, hwctx->id);

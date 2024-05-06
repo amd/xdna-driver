@@ -26,6 +26,9 @@
  *  pair as a key to select the devices.
  */
 static const struct pci_device_id pci_ids[] = {
+#ifdef AMDXDNA_NPU3
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1569) },
+#endif
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_ANY_ID),
 		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
 		.class_mask = 0xFFFF00,
@@ -38,6 +41,9 @@ MODULE_DEVICE_TABLE(pci, pci_ids);
 static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x1502, 0x0,  &dev_npu1_info },
 	{ 0x17f0, 0x0,  &dev_npu2_info },
+#ifdef AMDXDNA_NPU3
+	{ 0x1569, 0x0,  &dev_npu3_info },
+#endif
 	{ 0x17f0, 0x10, &dev_npu4_info },
 	{0}
 };
