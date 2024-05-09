@@ -50,6 +50,10 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 
 struct drm_gem_object *
 amdxdna_gem_create_object(struct drm_device *dev, size_t size);
+struct drm_gem_object *
+amdxdna_gem_import_sg_table(struct drm_device *dev,
+			    struct dma_buf_attachment *attach,
+			    struct sg_table *sgt);
 
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);
@@ -58,7 +62,6 @@ void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo);
 u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl);
 int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctx_hdl);
 void amdxdna_gem_clear_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl);
-
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

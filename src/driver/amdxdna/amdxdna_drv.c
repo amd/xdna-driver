@@ -237,6 +237,7 @@ static const struct drm_driver amdxdna_drm_drv = {
 
 	/* For shmem object create */
 	.gem_create_object = amdxdna_gem_create_object,
+	.gem_prime_import_sg_table = amdxdna_gem_import_sg_table,
 };
 
 static const struct amdxdna_dev_info *

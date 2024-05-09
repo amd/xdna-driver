@@ -398,11 +398,33 @@ err_unlock:
 	return ret;
 }
 
+struct drm_gem_object *
+amdxdna_gem_import_sg_table(struct drm_device *dev,
+			    struct dma_buf_attachment *attach,
+			    struct sg_table *sgt)
+{
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
+
+	gobj = drm_gem_shmem_prime_import_sg_table(dev, attach, sgt);
+	if (IS_ERR(gobj))
+		return gobj;
+
+	abo = to_xdna_obj(gobj);
+	abo->type = AMDXDNA_BO_SHMEM;
+	abo->mmap_offset = drm_vma_node_offset_addr(&gobj->vma_node);
+
+	return gobj;
+}
+
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo)
 {
 	int ret;
 
 	if (abo->type == AMDXDNA_BO_SHMEM) {
+		if (to_gobj(abo)->import_attach)
+			return 0;
+
 		ret = drm_gem_shmem_pin(&abo->base);
 		if (ret) {
 			XDNA_ERR(abo->client->xdna, "pin shmem bo failed, ret %d", ret);
@@ -440,13 +462,17 @@ void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo)
 {
 	mutex_lock(&abo->lock);
 
-	if (abo->type == AMDXDNA_BO_SHMEM)
+	if (abo->type == AMDXDNA_BO_SHMEM) {
+		if (to_gobj(abo)->import_attach)
+			goto out_unlock;
 		drm_gem_shmem_unpin(&abo->base);
-	else if (abo->type == AMDXDNA_BO_DEV)
+	} else if (abo->type == AMDXDNA_BO_DEV) {
 		amdxdna_gem_unpin(abo->dev_heap);
-	else
+	} else {
 		amdxdna_unpin_pages(&abo->mem);
+	}
 
+out_unlock:
 	mutex_unlock(&abo->lock);
 }
 
@@ -546,10 +572,14 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	if (ret)
 		goto put_obj;
 
-	if (abo->type == AMDXDNA_BO_SHMEM)
-		drm_clflush_pages(abo->base.pages, gobj->size >> PAGE_SHIFT);
-	else
+	if (abo->type == AMDXDNA_BO_SHMEM) {
+		if (gobj->import_attach)
+			drm_clflush_sg(abo->base.sgt);
+		else
+			drm_clflush_pages(abo->base.pages, gobj->size >> PAGE_SHIFT);
+	} else {
 		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
+	}
 
 	amdxdna_gem_unpin(abo);
 
