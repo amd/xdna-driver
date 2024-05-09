@@ -522,7 +522,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 		goto free_bo_hdls;
 	}
 
-	cmd_bo = amdxdna_gem_get_obj(dev, cmd_bo_hdl, AMDXDNA_BO_CMD, filp);
+	cmd_bo = amdxdna_gem_get_obj(client, cmd_bo_hdl, AMDXDNA_BO_CMD);
 	if (!cmd_bo) {
 		XDNA_DBG(xdna, "get cmd bo failed");
 		ret = -ENOENT;
@@ -547,7 +547,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	return 0;
 
 put_cmd_bo:
-	drm_gem_object_put(to_gobj(cmd_bo));
+	amdxdna_gem_put_obj(cmd_bo);
 free_bo_hdls:
 	kfree(bo_hdls);
 	return ret;

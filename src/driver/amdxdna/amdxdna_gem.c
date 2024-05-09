@@ -95,7 +95,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		mutex_lock(&abo->client->mm_lock);
 		drm_mm_remove_node(&abo->mm_node);
 		mutex_unlock(&abo->client->mm_lock);
-		amdxdna_put_dev_heap(abo->dev_heap);
+		amdxdna_gem_put_obj(abo->dev_heap);
 		break;
 	case AMDXDNA_BO_CMD:
 		amdxdna_unpin_pages(&abo->mem);
@@ -226,7 +226,7 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	u32 align;
 	int ret;
 
-	heap = amdxdna_gem_get_obj(dev, client->dev_heap, AMDXDNA_BO_DEV_HEAP, filp);
+	heap = amdxdna_gem_get_obj(client, client->dev_heap, AMDXDNA_BO_DEV_HEAP);
 	if (!heap) {
 		XDNA_DBG(xdna, "dev heap is not created");
 		return ERR_PTR(-EINVAL);
@@ -272,7 +272,7 @@ free_bo:
 	drm_gem_object_release(to_gobj(abo));
 	kfree(abo);
 put_and_err:
-	amdxdna_put_dev_heap(heap);
+	amdxdna_gem_put_obj(heap);
 	return ERR_PTR(ret);
 }
 
@@ -450,26 +450,23 @@ void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo)
 	mutex_unlock(&abo->lock);
 }
 
-struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct drm_device *dev, u32 bo_hdl,
-					    u8 bo_type, struct drm_file *filp)
+struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client,
+					    u32 bo_hdl, u8 bo_type)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 
-	gobj = drm_gem_object_lookup(filp, bo_hdl);
+	gobj = drm_gem_object_lookup(client->filp, bo_hdl);
 	if (!gobj) {
 		XDNA_DBG(xdna, "can not find bo %d", bo_hdl);
 		return NULL;
 	}
 
 	abo = to_xdna_obj(gobj);
-	if (abo->type != bo_type)
-		goto put_bo;
+	if ((bo_type == AMDXDNA_BO_INVALID) || (abo->type == bo_type))
+		return abo;
 
-	return abo;
-
-put_bo:
 	drm_gem_object_put(gobj);
 	return NULL;
 }
@@ -562,4 +559,55 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 put_obj:
 	drm_gem_object_put(gobj);
 	return ret;
+}
+
+u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
+{
+	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
+	u32 ctxid;
+
+	if (!abo)
+		return AMDXDNA_INVALID_CTX_HANDLE;
+
+	mutex_lock(&abo->lock);
+	ctxid = abo->assigned_hwctx;
+	if (!idr_find(&client->hwctx_idr, ctxid))
+		ctxid = AMDXDNA_INVALID_CTX_HANDLE;
+	mutex_unlock(&abo->lock);
+
+	amdxdna_gem_put_obj(abo);
+	return ctxid;
+}
+
+int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctxid)
+{
+	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
+	int ret = 0;
+
+	if (!abo)
+		return -EINVAL;
+
+	mutex_lock(&abo->lock);
+	if (!idr_find(&client->hwctx_idr, abo->assigned_hwctx))
+		abo->assigned_hwctx = ctxid;
+	else if (ctxid != abo->assigned_hwctx)
+		ret = -EBUSY;
+	mutex_unlock(&abo->lock);
+
+	amdxdna_gem_put_obj(abo);
+	return ret;
+}
+
+void amdxdna_gem_clear_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
+{
+	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
+
+	if (!abo)
+		return;
+
+	mutex_lock(&abo->lock);
+	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+	mutex_unlock(&abo->lock);
+
+	amdxdna_gem_put_obj(abo);
 }

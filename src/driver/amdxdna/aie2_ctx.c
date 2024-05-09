@@ -445,8 +445,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	if (!hwctx->priv)
 		return -ENOMEM;
 
-	heap = amdxdna_gem_get_obj(&xdna->ddev, client->dev_heap,
-				   AMDXDNA_BO_DEV_HEAP, client->filp);
+	heap = amdxdna_gem_get_obj(client, client->dev_heap, AMDXDNA_BO_DEV_HEAP);
 	if (!heap) {
 		ret = -EINVAL;
 		XDNA_ERR(xdna, "Cannot get dev heap object, ret %d", ret);
@@ -513,7 +512,7 @@ free_sched:
 unpin:
 	amdxdna_gem_unpin(heap);
 put_heap:
-	amdxdna_put_dev_heap(heap);
+	amdxdna_gem_put_obj(heap);
 free_priv:
 	kfree(hwctx->priv);
 	return ret;
@@ -553,7 +552,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->priv->seq);
 
 	amdxdna_gem_unpin(hwctx->priv->heap);
-	amdxdna_put_dev_heap(hwctx->priv->heap);
+	amdxdna_gem_put_obj(hwctx->priv->heap);
 #ifdef AMDXDNA_DEVEL
 	if (priv_load)
 		aie2_unregister_pdis(hwctx);
@@ -631,84 +630,31 @@ free_cus:
 	return ret;
 }
 
-static u32 aie2_get_bo_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
-{
-	struct drm_gem_object *gobj;
-	struct amdxdna_gem_obj *abo;
-	u32 ctxid;
-
-	if (bo_hdl == AMDXDNA_INVALID_BO_HANDLE)
-		return AMDXDNA_INVALID_CTX_HANDLE;
-
-	gobj = drm_gem_object_lookup(client->filp, bo_hdl);
-	if (!gobj)
-		return AMDXDNA_INVALID_CTX_HANDLE;
-
-	abo = to_xdna_obj(gobj);
-	mutex_lock(&abo->lock);
-	ctxid = abo->assigned_hwctx;
-	if (!idr_find(&client->hwctx_idr, ctxid))
-		ctxid = AMDXDNA_INVALID_CTX_HANDLE;
-	mutex_unlock(&abo->lock);
-
-	drm_gem_object_put(gobj);
-	return ctxid;
-}
-
-static int aie2_set_bo_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctxid)
-{
-	struct drm_gem_object *gobj;
-	struct amdxdna_gem_obj *abo;
-	int ret = 0;
-
-	gobj = drm_gem_object_lookup(client->filp, bo_hdl);
-	if (!gobj)
-		return -EINVAL;
-
-	abo = to_xdna_obj(gobj);
-	mutex_lock(&abo->lock);
-	if (!idr_find(&client->hwctx_idr, abo->assigned_hwctx))
-		abo->assigned_hwctx = ctxid;
-	else if (ctxid != abo->assigned_hwctx)
-		ret = -EBUSY;
-	mutex_unlock(&abo->lock);
-
-	drm_gem_object_put(gobj);
-	return ret;
-}
-
-static void aie2_clear_bo_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
-{
-	struct drm_gem_object *gobj;
-	struct amdxdna_gem_obj *abo;
-
-	gobj = drm_gem_object_lookup(client->filp, bo_hdl);
-	if (!gobj)
-		return;
-
-	abo = to_xdna_obj(gobj);
-	mutex_lock(&abo->lock);
-	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
-	mutex_unlock(&abo->lock);
-
-	drm_gem_object_put(gobj);
-}
-
 static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 {
 	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_DEV);
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	// Debug BO has to be AMDXDNA_BO_DEV type
+	if (!abo) {
+		ret = -EINVAL;
+		goto done;
+	}
+	
 	/*
 	 * There has to be no existing assigned dbg BO and the target
 	 * BO (bo_hdl) has to exist and can't be already assigned to other ctx.
 	 */
-	if (aie2_get_bo_assigned_hwctx(client, hwctx->dbg_buf_bo) == hwctx->id)
+	if (amdxdna_gem_get_assigned_hwctx(client, hwctx->dbg_buf_bo) == hwctx->id)
 		ret = hwctx->dbg_buf_bo == bo_hdl ? 0 : -EBUSY;
 	else
-		ret = aie2_set_bo_assigned_hwctx(client, bo_hdl, hwctx->id);
+		ret = amdxdna_gem_set_assigned_hwctx(client, bo_hdl, hwctx->id);
 
+	amdxdna_gem_put_obj(abo);
+
+done:
 	if (ret == 0) {
 		hwctx->dbg_buf_bo = bo_hdl;
 		XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
@@ -724,13 +670,13 @@ static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	struct amdxdna_dev *xdna = client->xdna;
 
 	if ((hwctx->dbg_buf_bo != bo_hdl) ||
-	    (aie2_get_bo_assigned_hwctx(client, bo_hdl) != hwctx->id)) {
+	    (amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->id)) {
 		XDNA_ERR(xdna, "Debug BO %d isn't attached to %s", bo_hdl, hwctx->name);
 		return -EINVAL;
 	}
 
 	hwctx->dbg_buf_bo = AMDXDNA_INVALID_BO_HANDLE;
-	aie2_clear_bo_assigned_hwctx(client, bo_hdl);
+	amdxdna_gem_clear_assigned_hwctx(client, bo_hdl);
 	XDNA_DBG(xdna, "Detached debug BO %d from %s", bo_hdl, hwctx->name);
 	return 0;
 }
