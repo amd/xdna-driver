@@ -155,7 +155,7 @@ dev_filter_is_aie4(device::id_type id, device* dev)
 bool
 dev_filter_is_aie(device::id_type id, device* dev)
 {
-  return dev_filter_is_aie2 || dev_filter_is_aie4;
+  return dev_filter_is_aie2(id, dev) || dev_filter_is_aie4(id, dev);
 }
 
 int
