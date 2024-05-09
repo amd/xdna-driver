@@ -382,6 +382,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	abo->client = client;
 	abo->pinned = false;
+	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_init(&abo->lock);
 	if (abo->type == AMDXDNA_BO_DEV_HEAP)
 		client->dev_heap = args->handle;

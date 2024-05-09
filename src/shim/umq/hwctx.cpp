@@ -31,7 +31,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   // const_cast: alloc_bo() is not const yet in device class
   auto& dev = const_cast<device&>(get_device());
 
-  return dev.alloc_bo(userptr, INVALID_CTX_HANDLE, size, flags);
+  return dev.alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
 }
 
 } // shim_xdna

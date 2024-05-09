@@ -154,6 +154,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	hwctx->max_opc = args->max_opc;
 	hwctx->umq_bo = args->umq_bo;
 	hwctx->log_buf_bo = args->log_buf_bo;
+	hwctx->dbg_buf_bo = AMDXDNA_INVALID_BO_HANDLE;
 	mutex_lock(&client->hwctx_lock);
 	ret = idr_alloc_cyclic(&client->hwctx_idr, hwctx, 0, MAX_HWCTX_ID, GFP_KERNEL);
 	if (ret < 0) {

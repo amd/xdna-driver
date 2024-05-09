@@ -114,7 +114,7 @@ protected:
 
   // Used when exclusively assigned to a HW context. By default, BO is shared
   // among all HW contexts.
-  xrt_core::hwctx_handle::slot_id m_owner_ctx_id = INVALID_CTX_HANDLE;
+  xrt_core::hwctx_handle::slot_id m_owner_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
 };
 
 } // namespace shim_xdna

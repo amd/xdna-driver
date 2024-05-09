@@ -241,7 +241,7 @@ void
 bo::
 attach_to_ctx()
 {
-  if (m_owner_ctx_id == INVALID_CTX_HANDLE)
+  if (m_owner_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
     return;
 
   // Currently, only debug BO is supported.
@@ -257,7 +257,7 @@ void
 bo::
 detach_from_ctx()
 {
-  if (m_owner_ctx_id == INVALID_CTX_HANDLE)
+  if (m_owner_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
     return;
 
   // Currently, only debug BO is supported.

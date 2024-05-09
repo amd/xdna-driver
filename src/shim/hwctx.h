@@ -12,12 +12,6 @@
 #include "core/common/shim/hwctx_handle.h"
 #include "drm_local/amdxdna_accel.h"
 
-namespace {
-
-const xrt_core::hwctx_handle::slot_id INVALID_CTX_HANDLE = -1;
-
-}
-
 namespace shim_xdna {
 
 class hw_q; // forward declaration
@@ -87,7 +81,7 @@ protected:
 
 private:
   const device& m_device;
-  slot_id m_handle = INVALID_CTX_HANDLE;
+  slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
   amdxdna_qos_info m_qos = {};
   std::vector<cu_info> m_cu_info;
   std::unique_ptr<hw_q> m_q;

@@ -25,12 +25,13 @@ struct amdxdna_gem_obj {
 	struct amdxdna_client		*client;
 	u8				type;
 	bool				pinned;
-	struct mutex			lock; /* Protects: pinned */
+	struct mutex			lock; /* Protects: pinned, sync_hwctx */
 	u64				mmap_offset;
 	struct amdxdna_mem		mem;
 	struct amdxdna_gem_obj		*dev_heap;
 	struct drm_mm			mm;
 	struct drm_mm_node		mm_node;
+	u32				assigned_hwctx;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)

@@ -631,6 +631,110 @@ free_cus:
 	return ret;
 }
 
+static u32 aie2_get_bo_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
+{
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
+	u32 ctxid;
+
+	if (bo_hdl == AMDXDNA_INVALID_BO_HANDLE)
+		return AMDXDNA_INVALID_CTX_HANDLE;
+
+	gobj = drm_gem_object_lookup(client->filp, bo_hdl);
+	if (!gobj)
+		return AMDXDNA_INVALID_CTX_HANDLE;
+
+	abo = to_xdna_obj(gobj);
+	mutex_lock(&abo->lock);
+	ctxid = abo->assigned_hwctx;
+	if (!idr_find(&client->hwctx_idr, ctxid))
+		ctxid = AMDXDNA_INVALID_CTX_HANDLE;
+	mutex_unlock(&abo->lock);
+
+	drm_gem_object_put(gobj);
+	return ctxid;
+}
+
+static int aie2_set_bo_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctxid)
+{
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
+	int ret = 0;
+
+	gobj = drm_gem_object_lookup(client->filp, bo_hdl);
+	if (!gobj)
+		return -EINVAL;
+
+	abo = to_xdna_obj(gobj);
+	mutex_lock(&abo->lock);
+	if (!idr_find(&client->hwctx_idr, abo->assigned_hwctx))
+		abo->assigned_hwctx = ctxid;
+	else if (ctxid != abo->assigned_hwctx)
+		ret = -EBUSY;
+	mutex_unlock(&abo->lock);
+
+	drm_gem_object_put(gobj);
+	return ret;
+}
+
+static void aie2_clear_bo_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
+{
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
+
+	gobj = drm_gem_object_lookup(client->filp, bo_hdl);
+	if (!gobj)
+		return;
+
+	abo = to_xdna_obj(gobj);
+	mutex_lock(&abo->lock);
+	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+	mutex_unlock(&abo->lock);
+
+	drm_gem_object_put(gobj);
+}
+
+static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret;
+
+	/*
+	 * There has to be no existing assigned dbg BO and the target
+	 * BO (bo_hdl) has to exist and can't be already assigned to other ctx.
+	 */
+	if (aie2_get_bo_assigned_hwctx(client, hwctx->dbg_buf_bo) == hwctx->id)
+		ret = hwctx->dbg_buf_bo == bo_hdl ? 0 : -EBUSY;
+	else
+		ret = aie2_set_bo_assigned_hwctx(client, bo_hdl, hwctx->id);
+
+	if (ret == 0) {
+		hwctx->dbg_buf_bo = bo_hdl;
+		XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
+	} else {
+		XDNA_ERR(xdna, "Failed to attach debug BO %d to %s: %d", bo_hdl, hwctx->name, ret);
+	}
+	return ret;
+}
+
+static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+
+	if ((hwctx->dbg_buf_bo != bo_hdl) ||
+	    (aie2_get_bo_assigned_hwctx(client, bo_hdl) != hwctx->id)) {
+		XDNA_ERR(xdna, "Debug BO %d isn't attached to %s", bo_hdl, hwctx->name);
+		return -EINVAL;
+	}
+
+	hwctx->dbg_buf_bo = AMDXDNA_INVALID_BO_HANDLE;
+	aie2_clear_bo_assigned_hwctx(client, bo_hdl);
+	XDNA_DBG(xdna, "Detached debug BO %d from %s", bo_hdl, hwctx->name);
+	return 0;
+}
+
 int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -639,20 +743,10 @@ int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *bu
 	switch (type) {
 	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
 		return aie2_hwctx_cu_config(hwctx, buf, size);
-	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF: {
-		u32 bo_hdl = (u32)value;
-
-		XDNA_DBG(xdna, "Assgin bo %d to %s as debug buffer", bo_hdl, hwctx->name);
-		// TODO: check BO type and send firmware command to assign it to ctx
-		return -EOPNOTSUPP;
-	}
-	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF: {
-		u32 bo_hdl = (u32)value;
-
-		XDNA_DBG(xdna, "Remove bo %d from %s as debug buffer", bo_hdl, hwctx->name);
-		// TODO: check BO handle/type and send firmware command to assign it to ctx
-		return -EOPNOTSUPP;
-	}
+	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
+		return aie2_hwctx_attach_debug_bo(hwctx, (u32)value);
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+		return aie2_hwctx_detach_debug_bo(hwctx, (u32)value);
 	default:
 		XDNA_DBG(xdna, "Not supported type %d", type);
 		return -EOPNOTSUPP;

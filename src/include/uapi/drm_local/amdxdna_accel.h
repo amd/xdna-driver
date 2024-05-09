@@ -18,6 +18,8 @@ extern "C" {
 
 #define AMDXDNA_INVALID_CMD_HANDLE	(~0UL)
 #define AMDXDNA_INVALID_ADDR		(~0UL)
+#define AMDXDNA_INVALID_CTX_HANDLE	(~0)
+#define AMDXDNA_INVALID_BO_HANDLE	0
 
 /*
  * The interface can grow/extend over time.
@@ -160,8 +162,6 @@ struct amdxdna_drm_config_hwctx {
 	__u32 param_val_size;
 	__u32 pad;
 };
-
-#define AMDXDNA_INVALID_BO_HANDLE 0
 
 enum amdxdna_bo_type {
 	AMDXDNA_BO_INVALID = 0,
