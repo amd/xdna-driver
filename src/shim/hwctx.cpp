@@ -201,7 +201,7 @@ void
 hw_ctx::
 delete_ctx_on_device()
 {
-  if (m_handle == INVALID_CTX_HANDLE)
+  if (m_handle == AMDXDNA_INVALID_CTX_HANDLE)
     return;
 
   m_q->unbind_hwctx();

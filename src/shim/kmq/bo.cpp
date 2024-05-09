@@ -39,7 +39,7 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 
 bo_kmq::
 bo_kmq(const device& device, size_t size, amdxdna_bo_type type)
-  : bo_kmq(device, INVALID_CTX_HANDLE, size, 0, type)
+  : bo_kmq(device, AMDXDNA_INVALID_CTX_HANDLE, size, 0, type)
 {
 }
 

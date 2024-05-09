@@ -83,7 +83,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG)
     return dev.alloc_bo(userptr, get_slotidx(), size, flags);
   // Other BOs are shared across all contexts.
-  return dev.alloc_bo(userptr, INVALID_CTX_HANDLE, size, flags);
+  return dev.alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
 }
 
 } // shim_xdna

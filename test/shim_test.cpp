@@ -598,9 +598,19 @@ TEST_create_free_debug_bo(device::id_type id, device* dev, arg_type& arg)
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
   auto ext_boflags = XRT_BO_USE_DEBUG << 4;
   auto size = static_cast<size_t>(arg[0]);
-  hw_ctx hwctx{dev};
 
-  auto bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  // Create ctx -> create bo -> destroy bo -> destroy ctx
+  {
+    hw_ctx hwctx{dev};
+    auto bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  }
+
+  // Create ctx -> create bo -> destroy ctx -> destroy bo
+  std::unique_ptr<xrt_core::buffer_handle> bo;
+  {
+    hw_ctx hwctx{dev};
+    bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  }
 }
 
 void
@@ -1343,7 +1353,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, 1}
   },
   test_case{ "create and free debug bo",
-    TEST_NEGATIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x4000 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x1000 }
   },
   test_case{ "multi-command io test real kernel good run",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
