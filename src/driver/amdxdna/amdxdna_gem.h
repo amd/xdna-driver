@@ -28,9 +28,11 @@ struct amdxdna_gem_obj {
 	struct mutex			lock; /* Protects: pinned, assigned_hwctx */
 	u64				mmap_offset;
 	struct amdxdna_mem		mem;
-	struct amdxdna_gem_obj		*dev_heap;
-	struct drm_mm			mm;
-	struct drm_mm_node		mm_node;
+
+	/* Below members is uninitialized when needed */
+	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */
+	struct amdxdna_gem_obj		*dev_heap; /* For AMDXDNA_BO_DEV */
+	struct drm_mm_node		mm_node; /* For AMDXDNA_BO_DEV */
 	u32				assigned_hwctx;
 };
 
@@ -62,6 +64,12 @@ void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo);
 u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl);
 int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctx_hdl);
 void amdxdna_gem_clear_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl);
+
+int amdxdna_gem_resv_heap_mem(struct amdxdna_gem_obj *heap, size_t size,
+			      struct drm_mm_node *node, struct amdxdna_mem *mem);
+void amdxdna_gem_unresv_heap_mem(struct amdxdna_gem_obj *heap, struct drm_mm_node *node,
+				 struct amdxdna_mem *mem);
+
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

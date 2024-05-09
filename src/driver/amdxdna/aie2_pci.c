@@ -221,6 +221,7 @@ static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
 
+/* TODO: move below two functions to aie2_ctx.c? */
 static int aie2_xrs_load(void *cb_arg, struct xrs_action_load *action)
 {
 	struct amdxdna_hwctx *hwctx = cb_arg;

@@ -14,6 +14,7 @@
 #include "amdxdna_trace.h"
 
 #define MAX_HWCTX_ID		255
+#define MAX_CMD_BO_COUNT	25
 #define MAX_ARG_BO_COUNT	4095
 
 struct amdxdna_fence {
@@ -315,7 +316,10 @@ static void amdxdna_sched_job_release(struct kref *ref)
 	trace_xdna_job(job->hwctx->name, "job release", job->seq);
 	for (i = 0; i < job->bo_cnt; i++)
 		drm_gem_object_put(job->bos[i]);
-	drm_gem_object_put(to_gobj(job->cmd_abo));
+	for (i = 0; i < job->cmd_bo_cnt; i++)
+		drm_gem_object_put(to_gobj(job->cmd_bo[i]));
+
+	kfree(job->cmd_bo);
 	kfree(job);
 }
 
@@ -382,14 +386,15 @@ put_shmem_bo:
 }
 
 static int amdxdna_cmds_submit(struct amdxdna_client *client,
-			       struct amdxdna_gem_obj *cmd_bo, u32 *bo_hdls,
+			       u32 *cmd_bo_hdls, u32 *arg_bo_hdls,
 			       struct amdxdna_drm_exec_cmd *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
+	u32 cmd_bo_cnt = args->cmd_bo_count;
 	u32 bo_cnt = args->arg_bo_count;
+	struct amdxdna_gem_obj **cmd_bo;
 	struct amdxdna_sched_job *job;
 	struct amdxdna_hwctx *hwctx;
-	u32 *cu_mask;
 	int ret, idx;
 	int i;
 
@@ -397,10 +402,31 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client,
 	if (!job)
 		return -ENOMEM;
 
-	ret = amdxdna_arg_bos_lookup(client, job, bo_hdls, bo_cnt);
+	cmd_bo = kcalloc(args->cmd_bo_count, sizeof(cmd_bo), GFP_KERNEL);
+	if (!cmd_bo) {
+		ret = -ENOMEM;
+		goto free_job;
+	}
+
+	for (i = 0; i < args->cmd_bo_count; i++) {
+		cmd_bo[i] = amdxdna_gem_get_obj(client, cmd_bo_hdls[i], AMDXDNA_BO_CMD);
+		if (!cmd_bo[i]) {
+			XDNA_DBG(xdna, "Get cmd bo failed");
+			ret = -ENOENT;
+			goto put_cmd_bo;
+		}
+
+		if (to_gobj(cmd_bo[i])->size < sizeof(struct amdxdna_cmd)) {
+			XDNA_DBG(xdna, "Bad cmd BO size: %ld", to_gobj(cmd_bo[i])->size);
+			ret = -EINVAL;
+			goto put_cmd_bo;
+		}
+	}
+
+	ret = amdxdna_arg_bos_lookup(client, job, arg_bo_hdls, bo_cnt);
 	if (ret) {
 		XDNA_ERR(xdna, "Argument BOs lookup failed, ret %d", ret);
-		goto free_job;
+		goto put_cmd_bo;
 	}
 
 	idx = srcu_read_lock(&client->hwctx_srcu);
@@ -418,36 +444,10 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client,
 		goto unlock_srcu;
 	}
 
-	job->cmd_abo = cmd_bo;
-	job->cmd = cmd_bo->mem.kva;
-	if (!job->cmd) {
-		XDNA_ERR(xdna, "Cmd KVA not found");
-		ret = -EINVAL;
-		goto unlock_srcu;
-	}
-
-	if (to_gobj(cmd_bo)->size <
-	    offsetof(struct amdxdna_cmd, data[1 + job->cmd->extra_cu_masks])) {
-		XDNA_DBG(xdna, "Invalid extra_cu_masks");
-		ret = -EINVAL;
-		goto unlock_srcu;
-	}
-
-	job->cmd->state = ERT_CMD_STATE_NEW;
 	job->hwctx = hwctx;
 	job->mm = current->mm;
-
-	cu_mask = job->cmd->data;
-	for (i = 0; i < 1 + job->cmd->extra_cu_masks; i++) {
-		job->cu_idx = ffs(cu_mask[i]) - 1;
-
-		if (job->cu_idx >= 0)
-			break;
-	}
-	if (job->cu_idx < 0) {
-		ret = -EINVAL;
-		goto unlock_srcu;
-	}
+	job->cmd_bo = cmd_bo;
+	job->cmd_bo_cnt = cmd_bo_cnt;
 
 	job->fence = amdxdna_fence_create(hwctx);
 	if (!job->fence) {
@@ -477,6 +477,13 @@ put_fence:
 unlock_srcu:
 	srcu_read_unlock(&client->hwctx_srcu, idx);
 	amdxdna_arg_bos_put(job);
+put_cmd_bo:
+	for (i = 0; i < args->cmd_bo_count; i++) {
+		if (!cmd_bo[i])
+			continue;
+		drm_gem_object_put(to_gobj(cmd_bo[i]));
+	}
+	kfree(cmd_bo);
 free_job:
 	kfree(job);
 	return ret;
@@ -492,64 +499,57 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_exec_cmd *args = data;
-	struct amdxdna_gem_obj *cmd_bo;
-	u32 cmd_bo_hdl;
-	u32 *bo_hdls;
+	u32 *cmd_bo_hdls;
+	u32 *arg_bo_hdls;
 	int ret;
 
 	if (args->ext_flags)
 		return -EINVAL;
 
-	if (!args->arg_bo_count || args->arg_bo_count > MAX_ARG_BO_COUNT)
+	if (!args->arg_bo_count || args->arg_bo_count > MAX_ARG_BO_COUNT) {
+		XDNA_ERR(xdna, "Invalid arg bo count %d", args->arg_bo_count);
 		return -EINVAL;
-
-	if (args->cmd_bo_count != 1) {
-		XDNA_ERR(xdna, "Command list is not supported yet");
-		return -EOPNOTSUPP;
 	}
-	ret = copy_from_user(&cmd_bo_hdl, u64_to_user_ptr(args->cmd_bo_handles), sizeof(u32));
-	if (ret)
-		return -EFAULT;
 
-	bo_hdls = kcalloc(args->arg_bo_count, sizeof(u32), GFP_KERNEL);
-	if (!bo_hdls)
+	if (!args->cmd_bo_count || args->cmd_bo_count > MAX_CMD_BO_COUNT) {
+		XDNA_ERR(xdna, "Invalid cmd bo count %d", args->cmd_bo_count);
+		return -EINVAL;
+	}
+
+	cmd_bo_hdls = kcalloc(args->cmd_bo_count, sizeof(u32), GFP_KERNEL);
+	if (!cmd_bo_hdls)
 		return -ENOMEM;
 
-	ret = copy_from_user(bo_hdls, u64_to_user_ptr(args->arg_bo_handles),
+	arg_bo_hdls = kcalloc(args->arg_bo_count, sizeof(u32), GFP_KERNEL);
+	if (!arg_bo_hdls) {
+		ret = -ENOMEM;
+		goto free_cmd_bo_hdls;
+	}
+
+	ret = copy_from_user(cmd_bo_hdls, u64_to_user_ptr(args->cmd_bo_handles),
+			     args->cmd_bo_count * sizeof(u32));
+	if (ret) {
+		ret = -EFAULT;
+		goto free_cmd_bo_hdls;
+	}
+
+	ret = copy_from_user(arg_bo_hdls, u64_to_user_ptr(args->arg_bo_handles),
 			     args->arg_bo_count * sizeof(u32));
 	if (ret) {
 		ret = -EFAULT;
-		goto free_bo_hdls;
+		goto free_arg_bo_hdls;
 	}
 
-	cmd_bo = amdxdna_gem_get_obj(client, cmd_bo_hdl, AMDXDNA_BO_CMD);
-	if (!cmd_bo) {
-		XDNA_DBG(xdna, "get cmd bo failed");
-		ret = -ENOENT;
-		goto free_bo_hdls;
-	}
-
-	if (to_gobj(cmd_bo)->size < sizeof(struct amdxdna_cmd)) {
-		XDNA_DBG(xdna, "Bad cmd BO size: %ld", to_gobj(cmd_bo)->size);
-		ret = -EINVAL;
-		goto put_cmd_bo;
-	}
-
-	ret = amdxdna_cmds_submit(client, cmd_bo, bo_hdls, args);
-	if (ret) {
+	ret = amdxdna_cmds_submit(client, cmd_bo_hdls, arg_bo_hdls, args);
+	if (ret)
 		XDNA_DBG(xdna, "Submit cmds failed, ret %d", ret);
-		goto put_cmd_bo;
-	}
 
-	kfree(bo_hdls);
-	XDNA_DBG(xdna, "pushed cmd %lld to scheduler", args->seq);
-
-	return 0;
-
-put_cmd_bo:
-	amdxdna_gem_put_obj(cmd_bo);
-free_bo_hdls:
-	kfree(bo_hdls);
+free_arg_bo_hdls:
+	kfree(arg_bo_hdls);
+free_cmd_bo_hdls:
+	kfree(cmd_bo_hdls);
+	if (!ret)
+		XDNA_DBG(xdna, "Pushed cmd %lld to scheduler", args->seq);
 	return ret;
 }
 

@@ -45,6 +45,7 @@ std::string curpath;
 std::string xclbinpath;
 int base_write_speed;
 int base_read_speed;
+bool printing_on; 
 
 //local_path(const char *fname)
 inline const std::string
@@ -473,7 +474,8 @@ private:
 
     m_handle = dev->create_hw_context(xclbin_uuid, qos, mode);
     m_dev = dev;
-    std::cout << "loaded " << xclbin_path << std::endl;
+    if (printing_on)
+      std::cout << "loaded " << xclbin_path << std::endl;
   }
 
 };
@@ -803,12 +805,14 @@ io_test_bo_size_init(io_test_bo_set& io_test_bos, std::string& local_data_path)
     instr_word_size = 32;
   } else {
     auto instruction_file = local_data_path + instr_file;
-    std::cout << "Getting instruction BO size from " << instruction_file << std::endl;
+    if (printing_on)
+      std::cout << "Getting instruction BO size from " << instruction_file << std::endl;
     instr_word_size = get_instr_size(instruction_file);
   }
   // Loading other sizes
   auto bo_size_config_file = local_data_path + config_file;
-  std::cout << "Getting non-instruction BO sizes from " << bo_size_config_file << std::endl;
+  if (printing_on)
+    std::cout << "Getting non-instruction BO sizes from " << bo_size_config_file << std::endl;
   auto tp = parse_config_file(bo_size_config_file);
 
   io_test_bos[IO_TEST_BO_INSTRUCTION].size = instr_word_size * sizeof(int32_t);
@@ -1075,15 +1079,15 @@ io_test_verify_result(io_test_bo_set& io_test_bos, std::string& local_data_path)
 }
 
 void
-io_test(device::id_type id, device* dev, size_t cmds_chained)
+io_test(device::id_type id, device* dev, size_t cmds_listed)
 {
-  std::vector<io_test_bo_set> chained_bos(cmds_chained);
+  std::vector<io_test_bo_set> listed_bos(cmds_listed);
 
   auto wrk = get_xclbin_workspace(dev);
   auto local_data_path = local_path(wrk + "/data/");
   std::vector<bo*> cmd_bos;
 
-  for (auto& bos : chained_bos) {
+  for (auto& bos : listed_bos) {
     io_test_bo_size_init(bos, local_data_path);
     io_test_bo_alloc(bos, dev);
     checkpoint("Buffer allocation done");
@@ -1099,12 +1103,95 @@ io_test(device::id_type id, device* dev, size_t cmds_chained)
   io_test_cmd_submit_wait(dev, std::move(cmd_bos));
   checkpoint("Cmd execution done");
 
-  for (auto& bos : chained_bos) {
+  for (auto& bos : listed_bos) {
     io_test_sync_bos_after_run(bos);
     checkpoint("Output buffers' content synchronization to host done");
     io_test_verify_result(bos, local_data_path);
   }
 
+}
+
+void
+io_throughput_test(device::id_type id, device *dev, int total_hwq_submit, int num_cmdlist, int cmds_per_list)
+{
+  std::vector<io_test_bo_set> bo_set(num_cmdlist * cmds_per_list);
+  std::vector<std::tuple<std::vector<xrt_core::buffer_handle*>, ert_start_kernel_cmd *> > cmdlists(num_cmdlist);
+
+  auto wrk = get_xclbin_workspace(dev);
+  auto local_data_path = local_path(wrk + "/data/");
+  std::vector<bo*> cmd_bos;
+  int cmdlist_idx, cmd_idx;
+
+  for (auto& bos : bo_set) {
+    io_test_bo_size_init(bos, local_data_path);
+    io_test_bo_alloc(bos, dev);
+    io_test_bo_content_init(bos, local_data_path);
+    io_test_sync_bos_before_run(bos);
+    io_test_cmd_init(bos);
+    cmd_bos.push_back(bos[IO_TEST_BO_CMD].tbo.get());
+  }
+
+  auto ip_name = find_first_match_ip_name(dev, "DPU.*");
+  if (ip_name.empty())
+    throw std::runtime_error("Cannot find any kernel name matched DPU.*");
+
+  hw_ctx hwctx{dev};
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cu_idx = hwctx.get()->open_cu_context(ip_name);
+  if (printing_on)
+    std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
+
+  ert_start_kernel_cmd *cmd_packet = nullptr;
+  for (cmdlist_idx = 0; cmdlist_idx < num_cmdlist; cmdlist_idx++) {
+    int start_cmd_idx = cmdlist_idx * cmds_per_list;
+    for (cmd_idx = 0; cmd_idx < cmds_per_list; cmd_idx++) {
+      auto cmd_bo = cmd_bos[start_cmd_idx + cmd_idx];
+      cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->map());
+      // Set CU index before submit the command
+      cmd_packet->cu_mask = 0x1 << cu_idx.index;
+      std::get<0>(cmdlists[cmdlist_idx]).push_back(cmd_bo->get());
+    }
+    std::get<1>(cmdlists[cmdlist_idx]) = cmd_packet;
+  }
+
+  int issued = 0;
+  int completed = 0;
+  int wait_idx = 0;
+
+  auto start = Clock::now();
+
+  for (auto& cmdlist : cmdlists) {
+      hwq->submit_command(std::get<0>(cmdlist));
+      if (++issued == total_hwq_submit)
+        break;
+  }
+
+  while (completed < total_hwq_submit) {
+    hwq->wait_command(std::get<0>(cmdlists[wait_idx]).back(), 15000);
+    if (std::get<1>(cmdlists[wait_idx])->state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error("Command error");
+
+    completed++;
+    if (issued < total_hwq_submit) {
+      hwq->submit_command(std::get<0>(cmdlists[wait_idx]));
+      issued++;
+    }
+
+    if (++wait_idx == cmdlists.size())
+      wait_idx = 0;
+  }
+
+  auto end = Clock::now();
+
+  if (io_test_parameters.perf) {
+    auto duration_us = std::chrono::duration_cast<us_t>(end - start).count();
+    auto cps = (total_hwq_submit * cmds_per_list * 1000000.0) / duration_us;
+    auto latency_us = 1000000.0 / cps;
+    std::cout << total_hwq_submit * cmds_per_list << " commands finished in "
+              << duration_us << " us, " << cmds_per_list << " commands per list, "
+              << cps << " Command/sec,"
+              << " Average latency " << latency_us << " us" << std::endl;
+  }
 }
 
 void
@@ -1119,6 +1206,29 @@ TEST_io_latency(device::id_type id, device* dev, arg_type& arg)
 {
   io_test_parameter_init(true, 1000, static_cast<unsigned int>(arg[0]));
   io_test(id, dev, arg[1]);
+}
+
+void
+TEST_io_throughput(device::id_type id, device* dev, arg_type& arg)
+{
+  int num_bo_set = arg[1];
+  int total_commands = 32000;
+
+  std::cout << "Total commands: " << total_commands << ", allocate "
+            << num_bo_set << " command bo and bo set" << std::endl;
+
+  io_test_parameter_init(true, 0, static_cast<unsigned int>(arg[0]));
+
+  int cmds_per_list;
+  printing_on = false;
+  for (cmds_per_list = 1; cmds_per_list <= 32; cmds_per_list *= 2) {
+    if (cmds_per_list > 25)
+      cmds_per_list = 25;
+    int num_cmdlist = num_bo_set / cmds_per_list;
+    int total_hwq_submit = total_commands / cmds_per_list;
+    io_throughput_test(id, dev, total_hwq_submit, num_cmdlist, cmds_per_list);
+  }
+  printing_on = true;
 }
 
 template <typename TEST_BO>
@@ -1358,6 +1468,9 @@ std::vector<test_case> test_list {
   test_case{ "multi-command io test real kernel good run",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
+  test_case{ "measure no-op kernel throughput listed command",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, 256, 32000 }
+  },
   test_case{ "npu3 shim vadd",
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
   },
@@ -1447,6 +1560,7 @@ main(int argc, char **argv)
   program = std::filesystem::path(argv[0]).filename();
   std::set<int> tests;
 
+  printing_on = true;
   try {
     int first_test_id = 1;
 

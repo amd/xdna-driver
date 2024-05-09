@@ -13,6 +13,7 @@
 
 #include "amdxdna_drv.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
@@ -147,6 +148,7 @@ struct hwctx_pdi {
  * Must be power of 2!
  */
 #define HWCTX_MAX_CMDS		8
+#define get_job_idx(seq) ((seq) & (HWCTX_MAX_CMDS - 1))
 struct amdxdna_hwctx_priv {
 	struct amdxdna_gem_obj		*heap;
 	void				*mbox_chann;
@@ -162,6 +164,14 @@ struct amdxdna_hwctx_priv {
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	u32				num_pending;
 	u64				seq;
+
+	struct amdxdna_mem		resv_mem;
+	struct drm_mm_node		node;
+	struct {
+		u64			dev_addr;
+		void			*buf;
+		u32			size;
+	} cmd_buf[HWCTX_MAX_CMDS];
 };
 
 struct async_events;
@@ -270,9 +280,10 @@ int aie2_legacy_config_cu(struct amdxdna_hwctx *hwctx);
 #endif
 
 int aie2_config_cu(struct amdxdna_hwctx *hwctx);
-int aie2_execbuf(struct amdxdna_hwctx *hwctx, enum ert_cmd_opcode op, u32 cu_idx,
-		 u32 *payload, u32 payload_len, void *handle,
-		 int (*notify_cb)(void *, const u32 *, size_t));
+int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+		 void *handle, int (*notify_cb)(void *, const u32 *, size_t));
+int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+		 void *handle, int (*notify_cb)(void *, const u32 *, size_t));
 
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);

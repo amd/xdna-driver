@@ -50,6 +50,51 @@ static void amdxdna_unpin_pages(struct amdxdna_mem *mem)
 }
 
 static int
+amdxdna_gem_insert_node_nolock(struct amdxdna_gem_obj *heap, size_t size, bool has_vmap,
+			       struct drm_mm_node *node, struct amdxdna_mem *mem)
+{
+	struct amdxdna_client *client = heap->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	u64 offset;
+	u32 align;
+	int ret;
+
+	align = 1 << max(PAGE_SHIFT, xdna->dev_info->dev_mem_buf_shift);
+	ret = drm_mm_insert_node_generic(&heap->mm, node, size, align,
+					 0, DRM_MM_INSERT_BEST);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
+		return ret;
+	}
+
+	mem->dev_addr = node->start;
+	offset = mem->dev_addr - heap->mem.dev_addr;
+	mem->userptr = heap->mem.userptr + offset;
+	mem->size = size;
+	mem->pages = &heap->mem.pages[offset >> PAGE_SHIFT];
+	mem->nr_pages = mem->size >> PAGE_SHIFT;
+
+	if (has_vmap) {
+		WARN_ONCE(!heap->mem.pin_cnt, "Heap mem is unpined");
+		mem->kva = vmap(mem->pages, mem->nr_pages, VM_MAP, PAGE_KERNEL);
+		if (!mem->kva) {
+			XDNA_ERR(xdna, "Failed to vmap");
+			drm_mm_remove_node(node);
+			return -EFAULT;
+		}
+	}
+
+	return 0;
+}
+
+static void
+amdxdna_gem_remove_node_nolock(struct drm_mm_node *node, struct amdxdna_mem *mem)
+{
+	vunmap(mem->kva);
+	drm_mm_remove_node(node);
+}
+
+static int
 amdxdna_user_mem_init(struct amdxdna_mem *mem, u64 vaddr, size_t size)
 {
 	mem->userptr = vaddr;
@@ -211,6 +256,29 @@ release_obj:
 	drm_gem_object_release(to_gobj(abo));
 	kfree(abo);
 	return ERR_PTR(ret);
+}
+
+int amdxdna_gem_resv_heap_mem(struct amdxdna_gem_obj *heap, size_t size,
+			      struct drm_mm_node *node, struct amdxdna_mem *mem)
+{
+	struct amdxdna_client *client = heap->client;
+	int ret;
+
+	mutex_lock(&client->mm_lock);
+	ret = amdxdna_gem_insert_node_nolock(heap, size, true, node, mem);
+	mutex_unlock(&client->mm_lock);
+
+	return ret;
+}
+
+void amdxdna_gem_unresv_heap_mem(struct amdxdna_gem_obj *heap, struct drm_mm_node *node,
+				 struct amdxdna_mem *mem)
+{
+	struct amdxdna_client *client = heap->client;
+
+	mutex_lock(&client->mm_lock);
+	amdxdna_gem_remove_node_nolock(node, mem);
+	mutex_unlock(&client->mm_lock);
 }
 
 static struct amdxdna_gem_obj *
