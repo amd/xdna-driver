@@ -38,3 +38,5 @@ amdxdna-y += amdxdna_devel.o
 
 # Place holder for npu3 support
 include $(ROOT)/npu3.mk
+
+-include $(src)/extra_drv.mk
