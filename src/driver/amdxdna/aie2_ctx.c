@@ -212,6 +212,16 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	aie2_hwctx_restart(xdna, hwctx);
 }
 
+static inline void
+aie2_sched_notify(struct amdxdna_sched_job *job)
+{
+	dma_fence_signal(job->fence);
+	trace_xdna_job(job->hwctx->name, "signaled fence", job->seq);
+	dma_fence_put(job->fence);
+	mmput(job->mm);
+	amdxdna_job_put(job);
+}
+
 static int
 aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 {
@@ -238,11 +248,7 @@ aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 		amdxdna_cmd_set_state(job, 0, ERT_CMD_STATE_ERROR);
 
 out:
-	dma_fence_signal(job->fence);
-	trace_xdna_job(job->hwctx->name, "signaled fence", job->seq);
-	dma_fence_put(job->fence);
-	mmput(job->mm);
-	amdxdna_job_put(job);
+	aie2_sched_notify(job);
 	return ret;
 }
 
@@ -297,11 +303,7 @@ aie2_sched_cmdlist_resp_handler(void *handle, const u32 *data, size_t size)
 				       ERT_CMD_STATE_ABORT);
 
 out:
-	dma_fence_signal(job->fence);
-	trace_xdna_job(job->hwctx->name, "signaled fence", job->seq);
-	dma_fence_put(job->fence);
-	mmput(job->mm);
-	amdxdna_job_put(job);
+	aie2_sched_notify(job);
 	return ret;
 }
 

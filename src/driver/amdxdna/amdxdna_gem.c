@@ -138,7 +138,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		break;
 	case AMDXDNA_BO_DEV:
 		mutex_lock(&abo->client->mm_lock);
-		drm_mm_remove_node(&abo->mm_node);
+		amdxdna_gem_remove_node_nolock(&abo->mm_node, &abo->mem);
 		mutex_unlock(&abo->client->mm_lock);
 		amdxdna_gem_put_obj(abo->dev_heap);
 		break;
@@ -290,8 +290,6 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	size_t aligned_sz = PAGE_ALIGN(args->size);
 	struct amdxdna_gem_obj *abo, *heap;
-	u64 offset;
-	u32 align;
 	int ret;
 
 	heap = amdxdna_gem_get_obj(client, client->dev_heap, AMDXDNA_BO_DEV_HEAP);
@@ -318,21 +316,12 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	abo->type = AMDXDNA_BO_DEV;
 	abo->dev_heap = heap;
 
-	align = 1 << xdna->dev_info->dev_mem_buf_shift;
-	ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, aligned_sz,
-					 align, 0, DRM_MM_INSERT_BEST);
+	ret = amdxdna_gem_insert_node_nolock(heap, aligned_sz, false,
+					     &abo->mm_node, &abo->mem);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		goto free_bo;
 	}
-
-	abo->mem.dev_addr = abo->mm_node.start;
-	offset = abo->mem.dev_addr - heap->mem.dev_addr;
-	abo->mem.userptr = heap->mem.userptr + offset;
-	abo->mem.size = to_gobj(abo)->size;
-	abo->mem.pages = &heap->mem.pages[offset >> PAGE_SHIFT];
-	abo->mem.nr_pages = (PAGE_ALIGN(abo->mem.dev_addr + abo->mem.size) -
-			     (abo->mem.dev_addr & PAGE_MASK)) >> PAGE_SHIFT;
 
 	return abo;
 

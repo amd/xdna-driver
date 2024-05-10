@@ -481,7 +481,7 @@ put_cmd_bo:
 	for (i = 0; i < args->cmd_bo_count; i++) {
 		if (!cmd_bo[i])
 			continue;
-		drm_gem_object_put(to_gobj(cmd_bo[i]));
+		amdxdna_gem_put_obj(cmd_bo[i]);
 	}
 	kfree(cmd_bo);
 free_job:
