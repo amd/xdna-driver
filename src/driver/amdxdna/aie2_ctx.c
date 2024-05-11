@@ -15,7 +15,6 @@ module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
 
 #define HWCTX_MAX_TIMEOUT	16000 /* miliseconds */
-#define HWCTX_HEAP_RESV_SIZE	(HWCTX_MAX_CMDS * MAX_CHAIN_CMDBUF_SIZE)
 
 static inline int
 aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
@@ -526,22 +525,22 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	}
 	priv->heap = heap;
 
-	ret = amdxdna_gem_resv_heap_mem(priv->heap, HWCTX_HEAP_RESV_SIZE,
-					&priv->node, &priv->resv_mem);
-	if (ret) {
-		XDNA_ERR(xdna, "Reserve heap mem failed, ret %d", ret);
-		goto unpin;
-	}
-
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
-		u32 offset;
+		struct amdxdna_gem_obj *abo;
+		struct amdxdna_drm_create_bo args = {
+			.flags = 0,
+			.type = AMDXDNA_BO_DEV,
+			.vaddr = 0,
+			.size = MAX_CHAIN_CMDBUF_SIZE,
+		};
 
-		priv->cmd_buf[i].size = HWCTX_HEAP_RESV_SIZE / HWCTX_MAX_CMDS;
-		offset = priv->cmd_buf[i].size * i;
-		priv->cmd_buf[i].buf = priv->resv_mem.kva + offset;
-		priv->cmd_buf[i].dev_addr = priv->resv_mem.dev_addr + offset;
-		XDNA_DBG(xdna, "Reserve cmd_buf %d addr 0x%llx size 0x%x",
-			 i, priv->cmd_buf[i].dev_addr, priv->cmd_buf[i].size);
+		abo = amdxdna_drm_alloc_dev_bo(&xdna->ddev, &args, client->filp, true);
+		if (!abo)
+			goto free_cmd_bufs;
+
+		XDNA_DBG(xdna, "Command buf %d addr 0x%llx size 0x%lx",
+			 i, abo->mem.dev_addr, abo->mem.size);
+		priv->cmd_buf[i] = abo;
 	}
 
 	sched = &priv->sched;
@@ -551,7 +550,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 			     NULL, NULL, hwctx->name, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
-		goto unresv_mem;
+		goto free_cmd_bufs;
 	}
 
 	ret = drm_sched_entity_init(&priv->entity, DRM_SCHED_PRIORITY_NORMAL,
@@ -594,9 +593,12 @@ free_entity:
 	drm_sched_entity_destroy(&priv->entity);
 free_sched:
 	drm_sched_fini(&priv->sched);
-unresv_mem:
-	amdxdna_gem_unresv_heap_mem(priv->heap, &priv->node, &priv->resv_mem);
-unpin:
+free_cmd_bufs:
+	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
+		if (!priv->cmd_buf[i])
+			continue;
+		drm_gem_object_put(to_gobj(priv->cmd_buf[i]));
+	}
 	amdxdna_gem_unpin(heap);
 put_heap:
 	amdxdna_gem_put_obj(heap);
@@ -609,7 +611,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_sched_job *job;
 	struct amdxdna_dev *xdna;
-	int idx;
+	int idx, i;
 
 	xdna = hwctx->client->xdna;
 	drm_sched_wqueue_stop(&hwctx->priv->sched);
@@ -638,8 +640,8 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	}
 	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->priv->seq);
 
-	amdxdna_gem_unresv_heap_mem(hwctx->priv->heap, &hwctx->priv->node,
-				    &hwctx->priv->resv_mem);
+	for (i = 0; i < ARRAY_SIZE(hwctx->priv->cmd_buf); i++)
+		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[i]));
 	amdxdna_gem_unpin(hwctx->priv->heap);
 	amdxdna_gem_put_obj(hwctx->priv->heap);
 #ifdef AMDXDNA_DEVEL
@@ -731,7 +733,7 @@ static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 		ret = -EINVAL;
 		goto done;
 	}
-	
+
 	/*
 	 * There has to be no existing assigned dbg BO and the target
 	 * BO (bo_hdl) has to exist and can't be already assigned to other ctx.

@@ -165,13 +165,7 @@ struct amdxdna_hwctx_priv {
 	u32				num_pending;
 	u64				seq;
 
-	struct amdxdna_mem		resv_mem;
-	struct drm_mm_node		node;
-	struct {
-		u64			dev_addr;
-		void			*buf;
-		u32			size;
-	} cmd_buf[HWCTX_MAX_CMDS];
+	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 };
 
 struct async_events;

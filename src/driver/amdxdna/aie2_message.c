@@ -534,6 +534,7 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct cmd_chain_slot_execbuf_cf *buf;
 	struct xdna_mailbox_msg msg;
+	struct amdxdna_gem_obj *abo;
 	struct cmd_chain_req req;
 	int i, idx, ret;
 	u32 payload_len;
@@ -550,11 +551,12 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	}
 
 	idx = get_job_idx(job->seq);
-	req.buf_addr = hwctx->priv->cmd_buf[idx].dev_addr;
+	abo = hwctx->priv->cmd_buf[idx];
+	req.buf_addr = abo->mem.dev_addr;
 	req.count = job->cmd_bo_cnt;
 
 	req.buf_size = 0;
-	buf = hwctx->priv->cmd_buf[idx].buf;
+	buf = abo->mem.kva;
 	for (i = 0; i < job->cmd_bo_cnt; i++) {
 		payload = amdxdna_cmd_get_payload(job, i, &payload_len);
 		if (!payload) {
@@ -575,10 +577,10 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		req.buf_size += sizeof(*buf) + payload_len;
 		buf = (void *)&buf->args[buf->arg_cnt];
 	}
-	XDNA_DBG(xdna, "buf addr 0x%llx size 0x%x count %d",
+	XDNA_DBG(xdna, "Command buf addr 0x%llx size 0x%x count %d",
 		 req.buf_addr, req.buf_size, req.count);
 
-	drm_clflush_virt_range(hwctx->priv->cmd_buf[idx].buf, req.buf_size);
+	drm_clflush_virt_range(buf, req.buf_size);
 	/* Device can access the buf after flush */
 
 	msg.handle = handle;
