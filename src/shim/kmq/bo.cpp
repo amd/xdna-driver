@@ -76,8 +76,22 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 
   attach_to_ctx();
 
-  shim_debug("Allocated KMQ BO for: userptr=0x%lx, size=%ld, flags=0x%llx",
-    m_buf, m_size, m_flags);
+  shim_debug("Allocated KMQ BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
+    m_buf, m_size, m_flags, m_type, get_drm_bo_handle());
+}
+
+bo_kmq::
+bo_kmq(const device& device, xrt_core::shared_handle::export_handle ehdl)
+  : bo(device, ehdl)
+{
+  import_bo();
+  m_buf = map(bo::map_type::write);
+  // Setting up the mapping table
+  char *p = reinterpret_cast<char *>(m_buf);
+  for (size_t i = 0; i < m_size; i++)
+    char c = p[i];
+  shim_debug("Imported KMQ BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
+    m_buf, m_size, m_flags, m_type, get_drm_bo_handle());
 }
 
 bo_kmq::

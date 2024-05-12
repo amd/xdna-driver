@@ -790,4 +790,11 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   return alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
 }
 
+std::unique_ptr<xrt_core::buffer_handle>
+device::
+import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
+{
+  return import_bo(ehdl);
+}
+
 } // namespace shim_xdna

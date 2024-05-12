@@ -25,6 +25,8 @@ public:
   bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, amdxdna_bo_type type);
 
+  bo(const device& device, xrt_core::shared_handle::export_handle ehdl);
+
   ~bo();
 
   void*
@@ -40,11 +42,10 @@ public:
   get_properties() const override;
 
   std::unique_ptr<xrt_core::shared_handle>
-  share() const override
-  { shim_not_supported_err(__func__); }
+  share() const override;
 
   void
-  copy(const xrt_core::buffer_handle* src, size_t size, size_t dst_offset, size_t src_offset) override
+  copy(const buffer_handle* src, size_t size, size_t dst_offset, size_t src_offset) override
   { shim_not_supported_err(__func__); }
 
 public:
@@ -80,6 +81,10 @@ protected:
   void
   alloc_bo();
 
+  // Import DRM BO from m_imported_bo_fd
+  void
+  import_bo();
+
   // Free DRM BO in driver
   void
   free_bo();
@@ -107,6 +112,7 @@ protected:
   amdxdna_bo_type m_type = AMDXDNA_BO_INVALID;
   xrt_core::aligned_ptr_type m_private_buf{};
   std::unique_ptr<drm_bo> m_bo;
+  const shared m_import;
 
   // Command ID in the queue after command submission.
   // Only valid for cmd BO.

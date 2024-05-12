@@ -4,7 +4,6 @@
 #ifndef _SHARED_XDNA_H_
 #define _SHARED_XDNA_H_
 
-#include "shim_debug.h"
 #include "core/common/shim/shared_handle.h"
 #include <unistd.h>
 

@@ -64,6 +64,14 @@ bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 }
 
 bo_umq::
+bo_umq(const device& device, xrt_core::shared_handle::export_handle ehdl)
+  : bo(device, ehdl)
+{
+    alloc_bo();
+    m_buf = map(bo::map_type::write);
+}
+
+bo_umq::
 ~bo_umq()
 {
   shim_debug("Freeing UMQ BO, %s", describe().c_str());
