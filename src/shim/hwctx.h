@@ -44,6 +44,9 @@ public:
   std::unique_ptr<xrt_core::buffer_handle>
   alloc_bo(size_t size, uint64_t flags) override;
 
+  std::unique_ptr<xrt_core::buffer_handle>
+  import_bo(pid_t, xrt_core::shared_handle::export_handle) override;
+
   xrt_core::cuidx_type
   open_cu_context(const std::string& cuname) override;
 
@@ -54,6 +57,7 @@ public:
   exec_buf(xrt_core::buffer_handle *) override
   { shim_not_supported_err(__func__); }
 
+public:
   uint32_t
   get_doorbell() const;
 

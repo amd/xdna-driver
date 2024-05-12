@@ -507,6 +507,13 @@ public:
   {
   }
 
+  bo(device* dev, xrt_core::shared_handle::export_handle ehdl)
+    : m_dev(dev)
+  {
+    m_handle = m_dev->import_bo(getpid(), ehdl);
+    map_and_chk();
+  }
+
   ~bo()
   {
     if (!m_no_unmap)
@@ -626,6 +633,21 @@ TEST_create_free_bo(device::id_type id, device* dev, arg_type& arg)
 
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
+}
+
+void
+TEST_export_import_bo(device::id_type id, device* dev, arg_type& arg)
+{
+  bo exp_bo{dev, 4096ul};
+  auto exp_p = exp_bo.map();
+  std::memset(exp_p, 0x55, exp_bo.size());
+  auto share = exp_bo.get()->share();
+
+  bo imp_bo{dev, share->get_export_handle()};
+  auto imp_p = imp_bo.map();
+  auto ret = std::memcmp(exp_p, imp_p, imp_bo.size());
+  if (ret)
+    throw std::runtime_error("Content of exported BO differs with imported BO");
 }
 
 #if 0
@@ -1200,9 +1222,9 @@ umq_cmd_submit_and_wait(xrt_core::hwqueue_handle *hwq,
 void
 TEST_shim_umq_vadd(device::id_type id, device* dev, arg_type& arg)
 {
-  const uint32_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
-  const uint32_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
-  const uint32_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  const size_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  const size_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
+  const size_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
   bo bo_ifm{dev, IFM_BYTE_SIZE}, bo_wts{dev, WTS_BYTE_SIZE}, bo_ofm{dev, OFM_BYTE_SIZE};
   std::cout << "Allocated vadd ifm, wts and ofm BOs" << std::endl;
 
@@ -1360,6 +1382,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "npu3 shim vadd",
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
+  },
+  test_case{ "export import BO",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
   },
 };
 

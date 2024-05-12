@@ -14,6 +14,8 @@ public:
   bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags);
 
+  bo_kmq(const device& device, xrt_core::shared_handle::export_handle ehdl);
+
   ~bo_kmq();
 
   void

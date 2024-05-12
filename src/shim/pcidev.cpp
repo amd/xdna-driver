@@ -36,6 +36,10 @@ namespace {
       return "DRM_IOCTL_AMDXDNA_SET_STATE";
     case DRM_IOCTL_GEM_CLOSE:
       return "DRM_IOCTL_GEM_CLOSE";
+    case DRM_IOCTL_PRIME_HANDLE_TO_FD:
+      return "DRM_IOCTL_PRIME_HANDLE_TO_FD";
+    case DRM_IOCTL_PRIME_FD_TO_HANDLE:
+      return "DRM_IOCTL_PRIME_FD_TO_HANDLE";
     }
 
     return "UNKNOWN(" + std::to_string(cmd) + ")";

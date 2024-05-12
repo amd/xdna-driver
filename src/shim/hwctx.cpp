@@ -89,6 +89,15 @@ alloc_bo(size_t size, uint64_t flags)
   return alloc_bo(nullptr, size, flags);
 }
 
+std::unique_ptr<xrt_core::buffer_handle>
+hw_ctx::
+import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
+{
+  // const_cast: import_bo() is not const yet in device class
+  auto& dev = const_cast<device&>(get_device());
+  return dev.import_bo(pid, ehdl);
+}
+
 xrt_core::hwqueue_handle*
 hw_ctx::
 get_hw_queue()

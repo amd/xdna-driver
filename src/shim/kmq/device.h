@@ -24,6 +24,9 @@ protected:
   create_hw_context(const device& dev, const xrt::xclbin& xclbin,
     const xrt::hw_context::qos_type& qos) const override;
 
+  std::unique_ptr<xrt_core::buffer_handle>
+  import_bo(xrt_core::shared_handle::export_handle ehdl) const override;
+
 private:
   std::unique_ptr<xrt_core::buffer_handle> m_dev_heap_bo;
 };

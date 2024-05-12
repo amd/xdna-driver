@@ -26,6 +26,9 @@ protected:
   create_hw_context(const device& dev,
     const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos) const = 0;
 
+  virtual std::unique_ptr<xrt_core::buffer_handle>
+  import_bo(xrt_core::shared_handle::export_handle ehdl) const = 0;
+
 public:
   device(const pdev& pdev, handle_type shim_handle, id_type device_id);
 
@@ -48,6 +51,9 @@ public:
 
   virtual std::unique_ptr<xrt_core::buffer_handle>
   alloc_bo(void* userptr, size_t size, uint64_t flags) override;
+
+  std::unique_ptr<xrt_core::buffer_handle>
+  import_bo(pid_t, xrt_core::shared_handle::export_handle) override;
 
   std::unique_ptr<xrt_core::hwctx_handle>
   create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type& qos,

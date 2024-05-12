@@ -23,8 +23,8 @@ alloc_drm_bo(const shim_xdna::pdev& dev, amdxdna_bo_type type, void* buf, size_t
 void
 free_drm_bo(const shim_xdna::pdev& dev, uint32_t boh)
 {
-    drm_gem_close close_bo = {boh, 0};
-    dev.ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
+  drm_gem_close close_bo = {boh, 0};
+  dev.ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
 }
 
 void
@@ -60,12 +60,35 @@ attach_dbg_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
 void
 detach_dbg_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
 {
-   amdxdna_drm_config_hwctx adbo = {
+  amdxdna_drm_config_hwctx adbo = {
     .handle = ctx_id,
     .param_type = DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
     .param_val = boh,
   };
   dev.ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+}
+
+int
+export_drm_bo(const shim_xdna::pdev& dev, uint32_t boh)
+{
+  drm_prime_handle exp_bo = {boh, DRM_RDWR | DRM_CLOEXEC, -1};
+  dev.ioctl(DRM_IOCTL_PRIME_HANDLE_TO_FD, &exp_bo);
+  return exp_bo.fd;
+}
+
+uint32_t
+import_drm_bo(const shim_xdna::pdev& dev, const shim_xdna::shared& share,
+  amdxdna_bo_type *type, size_t *size)
+{
+  xrt_core::shared_handle::export_handle fd = share.get_export_handle();
+  drm_prime_handle imp_bo = {AMDXDNA_INVALID_BO_HANDLE, 0, fd};
+  dev.ioctl(DRM_IOCTL_PRIME_FD_TO_HANDLE, &imp_bo);
+
+  *type = AMDXDNA_BO_SHMEM;
+  *size = lseek(fd, 0, SEEK_END);
+  lseek(fd, 0, SEEK_SET);
+
+  return imp_bo.handle;
 }
 
 }
@@ -154,6 +177,17 @@ alloc_bo()
 
 void
 bo::
+import_bo()
+{
+  uint32_t boh = import_drm_bo(m_pdev, m_import, &m_type, &m_size);
+
+  amdxdna_drm_get_bo_info bo_info = {};
+  get_drm_bo_info(m_pdev, boh, &bo_info);
+  m_bo = std::make_unique<bo::drm_bo>(*this, bo_info);
+}
+
+void
+bo::
 free_bo()
 {
   m_bo.reset();
@@ -166,7 +200,15 @@ bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_size(size)
   , m_flags(flags)
   , m_type(type)
+  , m_import(-1)
   , m_owner_ctx_id(ctx_id)
+{
+}
+
+bo::
+bo(const device& device, xrt_core::shared_handle::export_handle ehdl)
+  : m_pdev(device.get_pdev())
+  , m_import(ehdl)
 {
 }
 
@@ -267,6 +309,16 @@ detach_from_ctx()
   auto boh = get_drm_bo_handle();
   shim_debug("Detaching drm_bo %d from ctx: %d", boh, m_owner_ctx_id);
   detach_dbg_drm_bo(m_pdev, boh, m_owner_ctx_id);
+}
+
+std::unique_ptr<xrt_core::shared_handle>
+bo::
+share() const
+{
+  auto boh = get_drm_bo_handle();
+  auto fd = export_drm_bo(m_pdev, boh);
+  shim_debug("Exported bo %d to fd %d", boh, fd);
+  return std::make_unique<shared>(fd);
 }
 
 } // namespace shim_xdna
