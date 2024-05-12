@@ -45,7 +45,7 @@ public:
   share() const override;
 
   void
-  copy(const buffer_handle* src, size_t size, size_t dst_offset, size_t src_offset) override
+  copy(const xrt_core::buffer_handle* src, size_t size, size_t dst_offset, size_t src_offset) override
   { shim_not_supported_err(__func__); }
 
 public:
@@ -81,7 +81,7 @@ protected:
   void
   alloc_bo();
 
-  // Import DRM BO from m_imported_bo_fd
+  // Import DRM BO from m_import shared object
   void
   import_bo();
 
