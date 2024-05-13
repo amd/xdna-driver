@@ -149,7 +149,7 @@ struct amdxdna_client {
 	struct drm_file			*filp;
 
 	struct mutex			mm_lock; /* protect memory related */
-	int				dev_heap;
+	struct amdxdna_gem_obj		*dev_heap;
 
 	struct iommu_sva		*sva;
 	int				pasid;

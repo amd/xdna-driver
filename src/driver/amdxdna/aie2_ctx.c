@@ -511,19 +511,20 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		return -ENOMEM;
 
 	hwctx->priv = priv;
-	heap = amdxdna_gem_get_obj(client, client->dev_heap, AMDXDNA_BO_DEV_HEAP);
+	heap = client->dev_heap;
 	if (!heap) {
+		XDNA_ERR(xdna, "The client dev heap object not exist");
 		ret = -EINVAL;
-		XDNA_ERR(xdna, "Cannot get dev heap object, ret %d", ret);
 		goto free_priv;
 	}
 
 	ret = amdxdna_gem_pin(heap);
 	if (ret) {
 		XDNA_ERR(xdna, "Dev heap pin failed, ret %d", ret);
-		goto put_heap;
+		goto free_priv;
 	}
 	priv->heap = heap;
+	drm_gem_object_get(to_gobj(heap));
 
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
 		struct amdxdna_gem_obj *abo;
@@ -600,8 +601,6 @@ free_cmd_bufs:
 		drm_gem_object_put(to_gobj(priv->cmd_buf[i]));
 	}
 	amdxdna_gem_unpin(heap);
-put_heap:
-	amdxdna_gem_put_obj(heap);
 free_priv:
 	kfree(priv);
 	return ret;
@@ -611,7 +610,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_sched_job *job;
 	struct amdxdna_dev *xdna;
-	int idx, i;
+	int idx;
 
 	xdna = hwctx->client->xdna;
 	drm_sched_wqueue_stop(&hwctx->priv->sched);
@@ -640,10 +639,10 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	}
 	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->priv->seq);
 
-	for (i = 0; i < ARRAY_SIZE(hwctx->priv->cmd_buf); i++)
-		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[i]));
+	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
+		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[idx]));
 	amdxdna_gem_unpin(hwctx->priv->heap);
-	amdxdna_gem_put_obj(hwctx->priv->heap);
+	drm_gem_object_put(to_gobj(hwctx->priv->heap));
 #ifdef AMDXDNA_DEVEL
 	if (priv_load)
 		aie2_unregister_pdis(hwctx);

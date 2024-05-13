@@ -580,7 +580,7 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	XDNA_DBG(xdna, "Command buf addr 0x%llx size 0x%x count %d",
 		 req.buf_addr, req.buf_size, req.count);
 
-	drm_clflush_virt_range(buf, req.buf_size);
+	drm_clflush_virt_range(abo->mem.kva, req.buf_size);
 	/* Device can access the buf after flush */
 
 	msg.handle = handle;

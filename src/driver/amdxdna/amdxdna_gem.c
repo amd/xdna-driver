@@ -131,11 +131,6 @@ static void
 amdxdna_drm_init_bo(struct amdxdna_client *client, struct amdxdna_gem_obj *abo,
 		    enum amdxdna_bo_type type)
 {
-	/*
-	 * Only initial the common members of amdxdna_gem_obj,
-	 * cal if needed.
-	 *
-	 */
 	abo->client = client;
 	abo->pinned = false;
 	abo->type = type;
@@ -158,15 +153,16 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		 abo->type, abo->mem.userptr, abo->mem.dev_addr);
 	switch (abo->type) {
 	case AMDXDNA_BO_DEV_HEAP:
+		mutex_lock(&abo->client->mm_lock);
 		drm_mm_takedown(&abo->mm);
 		amdxdna_user_mem_fini(&abo->mem);
-		abo->client->dev_heap = AMDXDNA_INVALID_BO_HANDLE;
+		mutex_unlock(&abo->client->mm_lock);
 		break;
 	case AMDXDNA_BO_DEV:
 		mutex_lock(&abo->client->mm_lock);
 		amdxdna_gem_remove_node_locked(&abo->mm_node, &abo->mem);
 		mutex_unlock(&abo->client->mm_lock);
-		amdxdna_gem_put_obj(abo->dev_heap);
+		drm_gem_object_put(to_gobj(abo->dev_heap));
 		break;
 	case AMDXDNA_BO_CMD:
 		amdxdna_unpin_pages(&abo->mem);
@@ -187,7 +183,21 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	kfree(abo);
 }
 
+static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp)
+{
+	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+
+	if (abo->type != AMDXDNA_BO_DEV_HEAP)
+		return;
+
+	mutex_lock(&abo->client->mm_lock);
+	drm_gem_object_put(to_gobj(abo->client->dev_heap));
+	abo->client->dev_heap = NULL;
+	mutex_unlock(&abo->client->mm_lock);
+}
+
 static const struct drm_gem_object_funcs amdxdna_gem_obj_funcs = {
+	.close = amdxdna_gem_obj_close,
 	.free = amdxdna_gem_obj_free,
 };
 
@@ -252,7 +262,7 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 	int ret;
 
 	mutex_lock(&client->mm_lock);
-	if (client->dev_heap != AMDXDNA_INVALID_BO_HANDLE) {
+	if (client->dev_heap) {
 		XDNA_DBG(client->xdna, "dev heap is already created");
 		ret = -EINVAL;
 		goto mm_unlock;
@@ -289,20 +299,13 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 	abo->mem.dev_addr = client->xdna->dev_info->dev_mem_base;
 	drm_mm_init(&abo->mm, abo->mem.dev_addr, abo->mem.size);
 
-	/* ready to publish object to userspace */
-	ret = drm_gem_handle_create(filp, to_gobj(abo), &args->handle);
-	if (ret) {
-		XDNA_ERR(client->xdna, "Create handle failed");
-		goto fini_user_mem;
-	}
-
-	client->dev_heap = args->handle;
+	client->dev_heap = abo;
+	/* When close(), put this object */
+	drm_gem_object_get(to_gobj(abo));
 	mutex_unlock(&client->mm_lock);
 
 	return abo;
 
-fini_user_mem:
-	amdxdna_user_mem_fini(&abo->mem);
 release_obj:
 	drm_gem_object_release(to_gobj(abo));
 	kfree(abo);
@@ -323,24 +326,24 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 	int ret;
 
 	mutex_lock(&client->mm_lock);
-	heap = amdxdna_gem_get_obj(client, client->dev_heap, AMDXDNA_BO_DEV_HEAP);
+	heap = client->dev_heap;
 	if (!heap) {
-		XDNA_DBG(xdna, "The dev heap is not created");
 		ret = -EINVAL;
 		goto mm_unlock;
 	}
 
+	drm_gem_object_get(to_gobj(heap));
 	if (args->size > heap->mem.size) {
 		XDNA_DBG(xdna, "Invalid dev bo size 0x%llx, limit 0x%lx",
 			 args->size, heap->mem.size);
 		ret = -EINVAL;
-		goto put_and_err;
+		goto mm_unlock;
 	}
 
 	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
 	if (!abo) {
 		ret = -ENOMEM;
-		goto put_and_err;
+		goto mm_unlock;
 	}
 
 	drm_gem_private_object_init(&xdna->ddev, to_gobj(abo), aligned_sz);
@@ -355,14 +358,11 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 		goto free_bo;
 	}
 	mutex_unlock(&client->mm_lock);
-
 	return abo;
 
 free_bo:
 	drm_gem_object_release(to_gobj(abo));
 	kfree(abo);
-put_and_err:
-	amdxdna_gem_put_obj(heap);
 mm_unlock:
 	mutex_unlock(&client->mm_lock);
 	return ERR_PTR(ret);
@@ -409,7 +409,6 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 		ret = -EFAULT;
 		goto unpin;
 	}
-
 	abo->mem.kva += offset_in_page(abo->mem.userptr);
 
 	return abo;
@@ -426,7 +425,6 @@ release_obj:
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
-	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_create_bo *args = data;
 	struct amdxdna_gem_obj *abo;
@@ -456,18 +454,18 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	if (IS_ERR(abo))
 		return PTR_ERR(abo);
 
-	if (args->type != AMDXDNA_BO_DEV_HEAP) {
-		/* ready to publish object to userspace */
-		ret = drm_gem_handle_create(filp, to_gobj(abo), &args->handle);
-		if (ret)
-			XDNA_ERR(client->xdna, "Create handle failed");
+	/* ready to publish object to userspace */
+	ret = drm_gem_handle_create(filp, to_gobj(abo), &args->handle);
+	if (ret) {
+		XDNA_ERR(xdna, "Create handle failed");
+		goto put_obj;
 	}
 
 	XDNA_DBG(xdna, "BO hdl %d type %d userptr 0x%llx dev_addr 0x%llx nr_pages %d",
 		 args->handle, args->type, abo->mem.userptr,
 		 abo->mem.dev_addr, abo->mem.nr_pages);
-
-	/* dereference object reference. Handle holds it now */
+put_obj:
+	/* Dereference object reference. Handle holds it now. */
 	drm_gem_object_put(to_gobj(abo));
 	return ret;
 }
@@ -585,7 +583,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 
 	gobj = drm_gem_object_lookup(filp, args->handle);
 	if (!gobj) {
-		XDNA_DBG(xdna, "Lookup GEM object failed");
+		XDNA_DBG(xdna, "Lookup GEM object %d failed", args->handle);
 		return -ENOENT;
 	}
 
