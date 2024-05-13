@@ -9,6 +9,10 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_gem.h"
 
+#ifdef AMDXDNA_DEVEL
+#include "amdxdna_devel.h"
+#endif
+
 #define XDNA_32K_ALIGN		0x8000
 #define XDNA_MAX_CMD_BO_SIZE	0x8000
 
@@ -153,6 +157,9 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		drm_gem_object_put(to_gobj(abo->dev_heap));
 		break;
 	case AMDXDNA_BO_CMD:
+#ifdef AMDXDNA_DEVEL
+		amdxdna_mem_unmap(abo->client->xdna, &abo->mem);
+#endif
 		amdxdna_unpin_pages(&abo->mem);
 		vunmap(abo->mem.kva - offset_in_page(abo->mem.userptr));
 		amdxdna_user_mem_fini(&abo->mem);
@@ -482,6 +489,13 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		break;
 	case AMDXDNA_BO_CMD:
 		abo = amdxdna_drm_create_cmd_bo(dev, args, filp);
+#ifdef AMDXDNA_DEVEL
+		if (IS_ERR(abo))
+			break;
+		ret = amdxdna_mem_map(xdna, &abo->mem);
+		if (ret)
+			goto put_obj;
+#endif
 		break;
 	default:
 		return -EINVAL;

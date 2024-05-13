@@ -83,3 +83,59 @@ void amdxdna_free_sgt(struct amdxdna_dev *xdna, struct sg_table *sgt)
 	sg_free_table(sgt);
 	kfree(sgt);
 }
+
+int amdxdna_mem_map(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
+{
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct sg_table *sgt = NULL;
+	int ret;
+
+	if (!mem) {
+		XDNA_ERR(xdna, "mem is not init");
+		return -EINVAL;
+	}
+
+	XDNA_DBG(xdna, "size %ld, nr_pages %d", mem->size, mem->nr_pages);
+
+	sgt = amdxdna_alloc_sgt(xdna, mem->size, mem->pages, mem->nr_pages);
+	if (!sgt)
+		return -ENOMEM;
+
+	if (!dma_map_sg(&pdev->dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL)) {
+		XDNA_ERR(xdna, "dma map sg failed");
+		ret = -ENOMEM;
+		goto free_sgt;
+	}
+
+	if (drm_prime_get_contiguous_size(sgt) != mem->size) {
+		XDNA_ERR(xdna, "failed to map contiguous dma address for size:%ld",
+			 mem->size);
+		ret = -ENOMEM;
+		goto unmap_and_free;
+	}
+
+	mem->sgt = sgt;
+	mem->dev_addr = sg_dma_address(sgt->sgl);
+
+	XDNA_DBG(xdna, "dev_addr 0x%llx", mem->dev_addr);
+
+	return 0;
+
+unmap_and_free:
+	dma_unmap_sg(&pdev->dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL);
+free_sgt:
+	amdxdna_free_sgt(xdna, sgt);
+	return ret;
+}
+
+void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
+{
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct sg_table *sgt = mem->sgt;
+
+	if (!sgt)
+		return;
+
+	dma_unmap_sg(&pdev->dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL);
+	amdxdna_free_sgt(xdna, sgt);
+}
