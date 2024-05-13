@@ -120,6 +120,27 @@ static const struct drm_gem_object_funcs amdxdna_gem_obj_funcs = {
 	.free = amdxdna_gem_obj_free,
 };
 
+static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
+				struct vm_area_struct *vma)
+{
+	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+	unsigned long num_pages;
+	int ret;
+
+	ret = drm_gem_shmem_object_mmap(gobj, vma);
+	if (ret)
+		return ret;
+
+	num_pages = gobj->size >> PAGE_SHIFT;
+	/* The buffer is based on memoey pages, indeed. Let's fix the flag. */
+	vm_flags_mod(vma, VM_MIXEDMAP, VM_PFNMAP);
+	ret = vm_insert_pages(vma, vma->vm_start, abo->base.pages, &num_pages);
+	if (ret)
+		XDNA_ERR(abo->client->xdna, "Failed insert pages, ret %d", ret);
+
+	return ret;
+}
+
 static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 	.free = amdxdna_gem_obj_free,
 	.print_info = drm_gem_shmem_object_print_info,
@@ -128,7 +149,7 @@ static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 	.get_sg_table = drm_gem_shmem_object_get_sg_table,
 	.vmap = drm_gem_shmem_object_vmap,
 	.vunmap = drm_gem_shmem_object_vunmap,
-	.mmap = drm_gem_shmem_object_mmap,
+	.mmap = amdxdna_gem_obj_mmap,
 	.vm_ops = &drm_gem_shmem_vm_ops,
 };
 

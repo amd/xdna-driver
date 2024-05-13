@@ -52,9 +52,11 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   case AMDXDNA_BO_SHMEM:
     alloc_bo();
     m_buf = map(bo::map_type::write);
-    // Do NOT remove and change the order of below two lines
-    memset(m_buf, 0, size); // Make sure the mapping is settled
-    sync(direction::host2device, size, 0); // avoid cache flush issue on output bo
+    // Newly allocated buffer may contain dirty pages. If used as output buffer,
+    // the data in cacheline will be flushed onto memory and pollute the output
+    // from device. We perform a cache flush right after the BO is allocated to
+    // avoid this issue.
+    sync(direction::host2device, size, 0);
     break;
   case AMDXDNA_BO_DEV:
     alloc_bo();
@@ -86,10 +88,6 @@ bo_kmq(const device& device, xrt_core::shared_handle::export_handle ehdl)
 {
   import_bo();
   m_buf = map(bo::map_type::write);
-  // Setting up the mapping table
-  char *p = reinterpret_cast<char *>(m_buf);
-  for (size_t i = 0; i < m_size; i++)
-    char c = p[i];
   shim_debug("Imported KMQ BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
     m_buf, m_size, m_flags, m_type, get_drm_bo_handle());
 }
