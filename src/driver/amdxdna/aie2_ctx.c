@@ -516,7 +516,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	if (!heap) {
 		XDNA_ERR(xdna, "The client dev heap object not exist");
 		mutex_unlock(&client->mm_lock);
-		ret = -EINVAL;
+		ret = -ENOENT;
 		goto free_priv;
 	}
 	drm_gem_object_get(to_gobj(heap));
