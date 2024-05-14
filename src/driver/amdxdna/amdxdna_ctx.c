@@ -530,7 +530,7 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 			     args->cmd_bo_count * sizeof(u32));
 	if (ret) {
 		ret = -EFAULT;
-		goto free_cmd_bo_hdls;
+		goto free_arg_bo_hdls;
 	}
 
 	ret = copy_from_user(arg_bo_hdls, u64_to_user_ptr(args->arg_bo_handles),
