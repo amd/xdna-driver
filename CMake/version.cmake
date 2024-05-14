@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
 
+if (NOT DEFINED BUILD_REPO_ROOT)
+  set(BUILD_REPO_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+message("-- BUILD_REPO_ROOT: ${BUILD_REPO_ROOT}")
+
 # Get the branch
 execute_process(
   COMMAND git rev-parse --abbrev-ref HEAD
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  WORKING_DIRECTORY ${BUILD_REPO_ROOT}
   OUTPUT_VARIABLE XDNA_BRANCH
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -12,7 +17,7 @@ execute_process(
 # Get the latest abbreviated commit hash of the working branch
 execute_process(
   COMMAND git rev-parse --verify HEAD
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  WORKING_DIRECTORY ${BUILD_REPO_ROOT}
   OUTPUT_VARIABLE XDNA_HASH
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -20,7 +25,7 @@ execute_process(
 # Get the latest abbreviated commit hash date of the working branch
 execute_process(
   COMMAND git log -1 --pretty=format:%cD
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  WORKING_DIRECTORY ${BUILD_REPO_ROOT}
   OUTPUT_VARIABLE XDNA_HASH_DATE
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
