@@ -469,6 +469,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	struct xdna_mailbox_msg msg;
 	u32 payload_len;
 	void *payload;
+	int cu_idx;
 	int ret;
 	u32 op;
 
@@ -481,12 +482,18 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		return -EINVAL;
 	}
 
+	cu_idx = amdxdna_cmd_get_cu_idx(job, 0);
+	if (cu_idx < 0) {
+		XDNA_DBG(xdna, "Invalid cu idx");
+		return -EINVAL;
+	}
+
 	op = amdxdna_cmd_get_op(job, 0);
 	switch (op) {
 	case ERT_START_CU:
 		if (unlikely(payload_len > sizeof(req.ebuf.payload)))
 			XDNA_DBG(xdna, "Invalid ebuf payload len: %d", payload_len);
-		req.ebuf.cu_idx = amdxdna_cmd_get_cu_idx(job, 0);
+		req.ebuf.cu_idx = cu_idx;
 		memcpy(req.ebuf.payload, payload, sizeof(req.ebuf.payload));
 		msg.send_size = sizeof(req.ebuf);
 		msg.opcode = MSG_OP_EXECUTE_BUFFER_CF;
@@ -503,7 +510,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		req.dpu.inst_buf_addr = sd->instruction_buffer;
 		req.dpu.inst_size = sd->instruction_buffer_size;
 		req.dpu.inst_prop_cnt = 0;
-		req.dpu.cu_idx = amdxdna_cmd_get_cu_idx(job, 0);
+		req.dpu.cu_idx = cu_idx;
 		memcpy(req.dpu.payload, ((char *)payload) + sizeof(*sd),
 		       sizeof(req.dpu.payload));
 		msg.send_size = sizeof(req.dpu);
@@ -536,7 +543,7 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	struct xdna_mailbox_msg msg;
 	struct amdxdna_gem_obj *abo;
 	struct cmd_chain_req req;
-	int i, idx, ret;
+	int i, idx, cu_idx, ret;
 	u32 payload_len;
 	void *payload;
 	u32 op;
@@ -548,6 +555,12 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	if (op != ERT_START_CU) {
 		XDNA_ERR(xdna, "Invalid ERT cmd op code: %d", op);
 		return -EOPNOTSUPP;
+	}
+
+	cu_idx = amdxdna_cmd_get_cu_idx(job, 0);
+	if (cu_idx < 0) {
+		XDNA_DBG(xdna, "Invalid cu idx");
+		return -EINVAL;
 	}
 
 	idx = get_job_idx(job->seq);
@@ -569,7 +582,7 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 				 req.buf_size, payload_len);
 			return -ENOSPC;
 		}
-		buf->cu_idx = amdxdna_cmd_get_cu_idx(job, i);
+		buf->cu_idx = cu_idx;
 		buf->arg_cnt = payload_len / sizeof(u32);
 		memcpy(buf->args, payload, payload_len);
 
