@@ -18,6 +18,9 @@ struct amdxdna_mem {
 	struct page		**pages;
 	u32			nr_pages;
 	int			pin_cnt;
+#ifdef AMDXDNA_DEVEL
+	struct sg_table		*sgt;
+#endif
 };
 
 struct amdxdna_gem_obj {

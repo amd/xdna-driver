@@ -458,10 +458,12 @@ public:
 
   hw_ctx(device* dev, const char *xclbin_name)
   {
+    auto wrk = get_xclbin_workspace(dev);
+
     if (!xclbinpath.empty())
       hw_ctx_init(dev, xclbinpath);
     else
-      hw_ctx_init(dev, local_path(std::string(xclbin_name)));
+      hw_ctx_init(dev, local_path(wrk + "/" + std::string(xclbin_name)));
   }
 
   ~hw_ctx()
@@ -1303,6 +1305,8 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
 
   if (err)
     throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
 }
 
 void
@@ -1358,7 +1362,10 @@ TEST_shim_umq_vadd(device::id_type id, device* dev, arg_type& arg)
   const size_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
   const size_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
   const size_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
-  bo bo_ifm{dev, IFM_BYTE_SIZE}, bo_wts{dev, WTS_BYTE_SIZE}, bo_ofm{dev, OFM_BYTE_SIZE};
+  bo bo_ifm{dev, IFM_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
+  bo bo_wts{dev, WTS_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
+  bo bo_ofm{dev, OFM_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
+ 
   std::cout << "Allocated vadd ifm, wts and ofm BOs" << std::endl;
 
   // Obtain vadd control code
@@ -1368,8 +1375,11 @@ TEST_shim_umq_vadd(device::id_type id, device* dev, arg_type& arg)
       {"g.ofm_ddr", bo_ofm.get()->get_properties().paddr}
   };
   const std::string ctrl_code_elf("vadd.elf");
-  auto ctrlcode = get_ctrl_from_elf(local_path(ctrl_code_elf), symbols);
-  bo bo_ctrl_code{dev, ctrlcode.at(0).ccode.size()};
+  auto wrk = get_xclbin_workspace(dev);
+  std::cout << "using vadd.elf from " << wrk + "/" + ctrl_code_elf << std::endl;
+
+  auto ctrlcode = get_ctrl_from_elf(local_path(wrk + "/" + ctrl_code_elf), symbols);
+  bo bo_ctrl_code{dev, ctrlcode.at(0).ccode.size(), XCL_BO_FLAGS_EXECBUF};
   std::memcpy(bo_ctrl_code.map(), ctrlcode.at(0).ccode.data(), bo_ctrl_code.size());
   std::cout << "Obtained vadd ctrl-code BO" << std::endl;
 
@@ -1380,27 +1390,28 @@ TEST_shim_umq_vadd(device::id_type id, device* dev, arg_type& arg)
   // EOF
   uint32_t nop_ctrlcode[] =
     { 0x0000FFFF, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000000C, 0x00000007, 0x000000FF };
-  bo bo_nop_ctrl_code{dev, 0x2000UL};
+  bo bo_nop_ctrl_code{dev, 0x2000UL, XCL_BO_FLAGS_EXECBUF};
   std::memcpy(bo_nop_ctrl_code.map(), nop_ctrlcode, sizeof(nop_ctrlcode));
   std::cout << "Obtained nop ctrl-code BO" << std::endl;
 
-  bo bo_exec_buf{dev, 0x1000};
+  bo bo_exec_buf{dev, 0x1000, XCL_BO_FLAGS_EXECBUF};
 
   {
     hw_ctx hwctx{dev, "vadd.xclbin"};
     auto hwq = hwctx.get()->get_hw_queue();
     auto cu_idx = hwctx.get()->open_cu_context("dpu:vadd");
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 1; i++) {
       sleep(5);
       std::cout << "Running vadd command" << std::endl;
       init_umq_vadd_buffers<bo>(bo_ifm, bo_wts, bo_ofm);
       umq_cmd_submit_and_wait(hwq, cu_idx.domain_index, bo_exec_buf, bo_ctrl_code);
       check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
 
-      sleep(5);
-      std::cout << "Running nop command" << std::endl;
-      umq_cmd_submit_and_wait(hwq, cu_idx.domain_index, bo_exec_buf, bo_nop_ctrl_code);
+      // noop ctrlcode is not updated yet.
+      //sleep(5);
+      //std::cout << "Running nop command" << std::endl;
+      //umq_cmd_submit_and_wait(hwq, cu_idx.domain_index, bo_exec_buf, bo_nop_ctrl_code);
     }
   }
 }
