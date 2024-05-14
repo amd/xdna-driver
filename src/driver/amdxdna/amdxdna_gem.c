@@ -427,6 +427,11 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 		return ERR_PTR(-EINVAL);
 	}
 
+	if (args->size < sizeof(struct amdxdna_cmd)) {
+		XDNA_DBG(xdna, "Command BO size 0x%llx too small", args->size);
+		return ERR_PTR(-EINVAL);
+	}
+
 	abo = amdxdna_gem_create_obj(&xdna->ddev, args->size, AMDXDNA_BO_CMD);
 	if (IS_ERR(abo))
 		return ERR_CAST(abo);
