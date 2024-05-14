@@ -170,9 +170,13 @@ static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
 	}
 
 	if (!strncmp(input, "suspend", strlen("suspend"))) {
+		mutex_lock(&ndev->xdna->dev_lock);
 		ret = aie2_suspend_fw(ndev);
+		mutex_unlock(&ndev->xdna->dev_lock);
 	} else if (!strncmp(input, "resume", strlen("resume"))) {
+		mutex_lock(&ndev->xdna->dev_lock);
 		ret = aie2_resume_fw(ndev);
+		mutex_unlock(&ndev->xdna->dev_lock);
 	} else {
 		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
 		return -EINVAL;
