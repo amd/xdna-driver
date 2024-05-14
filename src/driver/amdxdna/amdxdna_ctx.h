@@ -168,12 +168,12 @@ amdxdna_cmd_get_payload(struct amdxdna_sched_job *job, int idx, u32 *size)
 	return &cmd->data[num_masks];
 }
 
-static inline u32
+static inline int
 amdxdna_cmd_get_cu_idx(struct amdxdna_sched_job *job, int idx)
 {
 	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
 	u32 *cu_mask;
-	u32 cu_idx;
+	int cu_idx;
 	int i;
 
 	cu_mask = cmd->data;

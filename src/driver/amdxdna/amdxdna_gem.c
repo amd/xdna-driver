@@ -303,7 +303,7 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 	mutex_lock(&client->mm_lock);
 	if (client->dev_heap) {
 		XDNA_DBG(client->xdna, "dev heap is already created");
-		ret = -EINVAL;
+		ret = -EBUSY;
 		goto mm_unlock;
 	}
 
