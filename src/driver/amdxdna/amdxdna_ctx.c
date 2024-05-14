@@ -402,7 +402,7 @@ static int amdxdna_cmds_submit(struct amdxdna_client *client,
 	if (!job)
 		return -ENOMEM;
 
-	cmd_bo = kcalloc(args->cmd_bo_count, sizeof(cmd_bo), GFP_KERNEL);
+	cmd_bo = kcalloc(args->cmd_bo_count, sizeof(*cmd_bo), GFP_KERNEL);
 	if (!cmd_bo) {
 		ret = -ENOMEM;
 		goto free_job;
