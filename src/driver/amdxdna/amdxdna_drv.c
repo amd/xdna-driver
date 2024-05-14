@@ -85,7 +85,6 @@ skip_sva_bind:
 	init_srcu_struct(&client->hwctx_srcu);
 	idr_init(&client->hwctx_idr);
 	mutex_init(&client->mm_lock);
-	client->dev_heap = AMDXDNA_INVALID_BO_HANDLE;
 
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
@@ -116,6 +115,8 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
 	mutex_destroy(&client->mm_lock);
+	if (client->dev_heap)
+		drm_gem_object_put(to_gobj(client->dev_heap));
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
@@ -237,7 +238,7 @@ static const struct drm_driver amdxdna_drm_drv = {
 	.num_ioctls = ARRAY_SIZE(amdxdna_drm_ioctls),
 
 	/* For shmem object create */
-	.gem_create_object = amdxdna_gem_create_object,
+	.gem_create_object = amdxdna_gem_create_object_cb,
 	.gem_prime_import_sg_table = amdxdna_gem_import_sg_table,
 };
 

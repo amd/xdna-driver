@@ -12,6 +12,8 @@
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
 
+#include "amdxdna_gem.h"
+
 struct amdxdna_hwctx_priv;
 
 enum ert_cmd_opcode {
@@ -99,13 +101,91 @@ struct amdxdna_sched_job {
 	struct dma_fence	*fence;
 	/* user can wait on this fence */
 	struct dma_fence	*out_fence;
-	int			cu_idx;
-	struct amdxdna_cmd	*cmd;
-	struct amdxdna_gem_obj	*cmd_abo;
 	u64			seq;
+	struct amdxdna_gem_obj	**cmd_bo;
+	u32			cmd_bo_cnt;
 	size_t			bo_cnt;
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
+
+static inline u32
+amdxdna_cmd_get_op(struct amdxdna_sched_job *job, int idx)
+{
+	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+
+	return cmd->opcode;
+}
+
+static inline void
+amdxdna_cmd_set_state(struct amdxdna_sched_job *job, int idx, enum ert_cmd_state s)
+{
+	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+
+	cmd->state = s;
+}
+
+static inline enum ert_cmd_state
+amdxdna_cmd_get_state(struct amdxdna_sched_job *job, int idx)
+{
+	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+
+	return cmd->state;
+}
+
+static inline void
+amdxdna_cmd_set_state_in_range(struct amdxdna_sched_job *job, u32 start, u32 end,
+			       enum ert_cmd_state s)
+{
+	int i;
+
+	for (i = start; i < end; i++)
+		amdxdna_cmd_set_state(job, i, s);
+}
+
+static inline void
+amdxdna_cmd_init_all_state(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_cmd *cmd;
+	int i;
+
+	for (i = 0; i < job->cmd_bo_cnt; i++) {
+		cmd = job->cmd_bo[i]->mem.kva;
+		amdxdna_cmd_set_state(job, i, ERT_CMD_STATE_NEW);
+	}
+}
+
+static inline void *
+amdxdna_cmd_get_payload(struct amdxdna_sched_job *job, int idx, u32 *size)
+{
+	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+	int num_masks = 1 + cmd->extra_cu_masks;
+
+	if (size) {
+		if (unlikely(cmd->count <= num_masks))
+			return NULL;
+		*size = (cmd->count - num_masks) * sizeof(u32);
+	}
+	return &cmd->data[num_masks];
+}
+
+static inline u32
+amdxdna_cmd_get_cu_idx(struct amdxdna_sched_job *job, int idx)
+{
+	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+	u32 *cu_mask;
+	u32 cu_idx;
+	int i;
+
+	cu_mask = cmd->data;
+	for (i = 0; i < 1 + cmd->extra_cu_masks; i++) {
+		cu_idx = ffs(cu_mask[i]) - 1;
+
+		if (cu_idx >= 0)
+			break;
+	}
+
+	return cu_idx;
+}
 
 static inline u32 amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx)
 {

@@ -17,6 +17,8 @@ enum aie2_msg_opcode {
 	MSG_OP_QUERY_AIE_VERSION           = 0xF,
 	MSG_OP_EXEC_DPU                    = 0x10,
 	MSG_OP_CONFIG_CU                   = 0x11,
+	MSG_OP_CHAIN_EXEC_BUFFER_CF        = 0x12,
+	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
 #ifdef AMDXDNA_DEVEL
 	MSG_OP_REGISTER_PDI                = 0x1,
 	MSG_OP_UNREGISTER_PDI              = 0xA,
@@ -337,6 +339,28 @@ struct async_event_msg_req {
 struct async_event_msg_resp {
 	enum aie2_msg_status	status;
 	enum async_event_type	type;
+} __packed;
+
+#define MAX_CHAIN_CMDBUF_SIZE 0x1000
+#define cmd_chain_slot_has_space(offset, payload_size) \
+	(MAX_CHAIN_CMDBUF_SIZE - ((offset) + (payload_size)) > \
+	 offsetof(struct cmd_chain_slot_execbuf_cf, args[0]))
+struct cmd_chain_slot_execbuf_cf {
+	u32 cu_idx;
+	u32 arg_cnt;
+	u32 args[] __counted_by(arg_cnt);
+};
+
+struct cmd_chain_req {
+	u64 buf_addr;
+	u32 buf_size;
+	u32 count;
+} __packed;
+
+struct cmd_chain_resp {
+	enum aie2_msg_status	status;
+	u32			fail_cmd_idx;
+	enum aie2_msg_status	fail_cmd_status;
 } __packed;
 
 #ifdef AMDXDNA_DEVEL
