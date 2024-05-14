@@ -127,19 +127,7 @@ amdxdna_user_mem_fini(struct amdxdna_mem *mem)
 	memset(mem, 0, sizeof(*mem));
 }
 
-static void
-amdxdna_drm_init_bo(struct amdxdna_client *client, struct amdxdna_gem_obj *abo,
-		    enum amdxdna_bo_type type)
-{
-	abo->client = client;
-	abo->pinned = false;
-	abo->type = type;
-	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
-	abo->mmap_offset = AMDXDNA_INVALID_ADDR;
-	mutex_init(&abo->lock);
-
-	amdxdna_user_mem_init(&abo->mem, AMDXDNA_INVALID_ADDR, 0);
-}
+static void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo);
 
 static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 {
@@ -179,8 +167,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	}
 
 	drm_gem_object_release(gobj);
-	mutex_destroy(&abo->lock);
-	kfree(abo);
+	amdxdna_gem_destroy_obj(abo);
 }
 
 static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp)
@@ -213,19 +200,50 @@ static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 	.vm_ops = &drm_gem_shmem_vm_ops,
 };
 
+static struct amdxdna_gem_obj *
+amdxdna_gem_create_obj(struct drm_device *dev, size_t size,
+		       enum amdxdna_bo_type type)
+{
+	struct amdxdna_gem_obj *abo;
+
+	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
+	if (!abo)
+		return ERR_PTR(-ENOMEM);
+
+	/* The default funcs, caller should change if needed */
+	to_gobj(abo)->funcs = &amdxdna_gem_obj_funcs;
+
+	abo->pinned = false;
+	abo->type = type;
+	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+	abo->mmap_offset = AMDXDNA_INVALID_ADDR;
+	mutex_init(&abo->lock);
+
+	abo->mem.userptr = AMDXDNA_INVALID_ADDR;
+	abo->mem.dev_addr = AMDXDNA_INVALID_ADDR;
+
+	return abo;
+}
+
+static void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
+{
+	mutex_destroy(&abo->lock);
+	kfree(abo);
+}
+
+/* For drm_driver->gem_create_object callback */
 struct drm_gem_object *
-amdxdna_gem_create_object(struct drm_device *dev, size_t size)
+amdxdna_gem_create_object_cb(struct drm_device *dev, size_t size)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_gem_obj *abo;
 
 	XDNA_DBG(xdna, "size 0x%lx", size);
-	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
-	if (!abo)
-		return ERR_PTR(-ENOMEM);
+	abo = amdxdna_gem_create_obj(dev, size, AMDXDNA_BO_SHMEM);
+	if (IS_ERR(abo))
+		return ERR_CAST(abo);
 
 	to_gobj(abo)->funcs = &amdxdna_gem_shmem_funcs;
-
 	return to_gobj(abo);
 }
 
@@ -245,7 +263,7 @@ amdxdna_drm_alloc_shmem(struct drm_device *dev,
 	shmem->map_wc = false;
 
 	abo = to_xdna_obj(&shmem->base);
-	amdxdna_drm_init_bo(client, abo, AMDXDNA_BO_SHMEM);
+	abo->client = client;
 	abo->mmap_offset = drm_vma_node_offset_addr(&shmem->base.vma_node);
 
 	return abo;
@@ -280,15 +298,13 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 		goto mm_unlock;
 	}
 
-	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
-	if (!abo) {
-		ret = -ENOMEM;
+	abo = amdxdna_gem_create_obj(&xdna->ddev, args->size, AMDXDNA_BO_DEV_HEAP);
+	if (IS_ERR(abo)) {
+		ret = PTR_ERR(abo);
 		goto mm_unlock;
 	}
 
 	drm_gem_private_object_init(&xdna->ddev, to_gobj(abo), PAGE_ALIGN(args->size));
-	to_gobj(abo)->funcs = &amdxdna_gem_obj_funcs;
-	amdxdna_drm_init_bo(client, abo, AMDXDNA_BO_DEV_HEAP);
 
 	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, to_gobj(abo)->size);
 	if (ret) {
@@ -296,6 +312,7 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 		goto release_obj;
 	}
 
+	abo->client = client;
 	abo->mem.dev_addr = client->xdna->dev_info->dev_mem_base;
 	drm_mm_init(&abo->mm, abo->mem.dev_addr, abo->mem.size);
 
@@ -308,7 +325,7 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 
 release_obj:
 	drm_gem_object_release(to_gobj(abo));
-	kfree(abo);
+	amdxdna_gem_destroy_obj(abo);
 mm_unlock:
 	mutex_unlock(&client->mm_lock);
 	return ERR_PTR(ret);
@@ -332,7 +349,6 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 		goto mm_unlock;
 	}
 
-	drm_gem_object_get(to_gobj(heap));
 	if (args->size > heap->mem.size) {
 		XDNA_DBG(xdna, "Invalid dev bo size 0x%llx, limit 0x%lx",
 			 args->size, heap->mem.size);
@@ -340,16 +356,13 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 		goto mm_unlock;
 	}
 
-	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
-	if (!abo) {
-		ret = -ENOMEM;
+	abo = amdxdna_gem_create_obj(&xdna->ddev, aligned_sz, AMDXDNA_BO_DEV);
+	if (IS_ERR(abo)) {
+		ret = PTR_ERR(abo);
 		goto mm_unlock;
 	}
 
 	drm_gem_private_object_init(&xdna->ddev, to_gobj(abo), aligned_sz);
-	to_gobj(abo)->funcs = &amdxdna_gem_obj_funcs;
-	amdxdna_drm_init_bo(client, abo, AMDXDNA_BO_DEV);
-	abo->dev_heap = heap;
 
 	ret = amdxdna_gem_insert_node_locked(heap, aligned_sz, use_vmap,
 					     &abo->mm_node, &abo->mem);
@@ -357,12 +370,16 @@ amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		goto free_bo;
 	}
+
+	abo->client = client;
+	abo->dev_heap = heap;
+	drm_gem_object_get(to_gobj(heap));
 	mutex_unlock(&client->mm_lock);
 	return abo;
 
 free_bo:
 	drm_gem_object_release(to_gobj(abo));
-	kfree(abo);
+	amdxdna_gem_destroy_obj(abo);
 mm_unlock:
 	mutex_unlock(&client->mm_lock);
 	return ERR_PTR(ret);
@@ -373,7 +390,6 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 			  struct amdxdna_drm_create_bo *args,
 			  struct drm_file *filp)
 {
-	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_gem_obj *abo;
 	int ret;
@@ -383,13 +399,11 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 		return ERR_PTR(-EINVAL);
 	}
 
-	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
-	if (!abo)
-		return ERR_PTR(-ENOMEM);
+	abo = amdxdna_gem_create_obj(&xdna->ddev, args->size, AMDXDNA_BO_CMD);
+	if (IS_ERR(abo))
+		return ERR_CAST(abo);
 
 	drm_gem_private_object_init(&xdna->ddev, to_gobj(abo), PAGE_ALIGN(args->size));
-	to_gobj(abo)->funcs = &amdxdna_gem_obj_funcs;
-	amdxdna_drm_init_bo(client, abo, AMDXDNA_BO_CMD);
 
 	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, to_gobj(abo)->size);
 	if (ret) {
@@ -419,7 +433,7 @@ fini_user_mem:
 	amdxdna_user_mem_fini(&abo->mem);
 release_obj:
 	drm_gem_object_release(to_gobj(abo));
-	kfree(abo);
+	amdxdna_gem_destroy_obj(abo);
 	return ERR_PTR(ret);
 }
 
@@ -483,7 +497,6 @@ amdxdna_gem_import_sg_table(struct drm_device *dev,
 		return gobj;
 
 	abo = to_xdna_obj(gobj);
-	amdxdna_drm_init_bo(NULL, abo, AMDXDNA_BO_SHMEM);
 	abo->mmap_offset = drm_vma_node_offset_addr(&gobj->vma_node);
 
 	return gobj;

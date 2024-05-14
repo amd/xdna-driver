@@ -509,22 +509,25 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	priv = kzalloc(sizeof(*hwctx->priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
-
 	hwctx->priv = priv;
+
+	mutex_lock(&client->mm_lock);
 	heap = client->dev_heap;
 	if (!heap) {
 		XDNA_ERR(xdna, "The client dev heap object not exist");
+		mutex_unlock(&client->mm_lock);
 		ret = -EINVAL;
 		goto free_priv;
 	}
+	drm_gem_object_get(to_gobj(heap));
+	mutex_unlock(&client->mm_lock);
+	priv->heap = heap;
 
 	ret = amdxdna_gem_pin(heap);
 	if (ret) {
 		XDNA_ERR(xdna, "Dev heap pin failed, ret %d", ret);
-		goto free_priv;
+		goto put_heap;
 	}
-	priv->heap = heap;
-	drm_gem_object_get(to_gobj(heap));
 
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
 		struct amdxdna_gem_obj *abo;
@@ -601,6 +604,8 @@ free_cmd_bufs:
 		drm_gem_object_put(to_gobj(priv->cmd_buf[i]));
 	}
 	amdxdna_gem_unpin(heap);
+put_heap:
+	drm_gem_object_put(to_gobj(heap));
 free_priv:
 	kfree(priv);
 	return ret;

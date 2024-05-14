@@ -52,7 +52,7 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 }
 
 struct drm_gem_object *
-amdxdna_gem_create_object(struct drm_device *dev, size_t size);
+amdxdna_gem_create_object_cb(struct drm_device *dev, size_t size);
 struct drm_gem_object *
 amdxdna_gem_import_sg_table(struct drm_device *dev,
 			    struct dma_buf_attachment *attach,
