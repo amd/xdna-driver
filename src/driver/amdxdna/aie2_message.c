@@ -563,7 +563,7 @@ aie2_cmdlist_fill_slot_cf(void *cmd_buf,
 
 		/* Accurate buf size to hint firmware to do necessary copy */
 		*size += sizeof(*buf) + payload_len;
-		buf = (void *)&buf->args[buf->arg_cnt];
+		buf = (struct cmd_chain_slot_execbuf_cf *)((char *)cmd_buf + *size);
 	}
 
 	return 0;
@@ -574,6 +574,7 @@ aie2_cmdlist_fill_slot_dpu(void *cmd_buf, struct amdxdna_sched_job *job, u32 *si
 {
 	struct cmd_chain_slot_dpu *buf = cmd_buf;
 	struct amdxdna_cmd_start_dpu *sd;
+	u32 dpu_arg_size;
 	u32 payload_len;
 	void *payload;
 	int cu_idx;
@@ -584,24 +585,27 @@ aie2_cmdlist_fill_slot_dpu(void *cmd_buf, struct amdxdna_sched_job *job, u32 *si
 		payload = amdxdna_cmd_get_payload(job, i, &payload_len);
 		sd = payload;
 
+		dpu_arg_size = payload_len - sizeof(*sd);
+		if (payload_len < sizeof(*sd) || dpu_arg_size > MAX_DPU_ARGS_SIZE)
+			return -EINVAL;
+
 		cu_idx = amdxdna_cmd_get_cu_idx(job, i);
 		if (cu_idx < 0)
 			return -EINVAL;
 
-		if (!slot_dpu_has_space(*size, payload_len))
+		if (!slot_dpu_has_space(*size, dpu_arg_size))
 			return -ENOSPC;
 
 		buf->inst_buf_addr = sd->instruction_buffer;
 		buf->inst_size = sd->instruction_buffer_size;
 		buf->inst_prop_cnt = 0;
 		buf->cu_idx = cu_idx;
-		buf->arg_cnt = (payload_len - sizeof(*sd)) / sizeof(u32);
-		memcpy(buf->args, ((char *)payload + sizeof(*sd)),
-		       buf->arg_cnt * sizeof(u32));
+		buf->arg_cnt = dpu_arg_size / sizeof(u32);
+		memcpy(buf->args, ((char *)payload + sizeof(*sd)), dpu_arg_size);
 
 		/* Accurate buf size to hint firmware to do necessary copy */
-		*size += sizeof(*buf) + payload_len;
-		buf = (void *)&buf->args[buf->arg_cnt];
+		*size += sizeof(*buf) + dpu_arg_size;
+		buf = (struct cmd_chain_slot_dpu *)((char *)cmd_buf + *size);
 	}
 
 	return 0;

@@ -361,6 +361,7 @@ struct cmd_chain_slot_dpu {
 	u32 inst_prop_cnt;
 	u32 cu_idx;
 	u32 arg_cnt;
+#define MAX_DPU_ARGS_SIZE (34 * sizeof(u32))
 	u32 args[] __counted_by(arg_cnt);
 };
 
