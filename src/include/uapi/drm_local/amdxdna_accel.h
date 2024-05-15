@@ -8,13 +8,10 @@
 
 #include <drm/drm.h>
 #include <linux/const.h>
+#include <linux/stddef.h>
 
 #if defined(__cplusplus)
 extern "C" {
-#endif
-
-#ifndef __counted_by
-#define __counted_by(cnt)
 #endif
 
 #define AMDXDNA_DRIVER_MAJOR	1
