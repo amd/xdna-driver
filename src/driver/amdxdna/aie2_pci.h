@@ -278,6 +278,8 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		 void *handle, int (*notify_cb)(void *, const u32 *, size_t));
 int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		 void *handle, int (*notify_cb)(void *, const u32 *, size_t));
+int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+		 void *handle, int (*notify_cb)(void *, const u32 *, size_t));
 
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);

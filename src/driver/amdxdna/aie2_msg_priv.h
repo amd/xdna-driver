@@ -11,6 +11,7 @@
 enum aie2_msg_opcode {
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
+	MSG_OP_SYNC_BO			   = 0x7,
 	MSG_OP_EXECUTE_BUFFER_CF           = 0xC,
 	MSG_OP_QUERY_COL_STATUS            = 0xD,
 	MSG_OP_QUERY_AIE_TILE_INFO         = 0xE,
@@ -361,6 +362,21 @@ struct cmd_chain_resp {
 	enum aie2_msg_status	status;
 	u32			fail_cmd_idx;
 	enum aie2_msg_status	fail_cmd_status;
+} __packed;
+
+struct sync_bo_req {
+	u64 src_addr;
+	u64 dst_addr;
+	u32 size;
+#define SYNC_BO_DEV_MEM  0
+#define SYNC_BO_HOST_MEM 2
+	u32 src_type : 4;
+	u32 dst_type : 4;
+	u32 reserved : 24;
+} __packed;
+
+struct sync_bo_resp {
+	enum aie2_msg_status	status;
 } __packed;
 
 #ifdef AMDXDNA_DEVEL
