@@ -199,6 +199,14 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 
+int amdxdna_cmds_submit(struct amdxdna_client *client,
+			u32 *cmd_bo_hdls, u32 cmd_bo_cnt,
+			u32 *arg_bo_hdls, u32 arg_bo_cnt,
+			u32 hwctx_hdl, u64 *seq);
+
+int amdxdna_cmds_wait(struct amdxdna_client *client, u32 hwctx_hdl,
+		      u64 seq, u32 timeout);
+
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

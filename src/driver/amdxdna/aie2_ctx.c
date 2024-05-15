@@ -252,6 +252,29 @@ out:
 }
 
 static int
+aie2_sched_nocmd_resp_handler(void *handle, const u32 *data, size_t size)
+{
+	struct amdxdna_sched_job *job = handle;
+	u32 ret = 0;
+	u32 status;
+
+	if (unlikely(!data))
+		goto out;
+
+	if (unlikely(size != sizeof(u32))) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	status = *data;
+	XDNA_DBG(job->hwctx->client->xdna, "Resp status 0x%x", status);
+
+out:
+	aie2_sched_notify(job);
+	return ret;
+}
+
+static int
 aie2_sched_cmdlist_resp_handler(void *handle, const u32 *data, size_t size)
 {
 	struct amdxdna_sched_job *job = handle;
@@ -320,11 +343,18 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
 
+	if (unlikely(!job->cmd_bo_cnt)) {
+		ret = aie2_sync_bo(hwctx, job, job, aie2_sched_nocmd_resp_handler);
+		goto out;
+	}
+
 	amdxdna_cmd_init_all_state(job);
 	if (force_cmdlist || job->cmd_bo_cnt > 1)
 		ret = aie2_cmdlist(hwctx, job, job, aie2_sched_cmdlist_resp_handler);
 	else
 		ret = aie2_execbuf(hwctx, job, job, aie2_sched_resp_handler);
+
+out:
 	if (ret) {
 		dma_fence_put(job->fence);
 		amdxdna_job_put(job);
@@ -734,6 +764,7 @@ static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 
 	// Debug BO has to be AMDXDNA_BO_DEV type
 	if (!abo) {
+		XDNA_ERR(xdna, "Get bo %d failed", bo_hdl);
 		ret = -EINVAL;
 		goto done;
 	}

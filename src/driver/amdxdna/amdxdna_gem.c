@@ -13,7 +13,6 @@
 #include "amdxdna_devel.h"
 #endif
 
-#define XDNA_32K_ALIGN		0x8000
 #define XDNA_MAX_CMD_BO_SIZE	0x8000
 
 static int amdxdna_pin_pages(struct amdxdna_mem *mem)
@@ -427,12 +426,18 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 		return ERR_PTR(-EINVAL);
 	}
 
+	if (args->size < sizeof(struct amdxdna_cmd)) {
+		XDNA_DBG(xdna, "Command BO size 0x%llx too small", args->size);
+		return ERR_PTR(-EINVAL);
+	}
+
 	abo = amdxdna_gem_create_obj(&xdna->ddev, args->size, AMDXDNA_BO_CMD);
 	if (IS_ERR(abo))
 		return ERR_CAST(abo);
 
 	drm_gem_private_object_init(&xdna->ddev, to_gobj(abo), PAGE_ALIGN(args->size));
 
+	abo->client = filp->driver_priv;
 	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, to_gobj(abo)->size);
 	if (ret) {
 		XDNA_ERR(xdna, "user mem init failed, ret %d", ret);
@@ -657,10 +662,12 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			      void *data, struct drm_file *filp)
 {
+	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_sync_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
+	u32 hwctx_hdl;
 	int ret;
 
 	gobj = drm_gem_object_lookup(filp, args->handle);
@@ -685,6 +692,27 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 
 	amdxdna_gem_unpin(abo);
 
+	if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE) {
+		u64 seq;
+
+		hwctx_hdl = amdxdna_gem_get_assigned_hwctx(client, args->handle);
+		if (hwctx_hdl == AMDXDNA_INVALID_CTX_HANDLE ||
+		    args->direction != SYNC_DIRECT_FROM_DEVICE) {
+			XDNA_ERR(xdna, "Sync failed, dir %d", args->direction);
+			ret = -EINVAL;
+			goto put_obj;
+		}
+
+		ret = amdxdna_cmds_submit(client, NULL, 0, &args->handle, 1,
+					  hwctx_hdl, &seq);
+		if (ret) {
+			XDNA_ERR(xdna, "Submit command failed");
+			goto put_obj;
+		}
+
+		ret = amdxdna_cmds_wait(client, hwctx_hdl, seq, 3000 /* ms */);
+	}
+
 	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx\n",
 		 args->handle, args->offset, args->size);
 
@@ -698,8 +726,10 @@ u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
 	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
 	u32 ctxid;
 
-	if (!abo)
+	if (!abo) {
+		XDNA_DBG(client->xdna, "Get bo %d failed", bo_hdl);
 		return AMDXDNA_INVALID_CTX_HANDLE;
+	}
 
 	mutex_lock(&abo->lock);
 	ctxid = abo->assigned_hwctx;
@@ -716,8 +746,10 @@ int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u3
 	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
 	int ret = 0;
 
-	if (!abo)
+	if (!abo) {
+		XDNA_DBG(client->xdna, "Get bo %d failed", bo_hdl);
 		return -EINVAL;
+	}
 
 	mutex_lock(&abo->lock);
 	if (!idr_find(&client->hwctx_idr, abo->assigned_hwctx))
@@ -734,8 +766,10 @@ void amdxdna_gem_clear_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
 {
 	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
 
-	if (!abo)
+	if (!abo) {
+		XDNA_DBG(client->xdna, "Get bo %d failed", bo_hdl);
 		return;
+	}
 
 	mutex_lock(&abo->lock);
 	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;

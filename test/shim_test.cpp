@@ -637,6 +637,12 @@ TEST_create_free_debug_bo(device::id_type id, device* dev, arg_type& arg)
   {
     hw_ctx hwctx{dev};
     auto bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+
+    auto dbg_p = static_cast<uint32_t *>(bo->map(xrt_core::buffer_handle::map_type::read));
+    std::memset(dbg_p, 0xff, size);
+    bo.get()->sync(buffer_handle::direction::device2host, size, 0);
+    if (std::memcmp(dbg_p, std::string(size, '\0').c_str(), size) != 0)
+      throw std::runtime_error("Debug buffer is not zero");
   }
 
   // Create ctx -> create bo -> destroy ctx -> destroy bo
@@ -644,6 +650,11 @@ TEST_create_free_debug_bo(device::id_type id, device* dev, arg_type& arg)
   {
     hw_ctx hwctx{dev};
     bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  }
+  try {
+    bo.get()->sync(buffer_handle::direction::device2host, size, 0);
+  } catch (const std::system_error& e) {
+    std::cout << e.what() << std::endl;
   }
 }
 

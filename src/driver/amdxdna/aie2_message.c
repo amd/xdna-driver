@@ -611,6 +611,42 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	return 0;
 }
 
+int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+		 void *handle, int (*notify_cb)(void *, const u32 *, size_t))
+{
+	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct amdxdna_gem_obj *abo = to_xdna_obj(job->bos[0]);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct xdna_mailbox_msg msg;
+	struct sync_bo_req req;
+	int ret = 0;
+
+	req.src_addr = 0;
+	req.dst_addr = abo->mem.dev_addr - hwctx->client->dev_heap->mem.dev_addr;
+	req.size = abo->mem.size;
+
+	/* Device to Host */
+	req.src_type = SYNC_BO_DEV_MEM;
+	req.dst_type = SYNC_BO_HOST_MEM;
+
+	XDNA_DBG(xdna, "sync %d bytes src(0x%llx) to dst(0x%llx) completed",
+		 req.size, req.src_addr, req.dst_addr);
+
+	msg.handle = handle;
+	msg.notify_cb = notify_cb;
+	msg.send_data = (u8 *)&req;
+	msg.send_size = sizeof(req);
+	msg.opcode = MSG_OP_SYNC_BO;
+
+	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	if (ret) {
+		XDNA_ERR(xdna, "Send message failed");
+		return ret;
+	}
+
+	return 0;
+}
+
 #ifdef AMDXDNA_DEVEL
 int aie2_register_pdis(struct amdxdna_hwctx *hwctx)
 {
