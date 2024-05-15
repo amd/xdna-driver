@@ -437,7 +437,7 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 
 	drm_gem_private_object_init(&xdna->ddev, to_gobj(abo), PAGE_ALIGN(args->size));
 
-	abo->client = client;
+	abo->client = filp->driver_priv;
 	ret = amdxdna_user_mem_init(&abo->mem, args->vaddr, to_gobj(abo)->size);
 	if (ret) {
 		XDNA_ERR(xdna, "user mem init failed, ret %d", ret);
