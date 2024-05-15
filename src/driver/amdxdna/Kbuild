@@ -20,6 +20,7 @@ amdxdna-y := \
 	amdxdna_gem.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \
+	amdxdna_mailbox_helper.o \
 	aie2_solver.o \
 	aie2_smu.o \
 	aie2_psp.o \
