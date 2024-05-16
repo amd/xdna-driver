@@ -534,62 +534,118 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	return 0;
 }
 
+static inline int
+aie2_cmdlist_fill_slot_cf(void *cmd_buf,
+			  struct amdxdna_sched_job *job, u32 *size)
+{
+	struct cmd_chain_slot_execbuf_cf *buf = cmd_buf;
+	u32 payload_len;
+	void *payload;
+	int cu_idx;
+	int i;
+
+	*size = 0;
+	for (i = 0; i < job->cmd_bo_cnt; i++) {
+		payload = amdxdna_cmd_get_payload(job, i, &payload_len);
+		if (!payload)
+			return -EINVAL;
+
+		cu_idx = amdxdna_cmd_get_cu_idx(job, i);
+		if (cu_idx < 0)
+			return -EINVAL;
+
+		if (!slot_cf_has_space(*size, payload_len))
+			return -ENOSPC;
+
+		buf->cu_idx = cu_idx;
+		buf->arg_cnt = payload_len / sizeof(u32);
+		memcpy(buf->args, payload, payload_len);
+
+		/* Accurate buf size to hint firmware to do necessary copy */
+		*size += sizeof(*buf) + payload_len;
+		buf = (struct cmd_chain_slot_execbuf_cf *)((char *)cmd_buf + *size);
+	}
+
+	return 0;
+}
+
+static inline int
+aie2_cmdlist_fill_slot_dpu(void *cmd_buf, struct amdxdna_sched_job *job, u32 *size)
+{
+	struct cmd_chain_slot_dpu *buf = cmd_buf;
+	struct amdxdna_cmd_start_dpu *sd;
+	u32 dpu_arg_size;
+	u32 payload_len;
+	void *payload;
+	int cu_idx;
+	int i;
+
+	*size = 0;
+	for (i = 0; i < job->cmd_bo_cnt; i++) {
+		payload = amdxdna_cmd_get_payload(job, i, &payload_len);
+		sd = payload;
+
+		dpu_arg_size = payload_len - sizeof(*sd);
+		if (payload_len < sizeof(*sd) || dpu_arg_size > MAX_DPU_ARGS_SIZE)
+			return -EINVAL;
+
+		cu_idx = amdxdna_cmd_get_cu_idx(job, i);
+		if (cu_idx < 0)
+			return -EINVAL;
+
+		if (!slot_dpu_has_space(*size, dpu_arg_size))
+			return -ENOSPC;
+
+		buf->inst_buf_addr = sd->instruction_buffer;
+		buf->inst_size = sd->instruction_buffer_size;
+		buf->inst_prop_cnt = 0;
+		buf->cu_idx = cu_idx;
+		buf->arg_cnt = dpu_arg_size / sizeof(u32);
+		memcpy(buf->args, ((char *)payload + sizeof(*sd)), dpu_arg_size);
+
+		/* Accurate buf size to hint firmware to do necessary copy */
+		*size += sizeof(*buf) + dpu_arg_size;
+		buf = (struct cmd_chain_slot_dpu *)((char *)cmd_buf + *size);
+	}
+
+	return 0;
+}
+
 int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		 void *handle, int (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct cmd_chain_slot_execbuf_cf *buf;
 	struct xdna_mailbox_msg msg;
 	struct amdxdna_gem_obj *abo;
 	struct cmd_chain_req req;
-	int i, idx, cu_idx, ret;
-	u32 payload_len;
-	void *payload;
+	int idx, ret;
 	u32 op;
 
 	if (!chann)
 		return -ENODEV;
-
-	op = amdxdna_cmd_get_op(job, 0);
-	if (op != ERT_START_CU) {
-		XDNA_ERR(xdna, "Invalid ERT cmd op code: %d", op);
-		return -EOPNOTSUPP;
-	}
-
-	cu_idx = amdxdna_cmd_get_cu_idx(job, 0);
-	if (cu_idx < 0) {
-		XDNA_DBG(xdna, "Invalid cu idx");
-		return -EINVAL;
-	}
 
 	idx = get_job_idx(job->seq);
 	abo = hwctx->priv->cmd_buf[idx];
 	req.buf_addr = abo->mem.dev_addr;
 	req.count = job->cmd_bo_cnt;
 
-	req.buf_size = 0;
-	buf = abo->mem.kva;
-	for (i = 0; i < job->cmd_bo_cnt; i++) {
-		payload = amdxdna_cmd_get_payload(job, i, &payload_len);
-		if (!payload) {
-			XDNA_ERR(xdna, "Invalid command, cannot get payload");
-			return -EINVAL;
-		}
-
-		if (!cmd_chain_slot_has_space(req.buf_size, payload_len)) {
-			XDNA_ERR(xdna, "No space at offset 0x%x, size 0x%x",
-				 req.buf_size, payload_len);
-			return -ENOSPC;
-		}
-		buf->cu_idx = cu_idx;
-		buf->arg_cnt = payload_len / sizeof(u32);
-		memcpy(buf->args, payload, payload_len);
-
-		/* Accurate buf size to hint firmware to do necessary copy */
-		req.buf_size += sizeof(*buf) + payload_len;
-		buf = (void *)&buf->args[buf->arg_cnt];
+	op = amdxdna_cmd_get_op(job, 0);
+	switch (op) {
+	case ERT_START_CU:
+		ret = aie2_cmdlist_fill_slot_cf(abo->mem.kva, job, &req.buf_size);
+		break;
+	case ERT_START_DPU:
+		ret = aie2_cmdlist_fill_slot_dpu(abo->mem.kva, job, &req.buf_size);
+		break;
+	default:
+		ret = -EOPNOTSUPP;
 	}
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to handle cmd op %d ret %d", op, ret);
+		return ret;
+	}
+
 	XDNA_DBG(xdna, "Command buf addr 0x%llx size 0x%x count %d",
 		 req.buf_addr, req.buf_size, req.count);
 
