@@ -88,7 +88,9 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	mutex_unlock(&xdna->dev_lock);
 	synchronize_srcu(ss);
+	mutex_lock(&xdna->dev_lock);
 
 	/* At this point, user is not able to submit new commands */
 	xdna->dev_info->ops->hwctx_fini(hwctx);
