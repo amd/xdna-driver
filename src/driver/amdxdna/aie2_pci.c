@@ -681,12 +681,13 @@ static int aie2_get_hwctx_status(struct amdxdna_dev *xdna,
 	int next;
 	int idx;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
 	tmp = kzalloc(sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
 
 	buf = u64_to_user_ptr(args->buffer);
-	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&client->hwctx_srcu);
 		next = 0;
@@ -712,14 +713,12 @@ static int aie2_get_hwctx_status(struct amdxdna_dev *xdna,
 			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;
 				srcu_read_unlock(&client->hwctx_srcu, idx);
-				mutex_unlock(&xdna->dev_lock);
 				goto out;
 			}
 			hw_i++;
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
-	mutex_unlock(&xdna->dev_lock);
 
 	if (overflow) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %u.",
@@ -763,6 +762,7 @@ static int aie2_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
+	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	drm_dev_exit(idx);
 	return ret;
