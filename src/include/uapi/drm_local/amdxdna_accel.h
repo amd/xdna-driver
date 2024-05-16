@@ -8,6 +8,7 @@
 
 #include <drm/drm.h>
 #include <linux/const.h>
+#include <linux/stddef.h>
 
 #if defined(__cplusplus)
 extern "C" {
