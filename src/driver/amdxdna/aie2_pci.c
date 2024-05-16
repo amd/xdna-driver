@@ -470,7 +470,6 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	xrs_cfg.clk_list.cu_clk_list[1] = 800;
 	xrs_cfg.clk_list.cu_clk_list[2] = 1000;
 	xrs_cfg.sys_eff_factor = 1;
-	xrs_cfg.mode = XRS_MODE_TEMPORAL_BEST;
 	xrs_cfg.dev = xdna->ddev.dev;
 	xrs_cfg.actions = &aie2_xrs_actions;
 	xrs_cfg.total_col = ndev->total_col;
