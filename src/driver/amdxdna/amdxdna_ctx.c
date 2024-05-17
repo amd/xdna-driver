@@ -87,13 +87,12 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_unlock(&xdna->dev_lock);
 	synchronize_srcu(ss);
-	mutex_lock(&xdna->dev_lock);
 
 	/* At this point, user is not able to submit new commands */
+	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->hwctx_fini(hwctx);
+	mutex_unlock(&xdna->dev_lock);
 
 	kfree(hwctx->name);
 	kfree(hwctx);
@@ -106,11 +105,8 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
  */
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 {
-	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
 	int next = 0;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
@@ -233,9 +229,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	idr_remove(&client->hwctx_idr, hwctx->id);
 	mutex_unlock(&client->hwctx_lock);
 
-	mutex_lock(&xdna->dev_lock);
 	amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
-	mutex_unlock(&xdna->dev_lock);
 
 out:
 	drm_dev_exit(idx);
