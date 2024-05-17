@@ -93,7 +93,7 @@ skip_sva_bind:
 	filp->driver_priv = client;
 	client->filp = filp;
 
-	XDNA_DBG(xdna, "pid %d opened", client->pid);
+	XDNA_DBG(xdna, "PID %d opened", client->pid);
 	return 0;
 
 unbind_sva:
@@ -109,7 +109,7 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
 
-	XDNA_DBG(xdna, "closing pid %d", client->pid);
+	XDNA_DBG(xdna, "Closing PID %d", client->pid);
 
 	idr_destroy(&client->hwctx_idr);
 	cleanup_srcu_struct(&client->hwctx_srcu);
@@ -127,7 +127,7 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 skip_sva_unbind:
 #endif
 
-	XDNA_DBG(xdna, "pid %d closed", client->pid);
+	XDNA_DBG(xdna, "PID %d closed", client->pid);
 	kfree(client);
 }
 
@@ -136,13 +136,18 @@ static int amdxdna_flush(struct file *f, fl_owner_t id)
 	struct drm_file *filp = f->private_data;
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = client->xdna;
+	int idx;
 
-	XDNA_DBG(xdna, "pid %d flushing...", client->pid);
+	XDNA_DBG(xdna, "PID %d flushing...", client->pid);
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return 0;
+
 	mutex_lock(&xdna->dev_lock);
 	list_del_init(&client->node);
-	amdxdna_hwctx_remove_all(client);
 	mutex_unlock(&xdna->dev_lock);
+	amdxdna_hwctx_remove_all(client);
 
+	drm_dev_exit(idx);
 	return 0;
 }
 
@@ -316,15 +321,27 @@ failed_dev_fini:
 static void amdxdna_remove(struct pci_dev *pdev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
-	struct amdxdna_client *client, *tmp;
+	struct amdxdna_client *client;
 
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
 
 	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry_safe(client, tmp, &xdna->client_list, node)
+	client = list_first_entry_or_null(&xdna->client_list,
+					  struct amdxdna_client, node);
+	while (client) {
+		list_del_init(&client->node);
+		mutex_unlock(&xdna->dev_lock);
+
 		amdxdna_hwctx_remove_all(client);
 
+		mutex_lock(&xdna->dev_lock);
+		client = list_first_entry_or_null(&xdna->client_list,
+						  struct amdxdna_client, node);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
 #ifdef AMDXDNA_DEVEL
