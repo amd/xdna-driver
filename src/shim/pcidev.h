@@ -20,30 +20,6 @@ public:
   pdev(std::shared_ptr<const drv> driver, std::string sysfs_name);
   ~pdev();
 
-  int
-  pcieBarRead(uint64_t offset, void *buf, uint64_t len) const override
-  { shim_not_supported_err(__func__); }
-
-  int
-  pcieBarWrite(uint64_t offset, const void *buf, uint64_t len) const override
-  { shim_not_supported_err(__func__); }
-
-  int
-  poll(int devhdl, short events, int timeoutMilliSec) override
-  { shim_not_supported_err(__func__); }
-
-  int
-  flock(int devhdl, int op) override
-  { shim_not_supported_err(__func__); }
-
-  int
-  get_partinfo(std::vector<std::string>& info, void *blob = nullptr) override
-  { shim_not_supported_err(__func__); }
-
-  std::shared_ptr<xrt_core::pci::dev>
-  lookup_peer_dev() override
-  { shim_not_supported_err(__func__); }
-
   xrt_core::device::handle_type
   create_shim(xrt_core::device::id_type id) const override;
  
@@ -61,15 +37,16 @@ public:
   void
   munmap(void* addr, size_t len) const;
 
-private:
-  virtual void
+  void
   open() const;
 
-  mutable int m_dev_fd = -1;
-  mutable std::mutex m_lock;
+  void
+  close() const;
 
-  int
-  get_dev_fd() const;
+private:
+  mutable int m_dev_fd = -1;
+  mutable int m_dev_users = 0;
+  mutable std::mutex m_lock;
 };
 
 } // namespace shim_xdna
