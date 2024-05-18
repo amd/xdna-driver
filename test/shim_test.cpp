@@ -25,7 +25,6 @@
 #include <chrono>
 #include <regex>
 #include <sys/wait.h>
-#include <sys/select.h>
 
 namespace {
 
