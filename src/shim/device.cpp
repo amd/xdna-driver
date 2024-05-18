@@ -825,7 +825,6 @@ import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
      "Importing buffer object from different process requires XRT "
      " built and installed on a system with 'pidfd' kernel support");
 #endif
-
 }
 
 } // namespace shim_xdna

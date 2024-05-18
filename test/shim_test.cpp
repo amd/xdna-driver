@@ -673,75 +673,178 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& a
     get_and_show_bo_properties(dev.get(), bo->get());
 }
 
-// Create pipe and fork, returns the fd (writable for parent, readable for child)
-int
-fork_with_pipe(bool *is_parent, int *fd)
-{
-  int pipefd[2];
+class test_2proc {
+public:
+  test_2proc(device::id_type id) : m_id(id)
+  {
+    int p_pipefd[2] = {-1, -1};
+    int c_pipefd[2] = {-1, -1};
 
-  if (pipe(pipefd) == -1)
-    return errno;
+    if (pipe(p_pipefd) < 0 || pipe(c_pipefd) < 0) {
+      std::cout << "Can't create pipes" << std::endl;
+      // Just quit on these fundamental issues and let OS clean it up.
+      _exit(EXIT_FAILURE);
+    }
+    auto pid = fork();
+    if (pid == -1) {
+      std::cout << "Can't fork" << std::endl;
+      // Just quit on these fundamental issues and let OS clean it up.
+      _exit(EXIT_FAILURE);
+    }
+    // We want to handle pipe comm issue ourselves.
+    signal(SIGPIPE, SIG_IGN);
 
-  pid_t pid = fork();
-  if (pid == -1)
-    return errno;
+    m_is_parent = !!pid;
 
-  if (pid) {
-    std::cout << "Parent process started" << std::endl;
-    close(pipefd[1]);
-    *is_parent = true;
-    *fd = pipefd[0];
-  } else {
-    std::cout << "Child process started" << std::endl;
-    close(pipefd[0]);
-    *is_parent = false;
-    *fd = pipefd[1];
+    if (m_is_parent) {
+      m_read_fd = p_pipefd[0];
+      close(p_pipefd[1]);
+      m_write_fd = c_pipefd[1];
+      close(c_pipefd[0]);
+    } else {
+      m_read_fd = c_pipefd[0];
+      close(c_pipefd[1]);
+      m_write_fd = p_pipefd[1];
+      close(p_pipefd[0]);
+    }
+
+    std::cout << (m_is_parent ? "Parent" : "Child") << " started: " << getpid() << std::endl;
   }
-  return 0;
-}
 
-int
-join_after_fork(bool is_parent, int ret)
-{
-  if (is_parent) {
+  ~test_2proc()
+  {
+    close(m_read_fd);
+    close(m_write_fd);
+    if (m_is_parent)
+      wait(nullptr);
+    else
+      _exit(m_child_failed ? EXIT_FAILURE : EXIT_SUCCESS);
+  }
+
+  void
+  run_test()
+  {
+    if (m_is_parent) {
+      run_test_parent();
+      wait_for_child();
+    } else {
+      try {
+        run_test_child();
+      } catch (const std::exception& ex) {
+        std::cout << "Child failed: " << ex.what() << std::endl;
+        m_child_failed = true;
+        return;
+      }
+      m_child_failed = false;
+    }
+  }
+
+protected:
+  void
+  send_ipc_data(const void *buf, size_t size)
+  {
+    if (write(m_write_fd, buf, size) != size) {
+      if (!m_is_parent)
+        throw std::runtime_error("Failed to send IPC data to parent");
+      else
+        std::cout << "Failed to send IPC data to child" << std::endl;
+    }
+  }
+
+  void
+  recv_ipc_data(void *buf, size_t size)
+  {
+    if (read(m_read_fd, buf, size) != size) {
+      if (!m_is_parent)
+        throw std::runtime_error("Failed to read IPC data from parent");
+      else
+        std::cout << "Failed to read IPC data from child" << std::endl;
+    }
+  }
+
+  device::id_type
+  get_dev_id()
+  {
+    return m_id;
+  }
+
+private:
+  virtual void
+  run_test_parent() = 0;
+
+  virtual void
+  run_test_child() = 0;
+
+  void
+  wait_for_child()
+  {
     int status = 0;
-    std::cout << "Waiting for child to complete" << std::endl;
+
     wait(&status);
-    if (WIFEXITED(status))
-      return WEXITSTATUS(status);
-    return -EFAULT;
-  } else {
-    std::cout << "Child is quitting" << std::endl;
-    _exit(ret);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != EXIT_SUCCESS)
+      throw std::runtime_error("Child did not complete successfully");
   }
-  return 0;
-}
 
-int
-sync_ipc_data(bool is_parent, int fd, void *data, size_t size)
+  bool m_is_parent = false;
+  bool m_child_failed = true;
+  int m_read_fd = -1;
+  int m_write_fd = -1;
+  device::id_type m_id;
+};
+
+class test_2proc_export_import_bo : public test_2proc
 {
-  size_t sz = 0;
+public:
+  test_2proc_export_import_bo(device::id_type id) : test_2proc(id)
+  {}
 
-  if (!is_parent) {
-    sz = write(fd, data, size);
-  } else {
-    struct timeval timeout;
-    fd_set fds;
+private:
+  struct ipc_data {
+    pid_t pid;
+    shared_handle::export_handle hdl;
+  };
 
-    FD_ZERO(&fds);
-    FD_SET(fd, &fds);
-    timeout.tv_sec = 5; // 5 second timeout for reading
-    timeout.tv_usec = 0;
-    int ret = select(fd+1, &fds, NULL, NULL, &timeout);
-    if (ret && ret != -1)
-      sz = read(fd, data, size);
+  const uint8_t m_buf_char = 0x55;
+
+  void
+  run_test_parent() override
+  {
+    std::cout << "Running parent test..." << std::endl;
+
+    ipc_data idata = {};
+    recv_ipc_data(&idata, sizeof(idata));
+    std::cout << "Received BO " << idata.hdl << " from PID " << idata.pid << std::endl;
+
+    bool success = true;
+    auto dev = get_userpf_device(get_dev_id());
+    bo imp_bo{dev, idata.pid, idata.hdl};
+    char *imp_p = reinterpret_cast<char *>(imp_bo.map());
+    for (int i = 0; i < imp_bo.size(); i++) {
+      if (imp_p[i] != m_buf_char) {
+        std::cout << "Imported BO content mis-match" << std::endl;
+        success = false;
+        break;
+      }
+    }
+    send_ipc_data(&success, sizeof(success));
   }
-  close(fd);
-  
-  if (sz != size)
-    return -EIO;
-  return 0;
-}
+
+  void
+  run_test_child() override
+  {
+    std::cout << "Running child test..." << std::endl;
+
+    auto dev = get_userpf_device(get_dev_id());
+    bo exp_bo{dev, 4096ul};
+    auto exp_p = exp_bo.map();
+    std::memset(exp_p, m_buf_char, exp_bo.size());
+    auto share = exp_bo.get()->share();
+    ipc_data idata = { getpid(), share->get_export_handle() };
+    send_ipc_data(&idata, sizeof(idata));
+    bool success;
+    recv_ipc_data(&success, sizeof(success));
+  }
+};
 
 void
 TEST_export_import_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
@@ -749,64 +852,8 @@ TEST_export_import_bo(device::id_type id, std::shared_ptr<device> dev, arg_type&
   // Can't fork with opened device.
   dev.reset();
 
-  // Do fork
-  bool is_parent;
-  int fd;
-  int ret = fork_with_pipe(&is_parent, &fd);
-  if (ret != 0) {
-    std::cout << "Fork failed: " << strerror(ret) << std::endl;
-    throw std::runtime_error("Failed to fork");
-  }
-
-  // Forked
-  struct {
-    pid_t pid;
-    shared_handle::export_handle hdl;
-  } ipc_data = { getpid(), 0 };
-
-  if (!is_parent) {
-    try {
-      auto dev = get_userpf_device(id);
-      bo exp_bo{dev, 4096ul};
-      auto exp_p = exp_bo.map();
-      std::memset(exp_p, 0x55, exp_bo.size());
-      auto share = exp_bo.get()->share();
-      ipc_data.hdl = share->get_export_handle();
-      sync_ipc_data(is_parent, fd, &ipc_data, sizeof(ipc_data));
-      sleep(10);
-    } catch (const std::exception& ex) {
-        ret = -EINVAL;
-        std::cout << "Child test failed: " << ex.what() << std::endl;
-    }
-#if 0
-    if (ret == 0 && sync_ipc_data(is_parent, fd, &ipc_data, sizeof(ipc_data)) != 0) {
-      ret = -EIO;
-      std::cout << "Failed to send IPC data to parent" << std::endl;
-    }
-#endif
-  } else {
-    ret = sync_ipc_data(is_parent, fd, &ipc_data, sizeof(ipc_data));
-    if (ret == 0) {
-      std::cout << "BO handle from " << ipc_data.pid << std::endl;
-      std::cout << "BO handle is " << ipc_data.hdl << std::endl;
-      auto dev = get_userpf_device(id);
-      bo imp_bo{dev, ipc_data.pid, ipc_data.hdl};
-      char *imp_p = reinterpret_cast<char *>(imp_bo.map());
-      for (int i = 0; i < imp_bo.size(); i++) {
-        if (imp_p[i] != 0x55) {
-          ret = -EINVAL;
-          std::cout << "Imported BO content mis-match" << std::endl;
-          break;
-        }
-      }
-    } else {
-      std::cout << "Failed to receive IPC data from child" << std::endl;
-    }
-  }
-
-  // Join again
-  if (join_after_fork(is_parent, ret) != 0 || ret != 0)
-    throw std::runtime_error("Test failed");
+  test_2proc_export_import_bo t2p(id);
+  t2p.run_test();
 }
 
 void
