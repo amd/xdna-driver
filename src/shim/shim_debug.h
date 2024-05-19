@@ -8,6 +8,7 @@
 #include "core/common/debug.h"
 #include <cstdio>
 #include <memory>
+#include <unistd.h>
 
 namespace {
 
@@ -38,9 +39,10 @@ void
 shim_debug(const char* fmt, Args&&... args)
 {
 #ifdef XDNA_SHIM_DEBUG
-  std::string format = std::string(fmt);
+  std::string format = "PID(%d): ";
+  format += std::string(fmt);
   format += "\n";
-  XRT_PRINTF(format.c_str(), std::forward<Args>(args)...);
+  XRT_PRINTF(format.c_str(), getpid(), std::forward<Args>(args)...);
 #endif
 }
 

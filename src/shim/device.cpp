@@ -9,6 +9,8 @@
 
 #include <any>
 #include <filesystem>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 namespace {
 
@@ -732,11 +734,13 @@ device(const pdev& pdev, handle_type shim_handle, id_type device_id)
   : noshim<xrt_core::device_pcie>{shim_handle, device_id, !pdev.m_is_mgmt}
   , m_pdev(pdev)
 {
+  m_pdev.open();
 }
 
 device::
 ~device()
 {
+  m_pdev.close();
 }
 
 
@@ -794,8 +798,33 @@ std::unique_ptr<xrt_core::buffer_handle>
 device::
 import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
-  // TODO: handle bo import from different PID
-  return import_bo(ehdl);
+  if (pid == 0 || getpid() == pid)
+    return import_bo(ehdl);
+
+#if defined(SYS_pidfd_open) && defined(SYS_pidfd_getfd)
+  auto pidfd = syscall(SYS_pidfd_open, pid, 0);
+  if (pidfd < 0)
+    throw xrt_core::system_error(errno, "pidfd_open failed");
+
+  auto bofd = syscall(SYS_pidfd_getfd, pidfd, ehdl, 0);
+  if (bofd < 0) {
+    if (errno == EPERM) {
+      throw xrt_core::system_error
+        (errno, "pidfd_getfd failed, check that ptrace access mode "
+        "allows PTRACE_MODE_ATTACH_REALCREDS.  For more details please "
+        "check /etc/sysctl.d/10-ptrace.conf");
+    } else {
+      throw xrt_core::system_error(errno, "pidfd_getfd failed");
+    }
+  }
+
+  return import_bo(bofd);
+#else
+  throw xrt_core::system_error
+    (std::errc::not_supported,
+     "Importing buffer object from different process requires XRT "
+     " built and installed on a system with 'pidfd' kernel support");
+#endif
 }
 
 } // namespace shim_xdna
