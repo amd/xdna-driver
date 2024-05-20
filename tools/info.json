@@ -34,7 +34,7 @@
 			"url": "",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "11",
-			"version": "0.2.9.45",
+			"version": "0.7.17.66",
 			"fw_name": "npu.sbin"
 		}
 	]
