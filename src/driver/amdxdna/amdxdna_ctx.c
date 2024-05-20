@@ -14,8 +14,8 @@
 #include "amdxdna_trace.h"
 
 #define MAX_HWCTX_ID		255
-#define MAX_CMD_BO_COUNT	25
-#define MAX_ARG_BO_COUNT	4095
+#define MAX_CMD_COUNT		24
+#define MAX_ARG_COUNT		4095
 
 struct amdxdna_fence {
 	struct dma_fence	base;
@@ -522,42 +522,42 @@ int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	if (args->ext_flags)
 		return -EINVAL;
 
-	if (!args->arg_bo_count || args->arg_bo_count > MAX_ARG_BO_COUNT) {
-		XDNA_ERR(xdna, "Invalid arg bo count %d", args->arg_bo_count);
+	if (!args->arg_count || args->arg_count > MAX_ARG_COUNT) {
+		XDNA_ERR(xdna, "Invalid arg bo count %d", args->arg_count);
 		return -EINVAL;
 	}
 
-	if (!args->cmd_bo_count || args->cmd_bo_count > MAX_CMD_BO_COUNT) {
-		XDNA_ERR(xdna, "Invalid cmd bo count %d", args->cmd_bo_count);
+	if (!args->cmd_count || args->cmd_count > MAX_CMD_COUNT) {
+		XDNA_ERR(xdna, "Invalid cmd bo count %d", args->cmd_count);
 		return -EINVAL;
 	}
 
-	cmd_bo_hdls = kcalloc(args->cmd_bo_count, sizeof(u32), GFP_KERNEL);
+	cmd_bo_hdls = kcalloc(args->cmd_count, sizeof(u32), GFP_KERNEL);
 	if (!cmd_bo_hdls)
 		return -ENOMEM;
 
-	arg_bo_hdls = kcalloc(args->arg_bo_count, sizeof(u32), GFP_KERNEL);
+	arg_bo_hdls = kcalloc(args->arg_count, sizeof(u32), GFP_KERNEL);
 	if (!arg_bo_hdls) {
 		ret = -ENOMEM;
 		goto free_cmd_bo_hdls;
 	}
 
-	ret = copy_from_user(cmd_bo_hdls, u64_to_user_ptr(args->cmd_bo_handles),
-			     args->cmd_bo_count * sizeof(u32));
+	ret = copy_from_user(cmd_bo_hdls, u64_to_user_ptr(args->cmd_handles),
+			     args->cmd_count * sizeof(u32));
 	if (ret) {
 		ret = -EFAULT;
 		goto free_arg_bo_hdls;
 	}
 
-	ret = copy_from_user(arg_bo_hdls, u64_to_user_ptr(args->arg_bo_handles),
-			     args->arg_bo_count * sizeof(u32));
+	ret = copy_from_user(arg_bo_hdls, u64_to_user_ptr(args->args),
+			     args->arg_count * sizeof(u32));
 	if (ret) {
 		ret = -EFAULT;
 		goto free_arg_bo_hdls;
 	}
 
-	ret = amdxdna_cmds_submit(client, cmd_bo_hdls, args->cmd_bo_count, arg_bo_hdls,
-				  args->arg_bo_count, args->hwctx, &args->seq);
+	ret = amdxdna_cmds_submit(client, cmd_bo_hdls, args->cmd_count, arg_bo_hdls,
+				  args->arg_count, args->hwctx, &args->seq);
 	if (ret)
 		XDNA_DBG(xdna, "Submit cmds failed, ret %d", ret);
 
