@@ -224,26 +224,33 @@ struct amdxdna_drm_sync_bo {
 	__u64 size;
 };
 
+enum amdxdna_cmd_type {
+	AMDXDNA_CMD_SUBMIT_EXEC_BUF = 0,
+	AMDXDNA_CMD_SUBMIT_DEPENDENCY,
+	AMDXDNA_CMD_SUBMIT_SIGNAL,
+};
+
 /**
  * struct amdxdna_drm_exec_cmd - Execute command.
  * @ext: MBZ.
  * @ext_flags: MBZ.
  * @hwctx: Hardware context handle.
- * @cmd_bo_handles: Array of command BO handles
- * @arg_bo_handles: Array of BO handles for all BOs referenced by these commands
- * @cmd_bo_count: Number of BO handles in the cmd_bo_handles array
- * @arg_bo_count: Number of BO handles in the arg_bo_handles array
+ * @type: One of command type in enum amdxdna_cmd_type.
+ * @cmd_handles: Array of command handles.
+ * @args: Array of arguments for all command handles.
+ * @cmd_count: Number of command handles in the cmd_handles array.
+ * @arg_count: Number of arguments in the args array.
  * @seq: Returned sequence number for this command.
  */
 struct amdxdna_drm_exec_cmd {
 	__u64 ext;
 	__u64 ext_flags;
 	__u32 hwctx;
-	__u32 _pad;
-	__u64 cmd_bo_handles;
-	__u64 arg_bo_handles;
-	__u32 cmd_bo_count;
-	__u32 arg_bo_count;
+	__u32 type;
+	__u64 cmd_handles;
+	__u64 args;
+	__u32 cmd_count;
+	__u32 arg_count;
 	__u64 seq;
 };
 
