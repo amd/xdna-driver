@@ -339,9 +339,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 		client = list_first_entry_or_null(&xdna->client_list,
 						  struct amdxdna_client, node);
 	}
-	mutex_unlock(&xdna->dev_lock);
 
-	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
 #ifdef AMDXDNA_DEVEL

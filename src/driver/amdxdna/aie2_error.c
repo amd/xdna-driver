@@ -12,7 +12,7 @@
 #define AIE_ERR_SENTINEL 0xFF
 
 struct async_event {
-	struct amdxdna_dev_hdl	*ndev;
+	struct amdxdna_dev_hdl		*ndev;
 	struct async_event_msg_resp	resp;
 	struct workqueue_struct		*wq;
 	struct work_struct		work;

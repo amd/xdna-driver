@@ -569,8 +569,10 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		};
 
 		abo = amdxdna_drm_alloc_dev_bo(&xdna->ddev, &args, client->filp, true);
-		if (!abo)
+		if (IS_ERR(abo)) {
+			ret = PTR_ERR(abo);
 			goto free_cmd_bufs;
+		}
 
 		XDNA_DBG(xdna, "Command buf %d addr 0x%llx size 0x%lx",
 			 i, abo->mem.dev_addr, abo->mem.size);
@@ -795,8 +797,8 @@ static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 
-	if ((hwctx->dbg_buf_bo != bo_hdl) ||
-	    (amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->id)) {
+	if (hwctx->dbg_buf_bo != bo_hdl ||
+	    amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->id) {
 		XDNA_ERR(xdna, "Debug BO %d isn't attached to %s", bo_hdl, hwctx->name);
 		return -EINVAL;
 	}

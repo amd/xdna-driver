@@ -261,8 +261,8 @@ static struct xrs_action_ops aie2_xrs_actions = {
 
 static void aie2_hw_stop(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
@@ -275,8 +275,8 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 
 static int aie2_hw_start(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct xdna_mailbox_res mbox_res;
 	u32 xdna_mailbox_intr_reg;
 	int mgmt_mb_irq, ret;
@@ -362,8 +362,8 @@ disable_dev:
 static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct amdxdna_dev_hdl *ndev;
 	struct init_config xrs_cfg = { 0 };
+	struct amdxdna_dev_hdl *ndev;
 	struct psp_config psp_conf;
 	const struct firmware *fw;
 	void __iomem * const *tbl;
@@ -519,8 +519,8 @@ release_fw:
 
 static void aie2_fini(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	aie2_hw_stop(xdna);
 	aie2_error_async_events_free(ndev);
