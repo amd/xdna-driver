@@ -43,10 +43,10 @@ submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
 
   amdxdna_drm_exec_cmd ecmd = {
     .hwctx = m_hwctx->get_slotidx(),
-    .cmd_bo_handles = reinterpret_cast<uintptr_t>(cmd_bo_hdls),
-    .arg_bo_handles = reinterpret_cast<uintptr_t>(arg_bo_hdls),
-    .cmd_bo_count = static_cast<uint32_t>(num_cmd_bos),
-    .arg_bo_count = static_cast<uint32_t>(arg_cnt),
+    .cmd_handles = reinterpret_cast<uintptr_t>(cmd_bo_hdls),
+    .args = reinterpret_cast<uintptr_t>(arg_bo_hdls),
+    .cmd_count = static_cast<uint32_t>(num_cmd_bos),
+    .arg_count = static_cast<uint32_t>(arg_cnt),
   };
 
   int ret = EAGAIN;
