@@ -218,7 +218,7 @@ void speed_test_base_line(size_t size)
 // All test case runners
 
 void
-TEST_get_xrt_info(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_get_xrt_info(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   boost::property_tree::ptree pt;
   const boost::property_tree::ptree empty_pt;
@@ -237,7 +237,7 @@ TEST_get_xrt_info(device::id_type id, std::shared_ptr<device> dev, arg_type& arg
 }
 
 void
-TEST_get_os_info(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_get_os_info(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   boost::property_tree::ptree pt;
   sysinfo::get_os_info(pt);
@@ -246,7 +246,7 @@ TEST_get_os_info(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 }
 
 void
-TEST_get_total_devices(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_get_total_devices(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto is_user = arg[0];
   std::string pf { is_user ? "userpf" : "mgmtpf" };
@@ -266,7 +266,7 @@ bdf_info2str(std::tuple<uint16_t, uint16_t, uint16_t, uint16_t>& info)
 }
 
 void
-TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto is_user = arg[0];
   auto devinfo = get_total_devices(is_user);
@@ -280,7 +280,7 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device> 
 }
 
 void
-TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto devinfo = get_total_devices(false);
   for (device::id_type i = 0; i < devinfo.first; i++)
@@ -289,9 +289,9 @@ TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device> dev, arg_type
 
 template <typename QueryRequestType>
 void
-TEST_query_userpf(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_query_userpf(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  auto query_result = device_query<QueryRequestType>(dev);
+  auto query_result = device_query<QueryRequestType>(sdev);
   std::cout << "dev[" << id << "]." << QueryRequestType::name() << ": "
     << QueryRequestType::to_string(query_result) << std::endl;
 }
@@ -447,24 +447,24 @@ std::string find_first_match_ip_name(device* dev, const std::string& pattern)
 
 class hw_ctx {
 public:
-  hw_ctx(std::shared_ptr<device> dev)
+  hw_ctx(device* dev)
   {
-    auto wrk = get_xclbin_workspace(dev.get());
+    auto wrk = get_xclbin_workspace(dev);
 
     if (!xclbinpath.empty())
-      hw_ctx_init(dev.get(), xclbinpath);
+      hw_ctx_init(dev, xclbinpath);
     else
-      hw_ctx_init(dev.get(), local_path(wrk + "/" + get_xclbin_name(dev.get())));
+      hw_ctx_init(dev, local_path(wrk + "/" + get_xclbin_name(dev)));
   }
 
-  hw_ctx(std::shared_ptr<device> dev, const char *xclbin_name)
+  hw_ctx(device* dev, const char *xclbin_name)
   {
-    auto wrk = get_xclbin_workspace(dev.get());
+    auto wrk = get_xclbin_workspace(dev);
 
     if (!xclbinpath.empty())
-      hw_ctx_init(dev.get(), xclbinpath);
+      hw_ctx_init(dev, xclbinpath);
     else
-      hw_ctx_init(dev.get(), local_path(wrk + "/" + std::string(xclbin_name)));
+      hw_ctx_init(dev, local_path(wrk + "/" + std::string(xclbin_name)));
   }
 
   ~hw_ctx()
@@ -516,25 +516,25 @@ get_bo_flags(uint32_t flags, uint32_t ext_flags)
 
 class bo {
 public:
-  bo(std::shared_ptr<device> dev, size_t size, uint32_t boflags, uint32_t ext_boflags)
-    : m_dev(dev.get())
+  bo(device* dev, size_t size, uint32_t boflags, uint32_t ext_boflags)
+    : m_dev(dev)
   {
     m_handle = m_dev->alloc_bo(nullptr, size, get_bo_flags(boflags, ext_boflags));
     map_and_chk();
   }
 
-  bo(std::shared_ptr<device> dev, size_t size, uint32_t xcl_boflags)
+  bo(device* dev, size_t size, uint32_t xcl_boflags)
     : bo(dev, size, xcl_boflags, 0)
   {
   }
 
-  bo(std::shared_ptr<device> dev, size_t size)
+  bo(device* dev, size_t size)
     : bo(dev, size, XCL_BO_FLAGS_HOST_ONLY, 0)
   {
   }
 
-  bo(std::shared_ptr<device> dev, pid_t pid, shared_handle::export_handle ehdl)
-    : m_dev(dev.get())
+  bo(device* dev, pid_t pid, shared_handle::export_handle ehdl)
+    : m_dev(dev)
   {
     m_handle = m_dev->import_bo(pid, ehdl);
     map_and_chk();
@@ -610,9 +610,9 @@ private:
 };
 
 void
-TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  hw_ctx hwctx{dev};
+  hw_ctx hwctx{sdev.get()};
 }
 
 void
@@ -626,8 +626,9 @@ get_and_show_bo_properties(device* dev, buffer_handle *boh)
 }
 
 void
-TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
+  auto dev = sdev.get();
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
   auto ext_boflags = XRT_BO_USE_DEBUG << 4;
   auto size = static_cast<size_t>(arg[0]);
@@ -658,8 +659,9 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> dev, arg_t
 }
 
 void
-TEST_create_free_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_create_free_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
+  auto dev = sdev.get();
   uint32_t boflags = static_cast<unsigned int>(arg[0]);
   uint32_t ext_boflags = static_cast<unsigned int>(arg[1]);
   arg_type bos_size(arg.begin() + 2, arg.end());
@@ -669,7 +671,7 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& a
     bos.push_back(std::make_unique<bo>(dev, static_cast<size_t>(size), boflags, ext_boflags));
 
   for (auto& bo : bos)
-    get_and_show_bo_properties(dev.get(), bo->get());
+    get_and_show_bo_properties(dev, bo->get());
 }
 
 class test_2proc {
@@ -816,7 +818,7 @@ private:
 
     bool success = true;
     auto dev = get_userpf_device(get_dev_id());
-    bo imp_bo{dev, idata.pid, idata.hdl};
+    bo imp_bo{dev.get(), idata.pid, idata.hdl};
     char *imp_p = reinterpret_cast<char *>(imp_bo.map());
     for (int i = 0; i < imp_bo.size(); i++) {
       if (imp_p[i] != m_buf_char) {
@@ -834,7 +836,7 @@ private:
     std::cout << "Running child test..." << std::endl;
 
     auto dev = get_userpf_device(get_dev_id());
-    bo exp_bo{dev, 4096ul};
+    bo exp_bo{dev.get(), 4096ul};
     auto exp_p = exp_bo.map();
     std::memset(exp_p, m_buf_char, exp_bo.size());
     auto share = exp_bo.get()->share();
@@ -846,22 +848,22 @@ private:
 };
 
 void
-TEST_export_import_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_export_import_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   // Can't fork with opened device.
-  dev.reset();
+  sdev.reset();
 
   test_2proc_export_import_bo t2p(id);
   t2p.run_test();
 }
 
 void
-TEST_sync_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_sync_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
   auto ext_boflags = static_cast<unsigned int>(arg[1]);
   auto size = static_cast<size_t>(arg[2]);
-  bo bo{dev, size, boflags, ext_boflags};
+  bo bo{sdev.get(), size, boflags, ext_boflags};
 
   auto start = Clock::now();
   bo.get()->sync(buffer_handle::direction::host2device, size / 2, 0);
@@ -872,12 +874,12 @@ TEST_sync_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 }
 
 void
-TEST_map_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_map_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
   auto ext_boflags = static_cast<unsigned int>(arg[1]);
   auto size = static_cast<size_t>(arg[2]);
-  bo bo{dev, size, boflags, ext_boflags};
+  bo bo{sdev.get(), size, boflags, ext_boflags};
 
   // Intentionally not unmap to test error handling in driver
   bo.set_no_unmap();
@@ -910,11 +912,12 @@ TEST_map_bo(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
 }
 
 void
-TEST_open_close_cu_context(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_open_close_cu_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
+  auto dev = sdev.get();
   hw_ctx hwctx{dev};
 
-  for (auto& ip : get_xclbin_ip_name2index(dev.get())) {
+  for (auto& ip : get_xclbin_ip_name2index(dev)) {
     auto idx = hwctx.get()->open_cu_context(ip.first);
     hwctx.get()->close_cu_context(idx);
     auto r = idx.index;
@@ -932,9 +935,9 @@ TEST_open_close_cu_context(device::id_type id, std::shared_ptr<device> dev, arg_
 }
 
 void
-TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  hw_ctx hwctx{dev};
+  hw_ctx hwctx{sdev.get()};
   // Test to create > 1 queues
   auto hwq = hwctx.get()->get_hw_queue();
   auto hwq2 = hwctx.get()->get_hw_queue();
@@ -1042,7 +1045,7 @@ io_test_bo_size_init(io_test_bo_set& io_test_bos, std::string& local_data_path)
 }
 
 void
-io_test_bo_alloc(io_test_bo_set& io_test_bos, std::shared_ptr<device> dev)
+io_test_bo_alloc(io_test_bo_set& io_test_bos, device* dev)
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     io_test_bo *ibo = &io_test_bos[i];
@@ -1226,9 +1229,9 @@ io_test_dump_bo_content(io_test_bo *io_test_bos)
 }
 
 void
-io_test_cmd_submit_wait(std::shared_ptr<device> dev, std::vector<bo*> cmd_bos)
+io_test_cmd_submit_wait(device* dev, std::vector<bo*> cmd_bos)
 {
-  auto ip_name = find_first_match_ip_name(dev.get(), "DPU.*");
+  auto ip_name = find_first_match_ip_name(dev, "DPU.*");
   if (ip_name.empty())
     throw std::runtime_error("Cannot find any kernel name matched DPU.*");
 
@@ -1284,11 +1287,11 @@ io_test_verify_result(io_test_bo_set& io_test_bos, std::string& local_data_path)
 }
 
 void
-io_test(device::id_type id, std::shared_ptr<device> dev, size_t cmds_listed)
+io_test(device::id_type id, device* dev, size_t cmds_listed)
 {
   std::vector<io_test_bo_set> listed_bos(cmds_listed);
 
-  auto wrk = get_xclbin_workspace(dev.get());
+  auto wrk = get_xclbin_workspace(dev);
   auto local_data_path = local_path(wrk + "/data/");
   std::vector<bo*> cmd_bos;
 
@@ -1313,16 +1316,15 @@ io_test(device::id_type id, std::shared_ptr<device> dev, size_t cmds_listed)
     checkpoint("Output buffers' content synchronization to host done");
     io_test_verify_result(bos, local_data_path);
   }
-
 }
 
 void
-io_throughput_test(device::id_type id, std::shared_ptr<device> dev, int total_hwq_submit, int num_cmdlist, int cmds_per_list)
+io_throughput_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, int cmds_per_list)
 {
   std::vector<io_test_bo_set> bo_set(num_cmdlist * cmds_per_list);
   std::vector<std::tuple<std::vector<buffer_handle*>, ert_start_kernel_cmd *> > cmdlists(num_cmdlist);
 
-  auto wrk = get_xclbin_workspace(dev.get());
+  auto wrk = get_xclbin_workspace(dev);
   auto local_data_path = local_path(wrk + "/data/");
   std::vector<bo*> cmd_bos;
   int cmdlist_idx, cmd_idx;
@@ -1336,7 +1338,7 @@ io_throughput_test(device::id_type id, std::shared_ptr<device> dev, int total_hw
     cmd_bos.push_back(bos[IO_TEST_BO_CMD].tbo.get());
   }
 
-  auto ip_name = find_first_match_ip_name(dev.get(), "DPU.*");
+  auto ip_name = find_first_match_ip_name(dev, "DPU.*");
   if (ip_name.empty())
     throw std::runtime_error("Cannot find any kernel name matched DPU.*");
 
@@ -1400,21 +1402,21 @@ io_throughput_test(device::id_type id, std::shared_ptr<device> dev, int total_hw
 }
 
 void
-TEST_io(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   io_test_parameter_init(false, 1, static_cast<unsigned int>(arg[0]));
-  io_test(id, dev, arg[1]);
+  io_test(id, sdev.get(), arg[1]);
 }
 
 void
-TEST_io_latency(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   io_test_parameter_init(true, 1000, static_cast<unsigned int>(arg[0]));
-  io_test(id, dev, arg[1]);
+  io_test(id, sdev.get(), arg[1]);
 }
 
 void
-TEST_io_throughput(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   int num_bo_set = arg[1];
   int total_commands = 32000;
@@ -1431,7 +1433,7 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device> dev, arg_type& ar
       cmds_per_list = 25;
     int num_cmdlist = num_bo_set / cmds_per_list;
     int total_hwq_submit = total_commands / cmds_per_list;
-    io_throughput_test(id, dev, total_hwq_submit, num_cmdlist, cmds_per_list);
+    io_throughput_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list);
   }
   printing_on = true;
 }
@@ -1515,8 +1517,9 @@ umq_cmd_submit_and_wait(hwqueue_handle *hwq,
 }
 
 void
-TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> dev, arg_type& arg)
+TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
+  auto dev = sdev.get();
   const size_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
   const size_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
   const size_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
@@ -1533,7 +1536,7 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> dev, arg_type& ar
       {"g.ofm_ddr", bo_ofm.get()->get_properties().paddr}
   };
   const std::string ctrl_code_elf("vadd.elf");
-  auto wrk = get_xclbin_workspace(dev.get());
+  auto wrk = get_xclbin_workspace(dev);
   std::cout << "using vadd.elf from " << wrk + "/" + ctrl_code_elf << std::endl;
 
   auto ctrlcode = get_ctrl_from_elf(local_path(wrk + "/" + ctrl_code_elf), symbols);

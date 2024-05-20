@@ -75,14 +75,17 @@ void
 pdev::
 open() const
 {
+  int fd;
   const std::lock_guard<std::mutex> lock(m_lock);
 
   if (m_dev_users == 0) {
-    m_dev_fd = xrt_core::pci::dev::open("", O_RDWR);
-    if (m_dev_fd < 0)
+    fd = xrt_core::pci::dev::open("", O_RDWR);
+    if (fd < 0)
       shim_err(EINVAL, "Failed to open KMQ device");
     else
-      shim_debug("Device opened, fd=%d", m_dev_fd);
+      shim_debug("Device opened, fd=%d", fd);
+    // Publish the fd for other threads to use.
+    m_dev_fd = fd;
   }
   ++m_dev_users;
 }
@@ -91,12 +94,17 @@ void
 pdev::
 close() const
 {
+  int fd;
   const std::lock_guard<std::mutex> lock(m_lock);
+
   --m_dev_users;
   if (m_dev_users == 0) {
-    ::close(m_dev_fd);
-    shim_debug("Device closed, fd=%d", m_dev_fd);
+    // Stop new users of the fd from other threads.
+    fd = m_dev_fd;
     m_dev_fd = -1;
+    // Kernel will wait for existing users to quit.
+    ::close(fd);
+    shim_debug("Device closed, fd=%d", fd);
   }
 }
 
