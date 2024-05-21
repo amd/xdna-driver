@@ -21,7 +21,7 @@ public:
   submit_command(xrt_core::buffer_handle *) override;
 
   void
-  submit_command(const std::vector<xrt_core::buffer_handle *>&) override;
+  submit_command(const xrt_core::span<xrt_core::buffer_handle *>&) override;
 
   int
   wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
@@ -58,7 +58,7 @@ public:
 
 protected:
   virtual void
-  submit_command_list(const std::vector<xrt_core::buffer_handle *>&) = 0;
+  submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>&) = 0;
 
   const hw_ctx *m_hwctx;
   const pdev& m_pdev;

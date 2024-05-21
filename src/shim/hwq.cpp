@@ -26,12 +26,13 @@ hw_q::
 submit_command(xrt_core::buffer_handle *cmd_bo)
 {
   std::vector<xrt_core::buffer_handle *> cmd_bos {cmd_bo};
-  return submit_command(cmd_bos);
+  xrt_core::span<xrt_core::buffer_handle *> cmds {cmd_bos};
+  return submit_command(cmds);
 }
 
 void
 hw_q::
-submit_command(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
+submit_command(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos)
 {
   if (cmd_bos.size() > 1) {
     if (m_force_unchained_command) {

@@ -208,7 +208,7 @@ fill_slot_and_send(volatile host_queue_packet_t *pkt, void *payload, size_t size
 
 void
 hw_q_umq::
-submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
+submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos)
 {
   if (cmd_bos.size() > 1)
     shim_err(EINVAL, "Do not support more than 1 cmd");

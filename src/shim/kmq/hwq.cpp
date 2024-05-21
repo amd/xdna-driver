@@ -20,7 +20,7 @@ hw_q_kmq::
 
 void
 hw_q_kmq::
-submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos)
+submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos)
 {
   // Assuming 256 max cmds and 256 max args per cmd bo
   const size_t max_cmd_bos = 256;
