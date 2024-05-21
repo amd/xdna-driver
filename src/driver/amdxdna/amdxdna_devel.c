@@ -115,9 +115,9 @@ int amdxdna_mem_map(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 	}
 
 	mem->sgt = sgt;
-	mem->dev_addr = sg_dma_address(sgt->sgl);
+	mem->dma_addr = sg_dma_address(sgt->sgl);
 
-	XDNA_DBG(xdna, "dev_addr 0x%llx", mem->dev_addr);
+	XDNA_DBG(xdna, "dma_addr 0x%llx", mem->dma_addr);
 
 	return 0;
 

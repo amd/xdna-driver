@@ -10,6 +10,10 @@
 #include "aie2_solver.h"
 #include "aie2_msg_priv.h"
 
+#ifdef AMDXDNA_DEVEL
+#include "amdxdna_devel.h"
+#endif
+
 bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
@@ -609,8 +613,18 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto free_col_list;
 	}
 
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
+		ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
+					heap->mem.dma_addr, heap->mem.size);
+		goto skip;
+	}
+#endif
 	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
 				heap->mem.userptr, heap->mem.size);
+#ifdef AMDXDNA_DEVEL
+skip:
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
 		goto release_resource;
