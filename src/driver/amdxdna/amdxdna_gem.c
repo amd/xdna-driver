@@ -34,6 +34,21 @@ static int amdxdna_pin_pages(struct amdxdna_mem *mem)
 		}
 		total_pinned += pinned;
 	}
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
+		struct amdxdna_gem_obj *abo;
+
+		abo = container_of(mem, struct amdxdna_gem_obj, mem);
+		if (abo->type != AMDXDNA_BO_DEV_HEAP)
+			return 0;
+
+		pinned = amdxdna_mem_map(abo->client->xdna, mem);
+		if (pinned) {
+			mem->pin_cnt = 0;
+			goto unpin;
+		}
+	}
+#endif
 
 	return 0;
 
@@ -49,6 +64,15 @@ static void amdxdna_unpin_pages(struct amdxdna_mem *mem)
 	if (--mem->pin_cnt > 0)
 		return;
 
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
+		struct amdxdna_gem_obj *abo;
+
+		abo = container_of(mem, struct amdxdna_gem_obj, mem);
+		if (abo->type == AMDXDNA_BO_DEV_HEAP)
+			amdxdna_mem_unmap(abo->client->xdna, mem);
+	}
+#endif
 	unpin_user_pages_dirty_lock(mem->pages, mem->nr_pages, true);
 }
 
@@ -290,6 +314,19 @@ amdxdna_drm_alloc_shmem(struct drm_device *dev,
 	abo = to_xdna_obj(&shmem->base);
 	abo->client = client;
 	abo->mmap_offset = drm_vma_node_offset_addr(&shmem->base.vma_node);
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
+		struct sg_table *sgt;
+
+		sgt = drm_gem_shmem_get_pages_sgt(&abo->base);
+		if (IS_ERR(sgt)) {
+			XDNA_ERR(client->xdna, "Get sgt failed, ret %ld", PTR_ERR(sgt));
+			drm_gem_object_put(to_gobj(abo));
+			return ERR_CAST(sgt);
+		}
+		abo->mem.dev_addr = sg_dma_address(sgt->sgl);
+	}
+#endif
 
 	return abo;
 }
@@ -498,6 +535,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		ret = amdxdna_mem_map(xdna, &abo->mem);
 		if (ret)
 			goto put_obj;
+		abo->mem.dev_addr = abo->mem.dma_addr;
 #endif
 		break;
 	default:

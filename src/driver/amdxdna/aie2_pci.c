@@ -13,6 +13,10 @@
 #include "aie2_solver.h"
 #include "aie2_msg_priv.h"
 
+#ifdef AMDXDNA_DEVEL
+#include "amdxdna_devel.h"
+#endif
+
 int aie2_max_col = XRS_MAX_COL;
 module_param(aie2_max_col, int, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
@@ -434,11 +438,24 @@ static int aie2_init(struct amdxdna_dev *xdna)
 		goto release_fw;
 	}
 
+#ifdef AMDXDNA_DEVEL
+	ret = amdxdna_iommu_mode_setup(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
+		return ret;
+	}
+	if (iommu_mode != AMDXDNA_IOMMU_PASID)
+		goto skip_pasid;
+#endif
 	ret = iommu_dev_enable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
 		XDNA_ERR(xdna, "Enable PASID failed, ret %d", ret);
 		goto free_irq;
 	}
+#ifdef AMDXDNA_DEVEL
+skip_pasid:
+		XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
+#endif
 
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
@@ -524,7 +541,14 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 
 	aie2_hw_stop(xdna);
 	aie2_error_async_events_free(ndev);
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode != AMDXDNA_IOMMU_PASID)
+		goto skip_pasid;
+#endif
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
+#ifdef AMDXDNA_DEVEL
+skip_pasid:
+#endif
 	pci_free_irq_vectors(pdev);
 }
 
