@@ -130,7 +130,11 @@ amdxdna_user_mem_fini(struct amdxdna_mem *mem)
 	memset(mem, 0, sizeof(*mem));
 }
 
-static void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo);
+static void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
+{
+	mutex_destroy(&abo->lock);
+	kfree(abo);
+}
 
 static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 {
@@ -250,12 +254,6 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size,
 	abo->mem.dev_addr = AMDXDNA_INVALID_ADDR;
 
 	return abo;
-}
-
-static void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
-{
-	mutex_destroy(&abo->lock);
-	kfree(abo);
 }
 
 /* For drm_driver->gem_create_object callback */
@@ -616,7 +614,7 @@ struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client,
 	}
 
 	abo = to_xdna_obj(gobj);
-	if ((bo_type == AMDXDNA_BO_INVALID) || (abo->type == bo_type))
+	if (bo_type == AMDXDNA_BO_INVALID || abo->type == bo_type)
 		return abo;
 
 	drm_gem_object_put(gobj);

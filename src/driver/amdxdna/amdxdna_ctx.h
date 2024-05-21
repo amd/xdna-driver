@@ -39,10 +39,10 @@ enum ert_cmd_state {
  * amdxdna_cmd. The rest of the payload in amdxdna_cmd is regular kernel args.
  */
 struct amdxdna_cmd_start_dpu {
-  uint64_t instruction_buffer;       /* buffer address 2 words */
-  uint32_t instruction_buffer_size;  /* size of buffer in bytes */
-  uint32_t chained;                  /* MBZ */
-  /* Regular kernel args followed here. */
+	u64 instruction_buffer;       /* buffer address 2 words */
+	u32 instruction_buffer_size;  /* size of buffer in bytes */
+	u32 chained;                  /* MBZ */
+	/* Regular kernel args followed here. */
 };
 
 /* Exec buffer command header format */
@@ -161,8 +161,10 @@ amdxdna_cmd_get_payload(struct amdxdna_sched_job *job, int idx, u32 *size)
 	int num_masks = 1 + cmd->extra_cu_masks;
 
 	if (size) {
-		if (unlikely(cmd->count <= num_masks))
+		if (unlikely(cmd->count <= num_masks)) {
+			*size = 0;
 			return NULL;
+		}
 		*size = (cmd->count - num_masks) * sizeof(u32);
 	}
 	return &cmd->data[num_masks];

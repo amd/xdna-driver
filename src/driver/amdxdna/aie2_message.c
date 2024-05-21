@@ -271,8 +271,7 @@ int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwc
 	req.context_id = hwctx->fw_ctx_id;
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
-		XDNA_WARN(xdna, "%s destroy context failed, ret %d",
-			  hwctx->name, ret);
+		XDNA_WARN(xdna, "%s destroy context failed, ret %d", hwctx->name, ret);
 
 	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chann);
 	XDNA_DBG(xdna, "%s destroyed fw ctx %d", hwctx->name,
