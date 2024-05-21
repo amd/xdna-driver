@@ -20,7 +20,7 @@ public:
 
 protected:
   void
-  submit_command_list(const std::vector<xrt_core::buffer_handle *>&) override;
+  submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>&) override;
 };
 
 } // shim_xdna

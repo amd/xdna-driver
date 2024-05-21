@@ -32,7 +32,7 @@ public:
 
 protected:
   void
-  submit_command_list(const std::vector<xrt_core::buffer_handle *>& cmd_bos) override;
+  submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos) override;
 
 private:
   std::unique_ptr<xrt_core::buffer_handle> m_umq_bo;
