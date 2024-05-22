@@ -436,6 +436,7 @@ int amdxdna_cmds_submit(struct amdxdna_client *client,
 	struct amdxdna_hwctx *hwctx;
 	int ret, idx;
 
+	XDNA_DBG(xdna, "Command BO count %d, Arg BO count %d", cmd_bo_cnt, arg_bo_cnt);
 	job = kzalloc(struct_size(job, bos, arg_bo_cnt), GFP_KERNEL);
 	if (!job)
 		return -ENOMEM;

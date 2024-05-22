@@ -632,9 +632,11 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	op = amdxdna_cmd_get_op(job, 0);
 	switch (op) {
 	case ERT_START_CU:
+		msg.opcode = MSG_OP_CHAIN_EXEC_BUFFER_CF;
 		ret = aie2_cmdlist_fill_slot_cf(abo->mem.kva, job, &req.buf_size);
 		break;
 	case ERT_START_DPU:
+		msg.opcode = MSG_OP_CHAIN_EXEC_DPU;
 		ret = aie2_cmdlist_fill_slot_dpu(abo->mem.kva, job, &req.buf_size);
 		break;
 	default:
@@ -655,7 +657,6 @@ int aie2_cmdlist(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	msg.notify_cb = notify_cb;
 	msg.send_data = (u8 *)&req;
 	msg.send_size = sizeof(req);
-	msg.opcode = MSG_OP_CHAIN_EXEC_BUFFER_CF;
 
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
