@@ -1411,7 +1411,7 @@ TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 void
 TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  io_test_parameter_init(true, 1000, static_cast<unsigned int>(arg[0]));
+  io_test_parameter_init(true, 10000, static_cast<unsigned int>(arg[0]));
   io_test(id, sdev.get(), arg[1]);
 }
 

@@ -147,7 +147,7 @@ struct hwctx_pdi {
  * Define the maximum number of pending commands in a hardware context.
  * Must be power of 2!
  */
-#define HWCTX_MAX_CMDS		8
+#define HWCTX_MAX_CMDS		4
 #define get_job_idx(seq) ((seq) & (HWCTX_MAX_CMDS - 1))
 struct amdxdna_hwctx_priv {
 	struct amdxdna_gem_obj		*heap;
