@@ -1535,11 +1535,12 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, arg_type& a
       {"g.wts_ddr", bo_wts.get()->get_properties().paddr},
       {"g.ofm_ddr", bo_ofm.get()->get_properties().paddr}
   };
-  const std::string ctrl_code_elf("vadd.elf");
-  auto wrk = get_xclbin_workspace(dev);
-  std::cout << "using vadd.elf from " << wrk + "/" + ctrl_code_elf << std::endl;
 
-  auto ctrlcode = get_ctrl_from_elf(local_path(wrk + "/" + ctrl_code_elf), symbols);
+  std::cout << std::hex << "ifm paddr 0x" <<
+    bo_ifm.get()->get_properties().paddr << std::endl;
+
+  auto wrk = get_xclbin_workspace(dev);
+  auto ctrlcode = get_ctrl_from_elf(local_path(wrk + "/vadd.elf"), symbols);
   bo bo_ctrl_code{dev, ctrlcode.at(0).ccode.size(), XCL_BO_FLAGS_EXECBUF};
   std::memcpy(bo_ctrl_code.map(), ctrlcode.at(0).ccode.data(), bo_ctrl_code.size());
   std::cout << "Obtained vadd ctrl-code BO" << std::endl;
