@@ -107,7 +107,8 @@ int amdxdna_mem_map(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 		goto free_sgt;
 	}
 
-	if (drm_prime_get_contiguous_size(sgt) != mem->size) {
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID &&
+	    drm_prime_get_contiguous_size(sgt) != mem->size) {
 		XDNA_ERR(xdna, "failed to map contiguous dma address for size:%ld",
 			 mem->size);
 		ret = -ENOMEM;

@@ -83,6 +83,12 @@ protected:
   void
   create_ctx_on_device();
 
+  void
+  init_log_buf();
+
+  void
+  fini_log_buf();
+
 private:
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
@@ -100,12 +106,6 @@ private:
 
   void
   init_qos_info(const qos_type& qos);
-
-  uint32_t
-  init_log_buf();
-
-  void
-  fini_log_buf();
 
   void
   parse_xclbin(const xrt::xclbin& xclbin);

@@ -728,7 +728,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 
 	amdxdna_gem_unpin(abo);
 
-	if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE) {
+	if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE &&
+	    args->direction == SYNC_DIRECT_FROM_DEVICE) {
 		u64 seq;
 
 		hwctx_hdl = amdxdna_gem_get_assigned_hwctx(client, args->handle);
@@ -749,8 +750,9 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		ret = amdxdna_cmds_wait(client, hwctx_hdl, seq, 3000 /* ms */);
 	}
 
-	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx\n",
-		 args->handle, args->offset, args->size);
+	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx, dir %d, hwctx %d\n",
+		 args->handle, args->offset, args->size, args->direction,
+		 abo->assigned_hwctx);
 
 put_obj:
 	drm_gem_object_put(gobj);

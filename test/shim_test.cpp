@@ -641,8 +641,11 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> sdev, arg_
     auto dbg_p = static_cast<uint32_t *>(bo->map(buffer_handle::map_type::read));
     std::memset(dbg_p, 0xff, size);
     bo.get()->sync(buffer_handle::direction::device2host, size, 0);
-    if (std::memcmp(dbg_p, std::string(size, '\0').c_str(), size) != 0)
+    if (std::memcmp(dbg_p, std::string(size, '\0').c_str(), size) != 0) {
+	    for (int i = 0; i < 1024; i++)
+	      printf("DEBUG BUF[%d]=0x%x\n", i, dbg_p[i]);
       throw std::runtime_error("Debug buffer is not zero");
+    }
   }
 
   // Create ctx -> create bo -> destroy ctx -> destroy bo
