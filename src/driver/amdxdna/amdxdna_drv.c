@@ -83,7 +83,7 @@ skip_sva_bind:
 #endif
 	mutex_init(&client->hwctx_lock);
 	init_srcu_struct(&client->hwctx_srcu);
-	idr_init(&client->hwctx_idr);
+	idr_init_base(&client->hwctx_idr, AMDXDNA_INVALID_CTX_HANDLE + 1);
 	mutex_init(&client->mm_lock);
 
 	mutex_lock(&xdna->dev_lock);

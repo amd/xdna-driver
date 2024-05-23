@@ -197,7 +197,9 @@ create_ctx_on_device()
   arg.umq_bo = m_q->get_queue_bo();
   arg.max_opc = m_ops_per_cycle;
   arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
-  arg.log_buf_bo = init_log_buf();
+  arg.log_buf_bo = m_log_bo ?
+    static_cast<bo*>(m_log_bo.get())->get_drm_bo_handle() :
+    AMDXDNA_INVALID_BO_HANDLE;
   m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 
   set_slotidx(arg.handle);
@@ -221,7 +223,7 @@ delete_ctx_on_device()
   fini_log_buf();
 }
 
-uint32_t
+void
 hw_ctx::
 init_log_buf()
 {
@@ -229,15 +231,14 @@ init_log_buf()
   m_log_bo = alloc_bo(nullptr, log_buf_size, XCL_BO_FLAGS_EXECBUF);
   m_log_buf = m_log_bo->map(bo::map_type::write);
   std::memset(m_log_buf, 0, log_buf_size);
-
-  return static_cast<bo*>(m_log_bo.get())->get_drm_bo_handle();
 }
 
 void
 hw_ctx::
 fini_log_buf(void)
 {
-  m_log_bo->unmap(m_log_buf);
+  if (m_log_bo)
+    m_log_bo->unmap(m_log_buf);
 }
 
 void

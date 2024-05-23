@@ -784,25 +784,15 @@ static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 		ret = -EINVAL;
 		goto done;
 	}
-
-	/*
-	 * There has to be no existing assigned dbg BO and the target
-	 * BO (bo_hdl) has to exist and can't be already assigned to other ctx.
-	 */
-	if (amdxdna_gem_get_assigned_hwctx(client, hwctx->dbg_buf_bo) == hwctx->id)
-		ret = hwctx->dbg_buf_bo == bo_hdl ? 0 : -EBUSY;
-	else
-		ret = amdxdna_gem_set_assigned_hwctx(client, bo_hdl, hwctx->id);
+	ret = amdxdna_gem_set_assigned_hwctx(client, bo_hdl, hwctx->id);
 
 	amdxdna_gem_put_obj(abo);
 
 done:
-	if (ret == 0) {
-		hwctx->dbg_buf_bo = bo_hdl;
+	if (ret == 0)
 		XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
-	} else {
+	else
 		XDNA_ERR(xdna, "Failed to attach debug BO %d to %s: %d", bo_hdl, hwctx->name, ret);
-	}
 	return ret;
 }
 
@@ -811,13 +801,11 @@ static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 
-	if (hwctx->dbg_buf_bo != bo_hdl ||
-	    amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->id) {
+	if (amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->id) {
 		XDNA_ERR(xdna, "Debug BO %d isn't attached to %s", bo_hdl, hwctx->name);
 		return -EINVAL;
 	}
 
-	hwctx->dbg_buf_bo = AMDXDNA_INVALID_BO_HANDLE;
 	amdxdna_gem_clear_assigned_hwctx(client, bo_hdl);
 	XDNA_DBG(xdna, "Detached debug BO %d from %s", bo_hdl, hwctx->name);
 	return 0;

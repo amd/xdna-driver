@@ -286,10 +286,6 @@ attach_to_ctx()
   if (m_owner_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
     return;
 
-  // Currently, only debug BO is supported.
-  if (xcl_bo_flags{m_flags}.use != XRT_BO_USE_DEBUG)
-    shim_err(EINVAL, "Bad BO type to attach to HW ctx");
-
   auto boh = get_drm_bo_handle();
   shim_debug("Attaching drm_bo %d to ctx: %d", boh, m_owner_ctx_id);
   attach_dbg_drm_bo(m_pdev, boh, m_owner_ctx_id);
@@ -301,10 +297,6 @@ detach_from_ctx()
 {
   if (m_owner_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
     return;
-
-  // Currently, only debug BO is supported.
-  if (xcl_bo_flags{m_flags}.use != XRT_BO_USE_DEBUG)
-    shim_err(EINVAL, "Bad BO type to detach from HW ctx");
 
   auto boh = get_drm_bo_handle();
   shim_debug("Detaching drm_bo %d from ctx: %d", boh, m_owner_ctx_id);

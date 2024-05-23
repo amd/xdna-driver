@@ -44,6 +44,14 @@ alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
 {
   if (userptr)
     shim_not_supported_err("User ptr BO");;
+
+  // TODO:
+  // For now, debug BO is just a normal device BO. Let's associate all device
+  // BO with a HW CTX (if not passed in) since we can't tell if it is a
+  // debug BO or not.
+  auto f = xcl_bo_flags{flags};
+  if ((ctx_id == AMDXDNA_INVALID_CTX_HANDLE) && !!(f.flags & XRT_BO_FLAGS_CACHEABLE))
+    ctx_id = f.slot;
   return std::make_unique<bo_kmq>(*this, ctx_id, size, flags);
 }
 
