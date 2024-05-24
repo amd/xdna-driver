@@ -13,8 +13,8 @@ umq_flags_to_type(uint64_t bo_flags)
   switch (boflags) {
   case XCL_BO_FLAGS_NONE:
   case XCL_BO_FLAGS_HOST_ONLY:
-  case XCL_BO_FLAGS_CACHEABLE:
     return AMDXDNA_BO_SHMEM;
+  case XCL_BO_FLAGS_CACHEABLE:
   case XCL_BO_FLAGS_EXECBUF:
     return AMDXDNA_BO_CMD;
   default:
