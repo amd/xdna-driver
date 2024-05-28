@@ -5,6 +5,7 @@
 
 #include <linux/module.h>
 #include <linux/iommu.h>
+#include <linux/pm_runtime.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_accel.h>
 #include <drm/drm_managed.h>
@@ -269,6 +270,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (IS_ERR(xdna))
 		return PTR_ERR(xdna);
 
+	XDNA_WARN(xdna, "enter");
 	xdna->dev_info = amdxdna_get_dev_info(pdev);
 	if (!xdna->dev_info)
 		return -ENODEV;
@@ -304,6 +306,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
 
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 5000);
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_allow(&pdev->dev);
+	pm_runtime_mark_last_busy(&pdev->dev);
+	pm_runtime_put_autosuspend(&pdev->dev);
+
+	XDNA_WARN(xdna, "exit");
+
 #ifdef AMDXDNA_DEVEL
 	ida_init(&xdna->pdi_ida);
 #endif
@@ -322,6 +333,10 @@ static void amdxdna_remove(struct pci_dev *pdev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
+
+	XDNA_WARN(xdna, "enter");
+	pm_runtime_get_noresume(&pdev->dev);
+	pm_runtime_forbid(&pdev->dev);
 
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
@@ -345,6 +360,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 #ifdef AMDXDNA_DEVEL
 	ida_destroy(&xdna->pdi_ida);
 #endif
+	XDNA_WARN(xdna, "exit");
 }
 
 static int amdxdna_pmops_suspend(struct device *dev)
@@ -352,6 +368,7 @@ static int amdxdna_pmops_suspend(struct device *dev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
 	struct amdxdna_client *client;
 
+	XDNA_WARN(xdna, "firmware suspend...");
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_suspend(client);
@@ -360,6 +377,7 @@ static int amdxdna_pmops_suspend(struct device *dev)
 		xdna->dev_info->ops->suspend(xdna);
 	mutex_unlock(&xdna->dev_lock);
 
+	XDNA_WARN(xdna, "firmware suspend done");
 	return 0;
 }
 
@@ -369,7 +387,7 @@ static int amdxdna_pmops_resume(struct device *dev)
 	struct amdxdna_client *client;
 	int ret;
 
-	XDNA_INFO(xdna, "firmware resuming...");
+	XDNA_WARN(xdna, "firmware resuming...");
 	mutex_lock(&xdna->dev_lock);
 	if (xdna->dev_info->ops->resume) {
 		ret = xdna->dev_info->ops->resume(xdna);
@@ -385,11 +403,48 @@ static int amdxdna_pmops_resume(struct device *dev)
 		amdxdna_hwctx_resume(client);
 	mutex_unlock(&xdna->dev_lock);
 
+	XDNA_WARN(xdna, "firmware resume done");
 	return 0;
+}
+
+static int amdxdna_rt_pmops_suspend(struct device *dev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
+	int ret = -EAGAIN;
+
+	XDNA_WARN(xdna, "enter");
+	ret = 0;
+	return ret;
+}
+
+static int amdxdna_rt_pmops_resume(struct device *dev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
+
+	XDNA_WARN(xdna, "enter");
+	return 0;
+}
+
+static int amdxdna_rt_pmops_idle(struct device *dev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
+	static unsigned long last_check_time;
+	int ret = -EBUSY;
+
+	XDNA_WARN(xdna, "enter");
+
+	if (time_after(jiffies, last_check_time + 10 * HZ)) {
+		last_check_time = jiffies;
+		ret = 0;
+	}
+
+	XDNA_WARN(xdna, "exit, ret=%d", ret);
+	return ret;
 }
 
 static const struct dev_pm_ops amdxdna_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(amdxdna_pmops_suspend, amdxdna_pmops_resume)
+	SET_RUNTIME_PM_OPS(amdxdna_rt_pmops_suspend, amdxdna_rt_pmops_resume, amdxdna_rt_pmops_idle)
 };
 
 static struct pci_driver amdxdna_pci_driver = {
