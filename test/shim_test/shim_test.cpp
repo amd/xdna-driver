@@ -16,9 +16,7 @@
 #include "core/common/sysinfo.h"
 #include "core/common/system.h"
 #include "core/include/ert.h"
-#include "experimental/xrt_elf.h"
-#include "experimental/xrt_ext.h"
-#include "experimental/xrt_module.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <libgen.h>
@@ -580,37 +578,6 @@ private:
       throw std::runtime_error("map bo of " + std::to_string(size()) + "bytes failed");
     return m_bop;
   }
-};
-
-class xrt_bo {
-public:
-  xrt_bo(const xrt::device& dev, size_t size)
-    : m_boh{xrt::ext::bo{dev, size}}
-    , m_bop{reinterpret_cast<int *>(m_boh.map())}
-  {
-    if (!m_bop)
-      throw std::runtime_error("map shim test bo of " + std::to_string(size) + "bytes failed");
-  }
-
-  ~xrt_bo()
-  {
-  }
-
-  int *
-  map()
-  { return m_bop; }
-
-  size_t
-  size()
-  { return m_boh.size(); }
-
-  xrt::bo&
-  get()
-  { return m_boh; }
-
-private:
-  xrt::bo m_boh;
-  int *m_bop;
 };
 
 void
