@@ -326,10 +326,6 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	// retpm = devm_pm_runtime_enable(dev);
 	// XDNA_WARN(xdna, "pm rt enable ret %d", retpm);
 	XDNA_WARN(xdna, "rpm is enabled: %d, usage_counter: %d", pm_runtime_enabled(dev), atomic_read(&dev->power.usage_count));
-	pm_runtime_mark_last_busy(dev);
-	retpm = pm_runtime_put_autosuspend(dev);
-	XDNA_WARN(xdna, "put autosuspend ret %d", retpm);
-	XDNA_WARN(xdna, "rpm is enabled: %d, usage_counter: %d", pm_runtime_enabled(dev), atomic_read(&dev->power.usage_count));
 
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
@@ -346,6 +342,10 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 #ifdef AMDXDNA_DEVEL
 	ida_init(&xdna->pdi_ida);
 #endif
+	pm_runtime_mark_last_busy(dev);
+	retpm = pm_runtime_put_autosuspend(dev);
+	XDNA_WARN(xdna, "put autosuspend ret %d", retpm);
+	XDNA_WARN(xdna, "rpm is enabled: %d, usage_counter: %d", pm_runtime_enabled(dev), atomic_read(&dev->power.usage_count));
 	return 0;
 
 failed_sysfs_fini:
