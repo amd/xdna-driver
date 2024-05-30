@@ -57,6 +57,13 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	int ret;
 
 	XDNA_WARN(xdna, "enter");
+	ret = pm_runtime_resume_and_get(ddev->dev);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "Failed to get rpm, ret %d", ret);
+		return ret;
+	}
+	XDNA_WARN(xdna, "get rpm, usage_counter %d, ret %d", atomic_read(&ddev->dev->power.usage_count), ret);
+
 	client = kzalloc(sizeof(*client), GFP_KERNEL);
 	if (!client)
 		return -ENOMEM;
@@ -111,6 +118,7 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
+	int ret;
 
 	XDNA_WARN(xdna, "enter");
 	XDNA_DBG(xdna, "Closing PID %d", client->pid);
@@ -134,6 +142,9 @@ skip_sva_unbind:
 	XDNA_DBG(xdna, "PID %d closed", client->pid);
 	XDNA_WARN(xdna, "exit");
 	kfree(client);
+	pm_runtime_mark_last_busy(ddev->dev);
+	ret = pm_runtime_put_autosuspend(ddev->dev);
+	XDNA_WARN(xdna, "put rpm, usage_counter %d, ret %d", atomic_read(&ddev->dev->power.usage_count), ret);
 }
 
 static int amdxdna_flush(struct file *f, fl_owner_t id)
