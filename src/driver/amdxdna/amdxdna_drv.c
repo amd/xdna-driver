@@ -448,6 +448,7 @@ static int amdxdna_rpmops_suspend(struct device *dev)
 
 	pci_save_state(pdev);
 	// todo
+	amdxdna_pmops_suspend(dev);
 	pci_set_power_state(pdev, PCI_D3cold);
 
 	XDNA_WARN(xdna, "enter rpm usage_counter: %d", atomic_read(&dev->power.usage_count));
@@ -461,6 +462,7 @@ static int amdxdna_rpmops_resume(struct device *dev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 
 	// todo
+	amdxdna_pmops_resume(dev);
 	pci_set_power_state(pdev, PCI_D0);
 	pci_restore_state(pdev);
 
