@@ -208,12 +208,9 @@ fill_slot_and_send(volatile host_queue_packet_t *pkt, void *payload, size_t size
 
 void
 hw_q_umq::
-submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos)
+issue_command(xrt_core::buffer_handle *cmd_bo)
 {
-  if (cmd_bos.size() > 1)
-    shim_err(EINVAL, "Do not support more than 1 cmd");
-
-  auto boh = static_cast<bo*>(cmd_bos[0]);
+  auto boh = static_cast<bo*>(cmd_bo);
   auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(boh->map(bo::map_type::write));
 
   // Sanity check

@@ -75,7 +75,7 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
     shim_err(EINVAL, "Invalid BO type: %d", type);
     break;
   }
-
+  
   attach_to_ctx();
 
   shim_debug("Allocated KMQ BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
@@ -131,25 +131,41 @@ void
 bo_kmq::
 bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
 {
+  auto boh = reinterpret_cast<const bo_kmq*>(bh);
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
   if (m_type != AMDXDNA_BO_CMD)
     shim_err(EINVAL, "Can't call bind_at() on non-cmd BO");
-  m_args_map[pos] = static_cast<const bo*>(bh)->get_drm_bo_handle();
+
+  if (boh->get_type() != AMDXDNA_BO_CMD) {
+    auto h = boh->get_drm_bo_handle();
+    m_args_set.insert(h);
+    shim_debug("Added arg BO %d to cmd BO %d", h, get_drm_bo_handle());
+  } else {
+    const size_t max_args = 64;
+    uint32_t hs[max_args];
+    auto arg_cnt = boh->get_arg_bo_handles(hs, max_args);
+    std::string bohs;
+    for (int i = 0; i < arg_cnt; i++) {
+      m_args_set.insert(hs[i]);
+      bohs += std::to_string(hs[i]) + " ";
+    }
+    shim_debug("Added arg BO %s to cmd BO %d", bohs.c_str(), get_drm_bo_handle());
+  }
 }
 
 uint32_t
 bo_kmq::
-get_arg_bo_handles(uint32_t *handles, size_t num)
+get_arg_bo_handles(uint32_t *handles, size_t num) const
 {
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
-  auto sz = m_args_map.size();
+  auto sz = m_args_set.size();
   if (sz > num)
     shim_err(E2BIG, "There are %ld BO args, provided buffer can hold only %ld", sz, num);
 
-  for (auto const& m : m_args_map)
-    *(handles++) = m.second;
+  for (auto m : m_args_set)
+    *(handles++) = m;
 
   return sz;
 }

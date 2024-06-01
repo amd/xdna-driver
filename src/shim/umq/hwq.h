@@ -19,6 +19,9 @@ public:
   ~hw_q_umq();
 
   void
+  issue_command(xrt_core::buffer_handle *) override;
+
+  void
   dump() const;
 
   void
@@ -29,10 +32,6 @@ public:
 
   volatile host_queue_header_t *
   get_header_ptr() const;
-
-protected:
-  void
-  submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos) override;
 
 private:
   std::unique_ptr<xrt_core::buffer_handle> m_umq_bo;

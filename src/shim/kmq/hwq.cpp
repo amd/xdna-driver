@@ -20,33 +20,21 @@ hw_q_kmq::
 
 void
 hw_q_kmq::
-submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos)
+issue_command(xrt_core::buffer_handle *cmd_bo)
 {
-  // Assuming 256 max cmds and 256 max args per cmd bo
-  const size_t max_cmd_bos = 256;
-  const size_t max_arg_bos = max_cmd_bos << 8;
+  // Assuming 1024 max args per cmd bo
+  const size_t max_arg_bos = 1024;
 
-  auto num_cmd_bos = cmd_bos.size();
-  if (num_cmd_bos > max_cmd_bos)
-    shim_err(EINVAL, "Too many cmds (%ld) in the list", num_cmd_bos);
-
-  uint32_t cmd_bo_hdls[max_cmd_bos];
   uint32_t arg_bo_hdls[max_arg_bos];
-  size_t arg_cnt = 0;
-
-  for (size_t cmd_cnt = 0; cmd_cnt < num_cmd_bos; cmd_cnt++) {
-    auto boh = static_cast<bo_kmq*>(cmd_bos[cmd_cnt]);
-    cmd_bo_hdls[cmd_cnt] = boh->get_drm_bo_handle();
-    auto cur_arg_cnt = boh->get_arg_bo_handles(&arg_bo_hdls[arg_cnt], max_arg_bos - arg_cnt);
-    arg_cnt += cur_arg_cnt;
-  }
+  auto boh = static_cast<bo_kmq*>(cmd_bo);
+  uint32_t cmd_bo_hdl = boh->get_drm_bo_handle();
 
   amdxdna_drm_exec_cmd ecmd = {
     .hwctx = m_hwctx->get_slotidx(),
-    .cmd_handles = reinterpret_cast<uintptr_t>(cmd_bo_hdls),
+    .cmd_handles = reinterpret_cast<uintptr_t>(&cmd_bo_hdl),
     .args = reinterpret_cast<uintptr_t>(arg_bo_hdls),
-    .cmd_count = static_cast<uint32_t>(num_cmd_bos),
-    .arg_count = static_cast<uint32_t>(arg_cnt),
+    .cmd_count = 1,
+    .arg_count = static_cast<uint32_t>(boh->get_arg_bo_handles(arg_bo_hdls, max_arg_bos)),
   };
 
   int ret = EAGAIN;
@@ -67,13 +55,9 @@ submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos)
       m_pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
     }
   }
-  auto id = ecmd.seq;
 
-  // All command BOs share the same cmd ID.
-  for (size_t cmd_cnt = 0; cmd_cnt < num_cmd_bos; cmd_cnt++) {
-    auto boh = static_cast<bo_kmq*>(cmd_bos[cmd_cnt]);
-    boh->set_cmd_id(id);
-  }
+  auto id = ecmd.seq;
+  boh->set_cmd_id(id);
   shim_debug("Submitted command (%ld)", id);
 }
 

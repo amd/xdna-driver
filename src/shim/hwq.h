@@ -20,9 +20,6 @@ public:
   void
   submit_command(xrt_core::buffer_handle *) override;
 
-  void
-  submit_command(const xrt_core::span<xrt_core::buffer_handle *>&) override;
-
   int
   wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
 
@@ -58,14 +55,11 @@ public:
 
 protected:
   virtual void
-  submit_command_list(const xrt_core::span<xrt_core::buffer_handle *>&) = 0;
+  issue_command(xrt_core::buffer_handle *) = 0;
 
   const hw_ctx *m_hwctx;
   const pdev& m_pdev;
   uint32_t m_queue_boh;
-
-private:
-  bool m_force_unchained_command;
 };
 
 } // shim_xdna
