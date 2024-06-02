@@ -113,7 +113,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
   auto last_boh = reinterpret_cast<xrt_core::buffer_handle*>(
     m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[payload->command_count-1])));
   auto ret = wait_cmd(m_pdev, m_hwctx, last_boh, timeout_ms);
-  if (ret)
+  if (ret != 1)
     return ret;
 
   // Check the state of the last command.
