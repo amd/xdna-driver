@@ -19,6 +19,7 @@ struct amdxdna_hwctx_priv;
 enum ert_cmd_opcode {
 	ERT_START_CU      = 0,
 	ERT_START_DPU     = 18,
+	ERT_CMD_CHAIN     = 19,
 };
 
 enum ert_cmd_state {
@@ -43,6 +44,18 @@ struct amdxdna_cmd_start_dpu {
 	u32 instruction_buffer_size;  /* size of buffer in bytes */
 	u32 chained;                  /* MBZ */
 	/* Regular kernel args followed here. */
+};
+
+/*
+ * Interpretation of the beginning of data payload for ERT_CMD_CHAIN in
+ * amdxdna_cmd. The rest of the payload in amdxdna_cmd is cmd BO handles.
+ */
+struct amdxdna_cmd_chain {
+	u32 command_count;
+	u32 submit_index;
+	u32 error_index;
+	u32 reserved[3];
+	u64 data[] __counted_by(command_count);
 };
 
 /* Exec buffer command header format */
@@ -101,63 +114,46 @@ struct amdxdna_sched_job {
 	/* user can wait on this fence */
 	struct dma_fence	*out_fence;
 	u64			seq;
-	struct amdxdna_gem_obj	**cmd_bo;
-	u32			cmd_bo_cnt;
+	struct amdxdna_gem_obj	*cmd_bo;
 	size_t			bo_cnt;
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
 static inline u32
-amdxdna_cmd_get_op(struct amdxdna_sched_job *job, int idx)
+amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+	struct amdxdna_cmd *cmd = abo->mem.kva;
 
 	return cmd->opcode;
 }
 
 static inline void
-amdxdna_cmd_set_state(struct amdxdna_sched_job *job, int idx, enum ert_cmd_state s)
+amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 {
-	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+	struct amdxdna_cmd *cmd = abo->mem.kva;
 
 	cmd->state = s;
 }
 
 static inline enum ert_cmd_state
-amdxdna_cmd_get_state(struct amdxdna_sched_job *job, int idx)
+amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+	struct amdxdna_cmd *cmd = abo->mem.kva;
 
 	return cmd->state;
 }
 
-static inline void
-amdxdna_cmd_set_state_in_range(struct amdxdna_sched_job *job, u32 start, u32 end,
-			       enum ert_cmd_state s)
-{
-	int i;
-
-	for (i = start; i < end; i++)
-		amdxdna_cmd_set_state(job, i, s);
-}
-
-static inline void
-amdxdna_cmd_init_all_state(struct amdxdna_sched_job *job)
-{
-	struct amdxdna_cmd *cmd;
-	int i;
-
-	for (i = 0; i < job->cmd_bo_cnt; i++) {
-		cmd = job->cmd_bo[i]->mem.kva;
-		amdxdna_cmd_set_state(job, i, ERT_CMD_STATE_NEW);
-	}
-}
-
+// TODO: need to verify size <= cmd_bo size before return?
 static inline void *
-amdxdna_cmd_get_payload(struct amdxdna_sched_job *job, int idx, u32 *size)
+amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 {
-	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
-	int num_masks = 1 + cmd->extra_cu_masks;
+	struct amdxdna_cmd *cmd = abo->mem.kva;
+	int num_masks;
+
+	if (cmd->opcode == ERT_CMD_CHAIN)
+		num_masks = 0;
+	else
+		num_masks = 1 + cmd->extra_cu_masks;
 
 	if (size) {
 		if (unlikely(cmd->count <= num_masks)) {
@@ -170,12 +166,15 @@ amdxdna_cmd_get_payload(struct amdxdna_sched_job *job, int idx, u32 *size)
 }
 
 static inline int
-amdxdna_cmd_get_cu_idx(struct amdxdna_sched_job *job, int idx)
+amdxdna_cmd_get_cu_idx(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = job->cmd_bo[idx]->mem.kva;
+	struct amdxdna_cmd *cmd = abo->mem.kva;
 	u32 *cu_mask;
 	int cu_idx;
 	int i;
+
+	if (cmd->opcode == ERT_CMD_CHAIN)
+		return -1;
 
 	cu_mask = cmd->data;
 	for (i = 0; i < 1 + cmd->extra_cu_masks; i++) {
@@ -200,18 +199,17 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 
-int amdxdna_cmds_submit(struct amdxdna_client *client,
-			u32 *cmd_bo_hdls, u32 cmd_bo_cnt,
-			u32 *arg_bo_hdls, u32 arg_bo_cnt,
-			u32 hwctx_hdl, u64 *seq);
+int amdxdna_cmd_submit(struct amdxdna_client *client,
+		       u32 cmd_bo_hdls, u32 *arg_bo_hdls, u32 arg_bo_cnt,
+		       u32 hwctx_hdl, u64 *seq);
 
-int amdxdna_cmds_wait(struct amdxdna_client *client, u32 hwctx_hdl,
-		      u64 seq, u32 timeout);
+int amdxdna_cmd_wait(struct amdxdna_client *client, u32 hwctx_hdl,
+		     u64 seq, u32 timeout);
 
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
-int amdxdna_drm_exec_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_create_hwctx_unsec_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 

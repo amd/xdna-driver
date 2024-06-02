@@ -229,16 +229,19 @@ static int
 aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 {
 	struct amdxdna_sched_job *job = handle;
+	struct amdxdna_gem_obj *cmd_abo;
 	u32 ret = 0;
 	u32 status;
 
+	cmd_abo = job->cmd_bo;
+
 	if (unlikely(!data)) {
-		amdxdna_cmd_set_state(job, 0, ERT_CMD_STATE_ABORT);
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		goto out;
 	}
 
 	if (unlikely(size != sizeof(u32))) {
-		amdxdna_cmd_set_state(job, 0, ERT_CMD_STATE_ABORT);
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -246,9 +249,9 @@ aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 	status = *data;
 	XDNA_DBG(job->hwctx->client->xdna, "Resp status 0x%x", status);
 	if (status == AIE2_STATUS_SUCCESS)
-		amdxdna_cmd_set_state(job, 0, ERT_CMD_STATE_COMPLETED);
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
 	else
-		amdxdna_cmd_set_state(job, 0, ERT_CMD_STATE_ERROR);
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ERROR);
 
 out:
 	aie2_sched_notify(job);
@@ -282,31 +285,25 @@ static int
 aie2_sched_cmdlist_resp_handler(void *handle, const u32 *data, size_t size)
 {
 	struct amdxdna_sched_job *job = handle;
+	struct amdxdna_gem_obj *cmd_abo;
 	struct cmd_chain_resp *resp;
 	struct amdxdna_dev *xdna;
 	u32 fail_cmd_status;
 	u32 fail_cmd_idx;
 	u32 ret = 0;
 
-	if (unlikely(!data)) {
-		amdxdna_cmd_set_state_in_range(job, 0, job->cmd_bo_cnt,
-					       ERT_CMD_STATE_ABORT);
-		goto out;
-	}
-
-	if (unlikely(size != sizeof(u32) * 3)) {
-		amdxdna_cmd_set_state_in_range(job, 0, job->cmd_bo_cnt,
-					       ERT_CMD_STATE_ABORT);
+	cmd_abo = job->cmd_bo;
+	if (unlikely(!data) || unlikely(size != sizeof(u32) * 3)) {
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
 	}
 
 	resp = (struct cmd_chain_resp *)data;
 	xdna = job->hwctx->client->xdna;
-	XDNA_DBG(xdna, "Status for all 0x%x", resp->status);
+	XDNA_DBG(xdna, "Status 0x%x", resp->status);
 	if (resp->status == AIE2_STATUS_SUCCESS) {
-		amdxdna_cmd_set_state_in_range(job, 0, job->cmd_bo_cnt,
-					       ERT_CMD_STATE_COMPLETED);
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
 		goto out;
 	}
 
@@ -316,18 +313,20 @@ aie2_sched_cmdlist_resp_handler(void *handle, const u32 *data, size_t size)
 	XDNA_DBG(xdna, "Failed cmd idx %d, status 0x%x",
 		 fail_cmd_idx, fail_cmd_status);
 
-	if (fail_cmd_idx > job->cmd_bo_cnt ||
-	    fail_cmd_status == AIE2_STATUS_SUCCESS) {
-		amdxdna_cmd_set_state_in_range(job, 0, job->cmd_bo_cnt,
-					       ERT_CMD_STATE_ABORT);
+	if (fail_cmd_status == AIE2_STATUS_SUCCESS) {
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
 	}
+	amdxdna_cmd_set_state(cmd_abo, fail_cmd_status);
 
-	amdxdna_cmd_set_state_in_range(job, 0, fail_cmd_idx, ERT_CMD_STATE_COMPLETED);
-	amdxdna_cmd_set_state_in_range(job, fail_cmd_idx, job->cmd_bo_cnt,
-				       ERT_CMD_STATE_ABORT);
+	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
+		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
 
+		cc->error_index = fail_cmd_idx;
+		if (cc->error_index >= cc->command_count)
+			cc->error_index = 0;
+	}
 out:
 	aie2_sched_notify(job);
 	return ret;
@@ -337,6 +336,7 @@ static struct dma_fence *
 aie2_sched_job_run(struct drm_sched_job *sched_job)
 {
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence;
 	int ret;
@@ -347,16 +347,19 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
 
-	if (unlikely(!job->cmd_bo_cnt)) {
-		ret = aie2_sync_bo(hwctx, job, job, aie2_sched_nocmd_resp_handler);
+	if (unlikely(!cmd_abo)) {
+		ret = aie2_sync_bo(hwctx, job, aie2_sched_nocmd_resp_handler);
 		goto out;
 	}
 
-	amdxdna_cmd_init_all_state(job);
-	if (force_cmdlist || job->cmd_bo_cnt > 1)
-		ret = aie2_cmdlist(hwctx, job, job, aie2_sched_cmdlist_resp_handler);
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_NEW);
+
+	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN)
+		ret = aie2_cmdlist_multi_execbuf(hwctx, job, aie2_sched_cmdlist_resp_handler);
+	else if (force_cmdlist)
+		ret = aie2_cmdlist_single_execbuf(hwctx, job, aie2_sched_cmdlist_resp_handler);
 	else
-		ret = aie2_execbuf(hwctx, job, job, aie2_sched_resp_handler);
+		ret = aie2_execbuf(hwctx, job, aie2_sched_resp_handler);
 
 out:
 	if (ret) {

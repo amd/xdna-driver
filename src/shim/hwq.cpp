@@ -87,7 +87,9 @@ submit_command(xrt_core::buffer_handle *cmd)
     return;
   }
 
-  // Unchain commands
+  // HACK: Forcibly unchain commands, to be removed later.
+  //
+  // Forcibly unchain commands and send to driver one by one.
   auto payload = get_ert_cmd_chain_data(pkt);
   for (size_t i = 0; i < payload->command_count; i++) {
     auto boh = reinterpret_cast<xrt_core::buffer_handle*>(
@@ -104,14 +106,35 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
   if (!m_pdev.is_force_unchained_command() || !pkt)
     return wait_cmd(m_pdev, m_hwctx, cmd, timeout_ms);
 
-  // Wait for the last unchained command
+  // HACK: handling forcibly unchained commands, to be removed later.
+  //
+  // Wait for the last unchained command.
   auto payload = get_ert_cmd_chain_data(pkt);
-  auto boh = reinterpret_cast<xrt_core::buffer_handle*>(
+  auto last_boh = reinterpret_cast<xrt_core::buffer_handle*>(
     m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[payload->command_count-1])));
-  auto ret = wait_cmd(m_pdev, m_hwctx, boh, timeout_ms);
-  auto last_cmdpkt = reinterpret_cast<ert_packet *>(boh->map(xrt_core::buffer_handle::map_type::write));
-  pkt->state = last_cmdpkt->state;
-  return ret;
+  auto ret = wait_cmd(m_pdev, m_hwctx, last_boh, timeout_ms);
+  if (ret)
+    return ret;
+
+  // Check the state of the last command.
+  auto cmdpkt = reinterpret_cast<ert_packet *>(last_boh->map(xrt_core::buffer_handle::map_type::read));
+  if (cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+    pkt->state = ERT_CMD_STATE_COMPLETED;
+    return 0;
+  }
+
+  // Find out the first command failed.
+  for (int i = 0; i < payload->command_count; i++) {
+    auto boh = reinterpret_cast<xrt_core::buffer_handle*>(
+      m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[i])));
+    cmdpkt = reinterpret_cast<ert_packet *>(boh->map(xrt_core::buffer_handle::map_type::read));
+    if (cmdpkt->state != ERT_CMD_STATE_COMPLETED) {
+      pkt->state = cmdpkt->state;
+      payload->error_index = i;
+      break;
+    }
+  }
+  return 0;
 }
 
 } // shim_xdna
