@@ -467,26 +467,9 @@ static int amdxdna_rpmops_resume(struct device *dev)
 	return ret;
 }
 
-static int amdxdna_rpmops_idle(struct device *dev)
-{
-	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	static unsigned long last_check_time;
-	int ret = -EBUSY;
-
-	XDNA_WARN(xdna, "enter rpm usage_counter: %d", atomic_read(&dev->power.usage_count));
-
-	if (time_after(jiffies, last_check_time + 10 * HZ)) {
-		last_check_time = jiffies;
-		ret = 0;
-	}
-
-	XDNA_WARN(xdna, "exit, ret=%d", ret);
-	return ret;
-}
-
 static const struct dev_pm_ops amdxdna_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(amdxdna_pmops_suspend, amdxdna_pmops_resume)
-	SET_RUNTIME_PM_OPS(amdxdna_rpmops_suspend, amdxdna_rpmops_resume, amdxdna_rpmops_idle)
+	SET_RUNTIME_PM_OPS(amdxdna_rpmops_suspend, amdxdna_rpmops_resume, NULL)
 };
 
 static struct pci_driver amdxdna_pci_driver = {
