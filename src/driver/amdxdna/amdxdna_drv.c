@@ -103,7 +103,7 @@ skip_sva_bind:
 	client->filp = filp;
 
 	XDNA_DBG(xdna, "PID %d opened", client->pid);
-	XDNA_WARN(xdna, "exit");
+	XDNA_WARN(xdna, "exit. pid %d opened", client->pid);
 	return 0;
 
 unbind_sva:
@@ -446,13 +446,11 @@ static int amdxdna_rpmops_suspend(struct device *dev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	int ret = -EAGAIN;
 
-	pci_save_state(pdev);
-	// todo
+	XDNA_WARN(xdna, "Runtime suspend...");
 	amdxdna_pmops_suspend(dev);
-	pci_set_power_state(pdev, PCI_D3cold);
 
-	XDNA_WARN(xdna, "enter rpm usage_counter: %d", atomic_read(&dev->power.usage_count));
 	ret = 0;
+	XDNA_WARN(xdna, "Runtime suspend done ret: %d. usage_counter: %d", ret, atomic_read(&dev->power.usage_count));
 	return ret;
 }
 
@@ -460,14 +458,13 @@ static int amdxdna_rpmops_resume(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+	int ret;
 
-	// todo
-	amdxdna_pmops_resume(dev);
-	pci_set_power_state(pdev, PCI_D0);
-	pci_restore_state(pdev);
+	XDNA_WARN(xdna, "Runtime resume...");
+	ret = amdxdna_pmops_resume(dev);
 
-	XDNA_WARN(xdna, "enter rpm usage_counter: %d", atomic_read(&dev->power.usage_count));
-	return 0;
+	XDNA_WARN(xdna, "Runtime resume done ret: %d. usage_counter: %d", ret, atomic_read(&dev->power.usage_count));
+	return ret;
 }
 
 static int amdxdna_rpmops_idle(struct device *dev)
