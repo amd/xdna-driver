@@ -524,7 +524,6 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
 	msg.send_data = (u8 *)&req;
-	/* TODO: no need to fill msg.send_size? */
 
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
@@ -699,6 +698,17 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, size, payload->command_count);
 
+	switch (op) {
+	case ERT_START_CU:
+		msg.opcode = MSG_OP_CHAIN_EXEC_BUFFER_CF;
+		break;
+	case ERT_START_DPU:
+		msg.opcode = MSG_OP_CHAIN_EXEC_DPU;
+		break;
+	default:
+		XDNA_ERR(client->xdna, "Command list for op %d is not supported", op);
+		return -EOPNOTSUPP;
+	}
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
 	msg.send_data = (u8 *)&req;
