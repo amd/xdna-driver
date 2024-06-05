@@ -740,14 +740,14 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			goto put_obj;
 		}
 
-		ret = amdxdna_cmds_submit(client, NULL, 0, &args->handle, 1,
-					  hwctx_hdl, &seq);
+		ret = amdxdna_cmd_submit(client, AMDXDNA_INVALID_BO_HANDLE, 
+					 &args->handle, 1, hwctx_hdl, &seq);
 		if (ret) {
 			XDNA_ERR(xdna, "Submit command failed");
 			goto put_obj;
 		}
 
-		ret = amdxdna_cmds_wait(client, hwctx_hdl, seq, 3000 /* ms */);
+		ret = amdxdna_cmd_wait(client, hwctx_hdl, seq, 3000 /* ms */);
 	}
 
 	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx, dir %d, hwctx %d\n",

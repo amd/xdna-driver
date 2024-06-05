@@ -59,6 +59,9 @@ public:
   uint32_t
   get_drm_bo_handle() const;
 
+  amdxdna_bo_type
+  get_type() const;
+
 protected:
   
   // DRM BO managed by driver.

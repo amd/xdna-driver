@@ -21,6 +21,8 @@ private:
 
   const pdev& m_pdev; // The pcidev that this device object is derived from
 
+  std::map<uint32_t, xrt_core::buffer_handle *> m_bo_map;
+
 protected:
   virtual std::unique_ptr<xrt_core::hwctx_handle>
   create_hw_context(const device& dev,

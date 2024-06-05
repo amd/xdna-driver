@@ -7,6 +7,8 @@
 #include "../bo.h"
 #include "drm_local/amdxdna_accel.h"
 
+#include <set>
+
 namespace shim_xdna {
 
 class bo_kmq : public bo {
@@ -30,15 +32,15 @@ public:
 
   // Obtain array of arg BO handles, returns real number of handles
   uint32_t
-  get_arg_bo_handles(uint32_t *handles, size_t num);
+  get_arg_bo_handles(uint32_t *handles, size_t num) const;
 
 private:
   bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, amdxdna_bo_type type);
 
   // Only for AMDXDNA_BO_CMD type
-  std::map<size_t, uint32_t> m_args_map;
-  std::mutex m_args_map_lock;
+  std::set<uint32_t> m_args_set;
+  mutable std::mutex m_args_map_lock;
 };
 
 } // namespace shim_xdna

@@ -5,7 +5,44 @@
 #include "hwq.h"
 #include "shim_debug.h"
 
-#include "core/common/config_reader.h"
+namespace {
+
+ert_packet *
+get_chained_command_pkt(xrt_core::buffer_handle *boh)
+{
+  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->map(xrt_core::buffer_handle::map_type::write));
+  return cmdpkt->opcode == ERT_CMD_CHAIN ? cmdpkt : nullptr;
+}
+
+int
+wait_cmd(const shim_xdna::pdev& pdev, const shim_xdna::hw_ctx *ctx,
+  xrt_core::buffer_handle *cmd, uint32_t timeout_ms)
+{
+  int ret = 1;
+  auto boh = static_cast<shim_xdna::bo*>(cmd);
+  auto id = boh->get_cmd_id();
+
+  shim_debug("Waiting for cmd (%ld)...", id);
+
+  amdxdna_drm_wait_cmd wcmd = {
+    .hwctx = ctx->get_slotidx(),
+    .timeout = timeout_ms,
+    .seq = boh->get_cmd_id(),
+  };
+
+  try {
+    pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
+  }
+  catch (const xrt_core::system_error& ex) {
+    if (ex.get_code() != ETIME)
+      throw;
+    else
+      ret = 0;
+  }
+  return ret;
+}
+
+}
 
 namespace shim_xdna {
 
@@ -14,34 +51,7 @@ hw_q(const device& device)
   : m_hwctx(nullptr)
   , m_queue_boh(AMDXDNA_INVALID_BO_HANDLE)
   , m_pdev(device.get_pdev())
-  // Default of force_unchained_command should be false once command
-  // chaining is natively supported by driver/firmware.
-  , m_force_unchained_command(xrt_core::config::detail::get_bool_value(
-    "Debug.force_unchained_command", true))
 {
-}
-
-void
-hw_q::
-submit_command(xrt_core::buffer_handle *cmd_bo)
-{
-  std::vector<xrt_core::buffer_handle *> cmd_bos {cmd_bo};
-  xrt_core::span<xrt_core::buffer_handle *> cmds {cmd_bos};
-  return submit_command(cmds);
-}
-
-void
-hw_q::
-submit_command(const xrt_core::span<xrt_core::buffer_handle *>& cmd_bos)
-{
-  if (cmd_bos.size() > 1) {
-    if (m_force_unchained_command) {
-      for (auto& cmd : cmd_bos)
-        submit_command(cmd);
-      return;
-    }
-  }
-  submit_command_list(cmd_bos);
 }
 
 void
@@ -67,32 +77,64 @@ get_queue_bo()
   return m_queue_boh;
 }
 
+void
+hw_q::
+submit_command(xrt_core::buffer_handle *cmd)
+{
+  auto pkt = get_chained_command_pkt(cmd);
+  if (!m_pdev.is_force_unchained_command() || !pkt) {
+    issue_command(cmd);
+    return;
+  }
+
+  // HACK: Forcibly unchain commands, to be removed later.
+  //
+  // Forcibly unchain commands and send to driver one by one.
+  auto payload = get_ert_cmd_chain_data(pkt);
+  for (size_t i = 0; i < payload->command_count; i++) {
+    auto boh = reinterpret_cast<xrt_core::buffer_handle*>(
+      m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[i])));
+    issue_command(boh);
+  }
+}
+
 int
 hw_q::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
-  int ret = 1;
-  auto boh = static_cast<bo*>(cmd);
-  auto id = boh->get_cmd_id();
+  auto pkt = get_chained_command_pkt(cmd);
+  if (!m_pdev.is_force_unchained_command() || !pkt)
+    return wait_cmd(m_pdev, m_hwctx, cmd, timeout_ms);
 
-  shim_debug("Waiting for cmd (%ld)...", id);
+  // HACK: handling forcibly unchained commands, to be removed later.
+  //
+  // Wait for the last unchained command.
+  auto payload = get_ert_cmd_chain_data(pkt);
+  auto last_boh = reinterpret_cast<xrt_core::buffer_handle*>(
+    m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[payload->command_count-1])));
+  auto ret = wait_cmd(m_pdev, m_hwctx, last_boh, timeout_ms);
+  if (ret != 1)
+    return ret;
 
-  amdxdna_drm_wait_cmd wcmd = {
-    .hwctx = m_hwctx->get_slotidx(),
-    .timeout = timeout_ms,
-    .seq = boh->get_cmd_id(),
-  };
-
-  try {
-    m_pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
+  // Check the state of the last command.
+  auto cmdpkt = reinterpret_cast<ert_packet *>(last_boh->map(xrt_core::buffer_handle::map_type::read));
+  if (cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+    pkt->state = ERT_CMD_STATE_COMPLETED;
+    return 1;
   }
-  catch (const xrt_core::system_error& ex) {
-    if (ex.get_code() != ETIME)
-      throw;
-    else
-      ret = 0;
+
+  // Find out the first command failed.
+  for (int i = 0; i < payload->command_count; i++) {
+    auto boh = reinterpret_cast<xrt_core::buffer_handle*>(
+      m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[i])));
+    cmdpkt = reinterpret_cast<ert_packet *>(boh->map(xrt_core::buffer_handle::map_type::read));
+    if (cmdpkt->state != ERT_CMD_STATE_COMPLETED) {
+      pkt->state = cmdpkt->state;
+      payload->error_index = i;
+      break;
+    }
   }
-  return ret;
+  return 1;
 }
 
 } // shim_xdna

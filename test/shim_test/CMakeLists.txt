@@ -29,7 +29,6 @@ set_target_properties(${XDNA_SHIM_TEST} PROPERTIES
 target_include_directories(${XDNA_SHIM_TEST} PRIVATE
   ${XRT_SUBMOD_SOURCE_DIR}/src/runtime_src
   ${XRT_SUBMOD_SOURCE_DIR}/src/runtime_src/core/include
-  ${XRT_SUBMOD_SOURCE_DIR}/src/runtime_src/core/common/gsl/include
   ${XRT_SUBMOD_BINARY_DIR}/src/gen
   )
 

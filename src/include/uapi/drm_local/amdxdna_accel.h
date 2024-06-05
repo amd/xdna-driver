@@ -14,8 +14,8 @@
 extern "C" {
 #endif
 
-#define AMDXDNA_DRIVER_MAJOR	1
-#define AMDXDNA_DRIVER_MINOR	0
+#define AMDXDNA_DRIVER_MAJOR		1
+#define AMDXDNA_DRIVER_MINOR		0
 
 #define AMDXDNA_INVALID_CMD_HANDLE	(~0UL)
 #define AMDXDNA_INVALID_ADDR		(~0UL)
@@ -236,7 +236,7 @@ enum amdxdna_cmd_type {
  * @ext_flags: MBZ.
  * @hwctx: Hardware context handle.
  * @type: One of command type in enum amdxdna_cmd_type.
- * @cmd_handles: Array of command handles.
+ * @cmd_handles: Array of command handles or the command handle itself in case of just one.
  * @args: Array of arguments for all command handles.
  * @cmd_count: Number of command handles in the cmd_handles array.
  * @arg_count: Number of arguments in the args array.

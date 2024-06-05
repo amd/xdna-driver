@@ -173,6 +173,7 @@ alloc_bo()
   amdxdna_drm_get_bo_info bo_info = {};
   get_drm_bo_info(m_pdev, boh, &bo_info);
   m_bo = std::make_unique<bo::drm_bo>(*this, bo_info);
+  m_pdev.insert_hdl_mapping(boh, reinterpret_cast<uint64_t>(this));
 }
 
 void
@@ -190,6 +191,7 @@ void
 bo::
 free_bo()
 {
+  m_pdev.remove_hdl_mapping(get_drm_bo_handle());
   m_bo.reset();
 }
 
@@ -223,7 +225,7 @@ bo::properties
 bo::
 get_properties() const
 {
-  return { m_flags, m_size, get_paddr() };
+  return { m_flags, m_size, get_paddr(), get_drm_bo_handle() };
 }
 
 void*
@@ -311,6 +313,13 @@ share() const
   auto fd = export_drm_bo(m_pdev, boh);
   shim_debug("Exported bo %d to fd %d", boh, fd);
   return std::make_unique<shared>(fd);
+}
+
+amdxdna_bo_type
+bo::
+get_type() const
+{
+  return m_type;
 }
 
 } // namespace shim_xdna
