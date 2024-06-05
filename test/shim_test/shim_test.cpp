@@ -911,7 +911,7 @@ struct {
 #define IO_TEST_NO_PERF       0
 #define IO_TEST_LATENCY_PERF  1
 #define IO_TEST_THRUPUT_PERF  2
-  bool perf;
+  int perf;
 #define IO_TEST_NORMAL_RUN    0
 #define IO_TEST_NOOP_RUN      1
 #define IO_TEST_BAD_RUN       2
@@ -948,7 +948,7 @@ struct io_test_bo {
 using io_test_bo_set = std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>;
 
 void
-io_test_parameter_init(bool perf, int type, bool debug = false)
+io_test_parameter_init(int perf, int type, bool debug = false)
 {
   io_test_parameters.perf = perf;
   io_test_parameters.type = type;
@@ -1378,7 +1378,7 @@ TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 void
 TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  io_test_parameter_init(true, static_cast<unsigned int>(arg[0]));
+  io_test_parameter_init(IO_TEST_LATENCY_PERF, static_cast<unsigned int>(arg[0]));
   io_test(id, sdev.get(), 1000, 1, 1);
 }
 
