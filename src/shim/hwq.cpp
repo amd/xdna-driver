@@ -120,7 +120,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
   auto cmdpkt = reinterpret_cast<ert_packet *>(last_boh->map(xrt_core::buffer_handle::map_type::read));
   if (cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
     pkt->state = ERT_CMD_STATE_COMPLETED;
-    return 0;
+    return 1;
   }
 
   // Find out the first command failed.
@@ -134,7 +134,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
       break;
     }
   }
-  return 0;
+  return 1;
 }
 
 } // shim_xdna
