@@ -650,6 +650,19 @@ aie2_cmdlist_prepare_request(struct cmd_chain_req *req,
 		 req->buf_addr, size, cnt);
 }
 
+static inline u32
+aie2_cmd_op_to_msg_op(u32 op)
+{
+	switch (op) {
+	case ERT_START_CU:
+		return MSG_OP_CHAIN_EXEC_BUFFER_CF;
+	case ERT_START_DPU:
+		return MSG_OP_CHAIN_EXEC_DPU;
+	default:
+		return MSG_OP_MAX_OPCODE;
+	}
+}
+
 int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 			       struct amdxdna_sched_job *job,
 			       int (*notify_cb)(void *, const u32 *, size_t))
@@ -696,19 +709,12 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 		offset += size;
 	}
 
-	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, size, payload->command_count);
+	/* The offset is the accumulated total size of the cmd buffer */
+	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, offset, payload->command_count);
 
-	switch (op) {
-	case ERT_START_CU:
-		msg.opcode = MSG_OP_CHAIN_EXEC_BUFFER_CF;
-		break;
-	case ERT_START_DPU:
-		msg.opcode = MSG_OP_CHAIN_EXEC_DPU;
-		break;
-	default:
-		XDNA_ERR(client->xdna, "Command list for op %d is not supported", op);
+	msg.opcode = aie2_cmd_op_to_msg_op(op);
+	if (msg.opcode == MSG_OP_MAX_OPCODE)
 		return -EOPNOTSUPP;
-	}
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
 	msg.send_data = (u8 *)&req;
@@ -733,14 +739,18 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 	struct cmd_chain_req req;
 	u32 size;
 	int ret;
+	u32 op;
 
-	ret = aie2_cmdlist_fill_one_slot(amdxdna_cmd_get_op(cmd_abo),
-					 cmdbuf_abo, 0, cmd_abo, &size);
+	op = amdxdna_cmd_get_op(cmd_abo);
+	ret = aie2_cmdlist_fill_one_slot(op, cmdbuf_abo, 0, cmd_abo, &size);
 	if (ret)
 		return ret;
 
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, size, 1);
 
+	msg.opcode = aie2_cmd_op_to_msg_op(op);
+	if (msg.opcode == MSG_OP_MAX_OPCODE)
+		return -EOPNOTSUPP;
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
 	msg.send_data = (u8 *)&req;
