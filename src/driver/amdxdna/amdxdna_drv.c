@@ -369,6 +369,22 @@ static void amdxdna_remove(struct pci_dev *pdev)
 #endif
 }
 
+static int amdxdna_dev_suspend_nolock(struct amdxdna_dev *xdna)
+{
+	if (xdna->dev_info->ops->suspend)
+		xdna->dev_info->ops->suspend(xdna);
+
+	return 0;
+}
+
+static int amdxdna_dev_resume_nolock(struct amdxdna_dev *xdna)
+{
+	if (xdna->dev_info->ops->resume)
+		return xdna->dev_info->ops->resume(xdna);
+
+	return 0;
+}
+
 static int amdxdna_pmops_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
@@ -378,8 +394,7 @@ static int amdxdna_pmops_suspend(struct device *dev)
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_suspend(client);
 
-	if (xdna->dev_info->ops->suspend)
-		xdna->dev_info->ops->suspend(xdna);
+	amdxdna_dev_suspend_nolock(xdna);
 	mutex_unlock(&xdna->dev_lock);
 
 	return 0;
@@ -391,18 +406,16 @@ static int amdxdna_pmops_resume(struct device *dev)
 	struct amdxdna_client *client;
 	int ret;
 
-	XDNA_DBG(xdna, "firmware resuming...");
+	XDNA_INFO(xdna, "firmware resuming...");
 	mutex_lock(&xdna->dev_lock);
-	if (xdna->dev_info->ops->resume) {
-		ret = xdna->dev_info->ops->resume(xdna);
-		if (ret) {
-			XDNA_ERR(xdna, "resume NPU firmware failed");
-			mutex_unlock(&xdna->dev_lock);
-			return ret;
-		}
+	ret = amdxdna_dev_resume_nolock(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "resume NPU firmware failed");
+		mutex_unlock(&xdna->dev_lock);
+		return ret;
 	}
 
-	XDNA_DBG(xdna, "hardware context resuming...");
+	XDNA_INFO(xdna, "hardware context resuming...");
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_resume(client);
 	mutex_unlock(&xdna->dev_lock);
@@ -415,7 +428,14 @@ static int amdxdna_rpmops_suspend(struct device *dev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
 	int ret;
 
-	ret = amdxdna_pmops_suspend(dev);
+	mutex_lock(&xdna->dev_lock);
+	if (!list_empty(&xdna->client_list)) {
+		XDNA_WARN(xdna, "can't suspend due to alive clients");
+		mutex_unlock(&xdna->dev_lock);
+		return -EBUSY;
+	}
+	ret = amdxdna_dev_suspend_nolock(xdna);
+	mutex_unlock(&xdna->dev_lock);
 
 	XDNA_DBG(xdna, "Runtime suspend done ret: %d", ret);
 	return ret;
@@ -426,7 +446,9 @@ static int amdxdna_rpmops_resume(struct device *dev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
 	int ret;
 
-	ret = amdxdna_pmops_resume(dev);
+	mutex_lock(&xdna->dev_lock);
+	ret = amdxdna_dev_resume_nolock(xdna);
+	mutex_unlock(&xdna->dev_lock);
 
 	XDNA_DBG(xdna, "Runtime resume done ret: %d", ret);
 	return ret;
