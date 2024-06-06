@@ -8,6 +8,7 @@
 
 #include <linux/stringify.h>
 #include <linux/tracepoint.h>
+#include <linux/version.h>
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM amdxdna_trace
@@ -22,9 +23,15 @@ TRACE_EVENT(amdxdna_debug_point,
 			     __field(int, line)
 			     __string(str, str)),
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 	    TP_fast_assign(__assign_str(name, name);
 			   __entry->line = line;
 			   __assign_str(str, str);),
+#else
+	    TP_fast_assign(__assign_str(name);
+			   __entry->line = line;
+			   __assign_str(str);),
+#endif
 
 	    TP_printk("%s:%d %s", __get_str(name), __entry->line,
 		      __get_str(str))
@@ -39,9 +46,15 @@ TRACE_EVENT(xdna_job,
 			     __string(str, str)
 			     __field(u64, seq)),
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 	    TP_fast_assign(__assign_str(name, name);
 			   __assign_str(str, str);
 			   __entry->seq = seq;),
+#else
+	    TP_fast_assign(__assign_str(name);
+			   __assign_str(str);
+			   __entry->seq = seq;),
+#endif
 
 	    TP_printk("%s seq#:%lld %s", __get_str(name), __entry->seq,
 		      __get_str(str))
@@ -57,10 +70,17 @@ DECLARE_EVENT_CLASS(xdna_mbox_msg,
 				     __field(u32, opcode)
 				     __field(u32, msg_id)),
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 		    TP_fast_assign(__assign_str(name, name);
 				   __entry->chann_id = chann_id;
 				   __entry->opcode = opcode;
 				   __entry->msg_id = msg_id;),
+#else
+		    TP_fast_assign(__assign_str(name);
+				   __entry->chann_id = chann_id;
+				   __entry->opcode = opcode;
+				   __entry->msg_id = msg_id;),
+#endif
 
 		    TP_printk("%s.%d id 0x%x opcode 0x%x", __get_str(name),
 			      __entry->chann_id, __entry->msg_id, __entry->opcode)
@@ -84,8 +104,13 @@ TRACE_EVENT(mbox_irq_handle,
 	    TP_STRUCT__entry(__string(name, name)
 			     __field(int, irq)),
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 	    TP_fast_assign(__assign_str(name, name);
 			   __entry->irq = irq;),
+#else
+	    TP_fast_assign(__assign_str(name);
+			   __entry->irq = irq;),
+#endif
 
 	    TP_printk("%s.%d", __get_str(name), __entry->irq)
 );
