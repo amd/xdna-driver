@@ -20,6 +20,8 @@
 #define CREATE_TRACE_POINTS
 #include "amdxdna_trace.h"
 
+#define AMDXDNA_AUTOSUSPEND_DELAY	5000 /* miliseconds */
+
 /*
  *  There are platforms which share the same PCI device ID
  *  but have different PCI revision IDs. So, let the PCI class
@@ -57,7 +59,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	int ret;
 
 	ret = pm_runtime_resume_and_get(ddev->dev);
-	if (ret < 0) {
+	if (ret) {
 		XDNA_ERR(xdna, "Failed to get rpm, ret %d", ret);
 		return ret;
 	}
@@ -271,11 +273,11 @@ amdxdna_get_dev_info(struct pci_dev *pdev)
 
 static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	struct amdxdna_dev *xdna;
 	struct device *dev = &pdev->dev;
+	struct amdxdna_dev *xdna;
 	int ret;
 
-	xdna = devm_drm_dev_alloc(&pdev->dev, &amdxdna_drm_drv, typeof(*xdna), ddev);
+	xdna = devm_drm_dev_alloc(dev, &amdxdna_drm_drv, typeof(*xdna), ddev);
 	if (IS_ERR(xdna))
 		return PTR_ERR(xdna);
 
@@ -304,7 +306,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_dev_fini;
 	}
 
-	pm_runtime_set_autosuspend_delay(dev, 5000);
+	pm_runtime_set_autosuspend_delay(dev, AMDXDNA_AUTOSUSPEND_DELAY);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_allow(dev);
 
@@ -337,8 +339,8 @@ failed_dev_fini:
 static void amdxdna_remove(struct pci_dev *pdev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
-	struct amdxdna_client *client;
 	struct device *dev = &pdev->dev;
+	struct amdxdna_client *client;
 
 	pm_runtime_get_noresume(dev);
 	pm_runtime_forbid(dev);
