@@ -4,6 +4,7 @@
  */
 
 #include "drm_local/amdxdna_accel.h"
+#include <linux/vmalloc.h>
 #include <drm/drm_cache.h>
 
 #include "amdxdna_drv.h"

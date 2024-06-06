@@ -7,6 +7,7 @@
 #include <linux/module.h>
 #include <linux/debugfs.h>
 #include <linux/string.h>
+#include <linux/vmalloc.h>
 #include <linux/completion.h>
 #include <drm/drm_debugfs.h>
 

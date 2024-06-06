@@ -8,6 +8,7 @@
 #include <linux/io.h>
 #include <linux/idr.h>
 #include <linux/mutex.h>
+#include <linux/vmalloc.h>
 #include <linux/spinlock.h>
 #include <linux/build_bug.h>
 #include <linux/interrupt.h>
