@@ -1745,7 +1745,7 @@ main(int argc, char **argv)
     int first_test_id = 1;
 
     if (argc >= 2) {
-      std::ifstream xclbin(argv[1]);
+      std::ifstream xclbin(argv[first_test_id]);
       if (xclbin) {
         xclbinpath = argv[1];
         std::cout << "Xclbin file: " << xclbinpath << std::endl;
