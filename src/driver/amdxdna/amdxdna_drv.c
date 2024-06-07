@@ -313,6 +313,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
+		pm_runtime_forbid(dev);
 		goto failed_sysfs_fini;
 	}
 
@@ -429,11 +430,7 @@ static int amdxdna_rpmops_suspend(struct device *dev)
 	int ret;
 
 	mutex_lock(&xdna->dev_lock);
-	if (!list_empty(&xdna->client_list)) {
-		XDNA_WARN(xdna, "can't suspend due to alive clients");
-		mutex_unlock(&xdna->dev_lock);
-		return -EBUSY;
-	}
+	WARN_ON(!list_empty(&xdna->client_list));
 	ret = amdxdna_dev_suspend_nolock(xdna);
 	mutex_unlock(&xdna->dev_lock);
 
