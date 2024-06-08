@@ -27,6 +27,7 @@
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 
 struct amdxdna_dev;
+struct amdxdna_client;
 struct amdxdna_dev_hdl;
 struct amdxdna_dev_priv;
 
@@ -39,11 +40,12 @@ struct amdxdna_dev_ops {
 	void (*fini)(struct amdxdna_dev *xdna);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
+	/* obsoleted will be removed */
 	int (*get_info)(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
-	int (*set_state)(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 
+	/* Below device ops are called by IOCTL */
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
 	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
@@ -51,6 +53,8 @@ struct amdxdna_dev_ops {
 	void (*hwctx_resume)(struct amdxdna_hwctx *hwctx);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
+	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
+	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 };
 
 /*
