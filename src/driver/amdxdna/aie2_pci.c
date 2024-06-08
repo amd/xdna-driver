@@ -17,6 +17,10 @@
 #include "amdxdna_devel.h"
 #endif
 
+#ifdef AMDXDNA_AIE2_PRIV
+#include "aie2_internal.h"
+#endif
+
 int aie2_max_col = XRS_MAX_COL;
 module_param(aie2_max_col, int, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
@@ -552,9 +556,10 @@ skip_pasid:
 	pci_free_irq_vectors(pdev);
 }
 
-static int aie2_get_aie_status(struct amdxdna_dev *xdna,
+static int aie2_get_aie_status(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_status status;
 	int ret;
@@ -585,9 +590,10 @@ static int aie2_get_aie_status(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int aie2_get_aie_metadata(struct amdxdna_dev *xdna,
+static int aie2_get_aie_metadata(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_metadata *meta;
 	int ret = 0;
@@ -628,9 +634,10 @@ static int aie2_get_aie_metadata(struct amdxdna_dev *xdna,
 	return ret;
 }
 
-static int aie2_get_aie_version(struct amdxdna_dev *xdna,
+static int aie2_get_aie_version(struct amdxdna_client *client,
 				struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_version version;
 
@@ -643,9 +650,10 @@ static int aie2_get_aie_version(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static int aie2_get_clock_metadata(struct amdxdna_dev *xdna,
+static int aie2_get_clock_metadata(struct amdxdna_client *client,
 				   struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_clock_metadata *clock;
 	int ret = 0;
@@ -667,7 +675,7 @@ static int aie2_get_clock_metadata(struct amdxdna_dev *xdna,
 	return ret;
 }
 
-static int aie2_get_sensors(struct amdxdna_dev *xdna,
+static int aie2_get_sensors(struct amdxdna_client *client,
 			    struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_sensor *sensor;
@@ -690,12 +698,13 @@ static int aie2_get_sensors(struct amdxdna_dev *xdna,
 	return ret;
 }
 
-static int aie2_get_hwctx_status(struct amdxdna_dev *xdna,
+static int aie2_get_hwctx_status(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_drm_query_hwctx __user *buf;
 	struct amdxdna_drm_query_hwctx *tmp;
-	struct amdxdna_client *client;
+	struct amdxdna_client *tmp_client;
 	struct amdxdna_hwctx *hwctx;
 	bool overflow = false;
 	u32 req_bytes = 0;
@@ -711,10 +720,10 @@ static int aie2_get_hwctx_status(struct amdxdna_dev *xdna,
 		return -ENOMEM;
 
 	buf = u64_to_user_ptr(args->buffer);
-	list_for_each_entry(client, &xdna->client_list, node) {
-		idx = srcu_read_lock(&client->hwctx_srcu);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&tmp_client->hwctx_srcu);
 		next = 0;
-		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+		idr_for_each_entry_continue(&tmp_client->hwctx_idr, hwctx, next) {
 			req_bytes += sizeof(tmp);
 			if (args->buffer_size < req_bytes) {
 				/* Continue iterating to get the required size */
@@ -722,7 +731,7 @@ static int aie2_get_hwctx_status(struct amdxdna_dev *xdna,
 				continue;
 			}
 
-			tmp->pid = client->pid;
+			tmp->pid = tmp_client->pid;
 			tmp->context_id = hwctx->id;
 			tmp->start_col = hwctx->start_col;
 			tmp->num_col = hwctx->num_col;
@@ -735,12 +744,12 @@ static int aie2_get_hwctx_status(struct amdxdna_dev *xdna,
 
 			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;
-				srcu_read_unlock(&client->hwctx_srcu, idx);
+				srcu_read_unlock(&tmp_client->hwctx_srcu, idx);
 				goto out;
 			}
 			hw_i++;
 		}
-		srcu_read_unlock(&client->hwctx_srcu, idx);
+		srcu_read_unlock(&tmp_client->hwctx_srcu, idx);
 	}
 
 	if (overflow) {
@@ -755,8 +764,9 @@ out:
 	return ret;
 }
 
-static int aie2_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args)
+static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	int ret, idx;
 
 	if (!drm_dev_enter(&xdna->ddev, &idx))
@@ -764,23 +774,31 @@ static int aie2_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *
 
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = aie2_get_aie_status(xdna, args);
+		ret = aie2_get_aie_status(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		ret = aie2_get_aie_metadata(xdna, args);
+		ret = aie2_get_aie_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
-		ret = aie2_get_aie_version(xdna, args);
+		ret = aie2_get_aie_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
-		ret = aie2_get_clock_metadata(xdna, args);
+		ret = aie2_get_clock_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = aie2_get_sensors(xdna, args);
+		ret = aie2_get_sensors(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = aie2_get_hwctx_status(xdna, args);
+		ret = aie2_get_hwctx_status(client, args);
 		break;
+#ifdef AMDXDNA_AIE2_PRIV
+	case DRM_AMDXDNA_READ_AIE_MEM:
+		ret = aie2_read_aie_mem(client, args);
+		break;
+	case DRM_AMDXDNA_READ_AIE_REG:
+		ret = aie2_read_aie_reg(client, args);
+		break;
+#endif
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -791,9 +809,10 @@ static int aie2_get_info(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *
 	return ret;
 }
 
-static int aie2_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_set_power_mode power_state;
+	struct amdxdna_dev *xdna = client->xdna;
 
 	if (args->buffer_size != sizeof(power_state)) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
@@ -814,8 +833,9 @@ static int aie2_set_power_mode(struct amdxdna_dev *xdna, struct amdxdna_drm_set_
 	return 0;
 }
 
-static int aie2_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	int ret, idx;
 
 	if (!drm_dev_enter(&xdna->ddev, &idx))
@@ -823,8 +843,16 @@ static int aie2_set_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state
 
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
-		ret = aie2_set_power_mode(xdna, args);
+		ret = aie2_set_power_mode(client, args);
 		break;
+#ifdef AMDXDNA_AIE2_PRIV
+	case DRM_AMDXDNA_WRITE_AIE_MEM:
+		ret = aie2_write_aie_mem(client, args);
+		break;
+	case DRM_AMDXDNA_WRITE_AIE_REG:
+		ret = aie2_write_aie_reg(client, args);
+		break;
+#endif
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -840,8 +868,8 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.fini           = aie2_fini,
 	.resume         = aie2_hw_start,
 	.suspend        = aie2_hw_stop,
-	.get_info       = aie2_get_info,
-	.set_state      = aie2_set_state,
+	.get_aie_info   = aie2_get_info,
+	.set_aie_state  = aie2_set_state,
 	.hwctx_init     = aie2_hwctx_init,
 	.hwctx_fini     = aie2_hwctx_fini,
 	.hwctx_config   = aie2_hwctx_config,

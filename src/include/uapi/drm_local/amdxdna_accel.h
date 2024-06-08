@@ -409,6 +409,42 @@ struct amdxdna_drm_query_hwctx {
 	__u64 errors;
 };
 
+/**
+ * struct amdxdna_drm_aie_mem - The data for AIE memory read/write
+ * @col: The AIE column index
+ * @row: The AIE row index
+ * @boh: The BO to store input or output data
+ * @addr: The AIE memory address to read/write
+ * @size: The size of bytes to read/write
+ *
+ * This is used for DRM_AMDXDNA_READ_AIE_MEM and DRM_AMDXDNA_WRITE_AIE_MEM
+ * parameters.
+ */
+struct amdxdna_drm_aie_mem {
+	__u32 col;
+	__u32 row;
+	__u32 boh;
+	__u32 addr;
+	__u32 size;
+};
+
+/**
+ * struct amdxdna_drm_aie_reg - The data for AIE register read/write
+ * @col: The AIE column index
+ * @row: The AIE row index
+ * @addr: The AIE register address to read/write
+ * @val: The value to write or returned value from AIE
+ *
+ * This is used for DRM_AMDXDNA_READ_AIE_REG and DRM_AMDXDNA_WRITE_AIE_REG
+ * parameters.
+ */
+struct amdxdna_drm_aie_reg {
+	__u32 col;
+	__u32 row;
+	__u32 addr;
+	__u32 val;
+};
+
 enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_AIE_STATUS,
 	DRM_AMDXDNA_QUERY_AIE_METADATA,
@@ -416,6 +452,8 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_CLOCK_METADATA,
 	DRM_AMDXDNA_QUERY_SENSORS,
 	DRM_AMDXDNA_QUERY_HW_CONTEXTS,
+	DRM_AMDXDNA_READ_AIE_MEM,
+	DRM_AMDXDNA_READ_AIE_REG,
 	DRM_AMDXDNA_NUM_GET_PARAM,
 };
 
@@ -449,7 +487,10 @@ struct amdxdna_drm_set_power_mode {
 };
 
 enum amdxdna_drm_set_param {
-	DRM_AMDXDNA_SET_POWER_MODE
+	DRM_AMDXDNA_SET_POWER_MODE,
+	DRM_AMDXDNA_WRITE_AIE_MEM,
+	DRM_AMDXDNA_WRITE_AIE_REG,
+	DRM_AMDXDNA_NUM_SET_PARAM,
 };
 
 /**
