@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
+#include <x86intrin.h>
 #include "bo.h"
 #include "hwq.h"
 
@@ -24,6 +25,19 @@ inline bool
 is_slot_valid(volatile host_queue_packet_t *pkt)
 {
   return pkt->xrt_header.common_header.type == HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+}
+
+inline void
+pkt_clflush(volatile host_queue_packet_t *pkt)
+{
+	const int LINESIZE = 64;
+	const char *cur = (const char *)pkt;
+	/* must be at least one line */
+	uintptr_t lastline = (uintptr_t)(cur + sizeof(*pkt) - 1) | (LINESIZE - 1);
+	do {
+		_mm_clflush(cur);
+		cur += LINESIZE;
+	} while (cur <= (const char *)lastline);
 }
 
 }
@@ -202,6 +216,10 @@ fill_slot_and_send(volatile host_queue_packet_t *pkt, void *payload, size_t size
   std::memcpy(data, payload, size);
   /* Always done as last step. */
   mark_slot_valid(pkt);
+
+  /* flash cache line for non coherence memory */
+  pkt_clflush(pkt);
+
   /* Wake up CERT */
   *m_mapped_doorbell = 0;
 }
