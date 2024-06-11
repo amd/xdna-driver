@@ -162,6 +162,8 @@ typedef struct
   uint64_t data_address;
   
   // TODO Ready signal?
+  // padding to 64Bytes cache line
+  uint64_t padding[4];
 }
 host_queue_header_t;
 
