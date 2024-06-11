@@ -62,4 +62,113 @@ import_bo(xrt_core::shared_handle::export_handle ehdl) const
   return std::make_unique<bo_kmq>(*this, ehdl);
 }
 
+std::vector<char>
+device::
+read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size)
+{
+  amdxdna_drm_aie_mem mem;
+
+  auto tmp_bo = alloc_bo(size, XCL_BO_FLAGS_EXECBUF);
+  /* Make sure cache is flushed */
+  tmp_bo->sync(xrt_core::buffer_handle::direction::host2device,
+    tmp_bo->get_properties().size, 0);
+
+  mem.col = col;
+  mem.row = row;
+  mem.addr = offset;
+  mem.size = size;
+  mem.boh = static_cast<bo*>(tmp_bo.get())->get_drm_bo_handle();
+
+  amdxdna_drm_get_info arg = {
+    .param = DRM_AMDXDNA_READ_AIE_MEM,
+    .buffer_size = sizeof(mem),
+    .buffer = reinterpret_cast<uintptr_t>(&mem)
+  };
+
+  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+  auto tmp_vaddr = reinterpret_cast<char *>(
+    tmp_bo->map(xrt_core::buffer_handle::map_type::read));
+  std::vector<char> store_buf(size);
+  std::memcpy(store_buf.data(), tmp_vaddr, size);
+
+  return store_buf;
+}
+
+uint32_t
+device::
+read_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr)
+{
+  amdxdna_drm_aie_reg reg;
+
+  reg.col = col;
+  reg.row = row;
+  reg.addr = reg_addr;
+  reg.val = 0;
+
+  amdxdna_drm_get_info arg = {
+    .param = DRM_AMDXDNA_READ_AIE_REG,
+    .buffer_size = sizeof(reg),
+    .buffer = reinterpret_cast<uintptr_t>(&reg)
+  };
+
+  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+  return reg.val;
+}
+
+size_t
+device::
+write_aie_mem(uint16_t col, uint16_t row, uint32_t offset, const std::vector<char>& buf)
+{
+  amdxdna_drm_aie_mem mem;
+  uint32_t size = static_cast<uint32_t>(buf.size());
+
+  auto tmp_bo = alloc_bo(size, XCL_BO_FLAGS_EXECBUF);
+  auto tmp_vaddr = reinterpret_cast<char *>(
+    tmp_bo->map(xrt_core::buffer_handle::map_type::write));
+  std::memcpy(tmp_vaddr, buf.data(), size);
+
+  tmp_bo->sync(xrt_core::buffer_handle::direction::host2device,
+    tmp_bo->get_properties().size, 0);
+
+  mem.col = col;
+  mem.row = row;
+  mem.addr = offset;
+  mem.size = size;
+  mem.boh = static_cast<bo*>(tmp_bo.get())->get_drm_bo_handle();
+
+  amdxdna_drm_get_info arg = {
+    .param = DRM_AMDXDNA_WRITE_AIE_MEM,
+    .buffer_size = sizeof(mem),
+    .buffer = reinterpret_cast<uintptr_t>(&mem)
+  };
+
+  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+
+  return size;
+}
+
+bool
+device::
+write_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val)
+{
+  amdxdna_drm_aie_reg reg;
+
+  reg.col = col;
+  reg.row = row;
+  reg.addr = reg_addr;
+  reg.val = reg_val;
+
+  amdxdna_drm_get_info arg = {
+    .param = DRM_AMDXDNA_WRITE_AIE_REG,
+    .buffer_size = sizeof(reg),
+    .buffer = reinterpret_cast<uintptr_t>(&reg)
+  };
+
+  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+
+  return true;
+}
+
 } // namespace shim_xdna
