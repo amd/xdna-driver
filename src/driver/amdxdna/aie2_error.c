@@ -9,8 +9,6 @@
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 
-#define AIE_ERR_SENTINEL 0xFF
-
 struct async_event {
 	struct amdxdna_dev_hdl		*ndev;
 	struct async_event_msg_resp	resp;
@@ -64,6 +62,13 @@ struct aie_error {
 	u8			col;
 	enum aie_module_type	mod_type;
 	u8			event_id;
+};
+
+struct aie_err_info {
+	u32			err_cnt;
+	u32			ret_code;
+	u32			rsvd;
+	struct aie_error	payload[] __counted_by(err_cnt);
 };
 
 struct aie_event_category {
@@ -181,9 +186,6 @@ static u32 aie2_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u3
 		struct aie_error *err = &errs[i];
 		enum aie_error_category cat;
 
-		if (err->col == AIE_ERR_SENTINEL && err->row == AIE_ERR_SENTINEL)
-			break;
-
 		cat = aie_get_error_category(err->row, err->event_id, err->mod_type);
 		XDNA_ERR(ndev->xdna, "Row: %d, Col: %d, module %d, event ID %d, category %d",
 			 err->row, err->col, err->mod_type,
@@ -196,7 +198,6 @@ static u32 aie2_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u3
 		}
 
 		err_col |= (1 << err->col);
-		memset(err, AIE_ERR_SENTINEL, sizeof(*err));
 	}
 
 	/* TODO: Send AIE error to EDAC system */
@@ -229,6 +230,7 @@ static int aie2_error_event_send(struct async_event *e)
 static void aie2_error_worker(struct work_struct *err_work)
 {
 	struct amdxdna_client *client;
+	struct aie_err_info *info;
 	struct amdxdna_dev *xdna;
 	struct async_event *e;
 	u32 max_err;
@@ -246,8 +248,15 @@ static void aie2_error_worker(struct work_struct *err_work)
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     e->buf, 0x100, false);
 
-	max_err = e->size / sizeof(struct aie_error);
-	err_col = aie2_error_backtrack(e->ndev, e->buf, max_err);
+	info = (struct aie_err_info *)e->buf;
+	XDNA_DBG(xdna, "Error count %d return code %d", info->err_cnt, info->ret_code);
+
+	max_err = (e->size - sizeof(*info)) / sizeof(struct aie_error);
+	if (unlikely(info->err_cnt > max_err)) {
+		WARN_ONCE(1, "Error count too large %d\n", info->err_cnt);
+		return;
+	}
+	err_col = aie2_error_backtrack(e->ndev, info->payload, info->err_cnt);
 	if (!err_col) {
 		XDNA_WARN(xdna, "Did not get error column");
 		return;
@@ -266,8 +275,6 @@ static void aie2_error_worker(struct work_struct *err_work)
 	list_for_each_entry(client, &xdna->client_list, node)
 		aie2_restart_ctx(client);
 
-	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     e->buf, 0x100, false);
 	/* Re-sent this event to firmware */
 	if (aie2_error_event_send(e))
 		XDNA_WARN(xdna, "Unable to register async event");
@@ -323,7 +330,6 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	}
 	events->size = total_size;
 	events->event_cnt = total_col;
-	memset(events->buf, AIE_ERR_SENTINEL, total_size);
 
 	events->wq = alloc_ordered_workqueue("async_wq", 0);
 	if (!events->wq) {
