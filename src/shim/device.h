@@ -64,6 +64,16 @@ public:
   void
   register_xclbin(const xrt::xclbin& xclbin) const override;
 
+  void
+  open_aie_context(xrt::aie::access_mode) override
+  {
+    // return success everytime as this flow doesn't support
+    // calling driver to open aie context
+    // this is to satisfy xrt::aie::device class constructor
+    // which calls open_aie_context of ishim
+    return;
+  }
+
   std::vector<char>
   read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size) override;
 
