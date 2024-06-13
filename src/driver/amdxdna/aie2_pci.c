@@ -724,7 +724,7 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 		idx = srcu_read_lock(&tmp_client->hwctx_srcu);
 		next = 0;
 		idr_for_each_entry_continue(&tmp_client->hwctx_idr, hwctx, next) {
-			req_bytes += sizeof(tmp);
+			req_bytes += sizeof(*tmp);
 			if (args->buffer_size < req_bytes) {
 				/* Continue iterating to get the required size */
 				overflow = true;
