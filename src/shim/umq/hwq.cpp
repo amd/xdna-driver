@@ -7,6 +7,20 @@
 
 namespace {
 
+// flash cache line for non coherence memory
+inline void
+clflush_data(void *data, int len)
+{
+	const int LINESIZE = 64;
+	const char *cur = (const char *)data;
+	// must be at least one cache line
+	uintptr_t lastline = (uintptr_t)(cur + len - 1) | (LINESIZE - 1);
+	do {
+		_mm_clflush(cur);
+		cur += LINESIZE;
+	} while (cur <= (const char *)lastline);
+}
+
 inline void
 mark_slot_invalid(volatile host_queue_packet_t *pkt)
 {
@@ -19,25 +33,14 @@ mark_slot_valid(volatile host_queue_packet_t *pkt)
   /* Issue mfence instruction to make sure all writes to the slot before is done */
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+  /* must flush this data to make cache coherence */
+  clflush_data((void *)&pkt->xrt_header.common_header, sizeof(pkt->xrt_header.common_header));
 }
 
 inline bool
 is_slot_valid(volatile host_queue_packet_t *pkt)
 {
   return pkt->xrt_header.common_header.type == HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
-}
-
-inline void
-pkt_clflush(volatile host_queue_packet_t *pkt)
-{
-	const int LINESIZE = 64;
-	const char *cur = (const char *)pkt;
-	/* must be at least one line */
-	uintptr_t lastline = (uintptr_t)(cur + sizeof(*pkt) - 1) | (LINESIZE - 1);
-	do {
-		_mm_clflush(cur);
-		cur += LINESIZE;
-	} while (cur <= (const char *)lastline);
 }
 
 }
@@ -214,11 +217,11 @@ fill_slot_and_send(volatile host_queue_packet_t *pkt, void *payload, size_t size
 
   auto data = const_cast<uint32_t *>(pkt->data);
   std::memcpy(data, payload, size);
+  /* must flush data to make cache coherence */
+  clflush_data((void *)data, size);
+
   /* Always done as last step. */
   mark_slot_valid(pkt);
-
-  /* flash cache line for non coherence memory */
-  pkt_clflush(pkt);
 
   /* Wake up CERT */
   *m_mapped_doorbell = 0;
