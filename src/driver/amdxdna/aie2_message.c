@@ -498,21 +498,16 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		msg.send_size = sizeof(req.ebuf);
 		msg.opcode = MSG_OP_EXECUTE_BUFFER_CF;
 		break;
-	case ERT_START_DPU: {
-		struct amdxdna_cmd_start_dpu *sd = payload;
+	case ERT_START_NPU: {
+		struct amdxdna_cmd_start_npu *sn = payload;
 
-		if (sd->chained) {
-			XDNA_DBG(xdna, "Chained ERT_START_DPU is not supported");
-			return -EOPNOTSUPP;
-		}
-		if (unlikely(payload_len - sizeof(*sd) > sizeof(req.dpu.payload)))
+		if (unlikely(payload_len - sizeof(*sn) > sizeof(req.dpu.payload)))
 			XDNA_DBG(xdna, "Invalid dpu payload len: %d", payload_len);
-		req.dpu.inst_buf_addr = sd->instruction_buffer;
-		req.dpu.inst_size = sd->instruction_buffer_size;
-		req.dpu.inst_prop_cnt = 0;
+		req.dpu.inst_buf_addr = sn->buffer;
+		req.dpu.inst_size = sn->buffer_size;
+		req.dpu.inst_prop_cnt = sn->prop_count;
 		req.dpu.cu_idx = cu_idx;
-		memcpy(req.dpu.payload, ((char *)payload) + sizeof(*sd),
-		       sizeof(req.dpu.payload));
+		memcpy(req.dpu.payload, sn->prop_args, sizeof(req.dpu.payload));
 		msg.send_size = sizeof(req.dpu);
 		msg.opcode = MSG_OP_EXEC_DPU;
 		break;
@@ -524,6 +519,8 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
 	msg.send_data = (u8 *)&req;
+	print_hex_dump_debug("cmd: ", DUMP_PREFIX_OFFSET, 16, 4, &req,
+			     0x40, false);
 
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
@@ -567,7 +564,7 @@ aie2_cmdlist_fill_one_slot_dpu(void *cmd_buf, u32 offset,
 {
 	struct cmd_chain_slot_dpu *buf = cmd_buf + offset;
 	int cu_idx = amdxdna_cmd_get_cu_idx(abo);
-	struct amdxdna_cmd_start_dpu *sd;
+	struct amdxdna_cmd_start_npu *sn;
 	u32 payload_len;
 	void *payload;
 	u32 arg_sz;
@@ -578,20 +575,20 @@ aie2_cmdlist_fill_one_slot_dpu(void *cmd_buf, u32 offset,
 	payload = amdxdna_cmd_get_payload(abo, &payload_len);
 	if (!payload)
 		return -EINVAL;
-	sd = payload;
-	arg_sz = payload_len - sizeof(*sd);
-	if (payload_len < sizeof(*sd) || arg_sz > MAX_DPU_ARGS_SIZE)
+	sn = payload;
+	arg_sz = payload_len - sizeof(*sn);
+	if (payload_len < sizeof(*sn) || arg_sz > MAX_DPU_ARGS_SIZE)
 		return -EINVAL;
 
 	if (!slot_dpu_has_space(offset, arg_sz))
 		return -ENOSPC;
 
-	buf->inst_buf_addr = sd->instruction_buffer;
-	buf->inst_size = sd->instruction_buffer_size;
-	buf->inst_prop_cnt = 0;
+	buf->inst_buf_addr = sn->buffer;
+	buf->inst_size = sn->buffer_size;
+	buf->inst_prop_cnt = sn->prop_count;
 	buf->cu_idx = cu_idx;
 	buf->arg_cnt = arg_sz / sizeof(u32);
-	memcpy(buf->args, ((char *)payload + sizeof(*sd)), arg_sz);
+	memcpy(buf->args, sn->prop_args, arg_sz);
 
 	/* Accurate buf size to hint firmware to do necessary copy */
 	*size += sizeof(*buf) + arg_sz;
@@ -615,7 +612,7 @@ aie2_cmdlist_fill_one_slot(u32 op, struct amdxdna_gem_obj *cmdbuf_abo, u32 offse
 	case ERT_START_CU:
 		ret = aie2_cmdlist_fill_one_slot_cf(cmd_buf, offset, abo, size);
 		break;
-	case ERT_START_DPU:
+	case ERT_START_NPU:
 		ret = aie2_cmdlist_fill_one_slot_dpu(cmd_buf, offset, abo, size);
 		break;
 	default:
@@ -656,7 +653,7 @@ aie2_cmd_op_to_msg_op(u32 op)
 	switch (op) {
 	case ERT_START_CU:
 		return MSG_OP_CHAIN_EXEC_BUFFER_CF;
-	case ERT_START_DPU:
+	case ERT_START_NPU:
 		return MSG_OP_CHAIN_EXEC_DPU;
 	default:
 		return MSG_OP_MAX_OPCODE;
