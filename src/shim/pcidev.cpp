@@ -56,7 +56,7 @@ pdev(std::shared_ptr<const drv> driver, std::string sysfs_name)
   // Default of force_unchained_command should be false once command
   // chaining is natively supported by driver/firmware.
   , m_force_unchained_command(xrt_core::config::detail::get_bool_value(
-    "Debug.force_unchained_command", true))
+    "Debug.force_unchained_command", false))
 {
   m_is_ready = true; // We're always ready.
 }
