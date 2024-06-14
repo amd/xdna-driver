@@ -463,6 +463,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	union {
+		struct exec_dpu_preempt_req dpu_pmpt;
 		struct execute_buffer_req ebuf;
 		struct exec_dpu_req dpu;
 	} req;
@@ -512,6 +513,25 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		msg.opcode = MSG_OP_EXEC_DPU;
 		break;
 	}
+	case ERT_START_NPU_PREEMPT: {
+		struct amdxdna_cmd_preempt_data *pd = payload;
+
+		if (unlikely(payload_len - sizeof(*pd) > sizeof(req.dpu.payload)))
+			XDNA_DBG(xdna, "Invalid dpu payload len: %d", payload_len);
+
+		req.dpu_pmpt.inst_buf_addr = pd->inst_buf;
+		req.dpu_pmpt.save_buf_addr = pd->save_buf;
+		req.dpu_pmpt.restore_buf_addr = pd->restore_buf;
+		req.dpu_pmpt.inst_size = pd->inst_size;
+		req.dpu_pmpt.save_size = pd->save_size;
+		req.dpu_pmpt.restore_size = pd->restore_size;
+		req.dpu_pmpt.inst_prop_cnt = pd->inst_prop_cnt;
+		req.dpu_pmpt.cu_idx = cu_idx;
+		memcpy(req.dpu_pmpt.payload, pd->prop_args, sizeof(req.dpu_pmpt.payload));
+		msg.send_size = sizeof(req.dpu_pmpt);
+		msg.opcode = MSG_OP_EXEC_DPU_PREEMPT;
+		break;
+	}
 	default:
 		XDNA_DBG(xdna, "Invalid ERT cmd op code: %d", op);
 		return -EINVAL;
@@ -519,8 +539,10 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	msg.handle = job;
 	msg.notify_cb = notify_cb;
 	msg.send_data = (u8 *)&req;
+#ifdef AMDXDNA_DEVEL
 	print_hex_dump_debug("cmd: ", DUMP_PREFIX_OFFSET, 16, 4, &req,
-			     0x40, false);
+			     sizeof(req), false);
+#endif
 
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {

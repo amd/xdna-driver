@@ -20,6 +20,7 @@ enum aie2_msg_opcode {
 	MSG_OP_CONFIG_CU                   = 0x11,
 	MSG_OP_CHAIN_EXEC_BUFFER_CF        = 0x12,
 	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
+	MSG_OP_EXEC_DPU_PREEMPT		   = 0x15,
 #ifdef AMDXDNA_DEVEL
 	MSG_OP_REGISTER_PDI                = 0x1,
 	MSG_OP_UNREGISTER_PDI              = 0xA,
@@ -157,6 +158,19 @@ struct exec_dpu_req {
 	u32     inst_prop_cnt;
 	u32     cu_idx;
 	u32	payload[35];
+
+} __packed;
+
+struct exec_dpu_preempt_req {
+	u64	inst_buf_addr;
+	u64	save_buf_addr;
+	u64	restore_buf_addr;
+	u32	inst_size;
+	u32	save_size;
+	u32	restore_size;
+	u32	inst_prop_cnt;
+	u32	cu_idx;
+	u32	payload[29];
 } __packed;
 
 struct execute_buffer_resp {
