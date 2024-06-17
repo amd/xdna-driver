@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/debugfs.h>
+#include <linux/pm_runtime.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/completion.h>
@@ -61,6 +62,7 @@ static ssize_t aie2_clock_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct device *dev = ndev->xdna->ddev.dev;
 	u32 val;
 	int ret;
 
@@ -70,7 +72,13 @@ static ssize_t aie2_clock_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
 	aie2_smu_set_mpnpu_clock_freq(ndev, val);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+
 	return len;
 }
 
@@ -85,6 +93,7 @@ static ssize_t aie2_pasid_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct device *dev = ndev->xdna->ddev.dev;
 	u32 val;
 	int ret;
 
@@ -94,12 +103,16 @@ static ssize_t aie2_pasid_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	ret = aie2_assign_mgmt_pasid(ndev, val);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Assigning pasid: %d failed, ret: %d", val, ret);
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
 		return ret;
-	}
-	return len;
+	ret = aie2_assign_mgmt_pasid(ndev, val);
+	if (ret)
+		XDNA_ERR(ndev->xdna, "Assigning pasid: %d failed, ret: %d", val, ret);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+
+	return (ret) ? ret : len;
 }
 
 static int aie2_pasid_show(struct seq_file *m, void *unused)
@@ -113,6 +126,7 @@ static ssize_t aie2_power_state_write(struct file *file, const char __user *ptr,
 				      size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct device *dev = ndev->xdna->ddev.dev;
 	char input[SIZE + 1];
 	int ret;
 
@@ -127,22 +141,30 @@ static ssize_t aie2_power_state_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
 	if (!strncmp(input, "on", strlen("on"))) {
 		ret = aie2_smu_set_power_on(ndev);
 	} else if (!strncmp(input, "off", strlen("off"))) {
 		ret = aie2_smu_set_power_off(ndev);
 	} else {
 		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto put_rpm;
 	}
 
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "NPU power %s failed", input);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto put_rpm;
 	}
 
 	XDNA_DBG(ndev->xdna, "NPU power %s successful", input);
-	return len;
+put_rpm:
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+	return (ret) ? ret : len;
 }
 
 static int aie2_power_state_show(struct seq_file *m, void *unused)
@@ -156,6 +178,7 @@ static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct device *dev = ndev->xdna->ddev.dev;
 	char input[SIZE + 1];
 	int ret;
 
@@ -170,6 +193,9 @@ static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
 	if (!strncmp(input, "suspend", strlen("suspend"))) {
 		mutex_lock(&ndev->xdna->dev_lock);
 		ret = aie2_suspend_fw(ndev);
@@ -180,16 +206,21 @@ static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
 		mutex_unlock(&ndev->xdna->dev_lock);
 	} else {
 		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto put_rpm;
 	}
 
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "NPU %s failed", input);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto put_rpm;
 	}
 
 	XDNA_DBG(ndev->xdna, "NPU %s succeeded", input);
-	return len;
+put_rpm:
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+	return (ret) ? ret : len;
 }
 
 static int aie2_state_show(struct seq_file *m, void *unused)
@@ -203,6 +234,7 @@ static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr
 				       size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_wo(file);
+	struct device *dev = ndev->xdna->ddev.dev;
 	u32 val;
 	int ret;
 
@@ -212,7 +244,12 @@ static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr
 		return ret;
 	}
 
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
 	aie2_smu_set_hclock_freq(ndev, val);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 	return len;
 }
@@ -327,6 +364,7 @@ static ssize_t aie2_dbgfs_nputest(struct file *file, const char __user *ptr,
 				  size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct device *dev = ndev->xdna->ddev.dev;
 	char *kern_buff, *tmp_buff, *sub_str;
 	u32 args[NPUTEST_MAX_PARAM];
 	int argc = 0;
@@ -353,6 +391,9 @@ static ssize_t aie2_dbgfs_nputest(struct file *file, const char __user *ptr,
 	}
 	XDNA_DBG(ndev->xdna, "Got %d parameters\n", argc);
 
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
 	mutex_lock(&ndev->xdna->dev_lock);
 	/* args[0] is test case ID */
 	switch (args[0]) {
@@ -369,6 +410,8 @@ static ssize_t aie2_dbgfs_nputest(struct file *file, const char __user *ptr,
 		XDNA_ERR(ndev->xdna, "Unknown test case ID %d\n", args[0]);
 	}
 	mutex_unlock(&ndev->xdna->dev_lock);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 free_and_out:
 	kfree(kern_buff);
@@ -402,8 +445,8 @@ const struct {
 	const struct file_operations *fops;
 	umode_t mode;
 } aie2_dbgfs_files[] = {
-	AIE2_DBGFS_FILE(nputest, 0400),
-	AIE2_DBGFS_FILE(hclock, 0600),
+	AIE2_DBGFS_FILE(nputest, 0600),
+	AIE2_DBGFS_FILE(hclock, 0200),
 	AIE2_DBGFS_FILE(npuclock, 0600),
 	AIE2_DBGFS_FILE(pasid, 0600),
 	AIE2_DBGFS_FILE(state, 0600),
@@ -418,16 +461,34 @@ static int
 aie2_ringbuf_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
+	struct device *dev = seqf_to_xdna_dev(m)->ddev.dev;
+	int ret;
 
-	return xdna_mailbox_ringbuf_show(ndev->mbox, m);
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
+	ret = xdna_mailbox_ringbuf_show(ndev->mbox, m);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+
+	return ret;
 }
 
 static int
 aie2_msg_queue_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
+	struct device *dev = seqf_to_xdna_dev(m)->ddev.dev;
+	int ret;
 
-	return xdna_mailbox_info_show(ndev->mbox, m);
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
+	ret = xdna_mailbox_info_show(ndev->mbox, m);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+
+	return ret;
 }
 
 static const struct drm_info_list aie2_debugfs_list[] = {
