@@ -18,7 +18,7 @@ bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
 
-#define HWCTX_MAX_TIMEOUT	16000 /* miliseconds */
+#define HWCTX_MAX_TIMEOUT	60000 /* miliseconds */
 
 static inline int
 aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
