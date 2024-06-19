@@ -95,6 +95,7 @@ skip_sva_bind:
 	mutex_init(&client->hwctx_lock);
 	init_srcu_struct(&client->hwctx_srcu);
 	idr_init_base(&client->hwctx_idr, AMDXDNA_INVALID_CTX_HANDLE + 1);
+	hash_init(client->hwctx_htbl);
 	mutex_init(&client->mm_lock);
 
 	mutex_lock(&xdna->dev_lock);
@@ -331,6 +332,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
 
+	atomic_set(&xdna->next_hwctx_id, AMDXDNA_INVALID_CTX_HANDLE + 1);
 #ifdef AMDXDNA_DEVEL
 	ida_init(&xdna->pdi_ida);
 #endif

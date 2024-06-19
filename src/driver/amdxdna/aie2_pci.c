@@ -732,7 +732,7 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 			}
 
 			tmp->pid = tmp_client->pid;
-			tmp->context_id = hwctx->id;
+			tmp->context_id = hwctx->unique_id;
 			tmp->start_col = hwctx->start_col;
 			tmp->num_col = hwctx->num_col;
 			tmp->command_submissions = hwctx->priv->seq;

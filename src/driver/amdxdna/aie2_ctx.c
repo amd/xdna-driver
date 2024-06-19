@@ -18,7 +18,7 @@ bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
 
-#define HWCTX_MAX_TIMEOUT	60000 /* miliseconds */
+#define HWCTX_MAX_TIMEOUT	120000 /* miliseconds */
 
 static inline int
 aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
@@ -194,6 +194,7 @@ void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 	 * break the system. aie2_hwctx_stop() will destroy mailbox
 	 * and abort all commands.
 	 */
+	XDNA_DBG(xdna, "%s suspending", hwctx->name);
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	aie2_hwctx_wait_for_idle(hwctx);
 	aie2_hwctx_stop(xdna, hwctx, NULL);
@@ -210,6 +211,7 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	 * regenerated. If this happen, when submit message to this
 	 * mailbox channel, error will return.
 	 */
+	XDNA_DBG(xdna, "%s resuming", hwctx->name);
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	hwctx->status = hwctx->old_status;
 	aie2_hwctx_restart(xdna, hwctx);
@@ -781,13 +783,12 @@ static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
-	// Debug BO has to be AMDXDNA_BO_DEV type
 	if (!abo) {
 		XDNA_ERR(xdna, "Get bo %d failed", bo_hdl);
 		ret = -EINVAL;
 		goto done;
 	}
-	ret = amdxdna_gem_set_assigned_hwctx(client, bo_hdl, hwctx->id);
+	ret = amdxdna_gem_set_assigned_hwctx(client, bo_hdl, hwctx->unique_id);
 
 	amdxdna_gem_put_obj(abo);
 
@@ -804,7 +805,7 @@ static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 
-	if (amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->id) {
+	if (amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->unique_id) {
 		XDNA_ERR(xdna, "Debug BO %d isn't attached to %s", bo_hdl, hwctx->name);
 		return -EINVAL;
 	}

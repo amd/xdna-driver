@@ -8,7 +8,7 @@
 
 #include <linux/pci.h>
 #include <linux/srcu.h>
-#include <linux/uuid.h>
+#include <linux/hashtable.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_print.h>
 #include <drm/drm_file.h>
@@ -120,6 +120,7 @@ struct amdxdna_dev {
 	struct mutex			dev_lock; /* protect client list, dev_info->ops, xrt_hdl */
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
+	atomic_t			next_hwctx_id;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
@@ -138,8 +139,8 @@ struct amdxdna_dev {
  * @filp: DRM file pointer
  * @mm_lock: lock for client wide memory related
  * @dev_heap: Shared device heap memory
- * @client_sva: iommu SVA handle
- * @client_pasid: PASID
+ * @sva: iommu SVA handle
+ * @pasid: PASID
  */
 struct amdxdna_client {
 	struct list_head		node;
@@ -149,6 +150,8 @@ struct amdxdna_client {
 	/* To avoid deadlock, do NOT wait this srcu when hwctx_lock is hold */
 	struct srcu_struct		hwctx_srcu;
 	struct idr			hwctx_idr;
+#define HWCTX_HASH_BITS 5
+	DECLARE_HASHTABLE(hwctx_htbl, HWCTX_HASH_BITS);
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
 

@@ -93,9 +93,11 @@ struct amdxdna_cmd {
 struct amdxdna_hwctx {
 	struct amdxdna_client		*client;
 	struct amdxdna_hwctx_priv	*priv;
+	struct hlist_node		hnode;
 	char				*name;
 
 	u32				id;
+	u32				unique_id;
 	u32				max_opc;
 	u32				num_tiles;
 	u32				mem_size;
@@ -211,6 +213,8 @@ static inline u32 amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx)
 
 void amdxdna_job_put(struct amdxdna_sched_job *job);
 
+struct amdxdna_hwctx *
+amdxdna_hwctx_find(struct amdxdna_client *client, u32 id);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
