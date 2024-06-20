@@ -18,6 +18,7 @@ obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
+	amdxdna_drm.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
@@ -33,7 +34,7 @@ amdxdna-y := \
 	npu2_regs.o \
 	npu4_regs.o \
 	npu5_regs.o \
-	amdxdna_drv.o
+	amdxdna_pci_drv.o
 
 # TODO: This is a hack for 6.10. Looking for a solution
 $(obj)/%.o : $(src)/%.c FORCE
@@ -42,8 +43,5 @@ $(obj)/%.o : $(src)/%.c FORCE
 
 # Helper functions for amdxdna development, but not for upstreaming
 amdxdna-y += amdxdna_devel.o
-
-# Place holder for npu3 support
-include $(ROOT)/npu3.mk
 
 -include $(src)/extra_drv.mk

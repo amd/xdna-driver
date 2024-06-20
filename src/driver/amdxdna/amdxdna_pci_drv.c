@@ -1,0 +1,255 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ */
+
+#include <linux/module.h>
+#include <linux/pm_runtime.h>
+
+#include "amdxdna_pci_drv.h"
+#include "amdxdna_sysfs.h"
+
+#define AMDXDNA_AUTOSUSPEND_DELAY	5000 /* miliseconds */
+
+/*
+ *  There are platforms which share the same PCI device ID
+ *  but have different PCI revision IDs. So, let the PCI class
+ *  determine the probe and later use the (device_id, rev_id)
+ *  pair as a key to select the devices.
+ */
+static const struct pci_device_id pci_ids[] = {
+#ifdef AMDXDNA_NPU3
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1569) },
+#endif
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_ANY_ID),
+		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
+		.class_mask = 0xFFFF00,
+	},
+	{0}
+};
+
+MODULE_DEVICE_TABLE(pci, pci_ids);
+
+static const struct amdxdna_device_id amdxdna_ids[] = {
+	{ 0x1502, 0x0,  &dev_npu1_info },
+	{ 0x17f0, 0x0,  &dev_npu2_info },
+#ifdef AMDXDNA_NPU3
+	{ 0x1569, 0x0,  &dev_npu3_info },
+#endif
+	{ 0x17f0, 0x10, &dev_npu4_info },
+	{ 0x17f0, 0x11, &dev_npu5_info },
+	{0}
+};
+
+static const struct amdxdna_dev_info *
+amdxdna_get_dev_info(struct pci_dev *pdev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(amdxdna_ids); i++) {
+		if (pdev->device == amdxdna_ids[i].device &&
+		    pdev->revision == amdxdna_ids[i].revision)
+			return amdxdna_ids[i].dev_info;
+	}
+	return NULL;
+}
+
+static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+{
+	struct device *dev = &pdev->dev;
+	struct amdxdna_dev *xdna;
+	int ret;
+
+	xdna = devm_drm_dev_alloc(dev, &amdxdna_drm_drv, typeof(*xdna), ddev);
+	if (IS_ERR(xdna))
+		return PTR_ERR(xdna);
+
+	xdna->dev_info = amdxdna_get_dev_info(pdev);
+	if (!xdna->dev_info)
+		return -ENODEV;
+
+	devm_mutex_init(dev, &xdna->dev_lock);
+	INIT_LIST_HEAD(&xdna->client_list);
+	pci_set_drvdata(pdev, xdna);
+
+	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
+		return -EOPNOTSUPP;
+
+	mutex_lock(&xdna->dev_lock);
+	ret = xdna->dev_info->ops->init(xdna);
+	mutex_unlock(&xdna->dev_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
+		return ret;
+	}
+
+	ret = amdxdna_sysfs_init(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
+		goto failed_dev_fini;
+	}
+
+	pm_runtime_set_autosuspend_delay(dev, AMDXDNA_AUTOSUSPEND_DELAY);
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_allow(dev);
+
+	ret = drm_dev_register(&xdna->ddev, 0);
+	if (ret) {
+		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
+		pm_runtime_forbid(dev);
+		goto failed_sysfs_fini;
+	}
+
+	/* Debug fs needs to go after register DRM dev */
+	if (xdna->dev_info->ops->debugfs)
+		xdna->dev_info->ops->debugfs(xdna);
+
+#ifdef AMDXDNA_DEVEL
+	ida_init(&xdna->pdi_ida);
+#endif
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
+	return 0;
+
+failed_sysfs_fini:
+	amdxdna_sysfs_fini(xdna);
+failed_dev_fini:
+	mutex_lock(&xdna->dev_lock);
+	xdna->dev_info->ops->fini(xdna);
+	mutex_unlock(&xdna->dev_lock);
+	return ret;
+}
+
+static void amdxdna_remove(struct pci_dev *pdev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+	struct device *dev = &pdev->dev;
+	struct amdxdna_client *client;
+
+	pm_runtime_get_noresume(dev);
+	pm_runtime_forbid(dev);
+
+	drm_dev_unplug(&xdna->ddev);
+	amdxdna_sysfs_fini(xdna);
+
+	mutex_lock(&xdna->dev_lock);
+	client = list_first_entry_or_null(&xdna->client_list,
+					  struct amdxdna_client, node);
+	while (client) {
+		list_del_init(&client->node);
+		mutex_unlock(&xdna->dev_lock);
+
+		amdxdna_hwctx_remove_all(client);
+
+		mutex_lock(&xdna->dev_lock);
+		client = list_first_entry_or_null(&xdna->client_list,
+						  struct amdxdna_client, node);
+	}
+
+	xdna->dev_info->ops->fini(xdna);
+	mutex_unlock(&xdna->dev_lock);
+#ifdef AMDXDNA_DEVEL
+	ida_destroy(&xdna->pdi_ida);
+#endif
+}
+
+static int amdxdna_dev_suspend_nolock(struct amdxdna_dev *xdna)
+{
+	if (xdna->dev_info->ops->suspend)
+		xdna->dev_info->ops->suspend(xdna);
+
+	return 0;
+}
+
+static int amdxdna_dev_resume_nolock(struct amdxdna_dev *xdna)
+{
+	if (xdna->dev_info->ops->resume)
+		return xdna->dev_info->ops->resume(xdna);
+
+	return 0;
+}
+
+static int amdxdna_pmops_suspend(struct device *dev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
+	struct amdxdna_client *client;
+
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(client, &xdna->client_list, node)
+		amdxdna_hwctx_suspend(client);
+
+	amdxdna_dev_suspend_nolock(xdna);
+	mutex_unlock(&xdna->dev_lock);
+
+	return 0;
+}
+
+static int amdxdna_pmops_resume(struct device *dev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
+	struct amdxdna_client *client;
+	int ret;
+
+	XDNA_INFO(xdna, "firmware resuming...");
+	mutex_lock(&xdna->dev_lock);
+	ret = amdxdna_dev_resume_nolock(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "resume NPU firmware failed");
+		mutex_unlock(&xdna->dev_lock);
+		return ret;
+	}
+
+	XDNA_INFO(xdna, "hardware context resuming...");
+	list_for_each_entry(client, &xdna->client_list, node)
+		amdxdna_hwctx_resume(client);
+	mutex_unlock(&xdna->dev_lock);
+
+	return 0;
+}
+
+static int amdxdna_rpmops_suspend(struct device *dev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
+	int ret;
+
+	mutex_lock(&xdna->dev_lock);
+	WARN_ON(!list_empty(&xdna->client_list));
+	ret = amdxdna_dev_suspend_nolock(xdna);
+	mutex_unlock(&xdna->dev_lock);
+
+	XDNA_DBG(xdna, "Runtime suspend done ret: %d", ret);
+	return ret;
+}
+
+static int amdxdna_rpmops_resume(struct device *dev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
+	int ret;
+
+	mutex_lock(&xdna->dev_lock);
+	ret = amdxdna_dev_resume_nolock(xdna);
+	mutex_unlock(&xdna->dev_lock);
+
+	XDNA_DBG(xdna, "Runtime resume done ret: %d", ret);
+	return ret;
+}
+
+static const struct dev_pm_ops amdxdna_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(amdxdna_pmops_suspend, amdxdna_pmops_resume)
+	SET_RUNTIME_PM_OPS(amdxdna_rpmops_suspend, amdxdna_rpmops_resume, NULL)
+};
+
+static struct pci_driver amdxdna_pci_driver = {
+	.name = KBUILD_MODNAME,
+	.id_table = pci_ids,
+	.probe = amdxdna_probe,
+	.remove = amdxdna_remove,
+	.driver.pm = &amdxdna_pm_ops,
+};
+
+module_pci_driver(amdxdna_pci_driver);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
+MODULE_VERSION("0.1");
+MODULE_DESCRIPTION("amdxdna driver");

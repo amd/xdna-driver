@@ -9,7 +9,7 @@
 #include <linux/amd-iommu.h>
 #include <linux/iommu.h>
 
-#include "amdxdna_drv.h"
+#include "amdxdna_drm.h"
 
 #define AMDXDNA_IOMMU_PASID 0
 #define AMDXDNA_IOMMU_NO_PASID 1
