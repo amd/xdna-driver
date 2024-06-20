@@ -9,6 +9,7 @@
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/completion.h>
+#include <linux/pm_runtime.h>
 #include <drm/drm_debugfs.h>
 
 #include "aie2_msg_priv.h"
@@ -20,23 +21,55 @@
 #define TX_TIMEOUT 2000 /* miliseconds */
 #define RX_TIMEOUT 5000 /* miliseconds */
 
-#define _DBGFS_FOPS(_open, _write) \
+static int drm_dbgfs_entry_open(struct inode *inode, struct file *file,
+				int (*show)(struct seq_file *, void *))
+{
+	struct amdxdna_dev_hdl *ndev = inode->i_private;
+	int ret;
+
+	ret = pm_runtime_resume_and_get(ndev->xdna->ddev.dev);
+	if (ret)
+		return ret;
+
+	ret = single_open(file, show, ndev);
+	if (ret) {
+		pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
+		pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
+	}
+
+	return ret;
+}
+
+static int aie2_dbgfs_entry_release(struct inode *inode, struct file *file)
+{
+	struct amdxdna_dev_hdl *ndev = inode->i_private;
+
+	pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
+	pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
+	return single_release(inode, file);
+}
+
+#define _DBGFS_FOPS(_open, _release, _write) \
 { \
 	.owner = THIS_MODULE, \
 	.open = _open, \
 	.read = seq_read, \
 	.llseek = seq_lseek, \
-	.release = single_release, \
+	.release = _release, \
 	.write = _write, \
 }
 
 #define AIE2_DBGFS_FOPS(_name, _show, _write) \
 	static int aie2_dbgfs_##_name##_open(struct inode *inode, struct file *file) \
-{ \
-	return single_open(file, _show, inode->i_private); \
-} \
-static const struct file_operations aie2_fops_##_name = \
-_DBGFS_FOPS(aie2_dbgfs_##_name##_open, _write)
+	{ \
+		return drm_dbgfs_entry_open(inode, file, _show); \
+	} \
+	static int aie2_dbgfs_##_name##_release(struct inode *inode, struct file *file) \
+	{ \
+		return aie2_dbgfs_entry_release(inode, file); \
+	} \
+	static const struct file_operations aie2_fops_##_name = \
+		_DBGFS_FOPS(aie2_dbgfs_##_name##_open, aie2_dbgfs_##_name##_release, _write)
 
 #define AIE2_DBGFS_FILE(_name, _mode) { #_name, &aie2_fops_##_name, _mode }
 
