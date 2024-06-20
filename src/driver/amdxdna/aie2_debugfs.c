@@ -402,7 +402,7 @@ const struct {
 	const struct file_operations *fops;
 	umode_t mode;
 } aie2_dbgfs_files[] = {
-	AIE2_DBGFS_FILE(nputest, 0400),
+	AIE2_DBGFS_FILE(nputest, 0600),
 	AIE2_DBGFS_FILE(hclock, 0600),
 	AIE2_DBGFS_FILE(npuclock, 0600),
 	AIE2_DBGFS_FILE(pasid, 0600),
