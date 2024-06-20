@@ -21,8 +21,8 @@
 #define TX_TIMEOUT 2000 /* miliseconds */
 #define RX_TIMEOUT 5000 /* miliseconds */
 
-static int drm_dbgfs_entry_open(struct inode *inode, struct file *file,
-				int (*show)(struct seq_file *, void *))
+static int aie2_dbgfs_entry_open(struct inode *inode, struct file *file,
+				 int (*show)(struct seq_file *, void *))
 {
 	struct amdxdna_dev_hdl *ndev = inode->i_private;
 	int ret;
@@ -62,7 +62,7 @@ static int aie2_dbgfs_entry_release(struct inode *inode, struct file *file)
 #define AIE2_DBGFS_FOPS(_name, _show, _write) \
 	static int aie2_dbgfs_##_name##_open(struct inode *inode, struct file *file) \
 	{ \
-		return drm_dbgfs_entry_open(inode, file, _show); \
+		return aie2_dbgfs_entry_open(inode, file, _show); \
 	} \
 	static int aie2_dbgfs_##_name##_release(struct inode *inode, struct file *file) \
 	{ \
@@ -421,12 +421,6 @@ static int aie2_dbgfs_nputest_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(nputest, aie2_dbgfs_nputest_show, aie2_dbgfs_nputest);
 
-static ssize_t aie2_ringbuf_write(struct file *file, const char __user *ptr,
-				  size_t len, loff_t *off)
-{
-	return len;
-}
-
 static int aie2_ringbuf_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
@@ -434,13 +428,7 @@ static int aie2_ringbuf_show(struct seq_file *m, void *unused)
 	return xdna_mailbox_ringbuf_show(ndev->mbox, m);
 }
 
-AIE2_DBGFS_FOPS(ringbuf, aie2_ringbuf_show, aie2_ringbuf_write);
-
-static ssize_t aie2_msg_queue_write(struct file *file, const char __user *ptr,
-				    size_t len, loff_t *off)
-{
-	return len;
-}
+AIE2_DBGFS_FOPS(ringbuf, aie2_ringbuf_show, NULL);
 
 static int aie2_msg_queue_show(struct seq_file *m, void *unused)
 {
@@ -449,7 +437,7 @@ static int aie2_msg_queue_show(struct seq_file *m, void *unused)
 	return xdna_mailbox_info_show(ndev->mbox, m);
 }
 
-AIE2_DBGFS_FOPS(msg_queue, aie2_msg_queue_show, aie2_msg_queue_write);
+AIE2_DBGFS_FOPS(msg_queue, aie2_msg_queue_show, NULL);
 
 const struct {
 	const char *name;
@@ -462,8 +450,8 @@ const struct {
 	AIE2_DBGFS_FILE(pasid, 0600),
 	AIE2_DBGFS_FILE(state, 0600),
 	AIE2_DBGFS_FILE(powerstate, 0600),
-	AIE2_DBGFS_FILE(ringbuf, 0600),
-	AIE2_DBGFS_FILE(msg_queue, 0600),
+	AIE2_DBGFS_FILE(ringbuf, 0400),
+	AIE2_DBGFS_FILE(msg_queue, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
