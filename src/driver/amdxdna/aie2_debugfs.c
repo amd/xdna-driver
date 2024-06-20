@@ -30,29 +30,15 @@
 	.write = _write, \
 }
 
-#define _DBGFS_FOPS_WO(_write) \
-{ \
-	.owner = THIS_MODULE, \
-	.open = simple_open, \
-	.llseek = default_llseek, \
-	.write = _write, \
-}
-
 #define AIE2_DBGFS_FOPS(_name, _show, _write) \
 	static int aie2_dbgfs_##_name##_open(struct inode *inode, struct file *file) \
 { \
 	return single_open(file, _show, inode->i_private); \
 } \
-const struct file_operations aie2_fops_##_name = \
+static const struct file_operations aie2_fops_##_name = \
 _DBGFS_FOPS(aie2_dbgfs_##_name##_open, _write)
 
-#define AIE2_DBGFS_FOPS_WO(_name, _write) \
-	const struct file_operations aie2_fops_##_name = _DBGFS_FOPS_WO(_write)
-
 #define AIE2_DBGFS_FILE(_name, _mode) { #_name, &aie2_fops_##_name, _mode }
-
-#define file_to_ndev_wo(file) \
-	((file)->private_data)
 
 #define file_to_ndev_rw(file) \
 	(((struct seq_file *)(file)->private_data)->private)
@@ -202,7 +188,7 @@ AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
 static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr,
 				       size_t len, loff_t *off)
 {
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_wo(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	u32 val;
 	int ret;
 
@@ -217,7 +203,12 @@ static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr
 	return len;
 }
 
-AIE2_DBGFS_FOPS_WO(hclock, aie2_dbgfs_hclock_write);
+static int aie2_dbgfs_hclock_show(struct seq_file *m, void *unused)
+{
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(hclock, aie2_dbgfs_hclock_show, aie2_dbgfs_hclock_write);
 
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
