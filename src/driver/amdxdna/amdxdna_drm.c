@@ -7,7 +7,6 @@
 #include <linux/pm_runtime.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_accel.h>
-#include <drm/drm_managed.h>
 #include "drm_local/amdxdna_accel.h"
 
 #include "amdxdna_drm.h"

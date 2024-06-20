@@ -5,6 +5,10 @@
 
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/version.h>
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
+#include <drm/drm_managed.h>
+#endif
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sysfs.h"
@@ -68,7 +72,11 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->dev_info)
 		return -ENODEV;
 
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
+	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
+#else
 	devm_mutex_init(dev, &xdna->dev_lock);
+#endif
 	INIT_LIST_HEAD(&xdna->client_list);
 	pci_set_drvdata(pdev, xdna);
 
