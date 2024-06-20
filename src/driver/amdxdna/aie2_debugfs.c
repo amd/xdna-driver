@@ -421,6 +421,36 @@ static int aie2_dbgfs_nputest_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(nputest, aie2_dbgfs_nputest_show, aie2_dbgfs_nputest);
 
+static ssize_t aie2_ringbuf_write(struct file *file, const char __user *ptr,
+				  size_t len, loff_t *off)
+{
+	return len;
+}
+
+static int aie2_ringbuf_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	return xdna_mailbox_ringbuf_show(ndev->mbox, m);
+}
+
+AIE2_DBGFS_FOPS(ringbuf, aie2_ringbuf_show, aie2_ringbuf_write);
+
+static ssize_t aie2_msg_queue_write(struct file *file, const char __user *ptr,
+				    size_t len, loff_t *off)
+{
+	return len;
+}
+
+static int aie2_msg_queue_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	return xdna_mailbox_info_show(ndev->mbox, m);
+}
+
+AIE2_DBGFS_FOPS(msg_queue, aie2_msg_queue_show, aie2_msg_queue_write);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -432,34 +462,9 @@ const struct {
 	AIE2_DBGFS_FILE(pasid, 0600),
 	AIE2_DBGFS_FILE(state, 0600),
 	AIE2_DBGFS_FILE(powerstate, 0600),
+	AIE2_DBGFS_FILE(ringbuf, 0600),
+	AIE2_DBGFS_FILE(msg_queue, 0600),
 };
-
-/* only for aie2_debugfs_list */
-#define seqf_to_xdna_dev(m) \
-	to_xdna_dev(((struct drm_info_node *)(m)->private)->minor->dev)
-
-static int
-aie2_ringbuf_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
-
-	return xdna_mailbox_ringbuf_show(ndev->mbox, m);
-}
-
-static int
-aie2_msg_queue_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
-
-	return xdna_mailbox_info_show(ndev->mbox, m);
-}
-
-static const struct drm_info_list aie2_debugfs_list[] = {
-	{"ringbuf", aie2_ringbuf_show, 0},
-	{"msg_queues", aie2_msg_queue_show, 0},
-};
-
-#define INFO_LIST_ENTRIES ARRAY_SIZE(aie2_debugfs_list)
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
 {
@@ -480,10 +485,6 @@ void aie2_debugfs_init(struct amdxdna_dev *xdna)
 				    xdna->dev_handle,
 				    aie2_dbgfs_files[i].fops);
 	}
-
-	/* DRM debugfs handles readonly files */
-	drm_debugfs_create_files(aie2_debugfs_list, INFO_LIST_ENTRIES,
-				 minor->debugfs_root, minor);
 }
 #else
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
