@@ -8,17 +8,20 @@ project("amdxdna-example")
 set(CMAKE_CXX_STANDARD 17)
 find_package(XRT REQUIRED)
 
-set(XDNA_EXAMPLE example_noop_test)
+function(create_example_exec_target name file)
+add_executable(${name} ${file})
 
-add_executable(${XDNA_EXAMPLE} example_noop_test.cpp)
-
-target_link_libraries(${XDNA_EXAMPLE} PRIVATE
+target_link_libraries(${name} PRIVATE
   XRT::xrt_coreutil
   dl
   )
 
-target_include_directories(${XDNA_EXAMPLE} PRIVATE
+target_include_directories(${name} PRIVATE
   ${XRT_INCLUDE_DIRS}
   )
 
-target_compile_options(${XDNA_EXAMPLE} PRIVATE -O3)
+target_compile_options(${name} PRIVATE -O3)
+endfunction()
+
+create_example_exec_target(example_noop_test example_noop_test.cpp)
+create_example_exec_target(runlist_noop_test runlist_noop_test.cpp)
