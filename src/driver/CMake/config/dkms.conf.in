@@ -4,6 +4,6 @@ BUILD_EXCLUSIVE_KERNEL_MIN=6.8
 MAKE[0]="cd driver/@XDNA_DRV_DIR@; make KERNEL_SRC=${kernel_source_dir}; cd ../.."
 CLEAN="cd driver/@XDNA_DRV_DIR@; make clean KERNEL_SRC=${kernel_source_dir}; cd ../.."
 BUILT_MODULE_NAME[0]=@XDNA_DRV@
-BUILT_MODULE_LOCATION[0]="driver/@XDNA_DRV_DIR@/build/amdxdna"
+BUILT_MODULE_LOCATION[0]="driver/@XDNA_DRV_DIR@/build/driver/amdxdna"
 DEST_MODULE_LOCATION[0]="/kernel/extras"
 AUTOINSTALL="yes"
