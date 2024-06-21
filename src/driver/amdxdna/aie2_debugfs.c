@@ -9,6 +9,7 @@
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/completion.h>
+#include <linux/pm_runtime.h>
 #include <drm/drm_debugfs.h>
 
 #include "aie2_msg_priv.h"
@@ -20,39 +21,57 @@
 #define TX_TIMEOUT 2000 /* miliseconds */
 #define RX_TIMEOUT 5000 /* miliseconds */
 
-#define _DBGFS_FOPS(_open, _write) \
+static int aie2_dbgfs_entry_open(struct inode *inode, struct file *file,
+				 int (*show)(struct seq_file *, void *))
+{
+	struct amdxdna_dev_hdl *ndev = inode->i_private;
+	int ret;
+
+	ret = pm_runtime_resume_and_get(ndev->xdna->ddev.dev);
+	if (ret)
+		return ret;
+
+	ret = single_open(file, show, ndev);
+	if (ret) {
+		pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
+		pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
+	}
+
+	return ret;
+}
+
+static int aie2_dbgfs_entry_release(struct inode *inode, struct file *file)
+{
+	struct amdxdna_dev_hdl *ndev = inode->i_private;
+
+	pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
+	pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
+	return single_release(inode, file);
+}
+
+#define _DBGFS_FOPS(_open, _release, _write) \
 { \
 	.owner = THIS_MODULE, \
 	.open = _open, \
 	.read = seq_read, \
 	.llseek = seq_lseek, \
-	.release = single_release, \
-	.write = _write, \
-}
-
-#define _DBGFS_FOPS_WO(_write) \
-{ \
-	.owner = THIS_MODULE, \
-	.open = simple_open, \
-	.llseek = default_llseek, \
+	.release = _release, \
 	.write = _write, \
 }
 
 #define AIE2_DBGFS_FOPS(_name, _show, _write) \
 	static int aie2_dbgfs_##_name##_open(struct inode *inode, struct file *file) \
-{ \
-	return single_open(file, _show, inode->i_private); \
-} \
-const struct file_operations aie2_fops_##_name = \
-_DBGFS_FOPS(aie2_dbgfs_##_name##_open, _write)
-
-#define AIE2_DBGFS_FOPS_WO(_name, _write) \
-	const struct file_operations aie2_fops_##_name = _DBGFS_FOPS_WO(_write)
+	{ \
+		return aie2_dbgfs_entry_open(inode, file, _show); \
+	} \
+	static int aie2_dbgfs_##_name##_release(struct inode *inode, struct file *file) \
+	{ \
+		return aie2_dbgfs_entry_release(inode, file); \
+	} \
+	static const struct file_operations aie2_fops_##_name = \
+		_DBGFS_FOPS(aie2_dbgfs_##_name##_open, aie2_dbgfs_##_name##_release, _write)
 
 #define AIE2_DBGFS_FILE(_name, _mode) { #_name, &aie2_fops_##_name, _mode }
-
-#define file_to_ndev_wo(file) \
-	((file)->private_data)
 
 #define file_to_ndev_rw(file) \
 	(((struct seq_file *)(file)->private_data)->private)
@@ -202,7 +221,7 @@ AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
 static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr,
 				       size_t len, loff_t *off)
 {
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_wo(file);
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	u32 val;
 	int ret;
 
@@ -217,7 +236,12 @@ static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr
 	return len;
 }
 
-AIE2_DBGFS_FOPS_WO(hclock, aie2_dbgfs_hclock_write);
+static int aie2_dbgfs_hclock_show(struct seq_file *m, void *unused)
+{
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(hclock, aie2_dbgfs_hclock_show, aie2_dbgfs_hclock_write);
 
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
@@ -397,45 +421,38 @@ static int aie2_dbgfs_nputest_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(nputest, aie2_dbgfs_nputest_show, aie2_dbgfs_nputest);
 
+static int aie2_ringbuf_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	return xdna_mailbox_ringbuf_show(ndev->mbox, m);
+}
+
+AIE2_DBGFS_FOPS(ringbuf, aie2_ringbuf_show, NULL);
+
+static int aie2_msg_queue_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	return xdna_mailbox_info_show(ndev->mbox, m);
+}
+
+AIE2_DBGFS_FOPS(msg_queue, aie2_msg_queue_show, NULL);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
 	umode_t mode;
 } aie2_dbgfs_files[] = {
-	AIE2_DBGFS_FILE(nputest, 0400),
+	AIE2_DBGFS_FILE(nputest, 0600),
 	AIE2_DBGFS_FILE(hclock, 0600),
 	AIE2_DBGFS_FILE(npuclock, 0600),
 	AIE2_DBGFS_FILE(pasid, 0600),
 	AIE2_DBGFS_FILE(state, 0600),
 	AIE2_DBGFS_FILE(powerstate, 0600),
+	AIE2_DBGFS_FILE(ringbuf, 0400),
+	AIE2_DBGFS_FILE(msg_queue, 0400),
 };
-
-/* only for aie2_debugfs_list */
-#define seqf_to_xdna_dev(m) \
-	to_xdna_dev(((struct drm_info_node *)(m)->private)->minor->dev)
-
-static int
-aie2_ringbuf_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
-
-	return xdna_mailbox_ringbuf_show(ndev->mbox, m);
-}
-
-static int
-aie2_msg_queue_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = seqf_to_xdna_dev(m)->dev_handle;
-
-	return xdna_mailbox_info_show(ndev->mbox, m);
-}
-
-static const struct drm_info_list aie2_debugfs_list[] = {
-	{"ringbuf", aie2_ringbuf_show, 0},
-	{"msg_queues", aie2_msg_queue_show, 0},
-};
-
-#define INFO_LIST_ENTRIES ARRAY_SIZE(aie2_debugfs_list)
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
 {
@@ -456,10 +473,6 @@ void aie2_debugfs_init(struct amdxdna_dev *xdna)
 				    xdna->dev_handle,
 				    aie2_dbgfs_files[i].fops);
 	}
-
-	/* DRM debugfs handles readonly files */
-	drm_debugfs_create_files(aie2_debugfs_list, INFO_LIST_ENTRIES,
-				 minor->debugfs_root, minor);
 }
 #else
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
