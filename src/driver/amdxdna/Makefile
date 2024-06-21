@@ -14,21 +14,6 @@ ifeq ($(BUILD_ROOT_DIR),$(SRC_DIR))
 $(error BUILD_ROOT_DIR and SRC_DIR can NOT be the same)
 endif
 
-define enable_extra_drv
-	@if [ -f extra_drv.mk ]; then \
-		echo "[INFO] enable all includes in extra_drv.mk"; \
-		cp extra_drv.mk extra_drv.mk.orig; \
-		sed 's/-include/include/' extra_drv.mk.orig > extra_drv.mk; \
-		fi
-endef
-
-define restore_extra_drv
-	@if [ -f extra_drv.mk ]; then \
-		cp extra_drv.mk.orig extra_drv.mk; \
-		rm extra_drv.mk.orig; \
-		fi
-endef
-
 .PHONY: all clean modules modules_install copy_ko
 
 all: $(BUILD_ROOT_DIR)
@@ -36,9 +21,7 @@ all: $(BUILD_ROOT_DIR)
 
 # add EXTRA_CFLAGS='-save-temps' to keep intermedia files
 modules:
-	$(call enable_extra_drv)
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE='-DAMDXDNA_DEVEL' modules
-	$(call restore_extra_drv)
 
 modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install
