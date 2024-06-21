@@ -11,7 +11,7 @@
 #include <linux/io.h>
 #include <drm/gpu_scheduler.h>
 
-#include "amdxdna_drv.h"
+#include "amdxdna_pci_drv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"

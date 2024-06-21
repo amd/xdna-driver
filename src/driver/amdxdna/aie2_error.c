@@ -5,6 +5,7 @@
 
 #include <linux/kthread.h>
 #include <linux/kernel.h>
+#include <linux/dma-mapping.h>
 #include <drm/drm_cache.h>
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"

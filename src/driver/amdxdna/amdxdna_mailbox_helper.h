@@ -6,7 +6,7 @@
 #ifndef _AMDXDNA_MAILBOX_HELPER_H
 #define _AMDXDNA_MAILBOX_HELPER_H
 
-#include "amdxdna_drv.h"
+#include "amdxdna_drm.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_mailbox.h"
 

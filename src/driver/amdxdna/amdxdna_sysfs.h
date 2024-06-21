@@ -6,7 +6,7 @@
 #ifndef _AMDXDNA_SYSFS_H_
 #define _AMDXDNA_SYSFS_H_
 
-#include "amdxdna_drv.h"
+#include "amdxdna_drm.h"
 
 int amdxdna_sysfs_init(struct amdxdna_dev *xdna);
 void amdxdna_sysfs_fini(struct amdxdna_dev *xdna);

@@ -9,7 +9,7 @@
 #include <drm/drm_cache.h>
 #include "drm_local/amdxdna_accel.h"
 
-#include "amdxdna_drv.h"
+#include "amdxdna_drm.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_trace.h"
 

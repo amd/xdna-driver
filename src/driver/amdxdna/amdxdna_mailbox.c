@@ -17,7 +17,6 @@
 #include <linux/seq_file.h>
 #endif
 #include <linux/irqreturn.h>
-#include <linux/pci.h>
 #include "amdxdna_trace.h"
 #include "amdxdna_mailbox.h"
 
