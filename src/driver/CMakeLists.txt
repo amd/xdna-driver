@@ -24,7 +24,8 @@ add_custom_command(
 add_custom_command(
   OUTPUT ${XDNA_DRV_TGT}
   COMMENT "Build ${XDNA_DRV_TGT}"
-  COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_DIR=${XDNA_DRV_BLD_TGT} SRC_DIR=${XDNA_DRV_BLD_SRC} ${KERNEL_VER} ${UMQ_HELLO_TEST}
+  COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} ${KERNEL_VER} ${UMQ_HELLO_TEST}
+  COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} copy_ko
   COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
   DEPENDS all_driver_source
   )
@@ -39,6 +40,7 @@ set(XDNA_DRV_EXCLUDES
   --exclude=CMake*
   --exclude=tools
   --exclude=doc
+  ${XNDA_EXTRA_DRV_EXCLUDES}
   )
 file(GLOB_RECURSE ALL_DRV_FILES
   ${XDNA_DRV_BLD_SRC}/Makefile
