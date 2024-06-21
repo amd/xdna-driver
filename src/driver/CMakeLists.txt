@@ -11,6 +11,7 @@ set(XDNA_DRV_BLD_SRC ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_BLD_DIR})
 set(XDNA_DRV_BLD_TGT ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_DIR})
 
 message("-- Extra driver source dir: ${XDNA_EXTRA_DRV_DIR}")
+message("-- Extra driver tar exclude rules: ${XDNA_EXTRA_DRV_EXCLUDES}")
 add_custom_command(
   OUTPUT all_driver_source
   COMMENT "Collect all driver source code"
@@ -40,7 +41,7 @@ set(XDNA_DRV_EXCLUDES
   --exclude=CMake*
   --exclude=tools
   --exclude=doc
-  ${XNDA_EXTRA_DRV_EXCLUDES}
+  ${XDNA_EXTRA_DRV_EXCLUDES}
   )
 file(GLOB_RECURSE ALL_DRV_FILES
   ${XDNA_DRV_BLD_SRC}/Makefile
