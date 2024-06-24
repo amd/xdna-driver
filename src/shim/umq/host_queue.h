@@ -157,6 +157,19 @@ typedef struct
   //! @note Queue capacity, must be a power of two.
   uint32_t capacity;
 
+  /*
+   * NOTE!!!
+   *  Due to the cache is not cache coherence between host and device.  We have
+   *  to flush the cache of the host queue.
+   *
+   *  Most importantly, the read_index has to be in different cache line
+   *  (64Bytes in linux) than the write_index. Because the read_index might be
+   *  flushed from a different context from kernel driver that is monitoring
+   *  the completed message. While at the same time, the write_index might be 
+   *  being flushed from UMQ.
+   */ 
+  uint64_t padding[6];
+
   uint64_t write_index;
   
   uint64_t data_address;
