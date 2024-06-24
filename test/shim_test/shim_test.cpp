@@ -6,9 +6,12 @@
 // user to call. We can't provide any support if you use APIs here and run into issues.
 
 #include "config.h"
-#include "patch_DDR_address.h"
-#include "elf_loader.h"
 
+#include "experimental/xrt_elf.h"
+#include "experimental/xrt_ext.h"
+#include "experimental/xrt_module.h"
+
+#include "core/common/api/module_int.h"
 #include "core/common/device.h"
 #include "core/common/dlfcn.h"
 #include "core/common/memalign.h"
@@ -1055,24 +1058,10 @@ bo_set_init_arg(io_test_bo_set& io_test_bos, std::string& local_data_path)
       }
       break;
     case IO_TEST_BO_MC_CODE: {
-      if (ibo->size == 0)
-        break;
-      /* In the original test case, this MC_CODE_SIZE can be 0.
-       * If it is 0, use a constant value (16) to allocate bo_mc.
-       * In the current conv_case_0, MC_CODE_SIZE is 0. But, keep this code here.
-       */
-      std::cout << "!!! MC_CODE_SIZE is non zero !!!" << std::endl;
-      auto mc_blob_p = ibo->tbo->map();
-      read_data_from_bin(local_data_path + mc_blob_file, 0, ibo->size, mc_blob_p);
-      for (int i = 0; i < 16; i++)
-        std::cout << "mc_blob data: " << std::hex << mc_blob_p[i] << std::dec << std::endl;
-
-      uint64_t ifm_paddr = io_test_bos[IO_TEST_BO_INPUT].tbo->get()->get_properties().paddr;
-      uint64_t param_paddr = io_test_bos[IO_TEST_BO_PARAMETERS].tbo->get()->get_properties().paddr;
-      uint64_t ofm_paddr = io_test_bos[IO_TEST_BO_OUTPUT].tbo->get()->get_properties().paddr;
-      uint64_t inter_paddr = io_test_bos[IO_TEST_BO_INTERMEDIATE].tbo->get()->get_properties().paddr;
-      patchMcCodeDDR(ifm_paddr, param_paddr, ofm_paddr, inter_paddr,
-        reinterpret_cast<uint32_t *>(mc_blob_p), ibo->size);
+      if (ibo->size != 0) {
+        // Do not support patching MC_CODE. */
+        throw std::runtime_error("MC_CODE_SIZE is non zero!!!");
+      }
       break;
     }
     case IO_TEST_BO_INPUT:
@@ -1444,13 +1433,8 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
 }
 
 void
-umq_cmd_submit(hwqueue_handle *hwq,
-  cuidx_type::domain_index_type cu_idx, bo& exec_buf_bo, bo& ctrl_bo)
+umq_prepare_execbuf_header(bo& exec_buf_bo, cuidx_type::domain_index_type cu_idx)
 {
-  if (cu_idx != 0)
-    throw std::runtime_error("Non-zero CU index is not supported!!!");
-
-  // Prepare exec buf
   auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(exec_buf_bo.map());
   cmd_packet->state = ERT_CMD_STATE_NEW;
   cmd_packet->count = sizeof (ert_dpu_data) / sizeof (uint32_t) + 1;
@@ -1458,10 +1442,28 @@ umq_cmd_submit(hwqueue_handle *hwq,
   cmd_packet->type = ERT_CU;
   cmd_packet->extra_cu_masks = 0;
   cmd_packet->cu_mask = 0x1 << cu_idx;
+}
+
+void
+umq_prepare_execbuf_payload(bo& exec_buf_bo, bo& ctrl_bo)
+{
+  auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(exec_buf_bo.map());
   auto dpu_data = get_ert_dpu_data(cmd_packet);
   dpu_data->instruction_buffer = ctrl_bo.get()->get_properties().paddr;
   dpu_data->instruction_buffer_size = ctrl_bo.size();
   dpu_data->chained = 0;
+}
+
+// Submit a cmd with control code buf directly
+void
+umq_cmd_submit(hwqueue_handle *hwq,
+  cuidx_type::domain_index_type cu_idx, bo& exec_buf_bo, bo& ctrl_bo)
+{
+  if (cu_idx != 0)
+    throw std::runtime_error("Non-zero CU index is not supported!!!");
+
+  umq_prepare_execbuf_header(exec_buf_bo, cu_idx);
+  umq_prepare_execbuf_payload(exec_buf_bo, ctrl_bo);
 
   // Send command through HSA queue and wait for it to complete
   hwq->submit_command(exec_buf_bo.get());
@@ -1483,14 +1485,6 @@ umq_cmd_wait(hwqueue_handle *hwq, bo& exec_buf_bo, uint32_t timeout_ms)
 }
 
 void
-umq_cmd_submit_and_wait(hwqueue_handle *hwq,
-  cuidx_type::domain_index_type cu_idx, bo& exec_buf_bo, bo& ctrl_bo)
-{
-  umq_cmd_submit(hwq, cu_idx, exec_buf_bo, ctrl_bo);
-  umq_cmd_wait(hwq, exec_buf_bo, 600000 /* 600 sec, some simnow server are slow */);
-}
-
-void
 TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto dev = sdev.get();
@@ -1500,24 +1494,23 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, arg_type& a
   bo bo_ifm{dev, IFM_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
   bo bo_wts{dev, WTS_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
   bo bo_ofm{dev, OFM_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
- 
+
   std::cout << "Allocated vadd ifm, wts and ofm BOs" << std::endl;
 
-  // Obtain vadd control code
-  std::map<std::string, uint64_t> symbols {
-      {"g.ifm_ddr", bo_ifm.get()->get_properties().paddr},
-      {"g.wts_ddr", bo_wts.get()->get_properties().paddr},
-      {"g.ofm_ddr", bo_ofm.get()->get_properties().paddr}
-  };
-
-  std::cout << std::hex << "ifm paddr 0x" <<
-    bo_ifm.get()->get_properties().paddr << std::dec << std::endl;
-
   auto wrk = get_xclbin_workspace(dev);
-  auto ctrlcode = get_ctrl_from_elf(local_path(wrk + "/vadd.elf"), symbols);
-  bo bo_ctrl_code{dev, ctrlcode.at(0).ccode.size(), XCL_BO_FLAGS_EXECBUF};
-  std::memcpy(bo_ctrl_code.map(), ctrlcode.at(0).ccode.data(), bo_ctrl_code.size());
-  std::cout << "Obtained vadd ctrl-code BO" << std::endl;
+  auto elf = xrt::elf{local_path(wrk + "/vadd.elf")};
+  auto mod = xrt::module{elf};
+
+  size_t instr_size = 0;
+  xrt_core::module_int::patch(mod, nullptr, &instr_size, nullptr);
+  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
+  std::vector< std::pair<std::string, uint64_t> > args = {
+    {"g.ifm_ddr", bo_ifm.get()->get_properties().paddr},
+    {"g.wts_ddr", bo_wts.get()->get_properties().paddr},
+    {"g.ofm_ddr", bo_ofm.get()->get_properties().paddr}
+  };
+  xrt_core::module_int::patch(mod, reinterpret_cast<uint8_t*>(bo_ctrl_code.map()), &instr_size, &args);
+  std::cout << "Obtained vadd ctrl-code BO as a xrt::module" << std::endl;
 
   // Obtain no-op control code
   // ASM code:
@@ -1526,28 +1519,29 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, arg_type& a
   // EOF
   uint32_t nop_ctrlcode[] =
     { 0x0000FFFF, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000000C, 0x00000007, 0x000000FF };
-  bo bo_nop_ctrl_code{dev, 0x2000UL, XCL_BO_FLAGS_EXECBUF};
+  bo bo_nop_ctrl_code{dev, 0x1000UL, XCL_BO_FLAGS_EXECBUF};
   std::memcpy(bo_nop_ctrl_code.map(), nop_ctrlcode, sizeof(nop_ctrlcode));
   std::cout << "Obtained nop ctrl-code BO" << std::endl;
-
-  bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
   {
     hw_ctx hwctx{dev, "vadd.xclbin"};
     auto hwq = hwctx.get()->get_hw_queue();
     auto cu_idx = hwctx.get()->open_cu_context("dpu:vadd");
+    bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
     for (int i = 0; i < 1; i++) {
       sleep(5);
       std::cout << "Running vadd command" << std::endl;
       init_umq_vadd_buffers<bo>(bo_ifm, bo_wts, bo_ofm);
-      umq_cmd_submit_and_wait(hwq, cu_idx.domain_index, bo_exec_buf, bo_ctrl_code);
+      umq_cmd_submit(hwq, cu_idx.index, bo_exec_buf, bo_ctrl_code);
+      umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);
       check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
 
       // noop ctrlcode is not updated yet.
       //sleep(5);
       //std::cout << "Running nop command" << std::endl;
-      //umq_cmd_submit_and_wait(hwq, cu_idx.domain_index, bo_exec_buf, bo_nop_ctrl_code);
+      //umq_cmd_submit(hwq, cu_idx.domain_index, bo_exec_buf, bo_nop_ctrl_code);
+      //umq_cmd_wait(hwq, exec_buf_bo, 600000 /* 600 sec, some simnow server are slow */);
     }
   }
 }
