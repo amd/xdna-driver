@@ -5,7 +5,6 @@ set(XDNA_SHIM_TEST shim_test.elf)
 
 add_executable(${XDNA_SHIM_TEST}
   shim_test.cpp
-  elf_loader.cpp
   )
 
 target_compile_definitions(${XDNA_SHIM_TEST} PRIVATE
@@ -18,7 +17,6 @@ target_compile_definitions(${XDNA_SHIM_TEST} PRIVATE
 target_link_libraries(${XDNA_SHIM_TEST} PRIVATE
   xrt_coreutil # for xclbin parser and some other helpers
   dl
-  elf
   )
 
 set_target_properties(${XDNA_SHIM_TEST} PROPERTIES
