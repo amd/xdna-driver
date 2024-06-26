@@ -1231,6 +1231,7 @@ bo_set_verify_result(io_test_bo_set& io_test_bos, std::string& local_data_path)
     throw std::runtime_error("Test failed!!!");
 }
 
+#define IO_TEST_TIMEOUT 5000 /* millisecond */
 void
 io_test_cmd_submit_and_wait_latency(
   hwqueue_handle *hwq,
@@ -1244,7 +1245,7 @@ io_test_cmd_submit_and_wait_latency(
   while (completed < total_cmd_submission) {
     for (auto& cmd : cmdlist_bos) {
         hwq->submit_command(std::get<0>(cmd).get()->get());
-        hwq->wait_command(std::get<0>(cmd).get()->get(), 15000);
+        hwq->wait_command(std::get<0>(cmd).get()->get(), IO_TEST_TIMEOUT);
         if (std::get<1>(cmd)->state != ERT_CMD_STATE_COMPLETED)
           throw std::runtime_error("Command error");
         completed++;
@@ -1273,7 +1274,7 @@ io_test_cmd_submit_and_wait_thruput(
   }
 
   while (completed < issued) {
-    hwq->wait_command(std::get<0>(cmdlist_bos[wait_idx]).get()->get(), 15000);
+    hwq->wait_command(std::get<0>(cmdlist_bos[wait_idx]).get()->get(), IO_TEST_TIMEOUT);
     if (std::get<1>(cmdlist_bos[wait_idx])->state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error("Command error");
     completed++;

@@ -230,7 +230,6 @@ static int aie2_error_event_send(struct async_event *e)
 
 static void aie2_error_worker(struct work_struct *err_work)
 {
-	struct amdxdna_client *client;
 	struct aie_err_info *info;
 	struct amdxdna_dev *xdna;
 	struct async_event *e;
@@ -263,19 +262,7 @@ static void aie2_error_worker(struct work_struct *err_work)
 		return;
 	}
 
-	/* Found error columns, let's start recovery */
 	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry(client, &xdna->client_list, node)
-		aie2_stop_ctx_by_col_map(client, err_col);
-
-	/*
-	 * The error columns will be reset after all hardware
-	 * contexts which use these columns are destroyed.
-	 * So try to restart the hardware contexts.
-	 */
-	list_for_each_entry(client, &xdna->client_list, node)
-		aie2_restart_ctx(client);
-
 	/* Re-sent this event to firmware */
 	if (aie2_error_event_send(e))
 		XDNA_WARN(xdna, "Unable to register async event");
