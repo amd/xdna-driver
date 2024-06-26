@@ -10,53 +10,63 @@
 #include <linux/tracepoint.h>
 #include <linux/version.h>
 
+#include <drm/gpu_scheduler.h>
+
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM amdxdna_trace
 #define TRACE_INCLUDE_FILE amdxdna_trace
 
 TRACE_EVENT(amdxdna_debug_point,
-	    TP_PROTO(const char *name, int line, const char *str),
+	    TP_PROTO(const char *name, u64 number, const char *str),
 
-	    TP_ARGS(name, line, str),
+	    TP_ARGS(name, number, str),
 
 	    TP_STRUCT__entry(__string(name, name)
-			     __field(int, line)
+			     __field(u64, number)
 			     __string(str, str)),
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 	    TP_fast_assign(__assign_str(name, name);
-			   __entry->line = line;
+			   __entry->number = number;
 			   __assign_str(str, str);),
 #else
 	    TP_fast_assign(__assign_str(name);
-			   __entry->line = line;
+			   __entry->number = number;
 			   __assign_str(str);),
 #endif
 
-	    TP_printk("%s:%d %s", __get_str(name), __entry->line,
+	    TP_printk("%s:%llu %s", __get_str(name), __entry->number,
 		      __get_str(str))
 );
 
 TRACE_EVENT(xdna_job,
-	    TP_PROTO(const char *name, const char *str, u64 seq),
+	    TP_PROTO(struct drm_sched_job *sched_job, const char *name, const char *str, u64 seq),
 
-	    TP_ARGS(name, str, seq),
+	    TP_ARGS(sched_job, name, str, seq),
 
 	    TP_STRUCT__entry(__string(name, name)
 			     __string(str, str)
+			     __field(u64, fence_context)
+			     __field(u64, fence_seqno)
 			     __field(u64, seq)),
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 	    TP_fast_assign(__assign_str(name, name);
 			   __assign_str(str, str);
+			   __entry->fence_context = sched_job->s_fence->finished.context;
+			   __entry->fence_seqno = sched_job->s_fence->finished.seqno;
 			   __entry->seq = seq;),
 #else
 	    TP_fast_assign(__assign_str(name);
 			   __assign_str(str);
+			   __entry->fence_context = sched_job->s_fence->finished.context;
+			   __entry->fence_seqno = sched_job->s_fence->finished.seqno;
 			   __entry->seq = seq;),
 #endif
 
-	    TP_printk("%s seq#:%lld %s", __get_str(name), __entry->seq,
+	    TP_printk("fence=(context:%llu, seqno:%lld), %s seq#:%lld %s",
+		      __entry->fence_context, __entry->fence_seqno,
+		      __get_str(name), __entry->seq,
 		      __get_str(str))
 );
 

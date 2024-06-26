@@ -363,7 +363,7 @@ static void amdxdna_sched_job_release(struct kref *ref)
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
 
-	trace_xdna_job(job->hwctx->name, "job release", job->seq);
+	trace_amdxdna_debug_point(job->hwctx->name, job->seq, "job release");
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
 	kfree(job);
@@ -442,7 +442,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	 * For here we can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
-	trace_xdna_job(hwctx->name, "job pushed", *seq);
+	trace_amdxdna_debug_point(hwctx->name, *seq, "job pushed");
 
 	return 0;
 
