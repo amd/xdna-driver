@@ -163,7 +163,13 @@ struct amdxdna_hwctx_priv {
 	struct wait_queue_head		job_free_wq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	u32				num_pending;
+	/*
+	 * Sequence number for next job; As this is start from 0,
+	 * it can be used as the submitted job counter.
+	 */
 	u64				seq;
+	/* Completed job counter */
+	u64				completed;
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 };
