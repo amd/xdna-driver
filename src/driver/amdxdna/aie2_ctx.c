@@ -219,7 +219,7 @@ static inline void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	dma_fence_signal(job->fence);
-	trace_xdna_job(job->hwctx->name, "signaled fence", job->seq);
+	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
 	dma_fence_put(job->fence);
 	mmput(job->mm);
 	amdxdna_job_put(job);
@@ -368,7 +368,7 @@ out:
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	}
-	trace_xdna_job(hwctx->name, "sent to device", job->seq);
+	trace_xdna_job(sched_job, hwctx->name, "sent to device", job->seq);
 
 	return fence;
 }
@@ -378,7 +378,7 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 
-	trace_xdna_job(hwctx->name, "job free", job->seq);
+	trace_xdna_job(sched_job, hwctx->name, "job free", job->seq);
 	drm_sched_job_cleanup(sched_job);
 	job->fence = NULL;
 	amdxdna_job_put(job);
@@ -394,7 +394,7 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	struct amdxdna_dev *xdna;
 
 	xdna = hwctx->client->xdna;
-	trace_xdna_job(hwctx->name, "job timedout", job->seq);
+	trace_xdna_job(sched_job, hwctx->name, "job timedout", job->seq);
 	mutex_lock(&xdna->dev_lock);
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
 
