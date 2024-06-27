@@ -16,7 +16,10 @@ public:
   {}
 
   ~shared() override
-  { close(m_fd); }
+  {
+    if (m_fd != -1)
+      close(m_fd);
+  }
 
   export_handle
   get_export_handle() const override

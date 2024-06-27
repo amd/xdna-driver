@@ -144,7 +144,7 @@ struct aie_info
         if (iter != cache.end())
           return cache.at(device);
 
-        amdxdna_drm_query_aie_metadata aie_metadata;
+        amdxdna_drm_query_aie_metadata aie_metadata = {};
 
         amdxdna_drm_get_info arg = {
           .param = DRM_AMDXDNA_QUERY_AIE_METADATA,

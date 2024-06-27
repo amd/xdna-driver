@@ -168,10 +168,9 @@ parse_xclbin(const xrt::xclbin& xclbin)
 
   if (m_cu_info.empty())
     shim_err(EINVAL, "No valid DPU kernel found in xclbin");
-  print_xclbin_info();
-
   m_ops_per_cycle = aie_partition.ops_per_cycle;
   m_num_cols = aie_partition.ncol;
+  print_xclbin_info();
 }
 
 const device&
