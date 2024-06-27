@@ -236,10 +236,8 @@ aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 
 	cmd_abo = job->cmd_bo;
 
-	if (unlikely(!data)) {
-		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
+	if (unlikely(!data))
 		goto out;
-	}
 
 	if (unlikely(size != sizeof(u32))) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
