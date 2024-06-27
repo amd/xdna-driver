@@ -218,6 +218,7 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 static inline void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
+	job->hwctx->priv->completed++;
 	dma_fence_signal(job->fence);
 	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
 	dma_fence_put(job->fence);
@@ -235,10 +236,8 @@ aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 
 	cmd_abo = job->cmd_bo;
 
-	if (unlikely(!data)) {
-		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
+	if (unlikely(!data))
 		goto out;
-	}
 
 	if (unlikely(size != sizeof(u32))) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);

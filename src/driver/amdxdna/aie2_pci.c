@@ -736,8 +736,7 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 			tmp->start_col = hwctx->start_col;
 			tmp->num_col = hwctx->num_col;
 			tmp->command_submissions = hwctx->priv->seq;
-			/* TODO Not implemented section */
-			tmp->command_completions = 0;
+			tmp->command_completions = hwctx->priv->completed;
 			tmp->migrations = 0;
 			tmp->preemptions = 0;
 			tmp->errors = 0;
