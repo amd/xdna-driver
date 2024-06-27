@@ -19,6 +19,8 @@
 #define XDNA_ERR(xdna, fmt, args...)	dev_err((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
 #define XDNA_DBG(xdna, fmt, args...)	dev_dbg((xdna)->ddev.dev, fmt, ##args)
 
+#define XDNA_INFO_ONCE(xdna, fmt, args...)	dev_info_once((xdna)->ddev.dev, fmt, ##args)
+
 #define to_xdna_dev(drm_dev) \
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
 

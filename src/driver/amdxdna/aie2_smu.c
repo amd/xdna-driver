@@ -53,7 +53,7 @@ int aie2_smu_set_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev, u32 freq_mhz)
 	ndev->mp_npu_clock.freq_mhz = freq_mhz;
 	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
 	if (!ret)
-		XDNA_INFO(ndev->xdna, "set mpnpu_clock = %d mhz", freq_mhz);
+		XDNA_INFO_ONCE(ndev->xdna, "set mpnpu_clock = %d mhz", freq_mhz);
 
 	return ret;
 }
@@ -70,7 +70,7 @@ int aie2_smu_set_hclock_freq(struct amdxdna_dev_hdl *ndev, u32 freq_mhz)
 	ndev->h_clock.freq_mhz = freq_mhz;
 	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HCLK_FREQ, freq_mhz);
 	if (!ret)
-		XDNA_INFO(ndev->xdna, "set npu_hclock = %d mhz", freq_mhz);
+		XDNA_INFO_ONCE(ndev->xdna, "set npu_hclock = %d mhz", freq_mhz);
 
 	return ret;
 }
