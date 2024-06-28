@@ -434,10 +434,11 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx)
 			return -EINVAL;
 		}
 
-		req.cfgs[i].pdi_addr = abo->mem.dev_addr >> shift;
-		req.cfgs[i].cu_func = cu->cu_func;
-		XDNA_DBG(xdna, "CU %d full addr 0x%llx, short addr 0x%x, cu func %d", i,
-			 abo->mem.dev_addr, req.cfgs[i].pdi_addr, req.cfgs[i].cu_func);
+		req.cfgs[i] = FIELD_PREP(AIE2_MSG_CFG_CU_PDI_ADDR,
+					 abo->mem.dev_addr >> shift);
+		req.cfgs[i] |= FIELD_PREP(AIE2_MSG_CFG_CU_FUNC, cu->cu_func);
+		XDNA_DBG(xdna, "CU %d full addr 0x%llx, cfg 0x%x", i,
+			 abo->mem.dev_addr, req.cfgs[i]);
 		drm_gem_object_put(gobj);
 	}
 	req.num_cus = hwctx->cus->num_cus;
@@ -798,8 +799,8 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	req.size = abo->mem.size;
 
 	/* Device to Host */
-	req.src_type = SYNC_BO_DEV_MEM;
-	req.dst_type = SYNC_BO_HOST_MEM;
+	req.type = FIELD_PREP(AIE2_MSG_SYNC_BO_SRC_TYPE, SYNC_BO_DEV_MEM) |
+		FIELD_PREP(AIE2_MSG_SYNC_BO_DST_TYPE, SYNC_BO_HOST_MEM);
 
 	XDNA_DBG(xdna, "sync %d bytes src(0x%llx) to dst(0x%llx) completed",
 		 req.size, req.src_addr, req.dst_addr);

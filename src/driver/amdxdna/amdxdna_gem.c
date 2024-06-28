@@ -235,7 +235,7 @@ static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
 		return ret;
 
 	num_pages = gobj->size >> PAGE_SHIFT;
-	/* The buffer is based on memoey pages, indeed. Let's fix the flag. */
+	/* The buffer is based on memory pages, indeed. Let's fix the flag. */
 	vm_flags_mod(vma, VM_MIXEDMAP, VM_PFNMAP);
 	ret = vm_insert_pages(vma, vma->vm_start, abo->base.pages, &num_pages);
 	if (ret)
@@ -272,7 +272,6 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size,
 	abo->pinned = false;
 	abo->type = type;
 	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
-	abo->mmap_offset = AMDXDNA_INVALID_ADDR;
 	mutex_init(&abo->lock);
 
 	abo->mem.userptr = AMDXDNA_INVALID_ADDR;
@@ -314,7 +313,6 @@ amdxdna_drm_alloc_shmem(struct drm_device *dev,
 
 	abo = to_xdna_obj(&shmem->base);
 	abo->client = client;
-	abo->mmap_offset = drm_vma_node_offset_addr(&shmem->base.vma_node);
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
 		struct sg_table *sgt;
@@ -561,24 +559,6 @@ put_obj:
 	return ret;
 }
 
-struct drm_gem_object *
-amdxdna_gem_import_sg_table(struct drm_device *dev,
-			    struct dma_buf_attachment *attach,
-			    struct sg_table *sgt)
-{
-	struct drm_gem_object *gobj;
-	struct amdxdna_gem_obj *abo;
-
-	gobj = drm_gem_shmem_prime_import_sg_table(dev, attach, sgt);
-	if (IS_ERR(gobj))
-		return gobj;
-
-	abo = to_xdna_obj(gobj);
-	abo->mmap_offset = drm_vma_node_offset_addr(&gobj->vma_node);
-
-	return gobj;
-}
-
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -678,9 +658,13 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	}
 
 	abo = to_xdna_obj(gobj);
-	args->map_offset = abo->mmap_offset;
 	args->vaddr = abo->mem.userptr;
 	args->xdna_addr = abo->mem.dev_addr;
+
+	if (abo->type == AMDXDNA_BO_SHMEM)
+		args->map_offset = drm_vma_node_offset_addr(&gobj->vma_node);
+	else
+		args->map_offset = AMDXDNA_INVALID_ADDR;
 
 	XDNA_DBG(xdna, "map_offset 0x%llx, vaddr 0x%llx, xdna_addr 0x%llx",
 		 args->map_offset, args->vaddr, args->xdna_addr);
@@ -741,7 +725,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			goto put_obj;
 		}
 
-		ret = amdxdna_cmd_submit(client, AMDXDNA_INVALID_BO_HANDLE, 
+		ret = amdxdna_cmd_submit(client, AMDXDNA_INVALID_BO_HANDLE,
 					 &args->handle, 1, hwctx_hdl, &seq);
 		if (ret) {
 			XDNA_ERR(xdna, "Submit command failed");

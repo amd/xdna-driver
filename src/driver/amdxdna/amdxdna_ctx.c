@@ -229,9 +229,9 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 
 	amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
 
+	XDNA_DBG(xdna, "PID %d destroyed HW context %d", client->pid, args->handle);
 out:
 	drm_dev_exit(idx);
-	XDNA_DBG(xdna, "PID %d destroyed HW context %d", client->pid, args->handle);
 	return ret;
 }
 
