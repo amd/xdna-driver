@@ -411,11 +411,11 @@ struct amdxdna_drm_query_hwctx {
 
 /**
  * struct amdxdna_drm_aie_mem - The data for AIE memory read/write
- * @col: The AIE column index
- * @row: The AIE row index
- * @boh: The BO to store input or output data
- * @addr: The AIE memory address to read/write
- * @size: The size of bytes to read/write
+ * @col:   The AIE column index
+ * @row:   The AIE row index
+ * @addr:  The AIE memory address to read/write
+ * @size:  The size of bytes to read/write
+ * @buf_p: The buffer to store read/write data
  *
  * This is used for DRM_AMDXDNA_READ_AIE_MEM and DRM_AMDXDNA_WRITE_AIE_MEM
  * parameters.
@@ -423,9 +423,10 @@ struct amdxdna_drm_query_hwctx {
 struct amdxdna_drm_aie_mem {
 	__u32 col;
 	__u32 row;
-	__u32 boh;
+	__u32 boh; /* TODO: delete */
 	__u32 addr;
 	__u32 size;
+	__u64 buf_p;
 };
 
 /**
