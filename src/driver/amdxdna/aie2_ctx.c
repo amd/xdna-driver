@@ -776,25 +776,27 @@ free_cus:
 static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 {
 	struct amdxdna_client *client = hwctx->client;
-	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_DEV);
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_gem_obj *abo;
 	int ret;
 
-	// Debug BO has to be AMDXDNA_BO_DEV type
+	abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_DEV);
 	if (!abo) {
 		XDNA_ERR(xdna, "Get bo %d failed", bo_hdl);
 		ret = -EINVAL;
-		goto done;
+		goto err_out;
 	}
+
 	ret = amdxdna_gem_set_assigned_hwctx(client, bo_hdl, hwctx->id);
-
-	amdxdna_gem_put_obj(abo);
-
-done:
-	if (ret == 0)
-		XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
-	else
+	if (ret) {
 		XDNA_ERR(xdna, "Failed to attach debug BO %d to %s: %d", bo_hdl, hwctx->name, ret);
+		goto put_obj;
+	}
+	XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
+
+put_obj:
+	amdxdna_gem_put_obj(abo);
+err_out:
 	return ret;
 }
 

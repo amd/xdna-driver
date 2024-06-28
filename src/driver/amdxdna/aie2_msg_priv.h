@@ -119,12 +119,12 @@ struct cq_pair {
 
 struct create_ctx_req {
 	u32	aie_type;
-	u32	start_col:8;
-	u32	num_col:8;
-	u32	reserved:16;
-	u32	num_cq_pairs_requested:8;
-	u32	reserved1:8;
-	u32	pasid:16;
+	u8	start_col;
+	u8	num_col;
+	u16	reserved;
+	u8	num_cq_pairs_requested;
+	u8	reserved1;
+	u16	pasid;
 	u32	pad[2];
 	u32	sec_comm_target_type;
 	u32     context_priority;
@@ -133,9 +133,9 @@ struct create_ctx_req {
 struct create_ctx_resp {
 	enum aie2_msg_status	status;
 	u32			context_id;
-	u32			msix_id:16;
-	u32			num_cq_pairs_allocated:8;
-	u32			reserved:8;
+	u16			msix_id;
+	u8			num_cq_pairs_allocated;
+	u8			reserved;
 	struct cq_pair		cq_pair[MAX_CQ_PAIRS];
 } __packed;
 
@@ -278,8 +278,7 @@ struct query_error_req {
 struct query_error_resp {
 	enum aie2_msg_status	status;
 	u32			num_err;
-	u32			has_next_err:1;
-	u32			reserved:31;
+	u32			has_next_err;
 	u32			next_row;
 	u32			next_column;
 	u32			next_module;
@@ -307,14 +306,12 @@ struct firmware_version_resp {
 	u32			build;
 } __packed;
 
-#define MAX_NUM_CUS	32
+#define MAX_NUM_CUS			32
+#define AIE2_MSG_CFG_CU_PDI_ADDR	GENMASK(16, 0)
+#define AIE2_MSG_CFG_CU_FUNC		GENMASK(24, 17)
 struct config_cu_req {
 	u32	num_cus;
-	struct {
-		u32	pdi_addr:17;
-		u32	cu_func:8;
-		u32	reserved:7;
-	} cfgs[MAX_NUM_CUS];
+	u32	cfgs[MAX_NUM_CUS];
 } __packed;
 
 struct config_cu_resp {
@@ -391,15 +388,15 @@ struct cmd_chain_resp {
 	enum aie2_msg_status	fail_cmd_status;
 } __packed;
 
+#define AIE2_MSG_SYNC_BO_SRC_TYPE	GENMASK(3, 0)
+#define AIE2_MSG_SYNC_BO_DST_TYPE	GENMASK(7, 4)
 struct sync_bo_req {
 	u64 src_addr;
 	u64 dst_addr;
 	u32 size;
 #define SYNC_BO_DEV_MEM  0
 #define SYNC_BO_HOST_MEM 2
-	u32 src_type : 4;
-	u32 dst_type : 4;
-	u32 reserved : 24;
+	u32 type;
 } __packed;
 
 struct sync_bo_resp {

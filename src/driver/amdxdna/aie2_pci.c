@@ -559,11 +559,12 @@ skip_pasid:
 static int aie2_get_aie_status(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_status status;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
+	ndev = xdna->dev_handle;
 	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), sizeof(status))) {
 		XDNA_ERR(xdna, "Failed to copy AIE request into kernel");
 		return -EFAULT;
@@ -593,11 +594,12 @@ static int aie2_get_aie_status(struct amdxdna_client *client,
 static int aie2_get_aie_metadata(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_metadata *meta;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
 	int ret = 0;
 
+	ndev = xdna->dev_handle;
 	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
 	if (!meta)
 		return -ENOMEM;
@@ -637,10 +639,11 @@ static int aie2_get_aie_metadata(struct amdxdna_client *client,
 static int aie2_get_aie_version(struct amdxdna_client *client,
 				struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_aie_version version;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
 
+	ndev = xdna->dev_handle;
 	version.major = ndev->version.major;
 	version.minor = ndev->version.minor;
 
@@ -653,11 +656,12 @@ static int aie2_get_aie_version(struct amdxdna_client *client,
 static int aie2_get_clock_metadata(struct amdxdna_client *client,
 				   struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_drm_query_clock_metadata *clock;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
 	int ret = 0;
 
+	ndev = xdna->dev_handle;
 	clock = kzalloc(sizeof(*clock), GFP_KERNEL);
 	if (!clock)
 		return -ENOMEM;
@@ -701,8 +705,8 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 static int aie2_get_hwctx_status(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_drm_query_hwctx __user *buf;
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_drm_query_hwctx *tmp;
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_hwctx *hwctx;

@@ -33,7 +33,6 @@ struct amdxdna_dev_priv;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
- *
  */
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);

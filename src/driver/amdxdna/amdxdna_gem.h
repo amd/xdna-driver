@@ -30,7 +30,6 @@ struct amdxdna_gem_obj {
 	u8				type;
 	bool				pinned;
 	struct mutex			lock; /* Protects: pinned, assigned_hwctx */
-	u64				mmap_offset;
 	struct amdxdna_mem		mem;
 
 	/* Below members is uninitialized when needed */
@@ -57,10 +56,6 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 
 struct drm_gem_object *
 amdxdna_gem_create_object_cb(struct drm_device *dev, size_t size);
-struct drm_gem_object *
-amdxdna_gem_import_sg_table(struct drm_device *dev,
-			    struct dma_buf_attachment *attach,
-			    struct sg_table *sgt);
 struct amdxdna_gem_obj *
 amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 			 struct amdxdna_drm_create_bo *args,
