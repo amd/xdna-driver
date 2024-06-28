@@ -425,6 +425,7 @@ struct amdxdna_drm_aie_mem {
 	__u32 row;
 	__u32 boh; /* TODO: delete */
 	__u32 addr;
+#define MAX_RW_AIE_MEM_SIZE 0x10000
 	__u32 size;
 	__u64 buf_p;
 };
