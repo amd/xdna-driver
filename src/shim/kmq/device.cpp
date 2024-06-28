@@ -69,9 +69,6 @@ read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size)
   amdxdna_drm_aie_mem mem;
   std::vector<char> store_buf(size);
 
-  if (size > MAX_RW_AIE_MEM_SIZE)
-      shim_err(EINVAL, "Size %d larger than max size %d", size, MAX_RW_AIE_MEM_SIZE);
-
   mem.col = col;
   mem.row = row;
   mem.addr = offset;
@@ -117,9 +114,6 @@ write_aie_mem(uint16_t col, uint16_t row, uint32_t offset, const std::vector<cha
 {
   amdxdna_drm_aie_mem mem;
   uint32_t size = static_cast<uint32_t>(buf.size());
-
-  if (size > MAX_RW_AIE_MEM_SIZE)
-      shim_err(EINVAL, "Size %d larger than max size %d", size, MAX_RW_AIE_MEM_SIZE);
 
   mem.col = col;
   mem.row = row;
