@@ -275,6 +275,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
+	xdna_mailbox_destroy(ndev->mbox);
 	aie2_psp_stop(ndev->psp_hdl);
 	aie2_smu_fini(ndev);
 	pci_clear_master(pdev);
@@ -330,7 +331,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	if (mgmt_mb_irq < 0) {
 		ret = mgmt_mb_irq;
 		XDNA_ERR(xdna, "failed to alloc irq vector, ret %d", ret);
-		goto stop_psp;
+		goto destroy_mbox;
 	}
 
 	xdna_mailbox_intr_reg = ndev->mgmt_i2x.mb_head_ptr_reg + 4;
@@ -342,7 +343,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	if (!ndev->mgmt_chann) {
 		XDNA_ERR(xdna, "failed to create management mailbox channel");
 		ret = -EINVAL;
-		goto stop_psp;
+		goto destroy_mbox;
 	}
 
 	ret = aie2_mgmt_fw_init(ndev);
@@ -356,6 +357,8 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 destroy_mgmt_chann:
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
+destroy_mbox:
+	xdna_mailbox_destroy(ndev->mbox);
 stop_psp:
 	aie2_psp_stop(ndev->psp_hdl);
 fini_smu:
