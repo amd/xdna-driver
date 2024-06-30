@@ -45,6 +45,10 @@
 #define MSG_RX_TIMER			200 /* milliseconds */
 #define MAILBOX_NAME			"xdna_mailbox"
 
+int mailbox_polling;
+module_param(mailbox_polling, int, 0644);
+MODULE_PARM_DESC(mailbox_polling, "1:Enable mailbox polling mode");
+
 enum channel_res_type {
 	CHAN_RES_X2I,
 	CHAN_RES_I2X,
@@ -80,6 +84,10 @@ struct mailbox_channel {
 	struct work_struct		rx_work;
 	u32				i2x_head;
 	bool				bad_state;
+
+#ifdef AMDXDNA_DEVEL
+	struct timer_list		event_timer;
+#endif
 };
 
 struct xdna_msg_header {
@@ -378,6 +386,22 @@ static irqreturn_t mailbox_irq_handler(int irq, void *p)
 	return IRQ_HANDLED;
 }
 
+#ifdef AMDXDNA_DEVEL
+static void mbox_timer(struct timer_list *t)
+{
+	struct mailbox_channel *mb_chann = from_timer(mb_chann, t, event_timer);
+
+	if (!mb_chann) {
+		pr_warn("DZ_ mbox is gone, stop timer!\n");
+		return;
+	}
+
+	mailbox_irq_handler(0, mb_chann);
+
+	mod_timer(&mb_chann->event_timer, jiffies + msecs_to_jiffies(1000));
+}
+#endif
+
 static void mailbox_rx_worker(struct work_struct *rx_work)
 {
 	struct mailbox_channel *mb_chann;
@@ -627,12 +651,20 @@ skip_record:
 	}
 
 	/* Everything look good. Time to enable irq handler */
+#ifdef AMDXDNA_DEVEL
+	if (mailbox_polling) {
+		timer_setup(&mb_chann->event_timer, mbox_timer, 0);
+		mod_timer(&mb_chann->event_timer, jiffies + msecs_to_jiffies(1000));
+		goto skip_irq;
+	}
+#endif
 	ret = request_irq(mb_irq, mailbox_irq_handler, 0, MAILBOX_NAME, mb_chann);
 	if (ret) {
 		MB_ERR(mb_chann, "Failed to request irq %d ret %d", mb_irq, ret);
 		goto destroy_wq;
 	}
 
+skip_irq:
 	mb_chann->bad_state = false;
 	mutex_lock(&mb->mbox_lock);
 	list_add(&mb_chann->chann_entry, &mb->chann_list);
@@ -657,7 +689,13 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 	list_del(&mb_chann->chann_entry);
 	mutex_unlock(&mb_chann->mb->mbox_lock);
 
+#ifdef AMDXDNA_DEVEL
+	if (!mailbox_polling)
+		free_irq(mb_chann->msix_irq, mb_chann);
+#else
 	free_irq(mb_chann->msix_irq, mb_chann);
+#endif
+
 	destroy_workqueue(mb_chann->work_q);
 	/* We can clean up and release resources */
 
@@ -675,7 +713,14 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 		return;
 
 	/* Disalbe an irq and wait. This might sleep. */
+#ifdef AMDXDNA_DEVEL
+	if (mailbox_polling)
+		del_timer_sync(&mb_chann->event_timer);
+	else
+		disable_irq(mb_chann->msix_irq);
+#else
 	disable_irq(mb_chann->msix_irq);
+#endif
 
 	/* Cancel RX work and wait for it to finish */
 	cancel_work_sync(&mb_chann->rx_work);
