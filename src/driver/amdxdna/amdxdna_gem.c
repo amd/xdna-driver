@@ -188,8 +188,8 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 #ifdef AMDXDNA_DEVEL
 		amdxdna_mem_unmap(xdna, &abo->mem);
 #endif
-		amdxdna_unpin_pages(&abo->mem);
 		vunmap(abo->mem.kva - offset_in_page(abo->mem.userptr));
+		amdxdna_unpin_pages(&abo->mem);
 		amdxdna_user_mem_fini(&abo->mem);
 		break;
 	case AMDXDNA_BO_SHMEM:

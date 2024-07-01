@@ -218,10 +218,12 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 static inline void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
+	struct dma_fence *fence = job->fence;
+
 	job->hwctx->priv->completed++;
-	dma_fence_signal(job->fence);
+	dma_fence_signal(fence);
 	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
-	dma_fence_put(job->fence);
+	dma_fence_put(fence);
 	mmput(job->mm);
 	amdxdna_job_put(job);
 }
