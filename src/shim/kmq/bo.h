@@ -39,7 +39,7 @@ private:
     size_t size, uint64_t flags, amdxdna_bo_type type);
 
   // Only for AMDXDNA_BO_CMD type
-  std::set<uint32_t> m_args_set;
+  std::map<size_t, uint32_t> m_args_map;
   mutable std::mutex m_args_map_lock;
 };
 
