@@ -154,15 +154,12 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 	struct amdxdna_drm_get_info *args = data;
 	int ret;
 
-	if (!xdna->dev_info->ops->get_aie_info && !xdna->dev_info->ops->get_info)
+	if (!xdna->dev_info->ops->get_aie_info)
 		return -EOPNOTSUPP;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	mutex_lock(&xdna->dev_lock);
-	if (xdna->dev_info->ops->get_aie_info)
-		ret = xdna->dev_info->ops->get_aie_info(client, args);
-	else
-		ret = xdna->dev_info->ops->get_info(xdna, args);
+	ret = xdna->dev_info->ops->get_aie_info(client, args);
 	mutex_unlock(&xdna->dev_lock);
 	return ret;
 }
