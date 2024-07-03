@@ -139,15 +139,17 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
 
   if (boh->get_type() != AMDXDNA_BO_CMD) {
     auto h = boh->get_drm_bo_handle();
-    m_args_set.insert(h);
+    m_args_map[pos] = h;
     shim_debug("Added arg BO %d to cmd BO %d", h, get_drm_bo_handle());
   } else {
-    const size_t max_args = 64;
+    const size_t max_args_order = 6;
+    const size_t max_args = 1 << max_args_order;
+    size_t key = pos << max_args_order;
     uint32_t hs[max_args];
     auto arg_cnt = boh->get_arg_bo_handles(hs, max_args);
     std::string bohs;
     for (int i = 0; i < arg_cnt; i++) {
-      m_args_set.insert(hs[i]);
+      m_args_map[key + i] = hs[i];
       bohs += std::to_string(hs[i]) + " ";
     }
     shim_debug("Added arg BO %s to cmd BO %d", bohs.c_str(), get_drm_bo_handle());
@@ -160,12 +162,12 @@ get_arg_bo_handles(uint32_t *handles, size_t num) const
 {
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
-  auto sz = m_args_set.size();
+  auto sz = m_args_map.size();
   if (sz > num)
     shim_err(E2BIG, "There are %ld BO args, provided buffer can hold only %ld", sz, num);
 
-  for (auto m : m_args_set)
-    *(handles++) = m;
+  for (auto m : m_args_map)
+    *(handles++) = m.second;
 
   return sz;
 }
