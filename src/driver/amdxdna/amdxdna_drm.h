@@ -39,8 +39,6 @@ struct amdxdna_dev_ops {
 	void (*fini)(struct amdxdna_dev *xdna);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
-	/* obsoleted will be removed */
-	int (*get_info)(struct amdxdna_dev *xdna, struct amdxdna_drm_get_info *args);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 
@@ -103,7 +101,7 @@ struct amdxdna_dev {
 	const struct amdxdna_dev_info	*dev_info;
 	void				*xrs_hdl;
 
-	struct mutex			dev_lock; /* protect client list, dev_info->ops, xrt_hdl */
+	struct mutex			dev_lock; /* protect client list, dev_info->ops, xrs_hdl */
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
 #ifdef AMDXDNA_DEVEL

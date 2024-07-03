@@ -423,7 +423,6 @@ struct amdxdna_drm_query_hwctx {
 struct amdxdna_drm_aie_mem {
 	__u32 col;
 	__u32 row;
-	__u32 boh; /* TODO: delete */
 	__u32 addr;
 	__u32 size;
 	__u64 buf_p;
