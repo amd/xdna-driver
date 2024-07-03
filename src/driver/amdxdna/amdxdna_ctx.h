@@ -6,6 +6,7 @@
 #ifndef _AMDXDNA_CTX_H_
 #define _AMDXDNA_CTX_H_
 
+#include <linux/bitfield.h>
 #include <linux/kref.h>
 #include <linux/wait.h>
 #include <drm/drm_drv.h>
