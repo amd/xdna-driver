@@ -167,6 +167,8 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 
 void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 {
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+
 	XDNA_DBG(xdna, "BO dma_addr 0x%llx", abo->mem.dma_addr);
 	drm_gem_shmem_put_pages(&abo->base);
 }
