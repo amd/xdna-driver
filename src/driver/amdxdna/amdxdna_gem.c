@@ -270,11 +270,6 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 	struct amdxdna_gem_obj *abo;
 	int ret;
 
-	if (args->vaddr) {
-		XDNA_ERR(client->xdna, "Userptr is not supported");
-		return ERR_PTR(-EINVAL);
-	}
-
 	if (args->size > xdna->dev_info->dev_mem_size) {
 		XDNA_DBG(xdna, "Invalid dev heap size 0x%llx, limit 0x%lx",
 			 args->size, xdna->dev_info->dev_mem_size);
@@ -445,7 +440,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_gem_obj *abo;
 	int ret;
 
-	if (args->flags || !args->size)
+	if (args->flags || args->vaddr || !args->size)
 		return -EINVAL;
 
 	XDNA_DBG(xdna, "BO arg type %d vaddr 0x%llx size 0x%llx flags 0x%llx",

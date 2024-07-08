@@ -287,7 +287,8 @@ void*
 bo::
 map(bo::map_type type)
 {
-  /* We don't respect 'type'. SHIM map bo right after allocation. */
+  if (type != bo::map_type::write)
+    shim_err(EINVAL, "Not support map BO as readonly. Type must be bo::map_type::write");
   return m_aligned;
 }
 

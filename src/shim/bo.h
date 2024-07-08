@@ -117,7 +117,6 @@ protected:
   size_t m_aligned_size = 0;
   uint64_t m_flags = 0;
   amdxdna_bo_type m_type = AMDXDNA_BO_INVALID;
-  xrt_core::aligned_ptr_type m_private_buf{}; /* delete */
   std::unique_ptr<drm_bo> m_bo;
   const shared m_import;
 
