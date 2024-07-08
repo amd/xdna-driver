@@ -48,38 +48,25 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, amdxdna_bo_type type)
   : bo(device, ctx_id, size, flags, type)
 {
-  switch (m_type) {
-  case AMDXDNA_BO_SHMEM:
-    alloc_bo();
-    m_buf = map(bo::map_type::write);
-    // Newly allocated buffer may contain dirty pages. If used as output buffer,
-    // the data in cacheline will be flushed onto memory and pollute the output
-    // from device. We perform a cache flush right after the BO is allocated to
-    // avoid this issue.
+  size_t align = 0;
+
+  if (m_type == AMDXDNA_BO_DEV_HEAP)
+    align = 64 * 1024 * 1024; // Device mem heap must align at 64MB boundary.
+
+  alloc_bo();
+  mmap_bo(align);
+
+  // Newly allocated buffer may contain dirty pages. If used as output buffer,
+  // the data in cacheline will be flushed onto memory and pollute the output
+  // from device. We perform a cache flush right after the BO is allocated to
+  // avoid this issue.
+  if (m_type == AMDXDNA_BO_SHMEM)
     sync(direction::host2device, size, 0);
-    break;
-  case AMDXDNA_BO_DEV:
-    alloc_bo();
-    m_buf = reinterpret_cast<void *>(m_bo->m_vaddr);
-    break;
-  case AMDXDNA_BO_DEV_HEAP:
-    // Device mem heap must align at 64MB boundary.
-    alloc_buf(64 * 1024 * 1024);
-    alloc_bo();
-    break;
-  case AMDXDNA_BO_CMD:
-    alloc_buf();
-    alloc_bo();
-    break;
-  default:
-    shim_err(EINVAL, "Invalid BO type: %d", type);
-    break;
-  }
-  
+
   attach_to_ctx();
 
   shim_debug("Allocated KMQ BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
-    m_buf, m_size, m_flags, m_type, get_drm_bo_handle());
+    m_aligned, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
 }
 
 bo_kmq::
@@ -87,9 +74,9 @@ bo_kmq(const device& device, xrt_core::shared_handle::export_handle ehdl)
   : bo(device, ehdl)
 {
   import_bo();
-  m_buf = map(bo::map_type::write);
+  mmap_bo();
   shim_debug("Imported KMQ BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
-    m_buf, m_size, m_flags, m_type, get_drm_bo_handle());
+    m_aligned, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
 }
 
 bo_kmq::
@@ -97,20 +84,13 @@ bo_kmq::
 {
   shim_debug("Freeing KMQ BO, %s", describe().c_str());
 
+  munmap_bo();
   try {
     detach_from_ctx();
     // If BO is in use, we should block and wait in driver
     free_bo();
   } catch (const xrt_core::system_error& e) {
     shim_debug("Failed to free BO: %s", e.what());
-  }
-
-  switch (m_type) {
-  case AMDXDNA_BO_SHMEM:
-    unmap(m_buf);
-    break;
-  default:
-    break;
   }
 }
 

@@ -17,7 +17,6 @@ struct amdxdna_mem {
 	size_t			size;
 	struct page		**pages;
 	u32			nr_pages;
-	int			pin_cnt;
 #ifdef AMDXDNA_DEVEL
 	struct sg_table		*sgt;
 	u64			dma_addr; /* IOVA DMA address */

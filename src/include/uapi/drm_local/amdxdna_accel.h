@@ -176,7 +176,7 @@ enum amdxdna_bo_type {
  * struct amdxdna_drm_create_bo - Create a buffer object.
  * @flags: Buffer flags. MBZ.
  * @type: Buffer type.
- * @vaddr: User VA of buffer if applied.
+ * @vaddr: User VA of buffer if applied. MBZ.
  * @size: Size in bytes.
  * @handle: Returned DRM buffer object handle.
  */

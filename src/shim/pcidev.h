@@ -22,7 +22,7 @@ public:
 
   xrt_core::device::handle_type
   create_shim(xrt_core::device::id_type id) const override;
- 
+
   std::shared_ptr<xrt_core::device>
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override
   { shim_not_supported_err(__func__); }
@@ -32,7 +32,7 @@ public:
   ioctl(unsigned long cmd, void* arg) const;
 
   void*
-  mmap(size_t len, int prot, int flags, off_t offset) const;
+  mmap(void *addr, size_t len, int prot, int flags, off_t offset) const;
 
   void
   munmap(void* addr, size_t len) const;

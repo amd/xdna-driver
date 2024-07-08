@@ -124,12 +124,12 @@ ioctl(unsigned long cmd, void* arg) const
 
 void*
 pdev::
-mmap(size_t len, int prot, int flags, off_t offset) const
+mmap(void *addr, size_t len, int prot, int flags, off_t offset) const
 {
-  void* ret = ::mmap(0, len, prot, flags, m_dev_fd, offset);
+  void* ret = ::mmap(addr, len, prot, flags, m_dev_fd, offset);
 
   if (ret == reinterpret_cast<void*>(-1))
-    shim_err(errno, "mmap(len=%ld, prot=%d, flags=%d, offset=%ld) failed", len, prot, flags, offset);
+    shim_err(errno, "mmap(addr=%p, len=%ld, prot=%d, flags=%d, offset=%ld) failed", addr, len, prot, flags, offset);
   return ret;
 }
 

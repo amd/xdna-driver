@@ -63,7 +63,7 @@ public:
   get_type() const;
 
 protected:
-  
+
   // DRM BO managed by driver.
   class drm_bo {
   public:
@@ -93,7 +93,10 @@ protected:
   free_bo();
 
   void
-  alloc_buf(size_t align = 0);
+  mmap_bo(size_t align = 0);
+
+  void
+  munmap_bo();
 
   uint64_t
   get_paddr() const;
@@ -108,12 +111,13 @@ protected:
   detach_from_ctx();
 
   const pdev& m_pdev;
-  void* m_buf = nullptr;
-  std::atomic<int> m_mmap_cnt = 0;
-  size_t m_size = 0;
+  void* m_parent = nullptr;
+  void* m_aligned = nullptr;
+  size_t m_parent_size = 0;
+  size_t m_aligned_size = 0;
   uint64_t m_flags = 0;
   amdxdna_bo_type m_type = AMDXDNA_BO_INVALID;
-  xrt_core::aligned_ptr_type m_private_buf{};
+  xrt_core::aligned_ptr_type m_private_buf{}; /* delete */
   std::unique_ptr<drm_bo> m_bo;
   const shared m_import;
 
