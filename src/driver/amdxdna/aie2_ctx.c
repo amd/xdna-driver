@@ -18,15 +18,13 @@ bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
 
-#define HWCTX_MAX_TIMEOUT	60000 /* miliseconds */
-
 static inline int
 aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 {
 	struct amdxdna_sched_job *other;
 	int idx;
 
-	idx = get_job_idx(hwctx->priv->seq);
+	idx = get_job_idx(hwctx->seq);
 	/* When pending list full, hwctx->seq points to oldest fence */
 	other = hwctx->priv->pending[idx];
 	if (other && other->fence)
@@ -38,7 +36,7 @@ aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 	}
 
 	hwctx->priv->pending[idx] = job;
-	job->seq = hwctx->priv->seq++;
+	job->seq = hwctx->seq++;
 	kref_get(&job->refcnt);
 
 	return 0;
@@ -51,14 +49,14 @@ aie2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 
 	/* Special sequence number for oldest fence if exist */
 	if (seq == AMDXDNA_INVALID_CMD_HANDLE) {
-		idx = get_job_idx(hwctx->priv->seq);
+		idx = get_job_idx(hwctx->seq);
 		goto out;
 	}
 
-	if (seq >= hwctx->priv->seq)
+	if (seq >= hwctx->seq)
 		return ERR_PTR(-EINVAL);
 
-	if (seq + HWCTX_MAX_CMDS < hwctx->priv->seq)
+	if (seq + HWCTX_MAX_CMDS < hwctx->seq)
 		return NULL;
 
 	idx = get_job_idx(seq);
@@ -67,7 +65,6 @@ out:
 	return hwctx->priv->pending[idx];
 }
 
-/* The bad_job is used in aie2_sched_job_timedout, otherwise, set it to NULL */
 static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			    struct drm_sched_job *bad_job)
 {
@@ -122,7 +119,7 @@ out:
 	return ret;
 }
 
-void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
+void aie2_stop_ctx(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
@@ -131,10 +128,6 @@ void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
-		/* check if the HW context uses the error column */
-		if (!(col_map & amdxdna_hwctx_col_map(hwctx)))
-			continue;
-
 		aie2_hwctx_stop(xdna, hwctx, NULL);
 		hwctx->old_status = hwctx->status;
 		hwctx->status = HWCTX_STAT_STOP;
@@ -167,12 +160,12 @@ static int aie2_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_sched_job *job;
 
 	mutex_lock(&hwctx->priv->io_lock);
-	if (!hwctx->priv->seq) {
+	if (!hwctx->seq) {
 		mutex_unlock(&hwctx->priv->io_lock);
 		return 0;
 	}
 
-	job = aie2_hwctx_get_job(hwctx, hwctx->priv->seq - 1);
+	job = aie2_hwctx_get_job(hwctx, hwctx->seq - 1);
 	if (IS_ERR_OR_NULL(job)) {
 		mutex_unlock(&hwctx->priv->io_lock);
 		XDNA_WARN(hwctx->client->xdna, "Corrupted pending list");
@@ -220,7 +213,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct dma_fence *fence = job->fence;
 
-	job->hwctx->priv->completed++;
+	job->hwctx->completed++;
 	dma_fence_signal(fence);
 	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
 	dma_fence_put(fence);
@@ -392,28 +385,9 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 	wake_up(&hwctx->priv->job_free_wq);
 }
 
-static enum drm_gpu_sched_stat
-aie2_sched_job_timedout(struct drm_sched_job *sched_job)
-{
-	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
-	struct amdxdna_hwctx *hwctx = job->hwctx;
-	struct amdxdna_dev *xdna;
-
-	xdna = hwctx->client->xdna;
-	trace_xdna_job(sched_job, hwctx->name, "job timedout", job->seq);
-	mutex_lock(&xdna->dev_lock);
-	aie2_hwctx_stop(xdna, hwctx, sched_job);
-
-	aie2_hwctx_restart(xdna, hwctx);
-	mutex_unlock(&xdna->dev_lock);
-
-	return DRM_GPU_SCHED_STAT_NOMINAL;
-}
-
 const struct drm_sched_backend_ops sched_ops = {
 	.run_job = aie2_sched_job_run,
 	.free_job = aie2_sched_job_free,
-	.timedout_job = aie2_sched_job_timedout,
 };
 
 static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
@@ -595,7 +569,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	sched = &priv->sched;
 	mutex_init(&priv->io_lock);
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
-			     HWCTX_MAX_CMDS, 0, msecs_to_jiffies(HWCTX_MAX_TIMEOUT),
+			     HWCTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT,
 			     NULL, NULL, hwctx->name, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
@@ -697,7 +671,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		dma_fence_put(job->out_fence);
 		amdxdna_job_put(job);
 	}
-	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->priv->seq);
+	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->seq);
 
 	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
 		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[idx]));

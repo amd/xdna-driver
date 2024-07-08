@@ -103,6 +103,8 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_allow(dev);
 
+	amdxdna_tdr_start(&xdna->tdr);
+
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
@@ -141,6 +143,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
+	amdxdna_tdr_stop(&xdna->tdr);
 
 	mutex_lock(&xdna->dev_lock);
 	client = list_first_entry_or_null(&xdna->client_list,
