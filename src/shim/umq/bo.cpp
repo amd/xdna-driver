@@ -41,26 +41,12 @@ bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, amdxdna_bo_type type)
   : bo(device, ctx_id, size, flags, type)
 {
-  switch (m_type) {
-  case AMDXDNA_BO_SHMEM:
-    alloc_bo();
-    m_buf = map(bo::map_type::write);
-    break;
-  case AMDXDNA_BO_CMD:
-    alloc_buf();
-    alloc_bo();
-    break;
-  case AMDXDNA_BO_DEV:
-  case AMDXDNA_BO_DEV_HEAP:
-    shim_err(EINVAL, "Unsupported BO type: %d", type);
-    break;
-  default:
-    shim_err(EINVAL, "Invalid BO type: %d", type);
-    break;
-  }
+  alloc_bo();
+  mmap_bo();
+  sync(direction::host2device, size, 0);
 
   shim_debug("Allocated UMQ BO for: userptr=0x%lx, size=%ld, flags=0x%llx",
-    m_buf, m_size, m_flags);
+    m_aligned, m_aligned_size, m_flags);
 }
 
 bo_umq::
@@ -68,7 +54,7 @@ bo_umq(const device& device, xrt_core::shared_handle::export_handle ehdl)
   : bo(device, ehdl)
 {
     alloc_bo();
-    m_buf = map(bo::map_type::write);
+    mmap_bo();
 }
 
 bo_umq::
@@ -76,16 +62,9 @@ bo_umq::
 {
   shim_debug("Freeing UMQ BO, %s", describe().c_str());
 
+  munmap_bo();
   // If BO is in use, we should block and wait in driver
   free_bo();
-
-  switch (m_type) {
-  case AMDXDNA_BO_SHMEM:
-    unmap(m_buf);
-    break;
-  default:
-    break;
-  }
 }
 
 void

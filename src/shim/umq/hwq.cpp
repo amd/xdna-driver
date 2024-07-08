@@ -93,22 +93,22 @@ hw_q_umq::
 void
 hw_q_umq::
 map_doorbell(uint32_t doorbell_offset)
-{ 
+{
   m_mapped_doorbell = reinterpret_cast<volatile uint32_t *>(
-    m_pdev.mmap(sizeof(uint32_t), PROT_WRITE, MAP_SHARED, doorbell_offset));
+    m_pdev.mmap(0, sizeof(uint32_t), PROT_WRITE, MAP_SHARED, doorbell_offset));
 }
 
 volatile host_queue_header_t *
 hw_q_umq::
 get_header_ptr() const
-{ 
+{
   return reinterpret_cast<volatile host_queue_header_t *>(m_umq_bo_buf);
 }
 
 void
 hw_q_umq::
 dump() const
-{ 
+{
   auto h = get_header_ptr();
   shim_debug("Dumping UMQ queue header @%p:", h);
   shim_debug("\tRead Index:\t0x%lx", h->read_index);

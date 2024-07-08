@@ -542,7 +542,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	msg.send_data = (u8 *)&req;
 #ifdef AMDXDNA_DEVEL
 	print_hex_dump_debug("cmd: ", DUMP_PREFIX_OFFSET, 16, 4, &req,
-			     sizeof(req), false);
+			     msg.send_size, false);
 #endif
 
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);

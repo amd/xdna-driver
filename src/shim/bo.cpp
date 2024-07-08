@@ -3,7 +3,6 @@
 
 #include "bo.h"
 #include "shim_debug.h"
-#include "core/common/memalign.h"
 #include <unistd.h>
 
 namespace {
@@ -34,10 +33,26 @@ get_drm_bo_info(const shim_xdna::pdev& dev, uint32_t boh, amdxdna_drm_get_bo_inf
   dev.ioctl(DRM_IOCTL_AMDXDNA_GET_BO_INFO, bo_info);
 }
 
+void *
+map_parent_range(size_t size)
+{
+  auto p = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (!p)
+    shim_err(errno, "mmap(len=%ld) failed", size);
+
+  return p;
+}
+
 void*
 map_drm_bo(const shim_xdna::pdev& dev, size_t size, int prot, uint64_t offset)
 {
-  return dev.mmap(size, prot, MAP_SHARED | MAP_LOCKED, offset);
+  return dev.mmap(0, size, prot, MAP_SHARED | MAP_LOCKED, offset);
+}
+
+void*
+map_drm_bo(const shim_xdna::pdev& dev, void *addr, size_t size, int prot, int flags, uint64_t offset)
+{
+  return dev.mmap(addr, size, prot, flags, offset);
 }
 
 void
@@ -89,6 +104,21 @@ import_drm_bo(const shim_xdna::pdev& dev, const shim_xdna::shared& share,
   lseek(fd, 0, SEEK_SET);
 
   return imp_bo.handle;
+}
+
+bool
+is_power_of_two(size_t x)
+{
+    return (x > 0) && ((x & (x - 1)) == 0);
+}
+
+void *
+addr_align(void *p, size_t align)
+{
+    if (!is_power_of_two(align))
+        shim_err(EINVAL, "Alignment 0x%lx is not power of two", align);
+
+    return (void *)(((uintptr_t)p + align) & ~(align - 1));
 }
 
 }
@@ -147,28 +177,55 @@ describe() const
   desc += std::to_string(m_bo->m_handle);
   desc += ", ";
   desc += "size=";
-  desc += std::to_string(m_size);
+  desc += std::to_string(m_aligned_size);
   return desc;
 }
 
 void
 bo::
-alloc_buf(size_t align)
+mmap_bo(size_t align)
 {
   size_t a = align;
 
-  if (a == 0)
-    a = getpagesize();
+  if (m_bo->m_map_offset == AMDXDNA_INVALID_ADDR) {
+    m_aligned = reinterpret_cast<void *>(m_bo->m_vaddr);
+    return;
+  }
 
-  m_private_buf = xrt_core::aligned_alloc(a, m_size);
-  m_buf = m_private_buf.get();
+  if (a == 0) {
+    m_aligned = map_drm_bo(m_pdev, m_aligned_size, PROT_READ | PROT_WRITE, m_bo->m_map_offset);
+    return;
+  }
+
+  /*
+   * Handle special alignment
+   * The first mmap() is just for reserved a range in user vritual address space.
+   * The second mmap() uses an aligned addr as the first argument in mmap syscall.
+   */
+  m_parent_size = align * 2 - 1;
+  m_parent = map_parent_range(m_parent_size);
+  auto aligned = addr_align(m_parent, align);
+  m_aligned = map_drm_bo(m_pdev, aligned, m_aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, m_bo->m_map_offset);
+}
+
+void
+bo::
+munmap_bo()
+{
+  shim_debug("Unmap BO, aligned %p parent %p", m_aligned, m_parent);
+  if (m_bo->m_map_offset == AMDXDNA_INVALID_ADDR)
+      return;
+
+  unmap_drm_bo(m_pdev, m_aligned, m_aligned_size);
+  if (m_parent)
+      unmap_drm_bo(m_pdev, m_parent, m_parent_size);
 }
 
 void
 bo::
 alloc_bo()
 {
-  uint32_t boh = alloc_drm_bo(m_pdev, m_type, m_buf, m_size);
+  uint32_t boh = alloc_drm_bo(m_pdev, m_type, NULL, m_aligned_size);
 
   amdxdna_drm_get_bo_info bo_info = {};
   get_drm_bo_info(m_pdev, boh, &bo_info);
@@ -180,7 +237,7 @@ void
 bo::
 import_bo()
 {
-  uint32_t boh = import_drm_bo(m_pdev, m_import, &m_type, &m_size);
+  uint32_t boh = import_drm_bo(m_pdev, m_import, &m_type, &m_aligned_size);
 
   amdxdna_drm_get_bo_info bo_info = {};
   get_drm_bo_info(m_pdev, boh, &bo_info);
@@ -199,7 +256,7 @@ bo::
 bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, amdxdna_bo_type type)
   : m_pdev(device.get_pdev())
-  , m_size(size)
+  , m_aligned_size(size)
   , m_flags(flags)
   , m_type(type)
   , m_import(-1)
@@ -217,38 +274,28 @@ bo(const device& device, xrt_core::shared_handle::export_handle ehdl)
 bo::
 ~bo()
 {
-  if (m_mmap_cnt)
-    shim_debug("Non-zero mmap cnt: %d", m_mmap_cnt.load());
 }
 
 bo::properties
 bo::
 get_properties() const
 {
-  return { m_flags, m_size, get_paddr(), get_drm_bo_handle() };
+  return { m_flags, m_aligned_size, get_paddr(), get_drm_bo_handle() };
 }
 
 void*
 bo::
 map(bo::map_type type)
 {
-  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR) {
-    int prot = (type == bo::map_type::write ? (PROT_READ | PROT_WRITE) : PROT_READ);
-    void *p = map_drm_bo(m_pdev, m_size, prot, m_bo->m_map_offset);
-    m_mmap_cnt++;
-    return p;
-  }
-  return m_buf;
+  if (type != bo::map_type::write)
+    shim_err(EINVAL, "Not support map BO as readonly. Type must be bo::map_type::write");
+  return m_aligned;
 }
 
 void
 bo::
 unmap(void* addr)
 {
-  if (m_mmap_cnt > 0) {
-    unmap_drm_bo(m_pdev, addr, m_size);
-    m_mmap_cnt--;
-  }
 }
 
 uint64_t
@@ -257,7 +304,7 @@ get_paddr() const
 {
   if (m_bo->m_xdna_addr != AMDXDNA_INVALID_ADDR)
     return m_bo->m_xdna_addr;
-  return reinterpret_cast<uintptr_t>(m_buf);
+  return reinterpret_cast<uintptr_t>(m_aligned);
 }
 
 void

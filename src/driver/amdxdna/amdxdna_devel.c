@@ -140,3 +140,35 @@ void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 	dma_unmap_sg(dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL);
 	amdxdna_free_sgt(xdna, sgt);
 }
+
+int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct sg_table *sgt;
+
+	sgt = drm_gem_shmem_get_pages_sgt(&abo->base);
+	if (IS_ERR(sgt)) {
+		XDNA_ERR(xdna, "Get sgt failed, ret %ld", PTR_ERR(sgt));
+		return PTR_ERR(sgt);
+	}
+
+	/* Device doesn't do scatter/gather, fail non-contiguous map */
+	if (drm_prime_get_contiguous_size(sgt) != abo->mem.size) {
+		XDNA_ERR(xdna, "noncontiguous dma map, size:%ld", abo->mem.size);
+		drm_gem_shmem_put_pages(&abo->base);
+		return -ENOMEM;
+	}
+
+	abo->mem.dma_addr = sg_dma_address(sgt->sgl);
+
+	XDNA_DBG(xdna, "BO dma_addr 0x%llx", abo->mem.dma_addr);
+	return 0;
+}
+
+void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+
+	XDNA_DBG(xdna, "BO dma_addr 0x%llx", abo->mem.dma_addr);
+	drm_gem_shmem_put_pages(&abo->base);
+}

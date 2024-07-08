@@ -601,7 +601,7 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> sdev, arg_
     hw_ctx hwctx{dev};
     auto bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
 
-    auto dbg_p = static_cast<uint32_t *>(bo->map(buffer_handle::map_type::read));
+    auto dbg_p = static_cast<uint32_t *>(bo->map(buffer_handle::map_type::write));
     std::memset(dbg_p, 0xff, size);
     bo.get()->sync(buffer_handle::direction::device2host, size, 0);
     if (std::memcmp(dbg_p, std::string(size, '\0').c_str(), size) != 0)
@@ -834,6 +834,16 @@ TEST_sync_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
   auto end = Clock::now();
 
   get_speed_and_print("sync", size, start, end);
+}
+
+void
+TEST_map_read_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto size = static_cast<size_t>(arg[0]);
+  auto bo_hdl = dev->alloc_bo(size, get_bo_flags(XRT_BO_FLAGS_NONE, 0));
+
+  auto buf = bo_hdl->map(buffer_handle::map_type::read);
 }
 
 void
@@ -1618,6 +1628,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "map input_output bo and test perf",
     TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_NONE, 0, 361264}
+  },
+  test_case{ "map bo for read only",
+    TEST_NEGATIVE, dev_filter_xdna, TEST_map_read_bo, {0x1000}
   },
   test_case{ "map exec_buf_bo and test perf",
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 0x1000}
