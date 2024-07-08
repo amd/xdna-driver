@@ -168,7 +168,8 @@ typedef struct
    *  the completed message. While at the same time, the write_index might be 
    *  being flushed from UMQ.
    */ 
-  uint64_t padding[6];
+  //Note: temporary disable padding because FW has not been fully changed yet.
+  //uint64_t padding[6];
 
   uint64_t write_index;
   
