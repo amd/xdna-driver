@@ -155,7 +155,7 @@ struct aie_info
         auto& pci_dev_impl = get_pcidev_impl(device);
         pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
 
-        query::aie_tiles_stats::result_type output;
+        query::aie_tiles_stats::result_type output = {};
         output.col_size = aie_metadata.col_size;
         output.major = aie_metadata.version.major;
         output.minor = aie_metadata.version.minor;
