@@ -919,7 +919,7 @@ int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	if (!remaining)
 		ret = -ETIME;
 	else if (remaining < 0)
-		ret = remaining; /* error code */
+		ret = (int)remaining; /* error code */
 	else
 		ret = 0;
 
