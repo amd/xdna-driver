@@ -894,7 +894,7 @@ int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	signed long remaining = MAX_SCHEDULE_TIMEOUT;
 	struct amdxdna_sched_job *job;
 	struct dma_fence *out_fence;
-	int ret;
+	long ret;
 
 	mutex_lock(&hwctx->priv->io_lock);
 	job = aie2_hwctx_get_job(hwctx, seq);
@@ -915,12 +915,10 @@ int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	if (timeout)
 		remaining = msecs_to_jiffies(timeout);
 
-	remaining = dma_fence_wait_timeout(out_fence, true, remaining);
-	if (!remaining)
+	ret = dma_fence_wait_timeout(out_fence, true, remaining);
+	if (!ret)
 		ret = -ETIME;
-	else if (remaining < 0)
-		ret = (int)remaining; /* error code */
-	else
+	else if (ret > 0)
 		ret = 0;
 
 	dma_fence_put(out_fence);
