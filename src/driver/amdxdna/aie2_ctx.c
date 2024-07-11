@@ -348,8 +348,13 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
 
-	if (unlikely(!cmd_abo)) {
+	switch (job->opcode) {
+	case OP_SYNC_BO:
 		ret = aie2_sync_bo(hwctx, job, aie2_sched_nocmd_resp_handler);
+		goto out;
+	case OP_REG_DEBUG_BO:
+	case OP_UNREG_DEBUG_BO:
+		ret = aie2_config_debug_bo(hwctx, job, aie2_sched_nocmd_resp_handler);
 		goto out;
 	}
 
@@ -780,6 +785,7 @@ static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_gem_obj *abo;
+	u64 seq;
 	int ret;
 
 	abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_DEV);
@@ -794,8 +800,21 @@ static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 		XDNA_ERR(xdna, "Failed to attach debug BO %d to %s: %d", bo_hdl, hwctx->name, ret);
 		goto put_obj;
 	}
-	XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
 
+	ret = amdxdna_cmd_submit(client, OP_REG_DEBUG_BO, AMDXDNA_INVALID_BO_HANDLE,
+				 &bo_hdl, 1, hwctx->id, &seq);
+	if (ret) {
+		XDNA_ERR(xdna, "Submit command failed");
+		goto clear_ctx;
+	}
+
+	ret = amdxdna_cmd_wait(client, hwctx->id, seq, 3000 /* ms */);
+	XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
+	amdxdna_gem_put_obj(abo);
+	return 0;
+
+clear_ctx:
+	amdxdna_gem_clear_assigned_hwctx(client, bo_hdl);
 put_obj:
 	amdxdna_gem_put_obj(abo);
 err_out:
@@ -806,6 +825,8 @@ static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
+	u64 seq;
+	int ret;
 
 	if (amdxdna_gem_get_assigned_hwctx(client, bo_hdl) != hwctx->id) {
 		XDNA_ERR(xdna, "Debug BO %d isn't attached to %s", bo_hdl, hwctx->name);
@@ -813,8 +834,17 @@ static int aie2_hwctx_detach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	}
 
 	amdxdna_gem_clear_assigned_hwctx(client, bo_hdl);
-	XDNA_DBG(xdna, "Detached debug BO %d from %s", bo_hdl, hwctx->name);
-	return 0;
+
+	ret = amdxdna_cmd_submit(client, OP_UNREG_DEBUG_BO, AMDXDNA_INVALID_BO_HANDLE,
+				 &bo_hdl, 1, hwctx->id, &seq);
+	if (unlikely(ret)) {
+		XDNA_ERR(xdna, "Submit command failed");
+		return ret;
+	}
+
+	ret = amdxdna_cmd_wait(client, hwctx->id, seq, 3000 /* ms */);
+	XDNA_DBG(xdna, "Detached debug BO %d from %s, ret %d", bo_hdl, hwctx->name, ret);
+	return ret;
 }
 
 int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size)

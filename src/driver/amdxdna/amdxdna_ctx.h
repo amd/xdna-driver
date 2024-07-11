@@ -125,6 +125,11 @@ struct amdxdna_sched_job {
 	/* user can wait on this fence */
 	struct dma_fence	*out_fence;
 	u64			seq;
+#define OP_USER			0
+#define OP_SYNC_BO		1
+#define OP_REG_DEBUG_BO		2
+#define OP_UNREG_DEBUG_BO	3
+	u32			opcode;
 	struct amdxdna_gem_obj	*cmd_bo;
 	size_t			bo_cnt;
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
@@ -213,7 +218,7 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 
-int amdxdna_cmd_submit(struct amdxdna_client *client,
+int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdls, u32 *arg_bo_hdls, u32 arg_bo_cnt,
 		       u32 hwctx_hdl, u64 *seq);
 

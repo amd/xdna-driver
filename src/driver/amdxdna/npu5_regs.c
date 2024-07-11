@@ -56,17 +56,28 @@
 #define NPU5_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
 #define NPU5_RT_CFG_TYPE_PDI_LOAD 5
+#define NPU5_RT_CFG_TYPE_DEBUG_BO 10
+
 #define NPU5_RT_CFG_VAL_PDI_LOAD_MGMT 0
 #define NPU5_RT_CFG_VAL_PDI_LOAD_APP 1
+
+#define NPU5_RT_CFG_VAL_DEBUG_BO_DEFAULT 0
+#define NPU5_RT_CFG_VAL_DEBUG_BO_LARGE   1
 
 #define NPU5_MPNPUCLK_FREQ_MAX  1267
 #define NPU5_HCLK_FREQ_MAX      1800
 
+const struct rt_config npu5_rt_cfg[] = {
+	{NPU5_RT_CFG_TYPE_PDI_LOAD, NPU5_RT_CFG_VAL_PDI_LOAD_APP},
+	{NPU5_RT_CFG_TYPE_DEBUG_BO, NPU5_RT_CFG_VAL_DEBUG_BO_LARGE},
+};
+
 const struct amdxdna_dev_priv npu5_dev_priv = {
 	.fw_path        = "amdnpu/17f0_11/npu.sbin",
 	.protocol_major = 0x6,
-	.protocol_minor = 0x1,
-	.rt_config	= {NPU5_RT_CFG_TYPE_PDI_LOAD, NPU5_RT_CFG_VAL_PDI_LOAD_APP},
+	.protocol_minor = 0x6,
+	.rt_config	= npu5_rt_cfg,
+	.num_rt_cfg	= ARRAY_SIZE(npu5_rt_cfg),
 	.col_align	= COL_ALIGN_NATURE,
 	.mbox_dev_addr  = NPU5_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
@@ -94,7 +105,7 @@ const struct amdxdna_dev_priv npu5_dev_priv = {
 	.smu_mpnpuclk_freq_max = NPU5_MPNPUCLK_FREQ_MAX,
 	.smu_hclk_freq_max     = NPU5_HCLK_FREQ_MAX,
 #ifdef AMDXDNA_DEVEL
-	.dbg_rt_cfgs = {NPU5_RT_CFG_TYPE_PDI_LOAD, NPU5_RT_CFG_VAL_PDI_LOAD_MGMT},
+	.priv_load_cfg = {NPU5_RT_CFG_TYPE_PDI_LOAD, NPU5_RT_CFG_VAL_PDI_LOAD_MGMT},
 #endif
 };
 

@@ -35,7 +35,8 @@ struct amdxdna_gem_obj {
 	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */
 	struct amdxdna_gem_obj		*dev_heap; /* For AMDXDNA_BO_DEV */
 	struct drm_mm_node		mm_node; /* For AMDXDNA_BO_DEV */
-	u32				assigned_hwctx;
+	u32				assigned_hwctx; /* For debug bo */
+	bool				configed; /* For debug bo */
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)

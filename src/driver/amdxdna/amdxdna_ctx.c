@@ -374,7 +374,7 @@ void amdxdna_job_put(struct amdxdna_sched_job *job)
 	kref_put(&job->refcnt, amdxdna_sched_job_release);
 }
 
-int amdxdna_cmd_submit(struct amdxdna_client *client,
+int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdl, u32 *arg_bo_hdls, u32 arg_bo_cnt,
 		       u32 hwctx_hdl, u64 *seq)
 {
@@ -397,6 +397,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 		}
 	} else {
 		job->cmd_bo = NULL;
+		drm_WARN_ON(&xdna->ddev, opcode == OP_USER);
 	}
 
 	ret = amdxdna_arg_bos_lookup(client, job, arg_bo_hdls, arg_bo_cnt);
@@ -422,6 +423,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 
 	job->hwctx = hwctx;
 	job->mm = current->mm;
+	job->opcode = opcode;
 
 	job->fence = amdxdna_fence_create(hwctx);
 	if (!job->fence) {
@@ -493,7 +495,7 @@ static int amdxdna_drm_submit_execbuf(struct amdxdna_client *client,
 		goto free_cmd_bo_hdls;
 	}
 
-	ret = amdxdna_cmd_submit(client, cmd_bo_hdl, arg_bo_hdls,
+	ret = amdxdna_cmd_submit(client, OP_USER, cmd_bo_hdl, arg_bo_hdls,
 				 args->arg_count, args->hwctx, &args->seq);
 	if (ret)
 		XDNA_DBG(xdna, "Submit cmds failed, ret %d", ret);
