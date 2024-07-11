@@ -42,6 +42,7 @@ using ns_t = std::chrono::nanoseconds;
 const uint16_t npu1_device_id = 0x1502;
 const uint16_t npu2_device_id = 0x17f0;
 const uint16_t npu3_device_id = 0x1569;
+const uint16_t npu3_device_id1 = 0x1640;
 const uint16_t npu2_revision_id = 0x0;
 const uint16_t npu4_revision_id = 0x10;
 const uint16_t npu5_revision_id = 0x11;
@@ -150,7 +151,7 @@ dev_filter_is_aie4(device::id_type id, device* dev)
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu3_device_id;
+  return device_id == npu3_device_id || device_id == npu3_device_id1;
 }
 
 bool
@@ -338,6 +339,15 @@ xclbin_info xclbin_infos[] = {
   {
     .name = "vadd.xclbin",
     .device = npu3_device_id,
+    .revision_id = 0,
+    .ip_name2idx = {
+      { "dpu:vadd", {0} },
+    },
+    .workspace = "npu3_workspace",
+  },
+  {
+    .name = "vadd.xclbin",
+    .device = npu3_device_id1,
     .revision_id = 0,
     .ip_name2idx = {
       { "dpu:vadd", {0} },

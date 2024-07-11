@@ -24,6 +24,7 @@
 static const struct pci_device_id pci_ids[] = {
 #ifdef AMDXDNA_NPU3
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1569) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_ATI, 0x1640) },
 #endif
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_ANY_ID),
 		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
@@ -39,6 +40,7 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x17f0, 0x0,  &dev_npu2_info },
 #ifdef AMDXDNA_NPU3
 	{ 0x1569, 0x0,  &dev_npu3_info },
+	{ 0x1640, 0x0,  &dev_npu3_info },
 #endif
 	{ 0x17f0, 0x10, &dev_npu4_info },
 	{ 0x17f0, 0x11, &dev_npu5_info },
