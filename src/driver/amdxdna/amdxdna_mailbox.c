@@ -45,9 +45,11 @@
 #define MSG_RX_TIMER			200 /* milliseconds */
 #define MAILBOX_NAME			"xdna_mailbox"
 
+#ifdef AMDXDNA_DEVEL
 int mailbox_polling;
 module_param(mailbox_polling, int, 0644);
 MODULE_PARM_DESC(mailbox_polling, "1:Enable mailbox polling mode");
+#endif
 
 enum channel_res_type {
 	CHAN_RES_X2I,
@@ -391,11 +393,6 @@ static void mbox_timer(struct timer_list *t)
 {
 	struct mailbox_channel *mb_chann = from_timer(mb_chann, t, event_timer);
 
-	if (!mb_chann) {
-		pr_warn("DZ_ mbox is gone, stop timer!\n");
-		return;
-	}
-
 	mailbox_irq_handler(0, mb_chann);
 
 	mod_timer(&mb_chann->event_timer, jiffies + msecs_to_jiffies(1000));
@@ -715,7 +712,7 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 	/* Disalbe an irq and wait. This might sleep. */
 #ifdef AMDXDNA_DEVEL
 	if (mailbox_polling)
-		del_timer_sync(&mb_chann->event_timer);
+		timer_delete_sync(&mb_chann->event_timer);
 	else
 		disable_irq(mb_chann->msix_irq);
 #else
