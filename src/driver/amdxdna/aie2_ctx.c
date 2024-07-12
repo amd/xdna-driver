@@ -809,6 +809,8 @@ static int aie2_hwctx_attach_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl)
 	}
 
 	ret = amdxdna_cmd_wait(client, hwctx->id, seq, 3000 /* ms */);
+	if (ret)
+		goto clear_ctx;
 	XDNA_DBG(xdna, "Attached debug BO %d to %s", bo_hdl, hwctx->name);
 	amdxdna_gem_put_obj(abo);
 	return 0;
