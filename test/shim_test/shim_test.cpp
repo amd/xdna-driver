@@ -607,7 +607,7 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> sdev, arg_
     auto dbg_p = static_cast<uint32_t *>(bo->map(buffer_handle::map_type::write));
     std::memset(dbg_p, 0xff, size);
     bo.get()->sync(buffer_handle::direction::device2host, size, 0);
-    if (std::memcmp(dbg_p, std::string(size, '\0').c_str(), size) != 0)
+    if (std::memcmp(dbg_p, std::string(size, 0xff).c_str(), size) != 0)
       throw std::runtime_error("Debug buffer is not zero");
   }
 
@@ -1650,6 +1650,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "create and free debug bo",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x1000 }
+  },
+  test_case{ "create and free large debug bo",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
