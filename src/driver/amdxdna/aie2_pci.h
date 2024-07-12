@@ -212,7 +212,8 @@ struct amdxdna_dev_priv {
 	const char			*fw_path;
 	u64				protocol_major;
 	u64				protocol_minor;
-	struct rt_config		rt_config;
+	const struct rt_config		*rt_config;
+	u32				num_rt_cfg;
 #define COL_ALIGN_NONE   0
 #define COL_ALIGN_NATURE 1
 	u32				col_align;
@@ -226,7 +227,7 @@ struct amdxdna_dev_priv {
 	u32				smu_mpnpuclk_freq_max;
 	u32				smu_hclk_freq_max;
 #ifdef AMDXDNA_DEVEL
-	struct rt_config		dbg_rt_cfgs;
+	struct rt_config		priv_load_cfg;
 #endif
 };
 
@@ -290,6 +291,8 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 			       int (*notify_cb)(void *, const u32 *, size_t));
 int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, const u32 *, size_t));
+int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+			 int (*notify_cb)(void *, const u32 *, size_t));
 
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);

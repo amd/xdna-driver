@@ -20,6 +20,7 @@ enum aie2_msg_opcode {
 	MSG_OP_CONFIG_CU                   = 0x11,
 	MSG_OP_CHAIN_EXEC_BUFFER_CF        = 0x12,
 	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
+	MSG_OP_CONFIG_DEBUG_BO		   = 0x14,
 	MSG_OP_EXEC_DPU_PREEMPT		   = 0x15,
 #ifdef AMDXDNA_DEVEL
 	MSG_OP_REGISTER_PDI                = 0x1,
@@ -81,6 +82,7 @@ enum aie2_msg_status {
 #endif
 	AIE2_STATUS_INVALID_OPERATION                    = 0x4000006,
 	AIE2_STATUS_ASYNC_EVENT_MSGS_FULL,
+	AIE2_STATUS_DEBUG_BO_CONFIG_FAILED,
 	AIE2_STATUS_MAX_RTOS_STATUS_CODE,
 	MAX_AIE2_STATUS_CODE
 };
@@ -400,6 +402,18 @@ struct sync_bo_req {
 } __packed;
 
 struct sync_bo_resp {
+	enum aie2_msg_status	status;
+} __packed;
+
+struct config_debug_bo_req {
+	u64	offset;
+	u64	size;
+#define REGISTER   0
+#define UNREGISTER 1
+	u32	config;
+} __packed;
+
+struct config_debug_bo_resp {
 	enum aie2_msg_status	status;
 } __packed;
 

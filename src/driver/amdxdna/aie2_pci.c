@@ -108,32 +108,36 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 
 static int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev)
 {
-	const struct rt_config *cfg = &ndev->priv->rt_config;
-	u64 value;
-	int ret;
+	int i;
+
+	for (i = 0; i < ndev->priv->num_rt_cfg; i++) {
+		const struct rt_config *cfg = &ndev->priv->rt_config[i];
+		u64 value;
+		int ret;
 
 #ifdef AMDXDNA_DEVEL
-	if (priv_load) {
-		cfg = &ndev->priv->dbg_rt_cfgs;
-		XDNA_INFO(ndev->xdna, "Set runtime type %d value %d",
-			  cfg->type, cfg->value);
-	}
+		if (priv_load && cfg->type == ndev->priv->priv_load_cfg.type) {
+			cfg = &ndev->priv->priv_load_cfg;
+			XDNA_INFO(ndev->xdna, "Set runtime type %d value %d",
+				  cfg->type, cfg->value);
+		}
 #endif
-	ret = aie2_set_runtime_cfg(ndev, cfg->type, cfg->value);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Set runtime type %d value %d failed",
-			 cfg->type, cfg->value);
-		return ret;
-	}
+		ret = aie2_set_runtime_cfg(ndev, cfg->type, cfg->value);
+		if (ret) {
+			XDNA_ERR(ndev->xdna, "Set runtime type %d value %d failed",
+				 cfg->type, cfg->value);
+			return ret;
+		}
 
-	ret = aie2_get_runtime_cfg(ndev, cfg->type, &value);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Get runtime cfg failed");
-		return ret;
-	}
+		ret = aie2_get_runtime_cfg(ndev, cfg->type, &value);
+		if (ret) {
+			XDNA_ERR(ndev->xdna, "Get runtime cfg failed");
+			return ret;
+		}
 
-	if (value != cfg->value)
-		return -EINVAL;
+		if (value != cfg->value)
+			return -EINVAL;
+	}
 
 	return 0;
 }
