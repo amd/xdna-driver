@@ -7,6 +7,6 @@ distributed for use with the XRT plug-in for NPU device.
 
 --------------------------------------------------------------------------
 
-File: bins/1502_00/validate.xclbin
+File: tools/bins/1502_00/validate.xclbin
 
 Licence: Redistributable. See LICENSE.amdnpu for details.
