@@ -50,7 +50,7 @@ build_targets()
 		# Some git submodule dir's ownershipt may not be right, fix it
 		# so that cmake generation can be done properly
 		git config --global --add safe.directory '*'
-		time $CMAKE $CMAKE_EXTRA_FLAGS -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DKERNEL_VER=$kernel_ver -DUMQ_HELLO_TEST:string=$hello_umq $BUILD_DIR/../
+		time $CMAKE $CMAKE_EXTRA_FLAGS -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DKERNEL_VER=$kernel_ver -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
 	fi
 	time make -j $njobs $verbose DESTDIR=$PWD install
 
@@ -124,7 +124,7 @@ verbose=
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
 xrt_install_prefix="/opt/xilinx"
-hello_umq="UMQ_HELLO_TEST=n"
+hello_umq=n
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -163,7 +163,7 @@ while [ $# -gt 0 ]; do
 			nocmake=1
 			;;
 		-hello_umq)
-		  hello_umq="UMQ_HELLO_TEST=y"
+		  hello_umq=y
 			;;
 		-verbose)
 			verbose=VERBOSE=1
