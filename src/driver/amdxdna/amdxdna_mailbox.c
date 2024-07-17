@@ -8,6 +8,7 @@
 #include <linux/io.h>
 #include <linux/idr.h>
 #include <linux/mutex.h>
+#include <linux/iopoll.h>
 #include <linux/vmalloc.h>
 #include <linux/spinlock.h>
 #include <linux/build_bug.h>
@@ -144,6 +145,22 @@ static u32 mailbox_reg_read(struct mailbox_channel *mb_chann, u32 mbox_reg)
 	u64 ringbuf_addr = mb_res->mbox_base + mbox_reg;
 
 	return ioread32((void *)ringbuf_addr);
+}
+
+static int mailbox_reg_read_non_zero(struct mailbox_channel *mb_chann, u32 mbox_reg, u32 *val)
+{
+	struct xdna_mailbox_res *mb_res = &mb_chann->mb->res;
+	u64 ringbuf_addr = mb_res->mbox_base + mbox_reg;
+	int ret, value;
+
+	/* Poll till value is not zero */
+	ret = readx_poll_timeout(ioread32, (void *)ringbuf_addr, value,
+				 value, 1 /* us */, 100);
+	if (ret < 0)
+		return ret;
+
+	*val = value;
+	return 0;
 }
 
 static inline void
@@ -317,7 +334,8 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	u64 read_addr;
 	int ret;
 
-	tail = mailbox_get_tailptr(mb_chann, CHAN_RES_I2X);
+	if (mailbox_reg_read_non_zero(mb_chann, mb_chann->res[CHAN_RES_I2X].mb_tail_ptr_reg, &tail))
+		return -EINVAL;
 	head = mb_chann->i2x_head;
 	ringbuf_size = mailbox_get_ringbuf_size(mb_chann, CHAN_RES_I2X);
 	start_addr = mb_chann->res[CHAN_RES_I2X].rb_start_addr;
@@ -328,7 +346,7 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	}
 
 	/* ringbuf empty */
-	if ((head & (ringbuf_size - 1)) == (tail & (ringbuf_size - 1)))
+	if (head == tail)
 		return -ENOENT;
 
 	if (head == ringbuf_size)
