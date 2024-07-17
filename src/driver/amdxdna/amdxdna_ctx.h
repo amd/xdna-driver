@@ -13,7 +13,11 @@
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
 
+#ifdef AMDXDNA_SHMEM
 #include "amdxdna_gem.h"
+#else
+#include "amdxdna_gem_dma.h"
+#endif
 
 struct amdxdna_hwctx_priv;
 

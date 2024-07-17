@@ -141,6 +141,7 @@ void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 	amdxdna_free_sgt(xdna, sgt);
 }
 
+#ifdef AMDXDNA_PCI
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -172,3 +173,13 @@ void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 	XDNA_DBG(xdna, "BO dma_addr 0x%llx", abo->mem.dma_addr);
 	drm_gem_shmem_put_pages(&abo->base);
 }
+#else
+int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
+{
+	return -EOPNOTSUPP;
+}
+
+void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
+{
+}
+#endif /* AMDXDNA_PCI */

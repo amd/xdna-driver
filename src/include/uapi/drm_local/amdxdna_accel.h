@@ -164,12 +164,20 @@ struct amdxdna_drm_config_hwctx {
 	__u32 pad;
 };
 
+/*
+ * AMDXDNA_BO_SHMEM:	DRM GEM SHMEM bo
+ * AMDXDNA_BO_DEV_HEAP: Shared host memory to device as heap memory
+ * AMDXDNA_BO_DEV_BO:	Allocated from BO_DEV_HEAP
+ * AMDXDNA_BO_CMD:	User and driver accessible bo
+ * AMDXDNA_BO_DMA:	DRM GEM DMA bo
+ */
 enum amdxdna_bo_type {
 	AMDXDNA_BO_INVALID = 0,
 	AMDXDNA_BO_SHMEM,
 	AMDXDNA_BO_DEV_HEAP,
 	AMDXDNA_BO_DEV,
 	AMDXDNA_BO_CMD,
+	AMDXDNA_BO_DMA,
 };
 
 /**
