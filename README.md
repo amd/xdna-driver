@@ -21,40 +21,37 @@ To run AI applications, your system needs
   - To run AI applications (test machine): RyzenAI processor
   - To build this repository (build machine): Any x86 processors, but recommend AMD processor :wink:
 * Operating System: Ubuntu >= 22.04
-* Linux Kernel: v6.8 with IOMMU SVA support (see below)
+* Linux Kernel: v6.10 or above. (See [Linux compilation and installation](#linux-compilation-and-installation)
+  - Due to Linux API change, XDNA driver doesn't always keep supporting old version.
 * Installed XRT base package (or you can install it along the
   following recipe)
   - To make sure the XRT base package works with the plug-in package, better build it from `xrt` submodule in this repo (`<root-of-source-tree>/xrt`)
   - Refer to https://github.com/Xilinx/XRT for more detailed information.
 
-*Important*: IOMMU SVA in Linux kernel support is required.
-
 ## Linux compilation and installation
 
-You need to manually build 6.8 Linux kernel packages by following below steps.
+Since Linux v6.10 offically supports AMD IOMMU SVA, we can play with original Linux source code.
+If your system has Linux v6.10 or above installed, check if `CONFIG_AMD_IOMMU` and `CONFIG_DRM_ACCEL` are set. If not, the system is not good for XDNA driver.
 
-The 6.8 Linux kernel with SVA source code can be downloaded from _v6.8-iommu-sva-part4-v7_ on https://github.com/AMD-SW/linux
-``` bash
+If you want to manually build Linux kernel, follow below steps.
+```  bash
 # Assuming you have knowledge of kernel compilation,
 # this is just refreshing up a few key points.
 
-git clone --depth=1 --branch v6.8-iommu-sva-part4-v7 git@github.com:AMD-SW/linux
-cd linux
+# Clone Linux source code from your favorite repository, for example
+git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 
-# Usually, when people compile kernel from source code, they use current config.
+# Usually, when people compile kernel from source code, they use current config
 cp /boot/config-`uname -r` <your_build_dir>/.config   # (Option step, if you know how to do it better)
 # Open <your_build_dir>/.config and add "CONFIG_DRM_ACCEL=y" #Required by XDNA Driver
 # Or run instead
 scripts/config --file .config --enable DRM_ACCEL
-
-# Otherwise if you do not have a `.config` file modern enough, you can
-# get one for Debian/Ubuntu with
-https://gist.github.com/keryell/a0d0c020f81128d0f0071f16c9022000/raw/069d79a53fd20193ea4c9fa469d84ffc334229bb/.config
+scripts/config --file .config --enable AMD_IOMMU # Option step, if you know this is not set
 
 # Use below command to build kernel packages. Once build is done, DEB packages are at the parent directory of <your_build_dir>
 make -j `nproc` bindeb-pkg
 # The exact names will depend on your configuration
-sudo apt reinstall ../linux-headers-6.8.5+iommu-sva-part4-v7+_6.8.5-00095-g88132f705404-2_amd64.deb ../linux-image-6.8.5+iommu-sva-part4-v7+_6.8.5-00095-g88132f705404-2_amd64.deb ../linux-libc-dev_6.8.5-00095-g88132f705404-2_amd64.deb
+sudo apt reinstall ../linux-headers-6.10.0_6.10.0-1_amd64.deb ../linux-image-6.10.0_6.10.0-1_amd64.deb ../linux-libc-dev_6.10.0-1_amd64.deb
 ```
 
 ## Clone
