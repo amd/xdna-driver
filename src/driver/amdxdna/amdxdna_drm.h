@@ -12,7 +12,11 @@
 #include <drm/drm_file.h>
 
 #include "amdxdna_ctx.h"
+#ifdef AMDXDNA_SHMEM
 #include "amdxdna_gem.h"
+#else
+#include "amdxdna_gem_dma.h"
+#endif
 
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...)	dev_warn((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)

@@ -327,7 +327,7 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 		gobj = drm_gem_object_lookup(client->filp, bo_hdls[i]);
 		if (!gobj) {
 			ret = -ENOENT;
-			goto put_shmem_bo;
+			goto put_arg_bos;
 		}
 		abo = to_xdna_obj(gobj);
 
@@ -342,7 +342,7 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 		if (ret) {
 			mutex_unlock(&abo->lock);
 			drm_gem_object_put(gobj);
-			goto put_shmem_bo;
+			goto put_arg_bos;
 		}
 		abo->pinned = true;
 		mutex_unlock(&abo->lock);
@@ -352,7 +352,7 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 
 	return 0;
 
-put_shmem_bo:
+put_arg_bos:
 	amdxdna_arg_bos_put(job);
 	return ret;
 }

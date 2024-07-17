@@ -21,7 +21,7 @@ all: $(BUILD_ROOT_DIR)
 
 # add EXTRA_CFLAGS='-save-temps' to keep intermedia files
 modules:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE='-DAMDXDNA_DEVEL' modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE='-DAMDXDNA_DEVEL -DAMDXDNA_SHMEM' modules
 
 modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install
