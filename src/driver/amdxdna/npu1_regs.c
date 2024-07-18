@@ -54,6 +54,18 @@
 #define NPU1_MPNPUCLK_FREQ_MAX  847
 #define NPU1_HCLK_FREQ_MAX      1600
 
+/*fill in the dpm clock frequencies */
+const struct dpm_clk npu1_dpm_clk_table[] = {
+	{400, 800},
+	{600, 1029},
+	{600, 1029},
+	{600, 1029},
+	{600, 1029},
+	{720, 1309},
+	{720, 1309},
+	{847, 1600},
+};
+
 const struct rt_config npu1_rt_cfg[] = {
 	{NPU1_RT_CFG_TYPE_PDI_LOAD, NPU1_RT_CFG_VAL_PDI_LOAD_APP},
 	{NPU1_RT_CFG_TYPE_DEBUG_BO, NPU1_RT_CFG_VAL_DEBUG_BO_LARGE},
@@ -99,7 +111,10 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 	},
 	.smu_mpnpuclk_freq_max = NPU1_MPNPUCLK_FREQ_MAX,
 	.smu_hclk_freq_max     = NPU1_HCLK_FREQ_MAX,
-	.smu_dpm_max           = 0,
+	.smu_dpm_max           = 7,
+	.smu_rev = SMU_REVISION_V0,
+	.smu_npu_dpm_clk_table = npu1_dpm_clk_table,
+	.smu_npu_dpm_levels = ARRAY_SIZE(npu1_dpm_clk_table),
 #ifdef AMDXDNA_DEVEL
 	.priv_load_cfg	= {NPU1_RT_CFG_TYPE_PDI_LOAD, NPU1_RT_CFG_VAL_PDI_LOAD_MGMT},
 #endif

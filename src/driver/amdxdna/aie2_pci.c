@@ -234,6 +234,21 @@ static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 }
 
 /* TODO: move below two functions to aie2_ctx.c? */
+static int aie2_set_dpm_level(void *cb_arg, u32 dpm_level)
+{
+	struct amdxdna_hwctx *hwctx = cb_arg;
+	struct amdxdna_dev *xdna;
+	int ret;
+
+	xdna = hwctx->client->xdna;
+
+	ret = aie2_smu_set_dpm_level(xdna->dev_handle, dpm_level, true);
+	if (ret)
+		XDNA_ERR(xdna, "set dpm level failed, ret %d", ret);
+
+	return ret;
+}
+
 static int aie2_xrs_load(void *cb_arg, struct xrs_action_load *action)
 {
 	struct amdxdna_hwctx *hwctx = cb_arg;
@@ -269,6 +284,7 @@ static int aie2_xrs_unload(void *cb_arg)
 static struct xrs_action_ops aie2_xrs_actions = {
 	.load = aie2_xrs_load,
 	.unload = aie2_xrs_unload,
+	.set_dpm_level = aie2_set_dpm_level,
 };
 
 static void aie2_hw_stop(struct amdxdna_dev *xdna)
@@ -507,10 +523,8 @@ skip_pasid:
 	}
 	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
 
-	xrs_cfg.clk_list.num_levels = 3;
-	xrs_cfg.clk_list.cu_clk_list[0] = 0;
-	xrs_cfg.clk_list.cu_clk_list[1] = 800;
-	xrs_cfg.clk_list.cu_clk_list[2] = 1000;
+	xrs_cfg.clk_list.num_levels = ndev->priv->smu_npu_dpm_levels;
+	xrs_cfg.clk_list.cu_clk_list = ndev->priv->smu_npu_dpm_clk_table;
 	xrs_cfg.sys_eff_factor = 1;
 	xrs_cfg.dev = xdna->ddev.dev;
 	xrs_cfg.actions = &aie2_xrs_actions;
