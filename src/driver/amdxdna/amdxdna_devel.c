@@ -116,9 +116,14 @@ int amdxdna_mem_map(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 	}
 
 	mem->sgt = sgt;
-	mem->dma_addr = sg_dma_address(sgt->sgl);
-
-	XDNA_DBG(xdna, "dma_addr 0x%llx", mem->dma_addr);
+	if (iommu_mode == AMDXDNA_IOMMU_BYPASS) {
+		mem->dma_addr = sg_phys(sgt->sgl);
+		XDNA_DBG(xdna, "iommu_bypass phy_addr 0x%llx", mem->dma_addr);
+		XDNA_DBG(xdna, "sgt off 0x%d", sgt->sgl->offset);
+	} else {
+		mem->dma_addr = sg_dma_address(sgt->sgl);
+		XDNA_DBG(xdna, "iommu dma_addr 0x%llx", mem->dma_addr);
+	}
 
 	return 0;
 
