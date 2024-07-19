@@ -31,19 +31,19 @@ static void amdxdna_tdr_work(struct work_struct *work)
 		idx = srcu_read_lock(&client->hwctx_srcu);
 		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 			u64 completed = hwctx->completed; /* To avoid race */
-			u64 tdr_last = hwctx->tdr_last;
-			u64 seq = hwctx->seq;
+			u64 last = hwctx->tdr_last_completed;
+			u64 submitted = hwctx->submitted;
 
-			XDNA_DBG(xdna, "%s seq %lld completed %lld tdr_last %lld",
-				 hwctx->name, seq, completed, tdr_last);
+			XDNA_DBG(xdna, "%s submitted %lld completed %lld last %lld",
+				 hwctx->name, submitted, completed, last);
 			ctx_cnt++;
-			if (seq == completed) {
+			if (submitted == completed) {
 				stop_cnt++;
 				continue;
 			}
 
-			if (tdr_last != completed) {
-				hwctx->tdr_last = completed;
+			if (last != completed) {
+				hwctx->tdr_last_completed = completed;
 				active = true;
 				break;
 			}

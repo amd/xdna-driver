@@ -24,8 +24,8 @@ aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 	struct amdxdna_sched_job *other;
 	int idx;
 
-	idx = get_job_idx(hwctx->seq);
-	/* When pending list full, hwctx->seq points to oldest fence */
+	idx = get_job_idx(hwctx->submitted);
+	/* When pending list full, hwctx->submitted points to oldest fence */
 	other = hwctx->priv->pending[idx];
 	if (other && other->fence)
 		return -EAGAIN;
@@ -36,7 +36,7 @@ aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 	}
 
 	hwctx->priv->pending[idx] = job;
-	job->seq = hwctx->seq++;
+	job->seq = hwctx->submitted++;
 	kref_get(&job->refcnt);
 
 	return 0;
@@ -49,14 +49,14 @@ aie2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 
 	/* Special sequence number for oldest fence if exist */
 	if (seq == AMDXDNA_INVALID_CMD_HANDLE) {
-		idx = get_job_idx(hwctx->seq);
+		idx = get_job_idx(hwctx->submitted);
 		goto out;
 	}
 
-	if (seq >= hwctx->seq)
+	if (seq >= hwctx->submitted)
 		return ERR_PTR(-EINVAL);
 
-	if (seq + HWCTX_MAX_CMDS < hwctx->seq)
+	if (seq + HWCTX_MAX_CMDS < hwctx->submitted)
 		return NULL;
 
 	idx = get_job_idx(seq);
@@ -160,12 +160,12 @@ static int aie2_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_sched_job *job;
 
 	mutex_lock(&hwctx->priv->io_lock);
-	if (!hwctx->seq) {
+	if (!hwctx->submitted) {
 		mutex_unlock(&hwctx->priv->io_lock);
 		return 0;
 	}
 
-	job = aie2_hwctx_get_job(hwctx, hwctx->seq - 1);
+	job = aie2_hwctx_get_job(hwctx, hwctx->submitted - 1);
 	if (IS_ERR_OR_NULL(job)) {
 		mutex_unlock(&hwctx->priv->io_lock);
 		XDNA_WARN(hwctx->client->xdna, "Corrupted pending list");
@@ -671,7 +671,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		dma_fence_put(job->out_fence);
 		amdxdna_job_put(job);
 	}
-	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->seq);
+	XDNA_DBG(xdna, "%s total completed jobs %lld", hwctx->name, hwctx->completed);
 
 	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
 		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[idx]));

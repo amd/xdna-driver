@@ -111,18 +111,15 @@ struct amdxdna_hwctx {
 #define HWCTX_STAT_STOP  2
 	u32				status;
 	u32				old_status;
-	/*
-	 * Sequence number for next job; As this is start from 0,
-	 * it can be used as the submitted job counter.
-	 */
-	u64				seq;
-	/* Completed job counter */
-	u64				completed;
-	/* For TDR worker to keep last completed */
-	u64				tdr_last;
 
 	struct amdxdna_qos_info		     qos;
 	struct amdxdna_hwctx_param_config_cu *cus;
+
+	/* Submitted and Completed job counter */
+	u64				submitted;
+	u64				completed ____cacheline_aligned_in_smp;
+	/* For TDR worker to keep last completed. low frequency update */
+	u64				tdr_last_completed;
 };
 
 #define drm_job_to_xdna_job(j) \

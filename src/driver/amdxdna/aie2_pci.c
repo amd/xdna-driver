@@ -760,7 +760,7 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 			tmp->context_id = hwctx->id;
 			tmp->start_col = hwctx->start_col;
 			tmp->num_col = hwctx->num_col;
-			tmp->command_submissions = hwctx->seq;
+			tmp->command_submissions = hwctx->submitted;
 			tmp->command_completions = hwctx->completed;
 			tmp->migrations = 0;
 			tmp->preemptions = 0;
