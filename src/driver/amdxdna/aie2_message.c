@@ -490,6 +490,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		return -EINVAL;
 	}
 
+	print_hex_dump_debug("execbuf: ", DUMP_PREFIX_OFFSET, 16, 4, cmd_abo->mem.kva, 0x100, false);
 	op = amdxdna_cmd_get_op(cmd_abo);
 	switch (op) {
 	case ERT_START_CU:
