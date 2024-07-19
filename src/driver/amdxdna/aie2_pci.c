@@ -563,6 +563,20 @@ skip_pasid:
 	pci_free_irq_vectors(pdev);
 }
 
+static void aie2_recover(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_client *client;
+
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(client, &xdna->client_list, node)
+		aie2_stop_ctx(client);
+
+	/* The AIE will reset after all hardware contexts are destroyed */
+	list_for_each_entry(client, &xdna->client_list, node)
+		aie2_restart_ctx(client);
+	mutex_unlock(&xdna->dev_lock);
+}
+
 static int aie2_get_aie_status(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info *args)
 {
@@ -746,8 +760,8 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 			tmp->context_id = hwctx->id;
 			tmp->start_col = hwctx->start_col;
 			tmp->num_col = hwctx->num_col;
-			tmp->command_submissions = hwctx->priv->seq;
-			tmp->command_completions = hwctx->priv->completed;
+			tmp->command_submissions = hwctx->submitted;
+			tmp->command_completions = hwctx->completed;
 			tmp->migrations = 0;
 			tmp->preemptions = 0;
 			tmp->errors = 0;
@@ -876,6 +890,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.mmap           = NULL,
 	.init           = aie2_init,
 	.fini           = aie2_fini,
+	.recover        = aie2_recover,
 	.resume         = aie2_hw_start,
 	.suspend        = aie2_hw_stop,
 	.get_aie_info   = aie2_get_info,
