@@ -117,6 +117,9 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   if (m_type != AMDXDNA_BO_CMD)
     shim_err(EINVAL, "Can't call bind_at() on non-cmd BO");
 
+  if (!pos)
+    m_args_map.clear();
+
   if (boh->get_type() != AMDXDNA_BO_CMD) {
     auto h = boh->get_drm_bo_handle();
     m_args_map[pos] = h;
