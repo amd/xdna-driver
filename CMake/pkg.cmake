@@ -14,6 +14,7 @@ execute_process(
   )
 execute_process(
   COMMAND awk -F= "$1==\"ID\" {print $2}" /etc/os-release
+  COMMAND tr -d "\""
   OUTPUT_VARIABLE XDNA_CPACK_LINUX_FLAVOR
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )

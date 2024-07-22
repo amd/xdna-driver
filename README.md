@@ -144,6 +144,6 @@ A: Create a debug DEB package, see above question. Then install debug DEB packag
 ### Checkpatch
 There is a pre-commit script for this purpose.
 ``` bash
-cp amd-aie/tools/pre-commit <root-of-source-tree>/.git/hooks/
+cp xdna-driver/tools/pre-commit <root-of-source-tree>/.git/hooks/
 ```
 `git commit` will reject the commit if error/warning is found, until you make `checkpatch.pl` happy.
