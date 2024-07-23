@@ -902,5 +902,6 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.hwctx_resume   = aie2_hwctx_resume,
 	.cmd_submit     = aie2_cmd_submit,
 	.cmd_wait       = aie2_cmd_wait,
+	.hmm_invalidate = aie2_hmm_invalidate,
 	.debugfs	= aie2_debugfs_init,
 };

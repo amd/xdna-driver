@@ -11,15 +11,19 @@
 #include <drm/drm_gem_shmem_helper.h>
 
 struct amdxdna_mem {
-	u64			userptr;
-	void			*kva;
-	u64			dev_addr;
-	size_t			size;
-	struct page		**pages;
-	u32			nr_pages;
+	u64				userptr;
+	void				*kva;
+	u64				dev_addr;
+	size_t				size;
+	struct vm_area_struct		*vma;
+	struct page			**pages;
+	u32				nr_pages;
+	struct mmu_interval_notifier	notifier;
+	unsigned long			*pfns;
+	bool				map_invalid;
 #ifdef AMDXDNA_DEVEL
-	struct sg_table		*sgt;
-	u64			dma_addr; /* IOVA DMA address */
+	struct sg_table			*sgt;
+	u64				dma_addr; /* IOVA DMA address */
 #endif
 };
 
@@ -30,6 +34,7 @@ struct amdxdna_gem_obj {
 	bool				pinned;
 	struct mutex			lock; /* Protects: pinned, assigned_hwctx */
 	struct amdxdna_mem		mem;
+	struct work_struct		hmm_unreg_work;
 
 	/* Below members is uninitialized when needed */
 	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */
