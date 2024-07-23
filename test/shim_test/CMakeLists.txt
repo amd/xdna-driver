@@ -3,8 +3,9 @@
 
 set(XDNA_SHIM_TEST shim_test.elf)
 
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} MAIN_SOURCES)
 add_executable(${XDNA_SHIM_TEST}
-  shim_test.cpp
+  ${MAIN_SOURCES}
   )
 
 target_compile_definitions(${XDNA_SHIM_TEST} PRIVATE
