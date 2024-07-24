@@ -30,22 +30,6 @@ add_subdirectory(src)
 # By default, build/build.sh downloads binaries to build/amdxdna_bins/
 set(AMDXDNA_BINS_DIR ${CMAKE_BINARY_DIR}/../amdxdna_bins)
 
-# Add common NPU support files
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/bins/dpu_sequence/
-  DESTINATION xrt/${XDNA_COMPONENT}/bins/dpu_sequence
-  COMPONENT ${XDNA_COMPONENT}
-  FILES_MATCHING
-  PATTERN "*.txt" # dpu sequences are txt files
-  )
-
-# Add Phoenix NPU support files
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/bins/
-  DESTINATION xrt/${XDNA_COMPONENT}/bins
-  COMPONENT ${XDNA_COMPONENT}
-  FILES_MATCHING
-  PATTERN "*.xclbin"
-  )
-
 set(XRT_SUBMOD_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/xrt)
 set(XRT_SUBMOD_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/xrt)
 
