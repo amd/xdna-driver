@@ -377,6 +377,33 @@ struct clock_topology
   }
 };
 
+struct firmware_version
+{
+  using result_type = query::firmware_version::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_firmware_version fw_version{};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_FIRMWARE_VERSION,
+      .buffer_size = sizeof(fw_version),
+      .buffer = reinterpret_cast<uintptr_t>(&fw_version)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    result_type output;
+    output.major = fw_version.major;
+    output.minor = fw_version.minor;
+    output.patch = fw_version.patch;
+    output.build = fw_version.build;
+    return output;
+  }
+};
+
 struct default_value
 {
 
@@ -708,6 +735,7 @@ initialize_query_table()
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
   emplace_func1_request<query::sequence_name,                  sequence_name>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
+  emplace_func0_request<query::firmware_version,               firmware_version>();
 }
 
 struct X { X() { initialize_query_table(); }};
@@ -723,8 +751,10 @@ lookup_query(query::key_type query_key) const
 {
   auto it = query_tbl.find(query_key);
 
-  if (it == query_tbl.end())
+  if (it == query_tbl.end()) {
+    shim_debug("query key (%d) is not supported", query_key);
     throw query::no_such_key(query_key);
+  }
 
   return *(it->second);
 }
