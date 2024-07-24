@@ -10,6 +10,7 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_print.h>
 #include <drm/drm_file.h>
+#include <linux/hmm.h>
 
 #include "amdxdna_ctx.h"
 #ifdef AMDXDNA_SHMEM
@@ -55,6 +56,7 @@ struct amdxdna_dev_ops {
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
 	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
+	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 	void (*hwctx_suspend)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_resume)(struct amdxdna_hwctx *hwctx);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);

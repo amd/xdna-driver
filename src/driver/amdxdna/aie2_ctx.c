@@ -841,10 +841,62 @@ int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *bu
 	}
 }
 
+static int aie2_populate_range(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct mm_struct *mm = abo->mem.notifier.mm;
+	struct hmm_range range = { 0 };
+	unsigned long timeout;
+	int ret;
+
+	XDNA_INFO_ONCE(xdna, "populate memory range %llx size %lx",
+		       abo->mem.userptr, abo->mem.size);
+	range.notifier = &abo->mem.notifier;
+	range.start = abo->mem.userptr;
+	range.end = abo->mem.userptr + abo->mem.size;
+	range.hmm_pfns = abo->mem.pfns;
+	range.default_flags = HMM_PFN_REQ_FAULT;
+
+	if (!mmget_not_zero(mm))
+		return -EFAULT;
+
+	timeout = jiffies + msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
+again:
+	range.notifier_seq = mmu_interval_read_begin(&abo->mem.notifier);
+	mmap_read_lock(mm);
+	ret = hmm_range_fault(&range);
+	mmap_read_unlock(mm);
+	if (ret) {
+		if (time_after(jiffies, timeout)) {
+			ret = -ETIME;
+			goto put_mm;
+		}
+
+		if (ret == -EBUSY)
+			goto again;
+
+		goto put_mm;
+	}
+
+	dma_resv_lock(to_gobj(abo)->resv, NULL);
+	if (mmu_interval_read_retry(&abo->mem.notifier, range.notifier_seq)) {
+		dma_resv_unlock(to_gobj(abo)->resv);
+		goto again;
+	}
+	abo->mem.map_invalid = false;
+	dma_resv_unlock(to_gobj(abo)->resv);
+
+put_mm:
+	mmput(mm);
+	return ret;
+}
+
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
+	struct amdxdna_gem_obj *abo;
+	unsigned long timeout = 0;
 	int ret, i;
 
 	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, hwctx);
@@ -856,6 +908,7 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	drm_sched_job_arm(&job->base);
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 
+retry:
 	ret = drm_gem_lock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to reverve fence, ret %d", ret);
@@ -863,10 +916,28 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	}
 
 	for (i = 0; i < job->bo_cnt; i++) {
+		abo = to_xdna_obj(job->bos[i]);
+		if (abo->mem.map_invalid) {
+			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			if (!timeout) {
+				timeout = jiffies +
+					msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
+			} else if (time_after(jiffies, timeout)) {
+				ret = -ETIME;
+				goto put_fence;
+			}
+
+			ret = aie2_populate_range(abo);
+			if (ret)
+				goto put_fence;
+			goto retry;
+		}
+
 		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
 		if (ret) {
 			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
-			goto unlock_resv;
+			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			goto put_fence;
 		}
 	}
 
@@ -878,7 +949,7 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	ret = aie2_hwctx_add_job(hwctx, job);
 	if (ret) {
 		mutex_unlock(&hwctx->priv->io_lock);
-		goto unlock_resv;
+		goto signal_fence;
 	}
 
 	*seq = job->seq;
@@ -887,8 +958,8 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 
 	return 0;
 
-unlock_resv:
-	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+signal_fence:
+	dma_fence_signal(job->out_fence);
 put_fence:
 	dma_fence_put(job->out_fence);
 	drm_sched_job_cleanup(&job->base);
@@ -930,4 +1001,22 @@ int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	dma_fence_put(out_fence);
 out:
 	return ret;
+}
+
+void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
+			 unsigned long cur_seq)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct drm_gem_object *gobj = to_gobj(abo);
+	long ret;
+
+	dma_resv_lock(gobj->resv, NULL);
+	abo->mem.map_invalid = true;
+	mmu_interval_set_seq(&abo->mem.notifier, cur_seq);
+	ret = dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
+				    true, MAX_SCHEDULE_TIMEOUT);
+	dma_resv_unlock(gobj->resv);
+
+	if (!ret || ret == -ERESTARTSYS)
+		XDNA_ERR(xdna, "Failed to wait for bo, ret %ld", ret);
 }

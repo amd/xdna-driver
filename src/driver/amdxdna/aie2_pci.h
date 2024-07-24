@@ -295,7 +295,9 @@ void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx);
 void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx);
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
+void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 void aie2_stop_ctx(struct amdxdna_client *client);
 void aie2_restart_ctx(struct amdxdna_client *client);
+void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
 
 #endif /* _AIE2_PCI_H_ */
