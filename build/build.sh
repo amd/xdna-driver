@@ -196,6 +196,7 @@ CMAKE_EXTRA_FLAGS=${CMAKE_FLAGS:""}
 EXAMPLE_BUILD_DIR=example_build
 INFO_JSON=${BUILD_DIR}/../tools/info.json
 DOWNLOAD_BINS_DIR=./amdxdna_bins
+XBUTIL_VALIDATE_BINS_DIR=$DOWNLOAD_BINS_DIR/download_raw/xbutil_validate/bins
 
 # Sanity check
 if [[ $CMAKE_MAJOR_VERSION != 3 ]]; then
@@ -232,6 +233,9 @@ fi
 
 if [[ $package == 1 ]]; then
 	download_npufws
+  # Prepare xbutil validate related files for packaging
+	mkdir -p $XBUTIL_VALIDATE_BINS_DIR
+  cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
 	package_targets $DEBUG_BUILD_TYPE
 	package_targets $RELEASE_BUILD_TYPE
 	exit 0
