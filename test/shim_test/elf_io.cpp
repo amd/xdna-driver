@@ -44,7 +44,7 @@ create_bo_from_bin(device* dev, const std::string& filename)
 }
 
 void
-prepare_cmd_npu1(bo& execbuf, std::string elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
+prepare_cmd_npu1(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
 {
   exec_buf ebuf(execbuf, ERT_START_NPU);
 
@@ -64,7 +64,7 @@ prepare_cmd_npu1(bo& execbuf, std::string elf, bo& ctrl, bo& ifm, bo& wts, bo& o
 }
 
 void
-prepare_cmd_npu2(bo& execbuf, std::string elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
+prepare_cmd_npu2(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
 {
   exec_buf ebuf(execbuf, ERT_START_NPU);
 

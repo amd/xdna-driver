@@ -124,7 +124,7 @@ public:
   }
 
   static size_t
-  get_ctrl_code_size(std::string elf_path)
+  get_ctrl_code_size(const std::string& elf_path)
   {
     auto elf = xrt::elf{elf_path};
     auto mod = xrt::module{elf};
@@ -134,7 +134,7 @@ public:
   }
 
   void
-  patch_ctrl_code(bo& bo_ctrl, std::string elf_path)
+  patch_ctrl_code(bo& bo_ctrl, const std::string& elf_path)
   {
     auto elf = xrt::elf{elf_path};
     auto mod = xrt::module{elf};
