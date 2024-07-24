@@ -192,7 +192,11 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 
 static int is_mapped_fn(pte_t *pte, unsigned long addr, void *data)
 {
-	return pte_none(ptep_get(pte)) ? -EINVAL : 0;
+	if (pte_none(ptep_get(pte)))
+		return -EINVAL;
+
+	*(bool *)data = true;
+	return 0;
 }
 
 static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
@@ -200,6 +204,7 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 {
 	unsigned long num_pages = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 	struct sg_dma_page_iter sg_iter;
+	bool has_mapped_page = false;
 	unsigned long offset = 0;
 	int ret;
 
@@ -211,9 +216,12 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 	}
 
 	ret = apply_to_page_range(vma->vm_mm, vma->vm_start, num_pages,
-				  is_mapped_fn, NULL);
+				  is_mapped_fn, &has_mapped_page);
 	if (!ret)
 		return 0;
+
+	if (has_mapped_page)
+		return -EBUSY;
 
 	for_each_sgtable_dma_page(abo->base.sgt, &sg_iter, 0) {
 		dma_addr_t addr = sg_page_iter_dma_address(&sg_iter);
@@ -254,7 +262,7 @@ static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
 	ret = amdxdna_insert_pages(abo, vma);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed insert pages, ret %d", ret);
-		vma->vm_ops->close(vma);
+		goto close_vma;
 	}
 
 	XDNA_DBG(xdna, "BO map_offset 0x%llx type %d userptr 0x%llx size 0x%lx",
@@ -262,6 +270,8 @@ static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
 		 abo->mem.userptr, gobj->size);
 	return 0;
 
+close_vma:
+	vma->vm_ops->close(vma);
 hmm_unreg:
 	amdxdna_hmm_unregister(abo);
 	return ret;
