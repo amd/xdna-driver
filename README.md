@@ -136,6 +136,28 @@ TL;DR, run `sudo insmod amdxdna.ko dyndbg=+pf` to enable XDNA_DBG() globally, wh
 
 A: Create a debug DEB package, see above question. Then install debug DEB package in your environment. This time, you will have more verbose log. Share this log with us.
 
+### Q: Can I use NPU for accelerate ML traning?
+
+A: You can use NPU to accelerate ML inference. But NPU is not designed for ML traning.
+
+### Q: How to allocate huge size BO?
+
+A: There is no limit for BO size from the XRT and NPU device.
+An application can fail to allocate a huge BO, once it hits the Linux resource limite.
+In our test, the "max locked memory" is the key. You can follow below steps to check and change configure.
+``` bash
+ulimit -l # The result is in kbytes
+
+# Open /etc/security/limits.conf, add below two lines.
+# * soft  memlock <max-size-in-kbytes>
+# * hard  memlock <max-size-in-kbytes>
+#
+# See comments of the file for the meaning of each column.
+
+# Reboot the machine, then check if the limite is changed
+ulimit -l
+```
+
 ## Contributor Guidelines
 1. Read [Getting Started](#getting-started)
 2. Read [System Requirements](#system-requirements)
