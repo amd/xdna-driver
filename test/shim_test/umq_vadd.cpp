@@ -13,7 +13,7 @@ namespace {
 using namespace xrt_core;
 
 void
-prepare_cmd(bo& execbuf, std::string elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
+prepare_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
 {
   exec_buf ebuf(execbuf, ERT_START_DPU);
 
