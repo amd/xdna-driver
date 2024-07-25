@@ -439,6 +439,70 @@ static int aie2_msg_queue_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(msg_queue, aie2_msg_queue_show, NULL);
 
+static int aie2_telemetry(struct seq_file *m, u32 type)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	const size_t size = 0x1000;
+	dma_addr_t dma_addr;
+	void *buff;
+	int ret;
+
+	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
+				     DMA_FROM_DEVICE, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	mutex_lock(&xdna->dev_lock);
+	ret = aie2_get_telemetry(ndev, type, dma_addr, size);
+	mutex_unlock(&xdna->dev_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
+		goto free_buf;
+	}
+
+	seq_write(m, buff, size);
+
+free_buf:
+	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	return ret;
+}
+
+static int aie2_telemetry_disabled_show(struct seq_file *m, void *unused)
+{
+	return aie2_telemetry(m, TELEMETRY_TYPE_DISABLED);
+}
+
+AIE2_DBGFS_FOPS(telemetry_disabled, aie2_telemetry_disabled_show, NULL);
+
+static int aie2_telemetry_health_show(struct seq_file *m, void *unused)
+{
+	return aie2_telemetry(m, TELEMETRY_TYPE_HEALTH);
+}
+
+AIE2_DBGFS_FOPS(telemetry_health, aie2_telemetry_health_show, NULL);
+
+static int aie2_telemetry_error_info_show(struct seq_file *m, void *unused)
+{
+	return aie2_telemetry(m, TELEMETRY_TYPE_ERROR_INFO);
+}
+
+AIE2_DBGFS_FOPS(telemetry_error_info, aie2_telemetry_error_info_show, NULL);
+
+static int aie2_telemetry_profiling_show(struct seq_file *m, void *unused)
+{
+	return aie2_telemetry(m, TELEMETRY_TYPE_PROFILING);
+}
+
+AIE2_DBGFS_FOPS(telemetry_profiling, aie2_telemetry_profiling_show, NULL);
+
+static int aie2_telemetry_debug_show(struct seq_file *m, void *unused)
+{
+	return aie2_telemetry(m, TELEMETRY_TYPE_DEBUG);
+}
+
+AIE2_DBGFS_FOPS(telemetry_debug, aie2_telemetry_debug_show, NULL);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -452,6 +516,11 @@ const struct {
 	AIE2_DBGFS_FILE(powerstate, 0600),
 	AIE2_DBGFS_FILE(ringbuf, 0400),
 	AIE2_DBGFS_FILE(msg_queue, 0400),
+	AIE2_DBGFS_FILE(telemetry_disabled, 0400),
+	AIE2_DBGFS_FILE(telemetry_health, 0400),
+	AIE2_DBGFS_FILE(telemetry_error_info, 0400),
+	AIE2_DBGFS_FILE(telemetry_profiling, 0400),
+	AIE2_DBGFS_FILE(telemetry_debug, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
