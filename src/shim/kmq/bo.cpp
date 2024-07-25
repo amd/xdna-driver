@@ -100,7 +100,8 @@ sync(bo_kmq::direction dir, size_t size, size_t offset)
 {
   amdxdna_drm_sync_bo sbo = {
     .handle = m_bo->m_handle,
-    .direction = (dir == shim_xdna::bo::direction::host2device ? SYNC_DIRECT_TO_DEVICE : SYNC_DIRECT_FROM_DEVICE),
+    .direction = (dir == shim_xdna::bo::direction::host2device ?
+      SYNC_DIRECT_TO_DEVICE : SYNC_DIRECT_FROM_DEVICE),
     .offset = offset,
     .size = size,
   };
