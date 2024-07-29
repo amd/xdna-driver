@@ -112,6 +112,64 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+#ifdef AMDXDNA_DEVEL
+/* TODO: Delete this. move status to the first word of struct get_telemetry_resp */
+static int aie2_send_mgmt_msg_wait_for_telemetry(struct amdxdna_dev_hdl *ndev,
+						 struct xdna_mailbox_msg *msg)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct xdna_notify *hdl = msg->handle;
+	struct get_telemetry_resp *resp;
+	int ret;
+
+	if (!ndev->mgmt_chann)
+		return -ENODEV;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
+	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(ndev->mgmt_chann);
+		xdna_mailbox_destroy_channel(ndev->mgmt_chann);
+		ndev->mgmt_chann = NULL;
+	}
+
+	resp = (struct get_telemetry_resp *)hdl->data;
+	if (!ret && resp->status != AIE2_STATUS_SUCCESS) {
+		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
+			 msg->opcode, resp->status);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
+int aie2_get_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, u32 size)
+{
+	DECLARE_AIE2_MSG(get_telemetry, MSG_OP_GET_TELEMETRY);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (type >= MAX_TELEMETRY_TYPE) {
+		XDNA_ERR(xdna, "Invalid telemetry type %d", type);
+		return -EINVAL;
+	}
+
+	req.buf_addr = addr;
+	req.buf_size = size;
+	req.type = type;
+
+	ret = aie2_send_mgmt_msg_wait_for_telemetry(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to get telemetry, ret %d", ret);
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "Telemetry type %d major %u minor %u",
+		 type, resp.major, resp.minor);
+
+	return 0;
+}
+#endif
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid)
 {
 	DECLARE_AIE2_MSG(assign_mgmt_pasid, MSG_OP_ASSIGN_MGMT_PASID);

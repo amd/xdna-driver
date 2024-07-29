@@ -11,6 +11,9 @@
 enum aie2_msg_opcode {
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
+#ifdef AMDXDNA_DEVEL
+	MSG_OP_GET_TELEMETRY               = 0x4,
+#endif
 	MSG_OP_SYNC_BO			   = 0x7,
 	MSG_OP_EXECUTE_BUFFER_CF           = 0xC,
 	MSG_OP_QUERY_COL_STATUS            = 0xD,
@@ -149,6 +152,29 @@ struct destroy_ctx_resp {
 	enum aie2_msg_status	status;
 } __packed;
 
+#ifdef AMDXDNA_DEVEL
+enum telemetry_type {
+	TELEMETRY_TYPE_DISABLED = 0,
+	TELEMETRY_TYPE_HEALTH,
+	TELEMETRY_TYPE_ERROR_INFO,
+	TELEMETRY_TYPE_PROFILING,
+	TELEMETRY_TYPE_DEBUG,
+	MAX_TELEMETRY_TYPE
+};
+
+struct get_telemetry_req {
+	enum telemetry_type	type;
+	u64	buf_addr;
+	u32	buf_size;
+} __packed;
+
+struct get_telemetry_resp {
+	u32	major;
+	u32	minor;
+	u32	size;
+	enum aie2_msg_status	status;
+} __packed;
+#endif
 struct execute_buffer_req {
 	u32	cu_idx;
 	u32	payload[19];
