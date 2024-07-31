@@ -11,6 +11,7 @@
 #include <linux/completion.h>
 #include <linux/pm_runtime.h>
 #include <drm/drm_debugfs.h>
+#include <drm/drm_cache.h>
 
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
@@ -453,6 +454,7 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 	if (!buff)
 		return -ENOMEM;
 
+	drm_clflush_virt_range(buff, size); /* device can access */
 	mutex_lock(&xdna->dev_lock);
 	ret = aie2_get_telemetry(ndev, type, dma_addr, size);
 	mutex_unlock(&xdna->dev_lock);
@@ -465,7 +467,7 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 
 free_buf:
 	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
-	return ret;
+	return 0;
 }
 
 static int aie2_telemetry_disabled_show(struct seq_file *m, void *unused)
