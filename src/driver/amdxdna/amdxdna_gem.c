@@ -70,6 +70,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	if (abo->pinned)
 		amdxdna_gem_unpin(abo);
 
+	flush_work(&abo->hmm_unreg_work);
 	if (abo->type == AMDXDNA_BO_DEV) {
 		mutex_lock(&abo->client->mm_lock);
 		drm_mm_remove_node(&abo->mm_node);
@@ -89,8 +90,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 #ifdef AMDXDNA_DEVEL
 	if (abo->type == AMDXDNA_BO_CMD)
 		amdxdna_mem_unmap(xdna, &abo->mem);
-
-	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
+	else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
 		amdxdna_bo_dma_unmap(abo);
 #endif
 	drm_gem_vunmap_unlocked(gobj, &map);
@@ -145,7 +145,6 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo)
 
 	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
 		mapping_clear_unevictable(vma->vm_file->f_mapping);
-	drm_gem_object_put(to_gobj(abo));
 }
 
 static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
@@ -184,8 +183,6 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	abo->mem.vma = vma;
 	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
 		mapping_set_unevictable(vma->vm_file->f_mapping);
-
-	drm_gem_object_get(to_gobj(abo));
 
 	return 0;
 }
@@ -461,7 +458,7 @@ amdxdna_drm_create_dev_heap(struct drm_device *dev,
 		ret = amdxdna_bo_dma_map(abo);
 		if (ret) {
 			drm_gem_object_put(to_gobj(abo));
-			return ERR_PTR(ret);
+			goto mm_unlock;
 		}
 	}
 #endif
