@@ -124,9 +124,21 @@ struct aie_metadata {
 	struct aie_tile_metadata shim;
 };
 
-struct clock_entry {
+struct clock {
 	char name[16];
+	u32 max_freq_mhz;
 	u32 freq_mhz;
+#if defined(CONFIG_DEBUG_FS)
+	u32 dbg_freq_mhz;
+#endif
+};
+
+struct smu {
+	struct clock		mp_npu_clock;
+	struct clock		h_clock;
+#define SMU_POWER_OFF 0
+#define SMU_POWER_ON  1
+	u32			power_state;
 };
 
 struct rt_config {
@@ -184,8 +196,7 @@ struct amdxdna_dev_hdl {
 	u32				total_col;
 	struct aie_version		version;
 	struct aie_metadata		metadata;
-	struct clock_entry		mp_npu_clock;
-	struct clock_entry		h_clock;
+	struct smu			smu;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
@@ -228,12 +239,17 @@ struct amdxdna_dev_priv {
 extern const struct amdxdna_dev_ops aie2_ops;
 
 /* aie2_smu.c */
-int aie2_smu_init(struct amdxdna_dev_hdl *ndev);
-void aie2_smu_fini(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_set_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev, u32 freq_mhz);
-int aie2_smu_set_hclock_freq(struct amdxdna_dev_hdl *ndev, u32 freq_mhz);
+void aie2_smu_setup(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
+void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_set_clock_freq(struct amdxdna_dev_hdl *ndev, struct clock *clock, u32 freq_mhz);
+char *aie2_smu_get_mpnpu_clock_name(struct amdxdna_dev_hdl *ndev);
+char *aie2_smu_get_hclock_name(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_psp.c */
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);

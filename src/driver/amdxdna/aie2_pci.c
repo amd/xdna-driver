@@ -281,7 +281,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy(ndev->mbox);
 	aie2_psp_stop(ndev->psp_hdl);
-	aie2_smu_fini(ndev);
+	aie2_smu_stop(ndev);
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
 }
@@ -301,7 +301,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	}
 	pci_set_master(pdev);
 
-	ret = aie2_smu_init(ndev);
+	ret = aie2_smu_start(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init smu, ret %d", ret);
 		goto disable_dev;
@@ -366,7 +366,7 @@ destroy_mbox:
 stop_psp:
 	aie2_psp_stop(ndev->psp_hdl);
 fini_smu:
-	aie2_smu_fini(ndev);
+	aie2_smu_stop(ndev);
 disable_dev:
 	pci_disable_device(pdev);
 	pci_clear_master(pdev);
@@ -479,6 +479,8 @@ skip_pasid:
 		goto disable_sva;
 	}
 	xdna->dev_handle = ndev;
+
+	aie2_smu_setup(ndev);
 
 	ret = aie2_hw_start(xdna);
 	if (ret) {
@@ -704,11 +706,13 @@ static int aie2_get_clock_metadata(struct amdxdna_client *client,
 	if (!clock)
 		return -ENOMEM;
 
-	memcpy(clock->mp_npu_clock.name, ndev->mp_npu_clock.name,
+	memcpy(clock->mp_npu_clock.name, aie2_smu_get_mpnpu_clock_name(ndev),
 	       sizeof(clock->mp_npu_clock.name));
-	clock->mp_npu_clock.freq_mhz = ndev->mp_npu_clock.freq_mhz;
-	memcpy(clock->h_clock.name, ndev->h_clock.name, sizeof(clock->h_clock.name));
-	clock->h_clock.freq_mhz = ndev->h_clock.freq_mhz;
+	clock->mp_npu_clock.freq_mhz = aie2_smu_get_mpnpu_clock_freq(ndev);
+
+	memcpy(clock->h_clock.name, aie2_smu_get_hclock_name(ndev),
+	       sizeof(clock->h_clock.name));
+	clock->h_clock.freq_mhz = aie2_smu_get_hclock_freq(ndev);
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), clock, sizeof(*clock)))
 		ret = -EFAULT;
