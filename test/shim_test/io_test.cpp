@@ -29,7 +29,8 @@ io_test_parameter_init(int perf, int type, bool debug = false)
 io_test_bo_set
 alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
 {
-  auto bos = create_bo_set(dev, local_data_path);
+  io_test_bo_set boset{dev, local_data_path};
+  auto bos = boset.get_bos();
 
   if (io_test_parameters.type == IO_TEST_NOOP_RUN) {
     // Preparing no-op kernel's special control code
@@ -51,12 +52,12 @@ alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
 
   if (io_test_parameters.debug) {
     for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
-      std::cout << bo_set_type2name(i) << "'s size and init_offset: "
+      std::cout << io_test_bo_set::bo_type2name(i) << "'s size and init_offset: "
                 << bos[i].size << ", " << bos[i].init_offset << std::endl;
     }
   }
 
-  return bos;
+  return boset;
 }
 
 void
@@ -161,7 +162,7 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
   auto local_data_path = wrk + "/data/";
   std::vector<io_test_bo_set> bo_set;
   for (int i = 0; i < num_cmdlist * cmds_per_list; i++)
-    bo_set.push_back(alloc_and_init_bo_set(dev, local_data_path));
+    bo_set.push_back(std::move(alloc_and_init_bo_set(dev, local_data_path)));
 
   // Creating HW context for cmd submission
   hw_ctx hwctx{dev};
@@ -173,25 +174,25 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
   std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
 
   // Finalize cmd before submission
-  for (auto& bos : bo_set) {
-    bo_set_init_cmd(bos, cu_idx, io_test_parameters.debug);
-    bo_set_sync_before_run(bos);
+  for (auto& boset : bo_set) {
+    boset.init_cmd(cu_idx, io_test_parameters.debug);
+    boset.sync_before_run();
   }
 
   // Creating list of commands to be submitted
   std::vector< std::pair<std::shared_ptr<bo>, ert_start_kernel_cmd *> > cmdlist_bos;
   if (cmds_per_list == 1) {
     // Single command per list, just send the command BO itself
-    for (auto& bos : bo_set) {
-      auto& cbo = bos[IO_TEST_BO_CMD].tbo;
+    for (auto& boset : bo_set) {
+      auto& cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo;
       auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
       cmdlist_bos.push_back( {std::move(cbo), cmdpkt} );
     }
   } else {
     // Multiple commands per list, create and send the chained command
     std::vector<bo*> tmp_cmd_bos;
-    for (auto& bos : bo_set) {
-      tmp_cmd_bos.push_back(bos[IO_TEST_BO_CMD].tbo.get());
+    for (auto& boset : bo_set) {
+      tmp_cmd_bos.push_back(boset.get_bos()[IO_TEST_BO_CMD].tbo.get());
       if ((tmp_cmd_bos.size() % cmds_per_list) == 0) {
         auto cbo = std::make_unique<bo>(dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF);
         auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
@@ -212,9 +213,9 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
 
   // Verify result
   if (io_test_parameters.type != IO_TEST_NOOP_RUN) {
-    for (auto& bos : bo_set) {
-      bo_set_sync_after_run(bos);
-      bo_set_verify_result(bos, local_data_path);
+    for (auto& boset : bo_set) {
+      boset.sync_after_run();
+      boset.verify_result();
     }
   }
 

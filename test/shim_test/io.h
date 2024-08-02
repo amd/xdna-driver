@@ -25,14 +25,48 @@ struct io_test_bo {
   size_t init_offset;
   std::shared_ptr<bo> tbo;
 };
-using io_test_bo_set = std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>;
 
-void bo_set_sync_before_run(io_test_bo_set& io_test_bos);
-void bo_set_sync_after_run(io_test_bo_set& io_test_bos);
-void bo_set_init_cmd(io_test_bo_set& io_test_bos, xrt_core::cuidx_type idx, bool dump);
-void bo_set_dump_content(io_test_bo_set& io_test_bos);
-void bo_set_verify_result(io_test_bo_set& io_test_bos, const std::string& local_data_path);
-io_test_bo_set create_bo_set(device* dev, const std::string& local_data_path);
-const char* bo_set_type2name(int type);
+class io_test_bo_set {
+public:
+  io_test_bo_set(device *dev, const std::string& data_path);
+
+  void
+  run();
+
+  void
+  sync_before_run();
+
+  void
+  sync_after_run();
+
+  void
+  init_cmd(xrt_core::cuidx_type idx, bool dump);
+
+  void
+  dump_content();
+
+  void
+  verify_result();
+
+  static const char *
+  bo_type2name(int type);
+
+  std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
+  get_bos();
+
+private:
+  std::array<io_test_bo, IO_TEST_BO_MAX_TYPES> m_bo_array;
+  const std::string m_local_data_path;
+  device *m_dev;
+
+  void
+  init_sizes();
+
+  void
+  alloc_bos();
+
+  void
+  init_args();
+};
 
 #endif // _SHIMTEST_IO_H_

@@ -87,15 +87,18 @@ protected:
     }
   }
 
-  void
+  bool
   recv_ipc_data(void *buf, size_t size)
   {
     if (read(m_read_fd, buf, size) != size) {
-      if (!m_is_parent)
+      if (!m_is_parent) {
         throw std::runtime_error("Failed to read IPC data from parent");
-      else
+      } else {
         std::cout << "Failed to read IPC data from child" << std::endl;
+	return false;
+      }
     }
+    return true;
   }
 
   xrt_core::device::id_type
