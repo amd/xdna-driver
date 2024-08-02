@@ -874,7 +874,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 	/* Set resource solver power property to the user choice */
 
 	/* Set power level within the device */
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
