@@ -4,6 +4,8 @@
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 #
 
+set -euo pipefail
+
 usage()
 {
 	cat << USAGE_END
@@ -50,7 +52,7 @@ build_targets()
 		# Some git submodule dir's ownershipt may not be right, fix it
 		# so that cmake generation can be done properly
 		git config --global --add safe.directory '*'
-		time $CMAKE $CMAKE_EXTRA_FLAGS -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DKERNEL_VER=$kernel_ver -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
+		time $CMAKE $cmake_extra_flags -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DKERNEL_VER=$kernel_ver -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
 	fi
 	time make -j $njobs $verbose DESTDIR=$PWD install
 
@@ -192,7 +194,7 @@ DEBUG_BUILD_TYPE=Debug
 RELEASE_BUILD_TYPE=Release
 CMAKE=cmake
 CMAKE_MAJOR_VERSION=`cmake --version | head -n 1 | awk '{print $3}' |awk -F. '{print $1}'`
-CMAKE_EXTRA_FLAGS=${CMAKE_FLAGS:""}
+cmake_extra_flags=""
 EXAMPLE_BUILD_DIR=example_build
 INFO_JSON=${BUILD_DIR}/../tools/info.json
 DOWNLOAD_BINS_DIR=./amdxdna_bins
@@ -210,7 +212,7 @@ if [[ $CMAKE_MAJOR_VERSION != 3 ]]; then
 fi
 # Sanity check end
 
-CMAKE_EXTRA_FLAGS+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix -DXRT_INSTALL_PREFIX=$xrt_install_prefix"
+cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix -DXRT_INSTALL_PREFIX=$xrt_install_prefix"
 
 if [[ ! -z "$download_dir" ]]; then
 	echo "Specified download directory is $download_dir"
