@@ -77,10 +77,10 @@ static int aie2_dbgfs_entry_release(struct inode *inode, struct file *file)
 #define file_to_ndev_rw(file) \
 	(((struct seq_file *)(file)->private_data)->private)
 
-static ssize_t aie2_clock_write(struct file *file, const char __user *ptr,
-				size_t len, loff_t *off)
+static ssize_t
+aie2_dbgfs_clock_write(struct amdxdna_dev_hdl *ndev, struct clock *clock,
+		       const char __user *ptr, size_t len, loff_t *off)
 {
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	u32 val;
 	int ret;
 
@@ -90,16 +90,57 @@ static ssize_t aie2_clock_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	aie2_smu_set_mpnpu_clock_freq(ndev, val);
+	clock->dbg_freq_mhz = val;
+	if (!clock->dbg_freq_mhz) {
+		XDNA_INFO(ndev->xdna, "Auto %s", clock->name);
+		return 0;
+	}
+
+	ret = aie2_smu_set_clock_freq(ndev, clock, val);
+	if (ret) {
+		clock->dbg_freq_mhz = 0;
+		XDNA_ERR(ndev->xdna, "Set %s ret %d, use auto clock", clock->name, ret);
+		return ret;
+	}
+
 	return len;
 }
 
-static int aie2_clock_show(struct seq_file *m, void *unused)
+static ssize_t aie2_dbgfs_mpnpu_clock_write(struct file *file, const char __user *ptr,
+					    size_t len, loff_t *off)
 {
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+
+	return aie2_dbgfs_clock_write(ndev, &ndev->smu.mp_npu_clock, ptr, len, off);
+}
+
+static int aie2_dbgfs_mpnpu_clock_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	seq_printf(m, "%d\n", aie2_smu_get_mpnpu_clock_freq(ndev));
 	return 0;
 }
 
-AIE2_DBGFS_FOPS(npuclock, aie2_clock_show, aie2_clock_write);
+AIE2_DBGFS_FOPS(npuclock, aie2_dbgfs_mpnpu_clock_show, aie2_dbgfs_mpnpu_clock_write);
+
+static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr,
+				       size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+
+	return aie2_dbgfs_clock_write(ndev, &ndev->smu.h_clock, ptr, len, off);
+}
+
+static int aie2_dbgfs_hclock_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	seq_printf(m, "%d\n", aie2_smu_get_hclock_freq(ndev));
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(hclock, aie2_dbgfs_hclock_show, aie2_dbgfs_hclock_write);
 
 static ssize_t aie2_pasid_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
@@ -167,6 +208,24 @@ static ssize_t aie2_power_state_write(struct file *file, const char __user *ptr,
 
 static int aie2_power_state_show(struct seq_file *m, void *unused)
 {
+	struct amdxdna_dev_hdl *ndev = m->private;
+	int ret;
+
+	ret = aie2_smu_get_power_state(ndev);
+	if (ret < 0)
+		return ret;
+
+	switch (ret) {
+	case SMU_POWER_ON:
+		seq_puts(m, "SMU power ON\n");
+		break;
+	case SMU_POWER_OFF:
+		seq_puts(m, "SMU power OFF\n");
+		break;
+	default:
+		seq_puts(m, "SMU power ??? (buggy)\n");
+	}
+
 	return 0;
 }
 
@@ -218,31 +277,6 @@ static int aie2_state_show(struct seq_file *m, void *unused)
 }
 
 AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
-
-static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr,
-				       size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	u32 val;
-	int ret;
-
-	ret = kstrtouint_from_user(ptr, len, 10, &val);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Invalid input val: %d", val);
-		return ret;
-	}
-
-	aie2_smu_set_hclock_freq(ndev, val);
-
-	return len;
-}
-
-static int aie2_dbgfs_hclock_show(struct seq_file *m, void *unused)
-{
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(hclock, aie2_dbgfs_hclock_show, aie2_dbgfs_hclock_write);
 
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
