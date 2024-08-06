@@ -52,7 +52,7 @@ build_targets()
 		# Some git submodule dir's ownershipt may not be right, fix it
 		# so that cmake generation can be done properly
 		git config --global --add safe.directory '*'
-		time $CMAKE $cmake_extra_flags -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DKERNEL_VER=$kernel_ver -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
+		time $CMAKE $cmake_extra_flags -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
 	fi
 	time make -j $njobs $verbose DESTDIR=$PWD install
 
@@ -106,7 +106,7 @@ download_npufws()
 
 			echo "Download $device NPUFW version $version:"
 			if [ -d "${firmware_dir}/${pci_dev_id}_${pci_rev_id}" ]; then
-				rm ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
+				rm -r ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
 			fi
 			mkdir -p ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
 			wget -O ${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name $url
