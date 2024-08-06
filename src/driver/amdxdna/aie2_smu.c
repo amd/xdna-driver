@@ -12,6 +12,8 @@
 #define AIE2_SMU_POWER_OFF		0x4
 #define AIE2_SMU_SET_MPNPUCLK_FREQ	0x5
 #define AIE2_SMU_SET_HCLK_FREQ		0x6
+#define AIE2_SMU_SET_SOFT_DPMLEVEL	0x7
+#define AIE2_SMU_SET_HARD_DPMLEVEL	0x8
 
 static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd, u32 reg_arg)
 {
@@ -115,6 +117,26 @@ char *aie2_smu_get_hclock_name(struct amdxdna_dev_hdl *ndev)
 	return ndev->smu.h_clock.name;
 }
 
+int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
+{
+	int ret;
+
+	if (SMU_DPM_MAX(ndev) == 0 || dpm_level > SMU_DPM_MAX(ndev))
+		return 0;
+
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HARD_DPMLEVEL, dpm_level);
+	if (!ret)
+		XDNA_INFO_ONCE(ndev->xdna, "Set hard dpm level = %d", dpm_level);
+	else
+		return ret;
+
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_SOFT_DPMLEVEL, dpm_level);
+	if (!ret)
+		XDNA_INFO_ONCE(ndev->xdna, "Set soft dpm level = %d", dpm_level);
+
+	return ret;
+}
+
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -174,12 +196,45 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev)
 	}
 	XDNA_INFO_ONCE(ndev->xdna, "Set %s = %d mhz", smu->h_clock.name, freq_mhz);
 
+	if (SMU_DPM_MAX(ndev) > 0) {
+		ret = aie2_smu_set_dpm_level(ndev, smu->dpm_level);
+		if (ret) {
+			XDNA_ERR(ndev->xdna, "Set dpm level failed, ret %d", ret);
+			return ret;
+		}
+	}
+
 	return 0;
+}
+
+void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev)
+{
+	u32 freq_mhz;
+	int ret;
+
+	freq_mhz = 400;
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
+	if (ret)
+		XDNA_ERR(ndev->xdna, "Set mpnpu clk freq %d mhz failed, ret %d", freq_mhz, ret);
+
+	freq_mhz = 800;
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HCLK_FREQ, freq_mhz);
+	if (ret)
+		XDNA_ERR(ndev->xdna, "Set hclk freq %d mhz failed, ret %d", freq_mhz, ret);
+
+	if (SMU_DPM_MAX(ndev) > 0) {
+		ret = aie2_smu_set_dpm_level(ndev, 0);
+		if (ret)
+			XDNA_ERR(ndev->xdna, "Set dpm level 0 failed, ret %d", ret);
+	}
 }
 
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
+
+	/* Minimize clocks/dpm level prior to power off */
+	aie2_smu_prepare_s0i3(ndev);
 
 	ret = aie2_smu_set_power_off(ndev);
 	if (ret)
@@ -199,4 +254,5 @@ void aie2_smu_setup(struct amdxdna_dev_hdl *ndev)
 	/* The first time SMU start, it will use below clock frequency */
 	smu->mp_npu_clock.freq_mhz = smu->mp_npu_clock.max_freq_mhz;
 	smu->h_clock.freq_mhz = smu->h_clock.max_freq_mhz;
+	smu->dpm_level = SMU_DPM_MAX(ndev);
 }

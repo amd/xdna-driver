@@ -104,6 +104,7 @@ const struct amdxdna_dev_priv npu5_dev_priv = {
 	},
 	.smu_mpnpuclk_freq_max = NPU5_MPNPUCLK_FREQ_MAX,
 	.smu_hclk_freq_max     = NPU5_HCLK_FREQ_MAX,
+	.smu_dpm_max           = 7,
 #ifdef AMDXDNA_DEVEL
 	.priv_load_cfg = {NPU5_RT_CFG_TYPE_PDI_LOAD, NPU5_RT_CFG_VAL_PDI_LOAD_MGMT},
 #endif
