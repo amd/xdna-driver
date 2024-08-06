@@ -67,6 +67,8 @@
 	((ndev)->priv->smu_mpnpuclk_freq_max)
 #define SMU_HCLK_FREQ_MAX(ndev) \
 	((ndev)->priv->smu_hclk_freq_max)
+#define SMU_DPM_MAX(ndev) \
+	((ndev)->priv->smu_dpm_max)
 
 enum aie2_smu_reg_idx {
 	SMU_CMD_REG = 0,
@@ -136,6 +138,7 @@ struct clock {
 struct smu {
 	struct clock		mp_npu_clock;
 	struct clock		h_clock;
+	u32			dpm_level;
 #define SMU_POWER_OFF 0
 #define SMU_POWER_ON  1
 	u32			power_state;
@@ -230,6 +233,8 @@ struct amdxdna_dev_priv {
 	struct aie2_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
 	u32				smu_mpnpuclk_freq_max;
 	u32				smu_hclk_freq_max;
+	/* npu1: 0, not support dpm; npu2+: support dpm up to 7 */
+	u32				smu_dpm_max;
 #ifdef AMDXDNA_DEVEL
 	struct rt_config		priv_load_cfg;
 #endif
@@ -250,6 +255,8 @@ int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_psp.c */
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
