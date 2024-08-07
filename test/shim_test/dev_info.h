@@ -26,6 +26,7 @@ const uint16_t npu1_revision_id = 0x0;
 const uint16_t npu2_revision_id = 0x0;
 const uint16_t npu4_revision_id = 0x10;
 const uint16_t npu5_revision_id = 0x11;
+const uint16_t npu6_revision_id = 0x20;
 
 const xclbin_info& get_xclbin_info(device* dev, const char *xclbin_name=nullptr);
 std::string get_xclbin_name(device* dev);

@@ -77,6 +77,13 @@ install(CODE "execute_process( \
   )"
   )
 
+install(CODE "execute_process( \
+  COMMAND ${CMAKE_COMMAND} -E create_symlink \
+  ${AMDXDNA_BINS_DIR}/workspaces/NPU6_1x4_TESTCASES \
+  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu6_workspace \
+  )"
+  )
+
 # Set up symlink for local shim test case data
 set(XDNA_SHIM_TEST_DATA_DIR local_shim_test_data)
 install(CODE "execute_process( \
