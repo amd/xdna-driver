@@ -90,7 +90,7 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
-	if (hwctx->status != HWCTX_STAT_READY) {
+	if (hwctx->old_status != HWCTX_STAT_READY) {
 		XDNA_DBG(xdna, "hwctx is not ready, status %d", hwctx->status);
 		goto out;
 	}
@@ -113,9 +113,13 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 #ifdef AMDXDNA_DEVEL
 skip_config_cu:
 #endif
+out:
+	/*
+	 * Even above commands might failed, we still needs to restart DRM
+	 * scheduler, to signal those commands in the pending list.
+	 */
 	drm_sched_start(&hwctx->priv->sched, true);
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
-out:
 	return ret;
 }
 
@@ -349,6 +353,9 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 
 	if (!mmget_not_zero(job->mm))
 		return ERR_PTR(-ESRCH);
+
+	if (!hwctx->priv->mbox_chann)
+		return ERR_PTR(-ENODEV);
 
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
