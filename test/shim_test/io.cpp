@@ -210,7 +210,7 @@ bo_type2name(int type)
 
 void
 io_test_bo_set::
-run()
+run(xrt_core::fence_handle* fence)
 {
   hw_ctx hwctx{m_dev};
   auto hwq = hwctx.get()->get_hw_queue();
@@ -225,6 +225,8 @@ run()
 
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto chdl = cbo->get();
+  if (fence)
+    hwq->submit_wait(fence);
   hwq->submit_command(chdl);
   hwq->wait_command(chdl, 5000);
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
@@ -233,6 +235,13 @@ run()
 
   sync_after_run();
   verify_result();
+}
+
+void
+io_test_bo_set::
+run()
+{
+  run(nullptr);
 }
 
 std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&

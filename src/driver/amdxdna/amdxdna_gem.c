@@ -637,6 +637,9 @@ int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo)
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	int ret;
 
+	if (is_import_bo(abo))
+		return 0;
+
 	switch (abo->type) {
 	case AMDXDNA_BO_SHMEM:
 	case AMDXDNA_BO_DEV_HEAP:
@@ -666,6 +669,9 @@ int amdxdna_gem_pin(struct amdxdna_gem_obj *abo)
 
 void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo)
 {
+	if (is_import_bo(abo))
+		return;
+
 	mutex_lock(&abo->lock);
 	XDNA_DBG(abo->client->xdna, "BO type %d", abo->type);
 	switch (abo->type) {

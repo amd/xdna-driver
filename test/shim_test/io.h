@@ -34,6 +34,9 @@ public:
   run();
 
   void
+  run(xrt_core::fence_handle* fence);
+
+  void
   sync_before_run();
 
   void

@@ -6,6 +6,7 @@
 
 #include "core/common/device.h"
 
+#include <cstdarg>
 #include <signal.h>
 #include <sys/wait.h>
 
@@ -105,6 +106,18 @@ protected:
   get_dev_id()
   {
     return m_id;
+  }
+
+  void
+  msg(const char* format,...)
+  {
+    va_list args;
+    std::string f = m_is_parent ? "P: " : "C: ";
+    f += format;
+    f += "\n";
+    va_start(args, format);
+    vprintf(f.c_str(), args);
+    va_end(args);
   }
 
 private:

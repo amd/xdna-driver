@@ -23,22 +23,15 @@ public:
   int
   wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
 
-  // TODO
   void
-  submit_wait(const xrt_core::fence_handle*) override
-  { shim_not_supported_err(__func__); }
+  submit_wait(const xrt_core::fence_handle*) override;
 
-  // TODO
   void
-  submit_wait(const std::vector<xrt_core::fence_handle*>&) override
-  { shim_not_supported_err(__func__); }
+  submit_wait(const std::vector<xrt_core::fence_handle*>&) override;
 
-  // TODO
   void
-  submit_signal(const xrt_core::fence_handle*) override
-  { shim_not_supported_err(__func__); }
+  submit_signal(const xrt_core::fence_handle*) override;
 
-  // TODO
   std::unique_ptr<xrt_core::fence_handle>
   import(xrt_core::fence_handle::export_handle) override
   { shim_not_supported_err(__func__); }

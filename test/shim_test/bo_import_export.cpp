@@ -27,14 +27,14 @@ private:
   void
   run_test_parent() override
   {
-    std::cout << "Running parent test..." << std::endl;
+    msg("test started...");
 
     bool success = true;
     ipc_data idata = {};
     if (!recv_ipc_data(&idata, sizeof(idata)))
       return;
 
-    std::cout << "Received BO " << idata.hdl << " from PID " << idata.pid << std::endl;
+    msg("Received BO %d from PID %d", idata.hdl, idata.pid);
 
     // Create IO test BO set and replace input BO with the one from child
     auto dev = get_userpf_device(get_dev_id());
@@ -48,7 +48,7 @@ private:
   void
   run_test_child() override
   {
-    std::cout << "Running child test..." << std::endl;
+    msg("test started...");
 
     // Create IO test BO set and share input BO with parent
     auto dev = get_userpf_device(get_dev_id());

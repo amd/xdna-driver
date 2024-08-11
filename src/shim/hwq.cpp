@@ -3,6 +3,7 @@
 
 #include "bo.h"
 #include "hwq.h"
+#include "fence.h"
 #include "shim_debug.h"
 
 namespace {
@@ -135,6 +136,29 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
     }
   }
   return 1;
+}
+
+void
+hw_q::
+submit_wait(const xrt_core::fence_handle* f)
+{
+  auto fh = static_cast<const fence*>(f);
+  fh->submit_wait();
+}
+
+void
+hw_q::
+submit_wait(const std::vector<xrt_core::fence_handle*>& fences)
+{
+  fence::submit_wait(m_pdev, fences);
+}
+
+void
+hw_q::
+submit_signal(const xrt_core::fence_handle* f)
+{
+  auto fh = static_cast<const fence*>(f);
+  fh->submit_signal();
 }
 
 } // shim_xdna

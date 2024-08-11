@@ -213,11 +213,12 @@ static const struct file_operations amdxdna_fops = {
 };
 
 const struct drm_driver amdxdna_drm_drv = {
-	.driver_features = DRIVER_GEM | DRIVER_COMPUTE_ACCEL,
+	.driver_features = DRIVER_GEM | DRIVER_COMPUTE_ACCEL |
+		DRIVER_SYNCOBJ | DRIVER_SYNCOBJ_TIMELINE,
 	.fops = &amdxdna_fops,
 	.name = "amdxdna_accel_driver",
 	.desc = "AMD XDNA DRM implementation",
-	.date = "20240124",
+	.date = "20240805",
 	.major = AMDXDNA_DRIVER_MAJOR,
 	.minor = AMDXDNA_DRIVER_MINOR,
 	.open = amdxdna_drm_open,
