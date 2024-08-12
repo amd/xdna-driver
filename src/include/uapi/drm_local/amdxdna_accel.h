@@ -21,6 +21,7 @@ extern "C" {
 #define AMDXDNA_INVALID_ADDR		(~0UL)
 #define AMDXDNA_INVALID_CTX_HANDLE	0
 #define AMDXDNA_INVALID_BO_HANDLE	0
+#define AMDXDNA_INVALID_FENCE_HANDLE	0
 
 /*
  * The interface can grow/extend over time.
@@ -48,6 +49,8 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_WAIT_CMD,
 	DRM_AMDXDNA_GET_INFO,
 	DRM_AMDXDNA_SET_STATE,
+	DRM_AMDXDNA_SUBMIT_WAIT,
+	DRM_AMDXDNA_SUBMIT_SIGNAL,
 	DRM_AMDXDNA_NUM_IOCTLS
 };
 
@@ -528,6 +531,20 @@ struct amdxdna_drm_set_state {
 	__u64 buffer; /* in */
 };
 
+
+/**
+ * struct amdxdna_drm_syncobjs - Signal or wait on array of DRM timelined sync objects.
+ * @handles: Array of handles of sync objects.
+ * @points: Array of time points for each sync objects.
+ * @count: Number of elements in the above array.
+ */
+struct amdxdna_drm_syncobjs {
+	__u64 handles; /* in */
+	__u64 points; /* in */
+	__u32 count; /* in */
+	__u32 pad;
+};
+
 #define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
 		 struct amdxdna_drm_create_hwctx)
@@ -567,6 +584,14 @@ struct amdxdna_drm_set_state {
 #define DRM_IOCTL_AMDXDNA_SET_STATE \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SET_STATE, \
 		 struct amdxdna_drm_set_state)
+
+#define DRM_IOCTL_AMDXDNA_SUBMIT_WAIT \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SUBMIT_WAIT, \
+		 struct amdxdna_drm_syncobjs)
+
+#define DRM_IOCTL_AMDXDNA_SUBMIT_SIGNAL \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SUBMIT_SIGNAL, \
+		 struct amdxdna_drm_syncobjs)
 
 #if defined(__cplusplus)
 } /* extern c end */

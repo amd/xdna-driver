@@ -6,6 +6,7 @@
 
 #include "core/common/device.h"
 
+#include <cstdarg>
 #include <signal.h>
 #include <sys/wait.h>
 
@@ -87,21 +88,36 @@ protected:
     }
   }
 
-  void
+  bool
   recv_ipc_data(void *buf, size_t size)
   {
     if (read(m_read_fd, buf, size) != size) {
-      if (!m_is_parent)
+      if (!m_is_parent) {
         throw std::runtime_error("Failed to read IPC data from parent");
-      else
+      } else {
         std::cout << "Failed to read IPC data from child" << std::endl;
+	return false;
+      }
     }
+    return true;
   }
 
   xrt_core::device::id_type
   get_dev_id()
   {
     return m_id;
+  }
+
+  void
+  msg(const char* format,...)
+  {
+    va_list args;
+    std::string f = m_is_parent ? "P: " : "C: ";
+    f += format;
+    f += "\n";
+    va_start(args, format);
+    vprintf(f.c_str(), args);
+    va_end(args);
   }
 
 private:

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "2proc.h"
 #include "bo.h"
+#include "io.h"
+#include "2proc.h"
+#include "dev_info.h"
 
 #include "core/common/system.h"
 
@@ -22,41 +24,37 @@ private:
     shared_handle::export_handle hdl;
   };
 
-  const uint8_t m_buf_char = 0x55;
-
   void
   run_test_parent() override
   {
-    std::cout << "Running parent test..." << std::endl;
-
-    ipc_data idata = {};
-    recv_ipc_data(&idata, sizeof(idata));
-    std::cout << "Received BO " << idata.hdl << " from PID " << idata.pid << std::endl;
+    msg("test started...");
 
     bool success = true;
+    ipc_data idata = {};
+    if (!recv_ipc_data(&idata, sizeof(idata)))
+      return;
+
+    msg("Received BO %d from PID %d", idata.hdl, idata.pid);
+
+    // Create IO test BO set and replace input BO with the one from child
     auto dev = get_userpf_device(get_dev_id());
-    bo imp_bo{dev.get(), idata.pid, idata.hdl};
-    char *imp_p = reinterpret_cast<char *>(imp_bo.map());
-    for (int i = 0; i < imp_bo.size(); i++) {
-      if (imp_p[i] != m_buf_char) {
-        std::cout << "Imported BO content mis-match" << std::endl;
-        success = false;
-        break;
-      }
-    }
+    auto wrk = get_xclbin_workspace(dev.get());
+    io_test_bo_set boset{dev.get(), wrk + "/data/"};
+    boset.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev.get(), idata.pid, idata.hdl);
+    boset.run();
     send_ipc_data(&success, sizeof(success));
   }
 
   void
   run_test_child() override
   {
-    std::cout << "Running child test..." << std::endl;
+    msg("test started...");
 
+    // Create IO test BO set and share input BO with parent
     auto dev = get_userpf_device(get_dev_id());
-    bo exp_bo{dev.get(), 4096ul};
-    auto exp_p = exp_bo.map();
-    std::memset(exp_p, m_buf_char, exp_bo.size());
-    auto share = exp_bo.get()->share();
+    auto wrk = get_xclbin_workspace(dev.get());
+    io_test_bo_set boset{dev.get(), wrk + "/data/"};
+    auto share = boset.get_bos()[IO_TEST_BO_INPUT].tbo->get()->share();
     ipc_data idata = { getpid(), share->get_export_handle() };
     send_ipc_data(&idata, sizeof(idata));
     bool success;

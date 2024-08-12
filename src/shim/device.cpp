@@ -4,6 +4,7 @@
 #include "bo.h"
 #include "device.h"
 #include "hwctx.h"
+#include "fence.h"
 
 #include "core/common/query_requests.h"
 
@@ -741,6 +742,38 @@ initialize_query_table()
 struct X { X() { initialize_query_table(); }};
 static X x;
 
+int
+import_fd(pid_t pid, int ehdl)
+{
+  if (pid == 0 || getpid() == pid)
+    return ehdl;
+
+#if defined(SYS_pidfd_open) && defined(SYS_pidfd_getfd)
+  auto pidfd = syscall(SYS_pidfd_open, pid, 0);
+  if (pidfd < 0)
+    throw xrt_core::system_error(errno, "pidfd_open failed");
+
+  auto fd = syscall(SYS_pidfd_getfd, pidfd, ehdl, 0);
+  if (fd < 0) {
+    if (errno == EPERM) {
+      throw xrt_core::system_error
+        (errno, "pidfd_getfd failed, check that ptrace access mode "
+        "allows PTRACE_MODE_ATTACH_REALCREDS.  For more details please "
+        "check /etc/sysctl.d/10-ptrace.conf");
+    } else {
+      throw xrt_core::system_error(errno, "pidfd_getfd failed");
+    }
+  }
+  return fd;
+#else
+  throw xrt_core::system_error
+    (std::errc::not_supported,
+     "Importing buffer object from different process requires XRT "
+     " built and installed on a system with 'pidfd' kernel support");
+  return -1;
+#endif
+}
+
 }
 
 namespace shim_xdna {
@@ -828,33 +861,21 @@ std::unique_ptr<xrt_core::buffer_handle>
 device::
 import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
-  if (pid == 0 || getpid() == pid)
-    return import_bo(ehdl);
+  return import_bo(import_fd(pid, ehdl));
+}
 
-#if defined(SYS_pidfd_open) && defined(SYS_pidfd_getfd)
-  auto pidfd = syscall(SYS_pidfd_open, pid, 0);
-  if (pidfd < 0)
-    throw xrt_core::system_error(errno, "pidfd_open failed");
+std::unique_ptr<xrt_core::fence_handle>
+device::
+create_fence(xrt::fence::access_mode)
+{
+  return std::make_unique<fence>(*this);
+}
 
-  auto bofd = syscall(SYS_pidfd_getfd, pidfd, ehdl, 0);
-  if (bofd < 0) {
-    if (errno == EPERM) {
-      throw xrt_core::system_error
-        (errno, "pidfd_getfd failed, check that ptrace access mode "
-        "allows PTRACE_MODE_ATTACH_REALCREDS.  For more details please "
-        "check /etc/sysctl.d/10-ptrace.conf");
-    } else {
-      throw xrt_core::system_error(errno, "pidfd_getfd failed");
-    }
-  }
-
-  return import_bo(bofd);
-#else
-  throw xrt_core::system_error
-    (std::errc::not_supported,
-     "Importing buffer object from different process requires XRT "
-     " built and installed on a system with 'pidfd' kernel support");
-#endif
+std::unique_ptr<xrt_core::fence_handle>
+device::
+import_fence(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
+{
+  return std::make_unique<fence>(*this, import_fd(pid, ehdl));
 }
 
 } // namespace shim_xdna
