@@ -536,6 +536,7 @@ struct amdxdna_drm_set_state {
  * struct amdxdna_drm_syncobjs - Signal or wait on array of DRM timelined sync objects.
  * @handles: Array of handles of sync objects.
  * @points: Array of time points for each sync objects.
+ * @count: Number of elements in the above array.
  */
 struct amdxdna_drm_syncobjs {
 	__u64 handles; /* in */
