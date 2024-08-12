@@ -465,6 +465,39 @@ static int aie2_ringbuf_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(ringbuf, aie2_ringbuf_show, NULL);
 
+static int aie2_ioctl_id_show(struct seq_file *m, void *unused)
+{
+#define drm_ioctl_id_seq_print(_name) \
+seq_printf(m, "%ld:%s\n", _name, #_name)
+
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_HWCTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_BO);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_GET_BO_INFO);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SYNC_BO);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_EXEC_CMD);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_WAIT_CMD);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_GET_INFO);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SET_STATE);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SUBMIT_SIGNAL);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SUBMIT_WAIT);
+
+	drm_ioctl_id_seq_print(DRM_IOCTL_GEM_CLOSE);
+	drm_ioctl_id_seq_print(DRM_IOCTL_PRIME_HANDLE_TO_FD);
+	drm_ioctl_id_seq_print(DRM_IOCTL_PRIME_FD_TO_HANDLE);
+	drm_ioctl_id_seq_print(DRM_IOCTL_SYNCOBJ_CREATE);
+	drm_ioctl_id_seq_print(DRM_IOCTL_SYNCOBJ_DESTROY);
+	drm_ioctl_id_seq_print(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE);
+	drm_ioctl_id_seq_print(DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD);
+	drm_ioctl_id_seq_print(DRM_IOCTL_SYNCOBJ_QUERY);
+	drm_ioctl_id_seq_print(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL);
+	drm_ioctl_id_seq_print(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT);
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(ioctl_id, aie2_ioctl_id_show, NULL);
+
 static int aie2_msg_queue_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
@@ -552,6 +585,7 @@ const struct {
 	AIE2_DBGFS_FILE(powerstate, 0600),
 	AIE2_DBGFS_FILE(ringbuf, 0400),
 	AIE2_DBGFS_FILE(msg_queue, 0400),
+	AIE2_DBGFS_FILE(ioctl_id, 0400),
 	AIE2_DBGFS_FILE(telemetry_disabled, 0400),
 	AIE2_DBGFS_FILE(telemetry_health, 0400),
 	AIE2_DBGFS_FILE(telemetry_error_info, 0400),
