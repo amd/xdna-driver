@@ -90,7 +90,7 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
-	if (hwctx->status != HWCTX_STAT_READY) {
+	if (hwctx->old_status != HWCTX_STAT_READY) {
 		XDNA_DBG(xdna, "hwctx is not ready, status %d", hwctx->status);
 		goto out;
 	}
@@ -114,6 +114,10 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 skip_config_cu:
 #endif
 out:
+	/*
+	 * Even above commands might failed, we still needs to restart DRM
+	 * scheduler, to signal those commands in the pending list.
+	 */
 	drm_sched_start(&hwctx->priv->sched, true);
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
 	return ret;
@@ -141,6 +145,7 @@ void aie2_restart_ctx(struct amdxdna_client *client)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
 	int next = 0;
+	int err;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
@@ -148,9 +153,15 @@ void aie2_restart_ctx(struct amdxdna_client *client)
 		if (hwctx->status != HWCTX_STAT_STOP)
 			continue;
 
-		hwctx->status = hwctx->old_status;
 		XDNA_DBG(xdna, "Resetting %s", hwctx->name);
-		aie2_hwctx_restart(xdna, hwctx);
+		err = aie2_hwctx_restart(xdna, hwctx);
+		if (!err) {
+			hwctx->status = hwctx->old_status;
+			continue;
+		}
+
+		XDNA_WARN(xdna, "Failed to restart %s status %d err %d",
+			  hwctx->name, hwctx->status, err);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -197,6 +208,7 @@ void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	int err;
 
 	/*
 	 * The resume path cannot guarantee that mailbox channel can be
@@ -204,8 +216,12 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	 * mailbox channel, error will return.
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	hwctx->status = hwctx->old_status;
-	aie2_hwctx_restart(xdna, hwctx);
+	err = aie2_hwctx_restart(xdna, hwctx);
+	if (!err)
+		hwctx->status = hwctx->old_status;
+	else
+		XDNA_WARN(xdna, "Failed to resume %s status %d err %d",
+			  hwctx->name, hwctx->status, err);
 }
 
 static inline void
@@ -337,6 +353,9 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 
 	if (!mmget_not_zero(job->mm))
 		return ERR_PTR(-ESRCH);
+
+	if (!hwctx->priv->mbox_chann)
+		return ERR_PTR(-ENODEV);
 
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
