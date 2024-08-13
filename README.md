@@ -39,7 +39,7 @@ If you want to manually build Linux kernel, follow below steps.
 # this is just refreshing up a few key points.
 
 # Clone Linux source code from your favorite repository, for example
-git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+git clone --depth=1 --branch v6.10 git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 
 # Usually, when people compile kernel from source code, they use current config
 cp /boot/config-`uname -r` <your_build_dir>/.config   # (Option step, if you know how to do it better)
