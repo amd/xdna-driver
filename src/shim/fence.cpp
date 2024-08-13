@@ -168,7 +168,11 @@ fence::
 ~fence()
 {
   shim_debug("Fence going away: %d@%ld", m_syncobj_hdl, m_state);
-  destroy_syncobj(m_pdev, m_syncobj_hdl);
+  try {
+    destroy_syncobj(m_pdev, m_syncobj_hdl);
+  } catch (const xrt_core::system_error& e) {
+    shim_debug("Failed to destroy fence");
+  }
 }
 
 std::unique_ptr<xrt_core::shared_handle>
@@ -283,6 +287,7 @@ submit_wait(const pdev& dev, const std::vector<xrt_core::fence_handle*>& fences)
 
   for (auto f : fences) {
     auto fh = static_cast<const fence*>(f);
+    std::lock_guard<std::mutex> guard(fh->m_lock);
     hdls[i] = fh->m_syncobj_hdl;
     pts[i] = ++fh->m_state;
     i++;
