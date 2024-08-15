@@ -533,9 +533,6 @@ std::vector<test_case> test_list {
   test_case{ "measure no-op kernel throughput listed command",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN }
   },
-  test_case{ "npu3 shim move memory tiles",
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_memtiles, {}
-  },
   test_case{ "npu3 shim vadd",
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
   },
@@ -547,6 +544,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "Cmd fencing (host side)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_host, {}
+  },
+  test_case{ "npu3 shim move memory tiles",
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_memtiles, {}
   },
   //test_case{ "Cmd fencing (device side)",
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
