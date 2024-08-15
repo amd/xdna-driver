@@ -48,6 +48,7 @@ public:
   add_ctrl_bo(bo& bo_ctrl)
   {
     auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(m_exec_buf_bo.map());
+
     switch (m_op) {
     case ERT_START_CU:
       break;

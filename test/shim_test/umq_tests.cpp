@@ -13,7 +13,19 @@ namespace {
 using namespace xrt_core;
 
 void
-prepare_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
+prepare_memtile_cmd(bo& execbuf, const std::string& elf, bo& ctrl)
+{
+  exec_buf ebuf(execbuf, ERT_START_DPU);
+
+  ebuf.add_ctrl_bo(ctrl);
+  ebuf.patch_ctrl_code(ctrl, elf);
+  ebuf.dump();
+ 
+  std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
+}
+
+void
+prepare_vadd_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
 {
   exec_buf ebuf(execbuf, ERT_START_DPU);
 
@@ -84,6 +96,33 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
 } // namespace
 
 void
+TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  auto dev = sdev.get();
+
+  auto wrk = get_xclbin_workspace(dev);
+  auto elf = wrk + "/move_memtiles.elf";
+  auto instr_size = exec_buf::get_ctrl_code_size(elf);
+  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
+  bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
+
+  {
+    hw_ctx hwctx{dev, "move_memtiles.xclbin"};
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto cu_idx = hwctx.get()->open_cu_context("dpu:move_memtiles");
+
+    for (int i = 0; i < 3; i++) {
+      std::cout << "=== " << __func__ << " round: " << i << std::endl;
+      prepare_memtile_cmd(bo_exec_buf, elf, bo_ctrl_code);
+      exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
+      umq_cmd_submit(hwq, bo_exec_buf);
+      umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);
+      std::cout << "PASS\n" << std::endl;
+    }
+  }
+}
+
+void
 TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
 {
   auto dev = sdev.get();
@@ -100,7 +139,7 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, const std::
   auto instr_size = exec_buf::get_ctrl_code_size(elf);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
-  prepare_cmd(bo_exec_buf, elf, bo_ctrl_code, bo_ifm, bo_wts, bo_ofm);
+  prepare_vadd_cmd(bo_exec_buf, elf, bo_ctrl_code, bo_ifm, bo_wts, bo_ofm);
 
   // Obtain no-op control code
   // ASM code:
