@@ -24,7 +24,7 @@
 
 /* Firmware determines device memory base address and size */
 #define AIE2_DEVM_BASE	0x4000000
-#define AIE2_DEVM_SIZE	(48 * 1024 * 1024)
+#define AIE2_DEVM_SIZE	(64 * 1024 * 1024)
 
 #define NDEV2PDEV(ndev) \
 	(to_pci_dev((ndev)->xdna->ddev.dev))
