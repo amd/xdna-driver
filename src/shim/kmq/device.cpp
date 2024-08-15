@@ -8,8 +8,8 @@
 
 namespace {
 
-// Device memory heap needs to be within one 64MB page. The maximum size is 48MB.
-const size_t dev_mem_size = (48 << 20);
+// Device memory heap needs to be within one 64MB page. The maximum size is 64MB.
+const size_t dev_mem_size = (64 << 20);
 
 }
 
