@@ -357,6 +357,7 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	if (!hwctx->priv->mbox_chann)
 		return ERR_PTR(-ENODEV);
 
+	trace_xdna_job(sched_job, hwctx->name, "job run", job->seq);
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
 
@@ -386,7 +387,6 @@ out:
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	}
-	trace_xdna_job(sched_job, hwctx->name, "sent to device", job->seq);
 
 	return fence;
 }
