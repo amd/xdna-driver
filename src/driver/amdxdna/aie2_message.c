@@ -8,6 +8,7 @@
 
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_mailbox_helper.h"
+#include "amdxdna_trace.h"
 #include "amdxdna_ctx.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
@@ -303,6 +304,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 		goto out_destroy_context;
 	}
 
+	trace_amdxdna_debug_point(hwctx->name, ret, "channel created");
 	XDNA_DBG(xdna, "%s mailbox channel irq: %d, msix_id: %d",
 		 hwctx->name, ret, resp.msix_id);
 	XDNA_DBG(xdna, "%s created fw ctx %d pasid %d", hwctx->name,
@@ -332,6 +334,7 @@ int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwc
 		XDNA_WARN(xdna, "%s destroy context failed, ret %d", hwctx->name, ret);
 
 	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chann);
+	trace_amdxdna_debug_point(hwctx->name, 0, "channel destroyed");
 	XDNA_DBG(xdna, "%s destroyed fw ctx %d", hwctx->name,
 		 hwctx->fw_ctx_id);
 	hwctx->priv->mbox_chann = NULL;
