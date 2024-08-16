@@ -106,23 +106,33 @@ DEFINE_EVENT(xdna_mbox_msg, mbox_set_head,
 	     TP_ARGS(name, chann_id, opcode, id)
 );
 
-TRACE_EVENT(mbox_irq_handle,
-	    TP_PROTO(char *name, int irq),
+DECLARE_EVENT_CLASS(xdna_mbox_name_id,
+		    TP_PROTO(char *name, int irq),
 
-	    TP_ARGS(name, irq),
+		    TP_ARGS(name, irq),
 
-	    TP_STRUCT__entry(__string(name, name)
-			     __field(int, irq)),
+		    TP_STRUCT__entry(__string(name, name)
+				     __field(int, irq)),
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
-	    TP_fast_assign(__assign_str(name, name);
-			   __entry->irq = irq;),
+		    TP_fast_assign(__assign_str(name, name);
+				   __entry->irq = irq;),
 #else
-	    TP_fast_assign(__assign_str(name);
-			   __entry->irq = irq;),
+		    TP_fast_assign(__assign_str(name);
+				   __entry->irq = irq;),
 #endif
 
-	    TP_printk("%s.%d", __get_str(name), __entry->irq)
+		    TP_printk("%s.%d", __get_str(name), __entry->irq)
+);
+
+DEFINE_EVENT(xdna_mbox_name_id, mbox_irq_handle,
+	     TP_PROTO(char *name, int irq),
+	     TP_ARGS(name, irq)
+);
+
+DEFINE_EVENT(xdna_mbox_name_id, mbox_poll_handle,
+	     TP_PROTO(char *name, int irq),
+	     TP_ARGS(name, irq)
 );
 
 #endif /* !defined(_AMDXDNA_TRACE_EVENTS_H_) || defined(TRACE_HEADER_MULTI_READ) */

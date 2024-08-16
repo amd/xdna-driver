@@ -450,11 +450,12 @@ static int mailbox_polld(void *data)
 		if (!iohub)
 			continue;
 
+		trace_mbox_poll_handle(MAILBOX_NAME, mb_chann->msix_irq);
+
 		/* Clear pending events */
 		iohub = 0;
 		mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, iohub);
 
-		/* TODO: maybe a trace point? */
 		do {
 			ret = mailbox_get_msg(mb_chann);
 		} while (!ret);
