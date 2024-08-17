@@ -276,6 +276,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
+	aie2_pm_stop(ndev);
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
@@ -355,6 +356,12 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	ret = aie2_mgmt_fw_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "initial mgmt firmware failed, ret %d", ret);
+		goto destroy_mgmt_chann;
+	}
+
+	ret = aie2_pm_start(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to start power manager, ret %d", ret);
 		goto destroy_mgmt_chann;
 	}
 
@@ -486,6 +493,7 @@ skip_pasid:
 
 	aie2_smu_setup(ndev);
 
+	ndev->pw_mode = POWER_MODE_DEFAULT;
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);
@@ -864,7 +872,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_set_power_mode power_state;
+	enum amdxdna_power_mode_type power_mode;
 	struct amdxdna_dev *xdna = client->xdna;
+	int ret;
 
 	if (args->buffer_size != sizeof(power_state)) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
@@ -878,11 +888,13 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 	}
 
 	/* Interpret the given buf->power_mode into the correct power mode*/
+	power_mode = power_state.power_mode;
+	if (power_mode > POWER_MODE_HIGH) {
+		XDNA_ERR(xdna, "Invalid power mode %d", power_mode);
+		return -EINVAL;
+	}
 
-	/* Set resource solver power property to the user choice */
-
-	/* Set power level within the device */
-	return -EOPNOTSUPP;
+	return aie2_pm_set_mode(xdna->dev_handle, power_mode);
 }
 
 static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)

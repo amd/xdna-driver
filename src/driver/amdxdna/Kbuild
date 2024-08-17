@@ -30,6 +30,7 @@ amdxdna-y := \
 	aie2_error.o \
 	aie2_debugfs.o \
 	aie2_message.o \
+	aie2_pm.o \
 	aie2_pci.o \
 	npu1_regs.o \
 	npu2_regs.o \

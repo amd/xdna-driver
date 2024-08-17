@@ -496,10 +496,10 @@ struct amdxdna_drm_get_info {
 };
 
 enum amdxdna_power_mode_type {
-    XRT_POWER_MODE_DEFAULT, /**< Fallback to calculated DPM */
-    XRT_POWER_MODE_LOW,     /**< Set frequency to lowest DPM */
-    XRT_POWER_MODE_MEDIUM,  /**< Set frequency to medium DPM */
-    XRT_POWER_MODE_HIGH,    /**< Set frequency to highest DPM */
+	POWER_MODE_DEFAULT, /**< Fallback to calculated DPM */
+	POWER_MODE_LOW,     /**< Set frequency to lowest DPM */
+	POWER_MODE_MEDIUM,  /**< Set frequency to medium DPM */
+	POWER_MODE_HIGH,    /**< Set frequency to highest DPM */
 };
 
 /**

@@ -55,8 +55,15 @@
 #define NPU6_SMU_BAR_BASE	MMNPU_APERTURE4_BASE
 #define NPU6_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
-#define NPU6_RT_CFG_TYPE_PDI_LOAD 5
-#define NPU6_RT_CFG_TYPE_DEBUG_BO 10
+#define NPU6_RT_CFG_TYPE_CLK_GATING   1
+#define NPU6_RT_CFG_TYPE_HCLK_GATING  2
+#define NPU6_RT_CFG_TYPE_PWR_GATING   3
+#define NPU6_RT_CFG_TYPE_L1IMU_GATING 4
+#define NPU6_RT_CFG_TYPE_PDI_LOAD     5
+#define NPU6_RT_CFG_TYPE_DEBUG_BO     10
+
+#define NPU6_RT_CFG_VAL_CLK_GATING_OFF 0
+#define NPU6_RT_CFG_VAL_CLK_GATING_ON 1
 
 #define NPU6_RT_CFG_VAL_PDI_LOAD_MGMT 0
 #define NPU6_RT_CFG_VAL_PDI_LOAD_APP 1
@@ -70,6 +77,13 @@
 const struct rt_config npu6_rt_cfg[] = {
 	{NPU6_RT_CFG_TYPE_PDI_LOAD, NPU6_RT_CFG_VAL_PDI_LOAD_APP},
 	{NPU6_RT_CFG_TYPE_DEBUG_BO, NPU6_RT_CFG_VAL_DEBUG_BO_LARGE},
+};
+
+const u32 npu6_clk_gating_types[] = {
+	NPU6_RT_CFG_TYPE_CLK_GATING,
+	NPU6_RT_CFG_TYPE_HCLK_GATING,
+	NPU6_RT_CFG_TYPE_PWR_GATING,
+	NPU6_RT_CFG_TYPE_L1IMU_GATING,
 };
 
 const struct amdxdna_dev_priv npu6_dev_priv = {
@@ -101,6 +115,12 @@ const struct amdxdna_dev_priv npu6_dev_priv = {
 		DEFINE_BAR_OFFSET(SMU_INTR_REG, NPU6_SMU, MMNPU_APERTURE4_BASE),
 		DEFINE_BAR_OFFSET(SMU_RESP_REG, NPU6_SMU, MP1_C2PMSG_61),
 		DEFINE_BAR_OFFSET(SMU_OUT_REG,  NPU6_SMU, MP1_C2PMSG_60),
+	},
+	.clk_gating = {
+		.types = npu6_clk_gating_types,
+		.num_types = ARRAY_SIZE(npu6_clk_gating_types),
+		.value_enable = NPU6_RT_CFG_VAL_CLK_GATING_ON,
+		.value_disable = NPU6_RT_CFG_VAL_CLK_GATING_OFF,
 	},
 	.smu_mpnpuclk_freq_max = NPU6_MPNPUCLK_FREQ_MAX,
 	.smu_hclk_freq_max     = NPU6_HCLK_FREQ_MAX,
