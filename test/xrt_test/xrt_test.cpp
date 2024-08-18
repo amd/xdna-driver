@@ -187,9 +187,95 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
 }
 
+void
+TEST_xrt_umq_memtiles(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/move_memtiles.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/move_memtiles.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{move_memtiles}"};
+  xrt::run run{kernel};
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+}
+
+void
+TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  /* init input buffer */
+  xrt_bo bo_data{device, sizeof(uint32_t), xrt::bo::flags::cacheable};
+  auto p = bo_data.map();
+  p[0] = 0xabcdabcd;
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/ddr_memtile.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/ddr_memtile.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{move_ddr_memtile}"};
+  xrt::run run{kernel};
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_data.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+}
+
+void
+TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/remote_barrier.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/remote_barrier.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{remote_barrier}"};
+  xrt::run run{kernel};
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "npu3 xrt vadd", TEST_xrt_umq_vadd, {} },
+  test_case{ "npu3 xrt move memtiles", TEST_xrt_umq_memtiles, {} },
+  test_case{ "npu3 xrt ddr_memtile", TEST_xrt_umq_ddr_memtile, {} },
+  test_case{ "npu3 xrt remote_barrier", TEST_xrt_umq_remote_barrier, {} },
 };
 
 }
