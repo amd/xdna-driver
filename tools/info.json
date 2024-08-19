@@ -23,26 +23,26 @@
 		},
 		{
 			"device": "npu4",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.0.7.22.116",
+			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.0.7.30.20",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "10",
-			"version": "0.7.22.116",
+			"version": "0.7.30.20",
 			"fw_name": "npu.sbin"
 		},
 		{
 			"device": "npu5",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.0.7.22.84",
+			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.0.7.30.101",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "11",
-			"version": "0.7.22.84",
+			"version": "0.7.30.101",
 			"fw_name": "npu.sbin"
 		},
 		{
 			"device": "npu6",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.0.7.22.116",
+			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_20/npu.sbin.0.7.30.20",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "20",
-			"version": "0.7.22.116",
+			"version": "0.7.30.20",
 			"fw_name": "npu.sbin"
 		}
 	]
