@@ -13,7 +13,20 @@ namespace {
 using namespace xrt_core;
 
 void
-prepare_memtile_cmd(bo& execbuf, const std::string& elf, bo& ctrl)
+prepare_ddr_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& data)
+{
+  exec_buf ebuf(execbuf, ERT_START_DPU);
+
+  ebuf.add_ctrl_bo(ctrl);
+  ebuf.add_arg_bo(data, "input");
+  ebuf.patch_ctrl_code(ctrl, elf);
+  ebuf.dump();
+ 
+  std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
+}
+
+void
+prepare_basic_cmd(bo& execbuf, const std::string& elf, bo& ctrl)
 {
   exec_buf ebuf(execbuf, ERT_START_DPU);
 
@@ -96,6 +109,63 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
 } // namespace
 
 void
+TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  auto dev = sdev.get();
+
+  auto wrk = get_xclbin_workspace(dev);
+  auto elf = wrk + "/remote_barrier.elf";
+  auto instr_size = exec_buf::get_ctrl_code_size(elf);
+  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
+  bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
+
+  {
+    hw_ctx hwctx{dev, "remote_barrier.xclbin"};
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto cu_idx = hwctx.get()->open_cu_context("dpu:remote_barrier");
+
+    for (int i = 0; i < 3; i++) {
+      std::cout << "=== " << __func__ << " round: " << i << std::endl;
+      prepare_basic_cmd(bo_exec_buf, elf, bo_ctrl_code);
+      exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
+      umq_cmd_submit(hwq, bo_exec_buf);
+      umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);
+      std::cout << "PASS\n" << std::endl;
+    }
+  }
+}
+void
+TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  auto dev = sdev.get();
+
+  bo bo_data{dev, sizeof(uint32_t), XCL_BO_FLAGS_EXECBUF};
+  auto p = bo_data.map();
+  p[0] = 0xabcdabcd;
+
+  auto wrk = get_xclbin_workspace(dev);
+  auto elf = wrk + "/ddr_memtile.elf";
+  auto instr_size = exec_buf::get_ctrl_code_size(elf);
+  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
+  bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
+
+  {
+    hw_ctx hwctx{dev, "ddr_memtile.xclbin"};
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto cu_idx = hwctx.get()->open_cu_context("dpu:move_ddr_memtile");
+
+    for (int i = 0; i < 3; i++) {
+      std::cout << "=== " << __func__ << " round: " << i << std::endl;
+      prepare_ddr_cmd(bo_exec_buf, elf, bo_ctrl_code, bo_data);
+      exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
+      umq_cmd_submit(hwq, bo_exec_buf);
+      umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);
+      std::cout << "PASS\n" << std::endl;
+    }
+  }
+}
+
+void
 TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
 {
   auto dev = sdev.get();
@@ -113,7 +183,7 @@ TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device> sdev, const s
 
     for (int i = 0; i < 3; i++) {
       std::cout << "=== " << __func__ << " round: " << i << std::endl;
-      prepare_memtile_cmd(bo_exec_buf, elf, bo_ctrl_code);
+      prepare_basic_cmd(bo_exec_buf, elf, bo_ctrl_code);
       exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
       umq_cmd_submit(hwq, bo_exec_buf);
       umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);

@@ -80,6 +80,24 @@ xclbin_info xclbin_infos[] = {
     .workspace = "npu3_workspace",
   },
   {
+    .name = "ddr_memtile.xclbin",
+    .device = npu3_device_id1,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "dpu:vadd", {0} },
+    },
+    .workspace = "npu3_workspace",
+  },
+  {
+    .name = "remote_barrier.xclbin",
+    .device = npu3_device_id1,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "dpu:vadd", {0} },
+    },
+    .workspace = "npu3_workspace",
+  },
+  {
     .name = "1x4.xclbin",
     .device = npu2_device_id,
     .revision_id = npu4_revision_id,
