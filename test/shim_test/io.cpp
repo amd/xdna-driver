@@ -98,7 +98,7 @@ init_args()
       break;
     case IO_TEST_BO_INPUT:
       read_data_from_bin(m_local_data_path + ifm_file, ibo->init_offset,
-        ibo->size - ibo->init_offset, ibo->tbo->map());
+        ibo->tbo->size() - ibo->init_offset, ibo->tbo->map());
       break;
     case IO_TEST_BO_PARAMETERS:
       read_data_from_bin(m_local_data_path + param_file, 0, ibo->tbo->size(), ibo->tbo->map());
@@ -210,7 +210,7 @@ bo_type2name(int type)
 
 void
 io_test_bo_set::
-run(xrt_core::fence_handle* fence)
+run(xrt_core::fence_handle* fence, bool no_check_result)
 {
   hw_ctx hwctx{m_dev};
   auto hwq = hwctx.get()->get_hw_queue();
@@ -234,14 +234,22 @@ run(xrt_core::fence_handle* fence)
     throw std::runtime_error("Command error");
 
   sync_after_run();
-  verify_result();
+  if (!no_check_result)
+    verify_result();
 }
 
 void
 io_test_bo_set::
 run()
 {
-  run(nullptr);
+  run(nullptr, false);
+}
+
+void
+io_test_bo_set::
+run(bool no_check_result)
+{
+  run(nullptr, no_check_result);
 }
 
 std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&

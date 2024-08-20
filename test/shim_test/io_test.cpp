@@ -36,12 +36,11 @@ alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
     // Preparing no-op kernel's special control code
     size_t sz = 32 * sizeof(int32_t);
     auto tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
-    bos[IO_TEST_BO_INSTRUCTION].size = sz;
     bos[IO_TEST_BO_INSTRUCTION].tbo = tbo;
     std::memset(tbo->map(), 0, sz);
   } else if (io_test_parameters.type == IO_TEST_BAD_RUN) {
     auto instruction_p = bos[IO_TEST_BO_INSTRUCTION].tbo->map();
-    auto sz = bos[IO_TEST_BO_INSTRUCTION].size;
+    auto sz = bos[IO_TEST_BO_INSTRUCTION].tbo->size();
     std::memset(instruction_p, 0, sz);
     // Error Event ID: 64
     // Expect "Row: 0, Col: 1, module 2, event ID 64, category 4" in dmesg
@@ -53,7 +52,7 @@ alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
   if (io_test_parameters.debug) {
     for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
       std::cout << io_test_bo_set::bo_type2name(i) << "'s size and init_offset: "
-                << bos[i].size << ", " << bos[i].init_offset << std::endl;
+                << bos[i].tbo->size() << ", " << bos[i].init_offset << std::endl;
     }
   }
 
@@ -264,5 +263,18 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& a
     int total_hwq_submit = total_commands / cmds_per_list;
     io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list);
   }
+}
+
+void
+TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  auto wrk = get_xclbin_workspace(sdev.get());
+  io_test_bo_set boset{sdev.get(), wrk + "/data/"};
+
+  // Use same BO for both input and output
+  boset.get_bos()[IO_TEST_BO_OUTPUT].tbo = boset.get_bos()[IO_TEST_BO_INPUT].tbo;
+  auto ibo = boset.get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
+  std::memset(ibo->map(), 0, ibo->size());
+  boset.run(true);
 }
 
