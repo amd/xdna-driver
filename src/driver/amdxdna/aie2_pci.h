@@ -11,6 +11,7 @@
 #include <linux/io.h>
 #include <drm/gpu_scheduler.h>
 
+#include "drm_local/amdxdna_accel.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -144,11 +145,6 @@ struct smu {
 	u32			power_state;
 };
 
-struct rt_config {
-	u32	type;
-	u32	value;
-};
-
 #ifdef AMDXDNA_DEVEL
 struct hwctx_pdi {
 	int			id;
@@ -200,6 +196,7 @@ struct amdxdna_dev_hdl {
 	struct aie_version		version;
 	struct aie_metadata		metadata;
 	struct smu			smu;
+	enum amdxdna_power_mode_type	pw_mode;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
@@ -213,6 +210,18 @@ struct amdxdna_dev_hdl {
 struct aie2_bar_off_pair {
 	int	bar_idx;
 	u32	offset;
+};
+
+struct rt_config {
+	u32	type;
+	u32	value;
+};
+
+struct rt_config_clk_gating {
+	const u32	*types;
+	u32		num_types;
+	u32		value_enable;
+	u32		value_disable;
 };
 
 struct amdxdna_dev_priv {
@@ -231,6 +240,7 @@ struct amdxdna_dev_priv {
 	struct aie2_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
 	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
 	struct aie2_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
+	struct rt_config_clk_gating	clk_gating;
 	u32				smu_mpnpuclk_freq_max;
 	u32				smu_hclk_freq_max;
 	/* npu1: 0, not support dpm; npu2+: support dpm up to 7 */
@@ -323,5 +333,10 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 void aie2_stop_ctx(struct amdxdna_client *client);
 void aie2_restart_ctx(struct amdxdna_client *client);
 void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
+
+/* aie2_pm.c */
+int aie2_pm_start(struct amdxdna_dev_hdl *ndev);
+void aie2_pm_stop(struct amdxdna_dev_hdl *ndev);
+int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
 
 #endif /* _AIE2_PCI_H_ */

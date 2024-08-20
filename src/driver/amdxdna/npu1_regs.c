@@ -38,8 +38,12 @@
 #define NPU1_SMU_BAR_BASE  MPNPU_APERTURE0_BASE
 #define NPU1_SRAM_BAR_BASE MPNPU_APERTURE1_BASE
 
+#define NPU1_RT_CFG_TYPE_CLK_GATING 1
 #define NPU1_RT_CFG_TYPE_PDI_LOAD 2
 #define NPU1_RT_CFG_TYPE_DEBUG_BO 4
+
+#define NPU1_RT_CFG_VAL_CLK_GATING_OFF 0
+#define NPU1_RT_CFG_VAL_CLK_GATING_ON 1
 
 #define NPU1_RT_CFG_VAL_PDI_LOAD_MGMT 0
 #define NPU1_RT_CFG_VAL_PDI_LOAD_APP 1
@@ -54,6 +58,8 @@ const struct rt_config npu1_rt_cfg[] = {
 	{NPU1_RT_CFG_TYPE_PDI_LOAD, NPU1_RT_CFG_VAL_PDI_LOAD_APP},
 	{NPU1_RT_CFG_TYPE_DEBUG_BO, NPU1_RT_CFG_VAL_DEBUG_BO_LARGE},
 };
+
+const u32 npu1_clk_gating_types[] = {NPU1_RT_CFG_TYPE_CLK_GATING};
 
 const struct amdxdna_dev_priv npu1_dev_priv = {
 	.fw_path        = "amdnpu/1502_00/npu.sbin",
@@ -84,6 +90,12 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 		DEFINE_BAR_OFFSET(SMU_INTR_REG, NPU1_SMU, MPNPU_PUB_PWRMGMT_INTR),
 		DEFINE_BAR_OFFSET(SMU_RESP_REG, NPU1_SMU, MPNPU_PUB_SCRATCH6),
 		DEFINE_BAR_OFFSET(SMU_OUT_REG,  NPU1_SMU, MPNPU_PUB_SCRATCH7),
+	},
+	.clk_gating = {
+		.types = npu1_clk_gating_types,
+		.num_types = ARRAY_SIZE(npu1_clk_gating_types),
+		.value_enable = NPU1_RT_CFG_VAL_CLK_GATING_ON,
+		.value_disable = NPU1_RT_CFG_VAL_CLK_GATING_OFF,
 	},
 	.smu_mpnpuclk_freq_max = NPU1_MPNPUCLK_FREQ_MAX,
 	.smu_hclk_freq_max     = NPU1_HCLK_FREQ_MAX,
