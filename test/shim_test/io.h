@@ -34,7 +34,10 @@ public:
   run();
 
   void
-  run(xrt_core::fence_handle* fence);
+  run(bool no_check_result);
+
+  void
+  run(xrt_core::fence_handle* fence, bool no_check_result);
 
   void
   sync_before_run();
