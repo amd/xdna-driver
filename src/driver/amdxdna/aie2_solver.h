@@ -8,6 +8,8 @@
 
 #include <linux/types.h>
 
+#include "aie2_pci.h"
+
 #define XRS_MAX_COL 128
 
 /*
@@ -67,40 +69,19 @@ struct xrs_action_load {
 };
 
 /*
- * Define the power level available
- *
- * POWER_LEVEL_MIN:
- *     Lowest power level. Usually set when all actions are unloaded.
- *
- * POWER_LEVEL_n
- *     Power levels 0 - n, is a step increase in system frequencies
- */
-enum power_level {
-	POWER_LEVEL_MIN = 0x0,
-	POWER_LEVEL_0   = 0x1,
-	POWER_LEVEL_1   = 0x2,
-	POWER_LEVEL_2   = 0x3,
-	POWER_LEVEL_3   = 0x4,
-	POWER_LEVEL_4   = 0x5,
-	POWER_LEVEL_5   = 0x6,
-	POWER_LEVEL_6   = 0x7,
-	POWER_LEVEL_7   = 0x8,
-	POWER_LEVEL_NUM,
-};
-
-/*
  * Structure used to describe the frequency table.
  * Resource solver chooses the frequency from the table
  * to meet the QOS requirements.
  */
 struct clk_list_info {
 	u32        num_levels;                     /* available power levels */
-	u32        cu_clk_list[POWER_LEVEL_NUM];   /* available aie clock frequencies in Mhz*/
+	const struct dpm_clk *cu_clk_list;   /* available aie clock frequencies in Mhz*/
 };
 
 struct xrs_action_ops {
 	int (*load)(void *cb_arg, struct xrs_action_load *action);
 	int (*unload)(void *cb_arg);
+	int (*set_dpm_level)(void *cb_arg, u32 dpm_level);
 };
 
 /*

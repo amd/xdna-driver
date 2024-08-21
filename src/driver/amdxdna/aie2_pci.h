@@ -20,6 +20,9 @@
 #include "amdxdna_devel.h"
 #endif
 
+#define SMU_REVISION_V0 0x0
+#define SMU_REVISION_V1 0x1
+
 #define AIE2_INTERVAL	20000	/* us */
 #define AIE2_TIMEOUT	1000000	/* us */
 
@@ -71,6 +74,9 @@
 #define SMU_DPM_MAX(ndev) \
 	((ndev)->priv->smu_dpm_max)
 
+#define SMU_NPU_DPM_TABLE_ENTRY(ndev, level) \
+	(&ndev->priv->smu_npu_dpm_clk_table[level])
+
 enum aie2_smu_reg_idx {
 	SMU_CMD_REG = 0,
 	SMU_ARG_REG,
@@ -96,6 +102,23 @@ enum psp_reg_idx {
 	PSP_STATUS_REG,
 	PSP_RESP_REG,
 	PSP_MAX_REGS /* Keep this at the end */
+};
+
+enum dpm_level {
+	DPM_LEVEL_0=0,
+	DPM_LEVEL_1,
+	DPM_LEVEL_2,
+	DPM_LEVEL_3,
+	DPM_LEVEL_4,
+	DPM_LEVEL_5,
+	DPM_LEVEL_6,
+	DPM_LEVEL_7,
+	DPM_LEVEL_MAX,
+};
+
+struct dpm_clk {
+	u32 npuclk;
+	u32 hclk;
 };
 
 struct psp_config {
@@ -139,7 +162,7 @@ struct clock {
 struct smu {
 	struct clock		mp_npu_clock;
 	struct clock		h_clock;
-	u32			dpm_level;
+	u32			curr_dpm_level;
 #define SMU_POWER_OFF 0
 #define SMU_POWER_ON  1
 	u32			power_state;
@@ -193,6 +216,7 @@ struct amdxdna_dev_hdl {
 	u32				mgmt_chan_idx;
 
 	u32				total_col;
+	u32				smu_curr_dpm_level;
 	struct aie_version		version;
 	struct aie_metadata		metadata;
 	struct smu			smu;
@@ -245,6 +269,9 @@ struct amdxdna_dev_priv {
 	u32				smu_hclk_freq_max;
 	/* npu1: 0, not support dpm; npu2+: support dpm up to 7 */
 	u32				smu_dpm_max;
+	u32				smu_rev;
+	const struct dpm_clk		*smu_npu_dpm_clk_table;
+	u32				smu_npu_dpm_levels;
 #ifdef AMDXDNA_DEVEL
 	struct rt_config		priv_load_cfg;
 #endif
@@ -265,7 +292,8 @@ int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool cache);
 void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_psp.c */

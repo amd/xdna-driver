@@ -24,6 +24,7 @@ struct solver_node {
 
 	struct partition_node	*pt_node;
 	void			*cb_arg;
+	u32			dpm_level;
 	u32			cols_len;
 	u32			start_cols[] __counted_by(cols_len);
 };
@@ -86,12 +87,43 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 	 * We can find at least one CDOs groups that meet the
 	 * GOPs requirement.
 	 */
-	cu_clk_freq = xrs->cfg.clk_list.cu_clk_list[xrs->cfg.clk_list.num_levels - 1];
+	cu_clk_freq = xrs->cfg.clk_list.cu_clk_list[xrs->cfg.clk_list.num_levels - 1].hclk;
 
 	if (qos_meet(xrs, rqos, cdop->qos_cap.opc * cu_clk_freq / 1000))
 		return -EINVAL;
 
 	return 0;
+}
+
+static u32 find_dpm_level(struct solver_state *xrs, struct alloc_requests *req)
+{
+	struct cdo_parts *cdop = &req->cdo;
+	struct aie_qos *rqos = &req->rqos;
+	struct solver_rgroup *rgp = &xrs->rgp;
+	struct solver_node *node;
+	u32 cu_clk_freq, dpm_level;
+
+	if (cdop->ncols > xrs->cfg.total_col)
+		return -EINVAL;
+
+        /*
+         * We can find at least one CDOs groups that meet the
+         * GOPs requirement.
+         */
+	for (dpm_level = 0; dpm_level < xrs->cfg.clk_list.num_levels; dpm_level++) {
+		cu_clk_freq = xrs->cfg.clk_list.cu_clk_list[dpm_level].hclk;
+
+		if (!qos_meet(xrs, rqos, cdop->qos_cap.opc * cu_clk_freq / 1000))
+			break;
+	}
+
+	/* set the dpm level which fits all the sessions */
+	list_for_each_entry(node, &rgp->node_list, list) {
+		if (node->dpm_level > dpm_level)
+			dpm_level = node->dpm_level;
+	}
+
+	return dpm_level;
 }
 
 static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
@@ -274,6 +306,11 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 	snode = create_solver_node(xrs, req);
 	if (IS_ERR(snode))
 		return PTR_ERR(snode);
+
+	snode->dpm_level = find_dpm_level(xrs, req);
+	ret = xrs->cfg.actions->set_dpm_level(cb_arg, snode->dpm_level);
+	if (ret)
+		goto free_node;
 
 	fill_load_action(xrs, snode, &load_act);
 	ret = xrs->cfg.actions->load(cb_arg, &load_act);

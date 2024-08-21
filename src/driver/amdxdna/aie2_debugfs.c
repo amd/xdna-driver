@@ -278,6 +278,37 @@ static int aie2_state_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
 
+static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
+				size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	u32 val;
+	int ret;
+
+	ret = kstrtouint_from_user(ptr, len, 10, &val);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Invalid input value: %d", val);
+		return ret;
+	}
+
+	ret = aie2_smu_set_dpm_level(ndev, val, true);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Setting dpm_level:%d failed, ret: %d", val, ret);
+		return ret;
+	}
+	return len;
+}
+
+static int aie2_dpm_level_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	seq_printf(m, "%d\n", aie2_smu_get_dpm_level(ndev));
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dpm_level, aie2_dpm_level_get, aie2_dpm_level_set);
+
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -583,6 +614,7 @@ const struct {
 	AIE2_DBGFS_FILE(pasid, 0600),
 	AIE2_DBGFS_FILE(state, 0600),
 	AIE2_DBGFS_FILE(powerstate, 0600),
+	AIE2_DBGFS_FILE(dpm_level, 0600),
 	AIE2_DBGFS_FILE(ringbuf, 0400),
 	AIE2_DBGFS_FILE(msg_queue, 0400),
 	AIE2_DBGFS_FILE(ioctl_id, 0400),
