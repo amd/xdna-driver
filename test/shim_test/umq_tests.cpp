@@ -139,14 +139,14 @@ TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device> sdev, cons
 {
   auto dev = sdev.get();
 
-  bo bo_data{dev, sizeof(uint32_t), XCL_BO_FLAGS_EXECBUF};
+  bo bo_data{dev, sizeof(uint32_t), XCL_BO_FLAGS_HOST_ONLY};
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
 
   auto wrk = get_xclbin_workspace(dev);
   auto elf = wrk + "/ddr_memtile.elf";
   auto instr_size = exec_buf::get_ctrl_code_size(elf);
-  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
+  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
   {
@@ -199,15 +199,15 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, const std::
   const size_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
   const size_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
   const size_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
-  bo bo_ifm{dev, IFM_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
-  bo bo_wts{dev, WTS_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
-  bo bo_ofm{dev, OFM_BYTE_SIZE, XCL_BO_FLAGS_EXECBUF};
+  bo bo_ifm{dev, IFM_BYTE_SIZE, XCL_BO_FLAGS_HOST_ONLY};
+  bo bo_wts{dev, WTS_BYTE_SIZE, XCL_BO_FLAGS_HOST_ONLY};
+  bo bo_ofm{dev, OFM_BYTE_SIZE, XCL_BO_FLAGS_HOST_ONLY};
   std::cout << "Allocated vadd ifm, wts and ofm BOs" << std::endl;
 
   auto wrk = get_xclbin_workspace(dev);
   auto elf = wrk + "/vadd.elf";
   auto instr_size = exec_buf::get_ctrl_code_size(elf);
-  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
+  bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
   prepare_vadd_cmd(bo_exec_buf, elf, bo_ctrl_code, bo_ifm, bo_wts, bo_ofm);
 

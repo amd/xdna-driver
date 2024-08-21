@@ -10,11 +10,20 @@ umq_flags_to_type(uint64_t bo_flags)
 {
   auto flags = xcl_bo_flags{bo_flags};
   auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
+
+  /*
+   * boflags scope:
+   * HOST_ONLY: any input, output buffers, can be large size
+   * CACHEABLE: control code buffer, can be large size too
+   *            on cache coherent systems, no need to sync.
+   * EXECBUF: small size buffer that can be accessed by both
+   *          userland(map), kernel(kva) and device(dev_addr).
+   */
   switch (boflags) {
   case XCL_BO_FLAGS_NONE:
   case XCL_BO_FLAGS_HOST_ONLY:
-    return AMDXDNA_BO_SHMEM;
   case XCL_BO_FLAGS_CACHEABLE:
+    return AMDXDNA_BO_SHMEM;
   case XCL_BO_FLAGS_EXECBUF:
     return AMDXDNA_BO_CMD;
   default:
@@ -43,6 +52,7 @@ bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 {
   alloc_bo();
   mmap_bo();
+  /*TODO: no need if cache coherent */
   sync(direction::host2device, size, 0);
 
   shim_debug("Allocated UMQ BO for: userptr=0x%lx, size=%ld, flags=0x%llx",

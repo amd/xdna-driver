@@ -152,9 +152,9 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   const uint32_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
   const uint32_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
   const uint32_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
-  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::cacheable};
-  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::cacheable};
-  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::cacheable};
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
 
   // Populate input & weight buffers
   init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
