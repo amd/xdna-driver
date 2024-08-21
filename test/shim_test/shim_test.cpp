@@ -560,9 +560,9 @@ std::vector<test_case> test_list {
   //test_case{ "Cmd fencing (device side)",
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
   //},
-  //test_case{ "io test no op with duplicated BOs",
-  //  TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
-  //},
+  test_case{ "io test no op with duplicated BOs",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
+  },
 };
 
 } // namespace

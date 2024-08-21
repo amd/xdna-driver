@@ -27,11 +27,13 @@ struct amdxdna_mem {
 #endif
 };
 
+#define BO_SUBMIT_PINNED	BIT(0)
+#define BO_SUBMIT_LOCKED	BIT(1)
 struct amdxdna_gem_obj {
 	struct drm_gem_shmem_object	base;
 	struct amdxdna_client		*client;
 	u8				type;
-	bool				pinned;
+	u64				flags;
 	struct mutex			lock; /* Protects: pinned, assigned_hwctx */
 	struct amdxdna_mem		mem;
 	struct work_struct		hmm_unreg_work;
@@ -60,6 +62,8 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 
 struct drm_gem_object *
 amdxdna_gem_create_object_cb(struct drm_device *dev, size_t size);
+struct drm_gem_object *
+amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf);
 struct amdxdna_gem_obj *
 amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
 			 struct amdxdna_drm_create_bo *args,

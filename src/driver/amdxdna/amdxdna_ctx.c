@@ -333,7 +333,7 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 		abo = to_xdna_obj(gobj);
 
 		mutex_lock(&abo->lock);
-		if (abo->pinned) {
+		if (abo->flags & BO_SUBMIT_PINNED) {
 			mutex_unlock(&abo->lock);
 			job->bos[i] = gobj;
 			continue;
@@ -345,7 +345,7 @@ amdxdna_arg_bos_lookup(struct amdxdna_client *client,
 			drm_gem_object_put(gobj);
 			goto put_arg_bos;
 		}
-		abo->pinned = true;
+		abo->flags |= BO_SUBMIT_PINNED;
 		mutex_unlock(&abo->lock);
 
 		job->bos[i] = gobj;
@@ -373,6 +373,77 @@ static void amdxdna_sched_job_release(struct kref *ref)
 void amdxdna_job_put(struct amdxdna_sched_job *job)
 {
 	kref_put(&job->refcnt, amdxdna_sched_job_release);
+}
+
+int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+{
+	struct amdxdna_dev *xdna = job->hwctx->client->xdna;
+	struct amdxdna_gem_obj *abo;
+	int contended = -1, i, ret;
+
+	ww_acquire_init(ctx, &reservation_ww_class);
+
+retry:
+	if (contended != -1) {
+		ret = dma_resv_lock_slow_interruptible(job->bos[contended]->resv, ctx);
+		if (ret) {
+			ww_acquire_fini(ctx);
+			return ret;
+		}
+		abo->flags |= BO_SUBMIT_LOCKED;
+	}
+
+	for (i = 0; i < job->bo_cnt; i++) {
+		abo = to_xdna_obj(job->bos[i]);
+		if (abo->flags & BO_SUBMIT_LOCKED)
+			continue;
+
+		ret = dma_resv_lock_interruptible(job->bos[i]->resv, ctx);
+		if (ret) {
+			int j;
+
+			for (j = 0; j < i; j++) {
+				abo = to_xdna_obj(job->bos[j]);
+				dma_resv_unlock(job->bos[j]->resv);
+				abo->flags &= ~BO_SUBMIT_LOCKED;
+			}
+
+			if (contended != -1 && contended >= i)
+				dma_resv_unlock(job->bos[contended]->resv);
+
+			if (ret == -EDEADLK) {
+				contended = i;
+				goto retry;
+			}
+
+			ww_acquire_fini(ctx);
+
+			XDNA_ERR(xdna, "Lock BO failed, ret %d", ret);
+			return ret;
+		}
+		abo->flags |= BO_SUBMIT_LOCKED;
+	}
+
+	ww_acquire_done(ctx);
+
+	return 0;
+}
+
+void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+{
+	struct amdxdna_gem_obj *abo;
+	int i;
+
+	for (i = 0; i < job->bo_cnt; i++) {
+		abo = to_xdna_obj(job->bos[i]);
+		if (!(abo->flags & BO_SUBMIT_LOCKED))
+			continue;
+
+		dma_resv_unlock(job->bos[i]->resv);
+		abo->flags &= ~BO_SUBMIT_LOCKED;
+	}
+
+	ww_acquire_fini(ctx);
 }
 
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
