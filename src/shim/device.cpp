@@ -316,9 +316,18 @@ struct performance_mode
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    result_type performance_mode = 0;
+    amdxdna_drm_get_power_mode state;
 
-    return performance_mode;
+    amdxdna_drm_get_info arg = {
+        .param = DRM_AMDXDNA_GET_POWER_MODE,
+        .buffer_size = sizeof(state),
+        .buffer = reinterpret_cast<uintptr_t>(&state)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    return state.power_mode;
   }
 
   static void
