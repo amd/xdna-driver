@@ -719,6 +719,22 @@ static int aie2_get_firmware_version(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie2_get_power_mode(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_get_power_mode mode;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
+
+	ndev = xdna->dev_handle;
+	mode.power_mode = ndev->pw_mode;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &mode, sizeof(mode)))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie2_get_clock_metadata(struct amdxdna_client *client,
 				   struct amdxdna_drm_get_info *args)
 {
@@ -872,6 +888,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 #endif
 	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
 		ret = aie2_get_firmware_version(client, args);
+		break;
+	case DRM_AMDXDNA_GET_POWER_MODE:
+		ret = aie2_get_power_mode(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

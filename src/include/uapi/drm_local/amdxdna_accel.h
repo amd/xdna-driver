@@ -456,6 +456,23 @@ struct amdxdna_drm_aie_reg {
 	__u32 val;
 };
 
+enum amdxdna_power_mode_type {
+	POWER_MODE_DEFAULT, /**< Fallback to calculated DPM */
+	POWER_MODE_LOW,     /**< Set frequency to lowest DPM */
+	POWER_MODE_MEDIUM,  /**< Set frequency to medium DPM */
+	POWER_MODE_HIGH,    /**< Set frequency to highest DPM */
+};
+
+/**
+ * struct amdxdna_drm_get_power_mode - Get the power mode of the AIE hardware
+ * @power_mode: The sensor type from enum amdxdna_power_mode_type
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_get_power_mode {
+	__u8 power_mode;
+	__u8 pad[7];
+};
+
 /**
  * struct amdxdna_drm_query_firmware_version - Query the version of the firmware
  * @major: The major version number
@@ -480,6 +497,7 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_READ_AIE_MEM,
 	DRM_AMDXDNA_READ_AIE_REG,
 	DRM_AMDXDNA_QUERY_FIRMWARE_VERSION,
+	DRM_AMDXDNA_GET_POWER_MODE,
 	DRM_AMDXDNA_NUM_GET_PARAM,
 };
 
@@ -493,13 +511,6 @@ struct amdxdna_drm_get_info {
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
-};
-
-enum amdxdna_power_mode_type {
-	POWER_MODE_DEFAULT, /**< Fallback to calculated DPM */
-	POWER_MODE_LOW,     /**< Set frequency to lowest DPM */
-	POWER_MODE_MEDIUM,  /**< Set frequency to medium DPM */
-	POWER_MODE_HIGH,    /**< Set frequency to highest DPM */
 };
 
 /**
