@@ -67,7 +67,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	struct iosys_map map = IOSYS_MAP_INIT_VADDR(abo->mem.kva);
 
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
-	if (abo->pinned)
+	if (abo->flags & BO_SUBMIT_PINNED)
 		amdxdna_gem_unpin(abo);
 
 	flush_work(&abo->hmm_unreg_work);
@@ -354,7 +354,6 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	if (!abo)
 		return ERR_PTR(-ENOMEM);
 
-	abo->pinned = false;
 	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_init(&abo->lock);
 	INIT_WORK(&abo->hmm_unreg_work, amdxdna_hmm_unreg_work);
@@ -379,6 +378,46 @@ amdxdna_gem_create_object_cb(struct drm_device *dev, size_t size)
 	to_gobj(abo)->funcs = &amdxdna_gem_shmem_funcs;
 
 	return to_gobj(abo);
+}
+
+struct drm_gem_object *
+amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
+{
+	struct dma_buf_attachment *attach;
+	struct drm_gem_object *gobj;
+	struct sg_table *sgt;
+	int ret;
+
+	attach = dma_buf_attach(dma_buf, dev->dev);
+	if (IS_ERR(attach))
+		return ERR_CAST(attach);
+
+	get_dma_buf(dma_buf);
+
+	sgt = dma_buf_map_attachment_unlocked(attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		ret = PTR_ERR(sgt);
+		goto fail_detach;
+	}
+
+	gobj = drm_gem_shmem_prime_import_sg_table(dev, attach, sgt);
+	if (IS_ERR(gobj)) {
+		ret = PTR_ERR(gobj);
+		goto fail_unmap;
+	}
+
+	gobj->import_attach = attach;
+	gobj->resv = dma_buf->resv;
+
+	return gobj;
+
+fail_unmap:
+	dma_buf_unmap_attachment_unlocked(attach, sgt, DMA_BIDIRECTIONAL);
+fail_detach:
+	dma_buf_detach(dma_buf, attach);
+	dma_buf_put(dma_buf);
+
+	return ERR_PTR(ret);
 }
 
 static struct amdxdna_gem_obj *
