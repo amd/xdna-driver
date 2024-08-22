@@ -297,8 +297,10 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 	ndev->mgmt_chann = NULL;
-	xdna_mailbox_destroy(ndev->mbox);
-	ndev->mbox = NULL;
+	if (ndev->mbox) {
+		xdna_mailbox_destroy(ndev->mbox);
+		ndev->mbox = NULL;
+	}
 	aie2_psp_stop(ndev->psp_hdl);
 	aie2_smu_stop(ndev);
 	pci_clear_master(pdev);
