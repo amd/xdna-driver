@@ -230,8 +230,8 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct dma_fence *fence = job->fence;
 
 	job->hwctx->completed++;
+	trace_xdna_job(&job->base, job->hwctx->name, "signale fence", job->seq);
 	dma_fence_signal(fence);
-	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
 	dma_fence_put(fence);
 	mmput(job->mm);
 	amdxdna_job_put(job);
