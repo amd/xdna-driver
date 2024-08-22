@@ -409,6 +409,20 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	gobj->import_attach = attach;
 	gobj->resv = dma_buf->resv;
 
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
+		struct amdxdna_gem_obj *abo;
+
+		abo = to_xdna_obj(gobj);
+		ret = amdxdna_bo_dma_map(abo);
+		if (ret) {
+			drm_gem_object_put(gobj);
+			goto fail_unmap;
+		}
+		abo->mem.dev_addr = abo->mem.dma_addr;
+	}
+#endif
+
 	return gobj;
 
 fail_unmap:
