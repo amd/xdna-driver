@@ -30,14 +30,22 @@ public:
   void
   bind_hwctx(const hw_ctx *ctx);
 
-  volatile host_queue_header_t *
+  volatile struct host_queue_header *
   get_header_ptr() const;
 
 private:
+
+  struct host_indirect_data {
+    struct common_header	header;
+    struct exec_buf		payload;
+  };
+
   std::unique_ptr<xrt_core::buffer_handle> m_umq_bo;
   void *m_umq_bo_buf;
-  volatile host_queue_header_t *m_umq_hdr = nullptr;
-  volatile host_queue_packet_t *m_umq_pkt = nullptr;
+  volatile struct host_queue_header *m_umq_hdr = nullptr;
+  volatile struct host_queue_packet *m_umq_pkt = nullptr;
+  volatile struct host_indirect_data *m_umq_indirect_buf = nullptr;
+  uint64_t m_indirect_paddr;
 
   volatile uint32_t *m_mapped_doorbell = nullptr;
 
@@ -46,11 +54,25 @@ private:
   uint64_t
   reserve_slot();
 
-  volatile host_queue_packet_t *
-  get_slot(uint64_t index);
+  int
+  get_pkt_idx(uint64_t index);
+
+  volatile struct host_queue_packet *
+  get_pkt(uint64_t index);
 
   void
-  fill_slot_and_send(volatile host_queue_packet_t *pkt, void *payload, size_t size);
+  init_indirect_buf(volatile struct host_indirect_data *indirect_buf, int size);
+
+  size_t
+  fill_direct_exec_buf(uint16_t cu_idx,
+    volatile struct host_queue_packet *pkt, ert_dpu_data *dpu);
+
+  size_t 
+  fill_indirect_exec_buf(uint64_t idx, uint16_t cu_idx,
+    volatile struct host_queue_packet *pkt, ert_dpu_data *dpu);
+
+  void
+  fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size);
 
   uint64_t
   issue_exec_buf(uint16_t cu_idx, ert_dpu_data *dpu_data, uint64_t comp);

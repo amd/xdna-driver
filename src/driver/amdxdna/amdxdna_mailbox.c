@@ -488,7 +488,7 @@ static void mailbox_timer(struct timer_list *t)
 	/* The timer mimic interrupt. It is good to reuse irq routine */
 	tail = mailbox_get_tailptr(mb_chann, CHAN_RES_I2X);
 	if (tail) {
-		MB_DBG(mb_chann, "Mimic interrupt...");
+		//MB_DBG(mb_chann, "Mimic interrupt...");
 		mailbox_irq_handler(0, mb_chann);
 	}
 
