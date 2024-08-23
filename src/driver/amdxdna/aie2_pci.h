@@ -214,6 +214,8 @@ struct amdxdna_dev_hdl {
 	struct xdna_mailbox_chann_res	mgmt_x2i;
 	struct xdna_mailbox_chann_res	mgmt_i2x;
 	u32				mgmt_chan_idx;
+	u32				mgmt_prot_major;
+	u32				mgmt_prot_minor;
 
 	u32				total_col;
 	u32				smu_curr_dpm_level;
@@ -279,6 +281,7 @@ struct amdxdna_dev_priv {
 
 /* aie2_pci.c */
 extern const struct amdxdna_dev_ops aie2_ops;
+int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor);
 
 /* aie2_smu.c */
 void aie2_smu_setup(struct amdxdna_dev_hdl *ndev);

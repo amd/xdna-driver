@@ -29,7 +29,16 @@ MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
  * The management mailbox channel is allocated by firmware.
  * The related register and ring buffer information is on SRAM BAR.
  * This struct is the register layout.
+ *
+ * Mgmt channel info query flow:
+ * 1. Poll alive pointer register until it is non zero
+ * 2. The alive pointer pointing to Mgmt Mbox Info on SRAM bar
+ * 4. Read x2i_* and i2x_*
+ * 3. If magic number MGMT_MBOX_MAGIC not presented, done;
+ * Otherwise, read msi_id, major, minor etc..
  */
+#define MGMT_MBOX_MAGIC 0x55504e5f /* _NPU */
+#define MAGIC_OFFSET offsetof(struct mgmt_mbox_chann_info, magic[0])
 struct mgmt_mbox_chann_info {
 	u32	x2i_tail;
 	u32	x2i_head;
@@ -39,7 +48,44 @@ struct mgmt_mbox_chann_info {
 	u32	i2x_head;
 	u32	i2x_buf;
 	u32	i2x_buf_sz;
+	u32	magic;
+	u32	msi_id;
+	u32	prot_major;
+	u32	prot_minor;
+	u32	rsvd[4];
 };
+
+int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+
+	/*
+	 * The driver supported mailbox behavior is defined by
+	 * ndev->priv->protocol_major and protocol_minor.
+	 *
+	 * When major different, it means incompatible behavior.
+	 * When only minor different, the greater minor means more opcode etc.
+	 *
+	 * Thus,
+	 * 1. driver and fw major must be the same
+	 * 2. driver minor must smaller than or equal to fw minor
+	 */
+	if (ndev->priv->protocol_major != fw_major) {
+		XDNA_ERR(xdna, "Incompatible firmware protocol major %d minor %d",
+			 fw_major, fw_minor);
+		return -EINVAL;
+	}
+
+	/*
+	 * Greater protocol minor version means new messages/status/emun are
+	 * added into the firmware interface protocol.
+	 */
+	if (ndev->priv->protocol_minor > fw_minor) {
+		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
+		return -EINVAL;
+	}
+	return 0;
+}
 
 static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 {
@@ -54,6 +100,11 @@ static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(xdna, "x2i ringbuf 0x%x", ndev->mgmt_x2i.rb_start_addr);
 	XDNA_DBG(xdna, "x2i rsize   0x%x", ndev->mgmt_x2i.rb_size);
 	XDNA_DBG(xdna, "x2i chann index 0x%x", ndev->mgmt_chan_idx);
+	if (!ndev->mgmt_prot_major)
+		return;
+
+	XDNA_DBG(xdna, "mailbox protocol major 0x%x", ndev->mgmt_prot_major);
+	XDNA_DBG(xdna, "mailbox protocol minor 0x%x", ndev->mgmt_prot_minor);
 }
 
 static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
@@ -96,14 +147,25 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	x2i->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_tail);
 	x2i->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.x2i_buf);
 	x2i->rb_size         = info_regs.x2i_buf_sz;
-	ndev->mgmt_chan_idx  = CHANN_INDEX(ndev, x2i->rb_start_addr);
 
+	if (info_regs.magic != MGMT_MBOX_MAGIC) {
+		ndev->mgmt_chan_idx = CHANN_INDEX(ndev, x2i->rb_start_addr);
+		goto done;
+	}
+
+	ndev->mgmt_chan_idx  = info_regs.msi_id;
+	ndev->mgmt_prot_major = info_regs.prot_major;
+	ndev->mgmt_prot_minor = info_regs.prot_minor;
+	if (aie2_check_protocol(ndev, ndev->mgmt_prot_major, ndev->mgmt_prot_minor))
+		ret = -EINVAL;
+
+done:
 	aie2_dump_chann_info_debug(ndev);
 
 	/* Must clear address at FW_ALIVE_OFF */
 	writel(0, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF));
 
-	return 0;
+	return ret;
 }
 
 static int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev)
@@ -165,10 +227,12 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = aie2_check_protocol_version(ndev);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Check header hash failed");
-		return ret;
+	if (!ndev->mgmt_prot_major) {
+		ret = aie2_check_protocol_version(ndev);
+		if (ret) {
+			XDNA_ERR(ndev->xdna, "Check protocol version failed");
+			return ret;
+		}
 	}
 
 	ret = aie2_runtime_cfg(ndev);
@@ -336,7 +400,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 
 	ret = aie2_get_mgmt_chann_info(ndev);
 	if (ret) {
-		XDNA_ERR(xdna, "firmware is not alive");
+		XDNA_ERR(xdna, "firmware mgmt info ret %d", ret);
 		goto stop_psp;
 	}
 

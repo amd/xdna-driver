@@ -95,18 +95,9 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	if (resp.major != ndev->priv->protocol_major) {
-		XDNA_ERR(xdna, "Incompatible firmware protocol version major %d minor %d",
-			 resp.major, resp.minor);
-		return -EINVAL;
-	}
-
-	/*
-	 * Greater protocol minor version means new messages/status/emun are
-	 * added into the firmware interface protocol.
-	 */
-	if (resp.minor < ndev->priv->protocol_minor) {
-		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
+	ret = aie2_check_protocol(ndev, resp.major, resp.minor);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed check protocol %d.%d", resp.major, resp.minor);
 		return -EINVAL;
 	}
 
