@@ -281,6 +281,7 @@ struct amdxdna_dev_priv {
 
 /* aie2_pci.c */
 extern const struct amdxdna_dev_ops aie2_ops;
+int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor);
 
 /* aie2_smu.c */
 void aie2_smu_setup(struct amdxdna_dev_hdl *ndev);

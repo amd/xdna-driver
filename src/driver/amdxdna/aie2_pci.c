@@ -33,10 +33,11 @@ MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
  * Mgmt channel info query flow:
  * 1. Poll alive pointer register until it is non zero
  * 2. The alive pointer pointing to Mgmt Mbox Info on SRAM bar
- * 3. If magic number "_NPU" presented, use struct mgmt_mbox_chann_info
- * Otherwise, use struct mgmt_mbox_chann_info_lagcy
+ * 4. Read x2i_* and i2x_*
+ * 3. If magic number MGMT_MBOX_MAGIC not presented, done;
+ * Otherwise, read msi_id, major, minor etc..
  */
-#define MGMT_MBOX_MAGIC "_NPU"
+#define MGMT_MBOX_MAGIC 0x55504e5f /* _NPU */
 #define MAGIC_OFFSET offsetof(struct mgmt_mbox_chann_info, magic[0])
 struct mgmt_mbox_chann_info {
 	u32	x2i_tail;
@@ -47,23 +48,44 @@ struct mgmt_mbox_chann_info {
 	u32	i2x_head;
 	u32	i2x_buf;
 	u32	i2x_buf_sz;
-	char	magic[4];
+	u32	magic;
 	u32	msi_id;
 	u32	prot_major;
 	u32	prot_minor;
 	u32	rsvd[4];
 };
 
-struct mgmt_mbox_chann_info_lagcy {
-	u32	x2i_tail;
-	u32	x2i_head;
-	u32	x2i_buf;
-	u32	x2i_buf_sz;
-	u32	i2x_tail;
-	u32	i2x_head;
-	u32	i2x_buf;
-	u32	i2x_buf_sz;
-};
+int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+
+	/*
+	 * The driver supported mailbox behavior is defined by
+	 * ndev->priv->protocol_major and protocol_minor.
+	 *
+	 * When major different, it means incompatible behavior.
+	 * When only minor different, the greater minor means more opcode etc.
+	 *
+	 * Thus,
+	 * 1. driver and fw major must be the same
+	 * 2. driver minor must smaller than or equal to fw minor
+	 */
+	if (ndev->priv->protocol_major != fw_major) {
+		XDNA_ERR(xdna, "Incompatible firmware protocol major %d minor %d",
+			 fw_major, fw_minor);
+		return -EINVAL;
+	}
+
+	/*
+	 * Greater protocol minor version means new messages/status/emun are
+	 * added into the firmware interface protocol.
+	 */
+	if (ndev->priv->protocol_minor > fw_minor) {
+		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
+		return -EINVAL;
+	}
+	return 0;
+}
 
 static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 {
@@ -85,49 +107,9 @@ static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(xdna, "mailbox protocol minor 0x%x", ndev->mgmt_prot_minor);
 }
 
-static bool aie2_is_legacy_mgmt_info(struct amdxdna_dev_hdl *ndev, u32 off)
-{
-	u32 *mgmt_info_bar_addr = ndev->sram_base + off;
-	u32 magic;
-
-	magic = readl(mgmt_info_bar_addr + MAGIC_OFFSET);
-	if (strcmp((const char *)&magic, MGMT_MBOX_MAGIC))
-		return true;
-
-	return false; /* Magic number found */
-}
-
-static void aie2_get_mgmt_chann_info_legacy(struct amdxdna_dev_hdl *ndev, u32 off)
-{
-	struct mgmt_mbox_chann_info_lagcy info_regs;
-	struct xdna_mailbox_chann_res *i2x;
-	struct xdna_mailbox_chann_res *x2i;
-	u32 *reg;
-	int i;
-
-	reg = (u32 *)&info_regs;
-	for (i = 0; i < sizeof(info_regs) / sizeof(u32); i++)
-		reg[i] = readl(ndev->sram_base + off + i * sizeof(u32));
-
-	i2x = &ndev->mgmt_i2x;
-	x2i = &ndev->mgmt_x2i;
-
-	i2x->mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_head);
-	i2x->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_tail);
-	i2x->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.i2x_buf);
-	i2x->rb_size         = info_regs.i2x_buf_sz;
-
-	x2i->mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_head);
-	x2i->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_tail);
-	x2i->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.x2i_buf);
-	x2i->rb_size         = info_regs.x2i_buf_sz;
-	ndev->mgmt_chan_idx  = CHANN_INDEX(ndev, x2i->rb_start_addr);
-}
-
 static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 {
 	struct mgmt_mbox_chann_info info_regs;
-	struct amdxdna_dev *xdna = ndev->xdna;
 	struct xdna_mailbox_chann_res *i2x;
 	struct xdna_mailbox_chann_res *x2i;
 	u32 addr, off;
@@ -149,11 +131,6 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 		return -ETIME;
 
 	off = AIE2_SRAM_OFF(ndev, addr);
-	if (aie2_is_legacy_mgmt_info(ndev, off)) {
-		aie2_get_mgmt_chann_info_legacy(ndev, off);
-		goto done;
-	}
-
 	reg = (u32 *)&info_regs;
 	for (i = 0; i < sizeof(info_regs) / sizeof(u32); i++)
 		reg[i] = readl(ndev->sram_base + off + i * sizeof(u32));
@@ -170,24 +147,17 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	x2i->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.x2i_tail);
 	x2i->rb_start_addr   = AIE2_SRAM_OFF(ndev, info_regs.x2i_buf);
 	x2i->rb_size         = info_regs.x2i_buf_sz;
-	ndev->mgmt_chan_idx  = AIE2_MBOX_OFF(ndev, info_regs.msi_id);
-	ndev->mgmt_prot_major = AIE2_MBOX_OFF(ndev, info_regs.prot_major);
-	ndev->mgmt_prot_minor = AIE2_MBOX_OFF(ndev, info_regs.prot_minor);
 
-	if (ndev->mgmt_prot_major != ndev->priv->protocol_major) {
-		XDNA_ERR(xdna, "Incompatible protocol version major %d minor %d",
-			 ndev->mgmt_prot_major, ndev->mgmt_prot_minor);
-		return -EINVAL;
+	if (info_regs.magic != MGMT_MBOX_MAGIC) {
+		ndev->mgmt_chan_idx = CHANN_INDEX(ndev, x2i->rb_start_addr);
+		goto done;
 	}
 
-	/*
-	 * Greater protocol minor version means new messages/status/emun are
-	 * added into the firmware interface protocol.
-	 */
-	if (ndev->mgmt_prot_minor < ndev->priv->protocol_minor) {
-		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
-		return -EINVAL;
-	}
+	ndev->mgmt_chan_idx  = info_regs.msi_id;
+	ndev->mgmt_prot_major = info_regs.prot_major;
+	ndev->mgmt_prot_minor = info_regs.prot_minor;
+	if (aie2_check_protocol(ndev, ndev->mgmt_prot_major, ndev->mgmt_prot_minor))
+		ret = -EINVAL;
 
 done:
 	aie2_dump_chann_info_debug(ndev);
@@ -195,7 +165,7 @@ done:
 	/* Must clear address at FW_ALIVE_OFF */
 	writel(0, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF));
 
-	return 0;
+	return ret;
 }
 
 static int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev)
