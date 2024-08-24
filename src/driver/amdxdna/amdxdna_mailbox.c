@@ -82,10 +82,28 @@ struct mailbox {
 
 };
 
+#if defined(CONFIG_DEBUG_FS)
+struct mailbox_res_record {
+	struct list_head		re_entry;
+	struct xdna_mailbox_chann_res	re_x2i;
+	struct xdna_mailbox_chann_res	re_i2x;
+	int				re_irq;
+	u64				irq_count;
+	/* update in worker thread */
+	u64				worker_count ____cacheline_aligned_in_smp;
+	u32				i2x_last_begin_head;
+	u32				i2x_last_begin_tail;
+	u32				i2x_last_end_head;
+	u32				i2x_last_end_tail;
+};
+#endif /* CONFIG_DEBUG_FS */
+
 struct mailbox_channel {
 	struct mailbox			*mb;
+	u64				irq_cnt;
 #if defined(CONFIG_DEBUG_FS)
 	struct list_head		chann_entry;
+	struct mailbox_res_record	*record;
 #endif
 	struct xdna_mailbox_chann_res	res[CHAN_RES_NUM];
 	int				msix_irq;
@@ -133,15 +151,6 @@ struct mailbox_msg {
 	size_t			pkg_size; /* package size in bytes */
 	struct mailbox_pkg	pkg;
 };
-
-#if defined(CONFIG_DEBUG_FS)
-struct mailbox_res_record {
-	struct list_head		re_entry;
-	struct xdna_mailbox_chann_res	re_x2i;
-	struct xdna_mailbox_chann_res	re_i2x;
-	int				re_irq;
-};
-#endif /* CONFIG_DEBUG_FS */
 
 static void mailbox_reg_write(struct mailbox_channel *mb_chann, u32 mbox_reg, u32 data)
 {
@@ -367,6 +376,10 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	ringbuf_size = mailbox_get_ringbuf_size(mb_chann, CHAN_RES_I2X);
 	start_addr = mb_chann->res[CHAN_RES_I2X].rb_start_addr;
 
+#if defined(CONFIG_DEBUG_FS)
+	mb_chann->record->i2x_last_begin_head = head;
+	mb_chann->record->i2x_last_begin_tail = tail;
+#endif
 	if (unlikely(tail > ringbuf_size || !IS_ALIGNED(tail, 4))) {
 		MB_WARN_ONCE(mb_chann, "Invalid tail 0x%x", tail);
 		return -EINVAL;
@@ -390,7 +403,8 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 			return -EINVAL;
 		}
 		mailbox_set_headptr(mb_chann, 0);
-		return 0;
+		ret = 0;
+		goto done;
 	}
 
 	if (unlikely(!header.total_size || !IS_ALIGNED(header.total_size, 4))) {
@@ -417,6 +431,11 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	trace_mbox_set_head(MAILBOX_NAME, mb_chann->msix_irq,
 			    header.opcode, header.id);
 
+done:
+#if defined(CONFIG_DEBUG_FS)
+	mb_chann->record->i2x_last_end_head = mb_chann->i2x_head;
+	mb_chann->record->i2x_last_end_tail = mailbox_get_tailptr(mb_chann, CHAN_RES_I2X);
+#endif
 	return ret;
 }
 
@@ -425,10 +444,13 @@ static irqreturn_t mailbox_irq_handler(int irq, void *p)
 	struct mailbox_channel *mb_chann = p;
 
 	trace_mbox_irq_handle(MAILBOX_NAME, irq);
-	/* Schedule a rx_work to call the callback functions */
-	queue_work(mb_chann->work_q, &mb_chann->rx_work);
 	/* Clear IOHUB register */
 	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+	/* Schedule a rx_work to call the callback functions */
+	queue_work(mb_chann->work_q, &mb_chann->rx_work);
+#if defined(CONFIG_DEBUG_FS)
+	mb_chann->record->irq_count++;
+#endif
 
 	return IRQ_HANDLED;
 }
@@ -567,6 +589,9 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 
 	mb_chann = container_of(rx_work, struct mailbox_channel, rx_work);
 
+#if defined(CONFIG_DEBUG_FS)
+	mb_chann->record->worker_count++;
+#endif
 	if (READ_ONCE(mb_chann->bad_state)) {
 		MB_ERR(mb_chann, "Channel in bad state, work aborted");
 		return;
@@ -673,7 +698,8 @@ msg_id_failed:
 int xdna_mailbox_info_show(struct mailbox *mb, struct seq_file *m)
 {
 	static const char ring_fmt[] = "%4d  %3s  %5d  0x%08x  0x%04x  ";
-	static const char mbox_fmt[] = "0x%08x  0x%08x  0x%04x    0x%04x\n";
+	static const char mbox_fmt[] = "0x%08x  0x%08x  0x%04x    0x%04x";
+	static const char dyn_state_fmt[] = " %lld  %lld  0x%04x  0x%04x  0x%04x  0x%04x\n";
 	struct mailbox_res_record *record;
 	struct mailbox_channel *chann;
 
@@ -684,7 +710,9 @@ int xdna_mailbox_info_show(struct mailbox *mb, struct seq_file *m)
 #define xdna_mbox_dump_queue(_dir, _act) \
 	{ \
 		u32 head_ptr, tail_ptr, head_val, tail_val; \
+		u32 b_head, b_tail, e_head, e_tail; \
 		u32 rb_start, rb_size; \
+		u64 irq_cnt, wrk_cnt; \
 		u32 mbox_irq; \
 		mbox_irq = record->re_irq; \
 		rb_start = record->re_##_dir.rb_start_addr; \
@@ -693,8 +721,15 @@ int xdna_mailbox_info_show(struct mailbox *mb, struct seq_file *m)
 		tail_ptr = record->re_##_dir.mb_tail_ptr_reg; \
 		head_val = ioread32((void *)(mb->res.mbox_base + head_ptr)); \
 		tail_val = ioread32((void *)(mb->res.mbox_base + tail_ptr)); \
+		irq_cnt = record->irq_count; \
+		wrk_cnt = record->worker_count; \
+		b_head = record->i2x_last_begin_head; \
+		b_tail = record->i2x_last_begin_tail; \
+		e_head = record->i2x_last_end_head; \
+		e_tail = record->i2x_last_end_tail; \
 		seq_printf(m, ring_fmt, mbox_irq, #_dir, _act, rb_start, rb_size); \
 		seq_printf(m, mbox_fmt, head_ptr, tail_ptr, head_val, tail_val); \
+		seq_printf(m, dyn_state_fmt, irq_cnt, wrk_cnt, b_head, b_tail, e_head, e_tail); \
 	}
 	mutex_lock(&mb->mbox_lock);
 	list_for_each_entry(record, &mb->res_records, re_entry) {
@@ -782,6 +817,9 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 	list_add_tail(&record->re_entry, &mb->res_records);
 
 skip_record:
+	/* Reset counter */
+	record->irq_count = 0;
+	record->worker_count = 0;
 	mutex_unlock(&mb->mbox_lock);
 #endif /* CONFIG_DEBUG_FS */
 
@@ -810,7 +848,8 @@ skip_record:
 #endif
 
 	INIT_WORK(&mb_chann->rx_work, mailbox_rx_worker);
-	mb_chann->work_q = create_singlethread_workqueue(MAILBOX_NAME);
+	//mb_chann->work_q = create_singlethread_workqueue(MAILBOX_NAME);
+	mb_chann->work_q = alloc_ordered_workqueue(MAILBOX_NAME, 0);
 	if (!mb_chann->work_q) {
 		MB_ERR(mb_chann, "Create workqueue failed");
 		goto free_and_out;
@@ -842,6 +881,9 @@ skip_irq:
 	list_add(&mb_chann->chann_entry, &mb->chann_list);
 	mutex_unlock(&mb->mbox_lock);
 
+#if defined(CONFIG_DEBUG_FS)
+	mb_chann->record = record;
+#endif
 	MB_DBG(mb_chann, "Mailbox channel created (irq: %d)", mb_chann->msix_irq);
 	return mb_chann;
 
