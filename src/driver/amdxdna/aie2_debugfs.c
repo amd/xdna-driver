@@ -291,7 +291,7 @@ static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	ret = aie2_smu_set_dpm_level(ndev, val, true);
+	ret = aie2_smu_set_dpm_level(ndev, val);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Setting dpm_level:%d failed, ret: %d", val, ret);
 		return ret;

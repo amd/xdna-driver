@@ -91,6 +91,7 @@ struct init_config {
 	u32			total_col;
 	u32			sys_eff_factor; /* system efficiency factor */
 	u32			latency_adj;    /* latency adjustment in ms */
+	u32			max_dpm_level;	/* Max dpm level in the system */
 	struct clk_list_info	clk_list;       /* List of frequencies available in system */
 	struct device		*dev;
 	struct xrs_action_ops	*actions;

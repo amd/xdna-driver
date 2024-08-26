@@ -306,7 +306,7 @@ static int aie2_set_dpm_level(void *cb_arg, u32 dpm_level)
 
 	xdna = hwctx->client->xdna;
 
-	ret = aie2_smu_set_dpm_level(xdna->dev_handle, dpm_level, true);
+	ret = aie2_smu_set_dpm_level(xdna->dev_handle, dpm_level);
 	if (ret)
 		XDNA_ERR(xdna, "set dpm level failed, ret %d", ret);
 
@@ -589,6 +589,7 @@ skip_pasid:
 	}
 	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
 
+	xrs_cfg.max_dpm_level = SMU_DPM_MAX(ndev);
 	xrs_cfg.clk_list.num_levels = ndev->priv->smu_npu_dpm_levels;
 	xrs_cfg.clk_list.cu_clk_list = ndev->priv->smu_npu_dpm_clk_table;
 	xrs_cfg.sys_eff_factor = 1;
