@@ -82,10 +82,20 @@ struct mailbox {
 
 };
 
+#if defined(CONFIG_DEBUG_FS)
+struct mailbox_res_record {
+	struct list_head		re_entry;
+	struct xdna_mailbox_chann_res	re_x2i;
+	struct xdna_mailbox_chann_res	re_i2x;
+	int				re_irq;
+};
+#endif /* CONFIG_DEBUG_FS */
+
 struct mailbox_channel {
 	struct mailbox			*mb;
 #if defined(CONFIG_DEBUG_FS)
 	struct list_head		chann_entry;
+	struct mailbox_res_record	*record;
 #endif
 	struct xdna_mailbox_chann_res	res[CHAN_RES_NUM];
 	int				msix_irq;
@@ -133,15 +143,6 @@ struct mailbox_msg {
 	size_t			pkg_size; /* package size in bytes */
 	struct mailbox_pkg	pkg;
 };
-
-#if defined(CONFIG_DEBUG_FS)
-struct mailbox_res_record {
-	struct list_head		re_entry;
-	struct xdna_mailbox_chann_res	re_x2i;
-	struct xdna_mailbox_chann_res	re_i2x;
-	int				re_irq;
-};
-#endif /* CONFIG_DEBUG_FS */
 
 static void mailbox_reg_write(struct mailbox_channel *mb_chann, u32 mbox_reg, u32 data)
 {
@@ -390,7 +391,8 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 			return -EINVAL;
 		}
 		mailbox_set_headptr(mb_chann, 0);
-		return 0;
+		ret = 0;
+		goto done;
 	}
 
 	if (unlikely(!header.total_size || !IS_ALIGNED(header.total_size, 4))) {
@@ -417,19 +419,62 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	trace_mbox_set_head(MAILBOX_NAME, mb_chann->msix_irq,
 			    header.opcode, header.id);
 
+done:
 	return ret;
+}
+
+static void mailbox_rx_worker(struct work_struct *rx_work)
+{
+	struct mailbox_channel *mb_chann;
+	int ret;
+
+	mb_chann = container_of(rx_work, struct mailbox_channel, rx_work);
+
+	if (READ_ONCE(mb_chann->bad_state)) {
+		MB_ERR(mb_chann, "Channel in bad state, work aborted");
+		return;
+	}
+
+	while (1) {
+		/*
+		 * If return is 0, keep consuming next message, until there is
+		 * no messages or an error happened.
+		 */
+		ret = mailbox_get_msg(mb_chann);
+		if (ret == -ENOENT)
+			break;
+
+		/* Other error means device doesn't look good, disable irq. */
+		if (unlikely(ret)) {
+			MB_ERR(mb_chann, "Unexpected ret %d, disable irq", ret);
+			WRITE_ONCE(mb_chann->bad_state, true);
+			disable_irq(mb_chann->msix_irq);
+			break;
+		}
+	}
 }
 
 static irqreturn_t mailbox_irq_handler(int irq, void *p)
 {
 	struct mailbox_channel *mb_chann = p;
+	u32 iohub;
+	int i;
 
 	trace_mbox_irq_handle(MAILBOX_NAME, irq);
-	/* Schedule a rx_work to call the callback functions */
-	queue_work(mb_chann->work_q, &mb_chann->rx_work);
 	/* Clear IOHUB register */
 	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+	/* Schedule a rx_work to call the callback functions */
+	queue_work(mb_chann->work_q, &mb_chann->rx_work);
+	for (i = 0; i < 4; i++) {
+		iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
+		if (iohub)
+			goto race;
+	}
 
+	return IRQ_HANDLED;
+race:
+	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+	queue_work(mb_chann->work_q, &mb_chann->rx_work);
 	return IRQ_HANDLED;
 }
 
@@ -559,37 +604,6 @@ static int mailbox_polld(void *data)
 	return 0;
 }
 #endif
-
-static void mailbox_rx_worker(struct work_struct *rx_work)
-{
-	struct mailbox_channel *mb_chann;
-	int ret;
-
-	mb_chann = container_of(rx_work, struct mailbox_channel, rx_work);
-
-	if (READ_ONCE(mb_chann->bad_state)) {
-		MB_ERR(mb_chann, "Channel in bad state, work aborted");
-		return;
-	}
-
-	while (1) {
-		/*
-		 * If return is 0, keep consuming next message, until there is
-		 * no messages or an error happened.
-		 */
-		ret = mailbox_get_msg(mb_chann);
-		if (ret == -ENOENT)
-			break;
-
-		/* Other error means device doesn't look good, disable irq. */
-		if (unlikely(ret)) {
-			MB_ERR(mb_chann, "Unexpected ret %d, disable irq", ret);
-			WRITE_ONCE(mb_chann->bad_state, true);
-			disable_irq(mb_chann->msix_irq);
-			break;
-		}
-	}
-}
 
 int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 			  const struct xdna_mailbox_msg *msg, u64 tx_timeout)
@@ -810,7 +824,7 @@ skip_record:
 #endif
 
 	INIT_WORK(&mb_chann->rx_work, mailbox_rx_worker);
-	mb_chann->work_q = create_singlethread_workqueue(MAILBOX_NAME);
+	mb_chann->work_q = alloc_ordered_workqueue(MAILBOX_NAME, 0);
 	if (!mb_chann->work_q) {
 		MB_ERR(mb_chann, "Create workqueue failed");
 		goto free_and_out;
@@ -842,6 +856,9 @@ skip_irq:
 	list_add(&mb_chann->chann_entry, &mb->chann_list);
 	mutex_unlock(&mb->mbox_lock);
 
+#if defined(CONFIG_DEBUG_FS)
+	mb_chann->record = record;
+#endif
 	MB_DBG(mb_chann, "Mailbox channel created (irq: %d)", mb_chann->msix_irq);
 	return mb_chann;
 
