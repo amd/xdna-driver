@@ -259,6 +259,13 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device> sdev, arg_ty
 }
 
 void
+TEST_io_e_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  io_test_parameter_init(IO_TEST_THRUPUT_PERF, static_cast<unsigned int>(arg[0]));
+  io_test(id, sdev.get(), 32000, 8, 1);
+}
+
+void
 TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   int num_bo_set = 256;
