@@ -165,7 +165,7 @@ int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev)
 	return ndev->smu.curr_dpm_level;
 }
 
-int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool cache)
+int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 {
 	int ret;
 
@@ -177,8 +177,10 @@ int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool cac
 	else
 		ret = aie2_smu_set_dpm_level_v1(ndev, dpm_level);
 
-	if (!ret & cache)
+	if (!ret) {
 		ndev->smu.curr_dpm_level = dpm_level;
+		XDNA_DBG(ndev->xdna, "The dpm level is set to %d", dpm_level);
+	}
 
 	return ret;
 }
@@ -243,7 +245,7 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev)
 	XDNA_INFO_ONCE(ndev->xdna, "Set %s = %d mhz", smu->h_clock.name, freq_mhz);
 
 	if (SMU_DPM_MAX(ndev) > 0) {
-		ret = aie2_smu_set_dpm_level(ndev, smu->curr_dpm_level, true);
+		ret = aie2_smu_set_dpm_level(ndev, smu->curr_dpm_level);
 		if (ret) {
 			XDNA_ERR(ndev->xdna, "Set dpm level failed, ret %d", ret);
 			return ret;
@@ -269,7 +271,7 @@ void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->xdna, "Set hclk freq %d mhz failed, ret %d", freq_mhz, ret);
 
 	if (SMU_DPM_MAX(ndev) > 0) {
-		ret = aie2_smu_set_dpm_level(ndev, 0, false);
+		ret = aie2_smu_set_dpm_level(ndev, 0);
 		if (ret)
 			XDNA_ERR(ndev->xdna, "Set dpm level 0 failed, ret %d", ret);
 	}

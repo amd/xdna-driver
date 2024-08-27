@@ -296,7 +296,7 @@ int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool cache);
+int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_psp.c */
