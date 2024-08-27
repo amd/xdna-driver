@@ -475,9 +475,6 @@ static irqreturn_t mailbox_irq_handler(int irq, void *p)
 race:
 	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
 	queue_work(mb_chann->work_q, &mb_chann->rx_work);
-	iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
-	if (unlikely(iohub))
-		MB_WARN_ONCE(mb_chann, "Clear and Set interrupt race again...");
 	return IRQ_HANDLED;
 }
 
