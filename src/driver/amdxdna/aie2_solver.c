@@ -97,8 +97,13 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 
 static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
 {
-	if (rqos->gops > 0 || rqos->fps > 0 ||  rqos->latency > 0)
+	/*
+	 * gops is retrieved from the xmodel, so it's always set
+	 * fps and latency are the configurable params from the application
+	 */
+	if (rqos->gops > 0 && (rqos->fps > 0 ||  rqos->latency > 0)) {
 		return true;
+	}
 
 	return false;
 }
