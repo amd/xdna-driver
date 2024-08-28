@@ -95,6 +95,19 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 	return 0;
 }
 
+static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
+{
+	/*
+	 * gops is retrieved from the xmodel, so it's always set
+	 * fps and latency are the configurable params from the application
+	 */
+	if (rqos->gops > 0 && (rqos->fps > 0 ||  rqos->latency > 0)) {
+		return true;
+	}
+
+	return false;
+}
+
 static u32 find_dpm_level(struct solver_state *xrs, struct alloc_requests *req)
 {
 	struct cdo_parts *cdop = &req->cdo;
@@ -103,8 +116,9 @@ static u32 find_dpm_level(struct solver_state *xrs, struct alloc_requests *req)
 	struct solver_node *node;
 	u32 cu_clk_freq, dpm_level;
 
-	if (cdop->ncols > xrs->cfg.total_col)
-		return -EINVAL;
+	/* If no QoS parameters are passed, set it to the max DPM level */
+	if (!is_valid_qos_dpm_params(rqos))
+		return xrs->cfg.max_dpm_level;
 
         /*
          * We can find at least one CDOs groups that meet the

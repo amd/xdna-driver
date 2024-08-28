@@ -230,8 +230,8 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct dma_fence *fence = job->fence;
 
 	job->hwctx->completed++;
+	trace_xdna_job(&job->base, job->hwctx->name, "signale fence", job->seq);
 	dma_fence_signal(fence);
-	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
 	dma_fence_put(fence);
 	mmput(job->mm);
 	amdxdna_job_put(job);
@@ -928,7 +928,7 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 
 retry:
-	ret = drm_gem_lock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+	ret = amdxdna_lock_objects(job, &acquire_ctx);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to reverve fence, ret %d", ret);
 		goto put_fence;
@@ -937,7 +937,7 @@ retry:
 	for (i = 0; i < job->bo_cnt; i++) {
 		abo = to_xdna_obj(job->bos[i]);
 		if (abo->mem.map_invalid) {
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			amdxdna_unlock_objects(job, &acquire_ctx);
 			if (!timeout) {
 				timeout = jiffies +
 					msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
@@ -955,14 +955,14 @@ retry:
 		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
 		if (ret) {
 			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			amdxdna_unlock_objects(job, &acquire_ctx);
 			goto put_fence;
 		}
 	}
 
 	for (i = 0; i < job->bo_cnt; i++)
 		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
-	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+	amdxdna_unlock_objects(job, &acquire_ctx);
 
 	mutex_lock(&hwctx->priv->io_lock);
 	ret = aie2_hwctx_add_job(hwctx, job);

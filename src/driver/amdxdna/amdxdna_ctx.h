@@ -228,6 +228,8 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
 
+int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
+void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdls, u32 *arg_bo_hdls, u32 arg_bo_cnt,
 		       u32 hwctx_hdl, u64 *seq);
