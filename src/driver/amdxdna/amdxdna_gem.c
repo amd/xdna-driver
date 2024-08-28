@@ -192,7 +192,6 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	unsigned long num_pages = vma_pages(vma);
-	struct sg_dma_page_iter sg_iter;
 	unsigned long offset = 0;
 	int ret;
 
@@ -216,26 +215,32 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 		return 0;
 	}
 
+	vma->vm_private_data = NULL;
+	vma->vm_ops = NULL;
+	ret = dma_buf_mmap(to_gobj(abo)->dma_buf, vma, 0);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to mmap dma buf %d", ret);
+		return ret;
+	}
 
-	for_each_sgtable_dma_page(abo->base.sgt, &sg_iter, 0) {
-		dma_addr_t addr = sg_page_iter_dma_address(&sg_iter);
-		unsigned long pfn;
+	do {
+		vm_fault_t fault_ret;
 
-		pfn = __phys_to_pfn(dma_to_phys(to_gobj(abo)->dev->dev, addr));
-		ret = vm_insert_page(vma, vma->vm_start + offset, pfn_to_page(pfn));
-		if (ret) {
-			XDNA_ERR(xdna, "Failed insert page %dff", ret);
-			break;
+		fault_ret = handle_mm_fault(vma, vma->vm_start+offset,
+					    FAULT_FLAG_WRITE, NULL);
+		if (fault_ret & VM_FAULT_ERROR) {
+			vma->vm_ops->close(vma);
+			XDNA_ERR(xdna, "Fault in page failed"); 
+			return -EFAULT;
 		}
 
-		if (!(--num_pages))
-			break;
 		offset += PAGE_SIZE;
-	}
-	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
-	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
+	} while (--num_pages);
 
-	return ret;
+	/* Drop the reference drm_gem_mmap_obj() acquired.*/
+	drm_gem_object_put(to_gobj(abo));
+
+	return 0;
 }
 
 static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
