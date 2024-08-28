@@ -30,7 +30,7 @@ io_test_bo_set
 alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
 {
   io_test_bo_set boset{dev, local_data_path};
-  auto bos = boset.get_bos();
+  auto& bos = boset.get_bos();
 
   if (io_test_parameters.type == IO_TEST_NOOP_RUN) {
     // Preparing no-op kernel's special control code
