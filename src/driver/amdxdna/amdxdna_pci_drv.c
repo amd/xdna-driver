@@ -13,7 +13,9 @@
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sysfs.h"
 
-#define AMDXDNA_AUTOSUSPEND_DELAY	5000 /* miliseconds */
+int autosuspend_ms = -1;
+module_param(autosuspend_ms, int, 0644);
+MODULE_PARM_DESC(autosuspend_ms, "runtime suspend delay in miliseconds. < 0: prevent it");
 
 /*
  *  There are platforms which share the same PCI device ID
@@ -100,7 +102,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_dev_fini;
 	}
 
-	pm_runtime_set_autosuspend_delay(dev, AMDXDNA_AUTOSUSPEND_DELAY);
+	pm_runtime_set_autosuspend_delay(dev, autosuspend_ms);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_allow(dev);
 
