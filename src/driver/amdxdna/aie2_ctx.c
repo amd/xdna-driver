@@ -230,7 +230,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct dma_fence *fence = job->fence;
 
 	job->hwctx->completed++;
-	trace_xdna_job(&job->base, job->hwctx->name, "signale fence", job->seq);
+	trace_xdna_job(&job->base, job->hwctx->name, "signaling fence", job->seq);
 	dma_fence_signal(fence);
 	dma_fence_put(fence);
 	mmput(job->mm);
@@ -257,7 +257,7 @@ aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 	}
 
 	status = *data;
-	XDNA_DBG(job->hwctx->client->xdna, "Resp status 0x%x", status);
+	XDNA_DBG(job->hwctx->client->xdna, "Response status 0x%x", status);
 	if (status == AIE2_STATUS_SUCCESS)
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
 	else
@@ -284,7 +284,7 @@ aie2_sched_nocmd_resp_handler(void *handle, const u32 *data, size_t size)
 	}
 
 	status = *data;
-	XDNA_DBG(job->hwctx->client->xdna, "Resp status 0x%x", status);
+	XDNA_DBG(job->hwctx->client->xdna, "Response status 0x%x", status);
 
 out:
 	aie2_sched_notify(job);
