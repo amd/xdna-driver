@@ -7,10 +7,10 @@
 	"firmwares": [
 		{
 			"device": "npu1",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.4.2.313",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.4.2.329",
 			"pci_device_id": "1502",
 			"pci_revision_id": "00",
-			"version": "1.4.2.313",
+			"version": "1.4.2.329",
 			"fw_name": "npu.sbin"
 		},
 		{
