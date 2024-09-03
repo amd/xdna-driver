@@ -64,23 +64,35 @@ event2_ts_num=${#event2_ts[@]}
 echo "${event2_ts_num} events for: '${event2}'"
 
 # Sanity check collected data
-if [ ${event1_ts_num} -ne ${event2_ts_num} ]; then
-	echo Two events do not show up in pairs
-	exit 1
-fi
 if [ ${event1_ts_num} -eq 0 ]; then
-	echo No events found
+	echo No events found for ${event1}
 	exit 1
 fi
-if [ ${event2_ts[0]} -lt ${event1_ts[0]} ]; then
-	echo Event2 shows up before event1
+if [ ${event2_ts_num} -eq 0 ]; then
+	echo No events found for ${event2}
+	exit 1
+fi
+# Find first event2 entry index which comes after first event1
+event2_index_base=-1
+for (( i=0; i<${event2_ts_num}; i++ )); do
+	if ! [[ ${event2_ts[i]} -lt ${event1_ts[0]} ]]; then
+		event2_index_base=${i}
+		break
+	fi
+done
+if [ ${event2_index_base} -eq -1 ]; then
+	echo No ${event2} is after ${event1}
 	exit 1
 fi
 
 # Caculate time difference between two events
 diffs=()
 for (( i=0; i<${event1_ts_num}; i++ )); do
-	diffs+=( $((event2_ts[i] - event1_ts[i])) )
+	i2=$(( i+${event2_index_base} ))
+	if ! [ ${i2} -lt ${event2_ts_num} ]; then
+		break
+	fi
+	diffs+=( $((event2_ts[i2] - event1_ts[i])) )
 done
 #echo ${diffs[@]}
 
@@ -88,7 +100,7 @@ done
 # Data mining within specified range
 
 if [ ${range_end} -eq 0 ]; then
-	range_end=${event1_ts_num}
+	range_end=${#diffs[@]}
 fi
 if [ ${range_end} -eq ${range_start} ]; then
 	echo Range start and end are the same
