@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 
-set -eu
+#set -eu
 
 bold=$(tput bold)
 normal=$(tput sgr0)
