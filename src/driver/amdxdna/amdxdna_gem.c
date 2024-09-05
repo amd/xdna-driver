@@ -60,48 +60,6 @@ amdxdna_gem_insert_node_locked(struct amdxdna_gem_obj *abo, bool use_vmap)
 	return 0;
 }
 
-static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
-	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
-	struct iosys_map map = IOSYS_MAP_INIT_VADDR(abo->mem.kva);
-
-	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
-	if (abo->flags & BO_SUBMIT_PINNED)
-		amdxdna_gem_unpin(abo);
-
-	flush_work(&abo->hmm_unreg_work);
-	if (abo->type == AMDXDNA_BO_DEV) {
-		mutex_lock(&abo->client->mm_lock);
-		drm_mm_remove_node(&abo->mm_node);
-		mutex_unlock(&abo->client->mm_lock);
-
-		vunmap(abo->mem.kva);
-		drm_gem_object_put(to_gobj(abo->dev_heap));
-		drm_gem_object_release(gobj);
-		mutex_destroy(&abo->lock);
-		kfree(abo);
-		return;
-	}
-
-	if (abo->type == AMDXDNA_BO_DEV_HEAP)
-		drm_mm_takedown(&abo->mm);
-
-#ifdef AMDXDNA_DEVEL
-	if (abo->type == AMDXDNA_BO_CMD)
-		amdxdna_mem_unmap(xdna, &abo->mem);
-	else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
-		amdxdna_bo_dma_unmap(abo);
-#endif
-	drm_gem_vunmap_unlocked(gobj, &map);
-	mutex_destroy(&abo->lock);
-	drm_gem_shmem_free(&abo->base);
-}
-
-static const struct drm_gem_object_funcs amdxdna_gem_dev_obj_funcs = {
-	.free = amdxdna_gem_obj_free,
-};
-
 static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 				   const struct mmu_notifier_range *range,
 				   unsigned long cur_seq)
@@ -136,8 +94,11 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo)
 	if (!xdna->dev_info->ops->hmm_invalidate)
 		return;
 
-	if (!abo->mem.pfns)
+	mutex_lock(&abo->lock);
+	if (!abo->mem.pfns) {
+		mutex_unlock(&abo->lock);
 		return;
+	}
 
 	mmu_interval_notifier_remove(&abo->mem.notifier);
 	kvfree(abo->mem.pfns);
@@ -145,6 +106,8 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo)
 
 	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
 		mapping_clear_unevictable(vma->vm_file->f_mapping);
+
+	mutex_unlock(&abo->lock);
 }
 
 static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
@@ -159,14 +122,19 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	if (!xdna->dev_info->ops->hmm_invalidate)
 		return 0;
 
-	if (abo->mem.pfns)
-		return -EEXIST;
+	mutex_lock(&abo->lock);
+	if (abo->mem.pfns) {
+		ret = -EEXIST;
+		goto out_unlock;
+	}
 
 	nr_pages = (PAGE_ALIGN(addr + len) - (addr & PAGE_MASK)) >> PAGE_SHIFT;
 	abo->mem.pfns = kvcalloc(nr_pages, sizeof(unsigned long),
 				 GFP_KERNEL);
-	if (!abo->mem.pfns)
-		return -ENOMEM;
+	if (!abo->mem.pfns) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
 
 	ret = mmu_interval_notifier_insert_locked(&abo->mem.notifier,
 						  current->mm,
@@ -175,17 +143,67 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 						  &amdxdna_hmm_ops);
 	if (ret) {
 		XDNA_ERR(xdna, "Insert mmu notifier failed, ret %d", ret);
-		kvfree(abo->mem.pfns);
-		abo->mem.pfns = NULL;
-		return ret;
+		goto free_pfns;
 	}
 	abo->mem.userptr = addr;
 	abo->mem.vma = vma;
 	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
 		mapping_set_unevictable(vma->vm_file->f_mapping);
 
+	mutex_unlock(&abo->lock);
+
 	return 0;
+
+free_pfns:
+	kvfree(abo->mem.pfns);
+	abo->mem.pfns = NULL;
+out_unlock:
+	mutex_unlock(&abo->lock);
+	return ret;
 }
+
+static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
+	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+	struct iosys_map map = IOSYS_MAP_INIT_VADDR(abo->mem.kva);
+
+	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
+	if (abo->flags & BO_SUBMIT_PINNED)
+		amdxdna_gem_unpin(abo);
+
+	amdxdna_hmm_unregister(abo);
+	flush_work(&abo->hmm_unreg_work);
+	if (abo->type == AMDXDNA_BO_DEV) {
+		mutex_lock(&abo->client->mm_lock);
+		drm_mm_remove_node(&abo->mm_node);
+		mutex_unlock(&abo->client->mm_lock);
+
+		vunmap(abo->mem.kva);
+		drm_gem_object_put(to_gobj(abo->dev_heap));
+		drm_gem_object_release(gobj);
+		mutex_destroy(&abo->lock);
+		kfree(abo);
+		return;
+	}
+
+	if (abo->type == AMDXDNA_BO_DEV_HEAP)
+		drm_mm_takedown(&abo->mm);
+
+#ifdef AMDXDNA_DEVEL
+	if (abo->type == AMDXDNA_BO_CMD)
+		amdxdna_mem_unmap(xdna, &abo->mem);
+	else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
+		amdxdna_bo_dma_unmap(abo);
+#endif
+	drm_gem_vunmap_unlocked(gobj, &map);
+	mutex_destroy(&abo->lock);
+	drm_gem_shmem_free(&abo->base);
+}
+
+static const struct drm_gem_object_funcs amdxdna_gem_dev_obj_funcs = {
+	.free = amdxdna_gem_obj_free,
+};
 
 static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 				struct vm_area_struct *vma)
