@@ -99,7 +99,7 @@ pdev::
 open() const
 {
   int fd;
-  const std::lock_guard<std::mutex> lock(m_lock);
+  const std::lock_guard<std::recursive_mutex> lock(m_lock);
 
   if (m_dev_users == 0) {
     fd = xrt_core::pci::dev::open("", O_RDWR);
@@ -111,6 +111,8 @@ open() const
     m_dev_fd = fd;
   }
   ++m_dev_users;
+
+  on_first_open();
 }
 
 void
@@ -118,10 +120,12 @@ pdev::
 close() const
 {
   int fd;
-  const std::lock_guard<std::mutex> lock(m_lock);
+  const std::lock_guard<std::recursive_mutex> lock(m_lock);
 
   --m_dev_users;
   if (m_dev_users == 0) {
+    on_last_close();
+
     // Stop new users of the fd from other threads.
     fd = m_dev_fd;
     m_dev_fd = -1;
