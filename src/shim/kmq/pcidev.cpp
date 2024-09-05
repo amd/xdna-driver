@@ -44,5 +44,12 @@ create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id
   return dev;
 }
 
+void
+pdev_kmq::
+on_last_close() const
+{
+  m_dev_heap_bo.reset();
+}
+
 } // namespace shim_xdna
 
