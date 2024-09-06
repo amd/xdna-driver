@@ -800,6 +800,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	abo = to_xdna_obj(gobj);
 	args->vaddr = abo->mem.userptr;
 	args->xdna_addr = abo->mem.dev_addr;
+	args->size = abo->mem.size;
 
 	if (abo->type != AMDXDNA_BO_DEV)
 		args->map_offset = drm_vma_node_offset_addr(&gobj->vma_node);

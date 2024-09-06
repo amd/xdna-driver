@@ -208,6 +208,7 @@ struct amdxdna_drm_create_bo {
  * @map_offset: Returned DRM fake offset for mmap().
  * @vaddr: Returned user VA of buffer. 0 in case user needs mmap().
  * @xdna_addr: Returned XDNA device virtual address.
+ * @size: Size in bytes.
  */
 struct amdxdna_drm_get_bo_info {
 	__u64 ext;
@@ -217,6 +218,7 @@ struct amdxdna_drm_get_bo_info {
 	__u64 map_offset;
 	__u64 vaddr;
 	__u64 xdna_addr;
+	__u64	size;
 };
 
 /**
