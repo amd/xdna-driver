@@ -910,6 +910,34 @@ put_mm:
 	return ret;
 }
 
+static int aie2_hwctx_poll(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
+{
+	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct dma_fence *fence;
+	int ret;
+
+	mutex_lock(&hwctx->priv->io_lock);
+	fence = aie2_sched_job_run(&job->base);
+	if (!fence)
+		goto unlock_and_out;
+	dma_fence_put(fence);
+
+	while (1) {
+		ret = xdna_mailbox_get_response(chann);
+		if (ret == -ENOENT)
+			continue;
+		else
+			break;
+	};
+
+	dma_fence_signal(job->out_fence);
+	aie2_sched_job_free(&job->base);
+
+unlock_and_out:
+	mutex_unlock(&hwctx->priv->io_lock);
+	return ret;
+}
+
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -964,6 +992,14 @@ retry:
 		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
+	if (xdna_mailbox_is_upoll(hwctx->priv->mbox_chann)) {
+		ret = aie2_hwctx_poll(hwctx, job);
+		if (ret)
+			goto signal_fence;
+
+		return 0;
+	}
+
 	mutex_lock(&hwctx->priv->io_lock);
 	ret = aie2_hwctx_add_job(hwctx, job);
 	if (ret) {
@@ -991,6 +1027,9 @@ int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	struct amdxdna_sched_job *job;
 	struct dma_fence *out_fence;
 	long ret;
+
+	if (xdna_mailbox_is_upoll(hwctx->priv->mbox_chann))
+		return 0;
 
 	mutex_lock(&hwctx->priv->io_lock);
 	job = aie2_hwctx_get_job(hwctx, seq);

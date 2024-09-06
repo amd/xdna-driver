@@ -288,7 +288,8 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 
 	intr_reg = i2x.mb_head_ptr_reg + 4;
 	hwctx->priv->mbox_chann = xdna_mailbox_create_channel(ndev->mbox, &x2i, &i2x,
-							      intr_reg, ret);
+							      intr_reg, ret,
+							      MB_CHANNEL_USER);
 	if (!hwctx->priv->mbox_chann) {
 		XDNA_ERR(xdna, "not able to create channel");
 		ret = -EINVAL;
@@ -495,7 +496,23 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx)
 	}
 	req.num_cus = hwctx->cus->num_cus;
 
-	ret = xdna_send_msg_wait(xdna, chann, &msg);
+	if (xdna_mailbox_is_upoll(chann)) {
+		ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+		if (ret) {
+			XDNA_ERR(xdna, "Send message failed, ret %d", ret);
+			return ret;
+		}
+
+		while (1) {
+			ret = xdna_mailbox_get_response(chann);
+			if (ret == -ENOENT)
+				continue;
+			else
+				break;
+		}
+	} else {
+		ret = xdna_send_msg_wait(xdna, chann, &msg);
+	}
 	if (ret == -ETIME)
 		aie2_destroy_context(xdna->dev_handle, hwctx);
 
