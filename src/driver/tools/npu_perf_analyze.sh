@@ -3,14 +3,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2024, Advanced Micro Devices, Inc.
 
-perf_out_file="perf.converted.out"
-
 usage()
 {
-	echo "$0 [entry_index_begin:entry_index_end] event1_pattern event2_pattern"
-	echo "Calculate time from event1 to event2 within [entry_index_begin,entry_index_end)"
-	echo "event pattern examples:"
-	echo "    sdt_xrt:ioctl_exit: \(.+\) arg1=DRM_IOCTL_AMDXDNA_WAIT_CMD"
+  cat << USAGE_END
+Usage: $0 [options] event1_pattern event2_pattern
+Options:
+  -file/-f: Trace log file for parsing
+  -range/-r: [entry_index_begin:entry_index_end), e.g.: 100:200
+Parsing trace log file to find time interval from event1 to event2.
+event pattern examples:
+  "sdt_xrt:ioctl_exit: \(.+\) arg1=DRM_IOCTL_AMDXDNA_WAIT_CMD"
+USAGE_END
 }
 
 read_timestamps()
@@ -25,28 +28,50 @@ read_timestamps()
 	echo ${timestamps[@]}
 }
 
-range_start=0
-range_end=0
-event1=""
-event2=""
-if [ "$#" -eq 2 ]; then
-	event1=$1
-	event2=$2
-elif [ "$#" -eq 3 ]; then
-	st=$(echo $1 | cut -d':' -f1)
-	end=$(echo $1 | cut -d':' -f2)
-	if [ "${st}" != "" ]; then
-		range_start=$(("10#${st}"))
-	fi
-	if [ "${end}" != "" ]; then
-		range_end=$(("10#${end}"))
-	fi
-	event1=$2
-	event2=$3
-else
+if [ "$#" -eq 0 ]; then
 	usage
 	exit 1
 fi
+
+range_start=-1
+range_end=-1
+event1=""
+event2=""
+perf_out_file="perf.converted.out"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-range | -r)
+			st=$(echo $2 | cut -d':' -f1)
+			end=$(echo $2 | cut -d':' -f2)
+			if [ "${st}" != "" ]; then
+				if [[ "${st}" =~ ^[0-9]+$ ]]; then
+					range_start=$(("10#${st}"))
+				else
+					echo Invalid range start: ${st}
+					exit 1
+				fi
+			fi
+			if [ "${end}" != "" ]; then
+				if [[ "${end}" =~ ^[0-9]+$ ]]; then
+					range_end=$(("10#${end}"))
+				else
+					echo Invalid range end: ${end}
+					exit 1
+				fi
+			fi
+			shift
+			;;
+		-file | -f)
+			perf_out_file=$2
+			shift
+			;;
+		*)
+			break
+	esac
+	shift
+done
+event1=$1
+event2=$2
 
 if [ ! -f ${perf_out_file} ]; then
 	echo "${perf_out_file} is not found"
@@ -57,49 +82,44 @@ fi
 
 event1_ts=($(read_timestamps "${event1}"))
 event1_ts_num=${#event1_ts[@]}
-echo "${event1_ts_num} events for: '${event1}'"
-
-event2_ts=($(read_timestamps "${event2}"))
-event2_ts_num=${#event2_ts[@]}
-echo "${event2_ts_num} events for: '${event2}'"
-
-# Sanity check collected data
 if [ ${event1_ts_num} -eq 0 ]; then
 	echo No events found for ${event1}
 	exit 1
 fi
+echo "${event1_ts_num} events for: '${event1}'"
+
+event2_ts=($(read_timestamps "${event2}"))
+event2_ts_num=${#event2_ts[@]}
 if [ ${event2_ts_num} -eq 0 ]; then
 	echo No events found for ${event2}
 	exit 1
 fi
-# Find first event2 entry index which comes after first event1
-event2_index_base=-1
-for (( i=0; i<${event2_ts_num}; i++ )); do
-	if ! [[ ${event2_ts[i]} -lt ${event1_ts[0]} ]]; then
-		event2_index_base=${i}
-		break
-	fi
-done
-if [ ${event2_index_base} -eq -1 ]; then
-	echo No ${event2} is after ${event1}
-	exit 1
-fi
+echo "${event2_ts_num} events for: '${event2}'"
 
 # Caculate time difference between two events
 diffs=()
-for (( i=0; i<${event1_ts_num}; i++ )); do
-	i2=$(( i+${event2_index_base} ))
-	if ! [ ${i2} -lt ${event2_ts_num} ]; then
+i1=0
+i2=0
+while [ ${i1} -lt ${event1_ts_num} ]; do
+	while [[ ${i2} -lt ${event2_ts_num} && ${event2_ts[i2]} -lt ${event1_ts[i1]} ]]; do
+		(( i2++ ))
+	done
+	if [ ${i2} -eq ${event2_ts_num} ]; then
 		break
 	fi
-	diffs+=( $((event2_ts[i2] - event1_ts[i])) )
+	diffs+=( $((event2_ts[i2] - event1_ts[i1])) )
+	(( i1++ ))
+	(( i2++ ))
 done
 #echo ${diffs[@]}
 
 
 # Data mining within specified range
 
-if [ ${range_end} -eq 0 ]; then
+if [ ${range_start} -eq -1 ]; then
+	range_start=0
+fi
+if [ ${range_end} -eq -1 ]; then
 	range_end=${#diffs[@]}
 fi
 if [ ${range_end} -eq ${range_start} ]; then
