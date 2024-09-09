@@ -76,12 +76,26 @@ instance of ERT. Each user channel is bound to its own dedicated mailbox.
 PCIe EP
 -------
 
-NPU is visible to the x86 as a PCIe device with 3 BARS and an MSI-X interrupt
+NPU is visible to the x86 as a PCIe device with multiple BARs and an MSI-X interrupt
 vector. NPU uses a dedicated high bandwidth SoC level fabric for reading
 writing into host memory. Each instance of ERT gets its own dedicated MSI-X
 interrupt. MERT gets a single instance of MSI-X interrupt.
 
-TODO, briefly describe the BARs
+The number of PCIe BARs varies depending on the specific device.
+Based on their functions, PCIe BARs can generally be categorized into the
+following types.
+* PSP BAR: Expose the AMD PSP(Platform Security Processor) function
+* SMU BAR: Expose the AMD SMU(System Management Unit) function
+* SRAM BAR: Expose ring buffers for the mailbox
+* Mailbox BAR: Expose the mailbox control registers(head, tail and isr registers etc.)
+* Public Register BAR: Expose public registers
+
+On specific devices, the above-mentioned BAR type might be combined into a single physical PCIe BAR.
+Or a BAR type might require two physical PCIe BARs to fully functional.
+For example,
+* On NPU1 device, PSP, SMU, Public Register BARs are on PCIe BAR index 0.
+* On NPU4 device, Mailbox and Public Register BARs are on PCIe BAR index 0.
+  The PSP BAR has some registers in PCIe BAR index 0 and PCIe BAR index 4.
 
 Process Isolation Hardware
 --------------------------
@@ -245,7 +259,10 @@ Telemetry
 =========
 
 MERT can report various kinds of telemetry information like
-TODO, list the key ones
+* L1 interrupt counter
+* DMA counter
+* Deep Sleep counter
+* etc.
 
 
 References
