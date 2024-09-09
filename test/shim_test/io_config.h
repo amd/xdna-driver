@@ -208,7 +208,7 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
     ss >> key >> str_val;
     ss.clear();
     golden_output_files.push_back(wrk_path + "golden_" + str_val + ".bin");
-    dump_output_files.push_back(wrk_path + "dump_" + str_val + ".bin");
+    dump_output_files.push_back("/tmp/dump_" + str_val + "." + std::to_string(getpid()) + ".bin");
 
     getline(myfile, line);
     ss.str(line);
@@ -239,12 +239,14 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
 
   int ret = 0;
   for (int i = 0; i < num_outputs; i++) {
-    std::cout << "Examing output: " << golden_output_files[i] << std::endl;
     ret = comp_buf_strides(buf + output_ddr_addr[i], golden_output_files[i],
                            dump_output_files[i], output_shapes[i], output_strides[i]);
     if (ret) {
         std::cout << "Examing failed, ret " << ret << std::endl;
+        std::cout << "Examing output: " << dump_output_files[i] << std::endl;
         break;
+    } else {
+        std::remove(dump_output_files[i].c_str());
     }
   }
 
