@@ -84,6 +84,7 @@ interrupt. MERT gets a single instance of MSI-X interrupt.
 The number of PCIe BARs varies depending on the specific device.
 Based on their functions, PCIe BARs can generally be categorized into the
 following types.
+
 * PSP BAR: Expose the AMD PSP(Platform Security Processor) function
 * SMU BAR: Expose the AMD SMU(System Management Unit) function
 * SRAM BAR: Expose ring buffers for the mailbox
@@ -93,6 +94,7 @@ following types.
 On specific devices, the above-mentioned BAR type might be combined into a single physical PCIe BAR.
 Or a BAR type might require two physical PCIe BARs to fully functional.
 For example,
+
 * On NPU1 device, PSP, SMU, Public Register BARs are on PCIe BAR index 0.
 * On NPU4 device, Mailbox and Public Register BARs are on PCIe BAR index 0.
   The PSP BAR has some registers in PCIe BAR index 0 and PCIe BAR index 4.
