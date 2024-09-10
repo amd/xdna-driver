@@ -95,8 +95,8 @@ On specific devices, the above-mentioned BAR type might be combined into a singl
 Or a module might require two physical PCIe BARs to be fully functional.
 For example,
 
-* On NPU1 device, PSP, SMU, Public Register BARs are on PCIe BAR index 0.
-* On NPU4 device, Mailbox and Public Register BARs are on PCIe BAR index 0.
+* On AMD Phoenix device, PSP, SMU, Public Register BARs are on PCIe BAR index 0.
+* On AMD Strix Point device, Mailbox and Public Register BARs are on PCIe BAR index 0.
   The PSP has some registers in PCIe BAR index 0 (Public Register BAR) and PCIe BAR index 4 (PSP BAR).
 
 Process Isolation Hardware
