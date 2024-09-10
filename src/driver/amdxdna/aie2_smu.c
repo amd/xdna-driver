@@ -169,7 +169,7 @@ int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 {
 	int ret;
 
-	if (dpm_level < 0 || dpm_level > SMU_DPM_MAX(ndev))
+	if (dpm_level > SMU_DPM_MAX(ndev))
 		return -EINVAL;
 
 	if (!ndev->priv->smu_rev)

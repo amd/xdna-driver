@@ -285,8 +285,7 @@ fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
   volatile struct host_indirect_packet_entry *hp =
     reinterpret_cast<volatile struct host_indirect_packet_entry *>(pkt->data);
 
-  for (int i = 0; dpu && dpu->chained >= 0;
-    i++, hp++, dpu = get_ert_dpu_data_next(dpu)) {
+  for (int i = 0; dpu; i++, hp++, dpu = get_ert_dpu_data_next(dpu)) {
     auto data_size = sizeof(struct host_indirect_data) * HSA_INDIRECT_PKT_NUM;
     auto prefix_off = get_pkt_idx(slot_idx) * data_size;
     auto prefix_idx = get_pkt_idx(slot_idx) * HSA_INDIRECT_PKT_NUM;
