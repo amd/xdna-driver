@@ -69,6 +69,18 @@ fi
 # Global variables
 sdt_pre_enabled=0
 xrt_lib_prefix="/opt/xilinx/xrt/lib"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-libdir | -l)
+			xrt_lib_prefix=$2
+			shift
+			;;
+		*)
+			break
+			;;
+	esac
+	shift
+done
 accel_debugfs="/sys/kernel/debug/accel"
 xrt_libs="${xrt_lib_prefix}/libxrt_coreutil.so,${xrt_lib_prefix}/libxrt_driver_xdna.so"
 perf_record_args="-e amdxdna_trace:* "
