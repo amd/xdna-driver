@@ -76,8 +76,8 @@ instance of ERT. Each user channel is bound to its own dedicated mailbox.
 PCIe EP
 -------
 
-NPU is visible to the x86 as a PCIe device with multiple BARs and an MSI-X interrupt
-vector. NPU uses a dedicated high bandwidth SoC level fabric for reading
+NPU is visible to the x86 as a PCIe device with multiple BARs and some MSI-X interrupt
+vectors. NPU uses a dedicated high bandwidth SoC level fabric for reading
 writing into host memory. Each instance of ERT gets its own dedicated MSI-X
 interrupt. MERT gets a single instance of MSI-X interrupt.
 
@@ -85,19 +85,19 @@ The number of PCIe BARs varies depending on the specific device.
 Based on their functions, PCIe BARs can generally be categorized into the
 following types.
 
-* PSP BAR: Expose the AMD PSP(Platform Security Processor) function
-* SMU BAR: Expose the AMD SMU(System Management Unit) function
+* PSP BAR: Expose the AMD PSP (Platform Security Processor) function
+* SMU BAR: Expose the AMD SMU (System Management Unit) function
 * SRAM BAR: Expose ring buffers for the mailbox
-* Mailbox BAR: Expose the mailbox control registers(head, tail and isr registers etc.)
+* Mailbox BAR: Expose the mailbox control registers (head, tail and ISR registers etc.)
 * Public Register BAR: Expose public registers
 
 On specific devices, the above-mentioned BAR type might be combined into a single physical PCIe BAR.
-Or a BAR type might require two physical PCIe BARs to fully functional.
+Or a module might require two physical PCIe BARs to be fully functional.
 For example,
 
 * On NPU1 device, PSP, SMU, Public Register BARs are on PCIe BAR index 0.
 * On NPU4 device, Mailbox and Public Register BARs are on PCIe BAR index 0.
-  The PSP BAR has some registers in PCIe BAR index 0 and PCIe BAR index 4.
+  The PSP has some registers in PCIe BAR index 0 (Public Register BAR) and PCIe BAR index 4 (PSP BAR).
 
 Process Isolation Hardware
 --------------------------
@@ -260,7 +260,7 @@ driver then decodes the error by reading the contents of the buffer pointer.
 Telemetry
 =========
 
-MERT can report various kinds of telemetry information like
+MERT can report various kinds of telemetry information like the following:
 * L1 interrupt counter
 * DMA counter
 * Deep Sleep counter
