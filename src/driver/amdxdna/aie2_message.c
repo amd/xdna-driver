@@ -249,6 +249,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 {
 	DECLARE_AIE2_MSG(create_ctx, MSG_OP_CREATE_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
+	enum xdna_mailbox_channel_type type;
 	struct xdna_mailbox_chann_res x2i;
 	struct xdna_mailbox_chann_res i2x;
 	struct cq_pair *cq_pair;
@@ -287,9 +288,12 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	}
 
 	intr_reg = i2x.mb_head_ptr_reg + 4;
+	if (aie2_pm_is_turbo(ndev))
+		type = MB_CHANNEL_USER_POLL;
+	else
+		type = MB_CHANNEL_USER_NORMAL;
 	hwctx->priv->mbox_chann = xdna_mailbox_create_channel(ndev->mbox, &x2i, &i2x,
-							      intr_reg, ret,
-							      MB_CHANNEL_USER);
+							      intr_reg, ret, type);
 	if (!hwctx->priv->mbox_chann) {
 		XDNA_ERR(xdna, "not able to create channel");
 		ret = -EINVAL;
@@ -496,23 +500,7 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx)
 	}
 	req.num_cus = hwctx->cus->num_cus;
 
-	if (xdna_mailbox_is_upoll(chann)) {
-		ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
-		if (ret) {
-			XDNA_ERR(xdna, "Send message failed, ret %d", ret);
-			return ret;
-		}
-
-		while (1) {
-			ret = xdna_mailbox_get_response(chann);
-			if (ret == -ENOENT)
-				continue;
-			else
-				break;
-		}
-	} else {
-		ret = xdna_send_msg_wait(xdna, chann, &msg);
-	}
+	ret = xdna_send_msg_wait(xdna, chann, &msg);
 	if (ret == -ETIME)
 		aie2_destroy_context(xdna->dev_handle, hwctx);
 

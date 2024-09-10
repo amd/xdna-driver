@@ -82,7 +82,8 @@ void xdna_mailbox_destroy(struct mailbox *mailbox);
 
 enum xdna_mailbox_channel_type {
 	MB_CHANNEL_MGMT = 0,
-	MB_CHANNEL_USER,
+	MB_CHANNEL_USER_NORMAL,
+	MB_CHANNEL_USER_POLL,
 	MB_CHANNEL_MAX_TYPE,
 };
 
@@ -158,8 +159,5 @@ int xdna_mailbox_info_show(struct mailbox *mailbox,
 int xdna_mailbox_ringbuf_show(struct mailbox *mailbox,
 			      struct seq_file *m);
 #endif
-#ifdef AMDXDNA_DEVEL
-bool xdna_mailbox_is_upoll(struct mailbox_channel *mailbox_chann);
-int xdna_mailbox_get_response(struct mailbox_channel *mailbox_chann);
-#endif
+
 #endif /* _AIE2_MAILBOX_ */

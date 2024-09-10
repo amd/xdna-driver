@@ -33,6 +33,32 @@ static int aie2_pm_clock_gating(struct amdxdna_dev_hdl *ndev, bool enable)
 	return ret;
 }
 
+bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->pw_mode == POWER_MODE_TURBO;
+}
+
+static int aie2_pm_turbo(struct amdxdna_dev_hdl *ndev, bool enable)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_client *client;
+	bool clk_gate_on;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	list_for_each_entry(client, &xdna->client_list, node) {
+		bool empty;
+
+		mutex_lock(&client->hwctx_lock);
+		empty = idr_is_empty(&client->hwctx_idr);
+		mutex_unlock(&client->hwctx_lock);
+		if (!empty)
+			return -EBUSY;
+	}
+
+	clk_gate_on = !enable;
+	return aie2_pm_clock_gating(ndev, clk_gate_on);
+}
+
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -41,7 +67,7 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 	if (ndev->pw_mode == target)
 		return 0;
 
-	if (target == POWER_MODE_LOW || target == POWER_MODE_MEDIUM)
+	if (target != POWER_MODE_DEFAULT && target != POWER_MODE_TURBO)
 		return -EOPNOTSUPP;
 
 	XDNA_DBG(xdna, "Changing power mode from %d to %d", ndev->pw_mode, target);
@@ -50,17 +76,14 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 	/* Set power level within the device */
 
 	/*
-	 * Other mode -> POWER_MODE_HIGH: Turn off clock gating
-	 * POWER_MODE_HIGH -> Other mode: Turn on clock gating
+	 * Other mode -> POWER_MODE_TURBO: Turn off turbo mode
+	 * POWER_MODE_TURBO -> Other mode: Turn on turbo mode
 	 * Otherwise, no change
 	 */
-	if (target == POWER_MODE_HIGH) {
-		XDNA_DBG(xdna, "Clock gating turning off");
-		ret = aie2_pm_clock_gating(ndev, false);
-	} else if (ndev->pw_mode == POWER_MODE_HIGH) {
-		XDNA_DBG(xdna, "Clock gating turning on");
-		ret = aie2_pm_clock_gating(ndev, true);
-	}
+	if (target == POWER_MODE_TURBO)
+		ret = aie2_pm_turbo(ndev, true);
+	else if (ndev->pw_mode == POWER_MODE_TURBO)
+		ret = aie2_pm_turbo(ndev, false);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to config clock gating");
 		return ret;
@@ -77,7 +100,7 @@ int aie2_pm_start(struct amdxdna_dev_hdl *ndev)
 	 * TODO: should only skip POWER_MODE_DEFAULT.
 	 * Let's make it right after full DPM support is ready
 	 */
-	if (ndev->pw_mode != POWER_MODE_HIGH)
+	if (ndev->pw_mode != POWER_MODE_TURBO)
 		return 0;
 
 	return aie2_pm_clock_gating(ndev, false);
@@ -85,7 +108,7 @@ int aie2_pm_start(struct amdxdna_dev_hdl *ndev)
 
 void aie2_pm_stop(struct amdxdna_dev_hdl *ndev)
 {
-	if (ndev->pw_mode != POWER_MODE_HIGH)
+	if (ndev->pw_mode != POWER_MODE_TURBO)
 		return;
 
 	/* Clock gating must be turned ON before suspend firmware */

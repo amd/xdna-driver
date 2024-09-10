@@ -986,9 +986,8 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 		return -EFAULT;
 	}
 
-	/* Interpret the given buf->power_mode into the correct power mode*/
 	power_mode = power_state.power_mode;
-	if (power_mode > POWER_MODE_HIGH) {
+	if (power_mode > POWER_MODE_TURBO) {
 		XDNA_ERR(xdna, "Invalid power mode %d", power_mode);
 		return -EINVAL;
 	}
