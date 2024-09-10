@@ -246,7 +246,8 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
         std::cout << "Examing output: " << dump_output_files[i] << std::endl;
         break;
     } else {
-        std::remove(dump_output_files[i].c_str());
+        if (std::remove(dump_output_files[i].c_str()))
+            std::cout << "Failed to remove " << dump_output_files[i] << std::endl;
     }
   }
 
