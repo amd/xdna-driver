@@ -14,6 +14,9 @@ struct io_test_parameter {
 #define IO_TEST_NOOP_RUN      1
 #define IO_TEST_BAD_RUN       2
   int type;
+#define IO_TEST_IOCTL_WAIT    0
+#define IO_TEST_POLL_WAIT     1
+  int wait;
   bool debug;
 };
 

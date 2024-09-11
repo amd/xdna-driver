@@ -21,6 +21,9 @@ public:
   submit_command(xrt_core::buffer_handle *) override;
 
   int
+  poll_command(xrt_core::buffer_handle *) const override;
+
+  int
   wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
 
   void

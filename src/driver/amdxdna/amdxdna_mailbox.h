@@ -80,6 +80,13 @@ struct mailbox *xdna_mailbox_create(struct device *dev,
  */
 void xdna_mailbox_destroy(struct mailbox *mailbox);
 
+enum xdna_mailbox_channel_type {
+	MB_CHANNEL_MGMT = 0,
+	MB_CHANNEL_USER_NORMAL,
+	MB_CHANNEL_USER_POLL,
+	MB_CHANNEL_MAX_TYPE,
+};
+
 /*
  * xdna_mailbox_create_channel() -- Create a mailbox channel instance
  *
@@ -88,6 +95,7 @@ void xdna_mailbox_destroy(struct mailbox *mailbox);
  * @i2x: firmware to host mailbox resources
  * @xdna_mailbox_intr_reg: register addr of MSI-X interrupt
  * @mb_irq: Linux IRQ number associated with mailbox MSI-X interrupt vector index
+ * @type: Type of channel
  *
  * Return: If success, return a handle of mailbox channel. Otherwise, return NULL.
  */
@@ -96,7 +104,7 @@ xdna_mailbox_create_channel(struct mailbox *mailbox,
 			    const struct xdna_mailbox_chann_res *x2i,
 			    const struct xdna_mailbox_chann_res *i2x,
 			    u32 xdna_mailbox_intr_reg,
-			    int mb_irq);
+			    int mb_irq, enum xdna_mailbox_channel_type type);
 
 /*
  * xdna_mailbox_destroy_channel() -- destroy mailbox channel

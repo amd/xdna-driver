@@ -223,6 +223,7 @@ struct amdxdna_dev_hdl {
 	struct aie_metadata		metadata;
 	struct smu			smu;
 	enum amdxdna_power_mode_type	pw_mode;
+	bool				clk_gate_enabled;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
@@ -368,6 +369,7 @@ void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
 /* aie2_pm.c */
 int aie2_pm_start(struct amdxdna_dev_hdl *ndev);
 void aie2_pm_stop(struct amdxdna_dev_hdl *ndev);
+bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
 
 #endif /* _AIE2_PCI_H_ */

@@ -428,7 +428,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 						       &ndev->mgmt_x2i,
 						       &ndev->mgmt_i2x,
 						       xdna_mailbox_intr_reg,
-						       mgmt_mb_irq);
+						       mgmt_mb_irq, MB_CHANNEL_MGMT);
 	if (!ndev->mgmt_chann) {
 		XDNA_ERR(xdna, "failed to create management mailbox channel");
 		ret = -EINVAL;
@@ -576,6 +576,7 @@ skip_pasid:
 	aie2_smu_setup(ndev);
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
+	ndev->clk_gate_enabled = true;
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);
@@ -986,9 +987,8 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 		return -EFAULT;
 	}
 
-	/* Interpret the given buf->power_mode into the correct power mode*/
 	power_mode = power_state.power_mode;
-	if (power_mode > POWER_MODE_HIGH) {
+	if (power_mode > POWER_MODE_TURBO) {
 		XDNA_ERR(xdna, "Invalid power mode %d", power_mode);
 		return -EINVAL;
 	}
