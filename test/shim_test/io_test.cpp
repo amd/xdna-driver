@@ -19,10 +19,11 @@ namespace {
 io_test_parameter io_test_parameters;
 
 void
-io_test_parameter_init(int perf, int type, bool debug = false)
+io_test_parameter_init(int perf, int type, int wait, bool debug = false)
 {
   io_test_parameters.perf = perf;
   io_test_parameters.type = type;
+  io_test_parameters.wait = wait;
   io_test_parameters.debug = debug;
 }
 
@@ -83,6 +84,22 @@ io_test_init_runlist_cmd(bo* cmd_bo, std::vector<bo*>& cmd_bos)
 }
 
 #define IO_TEST_TIMEOUT 5000 /* millisecond */
+
+void io_test_cmd_wait(hwqueue_handle *hwq, std::shared_ptr<bo> bo)
+{
+    if (io_test_parameters.wait == IO_TEST_POLL_WAIT) {
+        auto start = clk::now();
+        while(!hwq->poll_command(bo->get())) {
+            auto now = clk::now();
+            auto elapsed = std::chrono::duration_cast<ms_t>(now - start).count();
+            if (elapsed > IO_TEST_TIMEOUT)
+                throw std::runtime_error("Polling timeout");
+        }
+    } else {
+        hwq->wait_command(bo->get(), IO_TEST_TIMEOUT);
+    }
+}
+
 void
 io_test_cmd_submit_and_wait_latency(
   hwqueue_handle *hwq,
@@ -96,9 +113,10 @@ io_test_cmd_submit_and_wait_latency(
   while (completed < total_cmd_submission) {
     for (auto& cmd : cmdlist_bos) {
         hwq->submit_command(std::get<0>(cmd).get()->get());
-        hwq->wait_command(std::get<0>(cmd).get()->get(), IO_TEST_TIMEOUT);
+        io_test_cmd_wait(hwq, std::get<0>(cmd));
         if (std::get<1>(cmd)->state != ERT_CMD_STATE_COMPLETED)
           throw std::runtime_error("Command error");
+        std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
         completed++;
         if (completed >= total_cmd_submission)
           break;
@@ -125,9 +143,10 @@ io_test_cmd_submit_and_wait_thruput(
   }
 
   while (completed < issued) {
-    hwq->wait_command(std::get<0>(cmdlist_bos[wait_idx]).get()->get(), IO_TEST_TIMEOUT);
+    io_test_cmd_wait(hwq, std::get<0>(cmdlist_bos[wait_idx]));
     if (std::get<1>(cmdlist_bos[wait_idx])->state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error("Command error");
+    std::get<1>(cmdlist_bos[wait_idx])->state = ERT_CMD_STATE_NEW;
     completed++;
 
     if (issued < total_cmd_submission) {
@@ -235,47 +254,63 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
 void
 TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  io_test_parameter_init(IO_TEST_NO_PERF, static_cast<unsigned int>(arg[0]));
+  unsigned int run_type = static_cast<unsigned int>(arg[0]);
+
+  io_test_parameter_init(IO_TEST_NO_PERF, run_type, IO_TEST_IOCTL_WAIT);
   io_test(id, sdev.get(), 1, 1, arg[1]);
 }
 
 void
 TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  io_test_parameter_init(IO_TEST_LATENCY_PERF, static_cast<unsigned int>(arg[0]));
-  io_test(id, sdev.get(), 1000, 1, 1);
-}
+  unsigned int run_type = static_cast<unsigned int>(arg[0]);
+  unsigned int wait_type = static_cast<unsigned int>(arg[1]);
+  unsigned int total = static_cast<unsigned int>(arg[2]);
 
-void
-TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
-{
-  io_test_parameter_init(IO_TEST_LATENCY_PERF, static_cast<unsigned int>(arg[0]));
-  io_test(id, sdev.get(), 32000, 1,  1);
-  io_test(id, sdev.get(), 16000, 1,  2);
-  io_test(id, sdev.get(),  8000, 1,  4);
-  io_test(id, sdev.get(),  4000, 1,  8);
-  io_test(id, sdev.get(),  2000, 1, 16);
-  io_test(id, sdev.get(),  1333, 1, 24);
-}
-
-void
-TEST_io_e_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
-{
-  io_test_parameter_init(IO_TEST_THRUPUT_PERF, static_cast<unsigned int>(arg[0]));
-  io_test(id, sdev.get(), 32000, 8, 1);
+  io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
+  io_test(id, sdev.get(), total, 1, 1);
 }
 
 void
 TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  int num_bo_set = 256;
-  int total_commands = 32000;
+  unsigned int run_type = static_cast<unsigned int>(arg[0]);
+  unsigned int wait_type = static_cast<unsigned int>(arg[1]);
+  unsigned int total = static_cast<unsigned int>(arg[2]);
+
+  io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
+  io_test(id, sdev.get(), total, 8, 1);
+}
+
+void
+TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  unsigned int run_type = static_cast<unsigned int>(arg[0]);
+  unsigned int wait_type = static_cast<unsigned int>(arg[1]);
+  unsigned int total = static_cast<unsigned int>(arg[2]);
   const size_t max_cmd_per_list = 24;
 
-  io_test_parameter_init(IO_TEST_THRUPUT_PERF, static_cast<unsigned int>(arg[0]));
+  io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
+  for (int cmds_per_list = 1; cmds_per_list <=32; cmds_per_list *=2) {
+    if (cmds_per_list > max_cmd_per_list)
+      cmds_per_list = max_cmd_per_list;
+    int total_hwq_submit = total / cmds_per_list;
+    io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list);
+  }
+}
 
-  int cmds_per_list;
-  for (cmds_per_list = 1; cmds_per_list <= 32; cmds_per_list *= 2) {
+void
+TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  unsigned int run_type = static_cast<unsigned int>(arg[0]);
+  unsigned int wait_type = static_cast<unsigned int>(arg[1]);
+  unsigned int total_commands = static_cast<unsigned int>(arg[2]);
+  int num_bo_set = 256;
+  const size_t max_cmd_per_list = 24;
+
+  io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
+
+  for (int cmds_per_list = 1; cmds_per_list <= 32; cmds_per_list *= 2) {
     if (cmds_per_list > max_cmd_per_list)
       cmds_per_list = max_cmd_per_list;
     int num_cmdlist = num_bo_set / cmds_per_list;

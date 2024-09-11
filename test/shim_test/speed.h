@@ -7,6 +7,7 @@
 #include <chrono>
 
 using clk = std::chrono::high_resolution_clock;
+using ms_t = std::chrono::milliseconds;
 using us_t = std::chrono::microseconds;
 using ns_t = std::chrono::nanoseconds;
 

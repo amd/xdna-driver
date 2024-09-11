@@ -101,8 +101,19 @@ submit_command(xrt_core::buffer_handle *cmd)
 
 int
 hw_q::
+poll_command(xrt_core::buffer_handle *cmd) const
+{
+  auto cmdpkt = reinterpret_cast<ert_packet *>(cmd->map(xrt_core::buffer_handle::map_type::write));
+  return (cmdpkt->state >= ERT_CMD_STATE_COMPLETED) ? 1 : 0;
+}
+
+int
+hw_q::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
+  if (poll_command(cmd))
+      return 1;
+
   auto pkt = get_chained_command_pkt(cmd);
   if (!m_pdev.is_force_unchained_command() || !pkt)
     return wait_cmd(m_pdev, m_hwctx, cmd, timeout_ms);
