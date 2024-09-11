@@ -83,20 +83,12 @@ io_test_init_runlist_cmd(bo* cmd_bo, std::vector<bo*>& cmd_bos)
   }
 }
 
-#define IO_TEST_TIMEOUT 5000 /* millisecond */
-
 void io_test_cmd_wait(hwqueue_handle *hwq, std::shared_ptr<bo> bo)
 {
     if (io_test_parameters.wait == IO_TEST_POLL_WAIT) {
-        auto start = clk::now();
-        while(!hwq->poll_command(bo->get())) {
-            auto now = clk::now();
-            auto elapsed = std::chrono::duration_cast<ms_t>(now - start).count();
-            if (elapsed > IO_TEST_TIMEOUT)
-                throw std::runtime_error("Polling timeout");
-        }
+        while(!hwq->poll_command(bo->get()));
     } else {
-        hwq->wait_command(bo->get(), IO_TEST_TIMEOUT);
+        hwq->wait_command(bo->get(), 0);
     }
 }
 

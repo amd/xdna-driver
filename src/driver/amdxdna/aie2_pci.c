@@ -576,6 +576,7 @@ skip_pasid:
 	aie2_smu_setup(ndev);
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
+	ndev->clk_gate_enabled = true;
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);

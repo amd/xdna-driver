@@ -223,6 +223,7 @@ struct amdxdna_dev_hdl {
 	struct aie_metadata		metadata;
 	struct smu			smu;
 	enum amdxdna_power_mode_type	pw_mode;
+	bool				clk_gate_enabled;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
