@@ -216,13 +216,20 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 			  hwctx->name, hwctx->status, err);
 }
 
-static inline void
+static void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
+	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence = job->fence;
 
-	job->hwctx->completed++;
-	trace_xdna_job(&job->base, job->hwctx->name, "signaling fence", job->seq, job->opcode);
+	hwctx->completed++;
+	write_seqcount_begin(&hwctx->stats.lock);
+	hwctx->stats.total =
+		ktime_add(hwctx->stats.total,
+			  ktime_sub(ktime_get(), hwctx->stats.start));
+	hwctx->stats.start = ns_to_ktime(0);
+	write_seqcount_end(&hwctx->stats.lock);
+	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
 	mmput(job->mm);
 	amdxdna_job_put(job);
@@ -373,6 +380,12 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 		ret = aie2_cmdlist_single_execbuf(hwctx, job, aie2_sched_cmdlist_resp_handler);
 	else
 		ret = aie2_execbuf(hwctx, job, aie2_sched_resp_handler);
+
+	if (!ret) {
+		write_seqcount_begin(&hwctx->stats.lock);
+		hwctx->stats.start = ktime_get();
+		write_seqcount_end(&hwctx->stats.lock);
+	}
 
 out:
 	if (ret) {

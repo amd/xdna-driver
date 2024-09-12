@@ -208,6 +208,15 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 
+static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	u64 busy_ns;
+
+	busy_ns = amdxdna_hwctx_get_usage(client);
+	drm_printf(p, "drm-engine-npu-amdxdna:\t%llu ns\n", busy_ns);
+}
+
 static const struct file_operations amdxdna_fops = {
 	.owner		= THIS_MODULE,
 	.open		= accel_open,
@@ -218,7 +227,8 @@ static const struct file_operations amdxdna_fops = {
 	.poll		= drm_poll,
 	.read		= drm_read,
 	.llseek		= noop_llseek,
-	.mmap		= amdxdna_drm_gem_mmap
+	.mmap		= amdxdna_drm_gem_mmap,
+	.show_fdinfo	= drm_show_fdinfo,
 };
 
 const struct drm_driver amdxdna_drm_drv = {
@@ -234,6 +244,7 @@ const struct drm_driver amdxdna_drm_drv = {
 	.postclose = amdxdna_drm_close,
 	.ioctls = amdxdna_drm_ioctls,
 	.num_ioctls = ARRAY_SIZE(amdxdna_drm_ioctls),
+	.show_fdinfo = amdxdna_show_fdinfo,
 
 	/* For shmem object create */
 	.gem_create_object = amdxdna_gem_create_object_cb,

@@ -56,6 +56,37 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	return &fence->base;
 }
 
+u64 amdxdna_hwctx_get_usage(struct amdxdna_client *client)
+{
+	struct amdxdna_hwctx *hwctx;
+	ktime_t total, total1, start1, now;
+	unsigned int seq;
+	int next = 0;
+
+	total = ns_to_ktime(0);
+	now = ktime_get();
+	mutex_lock(&client->hwctx_lock);
+	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+		do {
+			seq = read_seqcount_begin(&hwctx->stats.lock);
+			total1 = hwctx->stats.total;
+			start1 = hwctx->stats.start;
+		} while (read_seqcount_retry(&hwctx->stats.lock, seq));
+		if (ktime_to_ns(start1) && ktime_after(now, start1))
+			total1 = ktime_add(total1, ktime_sub(now, start1));
+		total = ktime_add(total, total1);
+
+		XDNA_DBG(client->xdna,
+			 "%s, %llu jobs, hw[s,t1] [%llu,%llu], sum[n,t] [%llu,%llu]",
+			 hwctx->name, hwctx->completed,
+			 ktime_to_ns(start1), ktime_to_ns(total1),
+			 ktime_to_ns(now), ktime_to_ns(total));
+	}
+	mutex_unlock(&client->hwctx_lock);
+
+	return ktime_to_ns(total);
+}
+
 void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;

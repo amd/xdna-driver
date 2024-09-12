@@ -8,6 +8,8 @@
 
 #include <linux/bitfield.h>
 #include <linux/kref.h>
+#include <linux/seqlock.h>
+#include <linux/timekeeping.h>
 #include <linux/wait.h>
 #include <drm/drm_drv.h>
 #include <drm/gpu_scheduler.h>
@@ -120,6 +122,12 @@ struct amdxdna_hwctx {
 	u64				completed ____cacheline_aligned_in_smp;
 	/* For TDR worker to keep last completed. low frequency update */
 	u64				tdr_last_completed;
+
+	struct {
+		ktime_t		start; /* start time of current job */
+		ktime_t		total; /* total time of completed jobs */
+		seqcount_t	lock;
+	} stats;
 };
 
 #define drm_job_to_xdna_job(j) \
@@ -228,6 +236,7 @@ void amdxdna_job_put(struct amdxdna_sched_job *job);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);
+u64 amdxdna_hwctx_get_usage(struct amdxdna_client *client);
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
 void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
