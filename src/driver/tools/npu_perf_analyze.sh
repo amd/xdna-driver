@@ -101,18 +101,30 @@ echo "${event2_ts_num} events for: '${event2}'"
 diffs=()
 i1=0
 i2=0
-while [ ${i1} -lt ${event1_ts_num} ]; do
+while [ 1 ]; do
 	while [[ ${i2} -lt ${event2_ts_num} && ${event2_ts[i2]} -lt ${event1_ts[i1]} ]]; do
 		(( i2++ ))
 	done
 	if [ ${i2} -eq ${event2_ts_num} ]; then
 		break
 	fi
+
+	while [[ ${i1} -lt ${event1_ts_num} && ${event1_ts[i1]} -lt ${event2_ts[i2]} ]]; do
+		(( i1++ ))
+	done
+	if [ ${i1} -eq ${event1_ts_num} ]; then
+		break
+	fi
+
+
+	(( i1-- ))
 	diffs+=( $((event2_ts[i2] - event1_ts[i1])) )
 	(( i1++ ))
 	(( i2++ ))
 done
-#echo ${diffs[@]}
+#echo ${event1_ts[@]} > /tmp/e1
+#echo ${event2_ts[@]} > /tmp/e2
+#echo ${diffs[@]} > /tmp/diffs
 
 
 # Data mining within specified range

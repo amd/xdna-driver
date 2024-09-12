@@ -5,6 +5,7 @@
 #include "hwq.h"
 #include "fence.h"
 #include "shim_debug.h"
+#include "core/common/trace.h"
 
 namespace {
 
@@ -104,7 +105,12 @@ hw_q::
 poll_command(xrt_core::buffer_handle *cmd) const
 {
   auto cmdpkt = reinterpret_cast<ert_packet *>(cmd->map(xrt_core::buffer_handle::map_type::write));
-  return (cmdpkt->state >= ERT_CMD_STATE_COMPLETED) ? 1 : 0;
+
+  if (cmdpkt->state >= ERT_CMD_STATE_COMPLETED) {
+    XRT_TRACE_POINT_LOG(poll_command_done);
+    return 1;
+  }
+  return 0;
 }
 
 int
