@@ -43,30 +43,6 @@ public:
   void
   close() const;
 
-  bool
-  is_force_unchained_command() const;
-
-  // Below routines are for managing drm_bo_hdl -> buffer_handle* mapping.
-  // This is only a temporary hack for supporting forcibly unchained runlist.
-  void
-  insert_hdl_mapping(uint32_t hdl, uint64_t ptr) const
-  {
-    const std::lock_guard<std::recursive_mutex> lock(m_lock);
-    m_hdl_map[hdl] = ptr;
-  }
-  void
-  remove_hdl_mapping(uint32_t hdl) const
-  {
-    const std::lock_guard<std::recursive_mutex> lock(m_lock);
-    m_hdl_map.erase(hdl);
-  }
-  uint64_t
-  lookup_hdl_mapping(uint32_t hdl) const
-  {
-    const std::lock_guard<std::recursive_mutex> lock(m_lock);
-    return m_hdl_map[hdl];
-  }
-
 private:
   virtual void
   on_first_open() const {}
@@ -75,10 +51,7 @@ private:
 
   mutable int m_dev_fd = -1;
   mutable int m_dev_users = 0;
-  mutable std::recursive_mutex m_lock;
-  const bool m_force_unchained_command = true;
-  // Mark it as mutable since pdev does not look at what is saved in this map
-  mutable std::map<uint32_t, uint64_t> m_hdl_map;
+  mutable std::mutex m_lock;
 };
 
 } // namespace shim_xdna
