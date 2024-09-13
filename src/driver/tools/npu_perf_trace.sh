@@ -127,7 +127,7 @@ eval $command
 tmp_file=/tmp/perf.out
 # convert timestamp from second to microsecond to avoid floating numbers
 #perf script | awk '{ $4=$4*1000000; print }' > ${tmp_file}
-perf script --reltime > ${tmp_file}
+perf script --reltime --ns > ${tmp_file}
 # replace IOCTL cmd number to name
 sed "$ioctl_sed_expr" "${tmp_file}" > perf.converted.out
 rm -rf ${tmp_file}

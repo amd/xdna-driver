@@ -98,6 +98,8 @@ fi
 echo "${event2_ts_num} events for: '${event2}'"
 
 # Caculate time difference between two events
+diffs_event1=()
+diffs_event2=()
 diffs=()
 i1=0
 i2=0
@@ -118,6 +120,8 @@ while [ 1 ]; do
 
 
 	(( i1-- ))
+	diffs_event1+=( $((event1_ts[i1])) )
+	diffs_event2+=( $((event2_ts[i2])) )
 	diffs+=( $((event2_ts[i2] - event1_ts[i1])) )
 	(( i1++ ))
 	(( i2++ ))
@@ -162,6 +166,6 @@ done
 
 # Output result
 total_events=$(( range_end - range_start ))
-echo Average over ${total_events} events: $(( total / total_events ))us
-echo Largest:  ${largest}us@${largest_idx}
-echo Smallest: ${smallest}us@${smallest_idx}
+echo Average over ${total_events} events: $(( total / total_events ))ns
+echo Largest:  ${largest}ns@${largest_idx}: event1=${diffs_event1[largest_idx]}, event2=${diffs_event2[largest_idx]}
+echo Smallest: ${smallest}ns@${smallest_idx}: event1=${diffs_event1[smallest_idx]}, event2=${diffs_event2[smallest_idx]}
