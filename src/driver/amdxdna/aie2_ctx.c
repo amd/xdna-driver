@@ -540,6 +540,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct drm_gpu_scheduler *sched;
 	struct amdxdna_hwctx_priv *priv;
 	struct amdxdna_gem_obj *heap;
+	unsigned int wq_flags;
 	int i, ret;
 
 	priv = kzalloc(sizeof(*hwctx->priv), GFP_KERNEL);
@@ -587,12 +588,21 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	sched = &priv->sched;
 	mutex_init(&priv->io_lock);
-	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
+
+	wq_flags = __WQ_ORDERED;
+	if (!aie2_pm_is_turbo(xdna->dev_handle))
+		wq_flags |= WQ_UNBOUND;
+	priv->submit_wq = alloc_workqueue(hwctx->name, wq_flags, 1);
+	if (!priv->submit_wq) {
+		XDNA_ERR(xdna, "Failed to alloc submit wq");
+		goto free_cmd_bufs;
+	}
+	ret = drm_sched_init(sched, &sched_ops, priv->submit_wq, DRM_SCHED_PRIORITY_COUNT,
 			     HWCTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT,
 			     NULL, NULL, hwctx->name, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
-		goto free_cmd_bufs;
+		goto free_wq;
 	}
 
 	ret = drm_sched_entity_init(&priv->entity, DRM_SCHED_PRIORITY_NORMAL,
@@ -645,6 +655,8 @@ free_entity:
 	drm_sched_entity_destroy(&priv->entity);
 free_sched:
 	drm_sched_fini(&priv->sched);
+free_wq:
+	destroy_workqueue(priv->submit_wq);
 free_cmd_bufs:
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
 		if (!priv->cmd_buf[i])
@@ -681,6 +693,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	aie2_hwctx_wait_for_idle(hwctx);
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 	drm_sched_fini(&hwctx->priv->sched);
+	destroy_workqueue(hwctx->priv->submit_wq);
 
 	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
 		job = hwctx->priv->pending[idx];

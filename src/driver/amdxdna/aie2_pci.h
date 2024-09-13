@@ -199,6 +199,7 @@ struct amdxdna_hwctx_priv {
 	u32				num_pending;
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
+	struct workqueue_struct		*submit_wq;
 };
 
 struct async_events;
