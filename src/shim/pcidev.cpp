@@ -6,7 +6,6 @@
 #include "pcidrv.h"
 #include "shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
-#include "core/common/config_reader.h"
 #include "core/common/trace.h"
 
 namespace {
@@ -71,10 +70,6 @@ namespace shim_xdna {
 pdev::
 pdev(std::shared_ptr<const drv> driver, std::string sysfs_name)
   : xrt_core::pci::dev(driver, std::move(sysfs_name))
-  // Default of force_unchained_command should be false once command
-  // chaining is natively supported by driver/firmware.
-  , m_force_unchained_command(xrt_core::config::detail::get_bool_value(
-    "Debug.force_unchained_command", false))
 {
   m_is_ready = true; // We're always ready.
 }
@@ -99,7 +94,7 @@ pdev::
 open() const
 {
   int fd;
-  const std::lock_guard<std::recursive_mutex> lock(m_lock);
+  const std::lock_guard<std::mutex> lock(m_lock);
 
   if (m_dev_users == 0) {
     fd = xrt_core::pci::dev::open("", O_RDWR);
@@ -120,7 +115,7 @@ pdev::
 close() const
 {
   int fd;
-  const std::lock_guard<std::recursive_mutex> lock(m_lock);
+  const std::lock_guard<std::mutex> lock(m_lock);
 
   --m_dev_users;
   if (m_dev_users == 0) {
@@ -160,13 +155,6 @@ pdev::
 munmap(void* addr, size_t len) const
 {
   ::munmap(addr, len);
-}
-
-bool
-pdev::
-is_force_unchained_command() const
-{
-  return m_force_unchained_command;
 }
 
 } // namespace shim_xdna
