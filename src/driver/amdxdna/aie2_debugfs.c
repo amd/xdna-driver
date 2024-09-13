@@ -77,71 +77,6 @@ static int aie2_dbgfs_entry_release(struct inode *inode, struct file *file)
 #define file_to_ndev_rw(file) \
 	(((struct seq_file *)(file)->private_data)->private)
 
-static ssize_t
-aie2_dbgfs_clock_write(struct amdxdna_dev_hdl *ndev, struct clock *clock,
-		       const char __user *ptr, size_t len, loff_t *off)
-{
-	u32 val;
-	int ret;
-
-	ret = kstrtouint_from_user(ptr, len, 10, &val);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Invalid input value: %d", val);
-		return ret;
-	}
-
-	clock->dbg_freq_mhz = val;
-	if (!clock->dbg_freq_mhz) {
-		XDNA_INFO(ndev->xdna, "Auto %s", clock->name);
-		return 0;
-	}
-
-	ret = aie2_smu_set_clock_freq(ndev, clock, val);
-	if (ret) {
-		clock->dbg_freq_mhz = 0;
-		XDNA_ERR(ndev->xdna, "Set %s ret %d, use auto clock", clock->name, ret);
-		return ret;
-	}
-
-	return len;
-}
-
-static ssize_t aie2_dbgfs_mpnpu_clock_write(struct file *file, const char __user *ptr,
-					    size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-
-	return aie2_dbgfs_clock_write(ndev, &ndev->smu.mp_npu_clock, ptr, len, off);
-}
-
-static int aie2_dbgfs_mpnpu_clock_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = m->private;
-
-	seq_printf(m, "%d\n", aie2_smu_get_mpnpu_clock_freq(ndev));
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(npuclock, aie2_dbgfs_mpnpu_clock_show, aie2_dbgfs_mpnpu_clock_write);
-
-static ssize_t aie2_dbgfs_hclock_write(struct file *file, const char __user *ptr,
-				       size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-
-	return aie2_dbgfs_clock_write(ndev, &ndev->smu.h_clock, ptr, len, off);
-}
-
-static int aie2_dbgfs_hclock_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = m->private;
-
-	seq_printf(m, "%d\n", aie2_smu_get_hclock_freq(ndev));
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(hclock, aie2_dbgfs_hclock_show, aie2_dbgfs_hclock_write);
-
 static ssize_t aie2_pasid_write(struct file *file, const char __user *ptr,
 				size_t len, loff_t *off)
 {
@@ -302,8 +237,24 @@ static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 static int aie2_dpm_level_get(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
+	const struct dpm_clk *dpm_table;
+	u32 num_dpm_levels;
+	int dpm_level;
+	int i;
 
-	seq_printf(m, "%d\n", aie2_smu_get_dpm_level(ndev));
+	dpm_table = SMU_DPM_TABLE_ENTRY(ndev, 0);
+	dpm_level = aie2_smu_get_dpm_level(ndev);
+	num_dpm_levels = SMU_DPM_MAX(ndev);
+	for (i = 0; i <= num_dpm_levels; i++) {
+		u32 npuclk = dpm_table[i].npuclk;
+		u32 hclk = dpm_table[i].hclk;
+
+		if (dpm_level == i)
+			seq_printf(m, " [%d,%d] ", npuclk, hclk);
+		else
+			seq_printf(m, " %d,%d ", npuclk, hclk);
+	}
+	seq_puts(m, "\n");
 	return 0;
 }
 
@@ -609,8 +560,6 @@ const struct {
 	umode_t mode;
 } aie2_dbgfs_files[] = {
 	AIE2_DBGFS_FILE(nputest, 0600),
-	AIE2_DBGFS_FILE(hclock, 0600),
-	AIE2_DBGFS_FILE(npuclock, 0600),
 	AIE2_DBGFS_FILE(pasid, 0600),
 	AIE2_DBGFS_FILE(state, 0600),
 	AIE2_DBGFS_FILE(powerstate, 0600),

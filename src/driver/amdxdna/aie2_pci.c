@@ -21,9 +21,16 @@
 #include "aie2_internal.h"
 #endif
 
-int aie2_max_col = XRS_MAX_COL;
-module_param(aie2_max_col, int, 0600);
+uint aie2_max_col = XRS_MAX_COL;
+module_param(aie2_max_col, uint, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
+
+uint aie2_control_flags;
+module_param(aie2_control_flags, uint, 0400);
+MODULE_PARM_DESC(aie2_control_flags,
+		 " Bit " __stringify(AIE2_BIT_BYPASS_POWER_SWITCH) ": Bypass power on/off,"
+		 " Bit " __stringify(AIE2_BIT_BYPASS_SET_FREQ) ": Bypass set freq,"
+		 " Bit " __stringify(AIE2_BIT_BYPASS_FW_LOAD) ": Bypass FW loading");
 
 /*
  * The management mailbox channel is allocated by firmware.
@@ -477,6 +484,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	void __iomem * const *tbl;
 	int i, bars, nvec, ret;
 
+	XDNA_DBG(xdna, "Control flags 0x%x", aie2_control_flags);
 	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
 	if (!ndev)
 		return -ENOMEM;

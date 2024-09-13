@@ -74,9 +74,6 @@
 #define NPU4_RT_CFG_VAL_DEBUG_BO_DEFAULT 0
 #define NPU4_RT_CFG_VAL_DEBUG_BO_LARGE   1
 
-#define NPU4_MPNPUCLK_FREQ_MAX  1267
-#define NPU4_HCLK_FREQ_MAX      1800
-
 #define NPU4_INIT_RT_CFG_NUM	2
 #define NPU4_CLK_GATING_CFG_NUM 4
 
@@ -118,9 +115,6 @@ extern const u32 npu4_clk_gating_types[NPU4_CLK_GATING_CFG_NUM];
 		.value_enable = NPU4_RT_CFG_VAL_CLK_GATING_ON,					\
 		.value_disable = NPU4_RT_CFG_VAL_CLK_GATING_OFF,				\
 	},											\
-	.smu_mpnpuclk_freq_max = NPU4_MPNPUCLK_FREQ_MAX,					\
-	.smu_hclk_freq_max     = NPU4_HCLK_FREQ_MAX,						\
-	.smu_dpm_max           = 7,								\
 	.smu_rev = SMU_REVISION_V1,								\
 	.smu_npu_dpm_clk_table = npu4_dpm_clk_table,						\
 	.smu_npu_dpm_levels = ARRAY_SIZE(npu4_dpm_clk_table)

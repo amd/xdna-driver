@@ -67,15 +67,10 @@
 	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
 })
 
-#define SMU_MPNPUCLK_FREQ_MAX(ndev) \
-	((ndev)->priv->smu_mpnpuclk_freq_max)
-#define SMU_HCLK_FREQ_MAX(ndev) \
-	((ndev)->priv->smu_hclk_freq_max)
 #define SMU_DPM_MAX(ndev) \
-	((ndev)->priv->smu_dpm_max)
-
-#define SMU_NPU_DPM_TABLE_ENTRY(ndev, level) \
-	(&ndev->priv->smu_npu_dpm_clk_table[level])
+	((ndev)->smu.num_dpm_levels - 1)
+#define SMU_DPM_TABLE_ENTRY(ndev, level) \
+	(&(ndev)->smu.dpm_table[level])
 
 enum aie2_smu_reg_idx {
 	SMU_CMD_REG = 0,
@@ -154,12 +149,11 @@ struct clock {
 	char name[16];
 	u32 max_freq_mhz;
 	u32 freq_mhz;
-#if defined(CONFIG_DEBUG_FS)
-	u32 dbg_freq_mhz;
-#endif
 };
 
 struct smu {
+	const struct dpm_clk	*dpm_table;
+	u32			num_dpm_levels;
 	struct clock		mp_npu_clock;
 	struct clock		h_clock;
 	u32			curr_dpm_level;
@@ -268,10 +262,6 @@ struct amdxdna_dev_priv {
 	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
 	struct aie2_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
 	struct rt_config_clk_gating	clk_gating;
-	u32				smu_mpnpuclk_freq_max;
-	u32				smu_hclk_freq_max;
-	/* npu1: 0, not support dpm; npu2+: support dpm up to 7 */
-	u32				smu_dpm_max;
 	u32				smu_rev;
 	const struct dpm_clk		*smu_npu_dpm_clk_table;
 	u32				smu_npu_dpm_levels;
@@ -281,6 +271,10 @@ struct amdxdna_dev_priv {
 };
 
 /* aie2_pci.c */
+#define AIE2_BIT_BYPASS_POWER_SWITCH	0 /* NOSYS */
+#define AIE2_BIT_BYPASS_SET_FREQ	1
+#define AIE2_BIT_BYPASS_FW_LOAD		2 /* NOSYS */
+extern uint aie2_control_flags;
 extern const struct amdxdna_dev_ops aie2_ops;
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor);
 
