@@ -10,12 +10,21 @@
 /* SMU commands */
 #define AIE2_SMU_POWER_ON		0x3
 #define AIE2_SMU_POWER_OFF		0x4
+/* For SMU v0 */
 #define AIE2_SMU_SET_MPNPUCLK_FREQ	0x5
 #define AIE2_SMU_SET_HCLK_FREQ		0x6
+/* For SMU v1 */
 #define AIE2_SMU_SET_SOFT_DPMLEVEL	0x7
 #define AIE2_SMU_SET_HARD_DPMLEVEL	0x8
 
-static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd, u32 reg_arg)
+/* This is a hack for NPU1 device */
+const struct dpm_clk npu1_hack_dpm_clk_table[] = {
+	{400, 800},
+	{600, 1024},
+};
+
+static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd,
+			 u32 reg_arg, u32 *out)
 {
 	u32 resp;
 	int ret;
@@ -35,6 +44,9 @@ static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd, u32 reg_arg)
 		return ret;
 	}
 
+	if (out)
+		*out = readl(SMU_REG(ndev, SMU_OUT_REG));
+
 	if (resp != SMU_RESULT_OK) {
 		XDNA_ERR(ndev->xdna, "SMU cmd %d failed, 0x%x", reg_cmd, resp);
 		return -EINVAL;
@@ -43,26 +55,12 @@ static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd, u32 reg_arg)
 	return 0;
 }
 
-static int aie2_smu_update_clock_freq(struct amdxdna_dev_hdl *ndev, u32 cmd,
-				      struct clock *clock, u32 freq_mhz)
-{
-	int ret;
-
-	ret = aie2_smu_exec(ndev, cmd, freq_mhz);
-	if (ret)
-		return ret;
-
-	clock->freq_mhz = freq_mhz;
-
-	return 0;
-}
-
 /*
  * Depending on the current running frequency and debugfs setting,
  * aie2_smu_set_clock_freq() might or might not update freqency.
  */
-int aie2_smu_set_clock_freq(struct amdxdna_dev_hdl *ndev,
-			    struct clock *clock, u32 freq_mhz)
+static int aie2_smu_set_clock_freq(struct amdxdna_dev_hdl *ndev,
+				   struct clock *clock, u32 freq_mhz)
 {
 	u32 smu_cmd;
 	int ret;
@@ -82,18 +80,11 @@ int aie2_smu_set_clock_freq(struct amdxdna_dev_hdl *ndev,
 	if (freq_mhz == clock->freq_mhz)
 		return 0;
 
-#if defined(CONFIG_DEBUG_FS)
-	/* If freq is set by debugfs, respect it until debugfs write freq 0 */
-	if (clock->dbg_freq_mhz && freq_mhz != clock->dbg_freq_mhz) {
-		XDNA_DBG(ndev->xdna, "%s debug freq %d, ignore target freq %d",
-			 clock->name, clock->dbg_freq_mhz, freq_mhz);
-		return 0;
-	}
-#endif
-	ret = aie2_smu_update_clock_freq(ndev, smu_cmd, clock, freq_mhz);
+	ret = aie2_smu_exec(ndev, smu_cmd, freq_mhz, NULL);
 	if (ret)
 		return ret;
 
+	clock->freq_mhz = freq_mhz;
 	XDNA_DBG(ndev->xdna, "Set %s = %d mhz", clock->name, clock->freq_mhz);
 	return 0;
 }
@@ -120,23 +111,23 @@ char *aie2_smu_get_hclock_name(struct amdxdna_dev_hdl *ndev)
 
 static int aie2_smu_set_dpm_level_v0(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 {
-	int ret;
-	const struct dpm_clk *dpm_entry = SMU_NPU_DPM_TABLE_ENTRY(ndev, dpm_level);
+	const struct dpm_clk *dpm_entry = SMU_DPM_TABLE_ENTRY(ndev, dpm_level);
 	struct clock *clk;
+	int ret;
 
 	clk = &ndev->smu.mp_npu_clock;
-
 	ret = aie2_smu_set_clock_freq(ndev, clk, dpm_entry->npuclk);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "setting npu clk failed for dpm level %d, ret: %d", dpm_level, ret);
+		XDNA_ERR(ndev->xdna, "setting npu clk failed for dpm level %d, ret: %d",
+			 dpm_level, ret);
 		return ret;
 	}
 
 	clk = &ndev->smu.h_clock;
-
 	ret = aie2_smu_set_clock_freq(ndev, clk, dpm_entry->hclk);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "setting hclk failed for dpm level %d, ret: %d", dpm_level, ret);
+		XDNA_ERR(ndev->xdna, "setting hclk failed for dpm level %d, ret: %d",
+			 dpm_level, ret);
 		return ret;
 	}
 
@@ -147,15 +138,18 @@ static int aie2_smu_set_dpm_level_v1(struct amdxdna_dev_hdl *ndev, u32 dpm_level
 {
 	int ret;
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HARD_DPMLEVEL, dpm_level);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HARD_DPMLEVEL, dpm_level, NULL);
 	if (!ret)
 		XDNA_INFO_ONCE(ndev->xdna, "Set hard dpm level = %d", dpm_level);
 	else
 		return ret;
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_SOFT_DPMLEVEL, dpm_level);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_SOFT_DPMLEVEL, dpm_level, NULL);
 	if (!ret)
 		XDNA_INFO_ONCE(ndev->xdna, "Set soft dpm level = %d", dpm_level);
+
+	ndev->smu.mp_npu_clock.freq_mhz = SMU_DPM_TABLE_ENTRY(ndev, dpm_level)->npuclk;
+	ndev->smu.h_clock.freq_mhz = SMU_DPM_TABLE_ENTRY(ndev, dpm_level)->hclk;
 
 	return ret;
 }
@@ -168,6 +162,11 @@ int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev)
 int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 {
 	int ret;
+
+	if (aie2_control_flags && BIT(AIE2_BIT_BYPASS_SET_FREQ)) {
+		XDNA_DBG(ndev->xdna, "Bypassed set dpm level");
+		return 0;
+	}
 
 	if (dpm_level > SMU_DPM_MAX(ndev))
 		return -EINVAL;
@@ -189,7 +188,7 @@ int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_ON, 0);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_ON, 0, NULL);
 	if (ret)
 		return ret;
 
@@ -201,7 +200,7 @@ int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_OFF, 0);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_OFF, 0, NULL);
 	if (ret)
 		return ret;
 
@@ -217,7 +216,6 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev)
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev)
 {
 	struct smu *smu = &ndev->smu;
-	u32 freq_mhz;
 	int ret;
 
 	ret = aie2_smu_set_power_on(ndev);
@@ -226,55 +224,13 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	freq_mhz = smu->mp_npu_clock.freq_mhz;
-	ret = aie2_smu_update_clock_freq(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ,
-					 &smu->mp_npu_clock, freq_mhz);
+	ret = aie2_smu_set_dpm_level(ndev, smu->curr_dpm_level);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "Set mpnpu clk freq failed, ret %d", ret);
+		XDNA_ERR(ndev->xdna, "Set dpm level failed, ret %d", ret);
 		return ret;
-	}
-	XDNA_INFO_ONCE(ndev->xdna, "Set %s = %d mhz", smu->mp_npu_clock.name, freq_mhz);
-
-	freq_mhz = smu->h_clock.freq_mhz;
-	ret = aie2_smu_update_clock_freq(ndev, AIE2_SMU_SET_HCLK_FREQ,
-					 &smu->h_clock, freq_mhz);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Set hclk freq failed, ret %d", ret);
-		return ret;
-	}
-	XDNA_INFO_ONCE(ndev->xdna, "Set %s = %d mhz", smu->h_clock.name, freq_mhz);
-
-	if (SMU_DPM_MAX(ndev) > 0) {
-		ret = aie2_smu_set_dpm_level(ndev, smu->curr_dpm_level);
-		if (ret) {
-			XDNA_ERR(ndev->xdna, "Set dpm level failed, ret %d", ret);
-			return ret;
-		}
 	}
 
 	return 0;
-}
-
-void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev)
-{
-	u32 freq_mhz;
-	int ret;
-
-	freq_mhz = 400;
-	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, freq_mhz);
-	if (ret)
-		XDNA_ERR(ndev->xdna, "Set mpnpu clk freq %d mhz failed, ret %d", freq_mhz, ret);
-
-	freq_mhz = 800;
-	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HCLK_FREQ, freq_mhz);
-	if (ret)
-		XDNA_ERR(ndev->xdna, "Set hclk freq %d mhz failed, ret %d", freq_mhz, ret);
-
-	if (SMU_DPM_MAX(ndev) > 0) {
-		ret = aie2_smu_set_dpm_level(ndev, 0);
-		if (ret)
-			XDNA_ERR(ndev->xdna, "Set dpm level 0 failed, ret %d", ret);
-	}
 }
 
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev)
@@ -282,7 +238,9 @@ void aie2_smu_stop(struct amdxdna_dev_hdl *ndev)
 	int ret;
 
 	/* Minimize clocks/dpm level prior to power off */
-	aie2_smu_prepare_s0i3(ndev);
+	ret = aie2_smu_set_dpm_level(ndev, 0);
+	if (ret)
+		XDNA_WARN(ndev->xdna, "Set dpm level 0 failed, ret %d", ret);
 
 	ret = aie2_smu_set_power_off(ndev);
 	if (ret)
@@ -294,13 +252,26 @@ void aie2_smu_setup(struct amdxdna_dev_hdl *ndev)
 	struct smu *smu = &ndev->smu;
 
 	snprintf(smu->mp_npu_clock.name, sizeof(smu->mp_npu_clock.name), "MP-NPU Clock");
-	smu->mp_npu_clock.max_freq_mhz = SMU_MPNPUCLK_FREQ_MAX(ndev);
-
 	snprintf(smu->h_clock.name, sizeof(smu->h_clock.name), "H Clock");
-	smu->h_clock.max_freq_mhz = SMU_HCLK_FREQ_MAX(ndev);
-
-	/* The first time SMU start, it will use below clock frequency */
-	smu->mp_npu_clock.freq_mhz = smu->mp_npu_clock.max_freq_mhz;
-	smu->h_clock.freq_mhz = smu->h_clock.max_freq_mhz;
+	smu->dpm_table = ndev->priv->smu_npu_dpm_clk_table;
+	smu->num_dpm_levels = ndev->priv->smu_npu_dpm_levels;
 	smu->curr_dpm_level = SMU_DPM_MAX(ndev);
+
+	if (!ndev->priv->smu_rev) {
+		u32 npuclk_freq;
+		u32 out;
+
+		/* This is a hack for special NPU1 device */
+		npuclk_freq = SMU_DPM_TABLE_ENTRY(ndev, SMU_DPM_MAX(ndev))->npuclk;
+		aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, npuclk_freq, &out);
+		if (npuclk_freq != out) {
+			XDNA_DBG(ndev->xdna, "Use small DPM table");
+			smu->dpm_table = npu1_hack_dpm_clk_table;
+			smu->num_dpm_levels = ARRAY_SIZE(npu1_hack_dpm_clk_table);
+			smu->curr_dpm_level = SMU_DPM_MAX(ndev);
+		}
+	}
+
+	smu->mp_npu_clock.max_freq_mhz = SMU_DPM_TABLE_ENTRY(ndev, SMU_DPM_MAX(ndev))->npuclk;
+	smu->h_clock.max_freq_mhz = SMU_DPM_TABLE_ENTRY(ndev, SMU_DPM_MAX(ndev))->hclk;
 }
