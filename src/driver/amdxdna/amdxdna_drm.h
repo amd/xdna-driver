@@ -123,6 +123,11 @@ struct amdxdna_dev {
 #endif
 };
 
+struct amdxdna_stats {
+	struct mutex	lock; /* protect stats data */
+	u64		busy_ns;
+};
+
 /*
  * struct amdxdna_client - amdxdna client
  * A per fd data structure for managing context and other user process stuffs.
@@ -155,6 +160,8 @@ struct amdxdna_client {
 
 	struct iommu_sva		*sva;
 	int				pasid;
+
+	struct amdxdna_stats		stats;
 };
 
 #endif /* _AMDXDNA_DRM_H_ */

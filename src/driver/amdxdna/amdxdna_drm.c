@@ -69,6 +69,9 @@ skip_sva_bind:
 	filp->driver_priv = client;
 	client->filp = filp;
 
+	mutex_init(&client->stats.lock);
+	client->stats.busy_ns = 0;
+
 	XDNA_DBG(xdna, "PID %d opened", client->pid);
 	return 0;
 
@@ -94,6 +97,7 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
 	mutex_destroy(&client->mm_lock);
+	mutex_destroy(&client->stats.lock);
 	if (client->dev_heap)
 		drm_gem_object_put(to_gobj(client->dev_heap));
 
@@ -211,10 +215,14 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	u64 busy_ns;
+	const char *engine_npu_name = "npu-amdxdna";
+	u64 busy = client->stats.busy_ns;
 
-	busy_ns = amdxdna_hwctx_get_usage(client);
-	drm_printf(p, "drm-engine-npu-amdxdna:\t%llu ns\n", busy_ns);
+	/* see Documentation/gpu/drm-usage-stats.rst */
+	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy);
+	XDNA_DBG(client->xdna, "client[%d][%llu]: %llu", client->pid, ktime_get_ns(), busy);
+
+	drm_show_memory_stats(p, filp);
 }
 
 static const struct file_operations amdxdna_fops = {

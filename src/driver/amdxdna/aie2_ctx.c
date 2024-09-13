@@ -18,6 +18,10 @@ bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
 
+uint print_job_time = 500;
+module_param(print_job_time, uint, 0600);
+MODULE_PARM_DESC(print_job_time, "print exec time of every no. of jobs (Default 500)");
+
 static inline int
 aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 {
@@ -221,17 +225,24 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence = job->fence;
+	u64 job_ns;
+	u64 busy_pre, busy_post;
 
+	job_ns = ktime_to_ns(ktime_sub(ktime_get(), job->start_time));
 	hwctx->completed++;
-	write_seqcount_begin(&hwctx->stats.lock);
-	hwctx->stats.total =
-		ktime_add(hwctx->stats.total,
-			  ktime_sub(ktime_get(), hwctx->stats.start));
-	hwctx->stats.start = ns_to_ktime(0);
-	write_seqcount_end(&hwctx->stats.lock);
 	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
 	mmput(job->mm);
+	mutex_lock(&job->stats->lock);
+	busy_pre = job->stats->busy_ns;
+	job->stats->busy_ns += job_ns;
+	busy_post = job->stats->busy_ns;
+	mutex_unlock(&job->stats->lock);
+	job->start_time = ns_to_ktime(0);
+	if (print_job_time && (!(job->seq % print_job_time) || job->seq < 5))
+		XDNA_DBG(hwctx->client->xdna, "job[%s-%llu][%llu]: %llu\t%llu\t%llu",
+			 hwctx->name, job->seq, ktime_get_ns(), busy_pre, job_ns, busy_post);
+
 	amdxdna_job_put(job);
 }
 
@@ -381,18 +392,14 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	else
 		ret = aie2_execbuf(hwctx, job, aie2_sched_resp_handler);
 
-	if (!ret) {
-		write_seqcount_begin(&hwctx->stats.lock);
-		hwctx->stats.start = ktime_get();
-		write_seqcount_end(&hwctx->stats.lock);
-	}
-
 out:
 	if (ret) {
 		dma_fence_put(job->fence);
 		amdxdna_job_put(job);
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
+	} else {
+		job->start_time = ktime_get();
 	}
 
 	return fence;
