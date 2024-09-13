@@ -282,7 +282,6 @@ int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor
 void aie2_smu_setup(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_set_clock_freq(struct amdxdna_dev_hdl *ndev, struct clock *clock, u32 freq_mhz);
 char *aie2_smu_get_mpnpu_clock_name(struct amdxdna_dev_hdl *ndev);
 char *aie2_smu_get_hclock_name(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
@@ -292,7 +291,6 @@ int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_psp.c */
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
