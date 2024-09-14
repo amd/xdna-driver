@@ -47,12 +47,6 @@ aie2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 {
 	int idx;
 
-	/* Special sequence number for oldest fence if exist */
-	if (seq == AMDXDNA_INVALID_CMD_HANDLE) {
-		idx = get_job_idx(hwctx->submitted);
-		goto out;
-	}
-
 	if (seq >= hwctx->submitted)
 		return ERR_PTR(-EINVAL);
 
@@ -60,8 +54,6 @@ aie2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 		return NULL;
 
 	idx = get_job_idx(seq);
-
-out:
 	return hwctx->priv->pending[idx];
 }
 
@@ -977,10 +969,18 @@ retry:
 		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
+again:
 	mutex_lock(&hwctx->priv->io_lock);
 	ret = aie2_hwctx_add_job(hwctx, job);
 	if (ret) {
 		mutex_unlock(&hwctx->priv->io_lock);
+
+		if (ret == -EAGAIN) {
+			// Waiting for the first pending cmd to complete before trying again.
+			int res = aie2_cmd_wait(hwctx, hwctx->submitted - HWCTX_MAX_CMDS, 0);
+			if (!res)
+				goto again;
+		}
 		goto signal_fence;
 	}
 
