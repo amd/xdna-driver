@@ -4,6 +4,7 @@
 #ifndef _FENCE_XDNA_H_
 #define _FENCE_XDNA_H_
 
+#include "hwctx.h"
 #include "device.h"
 #include "shared.h"
 
@@ -41,20 +42,20 @@ public:
 
 public:
   void
-  submit_wait() const;
+  submit_wait(const hw_ctx*) const;
 
   static void
-  submit_wait(const pdev& dev, const std::vector<xrt_core::fence_handle*>& fences);
+  submit_wait(const pdev& dev, const hw_ctx*, const std::vector<xrt_core::fence_handle*>& fences);
 
   void
-  submit_signal() const;
+  submit_signal(const hw_ctx*) const;
 
 private:
-  void
-  wait(bool async) const;
+  uint64_t
+  wait_next_state() const;
 
-  void
-  signal(bool async) const;
+  uint64_t
+  signal_next_state() const;
 
   const pdev& m_pdev;
   const std::unique_ptr<xrt_core::shared_handle> m_import;

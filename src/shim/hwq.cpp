@@ -113,14 +113,14 @@ hw_q::
 submit_wait(const xrt_core::fence_handle* f)
 {
   auto fh = static_cast<const fence*>(f);
-  fh->submit_wait();
+  fh->submit_wait(m_hwctx);
 }
 
 void
 hw_q::
 submit_wait(const std::vector<xrt_core::fence_handle*>& fences)
 {
-  fence::submit_wait(m_pdev, fences);
+  fence::submit_wait(m_pdev, m_hwctx, fences);
 }
 
 void
@@ -128,7 +128,7 @@ hw_q::
 submit_signal(const xrt_core::fence_handle* f)
 {
   auto fh = static_cast<const fence*>(f);
-  fh->submit_signal();
+  fh->submit_signal(m_hwctx);
 }
 
 } // shim_xdna

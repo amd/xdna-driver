@@ -262,7 +262,7 @@ struct partition_info
     for (uint32_t i = 0; i < data_size; i++) {
       const auto& entry = data[i];
 
-      xrt_core::query::aie_partition_info::data new_entry;
+      xrt_core::query::aie_partition_info::data new_entry{};
       new_entry.metadata.id = std::to_string(entry.context_id);
       new_entry.metadata.xclbin_uuid = "N/A";
       new_entry.start_col = entry.start_col;

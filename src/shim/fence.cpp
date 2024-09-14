@@ -107,28 +107,35 @@ wait_syncobj_available(const shim_xdna::pdev& dev,
 }
 
 void
-submit_wait_syncobjs(const shim_xdna::pdev& dev,
+submit_wait_syncobjs(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
   const uint32_t* sobj_hdls, const uint64_t* points, uint32_t num)
 {
   wait_syncobj_available(dev, sobj_hdls, points, num);
 
-  amdxdna_drm_syncobjs swsobj = {
-    .handles = reinterpret_cast<uintptr_t>(sobj_hdls),
-    .points = reinterpret_cast<uintptr_t>(points),
-    .count = num,
+  amdxdna_drm_exec_cmd ecmd = {
+    .hwctx = ctx->get_slotidx(),
+    .type = AMDXDNA_CMD_SUBMIT_DEPENDENCY,
+    .cmd_handles = reinterpret_cast<uintptr_t>(sobj_hdls),
+    .args = reinterpret_cast<uintptr_t>(points),
+    .cmd_count = num,
+    .arg_count = num,
   };
-  dev.ioctl(DRM_IOCTL_AMDXDNA_SUBMIT_WAIT, &swsobj);
+  dev.ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
 }
 
 void
-submit_signal_syncobj(const shim_xdna::pdev& dev, uint32_t sobj_hdl, uint64_t point)
+submit_signal_syncobj(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
+  uint32_t sobj_hdl, uint64_t point)
 {
-  amdxdna_drm_syncobjs sssobj = {
-    .handles = reinterpret_cast<uintptr_t>(&sobj_hdl),
-    .points = reinterpret_cast<uintptr_t>(&point),
-    .count = 1,
+  amdxdna_drm_exec_cmd ecmd = {
+    .hwctx = ctx->get_slotidx(),
+    .type = AMDXDNA_CMD_SUBMIT_SIGNAL,
+    .cmd_handles = reinterpret_cast<uintptr_t>(&sobj_hdl),
+    .args = reinterpret_cast<uintptr_t>(&point),
+    .cmd_count = 1,
+    .arg_count = 1,
   };
-  dev.ioctl(DRM_IOCTL_AMDXDNA_SUBMIT_SIGNAL, &sssobj);
+  dev.ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
 }
 
 }
@@ -199,25 +206,15 @@ clone() const
   return std::make_unique<fence>(*this);
 }
 
-void
+uint64_t
 fence::
-wait(bool async) const
+wait_next_state() const
 {
   std::lock_guard<std::mutex> guard(m_lock);
-  auto st = m_state;
 
-  if (st != initial_state && m_signaled)
+  if (m_state != initial_state && m_signaled)
     shim_err(-EINVAL, "Can't wait on fence that has been signaled before.");
-
-  st++;
-  shim_debug("%s for command fence %d@%ld",
-    async ? "Submitting wait" : "Waiting", m_syncobj_hdl, st);
-  if (async)
-    submit_wait_syncobjs(m_pdev, &m_syncobj_hdl, &st, 1);
-  else
-    wait_syncobj_done(m_pdev, m_syncobj_hdl, st);
-
-  m_state = st;
+  return ++m_state;
 }
 
 // Timeout value is ignored for now.
@@ -225,57 +222,54 @@ void
 fence::
 wait(uint32_t timeout_ms) const
 {
-  wait(false);
+  auto st = signal_next_state();
+  shim_debug("Waiting for command fence %d@%ld", m_syncobj_hdl, st);
+  wait_syncobj_done(m_pdev, m_syncobj_hdl, st);
 }
 
 void
 fence::
-submit_wait() const
+submit_wait(const hw_ctx *ctx) const
 {
-  wait(true);
+  auto st = signal_next_state();
+  shim_debug("Submitting wait for command fence %d@%ld", m_syncobj_hdl, st);
+  submit_wait_syncobjs(m_pdev, ctx, &m_syncobj_hdl, &st, 1);
 }
 
-void
+uint64_t
 fence::
-signal(bool async) const
+signal_next_state() const
 {
   std::lock_guard<std::mutex> guard(m_lock);
-  auto st = m_state;
 
-  if (st != initial_state && !m_signaled)
+  if (m_state != initial_state && !m_signaled)
     shim_err(-EINVAL, "Can't signal fence that has been waited before.");
-
-  if (st == initial_state)
+  if (m_state == initial_state)
     m_signaled = true;
-
-  st++;
-  shim_debug("%s command fence %d@%ld",
-    async ? "Submitting signal" : "Signaling", m_syncobj_hdl, st);
-  if (async)
-    submit_signal_syncobj(m_pdev, m_syncobj_hdl, st);
-  else
-    signal_syncobj(m_pdev, m_syncobj_hdl, st);
-
-  m_state = st;
+  return ++m_state;
 }
 
 void
 fence::
 signal() const
 {
-  signal(false);
+  auto st = signal_next_state();
+  shim_debug("Signaling command fence %d@%ld", m_syncobj_hdl, st);
+  signal_syncobj(m_pdev, m_syncobj_hdl, st);
 }
 
 void
 fence::
-submit_signal() const
+submit_signal(const hw_ctx *ctx) const
 {
-  signal(true);
+  auto st = signal_next_state();
+  shim_debug("Submitting signal command fence %d@%ld", m_syncobj_hdl, st);
+  submit_signal_syncobj(m_pdev, ctx, m_syncobj_hdl, st);
 }
 
 void
 fence::
-submit_wait(const pdev& dev, const std::vector<xrt_core::fence_handle*>& fences)
+submit_wait(const pdev& dev, const hw_ctx *ctx, const std::vector<xrt_core::fence_handle*>& fences)
 {
   constexpr int max_fences = 1024;
   uint32_t hdls[max_fences];
@@ -287,12 +281,13 @@ submit_wait(const pdev& dev, const std::vector<xrt_core::fence_handle*>& fences)
 
   for (auto f : fences) {
     auto fh = static_cast<const fence*>(f);
-    std::lock_guard<std::mutex> guard(fh->m_lock);
+    auto st = fh->wait_next_state();
+    shim_debug("Waiting for command fence %d@%ld", fh->m_syncobj_hdl, st);
     hdls[i] = fh->m_syncobj_hdl;
-    pts[i] = ++fh->m_state;
+    pts[i] = st;
     i++;
   }
-  submit_wait_syncobjs(dev, hdls, pts, i);
+  submit_wait_syncobjs(dev, ctx, hdls, pts, i);
 }
 
 } // shim_xdna
