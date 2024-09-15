@@ -71,7 +71,9 @@ skip_sva_bind:
 
 	// mutex_init(&client->stats.lock);
 	// client->stats.busy_ns = 0;
-	atomic64_set(&client->busy_ns, 0);
+	atomic64_set(&client->stats.busy_ns, 0);
+	atomic64_set(&client->stats.job_depth, 0);
+	client->stats.start_time = ns_to_ktime(0);
 
 	XDNA_DBG(xdna, "PID %d opened", client->pid);
 	return 0;
@@ -218,8 +220,10 @@ static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 	struct amdxdna_client *client = filp->driver_priv;
 	const char *engine_npu_name = "npu-amdxdna";
 	// u64 busy = client->stats.busy_ns;
-	u64 busy = atomic64_read(&client->busy_ns);
+	u64 busy = atomic64_read(&client->stats.busy_ns);
 
+	if (atomic64_read(&client->stats.job_depth) > 0)
+		busy += ktime_to_ns(ktime_sub(ktime_get(), client->stats.start_time));
 	/* see Documentation/gpu/drm-usage-stats.rst */
 	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy);
 	XDNA_DBG(client->xdna, "client[%d][%llu][%llu]: %llu",
