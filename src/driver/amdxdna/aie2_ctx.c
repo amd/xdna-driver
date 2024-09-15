@@ -227,21 +227,32 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct dma_fence *fence = job->fence;
 	u64 job_ns;
 	u64 busy_pre, busy_post;
+	u64 now, start;
+	char str[100];
 
-	job_ns = ktime_to_ns(ktime_sub(ktime_get(), job->start_time));
+	now = ktime_get_ns();
+	start = ktime_to_ns(job->start_time);
+	job_ns = ktime_to_ns(ktime_sub(ns_to_ktime(now), ns_to_ktime(start)));
 	hwctx->completed++;
-	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
+	sprintf(str, "signaling fence @%llu &%p", now, job);
+	trace_xdna_job(&job->base, hwctx->name, str, job->seq, job->opcode);
 	dma_fence_signal(fence);
 	mmput(job->mm);
-	mutex_lock(&job->stats->lock);
-	busy_pre = job->stats->busy_ns;
-	job->stats->busy_ns += job_ns;
-	busy_post = job->stats->busy_ns;
-	mutex_unlock(&job->stats->lock);
+	// mutex_lock(&job->stats->lock);
+	// busy_pre = job->stats->busy_ns;
+	// job->stats->busy_ns += job_ns;
+	// busy_post = job->stats->busy_ns;
+	// mutex_unlock(&job->stats->lock);
 	job->start_time = ns_to_ktime(0);
-	if (print_job_time && (!(job->seq % print_job_time) || job->seq < 5))
-		XDNA_DBG(hwctx->client->xdna, "job[%s-%llu][%llu]: %llu\t%llu\t%llu",
-			 hwctx->name, job->seq, ktime_get_ns(), busy_pre, job_ns, busy_post);
+	busy_pre = atomic64_read(&hwctx->client->busy_ns);
+	atomic64_add(job_ns, &hwctx->client->busy_ns);
+	busy_post = atomic64_read(&hwctx->client->busy_ns);
+
+	if (print_job_time && (!(job->seq % print_job_time) || job->seq < 5)) {
+		XDNA_DBG(hwctx->client->xdna, "job[%s-%llu-%llu][%llu - %llu]: %llu\t%llu\t%llu",
+			 hwctx->name, job->seq, hwctx->client_id,
+			 start, now, busy_pre, job_ns, busy_post);
+	}
 
 	amdxdna_job_put(job);
 }
@@ -359,8 +370,10 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence;
 	int ret = 0;
+	char str[100];
 
-	trace_xdna_job(sched_job, hwctx->name, "job run", job->seq, job->opcode);
+	sprintf(str, "job run @%llu &%p", ktime_get_ns(), job);
+	trace_xdna_job(sched_job, hwctx->name, str, job->seq, job->opcode);
 
 	if (!mmget_not_zero(job->mm))
 		return ERR_PTR(-ESRCH);
@@ -409,8 +422,10 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 {
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_hwctx *hwctx = job->hwctx;
+	char str[100];
 
-	trace_xdna_job(sched_job, hwctx->name, "job free", job->seq, job->opcode);
+	sprintf(str, "job free @%llu &%p", ktime_get_ns(), job);
+	trace_xdna_job(sched_job, hwctx->name, str, job->seq, job->opcode);
 	drm_sched_job_cleanup(sched_job);
 	dma_fence_put(job->fence);
 	job->fence = NULL;

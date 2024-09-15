@@ -146,6 +146,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto free_hwctx;
 	}
 
+	hwctx->client_id = filp->client_id;
 	hwctx->client = client;
 	hwctx->fw_ctx_id = -1;
 	hwctx->tdr_last_completed = -1;
@@ -362,10 +363,12 @@ put_arg_bos:
 static void amdxdna_sched_job_release(struct kref *ref)
 {
 	struct amdxdna_sched_job *job;
+	char str[100];
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
 
-	trace_amdxdna_debug_point(job->hwctx->name, job->seq, "job release");
+	sprintf(str, "job release @%llu &%p", ktime_get_ns(), job);
+	trace_amdxdna_debug_point(job->hwctx->name, job->seq, str);
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
 	kfree(job);
@@ -456,6 +459,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	struct amdxdna_sched_job *job;
 	struct amdxdna_hwctx *hwctx;
 	int ret, idx;
+	char str[100];
 
 	XDNA_DBG(xdna, "Command BO hdl %d, Arg BO count %d", cmd_bo_hdl, arg_bo_cnt);
 	job = kzalloc(struct_size(job, bos, arg_bo_cnt), GFP_KERNEL);
@@ -500,7 +504,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	job->hwctx = hwctx;
 	job->mm = current->mm;
 	job->opcode = opcode;
-	job->stats = &client->stats;
+	// job->stats = &client->stats;
 
 	job->fence = amdxdna_fence_create(hwctx);
 	if (!job->fence) {
@@ -524,7 +528,8 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	 * For here we can unlock SRCU.
 	 */
 	srcu_read_unlock(&client->hwctx_srcu, idx);
-	trace_amdxdna_debug_point(hwctx->name, *seq, "job pushed");
+	sprintf(str, "job pushed @%llu &%p bo_cnt:%lu", ktime_get_ns(), job, job->bo_cnt);
+	trace_amdxdna_debug_point(hwctx->name, *seq, str);
 
 	return 0;
 

@@ -94,6 +94,7 @@ struct amdxdna_hwctx {
 	struct amdxdna_client		*client;
 	struct amdxdna_hwctx_priv	*priv;
 	char				*name;
+	u64				client_id;
 
 	u32				id;
 	u32				max_opc;
@@ -131,7 +132,7 @@ struct amdxdna_sched_job {
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;
-	struct amdxdna_stats	*stats;
+	// struct amdxdna_stats	*stats;
 	ktime_t			start_time;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
