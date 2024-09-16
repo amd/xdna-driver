@@ -163,7 +163,7 @@ int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 {
 	int ret;
 
-	if (aie2_control_flags && BIT(AIE2_BIT_BYPASS_SET_FREQ)) {
+	if (aie2_control_flags & BIT(AIE2_BIT_BYPASS_SET_FREQ)) {
 		XDNA_DBG(ndev->xdna, "Bypassed set dpm level");
 		return 0;
 	}
