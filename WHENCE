@@ -11,5 +11,6 @@ File:
 	tools/bins/1502_00/validate.xclbin
 	tools/bins/17f0_10/validate.xclbin
 	tools/bins/17f0_11/validate.xclbin
+	tools/bins/17f0_20/validate.xclbin
 
 Licence: Redistributable. See LICENSE.amdnpu for details.
