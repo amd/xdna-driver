@@ -535,7 +535,7 @@ std::vector<test_case> test_list {
   test_case{ "multi-command io test real kernel good run",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
-  test_case{ "measure no-op kernel throughput listed command",
+  test_case{ "measure no-op kernel throughput chained command",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "npu3 shim vadd",
@@ -565,7 +565,7 @@ std::vector<test_case> test_list {
   test_case{ "io test no op with duplicated BOs",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
   },
-  test_case{ "measure no-op kernel latency listed command",
+  test_case{ "measure no-op kernel latency chained command",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "measure no-op kernel throuput",
@@ -577,10 +577,10 @@ std::vector<test_case> test_list {
   test_case{ "measure no-op kernel throuput (polling)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "measure no-op kernel latency listed command (polling)",
+  test_case{ "measure no-op kernel latency chained command (polling)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "measure no-op kernel throughput listed command (polling)",
+  test_case{ "measure no-op kernel throughput chained command (polling)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
 };

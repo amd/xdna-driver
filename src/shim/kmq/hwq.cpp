@@ -31,30 +31,13 @@ issue_command(xrt_core::buffer_handle *cmd_bo)
 
   amdxdna_drm_exec_cmd ecmd = {
     .hwctx = m_hwctx->get_slotidx(),
+    .type = AMDXDNA_CMD_SUBMIT_EXEC_BUF,
     .cmd_handles = cmd_bo_hdl,
     .args = reinterpret_cast<uintptr_t>(arg_bo_hdls),
     .cmd_count = 1,
     .arg_count = static_cast<uint32_t>(boh->get_arg_bo_handles(arg_bo_hdls, max_arg_bos)),
   };
-
-  int ret = EAGAIN;
-  while (ret == EAGAIN) {
-    try {
-      m_pdev.ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
-      ret = 0;
-    }
-    catch (const xrt_core::system_error& ex) {
-      ret = ex.get_code();
-      if (ret != EAGAIN)
-        throw;
-      amdxdna_drm_wait_cmd wcmd = {
-        .hwctx = ecmd.hwctx,
-        .timeout = 0, // Infinite waiting
-        .seq = AMDXDNA_INVALID_CMD_HANDLE, // Wait for free slot
-      };
-      m_pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
-    }
-  }
+  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
 
   auto id = ecmd.seq;
   boh->set_cmd_id(id);
