@@ -270,8 +270,6 @@ struct amdxdna_drm_exec_cmd {
  * @seq: sequence number of the command returned by execute command.
  *
  * Wait a command specified by seq to be completed.
- * Using AMDXDNA_INVALID_CMD_HANDLE as seq means wait till there is a free slot
- * to submit a new command.
  */
 struct amdxdna_drm_wait_cmd {
 	__u32 hwctx;
