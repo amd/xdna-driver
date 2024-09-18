@@ -69,10 +69,8 @@ skip_sva_bind:
 	filp->driver_priv = client;
 	client->filp = filp;
 
-	// mutex_init(&client->stats.lock);
-	// client->stats.busy_ns = 0;
 	atomic64_set(&client->stats.busy_ns, 0);
-	atomic64_set(&client->stats.job_depth, 0);
+	atomic_set(&client->stats.job_depth, 0);
 	client->stats.start_time = ns_to_ktime(0);
 
 	XDNA_DBG(xdna, "PID %d opened", client->pid);
@@ -221,13 +219,19 @@ static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 	const char *engine_npu_name = "npu-amdxdna";
 	// u64 busy = client->stats.busy_ns;
 	u64 busy = atomic64_read(&client->stats.busy_ns);
+	ktime_t start = client->stats.start_time;
+	s64 depth;
 
-	if (atomic64_read(&client->stats.job_depth) > 0)
-		busy += ktime_to_ns(ktime_sub(ktime_get(), client->stats.start_time));
+	if (atomic_read(&client->stats.job_depth) > 0)
+		busy += ktime_to_ns(ktime_sub(ktime_get(), start));
+
+	depth = atomic_read(&client->stats.job_depth);
+	XDNA_DBG(client->xdna, "client[%d-C%llu-D%llu][%llu - %llu]: %llu",
+		 client->pid, filp->client_id, depth,
+		 ktime_to_ns(start), ktime_get_ns(), busy);
+
 	/* see Documentation/gpu/drm-usage-stats.rst */
 	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy);
-	XDNA_DBG(client->xdna, "client[%d][%llu][%llu]: %llu",
-		 client->pid, filp->client_id, ktime_get_ns(), busy);
 
 	drm_show_memory_stats(p, filp);
 }

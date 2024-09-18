@@ -504,7 +504,6 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	job->hwctx = hwctx;
 	job->mm = current->mm;
 	job->opcode = opcode;
-	// job->stats = &client->stats;
 
 	job->fence = amdxdna_fence_create(hwctx);
 	if (!job->fence) {

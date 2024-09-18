@@ -124,14 +124,10 @@ struct amdxdna_dev {
 #endif
 };
 
-//struct amdxdna_stats {
-//	struct mutex	lock; /* protect stats data */
-//	u64		busy_ns;
-//};
-
 struct amdxdna_stats {
+	// spinlock_t			lock; /* protect stats */
 	atomic64_t			busy_ns;
-	atomic64_t			job_depth;
+	atomic_t			job_depth;
 	ktime_t				start_time;
 };
 
@@ -169,8 +165,6 @@ struct amdxdna_client {
 	int				pasid;
 
 	struct amdxdna_stats		stats;
-	// atomic64_t			busy_ns;
-	// atomic64_t			job_depth;
 };
 
 #endif /* _AMDXDNA_DRM_H_ */
