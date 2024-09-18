@@ -88,7 +88,7 @@ cd <root-of-source-tree>/build
 cd xrt/build
 ./build.sh -noert -noalveo
 # To adapt according to your OS & version
-sudo apt reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xrt.deb ./Release/xrt_202410.2.17.0_23.10-amd64-xbflash2.deb
+sudo apt reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xrt.deb
 cd ../../build
 
 # Start XDNA driver release build
