@@ -446,8 +446,27 @@ void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx
 	ww_acquire_fini(ctx);
 }
 
+int amdxdna_add_job_dependency(struct amdxdna_sched_job *job,
+			       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt)
+{
+	struct amdxdna_client *client = job->hwctx->client;
+	int ret = 0;
+	int i;
+
+	for (i = 0; ret == 0 && i < sync_obj_cnt; i++) {
+		ret = drm_sched_job_add_syncobj_dependency(&job->base, client->filp,
+							   sync_obj_hdls[i], sync_obj_pts[i]);
+	}
+	if (ret) {
+		XDNA_ERR(client->xdna, "Failed to add syncobj (%d@%ld) as dependency, %d",
+			 sync_obj_hdls[i], sync_obj_pts[i], ret);
+	}
+	return ret;
+}
+
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdl, u32 *arg_bo_hdls, u32 arg_bo_cnt,
+		       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt,
 		       u32 hwctx_hdl, u64 *seq)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -472,10 +491,12 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		drm_WARN_ON(&xdna->ddev, opcode == OP_USER);
 	}
 
-	ret = amdxdna_arg_bos_lookup(client, job, arg_bo_hdls, arg_bo_cnt);
-	if (ret) {
-		XDNA_ERR(xdna, "Argument BOs lookup failed, ret %d", ret);
-		goto cmd_put;
+	if (arg_bo_hdls) {
+		ret = amdxdna_arg_bos_lookup(client, job, arg_bo_hdls, arg_bo_cnt);
+		if (ret) {
+			XDNA_ERR(xdna, "Argument BOs lookup failed, ret %d", ret);
+			goto cmd_put;
+		}
 	}
 
 	idx = srcu_read_lock(&client->hwctx_srcu);
@@ -504,6 +525,10 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		goto unlock_srcu;
 	}
 	kref_init(&job->refcnt);
+
+	ret = amdxdna_add_job_dependency(job, sync_obj_hdls, sync_obj_pts, sync_obj_cnt);
+	if (ret)
+		goto put_fence;
 
 	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, seq);
 	if (ret)
@@ -579,6 +604,57 @@ free_cmd_bo_hdls:
 	return ret;
 }
 
+static int amdxdna_drm_submit_dependency(struct amdxdna_client *client,
+					 struct amdxdna_drm_exec_cmd *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	u32 *sync_obj_hdls;
+	u64 *sync_obj_pts;
+	u32 sync_obj_cnt;
+	void *args;
+	int ret;
+
+	if (!args->cmd_count || args->cmd_count > MAX_ARG_COUNT) {
+		XDNA_ERR(xdna, "Invalid sync obj hdl count %d", args->cmd_count);
+		return -EINVAL;
+	}
+	if (args->arg_count != args->cmd_count) {
+		XDNA_ERR(xdna, "Num of sync obj hdl and pts not equal (%d/%d)",
+			 args->cmd_count, args->arg_count);
+		return -EINVAL;
+	}
+	sync_obj_cnt = args->arg_count;
+
+	args = kcalloc(sync_obj_cnt, sizeof(u32) + sizeof(u64), GFP_KERNEL);
+	if (!args)
+		return -ENOMEM;
+	sync_obj_hdls = args;
+	sync_obj_pts = (u64 *)(sync_obj_hdls + sync_obj_cnt);
+
+	ret = copy_from_user(sync_obj_hdls, u64_to_user_ptr(args->cmd_handles),
+			     sync_obj_cnt * sizeof(u32));
+	if (ret) {
+		ret = -EFAULT;
+		goto free_args;
+	}
+	ret = copy_from_user(sync_obj_pts, u64_to_user_ptr(args->args),
+			     sync_obj_cnt * sizeof(u64));
+	if (ret) {
+		ret = -EFAULT;
+		goto free_args;
+	}
+
+free_args:
+	kfree(args);
+	return ret;
+}
+
+static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
+				     struct amdxdna_drm_exec_cmd *args)
+{
+	return 0;
+}
+
 int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
@@ -590,6 +666,10 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 	switch (args->type) {
 	case AMDXDNA_CMD_SUBMIT_EXEC_BUF:
 		return amdxdna_drm_submit_execbuf(client, args);
+	case AMDXDNA_CMD_SUBMIT_DEPENDENCY:
+		return amdxdna_drm_submit_dependency(client, args);
+	case AMDXDNA_CMD_SUBMIT_SIGNAL:
+		return amdxdna_drm_submit_signal(client, args);
 	}
 
 	XDNA_ERR(client->xdna, "Invalid command type %d", args->type);

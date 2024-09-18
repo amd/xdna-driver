@@ -139,6 +139,7 @@ struct amdxdna_sched_job {
 #define OP_SYNC_BO		1
 #define OP_REG_DEBUG_BO		2
 #define OP_UNREG_DEBUG_BO	3
+#define OP_NOOP			4
 	u32			opcode;
 	struct amdxdna_gem_obj	*cmd_bo;
 	size_t			bo_cnt;
