@@ -132,8 +132,8 @@ struct amdxdna_sched_job {
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;
-	// struct amdxdna_stats	*stats;
 	ktime_t			start_time;
+	ktime_t			finish_time;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
 	/* user can wait on this fence */

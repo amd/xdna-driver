@@ -66,12 +66,13 @@ skip_sva_bind:
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
 
+	spin_lock_init(&client->stats.lock);
+	client->stats.job_depth = 0;
+	client->stats.busy_time = ns_to_ktime(0);
+	client->stats.start_time = ns_to_ktime(0);
+
 	filp->driver_priv = client;
 	client->filp = filp;
-
-	atomic64_set(&client->stats.busy_ns, 0);
-	atomic_set(&client->stats.job_depth, 0);
-	client->stats.start_time = ns_to_ktime(0);
 
 	XDNA_DBG(xdna, "PID %d opened", client->pid);
 	return 0;
@@ -213,25 +214,49 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 
+void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&client->stats.lock, flags);
+	if (start) {
+		client->stats.job_depth++;
+		if (client->stats.job_depth == 1)
+			client->stats.start_time = time;
+	} else {
+		client->stats.job_depth--;
+		if (client->stats.job_depth == 0)
+			client->stats.busy_time =
+				ktime_add(client->stats.busy_time,
+					  ktime_sub(time, client->stats.start_time));
+	}
+	spin_unlock_irqrestore(&client->stats.lock, flags);
+}
+
 static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	const char *engine_npu_name = "npu-amdxdna";
-	// u64 busy = client->stats.busy_ns;
-	u64 busy = atomic64_read(&client->stats.busy_ns);
-	ktime_t start = client->stats.start_time;
-	s64 depth;
+	unsigned long flags;
+	ktime_t start, now;
+	u64 busy_ns;
+	u32 depth;
 
-	if (atomic_read(&client->stats.job_depth) > 0)
-		busy += ktime_to_ns(ktime_sub(ktime_get(), start));
+	spin_lock_irqsave(&client->stats.lock, flags);
+	start = client->stats.start_time;
+	now = ktime_get();
+	depth = client->stats.job_depth;
+	busy_ns = ktime_to_ns(client->stats.busy_time);
+	if (depth > 0)
+		busy_ns += ktime_to_ns(ktime_sub(now, start));
+	spin_unlock_irqrestore(&client->stats.lock, flags);
 
-	depth = atomic_read(&client->stats.job_depth);
-	XDNA_DBG(client->xdna, "client[%d-C%llu-D%llu][%llu - %llu]: %llu",
+	XDNA_DBG(client->xdna, "client[%d-C%llu-D%u][%llu - %llu]: %llu",
 		 client->pid, filp->client_id, depth,
-		 ktime_to_ns(start), ktime_get_ns(), busy);
+		 ktime_to_ns(start), ktime_to_ns(now), busy_ns);
 
 	/* see Documentation/gpu/drm-usage-stats.rst */
-	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy);
+	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy_ns);
 
 	drm_show_memory_stats(p, filp);
 }

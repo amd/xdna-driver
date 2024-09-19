@@ -125,9 +125,9 @@ struct amdxdna_dev {
 };
 
 struct amdxdna_stats {
-	// spinlock_t			lock; /* protect stats */
-	atomic64_t			busy_ns;
-	atomic_t			job_depth;
+	spinlock_t			lock; /* protect stats */
+	u32				job_depth;
+	ktime_t				busy_time;
 	ktime_t				start_time;
 };
 
@@ -166,5 +166,8 @@ struct amdxdna_client {
 
 	struct amdxdna_stats		stats;
 };
+
+// void amdxdna_start_stats(ktime_t start_time);
+void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start);
 
 #endif /* _AMDXDNA_DRM_H_ */

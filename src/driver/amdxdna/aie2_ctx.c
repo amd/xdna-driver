@@ -225,39 +225,21 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence = job->fence;
-	u64 job_ns = 0;
-	// u64 busy_pre, busy_post;
-	u64 now, start;
-	char str[100];
-	s64 depth;
 
 	hwctx->completed++;
 
-	now = ktime_get_ns();
-	start = ktime_to_ns(job->start_time);
-	// if (atomic_dec_and_test(&hwctx->client->stats.job_depth))
-	//	job_ns = ktime_to_ns(ktime_sub(ns_to_ktime(now), hwctx->client->stats.start_time));
-	// job->start_time = ns_to_ktime(0);
-	// busy_pre = atomic64_read(&hwctx->client->stats.busy_ns);
-	// atomic64_add(job_ns, &hwctx->client->stats.busy_ns);
-	// busy_post = atomic64_read(&hwctx->client->stats.busy_ns);
-	if (atomic_dec_and_test(&hwctx->client->stats.job_depth)) {
-		job_ns = ktime_to_ns(ktime_sub(ns_to_ktime(now), hwctx->client->stats.start_time));
-		atomic64_add(job_ns, &hwctx->client->stats.busy_ns);
-	}
+	job->finish_time = ktime_get();
+	amdxdna_update_stats(hwctx->client, job->finish_time, false);
 	if (print_job_time && (!(job->seq % print_job_time) || job->seq < 5)) {
-		depth = atomic_read(&hwctx->client->stats.job_depth);
 		XDNA_DBG(hwctx->client->xdna,
-			 "%sjob(%llu,%llu)[%s-S%-6llu-C%llu-D%lld][%llu - %llu]: %llu%s",
-			 job_ns ? "last " : "",
+			 "job(%6llu,%6llu)[%s-S%-6llu-C%llu][%llu - %llu]: %llu",
 			 hwctx->submitted, hwctx->completed,
-			 hwctx->name, job->seq, hwctx->client_id, depth,
-			 start, now, job_ns,
-			 ((job_ns && depth) || (!job_ns && !depth)) ? "(unmatched!!!)" : "");
+			 hwctx->name, job->seq, hwctx->client_id,
+			 ktime_to_ns(job->start_time), ktime_to_ns(job->finish_time),
+			 ktime_to_ns(ktime_sub(job->finish_time, job->start_time)));
 	}
 
-	sprintf(str, "signaling fence @%llu &%p", now, job);
-	trace_xdna_job(&job->base, hwctx->name, str, job->seq, job->opcode);
+	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
 	mmput(job->mm);
 
@@ -377,11 +359,8 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence;
 	int ret = 0;
-	char str[100];
-	s64 depth, depth1;
 
-	sprintf(str, "job run @%llu &%p", ktime_get_ns(), job);
-	trace_xdna_job(sched_job, hwctx->name, str, job->seq, job->opcode);
+	trace_xdna_job(sched_job, hwctx->name, "job run", job->seq, job->opcode);
 
 	if (!mmget_not_zero(job->mm))
 		return ERR_PTR(-ESRCH);
@@ -421,14 +400,7 @@ out:
 		fence = ERR_PTR(ret);
 	} else {
 		job->start_time = ktime_get();
-		depth = atomic_inc_return(&hwctx->client->stats.job_depth);
-		if (depth == 1)
-			hwctx->client->stats.start_time = job->start_time;
-		depth1 = atomic_read(&hwctx->client->stats.job_depth);
-		XDNA_DBG(hwctx->client->xdna, "%sjob(%llu,%llu)[%s-S%-6llu-C%llu-D%lld] @%llu%s",
-			 (depth == 1) ? "1st " : "", hwctx->submitted, hwctx->completed,
-			 hwctx->name, job->seq, hwctx->client_id, depth1,
-			 ktime_to_ns(job->start_time), (depth != depth1) ? "(unmatched!!!)" : "");
+		amdxdna_update_stats(hwctx->client, job->start_time, true);
 	}
 
 	return fence;
@@ -438,10 +410,8 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 {
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_hwctx *hwctx = job->hwctx;
-	char str[100];
 
-	sprintf(str, "job free @%llu &%p", ktime_get_ns(), job);
-	trace_xdna_job(sched_job, hwctx->name, str, job->seq, job->opcode);
+	trace_xdna_job(sched_job, hwctx->name, "job free", job->seq, job->opcode);
 	drm_sched_job_cleanup(sched_job);
 	dma_fence_put(job->fence);
 	job->fence = NULL;
