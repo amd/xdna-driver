@@ -117,7 +117,16 @@ static int amdxdna_flush(struct file *f, fl_owner_t id)
 	struct drm_file *filp = f->private_data;
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = client->xdna;
+	pid_t pid = task_tgid_nr(current);
 	int idx;
+
+	/* When current PID not equals to Client PID, this is a flush()
+	 * triggered by closing a child process. If this is the case, flush() is
+	 * just a no-op. The process which open() device should finally flush()
+	 * and close() device.
+	 */
+	if (pid != client->pid)
+		return 0;
 
 	XDNA_DBG(xdna, "PID %d flushing...", client->pid);
 	if (!drm_dev_enter(&xdna->ddev, &idx))
