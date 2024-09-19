@@ -868,7 +868,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		}
 
 		ret = amdxdna_cmd_submit(client, OP_SYNC_BO, AMDXDNA_INVALID_BO_HANDLE,
-					 &args->handle, 1, hwctx_hdl, &seq);
+					 &args->handle, 1, NULL, NULL, 0, hwctx_hdl, &seq);
 		if (ret) {
 			XDNA_ERR(xdna, "Submit command failed");
 			goto put_obj;

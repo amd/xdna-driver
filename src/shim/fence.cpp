@@ -130,8 +130,8 @@ submit_signal_syncobj(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
   amdxdna_drm_exec_cmd ecmd = {
     .hwctx = ctx->get_slotidx(),
     .type = AMDXDNA_CMD_SUBMIT_SIGNAL,
-    .cmd_handles = reinterpret_cast<uintptr_t>(&sobj_hdl),
-    .args = reinterpret_cast<uintptr_t>(&point),
+    .cmd_handles = sobj_hdl,
+    .args = point,
     .cmd_count = 1,
     .arg_count = 1,
   };

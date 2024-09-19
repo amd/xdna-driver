@@ -7,6 +7,7 @@
 #include <linux/kref.h>
 #include <drm/drm_file.h>
 #include <drm/drm_cache.h>
+#include <drm/drm_syncobj.h>
 #include "drm_local/amdxdna_accel.h"
 
 #include "amdxdna_drm.h"
@@ -446,8 +447,8 @@ void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx
 	ww_acquire_fini(ctx);
 }
 
-int amdxdna_add_job_dependency(struct amdxdna_sched_job *job,
-			       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt)
+static int amdxdna_add_job_dependency(struct amdxdna_sched_job *job, u32 *sync_obj_hdls,
+				      u64 *sync_obj_pts, u32 sync_obj_cnt)
 {
 	struct amdxdna_client *client = job->hwctx->client;
 	int ret = 0;
@@ -458,7 +459,7 @@ int amdxdna_add_job_dependency(struct amdxdna_sched_job *job,
 							   sync_obj_hdls[i], sync_obj_pts[i]);
 	}
 	if (ret) {
-		XDNA_ERR(client->xdna, "Failed to add syncobj (%d@%ld) as dependency, %d",
+		XDNA_ERR(client->xdna, "Failed to add syncobj (%d@%lld) as dependency, %d",
 			 sync_obj_hdls[i], sync_obj_pts[i], ret);
 	}
 	return ret;
@@ -527,12 +528,16 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	kref_init(&job->refcnt);
 
 	ret = amdxdna_add_job_dependency(job, sync_obj_hdls, sync_obj_pts, sync_obj_cnt);
-	if (ret)
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to add dependency, ret %d", ret);
 		goto put_fence;
+	}
 
 	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, seq);
-	if (ret)
+	if (ret) {
+		XDNA_DBG(xdna, "Submit cmds failed, ret %d", ret);
 		goto put_fence;
+	}
 
 	/*
 	 * The amdxdna_hwctx_destroy_rcu() will release hwctx and associated
@@ -593,9 +598,7 @@ static int amdxdna_drm_submit_execbuf(struct amdxdna_client *client,
 	}
 
 	ret = amdxdna_cmd_submit(client, OP_USER, cmd_bo_hdl, arg_bo_hdls,
-				 args->arg_count, args->hwctx, &args->seq);
-	if (ret)
-		XDNA_DBG(xdna, "Submit cmds failed, ret %d", ret);
+				 args->arg_count, NULL, NULL, 0, args->hwctx, &args->seq);
 
 free_cmd_bo_hdls:
 	kfree(arg_bo_hdls);
@@ -611,7 +614,7 @@ static int amdxdna_drm_submit_dependency(struct amdxdna_client *client,
 	u32 *sync_obj_hdls;
 	u64 *sync_obj_pts;
 	u32 sync_obj_cnt;
-	void *args;
+	void *argbuf;
 	int ret;
 
 	if (!args->cmd_count || args->cmd_count > MAX_ARG_COUNT) {
@@ -625,34 +628,109 @@ static int amdxdna_drm_submit_dependency(struct amdxdna_client *client,
 	}
 	sync_obj_cnt = args->arg_count;
 
-	args = kcalloc(sync_obj_cnt, sizeof(u32) + sizeof(u64), GFP_KERNEL);
-	if (!args)
+	argbuf = kcalloc(sync_obj_cnt, sizeof(u32) + sizeof(u64), GFP_KERNEL);
+	if (!argbuf)
 		return -ENOMEM;
-	sync_obj_hdls = args;
+	sync_obj_hdls = argbuf;
 	sync_obj_pts = (u64 *)(sync_obj_hdls + sync_obj_cnt);
 
 	ret = copy_from_user(sync_obj_hdls, u64_to_user_ptr(args->cmd_handles),
 			     sync_obj_cnt * sizeof(u32));
 	if (ret) {
 		ret = -EFAULT;
-		goto free_args;
+		goto done;
 	}
 	ret = copy_from_user(sync_obj_pts, u64_to_user_ptr(args->args),
 			     sync_obj_cnt * sizeof(u64));
 	if (ret) {
 		ret = -EFAULT;
-		goto free_args;
+		goto done;
 	}
 
-free_args:
-	kfree(args);
+	ret = amdxdna_cmd_submit(client, OP_NOOP, AMDXDNA_INVALID_BO_HANDLE, NULL, 0,
+				 sync_obj_hdls, sync_obj_pts, sync_obj_cnt,
+				 args->hwctx,&args->seq);
+
+done:
+	kfree(argbuf);
+	if (!ret)
+		XDNA_DBG(xdna, "Pushed no-op cmd %lld to scheduler", args->seq);
 	return ret;
 }
 
 static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 				     struct amdxdna_drm_exec_cmd *args)
 {
-	return 0;
+	u32 sync_obj_hdl = (u32)args->cmd_handles;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct dma_fence_chain *chain = NULL;
+	struct dma_fence *ofence = NULL;
+	u64 sync_obj_pt = args->args;
+	struct drm_syncobj *sync_obj;
+	u32 hwctx_hdl = args->hwctx;
+	struct amdxdna_hwctx *hwctx;
+	int ret = 0;
+	int idx;
+
+	/* Only support single signal submission for now. */
+	if (args->cmd_count != 1 || args->arg_count != 1) {
+		XDNA_ERR(xdna, "Only support 1 syncobj for signal submission");
+		return -EINVAL;
+	}
+
+	sync_obj = drm_syncobj_find(client->filp, sync_obj_hdl);
+	if (!sync_obj) {
+		XDNA_ERR(xdna, "Syncobj %d not found", sync_obj_hdl);
+		return -ENOENT;
+	}
+
+	idx = srcu_read_lock(&client->hwctx_srcu);
+
+	ret = drm_syncobj_find_fence(client->filp, sync_obj_hdl, sync_obj_pt, 0, &ofence);
+	if (!ret) {
+		XDNA_DBG(xdna, "Signal for syncobj %d@%lld is already submitted",
+			 sync_obj_hdl, sync_obj_pt);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	hwctx = idr_find(&client->hwctx_idr, hwctx_hdl);
+	if (!hwctx) {
+		XDNA_DBG(xdna, "PID %d failed to get hwctx %d", client->pid, hwctx_hdl);
+		ret = -EINVAL;
+		goto out;
+	}
+	if (!hwctx->submitted) {
+		XDNA_DBG(xdna, "Submitting signal without first execute anything?");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	chain = dma_fence_chain_alloc();
+	if (!chain) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	if (hwctx->submitted)
+		ofence = xdna->dev_info->ops->cmd_get_out_fence(hwctx, hwctx->submitted - 1);
+	else
+		ofence = dma_fence_get_stub();
+	if (unlikely(!ofence)) {
+		XDNA_DBG(xdna, "Can't find last submitted job");
+		ret = -ENOENT;
+		goto out;
+	}
+	
+	drm_syncobj_add_point(sync_obj, chain, ofence, sync_obj_pt);
+	chain = NULL;
+
+out:
+	dma_fence_chain_free(chain);
+	dma_fence_put(ofence);
+	drm_syncobj_put(sync_obj);
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+	return ret;
 }
 
 int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
