@@ -3,6 +3,8 @@
  * Copyright (C) 2024, Advanced Micro Devices, Inc.
  */
 
+#include <linux/timekeeping.h>
+
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_trace.h"
@@ -17,10 +19,6 @@
 bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
-
-uint print_job_time = 500;
-module_param(print_job_time, uint, 0600);
-MODULE_PARM_DESC(print_job_time, "print exec time of every no. of jobs (Default 500)");
 
 static inline int
 aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
@@ -226,23 +224,11 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence = job->fence;
 
+	amdxdna_update_stats(hwctx->client, ktime_get(), false);
 	hwctx->completed++;
-
-	job->finish_time = ktime_get();
-	amdxdna_update_stats(hwctx->client, job->finish_time, false);
-	if (print_job_time && (!(job->seq % print_job_time) || job->seq < 5)) {
-		XDNA_DBG(hwctx->client->xdna,
-			 "job(%6llu,%6llu)[%s-S%-6llu-C%llu][%llu - %llu]: %llu",
-			 hwctx->submitted, hwctx->completed,
-			 hwctx->name, job->seq, hwctx->client_id,
-			 ktime_to_ns(job->start_time), ktime_to_ns(job->finish_time),
-			 ktime_to_ns(ktime_sub(job->finish_time, job->start_time)));
-	}
-
 	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
 	mmput(job->mm);
-
 	amdxdna_job_put(job);
 }
 
@@ -399,8 +385,7 @@ out:
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	} else {
-		job->start_time = ktime_get();
-		amdxdna_update_stats(hwctx->client, job->start_time, true);
+		amdxdna_update_stats(hwctx->client, ktime_get(), true);
 	}
 
 	return fence;

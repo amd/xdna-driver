@@ -99,7 +99,6 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->hwctx_lock);
 	mutex_destroy(&client->mm_lock);
-	// mutex_destroy(&client->stats.lock);
 	if (client->dev_heap)
 		drm_gem_object_put(to_gobj(client->dev_heap));
 

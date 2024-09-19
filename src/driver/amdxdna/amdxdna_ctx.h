@@ -8,7 +8,6 @@
 
 #include <linux/bitfield.h>
 #include <linux/kref.h>
-#include <linux/timekeeping.h>
 #include <linux/wait.h>
 #include <drm/drm_drv.h>
 #include <drm/gpu_scheduler.h>
@@ -94,7 +93,6 @@ struct amdxdna_hwctx {
 	struct amdxdna_client		*client;
 	struct amdxdna_hwctx_priv	*priv;
 	char				*name;
-	u64				client_id;
 
 	u32				id;
 	u32				max_opc;
@@ -132,8 +130,6 @@ struct amdxdna_sched_job {
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;
-	ktime_t			start_time;
-	ktime_t			finish_time;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
 	/* user can wait on this fence */

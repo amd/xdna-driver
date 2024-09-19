@@ -167,7 +167,6 @@ struct amdxdna_client {
 	struct amdxdna_stats		stats;
 };
 
-// void amdxdna_start_stats(ktime_t start_time);
 void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start);
 
 #endif /* _AMDXDNA_DRM_H_ */
