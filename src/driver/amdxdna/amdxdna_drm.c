@@ -237,22 +237,13 @@ static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 	struct amdxdna_client *client = filp->driver_priv;
 	const char *engine_npu_name = "npu-amdxdna";
 	unsigned long flags;
-	ktime_t start, now;
 	u64 busy_ns;
-	u32 depth;
 
 	spin_lock_irqsave(&client->stats.lock, flags);
-	start = client->stats.start_time;
-	now = ktime_get();
-	depth = client->stats.job_depth;
 	busy_ns = ktime_to_ns(client->stats.busy_time);
-	if (depth > 0)
-		busy_ns += ktime_to_ns(ktime_sub(now, start));
+	if (client->stats.job_depth > 0)
+		busy_ns += ktime_to_ns(ktime_sub(ktime_get(), client->stats.start_time));
 	spin_unlock_irqrestore(&client->stats.lock, flags);
-
-	XDNA_DBG(client->xdna, "client[%d-C%llu-D%u][%llu - %llu]: %llu",
-		 client->pid, filp->client_id, depth,
-		 ktime_to_ns(start), ktime_to_ns(now), busy_ns);
 
 	/* see Documentation/gpu/drm-usage-stats.rst */
 	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy_ns);

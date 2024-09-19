@@ -146,6 +146,7 @@ struct amdxdna_stats {
  * @dev_heap: Shared device heap memory
  * @sva: iommu SVA handle
  * @pasid: PASID
+ * @stats: record npu usage stats
  */
 struct amdxdna_client {
 	struct list_head		node;
