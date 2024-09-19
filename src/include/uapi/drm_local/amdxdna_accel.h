@@ -17,7 +17,6 @@ extern "C" {
 #define AMDXDNA_DRIVER_MAJOR		1
 #define AMDXDNA_DRIVER_MINOR		0
 
-#define AMDXDNA_INVALID_CMD_HANDLE	(~0UL)
 #define AMDXDNA_INVALID_ADDR		(~0UL)
 #define AMDXDNA_INVALID_CTX_HANDLE	0
 #define AMDXDNA_INVALID_BO_HANDLE	0
@@ -49,8 +48,6 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_WAIT_CMD,
 	DRM_AMDXDNA_GET_INFO,
 	DRM_AMDXDNA_SET_STATE,
-	DRM_AMDXDNA_SUBMIT_WAIT,
-	DRM_AMDXDNA_SUBMIT_SIGNAL,
 	DRM_AMDXDNA_NUM_IOCTLS
 };
 
@@ -273,8 +270,6 @@ struct amdxdna_drm_exec_cmd {
  * @seq: sequence number of the command returned by execute command.
  *
  * Wait a command specified by seq to be completed.
- * Using AMDXDNA_INVALID_CMD_HANDLE as seq means wait till there is a free slot
- * to submit a new command.
  */
 struct amdxdna_drm_wait_cmd {
 	__u32 hwctx;
@@ -461,6 +456,7 @@ enum amdxdna_power_mode_type {
 	POWER_MODE_LOW,     /**< Set frequency to lowest DPM */
 	POWER_MODE_MEDIUM,  /**< Set frequency to medium DPM */
 	POWER_MODE_HIGH,    /**< Set frequency to highest DPM */
+	POWER_MODE_TURBO,   /**< More power, more performance */
 };
 
 /**
@@ -542,20 +538,6 @@ struct amdxdna_drm_set_state {
 	__u64 buffer; /* in */
 };
 
-
-/**
- * struct amdxdna_drm_syncobjs - Signal or wait on array of DRM timelined sync objects.
- * @handles: Array of handles of sync objects.
- * @points: Array of time points for each sync objects.
- * @count: Number of elements in the above array.
- */
-struct amdxdna_drm_syncobjs {
-	__u64 handles; /* in */
-	__u64 points; /* in */
-	__u32 count; /* in */
-	__u32 pad;
-};
-
 #define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
 		 struct amdxdna_drm_create_hwctx)
@@ -595,14 +577,6 @@ struct amdxdna_drm_syncobjs {
 #define DRM_IOCTL_AMDXDNA_SET_STATE \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SET_STATE, \
 		 struct amdxdna_drm_set_state)
-
-#define DRM_IOCTL_AMDXDNA_SUBMIT_WAIT \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SUBMIT_WAIT, \
-		 struct amdxdna_drm_syncobjs)
-
-#define DRM_IOCTL_AMDXDNA_SUBMIT_SIGNAL \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SUBMIT_SIGNAL, \
-		 struct amdxdna_drm_syncobjs)
 
 #if defined(__cplusplus)
 } /* extern c end */

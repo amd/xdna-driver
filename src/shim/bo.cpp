@@ -230,7 +230,6 @@ alloc_bo()
   amdxdna_drm_get_bo_info bo_info = {};
   get_drm_bo_info(m_pdev, boh, &bo_info);
   m_bo = std::make_unique<bo::drm_bo>(*this, bo_info);
-  m_pdev.insert_hdl_mapping(boh, reinterpret_cast<uint64_t>(this));
 }
 
 void
@@ -248,7 +247,6 @@ void
 bo::
 free_bo()
 {
-  m_pdev.remove_hdl_mapping(get_drm_bo_handle());
   m_bo.reset();
 }
 

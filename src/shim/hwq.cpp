@@ -5,6 +5,7 @@
 #include "hwq.h"
 #include "fence.h"
 #include "shim_debug.h"
+#include "core/common/trace.h"
 
 namespace {
 
@@ -82,60 +83,29 @@ void
 hw_q::
 submit_command(xrt_core::buffer_handle *cmd)
 {
-  auto pkt = get_chained_command_pkt(cmd);
-  if (!m_pdev.is_force_unchained_command() || !pkt) {
-    issue_command(cmd);
-    return;
-  }
+  issue_command(cmd);
+}
 
-  // HACK: Forcibly unchain commands, to be removed later.
-  //
-  // Forcibly unchain commands and send to driver one by one.
-  auto payload = get_ert_cmd_chain_data(pkt);
-  for (size_t i = 0; i < payload->command_count; i++) {
-    auto boh = reinterpret_cast<xrt_core::buffer_handle*>(
-      m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[i])));
-    issue_command(boh);
+int
+hw_q::
+poll_command(xrt_core::buffer_handle *cmd) const
+{
+  auto cmdpkt = reinterpret_cast<ert_packet *>(cmd->map(xrt_core::buffer_handle::map_type::write));
+
+  if (cmdpkt->state >= ERT_CMD_STATE_COMPLETED) {
+    XRT_TRACE_POINT_LOG(poll_command_done);
+    return 1;
   }
+  return 0;
 }
 
 int
 hw_q::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
-  auto pkt = get_chained_command_pkt(cmd);
-  if (!m_pdev.is_force_unchained_command() || !pkt)
-    return wait_cmd(m_pdev, m_hwctx, cmd, timeout_ms);
-
-  // HACK: handling forcibly unchained commands, to be removed later.
-  //
-  // Wait for the last unchained command.
-  auto payload = get_ert_cmd_chain_data(pkt);
-  auto last_boh = reinterpret_cast<xrt_core::buffer_handle*>(
-    m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[payload->command_count-1])));
-  auto ret = wait_cmd(m_pdev, m_hwctx, last_boh, timeout_ms);
-  if (ret != 1)
-    return ret;
-
-  // Check the state of the last command.
-  auto cmdpkt = reinterpret_cast<ert_packet *>(last_boh->map(xrt_core::buffer_handle::map_type::read));
-  if (cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
-    pkt->state = ERT_CMD_STATE_COMPLETED;
-    return 1;
-  }
-
-  // Find out the first command failed.
-  for (int i = 0; i < payload->command_count; i++) {
-    auto boh = reinterpret_cast<xrt_core::buffer_handle*>(
-      m_pdev.lookup_hdl_mapping(static_cast<uint32_t>(payload->data[i])));
-    cmdpkt = reinterpret_cast<ert_packet *>(boh->map(xrt_core::buffer_handle::map_type::read));
-    if (cmdpkt->state != ERT_CMD_STATE_COMPLETED) {
-      pkt->state = cmdpkt->state;
-      payload->error_index = i;
-      break;
-    }
-  }
-  return 1;
+  if (poll_command(cmd))
+      return 1;
+  return wait_cmd(m_pdev, m_hwctx, cmd, timeout_ms);
 }
 
 void
@@ -143,14 +113,14 @@ hw_q::
 submit_wait(const xrt_core::fence_handle* f)
 {
   auto fh = static_cast<const fence*>(f);
-  fh->submit_wait();
+  fh->submit_wait(m_hwctx);
 }
 
 void
 hw_q::
 submit_wait(const std::vector<xrt_core::fence_handle*>& fences)
 {
-  fence::submit_wait(m_pdev, fences);
+  fence::submit_wait(m_pdev, m_hwctx, fences);
 }
 
 void
@@ -158,7 +128,7 @@ hw_q::
 submit_signal(const xrt_core::fence_handle* f)
 {
   auto fh = static_cast<const fence*>(f);
-  fh->submit_signal();
+  fh->submit_signal(m_hwctx);
 }
 
 } // shim_xdna

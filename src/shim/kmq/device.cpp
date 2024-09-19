@@ -6,21 +6,12 @@
 #include "hwctx.h"
 #include "drm_local/amdxdna_accel.h"
 
-namespace {
-
-// Device memory heap needs to be within one 64MB page. The maximum size is 64MB.
-const size_t dev_mem_size = (64 << 20);
-
-}
-
 namespace shim_xdna {
 
 device_kmq::
 device_kmq(const pdev& pdev, handle_type shim_handle, id_type device_id)
 : device(pdev, shim_handle, device_id)
 {
-  // Alloc and register device memory w/ driver.
-  m_dev_heap_bo = std::make_unique<bo_kmq>(*this, dev_mem_size, AMDXDNA_BO_DEV_HEAP);
   shim_debug("Created KMQ device (%s) ...", get_pdev().m_sysfs_name.c_str());
 }
 

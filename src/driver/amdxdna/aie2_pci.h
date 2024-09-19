@@ -67,15 +67,10 @@
 	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
 })
 
-#define SMU_MPNPUCLK_FREQ_MAX(ndev) \
-	((ndev)->priv->smu_mpnpuclk_freq_max)
-#define SMU_HCLK_FREQ_MAX(ndev) \
-	((ndev)->priv->smu_hclk_freq_max)
 #define SMU_DPM_MAX(ndev) \
-	((ndev)->priv->smu_dpm_max)
-
-#define SMU_NPU_DPM_TABLE_ENTRY(ndev, level) \
-	(&ndev->priv->smu_npu_dpm_clk_table[level])
+	((ndev)->smu.num_dpm_levels - 1)
+#define SMU_DPM_TABLE_ENTRY(ndev, level) \
+	(&(ndev)->smu.dpm_table[level])
 
 enum aie2_smu_reg_idx {
 	SMU_CMD_REG = 0,
@@ -154,12 +149,11 @@ struct clock {
 	char name[16];
 	u32 max_freq_mhz;
 	u32 freq_mhz;
-#if defined(CONFIG_DEBUG_FS)
-	u32 dbg_freq_mhz;
-#endif
 };
 
 struct smu {
+	const struct dpm_clk	*dpm_table;
+	u32			num_dpm_levels;
 	struct clock		mp_npu_clock;
 	struct clock		h_clock;
 	u32			curr_dpm_level;
@@ -199,6 +193,7 @@ struct amdxdna_hwctx_priv {
 	u32				num_pending;
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
+	struct workqueue_struct		*submit_wq;
 };
 
 struct async_events;
@@ -223,6 +218,7 @@ struct amdxdna_dev_hdl {
 	struct aie_metadata		metadata;
 	struct smu			smu;
 	enum amdxdna_power_mode_type	pw_mode;
+	bool				clk_gate_enabled;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
@@ -267,10 +263,6 @@ struct amdxdna_dev_priv {
 	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
 	struct aie2_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
 	struct rt_config_clk_gating	clk_gating;
-	u32				smu_mpnpuclk_freq_max;
-	u32				smu_hclk_freq_max;
-	/* npu1: 0, not support dpm; npu2+: support dpm up to 7 */
-	u32				smu_dpm_max;
 	u32				smu_rev;
 	const struct dpm_clk		*smu_npu_dpm_clk_table;
 	u32				smu_npu_dpm_levels;
@@ -280,6 +272,10 @@ struct amdxdna_dev_priv {
 };
 
 /* aie2_pci.c */
+#define AIE2_BIT_BYPASS_POWER_SWITCH	0 /* NOSYS */
+#define AIE2_BIT_BYPASS_SET_FREQ	1
+#define AIE2_BIT_BYPASS_FW_LOAD		2 /* NOSYS */
+extern uint aie2_control_flags;
 extern const struct amdxdna_dev_ops aie2_ops;
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor);
 
@@ -287,7 +283,6 @@ int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor
 void aie2_smu_setup(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_set_clock_freq(struct amdxdna_dev_hdl *ndev, struct clock *clock, u32 freq_mhz);
 char *aie2_smu_get_mpnpu_clock_name(struct amdxdna_dev_hdl *ndev);
 char *aie2_smu_get_hclock_name(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
@@ -297,7 +292,6 @@ int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-void aie2_smu_prepare_s0i3(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_psp.c */
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
@@ -368,6 +362,7 @@ void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
 /* aie2_pm.c */
 int aie2_pm_start(struct amdxdna_dev_hdl *ndev);
 void aie2_pm_stop(struct amdxdna_dev_hdl *ndev);
+bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
 
 #endif /* _AIE2_PCI_H_ */

@@ -130,6 +130,11 @@ DEFINE_EVENT(xdna_mbox_name_id, mbox_irq_handle,
 	     TP_ARGS(name, irq)
 );
 
+DEFINE_EVENT(xdna_mbox_name_id, mbox_rx_worker,
+	     TP_PROTO(char *name, int irq),
+	     TP_ARGS(name, irq)
+);
+
 DEFINE_EVENT(xdna_mbox_name_id, mbox_poll_handle,
 	     TP_PROTO(char *name, int irq),
 	     TP_ARGS(name, irq)

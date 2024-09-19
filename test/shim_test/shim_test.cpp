@@ -29,9 +29,9 @@ using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_io_e_throughput(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>, arg_type&);
+void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>, arg_type&);
+void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>, arg_type&);
@@ -521,10 +521,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "measure no-op kernel latency",
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "measure real kernel latency",
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "create and free debug bo",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x1000 }
@@ -535,8 +535,8 @@ std::vector<test_case> test_list {
   test_case{ "multi-command io test real kernel good run",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
-  test_case{ "measure no-op kernel throughput listed command",
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN }
+  test_case{ "measure no-op kernel throughput chained command",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "npu3 shim vadd",
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
@@ -565,11 +565,23 @@ std::vector<test_case> test_list {
   test_case{ "io test no op with duplicated BOs",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
   },
-  test_case{ "io test no-op kernel latency listed command",
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN }
+  test_case{ "measure no-op kernel latency chained command",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "measure no-op kernel throuput",
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_e_throughput, { IO_TEST_NOOP_RUN }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
+  },
+  test_case{ "measure no-op kernel latency (polling)",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
+  },
+  test_case{ "measure no-op kernel throuput (polling)",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
+  },
+  test_case{ "measure no-op kernel latency chained command (polling)",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
+  },
+  test_case{ "measure no-op kernel throughput chained command (polling)",
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
 };
 

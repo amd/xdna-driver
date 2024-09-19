@@ -16,8 +16,13 @@
 #define DECLARE_AIE2_MSG(name, op) \
 	DECLARE_XDNA_MSG_COMMON(name, op, MAX_AIE2_STATUS_CODE)
 
-static int aie2_send_mgmt_msg_wait(struct amdxdna_dev_hdl *ndev,
-				   struct xdna_mailbox_msg *msg)
+#define aie2_send_mgmt_msg_wait(ndev, msg) \
+	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0)
+
+static int
+aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
+			       struct xdna_mailbox_msg *msg,
+			       u32 offset)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct xdna_notify *hdl = msg->handle;
@@ -34,7 +39,7 @@ static int aie2_send_mgmt_msg_wait(struct amdxdna_dev_hdl *ndev,
 		ndev->mgmt_chann = NULL;
 	}
 
-	if (!ret && *hdl->data != AIE2_STATUS_SUCCESS) {
+	if (!ret && hdl->data[offset] != AIE2_STATUS_SUCCESS) {
 		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
 			 msg->opcode, *hdl->data);
 		ret = -EINVAL;
@@ -105,36 +110,6 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 }
 
 #ifdef AMDXDNA_DEVEL
-/* TODO: Delete this. move status to the first word of struct get_telemetry_resp */
-static int aie2_send_mgmt_msg_wait_for_telemetry(struct amdxdna_dev_hdl *ndev,
-						 struct xdna_mailbox_msg *msg)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct xdna_notify *hdl = msg->handle;
-	struct get_telemetry_resp *resp;
-	int ret;
-
-	if (!ndev->mgmt_chann)
-		return -ENODEV;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
-	if (ret == -ETIME) {
-		xdna_mailbox_stop_channel(ndev->mgmt_chann);
-		xdna_mailbox_destroy_channel(ndev->mgmt_chann);
-		ndev->mgmt_chann = NULL;
-	}
-
-	resp = (struct get_telemetry_resp *)hdl->data;
-	if (!ret && resp->status != AIE2_STATUS_SUCCESS) {
-		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
-			 msg->opcode, resp->status);
-		ret = -EINVAL;
-	}
-
-	return ret;
-}
-
 int aie2_get_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, u32 size)
 {
 	DECLARE_AIE2_MSG(get_telemetry, MSG_OP_GET_TELEMETRY);
@@ -150,7 +125,7 @@ int aie2_get_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, 
 	req.buf_size = size;
 	req.type = type;
 
-	ret = aie2_send_mgmt_msg_wait_for_telemetry(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait_offset(ndev, &msg, XDNA_STATUS_OFFSET(get_telemetry));
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get telemetry, ret %d", ret);
 		return ret;
@@ -249,6 +224,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 {
 	DECLARE_AIE2_MSG(create_ctx, MSG_OP_CREATE_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
+	enum xdna_mailbox_channel_type type;
 	struct xdna_mailbox_chann_res x2i;
 	struct xdna_mailbox_chann_res i2x;
 	struct cq_pair *cq_pair;
@@ -287,8 +263,12 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	}
 
 	intr_reg = i2x.mb_head_ptr_reg + 4;
+	if (aie2_pm_is_turbo(ndev))
+		type = MB_CHANNEL_USER_POLL;
+	else
+		type = MB_CHANNEL_USER_NORMAL;
 	hwctx->priv->mbox_chann = xdna_mailbox_create_channel(ndev->mbox, &x2i, &i2x,
-							      intr_reg, ret);
+							      intr_reg, ret, type);
 	if (!hwctx->priv->mbox_chann) {
 		XDNA_ERR(xdna, "not able to create channel");
 		ret = -EINVAL;

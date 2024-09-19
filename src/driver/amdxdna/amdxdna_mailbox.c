@@ -52,8 +52,11 @@
 
 #ifdef AMDXDNA_DEVEL
 int mailbox_polling;
-module_param(mailbox_polling, int, 0644);
-MODULE_PARM_DESC(mailbox_polling, "0:interrupt(default); >0:poll interval in ms; <0: busy poll");
+module_param(mailbox_polling, int, 0444);
+MODULE_PARM_DESC(mailbox_polling, "<=0:interrupt(default); >0:poll interval in ms; <0: busy poll");
+#define MB_DEFAULT_NO_POLL (mailbox_polling <= 0)
+#define MB_PERIODIC_POLL   (mailbox_polling > 0)
+#define MB_FORCE_USER_POLL   (mailbox_polling < 0)
 
 #define MB_TIMER_JIFF msecs_to_jiffies(mailbox_polling)
 #endif
@@ -70,39 +73,39 @@ struct mailbox {
 	/* protect channel list */
 	struct mutex		mbox_lock;
 	struct list_head        chann_list;
-#ifdef AMDXDNA_DEVEL
+	struct list_head        poll_chann_list;
 	struct task_struct	*polld;
 	struct wait_queue_head	poll_wait;
 	bool			sent_msg; /* For polld */
-#endif
-
 #if defined(CONFIG_DEBUG_FS)
 	struct list_head        res_records;
 #endif /* CONFIG_DEBUG_FS */
-
 };
 
 #if defined(CONFIG_DEBUG_FS)
 struct mailbox_res_record {
+	enum xdna_mailbox_channel_type	type;
 	struct list_head		re_entry;
 	struct xdna_mailbox_chann_res	re_x2i;
 	struct xdna_mailbox_chann_res	re_i2x;
 	int				re_irq;
+	int				active;
 };
 #endif /* CONFIG_DEBUG_FS */
 
 struct mailbox_channel {
 	struct mailbox			*mb;
 #if defined(CONFIG_DEBUG_FS)
-	struct list_head		chann_entry;
 	struct mailbox_res_record	*record;
 #endif
+	struct list_head		chann_entry;
 	struct xdna_mailbox_chann_res	res[CHAN_RES_NUM];
 	int				msix_irq;
+	u32				x2i_tail;
 	u32				iohub_int_addr;
+	enum xdna_mailbox_channel_type	type;
 	struct idr			chan_idr;
 	spinlock_t			chan_idr_lock; /* protect idr operations */
-	u32				x2i_tail;
 
 	/* Received msg related fields */
 	struct workqueue_struct		*work_q;
@@ -163,17 +166,23 @@ static u32 mailbox_reg_read(struct mailbox_channel *mb_chann, u32 mbox_reg)
 static int mailbox_tail_read_non_zero(struct mailbox_channel *mb_chann, u32 *val)
 {
 	u32 mbox_reg = mb_chann->res[CHAN_RES_I2X].mb_tail_ptr_reg;
+	u32 ringbuf_size = mb_chann->res[CHAN_RES_I2X].rb_size;
 	struct xdna_mailbox_res *mb_res = &mb_chann->mb->res;
 	u64 ringbuf_addr = mb_res->mbox_base + mbox_reg;
-	int ret, value;
+	int ret, tail;
 
-	/* Poll till value is not zero */
-	ret = readx_poll_timeout(ioread32, (void *)ringbuf_addr, value,
-				 value, 1 /* us */, 100);
+	/* Poll till tail is not zero */
+	ret = readx_poll_timeout(ioread32, (void *)ringbuf_addr, tail,
+				 tail, 0 /* tight-loops */, 100 /* us timeout */);
 	if (ret < 0)
 		return ret;
 
-	*val = value;
+	if (unlikely(tail > ringbuf_size || !IS_ALIGNED(tail, 4))) {
+		MB_WARN_ONCE(mb_chann, "Invalid tail 0x%x", tail);
+		return -EINVAL;
+	}
+
+	*val = tail;
 	return 0;
 }
 
@@ -350,6 +359,12 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 	return ret;
 }
 
+/*
+ * mailbox_get_msg() is the key function to get message from ring buffer.
+ * If it returns 0, means 1 message was consumed.
+ * If it returns -ENOENT, means ring buffer is emtpy.
+ * If it returns other value, means ERROR.
+ */
 static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 {
 	struct xdna_msg_header header;
@@ -360,18 +375,14 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	u64 read_addr;
 	int ret;
 
-	if (mailbox_tail_read_non_zero(mb_chann, &tail)) {
+	ret = mailbox_tail_read_non_zero(mb_chann, &tail);
+	if (ret) {
 		MB_WARN_ONCE(mb_chann, "Zero tail too long");
-		return -EINVAL;
+		return ret;
 	}
 	head = mb_chann->i2x_head;
 	ringbuf_size = mailbox_get_ringbuf_size(mb_chann, CHAN_RES_I2X);
 	start_addr = mb_chann->res[CHAN_RES_I2X].rb_start_addr;
-
-	if (unlikely(tail > ringbuf_size || !IS_ALIGNED(tail, 4))) {
-		MB_WARN_ONCE(mb_chann, "Invalid tail 0x%x", tail);
-		return -EINVAL;
-	}
 
 	/* ringbuf empty */
 	if (head == tail)
@@ -390,9 +401,17 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 				     head, tail);
 			return -EINVAL;
 		}
-		mailbox_set_headptr(mb_chann, 0);
-		ret = 0;
-		goto done;
+
+		/* Read from beginning of ringbuf */
+		head = 0;
+		ret = mailbox_tail_read_non_zero(mb_chann, &tail);
+		if (ret) {
+			MB_WARN_ONCE(mb_chann, "Hit tombstone, re-read tail failed");
+			return -EINVAL;
+		}
+		/* Re-peek size of the message */
+		read_addr = mb_chann->mb->res.ringbuf_base + start_addr;
+		header.total_size = ioread32((void *)read_addr);
 	}
 
 	if (unlikely(!header.total_size || !IS_ALIGNED(header.total_size, 4))) {
@@ -418,8 +437,6 @@ static inline int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	/* After update head, it can equal to ringbuf_size. This is expected. */
 	trace_mbox_set_head(MAILBOX_NAME, mb_chann->msix_irq,
 			    header.opcode, header.id);
-
-done:
 	return ret;
 }
 
@@ -429,6 +446,7 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 	int ret;
 
 	mb_chann = container_of(rx_work, struct mailbox_channel, rx_work);
+	trace_mbox_rx_worker(MAILBOX_NAME, mb_chann->msix_irq);
 
 	if (READ_ONCE(mb_chann->bad_state)) {
 		MB_ERR(mb_chann, "Channel in bad state, work aborted");
@@ -461,6 +479,8 @@ static irqreturn_t mailbox_irq_handler(int irq, void *p)
 	int i;
 
 	trace_mbox_irq_handle(MAILBOX_NAME, irq);
+	if (mb_chann->type == MB_CHANNEL_USER_POLL)
+		return IRQ_HANDLED;
 	/* Clear IOHUB register */
 	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
 	/* Schedule a rx_work to call the callback functions */
@@ -486,13 +506,12 @@ static void mailbox_timer(struct timer_list *t)
 
 	/* The timer mimic interrupt. It is good to reuse irq routine */
 	tail = mailbox_get_tailptr(mb_chann, CHAN_RES_I2X);
-	if (tail) {
-		MB_DBG(mb_chann, "Mimic interrupt...");
+	if (tail)
 		mailbox_irq_handler(0, mb_chann);
-	}
 
 	mod_timer(&mb_chann->timer, jiffies + MB_TIMER_JIFF);
 }
+#endif
 
 static void mailbox_polld_handle_chann(struct mailbox_channel *mb_chann)
 {
@@ -546,7 +565,10 @@ static bool mailbox_polld_event(struct mailbox *mb)
 	struct mailbox_channel *mb_chann;
 
 	mutex_lock(&mb->mbox_lock);
-	list_for_each_entry(mb_chann, &mb->chann_list, chann_entry) {
+	list_for_each_entry(mb_chann, &mb->poll_chann_list, chann_entry) {
+		if (mb_chann->type == MB_CHANNEL_MGMT)
+			break;
+
 		if (mailbox_channel_no_msg(mb_chann))
 			continue;
 
@@ -575,13 +597,11 @@ static int mailbox_polld(void *data)
 			continue;
 
 		mutex_lock(&mb->mbox_lock);
-		if (unlikely(list_empty(&mb->chann_list))) {
-			mutex_unlock(&mb->mbox_lock);
-			continue;
-		}
-
 		chann_all_empty = true;
-		list_for_each_entry(mb_chann, &mb->chann_list, chann_entry) {
+		list_for_each_entry(mb_chann, &mb->poll_chann_list, chann_entry) {
+			if (mb_chann->type == MB_CHANNEL_MGMT)
+				break;
+
 			if (mailbox_channel_no_msg(mb_chann))
 				continue;
 
@@ -603,7 +623,6 @@ static int mailbox_polld(void *data)
 
 	return 0;
 }
-#endif
 
 int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 			  const struct xdna_mailbox_msg *msg, u64 tx_timeout)
@@ -670,10 +689,8 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 		goto release_id;
 	}
 
-#ifdef AMDXDNA_DEVEL
-	if (mb_chann->mb->polld)
+	if (mb_chann->type == MB_CHANNEL_USER_POLL)
 		mailbox_polld_wakeup(mb_chann->mb);
-#endif
 	return 0;
 
 release_id:
@@ -684,42 +701,75 @@ msg_id_failed:
 }
 
 #if defined(CONFIG_DEBUG_FS)
+static struct mailbox_res_record *
+xdna_mailbox_get_record(struct mailbox *mb, int mb_irq,
+			const struct xdna_mailbox_chann_res *x2i,
+			const struct xdna_mailbox_chann_res *i2x,
+			enum xdna_mailbox_channel_type type)
+{
+	struct mailbox_res_record *record;
+	int record_found = 0;
+
+	mutex_lock(&mb->mbox_lock);
+	list_for_each_entry(record, &mb->res_records, re_entry) {
+		if (record->re_irq != mb_irq)
+			continue;
+
+		record_found = 1;
+		break;
+	}
+
+	if (record_found) {
+		record->type = type;
+		goto found;
+	}
+
+	record = kzalloc(sizeof(*record), GFP_KERNEL);
+	if (!record)
+		goto out;
+	list_add_tail(&record->re_entry, &mb->res_records);
+	record->re_irq = mb_irq;
+
+found:
+	record->type = type;
+	memcpy(&record->re_x2i, x2i, sizeof(*x2i));
+	memcpy(&record->re_i2x, i2x, sizeof(*i2x));
+out:
+	mutex_unlock(&mb->mbox_lock);
+	return record;
+}
+
 int xdna_mailbox_info_show(struct mailbox *mb, struct seq_file *m)
 {
-	static const char ring_fmt[] = "%4d  %3s  %5d  0x%08x  0x%04x  ";
+	static const char ring_fmt[] = "%4d  %3s  %5d  %4d  0x%08x  0x%04x  ";
 	static const char mbox_fmt[] = "0x%08x  0x%08x  0x%04x    0x%04x\n";
 	struct mailbox_res_record *record;
-	struct mailbox_channel *chann;
 
 	/* If below two puts changed, make sure update fmt[] as well */
-	seq_puts(m, "mbox  dir  alive  ring addr   size    ");
+	seq_puts(m, "mbox  dir  alive  type  ring addr   size    ");
 	seq_puts(m, "head ptr    tail ptr    head val  tail val\n");
 
 #define xdna_mbox_dump_queue(_dir, _act) \
-	{ \
-		u32 head_ptr, tail_ptr, head_val, tail_val; \
-		u32 rb_start, rb_size; \
-		u32 mbox_irq; \
-		mbox_irq = record->re_irq; \
-		rb_start = record->re_##_dir.rb_start_addr; \
-		rb_size = record->re_##_dir.rb_size; \
-		head_ptr = record->re_##_dir.mb_head_ptr_reg; \
-		tail_ptr = record->re_##_dir.mb_tail_ptr_reg; \
-		head_val = ioread32((void *)(mb->res.mbox_base + head_ptr)); \
-		tail_val = ioread32((void *)(mb->res.mbox_base + tail_ptr)); \
-		seq_printf(m, ring_fmt, mbox_irq, #_dir, _act, rb_start, rb_size); \
-		seq_printf(m, mbox_fmt, head_ptr, tail_ptr, head_val, tail_val); \
-	}
+{ \
+	u32 head_ptr, tail_ptr, head_val, tail_val; \
+	u32 rb_start, rb_size; \
+	u32 mbox_irq; \
+	u32 type; \
+	type = record->type; \
+	mbox_irq = record->re_irq; \
+	rb_start = record->re_##_dir.rb_start_addr; \
+	rb_size = record->re_##_dir.rb_size; \
+	head_ptr = record->re_##_dir.mb_head_ptr_reg; \
+	tail_ptr = record->re_##_dir.mb_tail_ptr_reg; \
+	head_val = ioread32((void *)(mb->res.mbox_base + head_ptr)); \
+	tail_val = ioread32((void *)(mb->res.mbox_base + tail_ptr)); \
+	seq_printf(m, ring_fmt, mbox_irq, #_dir, _act, type, rb_start, rb_size); \
+	seq_printf(m, mbox_fmt, head_ptr, tail_ptr, head_val, tail_val); \
+}
 	mutex_lock(&mb->mbox_lock);
 	list_for_each_entry(record, &mb->res_records, re_entry) {
-		int active = 0;
-
-		list_for_each_entry(chann, &mb->chann_list, chann_entry) {
-			if (record->re_irq == chann->msix_irq)
-				active = 1;
-		}
-		xdna_mbox_dump_queue(x2i, active);
-		xdna_mbox_dump_queue(i2x, active);
+		xdna_mbox_dump_queue(x2i, record->active);
+		xdna_mbox_dump_queue(i2x, record->active);
 	}
 	mutex_unlock(&mb->mbox_lock);
 
@@ -761,42 +811,17 @@ struct mailbox_channel *
 xdna_mailbox_create_channel(struct mailbox *mb,
 			    const struct xdna_mailbox_chann_res *x2i,
 			    const struct xdna_mailbox_chann_res *i2x,
-			    u32 iohub_int_addr,
-			    int mb_irq)
+			    u32 iohub_int_addr, int mb_irq,
+			    enum xdna_mailbox_channel_type type)
 {
 	struct mailbox_channel *mb_chann;
 	int ret;
 #if defined(CONFIG_DEBUG_FS)
 	struct mailbox_res_record *record;
-	int record_found = 0;
-
-	mutex_lock(&mb->mbox_lock);
-	list_for_each_entry(record, &mb->res_records, re_entry) {
-		if (record->re_irq != mb_irq)
-			continue;
-
-		record_found = 1;
-		break;
-	}
-
-	if (record_found)
-		goto skip_record;
-
-	record = kzalloc(sizeof(*record), GFP_KERNEL);
-	if (!record) {
-		mutex_unlock(&mb->mbox_lock);
-		return NULL;
-	}
-
-	memcpy(&record->re_x2i, x2i, sizeof(*x2i));
-	memcpy(&record->re_i2x, i2x, sizeof(*i2x));
-	record->re_irq = mb_irq;
-
 	/* Record will be released when mailbox device destroy*/
-	list_add_tail(&record->re_entry, &mb->res_records);
-
-skip_record:
-	mutex_unlock(&mb->mbox_lock);
+	record = xdna_mailbox_get_record(mb, mb_irq, x2i, i2x, type);
+	if (!record)
+		return NULL;
 #endif /* CONFIG_DEBUG_FS */
 
 	if (!is_power_of_2(x2i->rb_size) || !is_power_of_2(i2x->rb_size)) {
@@ -809,6 +834,11 @@ skip_record:
 		return NULL;
 
 	mb_chann->mb = mb;
+	mb_chann->type = type;
+#ifdef AMDXDNA_DEVEL
+	if (type != MB_CHANNEL_MGMT && MB_FORCE_USER_POLL)
+		mb_chann->type = MB_CHANNEL_USER_POLL;
+#endif
 	mb_chann->msix_irq = mb_irq;
 	mb_chann->iohub_int_addr = iohub_int_addr;
 	memcpy(&mb_chann->res[CHAN_RES_X2I], x2i, sizeof(*x2i));
@@ -818,10 +848,7 @@ skip_record:
 	idr_init(&mb_chann->chan_idr);
 	mb_chann->x2i_tail = mailbox_get_tailptr(mb_chann, CHAN_RES_X2I);
 	mb_chann->i2x_head = mailbox_get_headptr(mb_chann, CHAN_RES_I2X);
-#ifdef AMDXDNA_DEVEL
-	if (mb->polld)
-		goto skip_irq;
-#endif
+	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
 
 	INIT_WORK(&mb_chann->rx_work, mailbox_rx_worker);
 	mb_chann->work_q = alloc_ordered_workqueue(MAILBOX_NAME, 0);
@@ -831,7 +858,7 @@ skip_record:
 	}
 
 #ifdef AMDXDNA_DEVEL
-	if (mailbox_polling > 0) {
+	if (MB_PERIODIC_POLL) {
 		/* Poll response every few ms. Good for bring up a new device */
 		timer_setup(&mb_chann->timer, mailbox_timer, 0);
 
@@ -853,13 +880,18 @@ skip_irq:
 #endif
 	mb_chann->bad_state = false;
 	mutex_lock(&mb->mbox_lock);
-	list_add(&mb_chann->chann_entry, &mb->chann_list);
-	mutex_unlock(&mb->mbox_lock);
-
+	if (mb_chann->type == MB_CHANNEL_USER_POLL)
+		list_add_tail(&mb_chann->chann_entry, &mb->poll_chann_list);
+	else
+		list_add_tail(&mb_chann->chann_entry, &mb->chann_list);
 #if defined(CONFIG_DEBUG_FS)
 	mb_chann->record = record;
+	record->active = 1;
 #endif
-	MB_DBG(mb_chann, "Mailbox channel created (irq: %d)", mb_chann->msix_irq);
+	mutex_unlock(&mb->mbox_lock);
+
+	MB_DBG(mb_chann, "Mailbox channel created type %d (irq: %d)",
+	       mb_chann->type, mb_chann->msix_irq);
 	return mb_chann;
 
 destroy_wq:
@@ -876,13 +908,13 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
 
 	mutex_lock(&mb_chann->mb->mbox_lock);
 	list_del(&mb_chann->chann_entry);
+#if defined(CONFIG_DEBUG_FS)
+	mb_chann->record->active = 0;
+#endif
 	mutex_unlock(&mb_chann->mb->mbox_lock);
 
 #ifdef AMDXDNA_DEVEL
-	if (mb_chann->mb->polld)
-		goto free_msg;
-
-	if (mailbox_polling > 0)
+	if (MB_PERIODIC_POLL)
 		goto destroy_wq;
 #endif
 	free_irq(mb_chann->msix_irq, mb_chann);
@@ -893,13 +925,11 @@ destroy_wq:
 	destroy_workqueue(mb_chann->work_q);
 	/* We can clean up and release resources */
 
-#ifdef AMDXDNA_DEVEL
-free_msg:
-#endif
 	idr_for_each(&mb_chann->chan_idr, mailbox_release_msg, mb_chann);
 	idr_destroy(&mb_chann->chan_idr);
 
-	MB_DBG(mb_chann, "Mailbox channel destroyed, irq: %d", mb_chann->msix_irq);
+	MB_DBG(mb_chann, "Mailbox channel destroyed type %d irq: %d",
+	       mb_chann->type, mb_chann->msix_irq);
 	kfree(mb_chann);
 	return 0;
 }
@@ -910,10 +940,7 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 		return;
 
 #ifdef AMDXDNA_DEVEL
-	if (mb_chann->mb->polld)
-		return;
-
-	if (mailbox_polling > 0) {
+	if (MB_PERIODIC_POLL) {
 		timer_delete_sync(&mb_chann->timer);
 		goto skip_irq;
 	}
@@ -944,11 +971,13 @@ struct mailbox *xdna_mailbox_create(struct device *dev,
 
 	mutex_init(&mb->mbox_lock);
 	INIT_LIST_HEAD(&mb->chann_list);
-#ifdef AMDXDNA_DEVEL
-	if (mailbox_polling >= 0)
-		goto skip_polld;
+	INIT_LIST_HEAD(&mb->poll_chann_list);
 
-	/* Launch per device busy polling kthread */
+	/*
+	 * The polld kthread will only wakeup and handle those
+	 * MB_CHANNEL_USER_POLL channels. If no thing to do, polld should
+	 * just sleep. It is a per device kthread.
+	 */
 	mb->polld = kthread_run(mailbox_polld, mb, MAILBOX_NAME);
 	if (IS_ERR(mb->polld)) {
 		dev_err(mb->dev, "Failed to create polld ret %ld", PTR_ERR(mb->polld));
@@ -957,8 +986,6 @@ struct mailbox *xdna_mailbox_create(struct device *dev,
 	}
 	init_waitqueue_head(&mb->poll_wait);
 	mb->sent_msg = false;
-skip_polld:
-#endif
 
 #if defined(CONFIG_DEBUG_FS)
 	INIT_LIST_HEAD(&mb->res_records);
@@ -982,18 +1009,11 @@ void xdna_mailbox_destroy(struct mailbox *mb)
 	}
 done_release_record:
 #endif /* CONFIG_DEBUG_FS */
-#ifdef AMDXDNA_DEVEL
-	if (mailbox_polling >= 0)
-		goto skip_polld;
-
 	dev_dbg(mb->dev, "Stopping polld");
 	(void)kthread_stop(mb->polld);
-skip_polld:
-#endif
 
 	mutex_lock(&mb->mbox_lock);
-	if (!list_empty(&mb->chann_list))
-		WARN_ON("Channel not destroy");
+	WARN_ONCE(!list_empty(&mb->chann_list), "Channel not destroy");
 	mutex_unlock(&mb->mbox_lock);
 
 	mutex_destroy(&mb->mbox_lock);

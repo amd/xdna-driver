@@ -47,12 +47,6 @@ aie2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 {
 	int idx;
 
-	/* Special sequence number for oldest fence if exist */
-	if (seq == AMDXDNA_INVALID_CMD_HANDLE) {
-		idx = get_job_idx(hwctx->submitted);
-		goto out;
-	}
-
 	if (seq >= hwctx->submitted)
 		return ERR_PTR(-EINVAL);
 
@@ -60,8 +54,6 @@ aie2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 		return NULL;
 
 	idx = get_job_idx(seq);
-
-out:
 	return hwctx->priv->pending[idx];
 }
 
@@ -230,7 +222,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct dma_fence *fence = job->fence;
 
 	job->hwctx->completed++;
-	trace_xdna_job(&job->base, job->hwctx->name, "signale fence", job->seq);
+	trace_xdna_job(&job->base, job->hwctx->name, "signaling fence", job->seq);
 	dma_fence_signal(fence);
 	dma_fence_put(fence);
 	mmput(job->mm);
@@ -257,7 +249,7 @@ aie2_sched_resp_handler(void *handle, const u32 *data, size_t size)
 	}
 
 	status = *data;
-	XDNA_DBG(job->hwctx->client->xdna, "Resp status 0x%x", status);
+	XDNA_DBG(job->hwctx->client->xdna, "Response status 0x%x", status);
 	if (status == AIE2_STATUS_SUCCESS)
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
 	else
@@ -284,7 +276,7 @@ aie2_sched_nocmd_resp_handler(void *handle, const u32 *data, size_t size)
 	}
 
 	status = *data;
-	XDNA_DBG(job->hwctx->client->xdna, "Resp status 0x%x", status);
+	XDNA_DBG(job->hwctx->client->xdna, "Response status 0x%x", status);
 
 out:
 	aie2_sched_notify(job);
@@ -540,6 +532,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct drm_gpu_scheduler *sched;
 	struct amdxdna_hwctx_priv *priv;
 	struct amdxdna_gem_obj *heap;
+	unsigned int wq_flags;
 	int i, ret;
 
 	priv = kzalloc(sizeof(*hwctx->priv), GFP_KERNEL);
@@ -587,12 +580,21 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	sched = &priv->sched;
 	mutex_init(&priv->io_lock);
-	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
+
+	wq_flags = __WQ_ORDERED;
+	if (!aie2_pm_is_turbo(xdna->dev_handle))
+		wq_flags |= WQ_UNBOUND;
+	priv->submit_wq = alloc_workqueue(hwctx->name, wq_flags, 1);
+	if (!priv->submit_wq) {
+		XDNA_ERR(xdna, "Failed to alloc submit wq");
+		goto free_cmd_bufs;
+	}
+	ret = drm_sched_init(sched, &sched_ops, priv->submit_wq, DRM_SCHED_PRIORITY_COUNT,
 			     HWCTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT,
 			     NULL, NULL, hwctx->name, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
-		goto free_cmd_bufs;
+		goto free_wq;
 	}
 
 	ret = drm_sched_entity_init(&priv->entity, DRM_SCHED_PRIORITY_NORMAL,
@@ -645,6 +647,8 @@ free_entity:
 	drm_sched_entity_destroy(&priv->entity);
 free_sched:
 	drm_sched_fini(&priv->sched);
+free_wq:
+	destroy_workqueue(priv->submit_wq);
 free_cmd_bufs:
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
 		if (!priv->cmd_buf[i])
@@ -681,6 +685,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	aie2_hwctx_wait_for_idle(hwctx);
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 	drm_sched_fini(&hwctx->priv->sched);
+	destroy_workqueue(hwctx->priv->submit_wq);
 
 	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
 		job = hwctx->priv->pending[idx];
@@ -964,10 +969,18 @@ retry:
 		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
+again:
 	mutex_lock(&hwctx->priv->io_lock);
 	ret = aie2_hwctx_add_job(hwctx, job);
 	if (ret) {
 		mutex_unlock(&hwctx->priv->io_lock);
+
+		if (ret == -EAGAIN) {
+			// Waiting for the first pending cmd to complete before trying again.
+			int res = aie2_cmd_wait(hwctx, hwctx->submitted - HWCTX_MAX_CMDS, 0);
+			if (!res)
+				goto again;
+		}
 		goto signal_fence;
 	}
 

@@ -51,9 +51,6 @@
 #define NPU1_RT_CFG_VAL_DEBUG_BO_DEFAULT 0
 #define NPU1_RT_CFG_VAL_DEBUG_BO_LARGE   1
 
-#define NPU1_MPNPUCLK_FREQ_MAX  847
-#define NPU1_HCLK_FREQ_MAX      1600
-
 /*fill in the dpm clock frequencies */
 const struct dpm_clk npu1_dpm_clk_table[] = {
 	{400, 800},
@@ -109,9 +106,6 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 		.value_enable = NPU1_RT_CFG_VAL_CLK_GATING_ON,
 		.value_disable = NPU1_RT_CFG_VAL_CLK_GATING_OFF,
 	},
-	.smu_mpnpuclk_freq_max = NPU1_MPNPUCLK_FREQ_MAX,
-	.smu_hclk_freq_max     = NPU1_HCLK_FREQ_MAX,
-	.smu_dpm_max           = 7,
 	.smu_rev = SMU_REVISION_V0,
 	.smu_npu_dpm_clk_table = npu1_dpm_clk_table,
 	.smu_npu_dpm_levels = ARRAY_SIZE(npu1_dpm_clk_table),

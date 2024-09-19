@@ -21,9 +21,16 @@
 #include "aie2_internal.h"
 #endif
 
-int aie2_max_col = XRS_MAX_COL;
-module_param(aie2_max_col, int, 0600);
+uint aie2_max_col = XRS_MAX_COL;
+module_param(aie2_max_col, uint, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
+
+uint aie2_control_flags;
+module_param(aie2_control_flags, uint, 0400);
+MODULE_PARM_DESC(aie2_control_flags,
+		 " Bit " __stringify(AIE2_BIT_BYPASS_POWER_SWITCH) ": Bypass power on/off,"
+		 " Bit " __stringify(AIE2_BIT_BYPASS_SET_FREQ) ": Bypass set freq,"
+		 " Bit " __stringify(AIE2_BIT_BYPASS_FW_LOAD) ": Bypass FW loading");
 
 /*
  * The management mailbox channel is allocated by firmware.
@@ -428,7 +435,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 						       &ndev->mgmt_x2i,
 						       &ndev->mgmt_i2x,
 						       xdna_mailbox_intr_reg,
-						       mgmt_mb_irq);
+						       mgmt_mb_irq, MB_CHANNEL_MGMT);
 	if (!ndev->mgmt_chann) {
 		XDNA_ERR(xdna, "failed to create management mailbox channel");
 		ret = -EINVAL;
@@ -477,6 +484,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	void __iomem * const *tbl;
 	int i, bars, nvec, ret;
 
+	XDNA_DBG(xdna, "Control flags 0x%x", aie2_control_flags);
 	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
 	if (!ndev)
 		return -ENOMEM;
@@ -576,6 +584,7 @@ skip_pasid:
 	aie2_smu_setup(ndev);
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
+	ndev->clk_gate_enabled = true;
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);
@@ -789,7 +798,7 @@ static int aie2_get_firmware_version(struct amdxdna_client *client,
 static int aie2_get_power_mode(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_get_power_mode mode;
+	struct amdxdna_drm_get_power_mode mode = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
 
@@ -986,9 +995,8 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 		return -EFAULT;
 	}
 
-	/* Interpret the given buf->power_mode into the correct power mode*/
 	power_mode = power_state.power_mode;
-	if (power_mode > POWER_MODE_HIGH) {
+	if (power_mode > POWER_MODE_TURBO) {
 		XDNA_ERR(xdna, "Invalid power mode %d", power_mode);
 		return -EINVAL;
 	}

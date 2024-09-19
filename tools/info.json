@@ -1,21 +1,21 @@
 {
 	"copyright": "Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
-		"version": "202420.2.18.101",
+		"version": "202420.2.18.134",
 		"os_rel": "22.04"
 	},
 	"firmwares": [
 		{
 			"device": "npu1",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.4.2.313",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.4.2.329",
 			"pci_device_id": "1502",
 			"pci_revision_id": "00",
-			"version": "1.4.2.313",
+			"version": "1.4.2.329",
 			"fw_name": "npu.sbin"
 		},
 		{
 			"device": "npu2",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_00/npu.sbin.0.7.22.185",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_00/npu.sbin.0.7.22.185",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "00",
 			"version": "0.7.22.185",
@@ -23,18 +23,18 @@
 		},
 		{
 			"device": "npu4",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.0.7.30.20",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.0.7.35.35",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "10",
-			"version": "0.7.30.20",
+			"version": "0.7.35.35",
 			"fw_name": "npu.sbin"
 		},
 		{
 			"device": "npu5",
-			"url": "https://gitlab.freedesktop.org/drm/firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.0.7.30.101",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.0.7.35.139",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "11",
-			"version": "0.7.30.101",
+			"version": "0.7.35.139",
 			"fw_name": "npu.sbin"
 		}
 	]

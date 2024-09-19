@@ -6,7 +6,6 @@
 #include "pcidrv.h"
 #include "shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
-#include "core/common/config_reader.h"
 #include "core/common/trace.h"
 
 namespace {
@@ -35,10 +34,6 @@ namespace {
       return "DRM_IOCTL_AMDXDNA_GET_INFO";
     case DRM_IOCTL_AMDXDNA_SET_STATE:
       return "DRM_IOCTL_AMDXDNA_SET_STATE";
-    case DRM_IOCTL_AMDXDNA_SUBMIT_WAIT:
-      return "DRM_IOCTL_AMDXDNA_SUBMIT_WAIT";
-    case DRM_IOCTL_AMDXDNA_SUBMIT_SIGNAL:
-      return "DRM_IOCTL_AMDXDNA_SUBMIT_SIGNAL";
     case DRM_IOCTL_GEM_CLOSE:
       return "DRM_IOCTL_GEM_CLOSE";
     case DRM_IOCTL_PRIME_HANDLE_TO_FD:
@@ -71,10 +66,6 @@ namespace shim_xdna {
 pdev::
 pdev(std::shared_ptr<const drv> driver, std::string sysfs_name)
   : xrt_core::pci::dev(driver, std::move(sysfs_name))
-  // Default of force_unchained_command should be false once command
-  // chaining is natively supported by driver/firmware.
-  , m_force_unchained_command(xrt_core::config::detail::get_bool_value(
-    "Debug.force_unchained_command", false))
 {
   m_is_ready = true; // We're always ready.
 }
@@ -111,6 +102,8 @@ open() const
     m_dev_fd = fd;
   }
   ++m_dev_users;
+
+  on_first_open();
 }
 
 void
@@ -122,6 +115,8 @@ close() const
 
   --m_dev_users;
   if (m_dev_users == 0) {
+    on_last_close();
+
     // Stop new users of the fd from other threads.
     fd = m_dev_fd;
     m_dev_fd = -1;
@@ -156,13 +151,6 @@ pdev::
 munmap(void* addr, size_t len) const
 {
   ::munmap(addr, len);
-}
-
-bool
-pdev::
-is_force_unchained_command() const
-{
-  return m_force_unchained_command;
 }
 
 } // namespace shim_xdna
