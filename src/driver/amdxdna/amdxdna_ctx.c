@@ -447,27 +447,9 @@ void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx
 	ww_acquire_fini(ctx);
 }
 
-static int amdxdna_add_job_dependency(struct amdxdna_sched_job *job, u32 *sync_obj_hdls,
-				      u64 *sync_obj_pts, u32 sync_obj_cnt)
-{
-	struct amdxdna_client *client = job->hwctx->client;
-	int ret = 0;
-	int i;
-
-	for (i = 0; ret == 0 && i < sync_obj_cnt; i++) {
-		ret = drm_sched_job_add_syncobj_dependency(&job->base, client->filp,
-							   sync_obj_hdls[i], sync_obj_pts[i]);
-	}
-	if (ret) {
-		XDNA_ERR(client->xdna, "Failed to add syncobj (%d@%lld) as dependency, %d",
-			 sync_obj_hdls[i], sync_obj_pts[i], ret);
-	}
-	return ret;
-}
-
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdl, u32 *arg_bo_hdls, u32 arg_bo_cnt,
-		       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt,
+		       u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt,
 		       u32 hwctx_hdl, u64 *seq)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -503,7 +485,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	idx = srcu_read_lock(&client->hwctx_srcu);
 	hwctx = idr_find(&client->hwctx_idr, hwctx_hdl);
 	if (!hwctx) {
-		XDNA_DBG(xdna, "PID %d failed to get hwctx %d",
+		XDNA_ERR(xdna, "PID %d failed to get hwctx %d",
 			 client->pid, hwctx_hdl);
 		ret = -EINVAL;
 		goto unlock_srcu;
@@ -527,15 +509,10 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	}
 	kref_init(&job->refcnt);
 
-	ret = amdxdna_add_job_dependency(job, sync_obj_hdls, sync_obj_pts, sync_obj_cnt);
+	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, syncobj_hdls,
+					      syncobj_points, syncobj_cnt, seq);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to add dependency, ret %d", ret);
-		goto put_fence;
-	}
-
-	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, seq);
-	if (ret) {
-		XDNA_DBG(xdna, "Submit cmds failed, ret %d", ret);
+		XDNA_ERR(xdna, "Submit cmds failed, ret %d", ret);
 		goto put_fence;
 	}
 
@@ -611,9 +588,9 @@ static int amdxdna_drm_submit_dependency(struct amdxdna_client *client,
 					 struct amdxdna_drm_exec_cmd *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	u32 *sync_obj_hdls;
-	u64 *sync_obj_pts;
-	u32 sync_obj_cnt;
+	u32 *syncobj_hdls;
+	u64 *syncobj_pts;
+	u32 syncobj_cnt;
 	void *argbuf;
 	int ret;
 
@@ -626,30 +603,30 @@ static int amdxdna_drm_submit_dependency(struct amdxdna_client *client,
 			 args->cmd_count, args->arg_count);
 		return -EINVAL;
 	}
-	sync_obj_cnt = args->arg_count;
+	syncobj_cnt = args->arg_count;
 
-	argbuf = kcalloc(sync_obj_cnt, sizeof(u32) + sizeof(u64), GFP_KERNEL);
+	argbuf = kcalloc(syncobj_cnt, sizeof(u32) + sizeof(u64), GFP_KERNEL);
 	if (!argbuf)
 		return -ENOMEM;
-	sync_obj_hdls = argbuf;
-	sync_obj_pts = (u64 *)(sync_obj_hdls + sync_obj_cnt);
+	syncobj_hdls = argbuf;
+	syncobj_pts = (u64 *)(syncobj_hdls + syncobj_cnt);
 
-	ret = copy_from_user(sync_obj_hdls, u64_to_user_ptr(args->cmd_handles),
-			     sync_obj_cnt * sizeof(u32));
+	ret = copy_from_user(syncobj_hdls, u64_to_user_ptr(args->cmd_handles),
+			     syncobj_cnt * sizeof(u32));
 	if (ret) {
 		ret = -EFAULT;
 		goto done;
 	}
-	ret = copy_from_user(sync_obj_pts, u64_to_user_ptr(args->args),
-			     sync_obj_cnt * sizeof(u64));
+	ret = copy_from_user(syncobj_pts, u64_to_user_ptr(args->args),
+			     syncobj_cnt * sizeof(u64));
 	if (ret) {
 		ret = -EFAULT;
 		goto done;
 	}
 
 	ret = amdxdna_cmd_submit(client, OP_NOOP, AMDXDNA_INVALID_BO_HANDLE, NULL, 0,
-				 sync_obj_hdls, sync_obj_pts, sync_obj_cnt,
-				 args->hwctx,&args->seq);
+				 syncobj_hdls, syncobj_pts, syncobj_cnt,
+				 args->hwctx, &args->seq);
 
 done:
 	kfree(argbuf);
@@ -661,12 +638,12 @@ done:
 static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 				     struct amdxdna_drm_exec_cmd *args)
 {
-	u32 sync_obj_hdl = (u32)args->cmd_handles;
+	u32 syncobj_hdl = (u32)args->cmd_handles;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct dma_fence_chain *chain = NULL;
 	struct dma_fence *ofence = NULL;
-	u64 sync_obj_pt = args->args;
-	struct drm_syncobj *sync_obj;
+	u64 syncobj_pt = args->args;
+	struct drm_syncobj *syncobj;
 	u32 hwctx_hdl = args->hwctx;
 	struct amdxdna_hwctx *hwctx;
 	int ret = 0;
@@ -678,30 +655,25 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 		return -EINVAL;
 	}
 
-	sync_obj = drm_syncobj_find(client->filp, sync_obj_hdl);
-	if (!sync_obj) {
-		XDNA_ERR(xdna, "Syncobj %d not found", sync_obj_hdl);
+	syncobj = drm_syncobj_find(client->filp, syncobj_hdl);
+	if (!syncobj) {
+		XDNA_ERR(xdna, "Syncobj %d not found", syncobj_hdl);
 		return -ENOENT;
 	}
 
 	idx = srcu_read_lock(&client->hwctx_srcu);
 
-	ret = drm_syncobj_find_fence(client->filp, sync_obj_hdl, sync_obj_pt, 0, &ofence);
+	ret = drm_syncobj_find_fence(client->filp, syncobj_hdl, syncobj_pt, 0, &ofence);
 	if (!ret) {
-		XDNA_DBG(xdna, "Signal for syncobj %d@%lld is already submitted",
-			 sync_obj_hdl, sync_obj_pt);
-		ret = -EINVAL;
+		XDNA_ERR(xdna, "Signal for syncobj %d@%lld is already submitted",
+			 syncobj_hdl, syncobj_pt);
 		goto out;
 	}
+	ret = 0;
 
 	hwctx = idr_find(&client->hwctx_idr, hwctx_hdl);
 	if (!hwctx) {
-		XDNA_DBG(xdna, "PID %d failed to get hwctx %d", client->pid, hwctx_hdl);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (!hwctx->submitted) {
-		XDNA_DBG(xdna, "Submitting signal without first execute anything?");
+		XDNA_ERR(xdna, "PID %d failed to get hwctx %d", client->pid, hwctx_hdl);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -717,18 +689,18 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 	else
 		ofence = dma_fence_get_stub();
 	if (unlikely(!ofence)) {
-		XDNA_DBG(xdna, "Can't find last submitted job");
+		XDNA_ERR(xdna, "Can't find last submitted job");
 		ret = -ENOENT;
 		goto out;
 	}
 	
-	drm_syncobj_add_point(sync_obj, chain, ofence, sync_obj_pt);
+	drm_syncobj_add_point(syncobj, chain, ofence, syncobj_pt);
 	chain = NULL;
 
 out:
 	dma_fence_chain_free(chain);
 	dma_fence_put(ofence);
-	drm_syncobj_put(sync_obj);
+	drm_syncobj_put(syncobj);
 	srcu_read_unlock(&client->hwctx_srcu, idx);
 	return ret;
 }

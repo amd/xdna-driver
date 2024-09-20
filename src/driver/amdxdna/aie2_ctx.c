@@ -918,7 +918,30 @@ put_mm:
 	return ret;
 }
 
-int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
+static int aie2_add_job_dependency(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
+				   u64 *syncobj_points, u32 syncobj_cnt)
+{
+	struct amdxdna_client *client = job->hwctx->client;
+	int ret = 0;
+	u32 hdl;
+	u64 pt;
+	int i;
+
+	for (i = 0; ret == 0 && i < syncobj_cnt; i++) {
+		hdl = syncobj_hdls[i];
+		pt = syncobj_points[i];
+		ret = drm_sched_job_add_syncobj_dependency(&job->base, client->filp, hdl, pt);
+		if (ret) {
+			XDNA_ERR(client->xdna,
+				 "Failed to add syncobj (%d@%lld) as dependency, ret %d",
+				 hdl, pt, ret);
+		}
+	}
+	return ret;
+}
+
+int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
@@ -934,6 +957,12 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 
 	drm_sched_job_arm(&job->base);
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
+
+	ret = aie2_add_job_dependency(job, syncobj_hdls, syncobj_points, syncobj_cnt);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to add dependency, ret %d", ret);
+		goto put_fence;
+	}
 
 retry:
 	ret = amdxdna_lock_objects(job, &acquire_ctx);

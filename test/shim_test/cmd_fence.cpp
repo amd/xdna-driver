@@ -34,7 +34,7 @@ private:
   void
   run_test_parent() override
   {
-    msg("test started...");
+    msg("user fence test started...");
 
     ipc_data idata = {};
     if (!recv_ipc_data(&idata, sizeof(idata)))
@@ -45,17 +45,11 @@ private:
     auto wfence = dev->import_fence(idata.pid, idata.whdl);
     auto sfence = dev->import_fence(idata.pid, idata.shdl);
 
-    msg("Waiting for fence fd %d", idata.whdl);
     wfence->wait(0);
-    msg("Signaling fence fd %d", idata.shdl);
     sfence->signal();
-    msg("Waiting for fence fd %d", idata.whdl);
     wfence->wait(0);
-    msg("Signaling fence fd %d", idata.shdl);
     sfence->signal();
-    msg("Waiting for fence fd %d", idata.whdl);
     wfence->wait(0);
-    msg("Signaling fence fd %d", idata.shdl);
     sfence->signal();
 
     bool success = true;
@@ -65,7 +59,7 @@ private:
   void
   run_test_child() override
   {
-    msg("test started...");
+    msg("user fence test started...");
 
     auto dev = get_userpf_device(get_dev_id());
     auto sfence = dev->create_fence(fence_handle::access_mode::process);
@@ -75,17 +69,11 @@ private:
     ipc_data idata = { getpid(), sshare->get_export_handle(), wshare->get_export_handle() };
     send_ipc_data(&idata, sizeof(idata));
 
-    msg("Signaling fence fd %d", idata.whdl);
     wfence->signal();
-    msg("Waiting for fence fd %d", idata.shdl);
     sfence->wait(0);
-    msg("Signaling fence fd %d", idata.whdl);
     wfence->signal();
-    msg("Waiting for fence fd %d", idata.shdl);
     sfence->wait(0);
-    msg("Signaling fence fd %d", idata.whdl);
     wfence->signal();
-    msg("Waiting for fence fd %d", idata.shdl);
     sfence->wait(0);
 
     bool success;
@@ -108,7 +96,7 @@ private:
   void
   run_test_parent() override
   {
-    msg("test started...");
+    msg("device fence test started...");
 
     ipc_data idata = {};
     if (!recv_ipc_data(&idata, sizeof(idata)))
@@ -117,10 +105,14 @@ private:
 
     auto dev = get_userpf_device(get_dev_id());
     auto fence = dev->import_fence(idata.pid, idata.hdl);
+    const std::vector<xrt_core::fence_handle*> wfences{fence.get()};
+    const std::vector<xrt_core::fence_handle*> sfences{};
 
     auto wrk = get_xclbin_workspace(dev.get());
     io_test_bo_set boset{dev.get(), wrk + "/data/"};
-    boset.run(fence.get());
+    boset.run(wfences, sfences, false);
+    boset.run(wfences, sfences, false);
+    boset.run(wfences, sfences, false);
 
     bool success = true;
     send_ipc_data(&success, sizeof(success));
@@ -129,17 +121,24 @@ private:
   void
   run_test_child() override
   {
-    msg("test started...");
+    msg("device fence test started...");
 
     auto dev = get_userpf_device(get_dev_id());
     auto fence = dev->create_fence(fence_handle::access_mode::process);
+    const std::vector<xrt_core::fence_handle*> sfences{fence.get()};
+    const std::vector<xrt_core::fence_handle*> wfences{};
     auto share = fence->share();
     ipc_data idata = { getpid(), share->get_export_handle() };
     send_ipc_data(&idata, sizeof(idata));
 
     hw_ctx hwctx{dev.get()};
     auto hwq = hwctx.get()->get_hw_queue();
+
+    auto wrk = get_xclbin_workspace(dev.get());
+    io_test_bo_set boset{dev.get(), wrk + "/data/"};
     hwq->submit_signal(fence.get());
+    boset.run(wfences, sfences, false);
+    boset.run(wfences, sfences, false);
 
     bool success;
     recv_ipc_data(&success, sizeof(success));

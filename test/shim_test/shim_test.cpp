@@ -547,7 +547,7 @@ std::vector<test_case> test_list {
   test_case{ "txn elf flow",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_txn_elf_flow, {}
   },
-  test_case{ "Cmd fencing (host side)",
+  test_case{ "Cmd fencing (user space side)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_host, {}
   },
   test_case{ "npu3 shim move memory tiles",
@@ -580,7 +580,7 @@ std::vector<test_case> test_list {
   test_case{ "measure no-op kernel throughput chained command (polling)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "Cmd fencing (device side)",
+  test_case{ "Cmd fencing (driver side)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
   },
 };
