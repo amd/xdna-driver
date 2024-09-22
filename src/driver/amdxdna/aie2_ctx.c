@@ -1074,15 +1074,11 @@ struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_hwctx *hwctx, u64 seq)
 
 	mutex_lock(&hwctx->priv->io_lock);
 	job = aie2_hwctx_get_job(hwctx, seq);
-	if (IS_ERR(job)) {
+	if (IS_ERR_OR_NULL(job)) {
 		mutex_unlock(&hwctx->priv->io_lock);
-		return (struct dma_fence *)job;
+		return ERR_CAST(job);
 	}
 
-	if (unlikely(!job)) {
-		mutex_unlock(&hwctx->priv->io_lock);
-		return NULL;
-	}
 	out_fence = dma_fence_get(job->out_fence);
 	mutex_unlock(&hwctx->priv->io_lock);
 	return out_fence;
