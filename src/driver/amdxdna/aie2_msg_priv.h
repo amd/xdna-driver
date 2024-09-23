@@ -433,8 +433,8 @@ struct sync_bo_resp {
 struct config_debug_bo_req {
 	u64	offset;
 	u64	size;
-#define REGISTER   0
-#define UNREGISTER 1
+#define UNREGISTER 0
+#define REGISTER   1
 	u32	config;
 } __packed;
 
