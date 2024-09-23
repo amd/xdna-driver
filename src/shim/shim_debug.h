@@ -46,6 +46,16 @@ shim_debug(const char* fmt, Args&&... args)
 #endif
 }
 
+template <typename ...Args>
+void
+shim_info(const char* fmt, Args&&... args)
+{
+  std::string format = "PID(%d): ";
+  format += std::string(fmt);
+  format += "\n";
+  XRT_PRINTF(format.c_str(), getpid(), std::forward<Args>(args)...);
+}
+
 }
 
 #endif // SHIM_DEBUG_H

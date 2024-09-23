@@ -40,34 +40,34 @@ TRACE_EVENT(amdxdna_debug_point,
 );
 
 TRACE_EVENT(xdna_job,
-	    TP_PROTO(struct drm_sched_job *sched_job, const char *name, const char *str, u64 seq),
+	    TP_PROTO(struct drm_sched_job *sched_job, const char *name, const char *str, u64 seq, u32 op),
 
-	    TP_ARGS(sched_job, name, str, seq),
+	    TP_ARGS(sched_job, name, str, seq, op),
 
 	    TP_STRUCT__entry(__string(name, name)
 			     __string(str, str)
 			     __field(u64, fence_context)
 			     __field(u64, fence_seqno)
-			     __field(u64, seq)),
+			     __field(u64, seq)
+			     __field(u32, op)),
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
 	    TP_fast_assign(__assign_str(name, name);
 			   __assign_str(str, str);
-			   __entry->fence_context = sched_job->s_fence->finished.context;
-			   __entry->fence_seqno = sched_job->s_fence->finished.seqno;
-			   __entry->seq = seq;),
 #else
 	    TP_fast_assign(__assign_str(name);
 			   __assign_str(str);
+#endif
 			   __entry->fence_context = sched_job->s_fence->finished.context;
 			   __entry->fence_seqno = sched_job->s_fence->finished.seqno;
-			   __entry->seq = seq;),
-#endif
+			   __entry->seq = seq;
+			   __entry->op = op;),
 
-	    TP_printk("fence=(context:%llu, seqno:%lld), %s seq#:%lld %s",
+	    TP_printk("fence=(context:%llu, seqno:%lld), %s seq#:%lld %s, op=%d",
 		      __entry->fence_context, __entry->fence_seqno,
 		      __get_str(name), __entry->seq,
-		      __get_str(str))
+		      __get_str(str),
+		      __entry->op)
 );
 
 DECLARE_EVENT_CLASS(xdna_mbox_msg,

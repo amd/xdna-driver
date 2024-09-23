@@ -210,7 +210,8 @@ bo_type2name(int type)
 
 void
 io_test_bo_set::
-run(xrt_core::fence_handle* fence, bool no_check_result)
+run(const std::vector<xrt_core::fence_handle*>& wait_fences,
+  const std::vector<xrt_core::fence_handle*>& signal_fences, bool no_check_result)
 {
   hw_ctx hwctx{m_dev};
   auto hwq = hwctx.get()->get_hw_queue();
@@ -225,9 +226,11 @@ run(xrt_core::fence_handle* fence, bool no_check_result)
 
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto chdl = cbo->get();
-  if (fence)
+  for (const auto& fence : wait_fences)
     hwq->submit_wait(fence);
   hwq->submit_command(chdl);
+  for (const auto& fence : signal_fences)
+    hwq->submit_signal(fence);
   hwq->wait_command(chdl, 5000);
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_COMPLETED)
@@ -242,14 +245,18 @@ void
 io_test_bo_set::
 run()
 {
-  run(nullptr, false);
+  const std::vector<xrt_core::fence_handle*> sfences{};
+  const std::vector<xrt_core::fence_handle*> wfences{};
+  run(wfences, sfences, false);
 }
 
 void
 io_test_bo_set::
 run(bool no_check_result)
 {
-  run(nullptr, no_check_result);
+  const std::vector<xrt_core::fence_handle*> sfences{};
+  const std::vector<xrt_core::fence_handle*> wfences{};
+  run(wfences, sfences, no_check_result);
 }
 
 std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&

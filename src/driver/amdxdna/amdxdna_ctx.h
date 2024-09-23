@@ -139,6 +139,7 @@ struct amdxdna_sched_job {
 #define OP_SYNC_BO		1
 #define OP_REG_DEBUG_BO		2
 #define OP_UNREG_DEBUG_BO	3
+#define OP_NOOP			4
 	u32			opcode;
 	struct amdxdna_gem_obj	*cmd_bo;
 	size_t			bo_cnt;
@@ -232,6 +233,7 @@ int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *c
 void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdls, u32 *arg_bo_hdls, u32 arg_bo_cnt,
+		       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt,
 		       u32 hwctx_hdl, u64 *seq);
 
 int amdxdna_cmd_wait(struct amdxdna_client *client, u32 hwctx_hdl,
