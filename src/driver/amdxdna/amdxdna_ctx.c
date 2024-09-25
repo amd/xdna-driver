@@ -693,7 +693,7 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 		ret = -ENOENT;
 		goto out;
 	}
-	
+
 	drm_syncobj_add_point(syncobj, chain, ofence, syncobj_pt);
 	chain = NULL;
 

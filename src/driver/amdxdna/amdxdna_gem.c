@@ -813,6 +813,57 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	return ret;
 }
 
+static void
+amdxdna_drm_clflush(struct amdxdna_gem_obj *abo, u32 start, u32 size)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	u32 start_page, start_page_off;
+	u32 end_page, end_page_size;
+	u32 end = start + size - 1;
+	u32 pages_in_middle;
+	struct page **pages;
+	void *addr;
+
+	start_page = start >> PAGE_SHIFT;
+	end_page = end >> PAGE_SHIFT;
+	start_page_off = start & ~PAGE_MASK;
+	end_page_size = (end & ~PAGE_MASK) + 1;
+
+	if (abo->type == AMDXDNA_BO_DEV)
+		pages = abo->mem.pages;
+	else
+		pages = abo->base.pages;
+
+	XDNA_DBG(xdna, "Flush range [%d, %d]. page,size: [%d, %d] to [%d, %d]",
+		 start, end, start_page, start_page_off, end_page, end_page_size);
+
+	/* If start and end are on the page, use lightweight kernel API for best
+	 * performance.
+	 */
+	addr = page_to_virt(pages[start_page]);
+	addr = (void *)((u64)addr + start_page_off);
+	if (start_page == end_page) {
+		drm_clflush_virt_range(addr, size);
+		return;
+	}
+
+	/* There are multiple pages */
+	if (start_page_off)
+		drm_clflush_virt_range(addr, PAGE_SIZE - start_page_off);
+	else
+		drm_clflush_pages(&pages[0], 1);
+
+	pages_in_middle = end_page - start_page - 1;
+	if (pages_in_middle)
+		drm_clflush_pages(&pages[1], pages_in_middle);
+
+	addr = page_to_virt(pages[end_page]);
+	if (end_page_size < PAGE_SIZE)
+		drm_clflush_virt_range(addr, end_page_size);
+	else
+		drm_clflush_pages(&pages[end_page], 1);
+}
+
 /*
  * The sync bo ioctl is to make sure the CPU cache is in sync with memory.
  * This is required because NPU is not cache coherent device. CPU cache
@@ -838,20 +889,22 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	}
 	abo = to_xdna_obj(gobj);
 
+	if (gobj->size < args->offset + args->size) {
+		ret = -EINVAL;
+		goto put_obj;
+	}
+
 	ret = amdxdna_gem_pin(abo);
 	if (ret) {
 		XDNA_ERR(xdna, "Pin BO %d failed, ret %d", args->handle, ret);
 		goto put_obj;
 	}
 
-	if (abo->type == AMDXDNA_BO_DEV) {
-		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
-	} else {
-		if (is_import_bo(abo))
-			drm_clflush_sg(abo->base.sgt);
-		else
-			drm_clflush_pages(abo->base.pages, gobj->size >> PAGE_SHIFT);
-	}
+	/* For import bo, still sync whole BO */
+	if (is_import_bo(abo))
+		drm_clflush_sg(abo->base.sgt);
+	else
+		amdxdna_drm_clflush(abo, args->offset, args->size);
 
 	amdxdna_gem_unpin(abo);
 
@@ -877,7 +930,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		ret = amdxdna_cmd_wait(client, hwctx_hdl, seq, 3000 /* ms */);
 	}
 
-	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx, dir %d, hwctx %d\n",
+	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx, dir %d, hwctx %d",
 		 args->handle, args->offset, args->size, args->direction,
 		 abo->assigned_hwctx);
 
