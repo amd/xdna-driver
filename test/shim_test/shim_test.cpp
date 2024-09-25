@@ -309,6 +309,23 @@ TEST_sync_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 }
 
 void
+TEST_sync_bo_off_size(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  auto boflags = static_cast<unsigned int>(arg[0]);
+  auto ext_boflags = static_cast<unsigned int>(arg[1]);
+  auto size = static_cast<size_t>(arg[2]);
+  auto sync_offset = static_cast<size_t>(arg[3]);
+  auto sync_size = static_cast<size_t>(arg[4]);
+  bo bo{sdev.get(), size, boflags, ext_boflags};
+
+  auto start = clk::now();
+  bo.get()->sync(buffer_handle::direction::host2device, sync_size, sync_offset);
+  auto end = clk::now();
+
+  get_speed_and_print("sync", sync_size, start, end);
+}
+
+void
 TEST_map_read_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto dev = sdev.get();
@@ -582,6 +599,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "Cmd fencing (driver side)",
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
+  },
+  test_case{ "sync_bo for input_output 1MiB BO",
+    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_NONE, 0, 0x100000}
+  },
+  test_case{ "sync_bo for input_output 1MiB BO w/ offset and size",
+    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_NONE, 0, 0x100000, 0x1004, 0x3c}
   },
 };
 
