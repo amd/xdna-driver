@@ -20,8 +20,13 @@ all: $(BUILD_ROOT_DIR)
 	$(MAKE) -C $(BUILD_ROOT_DIR)/driver/$(notdir $(SRC_DIR)) modules
 
 # add EXTRA_CFLAGS='-save-temps' to keep intermedia files
+DEFINES := -DAMDXDNA_DEVEL -DAMDXDNA_SHMEM
+ifdef AMDXDNA_DRM_USAGE
+DEFINES += -DAMDXDNA_DRM_USAGE
+endif
+
 modules:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE='-DAMDXDNA_DEVEL -DAMDXDNA_SHMEM' modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" modules
 
 modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install
