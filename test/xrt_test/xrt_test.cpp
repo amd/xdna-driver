@@ -270,12 +270,40 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 }
 
+void
+TEST_xrt_umq_nop(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{nop}"};
+  xrt::run run{kernel};
+
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+}
+
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "npu3 xrt vadd", TEST_xrt_umq_vadd, {} },
   test_case{ "npu3 xrt move memtiles", TEST_xrt_umq_memtiles, {} },
   test_case{ "npu3 xrt ddr_memtile", TEST_xrt_umq_ddr_memtile, {} },
   test_case{ "npu3 xrt remote_barrier", TEST_xrt_umq_remote_barrier, {} },
+  test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
 };
 
 }
