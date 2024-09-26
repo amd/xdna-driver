@@ -109,8 +109,8 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-#ifdef AMDXDNA_DEVEL
-int aie2_get_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, u32 size)
+int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
+			 u32 size, struct aie_version *version)
 {
 	DECLARE_AIE2_MSG(get_telemetry, MSG_OP_GET_TELEMETRY);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -134,9 +134,14 @@ int aie2_get_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, 
 	XDNA_DBG(xdna, "Telemetry type %d major %u minor %u",
 		 type, resp.major, resp.minor);
 
+	if (version) {
+		version->major = resp.major;
+		version->minor = resp.minor;
+	}
+
 	return 0;
 }
-#endif
+
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid)
 {
 	DECLARE_AIE2_MSG(assign_mgmt_pasid, MSG_OP_ASSIGN_MGMT_PASID);
