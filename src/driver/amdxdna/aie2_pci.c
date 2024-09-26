@@ -7,6 +7,8 @@
 #include <linux/kthread.h>
 #include <linux/iommu.h>
 #include <linux/firmware.h>
+#include <linux/uaccess.h>
+#include <drm/drm_cache.h>
 #include "drm_local/amdxdna_accel.h"
 
 #include "aie2_pci.h"
@@ -927,6 +929,56 @@ out:
 	return ret;
 }
 
+static int aie2_get_telemetry(struct amdxdna_client *client,
+			      struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
+	struct aie_version ver;
+	dma_addr_t dma_addr;
+	size_t aligned_sz;
+	void *buff;
+	u32 type;
+	int ret;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
+	if (copy_from_user(&type, u64_to_user_ptr(args->buffer), sizeof(type))) {
+		XDNA_ERR(xdna, "Failed to copy telemetry type from user");
+		return -EFAULT;
+	}
+
+	ndev = xdna->dev_handle;
+	aligned_sz = PAGE_ALIGN(args->buffer_size);
+	buff = dma_alloc_noncoherent(xdna->ddev.dev, aligned_sz, &dma_addr,
+				     DMA_FROM_DEVICE, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	memset(buff, 0, aligned_sz);
+	drm_clflush_virt_range(buff, aligned_sz); /* device can access */
+	/* The first two words of the buffer is reserved for major and minor */
+	ret = aie2_query_telemetry(ndev, type, dma_addr + sizeof(u64), aligned_sz, &ver);
+	if (ret) {
+		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
+		goto free_buf;
+	}
+
+	((u32 *)buff)[0] = ver.major;
+	((u32 *)buff)[1] = ver.minor;
+	print_hex_dump_debug("telemetry: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
+			     aligned_sz, false);
+	if (copy_to_user(u64_to_user_ptr(args->buffer), buff, args->buffer_size))
+		ret = -EFAULT;
+
+free_buf:
+	dma_free_noncoherent(xdna->ddev.dev, aligned_sz, buff, dma_addr, DMA_FROM_DEVICE);
+	return ret;
+}
+
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -967,6 +1019,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_GET_POWER_MODE:
 		ret = aie2_get_power_mode(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_TELEMETRY:
+		ret = aie2_get_telemetry(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -1034,22 +1089,22 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 }
 
 const struct amdxdna_dev_ops aie2_ops = {
-	.mmap           	= NULL,
-	.init           	= aie2_init,
-	.fini           	= aie2_fini,
-	.recover        	= aie2_recover,
-	.resume         	= aie2_hw_start,
-	.suspend        	= aie2_hw_stop,
-	.get_aie_info   	= aie2_get_info,
-	.set_aie_state  	= aie2_set_state,
-	.hwctx_init     	= aie2_hwctx_init,
-	.hwctx_fini     	= aie2_hwctx_fini,
-	.hwctx_config   	= aie2_hwctx_config,
-	.hwctx_suspend  	= aie2_hwctx_suspend,
-	.hwctx_resume   	= aie2_hwctx_resume,
-	.cmd_submit     	= aie2_cmd_submit,
-	.cmd_wait       	= aie2_cmd_wait,
-	.hmm_invalidate 	= aie2_hmm_invalidate,
+	.mmap			= NULL,
+	.init			= aie2_init,
+	.fini			= aie2_fini,
+	.recover		= aie2_recover,
+	.resume			= aie2_hw_start,
+	.suspend		= aie2_hw_stop,
+	.get_aie_info		= aie2_get_info,
+	.set_aie_state		= aie2_set_state,
+	.hwctx_init		= aie2_hwctx_init,
+	.hwctx_fini		= aie2_hwctx_fini,
+	.hwctx_config		= aie2_hwctx_config,
+	.hwctx_suspend		= aie2_hwctx_suspend,
+	.hwctx_resume		= aie2_hwctx_resume,
+	.cmd_submit		= aie2_cmd_submit,
+	.cmd_wait		= aie2_cmd_wait,
+	.hmm_invalidate		= aie2_hmm_invalidate,
 	.debugfs		= aie2_debugfs_init,
 	// TODO: cmd_wait can be removed when all caller move to cmd_get_out_fence
 	.cmd_get_out_fence	= aie2_cmd_get_out_fence,
