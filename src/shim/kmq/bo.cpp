@@ -2,6 +2,7 @@
 // Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
+#include <x86intrin.h>
 
 namespace {
 
@@ -22,6 +23,42 @@ flag_to_type(uint64_t bo_flags)
     break;
   }
   return AMDXDNA_BO_INVALID;
+}
+
+long cacheline_size = 0;
+
+// flash cache line for non coherence memory
+inline void
+clflush_data(const void *base, size_t offset, size_t len)
+{
+  if (!cacheline_size) {
+    long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+    if (sz <= 0)
+      shim_err(EINVAL, "Invalid cache line size: %ld", sz);
+    cacheline_size = sz;
+  }
+
+  const char *cur = (const char *)base;
+  cur += offset;
+  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
+  do {
+    _mm_clflush(cur);
+    cur += cacheline_size;
+  } while (cur <= (const char *)lastline);
+}
+
+void
+sync_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, xrt_core::buffer_handle::direction dir,
+  size_t offset, size_t len)
+{
+  amdxdna_drm_sync_bo sbo = {
+    .handle = boh,
+    .direction = (dir == xrt_core::buffer_handle::direction::host2device ?
+      SYNC_DIRECT_TO_DEVICE : SYNC_DIRECT_FROM_DEVICE),
+    .offset = offset,
+    .size = len,
+  };
+  dev.ioctl(DRM_IOCTL_AMDXDNA_SYNC_BO, &sbo);
 }
 
 }
@@ -96,16 +133,25 @@ bo_kmq::
 
 void
 bo_kmq::
-sync(bo_kmq::direction dir, size_t size, size_t offset)
+sync(direction dir, size_t size, size_t offset)
 {
-  amdxdna_drm_sync_bo sbo = {
-    .handle = m_bo->m_handle,
-    .direction = (dir == shim_xdna::bo::direction::host2device ?
-      SYNC_DIRECT_TO_DEVICE : SYNC_DIRECT_FROM_DEVICE),
-    .offset = offset,
-    .size = size,
-  };
-  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_SYNC_BO, &sbo);
+  if (offset + size > m_aligned_size)
+    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
+
+  switch (m_type) {
+  case AMDXDNA_BO_SHMEM:
+  case AMDXDNA_BO_CMD:
+    clflush_data(m_aligned, offset, size); 
+    break;
+  case AMDXDNA_BO_DEV:
+    if (m_owner_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
+      clflush_data(m_aligned, offset, size); 
+    else
+      sync_drm_bo(m_pdev, get_drm_bo_handle(), dir, offset, size);
+    break;
+  default:
+    shim_err(ENOTSUP, "Can't sync bo type %d", m_type);
+  }
 }
 
 void
