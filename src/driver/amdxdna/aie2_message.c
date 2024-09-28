@@ -131,7 +131,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr
 		return ret;
 	}
 
-	XDNA_DBG(xdna, "Telemetry type %d major %u minor %u",
+	XDNA_DBG(xdna, "Telemetry type %d major %d minor %d",
 		 type, resp.major, resp.minor);
 
 	if (version) {
