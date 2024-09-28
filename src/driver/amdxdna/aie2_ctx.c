@@ -3,6 +3,8 @@
  * Copyright (C) 2024, Advanced Micro Devices, Inc.
  */
 
+#include <linux/timekeeping.h>
+
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_trace.h"
@@ -216,13 +218,17 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 			  hwctx->name, hwctx->status, err);
 }
 
-static inline void
+static void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
+	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence = job->fence;
 
-	job->hwctx->completed++;
-	trace_xdna_job(&job->base, job->hwctx->name, "signaling fence", job->seq, job->opcode);
+#ifdef AMDXDNA_DRM_USAGE
+	amdxdna_update_stats(hwctx->client, ktime_get(), false);
+#endif
+	hwctx->completed++;
+	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
 	mmput(job->mm);
 	amdxdna_job_put(job);
@@ -381,6 +387,10 @@ out:
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	}
+#ifdef AMDXDNA_DRM_USAGE
+	else
+		amdxdna_update_stats(hwctx->client, ktime_get(), true);
+#endif
 
 	return fence;
 }

@@ -11,6 +11,7 @@
 #include <drm/drm_print.h>
 #include <drm/drm_file.h>
 #include <linux/hmm.h>
+#include <linux/timekeeping.h>
 
 #include "amdxdna_ctx.h"
 #ifdef AMDXDNA_SHMEM
@@ -123,6 +124,13 @@ struct amdxdna_dev {
 #endif
 };
 
+struct amdxdna_stats {
+	spinlock_t			lock; /* protect stats */
+	u32				job_depth;
+	ktime_t				busy_time;
+	ktime_t				start_time;
+};
+
 /*
  * struct amdxdna_client - amdxdna client
  * A per fd data structure for managing context and other user process stuffs.
@@ -138,6 +146,7 @@ struct amdxdna_dev {
  * @dev_heap: Shared device heap memory
  * @sva: iommu SVA handle
  * @pasid: PASID
+ * @stats: record npu usage stats
  */
 struct amdxdna_client {
 	struct list_head		node;
@@ -155,6 +164,10 @@ struct amdxdna_client {
 
 	struct iommu_sva		*sva;
 	int				pasid;
+
+	struct amdxdna_stats		stats;
 };
+
+void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start);
 
 #endif /* _AMDXDNA_DRM_H_ */

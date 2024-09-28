@@ -66,6 +66,11 @@ skip_sva_bind:
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
 
+	spin_lock_init(&client->stats.lock);
+	client->stats.job_depth = 0;
+	client->stats.busy_time = ns_to_ktime(0);
+	client->stats.start_time = ns_to_ktime(0);
+
 	filp->driver_priv = client;
 	client->filp = filp;
 
@@ -208,6 +213,44 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 
+void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&client->stats.lock, flags);
+	if (start) {
+		client->stats.job_depth++;
+		if (client->stats.job_depth == 1)
+			client->stats.start_time = time;
+	} else {
+		client->stats.job_depth--;
+		if (client->stats.job_depth == 0)
+			client->stats.busy_time =
+				ktime_add(client->stats.busy_time,
+					  ktime_sub(time, client->stats.start_time));
+	}
+	spin_unlock_irqrestore(&client->stats.lock, flags);
+}
+
+static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	const char *engine_npu_name = "npu-amdxdna";
+	unsigned long flags;
+	u64 busy_ns;
+
+	spin_lock_irqsave(&client->stats.lock, flags);
+	busy_ns = ktime_to_ns(client->stats.busy_time);
+	if (client->stats.job_depth > 0)
+		busy_ns += ktime_to_ns(ktime_sub(ktime_get(), client->stats.start_time));
+	spin_unlock_irqrestore(&client->stats.lock, flags);
+
+	/* see Documentation/gpu/drm-usage-stats.rst */
+	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy_ns);
+
+	drm_show_memory_stats(p, filp);
+}
+
 static const struct file_operations amdxdna_fops = {
 	.owner		= THIS_MODULE,
 	.open		= accel_open,
@@ -218,7 +261,8 @@ static const struct file_operations amdxdna_fops = {
 	.poll		= drm_poll,
 	.read		= drm_read,
 	.llseek		= noop_llseek,
-	.mmap		= amdxdna_drm_gem_mmap
+	.mmap		= amdxdna_drm_gem_mmap,
+	.show_fdinfo	= drm_show_fdinfo,
 };
 
 const struct drm_driver amdxdna_drm_drv = {
@@ -234,6 +278,7 @@ const struct drm_driver amdxdna_drm_drv = {
 	.postclose = amdxdna_drm_close,
 	.ioctls = amdxdna_drm_ioctls,
 	.num_ioctls = ARRAY_SIZE(amdxdna_drm_ioctls),
+	.show_fdinfo = amdxdna_show_fdinfo,
 
 	/* For shmem object create */
 	.gem_create_object = amdxdna_gem_create_object_cb,
