@@ -123,8 +123,8 @@ struct psp_config {
 };
 
 struct aie_version {
-	u16 major;
-	u16 minor;
+	u32 major;
+	u32 minor;
 };
 
 struct aie_tile_metadata {

@@ -2,6 +2,7 @@
 // Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
+#include "core/common/config_reader.h"
 #include <x86intrin.h>
 
 namespace {
@@ -25,12 +26,13 @@ flag_to_type(uint64_t bo_flags)
   return AMDXDNA_BO_INVALID;
 }
 
-long cacheline_size = 0;
 
 // flash cache line for non coherence memory
 inline void
 clflush_data(const void *base, size_t offset, size_t len)
 {
+  static long cacheline_size = 0;
+
   if (!cacheline_size) {
     long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
     if (sz <= 0)
@@ -59,6 +61,18 @@ sync_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, xrt_core::buffer_handle::d
     .size = len,
   };
   dev.ioctl(DRM_IOCTL_AMDXDNA_SYNC_BO, &sbo);
+}
+
+bool
+is_driver_sync()
+{
+  static int drv_sync = -1;
+
+  if (drv_sync == -1) {
+    bool ds = xrt_core::config::detail::get_bool_value("Debug.force_driver_sync", false);
+    drv_sync = ds ? 1 : 0;
+  }
+  return drv_sync == 1;
 }
 
 }
@@ -135,6 +149,11 @@ void
 bo_kmq::
 sync(direction dir, size_t size, size_t offset)
 {
+  if (is_driver_sync()) {
+    sync_drm_bo(m_pdev, get_drm_bo_handle(), dir, offset, size);
+    return;
+  }
+
   if (offset + size > m_aligned_size)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
 
