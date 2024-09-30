@@ -112,7 +112,11 @@ out:
 	 * Even above commands might failed, we still needs to restart DRM
 	 * scheduler, to signal those commands in the pending list.
 	 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	drm_sched_start(&hwctx->priv->sched, true);
+#else
+	drm_sched_start(&hwctx->priv->sched);
+#endif
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
 	return ret;
 }
