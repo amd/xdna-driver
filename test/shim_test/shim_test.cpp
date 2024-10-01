@@ -230,7 +230,18 @@ TEST_query_userpf(device::id_type id, std::shared_ptr<device> sdev, arg_type& ar
 void
 TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  hw_ctx hwctx{sdev.get()};
+  // Close existing device
+  sdev.reset();
+
+  // Try opening device and creating ctx twice
+  {
+    auto dev = get_userpf_device(id);
+    hw_ctx hwctx{dev.get()};
+  }
+  {
+    auto dev = get_userpf_device(id);
+    hw_ctx hwctx{dev.get()};
+  }
 }
 
 void
