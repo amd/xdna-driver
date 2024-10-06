@@ -79,9 +79,9 @@ struct clk_list_info {
 };
 
 struct xrs_action_ops {
-	int (*load)(void *cb_arg, struct xrs_action_load *action);
-	int (*unload)(void *cb_arg);
-	int (*set_dpm_level)(void *cb_arg, u32 dpm_level);
+	int (*load_hwctx)(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
+	int (*unload_hwctx)(struct amdxdna_hwctx *hwctx);
+	int (*set_dpm_level)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 };
 
 /*
@@ -116,7 +116,7 @@ void *xrsm_init(struct init_config *cfg);
  * @hdl:	Resource solver handle obtained from xrs_init()
  * @req:	Input to the Resource solver including request id
  *		and partition metadata.
- * @cb_arg:	callback argument pointer
+ * @hwctx:	The given context
  *
  * Return:	0 when successful.
  *		Or standard error number when failing
@@ -126,7 +126,7 @@ void *xrsm_init(struct init_config *cfg);
  *      the caller's responsibility to lock down XCLBINs and grab
  *      necessary lock.
  */
-int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
+int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_hwctx *hwctx);
 
 /*
  * xrs_release_resource() - Request to free resources for a given context.

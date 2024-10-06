@@ -306,58 +306,10 @@ static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
 
-/* TODO: move below two functions to aie2_ctx.c? */
-static int aie2_set_dpm_level(void *cb_arg, u32 dpm_level)
-{
-	struct amdxdna_hwctx *hwctx = cb_arg;
-	struct amdxdna_dev *xdna;
-	int ret;
-
-	xdna = hwctx->client->xdna;
-
-	ret = aie2_smu_set_dpm_level(xdna->dev_handle, dpm_level);
-	if (ret)
-		XDNA_ERR(xdna, "set dpm level failed, ret %d", ret);
-
-	return ret;
-}
-
-static int aie2_xrs_load(void *cb_arg, struct xrs_action_load *action)
-{
-	struct amdxdna_hwctx *hwctx = cb_arg;
-	struct amdxdna_dev *xdna;
-	int ret;
-
-	xdna = hwctx->client->xdna;
-
-	hwctx->start_col = action->part.start_col;
-	hwctx->num_col = action->part.ncols;
-	ret = aie2_create_context(xdna->dev_handle, hwctx);
-	if (ret)
-		XDNA_ERR(xdna, "create context failed, ret %d", ret);
-
-	return ret;
-}
-
-static int aie2_xrs_unload(void *cb_arg)
-{
-	struct amdxdna_hwctx *hwctx = cb_arg;
-	struct amdxdna_dev *xdna;
-	int ret;
-
-	xdna = hwctx->client->xdna;
-
-	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
-	if (ret)
-		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
-
-	return ret;
-}
-
 static struct xrs_action_ops aie2_xrs_actions = {
-	.load = aie2_xrs_load,
-	.unload = aie2_xrs_unload,
-	.set_dpm_level = aie2_set_dpm_level,
+	.load_hwctx = aie2_xrs_load_hwctx,
+	.unload_hwctx = aie2_xrs_unload_hwctx,
+	.set_dpm_level = aie2_smu_set_dpm_level,
 };
 
 static void aie2_hw_stop(struct amdxdna_dev *xdna)

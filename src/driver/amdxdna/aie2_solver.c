@@ -23,7 +23,7 @@ struct solver_node {
 	u64			rid;		/* Request ID from consumer */
 
 	struct partition_node	*pt_node;
-	void			*cb_arg;
+	struct amdxdna_hwctx	*hwctx;
 	u32			dpm_level;
 	u32			cols_len;
 	u32			start_cols[] __counted_by(cols_len);
@@ -297,7 +297,7 @@ static void fill_load_action(struct solver_state *xrs,
 	action->part.ncols = snode->pt_node->ncols;
 }
 
-int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
+int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_hwctx *hwctx)
 {
 	struct xrs_action_load load_act;
 	struct solver_node *snode;
@@ -322,16 +322,17 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg)
 		return PTR_ERR(snode);
 
 	snode->dpm_level = find_dpm_level(xrs, req);
-	ret = xrs->cfg.actions->set_dpm_level(cb_arg, snode->dpm_level);
+	ret = xrs->cfg.actions->set_dpm_level(hwctx->client->xdna->dev_handle,
+					      snode->dpm_level);
 	if (ret)
 		goto free_node;
 
 	fill_load_action(xrs, snode, &load_act);
-	ret = xrs->cfg.actions->load(cb_arg, &load_act);
+	ret = xrs->cfg.actions->load_hwctx(hwctx, &load_act);
 	if (ret)
 		goto free_node;
 
-	snode->cb_arg = cb_arg;
+	snode->hwctx = hwctx;
 
 	dev_dbg(xrs->cfg.dev, "start col %d ncols %d\n",
 		snode->pt_node->start_col, snode->pt_node->ncols);
@@ -355,7 +356,7 @@ int xrs_release_resource(void *hdl, u64 rid)
 		return -ENODEV;
 	}
 
-	xrs->cfg.actions->unload(node->cb_arg);
+	xrs->cfg.actions->unload_hwctx(node->hwctx);
 	remove_solver_node(&xrs->rgp, node);
 
 	return 0;
