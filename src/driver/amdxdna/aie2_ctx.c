@@ -1115,3 +1115,33 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
 	if (!ret || ret == -ERESTARTSYS)
 		XDNA_ERR(xdna, "Failed to wait for bo, ret %ld", ret);
 }
+
+int aie2_xrs_load_hwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action)
+{
+	struct amdxdna_dev *xdna;
+	int ret;
+
+	xdna = hwctx->client->xdna;
+
+	hwctx->start_col = action->part.start_col;
+	hwctx->num_col = action->part.ncols;
+	ret = aie2_create_context(xdna->dev_handle, hwctx);
+	if (ret)
+		XDNA_ERR(xdna, "create context failed, ret %d", ret);
+
+	return ret;
+}
+
+int aie2_xrs_unload_hwctx(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna;
+	int ret;
+
+	xdna = hwctx->client->xdna;
+
+	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
+	if (ret)
+		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
+
+	return ret;
+}
