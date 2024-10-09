@@ -20,9 +20,6 @@
 #include "amdxdna_devel.h"
 #endif
 
-#define SMU_REVISION_V0 0x0
-#define SMU_REVISION_V1 0x1
-
 #define AIE2_INTERVAL	20000	/* us */
 #define AIE2_TIMEOUT	1000000	/* us */
 
@@ -82,6 +79,13 @@ enum aie2_smu_reg_idx {
 	SMU_RESP_REG,
 	SMU_OUT_REG,
 	SMU_MAX_REGS /* Kepp this at the end */
+};
+
+enum aie2_smu_rev {
+	SMU_REVISION_NONE = 0,
+	SMU_REVISION_NPU1,
+	SMU_REVISION_NPU4,
+	SMU_REVISION_MAX
 };
 
 enum aie2_sram_reg_idx {

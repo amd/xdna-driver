@@ -106,7 +106,7 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 		.value_enable = NPU1_RT_CFG_VAL_CLK_GATING_ON,
 		.value_disable = NPU1_RT_CFG_VAL_CLK_GATING_OFF,
 	},
-	.smu_rev = SMU_REVISION_V0,
+	.smu_rev = SMU_REVISION_NPU1,
 	.smu_npu_dpm_clk_table = npu1_dpm_clk_table,
 	.smu_npu_dpm_levels = ARRAY_SIZE(npu1_dpm_clk_table),
 #ifdef AMDXDNA_DEVEL
