@@ -154,12 +154,20 @@ static int aie2_smu_set_dpm_level_v1(struct amdxdna_dev_hdl *ndev, u32 dpm_level
 	return ret;
 }
 
-int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev)
+// Find out the target level to set, fixed level always gets priority
+static u32 aie2_smu_get_tgt_dpm_level(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->smu.fixed_dpm_level != SMU_DPM_INVALID ?
+		ndev->smu.fixed_dpm_level : ndev->smu.dft_dpm_level;
+}
+
+// Find out what current level is set to
+u32 aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev)
 {
 	return ndev->smu.curr_dpm_level;
 }
 
-int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
+static int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 {
 	int ret;
 
@@ -170,18 +178,33 @@ int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 
 	if (dpm_level > SMU_DPM_MAX(ndev))
 		return -EINVAL;
+	if (dpm_level == ndev->smu.curr_dpm_level)
+		return 0;
 
 	if (!ndev->priv->smu_rev)
 		ret = aie2_smu_set_dpm_level_v0(ndev, dpm_level);
 	else
 		ret = aie2_smu_set_dpm_level_v1(ndev, dpm_level);
-
 	if (!ret) {
 		ndev->smu.curr_dpm_level = dpm_level;
-		XDNA_DBG(ndev->xdna, "The dpm level is set to %d", dpm_level);
+		XDNA_DBG(ndev->xdna, "The current dpm level is set to %d", dpm_level);
 	}
 
 	return ret;
+}
+
+int aie2_smu_set_fixed_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
+{
+	ndev->smu.fixed_dpm_level = dpm_level;
+	XDNA_DBG(ndev->xdna, "The fixed dpm level is %d", dpm_level);
+	return aie2_smu_set_dpm_level(ndev, aie2_smu_get_tgt_dpm_level(ndev));
+}
+
+int aie2_smu_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
+{
+	ndev->smu.dft_dpm_level = dpm_level;
+	XDNA_DBG(ndev->xdna, "The default dpm level is %d", dpm_level);
+	return aie2_smu_set_dpm_level(ndev, aie2_smu_get_tgt_dpm_level(ndev));
 }
 
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
@@ -215,7 +238,6 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev)
 
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev)
 {
-	struct smu *smu = &ndev->smu;
 	int ret;
 
 	ret = aie2_smu_set_power_on(ndev);
@@ -224,9 +246,10 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	ret = aie2_smu_set_dpm_level(ndev, smu->curr_dpm_level);
+	// Restore DPM level to what we set before 
+	ret = aie2_smu_set_dpm_level(ndev, aie2_smu_get_tgt_dpm_level(ndev));
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "Set dpm level failed, ret %d", ret);
+		XDNA_ERR(ndev->xdna, "Restore dpm level failed, ret %d", ret);
 		return ret;
 	}
 
@@ -253,10 +276,9 @@ void aie2_smu_setup(struct amdxdna_dev_hdl *ndev)
 
 	snprintf(smu->mp_npu_clock.name, sizeof(smu->mp_npu_clock.name), "MP-NPU Clock");
 	snprintf(smu->h_clock.name, sizeof(smu->h_clock.name), "H Clock");
+
 	smu->dpm_table = ndev->priv->smu_npu_dpm_clk_table;
 	smu->num_dpm_levels = ndev->priv->smu_npu_dpm_levels;
-	smu->curr_dpm_level = SMU_DPM_MAX(ndev);
-
 	if (!ndev->priv->smu_rev) {
 		u32 npuclk_freq;
 		u32 out;
@@ -268,9 +290,11 @@ void aie2_smu_setup(struct amdxdna_dev_hdl *ndev)
 			XDNA_DBG(ndev->xdna, "Use small DPM table");
 			smu->dpm_table = npu1_hack_dpm_clk_table;
 			smu->num_dpm_levels = ARRAY_SIZE(npu1_hack_dpm_clk_table);
-			smu->curr_dpm_level = SMU_DPM_MAX(ndev);
 		}
 	}
+	smu->dft_dpm_level = SMU_DPM_MAX(ndev);
+	smu->fixed_dpm_level = SMU_DPM_INVALID;
+	smu->curr_dpm_level = SMU_DPM_INVALID;
 
 	smu->mp_npu_clock.max_freq_mhz = SMU_DPM_TABLE_ENTRY(ndev, SMU_DPM_MAX(ndev))->npuclk;
 	smu->h_clock.max_freq_mhz = SMU_DPM_TABLE_ENTRY(ndev, SMU_DPM_MAX(ndev))->hclk;

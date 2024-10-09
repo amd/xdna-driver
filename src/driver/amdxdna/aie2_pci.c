@@ -309,7 +309,7 @@ static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 static struct xrs_action_ops aie2_xrs_actions = {
 	.load_hwctx = aie2_xrs_load_hwctx,
 	.unload_hwctx = aie2_xrs_unload_hwctx,
-	.set_dpm_level = aie2_smu_set_dpm_level,
+	.set_dpm_level = aie2_smu_set_dft_dpm_level,
 };
 
 static void aie2_hw_stop(struct amdxdna_dev *xdna)
