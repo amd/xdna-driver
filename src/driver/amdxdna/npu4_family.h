@@ -115,7 +115,7 @@ extern const u32 npu4_clk_gating_types[NPU4_CLK_GATING_CFG_NUM];
 		.value_enable = NPU4_RT_CFG_VAL_CLK_GATING_ON,					\
 		.value_disable = NPU4_RT_CFG_VAL_CLK_GATING_OFF,				\
 	},											\
-	.smu_rev = SMU_REVISION_V1,								\
+	.smu_rev = SMU_REVISION_NPU4,								\
 	.smu_npu_dpm_clk_table = npu4_dpm_clk_table,						\
 	.smu_npu_dpm_levels = ARRAY_SIZE(npu4_dpm_clk_table)
 

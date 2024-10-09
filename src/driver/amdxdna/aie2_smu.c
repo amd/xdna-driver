@@ -181,7 +181,8 @@ static int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	if (dpm_level == ndev->smu.curr_dpm_level)
 		return 0;
 
-	if (!ndev->priv->smu_rev)
+	/* default is v1 */
+	if (ndev->priv->smu_rev == SMU_REVISION_NPU1)
 		ret = aie2_smu_set_dpm_level_v0(ndev, dpm_level);
 	else
 		ret = aie2_smu_set_dpm_level_v1(ndev, dpm_level);
@@ -211,6 +212,9 @@ int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
+	if (ndev->smu.power_state == SMU_POWER_ON)
+		return 0;
+
 	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_ON, 0, NULL);
 	if (ret)
 		return ret;
@@ -222,6 +226,9 @@ int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
+
+	if (ndev->smu.power_state == SMU_POWER_OFF)
+		return 0;
 
 	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_OFF, 0, NULL);
 	if (ret)
@@ -270,6 +277,45 @@ void aie2_smu_stop(struct amdxdna_dev_hdl *ndev)
 		XDNA_WARN(ndev->xdna, "Power off failed, ret %d", ret);
 }
 
+static void aie2_smu_npu1_hack(struct amdxdna_dev_hdl *ndev)
+{
+	struct smu *smu = &ndev->smu;
+	u32 npuclk_freq;
+	u32 out;
+	int ret;
+
+	/* This function is only for NPU1, do nothing for others */
+	if (ndev->priv->smu_rev != SMU_REVISION_NPU1)
+		return;
+
+	/*
+	 * TODO: We are setting the smu power on here, normally to undo this
+	 * tried smu poweroff before returning. That poweroff didn't work
+	 * especially during the early bootup, so not doing poweroff for now
+	 */
+	ret = aie2_smu_set_power_on(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "%s: Power on failed, ret %d", __func__, ret);
+		return;
+	}
+
+	/*
+	 *  It's a workaround for which DPM table to use on NPU1,
+	 *  set the highest clk, read it back and then reset to default clk
+	 */
+	npuclk_freq = SMU_DPM_TABLE_ENTRY(ndev, SMU_DPM_MAX(ndev))->npuclk;
+	aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, npuclk_freq, &out);
+
+	if (npuclk_freq != out) {
+		XDNA_DBG(ndev->xdna, "Use small DPM table");
+		smu->dpm_table = npu1_hack_dpm_clk_table;
+		smu->num_dpm_levels = ARRAY_SIZE(npu1_hack_dpm_clk_table);
+	}
+
+	npuclk_freq = SMU_DPM_TABLE_ENTRY(ndev, 0)->npuclk;
+	aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, npuclk_freq, NULL);
+}
+
 void aie2_smu_setup(struct amdxdna_dev_hdl *ndev)
 {
 	struct smu *smu = &ndev->smu;
@@ -279,19 +325,10 @@ void aie2_smu_setup(struct amdxdna_dev_hdl *ndev)
 
 	smu->dpm_table = ndev->priv->smu_npu_dpm_clk_table;
 	smu->num_dpm_levels = ndev->priv->smu_npu_dpm_levels;
-	if (!ndev->priv->smu_rev) {
-		u32 npuclk_freq;
-		u32 out;
 
-		/* This is a hack for special NPU1 device */
-		npuclk_freq = SMU_DPM_TABLE_ENTRY(ndev, SMU_DPM_MAX(ndev))->npuclk;
-		aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ, npuclk_freq, &out);
-		if (npuclk_freq != out) {
-			XDNA_DBG(ndev->xdna, "Use small DPM table");
-			smu->dpm_table = npu1_hack_dpm_clk_table;
-			smu->num_dpm_levels = ARRAY_SIZE(npu1_hack_dpm_clk_table);
-		}
-	}
+	/* This is a hack for special NPU1 device */
+	aie2_smu_npu1_hack(ndev);
+
 	smu->dft_dpm_level = SMU_DPM_MAX(ndev);
 	smu->fixed_dpm_level = SMU_DPM_INVALID;
 	smu->curr_dpm_level = SMU_DPM_INVALID;
