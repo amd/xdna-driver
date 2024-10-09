@@ -67,6 +67,7 @@
 	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
 })
 
+#define SMU_DPM_INVALID		0xffffffff
 #define SMU_DPM_MAX(ndev) \
 	((ndev)->smu.num_dpm_levels - 1)
 #define SMU_DPM_TABLE_ENTRY(ndev, level) \
@@ -159,6 +160,8 @@ struct smu {
 	struct clock		mp_npu_clock;
 	struct clock		h_clock;
 	u32			curr_dpm_level;
+	u32			dft_dpm_level;
+	u32			fixed_dpm_level;
 #define SMU_POWER_OFF 0
 #define SMU_POWER_ON  1
 	u32			power_state;
@@ -292,8 +295,9 @@ int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_set_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+u32 aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+int aie2_smu_set_fixed_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 
 /* aie2_psp.c */
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);

@@ -5,16 +5,13 @@
 
 #include "aie2_pci.h"
 
-static int aie2_pm_clock_gating(struct amdxdna_dev_hdl *ndev,
-				enum amdxdna_power_mode_type target)
+static int aie2_pm_set_clock_gating(struct amdxdna_dev_hdl *ndev, bool enable)
 {
 	const struct rt_config_clk_gating *config;
-	bool enable;
 	u32 value;
 	int ret;
 	int i;
 
-	enable = (target != POWER_MODE_TURBO && target != POWER_MODE_HIGH);
 	if (enable == ndev->clk_gate_enabled)
 		return 0;
 
@@ -78,48 +75,53 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 	if (ndev->pw_mode == target)
 		return 0;
 
-	if (target == POWER_MODE_LOW || target == POWER_MODE_MEDIUM)
-		return -EOPNOTSUPP;
-
-	ret = aie2_pm_check_turbo(ndev, ndev->pw_mode, target);
-	if (ret) {
-		XDNA_WARN(xdna, "Change Turbo mode failed");
-		return ret;
-	}
-
 	XDNA_DBG(xdna, "Changing power mode from %d to %d", ndev->pw_mode, target);
 
-	/* TODO:
-	 *switch (ndev->pw_mode) {
-	 *case POWER_MODE_LOW:
-	 *	Set to low DPM level
-	 *case POWER_MODE_MEDIUM:
-	 *	Set to medium DPM level
-	 *case POWER_MODE_HIGH:
-	 *case POWER_MODE_TURBO:
-	 *	Set to highest DPM level
-	 *default:
-	 *	Let driver decides DPM level
-	 *}
-	 */
-
-	ret = aie2_pm_clock_gating(ndev, target);
+	switch (target) {
+	case POWER_MODE_TURBO:
+		ret = aie2_pm_check_turbo(ndev, ndev->pw_mode, target);
+		if (ret)
+			break;
+		ret = aie2_pm_set_clock_gating(ndev, false);
+		if (ret)
+			break;
+		ret = aie2_smu_set_fixed_dpm_level(ndev, SMU_DPM_MAX(ndev));
+		break;
+	case POWER_MODE_HIGH:
+		ret = aie2_pm_set_clock_gating(ndev, false);
+		if (ret)
+			break;
+		ret = aie2_smu_set_fixed_dpm_level(ndev, SMU_DPM_MAX(ndev));
+		break;
+	case POWER_MODE_DEFAULT:
+		ret = aie2_pm_set_clock_gating(ndev, true);
+		if (ret)
+			break;
+		// Revert back to default level, let resolver decide level
+		ret = aie2_smu_set_fixed_dpm_level(ndev, SMU_DPM_INVALID);
+		break;
+	default:
+		// POWER_MODE_LOW and POWER_MODE_MEDIUM
+		ret = -EOPNOTSUPP;
+		break;
+	}
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to config clock gating");
+		/* Either nothing was done or messed up, can't recover. */
+		XDNA_ERR(xdna, "Failed to set power mode: %d, ret %d", target, ret);
 		return ret;
 	}
 
 	ndev->pw_mode = target;
-	XDNA_INFO(xdna, "Power mode changed into %d", ndev->pw_mode);
+	XDNA_INFO(xdna, "Power mode changed to %d", ndev->pw_mode);
 	return 0;
 }
 
 int aie2_pm_start(struct amdxdna_dev_hdl *ndev)
 {
-	return aie2_pm_clock_gating(ndev, ndev->pw_mode);
+	return aie2_pm_set_mode(ndev, ndev->pw_mode);
 }
 
 void aie2_pm_stop(struct amdxdna_dev_hdl *ndev)
 {
-	aie2_pm_clock_gating(ndev, POWER_MODE_DEFAULT);
+	aie2_pm_set_mode(ndev, POWER_MODE_DEFAULT);
 }

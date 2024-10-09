@@ -214,19 +214,21 @@ static int aie2_state_show(struct seq_file *m, void *unused)
 AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
 
 static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
-				size_t len, loff_t *off)
+				  size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	u32 val;
 	int ret;
 
-	ret = kstrtouint_from_user(ptr, len, 10, &val);
+	ret = kstrtoint_from_user(ptr, len, 10, &val);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Invalid input value: %d", val);
 		return ret;
 	}
 
-	ret = aie2_smu_set_dpm_level(ndev, val);
+	mutex_lock(&ndev->xdna->dev_lock);
+	ret = aie2_smu_set_fixed_dpm_level(ndev, val);
+	mutex_unlock(&ndev->xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Setting dpm_level:%d failed, ret: %d", val, ret);
 		return ret;
