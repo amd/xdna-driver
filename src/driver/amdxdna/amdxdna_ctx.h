@@ -106,9 +106,10 @@ struct amdxdna_hwctx {
 	u32				umq_bo;
 	u32				log_buf_bo;
 	u32				doorbell_offset;
-#define HWCTX_STAT_INIT  0
-#define HWCTX_STAT_READY 1
-#define HWCTX_STAT_STOP  2
+#define HWCTX_STATE_INIT	0
+#define HWCTX_STATE_READY	1
+#define HWCTX_STATE_STOP	2
+#define HWCTX_STATE_DEAD	3
 	u32				status;
 	u32				old_status;
 
@@ -141,6 +142,7 @@ struct amdxdna_sched_job {
 #define OP_UNREG_DEBUG_BO	3
 #define OP_NOOP			4
 	u32			opcode;
+	int			msg_id;
 	struct amdxdna_gem_obj	*cmd_bo;
 	size_t			bo_cnt;
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);

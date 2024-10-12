@@ -84,7 +84,7 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
-	if (hwctx->old_status != HWCTX_STAT_READY) {
+	if (hwctx->old_status != HWCTX_STATE_READY) {
 		XDNA_DBG(xdna, "hwctx is not ready, status %d", hwctx->status);
 		goto out;
 	}
@@ -121,6 +121,47 @@ out:
 	return ret;
 }
 
+static const char *
+aie2_fence_state2str(struct dma_fence *fence)
+{
+	if (!fence)
+		return "not-exist";
+	return dma_fence_is_signaled(fence) ? "signaled" : "unsignaled";
+}
+
+static void
+aie2_hwctx_dump(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
+{
+	u64 sub = hwctx->submitted;
+	u64 comp = hwctx->completed;
+
+	XDNA_ERR(xdna, "Dumping ctx %s, sub=%lld, comp=%lld", hwctx->name, sub, comp);
+	for (int i = 0; i < HWCTX_MAX_CMDS; i++) {
+		struct amdxdna_sched_job *j = hwctx->priv->pending[i];
+		if (!j)
+			continue;
+		XDNA_ERR(xdna, "JOB[%d]:", i);
+		XDNA_ERR(xdna, "\tseq: %lld", j->seq);
+		XDNA_ERR(xdna, "\top: 0x%x", j->opcode);
+		XDNA_ERR(xdna, "\tmsg: 0x%x", j->msg_id);
+		XDNA_ERR(xdna, "\tfence: %s", aie2_fence_state2str(j->fence));
+		XDNA_ERR(xdna, "\tout_fence: %s", aie2_fence_state2str(j->out_fence));
+	}
+}
+
+void aie2_dump_ctx(struct amdxdna_client *client)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx;
+	int next = 0;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	mutex_lock(&client->hwctx_lock);
+	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next)
+		aie2_hwctx_dump(xdna, hwctx);
+	mutex_unlock(&client->hwctx_lock);
+}
+
 void aie2_stop_ctx(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -132,7 +173,7 @@ void aie2_stop_ctx(struct amdxdna_client *client)
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
 		aie2_hwctx_stop(xdna, hwctx, NULL);
 		hwctx->old_status = hwctx->status;
-		hwctx->status = HWCTX_STAT_STOP;
+		hwctx->status = HWCTX_STATE_STOP;
 		XDNA_DBG(xdna, "Stop %s", hwctx->name);
 	}
 	mutex_unlock(&client->hwctx_lock);
@@ -148,7 +189,7 @@ void aie2_restart_ctx(struct amdxdna_client *client)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
-		if (hwctx->status != HWCTX_STAT_STOP)
+		if (hwctx->status != HWCTX_STATE_STOP)
 			continue;
 
 		XDNA_DBG(xdna, "Resetting %s", hwctx->name);
@@ -200,7 +241,7 @@ void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 	aie2_hwctx_wait_for_idle(hwctx);
 	aie2_hwctx_stop(xdna, hwctx, NULL);
 	hwctx->old_status = hwctx->status;
-	hwctx->status = HWCTX_STAT_STOP;
+	hwctx->status = HWCTX_STATE_STOP;
 }
 
 void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
@@ -650,7 +691,7 @@ skip:
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
 		goto release_resource;
 	}
-	hwctx->status = HWCTX_STAT_INIT;
+	hwctx->status = HWCTX_STATE_INIT;
 
 	XDNA_DBG(xdna, "hwctx %s init completed", hwctx->name);
 
@@ -737,7 +778,7 @@ static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 	int ret;
 
 	XDNA_DBG(xdna, "Config %d CU to %s", config->num_cus, hwctx->name);
-	if (hwctx->status != HWCTX_STAT_INIT) {
+	if (hwctx->status != HWCTX_STATE_INIT) {
 		XDNA_ERR(xdna, "Not support re-config CU");
 		return -EINVAL;
 	}
@@ -785,7 +826,7 @@ static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 skip_config_cu:
 #endif
 	wmb(); /* To avoid locking in command submit when check status */
-	hwctx->status = HWCTX_STAT_READY;
+	hwctx->status = HWCTX_STATE_READY;
 
 	return 0;
 

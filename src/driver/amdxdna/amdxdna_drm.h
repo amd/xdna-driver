@@ -47,7 +47,7 @@ struct amdxdna_dev_priv;
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);
 	void (*fini)(struct amdxdna_dev *xdna);
-	void (*recover)(struct amdxdna_dev *xdna);
+	void (*recover)(struct amdxdna_dev *xdna, bool dump_only);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);

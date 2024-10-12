@@ -49,6 +49,7 @@
 #define MAX_MSG_ID_ENTRIES		256
 #define MSG_RX_TIMER			200 /* milliseconds */
 #define MAILBOX_NAME			"xdna_mailbox"
+#define MSG_ID2ENTRY(msg_id)		((msg_id) & ~MAGIC_VAL_MASK)
 
 #ifdef AMDXDNA_DEVEL
 int mailbox_polling;
@@ -112,6 +113,7 @@ struct mailbox_channel {
 	struct work_struct		rx_work;
 	u32				i2x_head;
 	bool				bad_state;
+	u32				last_msg_id;
 
 #ifdef AMDXDNA_DEVEL
 	struct timer_list		timer;
@@ -218,9 +220,24 @@ mailbox_get_ringbuf_size(struct mailbox_channel *mb_chann, enum channel_res_type
 	return mb_chann->res[type].rb_size;
 }
 
-static inline int mailbox_validate_msgid(int msg_id)
+static inline int mailbox_validate_msgid(struct mailbox_channel *mb_chann, u32 msg_id)
 {
-	return (msg_id & MAGIC_VAL_MASK) == MAGIC_VAL;
+	u32 exp_id = mb_chann->last_msg_id + 1;
+
+	if ((msg_id & MAGIC_VAL_MASK) != MAGIC_VAL) {
+		MB_ERR(mb_chann, "Bad message ID 0x%x", msg_id);
+		return false;
+	}
+
+	if (mb_chann->type == MB_CHANNEL_MGMT)
+		return true;
+
+	if (MSG_ID2ENTRY(msg_id) && msg_id != exp_id) {
+		MB_ERR(mb_chann, "Non-contiguous message ID 0x%x, expecting 0x%x",
+		       msg_id, exp_id);
+		return false;
+	}
+	return true;
 }
 
 static int mailbox_acquire_msgid(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
@@ -259,7 +276,7 @@ static void mailbox_release_msgid(struct mailbox_channel *mb_chann, int msg_id)
 {
 	unsigned long flags;
 
-	msg_id &= ~MAGIC_VAL_MASK;
+	msg_id = MSG_ID2ENTRY(msg_id);
 	spin_lock_irqsave(&mb_chann->chan_idr_lock, flags);
 	idr_remove(&mb_chann->chan_idr, msg_id);
 	spin_unlock_irqrestore(&mb_chann->chan_idr_lock, flags);
@@ -332,12 +349,11 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 	int ret;
 
 	msg_id = header->id;
-	if (!mailbox_validate_msgid(msg_id)) {
-		MB_ERR(mb_chann, "Bad message ID 0x%x", msg_id);
+	if (!mailbox_validate_msgid(mb_chann, msg_id))
 		return -EINVAL;
-	}
+	mb_chann->last_msg_id = msg_id;
 
-	msg_id &= ~MAGIC_VAL_MASK;
+	msg_id = MSG_ID2ENTRY(msg_id);
 	spin_lock_irqsave(&mb_chann->chan_idr_lock, flags);
 	mb_msg = idr_find(&mb_chann->chan_idr, msg_id);
 	if (!mb_msg) {
@@ -625,7 +641,7 @@ static int mailbox_polld(void *data)
 }
 
 int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
-			  const struct xdna_mailbox_msg *msg, u64 tx_timeout)
+			  struct xdna_mailbox_msg *msg, u64 tx_timeout)
 {
 	struct xdna_msg_header *header;
 	struct mailbox_msg *mb_msg;
@@ -679,6 +695,7 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 		goto msg_id_failed;
 	}
 	header->id = ret;
+	msg->id = header->id;
 
 	MB_DBG(mb_chann, "opcode 0x%x size %d id 0x%x",
 	       header->opcode, header->total_size, header->id);
@@ -779,7 +796,7 @@ int xdna_mailbox_info_show(struct mailbox *mb, struct seq_file *m)
 int xdna_mailbox_ringbuf_show(struct mailbox *mb, struct seq_file *m)
 {
 	struct mailbox_res_record *record;
-	const int size = 0x1000;
+	const int size = 1024;
 	void __iomem *base;
 	char pfx[15];
 	void *buf;
