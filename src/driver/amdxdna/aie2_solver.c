@@ -204,12 +204,9 @@ static int get_free_partition(struct solver_state *xrs,
 	pt_node->ncols = ncols;
 
 	/*
-	 * Before fully support latency in QoS, if a request
-	 * specifies a non-zero latency value, it will not share
-	 * the partition with other requests.
+	 * Always set exclusive to false for now.
 	 */
-	if (req->rqos.latency)
-		pt_node->exclusive = true;
+	pt_node->exclusive = false;
 
 	list_add_tail(&pt_node->list, &xrs->rgp.pt_node_list);
 	xrs->rgp.npartition_node++;
