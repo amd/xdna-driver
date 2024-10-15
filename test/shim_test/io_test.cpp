@@ -86,9 +86,9 @@ io_test_init_runlist_cmd(bo* cmd_bo, std::vector<bo*>& cmd_bos)
 void io_test_cmd_wait(hwqueue_handle *hwq, std::shared_ptr<bo> bo)
 {
     if (io_test_parameters.wait == IO_TEST_POLL_WAIT) {
-        while(!hwq->poll_command(bo->get()));
+      while(!hwq->poll_command(bo->get()));
     } else {
-        hwq->wait_command(bo->get(), 0);
+      hwq->wait_command(bo->get(), 0);
     }
 }
 
@@ -104,14 +104,14 @@ io_test_cmd_submit_and_wait_latency(
 
   while (completed < total_cmd_submission) {
     for (auto& cmd : cmdlist_bos) {
-        hwq->submit_command(std::get<0>(cmd).get()->get());
-        io_test_cmd_wait(hwq, std::get<0>(cmd));
-        if (std::get<1>(cmd)->state != ERT_CMD_STATE_COMPLETED)
-          throw std::runtime_error("Command error");
-        std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
-        completed++;
-        if (completed >= total_cmd_submission)
-          break;
+      hwq->submit_command(std::get<0>(cmd).get()->get());
+      io_test_cmd_wait(hwq, std::get<0>(cmd));
+      if (std::get<1>(cmd)->state != ERT_CMD_STATE_COMPLETED)
+        throw std::runtime_error("Command error");
+      std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
+      completed++;
+      if (completed >= total_cmd_submission)
+        break;
     }
   }
 }
@@ -128,10 +128,10 @@ io_test_cmd_submit_and_wait_thruput(
   int wait_idx = 0;
 
   for (auto& cmd : cmdlist_bos) {
-      hwq->submit_command(std::get<0>(cmd).get()->get());
-      issued++;
-      if (issued >= total_cmd_submission)
-        break;
+    hwq->submit_command(std::get<0>(cmd).get()->get());
+    issued++;
+    if (issued >= total_cmd_submission)
+      break;
   }
 
   while (completed < issued) {

@@ -17,10 +17,7 @@ struct mailbox_channel;
  * @notify_cb:  callback function to notify the sender when there is response
  * @send_data:	pointing to sending data
  * @send_size:	size of the sending data
- *
- * The mailbox will splite the sending data in to multiple firmware message if
- * the size of the data is too big. This is transparent to the sender. The
- * sender will receive one notification.
+ * @id:		ID of the msg eventually pushed to device
  */
 struct xdna_mailbox_msg {
 	u32		opcode;
@@ -28,6 +25,7 @@ struct xdna_mailbox_msg {
 	int		(*notify_cb)(void *handle, const u32 *data, size_t size);
 	u8		*send_data;
 	size_t		send_size;
+	int		id;
 };
 
 /*
@@ -134,7 +132,7 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
  * Return: If success return 0, otherwise, return error code
  */
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
-			  const struct xdna_mailbox_msg *msg, u64 tx_timeout);
+			  struct xdna_mailbox_msg *msg, u64 tx_timeout);
 
 #if defined(CONFIG_DEBUG_FS)
 /*

@@ -621,17 +621,21 @@ skip_pasid:
 	pci_free_irq_vectors(pdev);
 }
 
-static void aie2_recover(struct amdxdna_dev *xdna)
+static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
 	struct amdxdna_client *client;
 
 	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry(client, &xdna->client_list, node)
-		aie2_stop_ctx(client);
-
-	/* The AIE will reset after all hardware contexts are destroyed */
-	list_for_each_entry(client, &xdna->client_list, node)
-		aie2_restart_ctx(client);
+	if (dump_only) {
+		list_for_each_entry(client, &xdna->client_list, node)
+			aie2_dump_ctx(client);
+	} else {
+		list_for_each_entry(client, &xdna->client_list, node)
+			aie2_stop_ctx(client);
+		/* The AIE will reset after all hardware contexts are destroyed */
+		list_for_each_entry(client, &xdna->client_list, node)
+			aie2_restart_ctx(client);
+	}
 	mutex_unlock(&xdna->dev_lock);
 }
 

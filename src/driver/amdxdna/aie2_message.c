@@ -587,6 +587,7 @@ int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
 	}
+	job->msg_id = msg.id;
 
 	return 0;
 }
@@ -781,6 +782,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 		XDNA_ERR(hwctx->client->xdna, "Send message failed");
 		return ret;
 	}
+	job->msg_id = msg.id;
 
 	return 0;
 }
@@ -817,6 +819,7 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 		XDNA_ERR(hwctx->client->xdna, "Send message failed");
 		return ret;
 	}
+	job->msg_id = msg.id;
 
 	return 0;
 }
@@ -853,6 +856,7 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
 	}
+	job->msg_id = msg.id;
 
 	return 0;
 }
@@ -885,6 +889,7 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 		XDNA_ERR(xdna, "Send message failed");
 		return ret;
 	}
+	job->msg_id = msg.id;
 
 	return 0;
 }

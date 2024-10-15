@@ -491,7 +491,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		goto unlock_srcu;
 	}
 
-	if (hwctx->status != HWCTX_STAT_READY) {
+	if (hwctx->status != HWCTX_STATE_READY) {
 		XDNA_ERR(xdna, "HW Context is not ready");
 		ret = -EINVAL;
 		goto unlock_srcu;
