@@ -78,7 +78,7 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 	XDNA_DBG(xdna, "Changing power mode from %d to %d", ndev->pw_mode, target);
 
 	switch (target) {
-	case POWER_MODE_TURBO:
+	case POWER_MODE_TURBO: // Turbo mode
 		ret = aie2_pm_check_turbo(ndev, ndev->pw_mode, target);
 		if (ret)
 			break;
@@ -87,13 +87,13 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 			break;
 		ret = aie2_smu_set_fixed_dpm_level(ndev, SMU_DPM_MAX(ndev));
 		break;
-	case POWER_MODE_HIGH:
-		ret = aie2_pm_set_clock_gating(ndev, false);
+	case POWER_MODE_HIGH: // Performance mode
+		ret = aie2_pm_set_clock_gating(ndev, true);
 		if (ret)
 			break;
 		ret = aie2_smu_set_fixed_dpm_level(ndev, SMU_DPM_MAX(ndev));
 		break;
-	case POWER_MODE_DEFAULT:
+	case POWER_MODE_DEFAULT: // Default mode
 		ret = aie2_pm_set_clock_gating(ndev, true);
 		if (ret)
 			break;
