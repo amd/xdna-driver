@@ -19,7 +19,7 @@
 #include "amdxdna_devel.h"
 #endif
 
-#define XDNA_MAX_CMD_BO_SIZE	0x8000
+#define XDNA_MAX_CMD_BO_SIZE	SZ_32K
 
 MODULE_IMPORT_NS(DMA_BUF);
 
@@ -373,7 +373,14 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 
 	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_init(&abo->lock);
+	mutex_init(&abo->mem.notify_lock);
 	INIT_WORK(&abo->hmm_unreg_work, amdxdna_hmm_unreg_work);
+
+	if (IS_ENABLED(CONFIG_LOCKDEP)) {
+		fs_reclaim_acquire(GFP_KERNEL);
+		might_lock(&abo->mem.notify_lock);
+		fs_reclaim_release(GFP_KERNEL);
+	}
 
 	abo->mem.userptr = AMDXDNA_INVALID_ADDR;
 	abo->mem.dev_addr = AMDXDNA_INVALID_ADDR;
@@ -716,7 +723,7 @@ int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo)
 		ret = drm_gem_shmem_pin(&abo->base);
 		break;
 	case AMDXDNA_BO_DEV:
-		ret = amdxdna_gem_pin(abo->dev_heap);
+		ret = drm_gem_shmem_pin(&abo->dev_heap->base);
 		break;
 	default:
 		ret = -EOPNOTSUPP;
@@ -730,6 +737,9 @@ int amdxdna_gem_pin(struct amdxdna_gem_obj *abo)
 {
 	int ret;
 
+	if (abo->type == AMDXDNA_BO_DEV)
+		abo = abo->dev_heap;
+
 	mutex_lock(&abo->lock);
 	ret = amdxdna_gem_pin_nolock(abo);
 	mutex_unlock(&abo->lock);
@@ -742,20 +752,11 @@ void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo)
 	if (is_import_bo(abo))
 		return;
 
+	if (abo->type == AMDXDNA_BO_DEV)
+		abo = abo->dev_heap;
+
 	mutex_lock(&abo->lock);
-	XDNA_DBG(abo->client->xdna, "BO type %d", abo->type);
-	switch (abo->type) {
-	case AMDXDNA_BO_SHMEM:
-	case AMDXDNA_BO_DEV_HEAP:
-		drm_gem_shmem_unpin(&abo->base);
-		break;
-	case AMDXDNA_BO_DEV:
-		amdxdna_gem_unpin(abo->dev_heap);
-		break;
-	default:
-		/* Should never go here */
-		WARN_ONCE(1, "Unexpected BO type %d\n", abo->type);
-	}
+	drm_gem_shmem_unpin(&abo->base);
 	mutex_unlock(&abo->lock);
 }
 
@@ -788,7 +789,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	struct drm_gem_object *gobj;
 	int ret = 0;
 
-	if (args->ext_flags)
+	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
 	gobj = drm_gem_object_lookup(filp, args->handle);

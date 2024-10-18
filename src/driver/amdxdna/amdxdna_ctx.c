@@ -386,6 +386,7 @@ int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *c
 
 retry:
 	if (contended != -1) {
+		abo = to_xdna_obj(job->bos[contended]);
 		ret = dma_resv_lock_slow_interruptible(job->bos[contended]->resv, ctx);
 		if (ret) {
 			ww_acquire_fini(ctx);
@@ -403,14 +404,21 @@ retry:
 		if (ret) {
 			int j;
 
-			for (j = 0; j < i; j++) {
+			for (j = i - 1; j >= 0; j--) {
 				abo = to_xdna_obj(job->bos[j]);
-				dma_resv_unlock(job->bos[j]->resv);
-				abo->flags &= ~BO_SUBMIT_LOCKED;
+				if (abo->flags & BO_SUBMIT_LOCKED) {
+					dma_resv_unlock(job->bos[j]->resv);
+					abo->flags &= ~BO_SUBMIT_LOCKED;
+				}
 			}
 
-			if (contended != -1 && contended >= i)
-				dma_resv_unlock(job->bos[contended]->resv);
+			if (contended != -1 && contended >= i) {
+				abo = to_xdna_obj(job->bos[contended]);
+				if (abo->flags & BO_SUBMIT_LOCKED) {
+					dma_resv_unlock(job->bos[contended]->resv);
+					abo->flags &= ~BO_SUBMIT_LOCKED;
+				}
+			}
 
 			if (ret == -EDEADLK) {
 				contended = i;
