@@ -21,6 +21,7 @@ struct amdxdna_mem {
 	struct mmu_interval_notifier	notifier;
 	unsigned long			*pfns;
 	bool				map_invalid;
+	struct mutex			notify_lock; /* for map_invalid */
 #ifdef AMDXDNA_DEVEL
 	struct sg_table			*sgt;
 	u64				dma_addr; /* IOVA DMA address */

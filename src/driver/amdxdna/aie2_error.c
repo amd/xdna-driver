@@ -61,7 +61,7 @@ enum aie_error_category {
 struct aie_error {
 	u8			row;
 	u8			col;
-	enum aie_module_type	mod_type;
+	u32			mod_type;
 	u8			event_id;
 };
 
@@ -292,7 +292,11 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 	struct async_events *events;
 
 	events = ndev->async_events;
+
+	mutex_unlock(&xdna->dev_lock);
 	destroy_workqueue(events->wq);
+	mutex_lock(&xdna->dev_lock);
+
 	dma_free_noncoherent(xdna->ddev.dev, events->size, events->buf,
 			     events->addr, DMA_BIDIRECTIONAL);
 	kfree(events);

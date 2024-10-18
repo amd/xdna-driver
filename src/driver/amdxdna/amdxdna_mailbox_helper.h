@@ -20,21 +20,21 @@ struct xdna_notify {
 	int			error;
 };
 
-#define DECLARE_XDNA_MSG_COMMON(name, op, status)		\
-	struct name##_req	req = { 0 };			\
-	struct name##_resp	resp = { status	};		\
-	struct xdna_notify	hdl = {				\
-		.error = 0,					\
-		.data = (u32 *)&resp,				\
-		.size = sizeof(resp),				\
-		.comp = COMPLETION_INITIALIZER(hdl.comp),	\
-	};							\
-	struct xdna_mailbox_msg msg = {				\
-		.send_data = (u8 *)&req,			\
-		.send_size = sizeof(req),			\
-		.handle = &hdl,					\
-		.opcode = op,					\
-		.notify_cb = xdna_msg_cb,			\
+#define DECLARE_XDNA_MSG_COMMON(name, op, status)			\
+	struct name##_req	req = { 0 };				\
+	struct name##_resp	resp = { status	};			\
+	struct xdna_notify	hdl = {					\
+		.error = 0,						\
+		.data = (u32 *)&resp,					\
+		.size = sizeof(resp),					\
+		.comp = COMPLETION_INITIALIZER_ONSTACK(hdl.comp),	\
+	};								\
+	struct xdna_mailbox_msg msg = {					\
+		.send_data = (u8 *)&req,				\
+		.send_size = sizeof(req),				\
+		.handle = &hdl,						\
+		.opcode = op,						\
+		.notify_cb = xdna_msg_cb,				\
 	}
 
 #define XDNA_STATUS_OFFSET(name) (offsetof(struct name##_resp, status) / sizeof(u32))

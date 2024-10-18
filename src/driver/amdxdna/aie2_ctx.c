@@ -960,13 +960,13 @@ again:
 		goto put_mm;
 	}
 
-	dma_resv_lock(to_gobj(abo)->resv, NULL);
+	mutex_lock(&abo->mem.notify_lock);
 	if (mmu_interval_read_retry(&abo->mem.notifier, range.notifier_seq)) {
-		dma_resv_unlock(to_gobj(abo)->resv);
+		mutex_unlock(&abo->mem.notify_lock);
 		goto again;
 	}
 	abo->mem.map_invalid = false;
-	dma_resv_unlock(to_gobj(abo)->resv);
+	mutex_unlock(&abo->mem.notify_lock);
 
 put_mm:
 	mmput(mm);
@@ -1028,7 +1028,16 @@ retry:
 
 	for (i = 0; i < job->bo_cnt; i++) {
 		abo = to_xdna_obj(job->bos[i]);
+		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
+		if (ret) {
+			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
+			amdxdna_unlock_objects(job, &acquire_ctx);
+			goto put_fence;
+		}
+
+		mutex_lock(&abo->mem.notify_lock);
 		if (abo->mem.map_invalid) {
+			mutex_unlock(&abo->mem.notify_lock);
 			amdxdna_unlock_objects(job, &acquire_ctx);
 			if (!timeout) {
 				timeout = jiffies +
@@ -1044,16 +1053,10 @@ retry:
 			goto retry;
 		}
 
-		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
-		if (ret) {
-			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
-			amdxdna_unlock_objects(job, &acquire_ctx);
-			goto put_fence;
-		}
+		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+		mutex_unlock(&abo->mem.notify_lock);
 	}
 
-	for (i = 0; i < job->bo_cnt; i++)
-		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
 again:
@@ -1146,13 +1149,12 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
 	struct drm_gem_object *gobj = to_gobj(abo);
 	long ret;
 
-	dma_resv_lock(gobj->resv, NULL);
+	mutex_lock(&abo->mem.notify_lock);
 	abo->mem.map_invalid = true;
 	mmu_interval_set_seq(&abo->mem.notifier, cur_seq);
+	mutex_unlock(&abo->mem.notify_lock);
 	ret = dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
 				    true, MAX_SCHEDULE_TIMEOUT);
-	dma_resv_unlock(gobj->resv);
-
 	if (!ret || ret == -ERESTARTSYS)
 		XDNA_ERR(xdna, "Failed to wait for bo, ret %ld", ret);
 }
