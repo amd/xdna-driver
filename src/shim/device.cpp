@@ -611,6 +611,33 @@ struct sequence_name
   }
 };
 
+struct elf_name
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::elf_name)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    auto fmt = boost::format("bins/elf/%s");
+
+    std::string elf_file;
+    switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
+    case xrt_core::query::elf_name::type::nop:
+      elf_file = "nop.elf";
+      break;
+    }
+
+    return boost::str(fmt % elf_file);
+  }
+};
+
 template <typename QueryRequestType>
 struct sysfs_get : virtual QueryRequestType
 {
@@ -744,6 +771,7 @@ initialize_query_table()
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
   emplace_func1_request<query::sequence_name,                  sequence_name>();
+  emplace_func1_request<query::elf_name,		       elf_name>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func0_request<query::firmware_version,               firmware_version>();
 }
