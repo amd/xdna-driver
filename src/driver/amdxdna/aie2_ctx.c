@@ -1053,8 +1053,8 @@ retry:
 			goto retry;
 		}
 
-		for (i = 0; i < job->bo_cnt; i++)
-			dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+		mutex_unlock(&abo->mem.notify_lock);
 	}
 
 	amdxdna_unlock_objects(job, &acquire_ctx);
