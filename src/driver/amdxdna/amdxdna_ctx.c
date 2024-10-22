@@ -398,6 +398,9 @@ retry:
 			continue;
 
 		ret = dma_resv_lock_interruptible(job->bos[i].obj->resv, ctx);
+		if (ret == -EALREADY)
+			continue;
+
 		if (ret) {
 			int j;
 
