@@ -29,7 +29,6 @@ struct amdxdna_mem {
 };
 
 #define BO_SUBMIT_PINNED	BIT(0)
-#define BO_SUBMIT_LOCKED	BIT(1)
 struct amdxdna_gem_obj {
 	struct drm_gem_shmem_object	base;
 	struct amdxdna_client		*client;

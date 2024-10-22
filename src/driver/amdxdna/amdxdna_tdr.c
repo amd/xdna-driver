@@ -111,5 +111,6 @@ void amdxdna_tdr_stop(struct amdxdna_tdr *tdr)
 		return;
 
 	timer_delete_sync(&tdr->timer);
+	cancel_work_sync(&tdr->tdr_work);
 	XDNA_DBG(xdna, "Timer stopped");
 }
