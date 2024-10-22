@@ -126,6 +126,11 @@ struct amdxdna_hwctx {
 #define drm_job_to_xdna_job(j) \
 	container_of(j, struct amdxdna_sched_job, base)
 
+struct amdxdna_job_bo {
+	struct drm_gem_object   *obj;
+	bool			locked;
+};
+
 struct amdxdna_sched_job {
 	struct drm_sched_job	base;
 	struct kref		refcnt;
@@ -145,7 +150,7 @@ struct amdxdna_sched_job {
 	int			msg_id;
 	struct amdxdna_gem_obj	*cmd_bo;
 	size_t			bo_cnt;
-	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
+	struct amdxdna_job_bo	bos[] __counted_by(bo_cnt);
 };
 
 static inline u32

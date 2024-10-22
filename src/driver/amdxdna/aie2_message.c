@@ -828,7 +828,7 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
-	struct amdxdna_gem_obj *abo = to_xdna_obj(job->bos[0]);
+	struct amdxdna_gem_obj *abo = to_xdna_obj(job->bos[0].obj);
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct xdna_mailbox_msg msg;
 	struct sync_bo_req req;
@@ -865,7 +865,7 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 			 int (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
-	struct amdxdna_gem_obj *abo = to_xdna_obj(job->bos[0]);
+	struct amdxdna_gem_obj *abo = to_xdna_obj(job->bos[0].obj);
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct config_debug_bo_req req;
 	struct xdna_mailbox_msg msg;

@@ -1022,13 +1022,13 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 retry:
 	ret = amdxdna_lock_objects(job, &acquire_ctx);
 	if (ret) {
-		XDNA_WARN(xdna, "Failed to reverve fence, ret %d", ret);
+		XDNA_WARN(xdna, "Failed to lock objects, ret %d", ret);
 		goto put_fence;
 	}
 
 	for (i = 0; i < job->bo_cnt; i++) {
-		abo = to_xdna_obj(job->bos[i]);
-		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
+		abo = to_xdna_obj(job->bos[i].obj);
+		ret = dma_resv_reserve_fences(job->bos[i].obj->resv, 1);
 		if (ret) {
 			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
 			amdxdna_unlock_objects(job, &acquire_ctx);
@@ -1053,7 +1053,7 @@ retry:
 			goto retry;
 		}
 
-		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+		dma_resv_add_fence(job->bos[i].obj->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 		mutex_unlock(&abo->mem.notify_lock);
 	}
 
