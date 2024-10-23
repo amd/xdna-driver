@@ -63,12 +63,6 @@ init_indirect_buf(volatile struct host_indirect_data *indirect_buf, int size)
 hw_q_umq::
 hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
 {
-#ifdef UMQ_HELLO_TEST
-  const size_t header_sz = 8192; // Hard code to 2 pages
-  const size_t queue_sz = 0;
-  const size_t indirect_sz = 0;
-#else
-  //
   // host queue layout:
   //   host_queue_header_t
   //   host_queue_packet_t [nslots]
@@ -76,8 +70,14 @@ hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
   const size_t header_sz = sizeof(struct host_queue_header);
   const size_t queue_sz = sizeof(struct host_queue_packet) * nslots;
   const size_t indirect_sz = (sizeof(struct host_indirect_data) * HSA_INDIRECT_PKT_NUM) * nslots;
-#endif
+
+#ifdef UMQ_HELLO_TEST
+  const size_t umq_sz = 0x8000; // 32k, current cmd_bo max size
+  //const size_t umq_sz = 0x200000; // 2M, lift the cmd_bo max size to enable this
+#else
   const size_t umq_sz = header_sz + queue_sz + indirect_sz;
+#endif
+
   shim_debug("umq sz %ld", umq_sz);
 
   m_umq_bo = const_cast<device &>(dev).alloc_bo(umq_sz, XCL_BO_FLAGS_EXECBUF);
