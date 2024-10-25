@@ -7,10 +7,10 @@
 	"firmwares": [
 		{
 			"device": "npu1",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.5.1.362",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.5.2.378",
 			"pci_device_id": "1502",
 			"pci_revision_id": "00",
-			"version": "1.5.1.362",
+			"version": "1.5.2.378",
 			"fw_name": "npu.sbin"
 		},
 		{
@@ -23,18 +23,18 @@
 		},
 		{
 			"device": "npu4",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.0.7.37.42",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.1.0.0.61",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "10",
-			"version": "0.7.37.42",
+			"version": "1.0.0.61",
 			"fw_name": "npu.sbin"
 		},
 		{
 			"device": "npu5",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.0.7.37.146",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.1.0.0.164",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "11",
-			"version": "0.7.37.146",
+			"version": "1.0.0.164",
 			"fw_name": "npu.sbin"
 		}
 	]
