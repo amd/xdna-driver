@@ -178,6 +178,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto free_name;
 	}
 	args->handle = hwctx->id;
+	args->syncobj_handle = hwctx->syncobj_hdl;
 	args->umq_doorbell = hwctx->doorbell_offset;
 	mutex_unlock(&xdna->dev_lock);
 

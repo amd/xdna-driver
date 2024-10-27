@@ -121,6 +121,8 @@ struct amdxdna_hwctx {
 	u64				completed ____cacheline_aligned_in_smp;
 	/* For TDR worker to keep last completed. low frequency update */
 	u64				tdr_last_completed;
+	/* For command completion notification. */
+	u32				syncobj_hdl;
 };
 
 #define drm_job_to_xdna_job(j) \

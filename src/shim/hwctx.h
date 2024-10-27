@@ -61,6 +61,9 @@ public:
   uint32_t
   get_doorbell() const;
 
+  uint32_t
+  get_syncobj() const;
+
 protected:
   const device&
   get_device();
@@ -81,6 +84,9 @@ protected:
   set_doorbell(uint32_t db);
 
   void
+  set_syncobj(uint32_t syncobj);
+
+  void
   create_ctx_on_device();
 
   void
@@ -98,6 +104,7 @@ private:
   uint32_t m_ops_per_cycle;
   uint32_t m_num_cols;
   uint32_t m_doorbell;
+  uint32_t m_syncobj;
   std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
   void *m_log_buf;
 

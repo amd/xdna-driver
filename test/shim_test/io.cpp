@@ -234,7 +234,7 @@ run(const std::vector<xrt_core::fence_handle*>& wait_fences,
   hwq->wait_command(chdl, 5000);
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error("Command error");
+    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
 
   sync_after_run();
   if (!no_check_result)

@@ -203,6 +203,7 @@ create_ctx_on_device()
 
   set_slotidx(arg.handle);
   set_doorbell(arg.umq_doorbell);
+  set_syncobj(arg.syncobj_handle);
 
   m_q->bind_hwctx(this);
 }
@@ -252,6 +253,20 @@ hw_ctx::
 get_doorbell() const
 {
   return m_doorbell;
+}
+
+void
+hw_ctx::
+set_syncobj(uint32_t syncobj)
+{
+  m_syncobj = syncobj;
+}
+
+uint32_t
+hw_ctx::
+get_syncobj() const
+{
+  return m_syncobj;
 }
 
 } // shim_xdna
