@@ -203,6 +203,7 @@ struct amdxdna_hwctx_priv {
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 	struct workqueue_struct		*submit_wq;
+	struct drm_syncobj		*syncobj;
 };
 
 struct async_events;

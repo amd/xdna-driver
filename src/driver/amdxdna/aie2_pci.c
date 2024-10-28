@@ -1062,6 +1062,5 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.cmd_wait		= aie2_cmd_wait,
 	.hmm_invalidate		= aie2_hmm_invalidate,
 	.debugfs		= aie2_debugfs_init,
-	// TODO: cmd_wait can be removed when all caller move to cmd_get_out_fence
 	.cmd_get_out_fence	= aie2_cmd_get_out_fence,
 };

@@ -106,8 +106,9 @@ io_test_cmd_submit_and_wait_latency(
     for (auto& cmd : cmdlist_bos) {
       hwq->submit_command(std::get<0>(cmd).get()->get());
       io_test_cmd_wait(hwq, std::get<0>(cmd));
-      if (std::get<1>(cmd)->state != ERT_CMD_STATE_COMPLETED)
-        throw std::runtime_error("Command error");
+      auto state = std::get<1>(cmd)->state;
+      if (state != ERT_CMD_STATE_COMPLETED)
+        throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
       std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
       completed++;
       if (completed >= total_cmd_submission)
@@ -136,8 +137,9 @@ io_test_cmd_submit_and_wait_thruput(
 
   while (completed < issued) {
     io_test_cmd_wait(hwq, std::get<0>(cmdlist_bos[wait_idx]));
-    if (std::get<1>(cmdlist_bos[wait_idx])->state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error("Command error");
+    auto state = std::get<1>(cmdlist_bos[wait_idx])->state;
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
     std::get<1>(cmdlist_bos[wait_idx])->state = ERT_CMD_STATE_NEW;
     completed++;
 

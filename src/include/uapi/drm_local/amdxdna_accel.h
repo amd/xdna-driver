@@ -89,7 +89,7 @@ struct amdxdna_qos_info {
  * @mem_size: Size of AIE tile memory.
  * @umq_doorbell: Returned offset of doorbell associated with UMQ.
  * @handle: Returned hardware context handle.
- * @pad: Structure padding.
+ * @syncobj_handle: The drm timeline syncobj handle for command completion notification.
  */
 struct amdxdna_drm_create_hwctx {
 	__u64 ext;
@@ -102,7 +102,7 @@ struct amdxdna_drm_create_hwctx {
 	__u32 mem_size;
 	__u32 umq_doorbell;
 	__u32 handle;
-	__u32 pad;
+	__u32 syncobj_handle;
 };
 
 /**

@@ -68,7 +68,7 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 						   mem.notifier);
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 
-	XDNA_DBG(xdna, "Invalid range 0x%llx, 0x%lx, type %d",
+	XDNA_DBG(xdna, "Invalidating range 0x%llx, 0x%lx, type %d",
 		 abo->mem.userptr, abo->mem.size, abo->type);
 
 	if (!mmu_notifier_range_blockable(range))

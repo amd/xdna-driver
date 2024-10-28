@@ -11,7 +11,7 @@ using ms_t = std::chrono::milliseconds;
 using us_t = std::chrono::microseconds;
 using ns_t = std::chrono::nanoseconds;
 
-static int
+static inline int
 get_speed_and_print(std::string prefix, size_t size, clk::time_point &start, clk::time_point &end)
 {
   std::ios_base::fmtflags f(std::cout.flags());

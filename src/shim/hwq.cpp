@@ -9,11 +9,49 @@
 
 namespace {
 
+uint64_t abs_now_ns()
+{
+    auto now = std::chrono::high_resolution_clock::now();
+    auto now_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now);
+    return now_ns.time_since_epoch().count();
+}
+
 ert_packet *
 get_chained_command_pkt(xrt_core::buffer_handle *boh)
 {
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->map(xrt_core::buffer_handle::map_type::write));
   return cmdpkt->opcode == ERT_CMD_CHAIN ? cmdpkt : nullptr;
+}
+
+void
+wait_cmd_syncobj(const shim_xdna::pdev& pdev, uint32_t syncobj, uint64_t seq, uint32_t timeout_ms)
+{
+  int64_t timeout = std::numeric_limits<int64_t>::max();
+
+  if (timeout_ms) {
+	  timeout = timeout_ms;
+	  timeout *= 1000000;
+	  timeout += abs_now_ns();
+  }
+  drm_syncobj_timeline_wait wsobj = {
+    .handles = reinterpret_cast<uintptr_t>(&syncobj),
+    .points = reinterpret_cast<uintptr_t>(&seq),
+    .timeout_nsec = timeout,
+    .count_handles = 1,
+    .flags = 0,
+  };
+  pdev.ioctl(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wsobj);
+}
+
+void
+wait_cmd_ioctl(const shim_xdna::pdev& pdev, uint32_t ctx_id, uint64_t seq, uint32_t timeout_ms)
+{
+  amdxdna_drm_wait_cmd wcmd = {
+    .hwctx = ctx_id,
+    .timeout = timeout_ms,
+    .seq = seq,
+  };
+  pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
 }
 
 int
@@ -23,17 +61,17 @@ wait_cmd(const shim_xdna::pdev& pdev, const shim_xdna::hw_ctx *ctx,
   int ret = 1;
   auto boh = static_cast<shim_xdna::bo*>(cmd);
   auto id = boh->get_cmd_id();
+  auto syncobj = ctx->get_syncobj();
+  auto ctx_id = ctx->get_slotidx();
+  auto seq = boh->get_cmd_id();
 
   shim_debug("Waiting for cmd (%ld)...", id);
-
-  amdxdna_drm_wait_cmd wcmd = {
-    .hwctx = ctx->get_slotidx(),
-    .timeout = timeout_ms,
-    .seq = boh->get_cmd_id(),
-  };
-
+  
   try {
-    pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
+    if (syncobj != AMDXDNA_INVALID_FENCE_HANDLE)
+      wait_cmd_syncobj(pdev, syncobj, seq, timeout_ms);
+    else
+      wait_cmd_ioctl(pdev, ctx_id, seq, timeout_ms);
   }
   catch (const xrt_core::system_error& ex) {
     if (ex.get_code() != ETIME)
