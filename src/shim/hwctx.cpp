@@ -25,12 +25,28 @@ get_pdi(const xrt_core::xclbin::aie_partition_obj& aie, uint16_t kernel_id)
   shim_err(ENOENT, "PDI for kernel ID 0x%x not found", kernel_id);
 }
 
+void
+destroy_syncobj(const shim_xdna::pdev& dev, uint32_t hdl)
+{
+  if (hdl == AMDXDNA_INVALID_FENCE_HANDLE)
+    return;
+
+  drm_syncobj_destroy dsobj = {
+    .handle = hdl
+  };
+  dev.ioctl(DRM_IOCTL_SYNCOBJ_DESTROY, &dsobj);
+}
+
 }
 namespace shim_xdna {
 
 hw_ctx::
 hw_ctx(const device& dev, const qos_type& qos, std::unique_ptr<hw_q> q, const xrt::xclbin& xclbin)
-  : m_device(dev), m_q(std::move(q)), m_doorbell(0), m_log_buf(nullptr)
+  : m_device(dev)
+  , m_q(std::move(q))
+  , m_doorbell(0)
+  , m_log_buf(nullptr)
+  , m_syncobj(AMDXDNA_INVALID_FENCE_HANDLE)
 {
   shim_debug("Creating HW context...");
   init_qos_info(qos);
@@ -45,6 +61,7 @@ hw_ctx::
   } catch (const xrt_core::system_error& e) {
     shim_debug("Failed to delete context on device: %s", e.what());
   }
+  destroy_syncobj(m_device.get_pdev(), m_syncobj);
   shim_debug("Destroyed HW context (%d)...", m_handle);
 }
 

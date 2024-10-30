@@ -584,7 +584,7 @@ static void aie2_release_resource(struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
 }
 
-static void aie2_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
+static int aie2_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct drm_file *filp = hwctx->client->filp;
@@ -598,34 +598,27 @@ static void aie2_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
 	ret = drm_syncobj_create(&syncobj, 0, NULL);
 	if (ret) {
 		XDNA_ERR(xdna, "Create ctx syncobj failed, ret %d", ret);
-		return;
+		return ret;
 	}
 	ret = drm_syncobj_get_handle(filp, syncobj, &hdl);
 	drm_syncobj_put(syncobj);
 	if (ret) {
 		XDNA_ERR(xdna, "Create ctx syncobj handle failed, ret %d", ret);
-		return;
+		return ret;
 	}
 	hwctx->priv->syncobj = syncobj;
 	hwctx->syncobj_hdl = hdl;
+
+	return 0;
 }
 
 static void aie2_ctx_syncobj_destroy(struct amdxdna_hwctx *hwctx)
 {
-	struct drm_file *filp = hwctx->client->filp;
-	u32 hdl = hwctx->syncobj_hdl;
-	struct drm_syncobj *syncobj;
-
-	if (hdl == AMDXDNA_INVALID_FENCE_HANDLE)
-		return;
-
-	hwctx->priv->syncobj = NULL;
-	hwctx->syncobj_hdl = AMDXDNA_INVALID_FENCE_HANDLE;
-
-	spin_lock(&filp->syncobj_table_lock);
-	syncobj = idr_remove(&filp->syncobj_idr, hdl);
-	spin_unlock(&filp->syncobj_table_lock);
-	drm_syncobj_put(syncobj);
+	/*
+	* The syncobj_hdl is owned by user space and will be cleaned up
+	* separately.
+	*/
+	drm_syncobj_put(hwctx->priv->syncobj);
 }
 
 static void aie2_ctx_syncobj_add_fence(struct amdxdna_hwctx *hwctx,
@@ -753,7 +746,11 @@ skip:
 		goto release_resource;
 	}
 
-	aie2_ctx_syncobj_create(hwctx);
+	ret = aie2_ctx_syncobj_create(hwctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
+		goto release_resource;
+	}
 	hwctx->status = HWCTX_STATE_INIT;
 
 	XDNA_DBG(xdna, "hwctx %s init completed", hwctx->name);
@@ -790,9 +787,8 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna;
 	int idx;
 
-	aie2_ctx_syncobj_destroy(hwctx);
-
 	xdna = hwctx->client->xdna;
+	aie2_ctx_syncobj_destroy(hwctx);
 	drm_sched_wqueue_stop(&hwctx->priv->sched);
 
 	/* Now, scheduler will not send command to device. */
@@ -1060,6 +1056,35 @@ static int aie2_add_job_dependency(struct amdxdna_sched_job *job, u32 *syncobj_h
 	return ret;
 }
 
+static int aie2_hwctx_push_job(struct amdxdna_sched_job *job, u64 *seq)
+{
+	struct amdxdna_hwctx *hwctx = job->hwctx;
+	struct dma_fence *fence;
+	long ret;
+
+again:
+	mutex_lock(&hwctx->priv->io_lock);
+	ret = aie2_hwctx_add_job(hwctx, job);
+	if (ret) {
+		mutex_unlock(&hwctx->priv->io_lock);
+		if (ret == -EAGAIN) {
+			// Waiting for the first pending cmd to complete before trying again.
+			aie2_cmd_wait(hwctx, hwctx->submitted - HWCTX_MAX_CMDS, 0);
+			goto again;
+		}
+		return ret;
+	}
+
+	fence = dma_fence_get(job->out_fence);
+	*seq = job->seq;
+	drm_sched_entity_push_job(&job->base);
+	mutex_unlock(&hwctx->priv->io_lock);
+
+	aie2_ctx_syncobj_add_fence(hwctx, fence, *seq);
+	dma_fence_put(fence);
+	return 0;
+}
+
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
@@ -1067,7 +1092,6 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	struct ww_acquire_ctx acquire_ctx;
 	struct amdxdna_gem_obj *abo;
 	unsigned long timeout = 0;
-	struct dma_fence *ofence;
 	int ret, i;
 
 	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, hwctx);
@@ -1125,27 +1149,10 @@ retry:
 
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
-again:
-	mutex_lock(&hwctx->priv->io_lock);
-	ret = aie2_hwctx_add_job(hwctx, job);
-	if (ret) {
-		mutex_unlock(&hwctx->priv->io_lock);
-		if (ret == -EAGAIN) {
-			// Waiting for the first pending cmd to complete before trying again.
-			aie2_cmd_wait(hwctx, hwctx->submitted - HWCTX_MAX_CMDS, 0);
-			goto again;
-		}
+	ret = aie2_hwctx_push_job(job, seq);
+	if (ret)
 		goto signal_fence;
-	}
 
-	*seq = job->seq;
-	ofence = dma_fence_get(job->out_fence);
-
-	drm_sched_entity_push_job(&job->base);
-	mutex_unlock(&hwctx->priv->io_lock);
-
-	aie2_ctx_syncobj_add_fence(hwctx, ofence, *seq);
-	dma_fence_put(ofence);
 	return 0;
 
 signal_fence:
