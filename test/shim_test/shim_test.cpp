@@ -18,12 +18,26 @@
 #include "core/common/device.h"
 
 #include <filesystem>
-#include <libgen.h>
 #include <fstream>
-#include <set>
+#include <vector>
+#include <iostream>
+#include <sstream>
+#include <string>
 
+#include <libgen.h>
+#include <sys/utsname.h>
+#include <unistd.h>
+
+struct kern_version {
+  int major;
+  int minor;
+};
+
+kern_version current_kern;
 std::string cur_path;
 std::string xclbin_path;
+int base_write_speed;
+int base_read_speed;
 
 using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>, arg_type&);
@@ -41,38 +55,36 @@ void TEST_txn_elf_flow(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>, arg_type&);
 
-namespace {
-
-int base_write_speed;
-int base_read_speed;
-std::string program;
-
 inline void
 set_xrt_path()
 {
   setenv("XILINX_XRT", (cur_path + "/../").c_str(), true);
 }
 
-enum test_mode {
-  TEST_POSITIVE,
-  TEST_NEGATIVE,
-};
+#define TEST_POSITIVE false
+#define TEST_NEGATIVE true
 
 void
 usage(const std::string& prog)
 {
-  std::cout << "\nUsage: " << prog << " [xclbin] [test case ID separated by space]\n";
-  std::cout << "Examples:\n";
-  std::cout << "\t" << prog << " - run all test cases\n";
-  std::cout << "\t" << prog << " [test case ID separated by space] - run specified test cases\n";
-  std::cout << "\t" << prog << " /path/to/a/test.xclbin - run all test cases with test.xclbin\n";
-  std::cout << "\n";
+  std::cout << "\nUsage: " << prog << " [options] [test case ID/name separated by spaces]\n";
+  std::cout << "Options:\n";
+  std::cout << "\t" << "-h" << ": print this help message\n";
+  std::cout << "\t" << "-u" << ": evaluate test result based on kernel version\n";
+  std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
   std::cout << std::endl;
 }
 
-struct test_case { // Definition of one test case
-  const char *description;
-  enum test_mode mode;
+// Definition of one test case
+struct test_case {
+  const std::string name;
+  /*
+   * k_ver = { 0, 0 }: test should behave as expected
+   * k_ver = { -1, -1 }: test does not behave as expected for now
+   * k_ver = { m, n }: test does not behave as expected until m.n kenrel
+   */
+  const kern_version k_ver;
+  bool is_negative;
   bool (*dev_filter)(device::id_type id, device *dev);
   void (*func)(device::id_type id, std::shared_ptr<device> dev, arg_type& arg);
   arg_type arg;
@@ -454,182 +466,195 @@ TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device> sdev, a
 
 // List of all test cases
 std::vector<test_case> test_list {
-  test_case{ "get_xrt_info",
+  test_case{ "get_xrt_info", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_xrt_info, {}
   },
-  test_case{ "get_os_info",
+  test_case{ "get_os_info", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_os_info, {}
   },
-  test_case{ "get_total_devices",
+  test_case{ "get_total_devices", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {true}
   },
-  //test_case{ "get_total_devices(mgmtpf)",
+  //test_case{ "get_total_devices(mgmtpf)", {},
   //  TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {false}
   //},
-  test_case{ "get_bdf_info_and_get_device_id",
+  test_case{ "get_bdf_info_and_get_device_id", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {true}
   },
-  //test_case{ "get_bdf_info_and_get_device_id(mgmtpf)",
+  //test_case{ "get_bdf_info_and_get_device_id(mgmtpf)", {},
   //  TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {false}
   //},
-  //test_case{ "get_mgmtpf_device",
+  //test_case{ "get_mgmtpf_device", {},
   //  TEST_POSITIVE, no_dev_filter, TEST_get_mgmtpf_device, {}
   //},
-  test_case{ "query(pcie_vendor)",
+  test_case{ "query(pcie_vendor)", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_query_userpf<query::pcie_vendor>, {}
   },
-  //test_case{ "non_xdna_userpf: query(pcie_vendor)",
+  //test_case{ "non_xdna_userpf: query(pcie_vendor)", {},
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::pcie_vendor>, {}
   //},
-  test_case{ "query(rom_vbnv)",
+  test_case{ "query(rom_vbnv)", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_query_userpf<query::rom_vbnv>, {}
   },
-  test_case{ "query(rom_fpga_name)",
+  test_case{ "query(rom_fpga_name)", {},
     TEST_NEGATIVE, dev_filter_xdna, TEST_query_userpf<query::rom_fpga_name>, {}
   },
-  //test_case{ "non_xdna_userpf: query(rom_vbnv)",
+  //test_case{ "non_xdna_userpf: query(rom_vbnv)", {},
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
   //},
-  test_case{ "create_destroy_hw_context",
+  test_case{ "create_destroy_hw_context", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_hw_context, {}
   },
-  test_case{ "create_invalid_bo",
+  test_case{ "create_invalid_bo", {},
     TEST_NEGATIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_P2P, 0, 128}
   },
-  test_case{ "create_and_free_exec_buf_bo",
+  test_case{ "create_and_free_exec_buf_bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 128}
   },
-  test_case{ "create_and_free_dpu_sequence_bo 1 bo",
+  test_case{ "create_and_free_dpu_sequence_bo 1 bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
   },
-  test_case{ "create_and_free_dpu_sequence_bo multiple bos",
+  test_case{ "create_and_free_dpu_sequence_bo multiple bos", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo,
     {XCL_BO_FLAGS_CACHEABLE, 0, 0x2000, 0x400, 0x3000, 0x100}
   },
-  test_case{ "create_and_free_input_output_bo 1 pages",
+  test_case{ "create_and_free_input_output_bo 1 pages", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_NONE, 0, 128}
   },
-  test_case{ "create_and_free_input_output_bo multiple pages",
+  test_case{ "create_and_free_input_output_bo multiple pages", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo,
     {XCL_BO_FLAGS_NONE, 0, 0x10000, 0x23000, 0x2000}
   },
-  test_case{ "create_and_free_input_output_bo huge pages",
+  test_case{ "create_and_free_input_output_bo huge pages", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_bo,
     {XCL_BO_FLAGS_NONE, 0, 0x20000000}
   },
-  test_case{ "sync_bo for dpu sequence bo",
+  test_case{ "sync_bo for dpu sequence bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
   },
-  test_case{ "sync_bo for input_output",
+  test_case{ "sync_bo for input_output", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_NONE, 0, 128}
   },
-  test_case{ "map dpu sequence bo and test perf",
+  test_case{ "map dpu sequence bo and test perf", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 361264 /*0x10000*/}
   },
-  test_case{ "map input_output bo and test perf",
+  test_case{ "map input_output bo and test perf", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_NONE, 0, 361264}
   },
-  test_case{ "map bo for read only",
+  test_case{ "map bo for read only", {},
     TEST_NEGATIVE, dev_filter_xdna, TEST_map_read_bo, {0x1000}
   },
-  test_case{ "map exec_buf_bo and test perf",
+  test_case{ "map exec_buf_bo and test perf", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 0x1000}
   },
-  test_case{ "open_close_cu_context",
+  test_case{ "open_close_cu_context", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_open_close_cu_context, {}
   },
-  test_case{ "create_destroy_hw_queue",
+  test_case{ "create_destroy_hw_queue", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_hw_queue, {}
   },
   // Keep bad run before normal run to test recovery of hw ctx
-  test_case{ "io test real kernel bad run",
+  test_case{ "io test real kernel bad run", {},
     TEST_NEGATIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_BAD_RUN, 1 }
   },
-  test_case{ "io test real kernel good run",
+  test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
-  test_case{ "measure no-op kernel latency",
+  test_case{ "measure no-op kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "measure real kernel latency",
+  test_case{ "measure real kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "create and free debug bo",
+  test_case{ "create and free debug bo", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x1000 }
   },
-  test_case{ "create and free large debug bo",
+  test_case{ "create and free large debug bo", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x100000 }
   },
-  test_case{ "multi-command io test real kernel good run",
+  test_case{ "multi-command io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
-  test_case{ "measure no-op kernel throughput chained command",
+  test_case{ "measure no-op kernel throughput chained command", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "npu3 shim vadd",
+  test_case{ "npu3 shim vadd", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
   },
-  test_case{ "export import BO",
+  test_case{ "export import BO", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
   },
-  test_case{ "txn elf flow",
+  test_case{ "txn elf flow", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_txn_elf_flow, {}
   },
-  test_case{ "Cmd fencing (user space side)",
+  test_case{ "Cmd fencing (user space side)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_host, {}
   },
-  test_case{ "npu3 shim move memory tiles",
+  test_case{ "npu3 shim move memory tiles", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_memtiles, {}
   },
-  test_case{ "npu3 shim move ddr memory tiles",
+  test_case{ "npu3 shim move ddr memory tiles", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_ddr_memtile, {}
   },
-  test_case{ "npu3 shim multi col remote barrier",
+  test_case{ "npu3 shim multi col remote barrier", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_remote_barrier, {}
   },
-  test_case{ "io test no op with duplicated BOs",
+  test_case{ "io test no op with duplicated BOs", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
   },
-  test_case{ "measure no-op kernel latency chained command",
+  test_case{ "measure no-op kernel latency chained command", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "measure no-op kernel throuput",
+  test_case{ "measure no-op kernel throuput", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "measure no-op kernel latency (polling)",
+  test_case{ "measure no-op kernel latency (polling)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "measure no-op kernel throuput (polling)",
+  test_case{ "measure no-op kernel throuput (polling)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "measure no-op kernel latency chained command (polling)",
+  test_case{ "measure no-op kernel latency chained command (polling)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "measure no-op kernel throughput chained command (polling)",
+  test_case{ "measure no-op kernel throughput chained command (polling)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "Cmd fencing (driver side)",
+  test_case{ "Cmd fencing (driver side)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
   },
-  test_case{ "sync_bo for input_output 1MiB BO",
+  test_case{ "sync_bo for input_output 1MiB BO", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_NONE, 0, 0x100000}
   },
-  test_case{ "sync_bo for input_output 1MiB BO w/ offset and size",
+  test_case{ "sync_bo for input_output 1MiB BO w/ offset and size", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_NONE, 0, 0x100000, 0x1004, 0x3c}
   },
 };
 
-} // namespace
-
 // Test case executor implementation
+
+bool
+is_negative_test(const test_case& test)
+{
+  printf("test major=%d, minor=%d\n", test.k_ver.major, test.k_ver.minor);
+  if (current_kern.major == 0)
+    return test.is_negative;
+  if (test.k_ver.major == -1)
+    return !test.is_negative;
+  if (current_kern.major < test.k_ver.major)
+    return !test.is_negative;
+  if (current_kern.major == test.k_ver.major && current_kern.minor < test.k_ver.minor)
+    return !test.is_negative;
+  return test.is_negative;
+}
 
 void
 run_test(int id, const test_case& test, bool force, const device::id_type& num_of_devices)
 {
-  bool failed = (test.mode == TEST_NEGATIVE);
+  bool failed = is_negative_test(test);
   bool skipped = true;
 
-  std::cout << "====== " << id << ": " << test.description << " started =====" << std::endl;
+  std::cout << "====== " << id << ": " << test.name << " started =====" << std::endl;
   try {
     if (test.dev_filter == no_dev_filter) { // system test
       skipped = false;
@@ -646,7 +671,7 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
   }
   catch (const std::exception& ex) {
     skipped = false;
-    std::cerr << ex.what() << std::endl;
+    std::cout << ex.what() << std::endl;
     failed = !failed;
   }
 
@@ -655,7 +680,7 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
     result = "skipped";
   else
     result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed";
-  std::cout << "====== " << id << ": " << test.description << " " << result << "  =====" << std::endl;
+  std::cout << "====== " << id << ": " << test.name << " " << result << "  =====" << std::endl;
 
   if (skipped)
     test_skipped++;
@@ -666,9 +691,8 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
 }
 
 void
-run_all_test(std::set<int>& tests)
+run_all_test(std::vector<int>& tests)
 {
-  auto all = tests.empty();
   device::id_type total_dev = 0;
 
   try {
@@ -684,56 +708,126 @@ run_all_test(std::set<int>& tests)
     return;
   }
 
-  for (int i = 0; i < test_list.size(); i++) {
-    if (!all) {
-      if (tests.find(i) == tests.end())
-        continue;
-      else
-        tests.erase(i);
+  // Run all tests
+  if (tests.empty()) {
+    int id = 0;
+    for (const auto& t : test_list) {
+      run_test(id++, t, false, total_dev);
+      std::cout << std::endl;
     }
-    const auto& t = test_list[i];
-    run_test(i, t, !all, total_dev);
+  }
+
+  // Run specified tests
+  for (auto id : tests) {
+    const auto& t = test_list[id];
+    run_test(id, t, true, total_dev);
     std::cout << std::endl;
   }
 }
 
 int
-main(int argc, char **argv)
+get_kernel_version(int *major, int *minor)
 {
-  program = std::filesystem::path(argv[0]).filename();
-  std::set<int> tests;
+  struct utsname buffer;
+
+  if (uname(&buffer) != 0) {
+      perror("uname");
+      return -EFAULT;
+  }
+
+  std::string version = buffer.release;
+  std::stringstream version_stream(version);
+  char dot;
+  if (!(version_stream >> *major >> dot >> *minor)) {
+      std::cout << "Failed to parse kernel version: " << version << std::endl;
+      return -EINVAL;
+  }
+  return 0;
+}
+
+int
+get_test_case_index(const char *arg)
+{
+  int idx;
+  size_t pos;
+  bool is_idx = true;
 
   try {
-    int first_test_id = 1;
-
-    if (argc >= 2) {
-      std::ifstream xclbin(argv[first_test_id]);
-      if (xclbin) {
-        xclbin_path = argv[1];
-        std::cout << "Xclbin file: " << xclbin_path << std::endl;
-        first_test_id++;
-      }
-    }
-
-    for (int i = first_test_id; i < argc; i++)
-      tests.insert(std::stoi(argv[i]));
+    idx = std::stoi(arg, &pos, 10);
   }
   catch (...) {
-    usage(program);
-    return 2;
+    is_idx = false;
+  }
+  if (arg[pos] != '\0')
+    is_idx = false;
+
+  if (is_idx)
+    return idx;
+
+  idx = 0;
+  for (const auto& t : test_list) {
+    if (t.name.compare(arg) == 0)
+      return idx;
+    idx++;
+  }
+  std::cout << "Test case not found: " << arg << std::endl;
+  return -1;
+}
+
+int
+main(int argc, char **argv)
+{
+  std::string program = std::filesystem::path(argv[0]).filename();
+
+  int option;
+  while ((option = getopt(argc, argv, ":hx:k")) != -1) {
+    switch (option) {
+    case 'h':
+      usage(program);
+      return 0;
+    case 'x': {
+      std::ifstream xclbin(optarg);
+      if (xclbin) {
+        xclbin_path = optarg;
+        std::cout << "Using xclbin file: " << xclbin_path << std::endl;
+	      break;
+      } else {
+        std::cout << "Failed to open xclbin file: " << optarg << std::endl;
+	      return 1;
+      }
+    }
+    case 'k': {
+      if (get_kernel_version(&current_kern.major, &current_kern.minor))
+        return 1;
+      std::cout << "Evaluating test result based on kernel version: "
+        << current_kern.major << "." << current_kern.minor << std::endl;
+      break;
+    }
+    case '?':
+      std::cout << "Unknown option: " << static_cast<char>(optopt) << std::endl;;
+      return 1;
+    case ':':
+      std::cout << "Missing value for option: " << argv[optind-1] << std::endl;;
+      return 1;
+    default:
+      usage(program);
+      return 1;
+    }
+  }
+
+  std::vector<int> tests;
+  for (int i = optind; i < argc; i++) {
+    int idx = get_test_case_index(argv[i]);
+    if (idx >= 0)
+      tests.push_back(idx);
+    else
+      return 1;
   }
 
   cur_path = dirname(argv[0]);
   set_xrt_path();
 
   run_all_test(tests);
-
-  if (!tests.empty()) {
-    std::cout << tests.size() << "\ttest(s) not found:";
-    for (auto i : tests)
-      std::cout << " " << i;
-    std::cout << std::endl;
-  }
 
   if (test_skipped)
     std::cout << test_skipped << "\ttest(s) skipped" << std::endl;
