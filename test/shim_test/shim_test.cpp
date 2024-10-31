@@ -70,7 +70,7 @@ usage(const std::string& prog)
   std::cout << "\nUsage: " << prog << " [options] [test case ID/name separated by spaces]\n";
   std::cout << "Options:\n";
   std::cout << "\t" << "-h" << ": print this help message\n";
-  std::cout << "\t" << "-u" << ": evaluate test result based on kernel version\n";
+  std::cout << "\t" << "-k" << ": evaluate test result based on kernel version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
   std::cout << std::endl;
 }
@@ -566,10 +566,10 @@ std::vector<test_case> test_list {
   test_case{ "measure real kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "create and free debug bo", {},
+  test_case{ "create and free debug bo", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x1000 }
   },
-  test_case{ "create and free large debug bo", {},
+  test_case{ "create and free large debug bo", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
@@ -581,7 +581,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 shim vadd", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
   },
-  test_case{ "export import BO", {},
+  test_case{ "export import BO", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
   },
   test_case{ "txn elf flow", {},
@@ -599,7 +599,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 shim multi col remote barrier", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_remote_barrier, {}
   },
-  test_case{ "io test no op with duplicated BOs", {},
+  test_case{ "io test no op with duplicated BOs", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
   },
   test_case{ "measure no-op kernel latency chained command", {},
@@ -620,7 +620,7 @@ std::vector<test_case> test_list {
   test_case{ "measure no-op kernel throughput chained command (polling)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "Cmd fencing (driver side)", {},
+  test_case{ "Cmd fencing (driver side)", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
   },
   test_case{ "sync_bo for input_output 1MiB BO", {},
