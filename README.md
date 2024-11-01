@@ -86,9 +86,9 @@ cd <root-of-source-tree>/build
 
 # If you do not have XRT installed yet:
 cd xrt/build
-./build.sh -noert -noalveo
+./build.sh -npu -opt
 # To adapt according to your OS & version
-sudo apt reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xrt.deb
+sudo apt reinstall ./Release/npu_202410.2.17.0_23.10-amd64-xrt.deb
 cd ../../build
 
 # Start XDNA driver release build
