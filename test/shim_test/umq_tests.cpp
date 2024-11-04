@@ -134,6 +134,7 @@ TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device> sdev, c
     }
   }
 }
+
 void
 TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
 {

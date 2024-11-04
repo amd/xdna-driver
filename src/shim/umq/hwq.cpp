@@ -43,6 +43,32 @@ is_slot_valid(volatile struct host_queue_packet *pkt)
   return pkt->xrt_header.common_header.type == HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 }
 
+int
+wait_slot(const shim_xdna::pdev& pdev, const shim_xdna::hw_ctx *ctx,
+  uint64_t cmd_id, uint32_t timeout_ms)
+{
+  int ret = 1;
+
+  shim_debug("waiting for cmd_id (%ld)...", cmd_id);
+
+  amdxdna_drm_wait_cmd wcmd = {
+    .hwctx = ctx->get_slotidx(),
+    .timeout = timeout_ms,
+    .seq = cmd_id,
+  };
+
+  try {
+    pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
+  }
+  catch (const xrt_core::system_error& ex) {
+    if (ex.get_code() != ETIME)
+      throw;
+    else
+      ret = 0;
+  }
+  return ret;
+}
+
 }
 
 namespace shim_xdna {
@@ -206,21 +232,27 @@ reserve_slot()
   bool queue_full = false;
   auto h = get_header_ptr();
 
-  std::unique_lock<std::mutex> lock(m_mutex);
-  if (h->write_index < h->read_index) {
-    shim_err(EINVAL, "Queue read before write! read_index=0x%lx, write_index=0x%lx",
-      h->read_index, h->write_index);
-    dump();
-  } else if ((h->write_index - h->read_index) < h->capacity) {
-    cur_slot = h->write_index;
-    h->write_index++;
-  } else {
-    queue_full = true;
-  }
-  lock.unlock();
+  do {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    if (h->write_index < h->read_index) {
+      shim_err(EINVAL, "Queue read before write! read_index=0x%lx, write_index=0x%lx",
+        h->read_index, h->write_index);
+      dump();
+    } else if ((h->write_index - h->read_index) < h->capacity) {
+      cur_slot = h->write_index;
+      h->write_index++;
+      break;
+    } else {
+      queue_full = true;
+    }
+    lock.unlock();
 
-  if (queue_full)
-    shim_err(ENOSPC, "Queue is full");
+    if (queue_full) {
+      shim_debug("Queue is full, wait for next available slot");
+      //should wait for h->read_index which should be the first available slot.
+      wait_slot(m_pdev, m_hwctx, h->read_index, 0);
+    }
+  } while (queue_full);
 
   return cur_slot;
 }

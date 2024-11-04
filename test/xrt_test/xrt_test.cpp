@@ -286,7 +286,6 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
   xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{nop}"};
   xrt::run run{kernel};
 
-
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
@@ -296,6 +295,79 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 }
 
+/* run.start n requests, then run.wait all of them */
+void
+TEST_xrt_stress_start(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+  unsigned round = static_cast<unsigned>(arg[0]);
+
+  auto xclbin = xrt::xclbin(
+    xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{nop}"};
+
+  std::vector<xrt::run> run_handles;
+
+  for (int i = 0; i < round; i++) {
+    auto run = xrt::run(kernel);
+    run_handles.push_back(std::move(run));
+  }
+
+  for (int i = 0; i < round; i++) {
+    run_handles[i].start();
+  }
+
+  for (int i = 0; i < round; i++) {
+    auto state = run_handles[i].wait(600000 /* 600 sec, some simnow server are slow */);
+    if (state == ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  }
+}
+
+/* create n hwctx  */
+void
+TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+  unsigned round = static_cast<unsigned>(arg[0]);
+
+  auto xclbin = xrt::xclbin(
+    xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+  xrt::module mod{elf};
+
+  std::vector<xrt::hw_context> run_hwctxs;
+
+  for (int i = 0; i < round; i++) {
+    xrt::hw_context hwctx{device, uuid};
+    run_hwctxs.push_back(std::move(hwctx));
+  }
+
+  for (int i = 0; i < round; i++) {
+    auto hwctx = run_hwctxs[i];
+    auto kernel = xrt::ext::kernel{hwctx, mod, "dpu:{nop}"};
+
+    auto run = xrt::run(kernel);
+
+    run.start();
+    auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+
+    if (state == ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  }
+}
 
 // List of all test cases
 std::vector<test_case> test_list {
@@ -304,6 +376,8 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt ddr_memtile", TEST_xrt_umq_ddr_memtile, {} },
   test_case{ "npu3 xrt remote_barrier", TEST_xrt_umq_remote_barrier, {} },
   test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
+  test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {32} },
+  test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {2} }, //upto 2 now
 };
 
 }
