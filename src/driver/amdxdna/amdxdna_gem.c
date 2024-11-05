@@ -373,14 +373,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 
 	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_init(&abo->lock);
-	mutex_init(&abo->mem.notify_lock);
 	INIT_WORK(&abo->hmm_unreg_work, amdxdna_hmm_unreg_work);
-
-	if (IS_ENABLED(CONFIG_LOCKDEP)) {
-		fs_reclaim_acquire(GFP_KERNEL);
-		might_lock(&abo->mem.notify_lock);
-		fs_reclaim_release(GFP_KERNEL);
-	}
 
 	abo->mem.userptr = AMDXDNA_INVALID_ADDR;
 	abo->mem.dev_addr = AMDXDNA_INVALID_ADDR;

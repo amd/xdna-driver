@@ -21,6 +21,20 @@ bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
 
+static void aie2_job_release(struct kref *ref)
+{
+	struct amdxdna_sched_job *job;
+
+	job = container_of(ref, struct amdxdna_sched_job, refcnt);
+	amdxdna_sched_job_cleanup(job);
+	kfree(job);
+}
+
+static void aie2_job_put(struct amdxdna_sched_job *job)
+{
+	kref_put(&job->refcnt, aie2_job_release);
+}
+
 static inline int
 aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 {
@@ -30,17 +44,18 @@ aie2_hwctx_add_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 	idx = get_job_idx(hwctx->submitted);
 	/* When pending list full, hwctx->submitted points to oldest fence */
 	other = hwctx->priv->pending[idx];
-	if (other && other->fence)
+	if (other && !dma_fence_is_signaled(other->fence))
 		return -EAGAIN;
 
 	if (other) {
-		dma_fence_put(other->out_fence);
-		amdxdna_job_put(other);
+		dma_fence_put(other->fence);
+		aie2_job_put(other);
 	}
 
 	hwctx->priv->pending[idx] = job;
 	job->seq = hwctx->submitted++;
 	kref_get(&job->refcnt);
+	dma_fence_get(job->fence);
 
 	return 0;
 }
@@ -146,7 +161,8 @@ aie2_hwctx_dump(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "\top: 0x%x", j->opcode);
 		XDNA_ERR(xdna, "\tmsg: 0x%x", j->msg_id);
 		XDNA_ERR(xdna, "\tfence: %s", aie2_fence_state2str(j->fence));
-		XDNA_ERR(xdna, "\tout_fence: %s", aie2_fence_state2str(j->out_fence));
+		XDNA_ERR(xdna, "\tout_fence: %s",
+			 aie2_fence_state2str(&j->base.s_fence->finished));
 	}
 }
 
@@ -224,7 +240,7 @@ static int aie2_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 	}
 	mutex_unlock(&hwctx->priv->io_lock);
 
-	wait_event(hwctx->priv->job_free_wq, !job->fence);
+	dma_fence_wait(job->fence, false);
 
 	return 0;
 }
@@ -277,7 +293,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
 	mmput(job->mm);
-	amdxdna_job_put(job);
+	aie2_job_put(job);
 }
 
 static int
@@ -429,7 +445,7 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 out:
 	if (ret) {
 		dma_fence_put(job->fence);
-		amdxdna_job_put(job);
+		aie2_job_put(job);
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	}
@@ -449,10 +465,7 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 	trace_xdna_job(sched_job, hwctx->name, "job free", job->seq, job->opcode);
 	drm_sched_job_cleanup(sched_job);
 	dma_fence_put(job->fence);
-	job->fence = NULL;
-	amdxdna_job_put(job);
-
-	wake_up(&hwctx->priv->job_free_wq);
+	aie2_job_put(job);
 }
 
 const struct drm_sched_backend_ops sched_ops = {
@@ -601,7 +614,6 @@ static int aie2_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
 		return ret;
 	}
 	ret = drm_syncobj_get_handle(filp, syncobj, &hdl);
-	drm_syncobj_put(syncobj);
 	if (ret) {
 		XDNA_ERR(xdna, "Create ctx syncobj handle failed, ret %d", ret);
 		return ret;
@@ -715,7 +727,6 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "Failed to initial sched entiry. ret %d", ret);
 		goto free_sched;
 	}
-	init_waitqueue_head(&priv->job_free_wq);
 
 	ret = aie2_hwctx_col_list(hwctx);
 	if (ret) {
@@ -811,8 +822,8 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		if (!job)
 			continue;
 
-		dma_fence_put(job->out_fence);
-		amdxdna_job_put(job);
+		dma_fence_put(job->fence);
+		aie2_job_put(job);
 	}
 	XDNA_DBG(xdna, "%s total completed jobs %lld", hwctx->name, hwctx->completed);
 
@@ -879,7 +890,7 @@ static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 #endif
 	ret = aie2_config_cu(hwctx);
 	if (ret) {
-		XDNA_ERR(xdna, "Configu CU to firmware failed, ret %d", ret);
+		XDNA_ERR(xdna, "Config CU to firmware failed, ret %d", ret);
 		goto free_cus;
 	}
 
@@ -1021,13 +1032,13 @@ again:
 		goto put_mm;
 	}
 
-	mutex_lock(&abo->mem.notify_lock);
+	read_lock(&xdna->notifier_lock);
 	if (mmu_interval_read_retry(&abo->mem.notifier, range.notifier_seq)) {
-		mutex_unlock(&abo->mem.notify_lock);
+		read_unlock(&xdna->notifier_lock);
 		goto again;
 	}
 	abo->mem.map_invalid = false;
-	mutex_unlock(&abo->mem.notify_lock);
+	read_unlock(&xdna->notifier_lock);
 
 put_mm:
 	mmput(mm);
@@ -1056,7 +1067,7 @@ static int aie2_add_job_dependency(struct amdxdna_sched_job *job, u32 *syncobj_h
 	return ret;
 }
 
-static int aie2_hwctx_push_job(struct amdxdna_sched_job *job, u64 *seq)
+static void aie2_hwctx_push_job(struct amdxdna_sched_job *job, u64 *seq)
 {
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence;
@@ -1067,22 +1078,19 @@ again:
 	ret = aie2_hwctx_add_job(hwctx, job);
 	if (ret) {
 		mutex_unlock(&hwctx->priv->io_lock);
-		if (ret == -EAGAIN) {
-			// Waiting for the first pending cmd to complete before trying again.
-			aie2_cmd_wait(hwctx, hwctx->submitted - HWCTX_MAX_CMDS, 0);
-			goto again;
-		}
-		return ret;
+		// Waiting for the first pending cmd to complete before trying again.
+		aie2_cmd_wait(hwctx, hwctx->submitted - HWCTX_MAX_CMDS, 0);
+		goto again;
 	}
 
-	fence = dma_fence_get(job->out_fence);
+	drm_sched_job_arm(&job->base);
+	fence = dma_fence_get(&job->base.s_fence->finished);
 	*seq = job->seq;
 	drm_sched_entity_push_job(&job->base);
 	mutex_unlock(&hwctx->priv->io_lock);
 
 	aie2_ctx_syncobj_add_fence(hwctx, fence, *seq);
 	dma_fence_put(fence);
-	return 0;
 }
 
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
@@ -1100,65 +1108,60 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		return ret;
 	}
 
-	drm_sched_job_arm(&job->base);
-	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
-
 	ret = aie2_add_job_dependency(job, syncobj_hdls, syncobj_points, syncobj_cnt);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to add dependency, ret %d", ret);
-		goto put_fence;
+		goto cleanup_job;
 	}
 
 retry:
 	ret = amdxdna_lock_objects(job, &acquire_ctx);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to lock objects, ret %d", ret);
-		goto put_fence;
+		goto cleanup_job;
 	}
 
 	for (i = 0; i < job->bo_cnt; i++) {
-		abo = to_xdna_obj(job->bos[i].obj);
 		ret = dma_resv_reserve_fences(job->bos[i].obj->resv, 1);
 		if (ret) {
 			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
 			amdxdna_unlock_objects(job, &acquire_ctx);
-			goto put_fence;
+			goto cleanup_job;
 		}
+	}
 
-		mutex_lock(&abo->mem.notify_lock);
+	read_lock(&xdna->notifier_lock);
+	for (i = 0; i < job->bo_cnt; i++) {
+		abo = to_xdna_obj(job->bos[i].obj);
 		if (abo->mem.map_invalid) {
-			mutex_unlock(&abo->mem.notify_lock);
+			read_unlock(&xdna->notifier_lock);
 			amdxdna_unlock_objects(job, &acquire_ctx);
 			if (!timeout) {
 				timeout = jiffies +
 					msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
 			} else if (time_after(jiffies, timeout)) {
 				ret = -ETIME;
-				goto put_fence;
+				goto cleanup_job;
 			}
 
 			ret = aie2_populate_range(abo);
 			if (ret)
-				goto put_fence;
+				goto cleanup_job;
 			goto retry;
 		}
-
-		dma_resv_add_fence(job->bos[i].obj->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
-		mutex_unlock(&abo->mem.notify_lock);
 	}
 
+	for (i = 0; i < job->bo_cnt; i++)
+		dma_resv_add_fence(job->bos[i].obj->resv, job->fence, DMA_RESV_USAGE_WRITE);
+
+	read_unlock(&xdna->notifier_lock);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
-	ret = aie2_hwctx_push_job(job, seq);
-	if (ret)
-		goto signal_fence;
+	aie2_hwctx_push_job(job, seq);
 
 	return 0;
 
-signal_fence:
-	dma_fence_signal(job->out_fence);
-put_fence:
-	dma_fence_put(job->out_fence);
+cleanup_job:
 	drm_sched_job_cleanup(&job->base);
 	return ret;
 }
@@ -1175,7 +1178,7 @@ struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_hwctx *hwctx, u64 seq)
 		return ERR_CAST(job);
 	}
 
-	out_fence = dma_fence_get(job->out_fence);
+	out_fence = dma_fence_get(&job->base.s_fence->finished);
 	mutex_unlock(&hwctx->priv->io_lock);
 	return out_fence;
 }
@@ -1204,10 +1207,10 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
 	struct drm_gem_object *gobj = to_gobj(abo);
 	long ret;
 
-	mutex_lock(&abo->mem.notify_lock);
+	write_lock(&xdna->notifier_lock);
 	abo->mem.map_invalid = true;
 	mmu_interval_set_seq(&abo->mem.notifier, cur_seq);
-	mutex_unlock(&abo->mem.notify_lock);
+	write_unlock(&xdna->notifier_lock);
 	ret = dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
 				    true, MAX_SCHEDULE_TIMEOUT);
 	if (!ret || ret == -ERESTARTSYS)
