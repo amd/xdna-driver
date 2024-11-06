@@ -140,8 +140,6 @@ struct amdxdna_sched_job {
 	struct mm_struct	*mm;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
-	/* user can wait on this fence */
-	struct dma_fence	*out_fence;
 	u64			seq;
 #define OP_USER			0
 #define OP_SYNC_BO		1
@@ -232,8 +230,7 @@ static inline u32 amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx)
 		       hwctx->start_col);
 }
 
-void amdxdna_job_put(struct amdxdna_sched_job *job);
-
+void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
 void amdxdna_hwctx_resume(struct amdxdna_client *client);

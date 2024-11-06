@@ -360,21 +360,11 @@ put_arg_bos:
 	return ret;
 }
 
-static void amdxdna_sched_job_release(struct kref *ref)
+void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 {
-	struct amdxdna_sched_job *job;
-
-	job = container_of(ref, struct amdxdna_sched_job, refcnt);
-
 	trace_amdxdna_debug_point(job->hwctx->name, job->seq, "job release");
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
-	kfree(job);
-}
-
-void amdxdna_job_put(struct amdxdna_sched_job *job)
-{
-	kref_put(&job->refcnt, amdxdna_sched_job_release);
 }
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)

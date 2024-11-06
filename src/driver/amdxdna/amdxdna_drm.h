@@ -122,6 +122,7 @@ struct amdxdna_dev {
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
+	rwlock_t			notifier_lock; /* for mmu notifier*/
 };
 
 struct amdxdna_stats {
