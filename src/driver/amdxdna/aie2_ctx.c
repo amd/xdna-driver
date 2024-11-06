@@ -615,6 +615,7 @@ static int aie2_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
 	}
 	ret = drm_syncobj_get_handle(filp, syncobj, &hdl);
 	if (ret) {
+		drm_syncobj_put(syncobj);
 		XDNA_ERR(xdna, "Create ctx syncobj handle failed, ret %d", ret);
 		return ret;
 	}
