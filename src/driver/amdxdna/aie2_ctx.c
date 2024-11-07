@@ -127,6 +127,7 @@ aie2_hwctx_dump(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 	u64 comp = hwctx->completed;
 
 	XDNA_ERR(xdna, "Dumping ctx %s, sub=%lld, comp=%lld", hwctx->name, sub, comp);
+	mutex_lock(&hwctx->priv->io_lock);
 	for (int i = 0; i < HWCTX_MAX_CMDS; i++) {
 		struct amdxdna_sched_job *j = hwctx->priv->pending[i];
 		if (!j)
@@ -139,6 +140,7 @@ aie2_hwctx_dump(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "\tout_fence: %s",
 			 aie2_fence_state2str(&j->base.s_fence->finished));
 	}
+	mutex_unlock(&hwctx->priv->io_lock);
 }
 
 void aie2_dump_ctx(struct amdxdna_client *client)
@@ -779,7 +781,6 @@ free_priv:
 
 void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_sched_job *job;
 	struct amdxdna_dev *xdna;
 	int idx;
 
@@ -802,13 +803,6 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	drm_sched_fini(&hwctx->priv->sched);
 	destroy_workqueue(hwctx->priv->submit_wq);
 
-	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
-		job = hwctx->priv->pending[idx];
-		if (!job)
-			continue;
-
-		aie2_job_put(job);
-	}
 	XDNA_DBG(xdna, "%s total completed jobs %lld", hwctx->name, hwctx->completed);
 
 	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
