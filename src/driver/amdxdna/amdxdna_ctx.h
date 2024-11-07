@@ -140,6 +140,8 @@ struct amdxdna_sched_job {
 	struct mm_struct	*mm;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
+	/* user can wait on this fence */
+	struct dma_fence	*out_fence;
 	u64			seq;
 #define OP_USER			0
 #define OP_SYNC_BO		1
