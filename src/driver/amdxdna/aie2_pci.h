@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/iopoll.h>
 #include <linux/io.h>
+#include <linux/semaphore.h>
 #include <drm/gpu_scheduler.h>
 
 #include "drm_local/amdxdna_accel.h"
@@ -200,6 +201,7 @@ struct amdxdna_hwctx_priv {
 	struct wait_queue_head		job_free_wq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	u32				num_pending;
+	struct semaphore		job_sem;
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 	struct workqueue_struct		*submit_wq;
