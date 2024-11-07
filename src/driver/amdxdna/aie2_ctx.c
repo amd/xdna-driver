@@ -210,7 +210,6 @@ static int aie2_hwctx_wait_for_idle(struct amdxdna_hwctx *hwctx)
 	job = aie2_hwctx_get_job(hwctx, hwctx->submitted - 1);
 	if (IS_ERR_OR_NULL(job)) {
 		mutex_unlock(&hwctx->priv->io_lock);
-		XDNA_WARN(hwctx->client->xdna, "Corrupted pending list");
 		return 0;
 	}
 	mutex_unlock(&hwctx->priv->io_lock);
@@ -260,6 +259,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct dma_fence *fence = job->fence;
+	int idx;
 
 #ifdef AMDXDNA_DRM_USAGE
 	amdxdna_update_stats(hwctx->client, ktime_get(), false);
@@ -267,6 +267,11 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	hwctx->completed++;
 	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
+	idx = get_job_idx(job->seq);
+	mutex_lock(&hwctx->priv->io_lock);
+	hwctx->priv->pending[idx] = NULL;
+	mutex_unlock(&hwctx->priv->io_lock);
+
 	up(&job->hwctx->priv->job_sem);
 	mmput(job->mm);
 	aie2_job_put(job);
@@ -1049,20 +1054,14 @@ static int aie2_add_job_dependency(struct amdxdna_sched_job *job, u32 *syncobj_h
 static void aie2_hwctx_push_job(struct amdxdna_sched_job *job, u64 *seq)
 {
 	struct amdxdna_hwctx *hwctx = job->hwctx;
-	struct amdxdna_sched_job *other;
 	int idx;
 
 	mutex_lock(&hwctx->priv->io_lock);
 	idx = get_job_idx(hwctx->submitted);
-	other = hwctx->priv->pending[idx];
-	if (other)
-		aie2_job_put(other);
-
 	drm_sched_job_arm(&job->base);
 	hwctx->priv->pending[idx] = job;
 	job->seq = hwctx->submitted++;
 	*seq = job->seq;
-	kref_get(&job->refcnt);
 
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 	drm_sched_entity_push_job(&job->base);
