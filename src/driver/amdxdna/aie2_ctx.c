@@ -1050,7 +1050,6 @@ static void aie2_hwctx_push_job(struct amdxdna_sched_job *job, u64 *seq)
 {
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 	struct amdxdna_sched_job *other;
-	struct dma_fence *fence;
 	int idx;
 
 	mutex_lock(&hwctx->priv->io_lock);
@@ -1065,12 +1064,11 @@ static void aie2_hwctx_push_job(struct amdxdna_sched_job *job, u64 *seq)
 	*seq = job->seq;
 	kref_get(&job->refcnt);
 
-	fence = dma_fence_get(&job->base.s_fence->finished);
-	job->out_fence = fence;
+	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 	drm_sched_entity_push_job(&job->base);
+	aie2_ctx_syncobj_add_fence(hwctx, job->out_fence, *seq);
 	mutex_unlock(&hwctx->priv->io_lock);
 
-	aie2_ctx_syncobj_add_fence(hwctx, fence, *seq);
 }
 
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
