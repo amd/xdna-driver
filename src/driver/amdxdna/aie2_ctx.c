@@ -27,6 +27,8 @@ static void aie2_job_release(struct kref *ref)
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
 	amdxdna_sched_job_cleanup(job);
+	if (job->out_fence)
+		dma_fence_put(job->out_fence);
 	kfree(job);
 }
 
@@ -426,8 +428,6 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 	if (!job->job_done)
 		up(&hwctx->priv->job_sem);
 
-	if (job->out_fence)
-		dma_fence_put(job->out_fence);
 	drm_sched_job_cleanup(sched_job);
 	aie2_job_put(job);
 }
@@ -598,22 +598,6 @@ static void aie2_ctx_syncobj_destroy(struct amdxdna_hwctx *hwctx)
 	drm_syncobj_put(hwctx->priv->syncobj);
 }
 
-static void aie2_ctx_syncobj_add_fence(struct amdxdna_hwctx *hwctx,
-				       struct dma_fence *ofence, u64 seq)
-{
-	struct drm_syncobj *syncobj = hwctx->priv->syncobj;
-	struct dma_fence_chain *chain;
-
-	if (!syncobj)
-		return;
-
-	chain = dma_fence_chain_alloc();
-	if (!chain)
-		return;
-
-	drm_syncobj_add_point(syncobj, chain, ofence, seq);
-}
-
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
@@ -670,6 +654,10 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	sched = &priv->sched;
 	mutex_init(&priv->io_lock);
+
+	fs_reclaim_acquire(GFP_KERNEL);
+	might_lock(&priv->io_lock);
+	fs_reclaim_release(GFP_KERNEL);
 
 	wq_flags = __WQ_ORDERED;
 	if (!aie2_pm_is_turbo(xdna->dev_handle))
@@ -1024,24 +1012,6 @@ static int aie2_add_job_dependency(struct amdxdna_sched_job *job, u32 *syncobj_h
 	return ret;
 }
 
-static void aie2_hwctx_push_job(struct amdxdna_sched_job *job, u64 *seq)
-{
-	struct amdxdna_hwctx *hwctx = job->hwctx;
-	int idx;
-
-	mutex_lock(&hwctx->priv->io_lock);
-	idx = get_job_idx(hwctx->submitted);
-	drm_sched_job_arm(&job->base);
-	hwctx->priv->pending[idx] = job;
-	job->seq = hwctx->submitted++;
-	*seq = job->seq;
-
-	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
-	drm_sched_entity_push_job(&job->base);
-	aie2_ctx_syncobj_add_fence(hwctx, job->out_fence, *seq);
-	mutex_unlock(&hwctx->priv->io_lock);
-}
-
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
@@ -1057,10 +1027,17 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		return ret;
 	}
 
+	job->chain = dma_fence_chain_alloc();
+	if (!job->chain) {
+		XDNA_ERR(xdna, "Alloc fence chain failed");
+		ret = -ENOMEM;
+		goto up_sem;
+	}
+
 	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM job init failed, ret %d", ret);
-		goto up_sem;
+		goto free_chain;
 	}
 
 	ret = aie2_add_job_dependency(job, syncobj_hdls, syncobj_points, syncobj_cnt);
@@ -1106,18 +1083,31 @@ retry:
 		}
 	}
 
+	mutex_lock(&hwctx->priv->io_lock);
+	drm_sched_job_arm(&job->base);
+	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 	for (i = 0; i < job->bo_cnt; i++)
-		dma_resv_add_fence(job->bos[i].obj->resv, job->fence, DMA_RESV_USAGE_WRITE);
+		dma_resv_add_fence(job->bos[i].obj->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+	job->seq = hwctx->submitted++;
+	kref_get(&job->refcnt);
+	drm_sched_entity_push_job(&job->base);
+
+	*seq = job->seq;
+	drm_syncobj_add_point(hwctx->priv->syncobj, job->chain, job->out_fence, *seq);
+	job->chain = NULL;
+	mutex_unlock(&hwctx->priv->io_lock);
 
 	read_unlock(&xdna->notifier_lock);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
-	aie2_hwctx_push_job(job, seq);
+	aie2_job_put(job);
 
 	return 0;
 
 cleanup_job:
 	drm_sched_job_cleanup(&job->base);
+free_chain:
+	dma_fence_chain_free(job->chain);
 up_sem:
 	up(&hwctx->priv->job_sem);
 	job->job_done = true;

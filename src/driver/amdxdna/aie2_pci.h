@@ -374,7 +374,6 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 void aie2_stop_ctx(struct amdxdna_client *client);
 void aie2_dump_ctx(struct amdxdna_client *client);
 void aie2_restart_ctx(struct amdxdna_client *client);
-void aie2_stop_ctx_by_col_map(struct amdxdna_client *client, u32 col_map);
 int aie2_xrs_load_hwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
 int aie2_xrs_unload_hwctx(struct amdxdna_hwctx *hwctx);
 
