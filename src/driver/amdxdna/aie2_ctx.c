@@ -53,14 +53,23 @@ aie2_hwctx_get_job(struct amdxdna_hwctx *hwctx, u64 seq)
 static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			    struct drm_sched_job *bad_job)
 {
+	if (hwctx->status == HWCTX_STATE_STOP) {
+		XDNA_DBG(xdna, "%s was stopped, skip", hwctx->name);
+		return;
+	}
+
 	drm_sched_stop(&hwctx->priv->sched, bad_job);
 	aie2_destroy_context(xdna->dev_handle, hwctx);
+	hwctx->status = HWCTX_STATE_STOP;
+	XDNA_DBG(xdna, "Stopped %s", hwctx->name);
 }
 
 static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_gem_obj *heap = hwctx->priv->heap;
 	int ret;
+
+	WARN_ONCE(hwctx->status != HWCTX_STATE_STOP, "hwctx should be in stop state");
 
 	ret = aie2_create_context(xdna->dev_handle, hwctx);
 	if (ret) {
@@ -75,8 +84,9 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
-	if (hwctx->old_status != HWCTX_STATE_READY) {
-		XDNA_DBG(xdna, "hwctx is not ready, status %d", hwctx->status);
+	if (!hwctx->cus) {
+		XDNA_DBG(xdna, "%s restart to init state", hwctx->name);
+		hwctx->status = HWCTX_STATE_INIT;
 		goto out;
 	}
 
@@ -108,6 +118,7 @@ out:
 #else
 	drm_sched_start(&hwctx->priv->sched);
 #endif
+	hwctx->status = HWCTX_STATE_READY;
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
 	return ret;
 }
@@ -165,10 +176,10 @@ void aie2_stop_ctx(struct amdxdna_client *client)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
 	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+		if (hwctx->status == HWCTX_STATE_INIT)
+			continue;
+
 		aie2_hwctx_stop(xdna, hwctx, NULL);
-		hwctx->old_status = hwctx->status;
-		hwctx->status = HWCTX_STATE_STOP;
-		XDNA_DBG(xdna, "Stop %s", hwctx->name);
 	}
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -188,10 +199,8 @@ void aie2_restart_ctx(struct amdxdna_client *client)
 
 		XDNA_DBG(xdna, "Resetting %s", hwctx->name);
 		err = aie2_hwctx_restart(xdna, hwctx);
-		if (!err) {
-			hwctx->status = hwctx->old_status;
+		if (!err)
 			continue;
-		}
 
 		XDNA_WARN(xdna, "Failed to restart %s status %d err %d",
 			  hwctx->name, hwctx->status, err);
@@ -233,8 +242,6 @@ void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	aie2_hwctx_wait_for_idle(hwctx);
 	aie2_hwctx_stop(xdna, hwctx, NULL);
-	hwctx->old_status = hwctx->status;
-	hwctx->status = HWCTX_STATE_STOP;
 }
 
 void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
@@ -249,9 +256,7 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	err = aie2_hwctx_restart(xdna, hwctx);
-	if (!err)
-		hwctx->status = hwctx->old_status;
-	else
+	if (err)
 		XDNA_WARN(xdna, "Failed to resume %s status %d err %d",
 			  hwctx->name, hwctx->status, err);
 }

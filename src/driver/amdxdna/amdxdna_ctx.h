@@ -106,12 +106,30 @@ struct amdxdna_hwctx {
 	u32				umq_bo;
 	u32				log_buf_bo;
 	u32				doorbell_offset;
+/*
+ * HWCTX_STATE_INIT indicated that hardware context is initialized.
+ * But in this state, user is not allow to submit commands.
+ */
 #define HWCTX_STATE_INIT	0
+/*
+ * HWCTX_STATE_READY indicated that hardware context is ready to accept
+ * commands. State bigger than HWCTX_STATE_READY implied that submit command
+ * is ready.
+ */
 #define HWCTX_STATE_READY	1
+/*
+ * HWCTX_STATE_STOP indicated that hardware context scheduler is stopped.
+ * Submit command is still allowed but commands will NOT be scheduled until
+ * scheduler is restarted.
+ */
 #define HWCTX_STATE_STOP	2
+/*
+ * HWCTX_STATE_DEAD indicated that hardware context marked as dead by TDR.
+ * Submit command is still allowed but commands will NOT be scheduled until
+ * context is fully recovered.
+ */
 #define HWCTX_STATE_DEAD	3
 	u32				status;
-	u32				old_status;
 
 	struct amdxdna_qos_info		     qos;
 	struct amdxdna_hwctx_param_config_cu *cus;
