@@ -1017,6 +1017,7 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
+	struct dma_fence_chain *chain;
 	struct amdxdna_gem_obj *abo;
 	unsigned long timeout = 0;
 	int ret, i;
@@ -1027,8 +1028,8 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		return ret;
 	}
 
-	job->chain = dma_fence_chain_alloc();
-	if (!job->chain) {
+	chain = dma_fence_chain_alloc();
+	if (!chain) {
 		XDNA_ERR(xdna, "Alloc fence chain failed");
 		ret = -ENOMEM;
 		goto up_sem;
@@ -1093,8 +1094,7 @@ retry:
 	drm_sched_entity_push_job(&job->base);
 
 	*seq = job->seq;
-	drm_syncobj_add_point(hwctx->priv->syncobj, job->chain, job->out_fence, *seq);
-	job->chain = NULL;
+	drm_syncobj_add_point(hwctx->priv->syncobj, chain, job->out_fence, *seq);
 	mutex_unlock(&hwctx->priv->io_lock);
 
 	read_unlock(&xdna->notifier_lock);
@@ -1107,7 +1107,7 @@ retry:
 cleanup_job:
 	drm_sched_job_cleanup(&job->base);
 free_chain:
-	dma_fence_chain_free(job->chain);
+	dma_fence_chain_free(chain);
 up_sem:
 	up(&hwctx->priv->job_sem);
 	job->job_done = true;
