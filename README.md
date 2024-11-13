@@ -16,7 +16,7 @@ This repository is for supporting XRT on AMD XDNA devices. From this repository,
 On a machine with XDNA device, with both XRT and XRT plugin packages installed, user can start using XDNA device on Linux.
 
 ## System Requirements
-To run AI applications, your system needs
+To run AI applications, your system needs,
 * Processor:
   - To run AI applications (test machine): RyzenAI processor
   - To build this repository (build machine): Any x86 processors, but recommend AMD processor :wink:
