@@ -145,11 +145,11 @@ void aie2_dump_ctx(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
-	int next = 0;
+	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next)
+	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx)
 		aie2_hwctx_dump(xdna, hwctx);
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -158,11 +158,11 @@ void aie2_stop_ctx(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
-	int next = 0;
+	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx) {
 		if (hwctx->status == HWCTX_STATE_INIT)
 			continue;
 
@@ -175,12 +175,12 @@ void aie2_restart_ctx(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
-	int next = 0;
+	unsigned long hwctx_id;
 	int err;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx) {
 		if (hwctx->status != HWCTX_STATE_STOP)
 			continue;
 
@@ -982,13 +982,13 @@ again:
 		goto put_mm;
 	}
 
-	read_lock(&xdna->notifier_lock);
+	down_read(&xdna->notifier_lock);
 	if (mmu_interval_read_retry(&abo->mem.notifier, range.notifier_seq)) {
-		read_unlock(&xdna->notifier_lock);
+		up_read(&xdna->notifier_lock);
 		goto again;
 	}
 	abo->mem.map_invalid = false;
-	read_unlock(&xdna->notifier_lock);
+	up_read(&xdna->notifier_lock);
 
 put_mm:
 	mmput(mm);
@@ -1068,11 +1068,11 @@ retry:
 		}
 	}
 
-	read_lock(&xdna->notifier_lock);
+	down_read(&xdna->notifier_lock);
 	for (i = 0; i < job->bo_cnt; i++) {
 		abo = to_xdna_obj(job->bos[i].obj);
 		if (abo->mem.map_invalid) {
-			read_unlock(&xdna->notifier_lock);
+			up_read(&xdna->notifier_lock);
 			amdxdna_unlock_objects(job, &acquire_ctx);
 			if (!timeout) {
 				timeout = jiffies +
@@ -1102,7 +1102,7 @@ retry:
 	drm_syncobj_add_point(hwctx->priv->syncobj, chain, job->out_fence, *seq);
 	mutex_unlock(&hwctx->priv->io_lock);
 
-	read_unlock(&xdna->notifier_lock);
+	up_read(&xdna->notifier_lock);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 
 	aie2_job_put(job);
@@ -1163,10 +1163,10 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
 	struct drm_gem_object *gobj = to_gobj(abo);
 	long ret;
 
-	write_lock(&xdna->notifier_lock);
+	down_write(&xdna->notifier_lock);
 	abo->mem.map_invalid = true;
 	mmu_interval_set_seq(&abo->mem.notifier, cur_seq);
-	write_unlock(&xdna->notifier_lock);
+	up_write(&xdna->notifier_lock);
 	ret = dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
 				    true, MAX_SCHEDULE_TIMEOUT);
 	if (!ret || ret == -ERESTARTSYS)

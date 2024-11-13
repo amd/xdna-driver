@@ -945,7 +945,7 @@ u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
 
 	mutex_lock(&abo->lock);
 	ctxid = abo->assigned_hwctx;
-	if (!idr_find(&client->hwctx_idr, ctxid))
+	if (!xa_load(&client->hwctx_xa, ctxid))
 		ctxid = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_unlock(&abo->lock);
 
@@ -964,7 +964,7 @@ int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u3
 	}
 
 	mutex_lock(&abo->lock);
-	if (!idr_find(&client->hwctx_idr, abo->assigned_hwctx))
+	if (!xa_load(&client->hwctx_xa, abo->assigned_hwctx))
 		abo->assigned_hwctx = ctxid;
 	else if (ctxid != abo->assigned_hwctx)
 		ret = -EBUSY;

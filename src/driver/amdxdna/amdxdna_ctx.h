@@ -86,7 +86,7 @@ struct amdxdna_cmd_preempt_data {
 #define AMDXDNA_CMD_OPCODE		GENMASK(27, 23)
 struct amdxdna_cmd {
 	u32 header;
-	u32 data[] __counted_by(count);
+	u32 data[];
 };
 
 struct amdxdna_hwctx {

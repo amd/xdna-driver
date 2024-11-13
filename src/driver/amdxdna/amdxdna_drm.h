@@ -122,7 +122,7 @@ struct amdxdna_dev {
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
-	rwlock_t			notifier_lock; /* for mmu notifier*/
+	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
 };
 
 struct amdxdna_stats {
@@ -156,7 +156,8 @@ struct amdxdna_client {
 	struct mutex			hwctx_lock;
 	/* To avoid deadlock, do NOT wait this srcu when hwctx_lock is hold */
 	struct srcu_struct		hwctx_srcu;
-	struct idr			hwctx_idr;
+	struct xarray			hwctx_xa;
+	u32				next_hwctxid;
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
 
