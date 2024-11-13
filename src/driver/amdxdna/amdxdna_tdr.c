@@ -22,18 +22,17 @@ static void amdxdna_tdr_work(struct work_struct *work)
 	struct amdxdna_client *client;
 	struct amdxdna_hwctx *hwctx;
 	struct amdxdna_dev *xdna;
+	unsigned long hwctx_id;
 	bool active = false;
 	int idle_cnt = 0;
 	int ctx_cnt = 0;
-	int next;
 	int idx;
 
 	xdna = tdr_to_xdna_dev(tdr);
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
-		next = 0;
 		idx = srcu_read_lock(&client->hwctx_srcu);
-		idr_for_each_entry_continue(&client->hwctx_idr, hwctx, next) {
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 			if (hwctx->status != HWCTX_STATE_READY)
 				continue;
 

@@ -59,7 +59,7 @@ static int aie2_pm_check_turbo(struct amdxdna_dev_hdl *ndev,
 		bool empty;
 
 		mutex_lock(&client->hwctx_lock);
-		empty = idr_is_empty(&client->hwctx_idr);
+		empty = amdxdna_no_hwctx(client);
 		mutex_unlock(&client->hwctx_lock);
 		if (!empty)
 			return -EBUSY;

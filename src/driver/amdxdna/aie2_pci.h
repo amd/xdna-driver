@@ -26,22 +26,16 @@
 
 /* Firmware determines device memory base address and size */
 #define AIE2_DEVM_BASE	0x4000000
-#define AIE2_DEVM_SIZE	(64 * 1024 * 1024)
+#define AIE2_DEVM_SIZE	SZ_64M
 
-#define NDEV2PDEV(ndev) \
-	(to_pci_dev((ndev)->xdna->ddev.dev))
+#define NDEV2PDEV(ndev) (to_pci_dev((ndev)->xdna->ddev.dev))
 
-#define AIE2_SRAM_OFF(ndev, addr) \
-	((addr) - (ndev)->priv->sram_dev_addr)
-#define AIE2_MBOX_OFF(ndev, addr) \
-	((addr) - (ndev)->priv->mbox_dev_addr)
+#define AIE2_SRAM_OFF(ndev, addr) ((addr) - (ndev)->priv->sram_dev_addr)
+#define AIE2_MBOX_OFF(ndev, addr) ((addr) - (ndev)->priv->mbox_dev_addr)
 
-#define PSP_REG_BAR(ndev, idx) \
-	((ndev)->priv->psp_regs_off[(idx)].bar_idx)
-#define PSP_REG_OFF(ndev, idx) \
-	((ndev)->priv->psp_regs_off[(idx)].offset)
-#define SRAM_REG_OFF(ndev, idx) \
-	((ndev)->priv->sram_offs[(idx)].offset)
+#define PSP_REG_BAR(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].bar_idx)
+#define PSP_REG_OFF(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].offset)
+#define SRAM_REG_OFF(ndev, idx) ((ndev)->priv->sram_offs[(idx)].offset)
 
 #define SMU_REG(ndev, idx) \
 ({ \
@@ -54,7 +48,7 @@
 	((_ndev)->sram_base + SRAM_REG_OFF((_ndev), (idx))); \
 })
 
-#define CHAN_SLOT_SZ 0x2000
+#define CHAN_SLOT_SZ SZ_8K
 #define CHANN_INDEX(ndev, rbuf_off) \
 	(((rbuf_off) - SRAM_REG_OFF((ndev), MBOX_CHANN_OFF)) / CHAN_SLOT_SZ)
 
@@ -79,7 +73,7 @@ enum aie2_smu_reg_idx {
 	SMU_INTR_REG,
 	SMU_RESP_REG,
 	SMU_OUT_REG,
-	SMU_MAX_REGS /* Kepp this at the end */
+	SMU_MAX_REGS /* Keep this at the end */
 };
 
 enum aie2_smu_rev {

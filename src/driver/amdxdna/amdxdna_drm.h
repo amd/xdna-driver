@@ -122,7 +122,7 @@ struct amdxdna_dev {
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
-	rwlock_t			notifier_lock; /* for mmu notifier*/
+	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
 };
 
 struct amdxdna_stats {
@@ -140,7 +140,7 @@ struct amdxdna_stats {
  * @pid: PID of current client
  * @hwctx_lock: HW context lock for protect IDR
  * @hwctx_srcu: Per client SRCU for synchronizing hwctx destroy with other ioctls.
- * @hwctx_idr: HW context IDR
+ * @hwctx_xa: HW context xarray
  * @xdna: XDNA device pointer
  * @filp: DRM file pointer
  * @mm_lock: lock for client wide memory related
@@ -152,11 +152,12 @@ struct amdxdna_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
-	/* To protect hwctx_idr and exclusion of hwctx stop/restart/destroy etc. */
+	/* To protect hwctx stop/restart/destroy etc. */
 	struct mutex			hwctx_lock;
 	/* To avoid deadlock, do NOT wait this srcu when hwctx_lock is hold */
 	struct srcu_struct		hwctx_srcu;
-	struct idr			hwctx_idr;
+	struct xarray			hwctx_xa;
+	u32				next_hwctxid;
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
 
@@ -168,6 +169,11 @@ struct amdxdna_client {
 
 	struct amdxdna_stats		stats;
 };
+
+#define amdxdna_for_each_hwctx(client, hwctx_id, entry)		\
+	xa_for_each(&(client)->hwctx_xa, hwctx_id, entry)
+#define amdxdna_no_hwctx(client)				\
+	xa_empty(&(client)->hwctx_xa)
 
 void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start);
 
