@@ -373,7 +373,7 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	/* Go through each hardware context and mark the AIE columns that are active */
 	list_for_each_entry(client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&client->hwctx_srcu);
-		xa_for_each(&client->hwctx_xa, hwctx_id, hwctx)
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 			aie_bitmap |= amdxdna_hwctx_col_map(hwctx);
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}

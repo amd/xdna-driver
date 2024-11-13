@@ -32,7 +32,7 @@ static void amdxdna_tdr_work(struct work_struct *work)
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&client->hwctx_srcu);
-		xa_for_each(&client->hwctx_xa, hwctx_id, hwctx) {
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 			if (hwctx->status != HWCTX_STATE_READY)
 				continue;
 

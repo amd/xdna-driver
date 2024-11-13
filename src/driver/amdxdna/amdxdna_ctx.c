@@ -64,7 +64,7 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx)
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 		xdna->dev_info->ops->hwctx_suspend(hwctx);
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -77,7 +77,7 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx)
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 		xdna->dev_info->ops->hwctx_resume(hwctx);
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -109,7 +109,7 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	mutex_lock(&client->hwctx_lock);
-	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx) {
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		XDNA_DBG(client->xdna, "PID %d close HW context %d",
 			 client->pid, hwctx->id);
 		xa_erase(&client->hwctx_xa, hwctx->id);

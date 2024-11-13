@@ -844,7 +844,7 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 	buf = u64_to_user_ptr(args->buffer);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->hwctx_srcu);
-		xa_for_each(&tmp_client->hwctx_xa, hwctx_id, hwctx) {
+		amdxdna_for_each_hwctx(tmp_client, hwctx_id, hwctx) {
 			req_bytes += sizeof(*tmp);
 			if (args->buffer_size < req_bytes) {
 				/* Continue iterating to get the required size */

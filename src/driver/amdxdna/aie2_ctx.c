@@ -149,7 +149,7 @@ void aie2_dump_ctx(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx)
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 		aie2_hwctx_dump(xdna, hwctx);
 	mutex_unlock(&client->hwctx_lock);
 }
@@ -162,7 +162,7 @@ void aie2_stop_ctx(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx) {
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		if (hwctx->status == HWCTX_STATE_INIT)
 			continue;
 
@@ -180,7 +180,7 @@ void aie2_restart_ctx(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	xa_for_each(&client->hwctx_xa, hwctx_id, hwctx) {
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		if (hwctx->status != HWCTX_STATE_STOP)
 			continue;
 
