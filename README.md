@@ -12,6 +12,7 @@ This repository is for the AMD XDNA™️ Driver (amdxdna.ko) for Linux®️ and
 - [Contributor Guidelines](#contributor-guidelines)
 
 ## Introduction
+
 This repository is for supporting XRT on AMD XDNA devices. From this repository, you can build a XRT plugin DEB package.
 On a machine with XDNA device, with both XRT and XRT plugin packages installed, user can start using XDNA device on Linux.
 
