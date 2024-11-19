@@ -13,7 +13,7 @@ alloc_drm_bo(const shim_xdna::pdev& dev, amdxdna_bo_type type, void* buf, size_t
   amdxdna_drm_create_bo cbo = {
     .vaddr = reinterpret_cast<uintptr_t>(buf),
     .size = size,
-    .type = type,
+    .type = static_cast<uint32_t>(type),
   };
   dev.ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
   return cbo.handle;

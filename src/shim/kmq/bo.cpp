@@ -215,7 +215,7 @@ get_arg_bo_handles(uint32_t *handles, size_t num) const
   if (sz > num)
     shim_err(E2BIG, "There are %ld BO args, provided buffer can hold only %ld", sz, num);
 
-  for (auto m : m_args_map)
+  for (auto &m : m_args_map)
     *(handles++) = m.second;
 
   return sz;
