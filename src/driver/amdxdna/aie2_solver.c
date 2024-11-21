@@ -3,10 +3,11 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#include <linux/slab.h>
+#include <drm/drm_device.h>
+#include <drm/drm_managed.h>
+#include <drm/drm_print.h>
 #include <linux/bitops.h>
 #include <linux/bitmap.h>
-#include <linux/device.h>
 
 #include "aie2_solver.h"
 
@@ -87,7 +88,7 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 	 * We can find at least one CDOs groups that meet the
 	 * GOPs requirement.
 	 */
-	cu_clk_freq = xrs->cfg.clk_list.cu_clk_list[xrs->cfg.clk_list.num_levels - 1].hclk;
+	cu_clk_freq = xrs->cfg.clk_list.cu_clk_list[xrs->cfg.clk_list.num_levels - 1];
 
 	if (qos_meet(xrs, rqos, cdop->qos_cap.opc * cu_clk_freq / 1000))
 		return -EINVAL;
@@ -108,36 +109,37 @@ static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
 	return false;
 }
 
-static u32 find_dpm_level(struct solver_state *xrs, struct alloc_requests *req)
+static int set_dpm_level(struct solver_state *xrs, struct alloc_requests *req, u32 *dpm_level)
 {
+	struct solver_rgroup *rgp = &xrs->rgp;
 	struct cdo_parts *cdop = &req->cdo;
 	struct aie_qos *rqos = &req->rqos;
-	struct solver_rgroup *rgp = &xrs->rgp;
+	u32 freq, max_dpm_level, level;
 	struct solver_node *node;
-	u32 cu_clk_freq, dpm_level;
 
+	max_dpm_level = xrs->cfg.clk_list.num_levels - 1;
 	/* If no QoS parameters are passed, set it to the max DPM level */
-	if (!is_valid_qos_dpm_params(rqos))
-		return xrs->cfg.max_dpm_level;
+	if (!is_valid_qos_dpm_params(rqos)) {
+		level = max_dpm_level;
+		goto set_dpm;
+	}
 
-        /*
-         * We can find at least one CDOs groups that meet the
-         * GOPs requirement.
-         */
-	for (dpm_level = 0; dpm_level < xrs->cfg.clk_list.num_levels; dpm_level++) {
-		cu_clk_freq = xrs->cfg.clk_list.cu_clk_list[dpm_level].hclk;
-
-		if (!qos_meet(xrs, rqos, cdop->qos_cap.opc * cu_clk_freq / 1000))
+	/* Find one CDO group that meet the GOPs requirement. */
+	for (level = 0; level < max_dpm_level; level++) {
+		freq = xrs->cfg.clk_list.cu_clk_list[level];
+		if (!qos_meet(xrs, rqos, cdop->qos_cap.opc * freq / 1000))
 			break;
 	}
 
 	/* set the dpm level which fits all the sessions */
 	list_for_each_entry(node, &rgp->node_list, list) {
-		if (node->dpm_level > dpm_level)
-			dpm_level = node->dpm_level;
+		if (node->dpm_level > level)
+			level = node->dpm_level;
 	}
 
-	return dpm_level;
+set_dpm:
+	*dpm_level = level;
+	return xrs->cfg.actions->set_dft_dpm_level(xrs->cfg.ddev, level);
 }
 
 static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
@@ -299,18 +301,19 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_
 	struct xrs_action_load load_act;
 	struct solver_node *snode;
 	struct solver_state *xrs;
+	u32 dpm_level;
 	int ret;
 
 	xrs = (struct solver_state *)hdl;
 
 	ret = sanity_check(xrs, req);
 	if (ret) {
-		dev_err(xrs->cfg.dev, "invalid request");
+		drm_err(xrs->cfg.ddev, "invalid request");
 		return ret;
 	}
 
 	if (rg_search_node(&xrs->rgp, req->rid)) {
-		dev_err(xrs->cfg.dev, "rid %lld is in-use", req->rid);
+		drm_err(xrs->cfg.ddev, "rid %lld is in-use", req->rid);
 		return -EEXIST;
 	}
 
@@ -318,20 +321,19 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_
 	if (IS_ERR(snode))
 		return PTR_ERR(snode);
 
-	snode->dpm_level = find_dpm_level(xrs, req);
-	ret = xrs->cfg.actions->set_dpm_level(hwctx->client->xdna->dev_handle,
-					      snode->dpm_level);
-	if (ret)
-		goto free_node;
-
 	fill_load_action(xrs, snode, &load_act);
 	ret = xrs->cfg.actions->load_hwctx(hwctx, &load_act);
 	if (ret)
 		goto free_node;
 
+	ret = set_dpm_level(xrs, req, &dpm_level);
+	if (ret)
+		goto free_node;
+
+	snode->dpm_level = dpm_level;
 	snode->hwctx = hwctx;
 
-	dev_dbg(xrs->cfg.dev, "start col %d ncols %d\n",
+	drm_dbg(xrs->cfg.ddev, "start col %d ncols %d\n",
 		snode->pt_node->start_col, snode->pt_node->ncols);
 
 	return 0;
@@ -349,7 +351,7 @@ int xrs_release_resource(void *hdl, u64 rid)
 
 	node = rg_search_node(&xrs->rgp, rid);
 	if (!node) {
-		dev_err(xrs->cfg.dev, "node not exist");
+		drm_err(xrs->cfg.ddev, "node not exist");
 		return -ENODEV;
 	}
 
@@ -364,11 +366,11 @@ void *xrsm_init(struct init_config *cfg)
 	struct solver_rgroup *rgp;
 	struct solver_state *xrs;
 
-	xrs = devm_kzalloc(cfg->dev, sizeof(*xrs), GFP_KERNEL);
+	xrs = drmm_kzalloc(cfg->ddev, sizeof(*xrs), GFP_KERNEL);
 	if (!xrs)
 		return NULL;
 
-	memcpy(&xrs->cfg, cfg, sizeof(struct init_config));
+	memcpy(&xrs->cfg, cfg, sizeof(*cfg));
 
 	rgp = &xrs->rgp;
 	INIT_LIST_HEAD(&rgp->node_list);

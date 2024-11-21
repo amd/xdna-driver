@@ -147,23 +147,20 @@ struct aie_metadata {
 	struct aie_tile_metadata shim;
 };
 
-struct clock {
-	char name[16];
-	u32 max_freq_mhz;
-	u32 freq_mhz;
+enum rt_config_category {
+	AIE2_RT_CFG_INIT,
+	AIE2_RT_CFG_CLK_GATING,
 };
 
-struct smu {
-	const struct dpm_clk	*dpm_table;
-	u32			num_dpm_levels;
-	struct clock		mp_npu_clock;
-	struct clock		h_clock;
-	u32			curr_dpm_level;
-	u32			dft_dpm_level;
-	u32			fixed_dpm_level;
-#define SMU_POWER_OFF 0
-#define SMU_POWER_ON  1
-	u32			power_state;
+struct rt_config {
+	u32	type;
+	u32	value;
+	u32	category;
+};
+
+struct dpm_clk_freq {
+	u32	npuclk;
+	u32	hclk;
 };
 
 #ifdef AMDXDNA_DEVEL
@@ -202,6 +199,17 @@ struct amdxdna_hwctx_priv {
 	struct drm_syncobj		*syncobj;
 };
 
+enum aie2_dev_status {
+	AIE2_DEV_UNINIT,
+	AIE2_DEV_INIT,
+	AIE2_DEV_START,
+};
+
+enum aie2_power_state {
+	SMU_POWER_OFF,
+	SMU_POWER_ON,
+};
+
 struct async_events;
 
 struct amdxdna_dev_hdl {
@@ -219,17 +227,26 @@ struct amdxdna_dev_hdl {
 	u32				mgmt_prot_minor;
 
 	u32				total_col;
-	u32				smu_curr_dpm_level;
 	struct aie_version		version;
 	struct aie_metadata		metadata;
-	struct smu			smu;
+
+	/*power management and clock */
 	enum amdxdna_power_mode_type	pw_mode;
-	bool				clk_gate_enabled;
+	enum aie2_power_state		power_state;
+	u32				dpm_level;
+	u32				dft_dpm_level;
+	u32				max_dpm_level;
+	u32				clk_gating;
+	u32				npuclk_freq;
+	u32				hclk_freq;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
 	struct mailbox_channel		*mgmt_chann;
 	struct async_events		*async_events;
+
+	u32				dev_status;
+	u32				hwctx_num;
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
@@ -240,16 +257,8 @@ struct aie2_bar_off_pair {
 	u32	offset;
 };
 
-struct rt_config {
-	u32	type;
-	u32	value;
-};
-
-struct rt_config_clk_gating {
-	const u32	*types;
-	u32		num_types;
-	u32		value_enable;
-	u32		value_disable;
+struct aie2_hw_ops {
+	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 };
 
 struct amdxdna_dev_priv {
@@ -257,7 +266,8 @@ struct amdxdna_dev_priv {
 	u64				protocol_major;
 	u64				protocol_minor;
 	const struct rt_config		*rt_config;
-	u32				num_rt_cfg;
+	const struct dpm_clk_freq	*dpm_clk_tbl;
+
 #define COL_ALIGN_NONE   0
 #define COL_ALIGN_NATURE 1
 	u32				col_align;
@@ -268,14 +278,22 @@ struct amdxdna_dev_priv {
 	struct aie2_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
 	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
 	struct aie2_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
-	struct rt_config_clk_gating	clk_gating;
-	u32				smu_rev;
-	const struct dpm_clk		*smu_npu_dpm_clk_table;
-	u32				smu_npu_dpm_levels;
+	struct aie2_hw_ops		hw_ops;
 #ifdef AMDXDNA_DEVEL
 	struct rt_config		priv_load_cfg;
 #endif
 };
+
+extern const struct amdxdna_dev_ops aie2_ops;
+
+int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
+		     enum rt_config_category category, u32 *val);
+
+/* aie2 npu hw config */
+extern const struct dpm_clk_freq npu1_dpm_clk_table[];
+extern const struct dpm_clk_freq npu4_dpm_clk_table[];
+extern const struct rt_config npu1_default_rt_cfg[];
+extern const struct rt_config npu4_default_rt_cfg[];
 
 /* aie2_pci.c */
 #define AIE2_BIT_BYPASS_POWER_SWITCH	0 /* NOSYS */
@@ -286,19 +304,24 @@ extern const struct amdxdna_dev_ops aie2_ops;
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor);
 
 /* aie2_smu.c */
-void aie2_smu_setup(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
-char *aie2_smu_get_mpnpu_clock_name(struct amdxdna_dev_hdl *ndev);
-char *aie2_smu_get_hclock_name(struct amdxdna_dev_hdl *ndev);
+int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
-u32 aie2_smu_get_dpm_level(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-int aie2_smu_set_fixed_dpm_level(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+
+/* aie2_pm.c */
+int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
+int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
+
+static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->pw_mode == POWER_MODE_TURBO;
+}
 
 /* aie2_psp.c */
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
@@ -370,11 +393,5 @@ void aie2_dump_ctx(struct amdxdna_client *client);
 void aie2_restart_ctx(struct amdxdna_client *client);
 int aie2_xrs_load_hwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
 int aie2_xrs_unload_hwctx(struct amdxdna_hwctx *hwctx);
-
-/* aie2_pm.c */
-int aie2_pm_start(struct amdxdna_dev_hdl *ndev);
-void aie2_pm_stop(struct amdxdna_dev_hdl *ndev);
-bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev);
-int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
 
 #endif /* _AIE2_PCI_H_ */

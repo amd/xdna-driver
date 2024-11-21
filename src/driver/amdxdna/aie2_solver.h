@@ -73,15 +73,17 @@ struct xrs_action_load {
  * Resource solver chooses the frequency from the table
  * to meet the QOS requirements.
  */
+#define POWER_LEVEL_NUM	8
+
 struct clk_list_info {
 	u32        num_levels;                     /* available power levels */
-	const struct dpm_clk *cu_clk_list;   /* available aie clock frequencies in Mhz*/
+	u32        cu_clk_list[POWER_LEVEL_NUM];   /* available aie clock frequencies in Mhz*/
 };
 
 struct xrs_action_ops {
 	int (*load_hwctx)(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
 	int (*unload_hwctx)(struct amdxdna_hwctx *hwctx);
-	int (*set_dpm_level)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+	int (*set_dft_dpm_level)(struct drm_device *ddev, u32 level);
 };
 
 /*
@@ -91,9 +93,8 @@ struct init_config {
 	u32			total_col;
 	u32			sys_eff_factor; /* system efficiency factor */
 	u32			latency_adj;    /* latency adjustment in ms */
-	u32			max_dpm_level;	/* Max dpm level in the system */
 	struct clk_list_info	clk_list;       /* List of frequencies available in system */
-	struct device		*dev;
+	struct drm_device	*ddev;
 	struct xrs_action_ops	*actions;
 };
 

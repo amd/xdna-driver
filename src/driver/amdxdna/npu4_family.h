@@ -58,33 +58,10 @@
 #define NPU4_SMU_BAR_BASE	MMNPU_APERTURE4_BASE
 #define NPU4_SRAM_BAR_BASE	MMNPU_APERTURE1_BASE
 
-#define NPU4_RT_CFG_TYPE_CLK_GATING   1
-#define NPU4_RT_CFG_TYPE_HCLK_GATING  2
-#define NPU4_RT_CFG_TYPE_PWR_GATING   3
-#define NPU4_RT_CFG_TYPE_L1IMU_GATING 4
-#define NPU4_RT_CFG_TYPE_PDI_LOAD     5
-#define NPU4_RT_CFG_TYPE_DEBUG_BO     10
-
-#define NPU4_RT_CFG_VAL_CLK_GATING_OFF 0
-#define NPU4_RT_CFG_VAL_CLK_GATING_ON 1
-
-#define NPU4_RT_CFG_VAL_PDI_LOAD_MGMT 0
-#define NPU4_RT_CFG_VAL_PDI_LOAD_APP 1
-
-#define NPU4_RT_CFG_VAL_DEBUG_BO_DEFAULT 0
-#define NPU4_RT_CFG_VAL_DEBUG_BO_LARGE   1
-
-#define NPU4_INIT_RT_CFG_NUM	2
-#define NPU4_CLK_GATING_CFG_NUM 4
-
-extern const struct dpm_clk npu4_dpm_clk_table[DPM_LEVEL_MAX];
-extern const struct rt_config npu4_rt_cfg[NPU4_INIT_RT_CFG_NUM];
-extern const u32 npu4_clk_gating_types[NPU4_CLK_GATING_CFG_NUM];
-
 #define NPU4_COMMON_DEV_PRIV \
-	.rt_config	= npu4_rt_cfg,								\
-	.num_rt_cfg	= ARRAY_SIZE(npu4_rt_cfg),						\
-	.priv_load_cfg = {NPU4_RT_CFG_TYPE_PDI_LOAD, NPU4_RT_CFG_VAL_PDI_LOAD_MGMT},		\
+	.rt_config	= npu4_default_rt_cfg,							\
+	.dpm_clk_tbl	= npu4_dpm_clk_table,							\
+	.priv_load_cfg = { 5, 0, AIE2_RT_CFG_INIT },						\
 	.col_align	= COL_ALIGN_NATURE,							\
 	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,							\
 	.mbox_size      = 0, /* Use BAR size */							\
@@ -109,15 +86,9 @@ extern const u32 npu4_clk_gating_types[NPU4_CLK_GATING_CFG_NUM];
 		DEFINE_BAR_OFFSET(SMU_RESP_REG, NPU4_SMU, MP1_C2PMSG_61),			\
 		DEFINE_BAR_OFFSET(SMU_OUT_REG,  NPU4_SMU, MP1_C2PMSG_60),			\
 	},											\
-	.clk_gating = {										\
-		.types = npu4_clk_gating_types,							\
-		.num_types = ARRAY_SIZE(npu4_clk_gating_types),					\
-		.value_enable = NPU4_RT_CFG_VAL_CLK_GATING_ON,					\
-		.value_disable = NPU4_RT_CFG_VAL_CLK_GATING_OFF,				\
-	},											\
-	.smu_rev = SMU_REVISION_NPU4,								\
-	.smu_npu_dpm_clk_table = npu4_dpm_clk_table,						\
-	.smu_npu_dpm_levels = ARRAY_SIZE(npu4_dpm_clk_table)
+	.hw_ops		= {									\
+		.set_dpm = npu4_set_dpm,							\
+	}
 
 #define NPU4_COMMON_DEV_INFO \
 	.reg_bar           = NPU4_REG_BAR_INDEX,						\
