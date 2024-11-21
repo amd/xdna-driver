@@ -263,7 +263,7 @@ static const struct file_operations amdxdna_fops = {
 	.llseek		= noop_llseek,
 	.mmap		= amdxdna_drm_gem_mmap,
 	.show_fdinfo	= drm_show_fdinfo,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#ifdef FOP_UNSIGNED_OFFSET
 	.fop_flags      = FOP_UNSIGNED_OFFSET,
 #endif
 };
