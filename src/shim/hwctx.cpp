@@ -61,7 +61,11 @@ hw_ctx::
   } catch (const xrt_core::system_error& e) {
     shim_debug("Failed to delete context on device: %s", e.what());
   }
-  destroy_syncobj(m_device.get_pdev(), m_syncobj);
+  try {
+    destroy_syncobj(m_device.get_pdev(), m_syncobj);
+  } catch (const xrt_core::system_error& e) {
+    shim_debug("Failed to destroy sync object: %s", e.what());
+  }
   shim_debug("Destroyed HW context (%d)...", m_handle);
 }
 
