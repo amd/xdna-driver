@@ -177,37 +177,32 @@ done:
 	return ret;
 }
 
-static int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev)
+int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
+		     enum rt_config_category category, u32 *val)
 {
-	int i;
+	const struct rt_config *cfg;
+	u32 value;
+	int ret;
 
-	for (i = 0; i < ndev->priv->num_rt_cfg; i++) {
-		const struct rt_config *cfg = &ndev->priv->rt_config[i];
-		u64 value;
-		int ret;
+	for (cfg = ndev->priv->rt_config; cfg->type; cfg++) {
+		if (cfg->category != category)
+			continue;
 
+		value = val ? *val : cfg->value;
 #ifdef AMDXDNA_DEVEL
 		if (priv_load && cfg->type == ndev->priv->priv_load_cfg.type) {
 			cfg = &ndev->priv->priv_load_cfg;
+			value = cfg->value;
 			XDNA_INFO(ndev->xdna, "Set runtime type %d value %d",
 				  cfg->type, cfg->value);
 		}
 #endif
-		ret = aie2_set_runtime_cfg(ndev, cfg->type, cfg->value);
+		ret = aie2_set_runtime_cfg(ndev, cfg->type, value);
 		if (ret) {
 			XDNA_ERR(ndev->xdna, "Set runtime type %d value %d failed",
-				 cfg->type, cfg->value);
+				 cfg->type, value);
 			return ret;
 		}
-
-		ret = aie2_get_runtime_cfg(ndev, cfg->type, &value);
-		if (ret) {
-			XDNA_ERR(ndev->xdna, "Get runtime cfg failed");
-			return ret;
-		}
-
-		if (value != cfg->value)
-			return -EINVAL;
 	}
 
 	return 0;
@@ -244,7 +239,7 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		}
 	}
 
-	ret = aie2_runtime_cfg(ndev);
+	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_INIT, NULL);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Runtime config failed");
 		return ret;
@@ -306,10 +301,25 @@ static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
 
+static int aie2_xrs_set_dft_dpm_level(struct drm_device *ddev, u32 dpm_level)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
+	struct amdxdna_dev_hdl *ndev;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	ndev = xdna->dev_handle;
+	ndev->dft_dpm_level = dpm_level;
+	if (ndev->pw_mode != POWER_MODE_DEFAULT || ndev->dpm_level == dpm_level)
+		return 0;
+
+	return ndev->priv->hw_ops.set_dpm(ndev, dpm_level);
+}
+
 static struct xrs_action_ops aie2_xrs_actions = {
 	.load_hwctx = aie2_xrs_load_hwctx,
 	.unload_hwctx = aie2_xrs_unload_hwctx,
-	.set_dpm_level = aie2_smu_set_dft_dpm_level,
+	.set_dft_dpm_level = aie2_xrs_set_dft_dpm_level,
 };
 
 static void aie2_hw_stop(struct amdxdna_dev *xdna)
@@ -317,7 +327,11 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	aie2_pm_stop(ndev);
+	if (ndev->dev_status <= AIE2_DEV_INIT) {
+		XDNA_ERR(xdna, "device is already stopped");
+		return;
+	}
+
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
@@ -330,6 +344,8 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	aie2_smu_stop(ndev);
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
+
+	ndev->dev_status = AIE2_DEV_INIT;
 }
 
 static int aie2_hw_start(struct amdxdna_dev *xdna)
@@ -339,6 +355,11 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	struct xdna_mailbox_res mbox_res;
 	u32 xdna_mailbox_intr_reg;
 	int mgmt_mb_irq, ret;
+
+	if (ndev->dev_status >= AIE2_DEV_START) {
+		XDNA_INFO(xdna, "device is already started");
+		return 0;
+	}
 
 	ret = pci_enable_device(pdev);
 	if (ret) {
@@ -396,17 +417,19 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto destroy_mbox;
 	}
 
+	ret = aie2_pm_init(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to init pm, ret %d", ret);
+		goto destroy_mgmt_chann;
+	}
+
 	ret = aie2_mgmt_fw_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "initial mgmt firmware failed, ret %d", ret);
 		goto destroy_mgmt_chann;
 	}
 
-	ret = aie2_pm_start(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "failed to start power manager, ret %d", ret);
-		goto destroy_mgmt_chann;
-	}
+	ndev->dev_status = AIE2_DEV_START;
 
 	return 0;
 
@@ -535,10 +558,6 @@ skip_pasid:
 	}
 	xdna->dev_handle = ndev;
 
-	aie2_smu_setup(ndev);
-
-	ndev->pw_mode = POWER_MODE_DEFAULT;
-	ndev->clk_gate_enabled = true;
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);
@@ -552,11 +571,11 @@ skip_pasid:
 	}
 	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
 
-	xrs_cfg.max_dpm_level = SMU_DPM_MAX(ndev);
-	xrs_cfg.clk_list.num_levels = ndev->priv->smu_npu_dpm_levels;
-	xrs_cfg.clk_list.cu_clk_list = ndev->priv->smu_npu_dpm_clk_table;
+	xrs_cfg.clk_list.num_levels = ndev->max_dpm_level + 1;
+	for (i = 0; i < xrs_cfg.clk_list.num_levels; i++)
+		xrs_cfg.clk_list.cu_clk_list[i] = ndev->priv->dpm_clk_tbl[i].hclk;
 	xrs_cfg.sys_eff_factor = 1;
-	xrs_cfg.dev = xdna->ddev.dev;
+	xrs_cfg.ddev = &xdna->ddev;
 	xrs_cfg.actions = &aie2_xrs_actions;
 	xrs_cfg.total_col = ndev->total_col;
 
@@ -782,13 +801,11 @@ static int aie2_get_clock_metadata(struct amdxdna_client *client,
 	if (!clock)
 		return -ENOMEM;
 
-	memcpy(clock->mp_npu_clock.name, aie2_smu_get_mpnpu_clock_name(ndev),
-	       sizeof(clock->mp_npu_clock.name));
-	clock->mp_npu_clock.freq_mhz = aie2_smu_get_mpnpu_clock_freq(ndev);
-
-	memcpy(clock->h_clock.name, aie2_smu_get_hclock_name(ndev),
-	       sizeof(clock->h_clock.name));
-	clock->h_clock.freq_mhz = aie2_smu_get_hclock_freq(ndev);
+	snprintf(clock->mp_npu_clock.name, sizeof(clock->mp_npu_clock.name),
+		 "MP-NPU Clock");
+	clock->mp_npu_clock.freq_mhz = ndev->npuclk_freq;
+	snprintf(clock->h_clock.name, sizeof(clock->h_clock.name), "H Clock");
+	clock->h_clock.freq_mhz = ndev->hclk_freq;
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), clock, sizeof(*clock)))
 		ret = -EFAULT;

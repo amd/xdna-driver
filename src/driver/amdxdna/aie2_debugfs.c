@@ -227,7 +227,10 @@ static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 	}
 
 	mutex_lock(&ndev->xdna->dev_lock);
-	ret = aie2_smu_set_fixed_dpm_level(ndev, val);
+	ndev->dft_dpm_level = val;
+	if (ndev->pw_mode != POWER_MODE_DEFAULT)
+		val = ndev->dpm_level;
+	ret = ndev->priv->hw_ops.set_dpm(ndev, val);
 	mutex_unlock(&ndev->xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Setting dpm_level:%d failed, ret: %d", val, ret);
@@ -239,15 +242,13 @@ static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 static int aie2_dpm_level_get(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
-	const struct dpm_clk *dpm_table;
-	u32 num_dpm_levels;
+	const struct dpm_clk_freq *dpm_table;
 	int dpm_level;
 	int i;
 
-	dpm_table = SMU_DPM_TABLE_ENTRY(ndev, 0);
-	dpm_level = aie2_smu_get_dpm_level(ndev);
-	num_dpm_levels = SMU_DPM_MAX(ndev);
-	for (i = 0; i <= num_dpm_levels; i++) {
+	dpm_table = ndev->priv->dpm_clk_tbl;
+	dpm_level = ndev->dpm_level;
+	for (i = 0; dpm_table[i].hclk; i++) {
 		u32 npuclk = dpm_table[i].npuclk;
 		u32 hclk = dpm_table[i].hclk;
 
