@@ -102,8 +102,10 @@ out:
 	 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	drm_sched_start(&hwctx->priv->sched, true);
-#else
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(6, 13, 0)
 	drm_sched_start(&hwctx->priv->sched);
+#else
+	drm_sched_start(&hwctx->priv->sched, 0);
 #endif
 	hwctx->status = HWCTX_STATE_READY;
 	XDNA_DBG(xdna, "%s restarted, ret %d", hwctx->name, ret);
