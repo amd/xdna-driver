@@ -30,7 +30,11 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 	case AMDXDNA_IOMMU_PASID:
 		break;
 	case AMDXDNA_IOMMU_NO_PASID:
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 13, 0)
 		if (!iommu_present(xdna->ddev.dev->bus)) {
+#else
+		if (!device_iommu_mapped(xdna->ddev.dev)) {
+#endif
 			XDNA_ERR(xdna, "IOMMU not present");
 			return -ENODEV;
 		}
