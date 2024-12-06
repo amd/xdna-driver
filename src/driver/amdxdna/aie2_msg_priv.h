@@ -90,6 +90,13 @@ enum aie2_msg_status {
 	MAX_AIE2_STATUS_CODE
 };
 
+enum aie2_qos_priority {
+	AIE2_QOS_REALTIME_PRIORITY = 1,
+	AIE2_QOS_HIGH_PRIORITY,
+	AIE2_QOS_NORMAL_PRIORITY,
+	AIE2_QOS_LOW_PRIORITY
+};
+
 struct assign_mgmt_pasid_req {
 	u16	pasid;
 	u16	reserved;

@@ -347,6 +347,44 @@ struct performance_mode
   }
 };
 
+struct preemption
+{
+  using result_type = query::preemption::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_get_force_preempt_state force;
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
+      .buffer_size = sizeof(force),
+      .buffer = reinterpret_cast<uintptr_t>(&force)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    return force.state;
+  }
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    amdxdna_drm_set_force_preempt_state force;
+    force.state = std::any_cast<uint32_t>(any);
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FORCE_PREEMPT,
+      .buffer_size = sizeof(force),
+      .buffer = reinterpret_cast<uintptr_t>(&force)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  }
+};
+
 struct clock_topology
 {
   using result_type = query::clock_freq_topology_raw::result_type;
@@ -765,6 +803,7 @@ initialize_query_table()
   emplace_sysfs_get<query::pcie_vendor>                        ("", "vendor");
 
   emplace_func0_getput<query::performance_mode,                performance_mode>();
+  emplace_func0_getput<query::preemption,                      preemption>();
 
   emplace_func0_request<query::rom_ddr_bank_count_max,         default_value>();
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();

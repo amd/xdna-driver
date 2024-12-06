@@ -150,6 +150,8 @@ struct aie_metadata {
 enum rt_config_category {
 	AIE2_RT_CFG_INIT,
 	AIE2_RT_CFG_CLK_GATING,
+	AIE2_RT_CFG_FINE_PREEMPTION,
+	AIE2_RT_CFG_FORCE_PREEMPTION,
 };
 
 struct rt_config {
@@ -239,6 +241,7 @@ struct amdxdna_dev_hdl {
 	u32				clk_gating;
 	u32				npuclk_freq;
 	u32				hclk_freq;
+	bool				force_preempt_enabled;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;

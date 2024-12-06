@@ -12,6 +12,8 @@ const struct rt_config npu4_default_rt_cfg[] = {
 	{ 2, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
 	{ 3, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
 	{ 4, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
+	{ 12, 1, AIE2_RT_CFG_FINE_PREEMPTION }, /* Fine grain preemption control */
+	{ 13, 0, AIE2_RT_CFG_FORCE_PREEMPTION }, /* Force preemption control */
 	{ 0 },
 };
 

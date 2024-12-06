@@ -19,6 +19,29 @@
 #define aie2_send_mgmt_msg_wait(ndev, msg) \
 	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0)
 
+static int map_app_priority_to_fw(enum amdxdna_qos_priority avalue, u32 *fvalue)
+{
+	switch (avalue) {
+	case AMDXDNA_QOS_REALTIME_PRIORITY:
+		*fvalue = AIE2_QOS_REALTIME_PRIORITY;
+		break;
+	case AMDXDNA_QOS_DEFAULT_PRIORITY:
+		/* fallthrough */
+	case AMDXDNA_QOS_HIGH_PRIORITY:
+		*fvalue = AIE2_QOS_HIGH_PRIORITY;
+		break;
+	case AMDXDNA_QOS_NORMAL_PRIORITY:
+		*fvalue = AIE2_QOS_NORMAL_PRIORITY;
+		break;
+	case AMDXDNA_QOS_LOW_PRIORITY:
+		*fvalue = AIE2_QOS_LOW_PRIORITY;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static int
 aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 			       struct xdna_mailbox_msg *msg,
@@ -240,15 +263,21 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	struct xdna_mailbox_chann_res x2i;
 	struct xdna_mailbox_chann_res i2x;
 	struct cq_pair *cq_pair;
-	u32 intr_reg;
+	u32 intr_reg, priority;
 	int ret;
+
+	ret = map_app_priority_to_fw(hwctx->qos.priority, &priority);
+	if (ret) {
+		XDNA_ERR(xdna, "Invalid context priority: 0x%x\n", hwctx->qos.priority);
+		return ret;
+	}
 
 	req.aie_type = 1;
 	req.start_col = hwctx->start_col;
 	req.num_col = hwctx->num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = hwctx->client->pasid;
-	req.context_priority = 2;
+	req.context_priority = priority;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
@@ -256,6 +285,13 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 
 	hwctx->fw_ctx_id = resp.context_id;
 	WARN_ONCE(hwctx->fw_ctx_id == -1, "Unexpected context id");
+
+	if (ndev->force_preempt_enabled) {
+		ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FORCE_PREEMPTION,
+				   &hwctx->fw_ctx_id);
+		if (ret)
+			XDNA_WARN(ndev->xdna, "Failed to config force preemption");
+	}
 
 	cq_pair = &resp.cq_pair[0];
 	x2i.mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->x2i_q.head_addr);
