@@ -34,6 +34,10 @@ MODULE_PARM_DESC(aie2_control_flags,
 		 " Bit " __stringify(AIE2_BIT_BYPASS_SET_FREQ) ": Bypass set freq,"
 		 " Bit " __stringify(AIE2_BIT_BYPASS_FW_LOAD) ": Bypass FW loading");
 
+bool disable_fine_preemption = false;
+module_param(disable_fine_preemption, bool, 0600);
+MODULE_PARM_DESC(disable_fine_preemption, "Disable fine grain preemption");
+
 /*
  * The management mailbox channel is allocated by firmware.
  * The related register and ring buffer information is on SRAM BAR.
@@ -229,6 +233,7 @@ static int aie2_xdna_reset(struct amdxdna_dev_hdl *ndev)
 
 static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
+	u32 preempt;
 	int ret;
 
 	if (!ndev->mgmt_prot_major) {
@@ -242,6 +247,18 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_INIT, NULL);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Runtime config failed");
+		return ret;
+	}
+
+	if (disable_fine_preemption)
+		preempt = 0;
+	else
+		preempt = 1;
+
+	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FINE_PREEMPTION, &preempt);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to %s fine grain preemption",
+			 disable_fine_preemption ? "disable" : "enable");
 		return ret;
 	}
 
@@ -951,6 +968,22 @@ free_buf:
 	return ret;
 }
 
+static int aie2_get_force_preempt_state(struct amdxdna_client *client,
+										struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_get_force_preempt_state force = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
+
+	ndev = xdna->dev_handle;
+	force.state = ndev->force_preempt_enabled;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &force, sizeof(force)))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -995,6 +1028,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
 		ret = aie2_get_telemetry(client, args);
 		break;
+	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
+		ret = aie2_get_force_preempt_state(client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -1031,6 +1067,30 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 	return aie2_pm_set_mode(xdna->dev_handle, power_mode);
 }
 
+static int aie2_set_force_preempt_state(struct amdxdna_client *client,
+										struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_set_force_preempt_state force;
+	struct amdxdna_dev *xdna = client->xdna;
+
+	if (args->buffer_size != sizeof(force)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 args->buffer_size, sizeof(force));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&force, u64_to_user_ptr(args->buffer), sizeof(force))) {
+		XDNA_ERR(xdna, "Failed to copy force preemption request into kernel");
+		return -EFAULT;
+	}
+
+	xdna->dev_handle->force_preempt_enabled = force.state;
+
+	XDNA_WARN(xdna, "Force preemption %s", force.state ? "enabled": "disabled");
+
+	return 0;
+}
+
 static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1042,6 +1102,9 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
 		ret = aie2_set_power_mode(client, args);
+		break;
+	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
+		ret = aie2_set_force_preempt_state(client, args);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_WRITE_AIE_MEM:
