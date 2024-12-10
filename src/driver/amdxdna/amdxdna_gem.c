@@ -21,7 +21,7 @@
 
 #define XDNA_MAX_CMD_BO_SIZE	SZ_32K
 
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 
 static int
 amdxdna_gem_insert_node_locked(struct amdxdna_gem_obj *abo, bool use_vmap)
