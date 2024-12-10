@@ -21,7 +21,11 @@
 
 #define XDNA_MAX_CMD_BO_SIZE	SZ_32K
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 13, 0)
+MODULE_IMPORT_NS(DMA_BUF);
+#else
 MODULE_IMPORT_NS("DMA_BUF");
+#endif
 
 static int
 amdxdna_gem_insert_node_locked(struct amdxdna_gem_obj *abo, bool use_vmap)
