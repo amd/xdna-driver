@@ -933,10 +933,28 @@ destroy_wq:
 	return 0;
 }
 
+#define MB_CHANN_STOP_MAX_TRY 10
+#define MB_CHANN_STOP_INTERVAL 200 /* milliseconds */
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 {
+	int try = 0;
+
 	if (!mb_chann)
 		return;
+
+	if (mb_chann->type != MB_CHANNEL_MGMT) {
+		while (try < MB_CHANN_STOP_MAX_TRY) {
+			if (mailbox_channel_no_msg(mb_chann))
+				break;
+
+			msleep(MB_CHANN_STOP_INTERVAL);
+			try++;
+		}
+
+		if (try == MB_CHANN_STOP_MAX_TRY)
+			MB_WARN_ONCE(mb_chann, "Channel (irq %d) exceeded maximum try",
+				     mb_chann->msix_irq);
+	}
 
 #ifdef AMDXDNA_DEVEL
 	if (MB_PERIODIC_POLL) {

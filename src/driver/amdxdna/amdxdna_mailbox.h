@@ -118,7 +118,8 @@ int xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
  *
  * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
  *
- * Return: if success, return 0. otherwise return error code
+ * Stop mailbox channel but wait for out standing messages on channel type
+ * is not MB_CHANNEL_MGMT.
  */
 void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 
