@@ -14,12 +14,6 @@ add_library(${XDNA_TARGET} SHARED
   ${UMQ_SOURCES}
   )
 
-target_compile_definitions(${XDNA_TARGET} PRIVATE
-  XRT_ENABLE_AIE
-  XRT_AIE_BUILD
-  __user=
-  )
-
 set_target_properties(${XDNA_TARGET} PROPERTIES
   VERSION ${XRT_PLUGIN_VERSION_STRING}
   SOVERSION ${XRT_SOVERSION}
@@ -30,6 +24,7 @@ target_compile_definitions(${XDNA_TARGET} PRIVATE
   # consistent with native xrt implementation
   XRT_ENABLE_AIE
   XRT_AIE_BUILD
+  __user=
   )
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
