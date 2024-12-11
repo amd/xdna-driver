@@ -14,6 +14,12 @@ add_library(${XDNA_TARGET} SHARED
   ${UMQ_SOURCES}
   )
 
+target_compile_definitions(${XDNA_TARGET} PRIVATE
+  XRT_ENABLE_AIE
+  XRT_AIE_BUILD
+  __user=
+  )
+
 set_target_properties(${XDNA_TARGET} PROPERTIES
   VERSION ${XRT_PLUGIN_VERSION_STRING}
   SOVERSION ${XRT_SOVERSION}
@@ -33,10 +39,6 @@ endif()
 if(${UMQ_HELLO_TEST})
   add_definitions(-DUMQ_HELLO_TEST)
 endif()
-
-target_compile_options(${XDNA_TARGET} PRIVATE
-  "-fPIC"
-  )
 
 target_include_directories(${XDNA_TARGET} PRIVATE
   ${XRT_SOURCE_DIR}/src/runtime_src

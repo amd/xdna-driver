@@ -7,9 +7,9 @@
 #define AMDXDNA_ACCEL_H_
 
 #ifdef __KERNEL__
-#include <drm/drm.h>
+#include <uapi/drm/drm.h>
 #else
-#include <libdrm/drm.h>
+#include "drm_local/drm.h"
 #endif
 #include <linux/const.h>
 #include <linux/stddef.h>
