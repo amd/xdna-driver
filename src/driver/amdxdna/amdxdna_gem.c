@@ -9,6 +9,7 @@
 #include <linux/iosys-map.h>
 #include <linux/pagemap.h>
 #include <linux/pfn.h>
+#include <linux/version.h>
 #include <linux/vmalloc.h>
 #include <drm/drm_cache.h>
 
