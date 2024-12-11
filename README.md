@@ -20,8 +20,10 @@ To run AI applications, your system needs
 * Processor:
   - To run AI applications (test machine): RyzenAI processor
   - To build this repository (build machine): Any x86 processors, but recommend AMD processor :wink:
-* Operating System: Ubuntu >= 22.04
-* Linux Kernel: v6.10 or above. (See [Linux compilation and installation](#linux-compilation-and-installation)
+* Operating System:
+  - Ubuntu >= 22.04
+  - Arch Linux
+* Linux Kernel: v6.10 or above. (See [Linux compilation and installation](#linux-compilation-and-installation))
   - Due to Linux API change, XDNA driver doesn't always keep supporting old version.
 * Installed XRT base package (or you can install it along the
   following recipe)
@@ -68,8 +70,8 @@ git submodule update --init --recursive
 ### Prerequisite
 
 * If this is your first time building this module,
-  follow below steps to resolve the dependencies or at least look at
-  the file content
+  follow below steps to resolve the dependencies (or at least look at
+  the file content if you're not on a distro with apt-get)
 ``` bash
 #requires root permissions to run the script
 sudo su

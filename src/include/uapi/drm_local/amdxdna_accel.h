@@ -6,7 +6,11 @@
 #ifndef AMDXDNA_ACCEL_H_
 #define AMDXDNA_ACCEL_H_
 
-#include <drm/drm.h>
+#ifdef __KERNEL__
+#include <uapi/drm/drm.h>
+#else
+#include "drm_local/drm.h"
+#endif
 #include <linux/const.h>
 #include <linux/stddef.h>
 
