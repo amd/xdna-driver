@@ -11,7 +11,7 @@ target_compile_definitions(${XDNA_XRT_TEST} PRIVATE
   # below macros is required so that i/f defined in ishim.h is
   # consistent with native xrt implementation
   XRT_ENABLE_AIE
-  XRT_XDNA_BUILD
+  XRT_BUILD
   )
 
 target_link_libraries(${XDNA_XRT_TEST} PRIVATE

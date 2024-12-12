@@ -6,8 +6,8 @@
 
 #include "bo.h"
 
-#include "experimental/xrt_elf.h"
-#include "experimental/xrt_module.h"
+#include "xrt/experimental/xrt_elf.h"
+#include "xrt/experimental/xrt_module.h"
 #include "core/common/api/module_int.h"
 
 #include "core/include/ert.h"
