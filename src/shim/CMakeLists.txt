@@ -40,10 +40,6 @@ if(${UMQ_HELLO_TEST})
   add_definitions(-DUMQ_HELLO_TEST)
 endif()
 
-target_compile_options(${XDNA_TARGET} PRIVATE
-  "-fPIC"
-  )
-
 target_include_directories(${XDNA_TARGET} PRIVATE
   ${XRT_SOURCE_DIR}/src/runtime_src
   ${XRT_SOURCE_DIR}/src/runtime_src/core/include
