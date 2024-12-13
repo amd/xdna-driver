@@ -154,6 +154,8 @@ while [ $# -gt 0 ]; do
 			;;
 		-package)
 			package=1
+			debug=0
+			release=0
 			;;
 		-j)
 			if is_not_option_or_empty $2; then

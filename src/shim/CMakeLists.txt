@@ -24,6 +24,7 @@ target_compile_definitions(${XDNA_TARGET} PRIVATE
   # consistent with native xrt implementation
   XRT_ENABLE_AIE
   XRT_AIE_BUILD
+  XRT_BUILD
   )
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
