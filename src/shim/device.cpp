@@ -238,7 +238,7 @@ struct partition_info
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     amdxdna_drm_query_hwctx* data;
-    const uint32_t output_size = 10 * sizeof(*data);
+    const uint32_t output_size = 256 * sizeof(*data);
 
     std::vector<char> payload(output_size);
     amdxdna_drm_get_info arg = {
