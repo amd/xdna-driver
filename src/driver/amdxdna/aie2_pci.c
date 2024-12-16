@@ -53,19 +53,19 @@ MODULE_PARM_DESC(disable_fine_preemption, "Disable fine grain preemption");
 #define MGMT_MBOX_MAGIC 0x55504e5f /* _NPU */
 #define MAGIC_OFFSET offsetof(struct mgmt_mbox_chann_info, magic[0])
 struct mgmt_mbox_chann_info {
-	u32	x2i_tail;
-	u32	x2i_head;
-	u32	x2i_buf;
-	u32	x2i_buf_sz;
-	u32	i2x_tail;
-	u32	i2x_head;
-	u32	i2x_buf;
-	u32	i2x_buf_sz;
-	u32	magic;
-	u32	msi_id;
-	u32	prot_major;
-	u32	prot_minor;
-	u32	rsvd[4];
+	__u32	x2i_tail;
+	__u32	x2i_head;
+	__u32	x2i_buf;
+	__u32	x2i_buf_sz;
+	__u32	i2x_tail;
+	__u32	i2x_head;
+	__u32	i2x_buf;
+	__u32	i2x_buf_sz;
+	__u32	magic;
+	__u32	msi_id;
+	__u32	prot_major;
+	__u32	prot_minor;
+	__u32	rsvd[4];
 };
 
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor)

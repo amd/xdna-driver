@@ -81,8 +81,10 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 
 	xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
 
-	if (range->event == MMU_NOTIFY_UNMAP)
+	if (range->event == MMU_NOTIFY_UNMAP) {
+		drm_gem_object_get(to_gobj(abo));
 		schedule_work(&abo->hmm_unreg_work);
+	}
 
 	return true;
 }
@@ -134,7 +136,7 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	}
 
 	nr_pages = (PAGE_ALIGN(addr + len) - (addr & PAGE_MASK)) >> PAGE_SHIFT;
-	abo->mem.pfns = kvcalloc(nr_pages, sizeof(unsigned long),
+	abo->mem.pfns = kvcalloc(nr_pages, sizeof(*abo->mem.pfns),
 				 GFP_KERNEL);
 	if (!abo->mem.pfns) {
 		ret = -ENOMEM;
@@ -177,8 +179,6 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	if (abo->flags & BO_SUBMIT_PINNED)
 		amdxdna_gem_unpin(abo);
 
-	amdxdna_hmm_unregister(abo);
-	flush_work(&abo->hmm_unreg_work);
 	if (abo->type == AMDXDNA_BO_DEV) {
 		mutex_lock(&abo->client->mm_lock);
 		drm_mm_remove_node(&abo->mm_node);
@@ -249,11 +249,11 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 	do {
 		vm_fault_t fault_ret;
 
-		fault_ret = handle_mm_fault(vma, vma->vm_start+offset,
+		fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
 					    FAULT_FLAG_WRITE, NULL);
 		if (fault_ret & VM_FAULT_ERROR) {
 			vma->vm_ops->close(vma);
-			XDNA_ERR(xdna, "Fault in page failed"); 
+			XDNA_ERR(xdna, "Fault in page failed");
 			return -EFAULT;
 		}
 
@@ -272,9 +272,6 @@ static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 	int ret;
-
-	if (vma->vm_end - vma->vm_start > gobj->size)
-		return -EINVAL;
 
 	ret = amdxdna_hmm_register(abo, vma);
 	if (ret)
@@ -357,14 +354,11 @@ static void amdxdna_hmm_unreg_work(struct work_struct *work)
 						   hmm_unreg_work);
 	struct mm_struct *mm = abo->mem.notifier.mm;
 
-	if (!mmget_not_zero(mm))
-		return;
-
 	mmap_read_lock(mm);
 	amdxdna_hmm_unregister(abo);
 	mmap_read_unlock(mm);
 
-	mmput(mm);
+	drm_gem_object_put(to_gobj(abo));
 }
 
 static struct amdxdna_gem_obj *

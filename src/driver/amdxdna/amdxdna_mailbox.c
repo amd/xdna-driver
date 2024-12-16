@@ -48,8 +48,9 @@
 #define MAGIC_VAL			0x1D000000U
 #define MAGIC_VAL_MASK			0xFF000000
 #define MAX_MSG_ID_ENTRIES		256
-#define MSG_RX_TIMER			200 /* milliseconds */
 #define MAILBOX_NAME			"xdna_mailbox"
+#define CHANN_RX_RETRY			10
+#define CHANN_RX_INTERVAL		200 /* milliseconds */
 #define MSG_ID2ENTRY(msg_id)		((msg_id) & ~MAGIC_VAL_MASK)
 
 #ifdef AMDXDNA_DEVEL
@@ -935,8 +936,24 @@ destroy_wq:
 
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 {
+	int retry;
+
 	if (!mb_chann)
 		return;
+
+	if (mb_chann->type != MB_CHANNEL_MGMT) {
+		for (retry = 0; retry < CHANN_RX_RETRY; retry++) {
+			if (mailbox_channel_no_msg(mb_chann))
+				break;
+
+			msleep(CHANN_RX_INTERVAL);
+		}
+
+		if (!mailbox_channel_no_msg(mb_chann)) {
+			MB_WARN_ONCE(mb_chann, "Channel (irq %d) exceeded maximum try",
+				     mb_chann->msix_irq);
+		}
+	}
 
 #ifdef AMDXDNA_DEVEL
 	if (MB_PERIODIC_POLL) {
@@ -944,7 +961,8 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 		goto skip_irq;
 	}
 #endif
-	/* Disalbe an irq and wait. This might sleep. */
+
+	/* Disable an irq and wait. This might sleep. */
 	disable_irq(mb_chann->msix_irq);
 
 #ifdef AMDXDNA_DEVEL

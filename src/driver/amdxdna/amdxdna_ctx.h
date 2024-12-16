@@ -141,6 +141,9 @@ struct amdxdna_hwctx {
 	u64				tdr_last_completed;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
+
+	atomic_t			job_submit_cnt;
+	atomic_t			job_free_cnt;
 };
 
 #define drm_job_to_xdna_job(j) \

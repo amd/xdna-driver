@@ -82,7 +82,6 @@ enum xdna_mailbox_channel_type {
 	MB_CHANNEL_MGMT = 0,
 	MB_CHANNEL_USER_NORMAL,
 	MB_CHANNEL_USER_POLL,
-	MB_CHANNEL_MAX_TYPE,
 };
 
 /*
