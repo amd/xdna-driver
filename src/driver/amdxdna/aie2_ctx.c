@@ -29,6 +29,7 @@ static void aie2_job_release(struct kref *ref)
 	amdxdna_sched_job_cleanup(job);
 	if (job->out_fence)
 		dma_fence_put(job->out_fence);
+	wake_up(&job->hwctx->priv->status_wq);
 	kfree(job);
 }
 
@@ -261,7 +262,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	up(&job->hwctx->priv->job_sem);
 	job->job_done = true;
 	dma_fence_put(fence);
-	mmput(job->mm);
+	mmput_async(job->mm);
 	aie2_job_put(job);
 }
 
@@ -727,6 +728,7 @@ skip:
 	hwctx->status = HWCTX_STATE_INIT;
 	ndev = xdna->dev_handle;
 	ndev->hwctx_num++;
+	init_waitqueue_head(&priv->status_wq);
 
 	XDNA_DBG(xdna, "hwctx %s init completed", hwctx->name);
 
@@ -777,7 +779,8 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	 */
 	drm_sched_wqueue_start(&hwctx->priv->sched);
 
-	aie2_hwctx_wait_for_idle(hwctx);
+	wait_event(hwctx->priv->status_wq,
+		   atomic_read(&hwctx->job_submit_cnt) == atomic_read(&hwctx->job_free_cnt));
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 	drm_sched_fini(&hwctx->priv->sched);
 	destroy_workqueue(hwctx->priv->submit_wq);

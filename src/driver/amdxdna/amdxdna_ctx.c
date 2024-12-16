@@ -180,6 +180,9 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	args->umq_doorbell = hwctx->doorbell_offset;
 	mutex_unlock(&xdna->dev_lock);
 
+	atomic_set(&hwctx->job_submit_cnt, 0);
+	atomic_set(&hwctx->job_free_cnt, 0);
+
 	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
 	return 0;
@@ -353,6 +356,8 @@ void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 	trace_amdxdna_debug_point(job->hwctx->name, job->seq, "job release");
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
+
+	atomic_inc(&job->hwctx->job_free_cnt);
 }
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
@@ -498,6 +503,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		XDNA_ERR(xdna, "Submit cmds failed, ret %d", ret);
 		goto put_fence;
 	}
+	atomic_inc(&hwctx->job_submit_cnt);
 
 	/*
 	 * The amdxdna_hwctx_destroy_rcu() will release hwctx and associated
