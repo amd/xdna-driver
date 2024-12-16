@@ -37,6 +37,23 @@ struct xdna_notify {
 		.notify_cb = xdna_msg_cb,				\
 	}
 
+#define DECLARE_XDNA_STOP_EVENT_TRACE_MSG(name, op, status)	\
+	struct name##_req	req = {};				\
+	struct name##_resp	resp = { status	};			\
+	struct xdna_notify	hdl = {					\
+		.error = 0,						\
+		.data = (u32 *)&resp,					\
+		.size = sizeof(resp),					\
+		.comp = COMPLETION_INITIALIZER_ONSTACK(hdl.comp),	\
+	};								\
+	struct xdna_mailbox_msg msg = {					\
+		.send_data = (u8 *)&req,				\
+		.send_size = sizeof(req),				\
+		.handle = &hdl,						\
+		.opcode = op,						\
+		.notify_cb = xdna_msg_cb,				\
+	}
+
 #define XDNA_STATUS_OFFSET(name) (offsetof(struct name##_resp, status) / sizeof(u32))
 
 int xdna_msg_cb(void *handle, const u32 *data, size_t size);
