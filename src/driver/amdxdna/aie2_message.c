@@ -169,6 +169,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr
 		version->minor = resp.minor;
 	}
 
+    //This test change
 	return 0;
 }
 
