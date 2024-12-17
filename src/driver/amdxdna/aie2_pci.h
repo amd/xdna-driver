@@ -249,6 +249,7 @@ struct amdxdna_dev_hdl {
 	struct mailbox			*mbox;
 	struct mailbox_channel		*mgmt_chann;
 	struct async_events		*async_events;
+	struct event_trace_req_buf 	*event_trace_req;
 
 	u32				dev_status;
 	u32				hwctx_num;
@@ -341,6 +342,13 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
 void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_msg_thread(void *data);
+
+/* aie2_event.c */
+int aie2_event_trace_alloc(struct amdxdna_dev_hdl *ndev);
+void aie2_event_trace_free(struct amdxdna_dev_hdl *ndev);
+int aie2_start_event_trace_send(struct amdxdna_dev_hdl *ndev);
+int aie2_start_event_trace_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
+			u32 size, void *handle);
 
 /* aie2_message.c */
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev);
