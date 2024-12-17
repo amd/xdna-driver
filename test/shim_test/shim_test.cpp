@@ -353,7 +353,7 @@ TEST_map_read_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg
 {
   auto dev = sdev.get();
   auto size = static_cast<size_t>(arg[0]);
-  auto bo_hdl = dev->alloc_bo(size, get_bo_flags(XRT_BO_FLAGS_NONE, 0));
+  auto bo_hdl = dev->alloc_bo(size, get_bo_flags(XCL_BO_FLAGS_HOST_ONLY, 0));
 
   auto buf = bo_hdl->map(buffer_handle::map_type::read);
 }
@@ -519,27 +519,27 @@ std::vector<test_case> test_list {
     {XCL_BO_FLAGS_CACHEABLE, 0, 0x2000, 0x400, 0x3000, 0x100}
   },
   test_case{ "create_and_free_input_output_bo 1 pages", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_NONE, 0, 128}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "create_and_free_input_output_bo multiple pages", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo,
-    {XCL_BO_FLAGS_NONE, 0, 0x10000, 0x23000, 0x2000}
+    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x10000, 0x23000, 0x2000}
   },
   test_case{ "create_and_free_input_output_bo huge pages", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_bo,
-    {XCL_BO_FLAGS_NONE, 0, 0x20000000}
+    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x20000000}
   },
   test_case{ "sync_bo for dpu sequence bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
   },
   test_case{ "sync_bo for input_output", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_NONE, 0, 128}
+    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "map dpu sequence bo and test perf", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 361264 /*0x10000*/}
   },
   test_case{ "map input_output bo and test perf", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_NONE, 0, 361264}
+    TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 361264}
   },
   test_case{ "map bo for read only", {},
     TEST_NEGATIVE, dev_filter_xdna, TEST_map_read_bo, {0x1000}
@@ -624,10 +624,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
   },
   test_case{ "sync_bo for input_output 1MiB BO", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_NONE, 0, 0x100000}
+    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000}
   },
   test_case{ "sync_bo for input_output 1MiB BO w/ offset and size", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_NONE, 0, 0x100000, 0x1004, 0x3c}
+    TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000, 0x1004, 0x3c}
   },
 };
 
