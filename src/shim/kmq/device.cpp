@@ -33,8 +33,12 @@ device_kmq::
 alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags)
 {
+  // Sanity check
+  auto f = xcl_bo_flags{flags};
+  if (f.boflags == 0)
+    shim_not_supported_err("unsupported buffer type: none flag");
   if (userptr)
-    shim_not_supported_err("User ptr BO");;
+    shim_not_supported_err("User ptr BO");
 
   return std::make_unique<bo_kmq>(*this, ctx_id, size, flags);
 }

@@ -13,7 +13,6 @@ flag_to_type(uint64_t bo_flags)
   auto flags = xcl_bo_flags{bo_flags};
   auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
   switch (boflags) {
-  case XCL_BO_FLAGS_NONE:
   case XCL_BO_FLAGS_HOST_ONLY:
     return AMDXDNA_BO_SHMEM;
   case XCL_BO_FLAGS_CACHEABLE:
