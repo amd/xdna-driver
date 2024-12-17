@@ -607,6 +607,9 @@ struct xclbin_name
     case xrt_core::query::xclbin_name::type::validate:
       xclbin_name = "validate.xclbin";
       break;
+    case xrt_core::query::xclbin_name::type::df_bw:
+      xclbin_name = "df_bw.xclbin";
+      break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
@@ -669,6 +672,9 @@ struct elf_name
     switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
     case xrt_core::query::elf_name::type::nop:
       elf_file = "nop.elf";
+      break;
+    case xrt_core::query::elf_name::type::df_bw:
+      elf_file = "df_bw.elf";
       break;
     }
 
