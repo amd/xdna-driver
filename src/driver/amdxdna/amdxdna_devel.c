@@ -190,3 +190,17 @@ void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 {
 }
 #endif /* AMDXDNA_SHMEM */
+
+#define AMDXDNA_GEM_DUMP
+#ifdef AMDXDNA_GEM_DUMP
+void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
+{
+	struct drm_printer p = drm_info_printer(xdna->ddev.dev);
+
+	drm_mm_print(&xdna->ddev.vma_offset_manager->vm_addr_space_mm, &p);
+}
+#else
+void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
+{
+}
+#endif

@@ -11,7 +11,6 @@
 #include <linux/mutex.h>
 #include <linux/iopoll.h>
 #include <linux/vmalloc.h>
-#include <linux/spinlock.h>
 #include <linux/build_bug.h>
 #include <linux/interrupt.h>
 #include <linux/dev_printk.h>
@@ -114,6 +113,9 @@ struct mailbox_channel {
 	struct workqueue_struct		*work_q;
 	struct work_struct		rx_work;
 	u32				i2x_head;
+#define MB_STAT_READY	0
+#define MB_STAT_STOPPED	1
+	u32				status;
 	bool				bad_state;
 	u32				last_msg_id;
 
@@ -246,9 +248,16 @@ static int mailbox_acquire_msgid(struct mailbox_channel *mb_chann, struct mailbo
 	u32 msg_id;
 	int ret;
 
-	ret = xa_alloc_cyclic_irq(&mb_chann->chan_xa, &msg_id, mb_msg,
-				  XA_LIMIT(0, MAX_MSG_ID_ENTRIES - 1),
-				  &mb_chann->next_msgid, GFP_NOWAIT);
+	xa_lock_irq(&mb_chann->chan_xa);
+	if (mb_chann->status == MB_STAT_STOPPED) {
+		xa_unlock_irq(&mb_chann->chan_xa);
+		MB_DBG(mb_chann, "Channel is stopped");
+		return -ENOENT;
+	}
+	ret = __xa_alloc_cyclic(&mb_chann->chan_xa, &msg_id, mb_msg,
+				XA_LIMIT(0, MAX_MSG_ID_ENTRIES - 1),
+				&mb_chann->next_msgid, GFP_NOWAIT);
+	xa_unlock_irq(&mb_chann->chan_xa);
 	if (ret < 0)
 		return ret;
 
@@ -874,6 +883,7 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 skip_irq:
 #endif
 	mb_chann->bad_state = false;
+	mb_chann->status = MB_STAT_READY;
 	mutex_lock(&mb->mbox_lock);
 	if (mb_chann->type == MB_CHANNEL_USER_POLL)
 		list_add_tail(&mb_chann->chann_entry, &mb->poll_chann_list);
@@ -896,14 +906,15 @@ free_and_out:
 	return NULL;
 }
 
-int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
+void xdna_mailbox_release_channel(struct mailbox_channel *mb_chann)
 {
 	struct mailbox_msg *mb_msg;
 	unsigned long msg_id;
 
 	if (!mb_chann)
-		return 0;
+		return;
 
+	WARN_ONCE(mb_chann->status != MB_STAT_STOPPED, "Channel not stopped");
 	mutex_lock(&mb_chann->mb->mbox_lock);
 	list_del(&mb_chann->chann_entry);
 #if defined(CONFIG_DEBUG_FS)
@@ -926,12 +937,17 @@ destroy_wq:
 	xa_for_each(&mb_chann->chan_xa, msg_id, mb_msg)
 		mailbox_release_msg(mb_chann, mb_msg);
 
-	xa_destroy(&mb_chann->chan_xa);
-
-	MB_DBG(mb_chann, "Mailbox channel destroyed type %d irq: %d",
+	MB_DBG(mb_chann, "Mailbox channel released type %d irq: %d",
 	       mb_chann->type, mb_chann->msix_irq);
+}
+
+void xdna_mailbox_free_channel(struct mailbox_channel *mb_chann)
+{
+	if (!mb_chann)
+		return;
+
+	xa_destroy(&mb_chann->chan_xa);
 	kfree(mb_chann);
-	return 0;
 }
 
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
@@ -941,27 +957,35 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 	if (!mb_chann)
 		return;
 
-	if (mb_chann->type != MB_CHANNEL_MGMT) {
-		for (retry = 0; retry < CHANN_RX_RETRY; retry++) {
-			if (mailbox_channel_no_msg(mb_chann))
-				break;
+	xa_lock_irq(&mb_chann->chan_xa);
+	mb_chann->status = MB_STAT_STOPPED;
+	xa_unlock_irq(&mb_chann->chan_xa);
+	if (mailbox_channel_no_msg(mb_chann))
+		goto fast_path;
 
-			msleep(CHANN_RX_INTERVAL);
-		}
+	if (mb_chann->type == MB_CHANNEL_MGMT)
+		goto fast_path;
 
-		if (!mailbox_channel_no_msg(mb_chann)) {
-			MB_WARN_ONCE(mb_chann, "Channel (irq %d) exceeded maximum try",
-				     mb_chann->msix_irq);
-		}
+	/* The slow path waits for out standing messages */
+	for (retry = 0; retry < CHANN_RX_RETRY; retry++) {
+		if (mailbox_channel_no_msg(mb_chann))
+			break;
+
+		msleep(CHANN_RX_INTERVAL);
 	}
 
+	if (!mailbox_channel_no_msg(mb_chann)) {
+		MB_WARN_ONCE(mb_chann, "Channel (irq %d) exceeded maximum try",
+			     mb_chann->msix_irq);
+	}
+
+fast_path:
 #ifdef AMDXDNA_DEVEL
 	if (MB_PERIODIC_POLL) {
 		timer_delete_sync(&mb_chann->timer);
 		goto skip_irq;
 	}
 #endif
-
 	/* Disable an irq and wait. This might sleep. */
 	disable_irq(mb_chann->msix_irq);
 
@@ -971,6 +995,12 @@ skip_irq:
 	/* Cancel RX work and wait for it to finish */
 	cancel_work_sync(&mb_chann->rx_work);
 	MB_DBG(mb_chann, "IRQ disabled and RX work cancelled");
+}
+
+void xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann)
+{
+	xdna_mailbox_release_channel(mailbox_chann);
+	xdna_mailbox_free_channel(mailbox_chann);
 }
 
 struct mailbox *xdna_mailbox_create(struct device *dev,

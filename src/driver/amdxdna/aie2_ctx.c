@@ -21,6 +21,71 @@ bool force_cmdlist;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
 
+static void *aie2_hwctx_connect_fw_ctx(struct amdxdna_hwctx *hwctx)
+{
+	enum xdna_mailbox_channel_type type;
+	struct amdxdna_chann_info info;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	void *mbox_chann;
+	u32 intr_reg;
+	int ret;
+
+	xdna = hwctx->client->xdna;
+	ndev = xdna->dev_handle;
+
+	ret = aie2_create_context(xdna->dev_handle, hwctx, &info);
+	if (ret) {
+		XDNA_ERR(xdna, "create context failed, ret %d", ret);
+		return NULL;
+	}
+
+	ret = pci_irq_vector(to_pci_dev(xdna->ddev.dev), info.msix_id);
+	if (ret == -EINVAL) {
+		XDNA_ERR(xdna, "get irq failed, msix id %d", info.msix_id);
+		return NULL;
+	}
+
+	intr_reg = info.i2x.mb_head_ptr_reg + 4;
+	if (aie2_pm_is_turbo(ndev))
+		type = MB_CHANNEL_USER_POLL;
+	else
+		type = MB_CHANNEL_USER_NORMAL;
+	mbox_chann = xdna_mailbox_create_channel(ndev->mbox, &info.x2i, &info.i2x,
+						 intr_reg, ret, type);
+	if (!mbox_chann) {
+		XDNA_ERR(xdna, "not able to create channel");
+		goto failed;
+	}
+
+	trace_amdxdna_debug_point(hwctx->name, ret, "channel created");
+	XDNA_DBG(xdna, "%s mailbox channel irq: %d, msix_id: %d",
+		 hwctx->name, ret, info.msix_id);
+
+	return mbox_chann;
+failed:
+	aie2_destroy_context(xdna->dev_handle, hwctx);
+	return NULL;
+}
+
+static void aie2_hwctx_disconnect_fw_ctx(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna;
+	int ret;
+
+	xdna = hwctx->client->xdna;
+	xdna_mailbox_stop_channel(hwctx->priv->mbox_chann);
+	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
+	if (ret)
+		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
+
+	/*
+	 * The DRM scheduler thread might still running.
+	 * Call xdna_mailbox_free_channel() when hwctx is destroyed.
+	 */
+	xdna_mailbox_release_channel(hwctx->priv->mbox_chann);
+}
+
 static void aie2_job_release(struct kref *ref)
 {
 	struct amdxdna_sched_job *job;
@@ -29,7 +94,6 @@ static void aie2_job_release(struct kref *ref)
 	amdxdna_sched_job_cleanup(job);
 	if (job->out_fence)
 		dma_fence_put(job->out_fence);
-	wake_up(&job->hwctx->priv->status_wq);
 	kfree(job);
 }
 
@@ -47,7 +111,9 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 	}
 
 	drm_sched_stop(&hwctx->priv->sched, bad_job);
-	aie2_destroy_context(xdna->dev_handle, hwctx);
+	aie2_hwctx_disconnect_fw_ctx(hwctx);
+	xdna_mailbox_free_channel(hwctx->priv->mbox_chann);
+	hwctx->priv->mbox_chann = NULL;
 	hwctx->status = HWCTX_STATE_STOP;
 	XDNA_DBG(xdna, "Stopped %s", hwctx->name);
 }
@@ -59,9 +125,10 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 
 	WARN_ONCE(hwctx->status != HWCTX_STATE_STOP, "hwctx should be in stop state");
 
-	ret = aie2_create_context(xdna->dev_handle, hwctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Create hwctx failed, ret %d", ret);
+	hwctx->priv->mbox_chann = aie2_hwctx_connect_fw_ctx(hwctx);
+	if (!hwctx->priv->mbox_chann) {
+		XDNA_ERR(xdna, "Connect fw context failed");
+		ret = -EPIPE;
 		goto out;
 	}
 
@@ -728,7 +795,6 @@ skip:
 	hwctx->status = HWCTX_STATE_INIT;
 	ndev = xdna->dev_handle;
 	ndev->hwctx_num++;
-	init_waitqueue_head(&priv->status_wq);
 
 	XDNA_DBG(xdna, "hwctx %s init completed", hwctx->name);
 
@@ -758,31 +824,27 @@ free_priv:
 	return ret;
 }
 
-void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
+void aie2_hwctx_flush_async(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev_hdl *ndev;
+
+	ndev = hwctx->client->xdna->dev_handle;
+	ndev->hwctx_num--;
+
+	aie2_release_resource(hwctx);
+}
+
+void aie2_hwctx_free(struct amdxdna_hwctx *hwctx)
+{
 	struct amdxdna_dev *xdna;
+	struct drm_printer p;
 	int idx;
 
 	xdna = hwctx->client->xdna;
-	ndev = xdna->dev_handle;
-	ndev->hwctx_num--;
-	drm_sched_wqueue_stop(&hwctx->priv->sched);
-
-	/* Now, scheduler will not send command to device. */
-	aie2_release_resource(hwctx);
-
-	/*
-	 * All submitted commands are aborted.
-	 * Restart scheduler queues to cleanup jobs. The amdxdna_sched_job_run()
-	 * will return NODEV if it is called.
-	 */
-	drm_sched_wqueue_start(&hwctx->priv->sched);
-
-	wait_event(hwctx->priv->status_wq,
-		   atomic_read(&hwctx->job_submit_cnt) == atomic_read(&hwctx->job_free_cnt));
+	p = drm_info_printer(xdna->ddev.dev);
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 	drm_sched_fini(&hwctx->priv->sched);
+	xdna_mailbox_free_channel(hwctx->priv->mbox_chann);
 	destroy_workqueue(hwctx->priv->submit_wq);
 	aie2_ctx_syncobj_destroy(hwctx);
 
@@ -1203,30 +1265,19 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
 
 int aie2_xrs_load_hwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action)
 {
-	struct amdxdna_dev *xdna;
-	int ret;
-
-	xdna = hwctx->client->xdna;
-
 	hwctx->start_col = action->part.start_col;
 	hwctx->num_col = action->part.ncols;
-	ret = aie2_create_context(xdna->dev_handle, hwctx);
-	if (ret)
-		XDNA_ERR(xdna, "create context failed, ret %d", ret);
+	hwctx->priv->mbox_chann = aie2_hwctx_connect_fw_ctx(hwctx);
+	if (!hwctx->priv->mbox_chann) {
+		XDNA_ERR(hwctx->client->xdna, "%s connect fw context failed", hwctx->name);
+		return -ENODEV;
+	}
 
-	return ret;
+	return 0;
 }
 
 int aie2_xrs_unload_hwctx(struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_dev *xdna;
-	int ret;
-
-	xdna = hwctx->client->xdna;
-
-	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
-	if (ret)
-		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
-
-	return ret;
+	aie2_hwctx_disconnect_fw_ctx(hwctx);
+	return 0;
 }

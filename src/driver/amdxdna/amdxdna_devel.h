@@ -28,4 +28,6 @@ void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem);
 
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo);
 void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo);
+
+void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna);
 #endif /* _AMDXDNA_DEVEL_ */

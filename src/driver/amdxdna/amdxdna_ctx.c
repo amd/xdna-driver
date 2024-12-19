@@ -91,9 +91,12 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 
 	/* At this point, user is not able to submit new commands */
 	mutex_lock(&xdna->dev_lock);
-	xdna->dev_info->ops->hwctx_fini(hwctx);
+	xdna->dev_info->ops->hwctx_flush_async(hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
+	wait_event(hwctx->status_wq,
+		   atomic_read(&hwctx->job_submit_cnt) == atomic_read(&hwctx->job_free_cnt));
+	xdna->dev_info->ops->hwctx_free(hwctx);
 	kfree(hwctx->name);
 	kfree(hwctx);
 }
@@ -182,6 +185,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	atomic_set(&hwctx->job_submit_cnt, 0);
 	atomic_set(&hwctx->job_free_cnt, 0);
+	init_waitqueue_head(&hwctx->status_wq);
 
 	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
@@ -358,6 +362,7 @@ void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 	amdxdna_gem_put_obj(job->cmd_bo);
 
 	atomic_inc(&job->hwctx->job_free_cnt);
+	wake_up(&job->hwctx->status_wq);
 }
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
