@@ -73,3 +73,18 @@ TEST_export_import_bo(device::id_type id, std::shared_ptr<device> sdev, const st
   test_2proc_export_import_bo t2p(id);
   t2p.run_test();
 }
+
+void
+TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  auto wrk = get_xclbin_workspace(sdev.get());
+
+  // Create IO test BO set and share input BO with same process
+  io_test_bo_set boset1{sdev.get(), wrk + "/data/"};
+  auto share = boset1.get_bos()[IO_TEST_BO_INPUT].tbo->get()->share();
+
+  // Create IO test BO set and replace input BO with the one from above and execute it
+  io_test_bo_set boset2{sdev.get(), wrk + "/data/"};
+  boset2.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(sdev.get(), getpid(), share->get_export_handle());
+  boset2.run();
+}

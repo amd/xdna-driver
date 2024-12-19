@@ -41,6 +41,7 @@ int base_read_speed;
 
 using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>, arg_type&);
+void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>, arg_type&);
@@ -629,6 +630,9 @@ std::vector<test_case> test_list {
   test_case{ "sync_bo for input_output 1MiB BO w/ offset and size", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000, 0x1004, 0x3c}
   },
+  test_case{ "export import BO in single process", {-1, -1},
+    TEST_NEGATIVE, dev_filter_is_aie2, TEST_export_import_bo_single_proc, {}
+  },
 };
 
 // Test case executor implementation
@@ -636,7 +640,6 @@ std::vector<test_case> test_list {
 bool
 is_negative_test(const test_case& test)
 {
-  printf("test major=%d, minor=%d\n", test.k_ver.major, test.k_ver.minor);
   if (current_kern.major == 0)
     return test.is_negative;
   if (test.k_ver.major == -1)
