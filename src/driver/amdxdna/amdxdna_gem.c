@@ -82,6 +82,8 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 	xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
 
 	if (range->event == MMU_NOTIFY_UNMAP) {
+		XDNA_DBG(xdna, "MMU notify unmap 0x%llx type %d",
+			 abo->mem.userptr, abo->type);
 		drm_gem_object_get(to_gobj(abo));
 		schedule_work(&abo->hmm_unreg_work);
 	}
