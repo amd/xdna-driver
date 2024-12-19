@@ -104,20 +104,41 @@ xdna_mailbox_create_channel(struct mailbox *mailbox,
 			    int mb_irq, enum xdna_mailbox_channel_type type);
 
 /*
+ * xdna_mailbox_release_channel() -- release mailbox channel
+ *
+ * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
+ *
+ * Release all resources, including messages, list entries, interrupt etc.
+ * After this function all, the channel is not functional at all.
+ * This is added for more complex synchronization secnario.
+ */
+void xdna_mailbox_release_channel(struct mailbox_channel *mailbox_chann);
+
+/*
+ * xdna_mailbox_free_channel() -- free mailbox channel
+ *
+ * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
+ *
+ * Free all resources. This must be called after xdna_mailbox_release_channel().
+ */
+void xdna_mailbox_free_channel(struct mailbox_channel *mailbox_chann);
+
+/*
  * xdna_mailbox_destroy_channel() -- destroy mailbox channel
  *
  * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
  *
- * Return: if success, return 0. otherwise return error code
+ * Destroy the channel, it release all the resources that the mailbox channel is
+ * holding and then free all the resources.
  */
-int xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
+void xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
 
 /*
  * xdna_mailbox_stop_channel() -- stop mailbox channel
  *
  * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
  *
- * Return: if success, return 0. otherwise return error code
+ * Stop receiving response and sending messages
  */
 void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 
