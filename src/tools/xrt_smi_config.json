@@ -1,4 +1,5 @@
-"subcommands":
+{
+  "subcommands":
   [{
     "name" : "validate",
     "description" : "Validates the given device by executing the platform's validate executable.",
