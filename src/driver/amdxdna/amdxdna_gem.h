@@ -9,17 +9,28 @@
 #include <drm/drm_file.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
+#include <linux/hmm.h>
+
+
+struct amdxdna_umap {
+	struct vm_area_struct		*vma;
+	struct mmu_interval_notifier	notifier;
+	struct hmm_range		range;
+	struct work_struct		hmm_unreg_work;
+	struct amdxdna_gem_obj		*abo;
+	struct list_head		node;
+	struct kref			refcnt;
+	bool				invalid;
+};
 
 struct amdxdna_mem {
 	u64				userptr;
 	void				*kva;
 	u64				dev_addr;
 	size_t				size;
-	struct vm_area_struct		*vma;
 	struct page			**pages;
 	u32				nr_pages;
-	struct mmu_interval_notifier	notifier;
-	unsigned long			*pfns;
+	struct list_head		umap_list;
 	bool				map_invalid;
 #ifdef AMDXDNA_DEVEL
 	struct sg_table			*sgt;
@@ -35,7 +46,6 @@ struct amdxdna_gem_obj {
 	u64				flags;
 	struct mutex			lock; /* Protects: pinned, assigned_hwctx */
 	struct amdxdna_mem		mem;
-	struct work_struct		hmm_unreg_work;
 
 	/* Below members is uninitialized when needed */
 	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */
@@ -58,6 +68,7 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 {
 	drm_gem_object_put(to_gobj(abo));
 }
+void amdxdna_umap_put(struct amdxdna_umap *mapp);
 
 struct drm_gem_object *
 amdxdna_gem_create_object_cb(struct drm_device *dev, size_t size);
