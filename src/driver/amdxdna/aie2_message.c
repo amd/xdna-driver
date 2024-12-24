@@ -695,7 +695,7 @@ aie2_cmdlist_fill_one_slot_dpu(void *cmd_buf, u32 offset,
 	memcpy(buf->args, sn->prop_args, arg_sz);
 
 	/* Accurate buf size to hint firmware to do necessary copy */
-	*size += sizeof(*buf) + arg_sz;
+	*size = sizeof(*buf) + arg_sz;
 	return 0;
 }
 
