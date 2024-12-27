@@ -1012,7 +1012,7 @@ again:
 
 	down_write(&xdna->notifier_lock);
 	if (mmu_interval_read_retry(&mapp->notifier, mapp->range.notifier_seq)) {
-		up_read(&xdna->notifier_lock);
+		up_write(&xdna->notifier_lock);
 		amdxdna_umap_put(mapp);
 		goto again;
 	}
