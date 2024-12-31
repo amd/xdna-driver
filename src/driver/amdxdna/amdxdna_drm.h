@@ -12,6 +12,7 @@
 #include <drm/drm_file.h>
 #include <linux/hmm.h>
 #include <linux/timekeeping.h>
+#include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
 #ifdef AMDXDNA_SHMEM
@@ -123,6 +124,7 @@ struct amdxdna_dev {
 	struct ida			pdi_ida;
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
+	struct workqueue_struct		*notifier_wq;
 };
 
 struct amdxdna_stats {
