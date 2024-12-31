@@ -295,6 +295,61 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 }
 
+void
+TEST_xrt_umq_df_bw(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/df_bw.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/df_bw.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{df_bw}"};
+  xrt::run run{kernel};
+
+  /* init input buffer */
+  const uint32_t data = 0xabcdabcd;
+  const uint32_t rw_size = 12 * sizeof(uint32_t); // number of shim BD used
+
+  xrt_bo bo_ifm{device, rw_size, xrt::bo::flags::cacheable};
+  xrt_bo bo_ofm{device, rw_size, xrt::bo::flags::cacheable};
+  auto p = bo_ifm.map();
+  for (uint32_t i = 0; i < rw_size / sizeof(uint32_t); i++) {
+    p[i] = data;
+  }
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  p = bo_ofm.map();
+  int err = 0;
+  for (uint32_t i = 0; i < rw_size / sizeof(uint32_t); i++) {
+    if (p[i] != 0) {
+      std::cout << "error@" << i <<": " << p[i] << ", expecting: " << 0 << std::endl;
+      err++;
+    }
+  }
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
 /* run.start n requests, then run.wait all of them */
 void
 TEST_xrt_stress_start(int device_index, arg_type& arg)
@@ -376,6 +431,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt ddr_memtile", TEST_xrt_umq_ddr_memtile, {} },
   test_case{ "npu3 xrt remote_barrier", TEST_xrt_umq_remote_barrier, {} },
   test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
+  test_case{ "npu3 xrt df_bw", TEST_xrt_umq_df_bw, {} },
   test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {32} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {2} }, //upto 2 now
 };
