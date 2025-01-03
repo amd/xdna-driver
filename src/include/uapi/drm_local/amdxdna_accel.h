@@ -52,7 +52,6 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_GET_INFO,
 	DRM_AMDXDNA_SET_STATE,
 	DRM_AMDXDNA_WAIT_CMD,
-	DRM_AMDXDNA_NUM_IOCTLS
 };
 
 enum amdxdna_device_type {
@@ -157,14 +156,13 @@ struct amdxdna_cu_config {
 struct amdxdna_hwctx_param_config_cu {
 	__u16 num_cus;
 	__u16 pad[3];
-	struct amdxdna_cu_config cu_configs[] __counted_by(num_cus);
+	struct amdxdna_cu_config cu_configs[];
 };
 
 enum amdxdna_drm_config_hwctx_param {
 	DRM_AMDXDNA_HWCTX_CONFIG_CU,
 	DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
 	DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
-	DRM_AMDXDNA_HWCTX_CONFIG_NUM
 };
 
 /**
@@ -533,7 +531,6 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_GET_POWER_MODE,
 	DRM_AMDXDNA_QUERY_TELEMETRY,
 	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
-	DRM_AMDXDNA_NUM_GET_PARAM,
 };
 
 /**
@@ -574,7 +571,6 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_WRITE_AIE_MEM,
 	DRM_AMDXDNA_WRITE_AIE_REG,
 	DRM_AMDXDNA_SET_FORCE_PREEMPT,
-	DRM_AMDXDNA_NUM_SET_PARAM,
 };
 
 /**

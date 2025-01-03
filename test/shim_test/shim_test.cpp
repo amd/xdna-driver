@@ -631,7 +631,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000, 0x1004, 0x3c}
   },
   test_case{ "export import BO in single process", {-1, -1},
-    TEST_NEGATIVE, dev_filter_is_aie2, TEST_export_import_bo_single_proc, {}
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo_single_proc, {}
   },
 };
 
