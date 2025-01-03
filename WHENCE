@@ -14,5 +14,6 @@ File:
 	tools/bins/17f0_11/validate.xclbin
 	tools/bins/17f0_20/validate.xclbin
 	tools/bins/elf/nop.elf
+	src/tools/xrt_smi_config.json
 
 Licence: Redistributable. See LICENSE.amdnpu for details.

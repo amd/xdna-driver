@@ -585,6 +585,37 @@ struct sensor_info
   }
 };
 
+/* This structure can be extended to provide
+*  other configurations supporting xrt-smi
+*/
+struct xrt_smi_config
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::xrt_smi_config)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+
+    std::string xrt_smi_config_name;
+    const auto xrt_smi_config_type = std::any_cast<xrt_core::query::xrt_smi_config::type>(param);
+    switch (xrt_smi_config_type) {
+    case xrt_core::query::xrt_smi_config::type::options_config:
+      xrt_smi_config_name = "xrt_smi_config.json";
+      break;
+    }
+
+    return boost::str(boost::format(xrt_smi_config_name));
+  }
+};
+
 struct xclbin_name
 {
   static std::any
@@ -812,6 +843,7 @@ initialize_query_table()
   emplace_func1_request<query::sequence_name,                  sequence_name>();
   emplace_func1_request<query::elf_name,		       elf_name>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
+  emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func0_request<query::firmware_version,               firmware_version>();
 }
 
