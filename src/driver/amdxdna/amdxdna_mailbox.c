@@ -7,7 +7,7 @@
 #include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/io.h>
-#include <linux/idr.h>
+#include <linux/pci.h>
 #include <linux/mutex.h>
 #include <linux/iopoll.h>
 #include <linux/vmalloc.h>
@@ -48,8 +48,6 @@
 #define MAGIC_VAL_MASK			0xFF000000
 #define MAX_MSG_ID_ENTRIES		256
 #define MAILBOX_NAME			"xdna_mailbox"
-#define CHANN_RX_RETRY			10
-#define CHANN_RX_INTERVAL		200 /* milliseconds */
 #define MSG_ID2ENTRY(msg_id)		((msg_id) & ~MAGIC_VAL_MASK)
 
 #ifdef AMDXDNA_DEVEL
@@ -113,9 +111,6 @@ struct mailbox_channel {
 	struct workqueue_struct		*work_q;
 	struct work_struct		rx_work;
 	u32				i2x_head;
-#define MB_STAT_READY	0
-#define MB_STAT_STOPPED	1
-	u32				status;
 	bool				bad_state;
 	u32				last_msg_id;
 
@@ -248,16 +243,9 @@ static int mailbox_acquire_msgid(struct mailbox_channel *mb_chann, struct mailbo
 	u32 msg_id;
 	int ret;
 
-	xa_lock_irq(&mb_chann->chan_xa);
-	if (mb_chann->status == MB_STAT_STOPPED) {
-		xa_unlock_irq(&mb_chann->chan_xa);
-		MB_DBG(mb_chann, "Channel is stopped");
-		return -ENOENT;
-	}
-	ret = __xa_alloc_cyclic(&mb_chann->chan_xa, &msg_id, mb_msg,
-				XA_LIMIT(0, MAX_MSG_ID_ENTRIES - 1),
-				&mb_chann->next_msgid, GFP_NOWAIT);
-	xa_unlock_irq(&mb_chann->chan_xa);
+	ret = xa_alloc_cyclic_irq(&mb_chann->chan_xa, &msg_id, mb_msg,
+				  XA_LIMIT(0, MAX_MSG_ID_ENTRIES - 1),
+				  &mb_chann->next_msgid, GFP_NOWAIT);
 	if (ret < 0)
 		return ret;
 
@@ -814,13 +802,22 @@ int xdna_mailbox_ringbuf_show(struct mailbox *mb, struct seq_file *m)
 
 struct mailbox_channel *
 xdna_mailbox_create_channel(struct mailbox *mb,
-			    const struct xdna_mailbox_chann_res *x2i,
-			    const struct xdna_mailbox_chann_res *i2x,
-			    u32 iohub_int_addr, int mb_irq,
+			    struct xdna_mailbox_chann_info *info,
 			    enum xdna_mailbox_channel_type type)
 {
+	struct xdna_mailbox_chann_res *x2i = &info->x2i;
+	struct xdna_mailbox_chann_res *i2x = &info->i2x;
+	u32 iohub_int_addr = info->intr_reg;
 	struct mailbox_channel *mb_chann;
+	u32 mb_irq;
 	int ret;
+
+	mb_irq = pci_irq_vector(to_pci_dev(mb->dev), info->msix_id);
+	if (mb_irq < 0) {
+		pr_err("failed to alloc irq vector %d", mb_irq);
+		return NULL;
+	}
+
 #if defined(CONFIG_DEBUG_FS)
 	struct mailbox_res_record *record;
 	/* Record will be released when mailbox device destroy*/
@@ -883,7 +880,6 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 skip_irq:
 #endif
 	mb_chann->bad_state = false;
-	mb_chann->status = MB_STAT_READY;
 	mutex_lock(&mb->mbox_lock);
 	if (mb_chann->type == MB_CHANNEL_USER_POLL)
 		list_add_tail(&mb_chann->chann_entry, &mb->poll_chann_list);
@@ -914,7 +910,6 @@ void xdna_mailbox_release_channel(struct mailbox_channel *mb_chann)
 	if (!mb_chann)
 		return;
 
-	WARN_ONCE(mb_chann->status != MB_STAT_STOPPED, "Channel not stopped");
 	mutex_lock(&mb_chann->mb->mbox_lock);
 	list_del(&mb_chann->chann_entry);
 #if defined(CONFIG_DEBUG_FS)
@@ -952,34 +947,6 @@ void xdna_mailbox_free_channel(struct mailbox_channel *mb_chann)
 
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 {
-	int retry;
-
-	if (!mb_chann)
-		return;
-
-	xa_lock_irq(&mb_chann->chan_xa);
-	mb_chann->status = MB_STAT_STOPPED;
-	xa_unlock_irq(&mb_chann->chan_xa);
-	if (mailbox_channel_no_msg(mb_chann))
-		goto fast_path;
-
-	if (mb_chann->type == MB_CHANNEL_MGMT)
-		goto fast_path;
-
-	/* The slow path waits for out standing messages */
-	for (retry = 0; retry < CHANN_RX_RETRY; retry++) {
-		if (mailbox_channel_no_msg(mb_chann))
-			break;
-
-		msleep(CHANN_RX_INTERVAL);
-	}
-
-	if (!mailbox_channel_no_msg(mb_chann)) {
-		MB_WARN_ONCE(mb_chann, "Channel (irq %d) exceeded maximum try",
-			     mb_chann->msix_irq);
-	}
-
-fast_path:
 #ifdef AMDXDNA_DEVEL
 	if (MB_PERIODIC_POLL) {
 		timer_delete_sync(&mb_chann->timer);

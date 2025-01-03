@@ -60,6 +60,21 @@ struct xdna_mailbox_chann_res {
 };
 
 /*
+ * xdna_mailbox_chann_info - channel information
+ *
+ * @x2i: host to firmware mailbox resources
+ * @i2x: firmware to host mailbox resources
+ * @intr_reg: register addr of MSI-X interrupt
+ * @msix_id: mailbox MSI-X interrupt vector index
+ */
+struct xdna_mailbox_chann_info {
+	struct xdna_mailbox_chann_res	x2i;
+	struct xdna_mailbox_chann_res	i2x;
+	u32				intr_reg;
+	u32				msix_id;
+};
+
+/*
  * xdna_mailbox_create() -- create mailbox subsystem and initialize
  *
  * @dev: device pointer
@@ -88,20 +103,15 @@ enum xdna_mailbox_channel_type {
  * xdna_mailbox_create_channel() -- Create a mailbox channel instance
  *
  * @mailbox: the handle return from xdna_mailbox_create()
- * @x2i: host to firmware mailbox resources
- * @i2x: firmware to host mailbox resources
- * @xdna_mailbox_intr_reg: register addr of MSI-X interrupt
- * @mb_irq: Linux IRQ number associated with mailbox MSI-X interrupt vector index
- * @type: Type of channel
+ * @info: information to create a channel
+ * @type: type of channel
  *
  * Return: If success, return a handle of mailbox channel. Otherwise, return NULL.
  */
 struct mailbox_channel *
 xdna_mailbox_create_channel(struct mailbox *mailbox,
-			    const struct xdna_mailbox_chann_res *x2i,
-			    const struct xdna_mailbox_chann_res *i2x,
-			    u32 xdna_mailbox_intr_reg,
-			    int mb_irq, enum xdna_mailbox_channel_type type);
+			    struct xdna_mailbox_chann_info *info,
+			    enum xdna_mailbox_channel_type type);
 
 /*
  * xdna_mailbox_release_channel() -- release mailbox channel

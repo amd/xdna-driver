@@ -56,6 +56,18 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	return &fence->base;
 }
 
+#define WAIT_JOB_COND \
+	(atomic_read(&hwctx->job_submit_cnt) == atomic_read(&hwctx->job_free_cnt))
+void amdxdna_hwctx_wait_jobs(struct amdxdna_hwctx *hwctx, long timeout)
+{
+	if (timeout == MAX_SCHEDULE_TIMEOUT) {
+		wait_event(hwctx->status_wq, WAIT_JOB_COND);
+		return;
+	}
+
+	wait_event_timeout(hwctx->status_wq, WAIT_JOB_COND, timeout);
+}
+
 void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -64,8 +76,9 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		xdna->dev_info->ops->hwctx_suspend(hwctx);
+	}
 	mutex_unlock(&client->hwctx_lock);
 }
 
@@ -91,12 +104,12 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 
 	/* At this point, user is not able to submit new commands */
 	mutex_lock(&xdna->dev_lock);
-	xdna->dev_info->ops->hwctx_flush_async(hwctx);
+	xdna->dev_info->ops->hwctx_fini(hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
-	wait_event(hwctx->status_wq,
-		   atomic_read(&hwctx->job_submit_cnt) == atomic_read(&hwctx->job_free_cnt));
-	xdna->dev_info->ops->hwctx_free(hwctx);
+	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
+	if (xdna->dev_info->ops->hwctx_free)
+		xdna->dev_info->ops->hwctx_free(hwctx);
 	kfree(hwctx->name);
 	kfree(hwctx);
 }
@@ -150,7 +163,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 
 	hwctx->client = client;
-	hwctx->fw_ctx_id = -1;
 	hwctx->tdr_last_completed = -1;
 	hwctx->num_tiles = args->num_tiles;
 	hwctx->mem_size = args->mem_size;
