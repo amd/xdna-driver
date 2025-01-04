@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_DEVEL_
@@ -28,4 +28,6 @@ void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem);
 
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo);
 void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo);
+
+void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna);
 #endif /* _AMDXDNA_DEVEL_ */

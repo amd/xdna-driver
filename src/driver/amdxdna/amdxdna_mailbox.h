@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AIE2_MAILBOX_H_
@@ -60,6 +60,21 @@ struct xdna_mailbox_chann_res {
 };
 
 /*
+ * xdna_mailbox_chann_info - channel information
+ *
+ * @x2i: host to firmware mailbox resources
+ * @i2x: firmware to host mailbox resources
+ * @intr_reg: register addr of MSI-X interrupt
+ * @msix_id: mailbox MSI-X interrupt vector index
+ */
+struct xdna_mailbox_chann_info {
+	struct xdna_mailbox_chann_res	x2i;
+	struct xdna_mailbox_chann_res	i2x;
+	u32				intr_reg;
+	u32				msix_id;
+};
+
+/*
  * xdna_mailbox_create() -- create mailbox subsystem and initialize
  *
  * @dev: device pointer
@@ -88,36 +103,52 @@ enum xdna_mailbox_channel_type {
  * xdna_mailbox_create_channel() -- Create a mailbox channel instance
  *
  * @mailbox: the handle return from xdna_mailbox_create()
- * @x2i: host to firmware mailbox resources
- * @i2x: firmware to host mailbox resources
- * @xdna_mailbox_intr_reg: register addr of MSI-X interrupt
- * @mb_irq: Linux IRQ number associated with mailbox MSI-X interrupt vector index
- * @type: Type of channel
+ * @info: information to create a channel
+ * @type: type of channel
  *
  * Return: If success, return a handle of mailbox channel. Otherwise, return NULL.
  */
 struct mailbox_channel *
 xdna_mailbox_create_channel(struct mailbox *mailbox,
-			    const struct xdna_mailbox_chann_res *x2i,
-			    const struct xdna_mailbox_chann_res *i2x,
-			    u32 xdna_mailbox_intr_reg,
-			    int mb_irq, enum xdna_mailbox_channel_type type);
+			    struct xdna_mailbox_chann_info *info,
+			    enum xdna_mailbox_channel_type type);
+
+/*
+ * xdna_mailbox_release_channel() -- release mailbox channel
+ *
+ * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
+ *
+ * Release all resources, including messages, list entries, interrupt etc.
+ * After this function all, the channel is not functional at all.
+ * This is added for more complex synchronization secnario.
+ */
+void xdna_mailbox_release_channel(struct mailbox_channel *mailbox_chann);
+
+/*
+ * xdna_mailbox_free_channel() -- free mailbox channel
+ *
+ * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
+ *
+ * Free all resources. This must be called after xdna_mailbox_release_channel().
+ */
+void xdna_mailbox_free_channel(struct mailbox_channel *mailbox_chann);
 
 /*
  * xdna_mailbox_destroy_channel() -- destroy mailbox channel
  *
  * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
  *
- * Return: if success, return 0. otherwise return error code
+ * Destroy the channel, it release all the resources that the mailbox channel is
+ * holding and then free all the resources.
  */
-int xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
+void xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann);
 
 /*
  * xdna_mailbox_stop_channel() -- stop mailbox channel
  *
  * @mailbox_chann: the handle return from xdna_mailbox_create_channel()
  *
- * Return: if success, return 0. otherwise return error code
+ * Stop receiving response and sending messages
  */
 void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 

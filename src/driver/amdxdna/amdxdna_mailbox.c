@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/bitfield.h>
 #include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/io.h>
-#include <linux/idr.h>
+#include <linux/pci.h>
 #include <linux/mutex.h>
 #include <linux/iopoll.h>
 #include <linux/vmalloc.h>
-#include <linux/spinlock.h>
 #include <linux/build_bug.h>
 #include <linux/interrupt.h>
 #include <linux/dev_printk.h>
@@ -49,8 +48,6 @@
 #define MAGIC_VAL_MASK			0xFF000000
 #define MAX_MSG_ID_ENTRIES		256
 #define MAILBOX_NAME			"xdna_mailbox"
-#define CHANN_RX_RETRY			10
-#define CHANN_RX_INTERVAL		200 /* milliseconds */
 #define MSG_ID2ENTRY(msg_id)		((msg_id) & ~MAGIC_VAL_MASK)
 
 #ifdef AMDXDNA_DEVEL
@@ -805,13 +802,22 @@ int xdna_mailbox_ringbuf_show(struct mailbox *mb, struct seq_file *m)
 
 struct mailbox_channel *
 xdna_mailbox_create_channel(struct mailbox *mb,
-			    const struct xdna_mailbox_chann_res *x2i,
-			    const struct xdna_mailbox_chann_res *i2x,
-			    u32 iohub_int_addr, int mb_irq,
+			    struct xdna_mailbox_chann_info *info,
 			    enum xdna_mailbox_channel_type type)
 {
+	struct xdna_mailbox_chann_res *x2i = &info->x2i;
+	struct xdna_mailbox_chann_res *i2x = &info->i2x;
+	u32 iohub_int_addr = info->intr_reg;
 	struct mailbox_channel *mb_chann;
+	u32 mb_irq;
 	int ret;
+
+	mb_irq = pci_irq_vector(to_pci_dev(mb->dev), info->msix_id);
+	if (mb_irq < 0) {
+		pr_err("failed to alloc irq vector %d", mb_irq);
+		return NULL;
+	}
+
 #if defined(CONFIG_DEBUG_FS)
 	struct mailbox_res_record *record;
 	/* Record will be released when mailbox device destroy*/
@@ -896,13 +902,13 @@ free_and_out:
 	return NULL;
 }
 
-int xdna_mailbox_destroy_channel(struct mailbox_channel *mb_chann)
+void xdna_mailbox_release_channel(struct mailbox_channel *mb_chann)
 {
 	struct mailbox_msg *mb_msg;
 	unsigned long msg_id;
 
 	if (!mb_chann)
-		return 0;
+		return;
 
 	mutex_lock(&mb_chann->mb->mbox_lock);
 	list_del(&mb_chann->chann_entry);
@@ -926,42 +932,27 @@ destroy_wq:
 	xa_for_each(&mb_chann->chan_xa, msg_id, mb_msg)
 		mailbox_release_msg(mb_chann, mb_msg);
 
-	xa_destroy(&mb_chann->chan_xa);
-
-	MB_DBG(mb_chann, "Mailbox channel destroyed type %d irq: %d",
+	MB_DBG(mb_chann, "Mailbox channel released type %d irq: %d",
 	       mb_chann->type, mb_chann->msix_irq);
+}
+
+void xdna_mailbox_free_channel(struct mailbox_channel *mb_chann)
+{
+	if (!mb_chann)
+		return;
+
+	xa_destroy(&mb_chann->chan_xa);
 	kfree(mb_chann);
-	return 0;
 }
 
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 {
-	int retry;
-
-	if (!mb_chann)
-		return;
-
-	if (mb_chann->type != MB_CHANNEL_MGMT) {
-		for (retry = 0; retry < CHANN_RX_RETRY; retry++) {
-			if (mailbox_channel_no_msg(mb_chann))
-				break;
-
-			msleep(CHANN_RX_INTERVAL);
-		}
-
-		if (!mailbox_channel_no_msg(mb_chann)) {
-			MB_WARN_ONCE(mb_chann, "Channel (irq %d) exceeded maximum try",
-				     mb_chann->msix_irq);
-		}
-	}
-
 #ifdef AMDXDNA_DEVEL
 	if (MB_PERIODIC_POLL) {
 		timer_delete_sync(&mb_chann->timer);
 		goto skip_irq;
 	}
 #endif
-
 	/* Disable an irq and wait. This might sleep. */
 	disable_irq(mb_chann->msix_irq);
 
@@ -971,6 +962,12 @@ skip_irq:
 	/* Cancel RX work and wait for it to finish */
 	cancel_work_sync(&mb_chann->rx_work);
 	MB_DBG(mb_chann, "IRQ disabled and RX work cancelled");
+}
+
+void xdna_mailbox_destroy_channel(struct mailbox_channel *mailbox_chann)
+{
+	xdna_mailbox_release_channel(mailbox_chann);
+	xdna_mailbox_free_channel(mailbox_chann);
 }
 
 struct mailbox *xdna_mailbox_create(struct device *dev,

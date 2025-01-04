@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/version.h>
@@ -56,6 +56,18 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	return &fence->base;
 }
 
+#define WAIT_JOB_COND \
+	(atomic_read(&hwctx->job_submit_cnt) == atomic_read(&hwctx->job_free_cnt))
+void amdxdna_hwctx_wait_jobs(struct amdxdna_hwctx *hwctx, long timeout)
+{
+	if (timeout == MAX_SCHEDULE_TIMEOUT) {
+		wait_event(hwctx->status_wq, WAIT_JOB_COND);
+		return;
+	}
+
+	wait_event_timeout(hwctx->status_wq, WAIT_JOB_COND, timeout);
+}
+
 void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -64,8 +76,9 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	mutex_lock(&client->hwctx_lock);
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		xdna->dev_info->ops->hwctx_suspend(hwctx);
+	}
 	mutex_unlock(&client->hwctx_lock);
 }
 
@@ -94,6 +107,9 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 	xdna->dev_info->ops->hwctx_fini(hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
+	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
+	if (xdna->dev_info->ops->hwctx_free)
+		xdna->dev_info->ops->hwctx_free(hwctx);
 	kfree(hwctx->name);
 	kfree(hwctx);
 }
@@ -147,7 +163,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 
 	hwctx->client = client;
-	hwctx->fw_ctx_id = -1;
 	hwctx->tdr_last_completed = -1;
 	hwctx->num_tiles = args->num_tiles;
 	hwctx->mem_size = args->mem_size;
@@ -182,6 +197,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	atomic_set(&hwctx->job_submit_cnt, 0);
 	atomic_set(&hwctx->job_free_cnt, 0);
+	init_waitqueue_head(&hwctx->status_wq);
 
 	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
@@ -358,6 +374,7 @@ void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 	amdxdna_gem_put_obj(job->cmd_bo);
 
 	atomic_inc(&job->hwctx->job_free_cnt);
+	wake_up(&job->hwctx->status_wq);
 }
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)

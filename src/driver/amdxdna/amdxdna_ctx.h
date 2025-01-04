@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_CTX_H_
@@ -98,7 +98,6 @@ struct amdxdna_hwctx {
 	u32				max_opc;
 	u32				num_tiles;
 	u32				mem_size;
-	u32				fw_ctx_id;
 	u32				col_list_len;
 	u32				*col_list;
 	u32				start_col;
@@ -143,7 +142,8 @@ struct amdxdna_hwctx {
 	u32				syncobj_hdl;
 
 	atomic_t			job_submit_cnt;
-	atomic_t			job_free_cnt;
+	atomic_t			job_free_cnt ____cacheline_aligned_in_smp;
+	wait_queue_head_t		status_wq;
 };
 
 #define drm_job_to_xdna_job(j) \
@@ -254,6 +254,7 @@ static inline u32 amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx)
 		       hwctx->start_col);
 }
 
+void amdxdna_hwctx_wait_jobs(struct amdxdna_hwctx *hwctx, long timeout);
 void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 void amdxdna_hwctx_suspend(struct amdxdna_client *client);
