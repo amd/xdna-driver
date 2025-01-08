@@ -5,6 +5,7 @@
 #include "device.h"
 #include "hwctx.h"
 #include "fence.h"
+#include "smi.h"
 
 #include "core/common/query_requests.h"
 
@@ -604,15 +605,15 @@ struct xrt_smi_config
 
     const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
 
-    std::string xrt_smi_config_name;
+    std::string xrt_smi_config;
     const auto xrt_smi_config_type = std::any_cast<xrt_core::query::xrt_smi_config::type>(param);
     switch (xrt_smi_config_type) {
     case xrt_core::query::xrt_smi_config::type::options_config:
-      xrt_smi_config_name = "xrt_smi_config.json";
+      xrt_smi_config = shim_xdna::smi::get_smi_config();
       break;
     }
 
-    return boost::str(boost::format(xrt_smi_config_name));
+    return boost::str(boost::format(xrt_smi_config));
   }
 };
 
