@@ -8,7 +8,7 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/pci.h>
-#include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/iopoll.h>
 #include <linux/vmalloc.h>
 #include <linux/build_bug.h>
@@ -70,8 +70,7 @@ enum channel_res_type {
 struct mailbox {
 	struct device		*dev;
 	struct xdna_mailbox_res	res;
-	/* protect channel list */
-	struct mutex		mbox_lock;
+	spinlock_t		mbox_lock; /* protect channel list */
 	struct list_head        chann_list;
 	struct list_head        poll_chann_list;
 	struct task_struct	*polld;
@@ -556,7 +555,7 @@ static bool mailbox_polld_event(struct mailbox *mb)
 {
 	struct mailbox_channel *mb_chann;
 
-	mutex_lock(&mb->mbox_lock);
+	spin_lock(&mb->mbox_lock);
 	list_for_each_entry(mb_chann, &mb->poll_chann_list, chann_entry) {
 		if (mb_chann->type == MB_CHANNEL_MGMT)
 			break;
@@ -567,7 +566,7 @@ static bool mailbox_polld_event(struct mailbox *mb)
 		mb->sent_msg = true;
 		break;
 	}
-	mutex_unlock(&mb->mbox_lock);
+	spin_unlock(&mb->mbox_lock);
 
 	return mb->sent_msg;
 }
@@ -588,7 +587,7 @@ static int mailbox_polld(void *data)
 		if (!mb->sent_msg)
 			continue;
 
-		mutex_lock(&mb->mbox_lock);
+		spin_lock(&mb->mbox_lock);
 		chann_all_empty = true;
 		list_for_each_entry(mb_chann, &mb->poll_chann_list, chann_entry) {
 			if (mb_chann->type == MB_CHANNEL_MGMT)
@@ -600,7 +599,7 @@ static int mailbox_polld(void *data)
 			chann_all_empty = false;
 			mailbox_polld_handle_chann(mb_chann);
 		}
-		mutex_unlock(&mb->mbox_lock);
+		spin_unlock(&mb->mbox_lock);
 
 		if (chann_all_empty)
 			mb->sent_msg = false;
@@ -703,7 +702,7 @@ xdna_mailbox_get_record(struct mailbox *mb, int mb_irq,
 	struct mailbox_res_record *record;
 	int record_found = 0;
 
-	mutex_lock(&mb->mbox_lock);
+	spin_lock(&mb->mbox_lock);
 	list_for_each_entry(record, &mb->res_records, re_entry) {
 		if (record->re_irq != mb_irq)
 			continue;
@@ -728,7 +727,7 @@ found:
 	memcpy(&record->re_x2i, x2i, sizeof(*x2i));
 	memcpy(&record->re_i2x, i2x, sizeof(*i2x));
 out:
-	mutex_unlock(&mb->mbox_lock);
+	spin_unlock(&mb->mbox_lock);
 	return record;
 }
 
@@ -759,12 +758,13 @@ int xdna_mailbox_info_show(struct mailbox *mb, struct seq_file *m)
 	seq_printf(m, ring_fmt, mbox_irq, #_dir, _act, type, rb_start, rb_size); \
 	seq_printf(m, mbox_fmt, head_ptr, tail_ptr, head_val, tail_val); \
 }
-	mutex_lock(&mb->mbox_lock);
+
+	spin_lock(&mb->mbox_lock);
 	list_for_each_entry(record, &mb->res_records, re_entry) {
 		xdna_mbox_dump_queue(x2i, record->active);
 		xdna_mbox_dump_queue(i2x, record->active);
 	}
-	mutex_unlock(&mb->mbox_lock);
+	spin_unlock(&mb->mbox_lock);
 
 	return 0;
 }
@@ -787,13 +787,13 @@ int xdna_mailbox_ringbuf_show(struct mailbox *mb, struct seq_file *m)
 		memcpy_fromio(buf, base + record->re_##_dir.rb_start_addr, size); \
 		seq_hex_dump(m, pfx, DUMP_PREFIX_OFFSET, 16, 4, buf, size, true); \
 	} while (0)
-	mutex_lock(&mb->mbox_lock);
+	spin_lock(&mb->mbox_lock);
 	base = (void *)mb->res.ringbuf_base;
 	list_for_each_entry(record, &mb->res_records, re_entry) {
 		xdna_mbox_dump_ringbuf(x2i);
 		xdna_mbox_dump_ringbuf(i2x);
 	}
-	mutex_unlock(&mb->mbox_lock);
+	spin_unlock(&mb->mbox_lock);
 
 	vfree(buf);
 	return 0;
@@ -880,7 +880,7 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 skip_irq:
 #endif
 	mb_chann->bad_state = false;
-	mutex_lock(&mb->mbox_lock);
+	spin_lock(&mb->mbox_lock);
 	if (mb_chann->type == MB_CHANNEL_USER_POLL)
 		list_add_tail(&mb_chann->chann_entry, &mb->poll_chann_list);
 	else
@@ -889,7 +889,7 @@ skip_irq:
 	mb_chann->record = record;
 	record->active = 1;
 #endif
-	mutex_unlock(&mb->mbox_lock);
+	spin_unlock(&mb->mbox_lock);
 
 	MB_DBG(mb_chann, "Mailbox channel created type %d (irq: %d)",
 	       mb_chann->type, mb_chann->msix_irq);
@@ -910,12 +910,12 @@ void xdna_mailbox_release_channel(struct mailbox_channel *mb_chann)
 	if (!mb_chann)
 		return;
 
-	mutex_lock(&mb_chann->mb->mbox_lock);
+	spin_lock(&mb_chann->mb->mbox_lock);
 	list_del(&mb_chann->chann_entry);
 #if defined(CONFIG_DEBUG_FS)
 	mb_chann->record->active = 0;
 #endif
-	mutex_unlock(&mb_chann->mb->mbox_lock);
+	spin_unlock(&mb_chann->mb->mbox_lock);
 
 #ifdef AMDXDNA_DEVEL
 	if (MB_PERIODIC_POLL)
@@ -983,7 +983,7 @@ struct mailbox *xdna_mailbox_create(struct device *dev,
 	/* mailbox and ring buf base and size information */
 	memcpy(&mb->res, res, sizeof(*res));
 
-	mutex_init(&mb->mbox_lock);
+	spin_lock_init(&mb->mbox_lock);
 	INIT_LIST_HEAD(&mb->chann_list);
 	INIT_LIST_HEAD(&mb->poll_chann_list);
 
@@ -1026,10 +1026,9 @@ done_release_record:
 	dev_dbg(mb->dev, "Stopping polld");
 	(void)kthread_stop(mb->polld);
 
-	mutex_lock(&mb->mbox_lock);
+	spin_lock(&mb->mbox_lock);
 	WARN_ONCE(!list_empty(&mb->chann_list), "Channel not destroy");
-	mutex_unlock(&mb->mbox_lock);
+	spin_unlock(&mb->mbox_lock);
 
-	mutex_destroy(&mb->mbox_lock);
 	kfree(mb);
 }
