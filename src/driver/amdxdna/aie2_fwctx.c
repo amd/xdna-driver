@@ -117,7 +117,7 @@ skip:
 		goto release_resource;
 	}
 
-	hwctx->status = HWCTX_STATE_INIT;
+	hwctx->status |= FIELD_PREP(HWCTX_STATE_CONNECTED, 1);
 	return 0;
 
 release_resource:
@@ -133,7 +133,7 @@ free_fwctx:
 
 void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx)
 {
-	if (hwctx->status == HWCTX_STATE_STOP) {
+	if (!FIELD_GET(HWCTX_STATE_CONNECTED, hwctx->status)) {
 		XDNA_DBG(hwctx->client->xdna, "%s was stopped, skip", hwctx->name);
 		return;
 	}
@@ -143,7 +143,7 @@ void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx)
 
 	drm_sched_entity_destroy(&hwctx->priv->fwctx->entity);
 	drm_sched_fini(&hwctx->priv->fwctx->sched);
-	hwctx->status = HWCTX_STATE_STOP;
+	hwctx->status &= ~HWCTX_STATE_CONNECTED;
 }
 
 void aie2_fwctx_free(struct amdxdna_hwctx *hwctx)

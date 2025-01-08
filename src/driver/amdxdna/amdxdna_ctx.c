@@ -75,11 +75,8 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_lock(&client->hwctx_lock);
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 		xdna->dev_info->ops->hwctx_suspend(hwctx);
-	}
-	mutex_unlock(&client->hwctx_lock);
 }
 
 void amdxdna_hwctx_resume(struct amdxdna_client *client)
@@ -89,10 +86,8 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_lock(&client->hwctx_lock);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 		xdna->dev_info->ops->hwctx_resume(hwctx);
-	mutex_unlock(&client->hwctx_lock);
 }
 
 static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
@@ -102,11 +97,14 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 
 	synchronize_srcu(ss);
 
-	/* At this point, user is not able to submit new commands */
+	/*
+	 * At this point, user is not able to submit new commands.
+	 */
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->hwctx_fini(hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
+	// TODO: remove
 	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
 	if (xdna->dev_info->ops->hwctx_free)
 		xdna->dev_info->ops->hwctx_free(hwctx);
@@ -115,7 +113,7 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 }
 
 /*
- * This should be called in close() and remove(). DO NOT call in other syscalls.
+ * This should be called in flush() and remove(). DO NOT call in other syscalls.
  * This guarantee that when hwctx and resources will be released, if user
  * doesn't call amdxdna_drm_destroy_hwctx_ioctl.
  */
@@ -124,16 +122,12 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 	struct amdxdna_hwctx *hwctx;
 	unsigned long hwctx_id;
 
-	mutex_lock(&client->hwctx_lock);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		XDNA_DBG(client->xdna, "PID %d close HW context %d",
 			 client->pid, hwctx->id);
 		xa_erase(&client->hwctx_xa, hwctx->id);
-		mutex_unlock(&client->hwctx_lock);
 		amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
-		mutex_lock(&client->hwctx_lock);
 	}
-	mutex_unlock(&client->hwctx_lock);
 }
 
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
@@ -492,12 +486,6 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	if (!hwctx) {
 		XDNA_ERR(xdna, "PID %d failed to get hwctx %d",
 			 client->pid, hwctx_hdl);
-		ret = -EINVAL;
-		goto unlock_srcu;
-	}
-
-	if (hwctx->status == HWCTX_STATE_INIT) {
-		XDNA_ERR(xdna, "HW Context is not ready");
 		ret = -EINVAL;
 		goto unlock_srcu;
 	}

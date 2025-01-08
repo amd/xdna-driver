@@ -231,6 +231,8 @@ struct amdxdna_dev_hdl {
 	struct xdna_mailbox_chann_info	mgmt_info;
 	u32				mgmt_prot_major;
 	u32				mgmt_prot_minor;
+	/* for recover and IO code path exclusion */
+	struct rw_semaphore		recover_lock;
 
 	u32				total_col;
 	struct aie_version		version;

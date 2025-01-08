@@ -34,6 +34,7 @@ static void aie2_job_put(struct amdxdna_sched_job *job)
 
 static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
+	hwctx->status &= ~HWCTX_STATE_READY;
 	aie2_fwctx_stop(hwctx);
 	XDNA_DBG(xdna, "Stopped %s", hwctx->name);
 }
@@ -42,17 +43,14 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 {
 	int ret;
 
-	WARN_ONCE(hwctx->status != HWCTX_STATE_STOP, "hwctx should be in stop state");
 	ret = aie2_fwctx_create(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to create fw context, ret %d", ret);
 		return ret;
 	}
 
-	if (!hwctx->cus) {
-		XDNA_DBG(xdna, "%s restart to init state", hwctx->name);
+	if (!hwctx->cus)
 		goto out;
-	}
 
 #ifdef AMDXDNA_DEVEL
 	if (priv_load) {
@@ -72,9 +70,9 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 #ifdef AMDXDNA_DEVEL
 skip_config_cu:
 #endif
-	hwctx->status = HWCTX_STATE_READY;
+	hwctx->status |= FIELD_PREP(HWCTX_STATE_READY, 1);
 out:
-	XDNA_DBG(xdna, "%s restarted, status %d", hwctx->name, hwctx->status);
+	XDNA_DBG(xdna, "%s restarted, status 0x%x", hwctx->name, hwctx->status);
 	return 0;
 
 failed:
@@ -121,10 +119,10 @@ void aie2_dump_ctx(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_lock(&client->hwctx_lock);
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		hwctx->status |= FIELD_PREP(HWCTX_STATE_DEAD, 1);
 		aie2_hwctx_dump(xdna, hwctx);
-	mutex_unlock(&client->hwctx_lock);
+	}
 }
 
 void aie2_stop_ctx(struct amdxdna_client *client)
@@ -134,14 +132,13 @@ void aie2_stop_ctx(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_lock(&client->hwctx_lock);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-		if (hwctx->status == HWCTX_STATE_INIT)
+		if (!FIELD_GET(HWCTX_STATE_CONNECTED, hwctx->status))
 			continue;
 
+		hwctx->status |= FIELD_PREP(HWCTX_STATE_DEAD, 1);
 		aie2_hwctx_stop(xdna, hwctx);
 	}
-	mutex_unlock(&client->hwctx_lock);
 }
 
 void aie2_restart_ctx(struct amdxdna_client *client)
@@ -152,20 +149,20 @@ void aie2_restart_ctx(struct amdxdna_client *client)
 	int err;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_lock(&client->hwctx_lock);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-		if (hwctx->status != HWCTX_STATE_STOP)
+		if (!FIELD_GET(HWCTX_STATE_DEAD, hwctx->status))
 			continue;
 
 		XDNA_DBG(xdna, "Resetting %s", hwctx->name);
 		err = aie2_hwctx_restart(xdna, hwctx);
-		if (!err)
+		if (!err) {
+			hwctx->status &= ~HWCTX_STATE_DEAD;
 			continue;
+		}
 
-		XDNA_WARN(xdna, "Failed to restart %s status %d err %d",
+		XDNA_WARN(xdna, "Failed to restart %s status 0x%x err %d",
 			  hwctx->name, hwctx->status, err);
 	}
-	mutex_unlock(&client->hwctx_lock);
 }
 
 void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx)
@@ -195,7 +192,7 @@ void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	err = aie2_hwctx_restart(xdna, hwctx);
 	if (err)
-		XDNA_WARN(xdna, "Failed to resume %s status %d err %d",
+		XDNA_WARN(xdna, "Failed to resume %s status 0x%x err %d",
 			  hwctx->name, hwctx->status, err);
 }
 
@@ -673,7 +670,7 @@ static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 	int ret;
 
 	XDNA_DBG(xdna, "Config %d CU to %s", config->num_cus, hwctx->name);
-	if (hwctx->status != HWCTX_STATE_INIT) {
+	if (hwctx->cus) {
 		XDNA_ERR(xdna, "Not support re-config CU");
 		return -EINVAL;
 	}
@@ -721,7 +718,7 @@ static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 skip_config_cu:
 #endif
 	wmb(); /* To avoid locking in command submit when check status */
-	hwctx->status = HWCTX_STATE_READY;
+	hwctx->status |= FIELD_PREP(HWCTX_STATE_READY, 1);
 
 	return 0;
 
@@ -917,12 +914,10 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
 	struct dma_fence_chain *chain;
+	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_gem_obj *abo;
 	unsigned long timeout = 0;
 	int ret, i;
-
-	if (hwctx->status != HWCTX_STATE_READY)
-		return -ENODEV;
 
 	ret = down_interruptible(&hwctx->priv->job_sem);
 	if (ret) {
@@ -934,6 +929,21 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	if (!chain) {
 		XDNA_ERR(xdna, "Alloc fence chain failed");
 		ret = -ENOMEM;
+		goto up_sem;
+	}
+
+	ndev = xdna->dev_handle;
+	down_read(&ndev->recover_lock);
+	if (!FIELD_GET(HWCTX_STATE_READY, hwctx->status)) {
+		up_read(&ndev->recover_lock);
+		XDNA_ERR(xdna, "HW Context is not ready");
+		ret = -EINVAL;
+		goto up_sem;
+	}
+
+	if (FIELD_GET(HWCTX_STATE_DEAD, hwctx->status)) {
+		up_read(&ndev->recover_lock);
+		ret = -ENODEV;
 		goto up_sem;
 	}
 
@@ -1001,6 +1011,7 @@ retry:
 
 	up_read(&xdna->notifier_lock);
 	amdxdna_unlock_objects(job, &acquire_ctx);
+	up_read(&ndev->recover_lock);
 
 	aie2_job_put(job);
 

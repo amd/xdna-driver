@@ -474,6 +474,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
+	init_rwsem(&ndev->recover_lock);
 
 	ret = request_firmware(&fw, ndev->priv->fw_path, &pdev->dev);
 	if (ret) {
@@ -648,20 +649,27 @@ skip_pasid:
 
 static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_client *client;
 
-	mutex_lock(&xdna->dev_lock);
 	if (dump_only) {
+		mutex_lock(&xdna->dev_lock);
 		list_for_each_entry(client, &xdna->client_list, node)
 			aie2_dump_ctx(client);
-	} else {
-		list_for_each_entry(client, &xdna->client_list, node)
-			aie2_stop_ctx(client);
-		/* The AIE will reset after all hardware contexts are destroyed */
-		list_for_each_entry(client, &xdna->client_list, node)
-			aie2_restart_ctx(client);
+		mutex_unlock(&xdna->dev_lock);
+		return;
 	}
+
+	down_write(&ndev->recover_lock);
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(client, &xdna->client_list, node)
+		aie2_stop_ctx(client);
+
+	/* The AIE will reset after all hardware contexts are destroyed */
+	list_for_each_entry(client, &xdna->client_list, node)
+		aie2_restart_ctx(client);
 	mutex_unlock(&xdna->dev_lock);
+	up_write(&ndev->recover_lock);
 }
 
 static int aie2_get_aie_status(struct amdxdna_client *client,
@@ -958,7 +966,7 @@ free_buf:
 }
 
 static int aie2_get_force_preempt_state(struct amdxdna_client *client,
-										struct amdxdna_drm_get_info *args)
+					struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_get_force_preempt_state force = {};
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1057,7 +1065,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 }
 
 static int aie2_set_force_preempt_state(struct amdxdna_client *client,
-										struct amdxdna_drm_set_state *args)
+					struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_set_force_preempt_state force;
 	struct amdxdna_dev *xdna = client->xdna;

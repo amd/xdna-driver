@@ -124,7 +124,7 @@ struct amdxdna_dev {
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
-	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
+	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
 };
 
@@ -141,7 +141,6 @@ struct amdxdna_stats {
  *
  * @node: entry node in clients list
  * @pid: PID of current client
- * @hwctx_lock: HW context lock for protect IDR
  * @hwctx_srcu: Per client SRCU for synchronizing hwctx destroy with other ioctls.
  * @hwctx_xa: HW context xarray
  * @xdna: XDNA device pointer
@@ -155,9 +154,7 @@ struct amdxdna_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
-	/* To protect hwctx stop/restart/destroy etc. */
-	struct mutex			hwctx_lock;
-	/* To avoid deadlock, do NOT wait this srcu when hwctx_lock is hold */
+	/* To avoid deadlock, do NOT wait this srcu when dev_lock is hold */
 	struct srcu_struct		hwctx_srcu;
 	struct xarray			hwctx_xa;
 	u32				next_hwctxid;
