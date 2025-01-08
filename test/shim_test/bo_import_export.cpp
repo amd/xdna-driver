@@ -37,11 +37,14 @@ private:
     msg("Received BO %d from PID %d", idata.hdl, idata.pid);
 
     // Create IO test BO set and replace input BO with the one from child
-    auto dev = get_userpf_device(get_dev_id());
-    auto wrk = get_xclbin_workspace(dev.get());
-    io_test_bo_set boset{dev.get(), wrk + "/data/"};
-    boset.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev.get(), idata.pid, idata.hdl);
-    boset.run();
+    auto sdev = get_userpf_device(get_dev_id());
+    auto dev = sdev.get();
+    auto wrk = get_xclbin_workspace(dev);
+    auto xclbin = get_xclbin_name(dev);
+
+    io_test_bo_set boset{dev, wrk + "/data/"};
+    boset.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev, idata.pid, idata.hdl);
+    boset.run(xclbin);
     send_ipc_data(&success, sizeof(success));
   }
 
@@ -77,7 +80,9 @@ TEST_export_import_bo(device::id_type id, std::shared_ptr<device> sdev, const st
 void
 TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
 {
-  auto wrk = get_xclbin_workspace(sdev.get());
+  auto dev = sdev.get();
+  auto wrk = get_xclbin_workspace(dev);
+  auto xclbin = get_xclbin_name(dev);
 
   // Create IO test BO set and share input BO with same process
   io_test_bo_set boset1{sdev.get(), wrk + "/data/"};
@@ -86,5 +91,5 @@ TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device> sd
   // Create IO test BO set and replace input BO with the one from above and execute it
   io_test_bo_set boset2{sdev.get(), wrk + "/data/"};
   boset2.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(sdev.get(), getpid(), share->get_export_handle());
-  boset2.run();
+  boset2.run(xclbin);
 }

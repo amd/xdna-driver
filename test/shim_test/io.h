@@ -21,23 +21,24 @@ enum io_test_bo_type {
 };
 
 struct io_test_bo {
-  size_t size;
-  size_t init_offset;
+  size_t size = 0;
+  size_t init_offset = 0;
   std::shared_ptr<bo> tbo;
 };
 
-class io_test_bo_set {
+class io_test_bo_set_base
+{
 public:
-  io_test_bo_set(device *dev, const std::string& data_path);
+  io_test_bo_set_base(device *dev, const std::string& data_path);
 
   void
-  run();
+  run_no_check_result(const std::string& xclbin);
 
   void
-  run(bool no_check_result);
+  run(const std::string& xclbin);
 
   void
-  run(const std::vector<xrt_core::fence_handle*>& wait_fences,
+  run(const std::string& xclbin, const std::vector<xrt_core::fence_handle*>& wait_fences,
     const std::vector<xrt_core::fence_handle*>& signal_fences, bool no_check_result);
 
   void
@@ -46,14 +47,14 @@ public:
   void
   sync_after_run();
 
-  void
-  init_cmd(xrt_core::cuidx_type idx, bool dump);
+  virtual void
+  init_cmd(xrt_core::cuidx_type idx, bool dump) = 0;
 
   void
   dump_content();
 
-  void
-  verify_result();
+  virtual void
+  verify_result() = 0;
 
   static const char *
   bo_type2name(int type);
@@ -61,19 +62,37 @@ public:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
   get_bos();
 
-private:
+protected:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES> m_bo_array;
   const std::string m_local_data_path;
   device *m_dev;
+};
+
+class io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  io_test_bo_set(device *dev, const std::string& data_path);
 
   void
-  init_sizes();
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override; 
 
   void
-  alloc_bos();
+  verify_result() override;
+};
+
+class elf_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_io_test_bo_set(device *dev, const std::string& data_path);
 
   void
-  init_args();
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override; 
+
+  void
+  verify_result() override;
+
+private:
+  std::string m_elf_path;
 };
 
 #endif // _SHIMTEST_IO_H_

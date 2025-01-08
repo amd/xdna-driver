@@ -316,13 +316,24 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device> sdev, arg
 void
 TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  auto wrk = get_xclbin_workspace(sdev.get());
-  io_test_bo_set boset{sdev.get(), wrk + "/data/"};
+  auto dev = sdev.get();
+  auto wrk = get_xclbin_workspace(dev);
+  auto xclbin = get_xclbin_name(dev);
+  io_test_bo_set boset{dev, wrk + "/data/"};
 
   // Use same BO for both input and output
   boset.get_bos()[IO_TEST_BO_OUTPUT].tbo = boset.get_bos()[IO_TEST_BO_INPUT].tbo;
   auto ibo = boset.get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
   std::memset(ibo->map(), 0, ibo->size());
-  boset.run(true);
+  boset.run_no_check_result(xclbin);
 }
 
+void
+TEST_txn_elf_flow(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  const char* xclbin = "design.xclbin";
+  auto wrk = get_xclbin_workspace(sdev.get(), xclbin);
+  elf_io_test_bo_set boset{sdev.get(), wrk};
+
+  boset.run(xclbin);
+}

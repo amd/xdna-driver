@@ -30,6 +30,7 @@ const uint16_t npu6_revision_id = 0x20;
 
 const xclbin_info& get_xclbin_info(device* dev, const char *xclbin_name=nullptr);
 std::string get_xclbin_name(device* dev);
+std::string get_kernel_name(device* dev, const char*);
 std::string get_xclbin_workspace(device* dev, const char *xclbin_name=nullptr);
 std::string get_xclbin_path(device* dev, const char *xclbin_name=nullptr);
 const std::map<const char*, cuidx_type>& get_xclbin_ip_name2index(device* dev, const char *xclbin_name=nullptr);

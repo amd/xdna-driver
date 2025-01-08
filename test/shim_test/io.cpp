@@ -24,108 +24,171 @@ const char *io_test_bo_type_names[] = {
   "IO_TEST_BO_BAD_INSTRUCTION",
 };
 
-std::string
-find_first_match_ip_name(device* dev, const std::string& pattern)
-{
-  for (auto& ip : get_xclbin_ip_name2index(dev)) {
-    const std::string& name = ip.first;
-    if (std::regex_match(name, std::regex(pattern))) {
-      return name;
-    }
-  }
-  return ""; // Return an empty string if no match is found
-}
-
-}
-
 void
-io_test_bo_set::
-init_sizes()
+alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t)
 {
-  // Should only need to load and init sizes once in case we reuse BO set.
-  if (m_bo_array[IO_TEST_BO_CMD].size)
+  auto sz = ibo.size;
+
+  if (sz == 0) {
+    ibo.tbo = nullptr;
     return;
+  }
 
-  m_bo_array[IO_TEST_BO_CMD].size = 0x1000;
-
-  auto instr_word_size = get_instr_size(m_local_data_path + instr_file);
-  m_bo_array[IO_TEST_BO_INSTRUCTION].size = instr_word_size * sizeof(int32_t);
-  if (m_bo_array[IO_TEST_BO_INSTRUCTION].size == 0)
-    throw std::runtime_error("instruction size cannot be 0");
-
-  // Loading other sizes
-  auto tp = parse_config_file(m_local_data_path + config_file);
-  m_bo_array[IO_TEST_BO_INPUT].size = IFM_SIZE(tp);
-  m_bo_array[IO_TEST_BO_INPUT].init_offset = IFM_DIRTY_BYTES(tp);
-  m_bo_array[IO_TEST_BO_PARAMETERS].size = PARAM_SIZE(tp);
-  m_bo_array[IO_TEST_BO_OUTPUT].size = OFM_SIZE(tp);
-  m_bo_array[IO_TEST_BO_INTERMEDIATE].size = INTER_SIZE(tp);
-  // Do not support patching MC_CODE. */
-  if (MC_CODE_SIZE(tp))
-    throw std::runtime_error("MC_CODE_SIZE is non zero!!!");
-  m_bo_array[IO_TEST_BO_MC_CODE].size = DUMMY_MC_CODE_BUFFER_SIZE;
-}
-
-void
-io_test_bo_set::
-alloc_bos()
-{
-  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
-    io_test_bo *ibo = &m_bo_array[i];
-    switch(i) {
-    case IO_TEST_BO_CMD:
-      ibo->tbo = std::make_shared<bo>(m_dev, ibo->size, XCL_BO_FLAGS_EXECBUF);
-      break;
-    case IO_TEST_BO_INSTRUCTION:
-      ibo->tbo = std::make_shared<bo>(m_dev, ibo->size, XCL_BO_FLAGS_CACHEABLE);
-      break;
-    default:
-      ibo->tbo = std::make_shared<bo>(m_dev, ibo->size);
-      break;
-    }
+  switch(t) {
+  case IO_TEST_BO_CMD:
+    ibo.tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_EXECBUF);
+    break;
+  case IO_TEST_BO_INSTRUCTION:
+    ibo.tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
+    break;
+  default:
+    ibo.tbo = std::make_shared<bo>(dev, sz);
+    break;
   }
 }
 
 void
-io_test_bo_set::
-init_args()
+init_bo(io_test_bo& ibo, const std::string& bin)
 {
-  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
-    io_test_bo *ibo = &m_bo_array[i];
-    switch(i) {
-    case IO_TEST_BO_INSTRUCTION:
-      read_instructions_from_txt(m_local_data_path + instr_file, ibo->tbo->map());
-      break;
-    case IO_TEST_BO_INPUT:
-      read_data_from_bin(m_local_data_path + ifm_file, ibo->init_offset,
-        ibo->tbo->size() - ibo->init_offset, ibo->tbo->map());
-      break;
-    case IO_TEST_BO_PARAMETERS:
-      read_data_from_bin(m_local_data_path + param_file, 0, ibo->tbo->size(), ibo->tbo->map());
-      break;
-    default:
-      break;
-    }
-  }
+  read_data_from_bin(bin, ibo.init_offset, ibo.tbo->size() - ibo.init_offset, ibo.tbo->map());
 }
 
-io_test_bo_set::
-io_test_bo_set(device* dev, const std::string& local_data_path) :
+size_t
+get_bin_size(const std::string& filename)
+{
+  std::ifstream ifs(filename, std::ifstream::ate | std::ifstream::binary);
+  if (!ifs.is_open())
+    throw std::runtime_error("Failure opening file " + filename + "!!");
+  return ifs.tellg();
+}
+
+}
+
+io_test_bo_set_base::
+io_test_bo_set_base(device* dev, const std::string& local_data_path) :
   m_bo_array{}
   , m_local_data_path(local_data_path)
   , m_dev(dev)
 {
-  init_sizes();
-  alloc_bos();
-  init_args();
+}
+
+io_test_bo_set::
+io_test_bo_set(device* dev, const std::string& local_data_path) :
+  io_test_bo_set_base(dev, local_data_path)
+{
+  std::string file;
+  auto tp = parse_config_file(m_local_data_path + config_file);
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      ibo.size = 0x1000;
+      alloc_bo(ibo, m_dev, type);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      file = m_local_data_path + instr_file;
+      ibo.size = get_instr_size(file) * sizeof(int32_t);
+      if (ibo.size == 0)
+        throw std::runtime_error("instruction size cannot be 0");
+      alloc_bo(ibo, m_dev, type);
+      read_instructions_from_txt(file, ibo.tbo->map());
+      break;
+    case IO_TEST_BO_INPUT:
+      ibo.size = IFM_SIZE(tp);
+      ibo.init_offset = IFM_DIRTY_BYTES(tp);
+      alloc_bo(ibo, m_dev, type);
+      init_bo(ibo, m_local_data_path + ifm_file);
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      ibo.size = PARAM_SIZE(tp);
+      alloc_bo(ibo, m_dev, type);
+      init_bo(ibo, m_local_data_path + param_file);
+      break;
+    case IO_TEST_BO_OUTPUT:
+      ibo.size = OFM_SIZE(tp);
+      alloc_bo(ibo, m_dev, type);
+      break;
+    case IO_TEST_BO_INTERMEDIATE:
+      ibo.size = INTER_SIZE(tp);
+      alloc_bo(ibo, m_dev, type);
+      break;
+    case IO_TEST_BO_MC_CODE:
+      // Do not support patching MC_CODE. */
+      if (MC_CODE_SIZE(tp))
+        throw std::runtime_error("MC_CODE_SIZE is non zero!!!");
+      ibo.size = DUMMY_MC_CODE_BUFFER_SIZE;
+      alloc_bo(ibo, m_dev, type);
+      break;
+    default:
+      throw std::runtime_error("unknown BO type");
+      break;
+    }
+  }
+}
+
+elf_io_test_bo_set::
+elf_io_test_bo_set(device* dev, const std::string& local_data_path) :
+  io_test_bo_set_base(dev, local_data_path)
+  , m_elf_path(m_local_data_path + "/no-ctrl-packet.elf")
+{
+  std::string file;
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      ibo.size = 0x1000;
+      alloc_bo(ibo, m_dev, type);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      ibo.size = exec_buf::get_ctrl_code_size(m_elf_path);
+      if (ibo.size == 0)
+        throw std::runtime_error("instruction size cannot be 0");
+      alloc_bo(ibo, m_dev, type);
+      break;
+    case IO_TEST_BO_INPUT:
+      file = m_local_data_path + "/ifm.bin";
+      ibo.size = get_bin_size(file);
+      alloc_bo(ibo, m_dev, type);
+      init_bo(ibo, file);
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      file = m_local_data_path + "/wts.bin";
+      ibo.size = get_bin_size(file);
+      alloc_bo(ibo, m_dev, type);
+      init_bo(ibo, file);
+      break;
+    case IO_TEST_BO_OUTPUT:
+      file = m_local_data_path + "/ofm.bin";
+      ibo.size = get_bin_size(file);
+      alloc_bo(ibo, m_dev, type);
+      break;
+    case IO_TEST_BO_INTERMEDIATE:
+    case IO_TEST_BO_MC_CODE:
+      // No need for intermediate/mc_code BO
+      break;
+    default:
+      throw std::runtime_error("unknown BO type");
+      break;
+    }
+  }
 }
 
 void
-io_test_bo_set::
+io_test_bo_set_base::
 sync_before_run()
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     io_test_bo *ibo = &m_bo_array[i];
+
+    if (ibo->tbo == nullptr)
+      continue;
+
     switch(i) {
     case IO_TEST_BO_INPUT:
     case IO_TEST_BO_INSTRUCTION:
@@ -140,11 +203,15 @@ sync_before_run()
 }
 
 void
-io_test_bo_set::
+io_test_bo_set_base::
 sync_after_run()
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     io_test_bo *ibo = &m_bo_array[i];
+
+    if (ibo->tbo == nullptr)
+      continue;
+
     switch(i) {
     case IO_TEST_BO_OUTPUT:
     case IO_TEST_BO_INTERMEDIATE:
@@ -175,13 +242,55 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
     ebuf.dump();
 }
 
+void
+elf_io_test_bo_set::
+init_cmd(xrt_core::cuidx_type idx, bool dump)
+{
+  auto dev_id = device_query<query::pcie_device>(m_dev);
+
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
+
+  ebuf.set_cu_idx(idx);
+  if (dev_id == npu1_device_id) {
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+    ebuf.add_arg_32(3);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf_path);
+  } else if (dev_id == npu2_device_id) {
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+    ebuf.add_arg_32(3);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf_path);
+  } else {
+    throw std::runtime_error("Device ID not supported: " + std::to_string(dev_id));
+  }
+  if (dump)
+    ebuf.dump();
+}
+
 // For debug only
 void
-io_test_bo_set::
+io_test_bo_set_base::
 dump_content()
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto ibo = m_bo_array[i].tbo.get();
+
+    if (ibo == nullptr)
+      continue;
+
     auto ibo_p = reinterpret_cast<int8_t *>(ibo->map());
     std::string p("/tmp/");
     p += io_test_bo_type_names[i] + std::to_string(getpid());
@@ -201,25 +310,46 @@ verify_result()
     throw std::runtime_error("Test failed!!!");
 }
 
+void
+elf_io_test_bo_set::
+verify_result()
+{
+  auto bo_ofm = m_bo_array[IO_TEST_BO_OUTPUT].tbo;
+  auto ofm_p = reinterpret_cast<char*>(bo_ofm->map());
+  auto sz = bo_ofm->size();
+
+  std::vector<char> buf_ofm_golden(sz);
+  auto ofm_golden_p = reinterpret_cast<char*>(buf_ofm_golden.data());
+  read_data_from_bin(m_local_data_path + "/ofm.bin", 0, sz, reinterpret_cast<int*>(ofm_golden_p));
+
+  size_t count = 0;
+  for (size_t i = 0; i < sz; i++) {
+    if (ofm_p[i] != ofm_golden_p[i])
+      count++;
+  }
+  if (count)
+    throw std::runtime_error(std::to_string(count) + " bytes result mismatch!!!");
+}
+
 const char *
-io_test_bo_set::
+io_test_bo_set_base::
 bo_type2name(int type)
 {
   return io_test_bo_type_names[type];
 }
 
 void
-io_test_bo_set::
-run(const std::vector<xrt_core::fence_handle*>& wait_fences,
+io_test_bo_set_base::
+run(const std::string& xclbin, const std::vector<xrt_core::fence_handle*>& wait_fences,
   const std::vector<xrt_core::fence_handle*>& signal_fences, bool no_check_result)
 {
-  hw_ctx hwctx{m_dev};
+  hw_ctx hwctx{m_dev, xclbin.c_str()};
   auto hwq = hwctx.get()->get_hw_queue();
-  auto ip_name = find_first_match_ip_name(m_dev, "DPU.*");
-  if (ip_name.empty())
-    throw std::runtime_error("Cannot find any kernel name matched DPU.*");
-  auto cu_idx = hwctx.get()->open_cu_context(ip_name);
-  std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
+  auto kernel = get_kernel_name(m_dev, xclbin.c_str());
+  if (kernel.empty())
+    throw std::runtime_error("No kernel found");
+  auto cu_idx = hwctx.get()->open_cu_context(kernel);
+  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
 
   init_cmd(cu_idx, false);
   sync_before_run();
@@ -242,25 +372,25 @@ run(const std::vector<xrt_core::fence_handle*>& wait_fences,
 }
 
 void
-io_test_bo_set::
-run()
+io_test_bo_set_base::
+run(const std::string& xclbin)
 {
   const std::vector<xrt_core::fence_handle*> sfences{};
   const std::vector<xrt_core::fence_handle*> wfences{};
-  run(wfences, sfences, false);
+  run(xclbin, wfences, sfences, false);
 }
 
 void
-io_test_bo_set::
-run(bool no_check_result)
+io_test_bo_set_base::
+run_no_check_result(const std::string& xclbin)
 {
   const std::vector<xrt_core::fence_handle*> sfences{};
   const std::vector<xrt_core::fence_handle*> wfences{};
-  run(wfences, sfences, no_check_result);
+  run(xclbin, wfences, sfences, true);
 }
 
 std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
-io_test_bo_set::
+io_test_bo_set_base::
 get_bos()
 {
   return m_bo_array;

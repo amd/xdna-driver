@@ -206,6 +206,12 @@ get_xclbin_name(device* dev)
 }
 
 std::string
+get_kernel_name(device* dev, const char *xclbin)
+{
+  return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->first;
+}
+
+std::string
 get_xclbin_workspace(device* dev, const char *xclbin_name)
 {
   return (cur_path + "/../" + get_xclbin_info(dev, xclbin_name).workspace);
