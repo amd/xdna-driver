@@ -52,7 +52,7 @@ void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_shim_umq_remote_barrier(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_txn_elf_flow(device::id_type, std::shared_ptr<device>, arg_type&);
+void TEST_elf_io(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>, arg_type&);
 
@@ -585,8 +585,8 @@ std::vector<test_case> test_list {
   test_case{ "export import BO", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
   },
-  test_case{ "txn elf flow", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_txn_elf_flow, {}
+  test_case{ "ELF io test real kernel good run", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_host, {}
@@ -632,6 +632,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "export import BO in single process", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo_single_proc, {}
+  },
+  test_case{ "multi-command ELF io test real kernel good run", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
 };
 
