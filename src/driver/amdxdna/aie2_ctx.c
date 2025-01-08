@@ -43,9 +43,9 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 {
 	int ret;
 
-	ret = aie2_fwctx_create(hwctx);
+	ret = aie2_fwctx_start(hwctx);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to create fw context, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to start %s, ret %d", hwctx->name, ret);
 		return ret;
 	}
 
@@ -599,9 +599,9 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto free_wq;
 	}
 
-	ret = aie2_fwctx_create(hwctx);
+	ret = aie2_fwctx_start(hwctx);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to create fw context, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to start fw context, ret %d", ret);
 		goto syncobj_destroy;
 	}
 
@@ -645,7 +645,6 @@ void aie2_hwctx_free(struct amdxdna_hwctx *hwctx)
 {
 	int idx;
 
-	aie2_fwctx_free(hwctx);
 	destroy_workqueue(hwctx->priv->submit_wq);
 	aie2_hwctx_syncobj_destroy(hwctx);
 	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
@@ -947,7 +946,7 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 		goto up_sem;
 	}
 
-	ret = drm_sched_job_init(&job->base, &hwctx->priv->fwctx->entity, 1, hwctx);
+	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM job init failed, ret %d", ret);
 		goto free_chain;

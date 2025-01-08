@@ -59,23 +59,14 @@ static void aie2_release_resource(struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
 }
 
-int aie2_fwctx_create(struct amdxdna_hwctx *hwctx)
+int aie2_fwctx_start(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct drm_gpu_scheduler *sched;
 	struct amdxdna_gem_obj *heap;
-	struct aie2_fwctx *fwctx;
 	int ret;
 
-	fwctx = hwctx->priv->fwctx;
-	if (!fwctx) {
-		fwctx = kzalloc(sizeof(*fwctx), GFP_KERNEL);
-		if (!fwctx)
-			return -ENOMEM;
-	}
-
-	hwctx->priv->fwctx = fwctx;
-	sched = &fwctx->sched;
+	sched = &hwctx->priv->sched;
 	heap = hwctx->priv->heap;
 
 	ret = drm_sched_init(sched, &sched_ops, hwctx->priv->submit_wq,
@@ -84,30 +75,30 @@ int aie2_fwctx_create(struct amdxdna_hwctx *hwctx)
 			     NULL, NULL, hwctx->name, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
-		goto free_fwctx;
+		return ret;
 	}
 
-	ret = drm_sched_entity_init(&fwctx->entity, DRM_SCHED_PRIORITY_NORMAL,
+	ret = drm_sched_entity_init(&hwctx->priv->entity, DRM_SCHED_PRIORITY_NORMAL,
 				    &sched, 1, NULL);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to initial sched entiry. ret %d", ret);
-		goto free_sched;
+		goto fini_sched;
 	}
 
 	ret = aie2_alloc_resource(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
-		goto free_entity;
+		goto destroy_entity;
 	}
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
-		ret = aie2_map_host_buf(xdna->dev_handle, fwctx->id,
+		ret = aie2_map_host_buf(xdna->dev_handle, hwctx->priv->id,
 					heap->mem.dma_addr, heap->mem.size);
 		goto skip;
 	}
 #endif
-	ret = aie2_map_host_buf(xdna->dev_handle, fwctx->id,
+	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->priv->id,
 				heap->mem.userptr, heap->mem.size);
 #ifdef AMDXDNA_DEVEL
 skip:
@@ -122,12 +113,10 @@ skip:
 
 release_resource:
 	aie2_release_resource(hwctx);
-free_entity:
-	drm_sched_entity_destroy(&fwctx->entity);
-free_sched:
-	drm_sched_fini(&fwctx->sched);
-free_fwctx:
-	kfree(fwctx);
+destroy_entity:
+	drm_sched_entity_destroy(&hwctx->priv->entity);
+fini_sched:
+	drm_sched_fini(&hwctx->priv->sched);
 	return ret;
 }
 
@@ -141,14 +130,9 @@ void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx)
 	aie2_release_resource(hwctx);
 	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
 
-	drm_sched_entity_destroy(&hwctx->priv->fwctx->entity);
-	drm_sched_fini(&hwctx->priv->fwctx->sched);
+	drm_sched_entity_destroy(&hwctx->priv->entity);
+	drm_sched_fini(&hwctx->priv->sched);
 	hwctx->status &= ~HWCTX_STATE_CONNECTED;
-}
-
-void aie2_fwctx_free(struct amdxdna_hwctx *hwctx)
-{
-	kfree(hwctx->priv->fwctx);
 }
 
 int aie2_xrs_load_fwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action)
@@ -186,7 +170,7 @@ int aie2_xrs_load_fwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *act
 	XDNA_DBG(xdna, "%s mailbox channel irq: %d, msix_id: %d",
 		 hwctx->name, ret, info.msix_id);
 
-	hwctx->priv->fwctx->mbox_chann = mbox_chann;
+	hwctx->priv->mbox_chann = mbox_chann;
 	return 0;
 
 failed:
@@ -200,7 +184,7 @@ int aie2_xrs_unload_fwctx(struct amdxdna_hwctx *hwctx)
 	int ret;
 
 	xdna = hwctx->client->xdna;
-	xdna_mailbox_stop_channel(hwctx->priv->fwctx->mbox_chann);
+	xdna_mailbox_stop_channel(hwctx->priv->mbox_chann);
 	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
 	if (ret)
 		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
@@ -209,6 +193,6 @@ int aie2_xrs_unload_fwctx(struct amdxdna_hwctx *hwctx)
 	 * The DRM scheduler thread might still running.
 	 * Call xdna_mailbox_free_channel() when hwctx is destroyed.
 	 */
-	xdna_mailbox_destroy_channel(hwctx->priv->fwctx->mbox_chann);
+	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chann);
 	return ret;
 }

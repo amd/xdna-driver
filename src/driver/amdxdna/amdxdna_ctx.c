@@ -104,8 +104,6 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 	xdna->dev_info->ops->hwctx_fini(hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
-	// TODO: remove
-	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
 	if (xdna->dev_info->ops->hwctx_free)
 		xdna->dev_info->ops->hwctx_free(hwctx);
 	kfree(hwctx->name);

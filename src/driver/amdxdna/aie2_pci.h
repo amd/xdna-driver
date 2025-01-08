@@ -175,12 +175,6 @@ struct hwctx_pdi {
 	dma_addr_t		dma_addr;
 };
 #endif
-struct aie2_fwctx {
-	u32				id;
-	void				*mbox_chann;
-	struct drm_gpu_scheduler	sched;
-	struct drm_sched_entity		entity;
-};
 
 /*
  * Define the maximum number of pending commands in a hardware context.
@@ -194,7 +188,6 @@ struct amdxdna_hwctx_priv {
 	struct hwctx_pdi		*pdi_infos;
 #endif
 
-	struct aie2_fwctx		*fwctx;
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 
 	struct mutex			io_lock; /* protect seq and cmd order */
@@ -205,6 +198,12 @@ struct amdxdna_hwctx_priv {
 
 	struct workqueue_struct		*submit_wq;
 	struct drm_syncobj		*syncobj;
+
+	/* Firmware context related in below */
+	u32				id;
+	void				*mbox_chann;
+	struct drm_gpu_scheduler	sched;
+	struct drm_sched_entity		entity;
 };
 
 enum aie2_dev_status {
@@ -409,9 +408,8 @@ void aie2_dump_ctx(struct amdxdna_client *client);
 void aie2_restart_ctx(struct amdxdna_client *client);
 
 /* aie2_fwctx.c */
-int aie2_fwctx_create(struct amdxdna_hwctx *hwctx);
+int aie2_fwctx_start(struct amdxdna_hwctx *hwctx);
 void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx);
-void aie2_fwctx_free(struct amdxdna_hwctx *hwctx);
 int aie2_xrs_load_fwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
 int aie2_xrs_unload_fwctx(struct amdxdna_hwctx *hwctx);
 
