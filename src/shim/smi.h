@@ -1,4 +1,13 @@
-{
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+
+#include <string>
+
+namespace shim_xdna::smi {
+
+static constexpr std::string_view xrt_smi_config =
+ R"(
+ {
   "subcommands":
   [{
     "name" : "validate",
@@ -192,3 +201,10 @@
     ]
   }]
 }
+)"; 
+
+
+std::string 
+get_smi_config();
+
+} // namespace shim_xdna::smi
