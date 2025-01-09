@@ -29,16 +29,16 @@ struct io_test_bo {
 class io_test_bo_set_base
 {
 public:
-  io_test_bo_set_base(device *dev, const std::string& data_path);
+  io_test_bo_set_base(device *dev, const std::string& xclbin_name);
 
   void
-  run_no_check_result(const std::string& xclbin);
+  run_no_check_result();
 
   void
-  run(const std::string& xclbin);
+  run();
 
   void
-  run(const std::string& xclbin, const std::vector<xrt_core::fence_handle*>& wait_fences,
+  run(const std::vector<xrt_core::fence_handle*>& wait_fences,
     const std::vector<xrt_core::fence_handle*>& signal_fences, bool no_check_result);
 
   void
@@ -64,6 +64,7 @@ public:
 
 protected:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES> m_bo_array;
+  const std::string m_xclbin_name;
   const std::string m_local_data_path;
   device *m_dev;
 };
@@ -71,7 +72,8 @@ protected:
 class io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  io_test_bo_set(device *dev, const std::string& data_path);
+  io_test_bo_set(device *dev, const std::string& xclbin_name);
+  io_test_bo_set(device *dev);
 
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override; 
@@ -83,7 +85,7 @@ public:
 class elf_io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_test_bo_set(device *dev, const std::string& data_path);
+  elf_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override; 

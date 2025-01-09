@@ -108,12 +108,10 @@ private:
     const std::vector<xrt_core::fence_handle*> wfences{fence.get()};
     const std::vector<xrt_core::fence_handle*> sfences{};
 
-    auto wrk = get_xclbin_workspace(dev.get());
-    auto xclbin = get_xclbin_name(dev.get());
-    io_test_bo_set boset{dev.get(), wrk + "/data/"};
-    boset.run(xclbin, wfences, sfences, false);
-    boset.run(xclbin, wfences, sfences, false);
-    boset.run(xclbin, wfences, sfences, false);
+    io_test_bo_set boset{dev.get()};
+    boset.run(wfences, sfences, false);
+    boset.run(wfences, sfences, false);
+    boset.run(wfences, sfences, false);
 
     bool success = true;
     send_ipc_data(&success, sizeof(success));
@@ -135,12 +133,10 @@ private:
     hw_ctx hwctx{dev.get()};
     auto hwq = hwctx.get()->get_hw_queue();
 
-    auto wrk = get_xclbin_workspace(dev.get());
-    auto xclbin = get_xclbin_name(dev.get());
-    io_test_bo_set boset{dev.get(), wrk + "/data/"};
+    io_test_bo_set boset{dev.get()};
     hwq->submit_signal(fence.get());
-    boset.run(xclbin, wfences, sfences, false);
-    boset.run(xclbin, wfences, sfences, false);
+    boset.run(wfences, sfences, false);
+    boset.run(wfences, sfences, false);
 
     bool success;
     recv_ipc_data(&success, sizeof(success));

@@ -31,17 +31,11 @@ io_test_parameter_init(int perf, int type, int wait, bool debug = false)
 std::unique_ptr<io_test_bo_set_base>
 alloc_and_init_bo_set(device* dev, bool is_elf)
 {
-  std::string local_data_path;
-  if (is_elf)
-    local_data_path = get_xclbin_workspace(dev, elf_xclbin);
-  else
-    local_data_path = get_xclbin_workspace(dev) + "/data/";
-
   std::unique_ptr<io_test_bo_set_base> base;
   if (is_elf)
-    base = std::make_unique<elf_io_test_bo_set>(dev, local_data_path);
+    base = std::make_unique<elf_io_test_bo_set>(dev, elf_xclbin);
   else
-    base = std::make_unique<io_test_bo_set>(dev, local_data_path);
+    base = std::make_unique<io_test_bo_set>(dev);
 
   auto& bos = base->get_bos();
 
@@ -320,15 +314,13 @@ void
 TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   auto dev = sdev.get();
-  auto wrk = get_xclbin_workspace(dev);
-  auto xclbin = get_xclbin_name(dev);
-  io_test_bo_set boset{dev, wrk + "/data/"};
+  io_test_bo_set boset{dev};
 
   // Use same BO for both input and output
   boset.get_bos()[IO_TEST_BO_OUTPUT].tbo = boset.get_bos()[IO_TEST_BO_INPUT].tbo;
   auto ibo = boset.get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
   std::memset(ibo->map(), 0, ibo->size());
-  boset.run_no_check_result(xclbin);
+  boset.run_no_check_result();
 }
 
 void

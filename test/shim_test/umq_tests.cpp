@@ -113,8 +113,8 @@ TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device> sdev, c
 {
   auto dev = sdev.get();
 
-  auto wrk = get_xclbin_workspace(dev);
-  auto elf = wrk + "/remote_barrier.elf";
+  auto data = get_xclbin_data(dev);
+  auto elf = data + "/remote_barrier.elf";
   auto instr_size = exec_buf::get_ctrl_code_size(elf);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
@@ -144,8 +144,8 @@ TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device> sdev, cons
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
 
-  auto wrk = get_xclbin_workspace(dev);
-  auto elf = wrk + "/ddr_memtile.elf";
+  auto data = get_xclbin_data(dev);
+  auto elf = data + "/ddr_memtile.elf";
   auto instr_size = exec_buf::get_ctrl_code_size(elf);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
@@ -171,8 +171,8 @@ TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device> sdev, const s
 {
   auto dev = sdev.get();
 
-  auto wrk = get_xclbin_workspace(dev);
-  auto elf = wrk + "/move_memtiles.elf";
+  auto data = get_xclbin_data(dev);
+  auto elf = data + "/move_memtiles.elf";
   auto instr_size = exec_buf::get_ctrl_code_size(elf);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
@@ -205,8 +205,8 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, const std::
   bo bo_ofm{dev, OFM_BYTE_SIZE, XCL_BO_FLAGS_HOST_ONLY};
   std::cout << "Allocated vadd ifm, wts and ofm BOs" << std::endl;
 
-  auto wrk = get_xclbin_workspace(dev);
-  auto elf = wrk + "/vadd.elf";
+  auto data = get_xclbin_data(dev);
+  auto elf = data + "/vadd.elf";
   auto instr_size = exec_buf::get_ctrl_code_size(elf);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};

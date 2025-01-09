@@ -65,16 +65,17 @@ get_bin_size(const std::string& filename)
 }
 
 io_test_bo_set_base::
-io_test_bo_set_base(device* dev, const std::string& local_data_path) :
+io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
   m_bo_array{}
-  , m_local_data_path(local_data_path)
+  , m_xclbin_name(xclbin_name)
+  , m_local_data_path(get_xclbin_data(dev, xclbin_name.c_str()))
   , m_dev(dev)
 {
 }
 
 io_test_bo_set::
-io_test_bo_set(device* dev, const std::string& local_data_path) :
-  io_test_bo_set_base(dev, local_data_path)
+io_test_bo_set(device* dev, const std::string& xclbin_name) :
+  io_test_bo_set_base(dev, xclbin_name)
 {
   std::string file;
   auto tp = parse_config_file(m_local_data_path + config_file);
@@ -129,9 +130,14 @@ io_test_bo_set(device* dev, const std::string& local_data_path) :
   }
 }
 
+io_test_bo_set::
+io_test_bo_set(device* dev) : io_test_bo_set(dev, get_xclbin_name(dev))
+{
+}
+
 elf_io_test_bo_set::
-elf_io_test_bo_set(device* dev, const std::string& local_data_path) :
-  io_test_bo_set_base(dev, local_data_path)
+elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
+  io_test_bo_set_base(dev, xclbin_name)
   , m_elf_path(m_local_data_path + "/no-ctrl-packet.elf")
 {
   std::string file;
@@ -340,12 +346,12 @@ bo_type2name(int type)
 
 void
 io_test_bo_set_base::
-run(const std::string& xclbin, const std::vector<xrt_core::fence_handle*>& wait_fences,
+run(const std::vector<xrt_core::fence_handle*>& wait_fences,
   const std::vector<xrt_core::fence_handle*>& signal_fences, bool no_check_result)
 {
-  hw_ctx hwctx{m_dev, xclbin.c_str()};
+  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
   auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel = get_kernel_name(m_dev, xclbin.c_str());
+  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
   if (kernel.empty())
     throw std::runtime_error("No kernel found");
   auto cu_idx = hwctx.get()->open_cu_context(kernel);
@@ -373,20 +379,20 @@ run(const std::string& xclbin, const std::vector<xrt_core::fence_handle*>& wait_
 
 void
 io_test_bo_set_base::
-run(const std::string& xclbin)
+run()
 {
   const std::vector<xrt_core::fence_handle*> sfences{};
   const std::vector<xrt_core::fence_handle*> wfences{};
-  run(xclbin, wfences, sfences, false);
+  run(wfences, sfences, false);
 }
 
 void
 io_test_bo_set_base::
-run_no_check_result(const std::string& xclbin)
+run_no_check_result()
 {
   const std::vector<xrt_core::fence_handle*> sfences{};
   const std::vector<xrt_core::fence_handle*> wfences{};
-  run(xclbin, wfences, sfences, true);
+  run(wfences, sfences, true);
 }
 
 std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
