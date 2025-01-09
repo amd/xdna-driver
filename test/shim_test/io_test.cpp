@@ -313,8 +313,7 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device> sdev, arg
 void
 TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  auto dev = sdev.get();
-  io_test_bo_set boset{dev};
+  io_test_bo_set boset{sdev.get()};
 
   // Use same BO for both input and output
   boset.get_bos()[IO_TEST_BO_OUTPUT].tbo = boset.get_bos()[IO_TEST_BO_INPUT].tbo;

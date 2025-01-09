@@ -80,11 +80,11 @@ TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device> sd
   auto dev = sdev.get();
 
   // Create IO test BO set and share input BO with same process
-  io_test_bo_set boset1{sdev.get()};
+  io_test_bo_set boset1{dev};
   auto share = boset1.get_bos()[IO_TEST_BO_INPUT].tbo->get()->share();
 
   // Create IO test BO set and replace input BO with the one from above and execute it
-  io_test_bo_set boset2{sdev.get()};
-  boset2.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(sdev.get(), getpid(), share->get_export_handle());
+  io_test_bo_set boset2{dev};
+  boset2.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev, getpid(), share->get_export_handle());
   boset2.run();
 }
