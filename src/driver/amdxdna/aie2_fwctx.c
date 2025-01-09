@@ -128,11 +128,13 @@ void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx)
 	}
 
 	aie2_release_resource(hwctx);
-	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
+	hwctx->status &= ~HWCTX_STATE_CONNECTED;
+}
 
+void aie2_fwctx_free(struct amdxdna_hwctx *hwctx)
+{
 	drm_sched_entity_destroy(&hwctx->priv->entity);
 	drm_sched_fini(&hwctx->priv->sched);
-	hwctx->status &= ~HWCTX_STATE_CONNECTED;
 }
 
 int aie2_xrs_load_fwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action)

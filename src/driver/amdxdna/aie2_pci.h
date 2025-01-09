@@ -410,6 +410,7 @@ void aie2_restart_ctx(struct amdxdna_client *client);
 /* aie2_fwctx.c */
 int aie2_fwctx_start(struct amdxdna_hwctx *hwctx);
 void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx);
+void aie2_fwctx_free(struct amdxdna_hwctx *hwctx);
 int aie2_xrs_load_fwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
 int aie2_xrs_unload_fwctx(struct amdxdna_hwctx *hwctx);
 

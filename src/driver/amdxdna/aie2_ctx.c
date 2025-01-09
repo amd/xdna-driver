@@ -37,6 +37,8 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 	hwctx->status &= ~HWCTX_STATE_READY;
 	aie2_fwctx_stop(hwctx);
 	XDNA_DBG(xdna, "Stopped %s", hwctx->name);
+	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
+	aie2_fwctx_free(hwctx);
 }
 
 static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
@@ -175,7 +177,6 @@ void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx)
 	 * and abort all commands.
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
 	aie2_hwctx_stop(xdna, hwctx);
 }
 
@@ -210,10 +211,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	trace_xdna_job(&job->base, hwctx->name, "signaling fence", job->seq, job->opcode);
 	dma_fence_signal(fence);
 	idx = get_job_idx(job->seq);
-	mutex_lock(&hwctx->priv->io_lock);
 	hwctx->priv->pending[idx] = NULL;
-	mutex_unlock(&hwctx->priv->io_lock);
-
 	up(&job->hwctx->priv->job_sem);
 	job->job_done = true;
 	dma_fence_put(fence);
@@ -385,8 +383,14 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 
 	trace_xdna_job(sched_job, hwctx->name, "job free", job->seq, job->opcode);
-	if (!job->job_done)
+	if (!job->job_done) {
+		int idx;
+
+		idx = get_job_idx(job->seq);
+		/* No contention with submit, no lock */
+		hwctx->priv->pending[idx] = NULL;
 		up(&hwctx->priv->job_sem);
+	}
 
 	drm_sched_job_cleanup(sched_job);
 	aie2_job_put(job);
@@ -438,10 +442,10 @@ static void aie2_hwctx_syncobj_destroy(struct amdxdna_hwctx *hwctx)
 
 static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 {
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev;
 	int start, end, first, last;
 	u32 width = 1, entries = 0;
-	struct amdxdna_dev *xdna;
 	int i;
 
 	if (!hwctx->num_tiles) {
@@ -449,7 +453,6 @@ static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 		return -EINVAL;
 	}
 
-	xdna = hwctx->client->xdna;
 	ndev = xdna->dev_handle;
 	if (unlikely(!ndev->metadata.core.row_count)) {
 		XDNA_WARN(xdna, "Core tile row count is zero");
@@ -635,16 +638,14 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 
 	xdna->dev_handle->hwctx_num--;
-	amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
 	aie2_fwctx_stop(hwctx);
-
-	XDNA_DBG(xdna, "%s total completed jobs %lld", hwctx->name, hwctx->completed);
 }
 
 void aie2_hwctx_free(struct amdxdna_hwctx *hwctx)
 {
 	int idx;
 
+	aie2_fwctx_free(hwctx);
 	destroy_workqueue(hwctx->priv->submit_wq);
 	aie2_hwctx_syncobj_destroy(hwctx);
 	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
@@ -656,6 +657,9 @@ void aie2_hwctx_free(struct amdxdna_hwctx *hwctx)
 		aie2_unregister_pdis(hwctx);
 #endif
 
+	XDNA_DBG(hwctx->client->xdna, "%s total completed jobs %lld",
+		 hwctx->name, hwctx->completed);
+	mutex_destroy(&hwctx->priv->io_lock);
 	kfree(hwctx->col_list);
 	kfree(hwctx->priv);
 	kfree(hwctx->cus);
@@ -1001,6 +1005,7 @@ retry:
 	for (i = 0; i < job->bo_cnt; i++)
 		dma_resv_add_fence(job->bos[i].obj->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 	job->seq = hwctx->submitted++;
+	hwctx->priv->pending[get_job_idx(job->seq)] = job;
 	kref_get(&job->refcnt);
 	drm_sched_entity_push_job(&job->base);
 

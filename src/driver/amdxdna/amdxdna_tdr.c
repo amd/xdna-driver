@@ -10,8 +10,8 @@ uint timeout_in_sec = 2;
 module_param(timeout_in_sec, uint, 0644);
 MODULE_PARM_DESC(timeout_in_sec, "Seconds to timeout and recovery, default 2; 0 - No TDR");
 
-int tdr_dump_ctx = 0;
-module_param(tdr_dump_ctx, int, 0644);
+bool tdr_dump_ctx;
+module_param(tdr_dump_ctx, bool, 0644);
 MODULE_PARM_DESC(tdr_dump_ctx, "Instead of resetting, just dump the ctx info for debugging");
 
 #define TDR_TIMEOUT_JIFF msecs_to_jiffies(timeout_in_sec * 1000)
