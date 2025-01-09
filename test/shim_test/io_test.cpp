@@ -17,6 +17,7 @@ using arg_type = const std::vector<uint64_t>;
 namespace {
 
 io_test_parameter io_test_parameters;
+const char *elf_xclbin = "design.xclbin";
 
 void
 io_test_parameter_init(int perf, int type, int wait, bool debug = false)
@@ -27,11 +28,16 @@ io_test_parameter_init(int perf, int type, int wait, bool debug = false)
   io_test_parameters.debug = debug;
 }
 
-io_test_bo_set
-alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
+std::unique_ptr<io_test_bo_set_base>
+alloc_and_init_bo_set(device* dev, bool is_elf)
 {
-  io_test_bo_set boset{dev, local_data_path};
-  auto& bos = boset.get_bos();
+  std::unique_ptr<io_test_bo_set_base> base;
+  if (is_elf)
+    base = std::make_unique<elf_io_test_bo_set>(dev, elf_xclbin);
+  else
+    base = std::make_unique<io_test_bo_set>(dev);
+
+  auto& bos = base->get_bos();
 
   if (io_test_parameters.type == IO_TEST_NOOP_RUN) {
     // Preparing no-op kernel's special control code
@@ -40,6 +46,9 @@ alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
     bos[IO_TEST_BO_INSTRUCTION].tbo = tbo;
     std::memset(tbo->map(), 0, sz);
   } else if (io_test_parameters.type == IO_TEST_BAD_RUN) {
+    if (is_elf)
+      throw std::runtime_error("ELF flow can't support bad run");
+
     auto instruction_p = bos[IO_TEST_BO_INSTRUCTION].tbo->map();
     auto sz = bos[IO_TEST_BO_INSTRUCTION].tbo->size();
     std::memset(instruction_p, 0, sz);
@@ -57,7 +66,7 @@ alloc_and_init_bo_set(device* dev, const std::string& local_data_path)
     }
   }
 
-  return boset;
+  return base;
 }
 
 void
@@ -153,33 +162,21 @@ io_test_cmd_submit_and_wait_thruput(
   }
 }
 
-std::string find_first_match_ip_name(device* dev, const std::string& pattern)
-{
-  for (auto& ip : get_xclbin_ip_name2index(dev)) {
-    const std::string& name = ip.first;
-    if (std::regex_match(name, std::regex(pattern))) {
-      return name;
-    }
-  }
-  return ""; // Return an empty string if no match is found
-}
-
 void
-io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, int cmds_per_list)
+io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, int cmds_per_list, bool is_elf)
 {
   // Allocate set of BOs for command submission based on num_cmdlist and cmds_per_list
   // Intentionally this is done before context creation to make sure BO and context
   // are totally decoupled.
-  auto wrk = get_xclbin_workspace(dev);
-  auto local_data_path = wrk + "/data/";
-  std::vector<io_test_bo_set> bo_set;
+  std::vector< std::unique_ptr<io_test_bo_set_base> > bo_set;
   for (int i = 0; i < num_cmdlist * cmds_per_list; i++)
-    bo_set.push_back(std::move(alloc_and_init_bo_set(dev, local_data_path)));
+    bo_set.push_back(std::move(alloc_and_init_bo_set(dev, is_elf)));
 
   // Creating HW context for cmd submission
-  hw_ctx hwctx{dev};
+  const char *xclbin = is_elf ? elf_xclbin : nullptr;
+  hw_ctx hwctx{dev, xclbin};
   auto hwq = hwctx.get()->get_hw_queue();
-  auto ip_name = find_first_match_ip_name(dev, "DPU.*");
+  auto ip_name = get_kernel_name(dev, xclbin);
   if (ip_name.empty())
     throw std::runtime_error("Cannot find any kernel name matched DPU.*");
   auto cu_idx = hwctx.get()->open_cu_context(ip_name);
@@ -187,8 +184,8 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
 
   // Finalize cmd before submission
   for (auto& boset : bo_set) {
-    boset.init_cmd(cu_idx, io_test_parameters.debug);
-    boset.sync_before_run();
+    boset->init_cmd(cu_idx, io_test_parameters.debug);
+    boset->sync_before_run();
   }
 
   // Creating list of commands to be submitted
@@ -196,7 +193,7 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
   if (cmds_per_list == 1) {
     // Single command per list, just send the command BO itself
     for (auto& boset : bo_set) {
-      auto& cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo;
+      auto& cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo;
       auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
       cmdlist_bos.push_back( {std::move(cbo), cmdpkt} );
     }
@@ -204,7 +201,7 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
     // Multiple commands per list, create and send the chained command
     std::vector<bo*> tmp_cmd_bos;
     for (auto& boset : bo_set) {
-      tmp_cmd_bos.push_back(boset.get_bos()[IO_TEST_BO_CMD].tbo.get());
+      tmp_cmd_bos.push_back(boset->get_bos()[IO_TEST_BO_CMD].tbo.get());
       if ((tmp_cmd_bos.size() % cmds_per_list) == 0) {
         auto cbo = std::make_unique<bo>(dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF);
         auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
@@ -226,8 +223,8 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
   // Verify result
   if (io_test_parameters.type != IO_TEST_NOOP_RUN) {
     for (auto& boset : bo_set) {
-      boset.sync_after_run();
-      boset.verify_result();
+      boset->sync_after_run();
+      boset->verify_result();
     }
   }
 
@@ -251,7 +248,7 @@ TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
 
   io_test_parameter_init(IO_TEST_NO_PERF, run_type, IO_TEST_IOCTL_WAIT);
-  io_test(id, sdev.get(), 1, 1, arg[1]);
+  io_test(id, sdev.get(), 1, 1, arg[1], false);
 }
 
 void
@@ -262,7 +259,7 @@ TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
   unsigned int total = static_cast<unsigned int>(arg[2]);
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 1, 1);
+  io_test(id, sdev.get(), total, 1, 1, false);
 }
 
 void
@@ -273,7 +270,7 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& a
   unsigned int total = static_cast<unsigned int>(arg[2]);
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 8, 1);
+  io_test(id, sdev.get(), total, 8, 1, false);
 }
 
 void
@@ -289,7 +286,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device> sdev, arg_ty
     if (cmds_per_list > max_cmd_per_list)
       cmds_per_list = max_cmd_per_list;
     int total_hwq_submit = total / cmds_per_list;
-    io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list);
+    io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list, false);
   }
 }
 
@@ -309,20 +306,27 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device> sdev, arg
       cmds_per_list = max_cmd_per_list;
     int num_cmdlist = num_bo_set / cmds_per_list;
     int total_hwq_submit = total_commands / cmds_per_list;
-    io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list);
+    io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list, false);
   }
 }
 
 void
 TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
-  auto wrk = get_xclbin_workspace(sdev.get());
-  io_test_bo_set boset{sdev.get(), wrk + "/data/"};
+  io_test_bo_set boset{sdev.get()};
 
   // Use same BO for both input and output
   boset.get_bos()[IO_TEST_BO_OUTPUT].tbo = boset.get_bos()[IO_TEST_BO_INPUT].tbo;
   auto ibo = boset.get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
   std::memset(ibo->map(), 0, ibo->size());
-  boset.run(true);
+  boset.run_no_check_result();
 }
 
+void
+TEST_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  unsigned int run_type = static_cast<unsigned int>(arg[0]);
+
+  io_test_parameter_init(IO_TEST_NO_PERF, run_type, IO_TEST_IOCTL_WAIT);
+  io_test(id, sdev.get(), 1, 1, arg[1], true);
+}

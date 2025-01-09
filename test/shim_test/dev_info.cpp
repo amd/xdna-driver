@@ -26,6 +26,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_7:IPUV1CNN",         {7} },
     },
     .workspace = "npu1_workspace",
+    .data = "data",
   },
   {
     .name = "1x4.xclbin",
@@ -42,6 +43,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_7:IPUV1CNN",         {7} },
     },
     .workspace = "npu2_workspace",
+    .data = "data",
   },
   {
     .name = "vadd.xclbin",
@@ -51,6 +53,7 @@ xclbin_info xclbin_infos[] = {
       { "dpu:vadd", {0} },
     },
     .workspace = "npu3_workspace",
+    .data = "",
   },
   {
     .name = "vadd.xclbin",
@@ -60,6 +63,7 @@ xclbin_info xclbin_infos[] = {
       { "dpu:vadd", {0} },
     },
     .workspace = "npu3_workspace",
+    .data = "",
   },
   {
     .name = "move_memtiles.xclbin",
@@ -69,6 +73,7 @@ xclbin_info xclbin_infos[] = {
       { "dpu:vadd", {0} },
     },
     .workspace = "npu3_workspace",
+    .data = "",
   },
   {
     .name = "move_memtiles.xclbin",
@@ -78,6 +83,7 @@ xclbin_info xclbin_infos[] = {
       { "dpu:vadd", {0} },
     },
     .workspace = "npu3_workspace",
+    .data = "",
   },
   {
     .name = "ddr_memtile.xclbin",
@@ -87,6 +93,7 @@ xclbin_info xclbin_infos[] = {
       { "dpu:vadd", {0} },
     },
     .workspace = "npu3_workspace",
+    .data = "",
   },
   {
     .name = "remote_barrier.xclbin",
@@ -96,6 +103,7 @@ xclbin_info xclbin_infos[] = {
       { "dpu:vadd", {0} },
     },
     .workspace = "npu3_workspace",
+    .data = "",
   },
   {
     .name = "1x4.xclbin",
@@ -118,6 +126,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_13:IPUV1CNN",         {13} },
     },
     .workspace = "npu4_workspace",
+    .data = "data",
   },
   {
     .name = "1x4.xclbin",
@@ -140,6 +149,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_13:IPUV1CNN",        {13} },
     },
     .workspace = "npu5_workspace",
+    .data = "data",
   },
   {
     .name = "1x4.xclbin",
@@ -162,6 +172,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_13:IPUV1CNN",         {13} },
     },
     .workspace = "npu6_workspace",
+    .data = "data",
   },
   {
     .name = "design.xclbin",
@@ -171,6 +182,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU:IPUV1CNN", {0} },
     },
     .workspace = "local_shim_test_data/elf_txn_no_cp_npu1",
+    .data = "",
   },
   {
     .name = "design.xclbin",
@@ -180,6 +192,7 @@ xclbin_info xclbin_infos[] = {
       { "DPU:IPUV1CNN", {0} },
     },
     .workspace = "local_shim_test_data/elf_txn_no_cp_npu2",
+    .data = "",
   },
 };
 
@@ -206,9 +219,22 @@ get_xclbin_name(device* dev)
 }
 
 std::string
+get_kernel_name(device* dev, const char *xclbin)
+{
+  return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->first;
+}
+
+static std::string
 get_xclbin_workspace(device* dev, const char *xclbin_name)
 {
-  return (cur_path + "/../" + get_xclbin_info(dev, xclbin_name).workspace);
+  return cur_path + "/../" + get_xclbin_info(dev, xclbin_name).workspace + "/";
+}
+
+std::string
+get_xclbin_data(device* dev, const char *xclbin_name)
+{
+  auto wrk = get_xclbin_workspace(dev, xclbin_name);
+  return wrk + get_xclbin_info(dev, xclbin_name).data + "/";
 }
 
 std::string
@@ -219,8 +245,8 @@ get_xclbin_path(device* dev, const char *xclbin_name)
 
   auto wrk = get_xclbin_workspace(dev, xclbin_name);
   if (!xclbin_name)
-    return wrk + "/" + get_xclbin_name(dev);
-  return wrk + "/" + std::string(xclbin_name);
+    return wrk + get_xclbin_name(dev);
+  return wrk + std::string(xclbin_name);
 }
 
 const std::map<const char*, cuidx_type>&
