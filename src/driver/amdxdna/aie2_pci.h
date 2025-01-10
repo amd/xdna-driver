@@ -191,9 +191,9 @@ struct amdxdna_hwctx_priv {
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 
 	struct mutex			io_lock; /* protect seq and cmd order */
-	struct wait_queue_head		job_free_wq;
+#ifdef AMDXDNA_DEVEL
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
-	u32				num_pending;
+#endif
 	struct semaphore		job_sem;
 
 	struct workqueue_struct		*submit_wq;

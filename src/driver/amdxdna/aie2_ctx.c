@@ -938,16 +938,14 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	ndev = xdna->dev_handle;
 	down_read(&ndev->recover_lock);
 	if (!FIELD_GET(HWCTX_STATE_READY, hwctx->status)) {
-		up_read(&ndev->recover_lock);
 		XDNA_ERR(xdna, "HW Context is not ready");
 		ret = -EINVAL;
-		goto up_sem;
+		goto unlock_recover;
 	}
 
 	if (FIELD_GET(HWCTX_STATE_DEAD, hwctx->status)) {
-		up_read(&ndev->recover_lock);
 		ret = -ENODEV;
-		goto up_sem;
+		goto unlock_recover;
 	}
 
 	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, hwctx);
@@ -1025,6 +1023,8 @@ cleanup_job:
 	drm_sched_job_cleanup(&job->base);
 free_chain:
 	dma_fence_chain_free(chain);
+unlock_recover:
+	up_read(&ndev->recover_lock);
 up_sem:
 	up(&hwctx->priv->job_sem);
 	job->job_done = true;
