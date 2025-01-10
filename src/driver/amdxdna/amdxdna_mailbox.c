@@ -710,6 +710,7 @@ xdna_mailbox_get_record(struct mailbox *mb, int mb_irq,
 		record_found = 1;
 		break;
 	}
+	spin_unlock(&mb->mbox_lock);
 
 	if (record_found) {
 		record->type = type;
@@ -718,16 +719,17 @@ xdna_mailbox_get_record(struct mailbox *mb, int mb_irq,
 
 	record = kzalloc(sizeof(*record), GFP_KERNEL);
 	if (!record)
-		goto out;
+		return record;
+
+	spin_lock(&mb->mbox_lock);
 	list_add_tail(&record->re_entry, &mb->res_records);
+	spin_unlock(&mb->mbox_lock);
 	record->re_irq = mb_irq;
 
 found:
 	record->type = type;
 	memcpy(&record->re_x2i, x2i, sizeof(*x2i));
 	memcpy(&record->re_i2x, i2x, sizeof(*i2x));
-out:
-	spin_unlock(&mb->mbox_lock);
 	return record;
 }
 
