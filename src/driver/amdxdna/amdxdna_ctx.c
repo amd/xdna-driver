@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/version.h>
@@ -56,6 +56,18 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	return &fence->base;
 }
 
+#define WAIT_JOB_COND \
+	(atomic_read(&hwctx->job_submit_cnt) == atomic_read(&hwctx->job_free_cnt))
+void amdxdna_hwctx_wait_jobs(struct amdxdna_hwctx *hwctx, long timeout)
+{
+	if (timeout == MAX_SCHEDULE_TIMEOUT) {
+		wait_event(hwctx->status_wq, WAIT_JOB_COND);
+		return;
+	}
+
+	wait_event_timeout(hwctx->status_wq, WAIT_JOB_COND, timeout);
+}
+
 void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -63,10 +75,10 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_lock(&client->hwctx_lock);
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
 		xdna->dev_info->ops->hwctx_suspend(hwctx);
-	mutex_unlock(&client->hwctx_lock);
+	}
 }
 
 void amdxdna_hwctx_resume(struct amdxdna_client *client)
@@ -76,10 +88,8 @@ void amdxdna_hwctx_resume(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	mutex_lock(&client->hwctx_lock);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 		xdna->dev_info->ops->hwctx_resume(hwctx);
-	mutex_unlock(&client->hwctx_lock);
 }
 
 static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
@@ -89,17 +99,23 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 
 	synchronize_srcu(ss);
 
-	/* At this point, user is not able to submit new commands */
+	/*
+	 * At this point, user is not able to submit new commands.
+	 */
+	amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->hwctx_fini(hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
+	amdxdna_hwctx_wait_jobs(hwctx, MAX_SCHEDULE_TIMEOUT);
+	if (xdna->dev_info->ops->hwctx_free)
+		xdna->dev_info->ops->hwctx_free(hwctx);
 	kfree(hwctx->name);
 	kfree(hwctx);
 }
 
 /*
- * This should be called in close() and remove(). DO NOT call in other syscalls.
+ * This should be called in flush() and remove(). DO NOT call in other syscalls.
  * This guarantee that when hwctx and resources will be released, if user
  * doesn't call amdxdna_drm_destroy_hwctx_ioctl.
  */
@@ -108,16 +124,12 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 	struct amdxdna_hwctx *hwctx;
 	unsigned long hwctx_id;
 
-	mutex_lock(&client->hwctx_lock);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		XDNA_DBG(client->xdna, "PID %d close HW context %d",
 			 client->pid, hwctx->id);
 		xa_erase(&client->hwctx_xa, hwctx->id);
-		mutex_unlock(&client->hwctx_lock);
 		amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
-		mutex_lock(&client->hwctx_lock);
 	}
-	mutex_unlock(&client->hwctx_lock);
 }
 
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
@@ -147,7 +159,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 
 	hwctx->client = client;
-	hwctx->fw_ctx_id = -1;
 	hwctx->tdr_last_completed = -1;
 	hwctx->num_tiles = args->num_tiles;
 	hwctx->mem_size = args->mem_size;
@@ -182,6 +193,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	atomic_set(&hwctx->job_submit_cnt, 0);
 	atomic_set(&hwctx->job_free_cnt, 0);
+	init_waitqueue_head(&hwctx->status_wq);
 
 	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
@@ -358,6 +370,7 @@ void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 	amdxdna_gem_put_obj(job->cmd_bo);
 
 	atomic_inc(&job->hwctx->job_free_cnt);
+	wake_up(&job->hwctx->status_wq);
 }
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
@@ -475,12 +488,6 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	if (!hwctx) {
 		XDNA_ERR(xdna, "PID %d failed to get hwctx %d",
 			 client->pid, hwctx_hdl);
-		ret = -EINVAL;
-		goto unlock_srcu;
-	}
-
-	if (hwctx->status == HWCTX_STATE_INIT) {
-		XDNA_ERR(xdna, "HW Context is not ready");
 		ret = -EINVAL;
 		goto unlock_srcu;
 	}

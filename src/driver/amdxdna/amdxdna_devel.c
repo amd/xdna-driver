@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/version.h>
@@ -190,3 +190,10 @@ void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 {
 }
 #endif /* AMDXDNA_SHMEM */
+
+void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
+{
+	struct drm_printer p = drm_dbg_printer(&xdna->ddev, DRM_UT_DRIVER, NULL);
+
+	drm_mm_print(&xdna->ddev.vma_offset_manager->vm_addr_space_mm, &p);
+}

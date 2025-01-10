@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/kthread.h>
@@ -255,15 +255,13 @@ int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx)
+int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx,
+			struct xdna_mailbox_chann_info *info)
 {
 	DECLARE_AIE2_MSG(create_ctx, MSG_OP_CREATE_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
-	enum xdna_mailbox_channel_type type;
-	struct xdna_mailbox_chann_res x2i;
-	struct xdna_mailbox_chann_res i2x;
 	struct cq_pair *cq_pair;
-	u32 intr_reg, priority;
+	u32 priority;
 	int ret;
 
 	ret = map_app_priority_to_fw(hwctx->qos.priority, &priority);
@@ -283,57 +281,33 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	if (ret)
 		return ret;
 
-	hwctx->fw_ctx_id = resp.context_id;
-	WARN_ONCE(hwctx->fw_ctx_id == -1, "Unexpected context id");
+	hwctx->priv->id = resp.context_id;
+	WARN_ONCE(hwctx->priv->id == -1, "Unexpected context id");
 
 	if (ndev->force_preempt_enabled) {
 		ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FORCE_PREEMPTION,
-				   &hwctx->fw_ctx_id);
+				   &hwctx->priv->id);
 		if (ret)
 			XDNA_WARN(ndev->xdna, "Failed to config force preemption");
 	}
 
+	info->msix_id = resp.msix_id;
 	cq_pair = &resp.cq_pair[0];
-	x2i.mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->x2i_q.head_addr);
-	x2i.mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->x2i_q.tail_addr);
-	x2i.rb_start_addr   = AIE2_SRAM_OFF(ndev, cq_pair->x2i_q.buf_addr);
-	x2i.rb_size	    = cq_pair->x2i_q.buf_size;
+	info->x2i.mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->x2i_q.head_addr);
+	info->x2i.mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->x2i_q.tail_addr);
+	info->x2i.rb_start_addr   = AIE2_SRAM_OFF(ndev, cq_pair->x2i_q.buf_addr);
+	info->x2i.rb_size	    = cq_pair->x2i_q.buf_size;
 
-	i2x.mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->i2x_q.head_addr);
-	i2x.mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->i2x_q.tail_addr);
-	i2x.rb_start_addr   = AIE2_SRAM_OFF(ndev, cq_pair->i2x_q.buf_addr);
-	i2x.rb_size	    = cq_pair->i2x_q.buf_size;
+	info->i2x.mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->i2x_q.head_addr);
+	info->i2x.mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, cq_pair->i2x_q.tail_addr);
+	info->i2x.rb_start_addr   = AIE2_SRAM_OFF(ndev, cq_pair->i2x_q.buf_addr);
+	info->i2x.rb_size	  = cq_pair->i2x_q.buf_size;
 
-	ret = pci_irq_vector(to_pci_dev(xdna->ddev.dev), resp.msix_id);
-	if (ret == -EINVAL) {
-		XDNA_ERR(xdna, "not able to create channel");
-		goto out_destroy_context;
-	}
-
-	intr_reg = i2x.mb_head_ptr_reg + 4;
-	if (aie2_pm_is_turbo(ndev))
-		type = MB_CHANNEL_USER_POLL;
-	else
-		type = MB_CHANNEL_USER_NORMAL;
-	hwctx->priv->mbox_chann = xdna_mailbox_create_channel(ndev->mbox, &x2i, &i2x,
-							      intr_reg, ret, type);
-	if (!hwctx->priv->mbox_chann) {
-		XDNA_ERR(xdna, "not able to create channel");
-		ret = -EINVAL;
-		goto out_destroy_context;
-	}
-
-	trace_amdxdna_debug_point(hwctx->name, ret, "channel created");
-	XDNA_DBG(xdna, "%s mailbox channel irq: %d, msix_id: %d",
-		 hwctx->name, ret, resp.msix_id);
-	XDNA_DBG(xdna, "%s created fw ctx %d pasid %d", hwctx->name,
-		 hwctx->fw_ctx_id, hwctx->client->pasid);
+	aie2_calc_intr_reg(info);
+	XDNA_DBG(xdna, "%s created fw ctx %d pasid %d priority %d", hwctx->name,
+		 hwctx->priv->id, hwctx->client->pasid, priority);
 
 	return 0;
-
-out_destroy_context:
-	aie2_destroy_context(ndev, hwctx);
-	return ret;
 }
 
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx)
@@ -342,22 +316,17 @@ int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwc
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	if (hwctx->fw_ctx_id == -1)
+	if (hwctx->priv->id == -1)
 		return 0;
 
-	xdna_mailbox_stop_channel(hwctx->priv->mbox_chann);
-
-	req.context_id = hwctx->fw_ctx_id;
+	req.context_id = hwctx->priv->id;
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		XDNA_WARN(xdna, "%s destroy context failed, ret %d", hwctx->name, ret);
 
-	xdna_mailbox_destroy_channel(hwctx->priv->mbox_chann);
 	trace_amdxdna_debug_point(hwctx->name, 0, "channel destroyed");
-	XDNA_DBG(xdna, "%s destroyed fw ctx %d", hwctx->name,
-		 hwctx->fw_ctx_id);
-	hwctx->priv->mbox_chann = NULL;
-	hwctx->fw_ctx_id = -1;
+	XDNA_DBG(xdna, "%s destroyed fw ctx %d", hwctx->name, hwctx->priv->id);
+	hwctx->priv->id = -1;
 
 	return ret;
 }
@@ -1067,8 +1036,8 @@ int aie2_unregister_pdis(struct amdxdna_hwctx *hwctx)
 
 int aie2_legacy_config_cu(struct amdxdna_hwctx *hwctx)
 {
-	DECLARE_AIE2_MSG(legacy_config_cu, MSG_OP_LEGACY_CONFIG_CU);
 	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	DECLARE_AIE2_MSG(legacy_config_cu, MSG_OP_LEGACY_CONFIG_CU);
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret, i;
 

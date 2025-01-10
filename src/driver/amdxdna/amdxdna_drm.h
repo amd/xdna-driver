@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_DRM_H_
@@ -57,6 +57,7 @@ struct amdxdna_dev_ops {
 	/* Below device ops are called by IOCTL */
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
+	void (*hwctx_free)(struct amdxdna_hwctx *hwctx);
 	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 	void (*hwctx_suspend)(struct amdxdna_hwctx *hwctx);
@@ -123,7 +124,7 @@ struct amdxdna_dev {
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
-	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
+	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
 };
 
@@ -140,7 +141,6 @@ struct amdxdna_stats {
  *
  * @node: entry node in clients list
  * @pid: PID of current client
- * @hwctx_lock: HW context lock for protect IDR
  * @hwctx_srcu: Per client SRCU for synchronizing hwctx destroy with other ioctls.
  * @hwctx_xa: HW context xarray
  * @xdna: XDNA device pointer
@@ -154,9 +154,7 @@ struct amdxdna_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
-	/* To protect hwctx stop/restart/destroy etc. */
-	struct mutex			hwctx_lock;
-	/* To avoid deadlock, do NOT wait this srcu when hwctx_lock is hold */
+	/* To avoid deadlock, do NOT wait this srcu when dev_lock is hold */
 	struct srcu_struct		hwctx_srcu;
 	struct xarray			hwctx_xa;
 	u32				next_hwctxid;

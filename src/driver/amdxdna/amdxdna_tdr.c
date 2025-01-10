@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
  */
 
 #include "amdxdna_drm.h"
@@ -10,8 +10,8 @@ uint timeout_in_sec = 2;
 module_param(timeout_in_sec, uint, 0644);
 MODULE_PARM_DESC(timeout_in_sec, "Seconds to timeout and recovery, default 2; 0 - No TDR");
 
-int tdr_dump_ctx = 0;
-module_param(tdr_dump_ctx, int, 0644);
+bool tdr_dump_ctx;
+module_param(tdr_dump_ctx, bool, 0644);
 MODULE_PARM_DESC(tdr_dump_ctx, "Instead of resetting, just dump the ctx info for debugging");
 
 #define TDR_TIMEOUT_JIFF msecs_to_jiffies(timeout_in_sec * 1000)
@@ -26,14 +26,12 @@ static void amdxdna_tdr_work(struct work_struct *work)
 	bool active = false;
 	int idle_cnt = 0;
 	int ctx_cnt = 0;
-	int idx;
 
 	xdna = tdr_to_xdna_dev(tdr);
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
-		idx = srcu_read_lock(&client->hwctx_srcu);
 		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-			if (hwctx->status != HWCTX_STATE_READY)
+			if (!FIELD_GET(HWCTX_STATE_READY, hwctx->status))
 				continue;
 
 			u64 completed = hwctx->completed; /* To avoid race */
@@ -52,12 +50,8 @@ static void amdxdna_tdr_work(struct work_struct *work)
 				hwctx->tdr_last_completed = completed;
 				active = true;
 				break;
-			} else {
-				// Mark ready ctx to be dead so to ignore it next time
-				hwctx->status = HWCTX_STATE_DEAD;
 			}
 		}
-		srcu_read_unlock(&client->hwctx_srcu, idx);
 		if (active)
 			break;
 	}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/module.h>
@@ -12,6 +12,9 @@
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sysfs.h"
+#ifdef AMDXDNA_DEVEL
+#include "amdxdna_devel.h"
+#endif
 
 int autosuspend_ms = -1;
 module_param(autosuspend_ms, int, 0644);
@@ -155,13 +158,16 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	struct amdxdna_client *client;
 
 	destroy_workqueue(xdna->notifier_wq);
+	amdxdna_tdr_stop(&xdna->tdr);
+	amdxdna_sysfs_fini(xdna);
 
 	pm_runtime_get_noresume(dev);
 	pm_runtime_forbid(dev);
 
+#ifdef AMDXDNA_DEVEL
+	amdxdna_gem_dump_mm(xdna);
+#endif
 	drm_dev_unplug(&xdna->ddev);
-	amdxdna_sysfs_fini(xdna);
-	amdxdna_tdr_stop(&xdna->tdr);
 
 	mutex_lock(&xdna->dev_lock);
 	client = list_first_entry_or_null(&xdna->client_list,

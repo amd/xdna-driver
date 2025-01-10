@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/errno.h>
@@ -104,15 +104,15 @@ static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 
-	XDNA_DBG(xdna, "i2x tail    0x%x", ndev->mgmt_i2x.mb_tail_ptr_reg);
-	XDNA_DBG(xdna, "i2x head    0x%x", ndev->mgmt_i2x.mb_head_ptr_reg);
-	XDNA_DBG(xdna, "i2x ringbuf 0x%x", ndev->mgmt_i2x.rb_start_addr);
-	XDNA_DBG(xdna, "i2x rsize   0x%x", ndev->mgmt_i2x.rb_size);
-	XDNA_DBG(xdna, "x2i tail    0x%x", ndev->mgmt_x2i.mb_tail_ptr_reg);
-	XDNA_DBG(xdna, "x2i head    0x%x", ndev->mgmt_x2i.mb_head_ptr_reg);
-	XDNA_DBG(xdna, "x2i ringbuf 0x%x", ndev->mgmt_x2i.rb_start_addr);
-	XDNA_DBG(xdna, "x2i rsize   0x%x", ndev->mgmt_x2i.rb_size);
-	XDNA_DBG(xdna, "x2i chann index 0x%x", ndev->mgmt_chan_idx);
+	XDNA_DBG(xdna, "i2x tail    0x%x", ndev->mgmt_info.i2x.mb_tail_ptr_reg);
+	XDNA_DBG(xdna, "i2x head    0x%x", ndev->mgmt_info.i2x.mb_head_ptr_reg);
+	XDNA_DBG(xdna, "i2x ringbuf 0x%x", ndev->mgmt_info.i2x.rb_start_addr);
+	XDNA_DBG(xdna, "i2x rsize   0x%x", ndev->mgmt_info.i2x.rb_size);
+	XDNA_DBG(xdna, "x2i tail    0x%x", ndev->mgmt_info.x2i.mb_tail_ptr_reg);
+	XDNA_DBG(xdna, "x2i head    0x%x", ndev->mgmt_info.x2i.mb_head_ptr_reg);
+	XDNA_DBG(xdna, "x2i ringbuf 0x%x", ndev->mgmt_info.x2i.rb_start_addr);
+	XDNA_DBG(xdna, "x2i rsize   0x%x", ndev->mgmt_info.x2i.rb_size);
+	XDNA_DBG(xdna, "x2i chann index 0x%x", ndev->mgmt_info.msix_id);
 	if (!ndev->mgmt_prot_major)
 		return;
 
@@ -148,8 +148,8 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	for (i = 0; i < sizeof(info_regs) / sizeof(u32); i++)
 		reg[i] = readl(ndev->sram_base + off + i * sizeof(u32));
 
-	i2x = &ndev->mgmt_i2x;
-	x2i = &ndev->mgmt_x2i;
+	i2x = &ndev->mgmt_info.i2x;
+	x2i = &ndev->mgmt_info.x2i;
 
 	i2x->mb_head_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_head);
 	i2x->mb_tail_ptr_reg = AIE2_MBOX_OFF(ndev, info_regs.i2x_tail);
@@ -162,17 +162,18 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	x2i->rb_size         = info_regs.x2i_buf_sz;
 
 	if (info_regs.magic != MGMT_MBOX_MAGIC) {
-		ndev->mgmt_chan_idx = CHANN_INDEX(ndev, x2i->rb_start_addr);
+		ndev->mgmt_info.msix_id = CHANN_INDEX(ndev, x2i->rb_start_addr);
 		goto done;
 	}
 
-	ndev->mgmt_chan_idx  = info_regs.msi_id;
+	ndev->mgmt_info.msix_id  = info_regs.msi_id;
 	ndev->mgmt_prot_major = info_regs.prot_major;
 	ndev->mgmt_prot_minor = info_regs.prot_minor;
 	if (aie2_check_protocol(ndev, ndev->mgmt_prot_major, ndev->mgmt_prot_minor))
 		ret = -EINVAL;
 
 done:
+	aie2_calc_intr_reg(&ndev->mgmt_info);
 	aie2_dump_chann_info_debug(ndev);
 
 	/* Must clear address at FW_ALIVE_OFF */
@@ -334,8 +335,8 @@ static int aie2_xrs_set_dft_dpm_level(struct drm_device *ddev, u32 dpm_level)
 }
 
 static struct xrs_action_ops aie2_xrs_actions = {
-	.load_hwctx = aie2_xrs_load_hwctx,
-	.unload_hwctx = aie2_xrs_unload_hwctx,
+	.load_hwctx = aie2_xrs_load_fwctx,
+	.unload_hwctx = aie2_xrs_unload_fwctx,
 	.set_dft_dpm_level = aie2_xrs_set_dft_dpm_level,
 };
 
@@ -370,8 +371,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct xdna_mailbox_res mbox_res;
-	u32 xdna_mailbox_intr_reg;
-	int mgmt_mb_irq, ret;
+	int ret;
 
 	if (ndev->dev_status >= AIE2_DEV_START) {
 		XDNA_INFO(xdna, "device is already started");
@@ -415,19 +415,8 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto stop_psp;
 	}
 
-	mgmt_mb_irq = pci_irq_vector(pdev, ndev->mgmt_chan_idx);
-	if (mgmt_mb_irq < 0) {
-		ret = mgmt_mb_irq;
-		XDNA_ERR(xdna, "failed to alloc irq vector, ret %d", ret);
-		goto destroy_mbox;
-	}
-
-	xdna_mailbox_intr_reg = ndev->mgmt_i2x.mb_head_ptr_reg + 4;
-	ndev->mgmt_chann = xdna_mailbox_create_channel(ndev->mbox,
-						       &ndev->mgmt_x2i,
-						       &ndev->mgmt_i2x,
-						       xdna_mailbox_intr_reg,
-						       mgmt_mb_irq, MB_CHANNEL_MGMT);
+	ndev->mgmt_chann = xdna_mailbox_create_channel(ndev->mbox, &ndev->mgmt_info,
+						       MB_CHANNEL_MGMT);
 	if (!ndev->mgmt_chann) {
 		XDNA_ERR(xdna, "failed to create management mailbox channel");
 		ret = -EINVAL;
@@ -485,6 +474,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
+	init_rwsem(&ndev->recover_lock);
 
 	ret = request_firmware(&fw, ndev->priv->fw_path, &pdev->dev);
 	if (ret) {
@@ -659,20 +649,27 @@ skip_pasid:
 
 static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_client *client;
 
-	mutex_lock(&xdna->dev_lock);
 	if (dump_only) {
+		mutex_lock(&xdna->dev_lock);
 		list_for_each_entry(client, &xdna->client_list, node)
 			aie2_dump_ctx(client);
-	} else {
-		list_for_each_entry(client, &xdna->client_list, node)
-			aie2_stop_ctx(client);
-		/* The AIE will reset after all hardware contexts are destroyed */
-		list_for_each_entry(client, &xdna->client_list, node)
-			aie2_restart_ctx(client);
+		mutex_unlock(&xdna->dev_lock);
+		return;
 	}
+
+	down_write(&ndev->recover_lock);
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(client, &xdna->client_list, node)
+		aie2_stop_ctx(client);
+
+	/* The AIE will reset after all hardware contexts are destroyed */
+	list_for_each_entry(client, &xdna->client_list, node)
+		aie2_restart_ctx(client);
 	mutex_unlock(&xdna->dev_lock);
+	up_write(&ndev->recover_lock);
 }
 
 static int aie2_get_aie_status(struct amdxdna_client *client,
@@ -969,7 +966,7 @@ free_buf:
 }
 
 static int aie2_get_force_preempt_state(struct amdxdna_client *client,
-										struct amdxdna_drm_get_info *args)
+					struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_get_force_preempt_state force = {};
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1068,7 +1065,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 }
 
 static int aie2_set_force_preempt_state(struct amdxdna_client *client,
-										struct amdxdna_drm_set_state *args)
+					struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_set_force_preempt_state force;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1134,6 +1131,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.set_aie_state		= aie2_set_state,
 	.hwctx_init		= aie2_hwctx_init,
 	.hwctx_fini		= aie2_hwctx_fini,
+	.hwctx_free		= aie2_hwctx_free,
 	.hwctx_config		= aie2_hwctx_config,
 	.hwctx_suspend		= aie2_hwctx_suspend,
 	.hwctx_resume		= aie2_hwctx_resume,
