@@ -30,6 +30,11 @@ class io_test_bo_set_base
 {
 public:
   io_test_bo_set_base(device *dev, const std::string& xclbin_name);
+  virtual ~io_test_bo_set_base()
+  {
+    // Do nothing, but allow destructor of inherited class to be called when destruction
+    // happens through base
+  }
 
   void
   run_no_check_result();
