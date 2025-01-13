@@ -67,31 +67,14 @@ public:
 protected:
   const device&
   get_device();
+  uint32_t m_num_cols;
+  std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
 
   struct cu_info {
     std::string m_name;
     size_t m_func;
     std::vector<uint8_t> m_pdi;
   };
-
-  enum cert_log_flag {
-    debug_buffer = 0,
-    trace_buffer
-  };
-
-  struct cert_log_metadata {
-    #define CERT_MAGIC_NO 0x43455254 // "CERT"
-    uint32_t magic_no;
-    uint8_t major;
-    uint8_t minor;
-    uint8_t cert_log_flag;
-    uint8_t num_cols;       // how many valid cols, up to 8 for now
-    uint64_t col_paddr[8];  // device accessible address array for each valid col
-    uint32_t col_size[8];    // bo size for each valid col
-  };
-
-  void
-  set_metadata(int num_cols, size_t size, uint64_t bo_paddr, uint8_t flag);
 
   const std::vector<cu_info>&
   get_cu_info() const;
@@ -108,25 +91,15 @@ protected:
   void
   create_ctx_on_device();
 
-  void
-  init_log_buf();
-
-  void
-  fini_log_buf();
-
 private:
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
   amdxdna_qos_info m_qos = {};
   std::vector<cu_info> m_cu_info;
-  struct cert_log_metadata m_metadata;
   std::unique_ptr<hw_q> m_q;
   uint32_t m_ops_per_cycle;
-  uint32_t m_num_cols;
   uint32_t m_doorbell;
   uint32_t m_syncobj;
-  std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
-  void *m_log_buf;
 
   void
   delete_ctx_on_device();

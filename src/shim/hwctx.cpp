@@ -45,7 +45,6 @@ hw_ctx(const device& dev, const qos_type& qos, std::unique_ptr<hw_q> q, const xr
   : m_device(dev)
   , m_q(std::move(q))
   , m_doorbell(0)
-  , m_log_buf(nullptr)
   , m_syncobj(AMDXDNA_INVALID_FENCE_HANDLE)
 {
   shim_debug("Creating HW context...");
@@ -240,45 +239,6 @@ delete_ctx_on_device()
   struct amdxdna_drm_destroy_hwctx arg = {};
   arg.handle = m_handle;
   m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
-
-  fini_log_buf();
-}
-
-void
-hw_ctx::
-set_metadata(int num_cols, size_t size, uint64_t bo_paddr, uint8_t flag)
-{
-  m_metadata.magic_no = CERT_MAGIC_NO;
-  m_metadata.major = 0;
-  m_metadata.minor = 1;
-  m_metadata.cert_log_flag = flag;
-  m_metadata.num_cols = num_cols;
-  for (int i = 0; i < num_cols; i++) {
-    m_metadata.col_paddr[i] = bo_paddr + size * i + sizeof(m_metadata);
-    m_metadata.col_size[i] = size;
-  }
-}
-
-void
-hw_ctx::
-init_log_buf()
-{
-  size_t column_size = 1024;
-  auto log_buf_size = m_num_cols * column_size + sizeof(m_metadata);
-  m_log_bo = alloc_bo(nullptr, log_buf_size, XCL_BO_FLAGS_EXECBUF);
-  m_log_buf = m_log_bo->map(bo::map_type::write);
-  uint64_t bo_paddr = m_log_bo->get_properties().paddr;
-  set_metadata(m_num_cols, column_size, bo_paddr, 1);
-  std::memset(m_log_buf, 0, log_buf_size);
-  std::memcpy(m_log_buf, &m_metadata, sizeof(m_metadata));
-}
-
-void
-hw_ctx::
-fini_log_buf(void)
-{
-  if (m_log_bo)
-    m_log_bo->unmap(m_log_buf);
 }
 
 void
