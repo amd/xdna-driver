@@ -814,11 +814,12 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 	u32 mb_irq;
 	int ret;
 
-	mb_irq = pci_irq_vector(to_pci_dev(mb->dev), info->msix_id);
-	if (mb_irq < 0) {
-		pr_err("failed to alloc irq vector %d", mb_irq);
+	ret = pci_irq_vector(to_pci_dev(mb->dev), info->msix_id);
+	if (ret < 0) {
+		pr_err("failed to alloc irq vector %d", ret);
 		return NULL;
 	}
+	mb_irq = ret;
 
 #if defined(CONFIG_DEBUG_FS)
 	struct mailbox_res_record *record;
