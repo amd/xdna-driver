@@ -274,7 +274,7 @@ struct partition_info
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
-      output.push_back(new_entry);
+      output.push_back(std::move(new_entry));
     }
     return output;
   }
@@ -580,7 +580,7 @@ struct sensor_info
       sensor.status = std::string(reinterpret_cast<const char*>(drv_sensor.status));
       sensor.units = std::string(reinterpret_cast<const char*>(drv_sensor.units));
       sensor.unitm = drv_sensor.unitm;
-      sensors.push_back(sensor);
+      sensors.push_back(std::move(sensor));
     }
     return sensors;
   }
