@@ -224,7 +224,7 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
       ss.clear();
       shapes.push_back(int_val);
     }
-    output_shapes.push_back(shapes);
+    output_shapes.push_back(std::move(shapes));
 
     std::vector<unsigned> strides;
     for (int j = 0; j < 4; j++) {
@@ -234,7 +234,7 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
       ss.clear();
       strides.push_back(int_val);
     }
-    output_strides.push_back(strides);
+    output_strides.push_back(std::move(strides));
   }
 
   int ret = 0;
