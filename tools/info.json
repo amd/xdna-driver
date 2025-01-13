@@ -36,12 +36,9 @@
 			"pci_revision_id": "11",
 			"version": "1.0.4.180",
 			"fw_name": "npu.sbin"
-		},
-                {
-			"device": "npu3",
-			"version": "20250108-6b53eb8f",
-			"fw_name": "app.elf"
-                }
-
-	]
+		}
+	],
+	"aie4_firmwares" : {
+		"umq_version": "20250108-6b53eb8f"
+	}
 }
