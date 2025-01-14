@@ -127,13 +127,13 @@ void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx)
 		return;
 	}
 
+	drm_sched_entity_destroy(&hwctx->priv->entity);
 	aie2_release_resource(hwctx);
 	hwctx->status &= ~HWCTX_STATE_CONNECTED;
 }
 
 void aie2_fwctx_free(struct amdxdna_hwctx *hwctx)
 {
-	drm_sched_entity_destroy(&hwctx->priv->entity);
 	drm_sched_fini(&hwctx->priv->sched);
 }
 
@@ -186,6 +186,7 @@ int aie2_xrs_unload_fwctx(struct amdxdna_hwctx *hwctx)
 	int ret;
 
 	xdna = hwctx->client->xdna;
+	amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
 	xdna_mailbox_stop_channel(hwctx->priv->mbox_chann);
 	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
 	if (ret)

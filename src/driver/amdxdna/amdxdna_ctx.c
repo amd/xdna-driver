@@ -75,10 +75,8 @@ void amdxdna_hwctx_suspend(struct amdxdna_client *client)
 	unsigned long hwctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-		amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
 		xdna->dev_info->ops->hwctx_suspend(hwctx);
-	}
 }
 
 void amdxdna_hwctx_resume(struct amdxdna_client *client)
@@ -102,7 +100,6 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 	/*
 	 * At this point, user is not able to submit new commands.
 	 */
-	amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->hwctx_fini(hwctx);
 	mutex_unlock(&xdna->dev_lock);

@@ -108,8 +108,7 @@ aie2_hwctx_dump(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "\top: 0x%x", j->opcode);
 		XDNA_ERR(xdna, "\tmsg: 0x%x", j->msg_id);
 		XDNA_ERR(xdna, "\tfence: %s", aie2_fence_state2str(j->fence));
-		XDNA_ERR(xdna, "\tout_fence: %s",
-			 aie2_fence_state2str(&j->base.s_fence->finished));
+		XDNA_ERR(xdna, "\tout_fence: %s", aie2_fence_state2str(j->out_fence));
 	}
 	mutex_unlock(&hwctx->priv->io_lock);
 }
