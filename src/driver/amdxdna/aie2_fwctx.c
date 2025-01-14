@@ -186,7 +186,6 @@ int aie2_xrs_unload_fwctx(struct amdxdna_hwctx *hwctx)
 	int ret;
 
 	xdna = hwctx->client->xdna;
-	amdxdna_hwctx_wait_jobs(hwctx, msecs_to_jiffies(2000));
 	xdna_mailbox_stop_channel(hwctx->priv->mbox_chann);
 	ret = aie2_destroy_context(xdna->dev_handle, hwctx);
 	if (ret)

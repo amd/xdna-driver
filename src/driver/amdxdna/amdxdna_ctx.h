@@ -124,17 +124,15 @@ struct amdxdna_hwctx {
 	struct amdxdna_qos_info		     qos;
 	struct amdxdna_hwctx_param_config_cu *cus;
 
-	/* Submitted and Completed job counter */
+	/* Submitted, completed, freed job counter */
 	u64				submitted;
 	u64				completed ____cacheline_aligned_in_smp;
+	/* Counter for freed job */
+	atomic64_t			job_free_cnt;
 	/* For TDR worker to keep last completed. low frequency update */
 	u64				tdr_last_completed;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
-
-	atomic_t			job_submit_cnt;
-	atomic_t			job_free_cnt ____cacheline_aligned_in_smp;
-	wait_queue_head_t		status_wq;
 };
 
 #define drm_job_to_xdna_job(j) \

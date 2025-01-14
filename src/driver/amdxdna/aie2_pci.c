@@ -1131,7 +1131,6 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.set_aie_state		= aie2_set_state,
 	.hwctx_init		= aie2_hwctx_init,
 	.hwctx_fini		= aie2_hwctx_fini,
-	.hwctx_free		= aie2_hwctx_free,
 	.hwctx_config		= aie2_hwctx_config,
 	.hwctx_suspend		= aie2_hwctx_suspend,
 	.hwctx_resume		= aie2_hwctx_resume,

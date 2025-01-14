@@ -199,6 +199,9 @@ struct amdxdna_hwctx_priv {
 	struct workqueue_struct		*submit_wq;
 	struct drm_syncobj		*syncobj;
 
+	/* Driver needs to wait for all jobs freed before fini DRM scheduler */
+	wait_queue_head_t		job_free_waitq;
+
 	/* Firmware context related in below */
 	u32				id;
 	void				*mbox_chann;
@@ -394,7 +397,6 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx);
-void aie2_hwctx_free(struct amdxdna_hwctx *hwctx);
 int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx);
 void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx);
