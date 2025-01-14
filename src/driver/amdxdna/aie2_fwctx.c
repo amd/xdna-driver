@@ -127,13 +127,13 @@ void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx)
 		return;
 	}
 
+	drm_sched_entity_destroy(&hwctx->priv->entity);
 	aie2_release_resource(hwctx);
 	hwctx->status &= ~HWCTX_STATE_CONNECTED;
 }
 
 void aie2_fwctx_free(struct amdxdna_hwctx *hwctx)
 {
-	drm_sched_entity_destroy(&hwctx->priv->entity);
 	drm_sched_fini(&hwctx->priv->sched);
 }
 
