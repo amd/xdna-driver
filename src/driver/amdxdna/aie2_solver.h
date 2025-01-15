@@ -81,8 +81,8 @@ struct clk_list_info {
 };
 
 struct xrs_action_ops {
-	int (*load_ctx)(struct amdxdna_ctx *ctx, struct xrs_action_load *action);
-	int (*unload_ctx)(struct amdxdna_ctx *ctx);
+	int (*load_hwctx)(struct amdxdna_ctx *ctx, struct xrs_action_load *action);
+	int (*unload_hwctx)(struct amdxdna_ctx *ctx);
 	int (*set_dft_dpm_level)(struct drm_device *ddev, u32 level);
 };
 

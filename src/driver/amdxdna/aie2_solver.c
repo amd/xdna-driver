@@ -322,7 +322,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_
 		return PTR_ERR(snode);
 
 	fill_load_action(xrs, snode, &load_act);
-	ret = xrs->cfg.actions->load_ctx(ctx, &load_act);
+	ret = xrs->cfg.actions->load_hwctx(ctx, &load_act);
 	if (ret)
 		goto free_node;
 
@@ -355,7 +355,7 @@ int xrs_release_resource(void *hdl, u64 rid)
 		return -ENODEV;
 	}
 
-	xrs->cfg.actions->unload_ctx(node->ctx);
+	xrs->cfg.actions->unload_hwctx(node->ctx);
 	remove_solver_node(&xrs->rgp, node);
 
 	return 0;

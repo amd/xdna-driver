@@ -335,8 +335,8 @@ static int aie2_xrs_set_dft_dpm_level(struct drm_device *ddev, u32 dpm_level)
 }
 
 static struct xrs_action_ops aie2_xrs_actions = {
-	.load_ctx = aie2_xrs_load_hwctx,
-	.unload_ctx = aie2_xrs_unload_hwctx,
+	.load_hwctx = aie2_xrs_load_hwctx,
+	.unload_hwctx = aie2_xrs_unload_hwctx,
 	.set_dft_dpm_level = aie2_xrs_set_dft_dpm_level,
 };
 
