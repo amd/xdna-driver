@@ -6,6 +6,7 @@
 #include <linux/bitfield.h>
 #include <linux/types.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/pci.h>
 #include <linux/spinlock.h>
