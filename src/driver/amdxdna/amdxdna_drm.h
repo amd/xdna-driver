@@ -55,18 +55,18 @@ struct amdxdna_dev_ops {
 	void (*debugfs)(struct amdxdna_dev *xdna);
 
 	/* Below device ops are called by IOCTL */
-	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
-	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
-	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
+	int (*ctx_init)(struct amdxdna_ctx *ctx);
+	void (*ctx_fini)(struct amdxdna_ctx *ctx);
+	int (*ctx_config)(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-	void (*hwctx_suspend)(struct amdxdna_hwctx *hwctx);
-	void (*hwctx_resume)(struct amdxdna_hwctx *hwctx);
-	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+	void (*ctx_suspend)(struct amdxdna_ctx *ctx);
+	void (*ctx_resume)(struct amdxdna_ctx *ctx);
+	int (*cmd_submit)(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 			  u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
-	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
+	int (*cmd_wait)(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
-	struct dma_fence *(*cmd_get_out_fence)(struct amdxdna_hwctx *hwctx, u64 seq);
+	struct dma_fence *(*cmd_get_out_fence)(struct amdxdna_ctx *ctx, u64 seq);
 };
 
 /*
@@ -140,8 +140,8 @@ struct amdxdna_stats {
  *
  * @node: entry node in clients list
  * @pid: PID of current client
- * @hwctx_srcu: Per client SRCU for synchronizing hwctx destroy with other ioctls.
- * @hwctx_xa: HW context xarray
+ * @ctx_srcu: Per client SRCU for synchronizing ctx destroy with other ioctls.
+ * @ctx_xa: context xarray
  * @xdna: XDNA device pointer
  * @filp: DRM file pointer
  * @mm_lock: lock for client wide memory related
@@ -154,9 +154,9 @@ struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
 	/* To avoid deadlock, do NOT wait this srcu when dev_lock is hold */
-	struct srcu_struct		hwctx_srcu;
-	struct xarray			hwctx_xa;
-	u32				next_hwctxid;
+	struct srcu_struct		ctx_srcu;
+	struct xarray			ctx_xa;
+	u32				next_ctxid;
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
 
@@ -169,10 +169,10 @@ struct amdxdna_client {
 	struct amdxdna_stats		stats;
 };
 
-#define amdxdna_for_each_hwctx(client, hwctx_id, entry)		\
-	xa_for_each(&(client)->hwctx_xa, hwctx_id, entry)
-#define amdxdna_no_hwctx(client)				\
-	xa_empty(&(client)->hwctx_xa)
+#define amdxdna_for_each_ctx(client, ctx_id, entry)		\
+	xa_for_each(&(client)->ctx_xa, ctx_id, entry)
+#define amdxdna_no_ctx(client)				\
+	xa_empty(&(client)->ctx_xa)
 
 void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start);
 

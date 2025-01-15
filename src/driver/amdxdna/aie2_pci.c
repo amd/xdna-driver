@@ -335,8 +335,8 @@ static int aie2_xrs_set_dft_dpm_level(struct drm_device *ddev, u32 dpm_level)
 }
 
 static struct xrs_action_ops aie2_xrs_actions = {
-	.load_hwctx = aie2_xrs_load_fwctx,
-	.unload_hwctx = aie2_xrs_unload_fwctx,
+	.load_ctx = aie2_xrs_load_hwctx,
+	.unload_ctx = aie2_xrs_unload_hwctx,
 	.set_dft_dpm_level = aie2_xrs_set_dft_dpm_level,
 };
 
@@ -665,7 +665,7 @@ static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 	list_for_each_entry(client, &xdna->client_list, node)
 		aie2_stop_ctx(client);
 
-	/* The AIE will reset after all hardware contexts are destroyed */
+	/* The AIE will reset after all contexts are destroyed */
 	list_for_each_entry(client, &xdna->client_list, node)
 		aie2_restart_ctx(client);
 	mutex_unlock(&xdna->dev_lock);
@@ -851,15 +851,15 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 	return ret;
 }
 
-static int aie2_get_hwctx_status(struct amdxdna_client *client,
-				 struct amdxdna_drm_get_info *args)
+static int aie2_get_ctx_status(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_hwctx __user *buf;
+	struct amdxdna_drm_query_ctx __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_drm_query_hwctx *tmp;
+	struct amdxdna_drm_query_ctx *tmp;
 	struct amdxdna_client *tmp_client;
-	struct amdxdna_hwctx *hwctx;
-	unsigned long hwctx_id;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
 	bool overflow = false;
 	u32 req_bytes = 0;
 	u32 hw_i = 0;
@@ -874,8 +874,8 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 
 	buf = u64_to_user_ptr(args->buffer);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
-		idx = srcu_read_lock(&tmp_client->hwctx_srcu);
-		amdxdna_for_each_hwctx(tmp_client, hwctx_id, hwctx) {
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, ctx_id, ctx) {
 			req_bytes += sizeof(*tmp);
 			if (args->buffer_size < req_bytes) {
 				/* Continue iterating to get the required size */
@@ -884,23 +884,23 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 			}
 
 			tmp->pid = tmp_client->pid;
-			tmp->context_id = hwctx->id;
-			tmp->start_col = hwctx->start_col;
-			tmp->num_col = hwctx->num_col;
-			tmp->command_submissions = hwctx->submitted;
-			tmp->command_completions = hwctx->completed;
+			tmp->context_id = ctx->id;
+			tmp->start_col = ctx->start_col;
+			tmp->num_col = ctx->num_col;
+			tmp->command_submissions = ctx->submitted;
+			tmp->command_completions = ctx->completed;
 			tmp->migrations = 0;
 			tmp->preemptions = 0;
 			tmp->errors = 0;
 
 			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;
-				srcu_read_unlock(&tmp_client->hwctx_srcu, idx);
+				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 				goto out;
 			}
 			hw_i++;
 		}
-		srcu_read_unlock(&tmp_client->hwctx_srcu, idx);
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
 
 	if (overflow) {
@@ -1006,7 +1006,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_get_sensors(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = aie2_get_hwctx_status(client, args);
+		ret = aie2_get_ctx_status(client, args);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_READ_AIE_MEM:
@@ -1129,11 +1129,11 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.suspend		= aie2_hw_stop,
 	.get_aie_info		= aie2_get_info,
 	.set_aie_state		= aie2_set_state,
-	.hwctx_init		= aie2_hwctx_init,
-	.hwctx_fini		= aie2_hwctx_fini,
-	.hwctx_config		= aie2_hwctx_config,
-	.hwctx_suspend		= aie2_hwctx_suspend,
-	.hwctx_resume		= aie2_hwctx_resume,
+	.ctx_init		= aie2_ctx_init,
+	.ctx_fini		= aie2_ctx_fini,
+	.ctx_config		= aie2_ctx_config,
+	.ctx_suspend		= aie2_ctx_suspend,
+	.ctx_resume		= aie2_ctx_resume,
 	.cmd_submit		= aie2_cmd_submit,
 	.cmd_wait		= aie2_cmd_wait,
 	.hmm_invalidate		= aie2_hmm_invalidate,

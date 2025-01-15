@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_GEM_H_
@@ -44,14 +44,14 @@ struct amdxdna_gem_obj {
 	struct amdxdna_client		*client;
 	u8				type;
 	u64				flags;
-	struct mutex			lock; /* Protects: pinned, assigned_hwctx */
+	struct mutex			lock; /* Protects: pinned, assigned_ctx */
 	struct amdxdna_mem		mem;
 
 	/* Below members is uninitialized when needed */
 	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */
 	struct amdxdna_gem_obj		*dev_heap; /* For AMDXDNA_BO_DEV */
 	struct drm_mm_node		mm_node; /* For AMDXDNA_BO_DEV */
-	u32				assigned_hwctx; /* For debug bo */
+	u32				assigned_ctx; /* For debug bo */
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)
@@ -83,9 +83,9 @@ int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);
 void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo);
 
-u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl);
-int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctx_hdl);
-void amdxdna_gem_clear_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl);
+u32 amdxdna_gem_get_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl);
+int amdxdna_gem_set_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctx_hdl);
+void amdxdna_gem_clear_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl);
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

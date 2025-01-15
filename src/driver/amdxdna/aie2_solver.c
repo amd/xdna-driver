@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #include <drm/drm_device.h>
@@ -24,7 +24,7 @@ struct solver_node {
 	u64			rid;		/* Request ID from consumer */
 
 	struct partition_node	*pt_node;
-	struct amdxdna_hwctx	*hwctx;
+	struct amdxdna_ctx	*ctx;
 	u32			dpm_level;
 	u32			cols_len;
 	u32			start_cols[] __counted_by(cols_len);
@@ -296,7 +296,7 @@ static void fill_load_action(struct solver_state *xrs,
 	action->part.ncols = snode->pt_node->ncols;
 }
 
-int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_hwctx *hwctx)
+int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_ctx *ctx)
 {
 	struct xrs_action_load load_act;
 	struct solver_node *snode;
@@ -322,7 +322,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_
 		return PTR_ERR(snode);
 
 	fill_load_action(xrs, snode, &load_act);
-	ret = xrs->cfg.actions->load_hwctx(hwctx, &load_act);
+	ret = xrs->cfg.actions->load_ctx(ctx, &load_act);
 	if (ret)
 		goto free_node;
 
@@ -331,7 +331,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_
 		goto free_node;
 
 	snode->dpm_level = dpm_level;
-	snode->hwctx = hwctx;
+	snode->ctx = ctx;
 
 	drm_dbg(xrs->cfg.ddev, "start col %d ncols %d\n",
 		snode->pt_node->start_col, snode->pt_node->ncols);
@@ -355,7 +355,7 @@ int xrs_release_resource(void *hdl, u64 rid)
 		return -ENODEV;
 	}
 
-	xrs->cfg.actions->unload_hwctx(node->hwctx);
+	xrs->cfg.actions->unload_ctx(node->ctx);
 	remove_solver_node(&xrs->rgp, node);
 
 	return 0;

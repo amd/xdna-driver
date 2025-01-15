@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "hwctx.h"
@@ -211,7 +211,7 @@ void
 hw_ctx::
 create_ctx_on_device()
 {
-  amdxdna_drm_create_hwctx arg = {};
+  amdxdna_drm_create_ctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
   arg.umq_bo = m_q->get_queue_bo();
   arg.max_opc = m_ops_per_cycle;
@@ -219,7 +219,7 @@ create_ctx_on_device()
   arg.log_buf_bo = m_log_bo ?
     static_cast<bo*>(m_log_bo.get())->get_drm_bo_handle() :
     AMDXDNA_INVALID_BO_HANDLE;
-  m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CREATE_CTX, &arg);
 
   set_slotidx(arg.handle);
   set_doorbell(arg.umq_doorbell);
@@ -236,9 +236,9 @@ delete_ctx_on_device()
     return;
 
   m_q->unbind_hwctx();
-  struct amdxdna_drm_destroy_hwctx arg = {};
+  struct amdxdna_drm_destroy_ctx arg = {};
   arg.handle = m_handle;
-  m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
+  m_device.get_pdev().ioctl(DRM_IOCTL_AMDXDNA_DESTROY_CTX, &arg);
 }
 
 void

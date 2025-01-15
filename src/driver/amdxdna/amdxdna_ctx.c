@@ -14,13 +14,13 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_trace.h"
 
-#define MAX_HWCTX_ID		255
+#define MAX_CTX_ID		255
 #define MAX_ARG_COUNT		4095
 
 struct amdxdna_fence {
 	struct dma_fence	base;
 	spinlock_t		lock; /* for base */
-	struct amdxdna_hwctx	*hwctx;
+	struct amdxdna_ctx	*ctx;
 };
 
 static const char *amdxdna_fence_get_driver_name(struct dma_fence *fence)
@@ -34,7 +34,7 @@ static const char *amdxdna_fence_get_timeline_name(struct dma_fence *fence)
 
 	xdna_fence = container_of(fence, struct amdxdna_fence, base);
 
-	return xdna_fence->hwctx->name;
+	return xdna_fence->ctx->name;
 }
 
 static const struct dma_fence_ops fence_ops = {
@@ -42,7 +42,7 @@ static const struct dma_fence_ops fence_ops = {
 	.get_timeline_name = amdxdna_fence_get_timeline_name,
 };
 
-static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
+static struct dma_fence *amdxdna_fence_create(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_fence *fence;
 
@@ -50,38 +50,37 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	if (!fence)
 		return NULL;
 
-	fence->hwctx = hwctx;
+	fence->ctx = ctx;
 	spin_lock_init(&fence->lock);
-	dma_fence_init(&fence->base, &fence_ops, &fence->lock, hwctx->id, 0);
+	dma_fence_init(&fence->base, &fence_ops, &fence->lock, ctx->id, 0);
 	return &fence->base;
 }
 
-void amdxdna_hwctx_suspend(struct amdxdna_client *client)
+void amdxdna_ctx_suspend(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_hwctx *hwctx;
-	unsigned long hwctx_id;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
-		xdna->dev_info->ops->hwctx_suspend(hwctx);
+	amdxdna_for_each_ctx(client, ctx_id, ctx)
+		xdna->dev_info->ops->ctx_suspend(ctx);
 }
 
-void amdxdna_hwctx_resume(struct amdxdna_client *client)
+void amdxdna_ctx_resume(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_hwctx *hwctx;
-	unsigned long hwctx_id;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
-		xdna->dev_info->ops->hwctx_resume(hwctx);
+	amdxdna_for_each_ctx(client, ctx_id, ctx)
+		xdna->dev_info->ops->ctx_resume(ctx);
 }
 
-static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
-				      struct srcu_struct *ss)
+static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct *ss)
 {
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 
 	synchronize_srcu(ss);
 
@@ -89,37 +88,37 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 	 * At this point, user is not able to submit new commands.
 	 */
 	mutex_lock(&xdna->dev_lock);
-	xdna->dev_info->ops->hwctx_fini(hwctx);
+	xdna->dev_info->ops->ctx_fini(ctx);
 	mutex_unlock(&xdna->dev_lock);
 
-	kfree(hwctx->name);
-	kfree(hwctx);
+	kfree(ctx->name);
+	kfree(ctx);
 }
 
 /*
  * This should be called in flush() and remove(). DO NOT call in other syscalls.
- * This guarantee that when hwctx and resources will be released, if user
- * doesn't call amdxdna_drm_destroy_hwctx_ioctl.
+ * This guarantee that when ctx and resources will be released, if user
+ * doesn't call amdxdna_drm_destroy_ctx_ioctl.
  */
-void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
+void amdxdna_ctx_remove_all(struct amdxdna_client *client)
 {
-	struct amdxdna_hwctx *hwctx;
-	unsigned long hwctx_id;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
 
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-		XDNA_DBG(client->xdna, "PID %d close HW context %d",
-			 client->pid, hwctx->id);
-		xa_erase(&client->hwctx_xa, hwctx->id);
-		amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
+	amdxdna_for_each_ctx(client, ctx_id, ctx) {
+		XDNA_DBG(client->xdna, "PID %d close context %d",
+			 client->pid, ctx->id);
+		xa_erase(&client->ctx_xa, ctx->id);
+		amdxdna_ctx_destroy_rcu(ctx, &client->ctx_srcu);
 	}
 }
 
-int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_create_hwctx *args = data;
+	struct amdxdna_drm_create_ctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_hwctx *hwctx;
+	struct amdxdna_ctx *ctx;
 	int ret, idx;
 
 	if (args->ext || args->ext_flags)
@@ -128,83 +127,83 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
 
-	hwctx = kzalloc(sizeof(*hwctx), GFP_KERNEL);
-	if (!hwctx) {
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx) {
 		ret = -ENOMEM;
 		goto exit;
 	}
 
-	if (copy_from_user(&hwctx->qos, u64_to_user_ptr(args->qos_p), sizeof(hwctx->qos))) {
+	if (copy_from_user(&ctx->qos, u64_to_user_ptr(args->qos_p), sizeof(ctx->qos))) {
 		XDNA_ERR(xdna, "Access QoS info failed");
 		ret = -EFAULT;
-		goto free_hwctx;
+		goto free_ctx;
 	}
 
-	hwctx->client = client;
-	hwctx->tdr_last_completed = -1;
-	hwctx->num_tiles = args->num_tiles;
-	hwctx->mem_size = args->mem_size;
-	hwctx->max_opc = args->max_opc;
-	hwctx->umq_bo = args->umq_bo;
-	hwctx->log_buf_bo = args->log_buf_bo;
-	ret = xa_alloc_cyclic(&client->hwctx_xa, &hwctx->id, hwctx,
-			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_HWCTX_ID),
-			      &client->next_hwctxid, GFP_KERNEL);
+	ctx->client = client;
+	ctx->tdr_last_completed = -1;
+	ctx->num_tiles = args->num_tiles;
+	ctx->mem_size = args->mem_size;
+	ctx->max_opc = args->max_opc;
+	ctx->umq_bo = args->umq_bo;
+	ctx->log_buf_bo = args->log_buf_bo;
+	ret = xa_alloc_cyclic(&client->ctx_xa, &ctx->id, ctx,
+			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_CTX_ID),
+			      &client->next_ctxid, GFP_KERNEL);
 	if (ret < 0) {
-		XDNA_ERR(xdna, "Allocate hwctx ID failed, ret %d", ret);
-		goto free_hwctx;
+		XDNA_ERR(xdna, "Allocate ctx ID failed, ret %d", ret);
+		goto free_ctx;
 	}
 
-	hwctx->name = kasprintf(GFP_KERNEL, "hwctx.%d.%d", client->pid, hwctx->id);
-	if (!hwctx->name) {
+	ctx->name = kasprintf(GFP_KERNEL, "ctx.%d.%d", client->pid, ctx->id);
+	if (!ctx->name) {
 		ret = -ENOMEM;
 		goto rm_id;
 	}
 
 	mutex_lock(&xdna->dev_lock);
-	ret = xdna->dev_info->ops->hwctx_init(hwctx);
+	ret = xdna->dev_info->ops->ctx_init(ctx);
 	if (ret) {
 		mutex_unlock(&xdna->dev_lock);
-		XDNA_ERR(xdna, "Init hwctx failed, ret %d", ret);
+		XDNA_ERR(xdna, "Init ctx failed, ret %d", ret);
 		goto free_name;
 	}
-	args->handle = hwctx->id;
-	args->syncobj_handle = hwctx->syncobj_hdl;
-	args->umq_doorbell = hwctx->doorbell_offset;
+	args->handle = ctx->id;
+	args->syncobj_handle = ctx->syncobj_hdl;
+	args->umq_doorbell = ctx->doorbell_offset;
 	mutex_unlock(&xdna->dev_lock);
 
-	atomic64_set(&hwctx->job_free_cnt, 0);
+	atomic64_set(&ctx->job_free_cnt, 0);
 
-	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
+	XDNA_DBG(xdna, "PID %d create context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
 	return 0;
 
 free_name:
-	kfree(hwctx->name);
+	kfree(ctx->name);
 rm_id:
-	xa_erase(&client->hwctx_xa, hwctx->id);
-free_hwctx:
-	kfree(hwctx);
+	xa_erase(&client->ctx_xa, ctx->id);
+free_ctx:
+	kfree(ctx);
 exit:
 	drm_dev_exit(idx);
 	return ret;
 }
 
-int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+int amdxdna_drm_destroy_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_destroy_hwctx *args = data;
+	struct amdxdna_drm_destroy_ctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_hwctx *hwctx;
+	struct amdxdna_ctx *ctx;
 	int ret = 0, idx;
 
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
 
-	hwctx = xa_erase(&client->hwctx_xa, args->handle);
-	if (!hwctx) {
+	ctx = xa_erase(&client->ctx_xa, args->handle);
+	if (!ctx) {
 		ret = -EINVAL;
-		XDNA_DBG(xdna, "PID %d HW context %d not exist",
+		XDNA_DBG(xdna, "PID %d context %d not exist",
 			 client->pid, args->handle);
 		goto out;
 	}
@@ -213,40 +212,39 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	 * The pushed jobs are handled by DRM scheduler during destroy.
 	 * SRCU to synchronize with exec command ioctls.
 	 */
-	amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
+	amdxdna_ctx_destroy_rcu(ctx, &client->ctx_srcu);
 
-	XDNA_DBG(xdna, "PID %d destroyed HW context %d", client->pid, args->handle);
+	XDNA_DBG(xdna, "PID %d destroyed context %d", client->pid, args->handle);
 out:
 	drm_dev_exit(idx);
 	return ret;
 }
 
-int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_config_hwctx *args = data;
+	struct amdxdna_drm_config_ctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_hwctx *hwctx;
+	struct amdxdna_ctx *ctx;
 	int ret, idx;
 	u32 buf_size;
 	void *buf;
 	u64 val;
 
-	if (!xdna->dev_info->ops->hwctx_config)
+	if (!xdna->dev_info->ops->ctx_config)
 		return -EOPNOTSUPP;
 
 	val = args->param_val;
 	buf_size = args->param_val_size;
 
 	switch (args->param_type) {
-	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
+	case DRM_AMDXDNA_CTX_CONFIG_CU:
 		/* For those types that param_val is pointer */
 		if (buf_size > PAGE_SIZE) {
 			XDNA_ERR(xdna, "Config CU param buffer too large");
 			return -E2BIG;
 		}
 
-		/* Hwctx needs to keep buf */
 		buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
 		if (!buf)
 			return -ENOMEM;
@@ -257,30 +255,30 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		}
 
 		break;
-	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
-	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
+	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;
 		break;
 	default:
-		XDNA_DBG(xdna, "Unknown HW context config type %d", args->param_type);
+		XDNA_DBG(xdna, "Unknown context config type %d", args->param_type);
 		return -EINVAL;
 	}
 
 	mutex_lock(&xdna->dev_lock);
-	idx = srcu_read_lock(&client->hwctx_srcu);
-	hwctx = xa_load(&client->hwctx_xa, args->handle);
-	if (!hwctx) {
-		XDNA_DBG(xdna, "PID %d failed to get hwctx %d", client->pid, args->handle);
+	idx = srcu_read_lock(&client->ctx_srcu);
+	ctx = xa_load(&client->ctx_xa, args->handle);
+	if (!ctx) {
+		XDNA_DBG(xdna, "PID %d failed to get ctx %d", client->pid, args->handle);
 		ret = -EINVAL;
 		goto unlock_srcu;
 	}
 
-	ret = xdna->dev_info->ops->hwctx_config(hwctx, args->param_type, val, buf, buf_size);
+	ret = xdna->dev_info->ops->ctx_config(ctx, args->param_type, val, buf, buf_size);
 
 unlock_srcu:
-	srcu_read_unlock(&client->hwctx_srcu, idx);
+	srcu_read_unlock(&client->ctx_srcu, idx);
 	mutex_unlock(&xdna->dev_lock);
 	kfree(buf);
 	return ret;
@@ -345,14 +343,14 @@ put_arg_bos:
 
 void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 {
-	trace_amdxdna_debug_point(job->hwctx->name, job->seq, "job release");
+	trace_amdxdna_debug_point(job->ctx->name, job->seq, "job release");
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
 }
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
 {
-	struct amdxdna_dev *xdna = job->hwctx->client->xdna;
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
 	int contended = -1, i, ret;
 
 	ww_acquire_init(ctx, &reservation_ww_class);
@@ -428,11 +426,11 @@ void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdl, u32 *arg_bo_hdls, u32 arg_bo_cnt,
 		       u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt,
-		       u32 hwctx_hdl, u64 *seq)
+		       u32 ctx_hdl, u64 *seq)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_sched_job *job;
-	struct amdxdna_hwctx *hwctx;
+	struct amdxdna_ctx *ctx;
 	int ret, idx;
 
 	XDNA_DBG(xdna, "Command BO hdl %d, Arg BO count %d", cmd_bo_hdl, arg_bo_cnt);
@@ -460,20 +458,20 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		}
 	}
 
-	idx = srcu_read_lock(&client->hwctx_srcu);
-	hwctx = xa_load(&client->hwctx_xa, hwctx_hdl);
-	if (!hwctx) {
-		XDNA_ERR(xdna, "PID %d failed to get hwctx %d",
-			 client->pid, hwctx_hdl);
+	idx = srcu_read_lock(&client->ctx_srcu);
+	ctx = xa_load(&client->ctx_xa, ctx_hdl);
+	if (!ctx) {
+		XDNA_ERR(xdna, "PID %d failed to get ctx %d",
+			 client->pid, ctx_hdl);
 		ret = -EINVAL;
 		goto unlock_srcu;
 	}
 
-	job->hwctx = hwctx;
+	job->ctx = ctx;
 	job->mm = current->mm;
 	job->opcode = opcode;
 
-	job->fence = amdxdna_fence_create(hwctx);
+	job->fence = amdxdna_fence_create(ctx);
 	if (!job->fence) {
 		XDNA_ERR(xdna, "Failed to create fence");
 		ret = -ENOMEM;
@@ -481,7 +479,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	}
 	kref_init(&job->refcnt);
 
-	ret = xdna->dev_info->ops->cmd_submit(hwctx, job, syncobj_hdls,
+	ret = xdna->dev_info->ops->cmd_submit(ctx, job, syncobj_hdls,
 					      syncobj_points, syncobj_cnt, seq);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit cmds failed, ret %d", ret);
@@ -489,20 +487,20 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	}
 
 	/*
-	 * The amdxdna_hwctx_destroy_rcu() will release hwctx and associated
+	 * The amdxdna_ctx_destroy_rcu() will release ctx and associated
 	 * resource after synchronize_srcu(). The submitted jobs should be
 	 * handled by the queue, for example DRM scheduler, in device layer.
 	 * For here we can unlock SRCU.
 	 */
-	srcu_read_unlock(&client->hwctx_srcu, idx);
-	trace_amdxdna_debug_point(hwctx->name, *seq, "job pushed");
+	srcu_read_unlock(&client->ctx_srcu, idx);
+	trace_amdxdna_debug_point(ctx->name, *seq, "job pushed");
 
 	return 0;
 
 put_fence:
 	dma_fence_put(job->fence);
 unlock_srcu:
-	srcu_read_unlock(&client->hwctx_srcu, idx);
+	srcu_read_unlock(&client->ctx_srcu, idx);
 	amdxdna_arg_bos_put(job);
 cmd_put:
 	amdxdna_gem_put_obj(job->cmd_bo);
@@ -547,7 +545,7 @@ static int amdxdna_drm_submit_execbuf(struct amdxdna_client *client,
 	}
 
 	ret = amdxdna_cmd_submit(client, OP_USER, cmd_bo_hdl, arg_bo_hdls,
-				 args->arg_count, NULL, NULL, 0, args->hwctx, &args->seq);
+				 args->arg_count, NULL, NULL, 0, args->ctx, &args->seq);
 
 free_cmd_bo_hdls:
 	kfree(arg_bo_hdls);
@@ -598,7 +596,7 @@ static int amdxdna_drm_submit_dependency(struct amdxdna_client *client,
 
 	ret = amdxdna_cmd_submit(client, OP_NOOP, AMDXDNA_INVALID_BO_HANDLE, NULL, 0,
 				 syncobj_hdls, syncobj_pts, syncobj_cnt,
-				 args->hwctx, &args->seq);
+				 args->ctx, &args->seq);
 
 done:
 	kfree(argbuf);
@@ -616,8 +614,8 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 	struct dma_fence *ofence = NULL;
 	u64 syncobj_pt = args->args;
 	struct drm_syncobj *syncobj;
-	u32 hwctx_hdl = args->hwctx;
-	struct amdxdna_hwctx *hwctx;
+	u32 ctx_hdl = args->ctx;
+	struct amdxdna_ctx *ctx;
 	int ret = 0;
 	int idx;
 
@@ -633,7 +631,7 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 		return -ENOENT;
 	}
 
-	idx = srcu_read_lock(&client->hwctx_srcu);
+	idx = srcu_read_lock(&client->ctx_srcu);
 
 	ret = drm_syncobj_find_fence(client->filp, syncobj_hdl, syncobj_pt, 0, &ofence);
 	if (!ret) {
@@ -643,9 +641,9 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 	}
 	ret = 0;
 
-	hwctx = xa_load(&client->hwctx_xa, hwctx_hdl);
-	if (!hwctx) {
-		XDNA_ERR(xdna, "PID %d failed to get hwctx %d", client->pid, hwctx_hdl);
+	ctx = xa_load(&client->ctx_xa, ctx_hdl);
+	if (!ctx) {
+		XDNA_ERR(xdna, "PID %d failed to get ctx %d", client->pid, ctx_hdl);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -656,8 +654,8 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 		goto out;
 	}
 
-	if (hwctx->submitted)
-		ofence = xdna->dev_info->ops->cmd_get_out_fence(hwctx, hwctx->submitted - 1);
+	if (ctx->submitted)
+		ofence = xdna->dev_info->ops->cmd_get_out_fence(ctx, ctx->submitted - 1);
 	else
 		ofence = dma_fence_get_stub();
 	if (unlikely(!ofence)) {
@@ -673,7 +671,7 @@ out:
 	dma_fence_chain_free(chain);
 	dma_fence_put(ofence);
 	drm_syncobj_put(syncobj);
-	srcu_read_unlock(&client->hwctx_srcu, idx);
+	srcu_read_unlock(&client->ctx_srcu, idx);
 	return ret;
 }
 
@@ -698,30 +696,30 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 	return -EINVAL;
 }
 
-int amdxdna_cmd_wait(struct amdxdna_client *client, u32 hwctx_hdl,
+int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
 		     u64 seq, u32 timeout)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_hwctx *hwctx;
+	struct amdxdna_ctx *ctx;
 	int ret, idx;
 
 	if (!xdna->dev_info->ops->cmd_wait)
 		return -EOPNOTSUPP;
 
 	/* For locking concerns, see amdxdna_drm_exec_cmd_ioctl. */
-	idx = srcu_read_lock(&client->hwctx_srcu);
-	hwctx = xa_load(&client->hwctx_xa, hwctx_hdl);
-	if (!hwctx) {
-		XDNA_DBG(xdna, "PID %d failed to get hwctx %d",
-			 client->pid, hwctx_hdl);
+	idx = srcu_read_lock(&client->ctx_srcu);
+	ctx = xa_load(&client->ctx_xa, ctx_hdl);
+	if (!ctx) {
+		XDNA_DBG(xdna, "PID %d failed to get ctx %d",
+			 client->pid, ctx_hdl);
 		ret = -EINVAL;
-		goto unlock_hwctx_srcu;
+		goto unlock_ctx_srcu;
 	}
 
-	ret = xdna->dev_info->ops->cmd_wait(hwctx, seq, timeout);
+	ret = xdna->dev_info->ops->cmd_wait(ctx, seq, timeout);
 
-unlock_hwctx_srcu:
-	srcu_read_unlock(&client->hwctx_srcu, idx);
+unlock_ctx_srcu:
+	srcu_read_unlock(&client->ctx_srcu, idx);
 	return ret;
 }
 
@@ -732,13 +730,13 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_drm_wait_cmd *args = data;
 	int ret;
 
-	XDNA_DBG(xdna, "PID %d hwctx %d timeout set %d ms for cmd %lld",
-		 client->pid, args->hwctx, args->timeout, args->seq);
+	XDNA_DBG(xdna, "PID %d ctx %d timeout set %d ms for cmd %lld",
+		 client->pid, args->ctx, args->timeout, args->seq);
 
-	ret = amdxdna_cmd_wait(client, args->hwctx, args->seq, args->timeout);
+	ret = amdxdna_cmd_wait(client, args->ctx, args->seq, args->timeout);
 
-	XDNA_DBG(xdna, "PID %d hwctx %d cmd %lld wait finished, ret %d",
-		 client->pid, args->hwctx, args->seq, ret);
+	XDNA_DBG(xdna, "PID %d ctx %d cmd %lld wait finished, ret %d",
+		 client->pid, args->ctx, args->seq, ret);
 
 	return ret;
 }

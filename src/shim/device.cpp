@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. - All rights reserved
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. - All rights reserved
 
 #include "bo.h"
 #include "device.h"
@@ -238,7 +238,7 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_query_hwctx* data;
+    amdxdna_drm_query_ctx* data;
     const uint32_t output_size = 256 * sizeof(*data);
 
     std::vector<char> payload(output_size);

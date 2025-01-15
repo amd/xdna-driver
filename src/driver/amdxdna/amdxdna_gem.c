@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
  */
 
 #include "drm_local/amdxdna_accel.h"
@@ -409,7 +409,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	if (!abo)
 		return ERR_PTR(-ENOMEM);
 
-	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+	abo->assigned_ctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_init(&abo->lock);
 
 	abo->mem.userptr = AMDXDNA_INVALID_ADDR;
@@ -911,7 +911,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	struct amdxdna_drm_sync_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
-	u32 hwctx_hdl;
+	u32 ctx_hdl;
 	int ret;
 
 	gobj = drm_gem_object_lookup(filp, args->handle);
@@ -940,12 +940,12 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 
 	amdxdna_gem_unpin(abo);
 
-	if (abo->assigned_hwctx != AMDXDNA_INVALID_CTX_HANDLE &&
+	if (abo->assigned_ctx != AMDXDNA_INVALID_CTX_HANDLE &&
 	    args->direction == SYNC_DIRECT_FROM_DEVICE) {
 		u64 seq;
 
-		hwctx_hdl = amdxdna_gem_get_assigned_hwctx(client, args->handle);
-		if (hwctx_hdl == AMDXDNA_INVALID_CTX_HANDLE ||
+		ctx_hdl = amdxdna_gem_get_assigned_ctx(client, args->handle);
+		if (ctx_hdl == AMDXDNA_INVALID_CTX_HANDLE ||
 		    args->direction != SYNC_DIRECT_FROM_DEVICE) {
 			XDNA_ERR(xdna, "Sync failed, dir %d", args->direction);
 			ret = -EINVAL;
@@ -953,25 +953,25 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		}
 
 		ret = amdxdna_cmd_submit(client, OP_SYNC_BO, AMDXDNA_INVALID_BO_HANDLE,
-					 &args->handle, 1, NULL, NULL, 0, hwctx_hdl, &seq);
+					 &args->handle, 1, NULL, NULL, 0, ctx_hdl, &seq);
 		if (ret) {
 			XDNA_ERR(xdna, "Submit command failed");
 			goto put_obj;
 		}
 
-		ret = amdxdna_cmd_wait(client, hwctx_hdl, seq, 3000 /* ms */);
+		ret = amdxdna_cmd_wait(client, ctx_hdl, seq, 3000 /* ms */);
 	}
 
-	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx, dir %d, hwctx %d",
+	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx, dir %d, ctx %d",
 		 args->handle, args->offset, args->size, args->direction,
-		 abo->assigned_hwctx);
+		 abo->assigned_ctx);
 
 put_obj:
 	drm_gem_object_put(gobj);
 	return ret;
 }
 
-u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
+u32 amdxdna_gem_get_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl)
 {
 	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
 	u32 ctxid;
@@ -982,8 +982,8 @@ u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
 	}
 
 	mutex_lock(&abo->lock);
-	ctxid = abo->assigned_hwctx;
-	if (!xa_load(&client->hwctx_xa, ctxid))
+	ctxid = abo->assigned_ctx;
+	if (!xa_load(&client->ctx_xa, ctxid))
 		ctxid = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_unlock(&abo->lock);
 
@@ -991,7 +991,7 @@ u32 amdxdna_gem_get_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
 	return ctxid;
 }
 
-int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctxid)
+int amdxdna_gem_set_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl, u32 ctxid)
 {
 	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
 	int ret = 0;
@@ -1002,9 +1002,9 @@ int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u3
 	}
 
 	mutex_lock(&abo->lock);
-	if (!xa_load(&client->hwctx_xa, abo->assigned_hwctx))
-		abo->assigned_hwctx = ctxid;
-	else if (ctxid != abo->assigned_hwctx)
+	if (!xa_load(&client->ctx_xa, abo->assigned_ctx))
+		abo->assigned_ctx = ctxid;
+	else if (ctxid != abo->assigned_ctx)
 		ret = -EBUSY;
 	mutex_unlock(&abo->lock);
 
@@ -1012,7 +1012,7 @@ int amdxdna_gem_set_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl, u3
 	return ret;
 }
 
-void amdxdna_gem_clear_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
+void amdxdna_gem_clear_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl)
 {
 	struct amdxdna_gem_obj *abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_INVALID);
 
@@ -1022,7 +1022,7 @@ void amdxdna_gem_clear_assigned_hwctx(struct amdxdna_client *client, u32 bo_hdl)
 	}
 
 	mutex_lock(&abo->lock);
-	abo->assigned_hwctx = AMDXDNA_INVALID_CTX_HANDLE;
+	abo->assigned_ctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_unlock(&abo->lock);
 
 	amdxdna_gem_put_obj(abo);

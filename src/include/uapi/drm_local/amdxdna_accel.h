@@ -42,9 +42,9 @@ extern "C" {
  */
 
 enum amdxdna_drm_ioctl_id {
-	DRM_AMDXDNA_CREATE_HWCTX,
-	DRM_AMDXDNA_DESTROY_HWCTX,
-	DRM_AMDXDNA_CONFIG_HWCTX,
+	DRM_AMDXDNA_CREATE_CTX,
+	DRM_AMDXDNA_DESTROY_CTX,
+	DRM_AMDXDNA_CONFIG_CTX,
 	DRM_AMDXDNA_CREATE_BO,
 	DRM_AMDXDNA_GET_BO_INFO,
 	DRM_AMDXDNA_SYNC_BO,
@@ -98,7 +98,7 @@ struct amdxdna_qos_info {
 };
 
 /**
- * struct amdxdna_drm_create_hwctx - Create hardware context.
+ * struct amdxdna_drm_create_ctx - Create context.
  * @ext: MBZ.
  * @ext_flags: MBZ.
  * @qos_p: Address of QoS info.
@@ -108,10 +108,10 @@ struct amdxdna_qos_info {
  * @num_tiles: Number of AIE tiles.
  * @mem_size: Size of AIE tile memory.
  * @umq_doorbell: Returned offset of doorbell associated with UMQ.
- * @handle: Returned hardware context handle.
+ * @handle: Returned context handle.
  * @syncobj_handle: The drm timeline syncobj handle for command completion notification.
  */
-struct amdxdna_drm_create_hwctx {
+struct amdxdna_drm_create_ctx {
 	__u64 ext;
 	__u64 ext_flags;
 	__u64 qos_p;
@@ -126,11 +126,11 @@ struct amdxdna_drm_create_hwctx {
 };
 
 /**
- * struct amdxdna_drm_destroy_hwctx - Destroy hardware context.
- * @handle: Hardware context handle.
+ * struct amdxdna_drm_destroy_ctx - Destroy context.
+ * @handle: Context handle.
  * @pad: Structure padding.
  */
-struct amdxdna_drm_destroy_hwctx {
+struct amdxdna_drm_destroy_ctx {
 	__u32 handle;
 	__u32 pad;
 };
@@ -148,27 +148,27 @@ struct amdxdna_cu_config {
 };
 
 /**
- * struct amdxdna_hwctx_param_config_cu - configuration for CUs in hardware context
+ * struct amdxdna_ctx_param_config_cu - configuration for CUs in context
  * @num_cus: Number of CUs to configure.
  * @pad: Structure padding.
  * @cu_configs: Array of CU configurations of struct amdxdna_cu_config.
  */
-struct amdxdna_hwctx_param_config_cu {
+struct amdxdna_ctx_param_config_cu {
 	__u16 num_cus;
 	__u16 pad[3];
 	struct amdxdna_cu_config cu_configs[];
 };
 
-enum amdxdna_drm_config_hwctx_param {
-	DRM_AMDXDNA_HWCTX_CONFIG_CU,
-	DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
-	DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
+enum amdxdna_drm_config_ctx_param {
+	DRM_AMDXDNA_CTX_CONFIG_CU,
+	DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF,
+	DRM_AMDXDNA_CTX_REMOVE_DBG_BUF,
 };
 
 /**
- * struct amdxdna_drm_config_hwctx - Configure hardware context.
- * @handle: hardware context handle.
- * @param_type: Value in enum amdxdna_drm_config_hwctx_param. Specifies the
+ * struct amdxdna_drm_config_ctx - Configure context.
+ * @handle: Context handle.
+ * @param_type: Value in enum amdxdna_drm_config_ctx_param. Specifies the
  *              structure passed in via param_val.
  * @param_val: A structure specified by the param_type struct member.
  * @param_val_size: Size of the parameter buffer pointed to by the param_val.
@@ -178,7 +178,7 @@ enum amdxdna_drm_config_hwctx_param {
  * Note: if the param_val is a pointer pointing to a buffer, the maximum size
  * of the buffer is 4KiB(PAGE_SIZE).
  */
-struct amdxdna_drm_config_hwctx {
+struct amdxdna_drm_config_ctx {
 	__u32 handle;
 	__u32 param_type;
 	__u64 param_val;
@@ -264,7 +264,7 @@ enum amdxdna_cmd_type {
  * struct amdxdna_drm_exec_cmd - Execute command.
  * @ext: MBZ.
  * @ext_flags: MBZ.
- * @hwctx: Hardware context handle.
+ * @ctx: Context handle.
  * @type: One of command type in enum amdxdna_cmd_type.
  * @cmd_handles: Array of command handles or the command handle itself
  *               in case of just one.
@@ -276,7 +276,7 @@ enum amdxdna_cmd_type {
 struct amdxdna_drm_exec_cmd {
 	__u64 ext;
 	__u64 ext_flags;
-	__u32 hwctx;
+	__u32 ctx;
 	__u32 type;
 	__u64 cmd_handles;
 	__u64 args;
@@ -288,14 +288,14 @@ struct amdxdna_drm_exec_cmd {
 /**
  * struct amdxdna_drm_wait_cmd - Wait exectuion command.
  *
- * @hwctx: hardware context handle.
+ * @ctx: Context handle.
  * @timeout: timeout in ms, 0 implies infinite wait.
  * @seq: sequence number of the command returned by execute command.
  *
  * Wait a command specified by seq to be completed.
  */
 struct amdxdna_drm_wait_cmd {
-	__u32 hwctx;
+	__u32 ctx;
 	__u32 timeout;
 	__u64 seq;
 };
@@ -413,7 +413,7 @@ struct amdxdna_drm_query_sensor {
 };
 
 /**
- * struct amdxdna_drm_query_hwctx - The data for single context.
+ * struct amdxdna_drm_query_ctx - The data for single context.
  * @context_id: The ID for this context.
  * @start_col: The starting column for the partition assigned to this context.
  * @num_col: The number of columns in the partition assigned to this context.
@@ -426,7 +426,7 @@ struct amdxdna_drm_query_sensor {
  *               same partition.
  * @errors: The errors for this context.
  */
-struct amdxdna_drm_query_hwctx {
+struct amdxdna_drm_query_ctx {
 	__u32 context_id;
 	__u32 start_col;
 	__u32 num_col;
@@ -585,17 +585,17 @@ struct amdxdna_drm_set_state {
 	__u64 buffer; /* in */
 };
 
-#define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
-		 struct amdxdna_drm_create_hwctx)
+#define DRM_IOCTL_AMDXDNA_CREATE_CTX \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_CTX, \
+		 struct amdxdna_drm_create_ctx)
 
-#define DRM_IOCTL_AMDXDNA_DESTROY_HWCTX \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DESTROY_HWCTX, \
-		 struct amdxdna_drm_destroy_hwctx)
+#define DRM_IOCTL_AMDXDNA_DESTROY_CTX \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DESTROY_CTX, \
+		 struct amdxdna_drm_destroy_ctx)
 
-#define DRM_IOCTL_AMDXDNA_CONFIG_HWCTX \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CONFIG_HWCTX, \
-		 struct amdxdna_drm_config_hwctx)
+#define DRM_IOCTL_AMDXDNA_CONFIG_CTX \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CONFIG_CTX, \
+		 struct amdxdna_drm_config_ctx)
 
 #define DRM_IOCTL_AMDXDNA_CREATE_BO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_BO, \

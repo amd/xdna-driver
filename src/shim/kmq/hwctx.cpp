@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "hwctx.h"
 #include "hwq.h"
@@ -12,7 +12,7 @@ namespace {
 
 // For debug only
 void
-print_cu_config(amdxdna_hwctx_param_config_cu *config)
+print_cu_config(amdxdna_ctx_param_config_cu *config)
 {
   auto n = config->num_cus;
   auto conf = config->cu_configs;
@@ -33,8 +33,8 @@ hw_ctx_kmq(const device& device, const xrt::xclbin& xclbin, const xrt::hw_contex
 
   auto cu_info = get_cu_info();
   std::vector<char> cu_conf_param_buf(
-    sizeof(amdxdna_hwctx_param_config_cu) + cu_info.size() * sizeof(amdxdna_cu_config));
-  auto cu_conf_param = reinterpret_cast<amdxdna_hwctx_param_config_cu *>(cu_conf_param_buf.data());
+    sizeof(amdxdna_ctx_param_config_cu) + cu_info.size() * sizeof(amdxdna_cu_config));
+  auto cu_conf_param = reinterpret_cast<amdxdna_ctx_param_config_cu *>(cu_conf_param_buf.data());
 
   cu_conf_param->num_cus = cu_info.size();
   xcl_bo_flags f = {};
@@ -56,12 +56,12 @@ hw_ctx_kmq(const device& device, const xrt::xclbin& xclbin, const xrt::hw_contex
 
   print_cu_config(cu_conf_param);
 
-  amdxdna_drm_config_hwctx arg = {};
+  amdxdna_drm_config_ctx arg = {};
   arg.handle = get_slotidx();
-  arg.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
+  arg.param_type = DRM_AMDXDNA_CTX_CONFIG_CU;
   arg.param_val = reinterpret_cast<uintptr_t>(cu_conf_param);
   arg.param_val_size = cu_conf_param_buf.size();
-  get_device().get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
+  get_device().get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CONFIG_CTX, &arg);
 
   shim_debug("Created KMQ HW context (%d)", get_slotidx());
 }
