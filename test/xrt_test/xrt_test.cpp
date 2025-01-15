@@ -317,9 +317,9 @@ TEST_xrt_umq_df_bw(int device_index, arg_type& arg)
 
   xrt_bo bo_ifm{device, rw_size, xrt::bo::flags::cacheable};
   xrt_bo bo_ofm{device, rw_size, xrt::bo::flags::cacheable};
-  auto p = bo_ifm.map();
+  auto ifm_mapped = bo_ifm.map();
   for (uint32_t i = 0; i < rw_size / sizeof(uint32_t); i++) {
-    p[i] = data;
+    ifm_mapped[i] = data;
   }
 
   // Setting args for patching control code buffer
@@ -335,11 +335,11 @@ TEST_xrt_umq_df_bw(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
   // Check result
-  p = bo_ofm.map();
+  auto ofm_mapped = bo_ofm.map();
   int err = 0;
   for (uint32_t i = 0; i < rw_size / sizeof(uint32_t); i++) {
-    if (p[i] != 0) {
-      std::cout << "error@" << i <<": " << p[i] << ", expecting: " << 0 << std::endl;
+    if (ofm_mapped[i] != ifm_mapped[i]) {
+      std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << ifm_mapped[i] << std::endl;
       err++;
     }
   }
