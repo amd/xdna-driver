@@ -176,7 +176,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 		list_del_init(&client->node);
 		mutex_unlock(&xdna->dev_lock);
 
-		amdxdna_hwctx_remove_all(client);
+		amdxdna_ctx_remove_all(client);
 
 		mutex_lock(&xdna->dev_lock);
 		client = list_first_entry_or_null(&xdna->client_list,
@@ -213,7 +213,7 @@ static int amdxdna_pmops_suspend(struct device *dev)
 
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node)
-		amdxdna_hwctx_suspend(client);
+		amdxdna_ctx_suspend(client);
 
 	amdxdna_dev_suspend_nolock(xdna);
 	mutex_unlock(&xdna->dev_lock);
@@ -236,9 +236,9 @@ static int amdxdna_pmops_resume(struct device *dev)
 		return ret;
 	}
 
-	XDNA_INFO(xdna, "hardware context resuming...");
+	XDNA_INFO(xdna, "context resuming...");
 	list_for_each_entry(client, &xdna->client_list, node)
-		amdxdna_hwctx_resume(client);
+		amdxdna_ctx_resume(client);
 	mutex_unlock(&xdna->dev_lock);
 
 	return 0;

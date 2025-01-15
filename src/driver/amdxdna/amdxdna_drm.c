@@ -57,8 +57,8 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 #ifdef AMDXDNA_DEVEL
 skip_sva_bind:
 #endif
-	init_srcu_struct(&client->hwctx_srcu);
-	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
+	init_srcu_struct(&client->ctx_srcu);
+	xa_init_flags(&client->ctx_xa, XA_FLAGS_ALLOC);
 	mutex_init(&client->mm_lock);
 
 	mutex_lock(&xdna->dev_lock);
@@ -94,8 +94,8 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 
 	XDNA_DBG(xdna, "Closing PID %d", client->pid);
 
-	xa_destroy(&client->hwctx_xa);
-	cleanup_srcu_struct(&client->hwctx_srcu);
+	xa_destroy(&client->ctx_xa);
+	cleanup_srcu_struct(&client->ctx_srcu);
 	mutex_destroy(&client->mm_lock);
 	if (client->dev_heap)
 		drm_gem_object_put(to_gobj(client->dev_heap));
@@ -138,7 +138,7 @@ static int amdxdna_flush(struct file *f, fl_owner_t id)
 	mutex_lock(&xdna->dev_lock);
 	list_del_init(&client->node);
 	mutex_unlock(&xdna->dev_lock);
-	amdxdna_hwctx_remove_all(client);
+	amdxdna_ctx_remove_all(client);
 
 	drm_dev_exit(idx);
 	return 0;
@@ -196,9 +196,9 @@ static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struc
 
 static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	/* Context */
-	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_HWCTX, amdxdna_drm_create_hwctx_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_DESTROY_HWCTX, amdxdna_drm_destroy_hwctx_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_CONFIG_HWCTX, amdxdna_drm_config_hwctx_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_CTX, amdxdna_drm_create_ctx_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_DESTROY_CTX, amdxdna_drm_destroy_ctx_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_CONFIG_CTX, amdxdna_drm_config_ctx_ioctl, 0),
 	/* BO */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_BO, amdxdna_drm_create_bo_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_BO_INFO, amdxdna_drm_get_bo_info_ioctl, 0),

@@ -65,7 +65,7 @@
 #define SMU_DPM_TABLE_ENTRY(ndev, level) \
 	(&(ndev)->smu.dpm_table[level])
 
-struct amdxdna_hwctx_priv;
+struct amdxdna_ctx_priv;
 struct xrs_action_load;
 
 enum aie2_smu_reg_idx {
@@ -167,7 +167,7 @@ struct dpm_clk_freq {
 };
 
 #ifdef AMDXDNA_DEVEL
-struct hwctx_pdi {
+struct ctx_pdi {
 	int			id;
 	int			registered;
 	size_t			size;
@@ -177,22 +177,22 @@ struct hwctx_pdi {
 #endif
 
 /*
- * Define the maximum number of pending commands in a hardware context.
+ * Define the maximum number of pending commands in a context.
  * Must be power of 2!
  */
-#define HWCTX_MAX_CMDS		4
-#define get_job_idx(seq) ((seq) & (HWCTX_MAX_CMDS - 1))
-struct amdxdna_hwctx_priv {
+#define CTX_MAX_CMDS		4
+#define get_job_idx(seq) ((seq) & (CTX_MAX_CMDS - 1))
+struct amdxdna_ctx_priv {
 	struct amdxdna_gem_obj		*heap;
 #ifdef AMDXDNA_DEVEL
-	struct hwctx_pdi		*pdi_infos;
+	struct ctx_pdi			*pdi_infos;
 #endif
 
-	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
+	struct amdxdna_gem_obj		*cmd_buf[CTX_MAX_CMDS];
 
 	struct mutex			io_lock; /* protect seq and cmd order */
 #ifdef AMDXDNA_DEVEL
-	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
+	struct amdxdna_sched_job	*pending[CTX_MAX_CMDS];
 #endif
 	struct semaphore		job_sem;
 
@@ -202,7 +202,7 @@ struct amdxdna_hwctx_priv {
 	/* Driver needs to wait for all jobs freed before fini DRM scheduler */
 	wait_queue_head_t		job_free_waitq;
 
-	/* Firmware context related in below */
+	/* Hardware context related in below */
 	u32				id;
 	void				*mbox_chann;
 	struct drm_gpu_scheduler	sched;
@@ -257,7 +257,7 @@ struct amdxdna_dev_hdl {
 	struct async_events		*async_events;
 
 	u32				dev_status;
-	u32				hwctx_num;
+	u32				ctx_num;
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
@@ -366,54 +366,54 @@ int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *ver
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 				struct amdxdna_fw_ver *fw_ver);
-int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx,
+int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			struct xdna_mailbox_chann_info *info);
-int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
+int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_query_status(struct amdxdna_dev_hdl *ndev, char *buf, u32 size, u32 *cols_filled);
 int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void*, const u32 *, size_t));
 int aie2_self_test(struct amdxdna_dev_hdl *ndev);
 #ifdef AMDXDNA_DEVEL
-int aie2_register_pdis(struct amdxdna_hwctx *hwctx);
-int aie2_unregister_pdis(struct amdxdna_hwctx *hwctx);
-int aie2_legacy_config_cu(struct amdxdna_hwctx *hwctx);
+int aie2_register_pdis(struct amdxdna_ctx *ctx);
+int aie2_unregister_pdis(struct amdxdna_ctx *ctx);
+int aie2_legacy_config_cu(struct amdxdna_ctx *ctx);
 #endif
 
-int aie2_config_cu(struct amdxdna_hwctx *hwctx);
-int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+int aie2_config_cu(struct amdxdna_ctx *ctx);
+int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, const u32 *, size_t));
-int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
+int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 				struct amdxdna_sched_job *job,
 				int (*notify_cb)(void *, const u32 *, size_t));
-int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
+int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 			       struct amdxdna_sched_job *job,
 			       int (*notify_cb)(void *, const u32 *, size_t));
-int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+int aie2_sync_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, const u32 *, size_t));
-int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+int aie2_config_debug_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 			 int (*notify_cb)(void *, const u32 *, size_t));
 
-/* aie2_hwctx.c */
-int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);
-void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx);
-int aie2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
-void aie2_hwctx_suspend(struct amdxdna_hwctx *hwctx);
-void aie2_hwctx_resume(struct amdxdna_hwctx *hwctx);
-int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+/* aie2_ctx.c */
+int aie2_ctx_init(struct amdxdna_ctx *ctx);
+void aie2_ctx_fini(struct amdxdna_ctx *ctx);
+int aie2_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
+void aie2_ctx_suspend(struct amdxdna_ctx *ctx);
+void aie2_ctx_resume(struct amdxdna_ctx *ctx);
+int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
-int aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
-struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_hwctx *hwctx, u64 seq);
+int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
+struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_ctx *ctx, u64 seq);
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 void aie2_stop_ctx(struct amdxdna_client *client);
 void aie2_dump_ctx(struct amdxdna_client *client);
 void aie2_restart_ctx(struct amdxdna_client *client);
 
-/* aie2_fwctx.c */
-int aie2_fwctx_start(struct amdxdna_hwctx *hwctx);
-void aie2_fwctx_stop(struct amdxdna_hwctx *hwctx);
-void aie2_fwctx_free(struct amdxdna_hwctx *hwctx);
-int aie2_xrs_load_fwctx(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
-int aie2_xrs_unload_fwctx(struct amdxdna_hwctx *hwctx);
+/* aie2_hwctx.c */
+int aie2_hwctx_start(struct amdxdna_ctx *ctx);
+void aie2_hwctx_stop(struct amdxdna_ctx *ctx);
+void aie2_hwctx_free(struct amdxdna_ctx *ctx);
+int aie2_xrs_load_hwctx(struct amdxdna_ctx *ctx, struct xrs_action_load *action);
+int aie2_xrs_unload_hwctx(struct amdxdna_ctx *ctx);
 
 #endif /* _AIE2_PCI_H_ */

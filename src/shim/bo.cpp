@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "shim_debug.h"
@@ -64,23 +64,23 @@ unmap_drm_bo(const shim_xdna::pdev& dev, void* addr, size_t size)
 void
 attach_dbg_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
 {
-  amdxdna_drm_config_hwctx adbo = {
+  amdxdna_drm_config_ctx adbo = {
     .handle = ctx_id,
-    .param_type = DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
+    .param_type = DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF,
     .param_val = boh,
   };
-  dev.ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  dev.ioctl(DRM_IOCTL_AMDXDNA_CONFIG_CTX, &adbo);
 }
 
 void
 detach_dbg_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, uint32_t ctx_id)
 {
-  amdxdna_drm_config_hwctx adbo = {
+  amdxdna_drm_config_ctx adbo = {
     .handle = ctx_id,
-    .param_type = DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
+    .param_type = DRM_AMDXDNA_CTX_REMOVE_DBG_BUF,
     .param_val = boh,
   };
-  dev.ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  dev.ioctl(DRM_IOCTL_AMDXDNA_CONFIG_CTX, &adbo);
 }
 
 int

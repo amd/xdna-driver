@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "device.h"
 #include "pcidev.h"
@@ -14,12 +14,12 @@ namespace {
   ioctl_cmd2name(unsigned long cmd)
   {
     switch(cmd) {
-    case DRM_IOCTL_AMDXDNA_CREATE_HWCTX:
-      return "DRM_IOCTL_AMDXDNA_CREATE_HWCTX";
-    case DRM_IOCTL_AMDXDNA_DESTROY_HWCTX:
-      return "DRM_IOCTL_AMDXDNA_DESTROY_HWCTX";
-    case DRM_IOCTL_AMDXDNA_CONFIG_HWCTX:
-      return "DRM_IOCTL_AMDXDNA_CONFIG_HWCTX";
+    case DRM_IOCTL_AMDXDNA_CREATE_CTX:
+      return "DRM_IOCTL_AMDXDNA_CREATE_CTX";
+    case DRM_IOCTL_AMDXDNA_DESTROY_CTX:
+      return "DRM_IOCTL_AMDXDNA_DESTROY_CTX";
+    case DRM_IOCTL_AMDXDNA_CONFIG_CTX:
+      return "DRM_IOCTL_AMDXDNA_CONFIG_CTX";
     case DRM_IOCTL_AMDXDNA_CREATE_BO:
       return "DRM_IOCTL_AMDXDNA_CREATE_BO";
     case DRM_IOCTL_AMDXDNA_GET_BO_INFO:

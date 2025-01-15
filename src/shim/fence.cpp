@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "fence.h"
 #include "drm_local/amdxdna_accel.h"
@@ -113,7 +113,7 @@ submit_wait_syncobjs(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
   wait_syncobj_available(dev, sobj_hdls, points, num);
 
   amdxdna_drm_exec_cmd ecmd = {
-    .hwctx = ctx->get_slotidx(),
+    .ctx = ctx->get_slotidx(),
     .type = AMDXDNA_CMD_SUBMIT_DEPENDENCY,
     .cmd_handles = reinterpret_cast<uintptr_t>(sobj_hdls),
     .args = reinterpret_cast<uintptr_t>(points),
@@ -128,7 +128,7 @@ submit_signal_syncobj(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
   uint32_t sobj_hdl, uint64_t point)
 {
   amdxdna_drm_exec_cmd ecmd = {
-    .hwctx = ctx->get_slotidx(),
+    .ctx = ctx->get_slotidx(),
     .type = AMDXDNA_CMD_SUBMIT_SIGNAL,
     .cmd_handles = sobj_hdl,
     .args = point,

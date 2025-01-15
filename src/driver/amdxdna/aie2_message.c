@@ -255,7 +255,7 @@ int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx,
+int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			struct xdna_mailbox_chann_info *info)
 {
 	DECLARE_AIE2_MSG(create_ctx, MSG_OP_CREATE_CONTEXT);
@@ -264,29 +264,29 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	u32 priority;
 	int ret;
 
-	ret = map_app_priority_to_fw(hwctx->qos.priority, &priority);
+	ret = map_app_priority_to_fw(ctx->qos.priority, &priority);
 	if (ret) {
-		XDNA_ERR(xdna, "Invalid context priority: 0x%x\n", hwctx->qos.priority);
+		XDNA_ERR(xdna, "Invalid context priority: 0x%x\n", ctx->qos.priority);
 		return ret;
 	}
 
 	req.aie_type = 1;
-	req.start_col = hwctx->start_col;
-	req.num_col = hwctx->num_col;
+	req.start_col = ctx->start_col;
+	req.num_col = ctx->num_col;
 	req.num_cq_pairs_requested = 1;
-	req.pasid = hwctx->client->pasid;
+	req.pasid = ctx->client->pasid;
 	req.context_priority = priority;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		return ret;
 
-	hwctx->priv->id = resp.context_id;
-	WARN_ONCE(hwctx->priv->id == -1, "Unexpected context id");
+	ctx->priv->id = resp.context_id;
+	WARN_ONCE(ctx->priv->id == -1, "Unexpected context id");
 
 	if (ndev->force_preempt_enabled) {
 		ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FORCE_PREEMPTION,
-				   &hwctx->priv->id);
+				   &ctx->priv->id);
 		if (ret)
 			XDNA_WARN(ndev->xdna, "Failed to config force preemption");
 	}
@@ -304,29 +304,29 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	info->i2x.rb_size	  = cq_pair->i2x_q.buf_size;
 
 	aie2_calc_intr_reg(info);
-	XDNA_DBG(xdna, "%s created fw ctx %d pasid %d priority %d", hwctx->name,
-		 hwctx->priv->id, hwctx->client->pasid, priority);
+	XDNA_DBG(xdna, "%s created fw ctx %d pasid %d priority %d", ctx->name,
+		 ctx->priv->id, ctx->client->pasid, priority);
 
 	return 0;
 }
 
-int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx)
+int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE2_MSG(destroy_ctx, MSG_OP_DESTROY_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	if (hwctx->priv->id == -1)
+	if (ctx->priv->id == -1)
 		return 0;
 
-	req.context_id = hwctx->priv->id;
+	req.context_id = ctx->priv->id;
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
-		XDNA_WARN(xdna, "%s destroy context failed, ret %d", hwctx->name, ret);
+		XDNA_WARN(xdna, "%s destroy context failed, ret %d", ctx->name, ret);
 
-	trace_amdxdna_debug_point(hwctx->name, 0, "channel destroyed");
-	XDNA_DBG(xdna, "%s destroyed fw ctx %d", hwctx->name, hwctx->priv->id);
-	hwctx->priv->id = -1;
+	trace_amdxdna_debug_point(ctx->name, 0, "channel destroyed");
+	XDNA_DBG(xdna, "%s destroyed fw ctx %d", ctx->name, ctx->priv->id);
+	ctx->priv->id = -1;
 
 	return ret;
 }
@@ -370,8 +370,8 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	DECLARE_AIE2_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_client *client;
-	struct amdxdna_hwctx *hwctx;
-	unsigned long hwctx_id;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
 	dma_addr_t dma_addr;
 	u32 aie_bitmap = 0;
 	u8 *buff_addr;
@@ -382,12 +382,12 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	if (!buff_addr)
 		return -ENOMEM;
 
-	/* Go through each hardware context and mark the AIE columns that are active */
+	/* Go through each context and mark the AIE columns that are active */
 	list_for_each_entry(client, &xdna->client_list, node) {
-		idx = srcu_read_lock(&client->hwctx_srcu);
-		amdxdna_for_each_hwctx(client, hwctx_id, hwctx)
-			aie_bitmap |= amdxdna_hwctx_col_map(hwctx);
-		srcu_read_unlock(&client->hwctx_srcu, idx);
+		idx = srcu_read_lock(&client->ctx_srcu);
+		amdxdna_for_each_ctx(client, ctx_id, ctx)
+			aie_bitmap |= amdxdna_ctx_col_map(ctx);
+		srcu_read_unlock(&client->ctx_srcu, idx);
 	}
 
 	*cols_filled = 0;
@@ -449,10 +449,10 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 }
 
 /* Below messages are to hardware context mailbox channel */
-int aie2_config_cu(struct amdxdna_hwctx *hwctx)
+int aie2_config_cu(struct amdxdna_ctx *ctx)
 {
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct mailbox_channel *chann = ctx->priv->mbox_chann;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	u32 shift = xdna->dev_info->dev_mem_buf_shift;
 	DECLARE_AIE2_MSG(config_cu, MSG_OP_CONFIG_CU);
 	struct drm_gem_object *gobj;
@@ -462,15 +462,15 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx)
 	if (!chann)
 		return -ENODEV;
 
-	if (hwctx->cus->num_cus > MAX_NUM_CUS) {
+	if (ctx->cus->num_cus > MAX_NUM_CUS) {
 		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
 		return -EINVAL;
 	}
 
-	for (i = 0; i < hwctx->cus->num_cus; i++) {
-		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
+	for (i = 0; i < ctx->cus->num_cus; i++) {
+		struct amdxdna_cu_config *cu = &ctx->cus->cu_configs[i];
 
-		gobj = drm_gem_object_lookup(hwctx->client->filp, cu->cu_bo);
+		gobj = drm_gem_object_lookup(ctx->client->filp, cu->cu_bo);
 		if (!gobj) {
 			XDNA_ERR(xdna, "Lookup GEM object failed");
 			return -EINVAL;
@@ -490,11 +490,11 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx)
 			 abo->mem.dev_addr, req.cfgs[i]);
 		drm_gem_object_put(gobj);
 	}
-	req.num_cus = hwctx->cus->num_cus;
+	req.num_cus = ctx->cus->num_cus;
 
 	ret = xdna_send_msg_wait(xdna, chann, &msg);
 	if (ret == -ETIME)
-		aie2_destroy_context(xdna->dev_handle, hwctx);
+		aie2_destroy_context(xdna->dev_handle, ctx);
 
 	if (resp.status == AIE2_STATUS_SUCCESS) {
 		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
@@ -506,11 +506,11 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx)
 	return ret;
 }
 
-int aie2_execbuf(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, const u32 *, size_t))
 {
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct mailbox_channel *chann = ctx->priv->mbox_chann;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	union {
 		struct exec_dpu_preempt_req dpu_pmpt;
@@ -705,7 +705,7 @@ aie2_cmdlist_get_cmd_buf(struct amdxdna_sched_job *job)
 {
 	int idx = get_job_idx(job->seq);
 
-	return job->hwctx->priv->cmd_buf[idx];
+	return job->ctx->priv->cmd_buf[idx];
 }
 
 static inline void
@@ -733,13 +733,13 @@ aie2_cmd_op_to_msg_op(u32 op)
 	}
 }
 
-int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
+int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 			       struct amdxdna_sched_job *job,
 			       int (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct amdxdna_gem_obj *cmdbuf_abo = aie2_cmdlist_get_cmd_buf(job);
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
-	struct amdxdna_client *client = hwctx->client;
+	struct mailbox_channel *chann = ctx->priv->mbox_chann;
+	struct amdxdna_client *client = ctx->client;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_cmd_chain *payload;
 	struct xdna_mailbox_msg msg;
@@ -791,7 +791,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 	msg.send_size = sizeof(req);
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
-		XDNA_ERR(hwctx->client->xdna, "Send message failed");
+		XDNA_ERR(ctx->client->xdna, "Send message failed");
 		return ret;
 	}
 	job->msg_id = msg.id;
@@ -799,12 +799,12 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 	return 0;
 }
 
-int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
+int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 				struct amdxdna_sched_job *job,
 				int (*notify_cb)(void *, const u32 *, size_t))
 {
 	struct amdxdna_gem_obj *cmdbuf_abo = aie2_cmdlist_get_cmd_buf(job);
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct mailbox_channel *chann = ctx->priv->mbox_chann;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct xdna_mailbox_msg msg;
 	struct cmd_chain_req req;
@@ -828,7 +828,7 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 	msg.send_size = sizeof(req);
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
-		XDNA_ERR(hwctx->client->xdna, "Send message failed");
+		XDNA_ERR(ctx->client->xdna, "Send message failed");
 		return ret;
 	}
 	job->msg_id = msg.id;
@@ -836,12 +836,12 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 	return 0;
 }
 
-int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+int aie2_sync_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, const u32 *, size_t))
 {
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct mailbox_channel *chann = ctx->priv->mbox_chann;
 	struct amdxdna_gem_obj *abo = to_xdna_obj(job->bos[0].obj);
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct xdna_mailbox_msg msg;
 	struct sync_bo_req req;
 	int ret;
@@ -873,18 +873,18 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 	return 0;
 }
 
-int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+int aie2_config_debug_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 			 int (*notify_cb)(void *, const u32 *, size_t))
 {
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct mailbox_channel *chann = ctx->priv->mbox_chann;
 	struct amdxdna_gem_obj *abo = to_xdna_obj(job->bos[0].obj);
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct config_debug_bo_req req;
 	struct xdna_mailbox_msg msg;
 	int ret;
 
 	req.config = (job->opcode == OP_REG_DEBUG_BO) ? REGISTER : UNREGISTER;
-	req.offset = abo->mem.dev_addr - hwctx->client->dev_heap->mem.dev_addr;
+	req.offset = abo->mem.dev_addr - ctx->client->dev_heap->mem.dev_addr;
 	req.size = abo->mem.size;
 
 	XDNA_DBG(xdna, "offset 0x%llx size 0x%llx config %d",
@@ -907,15 +907,15 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 }
 
 #ifdef AMDXDNA_DEVEL
-int aie2_register_pdis(struct amdxdna_hwctx *hwctx)
+int aie2_register_pdis(struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE2_MSG(register_pdi, MSG_OP_REGISTER_PDI);
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	int num_cus = hwctx->cus->num_cus;
+	int num_cus = ctx->cus->num_cus;
 	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
-	struct hwctx_pdi *pdi;
+	struct ctx_pdi *pdi;
 	int i, ret;
 
 	if (num_cus > MAX_NUM_CUS) {
@@ -923,16 +923,16 @@ int aie2_register_pdis(struct amdxdna_hwctx *hwctx)
 		return -EINVAL;
 	}
 
-	hwctx->priv->pdi_infos = kcalloc(num_cus, sizeof(*hwctx->priv->pdi_infos), GFP_KERNEL);
-	if (!hwctx->priv->pdi_infos)
+	ctx->priv->pdi_infos = kcalloc(num_cus, sizeof(*ctx->priv->pdi_infos), GFP_KERNEL);
+	if (!ctx->priv->pdi_infos)
 		return -ENOMEM;
 
 	req.num_infos = 1;
 	for (i = 0; i < num_cus; i++) {
-		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
+		struct amdxdna_cu_config *cu = &ctx->cus->cu_configs[i];
 
-		pdi = &hwctx->priv->pdi_infos[i];
-		gobj = drm_gem_object_lookup(hwctx->client->filp, cu->cu_bo);
+		pdi = &ctx->priv->pdi_infos[i];
+		gobj = drm_gem_object_lookup(ctx->client->filp, cu->cu_bo);
 		if (!gobj) {
 			XDNA_ERR(xdna, "Lookup GEM object failed");
 			ret = -EINVAL;
@@ -991,22 +991,22 @@ int aie2_register_pdis(struct amdxdna_hwctx *hwctx)
 	return 0;
 
 cleanup:
-	aie2_unregister_pdis(hwctx);
+	aie2_unregister_pdis(ctx);
 	return ret;
 }
 
-int aie2_unregister_pdis(struct amdxdna_hwctx *hwctx)
+int aie2_unregister_pdis(struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE2_MSG(unregister_pdi, MSG_OP_UNREGISTER_PDI);
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	int num_cus = hwctx->cus->num_cus;
-	struct hwctx_pdi *pdi;
+	int num_cus = ctx->cus->num_cus;
+	struct ctx_pdi *pdi;
 	int ret, i;
 
 	req.num_pdi = 1;
 	for (i = 0; i < num_cus; i++) {
-		pdi = &hwctx->priv->pdi_infos[i];
+		pdi = &ctx->priv->pdi_infos[i];
 
 		if (pdi->registered) {
 			req.pdi_id = pdi->id;
@@ -1030,37 +1030,37 @@ int aie2_unregister_pdis(struct amdxdna_hwctx *hwctx)
 			ida_free(&xdna->pdi_ida, pdi->id);
 	}
 
-	kfree(hwctx->priv->pdi_infos);
+	kfree(ctx->priv->pdi_infos);
 	return 0;
 }
 
-int aie2_legacy_config_cu(struct amdxdna_hwctx *hwctx)
+int aie2_legacy_config_cu(struct amdxdna_ctx *ctx)
 {
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
+	struct mailbox_channel *chann = ctx->priv->mbox_chann;
 	DECLARE_AIE2_MSG(legacy_config_cu, MSG_OP_LEGACY_CONFIG_CU);
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	int ret, i;
 
 	if (!chann)
 		return -ENODEV;
 
-	if (hwctx->cus->num_cus > MAX_NUM_CUS) {
+	if (ctx->cus->num_cus > MAX_NUM_CUS) {
 		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
 		return -EINVAL;
 	}
 
-	req.num_cus = hwctx->cus->num_cus;
+	req.num_cus = ctx->cus->num_cus;
 	for (i = 0; i < req.num_cus; i++) {
-		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
+		struct amdxdna_cu_config *cu = &ctx->cus->cu_configs[i];
 
 		req.configs[i].cu_idx = i;
 		req.configs[i].cu_func = cu->cu_func;
-		req.configs[i].cu_pdi_id = hwctx->priv->pdi_infos[i].id;
+		req.configs[i].cu_pdi_id = ctx->priv->pdi_infos[i].id;
 	}
 
 	ret = xdna_send_msg_wait(xdna, chann, &msg);
 	if (ret == -ETIME)
-		aie2_destroy_context(xdna->dev_handle, hwctx);
+		aie2_destroy_context(xdna->dev_handle, ctx);
 
 	XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
 

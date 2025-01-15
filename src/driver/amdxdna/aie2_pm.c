@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
  */
 
 #include "aie2_pci.h"
@@ -68,8 +68,8 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 
 	switch (target) {
 	case POWER_MODE_TURBO:
-		if (ndev->hwctx_num) {
-			XDNA_ERR(xdna, "Can not set turbo when there is active hwctx");
+		if (ndev->ctx_num) {
+			XDNA_ERR(xdna, "Can not set turbo when there is active ctx");
 			return -EINVAL;
 		}
 

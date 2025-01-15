@@ -20,9 +20,9 @@ static void amdxdna_tdr_work(struct work_struct *work)
 {
 	struct amdxdna_tdr *tdr = to_tdr(work);
 	struct amdxdna_client *client;
-	struct amdxdna_hwctx *hwctx;
+	struct amdxdna_ctx *ctx;
 	struct amdxdna_dev *xdna;
-	unsigned long hwctx_id;
+	unsigned long ctx_id;
 	bool active = false;
 	int idle_cnt = 0;
 	int ctx_cnt = 0;
@@ -30,16 +30,16 @@ static void amdxdna_tdr_work(struct work_struct *work)
 	xdna = tdr_to_xdna_dev(tdr);
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
-		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-			if (!FIELD_GET(HWCTX_STATE_READY, hwctx->status))
+		amdxdna_for_each_ctx(client, ctx_id, ctx) {
+			if (!FIELD_GET(CTX_STATE_READY, ctx->status))
 				continue;
 
-			u64 completed = hwctx->completed; /* To avoid race */
-			u64 last = hwctx->tdr_last_completed;
-			u64 submitted = hwctx->submitted;
+			u64 completed = ctx->completed; /* To avoid race */
+			u64 last = ctx->tdr_last_completed;
+			u64 submitted = ctx->submitted;
 
 			XDNA_DBG(xdna, "%s submitted %lld completed %lld last %lld",
-				 hwctx->name, submitted, completed, last);
+				 ctx->name, submitted, completed, last);
 			ctx_cnt++;
 			if (submitted == completed) {
 				idle_cnt++;
@@ -47,7 +47,7 @@ static void amdxdna_tdr_work(struct work_struct *work)
 			}
 
 			if (last != completed) {
-				hwctx->tdr_last_completed = completed;
+				ctx->tdr_last_completed = completed;
 				active = true;
 				break;
 			}

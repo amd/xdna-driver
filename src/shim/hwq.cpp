@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "hwq.h"
@@ -47,7 +47,7 @@ void
 wait_cmd_ioctl(const shim_xdna::pdev& pdev, uint32_t ctx_id, uint64_t seq, uint32_t timeout_ms)
 {
   amdxdna_drm_wait_cmd wcmd = {
-    .hwctx = ctx_id,
+    .ctx = ctx_id,
     .timeout = timeout_ms,
     .seq = seq,
   };

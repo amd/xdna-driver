@@ -19,7 +19,7 @@
 #include "amdxdna_gem_dma.h"
 #endif
 
-struct amdxdna_hwctx_priv;
+struct amdxdna_ctx_priv;
 
 enum ert_cmd_opcode {
 	ERT_START_CU		= 0,
@@ -89,9 +89,9 @@ struct amdxdna_cmd {
 	u32 data[];
 };
 
-struct amdxdna_hwctx {
+struct amdxdna_ctx {
 	struct amdxdna_client		*client;
-	struct amdxdna_hwctx_priv	*priv;
+	struct amdxdna_ctx_priv		*priv;
 	char				*name;
 
 	u32				id;
@@ -106,23 +106,23 @@ struct amdxdna_hwctx {
 	u32				log_buf_bo;
 	u32				doorbell_offset;
 /*
- * Set HWCTX_STATE_CONNECTED bit means hardware context is associated
+ * Set CTX_STATE_CONNECTED bit means context is associated
  * with firmware context
  */
-#define HWCTX_STATE_CONNECTED		BIT(0)
+#define CTX_STATE_CONNECTED	BIT(0)
 /*
- * Set HWCTX_STATE_READY bit means hardware/firmware context is ready
+ * Set CTX_STATE_READY bit means context is ready
  * to accept commands
  */
-#define HWCTX_STATE_READY		BIT(1)
+#define CTX_STATE_READY		BIT(1)
 /*
- * Set HWCTX_STATE_DEAD bit means hardware context marked as dead by TDR.
+ * Set CTX_STATE_DEAD bit means context marked as dead by TDR.
  */
-#define HWCTX_STATE_DEAD		BIT(2)
+#define CTX_STATE_DEAD		BIT(2)
 	u32				status;
 
 	struct amdxdna_qos_info		     qos;
-	struct amdxdna_hwctx_param_config_cu *cus;
+	struct amdxdna_ctx_param_config_cu *cus;
 
 	/* Submitted, completed, freed job counter */
 	u64				submitted;
@@ -146,7 +146,7 @@ struct amdxdna_job_bo {
 struct amdxdna_sched_job {
 	struct drm_sched_job	base;
 	struct kref		refcnt;
-	struct amdxdna_hwctx	*hwctx;
+	struct amdxdna_ctx	*ctx;
 	struct mm_struct	*mm;
 	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
@@ -237,33 +237,33 @@ amdxdna_cmd_get_cu_idx(struct amdxdna_gem_obj *abo)
 	return cu_idx;
 }
 
-static inline u32 amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx)
+static inline u32 amdxdna_ctx_col_map(struct amdxdna_ctx *ctx)
 {
-	return GENMASK(hwctx->start_col + hwctx->num_col - 1,
-		       hwctx->start_col);
+	return GENMASK(ctx->start_col + ctx->num_col - 1,
+		       ctx->start_col);
 }
 
-void amdxdna_hwctx_wait_jobs(struct amdxdna_hwctx *hwctx, long timeout);
+void amdxdna_ctx_wait_jobs(struct amdxdna_ctx *ctx, long timeout);
 void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job);
-void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
-void amdxdna_hwctx_suspend(struct amdxdna_client *client);
-void amdxdna_hwctx_resume(struct amdxdna_client *client);
+void amdxdna_ctx_remove_all(struct amdxdna_client *client);
+void amdxdna_ctx_suspend(struct amdxdna_client *client);
+void amdxdna_ctx_resume(struct amdxdna_client *client);
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
 void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 cmd_bo_hdls, u32 *arg_bo_hdls, u32 arg_bo_cnt,
 		       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt,
-		       u32 hwctx_hdl, u64 *seq);
+		       u32 ctx_hdl, u64 *seq);
 
-int amdxdna_cmd_wait(struct amdxdna_client *client, u32 hwctx_hdl,
+int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
 		     u64 seq, u32 timeout);
 
-int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
-int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
-int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_destroy_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
-int amdxdna_drm_create_hwctx_unsec_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_create_ctx_unsec_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 
 #endif /* _AMDXDNA_CTX_H_ */

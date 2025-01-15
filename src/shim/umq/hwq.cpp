@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <x86intrin.h>
 #include "bo.h"
@@ -52,7 +52,7 @@ wait_slot(const shim_xdna::pdev& pdev, const shim_xdna::hw_ctx *ctx,
   shim_debug("waiting for cmd_id (%ld)...", cmd_id);
 
   amdxdna_drm_wait_cmd wcmd = {
-    .hwctx = ctx->get_slotidx(),
+    .ctx = ctx->get_slotidx(),
     .timeout = timeout_ms,
     .seq = cmd_id,
   };

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AIE2_SOLVER_H
@@ -81,8 +81,8 @@ struct clk_list_info {
 };
 
 struct xrs_action_ops {
-	int (*load_hwctx)(struct amdxdna_hwctx *hwctx, struct xrs_action_load *action);
-	int (*unload_hwctx)(struct amdxdna_hwctx *hwctx);
+	int (*load_hwctx)(struct amdxdna_ctx *ctx, struct xrs_action_load *action);
+	int (*unload_hwctx)(struct amdxdna_ctx *ctx);
 	int (*set_dft_dpm_level)(struct drm_device *ddev, u32 level);
 };
 
@@ -117,7 +117,7 @@ void *xrsm_init(struct init_config *cfg);
  * @hdl:	Resource solver handle obtained from xrs_init()
  * @req:	Input to the Resource solver including request id
  *		and partition metadata.
- * @hwctx:	The given context
+ * @ctx:	The given context
  *
  * Return:	0 when successful.
  *		Or standard error number when failing
@@ -127,7 +127,7 @@ void *xrsm_init(struct init_config *cfg);
  *      the caller's responsibility to lock down XCLBINs and grab
  *      necessary lock.
  */
-int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_hwctx *hwctx);
+int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct amdxdna_ctx *ctx);
 
 /*
  * xrs_release_resource() - Request to free resources for a given context.

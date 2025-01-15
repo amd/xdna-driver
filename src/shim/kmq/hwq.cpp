@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "hwq.h"
@@ -30,7 +30,7 @@ issue_command(xrt_core::buffer_handle *cmd_bo)
   uint32_t cmd_bo_hdl = boh->get_drm_bo_handle();
 
   amdxdna_drm_exec_cmd ecmd = {
-    .hwctx = m_hwctx->get_slotidx(),
+    .ctx = m_hwctx->get_slotidx(),
     .type = AMDXDNA_CMD_SUBMIT_EXEC_BUF,
     .cmd_handles = cmd_bo_hdl,
     .args = reinterpret_cast<uintptr_t>(arg_bo_hdls),
