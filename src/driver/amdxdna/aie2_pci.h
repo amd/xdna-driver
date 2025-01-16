@@ -397,9 +397,9 @@ int aie2_config_debug_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 /* aie2_ctx.c */
 int aie2_ctx_init(struct amdxdna_ctx *ctx);
 void aie2_ctx_fini(struct amdxdna_ctx *ctx);
+int aie2_ctx_connect(struct amdxdna_ctx *ctx);
+void aie2_ctx_disconnect(struct amdxdna_ctx *ctx);
 int aie2_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
-void aie2_ctx_suspend(struct amdxdna_ctx *ctx);
-void aie2_ctx_resume(struct amdxdna_ctx *ctx);
 int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
