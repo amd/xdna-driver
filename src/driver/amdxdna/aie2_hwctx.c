@@ -129,12 +129,10 @@ void aie2_hwctx_stop(struct amdxdna_ctx *ctx)
 
 	drm_sched_entity_destroy(&ctx->priv->entity);
 	aie2_release_resource(ctx);
-	ctx->status &= ~CTX_STATE_CONNECTED;
-}
-
-void aie2_hwctx_free(struct amdxdna_ctx *ctx)
-{
+	wait_event(ctx->priv->job_free_waitq,
+		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
 	drm_sched_fini(&ctx->priv->sched);
+	ctx->status &= ~CTX_STATE_CONNECTED;
 }
 
 int aie2_xrs_load_hwctx(struct amdxdna_ctx *ctx, struct xrs_action_load *action)

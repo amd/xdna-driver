@@ -43,9 +43,6 @@ static void aie2_ctx_stop(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
 	ctx->status &= ~CTX_STATE_READY;
 	aie2_hwctx_stop(ctx);
 	XDNA_DBG(xdna, "Stopped %s", ctx->name);
-	wait_event(ctx->priv->job_free_waitq,
-		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
-	aie2_hwctx_free(ctx);
 }
 
 static int aie2_ctx_restart(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
@@ -661,10 +658,6 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 	xdna->dev_handle->ctx_num--;
 	aie2_ctx_wait_for_idle(ctx);
 	aie2_hwctx_stop(ctx);
-
-	wait_event(ctx->priv->job_free_waitq,
-		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
-	aie2_hwctx_free(ctx);
 	destroy_workqueue(ctx->priv->submit_wq);
 	aie2_ctx_syncobj_destroy(ctx);
 	for (idx = 0; idx < ARRAY_SIZE(ctx->priv->cmd_buf); idx++)
