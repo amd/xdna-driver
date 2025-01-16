@@ -613,7 +613,7 @@ struct xrt_smi_config
       break;
     }
 
-    return boost::str(boost::format(xrt_smi_config));
+    return xrt_smi_config;
   }
 };
 
