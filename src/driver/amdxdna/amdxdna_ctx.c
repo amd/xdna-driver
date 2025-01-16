@@ -64,7 +64,7 @@ void amdxdna_ctx_suspend(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	amdxdna_for_each_ctx(client, ctx_id, ctx)
-		xdna->dev_info->ops->ctx_suspend(ctx);
+		xdna->dev_info->ops->ctx_disconnect(ctx);
 }
 
 void amdxdna_ctx_resume(struct amdxdna_client *client)
@@ -75,7 +75,7 @@ void amdxdna_ctx_resume(struct amdxdna_client *client)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	amdxdna_for_each_ctx(client, ctx_id, ctx)
-		xdna->dev_info->ops->ctx_resume(ctx);
+		xdna->dev_info->ops->ctx_connect(ctx);
 }
 
 static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct *ss)

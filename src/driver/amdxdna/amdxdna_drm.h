@@ -57,10 +57,10 @@ struct amdxdna_dev_ops {
 	/* Below device ops are called by IOCTL */
 	int (*ctx_init)(struct amdxdna_ctx *ctx);
 	void (*ctx_fini)(struct amdxdna_ctx *ctx);
+	int (*ctx_connect)(struct amdxdna_ctx *ctx);
+	void (*ctx_disconnect)(struct amdxdna_ctx *ctx);
 	int (*ctx_config)(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-	void (*ctx_suspend)(struct amdxdna_ctx *ctx);
-	void (*ctx_resume)(struct amdxdna_ctx *ctx);
 	int (*cmd_submit)(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 			  u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);

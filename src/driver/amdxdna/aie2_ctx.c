@@ -185,7 +185,7 @@ static void aie2_ctx_wait_for_idle(struct amdxdna_ctx *ctx)
 	dma_fence_put(fence);
 }
 
-void aie2_ctx_suspend(struct amdxdna_ctx *ctx)
+void aie2_ctx_disconnect(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 
@@ -199,10 +199,10 @@ void aie2_ctx_suspend(struct amdxdna_ctx *ctx)
 	aie2_ctx_stop(xdna, ctx);
 }
 
-void aie2_ctx_resume(struct amdxdna_ctx *ctx)
+int aie2_ctx_connect(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
-	int err;
+	int ret;
 
 	/*
 	 * The resume path cannot guarantee that mailbox channel can be
@@ -210,10 +210,11 @@ void aie2_ctx_resume(struct amdxdna_ctx *ctx)
 	 * mailbox channel, error will return.
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	err = aie2_ctx_restart(xdna, ctx);
-	if (err)
-		XDNA_WARN(xdna, "Failed to resume %s status 0x%x err %d",
-			  ctx->name, ctx->status, err);
+	ret = aie2_ctx_restart(xdna, ctx);
+	if (ret)
+		XDNA_WARN(xdna, "Failed to connect %s status 0x%x ret %d",
+			  ctx->name, ctx->status, ret);
+	return ret;
 }
 
 static void
