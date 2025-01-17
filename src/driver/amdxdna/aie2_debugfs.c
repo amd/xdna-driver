@@ -283,7 +283,7 @@ static int test_case01(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-static int test_case02_cb(void *handle, const u32 *data, size_t size)
+static int test_case02_cb(void *handle, void __iomem *data, size_t size)
 {
 	struct completion *comp = handle;
 

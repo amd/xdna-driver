@@ -59,10 +59,10 @@ enum aie_error_category {
 
 /* Don't pack, unless XAIE side changed */
 struct aie_error {
-	u8			row;
-	u8			col;
-	u32			mod_type;
-	u8			event_id;
+	__u8			row;
+	__u8			col;
+	__u32			mod_type;
+	__u8			event_id;
 };
 
 struct aie_err_info {
@@ -206,16 +206,14 @@ static u32 aie2_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u3
 	return err_col;
 }
 
-static int aie2_error_async_cb(void *handle, const u32 *data, size_t size)
+static int aie2_error_async_cb(void *handle, void __iomem *data, size_t size)
 {
-	struct async_event_msg_resp *resp;
 	struct async_event *e = handle;
 
 	if (data) {
-		resp = (struct async_event_msg_resp *)data;
-		e->resp.type = resp->type;
+		e->resp.type = readl(data + offsetof(struct async_event_msg_resp, type));
 		wmb(); /* Update status in the end, so that no lock for here */
-		e->resp.status = resp->status;
+		e->resp.status = readl(data + offsetof(struct async_event_msg_resp, status));
 	}
 	queue_work(e->wq, &e->work);
 	return 0;
