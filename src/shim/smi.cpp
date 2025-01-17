@@ -160,10 +160,13 @@ static constexpr std::string_view xrt_smi_config =
       {
         "name": "format",
         "alias": "f",
-        "description": "Report output format",
+        "description": ["Report output format. Valid values are:",
+                        "\n\tJSON        - Latest JSON schema",
+                        "\n\tJSON-2020.2 - JSON 2020.2 schema"
+                        ],
         "tag": "basic",
-        "default_value": "json",
-        "options_type": "common",
+        "default_value": "",
+        "option_type": "common",
         "value_type": "string"
       },
       {
@@ -187,7 +190,12 @@ static constexpr std::string_view xrt_smi_config =
       {
         "name": "report",
         "alias": "r",
-        "description": "The type of report to be produced. Reports currently available are:",
+        "description": ["The type of report to be produced. Reports currently available are:",
+                        "\n\taie-partitions - AIE partition information",
+                        "\n\thost           - Host information",
+                        "\n\tplatform       - Platforms flashed on the device",
+                        "\n\ttelemetry      - Telemetry data for the device"
+                        ],
         "tag": "basic",
         "option_type": "common",
         "value_type": "array",
