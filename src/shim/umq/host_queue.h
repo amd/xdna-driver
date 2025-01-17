@@ -1,5 +1,48 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+/*  (c) Copyright 2014 - 2022 Xilinx, Inc. All rights reserved.
+   
+    This file contains confidential and proprietary information
+    of Xilinx, Inc. and is protected under U.S. and
+    international copyright and other intellectual property
+    laws.
+   
+    DISCLAIMER
+    This disclaimer is not a license and does not grant any
+    rights to the materials distributed herewith. Except as
+    otherwise provided in a valid license issued to you by
+    Xilinx, and to the maximum extent permitted by applicable
+    law: (1) THESE MATERIALS ARE MADE AVAILABLE "AS IS" AND
+    WITH ALL FAULTS, AND XILINX HEREBY DISCLAIMS ALL WARRANTIES
+    AND CONDITIONS, EXPRESS, IMPLIED, OR STATUTORY, INCLUDING
+    BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, NON-
+    INFRINGEMENT, OR FITNESS FOR ANY PARTICULAR PURPOSE; and
+    (2) Xilinx shall not be liable (whether in contract or tort,
+    including negligence, or under any other theory of
+    liability) for any loss or damage of any kind or nature
+    related to, arising under or in connection with these
+    materials, including for any direct, or any indirect,
+    special, incidental, or consequential loss or damage
+    (including loss of data, profits, goodwill, or any type of
+    loss or damage suffered as a result of any action brought
+    by a third party) even if such damage or loss was
+    reasonably foreseeable or Xilinx had been advised of the
+    possibility of the same.
+   
+    CRITICAL APPLICATIONS
+    Xilinx products are not designed or intended to be fail-
+    safe, or for use in any application requiring fail-safe
+    performance, such as life-support or safety devices or
+    systems, Class III medical devices, nuclear facilities,
+    applications related to the deployment of airbags, or any
+    other applications that could lead to death, personal
+    injury, or severe property or environmental damage
+    (individually and collectively, "Critical
+    Applications"). Customer assumes the sole risk and
+    liability of any use of Xilinx products in Critical
+    Applications, subject only to applicable laws and
+    regulations governing limitations on product liability.
+   
+    THIS COPYRIGHT NOTICE AND DISCLAIMER MUST BE RETAINED AS
+    PART OF THIS FILE AT ALL TIMES.                       */
 
 #ifndef _HOST_QUEUE_H_
 #define _HOST_QUEUE_H_
@@ -28,12 +71,12 @@ enum hsa_cmd_state
 #define HSA_COMP_SUCCESS          HSA_CMD_STATE_COMPLETED // Host user code will check this
 #define HSA_ERR(e)                (((e) << 4) | HSA_CMD_STATE_ERROR)
 #define HSA_EXIT_PKT              HSA_ERR(0)
-#define HSA_PDI_LOAD_NO_MAPPING   HSA_ERR(column_index_rel * 100 + 1)
-#define HSA_PDI_LOAD_FAILURE      HSA_ERR(column_index_rel * 100 + 2)
-#define HSA_INVALID_OPCODE        HSA_ERR(column_index_rel * 100 + 3)
+#define HSA_PDI_LOAD_NO_MAPPING   HSA_ERR(self_id * 100 + 1)
+#define HSA_PDI_LOAD_FAILURE      HSA_ERR(self_id * 100 + 2)
+#define HSA_INVALID_OPCODE        HSA_ERR(self_id * 100 + 3)
 #define HSA_INVALID_PKT           HSA_ERR(4)
-#define HSA_INVALID_PAGE          HSA_ERR(column_index_rel * 100 + 5)
-#define HSA_INDIRECT_PKT_NUM      6
+#define HSA_INVALID_PAGE          HSA_ERR(self_id * 100 + 5)
+#define HSA_PKT_TIMEOUT           HSA_ERR(self_id * 100 + 6)
 
 enum host_queue_packet_opcode
 {            
@@ -128,9 +171,12 @@ struct xrt_packet_header
 struct host_indirect_packet_entry
 {
   uint32_t host_addr_low;
-  uint32_t host_addr_high;
+  uint32_t host_addr_high:25;
+  uint32_t uc_index:7;
 };
 
+#define INVALID_INDIRECT_ADDR (0xffffffff)
+#define HSA_MAX_LEVEL1_INDIRECT_ENTRIES (6)
 /*
  * hsa pkt format -- 64Bytes fixed length
  *
@@ -169,12 +215,13 @@ struct host_indirect_packet_entry
  * xrt_packet_header:
  *   type: 0 (vendor specific)
  *   opcode: 1 (exec_buf)
- *   count: 48 (6 * sizeof(struct host_indirect_packet_entry))
+ *   count: 48 (6 *sizeof(struct host_indirect_packet_entry))
  *   distribute: 1
  *   indirect: 1 // common header of indirect
  *   completion_signal: xxx
  * data:
  *   struct host_indirect_packet_entry:
+ *     column_index: index of lead uc
  *     host_addr*: host addr of next level
  *       common_header:
  *         type: 0 (vendor specific)
@@ -184,6 +231,7 @@ struct host_indirect_packet_entry
  *       payload:
  *          struct exec_buf 
  *   struct host_indirect_packet_entry:
+ *     column_index: index of slave1
  *     host_addr*: host addr of next level
  *       common_header:
  *          type: 0 (vendor specific)
@@ -205,6 +253,7 @@ struct host_indirect_packet_entry
  *   completion_signal: xxx
  * data:
  *   struct host_indirect_packet_entry:
+ *     column_index: index of lead uc
  *     host_addr*: host addr of next level
  *       common_header:
  *         type: 0 (vendor specific)
@@ -214,6 +263,7 @@ struct host_indirect_packet_entry
  *         indirect: 1 // common header of level-2 indirect
  *       indirect_payload: 
  *         struct host_indirect_packet_entry:
+ *           column_index: index of lead uc
  *           host_addr*: host addr of next level
  *             common_header:
  *               type: 0 (vendor specific)
@@ -224,6 +274,7 @@ struct host_indirect_packet_entry
  *             payload: 
  *               struct exec_buf
  *         struct host_indirect_packet_entry:
+ *           column_index: index of slave1
  *           host_addr*: host addr of next level
  *             common_header:
  *               type: 0 (vendor specific)
