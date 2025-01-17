@@ -1,5 +1,5 @@
 {
-	"copyright": "Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.",
+	"copyright": "Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
 		"version": "202510.2.19.86",
 		"os_rel": ["22.04", "24.04"]
