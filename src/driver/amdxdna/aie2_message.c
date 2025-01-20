@@ -361,8 +361,7 @@ int aie2_self_test(struct amdxdna_dev_hdl *ndev)
 #else
 int aie2_self_test(struct amdxdna_dev_hdl *ndev)
 {
-	///need int retunr value
-	return 0; ///test value
+	return 0;
 }
 #endif
 
