@@ -89,6 +89,7 @@ static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct 
 	 */
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->ctx_fini(ctx);
+	xdna->ctx_cnt--;
 	mutex_unlock(&xdna->dev_lock);
 
 	kfree(ctx->name);
@@ -161,15 +162,21 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	}
 
 	mutex_lock(&xdna->dev_lock);
+	if (xdna->ctx_limit == xdna->ctx_cnt) {
+		XDNA_ERR(xdna, "Not allow more than %d context(s)", xdna->ctx_limit);
+		ret = -ENOENT;
+		goto unlock_and_err;
+	}
+
 	ret = xdna->dev_info->ops->ctx_init(ctx);
 	if (ret) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Init ctx failed, ret %d", ret);
-		goto free_name;
+		goto unlock_and_err;
 	}
 	args->handle = ctx->id;
 	args->syncobj_handle = ctx->syncobj_hdl;
 	args->umq_doorbell = ctx->doorbell_offset;
+	xdna->ctx_cnt++;
 	mutex_unlock(&xdna->dev_lock);
 
 	atomic64_set(&ctx->job_free_cnt, 0);
@@ -178,7 +185,8 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	drm_dev_exit(idx);
 	return 0;
 
-free_name:
+unlock_and_err:
+	mutex_unlock(&xdna->dev_lock);
 	kfree(ctx->name);
 rm_id:
 	xa_erase(&client->ctx_xa, ctx->id);

@@ -67,6 +67,7 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 	.mbox_dev_addr  = NPU1_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
 	.hwctx_limit	= 6,
+	.ctx_limit	= 6,
 	.sram_dev_addr  = NPU1_SRAM_BAR_BASE,
 	.sram_offs      = {
 		DEFINE_BAR_OFFSET(MBOX_CHANN_OFF, NPU1_SRAM, MPNPU_SRAM_X2I_MAILBOX_0),

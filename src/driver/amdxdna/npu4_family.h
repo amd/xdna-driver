@@ -66,7 +66,8 @@
 	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,							\
 	.mbox_size      = 0, /* Use BAR size */							\
 	.sram_dev_addr  = NPU4_SRAM_BAR_BASE,							\
-	.hwctx_limit	= 6,									\
+	.hwctx_limit	= 16,									\
+	.ctx_limit	= 32,									\
 	.sram_offs      = {									\
 		DEFINE_BAR_OFFSET(MBOX_CHANN_OFF, NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_0),		\
 		DEFINE_BAR_OFFSET(FW_ALIVE_OFF,   NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_15),	\

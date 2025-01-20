@@ -27,6 +27,10 @@ uint aie2_max_col = XRS_MAX_COL;
 module_param(aie2_max_col, uint, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
 
+uint aie2_hwctx_limit;
+module_param(aie2_hwctx_limit, uint, 0400);
+MODULE_PARM_DESC(aie2_hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default");
+
 uint aie2_control_flags;
 module_param(aie2_control_flags, uint, 0400);
 MODULE_PARM_DESC(aie2_control_flags,
@@ -475,6 +479,14 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
 	init_rwsem(&ndev->recover_lock);
+
+	if (aie2_hwctx_limit)
+		ndev->hwctx_limit = aie2_hwctx_limit;
+	else
+		ndev->hwctx_limit = ndev->priv->hwctx_limit;
+	XDNA_DBG(xdna, "Maximum limit %d hardware context(s)", ndev->hwctx_limit);
+
+	xdna->ctx_limit = ndev->priv->ctx_limit;
 
 	ret = request_firmware(&fw, ndev->priv->fw_path, &pdev->dev);
 	if (ret) {

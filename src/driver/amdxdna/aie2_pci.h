@@ -257,7 +257,8 @@ struct amdxdna_dev_hdl {
 	struct async_events		*async_events;
 
 	u32				dev_status;
-	u32				ctx_num;
+	u32				hwctx_num;
+	u32				hwctx_limit;
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
@@ -286,6 +287,7 @@ struct amdxdna_dev_priv {
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32				mbox_size;
 	u32				hwctx_limit; /* Hardware determine */
+	u32				ctx_limit; /* Driver determine */
 	u32				sram_dev_addr;
 	struct aie2_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
 	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];

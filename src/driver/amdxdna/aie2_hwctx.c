@@ -68,7 +68,7 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	int ret;
 
 	ndev = xdna->dev_handle;
-	if (ndev->priv->hwctx_limit == ndev->ctx_num) {
+	if (ndev->hwctx_limit == ndev->hwctx_num) {
 		XDNA_ERR(xdna, "Exceed hardware context limit");
 		return -ENOENT;
 	}
@@ -116,7 +116,7 @@ skip:
 	}
 
 	ctx->status |= FIELD_PREP(CTX_STATE_CONNECTED, 1);
-	ndev->ctx_num++;
+	ndev->hwctx_num++;
 	return 0;
 
 release_resource:
@@ -143,7 +143,7 @@ void aie2_hwctx_stop(struct amdxdna_ctx *ctx)
 		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
 	drm_sched_fini(&ctx->priv->sched);
 	ctx->status &= ~CTX_STATE_CONNECTED;
-	xdna->dev_handle->ctx_num--;
+	xdna->dev_handle->hwctx_num--;
 }
 
 int aie2_xrs_load_hwctx(struct amdxdna_ctx *ctx, struct xrs_action_load *action)
