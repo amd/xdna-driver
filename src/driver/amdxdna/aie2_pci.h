@@ -257,7 +257,7 @@ struct amdxdna_dev_hdl {
 	struct async_events		*async_events;
 
 	u32				dev_status;
-	u32				hwctx_num;
+	u32				hwctx_cnt;
 	u32				hwctx_limit;
 };
 

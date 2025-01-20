@@ -116,6 +116,11 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	if (context_limit)
 		xdna->ctx_limit = context_limit;
+	// FIXME: Remove below check later
+	if (!xdna->ctx_limit) {
+		XDNA_WARN(xdna, "Device doesn't define context limit");
+		xdna->ctx_limit = 32;
+	}
 	XDNA_DBG(xdna, "Maximum limit %d context(s)", xdna->ctx_limit);
 
 	ret = amdxdna_sysfs_init(xdna);
