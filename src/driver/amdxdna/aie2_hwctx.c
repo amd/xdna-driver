@@ -64,7 +64,14 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct drm_gpu_scheduler *sched;
 	struct amdxdna_gem_obj *heap;
+	struct amdxdna_dev_hdl *ndev;
 	int ret;
+
+	ndev = xdna->dev_handle;
+	if (ndev->priv->hwctx_limit == ndev->ctx_num) {
+		XDNA_ERR(xdna, "Exceed hardware context limit");
+		return -ENOENT;
+	}
 
 	sched = &ctx->priv->sched;
 	heap = ctx->priv->heap;
@@ -109,6 +116,7 @@ skip:
 	}
 
 	ctx->status |= FIELD_PREP(CTX_STATE_CONNECTED, 1);
+	ndev->ctx_num++;
 	return 0;
 
 release_resource:
@@ -122,6 +130,8 @@ fini_sched:
 
 void aie2_hwctx_stop(struct amdxdna_ctx *ctx)
 {
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+
 	if (!FIELD_GET(CTX_STATE_CONNECTED, ctx->status)) {
 		XDNA_DBG(ctx->client->xdna, "%s was stopped, skip", ctx->name);
 		return;
@@ -133,6 +143,7 @@ void aie2_hwctx_stop(struct amdxdna_ctx *ctx)
 		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
 	drm_sched_fini(&ctx->priv->sched);
 	ctx->status &= ~CTX_STATE_CONNECTED;
+	xdna->dev_handle->ctx_num--;
 }
 
 int aie2_xrs_load_hwctx(struct amdxdna_ctx *ctx, struct xrs_action_load *action)

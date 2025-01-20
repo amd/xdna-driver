@@ -626,8 +626,6 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 		goto syncobj_destroy;
 	}
 
-	xdna->dev_handle->ctx_num++;
-
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
 
@@ -653,10 +651,8 @@ free_priv:
 
 void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 {
-	struct amdxdna_dev *xdna = ctx->client->xdna;
 	int idx;
 
-	xdna->dev_handle->ctx_num--;
 	aie2_ctx_wait_for_idle(ctx);
 	aie2_hwctx_stop(ctx);
 	destroy_workqueue(ctx->priv->submit_wq);
