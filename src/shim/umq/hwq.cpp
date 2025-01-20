@@ -95,7 +95,7 @@ hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
   //   indirect [4 * indirect_buffer * nslots]
   const size_t header_sz = sizeof(struct host_queue_header);
   const size_t queue_sz = sizeof(struct host_queue_packet) * nslots;
-  const size_t indirect_sz = (sizeof(struct host_indirect_data) * HSA_INDIRECT_PKT_NUM) * nslots;
+  const size_t indirect_sz = (sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES) * nslots;
 
 #ifdef UMQ_HELLO_TEST
   const size_t umq_sz = 0x8000; // 32k, current cmd_bo max size
@@ -120,7 +120,7 @@ hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
   // init slots and indirect buf
   for (int i = 0; i < nslots; i++) {
     mark_slot_invalid(&m_umq_pkt[i]);
-    init_indirect_buf(&m_umq_indirect_buf[i * HSA_INDIRECT_PKT_NUM], HSA_INDIRECT_PKT_NUM);
+    init_indirect_buf(&m_umq_indirect_buf[i * HSA_MAX_LEVEL1_INDIRECT_ENTRIES], HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
   }
 
   m_umq_hdr->capacity = nslots;
@@ -196,8 +196,10 @@ dump() const
       volatile struct host_indirect_packet_entry *hp =
         reinterpret_cast<volatile struct host_indirect_packet_entry *>(pkt->data);
 
-      for (int i = 0; i < HSA_INDIRECT_PKT_NUM; i++, hp++) {
-        shim_debug("\thost addr: [0x%x 0x%x]", hp->host_addr_high, hp->host_addr_low);
+      for (int i = 0; i < HSA_MAX_LEVEL1_INDIRECT_ENTRIES; i++, hp++) {
+        uint32_t hi = hp->host_addr_high;
+	uint32_t lo = hp->host_addr_low;
+        shim_debug("\thost addr: [0x%x 0x%x]", hi, lo);
 
 	volatile struct host_indirect_data *data =
 	  reinterpret_cast<volatile struct host_indirect_data *>(m_umq_indirect_buf);
@@ -305,9 +307,9 @@ fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
                         ert_dpu_data *dpu) {
   auto pkt_size = (dpu->chained + 1) * sizeof(struct host_indirect_packet_entry);
 
-  if (dpu->chained + 1 >= HSA_INDIRECT_PKT_NUM)
+  if (dpu->chained + 1 >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
     shim_err(EINVAL, "unsupported indirect number %d, valid number <= %d",
-      dpu->chained + 1, HSA_INDIRECT_PKT_NUM);
+      dpu->chained + 1, HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 
   if (pkt_size > sizeof(pkt->data))
     shim_err(EINVAL, "dpu pkt_size=0x%lx > pkt_data max size=%x%lx",
@@ -318,14 +320,15 @@ fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
     reinterpret_cast<volatile struct host_indirect_packet_entry *>(pkt->data);
 
   for (int i = 0; dpu; i++, hp++, dpu = get_ert_dpu_data_next(dpu)) {
-    auto data_size = sizeof(struct host_indirect_data) * HSA_INDIRECT_PKT_NUM;
+    auto data_size = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES;
     auto prefix_off = get_pkt_idx(slot_idx) * data_size;
-    auto prefix_idx = get_pkt_idx(slot_idx) * HSA_INDIRECT_PKT_NUM;
+    auto prefix_idx = get_pkt_idx(slot_idx) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES;
     auto buf_paddr = m_indirect_paddr + prefix_off +
        sizeof(struct host_indirect_data) * i;
 
     hp->host_addr_low = static_cast<uint32_t>(buf_paddr);
     hp->host_addr_high = static_cast<uint32_t>(buf_paddr >> 32);
+    hp->uc_index = dpu->uc_index;
 
     auto cebp = &m_umq_indirect_buf[prefix_idx + i];
     // do not zero this buffer, the cebp->header is pre-set 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _HOST_QUEUE_H_
 #define _HOST_QUEUE_H_
@@ -28,12 +28,13 @@ enum hsa_cmd_state
 #define HSA_COMP_SUCCESS          HSA_CMD_STATE_COMPLETED // Host user code will check this
 #define HSA_ERR(e)                (((e) << 4) | HSA_CMD_STATE_ERROR)
 #define HSA_EXIT_PKT              HSA_ERR(0)
-#define HSA_PDI_LOAD_NO_MAPPING   HSA_ERR(column_index_rel * 100 + 1)
-#define HSA_PDI_LOAD_FAILURE      HSA_ERR(column_index_rel * 100 + 2)
-#define HSA_INVALID_OPCODE        HSA_ERR(column_index_rel * 100 + 3)
+#define HSA_PDI_LOAD_NO_MAPPING   HSA_ERR(self_id * 100 + 1)
+#define HSA_PDI_LOAD_FAILURE      HSA_ERR(self_id * 100 + 2)
+#define HSA_INVALID_OPCODE        HSA_ERR(self_id * 100 + 3)
 #define HSA_INVALID_PKT           HSA_ERR(4)
-#define HSA_INVALID_PAGE          HSA_ERR(column_index_rel * 100 + 5)
-#define HSA_INDIRECT_PKT_NUM      6
+#define HSA_INVALID_PAGE          HSA_ERR(self_id * 100 + 5)
+#define HSA_PKT_TIMEOUT           HSA_ERR(self_id * 100 + 6)
+#define HSA_MAX_LEVEL1_INDIRECT_ENTRIES (6)
 
 enum host_queue_packet_opcode
 {            
@@ -128,9 +129,11 @@ struct xrt_packet_header
 struct host_indirect_packet_entry
 {
   uint32_t host_addr_low;
-  uint32_t host_addr_high;
+  uint32_t host_addr_high:25;
+  uint32_t uc_index:7;
 };
 
+#define INVALID_INDIRECT_ADDR (0xffffffff)
 /*
  * hsa pkt format -- 64Bytes fixed length
  *
@@ -169,12 +172,13 @@ struct host_indirect_packet_entry
  * xrt_packet_header:
  *   type: 0 (vendor specific)
  *   opcode: 1 (exec_buf)
- *   count: 48 (6 * sizeof(struct host_indirect_packet_entry))
+ *   count: 48 (6 *sizeof(struct host_indirect_packet_entry))
  *   distribute: 1
  *   indirect: 1 // common header of indirect
  *   completion_signal: xxx
  * data:
  *   struct host_indirect_packet_entry:
+ *     column_index: index of lead uc
  *     host_addr*: host addr of next level
  *       common_header:
  *         type: 0 (vendor specific)
@@ -184,6 +188,7 @@ struct host_indirect_packet_entry
  *       payload:
  *          struct exec_buf 
  *   struct host_indirect_packet_entry:
+ *     column_index: index of slave1
  *     host_addr*: host addr of next level
  *       common_header:
  *          type: 0 (vendor specific)
@@ -205,6 +210,7 @@ struct host_indirect_packet_entry
  *   completion_signal: xxx
  * data:
  *   struct host_indirect_packet_entry:
+ *     column_index: index of lead uc
  *     host_addr*: host addr of next level
  *       common_header:
  *         type: 0 (vendor specific)
@@ -214,6 +220,7 @@ struct host_indirect_packet_entry
  *         indirect: 1 // common header of level-2 indirect
  *       indirect_payload: 
  *         struct host_indirect_packet_entry:
+ *           column_index: index of lead uc
  *           host_addr*: host addr of next level
  *             common_header:
  *               type: 0 (vendor specific)
@@ -224,6 +231,7 @@ struct host_indirect_packet_entry
  *             payload: 
  *               struct exec_buf
  *         struct host_indirect_packet_entry:
+ *           column_index: index of slave1
  *           host_addr*: host addr of next level
  *             common_header:
  *               type: 0 (vendor specific)
