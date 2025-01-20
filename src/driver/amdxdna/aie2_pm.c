@@ -68,7 +68,7 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 
 	switch (target) {
 	case POWER_MODE_TURBO:
-		if (ndev->ctx_num) {
+		if (xdna->ctx_cnt) {
 			XDNA_ERR(xdna, "Can not set turbo when there is active ctx");
 			return -EINVAL;
 		}

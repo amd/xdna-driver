@@ -20,6 +20,10 @@ int autosuspend_ms = -1;
 module_param(autosuspend_ms, int, 0644);
 MODULE_PARM_DESC(autosuspend_ms, "runtime suspend delay in miliseconds. < 0: prevent it");
 
+uint context_limit;
+module_param(context_limit, uint, 0444);
+MODULE_PARM_DESC(context_limit, "Maximum number of context, 0 = Driver determine (Default)");
+
 /*
  *  There are platforms which share the same PCI device ID
  *  but have different PCI revision IDs. So, let the PCI class
@@ -109,6 +113,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
 		goto destroy_notifier_wq;
 	}
+
+	if (context_limit)
+		xdna->ctx_limit = context_limit;
+	// FIXME: Remove below check later
+	if (!xdna->ctx_limit) {
+		XDNA_WARN(xdna, "Device doesn't define context limit");
+		xdna->ctx_limit = 32;
+	}
+	XDNA_DBG(xdna, "Maximum limit %d context(s)", xdna->ctx_limit);
 
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
