@@ -361,6 +361,7 @@ int aie2_self_test(struct amdxdna_dev_hdl *ndev)
 #else
 int aie2_self_test(struct amdxdna_dev_hdl *ndev)
 {
+	return 0;
 }
 #endif
 
