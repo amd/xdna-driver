@@ -25,8 +25,6 @@ static int map_app_priority_to_fw(enum amdxdna_qos_priority avalue, u32 *fvalue)
 	case AMDXDNA_QOS_REALTIME_PRIORITY:
 		*fvalue = AIE2_QOS_REALTIME_PRIORITY;
 		break;
-	case AMDXDNA_QOS_DEFAULT_PRIORITY:
-		/* fallthrough */
 	case AMDXDNA_QOS_HIGH_PRIORITY:
 		*fvalue = AIE2_QOS_HIGH_PRIORITY;
 		break;
@@ -263,6 +261,10 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	struct cq_pair *cq_pair;
 	u32 priority;
 	int ret;
+
+	/* Default to high priority, if unset */
+	if (!ctx->qos.priority)
+		ctx->qos.priority = AMDXDNA_QOS_HIGH_PRIORITY;
 
 	ret = map_app_priority_to_fw(ctx->qos.priority, &priority);
 	if (ret) {

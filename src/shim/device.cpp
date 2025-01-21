@@ -274,6 +274,7 @@ struct partition_info
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
+      new_entry.qos.priority = entry.priority;
       output.push_back(std::move(new_entry));
     }
     return output;
