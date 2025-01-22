@@ -62,7 +62,6 @@ enum amdxdna_device_type {
 
 /*
  * Enum for priority in application's QoS. Values copied from Window shim layer.
- * AMDXDNA_QOS_DEFAULT_PRIORITY: Default priority.
  * AMDXDNA_QOS_REALTIME_PRIORITY: Real time clients.
  * AMDXDNA_QOS_HIGH_PRIORITY: Best effort foreground clients.
  * AMDXDNA_QOS_NORMAL_PRIORITY: Best effort or background clients.
@@ -70,7 +69,6 @@ enum amdxdna_device_type {
  *                           completion.
  */
 enum amdxdna_qos_priority {
-	AMDXDNA_QOS_DEFAULT_PRIORITY = 0x0,
 	AMDXDNA_QOS_REALTIME_PRIORITY = 0x100,
 	AMDXDNA_QOS_HIGH_PRIORITY = 0x180,
 	AMDXDNA_QOS_NORMAL_PRIORITY = 0x200,
@@ -425,6 +423,7 @@ struct amdxdna_drm_query_sensor {
  * @preemptions: The number of times this context has been preempted by another context in the
  *               same partition.
  * @errors: The errors for this context.
+ * @priority: Context priority
  */
 struct amdxdna_drm_query_ctx {
 	__u32 context_id;
@@ -437,6 +436,7 @@ struct amdxdna_drm_query_ctx {
 	__u64 migrations;
 	__u64 preemptions;
 	__u64 errors;
+	__u64 priority;
 };
 
 /**
