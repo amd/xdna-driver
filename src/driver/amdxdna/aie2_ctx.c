@@ -960,7 +960,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	ret = drm_sched_job_init(&job->base, &ctx->priv->entity, 1, ctx);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM job init failed, ret %d", ret);
-		goto free_chain;
+		goto unlock_recover;
 	}
 
 	ret = aie2_add_job_dependency(job, syncobj_hdls, syncobj_points, syncobj_cnt);
@@ -1030,10 +1030,9 @@ retry:
 
 cleanup_job:
 	drm_sched_job_cleanup(&job->base);
-free_chain:
-	dma_fence_chain_free(chain);
 unlock_recover:
 	up_read(&ndev->recover_lock);
+	dma_fence_chain_free(chain);
 up_sem:
 	up(&ctx->priv->job_sem);
 	job->job_done = true;
