@@ -895,6 +895,7 @@ static int aie2_get_ctx_status(struct amdxdna_client *client,
 
 			tmp->pid = tmp_client->pid;
 			tmp->context_id = ctx->id;
+			tmp->hwctx_id = ctx->priv->id;
 			tmp->start_col = ctx->start_col;
 			tmp->num_col = ctx->num_col;
 			tmp->command_submissions = ctx->submitted;
