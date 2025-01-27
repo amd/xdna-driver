@@ -11,7 +11,6 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <linux/hmm.h>
 
-
 struct amdxdna_umap {
 	struct vm_area_struct		*vma;
 	struct mmu_interval_notifier	notifier;

@@ -56,28 +56,6 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_ctx *ctx)
 	return &fence->base;
 }
 
-void amdxdna_ctx_suspend(struct amdxdna_client *client)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_ctx(client, ctx_id, ctx)
-		xdna->dev_info->ops->ctx_disconnect(ctx);
-}
-
-void amdxdna_ctx_resume(struct amdxdna_client *client)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_ctx(client, ctx_id, ctx)
-		xdna->dev_info->ops->ctx_connect(ctx);
-}
-
 static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct *ss)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
@@ -274,7 +252,6 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 		return -EINVAL;
 	}
 
-	mutex_lock(&xdna->dev_lock);
 	idx = srcu_read_lock(&client->ctx_srcu);
 	ctx = xa_load(&client->ctx_xa, args->handle);
 	if (!ctx) {
@@ -287,7 +264,6 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 
 unlock_srcu:
 	srcu_read_unlock(&client->ctx_srcu, idx);
-	mutex_unlock(&xdna->dev_lock);
 	kfree(buf);
 	return ret;
 }

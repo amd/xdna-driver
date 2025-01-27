@@ -15,6 +15,7 @@
 #include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
+#include "amdxdna_ctx_runqueue.h"
 #ifdef AMDXDNA_SHMEM
 #include "amdxdna_gem.h"
 #else
@@ -34,6 +35,9 @@
 
 #define tdr_to_xdna_dev(t) \
 	((struct amdxdna_dev *)container_of(t, struct amdxdna_dev, tdr))
+
+#define ctx_rq_to_xdna_dev(r) \
+	((struct amdxdna_dev *)container_of(r, struct amdxdna_dev, ctx_rq))
 
 extern const struct drm_driver amdxdna_drm_drv;
 
@@ -116,7 +120,7 @@ struct amdxdna_dev {
 	const struct amdxdna_dev_info	*dev_info;
 	void				*xrs_hdl;
 
-	struct mutex			dev_lock; /* protect client list, dev_info->ops, xrs_hdl */
+	struct mutex			dev_lock; /* protect client list, xrs_hdl */
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
 	struct amdxdna_tdr		tdr;
@@ -128,6 +132,7 @@ struct amdxdna_dev {
 
 	u32				ctx_cnt;
 	u32				ctx_limit;
+	struct amdxdna_ctx_rq		ctx_rq;
 };
 
 struct amdxdna_stats {

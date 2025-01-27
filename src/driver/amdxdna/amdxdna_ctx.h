@@ -9,6 +9,7 @@
 #include <linux/bitfield.h>
 #include <linux/kref.h>
 #include <linux/wait.h>
+#include <linux/list.h>
 #include <drm/drm_drv.h>
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
@@ -133,6 +134,9 @@ struct amdxdna_ctx {
 	u64				tdr_last_completed;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
+
+	/* For context runqueue */
+	struct list_head		entry;
 };
 
 #define drm_job_to_xdna_job(j) \
@@ -246,8 +250,6 @@ static inline u32 amdxdna_ctx_col_map(struct amdxdna_ctx *ctx)
 void amdxdna_ctx_wait_jobs(struct amdxdna_ctx *ctx, long timeout);
 void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job);
 void amdxdna_ctx_remove_all(struct amdxdna_client *client);
-void amdxdna_ctx_suspend(struct amdxdna_client *client);
-void amdxdna_ctx_resume(struct amdxdna_client *client);
 
 int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
 void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx);
@@ -264,6 +266,5 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 int amdxdna_drm_destroy_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
-int amdxdna_drm_create_ctx_unsec_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 
 #endif /* _AMDXDNA_CTX_H_ */
