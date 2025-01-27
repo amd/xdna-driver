@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "core/common/config_reader.h"
-#include <x86intrin.h>
 
 namespace {
 
@@ -25,7 +24,6 @@ flag_to_type(uint64_t bo_flags)
   return AMDXDNA_BO_INVALID;
 }
 
-
 // flash cache line for non coherence memory
 inline void
 clflush_data(const void *base, size_t offset, size_t len)
@@ -43,7 +41,7 @@ clflush_data(const void *base, size_t offset, size_t len)
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
-    _mm_clflush(cur);
+    shim_xdna::flush_cache_line(cur);
     cur += cacheline_size;
   } while (cur <= (const char *)lastline);
 }
