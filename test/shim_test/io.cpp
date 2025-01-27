@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "io.h"
 #include "hwctx.h"
@@ -268,7 +268,7 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
     ebuf.add_arg_64(0);
     ebuf.add_arg_64(0);
     ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf_path);
-  } else if (dev_id == npu2_device_id) {
+  } else if (dev_id == npu4_device_id) {
     ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
     ebuf.add_arg_32(3);
     ebuf.add_arg_64(0);
