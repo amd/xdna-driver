@@ -4,260 +4,48 @@
 
 namespace shim_xdna::smi {
 
-static constexpr std::string_view xrt_smi_config =
- R"(
- {
-  "subcommands":
-  [{
-    "name" : "validate",
-    "description" : "Validates the given device by executing the platform's validate executable.",
-    "tag" : "basic",
-    "options" :
-    [
-      {
-        "name": "device",
-        "alias": "d",
-        "description": "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest",
-        "tag": "basic",
-        "default_value": "",
-        "option_type": "common", 
-        "value_type" : "string"
-      },
-      {
-        "name": "format",
-        "alias": "f",
-        "description": "Report output format",
-        "tag": "basic",
-        "default_value": "JSON",
-        "option_type": "common", 
-        "value_type" : "string"
-      },
-      {
-        "name": "output",
-        "alias": "o",
-        "description" : "Direct the output to the given file",
-        "tag": "basic",
-        "default_value": "",
-        "option_type": "common", 
-        "value_type" : "string"
-      },
-      {
-        "name": "help",
-        "alias": "h",
-        "description" : "Help to use this sub-command",
-        "tag": "basic",
-        "default_value": "",
-        "option_type": "common", 
-        "value_type" : "none"
-      },
-      {
-        "name" : "run",
-        "alias" : "r",
-        "description" : "Run a subset of the test suite",
-        "tag" : "basic",
-        "option_type": "common",
-        "value_type" : "array",
-        "options" : [
-          {
-            "name" : "latency",
-            "tag" : "basic",
-            "description" : "Run end-to-end latency test"
-          },
-          {
-            "name" : "throughput",
-            "tag" : "basic",
-            "description" : "Run end-to-end throughput test"
-          },
-          {
-            "name" : "cmd-chain-latency",
-            "tag" : "basic",
-            "description" : "Run command chain latency test"
-          },
-          {
-            "name" : "cmd-chain-throughput",
-            "tag" : "basic",
-            "description" : "Run end-to-end throughput test using command chaining"
-          },
-          {
-            "name" : "df-bw",
-            "tag" : "basic",
-            "description" : "Run dataflow bandwidth test"
-          },
-          {
-            "name" : "tct-one-col",
-            "tag" : "basic",
-            "description" : "Run TCT test with one column"
-          },
-          {
-            "name" : "tct-all-col",
-            "tag" : "basic",
-            "description" : "Run TCT test with all columns"
-          },
-          {
-            "name" : "gemm",
-            "tag" : "basic",
-            "description" : "Run GEMM test"
-          },
-          {
-            "name" : "aie-reconfig-overhead",
-            "tag" : "advanced",
-            "description" : "Run AIE reconfiguration overhead test"
-          },
-          {
-            "name" : "spatial-sharing-overhead",
-            "tag" : "advanced",
-            "description" : "Run spatial sharing overhead test"
-          },
-          {
-            "name" : "temporal-sharing-overhead",
-            "tag" : "advanced",
-            "description" : "Run temporal sharing overhead test"
-          }
-        ]
-      },
-      {
-        "name" : "path",
-        "alias" : "p",
-        "description" : "Path to the directory containing validate xclbins",
-        "tag" : "basic",
-        "default_value": "",
-        "option_type": "hidden",
-        "value_type" : "string"
-      },
-      {
-        "name" : "param",
-        "description" : "Extended parameter for a given test. Format: <test-name>:<key>:<value>",
-        "tag" : "basic",
-        "option_type": "hidden",
-        "default_value": "",
-        "value_type" : "string"
-      },
-      {
-        "name" : "pmode",
-        "description" : "Specify which power mode to run the benchmarks in. Note: Some tests might be unavailable for some modes",
-        "tag" : "basic",
-        "option_type": "hidden",
-        "default_value": "",
-        "value_type" : "string"
-      }
-    ]
-  },
-  {
-    "name" : "examine",
-    "tag" : "basic",
-    "description": "This command will 'examine' the state of the system/device and will generate a report of interest in a text or JSON format.",
-    "options":
-    [
-      {
-        "name": "device",
-        "alias": "d",
-        "description": "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest",
-        "tag": "basic",
-        "default_value": "",
-        "option_type": "common",
-        "value_type": "string"
-      },
-      {
-        "name": "format",
-        "alias": "f",
-        "description": ["Report output format. Valid values are:",
-                        "\n\tJSON        - Latest JSON schema",
-                        "\n\tJSON-2020.2 - JSON 2020.2 schema"
-                        ],
-        "tag": "basic",
-        "default_value": "",
-        "option_type": "common",
-        "value_type": "string"
-      },
-      {
-        "name": "output",
-        "alias": "o",
-        "description" : "Direct the output to the given file",
-        "tag": "basic",
-        "default_value": "",
-        "option_type": "common", 
-        "value_type" : "string"
-      },
-      {
-        "name": "help",
-        "alias": "h",
-        "description" : "Help to use this sub-command",
-        "tag": "basic",
-        "default_value": "",
-        "option_type": "common", 
-        "value_type" : "none"
-      },
-      {
-        "name": "report",
-        "alias": "r",
-        "description": ["The type of report to be produced. Reports currently available are:",
-                        "\n\taie-partitions - AIE partition information",
-                        "\n\thost           - Host information",
-                        "\n\tplatform       - Platforms flashed on the device",
-                        "\n\ttelemetry      - Telemetry data for the device"
-                        ],
-        "tag": "basic",
-        "option_type": "common",
-        "value_type": "array",
-        "options": [
-          {
-            "name": "host",
-            "tag": "basic",
-            "description": "Host information"
-          },
-          {
-            "name": "platform",
-            "tag": "basic",
-            "description": "Platforms flashed on the device"
-          },
-          {
-            "name": "aie-partitions",
-            "tag": "basic",
-            "description": "AIE partition information"
-          },
-          {
-            "name": "tememetry",
-            "tag": "basic",
-            "description": "Telemetry data for the device"
-          }
-        ]
-      },
-      {
-        "name": "element",
-        "alias": "e",
-        "description" : "Filters individual elements(s) from the report. Format: '/<key>/<key>/...'",
-        "tag": "basic",
-        "option_type": "hidden", 
-        "value_type" : "array"
-      } 
-    ]
-  },
-  {
-    "name" : "configure",
-    "tag" : "devl",
-    "description" : "Device and host configuration.",
-    "options" :
-    [
-      {
-        "name": "device",
-        "description": "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest",
-        "tag": "devl",
-        "value_type" : "string"
-      },
-      {
-        "name": "pmode",
-        "description": "Modes: default, powersaver, balanced, performance, turbo",
-        "tag": "basic",
-        "value_type": "string"
-      }
-    ]
-  }]
+const std::vector<std::tuple<std::string, std::string, std::string>>& 
+smi_xdna::
+get_validate_test_desc() const 
+{
+  static const std::vector<std::tuple<std::string, std::string, std::string>> validate_test_desc = {
+    {"aie-reconfig-overhead", "Run end-to-end array reconfiguration overhead through shim DMA", "hidden"},
+    {"all", "All applicable validate tests will be executed (default)", "common"},
+    {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "common"},
+    {"cmd-chain-throughput", "Run end-to-end throughput test using command chaining", "common"},
+    {"df-bw", "Run bandwidth test on data fabric", "common"},
+    {"gemm", "Measure the TOPS value of GEMM operations", "common"},
+    {"latency", "Run end-to-end latency test", "common"},
+    {"quick", "Run a subset of four tests: \n1. latency \n2. throughput \n3. cmd-chain-latency \n4. cmd-chain-throughput", "common"},
+    {"spatial-sharing-overhead", "Run Spatial Sharing Overhead Test", "hidden"},
+    {"tct-all-col", "Measure average TCT processing time for all columns", "common"},
+    {"tct-one-col", "Measure average TCT processing time for one column", "common"},
+    {"temporal-sharing-overhead", "Run Temporal Sharing Overhead Test", "hidden"},
+    {"throughput", "Run end-to-end throughput test", "common"}
+  };
+  return validate_test_desc;
 }
-)"; 
 
-std::string 
+const std::vector<std::tuple<std::string, std::string, std::string>>& 
+smi_xdna::
+get_examine_report_desc() const 
+{
+  static const std::vector<std::tuple<std::string, std::string, std::string>> examine_report_desc = {
+    {"aie-partitions", "AIE partition information", "common"},
+    {"host", "Host information", "common"},
+    {"platform", "Platforms flashed on the device", "common"},
+    {"telemetry", "Telemetry data for the device", "common"}
+  };
+  return examine_report_desc;
+}
+
+std::string
 get_smi_config()
 {
-  return std::string(xrt_smi_config);
+  // Create an instance of the derived class
+  shim_xdna::smi::smi_xdna smi_instance;
+
+  // Call the get_smi_config method
+  return smi_instance.get_smi_config();
 }
 } // namespace shim_xdna::smi
