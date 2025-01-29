@@ -8,8 +8,8 @@
 
 #include <linux/bitfield.h>
 #include <linux/kref.h>
-#include <linux/wait.h>
 #include <linux/list.h>
+#include <linux/wait.h>
 #include <drm/drm_drv.h>
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
@@ -120,6 +120,11 @@ struct amdxdna_ctx {
  * Set CTX_STATE_DEAD bit means context marked as dead by TDR.
  */
 #define CTX_STATE_DEAD		BIT(2)
+/*
+ * Set CTX_STATE_CONNECTING bit means context is run queue selected this context
+ * to connect soon.
+ */
+#define CTX_STATE_CONNECTING	BIT(3)
 	u32				status;
 
 	struct amdxdna_qos_info		     qos;
@@ -137,6 +142,8 @@ struct amdxdna_ctx {
 
 	/* For context runqueue */
 	struct list_head		entry;
+	wait_queue_head_t		connect_waitq;
+	u32				idle_cnt;
 };
 
 #define drm_job_to_xdna_job(j) \

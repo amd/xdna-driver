@@ -124,10 +124,16 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	XDNA_DBG(xdna, "Maximum limit %d context(s)", xdna->ctx_limit);
 
+	ret = amdxdna_rq_init(&xdna->ctx_rq);
+	if (ret) {
+		XDNA_ERR(xdna, "Context runqueue init failed");
+		goto failed_dev_fini;
+	}
+
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
-		goto failed_dev_fini;
+		goto failed_rq_fini;
 	}
 
 	pm_runtime_set_autosuspend_delay(dev, autosuspend_ms);
@@ -135,7 +141,6 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pm_runtime_allow(dev);
 
 	amdxdna_tdr_start(&xdna->tdr);
-	amdxdna_rq_init(&xdna->ctx_rq);
 
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
@@ -157,6 +162,8 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 failed_sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
+failed_rq_fini:
+	amdxdna_rq_fini(&xdna->ctx_rq);
 failed_dev_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);

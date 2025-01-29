@@ -7,6 +7,7 @@
 #define _AMDXDNA_CTX_RUNQUEUE_H_
 
 #include <linux/list.h>
+#include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
 
@@ -14,10 +15,15 @@ struct amdxdna_ctx_rq {
 	struct list_head	conn_list;
 	struct list_head	disconn_list;
 
+	struct delayed_work	delay_work;
+	struct workqueue_struct	*delay_wq;
+
 	bool			paused;
+	u32			connected_cnt;
+	u32			max_connected;
 };
 
-void amdxdna_rq_init(struct amdxdna_ctx_rq *rq);
+int amdxdna_rq_init(struct amdxdna_ctx_rq *rq);
 void amdxdna_rq_fini(struct amdxdna_ctx_rq *rq);
 
 void amdxdna_rq_add(struct amdxdna_ctx_rq *rq, struct amdxdna_ctx *ctx);

@@ -69,8 +69,8 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 
 	ndev = xdna->dev_handle;
 	if (ndev->hwctx_limit == ndev->hwctx_cnt) {
-		XDNA_ERR(xdna, "Exceed hardware context limit");
-		return -ENOENT;
+		XDNA_DBG(xdna, "Exceed hardware context limit");
+		return -EAGAIN;
 	}
 
 	sched = &ctx->priv->sched;

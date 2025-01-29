@@ -158,6 +158,7 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	mutex_unlock(&xdna->dev_lock);
 
 	atomic64_set(&ctx->job_free_cnt, 0);
+	init_waitqueue_head(&ctx->connect_waitq);
 
 	XDNA_DBG(xdna, "PID %d create context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);

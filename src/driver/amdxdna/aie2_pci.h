@@ -8,6 +8,7 @@
 
 #include <linux/device.h>
 #include <linux/iopoll.h>
+#include <linux/wait.h>
 #include <linux/io.h>
 #include <linux/semaphore.h>
 #include <drm/gpu_scheduler.h>
