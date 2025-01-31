@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "dev_info.h"
 
@@ -30,7 +30,7 @@ xclbin_info xclbin_infos[] = {
   },
   {
     .name = "1x4.xclbin",
-    .device = npu2_device_id,
+    .device = npu4_device_id,
     .revision_id = npu2_revision_id,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
@@ -107,7 +107,7 @@ xclbin_info xclbin_infos[] = {
   },
   {
     .name = "1x4.xclbin",
-    .device = npu2_device_id,
+    .device = npu4_device_id,
     .revision_id = npu4_revision_id,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
@@ -130,7 +130,7 @@ xclbin_info xclbin_infos[] = {
   },
   {
     .name = "1x4.xclbin",
-    .device = npu2_device_id,
+    .device = npu4_device_id,
     .revision_id = npu5_revision_id,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
@@ -153,7 +153,7 @@ xclbin_info xclbin_infos[] = {
   },
   {
     .name = "1x4.xclbin",
-    .device = npu2_device_id,
+    .device = npu4_device_id,
     .revision_id = npu6_revision_id,
     .ip_name2idx = {
       { "DPU_PDI_0:IPUV1CNN",         {0} },
@@ -186,7 +186,7 @@ xclbin_info xclbin_infos[] = {
   },
   {
     .name = "design.xclbin",
-    .device = npu2_device_id,
+    .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {0} },

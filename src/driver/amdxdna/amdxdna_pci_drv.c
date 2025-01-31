@@ -12,6 +12,7 @@
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sysfs.h"
+#include "amdxdna_ctx_runqueue.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -123,10 +124,16 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	XDNA_DBG(xdna, "Maximum limit %d context(s)", xdna->ctx_limit);
 
+	ret = amdxdna_rq_init(&xdna->ctx_rq);
+	if (ret) {
+		XDNA_ERR(xdna, "Context runqueue init failed");
+		goto failed_dev_fini;
+	}
+
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
-		goto failed_dev_fini;
+		goto failed_rq_fini;
 	}
 
 	pm_runtime_set_autosuspend_delay(dev, autosuspend_ms);
@@ -155,6 +162,8 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 failed_sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
+failed_rq_fini:
+	amdxdna_rq_fini(&xdna->ctx_rq);
 failed_dev_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
@@ -173,6 +182,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	destroy_workqueue(xdna->notifier_wq);
 	amdxdna_tdr_stop(&xdna->tdr);
 	amdxdna_sysfs_fini(xdna);
+	amdxdna_rq_fini(&xdna->ctx_rq);
 
 	pm_runtime_get_noresume(dev);
 	pm_runtime_forbid(dev);
@@ -222,11 +232,9 @@ static int amdxdna_dev_resume_nolock(struct amdxdna_dev *xdna)
 static int amdxdna_pmops_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	struct amdxdna_client *client;
 
 	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry(client, &xdna->client_list, node)
-		amdxdna_ctx_suspend(client);
+	amdxdna_rq_pause_all(&xdna->ctx_rq);
 
 	amdxdna_dev_suspend_nolock(xdna);
 	mutex_unlock(&xdna->dev_lock);
@@ -237,7 +245,6 @@ static int amdxdna_pmops_suspend(struct device *dev)
 static int amdxdna_pmops_resume(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	struct amdxdna_client *client;
 	int ret;
 
 	XDNA_INFO(xdna, "firmware resuming...");
@@ -250,8 +257,7 @@ static int amdxdna_pmops_resume(struct device *dev)
 	}
 
 	XDNA_INFO(xdna, "context resuming...");
-	list_for_each_entry(client, &xdna->client_list, node)
-		amdxdna_ctx_resume(client);
+	amdxdna_rq_run_all(&xdna->ctx_rq);
 	mutex_unlock(&xdna->dev_lock);
 
 	return 0;

@@ -38,55 +38,6 @@ static void aie2_job_put(struct amdxdna_sched_job *job)
 	kref_put(&job->refcnt, aie2_job_release);
 }
 
-static void aie2_ctx_stop(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
-{
-	ctx->status &= ~CTX_STATE_READY;
-	aie2_hwctx_stop(ctx);
-	XDNA_DBG(xdna, "Stopped %s", ctx->name);
-}
-
-static int aie2_ctx_restart(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
-{
-	int ret;
-
-	ret = aie2_hwctx_start(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to start %s, ret %d", ctx->name, ret);
-		return ret;
-	}
-
-	if (!ctx->cus)
-		goto out;
-
-#ifdef AMDXDNA_DEVEL
-	if (priv_load) {
-		ret = aie2_legacy_config_cu(ctx);
-		if (ret) {
-			XDNA_ERR(xdna, "Legacy config cu failed, ret %d", ret);
-			goto failed;
-		}
-		goto skip_config_cu;
-	}
-#endif
-	ret = aie2_config_cu(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
-		goto failed;
-	}
-#ifdef AMDXDNA_DEVEL
-skip_config_cu:
-#endif
-	ctx->status |= FIELD_PREP(CTX_STATE_READY, 1);
-out:
-	XDNA_DBG(xdna, "%s restarted, status 0x%x", ctx->name, ctx->status);
-	return 0;
-
-failed:
-	aie2_hwctx_stop(ctx);
-	XDNA_DBG(xdna, "%s restarted failed, ret %d", ctx->name, ret);
-	return ret;
-}
-
 static const char *
 aie2_fence_state2str(struct dma_fence *fence)
 {
@@ -130,46 +81,6 @@ void aie2_dump_ctx(struct amdxdna_client *client)
 	}
 }
 
-void aie2_stop_ctx(struct amdxdna_client *client)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_ctx(client, ctx_id, ctx) {
-		if (!FIELD_GET(CTX_STATE_CONNECTED, ctx->status))
-			continue;
-
-		ctx->status |= FIELD_PREP(CTX_STATE_DEAD, 1);
-		aie2_ctx_stop(xdna, ctx);
-	}
-}
-
-void aie2_restart_ctx(struct amdxdna_client *client)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
-	int err;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_ctx(client, ctx_id, ctx) {
-		if (!FIELD_GET(CTX_STATE_DEAD, ctx->status))
-			continue;
-
-		XDNA_DBG(xdna, "Resetting %s", ctx->name);
-		err = aie2_ctx_restart(xdna, ctx);
-		if (!err) {
-			ctx->status &= ~CTX_STATE_DEAD;
-			continue;
-		}
-
-		XDNA_WARN(xdna, "Failed to restart %s status 0x%x err %d",
-			  ctx->name, ctx->status, err);
-	}
-}
-
 static void aie2_ctx_wait_for_idle(struct amdxdna_ctx *ctx)
 {
 	struct dma_fence *fence;
@@ -188,12 +99,14 @@ void aie2_ctx_disconnect(struct amdxdna_ctx *ctx)
 
 	/*
 	 * Command timeout is unlikely. But if it happens, it doesn't
-	 * break the system. aie2_ctx_stop() will destroy mailbox
+	 * break the system. aie2_hwctx_stop() will destroy mailbox
 	 * and abort all commands.
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	aie2_ctx_wait_for_idle(ctx);
-	aie2_ctx_stop(xdna, ctx);
+	ctx->status &= ~CTX_STATE_READY;
+	aie2_hwctx_stop(ctx);
+	XDNA_DBG(xdna, "Stopped %s", ctx->name);
 }
 
 int aie2_ctx_connect(struct amdxdna_ctx *ctx)
@@ -207,10 +120,39 @@ int aie2_ctx_connect(struct amdxdna_ctx *ctx)
 	 * mailbox channel, error will return.
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	ret = aie2_ctx_restart(xdna, ctx);
+	if (!ctx->cus)
+		return -EINVAL;
+
+	ret = aie2_hwctx_start(ctx);
 	if (ret)
-		XDNA_WARN(xdna, "Failed to connect %s status 0x%x ret %d",
-			  ctx->name, ctx->status, ret);
+		return ret;
+
+#ifdef AMDXDNA_DEVEL
+	if (priv_load) {
+		ret = aie2_legacy_config_cu(ctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Legacy config cu failed, ret %d", ret);
+			goto failed;
+		}
+		goto skip_config_cu;
+	}
+#endif
+	ret = aie2_config_cu(ctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Config cu failed, ret %d", ret);
+		goto failed;
+	}
+#ifdef AMDXDNA_DEVEL
+skip_config_cu:
+#endif
+	ctx->status |= FIELD_PREP(CTX_STATE_READY, 1);
+	XDNA_DBG(xdna, "%s connected, status 0x%x", ctx->name, ctx->status);
+	return 0;
+
+failed:
+	aie2_hwctx_stop(ctx);
+	XDNA_ERR(xdna, "Failed to connect %s status 0x%x ret %d",
+		 ctx->name, ctx->status, ret);
 	return ret;
 }
 
@@ -620,17 +562,11 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 		goto free_wq;
 	}
 
-	ret = aie2_hwctx_start(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to start fw context, ret %d", ret);
-		goto syncobj_destroy;
-	}
+	amdxdna_rq_add(&xdna->ctx_rq, ctx);
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
 
-syncobj_destroy:
-	aie2_ctx_syncobj_destroy(ctx);
 free_wq:
 	destroy_workqueue(priv->submit_wq);
 free_cmd_bufs:
@@ -651,10 +587,11 @@ free_priv:
 
 void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 {
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	int idx;
 
 	aie2_ctx_wait_for_idle(ctx);
-	aie2_hwctx_stop(ctx);
+	amdxdna_rq_del(&xdna->ctx_rq, ctx);
 	destroy_workqueue(ctx->priv->submit_wq);
 	aie2_ctx_syncobj_destroy(ctx);
 	for (idx = 0; idx < ARRAY_SIZE(ctx->priv->cmd_buf); idx++)
@@ -666,7 +603,7 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 		aie2_unregister_pdis(ctx);
 #endif
 
-	XDNA_DBG(ctx->client->xdna, "%s total completed jobs %lld",
+	XDNA_DBG(xdna, "%s total completed jobs %lld",
 		 ctx->name, ctx->completed);
 	mutex_destroy(&ctx->priv->io_lock);
 	kfree(ctx->col_list);
@@ -709,29 +646,8 @@ static int aie2_ctx_cu_config(struct amdxdna_ctx *ctx, void *buf, u32 size)
 			XDNA_ERR(xdna, "Register PDIs failed, ret %d", ret);
 			goto free_cus;
 		}
-
-		ret = aie2_legacy_config_cu(ctx);
-		if (ret) {
-			XDNA_ERR(xdna, "Legacy config cu failed, ret %d", ret);
-			aie2_unregister_pdis(ctx);
-			goto free_cus;
-		}
-
-		goto skip_config_cu;
 	}
 #endif
-	ret = aie2_config_cu(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Config CU to firmware failed, ret %d", ret);
-		goto free_cus;
-	}
-
-#ifdef AMDXDNA_DEVEL
-skip_config_cu:
-#endif
-	wmb(); /* To avoid locking in command submit when check status */
-	ctx->status |= FIELD_PREP(CTX_STATE_READY, 1);
-
 	return 0;
 
 free_cus:
@@ -813,7 +729,6 @@ int aie2_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	switch (type) {
 	case DRM_AMDXDNA_CTX_CONFIG_CU:
 		return aie2_ctx_cu_config(ctx, buf, size);
@@ -936,6 +851,8 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		XDNA_ERR(xdna, "Grab job sem failed, ret %d", ret);
 		return ret;
 	}
+
+	amdxdna_rq_wait_for_run(&xdna->ctx_rq, ctx);
 
 	chain = dma_fence_chain_alloc();
 	if (!chain) {

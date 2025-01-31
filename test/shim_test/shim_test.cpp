@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // WARNING: This file contains test cases calling XRT's SHIM layer APIs directly.
 // These APIs are XRT's internal APIs and are not meant for any external XRT
 // user to call. We can't provide any support if you use APIs here and run into issues.
 
 
+#include "multi_threads.h"
 #include "dev_info.h"
 #include "io_param.h"
 #include "hwctx.h"
@@ -141,7 +142,7 @@ dev_filter_is_aie2(device::id_type id, device* dev)
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu1_device_id || device_id == npu2_device_id;
+  return device_id == npu1_device_id || device_id == npu4_device_id;
 }
 
 bool
@@ -157,6 +158,24 @@ bool
 dev_filter_is_aie(device::id_type id, device* dev)
 {
   return dev_filter_is_aie2(id, dev) || dev_filter_is_aie4(id, dev);
+}
+
+bool
+dev_filter_is_npu1(device::id_type id, device* dev)
+{
+  if (!is_xdna_dev(dev))
+    return false;
+  auto device_id = device_query<query::pcie_device>(dev);
+  return device_id == npu1_device_id;
+}
+
+bool
+dev_filter_is_npu4(device::id_type id, device* dev)
+{
+  if (!is_xdna_dev(dev))
+    return false;
+  auto device_id = device_query<query::pcie_device>(dev);
+  return device_id == npu4_device_id;
 }
 
 // All test case runners
@@ -255,6 +274,43 @@ TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> sdev,
     auto dev = get_userpf_device(id);
     hw_ctx hwctx{dev.get()};
   }
+}
+
+void
+TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto device_id = device_query<query::pcie_device>(dev);
+  int is_negative = static_cast<unsigned int>(arg[0]);
+  int num_virt_ctx;
+
+  // XDNA driver by default supports 6 virtual context on npu1 and 32 virtual context on npu4
+  if (device_id == npu1_device_id)
+    num_virt_ctx = 6;
+  else
+    num_virt_ctx = 32;
+
+  if (is_negative)
+    num_virt_ctx += 1;
+
+  std::cout << "Creating " << num_virt_ctx << " contexts" << std::endl;
+  // Try opening device and creating ctx twice
+  {
+    std::vector<std::unique_ptr<hw_ctx>> ctxs;
+    for (int i = 0; i < num_virt_ctx; i++)
+      ctxs.push_back(std::make_unique<hw_ctx>(dev));
+  }
+}
+
+void
+TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto device_id = device_query<query::pcie_device>(dev);
+  int num_virt_ctx = static_cast<unsigned int>(arg[0]);
+
+  multi_thread threads(num_virt_ctx, TEST_io_latency);
+  threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
 }
 
 void
@@ -635,6 +691,36 @@ std::vector<test_case> test_list {
   },
   test_case{ "multi-command ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
+  },
+  test_case{ "virtual context test", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 0 }
+  },
+  test_case{ "virtual context bad test", {},
+    TEST_NEGATIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 1 }
+  },
+  test_case{ "Multi context IO test 1 (npu1)", {},
+    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 2 }
+  },
+  test_case{ "Multi context IO test 2 (npu1)", {},
+    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 4 }
+  },
+  test_case{ "Multi context IO test 3 (npu1)", {},
+    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 6 }
+  },
+  //test_case{ "Multi context IO test 4 (npu1)", {},
+  //  TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 10 }
+  //},
+  test_case{ "Multi context IO test 1 (npu4)", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2 }
+  },
+  test_case{ "Multi context IO test 1 (npu4)", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 4 }
+  },
+  test_case{ "Multi context IO test 1 (npu4)", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 16 }
+  },
+  test_case{ "Multi context IO test 1 (npu4)", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 20 }
   },
 };
 

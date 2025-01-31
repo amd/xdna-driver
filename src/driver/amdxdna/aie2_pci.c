@@ -15,6 +15,7 @@
 #include "aie2_solver.h"
 #include "aie2_msg_priv.h"
 
+#include "amdxdna_ctx_runqueue.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -674,12 +675,9 @@ static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 
 	down_write(&ndev->recover_lock);
 	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry(client, &xdna->client_list, node)
-		aie2_stop_ctx(client);
+	amdxdna_rq_pause_all(&xdna->ctx_rq);
 
-	/* The AIE will reset after all contexts are destroyed */
-	list_for_each_entry(client, &xdna->client_list, node)
-		aie2_restart_ctx(client);
+	amdxdna_rq_run_all(&xdna->ctx_rq);
 	mutex_unlock(&xdna->dev_lock);
 	up_write(&ndev->recover_lock);
 }
