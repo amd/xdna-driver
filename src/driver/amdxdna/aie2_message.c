@@ -64,6 +64,9 @@ aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
 			 msg->opcode, *hdl->data);
 		ret = -EINVAL;
+	} else {
+		if (msg->opcode == MSG_OP_START_EVENT_TRACE)
+			aie2_set_trace_timestamp(ndev, hdl->data);
 	}
 
 	return ret;
@@ -251,6 +254,28 @@ int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 	fw_ver->build = resp.build;
 
 	return 0;
+}
+
+int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
+{
+	DECLARE_AIE2_MSG(start_event_trace, MSG_OP_START_EVENT_TRACE);
+
+	req.dram_buffer_address = addr;
+	req.dram_buffer_size = size;
+	req.event_trace_dest = EVENT_TRACE_DEST_DRAM;
+	req.event_trace_categories = 0xFFFFFFFF;
+	req.event_trace_timestamp = EVENT_TRACE_TIMESTAMP_FW_CHRONO;
+
+	XDNA_DBG(ndev->xdna, "send start event trace msg");
+	return aie2_send_mgmt_msg_wait(ndev, &msg);
+}
+
+int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE2_MSG(stop_event_trace, MSG_OP_STOP_EVENT_TRACE);
+
+	XDNA_DBG(ndev->xdna, "send stop event trace msg");
+	return aie2_send_mgmt_msg_wait(ndev, &msg);
 }
 
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
