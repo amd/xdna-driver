@@ -375,7 +375,7 @@ int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_query_status(struct amdxdna_dev_hdl *ndev, char *buf, u32 size, u32 *cols_filled);
 int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
-				 void *handle, int (*cb)(void*, const u32 *, size_t));
+				 void *handle, int (*cb)(void*, void __iomem *, size_t));
 int aie2_self_test(struct amdxdna_dev_hdl *ndev);
 #ifdef AMDXDNA_DEVEL
 int aie2_register_pdis(struct amdxdna_ctx *ctx);
@@ -385,17 +385,17 @@ int aie2_legacy_config_cu(struct amdxdna_ctx *ctx);
 
 int aie2_config_cu(struct amdxdna_ctx *ctx);
 int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
-		 int (*notify_cb)(void *, const u32 *, size_t));
+		 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 				struct amdxdna_sched_job *job,
-				int (*notify_cb)(void *, const u32 *, size_t));
+				int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 			       struct amdxdna_sched_job *job,
-			       int (*notify_cb)(void *, const u32 *, size_t));
+			       int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_sync_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
-		 int (*notify_cb)(void *, const u32 *, size_t));
+		 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_config_debug_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
-			 int (*notify_cb)(void *, const u32 *, size_t));
+			 int (*notify_cb)(void *, void __iomem *, size_t));
 
 /* aie2_ctx.c */
 int aie2_ctx_init(struct amdxdna_ctx *ctx);

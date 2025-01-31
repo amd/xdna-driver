@@ -142,7 +142,7 @@ struct mailbox_pkg {
 
 struct mailbox_msg {
 	void			*handle;
-	int			(*notify_cb)(void *handle, const u32 *data, size_t size);
+	int			(*notify_cb)(void *handle, void __iomem *data, size_t size);
 	size_t			pkg_size; /* package size in bytes */
 	struct mailbox_pkg	pkg;
 };
@@ -150,17 +150,17 @@ struct mailbox_msg {
 static void mailbox_reg_write(struct mailbox_channel *mb_chann, u32 mbox_reg, u32 data)
 {
 	struct xdna_mailbox_res *mb_res = &mb_chann->mb->res;
-	u64 ringbuf_addr = mb_res->mbox_base + mbox_reg;
+	void __iomem *ringbuf_addr = mb_res->mbox_base + mbox_reg;
 
-	writel(data, (void *)ringbuf_addr);
+	writel(data, ringbuf_addr);
 }
 
 static u32 mailbox_reg_read(struct mailbox_channel *mb_chann, u32 mbox_reg)
 {
 	struct xdna_mailbox_res *mb_res = &mb_chann->mb->res;
-	u64 ringbuf_addr = mb_res->mbox_base + mbox_reg;
+	void __iomem *ringbuf_addr = mb_res->mbox_base + mbox_reg;
 
-	return readl((void *)ringbuf_addr);
+	return readl(ringbuf_addr);
 }
 
 static int mailbox_tail_read_non_zero(struct mailbox_channel *mb_chann, u32 *val)
@@ -168,11 +168,11 @@ static int mailbox_tail_read_non_zero(struct mailbox_channel *mb_chann, u32 *val
 	u32 mbox_reg = mb_chann->res[CHAN_RES_I2X].mb_tail_ptr_reg;
 	u32 ringbuf_size = mb_chann->res[CHAN_RES_I2X].rb_size;
 	struct xdna_mailbox_res *mb_res = &mb_chann->mb->res;
-	u64 ringbuf_addr = mb_res->mbox_base + mbox_reg;
+	void __iomem *ringbuf_addr = mb_res->mbox_base + mbox_reg;
 	int ret, tail;
 
 	/* Poll till tail is not zero */
-	ret = readx_poll_timeout(readl, (void *)ringbuf_addr, tail,
+	ret = readx_poll_timeout(readl, ringbuf_addr, tail,
 				 tail, 0 /* tight-loops */, 100 /* us timeout */);
 	if (ret < 0)
 		return ret;
@@ -279,10 +279,10 @@ static void mailbox_release_msg(struct mailbox_channel *mb_chann,
 static int
 mailbox_send_msg(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
 {
+	void __iomem *write_addr;
 	u32 ringbuf_size;
 	u32 head, tail;
 	u32 start_addr;
-	u64 write_addr;
 	u32 tmp_tail;
 
 	head = mailbox_get_headptr(mb_chann, CHAN_RES_X2I);
@@ -300,14 +300,14 @@ mailbox_send_msg(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
 
 	if (tail >= head && tmp_tail > ringbuf_size - sizeof(u32)) {
 		write_addr = mb_chann->mb->res.ringbuf_base + start_addr + tail;
-		writel(TOMBSTONE, (void *)write_addr);
+		writel(TOMBSTONE, write_addr);
 
 		/* tombstone is set. Write from the start of the ringbuf */
 		tail = 0;
 	}
 
 	write_addr = mb_chann->mb->res.ringbuf_base + start_addr + tail;
-	memcpy_toio((void *)write_addr, &mb_msg->pkg, mb_msg->pkg_size);
+	memcpy_toio(write_addr, &mb_msg->pkg, mb_msg->pkg_size);
 	mailbox_set_tailptr(mb_chann, tail + mb_msg->pkg_size);
 
 	trace_mbox_set_tail(MAILBOX_NAME, mb_chann->msix_irq,
@@ -322,7 +322,7 @@ no_space:
 
 static int
 mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *header,
-		 void *data)
+		 void __iomem *data)
 {
 	struct mailbox_msg *mb_msg;
 	int msg_id;
@@ -360,11 +360,11 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 {
 	struct xdna_msg_header header;
+	void __iomem *read_addr;
 	u32 msg_size, rest;
 	u32 ringbuf_size;
 	u32 head, tail;
 	u32 start_addr;
-	u64 read_addr;
 	int ret;
 
 	ret = mailbox_tail_read_non_zero(mb_chann, &tail);
@@ -385,7 +385,7 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 
 	/* Peek size of the message or TOMBSTONE */
 	read_addr = mb_chann->mb->res.ringbuf_base + start_addr + head;
-	header.total_size = readl((void *)read_addr);
+	header.total_size = readl(read_addr);
 	/* size is TOMBSTONE, set next read from 0 */
 	if (header.total_size == TOMBSTONE) {
 		if (head < tail) {
@@ -403,7 +403,7 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 		}
 		/* Re-peek size of the message */
 		read_addr = mb_chann->mb->res.ringbuf_base + start_addr;
-		header.total_size = readl((void *)read_addr);
+		header.total_size = readl(read_addr);
 	}
 
 	if (unlikely(!header.total_size || !IS_ALIGNED(header.total_size, 4))) {
@@ -420,10 +420,10 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 
 	rest = sizeof(header) - sizeof(u32);
 	read_addr += sizeof(u32);
-	memcpy_fromio((u32 *)&header + 1, (void *)read_addr, rest);
+	memcpy_fromio((u32 *)&header + 1, read_addr, rest);
 	read_addr += rest;
 
-	ret = mailbox_get_resp(mb_chann, &header, (u32 *)read_addr);
+	ret = mailbox_get_resp(mb_chann, &header, read_addr);
 
 	mailbox_set_headptr(mb_chann, head + msg_size);
 	/* After update head, it can equal to ringbuf_size. This is expected. */
