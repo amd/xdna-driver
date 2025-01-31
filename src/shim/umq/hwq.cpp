@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include <x86intrin.h>
 #include "bo.h"
 #include "hwq.h"
 
 namespace {
 
-// flash cache line for non coherence memory
-inline void
-clflush_data(void *data, int len)
-{
-	const int LINESIZE = 64;
-	const char *cur = (const char *)data;
-	// must be at least one cache line
-	uintptr_t lastline = (uintptr_t)(cur + len - 1) | (LINESIZE - 1);
-	do {
-		_mm_clflush(cur);
-		cur += LINESIZE;
-	} while (cur <= (const char *)lastline);
+void clflush_data(const void *data, size_t len) {
+  const char *cur = (const char *)data;
+  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (shim_xdna::LINESIZE - 1);
+  do {
+    shim_xdna::flush_cache_line(cur);
+    cur += shim_xdna::LINESIZE;
+  } while (cur <= (const char *)lastline);
 }
 
 inline void
