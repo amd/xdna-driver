@@ -37,6 +37,24 @@ destroy_syncobj(const shim_xdna::pdev& dev, uint32_t hdl)
   dev.ioctl(DRM_IOCTL_SYNCOBJ_DESTROY, &dsobj);
 }
 
+int
+convert_priority(int p)
+{
+  // Below value of cases are copy from MCDM for application porting friendly
+  switch (p) {
+    case 0x100:
+      return AMDXDNA_QOS_REALTIME_PRIORITY;
+    case 0x180:
+      return AMDXDNA_QOS_HIGH_PRIORITY;
+    case 0x200:
+      return AMDXDNA_QOS_NORMAL_PRIORITY;
+    case 0x280:
+      return AMDXDNA_QOS_LOW_PRIORITY;
+    default:
+      shim_err(EINVAL, "Invalid priority %d", p);
+  };
+}
+
 }
 namespace shim_xdna {
 
@@ -141,7 +159,7 @@ init_qos_info(const qos_type& qos)
     else if (key == "frame_execution_time")
       m_qos.frame_exec_time = value;
     else if (key == "priority")
-      m_qos.priority = value;
+      m_qos.priority = convert_priority(value);
   }
 }
 
