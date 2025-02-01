@@ -34,6 +34,7 @@ To run AI applications, your system needs
 
 Since Linux v6.10 offically supports AMD IOMMU SVA, we can work with upstream Linux kernel source.
 If your system has Linux v6.10 or above installed, check if `CONFIG_AMD_IOMMU` and `CONFIG_DRM_ACCEL` are set. If not, the system is not good for XDNA driver.
+Do not enable CONFIG_TRIM_UNUSED_KSYMS (Trim unused exported kernel symbols).
 
 If you want to manually build Linux kernel, follow below steps.
 ```  bash
