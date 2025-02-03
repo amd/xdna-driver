@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _BO_KMQ_H_
 #define _BO_KMQ_H_
@@ -28,7 +28,7 @@ public:
 
 public:
   // Support BO creation from internal
-  bo_kmq(const device& device, size_t size, amdxdna_bo_type type);
+  bo_kmq(const device& device, size_t size, int type);
 
   // Obtain array of arg BO handles, returns real number of handles
   uint32_t
@@ -36,7 +36,7 @@ public:
 
 private:
   bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-    size_t size, uint64_t flags, amdxdna_bo_type type);
+    size_t size, uint64_t flags, int type);
 
   // Only for AMDXDNA_BO_CMD type
   std::map<size_t, uint32_t> m_args_map;

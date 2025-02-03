@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "core/common/config_reader.h"
@@ -7,7 +7,7 @@
 
 namespace {
 
-amdxdna_bo_type
+int
 flag_to_type(uint64_t bo_flags)
 {
   auto flags = xcl_bo_flags{bo_flags};
@@ -88,14 +88,14 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 }
 
 bo_kmq::
-bo_kmq(const device& device, size_t size, amdxdna_bo_type type)
+bo_kmq(const device& device, size_t size, int type)
   : bo_kmq(device, AMDXDNA_INVALID_CTX_HANDLE, size, 0, type)
 {
 }
 
 bo_kmq::
 bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags, amdxdna_bo_type type)
+  size_t size, uint64_t flags, int type)
   : bo(device, ctx_id, size, flags, type)
 {
   size_t align = 0;

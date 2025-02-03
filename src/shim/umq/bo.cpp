@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 
 namespace {
 
-amdxdna_bo_type
+int
 umq_flags_to_type(uint64_t bo_flags)
 {
   auto flags = xcl_bo_flags{bo_flags};
@@ -47,7 +47,7 @@ bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 
 bo_umq::
 bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags, amdxdna_bo_type type)
+  size_t size, uint64_t flags, int type)
   : bo(device, ctx_id, size, flags, type)
 {
   alloc_bo();

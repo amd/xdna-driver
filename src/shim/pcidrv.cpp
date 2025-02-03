@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 #include "kmq/pcidev.h"
 #include "umq/pcidev.h"
@@ -16,7 +16,7 @@ struct X
   X() { xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv>()); }
 } x;
 
-amdxdna_device_type
+int
 get_dev_type(const std::string& sysfs)
 {
   const std::string sysfs_root{"/sys/bus/pci/devices/"};
@@ -28,7 +28,7 @@ get_dev_type(const std::string& sysfs)
 
   std::string line;
   std::getline(ifs, line);
-  return static_cast<amdxdna_device_type>(std::stoi(line));
+  return static_cast<int>(std::stoi(line));
 }
 
 }
