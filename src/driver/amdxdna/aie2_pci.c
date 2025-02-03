@@ -647,6 +647,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
+	aie2_assign_event_trace_state(ndev, false);
 	aie2_hw_stop(xdna);
 	aie2_error_async_events_free(ndev);
 #ifdef AMDXDNA_DEVEL
