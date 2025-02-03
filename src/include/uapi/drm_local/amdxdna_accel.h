@@ -61,7 +61,7 @@ enum amdxdna_device_type {
 };
 
 /*
- * Enum for priority in application's QoS.
+ * Define priority in application's QoS.
  * AMDXDNA_QOS_DEFAULT_PRIORITY: Driver decide priority for client.
  * AMDXDNA_QOS_REALTIME_PRIORITY: Real time clients.
  * AMDXDNA_QOS_HIGH_PRIORITY: Best effort foreground clients.
@@ -69,13 +69,13 @@ enum amdxdna_device_type {
  * AMDXDNA_QOS_LOW_PRIORITY: Clients that can wait indefinite amount of time for
  *                           completion.
  */
-enum amdxdna_qos_priority {
-	AMDXDNA_QOS_DEFAULT_PRIORITY	= 0,
-	AMDXDNA_QOS_REALTIME_PRIORITY	= 1,
-	AMDXDNA_QOS_HIGH_PRIORITY	= 2,
-	AMDXDNA_QOS_NORMAL_PRIORITY	= 3,
-	AMDXDNA_QOS_LOW_PRIORITY	= 4,
-};
+#define	AMDXDNA_QOS_DEFAULT_PRIORITY	0
+#define	AMDXDNA_QOS_REALTIME_PRIORITY	1
+#define	AMDXDNA_QOS_HIGH_PRIORITY	2
+#define	AMDXDNA_QOS_NORMAL_PRIORITY	3
+#define	AMDXDNA_QOS_LOW_PRIORITY	4
+/* The maximum number of priority */
+#define	AMDXDNA_NUM_PRIORITY		4
 
 /**
  * struct qos_info - QoS information for driver.
