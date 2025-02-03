@@ -6,12 +6,14 @@
 
 namespace {
 
-void clflush_data(const void *data, size_t len) {
+void clflush_data(const void *data, size_t len)
+{
+  const int LINESIZE = 64;
   const char *cur = (const char *)data;
-  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (shim_xdna::LINESIZE - 1);
+  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (LINESIZE - 1);
   do {
     shim_xdna::flush_cache_line(cur);
-    cur += shim_xdna::LINESIZE;
+    cur += LINESIZE;
   } while (cur <= (const char *)lastline);
 }
 

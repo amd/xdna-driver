@@ -21,10 +21,9 @@
 #endif
 
 namespace shim_xdna {
-
-  const int LINESIZE = 64;
   
-  inline void flush_cache_line(const char *cur) {
+inline void flush_cache_line(const char *cur)
+{
 #if defined(__x86_64__) || defined(_M_X64)
   _mm_clflush(cur);
 #elif defined(__aarch64__)
@@ -37,7 +36,7 @@ namespace shim_xdna {
     : "memory"
   );
 #endif
-  }
+}
 
 class bo : public xrt_core::buffer_handle
 {
