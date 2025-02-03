@@ -118,6 +118,8 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 		goto free_ctx;
 	}
 
+	if (ctx->qos.priority == AMDXDNA_QOS_DEFAULT_PRIORITY)
+		ctx->qos.priority = AMDXDNA_QOS_HIGH_PRIORITY;
 	ctx->client = client;
 	ctx->tdr_last_completed = -1;
 	ctx->num_tiles = args->num_tiles;
