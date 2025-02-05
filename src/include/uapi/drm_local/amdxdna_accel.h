@@ -26,6 +26,12 @@ extern "C" {
 #define AMDXDNA_INVALID_BO_HANDLE	0
 #define AMDXDNA_INVALID_FENCE_HANDLE	0
 
+#define POWER_MODE_DEFAULT	0
+#define POWER_MODE_LOW		1
+#define POWER_MODE_MEDIUM	2
+#define POWER_MODE_HIGH		3
+#define POWER_MODE_TURBO	4
+
 /*
  * The interface can grow/extend over time.
  * On each struct amdxdna_drm_*, to support potential extension, we defined it
@@ -41,24 +47,20 @@ extern "C" {
  * We don't have extension now. The extension struct will define in the future.
  */
 
-enum amdxdna_drm_ioctl_id {
-	DRM_AMDXDNA_CREATE_CTX,
-	DRM_AMDXDNA_DESTROY_CTX,
-	DRM_AMDXDNA_CONFIG_CTX,
-	DRM_AMDXDNA_CREATE_BO,
-	DRM_AMDXDNA_GET_BO_INFO,
-	DRM_AMDXDNA_SYNC_BO,
-	DRM_AMDXDNA_EXEC_CMD,
-	DRM_AMDXDNA_GET_INFO,
-	DRM_AMDXDNA_SET_STATE,
-	DRM_AMDXDNA_WAIT_CMD,
-};
+#define	DRM_AMDXDNA_CREATE_CTX		0
+#define	DRM_AMDXDNA_DESTROY_CTX		1
+#define	DRM_AMDXDNA_CONFIG_CTX		2
+#define	DRM_AMDXDNA_CREATE_BO		3
+#define	DRM_AMDXDNA_GET_BO_INFO		4
+#define	DRM_AMDXDNA_SYNC_BO		5
+#define	DRM_AMDXDNA_EXEC_CMD		6
+#define	DRM_AMDXDNA_GET_INFO		7
+#define	DRM_AMDXDNA_SET_STATE		8
+#define	DRM_AMDXDNA_WAIT_CMD		9
 
-enum amdxdna_device_type {
-	AMDXDNA_DEV_TYPE_UNKNOWN = -1,
-	AMDXDNA_DEV_TYPE_KMQ,
-	AMDXDNA_DEV_TYPE_UMQ,
-};
+#define	AMDXDNA_DEV_TYPE_UNKNOWN	-1
+#define	AMDXDNA_DEV_TYPE_KMQ		0
+#define	AMDXDNA_DEV_TYPE_UMQ		1
 
 /*
  * Define priority in application's QoS.
@@ -159,17 +161,10 @@ struct amdxdna_ctx_param_config_cu {
 	struct amdxdna_cu_config cu_configs[];
 };
 
-enum amdxdna_drm_config_ctx_param {
-	DRM_AMDXDNA_CTX_CONFIG_CU,
-	DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF,
-	DRM_AMDXDNA_CTX_REMOVE_DBG_BUF,
-};
-
 /**
  * struct amdxdna_drm_config_ctx - Configure context.
  * @handle: Context handle.
- * @param_type: Value in enum amdxdna_drm_config_ctx_param. Specifies the
- *              structure passed in via param_val.
+ * @param_type: Specifies the structure passed in via param_val.
  * @param_val: A structure specified by the param_type struct member.
  * @param_val_size: Size of the parameter buffer pointed to by the param_val.
  *		    If param_val is not a pointer, driver can ignore this.
@@ -180,26 +175,13 @@ enum amdxdna_drm_config_ctx_param {
  */
 struct amdxdna_drm_config_ctx {
 	__u32 handle;
+#define DRM_AMDXDNA_CTX_CONFIG_CU	0
+#define	DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF	1
+#define	DRM_AMDXDNA_CTX_REMOVE_DBG_BUF	2
 	__u32 param_type;
 	__u64 param_val;
 	__u32 param_val_size;
 	__u32 pad;
-};
-
-/*
- * AMDXDNA_BO_SHMEM:	DRM GEM SHMEM bo
- * AMDXDNA_BO_DEV_HEAP: Shared host memory to device as heap memory
- * AMDXDNA_BO_DEV_BO:	Allocated from BO_DEV_HEAP
- * AMDXDNA_BO_CMD:	User and driver accessible bo
- * AMDXDNA_BO_DMA:	DRM GEM DMA bo
- */
-enum amdxdna_bo_type {
-	AMDXDNA_BO_INVALID = 0,
-	AMDXDNA_BO_SHMEM,
-	AMDXDNA_BO_DEV_HEAP,
-	AMDXDNA_BO_DEV,
-	AMDXDNA_BO_CMD,
-	AMDXDNA_BO_DMA,
 };
 
 /**
@@ -214,6 +196,19 @@ struct amdxdna_drm_create_bo {
 	__u64	flags;
 	__u64	vaddr;
 	__u64	size;
+/*
+ * AMDXDNA_BO_SHMEM:	DRM GEM SHMEM bo
+ * AMDXDNA_BO_DEV_HEAP: Shared host memory to device as heap memory
+ * AMDXDNA_BO_DEV_BO:	Allocated from BO_DEV_HEAP
+ * AMDXDNA_BO_CMD:	User and driver accessible bo
+ * AMDXDNA_BO_DMA:	DRM GEM DMA bo
+ */
+#define	AMDXDNA_BO_INVALID	0
+#define	AMDXDNA_BO_SHMEM	1
+#define	AMDXDNA_BO_DEV_HEAP	2
+#define	AMDXDNA_BO_DEV		3
+#define	AMDXDNA_BO_CMD		4
+#define	AMDXDNA_BO_DMA		5
 	__u32	type;
 	__u32	handle;
 };
@@ -254,18 +249,12 @@ struct amdxdna_drm_sync_bo {
 	__u64 size;
 };
 
-enum amdxdna_cmd_type {
-	AMDXDNA_CMD_SUBMIT_EXEC_BUF = 0,
-	AMDXDNA_CMD_SUBMIT_DEPENDENCY,
-	AMDXDNA_CMD_SUBMIT_SIGNAL,
-};
-
 /**
  * struct amdxdna_drm_exec_cmd - Execute command.
  * @ext: MBZ.
  * @ext_flags: MBZ.
  * @ctx: Context handle.
- * @type: One of command type in enum amdxdna_cmd_type.
+ * @type: Command type.
  * @cmd_handles: Array of command handles or the command handle itself
  *               in case of just one.
  * @args: Array of arguments for all command handles.
@@ -277,6 +266,9 @@ struct amdxdna_drm_exec_cmd {
 	__u64 ext;
 	__u64 ext_flags;
 	__u32 ctx;
+#define	AMDXDNA_CMD_SUBMIT_EXEC_BUF	0
+#define	AMDXDNA_CMD_SUBMIT_DEPENDENCY	1
+#define	AMDXDNA_CMD_SUBMIT_SIGNAL	2
 	__u32 type;
 	__u64 cmd_handles;
 	__u64 args;
@@ -382,10 +374,6 @@ struct amdxdna_drm_query_clock_metadata {
 	struct amdxdna_drm_query_clock h_clock;
 };
 
-enum amdxdna_sensor_type {
-	AMDXDNA_SENSOR_TYPE_POWER
-};
-
 /**
  * struct amdxdna_drm_query_sensor - The data for single sensor.
  * @label: The name for a sensor.
@@ -396,7 +384,7 @@ enum amdxdna_sensor_type {
  * @status: The sensor status.
  * @units: The sensor units.
  * @unitm: Translates value member variables into the correct unit via (pow(10, unitm) * value).
- * @type: The sensor type from enum amdxdna_sensor_type.
+ * @type: The sensor type.
  * @pad: Structure padding.
  */
 struct amdxdna_drm_query_sensor {
@@ -408,6 +396,7 @@ struct amdxdna_drm_query_sensor {
 	__u8  status[64];
 	__u8  units[16];
 	__s8  unitm;
+#define AMDXDNA_SENSOR_TYPE_POWER 0
 	__u8  type;
 	__u8  pad[6];
 };
@@ -477,17 +466,9 @@ struct amdxdna_drm_aie_reg {
 	__u32 val;
 };
 
-enum amdxdna_power_mode_type {
-	POWER_MODE_DEFAULT, /**< Fallback to calculated DPM */
-	POWER_MODE_LOW,     /**< Set frequency to lowest DPM */
-	POWER_MODE_MEDIUM,  /**< Set frequency to medium DPM */
-	POWER_MODE_HIGH,    /**< Set frequency to highest DPM */
-	POWER_MODE_TURBO,   /**< More power, more performance */
-};
-
 /**
  * struct amdxdna_drm_get_power_mode - Get the power mode of the AIE hardware
- * @power_mode: The sensor type from enum amdxdna_power_mode_type
+ * @power_mode: Returned current power mode
  * @pad: MBZ.
  */
 struct amdxdna_drm_get_power_mode {
@@ -520,28 +501,25 @@ struct amdxdna_drm_get_force_preempt_state {
 	__u8 pad[7];
 };
 
-enum amdxdna_drm_get_param {
-	DRM_AMDXDNA_QUERY_AIE_STATUS,
-	DRM_AMDXDNA_QUERY_AIE_METADATA,
-	DRM_AMDXDNA_QUERY_AIE_VERSION,
-	DRM_AMDXDNA_QUERY_CLOCK_METADATA,
-	DRM_AMDXDNA_QUERY_SENSORS,
-	DRM_AMDXDNA_QUERY_HW_CONTEXTS,
-	DRM_AMDXDNA_READ_AIE_MEM,
-	DRM_AMDXDNA_READ_AIE_REG,
-	DRM_AMDXDNA_QUERY_FIRMWARE_VERSION,
-	DRM_AMDXDNA_GET_POWER_MODE,
-	DRM_AMDXDNA_QUERY_TELEMETRY,
-	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
-};
-
 /**
  * struct amdxdna_drm_get_info - Get some information from the AIE hardware.
- * @param: Value in enum amdxdna_drm_get_param. Specifies the structure passed in the buffer.
+ * @param: Specifies the structure passed in the buffer.
  * @buffer_size: Size of the input buffer. Size needed/written by the kernel.
  * @buffer: A structure specified by the param struct member.
  */
 struct amdxdna_drm_get_info {
+#define	DRM_AMDXDNA_QUERY_AIE_STATUS		0
+#define	DRM_AMDXDNA_QUERY_AIE_METADATA		1
+#define	DRM_AMDXDNA_QUERY_AIE_VERSION		2
+#define	DRM_AMDXDNA_QUERY_CLOCK_METADATA	3
+#define	DRM_AMDXDNA_QUERY_SENSORS		4
+#define	DRM_AMDXDNA_QUERY_HW_CONTEXTS		5
+#define	DRM_AMDXDNA_READ_AIE_MEM		6
+#define	DRM_AMDXDNA_READ_AIE_REG		7
+#define	DRM_AMDXDNA_QUERY_FIRMWARE_VERSION	8
+#define	DRM_AMDXDNA_GET_POWER_MODE		9
+#define	DRM_AMDXDNA_QUERY_TELEMETRY		10
+#define	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE	11
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
@@ -549,7 +527,7 @@ struct amdxdna_drm_get_info {
 
 /**
  * struct amdxdna_drm_set_power_mode - Set the power mode of the AIE hardware
- * @power_mode: The sensor type from enum amdxdna_power_mode_type
+ * @power_mode: The target power mode to be set
  * @pad: MBZ.
  */
 struct amdxdna_drm_set_power_mode {
@@ -568,20 +546,17 @@ struct amdxdna_drm_set_force_preempt_state {
 	__u8 pad[7];
 };
 
-enum amdxdna_drm_set_param {
-	DRM_AMDXDNA_SET_POWER_MODE,
-	DRM_AMDXDNA_WRITE_AIE_MEM,
-	DRM_AMDXDNA_WRITE_AIE_REG,
-	DRM_AMDXDNA_SET_FORCE_PREEMPT,
-};
-
 /**
  * struct amdxdna_drm_set_state - Set the state of some component within the AIE hardware.
- * @param: Value in enum amdxdna_drm_set_param. Specifies the structure passed in the buffer.
+ * @param: Specifies the structure passed in the buffer.
  * @buffer_size: Size of the input buffer.
  * @buffer: A structure specified by the param struct member.
  */
 struct amdxdna_drm_set_state {
+#define	DRM_AMDXDNA_SET_POWER_MODE		0
+#define	DRM_AMDXDNA_WRITE_AIE_MEM		1
+#define	DRM_AMDXDNA_WRITE_AIE_REG		2
+#define	DRM_AMDXDNA_SET_FORCE_PREEMPT		3
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _BO_XDNA_H_
 #define _BO_XDNA_H_
@@ -23,7 +23,7 @@ class bo : public xrt_core::buffer_handle
 {
 public:
   bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-    size_t size, uint64_t flags, amdxdna_bo_type type);
+    size_t size, uint64_t flags, int type);
 
   bo(const device& device, xrt_core::shared_handle::export_handle ehdl);
 
@@ -59,7 +59,7 @@ public:
   uint32_t
   get_drm_bo_handle() const;
 
-  amdxdna_bo_type
+  int 
   get_type() const;
 
 protected:
@@ -116,7 +116,7 @@ protected:
   size_t m_parent_size = 0;
   size_t m_aligned_size = 0;
   uint64_t m_flags = 0;
-  amdxdna_bo_type m_type = AMDXDNA_BO_INVALID;
+  int m_type = AMDXDNA_BO_INVALID;
   std::unique_ptr<drm_bo> m_bo;
   const shared m_import;
 

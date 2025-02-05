@@ -55,7 +55,7 @@ int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target)
+int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 clk_gating, dpm_level;

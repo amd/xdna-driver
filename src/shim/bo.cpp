@@ -8,7 +8,7 @@
 namespace {
 
 uint32_t
-alloc_drm_bo(const shim_xdna::pdev& dev, amdxdna_bo_type type, void* buf, size_t size)
+alloc_drm_bo(const shim_xdna::pdev& dev, int type, void* buf, size_t size)
 {
   amdxdna_drm_create_bo cbo = {
     .vaddr = reinterpret_cast<uintptr_t>(buf),
@@ -93,7 +93,7 @@ export_drm_bo(const shim_xdna::pdev& dev, uint32_t boh)
 
 uint32_t
 import_drm_bo(const shim_xdna::pdev& dev, const shim_xdna::shared& share,
-  amdxdna_bo_type *type, size_t *size)
+  int *type, size_t *size)
 {
   xrt_core::shared_handle::export_handle fd = share.get_export_handle();
   drm_prime_handle imp_bo = {AMDXDNA_INVALID_BO_HANDLE, 0, fd};
@@ -252,7 +252,7 @@ free_bo()
 
 bo::
 bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags, amdxdna_bo_type type)
+  size_t size, uint64_t flags, int type)
   : m_pdev(device.get_pdev())
   , m_aligned_size(size)
   , m_flags(flags)
@@ -360,7 +360,7 @@ share() const
   return std::make_unique<shared>(fd);
 }
 
-amdxdna_bo_type
+int
 bo::
 get_type() const
 {

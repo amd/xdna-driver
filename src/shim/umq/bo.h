@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _BO_UMQ_H_
 #define _BO_UMQ_H_
@@ -25,7 +25,7 @@ public:
 
 private:
   bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-    size_t size, uint64_t flags, amdxdna_bo_type type);
+    size_t size, uint64_t flags, int type);
 
 };
 
