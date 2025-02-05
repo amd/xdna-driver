@@ -19,27 +19,6 @@
 #define aie2_send_mgmt_msg_wait(ndev, msg) \
 	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0)
 
-static int map_app_priority_to_fw(enum amdxdna_qos_priority avalue, u32 *fvalue)
-{
-	switch (avalue) {
-	case AMDXDNA_QOS_REALTIME_PRIORITY:
-		*fvalue = AIE2_QOS_REALTIME_PRIORITY;
-		break;
-	case AMDXDNA_QOS_HIGH_PRIORITY:
-		*fvalue = AIE2_QOS_HIGH_PRIORITY;
-		break;
-	case AMDXDNA_QOS_NORMAL_PRIORITY:
-		*fvalue = AIE2_QOS_NORMAL_PRIORITY;
-		break;
-	case AMDXDNA_QOS_LOW_PRIORITY:
-		*fvalue = AIE2_QOS_LOW_PRIORITY;
-		break;
-	default:
-		return -EINVAL;
-	}
-	return 0;
-}
-
 static int
 aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 			       struct xdna_mailbox_msg *msg,
@@ -259,25 +238,14 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	DECLARE_AIE2_MSG(create_ctx, MSG_OP_CREATE_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct cq_pair *cq_pair;
-	u32 priority;
 	int ret;
-
-	/* Default to high priority, if unset */
-	if (!ctx->qos.priority)
-		ctx->qos.priority = AMDXDNA_QOS_HIGH_PRIORITY;
-
-	ret = map_app_priority_to_fw(ctx->qos.priority, &priority);
-	if (ret) {
-		XDNA_ERR(xdna, "Invalid context priority: 0x%x\n", ctx->qos.priority);
-		return ret;
-	}
 
 	req.aie_type = 1;
 	req.start_col = ctx->start_col;
 	req.num_col = ctx->num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = ctx->client->pasid;
-	req.context_priority = priority;
+	req.context_priority = ctx->qos.priority;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
@@ -306,8 +274,8 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	info->i2x.rb_size	  = cq_pair->i2x_q.buf_size;
 
 	aie2_calc_intr_reg(info);
-	XDNA_DBG(xdna, "%s created fw ctx %d pasid %d priority %d", ctx->name,
-		 ctx->priv->id, ctx->client->pasid, priority);
+	XDNA_DBG(xdna, "%s created hwctx %d pasid %d priority %d", ctx->name,
+		 ctx->priv->id, ctx->client->pasid, ctx->qos.priority);
 
 	return 0;
 }
@@ -327,7 +295,7 @@ int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		XDNA_WARN(xdna, "%s destroy context failed, ret %d", ctx->name, ret);
 
 	trace_amdxdna_debug_point(ctx->name, 0, "channel destroyed");
-	XDNA_DBG(xdna, "%s destroyed fw ctx %d", ctx->name, ctx->priv->id);
+	XDNA_DBG(xdna, "%s destroyed hwctx %d", ctx->name, ctx->priv->id);
 	ctx->priv->id = -1;
 
 	return ret;
@@ -346,7 +314,7 @@ int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u6
 	if (ret)
 		return ret;
 
-	XDNA_DBG(xdna, "fw ctx %d map host buf addr 0x%llx size 0x%llx",
+	XDNA_DBG(xdna, "hwctx %d map host buf addr 0x%llx size 0x%llx",
 		 context_id, addr, size);
 
 	return 0;

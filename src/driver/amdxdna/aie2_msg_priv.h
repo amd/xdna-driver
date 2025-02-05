@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AIE2_MSG_PRIV_H_
@@ -88,13 +88,6 @@ enum aie2_msg_status {
 	AIE2_STATUS_DEBUG_BO_CONFIG_FAILED,
 	AIE2_STATUS_MAX_RTOS_STATUS_CODE,
 	MAX_AIE2_STATUS_CODE
-};
-
-enum aie2_qos_priority {
-	AIE2_QOS_REALTIME_PRIORITY = 1,
-	AIE2_QOS_HIGH_PRIORITY,
-	AIE2_QOS_NORMAL_PRIORITY,
-	AIE2_QOS_LOW_PRIORITY
 };
 
 struct assign_mgmt_pasid_req {

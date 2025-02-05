@@ -15,7 +15,7 @@ static int amdxdna_rq_start(struct amdxdna_ctx_rq *rq, struct amdxdna_ctx *ctx)
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
-	if (FIELD_GET(CTX_STATE_CONNECTED, ctx->status))
+	if (FIELD_GET(CTX_STATE_READY, ctx->status))
 		goto unlock_and_out; /* Connected */
 
 	ret = xdna->dev_info->ops->ctx_connect(ctx);
@@ -40,7 +40,7 @@ static void amdxdna_rq_stop(struct amdxdna_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
-	if (!FIELD_GET(CTX_STATE_CONNECTED, ctx->status))
+	if (!FIELD_GET(CTX_STATE_READY, ctx->status))
 		return;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
@@ -146,7 +146,7 @@ int amdxdna_rq_wait_for_run(struct amdxdna_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	int ret;
 
 try_connect:
-	if (FIELD_GET(CTX_STATE_CONNECTED, ctx->status))
+	if (FIELD_GET(CTX_STATE_READY, ctx->status))
 		return 0;
 
 	ret = amdxdna_rq_start(rq, ctx);
@@ -167,7 +167,7 @@ try_connect:
 
 	ret = wait_event_interruptible(ctx->connect_waitq,
 				       FIELD_GET(CTX_STATE_CONNECTING, ctx->status) ||
-				       FIELD_GET(CTX_STATE_CONNECTED, ctx->status));
+				       FIELD_GET(CTX_STATE_READY, ctx->status));
 	if (!ret)
 		goto try_connect;
 
