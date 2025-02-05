@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef AMDXDNA_ACCEL_H_
@@ -61,19 +61,21 @@ enum amdxdna_device_type {
 };
 
 /*
- * Enum for priority in application's QoS. Values copied from Window shim layer.
+ * Define priority in application's QoS.
+ * AMDXDNA_QOS_DEFAULT_PRIORITY: Driver decide priority for client.
  * AMDXDNA_QOS_REALTIME_PRIORITY: Real time clients.
  * AMDXDNA_QOS_HIGH_PRIORITY: Best effort foreground clients.
  * AMDXDNA_QOS_NORMAL_PRIORITY: Best effort or background clients.
  * AMDXDNA_QOS_LOW_PRIORITY: Clients that can wait indefinite amount of time for
  *                           completion.
  */
-enum amdxdna_qos_priority {
-	AMDXDNA_QOS_REALTIME_PRIORITY = 0x100,
-	AMDXDNA_QOS_HIGH_PRIORITY = 0x180,
-	AMDXDNA_QOS_NORMAL_PRIORITY = 0x200,
-	AMDXDNA_QOS_LOW_PRIORITY = 0x280
-};
+#define	AMDXDNA_QOS_DEFAULT_PRIORITY	0
+#define	AMDXDNA_QOS_REALTIME_PRIORITY	1
+#define	AMDXDNA_QOS_HIGH_PRIORITY	2
+#define	AMDXDNA_QOS_NORMAL_PRIORITY	3
+#define	AMDXDNA_QOS_LOW_PRIORITY	4
+/* The maximum number of priority */
+#define	AMDXDNA_NUM_PRIORITY		4
 
 /**
  * struct qos_info - QoS information for driver.
