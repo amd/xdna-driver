@@ -852,7 +852,11 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		return ret;
 	}
 
-	amdxdna_rq_wait_for_run(&xdna->ctx_rq, ctx);
+	ret = amdxdna_rq_wait_for_run(&xdna->ctx_rq, ctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Wait for ctx run failed %d", ret);
+		goto up_sem;
+	}
 
 	chain = dma_fence_chain_alloc();
 	if (!chain) {
