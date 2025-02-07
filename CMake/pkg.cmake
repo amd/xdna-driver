@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 execute_process(
   COMMAND uname -m
@@ -44,7 +44,7 @@ set(CPACK_DEB_COMPONENT_INSTALL yes)
 set(CPACK_PACKAGE_FILE_NAME
   "${CPACK_PACKAGE_NAME}.${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}_${XDNA_CPACK_LINUX_FLAVOR}${XDNA_CPACK_LINUX_VERSION}-${XDNA_CPACK_ARCH}")
 math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "xrt-npu (>= ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}), xrt-npu (<< ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "xrt-base (>= ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}), xrt-base (<< ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})")
 
 install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
   DESTINATION /lib/firmware/amdnpu
