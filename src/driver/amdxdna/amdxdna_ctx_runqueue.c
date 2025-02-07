@@ -64,9 +64,10 @@ static void amdxdna_rq_work(struct work_struct *work)
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry_safe(ctx, tmp, &rq->conn_list, entry) {
 		u64 completed = ctx->completed;
-		u64 submitted = ctx->submitted;
+		u64 pending;
 
-		if (submitted == completed)
+		pending	= atomic64_read(&ctx->job_pending_cnt);
+		if (pending == completed)
 			ctx->idle_cnt++;
 		else
 			ctx->idle_cnt = 0;

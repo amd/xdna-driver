@@ -159,6 +159,7 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	xdna->ctx_cnt++;
 	mutex_unlock(&xdna->dev_lock);
 
+	atomic64_set(&ctx->job_pending_cnt, 0);
 	atomic64_set(&ctx->job_free_cnt, 0);
 	init_waitqueue_head(&ctx->connect_waitq);
 

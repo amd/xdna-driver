@@ -852,6 +852,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		return ret;
 	}
 
+	atomic64_inc(&ctx->job_pending_cnt);
 	ret = amdxdna_rq_wait_for_run(&xdna->ctx_rq, ctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Wait for ctx run failed %d", ret);
@@ -955,6 +956,7 @@ unlock_recover:
 	up_read(&ndev->recover_lock);
 	dma_fence_chain_free(chain);
 up_sem:
+	atomic64_dec(&ctx->job_pending_cnt);
 	up(&ctx->priv->job_sem);
 	job->job_done = true;
 	return ret;
