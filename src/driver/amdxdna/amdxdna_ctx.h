@@ -130,6 +130,8 @@ struct amdxdna_ctx {
 	struct amdxdna_qos_info		     qos;
 	struct amdxdna_ctx_param_config_cu *cus;
 
+	/* Counter for pending job */
+	atomic64_t			job_pending_cnt;
 	/* Submitted, completed, freed job counter */
 	u64				submitted;
 	u64				completed ____cacheline_aligned_in_smp;

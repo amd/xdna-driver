@@ -1052,8 +1052,8 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_set_power_mode power_state;
-	enum amdxdna_power_mode_type power_mode;
 	struct amdxdna_dev *xdna = client->xdna;
+	int power_mode;
 
 	if (args->buffer_size != sizeof(power_state)) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
