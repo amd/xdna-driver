@@ -90,7 +90,7 @@ cd <root-of-source-tree>/build
 cd xrt/build
 ./build.sh -npu -opt
 # To adapt according to your OS & version
-sudo apt reinstall ./Release/xrt_202510.2.19.0_22.04-amd64-npu.deb
+sudo apt reinstall ./Release/xrt_202510.2.19.0_22.04-amd64-base.deb
 cd ../../build
 
 # Start XDNA driver release build
