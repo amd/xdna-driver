@@ -406,7 +406,7 @@ struct amdxdna_drm_query_sensor {
  * @context_id: The ID for this context.
  * @start_col: The starting column for the partition assigned to this context.
  * @num_col: The number of columns in the partition assigned to this context.
- * @pad: Structure padding.
+ * @nwctx_id: Hardware context ID.
  * @pid: The Process ID of the process that created this context.
  * @command_submissions: The number of commands submitted to this context.
  * @command_completions: The number of commands completed by this context.
@@ -420,7 +420,7 @@ struct amdxdna_drm_query_ctx {
 	__u32 context_id;
 	__u32 start_col;
 	__u32 num_col;
-	__u32 pad;
+	__u32 hwctx_id;
 	__s64 pid;
 	__u64 command_submissions;
 	__u64 command_completions;

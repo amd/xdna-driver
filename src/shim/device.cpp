@@ -387,6 +387,80 @@ struct preemption
   }
 };
 
+struct rtos_telemetry
+{
+  struct amdxdna_drm_query_telemetry {
+    uint32_t major;
+    uint32_t minor;
+    uint64_t reserved[352];
+    uint64_t layer_boundary_count[16];
+    uint64_t frame_boundary_count[16];
+    uint64_t reserved1[126];
+  };
+
+  using result_type = query::rtos_telemetry::result_type;
+
+  static constexpr uint32_t NPU_RTOS_MAX_USER_ID_COUNT = 16;
+  static constexpr uint16_t NPU4_DEVICE_ID = 0x17f0;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_ctx* data;
+    const uint32_t output_size = 256 * sizeof(*data);
+    result_type output;
+
+    auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
+    if (device_id != NPU4_DEVICE_ID)
+        return output;
+
+    std::vector<char> payload(output_size);
+    amdxdna_drm_get_info query_ctx = {
+      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
+      .buffer_size = output_size,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_ctx);
+
+    if (output_size < query_ctx.buffer_size) {
+      throw xrt_core::query::exception(
+        boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Insufficient buffer size. Need: %u") % query_ctx.buffer_size));
+    }
+
+    uint32_t data_size = query_ctx.buffer_size / sizeof(*data);
+    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    std::array<uint32_t, NPU_RTOS_MAX_USER_ID_COUNT> ctx_map{};
+    for (uint32_t i = 0; i < data_size; i++) {
+      const auto& entry = data[i];
+
+      ctx_map[entry.hwctx_id] = entry.context_id;
+    }
+
+    amdxdna_drm_query_telemetry telemetry{};
+
+    amdxdna_drm_get_info query_telemetry = {
+      .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+      .buffer_size = sizeof(telemetry),
+      .buffer = reinterpret_cast<uintptr_t>(&telemetry)
+    };
+
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+
+    for (auto i = 0; i < NPU_RTOS_MAX_USER_ID_COUNT; i++) {
+      query::rtos_telemetry::data task;
+
+      task.preemption_data.slot_index = ctx_map[i];
+      task.preemption_data.preemption_checkpoint_event = telemetry.layer_boundary_count[i];
+      task.preemption_data.preemption_frame_boundary_events = telemetry.frame_boundary_count[i];
+      output.push_back(task);
+    }
+    return output;
+  }
+};
+
 struct clock_topology
 {
   using result_type = query::clock_freq_topology_raw::result_type;
@@ -866,13 +940,14 @@ initialize_query_table()
 
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
+  emplace_func0_request<query::rtos_telemetry,                 rtos_telemetry>();
 
   emplace_func0_request<query::rom_ddr_bank_count_max,         default_value>();
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
   emplace_func1_request<query::sequence_name,                  sequence_name>();
-  emplace_func1_request<query::elf_name,		       elf_name>();
+  emplace_func1_request<query::elf_name,                       elf_name>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
