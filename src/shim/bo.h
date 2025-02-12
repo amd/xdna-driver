@@ -16,8 +16,27 @@
 #include "drm_local/amdxdna_accel.h"
 #include <string>
 #include <atomic>
+#if defined(__x86_64__) || defined(_M_X64)
+  #include <x86intrin.h>
+#endif
 
 namespace shim_xdna {
+  
+inline void flush_cache_line(const char *cur)
+{
+#if defined(__x86_64__) || defined(_M_X64)
+  _mm_clflush(cur);
+#elif defined(__aarch64__)
+  asm volatile(
+    "DC CIVAC, %[addr]\n"  // Clean and invalidate data cache
+    "DSB SY\n"             // Data Synchronization Barrier
+    "ISB SY\n"             // Instruction Synchronization Barrier
+    :
+    : [addr] "r" (cur)
+    : "memory"
+  );
+#endif
+}
 
 class bo : public xrt_core::buffer_handle
 {
