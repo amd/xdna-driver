@@ -23,6 +23,25 @@ static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd,
 	u32 resp;
 	int ret;
 
+	WARN_ON(!mutex_is_locked(&ndev->xdna->dev_lock));
+
+#ifdef AMDXDNA_DEVEL
+	/*
+	 * This is not a fix in the driver, it's just an internal debug helper.
+	 *
+	 * PMFW as system level firmware, uses SMU register write/read commands to provide power
+	 * management services for many component devices including NPU. When SMU does register
+	 * write, it must be in idle state, although xdna driver uses dev_lock mutex to serialize
+	 * its SMU commands, there might be chances that other device drivers cause SMU busy.
+	 *
+	 * Prior to register write, check SMU status first and log warning if busy.
+	 */
+	resp = readl(SMU_REG(ndev, SMU_RESP_REG));
+	if (!resp) {
+		XDNA_WARN(ndev->xdna, "reg write while smu still busy, smu_resp_reg 0x%x", resp);
+	}
+#endif
+
 	writel(0, SMU_REG(ndev, SMU_RESP_REG));
 	writel(reg_arg, SMU_REG(ndev, SMU_ARG_REG));
 	writel(reg_cmd, SMU_REG(ndev, SMU_CMD_REG));
