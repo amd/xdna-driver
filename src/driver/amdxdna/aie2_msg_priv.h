@@ -40,6 +40,8 @@ enum aie2_msg_opcode {
 	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
 	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
+	MSG_OP_START_EVENT_TRACE          = 0x10F,
+	MSG_OP_STOP_EVENT_TRACE          = 0x110,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
@@ -379,6 +381,71 @@ struct async_event_msg_resp {
 	enum aie2_msg_status	status;
 	enum async_event_type	type;
 } __packed;
+
+/* Start of event tracing data struct */
+
+#define LOG_BUFFER_IRQ 27
+#define TRACE_EVENT_BUFFER_SIZE	0x2000
+#define TRACE_EVENT_BUFFER_METADATA_SIZE	0x40
+#define MAX_ONE_TIME_LOG_INFO_LEN	16
+#define MPIPU_IOHUB_INT_27_ALIAS 0xD7008
+#define LOG_BUF_MB_IOHUB_PTR MPIPU_IOHUB_INT_27_ALIAS
+
+enum event_trace_destination {
+	EVENT_TRACE_DEST_DEBUG_BUS,
+	EVENT_TRACE_DEST_DRAM,
+	EVENT_TRACE_DEST_COUNT
+};
+
+enum event_trace_timestamp {
+	EVENT_TRACE_TIMESTAMP_FW_CHRONO,
+	EVENT_TRACE_TIMESTAMP_CPU_CCOUNT,
+	EVENT_TRACE_TIMESTAMP_COUNT
+};
+
+struct start_event_trace_req {
+	u32 event_trace_categories;
+	enum event_trace_destination event_trace_dest;
+	enum event_trace_timestamp event_trace_timestamp;
+	u64 dram_buffer_address;
+	u32 dram_buffer_size;
+} __packed;
+
+struct start_event_trace_resp {
+	enum aie2_msg_status status;
+	u32 msi_idx;
+	u64 current_timestamp;
+} __packed;
+
+struct stop_event_trace_req {
+	u32 place_holder;
+} __packed;
+
+struct stop_event_trace_resp {
+	enum aie2_msg_status status;
+} __packed;
+
+struct set_event_trace_categories_req {
+	u32 event_trace_categories;
+};
+
+struct set_event_trace_categories_resp {
+	enum aie2_msg_status status;
+};
+
+struct event_trace_req_buf {
+	struct amdxdna_dev_hdl *ndev;
+	struct start_event_trace_req trace_req;
+	struct workqueue_struct *wq;
+	struct work_struct work;
+	u64 resp_timestamp;
+	u64 sys_start_time;
+	int log_ch_irq;
+	u8 *fw_log_buf;
+	u8 *buf;
+};
+
+/* End of event tracing data structs */
 
 #define MAX_CHAIN_CMDBUF_SIZE 0x1000
 #define slot_cf_has_space(offset, payload_size) \
