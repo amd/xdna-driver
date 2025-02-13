@@ -185,6 +185,17 @@ struct amdxdna_drm_config_ctx {
 };
 
 /**
+ * struct amdxdna_bo_va_entry - virtual address list entry
+ *
+ * @vaddr: Virtual address
+ * @len: Length of memory segment
+ */
+struct amdxdna_bo_va_entry {
+	__u64	vaddr;
+	__u64	len;
+};
+
+/**
  * struct amdxdna_drm_create_bo - Create a buffer object.
  * @flags: Buffer flags. MBZ.
  * @vaddr: User VA of buffer if applied. MBZ.
@@ -209,6 +220,7 @@ struct amdxdna_drm_create_bo {
 #define	AMDXDNA_BO_DEV		3
 #define	AMDXDNA_BO_CMD		4
 #define	AMDXDNA_BO_DMA		5
+#define	AMDXDNA_BO_GUEST	6
 	__u32	type;
 	__u32	handle;
 };

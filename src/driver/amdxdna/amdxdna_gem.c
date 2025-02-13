@@ -191,7 +191,8 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	if (abo->mem.userptr == AMDXDNA_INVALID_ADDR)
 		abo->mem.userptr = addr;
 	INIT_WORK(&mapp->hmm_unreg_work, amdxdna_hmm_unreg_work);
-	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
+	if ((is_import_bo(abo) || abo->type == AMDXDNA_BO_GUEST) &&
+	    vma->vm_file && vma->vm_file->f_mapping)
 		mapping_set_unevictable(vma->vm_file->f_mapping);
 
 	down_write(&xdna->notifier_lock);
@@ -233,6 +234,17 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	if (abo->type == AMDXDNA_BO_DEV_HEAP)
 		drm_mm_takedown(&abo->mm);
 
+	if (abo->type == AMDXDNA_BO_GUEST) {
+		if (abo->mem.pages) {
+			unpin_user_pages(abo->mem.pages, abo->mem.nr_pages);
+			kvfree(abo->mem.pages);
+		}
+		drm_gem_object_release(gobj);
+		mutex_destroy(&abo->lock);
+		kfree(abo);
+		return;
+	}
+
 #ifdef AMDXDNA_DEVEL
 	if (abo->type == AMDXDNA_BO_CMD)
 		amdxdna_mem_unmap(xdna, &abo->mem);
@@ -253,8 +265,26 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	unsigned long num_pages = vma_pages(vma);
+	unsigned long start = vma->vm_start;
 	unsigned long offset = 0;
-	int ret;
+	int ret, i;
+
+	if (abo->type == AMDXDNA_BO_GUEST) {
+		vm_flags_mod(vma, VM_MIXEDMAP, VM_PFNMAP);
+
+		for (i = 0; i < abo->mem.nr_pages; i++) {
+			ret = remap_pfn_range(vma, start, page_to_pfn(abo->mem.pages[i]),
+					      PAGE_SIZE, vma->vm_page_prot);
+			if (ret) {
+				XDNA_ERR(xdna, "Failed insert pages %d for guest bo", ret);
+				return ret;
+			}
+
+			start += PAGE_SIZE;
+		}
+
+		return 0;
+	}
 
 	if (!is_import_bo(abo)) {
 		ret = drm_gem_shmem_mmap(&abo->base, vma);
@@ -398,6 +428,17 @@ static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 	.mmap = amdxdna_gem_obj_mmap,
 	.vm_ops = &drm_gem_shmem_vm_ops,
 	.export = amdxdna_gem_prime_export,
+};
+
+static const struct vm_operations_struct drm_vm_ops = {
+	.open = drm_gem_vm_open,
+	.close = drm_gem_vm_close,
+};
+
+static const struct drm_gem_object_funcs amdxdna_gem_guest_obj_funcs = {
+	.free = amdxdna_gem_obj_free,
+	.mmap = amdxdna_gem_obj_mmap,
+	.vm_ops = &drm_vm_ops,
 };
 
 static struct amdxdna_gem_obj *
@@ -683,6 +724,96 @@ release_obj:
 	return ERR_PTR(ret);
 }
 
+static struct amdxdna_gem_obj *
+amdxdna_drm_create_guest_bo(struct drm_device *dev,
+			    struct amdxdna_drm_create_bo *args,
+			    struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_bo_va_entry *va_tbl;
+	struct amdxdna_gem_obj *abo;
+	struct page **pages;
+	size_t bo_sz;
+	int ret, i;
+
+	va_tbl = kcalloc(args->size, sizeof(*va_tbl), GFP_KERNEL);
+	if (!va_tbl)
+		return ERR_PTR(-ENOMEM);
+
+	if (copy_from_user(va_tbl, u64_to_user_ptr(args->vaddr),
+			   sizeof(*va_tbl) * args->size)) {
+		XDNA_ERR(xdna, "Access va table failed");
+		ret = -EFAULT;
+		goto free_va_tbl;
+	}
+
+	for (i = 0, bo_sz = 0; i < args->size; i++) {
+		if ((va_tbl[i].vaddr & (PAGE_SIZE - 1)) ||
+		    (va_tbl[i].len & (PAGE_SIZE - 1))) {
+			XDNA_ERR(xdna, "Invalid address or len %llx, %llx",
+				 va_tbl[i].vaddr, va_tbl[i].len);
+			ret = -EINVAL;
+			goto free_va_tbl;
+		}
+		bo_sz += va_tbl[i].len;
+	}
+
+	abo = amdxdna_gem_create_obj(&xdna->ddev, bo_sz);
+	if (IS_ERR(abo)) {
+		ret = PTR_ERR(abo);
+		goto free_va_tbl;
+	}
+
+	to_gobj(abo)->funcs = &amdxdna_gem_guest_obj_funcs;
+	abo->type = AMDXDNA_BO_GUEST;
+	abo->client = client;
+
+	pages = kvmalloc_array(bo_sz >> PAGE_SHIFT, sizeof(*pages), GFP_KERNEL);
+	if (!pages) {
+		ret = -ENOMEM;
+		goto put_bo;
+	}
+
+	for (i = 0; i < args->size; i++) {
+		u32 npages = va_tbl[i].len >> PAGE_SHIFT;
+		u32 start = abo->mem.nr_pages;
+
+		ret = pin_user_pages_fast(va_tbl[i].vaddr, npages,
+					  FOLL_WRITE | FOLL_LONGTERM,
+					  &pages[start]);
+		if (ret < 0) {
+			XDNA_ERR(xdna, "Failed to pin pages ret %d", ret);
+			goto destroy_pages;
+		}
+
+		abo->mem.nr_pages += ret;
+		if (ret != npages) {
+			XDNA_ERR(xdna, "Partially pinned");
+			ret = -EFAULT;
+			goto destroy_pages;
+		}
+	}
+	abo->mem.pages = pages;
+
+	drm_gem_private_object_init(&xdna->ddev, to_gobj(abo), bo_sz);
+	ret = drm_gem_create_mmap_offset(to_gobj(abo));
+	if (ret)
+		goto destroy_pages;
+
+	return abo;
+
+destroy_pages:
+	unpin_user_pages(pages, abo->mem.nr_pages);
+	abo->mem.nr_pages = 0;
+	kvfree(pages);
+put_bo:
+	drm_gem_object_put(to_gobj(abo));
+free_va_tbl:
+	kfree(va_tbl);
+	return ERR_PTR(ret);
+};
+
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
@@ -690,7 +821,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_gem_obj *abo;
 	int ret;
 
-	if (args->flags || args->vaddr || !args->size)
+	if (args->flags)
 		return -EINVAL;
 
 	XDNA_DBG(xdna, "BO arg type %d vaddr 0x%llx size 0x%llx flags 0x%llx",
@@ -717,6 +848,9 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 			goto put_obj;
 		abo->mem.dev_addr = abo->mem.dma_addr;
 #endif
+		break;
+	case AMDXDNA_BO_GUEST:
+		abo = amdxdna_drm_create_guest_bo(dev, args, filp);
 		break;
 	default:
 		return -EINVAL;
@@ -861,7 +995,7 @@ amdxdna_drm_clflush(struct amdxdna_gem_obj *abo, u32 start, u32 size)
 	start_page_off = start & ~PAGE_MASK;
 	end_page_size = (end & ~PAGE_MASK) + 1;
 
-	if (abo->type == AMDXDNA_BO_DEV)
+	if (abo->type == AMDXDNA_BO_DEV || abo->type == AMDXDNA_BO_GUEST)
 		pages = abo->mem.pages;
 	else
 		pages = abo->base.pages;
