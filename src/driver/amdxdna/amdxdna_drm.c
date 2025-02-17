@@ -281,7 +281,7 @@ const struct drm_driver amdxdna_drm_drv = {
 	.show_fdinfo = amdxdna_show_fdinfo,
 
 	/* For shmem object create */
-	.gem_create_object = amdxdna_gem_create_shmem_object,
+	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
 #ifdef AMDXDNA_SHMEM
 	.gem_prime_import = amdxdna_gem_prime_import,
 #else

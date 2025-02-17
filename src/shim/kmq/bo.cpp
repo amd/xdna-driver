@@ -14,7 +14,7 @@ flag_to_type(uint64_t bo_flags)
   auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
   switch (boflags) {
   case XCL_BO_FLAGS_HOST_ONLY:
-    return AMDXDNA_BO_SHMEM;
+    return AMDXDNA_BO_SHARE;
   case XCL_BO_FLAGS_CACHEABLE:
     return AMDXDNA_BO_DEV;
   case XCL_BO_FLAGS_EXECBUF:
@@ -110,7 +110,7 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   // the data in cacheline will be flushed onto memory and pollute the output
   // from device. We perform a cache flush right after the BO is allocated to
   // avoid this issue.
-  if (m_type == AMDXDNA_BO_SHMEM)
+  if (m_type == AMDXDNA_BO_SHARE)
     sync(direction::host2device, size, 0);
 
   attach_to_ctx();
@@ -157,7 +157,7 @@ sync(direction dir, size_t size, size_t offset)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
 
   switch (m_type) {
-  case AMDXDNA_BO_SHMEM:
+  case AMDXDNA_BO_SHARE:
   case AMDXDNA_BO_CMD:
     clflush_data(m_aligned, offset, size); 
     break;

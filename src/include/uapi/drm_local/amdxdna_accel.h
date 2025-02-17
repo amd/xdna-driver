@@ -208,14 +208,14 @@ struct amdxdna_drm_create_bo {
 	__u64	vaddr;
 	__u64	size;
 /*
- * AMDXDNA_BO_SHMEM:	DRM GEM SHMEM bo
+ * AMDXDNA_BO_SHARE:	Regular BO shared between user and device
  * AMDXDNA_BO_DEV_HEAP: Shared host memory to device as heap memory
  * AMDXDNA_BO_DEV_BO:	Allocated from BO_DEV_HEAP
  * AMDXDNA_BO_CMD:	User and driver accessible bo
  * AMDXDNA_BO_DMA:	DRM GEM DMA bo
  */
 #define	AMDXDNA_BO_INVALID	0
-#define	AMDXDNA_BO_SHMEM	1
+#define	AMDXDNA_BO_SHARE	1
 #define	AMDXDNA_BO_DEV_HEAP	2
 #define	AMDXDNA_BO_DEV		3
 #define	AMDXDNA_BO_CMD		4

@@ -69,13 +69,13 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 void amdxdna_umap_put(struct amdxdna_umap *mapp);
 
 struct drm_gem_object *
-amdxdna_gem_create_shmem_object(struct drm_device *dev, size_t size);
+amdxdna_gem_create_shmem_object_cb(struct drm_device *dev, size_t size);
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf);
 struct amdxdna_gem_obj *
-amdxdna_drm_alloc_dev_bo(struct drm_device *dev,
-			 struct amdxdna_drm_create_bo *args,
-			 struct drm_file *filp, bool use_vmap);
+amdxdna_drm_create_dev_bo(struct drm_device *dev,
+			  struct amdxdna_drm_create_bo *args,
+			  struct drm_file *filp, bool use_vmap);
 
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);
