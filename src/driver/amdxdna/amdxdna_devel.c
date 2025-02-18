@@ -43,7 +43,7 @@ struct amdxdna_carvedout {
 
 bool amdxdna_use_carvedout()
 {
-	return !!carvedout_addr;
+	return !!carvedout_size;
 }
 
 void amdxdna_carvedout_init()
@@ -66,6 +66,7 @@ int amdxdna_carvedout_alloc(struct drm_mm_node *node, u64 size, u64 alignment)
 {
 	int ret;
 
+	printk(KERN_ERR "alloc carvedout: 0x%llx\n", size);
 	mutex_lock(&carvedout.lock);
 	ret = drm_mm_insert_node_generic(&carvedout.mm, node, size, alignment,
 					 0, DRM_MM_INSERT_BEST);
@@ -75,6 +76,7 @@ int amdxdna_carvedout_alloc(struct drm_mm_node *node, u64 size, u64 alignment)
 
 void amdxdna_carvedout_free(struct drm_mm_node *node)
 {
+	printk(KERN_ERR "free carvedout: 0x%llx\n", node->size);
 	mutex_lock(&carvedout.lock);
 	drm_mm_remove_node(node);
 	mutex_unlock(&carvedout.lock);
