@@ -386,6 +386,7 @@ struct preemption
     pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
   }
 };
+
 struct telemetry
 {
   static constexpr uint32_t NPU_RTOS_MAX_USER_ID_COUNT = 16;
@@ -394,6 +395,7 @@ struct telemetry
   static constexpr uint32_t NPU_MAX_OPCODE_COUNT = 30;
   static constexpr uint32_t NPU_MAX_DTLB_COUNT = 12;
   static constexpr uint16_t NPU4_DEVICE_ID = 0x17f0;
+
   struct amdxdna_drm_query_telemetry {
     uint32_t major;
     uint32_t minor;
@@ -441,7 +443,7 @@ struct telemetry
       for (auto i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
         query::aie_telemetry::data task;
         task.deep_sleep_count = telemetry.deep_sleep_count[i];
-        output.push_back(task);
+        output.push_back(std::move(task));
       }
       return output;
     }
@@ -489,7 +491,7 @@ struct telemetry
       for (auto i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
         query::opcode_telemetry::data task;
         task.count = telemetry.trace_opcode[i];
-        output.push_back(task);
+        output.push_back(std::move(task));
       }
       return output;
     }
@@ -524,7 +526,7 @@ struct telemetry
       std::array<uint32_t, NPU_RTOS_MAX_USER_ID_COUNT> ctx_map{};
       for (uint32_t i = 0; i < data_size; i++) {
         const auto& entry = data[i];
-        
+
         if (entry.hwctx_id >= NPU_RTOS_MAX_USER_ID_COUNT) {
           throw xrt_core::query::exception(
             boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Invalid hw ctx ID: %u") % entry.hwctx_id));
@@ -557,7 +559,7 @@ struct telemetry
           query::rtos_telemetry::dtlb_data dtlb = {
             .misses = telemetry.dtlb_misses[i][j]
           };
-          dtlbs.push_back(dtlb);
+          dtlbs.push_back(std::move(dtlb));
         }
         task.dtlbs = dtlbs;
 
@@ -590,7 +592,7 @@ struct telemetry
       for (auto i = 0; i < NPU_MAX_STREAM_BUFFER_COUNT; i++) {
         query::stream_buffer_telemetry::data task;
         task.tokens = telemetry.sb_tokens[i];
-        output.push_back(task);
+        output.push_back(std::move(task));
       }
       return output;
     }
