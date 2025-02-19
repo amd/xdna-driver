@@ -539,9 +539,9 @@ static int amdxdna_gem_obj_vmap(struct drm_gem_object *obj, struct iosys_map *ma
 		if (mem->pages)
 			kva = vmap(mem->pages, mem->nr_pages, VM_MAP, PAGE_KERNEL);
 		else
-			kva = ioremap(client->dev_heap->mm_node.start + offset, mem->size);
+			kva = ioremap_uc(client->dev_heap->mm_node.start + offset, mem->size);
 	} else {
-		kva = ioremap(abo->mm_node.start, abo->mm_node.size);
+		kva = ioremap_uc(abo->mm_node.start, abo->mm_node.size);
 	}
 	if (!kva)
 		return -ENOMEM;
@@ -560,10 +560,14 @@ static void amdxdna_gem_obj_vunmap(struct drm_gem_object *obj, struct iosys_map 
 	if (abo->mem.kva_use_count == 0)
 		return;
 
-	if (--abo->mem.kva_use_count == 0) {
+	if (--abo->mem.kva_use_count > 0)
+		return;
+
+	if (abo->type == AMDXDNA_BO_DEV && abo->mem.pages)
 		vunmap(abo->mem.kva);
-		abo->mem.kva = NULL;
-	}
+	else
+		iounmap(abo->mem.kva);
+	abo->mem.kva = NULL;
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
@@ -1031,6 +1035,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	XDNA_DBG(xdna, "BO arg type %d vaddr 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
+	args->size = PAGE_ALIGN(args->size);
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
 		abo = amdxdna_drm_create_share_bo(dev, args, filp);
