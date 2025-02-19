@@ -524,6 +524,11 @@ struct telemetry
       std::array<uint32_t, NPU_RTOS_MAX_USER_ID_COUNT> ctx_map{};
       for (uint32_t i = 0; i < data_size; i++) {
         const auto& entry = data[i];
+        
+        if (entry.hwctx_id >= NPU_RTOS_MAX_USER_ID_COUNT) {
+          throw xrt_core::query::exception(
+            boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Invalid hw ctx ID: %u") % entry.hwctx_id));
+        }
 
         ctx_map[entry.hwctx_id] = entry.context_id;
       }
@@ -559,7 +564,7 @@ struct telemetry
         task.preemption_data.slot_index = ctx_map[i];
         task.preemption_data.preemption_checkpoint_event = telemetry.layer_boundary_count[i];
         task.preemption_data.preemption_frame_boundary_events = telemetry.frame_boundary_count[i];
-        output.push_back(task);
+        output.push_back(std::move(task));
       }
       return output;
     }

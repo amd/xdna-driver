@@ -551,7 +551,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	ret = amdxdna_iommu_mode_setup(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
-		return ret;
+		goto free_irq;
 	}
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;

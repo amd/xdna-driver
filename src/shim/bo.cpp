@@ -99,7 +99,7 @@ import_drm_bo(const shim_xdna::pdev& dev, const shim_xdna::shared& share,
   drm_prime_handle imp_bo = {AMDXDNA_INVALID_BO_HANDLE, 0, fd};
   dev.ioctl(DRM_IOCTL_PRIME_FD_TO_HANDLE, &imp_bo);
 
-  *type = AMDXDNA_BO_SHMEM;
+  *type = AMDXDNA_BO_SHARE;
   *size = lseek(fd, 0, SEEK_END);
   lseek(fd, 0, SEEK_SET);
 
@@ -152,8 +152,8 @@ bo::
 type_to_name() const
 {
   switch (m_type) {
-  case AMDXDNA_BO_SHMEM:
-    return std::string("AMDXDNA_BO_SHMEM");
+  case AMDXDNA_BO_SHARE:
+    return std::string("AMDXDNA_BO_SHARE");
   case AMDXDNA_BO_DEV_HEAP:
     return std::string("AMDXDNA_BO_DEV_HEAP");
   case AMDXDNA_BO_DEV:

@@ -18,6 +18,12 @@ extern int iommu_mode;
 extern bool priv_load;
 extern int start_col_index;
 
+bool amdxdna_use_carvedout(void);
+void amdxdna_carvedout_init(void);
+void amdxdna_carvedout_fini(void);
+int amdxdna_carvedout_alloc(struct drm_mm_node *node, u64 size, u64 alignment);
+void amdxdna_carvedout_free(struct drm_mm_node *node);
+
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *aie);
 struct sg_table *amdxdna_alloc_sgt(struct amdxdna_dev *aie, size_t sz,
 				   struct page **pages, u32 nr_pages);

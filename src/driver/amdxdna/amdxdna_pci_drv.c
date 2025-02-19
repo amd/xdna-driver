@@ -303,7 +303,20 @@ static struct pci_driver amdxdna_pci_driver = {
 	.driver.pm = &amdxdna_pm_ops,
 };
 
-module_pci_driver(amdxdna_pci_driver);
+static int __init amdxdna_mod_init(void)
+{
+	amdxdna_carvedout_init();
+	return pci_register_driver(&amdxdna_pci_driver);
+}
+
+static void __exit amdxdna_mod_exit(void)
+{
+	pci_unregister_driver(&amdxdna_pci_driver);
+	amdxdna_carvedout_fini();
+}
+
+module_init(amdxdna_mod_init);
+module_exit(amdxdna_mod_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");

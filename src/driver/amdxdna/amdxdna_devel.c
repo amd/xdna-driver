@@ -14,6 +14,20 @@ int iommu_mode;
 module_param(iommu_mode, int, 0644);
 MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID, 2 = Bypass");
 
+/*
+ * Carvedout memory is a chunck of memory which is physically contiguous and
+ * is reserved during early boot time. There is only one chunck of such memory
+ * per system. Once available, all BOs accessible from device should be
+ * allocated from this memory.
+ */
+u64 carvedout_addr;
+module_param(carvedout_addr, ullong, 0644);
+MODULE_PARM_DESC(carvedout_addr, "Physical memory address for reserved memory chunk");
+
+u64 carvedout_size;
+module_param(carvedout_size, ullong, 0644);
+MODULE_PARM_DESC(carvedout_size, "Physical memory size for reserved memory chunk");
+
 bool priv_load;
 module_param(priv_load, bool, 0644);
 MODULE_PARM_DESC(priv_load, "Privileged loading runtime configure (Default false)");
@@ -22,14 +36,64 @@ int start_col_index = -1;
 module_param(start_col_index, int, 0600);
 MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)");
 
+struct amdxdna_carvedout {
+	struct drm_mm	mm;
+	struct mutex	lock;
+} carvedout;
+
+bool amdxdna_use_carvedout()
+{
+	return !!carvedout_addr;
+}
+
+void amdxdna_carvedout_init()
+{
+	if (!amdxdna_use_carvedout())
+		return;
+	mutex_init(&carvedout.lock);
+	drm_mm_init(&carvedout.mm, carvedout_addr, carvedout_size);
+}
+
+void amdxdna_carvedout_fini()
+{
+	if (!amdxdna_use_carvedout())
+		return;
+	mutex_destroy(&carvedout.lock);
+	drm_mm_takedown(&carvedout.mm);
+}
+
+int amdxdna_carvedout_alloc(struct drm_mm_node *node, u64 size, u64 alignment)
+{
+	int ret;
+
+	mutex_lock(&carvedout.lock);
+	ret = drm_mm_insert_node_generic(&carvedout.mm, node, size, alignment,
+					 0, DRM_MM_INSERT_BEST);
+	mutex_unlock(&carvedout.lock);
+	return ret;
+}
+
+void amdxdna_carvedout_free(struct drm_mm_node *node)
+{
+	mutex_lock(&carvedout.lock);
+	drm_mm_remove_node(node);
+	mutex_unlock(&carvedout.lock);
+}
+
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = NULL;
 
 	switch (iommu_mode) {
 	case AMDXDNA_IOMMU_PASID:
+		// default case
 		break;
 	case AMDXDNA_IOMMU_NO_PASID:
+		// Can't use carvedout memory due to no struct page, so can't do dma map
+		if (amdxdna_use_carvedout()) {
+			XDNA_ERR(xdna, "Carvedout memory can't be used with this iommu mode");
+			return -EOPNOTSUPP;
+		}
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 13, 0)
 		if (!iommu_present(xdna->ddev.dev->bus)) {
 #else
@@ -47,10 +111,11 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 
 		break;
 	case AMDXDNA_IOMMU_BYPASS:
-		/*
-		 * IOMMU bypass mode is always supported, but
-		 * with 4MB contiguous physical memory limitation.
-		 */
+		 // IOMMU bypass mode requires carvedout memory reserved.
+		if (!amdxdna_use_carvedout()) {
+			XDNA_ERR(xdna, "No carvedout memory reserved!");
+			return -EOPNOTSUPP;
+		}
 		break;
 	default:
 		XDNA_ERR(xdna, "Invalid IOMMU mode %d", iommu_mode);
