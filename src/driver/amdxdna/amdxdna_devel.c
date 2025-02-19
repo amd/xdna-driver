@@ -43,7 +43,7 @@ struct amdxdna_carvedout {
 
 bool amdxdna_use_carvedout()
 {
-	return !!carvedout_addr;
+	return !!carvedout_size;
 }
 
 void amdxdna_carvedout_init()

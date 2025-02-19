@@ -529,7 +529,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 			.size = MAX_CHAIN_CMDBUF_SIZE,
 		};
 
-		abo = amdxdna_drm_create_dev_bo(&xdna->ddev, &args, client->filp, true);
+		abo = amdxdna_drm_create_dev_bo(&xdna->ddev, &args, client->filp);
 		if (IS_ERR(abo)) {
 			ret = PTR_ERR(abo);
 			goto free_cmd_bufs;
