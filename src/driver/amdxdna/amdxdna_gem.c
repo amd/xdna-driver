@@ -684,6 +684,7 @@ amdxdna_gem_create_carvedout_object(struct drm_device *dev, size_t size)
 
 destroy_gobj:
 	drm_gem_private_object_fini(gobj);
+	amdxdna_carvedout_free(&abo->mm_node);
 destroy_abo:
 	amdxdna_gem_destroy_obj(abo);
 	return ERR_PTR(ret);
@@ -859,7 +860,7 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 		return abo;
 	gobj = to_gobj(abo);
 	gobj->funcs = &amdxdna_gem_dev_obj_funcs;
-	drm_gem_private_object_init(dev, to_gobj(abo), aligned_sz);
+	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
 	abo->type = AMDXDNA_BO_DEV;
 	abo->client = client;
