@@ -38,15 +38,15 @@ MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)"
 
 struct amdxdna_carvedout {
 	struct drm_mm	mm;
-	struct mutex	lock;
+	struct mutex	lock; /* Project mm */
 } carvedout;
 
-bool amdxdna_use_carvedout()
+bool amdxdna_use_carvedout(void)
 {
 	return !!carvedout_size;
 }
 
-void amdxdna_carvedout_init()
+void amdxdna_carvedout_init(void)
 {
 	if (!amdxdna_use_carvedout())
 		return;
@@ -54,7 +54,7 @@ void amdxdna_carvedout_init()
 	drm_mm_init(&carvedout.mm, carvedout_addr, carvedout_size);
 }
 
-void amdxdna_carvedout_fini()
+void amdxdna_carvedout_fini(void)
 {
 	if (!amdxdna_use_carvedout())
 		return;
@@ -94,7 +94,7 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 			XDNA_ERR(xdna, "Carvedout memory can't be used with this iommu mode");
 			return -EOPNOTSUPP;
 		}
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 13, 0)
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
 		if (!iommu_present(xdna->ddev.dev->bus)) {
 #else
 		if (!device_iommu_mapped(xdna->ddev.dev)) {

@@ -37,9 +37,8 @@ static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd,
 	 * Prior to register write, check SMU status first and log warning if busy.
 	 */
 	resp = readl(SMU_REG(ndev, SMU_RESP_REG));
-	if (!resp) {
+	if (!resp)
 		XDNA_WARN(ndev->xdna, "reg write while smu still busy, smu_resp_reg 0x%x", resp);
-	}
 #endif
 
 	writel(0, SMU_REG(ndev, SMU_RESP_REG));

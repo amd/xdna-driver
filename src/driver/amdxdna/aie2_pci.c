@@ -39,7 +39,7 @@ MODULE_PARM_DESC(aie2_control_flags,
 		 " Bit " __stringify(AIE2_BIT_BYPASS_SET_FREQ) ": Bypass set freq,"
 		 " Bit " __stringify(AIE2_BIT_BYPASS_FW_LOAD) ": Bypass FW loading");
 
-bool disable_fine_preemption = false;
+bool disable_fine_preemption;
 module_param(disable_fine_preemption, bool, 0600);
 MODULE_PARM_DESC(disable_fine_preemption, "Disable fine grain preemption");
 
@@ -1095,7 +1095,7 @@ static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 
 	xdna->dev_handle->force_preempt_enabled = force.state;
 
-	XDNA_WARN(xdna, "Force preemption %s", force.state ? "enabled": "disabled");
+	XDNA_WARN(xdna, "Force preemption %s", force.state ? "enabled" : "disabled");
 
 	return 0;
 }

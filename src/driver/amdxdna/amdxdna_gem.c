@@ -22,7 +22,7 @@
 
 #define XDNA_MAX_CMD_BO_SIZE	SZ_32K
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 13, 0)
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
 MODULE_IMPORT_NS(DMA_BUF);
 #else
 MODULE_IMPORT_NS("DMA_BUF");
@@ -874,7 +874,7 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		goto release_obj;
 	}
-	
+
 	ret = drm_gem_vmap_unlocked(gobj, &map);
 	if (ret) {
 		XDNA_ERR(xdna, "Vmap dev bo failed, ret %d", ret);

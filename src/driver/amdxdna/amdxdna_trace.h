@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
  */
 
 #if !defined(_AMDXDNA_TRACE_EVENTS_H_) || defined(TRACE_HEADER_MULTI_READ)
@@ -25,7 +25,7 @@ TRACE_EVENT(amdxdna_debug_point,
 			     __field(u64, number)
 			     __string(str, str)),
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 	    TP_fast_assign(__assign_str(name, name);
 			   __entry->number = number;
 			   __assign_str(str, str);),
@@ -40,7 +40,8 @@ TRACE_EVENT(amdxdna_debug_point,
 );
 
 TRACE_EVENT(xdna_job,
-	    TP_PROTO(struct drm_sched_job *sched_job, const char *name, const char *str, u64 seq, u32 op),
+	    TP_PROTO(struct drm_sched_job *sched_job, const char *name,
+		     const char *str, u64 seq, u32 op),
 
 	    TP_ARGS(sched_job, name, str, seq, op),
 
@@ -51,7 +52,7 @@ TRACE_EVENT(xdna_job,
 			     __field(u64, seq)
 			     __field(u32, op)),
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 	    TP_fast_assign(__assign_str(name, name);
 			   __assign_str(str, str);
 #else
@@ -80,7 +81,7 @@ DECLARE_EVENT_CLASS(xdna_mbox_msg,
 				     __field(u32, opcode)
 				     __field(u32, msg_id)),
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 		    TP_fast_assign(__assign_str(name, name);
 				   __entry->chann_id = chann_id;
 				   __entry->opcode = opcode;
@@ -114,7 +115,7 @@ DECLARE_EVENT_CLASS(xdna_mbox_name_id,
 		    TP_STRUCT__entry(__string(name, name)
 				     __field(int, irq)),
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 		    TP_fast_assign(__assign_str(name, name);
 				   __entry->irq = irq;),
 #else
