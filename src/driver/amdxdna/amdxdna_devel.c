@@ -38,7 +38,7 @@ MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)"
 
 struct amdxdna_carvedout {
 	struct drm_mm	mm;
-	struct mutex	lock; /* Project mm */
+	struct mutex	lock; /* protect mm */
 } carvedout;
 
 bool amdxdna_use_carvedout(void)
