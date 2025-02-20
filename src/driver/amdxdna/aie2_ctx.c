@@ -55,7 +55,9 @@ aie2_ctx_dump(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
 	XDNA_ERR(xdna, "Dumping ctx %s, sub=%lld, comp=%lld", ctx->name, sub, comp);
 	mutex_lock(&ctx->priv->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {
-		struct amdxdna_sched_job *j = ctx->priv->pending[i];
+		struct amdxdna_sched_job *j;
+
+		j = ctx->priv->pending[i];
 		if (!j)
 			continue;
 		XDNA_ERR(xdna, "JOB[%d]:", i);

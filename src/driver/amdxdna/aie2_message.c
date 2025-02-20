@@ -256,7 +256,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 
 	if (ndev->force_preempt_enabled) {
 		ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FORCE_PREEMPTION,
-				   &ctx->priv->id);
+				       &ctx->priv->id);
 		if (ret)
 			XDNA_WARN(ndev->xdna, "Failed to config force preemption");
 	}

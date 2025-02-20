@@ -67,6 +67,7 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 {
 	drm_gem_object_put(to_gobj(abo));
 }
+
 void amdxdna_umap_put(struct amdxdna_umap *mapp);
 
 struct drm_gem_object *
