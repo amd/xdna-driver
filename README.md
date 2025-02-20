@@ -166,8 +166,16 @@ ulimit -l
 3. Run Linux checkpatch.pl before commit and create pull request, see [Checkpatch](#checkpatch)
 
 ### Checkpatch
-There is a pre-commit script for this purpose.
+* There is a pre-commit script to run checkpatch.pl automatically.
 ``` bash
-cp xdna-driver/tools/pre-commit <root-of-source-tree>/.git/hooks/
+# How to setup the auto pre-commit check
+cd <workspace of this repo>/
+cp tools/pre-commit .git/hooks/
 ```
 `git commit` will reject the commit if error/warning is found, until you make `checkpatch.pl` happy.
+
+* There is shell script that scan all the source code in a folder
+``` bash
+cd <workspace of this repo>/
+./tools/codingsty_check.sh <DIR>
+```
