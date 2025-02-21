@@ -117,8 +117,14 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 
 	xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
 
-	if (range->event == MMU_NOTIFY_UNMAP)
-		queue_work(xdna->notifier_wq, &mapp->hmm_unreg_work);
+	if (range->event == MMU_NOTIFY_UNMAP) {
+		down_write(&xdna->notifier_lock);
+		if (!mapp->unmapped) {
+			queue_work(xdna->notifier_wq, &mapp->hmm_unreg_work);
+			mapp->unmapped = true;
+		}
+		up_write(&xdna->notifier_lock);
+	}
 
 	return true;
 }
