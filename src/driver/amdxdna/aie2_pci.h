@@ -68,6 +68,8 @@
 
 struct amdxdna_ctx_priv;
 struct xrs_action_load;
+struct event_trace_req_buf;
+struct start_event_trace_resp;
 
 enum aie2_smu_reg_idx {
 	SMU_CMD_REG = 0,
@@ -104,7 +106,7 @@ enum psp_reg_idx {
 };
 
 enum dpm_level {
-	DPM_LEVEL_0=0,
+	DPM_LEVEL_0 = 0,
 	DPM_LEVEL_1,
 	DPM_LEVEL_2,
 	DPM_LEVEL_3,
@@ -256,6 +258,7 @@ struct amdxdna_dev_hdl {
 	struct mailbox			*mbox;
 	struct mailbox_channel		*mgmt_chann;
 	struct async_events		*async_events;
+	struct event_trace_req_buf	*event_trace_req;
 
 	u32				dev_status;
 	u32				hwctx_cnt;
@@ -357,6 +360,14 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_msg_thread(void *data);
 
+/* aie2_event_trace.c */
+bool aie2_is_event_trace_enable(struct amdxdna_dev_hdl *ndev);
+int aie2_event_trace_init(struct amdxdna_dev_hdl *ndev);
+void aie2_event_trace_fini(struct amdxdna_dev_hdl *ndev);
+void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev, struct start_event_trace_resp *resp);
+void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev);
+void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state);
+
 /* aie2_message.c */
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_resume_fw(struct amdxdna_dev_hdl *ndev);
@@ -370,6 +381,8 @@ int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *ver
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 				struct amdxdna_fw_ver *fw_ver);
+int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev);
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			struct xdna_mailbox_chann_info *info);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);

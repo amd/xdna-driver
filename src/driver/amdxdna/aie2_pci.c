@@ -625,6 +625,10 @@ skip_pasid:
 		goto async_event_free;
 	}
 
+	ret = aie2_event_trace_init(ndev);
+	if (ret)
+		XDNA_DBG(xdna, "Event trace init failed, ret %d", ret);
+
 	release_firmware(fw);
 	return 0;
 
@@ -647,6 +651,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
+	aie2_event_trace_fini(ndev);
 	aie2_hw_stop(xdna);
 	aie2_error_async_events_free(ndev);
 #ifdef AMDXDNA_DEVEL
