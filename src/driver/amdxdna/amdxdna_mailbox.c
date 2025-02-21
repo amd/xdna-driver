@@ -432,9 +432,15 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	return ret;
 }
 
+static u32 maibox_read_iohub(struct mailbox_channel *mb_chann)
+{
+	return mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
+}
+
 static void mailbox_rx_worker(struct work_struct *rx_work)
 {
 	struct mailbox_channel *mb_chann;
+	u32 iohub;
 	int ret;
 
 	mb_chann = container_of(rx_work, struct mailbox_channel, rx_work);
@@ -445,6 +451,7 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 		return;
 	}
 
+again:
 	while (1) {
 		/*
 		 * If return is 0, keep consuming next message, until there is
@@ -459,34 +466,38 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 			MB_ERR(mb_chann, "Unexpected ret %d, disable irq", ret);
 			WRITE_ONCE(mb_chann->bad_state, true);
 			disable_irq(mb_chann->msix_irq);
-			break;
+			return;
 		}
 	}
+
+	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+
+	/*
+	 * There is a hardware flaw been found during stress tests. If the
+	 * firmware generates a mailbox response right after clearing
+	 * interrupt register above, the hardware will not be able to generate
+	 * an interrupt for the response because the new response drags the
+	 * interrupt register back to 1 too quickly.
+	 *
+	 * Poll the interrupt register for 100us. If it becomes to 1, go back
+	 * to process the new response.
+	 */
+	ret = readx_poll_timeout(maibox_read_iohub, mb_chann, iohub, iohub, 0, 100);
+	if (!ret)
+		goto again;
 }
 
 static irqreturn_t mailbox_irq_handler(int irq, void *p)
 {
 	struct mailbox_channel *mb_chann = p;
-	u32 iohub;
-	int i;
 
 	trace_mbox_irq_handle(MAILBOX_NAME, irq);
 	if (mb_chann->type == MB_CHANNEL_USER_POLL)
 		return IRQ_HANDLED;
-	/* Clear IOHUB register */
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+
 	/* Schedule a rx_work to call the callback functions */
 	queue_work(mb_chann->work_q, &mb_chann->rx_work);
-	for (i = 0; i < 4; i++) {
-		iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
-		if (iohub)
-			goto race;
-	}
 
-	return IRQ_HANDLED;
-race:
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
-	queue_work(mb_chann->work_q, &mb_chann->rx_work);
 	return IRQ_HANDLED;
 }
 

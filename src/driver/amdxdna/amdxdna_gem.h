@@ -20,6 +20,7 @@ struct amdxdna_umap {
 	struct list_head		node;
 	struct kref			refcnt;
 	bool				invalid;
+	bool				unmapped;
 };
 
 struct amdxdna_mem {
