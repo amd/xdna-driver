@@ -6,12 +6,46 @@
 #include "hwctx.h"
 #include "drm_local/amdxdna_accel.h"
 
+namespace {
+
+// Device memory heap needs to be within one 64MB page. The maximum size is 64MB.
+const size_t max_heap_mem_size = (64 << 20);
+const size_t min_heap_mem_size = (1 << 20);
+
+}
+
 namespace shim_xdna {
 
 device_kmq::
 device_kmq(const pdev& pdev, handle_type shim_handle, id_type device_id)
 : device(pdev, shim_handle, device_id)
 {
+  size_t heap_sz = max_heap_mem_size;
+
+  while (m_dev_heap_bo == nullptr) {
+    try {
+      // Alloc device memory on first device creation.
+      // No locking is needed since driver will ensure only one heap BO is created.
+      // ASSUMPTION: one process will only create device once
+      m_dev_heap_bo = std::make_unique<bo_kmq>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
+    } catch (const xrt_core::system_error& ex) {
+      switch (ex.get_code()) {
+      case EBUSY:
+        if (m_dev_heap_bo == nullptr)
+          shim_err(EINVAL, "Leaking dev heap BO?");
+        break;
+      case ENOMEM:
+        // Try with smaller size in case of memory pressure or IOMMU_MODE constrain
+        heap_sz /= 2;
+        if (heap_sz < min_heap_mem_size)
+          shim_err(EINVAL, "No mem for dev heap BO, giving up");
+        break;
+      default:
+        throw;
+      }
+    }
+  }
+
   shim_debug("Created KMQ device (%s) ...", get_pdev().m_sysfs_name.c_str());
 }
 
@@ -19,6 +53,7 @@ device_kmq::
 ~device_kmq()
 {
   shim_debug("Destroying KMQ device (%s) ...", get_pdev().m_sysfs_name.c_str());
+  m_dev_heap_bo.reset();
 }
 
 std::unique_ptr<xrt_core::hwctx_handle>

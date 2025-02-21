@@ -575,7 +575,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo,
     {XCL_BO_FLAGS_CACHEABLE, 0, 0x2000, 0x400, 0x3000, 0x100}
   },
-  test_case{ "create_and_free_input_output_bo 1 pages", {},
+  test_case{ "create_and_free_input_output_bo 1 page", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "create_and_free_input_output_bo multiple pages", {},

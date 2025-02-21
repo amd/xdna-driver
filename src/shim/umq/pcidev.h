@@ -4,6 +4,7 @@
 #ifndef PCIDEV_UMQ_H
 #define PCIDEV_UMQ_H
 
+#include "../pcidrv.h"
 #include "../pcidev.h"
 
 namespace shim_xdna {
