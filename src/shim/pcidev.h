@@ -11,13 +11,10 @@
 
 namespace shim_xdna {
 
-// Forward declaration
-class drv;
-
 class pdev : public xrt_core::pci::dev
 {
 public:
-  pdev(std::shared_ptr<const drv> driver, std::string sysfs_name);
+  pdev(std::shared_ptr<const xrt_core::pci::drv> driver, std::string sysfs_name);
   ~pdev();
 
   xrt_core::device::handle_type

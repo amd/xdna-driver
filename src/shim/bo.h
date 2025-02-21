@@ -82,20 +82,6 @@ public:
   get_type() const;
 
 protected:
-
-  // DRM BO managed by driver.
-  class drm_bo {
-  public:
-    bo& m_parent;
-    uint32_t m_handle = AMDXDNA_INVALID_BO_HANDLE;
-    off_t m_map_offset = AMDXDNA_INVALID_ADDR;
-    uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
-    uint64_t m_vaddr = AMDXDNA_INVALID_ADDR;
-
-    drm_bo(bo& parent, const amdxdna_drm_get_bo_info& bo_info);
-    ~drm_bo();
-  };
-
   std::string
   describe() const;
 
@@ -130,22 +116,44 @@ protected:
   detach_from_ctx();
 
   const pdev& m_pdev;
-  void* m_parent = nullptr;
   void* m_aligned = nullptr;
-  size_t m_parent_size = 0;
   size_t m_aligned_size = 0;
   uint64_t m_flags = 0;
   int m_type = AMDXDNA_BO_INVALID;
+  // Used when exclusively assigned to a HW context. By default, BO is shared
+  // among all HW contexts.
+  xrt_core::hwctx_handle::slot_id m_owner_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+
+private:
+  // DRM BO managed by driver.
+  class drm_bo {
+  public:
+    bo& m_parent;
+    uint32_t m_handle = AMDXDNA_INVALID_BO_HANDLE;
+    off_t m_map_offset = AMDXDNA_INVALID_ADDR;
+    uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
+    uint64_t m_vaddr = AMDXDNA_INVALID_ADDR;
+
+    drm_bo(bo& parent, const amdxdna_drm_get_bo_info& bo_info);
+    ~drm_bo();
+  };
+
   std::unique_ptr<drm_bo> m_bo;
   const shared m_import;
-
+  void* m_parent = nullptr;
+  size_t m_parent_size = 0;
   // Command ID in the queue after command submission.
   // Only valid for cmd BO.
   uint64_t m_cmd_id = -1;
 
-  // Used when exclusively assigned to a HW context. By default, BO is shared
-  // among all HW contexts.
-  xrt_core::hwctx_handle::slot_id m_owner_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+  virtual uint32_t
+  alloc_drm_bo(const shim_xdna::pdev& dev, int type, size_t size);
+
+  virtual void
+  get_drm_bo_info(const shim_xdna::pdev& dev, uint32_t boh, amdxdna_drm_get_bo_info* bo_info);
+
+  virtual void
+  free_drm_bo(const shim_xdna::pdev& dev, uint32_t boh);
 };
 
 } // namespace shim_xdna
