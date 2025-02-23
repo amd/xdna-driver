@@ -138,7 +138,7 @@ TL;DR, run `sudo insmod amdxdna.ko dyndbg=+pf` to enable XDNA_DBG() globally, wh
 
 A: Create a debug DEB package, see above question. Then install debug DEB package in your environment. This time, you will have more verbose log. Share this log with us.
 
-### Q: Can I use NPU for accelerate ML traning?
+### Q: Can I use NPU for accelerate ML training?
 
 A: You can use NPU to accelerate ML inference. But NPU is not designed for ML training.
 
