@@ -435,6 +435,7 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 static void mailbox_rx_worker(struct work_struct *rx_work)
 {
 	struct mailbox_channel *mb_chann;
+	u32 iohub;
 	int ret;
 
 	mb_chann = container_of(rx_work, struct mailbox_channel, rx_work);
@@ -444,6 +445,9 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 		MB_ERR(mb_chann, "Channel in bad state, work aborted");
 		return;
 	}
+
+again:
+	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
 
 	while (1) {
 		/*
@@ -459,34 +463,32 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 			MB_ERR(mb_chann, "Unexpected ret %d, disable irq", ret);
 			WRITE_ONCE(mb_chann->bad_state, true);
 			disable_irq(mb_chann->msix_irq);
-			break;
+			return;
 		}
 	}
+
+	/*
+	 * The hardware will not generate interrupt if firmware creates a new
+	 * response right after driver cleans up interrupt register. Check
+	 * the interrupt register to make sure there is not any new response
+	 * before exiting.
+	 */
+	iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
+	if (iohub)
+		goto again;
 }
 
 static irqreturn_t mailbox_irq_handler(int irq, void *p)
 {
 	struct mailbox_channel *mb_chann = p;
-	u32 iohub;
-	int i;
 
 	trace_mbox_irq_handle(MAILBOX_NAME, irq);
 	if (mb_chann->type == MB_CHANNEL_USER_POLL)
 		return IRQ_HANDLED;
-	/* Clear IOHUB register */
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+
 	/* Schedule a rx_work to call the callback functions */
 	queue_work(mb_chann->work_q, &mb_chann->rx_work);
-	for (i = 0; i < 4; i++) {
-		iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
-		if (iohub)
-			goto race;
-	}
 
-	return IRQ_HANDLED;
-race:
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
-	queue_work(mb_chann->work_q, &mb_chann->rx_work);
 	return IRQ_HANDLED;
 }
 
