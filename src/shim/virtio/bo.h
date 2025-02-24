@@ -12,7 +12,7 @@ namespace shim_xdna {
 
 class bo_virtio : public bo {
 public:
-  bo_virtio(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags);
 
   ~bo_virtio();
@@ -22,10 +22,10 @@ public:
 
 public:
   // Support BO creation from internal
-  bo_virtio(const device& device, size_t size, int type);
+  bo_virtio(const pdev& pdev, size_t size, int type);
 
 private:
-  bo_virtio(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, int type);
   
   uint32_t

@@ -221,9 +221,9 @@ free_bo()
 }
 
 bo::
-bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, int type)
-  : m_pdev(device.get_pdev())
+  : m_pdev(pdev)
   , m_aligned_size(size)
   , m_flags(flags)
   , m_type(type)
@@ -233,8 +233,8 @@ bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 }
 
 bo::
-bo(const device& device, xrt_core::shared_handle::export_handle ehdl)
-  : m_pdev(device.get_pdev())
+bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
+  : m_pdev(pdev)
   , m_import(ehdl)
 {
 }

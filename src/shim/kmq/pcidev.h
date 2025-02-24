@@ -18,6 +18,15 @@ public:
  
   std::shared_ptr<xrt_core::device>
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
+
+private:
+  mutable std::unique_ptr<xrt_core::buffer_handle> m_dev_heap_bo;
+
+  virtual void
+  on_first_open() const override;
+
+  virtual void
+  on_last_close() const override;
 };
 
 } // namespace shim_xdna

@@ -41,10 +41,10 @@ inline void flush_cache_line(const char *cur)
 class bo : public xrt_core::buffer_handle
 {
 public:
-  bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, int type);
 
-  bo(const device& device, xrt_core::shared_handle::export_handle ehdl);
+  bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
 
   ~bo();
 

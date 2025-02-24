@@ -10,10 +10,10 @@ namespace shim_xdna {
 
 class bo_umq : public bo {
 public:
-  bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_umq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags);
 
-  bo_umq(const device& device, xrt_core::shared_handle::export_handle ehdl);
+  bo_umq(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
 
   ~bo_umq();
 
@@ -24,7 +24,7 @@ public:
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
 
 private:
-  bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_umq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, int type);
 
 };

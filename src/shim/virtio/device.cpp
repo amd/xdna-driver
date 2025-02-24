@@ -38,7 +38,7 @@ alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   if (userptr)
     shim_not_supported_err("User ptr BO");
 
-  return std::make_unique<bo_virtio>(*this, ctx_id, size, flags);
+  return std::make_unique<bo_virtio>(get_pdev(), ctx_id, size, flags);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

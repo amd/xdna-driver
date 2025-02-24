@@ -260,6 +260,13 @@ TEST_query_userpf(device::id_type id, std::shared_ptr<device> sdev, arg_type& ar
 }
 
 void
+TEST_create_destroy_device(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+{
+  auto dev1 = get_userpf_device(id);
+  auto dev2 = get_userpf_device(id);
+}
+
+void
 TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 {
   // Close existing device
@@ -721,6 +728,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "Multi context IO test 1 (npu4)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 20 }
+  },
+  test_case{ "Create and destroy devices", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
 };
 

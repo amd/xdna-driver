@@ -52,24 +52,24 @@ clflush_data(const void *base, size_t offset, size_t len)
 namespace shim_xdna {
 
 bo_virtio::
-bo_virtio(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags)
-  : bo_virtio(device, ctx_id, size, flags, flag_to_type(flags))
+  : bo_virtio(pdev, ctx_id, size, flags, flag_to_type(flags))
 {
   if (m_type == AMDXDNA_BO_INVALID)
     shim_err(EINVAL, "Invalid BO flags: 0x%lx", flags);
 }
 
 bo_virtio::
-bo_virtio(const device& device, size_t size, int type)
-  : bo_virtio(device, AMDXDNA_INVALID_CTX_HANDLE, size, 0, type)
+bo_virtio(const pdev& pdev, size_t size, int type)
+  : bo_virtio(pdev, AMDXDNA_INVALID_CTX_HANDLE, size, 0, type)
 {
 }
 
 bo_virtio::
-bo_virtio(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, int type)
-  : bo(device, ctx_id, size, flags, type)
+  : bo(pdev, ctx_id, size, flags, type)
 {
   size_t align = 0;
 
@@ -86,8 +86,7 @@ bo_virtio(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
   if (m_type == AMDXDNA_BO_SHARE)
     sync(direction::host2device, size, 0);
 
-  shim_debug("Allocated VIRTIO BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
-    m_aligned, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
+  shim_debug("Allocated VIRTIO BO, %s", describe().c_str());
 }
 
 bo_virtio::
