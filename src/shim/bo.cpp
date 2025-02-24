@@ -7,32 +7,6 @@
 
 namespace {
 
-uint32_t
-alloc_drm_bo(const shim_xdna::pdev& dev, int type, void* buf, size_t size)
-{
-  amdxdna_drm_create_bo cbo = {
-    .vaddr = reinterpret_cast<uintptr_t>(buf),
-    .size = size,
-    .type = static_cast<uint32_t>(type),
-  };
-  dev.ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
-  return cbo.handle;
-}
-
-void
-free_drm_bo(const shim_xdna::pdev& dev, uint32_t boh)
-{
-  drm_gem_close close_bo = {boh, 0};
-  dev.ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
-}
-
-void
-get_drm_bo_info(const shim_xdna::pdev& dev, uint32_t boh, amdxdna_drm_get_bo_info* bo_info)
-{
-  bo_info->handle = boh;
-  dev.ioctl(DRM_IOCTL_AMDXDNA_GET_BO_INFO, bo_info);
-}
-
 void *
 map_parent_range(size_t size)
 {
@@ -41,12 +15,6 @@ map_parent_range(size_t size)
     shim_err(errno, "mmap(len=%ld) failed", size);
 
   return p;
-}
-
-void*
-map_drm_bo(const shim_xdna::pdev& dev, size_t size, int prot, uint64_t offset)
-{
-  return dev.mmap(0, size, prot, MAP_SHARED | MAP_LOCKED, offset);
 }
 
 void*
@@ -141,7 +109,7 @@ bo::drm_bo::
   if (m_handle == AMDXDNA_INVALID_BO_HANDLE)
     return;
   try {
-    free_drm_bo(m_parent.m_pdev, m_handle);
+    m_parent.free_drm_bo(m_parent.m_pdev, m_handle);
   } catch (const xrt_core::system_error& e) {
     shim_debug("Failed to free DRM BO: %s", e.what());
   }
@@ -193,7 +161,8 @@ mmap_bo(size_t align)
   }
 
   if (a == 0) {
-    m_aligned = map_drm_bo(m_pdev, m_aligned_size, PROT_READ | PROT_WRITE, m_bo->m_map_offset);
+    m_aligned = map_drm_bo(m_pdev, nullptr, m_aligned_size, PROT_READ | PROT_WRITE,
+      MAP_SHARED | MAP_LOCKED, m_bo->m_map_offset);
     return;
   }
 
@@ -205,7 +174,8 @@ mmap_bo(size_t align)
   m_parent_size = align * 2 - 1;
   m_parent = map_parent_range(m_parent_size);
   auto aligned = addr_align(m_parent, align);
-  m_aligned = map_drm_bo(m_pdev, aligned, m_aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, m_bo->m_map_offset);
+  m_aligned = map_drm_bo(m_pdev, aligned, m_aligned_size, PROT_READ | PROT_WRITE,
+    MAP_SHARED | MAP_LOCKED | MAP_FIXED, m_bo->m_map_offset);
 }
 
 void
@@ -225,7 +195,7 @@ void
 bo::
 alloc_bo()
 {
-  uint32_t boh = alloc_drm_bo(m_pdev, m_type, NULL, m_aligned_size);
+  uint32_t boh = alloc_drm_bo(m_pdev, m_type, m_aligned_size);
 
   amdxdna_drm_get_bo_info bo_info = {};
   get_drm_bo_info(m_pdev, boh, &bo_info);
@@ -251,9 +221,9 @@ free_bo()
 }
 
 bo::
-bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, int type)
-  : m_pdev(device.get_pdev())
+  : m_pdev(pdev)
   , m_aligned_size(size)
   , m_flags(flags)
   , m_type(type)
@@ -263,8 +233,8 @@ bo(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 }
 
 bo::
-bo(const device& device, xrt_core::shared_handle::export_handle ehdl)
-  : m_pdev(device.get_pdev())
+bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
+  : m_pdev(pdev)
   , m_import(ehdl)
 {
 }
@@ -365,6 +335,35 @@ bo::
 get_type() const
 {
   return m_type;
+}
+
+uint32_t
+bo::
+alloc_drm_bo(const shim_xdna::pdev& dev, int type, size_t size)
+{
+  amdxdna_drm_create_bo cbo = {
+    .vaddr = 0,
+    .size = size,
+    .type = static_cast<uint32_t>(type),
+  };
+  dev.ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
+  return cbo.handle;
+}
+
+void
+bo::
+get_drm_bo_info(const shim_xdna::pdev& dev, uint32_t boh, amdxdna_drm_get_bo_info* bo_info)
+{
+  bo_info->handle = boh;
+  dev.ioctl(DRM_IOCTL_AMDXDNA_GET_BO_INFO, bo_info);
+}
+
+void
+bo::
+free_drm_bo(const shim_xdna::pdev& dev, uint32_t boh)
+{
+  drm_gem_close close_bo = {boh, 0};
+  dev.ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
 }
 
 } // namespace shim_xdna

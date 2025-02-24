@@ -40,14 +40,14 @@ alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   if (userptr)
     shim_not_supported_err("User ptr BO");
 
-  return std::make_unique<bo_kmq>(*this, ctx_id, size, flags);
+  return std::make_unique<bo_kmq>(get_pdev(), ctx_id, size, flags);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
 device_kmq::
 import_bo(xrt_core::shared_handle::export_handle ehdl) const
 {
-  return std::make_unique<bo_kmq>(*this, ehdl);
+  return std::make_unique<bo_kmq>(get_pdev(), ehdl);
 }
 
 std::vector<char>

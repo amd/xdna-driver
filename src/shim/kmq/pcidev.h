@@ -4,6 +4,7 @@
 #ifndef PCIDEV_KMQ_H
 #define PCIDEV_KMQ_H
 
+#include "../pcidrv.h"
 #include "../pcidev.h"
 
 
@@ -19,8 +20,10 @@ public:
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
 
 private:
-  // Create on first device creation and removed right before device is closed
   mutable std::unique_ptr<xrt_core::buffer_handle> m_dev_heap_bo;
+
+  virtual void
+  on_first_open() const override;
 
   virtual void
   on_last_close() const override;

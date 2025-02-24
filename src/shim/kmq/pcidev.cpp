@@ -32,20 +32,21 @@ std::shared_ptr<xrt_core::device>
 pdev_kmq::
 create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
 {
-  auto dev = std::make_shared<device_kmq>(*this, handle, id);
+  return std::make_shared<device_kmq>(*this, handle, id);
+}
+
+void
+pdev_kmq::
+on_first_open() const
+{
   size_t heap_sz = max_heap_mem_size;
 
   while (m_dev_heap_bo == nullptr) {
     try {
-      // Alloc device memory on first device creation.
-      // No locking is needed since driver will ensure only one heap BO is created.
-      m_dev_heap_bo = std::make_unique<bo_kmq>(*dev, heap_sz, AMDXDNA_BO_DEV_HEAP);
+      // Alloc device memory on first device open.
+      m_dev_heap_bo = std::make_unique<bo_kmq>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
     } catch (const xrt_core::system_error& ex) {
       switch (ex.get_code()) {
-      case EBUSY:
-        if (m_dev_heap_bo == nullptr)
-          shim_err(EINVAL, "Leaking dev heap BO?");
-        break;
       case ENOMEM:
         // Try with smaller size in case of memory pressure or IOMMU_MODE constrain
         heap_sz /= 2;
@@ -57,7 +58,6 @@ create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id
       }
     }
   }
-  return dev;
 }
 
 void

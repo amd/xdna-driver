@@ -37,31 +37,30 @@ umq_flags_to_type(uint64_t bo_flags)
 namespace shim_xdna {
 
 bo_umq::
-bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo_umq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags)
-  : bo_umq(device, ctx_id, size, flags, umq_flags_to_type(flags))
+  : bo_umq(pdev, ctx_id, size, flags, umq_flags_to_type(flags))
 {
   if (m_type == AMDXDNA_BO_INVALID)
     shim_err(EINVAL, "Invalid BO flags: 0x%lx", flags);
 }
 
 bo_umq::
-bo_umq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+bo_umq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags, int type)
-  : bo(device, ctx_id, size, flags, type)
+  : bo(pdev, ctx_id, size, flags, type)
 {
   alloc_bo();
   mmap_bo();
   /*TODO: no need if cache coherent */
   sync(direction::host2device, size, 0);
 
-  shim_debug("Allocated UMQ BO for: userptr=0x%lx, size=%ld, flags=0x%llx",
-    m_aligned, m_aligned_size, m_flags);
+  shim_debug("Allocated UMQ BO, %s", describe().c_str());
 }
 
 bo_umq::
-bo_umq(const device& device, xrt_core::shared_handle::export_handle ehdl)
-  : bo(device, ehdl)
+bo_umq(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
+  : bo(pdev, ehdl)
 {
     alloc_bo();
     mmap_bo();

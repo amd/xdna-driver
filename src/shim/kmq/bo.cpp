@@ -77,24 +77,22 @@ is_driver_sync()
 namespace shim_xdna {
 
 bo_kmq::
-bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags)
-  : bo_kmq(device, ctx_id, size, flags, flag_to_type(flags))
+bo_kmq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id, size_t size, uint64_t flags)
+  : bo_kmq(pdev, ctx_id, size, flags, flag_to_type(flags))
 {
   if (m_type == AMDXDNA_BO_INVALID)
     shim_err(EINVAL, "Invalid BO flags: 0x%lx", flags);
 }
 
 bo_kmq::
-bo_kmq(const device& device, size_t size, int type)
-  : bo_kmq(device, AMDXDNA_INVALID_CTX_HANDLE, size, 0, type)
+bo_kmq(const pdev& pdev, size_t size, int type)
+  : bo_kmq(pdev, AMDXDNA_INVALID_CTX_HANDLE, size, 0, type)
 {
 }
 
 bo_kmq::
-bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags, int type)
-  : bo(device, ctx_id, size, flags, type)
+bo_kmq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id, size_t size, uint64_t flags, int type)
+  : bo(pdev, ctx_id, size, flags, type)
 {
   size_t align = 0;
 
@@ -113,13 +111,12 @@ bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
 
   attach_to_ctx();
 
-  shim_debug("Allocated KMQ BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
-    m_aligned, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
+  shim_debug("Allocated KMQ BO, %s", describe().c_str());
 }
 
 bo_kmq::
-bo_kmq(const device& device, xrt_core::shared_handle::export_handle ehdl)
-  : bo(device, ehdl)
+bo_kmq(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
+  : bo(pdev, ehdl)
 {
   import_bo();
   mmap_bo();

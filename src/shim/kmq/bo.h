@@ -13,10 +13,10 @@ namespace shim_xdna {
 
 class bo_kmq : public bo {
 public:
-  bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_kmq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags);
 
-  bo_kmq(const device& device, xrt_core::shared_handle::export_handle ehdl);
+  bo_kmq(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
 
   ~bo_kmq();
 
@@ -28,14 +28,14 @@ public:
 
 public:
   // Support BO creation from internal
-  bo_kmq(const device& device, size_t size, int type);
+  bo_kmq(const pdev& pdev, size_t size, int type);
 
   // Obtain array of arg BO handles, returns real number of handles
   uint32_t
   get_arg_bo_handles(uint32_t *handles, size_t num) const;
 
 private:
-  bo_kmq(const device& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  bo_kmq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, int type);
 
   // Only for AMDXDNA_BO_CMD type
