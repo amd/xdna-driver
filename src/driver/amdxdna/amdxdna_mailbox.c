@@ -432,11 +432,6 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	return ret;
 }
 
-static u32 maibox_read_iohub(struct mailbox_channel *mb_chann)
-{
-	return mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
-}
-
 static void mailbox_rx_worker(struct work_struct *rx_work)
 {
 	struct mailbox_channel *mb_chann;
@@ -452,6 +447,8 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 	}
 
 again:
+	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+
 	while (1) {
 		/*
 		 * If return is 0, keep consuming next message, until there is
@@ -470,20 +467,14 @@ again:
 		}
 	}
 
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
-
 	/*
-	 * There is a hardware flaw been found during stress tests. If the
-	 * firmware generates a mailbox response right after clearing
-	 * interrupt register above, the hardware will not be able to generate
-	 * an interrupt for the response because the new response drags the
-	 * interrupt register back to 1 too quickly.
-	 *
-	 * Poll the interrupt register for 100us. If it becomes to 1, go back
-	 * to process the new response.
+	 * The hardware will not generate interrupt if firmware creates a new
+	 * response right after driver cleans up interrupt register. Check
+	 * the interrupt register to make sure there is not any new response
+	 * before exiting.
 	 */
-	ret = readx_poll_timeout(maibox_read_iohub, mb_chann, iohub, iohub, 0, 100);
-	if (!ret)
+	iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
+	if (iohub)
 		goto again;
 }
 
