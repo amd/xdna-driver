@@ -425,10 +425,6 @@ struct telemetry
     {
       query::aie_telemetry::result_type output;
 
-      auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
-      if (device_id != NPU4_DEVICE_ID)
-        return output;
-
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -451,10 +447,6 @@ struct telemetry
     {
       query::misc_telemetry::result_type output;
 
-      auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
-      if (device_id != NPU4_DEVICE_ID)
-        return output;
-
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -472,10 +464,6 @@ struct telemetry
     case key_type::opcode_telemetry:
     {
       query::opcode_telemetry::result_type output;
-
-      auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
-      if (device_id != NPU4_DEVICE_ID)
-        return output;
 
       amdxdna_drm_query_telemetry telemetry{};
 
@@ -573,10 +561,6 @@ struct telemetry
     case key_type::stream_buffer_telemetry:
     {
       query::stream_buffer_telemetry::result_type output;
-
-      auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
-      if (device_id != NPU4_DEVICE_ID)
-        return output;
 
       amdxdna_drm_query_telemetry telemetry{};
 
