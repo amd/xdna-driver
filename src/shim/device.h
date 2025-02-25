@@ -23,7 +23,6 @@ private:
 
   std::map<uint32_t, xrt_core::buffer_handle *> m_bo_map;
 
-protected:
   virtual std::unique_ptr<xrt_core::hwctx_handle>
   create_hw_context(const device& dev,
     const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos) const = 0;
