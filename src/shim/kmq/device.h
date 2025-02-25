@@ -19,7 +19,7 @@ public:
   alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags) override;
 
-protected:
+private:
   std::unique_ptr<xrt_core::hwctx_handle>
   create_hw_context(const device& dev, const xrt::xclbin& xclbin,
     const xrt::hw_context::qos_type& qos) const override;

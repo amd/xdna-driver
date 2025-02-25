@@ -213,7 +213,7 @@ parse_xclbin(const xrt::xclbin& xclbin)
 
 const device&
 hw_ctx::
-get_device()
+get_device() const
 {
   return m_device;
 }

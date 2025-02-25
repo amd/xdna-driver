@@ -65,8 +65,6 @@ public:
   get_syncobj() const;
 
 protected:
-  const device&
-  get_device();
   uint32_t m_num_cols;
   std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
 
@@ -75,6 +73,9 @@ protected:
     size_t m_func;
     std::vector<uint8_t> m_pdi;
   };
+
+  const device&
+  get_device() const;
 
   const std::vector<cu_info>&
   get_cu_info() const;
