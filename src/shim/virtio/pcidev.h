@@ -6,6 +6,7 @@
 
 #include "../pcidrv_virtio.h"
 #include "../pcidev.h"
+#include "drm_local/amdxdna_accel.h"
 #include <drm/virtgpu_drm.h>
 
 namespace shim_xdna {
@@ -21,7 +22,7 @@ public:
 
 private:
   // Below are init'ed on first device open and removed right before device is closed
-  mutable uint32_t m_shmem_bo_hdl;
+  mutable uint32_t m_shmem_bo_hdl = AMDXDNA_INVALID_BO_HANDLE;
   mutable struct vdrm_shmem *m_shmem;
 
   virtual void

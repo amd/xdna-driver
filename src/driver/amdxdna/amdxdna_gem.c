@@ -703,9 +703,11 @@ destroy_abo:
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_share_object(struct drm_device *dev, size_t size)
 {
+	size_t aligned_sz = PAGE_ALIGN(size);
+
 	if (!amdxdna_use_carvedout())
-		return amdxdna_gem_create_shmem_object(dev, size);
-	return amdxdna_gem_create_carvedout_object(dev, size);
+		return amdxdna_gem_create_shmem_object(dev, aligned_sz);
+	return amdxdna_gem_create_carvedout_object(dev, aligned_sz);
 }
 
 static void
@@ -1041,7 +1043,6 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	XDNA_DBG(xdna, "BO arg type %d vaddr 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
-	args->size = PAGE_ALIGN(args->size);
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
 		abo = amdxdna_drm_create_share_bo(dev, args, filp);

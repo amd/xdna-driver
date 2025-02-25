@@ -65,7 +65,7 @@ namespace shim_xdna {
 
 pdev::
 pdev(std::shared_ptr<const xrt_core::pci::drv> driver, std::string sysfs_name)
-  : xrt_core::pci::dev(driver, std::move(sysfs_name))
+  : xrt_core::pci::dev(std::move(driver), std::move(sysfs_name))
 {
   m_is_ready = true; // We're always ready.
 }
