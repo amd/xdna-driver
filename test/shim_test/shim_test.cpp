@@ -317,7 +317,7 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device> sdev, arg
   int num_virt_ctx = static_cast<unsigned int>(arg[0]);
 
   multi_thread threads(num_virt_ctx, TEST_io_latency);
-  threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
+  threads.run_test(id, std::move(sdev), {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
 }
 
 void

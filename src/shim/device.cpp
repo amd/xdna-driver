@@ -549,7 +549,7 @@ struct telemetry
           };
           dtlbs.push_back(std::move(dtlb));
         }
-        task.dtlbs = dtlbs;
+        task.dtlbs = std::move(dtlbs);
 
         task.preemption_data.slot_index = ctx_map[i];
         task.preemption_data.preemption_checkpoint_event = telemetry.layer_boundary_count[i];
