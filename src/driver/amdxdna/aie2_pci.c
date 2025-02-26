@@ -15,7 +15,6 @@
 #include "aie2_solver.h"
 #include "aie2_msg_priv.h"
 
-#include "amdxdna_ctx_runqueue.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -27,10 +26,6 @@
 uint aie2_max_col = XRS_MAX_COL;
 module_param(aie2_max_col, uint, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
-
-uint aie2_hwctx_limit;
-module_param(aie2_hwctx_limit, uint, 0400);
-MODULE_PARM_DESC(aie2_hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default");
 
 uint aie2_control_flags;
 module_param(aie2_control_flags, uint, 0400);
@@ -329,9 +324,8 @@ static int aie2_xrs_set_dft_dpm_level(struct drm_device *ddev, u32 dpm_level)
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
 	struct amdxdna_dev_hdl *ndev;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-
 	ndev = xdna->dev_handle;
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ndev->dft_dpm_level = dpm_level;
 	if (ndev->pw_mode != POWER_MODE_DEFAULT || ndev->dpm_level == dpm_level)
 		return 0;
@@ -355,6 +349,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 		return;
 	}
 
+	mutex_lock(&ndev->aie2_lock);
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
@@ -365,6 +360,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	}
 	aie2_psp_stop(ndev->psp_hdl);
 	aie2_smu_stop(ndev);
+	mutex_unlock(&ndev->aie2_lock);
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
 
@@ -390,6 +386,11 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 	}
 	pci_set_master(pdev);
 
+	/*
+	 * aie2_smu_start(), aie2_pm_init() and aie2_mgmt_fw_init() require
+	 * aie2_lock. One mutex_lock() and mutex_unlock() is simpler.
+	 */
+	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_smu_start(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init smu, ret %d", ret);
@@ -440,6 +441,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto destroy_mgmt_chann;
 	}
 
+	mutex_unlock(&ndev->aie2_lock);
 	ndev->dev_status = AIE2_DEV_START;
 
 	return 0;
@@ -456,10 +458,33 @@ stop_psp:
 fini_smu:
 	aie2_smu_stop(ndev);
 disable_dev:
+	mutex_unlock(&ndev->aie2_lock);
 	pci_disable_device(pdev);
 	pci_clear_master(pdev);
 
 	return ret;
+}
+
+static void aie2_hw_suspend(struct amdxdna_dev *xdna)
+{
+	aie2_rq_pause_all(&xdna->dev_handle->ctx_rq);
+	aie2_hw_stop(xdna);
+}
+
+static int aie2_hw_resume(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	XDNA_INFO(xdna, "firmware resuming...");
+	ret = aie2_hw_start(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "resume NPU firmware failed");
+		return ret;
+	}
+
+	XDNA_INFO(xdna, "context resuming...");
+	aie2_rq_run_all(&xdna->dev_handle->ctx_rq);
+	return 0;
 }
 
 static int aie2_init(struct amdxdna_dev *xdna)
@@ -479,15 +504,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
-	init_rwsem(&ndev->recover_lock);
-
-	if (aie2_hwctx_limit)
-		ndev->hwctx_limit = aie2_hwctx_limit;
-	else
-		ndev->hwctx_limit = ndev->priv->hwctx_limit;
-	XDNA_DBG(xdna, "Maximum limit %d hardware context(s)", ndev->hwctx_limit);
-
-	xdna->ctx_limit = ndev->priv->ctx_limit;
+	mutex_init(&ndev->aie2_lock);
 
 	ret = request_firmware(&fw, ndev->priv->fw_path, &pdev->dev);
 	if (ret) {
@@ -584,10 +601,17 @@ skip_pasid:
 		goto disable_sva;
 	}
 
+	ret = aie2_rq_init(&ndev->ctx_rq);
+	if (ret) {
+		XDNA_ERR(xdna, "Context runqueue init failed");
+		goto stop_hw;
+	}
+
+	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_mgmt_fw_query(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Query firmware failed, ret %d", ret);
-		goto stop_hw;
+		goto failed_rq_fini;
 	}
 	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
 
@@ -599,8 +623,8 @@ skip_pasid:
 	xrs_cfg.actions = &aie2_xrs_actions;
 	xrs_cfg.total_col = ndev->total_col;
 
-	xdna->xrs_hdl = xrsm_init(&xrs_cfg);
-	if (!xdna->xrs_hdl) {
+	ndev->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!ndev->xrs_hdl) {
 		XDNA_ERR(xdna, "Initialize resolver failed");
 		ret = -EINVAL;
 		goto stop_hw;
@@ -624,6 +648,7 @@ skip_pasid:
 		XDNA_ERR(xdna, "Re-query firmware version failed");
 		goto async_event_free;
 	}
+	mutex_unlock(&ndev->aie2_lock);
 
 	ret = aie2_event_trace_init(ndev);
 	if (ret)
@@ -633,7 +658,10 @@ skip_pasid:
 	return 0;
 
 async_event_free:
+	mutex_unlock(&ndev->aie2_lock);
 	aie2_error_async_events_free(ndev);
+failed_rq_fini:
+	aie2_rq_fini(&ndev->ctx_rq);
 stop_hw:
 	aie2_hw_stop(xdna);
 disable_sva:
@@ -652,6 +680,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	aie2_event_trace_fini(ndev);
+	aie2_rq_fini(&ndev->ctx_rq);
 	aie2_hw_stop(xdna);
 	aie2_error_async_events_free(ndev);
 #ifdef AMDXDNA_DEVEL
@@ -663,11 +692,23 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 skip_pasid:
 #endif
 	pci_free_irq_vectors(pdev);
+	mutex_destroy(&ndev->aie2_lock);
+}
+
+/* This function returns recover is needed or not */
+static bool aie2_detect(struct amdxdna_dev *xdna)
+{
+	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
+
+	if (aie2_rq_handle_idle_ctx(rq))
+		return false;
+
+	return aie2_rq_is_all_context_stuck(rq);
 }
 
 static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
 	struct amdxdna_client *client;
 
 	if (dump_only) {
@@ -678,13 +719,11 @@ static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 		return;
 	}
 
-	down_write(&ndev->recover_lock);
 	mutex_lock(&xdna->dev_lock);
-	amdxdna_rq_pause_all(&xdna->ctx_rq);
+	aie2_rq_pause_all_nolock(rq);
 
-	amdxdna_rq_run_all(&xdna->ctx_rq);
+	aie2_rq_run_all_nolock(rq);
 	mutex_unlock(&xdna->dev_lock);
-	up_write(&ndev->recover_lock);
 }
 
 static int aie2_get_aie_status(struct amdxdna_client *client,
@@ -881,13 +920,12 @@ static int aie2_get_ctx_status(struct amdxdna_client *client,
 	int ret = 0;
 	int idx;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-
 	tmp = kzalloc(sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
 
 	buf = u64_to_user_ptr(args->buffer);
+	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		amdxdna_for_each_ctx(tmp_client, ctx_id, ctx) {
@@ -927,6 +965,7 @@ static int aie2_get_ctx_status(struct amdxdna_client *client,
 	}
 
 out:
+	mutex_unlock(&xdna->dev_lock);
 	kfree(tmp);
 	args->buffer_size = req_bytes;
 	return ret;
@@ -1006,6 +1045,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
+	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
 		ret = aie2_get_aie_status(client, args);
@@ -1023,7 +1063,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_get_sensors(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_get_ctx_status(client, args);
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_READ_AIE_MEM:
@@ -1049,6 +1091,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	drm_dev_exit(idx);
@@ -1113,6 +1156,7 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
+	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
 		ret = aie2_set_power_mode(client, args);
@@ -1132,6 +1176,7 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
 	drm_dev_exit(idx);
 	return ret;
@@ -1141,15 +1186,14 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.mmap			= NULL,
 	.init			= aie2_init,
 	.fini			= aie2_fini,
+	.detect			= aie2_detect,
 	.recover		= aie2_recover,
-	.resume			= aie2_hw_start,
-	.suspend		= aie2_hw_stop,
+	.resume			= aie2_hw_resume,
+	.suspend		= aie2_hw_suspend,
 	.get_aie_info		= aie2_get_info,
 	.set_aie_state		= aie2_set_state,
 	.ctx_init		= aie2_ctx_init,
 	.ctx_fini		= aie2_ctx_fini,
-	.ctx_connect		= aie2_ctx_connect,
-	.ctx_disconnect		= aie2_ctx_disconnect,
 	.ctx_config		= aie2_ctx_config,
 	.cmd_submit		= aie2_cmd_submit,
 	.cmd_wait		= aie2_cmd_wait,

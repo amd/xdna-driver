@@ -62,14 +62,7 @@ static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct 
 
 	synchronize_srcu(ss);
 
-	/*
-	 * At this point, user is not able to submit new commands.
-	 */
-	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->ctx_fini(ctx);
-	xdna->ctx_cnt--;
-	mutex_unlock(&xdna->dev_lock);
-
 	kfree(ctx->name);
 	kfree(ctx);
 }
@@ -121,7 +114,7 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	if (ctx->qos.priority == AMDXDNA_QOS_DEFAULT_PRIORITY)
 		ctx->qos.priority = AMDXDNA_QOS_HIGH_PRIORITY;
 	ctx->client = client;
-	ctx->tdr_last_completed = -1;
+	ctx->last_completed = -1;
 	ctx->num_tiles = args->num_tiles;
 	ctx->mem_size = args->mem_size;
 	ctx->max_opc = args->max_opc;
@@ -141,34 +134,22 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 		goto rm_id;
 	}
 
-	mutex_lock(&xdna->dev_lock);
-	if (xdna->ctx_limit == xdna->ctx_cnt) {
-		XDNA_ERR(xdna, "Not allow more than %d context(s)", xdna->ctx_limit);
-		ret = -ENOENT;
-		goto unlock_and_err;
-	}
-
 	ret = xdna->dev_info->ops->ctx_init(ctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Init ctx failed, ret %d", ret);
-		goto unlock_and_err;
+		goto free_name;
 	}
+
+	atomic64_set(&ctx->job_free_cnt, 0);
 	args->handle = ctx->id;
 	args->syncobj_handle = ctx->syncobj_hdl;
 	args->umq_doorbell = ctx->doorbell_offset;
-	xdna->ctx_cnt++;
-	mutex_unlock(&xdna->dev_lock);
-
-	atomic64_set(&ctx->job_pending_cnt, 0);
-	atomic64_set(&ctx->job_free_cnt, 0);
-	init_waitqueue_head(&ctx->connect_waitq);
 
 	XDNA_DBG(xdna, "PID %d create context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
 	return 0;
 
-unlock_and_err:
-	mutex_unlock(&xdna->dev_lock);
+free_name:
 	kfree(ctx->name);
 rm_id:
 	xa_erase(&client->ctx_xa, ctx->id);
@@ -198,10 +179,6 @@ int amdxdna_drm_destroy_ctx_ioctl(struct drm_device *dev, void *data, struct drm
 		goto out;
 	}
 
-	/*
-	 * The pushed jobs are handled by DRM scheduler during destroy.
-	 * SRCU to synchronize with exec command ioctls.
-	 */
 	amdxdna_ctx_destroy_rcu(ctx, &client->ctx_srcu);
 
 	XDNA_DBG(xdna, "PID %d destroyed context %d", client->pid, args->handle);

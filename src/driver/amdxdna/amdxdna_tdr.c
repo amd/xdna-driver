@@ -19,46 +19,10 @@ MODULE_PARM_DESC(tdr_dump_ctx, "Instead of resetting, just dump the ctx info for
 static void amdxdna_tdr_work(struct work_struct *work)
 {
 	struct amdxdna_tdr *tdr = to_tdr(work);
-	struct amdxdna_client *client;
-	struct amdxdna_ctx *ctx;
 	struct amdxdna_dev *xdna;
-	unsigned long ctx_id;
-	bool active = false;
-	int idle_cnt = 0;
-	int ctx_cnt = 0;
 
 	xdna = tdr_to_xdna_dev(tdr);
-	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry(client, &xdna->client_list, node) {
-		amdxdna_for_each_ctx(client, ctx_id, ctx) {
-			if (!FIELD_GET(CTX_STATE_READY, ctx->status))
-				continue;
-
-			u64 completed = ctx->completed; /* To avoid race */
-			u64 last = ctx->tdr_last_completed;
-			u64 submitted = ctx->submitted;
-
-			XDNA_DBG(xdna, "%s submitted %lld completed %lld last %lld",
-				 ctx->name, submitted, completed, last);
-			ctx_cnt++;
-			if (submitted == completed) {
-				idle_cnt++;
-				continue;
-			}
-
-			if (last != completed) {
-				ctx->tdr_last_completed = completed;
-				active = true;
-				break;
-			}
-		}
-		if (active)
-			break;
-	}
-	mutex_unlock(&xdna->dev_lock);
-
-	/* Detecting hang when all ctx with outstanding cmds do not make progress. */
-	if (ctx_cnt != idle_cnt && !active) {
+	if (xdna->dev_info->ops->detect(xdna)) {
 		XDNA_WARN(xdna, "Device isn't making progress... Count %d", ++tdr->tdr_counter);
 		xdna->dev_info->ops->recover(xdna, tdr_dump_ctx);
 	}

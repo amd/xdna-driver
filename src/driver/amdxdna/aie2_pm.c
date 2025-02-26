@@ -22,8 +22,10 @@ static int aie2_pm_set_clk_gating(struct amdxdna_dev_hdl *ndev, u32 val)
 
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 {
+	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	if (ndev->dev_status != AIE2_DEV_UNINIT) {
 		/* Resume device */
 		ret = ndev->priv->hw_ops.set_dpm(ndev, ndev->dpm_level);
@@ -61,14 +63,14 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
 	u32 clk_gating, dpm_level;
 	int ret;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 
 	if (ndev->pw_mode == target)
 		return 0;
 
 	switch (target) {
 	case POWER_MODE_TURBO:
-		if (xdna->ctx_cnt) {
+		if (ndev->hwctx_cnt) {
 			XDNA_ERR(xdna, "Can not set turbo when there is active ctx");
 			return -EINVAL;
 		}

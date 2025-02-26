@@ -17,7 +17,6 @@ ccflags-y += -g -Werror
 obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
-	amdxdna_ctx_runqueue.o \
 	amdxdna_gem.o \
 	amdxdna_drm.o \
 	amdxdna_sysfs.o \
@@ -33,6 +32,7 @@ amdxdna-y := \
 	aie2_debugfs.o \
 	aie2_message.o \
 	aie2_event_trace.o \
+	aie2_ctx_runqueue.o \
 	aie2_pm.o \
 	aie2_pci.o \
 	npu1_regs.o \
