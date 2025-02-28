@@ -868,6 +868,9 @@ struct xclbin_name
     case xrt_core::query::xclbin_name::type::validate:
       xclbin_name = "validate.xclbin";
       break;
+    case xrt_core::query::xclbin_name::type::validate_elf:
+      xclbin_name = "validate_elf.xclbin";
+      break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
@@ -930,6 +933,18 @@ struct elf_name
     switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
     case xrt_core::query::elf_name::type::nop:
       elf_file = "nop.elf";
+      break;
+    case xrt_core::query::elf_name::type::df_bandwidth:
+      elf_file = "df_bw.elf";
+      break;
+    case xrt_core::query::elf_name::type::tct_one_column:
+      elf_file = "tct_1col.elf";
+      break;
+    case xrt_core::query::elf_name::type::tct_all_column:
+      elf_file = "tct_4col.elf";
+      break;
+    case xrt_core::query::elf_name::type::aie_reconfig_overhead: 
+      elf_file = "aie_reconfig_overhead.elf";
       break;
     }
 
