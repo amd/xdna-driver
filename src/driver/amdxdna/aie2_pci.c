@@ -854,7 +854,7 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 		return -ENOMEM;
 
 	sensor->type = AMDXDNA_SENSOR_TYPE_POWER;
-	sensor->input = 1234; /* TODO: query the device and get the power data */
+	sensor->input = __UINT32_MAX__; /* TODO: query the device and get the power data */
 	sensor->unitm = -3; /* in milliwatts */
 	snprintf(sensor->label, sizeof(sensor->label), "Total Power");
 	snprintf(sensor->units, sizeof(sensor->units), "mW");
@@ -909,6 +909,11 @@ static int aie2_get_ctx_status(struct amdxdna_client *client,
 			tmp->preemptions = 0;
 			tmp->errors = 0;
 			tmp->priority = ctx->qos.priority;
+			tmp->instruction_mem = 0;
+			tmp->gops = 0;
+			tmp->egops = 0;
+			tmp->fps = 0;
+			tmp->latency = 0;
 
 			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;

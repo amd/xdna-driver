@@ -275,6 +275,11 @@ struct partition_info
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
+      new_entry.instruction_mem = entry.instruction_mem;
+      new_entry.qos.gops = entry.gops;
+      new_entry.qos.egops = entry.egops;
+      new_entry.qos.fps = entry.fps;
+      new_entry.qos.latency = entry.latency;
       output.push_back(std::move(new_entry));
     }
     return output;
@@ -308,6 +313,28 @@ struct pcie_id
     pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
 
     return pcie_id;
+  }
+};
+
+struct total_cols
+{
+  using result_type = query::total_cols::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_aie_metadata aie_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+      .buffer_size = sizeof(aie_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    return aie_metadata.cols;
   }
 };
 
@@ -1054,6 +1081,7 @@ initialize_query_table()
   emplace_func0_request<query::logic_uuids,                    default_value>();
   emplace_func0_request<query::pcie_bdf,                       bdf>();
   emplace_func0_request<query::pcie_id,                        pcie_id>();
+  emplace_func0_request<query::total_cols,                     total_cols>();
   emplace_sysfs_get<query::pcie_device>                        ("", "device");
   emplace_sysfs_get<query::pcie_express_lane_width>            ("", "link_width");
   emplace_sysfs_get<query::pcie_express_lane_width_max>        ("", "link_width_max");
