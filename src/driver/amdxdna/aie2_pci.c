@@ -909,11 +909,6 @@ static int aie2_get_ctx_status(struct amdxdna_client *client,
 			tmp->preemptions = 0;
 			tmp->errors = 0;
 			tmp->priority = ctx->qos.priority;
-			tmp->instruction_mem = 0;
-			tmp->gops = 0;
-			tmp->egops = 0;
-			tmp->fps = 0;
-			tmp->latency = 0;
 
 			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;

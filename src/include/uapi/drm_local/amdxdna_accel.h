@@ -420,11 +420,6 @@ struct amdxdna_drm_query_sensor {
  *               same partition.
  * @errors: The errors for this context.
  * @priority: Context priority
- * @instruction_mem: The size of the instruction BO in bytes.
- * @gops: Giga operations per second.
- * @egops: Effective giga operations per second.
- * @fps: Frames per second.
- * @latency: Frame response latency.
  */
 struct amdxdna_drm_query_ctx {
 	__u32 context_id;
@@ -438,11 +433,6 @@ struct amdxdna_drm_query_ctx {
 	__u64 preemptions;
 	__u64 errors;
 	__u64 priority;
-	__u64 instruction_mem;
-	__u64 gops;
-	__u64 egops;
-	__u64 fps;
-	__u64 latency;
 };
 
 /**

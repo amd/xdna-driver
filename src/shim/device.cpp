@@ -275,11 +275,6 @@ struct partition_info
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
-      new_entry.instruction_mem = entry.instruction_mem;
-      new_entry.qos.gops = entry.gops;
-      new_entry.qos.egops = entry.egops;
-      new_entry.qos.fps = entry.fps;
-      new_entry.qos.latency = entry.latency;
       output.push_back(std::move(new_entry));
     }
     return output;
