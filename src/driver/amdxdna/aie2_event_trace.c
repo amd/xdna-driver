@@ -22,6 +22,7 @@ struct event_trace_req_buf {
 	u64                      resp_timestamp;
 	u64                      sys_start_time;
 	u32                      dram_buffer_size;
+	u32			 msi_address;
 	int                      log_ch_irq;
 	bool                     enabled;
 };
@@ -41,8 +42,10 @@ struct trace_event_log_data {
 
 static void clear_event_trace_msix(struct amdxdna_dev_hdl *ndev)
 {
+	u64 iohub_ptr = ndev->event_trace_req->msi_address;
+
 	/* Clear the log buffer interrupt */
-	writel(0, (void *)((u64)ndev->mbox_base + (u64)LOG_BUF_MB_IOHUB_PTR));
+	writel(0, (void *)((u64)ndev->mbox_base + iohub_ptr));
 }
 
 static int aie2_is_event_trace_supported_on_dev(struct amdxdna_dev_hdl *ndev)
@@ -130,8 +133,9 @@ static void aie2_print_trace_event_log(struct amdxdna_dev_hdl *ndev)
 
 static void deffered_logging_work(struct work_struct *work)
 {
-	struct event_trace_req_buf *trace_rq = container_of(work, struct event_trace_req_buf, work);
+	struct event_trace_req_buf *trace_rq;
 
+	trace_rq = container_of(work, struct event_trace_req_buf, work);
 	aie2_print_trace_event_log(trace_rq->ndev);
 }
 
@@ -204,6 +208,8 @@ static void aie2_deregister_log_buf_irq_hdl(struct amdxdna_dev_hdl *ndev)
 
 	free_irq(req_buf->log_ch_irq, ndev);
 	kfree(req_buf->kern_log_buf);
+	req_buf->kern_log_buf = NULL;
+	req_buf->log_ch_irq = 0;
 }
 
 static int aie2_event_trace_alloc(struct amdxdna_dev_hdl *ndev)
@@ -283,6 +289,24 @@ static int aie2_stop_event_trace_send(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+int aie2_resume_event_trace(struct amdxdna_dev_hdl *ndev)
+{
+	struct event_trace_req_buf *req_buf = ndev->event_trace_req;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (!req_buf->buf)
+		return -ENOMEM;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	ret = aie2_start_event_trace(ndev, req_buf->dram_buffer_address,
+                                     req_buf->dram_buffer_size);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to start event trace, ret %d", ret);
+
+	return ret;
+}
+
 bool aie2_is_event_trace_enable(struct amdxdna_dev_hdl *ndev)
 {
 	if (ndev->event_trace_req)
@@ -294,6 +318,11 @@ void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,  struct start_event_
 {
 	ndev->event_trace_req->resp_timestamp = resp->current_timestamp;
 	ndev->event_trace_req->sys_start_time = ktime_get_ns() / 1000; /*Convert ns to us*/
+	ndev->event_trace_req->msi_address = resp->msi_address & 0x00FFFFFF;
+
+	if(ndev->event_trace_req->log_ch_irq)
+		return;
+
 	aie2_register_log_buf_irq_hdl(ndev, resp->msi_idx);
 }
 
@@ -301,6 +330,10 @@ void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev)
 {
 	ndev->event_trace_req->resp_timestamp = 0;
 	ndev->event_trace_req->sys_start_time = 0;
+
+	if(!ndev->event_trace_req->log_ch_irq)
+		return;
+
 	aie2_deregister_log_buf_irq_hdl(ndev);
 }
 
@@ -348,9 +381,13 @@ int aie2_event_trace_init(struct amdxdna_dev_hdl *ndev)
 	if (!req_buf)
 		return -ENOMEM;
 
-	req_buf->ndev = ndev;
-	req_buf->enabled = false;
-	ndev->event_trace_req = req_buf;
+	ndev->event_trace_req         = req_buf;
+	req_buf->dram_buffer_size     = 0;
+	req_buf->dram_buffer_address  = 0;
+	req_buf->log_ch_irq           = 0;
+	req_buf->enabled              = false;
+	req_buf->ndev                 = ndev;
+	req_buf->buf                  = NULL;
 
 	return 0;
 }

@@ -367,6 +367,7 @@ void aie2_event_trace_fini(struct amdxdna_dev_hdl *ndev);
 void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev, struct start_event_trace_resp *resp);
 void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev);
 void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state);
+int aie2_resume_event_trace(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_message.c */
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev);
