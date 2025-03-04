@@ -186,6 +186,8 @@ std::unique_ptr<xrt_core::shared_handle>
 fence::
 share() const
 {
+  std::lock_guard<std::mutex> guard(m_lock);
+
   if (m_state != initial_state)
     shim_err(-EINVAL, "Can't share fence not at initial state.");
 
