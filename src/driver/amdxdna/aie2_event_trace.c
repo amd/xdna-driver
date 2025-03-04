@@ -250,7 +250,7 @@ static int aie2_start_event_trace_send(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ret = aie2_start_event_trace(ndev, req_buf->dram_buffer_address,
 				     req_buf->dram_buffer_size);
 	if (ret) {
@@ -272,7 +272,7 @@ static int aie2_stop_event_trace_send(struct amdxdna_dev_hdl *ndev)
 		return 0;
 	}
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ret = aie2_stop_event_trace(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to stop event trace, ret %d", ret);

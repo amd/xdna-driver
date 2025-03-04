@@ -31,7 +31,7 @@ aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 	if (!ndev->mgmt_chann)
 		return -ENODEV;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
 		xdna_mailbox_stop_channel(ndev->mgmt_chann);
@@ -1008,6 +1008,9 @@ int aie2_unregister_pdis(struct amdxdna_ctx *ctx)
 	int num_cus = ctx->cus->num_cus;
 	struct ctx_pdi *pdi;
 	int ret, i;
+
+	if (!ctx->priv->pdi_infos)
+		return 0;
 
 	req.num_pdi = 1;
 	for (i = 0; i < num_cus; i++) {

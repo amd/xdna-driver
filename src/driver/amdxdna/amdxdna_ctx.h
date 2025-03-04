@@ -9,7 +9,7 @@
 #include <linux/bitfield.h>
 #include <linux/kref.h>
 #include <linux/list.h>
-#include <linux/wait.h>
+#include <linux/workqueue.h>
 #include <drm/drm_drv.h>
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
@@ -106,46 +106,23 @@ struct amdxdna_ctx {
 	u32				umq_bo;
 	u32				log_buf_bo;
 	u32				doorbell_offset;
-/*
- * Set CTX_STATE_CONNECTED bit means context is associated
- * with firmware context
- */
-#define CTX_STATE_CONNECTED	BIT(0)
-/*
- * Set CTX_STATE_READY bit means context is ready
- * to accept commands
- */
-#define CTX_STATE_READY		BIT(1)
-/*
- * Set CTX_STATE_DEAD bit means context marked as dead by TDR.
- */
-#define CTX_STATE_DEAD		BIT(2)
-/*
- * Set CTX_STATE_CONNECTING bit means context is run queue selected this context
- * to connect soon.
- */
-#define CTX_STATE_CONNECTING	BIT(3)
-	u32				status;
 
 	struct amdxdna_qos_info		     qos;
 	struct amdxdna_ctx_param_config_cu *cus;
 
-	/* Counter for pending job */
-	atomic64_t			job_pending_cnt;
 	/* Submitted, completed, freed job counter */
 	u64				submitted;
 	u64				completed ____cacheline_aligned_in_smp;
 	/* Counter for freed job */
 	atomic64_t			job_free_cnt;
-	/* For TDR worker to keep last completed. low frequency update */
-	u64				tdr_last_completed;
+	/* For context runqueue to keep last completed. low frequency update */
+	u64				last_completed;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
 
-	/* For context runqueue */
 	struct list_head		entry;
-	wait_queue_head_t		connect_waitq;
-	u32				idle_cnt;
+	struct work_struct		dispatch_work;
+	struct work_struct		yield_work;
 };
 
 #define drm_job_to_xdna_job(j) \
@@ -250,7 +227,8 @@ amdxdna_cmd_get_cu_idx(struct amdxdna_gem_obj *abo)
 	return cu_idx;
 }
 
-static inline u32 amdxdna_ctx_col_map(struct amdxdna_ctx *ctx)
+static inline u32
+amdxdna_ctx_col_map(struct amdxdna_ctx *ctx)
 {
 	return GENMASK(ctx->start_col + ctx->num_col - 1,
 		       ctx->start_col);

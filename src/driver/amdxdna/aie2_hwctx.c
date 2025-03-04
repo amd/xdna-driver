@@ -40,7 +40,7 @@ static int aie2_alloc_resource(struct amdxdna_ctx *ctx)
 
 	xrs_req->rid = (uintptr_t)ctx;
 
-	ret = xrs_allocate_resource(xdna->xrs_hdl, xrs_req, ctx);
+	ret = xrs_allocate_resource(xdna->dev_handle->xrs_hdl, xrs_req, ctx);
 	if (ret)
 		XDNA_ERR(xdna, "Allocate AIE resource failed, ret %d", ret);
 
@@ -54,7 +54,7 @@ static void aie2_release_resource(struct amdxdna_ctx *ctx)
 	int ret;
 
 	xdna = ctx->client->xdna;
-	ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)ctx);
+	ret = xrs_release_resource(xdna->dev_handle->xrs_hdl, (uintptr_t)ctx);
 	if (ret)
 		XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
 }
@@ -68,14 +68,10 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	int ret;
 
 	ndev = xdna->dev_handle;
-	if (ndev->hwctx_limit == ndev->hwctx_cnt) {
-		XDNA_DBG(xdna, "Exceed hardware context limit");
-		return -EAGAIN;
-	}
-
 	sched = &ctx->priv->sched;
 	heap = ctx->priv->heap;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ret = drm_sched_init(sched, &sched_ops, ctx->priv->submit_wq,
 			     DRM_SCHED_PRIORITY_COUNT,
 			     CTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT,
@@ -115,7 +111,6 @@ skip:
 		goto release_resource;
 	}
 
-	ctx->status |= FIELD_PREP(CTX_STATE_CONNECTED, 1);
 	ndev->hwctx_cnt++;
 	return 0;
 
@@ -132,17 +127,12 @@ void aie2_hwctx_stop(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 
-	if (!FIELD_GET(CTX_STATE_CONNECTED, ctx->status)) {
-		XDNA_DBG(ctx->client->xdna, "%s was stopped, skip", ctx->name);
-		return;
-	}
-
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_handle->aie2_lock));
 	drm_sched_entity_destroy(&ctx->priv->entity);
 	aie2_release_resource(ctx);
 	wait_event(ctx->priv->job_free_waitq,
 		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
 	drm_sched_fini(&ctx->priv->sched);
-	ctx->status &= ~CTX_STATE_CONNECTED;
 	xdna->dev_handle->hwctx_cnt--;
 }
 

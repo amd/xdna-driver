@@ -720,13 +720,13 @@ std::vector<test_case> test_list {
   test_case{ "Multi context IO test 1 (npu4)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2 }
   },
-  test_case{ "Multi context IO test 1 (npu4)", {},
+  test_case{ "Multi context IO test 2 (npu4)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 4 }
   },
-  test_case{ "Multi context IO test 1 (npu4)", {},
+  test_case{ "Multi context IO test 3 (npu4)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 16 }
   },
-  test_case{ "Multi context IO test 1 (npu4)", {},
+  test_case{ "Multi context IO test 4 (npu4)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 20 }
   },
   test_case{ "Create and destroy devices", {},

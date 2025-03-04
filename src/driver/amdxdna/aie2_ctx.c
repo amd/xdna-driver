@@ -75,12 +75,12 @@ void aie2_dump_ctx(struct amdxdna_client *client)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
+	int idx;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_for_each_ctx(client, ctx_id, ctx) {
-		ctx->status |= FIELD_PREP(CTX_STATE_DEAD, 1);
+	idx = srcu_read_lock(&client->ctx_srcu);
+	amdxdna_for_each_ctx(client, ctx_id, ctx)
 		aie2_ctx_dump(xdna, ctx);
-	}
+	srcu_read_unlock(&client->ctx_srcu, idx);
 }
 
 static void aie2_ctx_wait_for_idle(struct amdxdna_ctx *ctx)
@@ -95,7 +95,7 @@ static void aie2_ctx_wait_for_idle(struct amdxdna_ctx *ctx)
 	dma_fence_put(fence);
 }
 
-void aie2_ctx_disconnect(struct amdxdna_ctx *ctx)
+void aie2_ctx_disconnect(struct amdxdna_ctx *ctx, bool wait)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 
@@ -104,11 +104,11 @@ void aie2_ctx_disconnect(struct amdxdna_ctx *ctx)
 	 * break the system. aie2_hwctx_stop() will destroy mailbox
 	 * and abort all commands.
 	 */
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	aie2_ctx_wait_for_idle(ctx);
-	ctx->status &= ~CTX_STATE_READY;
+	if (wait)
+		aie2_ctx_wait_for_idle(ctx);
+	mutex_lock(&xdna->dev_handle->aie2_lock);
 	aie2_hwctx_stop(ctx);
-	XDNA_DBG(xdna, "Stopped %s", ctx->name);
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
 }
 
 int aie2_ctx_connect(struct amdxdna_ctx *ctx)
@@ -116,18 +116,13 @@ int aie2_ctx_connect(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	int ret;
 
-	/*
-	 * The resume path cannot guarantee that mailbox channel can be
-	 * regenerated. If this happen, when submit message to this
-	 * mailbox channel, error will return.
-	 */
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	if (!ctx->cus)
 		return -EINVAL;
 
+	mutex_lock(&xdna->dev_handle->aie2_lock);
 	ret = aie2_hwctx_start(ctx);
 	if (ret)
-		return ret;
+		goto unlock_and_err;
 
 #ifdef AMDXDNA_DEVEL
 	if (priv_load) {
@@ -147,14 +142,13 @@ int aie2_ctx_connect(struct amdxdna_ctx *ctx)
 #ifdef AMDXDNA_DEVEL
 skip_config_cu:
 #endif
-	ctx->status |= FIELD_PREP(CTX_STATE_READY, 1);
-	XDNA_DBG(xdna, "%s connected, status 0x%x", ctx->name, ctx->status);
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	return 0;
 
 failed:
 	aie2_hwctx_stop(ctx);
-	XDNA_ERR(xdna, "Failed to connect %s status 0x%x ret %d",
-		 ctx->name, ctx->status, ret);
+unlock_and_err:
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	return ret;
 }
 
@@ -172,6 +166,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	trace_xdna_job(&job->base, ctx->name, "signaling fence", job->seq, job->opcode);
 	job->job_done = true;
 	dma_fence_signal(fence);
+	aie2_rq_yield(ctx);
 	idx = get_job_idx(job->seq);
 	ctx->priv->pending[idx] = NULL;
 	up(&job->ctx->priv->job_sem);
@@ -564,11 +559,20 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 		goto free_wq;
 	}
 
-	amdxdna_rq_add(&xdna->ctx_rq, ctx);
+	ret = aie2_rq_add(&xdna->dev_handle->ctx_rq, ctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Add ctx %s failed, ret %d", ctx->name, ret);
+		goto destroy_syncobj;
+	}
+	init_rwsem(&priv->io_sem);
+	atomic64_set(&priv->job_pending_cnt, 0);
+	init_waitqueue_head(&priv->connect_waitq);
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
 
+destroy_syncobj:
+	aie2_ctx_syncobj_destroy(ctx);
 free_wq:
 	destroy_workqueue(priv->submit_wq);
 free_cmd_bufs:
@@ -592,8 +596,8 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	int idx;
 
-	aie2_ctx_wait_for_idle(ctx);
-	amdxdna_rq_del(&xdna->ctx_rq, ctx);
+	aie2_rq_del(&xdna->dev_handle->ctx_rq, ctx);
+
 	destroy_workqueue(ctx->priv->submit_wq);
 	aie2_ctx_syncobj_destroy(ctx);
 	for (idx = 0; idx < ARRAY_SIZE(ctx->priv->cmd_buf); idx++)
@@ -601,8 +605,11 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 	amdxdna_gem_unpin(ctx->priv->heap);
 	drm_gem_object_put(to_gobj(ctx->priv->heap));
 #ifdef AMDXDNA_DEVEL
-	if (priv_load)
+	if (priv_load) {
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		aie2_unregister_pdis(ctx);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
+	}
 #endif
 
 	XDNA_DBG(xdna, "%s total completed jobs %lld",
@@ -643,7 +650,9 @@ static int aie2_ctx_cu_config(struct amdxdna_ctx *ctx, void *buf, u32 size)
 
 #ifdef AMDXDNA_DEVEL
 	if (priv_load) {
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_register_pdis(ctx);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		if (ret) {
 			XDNA_ERR(xdna, "Register PDIs failed, ret %d", ret);
 			goto free_cus;
@@ -843,7 +852,6 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
 	struct dma_fence_chain *chain;
-	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_gem_obj *abo;
 	unsigned long timeout = 0;
 	int ret, i;
@@ -854,37 +862,22 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		return ret;
 	}
 
-	atomic64_inc(&ctx->job_pending_cnt);
-	ret = amdxdna_rq_wait_for_run(&xdna->ctx_rq, ctx);
+	ret = aie2_rq_submit_enter(&xdna->dev_handle->ctx_rq, ctx);
 	if (ret) {
-		XDNA_ERR(xdna, "Wait for ctx run failed %d", ret);
-		goto up_sem;
+		XDNA_ERR(xdna, "Submit enter failed, ret %d", ret);
+		goto up_job_sem;
 	}
 
 	chain = dma_fence_chain_alloc();
 	if (!chain) {
-		XDNA_ERR(xdna, "Alloc fence chain failed");
 		ret = -ENOMEM;
-		goto up_sem;
-	}
-
-	ndev = xdna->dev_handle;
-	down_read(&ndev->recover_lock);
-	if (!FIELD_GET(CTX_STATE_READY, ctx->status)) {
-		XDNA_ERR(xdna, "Context is not ready");
-		ret = -EINVAL;
-		goto unlock_recover;
-	}
-
-	if (FIELD_GET(CTX_STATE_DEAD, ctx->status)) {
-		ret = -ENODEV;
-		goto unlock_recover;
+		goto rq_yield;
 	}
 
 	ret = drm_sched_job_init(&job->base, &ctx->priv->entity, 1, ctx);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM job init failed, ret %d", ret);
-		goto unlock_recover;
+		goto free_chain;
 	}
 
 	ret = aie2_add_job_dependency(job, syncobj_hdls, syncobj_points, syncobj_cnt);
@@ -946,7 +939,7 @@ retry:
 
 	up_read(&xdna->notifier_lock);
 	amdxdna_unlock_objects(job, &acquire_ctx);
-	up_read(&ndev->recover_lock);
+	aie2_rq_submit_exit(ctx);
 
 	aie2_job_put(job);
 
@@ -954,11 +947,12 @@ retry:
 
 cleanup_job:
 	drm_sched_job_cleanup(&job->base);
-unlock_recover:
-	up_read(&ndev->recover_lock);
+free_chain:
 	dma_fence_chain_free(chain);
-up_sem:
-	atomic64_dec(&ctx->job_pending_cnt);
+rq_yield:
+	aie2_rq_yield(ctx);
+	aie2_rq_submit_exit(ctx);
+up_job_sem:
 	up(&ctx->priv->job_sem);
 	job->job_done = true;
 	return ret;
