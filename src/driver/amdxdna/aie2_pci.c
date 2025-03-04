@@ -893,7 +893,7 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 		return -ENOMEM;
 
 	sensor->type = AMDXDNA_SENSOR_TYPE_POWER;
-	sensor->input = 1234; /* TODO: query the device and get the power data */
+	sensor->input = __UINT32_MAX__; /* TODO: query the device and get the power data */
 	sensor->unitm = -3; /* in milliwatts */
 	snprintf(sensor->label, sizeof(sensor->label), "Total Power");
 	snprintf(sensor->units, sizeof(sensor->units), "mW");
