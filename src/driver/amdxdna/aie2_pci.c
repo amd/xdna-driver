@@ -289,6 +289,15 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	if (!aie2_is_event_trace_enable(ndev))
+		return 0;
+
+	ret = aie2_resume_event_trace(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Resume event trace failed");
+		return ret;
+	}
+
 	return 0;
 }
 
