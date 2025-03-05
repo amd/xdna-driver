@@ -621,6 +621,9 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 		rq->hwctx_limit = ndev->priv->hwctx_limit;
 	XDNA_DBG(xdna, "Maximum limit %d virtual context(s)", rq->ctx_limit);
 	XDNA_DBG(xdna, "Maximum limit %d hardware context(s)", rq->hwctx_limit);
+	/* Allow user get final values */
+	context_limit = rq->ctx_limit;
+	hwctx_limit = rq->hwctx_limit;
 
 	if (!rq->ctx_limit || !rq->hwctx_limit) {
 		XDNA_ERR(xdna, "Zero context or hwctx limit");
