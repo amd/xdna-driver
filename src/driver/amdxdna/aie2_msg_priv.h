@@ -386,9 +386,6 @@ struct async_event_msg_resp {
 #define TRACE_EVENT_BUF_SIZE				0x2000
 #define TRACE_EVENT_BUF_METADATA_SIZE			0x40
 #define MAX_ONE_TIME_LOG_INFO_LEN			16
-/* FIXME: To be deleted */
-#define MPNPU_IOHUB_INT_27_ALIAS			0xD7008
-#define LOG_BUF_MB_IOHUB_PTR				MPNPU_IOHUB_INT_27_ALIAS
 #define LOG_RB_SIZE	(TRACE_EVENT_BUF_SIZE - TRACE_EVENT_BUF_METADATA_SIZE)
 
 enum event_trace_destination {
@@ -415,6 +412,7 @@ struct start_event_trace_resp {
 	enum aie2_msg_status status;
 	u32 msi_idx;
 	u64 current_timestamp;
+	u32 msi_address;
 } __packed;
 
 struct stop_event_trace_req {
