@@ -200,7 +200,7 @@ static int amdxdna_pmops_suspend(struct device *dev)
 static int amdxdna_pmops_resume(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	int ret;
+	int ret = 0;
 
 	if (xdna->dev_info->ops->resume)
 		ret = xdna->dev_info->ops->resume(xdna);
