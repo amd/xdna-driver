@@ -32,6 +32,22 @@ To run AI applications, your system needs
 
 ## Linux compilation and installation
 
+### Ubuntu 24.10
+
+Ubuntu 24.10 already includes Linux kernel 6.11 that meets the requirements for the xdna-driver. 
+
+### Ubuntu 24.04
+
+If you are using Ubuntu 24.04 you may need to update the Linux kernel. You can update to Linux 6.11 by installing the Hardware Enablement (HWE) stack:
+
+  ```bash
+  sudo apt update 
+  sudo apt install --install-recommends linux-generic-hwe-24.04
+  sudo reboot
+  ```
+
+### Ubuntu 22.04
+
 Since Linux v6.10 offically supports AMD IOMMU SVA, we can work with upstream Linux kernel source.
 If your system has Linux v6.10 or above installed, check if `CONFIG_AMD_IOMMU` and `CONFIG_DRM_ACCEL` are set. If not, the system is not good for XDNA driver.
 
