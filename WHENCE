@@ -15,9 +15,10 @@ File:
 	tools/bins/17f0_11/validate.xclbin
 	tools/bins/17f0_20/validate.xclbin
 	tools/bins/elf/nop.elf
-	tools/bins/elf/aie_reconfig_overhead.elf
-	tools/bins/elf/df_bw.elf
-	tools/bins/elf/tct_1col.elf
-	tools/bins/elf/tct_4col.elf
+	tools/bins/17f0_10/nop.elf
+	tools/bins/17f0_10/aie_reconfig_overhead.elf
+	tools/bins/17f0_10/df_bw.elf
+	tools/bins/17f0_10/tct_1col.elf
+	tools/bins/17f0_10/tct_4col.elf
 
 Licence: Redistributable. See LICENSE.amdnpu for details.

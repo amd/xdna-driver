@@ -871,6 +871,9 @@ struct xclbin_name
     case xrt_core::query::xclbin_name::type::validate_elf:
       xclbin_name = "validate_elf.xclbin";
       break;
+    case xrt_core::query::xclbin_name::type::gemm:
+      xclbin_name = "gemm.xclbin";
+      break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
@@ -927,7 +930,7 @@ struct elf_name
     if (key != key_type::elf_name)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    auto fmt = boost::format("bins/elf/%s");
+    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
 
     std::string elf_file;
     switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
@@ -946,9 +949,15 @@ struct elf_name
     case xrt_core::query::elf_name::type::aie_reconfig_overhead: 
       elf_file = "aie_reconfig_overhead.elf";
       break;
+    case xrt_core::query::elf_name::type::gemm_int8:
+      elf_file = "gemm_int8.elf";
+      break;
     }
 
-    return boost::str(fmt % elf_file);
+    return boost::str(boost::format("bins/%04x_%02x/%s")
+      % pcie_id.device_id
+      % static_cast<uint16_t>(pcie_id.revision_id)
+      % elf_file);
   }
 };
 
