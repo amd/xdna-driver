@@ -1,0 +1,52 @@
+name: Build XDNA Driver and XRT Packages
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubuntu_version: ["24.04", "24.10"]
+
+    container:
+      image: ubuntu:${{ matrix.ubuntu_version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          apt update && apt install -y git build-essential cmake ninja-build
+          ./tools/amdxdna_deps.sh
+
+      - name: Build XRT
+        run: |
+          cd xrt/build
+          ./build.sh -npu -opt
+
+      - name: Build XDNA Driver
+        run: |
+          cd build
+          ./build.sh -release
+          ./build.sh -package
+
+      - name: Create tar package
+        run: |
+          cd xrt/build/Release
+          tar -czvf ../../xdna_driver_xrt_${{ matrix.ubuntu_version }}.tar.gz *base*.deb
+          cd ../../build/Release
+          tar -rzf ../../xdna_driver_xrt_${{ matrix.ubuntu_version }}.tar.gz *.deb
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xdna-driver-xrt-${{ matrix.ubuntu_version }}
+          path: xdna_driver_xrt_${{ matrix.ubuntu_version }}.tar.gz
+
