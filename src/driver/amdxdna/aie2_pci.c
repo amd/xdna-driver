@@ -350,6 +350,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	}
 
 	mutex_lock(&ndev->aie2_lock);
+	aie2_pm_fini(ndev);
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
@@ -429,15 +430,15 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto destroy_mbox;
 	}
 
-	ret = aie2_pm_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "failed to init pm, ret %d", ret);
-		goto destroy_mgmt_chann;
-	}
-
 	ret = aie2_mgmt_fw_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "initial mgmt firmware failed, ret %d", ret);
+		goto destroy_mgmt_chann;
+	}
+
+	ret = aie2_pm_init(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to init pm, ret %d", ret);
 		goto destroy_mgmt_chann;
 	}
 
