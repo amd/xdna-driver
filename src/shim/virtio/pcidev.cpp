@@ -52,7 +52,7 @@ namespace shim_xdna {
 
 pdev_virtio::
 pdev_virtio(std::shared_ptr<const drv_virtio> driver, std::string sysfs_name)
-  : pdev(driver, sysfs_name)
+  : pdev(driver, sysfs_name), m_shmem(nullptr)
 {
   shim_debug("Created VIRTIO pcidev over %s", sysfs_name.c_str());
 }
