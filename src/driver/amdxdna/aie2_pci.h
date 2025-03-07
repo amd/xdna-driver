@@ -395,6 +395,7 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_pm.c */
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
+void aie2_pm_fini(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 
 static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
