@@ -29,7 +29,9 @@ smi_xdna() : smi_base()
     {"aie-partitions", "AIE partition information", "common"},
     {"host", "Host information", "common"},
     {"platform", "Platforms flashed on the device", "common"},
-    {"telemetry", "Telemetry data for the device", "hidden"}
+    {"telemetry", "Telemetry data for the device", "hidden"},
+    {"preemption", "Preemption telemetry data for the device", "hidden"},
+    {"clocks", "Clock frequency information", "hidden"}
   };
 }
   
