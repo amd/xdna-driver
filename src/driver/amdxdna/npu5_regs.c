@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
  */
 
 #include "npu4_family.h"
@@ -13,7 +13,7 @@ const struct amdxdna_dev_priv npu5_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu5_info = {
-	.vbnv              = "RyzenAI-npu5",
+	.vbnv              = "NPU Strix Halo",
 	.dev_priv          = &npu5_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };
