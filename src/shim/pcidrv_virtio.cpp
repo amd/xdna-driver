@@ -21,7 +21,7 @@ std::string
 drv_virtio::
 name() const
 {
-  return "virtio-pci";
+  return "amdxdna-virtgpu";
 }
 
 std::string
