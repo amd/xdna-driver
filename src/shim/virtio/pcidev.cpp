@@ -5,7 +5,6 @@
 #include "device.h"
 #include "pcidev.h"
 #include "amdxdna_proto.h"
-#include "virglrenderer_hw.h"
 
 #include <poll.h>
 #include <drm/virtgpu_drm.h>
@@ -48,38 +47,38 @@ hcall_no_resp(const shim_xdna::pdev& dev, void *in_buf, size_t in_size)
 {
   drm_virtgpu_execbuffer exec = {};
 
-	exec.command = reinterpret_cast<uintptr_t>(in_buf);
-	exec.size = in_size;
-	dev.ioctl(DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
+  exec.command = reinterpret_cast<uintptr_t>(in_buf);
+  exec.size = in_size;
+  dev.ioctl(DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
 }
 
 void
 sync_wait(int fd, int timeout)
 {
-	struct timespec poll_start, poll_end;
-	struct pollfd fds = {0};
-	int ret;
+  struct timespec poll_start, poll_end;
+  struct pollfd fds = {0};
+  int ret;
 
-	fds.fd = fd;
-	fds.events = POLLIN;
-	while (true) {
-		clock_gettime(CLOCK_MONOTONIC, &poll_start);
-		ret = poll(&fds, 1, timeout);
-		clock_gettime(CLOCK_MONOTONIC, &poll_end);
+  fds.fd = fd;
+  fds.events = POLLIN;
+  while (true) {
+    clock_gettime(CLOCK_MONOTONIC, &poll_start);
+    ret = poll(&fds, 1, timeout);
+    clock_gettime(CLOCK_MONOTONIC, &poll_end);
 
-		if (ret > 0) {
-			if (fds.revents & (POLLERR | POLLNVAL))
+    if (ret > 0) {
+      if (fds.revents & (POLLERR | POLLNVAL))
         shim_err(-EINVAL, "failed to wait for host call response");
       break;
-		}
+    }
     if (ret == 0)
       shim_err(-ETIME, "wait for host call response timeout");
     if (ret < 0 && errno != EINTR && errno != EAGAIN)
       shim_err(-errno, "failed to wait for host call response");
 
-		timeout -= (poll_end.tv_sec - poll_start.tv_sec) * 1000 +
-			(poll_end.tv_nsec - poll_end.tv_nsec) / 1000000;
-	}
+    timeout -= (poll_end.tv_sec - poll_start.tv_sec) * 1000 +
+      (poll_end.tv_nsec - poll_end.tv_nsec) / 1000000;
+  }
 }
 
 void
@@ -88,11 +87,11 @@ hcall(const shim_xdna::pdev& dev, void *in_buf, size_t in_size)
   drm_virtgpu_execbuffer exec = {};
 
   exec.flags = VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX;
-	exec.command = reinterpret_cast<uintptr_t>(in_buf);
-	exec.size = in_size;
+  exec.command = reinterpret_cast<uintptr_t>(in_buf);
+  exec.size = in_size;
   exec.fence_fd = 0;
   exec.ring_idx = 1;
-	dev.ioctl(DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
+  dev.ioctl(DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
   sync_wait(exec.fence_fd, -1);
   close(exec.fence_fd);
 }
@@ -105,9 +104,9 @@ init_resp_buf(const shim_xdna::pdev& dev, uint32_t res_hdl)
 
   amdxdna_ccmd_init_req init_req = {};
 
-	init_req.hdr.cmd = AMDXDNA_CCMD_INIT;
-	init_req.hdr.len = sizeof(init_req);
-	init_req.rsp_res_id = res_hdl;
+  init_req.hdr.cmd = AMDXDNA_CCMD_INIT;
+  init_req.hdr.len = sizeof(init_req);
+  init_req.rsp_res_id = res_hdl;
   hcall_no_resp(dev, &init_req, sizeof(init_req));
 }
 
@@ -140,12 +139,12 @@ void
 set_virtgpu_context(const shim_xdna::pdev& dev)
 {
   struct drm_virtgpu_context_set_param params[] = {
-        { VIRTGPU_CONTEXT_PARAM_CAPSET_ID, VIRGL_RENDERER_CAPSET_DRM },
-        { VIRTGPU_CONTEXT_PARAM_NUM_RINGS, 64 },
+    { VIRTGPU_CONTEXT_PARAM_CAPSET_ID, 6 /* VIRGL_RENDERER_CAPSET_DRM */ },
+    { VIRTGPU_CONTEXT_PARAM_NUM_RINGS, 64 },
   };
   struct drm_virtgpu_context_init args = {
-     .num_params = 2,
-     .ctx_set_params = (uintptr_t)params,
+    .num_params = 2,
+    .ctx_set_params = (uintptr_t)params,
   };
 
   dev.ioctl(DRM_IOCTL_VIRTGPU_CONTEXT_INIT, &args);

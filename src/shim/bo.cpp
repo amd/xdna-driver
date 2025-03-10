@@ -136,9 +136,9 @@ type_to_name() const
 
 std::string
 to_hex_string(uint64_t num) {
-    std::stringstream ss;
-    ss << "0x" << std::hex << num;
-    return ss.str();
+  std::stringstream ss;
+  ss << "0x" << std::hex << num;
+  return ss.str();
 }
 
 std::string
@@ -249,8 +249,9 @@ bo(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_import(-1)
   , m_owner_ctx_id(ctx_id)
 {
+  // Device mem heap must align at 64MB boundary.
   if (m_type == AMDXDNA_BO_DEV_HEAP)
-    m_alignment = 64 * 1024 * 1024; // Device mem heap must align at 64MB boundary.
+    m_alignment = 64 * 1024 * 1024;
 }
 
 bo::
