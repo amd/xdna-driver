@@ -7,6 +7,7 @@
 #include "shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
 #include "core/common/trace.h"
+#include <drm/virtgpu_drm.h>
 
 namespace {
 
@@ -54,6 +55,12 @@ namespace {
       return "DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL";
     case DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT:
       return "DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT";
+    case DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB:
+      return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB";
+    case DRM_IOCTL_VIRTGPU_EXECBUFFER:
+      return "DRM_IOCTL_VIRTGPU_EXECBUFFER";
+    case DRM_IOCTL_VIRTGPU_MAP:
+      return "DRM_IOCTL_VIRTGPU_MAP";
     }
 
     return "UNKNOWN(" + std::to_string(cmd) + ")";

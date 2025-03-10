@@ -6,17 +6,6 @@
 
 namespace {
 
-void clflush_data(const void *data, size_t len)
-{
-  const int LINESIZE = 64;
-  const char *cur = (const char *)data;
-  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (LINESIZE - 1);
-  do {
-    shim_xdna::flush_cache_line(cur);
-    cur += LINESIZE;
-  } while (cur <= (const char *)lastline);
-}
-
 inline void
 mark_slot_invalid(volatile struct host_queue_packet *pkt)
 {
@@ -30,7 +19,7 @@ mark_slot_valid(volatile struct host_queue_packet *pkt)
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
   /* must flush this data to make cache coherence */
-  clflush_data((void *)&pkt->xrt_header.common_header, sizeof(pkt->xrt_header.common_header));
+  shim_xdna::clflush_data((void *)&pkt->xrt_header.common_header, 0, sizeof(pkt->xrt_header.common_header));
 }
 
 inline bool
@@ -382,7 +371,7 @@ fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size)
   hdr->common_header.count = size;
 
   /* must flush data to make cache coherence */
-  clflush_data((void *)(pkt->data), size);
+  clflush_data((void *)(pkt->data), 0, size);
 
   //comment this out, debug only
   //dump();

@@ -25,17 +25,19 @@ public:
   bo_virtio(const pdev& pdev, size_t size, int type);
 
 private:
+  uint32_t m_res_handle;
+
   bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, int type);
   
   uint32_t
-  alloc_drm_bo(const shim_xdna::pdev& dev, int type, size_t size) override;
+  alloc_drm_bo(int type, size_t size) override;
 
   void
-  get_drm_bo_info(const shim_xdna::pdev& dev, uint32_t boh, amdxdna_drm_get_bo_info* bo_info) override;
+  get_drm_bo_info(uint32_t boh, amdxdna_drm_get_bo_info* bo_info) override;
 
   void
-  free_drm_bo(const shim_xdna::pdev& dev, uint32_t boh) override;
+  free_drm_bo(uint32_t boh) override;
 };
 
 } // namespace shim_xdna
