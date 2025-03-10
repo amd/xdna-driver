@@ -67,14 +67,14 @@ uint64_t
 drm_bo_get_xdna_addr(const shim_xdna::pdev& dev, uint32_t resh, uint64_t align)
 {
   const shim_xdna::pdev_virtio& vdev = static_cast<const shim_xdna::pdev_virtio&>(dev);
-	amdxdna_ccmd_map_bo_req req = {};
-	amdxdna_ccmd_map_bo_rsp rsp = {};
+  amdxdna_ccmd_map_bo_req req = {};
+  amdxdna_ccmd_map_bo_rsp rsp = {};
 
   req.hdr.cmd = AMDXDNA_CCMD_MAP_BO;
-	req.hdr.len = sizeof(req);
-	req.hdr.rsp_off = 0;
-	req.res_id = resh;
-	req.alignment = align;
+  req.hdr.len = sizeof(req);
+  req.hdr.rsp_off = 0;
+  req.res_id = resh;
+  req.alignment = align;
   vdev.host_call(&req, sizeof(req), &rsp, sizeof(rsp));
   return rsp.iov_addr;
 }
