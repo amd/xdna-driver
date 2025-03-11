@@ -619,7 +619,7 @@ std::vector<test_case> test_list {
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test real kernel bad run", {},
-    TEST_NEGATIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_BAD_RUN, 1 }
+    TEST_NEGATIVE, skip_dev_filter, TEST_io, { IO_TEST_BAD_RUN, 1 }
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
