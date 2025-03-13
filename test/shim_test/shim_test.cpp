@@ -141,8 +141,8 @@ dev_filter_is_aie2(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
     return false;
-  auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu1_device_id || device_id == npu4_device_id;
+  auto pcie_id = device_query<query::pcie_id>(dev);
+  return pcie_id.device_id == npu1_device_id || pcie_id.device_id == npu4_device_id;
 }
 
 bool
@@ -150,8 +150,8 @@ dev_filter_is_aie4(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
     return false;
-  auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu3_device_id || device_id == npu3_device_id1;
+  auto pcie_id = device_query<query::pcie_id>(dev);
+  return pcie_id.device_id == npu3_device_id || pcie_id.device_id == npu3_device_id1;
 }
 
 bool
@@ -165,8 +165,8 @@ dev_filter_is_npu1(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
     return false;
-  auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu1_device_id;
+  auto pcie_id = device_query<query::pcie_id>(dev);
+  return pcie_id.device_id == npu1_device_id;
 }
 
 bool
@@ -174,8 +174,8 @@ dev_filter_is_npu4(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
     return false;
-  auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu4_device_id;
+  auto pcie_id = device_query<query::pcie_id>(dev);
+  return pcie_id.device_id == npu4_device_id;
 }
 
 // All test case runners
@@ -619,7 +619,7 @@ std::vector<test_case> test_list {
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test real kernel bad run", {},
-    TEST_NEGATIVE, skip_dev_filter, TEST_io, { IO_TEST_BAD_RUN, 1 }
+    TEST_NEGATIVE, dev_filter_is_npu1, TEST_io, { IO_TEST_BAD_RUN, 1 }
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
