@@ -12,6 +12,8 @@ File:
 	tools/bins/1640_00/validate.xclbin
 	tools/bins/17f0_10/validate.xclbin
 	tools/bins/17f0_10/validate_elf.xclbin
+	tools/bins/17f0_10/gemm.xclbin
+	tools/bins/17f0_10/gemm_elf.xclbin
 	tools/bins/17f0_11/validate.xclbin
 	tools/bins/17f0_20/validate.xclbin
 	tools/bins/elf/nop.elf
@@ -20,5 +22,6 @@ File:
 	tools/bins/17f0_10/df_bw.elf
 	tools/bins/17f0_10/tct_1col.elf
 	tools/bins/17f0_10/tct_4col.elf
+	tools/bins/17f0_10/gemm_int8.elf
 
 Licence: Redistributable. See LICENSE.amdnpu for details.
