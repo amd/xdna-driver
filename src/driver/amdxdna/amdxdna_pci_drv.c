@@ -12,7 +12,6 @@
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sysfs.h"
-#include "amdxdna_ctx_runqueue.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -20,10 +19,6 @@
 int autosuspend_ms = -1;
 module_param(autosuspend_ms, int, 0644);
 MODULE_PARM_DESC(autosuspend_ms, "runtime suspend delay in miliseconds. < 0: prevent it");
-
-uint context_limit;
-module_param(context_limit, uint, 0444);
-MODULE_PARM_DESC(context_limit, "Maximum number of context, 0 = Driver determine (Default)");
 
 /*
  *  There are platforms which share the same PCI device ID
@@ -107,33 +102,16 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->notifier_wq)
 		return -ENOMEM;
 
-	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->init(xdna);
-	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
 		goto destroy_notifier_wq;
 	}
 
-	if (context_limit)
-		xdna->ctx_limit = context_limit;
-	// FIXME: Remove below check later
-	if (!xdna->ctx_limit) {
-		XDNA_WARN(xdna, "Device doesn't define context limit");
-		xdna->ctx_limit = 32;
-	}
-	XDNA_DBG(xdna, "Maximum limit %d context(s)", xdna->ctx_limit);
-
-	ret = amdxdna_rq_init(&xdna->ctx_rq);
-	if (ret) {
-		XDNA_ERR(xdna, "Context runqueue init failed");
-		goto failed_dev_fini;
-	}
-
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
-		goto failed_rq_fini;
+		goto failed_dev_fini;
 	}
 
 	pm_runtime_set_autosuspend_delay(dev, autosuspend_ms);
@@ -146,7 +124,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
 		pm_runtime_forbid(dev);
-		goto failed_sysfs_fini;
+		goto failed_tdr_fini;
 	}
 
 	/* Debug fs needs to go after register DRM dev */
@@ -160,14 +138,11 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pm_runtime_put_autosuspend(dev);
 	return 0;
 
-failed_sysfs_fini:
+failed_tdr_fini:
+	amdxdna_tdr_stop(&xdna->tdr);
 	amdxdna_sysfs_fini(xdna);
-failed_rq_fini:
-	amdxdna_rq_fini(&xdna->ctx_rq);
 failed_dev_fini:
-	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
-	mutex_unlock(&xdna->dev_lock);
 destroy_notifier_wq:
 	destroy_workqueue(xdna->notifier_wq);
 	return ret;
@@ -182,7 +157,6 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	destroy_workqueue(xdna->notifier_wq);
 	amdxdna_tdr_stop(&xdna->tdr);
 	amdxdna_sysfs_fini(xdna);
-	amdxdna_rq_fini(&xdna->ctx_rq);
 
 	pm_runtime_get_noresume(dev);
 	pm_runtime_forbid(dev);
@@ -205,39 +179,20 @@ static void amdxdna_remove(struct pci_dev *pdev)
 		client = list_first_entry_or_null(&xdna->client_list,
 						  struct amdxdna_client, node);
 	}
+	mutex_unlock(&xdna->dev_lock);
 
 	xdna->dev_info->ops->fini(xdna);
-	mutex_unlock(&xdna->dev_lock);
 #ifdef AMDXDNA_DEVEL
 	ida_destroy(&xdna->pdi_ida);
 #endif
-}
-
-static int amdxdna_dev_suspend_nolock(struct amdxdna_dev *xdna)
-{
-	if (xdna->dev_info->ops->suspend)
-		xdna->dev_info->ops->suspend(xdna);
-
-	return 0;
-}
-
-static int amdxdna_dev_resume_nolock(struct amdxdna_dev *xdna)
-{
-	if (xdna->dev_info->ops->resume)
-		return xdna->dev_info->ops->resume(xdna);
-
-	return 0;
 }
 
 static int amdxdna_pmops_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
 
-	mutex_lock(&xdna->dev_lock);
-	amdxdna_rq_pause_all(&xdna->ctx_rq);
-
-	amdxdna_dev_suspend_nolock(xdna);
-	mutex_unlock(&xdna->dev_lock);
+	if (xdna->dev_info->ops->suspend)
+		xdna->dev_info->ops->suspend(xdna);
 
 	return 0;
 }
@@ -245,46 +200,34 @@ static int amdxdna_pmops_suspend(struct device *dev)
 static int amdxdna_pmops_resume(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	int ret;
+	int ret = 0;
 
-	XDNA_INFO(xdna, "firmware resuming...");
-	mutex_lock(&xdna->dev_lock);
-	ret = amdxdna_dev_resume_nolock(xdna);
-	if (ret) {
-		XDNA_ERR(xdna, "resume NPU firmware failed");
-		mutex_unlock(&xdna->dev_lock);
-		return ret;
-	}
+	if (xdna->dev_info->ops->resume)
+		ret = xdna->dev_info->ops->resume(xdna);
 
-	XDNA_INFO(xdna, "context resuming...");
-	amdxdna_rq_run_all(&xdna->ctx_rq);
-	mutex_unlock(&xdna->dev_lock);
-
-	return 0;
+	XDNA_DBG(xdna, "Resume done ret: %d", ret);
+	return ret;
 }
 
 static int amdxdna_rpmops_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	int ret;
 
-	mutex_lock(&xdna->dev_lock);
 	WARN_ON(!list_empty(&xdna->client_list));
-	ret = amdxdna_dev_suspend_nolock(xdna);
-	mutex_unlock(&xdna->dev_lock);
+	if (xdna->dev_info->ops->suspend)
+		xdna->dev_info->ops->suspend(xdna);
 
-	XDNA_DBG(xdna, "Runtime suspend done ret: %d", ret);
-	return ret;
+	XDNA_DBG(xdna, "Runtime suspend done");
+	return 0;
 }
 
 static int amdxdna_rpmops_resume(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	int ret;
+	int ret = 0;
 
-	mutex_lock(&xdna->dev_lock);
-	ret = amdxdna_dev_resume_nolock(xdna);
-	mutex_unlock(&xdna->dev_lock);
+	if (xdna->dev_info->ops->resume)
+		ret = xdna->dev_info->ops->resume(xdna);
 
 	XDNA_DBG(xdna, "Runtime resume done ret: %d", ret);
 	return ret;

@@ -170,9 +170,7 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 		return -EOPNOTSUPP;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
-	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->get_aie_info(client, args);
-	mutex_unlock(&xdna->dev_lock);
 	return ret;
 }
 
@@ -187,10 +185,7 @@ static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struc
 		return -EOPNOTSUPP;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
-	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->set_aie_state(client, args);
-	mutex_unlock(&xdna->dev_lock);
-
 	return ret;
 }
 

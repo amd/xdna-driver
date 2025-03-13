@@ -15,7 +15,6 @@
 #include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
-#include "amdxdna_ctx_runqueue.h"
 #ifdef AMDXDNA_SHMEM
 #include "amdxdna_gem.h"
 #else
@@ -36,9 +35,6 @@
 #define tdr_to_xdna_dev(t) \
 	((struct amdxdna_dev *)container_of(t, struct amdxdna_dev, tdr))
 
-#define ctx_rq_to_xdna_dev(r) \
-	((struct amdxdna_dev *)container_of(r, struct amdxdna_dev, ctx_rq))
-
 extern const struct drm_driver amdxdna_drm_drv;
 
 struct amdxdna_dev;
@@ -52,6 +48,7 @@ struct amdxdna_dev_priv;
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);
 	void (*fini)(struct amdxdna_dev *xdna);
+	bool (*detect)(struct amdxdna_dev *xdna);
 	void (*recover)(struct amdxdna_dev *xdna, bool dump_only);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
@@ -61,8 +58,6 @@ struct amdxdna_dev_ops {
 	/* Below device ops are called by IOCTL */
 	int (*ctx_init)(struct amdxdna_ctx *ctx);
 	void (*ctx_fini)(struct amdxdna_ctx *ctx);
-	int (*ctx_connect)(struct amdxdna_ctx *ctx);
-	void (*ctx_disconnect)(struct amdxdna_ctx *ctx);
 	int (*ctx_config)(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 	int (*cmd_submit)(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
@@ -118,9 +113,9 @@ struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
 	const struct amdxdna_dev_info	*dev_info;
-	void				*xrs_hdl;
 
-	struct mutex			dev_lock; /* protect client list, xrs_hdl */
+	/* This protects client list */
+	struct mutex			dev_lock;
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
 	struct amdxdna_tdr		tdr;
@@ -129,10 +124,6 @@ struct amdxdna_dev {
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
-
-	u32				ctx_cnt;
-	u32				ctx_limit;
-	struct amdxdna_ctx_rq		ctx_rq;
 };
 
 struct amdxdna_stats {

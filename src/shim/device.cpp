@@ -311,6 +311,28 @@ struct pcie_id
   }
 };
 
+struct total_cols
+{
+  using result_type = query::total_cols::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_aie_metadata aie_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+      .buffer_size = sizeof(aie_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    return aie_metadata.cols;
+  }
+};
+
 struct performance_mode
 {
   using result_type = query::performance_mode::result_type;
@@ -1084,6 +1106,7 @@ initialize_query_table()
   emplace_func0_request<query::logic_uuids,                    default_value>();
   emplace_func0_request<query::pcie_bdf,                       bdf>();
   emplace_func0_request<query::pcie_id,                        pcie_id>();
+  emplace_func0_request<query::total_cols,                     total_cols>();
   emplace_sysfs_get<query::pcie_device>                        ("", "device");
   emplace_sysfs_get<query::pcie_express_lane_width>            ("", "link_width");
   emplace_sysfs_get<query::pcie_express_lane_width_max>        ("", "link_width_max");

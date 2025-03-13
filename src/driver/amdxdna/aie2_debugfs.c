@@ -185,13 +185,13 @@ static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
 	}
 
 	if (!strncmp(input, "suspend", strlen("suspend"))) {
-		mutex_lock(&ndev->xdna->dev_lock);
+		mutex_lock(&ndev->aie2_lock);
 		ret = aie2_suspend_fw(ndev);
-		mutex_unlock(&ndev->xdna->dev_lock);
+		mutex_unlock(&ndev->aie2_lock);
 	} else if (!strncmp(input, "resume", strlen("resume"))) {
-		mutex_lock(&ndev->xdna->dev_lock);
+		mutex_lock(&ndev->aie2_lock);
 		ret = aie2_resume_fw(ndev);
-		mutex_unlock(&ndev->xdna->dev_lock);
+		mutex_unlock(&ndev->aie2_lock);
 	} else {
 		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
 		return -EINVAL;
@@ -226,12 +226,12 @@ static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	mutex_lock(&ndev->xdna->dev_lock);
+	mutex_lock(&ndev->aie2_lock);
 	ndev->dft_dpm_level = val;
 	if (ndev->pw_mode != POWER_MODE_DEFAULT)
 		val = ndev->dpm_level;
 	ret = ndev->priv->hw_ops.set_dpm(ndev, val);
-	mutex_unlock(&ndev->xdna->dev_lock);
+	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Setting dpm_level:%d failed, ret: %d", val, ret);
 		return ret;
@@ -276,9 +276,9 @@ static ssize_t aie2_event_trace_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	mutex_lock(&ndev->xdna->dev_lock);
+	mutex_lock(&ndev->aie2_lock);
 	aie2_assign_event_trace_state(ndev, state);
-	mutex_unlock(&ndev->xdna->dev_lock);
+	mutex_unlock(&ndev->aie2_lock);
 
 	return len;
 }
@@ -432,7 +432,7 @@ static ssize_t aie2_dbgfs_nputest(struct file *file, const char __user *ptr,
 	}
 	XDNA_DBG(ndev->xdna, "Got %d parameters\n", argc);
 
-	mutex_lock(&ndev->xdna->dev_lock);
+	mutex_lock(&ndev->aie2_lock);
 	/* args[0] is test case ID */
 	switch (args[0]) {
 	case 1:
@@ -447,7 +447,7 @@ static ssize_t aie2_dbgfs_nputest(struct file *file, const char __user *ptr,
 	default:
 		XDNA_ERR(ndev->xdna, "Unknown test case ID %d\n", args[0]);
 	}
-	mutex_unlock(&ndev->xdna->dev_lock);
+	mutex_unlock(&ndev->aie2_lock);
 
 free_and_out:
 	kfree(kern_buff);
@@ -540,9 +540,9 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 		return -ENOMEM;
 
 	drm_clflush_virt_range(buff, size); /* device can access */
-	mutex_lock(&xdna->dev_lock);
+	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_query_telemetry(ndev, type, dma_addr, size, NULL);
-	mutex_unlock(&xdna->dev_lock);
+	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
 		goto free_buf;

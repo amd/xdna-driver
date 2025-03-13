@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
  */
 
 #include <linux/kthread.h>
@@ -260,11 +260,11 @@ static void aie2_error_worker(struct work_struct *err_work)
 		return;
 	}
 
-	mutex_lock(&xdna->dev_lock);
+	mutex_lock(&xdna->dev_handle->aie2_lock);
 	/* Re-sent this event to firmware */
 	if (aie2_error_event_send(e))
 		XDNA_WARN(xdna, "Unable to register async event");
-	mutex_unlock(&xdna->dev_lock);
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
 }
 
 int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev)
@@ -273,7 +273,7 @@ int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev)
 	struct async_event *e;
 	int i, ret;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	for (i = 0; i < ndev->async_events->event_cnt; i++) {
 		e = &ndev->async_events->event[i];
 		ret = aie2_error_event_send(e);
@@ -289,11 +289,9 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_events *events;
 
+	drm_WARN_ON(&xdna->ddev, mutex_is_locked(&ndev->aie2_lock));
 	events = ndev->async_events;
-
-	mutex_unlock(&xdna->dev_lock);
 	destroy_workqueue(events->wq);
-	mutex_lock(&xdna->dev_lock);
 
 	dma_free_noncoherent(xdna->ddev.dev, events->size, events->buf,
 			     events->addr, DMA_BIDIRECTIONAL);

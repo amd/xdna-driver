@@ -10,7 +10,9 @@
 #include <linux/iopoll.h>
 #include <linux/wait.h>
 #include <linux/io.h>
-#include <linux/semaphore.h>
+#include <linux/list.h>
+#include <linux/rwsem.h>
+#include <linux/workqueue.h>
 #include <drm/gpu_scheduler.h>
 
 #include "drm_local/amdxdna_accel.h"
@@ -65,6 +67,11 @@
 	((ndev)->smu.num_dpm_levels - 1)
 #define SMU_DPM_TABLE_ENTRY(ndev, level) \
 	(&(ndev)->smu.dpm_table[level])
+
+#define ctx_rq_to_ndev(r) \
+	((struct amdxdna_dev_hdl *)container_of(r, struct amdxdna_dev_hdl, ctx_rq))
+#define ctx_rq_to_xdna_dev(r) \
+	(ctx_rq_to_ndev(r)->xdna)
 
 struct amdxdna_ctx_priv;
 struct xrs_action_load;
@@ -210,6 +217,21 @@ struct amdxdna_ctx_priv {
 	void				*mbox_chann;
 	struct drm_gpu_scheduler	sched;
 	struct drm_sched_entity		entity;
+
+	/* For context runqueue */
+	/* When there is ongoing IO, use this sem avoid runqueue disconnect ctx */
+	struct rw_semaphore		io_sem;
+	atomic64_t			job_pending_cnt;
+	wait_queue_head_t		connect_waitq;
+	int				idle_cnt;
+#define CTX_STATE_DISCONNECTED		0x0
+#define CTX_STATE_DISPATCHED		0x1
+#define CTX_STATE_CONNECTED		0x2
+#define CTX_STATE_DISCONNECTING		0x3
+#define CTX_STATE_DEBUG			0xFE
+#define CTX_STATE_DEAD			0xFF
+	u32				status;
+	bool				should_block;
 };
 
 enum aie2_dev_status {
@@ -223,6 +245,27 @@ enum aie2_power_state {
 	SMU_POWER_ON,
 };
 
+struct aie2_ctx_q {
+	struct list_head	q;
+	u32			cnt;
+};
+
+struct aie2_ctx_rq {
+	struct list_head	conn_list;
+	struct list_head	disconn_list;
+	struct aie2_ctx_q	runqueue[AMDXDNA_NUM_PRIORITY];
+	u32			runqueue_total;
+
+	struct workqueue_struct	*work_q;
+	struct work_struct	sched_work;
+
+	bool			paused;
+	u32			ctx_cnt;
+	u32			ctx_limit;
+	u32			hwctx_cnt;
+	u32			hwctx_limit;
+};
+
 struct async_events;
 
 struct amdxdna_dev_hdl {
@@ -232,12 +275,11 @@ struct amdxdna_dev_hdl {
 	void			__iomem *smu_base;
 	void			__iomem *mbox_base;
 	struct psp_device		*psp_hdl;
+	void				*xrs_hdl;
 
 	struct xdna_mailbox_chann_info	mgmt_info;
 	u32				mgmt_prot_major;
 	u32				mgmt_prot_minor;
-	/* for recover and IO code path exclusion */
-	struct rw_semaphore		recover_lock;
 
 	u32				total_col;
 	struct aie_version		version;
@@ -262,7 +304,21 @@ struct amdxdna_dev_hdl {
 
 	u32				dev_status;
 	u32				hwctx_cnt;
-	u32				hwctx_limit;
+
+	/*
+	 * The aie2_lock should be used in non critical path for below purposes
+	 *   - Exclusively send message to mgmt channel
+	 *   - Protect resolver APIs
+	 *   - Protect hwctx_cnt
+	 *   - Protect SMU set dpm, power on/off
+	 *
+	 * Some code path needs to make more than one of above atomic, such as,
+	 * aie2_hwctx_start() needs to send messages, access resolver and hwctx_cnt
+	 * aie2_mgmt_fw_init() needs to send multiple messages, etc.
+	 */
+	struct mutex			aie2_lock;
+
+	struct aie2_ctx_rq		ctx_rq;
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
@@ -415,7 +471,7 @@ int aie2_config_debug_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 int aie2_ctx_init(struct amdxdna_ctx *ctx);
 void aie2_ctx_fini(struct amdxdna_ctx *ctx);
 int aie2_ctx_connect(struct amdxdna_ctx *ctx);
-void aie2_ctx_disconnect(struct amdxdna_ctx *ctx);
+void aie2_ctx_disconnect(struct amdxdna_ctx *ctx, bool wait);
 int aie2_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
@@ -429,5 +485,21 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx);
 void aie2_hwctx_stop(struct amdxdna_ctx *ctx);
 int aie2_xrs_load_hwctx(struct amdxdna_ctx *ctx, struct xrs_action_load *action);
 int aie2_xrs_unload_hwctx(struct amdxdna_ctx *ctx);
+
+/* aid2_ctx_runqueue.c */
+int aie2_rq_init(struct aie2_ctx_rq *rq);
+void aie2_rq_fini(struct aie2_ctx_rq *rq);
+bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq);
+bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq);
+void aie2_rq_pause_all_nolock(struct aie2_ctx_rq *rq);
+void aie2_rq_run_all_nolock(struct aie2_ctx_rq *rq);
+void aie2_rq_pause_all(struct aie2_ctx_rq *rq);
+void aie2_rq_run_all(struct aie2_ctx_rq *rq);
+
+int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
+void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
+int aie2_rq_submit_enter(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
+void aie2_rq_submit_exit(struct amdxdna_ctx *ctx);
+void aie2_rq_yield(struct amdxdna_ctx *ctx);
 
 #endif /* _AIE2_PCI_H_ */
