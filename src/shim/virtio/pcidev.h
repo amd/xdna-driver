@@ -7,7 +7,6 @@
 #include "../pcidrv_virtio.h"
 #include "../pcidev.h"
 #include "drm_local/amdxdna_accel.h"
-#include <drm/virtgpu_drm.h>
 
 namespace shim_xdna {
 
@@ -20,10 +19,19 @@ public:
   std::shared_ptr<xrt_core::device>
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
 
+public:
+  void
+  host_call(void *in_buf, size_t in_size, void *out_buf, size_t out_size) const;
+
 private:
   // Below are init'ed on first device open and removed right before device is closed
-  mutable uint32_t m_shmem_bo_hdl = AMDXDNA_INVALID_BO_HANDLE;
-  mutable struct vdrm_shmem *m_shmem;
+  mutable uint32_t m_resp_buf_bo_hdl = AMDXDNA_INVALID_BO_HANDLE;
+  mutable uint32_t m_resp_buf_res_hdl = AMDXDNA_INVALID_BO_HANDLE;
+  mutable void *m_resp_buf = nullptr;
+  mutable std::unique_ptr<xrt_core::buffer_handle> m_dev_heap_bo;
+
+  // Serialize host call
+  mutable std::mutex m_lock;
 
   virtual void
   on_first_open() const override;
