@@ -57,6 +57,14 @@ int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+void aie2_pm_fini(struct amdxdna_dev_hdl *ndev)
+{
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
+
+	if(aie2_pm_set_mode(ndev, POWER_MODE_LOW))
+		XDNA_ERR(ndev->xdna, "Can not set to lowest power mode");
+}
+
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
