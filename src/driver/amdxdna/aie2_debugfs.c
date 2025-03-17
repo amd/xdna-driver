@@ -590,6 +590,15 @@ static int aie2_telemetry_debug_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(telemetry_debug, aie2_telemetry_debug_show, NULL);
 
+static int aie2_ctx_rq_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	return aie2_rq_show(&ndev->ctx_rq, m);
+}
+
+AIE2_DBGFS_FOPS(ctx_rq, aie2_ctx_rq_show, NULL);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -609,6 +618,7 @@ const struct {
 	AIE2_DBGFS_FILE(telemetry_profiling, 0400),
 	AIE2_DBGFS_FILE(telemetry_debug, 0400),
 	AIE2_DBGFS_FILE(event_trace, 0600),
+	AIE2_DBGFS_FILE(ctx_rq, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)

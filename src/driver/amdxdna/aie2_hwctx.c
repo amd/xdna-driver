@@ -59,6 +59,65 @@ static void aie2_release_resource(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
 }
 
+static int aie2_load_hwctx(struct amdxdna_ctx *ctx)
+{
+	enum xdna_mailbox_channel_type type;
+	struct xdna_mailbox_chann_info info;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	void *mbox_chann;
+	int ret;
+
+	xdna = ctx->client->xdna;
+	ndev = xdna->dev_handle;
+
+	ret = aie2_create_context(ndev, ctx, &info);
+	if (ret) {
+		XDNA_ERR(xdna, "create context failed, ret %d", ret);
+		return ret;
+	}
+
+	if (aie2_pm_is_turbo(ndev))
+		type = MB_CHANNEL_USER_POLL;
+	else
+		type = MB_CHANNEL_USER_NORMAL;
+	mbox_chann = xdna_mailbox_create_channel(ndev->mbox, &info, type);
+	if (!mbox_chann) {
+		XDNA_ERR(xdna, "not able to create channel");
+		goto failed;
+	}
+
+	trace_amdxdna_debug_point(ctx->name, ret, "channel created");
+	XDNA_DBG(xdna, "%s mailbox channel irq: %d, msix_id: %d",
+		 ctx->name, ret, info.msix_id);
+
+	ctx->priv->mbox_chann = mbox_chann;
+	return 0;
+
+failed:
+	aie2_destroy_context(xdna->dev_handle, ctx);
+	return ret;
+}
+
+static int aie2_unload_hwctx(struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_dev *xdna;
+	int ret;
+
+	xdna = ctx->client->xdna;
+	xdna_mailbox_stop_channel(ctx->priv->mbox_chann);
+	ret = aie2_destroy_context(xdna->dev_handle, ctx);
+	if (ret)
+		XDNA_ERR(xdna, "destroy context failed, ret %d", ret);
+
+	/*
+	 * The DRM scheduler thread might still running.
+	 * Call xdna_mailbox_free_channel() when ctx is destroyed.
+	 */
+	xdna_mailbox_destroy_channel(ctx->priv->mbox_chann);
+	return ret;
+}
+
 int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
@@ -93,6 +152,12 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 		goto destroy_entity;
 	}
 
+	ret = aie2_load_hwctx(ctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
+		goto release_resource;
+	}
+
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
 		ret = aie2_map_host_buf(xdna->dev_handle, ctx->priv->id,
@@ -107,12 +172,14 @@ skip:
 #endif
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
-		goto release_resource;
+		goto unload_hwctx;
 	}
 
 	ndev->hwctx_cnt++;
 	return 0;
 
+unload_hwctx:
+	aie2_unload_hwctx(ctx);
 release_resource:
 	aie2_release_resource(ctx);
 destroy_entity:
@@ -128,6 +195,7 @@ void aie2_hwctx_stop(struct amdxdna_ctx *ctx)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_handle->aie2_lock));
 	drm_sched_entity_destroy(&ctx->priv->entity);
+	aie2_unload_hwctx(ctx);
 	aie2_release_resource(ctx);
 	wait_event(ctx->priv->job_free_waitq,
 		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
