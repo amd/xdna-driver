@@ -88,7 +88,7 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
 		break;
 	case POWER_MODE_MEDIUM:
 		clk_gating = AIE2_CLK_GATING_ENABLE;
-		dpm_level = min(ndev->max_dpm_level, 5);
+		dpm_level = min(ndev->max_dpm_level, 3);
 		break;
 	case POWER_MODE_LOW:
 		clk_gating = AIE2_CLK_GATING_ENABLE;
