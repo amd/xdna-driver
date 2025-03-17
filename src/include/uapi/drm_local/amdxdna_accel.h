@@ -198,7 +198,7 @@ struct amdxdna_bo_va_entry {
 /**
  * struct amdxdna_drm_create_bo - Create a buffer object.
  * @flags: Buffer flags. MBZ.
- * @vaddr: User VA of buffer if applied. MBZ.
+ * @vaddr: User VA or UDMA fd of buffer if applied.
  * @size: Size in bytes.
  * @type: Buffer type.
  * @handle: Returned DRM buffer object handle.
@@ -213,7 +213,6 @@ struct amdxdna_drm_create_bo {
 #define	AMDXDNA_BO_DEV		3 /* Allocated from BO_DEV_HEAP */
 #define	AMDXDNA_BO_CMD		4 /* User and driver accessible BO */
 #define	AMDXDNA_BO_DMA		5 /* DRM GEM DMA BO */
-#define	AMDXDNA_BO_GUEST	6 /* BO for virt-io guest */
 	__u32	type;
 	__u32	handle;
 };
