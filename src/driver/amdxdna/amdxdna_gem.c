@@ -703,7 +703,7 @@ amdxdna_gem_import_udma_object(struct drm_device *dev, int udma_fd)
 free_pages:
 	kvfree(pages);
 put_bo:
-	drm_gem_object_put(gobj);	
+	drm_gem_object_put(gobj);
 	return abo;
 }
 
@@ -712,7 +712,7 @@ amdxdna_gem_create_share_object(struct drm_device *dev,
 				struct amdxdna_drm_create_bo *args)
 {
 	size_t aligned_sz = PAGE_ALIGN(args->size);
-	
+
 	if (args->vaddr && !args->size)
 		return amdxdna_gem_import_udma_object(dev, (int)args->vaddr);
 
