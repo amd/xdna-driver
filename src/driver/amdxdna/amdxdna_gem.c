@@ -978,8 +978,10 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 #ifdef AMDXDNA_DEVEL
 		if (IS_ERR(abo))
 			break;
-		abo->mem.pages = abo->base.pages;
-		abo->mem.nr_pages = to_gobj(abo)->size >> PAGE_SHIFT;
+		if (!abo->mem.pages) {
+			abo->mem.pages = abo->base.pages;
+			abo->mem.nr_pages = to_gobj(abo)->size >> PAGE_SHIFT;
+		}
 		ret = amdxdna_mem_map(xdna, &abo->mem);
 		if (ret)
 			goto put_obj;
