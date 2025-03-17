@@ -25,7 +25,7 @@ public:
   bo_virtio(const pdev& pdev, size_t size, int type);
 
 private:
-  uint32_t m_res_handle;
+  uint32_t m_res_handle = AMDXDNA_INVALID_BO_HANDLE;
 
   bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, int type);
