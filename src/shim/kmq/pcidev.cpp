@@ -4,12 +4,22 @@
 #include "bo.h"
 #include "device.h"
 #include "pcidev.h"
+#include "core/common/config_reader.h"
 
 namespace {
 
-// Device memory heap needs to be within one 64MB page. The maximum size is 64MB.
-const size_t max_heap_mem_size = (64 << 20);
-const size_t min_heap_mem_size = (1 << 20);
+// Device memory heap needs to be multiple of 64MB page.
+const size_t heap_page_size = (64 << 20);
+
+unsigned int
+get_heap_num_pages()
+{
+  static unsigned int num = 0;
+
+  if (!num)
+    num = xrt_core::config::detail::get_uint_value("Debug.num_heap_pages", 1);
+  return num;
+}
 
 }
 
@@ -39,25 +49,10 @@ void
 pdev_kmq::
 on_first_open() const
 {
-  size_t heap_sz = max_heap_mem_size;
-
-  while (m_dev_heap_bo == nullptr) {
-    try {
-      // Alloc device memory on first device open.
-      m_dev_heap_bo = std::make_unique<bo_kmq>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
-    } catch (const xrt_core::system_error& ex) {
-      switch (ex.get_code()) {
-      case ENOMEM:
-        // Try with smaller size in case of memory pressure or IOMMU_MODE constrain
-        heap_sz /= 2;
-        if (heap_sz < min_heap_mem_size)
-          shim_err(EINVAL, "No mem for dev heap BO, giving up");
-        break;
-      default:
-        throw;
-      }
-    }
-  }
+  auto heap_sz = heap_page_size * get_heap_num_pages();
+  shim_debug("HEAP BO size: 0x%lx", heap_sz);
+  // Alloc device memory on first device open.
+  m_dev_heap_bo = std::make_unique<bo_kmq>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
 }
 
 void
