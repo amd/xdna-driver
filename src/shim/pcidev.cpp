@@ -107,7 +107,15 @@ open() const
       shim_debug("Device opened, fd=%d", fd);
     // Publish the fd for other threads to use.
     m_dev_fd = fd;
-    on_first_open();
+
+    // Make sure we close fd if on_first_open() throws
+    try {
+      on_first_open();
+    } catch (...) {
+      ::close(fd);
+      m_dev_fd = -1;
+      throw;
+    }
   }
   ++m_dev_users;
 }
