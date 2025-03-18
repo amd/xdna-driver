@@ -522,7 +522,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 		struct amdxdna_drm_create_bo args = {
 			.flags = 0,
 			.type = AMDXDNA_BO_DEV,
-			.vaddr = 0,
+			.udma_fd = 0,
 			.size = MAX_CHAIN_CMDBUF_SIZE,
 		};
 
