@@ -185,7 +185,7 @@ mmap_bo()
    * The first mmap() is just for reserved a range in user vritual address space.
    * The second mmap() uses an aligned addr as the first argument in mmap syscall.
    */
-  m_parent_size = m_alignment * 2 - 1;
+  m_parent_size = m_alignment - 1 + m_aligned_size;
   m_parent = map_parent_range(m_parent_size);
   auto aligned = addr_align(m_parent, m_alignment);
   m_aligned = map_drm_bo(m_pdev, aligned, m_aligned_size, PROT_READ | PROT_WRITE,
