@@ -72,8 +72,7 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	heap = ctx->priv->heap;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-	ret = drm_sched_init(sched, &sched_ops, ctx->priv->submit_wq,
-			     DRM_SCHED_PRIORITY_COUNT,
+	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
 			     CTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT,
 			     NULL, NULL, ctx->name, xdna->ddev.dev);
 	if (ret) {

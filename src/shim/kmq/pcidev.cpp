@@ -50,7 +50,6 @@ pdev_kmq::
 on_first_open() const
 {
   auto heap_sz = heap_page_size * get_heap_num_pages();
-  shim_debug("HEAP BO size: 0x%lx", heap_sz);
   // Alloc device memory on first device open.
   m_dev_heap_bo = std::make_unique<bo_kmq>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
 }
