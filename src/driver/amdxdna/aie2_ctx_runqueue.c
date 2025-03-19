@@ -884,26 +884,35 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
 	u32 num_col;
+	int ret;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
 	if (rq->ctx_limit == rq->ctx_cnt) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Not allow more than %d context(s)", rq->ctx_limit);
-		return -ENOENT;
+		ret = -ENOENT;
+		goto error;
 	}
 
 	if (rq->hwctx_limit == rq->rt_ctx_cnt) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Not more hwctx");
-		return -ENOENT;
+		ret = -ENOENT;
+		goto error;
 	}
 
 	if (rq->ctx_cnt > rq->rt_ctx_cnt && ctx_is_rt(ctx) &&
 	    rq->rt_ctx_cnt + 1 == rq->hwctx_limit) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Not more hwctx for RT");
-		return -ENOENT;
+		ret = -ENOENT;
+		goto error;
+	}
+
+	num_col = ctx->priv->orig_num_col;
+	if (num_col > rq->total_cols) {
+		XDNA_ERR(xdna, "Require %d columns exceed %d",
+			 num_col, rq->total_cols);
+		ret = -ENOSPC;
+		goto error;
 	}
 
 	INIT_WORK(&ctx->dispatch_work, rq_dispatch_work);
@@ -912,7 +921,6 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	ctx->priv->should_block = false;
 	ctx->priv->priority = ctx->qos.priority;
 
-	num_col = ctx->priv->orig_num_col;
 	rq->col_arr[num_col]++;
 	if (num_col > rq->max_cols) {
 		rq->max_cols = num_col;
@@ -932,6 +940,10 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
 	mutex_unlock(&xdna->dev_lock);
 	return 0;
+
+error:
+	mutex_unlock(&xdna->dev_lock);
+	return ret;
 }
 
 void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
