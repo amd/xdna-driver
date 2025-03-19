@@ -484,12 +484,26 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx_priv *priv;
 	struct amdxdna_gem_obj *heap;
+	struct amdxdna_dev_hdl *ndev;
 	int i, ret;
+
+	if (!ctx->num_tiles) {
+		XDNA_ERR(xdna, "Number of tiles is zero");
+		return -EINVAL;
+	}
+
+	ndev = xdna->dev_handle;
+	if (unlikely(!ndev->metadata.core.row_count)) {
+		XDNA_WARN(xdna, "Core tile row count is zero");
+		return -EINVAL;
+	}
 
 	priv = kzalloc(sizeof(*ctx->priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 	ctx->priv = priv;
+
+	ctx->priv->orig_num_col = ctx->num_tiles / ndev->metadata.core.row_count;
 
 	ret = aie2_ctx_col_list(ctx);
 	if (ret) {

@@ -498,8 +498,11 @@ int aie2_config_cu(struct amdxdna_ctx *ctx)
 	req.num_cus = ctx->cus->num_cus;
 
 	ret = xdna_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME)
-		aie2_destroy_context(xdna->dev_handle, ctx);
+	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(chann);
+		xdna_mailbox_destroy_channel(chann);
+		ctx->priv->mbox_chann = NULL;
+	}
 
 	if (resp.status == AIE2_STATUS_SUCCESS) {
 		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
@@ -1067,8 +1070,11 @@ int aie2_legacy_config_cu(struct amdxdna_ctx *ctx)
 	}
 
 	ret = xdna_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME)
-		aie2_destroy_context(xdna->dev_handle, ctx);
+	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(chann);
+		xdna_mailbox_destroy_channel(chann);
+		ctx->priv->mbox_chann = NULL;
+	}
 
 	XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
 

@@ -98,6 +98,9 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 static void
 amdxdna_gem_heap_free(struct amdxdna_gem_obj *abo)
 {
+	if (!abo->mem.nr_pages)
+		return;
+
 	mutex_lock(&abo->client->mm_lock);
 
 	if (abo->mem.dev_addr != AMDXDNA_INVALID_ADDR)
