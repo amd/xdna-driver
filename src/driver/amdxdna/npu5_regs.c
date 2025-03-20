@@ -6,7 +6,7 @@
 #include "npu4_family.h"
 
 const struct amdxdna_dev_priv npu5_dev_priv = {
-	.fw_path        = "amdnpu/17f0_11/npu.sbin",
+	.fw_path        = "amdnpu/17f0_11/npu.dev.sbin",
 	.protocol_major = 0x6,
 	.protocol_minor = 0x6,
 	NPU4_COMMON_DEV_PRIV,
