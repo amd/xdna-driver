@@ -506,6 +506,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	ndev->xdna = xdna;
 	mutex_init(&ndev->aie2_lock);
 
+	XDNA_DBG(xdna, "Request fw %s", ndev->priv->fw_path);
 	ret = request_firmware(&fw, ndev->priv->fw_path, &pdev->dev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d",

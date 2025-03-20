@@ -229,6 +229,9 @@ int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 	fw_ver->sub = resp.sub;
 	fw_ver->build = resp.build;
 
+	XDNA_DBG(ndev->xdna, "FW version %d.%d.%d.%d", fw_ver->major,
+		 fw_ver->minor, fw_ver->sub, fw_ver->build);
+
 	return 0;
 }
 
