@@ -8,7 +8,7 @@
 /* NPU2 is the prototype of NPU4. It will be obsoleted in near future. */
 
 const struct amdxdna_dev_priv npu2_dev_priv = {
-	.fw_path        = "amdnpu/17f0_00/npu.sbin",
+	.fw_path        = "amdnpu/17f0_00/npu.dev.sbin",
 	.protocol_major = 0x6,
 	.protocol_minor = 0x6,
 	NPU4_COMMON_DEV_PRIV,

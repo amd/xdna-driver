@@ -30,7 +30,7 @@ const struct dpm_clk_freq npu4_dpm_clk_table[] = {
 };
 
 const struct amdxdna_dev_priv npu4_dev_priv = {
-	.fw_path        = "amdnpu/17f0_10/npu.sbin",
+	.fw_path        = "amdnpu/17f0_10/npu.dev.sbin",
 	.protocol_major = 0x6,
 	.protocol_minor = 0x6,
 	NPU4_COMMON_DEV_PRIV,
