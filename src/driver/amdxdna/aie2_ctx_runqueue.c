@@ -977,6 +977,7 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		}
 	}
 	mutex_unlock(&xdna->dev_lock);
+	cancel_work_sync(&ctx->yield_work);
 	XDNA_DBG(xdna, "%s deleted, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
 }
