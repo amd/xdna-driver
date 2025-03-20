@@ -232,24 +232,6 @@ struct partition_info
 {
   using result_type = std::any;
 
-  static int
-  convert_priority(int p)
-  {
-    // Below value of cases are copy from MCDM for application porting friendly
-    switch (p) {
-      case AMDXDNA_QOS_REALTIME_PRIORITY:
-        return 0x100;
-      case AMDXDNA_QOS_HIGH_PRIORITY:
-        return 0x180;
-      case AMDXDNA_QOS_NORMAL_PRIORITY:
-        return 0x200;
-      case AMDXDNA_QOS_LOW_PRIORITY:
-        return 0x280;
-      default:
-        shim_err(EINVAL, "Invalid priority %d", p);
-    };
-  }
-
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
@@ -292,7 +274,7 @@ struct partition_info
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
-      new_entry.qos.priority = convert_priority(entry.priority);
+      new_entry.qos.priority = entry.priority;
       output.push_back(std::move(new_entry));
     }
     return output;

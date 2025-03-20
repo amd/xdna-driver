@@ -19,9 +19,28 @@ MODULE_PARM_DESC(hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default"
 
 #define RQ_CTX_IDLE_COUNT 3
 
+#if AMDXDNA_NUM_PRIORITY != CTX_RQ_NUM_QUEUE
+#error "AMDXDNA_NUM_PRIORITY not equals to CTX_RQ_NUM_QUEUE"
+#endif
+static int qos_to_rq_prio(u32 p)
+{
+	switch (p) {
+	case AMDXDNA_QOS_REALTIME_PRIORITY:
+		return CTX_RQ_REALTIME;
+	case AMDXDNA_QOS_HIGH_PRIORITY:
+		return CTX_RQ_HIGH;
+	case AMDXDNA_QOS_NORMAL_PRIORITY:
+		return CTX_RQ_NORMAL;
+	case AMDXDNA_QOS_LOW_PRIORITY:
+		return CTX_RQ_LOW;
+	default:
+		return -EINVAL;
+	};
+}
+
 static inline bool ctx_is_rt(struct amdxdna_ctx *ctx)
 {
-	return ctx->priv->priority == AMDXDNA_QOS_REALTIME_PRIORITY;
+	return ctx->priv->priority == CTX_RQ_REALTIME;
 }
 
 static inline bool ctx_is_debug(struct amdxdna_ctx *ctx)
@@ -87,7 +106,7 @@ part_num_col(struct aie2_partition *part)
 static void
 part_ctx_dispatch(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 {
-	int prio_q = ctx->qos.priority - 1;
+	int prio_q = ctx->priv->priority;
 
 	list_move_tail(&ctx->entry, &part->runqueue[prio_q]);
 	part->ctx_cnt++;
@@ -239,9 +258,9 @@ select_next_ctx(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 
 	i = 0;
 	if (ctx) {
-		q = &part->runqueue[ctx->qos.priority - 1];
+		q = &part->runqueue[ctx->priv->priority];
 		if (list_is_last(&ctx->entry, q)) {
-			i = ctx->qos.priority;
+			i = ctx->priv->priority + 1; /* next queue */
 		} else {
 			ret = list_next_entry(ctx, entry);
 			goto out;
@@ -402,7 +421,7 @@ static void rq_ctx_cancel(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	xdna = ctx_rq_to_xdna_dev(rq);
 
 	down_write(&ctx->priv->io_sem);
-	prio_q = ctx->qos.priority - 1;
+	prio_q = ctx->priv->priority;
 	list_move_tail(&ctx->entry, &rq->disconn_list);
 	ctx->priv->status = CTX_STATE_DISCONNECTED;
 	part = ctx->priv->part;
@@ -915,11 +934,17 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		goto error;
 	}
 
+	ret = qos_to_rq_prio(ctx->qos.priority);
+	if (ret == -EINVAL) {
+		XDNA_ERR(xdna, "Invalid QoS priority 0x%x", ctx->qos.priority);
+		goto error;
+	}
+	ctx->priv->priority = ret;
+
 	INIT_WORK(&ctx->dispatch_work, rq_dispatch_work);
 	INIT_WORK(&ctx->yield_work, rq_yield_work);
 	ctx->priv->status = CTX_STATE_DISCONNECTED;
 	ctx->priv->should_block = false;
-	ctx->priv->priority = ctx->qos.priority;
 
 	rq->col_arr[num_col]++;
 	if (num_col > rq->max_cols) {

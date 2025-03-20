@@ -282,7 +282,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	req.num_col = ctx->num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = ctx->client->pasid;
-	req.context_priority = ctx->qos.priority;
+	req.context_priority = ctx->priv->priority + 1;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
@@ -311,7 +311,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	info->i2x.rb_size	  = cq_pair->i2x_q.buf_size;
 
 	aie2_calc_intr_reg(info);
-	XDNA_DBG(xdna, "%s created hwctx %d pasid %d priority %d", ctx->name,
+	XDNA_DBG(xdna, "%s created hwctx %d pasid %d qos priority 0x%x", ctx->name,
 		 ctx->priv->id, ctx->client->pasid, ctx->qos.priority);
 
 	return 0;
