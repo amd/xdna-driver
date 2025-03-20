@@ -69,6 +69,9 @@ extern "C" {
  * AMDXDNA_QOS_NORMAL_PRIORITY: Best effort or background clients.
  * AMDXDNA_QOS_LOW_PRIORITY: Clients that can wait indefinite amount of time for
  *                           completion.
+ *
+ * NOTE, if driver see value beyond above definition, it decides the priority of
+ * the context without error/warning.
  */
 #define	AMDXDNA_QOS_REALTIME_PRIORITY	0x100
 #define	AMDXDNA_QOS_HIGH_PRIORITY	0x180

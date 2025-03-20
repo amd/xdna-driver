@@ -34,7 +34,7 @@ static int qos_to_rq_prio(u32 p)
 	case AMDXDNA_QOS_LOW_PRIORITY:
 		return CTX_RQ_LOW;
 	default:
-		return -EINVAL;
+		return CTX_RQ_LOW;
 	};
 }
 
