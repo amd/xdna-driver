@@ -22,19 +22,27 @@ MODULE_PARM_DESC(hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default"
 #if AMDXDNA_NUM_PRIORITY != CTX_RQ_NUM_QUEUE
 #error "AMDXDNA_NUM_PRIORITY not equals to CTX_RQ_NUM_QUEUE"
 #endif
-static int qos_to_rq_prio(u32 p)
+static void qos_to_rq_prio(struct amdxdna_ctx *ctx)
 {
-	switch (p) {
+	u32 *rq_prio = &ctx->priv->priority;
+	u32 *qos = &ctx->qos.priority;
+
+	switch (*qos) {
 	case AMDXDNA_QOS_REALTIME_PRIORITY:
-		return CTX_RQ_REALTIME;
+		*rq_prio = CTX_RQ_REALTIME;
+		break;
 	case AMDXDNA_QOS_HIGH_PRIORITY:
-		return CTX_RQ_HIGH;
+		*rq_prio = CTX_RQ_HIGH;
+		break;
 	case AMDXDNA_QOS_NORMAL_PRIORITY:
-		return CTX_RQ_NORMAL;
+		*rq_prio = CTX_RQ_NORMAL;
+		break;
 	case AMDXDNA_QOS_LOW_PRIORITY:
-		return CTX_RQ_LOW;
+		*rq_prio = CTX_RQ_LOW;
+		break;
 	default:
-		return CTX_RQ_LOW;
+		*qos = AMDXDNA_QOS_LOW_PRIORITY;
+		*rq_prio = CTX_RQ_LOW;
 	};
 }
 
@@ -934,17 +942,11 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		goto error;
 	}
 
-	ret = qos_to_rq_prio(ctx->qos.priority);
-	if (ret == -EINVAL) {
-		XDNA_ERR(xdna, "Invalid QoS priority 0x%x", ctx->qos.priority);
-		goto error;
-	}
-	ctx->priv->priority = ret;
-
 	INIT_WORK(&ctx->dispatch_work, rq_dispatch_work);
 	INIT_WORK(&ctx->yield_work, rq_yield_work);
 	ctx->priv->status = CTX_STATE_DISCONNECTED;
 	ctx->priv->should_block = false;
+	qos_to_rq_prio(ctx);
 
 	rq->col_arr[num_col]++;
 	if (num_col > rq->max_cols) {
