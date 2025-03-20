@@ -231,7 +231,7 @@ struct amdxdna_ctx_priv {
 	u32				status;
 	int				errno; /* when CTX_STATE_DEAD */
 	bool				should_block;
-	u32				priority;
+	int				priority;
 	struct aie2_partition		*part;
 
 	/* Hardware context related in below */
@@ -253,7 +253,12 @@ enum aie2_power_state {
 };
 
 struct aie2_partition {
-	struct list_head	runqueue[AMDXDNA_NUM_PRIORITY];
+#define CTX_RQ_REALTIME		0
+#define CTX_RQ_HIGH		1
+#define CTX_RQ_NORMAL		2
+#define CTX_RQ_LOW		3
+#define CTX_RQ_NUM_QUEUE	4
+	struct list_head	runqueue[CTX_RQ_NUM_QUEUE];
 	struct list_head	conn_list;
 	struct aie2_ctx_rq	*rq;
 
