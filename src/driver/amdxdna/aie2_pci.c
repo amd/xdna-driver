@@ -467,6 +467,7 @@ disable_dev:
 
 static void aie2_hw_suspend(struct amdxdna_dev *xdna)
 {
+	aie2_assign_event_trace_state(xdna->dev_handle, false);
 	aie2_rq_stop_all(&xdna->dev_handle->ctx_rq);
 	aie2_hw_stop(xdna);
 }
@@ -484,6 +485,7 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 
 	XDNA_INFO(xdna, "context resuming...");
 	aie2_rq_restart_all(&xdna->dev_handle->ctx_rq);
+	aie2_assign_event_trace_state(xdna->dev_handle, true);
 	return 0;
 }
 

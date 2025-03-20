@@ -287,34 +287,12 @@ static int aie2_stop_event_trace_send(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-bool aie2_is_event_trace_enable(struct amdxdna_dev_hdl *ndev)
-{
-	if (ndev->event_trace_req)
-		return (ndev->event_trace_req->enabled);
-	return false;
-}
-
-void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,  struct start_event_trace_resp *resp)
-{
-	ndev->event_trace_req->resp_timestamp = resp->current_timestamp;
-	ndev->event_trace_req->sys_start_time = ktime_get_ns() / 1000; /*Convert ns to us*/
-	ndev->event_trace_req->msi_address = resp->msi_address & 0x00FFFFFF;
-	aie2_register_log_buf_irq_hdl(ndev, resp->msi_idx);
-}
-
-void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev)
-{
-	ndev->event_trace_req->resp_timestamp = 0;
-	ndev->event_trace_req->sys_start_time = 0;
-	aie2_deregister_log_buf_irq_hdl(ndev);
-}
-
-void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state)
+static void aie2_update_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state)
 {
 	int err;
 
 	if (!aie2_is_event_trace_supported_on_dev(ndev)) {
-		XDNA_ERR(ndev->xdna, "Event trace is not supported on this device");
+		XDNA_DBG(ndev->xdna, "Event trace is not supported on this device");
 		return;
 	}
 
@@ -343,6 +321,35 @@ void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state)
 done:
 	ndev->event_trace_req->enabled = state;
 	XDNA_DBG(ndev->xdna, "Event trace state: %d", state);
+}
+
+bool aie2_is_event_trace_enable(struct amdxdna_dev_hdl *ndev)
+{
+	if (ndev->event_trace_req)
+		return (ndev->event_trace_req->enabled);
+	return false;
+}
+
+void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,  struct start_event_trace_resp *resp)
+{
+	ndev->event_trace_req->resp_timestamp = resp->current_timestamp;
+	ndev->event_trace_req->sys_start_time = ktime_get_ns() / 1000; /*Convert ns to us*/
+	ndev->event_trace_req->msi_address = resp->msi_address & 0x00FFFFFF;
+	aie2_register_log_buf_irq_hdl(ndev, resp->msi_idx);
+}
+
+void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev)
+{
+	ndev->event_trace_req->resp_timestamp = 0;
+	ndev->event_trace_req->sys_start_time = 0;
+	aie2_deregister_log_buf_irq_hdl(ndev);
+}
+
+void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state)
+{
+	mutex_lock(&ndev->aie2_lock);
+	aie2_update_event_trace_state(ndev, state);
+	mutex_unlock(&ndev->aie2_lock);
 }
 
 int aie2_event_trace_init(struct amdxdna_dev_hdl *ndev)

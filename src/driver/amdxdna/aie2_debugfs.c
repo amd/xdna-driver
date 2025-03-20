@@ -276,9 +276,7 @@ static ssize_t aie2_event_trace_write(struct file *file, const char __user *ptr,
 		return ret;
 	}
 
-	mutex_lock(&ndev->aie2_lock);
 	aie2_assign_event_trace_state(ndev, state);
-	mutex_unlock(&ndev->aie2_lock);
 
 	return len;
 }
