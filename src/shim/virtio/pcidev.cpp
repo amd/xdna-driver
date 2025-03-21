@@ -219,16 +219,28 @@ host_call(void *in_buf, size_t in_size, void *out_buf, size_t out_size) const
   const std::lock_guard<std::mutex> lock(m_lock);
   auto sz = out_size;
 
-  if (!out_buf) {
-    hcall_no_resp(*this, in_buf, in_size);
-    return;
-  }
-
   if (sz > resp_buf_size)
     sz = resp_buf_size;
 
   hcall(*this, in_buf, in_size);
-  memcpy(out_buf, m_resp_buf, sz);
+  if (out_buf)
+    memcpy(out_buf, m_resp_buf, sz);
+}
+
+uint32_t
+pdev_virtio::
+get_unique_id() const
+{
+  return ++m_id;
+}
+
+uint64_t
+pdev_virtio::
+get_dev_bo_vaddr(uint64_t dev_bo_xdna_addr) const
+{
+  uint64_t xdna_addr = m_dev_heap_bo->get_properties().paddr;
+  uint64_t vaddr = reinterpret_cast<uint64_t>(m_dev_heap_bo->map(bo::map_type::write));
+  return vaddr + (dev_bo_xdna_addr - xdna_addr);
 }
 
 } // namespace shim_xdna
