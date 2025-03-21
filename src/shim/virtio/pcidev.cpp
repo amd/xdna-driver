@@ -219,16 +219,12 @@ host_call(void *in_buf, size_t in_size, void *out_buf, size_t out_size) const
   const std::lock_guard<std::mutex> lock(m_lock);
   auto sz = out_size;
 
-  if (!out_buf) {
-    hcall_no_resp(*this, in_buf, in_size);
-    return;
-  }
-
   if (sz > resp_buf_size)
     sz = resp_buf_size;
 
   hcall(*this, in_buf, in_size);
-  memcpy(out_buf, m_resp_buf, sz);
+  if (out_buf)
+    memcpy(out_buf, m_resp_buf, sz);
 }
 
 uint32_t
