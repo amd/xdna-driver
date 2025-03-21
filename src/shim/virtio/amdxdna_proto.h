@@ -1,5 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+/*
+ * Copyright 2025 Advanced Micro Devices, Inc.
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef AMDXDNA_PROTO_H_
 #define AMDXDNA_PROTO_H_
@@ -9,7 +11,8 @@
 enum amdxdna_ccmd {
 	AMDXDNA_CCMD_NOP = 1,
 	AMDXDNA_CCMD_INIT,
-	AMDXDNA_CCMD_MAP_BO,
+	AMDXDNA_CCMD_CREATE_BO,
+	AMDXDNA_CCMD_DESTROY_BO,
 };
 
 #ifdef __cplusplus
@@ -48,20 +51,33 @@ struct amdxdna_ccmd_init_req {
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_init_req)
 
 /*
- * AMDXDNA_CCMD_MAP_BO
+ * AMDXDNA_CCMD_CREATE_BO
  */
 
-struct amdxdna_ccmd_map_bo_req {
+struct amdxdna_ccmd_create_bo_req {
 	struct vdrm_ccmd_req hdr;
 	uint32_t res_id;
-	uint32_t alignment;
+	uint32_t blob_id;
+	uint64_t size;
+	uint64_t map_align;
+	uint32_t bo_type;
+	uint32_t _pad;
 };
-DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_map_bo_req)
+DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_create_bo_req)
 
-struct amdxdna_ccmd_map_bo_rsp {
+struct amdxdna_ccmd_create_bo_rsp {
 	struct amdxdna_ccmd_rsp hdr;
-	uint64_t iov_addr;
+	uint64_t xdna_addr;
 };
 
+/*
+ * AMDXDNA_CCMD_DESTROY_BO
+ */
+struct amdxdna_ccmd_destroy_bo_req {
+	struct vdrm_ccmd_req hdr;
+	uint32_t blob_id;
+	uint32_t _pad;
+};
+DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_destroy_bo_req)
 
 #endif /* AMDXDNA_PROTO_H_ */

@@ -28,7 +28,7 @@ flag_to_type(uint64_t bo_flags)
   return AMDXDNA_BO_INVALID;
 }
 
-std::tuple<uint32_t, uint32_t>
+std::pair<uint32_t, uint32_t>
 drm_bo_alloc(const shim_xdna::pdev& dev, size_t size)
 {
   drm_virtgpu_resource_create_blob args = {
@@ -56,6 +56,9 @@ drm_bo_free(const shim_xdna::pdev& dev, uint32_t boh)
 uint64_t
 drm_bo_get_map_offset(const shim_xdna::pdev& dev, uint32_t boh)
 {
+  if (boh == AMDXDNA_INVALID_BO_HANDLE)
+    return AMDXDNA_INVALID_ADDR;
+
   drm_virtgpu_map args = {
     .handle = boh,
   };
@@ -63,20 +66,36 @@ drm_bo_get_map_offset(const shim_xdna::pdev& dev, uint32_t boh)
   return args.offset;
 }
 
-uint64_t
-drm_bo_get_xdna_addr(const shim_xdna::pdev& dev, uint32_t resh, uint64_t align)
+std::pair<uint32_t, uint64_t>
+host_bo_alloc(const shim_xdna::pdev& dev, int type, size_t size, uint32_t res_id, uint64_t align)
 {
   const shim_xdna::pdev_virtio& vdev = static_cast<const shim_xdna::pdev_virtio&>(dev);
-  amdxdna_ccmd_map_bo_req req = {};
-  amdxdna_ccmd_map_bo_rsp rsp = {};
+  amdxdna_ccmd_create_bo_req req = {};
+  amdxdna_ccmd_create_bo_rsp rsp = {};
 
-  req.hdr.cmd = AMDXDNA_CCMD_MAP_BO;
+  req.hdr.cmd = AMDXDNA_CCMD_CREATE_BO;
   req.hdr.len = sizeof(req);
   req.hdr.rsp_off = 0;
-  req.res_id = resh;
-  req.alignment = align;
+  req.res_id = res_id;
+  req.blob_id = vdev.get_unique_id();
+  req.bo_type = type;
+  req.size = size;
+  req.map_align = align;
   vdev.host_call(&req, sizeof(req), &rsp, sizeof(rsp));
-  return rsp.iov_addr;
+  return { req.blob_id, rsp.xdna_addr };
+}
+
+void
+host_bo_free(const shim_xdna::pdev& dev, uint32_t blob_id)
+{
+  const shim_xdna::pdev_virtio& vdev = static_cast<const shim_xdna::pdev_virtio&>(dev);
+  amdxdna_ccmd_destroy_bo_req req = {};
+
+  req.hdr.cmd = AMDXDNA_CCMD_DESTROY_BO;
+  req.hdr.len = sizeof(req);
+  req.hdr.rsp_off = 0;
+  req.blob_id = blob_id;
+  vdev.host_call(&req, sizeof(req), nullptr, 0);
 }
 
 }
@@ -143,8 +162,18 @@ uint32_t
 bo_virtio::
 alloc_drm_bo(int type, size_t size)
 {
-  auto [ boh, resh ] = drm_bo_alloc(m_pdev, size);
-  m_res_handle = resh;
+  uint32_t boh = AMDXDNA_INVALID_BO_HANDLE;
+  uint32_t resh = AMDXDNA_INVALID_BO_HANDLE;
+
+  if (type != AMDXDNA_BO_DEV) {
+    auto p = drm_bo_alloc(m_pdev, size);
+    boh = p.first;
+    resh = p.second;
+  }
+  auto p = host_bo_alloc(m_pdev, type, size, resh, m_alignment);
+  m_blob_id = p.first;
+  m_xdna_addr = p.second;
+
   return boh;
 }
 
@@ -152,16 +181,19 @@ void
 bo_virtio::
 get_drm_bo_info(uint32_t boh, amdxdna_drm_get_bo_info* bo_info)
 {
+  const shim_xdna::pdev_virtio& vdev = static_cast<const shim_xdna::pdev_virtio&>(m_pdev);
+
   bo_info->handle = boh;
   bo_info->map_offset = drm_bo_get_map_offset(m_pdev, boh);
-  bo_info->vaddr = 0;
-  bo_info->xdna_addr = drm_bo_get_xdna_addr(m_pdev, m_res_handle, m_alignment);
+  bo_info->vaddr = m_type == AMDXDNA_BO_DEV ? vdev.get_dev_bo_vaddr(m_xdna_addr) : 0;
+  bo_info->xdna_addr = m_xdna_addr;
 }
 
 void
 bo_virtio::
 free_drm_bo(uint32_t boh)
 {
+  host_bo_free(m_pdev, m_blob_id);
   drm_bo_free(m_pdev, boh);
 }
 

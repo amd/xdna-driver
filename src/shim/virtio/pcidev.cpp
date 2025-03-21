@@ -231,5 +231,21 @@ host_call(void *in_buf, size_t in_size, void *out_buf, size_t out_size) const
   memcpy(out_buf, m_resp_buf, sz);
 }
 
+uint32_t
+pdev_virtio::
+get_unique_id() const
+{
+  return ++m_id;
+}
+
+uint64_t
+pdev_virtio::
+get_dev_bo_vaddr(uint64_t dev_bo_xdna_addr) const
+{
+  uint64_t xdna_addr = m_dev_heap_bo->get_properties().paddr;
+  uint64_t vaddr = reinterpret_cast<uint64_t>(m_dev_heap_bo->map(bo::map_type::write));
+  return vaddr + (dev_bo_xdna_addr - xdna_addr);
+}
+
 } // namespace shim_xdna
 
