@@ -128,6 +128,19 @@ public:
   get_ctrl_code_size(const std::string& elf_path)
   {
     auto elf = xrt::elf{elf_path};
+    return get_ctrl_code_size(elf);
+  }
+
+  void
+  patch_ctrl_code(bo& bo_ctrl, const std::string& elf_path)
+  {
+    auto elf = xrt::elf{elf_path};
+    patch_ctrl_code(bo_ctrl, elf);
+  }
+
+  static size_t
+  get_ctrl_code_size(const xrt::elf& elf)
+  {
     auto mod = xrt::module{elf};
     size_t instr_size = 0;
     xrt_core::module_int::patch(mod, nullptr, &instr_size, nullptr);
@@ -135,9 +148,8 @@ public:
   }
 
   void
-  patch_ctrl_code(bo& bo_ctrl, const std::string& elf_path)
+  patch_ctrl_code(bo& bo_ctrl, const xrt::elf& elf)
   {
-    auto elf = xrt::elf{elf_path};
     auto mod = xrt::module{elf};
     size_t instr_size = bo_ctrl.size();
     xrt_core::module_int::patch(mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), &instr_size, &m_patching_args);
