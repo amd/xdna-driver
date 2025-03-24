@@ -24,28 +24,6 @@ flag_to_type(uint64_t bo_flags)
   return AMDXDNA_BO_INVALID;
 }
 
-// flash cache line for non coherence memory
-inline void
-clflush_data(const void *base, size_t offset, size_t len)
-{
-  static long cacheline_size = 0;
-
-  if (!cacheline_size) {
-    long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
-    if (sz <= 0)
-      shim_err(EINVAL, "Invalid cache line size: %ld", sz);
-    cacheline_size = sz;
-  }
-
-  const char *cur = (const char *)base;
-  cur += offset;
-  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
-  do {
-    shim_xdna::flush_cache_line(cur);
-    cur += cacheline_size;
-  } while (cur <= (const char *)lastline);
-}
-
 void
 sync_drm_bo(const shim_xdna::pdev& dev, uint32_t boh, xrt_core::buffer_handle::direction dir,
   size_t offset, size_t len)
@@ -94,13 +72,8 @@ bo_kmq::
 bo_kmq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id, size_t size, uint64_t flags, int type)
   : bo(pdev, ctx_id, size, flags, type)
 {
-  size_t align = 0;
-
-  if (m_type == AMDXDNA_BO_DEV_HEAP)
-    align = 64 * 1024 * 1024; // Device mem heap must align at 64MB boundary.
-
   alloc_bo();
-  mmap_bo(align);
+  mmap_bo();
 
   // Newly allocated buffer may contain dirty pages. If used as output buffer,
   // the data in cacheline will be flushed onto memory and pollute the output
@@ -154,11 +127,11 @@ sync(direction dir, size_t size, size_t offset)
   switch (m_type) {
   case AMDXDNA_BO_SHARE:
   case AMDXDNA_BO_CMD:
-    clflush_data(m_aligned, offset, size); 
+    shim_xdna::clflush_data(m_aligned, offset, size); 
     break;
   case AMDXDNA_BO_DEV:
     if (m_owner_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
-      clflush_data(m_aligned, offset, size); 
+      shim_xdna::clflush_data(m_aligned, offset, size); 
     else
       sync_drm_bo(m_pdev, get_drm_bo_handle(), dir, offset, size);
     break;

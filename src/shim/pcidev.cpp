@@ -7,6 +7,7 @@
 #include "shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
 #include "core/common/trace.h"
+#include <drm/virtgpu_drm.h>
 
 namespace {
 
@@ -54,6 +55,12 @@ namespace {
       return "DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL";
     case DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT:
       return "DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT";
+    case DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB:
+      return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB";
+    case DRM_IOCTL_VIRTGPU_EXECBUFFER:
+      return "DRM_IOCTL_VIRTGPU_EXECBUFFER";
+    case DRM_IOCTL_VIRTGPU_MAP:
+      return "DRM_IOCTL_VIRTGPU_MAP";
     }
 
     return "UNKNOWN(" + std::to_string(cmd) + ")";
@@ -100,10 +107,17 @@ open() const
       shim_debug("Device opened, fd=%d", fd);
     // Publish the fd for other threads to use.
     m_dev_fd = fd;
+
+    // Make sure we close fd if on_first_open() throws
+    try {
+      on_first_open();
+    } catch (...) {
+      ::close(fd);
+      m_dev_fd = -1;
+      throw;
+    }
   }
   ++m_dev_users;
-
-  on_first_open();
 }
 
 void

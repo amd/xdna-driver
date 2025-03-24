@@ -953,6 +953,9 @@ void xdna_mailbox_free_channel(struct mailbox_channel *mb_chann)
 
 void xdna_mailbox_stop_channel(struct mailbox_channel *mb_chann)
 {
+	if (!mb_chann)
+		return;
+
 #ifdef AMDXDNA_DEVEL
 	if (MB_PERIODIC_POLL) {
 		timer_delete_sync(&mb_chann->timer);

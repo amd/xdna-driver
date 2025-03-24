@@ -13,6 +13,7 @@
 #include <linux/list.h>
 #include <linux/rwsem.h>
 #include <linux/workqueue.h>
+#include <linux/completion.h>
 #include <drm/gpu_scheduler.h>
 
 #include "drm_local/amdxdna_accel.h"
@@ -77,6 +78,7 @@ struct amdxdna_ctx_priv;
 struct xrs_action_load;
 struct event_trace_req_buf;
 struct start_event_trace_resp;
+struct aie2_partition;
 
 enum aie2_smu_reg_idx {
 	SMU_CMD_REG = 0,
@@ -206,17 +208,12 @@ struct amdxdna_ctx_priv {
 #endif
 	struct semaphore		job_sem;
 
-	struct workqueue_struct		*submit_wq;
 	struct drm_syncobj		*syncobj;
 
 	/* Driver needs to wait for all jobs freed before fini DRM scheduler */
 	wait_queue_head_t		job_free_waitq;
 
-	/* Hardware context related in below */
-	u32				id;
-	void				*mbox_chann;
-	struct drm_gpu_scheduler	sched;
-	struct drm_sched_entity		entity;
+	u32				orig_num_col;
 
 	/* For context runqueue */
 	/* When there is ongoing IO, use this sem avoid runqueue disconnect ctx */
@@ -224,6 +221,7 @@ struct amdxdna_ctx_priv {
 	atomic64_t			job_pending_cnt;
 	wait_queue_head_t		connect_waitq;
 	int				idle_cnt;
+	bool				force_yield;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_DISPATCHED		0x1
 #define CTX_STATE_CONNECTED		0x2
@@ -231,7 +229,16 @@ struct amdxdna_ctx_priv {
 #define CTX_STATE_DEBUG			0xFE
 #define CTX_STATE_DEAD			0xFF
 	u32				status;
+	int				errno; /* when CTX_STATE_DEAD */
 	bool				should_block;
+	int				priority;
+	struct aie2_partition		*part;
+
+	/* Hardware context related in below */
+	u32				id;
+	void				*mbox_chann;
+	struct drm_gpu_scheduler	sched;
+	struct drm_sched_entity		entity;
 };
 
 enum aie2_dev_status {
@@ -245,25 +252,50 @@ enum aie2_power_state {
 	SMU_POWER_ON,
 };
 
-struct aie2_ctx_q {
-	struct list_head	q;
-	u32			cnt;
+struct aie2_partition {
+#define CTX_RQ_REALTIME		0
+#define CTX_RQ_HIGH		1
+#define CTX_RQ_NORMAL		2
+#define CTX_RQ_LOW		3
+#define CTX_RQ_NUM_QUEUE	4
+	struct list_head	runqueue[CTX_RQ_NUM_QUEUE];
+	struct list_head	conn_list;
+	struct aie2_ctx_rq	*rq;
+
+	struct work_struct	sched_work;
+
+	u32			start_col;
+	u32			end_col;
+	u32			max_hwctx;
+	u32			max_rt_ctx;
+
+	u32			ctx_cnt;
+	u32			hwctx_cnt;
+	u32			rt_ctx_cnt;
 };
 
 struct aie2_ctx_rq {
-	struct list_head	conn_list;
-	struct list_head	disconn_list;
-	struct aie2_ctx_q	runqueue[AMDXDNA_NUM_PRIORITY];
-	u32			runqueue_total;
+	u32			ctx_limit;
+	u32			hwctx_limit;
+	u32			start_col;
+	u32			total_cols;
 
 	struct workqueue_struct	*work_q;
-	struct work_struct	sched_work;
-
+	struct work_struct	parts_work;
 	bool			paused;
+
+	/*
+	 * Above are static members which initial by aie2_rq_init().
+	 * Below are dynamic members, protected by xdna->dev_lock
+	 */
+	struct list_head	disconn_list;
+	struct aie2_partition	*parts;
+	/* the number of activated parts */
+	u32			num_parts;
 	u32			ctx_cnt;
-	u32			ctx_limit;
-	u32			hwctx_cnt;
-	u32			hwctx_limit;
+	u32			rt_ctx_cnt;
+	int			*col_arr;
+	u32			max_cols;
 };
 
 struct async_events;
@@ -395,6 +427,7 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_pm.c */
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
+void aie2_pm_fini(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 
 static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
@@ -489,12 +522,11 @@ int aie2_xrs_unload_hwctx(struct amdxdna_ctx *ctx);
 /* aid2_ctx_runqueue.c */
 int aie2_rq_init(struct aie2_ctx_rq *rq);
 void aie2_rq_fini(struct aie2_ctx_rq *rq);
-bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq);
 bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq);
-void aie2_rq_pause_all_nolock(struct aie2_ctx_rq *rq);
-void aie2_rq_run_all_nolock(struct aie2_ctx_rq *rq);
-void aie2_rq_pause_all(struct aie2_ctx_rq *rq);
-void aie2_rq_run_all(struct aie2_ctx_rq *rq);
+bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq);
+void aie2_rq_stop_all(struct aie2_ctx_rq *rq);
+void aie2_rq_restart_all(struct aie2_ctx_rq *rq);
+int aie2_rq_show(struct aie2_ctx_rq *rq, struct seq_file *m);
 
 int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);

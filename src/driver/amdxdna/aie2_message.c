@@ -229,6 +229,9 @@ int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 	fw_ver->sub = resp.sub;
 	fw_ver->build = resp.build;
 
+	XDNA_DBG(ndev->xdna, "FW version %d.%d.%d.%d", fw_ver->major,
+		 fw_ver->minor, fw_ver->sub, fw_ver->build);
+
 	return 0;
 }
 
@@ -279,7 +282,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	req.num_col = ctx->num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = ctx->client->pasid;
-	req.context_priority = ctx->qos.priority;
+	req.context_priority = ctx->priv->priority + 1;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
@@ -308,7 +311,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	info->i2x.rb_size	  = cq_pair->i2x_q.buf_size;
 
 	aie2_calc_intr_reg(info);
-	XDNA_DBG(xdna, "%s created hwctx %d pasid %d priority %d", ctx->name,
+	XDNA_DBG(xdna, "%s created hwctx %d pasid %d qos priority 0x%x", ctx->name,
 		 ctx->priv->id, ctx->client->pasid, ctx->qos.priority);
 
 	return 0;
@@ -498,8 +501,11 @@ int aie2_config_cu(struct amdxdna_ctx *ctx)
 	req.num_cus = ctx->cus->num_cus;
 
 	ret = xdna_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME)
-		aie2_destroy_context(xdna->dev_handle, ctx);
+	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(chann);
+		xdna_mailbox_destroy_channel(chann);
+		ctx->priv->mbox_chann = NULL;
+	}
 
 	if (resp.status == AIE2_STATUS_SUCCESS) {
 		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
@@ -1067,8 +1073,11 @@ int aie2_legacy_config_cu(struct amdxdna_ctx *ctx)
 	}
 
 	ret = xdna_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME)
-		aie2_destroy_context(xdna->dev_handle, ctx);
+	if (ret == -ETIME) {
+		xdna_mailbox_stop_channel(chann);
+		xdna_mailbox_destroy_channel(chann);
+		ctx->priv->mbox_chann = NULL;
+	}
 
 	XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
 

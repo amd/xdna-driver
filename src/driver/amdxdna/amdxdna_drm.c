@@ -136,10 +136,15 @@ static int amdxdna_flush(struct file *f, fl_owner_t id)
 		return 0;
 
 	mutex_lock(&xdna->dev_lock);
+	if (list_empty(&client->node)) {
+		mutex_unlock(&xdna->dev_lock);
+		goto out;
+	}
 	list_del_init(&client->node);
 	mutex_unlock(&xdna->dev_lock);
 	amdxdna_ctx_remove_all(client);
 
+out:
 	drm_dev_exit(idx);
 	return 0;
 }
