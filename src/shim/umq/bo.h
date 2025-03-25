@@ -26,7 +26,6 @@ public:
 private:
   bo_umq(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
     size_t size, uint64_t flags, int type);
-
 };
 
 } // namespace shim_xdna

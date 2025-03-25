@@ -58,7 +58,7 @@ const struct dpm_clk_freq npu1_dpm_clk_table[] = {
 };
 
 const struct amdxdna_dev_priv npu1_dev_priv = {
-	.fw_path        = "amdnpu/1502_00/npu.sbin",
+	.fw_path        = "amdnpu/1502_00/npu.dev.sbin",
 	.protocol_major = 0x5,
 	.protocol_minor = 0x5,
 	.rt_config	= npu1_default_rt_cfg,

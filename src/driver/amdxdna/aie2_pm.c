@@ -8,7 +8,7 @@
 #define AIE2_CLK_GATING_ENABLE	1
 #define AIE2_CLK_GATING_DISABLE	0
 
-static int aie2_pm_set_clk_gating(struct amdxdna_dev_hdl *ndev, u32 val)
+static int pm_set_clk_gating(struct amdxdna_dev_hdl *ndev, u32 val)
 {
 	int ret;
 
@@ -20,53 +20,11 @@ static int aie2_pm_set_clk_gating(struct amdxdna_dev_hdl *ndev, u32 val)
 	return 0;
 }
 
-int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-	int ret;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-	if (ndev->dev_status != AIE2_DEV_UNINIT) {
-		/* Resume device */
-		ret = ndev->priv->hw_ops.set_dpm(ndev, ndev->dpm_level);
-		if (ret)
-			return ret;
-
-		ret = aie2_pm_set_clk_gating(ndev, ndev->clk_gating);
-		if (ret)
-			return ret;
-
-		return 0;
-	}
-
-	while (ndev->priv->dpm_clk_tbl[ndev->max_dpm_level].hclk)
-		ndev->max_dpm_level++;
-	ndev->max_dpm_level--;
-
-	ret = ndev->priv->hw_ops.set_dpm(ndev, ndev->max_dpm_level);
-	if (ret)
-		return ret;
-
-	ret = aie2_pm_set_clk_gating(ndev, AIE2_CLK_GATING_ENABLE);
-	if (ret)
-		return ret;
-
-	ndev->pw_mode = POWER_MODE_DEFAULT;
-	ndev->dft_dpm_level = ndev->max_dpm_level;
-
-	return 0;
-}
-
-int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
+static int pm_set_mode(struct amdxdna_dev_hdl *ndev, int target, bool cache_pw_mode)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 clk_gating, dpm_level;
 	int ret;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-
-	if (ndev->pw_mode == target)
-		return 0;
 
 	switch (target) {
 	case POWER_MODE_TURBO:
@@ -88,7 +46,7 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
 		break;
 	case POWER_MODE_MEDIUM:
 		clk_gating = AIE2_CLK_GATING_ENABLE;
-		dpm_level = min(ndev->max_dpm_level, 5);
+		dpm_level = min(ndev->max_dpm_level, 3);
 		break;
 	case POWER_MODE_LOW:
 		clk_gating = AIE2_CLK_GATING_ENABLE;
@@ -102,11 +60,67 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
 	if (ret)
 		return ret;
 
-	ret = aie2_pm_set_clk_gating(ndev, clk_gating);
+	ret = pm_set_clk_gating(ndev, clk_gating);
 	if (ret)
 		return ret;
 
-	ndev->pw_mode = target;
+	if (cache_pw_mode)
+		ndev->pw_mode = target;
 
 	return 0;
+}
+
+int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
+
+	if (ndev->pw_mode == target)
+		return 0;
+
+	return pm_set_mode(ndev, target, true);
+}
+
+int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
+	if (ndev->dev_status != AIE2_DEV_UNINIT) {
+		/* Resume device */
+		ret = pm_set_mode(ndev, ndev->pw_mode, true);
+		if (ret)
+			return ret;
+
+		return 0;
+	}
+
+	while (ndev->priv->dpm_clk_tbl[ndev->max_dpm_level].hclk)
+		ndev->max_dpm_level++;
+	ndev->max_dpm_level--;
+
+	ret = ndev->priv->hw_ops.set_dpm(ndev, ndev->max_dpm_level);
+	if (ret)
+		return ret;
+
+	ret = pm_set_clk_gating(ndev, AIE2_CLK_GATING_ENABLE);
+	if (ret)
+		return ret;
+
+	ndev->pw_mode = POWER_MODE_DEFAULT;
+	ndev->dft_dpm_level = ndev->max_dpm_level;
+
+	return 0;
+}
+
+void aie2_pm_fini(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
+
+	if (pm_set_mode(ndev, POWER_MODE_DEFAULT, false))
+		XDNA_ERR(ndev->xdna, "Can not set to default power mode");
 }

@@ -42,7 +42,7 @@ private:
     }
     dev->record_xclbin(xclbin);
     auto xclbin_uuid = xclbin.get_uuid();
-    xrt::hw_context::qos_type qos{ {"gops", 100} };
+    xrt::hw_context::qos_type qos{ {"gops", 100}, {"priority", 0x180} };
     xrt::hw_context::access_mode mode = xrt::hw_context::access_mode::shared;
 
     m_handle = dev->create_hw_context(xclbin_uuid, qos, mode);

@@ -15,11 +15,16 @@ fi
 installdir=/opt/xilinx/xrt
 udev_rules_d=/etc/udev/rules.d
 amdxdna_rules_file=99-amdxdna.rules
+dracut_conf_d=/etc/dracut.conf.d
+dracut_conf_file=amdxdna.dracut.conf
 
 if lsmod | grep -q "amdxdna "; then
 	rmmod amdxdna
 fi
 
+if [ -f ${dracut_conf_d}/${dracut_conf_file} ]; then
+	rm -rf ${dracut_conf_d}/${dracut_conf_file}
+fi
 if [ -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
 	rm -rf ${udev_rules_d}/${amdxdna_rules_file}
 fi

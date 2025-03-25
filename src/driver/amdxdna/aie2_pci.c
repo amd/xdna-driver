@@ -350,6 +350,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	}
 
 	mutex_lock(&ndev->aie2_lock);
+	aie2_pm_fini(ndev);
 	aie2_mgmt_fw_fini(ndev);
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
@@ -429,15 +430,15 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto destroy_mbox;
 	}
 
-	ret = aie2_pm_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "failed to init pm, ret %d", ret);
-		goto destroy_mgmt_chann;
-	}
-
 	ret = aie2_mgmt_fw_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "initial mgmt firmware failed, ret %d", ret);
+		goto destroy_mgmt_chann;
+	}
+
+	ret = aie2_pm_init(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to init pm, ret %d", ret);
 		goto destroy_mgmt_chann;
 	}
 
@@ -467,7 +468,8 @@ disable_dev:
 
 static void aie2_hw_suspend(struct amdxdna_dev *xdna)
 {
-	aie2_rq_pause_all(&xdna->dev_handle->ctx_rq);
+	aie2_assign_event_trace_state(xdna->dev_handle, false);
+	aie2_rq_stop_all(&xdna->dev_handle->ctx_rq);
 	aie2_hw_stop(xdna);
 }
 
@@ -483,7 +485,8 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	}
 
 	XDNA_INFO(xdna, "context resuming...");
-	aie2_rq_run_all(&xdna->dev_handle->ctx_rq);
+	aie2_rq_restart_all(&xdna->dev_handle->ctx_rq);
+	aie2_assign_event_trace_state(xdna->dev_handle, true);
 	return 0;
 }
 
@@ -506,6 +509,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	ndev->xdna = xdna;
 	mutex_init(&ndev->aie2_lock);
 
+	XDNA_DBG(xdna, "Request fw %s", ndev->priv->fw_path);
 	ret = request_firmware(&fw, ndev->priv->fw_path, &pdev->dev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d",
@@ -601,19 +605,20 @@ skip_pasid:
 		goto disable_sva;
 	}
 
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_mgmt_fw_query(ndev);
+	mutex_unlock(&ndev->aie2_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "Query firmware failed, ret %d", ret);
+		goto stop_hw;
+	}
+	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
+
 	ret = aie2_rq_init(&ndev->ctx_rq);
 	if (ret) {
 		XDNA_ERR(xdna, "Context runqueue init failed");
 		goto stop_hw;
 	}
-
-	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_mgmt_fw_query(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "Query firmware failed, ret %d", ret);
-		goto failed_rq_fini;
-	}
-	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
 
 	xrs_cfg.clk_list.num_levels = ndev->max_dpm_level + 1;
 	for (i = 0; i < xrs_cfg.clk_list.num_levels; i++)
@@ -627,28 +632,31 @@ skip_pasid:
 	if (!ndev->xrs_hdl) {
 		XDNA_ERR(xdna, "Initialize resolver failed");
 		ret = -EINVAL;
-		goto stop_hw;
+		goto fini_rq;
 	}
 
 	ret = aie2_error_async_events_alloc(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
-		goto stop_hw;
+		goto fini_rq;
 	}
 
+	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_error_async_events_send(ndev);
+	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Send async events failed, ret %d", ret);
 		goto async_event_free;
 	}
 
 	/* Just to make sure firmware handled async events */
+	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_query_firmware_version(ndev, &ndev->xdna->fw_ver);
+	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Re-query firmware version failed");
 		goto async_event_free;
 	}
-	mutex_unlock(&ndev->aie2_lock);
 
 	ret = aie2_event_trace_init(ndev);
 	if (ret)
@@ -658,9 +666,8 @@ skip_pasid:
 	return 0;
 
 async_event_free:
-	mutex_unlock(&ndev->aie2_lock);
 	aie2_error_async_events_free(ndev);
-failed_rq_fini:
+fini_rq:
 	aie2_rq_fini(&ndev->ctx_rq);
 stop_hw:
 	aie2_hw_stop(xdna);
@@ -719,11 +726,8 @@ static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 		return;
 	}
 
-	mutex_lock(&xdna->dev_lock);
-	aie2_rq_pause_all_nolock(rq);
-
-	aie2_rq_run_all_nolock(rq);
-	mutex_unlock(&xdna->dev_lock);
+	aie2_rq_stop_all(rq);
+	aie2_rq_restart_all(rq);
 }
 
 static int aie2_get_aie_status(struct amdxdna_client *client,
@@ -929,6 +933,9 @@ static int aie2_get_ctx_status(struct amdxdna_client *client,
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		amdxdna_for_each_ctx(tmp_client, ctx_id, ctx) {
+			if (!ctx->priv)
+				continue;
+
 			req_bytes += sizeof(*tmp);
 			if (args->buffer_size < req_bytes) {
 				/* Continue iterating to get the required size */

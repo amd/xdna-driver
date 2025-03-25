@@ -19,8 +19,7 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )
 execute_process(
-  COMMAND awk -F= "$1==\"ID_LIKE\" {print $2}" /etc/os-release
-  COMMAND tr -d "\""
+  COMMAND bash -c "source /etc/os-release && echo \"\$ID \$ID_LIKE\""
   OUTPUT_VARIABLE XDNA_CPACK_LINUX_PKG_FLAVOR
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )

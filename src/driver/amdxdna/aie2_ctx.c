@@ -484,13 +484,26 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx_priv *priv;
 	struct amdxdna_gem_obj *heap;
-	unsigned int wq_flags;
+	struct amdxdna_dev_hdl *ndev;
 	int i, ret;
+
+	if (!ctx->num_tiles) {
+		XDNA_ERR(xdna, "Number of tiles is zero");
+		return -EINVAL;
+	}
+
+	ndev = xdna->dev_handle;
+	if (unlikely(!ndev->metadata.core.row_count)) {
+		XDNA_WARN(xdna, "Core tile row count is zero");
+		return -EINVAL;
+	}
 
 	priv = kzalloc(sizeof(*ctx->priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 	ctx->priv = priv;
+
+	ctx->priv->orig_num_col = ctx->num_tiles / ndev->metadata.core.row_count;
 
 	ret = aie2_ctx_col_list(ctx);
 	if (ret) {
@@ -522,7 +535,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 		struct amdxdna_drm_create_bo args = {
 			.flags = 0,
 			.type = AMDXDNA_BO_DEV,
-			.vaddr = 0,
+			.udma_fd = 0,
 			.size = MAX_CHAIN_CMDBUF_SIZE,
 		};
 
@@ -544,19 +557,10 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	might_lock(&priv->io_lock);
 	fs_reclaim_release(GFP_KERNEL);
 
-	wq_flags = __WQ_ORDERED;
-	if (!aie2_pm_is_turbo(xdna->dev_handle))
-		wq_flags |= WQ_UNBOUND;
-	priv->submit_wq = alloc_workqueue(ctx->name, wq_flags, 1);
-	if (!priv->submit_wq) {
-		XDNA_ERR(xdna, "Failed to alloc submit wq");
-		goto free_cmd_bufs;
-	}
-
 	ret = aie2_ctx_syncobj_create(ctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
-		goto free_wq;
+		goto free_cmd_bufs;
 	}
 
 	ret = aie2_rq_add(&xdna->dev_handle->ctx_rq, ctx);
@@ -573,8 +577,6 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 
 destroy_syncobj:
 	aie2_ctx_syncobj_destroy(ctx);
-free_wq:
-	destroy_workqueue(priv->submit_wq);
 free_cmd_bufs:
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
 		if (!priv->cmd_buf[i])
@@ -598,7 +600,6 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 
 	aie2_rq_del(&xdna->dev_handle->ctx_rq, ctx);
 
-	destroy_workqueue(ctx->priv->submit_wq);
 	aie2_ctx_syncobj_destroy(ctx);
 	for (idx = 0; idx < ARRAY_SIZE(ctx->priv->cmd_buf); idx++)
 		drm_gem_object_put(to_gobj(ctx->priv->cmd_buf[idx]));

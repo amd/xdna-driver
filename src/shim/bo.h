@@ -20,7 +20,7 @@
   #include <x86intrin.h>
 #endif
 
-namespace shim_xdna {
+namespace {
   
 inline void flush_cache_line(const char *cur)
 {
@@ -36,6 +36,32 @@ inline void flush_cache_line(const char *cur)
     : "memory"
   );
 #endif
+}
+
+}
+
+namespace shim_xdna {
+
+// flash cache line for non coherence memory
+inline void
+clflush_data(const void *base, size_t offset, size_t len)
+{
+  static long cacheline_size = 0;
+
+  if (!cacheline_size) {
+    long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+    if (sz <= 0)
+      shim_err(EINVAL, "Invalid cache line size: %ld", sz);
+    cacheline_size = sz;
+  }
+
+  const char *cur = (const char *)base;
+  cur += offset;
+  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
+  do {
+    flush_cache_line(cur);
+    cur += cacheline_size;
+  } while (cur <= (const char *)lastline);
 }
 
 class bo : public xrt_core::buffer_handle
@@ -98,7 +124,7 @@ protected:
   free_bo();
 
   void
-  mmap_bo(size_t align = 0);
+  mmap_bo();
 
   void
   munmap_bo();
@@ -118,6 +144,7 @@ protected:
   const pdev& m_pdev;
   void* m_aligned = nullptr;
   size_t m_aligned_size = 0;
+  size_t m_alignment = 0;
   uint64_t m_flags = 0;
   int m_type = AMDXDNA_BO_INVALID;
   // Used when exclusively assigned to a HW context. By default, BO is shared
@@ -147,13 +174,13 @@ private:
   uint64_t m_cmd_id = -1;
 
   virtual uint32_t
-  alloc_drm_bo(const shim_xdna::pdev& dev, int type, size_t size);
+  alloc_drm_bo(int type, size_t size);
 
   virtual void
-  get_drm_bo_info(const shim_xdna::pdev& dev, uint32_t boh, amdxdna_drm_get_bo_info* bo_info);
+  get_drm_bo_info(uint32_t boh, amdxdna_drm_get_bo_info* bo_info);
 
   virtual void
-  free_drm_bo(const shim_xdna::pdev& dev, uint32_t boh);
+  free_drm_bo(uint32_t boh);
 };
 
 } // namespace shim_xdna
