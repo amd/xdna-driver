@@ -172,9 +172,12 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
 static void amdxdna_umap_release(struct kref *ref)
 {
 	struct amdxdna_umap *mapp = container_of(ref, struct amdxdna_umap, refcnt);
+	struct vm_area_struct *vma = mapp->vma;
 	struct amdxdna_dev *xdna;
 
 	mmu_interval_notifier_remove(&mapp->notifier);
+	if (is_import_bo(mapp->abo) && vma->vm_file && vma->vm_file->f_mapping)
+		mapping_clear_unevictable(vma->vm_file->f_mapping);
 
 	xdna = to_xdna_dev(to_gobj(mapp->abo)->dev);
 	down_write(&xdna->notifier_lock);
@@ -324,6 +327,15 @@ static void amdxdna_gem_carvedout_obj_free(struct drm_gem_object *gobj)
 	amdxdna_gem_destroy_obj(abo);
 }
 
+static void amdxdna_imported_obj_free(struct amdxdna_gem_obj *abo)
+{
+	dma_buf_unmap_attachment_unlocked(abo->attach, abo->base.sgt, DMA_BIDIRECTIONAL);
+	dma_buf_detach(abo->dma_buf, abo->attach);
+	dma_buf_put(abo->dma_buf);
+	drm_gem_object_release(to_gobj(abo));
+	kfree(abo);
+}
+
 static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
@@ -350,6 +362,12 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 	mutex_destroy(&abo->lock);
 	if (abo->mem.new_pages)
 		kvfree(abo->mem.pages);
+
+	if (is_import_bo(abo)) {
+		amdxdna_imported_obj_free(abo);
+		return;
+	}
+
 	drm_gem_shmem_free(&abo->base);
 }
 
@@ -750,15 +768,18 @@ struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 {
 	struct dma_buf_attachment *attach;
+	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 	struct sg_table *sgt;
 	int ret;
 
-	attach = dma_buf_attach(dma_buf, dev->dev);
-	if (IS_ERR(attach))
-		return ERR_CAST(attach);
-
 	get_dma_buf(dma_buf);
+
+	attach = dma_buf_attach(dma_buf, dev->dev);
+	if (IS_ERR(attach)) {
+		ret = PTR_ERR(attach);
+		goto put_buf;
+	}
 
 	sgt = dma_buf_map_attachment_unlocked(attach, DMA_BIDIRECTIONAL);
 	if (IS_ERR(sgt)) {
@@ -772,13 +793,12 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 		goto fail_unmap;
 	}
 
-	gobj->import_attach = attach;
-	gobj->resv = dma_buf->resv;
+	abo = to_xdna_obj(gobj);
+	abo->attach = attach;
+	abo->dma_buf = dma_buf;
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
-		struct amdxdna_gem_obj *abo;
-
 		abo = to_xdna_obj(gobj);
 		ret = amdxdna_bo_dma_map(abo);
 		if (ret) {
@@ -795,6 +815,7 @@ fail_unmap:
 	dma_buf_unmap_attachment_unlocked(attach, sgt, DMA_BIDIRECTIONAL);
 fail_detach:
 	dma_buf_detach(dma_buf, attach);
+put_buf:
 	dma_buf_put(dma_buf);
 
 	return ERR_PTR(ret);
