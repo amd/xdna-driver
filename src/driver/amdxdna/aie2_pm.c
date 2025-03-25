@@ -115,6 +115,32 @@ int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+int npu1_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr)
+{
+	u64 total_col, hclk_freq;
+
+	total_col = ndev->total_col;
+	hclk_freq = ndev->hclk_freq;
+	*max = 2 * total_col;
+	*curr = (*max * hclk_freq) / 1028;
+
+	return 0;
+}
+
+int npu4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr)
+{
+	const struct amdxdna_dev_priv *priv = ndev->priv;
+	u64 total_col, hclk_freq, topc;
+
+	total_col = ndev->total_col;
+	hclk_freq = ndev->hclk_freq;
+	topc = 4096 * total_col;
+	*max = (topc * priv->dpm_clk_tbl[ndev->max_dpm_level].hclk) / 1000000;
+	*curr = (topc * hclk_freq) / 1000000;
+
+	return 0;
+}
+
 void aie2_pm_fini(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;

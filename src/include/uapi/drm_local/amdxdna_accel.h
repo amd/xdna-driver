@@ -496,6 +496,22 @@ struct amdxdna_drm_get_force_preempt_state {
 };
 
 /**
+ * struct amdxdna_drm_get_resource_info - Get info on some resources within NPU
+ * @ipu_clk_max: max H-Clocks
+ * @ipu_tops_max: max TOPs
+ * @ipu_task_max: max number of tasks
+ * @ipu_tops_curr: current TOPs
+ * @ipu_task_curr: current number of tasks
+ */
+struct amdxdna_drm_get_resource_info {
+	__u64 ipu_clk_max;
+	__u64 ipu_tops_max;
+	__u64 ipu_task_max;
+	__u64 ipu_tops_curr;
+	__u64 ipu_task_curr;
+};
+
+/**
  * struct amdxdna_drm_get_info - Get some information from the AIE hardware.
  * @param: Specifies the structure passed in the buffer.
  * @buffer_size: Size of the input buffer. Size needed/written by the kernel.
@@ -514,6 +530,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_GET_POWER_MODE		9
 #define	DRM_AMDXDNA_QUERY_TELEMETRY		10
 #define	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE	11
+#define	DRM_AMDXDNA_QUERY_RESOURCE_INFO		12
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */

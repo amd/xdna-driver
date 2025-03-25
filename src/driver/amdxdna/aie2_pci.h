@@ -363,6 +363,7 @@ struct aie2_bar_off_pair {
 
 struct aie2_hw_ops {
 	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+	int (*get_tops)(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 };
 
 struct amdxdna_dev_priv {
@@ -429,6 +430,8 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
 void aie2_pm_fini(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
+int npu1_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
+int npu4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 
 static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
 {

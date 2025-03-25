@@ -1044,6 +1044,33 @@ static int aie2_get_force_preempt_state(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie2_get_resource_info(struct amdxdna_client *client,
+				  struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_get_resource_info res_info;
+	const struct amdxdna_dev_priv *priv;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	u64 tops_max, tops_curr;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+	priv = ndev->priv;
+
+	priv->hw_ops.get_tops(ndev, &tops_max, &tops_curr);
+
+	res_info.ipu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
+	res_info.ipu_tops_max = tops_max;
+	res_info.ipu_task_max = priv->hwctx_limit;
+	res_info.ipu_tops_curr = tops_curr;
+	res_info.ipu_task_curr = ndev->hwctx_cnt;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, sizeof(res_info)))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1093,6 +1120,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
 		ret = aie2_get_force_preempt_state(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
+		ret = aie2_get_resource_info(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

@@ -648,6 +648,40 @@ struct clock_topology
   }
 };
 
+struct resource_info
+{
+  using result_type = query::xrt_resource_raw::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_get_resource_info resource_info;
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_RESOURCE_INFO,
+      .buffer_size = sizeof(resource_info),
+      .buffer = reinterpret_cast<uintptr_t>(&resource_info),
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(5);
+    info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_clk_max;
+    info_items[0].data_uint64 = resource_info.ipu_clk_max;
+    info_items[1].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_tops_max;
+    info_items[1].data_double = resource_info.ipu_tops_max;
+    info_items[2].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_task_max;
+    info_items[2].data_uint64 = resource_info.ipu_task_max;
+    info_items[3].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_tops_curr;
+    info_items[3].data_double = resource_info.ipu_tops_curr;
+    info_items[4].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_task_curr;
+    info_items[4].data_uint64 = resource_info.ipu_task_curr;
+
+    return info_items;
+  }
+};
+
 struct firmware_version
 {
   using result_type = query::firmware_version::result_type;
@@ -1099,6 +1133,7 @@ initialize_query_table()
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
   emplace_func0_request<query::clock_freq_topology_raw,        clock_topology>();
+  emplace_func0_request<query::xrt_resource_raw,               resource_info>();
   emplace_func0_request<query::device_class,                   default_value>();
   emplace_func0_request<query::instance,                       instance>();
   emplace_func0_request<query::is_ready,                       default_value>();
