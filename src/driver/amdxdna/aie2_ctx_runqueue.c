@@ -587,7 +587,8 @@ static void rq_dispatch_work(struct work_struct *work)
 
 	mutex_lock(&xdna->dev_lock);
 	down_write(&ctx->priv->io_sem);
-	XDNA_DBG(xdna, "Dispatching %s status %d", ctx->name, ctx->priv->status);
+	XDNA_DBG(xdna, "Dispatching %s status %d QoS priority %d",
+		 ctx->name, ctx->priv->status, ctx->priv->priority);
 	if (!ctx_is_disconnected(ctx))
 		goto out;
 
@@ -717,9 +718,8 @@ static void rq_parts_work(struct work_struct *work)
 		part_cleanup(&rq->parts[i]);
 
 	rq_part_resize(rq);
-
-out:
 	rq->paused = false;
+out:
 	list_for_each_entry_safe(ctx, tmp, &rq->disconn_list, entry)
 		if (atomic64_read(&ctx->priv->job_pending_cnt))
 			queue_work(rq->work_q, &ctx->dispatch_work);
