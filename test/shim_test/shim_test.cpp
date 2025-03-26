@@ -649,7 +649,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
   },
   test_case{ "ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_host, {}
@@ -697,7 +697,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo_single_proc, {}
   },
   test_case{ "multi-command ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "virtual context test", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 0 }

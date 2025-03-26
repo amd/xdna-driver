@@ -224,6 +224,7 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, 
   if (io_test_parameters.type != IO_TEST_NOOP_RUN) {
     for (auto& boset : bo_set) {
       boset->sync_after_run();
+      //boset->dump_content();
       boset->verify_result();
     }
   }

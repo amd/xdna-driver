@@ -179,7 +179,7 @@ xclbin_info xclbin_infos[] = {
     .device = npu1_device_id,
     .revision_id = npu1_revision_id,
     .ip_name2idx = {
-      { "DPU:IPUV1CNN", {0} },
+      { "DPU_ELF:IPUV1CNN", {0} },
     },
     .workspace = "local_shim_test_data/elf_txn_no_cp_npu1",
     .data = "",
