@@ -62,6 +62,31 @@ get_bin_size(const std::string& filename)
   return ifs.tellg();
 }
 
+std::tuple<uint32_t, uint32_t, uint32_t>
+get_ofm_format(const std::string& config_file)
+{
+    std::ifstream config(config_file);
+    if (!config)
+      return { 0, 0, 0 };
+
+    std::map<std::string, uint32_t> conf;
+
+    std::string line;
+    while (std::getline(config, line)) {
+        std::istringstream iss(line);
+        std::string key, value;
+        if (std::getline(iss, key, '=') && std::getline(iss, value))
+            conf[key] = std::stoul(value);
+    }
+
+    std::cout << "OFM format:"
+      << " valid_bytes_per_section=" << conf["valid_bytes_per_section"]
+      << " section_size=" << conf["section_size"]
+      << " total_size=" << conf["total_size"]
+      << std::endl;
+    return { conf["valid_bytes_per_section"], conf["section_size"], conf["total_size"] };
+}
+
 }
 
 io_test_bo_set_base::
@@ -257,31 +282,16 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
 
   ebuf.set_cu_idx(idx);
-  if (dev_id == npu1_device_id) {
-    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
-    ebuf.add_arg_32(3);
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_64(0);
-    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf_path);
-  } else if (dev_id == npu4_device_id) {
-    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
-    ebuf.add_arg_32(3);
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_64(0);
-    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf_path);
-  } else {
-    throw std::runtime_error("Device ID not supported: " + std::to_string(dev_id));
-  }
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.add_arg_64(3);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_32(0);
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf_path);
   if (dump)
     ebuf.dump();
 }
@@ -328,10 +338,15 @@ verify_result()
   auto ofm_golden_p = reinterpret_cast<char*>(buf_ofm_golden.data());
   read_data_from_bin(m_local_data_path + "/ofm.bin", 0, sz, reinterpret_cast<int*>(ofm_golden_p));
 
+  auto [ valid_per_sec, sec_size, total_size ] = get_ofm_format(m_local_data_path + "/ofm_format.ini");
+  if (total_size == 0)
+    valid_per_sec = sec_size = total_size = sz;
   size_t count = 0;
-  for (size_t i = 0; i < sz; i++) {
-    if (ofm_p[i] != ofm_golden_p[i])
-      count++;
+  for (size_t i = 0; i < total_size; i += sec_size) {
+    for (size_t j = i; j < i + valid_per_sec; j++) {
+      if (ofm_p[i] != ofm_golden_p[i])
+        count++;
+    }
   }
   if (count)
     throw std::runtime_error(std::to_string(count) + " bytes result mismatch!!!");
