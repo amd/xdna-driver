@@ -70,7 +70,6 @@ get_ofm_format(const std::string& config_file)
       return { 0, 0, 0 };
 
     std::map<std::string, uint32_t> conf;
-
     std::string line;
     while (std::getline(config, line)) {
         std::istringstream iss(line);
@@ -78,12 +77,6 @@ get_ofm_format(const std::string& config_file)
         if (std::getline(iss, key, '=') && std::getline(iss, value))
             conf[key] = std::stoul(value);
     }
-
-    std::cout << "OFM format:"
-      << " valid_bytes_per_section=" << conf["valid_bytes_per_section"]
-      << " section_size=" << conf["section_size"]
-      << " total_size=" << conf["total_size"]
-      << std::endl;
     return { conf["valid_bytes_per_section"], conf["section_size"], conf["total_size"] };
 }
 
