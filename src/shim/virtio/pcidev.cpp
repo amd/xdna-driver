@@ -227,13 +227,6 @@ host_call(void *in_buf, size_t in_size, void *out_buf, size_t out_size) const
     memcpy(out_buf, m_resp_buf, sz);
 }
 
-uint32_t
-pdev_virtio::
-get_unique_id() const
-{
-  return ++m_id;
-}
-
 uint64_t
 pdev_virtio::
 get_dev_bo_vaddr(uint64_t dev_bo_xdna_addr) const

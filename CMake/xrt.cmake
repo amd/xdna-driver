@@ -18,7 +18,6 @@ set(XRT_EXCLUDE_SUB_DIRECTORY
   src/runtime_src/xrt
 
   tests/validate
-  src/xma
   )
 
 # Instruct XRT to build the npu component
