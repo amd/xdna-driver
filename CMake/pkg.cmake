@@ -64,6 +64,7 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   FILES_MATCHING
   PATTERN "*.xclbin"
   PATTERN "*.txt"
+  PATTERN "*.elf"
   )
 
 configure_file(
