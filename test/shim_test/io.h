@@ -99,7 +99,7 @@ public:
   verify_result() override;
 
 private:
-  std::string m_elf_path;
+  std::string m_txn_bin_path;
 };
 
 #endif // _SHIMTEST_IO_H_

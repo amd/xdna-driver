@@ -5,6 +5,7 @@
 #include "hwctx.h"
 #include "exec_buf.h"
 #include "io_config.h"
+#include "core/common/aiebu/src/cpp/aiebu/src/include/aiebu_assembler.h"
 
 #include <string>
 #include <regex>
@@ -80,7 +81,30 @@ get_ofm_format(const std::string& config_file)
     return { conf["valid_bytes_per_section"], conf["section_size"], conf["total_size"] };
 }
 
+xrt::elf
+txn2elf(std::vector<char>& txn_buf)
+{
+  aiebu::aiebu_assembler as(aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf);
+  auto elf_buf = as.get_elf();
+  std::istringstream elf_stream;
+  elf_stream.rdbuf()->pubsetbuf(elf_buf.data(), elf_buf.size());
+  xrt::elf elf{elf_stream};
+  return elf;
 }
+
+const xrt::elf
+txn_file2elf(const std::string& filename)
+{
+  size_t instr_size = get_bin_size(filename);
+  if (instr_size == 0)
+    throw std::runtime_error("Zero instruction length");
+
+  std::vector<char> txn_buf(instr_size);
+  read_data_from_bin(filename, 0, instr_size, reinterpret_cast<int*>(txn_buf.data()));
+  return txn2elf(txn_buf);
+}
+
+} // namespace
 
 io_test_bo_set_base::
 io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
@@ -156,7 +180,7 @@ io_test_bo_set(device* dev) : io_test_bo_set(dev, get_xclbin_name(dev))
 elf_io_test_bo_set::
 elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   io_test_bo_set_base(dev, xclbin_name)
-  , m_elf_path(m_local_data_path + "/no-ctrl-packet.elf")
+  , m_txn_bin_path(m_local_data_path + "/ml_txn.bin")
 {
   std::string file;
 
@@ -170,7 +194,7 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       alloc_bo(ibo, m_dev, type);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      ibo.size = exec_buf::get_ctrl_code_size(m_elf_path);
+      ibo.size = exec_buf::get_ctrl_code_size(txn_file2elf(m_txn_bin_path));
       if (ibo.size == 0)
         throw std::runtime_error("instruction size cannot be 0");
       alloc_bo(ibo, m_dev, type);
@@ -273,6 +297,7 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
   auto dev_id = device_query<query::pcie_device>(m_dev);
 
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
+  auto elf = txn_file2elf(m_txn_bin_path);
 
   ebuf.set_cu_idx(idx);
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
@@ -284,7 +309,7 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
   ebuf.add_arg_64(0);
   ebuf.add_arg_64(0);
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf_path);
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), elf);
   if (dump)
     ebuf.dump();
 }
