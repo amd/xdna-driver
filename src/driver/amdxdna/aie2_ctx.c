@@ -865,7 +865,8 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 
 	ret = aie2_rq_submit_enter(&xdna->dev_handle->ctx_rq, ctx);
 	if (ret) {
-		XDNA_ERR(xdna, "Submit enter failed, ret %d", ret);
+		if (ret != -ERESTARTSYS)
+			XDNA_ERR(xdna, "Submit enter failed, ret %d", ret);
 		goto up_job_sem;
 	}
 

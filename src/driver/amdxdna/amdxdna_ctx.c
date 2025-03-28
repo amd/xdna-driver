@@ -445,7 +445,8 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	ret = xdna->dev_info->ops->cmd_submit(ctx, job, syncobj_hdls,
 					      syncobj_points, syncobj_cnt, seq);
 	if (ret) {
-		XDNA_ERR(xdna, "Submit cmds failed, ret %d", ret);
+		if (ret != -ERESTARTSYS)
+			XDNA_ERR(xdna, "Submit cmds failed, ret %d", ret);
 		goto put_fence;
 	}
 
