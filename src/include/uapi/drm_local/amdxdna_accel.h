@@ -497,18 +497,18 @@ struct amdxdna_drm_get_force_preempt_state {
 
 /**
  * struct amdxdna_drm_get_resource_info - Get info on some resources within NPU
- * @ipu_clk_max: max H-Clocks
- * @ipu_tops_max: max TOPs
- * @ipu_task_max: max number of tasks
- * @ipu_tops_curr: current TOPs
- * @ipu_task_curr: current number of tasks
+ * @npu_clk_max: max H-Clocks
+ * @npu_tops_max: max TOPs
+ * @npu_task_max: max number of tasks
+ * @npu_tops_curr: current TOPs
+ * @npu_task_curr: current number of tasks
  */
 struct amdxdna_drm_get_resource_info {
-	__u64 ipu_clk_max;
-	__u64 ipu_tops_max;
-	__u64 ipu_task_max;
-	__u64 ipu_tops_curr;
-	__u64 ipu_task_curr;
+	__u64 npu_clk_max;
+	__u64 npu_tops_max;
+	__u64 npu_task_max;
+	__u64 npu_tops_curr;
+	__u64 npu_task_curr;
 };
 
 /**

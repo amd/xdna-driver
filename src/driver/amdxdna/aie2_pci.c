@@ -1059,11 +1059,11 @@ static int aie2_get_resource_info(struct amdxdna_client *client,
 
 	priv->hw_ops.get_tops(ndev, &tops_max, &tops_curr);
 
-	res_info.ipu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
-	res_info.ipu_tops_max = tops_max;
-	res_info.ipu_task_max = priv->hwctx_limit;
-	res_info.ipu_tops_curr = tops_curr;
-	res_info.ipu_task_curr = ndev->hwctx_cnt;
+	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
+	res_info.npu_tops_max = tops_max;
+	res_info.npu_task_max = priv->hwctx_limit;
+	res_info.npu_tops_curr = tops_curr;
+	res_info.npu_task_curr = ndev->hwctx_cnt;
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, sizeof(res_info)))
 		return -EFAULT;
