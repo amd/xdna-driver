@@ -12,9 +12,9 @@
 #include "aie2_pci.h"
 #include "aie2_msg_priv.h"
 
-bool force_cmdlist;
+bool force_cmdlist = true;
 module_param(force_cmdlist, bool, 0600);
-MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
+MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default true)");
 
 static void aie2_job_release(struct kref *ref)
 {
