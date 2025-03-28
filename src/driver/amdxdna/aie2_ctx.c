@@ -12,9 +12,9 @@
 #include "aie2_pci.h"
 #include "aie2_msg_priv.h"
 
-bool force_cmdlist;
+bool force_cmdlist = true;
 module_param(force_cmdlist, bool, 0600);
-MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default false)");
+MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default true)");
 
 static void aie2_job_release(struct kref *ref)
 {
@@ -865,7 +865,8 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 
 	ret = aie2_rq_submit_enter(&xdna->dev_handle->ctx_rq, ctx);
 	if (ret) {
-		XDNA_ERR(xdna, "Submit enter failed, ret %d", ret);
+		if (ret != -ERESTARTSYS)
+			XDNA_ERR(xdna, "Submit enter failed, ret %d", ret);
 		goto up_job_sem;
 	}
 

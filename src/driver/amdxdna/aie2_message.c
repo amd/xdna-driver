@@ -607,7 +607,7 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
-		XDNA_ERR(xdna, "Send message failed");
+		XDNA_ERR(xdna, "Send message failed ret %d", ret);
 		return ret;
 	}
 	job->msg_id = msg.id;

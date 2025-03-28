@@ -291,12 +291,18 @@ mailbox_send_msg(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
 	start_addr = mb_chann->res[CHAN_RES_X2I].rb_start_addr;
 	tmp_tail = tail + mb_msg->pkg_size;
 
-	if (tail < head && tmp_tail >= head)
+	if (tail < head && tmp_tail >= head) {
+		MB_DBG(mb_chann, "head 0x%x tail 0x%x tmp_tail 0x%x",
+		       head, tail, tmp_tail);
 		goto no_space;
+	}
 
 	if (tail >= head && (tmp_tail > ringbuf_size - sizeof(u32) &&
-			     mb_msg->pkg_size >= head))
+			     mb_msg->pkg_size >= head)) {
+		MB_DBG(mb_chann, "head 0x%x tail 0x%x tmp_tail 0x%x",
+		       head, tail, tmp_tail);
 		goto no_space;
+	}
 
 	if (tail >= head && tmp_tail > ringbuf_size - sizeof(u32)) {
 		write_addr = mb_chann->mb->res.ringbuf_base + start_addr + tail;

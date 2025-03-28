@@ -556,7 +556,8 @@ static void rq_yield_work(struct work_struct *work)
 	if (ctx->submitted != ctx->completed)
 		goto out;
 
-	if (part->ctx_cnt <= part->hwctx_cnt && !ctx->priv->force_yield) {
+	rq = part->rq;
+	if (part->ctx_cnt <= part->hwctx_cnt && !ctx->priv->force_yield && !rq->paused) {
 		if (!part_connect_is_full(part))
 			ctx->priv->should_block = false;
 		ctx->priv->status = CTX_STATE_CONNECTED;
@@ -566,7 +567,6 @@ static void rq_yield_work(struct work_struct *work)
 
 	ctx->priv->should_block = false;
 	part_ctx_stop(ctx);
-	rq = part->rq;
 	if (rq->paused)
 		queue_work(rq->work_q, &rq->parts_work);
 	else
@@ -913,8 +913,11 @@ again:
 	queue_work(rq->work_q, &ctx->dispatch_work);
 	ret = wait_event_interruptible(ctx->priv->connect_waitq,
 				       ctx_is_connected(ctx) || ctx_is_fatal(ctx));
-	if (ret)
+	if (ret) {
+		XDNA_DBG(xdna, "%s status %d ret %d", ctx->name,
+			 ctx->priv->status, ret);
 		goto exit_and_cleanup;
+	}
 
 	if (ctx_is_fatal(ctx)) {
 		atomic64_dec(&ctx->priv->job_pending_cnt);
@@ -939,7 +942,6 @@ exit_and_cleanup:
 	cancel_work_sync(&ctx->dispatch_work);
 	atomic64_dec(&ctx->priv->job_pending_cnt);
 
-	XDNA_DBG(xdna, "%s status %d", ctx->name, ctx->priv->status);
 	mutex_lock(&xdna->dev_lock);
 	if (ctx_is_dispatched(ctx))
 		rq_ctx_cancel(rq, ctx);
