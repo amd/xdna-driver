@@ -91,6 +91,7 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 	},
 	.hw_ops		= {
 		.set_dpm = npu1_set_dpm,
+		.get_tops = npu1_get_tops,
 	},
 
 #ifdef AMDXDNA_DEVEL

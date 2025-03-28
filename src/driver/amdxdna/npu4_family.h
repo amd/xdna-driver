@@ -90,6 +90,7 @@
 	},											\
 	.hw_ops		= {									\
 		.set_dpm = npu4_set_dpm,							\
+		.get_tops = npu4_get_tops,							\
 	}
 
 #define NPU4_COMMON_DEV_INFO \
