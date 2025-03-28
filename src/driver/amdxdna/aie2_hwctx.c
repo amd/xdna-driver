@@ -115,6 +115,7 @@ static int aie2_unload_hwctx(struct amdxdna_ctx *ctx)
 	 * Call xdna_mailbox_free_channel() when ctx is destroyed.
 	 */
 	xdna_mailbox_destroy_channel(ctx->priv->mbox_chann);
+	ctx->priv->mbox_chann = NULL;
 	return ret;
 }
 

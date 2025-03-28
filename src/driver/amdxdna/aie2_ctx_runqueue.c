@@ -455,6 +455,7 @@ static void part_block_all_ctx(struct aie2_partition *part)
 static void part_cleanup(struct aie2_partition *part)
 {
 	struct amdxdna_ctx *ctx, *tmp;
+	struct amdxdna_dev *xdna;
 	struct aie2_ctx_rq *rq;
 	struct list_head *q;
 	int i;
@@ -464,6 +465,8 @@ static void part_cleanup(struct aie2_partition *part)
 		return;
 
 	rq = part->rq;
+	xdna = ctx_rq_to_xdna_dev(rq);
+	XDNA_DBG(xdna, "Part [%d %d]", part->start_col, part->end_col);
 	for (i = 0; i < ARRAY_SIZE(part->runqueue); i++) {
 		q = &part->runqueue[i];
 		list_for_each_entry_safe(ctx, tmp, q, entry) {
@@ -471,6 +474,8 @@ static void part_cleanup(struct aie2_partition *part)
 			part->ctx_cnt--;
 			if (ctx_is_rt(ctx))
 				part->rt_ctx_cnt--;
+			ctx->priv->status = CTX_STATE_DISCONNECTED;
+			ctx->priv->part = NULL;
 			queue_work(rq->work_q, &ctx->dispatch_work);
 		}
 	}
@@ -593,7 +598,7 @@ static void rq_dispatch_work(struct work_struct *work)
 		goto out;
 
 	if (rq->paused) {
-		XDNA_INFO(xdna, "Paused %s delay dispatch", ctx->name);
+		XDNA_DBG(xdna, "Paused %s delay dispatch", ctx->name);
 		goto out;
 	}
 
@@ -665,30 +670,63 @@ static void rq_part_reinit(struct aie2_ctx_rq *rq, bool all)
 #define rq_part_resize(rq) rq_part_reinit(rq, false)
 #define rq_part_init(rq) rq_part_reinit(rq, true)
 
-static void rq_parts_work(struct work_struct *work)
+static inline u32 get_part_cols(struct aie2_partition *p)
 {
-	struct aie2_partition *part;
+	return p->end_col - p->start_col + 1;
+}
+
+static bool should_update_parts(struct aie2_ctx_rq *rq)
+{
 	struct amdxdna_dev *xdna;
-	struct amdxdna_ctx *ctx;
-	struct amdxdna_ctx *tmp;
-	struct aie2_ctx_rq *rq;
-	bool active = false;
 	u32 part_rt_ctx = 0;
+	u32 part_ctx = 0;
 	u32 part_col;
 	int i;
 
-	rq = container_of(work, struct aie2_ctx_rq, parts_work);
 	xdna = ctx_rq_to_xdna_dev(rq);
-
-	mutex_lock(&xdna->dev_lock);
-	for (i = 0; i < rq->num_parts; i++)
+	part_col = get_part_cols(&rq->parts[0]);
+	for (i = 0; i < rq->num_parts; i++) {
 		part_rt_ctx += rq->parts[i].max_rt_ctx;
-	part_col = rq->parts[0].end_col - rq->parts[0].start_col + 1;
-	if (rq->col_arr[rq->max_cols] && rq->max_cols == part_col &&
-	    part_rt_ctx == rq->rt_ctx_cnt)
-		goto out;
+		part_ctx += rq->parts[i].ctx_cnt;
+	}
 
-	/* Partition expanding or trimming is needed */
+	XDNA_DBG(xdna, "max_cols %d part_col %d rt_ctx %d part_rt_ctx %d",
+		 rq->max_cols, part_col, rq->rt_ctx_cnt, part_rt_ctx);
+
+	/* rq is paused, go update */
+	if (rq->paused && !part_ctx)
+		return true;
+
+	/*
+	 * The counter of partition cols is zero.
+	 * Trimming partition is needed.
+	 */
+	if (!rq->col_arr[part_col])
+		return true;
+
+	/*
+	 * When max cols not equals to partition cols,
+	 * it needs to update partition cols to new max cols.
+	 */
+	if (rq->max_cols != part_col)
+		return true;
+
+	/*
+	 * When max cols not equals to partition cols,
+	 * it needs to update partition cols to new max cols.
+	 */
+	if (rq->rt_ctx_cnt != part_rt_ctx)
+		return true;
+
+	return false;
+}
+
+static bool handle_busy_ctxs(struct aie2_ctx_rq *rq)
+{
+	struct aie2_partition *part;
+	bool active = false;
+	int i;
+
 	rq->paused = true;
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
@@ -700,9 +738,32 @@ static void rq_parts_work(struct work_struct *work)
 		part_handle_idle_ctx(part, true);
 	}
 
-	if (active)
+	return active;
+}
+
+static void rq_parts_work(struct work_struct *work)
+{
+	struct amdxdna_dev *xdna;
+	struct amdxdna_ctx *ctx;
+	struct amdxdna_ctx *tmp;
+	struct aie2_ctx_rq *rq;
+	u32 part_col;
+	int i;
+
+	rq = container_of(work, struct aie2_ctx_rq, parts_work);
+	xdna = ctx_rq_to_xdna_dev(rq);
+
+	mutex_lock(&xdna->dev_lock);
+	if (!should_update_parts(rq))
 		goto out;
 
+	/* Partition expanding or trimming is needed */
+	if (handle_busy_ctxs(rq)) {
+		XDNA_DBG(xdna, "Wait for disconneting active contexts");
+		goto out;
+	}
+
+	part_col = get_part_cols(&rq->parts[0]);
 	if (rq->max_cols == part_col) {
 		/* Find out the next maximum column in records */
 		for (i = rq->max_cols; i > 0; i--) {
@@ -848,6 +909,7 @@ static int rq_submit_enter_slow(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	xdna = ctx_rq_to_xdna_dev(rq);
 
 	atomic64_inc(&ctx->priv->job_pending_cnt);
+again:
 	queue_work(rq->work_q, &ctx->dispatch_work);
 	ret = wait_event_interruptible(ctx->priv->connect_waitq,
 				       ctx_is_connected(ctx) || ctx_is_fatal(ctx));
@@ -866,6 +928,10 @@ static int rq_submit_enter_slow(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	 * At this point, this context will not be swapped out.
 	 */
 	down_read(&ctx->priv->io_sem);
+	if (!ctx_is_connected(ctx)) {
+		up_read(&ctx->priv->io_sem);
+		goto again;
+	}
 	atomic64_dec(&ctx->priv->job_pending_cnt);
 	return 0;
 
