@@ -285,7 +285,6 @@ select_next_ctx(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 
 		i++;
 	}
-	WARN_ON(!ret); /* ctx_cnt or hwctx_cnt mismatched with runqueue */
 
 out:
 	return ret;
