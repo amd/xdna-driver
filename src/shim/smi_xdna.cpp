@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#include "smi.h"
+#include "smi_xdna.h"
 
 namespace shim_xdna::smi {
 
 smi_xdna::
-smi_xdna() : smi_base() 
-{
-  // Filter validate_test_desc to include only relevant entries
-  validate_test_desc = {
+smi_xdna() : smi_base( 
+  {
     {"aie-reconfig-overhead", "Run end-to-end array reconfiguration overhead through shim DMA", "hidden"},
     {"all", "All applicable validate tests will be executed (default)", "common"},
     {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
@@ -22,26 +20,28 @@ smi_xdna() : smi_base()
     {"tct-one-col", "Measure average TCT processing time for one column", "hidden"},
     {"temporal-sharing-overhead", "Run Temporal Sharing Overhead Test", "hidden"},
     {"throughput", "Run end-to-end throughput test", "common"}
-  };
-
-  // Filter examine_report_desc to include only relevant entries
-  examine_report_desc = {
+  },
+  {
     {"aie-partitions", "AIE partition information", "common"},
     {"host", "Host information", "common"},
     {"platform", "Platforms flashed on the device", "common"},
     {"telemetry", "Telemetry data for the device", "hidden"},
     {"preemption", "Preemption telemetry data for the device", "hidden"},
     {"clocks", "Clock frequency information", "hidden"}
-  };
-}
-  
+  },
+  {
+    {"device", "d", "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest", "common", "", "string"},
+    {"help", "h", "Help to use this sub-command", "common", "", "none"}
+  })
+{}
+
 static shim_xdna::smi::smi_xdna smi_instance;
 
 std::string
 get_smi_config()
 {
   // Call the get_smi_config method
-  return smi_instance.get_smi_config();
+  return smi_instance.build_smi_config();
 }
 
 const xrt_core::smi::tuple_vector&
