@@ -473,8 +473,8 @@ static int config_cu_cb(void *handle, void __iomem *data, size_t size)
 int aie2_config_cu(struct amdxdna_ctx *ctx)
 {
 	struct mailbox_channel *chann = ctx->priv->mbox_chann;
-	u32 shift = xdna->dev_info->dev_mem_buf_shift;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
+	u32 shift = xdna->dev_info->dev_mem_buf_shift;
 	struct config_cu_req req = { 0 };
 	struct xdna_mailbox_msg msg = {
 		.send_data = (u8 *)&req,
