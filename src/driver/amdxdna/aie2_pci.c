@@ -38,6 +38,10 @@ bool disable_fine_preemption;
 module_param(disable_fine_preemption, bool, 0600);
 MODULE_PARM_DESC(disable_fine_preemption, "Disable fine grain preemption");
 
+uint time_quantun_ms = 30; /* 30 milliseconds */
+module_param(time_quantun_ms, uint, 0600);
+MODULE_PARM_DESC(time_quantun_ms, "Sets the default execution time quantum for all context in milliseconds");
+
 /*
  * The management mailbox channel is allocated by firmware.
  * The related register and ring buffer information is on SRAM BAR.
@@ -268,6 +272,11 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->xdna, "Can not assign PASID");
 		return ret;
 	}
+
+	ret = aie2_runtime_update_prop(ndev, AIE2_UPDATE_PROPERTY_TIME_QUOTA,
+				       time_quantun_ms * 1000);
+	if (ret)
+		XDNA_WARN(ndev->xdna, "Failed to update execution time quantum");
 
 	ret = aie2_xdna_reset(ndev);
 	if (ret) {
