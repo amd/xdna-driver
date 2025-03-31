@@ -457,15 +457,38 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 }
 
 /* Below messages are to hardware context mailbox channel */
+
+static int config_cu_cb(void *handle, void __iomem *data, size_t size)
+{
+	struct amdxdna_dev *xdna = handle;
+	u32 status;
+
+	if (data)
+		memcpy_fromio(&status, data, sizeof(status));
+
+	XDNA_DBG(xdna, "config cu got resp, status 0x%x", status);
+	return 0;
+}
+
 int aie2_config_cu(struct amdxdna_ctx *ctx)
 {
 	struct mailbox_channel *chann = ctx->priv->mbox_chann;
-	struct amdxdna_dev *xdna = ctx->client->xdna;
 	u32 shift = xdna->dev_info->dev_mem_buf_shift;
-	DECLARE_AIE2_MSG(config_cu, MSG_OP_CONFIG_CU);
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct config_cu_req req = { 0 };
+	struct xdna_mailbox_msg msg = {
+		.send_data = (u8 *)&req,
+		.send_size = sizeof(req),
+		.handle = xdna,
+		.opcode = MSG_OP_CONFIG_CU,
+		.notify_cb = config_cu_cb,
+	};
 	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
 	int ret, i;
+
+	if (!ctx->cus)
+		return 0;
 
 	if (!chann)
 		return -ENODEV;
@@ -500,20 +523,10 @@ int aie2_config_cu(struct amdxdna_ctx *ctx)
 	}
 	req.num_cus = ctx->cus->num_cus;
 
-	ret = xdna_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME) {
-		xdna_mailbox_stop_channel(chann);
-		xdna_mailbox_destroy_channel(chann);
-		ctx->priv->mbox_chann = NULL;
-	}
+	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	if (ret)
+		XDNA_ERR(xdna, "Send message failed, ret %d", ret);
 
-	if (resp.status == AIE2_STATUS_SUCCESS) {
-		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
-		return 0;
-	}
-
-	XDNA_ERR(xdna, "Command opcode 0x%x failed, status 0x%x ret %d",
-		 msg.opcode, resp.status, ret);
 	return ret;
 }
 

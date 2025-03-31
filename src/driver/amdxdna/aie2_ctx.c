@@ -116,9 +116,6 @@ int aie2_ctx_connect(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	int ret;
 
-	if (!ctx->cus)
-		return -EINVAL;
-
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	ret = aie2_hwctx_start(ctx);
 	if (ret)
