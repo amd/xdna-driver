@@ -16,6 +16,7 @@ enum amdxdna_ccmd {
 	AMDXDNA_CCMD_CREATE_CTX,
 	AMDXDNA_CCMD_DESTROY_CTX,
 	AMDXDNA_CCMD_CONFIG_CTX,
+	AMDXDNA_CCMD_EXEC_CMD,
 };
 
 #ifdef __cplusplus
@@ -125,5 +126,23 @@ struct amdxdna_ccmd_config_ctx_req {
 	uint64_t param_val[];
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_config_ctx_req)
+
+/*
+ * AMDXDNA_CCMD_EXEC_CMD
+ */
+struct amdxdna_ccmd_exec_cmd_req {
+	struct vdrm_ccmd_req hdr;
+	uint32_t ctx_handle;
+	uint32_t type;
+	uint32_t cmd_count;
+	uint32_t arg_count;
+	uint64_t cmds_n_args[];
+};
+DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_exec_cmd_req)
+
+struct amdxdna_ccmd_exec_cmd_rsp {
+	struct amdxdna_ccmd_rsp hdr;
+	uint64_t seq;
+};
 
 #endif /* AMDXDNA_PROTO_H_ */

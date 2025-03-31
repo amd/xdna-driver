@@ -89,20 +89,21 @@ protected:
   void
   set_syncobj(uint32_t syncobj);
 
-  void
+  virtual void
   create_ctx_on_device();
+
+  amdxdna_qos_info m_qos = {};
+  uint32_t m_ops_per_cycle;
+  std::unique_ptr<hw_q> m_q;
 
 private:
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
-  amdxdna_qos_info m_qos = {};
   std::vector<cu_info> m_cu_info;
-  std::unique_ptr<hw_q> m_q;
-  uint32_t m_ops_per_cycle;
-  uint32_t m_doorbell;
-  uint32_t m_syncobj;
+  uint32_t m_doorbell = 0;
+  uint32_t m_syncobj = 0;
 
-  void
+  virtual void
   delete_ctx_on_device();
 
   void

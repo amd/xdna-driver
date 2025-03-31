@@ -35,7 +35,6 @@ drm_bo_alloc(const shim_xdna::pdev& dev, size_t size)
     .blob_mem   = VIRTGPU_BLOB_MEM_GUEST,
     .blob_flags = VIRTGPU_BLOB_FLAG_USE_MAPPABLE,
     .size       = size,
-    .blob_id    = 0,
   };
   dev.ioctl(DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &args);
   return {args.bo_handle, args.res_handle};
@@ -131,7 +130,7 @@ bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   if (m_type == AMDXDNA_BO_SHARE)
     sync(direction::host2device, size, 0);
 
-  shim_debug("Allocated VIRTIO BO, %s", describe().c_str());
+  shim_debug("Allocated VIRTIO BO, %s, host=%d", describe().c_str(), m_host_handle);
 }
 
 bo_virtio::
@@ -194,6 +193,13 @@ free_drm_bo(uint32_t boh)
 {
   host_bo_free(m_pdev, m_host_handle);
   drm_bo_free(m_pdev, boh);
+}
+
+uint32_t
+bo_virtio::
+get_host_bo_handle() const
+{
+  return m_host_handle;
 }
 
 } // namespace shim_xdna

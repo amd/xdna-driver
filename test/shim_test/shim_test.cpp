@@ -275,12 +275,15 @@ TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> sdev,
   // Try opening device and creating ctx twice
   {
     auto dev = get_userpf_device(id);
-    hw_ctx hwctx{dev.get()};
+    hw_ctx hwctx1{dev.get()};
+    hw_ctx hwctx2{dev.get()};
   }
+#if 0
   {
     auto dev = get_userpf_device(id);
     hw_ctx hwctx{dev.get()};
   }
+#endif
 }
 
 void
