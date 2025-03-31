@@ -257,7 +257,7 @@ rq_part_select(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 static struct amdxdna_ctx *
 select_next_ctx(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 {
-	struct amdxdna_ctx *ret;
+	struct amdxdna_ctx *ret = NULL;
 	struct list_head *q;
 	int i;
 
@@ -285,6 +285,7 @@ select_next_ctx(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 
 		i++;
 	}
+	WARN_ON(!ret); /* ctx_cnt or hwctx_cnt mismatched with runqueue */
 
 out:
 	return ret;
