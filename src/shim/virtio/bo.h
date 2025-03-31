@@ -24,8 +24,11 @@ public:
   // Support BO creation from internal
   bo_virtio(const pdev& pdev, size_t size, int type);
 
+  uint32_t
+  get_host_bo_handle() const;
+
 private:
-  uint32_t m_blob_id = AMDXDNA_INVALID_BO_HANDLE;
+  uint32_t m_host_handle = AMDXDNA_INVALID_BO_HANDLE;
   uint64_t m_xdna_addr = 0;
 
   bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,

@@ -2,6 +2,7 @@
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
+#include "hwctx.h"
 #include "device.h"
 
 namespace shim_xdna {
@@ -23,7 +24,7 @@ std::unique_ptr<xrt_core::hwctx_handle>
 device_virtio::
 create_hw_context(const device& dev, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos) const
 {
-  shim_not_supported_err(__func__);
+  return std::make_unique<hw_ctx_virtio>(dev, xclbin, qos);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

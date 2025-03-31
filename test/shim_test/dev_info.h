@@ -19,11 +19,13 @@ struct xclbin_info {
 };
 
 const uint16_t npu1_device_id = 0x1502;
+const uint16_t npu1_device_id1 = 0x1050;
 const uint16_t npu3_device_id = 0x1569;
 const uint16_t npu3_device_id1 = 0x1640;
 const uint16_t npu4_device_id = 0x17f0;
 const uint16_t npu_any_revision_id = 0xffff;
 const uint16_t npu1_revision_id = 0x0;
+const uint16_t npu1_revision_id1 = 0x1;
 const uint16_t npu2_revision_id = 0x0;
 const uint16_t npu4_revision_id = 0x10;
 const uint16_t npu5_revision_id = 0x11;

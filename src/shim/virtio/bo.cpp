@@ -35,7 +35,6 @@ drm_bo_alloc(const shim_xdna::pdev& dev, size_t size)
     .blob_mem   = VIRTGPU_BLOB_MEM_GUEST,
     .blob_flags = VIRTGPU_BLOB_FLAG_USE_MAPPABLE,
     .size       = size,
-    .blob_id    = 0,
   };
   dev.ioctl(DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &args);
   return {args.bo_handle, args.res_handle};
@@ -77,16 +76,15 @@ host_bo_alloc(const shim_xdna::pdev& dev, int type, size_t size, uint32_t res_id
   req.hdr.len = sizeof(req);
   req.hdr.rsp_off = 0;
   req.res_id = res_id;
-  req.blob_id = vdev.get_unique_id();
   req.bo_type = type;
   req.size = size;
   req.map_align = align;
   vdev.host_call(&req, sizeof(req), &rsp, sizeof(rsp));
-  return { req.blob_id, rsp.xdna_addr };
+  return { rsp.handle, rsp.xdna_addr };
 }
 
 void
-host_bo_free(const shim_xdna::pdev& dev, uint32_t blob_id)
+host_bo_free(const shim_xdna::pdev& dev, uint32_t host_hdl)
 {
   const shim_xdna::pdev_virtio& vdev = static_cast<const shim_xdna::pdev_virtio&>(dev);
   amdxdna_ccmd_destroy_bo_req req = {};
@@ -94,7 +92,7 @@ host_bo_free(const shim_xdna::pdev& dev, uint32_t blob_id)
   req.hdr.cmd = AMDXDNA_CCMD_DESTROY_BO;
   req.hdr.len = sizeof(req);
   req.hdr.rsp_off = 0;
-  req.blob_id = blob_id;
+  req.handle = host_hdl;
   vdev.host_call(&req, sizeof(req), nullptr, 0);
 }
 
@@ -132,7 +130,7 @@ bo_virtio(const pdev& pdev, xrt_core::hwctx_handle::slot_id ctx_id,
   if (m_type == AMDXDNA_BO_SHARE)
     sync(direction::host2device, size, 0);
 
-  shim_debug("Allocated VIRTIO BO, %s", describe().c_str());
+  shim_debug("Allocated VIRTIO BO, %s, host=%d", describe().c_str(), m_host_handle);
 }
 
 bo_virtio::
@@ -171,7 +169,7 @@ alloc_drm_bo(int type, size_t size)
     resh = p.second;
   }
   auto p = host_bo_alloc(m_pdev, type, size, resh, m_alignment);
-  m_blob_id = p.first;
+  m_host_handle = p.first;
   m_xdna_addr = p.second;
 
   return boh;
@@ -193,8 +191,15 @@ void
 bo_virtio::
 free_drm_bo(uint32_t boh)
 {
-  host_bo_free(m_pdev, m_blob_id);
+  host_bo_free(m_pdev, m_host_handle);
   drm_bo_free(m_pdev, boh);
+}
+
+uint32_t
+bo_virtio::
+get_host_bo_handle() const
+{
+  return m_host_handle;
 }
 
 } // namespace shim_xdna
