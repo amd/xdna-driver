@@ -5,7 +5,7 @@
 #include "device.h"
 #include "hwctx.h"
 #include "fence.h"
-#include "smi.h"
+#include "smi_xdna.h"
 
 #include "core/common/query_requests.h"
 
