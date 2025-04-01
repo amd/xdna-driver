@@ -496,7 +496,7 @@ seq_printf(m, "%ld:%s\n", _name, #_name)
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SYNC_BO);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_EXEC_CMD);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_WAIT_CMD);
-	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_GET_INFO);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_GET_STATE);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SET_STATE);
 
 	drm_ioctl_id_seq_print(DRM_IOCTL_GEM_CLOSE);

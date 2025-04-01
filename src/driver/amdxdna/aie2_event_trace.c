@@ -116,17 +116,17 @@ static void aie2_print_trace_event_log(struct amdxdna_dev_hdl *ndev)
 
 	char *str = (char *)trace_req_buf->kern_log_buf;
 	char *end = str + log_size;
-	u64 fwTicks;
+	u64 fw_ticks;
 
 	trace_req_buf->kern_log_buf[log_size] = 0;
 
 	while (str < end) {
 		log_content = (struct trace_event_log_data *)str;
 		payload = ((u64)log_content->payload_hi << 32) | log_content->payload_low;
-		fwTicks = log_content->counter - trace_req_buf->resp_timestamp;
-		fwTicks = fwTicks / 24 + ndev->event_trace_req->sys_start_time;
+		fw_ticks = log_content->counter - trace_req_buf->resp_timestamp;
+		fw_ticks = fw_ticks / 24 + ndev->event_trace_req->sys_start_time;
 		pr_debug("[NPU]::[%llu] type: 0x%04x payload:0x%016llx",
-			 fwTicks, log_content->type, payload);
+			 fw_ticks, log_content->type, payload);
 		str += MAX_ONE_TIME_LOG_INFO_LEN;
 	}
 }
