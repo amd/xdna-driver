@@ -173,7 +173,7 @@ static int mailbox_tail_read_non_zero(struct mailbox_channel *mb_chann, u32 *val
 
 	/* Poll till tail is not zero */
 	ret = readx_poll_timeout(readl, ringbuf_addr, tail,
-				 tail, 0 /* tight-loops */, 100 /* us timeout */);
+				 tail, 0 /* tight-loops */, 500 /* us timeout */);
 	if (ret < 0)
 		return ret;
 
