@@ -457,32 +457,12 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 }
 
 /* Below messages are to hardware context mailbox channel */
-
-static int config_cu_cb(void *handle, void __iomem *data, size_t size)
-{
-	struct amdxdna_dev *xdna = handle;
-	u32 status;
-
-	if (data)
-		memcpy_fromio(&status, data, sizeof(status));
-
-	XDNA_DBG(xdna, "config cu got resp, status 0x%x", status);
-	return 0;
-}
-
 int aie2_config_cu(struct amdxdna_ctx *ctx)
 {
 	struct mailbox_channel *chann = ctx->priv->mbox_chann;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	u32 shift = xdna->dev_info->dev_mem_buf_shift;
-	struct config_cu_req req = { 0 };
-	struct xdna_mailbox_msg msg = {
-		.send_data = (u8 *)&req,
-		.send_size = sizeof(req),
-		.handle = xdna,
-		.opcode = MSG_OP_CONFIG_CU,
-		.notify_cb = config_cu_cb,
-	};
+	DECLARE_XDNA_MSG_NO_RESP(config_cu, MSG_OP_CONFIG_CU, xdna);
 	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
 	int ret, i;
