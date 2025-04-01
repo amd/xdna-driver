@@ -5,6 +5,18 @@
 
 #include "amdxdna_mailbox_helper.h"
 
+int xdna_msg_dummy_cb(void *handle, void __iomem *data, size_t size)
+{
+	struct amdxdna_dev *xdna = handle;
+	u32 status;
+
+	if (data)
+		memcpy_fromio(&status, data, sizeof(status));
+
+	XDNA_DBG(xdna, "Got dummy resp, status 0x%x", status);
+	return 0;
+}
+
 int xdna_msg_cb(void *handle, void __iomem *data, size_t size)
 {
 	struct xdna_notify *cb_arg = handle;

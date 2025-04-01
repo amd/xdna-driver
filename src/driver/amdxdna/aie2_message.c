@@ -462,10 +462,13 @@ int aie2_config_cu(struct amdxdna_ctx *ctx)
 	struct mailbox_channel *chann = ctx->priv->mbox_chann;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	u32 shift = xdna->dev_info->dev_mem_buf_shift;
-	DECLARE_AIE2_MSG(config_cu, MSG_OP_CONFIG_CU);
+	DECLARE_XDNA_MSG_NO_RESP(config_cu, MSG_OP_CONFIG_CU, xdna);
 	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
 	int ret, i;
+
+	if (!ctx->cus)
+		return 0;
 
 	if (!chann)
 		return -ENODEV;
@@ -500,20 +503,10 @@ int aie2_config_cu(struct amdxdna_ctx *ctx)
 	}
 	req.num_cus = ctx->cus->num_cus;
 
-	ret = xdna_send_msg_wait(xdna, chann, &msg);
-	if (ret == -ETIME) {
-		xdna_mailbox_stop_channel(chann);
-		xdna_mailbox_destroy_channel(chann);
-		ctx->priv->mbox_chann = NULL;
-	}
+	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
+	if (ret)
+		XDNA_ERR(xdna, "Send message failed, ret %d", ret);
 
-	if (resp.status == AIE2_STATUS_SUCCESS) {
-		XDNA_DBG(xdna, "Configure %d CUs, ret %d", req.num_cus, ret);
-		return 0;
-	}
-
-	XDNA_ERR(xdna, "Command opcode 0x%x failed, status 0x%x ret %d",
-		 msg.opcode, resp.status, ret);
 	return ret;
 }
 
