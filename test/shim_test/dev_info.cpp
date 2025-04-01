@@ -211,6 +211,16 @@ xclbin_info xclbin_infos[] = {
     .workspace = "local_shim_test_data/elf_txn_no_cp_npu2",
     .data = "",
   },
+  {
+    .name = "pm_reload.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .workspace = "local_shim_test_data/elf_txn_preempt_no_cp_npu2",
+    .data = "",
+  },
 };
 
 }
