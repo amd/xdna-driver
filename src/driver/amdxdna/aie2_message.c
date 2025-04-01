@@ -95,6 +95,26 @@ int aie2_get_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type, u64 *value)
 	return 0;
 }
 
+int aie2_runtime_update_prop(struct amdxdna_dev_hdl *ndev, u32 type, u32 value)
+{
+	DECLARE_AIE2_MSG(update_property, MSG_OP_UPDATE_PROPERTY);
+	int ret;
+
+	req.context_id = AIE2_UPDATE_PROPERTY_ALL_CTX;
+	req.time.quota = value;
+	req.type = type;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to update property, ret %d", ret);
+		return ret;
+	}
+
+	XDNA_INFO(ndev->xdna, "Execution time quantum updated to %dms", (value / 1000));
+
+	return 0;
+}
+
 int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE2_MSG(protocol_version, MSG_OP_GET_PROTOCOL_VERSION);

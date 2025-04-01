@@ -8,6 +8,8 @@
 
 #include <linux/uuid.h>
 
+#define AIE2_UPDATE_PROPERTY_ALL_CTX	0xFF
+
 enum aie2_msg_opcode {
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
@@ -42,6 +44,7 @@ enum aie2_msg_opcode {
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
 	MSG_OP_START_EVENT_TRACE           = 0x10F,
 	MSG_OP_STOP_EVENT_TRACE            = 0x110,
+	MSG_OP_UPDATE_PROPERTY             = 0x113,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
@@ -88,6 +91,7 @@ enum aie2_msg_status {
 	AIE2_STATUS_INVALID_OPERATION                    = 0x4000006,
 	AIE2_STATUS_ASYNC_EVENT_MSGS_FULL,
 	AIE2_STATUS_DEBUG_BO_CONFIG_FAILED,
+	AIE2_STATUS_PROPERTY_UPDATE_FAILED		= 0x400000A,
 	AIE2_STATUS_MAX_RTOS_STATUS_CODE,
 	MAX_AIE2_STATUS_CODE
 };
@@ -541,4 +545,26 @@ struct legacy_config_cu_resp {
 	enum aie2_msg_status	status;
 } __packed;
 #endif /* AMDXDNA_DEVEL */
+
+struct update_time_quota {
+	/* Time duration in microseconds */
+	u32 quota;
+} __packed;
+
+struct update_property_req {
+	u32 type;
+	union {
+		u8 context_id;
+		u64 reserved;
+	};
+	union {
+		struct update_time_quota time;
+		u64 data;
+	};
+} __packed;
+
+struct update_property_resp {
+	enum aie2_msg_status status;
+} __packed;
+
 #endif /* _AIE2_MSG_PRIV_H_ */
