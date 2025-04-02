@@ -17,7 +17,6 @@ using arg_type = const std::vector<uint64_t>;
 namespace {
 
 io_test_parameter io_test_parameters;
-const char *elf_xclbin = "design.xclbin";
 
 void
 io_test_parameter_init(int perf, int type, int wait, bool debug = false)
@@ -29,13 +28,15 @@ io_test_parameter_init(int perf, int type, int wait, bool debug = false)
 }
 
 std::unique_ptr<io_test_bo_set_base>
-alloc_and_init_bo_set(device* dev, bool is_elf)
+alloc_and_init_bo_set(device* dev, const char *xclbin)
 {
+  auto kernel_type = get_kernel_type(dev, xclbin);
+
   std::unique_ptr<io_test_bo_set_base> base;
-  if (is_elf)
-    base = std::make_unique<elf_io_test_bo_set>(dev, elf_xclbin);
-  else
+  if (kernel_type == KERNEL_TYPE_DPU_SEQ)
     base = std::make_unique<io_test_bo_set>(dev);
+  else
+    base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
 
   auto& bos = base->get_bos();
 
@@ -46,7 +47,7 @@ alloc_and_init_bo_set(device* dev, bool is_elf)
     bos[IO_TEST_BO_INSTRUCTION].tbo = tbo;
     std::memset(tbo->map(), 0, sz);
   } else if (io_test_parameters.type == IO_TEST_BAD_RUN) {
-    if (is_elf)
+    if (kernel_type != KERNEL_TYPE_DPU_SEQ)
       throw std::runtime_error("ELF flow can't support bad run");
 
     auto instruction_p = bos[IO_TEST_BO_INSTRUCTION].tbo->map();
@@ -163,17 +164,17 @@ io_test_cmd_submit_and_wait_thruput(
 }
 
 void
-io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist, int cmds_per_list, bool is_elf)
+io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
+  int cmds_per_list, const char *xclbin)
 {
   // Allocate set of BOs for command submission based on num_cmdlist and cmds_per_list
   // Intentionally this is done before context creation to make sure BO and context
   // are totally decoupled.
   std::vector< std::unique_ptr<io_test_bo_set_base> > bo_set;
   for (int i = 0; i < num_cmdlist * cmds_per_list; i++)
-    bo_set.push_back(std::move(alloc_and_init_bo_set(dev, is_elf)));
+    bo_set.push_back(std::move(alloc_and_init_bo_set(dev, xclbin)));
 
   // Creating HW context for cmd submission
-  const char *xclbin = is_elf ? elf_xclbin : nullptr;
   hw_ctx hwctx{dev, xclbin};
   auto hwq = hwctx.get()->get_hw_queue();
   auto ip_name = get_kernel_name(dev, xclbin);
@@ -249,7 +250,7 @@ TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
 
   io_test_parameter_init(IO_TEST_NO_PERF, run_type, IO_TEST_IOCTL_WAIT);
-  io_test(id, sdev.get(), 1, 1, arg[1], false);
+  io_test(id, sdev.get(), 1, 1, arg[1], nullptr);
 }
 
 void
@@ -260,7 +261,7 @@ TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
   unsigned int total = static_cast<unsigned int>(arg[2]);
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 1, 1, false);
+  io_test(id, sdev.get(), total, 1, 1, nullptr);
 }
 
 void
@@ -271,7 +272,7 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& a
   unsigned int total = static_cast<unsigned int>(arg[2]);
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 8, 1, false);
+  io_test(id, sdev.get(), total, 8, 1, nullptr);
 }
 
 void
@@ -287,7 +288,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device> sdev, arg_ty
     if (cmds_per_list > max_cmd_per_list)
       cmds_per_list = max_cmd_per_list;
     int total_hwq_submit = total / cmds_per_list;
-    io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list, false);
+    io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list, nullptr);
   }
 }
 
@@ -307,7 +308,7 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device> sdev, arg
       cmds_per_list = max_cmd_per_list;
     int num_cmdlist = num_bo_set / cmds_per_list;
     int total_hwq_submit = total_commands / cmds_per_list;
-    io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list, false);
+    io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list, nullptr);
   }
 }
 
@@ -329,5 +330,5 @@ TEST_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
 
   io_test_parameter_init(IO_TEST_NO_PERF, run_type, IO_TEST_IOCTL_WAIT);
-  io_test(id, sdev.get(), 1, 1, arg[1], true);
+  io_test(id, sdev.get(), 1, 1, arg[1], "design.xclbin");
 }

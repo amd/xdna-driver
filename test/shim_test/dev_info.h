@@ -9,6 +9,12 @@
 
 using namespace xrt_core;
 
+enum kernel_type {
+  KERNEL_TYPE_DPU_SEQ = 0,
+  KERNEL_TYPE_TXN,
+  KERNEL_TYPE_TXN_PREEMPT
+};
+
 struct xclbin_info {
   const char* name;
   const uint16_t device;
@@ -16,6 +22,7 @@ struct xclbin_info {
   const std::map<const char*, cuidx_type> ip_name2idx;
   const std::string workspace;
   const std::string data;
+  const kernel_type type;
 };
 
 const uint16_t npu1_device_id = 0x1502;
@@ -32,8 +39,9 @@ const uint16_t npu5_revision_id = 0x11;
 const uint16_t npu6_revision_id = 0x20;
 
 const xclbin_info& get_xclbin_info(device* dev, const char *xclbin_name=nullptr);
-std::string get_xclbin_name(device* dev);
+std::string get_xclbin_name(device* dev); // Find default xclbin name for this device
 std::string get_kernel_name(device* dev, const char*);
+kernel_type get_kernel_type(device* dev, const char*);
 std::string get_xclbin_data(device* dev, const char *xclbin_name=nullptr);
 std::string get_xclbin_path(device* dev, const char *xclbin_name=nullptr);
 const std::map<const char*, cuidx_type>& get_xclbin_ip_name2index(device* dev, const char *xclbin_name=nullptr);

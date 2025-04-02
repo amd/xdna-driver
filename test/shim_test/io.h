@@ -78,6 +78,7 @@ class io_test_bo_set : public io_test_bo_set_base
 {
 public:
   io_test_bo_set(device *dev, const std::string& xclbin_name);
+
   io_test_bo_set(device *dev);
 
   void
