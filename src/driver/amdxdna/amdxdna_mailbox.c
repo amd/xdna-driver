@@ -10,7 +10,6 @@
 #include <linux/io.h>
 #include <linux/pci.h>
 #include <linux/spinlock.h>
-#include <linux/iopoll.h>
 #include <linux/vmalloc.h>
 #include <linux/build_bug.h>
 #include <linux/interrupt.h>
@@ -161,29 +160,6 @@ static u32 mailbox_reg_read(struct mailbox_channel *mb_chann, u32 mbox_reg)
 	void __iomem *ringbuf_addr = mb_res->mbox_base + mbox_reg;
 
 	return readl(ringbuf_addr);
-}
-
-static int mailbox_tail_read_non_zero(struct mailbox_channel *mb_chann, u32 *val)
-{
-	u32 mbox_reg = mb_chann->res[CHAN_RES_I2X].mb_tail_ptr_reg;
-	u32 ringbuf_size = mb_chann->res[CHAN_RES_I2X].rb_size;
-	struct xdna_mailbox_res *mb_res = &mb_chann->mb->res;
-	void __iomem *ringbuf_addr = mb_res->mbox_base + mbox_reg;
-	int ret, tail;
-
-	/* Poll till tail is not zero */
-	ret = readx_poll_timeout(readl, ringbuf_addr, tail,
-				 tail, 0 /* tight-loops */, 500 /* us timeout */);
-	if (ret < 0)
-		return ret;
-
-	if (unlikely(tail > ringbuf_size || !IS_ALIGNED(tail, 4))) {
-		MB_WARN_ONCE(mb_chann, "Invalid tail 0x%x", tail);
-		return -EINVAL;
-	}
-
-	*val = tail;
-	return 0;
 }
 
 static inline void
@@ -373,14 +349,15 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 	u32 start_addr;
 	int ret;
 
-	ret = mailbox_tail_read_non_zero(mb_chann, &tail);
-	if (ret) {
-		MB_WARN_ONCE(mb_chann, "Zero tail too long");
-		return ret;
-	}
+	tail = mailbox_get_tailptr(mb_chann, CHAN_RES_I2X);
 	head = mb_chann->i2x_head;
 	ringbuf_size = mailbox_get_ringbuf_size(mb_chann, CHAN_RES_I2X);
 	start_addr = mb_chann->res[CHAN_RES_I2X].rb_start_addr;
+
+	if (unlikely(tail > ringbuf_size || !IS_ALIGNED(tail, 4))) {
+		MB_WARN_ONCE(mb_chann, "Invalid tail 0x%x", tail);
+		return -EINVAL;
+	}
 
 	/* ringbuf empty */
 	if (head == tail)
@@ -400,16 +377,8 @@ static int mailbox_get_msg(struct mailbox_channel *mb_chann)
 			return -EINVAL;
 		}
 
-		/* Read from beginning of ringbuf */
-		head = 0;
-		ret = mailbox_tail_read_non_zero(mb_chann, &tail);
-		if (ret) {
-			MB_WARN_ONCE(mb_chann, "Hit tombstone, re-read tail failed");
-			return -EINVAL;
-		}
-		/* Re-peek size of the message */
-		read_addr = mb_chann->mb->res.ringbuf_base + start_addr;
-		header.total_size = readl(read_addr);
+		mailbox_set_headptr(mb_chann, 0);
+		return 0;
 	}
 
 	if (unlikely(!header.total_size || !IS_ALIGNED(header.total_size, 4))) {
