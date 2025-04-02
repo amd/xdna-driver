@@ -7,12 +7,10 @@ namespace shim_xdna::smi {
 smi_xdna::
 smi_xdna() : smi_base( 
   {
-    {"aie-reconfig-overhead", "Run end-to-end array reconfiguration overhead through shim DMA", "hidden"},
     {"all", "All applicable validate tests will be executed (default)", "common"},
     {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
     {"cmd-chain-throughput", "Run end-to-end throughput test using command chaining", "hidden"},
     {"df-bw", "Run bandwidth test on data fabric", "hidden"},
-    {"gemm", "Measure the TOPS value of GEMM operations", "common"},
     {"latency", "Run end-to-end latency test", "common"},
     {"quick", "Run a subset of four tests: \n1. latency \n2. throughput \n3. cmd-chain-latency \n4. cmd-chain-throughput", "hidden"},
     {"spatial-sharing-overhead", "Run Spatial Sharing Overhead Test", "hidden"},
