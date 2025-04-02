@@ -533,6 +533,8 @@ int aie2_xrs_unload_hwctx(struct amdxdna_ctx *ctx);
 /* aid2_ctx_runqueue.c */
 int aie2_rq_init(struct aie2_ctx_rq *rq);
 void aie2_rq_fini(struct aie2_ctx_rq *rq);
+int aie2_rq_context_limit(struct aie2_ctx_rq *rq);
+int aie2_rq_active_context(struct aie2_ctx_rq *rq);
 bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq);
 bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq);
 void aie2_rq_stop_all(struct aie2_ctx_rq *rq);

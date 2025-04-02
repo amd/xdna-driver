@@ -1176,6 +1176,16 @@ void aie2_rq_fini(struct aie2_ctx_rq *rq)
 	kfree(rq->parts);
 }
 
+int aie2_rq_context_limit(struct aie2_ctx_rq *rq)
+{
+	return rq->ctx_limit;
+}
+
+int aie2_rq_active_context(struct aie2_ctx_rq *rq)
+{
+	return rq->ctx_cnt;
+}
+
 #if defined(CONFIG_DEBUG_FS)
 int aie2_rq_show(struct aie2_ctx_rq *rq, struct seq_file *m)
 {
