@@ -42,6 +42,7 @@ enum aie2_msg_opcode {
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
 	MSG_OP_START_EVENT_TRACE           = 0x10F,
 	MSG_OP_STOP_EVENT_TRACE            = 0x110,
+	MSG_OP_CONFIG_LOGGING_DRAM_BUF	   = 0x115,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
@@ -384,8 +385,10 @@ struct async_event_msg_resp {
 
 /* Start of event tracing data struct */
 #define TRACE_EVENT_BUF_SIZE				0x2000
+#define DRAM_LOG_BUF_SIZE				0x2000
 #define TRACE_EVENT_BUF_METADATA_SIZE			0x40
 #define MAX_ONE_TIME_LOG_INFO_LEN			16
+#define MSI_ADDR_MASK					0x00FFFFFF
 #define LOG_RB_SIZE	(TRACE_EVENT_BUF_SIZE - TRACE_EVENT_BUF_METADATA_SIZE)
 
 enum event_trace_destination {
@@ -425,8 +428,21 @@ struct stop_event_trace_resp {
 
 /* End of event tracing data structs */
 
+struct config_logging_dram_buf_req {
+	u64 dram_buffer_address;
+	u32 dram_buffer_size;
+	u32 reserved[5];
+} __packed;
+
+struct config_logging_dram_buf_resp {
+	enum aie2_msg_status status;
+	u32 msi_idx;
+	u32 msi_address;
+	u32 reserved[5];
+} __packed;
+
 #define MAX_CHAIN_CMDBUF_SIZE 0x1000
-#define slot_cf_has_space(offset, payload_size) \
+#define	slot_cf_has_space(offset, payload_size) \
 	(MAX_CHAIN_CMDBUF_SIZE - ((offset) + (payload_size)) > \
 	 offsetof(struct cmd_chain_slot_execbuf_cf, args[0]))
 struct cmd_chain_slot_execbuf_cf {
