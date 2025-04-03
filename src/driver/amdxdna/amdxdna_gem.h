@@ -31,7 +31,6 @@ struct amdxdna_mem {
 	size_t				size;
 	struct page			**pages;
 	u32				nr_pages;
-	bool				new_pages;
 	struct list_head		umap_list;
 	bool				map_invalid;
 #ifdef AMDXDNA_DEVEL
