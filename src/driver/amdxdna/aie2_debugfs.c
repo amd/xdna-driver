@@ -293,6 +293,84 @@ static int aie2_event_trace_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(event_trace, aie2_event_trace_show, aie2_event_trace_write);
 
+static ssize_t aie2_dram_logging_write(struct file *file, const char __user *buf,
+				       size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	u32 enable = 0, buf_size = 0, loglevel = 0;
+	char *kbuf, *token, *key, *val;
+
+	kbuf = kzalloc(len + 1, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
+
+	if (copy_from_user(kbuf, buf, len)) {
+		kfree(kbuf);
+		return -EFAULT;
+	}
+
+	kbuf[len] = '\0';
+	token = strsep(&kbuf, " ");
+
+	while (token) {
+		key = strsep(&token, "=");
+		val = token;
+		int ret;
+
+		if (key && val) {
+			if (strcmp(key, "enable") == 0) {
+				ret = kstrtouint(val, 10, &enable);
+				if (ret) {
+					XDNA_INFO(ndev->xdna, "invalid enable value %u",
+						  enable);
+					return ret;
+				}
+			} else if (strcmp(key, "size") == 0) {
+				buf_size = memparse(val, NULL);
+			} else if (strcmp(key, "loglevel") == 0) {
+				ret = kstrtouint(val, 0, &loglevel);
+				if (ret) {
+					XDNA_INFO(ndev->xdna, "invalid log level %u",
+						  loglevel);
+					return ret;
+				}
+			} else {
+				XDNA_INFO(ndev->xdna, "invalid key %s format", key);
+				return len;
+			}
+		}
+		token = strsep(&kbuf, " ");
+	}
+
+	XDNA_DBG(ndev->xdna, "Dram logging config: %u, %u, %u",
+		 enable, buf_size, loglevel);
+	if (enable && !buf_size)
+		return -EINVAL;
+
+	aie2_set_dram_log_config(ndev, enable, buf_size, loglevel);
+	kfree(kbuf);
+
+	return len;
+}
+
+static int aie2_dram_logging_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	if (aie2_is_dram_logging_enable(ndev))
+		seq_puts(m, "Dram logging is enabled\n");
+	else
+		seq_puts(m, "Dram logging is disabled\n"
+						"echo enable=1 size=1K loglevel=4 -> Follow given input format to enable\n"
+						"enable=[0, 1] -> enable=1 to enable, enable=0 to disable\n"
+						"size=[1K, 2K, 4K...512K to 1M] -> buffer size should be pow of 2\n"
+						"loglevel=[0 - 4] -> None-Err...Dbg\n\n");
+
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dram_logging, aie2_dram_logging_show, aie2_dram_logging_write);
+
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -653,6 +731,7 @@ const struct {
 	AIE2_DBGFS_FILE(event_trace, 0600),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
+	AIE2_DBGFS_FILE(dram_logging, 0600),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
