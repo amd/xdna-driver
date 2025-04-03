@@ -296,6 +296,39 @@ static int aie2_event_trace_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(event_trace, aie2_event_trace_show, aie2_event_trace_write);
 
+static ssize_t aie2_dram_logging_write(struct file *file, const char __user *ptr,
+				      size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	bool state;
+	int ret;
+
+	ret = kstrtobool_from_user(ptr, len, &state);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Invalid input value: %d", state);
+		return ret;
+	}
+
+	aie2_assign_dram_logging_state(ndev, state);
+
+	return len;
+}
+
+static int aie2_dram_logging_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	if (aie2_is_dram_logging_enable(ndev))
+		seq_puts(m, "Dram logging is enabled\n");
+	else
+		seq_puts(m, "Dram logging is disabled\n"
+						"echo 1 > To enable logging\n");
+
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dram_logging, aie2_dram_logging_show, aie2_dram_logging_write);
+
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -657,6 +690,7 @@ const struct {
 	AIE2_DBGFS_FILE(event_trace, 0600),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
+	AIE2_DBGFS_FILE(dram_logging, 0600),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
