@@ -364,7 +364,7 @@ bo::
 alloc_drm_bo(int type, size_t size)
 {
   amdxdna_drm_create_bo cbo = {
-    .udma_fd = 0,
+    .vaddr = 0,
     .size = size,
     .type = static_cast<uint32_t>(type),
   };
