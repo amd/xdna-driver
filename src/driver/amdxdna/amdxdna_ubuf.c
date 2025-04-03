@@ -59,7 +59,6 @@ static void amdxdna_ubuf_release(struct dma_buf *dbuf)
 {
 	struct amdxdna_ubuf_priv *ubuf = dbuf->priv;
 
-	pr_info("ubuf release\n");
 	unpin_user_pages(ubuf->pages, ubuf->nr_pages);
 	kvfree(ubuf->pages);
 }
@@ -98,7 +97,6 @@ static int amdxdna_ubuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
 	struct amdxdna_ubuf_priv *ubuf = dbuf->priv;
 	void *kva;
 
-	pr_info("Ubuf vmap\n");
 	kva = vmap(ubuf->pages, ubuf->nr_pages, VM_MAP, PAGE_KERNEL);
 	if (!kva)
 		return -EINVAL;
@@ -109,7 +107,6 @@ static int amdxdna_ubuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
 
 static void amdxdna_ubuf_vunmap(struct dma_buf *dbuf, struct iosys_map *map)
 {
-	pr_info("Ubuf vunmap\n");
 	vunmap(map->vaddr);
 }
 
@@ -134,7 +131,6 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 	int i, ret;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
-	pr_info("amdxdna_get_ubuf\n");
 	ubuf = kzalloc(sizeof(*ubuf), GFP_KERNEL);
 	if (!ubuf)
 		return ERR_PTR(-ENOMEM);
@@ -172,7 +168,6 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 		goto free_ent;
 	}
 
-	pr_info("before pin pages\n");
 	for (i = 0; i < num_entries; i++) {
 		npages = va_ent[i].len >> PAGE_SHIFT;
 
@@ -192,7 +187,6 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 	exp_info.priv = ubuf;
 	exp_info.flags = O_RDWR;
 
-	pr_info("export dbuf \n");
 	dbuf = dma_buf_export(&exp_info);
 	if (IS_ERR(dbuf)) {
 		ret = PTR_ERR(dbuf);
