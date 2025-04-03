@@ -12,8 +12,8 @@
 #include "amdxdna_ubuf.h"
 
 struct amdxdna_ubuf_priv {
-        struct page **pages;
-        u64 nr_pages;
+	struct page **pages;
+	u64 nr_pages;
 	enum amdxdna_ubuf_flag flags;
 };
 
@@ -69,7 +69,7 @@ static vm_fault_t amdxdna_ubuf_vm_fault(struct vm_fault *vmf)
 	struct amdxdna_ubuf_priv *ubuf;
 	unsigned long pfn;
 	pgoff_t pgoff;
-       
+
 	ubuf = vma->vm_private_data;
 	pgoff = (vmf->address - vma->vm_start) >> PAGE_SHIFT;
 
@@ -120,7 +120,7 @@ static const struct dma_buf_ops amdxdna_ubuf_dmabuf_ops = {
 };
 
 struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
-	       			 enum amdxdna_ubuf_flag flags,
+				 enum amdxdna_ubuf_flag flags,
 				 u32 num_entries, void __user *va_entries)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
@@ -204,5 +204,4 @@ free_ent:
 free_ubuf:
 	kfree(ubuf);
 	return ERR_PTR(ret);
-
 }

@@ -191,8 +191,8 @@ struct amdxdna_drm_config_ctx {
  * @len: Size of entry.
  */
 struct amdxdna_drm_va_entry {
-        __u64 vaddr;
-        __u64 len;
+	__u64 vaddr;
+	__u64 len;
 };
 
 /**
@@ -203,8 +203,8 @@ struct amdxdna_drm_va_entry {
  */
 struct amdxdna_drm_va_tbl {
 	__s32 udma_fd;
-        __u32 num_entries;
-        struct amdxdna_drm_va_entry va_entries[];
+	__u32 num_entries;
+	struct amdxdna_drm_va_entry va_entries[];
 };
 
 /**

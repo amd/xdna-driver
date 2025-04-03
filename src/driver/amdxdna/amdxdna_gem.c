@@ -571,7 +571,7 @@ static void amdxdna_gem_obj_vunmap(struct drm_gem_object *obj, struct iosys_map 
 	if (is_import_bo(abo))
 		dma_buf_vunmap(abo->dma_buf, map);
 	else if (obj->funcs == &amdxdna_gem_shmem_funcs)
-		 drm_gem_shmem_object_vunmap(obj, map);
+		drm_gem_shmem_object_vunmap(obj, map);
 	else if (obj->funcs == &amdxdna_gem_carvedout_obj_funcs)
 		iounmap(abo->mem.kva);
 
