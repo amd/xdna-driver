@@ -186,16 +186,38 @@ struct amdxdna_drm_config_ctx {
 };
 
 /**
+ * struct amdxdna_drm_va_entry
+ * @vaddr: Virtual address.
+ * @len: Size of entry.
+ */
+struct amdxdna_drm_va_entry {
+	__u64 vaddr;
+	__u64 len;
+};
+
+/**
+ * struct amdxdna_drm_va_tbl
+ * @udma_fd: UDMABUF fd.
+ * @num_entries: Number of va entries.
+ * @va_entries: Array of va entries.
+ */
+struct amdxdna_drm_va_tbl {
+	__s32 udma_fd;
+	__u32 num_entries;
+	struct amdxdna_drm_va_entry va_entries[];
+};
+
+/**
  * struct amdxdna_drm_create_bo - Create a buffer object.
  * @flags: Buffer flags. MBZ.
- * @udma_fd: UDMA fd of buffer if applied.
+ * @vaddr: Pointer of va address table.
  * @size: Size in bytes.
  * @type: Buffer type.
  * @handle: Returned DRM buffer object handle.
  */
 struct amdxdna_drm_create_bo {
 	__u64	flags;
-	__u64	udma_fd;
+	__u64	vaddr;
 	__u64	size;
 #define	AMDXDNA_BO_INVALID	0 /* Invalid BO type */
 #define	AMDXDNA_BO_SHARE	1 /* Regular BO shared between user and device */
