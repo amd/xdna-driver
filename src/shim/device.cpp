@@ -116,14 +116,14 @@ struct aie_info
         .minor = 0,
       };
 
-      amdxdna_drm_get_info arg = {
+      amdxdna_drm_get_state arg = {
         .param = DRM_AMDXDNA_QUERY_AIE_VERSION,
         .buffer_size = sizeof(aie_version),
         .buffer = reinterpret_cast<uintptr_t>(&aie_version)
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
       query::aie_status_version::result_type output;
       output.major = aie_version.major;
@@ -148,14 +148,14 @@ struct aie_info
 
         amdxdna_drm_query_aie_metadata aie_metadata = {};
 
-        amdxdna_drm_get_info arg = {
+        amdxdna_drm_get_state arg = {
           .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
           .buffer_size = sizeof(aie_metadata),
           .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
         };
 
         auto& pci_dev_impl = get_pcidev_impl(device);
-        pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+        pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
         query::aie_tiles_stats::result_type output = {};
         output.col_size = aie_metadata.col_size;
@@ -208,14 +208,14 @@ struct aie_info
         .buffer_size = output_size,
       };
 
-      amdxdna_drm_get_info arg = {
+      amdxdna_drm_get_state arg = {
         .param = DRM_AMDXDNA_QUERY_AIE_STATUS,
         .buffer_size = sizeof(aie_status),
         .buffer = reinterpret_cast<uintptr_t>(&aie_status)
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
       query::aie_tiles_status_info::result_type output;
       output.buf = std::move(payload);
@@ -242,14 +242,14 @@ struct partition_info
     const uint32_t output_size = 256 * sizeof(*data);
 
     std::vector<char> payload(output_size);
-    amdxdna_drm_get_info arg = {
+    amdxdna_drm_get_state arg = {
       .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
       .buffer_size = output_size,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
     if (output_size < arg.buffer_size) {
       throw xrt_core::query::exception(
@@ -320,14 +320,14 @@ struct total_cols
   {
     amdxdna_drm_query_aie_metadata aie_metadata = {};
 
-    amdxdna_drm_get_info arg = {
+    amdxdna_drm_get_state arg = {
       .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
       .buffer_size = sizeof(aie_metadata),
       .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
     return aie_metadata.cols;
   }
@@ -340,30 +340,30 @@ struct performance_mode
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_get_power_mode state;
+    amdxdna_drm_attribute_state power;
 
-    amdxdna_drm_get_info arg = {
+    amdxdna_drm_get_state arg = {
         .param = DRM_AMDXDNA_GET_POWER_MODE,
-        .buffer_size = sizeof(state),
-        .buffer = reinterpret_cast<uintptr_t>(&state)
+        .buffer_size = sizeof(power),
+        .buffer = reinterpret_cast<uintptr_t>(&power)
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
-    return state.power_mode;
+    return power.state;
   }
 
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_set_power_mode state;
-    state.power_mode = static_cast<int>(std::any_cast<xrt_core::query::performance_mode::power_type>(any));
+    amdxdna_drm_attribute_state power;
+    power.state = static_cast<int>(std::any_cast<xrt_core::query::performance_mode::power_type>(any));
 
     amdxdna_drm_set_state arg = {
       .param = DRM_AMDXDNA_SET_POWER_MODE,
-      .buffer_size = sizeof(state),
-      .buffer = reinterpret_cast<uintptr_t>(&state)
+      .buffer_size = sizeof(power),
+      .buffer = reinterpret_cast<uintptr_t>(&power)
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
@@ -378,16 +378,16 @@ struct preemption
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_get_force_preempt_state force;
+    amdxdna_drm_attribute_state force;
 
-    amdxdna_drm_get_info arg = {
+    amdxdna_drm_get_state arg = {
       .param = DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
       .buffer_size = sizeof(force),
       .buffer = reinterpret_cast<uintptr_t>(&force)
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
     return force.state;
   }
@@ -395,7 +395,7 @@ struct preemption
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_set_force_preempt_state force;
+    amdxdna_drm_attribute_state force;
     force.state = std::any_cast<uint32_t>(any);
 
     amdxdna_drm_set_state arg = {
@@ -408,6 +408,45 @@ struct preemption
     pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
   }
 };
+
+struct frame_boundary_preemption
+{
+  using result_type = query::frame_boundary_preemption::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_attribute_state preempt;
+
+    amdxdna_drm_get_state arg = {
+      .param = DRM_AMDXDNA_QUERY_FRAME_BOUNDARY_PREEMPT_STATE,
+      .buffer_size = sizeof(preempt),
+      .buffer = reinterpret_cast<uintptr_t>(&preempt)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
+
+    return preempt.state;
+  }
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    amdxdna_drm_attribute_state preempt;
+    preempt.state = std::any_cast<uint32_t>(any);
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
+      .buffer_size = sizeof(preempt),
+      .buffer = reinterpret_cast<uintptr_t>(&preempt)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  }
+};
+
 
 struct telemetry
 {
@@ -449,14 +488,14 @@ struct telemetry
 
       amdxdna_drm_query_telemetry telemetry{};
 
-      amdxdna_drm_get_info query_telemetry = {
+      amdxdna_drm_get_state query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
         .buffer_size = sizeof(telemetry),
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
         query::aie_telemetry::data task;
@@ -471,14 +510,14 @@ struct telemetry
 
       amdxdna_drm_query_telemetry telemetry{};
 
-      amdxdna_drm_get_info query_telemetry = {
+      amdxdna_drm_get_state query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
         .buffer_size = sizeof(telemetry),
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &query_telemetry);
 
       output.l1_interrupts = telemetry.l1_interrupts;
       return output;
@@ -489,14 +528,14 @@ struct telemetry
 
       amdxdna_drm_query_telemetry telemetry{};
 
-      amdxdna_drm_get_info query_telemetry = {
+      amdxdna_drm_get_state query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
         .buffer_size = sizeof(telemetry),
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
         query::opcode_telemetry::data task;
@@ -516,14 +555,14 @@ struct telemetry
         return output;
 
       std::vector<char> payload(output_size);
-      amdxdna_drm_get_info query_ctx = {
+      amdxdna_drm_get_state query_ctx = {
         .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
         .buffer_size = output_size,
         .buffer = reinterpret_cast<uintptr_t>(payload.data())
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_ctx);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &query_ctx);
 
       if (output_size < query_ctx.buffer_size) {
         throw xrt_core::query::exception(
@@ -547,13 +586,13 @@ struct telemetry
 
       amdxdna_drm_query_telemetry telemetry{};
 
-      amdxdna_drm_get_info query_telemetry = {
+      amdxdna_drm_get_state query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
         .buffer_size = sizeof(telemetry),
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &query_telemetry);
 
       for (auto i = 0; i < NPU_RTOS_MAX_USER_ID_COUNT; i++) {
         query::rtos_telemetry::data task;
@@ -586,14 +625,14 @@ struct telemetry
 
       amdxdna_drm_query_telemetry telemetry{};
 
-      amdxdna_drm_get_info query_telemetry = {
+      amdxdna_drm_get_state query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
         .buffer_size = sizeof(telemetry),
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_STREAM_BUFFER_COUNT; i++) {
         query::stream_buffer_telemetry::data task;
@@ -617,14 +656,14 @@ struct clock_topology
   {
     amdxdna_drm_query_clock_metadata clock_metadata;
 
-    amdxdna_drm_get_info arg = {
+    amdxdna_drm_get_state arg = {
       .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
       .buffer_size = sizeof(clock_metadata),
       .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
     std::vector<clock_freq> clocks;
     clock_freq mp_npu_clock;
@@ -657,14 +696,14 @@ struct resource_info
   {
     amdxdna_drm_get_resource_info resource_info;
 
-    amdxdna_drm_get_info arg = {
+    amdxdna_drm_get_state arg = {
       .param = DRM_AMDXDNA_QUERY_RESOURCE_INFO,
       .buffer_size = sizeof(resource_info),
       .buffer = reinterpret_cast<uintptr_t>(&resource_info),
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
     std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(5);
     info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_clk_max;
@@ -691,14 +730,14 @@ struct firmware_version
   {
     amdxdna_drm_query_firmware_version fw_version{};
 
-    amdxdna_drm_get_info arg = {
+    amdxdna_drm_get_state arg = {
       .param = DRM_AMDXDNA_QUERY_FIRMWARE_VERSION,
       .buffer_size = sizeof(fw_version),
       .buffer = reinterpret_cast<uintptr_t>(&fw_version)
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
     result_type output;
     output.major = fw_version.major;
@@ -771,7 +810,7 @@ struct sensor_info
     return false;
   }
 
-  static amdxdna_drm_get_info
+  static amdxdna_drm_get_state
   get_sensor_data(const xrt_core::device* device)
   {
     static std::map<const xrt_core::device*, std::vector<char>> data_map;
@@ -781,14 +820,14 @@ struct sensor_info
       const uint32_t output_size = sizeof(amdxdna_drm_query_sensor);
 
       std::vector<char> payload(output_size);
-      amdxdna_drm_get_info arg = {
+      amdxdna_drm_get_state arg = {
         .param = DRM_AMDXDNA_QUERY_SENSORS,
         .buffer_size = output_size,
         .buffer = reinterpret_cast<uintptr_t>(payload.data())
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
       if (output_size < arg.buffer_size) {
         throw xrt_core::query::exception(
@@ -800,7 +839,7 @@ struct sensor_info
     }
 
     auto& payload = data_map.at(device);
-    amdxdna_drm_get_info output = {
+    amdxdna_drm_get_state output = {
       .param = DRM_AMDXDNA_QUERY_SENSORS,
       .buffer_size = static_cast<uint32_t>(payload.size()),
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
@@ -814,7 +853,7 @@ struct sensor_info
     if (key != key_type::sdm_sensor_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_get_info arg = get_sensor_data(device);
+    amdxdna_drm_get_state arg = get_sensor_data(device);
 
     amdxdna_drm_query_sensor* drv_sensors;
     const uint32_t drv_sensor_count = arg.buffer_size / sizeof(*drv_sensors);
@@ -932,7 +971,7 @@ struct xclbin_name
     //   break;
     // case xrt_core::query::xclbin_name::type::gemm_elf:
     //   xclbin_name = "gemm_elf.xclbin";
-    //   break; 
+    //   break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
@@ -969,7 +1008,7 @@ struct sequence_name
     case xrt_core::query::sequence_name::type::tct_all_column:
       seq_name = "tct_4col.txt";
       break;
-    // case xrt_core::query::sequence_name::type::gemm_int8: 
+    // case xrt_core::query::sequence_name::type::gemm_int8:
     //   seq_name = "gemm_int8.txt";
     //   break;
     }
@@ -1008,7 +1047,7 @@ struct elf_name
     case xrt_core::query::elf_name::type::tct_all_column:
       elf_file = "tct_4col.elf";
       break;
-    case xrt_core::query::elf_name::type::aie_reconfig_overhead: 
+    case xrt_core::query::elf_name::type::aie_reconfig_overhead:
       elf_file = "aie_reconfig_overhead.elf";
       break;
     // case xrt_core::query::elf_name::type::gemm_int8:
@@ -1153,6 +1192,7 @@ initialize_query_table()
 
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
+  emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
   emplace_func0_request<query::opcode_telemetry,               telemetry>();

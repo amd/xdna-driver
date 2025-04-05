@@ -740,7 +740,7 @@ static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 }
 
 static int aie2_get_aie_status(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info *args)
+			       struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_query_aie_status status;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -775,7 +775,7 @@ static int aie2_get_aie_status(struct amdxdna_client *client,
 }
 
 static int aie2_get_aie_metadata(struct amdxdna_client *client,
-				 struct amdxdna_drm_get_info *args)
+				 struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_query_aie_metadata *meta;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -820,7 +820,7 @@ static int aie2_get_aie_metadata(struct amdxdna_client *client,
 }
 
 static int aie2_get_aie_version(struct amdxdna_client *client,
-				struct amdxdna_drm_get_info *args)
+				struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_query_aie_version version;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -837,7 +837,7 @@ static int aie2_get_aie_version(struct amdxdna_client *client,
 }
 
 static int aie2_get_firmware_version(struct amdxdna_client *client,
-				     struct amdxdna_drm_get_info *args)
+				     struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_query_firmware_version version;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -854,14 +854,14 @@ static int aie2_get_firmware_version(struct amdxdna_client *client,
 }
 
 static int aie2_get_power_mode(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info *args)
+			       struct amdxdna_drm_get_state *args)
 {
-	struct amdxdna_drm_get_power_mode mode = {};
+	struct amdxdna_drm_attribute_state mode = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
 
 	ndev = xdna->dev_handle;
-	mode.power_mode = ndev->pw_mode;
+	mode.state = ndev->pw_mode;
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &mode, sizeof(mode)))
 		return -EFAULT;
@@ -870,7 +870,7 @@ static int aie2_get_power_mode(struct amdxdna_client *client,
 }
 
 static int aie2_get_clock_metadata(struct amdxdna_client *client,
-				   struct amdxdna_drm_get_info *args)
+				   struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_query_clock_metadata *clock;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -896,7 +896,7 @@ static int aie2_get_clock_metadata(struct amdxdna_client *client,
 }
 
 static int aie2_get_sensors(struct amdxdna_client *client,
-			    struct amdxdna_drm_get_info *args)
+			    struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_query_sensor *sensor;
 	int ret = 0;
@@ -919,7 +919,7 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 }
 
 static int aie2_get_ctx_status(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info *args)
+			       struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_query_ctx __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -988,7 +988,7 @@ out:
 }
 
 static int aie2_get_telemetry(struct amdxdna_client *client,
-			      struct amdxdna_drm_get_info *args)
+			      struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
@@ -1038,9 +1038,9 @@ free_buf:
 }
 
 static int aie2_get_force_preempt_state(struct amdxdna_client *client,
-					struct amdxdna_drm_get_info *args)
+					struct amdxdna_drm_get_state *args)
 {
-	struct amdxdna_drm_get_force_preempt_state force = {};
+	struct amdxdna_drm_attribute_state force = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
 
@@ -1053,8 +1053,24 @@ static int aie2_get_force_preempt_state(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie2_query_frame_boundary_preempt_state(struct amdxdna_client *client,
+						   struct amdxdna_drm_get_state *args)
+{
+	struct amdxdna_drm_attribute_state preempt = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
+
+	ndev = xdna->dev_handle;
+	preempt.state = ndev->frame_boundary_preempt;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, sizeof(preempt)))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie2_get_resource_info(struct amdxdna_client *client,
-				  struct amdxdna_drm_get_info *args)
+				  struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_drm_get_resource_info res_info;
 	const struct amdxdna_dev_priv *priv;
@@ -1080,7 +1096,7 @@ static int aie2_get_resource_info(struct amdxdna_client *client,
 	return 0;
 }
 
-static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+static int aie2_get_state(struct amdxdna_client *client, struct amdxdna_drm_get_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret, idx;
@@ -1133,6 +1149,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
 		ret = aie2_get_resource_info(client, args);
 		break;
+	case DRM_AMDXDNA_QUERY_FRAME_BOUNDARY_PREEMPT_STATE:
+		ret = aie2_query_frame_boundary_preempt_state(client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -1146,7 +1165,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 
 static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_drm_set_power_mode power_state;
+	struct amdxdna_drm_attribute_state power_state;
 	struct amdxdna_dev *xdna = client->xdna;
 	int power_mode;
 
@@ -1161,7 +1180,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 		return -EFAULT;
 	}
 
-	power_mode = power_state.power_mode;
+	power_mode = power_state.state;
 	if (power_mode > POWER_MODE_TURBO) {
 		XDNA_ERR(xdna, "Invalid power mode %d", power_mode);
 		return -EINVAL;
@@ -1173,7 +1192,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 					struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_drm_set_force_preempt_state force;
+	struct amdxdna_drm_attribute_state force;
 	struct amdxdna_dev *xdna = client->xdna;
 
 	if (args->buffer_size != sizeof(force)) {
@@ -1194,6 +1213,48 @@ static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
+						 struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_dev_hdl *dev = client->xdna->dev_handle;
+	struct amdxdna_drm_attribute_state preempt;
+	struct amdxdna_dev *xdna = client->xdna;
+	u32 value;
+	int ret;
+
+	if (args->buffer_size != sizeof(preempt)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 args->buffer_size, sizeof(preempt));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&preempt, u64_to_user_ptr(args->buffer), sizeof(preempt))) {
+		XDNA_ERR(xdna, "Failed to copy frame boundary preempt request into kernel");
+		return -EFAULT;
+	}
+
+	if (preempt.state != 0 && preempt.state > 1) {
+		XDNA_ERR(xdna, "Invalid frame boundary preempt.state: %d", preempt.state);
+		return -EINVAL;
+	}
+
+	/* Invert the values to map firmware interface */
+	value = preempt.state ? false : true;
+
+	ret = aie2_runtime_cfg(dev, AIE2_RT_CFG_DISABLE_FRAME_BOUNDARY_PREEMPT, &value);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to %s frame boundary preemption",
+			 preempt.state ? "enable" : "disable");
+		return ret;
+	}
+
+	dev->frame_boundary_preempt = preempt.state;
+
+	XDNA_WARN(xdna, "Frame boundary preemption %s", preempt.state ? "enabled" : "disabled");
+
+	return 0;
+}
+
 static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1209,6 +1270,9 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
 		ret = aie2_set_force_preempt_state(client, args);
+		break;
+	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
+		ret = aie2_set_frame_boundary_preempt_state(client, args);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_WRITE_AIE_MEM:
@@ -1236,7 +1300,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.recover		= aie2_recover,
 	.resume			= aie2_hw_resume,
 	.suspend		= aie2_hw_suspend,
-	.get_aie_info		= aie2_get_info,
+	.get_aie_state		= aie2_get_state,
 	.set_aie_state		= aie2_set_state,
 	.ctx_init		= aie2_ctx_init,
 	.ctx_fini		= aie2_ctx_fini,

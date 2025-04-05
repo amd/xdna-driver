@@ -63,13 +63,13 @@ read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size)
   mem.size = size;
   mem.buf_p = reinterpret_cast<uintptr_t>(store_buf.data());
 
-  amdxdna_drm_get_info arg = {
+  amdxdna_drm_get_state arg = {
     .param = DRM_AMDXDNA_READ_AIE_MEM,
     .buffer_size = sizeof(mem),
     .buffer = reinterpret_cast<uintptr_t>(&mem)
   };
 
-  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
   return store_buf;
 }
@@ -85,13 +85,13 @@ read_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr)
   reg.addr = reg_addr;
   reg.val = 0;
 
-  amdxdna_drm_get_info arg = {
+  amdxdna_drm_get_state arg = {
     .param = DRM_AMDXDNA_READ_AIE_REG,
     .buffer_size = sizeof(reg),
     .buffer = reinterpret_cast<uintptr_t>(&reg)
   };
 
-  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_GET_STATE, &arg);
 
   return reg.val;
 }
@@ -109,7 +109,7 @@ write_aie_mem(uint16_t col, uint16_t row, uint32_t offset, const std::vector<cha
   mem.size = size;
   mem.buf_p = reinterpret_cast<uintptr_t>(buf.data());
 
-  amdxdna_drm_get_info arg = {
+  amdxdna_drm_get_state arg = {
     .param = DRM_AMDXDNA_WRITE_AIE_MEM,
     .buffer_size = sizeof(mem),
     .buffer = reinterpret_cast<uintptr_t>(&mem)
@@ -131,7 +131,7 @@ write_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val)
   reg.addr = reg_addr;
   reg.val = reg_val;
 
-  amdxdna_drm_get_info arg = {
+  amdxdna_drm_get_state arg = {
     .param = DRM_AMDXDNA_WRITE_AIE_REG,
     .buffer_size = sizeof(reg),
     .buffer = reinterpret_cast<uintptr_t>(&reg)
