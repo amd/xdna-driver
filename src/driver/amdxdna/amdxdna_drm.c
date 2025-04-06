@@ -86,7 +86,6 @@ put_rpm:
 	pm_runtime_mark_last_busy(ddev->dev);
 	pm_runtime_put_autosuspend(ddev->dev);
 #endif
-	
 	return ret;
 }
 
