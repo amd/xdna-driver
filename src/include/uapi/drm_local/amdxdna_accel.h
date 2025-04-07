@@ -508,17 +508,6 @@ struct amdxdna_drm_query_firmware_version {
 };
 
 /**
- * struct amdxdna_drm_get_force_preempt_state - Get force preemption state.
- * @force_preempt_state: 1 implies force preemption is enabled.
- *                       0 implies disabled.
- * @pad: MBZ.
- */
-struct amdxdna_drm_get_force_preempt_state {
-	__u8 state;
-	__u8 pad[7];
-};
-
-/**
  * struct amdxdna_drm_get_resource_info - Get info on some resources within NPU
  * @npu_clk_max: max H-Clocks
  * @npu_tops_max: max TOPs
@@ -535,25 +524,43 @@ struct amdxdna_drm_get_resource_info {
 };
 
 /**
+ * struct amdxdna_drm_attribute_state - Represent buffer packing for the below
+ *					struct amdxdna_drm_<get/set>_state attributes,
+ *					Get:
+ *						DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE
+ *						DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE
+ *					Set:
+ *						DRM_AMDXDNA_SET_FORCE_PREEMPT
+ *						DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT
+ * @state: 1 implies enabled/true. 0 implies disabled/false.
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_attribute_state {
+	__u8 state;
+	__u8 pad[7];
+};
+
+/**
  * struct amdxdna_drm_get_info - Get some information from the AIE hardware.
  * @param: Specifies the structure passed in the buffer.
  * @buffer_size: Size of the input buffer. Size needed/written by the kernel.
  * @buffer: A structure specified by the param struct member.
  */
 struct amdxdna_drm_get_info {
-#define	DRM_AMDXDNA_QUERY_AIE_STATUS		0
-#define	DRM_AMDXDNA_QUERY_AIE_METADATA		1
-#define	DRM_AMDXDNA_QUERY_AIE_VERSION		2
-#define	DRM_AMDXDNA_QUERY_CLOCK_METADATA	3
-#define	DRM_AMDXDNA_QUERY_SENSORS		4
-#define	DRM_AMDXDNA_QUERY_HW_CONTEXTS		5
-#define	DRM_AMDXDNA_READ_AIE_MEM		6
-#define	DRM_AMDXDNA_READ_AIE_REG		7
-#define	DRM_AMDXDNA_QUERY_FIRMWARE_VERSION	8
-#define	DRM_AMDXDNA_GET_POWER_MODE		9
-#define	DRM_AMDXDNA_QUERY_TELEMETRY		10
-#define	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE	11
-#define	DRM_AMDXDNA_QUERY_RESOURCE_INFO		12
+#define	DRM_AMDXDNA_QUERY_AIE_STATUS			0
+#define	DRM_AMDXDNA_QUERY_AIE_METADATA			1
+#define	DRM_AMDXDNA_QUERY_AIE_VERSION			2
+#define	DRM_AMDXDNA_QUERY_CLOCK_METADATA		3
+#define	DRM_AMDXDNA_QUERY_SENSORS			4
+#define	DRM_AMDXDNA_QUERY_HW_CONTEXTS			5
+#define	DRM_AMDXDNA_READ_AIE_MEM			6
+#define	DRM_AMDXDNA_READ_AIE_REG			7
+#define	DRM_AMDXDNA_QUERY_FIRMWARE_VERSION		8
+#define	DRM_AMDXDNA_GET_POWER_MODE			9
+#define	DRM_AMDXDNA_QUERY_TELEMETRY			10
+#define	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE		11
+#define	DRM_AMDXDNA_QUERY_RESOURCE_INFO			12
+#define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
@@ -636,17 +643,6 @@ struct amdxdna_drm_set_power_mode {
 };
 
 /**
- * struct amdxdna_drm_set_force_preempt_state - set force preemption state
- * @force_preempt_state: 1 implies force preemption is enabled.
- *                       0 implies disabled
- * @pad: MBZ.
- */
-struct amdxdna_drm_set_force_preempt_state {
-	__u8 state;
-	__u8 pad[7];
-};
-
-/**
  * struct amdxdna_drm_set_state - Set the state of some component within the AIE hardware.
  * @param: Specifies the structure passed in the buffer.
  * @buffer_size: Size of the input buffer.
@@ -657,6 +653,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_WRITE_AIE_MEM		1
 #define	DRM_AMDXDNA_WRITE_AIE_REG		2
 #define	DRM_AMDXDNA_SET_FORCE_PREEMPT		3
+#define	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT	4
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

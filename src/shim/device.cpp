@@ -378,7 +378,7 @@ struct preemption
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_get_force_preempt_state force;
+    amdxdna_drm_attribute_state force;
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
@@ -395,7 +395,7 @@ struct preemption
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_set_force_preempt_state force;
+    amdxdna_drm_attribute_state force;
     force.state = std::any_cast<uint32_t>(any);
 
     amdxdna_drm_set_state arg = {
@@ -408,6 +408,45 @@ struct preemption
     pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
   }
 };
+
+struct frame_boundary_preemption
+{
+  using result_type = query::frame_boundary_preemption::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_attribute_state preempt;
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
+      .buffer_size = sizeof(preempt),
+      .buffer = reinterpret_cast<uintptr_t>(&preempt)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    return preempt.state;
+  }
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    amdxdna_drm_attribute_state preempt;
+    preempt.state = std::any_cast<uint32_t>(any);
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
+      .buffer_size = sizeof(preempt),
+      .buffer = reinterpret_cast<uintptr_t>(&preempt)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  }
+};
+
 
 struct telemetry
 {
@@ -932,7 +971,7 @@ struct xclbin_name
     //   break;
     // case xrt_core::query::xclbin_name::type::gemm_elf:
     //   xclbin_name = "gemm_elf.xclbin";
-    //   break; 
+    //   break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
@@ -969,7 +1008,7 @@ struct sequence_name
     case xrt_core::query::sequence_name::type::tct_all_column:
       seq_name = "tct_4col.txt";
       break;
-    // case xrt_core::query::sequence_name::type::gemm_int8: 
+    // case xrt_core::query::sequence_name::type::gemm_int8:
     //   seq_name = "gemm_int8.txt";
     //   break;
     }
@@ -1008,7 +1047,7 @@ struct elf_name
     case xrt_core::query::elf_name::type::tct_all_column:
       elf_file = "tct_4col.elf";
       break;
-    case xrt_core::query::elf_name::type::aie_reconfig_overhead: 
+    case xrt_core::query::elf_name::type::aie_reconfig_overhead:
       elf_file = "aie_reconfig_overhead.elf";
       break;
     // case xrt_core::query::elf_name::type::gemm_int8:
@@ -1153,6 +1192,7 @@ initialize_query_table()
 
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
+  emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
   emplace_func0_request<query::opcode_telemetry,               telemetry>();
