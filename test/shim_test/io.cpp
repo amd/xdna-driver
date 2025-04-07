@@ -59,7 +59,7 @@ get_bin_size(const std::string& filename)
 {
   std::ifstream ifs(filename, std::ifstream::ate | std::ifstream::binary);
   if (!ifs.is_open())
-    throw std::runtime_error("Failure opening file " + filename + "!!");
+    return 0;
   return ifs.tellg();
 }
 
@@ -82,26 +82,47 @@ get_ofm_format(const std::string& config_file)
 }
 
 xrt::elf
-txn2elf(std::vector<char>& txn_buf)
+txn2elf(std::vector<char>& txn_buf, std::vector<char>& pm_ctrlpkt)
 {
-  aiebu::aiebu_assembler as(aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf);
-  auto elf_buf = as.get_elf();
+  std::unique_ptr<aiebu::aiebu_assembler> asp = nullptr;
+
+  if (pm_ctrlpkt.size()) {
+    std::vector<char> buffer2 = {};
+    std::vector<char> patch_json = {};
+    std::vector<std::string> libs = { "preempt" };
+    std::vector<std::string> libpaths = { get_preemption_libs_path() };
+    std::map< uint32_t, std::vector<char> > m_ctrlpkt = {};
+    m_ctrlpkt[0] = pm_ctrlpkt;
+    m_ctrlpkt[1] = pm_ctrlpkt;
+    asp = std::make_unique<aiebu::aiebu_assembler>(
+      aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf,
+      buffer2, patch_json, libs, libpaths, m_ctrlpkt);
+  } else {
+    asp = std::make_unique<aiebu::aiebu_assembler>(
+      aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf);
+  }
+  auto elf_buf = asp->get_elf();
   std::istringstream elf_stream;
   elf_stream.rdbuf()->pubsetbuf(elf_buf.data(), elf_buf.size());
+  //dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
   xrt::elf elf{elf_stream};
   return elf;
 }
 
 const xrt::elf
-txn_file2elf(const std::string& filename)
+txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
 {
-  size_t instr_size = get_bin_size(filename);
+  size_t instr_size = get_bin_size(ml_txn);
   if (instr_size == 0)
     throw std::runtime_error("Zero instruction length");
-
   std::vector<char> txn_buf(instr_size);
-  read_data_from_bin(filename, 0, instr_size, reinterpret_cast<int*>(txn_buf.data()));
-  return txn2elf(txn_buf);
+  read_data_from_bin(ml_txn, 0, instr_size, reinterpret_cast<int*>(txn_buf.data()));
+
+  size_t pm_ctrlpkt_size = get_bin_size(pm_ctrlpkt);
+  std::vector<char> pm_ctrlpkt_buf(pm_ctrlpkt_size);
+  if (pm_ctrlpkt_size)
+    read_data_from_bin(pm_ctrlpkt, 0, pm_ctrlpkt_size, reinterpret_cast<int*>(pm_ctrlpkt_buf.data()));
+  return txn2elf(txn_buf, pm_ctrlpkt_buf);
 }
 
 } // namespace
@@ -165,8 +186,12 @@ io_test_bo_set(device* dev, const std::string& xclbin_name) :
       ibo.size = DUMMY_MC_CODE_BUFFER_SIZE;
       alloc_bo(ibo, m_dev, type);
       break;
+    case IO_TEST_BO_CTRL_PKT_PM:
+    case IO_TEST_BO_SCRATCH_PAD:
+      // No need for ctrl_pm and scratch pad BO
+      break;
     default:
-      throw std::runtime_error("unknown BO type");
+      throw std::runtime_error(std::string("unknown BO type ") + std::to_string(type));
       break;
     }
   }
@@ -177,10 +202,20 @@ io_test_bo_set(device* dev) : io_test_bo_set(dev, get_xclbin_name(dev))
 {
 }
 
+uint32_t
+get_column_size(const std::string& xclbin_path)
+{
+  auto xclbin = xrt::xclbin(xclbin_path);
+  auto axlf = xclbin.get_axlf();
+  auto aie_partition = xrt_core::xclbin::get_aie_partition(axlf);
+  return aie_partition.ncol;
+}
+
 elf_io_test_bo_set::
 elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   io_test_bo_set_base(dev, xclbin_name)
-  , m_txn_bin_path(m_local_data_path + "/ml_txn.bin")
+  , m_elf(txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin"))
+  , m_type(get_kernel_type(dev, xclbin_name.c_str()))
 {
   std::string file;
 
@@ -194,7 +229,7 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       alloc_bo(ibo, m_dev, type);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      ibo.size = exec_buf::get_ctrl_code_size(txn_file2elf(m_txn_bin_path));
+      ibo.size = exec_buf::get_ctrl_code_size(m_elf);
       if (ibo.size == 0)
         throw std::runtime_error("instruction size cannot be 0");
       alloc_bo(ibo, m_dev, type);
@@ -208,8 +243,11 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
     case IO_TEST_BO_PARAMETERS:
       file = m_local_data_path + "/wts.bin";
       ibo.size = get_bin_size(file);
-      alloc_bo(ibo, m_dev, type);
-      init_bo(ibo, file);
+      // May not have wts.bin
+      if (ibo.size) {
+	      alloc_bo(ibo, m_dev, type);
+	      init_bo(ibo, file);
+      }
       break;
     case IO_TEST_BO_OUTPUT:
       file = m_local_data_path + "/ofm.bin";
@@ -219,6 +257,24 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
     case IO_TEST_BO_INTERMEDIATE:
     case IO_TEST_BO_MC_CODE:
       // No need for intermediate/mc_code BO
+      break;
+    case IO_TEST_BO_CTRL_PKT_PM:
+      file = m_local_data_path + "/pm_ctrlpkt.bin";
+      ibo.size = get_bin_size(file);
+      // May not have pm_ctrlpkt.bin
+      if (ibo.size) {
+        alloc_bo(ibo, m_dev, type);
+	      init_bo(ibo, file);
+      }
+      break;
+    case IO_TEST_BO_SCRATCH_PAD:
+      // Scratch pad buffer is required for preemption kernel
+      if (m_type == KERNEL_TYPE_TXN_PREEMPT) {
+        // Only support mem tile size for NPU4
+        const size_t mem_tile_sz = 512 * 1024;
+        ibo.size = mem_tile_sz * get_column_size(m_local_data_path + "/" + xclbin_name);
+        alloc_bo(ibo, m_dev, type);
+      }
       break;
     default:
       throw std::runtime_error("unknown BO type");
@@ -295,23 +351,42 @@ elf_io_test_bo_set::
 init_cmd(xrt_core::cuidx_type idx, bool dump)
 {
   auto dev_id = device_query<query::pcie_device>(m_dev);
+  uint32_t cmd;
 
-  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
-  auto elf = txn_file2elf(m_txn_bin_path);
-
+  switch (m_type) {
+  case KERNEL_TYPE_TXN:
+    cmd = ERT_START_NPU;
+    break;
+  case KERNEL_TYPE_TXN_PREEMPT:
+    cmd = ERT_START_NPU_PREEMPT;
+    break;
+  default:
+    throw std::runtime_error(std::string("Unknown kernel type: ") + std::to_string(m_type));
+  }
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), cmd);
   ebuf.set_cu_idx(idx);
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.add_arg_64(3);
   ebuf.add_arg_64(0);
   ebuf.add_arg_32(0);
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+  if (m_type == KERNEL_TYPE_TXN)
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+  else
+    ebuf.add_arg_64(0);
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
   ebuf.add_arg_64(0);
   ebuf.add_arg_64(0);
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), elf);
+  if (m_type == KERNEL_TYPE_TXN_PREEMPT) {
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-0");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-1");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get(), "scratch-pad-mem");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get(), "scratch-pad-mem");
+  }
   if (dump)
     ebuf.dump();
+
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf);
 }
 
 // For debug only

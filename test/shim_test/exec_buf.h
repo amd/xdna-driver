@@ -68,6 +68,17 @@ public:
       inc_pkt_count(sizeof(*dpu_data));
       break;
     }
+    case ERT_START_NPU_PREEMPT: {
+      auto dpu_data = get_ert_npu_preempt_data(cmd_packet);
+      dpu_data->instruction_buffer = bo_ctrl.paddr();
+      dpu_data->save_buffer = bo_ctrl.paddr();
+      dpu_data->restore_buffer = bo_ctrl.paddr();
+      dpu_data->instruction_buffer_size = bo_ctrl.size();
+      dpu_data->save_buffer_size = bo_ctrl.size();
+      dpu_data->restore_buffer_size = bo_ctrl.size();
+      inc_pkt_count(sizeof(*dpu_data));
+      break;
+    }
     default:
       throw std::runtime_error("Unknown exec buf op code: " + std::to_string(m_op));
     }

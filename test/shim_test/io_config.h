@@ -254,7 +254,7 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
   return ret;
 }
 
-void dump_buf_to_file(int8_t *buf, size_t size, const std::string &dumpfile)
+void dump_buf_to_file(int8_t *buf, size_t size, const std::string& dumpfile)
 {
     std::ofstream ofs(dumpfile, std::ios::out | std::ios::binary);
     std::string s("Failed to open dump file: ");

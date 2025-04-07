@@ -5,6 +5,7 @@
 #define _SHIMTEST_IO_H_
 
 #include "bo.h"
+#include "dev_info.h"
 
 #include "core/common/device.h"
 #include <memory>
@@ -17,6 +18,8 @@ enum io_test_bo_type {
   IO_TEST_BO_OUTPUT,
   IO_TEST_BO_INTERMEDIATE,
   IO_TEST_BO_MC_CODE,
+  IO_TEST_BO_CTRL_PKT_PM,
+  IO_TEST_BO_SCRATCH_PAD,
   IO_TEST_BO_MAX_TYPES
 };
 
@@ -78,6 +81,7 @@ class io_test_bo_set : public io_test_bo_set_base
 {
 public:
   io_test_bo_set(device *dev, const std::string& xclbin_name);
+
   io_test_bo_set(device *dev);
 
   void
@@ -99,7 +103,8 @@ public:
   verify_result() override;
 
 private:
-  std::string m_txn_bin_path;
+  const xrt::elf m_elf;
+  const kernel_type m_type;
 };
 
 #endif // _SHIMTEST_IO_H_

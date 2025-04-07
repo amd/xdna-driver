@@ -54,6 +54,7 @@ void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>, arg_type&)
 void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_shim_umq_remote_barrier(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_elf_io(device::id_type, std::shared_ptr<device>, arg_type&);
+void TEST_preempt_elf_io(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>, arg_type&);
 
@@ -732,6 +733,10 @@ std::vector<test_case> test_list {
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
+  // Disable for now. Require changes in XRT for argument patching.
+  //test_case{ "multi-command preempt ELF io test real kernel good run", {},
+  //  TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 1 }
+  //},
 };
 
 // Test case executor implementation
@@ -906,10 +911,10 @@ main(int argc, char **argv)
       break;
     }
     case '?':
-      std::cout << "Unknown option: " << static_cast<char>(optopt) << std::endl;;
+      std::cout << "Unknown option: " << static_cast<char>(optopt) << std::endl;
       return 1;
     case ':':
-      std::cout << "Missing value for option: " << argv[optind-1] << std::endl;;
+      std::cout << "Missing value for option: " << argv[optind-1] << std::endl;
       return 1;
     default:
       usage(program);

@@ -196,20 +196,33 @@ xclbin_info xclbin_infos[] = {
     .device = npu1_device_id,
     .revision_id = npu1_revision_id,
     .ip_name2idx = {
-      { "DPU_ELF:IPUV1CNN", {0} },
+      { "DPU_ELF:IPUV1CNN", {9} },
     },
     .workspace = "local_shim_test_data/elf_txn_no_cp_npu1",
     .data = "",
+    .type = KERNEL_TYPE_TXN,
   },
   {
     .name = "design.xclbin",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:IPUV1CNN", {0} },
+      { "DPU:IPUV1CNN", {1} },
     },
     .workspace = "local_shim_test_data/elf_txn_no_cp_npu2",
     .data = "",
+    .type = KERNEL_TYPE_TXN,
+  },
+  {
+    .name = "pm_reload.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {1} },
+    },
+    .workspace = "local_shim_test_data/elf_txn_preempt_no_cp_npu2",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_PREEMPT,
   },
 };
 
@@ -241,6 +254,12 @@ get_kernel_name(device* dev, const char *xclbin)
   return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->first;
 }
 
+kernel_type
+get_kernel_type(device* dev, const char *xclbin)
+{
+  return get_xclbin_info(dev, xclbin).type;
+}
+
 static std::string
 get_xclbin_workspace(device* dev, const char *xclbin_name)
 {
@@ -270,4 +289,10 @@ const std::map<const char*, cuidx_type>&
 get_xclbin_ip_name2index(device* dev, const char *xclbin_name)
 {
   return get_xclbin_info(dev, xclbin_name).ip_name2idx;
+}
+
+std::string
+get_preemption_libs_path()
+{
+  return cur_path + "/../" + "preemption_libs" + "/";
 }
