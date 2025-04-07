@@ -23,12 +23,13 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_client *client;
 	int ret;
 
+#ifndef AMDXDNA_OF
 	ret = pm_runtime_resume_and_get(ddev->dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get rpm, ret %d", ret);
 		return ret;
 	}
-
+#endif
 	client = kzalloc(sizeof(*client), GFP_KERNEL);
 	if (!client) {
 		ret = -ENOMEM;
@@ -81,9 +82,10 @@ unbind_sva:
 failed:
 	kfree(client);
 put_rpm:
+#ifndef AMDXDNA_OF
 	pm_runtime_mark_last_busy(ddev->dev);
 	pm_runtime_put_autosuspend(ddev->dev);
-
+#endif
 	return ret;
 }
 
@@ -111,8 +113,10 @@ skip_sva_unbind:
 
 	XDNA_DBG(xdna, "PID %d closed", client->pid);
 	kfree(client);
+#ifndef AMDXDNA_OF
 	pm_runtime_mark_last_busy(ddev->dev);
 	pm_runtime_put_autosuspend(ddev->dev);
+#endif
 }
 
 static int amdxdna_flush(struct file *f, fl_owner_t id)
@@ -281,7 +285,11 @@ const struct drm_driver amdxdna_drm_drv = {
 	.show_fdinfo = amdxdna_show_fdinfo,
 
 	/* For shmem object create */
+#ifdef AMDXDNA_OF
+	.gem_create_object = amdxdna_gem_create_object_cb,
+#else
 	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
+#endif
 #ifdef AMDXDNA_SHMEM
 	.gem_prime_import = amdxdna_gem_prime_import,
 #else
