@@ -325,10 +325,23 @@ TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_t
 }
 
 void
-TEST_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+elf_io(device::id_type id, std::shared_ptr<device> sdev,
+  const std::vector<uint64_t>& arg, const char *xclbin)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
 
   io_test_parameter_init(IO_TEST_NO_PERF, run_type, IO_TEST_IOCTL_WAIT);
-  io_test(id, sdev.get(), 1, 1, arg[1], "design.xclbin");
+  io_test(id, sdev.get(), 1, 1, arg[1], xclbin);
+}
+
+void
+TEST_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  elf_io(id, sdev, arg, "design.xclbin");
+}
+
+void
+TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+{
+  elf_io(id, sdev, arg, "pm_reload.xclbin");
 }

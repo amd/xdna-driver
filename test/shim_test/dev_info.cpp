@@ -290,3 +290,9 @@ get_xclbin_ip_name2index(device* dev, const char *xclbin_name)
 {
   return get_xclbin_info(dev, xclbin_name).ip_name2idx;
 }
+
+std::string
+get_preemption_libs_path()
+{
+  return cur_path + "/../" + "preemption_libs" + "/";
+}

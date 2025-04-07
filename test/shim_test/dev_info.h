@@ -45,5 +45,6 @@ kernel_type get_kernel_type(device* dev, const char*);
 std::string get_xclbin_data(device* dev, const char *xclbin_name=nullptr);
 std::string get_xclbin_path(device* dev, const char *xclbin_name=nullptr);
 const std::map<const char*, cuidx_type>& get_xclbin_ip_name2index(device* dev, const char *xclbin_name=nullptr);
+std::string get_preemption_libs_path();
 
 #endif // _SHIMTEST_DEV_INFO_H_
