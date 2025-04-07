@@ -287,6 +287,7 @@ struct aie2_ctx_rq {
 
 	struct workqueue_struct	*work_q;
 	struct work_struct	parts_work;
+	struct completion	parts_work_comp;
 	bool			paused;
 
 	/*

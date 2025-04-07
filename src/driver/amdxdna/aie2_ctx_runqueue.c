@@ -17,6 +17,10 @@ uint hwctx_limit;
 module_param(hwctx_limit, uint, 0444);
 MODULE_PARM_DESC(hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default");
 
+bool wait_update_parts = true;
+module_param(wait_update_parts, bool, 0600);
+MODULE_PARM_DESC(wait_update_parts, "[Debug] Add/Del context wait for update partition");
+
 #define RQ_CTX_IDLE_COUNT 3
 
 #if AMDXDNA_NUM_PRIORITY != CTX_RQ_NUM_QUEUE
@@ -780,6 +784,7 @@ static void rq_parts_work(struct work_struct *work)
 
 	rq_part_resize(rq);
 	rq->paused = false;
+	complete_all(&rq->parts_work_comp);
 out:
 	list_for_each_entry_safe(ctx, tmp, &rq->disconn_list, entry)
 		if (atomic64_read(&ctx->priv->job_pending_cnt))
@@ -978,6 +983,7 @@ void aie2_rq_submit_exit(struct amdxdna_ctx *ctx)
 int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
+	bool wait_parts = false;
 	u32 num_col;
 	int ret;
 
@@ -1020,20 +1026,27 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	if (num_col > rq->max_cols) {
 		rq->max_cols = num_col;
 		queue_work(rq->work_q, &rq->parts_work);
+		wait_parts = true;
 	}
 
-	if (!rq->ctx_cnt && num_col < rq->max_cols)
+	if (!rq->ctx_cnt && num_col < rq->max_cols) {
 		queue_work(rq->work_q, &rq->parts_work);
+		wait_parts = true;
+	}
 
 	list_add_tail(&ctx->entry, &rq->disconn_list);
 	rq->ctx_cnt++;
 	if (ctx_is_rt(ctx)) {
 		rq->rt_ctx_cnt++;
 		queue_work(rq->work_q, &rq->parts_work);
+		wait_parts = true;
 	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (wait_update_parts && wait_parts)
+		wait_for_completion_killable(&rq->parts_work_comp);
 	XDNA_DBG(xdna, "%s added, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
-	mutex_unlock(&xdna->dev_lock);
 	return 0;
 
 error:
@@ -1044,6 +1057,7 @@ error:
 void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
+	bool wait_parts = false;
 	u32 num_col;
 	int i;
 
@@ -1059,6 +1073,7 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	if (ctx_is_rt(ctx)) {
 		rq->rt_ctx_cnt--;
 		queue_work(rq->work_q, &rq->parts_work);
+		wait_parts = true;
 	}
 
 	num_col = ctx->priv->orig_num_col;
@@ -1069,9 +1084,14 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 				continue;
 
 			queue_work(rq->work_q, &rq->parts_work);
+			wait_parts = true;
+			break;
 		}
 	}
 	mutex_unlock(&xdna->dev_lock);
+
+	if (wait_update_parts && wait_parts)
+		wait_for_completion_killable(&rq->parts_work_comp);
 	cancel_work_sync(&ctx->yield_work);
 	XDNA_DBG(xdna, "%s deleted, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
@@ -1127,6 +1147,7 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 		goto free_col_arr;
 
 	INIT_WORK(&rq->parts_work, rq_parts_work);
+	init_completion(&rq->parts_work_comp);
 	INIT_LIST_HEAD(&rq->disconn_list);
 
 	rq_part_init(rq);
