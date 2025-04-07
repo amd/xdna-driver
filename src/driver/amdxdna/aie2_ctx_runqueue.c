@@ -1035,9 +1035,8 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		wait_parts = true;
 	}
 
-	if (!rq->ctx_cnt && num_col < rq->max_cols) {
+	if (!rq->ctx_cnt && num_col < rq->max_cols)
 		wait_parts = true;
-	}
 
 	if (ctx_is_rt(ctx)) {
 		rq->rt_ctx_cnt++;
