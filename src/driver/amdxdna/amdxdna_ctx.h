@@ -121,6 +121,7 @@ struct amdxdna_ctx {
 	u32				syncobj_hdl;
 
 	struct list_head		entry;
+	struct list_head		parts_work_entry;
 	struct work_struct		dispatch_work;
 	struct work_struct		yield_work;
 };

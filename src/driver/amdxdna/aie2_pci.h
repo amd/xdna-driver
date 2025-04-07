@@ -238,6 +238,7 @@ struct amdxdna_ctx_priv {
 	bool				should_block;
 	int				priority;
 	struct aie2_partition		*part;
+	struct completion		parts_work_comp;
 
 	/* Hardware context related in below */
 	u32				id;
@@ -287,6 +288,7 @@ struct aie2_ctx_rq {
 
 	struct workqueue_struct	*work_q;
 	struct work_struct	parts_work;
+	struct list_head	parts_work_waitq;
 	bool			paused;
 
 	/*

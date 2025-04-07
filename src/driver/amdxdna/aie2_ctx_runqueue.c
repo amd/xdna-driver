@@ -17,6 +17,10 @@ uint hwctx_limit;
 module_param(hwctx_limit, uint, 0444);
 MODULE_PARM_DESC(hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default");
 
+bool wait_update_parts = true;
+module_param(wait_update_parts, bool, 0600);
+MODULE_PARM_DESC(wait_update_parts, "[Debug] Add/Del context wait for update partition");
+
 #define RQ_CTX_IDLE_COUNT 3
 
 #if AMDXDNA_NUM_PRIORITY != CTX_RQ_NUM_QUEUE
@@ -780,6 +784,10 @@ static void rq_parts_work(struct work_struct *work)
 
 	rq_part_resize(rq);
 	rq->paused = false;
+	list_for_each_entry_safe(ctx, tmp, &rq->parts_work_waitq, parts_work_entry) {
+		list_del_init(&ctx->parts_work_entry);
+		complete(&ctx->priv->parts_work_comp);
+	}
 out:
 	list_for_each_entry_safe(ctx, tmp, &rq->disconn_list, entry)
 		if (atomic64_read(&ctx->priv->job_pending_cnt))
@@ -978,6 +986,7 @@ void aie2_rq_submit_exit(struct amdxdna_ctx *ctx)
 int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
+	bool wait_parts = false;
 	u32 num_col;
 	int ret;
 
@@ -1012,28 +1021,38 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 
 	INIT_WORK(&ctx->dispatch_work, rq_dispatch_work);
 	INIT_WORK(&ctx->yield_work, rq_yield_work);
+	init_completion(&ctx->priv->parts_work_comp);
 	ctx->priv->status = CTX_STATE_DISCONNECTED;
 	ctx->priv->should_block = false;
 	qos_to_rq_prio(ctx);
 
 	rq->col_arr[num_col]++;
+	list_add_tail(&ctx->entry, &rq->disconn_list);
+	rq->ctx_cnt++;
+
 	if (num_col > rq->max_cols) {
 		rq->max_cols = num_col;
-		queue_work(rq->work_q, &rq->parts_work);
+		wait_parts = true;
 	}
 
 	if (!rq->ctx_cnt && num_col < rq->max_cols)
-		queue_work(rq->work_q, &rq->parts_work);
+		wait_parts = true;
 
-	list_add_tail(&ctx->entry, &rq->disconn_list);
-	rq->ctx_cnt++;
 	if (ctx_is_rt(ctx)) {
 		rq->rt_ctx_cnt++;
+		wait_parts = true;
+	}
+
+	if (wait_parts) {
+		list_add_tail(&ctx->parts_work_entry, &rq->parts_work_waitq);
 		queue_work(rq->work_q, &rq->parts_work);
 	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (wait_update_parts && wait_parts)
+		wait_for_completion_killable(&ctx->priv->parts_work_comp);
 	XDNA_DBG(xdna, "%s added, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
-	mutex_unlock(&xdna->dev_lock);
 	return 0;
 
 error:
@@ -1044,6 +1063,7 @@ error:
 void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
+	bool wait_parts = false;
 	u32 num_col;
 	int i;
 
@@ -1058,7 +1078,7 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	rq->ctx_cnt--;
 	if (ctx_is_rt(ctx)) {
 		rq->rt_ctx_cnt--;
-		queue_work(rq->work_q, &rq->parts_work);
+		wait_parts = true;
 	}
 
 	num_col = ctx->priv->orig_num_col;
@@ -1068,10 +1088,19 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 			if (!rq->col_arr[i])
 				continue;
 
-			queue_work(rq->work_q, &rq->parts_work);
+			wait_parts = true;
+			break;
 		}
 	}
+
+	if (wait_parts) {
+		list_add_tail(&ctx->parts_work_entry, &rq->parts_work_waitq);
+		queue_work(rq->work_q, &rq->parts_work);
+	}
 	mutex_unlock(&xdna->dev_lock);
+
+	if (wait_update_parts && wait_parts)
+		wait_for_completion_killable(&ctx->priv->parts_work_comp);
 	cancel_work_sync(&ctx->yield_work);
 	XDNA_DBG(xdna, "%s deleted, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
@@ -1084,7 +1113,6 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 
 	ndev = ctx_rq_to_ndev(rq);
 	xdna = ndev->xdna;
-	/* amdxdna_dev_ops.init() set default context and connect limit value */
 	if (context_limit && context_limit != __UINT32_MAX__)
 		rq->ctx_limit = context_limit;
 	else
@@ -1127,6 +1155,7 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 		goto free_col_arr;
 
 	INIT_WORK(&rq->parts_work, rq_parts_work);
+	INIT_LIST_HEAD(&rq->parts_work_waitq);
 	INIT_LIST_HEAD(&rq->disconn_list);
 
 	rq_part_init(rq);
