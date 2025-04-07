@@ -104,7 +104,7 @@ txn2elf(std::vector<char>& txn_buf, std::vector<char>& pm_ctrlpkt)
   auto elf_buf = asp->get_elf();
   std::istringstream elf_stream;
   elf_stream.rdbuf()->pubsetbuf(elf_buf.data(), elf_buf.size());
-  dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
+  //dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
   xrt::elf elf{elf_stream};
   return elf;
 }
@@ -186,8 +186,12 @@ io_test_bo_set(device* dev, const std::string& xclbin_name) :
       ibo.size = DUMMY_MC_CODE_BUFFER_SIZE;
       alloc_bo(ibo, m_dev, type);
       break;
+    case IO_TEST_BO_CTRL_PKT_PM:
+    case IO_TEST_BO_SCRATCH_PAD:
+      // No need for ctrl_pm and scratch pad BO
+      break;
     default:
-      throw std::runtime_error("unknown BO type");
+      throw std::runtime_error(std::string("unknown BO type ") + std::to_string(type));
       break;
     }
   }
@@ -357,7 +361,7 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
     cmd = ERT_START_NPU_PREEMPT;
     break;
   default:
-    throw std::runtime_error("Unknown kernel type!!!");
+    throw std::runtime_error(std::string("Unknown kernel type: ") + std::to_string(m_type));
   }
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), cmd);
   ebuf.set_cu_idx(idx);
@@ -379,10 +383,10 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get(), "scratch-pad-mem");
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get(), "scratch-pad-mem");
   }
-//  if (dump)
+  if (dump)
     ebuf.dump();
 
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), /*m_elf*/"/proj/xsjhdstaff3/maxzhen2/tests/elf_flow/elf-preempt/pm_reload_aiebulib.elf");
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf);
 }
 
 // For debug only
