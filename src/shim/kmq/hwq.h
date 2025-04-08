@@ -16,9 +16,6 @@ public:
   ~hw_q_kmq();
 
   void
-  bind_hwctx(const hw_ctx *ctx);
-
-  void
   issue_command(xrt_core::buffer_handle *) override;
 };
 
