@@ -77,7 +77,11 @@ hw_ctx_virtio::
 {
   shim_debug("Destroying VIRTIO HW context (%d)...", get_slotidx());
   set_slotidx(AMDXDNA_INVALID_CTX_HANDLE);
-  delete_ctx_on_device();
+  try {
+    delete_ctx_on_device();
+  } catch (const xrt_core::system_error& e) {
+    shim_debug("Failed to delete context on device: %s", e.what());
+  }
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

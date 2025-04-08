@@ -23,6 +23,8 @@ const char *io_test_bo_type_names[] = {
   "IO_TEST_BO_INTERMEDIATE",
   "IO_TEST_BO_MC_CODE",
   "IO_TEST_BO_BAD_INSTRUCTION",
+  "IO_TEST_BO_CTRL_PKT_PM",
+  "IO_TEST_BO_SCRATCH_PAD",
 };
 
 void

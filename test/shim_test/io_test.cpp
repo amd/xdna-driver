@@ -337,11 +337,11 @@ elf_io(device::id_type id, std::shared_ptr<device> sdev,
 void
 TEST_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, sdev, arg, "design.xclbin");
+  elf_io(id, std::move(sdev), arg, "design.xclbin");
 }
 
 void
 TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, sdev, arg, "pm_reload.xclbin");
+  elf_io(id, std::move(sdev), arg, "pm_reload.xclbin");
 }
