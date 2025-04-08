@@ -15,8 +15,8 @@ public:
 
   ~hw_q_virtio();
 
-  void
-  bind_hwctx(const hw_ctx *ctx);
+  int
+  wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
 
   void
   issue_command(xrt_core::buffer_handle *) override;

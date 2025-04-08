@@ -44,12 +44,4 @@ issue_command(xrt_core::buffer_handle *cmd_bo)
   shim_debug("Submitted command (%ld)", id);
 }
 
-void
-hw_q_kmq::
-bind_hwctx(const hw_ctx *ctx)
-{
-  // link hwctx by parent class
-  hw_q::bind_hwctx(ctx);
-}
-
 } // shim_xdna

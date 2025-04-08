@@ -60,12 +60,11 @@ wait_cmd(const shim_xdna::pdev& pdev, const shim_xdna::hw_ctx *ctx,
 {
   int ret = 1;
   auto boh = static_cast<shim_xdna::bo*>(cmd);
-  auto id = boh->get_cmd_id();
   auto syncobj = ctx->get_syncobj();
   auto ctx_id = ctx->get_slotidx();
   auto seq = boh->get_cmd_id();
 
-  shim_debug("Waiting for cmd (%ld)...", id);
+  shim_debug("Waiting for cmd (%ld)...", seq);
   
   try {
     if (syncobj != AMDXDNA_INVALID_FENCE_HANDLE)

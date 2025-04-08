@@ -41,7 +41,7 @@ public:
 
 public:
   virtual void
-  bind_hwctx(const hw_ctx *ctx) = 0;
+  bind_hwctx(const hw_ctx *ctx);
 
   void
   unbind_hwctx();
