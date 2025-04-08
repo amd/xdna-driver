@@ -30,14 +30,14 @@ issue_command(xrt_core::buffer_handle *cmd_bo)
 
   amdxdna_ccmd_exec_cmd_rsp rsp = {};
 
+  auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req) + sizeof(uint64_t);
   // Get a 64 bit aligned buffer for req
-  auto req_sz_in_u64 =
-    (sizeof(amdxdna_ccmd_exec_cmd_req) + sizeof(uint64_t)) / sizeof(uint64_t) + 1;
+  auto req_sz_in_u64 = req_sz / sizeof(uint64_t) + 1;
   uint64_t req_buf[req_sz_in_u64];
   auto req = reinterpret_cast<amdxdna_ccmd_exec_cmd_req*>(req_buf);
 
   req->hdr.cmd = AMDXDNA_CCMD_EXEC_CMD;
-  req->hdr.len = sizeof(req);
+  req->hdr.len = req_sz;
   req->hdr.rsp_off = 0;
   req->ctx_handle = m_hwctx->get_slotidx();
   req->type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
