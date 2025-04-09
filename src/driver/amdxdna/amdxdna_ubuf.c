@@ -61,6 +61,7 @@ static void amdxdna_ubuf_release(struct dma_buf *dbuf)
 
 	unpin_user_pages(ubuf->pages, ubuf->nr_pages);
 	kvfree(ubuf->pages);
+	kfree(ubuf);
 }
 
 static vm_fault_t amdxdna_ubuf_vm_fault(struct vm_fault *vmf)

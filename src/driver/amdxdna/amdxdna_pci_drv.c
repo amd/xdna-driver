@@ -14,6 +14,7 @@
 #include "amdxdna_sysfs.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
+#include "amdxdna_carvedout_buf.h"
 #endif
 
 int autosuspend_ms = -1;
