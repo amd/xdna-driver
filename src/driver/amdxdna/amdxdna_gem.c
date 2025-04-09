@@ -833,7 +833,6 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 		return abo;
 	gobj = to_gobj(abo);
 	gobj->funcs = &amdxdna_gem_dev_obj_funcs;
-	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
 	abo->type = AMDXDNA_BO_DEV;
 	abo->client = client;
@@ -850,11 +849,12 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 		goto release_obj;
 	}
 	abo->mem.kva = map.vaddr + abo->mem.dev_addr - client->dev_heap->mem.dev_addr;
+	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
 	return abo;
 
 release_obj:
-	amdxdna_gem_dev_obj_free(gobj);
+	amdxdna_gem_destroy_obj(abo);
 	return ERR_PTR(ret);
 }
 
