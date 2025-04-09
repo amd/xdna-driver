@@ -57,6 +57,7 @@ extern "C" {
 #define	DRM_AMDXDNA_GET_INFO		7
 #define	DRM_AMDXDNA_SET_STATE		8
 #define	DRM_AMDXDNA_WAIT_CMD		9
+#define DRM_AMDXDNA_GET_INFO_ARRAY	10
 
 #define	AMDXDNA_DEV_TYPE_UNKNOWN	-1
 #define	AMDXDNA_DEV_TYPE_KMQ		0
@@ -559,6 +560,23 @@ struct amdxdna_drm_get_info {
 };
 
 /**
+ * struct amdxdna_drm_get_info_array - Get some information from the AIE hardware, return array.
+ * @param: Specifies the structure passed in the buffer.
+ * @element_size: Size of each element in the array.
+ * @num_element: The number of elements.
+ * @buffer: Pointer to an array whose elements are structure specified by the param struct member.
+ */
+struct amdxdna_drm_get_info_array {
+#define DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY	0
+	__u32 param; /* in */
+	__u32 element_size; /* in/out */
+#define AMDXDNA_MAX_NUM_ELEMENT			1024
+	__u32 num_element; /* in/out */
+	__u32 pad;
+	__u64 buffer; /* in/out */
+};
+
+/**
  * struct amdxdna_drm_set_power_mode - Set the power mode of the AIE hardware
  * @power_mode: The target power mode to be set
  * @pad: MBZ.
@@ -630,6 +648,10 @@ struct amdxdna_drm_set_state {
 #define DRM_IOCTL_AMDXDNA_GET_INFO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO, \
 		 struct amdxdna_drm_get_info)
+
+#define DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO_ARRAY, \
+		struct amdxdna_drm_get_info_array)
 
 #define DRM_IOCTL_AMDXDNA_SET_STATE \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SET_STATE, \
