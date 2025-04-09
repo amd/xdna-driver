@@ -9,7 +9,6 @@
 
 #include "amdxdna_devel.h"
 #include "amdxdna_trace.h"
-#include "amdxdna_carvedout_buf.h"
 
 int iommu_mode;
 module_param(iommu_mode, int, 0644);
