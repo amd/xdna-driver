@@ -772,8 +772,9 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 	struct amdxdna_gem_obj *abo;
 	int ret;
 
-	if (args->size > xdna->dev_info->dev_mem_size) {
-		XDNA_ERR(xdna, "Invalid dev heap size 0x%llx, limit 0x%lx",
+	WARN_ON(!is_power_of_2(xdna->dev_info->dev_mem_size));
+	if (!IS_ALIGNED(args->size, xdna->dev_info->dev_mem_size)) {
+		XDNA_ERR(xdna, "The dev heap size 0x%llx is not multiple of 0x%lx",
 			 args->size, xdna->dev_info->dev_mem_size);
 		return ERR_PTR(-EINVAL);
 	}
