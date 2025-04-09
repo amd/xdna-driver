@@ -24,6 +24,7 @@ amdxdna-y := \
 	amdxdna_mailbox_helper.o \
 	amdxdna_tdr.o \
 	amdxdna_ubuf.o \
+	amdxdna_carvedout_buf.o \
 	aie2_solver.o \
 	aie2_smu.o \
 	aie2_psp.o \
