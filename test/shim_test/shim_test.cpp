@@ -41,22 +41,22 @@ int base_write_speed;
 int base_read_speed;
 
 using arg_type = const std::vector<uint64_t>;
-void TEST_export_import_bo(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_io(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_io_latency(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_io_throughput(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_shim_umq_remote_barrier(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_elf_io(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_preempt_elf_io(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>, arg_type&);
-void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>, arg_type&);
+void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_shim_umq_remote_barrier(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_preempt_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 
 inline void
 set_xrt_path()
@@ -89,7 +89,7 @@ struct test_case {
   const kern_version k_ver;
   bool is_negative;
   bool (*dev_filter)(device::id_type id, device *dev);
-  void (*func)(device::id_type id, std::shared_ptr<device> dev, arg_type& arg);
+  void (*func)(device::id_type id, std::shared_ptr<device>& dev, arg_type& arg);
   arg_type arg;
 };
 
@@ -182,7 +182,7 @@ dev_filter_is_npu4(device::id_type id, device* dev)
 // All test case runners
 
 void
-TEST_get_xrt_info(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_get_xrt_info(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   boost::property_tree::ptree pt;
   const boost::property_tree::ptree empty_pt;
@@ -201,7 +201,7 @@ TEST_get_xrt_info(device::id_type id, std::shared_ptr<device> sdev, arg_type& ar
 }
 
 void
-TEST_get_os_info(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_get_os_info(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   boost::property_tree::ptree pt;
   sysinfo::get_os_info(pt);
@@ -210,7 +210,7 @@ TEST_get_os_info(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg
 }
 
 void
-TEST_get_total_devices(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_get_total_devices(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto is_user = arg[0];
   std::string pf { is_user ? "userpf" : "mgmtpf" };
@@ -230,7 +230,7 @@ bdf_info2str(std::tuple<uint16_t, uint16_t, uint16_t, uint16_t>& info)
 }
 
 void
-TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto is_user = arg[0];
   auto devinfo = get_total_devices(is_user);
@@ -244,7 +244,7 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device> 
 }
 
 void
-TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto devinfo = get_total_devices(false);
   for (device::id_type i = 0; i < devinfo.first; i++)
@@ -253,7 +253,7 @@ TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device> sdev, arg_typ
 
 template <typename QueryRequestType>
 void
-TEST_query_userpf(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_query_userpf(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto query_result = device_query<QueryRequestType>(sdev);
   std::cout << "dev[" << id << "]." << QueryRequestType::name() << ": "
@@ -261,14 +261,14 @@ TEST_query_userpf(device::id_type id, std::shared_ptr<device> sdev, arg_type& ar
 }
 
 void
-TEST_create_destroy_device(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_create_destroy_device(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev1 = get_userpf_device(id);
   auto dev2 = get_userpf_device(id);
 }
 
 void
-TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   // Close existing device
   sdev.reset();
@@ -285,7 +285,7 @@ TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device> sdev,
 }
 
 void
-TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   auto device_id = device_query<query::pcie_device>(dev);
@@ -311,18 +311,18 @@ TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device> 
 }
 
 void
-TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   auto device_id = device_query<query::pcie_device>(dev);
   int num_virt_ctx = static_cast<unsigned int>(arg[0]);
 
   multi_thread threads(num_virt_ctx, TEST_io_latency);
-  threads.run_test(id, std::move(sdev), {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
+  threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
 }
 
 void
-TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
@@ -365,7 +365,7 @@ get_and_show_bo_properties(device* dev, buffer_handle *boh)
 }
 
 void
-TEST_create_free_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_create_free_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   uint32_t boflags = static_cast<unsigned int>(arg[0]);
@@ -381,7 +381,7 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& 
 }
 
 void
-TEST_sync_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_sync_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
   auto ext_boflags = static_cast<unsigned int>(arg[1]);
@@ -397,7 +397,7 @@ TEST_sync_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 }
 
 void
-TEST_sync_bo_off_size(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_sync_bo_off_size(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
   auto ext_boflags = static_cast<unsigned int>(arg[1]);
@@ -414,7 +414,7 @@ TEST_sync_bo_off_size(device::id_type id, std::shared_ptr<device> sdev, arg_type
 }
 
 void
-TEST_map_read_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_map_read_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   auto size = static_cast<size_t>(arg[0]);
@@ -460,7 +460,7 @@ void speed_test_base_line(size_t size)
 }
 
 void
-TEST_map_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_map_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto boflags = static_cast<unsigned int>(arg[0]);
   auto ext_boflags = static_cast<unsigned int>(arg[1]);
@@ -498,7 +498,7 @@ TEST_map_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 }
 
 void
-TEST_open_close_cu_context(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_open_close_cu_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   hw_ctx hwctx{dev};
@@ -521,7 +521,7 @@ TEST_open_close_cu_context(device::id_type id, std::shared_ptr<device> sdev, arg
 }
 
 void
-TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   hw_ctx hwctx{sdev.get()};
   // Test to create > 1 queues
@@ -765,14 +765,15 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
   try {
     if (test.dev_filter == no_dev_filter) { // system test
       skipped = false;
-      test.func(0, nullptr, test.arg);
+      std::shared_ptr<device> dev = nullptr;
+      test.func(0, dev, test.arg);
     } else { // per user device test
       for (device::id_type i = 0; i < num_of_devices; i++) {
         auto dev = get_userpf_device(i);
         if (!force && !test.dev_filter(i, dev.get()))
           continue;
         skipped = false;
-        test.func(i, std::move(dev), test.arg);
+        test.func(i, dev, test.arg);
       }
     }
   }

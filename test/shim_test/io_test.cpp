@@ -245,7 +245,7 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
 }
 
 void
-TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
 
@@ -254,7 +254,7 @@ TEST_io(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 }
 
 void
-TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_io_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
@@ -265,7 +265,7 @@ TEST_io_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
 }
 
 void
-TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_io_throughput(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
@@ -276,7 +276,7 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& a
 }
 
 void
-TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
@@ -293,7 +293,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device> sdev, arg_ty
 }
 
 void
-TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
@@ -313,7 +313,7 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device> sdev, arg
 }
 
 void
-TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   io_test_bo_set boset{sdev.get()};
 
@@ -325,7 +325,7 @@ TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device> sdev, arg_t
 }
 
 void
-elf_io(device::id_type id, std::shared_ptr<device> sdev,
+elf_io(device::id_type id, std::shared_ptr<device>& sdev,
   const std::vector<uint64_t>& arg, const char *xclbin)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
@@ -335,13 +335,13 @@ elf_io(device::id_type id, std::shared_ptr<device> sdev,
 }
 
 void
-TEST_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, std::move(sdev), arg, "design.xclbin");
+  elf_io(id, sdev, arg, "design.xclbin");
 }
 
 void
-TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, std::move(sdev), arg, "pm_reload.xclbin");
+  elf_io(id, sdev, arg, "pm_reload.xclbin");
 }
