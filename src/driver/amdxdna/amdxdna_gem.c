@@ -840,22 +840,20 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 	ret = amdxdna_gem_heap_alloc(abo);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
-		goto release_obj;
+		amdxdna_gem_destroy_obj(abo);
+		return ERR_PTR(ret);
 	}
+	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
 	ret = drm_gem_vmap_unlocked(to_gobj(client->dev_heap), &map);
 	if (ret) {
 		XDNA_ERR(xdna, "Vmap dev bo failed, ret %d", ret);
-		goto release_obj;
+		drm_gem_object_put(gobj);
+		return ERR_PTR(ret);
 	}
 	abo->mem.kva = map.vaddr + abo->mem.dev_addr - client->dev_heap->mem.dev_addr;
-	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
 	return abo;
-
-release_obj:
-	amdxdna_gem_destroy_obj(abo);
-	return ERR_PTR(ret);
 }
 
 static struct amdxdna_gem_obj *
