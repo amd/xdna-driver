@@ -136,8 +136,8 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
-			 u32 size, struct aie_version *version)
+int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
+			     u32 size, struct aie_version *version)
 {
 	DECLARE_AIE2_MSG(get_telemetry, MSG_OP_GET_TELEMETRY);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -234,8 +234,8 @@ int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *m
 	return 0;
 }
 
-int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
-				struct amdxdna_fw_ver *fw_ver)
+int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
+				    struct amdxdna_fw_ver *fw_ver)
 {
 	DECLARE_AIE2_MSG(firmware_version, MSG_OP_GET_FIRMWARE_VERSION);
 	int ret;
@@ -392,8 +392,8 @@ int aie2_self_test(struct amdxdna_dev_hdl *ndev)
 }
 #endif
 
-int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
-		      u32 size, u32 *cols_filled)
+int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
+			  u32 size, u32 *cols_filled)
 {
 	DECLARE_AIE2_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -404,6 +404,11 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	u32 aie_bitmap = 0;
 	u8 *buff_addr;
 	int ret, idx;
+
+	if (!access_ok(buf, size)) {
+		XDNA_ERR(xdna, "Failed to access status buffer size %d", size);
+		return -EFAULT;
+	}
 
 	buff_addr = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
 					  DMA_FROM_DEVICE, GFP_KERNEL);

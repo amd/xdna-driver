@@ -329,7 +329,7 @@ static int aie2_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = aie2_query_firmware_version(ndev, &ndev->xdna->fw_ver);
+	ret = aie2_query_aie_firmware_version(ndev, &ndev->xdna->fw_ver);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "query firmware version failed");
 		return ret;
@@ -689,7 +689,7 @@ skip_pasid:
 
 	/* Just to make sure firmware handled async events */
 	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_query_firmware_version(ndev, &ndev->xdna->fw_ver);
+	ret = aie2_query_aie_firmware_version(ndev, &ndev->xdna->fw_ver);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Re-query firmware version failed");
@@ -768,34 +768,40 @@ static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 	aie2_rq_restart_all(rq);
 }
 
-static int aie2_get_aie_status(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info *args)
+static int aie2_query_status(struct amdxdna_client *client,
+			     struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_status status;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
-	int ret;
+	int ret, min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	ndev = xdna->dev_handle;
-	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), sizeof(status))) {
+	min = min(args->buffer_size, sizeof(status));
+	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), min)) {
 		XDNA_ERR(xdna, "Failed to copy AIE request into kernel");
 		return -EFAULT;
 	}
 
-	if (ndev->metadata.cols * ndev->metadata.size < status.buffer_size) {
+	if (ndev->metadata.cols * ndev->metadata.size > status.buffer_size) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given Size: %u. Need Size: %u.",
 			 status.buffer_size, ndev->metadata.cols * ndev->metadata.size);
 		return -EINVAL;
 	}
 
-	ret = aie2_query_status(ndev, u64_to_user_ptr(status.buffer),
-				status.buffer_size, &status.cols_filled);
+	ret = aie2_query_aie_status(ndev, u64_to_user_ptr(status.buffer),
+				    status.buffer_size, &status.cols_filled);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get AIE status info. Ret: %d", ret);
 		return ret;
 	}
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &status, sizeof(status))) {
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &status, min)) {
 		XDNA_ERR(xdna, "Failed to copy AIE request info to user space");
 		return -EFAULT;
 	}
@@ -803,15 +809,22 @@ static int aie2_get_aie_status(struct amdxdna_client *client,
 	return 0;
 }
 
-static int aie2_get_aie_metadata(struct amdxdna_client *client,
-				 struct amdxdna_drm_get_info *args)
+static int aie2_query_metadata(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_metadata *meta;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
 	int ret = 0;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	ndev = xdna->dev_handle;
+	min = min(args->buffer_size, sizeof(*meta));
 	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
 	if (!meta)
 		return -ENOMEM;
@@ -841,42 +854,56 @@ static int aie2_get_aie_metadata(struct amdxdna_client *client,
 	meta->shim.lock_count = ndev->metadata.shim.lock_count;
 	meta->shim.event_reg_count = ndev->metadata.shim.event_reg_count;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, sizeof(*meta)))
+	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, min))
 		ret = -EFAULT;
 
 	kfree(meta);
 	return ret;
 }
 
-static int aie2_get_aie_version(struct amdxdna_client *client,
-				struct amdxdna_drm_get_info *args)
+static int aie2_query_version(struct amdxdna_client *client,
+			      struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_aie_version version;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	ndev = xdna->dev_handle;
 	version.major = ndev->version.major;
 	version.minor = ndev->version.minor;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, sizeof(version)))
+	min = min(args->buffer_size, sizeof(version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, min))
 		return -EFAULT;
 
 	return 0;
 }
 
-static int aie2_get_firmware_version(struct amdxdna_client *client,
-				     struct amdxdna_drm_get_info *args)
+static int aie2_query_firmware_version(struct amdxdna_client *client,
+				       struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_firmware_version version;
 	struct amdxdna_dev *xdna = client->xdna;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	version.major = xdna->fw_ver.major;
 	version.minor = xdna->fw_ver.minor;
 	version.patch = xdna->fw_ver.sub;
 	version.build = xdna->fw_ver.build;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, sizeof(version)))
+	min = min(args->buffer_size, sizeof(version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, min))
 		return -EFAULT;
 
 	return 0;
@@ -888,48 +915,66 @@ static int aie2_get_power_mode(struct amdxdna_client *client,
 	struct amdxdna_drm_get_power_mode mode = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	ndev = xdna->dev_handle;
 	mode.power_mode = ndev->pw_mode;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &mode, sizeof(mode)))
+	min = min(args->buffer_size, sizeof(mode));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &mode, min))
 		return -EFAULT;
 
 	return 0;
 }
 
-static int aie2_get_clock_metadata(struct amdxdna_client *client,
-				   struct amdxdna_drm_get_info *args)
+static int aie2_query_clock_metadata(struct amdxdna_client *client,
+				     struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_clock_metadata *clock;
+	struct amdxdna_drm_query_clock_metadata clock = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
 	int ret = 0;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	ndev = xdna->dev_handle;
-	clock = kzalloc(sizeof(*clock), GFP_KERNEL);
-	if (!clock)
-		return -ENOMEM;
 
-	snprintf(clock->mp_npu_clock.name, sizeof(clock->mp_npu_clock.name),
+	snprintf(clock.mp_npu_clock.name, sizeof(clock.mp_npu_clock.name),
 		 "MP-NPU Clock");
-	clock->mp_npu_clock.freq_mhz = ndev->npuclk_freq;
-	snprintf(clock->h_clock.name, sizeof(clock->h_clock.name), "H Clock");
-	clock->h_clock.freq_mhz = ndev->hclk_freq;
+	clock.mp_npu_clock.freq_mhz = ndev->npuclk_freq;
+	snprintf(clock.h_clock.name, sizeof(clock.h_clock.name), "H Clock");
+	clock.h_clock.freq_mhz = ndev->hclk_freq;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), clock, sizeof(*clock)))
+	min = min(args->buffer_size, sizeof(clock));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &clock, min))
 		ret = -EFAULT;
 
-	kfree(clock);
 	return ret;
 }
 
-static int aie2_get_sensors(struct amdxdna_client *client,
-			    struct amdxdna_drm_get_info *args)
+static int aie2_query_sensors(struct amdxdna_client *client,
+			      struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_sensor *sensor;
+	struct amdxdna_dev *xdna = client->xdna;
 	int ret = 0;
+	int min;
 
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
+	min = min(args->buffer_size, sizeof(*sensor));
 	sensor = kzalloc(sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return -ENOMEM;
@@ -940,15 +985,15 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 	snprintf(sensor->label, sizeof(sensor->label), "Total Power");
 	snprintf(sensor->units, sizeof(sensor->units), "mW");
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), sensor, sizeof(*sensor)))
+	if (copy_to_user(u64_to_user_ptr(args->buffer), sensor, min))
 		ret = -EFAULT;
 
 	kfree(sensor);
 	return ret;
 }
 
-static int aie2_get_ctx_status(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info *args)
+static int aie2_query_ctx_status(struct amdxdna_client *client,
+				 struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_ctx __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -962,11 +1007,16 @@ static int aie2_get_ctx_status(struct amdxdna_client *client,
 	int ret = 0;
 	int idx;
 
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
 	tmp = kzalloc(sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
 
-	buf = u64_to_user_ptr(args->buffer);
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
@@ -1016,8 +1066,8 @@ out:
 	return ret;
 }
 
-static int aie2_get_telemetry(struct amdxdna_client *client,
-			      struct amdxdna_drm_get_info *args)
+static int aie2_query_telemetry(struct amdxdna_client *client,
+				struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
@@ -1048,7 +1098,7 @@ static int aie2_get_telemetry(struct amdxdna_client *client,
 	memset(buff, 0, aligned_sz);
 	drm_clflush_virt_range(buff, aligned_sz); /* device can access */
 	/* The first two words of the buffer is reserved for major and minor */
-	ret = aie2_query_telemetry(ndev, type, dma_addr + sizeof(u64), aligned_sz, &ver);
+	ret = aie2_query_aie_telemetry(ndev, type, dma_addr + sizeof(u64), aligned_sz, &ver);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
 		goto free_buf;
@@ -1058,6 +1108,7 @@ static int aie2_get_telemetry(struct amdxdna_client *client,
 	((u32 *)buff)[1] = ver.minor;
 	print_hex_dump_debug("telemetry: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
 			     aligned_sz, false);
+
 	if (copy_to_user(u64_to_user_ptr(args->buffer), buff, args->buffer_size))
 		ret = -EFAULT;
 
@@ -1072,11 +1123,18 @@ static int aie2_get_force_preempt_state(struct amdxdna_client *client,
 	struct amdxdna_drm_attribute_state force = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	ndev = xdna->dev_handle;
 	force.state = ndev->force_preempt_enabled;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &force, sizeof(force)))
+	min = min(args->buffer_size, sizeof(force));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &force, min))
 		return -EFAULT;
 
 	return 0;
@@ -1088,24 +1146,37 @@ static int aie2_query_frame_boundary_preempt_state(struct amdxdna_client *client
 	struct amdxdna_drm_attribute_state preempt = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	ndev = xdna->dev_handle;
 	preempt.state = ndev->frame_boundary_preempt;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, sizeof(preempt)))
+	min = min(args->buffer, sizeof(preempt));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, min))
 		return -EFAULT;
 
 	return 0;
 }
 
-static int aie2_get_resource_info(struct amdxdna_client *client,
-				  struct amdxdna_drm_get_info *args)
+static int aie2_query_resource_info(struct amdxdna_client *client,
+				    struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_get_resource_info res_info;
 	const struct amdxdna_dev_priv *priv;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
 	u64 tops_max, tops_curr;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
@@ -1119,7 +1190,8 @@ static int aie2_get_resource_info(struct amdxdna_client *client,
 	res_info.npu_tops_curr = tops_curr;
 	res_info.npu_task_curr = ndev->hwctx_cnt;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, sizeof(res_info)))
+	min = min(args->buffer_size, sizeof(res_info));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, min))
 		return -EFAULT;
 
 	return 0;
@@ -1136,23 +1208,23 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = aie2_get_aie_status(client, args);
+		ret = aie2_query_status(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		ret = aie2_get_aie_metadata(client, args);
+		ret = aie2_query_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
-		ret = aie2_get_aie_version(client, args);
+		ret = aie2_query_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
-		ret = aie2_get_clock_metadata(client, args);
+		ret = aie2_query_clock_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = aie2_get_sensors(client, args);
+		ret = aie2_query_sensors(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
 		mutex_unlock(&xdna->dev_handle->aie2_lock);
-		ret = aie2_get_ctx_status(client, args);
+		ret = aie2_query_ctx_status(client, args);
 		mutex_lock(&xdna->dev_handle->aie2_lock);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
@@ -1164,19 +1236,19 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 #endif
 	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
-		ret = aie2_get_firmware_version(client, args);
+		ret = aie2_query_firmware_version(client, args);
 		break;
 	case DRM_AMDXDNA_GET_POWER_MODE:
 		ret = aie2_get_power_mode(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
-		ret = aie2_get_telemetry(client, args);
+		ret = aie2_query_telemetry(client, args);
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
 		ret = aie2_get_force_preempt_state(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
-		ret = aie2_get_resource_info(client, args);
+		ret = aie2_query_resource_info(client, args);
 		break;
 	case DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE:
 		ret = aie2_query_frame_boundary_preempt_state(client, args);
@@ -1192,8 +1264,8 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	return ret;
 }
 
-static int aie2_get_ctx_status_array(struct amdxdna_client *client,
-				     struct amdxdna_drm_get_info_array *args)
+static int aie2_query_ctx_status_array(struct amdxdna_client *client,
+				       struct amdxdna_drm_get_info_array *args)
 {
 	struct amdxdna_drm_query_ctx_array __user *buf;
 	struct amdxdna_drm_query_ctx_array *tmp;
@@ -1292,7 +1364,7 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY:
 		mutex_unlock(&xdna->dev_handle->aie2_lock);
-		ret = aie2_get_ctx_status_array(client, args);
+		ret = aie2_query_ctx_status_array(client, args);
 		mutex_lock(&xdna->dev_handle->aie2_lock);
 		break;
 	default:
@@ -1310,15 +1382,15 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 {
 	struct amdxdna_drm_set_power_mode power_state;
 	struct amdxdna_dev *xdna = client->xdna;
-	int power_mode;
+	int power_mode, min;
 
-	if (args->buffer_size != sizeof(power_state)) {
-		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
-			 args->buffer_size, sizeof(power_state));
-		return -EINVAL;
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
 	}
 
-	if (copy_from_user(&power_state, u64_to_user_ptr(args->buffer), sizeof(power_state))) {
+	min = min(args->buffer_size, sizeof(power_state));
+	if (copy_from_user(&power_state, u64_to_user_ptr(args->buffer), min)) {
 		XDNA_ERR(xdna, "Failed to copy power mode request into kernel");
 		return -EFAULT;
 	}
@@ -1337,14 +1409,15 @@ static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 {
 	struct amdxdna_drm_attribute_state force;
 	struct amdxdna_dev *xdna = client->xdna;
+	int min;
 
-	if (args->buffer_size != sizeof(force)) {
-		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
-			 args->buffer_size, sizeof(force));
-		return -EINVAL;
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
 	}
 
-	if (copy_from_user(&force, u64_to_user_ptr(args->buffer), sizeof(force))) {
+	min = min(args->buffer_size, sizeof(force));
+	if (copy_from_user(&force, u64_to_user_ptr(args->buffer), min)) {
 		XDNA_ERR(xdna, "Failed to copy force preemption request into kernel");
 		return -EFAULT;
 	}
