@@ -146,7 +146,7 @@ private:
 }
 
 void
-TEST_cmd_fence_host(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_cmd_fence_host(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   // Can't fork with opened device.
   sdev.reset();
@@ -156,7 +156,7 @@ TEST_cmd_fence_host(device::id_type id, std::shared_ptr<device> sdev, arg_type& 
 }
 
 void
-TEST_cmd_fence_device(device::id_type id, std::shared_ptr<device> sdev, arg_type& arg)
+TEST_cmd_fence_device(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   // Can't fork with opened device.
   sdev.reset();

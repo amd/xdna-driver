@@ -65,7 +65,7 @@ private:
 }
 
 void
-TEST_export_import_bo(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_export_import_bo(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
   // Can't fork with opened device.
   sdev.reset();
@@ -75,7 +75,7 @@ TEST_export_import_bo(device::id_type id, std::shared_ptr<device> sdev, const st
 }
 
 void
-TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
   auto dev = sdev.get();
 

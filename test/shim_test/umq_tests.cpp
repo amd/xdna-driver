@@ -109,7 +109,7 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
 } // namespace
 
 void
-TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
   auto dev = sdev.get();
 
@@ -136,7 +136,7 @@ TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device> sdev, c
 }
 
 void
-TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
   auto dev = sdev.get();
 
@@ -167,7 +167,7 @@ TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device> sdev, cons
 }
 
 void
-TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
   auto dev = sdev.get();
 
@@ -194,7 +194,7 @@ TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device> sdev, const s
 }
 
 void
-TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device> sdev, const std::vector<uint64_t>& arg)
+TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
   auto dev = sdev.get();
   const size_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);

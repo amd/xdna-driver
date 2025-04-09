@@ -11,7 +11,7 @@
 using namespace xrt_core;
 using arg_type = const std::vector<uint64_t>;
 
-typedef void (*func)(device::id_type id, std::shared_ptr<device> dev, arg_type& arg);
+typedef void (*func)(device::id_type id, std::shared_ptr<device>& dev, arg_type& arg);
 
 class multi_thread {
 public:
