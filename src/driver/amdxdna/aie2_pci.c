@@ -1147,10 +1147,10 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 static int aie2_get_ctx_status_array(struct amdxdna_client *client,
 				     struct amdxdna_drm_get_info_array *args)
 {
-	struct amdxdna_drm_query_ctx __user *buf;
+	struct amdxdna_drm_query_ctx_array __user *buf;
+	struct amdxdna_drm_query_ctx_array *tmp;
 	struct amdxdna_dev *xdna = client->xdna;
 	int idx, ctx_limit, ctx_cnt, min, i;
-	struct amdxdna_drm_query_ctx *tmp;
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
@@ -1196,7 +1196,20 @@ static int aie2_get_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].migrations = 0;
 			tmp[hw_i].preemptions = 0;
 			tmp[hw_i].errors = 0;
+			tmp[hw_i].pasid = tmp_client->pasid;
 			tmp[hw_i].priority = ctx->qos.priority;
+			tmp[hw_i].gops = ctx->qos.gops;
+			tmp[hw_i].fps = ctx->qos.fps;
+			tmp[hw_i].dma_bandwidth = ctx->qos.dma_bandwidth;
+			tmp[hw_i].latency = ctx->qos.latency;
+			tmp[hw_i].frame_exec_time = ctx->qos.frame_exec_time;
+			tmp[hw_i].heap_usage = 0; /* TODO: Calculate total heap usage */
+			tmp[hw_i].egops = 0; /* TODO: Calculate effective gops */
+
+			if (ctx->priv->status == CTX_STATE_CONNECTED)
+				tmp[hw_i].state = AMDXDNA_CTX_STATE_ACTIVE;
+			else
+				tmp[hw_i].state = AMDXDNA_CTX_STATE_IDLE;
 
 			hw_i++;
 		}

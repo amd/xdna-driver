@@ -423,7 +423,7 @@ struct amdxdna_drm_query_sensor {
  * @context_id: The ID for this context.
  * @start_col: The starting column for the partition assigned to this context.
  * @num_col: The number of columns in the partition assigned to this context.
- * @nwctx_id: Hardware context ID.
+ * @hwctx_id: Hardware context ID.
  * @pid: The Process ID of the process that created this context.
  * @command_submissions: The number of commands submitted to this context.
  * @command_completions: The number of commands completed by this context.
@@ -557,6 +557,55 @@ struct amdxdna_drm_get_info {
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
+};
+
+/**
+ * struct amdxdna_drm_query_ctx_array - The element of a context in array
+ * @context_id: The ID for this context.
+ * @start_col: The starting column for the partition assigned to this context.
+ * @num_col: The number of columns in the partition assigned to this context.
+ * @hwctx_id: Hardware context ID.
+ * @pid: The Process ID of the process that created this context.
+ * @command_submissions: The number of commands submitted to this context.
+ * @command_completions: The number of commands completed by this context.
+ * @migrations: The number of times this context has been moved to a different partition.
+ * @preemptions: The number of times this context has been preempted by another context in the
+ *               same partition.
+ * @errors: The errors for this context.
+ * @priority: Context priority.
+ * @heap_usage: The usage of heap buffer of the process
+ * @state: The state of context.
+ * @pasid: PASID for this process
+ * @gops: Giga operations per second
+ * @egops: effective giga operations per second
+ * @fps: Frames per second
+ * @dma_bandwidth: DMA bandwidth
+ * @latency: Frame response latency
+ * @frame_exec_time: Frame execution time
+ */
+struct amdxdna_drm_query_ctx_array {
+	__u32 context_id;
+	__u32 start_col;
+	__u32 num_col;
+	__u32 hwctx_id;
+	__s64 pid;
+	__u64 command_submissions;
+	__u64 command_completions;
+	__u64 migrations;
+	__u64 preemptions;
+	__u64 errors;
+	__u64 priority;
+	__u64 heap_usage;
+#define AMDXDNA_CTX_STATE_IDLE		0
+#define AMDXDNA_CTX_STATE_ACTIVE	1
+	__u32 state;
+	__u32 pasid;
+	__u32 gops;
+	__u32 egops;
+	__u32 fps;
+	__u32 dma_bandwidth;
+	__u32 latency;
+	__u32 frame_exec_time;
 };
 
 /**
