@@ -217,6 +217,24 @@ int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+static int aie2_enable_frame_boundary_preempt(struct amdxdna_dev_hdl *ndev, u32 state)
+{
+	/* Invert the values to map firmware interface */
+	u32 value = state ? false : true;
+	int ret;
+
+	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT, &value);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to %s frame boundary preemption",
+			 state ? "enable" : "disable");
+		return ret;
+	}
+
+	ndev->frame_boundary_preempt = state;
+
+	return 0;
+}
+
 static int aie2_xdna_reset(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -273,6 +291,17 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	ret = aie2_enable_frame_boundary_preempt(ndev, true);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to %s fine grain preemption",
+			 disable_fine_preemption ? "disable" : "enable");
+		return ret;
+	}
+
+	/*
+	 * TODO: Fair scheduling feature is a Strix only feature. Cleanup the below implementation
+	 * once we have a generation specific management firmware initialization.
+	 */
 	ret = aie2_runtime_update_prop(ndev, AIE2_UPDATE_PROPERTY_TIME_QUOTA,
 				       time_quantun_ms * 1000);
 	if (ret)
@@ -1040,7 +1069,7 @@ free_buf:
 static int aie2_get_force_preempt_state(struct amdxdna_client *client,
 					struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_get_force_preempt_state force = {};
+	struct amdxdna_drm_attribute_state force = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev;
 
@@ -1048,6 +1077,22 @@ static int aie2_get_force_preempt_state(struct amdxdna_client *client,
 	force.state = ndev->force_preempt_enabled;
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &force, sizeof(force)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int aie2_query_frame_boundary_preempt_state(struct amdxdna_client *client,
+						   struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_attribute_state preempt = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
+
+	ndev = xdna->dev_handle;
+	preempt.state = ndev->frame_boundary_preempt;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, sizeof(preempt)))
 		return -EFAULT;
 
 	return 0;
@@ -1132,6 +1177,9 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
 		ret = aie2_get_resource_info(client, args);
+		break;
+	case DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE:
+		ret = aie2_query_frame_boundary_preempt_state(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -1287,7 +1335,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 					struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_drm_set_force_preempt_state force;
+	struct amdxdna_drm_attribute_state force;
 	struct amdxdna_dev *xdna = client->xdna;
 
 	if (args->buffer_size != sizeof(force)) {
@@ -1308,6 +1356,39 @@ static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
+						 struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_dev_hdl *dev = client->xdna->dev_handle;
+	struct amdxdna_drm_attribute_state preempt;
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret;
+
+	if (args->buffer_size != sizeof(preempt)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 args->buffer_size, sizeof(preempt));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&preempt, u64_to_user_ptr(args->buffer), sizeof(preempt))) {
+		XDNA_ERR(xdna, "Failed to copy frame boundary preempt request into kernel");
+		return -EFAULT;
+	}
+
+	if (preempt.state != 0 && preempt.state > 1) {
+		XDNA_ERR(xdna, "Invalid frame boundary preempt.state: %d", preempt.state);
+		return -EINVAL;
+	}
+
+	ret = aie2_enable_frame_boundary_preempt(dev, preempt.state);
+	if (ret)
+		return ret;
+
+	XDNA_WARN(xdna, "Frame boundary preemption %s", preempt.state ? "enabled" : "disabled");
+
+	return 0;
+}
+
 static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1323,6 +1404,9 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
 		ret = aie2_set_force_preempt_state(client, args);
+		break;
+	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
+		ret = aie2_set_frame_boundary_preempt_state(client, args);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_WRITE_AIE_MEM:

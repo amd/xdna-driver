@@ -6,14 +6,24 @@
 #include "npu4_family.h"
 
 const struct rt_config npu4_default_rt_cfg[] = {
-	{ 5, 1, AIE2_RT_CFG_INIT }, /* PDI APP LOAD MODE */
-	{ 10, 1, AIE2_RT_CFG_INIT }, /* Large Debug BO */
-	{ 1, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
-	{ 2, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
-	{ 3, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
-	{ 4, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
-	{ 12, 1, AIE2_RT_CFG_FINE_PREEMPTION }, /* Fine grain preemption control */
-	{ 13, 0, AIE2_RT_CFG_FORCE_PREEMPTION }, /* Force preemption control */
+	/* PDI APP LOAD MODE */
+	{ 5, 1, AIE2_RT_CFG_INIT },
+	/* Large Debug BO */
+	{ 10, 1, AIE2_RT_CFG_INIT },
+	/* Clock gating on */
+	{ 1, 1, AIE2_RT_CFG_CLK_GATING },
+	/* H-Clock gating on */
+	{ 2, 1, AIE2_RT_CFG_CLK_GATING },
+	/* Power gating on */
+	{ 3, 1, AIE2_RT_CFG_CLK_GATING },
+	/* L1 power gating on */
+	{ 4, 1, AIE2_RT_CFG_CLK_GATING },
+	/* Fine grain preemption enabled */
+	{ 12, 1, AIE2_RT_CFG_FINE_PREEMPTION },
+	/* Force preemption disabled */
+	{ 13, 0, AIE2_RT_CFG_FORCE_PREEMPTION },
+	/* Frame boundary preemption enabled */
+	{ 14, 1, AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT },
 	{ 0 },
 };
 
