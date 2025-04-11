@@ -360,19 +360,30 @@ int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size)
 {
-	DECLARE_AIE2_MSG(map_host_buffer, MSG_OP_MAP_HOST_BUFFER);
+	DECLARE_AIE2_MSG(host_buffer, MSG_OP_MAP_HOST_BUFFER);
 	struct amdxdna_dev *xdna = ndev->xdna;
+	size_t chunk_size;
 	int ret;
 
-	req.context_id = context_id;
-	req.buf_addr = addr;
-	req.buf_size = size;
-	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
-	if (ret)
-		return ret;
+	chunk_size = xdna->dev_info->dev_mem_size;
+	WARN_ON(!is_power_of_2(chunk_size));
+	WARN_ON(!IS_ALIGNED(size, chunk_size));
+	do {
+		req.context_id = context_id;
+		req.buf_addr = addr;
+		req.buf_size = chunk_size;
+		ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+		if (ret)
+			return ret;
 
-	XDNA_DBG(xdna, "hwctx %d map host buf addr 0x%llx size 0x%llx",
-		 context_id, addr, size);
+		addr += chunk_size;
+		size -= chunk_size;
+		XDNA_DBG(xdna, "hwctx %d map host buf addr 0x%llx size 0x%lx",
+			 context_id, addr, chunk_size);
+
+		/* Change opcode if there are more than one chunk */
+		msg.opcode = MSG_OP_ADD_HOST_BUFFER;
+	} while (size);
 
 	return 0;
 }

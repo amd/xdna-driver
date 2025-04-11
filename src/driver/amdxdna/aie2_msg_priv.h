@@ -45,6 +45,7 @@ enum aie2_msg_opcode {
 	MSG_OP_START_EVENT_TRACE           = 0x10F,
 	MSG_OP_STOP_EVENT_TRACE            = 0x110,
 	MSG_OP_UPDATE_PROPERTY             = 0x113,
+	MSG_OP_ADD_HOST_BUFFER             = 0x114,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
@@ -105,13 +106,14 @@ struct assign_mgmt_pasid_resp {
 	enum aie2_msg_status	status;
 } __packed;
 
-struct map_host_buffer_req {
+/* For MSG_OP_MAP_HOST_BUFFER and MSG_OP_ADD_HOST_BUFFER */
+struct host_buffer_req {
 	u32		context_id;
 	u64		buf_addr;
 	u64		buf_size;
 } __packed;
 
-struct map_host_buffer_resp {
+struct host_buffer_resp {
 	enum aie2_msg_status	status;
 } __packed;
 
