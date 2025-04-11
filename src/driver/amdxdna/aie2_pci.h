@@ -165,6 +165,7 @@ enum rt_config_category {
 	AIE2_RT_CFG_CLK_GATING,
 	AIE2_RT_CFG_FINE_PREEMPTION,
 	AIE2_RT_CFG_FORCE_PREEMPTION,
+	AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT,
 };
 
 struct rt_config {
@@ -334,6 +335,7 @@ struct amdxdna_dev_hdl {
 	u32				npuclk_freq;
 	u32				hclk_freq;
 	bool				force_preempt_enabled;
+	bool				frame_boundary_preempt;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
