@@ -76,12 +76,12 @@ hw_ctx_virtio::
 ~hw_ctx_virtio()
 {
   shim_debug("Destroying VIRTIO HW context (%d)...", get_slotidx());
-  set_slotidx(AMDXDNA_INVALID_CTX_HANDLE);
   try {
     delete_ctx_on_device();
   } catch (const xrt_core::system_error& e) {
     shim_debug("Failed to delete context on device: %s", e.what());
   }
+  set_slotidx(AMDXDNA_INVALID_CTX_HANDLE);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
@@ -115,7 +115,6 @@ create_ctx_on_device()
   auto& vdev = static_cast<const shim_xdna::pdev_virtio&>(pdev);
   vdev.host_call(&req, sizeof(req), &rsp, sizeof(rsp));
 
-  printf("CTX HANDLE RETURNED: %x\n", rsp.handle);
   set_slotidx(rsp.handle);
   m_q->bind_hwctx(this);
 }
