@@ -44,7 +44,7 @@ issue_command(xrt_core::buffer_handle *cmd_bo)
   req->cmd_count = 1;
   req->arg_count = 0;
   req->cmds_n_args[0] = cmd_bo_hdl;
-  vdev.host_call(&req, sizeof(req), &rsp, sizeof(rsp));
+  vdev.host_call(req, req_sz, &rsp, sizeof(rsp));
 
   auto id = rsp.seq;
   boh->set_cmd_id(id);
