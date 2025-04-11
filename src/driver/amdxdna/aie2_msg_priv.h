@@ -193,7 +193,7 @@ struct exec_dpu_req {
 	u32     inst_size;
 	u32     inst_prop_cnt;
 	u32     cu_idx;
-	u32	payload[25];
+	u32	payload[35];
 } __packed;
 
 struct exec_dpu_preempt_req {

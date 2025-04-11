@@ -392,7 +392,6 @@ ctx_dead:
 
 static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 {
-	struct aie2_partition *part;
 	struct amdxdna_dev *xdna;
 	struct aie2_ctx_rq *rq;
 
@@ -404,8 +403,21 @@ static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 		return;
 	}
 	aie2_ctx_disconnect(ctx, wait);
+
 	list_move_tail(&ctx->entry, &rq->disconn_list);
 	ctx->priv->status = CTX_STATE_DISCONNECTED;
+}
+
+static void part_ctx_stop(struct amdxdna_ctx *ctx)
+{
+	struct aie2_partition *part;
+	struct amdxdna_dev *xdna;
+	struct aie2_ctx_rq *rq;
+
+	xdna = ctx->client->xdna;
+	rq = &xdna->dev_handle->ctx_rq;
+	part_ctx_stop_wait(ctx, true);
+
 	part = ctx->priv->part;
 	if (part) {
 		part->hwctx_cnt--;
@@ -416,11 +428,6 @@ static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 	ctx->priv->part = NULL;
 	ctx->priv->idle_cnt = 0;
 	XDNA_DBG(xdna, "%s disconnected", ctx->name);
-}
-
-static void part_ctx_stop(struct amdxdna_ctx *ctx)
-{
-	part_ctx_stop_wait(ctx, true);
 }
 
 static void rq_ctx_cancel(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
@@ -452,8 +459,10 @@ static void part_block_all_ctx(struct aie2_partition *part)
 {
 	struct amdxdna_ctx *ctx;
 
-	list_for_each_entry(ctx, &part->conn_list, entry)
+	list_for_each_entry(ctx, &part->conn_list, entry) {
+		XDNA_DBG(ctx->client->xdna, "%s set block", ctx->name);
 		ctx->priv->should_block = true;
+	}
 }
 
 static void part_cleanup(struct aie2_partition *part)
@@ -731,7 +740,6 @@ static bool handle_busy_ctxs(struct aie2_ctx_rq *rq)
 	bool active = false;
 	int i;
 
-	rq->paused = true;
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
 		if (!part->hwctx_cnt)
@@ -762,6 +770,7 @@ static void rq_parts_work(struct work_struct *work)
 		goto out;
 
 	/* Partition expanding or trimming is needed */
+	rq->paused = true;
 	if (handle_busy_ctxs(rq)) {
 		XDNA_DBG(xdna, "Wait for disconneting active contexts");
 		goto out;
@@ -873,6 +882,8 @@ void aie2_rq_stop_all(struct aie2_ctx_rq *rq)
 			down_write(&ctx->priv->io_sem);
 			XDNA_DBG(xdna, "%s @[%d, %d] stop", ctx->name,
 				 part->start_col, part->end_col);
+			ctx->priv->should_block = true;
+			ctx->priv->force_yield = true;
 			part_ctx_stop_wait(ctx, false);
 			up_write(&ctx->priv->io_sem);
 		}
@@ -1101,7 +1112,7 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 
 	if (wait_update_parts && wait_parts)
 		wait_for_completion_killable(&ctx->priv->parts_work_comp);
-	cancel_work_sync(&ctx->yield_work);
+	flush_work(&ctx->yield_work);
 	XDNA_DBG(xdna, "%s deleted, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
 }
