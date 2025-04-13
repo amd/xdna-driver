@@ -23,6 +23,7 @@ Options:
 	-verbose								Enable verbose build
 	-hello_umq              Hello UMQ Memory Test
 	-dir	      						Download directory if apply
+  -nokmod									Don't build or install the kernel module
 USAGE_END
 }
 
@@ -123,6 +124,7 @@ package=0
 example=0
 nocmake=0
 verbose=
+skip_kmod=
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
 xrt_install_prefix="/opt/xilinx"
@@ -172,6 +174,9 @@ while [ $# -gt 0 ]; do
 		-verbose)
 			verbose=VERBOSE=1
 			;;
+		-nokmod)
+		  skip_kmod="ON"
+			;;
 		-dir)
 			download_dir=$2
 			shift
@@ -215,6 +220,10 @@ fi
 # Sanity check end
 
 cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix -DXRT_INSTALL_PREFIX=$xrt_install_prefix"
+
+if [[ ! -z "$skip_kmod" ]]; then
+	cmake_extra_flags+=" -DSKIP_KMOD=$skip_kmod"
+fi
 
 if [[ ! -z "$download_dir" ]]; then
 	echo "Specified download directory is $download_dir"
