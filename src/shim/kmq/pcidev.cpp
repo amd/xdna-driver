@@ -25,19 +25,6 @@ get_heap_num_pages()
 
 namespace shim_xdna {
 
-pdev_kmq::
-pdev_kmq(std::shared_ptr<const drv> driver, std::string sysfs_name)
-  : pdev(std::move(driver), std::move(sysfs_name))
-{
-  shim_debug("Created KMQ pcidev");
-}
-
-pdev_kmq::
-~pdev_kmq()
-{
-  shim_debug("Destroying KMQ pcidev");
-}
-
 std::shared_ptr<xrt_core::device>
 pdev_kmq::
 create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const

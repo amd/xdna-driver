@@ -4,7 +4,6 @@
 #ifndef PCIDEV_UMQ_H
 #define PCIDEV_UMQ_H
 
-#include "../pcidrv.h"
 #include "../pcidev.h"
 
 namespace shim_xdna {
@@ -12,13 +11,19 @@ namespace shim_xdna {
 class pdev_umq : public pdev
 {
 public:
-  pdev_umq(std::shared_ptr<const drv> driver, std::string sysfs_name);
-  ~pdev_umq();
+  using shim_xdna::pdev::pdev;
  
   std::shared_ptr<xrt_core::device>
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
+
+private:
+  virtual void
+  on_first_open() const override;
+
+  virtual void
+  on_last_close() const override;
 };
 
-} // namespace shim_xdna
+}
 
 #endif

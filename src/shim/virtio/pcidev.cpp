@@ -77,13 +77,13 @@ sync_wait(int fd, int timeout)
 
     if (ret > 0) {
       if (fds.revents & (POLLERR | POLLNVAL))
-        shim_err(-EINVAL, "failed to wait for host call response");
+        shim_err(EINVAL, "failed to wait for host call response");
       break;
     }
     if (ret == 0)
-      shim_err(-ETIME, "wait for host call response timeout");
+      shim_err(ETIME, "wait for host call response timeout");
     if (ret < 0 && errno != EINTR && errno != EAGAIN)
-      shim_err(-errno, "failed to wait for host call response");
+      shim_err(errno, "failed to wait for host call response");
 
     timeout -= (poll_end.tv_sec - poll_start.tv_sec) * 1000 +
       (poll_end.tv_nsec - poll_end.tv_nsec) / 1000000;
@@ -164,7 +164,7 @@ set_virtgpu_context(const shim_xdna::pdev& dev)
 namespace shim_xdna {
 
 pdev_virtio::
-pdev_virtio(std::shared_ptr<const drv_virtio> driver, std::string sysfs_name)
+pdev_virtio(std::shared_ptr<const drv> driver, std::string sysfs_name)
   : pdev(driver, sysfs_name), m_resp_buf(nullptr)
 {
   shim_debug("Created VIRTIO pcidev over %s", sysfs_name.c_str());

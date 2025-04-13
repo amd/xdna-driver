@@ -4,7 +4,7 @@
 #ifndef PCIDEV_VIRTIO_H
 #define PCIDEV_VIRTIO_H
 
-#include "../pcidrv_virtio.h"
+#include "../pcidrv_virtgpu.h"
 #include "../pcidev.h"
 #include "drm_local/amdxdna_accel.h"
 
@@ -15,7 +15,7 @@ namespace shim_xdna {
 class pdev_virtio : public pdev
 {
 public:
-  pdev_virtio(std::shared_ptr<const drv_virtio> driver, std::string sysfs_name);
+  pdev_virtio(std::shared_ptr<const drv> driver, std::string sysfs_name);
   ~pdev_virtio();
  
   std::shared_ptr<xrt_core::device>

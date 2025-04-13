@@ -189,7 +189,7 @@ share() const
   std::lock_guard<std::mutex> guard(m_lock);
 
   if (m_state != initial_state)
-    shim_err(-EINVAL, "Can't share fence not at initial state.");
+    shim_err(EINVAL, "Can't share fence not at initial state.");
 
   return std::make_unique<shared>(export_syncobj(m_pdev, m_syncobj_hdl));
 }
@@ -215,7 +215,7 @@ wait_next_state() const
   std::lock_guard<std::mutex> guard(m_lock);
 
   if (m_state != initial_state && m_signaled)
-    shim_err(-EINVAL, "Can't wait on fence that has been signaled before.");
+    shim_err(EINVAL, "Can't wait on fence that has been signaled before.");
   return ++m_state;
 }
 
@@ -245,7 +245,7 @@ signal_next_state() const
   std::lock_guard<std::mutex> guard(m_lock);
 
   if (m_state != initial_state && !m_signaled)
-    shim_err(-EINVAL, "Can't signal fence that has been waited before.");
+    shim_err(EINVAL, "Can't signal fence that has been waited before.");
   if (m_state == initial_state)
     m_signaled = true;
   return ++m_state;
@@ -279,7 +279,7 @@ submit_wait(const pdev& dev, const hw_ctx *ctx, const std::vector<xrt_core::fenc
   int i = 0;
 
   if (fences.size() > max_fences)
-    shim_err(-EINVAL, "Too many fences in one submit: %d", fences.size());
+    shim_err(EINVAL, "Too many fences in one submit: %d", fences.size());
 
   for (auto f : fences) {
     auto fh = static_cast<const fence*>(f);

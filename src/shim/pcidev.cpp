@@ -71,10 +71,11 @@ namespace {
 namespace shim_xdna {
 
 pdev::
-pdev(std::shared_ptr<const xrt_core::pci::drv> driver, std::string sysfs_name)
-  : xrt_core::pci::dev(std::move(driver), std::move(sysfs_name))
+pdev(std::shared_ptr<const drv>& driver, const std::string& sysfs_name)
+  : m_driver(driver)
+  , xrt_core::pci::dev(driver, sysfs_name)
 {
-  m_is_ready = true; // We're always ready.
+  m_is_ready = true; // We're always ready
 }
 
 pdev::
@@ -165,6 +166,13 @@ pdev::
 munmap(void* addr, size_t len) const
 {
   ::munmap(addr, len);
+}
+
+void
+pdev::
+drv_ioctl(drv_ioctl_cmd cmd, void* arg) const
+{
+  m_driver->drv_ioctl(m_dev_fd, cmd, arg);
 }
 
 } // namespace shim_xdna

@@ -4,7 +4,6 @@
 #ifndef PCIDEV_KMQ_H
 #define PCIDEV_KMQ_H
 
-#include "../pcidrv.h"
 #include "../pcidev.h"
 
 
@@ -13,13 +12,13 @@ namespace shim_xdna {
 class pdev_kmq : public pdev
 {
 public:
-  pdev_kmq(std::shared_ptr<const drv> driver, std::string sysfs_name);
-  ~pdev_kmq();
+  using shim_xdna::pdev::pdev;
  
   std::shared_ptr<xrt_core::device>
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
 
 private:
+  // Alloc'ed on first open and freed on last close
   mutable std::unique_ptr<xrt_core::buffer_handle> m_dev_heap_bo;
 
   virtual void
@@ -29,6 +28,6 @@ private:
   on_last_close() const override;
 };
 
-} // namespace shim_xdna
+}
 
 #endif

@@ -6,19 +6,6 @@
 
 namespace shim_xdna {
 
-pdev_umq::
-pdev_umq(std::shared_ptr<const drv> driver, std::string sysfs_name)
-  : pdev(std::move(driver), std::move(sysfs_name))
-{
-  shim_debug("Created UMQ pcidev");
-}
-
-pdev_umq::
-~pdev_umq()
-{
-  shim_debug("Destroying UMQ pcidev");
-}
-
 std::shared_ptr<xrt_core::device>
 pdev_umq::
 create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
@@ -26,5 +13,19 @@ create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id
   return std::make_shared<device_umq>(*this, handle, id);
 }
 
-} // namespace shim_xdna
+void
+pdev_umq::
+on_first_open() const
+{
+  // do nothing
+}
+
+void
+pdev_umq::
+on_last_close() const
+{
+  // do nothing
+}
+
+}
 
