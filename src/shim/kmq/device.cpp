@@ -109,7 +109,7 @@ write_aie_mem(uint16_t col, uint16_t row, uint32_t offset, const std::vector<cha
   mem.size = size;
   mem.buf_p = reinterpret_cast<uintptr_t>(buf.data());
 
-  amdxdna_drm_get_info arg = {
+  amdxdna_drm_set_state arg = {
     .param = DRM_AMDXDNA_WRITE_AIE_MEM,
     .buffer_size = sizeof(mem),
     .buffer = reinterpret_cast<uintptr_t>(&mem)
@@ -131,7 +131,7 @@ write_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val)
   reg.addr = reg_addr;
   reg.val = reg_val;
 
-  amdxdna_drm_get_info arg = {
+  amdxdna_drm_set_state arg = {
     .param = DRM_AMDXDNA_WRITE_AIE_REG,
     .buffer_size = sizeof(reg),
     .buffer = reinterpret_cast<uintptr_t>(&reg)

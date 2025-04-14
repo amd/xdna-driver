@@ -83,7 +83,7 @@ sync_wait(int fd, int timeout)
     if (ret == 0)
       shim_err(ETIME, "wait for host call response timeout");
     if (ret < 0 && errno != EINTR && errno != EAGAIN)
-      shim_err(errno, "failed to wait for host call response");
+      shim_err(-errno, "failed to wait for host call response");
 
     timeout -= (poll_end.tv_sec - poll_start.tv_sec) * 1000 +
       (poll_end.tv_nsec - poll_end.tv_nsec) / 1000000;

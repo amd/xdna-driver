@@ -147,7 +147,7 @@ ioctl(unsigned long cmd, void* arg) const
 {
   XRT_TRACE_POINT_SCOPE2(ioctl, cmd, arg);
   if (xrt_core::pci::dev::ioctl(m_dev_fd, cmd, arg) == -1)
-    shim_err(errno, "%s IOCTL failed", ioctl_cmd2name(cmd).c_str());
+    shim_err(-errno, "%s IOCTL failed", ioctl_cmd2name(cmd).c_str());
 }
 
 void*
@@ -157,7 +157,7 @@ mmap(void *addr, size_t len, int prot, int flags, off_t offset) const
   void* ret = ::mmap(addr, len, prot, flags, m_dev_fd, offset);
 
   if (ret == reinterpret_cast<void*>(-1))
-    shim_err(errno, "mmap(addr=%p, len=%ld, prot=%d, flags=%d, offset=%ld) failed", addr, len, prot, flags, offset);
+    shim_err(-errno, "mmap(addr=%p, len=%ld, prot=%d, flags=%d, offset=%ld) failed", addr, len, prot, flags, offset);
   return ret;
 }
 

@@ -12,7 +12,7 @@ map_parent_range(size_t size)
 {
   auto p = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (!p)
-    shim_err(errno, "mmap(len=%ld) failed", size);
+    shim_err(-errno, "mmap(len=%ld) failed", size);
 
   return p;
 }
