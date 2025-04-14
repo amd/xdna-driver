@@ -371,7 +371,7 @@ struct aie2_bar_off_pair {
 };
 
 struct aie2_hw_ops {
-	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool blocking);
 	int (*get_tops)(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 };
 
@@ -427,8 +427,8 @@ int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor
 /* aie2_smu.c */
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
-int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool blocking);
+int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool blocking);
 int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);

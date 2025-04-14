@@ -56,7 +56,7 @@ static int pm_set_mode(struct amdxdna_dev_hdl *ndev, int target, bool cache_pw_m
 		return -EOPNOTSUPP;
 	}
 
-	ret = ndev->priv->hw_ops.set_dpm(ndev, dpm_level);
+	ret = ndev->priv->hw_ops.set_dpm(ndev, dpm_level, true);
 	if (ret)
 		return ret;
 
@@ -101,7 +101,7 @@ int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 		ndev->max_dpm_level++;
 	ndev->max_dpm_level--;
 
-	ret = ndev->priv->hw_ops.set_dpm(ndev, ndev->max_dpm_level);
+	ret = ndev->priv->hw_ops.set_dpm(ndev, ndev->max_dpm_level, true);
 	if (ret)
 		return ret;
 

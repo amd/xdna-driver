@@ -230,7 +230,7 @@ static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 	ndev->dft_dpm_level = val;
 	if (ndev->pw_mode != POWER_MODE_DEFAULT)
 		val = ndev->dpm_level;
-	ret = ndev->priv->hw_ops.set_dpm(ndev, val);
+	ret = ndev->priv->hw_ops.set_dpm(ndev, val, true);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Setting dpm_level:%d failed, ret: %d", val, ret);
