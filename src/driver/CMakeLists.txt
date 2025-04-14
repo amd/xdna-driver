@@ -18,6 +18,8 @@ endif(DEFINED ENV{XDNA_DRV_BLD_FLAGS})
 
 message("-- Extra driver source dir: ${XDNA_EXTRA_DRV_DIR}")
 message("-- Extra driver tar exclude rules: ${XDNA_EXTRA_DRV_EXCLUDES}")
+
+if(NOT SKIP_KMOD)
 add_custom_command(
   OUTPUT all_driver_source
   COMMENT "Collect all driver source code"
@@ -96,16 +98,23 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dkms.conf
   COMPONENT ${XDNA_COMPONENT}
   )
 
+# install .ko for testing
+install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
+
 set(amdxdna_drv_tools
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/dkms_driver.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
   )
+else()
+set(amdxdna_drv_tools
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
+  )
+endif()
 install(FILES ${amdxdna_drv_tools}
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
   DESTINATION xrt/${XDNA_COMPONENT}
   COMPONENT ${XDNA_COMPONENT}
   )
 
-# install .ko for testing
-install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
