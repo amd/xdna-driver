@@ -966,12 +966,12 @@ struct xclbin_name
     case xrt_core::query::xclbin_name::type::validate_elf:
       xclbin_name = "validate_elf.xclbin";
       break;
-    // case xrt_core::query::xclbin_name::type::gemm:
-    //   xclbin_name = "gemm.xclbin";
-    //   break;
-    // case xrt_core::query::xclbin_name::type::gemm_elf:
-    //   xclbin_name = "gemm_elf.xclbin";
-    //   break;
+    case xrt_core::query::xclbin_name::type::gemm:
+      xclbin_name = "gemm.xclbin";
+      break;
+    case xrt_core::query::xclbin_name::type::gemm_elf:
+      xclbin_name = "gemm_elf.xclbin";
+      break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
@@ -1008,9 +1008,9 @@ struct sequence_name
     case xrt_core::query::sequence_name::type::tct_all_column:
       seq_name = "tct_4col.txt";
       break;
-    // case xrt_core::query::sequence_name::type::gemm_int8:
-    //   seq_name = "gemm_int8.txt";
-    //   break;
+    case xrt_core::query::sequence_name::type::gemm_int8: 
+      seq_name = "gemm_int8.txt";
+      break;
     }
 
     return boost::str(fmt % seq_name);
@@ -1050,9 +1050,9 @@ struct elf_name
     case xrt_core::query::elf_name::type::aie_reconfig_overhead:
       elf_file = "aie_reconfig_overhead.elf";
       break;
-    // case xrt_core::query::elf_name::type::gemm_int8:
-    //   elf_file = "gemm_int8.elf";
-    //   break;
+    case xrt_core::query::elf_name::type::gemm_int8:
+      elf_file = "gemm_int8.elf";
+      break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
