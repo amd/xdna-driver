@@ -152,7 +152,7 @@ int aie2_get_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type, u64 *value)
 int aie2_fine_preemption(struct amdxdna_dev_hdl *ndev, bool disable)
 {
 	u32 value = disable ? 0 : 1;
-	u32 type = 12;
+	u32 type = NPU4_RT_TYPE_FINE_PREEMPTION;
 
 	if (!is_supported_rt_cfg(ndev, type)) {
 		XDNA_DBG(ndev->xdna, "Skipped");
@@ -164,7 +164,7 @@ int aie2_fine_preemption(struct amdxdna_dev_hdl *ndev, bool disable)
 
 int aie2_force_preemption(struct amdxdna_dev_hdl *ndev, u32 hwctx_id)
 {
-	u32 type = 13;
+	u32 type = NPU4_RT_TYPE_FORCE_PREEMPTION;
 
 	if (!is_supported_rt_cfg(ndev, type)) {
 		XDNA_DBG(ndev->xdna, "Skipped");
@@ -178,7 +178,7 @@ int aie2_frame_boundary_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 {
 	/* Invert the values to map firmware interface */
 	u32 value = enable ? 0 : 1;
-	u32 type = 14;
+	u32 type = NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION;
 	int ret;
 
 	if (!is_supported_rt_cfg(ndev, type)) {

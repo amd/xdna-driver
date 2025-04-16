@@ -4,6 +4,7 @@
  */
 
 #include "drm_local/amdxdna_accel.h"
+#include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 
 /* Address definition from NPU1 docs */
@@ -39,9 +40,9 @@
 #define NPU1_SRAM_BAR_BASE MPNPU_APERTURE1_BASE
 
 const struct rt_config npu1_default_rt_cfg[] = {
-	{ 2, 1, AIE2_RT_CFG_INIT }, /* PDI APP LOAD MODE */
-	{ 4, 1, AIE2_RT_CFG_INIT }, /* Large Debug BO */
-	{ 1, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
+	{ NPU1_RT_TYPE_PDI_LOADING_MODE, 1 /* App */,	   AIE2_RT_CFG_INIT },
+	{ NPU1_RT_TYPE_DEBUG_BUF,	 1 /* Large BO */, AIE2_RT_CFG_INIT },
+	{ NPU1_RT_TYPE_CLOCK_GATING,	 1 /* On */,	   AIE2_RT_CFG_CLK_GATING },
 	{ 0 },
 };
 

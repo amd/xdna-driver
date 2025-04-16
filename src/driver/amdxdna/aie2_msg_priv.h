@@ -351,6 +351,20 @@ struct config_cu_resp {
 	enum aie2_msg_status	status;
 } __packed;
 
+#define NPU1_RT_TYPE_CLOCK_GATING	1
+#define NPU1_RT_TYPE_PDI_LOADING_MODE	2
+#define NPU1_RT_TYPE_DEBUG_BUF		4
+
+#define NPU4_RT_TYPE_CLOCK_GATING		1
+#define NPU4_RT_TYPE_H_CLOCK_GATING		2
+#define NPU4_RT_TYPE_POWER_GATING		3
+#define NPU4_RT_TYPE_L1_POWER_GATING		4
+#define NPU4_RT_TYPE_PDI_LOADING_MODE		5
+#define NPU4_RT_TYPE_DEBUG_BUF			10
+#define NPU4_RT_TYPE_FINE_PREEMPTION		12
+#define NPU4_RT_TYPE_FORCE_PREEMPTION		13
+#define NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION	14
+
 struct set_runtime_cfg_req {
 	u32	type;
 	u64	value;

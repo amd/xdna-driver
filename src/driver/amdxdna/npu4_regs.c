@@ -6,20 +6,20 @@
 #include "npu4_family.h"
 
 const struct rt_config npu4_default_rt_cfg[] = {
-	{ 5,  1, AIE2_RT_CFG_INIT }, /* PDI APP LOAD MODE */
-	{ 10, 1, AIE2_RT_CFG_INIT }, /* Large Debug BO */
-	{ 14, 0, AIE2_RT_CFG_INIT }, /* Frame boundary preemption on */
-	{ 1,  1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
-	{ 2,  1, AIE2_RT_CFG_CLK_GATING }, /* H-Clock gating on */
-	{ 3,  1, AIE2_RT_CFG_CLK_GATING }, /* Power gating on */
-	{ 4,  1, AIE2_RT_CFG_CLK_GATING }, /* L1 power gating on */
+	{ NPU4_RT_TYPE_L1_POWER_GATING,		  1 /* APP */,	    AIE2_RT_CFG_INIT },
+	{ NPU4_RT_TYPE_DEBUG_BUF,		  1 /* Large BO */, AIE2_RT_CFG_INIT },
+	{ NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION, 0 /* Enable */,   AIE2_RT_CFG_INIT },
+	{ NPU4_RT_TYPE_CLOCK_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
+	{ NPU4_RT_TYPE_H_CLOCK_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
+	{ NPU4_RT_TYPE_POWER_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
+	{ NPU4_RT_TYPE_L1_POWER_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
 	{ 0 },
 };
 
 const struct rt_cfg_ver npu4_rt_cfg_tbl[] = {
-	{ 12, 12 }, /* Fine grain preemption */
-	{ 12, 13 }, /* Force preemption */
-	{ 12, 14 }, /* Frame boundary preemption */
+	{ 12, NPU4_RT_TYPE_FINE_PREEMPTION },
+	{ 12, NPU4_RT_TYPE_FORCE_PREEMPTION },
+	{ 12, NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION },
 	{ 0 },
 };
 
