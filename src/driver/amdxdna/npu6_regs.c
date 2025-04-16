@@ -13,7 +13,7 @@ const struct amdxdna_dev_priv npu6_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu6_info = {
-	.vbnv              = "NPU Kracken",
+	.vbnv              = "NPU Krackan",
 	.dev_priv          = &npu6_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };
