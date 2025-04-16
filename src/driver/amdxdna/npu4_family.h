@@ -7,7 +7,14 @@
 #define _NPU4_FAMILY_H_
 
 #include "drm_local/amdxdna_accel.h"
+#include "aie2_msg_priv.h"
 #include "aie2_pci.h"
+
+extern const struct dpm_clk_freq npu4_dpm_clk_table[];
+extern const struct rt_config npu4_default_rt_cfg[];
+extern const struct msg_op_ver npu4_msg_op_tbl[];
+extern const struct rt_cfg_ver npu4_rt_cfg_tbl[];
+extern const struct amdxdna_dev_priv npu4_dev_priv;
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
 #define MPNPU_PUB_SEC_INTR             0x3010060
@@ -60,6 +67,8 @@
 
 #define NPU4_COMMON_DEV_PRIV \
 	.rt_config	= npu4_default_rt_cfg,							\
+	.optional_msg	= npu4_msg_op_tbl,							\
+	.optional_cfg	= npu4_rt_cfg_tbl,							\
 	.dpm_clk_tbl	= npu4_dpm_clk_table,							\
 	.priv_load_cfg = { 5, 0, AIE2_RT_CFG_INIT },						\
 	.col_align	= COL_ALIGN_NATURE,							\

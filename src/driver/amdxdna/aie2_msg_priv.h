@@ -8,8 +8,6 @@
 
 #include <linux/uuid.h>
 
-#define AIE2_UPDATE_PROPERTY_ALL_CTX	0xFF
-
 enum aie2_msg_opcode {
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
@@ -545,25 +543,29 @@ struct legacy_config_cu_resp {
 } __packed;
 #endif /* AMDXDNA_DEVEL */
 
-struct update_time_quota {
-	/* Time duration in microseconds */
-	u32 quota;
-} __packed;
-
 struct update_property_req {
+#define UPDATE_PROPERTY_TIME_QUOTA 0
 	u32 type;
-	union {
-		u8 context_id;
-		u64 reserved;
-	};
-	union {
-		struct update_time_quota time;
-		u64 data;
-	};
+#define AIE2_UPDATE_PROPERTY_ALL_CTX	0xFF
+	u8 context_id;
+	u8 reserved[7];
+	u32 time_quota_us;
+	u32 resv;
 } __packed;
 
 struct update_property_resp {
 	enum aie2_msg_status status;
 } __packed;
+
+/* Do NOT put any firmware defined struct, enum etc. start from here */
+struct msg_op_ver {
+	u32			minor;
+	enum aie2_msg_opcode	op;
+};
+
+struct rt_cfg_ver {
+	u32			minor;
+	u32			type;
+};
 
 #endif /* _AIE2_MSG_PRIV_H_ */

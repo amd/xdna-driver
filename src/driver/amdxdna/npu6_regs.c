@@ -5,15 +5,8 @@
 
 #include "npu4_family.h"
 
-const struct amdxdna_dev_priv npu6_dev_priv = {
-	.fw_path        = "amdnpu/17f0_10/npu.dev.sbin",
-	.protocol_major = 0x6,
-	.protocol_minor = 0x6,
-	NPU4_COMMON_DEV_PRIV,
-};
-
 const struct amdxdna_dev_info dev_npu6_info = {
 	.vbnv              = "NPU Krackan",
-	.dev_priv          = &npu6_dev_priv,
+	.dev_priv          = &npu4_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };

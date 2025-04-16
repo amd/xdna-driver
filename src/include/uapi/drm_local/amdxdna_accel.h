@@ -532,7 +532,7 @@ struct amdxdna_drm_get_resource_info {
  *					Set:
  *						DRM_AMDXDNA_SET_FORCE_PREEMPT
  *						DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT
- * @state: 1 implies enabled/true. 0 implies disabled/false.
+ * @state: 1 implies enabled/true. 0 implies disabled/false. Other value is invalid.
  * @pad: MBZ.
  */
 struct amdxdna_drm_attribute_state {

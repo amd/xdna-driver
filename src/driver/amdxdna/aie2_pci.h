@@ -163,9 +163,6 @@ struct aie_metadata {
 enum rt_config_category {
 	AIE2_RT_CFG_INIT,
 	AIE2_RT_CFG_CLK_GATING,
-	AIE2_RT_CFG_FINE_PREEMPTION,
-	AIE2_RT_CFG_FORCE_PREEMPTION,
-	AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT,
 };
 
 struct rt_config {
@@ -177,11 +174,6 @@ struct rt_config {
 struct dpm_clk_freq {
 	u32	npuclk;
 	u32	hclk;
-};
-
-enum update_property_type {
-	AIE2_UPDATE_PROPERTY_TIME_QUOTA,
-	MAX_PROPERTY,
 };
 
 #ifdef AMDXDNA_DEVEL
@@ -381,6 +373,8 @@ struct amdxdna_dev_priv {
 	u64				protocol_minor;
 	const struct rt_config		*rt_config;
 	const struct dpm_clk_freq	*dpm_clk_tbl;
+	const struct msg_op_ver		*optional_msg;
+	const struct rt_cfg_ver		*optional_cfg;
 
 #define COL_ALIGN_NONE   0
 #define COL_ALIGN_NATURE 1
@@ -409,12 +403,6 @@ static inline void aie2_calc_intr_reg(struct xdna_mailbox_chann_info *info)
 
 int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
 		     enum rt_config_category category, u32 *val);
-
-/* aie2 npu hw config */
-extern const struct dpm_clk_freq npu1_dpm_clk_table[];
-extern const struct dpm_clk_freq npu4_dpm_clk_table[];
-extern const struct rt_config npu1_default_rt_cfg[];
-extern const struct rt_config npu4_default_rt_cfg[];
 
 /* aie2_pci.c */
 #define AIE2_BIT_BYPASS_POWER_SWITCH	0 /* NOSYS */
@@ -474,7 +462,11 @@ int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_resume_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type, u64 value);
 int aie2_get_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type, u64 *value);
-int aie2_runtime_update_prop(struct amdxdna_dev_hdl *ndev, u32 type, u32 value);
+int aie2_fine_preemption(struct amdxdna_dev_hdl *ndev, bool disable);
+int aie2_force_preemption(struct amdxdna_dev_hdl *ndev, u32 hwctx_id);
+int aie2_frame_boundary_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
+int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev,
+				struct amdxdna_ctx *ctx, u32 us);
 int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev);
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid);
 int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
