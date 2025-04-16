@@ -1282,9 +1282,10 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	WARN_ON(ctx_limit > AMDXDNA_MAX_NUM_ELEMENT);
 	ctx_cnt = aie2_rq_active_context(&xdna->dev_handle->ctx_rq);
 	if (args->num_element < ctx_cnt) {
-		XDNA_DBG(xdna, "Invalid number of elements, max ctx %d", ctx_limit);
+		XDNA_DBG(xdna, "Not enough space. Total ctx %d, got %d",
+			 ctx_cnt, args->num_element);
 		args->num_element = ctx_cnt;
-		return ctx_limit;
+		return -ENOSPC;
 	}
 
 	buf_size = args->num_element * args->element_size;
