@@ -162,6 +162,23 @@ static u32 mailbox_reg_read(struct mailbox_channel *mb_chann, u32 mbox_reg)
 	return readl(ringbuf_addr);
 }
 
+static inline void mailbox_irq_acknowledge(struct mailbox_channel *mb_chann)
+{
+	if (mb_chann->iohub_int_addr)
+		mailbox_reg_write(mb_chann,
+				  mb_chann->iohub_int_addr,
+				  0);
+}
+
+static inline u32 mailbox_irq_status(struct mailbox_channel *mb_chann)
+{
+	if (mb_chann->iohub_int_addr)
+		return mailbox_reg_read(mb_chann,
+					mb_chann->iohub_int_addr);
+
+	return 0;
+}
+
 static inline void
 mailbox_set_headptr(struct mailbox_channel *mb_chann, u32 headptr_val)
 {
@@ -422,7 +439,7 @@ static void mailbox_rx_worker(struct work_struct *rx_work)
 	}
 
 again:
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+	mailbox_irq_acknowledge(mb_chann);
 
 	while (1) {
 		/*
@@ -448,7 +465,7 @@ again:
 	 * the interrupt register to make sure there is not any new response
 	 * before exiting.
 	 */
-	iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
+	iohub = mailbox_irq_status(mb_chann);
 	if (iohub)
 		goto again;
 }
@@ -490,15 +507,14 @@ static void mailbox_polld_handle_chann(struct mailbox_channel *mb_chann)
 	if (mb_chann->bad_state)
 		return;
 
-	iohub = mailbox_reg_read(mb_chann, mb_chann->iohub_int_addr);
+	iohub = mailbox_irq_status(mb_chann);
 	if (!iohub)
 		return;
 
 	trace_mbox_poll_handle(MAILBOX_NAME, mb_chann->msix_irq);
 
 	/* Clear pending events */
-	iohub = 0;
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, iohub);
+	mailbox_irq_acknowledge(mb_chann);
 
 	/*
 	 * Consider the race with FW, host needs to handle all messages sent
@@ -830,7 +846,8 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 	xa_init_flags(&mb_chann->chan_xa, XA_FLAGS_ALLOC | XA_FLAGS_LOCK_IRQ);
 	mb_chann->x2i_tail = mailbox_get_tailptr(mb_chann, CHAN_RES_X2I);
 	mb_chann->i2x_head = mailbox_get_headptr(mb_chann, CHAN_RES_I2X);
-	mailbox_reg_write(mb_chann, mb_chann->iohub_int_addr, 0);
+	/* Clear pending events */
+	mailbox_irq_acknowledge(mb_chann);
 
 	INIT_WORK(&mb_chann->rx_work, mailbox_rx_worker);
 	mb_chann->work_q = alloc_ordered_workqueue(MAILBOX_NAME, 0);
