@@ -573,12 +573,12 @@ struct update_property_resp {
 
 /* Do NOT put any firmware defined struct, enum etc. start from here */
 struct msg_op_ver {
-	u32			minor;
+	u32			fw_minor;
 	enum aie2_msg_opcode	op;
 };
 
 struct rt_cfg_ver {
-	u32			minor;
+	u32			fw_minor;
 	u32			type;
 };
 

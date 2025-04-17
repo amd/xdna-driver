@@ -30,15 +30,15 @@ is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode)
 	if (!op_tbl)
 		return false;
 
-	for (i = 0; op_tbl[i].minor; i++) {
+	for (i = 0; op_tbl[i].fw_minor; i++) {
 		if (op_tbl[i].op != opcode)
 			continue;
 
-		if (fw_minor >= op_tbl[i].minor)
+		if (fw_minor >= op_tbl[i].fw_minor)
 			return true;
 
 		XDNA_DBG(ndev->xdna, "Opcode %d protocol %lld.%d, fw is %d.%d",
-			 opcode, ndev->priv->protocol_major, op_tbl[i].minor,
+			 opcode, ndev->priv->protocol_major, op_tbl[i].fw_minor,
 			 ndev->mgmt_prot_major, ndev->mgmt_prot_minor);
 		return false;
 	}
@@ -57,15 +57,15 @@ is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
 	if (!rt_cfg_tbl)
 		return false;
 
-	for (i = 0; rt_cfg_tbl[i].minor; i++) {
+	for (i = 0; rt_cfg_tbl[i].fw_minor; i++) {
 		if (rt_cfg_tbl[i].type != type)
 			continue;
 
-		if (fw_minor >= rt_cfg_tbl[i].minor)
+		if (fw_minor >= rt_cfg_tbl[i].fw_minor)
 			return true;
 
 		XDNA_DBG(ndev->xdna, "Runtime cfg %d protocol %lld.%d, fw is %d.%d",
-			 type, ndev->priv->protocol_major, rt_cfg_tbl[i].minor,
+			 type, ndev->priv->protocol_major, rt_cfg_tbl[i].fw_minor,
 			 ndev->mgmt_prot_major, ndev->mgmt_prot_minor);
 		return false;
 	}
@@ -233,8 +233,10 @@ int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev,
 		return 0;
 	}
 
-	XDNA_DBG(ndev->xdna, "%s execution time quantum updated to %d us",
-		 ctx ? ctx->name : "All", us);
+	if (!ret) {
+		XDNA_DBG(ndev->xdna, "%s execution time quantum updated to %d us",
+			 ctx ? ctx->name : "All", us);
+	}
 	return ret;
 }
 
