@@ -6,7 +6,7 @@
 #include "npu4_family.h"
 
 const struct rt_config npu4_default_rt_cfg[] = {
-	{ NPU4_RT_TYPE_L1_POWER_GATING,		  1 /* APP */,	    AIE2_RT_CFG_INIT },
+	{ NPU4_RT_TYPE_PDI_LOADING_MODE,	  1 /* APP */,	    AIE2_RT_CFG_INIT },
 	{ NPU4_RT_TYPE_DEBUG_BUF,		  1 /* Large BO */, AIE2_RT_CFG_INIT },
 	{ NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION, 0 /* Enable */,   AIE2_RT_CFG_INIT },
 	{ NPU4_RT_TYPE_CLOCK_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
