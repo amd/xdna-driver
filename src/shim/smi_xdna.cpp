@@ -33,7 +33,7 @@ create_validate_subcommand()
   validate_suboptions.emplace("path", std::make_shared<xrt_core::smi::option>("path", "p", "Path to the directory containing validate xclbins", "hidden", "", "string"));
   validate_suboptions.emplace("param", std::make_shared<xrt_core::smi::option>("param", "", "Extended parameter for a given test. Format: <test-name>:<key>:<value>", "param", "", "string"));
   validate_suboptions.emplace("pmode", std::make_shared<xrt_core::smi::option>("pmode", "", "Specify which power mode to run the benchmarks in. Note: Some tests might be unavailable for some modes", "hidden", "", "string")); 
-  validate_suboptions.emplace("elf", std::make_shared<xrt_core::smi::option>("elf", "", "Run the test in ELF mode", "hidden", "", "string"));
+  validate_suboptions.emplace("elf", std::make_shared<xrt_core::smi::option>("elf", "", "Run the test in ELF mode", "hidden", "", "none"));
 
   return {"validate", "Validates the given device by executing the platform's validate executable", "common", std::move(validate_suboptions)};
 }
