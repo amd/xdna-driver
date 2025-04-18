@@ -153,8 +153,7 @@ public:
   get_ctrl_code_size(const xrt::elf& elf)
   {
     auto mod = xrt::module{elf};
-    size_t instr_size = 0;
-    xrt_core::module_int::patch(mod, nullptr, &instr_size, nullptr);
+    size_t instr_size = xrt_core::module_int::get_patch_buf_size(mod, xrt_core::patcher::buf_type::ctrltext);
     return instr_size;
   }
 
@@ -163,7 +162,7 @@ public:
   {
     auto mod = xrt::module{elf};
     size_t instr_size = bo_ctrl.size();
-    xrt_core::module_int::patch(mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), &instr_size, &m_patching_args);
+    xrt_core::module_int::patch(mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), instr_size, &m_patching_args, xrt_core::patcher::buf_type::ctrltext);
     bo_ctrl.get()->sync(buffer_handle::direction::host2device, instr_size, 0);
   }
 
