@@ -1145,14 +1145,14 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	u64 tops_max, tops_curr;
 	int min;
 
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+	priv = ndev->priv;
+
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
 		return -EFAULT;
 	}
-
-	xdna = client->xdna;
-	ndev = xdna->dev_handle;
-	priv = ndev->priv;
 
 	priv->hw_ops.get_tops(ndev, &tops_max, &tops_curr);
 
