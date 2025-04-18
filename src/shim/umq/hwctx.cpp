@@ -46,7 +46,7 @@ init_log_buf()
   hw_ctx::m_log_bo = alloc_bo(nullptr, log_buf_size, XCL_BO_FLAGS_EXECBUF);
   m_log_buf = hw_ctx::m_log_bo->map(xrt_core::buffer_handle::map_type::write);
   uint64_t bo_paddr = hw_ctx::m_log_bo->get_properties().paddr;
-  set_metadata(hw_ctx::m_num_cols, column_size, bo_paddr, UMQ_DEBUG_BUFFER);
+  set_metadata(hw_ctx::m_num_cols, column_size, bo_paddr, UMQ_LOG_BUFFER);
   std::memset(m_log_buf, 0, log_buf_size);
   std::memcpy(m_log_buf, &m_metadata, sizeof(m_metadata));
 }
@@ -61,16 +61,16 @@ fini_log_buf(void)
 
 void
 hw_ctx_umq::
-set_metadata(int num_cols, size_t size, uint64_t bo_paddr, enum umq_log_flag flag)
+set_metadata(int num_ucs, size_t size, uint64_t bo_paddr, enum umq_log_flag flag)
 {
   m_metadata.magic_no = LOG_MAGIC_NO;
   m_metadata.major = 0;
   m_metadata.minor = 1;
   m_metadata.umq_log_flag = flag;
-  m_metadata.num_cols = num_cols;
-  for (int i = 0; i < num_cols; i++) {
-    m_metadata.col_paddr[i] = bo_paddr + size * i + sizeof(m_metadata);
-    m_metadata.col_size[i] = size;
+  m_metadata.num_ucs = num_ucs;
+  for (int i = 0; i < num_ucs; i++) {
+    m_metadata.uc_paddr[i] = bo_paddr + size * i + sizeof(m_metadata);
+    m_metadata.uc_size[i] = size;
   }
 }
 
