@@ -182,10 +182,14 @@ aie2_sched_resp_handler(void *handle, void __iomem *data, size_t size)
 
 	cmd_abo = job->cmd_bo;
 
-	if (unlikely(!data))
+	if (unlikely(!data)) {
+		XDNA_WARN(job->ctx->client->xdna, "No response. cmd state %d",
+			  amdxdna_cmd_get_state(cmd_abo));
 		goto out;
+	}
 
 	if (unlikely(size != sizeof(u32))) {
+		XDNA_WARN(job->ctx->client->xdna, "Abort cmd");
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
