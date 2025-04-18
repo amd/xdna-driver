@@ -8,8 +8,6 @@
 
 #include <linux/uuid.h>
 
-#define AIE2_UPDATE_PROPERTY_ALL_CTX	0xFF
-
 enum aie2_msg_opcode {
 	MSG_OP_CREATE_CONTEXT              = 0x2,
 	MSG_OP_DESTROY_CONTEXT             = 0x3,
@@ -353,6 +351,20 @@ struct config_cu_resp {
 	enum aie2_msg_status	status;
 } __packed;
 
+#define NPU1_RT_TYPE_CLOCK_GATING	1
+#define NPU1_RT_TYPE_PDI_LOADING_MODE	2
+#define NPU1_RT_TYPE_DEBUG_BUF		4
+
+#define NPU4_RT_TYPE_CLOCK_GATING		1
+#define NPU4_RT_TYPE_H_CLOCK_GATING		2
+#define NPU4_RT_TYPE_POWER_GATING		3
+#define NPU4_RT_TYPE_L1_POWER_GATING		4
+#define NPU4_RT_TYPE_PDI_LOADING_MODE		5
+#define NPU4_RT_TYPE_DEBUG_BUF			10
+#define NPU4_RT_TYPE_FINE_PREEMPTION		12
+#define NPU4_RT_TYPE_FORCE_PREEMPTION		13
+#define NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION	14
+
 struct set_runtime_cfg_req {
 	u32	type;
 	u64	value;
@@ -545,25 +557,29 @@ struct legacy_config_cu_resp {
 } __packed;
 #endif /* AMDXDNA_DEVEL */
 
-struct update_time_quota {
-	/* Time duration in microseconds */
-	u32 quota;
-} __packed;
-
 struct update_property_req {
+#define UPDATE_PROPERTY_TIME_QUOTA 0
 	u32 type;
-	union {
-		u8 context_id;
-		u64 reserved;
-	};
-	union {
-		struct update_time_quota time;
-		u64 data;
-	};
+#define AIE2_UPDATE_PROPERTY_ALL_CTX	0xFF
+	u8 context_id;
+	u8 reserved[7];
+	u32 time_quota_us;
+	u32 resv;
 } __packed;
 
 struct update_property_resp {
 	enum aie2_msg_status status;
 } __packed;
+
+/* Do NOT put any firmware defined struct, enum etc. start from here */
+struct msg_op_ver {
+	u32			fw_minor;
+	enum aie2_msg_opcode	op;
+};
+
+struct rt_cfg_ver {
+	u32			fw_minor;
+	u32			type;
+};
 
 #endif /* _AIE2_MSG_PRIV_H_ */

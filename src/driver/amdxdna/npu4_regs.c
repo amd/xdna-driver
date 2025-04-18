@@ -6,24 +6,25 @@
 #include "npu4_family.h"
 
 const struct rt_config npu4_default_rt_cfg[] = {
-	/* PDI APP LOAD MODE */
-	{ 5, 1, AIE2_RT_CFG_INIT },
-	/* Large Debug BO */
-	{ 10, 1, AIE2_RT_CFG_INIT },
-	/* Clock gating on */
-	{ 1, 1, AIE2_RT_CFG_CLK_GATING },
-	/* H-Clock gating on */
-	{ 2, 1, AIE2_RT_CFG_CLK_GATING },
-	/* Power gating on */
-	{ 3, 1, AIE2_RT_CFG_CLK_GATING },
-	/* L1 power gating on */
-	{ 4, 1, AIE2_RT_CFG_CLK_GATING },
-	/* Fine grain preemption enabled */
-	{ 12, 1, AIE2_RT_CFG_FINE_PREEMPTION },
-	/* Force preemption disabled */
-	{ 13, 0, AIE2_RT_CFG_FORCE_PREEMPTION },
-	/* Frame boundary preemption enabled */
-	{ 14, 1, AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT },
+	{ NPU4_RT_TYPE_PDI_LOADING_MODE,	  1 /* APP */,	    AIE2_RT_CFG_INIT },
+	{ NPU4_RT_TYPE_DEBUG_BUF,		  1 /* Large BO */, AIE2_RT_CFG_INIT },
+	{ NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION, 0 /* Enable */,   AIE2_RT_CFG_INIT },
+	{ NPU4_RT_TYPE_CLOCK_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
+	{ NPU4_RT_TYPE_H_CLOCK_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
+	{ NPU4_RT_TYPE_POWER_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
+	{ NPU4_RT_TYPE_L1_POWER_GATING,		  1 /* On */,	    AIE2_RT_CFG_CLK_GATING },
+	{ 0 },
+};
+
+const struct rt_cfg_ver npu4_rt_cfg_tbl[] = {
+	{ 12, NPU4_RT_TYPE_FINE_PREEMPTION },
+	{ 12, NPU4_RT_TYPE_FORCE_PREEMPTION },
+	{ 12, NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION },
+	{ 0 },
+};
+
+const struct msg_op_ver npu4_msg_op_tbl[] = {
+	{ 15, MSG_OP_UPDATE_PROPERTY },
 	{ 0 },
 };
 
@@ -41,8 +42,8 @@ const struct dpm_clk_freq npu4_dpm_clk_table[] = {
 
 const struct amdxdna_dev_priv npu4_dev_priv = {
 	.fw_path        = "amdnpu/17f0_10/npu.dev.sbin",
-	.protocol_major = 0x6,
-	.protocol_minor = 0x6,
+	.protocol_major = 6,
+	.protocol_minor = 12,
 	NPU4_COMMON_DEV_PRIV,
 };
 

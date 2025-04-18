@@ -19,6 +19,60 @@
 #define aie2_send_mgmt_msg_wait(ndev, msg) \
 	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0)
 
+static bool
+is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode)
+{
+	int fw_minor = ndev->mgmt_prot_minor;
+	const struct msg_op_ver *op_tbl;
+	int i;
+
+	op_tbl = ndev->priv->optional_msg;
+	if (!op_tbl)
+		return false;
+
+	for (i = 0; op_tbl[i].fw_minor; i++) {
+		if (op_tbl[i].op != opcode)
+			continue;
+
+		if (fw_minor >= op_tbl[i].fw_minor)
+			return true;
+
+		XDNA_DBG(ndev->xdna, "Opcode %d protocol %lld.%d, fw is %d.%d",
+			 opcode, ndev->priv->protocol_major, op_tbl[i].fw_minor,
+			 ndev->mgmt_prot_major, ndev->mgmt_prot_minor);
+		return false;
+	}
+
+	return false;
+}
+
+static bool
+is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
+{
+	int fw_minor = ndev->mgmt_prot_minor;
+	const struct rt_cfg_ver *rt_cfg_tbl;
+	int i;
+
+	rt_cfg_tbl = ndev->priv->optional_cfg;
+	if (!rt_cfg_tbl)
+		return false;
+
+	for (i = 0; rt_cfg_tbl[i].fw_minor; i++) {
+		if (rt_cfg_tbl[i].type != type)
+			continue;
+
+		if (fw_minor >= rt_cfg_tbl[i].fw_minor)
+			return true;
+
+		XDNA_DBG(ndev->xdna, "Runtime cfg %d protocol %lld.%d, fw is %d.%d",
+			 type, ndev->priv->protocol_major, rt_cfg_tbl[i].fw_minor,
+			 ndev->mgmt_prot_major, ndev->mgmt_prot_minor);
+		return false;
+	}
+
+	return false;
+}
+
 static int
 aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 			       struct xdna_mailbox_msg *msg,
@@ -95,24 +149,95 @@ int aie2_get_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type, u64 *value)
 	return 0;
 }
 
-int aie2_runtime_update_prop(struct amdxdna_dev_hdl *ndev, u32 type, u32 value)
+int aie2_fine_preemption(struct amdxdna_dev_hdl *ndev, bool disable)
+{
+	u32 value = disable ? 0 : 1;
+	u32 type = NPU4_RT_TYPE_FINE_PREEMPTION;
+
+	if (!is_supported_rt_cfg(ndev, type)) {
+		XDNA_DBG(ndev->xdna, "Skipped");
+		return 0;
+	}
+
+	return aie2_set_runtime_cfg(ndev, type, value);
+}
+
+int aie2_force_preemption(struct amdxdna_dev_hdl *ndev, u32 hwctx_id)
+{
+	u32 type = NPU4_RT_TYPE_FORCE_PREEMPTION;
+
+	if (!is_supported_rt_cfg(ndev, type)) {
+		XDNA_DBG(ndev->xdna, "Skipped");
+		return 0;
+	}
+
+	return aie2_set_runtime_cfg(ndev, type, hwctx_id);
+}
+
+int aie2_frame_boundary_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
+{
+	/* Invert the values to map firmware interface */
+	u32 value = enable ? 0 : 1;
+	u32 type = NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION;
+	int ret;
+
+	if (!is_supported_rt_cfg(ndev, type)) {
+		XDNA_DBG(ndev->xdna, "Skipped");
+		return 0;
+	}
+
+	ret = aie2_set_runtime_cfg(ndev, type, value);
+	if (ret)
+		return ret;
+
+	ndev->frame_boundary_preempt = enable;
+	return 0;
+}
+
+static int
+aie2_runtime_update_prop(struct amdxdna_dev_hdl *ndev,
+			 struct amdxdna_ctx *ctx, u32 type, u32 value)
 {
 	DECLARE_AIE2_MSG(update_property, MSG_OP_UPDATE_PROPERTY);
 	int ret;
 
-	req.context_id = AIE2_UPDATE_PROPERTY_ALL_CTX;
-	req.time.quota = value;
+	if (!is_supported_msg(ndev, MSG_OP_UPDATE_PROPERTY))
+		return -EOPNOTSUPP;
+
+	if (ctx)
+		req.context_id = ctx->priv->id;
+	else
+		req.context_id = AIE2_UPDATE_PROPERTY_ALL_CTX;
+
+	req.time_quota_us = value;
 	req.type = type;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "Failed to update property, ret %d", ret);
+		XDNA_ERR(ndev->xdna, "%s update property failed, type %d ret %d",
+			 ctx ? ctx->name : "All", type, ret);
 		return ret;
 	}
 
-	XDNA_INFO(ndev->xdna, "Execution time quantum updated to %dms", (value / 1000));
-
 	return 0;
+}
+
+int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev,
+				struct amdxdna_ctx *ctx, u32 us)
+{
+	int ret;
+
+	ret = aie2_runtime_update_prop(ndev, ctx, UPDATE_PROPERTY_TIME_QUOTA, us);
+	if (ret == -EOPNOTSUPP) {
+		XDNA_DBG(ndev->xdna, "update time quota not support, skipped");
+		return 0;
+	}
+
+	if (!ret) {
+		XDNA_DBG(ndev->xdna, "%s execution time quantum updated to %d us",
+			 ctx ? ctx->name : "All", us);
+	}
+	return ret;
 }
 
 int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
@@ -312,10 +437,8 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	WARN_ONCE(ctx->priv->id == -1, "Unexpected context id");
 
 	if (ndev->force_preempt_enabled) {
-		ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FORCE_PREEMPTION,
-				       &ctx->priv->id);
-		if (ret)
-			XDNA_WARN(ndev->xdna, "Failed to config force preemption");
+		ret = aie2_force_preemption(ndev, ctx->priv->id);
+		WARN_ONCE(ret, "Failed to config force preemption");
 	}
 
 	info->msix_id = resp.msix_id;

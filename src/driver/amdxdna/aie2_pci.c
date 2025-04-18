@@ -38,9 +38,10 @@ bool disable_fine_preemption;
 module_param(disable_fine_preemption, bool, 0600);
 MODULE_PARM_DESC(disable_fine_preemption, "Disable fine grain preemption");
 
-uint time_quantun_ms = 30; /* 30 milliseconds */
-module_param(time_quantun_ms, uint, 0600);
-MODULE_PARM_DESC(time_quantun_ms, "Sets the default execution time quantum for all context in milliseconds");
+#define MAX_TIME_QUANTUM_MS 2000 /* milliseconds */
+uint time_quantum_ms = 30; /* milliseconds */
+module_param(time_quantum_ms, uint, 0400);
+MODULE_PARM_DESC(time_quantum_ms, "Execution time quantum. Default 30 ms, MAX 2000 ms");
 
 /*
  * The management mailbox channel is allocated by firmware.
@@ -217,24 +218,6 @@ int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-static int aie2_enable_frame_boundary_preempt(struct amdxdna_dev_hdl *ndev, u32 state)
-{
-	/* Invert the values to map firmware interface */
-	u32 value = state ? false : true;
-	int ret;
-
-	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT, &value);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Failed to %s frame boundary preemption",
-			 state ? "enable" : "disable");
-		return ret;
-	}
-
-	ndev->frame_boundary_preempt = state;
-
-	return 0;
-}
-
 static int aie2_xdna_reset(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -256,7 +239,6 @@ static int aie2_xdna_reset(struct amdxdna_dev_hdl *ndev)
 
 static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
-	u32 preempt;
 	int ret;
 
 	if (!ndev->mgmt_prot_major) {
@@ -273,12 +255,7 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	if (disable_fine_preemption)
-		preempt = 0;
-	else
-		preempt = 1;
-
-	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FINE_PREEMPTION, &preempt);
+	ret = aie2_fine_preemption(ndev, disable_fine_preemption);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Failed to %s fine grain preemption",
 			 disable_fine_preemption ? "disable" : "enable");
@@ -291,21 +268,16 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	ret = aie2_enable_frame_boundary_preempt(ndev, true);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Failed to %s fine grain preemption",
-			 disable_fine_preemption ? "disable" : "enable");
-		return ret;
+	if (time_quantum_ms > MAX_TIME_QUANTUM_MS) {
+		XDNA_ERR(ndev->xdna, "Bad time quantum %d", time_quantum_ms);
+		return -EINVAL;
 	}
 
-	/*
-	 * TODO: Fair scheduling feature is a Strix only feature. Cleanup the below implementation
-	 * once we have a generation specific management firmware initialization.
-	 */
-	ret = aie2_runtime_update_prop(ndev, AIE2_UPDATE_PROPERTY_TIME_QUOTA,
-				       time_quantun_ms * 1000);
-	if (ret)
-		XDNA_WARN(ndev->xdna, "Failed to update execution time quantum");
+	ret = aie2_update_prop_time_quota(ndev, NULL, time_quantum_ms * 1000);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to update execution time quantum");
+		return ret;
+	}
 
 	ret = aie2_xdna_reset(ndev);
 	if (ret) {
@@ -1131,7 +1103,7 @@ static int aie2_get_force_preempt_state(struct amdxdna_client *client,
 	}
 
 	ndev = xdna->dev_handle;
-	force.state = ndev->force_preempt_enabled;
+	force.state = ndev->force_preempt_enabled ? 1 : 0;
 
 	min = min(args->buffer_size, sizeof(force));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &force, min))
@@ -1154,7 +1126,7 @@ static int aie2_query_frame_boundary_preempt_state(struct amdxdna_client *client
 	}
 
 	ndev = xdna->dev_handle;
-	preempt.state = ndev->frame_boundary_preempt;
+	preempt.state = ndev->frame_boundary_preempt ? 1 : 0;
 
 	min = min(args->buffer, sizeof(preempt));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, min))
@@ -1391,10 +1363,8 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 	}
 
 	min = min(args->buffer_size, sizeof(power_state));
-	if (copy_from_user(&power_state, u64_to_user_ptr(args->buffer), min)) {
-		XDNA_ERR(xdna, "Failed to copy power mode request into kernel");
+	if (copy_from_user(&power_state, u64_to_user_ptr(args->buffer), min))
 		return -EFAULT;
-	}
 
 	power_mode = power_state.power_mode;
 	if (power_mode > POWER_MODE_TURBO) {
@@ -1418,14 +1388,17 @@ static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 	}
 
 	min = min(args->buffer_size, sizeof(force));
-	if (copy_from_user(&force, u64_to_user_ptr(args->buffer), min)) {
-		XDNA_ERR(xdna, "Failed to copy force preemption request into kernel");
+	if (copy_from_user(&force, u64_to_user_ptr(args->buffer), min))
 		return -EFAULT;
+
+	if (force.state && force.state > 1) {
+		XDNA_ERR(xdna, "Invalid state: %d", force.state);
+		return -EINVAL;
 	}
 
 	xdna->dev_handle->force_preempt_enabled = force.state;
 
-	XDNA_WARN(xdna, "Force preemption %s", force.state ? "enabled" : "disabled");
+	XDNA_DBG(xdna, "Force preemption %s", force.state ? "enabled" : "disabled");
 
 	return 0;
 }
@@ -1433,7 +1406,7 @@ static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 						 struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_dev_hdl *dev = client->xdna->dev_handle;
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_drm_attribute_state preempt;
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
@@ -1444,21 +1417,23 @@ static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 		return -EINVAL;
 	}
 
-	if (copy_from_user(&preempt, u64_to_user_ptr(args->buffer), sizeof(preempt))) {
-		XDNA_ERR(xdna, "Failed to copy frame boundary preempt request into kernel");
+	if (copy_from_user(&preempt, u64_to_user_ptr(args->buffer), sizeof(preempt)))
 		return -EFAULT;
-	}
 
-	if (preempt.state != 0 && preempt.state > 1) {
-		XDNA_ERR(xdna, "Invalid frame boundary preempt.state: %d", preempt.state);
+	if (preempt.state && preempt.state > 1) {
+		XDNA_ERR(xdna, "Invalid state: %d", preempt.state);
 		return -EINVAL;
 	}
 
-	ret = aie2_enable_frame_boundary_preempt(dev, preempt.state);
-	if (ret)
+	ret = aie2_frame_boundary_preemption(ndev, preempt.state);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to %s frame boundary preemption",
+			 preempt.state ? "enabled" : "disabled");
 		return ret;
+	}
 
-	XDNA_WARN(xdna, "Frame boundary preemption %s", preempt.state ? "enabled" : "disabled");
+	XDNA_DBG(xdna, "Frame boundary preemption %s",
+		 ndev->frame_boundary_preempt ? "enabled" : "disabled");
 
 	return 0;
 }
