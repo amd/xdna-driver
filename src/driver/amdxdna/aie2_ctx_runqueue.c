@@ -388,6 +388,7 @@ ctx_dead:
 	part->ctx_cnt--;
 	if (ctx_is_rt(ctx))
 		part->rt_ctx_cnt--;
+	ctx->priv->part = NULL;
 }
 
 static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
