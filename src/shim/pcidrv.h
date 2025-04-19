@@ -19,6 +19,7 @@ enum class drv_ioctl_cmd {
   destroy_bo,
   sync_bo,
   export_bo,
+  import_bo,
 
   submit_cmd,
   submit_dep,
@@ -27,6 +28,12 @@ enum class drv_ioctl_cmd {
 
   get_info,
   set_state,
+
+  create_syncobj,
+  destroy_syncobj,
+  export_syncobj,
+  import_syncobj,
+  wait_syncobj,
 };
 
 struct bo_id {
@@ -58,7 +65,7 @@ struct config_ctx_cu_config_arg {
 struct config_ctx_debug_bo_arg {
   uint32_t ctx_handle;
   bool is_detach;
-  uint32_t debug_bo;
+  uint32_t bo;
 };
 
 struct create_bo_arg {
@@ -122,6 +129,21 @@ struct wait_cmd_arg {
   uint64_t seq;
   uint32_t timeout_ms;
   bool timedout;
+};
+
+struct create_destroy_syncobj_arg {
+  uint32_t handle;
+};
+
+struct export_import_syncobj_arg {
+  uint32_t handle;
+  int fd;
+};
+
+struct wait_syncobj_arg {
+  uint32_t handle;
+  uint32_t timeout_ms;
+  uint64_t timepoint;
 };
 
 class drv : public xrt_core::pci::drv

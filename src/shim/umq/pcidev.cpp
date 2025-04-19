@@ -27,5 +27,19 @@ on_last_close() const
   // do nothing
 }
 
+bool
+pdev_umq::
+is_cache_coherent() const
+{
+  return true;
+}
+
+bool
+pdev_umq::
+has_heap_buffer() const
+{
+  return false;
+}
+
 }
 

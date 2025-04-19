@@ -48,5 +48,19 @@ on_last_close() const
   m_dev_heap_bo.reset();
 }
 
+bool
+pdev_kmq::
+is_cache_coherent() const
+{
+  return false;
+}
+
+bool
+pdev_kmq::
+has_heap_buffer() const
+{
+  return true;
+}
+
 } // namespace shim_xdna
 

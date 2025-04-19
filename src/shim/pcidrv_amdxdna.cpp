@@ -46,8 +46,6 @@ ioctl_cmd2name(unsigned long cmd)
     return "DRM_IOCTL_PRIME_FD_TO_HANDLE";
   case DRM_IOCTL_SYNCOBJ_CREATE:
     return "DRM_IOCTL_SYNCOBJ_CREATE";
-  case DRM_IOCTL_SYNCOBJ_QUERY:
-    return "DRM_IOCTL_SYNCOBJ_QUERY";
   case DRM_IOCTL_SYNCOBJ_DESTROY:
     return "DRM_IOCTL_SYNCOBJ_DESTROY";
   case DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD:
@@ -113,7 +111,7 @@ config_ctx_debug_bo(int dev_fd, shim_xdna::config_ctx_debug_bo_arg& ctx_arg)
   arg.handle = ctx_arg.ctx_handle;
   arg.param_type = ctx_arg.is_detach ?
     DRM_AMDXDNA_CTX_REMOVE_DBG_BUF : DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF;
-  arg.param_val = ctx_arg.debug_bo;
+  arg.param_val = ctx_arg.bo;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_CONFIG_CTX, &arg);
 }
 
@@ -202,9 +200,36 @@ submit_cmd(int dev_fd, shim_xdna::submit_cmd_arg& cmd_arg)
   cmd_arg.seq = arg.seq;
 }
 
+int64_t timeout_ms2abs_ns(int64_t timeout_ms)
+{
+  if (!timeout_ms)
+    return std::numeric_limits<int64_t>::max(); // 0 means wait forever
+
+  auto now = std::chrono::high_resolution_clock::now();
+  auto now_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now);
+  return timeout_ms * 1000000 + now_ns.time_since_epoch().count();
+}
+
+void
+wait_syncobj_available(int dev_fd, uint32_t* sobj_hdls, uint64_t* timepoints, uint32_t num)
+{
+  drm_syncobj_timeline_wait wsobj = {
+    .handles = reinterpret_cast<uintptr_t>(sobj_hdls),
+    .points = reinterpret_cast<uintptr_t>(timepoints),
+    .timeout_nsec = timeout_ms2abs_ns(0), /* wait forever */
+    .count_handles = num,
+    .flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL |
+             DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
+             DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE,
+  };
+  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wsobj);
+}
+
 void
 submit_dep(int dev_fd, shim_xdna::submit_dep_arg& cmd_arg)
 {
+  wait_syncobj_available(dev_fd, cmd_arg.sync_objs, cmd_arg.sync_points, cmd_arg.count);
+
   amdxdna_drm_exec_cmd arg = {};
   arg.ctx = cmd_arg.ctx_handle;
   arg.type = AMDXDNA_CMD_SUBMIT_DEPENDENCY;
@@ -228,27 +253,13 @@ submit_sig(int dev_fd, shim_xdna::submit_sig_arg& cmd_arg)
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
 }
 
-uint64_t abs_now_ns()
-{
-  auto now = std::chrono::high_resolution_clock::now();
-  auto now_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now);
-  return now_ns.time_since_epoch().count();
-}
-
 void
 wait_cmd(int dev_fd, shim_xdna::wait_cmd_arg& cmd_arg)
 {
-  int64_t timeout = std::numeric_limits<int64_t>::max();
-
-  if (cmd_arg.timeout_ms) {
-	  timeout = cmd_arg.timeout_ms;
-	  timeout *= 1000000;
-	  timeout += abs_now_ns();
-  }
   drm_syncobj_timeline_wait arg = {};
   arg.handles = reinterpret_cast<uintptr_t>(&cmd_arg.sync_obj);
   arg.points = reinterpret_cast<uintptr_t>(&cmd_arg.seq);
-  arg.timeout_nsec = timeout;
+  arg.timeout_nsec = timeout_ms2abs_ns(cmd_arg.timeout_ms);
   arg.count_handles = 1;
   arg.flags = 0;
   try {
@@ -272,6 +283,59 @@ void
 set_state(int dev_fd, amdxdna_drm_set_state& state)
 {
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_SET_STATE, &state);
+}
+
+void
+create_syncobj(int dev_fd, shim_xdna::create_destroy_syncobj_arg& sobj_arg)
+{
+  drm_syncobj_create arg = {};
+  arg.handle = AMDXDNA_INVALID_FENCE_HANDLE;
+  arg.flags = 0;
+  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_CREATE, &arg);
+  sobj_arg.handle = arg.handle;
+}
+
+void
+destroy_syncobj(int dev_fd, shim_xdna::create_destroy_syncobj_arg& sobj_arg)
+{
+  drm_syncobj_destroy arg = {};
+  arg.handle = sobj_arg.handle;
+  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_DESTROY, &arg);
+}
+
+void
+export_syncobj(int dev_fd, shim_xdna::export_import_syncobj_arg& sobj_arg)
+{
+  drm_syncobj_handle arg = {};
+  arg.handle = sobj_arg.handle;
+  arg.flags = 0;
+  arg.fd = -1;
+  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &arg);
+  sobj_arg.fd = arg.fd;
+}
+
+void
+import_syncobj(int dev_fd, shim_xdna::export_import_syncobj_arg& sobj_arg)
+{
+  drm_syncobj_handle arg = {};
+  arg.handle = AMDXDNA_INVALID_FENCE_HANDLE;
+  arg.flags = 0;
+  arg.fd = sobj_arg.fd;
+  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &arg);
+  sobj_arg.handle = arg.handle;
+}
+
+void
+wait_syncobj(int dev_fd, shim_xdna::wait_syncobj_arg& sobj_arg)
+{
+  drm_syncobj_timeline_wait arg = {};
+  arg.handles = reinterpret_cast<uintptr_t>(&sobj_arg.handle);
+  arg.points = reinterpret_cast<uintptr_t>(&sobj_arg.timepoint);
+  arg.timeout_nsec = timeout_ms2abs_ns(sobj_arg.timeout_ms);
+  arg.count_handles = 1;
+  /* Keep waiting even if not submitted yet */
+  arg.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &arg);
 }
 
 }
@@ -335,6 +399,9 @@ drv_ioctl(int dev_fd, drv_ioctl_cmd cmd, void* cmd_arg) const
   case drv_ioctl_cmd::export_bo:
     export_bo(dev_fd, *static_cast<export_bo_arg*>(cmd_arg));
     break;
+  case drv_ioctl_cmd::import_bo:
+    import_bo(dev_fd, *static_cast<import_bo_arg*>(cmd_arg));
+    break;
   case drv_ioctl_cmd::submit_cmd:
     submit_cmd(dev_fd, *static_cast<submit_cmd_arg*>(cmd_arg));
     break;
@@ -352,6 +419,21 @@ drv_ioctl(int dev_fd, drv_ioctl_cmd cmd, void* cmd_arg) const
     break;
   case drv_ioctl_cmd::set_state:
     set_state(dev_fd, *static_cast<amdxdna_drm_set_state*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::create_syncobj:
+    create_syncobj(dev_fd, *static_cast<create_destroy_syncobj_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::destroy_syncobj:
+    destroy_syncobj(dev_fd, *static_cast<create_destroy_syncobj_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::export_syncobj:
+    export_syncobj(dev_fd, *static_cast<export_import_syncobj_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::import_syncobj:
+    import_syncobj(dev_fd, *static_cast<export_import_syncobj_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::wait_syncobj:
+    wait_syncobj(dev_fd, *static_cast<wait_syncobj_arg*>(cmd_arg));
     break;
   default:
     shim_err(EINVAL, "Unknown drv_ioctl: %d", cmd);

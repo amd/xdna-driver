@@ -21,8 +21,10 @@ public:
 public:
   void
   ioctl(unsigned long cmd, void* arg) const;
+
   void*
   mmap(void *addr, size_t len, int prot, int flags, off_t offset) const;
+
   void
   munmap(void* addr, size_t len) const;
 
@@ -34,6 +36,12 @@ public:
 
   void
   drv_ioctl(drv_ioctl_cmd cmd, void* arg) const;
+
+  virtual bool
+  is_cache_coherent() const = 0;
+
+  virtual bool
+  has_heap_buffer() const = 0;
 
 private:
   virtual void
