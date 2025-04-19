@@ -18,7 +18,7 @@
 #define AIE2_SMU_SET_HARD_DPMLEVEL	0x8
 
 static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd,
-			 u32 reg_arg, u32 *out)
+			 u32 reg_arg, u32 *out, bool blocking)
 {
 	u32 resp;
 	int ret;
@@ -49,6 +49,9 @@ static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd,
 	writel(0, SMU_REG(ndev, SMU_INTR_REG));
 	writel(1, SMU_REG(ndev, SMU_INTR_REG));
 
+	if (!blocking)
+		return 0;
+
 	ret = readx_poll_timeout(readl, SMU_REG(ndev, SMU_RESP_REG), resp,
 				 resp, AIE2_INTERVAL, AIE2_TIMEOUT);
 	if (ret) {
@@ -67,13 +70,13 @@ static int aie2_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd,
 	return 0;
 }
 
-int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
+int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool blocking)
 {
 	u32 freq;
 	int ret;
 
 	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_MPNPUCLK_FREQ,
-			    ndev->priv->dpm_clk_tbl[dpm_level].npuclk, &freq);
+			    ndev->priv->dpm_clk_tbl[dpm_level].npuclk, &freq, blocking);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set npu clock to %d failed, ret %d\n",
 			 ndev->priv->dpm_clk_tbl[dpm_level].npuclk, ret);
@@ -81,7 +84,7 @@ int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	ndev->npuclk_freq = freq;
 
 	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HCLK_FREQ,
-			    ndev->priv->dpm_clk_tbl[dpm_level].hclk, &freq);
+			    ndev->priv->dpm_clk_tbl[dpm_level].hclk, &freq, blocking);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set h clock to %d failed, ret %d\n",
 			 ndev->priv->dpm_clk_tbl[dpm_level].hclk, ret);
@@ -95,18 +98,18 @@ int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	return 0;
 }
 
-int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
+int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level, bool blocking)
 {
 	int ret;
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HARD_DPMLEVEL, dpm_level, NULL);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_HARD_DPMLEVEL, dpm_level, NULL, blocking);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set hard dpm level %d failed, ret %d ",
 			 dpm_level, ret);
 		return ret;
 	}
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_SOFT_DPMLEVEL, dpm_level, NULL);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_SET_SOFT_DPMLEVEL, dpm_level, NULL, blocking);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Set soft dpm level %d failed, ret %d",
 			 dpm_level, ret);
@@ -137,7 +140,7 @@ int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_ON, 0, NULL);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_ON, 0, NULL, true);
 	if (ret)
 		return ret;
 	ndev->power_state = SMU_POWER_ON;
@@ -149,7 +152,7 @@ int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_OFF, 0, NULL);
+	ret = aie2_smu_exec(ndev, AIE2_SMU_POWER_OFF, 0, NULL, true);
 	if (ret)
 		return ret;
 	ndev->power_state = SMU_POWER_OFF;
@@ -180,7 +183,7 @@ void aie2_smu_stop(struct amdxdna_dev_hdl *ndev)
 	int ret;
 
 	/* Minimize clocks/dpm level prior to power off */
-	ndev->priv->hw_ops.set_dpm(ndev, 0);
+	ndev->priv->hw_ops.set_dpm(ndev, 0, true);
 
 	ret = aie2_smu_set_power_off(ndev);
 	if (ret)
