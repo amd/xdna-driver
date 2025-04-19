@@ -49,7 +49,7 @@ class buffer : public xrt_core::buffer_handle
 public:
   buffer(const pdev& pdev, size_t size, int type);
   buffer(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
-  ~buffer();
+  virtual ~buffer();
 
   void*
   map(map_type) override;
