@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "bo.h"
-#include "device.h"
+#include "../buffer.h"
 #include "pcidev.h"
 #include "core/common/config_reader.h"
 
@@ -25,20 +24,13 @@ get_heap_num_pages()
 
 namespace shim_xdna {
 
-std::shared_ptr<xrt_core::device>
-pdev_kmq::
-create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
-{
-  return std::make_shared<device_kmq>(*this, handle, id);
-}
-
 void
 pdev_kmq::
 on_first_open() const
 {
   auto heap_sz = heap_page_size * get_heap_num_pages();
   // Alloc device memory on first device open.
-  m_dev_heap_bo = std::make_unique<bo_kmq>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
+  m_dev_heap_bo = std::make_unique<buffer>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
 }
 
 void
@@ -60,6 +52,13 @@ pdev_kmq::
 has_heap_buffer() const
 {
   return true;
+}
+
+bool
+pdev_kmq::
+is_umq() const
+{
+  return false;
 }
 
 } // namespace shim_xdna

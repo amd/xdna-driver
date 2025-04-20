@@ -17,6 +17,9 @@ public:
 
   xrt_core::device::handle_type
   create_shim(xrt_core::device::id_type id) const override;
+ 
+  std::shared_ptr<xrt_core::device>
+  create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
 
 public:
   void
@@ -43,14 +46,25 @@ public:
   virtual bool
   has_heap_buffer() const = 0;
 
+  virtual bool
+  is_umq() const = 0;
+
 private:
+  class dev_fd {
+  public:
+    dev_fd(int fd) : m_fd(fd) {}
+    ~dev_fd() { ::close(m_fd); }
+    int get() { return m_fd; }
+  private:
+    int m_fd = -1;
+  };
   virtual void
   on_first_open() const = 0;
 
   virtual void
   on_last_close() const = 0;
 
-  mutable int m_dev_fd = -1;
+  mutable std::unique_ptr<dev_fd> m_dev_fd;
   mutable int m_dev_users = 0;
   mutable std::mutex m_lock;
   std::shared_ptr<const drv> m_driver;

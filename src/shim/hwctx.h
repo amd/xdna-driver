@@ -39,7 +39,7 @@ public:
   get_hw_queue() override;
 
   std::unique_ptr<xrt_core::buffer_handle>
-  alloc_bo(void* userptr, size_t size, uint64_t flags) override = 0;
+  alloc_bo(void* userptr, size_t size, uint64_t flags) override;
 
   std::unique_ptr<xrt_core::buffer_handle>
   alloc_bo(size_t size, uint64_t flags) override;

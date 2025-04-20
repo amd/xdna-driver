@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
+#include "buffer.h"
 #include "bo.h"
 #include "hwctx.h"
 #include "hwq.h"
@@ -107,6 +108,18 @@ hw_ctx::
 alloc_bo(size_t size, uint64_t flags)
 {
   return alloc_bo(nullptr, size, flags);
+}
+
+std::unique_ptr<xrt_core::buffer_handle>
+hw_ctx::
+alloc_bo(void* userptr, size_t size, uint64_t flags)
+{
+  // const_cast: alloc_bo() is not const yet in device class
+  auto& dev = const_cast<device&>(get_device());
+  auto boh = dev.alloc_bo(userptr, size, flags);
+  auto bo = dynamic_cast<buffer*>(boh.get());
+  bo->attach_to_ctx(*this);
+  return boh;
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

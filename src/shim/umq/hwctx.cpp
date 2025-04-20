@@ -27,16 +27,6 @@ hw_ctx_umq::
   fini_log_buf();
 }
 
-std::unique_ptr<xrt_core::buffer_handle>
-hw_ctx_umq::
-alloc_bo(void* userptr, size_t size, uint64_t flags)
-{
-  // const_cast: alloc_bo() is not const yet in device class
-  auto& dev = const_cast<device&>(get_device());
-
-  return dev.alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
-}
-
 void
 hw_ctx_umq::
 init_log_buf()

@@ -6,6 +6,7 @@
 
 #include "pcidev.h"
 #include "shared.h"
+#include "shim_debug.h"
 #include "core/common/shim/hwctx_handle.h"
 #include "core/common/shim/buffer_handle.h"
 #include <set>
@@ -50,6 +51,10 @@ public:
   buffer(const pdev& pdev, size_t size, int type);
   buffer(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
   virtual ~buffer();
+
+  void
+  copy(const xrt_core::buffer_handle* src, size_t size, size_t dst_offset, size_t src_offset) override
+  { shim_not_supported_err(__func__); }
 
   void*
   map(map_type) override;

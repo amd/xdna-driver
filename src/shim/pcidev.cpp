@@ -81,8 +81,6 @@ pdev(std::shared_ptr<const drv>& driver, const std::string& sysfs_name)
 pdev::
 ~pdev()
 {
-  if (m_dev_fd != -1)
-    shim_debug("Device node fd leaked!! fd=%d", m_dev_fd);
 }
 
 xrt_core::device::handle_type
@@ -97,26 +95,16 @@ void
 pdev::
 open() const
 {
-  int fd;
   const std::lock_guard<std::mutex> lock(m_lock);
 
   if (m_dev_users == 0) {
-    fd = xrt_core::pci::dev::open("", O_RDWR);
+    auto fd = xrt_core::pci::dev::open("", O_RDWR);
     if (fd < 0)
-      shim_err(EINVAL, "Failed to open KMQ device");
+      shim_err(EINVAL, "Failed to open NPU device");
     else
-      shim_debug("Device opened, fd=%d", fd);
-    // Publish the fd for other threads to use.
-    m_dev_fd = fd;
-
-    // Make sure we close fd if on_first_open() throws
-    try {
-      on_first_open();
-    } catch (...) {
-      ::close(fd);
-      m_dev_fd = -1;
-      throw;
-    }
+      shim_debug("Opened NPU device, fd=%d", fd);
+    m_dev_fd = std::make_unique<dev_fd>(fd);
+    on_first_open();
   }
   ++m_dev_users;
 }
@@ -125,19 +113,13 @@ void
 pdev::
 close() const
 {
-  int fd;
   const std::lock_guard<std::mutex> lock(m_lock);
 
   --m_dev_users;
   if (m_dev_users == 0) {
     on_last_close();
-
-    // Stop new users of the fd from other threads.
-    fd = m_dev_fd;
-    m_dev_fd = -1;
-    // Kernel will wait for existing users to quit.
-    ::close(fd);
-    shim_debug("Device closed, fd=%d", fd);
+    shim_debug("Closing NPU Device, fd=%d", m_dev_fd->get());
+    m_dev_fd.reset();
   }
 }
 
@@ -146,7 +128,7 @@ pdev::
 ioctl(unsigned long cmd, void* arg) const
 {
   XRT_TRACE_POINT_SCOPE2(ioctl, cmd, arg);
-  if (xrt_core::pci::dev::ioctl(m_dev_fd, cmd, arg) == -1)
+  if (xrt_core::pci::dev::ioctl(m_dev_fd->get(), cmd, arg) == -1)
     shim_err(-errno, "%s IOCTL failed", ioctl_cmd2name(cmd).c_str());
 }
 
@@ -154,7 +136,7 @@ void*
 pdev::
 mmap(void *addr, size_t len, int prot, int flags, off_t offset) const
 {
-  void* ret = ::mmap(addr, len, prot, flags, m_dev_fd, offset);
+  void* ret = ::mmap(addr, len, prot, flags, m_dev_fd->get(), offset);
 
   if (ret == reinterpret_cast<void*>(-1))
     shim_err(-errno, "mmap(addr=%p, len=%ld, prot=%d, flags=%d, offset=%ld) failed", addr, len, prot, flags, offset);
@@ -172,7 +154,14 @@ void
 pdev::
 drv_ioctl(drv_ioctl_cmd cmd, void* arg) const
 {
-  m_driver->drv_ioctl(m_dev_fd, cmd, arg);
+  m_driver->drv_ioctl(m_dev_fd->get(), cmd, arg);
+}
+
+std::shared_ptr<xrt_core::device>
+pdev::
+create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
+{
+  return std::make_shared<device>(*this, handle, id);
 }
 
 } // namespace shim_xdna

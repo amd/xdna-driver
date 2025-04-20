@@ -14,9 +14,6 @@ public:
 
   ~hw_ctx_umq();
 
-  std::unique_ptr<xrt_core::buffer_handle>
-  alloc_bo(void* userptr, size_t size, uint64_t flags) override;
-
 private:
   #define LOG_MAGIC_NO 0x43455254
 

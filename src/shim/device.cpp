@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. - All rights reserved
 
-#include "bo.h"
 #include "device.h"
-#include "hwctx.h"
+#include "buffer.h"
+#include "kmq/hwctx.h"
+#include "umq/hwctx.h"
 #include "fence.h"
 #include "smi_xdna.h"
 
@@ -1246,6 +1247,33 @@ import_fd(pid_t pid, int ehdl)
 #endif
 }
 
+int
+bo_flags_to_type(uint64_t bo_flags, bool has_dev_mem)
+{
+  auto flags = xcl_bo_flags{bo_flags};
+  auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
+
+  /*
+   * boflags scope:
+   * HOST_ONLY: any input, output buffers, can be large size
+   * CACHEABLE: control code buffer, can be large size too
+   *            on cache coherent systems, no need to sync.
+   * EXECBUF: small size buffer that can be accessed by both
+   *          userland(map), kernel(kva) and device(dev_addr).
+   */
+  switch (boflags) {
+  case XCL_BO_FLAGS_HOST_ONLY:
+    return AMDXDNA_BO_SHARE;
+  case XCL_BO_FLAGS_CACHEABLE:
+    return has_dev_mem ? AMDXDNA_BO_DEV : AMDXDNA_BO_SHARE;
+  case XCL_BO_FLAGS_EXECBUF:
+    return AMDXDNA_BO_CMD;
+  default:
+    break;
+  }
+  return AMDXDNA_BO_INVALID;
+}
+
 }
 
 namespace shim_xdna {
@@ -1270,11 +1298,13 @@ device(const pdev& pdev, handle_type shim_handle, id_type device_id)
   , m_pdev(pdev)
 {
   m_pdev.open();
+  shim_debug("Created device (%s) ...", m_pdev.m_sysfs_name.c_str());
 }
 
 device::
 ~device()
 {
+  shim_debug("Destroying device (%s) ...", m_pdev.m_sysfs_name.c_str());
   m_pdev.close();
 }
 
@@ -1307,12 +1337,25 @@ register_xclbin(const xrt::xclbin& xclbin) const
   // loaded by create_hw_context
 }
 
+void
+device::
+open_aie_context(xrt::aie::access_mode)
+{
+  // Do not throw here, just do nothing.
+  // This flow doesn't support calling driver to open aie context.
+  // This is to satisfy xrt::aie::device class constructor
+  // which calls open_aie_context of ishim.
+}
+
 std::unique_ptr<xrt_core::hwctx_handle>
 device::
 create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type& qos,
   xrt::hw_context::access_mode mode) const
 {
-  return create_hw_context(*this, get_xclbin(xclbin_uuid), qos);
+  if (m_pdev.is_umq())
+    return std::make_unique<hw_ctx_umq>(*this, get_xclbin(xclbin_uuid), qos);
+  else
+    return std::make_unique<hw_ctx_kmq>(*this, get_xclbin(xclbin_uuid), qos);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
@@ -1326,14 +1369,31 @@ std::unique_ptr<xrt_core::buffer_handle>
 device::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
-  return alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
+  // Sanity check
+  auto f = xcl_bo_flags{flags};
+  if (f.boflags == XCL_BO_FLAGS_NONE)
+    shim_not_supported_err("unsupported buffer type: none flag");
+  if (userptr)
+    shim_not_supported_err("User ptr BO");
+  auto type = bo_flags_to_type(flags, m_pdev.has_heap_buffer());
+  if (type == AMDXDNA_BO_INVALID)
+    shim_not_supported_err("Bad BO flags");
+
+  // Alloc special BO type
+  if (f.use == XRT_BO_USE_DEBUG)
+    return std::make_unique<dbg_buffer>(m_pdev, size, type);
+  if (type == AMDXDNA_BO_CMD)
+    return std::make_unique<cmd_buffer>(m_pdev, size, type);
+
+  // Alloc common BO type
+  return std::make_unique<buffer>(m_pdev, size, type);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
 device::
 import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
-  return import_bo(import_fd(pid, ehdl));
+  return std::make_unique<buffer>(get_pdev(), ehdl);
 }
 
 std::unique_ptr<xrt_core::fence_handle>
@@ -1350,4 +1410,83 @@ import_fence(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
   return std::make_unique<fence>(*this, import_fd(pid, ehdl));
 }
 
-} // namespace shim_xdna
+std::vector<char>
+device::
+read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size)
+{
+  amdxdna_drm_aie_mem mem = {};
+  std::vector<char> store_buf(size);
+
+  mem.col = col;
+  mem.row = row;
+  mem.addr = offset;
+  mem.size = size;
+  mem.buf_p = reinterpret_cast<uintptr_t>(store_buf.data());
+  amdxdna_drm_get_info arg = {
+    .param = DRM_AMDXDNA_READ_AIE_MEM,
+    .buffer_size = sizeof(mem),
+    .buffer = reinterpret_cast<uintptr_t>(&mem)
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::get_info, &arg);
+  return store_buf;
+}
+
+uint32_t
+device::
+read_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr)
+{
+  amdxdna_drm_aie_reg reg = {};
+  reg.col = col;
+  reg.row = row;
+  reg.addr = reg_addr;
+  reg.val = 0;
+  amdxdna_drm_get_info arg = {
+    .param = DRM_AMDXDNA_READ_AIE_REG,
+    .buffer_size = sizeof(reg),
+    .buffer = reinterpret_cast<uintptr_t>(&reg)
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::get_info, &arg);
+  return reg.val;
+}
+
+size_t
+device::
+write_aie_mem(uint16_t col, uint16_t row, uint32_t offset, const std::vector<char>& buf)
+{
+  amdxdna_drm_aie_mem mem = {};
+  uint32_t size = static_cast<uint32_t>(buf.size());
+
+  mem.col = col;
+  mem.row = row;
+  mem.addr = offset;
+  mem.size = size;
+  mem.buf_p = reinterpret_cast<uintptr_t>(buf.data());
+  amdxdna_drm_set_state arg = {
+    .param = DRM_AMDXDNA_WRITE_AIE_MEM,
+    .buffer_size = sizeof(mem),
+    .buffer = reinterpret_cast<uintptr_t>(&mem)
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::set_state, &arg);
+  return size;
+}
+
+bool
+device::
+write_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val)
+{
+  amdxdna_drm_aie_reg reg = {};
+
+  reg.col = col;
+  reg.row = row;
+  reg.addr = reg_addr;
+  reg.val = reg_val;
+  amdxdna_drm_set_state arg = {
+    .param = DRM_AMDXDNA_WRITE_AIE_REG,
+    .buffer_size = sizeof(reg),
+    .buffer = reinterpret_cast<uintptr_t>(&reg)
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::set_state, &arg);
+  return true;
+}
+
+}
