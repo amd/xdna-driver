@@ -433,7 +433,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
   test_case{ "npu3 xrt df_bw", TEST_xrt_umq_df_bw, {} },
   test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {128} },
-  test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {32} }, //upto 2 now
+  test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {32} },
 };
 
 }
