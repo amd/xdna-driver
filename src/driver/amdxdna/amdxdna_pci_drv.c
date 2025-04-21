@@ -66,7 +66,6 @@ amdxdna_get_dev_info(struct pci_dev *pdev)
 		    pdev->revision == amdxdna_ids[i].revision)
 			return amdxdna_ids[i].dev_info;
 	}
-
 	return NULL;
 }
 
