@@ -7,12 +7,11 @@
 #include <linux/dma-mapping.h>
 #include <linux/sched/clock.h>
 
+#include "amdxdna_carvedout_buf.h"
 #include "amdxdna_devel.h"
 #include "amdxdna_trace.h"
 
 int iommu_mode;
-module_param(iommu_mode, int, 0644);
-MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID, 2 = Bypass");
 
 bool priv_load;
 module_param(priv_load, bool, 0644);
@@ -26,35 +25,34 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = NULL;
 
-	switch (iommu_mode) {
-	case AMDXDNA_IOMMU_PASID:
-		// default case
-		break;
-	case AMDXDNA_IOMMU_NO_PASID:
 #if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-		if (!iommu_present(xdna->ddev.dev->bus)) {
+	if (!iommu_present(xdna->ddev.dev->bus)) {
 #else
-		if (!device_iommu_mapped(xdna->ddev.dev)) {
+	if (!device_iommu_mapped(xdna->ddev.dev)) {
 #endif
-			XDNA_ERR(xdna, "IOMMU not present");
-			return -ENODEV;
+		if (amdxdna_use_carvedout()) {
+			iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+			return 0;
 		}
 
-		domain = iommu_get_domain_for_dev(xdna->ddev.dev);
-		if (!iommu_is_dma_domain(domain)) {
-			XDNA_ERR(xdna, "Set amd_iommu=force_isolation for DMA domain");
-			return -EOPNOTSUPP;
-		}
-
-		break;
-	case AMDXDNA_IOMMU_BYPASS:
-		 // IOMMU bypass mode is supported with carvedout memory.
-		break;
-	default:
-		XDNA_ERR(xdna, "Invalid IOMMU mode %d", iommu_mode);
-		return -EINVAL;
+		XDNA_ERR(xdna, "No carvedout memory and IOMMU is off");
+		return -ENODEV;
 	}
 
+	/*
+	 * Set amd_iommu=force_isolation in the Linux cmdline makes SVA capable
+	 * device to force use legacy v1 page table, which not support PASID but
+	 * supports the old IOVA. In this mode, dma_map_*() can map uncontiguous
+	 * host memory to contiguous IOVA space.
+	 * This will not needed if AMD IOMMU changed the behavior.
+	 */
+	domain = iommu_get_domain_for_dev(xdna->ddev.dev);
+	if (iommu_is_dma_domain(domain)) {
+		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+		return 0;
+	}
+
+	iommu_mode = AMDXDNA_IOMMU_PASID;
 	return 0;
 }
 
