@@ -194,6 +194,7 @@ $ update-grub
 $ reboot
 
 # Once machine is rebooted, check /proc/cmdline to verify if memmap=1G$4G is presented
+# If it is, run below command to load driver
 $ modprobe amdxdna carvedout_addr=0x100000000 carvedout_size=0x40000000
 ```
 
