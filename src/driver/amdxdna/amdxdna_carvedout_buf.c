@@ -16,11 +16,11 @@
  * allocated from this memory.
  */
 u64 carvedout_addr;
-module_param(carvedout_addr, ullong, 0644);
+module_param(carvedout_addr, ullong, 0444);
 MODULE_PARM_DESC(carvedout_addr, "Physical memory address for reserved memory chunk");
 
 u64 carvedout_size;
-module_param(carvedout_size, ullong, 0644);
+module_param(carvedout_size, ullong, 0444);
 MODULE_PARM_DESC(carvedout_size, "Physical memory size for reserved memory chunk");
 
 struct amdxdna_carvedout {
