@@ -164,26 +164,50 @@ struct amdxdna_ctx_param_config_cu {
 };
 
 /**
+ * struct amdxdna_drm_ctx_config_metadata - metadata to configure context.
+ * @magic_no: CERT magic number
+ * @major: CERT major number
+ * @minor: CERT minor number
+ * @debug_buf_flag: Specifies the type of buffer.
+ * @num_cols: total coulmns count
+ * @col_paddr: physical address of debug buffer assigned to this col
+ * @col_size: size of the debug buffer
+ * @pad: Structure padding.
+ */
+struct amdxdna_drm_ctx_config_metadata {
+	__u32 magic_no;
+	__u8 major;
+	__u8 minor;
+#define DRM_AMDXDNA_CTX_CONFIG_CU               0
+#define DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF          1
+#define DRM_AMDXDNA_CTX_REMOVE_DBG_BUF          2
+#define DRM_AMDXDNA_CTX_ASSIGN_DTRACE_BUF       3
+#define DRM_AMDXDNA_CTX_REMOVE_DTRACE_BUF       4
+	__u8 log_flag;
+	__u8 num_cols;
+	__u64 col_paddr[8];
+	__u32 col_size[8];
+	__u32 pad;
+};
+
+/**
  * struct amdxdna_drm_config_ctx - Configure context.
  * @handle: Context handle.
  * @param_type: Specifies the structure passed in via param_val.
  * @param_val: A structure specified by the param_type struct member.
  * @param_val_size: Size of the parameter buffer pointed to by the param_val.
- *		    If param_val is not a pointer, driver can ignore this.
+ *                  If param_val is not a pointer, driver can ignore this.
  * @pad: Structure padding.
  *
  * Note: if the param_val is a pointer pointing to a buffer, the maximum size
  * of the buffer is 4KiB(PAGE_SIZE).
  */
 struct amdxdna_drm_config_ctx {
-	__u32 handle;
-#define DRM_AMDXDNA_CTX_CONFIG_CU	0
-#define	DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF	1
-#define	DRM_AMDXDNA_CTX_REMOVE_DBG_BUF	2
-	__u32 param_type;
-	__u64 param_val;
-	__u32 param_val_size;
-	__u32 pad;
+        __u32 handle;
+        __u32 param_type;
+        __u64 param_val;
+        __u32 param_val_size;
+        __u32 pad;
 };
 
 /**
