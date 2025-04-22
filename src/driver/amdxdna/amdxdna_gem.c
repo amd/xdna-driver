@@ -603,12 +603,12 @@ amdxdna_gem_create_shmem_object(struct drm_device *dev, size_t size)
 }
 
 static struct amdxdna_gem_obj *
-amdxdna_gem_create_carvedout_object(struct drm_device *dev, size_t size)
+amdxdna_gem_create_carvedout_object(struct drm_device *dev, size_t size, u64 align)
 {
 	struct drm_gem_object *gobj;
 	struct dma_buf *dma_buf;
 
-	dma_buf = amdxdna_get_carvedout_buf(dev, size, 0);
+	dma_buf = amdxdna_get_carvedout_buf(dev, size, align);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
@@ -670,8 +670,15 @@ amdxdna_gem_create_share_object(struct drm_device *dev,
 	if (args->vaddr)
 		return amdxdna_gem_create_user_object(dev, args);
 
-	if (amdxdna_use_carvedout())
-		return amdxdna_gem_create_carvedout_object(dev, aligned_sz);
+	if (amdxdna_use_carvedout()) {
+		struct amdxdna_dev *xdna = to_xdna_dev(dev);
+		u64 align = 0;
+
+		if (args->type == AMDXDNA_BO_DEV_HEAP)
+			align = xdna->dev_info->dev_mem_size;
+
+		return amdxdna_gem_create_carvedout_object(dev, aligned_sz, align);
+	}
 
 	return amdxdna_gem_create_shmem_object(dev, aligned_sz);
 }

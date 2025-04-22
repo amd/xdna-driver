@@ -176,6 +176,28 @@ ulimit -l # The result is in kbytes
 ulimit -l
 ```
 
+### Q: What is carvedout memory and how to use it?
+
+A: Carvedout memory refeers to a reserved region of physical memory that is allocated at boot time. This memory region is used as backing storage for buffer objects supported by the xdna driver.
+
+To use carvedout memory, reserve the desired memory range using a Linux command line parameter.
+Then, enable its usage in the driver by setting module parameters, carvedout_addr and carvedout_size.
+If this is correctly set, all the buffer object will backed by Carvedout memory instead of SHMEM on x86.
+
+``` bash
+# For example, reserve 1 GiB memory on 4 GiB location. Add "memmap=1G$4G" to Linux command line.
+# On Ubuntu system, you can edit /etc/default/grub and update GRUB_CMDLINE_LINUX.
+GRUB_CMDLINE_LINUX=" memmap=1G\\\$4G "
+
+# Update grub2 then reboot
+$ update-grub
+$ reboot
+
+# Once machine is rebooted, check /proc/cmdline to verify if memmap=1G$4G is presented
+# If it is, run below command to load driver
+$ modprobe amdxdna carvedout_addr=0x100000000 carvedout_size=0x40000000
+```
+
 ## Contributor Guidelines
 1. Read [Getting Started](#getting-started)
 2. Read [System Requirements](#system-requirements)

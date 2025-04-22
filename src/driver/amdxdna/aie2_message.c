@@ -496,14 +496,17 @@ int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u6
 		req.buf_addr = addr;
 		req.buf_size = chunk_size;
 		ret = aie2_send_mgmt_msg_wait(ndev, &msg);
-		if (ret)
+		if (ret) {
+			XDNA_ERR(xdna, "hwctx %d addr 0x%llx size 0x%lx",
+				 context_id, addr, chunk_size);
 			return ret;
+		}
 
-		addr += chunk_size;
-		size -= chunk_size;
 		XDNA_DBG(xdna, "hwctx %d map host buf addr 0x%llx size 0x%lx",
 			 context_id, addr, chunk_size);
 
+		addr += chunk_size;
+		size -= chunk_size;
 		/* Change opcode if there are more than one chunk */
 		msg.opcode = MSG_OP_ADD_HOST_BUFFER;
 	} while (size);
