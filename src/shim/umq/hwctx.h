@@ -22,7 +22,9 @@ private:
 
   enum umq_log_flag {
     UMQ_DEBUG_BUFFER = 0,
-    UMQ_TRACE_BUFFER
+    UMQ_TRACE_BUFFER,
+    UMQ_DBG_QUEUE,
+    UMQ_LOG_BUFFER
   };
 
   struct umq_log_metadata {
@@ -30,9 +32,9 @@ private:
     uint8_t major;
     uint8_t minor;
     uint8_t umq_log_flag;
-    uint8_t num_cols;       // how many valid cols, up to 8 for now
-    uint64_t col_paddr[8];  // device accessible address array for each valid col
-    uint32_t col_size[8];    // bo size for each valid col
+    uint8_t num_ucs;       // how many valid ucs, up to 8 for now
+    uint64_t uc_paddr[8];  // device accessible address array for each valid uc
+    uint32_t uc_size[8];    // bo size for each valid uc
   };
 
   struct umq_log_metadata m_metadata;
