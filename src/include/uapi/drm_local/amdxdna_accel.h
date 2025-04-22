@@ -178,11 +178,6 @@ struct amdxdna_drm_ctx_config_metadata {
 	__u32 magic_no;
 	__u8 major;
 	__u8 minor;
-#define DRM_AMDXDNA_CTX_CONFIG_CU               0
-#define DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF          1
-#define DRM_AMDXDNA_CTX_REMOVE_DBG_BUF          2
-#define DRM_AMDXDNA_CTX_ASSIGN_DTRACE_BUF       3
-#define DRM_AMDXDNA_CTX_REMOVE_DTRACE_BUF       4
 	__u8 log_flag;
 	__u8 num_cols;
 	__u64 col_paddr[8];
