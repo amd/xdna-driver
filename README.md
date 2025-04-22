@@ -32,9 +32,15 @@ To run AI applications, your system needs
 
 ## Linux compilation and installation
 
+### Ubuntu 25.04
+
+Ubuntu 25.04 includes [Linux kernel 6.14](https://kernelnewbies.org/Linux_6.14) that incorporates the amdxdna driver for AMD NPUs :partying_face:. 
+
+> The XRT SHIM library is still needed from this repository.
+
 ### Ubuntu 24.10
 
-Ubuntu 24.10 already includes Linux kernel 6.11 that meets the requirements for the xdna-driver. 
+Ubuntu 24.10 includes Linux kernel 6.11 that meets the requirements for the xdna-driver. 
 
 ### Ubuntu 24.04
 
