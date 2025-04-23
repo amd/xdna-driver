@@ -181,9 +181,10 @@ struct amdxdna_drm_ctx_config_metadata {
 #define LOG_BUF_TYPE_DEBUG	0x1
 #define LOG_BUF_TYPE_DTRACE	0x2
 	__u8 flag;
+#define MAX_COLUMN_COUNT	36
 	__u8 num_cols;
-	__u64 col_paddr[8];
-	__u32 col_size[8];
+	__u64 col_paddr[MAX_COLUMN_COUNT];
+	__u32 col_size[MAX_COLUMN_COUNT];
 	__u32 pad;
 };
 
