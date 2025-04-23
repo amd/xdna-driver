@@ -708,8 +708,11 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	op = amdxdna_cmd_get_op(cmd_abo);
 	switch (op) {
 	case ERT_START_CU:
-		if (unlikely(payload_len > sizeof(req.ebuf.payload)))
-			XDNA_DBG(xdna, "Invalid ebuf payload len: %d", payload_len);
+		if (unlikely(payload_len > sizeof(req.ebuf.payload))) {
+			XDNA_ERR(xdna, "Invalid ebuf payload len: %d", payload_len);
+			return -EINVAL;
+		}
+
 		req.ebuf.cu_idx = cu_idx;
 		memcpy(req.ebuf.payload, payload, sizeof(req.ebuf.payload));
 		msg.send_size = sizeof(req.ebuf);
@@ -718,8 +721,11 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	case ERT_START_NPU: {
 		struct amdxdna_cmd_start_npu *sn = payload;
 
-		if (unlikely(payload_len - sizeof(*sn) > sizeof(req.dpu.payload)))
-			XDNA_DBG(xdna, "Invalid dpu payload len: %d", payload_len);
+		if (unlikely(payload_len - sizeof(*sn) > sizeof(req.dpu.payload))) {
+			XDNA_ERR(xdna, "Invalid dpu payload len: %d", payload_len);
+			return -EINVAL;
+		}
+
 		req.dpu.inst_buf_addr = sn->buffer;
 		req.dpu.inst_size = sn->buffer_size;
 		req.dpu.inst_prop_cnt = sn->prop_count;
@@ -732,8 +738,10 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	case ERT_START_NPU_PREEMPT: {
 		struct amdxdna_cmd_preempt_data *pd = payload;
 
-		if (unlikely(payload_len - sizeof(*pd) > sizeof(req.dpu.payload)))
-			XDNA_DBG(xdna, "Invalid dpu payload len: %d", payload_len);
+		if (unlikely(payload_len - sizeof(*pd) > sizeof(req.dpu_pmpt.payload))) {
+			XDNA_ERR(xdna, "Invalid dpu preempt payload len: %d", payload_len);
+			return -EINVAL;
+		}
 
 		req.dpu_pmpt.inst_buf_addr = pd->inst_buf;
 		req.dpu_pmpt.save_buf_addr = pd->save_buf;
