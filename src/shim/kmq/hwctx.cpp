@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "hwctx.h"
 #include "hwq.h"
-#include "../bo.h"
-
-#include "core/common/config_reader.h"
-#include "core/common/memalign.h"
+#include "hwctx.h"
+#include "../buffer.h"
 
 namespace {
 
@@ -25,51 +22,48 @@ print_cu_config(amdxdna_ctx_param_config_cu *config)
 
 namespace shim_xdna {
 
-hw_ctx_kmq::
-hw_ctx_kmq(const device& device, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
-  : hw_ctx(device, qos, std::make_unique<hw_q_kmq>(device), xclbin)
+hwctx_kmq::
+hwctx_kmq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
+  : hwctx(device, qos, xclbin, std::make_unique<hw_q_kmq>(device))
 {
-  hw_ctx::create_ctx_on_device();
-
-  auto cu_info = get_cu_info();
+  xclbin_parser xp(xclbin);
   std::vector<char> cu_conf_param_buf(
-    sizeof(amdxdna_ctx_param_config_cu) + cu_info.size() * sizeof(amdxdna_cu_config));
+    sizeof(amdxdna_ctx_param_config_cu) + xp.get_num_cus() * sizeof(amdxdna_cu_config));
   auto cu_conf_param = reinterpret_cast<amdxdna_ctx_param_config_cu *>(cu_conf_param_buf.data());
 
-  cu_conf_param->num_cus = cu_info.size();
+  cu_conf_param->num_cus = xp.get_num_cus();
   xcl_bo_flags f = {};
   f.flags = XRT_BO_FLAGS_CACHEABLE;
-  for (int i = 0; i < cu_info.size(); i++) {
-    auto& ci = cu_info[i];
+  for (int i = 0; i < cu_conf_param->num_cus; i++) {
+    auto& pdi = xp.get_cu_pdi(i);
+    auto bo = alloc_bo(pdi.size(), f.all);
+    m_pdi_bos.emplace_back(dynamic_cast<buffer*>(bo.release()));
 
-    m_pdi_bos.push_back(alloc_bo(nullptr, ci.m_pdi.size(), f.all));
     auto& pdi_bo = m_pdi_bos[i];
-    auto pdi_vaddr = reinterpret_cast<char *>(
-      pdi_bo->map(xrt_core::buffer_handle::map_type::write));
+    auto pdi_vaddr = reinterpret_cast<char *>(pdi_bo->vaddr());
 
     auto& cf = cu_conf_param->cu_configs[i];
-    std::memcpy(pdi_vaddr, ci.m_pdi.data(), ci.m_pdi.size());
-    pdi_bo->sync(xrt_core::buffer_handle::direction::host2device, pdi_bo->get_properties().size, 0);
-    cf.cu_bo = static_cast<bo*>(pdi_bo.get())->get_drm_bo_handle();
-    cf.cu_func = ci.m_func;
+    std::memcpy(pdi_vaddr, pdi.data(), pdi.size());
+    pdi_bo->sync(xrt_core::buffer_handle::direction::host2device, pdi_bo->size(), 0);
+    cf.cu_bo = pdi_bo->handle();
+    cf.cu_func = xp.get_cu_func(i);
   }
 
   print_cu_config(cu_conf_param);
 
-  amdxdna_drm_config_ctx arg = {};
-  arg.handle = get_slotidx();
-  arg.param_type = DRM_AMDXDNA_CTX_CONFIG_CU;
-  arg.param_val = reinterpret_cast<uintptr_t>(cu_conf_param);
-  arg.param_val_size = cu_conf_param_buf.size();
-  get_device().get_pdev().ioctl(DRM_IOCTL_AMDXDNA_CONFIG_CTX, &arg);
+  config_ctx_cu_config_arg arg = {
+    .ctx_handle = get_slotidx(),
+    .conf_buf = cu_conf_param_buf,
+  };
+  device.get_pdev().drv_ioctl(drv_ioctl_cmd::config_ctx_cu_config, &arg);
 
   shim_debug("Created KMQ HW context (%d)", get_slotidx());
 }
 
-hw_ctx_kmq::
-~hw_ctx_kmq()
+hwctx_kmq::
+~hwctx_kmq()
 {
   shim_debug("Destroying KMQ HW context (%d)...", get_slotidx());
 }
 
-} // shim_xdna
+}

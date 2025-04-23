@@ -29,7 +29,7 @@ is_slot_valid(volatile struct host_queue_packet *pkt)
 }
 
 int
-wait_slot(const shim_xdna::pdev& pdev, const shim_xdna::hw_ctx *ctx,
+wait_slot(const shim_xdna::pdev& pdev, const shim_xdna::hwctx *ctx,
   uint64_t cmd_id, uint32_t timeout_ms)
 {
   int ret = 1;
@@ -415,7 +415,7 @@ issue_command(xrt_core::buffer_handle *cmd_bo)
 
 void
 hw_q_umq::
-bind_hwctx(const hw_ctx *ctx)
+bind_hwctx(const hwctx *ctx)
 {
   // link hwctx by parent class
   hw_q::bind_hwctx(ctx);

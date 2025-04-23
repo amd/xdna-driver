@@ -48,8 +48,8 @@ private:
 class buffer : public xrt_core::buffer_handle
 {
 public:
-  buffer(const pdev& pdev, size_t size, int type);
-  buffer(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
+  buffer(const pdev& dev, size_t size, int type);
+  buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl);
   virtual ~buffer();
 
   void
@@ -76,13 +76,16 @@ public:
 
 public:
   void*
-  map() const;
+  vaddr() const;
 
   uint32_t
   handle() const;
 
   uint64_t
   paddr() const;
+
+  size_t
+  size() const;
 
   virtual void
   attach_to_ctx(const xrt_core::hwctx_handle& hwctx);
@@ -95,12 +98,12 @@ public:
   get_arg_bo_handles() const;
 
 protected:
-  std::string
-  describe() const;
-
   const pdev& m_pdev;
 
 private:
+  std::string
+  describe() const;
+
   void
   mmap_drm_bo(); // Obtain void* through mmap()
 

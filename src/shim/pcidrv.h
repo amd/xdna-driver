@@ -69,7 +69,7 @@ struct config_ctx_debug_bo_arg {
 };
 
 struct create_bo_arg {
-  uint32_t type;
+  int type;
   size_t size;
   bo_id id;
   uint64_t paddr;

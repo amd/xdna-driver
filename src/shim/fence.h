@@ -42,13 +42,13 @@ public:
 
 public:
   void
-  submit_wait(const hw_ctx*) const;
+  submit_wait(const hwctx*) const;
 
   static void
-  submit_wait(const pdev& dev, const hw_ctx*, const std::vector<xrt_core::fence_handle*>& fences);
+  submit_wait(const pdev& dev, const hwctx*, const std::vector<xrt_core::fence_handle*>& fences);
 
   void
-  submit_signal(const hw_ctx*) const;
+  submit_signal(const hwctx*) const;
 
 private:
   uint64_t

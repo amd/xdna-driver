@@ -157,9 +157,10 @@ drm_bo::
 drm_bo(const pdev& pdev, size_t size, int type)
   : m_pdev(pdev), m_size(size), m_type(type)
 {
-  create_bo_arg arg = {};
-  arg.type = m_type;
-  arg.size = m_size;
+  create_bo_arg arg = {
+    .type = m_type,
+    .size = m_size,
+  };
   m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
   m_id = arg.id;
   m_paddr = arg.paddr;
@@ -171,8 +172,9 @@ drm_bo::
 drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
   : m_pdev(pdev)
 {
-  import_bo_arg arg = {};
-  arg.fd = ehdl;
+  import_bo_arg arg = {
+    .fd = ehdl,
+  };
   m_pdev.drv_ioctl(drv_ioctl_cmd::import_bo, &arg);
   m_type = arg.type;
   m_size = arg.size;
@@ -185,8 +187,9 @@ drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
 drm_bo::
 ~drm_bo()
 {
-  destroy_bo_arg arg = {};
-  arg.id = m_id;
+  destroy_bo_arg arg = {
+    .id = m_id,
+  };
   try {
     m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
   } catch (const xrt_core::system_error& e) {
@@ -202,10 +205,10 @@ drm_bo::
 //
 
 buffer::
-buffer(const pdev& pdev, size_t size, int type)
-  : m_pdev(pdev)
+buffer(const pdev& dev, size_t size, int type)
+  : m_pdev(dev)
 {
-  m_bo = std::make_unique<drm_bo>(pdev, size, type);
+  m_bo = std::make_unique<drm_bo>(dev, size, type);
   if (!m_bo->m_vaddr)
     mmap_drm_bo();
   
@@ -220,10 +223,10 @@ buffer(const pdev& pdev, size_t size, int type)
 }
 
 buffer::
-buffer(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
-  : m_pdev(pdev)
+buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl)
+  : m_pdev(dev)
 {
-  m_bo = std::make_unique<drm_bo>(pdev, ehdl);
+  m_bo = std::make_unique<drm_bo>(dev, ehdl);
   if (!m_bo->m_vaddr)
     mmap_drm_bo();
   shim_debug("Imported BO: %s", describe().c_str());
@@ -256,14 +259,21 @@ map(map_type t)
 {
   if (t != map_type::write)
     shim_err(EINVAL, "Not support map BO as readonly. Type must be bo::map_type::write");
-  return map();
+  return vaddr();
 }
 
 void *
 buffer::
-map() const
+vaddr() const
 {
   return m_bo->m_map_offset == AMDXDNA_INVALID_ADDR ? m_bo->m_vaddr : m_addr->get();
+}
+
+size_t
+buffer::
+size() const
+{
+  return m_bo->m_size;
 }
 
 void
@@ -284,8 +294,9 @@ std::unique_ptr<xrt_core::shared_handle>
 buffer::
 share() const 
 {
-  export_bo_arg arg = {};
-  arg.id = m_bo->m_id;
+  export_bo_arg arg = {
+    .id = m_bo->m_id,
+  };
   m_pdev.drv_ioctl(drv_ioctl_cmd::export_bo, &arg);
 
   shim_debug("Exported BO %d to fd %d", handle(), arg.fd);
@@ -348,7 +359,7 @@ describe() const
 
   desc += " ";
   desc += "vaddr=";
-  desc += to_hex_string(reinterpret_cast<uint64_t>(map()));
+  desc += to_hex_string(reinterpret_cast<uint64_t>(vaddr()));
   return desc;
 }
 
@@ -360,10 +371,11 @@ sync(direction, size_t size, size_t offset)
     return;
 
   if (is_driver_sync()) {
-    sync_bo_arg arg = {};
-    arg.handle = handle();
-    arg.size = size;
-    arg.offset = offset;
+    sync_bo_arg arg = {
+      .handle = handle(),
+      .offset = offset,
+      .size = size,
+    };
     m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
     return;
   }
@@ -371,7 +383,7 @@ sync(direction, size_t size, size_t offset)
   if (offset + size > m_bo->m_size)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
 
-  clflush_data(map(), offset, size); 
+  clflush_data(vaddr(), offset, size); 
 }
 
 std::set<uint32_t>
@@ -461,10 +473,11 @@ void
 dbg_buffer::
 config_debug_bo(bool is_attach)
 {
-  config_ctx_debug_bo_arg arg = {};
-  arg.ctx_handle = m_ctx_id;
-  arg.is_detach = is_attach;
-  arg.bo = handle();
+  config_ctx_debug_bo_arg arg = {
+    .ctx_handle = m_ctx_id,
+    .is_detach = is_attach,
+    .bo = handle(),
+  };
   m_pdev.drv_ioctl(drv_ioctl_cmd::config_ctx_debug_bo, &arg);
 }
 

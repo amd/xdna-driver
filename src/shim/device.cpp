@@ -1353,9 +1353,9 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
   xrt::hw_context::access_mode mode) const
 {
   if (m_pdev.is_umq())
-    return std::make_unique<hw_ctx_umq>(*this, get_xclbin(xclbin_uuid), qos);
+    return std::make_unique<hwctx_umq>(*this, get_xclbin(xclbin_uuid), qos);
   else
-    return std::make_unique<hw_ctx_kmq>(*this, get_xclbin(xclbin_uuid), qos);
+    return std::make_unique<hwctx_kmq>(*this, get_xclbin(xclbin_uuid), qos);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
@@ -1381,12 +1381,12 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
 
   // Alloc special BO type
   if (f.use == XRT_BO_USE_DEBUG)
-    return std::make_unique<dbg_buffer>(m_pdev, size, type);
+    return std::make_unique<dbg_buffer>(get_pdev(), size, type);
   if (type == AMDXDNA_BO_CMD)
-    return std::make_unique<cmd_buffer>(m_pdev, size, type);
+    return std::make_unique<cmd_buffer>(get_pdev(), size, type);
 
   // Alloc common BO type
-  return std::make_unique<buffer>(m_pdev, size, type);
+  return std::make_unique<buffer>(get_pdev(), size, type);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

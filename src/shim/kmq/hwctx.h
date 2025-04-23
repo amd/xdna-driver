@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _HWCTX_KMQ_H_
-#define _HWCTX_KMQ_H_
+#ifndef HWCTX_KMQ_H_
+#define HWCTX_KMQ_H_
 
 #include "../hwctx.h"
+#include "../buffer.h"
 
 namespace shim_xdna {
 
-class hw_ctx_kmq : public hw_ctx {
+class hwctx_kmq : public hwctx {
 public:
-  hw_ctx_kmq(const device& dev, const xrt::xclbin& xclbin, const qos_type& qos);
-
-  ~hw_ctx_kmq();
+  hwctx_kmq(const device& dev, const xrt::xclbin& xclbin, const qos_type& qos);
+  ~hwctx_kmq();
 
 private:
-  std::vector< std::unique_ptr<xrt_core::buffer_handle> > m_pdi_bos;
+  std::vector< std::unique_ptr<buffer> > m_pdi_bos;
 };
 
-} // shim_xdna
+}
 
-#endif // _HWCTX_KMQ_H_
+#endif

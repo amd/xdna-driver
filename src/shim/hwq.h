@@ -41,7 +41,7 @@ public:
 
 public:
   virtual void
-  bind_hwctx(const hw_ctx *ctx);
+  bind_hwctx(const hwctx *ctx);
 
   void
   unbind_hwctx();
@@ -53,7 +53,7 @@ protected:
   virtual void
   issue_command(xrt_core::buffer_handle *) = 0;
 
-  const hw_ctx *m_hwctx;
+  const hwctx *m_hwctx;
   const pdev& m_pdev;
   uint32_t m_queue_boh;
 };

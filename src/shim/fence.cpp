@@ -107,7 +107,7 @@ wait_syncobj_available(const shim_xdna::pdev& dev,
 }
 
 void
-submit_wait_syncobjs(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
+submit_wait_syncobjs(const shim_xdna::pdev& dev, const shim_xdna::hwctx *ctx,
   const uint32_t* sobj_hdls, const uint64_t* points, uint32_t num)
 {
   wait_syncobj_available(dev, sobj_hdls, points, num);
@@ -124,7 +124,7 @@ submit_wait_syncobjs(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
 }
 
 void
-submit_signal_syncobj(const shim_xdna::pdev& dev, const shim_xdna::hw_ctx *ctx,
+submit_signal_syncobj(const shim_xdna::pdev& dev, const shim_xdna::hwctx *ctx,
   uint32_t sobj_hdl, uint64_t point)
 {
   amdxdna_drm_exec_cmd ecmd = {
@@ -231,7 +231,7 @@ wait(uint32_t timeout_ms) const
 
 void
 fence::
-submit_wait(const hw_ctx *ctx) const
+submit_wait(const hwctx *ctx) const
 {
   auto st = signal_next_state();
   shim_debug("Submitting wait for command fence %d@%ld", m_syncobj_hdl, st);
@@ -262,7 +262,7 @@ signal() const
 
 void
 fence::
-submit_signal(const hw_ctx *ctx) const
+submit_signal(const hwctx *ctx) const
 {
   auto st = signal_next_state();
   shim_debug("Submitting signal command fence %d@%ld", m_syncobj_hdl, st);
@@ -271,7 +271,7 @@ submit_signal(const hw_ctx *ctx) const
 
 void
 fence::
-submit_wait(const pdev& dev, const hw_ctx *ctx, const std::vector<xrt_core::fence_handle*>& fences)
+submit_wait(const pdev& dev, const hwctx *ctx, const std::vector<xrt_core::fence_handle*>& fences)
 {
   constexpr int max_fences = 1024;
   uint32_t hdls[max_fences];

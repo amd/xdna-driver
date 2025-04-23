@@ -1,58 +1,59 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "hwctx.h"
 #include "hwq.h"
 
-#include "core/common/config_reader.h"
-#include "core/common/memalign.h"
-
 namespace shim_xdna {
 
-hw_ctx_umq::
-hw_ctx_umq(const device& device, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
-  : hw_ctx(device, qos, std::make_unique<hw_q_umq>(device, 8), xclbin)
+hwctx_umq::
+hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
+  : hwctx(device, qos, xclbin, std::make_unique<hw_q_umq>(device, 8))
   , m_metadata()
 {
-  init_log_buf();
-  hw_ctx::create_ctx_on_device();
+  xclbin_parser xp(xclbin);
+  m_col_cnt = xp.get_column_cnt();
 
+  init_log_buf();
+  // TODO: configure log BO on the hwctx
   shim_debug("Created UMQ HW context (%d)", get_slotidx());
 }
 
-hw_ctx_umq::
-~hw_ctx_umq()
+hwctx_umq::
+~hwctx_umq()
 {
   shim_debug("Destroying UMQ HW context (%d)...", get_slotidx());
+  // TODO: unconfigure log BO on the hwctx
   fini_log_buf();
 }
 
 void
-hw_ctx_umq::
+hwctx_umq::
 init_log_buf()
 {
   size_t column_size = 1024;
-  auto log_buf_size = hw_ctx::m_num_cols * column_size + sizeof(m_metadata);
-  hw_ctx::m_log_bo = alloc_bo(nullptr, log_buf_size, XCL_BO_FLAGS_EXECBUF);
-  m_log_buf = hw_ctx::m_log_bo->map(xrt_core::buffer_handle::map_type::write);
-  uint64_t bo_paddr = hw_ctx::m_log_bo->get_properties().paddr;
-  set_metadata(hw_ctx::m_num_cols, column_size, bo_paddr, UMQ_LOG_BUFFER);
+  auto log_buf_size = m_col_cnt * column_size + sizeof(m_metadata);
+  auto log_bo = alloc_bo(log_buf_size, XCL_BO_FLAGS_EXECBUF);
+  m_log_bo = std::unique_ptr<buffer>(static_cast<buffer*>(log_bo.release()));
+  m_log_buf = m_log_bo->vaddr();
+  uint64_t bo_paddr = m_log_bo->paddr();
+  set_metadata(m_col_cnt, column_size, bo_paddr, UMQ_LOG_BUFFER);
   std::memset(m_log_buf, 0, log_buf_size);
   std::memcpy(m_log_buf, &m_metadata, sizeof(m_metadata));
 }
 
 void
-hw_ctx_umq::
+hwctx_umq::
 fini_log_buf(void)
 {
-  if (hw_ctx::m_log_bo)
-    hw_ctx::m_log_bo->unmap(m_log_buf);
+  // Nothing to do.
 }
 
 void
-hw_ctx_umq::
+hwctx_umq::
 set_metadata(int num_ucs, size_t size, uint64_t bo_paddr, enum umq_log_flag flag)
 {
+  const uint32_t LOG_MAGIC_NO = 0x43455254;
   m_metadata.magic_no = LOG_MAGIC_NO;
   m_metadata.major = 0;
   m_metadata.minor = 1;

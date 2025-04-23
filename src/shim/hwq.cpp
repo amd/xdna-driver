@@ -55,7 +55,7 @@ wait_cmd_ioctl(const shim_xdna::pdev& pdev, uint32_t ctx_id, uint64_t seq, uint3
 }
 
 int
-wait_cmd(const shim_xdna::pdev& pdev, const shim_xdna::hw_ctx *ctx,
+wait_cmd(const shim_xdna::pdev& pdev, const shim_xdna::hwctx *ctx,
   xrt_core::buffer_handle *cmd, uint32_t timeout_ms)
 {
   int ret = 1;
@@ -95,7 +95,7 @@ hw_q(const device& device)
 
 void
 hw_q::
-bind_hwctx(const hw_ctx *ctx)
+bind_hwctx(const hwctx *ctx)
 {
   m_hwctx = ctx;
   shim_debug("Bond HW queue to HW context %d", m_hwctx->get_slotidx());

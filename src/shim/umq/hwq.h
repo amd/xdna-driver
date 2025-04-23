@@ -28,7 +28,7 @@ public:
   dump_raw() const;
 
   void
-  bind_hwctx(const hw_ctx *ctx);
+  bind_hwctx(const hwctx *ctx);
 
   volatile struct host_queue_header *
   get_header_ptr() const;
