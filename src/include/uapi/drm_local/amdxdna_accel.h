@@ -164,6 +164,30 @@ struct amdxdna_ctx_param_config_cu {
 };
 
 /**
+ * struct amdxdna_drm_ctx_config_metadata - metadata to configure context.
+ * @magic_no: CERT magic number
+ * @major: CERT major number
+ * @minor: CERT minor number
+ * @flag: Specifies the type of buffer.
+ * @num_cols: total coulmns count
+ * @col_paddr: physical address of debug buffer assigned to this col
+ * @col_size: size of the debug buffer
+ * @pad: Structure padding.
+ */
+struct amdxdna_drm_ctx_config_metadata {
+	__u32 magic_no;
+	__u8 major;
+	__u8 minor;
+#define LOG_BUF_TYPE_DEBUG	0x1
+#define LOG_BUF_TYPE_DTRACE	0x2
+	__u8 flag;
+	__u8 num_cols;
+	__u64 col_paddr[8];
+	__u32 col_size[8];
+	__u32 pad;
+};
+
+/**
  * struct amdxdna_drm_config_ctx - Configure context.
  * @handle: Context handle.
  * @param_type: Specifies the structure passed in via param_val.
