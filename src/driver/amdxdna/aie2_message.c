@@ -952,6 +952,11 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 
 		offset += size;
 	}
+#ifdef AMDXDNA_DEVEL
+	XDNA_DBG(client->xdna, "Total %d commands:", payload->command_count);
+	print_hex_dump_debug("cmdbufs: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     cmdbuf_abo->mem.kva, offset, false);
+#endif
 
 	/* The offset is the accumulated total size of the cmd buffer */
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, offset, payload->command_count);
@@ -965,10 +970,14 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 	msg.send_size = sizeof(req);
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
-		XDNA_ERR(ctx->client->xdna, "Send message failed");
+		XDNA_ERR(client->xdna, "Send message failed");
 		return ret;
 	}
 	job->msg_id = msg.id;
+#ifdef AMDXDNA_DEVEL
+	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     &req, msg.send_size, false);
+#endif
 
 	return 0;
 }
@@ -990,6 +999,10 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 	ret = aie2_cmdlist_fill_one_slot(op, cmdbuf_abo, 0, cmd_abo, &size);
 	if (ret)
 		return ret;
+#ifdef AMDXDNA_DEVEL
+	print_hex_dump_debug("cmdbuf: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     cmdbuf_abo->mem.kva, size, false);
+#endif
 
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, size, 1);
 
@@ -1006,6 +1019,10 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 		return ret;
 	}
 	job->msg_id = msg.id;
+#ifdef AMDXDNA_DEVEL
+	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     &req, msg.send_size, false);
+#endif
 
 	return 0;
 }
