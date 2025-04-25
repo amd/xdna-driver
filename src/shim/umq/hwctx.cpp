@@ -8,7 +8,7 @@ namespace shim_xdna {
 
 hwctx_umq::
 hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
-  : hwctx(device, qos, xclbin, std::make_unique<hw_q_umq>(device, 8))
+  : hwctx(device, qos, xclbin, std::make_unique<hwq_umq>(device, 8))
   , m_metadata()
 {
   xclbin_parser xp(xclbin);

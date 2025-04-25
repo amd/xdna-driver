@@ -4,10 +4,9 @@
 #ifndef DEVICE_XDNA_H
 #define DEVICE_XDNA_H
 
-#include "pcidev.h"
 #include "shim.h"
+#include "pcidev.h"
 #include "shim_debug.h"
-
 #include "core/common/ishim.h"
 
 namespace shim_xdna {

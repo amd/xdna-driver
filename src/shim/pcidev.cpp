@@ -5,68 +5,7 @@
 #include "pcidev.h"
 #include "pcidrv.h"
 #include "shim_debug.h"
-#include "drm_local/amdxdna_accel.h"
 #include "core/common/trace.h"
-#include <drm/virtgpu_drm.h>
-
-namespace {
-
-  std::string
-  ioctl_cmd2name(unsigned long cmd)
-  {
-    switch(cmd) {
-    case DRM_IOCTL_AMDXDNA_CREATE_CTX:
-      return "DRM_IOCTL_AMDXDNA_CREATE_CTX";
-    case DRM_IOCTL_AMDXDNA_DESTROY_CTX:
-      return "DRM_IOCTL_AMDXDNA_DESTROY_CTX";
-    case DRM_IOCTL_AMDXDNA_CONFIG_CTX:
-      return "DRM_IOCTL_AMDXDNA_CONFIG_CTX";
-    case DRM_IOCTL_AMDXDNA_CREATE_BO:
-      return "DRM_IOCTL_AMDXDNA_CREATE_BO";
-    case DRM_IOCTL_AMDXDNA_GET_BO_INFO:
-      return "DRM_IOCTL_AMDXDNA_GET_BO_INFO";
-    case DRM_IOCTL_AMDXDNA_SYNC_BO:
-      return "DRM_IOCTL_AMDXDNA_SYNC_BO";
-    case DRM_IOCTL_AMDXDNA_EXEC_CMD:
-      return "DRM_IOCTL_AMDXDNA_EXEC_CMD";
-    case DRM_IOCTL_AMDXDNA_WAIT_CMD:
-      return "DRM_IOCTL_AMDXDNA_WAIT_CMD";
-    case DRM_IOCTL_AMDXDNA_GET_INFO:
-      return "DRM_IOCTL_AMDXDNA_GET_INFO";
-    case DRM_IOCTL_AMDXDNA_SET_STATE:
-      return "DRM_IOCTL_AMDXDNA_SET_STATE";
-    case DRM_IOCTL_GEM_CLOSE:
-      return "DRM_IOCTL_GEM_CLOSE";
-    case DRM_IOCTL_PRIME_HANDLE_TO_FD:
-      return "DRM_IOCTL_PRIME_HANDLE_TO_FD";
-    case DRM_IOCTL_PRIME_FD_TO_HANDLE:
-      return "DRM_IOCTL_PRIME_FD_TO_HANDLE";
-    case DRM_IOCTL_SYNCOBJ_CREATE:
-      return "DRM_IOCTL_SYNCOBJ_CREATE";
-    case DRM_IOCTL_SYNCOBJ_QUERY:
-      return "DRM_IOCTL_SYNCOBJ_QUERY";
-    case DRM_IOCTL_SYNCOBJ_DESTROY:
-      return "DRM_IOCTL_SYNCOBJ_DESTROY";
-    case DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD:
-      return "DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD";
-    case DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE:
-      return "DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE";
-    case DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL:
-      return "DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL";
-    case DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT:
-      return "DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT";
-    case DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB:
-      return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB";
-    case DRM_IOCTL_VIRTGPU_EXECBUFFER:
-      return "DRM_IOCTL_VIRTGPU_EXECBUFFER";
-    case DRM_IOCTL_VIRTGPU_MAP:
-      return "DRM_IOCTL_VIRTGPU_MAP";
-    }
-
-    return "UNKNOWN(" + std::to_string(cmd) + ")";
-  }
-
-}
 
 namespace shim_xdna {
 
@@ -121,15 +60,6 @@ close() const
     shim_debug("Closing NPU Device, fd=%d", m_dev_fd->get());
     m_dev_fd.reset();
   }
-}
-
-void
-pdev::
-ioctl(unsigned long cmd, void* arg) const
-{
-  XRT_TRACE_POINT_SCOPE2(ioctl, cmd, arg);
-  if (xrt_core::pci::dev::ioctl(m_dev_fd->get(), cmd, arg) == -1)
-    shim_err(-errno, "%s IOCTL failed", ioctl_cmd2name(cmd).c_str());
 }
 
 void*

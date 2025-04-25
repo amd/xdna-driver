@@ -193,7 +193,7 @@ submit_cmd(int dev_fd, shim_xdna::submit_cmd_arg& cmd_arg)
   arg.ctx = cmd_arg.ctx_handle;
   arg.type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   arg.cmd_handles = cmd_arg.cmd_bo;
-  arg.args = reinterpret_cast<uintptr_t>(cmd_arg.arg_bo_host_handles);
+  arg.args = reinterpret_cast<uintptr_t>(cmd_arg.arg_bo_handles);
   arg.cmd_count = 1;
   arg.arg_count = cmd_arg.num_arg_bos;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
@@ -211,7 +211,8 @@ int64_t timeout_ms2abs_ns(int64_t timeout_ms)
 }
 
 void
-wait_syncobj_available(int dev_fd, uint32_t* sobj_hdls, uint64_t* timepoints, uint32_t num)
+wait_syncobj_available(int dev_fd, const uint32_t* sobj_hdls,
+  const uint64_t* timepoints, uint32_t num)
 {
   drm_syncobj_timeline_wait wsobj = {
     .handles = reinterpret_cast<uintptr_t>(sobj_hdls),
@@ -247,30 +248,10 @@ submit_sig(int dev_fd, shim_xdna::submit_sig_arg& cmd_arg)
   arg.ctx = cmd_arg.ctx_handle;
   arg.type = AMDXDNA_CMD_SUBMIT_SIGNAL;
   arg.cmd_handles = cmd_arg.sync_obj;
-  arg.args = cmd_arg.sync_obj_point;
+  arg.args = cmd_arg.timepoint;
   arg.cmd_count = 1;
   arg.arg_count = 1;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
-}
-
-void
-wait_cmd(int dev_fd, shim_xdna::wait_cmd_arg& cmd_arg)
-{
-  drm_syncobj_timeline_wait arg = {};
-  arg.handles = reinterpret_cast<uintptr_t>(&cmd_arg.sync_obj);
-  arg.points = reinterpret_cast<uintptr_t>(&cmd_arg.seq);
-  arg.timeout_nsec = timeout_ms2abs_ns(cmd_arg.timeout_ms);
-  arg.count_handles = 1;
-  arg.flags = 0;
-  try {
-    ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &arg);
-  }
-  catch (const xrt_core::system_error& ex) {
-    if (ex.get_code() != ETIME)
-      throw;
-    else
-      cmd_arg.timedout = true;
-  }
 }
 
 void
@@ -336,6 +317,16 @@ wait_syncobj(int dev_fd, shim_xdna::wait_syncobj_arg& sobj_arg)
   /* Keep waiting even if not submitted yet */
   arg.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
   ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &arg);
+}
+
+void
+signal_syncobj(int dev_fd, shim_xdna::signal_syncobj_arg& sobj_arg)
+{
+  drm_syncobj_timeline_array arg = {};
+  arg.handles = reinterpret_cast<uintptr_t>(&sobj_arg.handle);
+  arg.points = reinterpret_cast<uintptr_t>(&sobj_arg.timepoint);
+  arg.count_handles = 1;
+  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &arg);
 }
 
 }
@@ -411,9 +402,6 @@ drv_ioctl(int dev_fd, drv_ioctl_cmd cmd, void* cmd_arg) const
   case drv_ioctl_cmd::submit_sig:
     submit_sig(dev_fd, *static_cast<submit_sig_arg*>(cmd_arg));
     break;
-  case drv_ioctl_cmd::wait_cmd:
-    wait_cmd(dev_fd, *static_cast<wait_cmd_arg*>(cmd_arg));
-    break;
   case drv_ioctl_cmd::get_info:
     get_info(dev_fd, *static_cast<amdxdna_drm_get_info*>(cmd_arg));
     break;
@@ -431,6 +419,9 @@ drv_ioctl(int dev_fd, drv_ioctl_cmd cmd, void* cmd_arg) const
     break;
   case drv_ioctl_cmd::import_syncobj:
     import_syncobj(dev_fd, *static_cast<export_import_syncobj_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::signal_syncobj:
+    signal_syncobj(dev_fd, *static_cast<signal_syncobj_arg*>(cmd_arg));
     break;
   case drv_ioctl_cmd::wait_syncobj:
     wait_syncobj(dev_fd, *static_cast<wait_syncobj_arg*>(cmd_arg));

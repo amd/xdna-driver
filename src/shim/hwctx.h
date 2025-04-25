@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef HWCTX_XDNA_H_
-#define HWCTX_XDNA_H_
+#ifndef HWCTX_XDNA_H
+#define HWCTX_XDNA_H
 
 #include "device.h"
-#include "shim_debug.h"
-
 #include "core/common/xclbin_parser.h"
 #include "core/common/shim/buffer_handle.h"
 #include "core/common/shim/hwctx_handle.h"
-#include "drm_local/amdxdna_accel.h"
 
 namespace shim_xdna {
 
-class hw_q; // forward declaration
+class hwq; // forward declaration
 
 class xclbin_parser {
 public:
@@ -60,7 +57,7 @@ class hwctx : public xrt_core::hwctx_handle
 {
 public:
   hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
-    std::unique_ptr<hw_q> queue);
+    std::unique_ptr<hwq> queue);
   ~hwctx();
 
   slot_id
@@ -103,7 +100,7 @@ private:
   uint32_t m_syncobj = AMDXDNA_INVALID_FENCE_HANDLE;
   uint32_t m_col_cnt = 0;
   uint32_t m_ops_per_cycle = 0;
-  std::unique_ptr<hw_q> m_q;
+  std::unique_ptr<hwq> m_q;
   amdxdna_qos_info m_qos = {};
 
   void

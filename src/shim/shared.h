@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _SHARED_XDNA_H_
-#define _SHARED_XDNA_H_
+#ifndef SHARED_XDNA_H
+#define SHARED_XDNA_H
 
 #include "core/common/shim/shared_handle.h"
-#include <unistd.h>
 
 namespace shim_xdna {
 
@@ -29,6 +28,6 @@ private:
   const int m_fd;
 };
 
-} // shim_xdna
+}
 
-#endif // _SHARED_XDNA_H_
+#endif

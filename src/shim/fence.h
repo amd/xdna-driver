@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _FENCE_XDNA_H_
-#define _FENCE_XDNA_H_
+#ifndef FENCE_XDNA_H
+#define FENCE_XDNA_H
 
 #include "hwctx.h"
 #include "device.h"
 #include "shared.h"
-
-#include "shim_debug.h"
 #include "core/common/shim/fence_handle.h"
 #include <mutex>
 
@@ -18,11 +16,8 @@ class fence : public xrt_core::fence_handle
 {
 public:
   fence(const device& device);
-
   fence(const device& device, xrt_core::shared_handle::export_handle ehdl);
-
   fence(const fence&);
-
   ~fence() override;
 
   std::unique_ptr<xrt_core::fence_handle>
@@ -42,13 +37,14 @@ public:
 
 public:
   void
-  submit_wait(const hwctx*) const;
+  submit_wait(xrt_core::hwctx_handle::slot_id) const;
 
   static void
-  submit_wait(const pdev& dev, const hwctx*, const std::vector<xrt_core::fence_handle*>& fences);
+  submit_wait(const pdev& dev, xrt_core::hwctx_handle::slot_id,
+  	const std::vector<xrt_core::fence_handle*>& fences);
 
   void
-  submit_signal(const hwctx*) const;
+  submit_signal(xrt_core::hwctx_handle::slot_id) const;
 
 private:
   uint64_t
@@ -70,6 +66,6 @@ private:
   mutable uint64_t m_state = initial_state;
 };
 
-} // shim_xdna
+}
 
-#endif // _FENCE_XDNA_H_
+#endif

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef PCIDRV_XDNA_H_
-#define PCIDRV_XDNA_H_
+#ifndef PCIDRV_XDNA_H
+#define PCIDRV_XDNA_H
 
 #include "drm_local/amdxdna_accel.h"
 #include "core/pcie/linux/pcidrv.h"
@@ -24,7 +24,6 @@ enum class drv_ioctl_cmd {
   submit_cmd,
   submit_dep,
   submit_sig,
-  wait_cmd,
 
   get_info,
   set_state,
@@ -33,6 +32,7 @@ enum class drv_ioctl_cmd {
   destroy_syncobj,
   export_syncobj,
   import_syncobj,
+  signal_syncobj,
   wait_syncobj,
 };
 
@@ -106,7 +106,7 @@ struct import_bo_arg {
 struct submit_cmd_arg {
   uint32_t ctx_handle;
   uint32_t cmd_bo;
-  uint32_t *arg_bo_host_handles;
+  const uint32_t *arg_bo_handles;
   size_t num_arg_bos;
   uint64_t seq;
 };
@@ -114,21 +114,14 @@ struct submit_cmd_arg {
 struct submit_dep_arg {
   uint32_t ctx_handle;
   uint32_t count;
-  uint32_t *sync_objs;
-  uint64_t *sync_points;
+  const uint32_t *sync_objs;
+  const uint64_t *sync_points;
 };
 
 struct submit_sig_arg {
   uint32_t ctx_handle;
   uint32_t sync_obj;
-  uint64_t sync_obj_point;
-};
-
-struct wait_cmd_arg {
-  uint32_t sync_obj;
-  uint64_t seq;
-  uint32_t timeout_ms;
-  bool timedout;
+  uint64_t timepoint;
 };
 
 struct create_destroy_syncobj_arg {
@@ -140,10 +133,15 @@ struct export_import_syncobj_arg {
   int fd;
 };
 
+struct signal_syncobj_arg {
+  uint32_t handle;
+  uint64_t timepoint;
+};
+
 struct wait_syncobj_arg {
   uint32_t handle;
-  uint32_t timeout_ms;
   uint64_t timepoint;
+  uint32_t timeout_ms;
 };
 
 class drv : public xrt_core::pci::drv

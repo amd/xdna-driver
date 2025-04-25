@@ -131,7 +131,7 @@ get_cu_pdi(int idx) const
 
 hwctx::
 hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
-  std::unique_ptr<hw_q> queue)
+  std::unique_ptr<hwq> queue)
   : m_device(dev)
   , m_q(std::move(queue))
 {
@@ -232,7 +232,9 @@ hwctx::
 init_qos_info(const qos_type& qos)
 {
   for (auto& [key, value] : qos) {
-    if (key == "gops")
+    if (key == "gops" && value && !m_qos.gops)
+      m_qos.gops = value;
+    if (key == "egops" && value)
       m_qos.gops = value;
     else if (key == "fps")
       m_qos.fps = value;
@@ -256,14 +258,14 @@ create_ctx_on_device()
     .umq_bo = m_q->get_queue_bo(),
     .log_buf_bo = AMDXDNA_INVALID_BO_HANDLE,
     .max_opc = m_ops_per_cycle,
-    .num_tiles = m_col_cnt * 4 /* TODO: xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows*/,
+    .num_tiles = m_col_cnt * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows,
   };
   m_device.get_pdev().drv_ioctl(drv_ioctl_cmd::create_ctx, &arg);
 
   m_handle = arg.ctx_handle;
   m_doorbell = arg.umq_doorbell;
   m_syncobj = arg.syncobj_handle;
-  m_q->bind_hwctx(this);
+  m_q->bind_hwctx(*this);
 }
 
 void

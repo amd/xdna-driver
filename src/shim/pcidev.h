@@ -22,9 +22,6 @@ public:
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
 
 public:
-  void
-  ioctl(unsigned long cmd, void* arg) const;
-
   void*
   mmap(void *addr, size_t len, int prot, int flags, off_t offset) const;
 

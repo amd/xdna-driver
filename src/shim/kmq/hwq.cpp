@@ -1,47 +1,57 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "bo.h"
 #include "hwq.h"
 
 namespace shim_xdna {
 
-hw_q_kmq::
-hw_q_kmq(const device& device) : hw_q(device)
+hwq_kmq::
+hwq_kmq(const device& device) : hwq(device)
 {
   shim_debug("Created KMQ HW queue");
 }
 
-hw_q_kmq::
-~hw_q_kmq()
+hwq_kmq::
+~hwq_kmq()
 {
   shim_debug("Destroying KMQ HW queue");
 }
 
 void
-hw_q_kmq::
-issue_command(xrt_core::buffer_handle *cmd_bo)
+hwq_kmq::
+issue_command(cmd_buffer *cmd_bo)
 {
   // Assuming 1024 max args per cmd bo
   const size_t max_arg_bos = 1024;
 
   uint32_t arg_bo_hdls[max_arg_bos];
-  auto boh = static_cast<bo_kmq*>(cmd_bo);
-  uint32_t cmd_bo_hdl = boh->get_drm_bo_handle();
+  uint32_t cmd_bo_hdl = cmd_bo->handle();
+  auto arg_bos = cmd_bo->get_arg_bo_handles();
+  if (arg_bos.size() > max_arg_bos)
+    shim_err(EINVAL, "Too many cmd args");
 
-  amdxdna_drm_exec_cmd ecmd = {
-    .ctx = m_hwctx->get_slotidx(),
-    .type = AMDXDNA_CMD_SUBMIT_EXEC_BUF,
-    .cmd_handles = cmd_bo_hdl,
-    .args = reinterpret_cast<uintptr_t>(arg_bo_hdls),
-    .cmd_count = 1,
-    .arg_count = static_cast<uint32_t>(boh->get_arg_bo_handles(arg_bo_hdls, max_arg_bos)),
+  size_t i = 0;
+  for (auto hdl : arg_bos)
+    arg_bo_hdls[i++] = hdl;
+
+  submit_cmd_arg ecmd = {
+    .ctx_handle = m_ctx_id,
+    .cmd_bo = cmd_bo_hdl,
+    .arg_bo_handles = arg_bo_hdls,
+    .num_arg_bos = arg_bos.size(),
   };
-  m_pdev.ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
+  m_pdev.drv_ioctl(drv_ioctl_cmd::submit_cmd, &ecmd);
 
   auto id = ecmd.seq;
-  boh->set_cmd_id(id);
+  cmd_bo->set_cmd_id(id);
   shim_debug("Submitted command (%ld)", id);
 }
 
-} // shim_xdna
+uint32_t
+hwq_kmq::
+get_queue_bo() const
+{
+  return AMDXDNA_INVALID_BO_HANDLE;
+}
+
+}

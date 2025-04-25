@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef PCIDRV_AMDXDNA_H_
-#define PCIDRV_AMDXDNA_H_
+#ifndef PCIDRV_AMDXDNA_H
+#define PCIDRV_AMDXDNA_H
 
 #include "pcidrv.h"
 #include <string>

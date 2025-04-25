@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef HWCTX_UMQ_H_
-#define HWCTX_UMQ_H_
+#ifndef HWCTX_UMQ_H
+#define HWCTX_UMQ_H
 
 #include "../hwctx.h"
 #include "../buffer.h"
@@ -43,6 +43,6 @@ private:
   void set_metadata(int num_cols, size_t size, uint64_t bo_paddr, enum umq_log_flag flag);
 };
 
-} // shim_xdna
+}
 
-#endif // _HWCTX_UMQ_H_
+#endif

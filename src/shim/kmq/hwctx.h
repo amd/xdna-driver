@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef HWCTX_KMQ_H_
-#define HWCTX_KMQ_H_
+#ifndef HWCTX_KMQ_H
+#define HWCTX_KMQ_H
 
 #include "../hwctx.h"
-#include "../buffer.h"
 
 namespace shim_xdna {
 

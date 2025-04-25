@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "bo.h"
 #include "hwq.h"
 
 namespace {
@@ -18,8 +17,6 @@ mark_slot_valid(volatile struct host_queue_packet *pkt)
   /* Issue mfence instruction to make sure all writes to the slot before is done */
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
-  /* must flush this data to make cache coherence */
-  shim_xdna::clflush_data((void *)&pkt->xrt_header.common_header, 0, sizeof(pkt->xrt_header.common_header));
 }
 
 inline bool
@@ -28,38 +25,12 @@ is_slot_valid(volatile struct host_queue_packet *pkt)
   return pkt->xrt_header.common_header.type == HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 }
 
-int
-wait_slot(const shim_xdna::pdev& pdev, const shim_xdna::hwctx *ctx,
-  uint64_t cmd_id, uint32_t timeout_ms)
-{
-  int ret = 1;
-
-  shim_debug("waiting for cmd_id (%ld)...", cmd_id);
-
-  amdxdna_drm_wait_cmd wcmd = {
-    .ctx = ctx->get_slotidx(),
-    .timeout = timeout_ms,
-    .seq = cmd_id,
-  };
-
-  try {
-    pdev.ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
-  }
-  catch (const xrt_core::system_error& ex) {
-    if (ex.get_code() != ETIME)
-      throw;
-    else
-      ret = 0;
-  }
-  return ret;
-}
-
 }
 
 namespace shim_xdna {
 
 void
-hw_q_umq::
+hwq_umq::
 init_indirect_buf(volatile struct host_indirect_data *indirect_buf, int size)
 {
   for (int i = 0; i < size; i++) {
@@ -71,8 +42,8 @@ init_indirect_buf(volatile struct host_indirect_data *indirect_buf, int size)
   }
 }
 
-hw_q_umq::
-hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
+hwq_umq::
+hwq_umq(const device& dev, size_t nslots) : hwq(dev)
 {
   // host queue layout:
   //   host_queue_header_t
@@ -91,8 +62,8 @@ hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
 
   shim_debug("umq sz %ld", umq_sz);
 
-  m_umq_bo = const_cast<device &>(dev).alloc_bo(umq_sz, XCL_BO_FLAGS_EXECBUF);
-  m_umq_bo_buf = m_umq_bo->map(bo::map_type::write);
+  m_umq_bo = std::make_unique<cmd_buffer>(m_pdev, umq_sz, AMDXDNA_BO_CMD);
+  m_umq_bo_buf = m_umq_bo->vaddr();
   m_umq_hdr = reinterpret_cast<volatile struct host_queue_header *>(m_umq_bo_buf);
   m_umq_pkt = reinterpret_cast<volatile struct host_queue_packet *>
     ((char *)m_umq_bo_buf + header_sz);
@@ -115,23 +86,17 @@ hw_q_umq(const device& dev, size_t nslots) : hw_q(dev)
   // indirect buf starts after queue
   m_indirect_paddr = m_umq_hdr->data_address + queue_sz;
 
-  // this is the bo handler defined in parent class
-  m_queue_boh = static_cast<bo*>(m_umq_bo.get())->get_drm_bo_handle();
-
   shim_debug("Created UMQ HW queue");
 }
 
-hw_q_umq::
-~hw_q_umq()
+hwq_umq::
+~hwq_umq()
 {
   shim_debug("Destroying UMA HW queue");
-
-  m_umq_bo->unmap(m_umq_bo_buf);
-  m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
 }
 
 void
-hw_q_umq::
+hwq_umq::
 map_doorbell(uint32_t doorbell_offset)
 {
   m_mapped_doorbell = reinterpret_cast<volatile uint32_t *>(
@@ -139,14 +104,14 @@ map_doorbell(uint32_t doorbell_offset)
 }
 
 volatile struct host_queue_header *
-hw_q_umq::
+hwq_umq::
 get_header_ptr() const
 {
   return reinterpret_cast<volatile struct host_queue_header *>(m_umq_bo_buf);
 }
 
 void
-hw_q_umq::
+hwq_umq::
 dump() const
 {
   auto h = get_header_ptr();
@@ -201,7 +166,7 @@ dump() const
 }
 
 void
-hw_q_umq::
+hwq_umq::
 dump_raw() const
 {
   auto d = reinterpret_cast<volatile uint32_t *>(m_umq_pkt);
@@ -212,7 +177,7 @@ dump_raw() const
 }
 
 uint64_t
-hw_q_umq::
+hwq_umq::
 reserve_slot()
 {
   uint64_t cur_slot = 0;
@@ -237,7 +202,7 @@ reserve_slot()
     if (queue_full) {
       shim_debug("Queue is full, wait for next available slot");
       //should wait for h->read_index which should be the first available slot.
-      wait_slot(m_pdev, m_hwctx, h->read_index, 0);
+      wait_command(h->read_index, 0);
     }
   } while (queue_full);
 
@@ -245,14 +210,14 @@ reserve_slot()
 }
 
 int
-hw_q_umq::
+hwq_umq::
 get_pkt_idx(uint64_t index)
 {
   return index & (get_header_ptr()->capacity - 1);
 }
 
 volatile struct host_queue_packet *
-hw_q_umq::
+hwq_umq::
 get_pkt(uint64_t index)
 {
   auto pkt = &m_umq_pkt[get_pkt_idx(index)];
@@ -264,7 +229,7 @@ get_pkt(uint64_t index)
 }
 
 uint64_t
-hw_q_umq::
+hwq_umq::
 issue_exec_buf(uint16_t cu_idx, ert_dpu_data *dpu, uint64_t comp)
 {
   auto slot_idx = reserve_slot();
@@ -286,7 +251,7 @@ issue_exec_buf(uint16_t cu_idx, ert_dpu_data *dpu, uint64_t comp)
 }
 
 size_t
-hw_q_umq::
+hwq_umq::
 fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
                         volatile struct host_queue_packet *pkt,
                         ert_dpu_data *dpu) {
@@ -336,7 +301,7 @@ fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
 }
 
 size_t
-hw_q_umq::
+hwq_umq::
 fill_direct_exec_buf(uint16_t cu_idx, volatile struct host_queue_packet *pkt,
                      ert_dpu_data *dpu) {
   auto pkt_size = sizeof(struct exec_buf);
@@ -361,7 +326,7 @@ fill_direct_exec_buf(uint16_t cu_idx, volatile struct host_queue_packet *pkt,
 }
 
 void
-hw_q_umq::
+hwq_umq::
 fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size)
 {
   if (size > sizeof(pkt->data))
@@ -369,9 +334,6 @@ fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size)
 
   auto hdr = &pkt->xrt_header;
   hdr->common_header.count = size;
-
-  /* must flush data to make cache coherence */
-  clflush_data((void *)(pkt->data), 0, size);
 
   //comment this out, debug only
   //dump();
@@ -384,11 +346,10 @@ fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size)
 }
 
 void
-hw_q_umq::
-issue_command(xrt_core::buffer_handle *cmd_bo)
+hwq_umq::
+issue_command(cmd_buffer *cmd_bo)
 {
-  auto boh = static_cast<bo*>(cmd_bo);
-  auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(boh->map(bo::map_type::write));
+  auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->vaddr());
 
   // Sanity check
   auto dpu_data = get_ert_dpu_data(cmd);
@@ -406,21 +367,38 @@ issue_command(xrt_core::buffer_handle *cmd_bo)
     shim_debug("this is a multi-column dpu request.");
 
   // Completion signal area has to be a full WORD, we utilze the command_bo
-  uint64_t comp = boh->get_properties().paddr + offsetof(ert_start_kernel_cmd, header);
+  uint64_t comp = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
 
   auto id = issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
-  boh->set_cmd_id(id);
+  cmd_bo->set_cmd_id(id);
   shim_debug("Submitted command (%ld)", id);
 }
 
 void
-hw_q_umq::
-bind_hwctx(const hwctx *ctx)
+hwq_umq::
+bind_hwctx(const hwctx& ctx)
 {
   // link hwctx by parent class
-  hw_q::bind_hwctx(ctx);
+  hwq::bind_hwctx(ctx);
   // setup doorbell mapping by child class
-  map_doorbell(m_hwctx->get_doorbell());
+  map_doorbell(ctx.get_doorbell());
+}
+
+void
+hwq_umq::
+unbind_hwctx()
+{
+  // unlink hwctx by parent class
+  hwq::unbind_hwctx();
+  // teardown doorbell mapping by child class
+  m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
+}
+
+uint32_t
+hwq_umq::
+get_queue_bo() const
+{
+  return m_umq_bo->handle();
 }
 
 } // shim_xdna

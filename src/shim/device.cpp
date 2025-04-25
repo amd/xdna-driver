@@ -7,13 +7,7 @@
 #include "umq/hwctx.h"
 #include "fence.h"
 #include "smi_xdna.h"
-
 #include "core/common/query_requests.h"
-
-#include <any>
-#include <filesystem>
-#include <sys/syscall.h>
-#include <unistd.h>
 
 namespace {
 
@@ -124,7 +118,7 @@ struct aie_info
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
       query::aie_status_version::result_type output;
       output.major = aie_version.major;
@@ -156,7 +150,7 @@ struct aie_info
         };
 
         auto& pci_dev_impl = get_pcidev_impl(device);
-        pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
         query::aie_tiles_stats::result_type output = {};
         output.col_size = aie_metadata.col_size;
@@ -216,7 +210,7 @@ struct aie_info
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
       query::aie_tiles_status_info::result_type output;
       output.buf = std::move(payload);
@@ -250,7 +244,7 @@ struct partition_info
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     if (output_size < arg.buffer_size) {
       throw xrt_core::query::exception(
@@ -328,7 +322,7 @@ struct total_cols
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     return aie_metadata.cols;
   }
@@ -350,7 +344,7 @@ struct performance_mode
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     return state.power_mode;
   }
@@ -368,7 +362,7 @@ struct performance_mode
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
   }
 };
 
@@ -388,7 +382,7 @@ struct preemption
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     return force.state;
   }
@@ -406,7 +400,7 @@ struct preemption
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
   }
 };
 
@@ -426,7 +420,7 @@ struct frame_boundary_preemption
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     return preempt.state;
   }
@@ -444,7 +438,7 @@ struct frame_boundary_preemption
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
   }
 };
 
@@ -496,7 +490,7 @@ struct telemetry
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
         query::aie_telemetry::data task;
@@ -518,7 +512,7 @@ struct telemetry
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       output.l1_interrupts = telemetry.l1_interrupts;
       return output;
@@ -536,7 +530,7 @@ struct telemetry
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
         query::opcode_telemetry::data task;
@@ -563,7 +557,7 @@ struct telemetry
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_ctx);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_ctx);
 
       if (output_size < query_ctx.buffer_size) {
         throw xrt_core::query::exception(
@@ -593,7 +587,7 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_RTOS_MAX_USER_ID_COUNT; i++) {
         query::rtos_telemetry::data task;
@@ -633,7 +627,7 @@ struct telemetry
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &query_telemetry);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_STREAM_BUFFER_COUNT; i++) {
         query::stream_buffer_telemetry::data task;
@@ -664,7 +658,7 @@ struct clock_topology
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     std::vector<clock_freq> clocks;
     clock_freq mp_npu_clock;
@@ -704,7 +698,7 @@ struct resource_info
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(5);
     info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_clk_max;
@@ -738,7 +732,7 @@ struct firmware_version
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     result_type output;
     output.major = fw_version.major;
@@ -828,7 +822,7 @@ struct sensor_info
       };
 
       auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
       if (output_size < arg.buffer_size) {
         throw xrt_core::query::exception(
