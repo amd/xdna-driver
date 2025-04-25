@@ -15,6 +15,9 @@
 #include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
+#ifdef AMDXDNA_OF
+#include "amdxdna_gem_of.h"
+#endif
 #ifdef AMDXDNA_SHMEM
 #include "amdxdna_gem.h"
 #else

@@ -25,6 +25,10 @@ ifdef AMDXDNA_DRM_USAGE
 DEFINES += -DAMDXDNA_DRM_USAGE
 endif
 
+ifeq ($(ARCH), arm64)
+DEFINES += -DAMDXDNA_OF
+endif
+
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" modules
 
