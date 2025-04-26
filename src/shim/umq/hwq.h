@@ -21,7 +21,7 @@ public:
   void
   unbind_hwctx() override;
 
-  uint32_t
+  bo_id
   get_queue_bo() const override;
 
 private:

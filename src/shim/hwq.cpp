@@ -92,7 +92,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
       return 1;
 
   auto boh = static_cast<cmd_buffer*>(cmd);
-  auto seq = boh->get_cmd_id();
+  auto seq = boh->get_cmd_seq();
   return wait_command(seq, timeout_ms);
 }
 

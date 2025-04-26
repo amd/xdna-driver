@@ -74,10 +74,10 @@ create_ctx(int dev_fd, shim_xdna::create_ctx_arg& ctx_arg)
 {
   amdxdna_drm_create_ctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&ctx_arg.qos);
-  arg.umq_bo = ctx_arg.umq_bo;
+  arg.umq_bo = ctx_arg.umq_bo.handle;
   arg.max_opc = ctx_arg.max_opc;
   arg.num_tiles = ctx_arg.num_tiles;
-  arg.log_buf_bo = ctx_arg.log_buf_bo;
+  arg.log_buf_bo = ctx_arg.log_buf_bo.handle;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_CREATE_CTX, &arg);
   
   ctx_arg.ctx_handle = arg.handle;
@@ -111,8 +111,14 @@ config_ctx_debug_bo(int dev_fd, shim_xdna::config_ctx_debug_bo_arg& ctx_arg)
   arg.handle = ctx_arg.ctx_handle;
   arg.param_type = ctx_arg.is_detach ?
     DRM_AMDXDNA_CTX_REMOVE_DBG_BUF : DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF;
-  arg.param_val = ctx_arg.bo;
+  arg.param_val = ctx_arg.bo.handle;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_CONFIG_CTX, &arg);
+}
+
+void *
+to_ptr(uint64_t drv_ptr)
+{
+  return drv_ptr == AMDXDNA_INVALID_ADDR ? nullptr : reinterpret_cast<void*>(drv_ptr);
 }
 
 void
@@ -127,10 +133,10 @@ create_bo(int dev_fd, shim_xdna::create_bo_arg& bo_arg)
   iarg.handle = carg.handle;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &iarg);
 
-  bo_arg.id.handle = carg.handle;
-  bo_arg.id.res_id = AMDXDNA_INVALID_BO_HANDLE;
-  bo_arg.paddr = iarg.xdna_addr;
-  bo_arg.vaddr = reinterpret_cast<void*>(iarg.vaddr);
+  bo_arg.bo.handle = carg.handle;
+  bo_arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
+  bo_arg.xdna_addr = iarg.xdna_addr;
+  bo_arg.vaddr = to_ptr(iarg.vaddr);
   bo_arg.map_offset = iarg.map_offset;
 }
 
@@ -138,7 +144,7 @@ void
 destroy_bo(int dev_fd, shim_xdna::destroy_bo_arg& bo_arg)
 {
   drm_gem_close arg = {};
-  arg.handle = bo_arg.id.handle;
+  arg.handle = bo_arg.bo.handle;
   ioctl(dev_fd, DRM_IOCTL_GEM_CLOSE, &arg);
 }
 
@@ -146,7 +152,7 @@ void
 sync_bo(int dev_fd, shim_xdna::sync_bo_arg& bo_arg)
 {
   amdxdna_drm_sync_bo arg = {};
-  arg.handle = bo_arg.handle;
+  arg.handle = bo_arg.bo.handle;
   arg.direction = bo_arg.direction == xrt_core::buffer_handle::direction::host2device ?
       SYNC_DIRECT_TO_DEVICE : SYNC_DIRECT_FROM_DEVICE;
   arg.offset = bo_arg.offset;
@@ -158,10 +164,11 @@ void
 export_bo(int dev_fd, shim_xdna::export_bo_arg& bo_arg)
 {
   drm_prime_handle arg = {};
-  arg.handle = bo_arg.id.handle;
+  arg.handle = bo_arg.bo.handle;
   arg.flags = DRM_RDWR | DRM_CLOEXEC;
   arg.fd = -1;
   ioctl(dev_fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &arg);
+  bo_arg.fd = arg.fd;
 }
 
 void
@@ -176,10 +183,10 @@ import_bo(int dev_fd, shim_xdna::import_bo_arg& bo_arg)
   amdxdna_drm_get_bo_info iarg = {};
   iarg.handle = carg.handle;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &iarg);
-  bo_arg.id.handle = carg.handle;
-  bo_arg.id.res_id = AMDXDNA_INVALID_BO_HANDLE;
-  bo_arg.paddr = iarg.xdna_addr;
-  bo_arg.vaddr = reinterpret_cast<void*>(iarg.vaddr);
+  bo_arg.bo.handle = carg.handle;
+  bo_arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
+  bo_arg.xdna_addr = iarg.xdna_addr;
+  bo_arg.vaddr = to_ptr(iarg.vaddr);
   bo_arg.map_offset = iarg.map_offset;
   bo_arg.type = AMDXDNA_BO_SHARE;
   bo_arg.size = lseek(bo_arg.fd, 0, SEEK_END);
@@ -189,13 +196,24 @@ import_bo(int dev_fd, shim_xdna::import_bo_arg& bo_arg)
 void
 submit_cmd(int dev_fd, shim_xdna::submit_cmd_arg& cmd_arg)
 {
+  // Assuming 512 max args per cmd bo
+  const size_t max_args = 512;
+  const auto nargs = cmd_arg.arg_bos.size();
+  if (nargs > max_args)
+    shim_err(EINVAL, "Max arg %ld, received %ld", max_args, nargs);
+
+  uint32_t arg_bo_hdls[max_args] = {};
+  int i = 0;
+  for (auto& id : cmd_arg.arg_bos)
+    arg_bo_hdls[i++] = id.handle;
+
   amdxdna_drm_exec_cmd arg = {};
   arg.ctx = cmd_arg.ctx_handle;
   arg.type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
-  arg.cmd_handles = cmd_arg.cmd_bo;
-  arg.args = reinterpret_cast<uintptr_t>(cmd_arg.arg_bo_handles);
+  arg.cmd_handles = cmd_arg.cmd_bo.handle;
+  arg.args = reinterpret_cast<uintptr_t>(arg_bo_hdls);
   arg.cmd_count = 1;
-  arg.arg_count = cmd_arg.num_arg_bos;
+  arg.arg_count = nargs;
   ioctl(dev_fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
   cmd_arg.seq = arg.seq;
 }

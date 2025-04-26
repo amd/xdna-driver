@@ -46,7 +46,7 @@ public:
   virtual void
   unbind_hwctx();
 
-  virtual uint32_t
+  virtual bo_id
   get_queue_bo() const = 0;
 
 protected:

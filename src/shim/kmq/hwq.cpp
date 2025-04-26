@@ -21,37 +21,24 @@ void
 hwq_kmq::
 issue_command(cmd_buffer *cmd_bo)
 {
-  // Assuming 1024 max args per cmd bo
-  const size_t max_arg_bos = 1024;
-
-  uint32_t arg_bo_hdls[max_arg_bos];
-  uint32_t cmd_bo_hdl = cmd_bo->handle();
-  auto arg_bos = cmd_bo->get_arg_bo_handles();
-  if (arg_bos.size() > max_arg_bos)
-    shim_err(EINVAL, "Too many cmd args");
-
-  size_t i = 0;
-  for (auto hdl : arg_bos)
-    arg_bo_hdls[i++] = hdl;
-
   submit_cmd_arg ecmd = {
     .ctx_handle = m_ctx_id,
-    .cmd_bo = cmd_bo_hdl,
-    .arg_bo_handles = arg_bo_hdls,
-    .num_arg_bos = arg_bos.size(),
+    .cmd_bo = cmd_bo->id(),
+    .arg_bos = cmd_bo->get_arg_bo_ids(),
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::submit_cmd, &ecmd);
 
-  auto id = ecmd.seq;
-  cmd_bo->set_cmd_id(id);
-  shim_debug("Submitted command (%ld)", id);
+  auto seq = ecmd.seq;
+  cmd_bo->set_cmd_seq(seq);
+  shim_debug("Submitted command (%ld)", seq);
 }
 
-uint32_t
+bo_id
 hwq_kmq::
 get_queue_bo() const
 {
-  return AMDXDNA_INVALID_BO_HANDLE;
+  bo_id ret = { AMDXDNA_INVALID_BO_HANDLE, AMDXDNA_INVALID_BO_HANDLE };
+  return ret;
 }
 
 }

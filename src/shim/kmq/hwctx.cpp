@@ -44,7 +44,7 @@ hwctx_kmq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
     auto& cf = cu_conf_param->cu_configs[i];
     std::memcpy(pdi_vaddr, pdi.data(), pdi.size());
     pdi_bo->sync(xrt_core::buffer_handle::direction::host2device, pdi_bo->size(), 0);
-    cf.cu_bo = pdi_bo->handle();
+    cf.cu_bo = pdi_bo->id().handle;
     cf.cu_func = xp.get_cu_func(i);
   }
 

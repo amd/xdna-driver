@@ -14,7 +14,7 @@ public:
   hwq_kmq(const device& device);
   ~hwq_kmq();
 
-  uint32_t
+  bo_id
   get_queue_bo() const override;
 
 private:

@@ -6,6 +6,7 @@
 
 #include "drm_local/amdxdna_accel.h"
 #include "core/pcie/linux/pcidrv.h"
+#include <set>
 
 namespace shim_xdna {
 
@@ -39,18 +40,23 @@ enum class drv_ioctl_cmd {
 struct bo_id {
   uint32_t handle;
   uint32_t res_id;
+
+  bool operator<(const bo_id& other) const
+  {
+    return std::tie(handle, res_id) < std::tie(other.handle, other.res_id);
+  }
 };
 
 struct create_ctx_arg {
- 	const amdxdna_qos_info& qos;
-	uint32_t umq_bo;
-	uint32_t log_buf_bo;
-	uint32_t max_opc;
-	uint32_t num_tiles;
-	uint32_t mem_size;
-	uint32_t ctx_handle;
-	uint32_t umq_doorbell;
-	uint32_t syncobj_handle;
+  const amdxdna_qos_info& qos;
+  bo_id umq_bo;
+  bo_id log_buf_bo;
+  uint32_t max_opc;
+  uint32_t num_tiles;
+  uint32_t mem_size;
+  uint32_t ctx_handle;
+  uint32_t umq_doorbell;
+  uint32_t syncobj_handle;
 };
 
 struct destroy_ctx_arg {
@@ -65,31 +71,31 @@ struct config_ctx_cu_config_arg {
 struct config_ctx_debug_bo_arg {
   uint32_t ctx_handle;
   bool is_detach;
-  uint32_t bo;
+  bo_id bo;
 };
 
 struct create_bo_arg {
   int type;
   size_t size;
-  bo_id id;
-  uint64_t paddr;
+  bo_id bo;
+  uint64_t xdna_addr;
   void *vaddr;
   uint64_t map_offset;
 };
 
 struct destroy_bo_arg {
-  bo_id id;
+  bo_id bo;
 };
 
 struct sync_bo_arg {
-  uint32_t handle;
+  bo_id bo;
   xrt_core::buffer_handle::direction direction;
   uint64_t offset;
   size_t size;
 };
 
 struct export_bo_arg {
-  bo_id id;
+  bo_id bo;
   int fd;
 };
 
@@ -97,17 +103,16 @@ struct import_bo_arg {
   int fd;
   uint32_t type;
   size_t size;
-  bo_id id;
-  uint64_t paddr;
+  bo_id bo;
+  uint64_t xdna_addr;
   void *vaddr;
   uint64_t map_offset;
 };
 
 struct submit_cmd_arg {
   uint32_t ctx_handle;
-  uint32_t cmd_bo;
-  const uint32_t *arg_bo_handles;
-  size_t num_arg_bos;
+  bo_id cmd_bo;
+  const std::set<bo_id>& arg_bos;
   uint64_t seq;
 };
 

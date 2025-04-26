@@ -8,6 +8,7 @@
 #include "fence.h"
 #include "smi_xdna.h"
 #include "core/common/query_requests.h"
+#include <sys/syscall.h>
 
 namespace {
 
@@ -1215,7 +1216,6 @@ import_fd(pid_t pid, int ehdl)
   if (pid == 0 || getpid() == pid)
     return ehdl;
 
-#if defined(SYS_pidfd_open) && defined(SYS_pidfd_getfd)
   auto pidfd = syscall(SYS_pidfd_open, pid, 0);
   if (pidfd < 0)
     throw xrt_core::system_error(errno, "pidfd_open failed");
@@ -1232,13 +1232,6 @@ import_fd(pid_t pid, int ehdl)
     }
   }
   return fd;
-#else
-  throw xrt_core::system_error
-    (std::errc::not_supported,
-     "Importing buffer object from different process requires XRT "
-     " built and installed on a system with 'pidfd' kernel support");
-  return -1;
-#endif
 }
 
 int
@@ -1373,21 +1366,22 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   if (type == AMDXDNA_BO_INVALID)
     shim_not_supported_err("Bad BO flags");
 
-  // Alloc special BO type
+  std::unique_ptr<buffer> bo;
   if (f.use == XRT_BO_USE_DEBUG)
-    return std::make_unique<dbg_buffer>(get_pdev(), size, type);
-  if (type == AMDXDNA_BO_CMD)
-    return std::make_unique<cmd_buffer>(get_pdev(), size, type);
-
-  // Alloc common BO type
-  return std::make_unique<buffer>(get_pdev(), size, type);
+    bo = std::make_unique<dbg_buffer>(get_pdev(), size, type);
+  else if (type == AMDXDNA_BO_CMD)
+    bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
+  else
+    bo = std::make_unique<buffer>(get_pdev(), size, type);
+  bo->set_flags(flags);
+  return bo;
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
 device::
 import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
-  return std::make_unique<buffer>(get_pdev(), ehdl);
+  return std::make_unique<buffer>(get_pdev(), import_fd(pid, ehdl));
 }
 
 std::unique_ptr<xrt_core::fence_handle>

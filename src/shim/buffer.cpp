@@ -162,8 +162,8 @@ drm_bo(const pdev& pdev, size_t size, int type)
     .size = m_size,
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
-  m_id = arg.id;
-  m_paddr = arg.paddr;
+  m_id = arg.bo;
+  m_xdna_addr = arg.xdna_addr;
   m_vaddr = arg.vaddr;
   m_map_offset = arg.map_offset;
 }
@@ -178,9 +178,11 @@ drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
   m_pdev.drv_ioctl(drv_ioctl_cmd::import_bo, &arg);
   m_type = arg.type;
   m_size = arg.size;
-  m_id = arg.id;
-  m_paddr = arg.paddr;
+  m_id = arg.bo;
+  m_xdna_addr = arg.xdna_addr;
   m_vaddr = arg.vaddr;
+  if (m_vaddr)
+    m_same_pid_import = true; // Has valid vaddr, must be imported from same process!
   m_map_offset = arg.map_offset;
 }
 
@@ -188,10 +190,13 @@ drm_bo::
 ~drm_bo()
 {
   destroy_bo_arg arg = {
-    .id = m_id,
+    .bo = m_id,
   };
   try {
-    m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
+    if (m_same_pid_import)
+      shim_debug("Same proc imported, skip BO destroy");
+    else
+      m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
   } catch (const xrt_core::system_error& e) {
     std::cout << "Failed to destroy DRM BO "
       << std::to_string(m_id.handle)
@@ -266,7 +271,7 @@ void *
 buffer::
 vaddr() const
 {
-  return m_bo->m_map_offset == AMDXDNA_INVALID_ADDR ? m_bo->m_vaddr : m_addr->get();
+  return m_bo->m_vaddr ? m_bo->m_vaddr : m_addr->get();
 }
 
 size_t
@@ -287,7 +292,7 @@ buffer::properties
 buffer::
 get_properties() const 
 {
-  return { m_flags, m_bo->m_size, paddr(), handle() };
+  return { m_flags, size(), paddr(), id().handle };
 }
 
 std::unique_ptr<xrt_core::shared_handle>
@@ -295,11 +300,12 @@ buffer::
 share() const 
 {
   export_bo_arg arg = {
-    .id = m_bo->m_id,
+    .bo = id(),
+    .fd = -1,
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::export_bo, &arg);
 
-  shim_debug("Exported BO %d to fd %d", handle(), arg.fd);
+  shim_debug("Exported BO %d to fd %d", id().handle, arg.fd);
   return std::make_unique<shared>(arg.fd);
 }
 
@@ -311,23 +317,25 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   shim_not_supported_err(__func__);
 }
 
-uint32_t
+bo_id
 buffer::
-handle() const
+id() const
 {
-  return m_bo->m_id.handle;
+  return m_bo->m_id;
 }
 
 uint64_t
 buffer::
 paddr() const
 {
-  return m_bo->m_paddr;
+  if (m_bo->m_xdna_addr != AMDXDNA_INVALID_ADDR)
+    return m_bo->m_xdna_addr;
+  return reinterpret_cast<uintptr_t>(vaddr());
 }
 
 void
 buffer::
-attach_to_ctx(const xrt_core::hwctx_handle& hwctx)
+bind_hwctx(const hwctx& hwctx)
 {
   // Nothing to do.
 }
@@ -347,7 +355,7 @@ describe() const
   desc += type_to_name(m_bo->m_type, m_flags);
   desc += " ";
   desc += "hdl=";
-  desc += std::to_string(handle());
+  desc += std::to_string(id().handle);
 
   desc += " ";
   desc += "sz=";
@@ -372,7 +380,7 @@ sync(direction, size_t size, size_t offset)
 
   if (is_driver_sync()) {
     sync_bo_arg arg = {
-      .handle = handle(),
+      .bo = id(),
       .offset = offset,
       .size = size,
     };
@@ -384,14 +392,15 @@ sync(direction, size_t size, size_t offset)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
 
   clflush_data(vaddr(), offset, size); 
+  shim_debug("Syncing BO %d: %ld, %ld", id().handle, offset, size);
 }
 
-std::set<uint32_t>
+std::set<bo_id>
 buffer::
-get_arg_bo_handles() const
+get_arg_bo_ids() const
 {
   // For non-cmd BO, arg bo handles contains only its own handle.
-  std::set<uint32_t> ret = { handle() };
+  std::set<bo_id> ret = { id() };
   return ret;
 }
 
@@ -401,16 +410,16 @@ get_arg_bo_handles() const
 
 void
 cmd_buffer::
-set_cmd_id(uint64_t id)
+set_cmd_seq(uint64_t seq)
 {
-  m_cmd_id = id;
+  m_cmd_seq = seq;
 }
 
 uint64_t
 cmd_buffer::
-get_cmd_id() const
+get_cmd_seq() const
 {
-  return m_cmd_id;
+  return m_cmd_seq;
 }
 
 void
@@ -427,22 +436,22 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   if (!pos)
     m_args_map.clear();
 
-  m_args_map[pos] = boh->get_arg_bo_handles();
+  m_args_map[pos] = boh->get_arg_bo_ids();
 
 #ifdef XDNA_SHIM_DEBUG
   std::string bohs;
-  auto s = boh->get_arg_bo_handles();
+  auto s = boh->get_arg_bo_ids();
   for (const auto& bo : s)
-    bohs += std::to_string(bo) + " ";
-  shim_debug("Added arg BO %s to cmd BO %d", bohs.c_str(), handle());
+    bohs += std::to_string(bo.handle) + " ";
+  shim_debug("Added arg BO %s to cmd BO %d", bohs.c_str(), id().handle);
 #endif
 }
 
-std::set<uint32_t>
+std::set<bo_id>
 cmd_buffer::
-get_arg_bo_handles() const
+get_arg_bo_ids() const
 {
-  std::set<uint32_t> ret;
+  std::set<bo_id> ret;
   // For cmd BO, arg bo handles contains everything in args_map.
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
@@ -457,26 +466,26 @@ get_arg_bo_handles() const
 
 void
 dbg_buffer::
-attach_to_ctx(const xrt_core::hwctx_handle& hwctx)
+bind_hwctx(const hwctx& hwctx)
 {
   m_ctx_id = hwctx.get_slotidx();
   try {
-    config_debug_bo(true);
+    config_debug_bo(false);
   } catch (...) {
     m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
     throw;
   }
-  shim_debug("Attached DEBUG BO %d to hwctx %d", handle(), m_ctx_id);
+  shim_debug("Attached DEBUG BO %d to hwctx %d", id().handle, m_ctx_id);
 }
 
 void
 dbg_buffer::
-config_debug_bo(bool is_attach)
+config_debug_bo(bool is_detach)
 {
   config_ctx_debug_bo_arg arg = {
     .ctx_handle = m_ctx_id,
-    .is_detach = is_attach,
-    .bo = handle(),
+    .is_detach = is_detach,
+    .bo = id(),
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::config_ctx_debug_bo, &arg);
 }
@@ -488,9 +497,9 @@ dbg_buffer::
     return;
 
   try {
-    config_debug_bo(false);
+    config_debug_bo(true);
   } catch (const xrt_core::system_error& e) {
-    std::cout << "Failed to detach DEBUG BO " << std::to_string(handle())
+    std::cout << "Failed to detach DEBUG BO " << std::to_string(id().handle)
       << " from hwctx " << std::to_string(m_ctx_id)
       << ": " << e.what() << std::endl;
   }

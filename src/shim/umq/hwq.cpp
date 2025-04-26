@@ -369,9 +369,9 @@ issue_command(cmd_buffer *cmd_bo)
   // Completion signal area has to be a full WORD, we utilze the command_bo
   uint64_t comp = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
 
-  auto id = issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
-  cmd_bo->set_cmd_id(id);
-  shim_debug("Submitted command (%ld)", id);
+  auto seq = issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
+  cmd_bo->set_cmd_seq(seq);
+  shim_debug("Submitted command (%ld)", seq);
 }
 
 void
@@ -394,11 +394,11 @@ unbind_hwctx()
   m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
 }
 
-uint32_t
+bo_id
 hwq_umq::
 get_queue_bo() const
 {
-  return m_umq_bo->handle();
+  return m_umq_bo->id();
 }
 
 } // shim_xdna

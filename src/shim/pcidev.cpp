@@ -15,11 +15,13 @@ pdev(std::shared_ptr<const drv>& driver, const std::string& sysfs_name)
   , xrt_core::pci::dev(driver, sysfs_name)
 {
   m_is_ready = true; // We're always ready
+  shim_debug("Created pcidev (%s)", m_sysfs_name.c_str());
 }
 
 pdev::
 ~pdev()
 {
+  shim_debug("Destroying pcidev (%s)", m_sysfs_name.c_str());
 }
 
 xrt_core::device::handle_type

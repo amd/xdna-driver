@@ -207,7 +207,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   auto& dev = const_cast<device&>(m_device);
   auto boh = dev.alloc_bo(userptr, size, flags);
   auto bo = dynamic_cast<buffer*>(boh.get());
-  bo->attach_to_ctx(*this);
+  bo->bind_hwctx(*this);
   return boh;
 }
 
@@ -256,7 +256,7 @@ create_ctx_on_device()
   create_ctx_arg arg = {
     .qos = m_qos,
     .umq_bo = m_q->get_queue_bo(),
-    .log_buf_bo = AMDXDNA_INVALID_BO_HANDLE,
+    .log_buf_bo = { AMDXDNA_INVALID_BO_HANDLE, AMDXDNA_INVALID_BO_HANDLE },
     .max_opc = m_ops_per_cycle,
     .num_tiles = m_col_cnt * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows,
   };

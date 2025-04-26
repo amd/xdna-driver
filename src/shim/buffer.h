@@ -6,6 +6,7 @@
 
 #include "pcidev.h"
 #include "shared.h"
+#include "hwctx.h"
 #include "shim_debug.h"
 #include "core/common/shim/hwctx_handle.h"
 #include "core/common/shim/buffer_handle.h"
@@ -37,12 +38,13 @@ public:
   int m_type = AMDXDNA_BO_INVALID;
   size_t m_size = 0;
   bo_id m_id = { AMDXDNA_INVALID_BO_HANDLE, AMDXDNA_INVALID_BO_HANDLE };
-  uint64_t m_paddr = AMDXDNA_INVALID_ADDR;
+  uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
   void *m_vaddr = nullptr;
   uint64_t m_map_offset = 0;
 
 private:
   const pdev& m_pdev;
+  bool m_same_pid_import = false;
 };
 
 class buffer : public xrt_core::buffer_handle
@@ -78,8 +80,8 @@ public:
   void*
   vaddr() const;
 
-  uint32_t
-  handle() const;
+  bo_id
+  id() const;
 
   uint64_t
   paddr() const;
@@ -88,14 +90,14 @@ public:
   size() const;
 
   virtual void
-  attach_to_ctx(const xrt_core::hwctx_handle& hwctx);
+  bind_hwctx(const hwctx& hwctx);
 
   // Save flags in buffer which later returns via get_properties()
   void
   set_flags(uint64_t flags);
 
-  virtual std::set<uint32_t>
-  get_arg_bo_handles() const;
+  virtual std::set<bo_id>
+  get_arg_bo_ids() const;
 
 protected:
   const pdev& m_pdev;
@@ -123,17 +125,17 @@ public:
 
 public:
   void
-  set_cmd_id(uint64_t id);
+  set_cmd_seq(uint64_t seq);
 
   uint64_t
-  get_cmd_id() const;
+  get_cmd_seq() const;
 
-  std::set<uint32_t>
-  get_arg_bo_handles() const override;
+  std::set<bo_id>
+  get_arg_bo_ids() const override;
 
 private:
-  uint64_t m_cmd_id = 0;
-  std::map< size_t, std::set<uint32_t> > m_args_map;
+  uint64_t m_cmd_seq = 0;
+  std::map< size_t, std::set<bo_id> > m_args_map;
   mutable std::mutex m_args_map_lock;
 };
 
@@ -143,12 +145,12 @@ public:
   using buffer::buffer;
   ~dbg_buffer();
 
-  virtual void
-  attach_to_ctx(const xrt_core::hwctx_handle& hwctx);
+  void
+  bind_hwctx(const hwctx& hwctx) override;
 
 private:
   void
-  config_debug_bo(bool is_attach);
+  config_debug_bo(bool is_detach);
 
   xrt_core::hwctx_handle::slot_id m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
 };
