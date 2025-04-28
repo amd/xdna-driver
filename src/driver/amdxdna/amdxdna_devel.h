@@ -13,7 +13,6 @@
 
 #define AMDXDNA_IOMMU_PASID 0
 #define AMDXDNA_IOMMU_NO_PASID 1
-#define AMDXDNA_IOMMU_BYPASS 2
 extern int iommu_mode;
 extern bool priv_load;
 extern int start_col_index;
