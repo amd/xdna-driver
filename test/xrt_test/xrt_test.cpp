@@ -24,8 +24,6 @@ namespace {
 
 using arg_type = const std::vector<uint64_t>;
 
-const uint16_t npu3_device_id = 0x1569;
-
 std::string program;
 // Test harness setup helpers
 std::string curpath;
@@ -663,6 +661,9 @@ run_all_test(std::set<int>& tests)
 {
   auto all = tests.empty();
   unsigned int device_index = 0;
+
+  if (!test_list.size())
+    std::cout << "test_list is empty!" << std::endl;
 
   for (int i = 0; i < test_list.size(); i++) {
     if (!all) {
