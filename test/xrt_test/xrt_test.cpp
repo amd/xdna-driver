@@ -170,7 +170,7 @@ void check_umq_resnet50_result(int *ofm, std::string filename)
 
 template <typename TEST_BO>
 void
-read_bin_file(std::string filename, TEST_BO& test_bo)
+read_bin_file(std::string& filename, TEST_BO& test_bo)
 {
   uint32_t value;
   int i = 0;
