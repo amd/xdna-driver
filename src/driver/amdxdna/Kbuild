@@ -17,6 +17,7 @@ ccflags-y += -g -Werror
 obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
+	amdxdna_drm.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
@@ -28,7 +29,6 @@ amdxdna-y := \
 ifeq ($(ARCH), x86)
 amdxdna-y += \
 	amdxdna_gem.o \
-	amdxdna_drm.o \
 	aie2_solver.o \
 	aie2_smu.o \
 	aie2_psp.o \
@@ -53,7 +53,6 @@ endif
 ifeq ($(ARCH), arm64)
 amdxdna-y += \
 	amdxdna_gem_of.o \
-	amdxdna_drm.o \
 	ve2_of.o \
 	ve2_regs.o \
 	amdxdna_of_drv.o

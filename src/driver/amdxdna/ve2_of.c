@@ -8,7 +8,7 @@
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
-	struct amdxdna_dev_hdl *xdna_hdl = NULL;
+	struct amdxdna_dev_hdl *xdna_hdl;
 
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
@@ -23,6 +23,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
+	return;
 }
 
 const struct amdxdna_dev_ops ve2_ops = {

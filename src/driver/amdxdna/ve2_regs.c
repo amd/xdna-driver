@@ -7,6 +7,6 @@
 #include "ve2_of.h"
 
 const struct amdxdna_dev_info dev_ve2_info = {
-	.device_type		= AMDXDNA_DEV_TYPE_VE,
+	.device_type		= AMDXDNA_DEV_TYPE_KMQ,
 	.ops			= &ve2_ops,
 };
