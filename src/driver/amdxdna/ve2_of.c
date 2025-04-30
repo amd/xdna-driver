@@ -23,7 +23,6 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
-	return;
 }
 
 const struct amdxdna_dev_ops ve2_ops = {
