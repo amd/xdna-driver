@@ -2,8 +2,11 @@
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "shim_debug.h"
+#include "kmq/pcidev.h"
+#include "umq/pcidev.h"
+#include "platform_virtio.h"
+#include "amdxdna_proto.h"
 #include "pcidrv_virtgpu.h"
-#include "drm_local/amdxdna_accel.h"
 #include "core/pcie/linux/system_linux.h"
 
 namespace {
@@ -12,6 +15,13 @@ struct X
 {
   X() { xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv_virtgpu>()); }
 } x;
+
+int
+get_dev_type(const std::string& sysfs)
+{
+  // TODO: properly retrieve device type from host
+  return AMDXDNA_DEV_TYPE_KMQ;
+}
 
 }
 
@@ -45,23 +55,23 @@ sysfs_dev_node_dir() const
   return "drm";
 }
 
-void
+std::shared_ptr<xrt_core::pci::dev>
 drv_virtgpu::
-drv_ioctl(int dev_fd, drv_ioctl_cmd cmd, void* cmd_arg) const
+create_pcidev(const std::string& sysfs) const
 {
-  switch (cmd) {
-  default:
-    shim_err(EINVAL, "Unknown drv_ioctl: %d", cmd);
-    break;
-  }
-}
+  static int device_type = AMDXDNA_DEV_TYPE_UNKNOWN;
+  auto driver = std::dynamic_pointer_cast<const drv>(shared_from_this());
+  auto platform_driver = std::dynamic_pointer_cast<const platform_drv>(
+    std::make_shared<const platform_drv_virtio>(driver));
 
-int
-drv_virtgpu::
-get_dev_type(const std::string& sysfs) const
-{
-  // TODO: properly retrieve device type from host
-  return AMDXDNA_DEV_TYPE_KMQ;
+  if (device_type == AMDXDNA_DEV_TYPE_UNKNOWN)
+    device_type = get_dev_type(sysfs);
+
+  if (device_type == AMDXDNA_DEV_TYPE_KMQ)
+    return std::make_shared<pdev_kmq>(platform_driver, sysfs);
+  if (device_type == AMDXDNA_DEV_TYPE_UMQ)
+    return std::make_shared<pdev_umq>(platform_driver, sysfs);
+  shim_err(EINVAL, "Unknown device type: %d", device_type);
 }
 
 }

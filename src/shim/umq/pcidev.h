@@ -11,7 +11,7 @@ namespace shim_xdna {
 class pdev_umq : public pdev
 {
 public:
-  using shim_xdna::pdev::pdev;
+  using pdev::pdev;
 
 public:
   bool

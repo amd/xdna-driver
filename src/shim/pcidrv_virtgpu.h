@@ -5,6 +5,7 @@
 #define PCIDRV_VIRTGPU_H
 
 #include "pcidrv.h"
+#include "core/pcie/linux/pcidev.h"
 #include <string>
 
 namespace shim_xdna {
@@ -24,13 +25,9 @@ public:
   std::string
   sysfs_dev_node_dir() const override;
 
-public:
-  void
-  drv_ioctl(int dev_fd, drv_ioctl_cmd cmd, void* arg) const override;
-
 private:
-  int
-  get_dev_type(const std::string& sysfs) const override;
+  std::shared_ptr<xrt_core::pci::dev>
+  create_pcidev(const std::string& sysfs) const override;
 };
 
 }

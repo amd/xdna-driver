@@ -10,9 +10,9 @@
 namespace shim_xdna {
 
 pdev::
-pdev(std::shared_ptr<const drv>& driver, const std::string& sysfs_name)
+pdev(std::shared_ptr<const platform_drv>& driver, const std::string& sysfs_name)
   : m_driver(driver)
-  , xrt_core::pci::dev(driver, sysfs_name)
+  , xrt_core::pci::dev(driver->get_pdrv(), sysfs_name)
 {
   m_is_ready = true; // We're always ready
   shim_debug("Created pcidev (%s)", m_sysfs_name.c_str());
@@ -39,13 +39,13 @@ open() const
   const std::lock_guard<std::mutex> lock(m_lock);
 
   if (m_dev_users == 0) {
-    auto fd = xrt_core::pci::dev::open("", O_RDWR);
-    if (fd < 0)
-      shim_err(EINVAL, "Failed to open NPU device");
-    else
-      shim_debug("Opened NPU device, fd=%d", fd);
-    m_dev_fd = std::make_unique<dev_fd>(fd);
-    on_first_open();
+    m_driver->drv_open(m_sysfs_name);
+    try {
+      on_first_open();
+    } catch (...) {
+      m_driver->drv_close();
+      throw;
+    }
   }
   ++m_dev_users;
 }
@@ -58,9 +58,12 @@ close() const
 
   --m_dev_users;
   if (m_dev_users == 0) {
-    on_last_close();
-    shim_debug("Closing NPU Device, fd=%d", m_dev_fd->get());
-    m_dev_fd.reset();
+    try {
+      on_last_close();
+      m_driver->drv_close();
+    } catch (const xrt_core::system_error& e) {
+      shim_debug("Failed to close device: %s", e.what());
+    }
   }
 }
 
@@ -68,25 +71,21 @@ void*
 pdev::
 mmap(void *addr, size_t len, int prot, int flags, off_t offset) const
 {
-  void* ret = ::mmap(addr, len, prot, flags, m_dev_fd->get(), offset);
-
-  if (ret == reinterpret_cast<void*>(-1))
-    shim_err(-errno, "mmap(addr=%p, len=%ld, prot=%d, flags=%d, offset=%ld) failed", addr, len, prot, flags, offset);
-  return ret;
+  return m_driver->drv_mmap(addr, len, prot, flags, offset);
 }
 
 void
 pdev::
 munmap(void* addr, size_t len) const
 {
-  ::munmap(addr, len);
+  m_driver->drv_munmap(addr, len);
 }
 
 void
 pdev::
 drv_ioctl(drv_ioctl_cmd cmd, void* arg) const
 {
-  m_driver->drv_ioctl(m_dev_fd->get(), cmd, arg);
+  m_driver->drv_ioctl(cmd, arg);
 }
 
 std::shared_ptr<xrt_core::device>
@@ -96,5 +95,4 @@ create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id
   return std::make_shared<device>(*this, handle, id);
 }
 
-} // namespace shim_xdna
-
+}
