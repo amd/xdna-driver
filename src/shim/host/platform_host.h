@@ -4,7 +4,7 @@
 #ifndef PLAT_HOST_H
 #define PLAT_HOST_H
 
-#include "platform.h"
+#include "../platform.h"
 
 namespace shim_xdna {
 

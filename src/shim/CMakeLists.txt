@@ -8,10 +8,14 @@ set(XRT_COREUTIL_TARGET xrt_coreutil)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} MAIN_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/kmq KMQ_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/umq UMQ_SOURCES)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/host HOST_SOURCES)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/virtio VIRTIO_SOURCES)
 add_library(${XDNA_TARGET} SHARED
   ${MAIN_SOURCES}
   ${KMQ_SOURCES}
   ${UMQ_SOURCES}
+  ${HOST_SOURCES}
+  ${VIRTIO_SOURCES}
   )
 
 set_target_properties(${XDNA_TARGET} PROPERTIES

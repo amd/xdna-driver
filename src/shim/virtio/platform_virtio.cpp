@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "shim_debug.h"
+#include "../shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_proto.h"
 #include "platform_virtio.h"

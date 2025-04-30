@@ -4,7 +4,7 @@
 #ifndef PLAT_VIRTIO_H
 #define PLAT_VIRTIO_H
 
-#include "platform.h"
+#include "../platform.h"
 #include <string>
 
 namespace shim_xdna {

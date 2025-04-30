@@ -1,34 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "shim_debug.h"
-#include "kmq/pcidev.h"
-#include "umq/pcidev.h"
-#include "platform_host.h"
-#include "pcidrv_amdxdna.h"
+#include "../shim_debug.h"
+#include "../kmq/pcidev.h"
+#include "../umq/pcidev.h"
+#include "platform_virtio.h"
+#include "amdxdna_proto.h"
+#include "pcidrv_virtgpu.h"
 #include "core/pcie/linux/system_linux.h"
-#include <fstream>
 
 namespace {
 
 struct X
 {
-  X() { xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv_amdxdna>()); }
+  X() { xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv_virtgpu>()); }
 } x;
 
 int
 get_dev_type(const std::string& sysfs)
 {
-  const std::string sysfs_root{"/sys/bus/pci/devices/"};
-  const std::string dev_type_path = sysfs_root + sysfs + "/device_type";
-
-  std::ifstream ifs(dev_type_path);
-  if (!ifs.is_open())
-    throw std::invalid_argument(dev_type_path + " is missing?");
-
-  std::string line;
-  std::getline(ifs, line);
-  return static_cast<int>(std::stoi(line));
+  // TODO: properly retrieve device type from host
+  return AMDXDNA_DEV_TYPE_KMQ;
 }
 
 }
@@ -36,41 +28,41 @@ get_dev_type(const std::string& sysfs)
 namespace shim_xdna {
 
 std::string
-drv_amdxdna::
+drv_virtgpu::
 name() const
 {
-  return "amdxdna";
+  return "virtio-pci";
 }
 
 std::string
-drv_amdxdna::
+drv_virtgpu::
 dev_node_prefix() const
 {
-  return "accel";
+  return "renderD";
 }
 
 std::string
-drv_amdxdna::
+drv_virtgpu::
 dev_node_dir() const
 {
-  return "accel";
+  return "dri";
 }
 
 std::string
-drv_amdxdna::
+drv_virtgpu::
 sysfs_dev_node_dir() const
 {
-  return "accel";
+  return "drm";
 }
 
 std::shared_ptr<xrt_core::pci::dev>
-drv_amdxdna::
+drv_virtgpu::
 create_pcidev(const std::string& sysfs) const
 {
   static int device_type = AMDXDNA_DEV_TYPE_UNKNOWN;
   auto driver = std::dynamic_pointer_cast<const drv>(shared_from_this());
   auto platform_driver = std::dynamic_pointer_cast<const platform_drv>(
-    std::make_shared<const platform_drv_host>(driver));
+    std::make_shared<const platform_drv_virtio>(driver));
 
   if (device_type == AMDXDNA_DEV_TYPE_UNKNOWN)
     device_type = get_dev_type(sysfs);
