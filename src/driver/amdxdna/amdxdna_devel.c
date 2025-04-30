@@ -12,6 +12,8 @@
 #include "amdxdna_trace.h"
 
 int iommu_mode;
+module_param(iommu_mode, int, 0444);
+MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID");
 
 bool priv_load;
 module_param(priv_load, bool, 0644);
@@ -39,6 +41,14 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 		return -ENODEV;
 	}
 
+	if (iommu_mode == AMDXDNA_IOMMU_PASID)
+		return 0;
+
+	if (iommu_mode != AMDXDNA_IOMMU_NO_PASID) {
+		XDNA_ERR(xdna, "Invalid IOMMU mode %d", iommu_mode);
+		return -EINVAL;
+	}
+
 	/*
 	 * Set amd_iommu=force_isolation in the Linux cmdline makes SVA capable
 	 * device to force use legacy v1 page table, which not support PASID but
@@ -47,12 +57,11 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 	 * This will not needed if AMD IOMMU changed the behavior.
 	 */
 	domain = iommu_get_domain_for_dev(xdna->ddev.dev);
-	if (iommu_is_dma_domain(domain)) {
-		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
-		return 0;
+	if (!iommu_is_dma_domain(domain)) {
+		XDNA_WARN(xdna, "fallback to iommu_mode 0");
+		iommu_mode = AMDXDNA_IOMMU_PASID;
 	}
 
-	iommu_mode = AMDXDNA_IOMMU_PASID;
 	return 0;
 }
 
