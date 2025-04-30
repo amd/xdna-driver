@@ -198,7 +198,7 @@ void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
 {
-#ifdef AMDXDNA_OF
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 	struct drm_printer p = drm_debug_printer(NULL);
 #else
 	struct drm_printer p = drm_dbg_printer(&xdna->ddev, DRM_UT_DRIVER, NULL);

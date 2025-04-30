@@ -17,14 +17,18 @@ ccflags-y += -g -Werror
 obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
-	amdxdna_gem.o \
 	amdxdna_drm.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
 	amdxdna_tdr.o \
 	amdxdna_ubuf.o \
-	amdxdna_carvedout_buf.o \
+	amdxdna_carvedout_buf.o
+
+# On x86 architecture
+ifeq ($(ARCH), x86)
+amdxdna-y += \
+	amdxdna_gem.o \
 	aie2_solver.o \
 	aie2_smu.o \
 	aie2_psp.o \
@@ -43,6 +47,16 @@ amdxdna-y := \
 	npu5_regs.o \
 	npu6_regs.o \
 	amdxdna_pci_drv.o
+endif
+
+# On ARM64 architecture
+ifeq ($(ARCH), arm64)
+amdxdna-y += \
+	amdxdna_gem_of.o \
+	ve2_of.o \
+	ve2_regs.o \
+	amdxdna_of_drv.o
+endif
 
 # Helper functions for amdxdna development, but not for upstreaming
 amdxdna-y += amdxdna_devel.o

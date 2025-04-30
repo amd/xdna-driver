@@ -15,6 +15,13 @@
 #include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
+#ifdef AMDXDNA_OF
+/*
+ * TODO: remove this and implement physical contiguous memory by carvedout memory
+ * supported by amdxdna_gem.h"
+ */
+#include "amdxdna_gem_of.h"
+#endif
 #ifdef AMDXDNA_SHMEM
 #include "amdxdna_gem.h"
 #else
