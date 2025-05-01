@@ -58,44 +58,47 @@ static int aie2_is_event_trace_supported_on_dev(struct amdxdna_dev_hdl *ndev)
 
 static u32 aie2_get_trace_event_content(struct event_trace_req_buf *trace_req_buf)
 {
+	u32 head_ptr, tail_ptr, head_ptr_wrap, tail_ptr_wrap;
 	struct amdxdna_dev_hdl *ndev = trace_req_buf->ndev;
 	struct trace_event_metadata *trace_metadata;
 	u8 *kern_buf = trace_req_buf->kern_log_buf;
 	u8 *sys_buf = trace_req_buf->buf;
-	u32 head_ptr, tail_ptr, tail_ptr_wrap;
-	u32 log_size = 0, offset = 0;
-	u32 total_log_size = 0;
+	u32 log_size = 0;
 
 	WARN_ON(LOG_RB_SIZE <= 0);
 	trace_metadata = (struct trace_event_metadata *)(sys_buf + LOG_RB_SIZE);
-	head_ptr = (u32)(trace_metadata->head_offset % LOG_RB_SIZE);
-	tail_ptr = (u32)(trace_metadata->tail_offset);
+	head_ptr = (u32)trace_metadata->head_offset;
+	tail_ptr = (u32)trace_metadata->tail_offset;
+	head_ptr_wrap = head_ptr % LOG_RB_SIZE;
 	tail_ptr_wrap = tail_ptr % LOG_RB_SIZE;
+	log_size = tail_ptr - head_ptr;
 
-	/* Update the Ring Buffer head pointer */
+	if (!log_size)
+		return log_size;
+
 	trace_metadata->head_offset = tail_ptr;
 
-	do {
-		if (tail_ptr_wrap > head_ptr)
-			log_size = tail_ptr_wrap - head_ptr;
-		else if (tail_ptr_wrap < head_ptr)
-			log_size = LOG_RB_SIZE - head_ptr;
-		else
-			return 0;
+	/* Handle buffer overflow case, dump all log w.r.t timestamp */
+	if (log_size > LOG_RB_SIZE) {
+		XDNA_ERR(ndev->xdna, "log_size is %u, buffer overflow!", log_size);
+		u32 part_log = LOG_RB_SIZE - tail_ptr_wrap;
 
-		if (log_size > LOG_RB_SIZE) {
-			XDNA_ERR(ndev->xdna, "log_size > LOG_RB_SIZE");
-			return 0;
-		}
-		/* Copy the ring buffer content to kernel buffer */
-		memcpy(kern_buf + offset, (u8 *)(sys_buf + head_ptr), log_size);
+		memcpy((u8 *)kern_buf, (u8 *)sys_buf + tail_ptr_wrap, part_log);
+		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_ptr_wrap);
+		return LOG_RB_SIZE;
+	}
 
-		offset += log_size;
-		total_log_size += log_size;
-		head_ptr = (head_ptr + log_size) % LOG_RB_SIZE;
-	} while (head_ptr < tail_ptr_wrap);
+	/*Buffer split into two section when tail is wrapped and copy both */
+	if (tail_ptr_wrap < head_ptr_wrap) {
+		u32 part_log = LOG_RB_SIZE - head_ptr_wrap;
 
-	return total_log_size;
+		memcpy((u8 *)kern_buf, (u8 *)(sys_buf + head_ptr_wrap), part_log);
+		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_ptr_wrap);
+		return log_size;
+	}
+	/* General case when tail > head and with in log buff size */
+	memcpy((u8 *)kern_buf, (u8 *)(sys_buf + head_ptr_wrap), log_size);
+	return log_size;
 }
 
 static void aie2_print_trace_event_log(struct amdxdna_dev_hdl *ndev)
