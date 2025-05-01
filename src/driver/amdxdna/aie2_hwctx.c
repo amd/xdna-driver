@@ -15,6 +15,7 @@
 
 extern const struct drm_sched_backend_ops sched_ops;
 
+__maybe_unused
 static int aie2_alloc_resource(struct amdxdna_ctx *ctx)
 {
 	struct alloc_requests *xrs_req;
@@ -48,6 +49,7 @@ static int aie2_alloc_resource(struct amdxdna_ctx *ctx)
 	return ret;
 }
 
+__maybe_unused
 static void aie2_release_resource(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
@@ -147,16 +149,10 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 		goto fini_sched;
 	}
 
-	ret = aie2_alloc_resource(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
-		goto destroy_entity;
-	}
-
 	ret = aie2_load_hwctx(ctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
-		goto release_resource;
+		goto destroy_entity;
 	}
 
 #ifdef AMDXDNA_DEVEL
@@ -181,8 +177,6 @@ skip:
 
 unload_hwctx:
 	aie2_unload_hwctx(ctx);
-release_resource:
-	aie2_release_resource(ctx);
 destroy_entity:
 	drm_sched_entity_destroy(&ctx->priv->entity);
 fini_sched:
@@ -197,7 +191,6 @@ void aie2_hwctx_stop(struct amdxdna_ctx *ctx)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_handle->aie2_lock));
 	drm_sched_entity_destroy(&ctx->priv->entity);
 	aie2_unload_hwctx(ctx);
-	aie2_release_resource(ctx);
 	wait_event(ctx->priv->job_free_waitq,
 		   (ctx->submitted == atomic64_read(&ctx->job_free_cnt)));
 	drm_sched_fini(&ctx->priv->sched);

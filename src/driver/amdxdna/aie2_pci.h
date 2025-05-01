@@ -212,6 +212,7 @@ struct amdxdna_ctx_priv {
 	wait_queue_head_t		job_free_waitq;
 
 	u32				orig_num_col;
+	u32				req_dpm_level;
 
 	/* For context runqueue */
 	/* When there is ongoing IO, use this sem avoid runqueue disconnect ctx */
@@ -320,9 +321,11 @@ struct amdxdna_dev_hdl {
 	/*power management and clock */
 	int				pw_mode;
 	enum aie2_power_state		power_state;
+	u32				sys_eff_factor;
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
+	u32				*dpm_cnt;
 	u32				clk_gating;
 	u32				npuclk_freq;
 	u32				hclk_freq;
@@ -379,6 +382,7 @@ struct amdxdna_dev_priv {
 #define COL_ALIGN_NONE   0
 #define COL_ALIGN_NATURE 1
 	u32				col_align;
+	u32				col_opc;
 	u32				mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32				mbox_size;
@@ -427,6 +431,9 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
 void aie2_pm_fini(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
+#define aie2_pm_add_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, true)
+#define aie2_pm_del_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, false)
+void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
 int npu1_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 int npu4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 
