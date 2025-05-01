@@ -5,6 +5,17 @@
 
 KERNEL_VER ?= $(shell uname -r)
 KERNEL_SRC ?= /lib/modules/$(KERNEL_VER)/build
+XDNA_BUS_TYPE := pci
+
+ifeq ($(XDNA_BUS_TYPE), pci)
+PCI = y
+OF = n
+else ifeq ($(XDNA_BUS_TYPE), of)
+PCI = n
+OF = y
+else
+$(error Unknown XDNA_BUS_TYPE $(XDNA_BUS_TYPE))!!
+endif
 
 mkfile_path = $(abspath $(lastword $(MAKEFILE_LIST)))
 SRC_DIR = $(patsubst %/,%,$(dir $(mkfile_path)))
@@ -25,12 +36,12 @@ ifdef AMDXDNA_DRM_USAGE
 DEFINES += -DAMDXDNA_DRM_USAGE
 endif
 
-ifeq ($(ARCH), arm64)
+ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF
 endif
 
 modules:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
 
 modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install
