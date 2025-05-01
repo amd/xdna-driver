@@ -25,9 +25,7 @@ amdxdna-y := \
 	amdxdna_ubuf.o \
 	amdxdna_carvedout_buf.o
 
-# On x86 architecture
-ifeq ($(ARCH), x86)
-amdxdna-y += \
+amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	amdxdna_gem.o \
 	aie2_solver.o \
 	aie2_smu.o \
@@ -47,16 +45,12 @@ amdxdna-y += \
 	npu5_regs.o \
 	npu6_regs.o \
 	amdxdna_pci_drv.o
-endif
 
-# On ARM64 architecture
-ifeq ($(ARCH), arm64)
-amdxdna-y += \
+amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	amdxdna_gem_of.o \
 	ve2_of.o \
 	ve2_regs.o \
 	amdxdna_of_drv.o
-endif
 
 # Helper functions for amdxdna development, but not for upstreaming
 amdxdna-y += amdxdna_devel.o
