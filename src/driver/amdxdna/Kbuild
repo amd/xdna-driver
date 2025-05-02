@@ -27,7 +27,6 @@ amdxdna-y := \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	amdxdna_gem.o \
-	aie2_solver.o \
 	aie2_smu.o \
 	aie2_psp.o \
 	aie2_ctx.o \

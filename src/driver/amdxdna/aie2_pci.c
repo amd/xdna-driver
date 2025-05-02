@@ -12,7 +12,6 @@
 #include "drm_local/amdxdna_accel.h"
 
 #include "aie2_pci.h"
-#include "aie2_solver.h"
 #include "aie2_msg_priv.h"
 
 #ifdef AMDXDNA_DEVEL
@@ -23,7 +22,8 @@
 #include "aie2_internal.h"
 #endif
 
-uint aie2_max_col = XRS_MAX_COL;
+#define AIE2_MAX_COL 128
+uint aie2_max_col = AIE2_MAX_COL;
 module_param(aie2_max_col, uint, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
 
@@ -329,26 +329,6 @@ static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
 
-static int aie2_xrs_set_dft_dpm_level(struct drm_device *ddev, u32 dpm_level)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
-	struct amdxdna_dev_hdl *ndev;
-
-	ndev = xdna->dev_handle;
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-	ndev->dft_dpm_level = dpm_level;
-	if (ndev->pw_mode != POWER_MODE_DEFAULT || ndev->dpm_level == dpm_level)
-		return 0;
-
-	return ndev->priv->hw_ops.set_dpm(ndev, dpm_level);
-}
-
-static struct xrs_action_ops aie2_xrs_actions = {
-	.load_hwctx = aie2_xrs_load_hwctx,
-	.unload_hwctx = aie2_xrs_unload_hwctx,
-	.set_dft_dpm_level = aie2_xrs_set_dft_dpm_level,
-};
-
 static void aie2_hw_stop(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
@@ -503,7 +483,6 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct init_config xrs_cfg = { 0 };
 	struct amdxdna_dev_hdl *ndev;
 	struct psp_config psp_conf;
 	const struct firmware *fw;
@@ -628,21 +607,6 @@ skip_pasid:
 	if (ret) {
 		XDNA_ERR(xdna, "Context runqueue init failed");
 		goto stop_hw;
-	}
-
-	xrs_cfg.clk_list.num_levels = ndev->max_dpm_level + 1;
-	for (i = 0; i < xrs_cfg.clk_list.num_levels; i++)
-		xrs_cfg.clk_list.cu_clk_list[i] = ndev->priv->dpm_clk_tbl[i].hclk;
-	xrs_cfg.sys_eff_factor = 1;
-	xrs_cfg.ddev = &xdna->ddev;
-	xrs_cfg.actions = &aie2_xrs_actions;
-	xrs_cfg.total_col = ndev->total_col;
-
-	ndev->xrs_hdl = xrsm_init(&xrs_cfg);
-	if (!ndev->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialize resolver failed");
-		ret = -EINVAL;
-		goto fini_rq;
 	}
 
 	ret = aie2_error_async_events_alloc(ndev);

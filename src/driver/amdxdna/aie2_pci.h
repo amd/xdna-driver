@@ -75,7 +75,6 @@
 	(ctx_rq_to_ndev(r)->xdna)
 
 struct amdxdna_ctx_priv;
-struct xrs_action_load;
 struct event_trace_req_buf;
 struct start_event_trace_resp;
 struct aie2_partition;
@@ -308,7 +307,6 @@ struct amdxdna_dev_hdl {
 	void			__iomem *smu_base;
 	void			__iomem *mbox_base;
 	struct psp_device		*psp_hdl;
-	void				*xrs_hdl;
 
 	struct xdna_mailbox_chann_info	mgmt_info;
 	u32				mgmt_prot_major;
@@ -344,12 +342,11 @@ struct amdxdna_dev_hdl {
 	/*
 	 * The aie2_lock should be used in non critical path for below purposes
 	 *   - Exclusively send message to mgmt channel
-	 *   - Protect resolver APIs
 	 *   - Protect hwctx_cnt
 	 *   - Protect SMU set dpm, power on/off
 	 *
 	 * Some code path needs to make more than one of above atomic, such as,
-	 * aie2_hwctx_start() needs to send messages, access resolver and hwctx_cnt
+	 * aie2_hwctx_start() needs to send messages, access hwctx_cnt
 	 * aie2_mgmt_fw_init() needs to send multiple messages, etc.
 	 */
 	struct mutex			aie2_lock;
@@ -379,9 +376,6 @@ struct amdxdna_dev_priv {
 	const struct msg_op_ver		*optional_msg;
 	const struct rt_cfg_ver		*optional_cfg;
 
-#define COL_ALIGN_NONE   0
-#define COL_ALIGN_NATURE 1
-	u32				col_align;
 	u32				col_opc;
 	u32				mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
@@ -528,8 +522,6 @@ void aie2_dump_ctx(struct amdxdna_client *client);
 /* aie2_hwctx.c */
 int aie2_hwctx_start(struct amdxdna_ctx *ctx);
 void aie2_hwctx_stop(struct amdxdna_ctx *ctx);
-int aie2_xrs_load_hwctx(struct amdxdna_ctx *ctx, struct xrs_action_load *action);
-int aie2_xrs_unload_hwctx(struct amdxdna_ctx *ctx);
 
 /* aid2_ctx_runqueue.c */
 int aie2_rq_init(struct aie2_ctx_rq *rq);
