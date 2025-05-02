@@ -154,6 +154,7 @@ struct amdxdna_stats {
  * @filp: DRM file pointer
  * @mm_lock: lock for client wide memory related
  * @dev_heap: Shared device heap memory
+ * @heap_usage: Total number of bytes allocated in heap memory
  * @sva: iommu SVA handle
  * @pasid: PASID
  * @stats: record npu usage stats
@@ -170,6 +171,7 @@ struct amdxdna_client {
 
 	struct mutex			mm_lock; /* protect memory related */
 	struct amdxdna_gem_obj		*dev_heap;
+	u32				heap_usage;
 
 	struct iommu_sva		*sva;
 	int				pasid;
