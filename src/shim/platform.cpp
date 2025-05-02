@@ -118,6 +118,9 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
   case drv_ioctl_cmd::submit_sig:
     submit_sig(*static_cast<submit_sig_arg*>(cmd_arg));
     break;
+  case drv_ioctl_cmd::wait_cmd:
+    wait_cmd(*static_cast<wait_cmd_arg*>(cmd_arg));
+    break;
   case drv_ioctl_cmd::get_info:
     get_info(*static_cast<amdxdna_drm_get_info*>(cmd_arg));
     break;
