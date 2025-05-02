@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef HOST_QUEUE_H
-#define HOST_QUEUE_H
+#ifndef _HOST_QUEUE_H_
+#define _HOST_QUEUE_H_
 
 #define HSA_PKT_SUCCESS (0)
 /*
