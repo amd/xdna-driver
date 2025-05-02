@@ -5,6 +5,7 @@
 #define PCIDEV_KMQ_H
 
 #include "../pcidev.h"
+#include "../buffer.h"
 
 
 namespace shim_xdna {
@@ -18,15 +19,18 @@ public:
   bool
   is_cache_coherent() const override;
 
-  bool
-  has_heap_buffer() const override;
+  uint64_t
+  get_heap_xdna_addr() const override;
+
+  void *
+  get_heap_vaddr() const override;
 
   bool
   is_umq() const override;
 
 private:
   // Alloc'ed on first open and freed on last close
-  mutable std::unique_ptr<xrt_core::buffer_handle> m_dev_heap_bo;
+  mutable std::unique_ptr<buffer> m_dev_heap_bo;
 
   virtual void
   on_first_open() const override;

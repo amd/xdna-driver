@@ -156,14 +156,6 @@ hwctx::
   } catch (const xrt_core::system_error& e) {
     shim_debug("Failed to delete context on device: %s", e.what());
   }
-  try {
-    create_destroy_syncobj_arg arg = {
-      .handle = m_syncobj,
-    };
-    m_device.get_pdev().drv_ioctl(drv_ioctl_cmd::destroy_syncobj, &arg);
-  } catch (const xrt_core::system_error& e) {
-    shim_debug("Failed to destroy sync object: %s", e.what());
-  }
 }
 
 hwctx::slot_id

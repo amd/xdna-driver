@@ -47,11 +47,18 @@ is_cache_coherent() const
   return false;
 }
 
-bool
+uint64_t
 pdev_kmq::
-has_heap_buffer() const
+get_heap_xdna_addr() const
 {
-  return true;
+  return m_dev_heap_bo->paddr();
+}
+
+void *
+pdev_kmq::
+get_heap_vaddr() const
+{
+  return m_dev_heap_bo->vaddr();
 }
 
 bool

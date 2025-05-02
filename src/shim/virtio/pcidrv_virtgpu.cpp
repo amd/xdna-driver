@@ -17,9 +17,12 @@ struct X
 } x;
 
 int
-get_dev_type(const std::string& sysfs)
+get_dev_type(std::shared_ptr<const shim_xdna::platform_drv_virtio>& drv,
+  const std::string& sysfs)
 {
   // TODO: properly retrieve device type from host
+  drv->drv_open(sysfs);
+  drv->drv_close();
   return AMDXDNA_DEV_TYPE_KMQ;
 }
 
@@ -59,14 +62,11 @@ std::shared_ptr<xrt_core::pci::dev>
 drv_virtgpu::
 create_pcidev(const std::string& sysfs) const
 {
-  static int device_type = AMDXDNA_DEV_TYPE_UNKNOWN;
   auto driver = std::dynamic_pointer_cast<const drv>(shared_from_this());
-  auto platform_driver = std::dynamic_pointer_cast<const platform_drv>(
-    std::make_shared<const platform_drv_virtio>(driver));
+  auto platform_driver_virtio = std::make_shared<const platform_drv_virtio>(driver);
+  auto device_type = get_dev_type(platform_driver_virtio, sysfs);
 
-  if (device_type == AMDXDNA_DEV_TYPE_UNKNOWN)
-    device_type = get_dev_type(sysfs);
-
+  auto platform_driver = std::dynamic_pointer_cast<const platform_drv>(platform_driver_virtio);
   if (device_type == AMDXDNA_DEV_TYPE_KMQ)
     return std::make_shared<pdev_kmq>(platform_driver, sysfs);
   if (device_type == AMDXDNA_DEV_TYPE_UMQ)

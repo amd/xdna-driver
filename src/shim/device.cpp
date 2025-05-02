@@ -1362,7 +1362,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
     shim_not_supported_err("unsupported buffer type: none flag");
   if (userptr)
     shim_not_supported_err("User ptr BO");
-  auto type = bo_flags_to_type(flags, m_pdev.has_heap_buffer());
+  auto type = bo_flags_to_type(flags, !!m_pdev.get_heap_vaddr());
   if (type == AMDXDNA_BO_INVALID)
     shim_not_supported_err("Bad BO flags");
 

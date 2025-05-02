@@ -26,11 +26,18 @@ is_cache_coherent() const
   return true;
 }
 
-bool
+void *
 pdev_umq::
-has_heap_buffer() const
+get_heap_vaddr() const
 {
-  return false;
+  return nullptr;
+}
+
+uint64_t
+pdev_umq::
+get_heap_xdna_addr() const
+{
+  return AMDXDNA_INVALID_ADDR;
 }
 
 bool

@@ -2,7 +2,6 @@
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "pcidrv.h"
-#include "shim_debug.h"
 #include <sys/types.h>
 #include <dirent.h>
 
@@ -31,7 +30,7 @@ get_dev_node(const std::string& sysfs_name) const
         return std::string("/dev/") + dev_node_dir() + "/" + dirname;
     }
   }
-  shim_err(EINVAL, "Bad sysfs name: %s", sysfs_name.c_str());
+  throw std::invalid_argument(std::string("Bad sysfs name: ") + sysfs_name.c_str());
 }
 
 }

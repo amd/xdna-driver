@@ -104,6 +104,13 @@ is_driver_pin_arg_bo()
   return drv_pin;
 }
 
+uint64_t
+bo_addr_align(int type)
+{
+  // Device mem heap must align at 64MB boundary.
+  return (type == AMDXDNA_BO_DEV_HEAP) ? 64ul * 1024 * 1024 : 0;
+}
+
 }
 
 namespace shim_xdna {
@@ -160,11 +167,11 @@ drm_bo(const pdev& pdev, size_t size, int type)
   create_bo_arg arg = {
     .type = m_type,
     .size = m_size,
+    .xdna_addr_align = bo_addr_align(m_type), 
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
   m_id = arg.bo;
   m_xdna_addr = arg.xdna_addr;
-  m_vaddr = arg.vaddr;
   m_map_offset = arg.map_offset;
 }
 
@@ -180,8 +187,7 @@ drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
   m_size = arg.size;
   m_id = arg.bo;
   m_xdna_addr = arg.xdna_addr;
-  m_vaddr = arg.vaddr;
-  if (m_vaddr)
+  if (arg.vaddr)
     m_same_pid_import = true; // Has valid vaddr, must be imported from same process!
   m_map_offset = arg.map_offset;
 }
@@ -214,8 +220,10 @@ buffer(const pdev& dev, size_t size, int type)
   : m_pdev(dev)
 {
   m_bo = std::make_unique<drm_bo>(dev, size, type);
-  if (!m_bo->m_vaddr)
+  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
     mmap_drm_bo();
+  else if (m_bo->m_type != AMDXDNA_BO_DEV)
+    shim_err(EINVAL, "Non-DEV BO without mmap offset!");
   
   // Newly allocated buffer may contain dirty pages. If used as output buffer,
   // the data in cacheline will be flushed onto memory and pollute the output
@@ -232,8 +240,10 @@ buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl)
   : m_pdev(dev)
 {
   m_bo = std::make_unique<drm_bo>(dev, ehdl);
-  if (!m_bo->m_vaddr)
+  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
     mmap_drm_bo();
+  else if (m_bo->m_type != AMDXDNA_BO_DEV)
+    shim_err(EINVAL, "Non-DEV BO without mmap offset!");
   shim_debug("Imported BO: %s", describe().c_str());
 }
 
@@ -248,9 +258,9 @@ buffer::
 mmap_drm_bo()
 {
   void *p = nullptr;
-  // Device mem heap must align at 64MB boundary.
-  if (m_bo->m_type == AMDXDNA_BO_DEV_HEAP) {
-    auto alignment = 64ul * 1024 * 1024;
+  auto alignment = bo_addr_align(m_bo->m_type);
+
+  if (alignment) {
     auto range_sz = alignment + m_bo->m_size - 1;
     m_range_addr = std::make_unique<mmap_ptr>(range_sz);
     p = align_addr(m_range_addr->get(), alignment);
@@ -271,7 +281,11 @@ void *
 buffer::
 vaddr() const
 {
-  return m_bo->m_vaddr ? m_bo->m_vaddr : m_addr->get();
+  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
+    return m_addr->get();
+  // Must be DEV BO.
+  auto base = static_cast<char*>(m_pdev.get_heap_vaddr());
+  return base + (m_bo->m_xdna_addr - m_pdev.get_heap_xdna_addr());
 }
 
 size_t
@@ -392,7 +406,7 @@ sync(direction, size_t size, size_t offset)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
 
   clflush_data(vaddr(), offset, size); 
-  shim_debug("Syncing BO %d: %ld, %ld", id().handle, offset, size);
+  shim_debug("Syncing BO %d: offset=%ld, size=%ld", id().handle, offset, size);
 }
 
 std::set<bo_id>

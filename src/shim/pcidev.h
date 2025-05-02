@@ -40,8 +40,11 @@ public:
   virtual bool
   is_cache_coherent() const = 0;
 
-  virtual bool
-  has_heap_buffer() const = 0;
+  virtual uint64_t
+  get_heap_xdna_addr() const = 0;
+
+  virtual void *
+  get_heap_vaddr() const = 0;
 
   virtual bool
   is_umq() const = 0;

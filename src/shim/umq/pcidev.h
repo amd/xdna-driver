@@ -17,8 +17,11 @@ public:
   bool
   is_cache_coherent() const override;
 
-  bool
-  has_heap_buffer() const override;
+  uint64_t
+  get_heap_xdna_addr() const override;
+
+  void *
+  get_heap_vaddr() const override;
 
   bool
   is_umq() const override;

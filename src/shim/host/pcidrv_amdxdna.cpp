@@ -67,13 +67,10 @@ std::shared_ptr<xrt_core::pci::dev>
 drv_amdxdna::
 create_pcidev(const std::string& sysfs) const
 {
-  static int device_type = AMDXDNA_DEV_TYPE_UNKNOWN;
   auto driver = std::dynamic_pointer_cast<const drv>(shared_from_this());
   auto platform_driver = std::dynamic_pointer_cast<const platform_drv>(
     std::make_shared<const platform_drv_host>(driver));
-
-  if (device_type == AMDXDNA_DEV_TYPE_UNKNOWN)
-    device_type = get_dev_type(sysfs);
+  auto device_type = get_dev_type(sysfs);
 
   if (device_type == AMDXDNA_DEV_TYPE_KMQ)
     return std::make_shared<pdev_kmq>(platform_driver, sysfs);

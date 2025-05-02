@@ -5,6 +5,7 @@
 #define PLAT_XDNA_H
 
 #include "pcidrv.h"
+#include "shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
 #include "core/common/shim/buffer_handle.h"
 #include <set>
@@ -43,8 +44,8 @@ enum class drv_ioctl_cmd {
 };
 
 struct bo_id {
-  uint32_t res_id;
-  uint32_t handle;
+  uint32_t res_id = AMDXDNA_INVALID_BO_HANDLE;
+  uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
   bool operator<(const bo_id& other) const
   { return std::tie(handle, res_id) < std::tie(other.handle, other.res_id); }
 };
@@ -63,6 +64,7 @@ struct create_ctx_arg {
 
 struct destroy_ctx_arg {
   uint32_t ctx_handle;
+  uint32_t syncobj_handle;
 };
 
 struct config_ctx_cu_config_arg {
@@ -79,9 +81,9 @@ struct config_ctx_debug_bo_arg {
 struct create_bo_arg {
   int type;
   size_t size;
+  uint64_t xdna_addr_align;
   bo_id bo;
   uint64_t xdna_addr;
-  void *vaddr;
   uint64_t map_offset;
 };
 
@@ -163,13 +165,13 @@ public:
   virtual void
   drv_close() const;
 
-  virtual void
-  drv_ioctl(drv_ioctl_cmd cmd, void* arg) const = 0;
+  void
+  drv_ioctl(drv_ioctl_cmd cmd, void* arg) const;
 
-  virtual void *
+  void *
   drv_mmap(void *addr, size_t len, int prot, int flags, off_t offset) const;
 
-  virtual void
+  void
   drv_munmap(void* addr, size_t len) const;
 
   std::shared_ptr<const drv>
@@ -187,6 +189,86 @@ private:
 
   std::string
   get_dev_node(const std::string& sysfs_name);
+
+  virtual void
+  create_ctx(create_ctx_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  destroy_ctx(destroy_ctx_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  config_ctx_cu_config(config_ctx_cu_config_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  create_bo(create_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  destroy_bo(destroy_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  sync_bo(sync_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  export_bo(export_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  import_bo(import_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  submit_cmd(submit_cmd_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  submit_dep(submit_dep_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  submit_sig(submit_sig_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  get_info(amdxdna_drm_get_info& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  set_state(amdxdna_drm_set_state& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  create_syncobj(create_destroy_syncobj_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  destroy_syncobj(create_destroy_syncobj_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  export_syncobj(export_import_syncobj_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  import_syncobj(export_import_syncobj_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  signal_syncobj(signal_syncobj_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  wait_syncobj(wait_syncobj_arg& arg) const
+  { shim_not_supported_err(__func__); }
 };
 
 }

@@ -37,10 +37,9 @@ public:
 
   int m_type = AMDXDNA_BO_INVALID;
   size_t m_size = 0;
-  bo_id m_id = { AMDXDNA_INVALID_BO_HANDLE, AMDXDNA_INVALID_BO_HANDLE };
+  bo_id m_id;
   uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
-  void *m_vaddr = nullptr;
-  uint64_t m_map_offset = 0;
+  uint64_t m_map_offset = AMDXDNA_INVALID_ADDR;
 
 private:
   const pdev& m_pdev;
