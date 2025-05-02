@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 set(XDNA_TARGET xrt_driver_xdna)
 set(XRT_CORE_TARGET xrt_core)
@@ -8,11 +8,14 @@ set(XRT_COREUTIL_TARGET xrt_coreutil)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} MAIN_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/kmq KMQ_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/umq UMQ_SOURCES)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/virtio UMQ_SOURCES)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/host HOST_SOURCES)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/virtio VIRTIO_SOURCES)
 add_library(${XDNA_TARGET} SHARED
   ${MAIN_SOURCES}
   ${KMQ_SOURCES}
   ${UMQ_SOURCES}
+  ${HOST_SOURCES}
+  ${VIRTIO_SOURCES}
   )
 
 set_target_properties(${XDNA_TARGET} PROPERTIES

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _SHIM_XDNA_H_
-#define _SHIM_XDNA_H_
+#ifndef SHIM_XDNA_H
+#define SHIM_XDNA_H
 
 #include "core/common/system.h"
 
@@ -21,6 +21,6 @@ private:
   std::shared_ptr<xrt_core::device> m_device;
 };
 
-} // namespace shim_xdna
+}
 
 #endif

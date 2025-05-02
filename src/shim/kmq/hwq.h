@@ -1,24 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _HWQ_KMQ_H_
-#define _HWQ_KMQ_H_
+#ifndef HWQ_KMQ_H
+#define HWQ_KMQ_H
 
 #include "../hwq.h"
 
 namespace shim_xdna {
 
-class hw_q_kmq : public hw_q
+class hwq_kmq : public hwq
 {
 public:
-  hw_q_kmq(const device& device);
+  hwq_kmq(const device& device);
+  ~hwq_kmq();
 
-  ~hw_q_kmq();
+  bo_id
+  get_queue_bo() const override;
 
+private:
   void
-  issue_command(xrt_core::buffer_handle *) override;
+  issue_command(cmd_buffer *) override;
 };
 
-} // shim_xdna
+}
 
-#endif // _HWQ_KMQ_H_
+#endif

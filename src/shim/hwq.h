@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _HWQ_XDNA_H_
-#define _HWQ_XDNA_H_
+#ifndef HWQ_XDNA_H
+#define HWQ_XDNA_H
 
 #include "fence.h"
 #include "hwctx.h"
-#include "shim_debug.h"
-
+#include "buffer.h"
 #include "core/common/shim/hwqueue_handle.h"
 
 namespace shim_xdna {
 
-class hw_q : public xrt_core::hwqueue_handle
+class hwq : public xrt_core::hwqueue_handle
 {
 public:
-  hw_q(const device& device);
+  hwq(const device& device);
+  ~hwq();
 
   void
   submit_command(xrt_core::buffer_handle *) override;
@@ -41,23 +41,28 @@ public:
 
 public:
   virtual void
-  bind_hwctx(const hw_ctx *ctx);
+  bind_hwctx(const hwctx& ctx);
 
-  void
+  virtual void
   unbind_hwctx();
 
-  uint32_t
-  get_queue_bo();
+  virtual bo_id
+  get_queue_bo() const = 0;
 
 protected:
-  virtual void
-  issue_command(xrt_core::buffer_handle *) = 0;
-
-  const hw_ctx *m_hwctx;
   const pdev& m_pdev;
-  uint32_t m_queue_boh;
+  xrt_core::hwctx_handle::slot_id m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+
+  int
+  wait_command(uint64_t seq, uint32_t timeout_ms) const;
+
+private:
+  uint32_t m_syncobj = 0;
+
+  virtual void
+  issue_command(cmd_buffer *) = 0;
 };
 
-} // shim_xdna
+}
 
-#endif // _HWQ_XDNA_H_
+#endif

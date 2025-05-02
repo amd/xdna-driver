@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "bo.h"
-#include "device.h"
+#include "../buffer.h"
 #include "pcidev.h"
 #include "core/common/config_reader.h"
 
@@ -25,33 +24,13 @@ get_heap_num_pages()
 
 namespace shim_xdna {
 
-pdev_kmq::
-pdev_kmq(std::shared_ptr<const drv> driver, std::string sysfs_name)
-  : pdev(std::move(driver), std::move(sysfs_name))
-{
-  shim_debug("Created KMQ pcidev");
-}
-
-pdev_kmq::
-~pdev_kmq()
-{
-  shim_debug("Destroying KMQ pcidev");
-}
-
-std::shared_ptr<xrt_core::device>
-pdev_kmq::
-create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
-{
-  return std::make_shared<device_kmq>(*this, handle, id);
-}
-
 void
 pdev_kmq::
 on_first_open() const
 {
   auto heap_sz = heap_page_size * get_heap_num_pages();
   // Alloc device memory on first device open.
-  m_dev_heap_bo = std::make_unique<bo_kmq>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
+  m_dev_heap_bo = std::make_unique<buffer>(*this, heap_sz, AMDXDNA_BO_DEV_HEAP);
 }
 
 void
@@ -59,6 +38,34 @@ pdev_kmq::
 on_last_close() const
 {
   m_dev_heap_bo.reset();
+}
+
+bool
+pdev_kmq::
+is_cache_coherent() const
+{
+  return false;
+}
+
+uint64_t
+pdev_kmq::
+get_heap_xdna_addr() const
+{
+  return m_dev_heap_bo->paddr();
+}
+
+void *
+pdev_kmq::
+get_heap_vaddr() const
+{
+  return m_dev_heap_bo->vaddr();
+}
+
+bool
+pdev_kmq::
+is_umq() const
+{
+  return false;
 }
 
 } // namespace shim_xdna

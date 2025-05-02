@@ -1,25 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _PCIDRV_VIRTIO_XDNA_H_
-#define _PCIDRV_VIRTIO_XDNA_H_
+#ifndef PCIDRV_VIRTGPU_H
+#define PCIDRV_VIRTGPU_H
 
-#include "pcidev.h"
-
-#include "core/pcie/linux/pcidrv.h"
-
+#include "../pcidrv.h"
+#include "core/pcie/linux/pcidev.h"
 #include <string>
 
 namespace shim_xdna {
 
-class drv_virtio : public xrt_core::pci::drv
+class drv_virtgpu : public drv
 {
 public:
   std::string
   name() const override;
-
-  bool
-  is_user() const override;
 
   std::string
   dev_node_prefix() const override;
@@ -35,6 +30,6 @@ private:
   create_pcidev(const std::string& sysfs) const override;
 };
 
-} // namespace shim_xdna
+}
 
 #endif

@@ -1,67 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
-//
-#include "kmq/pcidev.h"
-#include "umq/pcidev.h"
-#include "drm_local/amdxdna_accel.h"
-#include "pcidev.h"
+
 #include "pcidrv.h"
-#include "core/pcie/linux/system_linux.h"
-#include <fstream>
-
-namespace {
-
-struct X
-{
-  X() { xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv>()); }
-} x;
-
-int
-get_dev_type(const std::string& sysfs)
-{
-  const std::string sysfs_root{"/sys/bus/pci/devices/"};
-  const std::string dev_type_path = sysfs_root + sysfs + "/device_type";
-
-  std::ifstream ifs(dev_type_path);
-  if (!ifs.is_open())
-    throw std::invalid_argument(dev_type_path + " is missing?");
-
-  std::string line;
-  std::getline(ifs, line);
-  return static_cast<int>(std::stoi(line));
-}
-
-}
+#include <sys/types.h>
+#include <dirent.h>
 
 namespace shim_xdna {
-
-std::string
-drv::
-name() const
-{
-  return "amdxdna";
-}
-
-std::string
-drv::
-dev_node_prefix() const
-{
-  return "accel";
-}
-
-std::string
-drv::
-dev_node_dir() const
-{
-  return "accel";
-}
-
-std::string
-drv::
-sysfs_dev_node_dir() const
-{
-  return "accel";
-}
 
 bool
 drv::
@@ -70,18 +14,23 @@ is_user() const
   return true;
 }
 
-std::shared_ptr<xrt_core::pci::dev>
+std::string
 drv::
-create_pcidev(const std::string& sysfs) const
+get_dev_node(const std::string& sysfs_name) const
 {
-  auto t = get_dev_type(sysfs);
-  auto driver = std::static_pointer_cast<const drv>(shared_from_this());
-  if (t == AMDXDNA_DEV_TYPE_KMQ)
-    return std::make_shared<pdev_kmq>(driver, sysfs);
-  if (t == AMDXDNA_DEV_TYPE_UMQ)
-    return std::make_shared<pdev_umq>(driver, sysfs);
-  shim_err(-EINVAL, "Unknown device type: %d", t);
+  const std::string sysfs_root{"/sys/bus/pci/devices/"};
+  const std::string dev_path_dir = sysfs_root + sysfs_name + "/" + sysfs_dev_node_dir();
+  const auto prefix = dev_node_prefix();
+
+  auto dp = opendir(dev_path_dir.c_str());
+  if (dp) {
+    while (auto entry = readdir(dp)) {
+      std::string dirname{entry->d_name};
+      if(dirname.compare(0, prefix.size(), prefix) == 0)
+        return std::string("/dev/") + dev_node_dir() + "/" + dirname;
+    }
+  }
+  throw std::invalid_argument(std::string("Bad sysfs name: ") + sysfs_name.c_str());
 }
 
-} // namespace shim_xdna
-
+}

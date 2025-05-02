@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef PCIE_DEVICE_LINUX_XDNA_H
-#define PCIE_DEVICE_LINUX_XDNA_H
+#ifndef DEVICE_XDNA_H
+#define DEVICE_XDNA_H
 
-#include "pcidev.h"
 #include "shim.h"
+#include "pcidev.h"
 #include "shim_debug.h"
-
 #include "core/common/ishim.h"
 
 namespace shim_xdna {
@@ -15,32 +14,18 @@ namespace shim_xdna {
 class device : public xrt_core::noshim<xrt_core::device_pcie>
 {
 private:
+  const pdev& m_pdev; // The pcidev that this device object is created from
+
   // Private look up function for concrete query::request
   const xrt_core::query::request&
   lookup_query(xrt_core::query::key_type query_key) const override;
 
-  const pdev& m_pdev; // The pcidev that this device object is derived from
-
-  std::map<uint32_t, xrt_core::buffer_handle *> m_bo_map;
-
-  virtual std::unique_ptr<xrt_core::hwctx_handle>
-  create_hw_context(const device& dev,
-    const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos) const = 0;
-
-  virtual std::unique_ptr<xrt_core::buffer_handle>
-  import_bo(xrt_core::shared_handle::export_handle ehdl) const = 0;
-
 public:
   device(const pdev& pdev, handle_type shim_handle, id_type device_id);
-
   ~device();
 
   const pdev&
   get_pdev() const;
-
-  virtual std::unique_ptr<xrt_core::buffer_handle>
-  alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
-    size_t size, uint64_t flags) = 0;
 
 // ISHIM APIs supported are listed below
 public:
@@ -64,14 +49,7 @@ public:
   register_xclbin(const xrt::xclbin& xclbin) const override;
 
   void
-  open_aie_context(xrt::aie::access_mode) override
-  {
-    // return success everytime as this flow doesn't support
-    // calling driver to open aie context
-    // this is to satisfy xrt::aie::device class constructor
-    // which calls open_aie_context of ishim
-    return;
-  }
+  open_aie_context(xrt::aie::access_mode) override;
 
   std::vector<char>
   read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size) override;
@@ -92,6 +70,6 @@ public:
   import_fence(pid_t, xrt_core::shared_handle::export_handle) override;
 };
 
-} // namespace shim_xdna
+}
 
 #endif
