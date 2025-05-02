@@ -1238,6 +1238,12 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		int heap_usage;
+
+		mutex_lock(&tmp_client->mm_lock);
+		heap_usage = tmp_client->heap_usage;
+		mutex_unlock(&tmp_client->mm_lock);
+
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		amdxdna_for_each_ctx(tmp_client, ctx_id, ctx) {
 			if (!ctx->priv)
@@ -1260,7 +1266,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].dma_bandwidth = ctx->qos.dma_bandwidth;
 			tmp[hw_i].latency = ctx->qos.latency;
 			tmp[hw_i].frame_exec_time = ctx->qos.frame_exec_time;
-			tmp[hw_i].heap_usage = 0; /* TODO: Calculate total heap usage */
+			tmp[hw_i].heap_usage = heap_usage;
 			tmp[hw_i].egops = 0; /* TODO: Calculate effective gops */
 
 			if (ctx->priv->status == CTX_STATE_CONNECTED)
