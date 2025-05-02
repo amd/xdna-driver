@@ -270,6 +270,7 @@ delete_ctx_on_device()
   m_q->unbind_hwctx();
   struct destroy_ctx_arg arg = {
     .ctx_handle = m_handle,
+    .syncobj_handle = m_syncobj,
   };
   m_device.get_pdev().drv_ioctl(drv_ioctl_cmd::destroy_ctx, &arg);
 }

@@ -51,6 +51,9 @@ private:
   submit_sig(submit_sig_arg& arg) const override;
 
   void
+  wait_cmd(wait_cmd_arg& arg) const override;
+
+  void
   get_info(amdxdna_drm_get_info& arg) const override;
 
   void

@@ -62,18 +62,26 @@ int
 hwq::
 wait_command(uint64_t seq, uint32_t timeout_ms) const
 {
-  if (m_syncobj == AMDXDNA_INVALID_FENCE_HANDLE)
-    shim_err(EINVAL, "No syncobj to wait for cmd");
-
   int ret = 1;
+
   shim_debug("Waiting for cmd (%ld)...", seq);
   try {
-    wait_syncobj_arg wsobj = {
-      .handle = m_syncobj,
-      .timepoint = seq,
-      .timeout_ms = timeout_ms,
-    };
-    m_pdev.drv_ioctl(drv_ioctl_cmd::wait_syncobj, &wsobj);
+
+    if (m_syncobj != AMDXDNA_INVALID_FENCE_HANDLE) {
+      wait_syncobj_arg wsobj = {
+        .handle = m_syncobj,
+        .timepoint = seq,
+        .timeout_ms = timeout_ms,
+      };
+      m_pdev.drv_ioctl(drv_ioctl_cmd::wait_syncobj, &wsobj);
+    } else {
+      wait_cmd_arg wcmd = {
+        .ctx_handle = m_ctx_id,
+        .timeout_ms = timeout_ms,
+        .seq = seq,
+      };
+      m_pdev.drv_ioctl(drv_ioctl_cmd::wait_cmd, &wcmd);
+    }
   }
   catch (const xrt_core::system_error& ex) {
     if (ex.get_code() != ETIME)

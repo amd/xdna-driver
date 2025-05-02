@@ -31,6 +31,7 @@ enum class drv_ioctl_cmd {
   submit_cmd,
   submit_dep,
   submit_sig,
+  wait_cmd,
 
   get_info,
   set_state,
@@ -131,6 +132,12 @@ struct submit_sig_arg {
   uint32_t ctx_handle;
   uint32_t sync_obj;
   uint64_t timepoint;
+};
+
+struct wait_cmd_arg {
+  uint32_t ctx_handle;
+  uint32_t timeout_ms;
+  uint64_t seq;
 };
 
 struct create_destroy_syncobj_arg {
@@ -236,6 +243,10 @@ private:
 
   virtual void
   submit_sig(submit_sig_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  wait_cmd(wait_cmd_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void

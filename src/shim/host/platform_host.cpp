@@ -124,10 +124,12 @@ void
 platform_drv_host::
 destroy_ctx(destroy_ctx_arg& ctx_arg) const
 {
-  create_destroy_syncobj_arg sarg = {
-    .handle = ctx_arg.syncobj_handle,
-  };
-  destroy_syncobj(sarg);
+  if (ctx_arg.syncobj_handle != AMDXDNA_INVALID_FENCE_HANDLE) {
+    create_destroy_syncobj_arg sarg = {
+      .handle = ctx_arg.syncobj_handle,
+    };
+    destroy_syncobj(sarg);
+  }
 
   amdxdna_drm_destroy_ctx arg = {};
   arg.handle = ctx_arg.ctx_handle;
@@ -288,6 +290,18 @@ submit_sig(submit_sig_arg& cmd_arg) const
   arg.cmd_count = 1;
   arg.arg_count = 1;
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
+}
+
+void
+platform_drv_host::
+wait_cmd(wait_cmd_arg& cmd_arg) const
+{
+  amdxdna_drm_wait_cmd wcmd = {
+    .ctx = cmd_arg.ctx_handle,
+    .timeout = cmd_arg.timeout_ms,
+    .seq = cmd_arg.seq,
+  };
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
 }
 
 void
