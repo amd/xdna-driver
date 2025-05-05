@@ -186,9 +186,6 @@ drm_bo_free(int fd, uint32_t boh)
 off_t
 drm_bo_get_map_offset(int fd, uint32_t boh)
 {
-  if (boh == AMDXDNA_INVALID_BO_HANDLE)
-    return AMDXDNA_INVALID_ADDR;
-
   drm_virtgpu_map args = {
     .handle = boh,
   };
