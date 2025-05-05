@@ -9,6 +9,7 @@
 #include "xrt/experimental/xrt_ext.h"
 #include "xrt/experimental/xrt_module.h"
 #include "multi-layer.h"
+#include "core_equivalence.h"
 
 #include <fstream>
 #include <algorithm>
@@ -605,6 +606,74 @@ TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
   check_umq_multi_layer_result(bo_ifm.map(), bo_wts.map(), bo_wts2.map(), bo_ofm.map());
 }
 
+void
+TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  // Prepare input/output/weights BOs
+  const uint32_t IFM_BYTE_SIZE = 8 * 4 * 6 * sizeof (uint32_t);
+  const uint32_t WTS_BYTE_SIZE = 6 * 6 * sizeof (uint32_t);
+  const uint32_t WTS2_BYTE_SIZE = 6 * 6 * sizeof (uint32_t);
+  const uint32_t OFM_BYTE_SIZE = 8 * 4 * 6 * sizeof (uint32_t);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts2{device, WTS2_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  // Populate input & weight buffers
+  auto p = bo_ifm.map();
+  for (uint32_t i = 0; i < bo_ifm.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts.map();
+  for (uint32_t i = 0; i < bo_wts.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts2.map();
+  for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/core_equivalence.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/core_equivalence.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::run run{kernel};
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_wts2.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  auto ofm_mapped = bo_ofm.map();
+  int err = 0;
+  for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+    if (ofm_mapped[i] != core_equivalence[i]) {
+      std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << core_equivalence[i] << std::endl;
+      err++;
+    }
+  }
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+  }
+}
+
 /* run.start n requests, then run.wait all of them */
 void
 TEST_xrt_stress_start(int device_index, arg_type& arg)
@@ -690,12 +759,11 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt multi col preemption", TEST_xrt_umq_multi_col_preemption, {} },
   test_case{ "npu3 xrt single col resnet50", TEST_xrt_umq_single_col_resnet50_1_layer, {} },
   test_case{ "npu3 xrt multi-layer", TEST_xrt_umq_multi_layer, {} },
+  test_case{ "npu3 xrt core equivalence", TEST_xrt_umq_core_equivalence, {} },
   test_case{ "npu3 xrt df_bw", TEST_xrt_umq_df_bw, {} },
   test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {128} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {32} },
 };
-
-}
 
 // Test case executor implementation
 
