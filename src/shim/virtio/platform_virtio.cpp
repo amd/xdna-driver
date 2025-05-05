@@ -183,7 +183,7 @@ drm_bo_free(int fd, uint32_t boh)
   ioctl(fd, DRM_IOCTL_GEM_CLOSE, &close_bo);
 }
 
-uint64_t
+off_t
 drm_bo_get_map_offset(int fd, uint32_t boh)
 {
   if (boh == AMDXDNA_INVALID_BO_HANDLE)

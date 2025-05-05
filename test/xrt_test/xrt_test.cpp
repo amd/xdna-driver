@@ -141,7 +141,7 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
     std::cout << "result matched" << std::endl;
 }
 
-void check_umq_resnet50_result(int *ofm, std::string filename)
+void check_umq_resnet50_result(int *ofm, const std::string& filename)
 {
   uint32_t value;
   int err = 0;

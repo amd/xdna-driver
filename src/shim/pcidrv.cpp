@@ -24,11 +24,17 @@ get_dev_node(const std::string& sysfs_name) const
 
   auto dp = opendir(dev_path_dir.c_str());
   if (dp) {
+    std::string valid;
     while (auto entry = readdir(dp)) {
       std::string dirname{entry->d_name};
-      if(dirname.compare(0, prefix.size(), prefix) == 0)
-        return std::string("/dev/") + dev_node_dir() + "/" + dirname;
+      if(dirname.compare(0, prefix.size(), prefix) == 0) {
+        valid = dirname;
+        break;
+      }
     }
+    closedir(dp);
+    if (!valid.empty())
+      return std::string("/dev/") + dev_node_dir() + "/" + valid;
   }
   throw std::invalid_argument(std::string("Bad sysfs name: ") + sysfs_name.c_str());
 }
