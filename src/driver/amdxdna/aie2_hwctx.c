@@ -77,7 +77,7 @@ static int aie2_unload_hwctx(struct amdxdna_ctx *ctx)
 int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
 	const struct drm_sched_init_args args = {
 		.ops = &sched_ops,
 		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
@@ -98,7 +98,7 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	heap = ctx->priv->heap;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
 	ret = drm_sched_init(sched, &args);
 #else
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
