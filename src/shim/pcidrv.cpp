@@ -28,7 +28,7 @@ get_dev_node(const std::string& sysfs_name) const
     while (auto entry = readdir(dp)) {
       std::string dirname{entry->d_name};
       if(dirname.compare(0, prefix.size(), prefix) == 0) {
-        valid = dirname;
+        valid = std::move(dirname);
         break;
       }
     }
