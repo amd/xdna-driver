@@ -20,6 +20,10 @@
 #include "amdxdna_gem_dma.h"
 #endif
 
+#ifdef AMDXDNA_OF
+#include "amdxdna_gem_of.h"
+#endif
+
 struct amdxdna_ctx_priv;
 
 enum ert_cmd_opcode {
