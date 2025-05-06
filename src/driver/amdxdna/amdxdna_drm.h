@@ -21,11 +21,8 @@
  * supported by amdxdna_gem.h"
  */
 #include "amdxdna_gem_of.h"
-#endif
-#ifdef AMDXDNA_SHMEM
-#include "amdxdna_gem.h"
 #else
-#include "amdxdna_gem_dma.h"
+#include "amdxdna_gem.h"
 #endif
 #include "amdxdna_tdr.h"
 
