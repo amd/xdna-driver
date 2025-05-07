@@ -45,6 +45,23 @@ public:
   }
 
   void
+  add_ctrl_bo(bo& bo_ctrl, bo& bo_save, bo& bo_restore)
+  {
+    if (m_op != ERT_START_NPU_PREEMPT)
+      throw std::runtime_error("Expecting ERT_START_NPU_PREEMPT op, got: " + std::to_string(m_op));
+
+    auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(m_exec_buf_bo.map());
+    auto dpu_data = get_ert_npu_preempt_data(cmd_packet);
+    dpu_data->instruction_buffer = bo_ctrl.paddr();
+    dpu_data->instruction_buffer_size = bo_ctrl.size();
+    dpu_data->save_buffer = bo_save.paddr();
+    dpu_data->save_buffer_size = bo_save.size();
+    dpu_data->restore_buffer = bo_restore.paddr();
+    dpu_data->restore_buffer_size = bo_restore.size();
+    inc_pkt_count(sizeof(*dpu_data));
+  }
+
+  void
   add_ctrl_bo(bo& bo_ctrl)
   {
     auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(m_exec_buf_bo.map());
@@ -68,19 +85,8 @@ public:
       inc_pkt_count(sizeof(*dpu_data));
       break;
     }
-    case ERT_START_NPU_PREEMPT: {
-      auto dpu_data = get_ert_npu_preempt_data(cmd_packet);
-      dpu_data->instruction_buffer = bo_ctrl.paddr();
-      dpu_data->save_buffer = bo_ctrl.paddr();
-      dpu_data->restore_buffer = bo_ctrl.paddr();
-      dpu_data->instruction_buffer_size = bo_ctrl.size();
-      dpu_data->save_buffer_size = bo_ctrl.size();
-      dpu_data->restore_buffer_size = bo_ctrl.size();
-      inc_pkt_count(sizeof(*dpu_data));
-      break;
-    }
     default:
-      throw std::runtime_error("Unknown exec buf op code: " + std::to_string(m_op));
+      throw std::runtime_error("Bad exec buf op code: " + std::to_string(m_op));
     }
   }
 
@@ -110,11 +116,20 @@ public:
     m_exec_buf_bo.get()->bind_at(m_arg_cnt, bo_arg.get(), 0, bo_arg.size());
     // Add to argument list for control code patching
     if (arg_name.empty())
-      m_patching_args.emplace_back(std::to_string(m_arg_cnt), bo_arg.paddr());
+      m_ctrl_text_args.emplace_back(std::to_string(m_arg_cnt), bo_arg.paddr());
     else
-      m_patching_args.emplace_back(arg_name, bo_arg.paddr());
+      m_ctrl_text_args.emplace_back(arg_name, bo_arg.paddr());
     // Only increase m_arg_cnt now after it's used by code above.
     add_arg_64(bo_arg.paddr());
+  }
+
+  void
+  add_scratchpad_bo(bo& bo_arg)
+  {
+    // Add to argument list for control code patching
+    if (m_save_restore_args.size())
+      throw std::runtime_error("Scratchpad BO has already been added");
+    m_save_restore_args.emplace_back("scratch-pad-mem", bo_arg.paddr());
   }
 
   void
@@ -130,39 +145,53 @@ public:
     }
     std::cout << std::setfill(' ') << std::setw(0) << std::dec << std::endl;
 
-    std::cout << "Dumping patching arguement list:\n";
-    for (auto& [arg_name, arg_addr] : m_patching_args)
+    std::cout << "Dumping ctrl_text arguement list:\n";
+    for (auto& [arg_name, arg_addr] : m_ctrl_text_args)
+      std::cout << "{ " << arg_name << ", 0x" << std::hex << arg_addr << std::dec << " }\n";
+    std::cout << "Dumping save_restore arguement list:\n";
+    for (auto& [arg_name, arg_addr] : m_save_restore_args)
       std::cout << "{ " << arg_name << ", 0x" << std::hex << arg_addr << std::dec << " }\n";
   }
 
   static size_t
-  get_ctrl_code_size(const std::string& elf_path)
+  get_ctrl_code_size(const std::string& elf_path, xrt_core::patcher::buf_type type)
   {
     auto elf = xrt::elf{elf_path};
-    return get_ctrl_code_size(elf);
+    return get_ctrl_code_size(elf, type);
   }
 
   void
-  patch_ctrl_code(bo& bo_ctrl, const std::string& elf_path)
+  patch_ctrl_code(bo& bo_ctrl, xrt_core::patcher::buf_type type, const std::string& elf_path)
   {
     auto elf = xrt::elf{elf_path};
-    patch_ctrl_code(bo_ctrl, elf);
+    patch_ctrl_code(bo_ctrl, type, elf);
   }
 
   static size_t
-  get_ctrl_code_size(const xrt::elf& elf)
+  get_ctrl_code_size(const xrt::elf& elf, xrt_core::patcher::buf_type type)
   {
     auto mod = xrt::module{elf};
-    size_t instr_size = xrt_core::module_int::get_patch_buf_size(mod, xrt_core::patcher::buf_type::ctrltext);
+    size_t instr_size = xrt_core::module_int::get_patch_buf_size(mod, type);
     return instr_size;
   }
 
   void
-  patch_ctrl_code(bo& bo_ctrl, const xrt::elf& elf)
+  patch_ctrl_code(bo& bo_ctrl, xrt_core::patcher::buf_type type, const xrt::elf& elf)
   {
     auto mod = xrt::module{elf};
     size_t instr_size = bo_ctrl.size();
-    xrt_core::module_int::patch(mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), instr_size, &m_patching_args, xrt_core::patcher::buf_type::ctrltext);
+    std::vector< std::pair<std::string, uint64_t> > *arglist = nullptr;
+
+    if (type == xrt_core::patcher::buf_type::ctrltext) {
+      arglist = &m_ctrl_text_args;
+      printf("PATCHING CTRL TEXT\n");
+    } else {// for patching save/restore instructions
+      printf("PATCHING SAVE RESTORE\n");
+      arglist = &m_save_restore_args;
+    }
+
+    xrt_core::module_int::patch(
+      mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), instr_size, arglist, type);
     bo_ctrl.get()->sync(buffer_handle::direction::host2device, instr_size, 0);
   }
 
@@ -181,7 +210,8 @@ private:
   uint32_t m_op;
   uint32_t m_arg_cnt;
   uint32_t m_reg_idx;
-  std::vector< std::pair<std::string, uint64_t> > m_patching_args;
+  std::vector< std::pair<std::string, uint64_t> > m_ctrl_text_args;
+  std::vector< std::pair<std::string, uint64_t> > m_save_restore_args;
 };
 
 #endif // _SHIMTEST_EXEC_BUF_H_
