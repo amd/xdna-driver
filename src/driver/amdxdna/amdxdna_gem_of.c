@@ -104,12 +104,12 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	if (args->flags || !args->size) {
 		XDNA_ERR(xdna, "Invalid BO received, flags: 0x%llx, size: %llu", args->flags,
-				args->size);
+			 args->size);
 		return -EINVAL;
 	}
 
 	XDNA_DBG(xdna, "BO arg type %d size 0x%llx flags 0x%llx", args->type, args->size,
-			args->flags);
+		 args->flags);
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
 	case AMDXDNA_BO_CMD:
@@ -131,9 +131,8 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		goto put_obj;
 	}
 
-	XDNA_DBG(xdna, "BO hdl %d type %d userptr 0x%llx xdna_addr 0x%llx size 0x%lx",
-			args->handle, args->type, abo->mem.userptr,
-			abo->mem.dev_addr, abo->mem.size);
+	XDNA_DBG(xdna, "BO hdl %d type %d userptr 0x%llx xdna_addr 0x%llx size 0x%lx", args->handle,
+		 args->type, abo->mem.userptr, abo->mem.dev_addr, abo->mem.size);
 put_obj:
 	/* Dereference object reference. Handle holds it now. */
 	drm_gem_object_put(to_gobj(abo));
@@ -160,8 +159,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_fil
 		return -ENOENT;
 	}
 
-	if ((args->offset > gobj->size) || (args->size > gobj->size) ||
-	    ((args->offset + args->size) > gobj->size)) {
+	if (args->offset > gobj->size || args->size > gobj->size ||
+	    (args->offset + args->size) > gobj->size) {
 		XDNA_ERR(xdna, "Invalid BO %d requested", args->handle);
 		ret = -EINVAL;
 		goto out;
@@ -175,11 +174,9 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_fil
 
 	if (args->direction == SYNC_DIRECT_TO_DEVICE) {
 		dma_sync_single_for_device(dev->dev, bo_phyaddr, args->size, DMA_TO_DEVICE);
-	}
-	else if (args->direction == SYNC_DIRECT_FROM_DEVICE) {
+	} else if (args->direction == SYNC_DIRECT_FROM_DEVICE) {
 		dma_sync_single_for_cpu(dev->dev, bo_phyaddr, args->size, DMA_FROM_DEVICE);
-	}
-	else {
+	} else {
 		XDNA_ERR(xdna, "Invalid direction %d requested", args->direction);
 		ret = -EINVAL;
 	}
@@ -211,8 +208,8 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	args->xdna_addr = abo->mem.dev_addr;
 	args->map_offset = drm_vma_node_offset_addr(&gobj->vma_node);
 
-	XDNA_DBG(xdna, "BO hdl %d map_offset 0x%llx vaddr 0x%llx xdna_addr 0x%llx",
-			args->handle, args->map_offset, args->vaddr, args->xdna_addr);
+	XDNA_DBG(xdna, "BO hdl %d map_offset 0x%llx vaddr 0x%llx xdna_addr 0x%llx", args->handle,
+		 args->map_offset, args->vaddr, args->xdna_addr);
 
 	drm_gem_object_put(gobj);
 	return ret;

@@ -27,12 +27,12 @@ struct amdxdna_mem {
 #define BO_SUBMIT_LOCKED	BIT(1)
 
 struct amdxdna_gem_obj {
-        struct drm_gem_dma_object	base;
-        struct amdxdna_client           *client;
-        u8                              type;
-        u64                             flags;
-        struct mutex                    lock; /* Protects: pinned, assigned_hwctx */
-        struct amdxdna_mem              mem;
+	struct drm_gem_dma_object	base;
+	struct amdxdna_client           *client;
+	u8                              type;
+	u64                             flags;
+	struct mutex                    lock; /* Protects: pinned, assigned_hwctx */
+	struct amdxdna_mem              mem;
 };
 
 #define to_gobj(obj)		(&(obj)->base.base)
