@@ -20,16 +20,38 @@
 #include <vector>
 #include <chrono>
 #include <regex>
+#include <unistd.h>
 
 namespace {
 
 using arg_type = const std::vector<uint64_t>;
+uint64_t s_rounds = 128;
+uint64_t m_rounds = 32;
+std::string dpu = "nop";
 
 std::string program;
 // Test harness setup helpers
 std::string curpath;
 std::string xclbinpath;
+std::string elfpath;
 bool printing_on;
+
+void
+usage(const std::string& prog)
+{
+  std::cout << "\nUsage: " << prog << " [options] [test case ID separated by space]\n";
+  std::cout << "Options:\n";
+  std::cout << "\t" << "xrt_test" << " - run all test cases\n";
+  std::cout << "\t" << "xrt_test" << " [test case ID separated by space] - run specified test cases\n";
+  std::cout << "\t" << "-s" << ": specify rounds for stress test (start n ctx, then run)\n";
+  std::cout << "\t" << "-m" << ": specify rounds for stress test (run n ctx)\n";
+  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress tests)\n";
+  std::cout << "\t" << "-d" << ": specify dpu kernel (only effects stress test)\n";
+  std::cout << "\t" << "-h" << ": print this help message\n\n";
+  std::cout << "\t" << "Example Usage: " << "./xrt_test 14 -s 20 -d vadd -x vadd\n";
+  std::cout << "\t" << "Run stress test with Vadd kernel and xclbin for 20 rounds\n";
+  std::cout << std::endl;
+}
 
 //local_path(const char *fname)
 inline const std::string
@@ -54,18 +76,6 @@ enum test_mode {
   TEST_POSITIVE,
   TEST_NEGATIVE,
 };
-
-void
-usage(const std::string& prog)
-{
-  std::cout << "\nUsage: " << prog << " [xclbin] [test case ID separated by space]\n";
-  std::cout << "Examples:\n";
-  std::cout << "\t" << prog << " - run all test cases\n";
-  std::cout << "\t" << prog << " [test case ID separated by space] - run specified test cases\n";
-  std::cout << "\t" << prog << " /path/to/a/test.xclbin - run all test cases with test.xclbin\n";
-  std::cout << "\n";
-  std::cout << std::endl;
-}
 
 struct test_case { // Definition of one test case
   const char *description;
@@ -219,8 +229,7 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   // Populate input & weight buffers
   init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/vadd.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/vadd.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/vadd.elf")};
@@ -252,8 +261,7 @@ TEST_xrt_umq_memtiles(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/move_memtiles.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/move_memtiles.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/move_memtiles.elf")};
@@ -282,8 +290,7 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/ddr_memtile.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/ddr_memtile.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/ddr_memtile.elf")};
@@ -310,8 +317,7 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/remote_barrier.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/remote_barrier.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/remote_barrier.elf")};
@@ -335,8 +341,7 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/nop.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/nop.elf")};
@@ -359,8 +364,7 @@ void TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/single_col_preemption.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/single_col_preemption.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/single_col_preemption.elf")};
@@ -406,8 +410,7 @@ void TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/multi_col_preemption.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/multi_col_preemption.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/multi_col_preemption.elf")};
@@ -473,8 +476,7 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   read_bin_file<xrt_bo>(ofm_path, bo_ofm);
   read_bin_file<xrt_bo>(param_path, bo_param);
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/single_col_resnet50_1_layer.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/single_col_resnet50_1_layer.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_1_layer.elf")};
@@ -505,8 +507,7 @@ TEST_xrt_umq_df_bw(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/df_bw.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/df_bw.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/df_bw.elf")};
@@ -870,17 +871,18 @@ void
 TEST_xrt_stress_start(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  unsigned round = static_cast<unsigned>(arg[0]);
+  unsigned round = s_rounds;
 
   auto xclbin = xrt::xclbin(
     xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
   auto uuid = device.register_xclbin(xclbin);
 
-  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+  auto elf = xrt::elf(
+    elfpath.empty() ? local_path("npu3_workspace/nop.elf") : elfpath);
   xrt::module mod{elf};
 
   xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{nop}"};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{" + dpu + "}"};
 
   std::vector<xrt::run> run_handles;
 
@@ -894,7 +896,7 @@ TEST_xrt_stress_start(int device_index, arg_type& arg)
   }
 
   for (int i = 0; i < round; i++) {
-    auto state = run_handles[i].wait(600000 /* 600 sec, some simnow server are slow */);
+    auto state = run_handles[i].wait(60000 * round /* give 1 minute per round */);
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
     if (state != ERT_CMD_STATE_COMPLETED)
@@ -907,13 +909,14 @@ void
 TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  unsigned round = static_cast<unsigned>(arg[0]);
+  unsigned round = m_rounds;
 
   auto xclbin = xrt::xclbin(
     xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
   auto uuid = device.register_xclbin(xclbin);
 
-  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+  auto elf = xrt::elf(
+    elfpath.empty() ? local_path("npu3_workspace/nop.elf") : elfpath);
   xrt::module mod{elf};
 
   std::vector<xrt::hw_context> run_hwctxs;
@@ -925,12 +928,12 @@ TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
 
   for (int i = 0; i < round; i++) {
     auto hwctx = run_hwctxs[i];
-    auto kernel = xrt::ext::kernel{hwctx, mod, "dpu:{nop}"};
+    auto kernel = xrt::ext::kernel{hwctx, mod, "dpu:{" + dpu + "}"};
 
     auto run = xrt::run(kernel);
 
     run.start();
-    auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+    auto state = run.wait(60000 * round /* give 1 minute per round */);
 
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
@@ -955,8 +958,8 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
   test_case{ "npu3 xrt wo shim dma", TEST_xrt_umq_wo_shim_dma, {} },
   test_case{ "npu3 xrt df_bw", TEST_xrt_umq_df_bw, {} },
-  test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {128} },
-  test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {32} },
+  test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {s_rounds} },
+  test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
 };
 
 }
@@ -1015,29 +1018,77 @@ main(int argc, char **argv)
 {
   program = std::filesystem::path(argv[0]).filename();
   std::set<int> tests;
-
+  curpath = dirname(argv[0]);
   printing_on = true;
-  try {
-    int first_test_id = 1;
 
-    if (argc >= 2) {
-      std::ifstream xclbin(argv[1]);
-      if (xclbin) {
-        xclbinpath = argv[1];
-        std::cout << "Xclbin file: " << xclbinpath << std::endl;
-        first_test_id++;
+  try {
+    int option, val;
+    while ((option = getopt(argc, argv, ":s:m:x:d:h")) != -1) {
+      switch (option) {
+	case 's': {
+	  val = std::stoi(optarg);
+	  if (val > 128 || val < 0 ) {
+	    std::cout << "Invalid number of -s runs, max 128" << std::endl;
+	    return 1;
+	  }
+	  s_rounds = val;
+	  break;
+	}
+	case 'm': {
+	  val = std::stoi(optarg);
+	  if (val > 32 || val < 0 ) {
+            std::cout << "Invalid number of -m runs, max 32" << std::endl;
+            return 1;
+          }
+	  m_rounds = val;
+	  break;
+	}
+	case 'd': {
+	  dpu = optarg;
+	  std::cout << "Using dpu: " << dpu << std::endl;
+	  break;
+	}
+	case 'x': {
+	  xclbinpath = local_path("npu3_workspace/") + optarg + ".xclbin";
+	  std::ifstream xclbin(xclbinpath);
+          if (xclbin) {
+            elfpath = local_path("npu3_workspace/") + optarg + ".elf";
+	    std::cout << "Using xclbin file: " << xclbinpath << std::endl;
+	    std::cout << "Using elf file: " << elfpath << std::endl;
+	    break;
+          } else {
+            std::cout << "Failed to open xclbin file: " << optarg << std::endl;
+	    return 1;
+	  }
+	}
+	case 'h':
+	  usage(program);
+	  return 0;
+	case '?':
+      	  std::cout << "Unknown option: " << static_cast<char>(optopt) << std::endl;
+      	  return 1;
+    	case ':':
+      	  std::cout << "Missing value for option: " << argv[optind-1] << std::endl;
+      	  return 1;
+    	default:
+      	  usage(program);
+      	  return 1;
       }
     }
 
-    for (int i = first_test_id; i < argc; i++)
-      tests.insert(std::stoi(argv[i]));
+    for (int i = optind; i < argc; i++) {
+      int idx = std::stoi(argv[i]);
+      if (idx >= 0)
+        tests.insert(idx);
+      else
+        return 1;
+    }
   }
   catch (...) {
     usage(program);
     return 2;
   }
 
-  curpath = dirname(argv[0]);
   set_xrt_path();
 
   run_all_test(tests);
