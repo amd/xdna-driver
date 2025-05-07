@@ -100,7 +100,7 @@ bool
 is_driver_pin_arg_bo()
 {
   static bool drv_pin =
-    xrt_core::config::detail::get_bool_value("Debug.driver_pin_arg_bo", false);
+    xrt_core::config::detail::get_bool_value("Debug.driver_pin_arg_bo", true);
   return drv_pin;
 }
 
