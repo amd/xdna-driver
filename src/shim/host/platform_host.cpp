@@ -74,9 +74,9 @@ int64_t timeout_ms2abs_ns(int64_t timeout_ms)
   if (!timeout_ms)
     return std::numeric_limits<int64_t>::max(); // 0 means wait forever
 
-  auto now = std::chrono::high_resolution_clock::now();
-  auto now_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now);
-  return timeout_ms * 1000000 + now_ns.time_since_epoch().count();
+  struct timespec tp;
+  clock_gettime(CLOCK_MONOTONIC, &tp);
+  return timeout_ms * 1000000 + tp.tv_sec * 1000000000ULL + tp.tv_nsec;
 }
 
 void
