@@ -10,6 +10,7 @@ xrt_core::smi::subcommand
 create_validate_subcommand()
 {
   std::vector<xrt_core::smi::basic_option> validate_test_desc = {
+    {"aie-reconfig-overhead", "Run end-to-end array reconfiguration overhead through shim DMA", "hidden"},
     {"all", "All applicable validate tests will be executed (default)", "common"},
     {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
     {"cmd-chain-throughput", "Run end-to-end throughput test using command chaining", "hidden"},
@@ -73,6 +74,8 @@ create_configure_subcommand()
   std::map<std::string, std::shared_ptr<xrt_core::smi::option>> configure_suboptions;
   configure_suboptions.emplace("device", std::make_shared<xrt_core::smi::option>("device", "d", "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest", "common", "", "string"));
   configure_suboptions.emplace("help", std::make_shared<xrt_core::smi::option>("help", "h", "Help to use this sub-command", "common", "", "none"));
+  configure_suboptions.emplace("pmode", std::make_shared<xrt_core::smi::option>("pmode", "", "Modes: default, powersaver, balanced, performance, turbo", "common", "", "string", true));
+  configure_suboptions.emplace("force-preemption", std::make_shared<xrt_core::smi::option>("force-preemption", "", "Force enable|disable and see status of preemption", "hidden", "", "string", true));
 
   return {"configure", "Device and host configuration", "common", std::move(configure_suboptions)};
 }
