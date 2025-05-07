@@ -427,6 +427,13 @@ get_info(amdxdna_drm_get_info& arg) const
 
 void
 platform_drv_virtio::
+get_info_array(amdxdna_drm_get_info_array& arg) const
+{
+  // TODO: properly retrieve info from host.
+}
+
+void
+platform_drv_virtio::
 config_ctx_cu_config(config_ctx_cu_config_arg& arg) const
 {
   std::vector<char> cu_conf_param_buf(sizeof(amdxdna_ccmd_config_ctx_req) + arg.conf_buf.size());
