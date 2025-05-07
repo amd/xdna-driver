@@ -57,6 +57,9 @@ private:
   get_info(amdxdna_drm_get_info& arg) const override;
 
   void
+  get_info_array(amdxdna_drm_get_info_array& arg) const override;
+
+  void
   set_state(amdxdna_drm_set_state& arg) const override;
 
   void

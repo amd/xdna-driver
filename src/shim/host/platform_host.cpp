@@ -33,6 +33,8 @@ ioctl_cmd2name(unsigned long cmd)
     return "DRM_IOCTL_AMDXDNA_WAIT_CMD";
   case DRM_IOCTL_AMDXDNA_GET_INFO:
     return "DRM_IOCTL_AMDXDNA_GET_INFO";
+  case DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY:
+    return "DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY";
   case DRM_IOCTL_AMDXDNA_SET_STATE:
     return "DRM_IOCTL_AMDXDNA_SET_STATE";
 
@@ -309,6 +311,13 @@ platform_drv_host::
 get_info(amdxdna_drm_get_info& info) const
 {
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+}
+
+void
+platform_drv_host::
+get_info_array(amdxdna_drm_get_info_array& info) const
+{
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY, &info);
 }
 
 void
