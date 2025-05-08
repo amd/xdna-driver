@@ -419,7 +419,7 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-1");
     ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
   }
-  //if (dump)
+  if (dump)
     ebuf.dump();
 
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
