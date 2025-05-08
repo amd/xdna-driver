@@ -182,13 +182,10 @@ public:
     size_t instr_size = bo_ctrl.size();
     std::vector< std::pair<std::string, uint64_t> > *arglist = nullptr;
 
-    if (type == xrt_core::patcher::buf_type::ctrltext) {
+    if (type == xrt_core::patcher::buf_type::ctrltext)
       arglist = &m_ctrl_text_args;
-      printf("PATCHING CTRL TEXT\n");
-    } else {// for patching save/restore instructions
-      printf("PATCHING SAVE RESTORE\n");
+    else // for patching save/restore instructions
       arglist = &m_save_restore_args;
-    }
 
     xrt_core::module_int::patch(
       mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), instr_size, arglist, type);
