@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 // XRT includes
 #include "xrt/xrt_device.h"
@@ -8,6 +8,7 @@
 #include "xrt/experimental/xrt_elf.h"
 #include "xrt/experimental/xrt_ext.h"
 #include "xrt/experimental/xrt_module.h"
+#include "multi-layer.h"
 
 #include <fstream>
 #include <algorithm>
@@ -131,6 +132,22 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
     auto exp = ifm[i] + 2 * wts[i % 16];
     if (ofm[i] != exp) {
       std::cout << "error@" << i <<": " << ofm[i] << ", expecting: " << exp << std::endl;
+      err++;
+    }
+  }
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+void check_umq_multi_layer_result(int *ifm, int *wts, int *wts2, int *ofm)
+{
+  int err = 0;
+  for (uint32_t i = 0; i < 16 * 16; i++) {
+    if (ofm[i] != multi_layer[i]) {
+      std::cout << "error@" << i <<": " << ofm[i] << ", expecting: " << multi_layer[i]<< std::endl;
       err++;
     }
   }
@@ -538,6 +555,316 @@ TEST_xrt_umq_df_bw(int device_index, arg_type& arg)
     std::cout << "result matched" << std::endl;
 }
 
+void
+TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  // Prepare input/output/weights BOs
+  const uint32_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  const uint32_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
+  const uint32_t WTS2_BYTE_SIZE = 8 * 8 * sizeof (uint32_t);
+  const uint32_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts2{device, WTS2_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  // Populate input & weight buffers
+  init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
+  auto p = bo_wts2.map();
+  for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
+    p[i] = i * 10000000;
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/multi-layer.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/multi-layer.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::run run{kernel};
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_wts2.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  check_umq_multi_layer_result(bo_ifm.map(), bo_wts.map(), bo_wts2.map(), bo_ofm.map());
+}
+
+void
+TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  // Prepare input/output/weights BOs
+  const uint32_t IFM_BYTE_SIZE = 8 * 4 * 6 * sizeof (uint32_t);
+  const uint32_t WTS_BYTE_SIZE = 6 * 6 * sizeof (uint32_t);
+  const uint32_t WTS2_BYTE_SIZE = 6 * 6 * sizeof (uint32_t);
+  const uint32_t OFM_BYTE_SIZE = 8 * 4 * 6 * sizeof (uint32_t);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts2{device, WTS2_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  // Populate input & weight buffers
+  auto p = bo_ifm.map();
+  for (uint32_t i = 0; i < bo_ifm.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts.map();
+  for (uint32_t i = 0; i < bo_wts.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts2.map();
+  for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/core_equivalence.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/core_equivalence.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::run run{kernel};
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_wts2.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  auto ofm_mapped = bo_ofm.map();
+  int err = 0;
+  for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+    if (ofm_mapped[i] != core_equivalence[i]) {
+      std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << core_equivalence[i] << std::endl;
+      err++;
+    }
+  }
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+void
+TEST_xrt_umq_cascade_4ker_2lay(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  // Prepare input/output/weights BOs
+  const uint32_t IFM_BYTE_SIZE = 8 * 4 * 6 * sizeof (uint32_t);
+  const uint32_t WTS_BYTE_SIZE = 6 * 6 * sizeof (uint32_t);
+  const uint32_t WTS2_BYTE_SIZE = 6 * 6 * sizeof (uint32_t);
+  const uint32_t OFM_BYTE_SIZE = 8 * 4 * 6 * sizeof (uint32_t);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts2{device, WTS2_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  // Populate input & weight buffers
+  auto p = bo_ifm.map();
+  for (uint32_t i = 0; i < bo_ifm.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts.map();
+  for (uint32_t i = 0; i < bo_wts.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts2.map();
+  for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/ml4v2.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/ml4v2.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::run run{kernel};
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_wts2.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  auto ofm_mapped = bo_ofm.map();
+  int err = 0;
+  for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+    if (ofm_mapped[i] != core_equivalence[i]) {
+      std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << core_equivalence[i] << std::endl;
+      err++;
+    }
+  }
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+void
+TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  // Prepare input/output/weights BOs
+  const uint32_t IFM_BYTE_SIZE = 8 * 4 * sizeof (uint32_t);
+  const uint32_t WTS_BYTE_SIZE = 8 * sizeof (uint32_t);
+  const uint32_t OFM_BYTE_SIZE = 8 * 4 * sizeof (uint32_t);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts2l{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts2r{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts3{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  // Populate input & weight buffers
+  auto p = bo_ifm.map();
+  for (uint32_t i = 0; i < bo_ifm.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts.map();
+  for (uint32_t i = 0; i < bo_wts.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts2l.map();
+  for (uint32_t i = 0; i < bo_wts2l.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts2r.map();
+  for (uint32_t i = 0; i < bo_wts2r.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+  p = bo_wts3.map();
+  for (uint32_t i = 0; i < bo_wts3.size() / sizeof (uint32_t); i++)
+    p[i] = i;
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/parallel_branches.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/parallel_branches.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::run run{kernel};
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_wts2l.get());
+  run.set_arg(4, bo_wts2r.get());
+  run.set_arg(5, bo_wts3.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  auto ofm_mapped = bo_ofm.map();
+  int err = 0;
+  for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+    if (ofm_mapped[i] != parallel_branches[i]) {
+      std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << parallel_branches[i] << std::endl;
+      err++;
+    }
+  }
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+void
+TEST_xrt_umq_wo_shim_dma(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  // Prepare input/output/weights BOs
+  const uint32_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  const uint32_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
+  const uint32_t WTS2_BYTE_SIZE = 8 * 8 * sizeof (uint32_t);
+  const uint32_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts2{device, WTS2_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  // Populate input & weight buffers
+  init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
+  auto p = bo_wts2.map();
+  for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
+    p[i] = i * 10000000;
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/wo_shim_dma.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/wo_shim_dma.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::run run{kernel};
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_wts2.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  check_umq_multi_layer_result(bo_ifm.map(), bo_wts.map(), bo_wts2.map(), bo_ofm.map());
+}
+
 /* run.start n requests, then run.wait all of them */
 void
 TEST_xrt_stress_start(int device_index, arg_type& arg)
@@ -622,6 +949,11 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt single col preemption", TEST_xrt_umq_single_col_preemption, {} },
   test_case{ "npu3 xrt multi col preemption", TEST_xrt_umq_multi_col_preemption, {} },
   test_case{ "npu3 xrt single col resnet50", TEST_xrt_umq_single_col_resnet50_1_layer, {} },
+  test_case{ "npu3 xrt multi-layer", TEST_xrt_umq_multi_layer, {} },
+  test_case{ "npu3 xrt core equivalence", TEST_xrt_umq_core_equivalence, {} },
+  test_case{ "npu3 xrt cascade 4 kernel 2 layer", TEST_xrt_umq_cascade_4ker_2lay, {} },
+  test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
+  test_case{ "npu3 xrt wo shim dma", TEST_xrt_umq_wo_shim_dma, {} },
   test_case{ "npu3 xrt df_bw", TEST_xrt_umq_df_bw, {} },
   test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {128} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {32} },
