@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef PCIDEV_XDNA_H
 #define PCIDEV_XDNA_H
 
-#include "shim_debug.h"
-
-#include "core/pcie/linux/device_linux.h"
+#include "platform.h"
 #include "core/pcie/linux/pcidev.h"
 
 namespace shim_xdna {
@@ -14,20 +12,16 @@ namespace shim_xdna {
 class pdev : public xrt_core::pci::dev
 {
 public:
-  pdev(std::shared_ptr<const xrt_core::pci::drv> driver, std::string sysfs_name);
+  pdev(std::shared_ptr<const platform_drv>& driver, const std::string& sysfs_name);
   ~pdev();
 
   xrt_core::device::handle_type
   create_shim(xrt_core::device::id_type id) const override;
-
+ 
   std::shared_ptr<xrt_core::device>
-  create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override
-  { shim_not_supported_err(__func__); }
+  create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
 
 public:
-  void
-  ioctl(unsigned long cmd, void* arg) const;
-
   void*
   mmap(void *addr, size_t len, int prot, int flags, off_t offset) const;
 
@@ -40,17 +34,33 @@ public:
   void
   close() const;
 
+  void
+  drv_ioctl(drv_ioctl_cmd cmd, void* arg) const;
+
+  virtual bool
+  is_cache_coherent() const = 0;
+
+  virtual uint64_t
+  get_heap_xdna_addr() const = 0;
+
+  virtual void *
+  get_heap_vaddr() const = 0;
+
+  virtual bool
+  is_umq() const = 0;
+
 private:
   virtual void
-  on_first_open() const {}
-  virtual void
-  on_last_close() const {}
+  on_first_open() const = 0;
 
-  mutable int m_dev_fd = -1;
+  virtual void
+  on_last_close() const = 0;
+
   mutable int m_dev_users = 0;
   mutable std::mutex m_lock;
+  std::shared_ptr<const platform_drv> m_driver;
 };
 
-} // namespace shim_xdna
+}
 
 #endif

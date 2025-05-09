@@ -15,10 +15,14 @@
 #include <linux/workqueue.h>
 
 #include "amdxdna_ctx.h"
-#ifdef AMDXDNA_SHMEM
-#include "amdxdna_gem.h"
+#ifdef AMDXDNA_OF
+/*
+ * TODO: remove this and implement physical contiguous memory by carvedout memory
+ * supported by amdxdna_gem.h"
+ */
+#include "amdxdna_gem_of.h"
 #else
-#include "amdxdna_gem_dma.h"
+#include "amdxdna_gem.h"
 #endif
 #include "amdxdna_tdr.h"
 
@@ -147,6 +151,7 @@ struct amdxdna_stats {
  * @filp: DRM file pointer
  * @mm_lock: lock for client wide memory related
  * @dev_heap: Shared device heap memory
+ * @heap_usage: Total number of bytes allocated in heap memory
  * @sva: iommu SVA handle
  * @pasid: PASID
  * @stats: record npu usage stats
@@ -163,6 +168,7 @@ struct amdxdna_client {
 
 	struct mutex			mm_lock; /* protect memory related */
 	struct amdxdna_gem_obj		*dev_heap;
+	u32				heap_usage;
 
 	struct iommu_sva		*sva;
 	int				pasid;

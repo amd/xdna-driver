@@ -361,6 +361,7 @@ get_and_show_bo_properties(device* dev, buffer_handle *boh)
   std::cout << std::hex
     << "\tbo flags: 0x" << properties.flags << "\n"
     << "\tbo paddr: 0x" << properties.paddr << "\n"
+    << "\tbo kmhdl: 0x" << properties.kmhdl << "\n"
     << "\tbo size: 0x" << properties.size << std::dec << std::endl;
 }
 

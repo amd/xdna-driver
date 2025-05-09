@@ -24,13 +24,11 @@ namespace {
 
 using arg_type = const std::vector<uint64_t>;
 
-const uint16_t npu3_device_id = 0x1569;
-
 std::string program;
 // Test harness setup helpers
 std::string curpath;
 std::string xclbinpath;
-bool printing_on; 
+bool printing_on;
 
 //local_path(const char *fname)
 inline const std::string
@@ -141,6 +139,51 @@ void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
     throw std::runtime_error("result mis-match");
   else
     std::cout << "result matched" << std::endl;
+}
+
+void check_umq_resnet50_result(int *ofm, const std::string& filename)
+{
+  uint32_t value;
+  int err = 0;
+  int i = 0;
+
+  std::ifstream infile(filename, std::ios::binary);
+  if (!infile)
+    throw std::runtime_error("Unable to open .bin file");
+
+  while (infile.read(reinterpret_cast<char*>(&value), sizeof(value))) {
+    if(ofm[i] != value) {
+      std::cout << "error@" << i <<": " << ofm[i] << ", expecting: " << value << std::endl;
+      err++;
+    }
+    i++;
+  }
+  infile.close();
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+template <typename TEST_BO>
+void
+read_bin_file(std::string& filename, TEST_BO& test_bo)
+{
+  uint32_t value;
+  int i = 0;
+  char ch;
+
+  std::ifstream infile(filename, std::ios::binary);
+  if (!infile)
+    throw std::runtime_error("Unable to open .bin file");
+
+  auto p = test_bo.map();
+  while (infile.read(reinterpret_cast<char*>(&value), sizeof(value))) {
+    p[i] = value;
+    i++;
+  }
+  infile.close();
 }
 
 void
@@ -295,6 +338,151 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 }
 
+void TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/single_col_preemption.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/single_col_preemption.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{preemption}"};
+  xrt::run run{kernel};
+
+  /* init input buffer */
+  const uint32_t data = 0x12345678;
+  const uint32_t rw_size = sizeof(uint32_t); // number of shim BD used
+
+  xrt_bo bo_ifm{device, rw_size, xrt::bo::flags::cacheable};
+  xrt_bo bo_ofm{device, rw_size, xrt::bo::flags::cacheable};
+  auto ifm_mapped = bo_ifm.map();
+  ifm_mapped[0] = data;
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  auto ofm_mapped = bo_ofm.map();
+  if (ofm_mapped[0] != ifm_mapped[0]) {
+    std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
+    throw std::runtime_error("result mis-match");
+  }
+  else
+    std::cout << "result matched" << std::endl;
+
+}
+
+void TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/multi_col_preemption.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/multi_col_preemption.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{preemption}"};
+  xrt::run run{kernel};
+
+  /* init input buffer */
+  const uint32_t data = 0x12345678;
+  const uint32_t rw_size = sizeof(uint32_t); // number of shim BD used
+
+  xrt_bo bo_ifm{device, rw_size, xrt::bo::flags::cacheable};
+  xrt_bo bo_ofm{device, rw_size, xrt::bo::flags::cacheable};
+  auto ifm_mapped = bo_ifm.map();
+  ifm_mapped[0] = data;
+
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_ofm.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // Check result
+  auto ofm_mapped = bo_ofm.map();
+  if (ofm_mapped[0] != ifm_mapped[0]) {
+    std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
+    throw std::runtime_error("result mis-match");
+  }
+  else
+    std::cout << "result matched" << std::endl;
+
+}
+
+void
+TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  std::string ifm_path = local_path("npu3_workspace/ifm.bin");
+  std::string param_path = local_path("npu3_workspace/param.bin");
+  std::string wgt_path = local_path("npu3_workspace/wgt.bin");
+  std::string ofm_path = local_path("npu3_workspace/ofm.bin");
+
+  const uint32_t IFM_BYTE_SIZE = std::filesystem::file_size(ifm_path);
+  const uint32_t WTS_BYTE_SIZE = std::filesystem::file_size(wgt_path);
+  const uint32_t OFM_BYTE_SIZE = std::filesystem::file_size(ofm_path);
+  const uint32_t PARAM_BYTE_SIZE = std::filesystem::file_size(param_path);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_param{device, PARAM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  read_bin_file<xrt_bo>(ifm_path, bo_ifm);
+  read_bin_file<xrt_bo>(wgt_path, bo_wts);
+  read_bin_file<xrt_bo>(ofm_path, bo_ofm);
+  read_bin_file<xrt_bo>(param_path, bo_param);
+
+  auto xclbin = xrt::xclbin(
+      xclbinpath.empty() ? local_path("npu3_workspace/single_col_resnet50_1_layer.xclbin") : xclbinpath);
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_1_layer.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{resnet50}"};
+  xrt::run run{kernel};
+
+  run.set_arg(0, bo_ofm.get());
+  run.set_arg(1, bo_ifm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_param.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  check_umq_resnet50_result(bo_ofm.map(), ofm_path);
+}
+
 void
 TEST_xrt_umq_df_bw(int device_index, arg_type& arg)
 {
@@ -431,6 +619,9 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt ddr_memtile", TEST_xrt_umq_ddr_memtile, {} },
   test_case{ "npu3 xrt remote_barrier", TEST_xrt_umq_remote_barrier, {} },
   test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
+  test_case{ "npu3 xrt single col preemption", TEST_xrt_umq_single_col_preemption, {} },
+  test_case{ "npu3 xrt multi col preemption", TEST_xrt_umq_multi_col_preemption, {} },
+  test_case{ "npu3 xrt single col resnet50", TEST_xrt_umq_single_col_resnet50_1_layer, {} },
   test_case{ "npu3 xrt df_bw", TEST_xrt_umq_df_bw, {} },
   test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {128} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {32} },
@@ -470,6 +661,9 @@ run_all_test(std::set<int>& tests)
 {
   auto all = tests.empty();
   unsigned int device_index = 0;
+
+  if (!test_list.size())
+    std::cout << "test_list is empty!" << std::endl;
 
   for (int i = 0; i < test_list.size(); i++) {
     if (!all) {

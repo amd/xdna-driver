@@ -397,86 +397,68 @@ static void aie2_ctx_syncobj_destroy(struct amdxdna_ctx *ctx)
 	drm_syncobj_put(ctx->priv->syncobj);
 }
 
-static int aie2_ctx_col_list(struct amdxdna_ctx *ctx)
+static bool is_valid_qos_dpm_params(struct amdxdna_qos_info *qos)
 {
-	struct amdxdna_dev *xdna = ctx->client->xdna;
-	struct amdxdna_dev_hdl *ndev;
-	int start, end, first, last;
-	u32 width = 1, entries = 0;
-	int i;
-
-	if (!ctx->num_tiles) {
-		XDNA_ERR(xdna, "Number of tiles is zero");
-		return -EINVAL;
-	}
-
-	ndev = xdna->dev_handle;
-	if (unlikely(!ndev->metadata.core.row_count)) {
-		XDNA_WARN(xdna, "Core tile row count is zero");
-		return -EINVAL;
-	}
-
-	ctx->num_col = ctx->num_tiles / ndev->metadata.core.row_count;
-	if (!ctx->num_col || ctx->num_col > ndev->total_col) {
-		XDNA_ERR(xdna, "Invalid num_col %d", ctx->num_col);
-		return -EINVAL;
-	}
-
-	if (ndev->priv->col_align == COL_ALIGN_NATURE)
-		width = ctx->num_col;
-
-#ifdef AMDXDNA_DEVEL
-	if (start_col_index >= 0) {
-		if (start_col_index + ctx->num_col > ndev->total_col) {
-			XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d",
-				 start_col_index, ctx->num_col);
-			return -EINVAL;
-		}
-		entries = 1;
-		first = start_col_index;
-		goto skip_list_cal;
-	}
-#endif
 	/*
-	 * In range [start, end], find out columns that is multiple of width.
-	 *	'first' is the first column,
-	 *	'last' is the last column,
-	 *	'entries' is the total number of columns.
+	 * gops is retrieved from the xmodel, so it's always set
+	 * fps and latency are the configurable params from the application
 	 */
-	start =  xdna->dev_info->first_col;
-	end =  ndev->total_col - ctx->num_col;
-	if (start > 0 && end == 0) {
-		XDNA_DBG(xdna, "Force start from col 0");
-		start = 0;
+	if (qos->gops > 0 && (qos->fps > 0 || qos->latency > 0))
+		return true;
+
+	return false;
+}
+
+static u32 capable_gops(u32 opc, u32 clk_mhz)
+{
+	return opc * clk_mhz / 1000;
+}
+
+static inline u32 request_gops(u32 gopw, u32 wps, u32 latency_ms, u32 factor)
+{
+	if (latency_ms)
+		return gopw * max(wps, 1000 / latency_ms) * factor;
+	else
+		return gopw * wps * factor;
+}
+
+static void aie2_calc_ctx_dpm(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_qos_info *qos = &ctx->qos;
+	u32 req_gops;
+	u32 level;
+
+	if (!is_valid_qos_dpm_params(qos)) {
+		ctx->priv->req_dpm_level = ndev->max_dpm_level;
+		return;
 	}
-	first = start + (width - start % width) % width;
-	last = end - end % width;
-	if (last >= first)
-		entries = (last - first) / width + 1;
-	XDNA_DBG(xdna, "start %d end %d first %d last %d",
-		 start, end, first, last);
 
-	if (unlikely(!entries)) {
-		XDNA_ERR(xdna, "Start %d end %d width %d",
-			 start, end, width);
-		return -EINVAL;
+	req_gops = request_gops(qos->gops, qos->fps, qos->latency,
+				ndev->sys_eff_factor);
+	if (!req_gops) {
+		XDNA_WARN(ndev->xdna, "%s GOPS is zero, use max DPM level", ctx->name);
+		ctx->priv->req_dpm_level = ndev->max_dpm_level;
+		return;
 	}
 
-#ifdef AMDXDNA_DEVEL
-skip_list_cal:
-#endif
-	ctx->col_list = kmalloc_array(entries, sizeof(*ctx->col_list), GFP_KERNEL);
-	if (!ctx->col_list)
-		return -ENOMEM;
+	/*
+	 * Try to find a DPM level that can provide enough GOPS.
+	 * If not able to find, use max_dpm_level.
+	 */
+	for (level = 0; level <= ndev->max_dpm_level; level++) {
+		u32 clk_mhz, cap_gops;
 
-	ctx->col_list_len = entries;
-	ctx->col_list[0] = first;
-	for (i = 1; i < entries; i++)
-		ctx->col_list[i] = ctx->col_list[i - 1] + width;
+		clk_mhz = ndev->priv->dpm_clk_tbl[level].hclk;
+		cap_gops = capable_gops(ctx->max_opc, clk_mhz);
+		if (req_gops <= cap_gops)
+			break;
+	}
 
-	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4, ctx->col_list,
-			     entries * sizeof(*ctx->col_list), false);
-	return 0;
+	if (level > ndev->max_dpm_level) {
+		XDNA_WARN(ndev->xdna, "%s GOPS too large, use max DPM level", ctx->name);
+		level = ndev->max_dpm_level;
+	}
+	ctx->priv->req_dpm_level = level;
 }
 
 int aie2_ctx_init(struct amdxdna_ctx *ctx)
@@ -505,20 +487,14 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	ctx->priv = priv;
 
 	ctx->priv->orig_num_col = ctx->num_tiles / ndev->metadata.core.row_count;
-
-	ret = aie2_ctx_col_list(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
-		goto free_priv;
-	}
-
+	ctx->max_opc = ndev->priv->col_opc * ctx->priv->orig_num_col;
 	mutex_lock(&client->mm_lock);
 	heap = client->dev_heap;
 	if (!heap) {
 		XDNA_ERR(xdna, "The client dev heap object not exist");
 		mutex_unlock(&client->mm_lock);
 		ret = -ENOENT;
-		goto free_col_list;
+		goto free_priv;
 	}
 	drm_gem_object_get(to_gobj(heap));
 	mutex_unlock(&client->mm_lock);
@@ -573,6 +549,9 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	atomic64_set(&priv->job_pending_cnt, 0);
 	init_waitqueue_head(&priv->connect_waitq);
 
+	aie2_calc_ctx_dpm(ndev, ctx);
+	aie2_pm_add_dpm_level(ndev, ctx->priv->req_dpm_level);
+
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
 
@@ -587,8 +566,6 @@ free_cmd_bufs:
 	amdxdna_gem_unpin(heap);
 put_heap:
 	drm_gem_object_put(to_gobj(heap));
-free_col_list:
-	kfree(ctx->col_list);
 free_priv:
 	kfree(priv);
 	return ret;
@@ -600,6 +577,7 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 	int idx;
 
 	aie2_rq_del(&xdna->dev_handle->ctx_rq, ctx);
+	aie2_pm_del_dpm_level(xdna->dev_handle, ctx->priv->req_dpm_level);
 
 	aie2_ctx_syncobj_destroy(ctx);
 	for (idx = 0; idx < ARRAY_SIZE(ctx->priv->cmd_buf); idx++)
@@ -617,7 +595,6 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 	XDNA_DBG(xdna, "%s total completed jobs %lld",
 		 ctx->name, ctx->completed);
 	mutex_destroy(&ctx->priv->io_lock);
-	kfree(ctx->col_list);
 	kfree(ctx->priv);
 	kfree(ctx->cus);
 }

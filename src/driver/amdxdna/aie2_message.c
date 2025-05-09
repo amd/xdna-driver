@@ -618,6 +618,31 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 	return xdna_mailbox_send_msg(ndev->mgmt_chann, &msg, TX_TIMEOUT);
 }
 
+int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			dma_addr_t addr, u32 size)
+{
+	DECLARE_AIE2_MSG(get_app_health, MSG_OP_GET_APP_HEALTH);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	req.context_id = context_id;
+	req.buf_size = size;
+	req.buf_addr = addr;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Get app health failed, ret 0x%x", ret);
+		return ret;
+	}
+
+	if (resp.status != AIE2_STATUS_SUCCESS) {
+		XDNA_ERR(xdna, "Get app health got status 0x%x", resp.status);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
 /* Below messages are to hardware context mailbox channel */
 int aie2_config_cu(struct amdxdna_ctx *ctx)
 {
@@ -708,8 +733,11 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	op = amdxdna_cmd_get_op(cmd_abo);
 	switch (op) {
 	case ERT_START_CU:
-		if (unlikely(payload_len > sizeof(req.ebuf.payload)))
-			XDNA_DBG(xdna, "Invalid ebuf payload len: %d", payload_len);
+		if (unlikely(payload_len > sizeof(req.ebuf.payload))) {
+			XDNA_ERR(xdna, "Invalid ebuf payload len: %d", payload_len);
+			return -EINVAL;
+		}
+
 		req.ebuf.cu_idx = cu_idx;
 		memcpy(req.ebuf.payload, payload, sizeof(req.ebuf.payload));
 		msg.send_size = sizeof(req.ebuf);
@@ -718,8 +746,11 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	case ERT_START_NPU: {
 		struct amdxdna_cmd_start_npu *sn = payload;
 
-		if (unlikely(payload_len - sizeof(*sn) > sizeof(req.dpu.payload)))
-			XDNA_DBG(xdna, "Invalid dpu payload len: %d", payload_len);
+		if (unlikely(payload_len - sizeof(*sn) > sizeof(req.dpu.payload))) {
+			XDNA_ERR(xdna, "Invalid dpu payload len: %d", payload_len);
+			return -EINVAL;
+		}
+
 		req.dpu.inst_buf_addr = sn->buffer;
 		req.dpu.inst_size = sn->buffer_size;
 		req.dpu.inst_prop_cnt = sn->prop_count;
@@ -732,8 +763,10 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	case ERT_START_NPU_PREEMPT: {
 		struct amdxdna_cmd_preempt_data *pd = payload;
 
-		if (unlikely(payload_len - sizeof(*pd) > sizeof(req.dpu.payload)))
-			XDNA_DBG(xdna, "Invalid dpu payload len: %d", payload_len);
+		if (unlikely(payload_len - sizeof(*pd) > sizeof(req.dpu_pmpt.payload))) {
+			XDNA_ERR(xdna, "Invalid dpu preempt payload len: %d", payload_len);
+			return -EINVAL;
+		}
 
 		req.dpu_pmpt.inst_buf_addr = pd->inst_buf;
 		req.dpu_pmpt.save_buf_addr = pd->save_buf;
@@ -944,6 +977,11 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 
 		offset += size;
 	}
+#ifdef AMDXDNA_DEVEL
+	XDNA_DBG(client->xdna, "Total %d commands:", payload->command_count);
+	print_hex_dump_debug("cmdbufs: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     cmdbuf_abo->mem.kva, offset, false);
+#endif
 
 	/* The offset is the accumulated total size of the cmd buffer */
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, offset, payload->command_count);
@@ -957,10 +995,14 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 	msg.send_size = sizeof(req);
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
 	if (ret) {
-		XDNA_ERR(ctx->client->xdna, "Send message failed");
+		XDNA_ERR(client->xdna, "Send message failed");
 		return ret;
 	}
 	job->msg_id = msg.id;
+#ifdef AMDXDNA_DEVEL
+	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     &req, msg.send_size, false);
+#endif
 
 	return 0;
 }
@@ -982,6 +1024,10 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 	ret = aie2_cmdlist_fill_one_slot(op, cmdbuf_abo, 0, cmd_abo, &size);
 	if (ret)
 		return ret;
+#ifdef AMDXDNA_DEVEL
+	print_hex_dump_debug("cmdbuf: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     cmdbuf_abo->mem.kva, size, false);
+#endif
 
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, size, 1);
 
@@ -998,6 +1044,10 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 		return ret;
 	}
 	job->msg_id = msg.id;
+#ifdef AMDXDNA_DEVEL
+	print_hex_dump_debug("cmdlist msg: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     &req, msg.send_size, false);
+#endif
 
 	return 0;
 }

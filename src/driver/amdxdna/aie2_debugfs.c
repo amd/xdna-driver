@@ -597,6 +597,45 @@ static int aie2_ctx_rq_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(ctx_rq, aie2_ctx_rq_show, NULL);
 
+static int aie2_get_app_health_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct app_health_report_v1 *report;
+	const size_t size = 0x1000;
+	dma_addr_t dma_addr;
+	void *buff;
+	int ret;
+
+	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
+				     DMA_FROM_DEVICE, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	drm_clflush_virt_range(buff, size); /* device can access */
+	mutex_lock(&ndev->aie2_lock);
+	/* Just for debug, always check context id 1 */
+	ret = aie2_get_app_health(ndev, 1, dma_addr, size);
+	mutex_unlock(&ndev->aie2_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "Get app health failed ret %d", ret);
+		goto free_buf;
+	}
+
+	report = buff;
+	seq_printf(m, "version    %d\n", report->header.version);
+	seq_printf(m, "size       %d\n", report->header.size);
+	seq_printf(m, "context_id %d\n", report->context_id);
+	seq_printf(m, "dpu_pc     0x%x\n", report->dpu_pc);
+	seq_printf(m, "txn_op_id  0x%x\n", report->txn_op_id);
+
+free_buf:
+	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(get_app_health, aie2_get_app_health_show, NULL);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -617,6 +656,7 @@ const struct {
 	AIE2_DBGFS_FILE(telemetry_debug, 0400),
 	AIE2_DBGFS_FILE(event_trace, 0600),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
+	AIE2_DBGFS_FILE(get_app_health, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)

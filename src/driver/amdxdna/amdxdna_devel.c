@@ -7,12 +7,13 @@
 #include <linux/dma-mapping.h>
 #include <linux/sched/clock.h>
 
+#include "amdxdna_carvedout_buf.h"
 #include "amdxdna_devel.h"
 #include "amdxdna_trace.h"
 
 int iommu_mode;
-module_param(iommu_mode, int, 0644);
-MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID, 2 = Bypass");
+module_param(iommu_mode, int, 0444);
+MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID");
 
 bool priv_load;
 module_param(priv_load, bool, 0644);
@@ -26,33 +27,39 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = NULL;
 
-	switch (iommu_mode) {
-	case AMDXDNA_IOMMU_PASID:
-		// default case
-		break;
-	case AMDXDNA_IOMMU_NO_PASID:
 #if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-		if (!iommu_present(xdna->ddev.dev->bus)) {
+	if (!iommu_present(xdna->ddev.dev->bus)) {
 #else
-		if (!device_iommu_mapped(xdna->ddev.dev)) {
+	if (!device_iommu_mapped(xdna->ddev.dev)) {
 #endif
-			XDNA_ERR(xdna, "IOMMU not present");
-			return -ENODEV;
+		if (amdxdna_use_carvedout()) {
+			iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+			return 0;
 		}
 
-		domain = iommu_get_domain_for_dev(xdna->ddev.dev);
-		if (!iommu_is_dma_domain(domain)) {
-			XDNA_ERR(xdna, "Set amd_iommu=force_isolation for DMA domain");
-			return -EOPNOTSUPP;
-		}
+		XDNA_ERR(xdna, "No carvedout memory and IOMMU is off");
+		return -ENODEV;
+	}
 
-		break;
-	case AMDXDNA_IOMMU_BYPASS:
-		 // IOMMU bypass mode is supported with carvedout memory.
-		break;
-	default:
+	if (iommu_mode == AMDXDNA_IOMMU_PASID)
+		return 0;
+
+	if (iommu_mode != AMDXDNA_IOMMU_NO_PASID) {
 		XDNA_ERR(xdna, "Invalid IOMMU mode %d", iommu_mode);
 		return -EINVAL;
+	}
+
+	/*
+	 * Set amd_iommu=force_isolation in the Linux cmdline makes SVA capable
+	 * device to force use legacy v1 page table, which not support PASID but
+	 * supports the old IOVA. In this mode, dma_map_*() can map uncontiguous
+	 * host memory to contiguous IOVA space.
+	 * This will not needed if AMD IOMMU changed the behavior.
+	 */
+	domain = iommu_get_domain_for_dev(xdna->ddev.dev);
+	if (!iommu_is_dma_domain(domain)) {
+		XDNA_WARN(xdna, "fallback to iommu_mode 0");
+		iommu_mode = AMDXDNA_IOMMU_PASID;
 	}
 
 	return 0;
@@ -143,7 +150,7 @@ void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 	amdxdna_free_sgt(xdna, sgt);
 }
 
-#ifdef AMDXDNA_SHMEM
+#ifndef AMDXDNA_OF
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -187,11 +194,11 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 {
 }
-#endif /* AMDXDNA_SHMEM */
+#endif
 
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
 {
-#ifdef AMDXDNA_OF
+#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 	struct drm_printer p = drm_debug_printer(NULL);
 #else
 	struct drm_printer p = drm_dbg_printer(&xdna->ddev, DRM_UT_DRIVER, NULL);

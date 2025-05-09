@@ -1,36 +1,64 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _HWCTX_XDNA_H_
-#define _HWCTX_XDNA_H_
+#ifndef HWCTX_XDNA_H
+#define HWCTX_XDNA_H
 
 #include "device.h"
-#include "shim_debug.h"
-
+#include "core/common/xclbin_parser.h"
 #include "core/common/shim/buffer_handle.h"
-#include "core/common/shim/fence_handle.h"
 #include "core/common/shim/hwctx_handle.h"
-#include "drm_local/amdxdna_accel.h"
 
 namespace shim_xdna {
 
-class hw_q; // forward declaration
+class hwq; // forward declaration
 
-class hw_ctx : public xrt_core::hwctx_handle
+class xclbin_parser {
+public:
+  xclbin_parser(const xrt::xclbin& xclbin);
+  ~xclbin_parser();
+
+  uint32_t
+  get_column_cnt() const;
+
+  uint32_t
+  get_ops_per_cycle() const;
+
+  int
+  get_num_cus() const;
+
+  const std::string&
+  get_cu_name(int idx) const;
+
+  size_t
+  get_cu_func(int idx) const;
+
+  const std::vector<uint8_t>&
+  get_cu_pdi(int idx) const;
+
+private:
+  struct cu_info {
+    std::string m_name;
+    size_t m_func;
+    std::vector<uint8_t> m_pdi;
+  };
+  std::vector<cu_info> m_cus;
+  uint32_t m_column_cnt;
+  uint32_t m_ops_per_cycle;
+
+  std::vector<uint8_t>
+  get_pdi(const xrt_core::xclbin::aie_partition_obj& aie, uint16_t kernel_id) const;
+
+  void
+  print_info() const;
+};
+
+class hwctx : public xrt_core::hwctx_handle
 {
 public:
-  hw_ctx(const device& dev, const qos_type& qos, std::unique_ptr<hw_q> q, const xrt::xclbin& xclbin);
-
-  ~hw_ctx();
-
-  // TODO
-  void
-  update_qos(const qos_type&) override
-  { shim_not_supported_err(__func__); }
-
-  void
-  update_access_mode(access_mode) override
-  { shim_not_supported_err(__func__); }
+  hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
+    std::unique_ptr<hwq> queue);
+  ~hwctx();
 
   slot_id
   get_slotidx() const override;
@@ -39,7 +67,7 @@ public:
   get_hw_queue() override;
 
   std::unique_ptr<xrt_core::buffer_handle>
-  alloc_bo(void* userptr, size_t size, uint64_t flags) override = 0;
+  alloc_bo(void* userptr, size_t size, uint64_t flags) override;
 
   std::unique_ptr<xrt_core::buffer_handle>
   alloc_bo(size_t size, uint64_t flags) override;
@@ -64,58 +92,27 @@ public:
   uint32_t
   get_syncobj() const;
 
-protected:
-  uint32_t m_num_cols;
-  std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
-
-  struct cu_info {
-    std::string m_name;
-    size_t m_func;
-    std::vector<uint8_t> m_pdi;
-  };
-
-  const device&
-  get_device() const;
-
-  const std::vector<cu_info>&
-  get_cu_info() const;
-
-  void
-  set_slotidx(slot_id id);
-
-  void
-  set_doorbell(uint32_t db);
-
-  void
-  set_syncobj(uint32_t syncobj);
-
-  virtual void
-  create_ctx_on_device();
-
-  amdxdna_qos_info m_qos = {};
-  uint32_t m_ops_per_cycle;
-  std::unique_ptr<hw_q> m_q;
-
 private:
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
-  std::vector<cu_info> m_cu_info;
+  std::vector<std::string> m_cu_names;
   uint32_t m_doorbell = 0;
-  uint32_t m_syncobj = 0;
+  uint32_t m_syncobj = AMDXDNA_INVALID_FENCE_HANDLE;
+  uint32_t m_col_cnt = 0;
+  uint32_t m_ops_per_cycle = 0;
+  std::unique_ptr<hwq> m_q;
+  amdxdna_qos_info m_qos = {};
 
-  virtual void
+  void
+  create_ctx_on_device();
+
+  void
   delete_ctx_on_device();
 
   void
   init_qos_info(const qos_type& qos);
-
-  void
-  parse_xclbin(const xrt::xclbin& xclbin);
-
-  void
-  print_xclbin_info();
 };
 
-} // shim_xdna
+}
 
-#endif // _HWCTX_XDNA_H_
+#endif

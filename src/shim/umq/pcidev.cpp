@@ -1,30 +1,51 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "device.h"
 #include "pcidev.h"
 
 namespace shim_xdna {
 
+void
 pdev_umq::
-pdev_umq(std::shared_ptr<const drv> driver, std::string sysfs_name)
-  : pdev(std::move(driver), std::move(sysfs_name))
+on_first_open() const
 {
-  shim_debug("Created UMQ pcidev");
+  // do nothing
 }
 
+void
 pdev_umq::
-~pdev_umq()
+on_last_close() const
 {
-  shim_debug("Destroying UMQ pcidev");
+  // do nothing
 }
 
-std::shared_ptr<xrt_core::device>
+bool
 pdev_umq::
-create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const
+is_cache_coherent() const
 {
-  return std::make_shared<device_umq>(*this, handle, id);
+  return true;
 }
 
-} // namespace shim_xdna
+void *
+pdev_umq::
+get_heap_vaddr() const
+{
+  return nullptr;
+}
+
+uint64_t
+pdev_umq::
+get_heap_xdna_addr() const
+{
+  return AMDXDNA_INVALID_ADDR;
+}
+
+bool
+pdev_umq::
+is_umq() const
+{
+  return true;
+}
+
+}
 

@@ -310,6 +310,16 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	if (!events)
 		return -ENOMEM;
 
+	/*
+	 * Note: We test the behavior of dma_alloc_noncoherent() on 6.13 kernel.
+	 * 1. This function eventually goes to __alloc_frozen_pages_noprof().
+	 * 2. The maximum size is 4MB (limited by MAX_PAGE_ORDER 10), otherwise
+	 * this will return NULL pointer.
+	 * 3. For valid size, this function returns physical contiguous memory.
+	 *
+	 * Thoughts, if there is requirement for larger than 4MB physical
+	 * contiguous memory, consider allocate buffer from carvedout memory?
+	 */
 	events->buf = dma_alloc_noncoherent(xdna->ddev.dev, total_size, &events->addr,
 					    DMA_BIDIRECTIONAL, GFP_KERNEL);
 	if (!events->buf) {

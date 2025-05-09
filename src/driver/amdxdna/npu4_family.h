@@ -71,7 +71,7 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 	.optional_cfg	= npu4_rt_cfg_tbl,							\
 	.dpm_clk_tbl	= npu4_dpm_clk_table,							\
 	.priv_load_cfg = { 5, 0, AIE2_RT_CFG_INIT },						\
-	.col_align	= COL_ALIGN_NATURE,							\
+	.col_opc	= 4096,									\
 	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,							\
 	.mbox_size      = 0, /* Use BAR size */							\
 	.sram_dev_addr  = NPU4_SRAM_BAR_BASE,							\

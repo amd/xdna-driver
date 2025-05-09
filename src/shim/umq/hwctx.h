@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef _HWCTX_UMQ_H_
-#define _HWCTX_UMQ_H_
+#ifndef HWCTX_UMQ_H
+#define HWCTX_UMQ_H
 
 #include "../hwctx.h"
+#include "../buffer.h"
 
 namespace shim_xdna {
 
-class hw_ctx_umq : public hw_ctx {
+class hwctx_umq : public hwctx {
 public:
-  hw_ctx_umq(const device& dev, const xrt::xclbin& xclbin, const qos_type& qos);
-
-  ~hw_ctx_umq();
-
-  std::unique_ptr<xrt_core::buffer_handle>
-  alloc_bo(void* userptr, size_t size, uint64_t flags) override;
+  hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos);
+  ~hwctx_umq();
 
 private:
-  #define LOG_MAGIC_NO 0x43455254
+  std::unique_ptr<buffer> m_log_bo;
+  uint32_t m_col_cnt = 0;
 
   enum umq_log_flag {
     UMQ_DEBUG_BUFFER = 0,
@@ -38,13 +36,13 @@ private:
   };
 
   struct umq_log_metadata m_metadata;
-  void *m_log_buf;
+  void *m_log_buf = nullptr;
 
   void init_log_buf();
   void fini_log_buf();
   void set_metadata(int num_cols, size_t size, uint64_t bo_paddr, enum umq_log_flag flag);
 };
 
-} // shim_xdna
+}
 
-#endif // _HWCTX_UMQ_H_
+#endif

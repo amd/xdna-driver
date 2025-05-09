@@ -75,7 +75,6 @@
 	(ctx_rq_to_ndev(r)->xdna)
 
 struct amdxdna_ctx_priv;
-struct xrs_action_load;
 struct event_trace_req_buf;
 struct start_event_trace_resp;
 struct aie2_partition;
@@ -212,6 +211,7 @@ struct amdxdna_ctx_priv {
 	wait_queue_head_t		job_free_waitq;
 
 	u32				orig_num_col;
+	u32				req_dpm_level;
 
 	/* For context runqueue */
 	/* When there is ongoing IO, use this sem avoid runqueue disconnect ctx */
@@ -307,7 +307,6 @@ struct amdxdna_dev_hdl {
 	void			__iomem *smu_base;
 	void			__iomem *mbox_base;
 	struct psp_device		*psp_hdl;
-	void				*xrs_hdl;
 
 	struct xdna_mailbox_chann_info	mgmt_info;
 	u32				mgmt_prot_major;
@@ -320,9 +319,11 @@ struct amdxdna_dev_hdl {
 	/*power management and clock */
 	int				pw_mode;
 	enum aie2_power_state		power_state;
+	u32				sys_eff_factor;
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
+	u32				*dpm_cnt;
 	u32				clk_gating;
 	u32				npuclk_freq;
 	u32				hclk_freq;
@@ -341,12 +342,11 @@ struct amdxdna_dev_hdl {
 	/*
 	 * The aie2_lock should be used in non critical path for below purposes
 	 *   - Exclusively send message to mgmt channel
-	 *   - Protect resolver APIs
 	 *   - Protect hwctx_cnt
 	 *   - Protect SMU set dpm, power on/off
 	 *
 	 * Some code path needs to make more than one of above atomic, such as,
-	 * aie2_hwctx_start() needs to send messages, access resolver and hwctx_cnt
+	 * aie2_hwctx_start() needs to send messages, access hwctx_cnt
 	 * aie2_mgmt_fw_init() needs to send multiple messages, etc.
 	 */
 	struct mutex			aie2_lock;
@@ -376,9 +376,7 @@ struct amdxdna_dev_priv {
 	const struct msg_op_ver		*optional_msg;
 	const struct rt_cfg_ver		*optional_cfg;
 
-#define COL_ALIGN_NONE   0
-#define COL_ALIGN_NATURE 1
-	u32				col_align;
+	u32				col_opc;
 	u32				mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
 	u32				mbox_size;
@@ -427,6 +425,9 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
 void aie2_pm_fini(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
+#define aie2_pm_add_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, true)
+#define aie2_pm_del_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, false)
+void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
 int npu1_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 int npu4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 
@@ -471,6 +472,8 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev);
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid);
 int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
 			     u32 size, struct aie_version *version);
+int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			dma_addr_t addr, u32 size);
 int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
@@ -521,8 +524,6 @@ void aie2_dump_ctx(struct amdxdna_client *client);
 /* aie2_hwctx.c */
 int aie2_hwctx_start(struct amdxdna_ctx *ctx);
 void aie2_hwctx_stop(struct amdxdna_ctx *ctx);
-int aie2_xrs_load_hwctx(struct amdxdna_ctx *ctx, struct xrs_action_load *action);
-int aie2_xrs_unload_hwctx(struct amdxdna_ctx *ctx);
 
 /* aid2_ctx_runqueue.c */
 int aie2_rq_init(struct aie2_ctx_rq *rq);

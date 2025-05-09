@@ -83,8 +83,8 @@ extern "C" {
 
 /**
  * struct qos_info - QoS information for driver.
- * @gops: Giga operations per second.
- * @fps: Frames per second.
+ * @gops: Giga operations per workload.
+ * @fps: Workload per second.
  * @dma_bandwidth: DMA bandwidtha.
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.

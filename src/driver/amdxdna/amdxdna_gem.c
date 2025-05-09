@@ -77,6 +77,7 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 		return ret;
 	}
 
+	client->heap_usage += mem->size;
 	mem->dev_addr = abo->mm_node.start;
 	offset = mem->dev_addr - client->dev_heap->mem.dev_addr;
 	mem->userptr = client->dev_heap->mem.userptr + offset;
@@ -97,8 +98,10 @@ amdxdna_gem_heap_free(struct amdxdna_gem_obj *abo)
 {
 	mutex_lock(&abo->client->mm_lock);
 
-	if (abo->mem.dev_addr != AMDXDNA_INVALID_ADDR)
+	if (abo->mem.dev_addr != AMDXDNA_INVALID_ADDR) {
 		drm_mm_remove_node(&abo->mm_node);
+		abo->client->heap_usage -= abo->mem.size;
+	}
 	drm_gem_object_put(to_gobj(abo->client->dev_heap));
 
 	mutex_unlock(&abo->client->mm_lock);
