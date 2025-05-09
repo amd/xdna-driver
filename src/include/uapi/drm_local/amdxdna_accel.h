@@ -163,6 +163,41 @@ struct amdxdna_ctx_param_config_cu {
 	struct amdxdna_cu_config cu_configs[];
 };
 
+enum cert_buf_type {
+	debug_buffer = 0,
+	trace_buffer,
+	dbg_queue,
+	log_buffer
+};
+
+/**
+ * struct uc_info_entry: Holds uc index & buffer size allotment info
+ * @index: uc index
+ *     On aie2ps, uc index is same to column index
+ *     On aie4, uc index is mapped as 0->0_A, 1->0_B, 2->1_A, 3->1_B, 4->2_A, 5->2_B
+ * @size: buffer size in words for this uc
+ */
+struct uc_info_entry {
+	__u32 index;
+	__u32 size;
+};
+
+/**
+ * struct cert_log_metadata - Holds buffer configuration.
+ * @buf_type: log type set to cert
+ * @num_ucs: total ucs to config
+ * @command_id: command id used for trace
+ * @bo_handle: actual bo handle
+ * @uc_info_entry: uc index & buffer size mapping info
+ */
+struct cert_log_metadata {
+	__u8 buf_type;
+	__u8 num_ucs;
+	__u64 command_id;
+	__u64 bo_handle;
+	struct uc_info_entry uc_info[];
+};
+
 /**
  * struct amdxdna_drm_config_ctx - Configure context.
  * @handle: Context handle.
