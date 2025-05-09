@@ -32,9 +32,6 @@ all: $(BUILD_ROOT_DIR)
 
 # add EXTRA_CFLAGS='-save-temps' to keep intermedia files
 DEFINES := -DAMDXDNA_DEVEL
-ifdef AMDXDNA_DRM_USAGE
-DEFINES += -DAMDXDNA_DRM_USAGE
-endif
 
 ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF
