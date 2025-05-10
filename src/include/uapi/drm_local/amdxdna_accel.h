@@ -163,7 +163,7 @@ struct amdxdna_ctx_param_config_cu {
 	struct amdxdna_cu_config cu_configs[];
 };
 
-enum cert_buf_type {
+enum fw_buf_type {
 	debug_buffer = 0,
 	trace_buffer,
 	dbg_queue,
@@ -183,14 +183,14 @@ struct uc_info_entry {
 };
 
 /**
- * struct cert_log_metadata - Holds buffer configuration.
- * @buf_type: log type set to cert
+ * struct fw_buffer_metadata - Holds buffer configuration.
+ * @buf_type: buffer type set to fw
  * @num_ucs: total ucs to config
  * @command_id: command id used for trace
  * @bo_handle: actual bo handle
  * @uc_info_entry: uc index & buffer size mapping info
  */
-struct cert_log_metadata {
+struct fw_buffer_metadata {
 	__u8 buf_type;
 	__u8 num_ucs;
 	__u64 command_id;
