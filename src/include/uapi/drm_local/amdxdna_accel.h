@@ -163,13 +163,6 @@ struct amdxdna_ctx_param_config_cu {
 	struct amdxdna_cu_config cu_configs[];
 };
 
-enum fw_buf_type {
-	debug_buffer = 0,
-	trace_buffer,
-	dbg_queue,
-	log_buffer
-};
-
 /**
  * struct uc_info_entry: Holds uc index & buffer size allotment info
  * @index: uc index
@@ -191,8 +184,13 @@ struct uc_info_entry {
  * @uc_info_entry: uc index & buffer size mapping info
  */
 struct fw_buffer_metadata {
+#define AMDXDNA_FW_BUF_DEBUG	0
+#define AMDXDNA_FW_BUF_TRACE	1
+#define AMDXDNA_FW_BUF_DBG_Q	2
+#define AMDXDNA_FW_BUF_LOG	3
 	__u8 buf_type;
 	__u8 num_ucs;
+	__u8 pad[48];
 	__u64 command_id;
 	__u64 bo_handle;
 	struct uc_info_entry uc_info[];
