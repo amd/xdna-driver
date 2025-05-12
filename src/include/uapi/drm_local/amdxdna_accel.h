@@ -541,6 +541,25 @@ struct amdxdna_drm_attribute_state {
 };
 
 /**
+ * struct amdxdna_drm_query_telemetry_header - Telemetry header to capture information shared
+ *					       between driver and shim. Followed by the telemetry
+ *					       data harvested from the firmware.
+ * @major: Firmware telemetry interface major version number. Based on firmware response message.
+ * @minor: Firmware telemetry interface minor version number. Based on firmware response message.
+ * @type: Telemetry query type. Set by the user.
+ *	  MBZ for NPU 1, 2, 4, 5, and 6. Non-zero for future generations.
+ * @map_num_elements: Total number of elements in the map table. Set by the driver.
+ * @map: Maps the firmware allocated context ID(key) to driver allocated context ID(value).
+ */
+struct amdxdna_drm_query_telemetry_header {
+	__u32 major;
+	__u32 minor;
+	__u32 type;
+	__u32 map_num_elements;
+	__u32 map[] __counted_by(map_num_elements);
+};
+
+/**
  * struct amdxdna_drm_get_info - Get some information from the AIE hardware.
  * @param: Specifies the structure passed in the buffer.
  * @buffer_size: Size of the input buffer. Size needed/written by the kernel.
