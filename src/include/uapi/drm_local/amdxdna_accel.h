@@ -175,7 +175,7 @@ enum fw_buf_type {
  * @index: uc index
  *     On aie2ps, uc index is same to column index
  *     On aie4, uc index is mapped as 0->0_A, 1->0_B, 2->1_A, 3->1_B, 4->2_A, 5->2_B
- * @size: buffer size in words for this uc
+ * @size: buffer size in bytes for this uc
  */
 struct uc_info_entry {
 	__u32 index;
