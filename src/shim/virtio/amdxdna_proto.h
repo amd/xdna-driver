@@ -112,7 +112,7 @@ struct amdxdna_ccmd_create_ctx_rsp {
 struct amdxdna_ccmd_destroy_ctx_req {
 	struct vdrm_ccmd_req hdr;
 	uint32_t handle;
-	uint32_t _pad;
+	uint32_t syncobj_hdl;
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_destroy_ctx_req)
 
@@ -138,7 +138,8 @@ struct amdxdna_ccmd_exec_cmd_req {
 	uint32_t type;
 	uint32_t cmd_count;
 	uint32_t arg_count;
-	uint64_t cmds_n_args[];
+	uint32_t arg_offset; /* number of dwords from the cmds_n_args[0] */
+	uint32_t cmds_n_args[];
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_exec_cmd_req)
 
