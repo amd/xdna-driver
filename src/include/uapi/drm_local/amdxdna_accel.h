@@ -164,6 +164,39 @@ struct amdxdna_ctx_param_config_cu {
 };
 
 /**
+ * struct uc_info_entry: Holds uc index & buffer size allotment info
+ * @index: uc index
+ *     On aie2ps, uc index is same to column index
+ *     On aie4, uc index is mapped as 0->0_A, 1->0_B, 2->1_A, 3->1_B, 4->2_A, 5->2_B
+ * @size: buffer size in bytes for this uc
+ */
+struct uc_info_entry {
+	__u32 index;
+	__u32 size;
+};
+
+/**
+ * struct fw_buffer_metadata - Holds buffer configuration.
+ * @buf_type: buffer type set to fw
+ * @num_ucs: total ucs to config
+ * @command_id: command id used for trace
+ * @bo_handle: actual bo handle
+ * @uc_info_entry: uc index & buffer size mapping info
+ */
+struct fw_buffer_metadata {
+#define AMDXDNA_FW_BUF_DEBUG	0
+#define AMDXDNA_FW_BUF_TRACE	1
+#define AMDXDNA_FW_BUF_DBG_Q	2
+#define AMDXDNA_FW_BUF_LOG	3
+	__u8 buf_type;
+	__u8 num_ucs;
+	__u8 pad[48];
+	__u64 command_id;
+	__u64 bo_handle;
+	struct uc_info_entry uc_info[];
+};
+
+/**
  * struct amdxdna_drm_config_ctx - Configure context.
  * @handle: Context handle.
  * @param_type: Specifies the structure passed in via param_val.
