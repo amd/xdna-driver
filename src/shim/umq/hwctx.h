@@ -6,8 +6,26 @@
 
 #include "../hwctx.h"
 #include "../buffer.h"
+#include "tcp_server.h"
 
 namespace shim_xdna {
+
+enum umq_log_flag {
+  UMQ_DEBUG_BUFFER = 0,
+  UMQ_TRACE_BUFFER,
+  UMQ_DBG_QUEUE,
+  UMQ_LOG_BUFFER
+};
+
+struct umq_fw_metadata {
+  uint32_t magic_no;
+  uint8_t major;
+  uint8_t minor;
+  uint8_t umq_log_flag;
+  uint8_t num_ucs;       // how many valid ucs, up to 8 for now
+  uint64_t uc_paddr[8];  // device accessible address array for each valid uc
+  uint32_t uc_size[8];    // bo size for each valid uc
+};
 
 class hwctx_umq : public hwctx {
 public:
@@ -18,25 +36,15 @@ private:
   std::unique_ptr<buffer> m_log_bo;
   uint32_t m_col_cnt = 0;
 
-  enum umq_log_flag {
-    UMQ_DEBUG_BUFFER = 0,
-    UMQ_TRACE_BUFFER,
-    UMQ_DBG_QUEUE,
-    UMQ_LOG_BUFFER
-  };
-
-  struct umq_log_metadata {
-    uint32_t magic_no;
-    uint8_t major;
-    uint8_t minor;
-    uint8_t umq_log_flag;
-    uint8_t num_ucs;       // how many valid ucs, up to 8 for now
-    uint64_t uc_paddr[8];  // device accessible address array for each valid uc
-    uint32_t uc_size[8];    // bo size for each valid uc
-  };
-
-  struct umq_log_metadata m_metadata;
+  umq_fw_metadata m_debugger_metadata;
+  umq_fw_metadata m_log_metadata;
   void *m_log_buf = nullptr;
+
+  tcp_server m_tcp_server;
+  std::thread m_thread_;
+
+  void init_tcp_server(const device& dev);
+  void fini_tcp_server();
 
   void init_log_buf();
   void fini_log_buf();
