@@ -342,12 +342,12 @@ void
 platform_drv_virtio::
 destroy_ctx(destroy_ctx_arg& arg) const
 {
-  // TODO: Need to pass syncobj handle to host as well.
   amdxdna_ccmd_destroy_ctx_req req = {
     { AMDXDNA_CCMD_DESTROY_CTX, sizeof(req) },
   };
 
   req.handle = arg.ctx_handle;
+  req.syncobj_hdl = arg.syncobj_handle;
   hcall(&req);
 }
 
@@ -456,7 +456,7 @@ submit_cmd(submit_cmd_arg& arg) const
 
   auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req);
   req_sz += sizeof(uint64_t); // One cmd handle
-  req_sz += nargs * sizeof(uint64_t); // For args handle
+  req_sz += nargs * sizeof(uint32_t); // For args handle
   // Get a 64 bit aligned buffer for req
   auto req_sz_in_u64 = req_sz / sizeof(uint64_t) + 1;
   uint64_t req_buf[req_sz_in_u64];
@@ -464,14 +464,15 @@ submit_cmd(submit_cmd_arg& arg) const
   amdxdna_ccmd_exec_cmd_rsp rsp = {};
 
   req->hdr.cmd = AMDXDNA_CCMD_EXEC_CMD;
-  req->hdr.len = req_sz;
+  req->hdr.len = req_sz_in_u64 * sizeof(uint64_t);
   req->hdr.rsp_off = 0;
   req->ctx_handle = arg.ctx_handle;
   req->type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   req->cmd_count = 1;
-  req->arg_count = nargs;
   req->cmds_n_args[0] = arg.cmd_bo.handle;
-  int i = 1;
+  req->arg_count = nargs;
+  req->arg_offset = 1;
+  int i = req->arg_offset;
   for (auto& id : arg.arg_bos)
     req->cmds_n_args[i++] = id.handle;
 
