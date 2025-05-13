@@ -187,27 +187,27 @@ drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
   m_size = arg.size;
   m_id = arg.bo;
   m_xdna_addr = arg.xdna_addr;
-  if (arg.vaddr)
-    m_same_pid_import = true; // Has valid vaddr, must be imported from same process!
   m_map_offset = arg.map_offset;
 }
 
 drm_bo::
 ~drm_bo()
 {
-  destroy_bo_arg arg = {
-    .bo = m_id,
-  };
   try {
-    if (m_same_pid_import)
-      shim_debug("Same proc imported, skip BO destroy");
-    else
-      m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
+    destroy_bo_arg arg = {
+      .bo = m_id,
+    };
+    m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
   } catch (const xrt_core::system_error& e) {
-    std::cout << "Failed to destroy DRM BO "
-      << std::to_string(m_id.handle)
-      << ": " << e.what()
-      << std::endl;
+    // In case BO is exported and imported in the same process, the same BO
+    // could be destroyed twice (once by exported BO, and once by imported BO).
+    // The last BO destroy will see EINVAL error. Ignore it.
+    if (e.get_code() != EINVAL) {
+      std::cout << "Failed to destroy DRM BO "
+        << std::to_string(m_id.handle)
+        << ": " << e.what()
+        << std::endl;
+    }
   }
 }
 

@@ -34,7 +34,7 @@ private:
     if (!recv_ipc_data(&idata, sizeof(idata)))
       return;
 
-    msg("Received BO %d from PID %d", idata.hdl, idata.pid);
+    msg("Received fd %d from PID %d", idata.hdl, idata.pid);
 
     // Create IO test BO set and replace input BO with the one from child
     auto sdev = get_userpf_device(get_dev_id());

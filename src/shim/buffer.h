@@ -43,7 +43,6 @@ public:
 
 private:
   const pdev& m_pdev;
-  bool m_same_pid_import = false;
 };
 
 class buffer : public xrt_core::buffer_handle
