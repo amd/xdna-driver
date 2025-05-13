@@ -4,7 +4,6 @@
  */
 
 #include <linux/iommu.h>
-#include <linux/pm_runtime.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_accel.h>
 #include "drm_local/amdxdna_accel.h"
@@ -23,18 +22,9 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_client *client;
 	int ret;
 
-#ifndef AMDXDNA_OF
-	ret = pm_runtime_resume_and_get(ddev->dev);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to get rpm, ret %d", ret);
-		return ret;
-	}
-#endif
 	client = kzalloc(sizeof(*client), GFP_KERNEL);
-	if (!client) {
-		ret = -ENOMEM;
-		goto put_rpm;
-	}
+	if (!client)
+		return -ENOMEM;
 
 	client->pid = pid_nr(filp->pid);
 	client->xdna = xdna;
@@ -82,11 +72,6 @@ unbind_sva:
 	iommu_sva_unbind_device(client->sva);
 failed:
 	kfree(client);
-put_rpm:
-#ifndef AMDXDNA_OF
-	pm_runtime_mark_last_busy(ddev->dev);
-	pm_runtime_put_autosuspend(ddev->dev);
-#endif
 	return ret;
 }
 
@@ -114,10 +99,6 @@ skip_sva_unbind:
 
 	XDNA_DBG(xdna, "PID %d closed", client->pid);
 	kfree(client);
-#ifndef AMDXDNA_OF
-	pm_runtime_mark_last_busy(ddev->dev);
-	pm_runtime_put_autosuspend(ddev->dev);
-#endif
 }
 
 static int amdxdna_flush(struct file *f, fl_owner_t id)

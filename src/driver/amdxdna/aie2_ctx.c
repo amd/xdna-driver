@@ -167,6 +167,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	dma_fence_put(fence);
 	mmput_async(job->mm);
 	aie2_job_put(job);
+	aie2_pm_suspend(ctx->client->xdna->dev_handle);
 }
 
 static int
@@ -834,10 +835,16 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	unsigned long timeout = 0;
 	int ret, i;
 
+	ret = aie2_pm_resume(xdna->dev_handle);
+	if (ret) {
+		XDNA_ERR(xdna, "Resume failed, ret %d", ret);
+		return ret;
+	}
+
 	ret = down_killable(&ctx->priv->job_sem);
 	if (ret) {
 		XDNA_ERR(xdna, "%s Grab job sem failed, ret %d", ctx->name, ret);
-		return ret;
+		goto suspend;
 	}
 
 	ret = aie2_rq_submit_enter(&xdna->dev_handle->ctx_rq, ctx);
@@ -934,6 +941,8 @@ rq_yield:
 up_job_sem:
 	up(&ctx->priv->job_sem);
 	job->job_done = true;
+suspend:
+	aie2_pm_suspend(xdna->dev_handle);
 	return ret;
 }
 
