@@ -209,7 +209,7 @@ void
 tcp_server::
 handle_detach()
 {
-  issue_exit_cmd();
+  m_dbg_umq.issue_exit_cmd();
   // issue ioctl to detach the dbg hsa queue
   m_aie_attached = false;
 }
