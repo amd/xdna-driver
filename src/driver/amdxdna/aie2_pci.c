@@ -973,7 +973,6 @@ static int aie2_query_ctx_status(struct amdxdna_client *client,
 
 			tmp->pid = tmp_client->pid;
 			tmp->context_id = ctx->id;
-			tmp->hwctx_id = ctx->priv->id;
 			tmp->start_col = ctx->start_col;
 			tmp->num_col = ctx->num_col;
 			tmp->command_submissions = ctx->submitted;
@@ -981,7 +980,6 @@ static int aie2_query_ctx_status(struct amdxdna_client *client,
 			tmp->migrations = 0;
 			tmp->preemptions = 0;
 			tmp->errors = 0;
-			tmp->priority = ctx->qos.priority;
 
 			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;
@@ -1291,7 +1289,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].latency = ctx->qos.latency;
 			tmp[hw_i].frame_exec_time = ctx->qos.frame_exec_time;
 			tmp[hw_i].heap_usage = heap_usage;
-			tmp[hw_i].egops = 0; /* TODO: Calculate effective gops */
+			tmp[hw_i].suspensions = ctx->priv->disconn_cnt;
 
 			if (ctx->priv->status == CTX_STATE_CONNECTED)
 				tmp[hw_i].state = AMDXDNA_CTX_STATE_ACTIVE;

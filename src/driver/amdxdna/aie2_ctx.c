@@ -108,6 +108,7 @@ void aie2_ctx_disconnect(struct amdxdna_ctx *ctx, bool wait)
 		aie2_ctx_wait_for_idle(ctx);
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	aie2_hwctx_stop(ctx);
+	ctx->priv->disconn_cnt++;
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 }
 

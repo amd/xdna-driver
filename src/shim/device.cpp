@@ -288,7 +288,6 @@ struct partition_info
           new_entry.migrations = entry.migrations;
           new_entry.preemptions = entry.preemptions;
           new_entry.errors = entry.errors;
-          new_entry.qos.priority = entry.priority;
           output.push_back(std::move(new_entry));
         }
         return output;
@@ -329,14 +328,13 @@ struct partition_info
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
       new_entry.qos.gops = entry.gops;
-      new_entry.qos.egops = entry.egops;
       new_entry.qos.fps = entry.fps;
       new_entry.qos.dma_bandwidth = entry.dma_bandwidth;
       new_entry.qos.latency = entry.latency;
       new_entry.qos.frame_exec_time = entry.frame_exec_time;
       new_entry.instruction_mem = entry.heap_usage;
       new_entry.pasid = entry.pasid;
-      // new_entry.suspensions = entry.suspensions;
+      new_entry.suspensions = entry.suspensions;
       output.push_back(std::move(new_entry));
     }
     return output;
