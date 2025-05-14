@@ -702,15 +702,15 @@ struct resource_info
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(5);
-    info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_clk_max;
+    info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::npu_clk_max;
     info_items[0].data_uint64 = resource_info.npu_clk_max;
-    info_items[1].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_tops_max;
+    info_items[1].type = xrt_core::query::xrt_resource_raw::resource_type::npu_tops_max;
     info_items[1].data_double = resource_info.npu_tops_max;
-    info_items[2].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_task_max;
+    info_items[2].type = xrt_core::query::xrt_resource_raw::resource_type::npu_task_max;
     info_items[2].data_uint64 = resource_info.npu_task_max;
-    info_items[3].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_tops_curr;
+    info_items[3].type = xrt_core::query::xrt_resource_raw::resource_type::npu_tops_curr;
     info_items[3].data_double = resource_info.npu_tops_curr;
-    info_items[4].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_task_curr;
+    info_items[4].type = xrt_core::query::xrt_resource_raw::resource_type::npu_task_curr;
     info_items[4].data_uint64 = resource_info.npu_task_curr;
 
     return info_items;
@@ -796,7 +796,7 @@ struct sensor_info
     switch (std::any_cast<xrt_core::query::sdm_sensor_info::sdr_req_type>(param)) {
     case xrt_core::query::sdm_sensor_info::sdr_req_type::power:
       return sensor.type == AMDXDNA_SENSOR_TYPE_POWER;
-    // At the moment no sensors are expected for IPU other than power
+    // At the moment no sensors are expected for NPU other than power
     case xrt_core::query::sdm_sensor_info::sdr_req_type::current:
     case xrt_core::query::sdm_sensor_info::sdr_req_type::mechanical:
     case xrt_core::query::sdm_sensor_info::sdr_req_type::thermal:
