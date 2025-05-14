@@ -80,6 +80,13 @@ private:
 
   void
   wait_syncobj(wait_syncobj_arg& arg) const override;
+
+  void
+  export_bo(export_bo_arg& arg) const override;
+
+  void
+  import_bo(import_bo_arg& arg) const override;
+
 };
 
 }

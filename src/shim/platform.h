@@ -34,6 +34,7 @@ enum class drv_ioctl_cmd {
   wait_cmd,
 
   get_info,
+  get_info_array,
   set_state,
 
   create_syncobj,
@@ -251,6 +252,10 @@ private:
 
   virtual void
   get_info(amdxdna_drm_get_info& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  get_info_array(amdxdna_drm_get_info_array& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void

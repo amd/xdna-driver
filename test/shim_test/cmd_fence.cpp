@@ -134,7 +134,12 @@ private:
     auto hwq = hwctx.get()->get_hw_queue();
 
     io_test_bo_set boset{dev.get()};
-    hwq->submit_signal(fence.get());
+    try {
+      hwq->submit_signal(fence.get());
+    } catch(...) {
+      fence->signal();
+      throw;
+    }
     boset.run(wfences, sfences, false);
     boset.run(wfences, sfences, false);
 

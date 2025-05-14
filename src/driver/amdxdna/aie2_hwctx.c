@@ -77,6 +77,17 @@ static int aie2_unload_hwctx(struct amdxdna_ctx *ctx)
 int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
+#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
+	const struct drm_sched_init_args args = {
+		.ops = &sched_ops,
+		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
+		.credit_limit = CTX_MAX_CMDS,
+		.timeout = MAX_SCHEDULE_TIMEOUT,
+		.name = ctx->name,
+		.dev = xdna->ddev.dev,
+	};
+#endif
+
 	struct drm_gpu_scheduler *sched;
 	struct amdxdna_gem_obj *heap;
 	struct amdxdna_dev_hdl *ndev;
@@ -87,9 +98,13 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	heap = ctx->priv->heap;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
+#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
+	ret = drm_sched_init(sched, &args);
+#else
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
 			     CTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT,
 			     NULL, NULL, ctx->name, xdna->ddev.dev);
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to init DRM scheduler. ret %d", ret);
 		return ret;

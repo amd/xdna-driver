@@ -33,6 +33,8 @@ ioctl_cmd2name(unsigned long cmd)
     return "DRM_IOCTL_AMDXDNA_WAIT_CMD";
   case DRM_IOCTL_AMDXDNA_GET_INFO:
     return "DRM_IOCTL_AMDXDNA_GET_INFO";
+  case DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY:
+    return "DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY";
   case DRM_IOCTL_AMDXDNA_SET_STATE:
     return "DRM_IOCTL_AMDXDNA_SET_STATE";
 
@@ -72,9 +74,9 @@ int64_t timeout_ms2abs_ns(int64_t timeout_ms)
   if (!timeout_ms)
     return std::numeric_limits<int64_t>::max(); // 0 means wait forever
 
-  auto now = std::chrono::high_resolution_clock::now();
-  auto now_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now);
-  return timeout_ms * 1000000 + now_ns.time_since_epoch().count();
+  struct timespec tp;
+  clock_gettime(CLOCK_MONOTONIC, &tp);
+  return timeout_ms * 1000000 + tp.tv_sec * 1000000000ULL + tp.tv_nsec;
 }
 
 void
@@ -309,6 +311,13 @@ platform_drv_host::
 get_info(amdxdna_drm_get_info& info) const
 {
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+}
+
+void
+platform_drv_host::
+get_info_array(amdxdna_drm_get_info_array& info) const
+{
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY, &info);
 }
 
 void

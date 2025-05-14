@@ -234,26 +234,83 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_query_ctx* data;
-    const uint32_t output_size = 256 * sizeof(*data);
+    amdxdna_drm_query_ctx_array* data;
+    const uint32_t output_size = 32 * sizeof(*data);
 
     std::vector<char> payload(output_size);
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
-      .buffer_size = output_size,
+    amdxdna_drm_get_info_array arg = {
+      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY,
+      .element_size = sizeof(*data),
+      .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
+    uint32_t data_size = 0;
+    try {
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      data_size = arg.num_element;
+      data = reinterpret_cast<decltype(data)>(payload.data());
+    } catch (const xrt_core::system_error& e) {
+      if (e.get_code() == -EINVAL) {
+        // If ioctl not supported, use legacy ioctl.
+        amdxdna_drm_query_ctx* legacy_data;
+        const uint32_t legacy_output_size = 256 * sizeof(*legacy_data);
+        std::vector<char> legacy_payload(legacy_output_size);
+        amdxdna_drm_get_info legacy_arg = {
+          .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
+          .buffer_size = legacy_output_size,
+          .buffer = reinterpret_cast<uintptr_t>(legacy_payload.data())
+        };
 
-    if (output_size < arg.buffer_size) {
-      throw xrt_core::query::exception(
-        boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Insufficient buffer size. Need: %u") % arg.buffer_size));
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &legacy_arg);
+
+        if (legacy_output_size < legacy_arg.buffer_size) {
+          throw xrt_core::query::exception(
+            boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Insufficient buffer size. Need: %u") % legacy_arg.buffer_size));
+        }
+
+        data_size = legacy_arg.buffer_size / sizeof(*legacy_data);
+        legacy_data = reinterpret_cast<decltype(legacy_data)>(legacy_payload.data());
+
+        query::aie_partition_info::result_type output;
+        for (uint32_t i = 0; i < data_size; i++) {
+          const auto& entry = legacy_data[i];
+
+          xrt_core::query::aie_partition_info::data new_entry{};
+          new_entry.metadata.id = std::to_string(entry.context_id);
+          new_entry.metadata.xclbin_uuid = "N/A";
+          new_entry.start_col = entry.start_col;
+          new_entry.num_cols = entry.num_col;
+          new_entry.pid = entry.pid;
+          new_entry.command_submissions = entry.command_submissions;
+          new_entry.command_completions = entry.command_completions;
+          new_entry.migrations = entry.migrations;
+          new_entry.preemptions = entry.preemptions;
+          new_entry.errors = entry.errors;
+          new_entry.qos.priority = entry.priority;
+          output.push_back(std::move(new_entry));
+        }
+        return output;
+      }
+      if (e.get_code() == -ENOSPC) {
+        // Retry ioctl with driver-returned number of elements.
+        const uint32_t updated_output_size = arg.num_element * sizeof(*data);
+
+        std::vector<char> updated_payload(updated_output_size);
+        arg.buffer = reinterpret_cast<uintptr_t>(updated_payload.data());
+
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+
+        if (updated_output_size < arg.element_size * arg.num_element) {
+          throw xrt_core::query::exception(
+            boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY - Insufficient buffer size. Need: %u") % arg.element_size));
+        }
+
+        data_size = arg.num_element;
+        data = reinterpret_cast<decltype(data)>(updated_payload.data());
+      }
     }
-
-    uint32_t data_size = arg.buffer_size / sizeof(*data);
-    data = reinterpret_cast<decltype(data)>(payload.data());
 
     query::aie_partition_info::result_type output;
     for (uint32_t i = 0; i < data_size; i++) {
@@ -271,6 +328,15 @@ struct partition_info
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
+      new_entry.qos.gops = entry.gops;
+      new_entry.qos.egops = entry.egops;
+      new_entry.qos.fps = entry.fps;
+      new_entry.qos.dma_bandwidth = entry.dma_bandwidth;
+      new_entry.qos.latency = entry.latency;
+      new_entry.qos.frame_exec_time = entry.frame_exec_time;
+      new_entry.instruction_mem = entry.heap_usage;
+      new_entry.pasid = entry.pasid;
+      // new_entry.suspensions = entry.suspensions;
       output.push_back(std::move(new_entry));
     }
     return output;
@@ -456,6 +522,9 @@ struct telemetry
   struct amdxdna_drm_query_telemetry {
     uint32_t major;
     uint32_t minor;
+    uint32_t type;
+    uint32_t ctx_map_num_elements;
+    uint32_t ctx_map[NPU_RTOS_MAX_USER_ID_COUNT];
     uint64_t l1_interrupts;
     uint64_t context_started_count[NPU_RTOS_MAX_USER_ID_COUNT];
     uint64_t scheduled_count[NPU_RTOS_MAX_USER_ID_COUNT];
@@ -550,37 +619,7 @@ struct telemetry
       if (device_id != NPU4_DEVICE_ID)
         return output;
 
-      std::vector<char> payload(output_size);
-      amdxdna_drm_get_info query_ctx = {
-        .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
-        .buffer_size = output_size,
-        .buffer = reinterpret_cast<uintptr_t>(payload.data())
-      };
-
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_ctx);
-
-      if (output_size < query_ctx.buffer_size) {
-        throw xrt_core::query::exception(
-          boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Insufficient buffer size. Need: %u") % query_ctx.buffer_size));
-      }
-
-      uint32_t data_size = query_ctx.buffer_size / sizeof(*data);
-      data = reinterpret_cast<decltype(data)>(payload.data());
-
-      std::array<uint32_t, NPU_RTOS_MAX_USER_ID_COUNT> ctx_map{};
-      for (uint32_t i = 0; i < data_size; i++) {
-        const auto& entry = data[i];
-
-        if (entry.hwctx_id >= NPU_RTOS_MAX_USER_ID_COUNT) {
-          throw xrt_core::query::exception(
-            boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Invalid hw ctx ID: %u") % entry.hwctx_id));
-        }
-
-        ctx_map[entry.hwctx_id] = entry.context_id;
-      }
-
-      amdxdna_drm_query_telemetry telemetry{};
+      amdxdna_drm_query_telemetry telemetry {};
 
       amdxdna_drm_get_info query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
@@ -588,9 +627,10 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
+      auto& pci_dev_impl = get_pcidev_impl(device);
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (auto i = 0; i < NPU_RTOS_MAX_USER_ID_COUNT; i++) {
+      for (auto i = 0; i < telemetry.ctx_map_num_elements; i++) {
         query::rtos_telemetry::data task;
 
         task.context_starts = telemetry.context_started_count[i];
@@ -608,7 +648,7 @@ struct telemetry
         }
         task.dtlbs = std::move(dtlbs);
 
-        task.preemption_data.slot_index = ctx_map[i];
+        task.preemption_data.slot_index = telemetry.ctx_map[i];
         task.preemption_data.preemption_checkpoint_event = telemetry.layer_boundary_count[i];
         task.preemption_data.preemption_frame_boundary_events = telemetry.frame_boundary_count[i];
         output.push_back(std::move(task));
@@ -1006,7 +1046,7 @@ struct sequence_name
     case xrt_core::query::sequence_name::type::tct_all_column:
       seq_name = "tct_4col.txt";
       break;
-    case xrt_core::query::sequence_name::type::gemm_int8: 
+    case xrt_core::query::sequence_name::type::gemm_int8:
       seq_name = "gemm_int8.txt";
       break;
     }

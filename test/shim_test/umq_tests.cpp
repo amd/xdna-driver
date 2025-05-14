@@ -19,7 +19,7 @@ prepare_ddr_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& data)
 
   ebuf.add_ctrl_bo(ctrl);
   ebuf.add_arg_bo(data, "input");
-  ebuf.patch_ctrl_code(ctrl, elf);
+  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf);
   ebuf.dump();
  
   std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
@@ -31,7 +31,7 @@ prepare_basic_cmd(bo& execbuf, const std::string& elf, bo& ctrl)
   exec_buf ebuf(execbuf, ERT_START_DPU);
 
   ebuf.add_ctrl_bo(ctrl);
-  ebuf.patch_ctrl_code(ctrl, elf);
+  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf);
   ebuf.dump();
  
   std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
@@ -46,7 +46,7 @@ prepare_vadd_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts
   ebuf.add_arg_bo(ifm, "g.ifm_ddr");
   ebuf.add_arg_bo(wts, "g.wts_ddr");
   ebuf.add_arg_bo(ofm, "g.ofm_ddr");
-  ebuf.patch_ctrl_code(ctrl, elf);
+  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf);
   ebuf.dump();
  
   std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
@@ -115,7 +115,7 @@ TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device>& sdev, 
 
   auto data = get_xclbin_data(dev);
   auto elf = data + "/remote_barrier.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
@@ -146,7 +146,7 @@ TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device>& sdev, con
 
   auto data = get_xclbin_data(dev);
   auto elf = data + "/ddr_memtile.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
@@ -173,7 +173,7 @@ TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device>& sdev, const 
 
   auto data = get_xclbin_data(dev);
   auto elf = data + "/move_memtiles.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
@@ -207,7 +207,7 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device>& sdev, const std:
 
   auto data = get_xclbin_data(dev);
   auto elf = data + "/vadd.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
   prepare_vadd_cmd(bo_exec_buf, elf, bo_ctrl_code, bo_ifm, bo_wts, bo_ofm);

@@ -43,7 +43,8 @@ enum aie2_msg_opcode {
 	MSG_OP_START_EVENT_TRACE           = 0x10F,
 	MSG_OP_STOP_EVENT_TRACE            = 0x110,
 	MSG_OP_UPDATE_PROPERTY             = 0x113,
-	MSG_OP_ADD_HOST_BUFFER             = 0x114,
+	MSG_OP_GET_APP_HEALTH              = 0x114,
+	MSG_OP_ADD_HOST_BUFFER             = 0x115,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
@@ -91,6 +92,7 @@ enum aie2_msg_status {
 	AIE2_STATUS_ASYNC_EVENT_MSGS_FULL,
 	AIE2_STATUS_DEBUG_BO_CONFIG_FAILED,
 	AIE2_STATUS_PROPERTY_UPDATE_FAILED		= 0x400000A,
+	AIE2_STATUS_ACTIVE_APP_ERROR,
 	AIE2_STATUS_MAX_RTOS_STATUS_CODE,
 	MAX_AIE2_STATUS_CODE
 };
@@ -568,6 +570,48 @@ struct update_property_req {
 } __packed;
 
 struct update_property_resp {
+	enum aie2_msg_status status;
+} __packed;
+
+struct app_health_report_hdr {
+	u32 version;
+	u32 size;
+};
+
+struct app_health_report_v1 {
+	/* header.version must be 1 */
+	struct app_health_report_hdr	header;
+	u32				context_id;
+	/*
+	 * PC of the most recently started DPU opcode, as reported by the ERT
+	 * application.  Before starting or after finishing successfully, this is
+	 * APP_HEALTH_REPORT_V1_DPU_PC_NONE.  If execution stops early due to an
+	 * error, this retains the opcode PC.
+	 * Note: For the sake of performance, the ERT might cut some corners in
+	 * reporting this.  Interpreting it correctly requires understanding the
+	 * nuances of the implementation.
+	 */
+#define APP_HEALTH_REPORT_V1_DPU_PC_NONE	(~0U)
+	u32				dpu_pc;
+	/*
+	 * Index of the most recently started TXN opcode.  Before starting or after
+	 * finishing successfully, this is APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE.  If
+	 * execution stops early due to an error, this retains the opcode ID.
+	 * Note: For the sake of performance, the ERT might cut some corners in
+	 * reporting this.  Interpreting it correctly requires understanding the
+	 * nuances of the implementation.
+	 */
+#define APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE	(~0U)
+	u32				txn_op_id;
+};
+
+struct get_app_health_req {
+	u32 context_id;
+	u32 buf_size;
+	u64 buf_addr;
+} __packed;
+
+struct get_app_health_resp {
 	enum aie2_msg_status status;
 } __packed;
 

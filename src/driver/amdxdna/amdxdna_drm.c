@@ -66,8 +66,8 @@ skip_sva_bind:
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
 
-	spin_lock_init(&client->stats.lock);
-	client->stats.job_depth = 0;
+	seqlock_init(&client->stats.lock);
+
 	client->stats.busy_time = ns_to_ktime(0);
 	client->stats.start_time = ns_to_ktime(0);
 
@@ -235,37 +235,48 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 
-void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start)
+void amdxdna_stats_start(struct amdxdna_client *client)
 {
-	unsigned long flags;
+	ktime_t now;
+	int depth;
 
-	spin_lock_irqsave(&client->stats.lock, flags);
-	if (start) {
-		client->stats.job_depth++;
-		if (client->stats.job_depth == 1)
-			client->stats.start_time = time;
-	} else {
-		client->stats.job_depth--;
-		if (client->stats.job_depth == 0)
-			client->stats.busy_time =
-				ktime_add(client->stats.busy_time,
-					  ktime_sub(time, client->stats.start_time));
+	now = ktime_get();
+	write_seqlock(&client->stats.lock);
+	depth = client->stats.job_depth++;
+	if (!depth)
+		client->stats.start_time = now;
+	write_sequnlock(&client->stats.lock);
+}
+
+void amdxdna_stats_account(struct amdxdna_client *client)
+{
+	ktime_t now;
+	u64 busy_ns;
+	int depth;
+
+	now = ktime_get();
+	write_seqlock(&client->stats.lock);
+	depth = --client->stats.job_depth;
+	if (!depth) {
+		busy_ns = ktime_to_ns(ktime_sub(now, client->stats.start_time));
+		client->stats.busy_time += busy_ns;
 	}
-	spin_unlock_irqrestore(&client->stats.lock, flags);
+	write_sequnlock(&client->stats.lock);
 }
 
 static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	const char *engine_npu_name = "npu-amdxdna";
-	unsigned long flags;
+	unsigned int seq;
 	u64 busy_ns;
 
-	spin_lock_irqsave(&client->stats.lock, flags);
-	busy_ns = ktime_to_ns(client->stats.busy_time);
-	if (client->stats.job_depth > 0)
-		busy_ns += ktime_to_ns(ktime_sub(ktime_get(), client->stats.start_time));
-	spin_unlock_irqrestore(&client->stats.lock, flags);
+	do {
+		seq = read_seqbegin(&client->stats.lock);
+		busy_ns = ktime_to_ns(client->stats.busy_time);
+		if (client->stats.job_depth)
+			busy_ns += ktime_to_ns(ktime_sub(ktime_get(), client->stats.start_time));
+	} while (read_seqretry(&client->stats.lock, seq));
 
 	/* see Documentation/gpu/drm-usage-stats.rst */
 	drm_printf(p, "drm-engine-%s:\t%llu ns\n", engine_npu_name, busy_ns);
@@ -303,16 +314,12 @@ const struct drm_driver amdxdna_drm_drv = {
 	.ioctls = amdxdna_drm_ioctls,
 	.num_ioctls = ARRAY_SIZE(amdxdna_drm_ioctls),
 	.show_fdinfo = amdxdna_show_fdinfo,
-
-	/* For shmem object create */
 #ifdef AMDXDNA_OF
 	.gem_create_object = amdxdna_gem_create_object_cb,
-#else
-	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
-#endif
-#ifdef AMDXDNA_SHMEM
-	.gem_prime_import = amdxdna_gem_prime_import,
-#else
 	.gem_prime_import_sg_table = drm_gem_dma_prime_import_sg_table,
+#else
+	/* For shmem object create */
+	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
+	.gem_prime_import = amdxdna_gem_prime_import,
 #endif
 };

@@ -164,6 +164,39 @@ struct amdxdna_ctx_param_config_cu {
 };
 
 /**
+ * struct uc_info_entry: Holds uc index & buffer size allotment info
+ * @index: uc index
+ *     On aie2ps, uc index is same to column index
+ *     On aie4, uc index is mapped as 0->0_A, 1->0_B, 2->1_A, 3->1_B, 4->2_A, 5->2_B
+ * @size: buffer size in bytes for this uc
+ */
+struct uc_info_entry {
+	__u32 index;
+	__u32 size;
+};
+
+/**
+ * struct fw_buffer_metadata - Holds buffer configuration.
+ * @buf_type: buffer type set to fw
+ * @num_ucs: total ucs to config
+ * @command_id: command id used for trace
+ * @bo_handle: actual bo handle
+ * @uc_info_entry: uc index & buffer size mapping info
+ */
+struct fw_buffer_metadata {
+#define AMDXDNA_FW_BUF_DEBUG	0
+#define AMDXDNA_FW_BUF_TRACE	1
+#define AMDXDNA_FW_BUF_DBG_Q	2
+#define AMDXDNA_FW_BUF_LOG	3
+	__u8 buf_type;
+	__u8 num_ucs;
+	__u8 pad[48];
+	__u64 command_id;
+	__u64 bo_handle;
+	struct uc_info_entry uc_info[];
+};
+
+/**
  * struct amdxdna_drm_config_ctx - Configure context.
  * @handle: Context handle.
  * @param_type: Specifies the structure passed in via param_val.
@@ -538,6 +571,25 @@ struct amdxdna_drm_get_resource_info {
 struct amdxdna_drm_attribute_state {
 	__u8 state;
 	__u8 pad[7];
+};
+
+/**
+ * struct amdxdna_drm_query_telemetry_header - Telemetry header to capture information shared
+ *					       between driver and shim. Followed by the telemetry
+ *					       data harvested from the firmware.
+ * @major: Firmware telemetry interface major version number. Based on firmware response message.
+ * @minor: Firmware telemetry interface minor version number. Based on firmware response message.
+ * @type: Telemetry query type. Set by the user.
+ *	  MBZ for NPU 1, 2, 4, 5, and 6. Non-zero for future generations.
+ * @map_num_elements: Total number of elements in the map table. Set by the driver.
+ * @map: Maps the firmware allocated context ID(key) to driver allocated context ID(value).
+ */
+struct amdxdna_drm_query_telemetry_header {
+	__u32 major;
+	__u32 minor;
+	__u32 type;
+	__u32 map_num_elements;
+	__u32 map[] __counted_by(map_num_elements);
 };
 
 /**

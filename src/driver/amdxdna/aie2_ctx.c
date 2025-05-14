@@ -156,9 +156,6 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct dma_fence *fence = job->fence;
 	int idx;
 
-#ifdef AMDXDNA_DRM_USAGE
-	amdxdna_update_stats(ctx->client, ktime_get(), false);
-#endif
 	ctx->completed++;
 	trace_xdna_job(&job->base, ctx->name, "signaling fence", job->seq, job->opcode);
 	job->job_done = true;
@@ -180,6 +177,7 @@ aie2_sched_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 ret = 0;
 	u32 status;
 
+	amdxdna_stats_account(job->ctx->client);
 	cmd_abo = job->cmd_bo;
 
 	if (unlikely(!data)) {
@@ -214,6 +212,7 @@ aie2_sched_nocmd_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 ret = 0;
 	u32 status;
 
+	amdxdna_stats_account(job->ctx->client);
 	if (unlikely(!data))
 		goto out;
 
@@ -241,6 +240,7 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 cmd_status;
 	u32 ret = 0;
 
+	amdxdna_stats_account(job->ctx->client);
 	cmd_abo = job->cmd_bo;
 	if (unlikely(!data) || unlikely(size != sizeof(u32) * 3)) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
@@ -325,11 +325,10 @@ out:
 		aie2_job_put(job);
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
+	} else {
+		if (job->opcode != OP_NOOP)
+			amdxdna_stats_start(ctx->client);
 	}
-#ifdef AMDXDNA_DRM_USAGE
-	else
-		amdxdna_update_stats(ctx->client, ktime_get(), true);
-#endif
 
 	return fence;
 }

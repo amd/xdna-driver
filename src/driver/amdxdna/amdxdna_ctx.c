@@ -498,6 +498,11 @@ static int amdxdna_drm_submit_execbuf(struct amdxdna_client *client,
 	}
 
 	cmd_bo_hdl = (u32)args->cmd_handles;
+	if (cmd_bo_hdl == AMDXDNA_INVALID_BO_HANDLE) {
+		XDNA_ERR(xdna, "Invalid cmd bo handle");
+		return -EINVAL;
+	}
+
 	if (!args->arg_count) {
 		arg_bo_hdls = NULL;
 	} else {

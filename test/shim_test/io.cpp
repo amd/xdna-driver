@@ -14,7 +14,7 @@ using namespace xrt_core;
 
 namespace {
 
-const char *io_test_bo_type_names[] = {
+std::array io_test_bo_type_names {
   "IO_TEST_BO_CMD",
   "IO_TEST_BO_INSTRUCTION",
   "IO_TEST_BO_INPUT",
@@ -22,9 +22,10 @@ const char *io_test_bo_type_names[] = {
   "IO_TEST_BO_OUTPUT",
   "IO_TEST_BO_INTERMEDIATE",
   "IO_TEST_BO_MC_CODE",
-  "IO_TEST_BO_BAD_INSTRUCTION",
   "IO_TEST_BO_CTRL_PKT_PM",
   "IO_TEST_BO_SCRATCH_PAD",
+  "IO_TEST_BO_SAVE_INSTRUCTION",
+  "IO_TEST_BO_RESTORE_INSTRUCTION",
 };
 
 void
@@ -42,6 +43,8 @@ alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t)
     ibo.tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_EXECBUF);
     break;
   case IO_TEST_BO_INSTRUCTION:
+  case IO_TEST_BO_SAVE_INSTRUCTION:
+  case IO_TEST_BO_RESTORE_INSTRUCTION:
     ibo.tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
     break;
   default:
@@ -190,7 +193,10 @@ io_test_bo_set(device* dev, const std::string& xclbin_name) :
       break;
     case IO_TEST_BO_CTRL_PKT_PM:
     case IO_TEST_BO_SCRATCH_PAD:
-      // No need for ctrl_pm and scratch pad BO
+    case IO_TEST_BO_SAVE_INSTRUCTION:
+    case IO_TEST_BO_RESTORE_INSTRUCTION:
+      // No need for ctrl_pm, scratch pad, save and restore instruction BOs
+      // They are meant for ELF flow.
       break;
     default:
       throw std::runtime_error(std::string("unknown BO type ") + std::to_string(type));
@@ -231,10 +237,28 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       alloc_bo(ibo, m_dev, type);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      ibo.size = exec_buf::get_ctrl_code_size(m_elf);
+      ibo.size = exec_buf::get_ctrl_code_size(m_elf, xrt_core::patcher::buf_type::ctrltext);
       if (ibo.size == 0)
         throw std::runtime_error("instruction size cannot be 0");
       alloc_bo(ibo, m_dev, type);
+      break;
+    case IO_TEST_BO_SAVE_INSTRUCTION:
+      // Save instruction buffer is required for preemption kernel
+      if (m_type == KERNEL_TYPE_TXN_PREEMPT) {
+        ibo.size = exec_buf::get_ctrl_code_size(m_elf, xrt_core::patcher::buf_type::preempt_save);
+        if (ibo.size == 0)
+          throw std::runtime_error("save instruction size cannot be 0");
+        alloc_bo(ibo, m_dev, type);
+      }
+      break;
+    case IO_TEST_BO_RESTORE_INSTRUCTION:
+      // Restore instruction buffer is required for preemption kernel
+      if (m_type == KERNEL_TYPE_TXN_PREEMPT) {
+        ibo.size = exec_buf::get_ctrl_code_size(m_elf, xrt_core::patcher::buf_type::preempt_restore);
+        if (ibo.size == 0)
+          throw std::runtime_error("restore instruction size cannot be 0");
+        alloc_bo(ibo, m_dev, type);
+      }
       break;
     case IO_TEST_BO_INPUT:
       file = m_local_data_path + "/ifm.bin";
@@ -247,8 +271,8 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       ibo.size = get_bin_size(file);
       // May not have wts.bin
       if (ibo.size) {
-	      alloc_bo(ibo, m_dev, type);
-	      init_bo(ibo, file);
+        alloc_bo(ibo, m_dev, type);
+        init_bo(ibo, file);
       }
       break;
     case IO_TEST_BO_OUTPUT:
@@ -266,7 +290,7 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       // May not have pm_ctrlpkt.bin
       if (ibo.size) {
         alloc_bo(ibo, m_dev, type);
-	      init_bo(ibo, file);
+        init_bo(ibo, file);
       }
       break;
     case IO_TEST_BO_SCRATCH_PAD:
@@ -298,6 +322,8 @@ sync_before_run()
     switch(i) {
     case IO_TEST_BO_INPUT:
     case IO_TEST_BO_INSTRUCTION:
+    case IO_TEST_BO_SAVE_INSTRUCTION:
+    case IO_TEST_BO_RESTORE_INSTRUCTION:
     case IO_TEST_BO_PARAMETERS:
     case IO_TEST_BO_MC_CODE:
       ibo->tbo->get()->sync(buffer_handle::direction::host2device, ibo->tbo->size(), 0);
@@ -367,7 +393,17 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
   }
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), cmd);
   ebuf.set_cu_idx(idx);
-  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+
+  if (m_type == KERNEL_TYPE_TXN_PREEMPT) {
+    ebuf.add_ctrl_bo(
+      *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+      *m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
+      *m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get()
+    );
+  } else {
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  }
+
   ebuf.add_arg_64(3);
   ebuf.add_arg_64(0);
   ebuf.add_arg_32(0);
@@ -382,13 +418,19 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
   if (m_type == KERNEL_TYPE_TXN_PREEMPT) {
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-0");
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-1");
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get(), "scratch-pad-mem");
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get(), "scratch-pad-mem");
+    ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
   }
   if (dump)
     ebuf.dump();
 
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(), m_elf);
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    xrt_core::patcher::buf_type::ctrltext, m_elf);
+  if (m_type == KERNEL_TYPE_TXN_PREEMPT) {
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
+      xrt_core::patcher::buf_type::preempt_save, m_elf);
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
+      xrt_core::patcher::buf_type::preempt_restore, m_elf);
+  }
 }
 
 // For debug only
@@ -404,7 +446,7 @@ dump_content()
 
     auto ibo_p = reinterpret_cast<int8_t *>(ibo->map());
     std::string p("/tmp/");
-    p += io_test_bo_type_names[i] + std::to_string(getpid());
+    p += bo_type2name(i) + std::to_string(getpid());
     dump_buf_to_file(ibo_p, ibo->size(), p);
     std::cout << "Dumping BO to: " << p << std::endl;
   }
@@ -451,6 +493,8 @@ const char *
 io_test_bo_set_base::
 bo_type2name(int type)
 {
+  if (IO_TEST_BO_MAX_TYPES > io_test_bo_type_names.size())
+    throw std::runtime_error("Missing BO type names in io_test_bo_type_names[]");
   return io_test_bo_type_names[type];
 }
 
