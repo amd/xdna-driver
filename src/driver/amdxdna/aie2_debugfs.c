@@ -166,53 +166,6 @@ static int aie2_power_state_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(powerstate, aie2_power_state_show, aie2_power_state_write);
 
-static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
-				size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	char input[SIZE + 1];
-	int ret;
-
-	if (len > SIZE) {
-		XDNA_ERR(ndev->xdna, "Length %zu of the buffer exceeds size %d", len, SIZE);
-		return -EINVAL;
-	}
-
-	ret = copy_from_user(input, ptr, len);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
-		return ret;
-	}
-
-	if (!strncmp(input, "suspend", strlen("suspend"))) {
-		mutex_lock(&ndev->aie2_lock);
-		ret = aie2_suspend_fw(ndev);
-		mutex_unlock(&ndev->aie2_lock);
-	} else if (!strncmp(input, "resume", strlen("resume"))) {
-		mutex_lock(&ndev->aie2_lock);
-		ret = aie2_resume_fw(ndev);
-		mutex_unlock(&ndev->aie2_lock);
-	} else {
-		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
-		return -EINVAL;
-	}
-
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "NPU %s failed", input);
-		return -EINVAL;
-	}
-
-	XDNA_DBG(ndev->xdna, "NPU %s succeeded", input);
-	return len;
-}
-
-static int aie2_state_show(struct seq_file *m, void *unused)
-{
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
-
 static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 				  size_t len, loff_t *off)
 {
@@ -643,7 +596,6 @@ const struct {
 } aie2_dbgfs_files[] = {
 	AIE2_DBGFS_FILE(nputest, 0600),
 	AIE2_DBGFS_FILE(pasid, 0600),
-	AIE2_DBGFS_FILE(state, 0600),
 	AIE2_DBGFS_FILE(powerstate, 0600),
 	AIE2_DBGFS_FILE(dpm_level, 0600),
 	AIE2_DBGFS_FILE(ringbuf, 0400),
