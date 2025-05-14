@@ -735,9 +735,9 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
   // Disable for now. Require changes in XRT for argument patching.
-  //test_case{ "multi-command preempt ELF io test real kernel good run", {},
-  //  TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 1 }
-  //},
+  test_case{ "multi-command preempt ELF io test real kernel good run", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 8 }
+  },
 };
 
 // Test case executor implementation

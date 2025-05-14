@@ -17,6 +17,7 @@
 #include <drm/gpu_scheduler.h>
 
 #include "drm_local/amdxdna_accel.h"
+#include "aie2_msg_priv.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -463,6 +464,7 @@ void aie2_config_event_trace(struct amdxdna_dev_hdl *ndev, u32 enable,
 void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state);
 
 /* aie2_message.c */
+bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode);
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_resume_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type, u64 value);
@@ -500,13 +502,13 @@ int aie2_legacy_config_cu(struct amdxdna_ctx *ctx);
 #endif
 
 int aie2_config_cu(struct amdxdna_ctx *ctx);
-int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
+int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job, enum cmd_chain_class class,
 		 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
-				struct amdxdna_sched_job *job,
+				struct amdxdna_sched_job *job, enum cmd_chain_class class,
 				int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
-			       struct amdxdna_sched_job *job,
+			       struct amdxdna_sched_job *job, enum cmd_chain_class class,
 			       int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_sync_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, void __iomem *, size_t));
