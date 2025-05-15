@@ -907,6 +907,23 @@ void aie2_rq_restart_all(struct aie2_ctx_rq *rq)
 	mutex_unlock(&xdna->dev_lock);
 }
 
+void aie2_rq_dump_all(struct aie2_ctx_rq *rq)
+{
+	struct aie2_partition *part;
+	struct amdxdna_dev *xdna;
+	struct amdxdna_ctx *ctx;
+	int i;
+
+	xdna = ctx_rq_to_xdna_dev(rq);
+	mutex_lock(&xdna->dev_lock);
+	for (i = 0; i < rq->num_parts; i++) {
+		part = &rq->parts[i];
+		list_for_each_entry(ctx, &part->conn_list, entry)
+			aie2_dump_ctx(ctx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+}
+
 /* This is called when command completed. Do NOT hold lock */
 void aie2_rq_yield(struct amdxdna_ctx *ctx)
 {
