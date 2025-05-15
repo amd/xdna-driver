@@ -458,7 +458,7 @@ disable_dev:
 
 static void aie2_hw_suspend(struct amdxdna_dev *xdna)
 {
-	aie2_assign_event_trace_state(xdna->dev_handle, false);
+	//aie2_assign_event_trace_state(xdna->dev_handle, false);
 	aie2_rq_stop_all(&xdna->dev_handle->ctx_rq);
 	aie2_hw_stop(xdna);
 }
@@ -467,16 +467,20 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 {
 	int ret;
 
-	XDNA_INFO(xdna, "firmware resuming...");
+	XDNA_DBG(xdna, "firmware resuming...");
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "resume NPU firmware failed");
 		return ret;
 	}
 
-	XDNA_INFO(xdna, "context resuming...");
+	XDNA_DBG(xdna, "context resuming...");
 	aie2_rq_restart_all(&xdna->dev_handle->ctx_rq);
-	aie2_assign_event_trace_state(xdna->dev_handle, true);
+	/*
+	 * Resume should turn it back to the previous event trace state.
+	 * Not just simply turn it on.
+	 */
+	//aie2_assign_event_trace_state(xdna->dev_handle, true);
 	return 0;
 }
 

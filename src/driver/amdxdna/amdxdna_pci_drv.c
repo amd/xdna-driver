@@ -17,7 +17,7 @@
 #include "amdxdna_carvedout_buf.h"
 #endif
 
-int autosuspend_ms = -1;
+int autosuspend_ms = 5000;
 module_param(autosuspend_ms, int, 0644);
 MODULE_PARM_DESC(autosuspend_ms, "runtime suspend delay in miliseconds. < 0: prevent it");
 
@@ -222,7 +222,6 @@ static int amdxdna_rpmops_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
 
-	WARN_ON(!list_empty(&xdna->client_list));
 	if (xdna->dev_info->ops->suspend)
 		xdna->dev_info->ops->suspend(xdna);
 
