@@ -425,6 +425,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	req.aie_type = 1;
 	req.start_col = ctx->start_col;
 	req.num_col = ctx->num_col;
+	req.num_unused_col = ctx->num_col - ctx->priv->orig_num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = ctx->client->pasid;
 	req.context_priority = ctx->priv->priority + 1;
