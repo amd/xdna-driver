@@ -464,6 +464,8 @@ struct amdxdna_drm_query_sensor {
  * @preemptions: The number of times this context has been preempted by another context in the
  *               same partition.
  * @errors: The errors for this context.
+ *
+ * !!! NOTE: Never expand this struct. Use amdxdna_drm_query_ctx_array instead. !!!
  */
 struct amdxdna_drm_query_ctx {
 	__u32 context_id;
