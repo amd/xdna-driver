@@ -577,7 +577,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 #ifdef AMDXDNA_DEVEL
 skip_pasid:
-		XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
+	XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
 #endif
 
 	psp_conf.fw_size = fw->size;
