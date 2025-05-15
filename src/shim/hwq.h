@@ -30,9 +30,6 @@ public:
   submit_wait(const xrt_core::fence_handle*) override;
 
   void
-  submit_wait(const std::vector<xrt_core::fence_handle*>&) override;
-
-  void
   submit_signal(const xrt_core::fence_handle*) override;
 
   std::unique_ptr<xrt_core::fence_handle>
