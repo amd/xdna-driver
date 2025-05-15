@@ -694,16 +694,10 @@ static bool aie2_detect(struct amdxdna_dev *xdna)
 static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
 	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
-	struct amdxdna_client *client;
 
-	if (dump_only) {
-		mutex_lock(&xdna->dev_lock);
-		list_for_each_entry(client, &xdna->client_list, node)
-			aie2_dump_ctx(client);
-		mutex_unlock(&xdna->dev_lock);
+	aie2_rq_dump_all(rq);
+	if (dump_only)
 		return;
-	}
-
 	aie2_rq_stop_all(rq);
 	aie2_rq_restart_all(rq);
 }

@@ -522,7 +522,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_ctx *ctx, u64 seq);
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-void aie2_dump_ctx(struct amdxdna_client *client);
+void aie2_dump_ctx(struct amdxdna_ctx *ctx);
 
 /* aie2_hwctx.c */
 int aie2_hwctx_start(struct amdxdna_ctx *ctx);
@@ -535,6 +535,7 @@ int aie2_rq_context_limit(struct aie2_ctx_rq *rq);
 int aie2_rq_active_context(struct aie2_ctx_rq *rq);
 bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq);
 bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq);
+void aie2_rq_dump_all(struct aie2_ctx_rq *rq);
 void aie2_rq_stop_all(struct aie2_ctx_rq *rq);
 void aie2_rq_restart_all(struct aie2_ctx_rq *rq);
 int aie2_rq_show(struct aie2_ctx_rq *rq, struct seq_file *m);

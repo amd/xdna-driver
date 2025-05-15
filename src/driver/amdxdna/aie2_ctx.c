@@ -5,6 +5,7 @@
 
 #include <linux/timekeeping.h>
 #include <drm/drm_syncobj.h>
+#include <drm/drm_cache.h>
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -46,13 +47,42 @@ aie2_fence_state2str(struct dma_fence *fence)
 	return dma_fence_is_signaled(fence) ? "signaled" : "unsignaled";
 }
 
-static void
-aie2_ctx_dump(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
+void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 {
-	u64 sub = ctx->submitted;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct app_health_report_v1 *report;
+	struct amdxdna_dev_hdl *ndev;
+	const size_t size = 0x1000;
 	u64 comp = ctx->completed;
+	u64 sub = ctx->submitted;
+	dma_addr_t dma_addr;
+	void *buff;
+	int ret;
 
-	XDNA_ERR(xdna, "Dumping ctx %s, sub=%lld, comp=%lld", ctx->name, sub, comp);
+	ndev = xdna->dev_handle;
+	XDNA_ERR(xdna, "Dumping ctx %s, hwctx %d, sub=%lld, comp=%lld",
+		 ctx->name, ctx->priv->id, sub, comp);
+	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
+				     DMA_FROM_DEVICE, GFP_KERNEL);
+	if (!buff) {
+		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
+		return;
+	}
+
+	drm_clflush_virt_range(buff, size); /* device can access */
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_get_app_health(ndev, ctx->priv->id, dma_addr, size);
+	mutex_unlock(&ndev->aie2_lock);
+	if (!ret) {
+		report = buff;
+		print_hex_dump_debug("raw_report: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
+				     sizeof(*report), false);
+		XDNA_ERR(xdna, "Firmware timeout state capture:");
+		XDNA_ERR(xdna, "\tDPU PC:    0x%x", report->dpu_pc);
+		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
+	}
+	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+
 	mutex_lock(&ctx->priv->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {
 		struct amdxdna_sched_job *j;
@@ -62,25 +92,12 @@ aie2_ctx_dump(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
 			continue;
 		XDNA_ERR(xdna, "JOB[%d]:", i);
 		XDNA_ERR(xdna, "\tseq: %lld", j->seq);
-		XDNA_ERR(xdna, "\top: 0x%x", j->opcode);
+		XDNA_ERR(xdna, "\top: 0x%x", amdxdna_cmd_get_op(j->cmd_bo));
 		XDNA_ERR(xdna, "\tmsg: 0x%x", j->msg_id);
 		XDNA_ERR(xdna, "\tfence: %s", aie2_fence_state2str(j->fence));
 		XDNA_ERR(xdna, "\tout_fence: %s", aie2_fence_state2str(j->out_fence));
 	}
 	mutex_unlock(&ctx->priv->io_lock);
-}
-
-void aie2_dump_ctx(struct amdxdna_client *client)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
-	int idx;
-
-	idx = srcu_read_lock(&client->ctx_srcu);
-	amdxdna_for_each_ctx(client, ctx_id, ctx)
-		aie2_ctx_dump(xdna, ctx);
-	srcu_read_unlock(&client->ctx_srcu, idx);
 }
 
 static void aie2_ctx_wait_for_idle(struct amdxdna_ctx *ctx)
