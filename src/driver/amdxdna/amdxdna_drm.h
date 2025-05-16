@@ -135,7 +135,7 @@ struct amdxdna_dev {
 
 struct amdxdna_stats {
 	seqlock_t			lock; /* protect stats */
-	atomic_t			job_depth;
+	int				job_depth;
 	ktime_t				start_time;
 	u64				busy_time;
 };

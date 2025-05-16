@@ -193,6 +193,16 @@ drm_bo_get_map_offset(int fd, uint32_t boh)
   return args.offset;
 }
 
+std::pair<uint32_t, uint32_t>
+drm_bo_get_info(int fd, uint32_t boh)
+{
+  drm_virtgpu_resource_info args = {
+    .bo_handle = boh,
+  };
+  ioctl(fd, DRM_IOCTL_VIRTGPU_RESOURCE_INFO, &args);
+  return {args.res_handle, args.size};
+}
+
 }
 
 namespace shim_xdna {
@@ -342,12 +352,12 @@ void
 platform_drv_virtio::
 destroy_ctx(destroy_ctx_arg& arg) const
 {
-  // TODO: Need to pass syncobj handle to host as well.
   amdxdna_ccmd_destroy_ctx_req req = {
     { AMDXDNA_CCMD_DESTROY_CTX, sizeof(req) },
   };
 
   req.handle = arg.ctx_handle;
+  req.syncobj_hdl = arg.syncobj_handle;
   hcall(&req);
 }
 
@@ -387,22 +397,21 @@ create_bo(create_bo_arg& arg) const
   bo_id id;
   auto fd = dev_fd();
 
-  if (arg.type != AMDXDNA_BO_DEV)
+  if (arg.type != AMDXDNA_BO_DEV) {
     id = drm_bo_alloc(fd, arg.size);
+    arg.bo.res_id = id.handle;
+    arg.map_offset = drm_bo_get_map_offset(fd, id.handle);
+  } else {
+    arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
+    arg.map_offset = AMDXDNA_INVALID_ADDR;
+  }
 
   try {
-    auto p = host_bo_alloc(arg.type, arg.size, id.res_id, arg.xdna_addr_align);
-    arg.bo.handle = p.first;
-    arg.xdna_addr = p.second;
+    std::tie(arg.bo.handle, arg.xdna_addr) =
+      host_bo_alloc(arg.type, arg.size, id.res_id, arg.xdna_addr_align);
   } catch (...) {
-    drm_bo_free(fd, id.handle);
+    drm_bo_free(fd, arg.bo.res_id);
     throw;
-  }
-  arg.bo.res_id = id.handle;
-  try {
-    arg.map_offset = drm_bo_get_map_offset(fd, id.handle);
-  } catch (...) {
-    arg.map_offset = AMDXDNA_INVALID_ADDR;
   }
 }
 
@@ -456,7 +465,7 @@ submit_cmd(submit_cmd_arg& arg) const
 
   auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req);
   req_sz += sizeof(uint64_t); // One cmd handle
-  req_sz += nargs * sizeof(uint64_t); // For args handle
+  req_sz += nargs * sizeof(uint32_t); // For args handle
   // Get a 64 bit aligned buffer for req
   auto req_sz_in_u64 = req_sz / sizeof(uint64_t) + 1;
   uint64_t req_buf[req_sz_in_u64];
@@ -464,14 +473,15 @@ submit_cmd(submit_cmd_arg& arg) const
   amdxdna_ccmd_exec_cmd_rsp rsp = {};
 
   req->hdr.cmd = AMDXDNA_CCMD_EXEC_CMD;
-  req->hdr.len = req_sz;
+  req->hdr.len = req_sz_in_u64 * sizeof(uint64_t);
   req->hdr.rsp_off = 0;
   req->ctx_handle = arg.ctx_handle;
   req->type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   req->cmd_count = 1;
-  req->arg_count = nargs;
   req->cmds_n_args[0] = arg.cmd_bo.handle;
-  int i = 1;
+  req->arg_count = nargs;
+  req->arg_offset = 1;
+  int i = req->arg_offset;
   for (auto& id : arg.arg_bos)
     req->cmds_n_args[i++] = id.handle;
 
@@ -491,6 +501,53 @@ wait_syncobj(wait_syncobj_arg& arg) const
   req.syncobj_hdl = arg.handle;
   // TODO: needs to pass timeout to host
   hcall(&req);
+}
+
+void
+platform_drv_virtio::
+export_bo(export_bo_arg& bo_arg) const
+{
+  drm_prime_handle arg = {};
+  arg.handle = bo_arg.bo.res_id;
+  arg.flags = DRM_RDWR | DRM_CLOEXEC;
+  arg.fd = -1;
+  ioctl(dev_fd(), DRM_IOCTL_PRIME_HANDLE_TO_FD, &arg);
+  bo_arg.fd = arg.fd;
+}
+
+void
+platform_drv_virtio::
+import_bo(import_bo_arg& bo_arg) const
+{
+  auto fd = dev_fd();
+  drm_prime_handle carg = {};
+  carg.handle = AMDXDNA_INVALID_BO_HANDLE;
+  carg.flags = 0;
+  carg.fd = bo_arg.fd;
+  ioctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &carg);
+  auto gboh = carg.handle;
+
+  auto [ resource, size ] = drm_bo_get_info(fd, gboh);
+
+  uint32_t hboh = AMDXDNA_INVALID_BO_HANDLE;
+  uint64_t xdna_addr = AMDXDNA_INVALID_ADDR;
+  try {
+    std::tie(hboh, xdna_addr) = host_bo_alloc(AMDXDNA_BO_SHARE, size, resource, 0);
+  } catch (...) {
+    drm_bo_free(fd, gboh);
+    throw;
+  }
+
+  uint64_t map_offset = AMDXDNA_INVALID_ADDR;
+  map_offset = drm_bo_get_map_offset(fd, gboh);
+
+  bo_arg.bo.handle = hboh;
+  bo_arg.bo.res_id = gboh;
+  bo_arg.xdna_addr = xdna_addr;
+  bo_arg.vaddr = nullptr;
+  bo_arg.map_offset = map_offset;
+  bo_arg.type = AMDXDNA_BO_SHARE;
+  bo_arg.size = size;
 }
 
 }

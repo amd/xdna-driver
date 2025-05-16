@@ -288,7 +288,6 @@ struct partition_info
           new_entry.migrations = entry.migrations;
           new_entry.preemptions = entry.preemptions;
           new_entry.errors = entry.errors;
-          new_entry.qos.priority = entry.priority;
           output.push_back(std::move(new_entry));
         }
         return output;
@@ -329,14 +328,13 @@ struct partition_info
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
       new_entry.qos.gops = entry.gops;
-      new_entry.qos.egops = entry.egops;
       new_entry.qos.fps = entry.fps;
       new_entry.qos.dma_bandwidth = entry.dma_bandwidth;
       new_entry.qos.latency = entry.latency;
       new_entry.qos.frame_exec_time = entry.frame_exec_time;
       new_entry.instruction_mem = entry.heap_usage;
       new_entry.pasid = entry.pasid;
-      // new_entry.suspensions = entry.suspensions;
+      new_entry.suspensions = entry.suspensions;
       output.push_back(std::move(new_entry));
     }
     return output;
@@ -522,6 +520,9 @@ struct telemetry
   struct amdxdna_drm_query_telemetry {
     uint32_t major;
     uint32_t minor;
+    uint32_t type;
+    uint32_t ctx_map_num_elements;
+    uint32_t ctx_map[NPU_RTOS_MAX_USER_ID_COUNT];
     uint64_t l1_interrupts;
     uint64_t context_started_count[NPU_RTOS_MAX_USER_ID_COUNT];
     uint64_t scheduled_count[NPU_RTOS_MAX_USER_ID_COUNT];
@@ -616,37 +617,7 @@ struct telemetry
       if (device_id != NPU4_DEVICE_ID)
         return output;
 
-      std::vector<char> payload(output_size);
-      amdxdna_drm_get_info query_ctx = {
-        .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
-        .buffer_size = output_size,
-        .buffer = reinterpret_cast<uintptr_t>(payload.data())
-      };
-
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_ctx);
-
-      if (output_size < query_ctx.buffer_size) {
-        throw xrt_core::query::exception(
-          boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Insufficient buffer size. Need: %u") % query_ctx.buffer_size));
-      }
-
-      uint32_t data_size = query_ctx.buffer_size / sizeof(*data);
-      data = reinterpret_cast<decltype(data)>(payload.data());
-
-      std::array<uint32_t, NPU_RTOS_MAX_USER_ID_COUNT> ctx_map{};
-      for (uint32_t i = 0; i < data_size; i++) {
-        const auto& entry = data[i];
-
-        if (entry.hwctx_id >= NPU_RTOS_MAX_USER_ID_COUNT) {
-          throw xrt_core::query::exception(
-            boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS - Invalid hw ctx ID: %u") % entry.hwctx_id));
-        }
-
-        ctx_map[entry.hwctx_id] = entry.context_id;
-      }
-
-      amdxdna_drm_query_telemetry telemetry{};
+      amdxdna_drm_query_telemetry telemetry {};
 
       amdxdna_drm_get_info query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
@@ -654,9 +625,10 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
+      auto& pci_dev_impl = get_pcidev_impl(device);
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (auto i = 0; i < NPU_RTOS_MAX_USER_ID_COUNT; i++) {
+      for (auto i = 0; i < telemetry.ctx_map_num_elements; i++) {
         query::rtos_telemetry::data task;
 
         task.context_starts = telemetry.context_started_count[i];
@@ -674,7 +646,7 @@ struct telemetry
         }
         task.dtlbs = std::move(dtlbs);
 
-        task.preemption_data.slot_index = ctx_map[i];
+        task.preemption_data.slot_index = telemetry.ctx_map[i];
         task.preemption_data.preemption_checkpoint_event = telemetry.layer_boundary_count[i];
         task.preemption_data.preemption_frame_boundary_events = telemetry.frame_boundary_count[i];
         output.push_back(std::move(task));
@@ -768,15 +740,15 @@ struct resource_info
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
     std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(5);
-    info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_clk_max;
+    info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::npu_clk_max;
     info_items[0].data_uint64 = resource_info.npu_clk_max;
-    info_items[1].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_tops_max;
+    info_items[1].type = xrt_core::query::xrt_resource_raw::resource_type::npu_tops_max;
     info_items[1].data_double = resource_info.npu_tops_max;
-    info_items[2].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_task_max;
+    info_items[2].type = xrt_core::query::xrt_resource_raw::resource_type::npu_task_max;
     info_items[2].data_uint64 = resource_info.npu_task_max;
-    info_items[3].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_tops_curr;
+    info_items[3].type = xrt_core::query::xrt_resource_raw::resource_type::npu_tops_curr;
     info_items[3].data_double = resource_info.npu_tops_curr;
-    info_items[4].type = xrt_core::query::xrt_resource_raw::resource_type::ipu_task_curr;
+    info_items[4].type = xrt_core::query::xrt_resource_raw::resource_type::npu_task_curr;
     info_items[4].data_uint64 = resource_info.npu_task_curr;
 
     return info_items;
@@ -862,7 +834,7 @@ struct sensor_info
     switch (std::any_cast<xrt_core::query::sdm_sensor_info::sdr_req_type>(param)) {
     case xrt_core::query::sdm_sensor_info::sdr_req_type::power:
       return sensor.type == AMDXDNA_SENSOR_TYPE_POWER;
-    // At the moment no sensors are expected for IPU other than power
+    // At the moment no sensors are expected for NPU other than power
     case xrt_core::query::sdm_sensor_info::sdr_req_type::current:
     case xrt_core::query::sdm_sensor_info::sdr_req_type::mechanical:
     case xrt_core::query::sdm_sensor_info::sdr_req_type::thermal:
@@ -997,6 +969,8 @@ struct xrt_smi_lists
       return xrt_core::smi::get_list("validate", "run");
     case xrt_core::query::xrt_smi_lists::type::examine_reports:
       return xrt_core::smi::get_list("examine", "report");
+    case xrt_core::query::xrt_smi_lists::type::configure_option_options:
+      return xrt_core::smi::get_option_options("configure");
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
@@ -1070,7 +1044,7 @@ struct sequence_name
     case xrt_core::query::sequence_name::type::tct_all_column:
       seq_name = "tct_4col.txt";
       break;
-    case xrt_core::query::sequence_name::type::gemm_int8: 
+    case xrt_core::query::sequence_name::type::gemm_int8:
       seq_name = "gemm_int8.txt";
       break;
     }

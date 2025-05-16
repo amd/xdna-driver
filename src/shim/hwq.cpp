@@ -114,13 +114,6 @@ submit_wait(const xrt_core::fence_handle* f)
 
 void
 hwq::
-submit_wait(const std::vector<xrt_core::fence_handle*>& fences)
-{
-  fence::submit_wait(m_pdev, m_ctx_id, fences);
-}
-
-void
-hwq::
 submit_signal(const xrt_core::fence_handle* f)
 {
   auto fh = static_cast<const fence*>(f);

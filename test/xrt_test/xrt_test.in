@@ -7,4 +7,4 @@ unset LD_LIBRARY_PATH
 
 SCRIPT_DIR=$(readlink -f $(dirname ${BASH_SOURCE[0]}))
 
-${SCRIPT_DIR}/@XDNA_XRT_TEST@ $1
+${SCRIPT_DIR}/@XDNA_XRT_TEST@ "$@"
