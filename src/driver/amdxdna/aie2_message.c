@@ -461,8 +461,10 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	info->i2x.rb_size	  = cq_pair->i2x_q.buf_size;
 
 	aie2_calc_intr_reg(info);
-	XDNA_DBG(xdna, "%s created hwctx %d pasid %d qos priority 0x%x", ctx->name,
-		 ctx->priv->id, ctx->client->pasid, ctx->qos.priority);
+	XDNA_DBG(xdna,
+		 "%s created hwctx %d pasid %d priority 0x%x start col %d num col %d unused col %d",
+		 ctx->name, ctx->priv->id, ctx->client->pasid, ctx->qos.priority, ctx->start_col,
+		 ctx->num_col, req.num_unused_col);
 
 	return 0;
 }
