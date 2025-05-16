@@ -134,7 +134,8 @@ struct create_ctx_req {
 	u32	aie_type;
 	u8	start_col;
 	u8	num_col;
-	u16	reserved;
+	u8	num_unused_col;
+	u8	reserved;
 	u8	num_cq_pairs_requested;
 	u8	reserved1;
 	u16	pasid;

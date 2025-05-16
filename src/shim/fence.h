@@ -39,10 +39,6 @@ public:
   void
   submit_wait(xrt_core::hwctx_handle::slot_id) const;
 
-  static void
-  submit_wait(const pdev& dev, xrt_core::hwctx_handle::slot_id,
-  	const std::vector<xrt_core::fence_handle*>& fences);
-
   void
   submit_signal(xrt_core::hwctx_handle::slot_id) const;
 

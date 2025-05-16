@@ -13,6 +13,7 @@
 #include <linux/hmm.h>
 #include <linux/timekeeping.h>
 #include <linux/workqueue.h>
+#include <linux/seqlock_types.h>
 
 #include "amdxdna_ctx.h"
 #ifdef AMDXDNA_OF
@@ -133,10 +134,10 @@ struct amdxdna_dev {
 };
 
 struct amdxdna_stats {
-	spinlock_t			lock; /* protect stats */
-	u32				job_depth;
-	ktime_t				busy_time;
+	seqlock_t			lock; /* protect stats */
+	int				job_depth;
 	ktime_t				start_time;
+	u64				busy_time;
 };
 
 /*
@@ -181,6 +182,7 @@ struct amdxdna_client {
 #define amdxdna_no_ctx(client)				\
 	xa_empty(&(client)->ctx_xa)
 
-void amdxdna_update_stats(struct amdxdna_client *client, ktime_t time, bool start);
+void amdxdna_stats_start(struct amdxdna_client *client);
+void amdxdna_stats_account(struct amdxdna_client *client);
 
 #endif /* _AMDXDNA_DRM_H_ */

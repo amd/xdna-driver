@@ -5,6 +5,7 @@
 
 #include <linux/timekeeping.h>
 #include <drm/drm_syncobj.h>
+#include <drm/drm_cache.h>
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -46,13 +47,42 @@ aie2_fence_state2str(struct dma_fence *fence)
 	return dma_fence_is_signaled(fence) ? "signaled" : "unsignaled";
 }
 
-static void
-aie2_ctx_dump(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
+void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 {
-	u64 sub = ctx->submitted;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct app_health_report_v1 *report;
+	struct amdxdna_dev_hdl *ndev;
+	const size_t size = 0x1000;
 	u64 comp = ctx->completed;
+	u64 sub = ctx->submitted;
+	dma_addr_t dma_addr;
+	void *buff;
+	int ret;
 
-	XDNA_ERR(xdna, "Dumping ctx %s, sub=%lld, comp=%lld", ctx->name, sub, comp);
+	ndev = xdna->dev_handle;
+	XDNA_ERR(xdna, "Dumping ctx %s, hwctx %d, sub=%lld, comp=%lld",
+		 ctx->name, ctx->priv->id, sub, comp);
+	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
+				     DMA_FROM_DEVICE, GFP_KERNEL);
+	if (!buff) {
+		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
+		return;
+	}
+
+	drm_clflush_virt_range(buff, size); /* device can access */
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_get_app_health(ndev, ctx->priv->id, dma_addr, size);
+	mutex_unlock(&ndev->aie2_lock);
+	if (!ret) {
+		report = buff;
+		print_hex_dump_debug("raw_report: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
+				     sizeof(*report), false);
+		XDNA_ERR(xdna, "Firmware timeout state capture:");
+		XDNA_ERR(xdna, "\tDPU PC:    0x%x", report->dpu_pc);
+		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
+	}
+	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+
 	mutex_lock(&ctx->priv->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {
 		struct amdxdna_sched_job *j;
@@ -62,25 +92,12 @@ aie2_ctx_dump(struct amdxdna_dev *xdna, struct amdxdna_ctx *ctx)
 			continue;
 		XDNA_ERR(xdna, "JOB[%d]:", i);
 		XDNA_ERR(xdna, "\tseq: %lld", j->seq);
-		XDNA_ERR(xdna, "\top: 0x%x", j->opcode);
+		XDNA_ERR(xdna, "\top: 0x%x", amdxdna_cmd_get_op(j->cmd_bo));
 		XDNA_ERR(xdna, "\tmsg: 0x%x", j->msg_id);
 		XDNA_ERR(xdna, "\tfence: %s", aie2_fence_state2str(j->fence));
 		XDNA_ERR(xdna, "\tout_fence: %s", aie2_fence_state2str(j->out_fence));
 	}
 	mutex_unlock(&ctx->priv->io_lock);
-}
-
-void aie2_dump_ctx(struct amdxdna_client *client)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
-	int idx;
-
-	idx = srcu_read_lock(&client->ctx_srcu);
-	amdxdna_for_each_ctx(client, ctx_id, ctx)
-		aie2_ctx_dump(xdna, ctx);
-	srcu_read_unlock(&client->ctx_srcu, idx);
 }
 
 static void aie2_ctx_wait_for_idle(struct amdxdna_ctx *ctx)
@@ -108,6 +125,7 @@ void aie2_ctx_disconnect(struct amdxdna_ctx *ctx, bool wait)
 		aie2_ctx_wait_for_idle(ctx);
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	aie2_hwctx_stop(ctx);
+	ctx->priv->disconn_cnt++;
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 }
 
@@ -156,9 +174,6 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	struct dma_fence *fence = job->fence;
 	int idx;
 
-#ifdef AMDXDNA_DRM_USAGE
-	amdxdna_update_stats(ctx->client, ktime_get(), false);
-#endif
 	ctx->completed++;
 	trace_xdna_job(&job->base, ctx->name, "signaling fence", job->seq, job->opcode);
 	job->job_done = true;
@@ -170,6 +185,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	dma_fence_put(fence);
 	mmput_async(job->mm);
 	aie2_job_put(job);
+	aie2_pm_suspend(ctx->client->xdna->dev_handle);
 }
 
 static int
@@ -180,6 +196,7 @@ aie2_sched_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 ret = 0;
 	u32 status;
 
+	amdxdna_stats_account(job->ctx->client);
 	cmd_abo = job->cmd_bo;
 
 	if (unlikely(!data)) {
@@ -214,6 +231,7 @@ aie2_sched_nocmd_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 ret = 0;
 	u32 status;
 
+	amdxdna_stats_account(job->ctx->client);
 	if (unlikely(!data))
 		goto out;
 
@@ -241,6 +259,7 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 cmd_status;
 	u32 ret = 0;
 
+	amdxdna_stats_account(job->ctx->client);
 	cmd_abo = job->cmd_bo;
 	if (unlikely(!data) || unlikely(size != sizeof(u32) * 3)) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
@@ -325,11 +344,10 @@ out:
 		aie2_job_put(job);
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
+	} else {
+		if (job->opcode != OP_NOOP)
+			amdxdna_stats_start(ctx->client);
 	}
-#ifdef AMDXDNA_DRM_USAGE
-	else
-		amdxdna_update_stats(ctx->client, ktime_get(), true);
-#endif
 
 	return fence;
 }
@@ -835,10 +853,16 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	unsigned long timeout = 0;
 	int ret, i;
 
+	ret = aie2_pm_resume(xdna->dev_handle);
+	if (ret) {
+		XDNA_ERR(xdna, "Resume failed, ret %d", ret);
+		return ret;
+	}
+
 	ret = down_killable(&ctx->priv->job_sem);
 	if (ret) {
 		XDNA_ERR(xdna, "%s Grab job sem failed, ret %d", ctx->name, ret);
-		return ret;
+		goto suspend;
 	}
 
 	ret = aie2_rq_submit_enter(&xdna->dev_handle->ctx_rq, ctx);
@@ -935,6 +959,8 @@ rq_yield:
 up_job_sem:
 	up(&ctx->priv->job_sem);
 	job->job_done = true;
+suspend:
+	aie2_pm_suspend(xdna->dev_handle);
 	return ret;
 }
 

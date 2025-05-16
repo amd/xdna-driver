@@ -17,7 +17,10 @@
 	DECLARE_XDNA_MSG_COMMON(name, op, MAX_AIE2_STATUS_CODE)
 
 #define aie2_send_mgmt_msg_wait(ndev, msg) \
-	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0)
+	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0, false)
+
+#define aie2_send_mgmt_msg_wait_silent(ndev, msg) \
+	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0, true)
 
 static bool
 is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode)
@@ -76,7 +79,7 @@ is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
 static int
 aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 			       struct xdna_mailbox_msg *msg,
-			       u32 offset)
+			       u32 offset, bool silent)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct xdna_notify *hdl = msg->handle;
@@ -94,8 +97,10 @@ aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 	}
 
 	if (!ret && hdl->data[offset] != AIE2_STATUS_SUCCESS) {
-		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
-			 msg->opcode, *hdl->data);
+		if (!silent) {
+			XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
+				 msg->opcode, *hdl->data);
+		}
 		ret = -EINVAL;
 	}
 
@@ -277,7 +282,7 @@ int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t 
 	req.buf_size = size;
 	req.type = type;
 
-	ret = aie2_send_mgmt_msg_wait_offset(ndev, &msg, XDNA_STATUS_OFFSET(get_telemetry));
+	ret = aie2_send_mgmt_msg_wait_offset(ndev, &msg, XDNA_STATUS_OFFSET(get_telemetry), false);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get telemetry, ret %d", ret);
 		return ret;
@@ -425,6 +430,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	req.aie_type = 1;
 	req.start_col = ctx->start_col;
 	req.num_col = ctx->num_col;
+	req.num_unused_col = ctx->num_col - ctx->priv->orig_num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = ctx->client->pasid;
 	req.context_priority = ctx->priv->priority + 1;
@@ -629,14 +635,14 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 	req.buf_size = size;
 	req.buf_addr = addr;
 
-	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	ret = aie2_send_mgmt_msg_wait_silent(ndev, &msg);
 	if (ret) {
-		XDNA_ERR(xdna, "Get app health failed, ret 0x%x", ret);
+		XDNA_DBG(xdna, "Get app health failed, ret 0x%x", ret);
 		return ret;
 	}
 
 	if (resp.status != AIE2_STATUS_SUCCESS) {
-		XDNA_ERR(xdna, "Get app health got status 0x%x", resp.status);
+		XDNA_DBG(xdna, "Get app health got status 0x%x", resp.status);
 		ret = -EINVAL;
 	}
 

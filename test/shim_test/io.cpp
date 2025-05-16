@@ -14,7 +14,7 @@ using namespace xrt_core;
 
 namespace {
 
-const char *io_test_bo_type_names[] = {
+std::array io_test_bo_type_names {
   "IO_TEST_BO_CMD",
   "IO_TEST_BO_INSTRUCTION",
   "IO_TEST_BO_INPUT",
@@ -22,9 +22,10 @@ const char *io_test_bo_type_names[] = {
   "IO_TEST_BO_OUTPUT",
   "IO_TEST_BO_INTERMEDIATE",
   "IO_TEST_BO_MC_CODE",
-  "IO_TEST_BO_BAD_INSTRUCTION",
   "IO_TEST_BO_CTRL_PKT_PM",
   "IO_TEST_BO_SCRATCH_PAD",
+  "IO_TEST_BO_SAVE_INSTRUCTION",
+  "IO_TEST_BO_RESTORE_INSTRUCTION",
 };
 
 void
@@ -445,7 +446,7 @@ dump_content()
 
     auto ibo_p = reinterpret_cast<int8_t *>(ibo->map());
     std::string p("/tmp/");
-    p += io_test_bo_type_names[i] + std::to_string(getpid());
+    p += bo_type2name(i) + std::to_string(getpid());
     dump_buf_to_file(ibo_p, ibo->size(), p);
     std::cout << "Dumping BO to: " << p << std::endl;
   }
@@ -492,6 +493,8 @@ const char *
 io_test_bo_set_base::
 bo_type2name(int type)
 {
+  if (IO_TEST_BO_MAX_TYPES > io_test_bo_type_names.size())
+    throw std::runtime_error("Missing BO type names in io_test_bo_type_names[]");
   return io_test_bo_type_names[type];
 }
 

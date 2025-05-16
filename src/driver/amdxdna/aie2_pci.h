@@ -219,6 +219,7 @@ struct amdxdna_ctx_priv {
 	atomic64_t			job_pending_cnt;
 	wait_queue_head_t		connect_waitq;
 	int				idle_cnt;
+	u64				disconn_cnt;
 	bool				force_yield;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_DISPATCHED		0x1
@@ -424,6 +425,8 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 /* aie2_pm.c */
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
 void aie2_pm_fini(struct amdxdna_dev_hdl *ndev);
+int aie2_pm_resume(struct amdxdna_dev_hdl *ndev);
+void aie2_pm_suspend(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 #define aie2_pm_add_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, true)
 #define aie2_pm_del_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, false)
@@ -519,7 +522,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_ctx *ctx, u64 seq);
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-void aie2_dump_ctx(struct amdxdna_client *client);
+void aie2_dump_ctx(struct amdxdna_ctx *ctx);
 
 /* aie2_hwctx.c */
 int aie2_hwctx_start(struct amdxdna_ctx *ctx);
@@ -532,6 +535,7 @@ int aie2_rq_context_limit(struct aie2_ctx_rq *rq);
 int aie2_rq_active_context(struct aie2_ctx_rq *rq);
 bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq);
 bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq);
+void aie2_rq_dump_all(struct aie2_ctx_rq *rq);
 void aie2_rq_stop_all(struct aie2_ctx_rq *rq);
 void aie2_rq_restart_all(struct aie2_ctx_rq *rq);
 int aie2_rq_show(struct aie2_ctx_rq *rq, struct seq_file *m);
