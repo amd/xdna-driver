@@ -59,13 +59,19 @@ static int amdxdna_rpmops_resume(struct device *dev)
 
 int amdxdna_pm_resume_get(struct device *dev)
 {
+#ifdef AMDXDNA_OF
+	return 0;
+#else
 	return pm_runtime_resume_and_get(dev);
+#endif
 }
 
 void amdxdna_pm_suspend_put(struct device *dev)
 {
+#ifndef AMDXDNA_OF
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
+#endif
 }
 
 void amdxdna_pm_init(struct device *dev)
