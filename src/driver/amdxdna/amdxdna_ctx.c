@@ -11,6 +11,7 @@
 #include "drm_local/amdxdna_accel.h"
 
 #include "amdxdna_drm.h"
+#include "amdxdna_pm.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_trace.h"
 
@@ -99,10 +100,14 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
 
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		goto exit;
+
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx) {
 		ret = -ENOMEM;
-		goto exit;
+		goto suspend;
 	}
 
 	if (copy_from_user(&ctx->qos, u64_to_user_ptr(args->qos_p), sizeof(ctx->qos))) {
@@ -144,6 +149,7 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	args->umq_doorbell = ctx->doorbell_offset;
 
 	XDNA_DBG(xdna, "PID %d create context %d, ret %d", client->pid, args->handle, ret);
+	amdxdna_pm_suspend_put(dev->dev);
 	drm_dev_exit(idx);
 	return 0;
 
@@ -153,6 +159,8 @@ rm_id:
 	xa_erase(&client->ctx_xa, ctx->id);
 free_ctx:
 	kfree(ctx);
+suspend:
+	amdxdna_pm_suspend_put(dev->dev);
 exit:
 	drm_dev_exit(idx);
 	return ret;
@@ -164,22 +172,28 @@ int amdxdna_drm_destroy_ctx_ioctl(struct drm_device *dev, void *data, struct drm
 	struct amdxdna_drm_destroy_ctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_ctx *ctx;
-	int ret = 0, idx;
+	int ret, idx;
 
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
+
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		goto out;
 
 	ctx = xa_erase(&client->ctx_xa, args->handle);
 	if (!ctx) {
 		ret = -EINVAL;
 		XDNA_DBG(xdna, "PID %d context %d not exist",
 			 client->pid, args->handle);
-		goto out;
+		goto suspend;
 	}
 
 	amdxdna_ctx_destroy_rcu(ctx, &client->ctx_srcu);
 
 	XDNA_DBG(xdna, "PID %d destroyed context %d", client->pid, args->handle);
+suspend:
+	amdxdna_pm_suspend_put(dev->dev);
 out:
 	drm_dev_exit(idx);
 	return ret;
@@ -231,6 +245,10 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 		return -EINVAL;
 	}
 
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		goto free_buf;
+
 	idx = srcu_read_lock(&client->ctx_srcu);
 	ctx = xa_load(&client->ctx_xa, args->handle);
 	if (!ctx) {
@@ -243,6 +261,8 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 
 unlock_srcu:
 	srcu_read_unlock(&client->ctx_srcu, idx);
+	amdxdna_pm_suspend_put(dev->dev);
+free_buf:
 	kfree(buf);
 	return ret;
 }
@@ -652,21 +672,32 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_drm_exec_cmd *args = data;
+	int ret;
 
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		return ret;
+
 	switch (args->type) {
 	case AMDXDNA_CMD_SUBMIT_EXEC_BUF:
-		return amdxdna_drm_submit_execbuf(client, args);
+		ret = amdxdna_drm_submit_execbuf(client, args);
+		break;
 	case AMDXDNA_CMD_SUBMIT_DEPENDENCY:
-		return amdxdna_drm_submit_dependency(client, args);
+		ret = amdxdna_drm_submit_dependency(client, args);
+		break;
 	case AMDXDNA_CMD_SUBMIT_SIGNAL:
-		return amdxdna_drm_submit_signal(client, args);
+		ret = amdxdna_drm_submit_signal(client, args);
+		break;
+	default:
+		XDNA_ERR(client->xdna, "Invalid command type %d", args->type);
+		ret = -EINVAL;
 	}
 
-	XDNA_ERR(client->xdna, "Invalid command type %d", args->type);
-	return -EINVAL;
+	amdxdna_pm_suspend_put(dev->dev);
+	return ret;
 }
 
 int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
@@ -703,6 +734,10 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_drm_wait_cmd *args = data;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		return ret;
+
 	XDNA_DBG(xdna, "PID %d ctx %d timeout set %d ms for cmd %lld",
 		 client->pid, args->ctx, args->timeout, args->seq);
 
@@ -711,5 +746,6 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	XDNA_DBG(xdna, "PID %d ctx %d cmd %lld wait finished, ret %d",
 		 client->pid, args->ctx, args->seq, ret);
 
+	amdxdna_pm_suspend_put(dev->dev);
 	return ret;
 }

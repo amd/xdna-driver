@@ -1153,10 +1153,7 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret, idx;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	int ret;
 
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
@@ -1213,7 +1210,6 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
-	drm_dev_exit(idx);
 	return ret;
 }
 
@@ -1315,10 +1311,7 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret, idx;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	int ret;
 
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
@@ -1334,7 +1327,6 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
-	drm_dev_exit(idx);
 	return ret;
 }
 
@@ -1428,10 +1420,7 @@ static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret, idx;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	int ret;
 
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
@@ -1458,7 +1447,6 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	}
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
-	drm_dev_exit(idx);
 	return ret;
 }
 
