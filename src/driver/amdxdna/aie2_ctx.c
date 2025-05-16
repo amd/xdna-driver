@@ -9,6 +9,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
+#include "amdxdna_pm.h"
 #include "amdxdna_trace.h"
 #include "aie2_pci.h"
 #include "aie2_msg_priv.h"
@@ -185,7 +186,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	dma_fence_put(fence);
 	mmput_async(job->mm);
 	aie2_job_put(job);
-	aie2_pm_suspend(ctx->client->xdna->dev_handle);
+	amdxdna_pm_suspend_put(ctx->client->xdna->ddev.dev);
 }
 
 static int
@@ -853,7 +854,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	unsigned long timeout = 0;
 	int ret, i;
 
-	ret = aie2_pm_resume(xdna->dev_handle);
+	ret = amdxdna_pm_resume_get(xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Resume failed, ret %d", ret);
 		return ret;
@@ -960,7 +961,7 @@ up_job_sem:
 	up(&ctx->priv->job_sem);
 	job->job_done = true;
 suspend:
-	aie2_pm_suspend(xdna->dev_handle);
+	amdxdna_pm_suspend_put(xdna->ddev.dev);
 	return ret;
 }
 
