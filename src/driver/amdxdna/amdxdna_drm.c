@@ -9,6 +9,7 @@
 #include "drm_local/amdxdna_accel.h"
 
 #include "amdxdna_drm.h"
+#include "amdxdna_pm.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -154,13 +155,24 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_get_info *args = data;
-	int ret;
+	int ret, idx;
 
 	if (!xdna->dev_info->ops->get_aie_info)
 		return -EOPNOTSUPP;
 
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		goto exit;
+
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	ret = xdna->dev_info->ops->get_aie_info(client, args);
+
+	amdxdna_pm_suspend_put(dev->dev);
+exit:
+	drm_dev_exit(idx);
 	return ret;
 }
 
@@ -170,7 +182,7 @@ static int amdxdna_drm_get_info_array_ioctl(struct drm_device *dev, void *data,
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_get_info_array *args = data;
-	int ret;
+	int ret, idx;
 
 	if (!xdna->dev_info->ops->get_aie_info_array)
 		return -EOPNOTSUPP;
@@ -178,8 +190,19 @@ static int amdxdna_drm_get_info_array_ioctl(struct drm_device *dev, void *data,
 	if (!args->num_element || args->num_element > AMDXDNA_MAX_NUM_ELEMENT)
 		return -EINVAL;
 
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		goto exit;
+
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	ret = xdna->dev_info->ops->get_aie_info_array(client, args);
+
+	amdxdna_pm_suspend_put(dev->dev);
+exit:
+	drm_dev_exit(idx);
 	return ret;
 }
 
@@ -188,13 +211,24 @@ static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struc
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_set_state *args = data;
-	int ret = 0;
+	int ret, idx;
 
 	if (!xdna->dev_info->ops->set_aie_state)
 		return -EOPNOTSUPP;
 
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		goto exit;
+
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	ret = xdna->dev_info->ops->set_aie_state(client, args);
+
+	amdxdna_pm_suspend_put(dev->dev);
+exit:
+	drm_dev_exit(idx);
 	return ret;
 }
 
