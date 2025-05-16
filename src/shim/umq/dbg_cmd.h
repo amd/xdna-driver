@@ -13,7 +13,7 @@ extern "C"
 #define DBG_PKT_EXIT (2)
 #define DBG_PKT_INVALID (2)
 
-enum dbg_packet_opcode;
+enum dbg_packet_opcode
 {            
   DBG_CMD_TEST = 10,
   DBG_CMD_EXIT = 11,

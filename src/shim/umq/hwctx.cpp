@@ -53,17 +53,14 @@ fini_log_buf(void)
 
 void
 hwctx_umq::
-set_metadata(int num_ucs, size_t size, uint64_t bo_paddr, enum umq_log_flag flag)
+set_metadata(int num_ucs, size_t size, uint64_t bo_paddr, enum umq_fw_flag flag)
 {
-  const uint32_t LOG_MAGIC_NO = 0x43455254;
-  m_log_metadata.magic_no = LOG_MAGIC_NO;
-  m_log_metadata.major = 0;
-  m_log_metadata.minor = 1;
-  m_log_metadata.umq_log_flag = flag;
+  m_log_metadata.umq_fw_flag = flag;
   m_log_metadata.num_ucs = num_ucs;
   for (int i = 0; i < num_ucs; i++) {
-    m_log_metadata.uc_paddr[i] = bo_paddr + size * i + sizeof(m_log_metadata);
-    m_log_metadata.uc_size[i] = size;
+    m_log_metadata.uc_info[i].paddr = bo_paddr + size * i + sizeof(m_log_metadata);
+    m_log_metadata.uc_info[i].size = size;
+    m_log_metadata.uc_info[i].index = i;
   }
 }
 
@@ -72,8 +69,8 @@ hwctx_umq::
 init_tcp_server(const device& dev)
 {
   //check xrt.ini to start tcp server
-  m_tcp_server(dev);
-  m_thread_(m_tcp_server::start);
+  m_tcp_server = std::make_unique<tcp_server>(dev, this);
+  m_thread_ = std::thread([&] () { m_tcp_server->start(); });
 }
 
 void

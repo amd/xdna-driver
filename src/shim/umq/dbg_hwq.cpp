@@ -7,7 +7,7 @@ namespace shim_xdna {
 
 dbg_hwq_umq::
 dbg_hwq_umq(const device& dev)
-  : m_pdev(device.get_pdev())
+  : m_pdev(dev.get_pdev())
 {
   const size_t header_sz = sizeof(struct host_queue_header);
   const size_t queue_sz = sizeof(struct host_queue_packet);
@@ -19,16 +19,18 @@ dbg_hwq_umq(const device& dev)
 
   m_dbg_umq_bo = std::make_unique<cmd_buffer>(m_pdev, umq_sz, AMDXDNA_BO_CMD);
   m_dbg_umq_bo_buf = m_dbg_umq_bo->vaddr();
-  m_dbg_umq_addr = m_dbg_umq_bo->paddr();
-  m_dbg_umq_hdr = reinterpret_cast<volatile struct host_queue_header *>(m_dbg_umq_bo_buf);
+  m_dbg_umq_paddr = m_dbg_umq_bo->paddr();
+  m_dbg_umq_hdr =
+    reinterpret_cast<volatile struct host_queue_header *>(m_dbg_umq_bo_buf);
   m_dbg_umq_pkt = reinterpret_cast<volatile struct host_queue_packet *>
     ((char *)m_dbg_umq_bo_buf + header_sz);
   m_dbg_umq_comp = m_dbg_umq_bo->paddr() + header_sz + queue_sz;
-  m_dbg_umq_comp_ptr = reinterpret_cast<volatile uint32_t *>(m_dbg_umq_comp);
+  m_dbg_umq_comp_ptr = reinterpret_cast<volatile uint32_t *>
+    ((char *)m_dbg_umq_bo_buf + header_sz + queue_sz);
 
   // set all mapped memory to 0 
   std::memset(m_dbg_umq_bo_buf, 0, umq_sz);
-  m_dbg_umq_pkt->completion_signal = m_dbg_umq_comp;
+  m_dbg_umq_pkt->xrt_header.completion_signal = m_dbg_umq_comp;
   
   m_dbg_umq_pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
   m_dbg_umq_hdr->capacity = 1;
@@ -46,31 +48,41 @@ uint32_t
 dbg_hwq_umq::
 issue_exit_cmd()
 {
-  auto hdr = m_dbg_umq_pkt->xrt_header;
+  auto hdr = &m_dbg_umq_pkt->xrt_header;
   // always case 1
   m_dbg_umq_hdr->write_index++;
-  struct xrt_packet_header *ehp = &m_dbg_umq_pkt->xrt_header;
+  auto ehp = &m_dbg_umq_pkt->xrt_header;
   ehp->common_header.opcode = DBG_CMD_EXIT;
   ehp->common_header.count = 0;
 
-  submit();
+  shim_debug("dbg umq: issue exit cmd");
+  return submit();
 }
 
 uint32_t
 dbg_hwq_umq::
 issue_rw_cmd(struct rw_mem &data, uint16_t opcode)
 { 
-  auto hdr = m_dbg_umq_pkt->xrt_header;
+  auto hdr = &m_dbg_umq_pkt->xrt_header;
   // always case 1
   m_dbg_umq_hdr->write_index++;
-  struct xrt_packet_header *ehp = &m_dbg_umq_pkt->xrt_header;
+  auto ehp = &m_dbg_umq_pkt->xrt_header;
   ehp->common_header.opcode = opcode;
   ehp->common_header.count = sizeof (struct rw_mem);
 
-  struct rw_mem *rwp = reinterpret_cast<struct rw_mem *>(m_dbg_umq_pkt->data);
+  struct rw_mem *rwp = reinterpret_cast<struct rw_mem *>
+    (const_cast<uint32_t *>(m_dbg_umq_pkt->data));
   std::memcpy(rwp, &data, sizeof(struct rw_mem));
 
-  submit();
+  shim_debug("dbg umq: issue rw cmd");
+  return submit();
+}
+
+uint64_t
+dbg_hwq_umq::
+get_bo_paddr() const
+{
+  return m_dbg_umq_paddr;
 }
 
 uint32_t
@@ -81,8 +93,10 @@ submit()
 
   /* Issue mfence instruction to make sure all writes to the slot before is done */
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
-  m_dbg_umq_pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+  m_dbg_umq_pkt->xrt_header.common_header.type =
+    HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 
+  shim_debug("dbg umq: submit cmd");
   while (1)
   {
     if (*m_dbg_umq_comp_ptr)
