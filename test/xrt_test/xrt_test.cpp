@@ -45,10 +45,10 @@ usage(const std::string& prog)
   std::cout << "\t" << "xrt_test" << " [test case ID separated by space] - run specified test cases\n";
   std::cout << "\t" << "-s" << ": specify rounds for stress test (start n ctx, then run)\n";
   std::cout << "\t" << "-m" << ": specify rounds for stress test (run n ctx)\n";
-  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress tests)\n";
+  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress test and multi-layer)\n";
   std::cout << "\t" << "-d" << ": specify dpu kernel (only effects stress test)\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
-  std::cout << "\t" << "Example Usage: " << "./xrt_test 14 -s 20 -d vadd -x vadd\n";
+  std::cout << "\t" << "Example Usage: " << "./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
   std::cout << "\t" << "Run stress test with Vadd kernel and xclbin for 20 rounds\n";
   std::cout << std::endl;
 }
@@ -503,60 +503,6 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
 }
 
 void
-TEST_xrt_umq_df_bw(int device_index, arg_type& arg)
-{
-  auto device = xrt::device{device_index};
-
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/df_bw.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
-  xrt::elf elf{local_path("npu3_workspace/df_bw.elf")};
-  xrt::module mod{elf};
-
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{df_bw}"};
-  xrt::run run{kernel};
-
-  /* init input buffer */
-  const uint32_t data = 0xabcdabcd;
-  const uint32_t rw_size = 12 * sizeof(uint32_t); // number of shim BD used
-
-  xrt_bo bo_ifm{device, rw_size, xrt::bo::flags::cacheable};
-  xrt_bo bo_ofm{device, rw_size, xrt::bo::flags::cacheable};
-  auto ifm_mapped = bo_ifm.map();
-  for (uint32_t i = 0; i < rw_size / sizeof(uint32_t); i++) {
-    ifm_mapped[i] = data;
-  }
-
-  // Setting args for patching control code buffer
-  run.set_arg(0, bo_ifm.get());
-  run.set_arg(1, bo_ofm.get());
-
-  // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-
-  // Check result
-  auto ofm_mapped = bo_ofm.map();
-  int err = 0;
-  for (uint32_t i = 0; i < rw_size / sizeof(uint32_t); i++) {
-    if (ofm_mapped[i] != ifm_mapped[i]) {
-      std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << ifm_mapped[i] << std::endl;
-      err++;
-    }
-  }
-
-  if (err)
-    throw std::runtime_error("result mis-match");
-  else
-    std::cout << "result matched" << std::endl;
-}
-
-void
 TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
@@ -581,7 +527,8 @@ TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
       xclbinpath.empty() ? local_path("npu3_workspace/multi-layer.xclbin") : xclbinpath);
   auto uuid = device.register_xclbin(xclbin);
 
-  xrt::elf elf{local_path("npu3_workspace/multi-layer.elf")};
+  auto elf = xrt::elf(
+      elfpath.empty() ? local_path("npu3_workspace/multi-layer.elf") : elfpath);
   xrt::module mod{elf};
 
   xrt::hw_context hwctx{device, uuid};
@@ -632,8 +579,7 @@ TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
   for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
     p[i] = i;
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/core_equivalence.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/core_equivalence.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/core_equivalence.elf")};
@@ -699,8 +645,7 @@ TEST_xrt_umq_cascade_4ker_2lay(int device_index, arg_type& arg)
   for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
     p[i] = i;
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/ml4v2.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/ml4v2.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/ml4v2.elf")};
@@ -773,8 +718,7 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
   for (uint32_t i = 0; i < bo_wts3.size() / sizeof (uint32_t); i++)
     p[i] = i;
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/parallel_branches.xclbin") : xclbinpath);
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/parallel_branches.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/parallel_branches.elf")};
@@ -814,56 +758,6 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
     throw std::runtime_error("result mis-match");
   else
     std::cout << "result matched" << std::endl;
-}
-
-void
-TEST_xrt_umq_wo_shim_dma(int device_index, arg_type& arg)
-{
-  auto device = xrt::device{device_index};
-
-  // Prepare input/output/weights BOs
-  const uint32_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
-  const uint32_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
-  const uint32_t WTS2_BYTE_SIZE = 8 * 8 * sizeof (uint32_t);
-  const uint32_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
-  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
-  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
-  xrt_bo bo_wts2{device, WTS2_BYTE_SIZE, xrt::bo::flags::host_only};
-  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
-
-  // Populate input & weight buffers
-  init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
-  auto p = bo_wts2.map();
-  for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
-    p[i] = i * 10000000;
-
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/wo_shim_dma.xclbin") : xclbinpath);
-  auto uuid = device.register_xclbin(xclbin);
-
-  xrt::elf elf{local_path("npu3_workspace/wo_shim_dma.elf")};
-  xrt::module mod{elf};
-
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
-  xrt::run run{kernel};
-
-  // Setting args for patching control code buffer
-  run.set_arg(0, bo_ifm.get());
-  run.set_arg(1, bo_ofm.get());
-  run.set_arg(2, bo_wts.get());
-  run.set_arg(3, bo_wts2.get());
-
-  // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-
-  // Check result
-  check_umq_multi_layer_result(bo_ifm.map(), bo_wts.map(), bo_wts2.map(), bo_ofm.map());
 }
 
 /* run.start n requests, then run.wait all of them */
@@ -956,8 +850,6 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt core equivalence", TEST_xrt_umq_core_equivalence, {} },
   test_case{ "npu3 xrt cascade 4 kernel 2 layer", TEST_xrt_umq_cascade_4ker_2lay, {} },
   test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
-  test_case{ "npu3 xrt wo shim dma", TEST_xrt_umq_wo_shim_dma, {} },
-  test_case{ "npu3 xrt df_bw", TEST_xrt_umq_df_bw, {} },
   test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
 };
