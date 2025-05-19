@@ -457,8 +457,11 @@ int aie2_error_async_msg_thread(void *data);
 bool aie2_is_event_trace_enable(struct amdxdna_dev_hdl *ndev);
 int aie2_event_trace_init(struct amdxdna_dev_hdl *ndev);
 void aie2_event_trace_fini(struct amdxdna_dev_hdl *ndev);
-void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev, struct start_event_trace_resp *resp);
+void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,
+			      struct start_event_trace_resp *resp);
 void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev);
+void aie2_config_event_trace(struct amdxdna_dev_hdl *ndev, u32 enable,
+			     u32 size, u32 category);
 void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state);
 
 /* aie2_message.c */
@@ -481,7 +484,8 @@ int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *ver
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 				    struct amdxdna_fw_ver *fw_ver);
-int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
+			   u32 size, u32 event_category);
 int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev);
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			struct xdna_mailbox_chann_info *info);
