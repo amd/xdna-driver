@@ -16,13 +16,14 @@ struct event_trace_req_buf {
 	struct amdxdna_dev_hdl   *ndev;
 	struct workqueue_struct  *wq;
 	struct work_struct       work;
+	dma_addr_t               dram_buffer_address;
 	u8                       *kern_log_buf;
 	u8                       *buf;
-	u64                      dram_buffer_address;
 	u64                      resp_timestamp;
 	u64                      sys_start_time;
 	u32                      dram_buffer_size;
 	u32			 msi_address;
+	u32			 event_trace_category;
 	int                      log_ch_irq;
 	bool                     enabled;
 };
@@ -56,21 +57,47 @@ static int aie2_is_event_trace_supported_on_dev(struct amdxdna_dev_hdl *ndev)
 	return (pdev->device == 0x17f0 && pdev->revision >= 0x10);
 }
 
-static u32 aie2_get_trace_event_content(struct event_trace_req_buf *trace_req_buf)
+static int aie2_validate_event_trace_config(struct amdxdna_dev_hdl *ndev, u32 enable,
+					    u32 buf_size, u32 category)
+{
+	if (enable > 1) {
+		XDNA_ERR(ndev->xdna, "Invalid event trace enable value[0,1]: %u",
+			 enable);
+		return -EINVAL;
+	}
+
+	if (buf_size <= 1024 || buf_size > 1024 * 1024 ||
+	    (buf_size & (buf_size - 1)) != 0) {
+		XDNA_ERR(ndev->xdna, "Invalid buffer size[1K-1M]: %u", buf_size);
+		return -EINVAL;
+	}
+
+	if (category < 0xFF) {
+		XDNA_ERR(ndev->xdna, "Invalid event category[0xFF-0xFFFFFFFF]: %u",
+			 category);
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static u32 aie2_get_event_trace_content(struct event_trace_req_buf *req_buf)
 {
 	u32 head_ptr, tail_ptr, head_ptr_wrap, tail_ptr_wrap;
-	struct amdxdna_dev_hdl *ndev = trace_req_buf->ndev;
+	struct amdxdna_dev_hdl *ndev = req_buf->ndev;
 	struct trace_event_metadata *trace_metadata;
-	u8 *kern_buf = trace_req_buf->kern_log_buf;
-	u8 *sys_buf = trace_req_buf->buf;
+	u8 *kern_buf = req_buf->kern_log_buf;
+	u8 *sys_buf = req_buf->buf;
+	u32 log_rb_size = 0;
 	u32 log_size = 0;
 
-	WARN_ON(LOG_RB_SIZE <= 0);
-	trace_metadata = (struct trace_event_metadata *)(sys_buf + LOG_RB_SIZE);
+	log_rb_size = req_buf->dram_buffer_size - EVENT_TRACE_BUF_METADATA_SIZE;
+	WARN_ON(log_rb_size <= 0);
+
+	trace_metadata = (struct trace_event_metadata *)(sys_buf + log_rb_size);
 	head_ptr = (u32)trace_metadata->head_offset;
 	tail_ptr = (u32)trace_metadata->tail_offset;
-	head_ptr_wrap = head_ptr % LOG_RB_SIZE;
-	tail_ptr_wrap = tail_ptr % LOG_RB_SIZE;
+	head_ptr_wrap = head_ptr % log_rb_size;
+	tail_ptr_wrap = tail_ptr % log_rb_size;
 	log_size = tail_ptr - head_ptr;
 
 	if (!log_size)
@@ -79,18 +106,18 @@ static u32 aie2_get_trace_event_content(struct event_trace_req_buf *trace_req_bu
 	trace_metadata->head_offset = tail_ptr;
 
 	/* Handle buffer overflow case, dump all log w.r.t timestamp */
-	if (log_size > LOG_RB_SIZE) {
-		XDNA_ERR(ndev->xdna, "log_size is %u, buffer overflow!", log_size);
-		u32 part_log = LOG_RB_SIZE - tail_ptr_wrap;
+	if (log_size > log_rb_size) {
+		XDNA_DBG(ndev->xdna, "log_size is %u, buffer overflow!", log_size);
+		u32 part_log = log_rb_size - tail_ptr_wrap;
 
 		memcpy((u8 *)kern_buf, (u8 *)sys_buf + tail_ptr_wrap, part_log);
 		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_ptr_wrap);
-		return LOG_RB_SIZE;
+		return log_rb_size;
 	}
 
 	/*Buffer split into two section when tail is wrapped and copy both */
 	if (tail_ptr_wrap < head_ptr_wrap) {
-		u32 part_log = LOG_RB_SIZE - head_ptr_wrap;
+		u32 part_log = log_rb_size - head_ptr_wrap;
 
 		memcpy((u8 *)kern_buf, (u8 *)(sys_buf + head_ptr_wrap), part_log);
 		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_ptr_wrap);
@@ -103,31 +130,29 @@ static u32 aie2_get_trace_event_content(struct event_trace_req_buf *trace_req_bu
 
 static void aie2_print_trace_event_log(struct amdxdna_dev_hdl *ndev)
 {
-	struct event_trace_req_buf *trace_req_buf;
+	struct event_trace_req_buf *req_buf;
 	struct trace_event_log_data *log_content;
 	u64 payload;
 	u32 log_size;
 
-	trace_req_buf = ndev->event_trace_req;
-	log_size = aie2_get_trace_event_content(trace_req_buf);
+	req_buf = ndev->event_trace_req;
+	log_size = aie2_get_event_trace_content(req_buf);
 	XDNA_DBG(ndev->xdna, "FW log size in bytes %u", log_size);
 
-	if (!log_size) {
-		XDNA_ERR(ndev->xdna, "No log data available");
+	if (!log_size)
 		return;
-	}
 
-	char *str = (char *)trace_req_buf->kern_log_buf;
+	char *str = (char *)req_buf->kern_log_buf;
 	char *end = str + log_size;
 	u64 fwTicks;
 
-	trace_req_buf->kern_log_buf[log_size] = 0;
+	req_buf->kern_log_buf[log_size] = 0;
 
 	while (str < end) {
 		log_content = (struct trace_event_log_data *)str;
 		payload = ((u64)log_content->payload_hi << 32) | log_content->payload_low;
-		fwTicks = log_content->counter - trace_req_buf->resp_timestamp;
-		fwTicks = fwTicks / 24 + ndev->event_trace_req->sys_start_time;
+		fwTicks = log_content->counter - req_buf->resp_timestamp;
+		fwTicks = fwTicks / 24 + req_buf->sys_start_time;
 		pr_debug("[NPU]::[%llu] type: 0x%04x payload:0x%016llx",
 			 fwTicks, log_content->type, payload);
 		str += MAX_ONE_TIME_LOG_INFO_LEN;
@@ -146,7 +171,7 @@ static irqreturn_t log_buffer_irq_handler(int irq, void *data)
 {
 	struct amdxdna_dev_hdl *ndev = (struct amdxdna_dev_hdl *)data;
 
-	trace_mbox_irq_handle("LOG_BUFFER", irq);
+	trace_mbox_irq_handle("EVENT_TRACE_BUFFER", irq);
 	clear_event_trace_msix(ndev);
 	queue_work(ndev->event_trace_req->wq, &ndev->event_trace_req->work);
 	return IRQ_HANDLED;
@@ -160,7 +185,7 @@ static int aie2_register_log_buf_irq_hdl(struct amdxdna_dev_hdl *ndev, u32 msi_i
 
 	req_buf = ndev->event_trace_req;
 	INIT_WORK(&req_buf->work, deffered_logging_work);
-	req_buf->wq = alloc_ordered_workqueue("LOG_BUFFER", 0);
+	req_buf->wq = alloc_ordered_workqueue("EVENT_TRACE_BUFFER", 0);
 	if (!req_buf->wq) {
 		XDNA_ERR(xdna, "Failed to allocate workqueue");
 		ret = -ENOMEM;
@@ -174,13 +199,14 @@ static int aie2_register_log_buf_irq_hdl(struct amdxdna_dev_hdl *ndev, u32 msi_i
 	}
 	req_buf->log_ch_irq = ret;
 
-	ret = request_irq(req_buf->log_ch_irq, log_buffer_irq_handler, 0, "LOG_BUFFER", ndev);
+	ret = request_irq(req_buf->log_ch_irq, log_buffer_irq_handler, 0,
+			  "EVENT_TRACE_BUFFER", ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to register irq %d ret %d", msi_idx, ret);
 		goto destroy_wq;
 	}
 
-	req_buf->kern_log_buf = kcalloc(TRACE_EVENT_BUF_SIZE, sizeof(u8), GFP_KERNEL);
+	req_buf->kern_log_buf = kcalloc(req_buf->dram_buffer_size, sizeof(u8), GFP_KERNEL);
 	if (!req_buf->kern_log_buf) {
 		ret = -ENOMEM;
 		goto free_irq;
@@ -193,7 +219,7 @@ destroy_wq:
 	destroy_workqueue(req_buf->wq);
 free_dma_trace_buf:
 	dma_free_noncoherent(xdna->ddev.dev, req_buf->dram_buffer_size, req_buf->buf,
-			     (dma_addr_t)req_buf->dram_buffer_address, DMA_BIDIRECTIONAL);
+			     req_buf->dram_buffer_address, DMA_BIDIRECTIONAL);
 	req_buf->buf = NULL;
 	req_buf->dram_buffer_address = 0;
 	req_buf->dram_buffer_size = 0;
@@ -209,6 +235,8 @@ static void aie2_deregister_log_buf_irq_hdl(struct amdxdna_dev_hdl *ndev)
 	aie2_print_trace_event_log(ndev);
 	destroy_workqueue(req_buf->wq);
 
+	ndev->event_trace_req->resp_timestamp = 0;
+	ndev->event_trace_req->sys_start_time = 0;
 	free_irq(req_buf->log_ch_irq, ndev);
 	kfree(req_buf->kern_log_buf);
 }
@@ -218,14 +246,12 @@ static int aie2_event_trace_alloc(struct amdxdna_dev_hdl *ndev)
 	struct event_trace_req_buf *req_buf = ndev->event_trace_req;
 	struct amdxdna_dev *xdna = ndev->xdna;
 
-	req_buf->buf = dma_alloc_noncoherent(xdna->ddev.dev, TRACE_EVENT_BUF_SIZE,
-					     (dma_addr_t *)&req_buf->dram_buffer_address,
+	req_buf->buf = dma_alloc_noncoherent(xdna->ddev.dev, req_buf->dram_buffer_size,
+					     &req_buf->dram_buffer_address,
 					     DMA_BIDIRECTIONAL, GFP_KERNEL);
-
 	if (!req_buf->buf)
 		return -ENOMEM;
 
-	req_buf->dram_buffer_size = TRACE_EVENT_BUF_SIZE;
 	XDNA_DBG(ndev->xdna, "Start event trace buf addr: 0x%llx size 0x%x",
 		 req_buf->dram_buffer_address, req_buf->dram_buffer_size);
 
@@ -238,7 +264,7 @@ static void aie2_event_trace_free(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 
 	dma_free_noncoherent(xdna->ddev.dev, req_buf->dram_buffer_size, req_buf->buf,
-			     (dma_addr_t)req_buf->dram_buffer_address, DMA_BIDIRECTIONAL);
+			     req_buf->dram_buffer_address, DMA_BIDIRECTIONAL);
 
 	req_buf->buf = NULL;
 	req_buf->dram_buffer_address = 0;
@@ -259,7 +285,8 @@ static int aie2_start_event_trace_send(struct amdxdna_dev_hdl *ndev)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ret = aie2_start_event_trace(ndev, req_buf->dram_buffer_address,
-				     req_buf->dram_buffer_size);
+				     req_buf->dram_buffer_size,
+				     req_buf->event_trace_category);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to start event trace, ret %d", ret);
 		aie2_event_trace_free(ndev);
@@ -343,8 +370,6 @@ void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,  struct start_event_
 
 void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev)
 {
-	ndev->event_trace_req->resp_timestamp = 0;
-	ndev->event_trace_req->sys_start_time = 0;
 	aie2_deregister_log_buf_irq_hdl(ndev);
 }
 
@@ -353,6 +378,26 @@ void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state)
 	mutex_lock(&ndev->aie2_lock);
 	aie2_update_event_trace_state(ndev, state);
 	mutex_unlock(&ndev->aie2_lock);
+}
+
+void aie2_config_event_trace(struct amdxdna_dev_hdl *ndev, u32 enable,
+			     u32 buff_size, u32 category)
+{
+	if (!enable) {
+		aie2_assign_event_trace_state(ndev, false);
+		return;
+	}
+
+	int ret = aie2_validate_event_trace_config(ndev, enable,
+						   buff_size, category);
+	if (ret)
+		return;
+
+	XDNA_DBG(ndev->xdna, "buf size 0x%08x category 0x%08x",
+		 buff_size, category);
+	ndev->event_trace_req->dram_buffer_size = buff_size;
+	ndev->event_trace_req->event_trace_category = category;
+	aie2_assign_event_trace_state(ndev, true);
 }
 
 int aie2_event_trace_init(struct amdxdna_dev_hdl *ndev)

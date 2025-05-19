@@ -385,7 +385,8 @@ int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
+int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
+			   u32 size, u32 event_category)
 {
 	DECLARE_AIE2_MSG(start_event_trace, MSG_OP_START_EVENT_TRACE);
 	int ret;
@@ -393,7 +394,7 @@ int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 si
 	req.dram_buffer_address = addr;
 	req.dram_buffer_size = size;
 	req.event_trace_dest = EVENT_TRACE_DEST_DRAM;
-	req.event_trace_categories = 0xFFFFFFFF;
+	req.event_trace_categories = event_category;
 	req.event_trace_timestamp = EVENT_TRACE_TIMESTAMP_FW_CHRONO;
 
 	XDNA_DBG(ndev->xdna, "send start event trace msg");

@@ -1038,6 +1038,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 				       aligned_sz - offset, &ver);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
+		mutex_unlock(&xdna->dev_lock);
 		goto free_buf;
 	}
 

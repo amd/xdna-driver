@@ -404,10 +404,8 @@ struct async_event_msg_resp {
 } __packed;
 
 /* Start of event tracing data struct */
-#define TRACE_EVENT_BUF_SIZE				0x2000
-#define TRACE_EVENT_BUF_METADATA_SIZE			0x40
+#define EVENT_TRACE_BUF_METADATA_SIZE			0x40
 #define MAX_ONE_TIME_LOG_INFO_LEN			16
-#define LOG_RB_SIZE	(TRACE_EVENT_BUF_SIZE - TRACE_EVENT_BUF_METADATA_SIZE)
 
 enum event_trace_destination {
 	EVENT_TRACE_DEST_DEBUG_BUS,
