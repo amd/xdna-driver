@@ -116,7 +116,7 @@ void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add
 			break;
 
 	XDNA_DBG(xdna, "Set default DPM to %d", level);
-	if (ndev->pw_mode == POWER_MODE_DEFAULT)
+	if (ndev->pw_mode == POWER_MODE_DEFAULT && ndev->dev_status == AIE2_DEV_START)
 		ndev->priv->hw_ops.set_dpm(ndev, level);
 	ndev->dft_dpm_level = level;
 

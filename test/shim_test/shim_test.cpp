@@ -647,7 +647,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 shim vadd", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
   },
-  test_case{ "export import BO", {-1, -1},
+  test_case{ "export import BO", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
   },
   test_case{ "ELF io test real kernel good run", {},
@@ -665,7 +665,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 shim multi col remote barrier", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_remote_barrier, {}
   },
-  test_case{ "io test no op with duplicated BOs", {-1, -1},
+  test_case{ "io test no op with duplicated BOs", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
   },
   test_case{ "measure no-op kernel latency chained command", {},
@@ -695,7 +695,7 @@ std::vector<test_case> test_list {
   test_case{ "sync_bo for input_output 1MiB BO w/ offset and size", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000, 0x1004, 0x3c}
   },
-  test_case{ "export import BO in single process", {-1, -1},
+  test_case{ "export import BO in single process", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo_single_proc, {}
   },
   test_case{ "multi-command ELF io test real kernel good run", {},

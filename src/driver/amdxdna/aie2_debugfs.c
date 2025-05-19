@@ -166,53 +166,6 @@ static int aie2_power_state_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(powerstate, aie2_power_state_show, aie2_power_state_write);
 
-static ssize_t aie2_state_write(struct file *file, const char __user *ptr,
-				size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	char input[SIZE + 1];
-	int ret;
-
-	if (len > SIZE) {
-		XDNA_ERR(ndev->xdna, "Length %zu of the buffer exceeds size %d", len, SIZE);
-		return -EINVAL;
-	}
-
-	ret = copy_from_user(input, ptr, len);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
-		return ret;
-	}
-
-	if (!strncmp(input, "suspend", strlen("suspend"))) {
-		mutex_lock(&ndev->aie2_lock);
-		ret = aie2_suspend_fw(ndev);
-		mutex_unlock(&ndev->aie2_lock);
-	} else if (!strncmp(input, "resume", strlen("resume"))) {
-		mutex_lock(&ndev->aie2_lock);
-		ret = aie2_resume_fw(ndev);
-		mutex_unlock(&ndev->aie2_lock);
-	} else {
-		XDNA_ERR(ndev->xdna, "Invalid input: %s", input);
-		return -EINVAL;
-	}
-
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "NPU %s failed", input);
-		return -EINVAL;
-	}
-
-	XDNA_DBG(ndev->xdna, "NPU %s succeeded", input);
-	return len;
-}
-
-static int aie2_state_show(struct seq_file *m, void *unused)
-{
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(state, aie2_state_show, aie2_state_write);
-
 static ssize_t aie2_dpm_level_set(struct file *file, const char __user *ptr,
 				  size_t len, loff_t *off)
 {
@@ -263,20 +216,60 @@ static int aie2_dpm_level_get(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(dpm_level, aie2_dpm_level_get, aie2_dpm_level_set);
 
-static ssize_t aie2_event_trace_write(struct file *file, const char __user *ptr,
+static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
 				      size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	bool state;
-	int ret;
+	u32 enable = 0, buf_size = 0, event_type = 0;
+	char *kbuf, *token, *key, *val;
 
-	ret = kstrtobool_from_user(ptr, len, &state);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Invalid input value: %d", state);
-		return ret;
+	kbuf = kzalloc(len + 1, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
+
+	if (copy_from_user(kbuf, buf, len)) {
+		kfree(kbuf);
+		return -EFAULT;
 	}
 
-	aie2_assign_event_trace_state(ndev, state);
+	kbuf[len] = '\0';
+	token = strsep(&kbuf, " ");
+
+	while (token) {
+		key = strsep(&token, "=");
+		val = token;
+		int ret;
+
+		if (key && val) {
+			if (strcmp(key, "enable") == 0) {
+				ret = kstrtouint(val, 10, &enable);
+				if (ret) {
+					XDNA_INFO(ndev->xdna, "invalid enable value %u", enable);
+					return ret;
+				}
+			} else if (strcmp(key, "size") == 0) {
+				buf_size = memparse(val, NULL);
+			} else if (strcmp(key, "eventtype") == 0) {
+				ret = kstrtouint(val, 0, &event_type);
+				if (ret) {
+					XDNA_INFO(ndev->xdna, "invalid event type %u", event_type);
+					return ret;
+				}
+			} else {
+				XDNA_INFO(ndev->xdna, "invalid key %s format", key);
+				return len;
+			}
+		}
+		token = strsep(&kbuf, " ");
+	}
+
+	XDNA_DBG(ndev->xdna, "Event trace config: %u, %u, %u",
+		 enable, buf_size, event_type);
+	if (enable && (!buf_size || !event_type))
+		return -EINVAL;
+
+	aie2_config_event_trace(ndev, enable, buf_size, event_type);
+	kfree(kbuf);
 
 	return len;
 }
@@ -289,7 +282,10 @@ static int aie2_event_trace_show(struct seq_file *m, void *unused)
 		seq_puts(m, "Event trace is enabled\n");
 	else
 		seq_puts(m, "Event trace is disabled\n"
-						"echo 1 > To enable event trace\n");
+						"echo \"enable=1 size=1K eventtype=0xffffff\" > Follow given input format to enable\n"
+						"echo \"enable=[0, 1]\" > enable=1 to enable, enable=0 to disable\n"
+						"echo \"size=[1K, 2K, 4K...512K to 1M\" buffer size should be pow of 2\n"
+						"echo \"eventtype=[0x000000FF, 0x0000FFFF, 0x00FFFFFF, 0xFFFFFFFF\" > are supported now\n");
 
 	return 0;
 }
@@ -597,6 +593,45 @@ static int aie2_ctx_rq_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(ctx_rq, aie2_ctx_rq_show, NULL);
 
+static int aie2_get_app_health_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct app_health_report_v1 *report;
+	const size_t size = 0x1000;
+	dma_addr_t dma_addr;
+	void *buff;
+	int ret;
+
+	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
+				     DMA_FROM_DEVICE, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	drm_clflush_virt_range(buff, size); /* device can access */
+	mutex_lock(&ndev->aie2_lock);
+	/* Just for debug, always check context id 1 */
+	ret = aie2_get_app_health(ndev, 1, dma_addr, size);
+	mutex_unlock(&ndev->aie2_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "Get app health failed ret %d", ret);
+		goto free_buf;
+	}
+
+	report = buff;
+	seq_printf(m, "version    %d\n", report->header.version);
+	seq_printf(m, "size       %d\n", report->header.size);
+	seq_printf(m, "context_id %d\n", report->context_id);
+	seq_printf(m, "dpu_pc     0x%x\n", report->dpu_pc);
+	seq_printf(m, "txn_op_id  0x%x\n", report->txn_op_id);
+
+free_buf:
+	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(get_app_health, aie2_get_app_health_show, NULL);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -604,7 +639,6 @@ const struct {
 } aie2_dbgfs_files[] = {
 	AIE2_DBGFS_FILE(nputest, 0600),
 	AIE2_DBGFS_FILE(pasid, 0600),
-	AIE2_DBGFS_FILE(state, 0600),
 	AIE2_DBGFS_FILE(powerstate, 0600),
 	AIE2_DBGFS_FILE(dpm_level, 0600),
 	AIE2_DBGFS_FILE(ringbuf, 0400),
@@ -617,6 +651,7 @@ const struct {
 	AIE2_DBGFS_FILE(telemetry_debug, 0400),
 	AIE2_DBGFS_FILE(event_trace, 0600),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
+	AIE2_DBGFS_FILE(get_app_health, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)

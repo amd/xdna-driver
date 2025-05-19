@@ -17,7 +17,10 @@
 	DECLARE_XDNA_MSG_COMMON(name, op, MAX_AIE2_STATUS_CODE)
 
 #define aie2_send_mgmt_msg_wait(ndev, msg) \
-	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0)
+	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0, false)
+
+#define aie2_send_mgmt_msg_wait_silent(ndev, msg) \
+	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0, true)
 
 static bool
 is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode)
@@ -76,7 +79,7 @@ is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
 static int
 aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 			       struct xdna_mailbox_msg *msg,
-			       u32 offset)
+			       u32 offset, bool silent)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct xdna_notify *hdl = msg->handle;
@@ -94,8 +97,10 @@ aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 	}
 
 	if (!ret && hdl->data[offset] != AIE2_STATUS_SUCCESS) {
-		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
-			 msg->opcode, *hdl->data);
+		if (!silent) {
+			XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
+				 msg->opcode, *hdl->data);
+		}
 		ret = -EINVAL;
 	}
 
@@ -277,7 +282,7 @@ int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t 
 	req.buf_size = size;
 	req.type = type;
 
-	ret = aie2_send_mgmt_msg_wait_offset(ndev, &msg, XDNA_STATUS_OFFSET(get_telemetry));
+	ret = aie2_send_mgmt_msg_wait_offset(ndev, &msg, XDNA_STATUS_OFFSET(get_telemetry), false);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get telemetry, ret %d", ret);
 		return ret;
@@ -380,7 +385,8 @@ int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
+int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
+			   u32 size, u32 event_category)
 {
 	DECLARE_AIE2_MSG(start_event_trace, MSG_OP_START_EVENT_TRACE);
 	int ret;
@@ -388,7 +394,7 @@ int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 si
 	req.dram_buffer_address = addr;
 	req.dram_buffer_size = size;
 	req.event_trace_dest = EVENT_TRACE_DEST_DRAM;
-	req.event_trace_categories = 0xFFFFFFFF;
+	req.event_trace_categories = event_category;
 	req.event_trace_timestamp = EVENT_TRACE_TIMESTAMP_FW_CHRONO;
 
 	XDNA_DBG(ndev->xdna, "send start event trace msg");
@@ -425,6 +431,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	req.aie_type = 1;
 	req.start_col = ctx->start_col;
 	req.num_col = ctx->num_col;
+	req.num_unused_col = ctx->num_col - ctx->priv->orig_num_col;
 	req.num_cq_pairs_requested = 1;
 	req.pasid = ctx->client->pasid;
 	req.context_priority = ctx->priv->priority + 1;
@@ -454,8 +461,10 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	info->i2x.rb_size	  = cq_pair->i2x_q.buf_size;
 
 	aie2_calc_intr_reg(info);
-	XDNA_DBG(xdna, "%s created hwctx %d pasid %d qos priority 0x%x", ctx->name,
-		 ctx->priv->id, ctx->client->pasid, ctx->qos.priority);
+	XDNA_DBG(xdna,
+		 "%s created hwctx %d pasid %d priority 0x%x start col %d num col %d unused col %d",
+		 ctx->name, ctx->priv->id, ctx->client->pasid, ctx->qos.priority, ctx->start_col,
+		 ctx->num_col, req.num_unused_col);
 
 	return 0;
 }
@@ -616,6 +625,31 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 
 	XDNA_DBG(ndev->xdna, "Register addr 0x%llx size 0x%x", addr, size);
 	return xdna_mailbox_send_msg(ndev->mgmt_chann, &msg, TX_TIMEOUT);
+}
+
+int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			dma_addr_t addr, u32 size)
+{
+	DECLARE_AIE2_MSG(get_app_health, MSG_OP_GET_APP_HEALTH);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	req.context_id = context_id;
+	req.buf_size = size;
+	req.buf_addr = addr;
+
+	ret = aie2_send_mgmt_msg_wait_silent(ndev, &msg);
+	if (ret) {
+		XDNA_DBG(xdna, "Get app health failed, ret 0x%x", ret);
+		return ret;
+	}
+
+	if (resp.status != AIE2_STATUS_SUCCESS) {
+		XDNA_DBG(xdna, "Get app health got status 0x%x", resp.status);
+		ret = -EINVAL;
+	}
+
+	return ret;
 }
 
 /* Below messages are to hardware context mailbox channel */

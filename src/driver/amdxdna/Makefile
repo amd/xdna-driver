@@ -31,10 +31,7 @@ all: $(BUILD_ROOT_DIR)
 	$(MAKE) -C $(BUILD_ROOT_DIR)/driver/$(notdir $(SRC_DIR)) modules
 
 # add EXTRA_CFLAGS='-save-temps' to keep intermedia files
-DEFINES := -DAMDXDNA_DEVEL -DAMDXDNA_SHMEM
-ifdef AMDXDNA_DRM_USAGE
-DEFINES += -DAMDXDNA_DRM_USAGE
-endif
+DEFINES := -DAMDXDNA_DEVEL
 
 ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF

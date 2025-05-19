@@ -219,6 +219,7 @@ struct amdxdna_ctx_priv {
 	atomic64_t			job_pending_cnt;
 	wait_queue_head_t		connect_waitq;
 	int				idle_cnt;
+	u64				disconn_cnt;
 	bool				force_yield;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_DISPATCHED		0x1
@@ -454,8 +455,11 @@ int aie2_error_async_msg_thread(void *data);
 bool aie2_is_event_trace_enable(struct amdxdna_dev_hdl *ndev);
 int aie2_event_trace_init(struct amdxdna_dev_hdl *ndev);
 void aie2_event_trace_fini(struct amdxdna_dev_hdl *ndev);
-void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev, struct start_event_trace_resp *resp);
+void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,
+			      struct start_event_trace_resp *resp);
 void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev);
+void aie2_config_event_trace(struct amdxdna_dev_hdl *ndev, u32 enable,
+			     u32 size, u32 category);
 void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state);
 
 /* aie2_message.c */
@@ -472,11 +476,14 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev);
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid);
 int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
 			     u32 size, struct aie_version *version);
+int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			dma_addr_t addr, u32 size);
 int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 				    struct amdxdna_fw_ver *fw_ver);
-int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
+			   u32 size, u32 event_category);
 int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev);
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			struct xdna_mailbox_chann_info *info);
@@ -517,7 +524,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_ctx *ctx, u64 seq);
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-void aie2_dump_ctx(struct amdxdna_client *client);
+void aie2_dump_ctx(struct amdxdna_ctx *ctx);
 
 /* aie2_hwctx.c */
 int aie2_hwctx_start(struct amdxdna_ctx *ctx);
@@ -530,6 +537,7 @@ int aie2_rq_context_limit(struct aie2_ctx_rq *rq);
 int aie2_rq_active_context(struct aie2_ctx_rq *rq);
 bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq);
 bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq);
+void aie2_rq_dump_all(struct aie2_ctx_rq *rq);
 void aie2_rq_stop_all(struct aie2_ctx_rq *rq);
 void aie2_rq_restart_all(struct aie2_ctx_rq *rq);
 int aie2_rq_show(struct aie2_ctx_rq *rq, struct seq_file *m);

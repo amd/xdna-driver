@@ -9,7 +9,7 @@ distributed for use with the XRT plug-in for NPU device.
 
 File:
 	tools/bins/1502_00/validate.xclbin
-	tools/bins/1640_00/validate_elf.xclbin
+	tools/bins/17f1_10/validate_elf.xclbin
 	tools/bins/17f0_10/validate.xclbin
 	tools/bins/17f0_10/validate_elf.xclbin
 	tools/bins/17f0_10/gemm.xclbin
@@ -22,7 +22,7 @@ File:
 	tools/bins/17f0_20/validate_elf.xclbin
 	tools/bins/17f0_20/gemm.xclbin
 	tools/bins/17f0_20/gemm_elf.xclbin
-	tools/bins/1640_00/nop.elf
+	tools/bins/17f1_10/nop.elf
 	tools/bins/17f0_10/nop.elf
 	tools/bins/17f0_10/aie_reconfig_overhead.elf
 	tools/bins/17f0_10/df_bw.elf
