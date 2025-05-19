@@ -13,16 +13,17 @@
 #include <linux/hmm.h>
 #include <linux/timekeeping.h>
 #include <linux/workqueue.h>
-#include <linux/seqlock_types.h>
 
 #include "amdxdna_ctx.h"
 #ifdef AMDXDNA_OF
+#include <linux/seqlock_api.h>
 /*
  * TODO: remove this and implement physical contiguous memory by carvedout memory
  * supported by amdxdna_gem.h"
  */
 #include "amdxdna_gem_of.h"
 #else
+#include <linux/seqlock_types.h>
 #include "amdxdna_gem.h"
 #endif
 #include "amdxdna_tdr.h"

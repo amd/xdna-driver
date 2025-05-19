@@ -212,3 +212,5 @@ free_cbuf:
 	kfree(cbuf);
 	return ERR_PTR(ret);
 }
+
+MODULE_IMPORT_NS(DMA_BUF);

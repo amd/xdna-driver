@@ -8,8 +8,13 @@
 
 #include "amdxdna_of_drv.h"
 
+struct amdxdna_dev_priv {
+	const char                      *fw_path;
+};
+
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev              *xdna;
+	const struct amdxdna_dev_priv   *priv;
 };
 
 /* ve2_of.c */
