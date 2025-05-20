@@ -216,20 +216,60 @@ static int aie2_dpm_level_get(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(dpm_level, aie2_dpm_level_get, aie2_dpm_level_set);
 
-static ssize_t aie2_event_trace_write(struct file *file, const char __user *ptr,
+static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
 				      size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	bool state;
-	int ret;
+	u32 enable = 0, buf_size = 0, event_type = 0;
+	char *kbuf, *token, *key, *val;
 
-	ret = kstrtobool_from_user(ptr, len, &state);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Invalid input value: %d", state);
-		return ret;
+	kbuf = kzalloc(len + 1, GFP_KERNEL);
+	if (!kbuf)
+		return -ENOMEM;
+
+	if (copy_from_user(kbuf, buf, len)) {
+		kfree(kbuf);
+		return -EFAULT;
 	}
 
-	aie2_assign_event_trace_state(ndev, state);
+	kbuf[len] = '\0';
+	token = strsep(&kbuf, " ");
+
+	while (token) {
+		key = strsep(&token, "=");
+		val = token;
+		int ret;
+
+		if (key && val) {
+			if (strcmp(key, "enable") == 0) {
+				ret = kstrtouint(val, 10, &enable);
+				if (ret) {
+					XDNA_INFO(ndev->xdna, "invalid enable value %u", enable);
+					return ret;
+				}
+			} else if (strcmp(key, "size") == 0) {
+				buf_size = memparse(val, NULL);
+			} else if (strcmp(key, "eventtype") == 0) {
+				ret = kstrtouint(val, 0, &event_type);
+				if (ret) {
+					XDNA_INFO(ndev->xdna, "invalid event type %u", event_type);
+					return ret;
+				}
+			} else {
+				XDNA_INFO(ndev->xdna, "invalid key %s format", key);
+				return len;
+			}
+		}
+		token = strsep(&kbuf, " ");
+	}
+
+	XDNA_DBG(ndev->xdna, "Event trace config: %u, %u, %u",
+		 enable, buf_size, event_type);
+	if (enable && (!buf_size || !event_type))
+		return -EINVAL;
+
+	aie2_config_event_trace(ndev, enable, buf_size, event_type);
+	kfree(kbuf);
 
 	return len;
 }
@@ -242,7 +282,10 @@ static int aie2_event_trace_show(struct seq_file *m, void *unused)
 		seq_puts(m, "Event trace is enabled\n");
 	else
 		seq_puts(m, "Event trace is disabled\n"
-						"echo 1 > To enable event trace\n");
+						"echo \"enable=1 size=1K eventtype=0xffffff\" > Follow given input format to enable\n"
+						"echo \"enable=[0, 1]\" > enable=1 to enable, enable=0 to disable\n"
+						"echo \"size=[1K, 2K, 4K...512K to 1M\" buffer size should be pow of 2\n"
+						"echo \"eventtype=[0x000000FF, 0x0000FFFF, 0x00FFFFFF, 0xFFFFFFFF\" > are supported now\n");
 
 	return 0;
 }

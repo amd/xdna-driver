@@ -288,7 +288,6 @@ struct partition_info
           new_entry.migrations = entry.migrations;
           new_entry.preemptions = entry.preemptions;
           new_entry.errors = entry.errors;
-          new_entry.qos.priority = entry.priority;
           output.push_back(std::move(new_entry));
         }
         return output;
@@ -329,14 +328,13 @@ struct partition_info
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
       new_entry.qos.gops = entry.gops;
-      new_entry.qos.egops = entry.egops;
       new_entry.qos.fps = entry.fps;
       new_entry.qos.dma_bandwidth = entry.dma_bandwidth;
       new_entry.qos.latency = entry.latency;
       new_entry.qos.frame_exec_time = entry.frame_exec_time;
       new_entry.instruction_mem = entry.heap_usage;
       new_entry.pasid = entry.pasid;
-      // new_entry.suspensions = entry.suspensions;
+      new_entry.suspensions = entry.suspensions;
       output.push_back(std::move(new_entry));
     }
     return output;
@@ -1016,6 +1014,9 @@ struct xclbin_name
     case xrt_core::query::xclbin_name::type::preemption_4x8:
       xclbin_name = "preemption_4x8.xclbin";
       break;
+    case xrt_core::query::xclbin_name::type::mobilenet_elf:
+      xclbin_name = "mobilenet_4col.xclbin";
+      break;
     }
 
     return boost::str(boost::format("bins/%04x_%02x/%s")
@@ -1060,6 +1061,42 @@ struct sequence_name
     return boost::str(fmt % seq_name);
   }
 };
+
+struct mobilenet 
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* /*device*/, key_type key, const std::any& reqType)
+  {
+    if (key != key_type::mobilenet)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    std::string bin_name;
+    const auto req_type = std::any_cast<xrt_core::query::mobilenet::type>(reqType);
+    switch (req_type) {
+    case xrt_core::query::mobilenet::type::mobilenet_ifm:
+      bin_name = "mobilenet_ifm.bin";
+      break;
+    case xrt_core::query::mobilenet::type::mobilenet_param:
+      bin_name = "mobilenet_param.bin";
+      break; 
+    case xrt_core::query::mobilenet::type::buffer_sizes:
+      bin_name = "buffer_sizes.json";
+      break;
+    default:
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+    }
+    return boost::str(boost::format("bins/Mobilenet/%s") % bin_name);
+  }
+};
+
 
 struct elf_name
 {
@@ -1108,6 +1145,9 @@ struct elf_name
       break;
     case xrt_core::query::elf_name::type::preemption_memtile_4x8:
       elf_file = "preemption_memtile_4x8.elf";
+      break;
+    case xrt_core::query::elf_name::type::mobilenet:
+      elf_file = "mobilenet_4col.elf";
       break;
     }
 
@@ -1261,6 +1301,7 @@ initialize_query_table()
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
   emplace_func1_request<query::sequence_name,                  sequence_name>();
   emplace_func1_request<query::elf_name,                       elf_name>();
+  emplace_func1_request<query::mobilenet,                      mobilenet>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();

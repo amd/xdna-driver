@@ -225,28 +225,4 @@ submit_signal(xrt_core::hwctx_handle::slot_id ctx_id) const
   submit_signal_syncobj(m_pdev, ctx_id, m_syncobj_hdl, st);
 }
 
-void
-fence::
-submit_wait(const pdev& dev, xrt_core::hwctx_handle::slot_id ctx_id,
-  const std::vector<xrt_core::fence_handle*>& fences)
-{
-  constexpr int max_fences = 1024;
-  uint32_t hdls[max_fences];
-  uint64_t pts[max_fences];
-  int i = 0;
-
-  if (fences.size() > max_fences)
-    shim_err(EINVAL, "Too many fences in one submit: %d", fences.size());
-
-  for (auto f : fences) {
-    auto fh = static_cast<const fence*>(f);
-    auto st = fh->wait_next_state();
-    shim_debug("Waiting for command fence %d@%ld", fh->m_syncobj_hdl, st);
-    hdls[i] = fh->m_syncobj_hdl;
-    pts[i] = st;
-    i++;
-  }
-  submit_wait_syncobjs(dev, ctx_id, hdls, pts, i);
-}
-
 }

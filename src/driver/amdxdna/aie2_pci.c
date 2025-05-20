@@ -577,7 +577,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 #ifdef AMDXDNA_DEVEL
 skip_pasid:
-		XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
+	XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
 #endif
 
 	psp_conf.fw_size = fw->size;
@@ -694,16 +694,10 @@ static bool aie2_detect(struct amdxdna_dev *xdna)
 static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
 	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
-	struct amdxdna_client *client;
 
-	if (dump_only) {
-		mutex_lock(&xdna->dev_lock);
-		list_for_each_entry(client, &xdna->client_list, node)
-			aie2_dump_ctx(client);
-		mutex_unlock(&xdna->dev_lock);
+	aie2_rq_dump_all(rq);
+	if (dump_only)
 		return;
-	}
-
 	aie2_rq_stop_all(rq);
 	aie2_rq_restart_all(rq);
 }
@@ -973,7 +967,6 @@ static int aie2_query_ctx_status(struct amdxdna_client *client,
 
 			tmp->pid = tmp_client->pid;
 			tmp->context_id = ctx->id;
-			tmp->hwctx_id = ctx->priv->id;
 			tmp->start_col = ctx->start_col;
 			tmp->num_col = ctx->num_col;
 			tmp->command_submissions = ctx->submitted;
@@ -981,7 +974,6 @@ static int aie2_query_ctx_status(struct amdxdna_client *client,
 			tmp->migrations = 0;
 			tmp->preemptions = 0;
 			tmp->errors = 0;
-			tmp->priority = ctx->qos.priority;
 
 			if (copy_to_user(&buf[hw_i], tmp, sizeof(*tmp))) {
 				ret = -EFAULT;
@@ -1046,6 +1038,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 				       aligned_sz - offset, &ver);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
+		mutex_unlock(&xdna->dev_lock);
 		goto free_buf;
 	}
 
@@ -1160,10 +1153,7 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret, idx;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	int ret;
 
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
@@ -1220,7 +1210,6 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
-	drm_dev_exit(idx);
 	return ret;
 }
 
@@ -1291,7 +1280,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].latency = ctx->qos.latency;
 			tmp[hw_i].frame_exec_time = ctx->qos.frame_exec_time;
 			tmp[hw_i].heap_usage = heap_usage;
-			tmp[hw_i].egops = 0; /* TODO: Calculate effective gops */
+			tmp[hw_i].suspensions = ctx->priv->disconn_cnt;
 
 			if (ctx->priv->status == CTX_STATE_CONNECTED)
 				tmp[hw_i].state = AMDXDNA_CTX_STATE_ACTIVE;
@@ -1322,10 +1311,7 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret, idx;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	int ret;
 
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
@@ -1341,7 +1327,6 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
-	drm_dev_exit(idx);
 	return ret;
 }
 
@@ -1435,10 +1420,7 @@ static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret, idx;
-
-	if (!drm_dev_enter(&xdna->ddev, &idx))
-		return -ENODEV;
+	int ret;
 
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
@@ -1465,7 +1447,6 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	}
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
-	drm_dev_exit(idx);
 	return ret;
 }
 
