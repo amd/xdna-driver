@@ -7,10 +7,11 @@
 #include <thread>
 #include <signal.h>
 #include <functional>
+#include <map>
 #include "../hwctx.h"
 #include "../buffer.h"
 #include "tcp_server.h"
-#include "fw_buf_metadata.h"
+#include "drm_local/amdxdna_accel.h"
 
 namespace shim_xdna {
 
@@ -20,10 +21,10 @@ public:
   ~hwctx_umq();
 
 private:
+  const pdev& m_pdev;
   std::unique_ptr<buffer> m_log_bo;
   uint32_t m_col_cnt = 0;
 
-  umq_fw_metadata m_log_metadata;
   void *m_log_buf = nullptr;
 
   std::unique_ptr<tcp_server> m_tcp_server;
@@ -34,7 +35,7 @@ private:
 
   void init_log_buf();
   void fini_log_buf();
-  void set_metadata(int num_cols, size_t size, uint64_t bo_paddr, enum umq_fw_flag flag);
+  void set_metadata(std::map<uint32_t, size_t>& buf_size, int num_cols, size_t size);
 };
 
 }

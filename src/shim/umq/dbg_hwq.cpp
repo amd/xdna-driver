@@ -17,9 +17,8 @@ dbg_hwq_umq(const device& dev)
 
   shim_debug("dbg umq sz %ld", umq_sz);
 
-  m_dbg_umq_bo = std::make_unique<cmd_buffer>(m_pdev, umq_sz, AMDXDNA_BO_CMD);
+  m_dbg_umq_bo = std::make_unique<uc_dbg_buffer>(m_pdev, umq_sz, AMDXDNA_BO_SHARE);
   m_dbg_umq_bo_buf = m_dbg_umq_bo->vaddr();
-  m_dbg_umq_paddr = m_dbg_umq_bo->paddr();
   m_dbg_umq_hdr =
     reinterpret_cast<volatile struct host_queue_header *>(m_dbg_umq_bo_buf);
   m_dbg_umq_pkt = reinterpret_cast<volatile struct host_queue_packet *>
@@ -35,6 +34,7 @@ dbg_hwq_umq(const device& dev)
   m_dbg_umq_pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
   m_dbg_umq_hdr->capacity = 1;
 
+  set_use_flag();
   shim_debug("Created DBG UMQ HW queue");
 }
 
@@ -78,11 +78,24 @@ issue_rw_cmd(struct rw_mem &data, uint16_t opcode)
   return submit();
 }
 
-uint64_t
+void
 dbg_hwq_umq::
-get_bo_paddr() const
+set_use_flag() const
 {
-  return m_dbg_umq_paddr;
+  auto f = xcl_bo_flags{0};
+  f.use = XRT_BO_USE_DEBUG_QUEUE;
+  f.flags = XRT_BO_FLAGS_CACHEABLE;
+  f.access = XRT_BO_ACCESS_LOCAL;
+  f.dir = XRT_BO_ACCESS_READ_WRITE;
+
+  m_dbg_umq_bo->set_flags(f.all);
+}
+
+buffer*
+dbg_hwq_umq::
+get_dbg_umq_bo() const
+{
+  return m_dbg_umq_bo.get();
 }
 
 uint32_t
@@ -97,6 +110,7 @@ submit()
     HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 
   shim_debug("dbg umq: submit cmd");
+
   while (1)
   {
     if (*m_dbg_umq_comp_ptr)

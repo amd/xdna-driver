@@ -7,7 +7,6 @@
 #include "dbg_hwq.h"
 #include "../buffer.h"
 #include "../hwctx.h"
-#include "fw_buf_metadata.h"
 
 namespace shim_xdna {
 

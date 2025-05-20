@@ -9,15 +9,14 @@ namespace shim_xdna {
 hwctx_umq::
 hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
   : hwctx(device, qos, xclbin, std::make_unique<hwq_umq>(device, 8))
-  , m_log_metadata()
+  , m_pdev(device.get_pdev())
 {
+  shim_debug("Created UMQ HW context (%d)", get_slotidx());
   xclbin_parser xp(xclbin);
   m_col_cnt = xp.get_column_cnt();
 
   init_tcp_server(device);
   init_log_buf();
-  // TODO: configure log BO on the hwctx
-  shim_debug("Created UMQ HW context (%d)", get_slotidx());
 }
 
 hwctx_umq::
@@ -34,14 +33,26 @@ hwctx_umq::
 init_log_buf()
 {
   size_t column_size = 1024;
-  auto log_buf_size = m_col_cnt * column_size + sizeof(m_log_metadata);
-  auto log_bo = alloc_bo(log_buf_size, XCL_BO_FLAGS_EXECBUF);
-  m_log_bo = std::unique_ptr<buffer>(static_cast<buffer*>(log_bo.release()));
-  m_log_buf = m_log_bo->vaddr();
-  uint64_t bo_paddr = m_log_bo->paddr();
-  set_metadata(m_col_cnt, column_size, bo_paddr, UMQ_LOG_BUFFER);
-  std::memset(m_log_buf, 0, log_buf_size);
-  std::memcpy(m_log_buf, &m_log_metadata, sizeof(m_log_metadata));
+  auto log_buf_size = m_col_cnt * column_size;
+  m_log_bo = std::make_unique<uc_dbg_buffer>
+    (m_pdev, log_buf_size, AMDXDNA_BO_SHARE);
+  auto log_buf = m_log_bo->vaddr();
+  std::memset(log_buf, 0, log_buf_size);
+
+  auto f = xcl_bo_flags{0};
+  f.use = XRT_BO_USE_LOG;
+  f.flags = XRT_BO_FLAGS_CACHEABLE;
+  f.access = XRT_BO_ACCESS_LOCAL;
+  f.dir = XRT_BO_ACCESS_READ_WRITE;
+
+  m_log_bo->set_flags(f.all);
+
+  std::map<uint32_t,size_t> buf_sizes;
+  set_metadata(buf_sizes, m_col_cnt, column_size);
+  
+  // TODO: configure log BO on the hwctx once driver and fw support it
+  // we may use xrt.ini to control the config
+  //m_log_bo->config(this, buf_sizes);
 }
 
 void
@@ -53,14 +64,10 @@ fini_log_buf(void)
 
 void
 hwctx_umq::
-set_metadata(int num_ucs, size_t size, uint64_t bo_paddr, enum umq_fw_flag flag)
+set_metadata(std::map<uint32_t, size_t>& buf_sizes, int num_ucs, size_t size)
 {
-  m_log_metadata.umq_fw_flag = flag;
-  m_log_metadata.num_ucs = num_ucs;
   for (int i = 0; i < num_ucs; i++) {
-    m_log_metadata.uc_info[i].paddr = bo_paddr + size * i + sizeof(m_log_metadata);
-    m_log_metadata.uc_info[i].size = size;
-    m_log_metadata.uc_info[i].index = i;
+    buf_sizes[i] = size;
   }
 }
 
@@ -68,7 +75,7 @@ void
 hwctx_umq::
 init_tcp_server(const device& dev)
 {
-  //check xrt.ini to start tcp server
+  //TODO:check xrt.ini to start tcp server
   m_tcp_server = std::make_unique<tcp_server>(dev, this);
   m_thread_ = std::thread([&] () { m_tcp_server->start(); });
 }
@@ -79,6 +86,7 @@ fini_tcp_server()
 {
   if (m_thread_.joinable())
   {
+    shim_debug("Kill TCP server...");
     pthread_kill(m_thread_.native_handle(), SIGINT);
     m_thread_.join();
   }

@@ -14,7 +14,7 @@ m_aie_attached(false), m_dbg_umq(dev), m_def_size(16), m_pdev(dev.get_pdev())
 {
   m_hwctx = hwctx;
   auto def_buf_size = m_def_size * sizeof(uint32_t);
-  m_data_bo = std::make_unique<cmd_buffer>(m_pdev, def_buf_size, AMDXDNA_BO_CMD);
+  m_data_bo = std::make_unique<buffer>(m_pdev, def_buf_size, AMDXDNA_BO_SHARE);
   m_data_buf = m_data_bo->vaddr();
   m_data_paddr = m_data_bo->paddr();
 }
@@ -22,6 +22,7 @@ m_aie_attached(false), m_dbg_umq(dev), m_def_size(16), m_pdev(dev.get_pdev())
 tcp_server::
 ~tcp_server()
 {
+  shim_debug("TCP server destructor");
 }
 
 void
@@ -90,7 +91,7 @@ start()
           ret.push_back(sizeof(uint32_t) * (cmd->cmd.read_mem.length + 1));
           ret.insert(ret.end(), data->begin(), data->end());
 
-          send(clientSocket, ret.data(), ret.size() + sizeof(uint32_t), 0);
+          send(clientSocket, ret.data(), ret.size() * sizeof(uint32_t), 0);
           break;
         }
         case WRITE_MEM_CMD:
@@ -194,9 +195,9 @@ void
 tcp_server::
 buffer_extend(size_t new_size)
 {
-    shim_debug("TCP server buffer extend to (%d)W\n", new_size);
+    shim_debug("TCP server buffer extend to (%dW)\n", new_size);
     auto n_buf_size = new_size * sizeof(uint32_t);
-    m_data_bo = std::make_unique<cmd_buffer>(m_pdev, n_buf_size, AMDXDNA_BO_CMD);
+    m_data_bo = std::make_unique<buffer>(m_pdev, n_buf_size, AMDXDNA_BO_SHARE);
     m_data_buf = m_data_bo->vaddr();
     m_data_paddr = m_data_bo->paddr();
 }
@@ -206,15 +207,10 @@ tcp_server::
 handle_attach(uint32_t uc_index)
 { 
   // issue ioctl to attach the dbg hsa queue
-  // send a DBG_CMD_TEST opcode
-  m_ctrl_bo = std::make_unique<dbg_buffer>(m_pdev, sizeof(umq_fw_metadata), AMDXDNA_BO_CMD);
-  auto debugger_metadata = reinterpret_cast<umq_fw_metadata *>(m_ctrl_bo->vaddr());
-  debugger_metadata->umq_fw_flag = UMQ_DBG_QUEUE;
-  debugger_metadata->num_ucs = 1;
-  debugger_metadata->uc_info[0].paddr = m_dbg_umq.get_bo_paddr();
-  debugger_metadata->uc_info[0].index = uc_index;
+  std::map<uint32_t, size_t> buf_sizes;
+  buf_sizes[uc_index] = 0; //we don't care size
 
-  m_ctrl_bo->bind_hwctx(*m_hwctx);
+  m_dbg_umq.get_dbg_umq_bo()->config(m_hwctx, buf_sizes);
   shim_debug("TCP server ioctl: debugger attach\n");
 
   m_aie_attached = true;
@@ -226,8 +222,9 @@ tcp_server::
 handle_detach()
 {
   m_dbg_umq.issue_exit_cmd();
-  m_ctrl_bo = nullptr;
   // issue ioctl to detach the dbg hsa queue
+  m_dbg_umq.get_dbg_umq_bo()->unconfig(m_hwctx);
+
   m_aie_attached = false;
   shim_debug("TCP server ioctl: debugger queue detach\n");
 }

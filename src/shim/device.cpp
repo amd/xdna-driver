@@ -1409,6 +1409,11 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   std::unique_ptr<buffer> bo;
   if (f.use == XRT_BO_USE_DEBUG)
     bo = std::make_unique<dbg_buffer>(get_pdev(), size, type);
+  else if (f.use == XRT_BO_USE_DTRACE ||
+    f.use == XRT_BO_USE_LOG ||
+    f.use == XRT_BO_USE_DEBUG_QUEUE
+    /*f.use == XRT_BO_USE_UC_DEBUG*/) //need define last one in xrt 
+    bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, type);
   else if (type == AMDXDNA_BO_CMD)
     bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
   else
