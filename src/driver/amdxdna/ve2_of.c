@@ -3,25 +3,26 @@
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
 
-#include <linux/xlnx-ai-engine.h>
+#include <linux/device.h>
 #include <linux/firmware.h>
+#include <linux/xlnx-ai-engine.h>
 
 #include "ve2_of.h"
 
-static int ve2_load_cert(struct amdxdna_dev_hdl *ndev)
+static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 {
-	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_dev *xdna = xdna_hdl->xdna;
 	struct aie_partition_init_args args;
 	struct aie_partition_req request;
 	const struct firmware *fw;
 	struct device *xaie_dev;
-	char *buf;
 	size_t buf_len;
+	char *buf;
 	int ret;
 
-	ret = request_firmware(&fw, ndev->priv->fw_path, xdna->ddev.dev);
+	ret = request_firmware(&fw, xdna_hdl->priv->fw_path, xdna->ddev.dev);
 	if (ret) {
-		XDNA_ERR(xdna, "request fw %s failed %d", ndev->priv->fw_path, ret);
+		XDNA_ERR(xdna, "request fw %s failed %d", xdna_hdl->priv->fw_path, ret);
 		return -ENODEV;
 	}
 
@@ -53,14 +54,9 @@ static int ve2_load_cert(struct amdxdna_dev_hdl *ndev)
 	}
 
 	ret = aie_load_cert(xaie_dev, buf);
-	if (ret) {
-		XDNA_ERR(xdna, "aie load cert failed %d", ret);
-		goto teardown;
-	}
-	XDNA_INFO(xdna, "aie load cert complete");
 
-teardown:
 	aie_partition_teardown(xaie_dev);
+
 release:
 	aie_partition_release(xaie_dev);
 out:
@@ -72,16 +68,22 @@ static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *xdna_hdl;
+	int ret;
 
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
 
 	xdna_hdl->xdna = xdna;
+	xdna_hdl->priv = xdna->dev_info->dev_priv;
 
 	xdna->dev_handle = xdna_hdl;
 
-	ve2_load_cert(xdna_hdl);
+	ret = ve2_load_fw(xdna_hdl);
+	if (ret)
+		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
+	else
+		XDNA_INFO(xdna, "aie load %s completed", xdna_hdl->priv->fw_path);
 
 	return 0;
 }

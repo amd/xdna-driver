@@ -9,7 +9,6 @@
 #include <linux/iosys-map.h>
 #include <linux/pagemap.h>
 #include <linux/pfn.h>
-#include <linux/version.h>
 #include <linux/vmalloc.h>
 #include <drm/drm_cache.h>
 
@@ -23,12 +22,6 @@
 #endif
 
 #define XDNA_MAX_CMD_BO_SIZE	SZ_32K
-
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
-#else
-MODULE_IMPORT_NS("DMA_BUF");
-#endif
 
 static int
 amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
