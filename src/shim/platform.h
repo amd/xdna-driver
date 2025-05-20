@@ -16,6 +16,16 @@
 
 namespace shim_xdna {
 
+// Can be returned to caller for resource tracking.
+// Resource tracked needs to be implemented in inherited class.
+// Object can't be reused. When it becomes invalid, it stays invalid for ever.
+// Caller may delete object at any time, if it is not valid.
+class platform_cookie {
+public:
+  virtual bool
+  is_valid() const = 0;
+};
+
 enum class drv_ioctl_cmd {
   create_ctx,
   destroy_ctx,
@@ -31,7 +41,8 @@ enum class drv_ioctl_cmd {
   submit_cmd,
   submit_dep,
   submit_sig,
-  wait_cmd,
+  wait_cmd_ioctl,
+  wait_cmd_syncobj,
 
   get_info,
   get_info_array,
@@ -46,7 +57,9 @@ enum class drv_ioctl_cmd {
 };
 
 struct bo_id {
+  // In non-VM case, not valid. In VM case, DRM BO handle in guest
   uint32_t res_id = AMDXDNA_INVALID_BO_HANDLE;
+  // In non-VM case, DRM BO handle. In VM case, DRM BO handle in host
   uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
   bool operator<(const bo_id& other) const
   { return std::tie(handle, res_id) < std::tie(other.handle, other.res_id); }
@@ -122,21 +135,19 @@ struct submit_cmd_arg {
   uint64_t seq;
 };
 
-struct submit_dep_arg {
+struct submit_sig_dep_arg {
   uint32_t ctx_handle;
-  uint32_t count;
-  const uint32_t *sync_objs;
-  const uint64_t *sync_points;
-};
-
-struct submit_sig_arg {
-  uint32_t ctx_handle;
-  uint32_t sync_obj;
+  uint32_t ctx_syncobj_handle;
+  uint32_t syncobj_handle;
   uint64_t timepoint;
+  std::unique_ptr<platform_cookie> cookie;
 };
 
 struct wait_cmd_arg {
-  uint32_t ctx_handle;
+  union {
+    uint32_t ctx_handle;
+    uint32_t ctx_syncobj_handle;
+  };
   uint32_t timeout_ms;
   uint64_t seq;
 };
@@ -157,8 +168,8 @@ struct signal_syncobj_arg {
 
 struct wait_syncobj_arg {
   uint32_t handle;
-  uint64_t timepoint;
   uint32_t timeout_ms;
+  uint64_t timepoint;
 };
 
 class platform_drv
@@ -185,9 +196,21 @@ public:
   std::shared_ptr<const drv>
   get_pdrv() const;
 
+  static int64_t
+  timeout_ms2abs_ns(int64_t timeout_ms);
+
 protected:
   int
   dev_fd() const;
+
+  virtual void
+  wait_syncobj(wait_syncobj_arg& arg) const;
+
+  virtual void
+  destroy_syncobj(create_destroy_syncobj_arg& arg) const;
+
+  virtual void
+  signal_syncobj(signal_syncobj_arg& arg) const;
 
 private:
   std::shared_ptr<const drv> m_driver;
@@ -239,15 +262,19 @@ private:
   { shim_not_supported_err(__func__); }
 
   virtual void
-  submit_dep(submit_dep_arg& arg) const
+  submit_dep(submit_sig_dep_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void
-  submit_sig(submit_sig_arg& arg) const
+  submit_sig(submit_sig_dep_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void
-  wait_cmd(wait_cmd_arg& arg) const
+  wait_cmd_ioctl(wait_cmd_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  wait_cmd_syncobj(wait_cmd_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void
@@ -263,28 +290,13 @@ private:
   { shim_not_supported_err(__func__); }
 
   virtual void
-  create_syncobj(create_destroy_syncobj_arg& arg) const
-  { shim_not_supported_err(__func__); }
+  create_syncobj(create_destroy_syncobj_arg& arg) const;
 
   virtual void
-  destroy_syncobj(create_destroy_syncobj_arg& arg) const
-  { shim_not_supported_err(__func__); }
+  export_syncobj(export_import_syncobj_arg& arg) const;
 
   virtual void
-  export_syncobj(export_import_syncobj_arg& arg) const
-  { shim_not_supported_err(__func__); }
-
-  virtual void
-  import_syncobj(export_import_syncobj_arg& arg) const
-  { shim_not_supported_err(__func__); }
-
-  virtual void
-  signal_syncobj(signal_syncobj_arg& arg) const
-  { shim_not_supported_err(__func__); }
-
-  virtual void
-  wait_syncobj(wait_syncobj_arg& arg) const
-  { shim_not_supported_err(__func__); }
+  import_syncobj(export_import_syncobj_arg& arg) const;
 };
 
 }

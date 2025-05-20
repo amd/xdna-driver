@@ -37,10 +37,10 @@ public:
 
 public:
   void
-  submit_wait(xrt_core::hwctx_handle::slot_id) const;
+  submit_wait(const hwctx& ctx) const;
 
   void
-  submit_signal(xrt_core::hwctx_handle::slot_id) const;
+  submit_signal(const hwctx& ctx) const;
 
 private:
   uint64_t
@@ -48,6 +48,9 @@ private:
 
   uint64_t
   signal_next_state() const;
+
+  void
+  save_cookies(std::unique_ptr<platform_cookie> cookie) const;
 
   const pdev& m_pdev;
   const std::unique_ptr<xrt_core::shared_handle> m_import;
@@ -57,9 +60,12 @@ private:
   mutable std::mutex m_lock;
   // Set once at first signal
   mutable bool m_signaled = false;
-  // Ever incrementing at each wait/signal
   static constexpr uint64_t initial_state = 0;
+  // Ever incrementing at each wait/signal
   mutable uint64_t m_state = initial_state;
+  // Keep track of all async waiting threads so that they can be joined
+  // when fence goes away. They do not affect fence's running state.
+  mutable std::vector< std::unique_ptr<platform_cookie> > m_cookies;
 };
 
 }

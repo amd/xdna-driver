@@ -69,25 +69,14 @@ ioctl(int dev_fd, unsigned long cmd, void* arg)
     shim_err(-errno, "%s IOCTL failed", ioctl_cmd2name(cmd).c_str());
 }
 
-int64_t timeout_ms2abs_ns(int64_t timeout_ms)
-{
-  if (!timeout_ms)
-    return std::numeric_limits<int64_t>::max(); // 0 means wait forever
-
-  struct timespec tp;
-  clock_gettime(CLOCK_MONOTONIC, &tp);
-  return timeout_ms * 1000000 + tp.tv_sec * 1000000000ULL + tp.tv_nsec;
-}
-
 void
-wait_syncobj_available(int dev_fd, const uint32_t* sobj_hdls,
-  const uint64_t* timepoints, uint32_t num)
+wait_syncobj_available(int dev_fd, uint32_t sobj_hdl, uint64_t timepoint)
 {
   drm_syncobj_timeline_wait wsobj = {
-    .handles = reinterpret_cast<uintptr_t>(sobj_hdls),
-    .points = reinterpret_cast<uintptr_t>(timepoints),
-    .timeout_nsec = timeout_ms2abs_ns(0), /* wait forever */
-    .count_handles = num,
+    .handles = reinterpret_cast<uintptr_t>(&sobj_hdl),
+    .points = reinterpret_cast<uintptr_t>(&timepoint),
+    .timeout_nsec = shim_xdna::platform_drv::timeout_ms2abs_ns(0), /* wait forever */
+    .count_handles = 1,
     .flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL |
              DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
              DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE,
@@ -266,28 +255,28 @@ submit_cmd(submit_cmd_arg& cmd_arg) const
 
 void
 platform_drv_host::
-submit_dep(submit_dep_arg& cmd_arg) const
+submit_dep(submit_sig_dep_arg& cmd_arg) const
 {
-  wait_syncobj_available(dev_fd(), cmd_arg.sync_objs, cmd_arg.sync_points, cmd_arg.count);
+  wait_syncobj_available(dev_fd(), cmd_arg.syncobj_handle, cmd_arg.timepoint);
 
   amdxdna_drm_exec_cmd arg = {};
   arg.ctx = cmd_arg.ctx_handle;
   arg.type = AMDXDNA_CMD_SUBMIT_DEPENDENCY;
-  arg.cmd_handles = reinterpret_cast<uintptr_t>(cmd_arg.sync_objs);
-  arg.args = reinterpret_cast<uintptr_t>(cmd_arg.sync_points);
-  arg.cmd_count = cmd_arg.count;
-  arg.arg_count = cmd_arg.count;
+  arg.cmd_handles = reinterpret_cast<uintptr_t>(&cmd_arg.syncobj_handle);
+  arg.args = reinterpret_cast<uintptr_t>(&cmd_arg.timepoint);
+  arg.cmd_count = 1;
+  arg.arg_count = 1;
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
 }
 
 void
 platform_drv_host::
-submit_sig(submit_sig_arg& cmd_arg) const
+submit_sig(submit_sig_dep_arg& cmd_arg) const
 {
   amdxdna_drm_exec_cmd arg = {};
   arg.ctx = cmd_arg.ctx_handle;
   arg.type = AMDXDNA_CMD_SUBMIT_SIGNAL;
-  arg.cmd_handles = cmd_arg.sync_obj;
+  arg.cmd_handles = cmd_arg.syncobj_handle;
   arg.args = cmd_arg.timepoint;
   arg.cmd_count = 1;
   arg.arg_count = 1;
@@ -296,7 +285,7 @@ submit_sig(submit_sig_arg& cmd_arg) const
 
 void
 platform_drv_host::
-wait_cmd(wait_cmd_arg& cmd_arg) const
+wait_cmd_ioctl(wait_cmd_arg& cmd_arg) const
 {
   amdxdna_drm_wait_cmd wcmd = {
     .ctx = cmd_arg.ctx_handle,
@@ -304,6 +293,18 @@ wait_cmd(wait_cmd_arg& cmd_arg) const
     .seq = cmd_arg.seq,
   };
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
+}
+
+void
+platform_drv_host::
+wait_cmd_syncobj(wait_cmd_arg& cmd_arg) const
+{
+  wait_syncobj_arg wcmd = {
+    .handle = cmd_arg.ctx_syncobj_handle,
+    .timeout_ms = cmd_arg.timeout_ms,
+    .timepoint = cmd_arg.seq,
+  };
+  wait_syncobj(wcmd);
 }
 
 void
@@ -325,75 +326,6 @@ platform_drv_host::
 set_state(amdxdna_drm_set_state& state) const
 {
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_SET_STATE, &state);
-}
-
-void
-platform_drv_host::
-create_syncobj(create_destroy_syncobj_arg& sobj_arg) const
-{
-  drm_syncobj_create arg = {};
-  arg.handle = AMDXDNA_INVALID_FENCE_HANDLE;
-  arg.flags = 0;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_CREATE, &arg);
-  sobj_arg.handle = arg.handle;
-}
-
-void
-platform_drv_host::
-destroy_syncobj(create_destroy_syncobj_arg& sobj_arg) const
-{
-  drm_syncobj_destroy arg = {};
-  arg.handle = sobj_arg.handle;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_DESTROY, &arg);
-}
-
-void
-platform_drv_host::
-export_syncobj(export_import_syncobj_arg& sobj_arg) const
-{
-  drm_syncobj_handle arg = {};
-  arg.handle = sobj_arg.handle;
-  arg.flags = 0;
-  arg.fd = -1;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD, &arg);
-  sobj_arg.fd = arg.fd;
-}
-
-void
-platform_drv_host::
-import_syncobj(export_import_syncobj_arg& sobj_arg) const
-{
-  drm_syncobj_handle arg = {};
-  arg.handle = AMDXDNA_INVALID_FENCE_HANDLE;
-  arg.flags = 0;
-  arg.fd = sobj_arg.fd;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &arg);
-  sobj_arg.handle = arg.handle;
-}
-
-void
-platform_drv_host::
-wait_syncobj(wait_syncobj_arg& sobj_arg) const
-{
-  drm_syncobj_timeline_wait arg = {};
-  arg.handles = reinterpret_cast<uintptr_t>(&sobj_arg.handle);
-  arg.points = reinterpret_cast<uintptr_t>(&sobj_arg.timepoint);
-  arg.timeout_nsec = timeout_ms2abs_ns(sobj_arg.timeout_ms);
-  arg.count_handles = 1;
-  /* Keep waiting even if not submitted yet */
-  arg.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &arg);
-}
-
-void
-platform_drv_host::
-signal_syncobj(signal_syncobj_arg& sobj_arg) const
-{
-  drm_syncobj_timeline_array arg = {};
-  arg.handles = reinterpret_cast<uintptr_t>(&sobj_arg.handle);
-  arg.points = reinterpret_cast<uintptr_t>(&sobj_arg.timepoint);
-  arg.count_handles = 1;
-  ioctl(dev_fd(), DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &arg);
 }
 
 }

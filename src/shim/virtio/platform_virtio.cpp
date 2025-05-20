@@ -9,6 +9,7 @@
 #include <poll.h>
 #include <cstring>
 #include <iostream>
+#include <thread>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <drm/virtgpu_drm.h>
@@ -491,14 +492,14 @@ submit_cmd(submit_cmd_arg& arg) const
 
 void
 platform_drv_virtio::
-wait_syncobj(wait_syncobj_arg& arg) const
+wait_cmd_syncobj(wait_cmd_arg& arg) const
 {
   amdxdna_ccmd_wait_cmd_req req = {
     { AMDXDNA_CCMD_WAIT_CMD, sizeof(req) },
   };
 
-  req.seq = arg.timepoint;
-  req.syncobj_hdl = arg.handle;
+  req.seq = arg.seq;
+  req.syncobj_hdl = arg.ctx_syncobj_handle;
   // TODO: needs to pass timeout to host
   hcall(&req);
 }
@@ -548,6 +549,112 @@ import_bo(import_bo_arg& bo_arg) const
   bo_arg.map_offset = map_offset;
   bo_arg.type = AMDXDNA_BO_SHARE;
   bo_arg.size = size;
+}
+
+class wait_thread : public platform_cookie
+{
+public:
+  wait_thread(std::function<void()> task)
+    : m_task(task)
+    , m_done(false)
+  {
+    m_thr = std::thread(&wait_thread::do_task, this);
+  }
+
+  ~wait_thread()
+  {
+    m_thr.join();
+  }
+
+  bool
+  is_valid() const override
+  {
+    return !m_done;
+  }
+
+private:
+  std::function<void()> m_task;
+  bool m_done;
+  std::thread m_thr;
+
+  void
+  do_task()
+  {
+    m_task();
+    m_done = true;
+  }
+};
+
+void
+platform_drv_virtio::
+wait_and_signal_host(uint32_t syncobj, uint64_t timepoint,
+  uint32_t host_syncobj) const
+{
+  shim_debug("waiting for local (%d, %ld) before signaling host (%d,0)",
+    syncobj, timepoint, host_syncobj);
+  wait_syncobj_arg arg = {
+    .handle = syncobj,
+    .timeout_ms = 0,
+    .timepoint = timepoint,
+  };
+  wait_syncobj(arg);
+
+  amdxdna_ccmd_sig_syncobj_req req = {
+    { AMDXDNA_CCMD_SIG_SYNCOBJ, sizeof(req) },
+  };
+  req.syncobj_hdl = host_syncobj;
+  hcall(&req);
+}
+
+void
+platform_drv_virtio::
+wait_and_signal_guest(uint32_t ctx_syncobj, uint64_t cmd_seq,
+  uint32_t syncobj, uint64_t timepoint) const
+{
+  shim_debug("waiting for host (%d, %ld) before signaling local (%d,%ld)",
+    ctx_syncobj, cmd_seq, syncobj, timepoint);
+  wait_cmd_arg wcmd = {
+    .ctx_syncobj_handle = ctx_syncobj,
+    .timeout_ms = 0,
+    .seq = cmd_seq,
+  };
+  wait_cmd_syncobj(wcmd);
+
+  signal_syncobj_arg sarg = {
+    .handle = syncobj,
+    .timepoint = timepoint,
+  };
+  signal_syncobj(sarg);
+}
+
+void
+platform_drv_virtio::
+submit_dep(submit_sig_dep_arg& arg) const
+{
+  amdxdna_ccmd_add_syncobj_req req = {
+    { AMDXDNA_CCMD_ADD_SYNCOBJ, sizeof(req) },
+  };
+  amdxdna_ccmd_add_syncobj_rsp rsp = {};
+
+  req.ctx_handle = arg.ctx_handle;
+  hcall(&req, &rsp, sizeof(rsp));
+
+  wait_and_signal_host(arg.syncobj_handle, arg.timepoint, rsp.syncobj_hdl);
+}
+
+void
+platform_drv_virtio::
+submit_sig(submit_sig_dep_arg& arg) const
+{
+  amdxdna_ccmd_get_last_seq_req req = {
+    { AMDXDNA_CCMD_GET_LAST_SEQ, sizeof(req) },
+  };
+  amdxdna_ccmd_get_last_seq_rsp rsp = {};
+
+  req.syncobj_hdl = arg.ctx_syncobj_handle;
+  hcall(&req, &rsp, sizeof(rsp));
+
+  wait_and_signal_guest(arg.ctx_syncobj_handle, rsp.seq, arg.syncobj_handle, arg.timepoint);
 }
 
 }

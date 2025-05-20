@@ -48,14 +48,12 @@ public:
 
 protected:
   const pdev& m_pdev;
-  xrt_core::hwctx_handle::slot_id m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+  const hwctx* m_ctx = nullptr;
 
   int
   wait_command(uint64_t seq, uint32_t timeout_ms) const;
 
 private:
-  uint32_t m_syncobj = 0;
-
   virtual void
   issue_command(cmd_buffer *) = 0;
 };

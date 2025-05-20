@@ -63,35 +63,25 @@ wait_syncobj_done(const shim_xdna::pdev& dev, uint32_t sobj_hdl, uint64_t timepo
 {
   wait_syncobj_arg wsobj = {
     .handle = sobj_hdl,
-    .timepoint = timepoint,
     .timeout_ms = 0, /* wait forever */
+    .timepoint = timepoint,
   };
   dev.drv_ioctl(drv_ioctl_cmd::wait_syncobj, &wsobj);
 }
 
-void
-submit_wait_syncobjs(const shim_xdna::pdev& dev, xrt_core::hwctx_handle::slot_id ctx_id,
-  const uint32_t* sobj_hdls, const uint64_t* points, uint32_t num)
+std::unique_ptr<platform_cookie>
+submit_sig_dep_syncobj(const shim_xdna::pdev& dev, bool is_dep,
+  const hwctx& ctx, uint32_t sobj_hdl, uint64_t point)
 {
-  submit_dep_arg ecmd = {
-    .ctx_handle = ctx_id,
-    .count = num,
-    .sync_objs = sobj_hdls,
-    .sync_points = points,
-  };
-  dev.drv_ioctl(drv_ioctl_cmd::submit_dep, &ecmd);
-}
-
-void
-submit_signal_syncobj(const shim_xdna::pdev& dev, xrt_core::hwctx_handle::slot_id ctx_id,
-  uint32_t sobj_hdl, uint64_t point)
-{
-  submit_sig_arg ecmd = {
-    .ctx_handle = ctx_id,
-    .sync_obj = sobj_hdl,
+  submit_sig_dep_arg ecmd = {
+    .ctx_handle = ctx.get_slotidx(),
+    .ctx_syncobj_handle = ctx.get_syncobj(),
+    .syncobj_handle = sobj_hdl,
     .timepoint = point,
+    .cookie = nullptr,
   };
-  dev.drv_ioctl(drv_ioctl_cmd::submit_sig, &ecmd);
+  dev.drv_ioctl(is_dep ? drv_ioctl_cmd::submit_dep : drv_ioctl_cmd::submit_sig, &ecmd);
+  return std::move(ecmd.cookie);
 }
 
 }
@@ -187,11 +177,11 @@ wait(uint32_t timeout_ms) const
 
 void
 fence::
-submit_wait(xrt_core::hwctx_handle::slot_id ctx_id) const
+submit_wait(const hwctx& ctx) const
 {
   auto st = signal_next_state();
   shim_debug("Submitting wait for command fence %d@%ld", m_syncobj_hdl, st);
-  submit_wait_syncobjs(m_pdev, ctx_id, &m_syncobj_hdl, &st, 1);
+  save_cookies(submit_sig_dep_syncobj(m_pdev, true, ctx, m_syncobj_hdl, st));
 }
 
 uint64_t
@@ -218,11 +208,32 @@ signal() const
 
 void
 fence::
-submit_signal(xrt_core::hwctx_handle::slot_id ctx_id) const
+submit_signal(const hwctx& ctx) const
 {
   auto st = signal_next_state();
   shim_debug("Submitting signal command fence %d@%ld", m_syncobj_hdl, st);
-  submit_signal_syncobj(m_pdev, ctx_id, m_syncobj_hdl, st);
+  save_cookies(submit_sig_dep_syncobj(m_pdev, false, ctx, m_syncobj_hdl, st));
+}
+
+void
+fence::
+save_cookies(std::unique_ptr<platform_cookie> cookie) const
+{
+  auto& v = m_cookies;
+
+  if (!cookie)
+    return;
+
+  v.erase(
+    std::remove_if (
+      v.begin(),
+      v.end(),
+      [](const std::unique_ptr<platform_cookie>& c) { return !c->is_valid(); }
+    ),
+    v.end()
+  );
+  
+  v.push_back(std::move(cookie));
 }
 
 }

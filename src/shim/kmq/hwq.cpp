@@ -22,7 +22,7 @@ hwq_kmq::
 issue_command(cmd_buffer *cmd_bo)
 {
   submit_cmd_arg ecmd = {
-    .ctx_handle = m_ctx_id,
+    .ctx_handle = m_ctx->get_slotidx(),
     .cmd_bo = cmd_bo->id(),
     .arg_bos = cmd_bo->get_arg_bo_ids(),
   };

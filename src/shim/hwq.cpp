@@ -24,16 +24,14 @@ void
 hwq::
 bind_hwctx(const hwctx& ctx)
 {
-  m_ctx_id = ctx.get_slotidx();
-  m_syncobj = ctx.get_syncobj();
+  m_ctx = &ctx;
 }
 
 void
 hwq::
 unbind_hwctx()
 {
-  m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
-  m_syncobj = 0;
+  m_ctx = nullptr;
 }
 
 void
@@ -66,21 +64,18 @@ wait_command(uint64_t seq, uint32_t timeout_ms) const
 
   shim_debug("Waiting for cmd (%ld)...", seq);
   try {
+    wait_cmd_arg wcmd = {
+      .timeout_ms = timeout_ms,
+      .seq = seq,
+    };
 
-    if (m_syncobj != AMDXDNA_INVALID_FENCE_HANDLE) {
-      wait_syncobj_arg wsobj = {
-        .handle = m_syncobj,
-        .timepoint = seq,
-        .timeout_ms = timeout_ms,
-      };
-      m_pdev.drv_ioctl(drv_ioctl_cmd::wait_syncobj, &wsobj);
+    auto syncobj = m_ctx->get_syncobj();
+    if (syncobj != AMDXDNA_INVALID_FENCE_HANDLE) {
+      wcmd.ctx_syncobj_handle = syncobj;
+      m_pdev.drv_ioctl(drv_ioctl_cmd::wait_cmd_syncobj, &wcmd);
     } else {
-      wait_cmd_arg wcmd = {
-        .ctx_handle = m_ctx_id,
-        .timeout_ms = timeout_ms,
-        .seq = seq,
-      };
-      m_pdev.drv_ioctl(drv_ioctl_cmd::wait_cmd, &wcmd);
+      wcmd.ctx_handle = m_ctx->get_slotidx();
+      m_pdev.drv_ioctl(drv_ioctl_cmd::wait_cmd_ioctl, &wcmd);
     }
   }
   catch (const xrt_core::system_error& ex) {
@@ -109,7 +104,7 @@ hwq::
 submit_wait(const xrt_core::fence_handle* f)
 {
   auto fh = static_cast<const fence*>(f);
-  fh->submit_wait(m_ctx_id);
+  fh->submit_wait(*m_ctx);
 }
 
 void
@@ -117,7 +112,7 @@ hwq::
 submit_signal(const xrt_core::fence_handle* f)
 {
   auto fh = static_cast<const fence*>(f);
-  fh->submit_signal(m_ctx_id);
+  fh->submit_signal(*m_ctx);
 }
 
 }
