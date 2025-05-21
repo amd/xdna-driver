@@ -5,16 +5,9 @@
 
 #include <drm/drm_mm.h>
 #include <linux/dma-buf.h>
-#include <linux/version.h>
 
 #include "amdxdna_carvedout_buf.h"
 #include "amdxdna_drm.h"
-
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
-#else
-MODULE_IMPORT_NS("DMA_BUF");
-#endif
 
 /*
  * Carvedout memory is a chunk of memory which is physically contiguous and
