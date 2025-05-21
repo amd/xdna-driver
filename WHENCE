@@ -41,5 +41,13 @@ File:
 	tools/bins/17f0_20/tct_1col.elf
 	tools/bins/17f0_20/tct_4col.elf
 	tools/bins/17f0_20/gemm_int8.elf
+	tools/bins/17f0_10/mobilenet_4col.elf
+  tools/bins/17f0_10/mobilenet_4col.xclbin
+  tools/bins/17f0_11/mobilenet_4col.elf
+  tools/bins/17f0_11/mobilenet_4col.xclbin
+  tools/bins/17f0_20/mobilenet_4col.elf
+  tools/bins/17f0_20/mobilenet_4col.xclbin
+  tools/bins/Mobilenet/mobilenet_ifm.bin
+  tools/bins/Mobilenet/mobilenet_param.bin
 
 Licence: Redistributable. See LICENSE.amdnpu for details.
