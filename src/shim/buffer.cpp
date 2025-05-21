@@ -11,7 +11,7 @@
 namespace {
 
 uint8_t
-use_to_type(uint8_t use)
+use_to_fw_debug_type(uint8_t use)
 {
   switch (use) {
   case XRT_BO_USE_DEBUG:
@@ -394,7 +394,7 @@ set_flags(uint64_t flags)
 
 uint64_t
 buffer::
-get_flags()
+get_flags() const
 {
   return m_flags;
 }
@@ -585,7 +585,7 @@ config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_size
   metadata->bo_handle = id().handle;
   metadata->command_id = 0; //support this later
   auto f = xcl_bo_flags{get_flags()};
-  metadata->buf_type = use_to_type(f.use);
+  metadata->buf_type = use_to_fw_debug_type(f.use);
   metadata->num_ucs = buf_sizes.size();
   int i = 0;
   for (const auto& pair : buf_sizes)

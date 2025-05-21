@@ -96,7 +96,7 @@ public:
 
   // Save flags in buffer which later returns via get_properties()
   void set_flags(uint64_t flags);
-  uint64_t get_flags();
+  uint64_t get_flags() const;
 
   virtual std::set<bo_id>
   get_arg_bo_ids() const;
