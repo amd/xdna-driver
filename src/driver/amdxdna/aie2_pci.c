@@ -951,7 +951,6 @@ static int aie2_query_ctx_status(struct amdxdna_client *client,
 	if (!tmp)
 		return -ENOMEM;
 
-	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		amdxdna_for_each_ctx(tmp_client, ctx_id, ctx) {
@@ -992,7 +991,6 @@ static int aie2_query_ctx_status(struct amdxdna_client *client,
 	}
 
 out:
-	mutex_unlock(&xdna->dev_lock);
 	kfree(tmp);
 	args->buffer_size = req_bytes;
 	return ret;
@@ -1029,8 +1027,6 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 
 	drm_clflush_virt_range(buff, aligned_sz); /* device can access */
 
-	mutex_lock(&xdna->dev_lock);
-
 	/* Reserve enough space for the driver to copy context map in the user buffer */
 	header.map_num_elements = xdna->dev_handle->ctx_rq.hwctx_limit;
 	offset = struct_size(&header, map, header.map_num_elements);
@@ -1038,7 +1034,6 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 				       aligned_sz - offset, &ver);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
-		mutex_unlock(&xdna->dev_lock);
 		goto free_buf;
 	}
 
@@ -1056,8 +1051,6 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 			tmp->map[ctx->priv->id] = ctx->id;
 		}
 	}
-
-	mutex_unlock(&xdna->dev_lock);
 
 	print_hex_dump_debug("telemetry: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
 			     aligned_sz, false);
@@ -1155,6 +1148,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
@@ -1173,9 +1167,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_query_sensors(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_query_ctx_status(client, args);
-		mutex_lock(&xdna->dev_handle->aie2_lock);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_READ_AIE_MEM:
@@ -1208,6 +1200,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = -EOPNOTSUPP;
 	}
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
+	mutex_unlock(&xdna->dev_lock);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
@@ -1249,7 +1242,6 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	if (!tmp)
 		return -ENOMEM;
 
-	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		int heap_usage;
 
@@ -1291,7 +1283,6 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
-	mutex_unlock(&xdna->dev_lock);
 
 	min = min(args->element_size, sizeof(*tmp));
 	for (i = 0; i < hw_i; i++) {
@@ -1313,6 +1304,7 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY:
@@ -1325,6 +1317,7 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 		ret = -EOPNOTSUPP;
 	}
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
+	mutex_unlock(&xdna->dev_lock);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
