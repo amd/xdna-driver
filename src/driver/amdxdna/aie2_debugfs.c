@@ -220,7 +220,7 @@ static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
 				      size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	u32 enable = 0, buf_size = 0, event_type = 0;
+	u32 enable = 0, buf_size = 0, event_category = 0;
 	char *kbuf, *token, *key, *val;
 
 	kbuf = kzalloc(len + 1, GFP_KERNEL);
@@ -249,10 +249,11 @@ static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
 				}
 			} else if (strcmp(key, "size") == 0) {
 				buf_size = memparse(val, NULL);
-			} else if (strcmp(key, "eventtype") == 0) {
-				ret = kstrtouint(val, 0, &event_type);
+			} else if (strcmp(key, "category") == 0) {
+				ret = kstrtouint(val, 0, &event_category);
 				if (ret) {
-					XDNA_INFO(ndev->xdna, "invalid event type %u", event_type);
+					XDNA_INFO(ndev->xdna, "invalid event category %u",
+						  event_category);
 					return ret;
 				}
 			} else {
@@ -263,12 +264,12 @@ static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
 		token = strsep(&kbuf, " ");
 	}
 
-	XDNA_DBG(ndev->xdna, "Event trace config: %u, %u, %u",
-		 enable, buf_size, event_type);
-	if (enable && (!buf_size || !event_type))
+	XDNA_DBG(ndev->xdna, "Event trace config: %u, %u, 0x%08x",
+		 enable, buf_size, event_category);
+	if (enable && (!buf_size || !event_category))
 		return -EINVAL;
 
-	aie2_config_event_trace(ndev, enable, buf_size, event_type);
+	aie2_config_event_trace(ndev, enable, buf_size, event_category);
 	kfree(kbuf);
 
 	return len;
@@ -282,10 +283,10 @@ static int aie2_event_trace_show(struct seq_file *m, void *unused)
 		seq_puts(m, "Event trace is enabled\n");
 	else
 		seq_puts(m, "Event trace is disabled\n"
-						"echo \"enable=1 size=1K eventtype=0xffffff\" > Follow given input format to enable\n"
-						"echo \"enable=[0, 1]\" > enable=1 to enable, enable=0 to disable\n"
-						"echo \"size=[1K, 2K, 4K...512K to 1M\" buffer size should be pow of 2\n"
-						"echo \"eventtype=[0x000000FF, 0x0000FFFF, 0x00FFFFFF, 0xFFFFFFFF\" > are supported now\n");
+						"echo enable=1 size=1K category=0xffffff -> Follow given input format to enable\n"
+						"enable=[0, 1] -> enable=1 to enable, enable=0 to disable\n"
+						"size=[1K, 2K, 4K...512K to 1M] -> buffer size should be pow of 2\n"
+						"category=[0x1 - 0xFFFFFFFF] -> 32 bit word\n");
 
 	return 0;
 }
