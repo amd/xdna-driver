@@ -21,6 +21,7 @@ create_validate_subcommand()
     {"tct-all-col", "Measure average TCT processing time for all columns", "hidden"},
     {"tct-one-col", "Measure average TCT processing time for one column", "hidden"},
     {"throughput", "Run end-to-end throughput test", "common"},
+    {"preemption-overhead", "Measure preemption overhead at noop and memtile levels", "hidden"},
     {"temporal-sharing-overhead", "Run end-to-end temporal sharing overhead test", "hidden"},
   };
 
