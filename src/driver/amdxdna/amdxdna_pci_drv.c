@@ -103,7 +103,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
 		return -EOPNOTSUPP;
 
-	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", 0);
+	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", WQ_MEM_RECLAIM);
 	if (!xdna->notifier_wq)
 		return -ENOMEM;
 
