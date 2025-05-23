@@ -25,6 +25,7 @@ enum aie2_msg_opcode {
 	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
 	MSG_OP_CONFIG_DEBUG_BO		   = 0x14,
 	MSG_OP_EXEC_DPU_PREEMPT		   = 0x15,
+	MSG_OP_CMD_CHAIN_NPU		   = 0x18,
 #ifdef AMDXDNA_DEVEL
 	MSG_OP_REGISTER_PDI                = 0x1,
 	MSG_OP_UNREGISTER_PDI              = 0xA,
@@ -406,6 +407,8 @@ struct async_event_msg_resp {
 /* Start of event tracing data struct */
 #define EVENT_TRACE_BUF_METADATA_SIZE			0x40
 #define MAX_ONE_TIME_LOG_INFO_LEN			16
+#define DEFAULT_EVENT_BUF_SIZE				0x2000
+#define DEFAULT_EVENT_CATEGORY				0xFFFFFFFF
 
 enum event_trace_destination {
 	EVENT_TRACE_DEST_DEBUG_BUS,
@@ -448,6 +451,13 @@ struct stop_event_trace_resp {
 #define slot_has_space(slot, offset, payload_size)		\
 	(MAX_CHAIN_CMDBUF_SIZE >= (offset) + (payload_size) +	\
 	 sizeof(typeof(slot)))
+
+enum cmd_chain_class {
+	CMD_CHAIN_CLASS_NON_PREEMPT,
+	CMD_CHAIN_CLASS_PREEMPT,
+	CMD_CHAIN_CLASS_MAX,
+};
+
 struct cmd_chain_slot_execbuf_cf {
 	u32 cu_idx;
 	u32 arg_cnt;
@@ -465,6 +475,37 @@ struct cmd_chain_slot_dpu {
 };
 
 struct cmd_chain_req {
+	u64 buf_addr;
+	u32 buf_size;
+	u32 count;
+} __packed;
+
+enum cmd_chain_npu_type {
+	CMD_CHAIN_NPU_TYPE_NON_ELF	= 0x1,
+	CMD_CHAIN_NPU_TYPE_PARTIAL_ELF	= 0x2,
+	CMD_CHAIN_NPU_TYPE_PREEMPT	= 0x3,
+	CMD_CHAIN_NPU_TYPE_MAX
+};
+
+struct cmd_chain_slot_npu {
+	union {
+		enum cmd_chain_npu_type type;
+		u32 type_u32;
+	};
+	u64 inst_buf_addr;
+	u64 save_buf_addr;
+	u64 restore_buf_addr;
+	u32 inst_size;
+	u32 save_size;
+	u32 restore_size;
+	u32 inst_prop_cnt;
+	u32 cu_idx;
+	u32 arg_cnt;
+	u32 args[] __counted_by(arg_cnt);
+} __packed;
+
+struct cmd_chain_npu_req {
+	u64 reserved;
 	u64 buf_addr;
 	u32 buf_size;
 	u32 count;

@@ -307,8 +307,10 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_ctx *ctx = job->ctx;
+	enum cmd_chain_class class;
 	struct dma_fence *fence;
 	int ret = 0;
+	u32 op;
 
 	trace_xdna_job(sched_job, ctx->name, "job run", job->seq, job->opcode);
 
@@ -332,12 +334,19 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 		goto out;
 	}
 
-	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN)
-		ret = aie2_cmdlist_multi_execbuf(ctx, job, aie2_sched_cmdlist_resp_handler);
+	/*
+	 * Transaction binaries are only supported with RAI 1.5 release onwards. Below
+	 * implementation returns -EOPNOTSUPP error code for any older firmware versions.
+	 */
+	class = aie2_is_supported_msg(ctx->client->xdna->dev_handle, MSG_OP_CMD_CHAIN_NPU) ?
+		CMD_CHAIN_CLASS_PREEMPT : CMD_CHAIN_CLASS_NON_PREEMPT;
+	op = amdxdna_cmd_get_op(cmd_abo);
+	if (op == ERT_CMD_CHAIN)
+		ret = aie2_cmdlist_multi_execbuf(ctx, job, class, aie2_sched_cmdlist_resp_handler);
 	else if (force_cmdlist)
-		ret = aie2_cmdlist_single_execbuf(ctx, job, aie2_sched_cmdlist_resp_handler);
+		ret = aie2_cmdlist_single_execbuf(ctx, job, class, aie2_sched_cmdlist_resp_handler);
 	else
-		ret = aie2_execbuf(ctx, job, aie2_sched_resp_handler);
+		ret = aie2_execbuf(ctx, job, class, aie2_sched_resp_handler);
 
 out:
 	if (ret) {
@@ -570,6 +579,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 
 	aie2_calc_ctx_dpm(ndev, ctx);
 	aie2_pm_add_dpm_level(ndev, ctx->priv->req_dpm_level);
+	priv->active = true; /* Init context is counted as an activation */
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
