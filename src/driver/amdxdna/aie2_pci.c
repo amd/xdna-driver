@@ -1282,7 +1282,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].heap_usage = heap_usage;
 			tmp[hw_i].suspensions = ctx->priv->disconn_cnt;
 
-			if (ctx->priv->status == CTX_STATE_CONNECTED)
+			if (ctx->priv->active)
 				tmp[hw_i].state = AMDXDNA_CTX_STATE_ACTIVE;
 			else
 				tmp[hw_i].state = AMDXDNA_CTX_STATE_IDLE;
