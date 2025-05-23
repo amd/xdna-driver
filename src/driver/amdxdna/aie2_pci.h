@@ -219,6 +219,7 @@ struct amdxdna_ctx_priv {
 	atomic64_t			job_pending_cnt;
 	wait_queue_head_t		connect_waitq;
 	int				idle_cnt;
+	bool				active;
 	u64				disconn_cnt;
 	bool				force_yield;
 #define CTX_STATE_DISCONNECTED		0x0
