@@ -8,6 +8,7 @@
 #include "hwctx.h"
 #include "buffer.h"
 #include "core/common/shim/hwqueue_handle.h"
+#include <thread>
 
 namespace shim_xdna {
 
@@ -54,8 +55,51 @@ protected:
   wait_command(uint64_t seq, uint32_t timeout_ms) const;
 
 private:
-  virtual void
-  issue_command(cmd_buffer *) = 0;
+  enum class pending_cmd_type
+  {
+    io,
+    signal,
+    wait,
+  };
+  struct pending_cmd {
+    pending_cmd_type m_type;
+    const void* m_cmd = nullptr;
+    uint64_t m_last_seq;
+  };
+
+  virtual uint64_t
+  issue_command(const cmd_buffer *) = 0;
+
+  bool
+  pending_queue_empty() const;
+
+  bool
+  pending_queue_full() const;
+
+  uint64_t
+  pending_queue_consumer_idx() const;
+
+  uint64_t
+  pending_queue_producer_idx() const;
+
+  void
+  process_pending_queue();
+
+  void
+  push_to_pending_queue(std::unique_lock<std::mutex>& lock,
+    const void *cmd, pending_cmd_type type);
+
+  std::mutex m_mutex;
+  const uint64_t INVALID_SEQ = 0xffffffffffffffff;
+  uint64_t m_last_seq = INVALID_SEQ;
+
+  std::thread m_pending_thread;
+  bool m_pending_thread_stop = false;
+  std::array<pending_cmd, 1> m_pending;
+  std::condition_variable m_pending_producer_cv;
+  std::condition_variable m_pending_consumer_cv;
+  uint64_t m_pending_consumer = 0;
+  uint64_t m_pending_producer = 0;
 };
 
 }

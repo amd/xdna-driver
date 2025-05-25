@@ -45,12 +45,6 @@ private:
   submit_cmd(submit_cmd_arg& arg) const override;
 
   void
-  submit_dep(submit_sig_dep_arg& arg) const override;
-
-  void
-  submit_sig(submit_sig_dep_arg& arg) const override;
-
-  void
   wait_cmd_ioctl(wait_cmd_arg& arg) const override;
 
   void

@@ -39,10 +39,8 @@ private:
 
   volatile uint32_t *m_mapped_doorbell = nullptr;
 
-  std::mutex m_mutex;
-
-  void
-  issue_command(cmd_buffer *) override;
+  uint64_t
+  issue_command(const cmd_buffer *) override;
 
   void
   dump() const;

@@ -86,20 +86,6 @@ private:
 
   void
   import_bo(import_bo_arg& arg) const override;
-
-  void
-  wait_and_signal_host(uint32_t syncobj, uint64_t timepoint,
-    uint32_t host_syncobj) const;
-
-  void
-  wait_and_signal_guest(uint32_t ctx_syncobj, uint64_t cmd_seq,
-    uint32_t syncobj, uint64_t timepoint) const;
-
-  void
-  submit_dep(submit_sig_dep_arg& arg) const override;
-
-  void
-  submit_sig(submit_sig_dep_arg& arg) const override;
 };
 
 }

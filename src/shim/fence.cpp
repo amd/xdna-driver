@@ -69,21 +69,6 @@ wait_syncobj_done(const shim_xdna::pdev& dev, uint32_t sobj_hdl, uint64_t timepo
   dev.drv_ioctl(drv_ioctl_cmd::wait_syncobj, &wsobj);
 }
 
-std::unique_ptr<platform_cookie>
-submit_sig_dep_syncobj(const shim_xdna::pdev& dev, bool is_dep,
-  const hwctx& ctx, uint32_t sobj_hdl, uint64_t point)
-{
-  submit_sig_dep_arg ecmd = {
-    .ctx_handle = ctx.get_slotidx(),
-    .ctx_syncobj_handle = ctx.get_syncobj(),
-    .syncobj_handle = sobj_hdl,
-    .timepoint = point,
-    .cookie = nullptr,
-  };
-  dev.drv_ioctl(is_dep ? drv_ioctl_cmd::submit_dep : drv_ioctl_cmd::submit_sig, &ecmd);
-  return std::move(ecmd.cookie);
-}
-
 }
 
 namespace shim_xdna {
@@ -175,15 +160,6 @@ wait(uint32_t timeout_ms) const
   wait_syncobj_done(m_pdev, m_syncobj_hdl, st);
 }
 
-void
-fence::
-submit_wait(const hwctx& ctx) const
-{
-  auto st = signal_next_state();
-  shim_debug("Submitting wait for command fence %d@%ld", m_syncobj_hdl, st);
-  save_cookies(submit_sig_dep_syncobj(m_pdev, true, ctx, m_syncobj_hdl, st));
-}
-
 uint64_t
 fence::
 signal_next_state() const
@@ -206,34 +182,11 @@ signal() const
   signal_syncobj(m_pdev, m_syncobj_hdl, st);
 }
 
-void
+const std::string
 fence::
-submit_signal(const hwctx& ctx) const
+describe() const
 {
-  auto st = signal_next_state();
-  shim_debug("Submitting signal command fence %d@%ld", m_syncobj_hdl, st);
-  save_cookies(submit_sig_dep_syncobj(m_pdev, false, ctx, m_syncobj_hdl, st));
-}
-
-void
-fence::
-save_cookies(std::unique_ptr<platform_cookie> cookie) const
-{
-  auto& v = m_cookies;
-
-  if (!cookie)
-    return;
-
-  v.erase(
-    std::remove_if (
-      v.begin(),
-      v.end(),
-      [](const std::unique_ptr<platform_cookie>& c) { return !c->is_valid(); }
-    ),
-    v.end()
-  );
-  
-  v.push_back(std::move(cookie));
+  return std::to_string(m_syncobj_hdl) + "@" + std::to_string(m_state + 1);
 }
 
 }

@@ -41,7 +41,7 @@ xclbin_parser(const xrt::xclbin& xclbin)
     shim_err(EINVAL, "No valid DPU kernel found in xclbin");
   m_ops_per_cycle = aie_partition.ops_per_cycle;
   m_column_cnt = aie_partition.ncol;
-  print_info();
+  //print_info();
 }
 
 xclbin_parser::

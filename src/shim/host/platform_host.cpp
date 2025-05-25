@@ -255,36 +255,6 @@ submit_cmd(submit_cmd_arg& cmd_arg) const
 
 void
 platform_drv_host::
-submit_dep(submit_sig_dep_arg& cmd_arg) const
-{
-  wait_syncobj_available(dev_fd(), cmd_arg.syncobj_handle, cmd_arg.timepoint);
-
-  amdxdna_drm_exec_cmd arg = {};
-  arg.ctx = cmd_arg.ctx_handle;
-  arg.type = AMDXDNA_CMD_SUBMIT_DEPENDENCY;
-  arg.cmd_handles = reinterpret_cast<uintptr_t>(&cmd_arg.syncobj_handle);
-  arg.args = reinterpret_cast<uintptr_t>(&cmd_arg.timepoint);
-  arg.cmd_count = 1;
-  arg.arg_count = 1;
-  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
-}
-
-void
-platform_drv_host::
-submit_sig(submit_sig_dep_arg& cmd_arg) const
-{
-  amdxdna_drm_exec_cmd arg = {};
-  arg.ctx = cmd_arg.ctx_handle;
-  arg.type = AMDXDNA_CMD_SUBMIT_SIGNAL;
-  arg.cmd_handles = cmd_arg.syncobj_handle;
-  arg.args = cmd_arg.timepoint;
-  arg.cmd_count = 1;
-  arg.arg_count = 1;
-  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_EXEC_CMD, &arg);
-}
-
-void
-platform_drv_host::
 wait_cmd_ioctl(wait_cmd_arg& cmd_arg) const
 {
   amdxdna_drm_wait_cmd wcmd = {

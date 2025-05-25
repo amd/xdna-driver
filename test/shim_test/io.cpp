@@ -523,6 +523,7 @@ run(const std::vector<xrt_core::fence_handle*>& wait_fences,
   hwq->submit_command(chdl);
   for (const auto& fence : signal_fences)
     hwq->submit_signal(fence);
+  //sleep(1);
   hwq->wait_command(chdl, 5000);
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_COMPLETED)

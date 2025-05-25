@@ -12,12 +12,16 @@ namespace shim_xdna {
 hwq::
 hwq(const device& device)
   : m_pdev(device.get_pdev())
+  , m_pending_thread{&hwq::process_pending_queue, this}
 {
 }
 
 hwq::
 ~hwq()
 {
+  m_pending_thread_stop = true;
+  m_pending_consumer_cv.notify_one();
+  m_pending_thread.join();
 }
 
 void
@@ -32,14 +36,6 @@ hwq::
 unbind_hwctx()
 {
   m_ctx = nullptr;
-}
-
-void
-hwq::
-submit_command(xrt_core::buffer_handle *cmd)
-{
-  auto boh = static_cast<cmd_buffer*>(cmd);
-  issue_command(boh);
 }
 
 int
@@ -101,18 +97,132 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 
 void
 hwq::
+push_to_pending_queue(std::unique_lock<std::mutex>& lock,
+  const void *cmd, pending_cmd_type type)
+{
+  m_pending_producer_cv.wait(lock, [this]() { return !pending_queue_full(); });
+  pending_cmd& c = m_pending[pending_queue_producer_idx()];
+  c.m_type = type;
+  c.m_cmd = cmd;
+  c.m_last_seq = m_last_seq;
+  m_pending_producer++;
+  m_pending_consumer_cv.notify_one();
+}
+
+void
+hwq::
+submit_command(xrt_core::buffer_handle *cmd)
+{
+  std::unique_lock<std::mutex> lock(m_mutex);
+  auto boh = static_cast<cmd_buffer*>(cmd);
+  boh->set_cmd_seq(++m_last_seq);
+  shim_debug("Submitting command (%ld)", boh->get_cmd_seq());
+  push_to_pending_queue(lock, boh, pending_cmd_type::io);
+}
+
+void
+hwq::
 submit_wait(const xrt_core::fence_handle* f)
 {
+  std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
-  fh->submit_wait(*m_ctx);
+  shim_debug("Submitting wait fence %s", fh->describe().c_str());
+  push_to_pending_queue(lock, fh, pending_cmd_type::wait);
 }
 
 void
 hwq::
 submit_signal(const xrt_core::fence_handle* f)
 {
+  std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
-  fh->submit_signal(*m_ctx);
+  shim_debug("Submitting signal fence %s", fh->describe().c_str());
+  push_to_pending_queue(lock, fh, pending_cmd_type::signal);
+}
+
+bool
+hwq::
+pending_queue_empty() const
+{
+  return m_pending_consumer == m_pending_producer;
+}
+
+bool
+hwq::
+pending_queue_full() const
+{
+  return (m_pending_producer - m_pending_consumer) == m_pending.size();
+}
+
+uint64_t
+hwq::
+pending_queue_consumer_idx() const
+{
+  return (m_pending_consumer & (m_pending.size() - 1));
+}
+
+uint64_t
+hwq::
+pending_queue_producer_idx() const
+{
+  return (m_pending_producer & (m_pending.size() - 1));
+}
+
+void
+hwq::
+process_pending_queue()
+{
+  shim_debug("Pending queue thread started!");
+
+  std::unique_lock<std::mutex> lock(m_mutex);
+
+  while (!m_pending_thread_stop) {
+
+    // Process all pending commands in queued order.
+    while (!pending_queue_empty()) {
+      // Releasing the lock, allow others to add to the pending queue while
+      // it is being processed. The pending cmd is processed in this single
+      // thread, so no need for any locking.
+      lock.unlock();
+
+      pending_cmd& c = m_pending[pending_queue_consumer_idx()];
+      switch (c.m_type) {
+      case pending_cmd_type::io: {
+        auto boh = reinterpret_cast<const cmd_buffer*>(c.m_cmd);
+        auto seq = issue_command(boh);
+        if (seq != boh->get_cmd_seq())
+          shim_err(EINVAL, "Command sequence does not match!");
+        break;
+      }
+      case pending_cmd_type::signal: {
+        auto fh = reinterpret_cast<const xrt_core::fence_handle*>(c.m_cmd);
+        if (c.m_last_seq != INVALID_SEQ)
+          wait_command(c.m_last_seq, 0);
+        fh->signal();
+        break;
+      }
+      case pending_cmd_type::wait: {
+        auto fh = reinterpret_cast<const xrt_core::fence_handle*>(c.m_cmd);
+        fh->wait(0);
+        break;
+      }
+      default:
+        shim_err(EINVAL, "Bad pending cmd!");
+      }
+
+      // Acquiring the lock before publishing pending queue processing progress.
+      lock.lock();
+      m_pending_consumer++;
+    }
+    // In case someone is waiting for adding more cmds.
+    m_pending_producer_cv.notify_one();
+
+    // Wait for new pending commands or quit indicator.
+    m_pending_consumer_cv.wait(lock,
+      [this]() { return m_pending_thread_stop || !pending_queue_empty(); });
+  }
+
+  shim_debug("Pending queue thread stopped!");
 }
 
 }

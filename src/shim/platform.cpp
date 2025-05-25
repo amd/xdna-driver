@@ -193,12 +193,6 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
   case drv_ioctl_cmd::submit_cmd:
     submit_cmd(*static_cast<submit_cmd_arg*>(cmd_arg));
     break;
-  case drv_ioctl_cmd::submit_dep:
-    submit_dep(*static_cast<submit_sig_dep_arg*>(cmd_arg));
-    break;
-  case drv_ioctl_cmd::submit_sig:
-    submit_sig(*static_cast<submit_sig_dep_arg*>(cmd_arg));
-    break;
   case drv_ioctl_cmd::wait_cmd_ioctl:
     wait_cmd_ioctl(*static_cast<wait_cmd_arg*>(cmd_arg));
     break;

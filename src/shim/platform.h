@@ -39,8 +39,6 @@ enum class drv_ioctl_cmd {
   import_bo,
 
   submit_cmd,
-  submit_dep,
-  submit_sig,
   wait_cmd_ioctl,
   wait_cmd_syncobj,
 
@@ -133,14 +131,6 @@ struct submit_cmd_arg {
   bo_id cmd_bo;
   const std::set<bo_id>& arg_bos;
   uint64_t seq;
-};
-
-struct submit_sig_dep_arg {
-  uint32_t ctx_handle;
-  uint32_t ctx_syncobj_handle;
-  uint32_t syncobj_handle;
-  uint64_t timepoint;
-  std::unique_ptr<platform_cookie> cookie;
 };
 
 struct wait_cmd_arg {
@@ -259,14 +249,6 @@ private:
 
   virtual void
   submit_cmd(submit_cmd_arg& arg) const
-  { shim_not_supported_err(__func__); }
-
-  virtual void
-  submit_dep(submit_sig_dep_arg& arg) const
-  { shim_not_supported_err(__func__); }
-
-  virtual void
-  submit_sig(submit_sig_dep_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void
