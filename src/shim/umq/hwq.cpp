@@ -367,7 +367,9 @@ issue_command(const cmd_buffer *cmd_bo)
   // Completion signal area has to be a full WORD, we utilze the command_bo
   uint64_t comp = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
 
-  return issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
+  auto seq = issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
+  shim_debug("Submitted command (%ld)", seq);
+  return seq;
 }
 
 void

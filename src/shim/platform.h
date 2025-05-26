@@ -16,16 +16,6 @@
 
 namespace shim_xdna {
 
-// Can be returned to caller for resource tracking.
-// Resource tracked needs to be implemented in inherited class.
-// Object can't be reused. When it becomes invalid, it stays invalid for ever.
-// Caller may delete object at any time, if it is not valid.
-class platform_cookie {
-public:
-  virtual bool
-  is_valid() const = 0;
-};
-
 enum class drv_ioctl_cmd {
   create_ctx,
   destroy_ctx,

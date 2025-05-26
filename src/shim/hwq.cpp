@@ -19,8 +19,11 @@ hwq(const device& device)
 hwq::
 ~hwq()
 {
-  m_pending_thread_stop = true;
-  m_pending_consumer_cv.notify_one();
+  {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_pending_thread_stop = true;
+  }
+  m_pending_consumer_cv.notify_all();
   m_pending_thread.join();
 }
 
@@ -91,7 +94,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
       return 1;
 
   auto boh = static_cast<cmd_buffer*>(cmd);
-  auto seq = boh->get_cmd_seq();
+  auto seq = boh->wait_for_submitted();
   return wait_command(seq, timeout_ms);
 }
 
@@ -106,7 +109,7 @@ push_to_pending_queue(std::unique_lock<std::mutex>& lock,
   c.m_cmd = cmd;
   c.m_last_seq = m_last_seq;
   m_pending_producer++;
-  m_pending_consumer_cv.notify_one();
+  m_pending_consumer_cv.notify_all();
 }
 
 void
@@ -115,9 +118,9 @@ submit_command(xrt_core::buffer_handle *cmd)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
   auto boh = static_cast<cmd_buffer*>(cmd);
-  boh->set_cmd_seq(++m_last_seq);
-  shim_debug("Submitting command (%ld)", boh->get_cmd_seq());
   push_to_pending_queue(lock, boh, pending_cmd_type::io);
+  boh->enqueued(++m_last_seq);
+  shim_debug("Enqueued command (%ld)", m_last_seq);
 }
 
 void
@@ -190,8 +193,7 @@ process_pending_queue()
       case pending_cmd_type::io: {
         auto boh = reinterpret_cast<const cmd_buffer*>(c.m_cmd);
         auto seq = issue_command(boh);
-        if (seq != boh->get_cmd_seq())
-          shim_err(EINVAL, "Command sequence does not match!");
+        boh->submitted(seq);
         break;
       }
       case pending_cmd_type::signal: {
@@ -215,7 +217,7 @@ process_pending_queue()
       m_pending_consumer++;
     }
     // In case someone is waiting for adding more cmds.
-    m_pending_producer_cv.notify_one();
+    m_pending_producer_cv.notify_all();
 
     // Wait for new pending commands or quit indicator.
     m_pending_consumer_cv.wait(lock,

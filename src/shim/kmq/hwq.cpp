@@ -27,6 +27,7 @@ issue_command(const cmd_buffer *cmd_bo)
     .arg_bos = cmd_bo->get_arg_bo_ids(),
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::submit_cmd, &ecmd);
+  shim_debug("Submitted command (%ld)", ecmd.seq);
   return ecmd.seq;
 }
 

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
+// Disable debug print in this file.
+#undef XDNA_SHIM_DEBUG
+
 #include "buffer.h"
 #include "shim_debug.h"
 #include "core/common/config_reader.h"
@@ -424,16 +427,31 @@ get_arg_bo_ids() const
 
 void
 cmd_buffer::
-set_cmd_seq(uint64_t seq)
+enqueued(uint64_t seq)
 {
+  std::unique_lock<std::mutex> lg(m_submission_lock);
   m_cmd_seq = seq;
+  m_submitted = false;
 }
 
 uint64_t
 cmd_buffer::
-get_cmd_seq() const
+wait_for_submitted() const
 {
+  std::unique_lock<std::mutex> lg(m_submission_lock);
+  m_submission_cv.wait(lg, [this]() { return m_submitted; });
   return m_cmd_seq;
+}
+
+void
+cmd_buffer::
+submitted(uint64_t seq) const
+{
+  std::unique_lock<std::mutex> lg(m_submission_lock);
+  if (seq != m_cmd_seq)
+    shim_err(EINVAL, "Submitted seq not matching enqueue seq!");
+  m_submitted = true;
+  m_submission_cv.notify_all();
 }
 
 void

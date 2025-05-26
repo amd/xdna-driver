@@ -9,7 +9,6 @@
 #include <poll.h>
 #include <cstring>
 #include <iostream>
-#include <thread>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <drm/virtgpu_drm.h>
@@ -155,6 +154,7 @@ hcall_no_wait(int dev_fd, void *buf, size_t size)
 void
 hcall_wait(int dev_fd, void *buf, size_t size)
 {
+  auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
   drm_virtgpu_execbuffer exec = {};
 
   exec.flags = VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX;
@@ -163,10 +163,12 @@ hcall_wait(int dev_fd, void *buf, size_t size)
   exec.fence_fd = 0;
   exec.ring_idx = 1;
   try {
+    shim_debug("%s HCALL IOCTL started", hcall_cmd2name(req->cmd).c_str());
     ioctl(dev_fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
+    shim_debug("%s HCALL IOCTL ended", hcall_cmd2name(req->cmd).c_str());
     sync_wait(exec.fence_fd, -1);
+    shim_debug("%s HCALL IOCTL wait ended", hcall_cmd2name(req->cmd).c_str());
   } catch (const xrt_core::system_error& e) {
-    auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
     shim_err(e.get_code(), "%s HCALL failed: %s", hcall_cmd2name(req->cmd).c_str(), e.what());
   }
   close(exec.fence_fd);
