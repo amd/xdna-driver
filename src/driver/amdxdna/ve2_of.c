@@ -82,12 +82,11 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
-		xdna->dev_handle = NULL;
-		goto err;
+		return ret;
 	}
+	
 	XDNA_DBG(xdna, "aie load %s completed", xdna_hdl->priv->fw_path);
-err:
-	return ret;
+	return 0;
 }
 
 static void ve2_fini(struct amdxdna_dev *xdna)
