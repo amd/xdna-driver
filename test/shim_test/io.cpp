@@ -326,6 +326,8 @@ sync_before_run()
     case IO_TEST_BO_RESTORE_INSTRUCTION:
     case IO_TEST_BO_PARAMETERS:
     case IO_TEST_BO_MC_CODE:
+    case IO_TEST_BO_CTRL_PKT_PM:
+    case IO_TEST_BO_SCRATCH_PAD:
       ibo->tbo->get()->sync(buffer_handle::direction::host2device, ibo->tbo->size(), 0);
       break;
     default:

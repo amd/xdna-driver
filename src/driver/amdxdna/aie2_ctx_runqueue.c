@@ -127,6 +127,8 @@ part_ctx_dispatch(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 
 	ctx->priv->status = CTX_STATE_DISPATCHED;
 	ctx->priv->part = part;
+	ctx->priv->active = true; /* Dispatch context is counted as an activation */
+	ctx->priv->idle_cnt = 0;
 	XDNA_DBG(ctx->client->xdna, "%s dispatched, priority queue %d", ctx->name, prio_q);
 }
 
@@ -157,6 +159,8 @@ static bool part_handle_idle_ctx(struct aie2_partition *part, bool force)
 				 ctx->name, ctx->priv->idle_cnt);
 			ctx->priv->force_yield = true;
 			ctx->priv->status = CTX_STATE_DISCONNECTING;
+			ctx->priv->active = false;
+			ctx->priv->idle_cnt = 0;
 			queue_work(part->rq->work_q, &ctx->yield_work);
 			found = true;
 		}
@@ -850,11 +854,23 @@ bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq)
 {
 	struct aie2_partition *part;
 	struct amdxdna_dev *xdna;
+	struct amdxdna_ctx *ctx;
 	bool found = false;
 	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(ctx, &rq->disconn_list, entry) {
+		if (!ctx->priv->active)
+			continue;
+
+		ctx->priv->idle_cnt++;
+		if (ctx->priv->idle_cnt == RQ_CTX_IDLE_COUNT) {
+			ctx->priv->active = false;
+			ctx->priv->idle_cnt = 0;
+		}
+	}
+
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
 		if (!part_handle_idle_ctx(part, false))

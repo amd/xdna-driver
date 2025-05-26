@@ -9,6 +9,7 @@
 #include "xrt/experimental/xrt_ext.h"
 #include "xrt/experimental/xrt_module.h"
 #include "multi-layer.h"
+#include "resnet50.h"
 
 #include <fstream>
 #include <algorithm>
@@ -199,7 +200,6 @@ read_bin_file(std::string& filename, TEST_BO& test_bo)
 {
   uint32_t value;
   int i = 0;
-  char ch;
 
   std::ifstream infile(filename, std::ios::binary);
   if (!infile)
@@ -211,6 +211,26 @@ read_bin_file(std::string& filename, TEST_BO& test_bo)
     i++;
   }
   infile.close();
+}
+
+template <typename TEST_BO>
+void
+read_txt_file(std::string& filename, TEST_BO& test_bo)
+{
+  int i = 0;
+
+  std::ifstream infile;
+  infile.open(filename);
+  if (!infile.is_open())
+    throw std::runtime_error("Unable to open .txt file");
+
+  auto p = test_bo.map();
+  for (int i = 0; i < test_bo.size()/sizeof(uint32_t); i++) {
+    uint32_t value;
+    infile >> std::hex >> value;
+    p[i] = value;
+  }
+    infile.close();
 }
 
 void
@@ -500,6 +520,87 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
   check_umq_resnet50_result(bo_ofm.map(), ofm_path);
+}
+
+void
+TEST_xrt_umq_resnet50_full(int device_index, arg_type& arg)
+{
+  std::vector<xrt_bo> wts_v;
+  auto device = xrt::device{device_index};
+
+  std::string ifm_path = local_path("npu3_workspace/ifm32.txt");
+  std::string wts_path = local_path("npu3_workspace/wts32.txt");
+  std::string ofm_path = local_path("npu3_workspace/ofm32.txt");
+
+  const uint32_t IFM_BYTE_SIZE = 233472;
+  const uint32_t WTS_BYTE_SIZE = 25704832;
+  const uint32_t OFM_BYTE_SIZE = 1024;
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  read_txt_file<xrt_bo>(ifm_path, bo_ifm);
+
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/resnet50.xclbin"));
+  auto uuid = device.register_xclbin(xclbin);
+
+  xrt::elf elf{local_path("npu3_workspace/resnet50.elf")};
+  xrt::module mod{elf};
+
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::run run{kernel};
+
+  run.set_arg(54, bo_ifm.get());
+
+  std::ifstream wts_ifs(wts_path);
+  if (!wts_ifs.is_open())
+    throw std::runtime_error("Unable to open weights file: " + wts_path);
+
+  auto p = bo_wts.map();
+  uint32_t tmp;
+  int i = 0;
+  while (wts_ifs >> std::hex >> tmp) {
+    p[i] = tmp;
+    i++;
+  }
+  wts_ifs.close();
+
+  for (int i = 0; i < 54; i++) {
+    run.set_arg(i, bo_wts.get().address() + (wts_offset[i] * sizeof(uint32_t)));
+  }
+
+  run.set_arg(55, bo_ofm.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(3600000 /* 1 hour, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  auto ofm = bo_ofm.map();
+  std::ifstream ofm_ifs;
+  ofm_ifs.open(ofm_path);
+  if (!ofm_ifs.is_open()) {
+    std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
+  }
+  int err = 0;
+  for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+    uint32_t gld;
+    ofm_ifs >> std::hex >> gld;
+    if (gld != ofm[i]) {
+      std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
+      err++;
+    }
+  }
+  ofm_ifs.close();
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
 }
 
 void
@@ -852,6 +953,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
   test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
+  test_case{ "npu3 xrt resnet50 model", TEST_xrt_umq_resnet50_full, {} },
 };
 
 }

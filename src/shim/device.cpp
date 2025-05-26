@@ -335,6 +335,7 @@ struct partition_info
       new_entry.instruction_mem = entry.heap_usage;
       new_entry.pasid = entry.pasid;
       new_entry.suspensions = entry.suspensions;
+      new_entry.is_suspended = entry.state == AMDXDNA_CTX_STATE_IDLE;
       output.push_back(std::move(new_entry));
     }
     return output;
