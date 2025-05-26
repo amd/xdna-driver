@@ -7,7 +7,7 @@
 #include "ve2_of.h"
 
 const struct amdxdna_dev_priv ve2_dev_priv = {
-	.fw_path        = "ve2.elf",
+	.fw_path        = "amdnpu/ve2.elf",
 };
 
 const struct amdxdna_dev_info dev_ve2_info = {
