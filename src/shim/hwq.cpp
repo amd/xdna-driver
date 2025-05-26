@@ -117,10 +117,11 @@ hwq::
 submit_command(xrt_core::buffer_handle *cmd)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
+  ++m_last_seq;
   auto boh = static_cast<cmd_buffer*>(cmd);
+  shim_debug("Enqueuing command (%ld)", m_last_seq);
   push_to_pending_queue(lock, boh, pending_cmd_type::io);
-  boh->enqueued(++m_last_seq);
-  shim_debug("Enqueued command (%ld)", m_last_seq);
+  boh->enqueued(m_last_seq);
 }
 
 void
@@ -129,7 +130,7 @@ submit_wait(const xrt_core::fence_handle* f)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
-  shim_debug("Submitting wait fence %s", fh->describe().c_str());
+  shim_debug("Enqueuing wait fence %s", fh->describe().c_str());
   push_to_pending_queue(lock, fh, pending_cmd_type::wait);
 }
 
@@ -139,7 +140,7 @@ submit_signal(const xrt_core::fence_handle* f)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
-  shim_debug("Submitting signal fence %s", fh->describe().c_str());
+  shim_debug("Enqueuing signal fence %s", fh->describe().c_str());
   push_to_pending_queue(lock, fh, pending_cmd_type::signal);
 }
 

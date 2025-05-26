@@ -2,7 +2,7 @@
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 // Disable debug print in this file.
-#undef XDNA_SHIM_DEBUG
+//#undef XDNA_SHIM_DEBUG
 
 #include "buffer.h"
 #include "shim_debug.h"

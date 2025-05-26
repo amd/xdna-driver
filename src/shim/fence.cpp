@@ -186,7 +186,7 @@ const std::string
 fence::
 describe() const
 {
-  return std::to_string(m_syncobj_hdl) + "@" + std::to_string(m_state + 1);
+  return std::to_string(m_syncobj_hdl) + "@" + std::to_string(get_next_state());
 }
 
 }

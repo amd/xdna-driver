@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
+// Disable debug print in this file.
+//#undef XDNA_SHIM_DEBUG
+
 #include "../shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_proto.h"
