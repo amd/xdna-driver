@@ -259,15 +259,16 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
   xrt::run run{kernel};
 
+  // Setting args for patching control code buffer
+  run.set_arg(0, bo_ifm.get());
+  run.set_arg(1, bo_wts.get());
+  run.set_arg(2, bo_ofm.get());
+
   // Send the command to device and wait for it to complete
   for (int i = 0 ; i < c_rounds; i++) {
     std::cout << "c_rounds: " << i << std::endl;
     //cleanup ofm on each run
     init_umq_ofm_bo(bo_ofm);
-    // Setting args for patching control code buffer
-    run.set_arg(0, bo_ifm.get());
-    run.set_arg(1, bo_wts.get());
-    run.set_arg(2, bo_ofm.get());
 
     run.start();
     auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
