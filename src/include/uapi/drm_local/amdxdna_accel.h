@@ -541,6 +541,20 @@ struct amdxdna_drm_query_firmware_version {
 };
 
 /**
+ * struct amdxdna_drm_query_git_firmware_version - Query the git hash and version of the firmware
+ * @major:  Major version number
+ * @minor:  Minor version number
+ * @date:  Build date of the firmware
+ * @git_hash:  Git commit ID used to build the firmware version
+ */
+struct amdxdna_drm_query_git_firmware_version {
+	__u8 major;
+	__u8 minor;
+	__u8 date[14];
+	__u8 git_hash[48];
+};
+
+/**
  * struct amdxdna_drm_get_resource_info - Get info on some resources within NPU
  * @npu_clk_max: max H-Clocks
  * @npu_tops_max: max TOPs
@@ -613,6 +627,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE		11
 #define	DRM_AMDXDNA_QUERY_RESOURCE_INFO			12
 #define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
+#define	DRM_AMDXDNA_QUERY_GIT_FIRMWARE_VERSION		14
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
