@@ -37,16 +37,16 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 
 	/* request all cols */
 	xaie_dev = aie_partition_request(&request);
-        if (IS_ERR(xaie_dev)) {
+	if (IS_ERR(xaie_dev)) {
 		XDNA_ERR(xdna, "aie partition request failed");
 		ret = -ENODEV;
 		goto out;
 	}
-	XDNA_DBG(xdna, "aie partiton request succeeded: 0x%x", request.partition_id);
+	XDNA_DBG(xdna, "aie partition request succeeded: 0x%x", request.partition_id);
 
 	args.locs = NULL;
 	args.num_tiles = 0;
-	args.init_opts = AIE_PART_INIT_OPT_DEFAULT;
+	args.init_opts = AIE_PART_INIT_OPT_DEFAULT ^ AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	ret = aie_partition_initialize(xaie_dev, &args);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
@@ -84,7 +84,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
 		return ret;
 	}
-	
+
 	XDNA_DBG(xdna, "aie load %s completed", xdna_hdl->priv->fw_path);
 	return 0;
 }
@@ -96,4 +96,6 @@ static void ve2_fini(struct amdxdna_dev *xdna)
 const struct amdxdna_dev_ops ve2_ops = {
 	.init		= ve2_init,
 	.fini		= ve2_fini,
+	.ctx_init	= ve2_hwctx_init,
+	.ctx_fini	= ve2_hwctx_fini,
 };

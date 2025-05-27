@@ -176,7 +176,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_fil
 	abo = to_xdna_obj(gobj);
 
 	/* For now we only support CMA memory*/
-	bo_phyaddr = (uint64_t)abo->base.dma_addr;
+	bo_phyaddr = (u64)abo->base.dma_addr;
 	bo_phyaddr += args->offset;
 
 	if (args->direction == SYNC_DIRECT_TO_DEVICE) {
