@@ -26,8 +26,9 @@
 namespace {
 
 using arg_type = const std::vector<uint64_t>;
-uint64_t s_rounds = 128;
-uint64_t m_rounds = 32;
+unsigned c_rounds = 1;
+unsigned s_rounds = 128;
+unsigned m_rounds = 32;
 std::string dpu = "nop";
 
 std::string program;
@@ -44,13 +45,14 @@ usage(const std::string& prog)
   std::cout << "Options:\n";
   std::cout << "\t" << "xrt_test" << " - run all test cases\n";
   std::cout << "\t" << "xrt_test" << " [test case ID separated by space] - run specified test cases\n";
-  std::cout << "\t" << "-s" << ": specify rounds for stress test (start n ctx, then run)\n";
-  std::cout << "\t" << "-m" << ": specify rounds for stress test (run n ctx)\n";
+  std::cout << "\t" << "-c" << ": n rounds in sequence within 1 hwctx (for vadd only)\n";
+  std::cout << "\t" << "-s" << ": n rounds in parallel within 1 hwctx\n";
+  std::cout << "\t" << "-m" << ": n hwctx in parallel\n";
   std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress test and multi-layer)\n";
   std::cout << "\t" << "-d" << ": specify dpu kernel (only effects stress test)\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
-  std::cout << "\t" << "Example Usage: " << "./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
-  std::cout << "\t" << "Run stress test with Vadd kernel and xclbin for 20 rounds\n";
+  std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
+  std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
   std::cout << std::endl;
 }
 
@@ -123,17 +125,35 @@ private:
 };
 
 template <typename TEST_BO>
-void init_umq_vadd_buffers(TEST_BO& ifm, TEST_BO& wts, TEST_BO& ofm)
+void init_umq_ifm_bo(TEST_BO& ifm)
 {
   auto p = ifm.map();
   for (uint32_t i = 0; i < ifm.size() / sizeof (uint32_t); i++)
     p[i] = i;
-  p = wts.map();
+}
+
+template <typename TEST_BO>
+void init_umq_wts_bo(TEST_BO& wts)
+{
+  auto p = wts.map();
   for (uint32_t i = 0; i < wts.size() / sizeof (uint32_t); i++)
     p[i] = i * 10000;
-  p = ofm.map();
+}
+
+template <typename TEST_BO>
+void init_umq_ofm_bo(TEST_BO& ofm)
+{
+  auto p = ofm.map();
   for (uint32_t i = 0; i < ofm.size() / sizeof (uint32_t); i++)
     p[i] = 0;
+}
+
+template <typename TEST_BO>
+void init_umq_vadd_buffers(TEST_BO& ifm, TEST_BO& wts, TEST_BO& ofm)
+{
+  init_umq_ifm_bo(ifm);
+  init_umq_wts_bo(wts);
+  init_umq_ofm_bo(ofm);
 }
 
 void check_umq_vadd_result(int *ifm, int *wts, int *ofm)
@@ -265,15 +285,21 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   run.set_arg(2, bo_ofm.get());
 
   // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  for (int i = 0 ; i < c_rounds; i++) {
+    std::cout << "c_rounds: " << i << std::endl;
+    //cleanup ofm on each run
+    init_umq_ofm_bo(bo_ofm);
 
-  // Check result
-  check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
+    run.start();
+    auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+    if (state == ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+    // Check result
+    check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
+  }
 }
 
 void
@@ -863,7 +889,7 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
 
 /* run.start n requests, then run.wait all of them */
 void
-TEST_xrt_stress_start(int device_index, arg_type& arg)
+TEST_xrt_stress_run(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
   unsigned round = s_rounds;
@@ -951,7 +977,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt core equivalence", TEST_xrt_umq_core_equivalence, {} },
   test_case{ "npu3 xrt cascade 4 kernel 2 layer", TEST_xrt_umq_cascade_4ker_2lay, {} },
   test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
-  test_case{ "npu3 xrt stress - start", TEST_xrt_stress_start, {s_rounds} },
+  test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
   test_case{ "npu3 xrt resnet50 model", TEST_xrt_umq_resnet50_full, {} },
 };
@@ -1017,23 +1043,23 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":s:m:x:d:h")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:h")) != -1) {
       switch (option) {
+        case 'c': {
+          val = std::stoi(optarg);
+	  std::cout << "Using c_rounds: " << val << std::endl;
+	  c_rounds = val;
+	  break;
+        }
 	case 's': {
 	  val = std::stoi(optarg);
-	  if (val > 128 || val < 0 ) {
-	    std::cout << "Invalid number of -s runs, max 128" << std::endl;
-	    return 1;
-	  }
+	  std::cout << "Using s_rounds: " << val << std::endl;
 	  s_rounds = val;
 	  break;
 	}
 	case 'm': {
 	  val = std::stoi(optarg);
-	  if (val > 32 || val < 0 ) {
-            std::cout << "Invalid number of -m runs, max 32" << std::endl;
-            return 1;
-          }
+	  std::cout << "Using m_rounds: " << val << std::endl;
 	  m_rounds = val;
 	  break;
 	}
@@ -1060,6 +1086,7 @@ main(int argc, char **argv)
 	  return 0;
 	case '?':
       	  std::cout << "Unknown option: " << static_cast<char>(optopt) << std::endl;
+	  usage(program);
       	  return 1;
     	case ':':
       	  std::cout << "Missing value for option: " << argv[optind-1] << std::endl;
