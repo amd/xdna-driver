@@ -734,7 +734,6 @@ std::vector<test_case> test_list {
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
-  // Disable for now. Require changes in XRT for argument patching.
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 8 }
   },
@@ -899,10 +898,10 @@ main(int argc, char **argv)
       if (xclbin) {
         xclbin_path = optarg;
         std::cout << "Using xclbin file: " << xclbin_path << std::endl;
-	      break;
+        break;
       } else {
         std::cout << "Failed to open xclbin file: " << optarg << std::endl;
-	      return 1;
+        return 1;
       }
     }
     case 'k': {
