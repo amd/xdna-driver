@@ -23,7 +23,7 @@ hwq::
     std::unique_lock<std::mutex> lock(m_mutex);
     m_pending_thread_stop = true;
   }
-  m_pending_consumer_cv.notify_all();
+  m_pending_consumer_cv.notify_one();
   m_pending_thread.join();
 }
 
@@ -109,7 +109,7 @@ push_to_pending_queue(std::unique_lock<std::mutex>& lock,
   c.m_cmd = cmd;
   c.m_last_seq = m_last_seq;
   m_pending_producer++;
-  m_pending_consumer_cv.notify_all();
+  m_pending_consumer_cv.notify_one();
 }
 
 void
