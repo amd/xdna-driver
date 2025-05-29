@@ -53,7 +53,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct app_health_report_v1 *report;
 	struct amdxdna_dev_hdl *ndev;
-	const size_t size = 0x1000;
+	const size_t size = SZ_4M;
 	u64 comp = ctx->completed;
 	u64 sub = ctx->submitted;
 	dma_addr_t dma_addr;
@@ -70,6 +70,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		return;
 	}
 
+	WARN_ONCE(!IS_ALIGNED(dma_addr, SZ_4M), "app health buffer needs to be 4M aligned");
 	drm_clflush_virt_range(buff, size); /* device can access */
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_get_app_health(ndev, ctx->priv->id, dma_addr, size);

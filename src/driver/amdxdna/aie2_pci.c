@@ -998,6 +998,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 {
 	struct amdxdna_drm_query_telemetry_header header, *tmp;
 	struct amdxdna_dev *xdna = client->xdna;
+	const int total_size = SZ_4M;
 	size_t aligned_sz, offset;
 	struct aie_version ver;
 	dma_addr_t dma_addr;
@@ -1015,11 +1016,13 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 	}
 
 	aligned_sz = PAGE_ALIGN(args->buffer_size);
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, aligned_sz, &dma_addr,
+	buff = dma_alloc_noncoherent(xdna->ddev.dev, total_size, &dma_addr,
 				     DMA_FROM_DEVICE, GFP_KERNEL);
 	if (!buff)
 		return -ENOMEM;
 
+	WARN_ONCE(!IS_ALIGNED(dma_addr, SZ_4M), "telemetry buffer needs to be 4M aligned");
+	WARN_ON(aligned_sz > total_size);
 	memset(buff, 0, aligned_sz);
 
 	drm_clflush_virt_range(buff, aligned_sz); /* device can access */
@@ -1056,7 +1059,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 		ret = -EFAULT;
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, aligned_sz, buff, dma_addr, DMA_FROM_DEVICE);
+	dma_free_noncoherent(xdna->ddev.dev, total_size, buff, dma_addr, DMA_FROM_DEVICE);
 	return ret;
 }
 

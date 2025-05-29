@@ -302,10 +302,11 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 total_col = ndev->total_col;
-	u32 total_size = ASYNC_BUF_SIZE * total_col;
 	struct async_events *events;
+	u32 total_size = SZ_4M;
 	int i, ret;
 
+	WARN_ON(ASYNC_BUF_SIZE * total_col > SZ_4M);
 	events = kzalloc(struct_size(events, event, total_col), GFP_KERNEL);
 	if (!events)
 		return -ENOMEM;
