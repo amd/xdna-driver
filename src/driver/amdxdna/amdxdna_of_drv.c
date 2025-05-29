@@ -9,6 +9,7 @@
 #include <drm/drm_managed.h>
 
 #include "amdxdna_of_drv.h"
+#include "ve2_res_solver.h"
 
 static const struct of_device_id amdxdna_of_table[] = {
 	{ .compatible = "amdxdna,ve2", .data = &dev_ve2_info },
@@ -19,6 +20,7 @@ MODULE_DEVICE_TABLE(of, amdxdna_of_table);
 
 static int amdxdna_of_probe(struct platform_device *pdev)
 {
+	struct init_config xrs_cfg = { 0 };
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *id;
 	struct amdxdna_dev *xdna;
@@ -69,6 +71,17 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 		}
 
 		XDNA_WARN(xdna, "DMA configuration downgraded to 32bit Mask\n");
+	}
+
+	xrs_cfg.ddev = &xdna->ddev;
+	xrs_cfg.total_col = XRS_MAX_COL;
+
+	if (xdna->dev_handle)
+		xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle || !xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialize resolver failed");
+		drm_dev_put(&xdna->ddev);
+		return -EINVAL;
 	}
 
 	return 0;

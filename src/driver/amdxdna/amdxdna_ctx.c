@@ -100,6 +100,9 @@ int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
 
+	if (!xdna->dev_info->ops->ctx_init)
+		return -EOPNOTSUPP;
+
 	ret = amdxdna_pm_resume_get(dev->dev);
 	if (ret)
 		goto exit;
