@@ -122,14 +122,11 @@ public:
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
 
 public:
-  // Today, sequence order is decided once enqueued.
   void
-  enqueued(uint64_t seq);
+  mark_enqueued() const;
 
-  // Passing in sequence number in HW queue.
-  // Should be the same as seq when enqueued.
   void
-  submitted(uint64_t seq) const;
+  mark_submitted(uint64_t seq) const;
 
   // Returning final sequence number in HW queue, which can be waited on.
   uint64_t
@@ -139,7 +136,8 @@ public:
   get_arg_bo_ids() const override;
 
 private:
-  uint64_t m_cmd_seq = 0;
+  // Valid only when m_submitted is true.
+  mutable uint64_t m_cmd_seq = 0;
   std::map< size_t, std::set<bo_id> > m_args_map;
   mutable std::mutex m_args_map_lock;
 

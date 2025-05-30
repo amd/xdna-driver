@@ -427,10 +427,9 @@ get_arg_bo_ids() const
 
 void
 cmd_buffer::
-enqueued(uint64_t seq)
+mark_enqueued() const
 {
   std::unique_lock<std::mutex> lg(m_submission_lock);
-  m_cmd_seq = seq;
   m_submitted = false;
 }
 
@@ -445,11 +444,10 @@ wait_for_submitted() const
 
 void
 cmd_buffer::
-submitted(uint64_t seq) const
+mark_submitted(uint64_t seq) const
 {
   std::unique_lock<std::mutex> lg(m_submission_lock);
-  if (seq != m_cmd_seq)
-    shim_err(EINVAL, "Submitted seq not matching enqueue seq!");
+  m_cmd_seq = seq;
   m_submitted = true;
   m_submission_cv.notify_all();
 }

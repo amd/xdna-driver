@@ -123,11 +123,10 @@ hwq::
 submit_command(xrt_core::buffer_handle *cmd)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
-  ++m_last_seq;
   auto boh = static_cast<cmd_buffer*>(cmd);
-  shim_debug("Enqueuing command (%ld)", m_last_seq);
+  shim_debug("Enqueuing command after command %ld", m_last_seq);
   push_to_pending_queue(lock, boh, 0, pending_cmd_type::io);
-  boh->enqueued(m_last_seq);
+  boh->mark_enqueued();
 }
 
 void
@@ -182,6 +181,7 @@ void
 hwq::
 process_pending_queue()
 {
+  uint64_t seq;
   shim_debug("Pending queue thread started!");
 
   std::unique_lock<std::mutex> lock(m_mutex);
@@ -203,8 +203,8 @@ process_pending_queue()
       switch (c.m_type) {
       case pending_cmd_type::io: {
         auto boh = reinterpret_cast<const cmd_buffer*>(c.m_cmd);
-        auto seq = issue_command(boh);
-        boh->submitted(seq);
+        seq = issue_command(boh);
+        boh->mark_submitted(seq);
         break;
       }
       case pending_cmd_type::signal: {
@@ -225,6 +225,8 @@ process_pending_queue()
       }
 
       lock.lock();
+      if (c.m_type == pending_cmd_type::io)
+        m_last_seq = seq;
       m_pending_consumer++;
       m_pending_producer_cv.notify_all();
     }
