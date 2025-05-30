@@ -64,6 +64,7 @@ private:
   struct pending_cmd {
     pending_cmd_type m_type;
     const void* m_cmd = nullptr;
+    uint64_t m_fence_state;
     uint64_t m_last_seq;
   };
 
@@ -87,19 +88,19 @@ private:
 
   void
   push_to_pending_queue(std::unique_lock<std::mutex>& lock,
-    const void *cmd, pending_cmd_type type);
+    const void *cmd, uint64_t fence_state, pending_cmd_type type);
 
   std::mutex m_mutex;
   const uint64_t INVALID_SEQ = 0xffffffffffffffff;
   uint64_t m_last_seq = INVALID_SEQ;
 
-  std::thread m_pending_thread;
   bool m_pending_thread_stop = false;
   std::array<pending_cmd, 1> m_pending;
   std::condition_variable m_pending_producer_cv;
   std::condition_variable m_pending_consumer_cv;
   uint64_t m_pending_consumer = 0;
   uint64_t m_pending_producer = 0;
+  std::thread m_pending_thread;
 };
 
 }

@@ -39,13 +39,19 @@ public:
   const std::string
   describe() const;
 
+  uint64_t
+  next_wait_state() const;
+
+  uint64_t
+  next_signal_state() const;
+
+  void
+  wait(uint64_t state) const;
+
+  void
+  signal(uint64_t state) const;
+
 private:
-  uint64_t
-  wait_next_state() const;
-
-  uint64_t
-  signal_next_state() const;
-
   const pdev& m_pdev;
   const std::unique_ptr<xrt_core::shared_handle> m_import;
   uint32_t m_syncobj_hdl;

@@ -12,8 +12,10 @@ namespace shim_xdna {
 hwq::
 hwq(const device& device)
   : m_pdev(device.get_pdev())
-  , m_pending_thread{&hwq::process_pending_queue, this}
 {
+  // Pending queue processing thread should be created as the last step
+  // after all other member variables have been initialized.
+  m_pending_thread = std::thread(&hwq::process_pending_queue, this);
 }
 
 hwq::
@@ -101,12 +103,16 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 void
 hwq::
 push_to_pending_queue(std::unique_lock<std::mutex>& lock,
-  const void *cmd, pending_cmd_type type)
+  const void *cmd, uint64_t fence_state, pending_cmd_type type)
 {
+  if (m_pending_thread_stop)
+    shim_err(EINVAL, "Enqueuing when processing thread is stopped");
+
   m_pending_producer_cv.wait(lock, [this]() { return !pending_queue_full(); });
   pending_cmd& c = m_pending[pending_queue_producer_idx()];
   c.m_type = type;
   c.m_cmd = cmd;
+  c.m_fence_state = fence_state;
   c.m_last_seq = m_last_seq;
   m_pending_producer++;
   m_pending_consumer_cv.notify_one();
@@ -120,7 +126,7 @@ submit_command(xrt_core::buffer_handle *cmd)
   ++m_last_seq;
   auto boh = static_cast<cmd_buffer*>(cmd);
   shim_debug("Enqueuing command (%ld)", m_last_seq);
-  push_to_pending_queue(lock, boh, pending_cmd_type::io);
+  push_to_pending_queue(lock, boh, 0, pending_cmd_type::io);
   boh->enqueued(m_last_seq);
 }
 
@@ -131,7 +137,7 @@ submit_wait(const xrt_core::fence_handle* f)
   std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
   shim_debug("Enqueuing wait fence %s", fh->describe().c_str());
-  push_to_pending_queue(lock, fh, pending_cmd_type::wait);
+  push_to_pending_queue(lock, fh, fh->next_wait_state(), pending_cmd_type::wait);
 }
 
 void
@@ -141,7 +147,7 @@ submit_signal(const xrt_core::fence_handle* f)
   std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
   shim_debug("Enqueuing signal fence %s", fh->describe().c_str());
-  push_to_pending_queue(lock, fh, pending_cmd_type::signal);
+  push_to_pending_queue(lock, fh, fh->next_signal_state(), pending_cmd_type::signal);
 }
 
 bool
@@ -180,10 +186,14 @@ process_pending_queue()
 
   std::unique_lock<std::mutex> lock(m_mutex);
 
-  while (!m_pending_thread_stop) {
+  while (!(m_pending_thread_stop && pending_queue_empty())) {
+
+    // Wait for new pending commands or quit indicator.
+    m_pending_consumer_cv.wait(lock,
+      [this]() { return m_pending_thread_stop || !pending_queue_empty(); });
 
     // Process all pending commands in queued order.
-    while (!pending_queue_empty()) {
+    if (!pending_queue_empty()) {
       // Releasing the lock, allow others to add to the pending queue while
       // it is being processed. The pending cmd is processed in this single
       // thread, so no need for any locking.
@@ -198,31 +208,26 @@ process_pending_queue()
         break;
       }
       case pending_cmd_type::signal: {
-        auto fh = reinterpret_cast<const xrt_core::fence_handle*>(c.m_cmd);
+        auto fh = reinterpret_cast<const fence*>(c.m_cmd);
         if (c.m_last_seq != INVALID_SEQ)
           wait_command(c.m_last_seq, 0);
-        fh->signal();
+        fh->signal(c.m_fence_state);
         break;
       }
       case pending_cmd_type::wait: {
-        auto fh = reinterpret_cast<const xrt_core::fence_handle*>(c.m_cmd);
-        fh->wait(0);
+        auto fh = reinterpret_cast<const fence*>(c.m_cmd);
+        fh->wait(c.m_fence_state);
         break;
       }
       default:
         shim_err(EINVAL, "Bad pending cmd!");
+        break;
       }
 
-      // Acquiring the lock before publishing pending queue processing progress.
       lock.lock();
       m_pending_consumer++;
+      m_pending_producer_cv.notify_all();
     }
-    // In case someone is waiting for adding more cmds.
-    m_pending_producer_cv.notify_all();
-
-    // Wait for new pending commands or quit indicator.
-    m_pending_consumer_cv.wait(lock,
-      [this]() { return m_pending_thread_stop || !pending_queue_empty(); });
   }
 
   shim_debug("Pending queue thread stopped!");

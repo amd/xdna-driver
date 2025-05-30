@@ -141,7 +141,7 @@ clone() const
 
 uint64_t
 fence::
-wait_next_state() const
+next_wait_state() const
 {
   std::lock_guard<std::mutex> guard(m_lock);
 
@@ -150,19 +150,25 @@ wait_next_state() const
   return ++m_state;
 }
 
+void
+fence::
+wait(uint64_t state) const
+{
+  shim_debug("Waiting for command fence %d@%ld", m_syncobj_hdl, state);
+  wait_syncobj_done(m_pdev, m_syncobj_hdl, state);
+}
+
 // Timeout value is ignored for now.
 void
 fence::
 wait(uint32_t timeout_ms) const
 {
-  auto st = signal_next_state();
-  shim_debug("Waiting for command fence %d@%ld", m_syncobj_hdl, st);
-  wait_syncobj_done(m_pdev, m_syncobj_hdl, st);
+  wait(next_wait_state());
 }
 
 uint64_t
 fence::
-signal_next_state() const
+next_signal_state() const
 {
   std::lock_guard<std::mutex> guard(m_lock);
 
@@ -175,11 +181,17 @@ signal_next_state() const
 
 void
 fence::
+signal(uint64_t state) const
+{
+  shim_debug("Signaling command fence %d@%ld", m_syncobj_hdl, state);
+  signal_syncobj(m_pdev, m_syncobj_hdl, state);
+}
+
+void
+fence::
 signal() const
 {
-  auto st = signal_next_state();
-  shim_debug("Signaling command fence %d@%ld", m_syncobj_hdl, st);
-  signal_syncobj(m_pdev, m_syncobj_hdl, st);
+  signal(next_signal_state());
 }
 
 const std::string

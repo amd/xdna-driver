@@ -5,7 +5,7 @@
 #include "hwctx.h"
 #include "exec_buf.h"
 #include "io_config.h"
-#include "core/common/aiebu/src/cpp/aiebu/src/include/aiebu_assembler.h"
+#include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 
 #include <string>
 #include <regex>
