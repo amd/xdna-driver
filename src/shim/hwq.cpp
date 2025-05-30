@@ -135,7 +135,7 @@ submit_wait(const xrt_core::fence_handle* f)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
-  shim_debug("Enqueuing wait fence %s", fh->describe().c_str());
+  shim_debug("Enqueuing wait fence %s after command %ld", fh->describe().c_str(), m_last_seq);
   push_to_pending_queue(lock, fh, fh->next_wait_state(), pending_cmd_type::wait);
 }
 
@@ -145,7 +145,7 @@ submit_signal(const xrt_core::fence_handle* f)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
   auto fh = static_cast<const fence*>(f);
-  shim_debug("Enqueuing signal fence %s", fh->describe().c_str());
+  shim_debug("Enqueuing signal fence %s after command %ld", fh->describe().c_str(), m_last_seq);
   push_to_pending_queue(lock, fh, fh->next_signal_state(), pending_cmd_type::signal);
 }
 
