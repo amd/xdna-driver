@@ -579,7 +579,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 
 	aie2_calc_ctx_dpm(ndev, ctx);
 	aie2_pm_add_dpm_level(ndev, ctx->priv->req_dpm_level);
-	priv->active = true; /* Init context is counted as an activation */
+	priv->active = true; /* Init context is counted as an activity */
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
