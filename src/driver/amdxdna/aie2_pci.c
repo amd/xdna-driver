@@ -998,7 +998,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 {
 	struct amdxdna_drm_query_telemetry_header header, *tmp;
 	struct amdxdna_dev *xdna = client->xdna;
-	size_t aligned_sz, offset;
+	size_t aligned_sz, buff_sz, offset;
 	struct aie_version ver;
 	dma_addr_t dma_addr;
 	void *buff;
@@ -1015,8 +1015,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 	}
 
 	aligned_sz = PAGE_ALIGN(args->buffer_size);
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, aligned_sz, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
+	buff = aie2_mgmt_buff_alloc(xdna->dev_handle, aligned_sz, &buff_sz, &dma_addr);
 	if (!buff)
 		return -ENOMEM;
 
@@ -1056,7 +1055,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 		ret = -EFAULT;
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, aligned_sz, buff, dma_addr, DMA_FROM_DEVICE);
+	aie2_mgmt_buff_free(xdna->dev_handle, buff_sz, buff, dma_addr);
 	return ret;
 }
 
@@ -1438,6 +1437,55 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
 	return ret;
+}
+
+#define SPAN_64M_BOUNDARY(addr, size) \
+	((((unsigned long)(addr) & ((SZ_64M) - 1)) + (size)) > (SZ_64M))
+void *aie2_mgmt_buff_alloc(struct amdxdna_dev_hdl *ndev, size_t size, size_t *aligned_sz,
+			   dma_addr_t *dma_handle)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	void *buf;
+
+	size = PAGE_ALIGN(size);
+	*aligned_sz = roundup_pow_of_two(size);
+	/* TODO: This workaround a FW issue. Remove this later */
+	*aligned_sz *= 2;
+
+	/*
+	 * Note: We test the behavior of dma_alloc_noncoherent() on 6.13 kernel.
+	 * 1. This function eventually goes to __alloc_frozen_pages_noprof().
+	 * 2. The maximum size is 4MB (limited by MAX_PAGE_ORDER 10), otherwise
+	 * this will return NULL pointer.
+	 * 3. For valid size, this function returns physical contiguous memory.
+	 *
+	 * Thoughts, if there is requirement for larger than 4MB physical
+	 * contiguous memory, consider allocate buffer from carvedout memory?
+	 */
+	buf = dma_alloc_noncoherent(xdna->ddev.dev, *aligned_sz, dma_handle,
+				    DMA_BIDIRECTIONAL, GFP_KERNEL);
+	if (!buf)
+		return NULL;
+
+	/*
+	 * FW doesn't allow buffer spans 64MB boundary.
+	 * Satisfied this by below two facts,
+	 * 1. The aligned_sz is power of 2 pages
+	 * 2. dma_alloc_noncoherent() should return size aligned dma_handle.
+	 *
+	 * If any of above changed, you will see WARN_ON.
+	 */
+	WARN_ON(SPAN_64M_BOUNDARY(*dma_handle, *aligned_sz));
+
+	return buf;
+}
+
+void aie2_mgmt_buff_free(struct amdxdna_dev_hdl *ndev, size_t aligned_sz,
+			 void *vaddr, dma_addr_t dma_handle)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+
+	dma_free_noncoherent(xdna->ddev.dev, aligned_sz, vaddr, dma_handle, DMA_FROM_DEVICE);
 }
 
 const struct amdxdna_dev_ops aie2_ops = {
