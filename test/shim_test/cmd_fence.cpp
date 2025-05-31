@@ -133,13 +133,14 @@ private:
     hw_ctx hwctx{dev.get()};
     auto hwq = hwctx.get()->get_hw_queue();
 
-    io_test_bo_set boset{dev.get()};
     try {
       hwq->submit_signal(fence.get());
     } catch(...) {
       fence->signal();
       throw;
     }
+
+    io_test_bo_set boset{dev.get()};
     boset.run(wfences, sfences, false);
     boset.run(wfences, sfences, false);
 

@@ -123,18 +123,29 @@ public:
 
 public:
   void
-  set_cmd_seq(uint64_t seq);
+  mark_enqueued() const;
 
+  void
+  mark_submitted(uint64_t seq) const;
+
+  // Returning final sequence number in HW queue, which can be waited on.
   uint64_t
-  get_cmd_seq() const;
+  wait_for_submitted() const;
 
   std::set<bo_id>
   get_arg_bo_ids() const override;
 
 private:
-  uint64_t m_cmd_seq = 0;
+  // Valid only when m_submitted is true.
+  mutable uint64_t m_cmd_seq = 0;
   std::map< size_t, std::set<bo_id> > m_args_map;
   mutable std::mutex m_args_map_lock;
+
+  mutable std::mutex m_submission_lock;
+  // Changed only once in the life time of cmd BO.
+  mutable bool m_submitted = false;
+  // Changed only once in the life time of cmd BO.
+  mutable std::condition_variable m_submission_cv;
 };
 
 class dbg_buffer : public buffer

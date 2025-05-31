@@ -36,19 +36,22 @@ public:
   signal() const override;
 
 public:
-  void
-  submit_wait(xrt_core::hwctx_handle::slot_id) const;
+  const std::string
+  describe() const;
+
+  uint64_t
+  next_wait_state() const;
+
+  uint64_t
+  next_signal_state() const;
 
   void
-  submit_signal(xrt_core::hwctx_handle::slot_id) const;
+  wait(uint64_t state) const;
+
+  void
+  signal(uint64_t state) const;
 
 private:
-  uint64_t
-  wait_next_state() const;
-
-  uint64_t
-  signal_next_state() const;
-
   const pdev& m_pdev;
   const std::unique_ptr<xrt_core::shared_handle> m_import;
   uint32_t m_syncobj_hdl;
@@ -57,8 +60,8 @@ private:
   mutable std::mutex m_lock;
   // Set once at first signal
   mutable bool m_signaled = false;
-  // Ever incrementing at each wait/signal
   static constexpr uint64_t initial_state = 0;
+  // Ever incrementing at each wait/signal
   mutable uint64_t m_state = initial_state;
 };
 

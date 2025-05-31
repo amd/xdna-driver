@@ -787,8 +787,8 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
   if (skipped)
     result = "skipped";
   else
-    result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed";
-  std::cout << "====== " << id << ": " << test.name << " " << result << "  =====" << std::endl;
+    result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed ";
+  std::cout << "====== " << id << ": " << test.name << " " << result << " =====" << std::endl;
 
   if (skipped)
     test_skipped++;
