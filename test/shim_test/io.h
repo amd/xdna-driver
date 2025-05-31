@@ -87,7 +87,7 @@ public:
   io_test_bo_set(device *dev);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override; 
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 
   void
   verify_result() override;
@@ -99,14 +99,36 @@ public:
   elf_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override; 
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 
   void
   verify_result() override;
 
 private:
   const xrt::elf m_elf;
-  const kernel_type m_type;
+};
+
+class elf_preempt_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  ~elf_preempt_io_test_bo_set() {
+    --m_total_cmds;
+  }
+
+  void
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+
+  void
+  verify_result() override;
+
+private:
+  const xrt::elf m_elf;
+  int m_user_tid = -1;
+  std::vector<std::pair<int, uint64_t>> m_fine_preemptions;
+  unsigned long m_total_fine_preemption_checkpoints;
+  static unsigned long m_total_cmds;
 };
 
 #endif // _SHIMTEST_IO_H_
