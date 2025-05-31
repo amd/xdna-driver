@@ -293,8 +293,7 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 	events = ndev->async_events;
 	destroy_workqueue(events->wq);
 
-	dma_free_noncoherent(xdna->ddev.dev, events->size, events->buf,
-			     events->addr, DMA_BIDIRECTIONAL);
+	aie2_mgmt_buff_free(ndev, events->size, events->buf, events->addr);
 	kfree(events);
 }
 
@@ -303,7 +302,8 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 total_col = ndev->total_col;
 	struct async_events *events;
-	u32 total_size = SZ_4M;
+	u32 total_size = ASYNC_BUF_SIZE * total_col;
+	size_t buff_sz;
 	int i, ret;
 
 	WARN_ON(ASYNC_BUF_SIZE * total_col > SZ_4M);
@@ -311,23 +311,12 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	if (!events)
 		return -ENOMEM;
 
-	/*
-	 * Note: We test the behavior of dma_alloc_noncoherent() on 6.13 kernel.
-	 * 1. This function eventually goes to __alloc_frozen_pages_noprof().
-	 * 2. The maximum size is 4MB (limited by MAX_PAGE_ORDER 10), otherwise
-	 * this will return NULL pointer.
-	 * 3. For valid size, this function returns physical contiguous memory.
-	 *
-	 * Thoughts, if there is requirement for larger than 4MB physical
-	 * contiguous memory, consider allocate buffer from carvedout memory?
-	 */
-	events->buf = dma_alloc_noncoherent(xdna->ddev.dev, total_size, &events->addr,
-					    DMA_BIDIRECTIONAL, GFP_KERNEL);
+	events->buf = aie2_mgmt_buff_alloc(ndev, total_size, &buff_sz, &events->addr);
 	if (!events->buf) {
 		ret = -ENOMEM;
 		goto free_events;
 	}
-	events->size = total_size;
+	events->size = buff_sz;
 	events->event_cnt = total_col;
 
 	events->wq = alloc_ordered_workqueue("async_wq", 0);
@@ -356,8 +345,7 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	return 0;
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, events->size, events->buf,
-			     events->addr, DMA_BIDIRECTIONAL);
+	aie2_mgmt_buff_free(ndev, events->size, events->buf, events->addr);
 free_events:
 	kfree(events);
 	return ret;

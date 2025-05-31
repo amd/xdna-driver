@@ -548,6 +548,7 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	unsigned long ctx_id;
 	dma_addr_t dma_addr;
 	u32 aie_bitmap = 0;
+	size_t buff_sz;
 	u8 *buff_addr;
 	int ret, idx;
 
@@ -556,8 +557,7 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 		return -EFAULT;
 	}
 
-	buff_addr = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
-					  DMA_FROM_DEVICE, GFP_KERNEL);
+	buff_addr = aie2_mgmt_buff_alloc(ndev, size, &buff_sz, &dma_addr);
 	if (!buff_addr)
 		return -ENOMEM;
 
@@ -604,7 +604,7 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	*cols_filled = aie_bitmap;
 
 fail:
-	dma_free_noncoherent(xdna->ddev.dev, size, buff_addr, dma_addr, DMA_FROM_DEVICE);
+	aie2_mgmt_buff_free(ndev, buff_sz, buff_addr, dma_addr);
 	return ret;
 }
 

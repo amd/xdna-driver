@@ -53,24 +53,23 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct app_health_report_v1 *report;
 	struct amdxdna_dev_hdl *ndev;
-	const size_t size = SZ_4M;
+	const size_t size = PAGE_SIZE;
 	u64 comp = ctx->completed;
 	u64 sub = ctx->submitted;
 	dma_addr_t dma_addr;
+	size_t buff_sz;
 	void *buff;
 	int ret;
 
 	ndev = xdna->dev_handle;
 	XDNA_ERR(xdna, "Dumping ctx %s, hwctx %d, sub=%lld, comp=%lld",
 		 ctx->name, ctx->priv->id, sub, comp);
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
+	buff = aie2_mgmt_buff_alloc(ndev, size, &buff_sz, &dma_addr);
 	if (!buff) {
 		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
 		return;
 	}
 
-	WARN_ONCE(!IS_ALIGNED(dma_addr, SZ_4M), "app health buffer needs to be 4M aligned");
 	drm_clflush_virt_range(buff, size); /* device can access */
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_get_app_health(ndev, ctx->priv->id, dma_addr, size);
@@ -83,7 +82,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "\tDPU PC:    0x%x", report->dpu_pc);
 		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
 	}
-	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	aie2_mgmt_buff_free(ndev, buff_sz, buff, dma_addr);
 
 	mutex_lock(&ctx->priv->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {
