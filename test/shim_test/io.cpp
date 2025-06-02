@@ -7,6 +7,7 @@
 #include "io_config.h"
 #include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 
+#include <climits>
 #include <string>
 #include <regex>
 
@@ -144,8 +145,17 @@ get_fine_preemption_checkpoints(const xrt::elf elf)
   while ((pos = report.find("XAIE_IO_PREEMPT", pos)) != std::string::npos) {
       pos += std::string("XAIE_IO_PREEMPT").length();
       std::istringstream stream(report.substr(pos));
-      int value;
-      stream >> value;
+      unsigned long value;
+
+      // Validate the extraction
+      if (!(stream >> value)) {
+          std::cerr << "Unable to parse preemption value at position " << pos << "\n";
+          continue;
+      }
+
+      if (count > ULONG_MAX - value)
+          throw std::overflow_error("Overflow detected while calculating preemption checkpoints");
+
       count += value;
   }
 
