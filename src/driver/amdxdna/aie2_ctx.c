@@ -457,7 +457,13 @@ static void aie2_calc_ctx_dpm(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *
 	u32 level;
 
 	if (!is_valid_qos_dpm_params(qos)) {
-		ctx->priv->req_dpm_level = ndev->max_dpm_level;
+		XDNA_DBG(ndev->xdna, "Invalid QoS gops %d fps %d latency %d",
+			 qos->gops, qos->fps, qos->latency);
+
+		if (qos->priority == AMDXDNA_QOS_LOW_PRIORITY)
+			ctx->priv->req_dpm_level =  0;
+		else
+			ctx->priv->req_dpm_level = ndev->max_dpm_level;
 		return;
 	}
 
