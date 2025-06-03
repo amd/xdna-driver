@@ -629,26 +629,7 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, 
 int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 			dma_addr_t addr, u32 size)
 {
-	DECLARE_AIE2_MSG(get_app_health, MSG_OP_GET_APP_HEALTH);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	int ret;
-
-	req.context_id = context_id;
-	req.buf_size = size;
-	req.buf_addr = addr;
-
-	ret = aie2_send_mgmt_msg_wait_silent(ndev, &msg);
-	if (ret) {
-		XDNA_DBG(xdna, "Get app health failed, ret 0x%x", ret);
-		return ret;
-	}
-
-	if (resp.status != AIE2_STATUS_SUCCESS) {
-		XDNA_DBG(xdna, "Get app health got status 0x%x", resp.status);
-		ret = -EINVAL;
-	}
-
-	return ret;
+	return -EOPNOTSUPP;
 }
 
 /* Below messages are to hardware context mailbox channel */
