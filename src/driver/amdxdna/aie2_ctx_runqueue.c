@@ -127,7 +127,7 @@ part_ctx_dispatch(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 
 	ctx->priv->status = CTX_STATE_DISPATCHED;
 	ctx->priv->part = part;
-	ctx->priv->active = true; /* Dispatch context is counted as an activation */
+	ctx->priv->active = true; /* Dispatch context is counted as an activity */
 	ctx->priv->idle_cnt = 0;
 	XDNA_DBG(ctx->client->xdna, "%s dispatched, priority queue %d", ctx->name, prio_q);
 }
@@ -229,9 +229,6 @@ rq_part_non_rt_select(struct aie2_ctx_rq *rq)
 {
 	struct aie2_partition *min = NULL;
 	struct aie2_partition *part;
-	int ratio, min_ratio;
-	int min_non_rt_ctx;
-	int non_rt_ctx;
 	int i;
 
 	for (i = 0; i < rq->num_parts; i++) {
@@ -239,15 +236,21 @@ rq_part_non_rt_select(struct aie2_ctx_rq *rq)
 		if (part->max_hwctx == part->max_rt_ctx)
 			continue;
 
-		non_rt_ctx = part->ctx_cnt - part->rt_ctx_cnt;
-		ratio = non_rt_ctx / part_max_non_rt_hwctx(part);
-
-		if (!min || ratio < min_ratio ||
-		    (ratio == min_ratio && non_rt_ctx < min_non_rt_ctx)) {
+		if (!min) {
 			min = part;
-			min_ratio = ratio;
-			min_non_rt_ctx = non_rt_ctx;
+			continue;
 		}
+
+		if (part->ctx_cnt > min->ctx_cnt)
+			continue;
+
+		if (part->ctx_cnt < min->ctx_cnt) {
+			min = part;
+			continue;
+		}
+
+		if (min->max_rt_ctx > part->max_rt_ctx)
+			min = part;
 	}
 
 	return min;
@@ -855,6 +858,8 @@ bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq)
 	struct aie2_partition *part;
 	struct amdxdna_dev *xdna;
 	struct amdxdna_ctx *ctx;
+	int average, remainder;
+	int ctx_total = 0;
 	bool found = false;
 	int i;
 
@@ -873,10 +878,37 @@ bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq)
 
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
+		ctx_total += part->ctx_cnt;
 		if (!part_handle_idle_ctx(part, false))
 			continue;
 
 		found = true;
+	}
+
+	average = ctx_total / rq->num_parts;
+	remainder = ctx_total - (average * rq->num_parts);
+	for (i = 0; i < rq->num_parts; i++) {
+		int num_move;
+
+		part = &rq->parts[i];
+		if (remainder)
+			num_move = part->ctx_cnt - (average + 1);
+		else
+			num_move = part->ctx_cnt - average;
+		if (num_move <= 0)
+			continue;
+
+		list_for_each_entry(ctx, &part->conn_list, entry) {
+			ctx->priv->force_yield = true;
+			ctx->priv->status = CTX_STATE_DISCONNECTING;
+			ctx->priv->active = false;
+			ctx->priv->idle_cnt = 0;
+			queue_work(part->rq->work_q, &ctx->yield_work);
+
+			num_move--;
+			if (!num_move)
+				break;
+		}
 	}
 	mutex_unlock(&xdna->dev_lock);
 

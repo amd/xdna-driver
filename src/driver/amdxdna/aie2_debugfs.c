@@ -650,9 +650,7 @@ const struct {
 	AIE2_DBGFS_FILE(telemetry_error_info, 0400),
 	AIE2_DBGFS_FILE(telemetry_profiling, 0400),
 	AIE2_DBGFS_FILE(telemetry_debug, 0400),
-	AIE2_DBGFS_FILE(event_trace, 0600),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
-	AIE2_DBGFS_FILE(get_app_health, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)

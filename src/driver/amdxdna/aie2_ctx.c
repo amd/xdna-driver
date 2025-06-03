@@ -53,18 +53,18 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct app_health_report_v1 *report;
 	struct amdxdna_dev_hdl *ndev;
-	const size_t size = 0x1000;
+	const size_t size = PAGE_SIZE;
 	u64 comp = ctx->completed;
 	u64 sub = ctx->submitted;
 	dma_addr_t dma_addr;
+	size_t buff_sz;
 	void *buff;
 	int ret;
 
 	ndev = xdna->dev_handle;
 	XDNA_ERR(xdna, "Dumping ctx %s, hwctx %d, sub=%lld, comp=%lld",
 		 ctx->name, ctx->priv->id, sub, comp);
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
+	buff = aie2_mgmt_buff_alloc(ndev, size, &buff_sz, &dma_addr);
 	if (!buff) {
 		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
 		return;
@@ -82,7 +82,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "\tDPU PC:    0x%x", report->dpu_pc);
 		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
 	}
-	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	aie2_mgmt_buff_free(ndev, buff_sz, buff, dma_addr);
 
 	mutex_lock(&ctx->priv->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {
@@ -579,7 +579,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 
 	aie2_calc_ctx_dpm(ndev, ctx);
 	aie2_pm_add_dpm_level(ndev, ctx->priv->req_dpm_level);
-	priv->active = true; /* Init context is counted as an activation */
+	priv->active = true; /* Init context is counted as an activity */
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
