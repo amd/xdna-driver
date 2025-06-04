@@ -45,6 +45,11 @@ public:
   create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type& qos,
     xrt::hw_context::access_mode mode) const override;
 
+  std::unique_ptr<xrt_core::hwctx_handle>
+  create_hw_context(uint32_t partition_size,
+                    const xrt::hw_context::cfg_param_type& cfg,
+                    xrt::hw_context::access_mode mode) const override;
+
   void
   register_xclbin(const xrt::xclbin& xclbin) const override;
 

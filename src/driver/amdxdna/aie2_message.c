@@ -736,6 +736,7 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job, enum cm
 		struct exec_dpu_preempt_req dpu_pmpt;
 		struct execute_buffer_req ebuf;
 		struct exec_dpu_req dpu;
+		struct exec_npu_req npu;
 	} req;
 	struct xdna_mailbox_msg msg;
 	u32 payload_len;
@@ -816,6 +817,34 @@ int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job, enum cm
 		msg.opcode = MSG_OP_EXEC_DPU_PREEMPT;
 		break;
 	}
+	case ERT_START_NPU_PREEMPT_ELF: {
+		struct amdxdna_cmd_preempt_data *nd = payload;
+
+		if (unlikely(payload_len - sizeof(*nd) > sizeof(req.npu.payload))) {
+			XDNA_ERR(xdna, "Invalid npu payload len: %d", payload_len);
+			return -EINVAL;
+		}
+
+		req.npu.type = EXEC_NPU_TYPE_ELF;
+		req.npu.inst_buf_addr = nd->inst_buf;
+		req.npu.save_buf_addr = nd->save_buf;
+		req.npu.restore_buf_addr = nd->restore_buf;
+		req.npu.inst_size = nd->inst_size;
+		req.npu.save_size = nd->save_size;
+		req.npu.restore_size = nd->restore_size;
+		req.npu.inst_prop_cnt = nd->inst_prop_cnt;
+
+		/*
+		 * Similar to the rest of the ERT opcodes, the kernel opcode must be embedded into
+		 * the payload by XRT. Currently, this is missing hence hard coding the payload for
+		 * now.
+		 */
+		req.npu.payload[0] = AIE2_EXEC_BUFFER_KERNEL_OP_TXN;
+
+		msg.send_size = sizeof(req.npu);
+		msg.opcode = MSG_OP_EXEC_NPU;
+		break;
+	}
 	default:
 		XDNA_DBG(xdna, "Invalid ERT cmd op code: %d", op);
 		return -EINVAL;
@@ -860,7 +889,7 @@ aie2_cmdlist_fill_one_slot_cf(void *cmd_buf, u32 offset, enum cmd_chain_class cl
 			return -ENOSPC;
 
 		memset(npu, 0, sizeof(*npu));
-		npu->type = CMD_CHAIN_NPU_TYPE_NON_ELF;
+		npu->type = EXEC_NPU_TYPE_NON_ELF;
 		npu->arg_cnt = payload_len / sizeof(u32);
 		npu->cu_idx = cu_idx;
 		memcpy(npu->args, payload, payload_len);
@@ -908,7 +937,7 @@ aie2_cmdlist_fill_one_slot_dpu(void *cmd_buf, u32 offset, enum cmd_chain_class c
 			return -ENOSPC;
 
 		memset(npu, 0, sizeof(*npu));
-		npu->type = CMD_CHAIN_NPU_TYPE_PARTIAL_ELF;
+		npu->type = EXEC_NPU_TYPE_PARTIAL_ELF;
 		npu->inst_buf_addr = sn->buffer;
 		npu->inst_size = sn->buffer_size;
 		npu->inst_prop_cnt = sn->prop_count;
@@ -959,7 +988,7 @@ aie2_cmdlist_fill_one_slot_npu(void *cmd_buf, u32 offset,
 	if (!slot_has_space(*npu, offset, arg_sz))
 		return -ENOSPC;
 
-	npu->type = CMD_CHAIN_NPU_TYPE_PREEMPT;
+	npu->type = EXEC_NPU_TYPE_PREEMPT;
 	npu->inst_buf_addr = pd->inst_buf;
 	npu->save_buf_addr = pd->save_buf;
 	npu->restore_buf_addr = pd->restore_buf;
@@ -970,6 +999,46 @@ aie2_cmdlist_fill_one_slot_npu(void *cmd_buf, u32 offset,
 	npu->cu_idx = cu_idx;
 	npu->arg_cnt = arg_sz / sizeof(u32);
 	memcpy(npu->args, pd->prop_args, arg_sz);
+	*size = struct_size(npu, args, npu->arg_cnt);
+	return 0;
+}
+
+static inline int
+aie2_cmdlist_fill_one_slot_elf(void *cmd_buf, u32 offset,
+			       struct amdxdna_gem_obj *abo, u32 *size)
+{
+	struct cmd_chain_slot_npu *npu = cmd_buf + offset;
+	struct amdxdna_cmd_preempt_data *nd;
+	u32 payload_len;
+	void *payload;
+	u32 arg_sz;
+
+	payload = amdxdna_cmd_get_payload(abo, &payload_len);
+	if (!payload)
+		return -EINVAL;
+	nd = payload;
+	arg_sz = payload_len - sizeof(*nd);
+	if (payload_len < sizeof(*nd))
+		return -EINVAL;
+
+	if (!slot_has_space(*npu, offset, arg_sz))
+		return -ENOSPC;
+
+	npu->type = EXEC_NPU_TYPE_ELF;
+	npu->inst_buf_addr = nd->inst_buf;
+	npu->save_buf_addr = nd->save_buf;
+	npu->restore_buf_addr = nd->restore_buf;
+	npu->inst_size = nd->inst_size;
+	npu->save_size = nd->save_size;
+	npu->restore_size = nd->restore_size;
+	npu->inst_prop_cnt = nd->inst_prop_cnt;
+	npu->arg_cnt = arg_sz / sizeof(u32);
+
+	/*
+	 * Similar to the rest of the ERT opcodes, the kernel opcode must be embedded into the
+	 * payload by XRT. Currently, this is missing hence hard coding the payload for now.
+	 */
+	npu->args[0] = AIE2_EXEC_BUFFER_KERNEL_OP_TXN;
 
 	*size = struct_size(npu, args, npu->arg_cnt);
 	return 0;
@@ -997,6 +1066,9 @@ aie2_cmdlist_fill_one_slot(u32 op, struct amdxdna_gem_obj *cmdbuf_abo, u32 offse
 		break;
 	case ERT_START_NPU_PREEMPT:
 		ret = aie2_cmdlist_fill_one_slot_npu(cmd_buf, offset, abo, size);
+		break;
+	case ERT_START_NPU_PREEMPT_ELF:
+		ret = aie2_cmdlist_fill_one_slot_elf(cmd_buf, offset, abo, size);
 		break;
 	default:
 		ret = -EOPNOTSUPP;
@@ -1118,7 +1190,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, class, offset, payload->command_count);
 
 	if (class == CMD_CHAIN_CLASS_PREEMPT) {
-		msg.opcode = MSG_OP_CMD_CHAIN_NPU;
+		msg.opcode = MSG_OP_CHAIN_EXEC_NPU;
 		msg.send_size = sizeof(req.npu);
 	} else {
 		msg.opcode = aie2_cmd_op_to_msg_op(op);
@@ -1179,7 +1251,7 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, class, size, 1);
 
 	if (class == CMD_CHAIN_CLASS_PREEMPT) {
-		msg.opcode = MSG_OP_CMD_CHAIN_NPU;
+		msg.opcode = MSG_OP_CHAIN_EXEC_NPU;
 		msg.send_size = sizeof(req.npu);
 	} else {
 		msg.opcode = aie2_cmd_op_to_msg_op(op);

@@ -25,7 +25,8 @@ enum aie2_msg_opcode {
 	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
 	MSG_OP_CONFIG_DEBUG_BO		   = 0x14,
 	MSG_OP_EXEC_DPU_PREEMPT		   = 0x15,
-	MSG_OP_CMD_CHAIN_NPU		   = 0x18,
+	MSG_OP_EXEC_NPU			   = 0x17,
+	MSG_OP_CHAIN_EXEC_NPU		   = 0x18,
 #ifdef AMDXDNA_DEVEL
 	MSG_OP_REGISTER_PDI                = 0x1,
 	MSG_OP_UNREGISTER_PDI              = 0xA,
@@ -542,18 +543,30 @@ struct cmd_chain_req {
 	u32 count;
 } __packed;
 
-enum cmd_chain_npu_type {
-	CMD_CHAIN_NPU_TYPE_NON_ELF	= 0x1,
-	CMD_CHAIN_NPU_TYPE_PARTIAL_ELF	= 0x2,
-	CMD_CHAIN_NPU_TYPE_PREEMPT	= 0x3,
-	CMD_CHAIN_NPU_TYPE_MAX
+enum exec_npu_type {
+	EXEC_NPU_TYPE_NON_ELF		= 0x1,
+	EXEC_NPU_TYPE_PARTIAL_ELF	= 0x2,
+	EXEC_NPU_TYPE_PREEMPT		= 0x3,
+	EXEC_NPU_TYPE_ELF		= 0x4,
+	EXEC_NPU_TYPE_MAX
 };
 
+struct exec_npu_req {
+	u32	flags;
+	enum	exec_npu_type type;
+	u64	inst_buf_addr;
+	u64	save_buf_addr;
+	u64	restore_buf_addr;
+	u32	inst_size;
+	u32	save_size;
+	u32	restore_size;
+	u32	inst_prop_cnt;
+	u32	cu_idx;
+	u32	payload[27];
+} __packed;
+
 struct cmd_chain_slot_npu {
-	union {
-		enum cmd_chain_npu_type type;
-		u32 type_u32;
-	};
+	enum exec_npu_type type;
 	u64 inst_buf_addr;
 	u64 save_buf_addr;
 	u64 restore_buf_addr;
@@ -563,11 +576,13 @@ struct cmd_chain_slot_npu {
 	u32 inst_prop_cnt;
 	u32 cu_idx;
 	u32 arg_cnt;
+#define AIE2_EXEC_BUFFER_KERNEL_OP_TXN	3
 	u32 args[] __counted_by(arg_cnt);
 } __packed;
 
 struct cmd_chain_npu_req {
-	u64 reserved;
+	u32 flags;
+	u32 reserved;
 	u64 buf_addr;
 	u32 buf_size;
 	u32 count;

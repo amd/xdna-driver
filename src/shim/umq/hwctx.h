@@ -12,6 +12,7 @@ namespace shim_xdna {
 class hwctx_umq : public hwctx {
 public:
   hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos);
+  hwctx_umq(const device& device, uint32_t partition_size);
   ~hwctx_umq();
 
 private:
