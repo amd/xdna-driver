@@ -25,6 +25,7 @@ struct event_trace_req_buf {
 	u32			 msi_address;
 	u32			 event_trace_category;
 	int                      log_ch_irq;
+	u64			 rb_head;
 	bool                     enabled;
 };
 
@@ -82,49 +83,61 @@ static int aie2_validate_event_trace_config(struct amdxdna_dev_hdl *ndev, u32 en
 
 static u32 aie2_get_event_trace_content(struct event_trace_req_buf *req_buf)
 {
-	u32 head_ptr, tail_ptr, head_ptr_wrap, tail_ptr_wrap;
 	struct amdxdna_dev_hdl *ndev = req_buf->ndev;
-	struct trace_event_metadata *trace_metadata;
+	struct trace_event_metadata trace_metadata;
 	u8 *kern_buf = req_buf->kern_log_buf;
 	u8 *sys_buf = req_buf->buf;
+	u32 head_wrap, tail_wrap;
+	u64 head, tail;
+
 	u32 log_rb_size = 0;
 	u32 log_size = 0;
 
-	log_rb_size = req_buf->dram_buffer_size - EVENT_TRACE_BUF_METADATA_SIZE;
+	log_rb_size = req_buf->dram_buffer_size - sizeof(trace_metadata);
 	WARN_ON(log_rb_size <= 0);
 
-	trace_metadata = (struct trace_event_metadata *)(sys_buf + log_rb_size);
-	head_ptr = (u32)trace_metadata->head_offset;
-	tail_ptr = (u32)trace_metadata->tail_offset;
-	head_ptr_wrap = head_ptr % log_rb_size;
-	tail_ptr_wrap = tail_ptr % log_rb_size;
-	log_size = tail_ptr - head_ptr;
+	drm_clflush_virt_range(sys_buf + log_rb_size, sizeof(trace_metadata));
+	memcpy(&trace_metadata, sys_buf + log_rb_size, sizeof(trace_metadata));
+
+	head = req_buf->rb_head;
+	tail = trace_metadata.tail_offset;
+
+	head_wrap = head % log_rb_size;
+	tail_wrap = tail % log_rb_size;
+	log_size = tail - head;
 
 	if (!log_size)
 		return log_size;
 
-	trace_metadata->head_offset = tail_ptr;
+	req_buf->rb_head = tail;
 
 	/* Handle buffer overflow case, dump all log w.r.t timestamp */
 	if (log_size > log_rb_size) {
 		XDNA_DBG(ndev->xdna, "log_size is %u, buffer overflow!", log_size);
-		u32 part_log = log_rb_size - tail_ptr_wrap;
+		u32 part_log = log_rb_size - tail_wrap;
 
-		memcpy((u8 *)kern_buf, (u8 *)sys_buf + tail_ptr_wrap, part_log);
-		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_ptr_wrap);
+		drm_clflush_virt_range((u8 *)sys_buf + tail_wrap, part_log);
+		memcpy((u8 *)kern_buf, (u8 *)sys_buf + tail_wrap, part_log);
+
+		drm_clflush_virt_range(sys_buf, tail_wrap);
+		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_wrap);
 		return log_rb_size;
 	}
 
 	/*Buffer split into two section when tail is wrapped and copy both */
-	if (tail_ptr_wrap < head_ptr_wrap) {
-		u32 part_log = log_rb_size - head_ptr_wrap;
+	if (tail_wrap < head_wrap) {
+		u32 part_log = log_rb_size - head_wrap;
 
-		memcpy((u8 *)kern_buf, (u8 *)(sys_buf + head_ptr_wrap), part_log);
-		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_ptr_wrap);
+		drm_clflush_virt_range((u8 *)sys_buf + head_wrap, part_log);
+		memcpy((u8 *)kern_buf, (u8 *)sys_buf + head_wrap, part_log);
+
+		drm_clflush_virt_range(sys_buf, tail_wrap);
+		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_wrap);
 		return log_size;
 	}
 	/* General case when tail > head and with in log buff size */
-	memcpy((u8 *)kern_buf, (u8 *)(sys_buf + head_ptr_wrap), log_size);
+	drm_clflush_virt_range((u8 *)sys_buf + head_wrap, log_size);
+	memcpy((u8 *)kern_buf, (u8 *)sys_buf + head_wrap, log_size);
 	return log_size;
 }
 
@@ -250,10 +263,13 @@ static int aie2_event_trace_alloc(struct amdxdna_dev_hdl *ndev)
 
 	req_buf->buf = dma_alloc_noncoherent(xdna->ddev.dev, req_buf->dram_buffer_size,
 					     &req_buf->dram_buffer_address,
-					     DMA_BIDIRECTIONAL, GFP_KERNEL);
+					     DMA_FROM_DEVICE, GFP_KERNEL);
+
 	if (!req_buf->buf)
 		return -ENOMEM;
 
+	req_buf->rb_head = 0;
+	drm_clflush_virt_range(req_buf->buf, req_buf->dram_buffer_size);
 	XDNA_DBG(ndev->xdna, "Event trace buf addr: 0x%llx",
 		 req_buf->dram_buffer_address);
 
@@ -266,9 +282,10 @@ static void aie2_event_trace_free(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 
 	dma_free_noncoherent(xdna->ddev.dev, req_buf->dram_buffer_size, req_buf->buf,
-			     req_buf->dram_buffer_address, DMA_BIDIRECTIONAL);
+			     req_buf->dram_buffer_address, DMA_FROM_DEVICE);
 
 	req_buf->buf = NULL;
+	req_buf->rb_head = 0;
 	req_buf->dram_buffer_address = 0;
 }
 
