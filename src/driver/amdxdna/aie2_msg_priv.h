@@ -405,7 +405,6 @@ struct async_event_msg_resp {
 } __packed;
 
 /* Start of event tracing data struct */
-#define EVENT_TRACE_BUF_METADATA_SIZE			0x40
 #define MAX_ONE_TIME_LOG_INFO_LEN			16
 #define DEFAULT_EVENT_BUF_SIZE				0x2000
 #define DEFAULT_EVENT_CATEGORY				0xFFFFFFFF
