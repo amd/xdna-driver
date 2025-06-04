@@ -61,30 +61,35 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	if (!xdna->dev_handle) {
+		XDNA_ERR(xdna, "amdxdna device handle is null");
+		ret = -EINVAL;
+		goto out;
+	}
+
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 	if (ret) {
 		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 		if (ret) {
 			XDNA_ERR(xdna, "DMA configuration failed: 0x%x\n", ret);
-			drm_dev_put(&xdna->ddev);
-			return ret;
+			goto out;
 		}
-
 		XDNA_WARN(xdna, "DMA configuration downgraded to 32bit Mask\n");
 	}
 
 	xrs_cfg.ddev = &xdna->ddev;
 	xrs_cfg.total_col = XRS_MAX_COL;
-
-	if (xdna->dev_handle)
-		xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
-	if (!xdna->dev_handle || !xdna->dev_handle->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialize resolver failed");
-		drm_dev_put(&xdna->ddev);
-		return -EINVAL;
+	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
+		ret = -EINVAL;
+		goto out;
 	}
 
 	return 0;
+goto out:
+	drm_dev_put(&xdna->ddev);
+	return ret;
 }
 
 static void amdxdna_of_remove(struct platform_device *pdev)
