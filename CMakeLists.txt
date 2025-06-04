@@ -16,6 +16,14 @@ message("-- XRT_INSTALL_PREFIX is set ${XRT_INSTALL_PREFIX}")
 # Set install component that will be packaged
 set(XDNA_COMPONENT "amdxdna" CACHE STRING "XDNA component name")
 
+if(XDNA_VE2)
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/xrt_ve2.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/version.cmake)
+add_subdirectory(src)
+
+else()
+
 # Bring in xrt git submodule before include any local directories
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/xrt.cmake)
 # version.cmake create XRT_PLUGIN_VERSION_STRING
@@ -46,3 +54,4 @@ install(FILES ${amdxdna_tools}
   DESTINATION xrt/${XDNA_COMPONENT}
   COMPONENT ${XDNA_COMPONENT}
   )
+endif()

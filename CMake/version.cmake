@@ -67,8 +67,14 @@ configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/version.json.in
   ${XDNA_VERSION_JSON_FILE}
 )
-
+if(XDNA_VE2)
+configure_file(
+ ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/version.h.in
+ ${CMAKE_BINARY_DIR}/gen/version.h
+)
+else()
 install(FILES ${XDNA_VERSION_JSON_FILE} DESTINATION xrt/${XDNA_COMPONENT} COMPONENT ${XDNA_COMPONENT})
+endif()
 
 execute_process(
   COMMAND echo ${XRT_VERSION_STRING}
