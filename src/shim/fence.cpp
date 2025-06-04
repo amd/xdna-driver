@@ -63,35 +63,10 @@ wait_syncobj_done(const shim_xdna::pdev& dev, uint32_t sobj_hdl, uint64_t timepo
 {
   wait_syncobj_arg wsobj = {
     .handle = sobj_hdl,
-    .timepoint = timepoint,
     .timeout_ms = 0, /* wait forever */
+    .timepoint = timepoint,
   };
   dev.drv_ioctl(drv_ioctl_cmd::wait_syncobj, &wsobj);
-}
-
-void
-submit_wait_syncobjs(const shim_xdna::pdev& dev, xrt_core::hwctx_handle::slot_id ctx_id,
-  const uint32_t* sobj_hdls, const uint64_t* points, uint32_t num)
-{
-  submit_dep_arg ecmd = {
-    .ctx_handle = ctx_id,
-    .count = num,
-    .sync_objs = sobj_hdls,
-    .sync_points = points,
-  };
-  dev.drv_ioctl(drv_ioctl_cmd::submit_dep, &ecmd);
-}
-
-void
-submit_signal_syncobj(const shim_xdna::pdev& dev, xrt_core::hwctx_handle::slot_id ctx_id,
-  uint32_t sobj_hdl, uint64_t point)
-{
-  submit_sig_arg ecmd = {
-    .ctx_handle = ctx_id,
-    .sync_obj = sobj_hdl,
-    .timepoint = point,
-  };
-  dev.drv_ioctl(drv_ioctl_cmd::submit_sig, &ecmd);
 }
 
 }
@@ -166,7 +141,7 @@ clone() const
 
 uint64_t
 fence::
-wait_next_state() const
+next_wait_state() const
 {
   std::lock_guard<std::mutex> guard(m_lock);
 
@@ -175,28 +150,25 @@ wait_next_state() const
   return ++m_state;
 }
 
+void
+fence::
+wait(uint64_t state) const
+{
+  shim_debug("Waiting for command fence %d@%ld", m_syncobj_hdl, state);
+  wait_syncobj_done(m_pdev, m_syncobj_hdl, state);
+}
+
 // Timeout value is ignored for now.
 void
 fence::
 wait(uint32_t timeout_ms) const
 {
-  auto st = signal_next_state();
-  shim_debug("Waiting for command fence %d@%ld", m_syncobj_hdl, st);
-  wait_syncobj_done(m_pdev, m_syncobj_hdl, st);
-}
-
-void
-fence::
-submit_wait(xrt_core::hwctx_handle::slot_id ctx_id) const
-{
-  auto st = signal_next_state();
-  shim_debug("Submitting wait for command fence %d@%ld", m_syncobj_hdl, st);
-  submit_wait_syncobjs(m_pdev, ctx_id, &m_syncobj_hdl, &st, 1);
+  wait(next_wait_state());
 }
 
 uint64_t
 fence::
-signal_next_state() const
+next_signal_state() const
 {
   std::lock_guard<std::mutex> guard(m_lock);
 
@@ -209,20 +181,24 @@ signal_next_state() const
 
 void
 fence::
-signal() const
+signal(uint64_t state) const
 {
-  auto st = signal_next_state();
-  shim_debug("Signaling command fence %d@%ld", m_syncobj_hdl, st);
-  signal_syncobj(m_pdev, m_syncobj_hdl, st);
+  shim_debug("Signaling command fence %d@%ld", m_syncobj_hdl, state);
+  signal_syncobj(m_pdev, m_syncobj_hdl, state);
 }
 
 void
 fence::
-submit_signal(xrt_core::hwctx_handle::slot_id ctx_id) const
+signal() const
 {
-  auto st = signal_next_state();
-  shim_debug("Submitting signal command fence %d@%ld", m_syncobj_hdl, st);
-  submit_signal_syncobj(m_pdev, ctx_id, m_syncobj_hdl, st);
+  signal(next_signal_state());
+}
+
+const std::string
+fence::
+describe() const
+{
+  return std::to_string(m_syncobj_hdl) + "@" + std::to_string(get_next_state());
 }
 
 }

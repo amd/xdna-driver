@@ -734,7 +734,6 @@ std::vector<test_case> test_list {
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
-  // Disable for now. Require changes in XRT for argument patching.
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 8 }
   },
@@ -788,8 +787,8 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
   if (skipped)
     result = "skipped";
   else
-    result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed";
-  std::cout << "====== " << id << ": " << test.name << " " << result << "  =====" << std::endl;
+    result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed ";
+  std::cout << "====== " << id << ": " << test.name << " " << result << " =====" << std::endl;
 
   if (skipped)
     test_skipped++;
@@ -899,10 +898,10 @@ main(int argc, char **argv)
       if (xclbin) {
         xclbin_path = optarg;
         std::cout << "Using xclbin file: " << xclbin_path << std::endl;
-	      break;
+        break;
       } else {
         std::cout << "Failed to open xclbin file: " << optarg << std::endl;
-	      return 1;
+        return 1;
       }
     }
     case 'k': {

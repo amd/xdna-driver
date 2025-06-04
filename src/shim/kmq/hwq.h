@@ -18,8 +18,8 @@ public:
   get_queue_bo() const override;
 
 private:
-  void
-  issue_command(cmd_buffer *) override;
+  uint64_t
+  issue_command(const cmd_buffer *) override;
 };
 
 }

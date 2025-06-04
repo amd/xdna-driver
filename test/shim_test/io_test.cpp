@@ -14,6 +14,10 @@
 using namespace xrt_core;
 using arg_type = const std::vector<uint64_t>;
 
+// Initialize static member to track the number cmds submitted in a runlist.
+// Required for validating preemption checkpoints in the forced preemption case.
+unsigned long elf_preempt_io_test_bo_set::m_total_cmds = 0;
+
 namespace {
 
 io_test_parameter io_test_parameters;
@@ -33,10 +37,19 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
   auto kernel_type = get_kernel_type(dev, xclbin);
 
   std::unique_ptr<io_test_bo_set_base> base;
-  if (kernel_type == KERNEL_TYPE_DPU_SEQ)
+  switch (kernel_type) {
+  case KERNEL_TYPE_DPU_SEQ:
     base = std::make_unique<io_test_bo_set>(dev);
-  else
+    break;
+  case KERNEL_TYPE_TXN:
     base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
+    break;
+  case KERNEL_TYPE_TXN_PREEMPT:
+    base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
+    break;
+  default:
+    throw std::runtime_error("Unknown kernel type");
+  }
 
   auto& bos = base->get_bos();
 

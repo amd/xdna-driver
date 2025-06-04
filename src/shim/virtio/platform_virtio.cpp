@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
+// Disable debug print in this file.
+#undef XDNA_SHIM_DEBUG
+
 #include "../shim_debug.h"
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_proto.h"
@@ -52,6 +55,33 @@ ioctl_cmd2name(unsigned long cmd)
     return "DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL";
   case DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT:
     return "DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT";
+  }
+
+  return "UNKNOWN(" + std::to_string(cmd) + ")";
+}
+
+std::string
+hcall_cmd2name(unsigned long cmd)
+{
+  switch(cmd) {
+  case AMDXDNA_CCMD_NOP:
+    return "AMDXDNA_CCMD_NOP";
+  case AMDXDNA_CCMD_INIT:
+    return "AMDXDNA_CCMD_INIT";
+  case AMDXDNA_CCMD_CREATE_BO:
+    return "AMDXDNA_CCMD_CREATE_BO";
+  case AMDXDNA_CCMD_DESTROY_BO:
+    return "AMDXDNA_CCMD_DESTROY_BO";
+  case AMDXDNA_CCMD_CREATE_CTX:
+    return "AMDXDNA_CCMD_CREATE_CTX";
+  case AMDXDNA_CCMD_DESTROY_CTX:
+    return "AMDXDNA_CCMD_DESTROY_CTX";
+  case AMDXDNA_CCMD_CONFIG_CTX:
+    return "AMDXDNA_CCMD_CONFIG_CTX";
+  case AMDXDNA_CCMD_EXEC_CMD:
+    return "AMDXDNA_CCMD_EXEC_CMD";
+  case AMDXDNA_CCMD_WAIT_CMD:
+    return "AMDXDNA_CCMD_WAIT_CMD";
   }
 
   return "UNKNOWN(" + std::to_string(cmd) + ")";
@@ -116,12 +146,18 @@ hcall_no_wait(int dev_fd, void *buf, size_t size)
 
   exec.command = reinterpret_cast<uintptr_t>(buf);
   exec.size = size;
-  ioctl(dev_fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
+  try {
+    ioctl(dev_fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
+  } catch (const xrt_core::system_error& e) {
+    auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
+    shim_err(e.get_code(), "%s HCALL failed: %s", hcall_cmd2name(req->cmd).c_str(), e.what());
+  }
 }
 
 void
 hcall_wait(int dev_fd, void *buf, size_t size)
 {
+  auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
   drm_virtgpu_execbuffer exec = {};
 
   exec.flags = VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX;
@@ -129,8 +165,15 @@ hcall_wait(int dev_fd, void *buf, size_t size)
   exec.size = size;
   exec.fence_fd = 0;
   exec.ring_idx = 1;
-  ioctl(dev_fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
-  sync_wait(exec.fence_fd, -1);
+  try {
+    shim_debug("%s HCALL IOCTL started", hcall_cmd2name(req->cmd).c_str());
+    ioctl(dev_fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
+    shim_debug("%s HCALL IOCTL ended", hcall_cmd2name(req->cmd).c_str());
+    sync_wait(exec.fence_fd, -1);
+    shim_debug("%s HCALL IOCTL wait ended", hcall_cmd2name(req->cmd).c_str());
+  } catch (const xrt_core::system_error& e) {
+    shim_err(e.get_code(), "%s HCALL failed: %s", hcall_cmd2name(req->cmd).c_str(), e.what());
+  }
   close(exec.fence_fd);
 }
 
@@ -324,8 +367,12 @@ hcall(void *req, void *out_buf, size_t out_size) const
 
   hcall(req);
 
-  if (out_buf)
-    memcpy(out_buf, m_resp_buf->get(), sz);
+  auto rsp_hdr = reinterpret_cast<amdxdna_ccmd_rsp*>(m_resp_buf->get());
+  if (rsp_hdr->ret) {
+    auto r = reinterpret_cast<vdrm_ccmd_req*>(req);
+    shim_err(rsp_hdr->ret, "%s HCALL received bad reponse", hcall_cmd2name(r->cmd).c_str());
+  }
+  memcpy(out_buf, m_resp_buf->get(), sz);
 }
 
 void
@@ -491,14 +538,14 @@ submit_cmd(submit_cmd_arg& arg) const
 
 void
 platform_drv_virtio::
-wait_syncobj(wait_syncobj_arg& arg) const
+wait_cmd_syncobj(wait_cmd_arg& arg) const
 {
   amdxdna_ccmd_wait_cmd_req req = {
     { AMDXDNA_CCMD_WAIT_CMD, sizeof(req) },
   };
 
-  req.seq = arg.timepoint;
-  req.syncobj_hdl = arg.handle;
+  req.seq = arg.seq;
+  req.syncobj_hdl = arg.ctx_syncobj_handle;
   // TODO: needs to pass timeout to host
   hcall(&req);
 }

@@ -185,7 +185,6 @@ reserve_slot()
   auto h = get_header_ptr();
 
   do {
-    std::unique_lock<std::mutex> lock(m_mutex);
     if (h->write_index < h->read_index) {
       shim_err(EINVAL, "Queue read before write! read_index=0x%lx, write_index=0x%lx",
         h->read_index, h->write_index);
@@ -197,7 +196,6 @@ reserve_slot()
     } else {
       queue_full = true;
     }
-    lock.unlock();
 
     if (queue_full) {
       shim_debug("Queue is full, wait for next available slot");
@@ -345,9 +343,9 @@ fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size)
   *m_mapped_doorbell = 0;
 }
 
-void
+uint64_t
 hwq_umq::
-issue_command(cmd_buffer *cmd_bo)
+issue_command(const cmd_buffer *cmd_bo)
 {
   auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->vaddr());
 
@@ -370,8 +368,8 @@ issue_command(cmd_buffer *cmd_bo)
   uint64_t comp = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
 
   auto seq = issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
-  cmd_bo->set_cmd_seq(seq);
   shim_debug("Submitted command (%ld)", seq);
+  return seq;
 }
 
 void
