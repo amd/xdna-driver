@@ -24,7 +24,8 @@ struct host_queue_header {
 		u16 minor;
 	}
 	version;
-	u32	capacity; //Queue capacity, must be a power of two.
+	//Queue capacity, must be a power of two.
+	u32	capacity;
 	u64	write_index;
 	u64	data_address;
 };
@@ -91,7 +92,7 @@ typedef struct host_queue_indirect_pkt {
 
 typedef struct host_queue_indirect_hdr {
 	struct common_header	header;
-	u32		data[HOST_INDIRECT_PKT_NUM * sizeof(host_indirect_packet_entry_t)];
+	u32	data[HOST_INDIRECT_PKT_NUM * sizeof(host_indirect_packet_entry_t)];
 } host_queue_indirect_hdr_t;
 
 struct hsa_queue {
@@ -107,15 +108,18 @@ struct ve2_hq_complete {
 };
 
 struct ve2_mem {
-	u64		user_addr; /* mapped for user to access memory */
-	u64		dma_addr;  /* addr for hardware to access, can be phy_t or dma_t */
+	// mapped for user to access memory
+	u64		user_addr;
+	// addr for hardware to access, can be phy_t or dma_t
+	u64		dma_addr;
 };
 
 struct ve2_hsa_queue {
 	struct hsa_queue		*hsa_queue_p;
 	struct ve2_mem			hsa_queue_mem;
 	struct ve2_hq_complete		hq_complete;
-	struct mutex			hq_lock; /* protect hwctx idr */
+	// protect hwctx idr
+	struct mutex			hq_lock;
 };
 
 // Handshake packet structure format
@@ -123,14 +127,18 @@ struct ve2_hsa_queue {
 typedef struct {
 	u32	mpaie_alive;			//0
 	u32	partition_base_address;		//4
-	u32	partition_size:7;		//8
-	u32	reserved:24;			//8
-	u32	uc_b:1;				//8
+	struct {
+		u32	partition_size:7;	//8
+		u32	reserved:23;		//8
+		u32	mode:1;			//8
+		u32	uc_b:1;			//8
+	}
+	aie_info;
 	u32	hsa_addr_high;			//c
 	u32	hsa_addr_low;			//10
 	u32	ctx_switch_req;			//14
 	u32	hsa_location;			//18
-	u32	hsa_lite_status;		//1c
+	u32	cert_idle_status;		//1c
 	u32	misc_status;			//20
 	u32	log_addr_high;			//24
 	u32	log_addr_low;			//28
@@ -215,5 +223,19 @@ typedef struct {
 		// previous pc (relative addr to current page) that drives current_job_ctxt to NULL
 		u32	ppc;
 	}
-	pc;
+	vm;
+	volatile struct
+	{
+		//exception address
+		u32	ear;
+		//exception status
+		u32	esr;
+		//exception pc
+		u32	pc;
+	}
+	exception;
+#ifdef PDI_LOAD_TEST
+	u32 test_pdi_addr_high;
+	u32 test_pdi_addr_low;
+#endif
 } handshake_t;
