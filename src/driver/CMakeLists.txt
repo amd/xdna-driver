@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2022-2023, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 set(XDNA_DRV amdxdna)
+set(XDNA_PF_DRV amdxdna_pf)
 
 set(XDNA_DRV_DIR amdxdna)
 set(XDNA_DRV_TGT ${XDNA_DRV}.ko)
+set(XDNA_DRV_PF_TGT ${XDNA_PF_DRV}.ko)
 set(XDNA_DRV_PATH ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_TGT})
+set(XDNA_DRV_PF_PATH ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_PF_TGT})
 set(XDNA_DRV_BLD_DIR driver/${XDNA_DRV_DIR})
 set(XDNA_DRV_BLD_SRC ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_BLD_DIR})
 set(XDNA_DRV_BLD_TGT ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_DIR})
@@ -31,14 +34,15 @@ add_custom_command(
 
 # Because ${XDNA_DRV_TGT} is generated in ${XDNA_DRV_BLD_TGT}. So this custom command will always run.
 add_custom_command(
-  OUTPUT ${XDNA_DRV_TGT}
-  COMMENT "Build ${XDNA_DRV_TGT}"
+  OUTPUT ${XDNA_DRV_TGT} ${XDNA_DRV_PF_PATH}
+  COMMENT "Build ${XDNA_DRV_TGT} and ${XDNA_DRV_PF_TGT}"
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} ${KERNEL_VER} UMQ_HELLO_TEST=${UMQ_HELLO_TEST} ${XDNA_DRV_BLD_FLAGS_MAKE} XDNA_BUS_TYPE=pci
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} copy_ko
   COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
+  COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_PF_TGT} ${XDNA_DRV_PF_PATH}
   DEPENDS all_driver_source
   )
-add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT})
+add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT} ${XDNA_DRV_PF_PATH})
 
 # Tar and install driver source code for packaging
 set(XDNA_DRV_SRC_DIR
@@ -99,7 +103,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dkms.conf
   )
 
 # install .ko for testing
-install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
+install(FILES ${XDNA_DRV_PATH} ${XDNA_DRV_PF_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
 
 set(amdxdna_drv_tools
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/dkms_driver.sh
