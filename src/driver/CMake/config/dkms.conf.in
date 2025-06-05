@@ -1,9 +1,16 @@
 PACKAGE_NAME=@XDNA_DKMS_PKG_NAME@
 PACKAGE_VERSION="@XRT_PLUGIN_VERSION_STRING@"
 BUILD_EXCLUSIVE_KERNEL_MIN=6.8
-MAKE[0]="cd driver/@XDNA_DRV_DIR@; make @XDNA_DRV_BLD_FLAGS_DKMS@ KERNEL_SRC=${kernel_source_dir}; cd ../.."
-CLEAN="cd driver/@XDNA_DRV_DIR@; make clean KERNEL_SRC=${kernel_source_dir}; cd ../.."
+
+MAKE="cd driver/@XDNA_DRV_DIR@; make @XDNA_DRV_BLD_FLAGS_DKMS@ KERNEL_SRC=${kernel_source_dir}; cd ../@XDNA_DRV_PF_DIR@; make KERNEL_SRC=${kernel_source_dir}; cd ../.."
+CLEAN="cd driver/@XDNA_DRV_DIR@; make clean KERNEL_SRC=${kernel_source_dir}; cd ../@XDNA_DRV_PF_DIR@; make clean KERNEL_SRC=${kernel_source_dir}; cd ../.."
+
 BUILT_MODULE_NAME[0]=@XDNA_DRV@
 BUILT_MODULE_LOCATION[0]="driver/@XDNA_DRV_DIR@/build/driver/amdxdna"
 DEST_MODULE_LOCATION[0]="/kernel/extras"
+
+BUILT_MODULE_NAME[1]=@XDNA_DRV_PF@
+BUILT_MODULE_LOCATION[1]="driver/@XDNA_DRV_PF_DIR@/build/driver/amdxdna_pf"
+DEST_MODULE_LOCATION[1]="/kernel/extras"
+
 AUTOINSTALL="yes"
