@@ -35,7 +35,7 @@ get_heap_vaddr() const
 
 uint64_t
 pdev_umq::
-get_heap_xdna_addr() const
+get_heap_paddr() const
 {
   return AMDXDNA_INVALID_ADDR;
 }

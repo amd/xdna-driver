@@ -41,7 +41,7 @@ public:
   is_cache_coherent() const = 0;
 
   virtual uint64_t
-  get_heap_xdna_addr() const = 0;
+  get_heap_paddr() const = 0;
 
   virtual void *
   get_heap_vaddr() const = 0;

@@ -178,6 +178,9 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
   case drv_ioctl_cmd::create_bo:
     create_bo(*static_cast<create_bo_arg*>(cmd_arg));
     break;
+  case drv_ioctl_cmd::create_uptr_bo:
+    create_uptr_bo(*static_cast<create_uptr_bo_arg*>(cmd_arg));
+    break;
   case drv_ioctl_cmd::destroy_bo:
     destroy_bo(*static_cast<destroy_bo_arg*>(cmd_arg));
     break;

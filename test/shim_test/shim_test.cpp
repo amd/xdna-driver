@@ -49,6 +49,7 @@ void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_with_ubuf_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -379,6 +380,37 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
+}
+
+void
+TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  uint32_t boflags = static_cast<unsigned int>(arg[0]);
+  uint32_t ext_boflags = static_cast<unsigned int>(arg[1]);
+  arg_type bos_size(arg.begin() + 2, arg.end());
+  std::vector<std::unique_ptr<bo>> bos;
+  const uint64_t fill = 0x55aa55aa55aa55aa;
+  std::vector< std::vector<char> > bufs;
+
+  for (auto& size : bos_size) {
+    if (size < 8)
+      throw std::runtime_error("User ptr BO size too small");
+    bufs.emplace_back(size);
+
+    auto p = reinterpret_cast<uint64_t*>(bufs.back().data());
+    *p = fill;
+    bos.push_back(std::make_unique<bo>(dev, p, static_cast<size_t>(size), boflags, ext_boflags));
+  }
+
+  for (auto& bo : bos) {
+    auto p = reinterpret_cast<uint64_t*>(bo->map());
+    if (*p != fill) {
+      printf("User ptr BO content is %lx@%p\n", *p, p);
+      throw std::runtime_error("User ptr BO content mis-match");
+    }
+    get_and_show_bo_properties(dev, bo->get());
+  }
 }
 
 void
@@ -736,6 +768,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 8 }
+  },
+  test_case{ "create and free user pointer bo", {},
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+  },
+  test_case{ "io test with user pointer BOs", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_with_ubuf_bo, {}
   },
 };
 

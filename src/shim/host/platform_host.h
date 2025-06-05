@@ -30,6 +30,9 @@ private:
   create_bo(create_bo_arg& arg) const override;
 
   void
+  create_uptr_bo(create_uptr_bo_arg& arg) const override;
+
+  void
   destroy_bo(destroy_bo_arg& arg) const override;
 
   void
@@ -58,6 +61,12 @@ private:
 
   void
   set_state(amdxdna_drm_set_state& arg) const override;
+
+  std::pair<uint64_t, uint64_t>
+  get_bo_info(uint32_t boh) const;
+
+  std::tuple<uint32_t, uint64_t, uint64_t>
+  create_drm_bo(void *uva_tbl, size_t size, int type) const;
 };
 
 }
