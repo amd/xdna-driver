@@ -51,7 +51,10 @@ alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t)
     ibo.tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
     break;
   default:
-    ibo.tbo = std::make_shared<bo>(dev, sz);
+    if (ibo.ubuf.size())
+      ibo.tbo = std::make_shared<bo>(dev, ibo.ubuf);
+    else
+      ibo.tbo = std::make_shared<bo>(dev, sz);
     break;
   }
 }
@@ -211,7 +214,7 @@ io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
 }
 
 io_test_bo_set::
-io_test_bo_set(device* dev, const std::string& xclbin_name) :
+io_test_bo_set(device* dev, const std::string& xclbin_name, bool use_ubuf) :
   io_test_bo_set_base(dev, xclbin_name)
 {
   std::string file;
@@ -237,20 +240,28 @@ io_test_bo_set(device* dev, const std::string& xclbin_name) :
     case IO_TEST_BO_INPUT:
       ibo.size = IFM_SIZE(tp);
       ibo.init_offset = IFM_DIRTY_BYTES(tp);
+      if (use_ubuf)
+        ibo.ubuf = std::vector<char>(ibo.size);
       alloc_bo(ibo, m_dev, type);
       init_bo(ibo, m_local_data_path + ifm_file);
       break;
     case IO_TEST_BO_PARAMETERS:
       ibo.size = PARAM_SIZE(tp);
+      if (use_ubuf)
+        ibo.ubuf = std::vector<char>(ibo.size);
       alloc_bo(ibo, m_dev, type);
       init_bo(ibo, m_local_data_path + param_file);
       break;
     case IO_TEST_BO_OUTPUT:
       ibo.size = OFM_SIZE(tp);
+      if (use_ubuf)
+        ibo.ubuf = std::vector<char>(ibo.size);
       alloc_bo(ibo, m_dev, type);
       break;
     case IO_TEST_BO_INTERMEDIATE:
       ibo.size = INTER_SIZE(tp);
+      if (use_ubuf)
+        ibo.ubuf = std::vector<char>(ibo.size);
       alloc_bo(ibo, m_dev, type);
       break;
     case IO_TEST_BO_MC_CODE:
@@ -258,6 +269,8 @@ io_test_bo_set(device* dev, const std::string& xclbin_name) :
       if (MC_CODE_SIZE(tp))
         throw std::runtime_error("MC_CODE_SIZE is non zero!!!");
       ibo.size = DUMMY_MC_CODE_BUFFER_SIZE;
+      if (use_ubuf)
+        ibo.ubuf = std::vector<char>(ibo.size);
       alloc_bo(ibo, m_dev, type);
       break;
     case IO_TEST_BO_CTRL_PKT_PM:
@@ -275,7 +288,12 @@ io_test_bo_set(device* dev, const std::string& xclbin_name) :
 }
 
 io_test_bo_set::
-io_test_bo_set(device* dev) : io_test_bo_set(dev, get_xclbin_name(dev))
+io_test_bo_set(device* dev) : io_test_bo_set(dev, get_xclbin_name(dev), false)
+{
+}
+
+io_test_bo_set::
+io_test_bo_set(device* dev, bool use_ubuf) : io_test_bo_set(dev, get_xclbin_name(dev), use_ubuf)
 {
 }
 

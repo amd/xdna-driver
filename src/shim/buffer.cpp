@@ -13,6 +13,23 @@
 
 namespace {
 
+const uint64_t page_size = sysconf(_SC_PAGESIZE);
+
+void *
+page_align(void *ptr)
+{
+  auto ap = reinterpret_cast<uintptr_t>(ptr);
+  ap &= ~(page_size - 1);
+  return reinterpret_cast<void*>(ap);
+}
+
+uint64_t
+page_offset(void *ptr)
+{
+  auto ap = reinterpret_cast<uintptr_t>(ptr);
+  return ap & (page_size - 1);
+}
+
 std::string
 type_to_name(int type, uint64_t flags)
 {
@@ -179,6 +196,20 @@ drm_bo(const pdev& pdev, size_t size, int type)
 }
 
 drm_bo::
+drm_bo(const pdev& pdev, size_t size, void *uptr)
+  : m_pdev(pdev), m_size(size), m_type(AMDXDNA_BO_SHARE)
+{
+  create_uptr_bo_arg arg = {
+    .buf = uptr,
+    .size = m_size,
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::create_uptr_bo, &arg);
+  m_id = arg.bo;
+  m_xdna_addr = arg.xdna_addr;
+  m_map_offset = arg.map_offset;
+}
+
+drm_bo::
 drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
   : m_pdev(pdev)
 {
@@ -219,10 +250,30 @@ drm_bo::
 //
 
 buffer::
+buffer(const pdev& dev, size_t size, void *uptr)
+  : buffer(dev, size, AMDXDNA_BO_SHARE, uptr)
+{
+}
+
+buffer::
 buffer(const pdev& dev, size_t size, int type)
+  : buffer(dev, size, type, nullptr)
+{
+}
+
+buffer::
+buffer(const pdev& dev, size_t size, int type, void *uptr)
   : m_pdev(dev)
 {
-  m_bo = std::make_unique<drm_bo>(dev, size, type);
+  if (uptr && type != AMDXDNA_BO_SHARE)
+    shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
+
+  if (uptr) {
+    m_page_offset = page_offset(uptr);
+    m_bo = std::make_unique<drm_bo>(dev, size + m_page_offset, page_align(uptr));
+  } else {
+    m_bo = std::make_unique<drm_bo>(dev, size, type);
+  }
   if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
     mmap_drm_bo();
   else if (m_bo->m_type != AMDXDNA_BO_DEV)
@@ -235,7 +286,10 @@ buffer(const pdev& dev, size_t size, int type)
   if (m_bo->m_type == AMDXDNA_BO_SHARE)
     sync(direction::host2device, size, 0);
 
-  shim_debug("Created BO: %s", describe().c_str());
+  if (uptr)
+    shim_debug("Created user ptr (%p) BO: %s", uptr, describe().c_str());
+  else
+    shim_debug("Created BO: %s", describe().c_str());
 }
 
 buffer::
@@ -285,17 +339,17 @@ buffer::
 vaddr() const
 {
   if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
-    return m_addr->get();
+    return reinterpret_cast<char*>(m_addr->get()) + m_page_offset;
   // Must be DEV BO.
   auto base = static_cast<char*>(m_pdev.get_heap_vaddr());
-  return base + (m_bo->m_xdna_addr - m_pdev.get_heap_xdna_addr());
+  return base + (paddr() - m_pdev.get_heap_paddr());
 }
 
 size_t
 buffer::
 size() const
 {
-  return m_bo->m_size;
+  return m_bo->m_size - m_page_offset;
 }
 
 void
@@ -346,7 +400,7 @@ buffer::
 paddr() const
 {
   if (m_bo->m_xdna_addr != AMDXDNA_INVALID_ADDR)
-    return m_bo->m_xdna_addr;
+    return m_bo->m_xdna_addr + m_page_offset;
   return reinterpret_cast<uintptr_t>(vaddr());
 }
 
@@ -376,7 +430,7 @@ describe() const
 
   desc += " ";
   desc += "sz=";
-  desc += to_hex_string(m_bo->m_size);
+  desc += to_hex_string(size());
 
   desc += " ";
   desc += "paddr=";
@@ -390,26 +444,26 @@ describe() const
 
 void
 buffer::
-sync(direction, size_t size, size_t offset)
+sync(direction, size_t sz, size_t offset)
 {
   if (m_pdev.is_cache_coherent())
     return;
 
+  if (offset + sz > size())
+    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
+
   if (is_driver_sync()) {
     sync_bo_arg arg = {
       .bo = id(),
-      .offset = offset,
-      .size = size,
+      .offset = offset + m_page_offset,
+      .size = sz,
     };
     m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
     return;
   }
 
-  if (offset + size > m_bo->m_size)
-    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, size);
-
-  clflush_data(vaddr(), offset, size); 
-  shim_debug("Syncing BO %d: offset=%ld, size=%ld", id().handle, offset, size);
+  clflush_data(vaddr(), offset, sz); 
+  shim_debug("Sync'ed BO %d: offset=%ld, size=%ld", id().handle, offset, sz);
 }
 
 std::set<bo_id>

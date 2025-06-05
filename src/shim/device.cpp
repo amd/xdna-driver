@@ -1462,19 +1462,23 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   auto f = xcl_bo_flags{flags};
   if (f.boflags == XCL_BO_FLAGS_NONE)
     shim_not_supported_err("unsupported buffer type: none flag");
-  if (userptr)
-    shim_not_supported_err("User ptr BO");
   auto type = bo_flags_to_type(flags, !!m_pdev.get_heap_vaddr());
   if (type == AMDXDNA_BO_INVALID)
     shim_not_supported_err("Bad BO flags");
+  if (userptr && type != AMDXDNA_BO_SHARE)
+    shim_not_supported_err("Non-AMDXDNA_BO_SHARE user ptr BO");
+  if (reinterpret_cast<uintptr_t>(userptr) % alignof(uint32_t))
+    shim_not_supported_err("User ptr must be at least uint32_t aligned");
 
   std::unique_ptr<buffer> bo;
   if (f.use == XRT_BO_USE_DEBUG)
     bo = std::make_unique<dbg_buffer>(get_pdev(), size, type);
   else if (type == AMDXDNA_BO_CMD)
     bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
-  else
+  else if (!userptr)
     bo = std::make_unique<buffer>(get_pdev(), size, type);
+  else
+    bo = std::make_unique<buffer>(get_pdev(), size, userptr);
   bo->set_flags(flags);
   return bo;
 }
