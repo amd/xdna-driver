@@ -1,7 +1,7 @@
 #! /bin/bash
 
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2024 AMD, Inc. All rights reserved.
+# Copyright (C) 2023-2025 AMD, Inc. All rights reserved.
 
 RED="\e[31m"
 ENDCOLOR="\e[0m"
@@ -43,8 +43,10 @@ echo "KERNEL==\"accel*\",DRIVERS==\"amdxdna\",MODE=\"0666\"" > ${udev_rules_d}/$
 rmmod amdxdna > /dev/null 2>&1
 if [ "$build_type" = "Debug" ]; then
 	modprobe amdxdna dyndbg=+pf
+	modprobe amdxdna_pf dyndbg=+pf
 else
 	modprobe amdxdna
+	modprobe amdxdna_pf
 fi
 
 unset XILINX_XRT
