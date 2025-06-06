@@ -19,7 +19,7 @@ static int cert_setup_partition(struct device *aie_dev, u32 col, u32 lead_col, u
 	int ret;
 
 	cert_comm.partition_base_address = lead_col_addr;
-	cert_comm.partition_size = partition_size;
+	cert_comm.aie_info.partition_size = partition_size;
 	cert_comm.hsa_addr_high = ADDR64_HIGH(hsa_addr);
 	cert_comm.hsa_addr_low = ADDR64_LOW(hsa_addr);
 	cert_comm.dbg.hsa_addr_high = 0xFFFFFFFF;

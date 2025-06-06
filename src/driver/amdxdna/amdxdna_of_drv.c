@@ -87,7 +87,7 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-goto out:
+out:
 	drm_dev_put(&xdna->ddev);
 	return ret;
 }
