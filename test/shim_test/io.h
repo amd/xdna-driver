@@ -28,6 +28,7 @@ enum io_test_bo_type {
 struct io_test_bo {
   size_t size = 0;
   size_t init_offset = 0;
+  std::vector<char> ubuf;
   std::shared_ptr<bo> tbo;
 };
 
@@ -82,9 +83,9 @@ protected:
 class io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  io_test_bo_set(device *dev, const std::string& xclbin_name);
-
+  io_test_bo_set(device *dev, const std::string& xclbin_name, bool use_ubuf);
   io_test_bo_set(device *dev);
+  io_test_bo_set(device *dev, bool use_ubuf);
 
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;

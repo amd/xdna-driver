@@ -49,7 +49,7 @@ is_cache_coherent() const
 
 uint64_t
 pdev_kmq::
-get_heap_xdna_addr() const
+get_heap_paddr() const
 {
   return m_dev_heap_bo->paddr();
 }

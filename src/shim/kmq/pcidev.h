@@ -20,7 +20,7 @@ public:
   is_cache_coherent() const override;
 
   uint64_t
-  get_heap_xdna_addr() const override;
+  get_heap_paddr() const override;
 
   void *
   get_heap_vaddr() const override;

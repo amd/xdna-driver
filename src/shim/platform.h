@@ -23,6 +23,7 @@ enum class drv_ioctl_cmd {
   config_ctx_debug_bo,
 
   create_bo,
+  create_uptr_bo,
   destroy_bo,
   sync_bo,
   export_bo,
@@ -85,6 +86,14 @@ struct create_bo_arg {
   int type;
   size_t size;
   uint64_t xdna_addr_align;
+  bo_id bo;
+  uint64_t xdna_addr;
+  uint64_t map_offset;
+};
+
+struct create_uptr_bo_arg {
+  void *buf;
+  size_t size;
   bo_id bo;
   uint64_t xdna_addr;
   uint64_t map_offset;
@@ -219,6 +228,10 @@ private:
 
   virtual void
   create_bo(create_bo_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  create_uptr_bo(create_uptr_bo_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void

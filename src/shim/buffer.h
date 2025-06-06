@@ -32,6 +32,7 @@ private:
 class drm_bo {
 public:
   drm_bo(const pdev& pdev, size_t size, int type);
+  drm_bo(const pdev& pdev, size_t size, void *uptr);
   drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
   ~drm_bo();
 
@@ -49,6 +50,7 @@ class buffer : public xrt_core::buffer_handle
 {
 public:
   buffer(const pdev& dev, size_t size, int type);
+  buffer(const pdev& dev, size_t size, void *uptr);
   buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl);
   virtual ~buffer();
 
@@ -75,6 +77,8 @@ public:
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
 
 public:
+  buffer(const pdev& dev, size_t size, int type, void *uptr);
+
   void*
   vaddr() const;
 
@@ -111,6 +115,7 @@ private:
   std::unique_ptr<mmap_ptr> m_range_addr = nullptr;
   std::unique_ptr<mmap_ptr> m_addr = nullptr;
   std::unique_ptr<drm_bo> m_bo = nullptr;
+  uint64_t m_page_offset = 0;
 };
 
 class cmd_buffer : public buffer

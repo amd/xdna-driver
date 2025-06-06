@@ -124,9 +124,16 @@ submit_command(xrt_core::buffer_handle *cmd)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
   auto boh = static_cast<cmd_buffer*>(cmd);
-  shim_debug("Enqueuing command after command %ld", m_last_seq);
-  push_to_pending_queue(lock, boh, 0, pending_cmd_type::io);
-  boh->mark_enqueued();
+
+  // If pending queue is empty, submit directly to driver, else enqueue.
+  if (pending_queue_empty()) {
+    auto seq = issue_command(boh);
+    boh->mark_submitted(seq);
+  } else {
+    shim_debug("Enqueuing command after command %ld", m_last_seq);
+    push_to_pending_queue(lock, boh, 0, pending_cmd_type::io);
+    boh->mark_enqueued();
+  }
 }
 
 void
