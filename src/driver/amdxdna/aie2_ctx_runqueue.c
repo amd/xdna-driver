@@ -1107,12 +1107,14 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	list_add_tail(&ctx->entry, &rq->disconn_list);
 	rq->ctx_cnt++;
 
+	/* Expand partition is needed*/
 	if (num_col > rq->max_cols) {
 		rq->max_cols = num_col;
 		wait_parts = true;
 	}
 
-	if (!rq->ctx_cnt && num_col < rq->max_cols)
+	/* Shrink partition is needed*/
+	if (rq->ctx_cnt == 1 && num_col < rq->max_cols)
 		wait_parts = true;
 
 	if (ctx_is_rt(ctx)) {
@@ -1223,7 +1225,7 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 	if (!rq->parts)
 		return -ENOMEM;
 
-	rq->col_arr = kcalloc(ndev->total_col, sizeof(*rq->col_arr), GFP_KERNEL);
+	rq->col_arr = kcalloc(ndev->total_col + 1, sizeof(*rq->col_arr), GFP_KERNEL);
 	if (!rq->col_arr)
 		goto free_parts;
 
