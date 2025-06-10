@@ -37,15 +37,6 @@ static int cert_setup_partition(struct device *aie_dev, u32 col, u32 lead_col, u
 	return aie_partition_uc_wakeup(aie_dev, &loc);
 }
 
-static void ve2_irq_handler(u32 partition_id, void *cb_arg)
-{
-	struct amdxdna_ctx *hwctx = (struct amdxdna_ctx *)cb_arg;
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-
-	XDNA_DBG(xdna, "Created partition for start_col %d, num_col %d with partition_id %d\n",
-		 hwctx->start_col, hwctx->num_col, partition_id);
-}
-
 static int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req, int total_col,
 			    u32 num_col)
 {
@@ -159,8 +150,6 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 	start_col = hwctx->start_col;
 	num_col = hwctx->num_col;
 
-	request.user_event1_complete = ve2_irq_handler;
-	request.user_event1_priv = hwctx;
 	request.partition_id = aie_calc_part_id(start_col, num_col);
 	XDNA_DBG(xdna, "Requesting partition for start_col %d, num_col %d with partition_id %d\n",
 		 start_col, num_col, request.partition_id);
@@ -247,6 +236,8 @@ struct amdxdna_ctx *ve2_get_hwctx(struct amdxdna_dev *xdna, u32 col)
 	unsigned long hwctx_id;
 	u32 start, end;
 	int idx;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	list_for_each_entry(client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&client->ctx_srcu);

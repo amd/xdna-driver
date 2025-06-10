@@ -82,8 +82,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 		}
 	}
 
+	WARN_ON(!is_power_of_2(nslots));
 	queue->hsa_queue_p->hq_header.capacity = nslots;
-	mutex_init(&queue->hq_lock);
 
 	XDNA_DBG(xdna, "created ve2 hsq queue with capacity %d slots", nslots);
 	return 0;
@@ -109,11 +109,11 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	ret = ve2_mgmt_create_partition(xdna, hwctx);
 	if (ret)
-		goto free_host_queue;
+		goto free_hsa_queue;
 
 	return 0;
 
-free_host_queue:
+free_hsa_queue:
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 free_priv:
 	kfree(hwctx->priv);

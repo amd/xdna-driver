@@ -8,6 +8,7 @@
 #include <linux/xlnx-ai-engine.h>
 
 #include "ve2_of.h"
+#include "ve2_res_solver.h"
 
 static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 {
@@ -67,8 +68,17 @@ out:
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
+	struct init_config xrs_cfg = { 0 };
 	struct amdxdna_dev_hdl *xdna_hdl;
 	int ret;
+
+	xrs_cfg.ddev = &xdna->ddev;
+	xrs_cfg.total_col = XRS_MAX_COL;
+	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
+		return -EINVAL;
+	}
 
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
