@@ -794,6 +794,10 @@ static void rq_parts_work(struct work_struct *work)
 			rq->max_cols = i;
 			break;
 		}
+
+		/* If all counters are zero, shrink partition to 1 column */
+		if (!i)
+			rq->max_cols = 1;
 	}
 
 	for (i = 0; i < rq->num_parts; i++)
@@ -1113,10 +1117,6 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		wait_parts = true;
 	}
 
-	/* Shrink partition is needed*/
-	if (rq->ctx_cnt == 1 && num_col < rq->max_cols)
-		wait_parts = true;
-
 	if (ctx_is_rt(ctx)) {
 		rq->rt_ctx_cnt++;
 		wait_parts = true;
@@ -1144,7 +1144,6 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna;
 	bool wait_parts = false;
 	u32 num_col;
-	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
@@ -1162,15 +1161,9 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 
 	num_col = ctx->priv->orig_num_col;
 	rq->col_arr[num_col]--;
-	if (!rq->col_arr[rq->max_cols]) {
-		for (i = rq->max_cols; i > 0; i--) {
-			if (!rq->col_arr[i])
-				continue;
-
-			wait_parts = true;
-			break;
-		}
-	}
+	/* Shrink partition is needed */
+	if (!rq->col_arr[rq->max_cols])
+		wait_parts = true;
 
 	if (wait_parts) {
 		list_add_tail(&ctx->parts_work_entry, &rq->parts_work_waitq);
