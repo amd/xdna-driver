@@ -26,12 +26,15 @@ page_align(void *ptr)
 uint64_t
 page_offset(void *ptr)
 {
+  if (!ptr)
+    return 0;
+
   auto ap = reinterpret_cast<uintptr_t>(ptr);
   return ap & (page_size - 1);
 }
 
 std::string
-type_to_name(int type, uint64_t flags)
+type_to_name(int type)
 {
   switch (type) {
   case AMDXDNA_BO_SHARE:
@@ -39,8 +42,6 @@ type_to_name(int type, uint64_t flags)
   case AMDXDNA_BO_DEV_HEAP:
     return std::string("AMDXDNA_BO_DEV_HEAP");
   case AMDXDNA_BO_DEV:
-    if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG)
-      return std::string("AMDXDNA_BO_DEV_DEBUG");
     return std::string("AMDXDNA_BO_DEV");
   case AMDXDNA_BO_CMD:
     return std::string("AMDXDNA_BO_CMD");
@@ -264,16 +265,15 @@ buffer(const pdev& dev, size_t size, int type)
 buffer::
 buffer(const pdev& dev, size_t size, int type, void *uptr)
   : m_pdev(dev)
+  , m_uptr(uptr)
 {
-  if (uptr && type != AMDXDNA_BO_SHARE)
+  if (m_uptr && type != AMDXDNA_BO_SHARE)
     shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
 
-  if (uptr) {
-    m_page_offset = page_offset(uptr);
-    m_bo = std::make_unique<drm_bo>(dev, size + m_page_offset, page_align(uptr));
-  } else {
+  if (m_uptr)
+    m_bo = std::make_unique<drm_bo>(dev, size + page_offset(m_uptr), page_align(m_uptr));
+  else
     m_bo = std::make_unique<drm_bo>(dev, size, type);
-  }
   if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
     mmap_drm_bo();
   else if (m_bo->m_type != AMDXDNA_BO_DEV)
@@ -286,10 +286,7 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   if (m_bo->m_type == AMDXDNA_BO_SHARE)
     sync(direction::host2device, size, 0);
 
-  if (uptr)
-    shim_debug("Created user ptr (%p) BO: %s", uptr, describe().c_str());
-  else
-    shim_debug("Created BO: %s", describe().c_str());
+  shim_debug("Created %s", describe().c_str());
 }
 
 buffer::
@@ -301,13 +298,13 @@ buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl)
     mmap_drm_bo();
   else if (m_bo->m_type != AMDXDNA_BO_DEV)
     shim_err(EINVAL, "Non-DEV BO without mmap offset!");
-  shim_debug("Imported BO: %s", describe().c_str());
+  shim_debug("Imported %s", describe().c_str());
 }
 
 buffer::
 ~buffer()
 {
-  shim_debug("Destroying BO: %s", describe().c_str());
+  shim_debug("Destroying %s", describe().c_str());
 }
 
 void
@@ -338,8 +335,12 @@ void *
 buffer::
 vaddr() const
 {
+  if (m_uptr)
+    return m_uptr;
+
   if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
-    return reinterpret_cast<char*>(m_addr->get()) + m_page_offset;
+    return reinterpret_cast<char*>(m_addr->get());
+
   // Must be DEV BO.
   auto base = static_cast<char*>(m_pdev.get_heap_vaddr());
   return base + (paddr() - m_pdev.get_heap_paddr());
@@ -349,7 +350,7 @@ size_t
 buffer::
 size() const
 {
-  return m_bo->m_size - m_page_offset;
+  return m_bo->m_size - page_offset(m_uptr);
 }
 
 void
@@ -399,9 +400,9 @@ uint64_t
 buffer::
 paddr() const
 {
-  if (m_bo->m_xdna_addr != AMDXDNA_INVALID_ADDR)
-    return m_bo->m_xdna_addr + m_page_offset;
-  return reinterpret_cast<uintptr_t>(vaddr());
+  uint64_t ret = (m_bo->m_xdna_addr != AMDXDNA_INVALID_ADDR) ?
+    m_bo->m_xdna_addr : reinterpret_cast<uintptr_t>(m_addr->get());
+  return ret + page_offset(m_uptr);
 }
 
 void
@@ -422,8 +423,10 @@ std::string
 buffer::
 describe() const
 {
-  std::string desc = "type=";
-  desc += type_to_name(m_bo->m_type, m_flags);
+  std::string desc = bo_sub_type_name() + ": ";
+
+  desc += "type=";
+  desc += type_to_name(m_bo->m_type);
   desc += " ";
   desc += "hdl=";
   desc += std::to_string(id().handle);
@@ -455,7 +458,7 @@ sync(direction, size_t sz, size_t offset)
   if (is_driver_sync()) {
     sync_bo_arg arg = {
       .bo = id(),
-      .offset = offset + m_page_offset,
+      .offset = offset + page_offset(m_uptr),
       .size = sz,
     };
     m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
@@ -473,6 +476,13 @@ get_arg_bo_ids() const
   // For non-cmd BO, arg bo handles contains only its own handle.
   std::set<bo_id> ret = { id() };
   return ret;
+}
+
+std::string
+buffer::
+bo_sub_type_name() const
+{
+  return m_uptr ? "USER_PTR BO" : "NORMAL BO";
 }
 
 //
@@ -544,6 +554,13 @@ get_arg_bo_ids() const
   return ret;
 }
 
+std::string
+cmd_buffer::
+bo_sub_type_name() const
+{
+  return "EXEC_BUF BO";
+}
+
 //
 // Impl for class dbg_buffer
 //
@@ -587,6 +604,13 @@ dbg_buffer::
       << " from hwctx " << std::to_string(m_ctx_id)
       << ": " << e.what() << std::endl;
   }
+}
+
+std::string
+dbg_buffer::
+bo_sub_type_name() const
+{
+  return "DEBUG BO";
 }
 
 }
