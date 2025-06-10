@@ -27,24 +27,24 @@ struct host_queue_header {
 	u32	capacity;
 	u64	write_index;
 	u64	data_address;
-};
+} host_queue_header_t;
 
 struct host_indirect_packet_entry {
 	u32	host_addr_low;
 	u32	host_addr_high:25;
 	u32	uc_index:7;
-};
+} host_indirect_packet_entry_t;
 
 enum host_queue_packet_type {
 	HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC = 0,
 	HOST_QUEUE_PACKET_TYPE_INVALID = 1,
-};
+} host_queue_packet_type_t;
 
 enum host_queue_packet_opcode {
 	HOST_QUEUE_PACKET_EXEC_BUF = 1,
 	HOST_QUEUE_PACKET_TEST = 2,
 	HOST_QUEUE_PACKET_EXIT = 3,
-};
+} host_queue_packet_opcode_t;
 
 struct common_header {
 	struct {
@@ -62,22 +62,22 @@ struct common_header {
 struct xrt_packet_header {
 	struct common_header	common_header;
 	u64			completion_signal;
-};
+} xrt_packet_header_t;
 
 struct host_queue_packet {
 	struct xrt_packet_header	xrt_header;
 	u32				data[12];
-};
+} host_queue_packet_t;
 
 struct host_queue_indirect_hdr {
 	struct common_header	header;
 	u32	data[HOST_INDIRECT_PKT_NUM * sizeof(host_indirect_packet_entry_t)];
-};
+} host_queue_indirect_hdr_t;
 
 struct host_queue_indirect_pkt {
 	struct common_header		header;
 	struct exec_buf			payload;
-};
+} host_queue_indirect_pkt_t;
 
 struct host_queue_entry {
 	struct host_queue_header	hq_header;
@@ -85,10 +85,10 @@ struct host_queue_entry {
 };
 
 struct hsa_queue {
-	host_queue_header_t		hq_header;
-	host_queue_packet_t		hq_entry[HOST_QUEUE_ENTRY];
-	host_queue_indirect_hdr_t	hq_indirect_hdr[HOST_QUEUE_ENTRY];
-	host_queue_indirect_pkt_t	hq_indirect_pkt[HOST_QUEUE_ENTRY][HOST_INDIRECT_PKT_NUM];
+	struct host_queue_header	hq_header;
+	struct host_queue_packet	hq_entry[HOST_QUEUE_ENTRY];
+	struct host_queue_indirect_hdr	hq_indirect_hdr[HOST_QUEUE_ENTRY];
+	struct host_queue_indirect_pkt	hq_indirect_pkt[HOST_QUEUE_ENTRY][HOST_INDIRECT_PKT_NUM];
 };
 
 struct ve2_hq_complete {
@@ -106,15 +106,6 @@ struct ve2_hsa_queue {
 	struct ve2_mem			hsa_queue_mem;
 	struct ve2_hq_complete		hq_complete;
 };
-
-typedef struct host_queue_header host_queue_header_t;
-typedef enum host_queue_packet_type host_queue_packet_type_t;
-typedef struct host_indirect_packet_entry host_indirect_packet_entry_t;
-typedef struct host_queue_packet host_queue_packet_t;
-typedef enum host_queue_packet_opcode host_queue_packet_opcode_t;
-typedef struct xrt_packet_header xrt_packet_header_t;
-typedef struct host_queue_indirect_hdr host_queue_indirect_hdr_t;
-typedef struct host_queue_indirect_pkt host_queue_indirect_pkt_t;
 
 // Handshake packet structure format
 #define ALIVE_MAGIC		0x404C5645
@@ -196,8 +187,7 @@ struct handshake {
 		u32	ppc;
 	}
 	vm;
-	struct
-	{
+	struct {
 		u32	ear;
 		u32	esr;
 		u32	pc;
@@ -207,4 +197,4 @@ struct handshake {
 	u32 test_pdi_addr_high;
 	u32 test_pdi_addr_low;
 #endif
-};
+} handshake_t;
