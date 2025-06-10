@@ -80,6 +80,27 @@ struct amdxdna_cmd_preempt_data {
 	u32 prop_args[];    /* properties and regular kernel arguments */
 };
 
+/*
+ * Interpretation of payload for an amdxdna_cmd which has context health data
+ *
+ * @version:          context health data version
+ * @txn_op_idx:       index of last TXN control code executed
+ * @ctx_pc:           program counter for that context
+ *
+ * Field              Default value  Comment
+ * txn_op_idx:        0xFFFFFFFF     there is no txn control code is running or the
+ *                                   last txn control code op idx is not captured
+ * ctx_pc:            0              context .text program counter is not captured
+ *
+ * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
+ * amdxdna_cmd starting from payload will have the following information.
+ */
+struct amdxdna_ctx_health_data {
+	u32 version; /* MBZ */
+	u32 txn_op_idx;
+	u32 ctx_pc;
+};
+
 /* Exec buffer command header format */
 #define AMDXDNA_CMD_STATE		GENMASK(3, 0)
 #define AMDXDNA_CMD_EXTRA_CU_MASK	GENMASK(11, 10)
@@ -119,6 +140,8 @@ struct amdxdna_ctx {
 	u64				last_completed;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
+	struct amdxdna_ctx_health_data	health_data;
+	bool				health_reported;
 
 	struct list_head		entry;
 	struct list_head		parts_work_entry;
@@ -180,6 +203,15 @@ amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 	struct amdxdna_cmd *cmd = abo->mem.kva;
 
 	return FIELD_GET(AMDXDNA_CMD_STATE, cmd->header);
+}
+
+static inline void *
+amdxdna_cmd_get_data(struct amdxdna_gem_obj *abo, u32 *size)
+{
+	struct amdxdna_cmd *cmd = abo->mem.kva;
+
+	*size = abo->mem.size - offsetof(struct amdxdna_cmd, data);
+	return cmd->data;
 }
 
 // TODO: need to verify size <= cmd_bo size before return?
