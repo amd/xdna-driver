@@ -27,24 +27,24 @@ struct host_queue_header {
 	u32	capacity;
 	u64	write_index;
 	u64	data_address;
-} host_queue_header_t;
+};
 
 struct host_indirect_packet_entry {
 	u32	host_addr_low;
 	u32	host_addr_high:25;
 	u32	uc_index:7;
-} host_indirect_packet_entry_t;
+};
 
 enum host_queue_packet_type {
 	HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC = 0,
 	HOST_QUEUE_PACKET_TYPE_INVALID = 1,
-} host_queue_packet_type_t;
+};
 
 enum host_queue_packet_opcode {
 	HOST_QUEUE_PACKET_EXEC_BUF = 1,
 	HOST_QUEUE_PACKET_TEST = 2,
 	HOST_QUEUE_PACKET_EXIT = 3,
-} host_queue_packet_opcode_t;
+};
 
 struct common_header {
 	struct {
@@ -62,22 +62,22 @@ struct common_header {
 struct xrt_packet_header {
 	struct common_header	common_header;
 	u64			completion_signal;
-} xrt_packet_header_t;
+};
 
 struct host_queue_packet {
 	struct xrt_packet_header	xrt_header;
 	u32				data[12];
-} host_queue_packet_t;
+};
 
 struct host_queue_indirect_hdr {
 	struct common_header	header;
-	u32	data[HOST_INDIRECT_PKT_NUM * sizeof(host_indirect_packet_entry_t)];
-} host_queue_indirect_hdr_t;
+	u32	data[HOST_INDIRECT_PKT_NUM * sizeof(struct host_indirect_packet_entry)];
+};
 
 struct host_queue_indirect_pkt {
 	struct common_header		header;
 	struct exec_buf			payload;
-} host_queue_indirect_pkt_t;
+};
 
 struct host_queue_entry {
 	struct host_queue_header	hq_header;
@@ -197,4 +197,4 @@ struct handshake {
 	u32 test_pdi_addr_high;
 	u32 test_pdi_addr_low;
 #endif
-} handshake_t;
+};

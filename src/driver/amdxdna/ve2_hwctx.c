@@ -11,12 +11,12 @@
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
 
-static inline host_queue_packet_t *hsa_queue_get_pkt(struct hsa_queue *queue, u64 slot)
+static inline struct host_queue_packet *hsa_queue_get_pkt(struct hsa_queue *queue, u64 slot)
 {
 	return &queue->hq_entry[slot & (queue->hq_header.capacity - 1)];
 }
 
-static inline void hsa_queue_pkt_set_invalid(volatile host_queue_packet_t *pkt)
+static inline void hsa_queue_pkt_set_invalid(volatile struct host_queue_packet *pkt)
 {
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
 }
@@ -57,11 +57,11 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 		(u64 *)((char *)queue->hsa_queue_p + sizeof(struct hsa_queue));
 	queue->hq_complete.hqc_dma_addr = queue->hsa_queue_mem.dma_addr + sizeof(struct hsa_queue);
 	queue->hsa_queue_p->hq_header.data_address = queue->hsa_queue_mem.dma_addr +
-		sizeof(host_queue_header_t);
+		sizeof(struct host_queue_header);
 
 	// Set hsa queue slots to invalid
 	for (int i = 0; i < nslots; i++) {
-		host_queue_indirect_hdr_t *hdr = &queue->hsa_queue_p->hq_indirect_hdr[i];
+		struct host_queue_indirect_hdr *hdr = &queue->hsa_queue_p->hq_indirect_hdr[i];
 
 		hsa_queue_pkt_set_invalid(hsa_queue_get_pkt(queue->hsa_queue_p, i));
 		hdr->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
@@ -71,7 +71,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 		hdr->header.indirect = 1;
 
 		for (int j = 0; j < HOST_INDIRECT_PKT_NUM; j++) {
-			host_queue_indirect_pkt_t *pkt =
+			struct host_queue_indirect_pkt *pkt =
 			       &queue->hsa_queue_p->hq_indirect_pkt[i][j];
 
 			pkt->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;

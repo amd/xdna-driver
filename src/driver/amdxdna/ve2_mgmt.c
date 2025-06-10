@@ -14,7 +14,7 @@ static int cert_setup_partition(struct device *aie_dev, u32 col, u32 lead_col, u
 {
 	u32 lead_col_addr = VE2_ADDR(lead_col, 0, 0);
 	struct aie_location loc = { 0 };
-	handshake_t cert_comm = { 0 };
+	struct handshake cert_comm = { 0 };
 	u32 rel_col = col - lead_col;
 	int ret;
 
@@ -200,7 +200,7 @@ xrs_rel_res:
 
 static int cert_clear_partition(struct amdxdna_dev *xdna, struct device *aie_dev, u32 col)
 {
-	handshake_t cert_comm = { 0 };
+	struct handshake cert_comm = { 0 };
 
 	return aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col),
 						  sizeof(cert_comm), (void *)&cert_comm);
