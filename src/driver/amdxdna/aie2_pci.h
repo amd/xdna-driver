@@ -385,6 +385,7 @@ struct amdxdna_dev_priv {
 	u32				mbox_size;
 	u32				hwctx_limit; /* Hardware determine */
 	u32				ctx_limit; /* Driver determine */
+	u32				temporal_only;
 	u32				sram_dev_addr;
 	struct aie2_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
 	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];

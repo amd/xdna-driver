@@ -1200,6 +1200,15 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 	if (!rq->col_arr)
 		goto free_parts;
 
+	/*
+	 * For temporal shared only device, hardcoding the all columns counter
+	 * to be 1.
+	 * 1. There will be only 1 partition to use all available columns.
+	 * 2. All contexts will expand and there will be no shrinking.
+	 */
+	if (ndev->priv->temporal_only)
+		rq->col_arr[rq->total_cols] = 1;
+
 	rq->work_q = alloc_ordered_workqueue("ctx_runqueue", 0);
 	if (!rq->work_q)
 		goto free_col_arr;
