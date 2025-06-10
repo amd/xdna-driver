@@ -720,7 +720,7 @@ static bool should_update_parts(struct aie2_ctx_rq *rq)
 
 	rq->max_cols = xdna->dev_handle->total_col;
 	while (rq->max_cols) {
-		if (rq->col_arr[rq->max_cols])
+		if (rq->ctx_width_resv[rq->max_cols])
 			break;
 
 		rq->max_cols--;
@@ -1044,6 +1044,66 @@ void aie2_rq_submit_exit(struct amdxdna_ctx *ctx)
 	up_read(&ctx->priv->io_sem);
 }
 
+static bool
+aie2_enable_special_case(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+
+	ndev = ctx_rq_to_ndev(rq);
+	xdna = ndev->xdna;
+	/*
+	 * Enable special case support when,
+	 * 1. The first column of the device is non-zero.
+	 * 2. The columns of context and device are the same.
+	 *
+	 * After spacial case support is enabled,
+	 * 1. Other context doesn't use all columns will fail to create.
+	 */
+	if (!xdna->dev_info->first_col) {
+		XDNA_DBG(xdna, "First column of the device is zero");
+		return false;
+	}
+
+	if (ctx->priv->orig_num_col != ndev->total_col) {
+		XDNA_DBG(xdna, "Context not the same as device total");
+		return false;
+	}
+
+	if (rq->ctx_cnt) {
+		XDNA_DBG(xdna, "Other context is running");
+		return false;
+	}
+
+	WARN_ON(!rq->start_col);
+	rq->start_col_orig = rq->start_col;
+	rq->start_col = 0;
+	rq->total_cols = ndev->total_col - rq->start_col;
+	XDNA_DBG(xdna, "Special case support enabled");
+
+	return true;
+}
+
+static void
+aie2_disable_special_case(struct aie2_ctx_rq *rq)
+{
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+
+	ndev = ctx_rq_to_ndev(rq);
+	xdna = ndev->xdna;
+	if (!rq->start_col_orig)
+		return;
+
+	if (rq->ctx_cnt)
+		return;
+
+	rq->start_col = rq->start_col_orig;
+	rq->total_cols = ndev->total_col - rq->start_col;
+	rq->start_col_orig = 0;
+	XDNA_DBG(xdna, "Special case support disabled");
+}
+
 int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
@@ -1073,11 +1133,19 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	}
 
 	num_col = ctx->priv->orig_num_col;
-	if (num_col > rq->total_cols) {
-		XDNA_ERR(xdna, "Require %d columns exceed %d",
-			 num_col, rq->total_cols);
-		ret = -ENOSPC;
+	if (rq->start_col_orig && num_col != rq->total_cols) {
+		XDNA_ERR(xdna, "Special context is running");
+		ret = -EBUSY;
 		goto error;
+	}
+
+	if (num_col > rq->total_cols) {
+		if (!aie2_enable_special_case(rq, ctx)) {
+			XDNA_ERR(xdna, "Require %d columns exceed %d",
+				 num_col, rq->total_cols);
+			ret = -ENOSPC;
+			goto error;
+		}
 	}
 
 	INIT_WORK(&ctx->dispatch_work, rq_dispatch_work);
@@ -1087,7 +1155,7 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	ctx->priv->should_block = false;
 	qos_to_rq_prio(ctx);
 
-	rq->col_arr[num_col]++;
+	rq->ctx_width_resv[num_col]++;
 	list_add_tail(&ctx->entry, &rq->disconn_list);
 	rq->ctx_cnt++;
 
@@ -1138,10 +1206,12 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	}
 
 	num_col = ctx->priv->orig_num_col;
-	rq->col_arr[num_col]--;
+	rq->ctx_width_resv[num_col]--;
 	/* Shrink partition is needed */
-	if (!rq->col_arr[rq->max_cols])
+	if (!rq->ctx_width_resv[rq->max_cols])
 		wait_parts = true;
+
+	aie2_disable_special_case(rq);
 
 	if (wait_parts) {
 		list_add_tail(&ctx->parts_work_entry, &rq->parts_work_waitq);
@@ -1196,8 +1266,8 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 	if (!rq->parts)
 		return -ENOMEM;
 
-	rq->col_arr = kcalloc(ndev->total_col + 1, sizeof(*rq->col_arr), GFP_KERNEL);
-	if (!rq->col_arr)
+	rq->ctx_width_resv = kcalloc(ndev->total_col + 1, sizeof(*rq->ctx_width_resv), GFP_KERNEL);
+	if (!rq->ctx_width_resv)
 		goto free_parts;
 
 	/*
@@ -1207,11 +1277,11 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 	 * 2. All contexts will expand and there will be no shrinking.
 	 */
 	if (ndev->priv->temporal_only)
-		rq->col_arr[rq->total_cols] = 1;
+		rq->ctx_width_resv[rq->total_cols] = 1;
 
 	rq->work_q = alloc_ordered_workqueue("ctx_runqueue", 0);
 	if (!rq->work_q)
-		goto free_col_arr;
+		goto free_ctx_width_resv;
 
 	INIT_WORK(&rq->parts_work, rq_parts_work);
 	INIT_LIST_HEAD(&rq->parts_work_waitq);
@@ -1221,8 +1291,8 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 
 	return 0;
 
-free_col_arr:
-	kfree(rq->col_arr);
+free_ctx_width_resv:
+	kfree(rq->ctx_width_resv);
 free_parts:
 	kfree(rq->parts);
 	return -ENOMEM;
@@ -1231,7 +1301,7 @@ free_parts:
 void aie2_rq_fini(struct aie2_ctx_rq *rq)
 {
 	destroy_workqueue(rq->work_q);
-	kfree(rq->col_arr);
+	kfree(rq->ctx_width_resv);
 	kfree(rq->parts);
 }
 

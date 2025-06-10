@@ -281,6 +281,7 @@ struct aie2_ctx_rq {
 	u32			hwctx_limit;
 	u32			start_col;
 	u32			total_cols;
+	u32			start_col_orig;
 
 	struct workqueue_struct	*work_q;
 	struct work_struct	parts_work;
@@ -297,7 +298,7 @@ struct aie2_ctx_rq {
 	u32			num_parts;
 	u32			ctx_cnt;
 	u32			rt_ctx_cnt;
-	int			*col_arr;
+	int			*ctx_width_resv;
 	u32			max_cols;
 };
 
