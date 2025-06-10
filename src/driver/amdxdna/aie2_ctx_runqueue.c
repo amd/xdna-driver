@@ -718,17 +718,14 @@ static bool should_update_parts(struct aie2_ctx_rq *rq)
 	if (rq->paused && !part_ctx)
 		return true;
 
-	/*
-	 * The counter of partition cols is zero.
-	 * Trimming partition is needed.
-	 */
-	if (!rq->col_arr[part_col])
-		return true;
+	rq->max_cols = xdna->dev_handle->total_col;
+	while (rq->max_cols) {
+		if (rq->col_arr[rq->max_cols])
+			break;
 
-	/*
-	 * When max cols not equals to partition cols,
-	 * it needs to update partition cols to new max cols.
-	 */
+		rq->max_cols--;
+	}
+
 	if (rq->max_cols != part_col)
 		return true;
 
@@ -767,7 +764,6 @@ static void rq_parts_work(struct work_struct *work)
 	struct amdxdna_ctx *ctx;
 	struct amdxdna_ctx *tmp;
 	struct aie2_ctx_rq *rq;
-	u32 part_col;
 	int i;
 
 	rq = container_of(work, struct aie2_ctx_rq, parts_work);
@@ -782,22 +778,6 @@ static void rq_parts_work(struct work_struct *work)
 	if (handle_busy_ctxs(rq)) {
 		XDNA_DBG(xdna, "Wait for disconneting active contexts");
 		goto out;
-	}
-
-	part_col = get_part_cols(&rq->parts[0]);
-	if (rq->max_cols == part_col) {
-		/* Find out the next maximum column in records */
-		for (i = rq->max_cols; i > 0; i--) {
-			if (!rq->col_arr[i])
-				continue;
-
-			rq->max_cols = i;
-			break;
-		}
-
-		/* If all counters are zero, shrink partition to 1 column */
-		if (!i)
-			rq->max_cols = 1;
 	}
 
 	for (i = 0; i < rq->num_parts; i++)
@@ -1112,10 +1092,8 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	rq->ctx_cnt++;
 
 	/* Expand partition is needed*/
-	if (num_col > rq->max_cols) {
-		rq->max_cols = num_col;
+	if (num_col > rq->max_cols)
 		wait_parts = true;
-	}
 
 	if (ctx_is_rt(ctx)) {
 		rq->rt_ctx_cnt++;
