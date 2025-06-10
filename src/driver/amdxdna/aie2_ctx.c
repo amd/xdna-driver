@@ -81,6 +81,19 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "Firmware timeout state capture:");
 		XDNA_ERR(xdna, "\tDPU PC:    0x%x", report->dpu_pc);
 		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
+
+		/* Update version when we support non zero version number */
+		if (report->txn_op_id != APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE)
+			ctx->health_data.txn_op_idx = report->txn_op_id;
+		else
+			ctx->health_data.txn_op_idx = UINT_MAX;
+
+		if (report->dpu_pc != APP_HEALTH_REPORT_V1_DPU_PC_NONE)
+			ctx->health_data.ctx_pc = report->dpu_pc;
+		else
+			ctx->health_data.ctx_pc = 0;
+
+		ctx->health_reported = false;
 	}
 	aie2_mgmt_buff_free(ndev, buff_sz, buff, dma_addr);
 
@@ -169,6 +182,28 @@ unlock_and_err:
 }
 
 static void
+aie2_ctx_cmd_health_data(struct amdxdna_ctx *ctx, struct amdxdna_gem_obj *cmd_abo)
+{
+	void *cmd_data;
+	u32 data_total;
+
+	if (ctx->health_reported) {
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
+		return;
+	}
+
+	cmd_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
+	if (unlikely(data_total < sizeof(ctx->health_data)))
+		XDNA_WARN(ctx->client->xdna, "Large health data, truncated");
+
+	data_total = min(data_total, sizeof(ctx->health_data));
+	memcpy(cmd_data, &ctx->health_data, data_total);
+	ctx->health_reported = true;
+
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+}
+
+static void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx *ctx = job->ctx;
@@ -201,8 +236,7 @@ aie2_sched_resp_handler(void *handle, void __iomem *data, size_t size)
 	cmd_abo = job->cmd_bo;
 
 	if (unlikely(!data)) {
-		XDNA_WARN(job->ctx->client->xdna, "No response. cmd state %d",
-			  amdxdna_cmd_get_state(cmd_abo));
+		aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
 		goto out;
 	}
 
@@ -262,7 +296,13 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 
 	amdxdna_stats_account(job->ctx->client);
 	cmd_abo = job->cmd_bo;
-	if (unlikely(!data) || unlikely(size != sizeof(u32) * 3)) {
+	if (unlikely(!data)) {
+		aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (unlikely(size != sizeof(u32) * 3)) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
