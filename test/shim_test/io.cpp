@@ -615,7 +615,7 @@ dump_content()
     std::string p("/tmp/");
     p += bo_type2name(i) + std::to_string(getpid());
     dump_buf_to_file(ibo_p, ibo->size(), p);
-    std::cout << "Dumping BO to: " << p << std::endl;
+    printf("Dumped BO (va: %p, xdna: %ld) to %s\n", ibo_p, ibo->paddr(), p.c_str());
   }
 }
 
@@ -626,8 +626,10 @@ verify_result()
   auto ofm_bo = m_bo_array[IO_TEST_BO_OUTPUT].tbo.get();
   auto ofm_p = reinterpret_cast<int8_t *>(ofm_bo->map());
 
-  if (verify_output(ofm_p, m_local_data_path))
+  if (verify_output(ofm_p, m_local_data_path)) {
+    dump_content();
     throw std::runtime_error("Test failed!!!");
+  }
 }
 
 void

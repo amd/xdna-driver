@@ -108,6 +108,9 @@ private:
   std::string
   describe() const;
 
+  virtual std::string
+  bo_sub_type_name() const;
+
   void
   mmap_drm_bo(); // Obtain void* through mmap()
 
@@ -115,7 +118,7 @@ private:
   std::unique_ptr<mmap_ptr> m_range_addr = nullptr;
   std::unique_ptr<mmap_ptr> m_addr = nullptr;
   std::unique_ptr<drm_bo> m_bo = nullptr;
-  uint64_t m_page_offset = 0;
+  void *m_uptr = nullptr;
 };
 
 class cmd_buffer : public buffer
@@ -141,6 +144,9 @@ public:
   get_arg_bo_ids() const override;
 
 private:
+  std::string
+  bo_sub_type_name() const override;
+
   // Valid only when m_submitted is true.
   mutable uint64_t m_cmd_seq = 0;
   std::map< size_t, std::set<bo_id> > m_args_map;
@@ -163,6 +169,9 @@ public:
   bind_hwctx(const hwctx& hwctx) override;
 
 private:
+  std::string
+  bo_sub_type_name() const override;
+
   void
   config_debug_bo(bool is_detach);
 

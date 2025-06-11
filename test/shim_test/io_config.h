@@ -167,7 +167,7 @@ int comp_buf_strides(int8_t *buff, std::string &goldenFile, std::string &dumpFil
           char byt = *it;
 
           if (byt != buff[idx]) {
-            std::cout << "Buffers differ at index " << idx << std::endl;
+            printf("Bytes differ at index %d: expect %d, saw %d\n", idx, byt, buff[idx]);
             ret = 1; 
           }
           ofs.write((char*)(&(buff[idx])), 1);
