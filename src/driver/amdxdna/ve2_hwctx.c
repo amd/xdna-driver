@@ -16,7 +16,7 @@ static inline struct host_queue_packet *hsa_queue_get_pkt(struct hsa_queue *queu
 	return &queue->hq_entry[slot & (queue->hq_header.capacity - 1)];
 }
 
-static inline void hsa_queue_pkt_set_invalid(volatile struct host_queue_packet *pkt)
+static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 {
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
 }
