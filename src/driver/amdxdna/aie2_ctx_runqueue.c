@@ -45,8 +45,8 @@ static void qos_to_rq_prio(struct amdxdna_ctx *ctx)
 		*rq_prio = CTX_RQ_LOW;
 		break;
 	default:
-		*qos = AMDXDNA_QOS_LOW_PRIORITY;
-		*rq_prio = CTX_RQ_LOW;
+		*qos = AMDXDNA_QOS_NORMAL_PRIORITY;
+		*rq_prio = CTX_RQ_NORMAL;
 	};
 }
 
