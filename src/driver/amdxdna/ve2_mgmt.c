@@ -253,3 +253,19 @@ struct amdxdna_ctx *ve2_get_hwctx(struct amdxdna_dev *xdna, u32 col)
 
 	return NULL;
 }
+
+int ve2_ring_doorbell(struct amdxdna_ctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 value = VE2_USER_EVENT_ID;
+	struct aie_location loc = {0};
+	int ret = 0;
+
+	loc.col = hwctx->start_col;
+	ret = aie_partition_write(hwctx->priv->aie_dev, loc, VE2_EVENT_GENERATE_REG, sizeof(u32),
+				  (void *)&(value), 0);
+	if (ret < 0)
+		XDNA_ERR(xdna, "Error in AIE write operation, error %d\n", ret);
+
+	return ret;
+}
