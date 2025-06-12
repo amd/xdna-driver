@@ -78,6 +78,8 @@
 struct amdxdna_ctx_priv;
 struct event_trace_req_buf;
 struct start_event_trace_resp;
+struct config_logging_dram_buf_resp;
+struct logging_req_buf;
 struct aie2_partition;
 
 enum aie2_smu_reg_idx {
@@ -339,6 +341,7 @@ struct amdxdna_dev_hdl {
 	struct mailbox_channel		*mgmt_chann;
 	struct async_events		*async_events;
 	struct event_trace_req_buf	*event_trace_req;
+	struct logging_req_buf		*logging_req;
 
 	u32				dev_status;
 	u32				hwctx_cnt;
@@ -557,5 +560,18 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 int aie2_rq_submit_enter(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 void aie2_rq_submit_exit(struct amdxdna_ctx *ctx);
 void aie2_rq_yield(struct amdxdna_ctx *ctx);
+
+/* aie2_logging.c */
+bool aie2_is_dram_logging_enable(struct amdxdna_dev_hdl *ndev);
+int aie2_dram_logging_init(struct amdxdna_dev_hdl *ndev);
+void aie2_dram_logging_fini(struct amdxdna_dev_hdl *ndev);
+int aie2_configure_log_buf_irq(struct amdxdna_dev_hdl *ndev,
+			       struct config_logging_dram_buf_resp *resp);
+void aie2_remove_log_buf_irq(struct amdxdna_dev_hdl *ndev);
+int aie2_configure_dram_logging(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+void aie2_dram_logging_suspend(struct amdxdna_dev_hdl *ndev);
+void aie2_dram_logging_resume(struct amdxdna_dev_hdl *ndev);
+void aie2_set_dram_log_config(struct amdxdna_dev_hdl *ndev,
+			      u32 enable, u32 size, u32 loglevel);
 
 #endif /* _AIE2_PCI_H_ */

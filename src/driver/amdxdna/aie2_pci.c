@@ -459,6 +459,7 @@ disable_dev:
 static void aie2_hw_suspend(struct amdxdna_dev *xdna)
 {
 	aie2_event_trace_suspend(xdna->dev_handle);
+	aie2_dram_logging_suspend(xdna->dev_handle);
 	aie2_rq_stop_all(&xdna->dev_handle->ctx_rq);
 	aie2_hw_stop(xdna);
 }
@@ -477,7 +478,7 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	XDNA_DBG(xdna, "context resuming...");
 	aie2_rq_restart_all(&xdna->dev_handle->ctx_rq);
 	aie2_event_trace_resume(xdna->dev_handle);
-
+	aie2_dram_logging_resume(xdna->dev_handle);
 	return 0;
 }
 
@@ -637,6 +638,10 @@ skip_pasid:
 	if (ret)
 		XDNA_DBG(xdna, "Event trace init failed, ret %d", ret);
 
+	ret = aie2_dram_logging_init(ndev);
+	if (ret)
+		XDNA_DBG(xdna, "Dram logging init failed, ret %d", ret);
+
 	release_firmware(fw);
 	return 0;
 
@@ -662,6 +667,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	aie2_event_trace_fini(ndev);
+	aie2_dram_logging_fini(ndev);
 	aie2_rq_fini(&ndev->ctx_rq);
 	aie2_hw_stop(xdna);
 	aie2_error_async_events_free(ndev);
