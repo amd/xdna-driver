@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 
 if (NOT DEFINED BUILD_REPO_ROOT)
   set(BUILD_REPO_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
@@ -67,8 +67,9 @@ configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/version.json.in
   ${XDNA_VERSION_JSON_FILE}
 )
-
+if(NOT XDNA_VE2)
 install(FILES ${XDNA_VERSION_JSON_FILE} DESTINATION xrt/${XDNA_COMPONENT} COMPONENT ${XDNA_COMPONENT})
+endif()
 
 execute_process(
   COMMAND echo ${XRT_VERSION_STRING}
