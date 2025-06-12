@@ -32,9 +32,6 @@ struct amdxdna_dev_hdl {
 	void				*xrs_hdl;
 };
 
-#define ADDR64_HIGH(x)		(((x) >> 32) & 0xFFFFFFFF)
-#define ADDR64_LOW(x)		((x) & 0xFFFFFFFF)
-
 /* ve2_of.c */
 extern const struct amdxdna_dev_ops ve2_ops;
 int ve2_hwctx_init(struct amdxdna_ctx *hwctx);

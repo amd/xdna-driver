@@ -20,8 +20,8 @@ static int cert_setup_partition(struct device *aie_dev, u32 col, u32 lead_col, u
 
 	cert_comm.partition_base_address = lead_col_addr;
 	cert_comm.aie_info.partition_size = partition_size;
-	cert_comm.hsa_addr_high = ADDR64_HIGH(hsa_addr);
-	cert_comm.hsa_addr_low = ADDR64_LOW(hsa_addr);
+	cert_comm.hsa_addr_high =  upper_32_bits(hsa_addr);
+	cert_comm.hsa_addr_low =  lower_32_bits(hsa_addr);
 	cert_comm.dbg.hsa_addr_high = 0xFFFFFFFF;
 	cert_comm.dbg.hsa_addr_low = 0xFFFFFFFF;
 	cert_comm.mpaie_alive = ALIVE_MAGIC;
@@ -86,9 +86,6 @@ static int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	struct alloc_requests *xrs_req;
 	int total_col;
 	int ret;
-
-	if (!xrs)
-		return -EINVAL;
 
 	mutex_lock(&xrs->xrs_lock);
 	xrs_req = kzalloc(sizeof(*xrs_req), GFP_KERNEL);
@@ -159,8 +156,6 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 		XDNA_ERR(xdna, "aie parition request failed, error %d", ret);
 		goto xrs_rel_res;
 	}
-
-	/* save aie_dev into priv */
 	priv->aie_dev = aie_dev;
 
 	args.locs = NULL;
