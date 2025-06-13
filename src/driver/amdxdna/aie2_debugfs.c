@@ -17,7 +17,10 @@
 #include "aie2_pci.h"
 
 #if defined(CONFIG_DEBUG_FS)
-#define SIZE            31
+#define LOG_LEVEL_BUF_SIZE	11
+#define MIN_INPUT_ARG_SIZE	8
+#define MAX_INPUT_ARG_SIZE	30
+#define SIZE			31
 
 #define TX_TIMEOUT 2000 /* miliseconds */
 #define RX_TIMEOUT 5000 /* miliseconds */
@@ -309,6 +312,12 @@ static ssize_t aie2_dram_logging_write(struct file *file, const char __user *buf
 	char *kbuf, *token, *key, *val;
 	int ret = 0;
 
+	if (len < MIN_INPUT_ARG_SIZE || len > MAX_INPUT_ARG_SIZE) {
+		XDNA_ERR(ndev->xdna, "Input length %zu beyond buffer size [%d, %d]",
+			 len, MIN_INPUT_ARG_SIZE, MAX_INPUT_ARG_SIZE);
+		return -EINVAL;
+	}
+
 	kbuf = kzalloc(len + 1, GFP_KERNEL);
 	if (!kbuf)
 		return -ENOMEM;
@@ -379,6 +388,77 @@ static int aie2_dram_logging_show(struct seq_file *m, void *unused)
 }
 
 AIE2_DBGFS_FOPS(dram_logging, aie2_dram_logging_show, aie2_dram_logging_write);
+
+static ssize_t aie2_log_runtime_cfg_write(struct file *file, const char __user *buf,
+					  size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	char log_level_buf[LOG_LEVEL_BUF_SIZE + 1];
+	char *kbuf, *token, *key, *val;
+	u32 loglevel;
+	int ret;
+
+	if (len > LOG_LEVEL_BUF_SIZE) {
+		XDNA_ERR(ndev->xdna, "Input length %zu > buffer size %d",
+			 len, LOG_LEVEL_BUF_SIZE);
+		return -EINVAL;
+	}
+
+	kbuf = log_level_buf;
+	if (copy_from_user(kbuf, buf, len))
+		return -EFAULT;
+
+	kbuf[len] = '\0';
+	token = strsep(&kbuf, " ");
+
+	if (token) {
+		key = strsep(&token, "=");
+		val = token;
+
+		if (!key || !val) {
+			XDNA_ERR(ndev->xdna, "Invalid \'key=val\' pair e.g loglevel=[0-4]");
+			return -EINVAL;
+		}
+
+		if (strcmp(key, "loglevel") == 0) {
+			ret = kstrtouint(val, 0, &loglevel);
+			if (ret || loglevel > 4) {
+				XDNA_ERR(ndev->xdna, "Invalid log level %u",
+					 loglevel);
+				return -EINVAL;
+			}
+
+			ret = aie2_set_log_level(ndev, loglevel);
+			if (ret) {
+				XDNA_ERR(ndev->xdna, "Failed to set log level: %d", ret);
+				return ret;
+			}
+		} else {
+			XDNA_ERR(ndev->xdna, "Invalid key %s, e.g. loglevel=[0-4]", key);
+			return -EINVAL;
+		}
+	}
+
+	return len;
+}
+
+static int aie2_log_runtime_cfg_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	u32 log_level;
+
+	if (!aie2_is_dram_logging_enable(ndev)) {
+		seq_puts(m, "Dram logging is disabled\n");
+	} else {
+		log_level = aie2_get_log_level(ndev);
+		seq_printf(m, "log level %u\n", log_level);
+		seq_puts(m, "To change log level echo loglevel=[0-4]\n");
+	}
+
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(log_runtime_cfg, aie2_log_runtime_cfg_show, aie2_log_runtime_cfg_write);
 
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
@@ -741,6 +821,7 @@ const struct {
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
 	AIE2_DBGFS_FILE(dram_logging, 0600),
+	AIE2_DBGFS_FILE(log_runtime_cfg, 0600),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)

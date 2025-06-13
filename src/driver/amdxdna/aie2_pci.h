@@ -573,5 +573,9 @@ void aie2_dram_logging_suspend(struct amdxdna_dev_hdl *ndev);
 void aie2_dram_logging_resume(struct amdxdna_dev_hdl *ndev);
 void aie2_set_dram_log_config(struct amdxdna_dev_hdl *ndev,
 			      u32 enable, u32 size, u32 loglevel);
+void aie2_set_dram_log_runtime_cfg(struct amdxdna_dev_hdl *ndev,
+				   u32 loglevel, u32 format, int dest);
+u32 aie2_get_log_level(struct amdxdna_dev_hdl *ndev);
+int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, u32 level);
 
 #endif /* _AIE2_PCI_H_ */
