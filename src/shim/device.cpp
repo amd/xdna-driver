@@ -1063,7 +1063,7 @@ struct sequence_name
   }
 };
 
-struct mobilenet 
+struct mobilenet
 {
   using result_type = std::any;
 
@@ -1087,7 +1087,7 @@ struct mobilenet
       break;
     case xrt_core::query::mobilenet::type::mobilenet_param:
       bin_name = "mobilenet_param.bin";
-      break; 
+      break;
     case xrt_core::query::mobilenet::type::buffer_sizes:
       bin_name = "buffer_sizes.json";
       break;
@@ -1445,6 +1445,18 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
     return std::make_unique<hwctx_umq>(*this, get_xclbin(xclbin_uuid), qos);
   else
     return std::make_unique<hwctx_kmq>(*this, get_xclbin(xclbin_uuid), qos);
+}
+
+std::unique_ptr<xrt_core::hwctx_handle>
+device::
+create_hw_context(uint32_t partition_size,
+                  const xrt::hw_context::cfg_param_type& cfg,
+                  xrt::hw_context::access_mode mode) const
+{
+  if (m_pdev.is_umq())
+    return std::make_unique<hwctx_umq>(*this, partition_size);
+  else
+    return std::make_unique<hwctx_kmq>(*this, partition_size);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

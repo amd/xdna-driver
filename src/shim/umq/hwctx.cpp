@@ -20,6 +20,18 @@ hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
 }
 
 hwctx_umq::
+hwctx_umq(const device& device, uint32_t partition_size)
+  : hwctx(device, partition_size, std::make_unique<hwq_umq>(device, 8))
+  , m_metadata()
+{
+  m_col_cnt = partition_size;
+
+  init_log_buf();
+  // TODO: configure log BO on the hwctx
+  shim_debug("Created UMQ HW context (%d)", get_slotidx());
+}
+
+hwctx_umq::
 ~hwctx_umq()
 {
   shim_debug("Destroying UMQ HW context (%d)...", get_slotidx());

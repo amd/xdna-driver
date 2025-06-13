@@ -149,6 +149,17 @@ hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
 }
 
 hwctx::
+hwctx(const device& dev, uint32_t partition_size, std::unique_ptr<hwq> queue)
+  : m_device(dev)
+  , m_q(std::move(queue))
+{
+  m_col_cnt = partition_size;
+  m_ops_per_cycle = 0;
+
+  create_ctx_on_device();
+}
+
+hwctx::
 ~hwctx()
 {
   try {

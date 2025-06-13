@@ -59,7 +59,7 @@ const struct dpm_clk_freq npu1_dpm_clk_table[] = {
 };
 
 const struct msg_op_ver npu1_msg_op_tbl[] = {
-	{ 8, MSG_OP_CMD_CHAIN_NPU },
+	{ 8, MSG_OP_CHAIN_EXEC_NPU },
 	{ 0 },
 };
 
