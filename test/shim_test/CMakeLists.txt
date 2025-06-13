@@ -23,7 +23,11 @@ target_link_libraries(${XDNA_SHIM_TEST} PRIVATE
 
 set_target_properties(${XDNA_SHIM_TEST} PROPERTIES
   BUILD_WITH_INSTALL_RPATH FALSE
-  LINK_FLAGS "-Wl,-rpath,$ORIGIN/../lib"
+  # --diable-new-dtags is needed to make sure linker to use RPATH instead of RUNPATH.
+  # RPATH   is searched *before* LD_LIBRARY_PATH
+  # RUNPATH is searched *after*  LD_LIBRARY_PATH
+  # We want RPATH behavior for XDNA_SHIM_TEST
+  LINK_FLAGS "-Wl,-rpath,$ORIGIN/../lib -Wl,--disable-new-dtags"
   )
 
 target_include_directories(${XDNA_SHIM_TEST} PRIVATE
@@ -34,14 +38,7 @@ target_include_directories(${XDNA_SHIM_TEST} PRIVATE
 
 target_compile_options(${XDNA_SHIM_TEST} PRIVATE -O3)
 
-configure_file(
-  shim_test.in
-  shim_test
-  @ONLY
-  )
-
 install(TARGETS ${XDNA_SHIM_TEST} DESTINATION ${XDNA_BIN_DIR}/bin)
-install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/shim_test DESTINATION ${XDNA_BIN_DIR}/bin)
 
 install(CODE "execute_process( \
   COMMAND ${CMAKE_COMMAND} -E create_symlink \
