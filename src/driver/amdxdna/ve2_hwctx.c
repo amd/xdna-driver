@@ -11,7 +11,7 @@
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
 
-/**
+/*
  * struct ve2_dpu_data - interpretation of data payload for ERT_START_DPU
  *
  * @instruction_buffer:       address of instruction buffer
@@ -43,22 +43,26 @@ static int hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 {
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
+	int ret = 0;
 
 	mutex_lock(&queue->hq_lock);
 	if (header->write_index < header->read_index) {
 		XDNA_ERR(xdna, "Error: HSA Queue read %llx before write %llx", header->read_index,
 			 header->write_index);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	} else if ((header->write_index - header->read_index) < header->capacity) {
 		*slot = header->write_index++;
 		XDNA_DBG(xdna, "reserved slot %lld", *slot);
 	} else {
 		XDNA_ERR(xdna, "Error: HSQ Queue is full");
-		return -EIO;
+		ret = -EIO;
+		goto out;
 	}
+out:
 	mutex_unlock(&queue->hq_lock);
 
-	return 0;
+	return ret;
 }
 
 static void ve2_job_release(struct kref *ref)
@@ -244,10 +248,10 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct ve2_hsa_queue *hq_queue;
-	struct hsa_queue *queue = NULL;
-	struct ve2_dpu_data *dpu;
 	struct xrt_packet_header *hdr;
 	struct host_queue_packet *pkt;
+	struct ve2_dpu_data *dpu;
+	struct hsa_queue *queue;
 	u64 slot_id = 0;
 	int ret;
 
@@ -483,28 +487,34 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 /*
  * Handling interrupt notification based on read_index and write_index.
  */
-#define check_read_index	\
-	({			\
-	static u64 counter;	\
-	u64 *read_index = (u64 *)((char *)priv_ctx->hwctx_hsa_queue.hsa_queue_p +	\
-		HSA_QUEUE_READ_INDEX_OFFSET);						\
-	if (counter % print_interval == 0) {						\
-		XDNA_DBG(xdna, "read idx addr (0x%llx)", (u64)read_index);		\
-		XDNA_WARN(xdna, "hwctx [%p] check read idx (%lld) > cmd idx (%lld)",	\
-			  hwctx, *read_index, seq);					\
-	}			\
-	counter++;		\
-	((*read_index) > seq);	\
-	})
+static inline bool check_read_index(struct amdxdna_ctx_priv *priv_ctx, struct amdxdna_ctx *hwctx,
+				    struct amdxdna_dev *xdna, u64 seq)
+{
+	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
+	u32 print_interval = 300;
+	static u64 counter;
+	u64 *read_index;
+
+	mutex_lock(&queue->hq_lock);
+	read_index = (u64 *)((char *)priv_ctx->hwctx_hsa_queue.hsa_queue_p +
+		HSA_QUEUE_READ_INDEX_OFFSET);
+	if (counter % print_interval == 0) {
+		XDNA_DBG(xdna, "read idx addr (0x%llx)", (u64)read_index);
+		XDNA_WARN(xdna, "hwctx [%p] check read idx (%lld) > cmd idx (%lld)", hwctx,
+			  *read_index, seq);
+	}
+	counter++;
+	mutex_unlock(&queue->hq_lock);
+
+	return ((*read_index) > seq);
+}
 
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
-	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_sched_job *job;
-	u32 print_interval = 300;
 	unsigned long wait_jifs;
 	int ret = 0;
 
@@ -514,13 +524,13 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	 * The current version assumes one hwctx is 1:1 mapping with one lead cert col
 	 */
 	wait_jifs = msecs_to_jiffies(timeout);
-	mutex_lock(&queue->hq_lock);
 	if (wait_jifs)
-		ret = wait_event_interruptible_timeout(priv_ctx->waitq, check_read_index,
+		ret = wait_event_interruptible_timeout(priv_ctx->waitq,
+						       check_read_index(priv_ctx, hwctx, xdna, seq),
 						       wait_jifs);
 	else
-		ret = wait_event_interruptible(priv_ctx->waitq, check_read_index);
-	mutex_unlock(&queue->hq_lock);
+		ret = wait_event_interruptible(priv_ctx->waitq,
+					       check_read_index(priv_ctx, hwctx, xdna, seq));
 
 	XDNA_INFO(xdna, "Requested command [%d] finished with ret %d", (int)seq, ret);
 
