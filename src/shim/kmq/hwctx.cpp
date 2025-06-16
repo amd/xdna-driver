@@ -60,6 +60,13 @@ hwctx_kmq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
 }
 
 hwctx_kmq::
+hwctx_kmq(const device& device, uint32_t partition_size)
+  : hwctx(device, partition_size, std::make_unique<hwq_kmq>(device))
+{
+  shim_debug("Created KMQ HW context (%d)", get_slotidx());
+}
+
+hwctx_kmq::
 ~hwctx_kmq()
 {
   shim_debug("Destroying KMQ HW context (%d)...", get_slotidx());

@@ -1,7 +1,7 @@
 {
 	"copyright": "Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
-		"version": "202520.2.20.54",
+		"version": "202520.2.20.57",
 		"os_rel": ["22.04", "24.04"]
 	},
 	"firmwares": [
@@ -23,18 +23,18 @@
 		},
 		{
 			"device": "npu4",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.1.0.18.3",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.255.0.1.5",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "10",
-			"version": "1.0.18.3",
+			"version": "255.0.1.5",
 			"fw_name": "npu.dev.sbin"
 		},
 		{
 			"device": "npu5",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.1.0.18.4",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.255.0.1.6",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "11",
-			"version": "1.0.18.4",
+			"version": "255.0.1.6",
 			"fw_name": "npu.dev.sbin"
 		}
 	],

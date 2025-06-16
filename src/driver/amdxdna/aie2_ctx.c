@@ -378,7 +378,7 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	 * Transaction binaries are only supported with RAI 1.5 release onwards. Below
 	 * implementation returns -EOPNOTSUPP error code for any older firmware versions.
 	 */
-	class = aie2_is_supported_msg(ctx->client->xdna->dev_handle, MSG_OP_CMD_CHAIN_NPU) ?
+	class = aie2_is_supported_msg(ctx->client->xdna->dev_handle, MSG_OP_CHAIN_EXEC_NPU) ?
 		CMD_CHAIN_CLASS_PREEMPT : CMD_CHAIN_CLASS_NON_PREEMPT;
 	op = amdxdna_cmd_get_op(cmd_abo);
 	if (op == ERT_CMD_CHAIN)
