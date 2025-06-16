@@ -322,12 +322,17 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	XDNA_DBG(xdna, "Failed cmd idx %d, status 0x%x",
 		 fail_cmd_idx, fail_cmd_status);
 
+	/*
+	 * The firmware may error out even before it starts processing subcmds in the cmdlist.
+	 * In such scenarios, the subcmd status returns with an uninitialized value of 0 i.e
+	 * AIE2_STATUS_SUCCESS.
+	 */
 	if (fail_cmd_status == AIE2_STATUS_SUCCESS) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
 	}
-	amdxdna_cmd_set_state(cmd_abo, fail_cmd_status);
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ERROR);
 
 	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
 		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
