@@ -50,16 +50,13 @@ static int hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 		XDNA_ERR(xdna, "Error: HSA Queue read %llx before write %llx", header->read_index,
 			 header->write_index);
 		ret = -EINVAL;
-		goto out;
 	} else if ((header->write_index - header->read_index) < header->capacity) {
 		*slot = header->write_index++;
 		XDNA_DBG(xdna, "reserved slot %lld", *slot);
 	} else {
 		XDNA_ERR(xdna, "Error: HSQ Queue is full");
 		ret = -EIO;
-		goto out;
 	}
-out:
 	mutex_unlock(&queue->hq_lock);
 
 	return ret;

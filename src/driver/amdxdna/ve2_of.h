@@ -12,10 +12,6 @@
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
 
-enum ert_cmd_opcode_ve2 {
-	ERT_START_DPU	= 18,
-};
-
 struct amdxdna_ctx_priv {
 	u32			start_col;
 	u32			num_col;
