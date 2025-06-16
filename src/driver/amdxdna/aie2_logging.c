@@ -174,9 +174,6 @@ static void aie2_print_log_buffer_data(struct amdxdna_dev_hdl *ndev)
 		char *msg = (char *)(str + header_size);
 		u32 msg_size;
 
-		if (!header || !msg)
-			return;
-
 		msg_size = (header->argc) * sizeof(u32);
 		if (msg_size > 0 && (char *)(msg + msg_size) <= end) {
 			*(char *)((char *)msg + msg_size - 1) = 0;
