@@ -105,7 +105,7 @@ struct ve2_hsa_queue {
 	struct hsa_queue		*hsa_queue_p;
 	struct ve2_mem			hsa_queue_mem;
 	struct ve2_hq_complete		hq_complete;
-	/* hq_lock mutex protects hsa queue slot's read & write indexes */
+	/* hq_lock protects hsa_queue_p->hq_header->[read | write]_index */
 	struct mutex			hq_lock;
 };
 
