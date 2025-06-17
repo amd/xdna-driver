@@ -314,7 +314,7 @@ static ssize_t aie2_dram_logging_write(struct file *file, const char __user *buf
 		return -ENOMEM;
 
 	if (copy_from_user(kbuf, buf, len)) {
-		return -EFAULT;
+		ret = -EFAULT;
 		goto out;
 	}
 
