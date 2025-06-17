@@ -978,6 +978,34 @@ struct xrt_smi_lists
   }
 };
 
+struct runner{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented"); 
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::runner)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+
+    std::string runner_name;
+    const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
+    switch (runner_type) {
+    case xrt_core::query::runner::type::throughput:
+      runner_name = "Runner/throughput";
+      break;
+    }
+
+    return boost::str(boost::format("bins/%s/")
+      % runner_name);
+  }
+};
+
 struct xclbin_name
 {
   static std::any
@@ -1303,6 +1331,7 @@ initialize_query_table()
   emplace_func1_request<query::sequence_name,                  sequence_name>();
   emplace_func1_request<query::elf_name,                       elf_name>();
   emplace_func1_request<query::mobilenet,                      mobilenet>();
+  emplace_func1_request<query::runner,                         runner>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
