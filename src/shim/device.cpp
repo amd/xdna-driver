@@ -992,13 +992,28 @@ struct runner{
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+    xrt_core::smi::smi_hardware_config smi_hrdw;
+    auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
 
     std::string runner_name;
     const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
     switch (runner_type) {
     case xrt_core::query::runner::type::throughput:
-      runner_name = "Runner/throughput";
+      runner_name = "/Runner/throughput";
       break;
+    }
+
+    switch (hardware_type)
+    {
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxA0:
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
+      case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
+        runner_name += "/strx";
+        break;
+      case xrt_core::smi::smi_hardware_config::hardware_type::phx:
+        runner_name += "/phx";
+        break;
     }
 
     return boost::str(boost::format("bins/%s/")
