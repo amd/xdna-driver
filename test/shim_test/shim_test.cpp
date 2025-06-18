@@ -779,6 +779,9 @@ std::vector<test_case> test_list {
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
   },
+  test_case{ "io test real kernel bad run", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
+  },
 };
 
 // Test case executor implementation

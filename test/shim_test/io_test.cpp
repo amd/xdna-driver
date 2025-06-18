@@ -21,6 +21,9 @@ unsigned long elf_preempt_io_test_bo_set::m_total_cmds = 0;
 namespace {
 
 io_test_parameter io_test_parameters;
+// Used for injectng hang instruction at this DPU program counter.
+// and verify if the context health report
+int bad_run_injected_ctc_pc = 3;
 
 void
 io_test_parameter_init(int perf, int type, int wait, bool debug = false)
@@ -71,6 +74,18 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
     instruction_p[0] = 0x02000000;
     instruction_p[1] = 0x00034008;
     instruction_p[2] = 0x00000040;
+  } else if (io_test_parameters.type == IO_TEST_BAD_RUN_REPORT_CTX_PC) {
+    if (kernel_type != KERNEL_TYPE_DPU_SEQ)
+      throw std::runtime_error("ELF flow can't support bad run");
+
+    auto instruction_p = bos[IO_TEST_BO_INSTRUCTION].tbo->map();
+    auto sz = bos[IO_TEST_BO_INSTRUCTION].tbo->size();
+    std::memset(instruction_p, 0, sz);
+    // mergesync opcode. This will lead to command run timeout but without async error
+    // Use this test to validate context health data report
+    // See io_test_cmd_submit_and_wait_latency() for how to validate the result
+    instruction_p[3] = 0x03000000;
+    instruction_p[4] = 0x00010100;
   }
 
   if (io_test_parameters.debug) {
@@ -130,8 +145,32 @@ io_test_cmd_submit_and_wait_latency(
       hwq->submit_command(std::get<0>(cmd).get()->get());
       io_test_cmd_wait(hwq, std::get<0>(cmd));
       auto state = std::get<1>(cmd)->state;
-      if (state != ERT_CMD_STATE_COMPLETED)
-        throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
+      if (state != ERT_CMD_STATE_COMPLETED) {
+        if (state == ERT_CMD_STATE_TIMEOUT) {
+          ert_packet *pkg = reinterpret_cast<ert_packet *>(std::get<1>(cmd));
+          ert_ctx_health_data *data = reinterpret_cast<ert_ctx_health_data *>(pkg->data);
+          std::cout << "CTX health data:" << std::hex
+                    << "\n  version:    " << data->version
+                    << "\n  txn_op_idx: " << data->txn_op_idx
+                    << "\n  ctx_pc:     " << data->ctx_pc
+                    << std::dec << std::endl;
+
+	  // Verify health data
+	  if (data->ctx_pc != bad_run_injected_ctc_pc ||
+	      data->txn_op_idx != 0xFFFFFFFF ||
+	      data->version != 0) {
+            std::cout << "\nExpecting:"
+                      << "\n  version:    0"
+                      << "\n  txn_op_idx: ffffffff"
+                      << "\n  ctx_pc:     " + std::to_string(bad_run_injected_ctc_pc)
+                      << std::endl;
+            throw std::runtime_error(std::string("Health data incorrect"));
+	  }
+	  // Don't throw but avoid validate the output buffer
+	} else {
+          throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
+	}
+      }
       std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
       completed++;
       if (completed >= total_cmd_submission)
@@ -256,7 +295,8 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   auto end = clk::now();
 
   // Verify result
-  if (io_test_parameters.type != IO_TEST_NOOP_RUN) {
+  if (io_test_parameters.type != IO_TEST_NOOP_RUN &&
+      io_test_parameters.type != IO_TEST_BAD_RUN_REPORT_CTX_PC) {
     for (auto& boset : bo_set) {
       boset->sync_after_run();
       //boset->dump_content();
