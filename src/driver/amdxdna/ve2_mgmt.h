@@ -44,6 +44,6 @@ struct amdxdna_ctx;
 int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx);
 struct amdxdna_ctx *ve2_get_hwctx(struct amdxdna_dev *xdna, u32 col);
-int ve2_ring_doorbell(struct amdxdna_ctx *hwctx);
+int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx);
 
 #endif /* _VE2_MGMT_H_ */

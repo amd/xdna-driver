@@ -254,7 +254,7 @@ struct amdxdna_ctx *ve2_get_hwctx(struct amdxdna_dev *xdna, u32 col)
 	return NULL;
 }
 
-int ve2_ring_doorbell(struct amdxdna_ctx *hwctx)
+int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	u32 value = VE2_USER_EVENT_ID;

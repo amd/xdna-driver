@@ -476,7 +476,8 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 		return ret;
 	}
 
-	ve2_ring_doorbell(hwctx);
+	//TODO: return value will be handled in future commit.
+	notify_fw_cmd_ready(hwctx);
 
 	return 0;
 }
@@ -512,7 +513,7 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_sched_job *job;
-	unsigned long wait_jifs;
+	unsigned long timeout_jiffies;
 	int ret = 0;
 
 	/*
@@ -520,25 +521,28 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	 * sharing the same lead col.
 	 * The current version assumes one hwctx is 1:1 mapping with one lead cert col
 	 */
-	wait_jifs = msecs_to_jiffies(timeout);
-	if (wait_jifs)
+	timeout_jiffies = msecs_to_jiffies(timeout);
+	if (timeout_jiffies)
 		ret = wait_event_interruptible_timeout(priv_ctx->waitq,
 						       check_read_index(priv_ctx, hwctx, xdna, seq),
-						       wait_jifs);
+						       timeout_jiffies);
 	else
 		ret = wait_event_interruptible(priv_ctx->waitq,
 					       check_read_index(priv_ctx, hwctx, xdna, seq));
 
-	XDNA_INFO(xdna, "Requested command [%d] finished with ret %d", (int)seq, ret);
+	XDNA_DBG(xdna, "wait_event returned %d (timeout_jiffies=%lu)", ret, timeout_jiffies);
 
-	if ((!wait_jifs && !ret) || ret > 0) {
+	if (ret == -ERESTARTSYS)
+		return ret;
+
+	if ((!timeout_jiffies && !ret) || ret > 0) {
 		job = ve2_hwctx_get_job(hwctx, seq);
 		if (unlikely(!job)) {
 			ret = 0;
 			goto out;
 		}
 
-		if (wait_jifs && !ret) {
+		if (timeout_jiffies && !ret) {
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 			XDNA_ERR(xdna, "Requested command [%d] TIMEOUT!!", (int)seq);
 		} else {
@@ -547,20 +551,21 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 
 		ve2_hwctx_job_release(hwctx, job);
 
-		if (!wait_jifs)
-			return 0;
+		if (!timeout_jiffies) {
+			ret = 0;
+			goto out;
+		}
 	}
 
 	/*
-	 * wait_event_interruptible_timeout() returns 0 when the condition
-	 * evaluated to false after the timeout elapsed.
-	 * So, return -ETIME in this case
+	 * wait_event_interruptible_timeout() returns 0 when the condition evaluated to false
+	 * after the timeout elapsed. So, return -ETIME in this case
 	 */
-	if (!ret)
+	if (timeout_jiffies && !ret)
 		ret = -ETIME;
 
 out:
-	XDNA_DBG(xdna, "wait_cmd ret:%d", ret);
+	XDNA_INFO(xdna, "Requested command [%d] finished with ret %d", (int)seq, ret);
 
 	/* 0 is success, others are timeout */
 	return ret > 0 ? 0 : ret;
