@@ -49,5 +49,22 @@ File:
   tools/bins/17f0_20/mobilenet_4col.xclbin
   tools/bins/Mobilenet/mobilenet_ifm.bin
   tools/bins/Mobilenet/mobilenet_param.bin
+  tools/bins/Runner/throughput/strx/recipe_throughput.json
+  tools/bins/Runner/throughput/strx/profile_throughput.json
+  tools/bins/Runner/throughput/strx/noop.elf
+  tools/bins/Runner/throughput/strx/validate.xclbin
+  tools/bins/Runner/throughput/phx/recipe_throughput.json
+  tools/bins/Runner/throughput/phx/profile_throughput.json
+  tools/bins/Runner/throughput/phx/noop.elf
+  tools/bins/Runner/throughput/phx/validate.xclbin
+	tools/bins/Runner/latency/phx/nop.elf
+  tools/bins/Runner/latency/phx/profile_latency.json
+  tools/bins/Runner/latency/phx/recipe_latency.json
+  tools/bins/Runner/latency/phx/validate.xclbin
+  tools/bins/Runner/latency/strx/nop.elf
+  tools/bins/Runner/latency/strx/profile_latency.json
+  tools/bins/Runner/latency/strx/recipe_latency.json
+  tools/bins/Runner/latency/strx/validate.xclbin
+  tools/bins/Runner/throughput/phx/recipe_throughput.json
 
 Licence: Redistributable. See LICENSE.amdnpu for details.

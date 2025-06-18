@@ -1,0 +1,139 @@
+{
+  "version": "1.0",
+  "header": {
+    "xclbin": "validate.xclbin"
+  },
+  "resources": {
+    "buffers": [
+      { "name": "arg0", "type": "input", "size": 20 },
+      { "name": "arg1", "type": "input", "size": 20 },
+      { "name": "arg2", "type": "input", "size": 20 },
+      { "name": "arg3", "type": "input", "size": 20 },
+      { "name": "arg4", "type": "input", "size": 20 }
+    ],
+    "kernels": [
+      { "name": "k1", "instance": "DPU", "ctrlcode": "nop.elf" }
+    ]
+  },
+  "execution": {
+    "runs": [
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      },
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg1", "argidx": 4 },
+          { "name": "arg2", "argidx": 5 },
+          { "name": "arg3", "argidx": 6 },
+          { "name": "arg4", "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      }
+    ]
+  }
+}
