@@ -226,6 +226,27 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
     }
   }
 
+  if (io_test_parameters.type == IO_TEST_DELAY_RUN) {
+	  int seconds = 8;
+
+	  std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
+	  // Waiting for auto-suspend.
+	  sleep(seconds);
+
+	  std::cout << "Submit command to resume" << std::endl;
+	  io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos);
+	  // The device should be in resume state.
+	  // Waiting for auto-suspend again.
+	  std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
+	  sleep(seconds);
+	  std::cout << "Submit command to resume" << std::endl;
+
+	  /*
+	   * For this code path, we expecte 2 times of suspend and resume
+	   * in dmesg log if dyndbg=+pf is set.
+	   */
+  }
+
   // Submit commands and wait for results
   auto start = clk::now();
   if (io_test_parameters.perf == IO_TEST_THRUPUT_PERF)
@@ -364,4 +385,13 @@ TEST_io_with_ubuf_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type
 {
   io_test_bo_set boset{sdev.get(), true};
   boset.run();
+}
+
+void
+TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  unsigned int run_type = static_cast<unsigned int>(arg[0]);
+
+  io_test_parameter_init(IO_TEST_NO_PERF, IO_TEST_DELAY_RUN, IO_TEST_IOCTL_WAIT);
+  io_test(id, sdev.get(), 1, 1, 1, nullptr);
 }
