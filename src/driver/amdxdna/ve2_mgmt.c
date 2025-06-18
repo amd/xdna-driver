@@ -253,3 +253,25 @@ struct amdxdna_ctx *ve2_get_hwctx(struct amdxdna_dev *xdna, u32 col)
 
 	return NULL;
 }
+
+int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 value = VE2_USER_EVENT_ID;
+	struct aie_location loc = {0};
+	int ret = 0;
+
+	loc.col = hwctx->start_col;
+
+	/* aie_partition_write() returns below possible values:
+	 *  success case: number of bytes write, so, return value >= 0
+	 *  failure case: negative value, so, return value < 0
+	 */
+	ret = aie_partition_write(hwctx->priv->aie_dev, loc, VE2_EVENT_GENERATE_REG, sizeof(u32),
+				  (void *)&(value), 0);
+	if (ret < 0)
+		XDNA_DBG(xdna, "AIE write on event_generate register throw error %d for col %u\n",
+			 ret, loc.col);
+
+	return ret;
+}

@@ -24,6 +24,7 @@ struct amdxdna_ctx_priv;
 
 enum ert_cmd_opcode {
 	ERT_START_CU			= 0,
+	ERT_START_DPU			= 18,
 	ERT_CMD_CHAIN			= 19,
 	ERT_START_NPU			= 20,
 	ERT_START_NPU_PREEMPT		= 21,
