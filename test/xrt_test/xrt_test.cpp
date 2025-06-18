@@ -29,6 +29,7 @@ using arg_type = const std::vector<uint64_t>;
 unsigned c_rounds = 1;
 unsigned s_rounds = 128;
 unsigned m_rounds = 32;
+unsigned device_index = 0;
 std::string dpu = "nop";
 
 std::string program;
@@ -50,6 +51,7 @@ usage(const std::string& prog)
   std::cout << "\t" << "-m" << ": n hwctx in parallel\n";
   std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress test and multi-layer)\n";
   std::cout << "\t" << "-d" << ": specify dpu kernel (only effects stress test)\n";
+  std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
   std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
   std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
@@ -1015,7 +1017,6 @@ void
 run_all_test(std::set<int>& tests)
 {
   auto all = tests.empty();
-  unsigned int device_index = 0;
 
   if (!test_list.size())
     std::cout << "test_list is empty!" << std::endl;
@@ -1043,7 +1044,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:h")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:h")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -1066,6 +1067,12 @@ main(int argc, char **argv)
 	case 'd': {
 	  dpu = optarg;
 	  std::cout << "Using dpu: " << dpu << std::endl;
+	  break;
+	}
+	case 'i': {
+	  val = std::stoi(optarg);
+	  std::cout << "Using device_index: " << val << std::endl;
+          device_index = val;
 	  break;
 	}
 	case 'x': {
