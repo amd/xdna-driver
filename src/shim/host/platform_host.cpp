@@ -346,7 +346,7 @@ set_state(amdxdna_drm_set_state& state) const
 
 void
 platform_drv_host::
-get_sysfs(get_put_sysfs_arg& arg) const
+get_sysfs(get_sysfs_arg& arg) const
 {
   std::string path = sysfs_root() + "/" + arg.sysfs_node;
   std::ifstream ifs(path, std::ios::binary);
@@ -361,7 +361,7 @@ get_sysfs(get_put_sysfs_arg& arg) const
 
 void
 platform_drv_host::
-put_sysfs(get_put_sysfs_arg& arg) const
+put_sysfs(put_sysfs_arg& arg) const
 {
   std::string path = sysfs_root() + "/" + arg.sysfs_node;
   std::ofstream ofs(path, std::ios::binary);
@@ -371,7 +371,6 @@ put_sysfs(get_put_sysfs_arg& arg) const
   ofs.write(arg.data.data(), arg.data.size());
   if (!ofs.good())
     shim_err(-errno, "Failed to write %s", path.c_str());
-  arg.real_size = arg.data.size();
 
   ofs.close();
 }

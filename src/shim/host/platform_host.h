@@ -69,10 +69,10 @@ private:
   create_drm_bo(void *uva_tbl, size_t size, int type) const;
 
   void
-  get_sysfs(get_put_sysfs_arg& arg) const override;
+  get_sysfs(get_sysfs_arg& arg) const override;
 
   void
-  put_sysfs(get_put_sysfs_arg& arg) const override;
+  put_sysfs(put_sysfs_arg& arg) const override;
 };
 
 }

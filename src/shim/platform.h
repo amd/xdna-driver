@@ -164,10 +164,15 @@ struct wait_syncobj_arg {
   uint64_t timepoint;
 };
 
-struct get_put_sysfs_arg {
-  const std::string sysfs_node;
-  std::vector<char> data;
+struct get_sysfs_arg {
+  const std::string& sysfs_node;
+  std::vector<char>& data;
   size_t real_size;
+};
+
+struct put_sysfs_arg {
+  const std::string& sysfs_node;
+  const std::vector<char>& data;
 };
 
 class platform_drv
@@ -298,11 +303,11 @@ private:
   import_syncobj(export_import_syncobj_arg& arg) const;
 
   virtual void
-  get_sysfs(get_put_sysfs_arg& arg) const
+  get_sysfs(get_sysfs_arg& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void
-  put_sysfs(get_put_sysfs_arg& arg) const
+  put_sysfs(put_sysfs_arg& arg) const
   { shim_not_supported_err(__func__); }
 };
 

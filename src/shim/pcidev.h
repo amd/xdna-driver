@@ -21,6 +21,34 @@ public:
   std::shared_ptr<xrt_core::device>
   create_device(xrt_core::device::handle_type handle, xrt_core::device::id_type id) const override;
 
+  void
+  sysfs_get(const std::string& subdev, const std::string& entry, std::string& err,
+    std::vector<std::string>& sv) override;
+
+  void
+  sysfs_get(const std::string& subdev, const std::string& entry, std::string& err,
+    std::vector<uint64_t>& iv) override;
+
+  void
+  sysfs_get(const std::string& subdev, const std::string& entry, std::string& err,
+    std::string& s) override;
+
+  void
+  sysfs_get(const std::string& subdev, const std::string& entry, std::string& err,
+    std::vector<char>& buf) override;
+
+  void
+  sysfs_put(const std::string& subdev, const std::string& entry, std::string& err,
+    const std::string& input) override;
+
+  void
+  sysfs_put(const std::string& subdev, const std::string& entry, std::string& err,
+    const std::vector<char>& buf) override;
+
+  void
+  sysfs_put(const std::string& subdev, const std::string& entry, std::string& err,
+    const unsigned int& buf) override;
+
 public:
   void*
   mmap(void *addr, size_t len, int prot, int flags, off_t offset) const;

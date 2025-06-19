@@ -241,10 +241,10 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
     wait_syncobj(*static_cast<wait_syncobj_arg*>(cmd_arg));
     break;
   case drv_ioctl_cmd::get_sysfs:
-    get_sysfs(*static_cast<get_put_sysfs_arg*>(cmd_arg));
+    get_sysfs(*static_cast<get_sysfs_arg*>(cmd_arg));
     break;
   case drv_ioctl_cmd::put_sysfs:
-    put_sysfs(*static_cast<get_put_sysfs_arg*>(cmd_arg));
+    put_sysfs(*static_cast<put_sysfs_arg*>(cmd_arg));
     break;
   default:
     shim_err(EINVAL, "Unknown drv_ioctl: %d", cmd);
