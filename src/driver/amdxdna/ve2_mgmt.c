@@ -128,6 +128,13 @@ free_xrs_req:
 	return ret;
 }
 
+static void ve2_event_completion_cb(u32 partition_id, void *cb_arg)
+{
+	struct amdxdna_ctx *hwctx = (struct amdxdna_ctx *)cb_arg;
+
+	wake_up_interruptible_all(&hwctx->priv->waitq);
+}
+
 int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
@@ -147,6 +154,8 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 	start_col = hwctx->start_col;
 	num_col = hwctx->num_col;
 
+	request.user_event1_complete = ve2_event_completion_cb;
+	request.user_event1_priv = hwctx;
 	request.partition_id = aie_calc_part_id(start_col, num_col);
 	XDNA_DBG(xdna, "Requesting partition for start_col %d, num_col %d with partition_id %d\n",
 		 start_col, num_col, request.partition_id);

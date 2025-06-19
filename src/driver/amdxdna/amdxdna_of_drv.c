@@ -8,6 +8,7 @@
 #include <linux/dma-mapping.h>
 #include <drm/drm_managed.h>
 
+#include "amdxdna_devel.h"
 #include "amdxdna_of_drv.h"
 
 static const struct of_device_id amdxdna_of_table[] = {
@@ -74,6 +75,8 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 		}
 		XDNA_WARN(xdna, "DMA configuration downgraded to 32bit Mask\n");
 	}
+
+	iommu_mode = AMDXDNA_IOMMU_NO_PASID;
 
 	return 0;
 out:

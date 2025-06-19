@@ -74,12 +74,6 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	xrs_cfg.ddev = &xdna->ddev;
 	xrs_cfg.total_col = XRS_MAX_COL;
-	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
-	if (!xdna->dev_handle->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
-		return -EINVAL;
-	}
-
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
@@ -88,6 +82,11 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	xdna_hdl->priv = xdna->dev_info->dev_priv;
 
 	xdna->dev_handle = xdna_hdl;
+	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
+		return -EINVAL;
+	}
 
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
@@ -95,7 +94,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		return ret;
 	}
 
-	XDNA_DBG(xdna, "aie load %s completed", xdna_hdl->priv->fw_path);
+	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 	return 0;
 }
 
