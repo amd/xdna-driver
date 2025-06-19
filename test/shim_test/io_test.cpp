@@ -84,8 +84,8 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
     // mergesync opcode. This will lead to command run timeout but without async error
     // Use this test to validate context health data report
     // See io_test_cmd_submit_and_wait_latency() for how to validate the result
-    instruction_p[3] = 0x03000000;
-    instruction_p[4] = 0x00010100;
+    instruction_p[bad_run_injected_ctc_pc] = 0x03000000;
+    instruction_p[bad_run_injected_ctc_pc + 1] = 0x00010100;
   }
 
   if (io_test_parameters.debug) {
