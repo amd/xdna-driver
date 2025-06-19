@@ -74,8 +74,8 @@ if(XDNA_DRV_PF_SRC_DIR)
 add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT} ${XDNA_DRV_PF_TGT})
 else()
 add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT})
-
 endif()
+
 # Tar and install driver source code for packaging
 set(XDNA_DRV_SRC_DIR
   driver
