@@ -146,7 +146,7 @@ io_test_cmd_submit_and_wait_latency(
       io_test_cmd_wait(hwq, std::get<0>(cmd));
       auto state = std::get<1>(cmd)->state;
       if (state != ERT_CMD_STATE_COMPLETED) {
-        if (state == ERT_CMD_STATE_TIMEOUT) {
+        if (io_test_parameters.type == IO_TEST_BAD_RUN_REPORT_CTX_PC && state == ERT_CMD_STATE_TIMEOUT) {
           ert_packet *pkg = reinterpret_cast<ert_packet *>(std::get<1>(cmd));
           ert_ctx_health_data *data = reinterpret_cast<ert_ctx_health_data *>(pkg->data);
           std::cout << "CTX health data:" << std::hex
