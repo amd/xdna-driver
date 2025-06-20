@@ -69,6 +69,12 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   PATTERN "*.json"
   )
 
+if(XDNA_DRV_PF_SRC_DIR)
+  set(PF_RMMOD "rmmod amdxdna_pf > /dev/null 2>&1")
+  set(PF_DBG_INSMOD "modprobe amdxdna_pf dyndbg=+pf")
+  set(PF_INSMOD "modprobe amdxdna_pf")
+endif()
+
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/postinst.in
   ${CMAKE_CURRENT_BINARY_DIR}/package/postinst

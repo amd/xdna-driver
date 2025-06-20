@@ -22,6 +22,8 @@ struct logging_req_buf {
 	u32                      dram_buffer_size;
 	u32                      msi_address;
 	u32			 log_level;
+	u32			 log_format;
+	u32			 log_dest;
 	int                      log_ch_irq;
 	u64			 rb_head;
 	bool                     enabled;
@@ -285,7 +287,7 @@ static int aie2_alloc_log_buf(struct amdxdna_dev_hdl *ndev)
 	struct logging_req_buf *req_buf = ndev->logging_req;
 	struct amdxdna_dev *xdna = ndev->xdna;
 
-	XDNA_DBG(ndev->xdna, "Dram logging buf size 0x%x log_level 0x%x",
+	XDNA_DBG(ndev->xdna, "Dram logging buf size 0x%x loglevel 0x%x",
 		 req_buf->dram_buffer_size, req_buf->log_level);
 
 	req_buf->buf = dma_alloc_noncoherent(xdna->ddev.dev, req_buf->dram_buffer_size,
@@ -310,24 +312,23 @@ static int aie2_apply_default_runtime_cfg(struct amdxdna_dev_hdl *ndev)
 	int ret;
 
 	ret = aie2_set_runtime_cfg(ndev, RUNTIME_CONFIGURATION_LOGGING_FORMAT,
-				   RUNTIME_CONFIGURATION_LOGGING_FORMAT_FULL);
+				   req_buf->log_format);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to set runtime log format, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to cfg log format, ret %d", ret);
 		return ret;
 	}
 
 	ret = aie2_set_runtime_cfg(ndev, RUNTIME_CONFIGURATION_LOGGING_LEVEL,
 				   req_buf->log_level);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to set runtime log level: %u, ret %d",
-			 req_buf->log_level, ret);
+		XDNA_ERR(xdna, "Failed to cfg log level, ret %d", ret);
 		return ret;
 	}
 
 	ret = aie2_set_runtime_cfg(ndev, RUNTIME_CONFIGURATION_LOGGING_DESTINATION,
-				   RUNTIME_CONFIGURATION_LOGGING_DEST_DRAM);
+				   req_buf->log_dest);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to set runtime log destination, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to cfg log destination, ret %d", ret);
 		return ret;
 	}
 
@@ -350,7 +351,7 @@ static int aie2_configure_and_start_logging(struct amdxdna_dev_hdl *ndev)
 	ret = aie2_configure_dram_logging(ndev, req_buf->dram_buffer_address,
 					  req_buf->dram_buffer_size);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to configure FW logging, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to configure FW logging");
 		goto free_log_buf;
 	}
 
@@ -459,6 +460,52 @@ void aie2_set_dram_log_config(struct amdxdna_dev_hdl *ndev, u32 enable,
 	aie2_assign_dram_logging_state(ndev, true);
 }
 
+int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, u32 loglevel)
+{
+	struct logging_req_buf *req_buf = ndev->logging_req;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (!aie2_is_dram_logging_supported_on_dev(ndev)) {
+		XDNA_DBG(ndev->xdna, "Dram logging is not supported on this device");
+		return 0;
+	}
+
+	if (!aie2_is_dram_logging_enable(ndev)) {
+		XDNA_DBG(ndev->xdna, "Dram logging is disabled");
+		return 0;
+	}
+
+	mutex_lock(&ndev->aie2_lock);
+	if (req_buf->log_level != loglevel) {
+		ret = aie2_set_runtime_cfg(ndev, RUNTIME_CONFIGURATION_LOGGING_LEVEL,
+					   loglevel);
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to cfg runtime log level: %u, ret %d",
+				 loglevel, ret);
+			goto out;
+		}
+
+		XDNA_DBG(ndev->xdna, "Set loglevel[%u] success prev loglevel[%u]",
+			 loglevel, req_buf->log_level);
+		req_buf->log_level = loglevel;
+	}
+	mutex_unlock(&ndev->aie2_lock);
+
+	return 0;
+
+out:
+	(void)aie2_configure_dram_logging(ndev, req_buf->dram_buffer_address, 0);
+	mutex_unlock(&ndev->aie2_lock);
+	aie2_free_log_buf(ndev);
+	return ret;
+}
+
+u32 aie2_get_log_level(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->logging_req->log_level;
+}
+
 void aie2_dram_logging_suspend(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -519,7 +566,9 @@ int aie2_dram_logging_init(struct amdxdna_dev_hdl *ndev)
 	if (!req_buf)
 		return -ENOMEM;
 
+	req_buf->log_format = RUNTIME_CONFIGURATION_LOGGING_FORMAT_FULL;
 	req_buf->log_level = RUNTIME_CONFIGURATION_LOGGING_LEVEL_INFO;
+	req_buf->log_dest = RUNTIME_CONFIGURATION_LOGGING_DEST_DRAM;
 	req_buf->dram_buffer_size = DEFAULT_DRAM_LOG_BUF_SIZE;
 	req_buf->enabled = false;
 	req_buf->ndev = ndev;
@@ -530,12 +579,7 @@ int aie2_dram_logging_init(struct amdxdna_dev_hdl *ndev)
 
 void aie2_dram_logging_fini(struct amdxdna_dev_hdl *ndev)
 {
-	if (!ndev->logging_req)
-		return;
-
-	if (aie2_is_dram_logging_enable(ndev))
-		aie2_assign_dram_logging_state(ndev, false);
-
+	aie2_assign_dram_logging_state(ndev, false);
 	kfree(ndev->logging_req);
 	ndev->logging_req = NULL;
 }

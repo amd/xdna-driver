@@ -50,6 +50,7 @@ void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type
 void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_with_ubuf_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_suspend_resume(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -774,6 +775,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "io test with user pointer BOs", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_with_ubuf_bo, {}
+  },
+  test_case{ "Real kernel delay run for auto-suspend/resume", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
+  },
+  test_case{ "io test real kernel bad run for health report", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
   },
 };
 
