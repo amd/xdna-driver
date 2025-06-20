@@ -765,8 +765,8 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct app_health_report_v1 *report;
-	const size_t size = 0x1000;
+	struct app_health_report *report;
+	const size_t size = 0x2000;
 	dma_addr_t dma_addr;
 	void *buff;
 	int ret;
@@ -787,8 +787,8 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	}
 
 	report = buff;
-	seq_printf(m, "version    %d\n", report->header.version);
-	seq_printf(m, "size       %d\n", report->header.size);
+	seq_printf(m, "version    %d.%d\n", report->major, report->minor);
+	seq_printf(m, "size       %d\n", report->size);
 	seq_printf(m, "context_id %d\n", report->context_id);
 	seq_printf(m, "dpu_pc     0x%x\n", report->dpu_pc);
 	seq_printf(m, "txn_op_id  0x%x\n", report->txn_op_id);

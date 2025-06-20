@@ -690,14 +690,32 @@ struct update_property_resp {
 	enum aie2_msg_status status;
 } __packed;
 
-struct app_health_report_hdr {
-	u32 version;
-	u32 size;
+struct fatal_error_info {
+	u32 fatal_type;         /* Fatal Error Type */
+	u32 exception_type;     /* Only valid if fatal_type is a specific value */
+	u32 exception_argument; /* meaning of the word varies based on exception type */
+	u32 exception_pc;       /* Program Counter at the time of the exception */
+	u32 app_module;         /* Error Module name */
+	u32 task_index;         /* Index of the task in which the error occurred */
+	u32 reserved[128];      /* for future use */
 };
 
-struct app_health_report_v1 {
-	/* header.version must be 1 */
-	struct app_health_report_hdr	header;
+struct col_status_info {
+	u32 num_dma_ch;
+	u32 num_locks;
+	u32 num_event_status_regs;
+	u32 num_xaie_cols;
+	u32 start_col_index;
+	u32 num_cols_valid;
+	u32 col_status_size;
+};
+
+struct app_health_report {
+	u16				major;
+	u16				minor;
+	u32				size;
+
+	/* minor = 1 fileds */
 	u32				context_id;
 	/*
 	 * PC of the most recently started DPU opcode, as reported by the ERT
@@ -720,6 +738,17 @@ struct app_health_report_v1 {
 	 */
 #define APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE	(~0U)
 	u32				txn_op_id;
+
+	/* minor = 2 fields */
+	/* TODO: Should driver parse below fileds? How? */
+	struct fatal_error_info		fatal_error_info;
+	struct col_status_info		col_status_info;
+	/*
+	 * TODO: There is a complex array binding with hardware details, like
+	 * columns and rows. Let's think about if driver really needs to parsing
+	 * so many hardware details. Just reserve some space for now.
+	 */
+	u32				resv[1521];
 };
 
 struct get_app_health_req {
