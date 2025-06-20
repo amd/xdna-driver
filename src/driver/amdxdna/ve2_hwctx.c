@@ -583,6 +583,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		return -ENOMEM;
 
 	hwctx->priv = priv;
+	init_waitqueue_head(&priv->waitq);
 
 	/* one host_queue entry per hwctx */
 	ret = ve2_create_host_queue(xdna, &priv->hwctx_hsa_queue);
