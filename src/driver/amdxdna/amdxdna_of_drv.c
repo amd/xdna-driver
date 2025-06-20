@@ -76,6 +76,7 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 		XDNA_WARN(xdna, "DMA configuration downgraded to 32bit Mask\n");
 	}
 
+	//VE2 doesn't support iommu PASID mode, use hardcoding value.
 	iommu_mode = AMDXDNA_IOMMU_NO_PASID;
 
 	return 0;
