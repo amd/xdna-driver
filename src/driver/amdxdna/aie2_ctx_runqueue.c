@@ -922,6 +922,9 @@ void aie2_rq_restart_all(struct aie2_ctx_rq *rq)
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
+	if (rq->paused)
+		queue_work(rq->work_q, &rq->parts_work);
+
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
 		queue_work(rq->work_q, &part->sched_work);
