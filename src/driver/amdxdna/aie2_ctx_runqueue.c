@@ -400,6 +400,7 @@ ctx_dead:
 
 static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 {
+	struct aie2_partition *part;
 	struct amdxdna_dev *xdna;
 	struct aie2_ctx_rq *rq;
 
@@ -414,17 +415,6 @@ static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 
 	list_move_tail(&ctx->entry, &rq->disconn_list);
 	ctx->priv->status = CTX_STATE_DISCONNECTED;
-}
-
-static void part_ctx_stop(struct amdxdna_ctx *ctx)
-{
-	struct aie2_partition *part;
-	struct amdxdna_dev *xdna;
-	struct aie2_ctx_rq *rq;
-
-	xdna = ctx->client->xdna;
-	rq = &xdna->dev_handle->ctx_rq;
-	part_ctx_stop_wait(ctx, true);
 
 	part = ctx->priv->part;
 	if (part) {
@@ -587,7 +577,7 @@ static void rq_yield_work(struct work_struct *work)
 	}
 
 	ctx->priv->should_block = false;
-	part_ctx_stop(ctx);
+	part_ctx_stop_wait(ctx, true);
 	if (rq->paused)
 		queue_work(rq->work_q, &rq->parts_work);
 	else
@@ -1163,10 +1153,14 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	rq->ctx_cnt++;
 
 	/* Expand partition is needed*/
-	if (num_col > rq->max_cols)
+	if (num_col > rq->max_cols) {
+		XDNA_DBG(xdna, "%s request %d colomns, rq max_cols %d",
+			 ctx->name, num_col, rq->max_cols);
 		wait_parts = true;
+	}
 
 	if (ctx_is_rt(ctx)) {
+		XDNA_DBG(xdna, "%s is realtime", ctx->name);
 		rq->rt_ctx_cnt++;
 		wait_parts = true;
 	}
@@ -1198,7 +1192,7 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	mutex_lock(&xdna->dev_lock);
 	down_write(&ctx->priv->io_sem);
 	ctx->priv->should_block = false;
-	part_ctx_stop(ctx);
+	part_ctx_stop_wait(ctx, true);
 	up_write(&ctx->priv->io_sem);
 
 	list_del(&ctx->entry);
@@ -1279,8 +1273,11 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 	 * 1. There will be only 1 partition to use all available columns.
 	 * 2. All contexts will expand and there will be no shrinking.
 	 */
-	if (ndev->priv->temporal_only)
+	if (ndev->priv->temporal_only) {
+		XDNA_DBG(xdna, "Temporal share only device");
 		rq->ctx_width_resv[rq->total_cols] = 1;
+		rq->max_cols = rq->total_cols;
+	}
 
 	rq->work_q = alloc_ordered_workqueue("ctx_runqueue", 0);
 	if (!rq->work_q)
