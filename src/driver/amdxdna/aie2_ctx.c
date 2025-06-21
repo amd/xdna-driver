@@ -1066,17 +1066,11 @@ int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq)
 {
 	struct drm_gem_object *gobj = to_gobj(abo);
-	long ret;
 
 	/*
 	 * Must wait forever, otherwise, memory was unmapped then FW might crash.
 	 * In case FW not response, TDR will terminal context execution and unref all BOs.
-	 * This loop will eventually exit.
 	 */
-	while (1) {
-		ret = dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
-					    true, MAX_SCHEDULE_TIMEOUT);
-		if (ret > 0)
-			break; /* Success */
-	}
+	dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
+			      false /* non-interruptible */, MAX_SCHEDULE_TIMEOUT);
 }
