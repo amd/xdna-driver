@@ -782,6 +782,9 @@ std::vector<test_case> test_list {
   test_case{ "io test real kernel bad run for health report", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
   },
+  //test_case{ "io test no-op kernel good run", {},
+  //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
+  //},
 };
 
 // Test case executor implementation
