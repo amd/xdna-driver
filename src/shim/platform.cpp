@@ -58,12 +58,15 @@ drv_open(const std::string& sysfs_name) const
   if (m_dev_fd != -1)
     shim_err(EBUSY, "Platform driver is already opened");
 
+  m_sysfs_root += "/sys/bus/pci/devices/";
+  m_sysfs_root += sysfs_name;
+
   auto dev_node = m_driver->get_dev_node(sysfs_name);
   m_dev_fd = open(dev_node.c_str(), O_RDWR);
   if (m_dev_fd == -1)
     shim_err(-errno, "Open %s failed", dev_node.c_str());
   else
-    shim_debug("Opened %s as %d", dev_node.c_str(), m_dev_fd);
+    shim_debug("Opened %s as %d, sysfs: %s", dev_node.c_str(), m_dev_fd, m_sysfs_root.c_str());
 }
 
 void
@@ -73,6 +76,7 @@ drv_close() const
   close(m_dev_fd);
   shim_debug("Closed %d", m_dev_fd);
   m_dev_fd = -1;
+  m_sysfs_root.clear();
 }
 
 int
@@ -80,6 +84,13 @@ platform_drv::
 dev_fd() const
 {
   return m_dev_fd;
+}
+
+const std::string&
+platform_drv::
+sysfs_root() const
+{
+  return m_sysfs_root;
 }
 
 std::shared_ptr<const drv>
@@ -228,6 +239,12 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
     break;
   case drv_ioctl_cmd::wait_syncobj:
     wait_syncobj(*static_cast<wait_syncobj_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::get_sysfs:
+    get_sysfs(*static_cast<get_sysfs_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::put_sysfs:
+    put_sysfs(*static_cast<put_sysfs_arg*>(cmd_arg));
     break;
   default:
     shim_err(EINVAL, "Unknown drv_ioctl: %d", cmd);

@@ -37,6 +37,9 @@ enum class drv_ioctl_cmd {
   get_info_array,
   set_state,
 
+  get_sysfs,
+  put_sysfs,
+
   create_syncobj,
   destroy_syncobj,
   export_syncobj,
@@ -161,6 +164,17 @@ struct wait_syncobj_arg {
   uint64_t timepoint;
 };
 
+struct get_sysfs_arg {
+  const std::string& sysfs_node;
+  std::vector<char>& data;
+  size_t real_size;
+};
+
+struct put_sysfs_arg {
+  const std::string& sysfs_node;
+  const std::vector<char>& data;
+};
+
 class platform_drv
 {
 public:
@@ -192,6 +206,9 @@ protected:
   int
   dev_fd() const;
 
+  const std::string&
+  sysfs_root() const;
+
   virtual void
   wait_syncobj(wait_syncobj_arg& arg) const;
 
@@ -203,9 +220,11 @@ protected:
 
 private:
   std::shared_ptr<const drv> m_driver;
+
   // Supposed to be set once and used till object is destroyed.
   // No locking protection here. Caller should make sure there is no race.
   mutable int m_dev_fd = -1;
+  mutable std::string m_sysfs_root;
 
   std::string
   get_dev_node(const std::string& sysfs_name);
@@ -282,6 +301,14 @@ private:
 
   virtual void
   import_syncobj(export_import_syncobj_arg& arg) const;
+
+  virtual void
+  get_sysfs(get_sysfs_arg& arg) const
+  { shim_not_supported_err(__func__); }
+
+  virtual void
+  put_sysfs(put_sysfs_arg& arg) const
+  { shim_not_supported_err(__func__); }
 };
 
 }
