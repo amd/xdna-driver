@@ -613,3 +613,209 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv);
 }
+
+static int ve2_hwctx_config_dtrace_buf(struct amdxdna_ctx *hwctx, u64 base_paddr,
+				       struct uc_info_entry uc_info[], bool attach)
+{
+	struct device *aie_dev = hwctx->priv ? hwctx->priv->aie_dev : NULL;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct handshake hs = { 0 };
+	u32 uc_index = 0;
+	u32 prev_sz = 0;
+	int ret = 0;
+	u64 paddr;
+
+	if (!aie_dev) {
+		XDNA_ERR(xdna, "%s aie device handle not found", __func__);
+		return -EINVAL;
+	}
+
+	for (u32 col = 0; col < hwctx->num_col; col++, uc_index++) {
+		if (attach) {
+			if (uc_info[uc_index].size == 0)
+				continue;
+			paddr = base_paddr + prev_sz;
+			hs.trace.dtrace_addr_high = upper_32_bits((u64)paddr);
+			hs.trace.dtrace_addr_low = lower_32_bits((u64)paddr);
+			prev_sz += uc_info[uc_index].size;
+			XDNA_DBG(xdna, "col[%d].paddr high = %u, low = %u, size = %u\n", col,
+				 hs.trace.dtrace_addr_high, hs.trace.dtrace_addr_low,
+				 uc_info[uc_index].size);
+		}
+
+		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
+							 offsetof(struct handshake,
+								  trace.dtrace_addr_high),
+							 sizeof(hs.trace), (void *)&hs.trace);
+		if (ret < 0)
+			return ret;
+	}
+
+	return ret;
+}
+
+static int ve2_hwctx_config_debug_buf(struct amdxdna_ctx *hwctx, u64 base_paddr,
+				      struct uc_info_entry uc_info[], bool attach)
+{
+	struct device *aie_dev = hwctx->priv ? hwctx->priv->aie_dev : NULL;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct handshake hs = { 0 };
+	u32 uc_index = 0;
+	u32 prev_sz = 0;
+	int ret = 0;
+	u64 paddr;
+
+	if (!aie_dev) {
+		XDNA_ERR(xdna, "%s aie device handle not found", __func__);
+		return -EINVAL;
+	}
+
+	for (u32 col = 0; col < hwctx->num_col; col++, uc_index++) {
+		if (attach) {
+			if (uc_info[uc_index].size == 0)
+				continue;
+			paddr = base_paddr + prev_sz;
+			hs.dbg_buf.dbg_buf_addr_high = upper_32_bits((u64)paddr);
+			hs.dbg_buf.dbg_buf_addr_low = lower_32_bits((u64)paddr);
+			hs.dbg_buf.size = uc_info[uc_index].size;
+			prev_sz += uc_info[uc_index].size;
+			XDNA_DBG(xdna, "col[%d].paddr high = %u, low = %u, size = %u\n", col,
+				 hs.dbg_buf.dbg_buf_addr_high, hs.dbg_buf.dbg_buf_addr_low,
+				 uc_info[uc_index].size);
+		}
+
+		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
+							 offsetof(struct handshake,
+								  dbg_buf.dbg_buf_addr_high),
+							 sizeof(hs.dbg_buf), (void *)&hs.dbg_buf);
+		if (ret < 0)
+			return ret;
+	}
+
+	return ret;
+}
+
+static int ve2_hwctx_config_log_buf(struct amdxdna_ctx *hwctx, u64 base_paddr,
+				    struct uc_info_entry uc_info[], bool attach)
+{
+	struct device *aie_dev = hwctx->priv ? hwctx->priv->aie_dev : NULL;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct handshake hs = { 0 };
+	u32 uc_index = 0;
+	u32 prev_sz = 0;
+	int ret = 0;
+	u64 paddr;
+
+	if (!aie_dev) {
+		XDNA_ERR(xdna, "%s aie device handle not found", __func__);
+		return -EINVAL;
+	}
+	for (u32 col = 0; col < hwctx->num_col; col++, uc_index++) {
+		if (attach) {
+			if (uc_info[uc_index].size == 0)
+				continue;
+			paddr = base_paddr + prev_sz;
+			hs.log_addr_high = upper_32_bits((u64)paddr);
+			hs.log_addr_low = lower_32_bits((u64)paddr);
+			hs.log_buf_size = uc_info[uc_index].size;
+			prev_sz += uc_info[uc_index].size;
+			XDNA_DBG(xdna, "col[%d].paddr high = %u, low = %u, size = %u\n", col,
+				 hs.log_addr_high, hs.log_addr_low, uc_info[uc_index].size);
+		}
+
+		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
+							 offsetof(struct handshake, log_addr_high),
+							 sizeof(hs.log_addr_high) +
+							 sizeof(hs.log_addr_high) +
+							 sizeof(hs.log_buf_size),
+							 (void *)&hs.log_addr_high);
+		if (ret < 0)
+			return ret;
+	}
+
+	return ret;
+}
+
+int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_gem_obj *abo, *mdata_abo;
+	struct fw_buffer_metadata *mdata;
+	int ret = 0;
+
+	/* Update fw's handshake shared memory with debug/trace buffer details */
+	switch (type) {
+	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
+		mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
+		if (!mdata_abo || !mdata_abo->mem.kva) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
+			return -EINVAL;
+		}
+		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+		if (!mdata) {
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
+			amdxdna_gem_put_obj(mdata_abo);
+			return -EINVAL;
+		}
+
+		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_DEV);
+		if (!abo || !abo->mem.kva) {
+			XDNA_ERR(xdna, "Get bo %lld failed for type %d", mdata->bo_handle, type);
+			amdxdna_gem_put_obj(mdata_abo);
+			return -EINVAL;
+		}
+
+		if (mdata->buf_type == AMDXDNA_FW_BUF_DEBUG)
+			ret = ve2_hwctx_config_debug_buf(hwctx, abo->mem.dev_addr, mdata->uc_info,
+							 true);
+		else if (mdata->buf_type == AMDXDNA_FW_BUF_TRACE)
+			ret = ve2_hwctx_config_dtrace_buf(hwctx, abo->mem.dev_addr, mdata->uc_info,
+							  true);
+		else if (mdata->buf_type == AMDXDNA_FW_BUF_LOG)
+			ret = ve2_hwctx_config_log_buf(hwctx, abo->mem.dev_addr, mdata->uc_info,
+						       true);
+		if (ret < 0)
+			XDNA_ERR(xdna, "hwctx config req %d with flag %d failed, err %d", type,
+				 mdata->buf_type, ret);
+		else
+			XDNA_DBG(xdna, "Attached %d BO %lld to %s, ret %d", mdata->buf_type,
+				 mdata->bo_handle, hwctx->name, ret);
+
+		amdxdna_gem_put_obj(abo);
+		amdxdna_gem_put_obj(mdata_abo);
+		break;
+	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
+		abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
+		if (!abo || !abo->mem.kva) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
+			return -EINVAL;
+		}
+		mdata = (struct fw_buffer_metadata *)(abo->mem.kva);
+		if (!mdata) {
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
+			amdxdna_gem_put_obj(abo);
+			return -EINVAL;
+		}
+		if (mdata->buf_type == AMDXDNA_FW_BUF_DEBUG)
+			ret = ve2_hwctx_config_debug_buf(hwctx, 0, 0, false);
+		else if (mdata->buf_type == AMDXDNA_FW_BUF_TRACE)
+			ret = ve2_hwctx_config_dtrace_buf(hwctx, 0, 0, false);
+		else if (mdata->buf_type == AMDXDNA_FW_BUF_LOG)
+			ret = ve2_hwctx_config_log_buf(hwctx, 0, 0, false);
+		if (ret < 0)
+			XDNA_ERR(xdna, "Detach Debug BO %lld from %s failed ret %d",
+				 mdata->bo_handle, hwctx->name, ret);
+		else
+			XDNA_DBG(xdna, "Detached Debug BO %lld from %s, ret %d", mdata->bo_handle,
+				 hwctx->name, ret);
+
+		amdxdna_gem_put_obj(abo);
+		break;
+	default:
+		XDNA_DBG(xdna, "%s Not supported type %d", __func__, type);
+		return -EOPNOTSUPP;
+	}
+
+	return ret;
+}
