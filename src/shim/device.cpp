@@ -1349,6 +1349,7 @@ initialize_query_table()
   emplace_func1_request<query::sequence_name,                  sequence_name>();
   emplace_func1_request<query::elf_name,                       elf_name>();
   emplace_func1_request<query::mobilenet,                      mobilenet>();
+  emplace_func1_request<query::runner,                         runner>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
