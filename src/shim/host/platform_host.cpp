@@ -344,4 +344,35 @@ set_state(amdxdna_drm_set_state& state) const
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_SET_STATE, &state);
 }
 
+void
+platform_drv_host::
+get_sysfs(get_sysfs_arg& arg) const
+{
+  std::string path = sysfs_root() + "/" + arg.sysfs_node;
+  std::ifstream ifs(path, std::ios::binary);
+  if (!ifs.is_open())
+    shim_err(-errno, "Failed to open %s", path.c_str());
+
+  ifs.read(arg.data.data(), arg.data.size());
+  arg.real_size = ifs.gcount();
+
+  ifs.close();
+}
+
+void
+platform_drv_host::
+put_sysfs(put_sysfs_arg& arg) const
+{
+  std::string path = sysfs_root() + "/" + arg.sysfs_node;
+  std::ofstream ofs(path, std::ios::binary);
+  if (!ofs.is_open())
+    shim_err(-errno, "Failed to open %s", path.c_str());
+
+  ofs.write(arg.data.data(), arg.data.size());
+  if (!ofs.good())
+    shim_err(-errno, "Failed to write %s", path.c_str());
+
+  ofs.close();
+}
+
 }
