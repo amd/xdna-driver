@@ -59,6 +59,7 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
   if (io_test_parameters.type == IO_TEST_NOOP_RUN) {
     // Preparing no-op kernel's special control code
     size_t sz = 32 * sizeof(int32_t);
+    //size_t sz = 0x100000 * 128; // 128 MB
     auto tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
     bos[IO_TEST_BO_INSTRUCTION].tbo = tbo;
     std::memset(tbo->map(), 0, sz);
