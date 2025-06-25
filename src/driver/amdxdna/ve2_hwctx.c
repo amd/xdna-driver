@@ -708,8 +708,8 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, buf_paddr, buf_sz,
 						       col, true);
 			if (ret < 0) {
-				XDNA_ERR(xdna, "hwctx config req %d with flag %d failed, err %d", type,
-					 mdata->buf_type, ret);
+				XDNA_ERR(xdna, "hwctx config req %d with flag %d failed, err %d",
+					 type, mdata->buf_type, ret);
 				amdxdna_gem_put_obj(abo);
 				amdxdna_gem_put_obj(mdata_abo);
 				return ret;
