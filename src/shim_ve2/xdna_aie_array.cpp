@@ -174,7 +174,7 @@ xdna_aie_array::
 get_driver_config_hwctx(const xrt_core::device* device, const xdna_hwctx* hwctx)
 {
   auto xclbin_uuid = hwctx ? hwctx->get_xclbin_uuid() : xrt::uuid();
-  auto data = device->get_axlf_section(AIE_METADATA, xclbin_uuid);
+  auto data = device->get_axlf_section(AIE_TRACE_METADATA, xclbin_uuid);
   if (!data.first || !data.second)
     return {};
 

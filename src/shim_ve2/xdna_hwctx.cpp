@@ -68,7 +68,7 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
 partition_info
 get_partition_info_hw(const xrt_core::device* device, const xrt::uuid xclbin_uuid, uint32_t hw_context_id)
 {
-  auto data = device->get_axlf_section(AIE_METADATA, xclbin_uuid);
+  auto data = device->get_axlf_section(AIE_TRACE_METADATA, xclbin_uuid);
   if (!data.first || !data.second)
     return {};
 
@@ -110,7 +110,7 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   m_info = get_partition_info_hw(&m_device, xclbin.get_uuid(), arg.handle);
   set_doorbell(arg.umq_doorbell);
 
-  auto data = m_device.get_axlf_section(AIE_METADATA, xclbin.get_uuid());
+  auto data = m_device.get_axlf_section(AIE_TRACE_METADATA, xclbin.get_uuid());
   if (data.first && data.second)
     m_aie_array = std::make_shared<xdna_aie_array>(&m_device, this);
 
