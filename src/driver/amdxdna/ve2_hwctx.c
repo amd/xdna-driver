@@ -626,8 +626,8 @@ static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u64 paddr, u8 buf
 	switch (buf_type) {
 	case AMDXDNA_FW_BUF_DEBUG:
 		if (attach) {
-			hs.dbg_buf.dbg_buf_addr_high = upper_32_bits((u64)paddr);
-			hs.dbg_buf.dbg_buf_addr_low = lower_32_bits((u64)paddr);
+			hs.dbg_buf.dbg_buf_addr_high = upper_32_bits(paddr);
+			hs.dbg_buf.dbg_buf_addr_low = lower_32_bits(paddr);
 			hs.dbg_buf.size = buf_sz;
 		}
 		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
@@ -637,8 +637,8 @@ static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u64 paddr, u8 buf
 		break;
 	case AMDXDNA_FW_BUF_TRACE:
 		if (attach) {
-			hs.trace.dtrace_addr_high = upper_32_bits((u64)paddr);
-			hs.trace.dtrace_addr_low = lower_32_bits((u64)paddr);
+			hs.trace.dtrace_addr_high = upper_32_bits(paddr);
+			hs.trace.dtrace_addr_low = lower_32_bits(paddr);
 		}
 		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
 							 offsetof(struct handshake,
@@ -647,8 +647,8 @@ static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u64 paddr, u8 buf
 		break;
 	case AMDXDNA_FW_BUF_LOG:
 		if (attach) {
-			hs.log_addr_high = upper_32_bits((u64)paddr);
-			hs.log_addr_low = lower_32_bits((u64)paddr);
+			hs.log_addr_high = upper_32_bits(paddr);
+			hs.log_addr_low = lower_32_bits(paddr);
 			hs.log_buf_size = buf_sz;
 		}
 		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
@@ -677,22 +677,22 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	int ret = 0;
 	u32 buf_sz;
 
+	mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
+	if (!mdata_abo || !mdata_abo->mem.kva) {
+		XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
+		return -EINVAL;
+	}
+
+	mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+	if (!mdata) {
+		XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
+		amdxdna_gem_put_obj(mdata_abo);
+		return -EINVAL;
+	}
+
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {
 	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
-		mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
-		if (!mdata_abo || !mdata_abo->mem.kva) {
-			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
-			return -EINVAL;
-		}
-
-		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
-		if (!mdata) {
-			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
-			amdxdna_gem_put_obj(mdata_abo);
-			return -EINVAL;
-		}
-
 		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_DEV);
 		if (!abo || !abo->mem.kva) {
 			XDNA_ERR(xdna, "Get bo %lld failed for type %d", mdata->bo_handle, type);
@@ -723,19 +723,6 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
 	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
-		mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
-		if (!mdata_abo || !mdata_abo->mem.kva) {
-			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
-			return -EINVAL;
-		}
-
-		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
-		if (!mdata) {
-			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
-			amdxdna_gem_put_obj(mdata_abo);
-			return -EINVAL;
-		}
-
 		for (u32 col = 0; col < hwctx->num_col; col++) {
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, 0, 0, col, false);
 			if (ret < 0) {
@@ -752,7 +739,9 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 		break;
 	default:
 		XDNA_DBG(xdna, "%s Not supported type %d", __func__, type);
-		return -EOPNOTSUPP;
+		ret = -EOPNOTSUPP;
+		amdxdna_gem_put_obj(mdata_abo);
+		break;
 	}
 
 	return ret;
