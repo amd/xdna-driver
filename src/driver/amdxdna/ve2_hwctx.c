@@ -608,6 +608,18 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_sched_job *job;
+	int idx = 0;
+
+	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
+		job = hwctx->priv->pending[idx];
+		if (!job)
+			continue;
+
+		ve2_hwctx_job_release(hwctx, job);
+	}
+
+	ve2_get_firmware_status(hwctx);
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);

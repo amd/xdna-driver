@@ -65,12 +65,24 @@ out:
 	return ret;
 }
 
+static void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
+{
+	u32 col;
+
+	for (col = 0; col < max_cols; col++) {
+		kfree(xdna_hdl->fw_slots[col]);
+		xdna_hdl->fw_slots[col] = NULL;
+	}
+}
+
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	struct init_config xrs_cfg = { 0 };
 	struct amdxdna_dev_hdl *xdna_hdl;
+	struct firmware_status *fw_slots;
 	int ret;
+	u32 col;
 
 	xrs_cfg.ddev = &xdna->ddev;
 	xrs_cfg.total_col = XRS_MAX_COL;
@@ -93,9 +105,22 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
 		return ret;
 	}
-
 	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
+
+	for (col = 0; col < VE2_MAX_COL; col++) {
+		fw_slots = kzalloc(sizeof(*fw_slots), GFP_KERNEL);
+		if (!fw_slots) {
+			ret = -ENOMEM;
+			goto done;
+		}
+		xdna->dev_handle->fw_slots[col] = fw_slots;
+	}
+
 	return 0;
+done:
+	ve2_free_firmware_slots(xdna_hdl, VE2_MAX_COL);
+
+	return ret;
 }
 
 static void ve2_fini(struct amdxdna_dev *xdna)
@@ -109,4 +134,6 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.ctx_fini	= ve2_hwctx_fini,
 	.cmd_submit	= ve2_cmd_submit,
 	.cmd_wait	= ve2_cmd_wait,
+	.get_aie_info	= ve2_get_aie_info,
+	.set_aie_state	= ve2_set_aie_state,
 };
