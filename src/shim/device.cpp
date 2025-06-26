@@ -760,11 +760,21 @@ struct firmware_version
 {
   using result_type = query::firmware_version::result_type;
 
-  static result_type
-  get(const xrt_core::device* device, key_type)
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
   {
-    amdxdna_drm_query_firmware_version fw_version{};
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
 
+  static result_type
+  get(const xrt_core::device* device, key_type,
+		  const std::any& req_type)
+  {
+    const auto fw_type = std::any_cast<query::firmware_version::firmware_type>(req_type);
+    if (fw_type != query::firmware_version::firmware_type::npu_firmware)
+       throw std::runtime_error("UC firmware query not supported in this context");
+
+    amdxdna_drm_query_firmware_version fw_version{};
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_FIRMWARE_VERSION,
       .buffer_size = sizeof(fw_version),
@@ -779,6 +789,8 @@ struct firmware_version
     output.minor = fw_version.minor;
     output.patch = fw_version.patch;
     output.build = fw_version.build;
+    output.git_hash = "N/A";
+    output.date = "N/A";
     return output;
   }
 };
@@ -1353,7 +1365,7 @@ initialize_query_table()
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
-  emplace_func0_request<query::firmware_version,               firmware_version>();
+  emplace_func1_request<query::firmware_version,               firmware_version>();
 }
 
 struct X { X() { initialize_query_table(); }};

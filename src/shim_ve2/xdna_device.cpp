@@ -273,6 +273,46 @@ struct partition_info
     return output;
   }
 };
+//Implement uc firmware verison query
+struct firmware_version
+{
+  using result_type = query::firmware_version::result_type;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type,
+		  const std::any& req_type)
+  {
+    const auto fw_type = std::any_cast<query::firmware_version::firmware_type>(req_type);
+    if (fw_type != query::firmware_version::firmware_type::uc_firmware)
+       throw std::runtime_error("NPU firmware query not supported in this context");
+
+    amdxdna_drm_query_git_firmware_version fw_version{};
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_GIT_FIRMWARE_VERSION,
+      .buffer_size = sizeof(fw_version),
+      .buffer = reinterpret_cast<uintptr_t>(&fw_version)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    result_type output;
+    output.major = static_cast<int>(fw_version.major);
+    output.minor = static_cast<int>(fw_version.minor);
+    output.patch = 0;
+    output.build = 0;
+    output.git_hash = std::string(reinterpret_cast<char*>(fw_version.git_hash));
+    output.date = std::string(reinterpret_cast<char*>(fw_version.date));
+
+    return output;
+  }
+};
 
 struct xclbin_slots
 {
@@ -405,6 +445,19 @@ struct function0_get : QueryRequestType
 };
 
 template <typename QueryRequestType, typename Getter>
+struct function1_get : function0_get<QueryRequestType, Getter>
+{
+  std::any
+  get(const xrt_core::device* device, const std::any& param) const
+  {
+    if (auto uhdl = device->get_user_handle())
+      return Getter::get(device, QueryRequestType::key, param);
+    else
+      throw xrt_core::internal_error("No device handle");
+  }
+};
+
+template <typename QueryRequestType, typename Getter>
 struct function2_get : QueryRequestType
 {
   std::any
@@ -455,6 +508,14 @@ emplace_func0_request()
 
 template <typename QueryRequestType, typename Getter>
 static void
+emplace_func1_request()
+{
+  auto k = QueryRequestType::key;
+  query_tbl.emplace(k, std::make_unique<function1_get<QueryRequestType, Getter>>());
+}
+
+template <typename QueryRequestType, typename Getter>
+static void
 emplace_func2_request()
 {
   auto k = QueryRequestType::key;
@@ -486,6 +547,7 @@ initialize_query_table()
   emplace_func0_request<query::pcie_bdf,                bdf>();
   emplace_func0_request<query::rom_vbnv,                dev_info>();
   emplace_func0_request<query::device_class,            dev_info>();
+  emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }
