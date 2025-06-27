@@ -6,6 +6,8 @@
 #include <linux/kthread.h>
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
 #include <drm/drm_cache.h>
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
@@ -16,6 +18,7 @@ struct logging_req_buf {
 	struct amdxdna_dev_hdl   *ndev;
 	struct workqueue_struct  *wq;
 	struct work_struct       work;
+	struct timer_list	 poll_timer;
 	dma_addr_t               dram_buffer_address;
 	u8                       *kern_log_buf;
 	u8                       *buf;
@@ -189,6 +192,16 @@ static void aie2_print_log_buffer_data(struct amdxdna_dev_hdl *ndev)
 	}
 }
 
+static void poll_timer_callback(struct timer_list *timer)
+{
+	struct logging_req_buf *req_buf;
+
+	req_buf = container_of(timer, struct logging_req_buf, poll_timer);
+
+	queue_work(req_buf->wq, &req_buf->work);
+	mod_timer(&req_buf->poll_timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
+}
+
 static void deferred_logging_work(struct work_struct *work)
 {
 	struct logging_req_buf *log_rq;
@@ -204,6 +217,7 @@ static irqreturn_t log_buffer_irq_handler(int irq, void *data)
 	trace_mbox_irq_handle("DRAM_LOG_BUFFER", irq);
 	clear_logging_msix(ndev);
 	queue_work(ndev->logging_req->wq, &ndev->logging_req->work);
+
 	return IRQ_HANDLED;
 }
 
@@ -359,6 +373,9 @@ static int aie2_configure_and_start_logging(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto detach_logger;
 
+	timer_setup(&req_buf->poll_timer, poll_timer_callback, 0);
+	mod_timer(&req_buf->poll_timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
+
 	return 0;
 
 detach_logger:
@@ -384,6 +401,7 @@ static int aie2_stop_and_remove_logging_config(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	timer_delete_sync(&req_buf->poll_timer);
 	aie2_remove_log_buf_irq(ndev);
 	ret = aie2_configure_dram_logging(ndev, req_buf->dram_buffer_address, 0);
 	if (ret)

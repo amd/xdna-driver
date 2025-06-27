@@ -461,6 +461,7 @@ enum cmd_chain_class {
 
 #define DRAM_LOG_BUF_METADATA_SIZE			0x40
 #define DEFAULT_DRAM_LOG_BUF_SIZE			0x2000
+#define POLL_INTERVAL_MS				200
 #define LOG_FORMAT_FULL					0xc0
 #define LOG_MSG_ALIGN					8
 #define MSI_ADDR_MASK					0x00FFFFFF
