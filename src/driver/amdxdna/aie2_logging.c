@@ -6,6 +6,8 @@
 #include <linux/kthread.h>
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
 #include <drm/drm_cache.h>
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
@@ -15,7 +17,7 @@
 struct logging_req_buf {
 	struct amdxdna_dev_hdl   *ndev;
 	struct workqueue_struct  *wq;
-	struct work_struct       work;
+	struct delayed_work	 work;
 	dma_addr_t               dram_buffer_address;
 	u8                       *kern_log_buf;
 	u8                       *buf;
@@ -191,10 +193,12 @@ static void aie2_print_log_buffer_data(struct amdxdna_dev_hdl *ndev)
 
 static void deferred_logging_work(struct work_struct *work)
 {
-	struct logging_req_buf *log_rq;
+	struct logging_req_buf *req_buf;
+	struct delayed_work *dw = to_delayed_work(work);
 
-	log_rq = container_of(work, struct logging_req_buf, work);
-	aie2_print_log_buffer_data(log_rq->ndev);
+	req_buf = container_of(dw, struct logging_req_buf, work);
+	aie2_print_log_buffer_data(req_buf->ndev);
+	mod_delayed_work(req_buf->wq, &req_buf->work, msecs_to_jiffies(POLL_INTERVAL_MS));
 }
 
 static irqreturn_t log_buffer_irq_handler(int irq, void *data)
@@ -203,7 +207,8 @@ static irqreturn_t log_buffer_irq_handler(int irq, void *data)
 
 	trace_mbox_irq_handle("DRAM_LOG_BUFFER", irq);
 	clear_logging_msix(ndev);
-	queue_work(ndev->logging_req->wq, &ndev->logging_req->work);
+	mod_delayed_work(ndev->logging_req->wq, &ndev->logging_req->work, 0);
+
 	return IRQ_HANDLED;
 }
 
@@ -230,7 +235,7 @@ int aie2_configure_log_buf_irq(struct amdxdna_dev_hdl *ndev,
 	ndev->logging_req->msi_address = resp->msi_address & MSI_ADDR_MASK;
 	req_buf = ndev->logging_req;
 
-	INIT_WORK(&req_buf->work, deferred_logging_work);
+	INIT_DELAYED_WORK(&req_buf->work, deferred_logging_work);
 	req_buf->wq = alloc_ordered_workqueue("DRAM_LOG_BUFFER", 0);
 	if (!req_buf->wq) {
 		XDNA_ERR(xdna, "Failed to allocate workqueue");
@@ -274,7 +279,7 @@ void aie2_remove_log_buf_irq(struct amdxdna_dev_hdl *ndev)
 {
 	struct logging_req_buf *req_buf = ndev->logging_req;
 
-	cancel_work_sync(&req_buf->work);
+	cancel_delayed_work_sync(&req_buf->work);
 	aie2_print_log_buffer_data(ndev);
 	destroy_workqueue(req_buf->wq);
 
@@ -358,6 +363,8 @@ static int aie2_configure_and_start_logging(struct amdxdna_dev_hdl *ndev)
 	ret = aie2_apply_default_runtime_cfg(ndev);
 	if (ret)
 		goto detach_logger;
+
+	mod_delayed_work(req_buf->wq, &req_buf->work, msecs_to_jiffies(POLL_INTERVAL_MS));
 
 	return 0;
 
