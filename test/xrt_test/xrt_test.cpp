@@ -569,10 +569,10 @@ TEST_xrt_umq_resnet50_full(int device_index, arg_type& arg)
 
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/resnet50.xclbin"));
+  auto xclbin = xrt::xclbin(local_path("npu3_workspace/single_col_resnet50_all_layer.xclbin"));
   auto uuid = device.register_xclbin(xclbin);
 
-  xrt::elf elf{local_path("npu3_workspace/resnet50.elf")};
+  xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_all_layer.elf")};
   xrt::module mod{elf};
 
   xrt::hw_context hwctx{device, uuid};
@@ -602,7 +602,7 @@ TEST_xrt_umq_resnet50_full(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(3600000 /* 1 hour, some simnow server are slow */);
+  auto state = run.wait(10800000 /* 3 hours, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
