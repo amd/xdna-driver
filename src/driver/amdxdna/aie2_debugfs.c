@@ -702,19 +702,18 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct aie2_mgmt_dma_hdl mgmt_hdl;
 	const size_t size = 0x1000;
-	dma_addr_t dma_addr;
 	void *buff;
 	int ret;
 
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
+	buff = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
 	if (!buff)
 		return -ENOMEM;
 
-	drm_clflush_virt_range(buff, size); /* device can access */
+	aie2_mgmt_buff_clflush(&mgmt_hdl);
 	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_query_aie_telemetry(ndev, type, dma_addr, size, NULL);
+	ret = aie2_query_aie_telemetry(ndev, &mgmt_hdl, type, size, NULL);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
@@ -724,7 +723,7 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 	seq_write(m, buff, size);
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	aie2_mgmt_buff_free(&mgmt_hdl);
 	return 0;
 }
 
@@ -776,21 +775,20 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct aie2_mgmt_dma_hdl mgmt_hdl;
 	struct app_health_report *report;
 	const size_t size = 0x2000;
-	dma_addr_t dma_addr;
 	void *buff;
 	int ret;
 
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
+	buff = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
 	if (!buff)
 		return -ENOMEM;
 
-	drm_clflush_virt_range(buff, size); /* device can access */
+	aie2_mgmt_buff_clflush(&mgmt_hdl);
 	mutex_lock(&ndev->aie2_lock);
 	/* Just for debug, always check context id 1 */
-	ret = aie2_get_app_health(ndev, 1, dma_addr, size);
+	ret = aie2_get_app_health(ndev, &mgmt_hdl, 1, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed ret %d", ret);
@@ -805,7 +803,7 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	seq_printf(m, "txn_op_id  0x%x\n", report->txn_op_id);
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	aie2_mgmt_buff_free(&mgmt_hdl);
 	return 0;
 }
 
