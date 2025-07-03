@@ -504,6 +504,14 @@ bo_sub_type_name() const
   return m_uptr ? "USER_PTR BO" : "NORMAL BO";
 }
 
+void
+buffer::
+expand(size_t size)
+{
+  if (m_bo->m_type != AMDXDNA_BO_DEV_HEAP)
+    shim_not_supported_err(__func__);
+}
+
 //
 // Impl for class cmd_buffer
 //

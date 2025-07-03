@@ -101,6 +101,9 @@ public:
   virtual std::set<bo_id>
   get_arg_bo_ids() const;
 
+  virtual void
+  expand(size_t size);
+
 protected:
   const pdev& m_pdev;
 
