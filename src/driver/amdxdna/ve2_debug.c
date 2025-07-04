@@ -19,7 +19,6 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 	u32 req_bytes = 0, hw_i = 0;
 	struct amdxdna_ctx *hwctx;
 	unsigned long hwctx_id;
-	bool overflow = false;
 	int ret = 0, idx;
 
 	hwctx_data = kzalloc(hwctx_data_sz, GFP_KERNEL);
@@ -33,9 +32,10 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 		amdxdna_for_each_ctx(tmp_client, hwctx_id, hwctx) {
 			req_bytes += hwctx_data_sz;
 			if (args->buffer_size < req_bytes) {
-				/* Continue iterating to get the required size */
-				overflow = true;
-				continue;
+				XDNA_ERR(xdna, "Invalid buffer size. Given: %u Required: %u bytes",
+					 args->buffer_size, req_bytes);
+				ret = -EINVAL;
+				goto out;
 			}
 
 			hwctx_data->pid = hwctx->client->pid;
@@ -54,13 +54,6 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 			hw_i++;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
-	}
-
-	if (overflow) {
-		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %u", args->buffer_size,
-			 req_bytes);
-		ret = -EINVAL;
-		goto out;
 	}
 
 	if (hw_i == 0) {
@@ -102,7 +95,7 @@ static int ve2_tile_data_reg_write(struct amdxdna_client *client,
 	struct amdxdna_drm_aie_reg info;
 	struct device *aie_dev = NULL;
 	struct aie_location loc;
-	int ret = 0;
+	int ret;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
@@ -125,10 +118,12 @@ static int ve2_tile_data_reg_write(struct amdxdna_client *client,
 
 	loc.row = info.row;
 	ret = aie_partition_write(aie_dev, loc, info.addr, sizeof(u32), (void *)&info.val, 0);
-	if (ret < 0)
+	if (ret < 0) {
 		XDNA_ERR(xdev, "Error in AIE Data Reg write operation, err: %d\n", ret);
+		return ret;
+	}
 
-	return ret > 0 ? 0 : ret;
+	return 0;
 }
 
 static int ve2_tile_data_mem_write(struct amdxdna_client *client,
@@ -274,7 +269,7 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 static int ve2_get_firmware_version(struct amdxdna_client *client,
 				    struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_git_firmware_version version;
+	struct amdxdna_drm_query_ve2_firmware_version version;
 	struct amdxdna_dev *xdev = client->xdna;
 	struct firmware_version *cver = &xdev->dev_handle->fw_version;
 
@@ -289,8 +284,8 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 	memset(&version, 0, sizeof(version));
 	version.major = cver->major;
 	version.minor = cver->minor;
-	memcpy(version.date, cver->date, GIT_DATE_STRING_LENGTH);
-	memcpy(version.git_hash, cver->git_hash, GIT_HASH_STRING_LENGTH);
+	memcpy(version.date, cver->date, VE2_FW_DATE_STRING_LENGTH);
+	memcpy(version.hash, cver->hash, VE2_FW_HASH_STRING_LENGTH);
 
 	if (copy_to_user((u64_to_user_ptr(args->buffer)), &version, sizeof(version)))
 		return -EFAULT;
@@ -318,7 +313,7 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	case DRM_AMDXDNA_READ_AIE_REG:
 		ret = ve2_tile_data_reg_read(client, args);
 		break;
-	case DRM_AMDXDNA_QUERY_GIT_FIRMWARE_VERSION:
+	case DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION:
 		ret = ve2_get_firmware_version(client, args);
 		break;
 	default:

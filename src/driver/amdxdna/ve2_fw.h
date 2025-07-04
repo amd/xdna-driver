@@ -9,14 +9,14 @@
 #define VE2_CERT_VERSION_OFF	0x50
 #define VE2_CERT_VERSION_SIZE	0x40
 
-#define GIT_HASH_STRING_LENGTH	41
-#define GIT_DATE_STRING_LENGTH	11
+#define VE2_FW_HASH_STRING_LENGTH	41
+#define VE2_FW_DATE_STRING_LENGTH	11
 
 struct firmware_version {
 	u8 major;
 	u8 minor;
-	char git_hash[GIT_HASH_STRING_LENGTH];
-	char date[GIT_DATE_STRING_LENGTH];
+	char hash[VE2_FW_HASH_STRING_LENGTH];
+	char date[VE2_FW_DATE_STRING_LENGTH];
 };
 
 struct firmware_status {

@@ -34,8 +34,9 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 	memcpy(&xdna_hdl->fw_version, version, sizeof(*version));
 	XDNA_INFO(xdna, "CERT major: %u\n", xdna_hdl->fw_version.major);
 	XDNA_INFO(xdna, "CERT minor: %u\n", xdna_hdl->fw_version.minor);
-	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.git_hash);
+	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.hash);
 	XDNA_INFO(xdna, "CERT git hash date: %s\n", xdna_hdl->fw_version.date);
+	kfree(version);
 
 	return 0;
 }
@@ -87,7 +88,7 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 	u32 start_col = priv_ctx->start_col;
 	u32 num_col = priv_ctx->num_col;
 	u32 relative_col;
-	int ret = 0;
+	int ret;
 
 	if (!priv_ctx->aie_dev) {
 		XDNA_ERR(xdna, "Partition does not have aie device handle\n");
@@ -97,9 +98,11 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 	for (u32 col = start_col; col < start_col + num_col; col++) {
 		relative_col = col - start_col;
 		ret = get_firmware_status(xdna, priv_ctx->aie_dev, relative_col);
-		if (ret < 0)
+		if (ret < 0) {
 			XDNA_ERR(xdna, "Failed to get fw status for col %d ret %d\n", relative_col,
 				 ret);
+			break;
+		}
 	}
 
 	return ret;

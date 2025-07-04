@@ -268,7 +268,7 @@ int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	u32 value = VE2_USER_EVENT_ID;
 	struct aie_location loc = {0};
-	int ret = 0;
+	int ret;
 
 	loc.col = hwctx->start_col;
 

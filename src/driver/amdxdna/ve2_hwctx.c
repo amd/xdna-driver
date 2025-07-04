@@ -43,7 +43,7 @@ static int hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 {
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
-	int ret = 0;
+	int ret;
 
 	mutex_lock(&queue->hq_lock);
 	if (header->write_index < header->read_index) {
@@ -514,7 +514,7 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_sched_job *job;
 	unsigned long timeout_jiffies;
-	int ret = 0;
+	int ret;
 
 	/*
 	 * NOTE: this is simplified hwctx which has no col_entry list for different ctx
@@ -609,7 +609,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_sched_job *job;
-	int idx = 0;
+	int idx;
 
 	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
 		job = hwctx->priv->pending[idx];
@@ -631,7 +631,7 @@ static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u64 paddr, u8 buf
 {
 	struct device *aie_dev = hwctx->priv->aie_dev;
 	struct handshake hs = { 0 };
-	int ret = 0;
+	int ret;
 
 	WARN_ON(!aie_dev);
 
@@ -686,8 +686,8 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	struct fw_buffer_metadata *mdata;
 	u32 prev_buf_sz;
 	u64 buf_paddr;
-	int ret = 0;
 	u32 buf_sz;
+	int ret;
 
 	mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
 	if (!mdata_abo || !mdata_abo->mem.kva) {
