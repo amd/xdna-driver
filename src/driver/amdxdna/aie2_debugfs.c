@@ -19,11 +19,11 @@
 #if defined(CONFIG_DEBUG_FS)
 #define LOG_LEVEL_BUF_SIZE	11
 #define MIN_INPUT_ARG_SIZE	8
-#define MAX_INPUT_ARG_SIZE	30
+#define MAX_INPUT_ARG_SIZE	40
 #define SIZE			31
 
-#define TX_TIMEOUT 2000 /* miliseconds */
-#define RX_TIMEOUT 5000 /* miliseconds */
+#define TX_TIMEOUT 2000 /* milliseconds */
+#define RX_TIMEOUT 5000 /* milliseconds */
 
 static int aie2_dbgfs_entry_open(struct inode *inode, struct file *file,
 				 int (*show)(struct seq_file *, void *))
@@ -219,21 +219,32 @@ static int aie2_dpm_level_get(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(dpm_level, aie2_dpm_level_get, aie2_dpm_level_set);
 
+static const char *aie2_event_trace_input_info(void)
+{
+	return	"echo enable=1 size=1K category=0xFFFFFF -> Follow given input format to enable\n"
+		"enable=[0, 1] -> enable=1 to enable, enable=0 to disable\n"
+		"size=[1K, 2K, 4K...512K to 1M] -> buffer size should be pow of 2\n"
+		"category=[0x1 - 0xFFFFFFFF] -> 32 bit word\n";
+}
+
 static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
 				      size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	char event_trace_cfg_buf[MAX_INPUT_ARG_SIZE + 1];
 	u32 enable = 0, buf_size = 0, event_category = 0;
 	char *kbuf, *token, *key, *val;
+	int ret = 0;
 
-	kbuf = kzalloc(len + 1, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
-
-	if (copy_from_user(kbuf, buf, len)) {
-		kfree(kbuf);
-		return -EFAULT;
+	if (len < MIN_INPUT_ARG_SIZE || len > MAX_INPUT_ARG_SIZE) {
+		XDNA_ERR(ndev->xdna, "Input length %zu beyond buffer size [%d, %d]",
+			 len, MIN_INPUT_ARG_SIZE, MAX_INPUT_ARG_SIZE);
+		return -EINVAL;
 	}
+
+	kbuf = event_trace_cfg_buf;
+	if (copy_from_user(kbuf, buf, len))
+		return -EFAULT;
 
 	kbuf[len] = '\0';
 	token = strsep(&kbuf, " ");
@@ -241,41 +252,45 @@ static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
 	while (token) {
 		key = strsep(&token, "=");
 		val = token;
-		int ret;
 
 		if (key && val) {
 			if (strcmp(key, "enable") == 0) {
 				ret = kstrtouint(val, 10, &enable);
 				if (ret) {
-					XDNA_INFO(ndev->xdna, "invalid enable value %u", enable);
-					return ret;
+					ret = -EINVAL;
+					goto out;
 				}
 			} else if (strcmp(key, "size") == 0) {
 				buf_size = memparse(val, NULL);
 			} else if (strcmp(key, "category") == 0) {
 				ret = kstrtouint(val, 0, &event_category);
 				if (ret) {
-					XDNA_INFO(ndev->xdna, "invalid event category %u",
-						  event_category);
-					return ret;
+					ret = -EINVAL;
+					goto out;
 				}
 			} else {
-				XDNA_INFO(ndev->xdna, "invalid key %s format", key);
-				return len;
+				ret = -EINVAL;
+				goto out;
 			}
 		}
 		token = strsep(&kbuf, " ");
 	}
 
-	XDNA_DBG(ndev->xdna, "Event trace config: %u, %u, 0x%08x",
-		 enable, buf_size, event_category);
-	if (enable && (!buf_size || !event_category))
-		return -EINVAL;
+	if (enable && (!buf_size || !event_category)) {
+		XDNA_ERR(ndev->xdna, "Invalid config: %u, %u, 0x%08x",
+			 enable, buf_size, event_category);
+		ret = -EINVAL;
+		goto out;
+	}
 
 	aie2_config_event_trace(ndev, enable, buf_size, event_category);
-	kfree(kbuf);
-
 	return len;
+
+out:
+	if (ret == -EINVAL)
+		XDNA_INFO(ndev->xdna, "%s", aie2_event_trace_input_info());
+
+	return ret;
 }
 
 static int aie2_event_trace_show(struct seq_file *m, void *unused)
@@ -285,12 +300,8 @@ static int aie2_event_trace_show(struct seq_file *m, void *unused)
 	if (aie2_is_event_trace_enable(ndev))
 		seq_puts(m, "Event trace is enabled\n");
 	else
-		seq_puts(m, "Event trace is disabled\n"
-						"echo enable=1 size=1K category=0xffffff -> Follow given input format to enable\n"
-						"enable=[0, 1] -> enable=1 to enable, enable=0 to disable\n"
-						"size=[1K, 2K, 4K...512K to 1M] -> buffer size should be pow of 2\n"
-						"category=[0x1 - 0xFFFFFFFF] -> 32 bit word\n");
-
+		seq_printf(m, "Event trace is disabled\n%s",
+			   aie2_event_trace_input_info());
 	return 0;
 }
 

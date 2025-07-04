@@ -67,4 +67,7 @@ File:
   tools/bins/Runner/latency/strx/validate.xclbin
   tools/bins/Runner/throughput/phx/recipe_throughput.json
 
+Link:
+	tools/bins/17f3_10 -> tools/bins/17f1_10
+
 Licence: Redistributable. See LICENSE.amdnpu for details.

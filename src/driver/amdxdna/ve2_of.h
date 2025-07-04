@@ -44,6 +44,7 @@ struct amdxdna_dev_hdl {
 extern const struct amdxdna_dev_ops ve2_ops;
 int ve2_hwctx_init(struct amdxdna_ctx *hwctx);
 void ve2_hwctx_fini(struct amdxdna_ctx *hwctx);
+int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size);
 
 int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 		   u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
