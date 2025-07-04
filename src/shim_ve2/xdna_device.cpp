@@ -314,6 +314,28 @@ struct firmware_version
   }
 };
 
+struct total_cols
+{
+  using result_type = query::total_cols::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_aie_metadata aie_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+      .buffer_size = sizeof(aie_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    return aie_metadata.cols;                                                          
+  }
+};
+
 struct xclbin_slots
 {
   using result_type = query::xclbin_slots::result_type;
@@ -547,6 +569,7 @@ initialize_query_table()
   emplace_func0_request<query::pcie_bdf,                bdf>();
   emplace_func0_request<query::rom_vbnv,                dev_info>();
   emplace_func0_request<query::device_class,            dev_info>();
+  emplace_func0_request<query::total_cols,              total_cols>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
