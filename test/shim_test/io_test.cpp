@@ -424,7 +424,7 @@ TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std
 void
 TEST_io_with_ubuf_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  io_test_bo_set boset{sdev.get(), false};
+  io_test_bo_set boset{sdev.get(), true};
   boset.run();
 }
 
