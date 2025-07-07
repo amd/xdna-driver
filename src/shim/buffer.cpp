@@ -119,7 +119,7 @@ clflush_data(const void *base, size_t offset, size_t len)
 bool
 is_cacheline_aligned(void *ptr)
 {
-  return (ptr == align_addr(ptr, get_cacheline_size()))
+  return (ptr == align_addr(ptr, get_cacheline_size()));
 }
 
 bool
