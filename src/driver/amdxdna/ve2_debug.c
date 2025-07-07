@@ -35,6 +35,7 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 				XDNA_ERR(xdna, "Invalid buffer size. Given: %u Required: %u bytes",
 					 args->buffer_size, req_bytes);
 				ret = -EINVAL;
+				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 				goto out;
 			}
 
