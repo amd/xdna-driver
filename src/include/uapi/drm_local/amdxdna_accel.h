@@ -545,13 +545,13 @@ struct amdxdna_drm_query_firmware_version {
  * @major:  Major version number
  * @minor:  Minor version number
  * @date:  Build date of the firmware
- * @hash:  Git commit ID used to build the firmware version
+ * @git_hash:  Git commit ID used to build the firmware version
  */
 struct amdxdna_drm_query_ve2_firmware_version {
 	__u8 major;
 	__u8 minor;
 	__u8 date[14];
-	__u8 hash[48];
+	__u8 git_hash[48];
 };
 
 /**

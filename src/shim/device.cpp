@@ -789,7 +789,7 @@ struct firmware_version
     output.minor = fw_version.minor;
     output.patch = fw_version.patch;
     output.build = fw_version.build;
-    output.hash = "N/A";
+    output.git_hash = "N/A";
     output.date = "N/A";
     return output;
   }

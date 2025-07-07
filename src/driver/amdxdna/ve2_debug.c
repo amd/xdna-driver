@@ -271,7 +271,7 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 {
 	struct amdxdna_drm_query_ve2_firmware_version version;
 	struct amdxdna_dev *xdev = client->xdna;
-	struct firmware_version *cver = &xdev->dev_handle->fw_version;
+	struct ve2_firmware_version *cver = &xdev->dev_handle->fw_version;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
@@ -285,7 +285,7 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 	version.major = cver->major;
 	version.minor = cver->minor;
 	memcpy(version.date, cver->date, VE2_FW_DATE_STRING_LENGTH);
-	memcpy(version.hash, cver->hash, VE2_FW_HASH_STRING_LENGTH);
+	memcpy(version.git_hash, cver->git_hash, VE2_FW_HASH_STRING_LENGTH);
 
 	if (copy_to_user((u64_to_user_ptr(args->buffer)), &version, sizeof(version)))
 		return -EFAULT;

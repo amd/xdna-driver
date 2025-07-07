@@ -13,7 +13,7 @@
 int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *xaie_dev)
 {
 	struct amdxdna_dev *xdna = xdna_hdl->xdna;
-	struct firmware_version *version;
+	struct ve2_firmware_version *version;
 	struct aie_location loc;
 	int ret;
 
@@ -34,7 +34,7 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 	memcpy(&xdna_hdl->fw_version, version, sizeof(*version));
 	XDNA_INFO(xdna, "CERT major: %u\n", xdna_hdl->fw_version.major);
 	XDNA_INFO(xdna, "CERT minor: %u\n", xdna_hdl->fw_version.minor);
-	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.hash);
+	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.git_hash);
 	XDNA_INFO(xdna, "CERT git hash date: %s\n", xdna_hdl->fw_version.date);
 	kfree(version);
 
@@ -43,7 +43,7 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 
 static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev, u32 col)
 {
-	struct firmware_status *cs = xdna->dev_handle->fw_slots[col];
+	struct ve2_firmware_status *cs = xdna->dev_handle->fw_slots[col];
 	struct aie_location loc;
 	struct handshake *hs;
 	int ret = 0;

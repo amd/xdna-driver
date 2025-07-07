@@ -78,9 +78,9 @@ static void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_co
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
+	struct ve2_firmware_status *fw_slots;
 	struct init_config xrs_cfg = { 0 };
 	struct amdxdna_dev_hdl *xdna_hdl;
-	struct firmware_status *fw_slots;
 	int ret;
 	u32 col;
 

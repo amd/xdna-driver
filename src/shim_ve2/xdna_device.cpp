@@ -307,7 +307,7 @@ struct firmware_version
     output.minor = static_cast<int>(fw_version.minor);
     output.patch = 0;
     output.build = 0;
-    output.hash = std::string(reinterpret_cast<char*>(fw_version.hash));
+    output.git_hash = std::string(reinterpret_cast<char*>(fw_version.git_hash));
     output.date = std::string(reinterpret_cast<char*>(fw_version.date));
 
     return output;

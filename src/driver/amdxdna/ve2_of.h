@@ -36,8 +36,8 @@ struct amdxdna_dev_hdl {
 	u32				hwctx_limit;
 	u32				hwctx_cnt;
 	void				*xrs_hdl;
-	struct firmware_version		fw_version;
-	struct firmware_status		*fw_slots[VE2_MAX_COL];
+	struct ve2_firmware_version	fw_version;
+	struct ve2_firmware_status	*fw_slots[VE2_MAX_COL];
 };
 
 /* ve2_of.c */

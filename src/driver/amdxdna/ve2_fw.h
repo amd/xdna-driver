@@ -12,14 +12,14 @@
 #define VE2_FW_HASH_STRING_LENGTH	41
 #define VE2_FW_DATE_STRING_LENGTH	11
 
-struct firmware_version {
+struct ve2_firmware_version {
 	u8 major;
 	u8 minor;
 	char hash[VE2_FW_HASH_STRING_LENGTH];
 	char date[VE2_FW_DATE_STRING_LENGTH];
 };
 
-struct firmware_status {
+struct ve2_firmware_status {
 	u32 state;
 	u32 abs_page_index;
 	u32 ppc;
