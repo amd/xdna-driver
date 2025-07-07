@@ -72,9 +72,8 @@ inline void flush_cache_line(const char *cur)
 #endif
 }
 
-// flash cache line for non coherent memory
-inline void
-clflush_data(const void *base, size_t offset, size_t len)
+long
+get_cacheline_size()
 {
   static long cacheline_size = 0;
 
@@ -84,14 +83,7 @@ clflush_data(const void *base, size_t offset, size_t len)
       shim_err(EINVAL, "Invalid cache line size: %ld", sz);
     cacheline_size = sz;
   }
-
-  const char *cur = (const char *)base;
-  cur += offset;
-  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
-  do {
-    flush_cache_line(cur);
-    cur += cacheline_size;
-  } while (cur <= (const char *)lastline);
+  return cacheline_size;
 }
 
 bool
@@ -106,7 +98,28 @@ align_addr(void *p, size_t align)
     if (!is_power_of_two(align))
         shim_err(EINVAL, "Alignment 0x%lx is not power of two", align);
     auto addr = reinterpret_cast<uint64_t>(p);
-    return reinterpret_cast<void*>((addr + align) & ~(align - 1));
+    return reinterpret_cast<void*>((addr + align - 1) & ~(align - 1));
+}
+
+// flash cache line for non coherent memory
+inline void
+clflush_data(const void *base, size_t offset, size_t len)
+{
+  auto cacheline_size = get_cacheline_size();
+
+  const char *cur = (const char *)base;
+  cur += offset;
+  uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
+  do {
+    flush_cache_line(cur);
+    cur += cacheline_size;
+  } while (cur <= (const char *)lastline);
+}
+
+bool
+is_cacheline_aligned(void *ptr)
+{
+  return (ptr == align_addr(ptr, get_cacheline_size()));
 }
 
 bool
@@ -267,6 +280,12 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   : m_pdev(dev)
   , m_uptr(uptr)
 {
+  // CPU and device can't share cacheline, especially when the BO is output, so
+  // both CPU and device may write to it.
+  if (!is_cacheline_aligned(m_uptr))
+    shim_err(EINVAL, "User pointer %p must be cacheline aligned.", m_uptr);
+  if (m_uptr && type != AMDXDNA_BO_SHARE)
+    shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
   if (m_uptr && type != AMDXDNA_BO_SHARE)
     shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
 
