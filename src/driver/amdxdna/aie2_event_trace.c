@@ -7,6 +7,8 @@
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
 #include <drm/drm_cache.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "amdxdna_trace.h"
@@ -16,6 +18,7 @@ struct event_trace_req_buf {
 	struct amdxdna_dev_hdl   *ndev;
 	struct workqueue_struct  *wq;
 	struct work_struct       work;
+	struct timer_list	 poll_timer;
 	dma_addr_t               dram_buffer_address;
 	u8                       *kern_log_buf;
 	u8                       *buf;
@@ -172,6 +175,16 @@ static void aie2_print_trace_event_log(struct amdxdna_dev_hdl *ndev)
 	}
 }
 
+static void poll_timer_callback(struct timer_list *timer)
+{
+	struct event_trace_req_buf *req_buf;
+
+	req_buf = container_of(timer, struct event_trace_req_buf, poll_timer);
+
+	queue_work(req_buf->wq, &req_buf->work);
+	mod_timer(&req_buf->poll_timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
+}
+
 static void deffered_logging_work(struct work_struct *work)
 {
 	struct event_trace_req_buf *trace_rq;
@@ -187,6 +200,7 @@ static irqreturn_t log_buffer_irq_handler(int irq, void *data)
 	trace_mbox_irq_handle("EVENT_TRACE_BUFFER", irq);
 	clear_event_trace_msix(ndev);
 	queue_work(ndev->event_trace_req->wq, &ndev->event_trace_req->work);
+
 	return IRQ_HANDLED;
 }
 
@@ -232,7 +246,7 @@ destroy_wq:
 	destroy_workqueue(req_buf->wq);
 free_dma_trace_buf:
 	dma_free_noncoherent(xdna->ddev.dev, req_buf->dram_buffer_size, req_buf->buf,
-			     req_buf->dram_buffer_address, DMA_BIDIRECTIONAL);
+			     req_buf->dram_buffer_address, DMA_FROM_DEVICE);
 	req_buf->buf = NULL;
 	req_buf->dram_buffer_address = 0;
 	return ret;
@@ -243,7 +257,6 @@ static void aie2_deregister_log_buf_irq_hdl(struct amdxdna_dev_hdl *ndev)
 	struct event_trace_req_buf *req_buf = ndev->event_trace_req;
 
 	cancel_work_sync(&req_buf->work);
-	/* print already accumulated FW logs */
 	aie2_print_trace_event_log(ndev);
 	destroy_workqueue(req_buf->wq);
 
@@ -311,6 +324,8 @@ static int aie2_start_event_trace_send(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	timer_setup(&req_buf->poll_timer, poll_timer_callback, 0);
+	mod_timer(&req_buf->poll_timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
 	return 0;
 }
 
@@ -325,6 +340,7 @@ static int aie2_stop_event_trace_send(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(xdna, "Failed to stop event trace, ret %d", ret);
 		return ret;
 	}
+	timer_delete_sync(&ndev->event_trace_req->poll_timer);
 	aie2_event_trace_free(ndev);
 
 	return 0;
@@ -376,7 +392,7 @@ void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,
 {
 	ndev->event_trace_req->resp_timestamp = resp->current_timestamp;
 	ndev->event_trace_req->sys_start_time = ktime_get_ns() / 1000; /*Convert ns to us*/
-	ndev->event_trace_req->msi_address = resp->msi_address & 0x00FFFFFF;
+	ndev->event_trace_req->msi_address = resp->msi_address & MSI_ADDR_MASK;
 	aie2_register_log_buf_irq_hdl(ndev, resp->msi_idx);
 }
 
