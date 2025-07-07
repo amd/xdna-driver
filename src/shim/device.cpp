@@ -1014,6 +1014,9 @@ struct runner{
     case xrt_core::query::runner::type::latency:
       runner_name = "/Runner/latency";
       break;
+    case xrt_core::query::runner::type::df_bandwidth:
+      runner_name = "/Runner/df_bandwidth";
+      break;
     }
 
     switch (hardware_type)
