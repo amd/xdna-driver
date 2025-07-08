@@ -27,6 +27,7 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 
 	buf = u64_to_user_ptr(args->buffer);
 
+	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		amdxdna_for_each_ctx(tmp_client, hwctx_id, hwctx) {
@@ -36,6 +37,7 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 					 args->buffer_size, req_bytes);
 				ret = -EINVAL;
 				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+				mutex_unlock(&xdna->dev_lock);
 				goto out;
 			}
 
@@ -50,16 +52,18 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 			if (copy_to_user(&buf[hw_i], hwctx_data, hwctx_data_sz)) {
 				ret = -EFAULT;
 				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+				mutex_unlock(&xdna->dev_lock);
 				goto out;
 			}
 			hw_i++;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
+	mutex_unlock(&xdna->dev_lock);
 
 	if (hw_i == 0) {
-		XDNA_ERR(xdna, "pid %d failed to get hwctx\n", client->pid);
-		ret = -EINVAL;
+		XDNA_DBG(xdna, "pid %d failed to get hwctx\n", client->pid);
+		args->buffer_size = 0;
 	}
 
 out:
@@ -78,13 +82,7 @@ static struct device *get_aie_device_handle(struct amdxdna_dev *xdna, u32 col,
 	if (!hwctx || !hwctx->priv)
 		return NULL;
 
-	loc->col = col;
-	if (loc->col < hwctx->start_col) {
-		XDNA_ERR(xdna, "Invalid input col %u received for start_col %u\n", loc->col,
-			 hwctx->start_col);
-		return NULL;
-	}
-	loc->col -= hwctx->start_col;
+	loc->col = col - hwctx->start_col;
 
 	return hwctx->priv->aie_dev;
 }

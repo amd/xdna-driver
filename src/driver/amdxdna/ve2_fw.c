@@ -6,9 +6,9 @@
 #include <linux/version.h>
 
 #include "amdxdna_of_drv.h"
-#include "ve2_fw.h"
-#include "ve2_mgmt.h"
 #include "ve2_of.h"
+#include "ve2_mgmt.h"
+#include "ve2_fw.h"
 
 int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *xaie_dev)
 {
