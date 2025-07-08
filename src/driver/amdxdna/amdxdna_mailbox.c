@@ -486,7 +486,11 @@ static irqreturn_t mailbox_irq_handler(int irq, void *p)
 #ifdef AMDXDNA_DEVEL
 static void mailbox_timer(struct timer_list *t)
 {
+#if defined from_timer
 	struct mailbox_channel *mb_chann = from_timer(mb_chann, t, timer);
+#elif defined timer_container_of
+	struct mailbox_channel *mb_chann = timer_container_of(mb_chann, t, timer);
+#endif
 	u32 tail;
 
 	/* The timer mimic interrupt. It is good to reuse irq routine */

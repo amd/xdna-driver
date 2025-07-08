@@ -322,7 +322,11 @@ static void amdxdna_gem_vunmap(struct amdxdna_gem_obj *abo)
 	if (is_import_bo(abo))
 		dma_buf_vunmap_unlocked(abo->dma_buf, &map);
 	else
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 		drm_gem_vunmap_unlocked(to_gobj(abo), &map);
+#else
+		drm_gem_vunmap(to_gobj(abo), &map);
+#endif
 }
 
 static void amdxdna_gem_dev_obj_free(struct drm_gem_object *gobj)
@@ -340,7 +344,11 @@ static void amdxdna_gem_dev_obj_free(struct drm_gem_object *gobj)
 	if (abo->mem.kva) {
 		offset = abo->mem.dev_addr - client->dev_heap->mem.dev_addr;
 		iosys_map_set_vaddr(&heap_map, abo->mem.kva - offset);
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 		drm_gem_vunmap_unlocked(to_gobj(client->dev_heap), &heap_map);
+#else
+		drm_gem_vunmap(to_gobj(client->dev_heap), &heap_map);
+#endif
 	}
 
 	amdxdna_gem_heap_free(abo);
@@ -550,7 +558,9 @@ static void amdxdna_gem_obj_vunmap(struct drm_gem_object *obj, struct iosys_map 
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 	.cache_sgt_mapping = true,
+#endif
 	.attach = drm_gem_map_attach,
 	.detach = drm_gem_map_detach,
 	.map_dma_buf = drm_gem_map_dma_buf,
@@ -879,7 +889,11 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 	}
 	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 	ret = drm_gem_vmap_unlocked(to_gobj(client->dev_heap), &map);
+#else
+	ret = drm_gem_vmap(to_gobj(client->dev_heap), &map);
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "Vmap dev bo failed, ret %d", ret);
 		drm_gem_object_put(gobj);
@@ -917,7 +931,11 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 	abo->type = AMDXDNA_BO_CMD;
 	abo->client = filp->driver_priv;
 
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 	ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
+#else
+	ret = drm_gem_vmap(to_gobj(abo), &map);
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "Vmap cmd bo failed, ret %d", ret);
 		goto release_obj;
