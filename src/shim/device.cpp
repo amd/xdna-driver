@@ -610,8 +610,6 @@ struct telemetry
     }
     case key_type::rtos_telemetry:
     {
-      amdxdna_drm_query_ctx* data;
-      const uint32_t output_size = 256 * sizeof(*data);
       query::rtos_telemetry::result_type output;
 
       auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
@@ -994,7 +992,7 @@ struct runner{
   static std::any
   get(const xrt_core::device* /*device*/, key_type key)
   {
-    throw xrt_core::query::no_such_key(key, "Not implemented"); 
+    throw xrt_core::query::no_such_key(key, "Not implemented");
   }
 
   static std::any
