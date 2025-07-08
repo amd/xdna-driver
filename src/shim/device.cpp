@@ -1444,6 +1444,7 @@ device::
 device(const pdev& pdev, handle_type shim_handle, id_type device_id)
   : noshim<xrt_core::device_pcie>{shim_handle, device_id, !pdev.m_is_mgmt}
   , m_pdev(pdev)
+  , m_pcidev_handle(xrt_core::pci::get_dev(device_id,is_userpf()))
 {
   m_pdev.open();
   shim_debug("Created device (%s) ...", m_pdev.m_sysfs_name.c_str());

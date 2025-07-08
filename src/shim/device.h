@@ -16,6 +16,11 @@ class device : public xrt_core::noshim<xrt_core::device_pcie>
 private:
   const pdev& m_pdev; // The pcidev that this device object is created from
 
+  // The shared pointer to the pcidev which this device is created from
+  // Hold the shared pointer in this object to make sure the underline pdev
+  // will not be released until this object is released.
+  std::shared_ptr<xrt_core::pci::dev> m_pcidev_handle;
+
   // Private look up function for concrete query::request
   const xrt_core::query::request&
   lookup_query(xrt_core::query::key_type query_key) const override;
