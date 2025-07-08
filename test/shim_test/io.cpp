@@ -31,15 +31,31 @@ std::array io_test_bo_type_names {
   "IO_TEST_BO_RESTORE_INSTRUCTION",
 };
 
+char *
+aligned(const char *ptr, uintptr_t align)
+{
+  uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t aligned = (p + align - 1) & ~(align - 1);
+  return reinterpret_cast<char *>(aligned);
+}
+
 void
-alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t)
+alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t, bool is_ubuf = false)
 {
   auto sz = ibo.size;
-
   if (sz == 0) {
     ibo.tbo = nullptr;
     return;
   }
+
+  static long cacheline_size = 0;
+  if (!cacheline_size)
+    cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+
+  // Allocate large enough buffer to pass cacheline algned user pointer for
+  // BO creation. Buffer is initially filled based on type.
+  if (is_ubuf)
+    ibo.ubuf = std::vector<char>(sz + cacheline_size - 1, t);
 
   switch(t) {
   case IO_TEST_BO_CMD:
@@ -52,7 +68,7 @@ alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t)
     break;
   default:
     if (ibo.ubuf.size())
-      ibo.tbo = std::make_shared<bo>(dev, ibo.ubuf);
+      ibo.tbo = std::make_shared<bo>(dev, aligned(ibo.ubuf.data(), cacheline_size), sz);
     else
       ibo.tbo = std::make_shared<bo>(dev, sz);
     break;
@@ -240,38 +256,28 @@ io_test_bo_set(device* dev, const std::string& xclbin_name, bool use_ubuf) :
     case IO_TEST_BO_INPUT:
       ibo.size = IFM_SIZE(tp);
       ibo.init_offset = IFM_DIRTY_BYTES(tp);
-      if (use_ubuf)
-        ibo.ubuf = std::vector<char>(ibo.size);
-      alloc_bo(ibo, m_dev, type);
+      alloc_bo(ibo, m_dev, type, use_ubuf);
       init_bo(ibo, m_local_data_path + ifm_file);
       break;
     case IO_TEST_BO_PARAMETERS:
       ibo.size = PARAM_SIZE(tp);
-      if (use_ubuf)
-        ibo.ubuf = std::vector<char>(ibo.size);
-      alloc_bo(ibo, m_dev, type);
+      alloc_bo(ibo, m_dev, type, use_ubuf);
       init_bo(ibo, m_local_data_path + param_file);
       break;
     case IO_TEST_BO_OUTPUT:
       ibo.size = OFM_SIZE(tp);
-      if (use_ubuf)
-        ibo.ubuf = std::vector<char>(ibo.size);
-      alloc_bo(ibo, m_dev, type);
+      alloc_bo(ibo, m_dev, type, use_ubuf);
       break;
     case IO_TEST_BO_INTERMEDIATE:
       ibo.size = INTER_SIZE(tp);
-      if (use_ubuf)
-        ibo.ubuf = std::vector<char>(ibo.size);
-      alloc_bo(ibo, m_dev, type);
+      alloc_bo(ibo, m_dev, type, use_ubuf);
       break;
     case IO_TEST_BO_MC_CODE:
       // Do not support patching MC_CODE. */
       if (MC_CODE_SIZE(tp))
         throw std::runtime_error("MC_CODE_SIZE is non zero!!!");
       ibo.size = DUMMY_MC_CODE_BUFFER_SIZE;
-      if (use_ubuf)
-        ibo.ubuf = std::vector<char>(ibo.size);
-      alloc_bo(ibo, m_dev, type);
+      alloc_bo(ibo, m_dev, type, use_ubuf);
       break;
     case IO_TEST_BO_CTRL_PKT_PM:
     case IO_TEST_BO_SCRATCH_PAD:

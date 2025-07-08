@@ -47,8 +47,8 @@ public:
   {
   }
 
-  bo(device* dev, std::vector<char>& ubuf)
-    : bo(dev, ubuf.data(), ubuf.size(), XCL_BO_FLAGS_HOST_ONLY, 0)
+  bo(device* dev, void *ubuf, size_t size)
+    : bo(dev, ubuf, size, XCL_BO_FLAGS_HOST_ONLY, 0)
   {
   }
 
@@ -59,8 +59,8 @@ public:
     map_and_chk();
   }
 
-  bo(bo&& rbo) :
-    m_dev(rbo.m_dev)
+  bo(bo&& rbo)
+    : m_dev(rbo.m_dev)
     , m_handle(rbo.m_handle.release())
     , m_bop(rbo.m_bop)
     , m_no_unmap(rbo.m_no_unmap)

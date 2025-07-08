@@ -393,13 +393,18 @@ TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_
   std::vector<std::unique_ptr<bo>> bos;
   const uint64_t fill = 0x55aa55aa55aa55aa;
   std::vector< std::vector<char> > bufs;
+  static long cacheline_size = 0;
+
+  if (!cacheline_size)
+    cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
 
   for (auto& size : bos_size) {
     if (size < 8)
       throw std::runtime_error("User ptr BO size too small");
-    bufs.emplace_back(size);
+    bufs.emplace_back(size + cacheline_size); // allow cacheline size align
 
-    auto p = reinterpret_cast<uint64_t*>(bufs.back().data());
+    auto addr = reinterpret_cast<uintptr_t>(bufs.back().data());
+    auto p = reinterpret_cast<uint64_t*>((addr + cacheline_size - 1) & ~(cacheline_size - 1));
     *p = fill;
     bos.push_back(std::make_unique<bo>(dev, p, static_cast<size_t>(size), boflags, ext_boflags));
   }
