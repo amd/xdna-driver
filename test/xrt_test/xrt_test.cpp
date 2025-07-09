@@ -22,6 +22,7 @@
 #include <chrono>
 #include <regex>
 #include <unistd.h>
+#include <thread>
 
 namespace {
 
@@ -30,6 +31,8 @@ unsigned c_rounds = 1;
 unsigned s_rounds = 128;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
+unsigned threads = 2;
+std::vector<unsigned> exec_list;
 std::string dpu = "nop";
 
 std::string program;
@@ -52,6 +55,8 @@ usage(const std::string& prog)
   std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress test and multi-layer)\n";
   std::cout << "\t" << "-d" << ": specify dpu kernel (only effects stress test)\n";
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
+  std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
+  std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test1 -e test2 ...]\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
   std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
   std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
@@ -984,6 +989,32 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt resnet50 model", TEST_xrt_umq_resnet50_full, {} },
 };
 
+/* test n threads of 1 or more tests */
+void
+TEST_xrt_threads(int device_index, arg_type& arg)
+{
+  std::vector<std::thread> m_threads;
+
+  if (exec_list.empty())
+    exec_list.insert(exec_list.begin(), threads, 0);
+  else if (exec_list.size() < threads)
+    exec_list.insert(exec_list.end(), threads - exec_list.size(), exec_list.back()); // if more threads requested than tests given, run test at last element
+  else
+    threads = exec_list.size(); // if more tests than threads, increase threads to run all tests
+
+  for (int i = 0; i < threads; i++) {
+    m_threads.push_back(std::thread([&, i](){
+      std::cout << "Thread " << i << " started" << std::endl;
+      test_list[exec_list[i]].func(device_index, test_list[exec_list[i]].arg);
+    })
+    );
+  }
+
+  for (int i = 0; i < threads; i++)
+      m_threads[i].join();
+
+}
+
 }
 
 // Test case executor implementation
@@ -1044,7 +1075,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:h")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:h")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -1073,6 +1104,26 @@ main(int argc, char **argv)
 	  val = std::stoi(optarg);
 	  std::cout << "Using device_index: " << val << std::endl;
           device_index = val;
+	  break;
+	}
+	case 't': {
+	  val = std::stoi(optarg);
+	  if (val < 0) {
+		  std::cout << "Invalid thread count" << std::endl;
+                  return 1;
+	  }
+	  std::cout << "Creating " << val << " threads" << std::endl;
+	  threads = val;
+	  break;
+	}
+	case 'e': {
+	  val = std::stoi(optarg);
+	  if (val > test_list.size() - 1 || val < 0) {
+		  std::cout << "Invalid test number" << std::endl;
+		  return 1;
+	  }
+          std::cout << "Add test #" << val << " to thread test" << std::endl;
+          exec_list.push_back(val);
 	  break;
 	}
 	case 'x': {
@@ -1119,6 +1170,7 @@ main(int argc, char **argv)
 
   set_xrt_path();
 
+  test_list.push_back(test_case{ "npu3 xrt thread test", TEST_xrt_threads, {threads} });
   run_all_test(tests);
 
   if (!tests.empty()) {
