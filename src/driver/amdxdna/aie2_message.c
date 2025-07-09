@@ -426,6 +426,19 @@ int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+int aie2_set_event_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories)
+{
+	DECLARE_AIE2_MSG(set_event_trace_categories, MSG_OP_SET_EVENT_TRACE_CATEGORIES);
+	int ret;
+
+	req.event_trace_categories = categories;
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret)
+		return ret;
+
+	return resp.status;
+}
+
 int aie2_configure_dram_logging(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
 {
 	DECLARE_AIE2_MSG(config_logging_dram_buf, MSG_OP_CONFIG_LOGGING_DRAM_BUF);

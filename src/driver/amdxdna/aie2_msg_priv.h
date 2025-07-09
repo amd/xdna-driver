@@ -44,6 +44,7 @@ enum aie2_msg_opcode {
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
 	MSG_OP_START_EVENT_TRACE           = 0x10F,
 	MSG_OP_STOP_EVENT_TRACE            = 0x110,
+	MSG_OP_SET_EVENT_TRACE_CATEGORIES  = 0x111,
 	MSG_OP_UPDATE_PROPERTY             = 0x113,
 	MSG_OP_GET_APP_HEALTH              = 0x114,
 	MSG_OP_ADD_HOST_BUFFER             = 0x115,
@@ -443,6 +444,14 @@ struct stop_event_trace_req {
 } __packed;
 
 struct stop_event_trace_resp {
+	enum aie2_msg_status status;
+} __packed;
+
+struct set_event_trace_categories_req {
+	u32 event_trace_categories;
+} __packed;
+
+struct set_event_trace_categories_resp {
 	enum aie2_msg_status status;
 } __packed;
 
