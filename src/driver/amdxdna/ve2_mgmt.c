@@ -9,7 +9,7 @@
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
 
-static int cert_setup_partition(struct device *aie_dev, u32 col, u32 lead_col, u32 partition_size,
+static int cert_setup_partition(struct device *aie_part, u32 col, u32 lead_col, u32 partition_size,
 				u64 hsa_addr)
 {
 	u32 lead_col_addr = VE2_ADDR(lead_col, 0, 0);
@@ -27,14 +27,14 @@ static int cert_setup_partition(struct device *aie_dev, u32 col, u32 lead_col, u
 	cert_comm.mpaie_alive = ALIVE_MAGIC;
 
 	/* write to cert handshake shared memory */
-	ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(rel_col),
+	ret = aie_partition_write_privileged_mem(aie_part, CERT_HANDSHAKE_OFF(rel_col),
 						 sizeof(cert_comm), (void *)&cert_comm);
 	if (ret < 0)
 		return ret;
 
 	loc.col = rel_col;
 	/* wake up cert */
-	return aie_partition_uc_wakeup(aie_dev, &loc);
+	return aie_partition_uc_wakeup(aie_part, &loc);
 }
 
 static int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req, int total_col,
@@ -140,7 +140,7 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
 	struct aie_partition_init_args args = { 0 };
 	struct aie_partition_req request = { 0 };
-	struct device *aie_dev;
+	struct device *aie_part;
 	u32 start_col;
 	u32 num_col;
 	int ret;
@@ -159,21 +159,21 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 	request.partition_id = aie_calc_part_id(start_col, num_col);
 	XDNA_DBG(xdna, "Requesting partition for start_col %d, num_col %d with partition_id %d\n",
 		 start_col, num_col, request.partition_id);
-	aie_dev = aie_partition_request(&request);
-	if (IS_ERR(aie_dev)) {
+	aie_part = aie_partition_request(&request);
+	if (IS_ERR(aie_part)) {
 		ret = -ENODEV;
 		XDNA_ERR(xdna, "aie parition request failed, error %d", ret);
 		goto xrs_rel_res;
 	}
-	priv->aie_dev = aie_dev;
+	priv->aie_part = aie_part;
 
 	args.locs = NULL;
 	args.num_tiles = 0;
 	args.init_opts = AIE_PART_INIT_OPT_DEFAULT ^ AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
-	ret = aie_partition_initialize(aie_dev, &args);
+	ret = aie_partition_initialize(aie_part, &args);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
-		aie_partition_release(aie_dev);
+		aie_partition_release(aie_part);
 		goto xrs_rel_res;
 	}
 
@@ -184,7 +184,7 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 		if (col == start_col)
 			hsa_addr = priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr;
 
-		ret = cert_setup_partition(aie_dev, col, start_col, num_col, hsa_addr);
+		ret = cert_setup_partition(aie_part, col, start_col, num_col, hsa_addr);
 		if (ret < 0) {
 			XDNA_ERR(xdna, "cert_setup_partition() err %d for col %d", ret, start_col);
 			goto aie_part_rel;
@@ -196,17 +196,17 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 
 	return 0;
 aie_part_rel:
-	aie_partition_release(aie_dev);
+	aie_partition_release(aie_part);
 xrs_rel_res:
 	xrs_release_resource(xdna->dev_handle->xrs_hdl, (uintptr_t)hwctx);
 	return ret;
 }
 
-static int cert_clear_partition(struct amdxdna_dev *xdna, struct device *aie_dev, u32 col)
+static int cert_clear_partition(struct amdxdna_dev *xdna, struct device *aie_part, u32 col)
 {
 	struct handshake cert_comm = { 0 };
 
-	return aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col),
+	return aie_partition_write_privileged_mem(aie_part, CERT_HANDSHAKE_OFF(col),
 						  sizeof(cert_comm), (void *)&cert_comm);
 }
 
@@ -216,19 +216,19 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
 	int ret;
 
-	if (!priv->aie_dev) {
+	if (!priv->aie_part) {
 		XDNA_ERR(xdna, "Parition does not have aie device handle");
 		return -ENODEV;
 	}
 
 	for (u32 col = 0; col < priv->num_col; col++) {
-		ret = cert_clear_partition(xdna, priv->aie_dev, col);
+		ret = cert_clear_partition(xdna, priv->aie_part, col);
 		if (ret < 0)
 			XDNA_ERR(xdna, "cert_clear_partition() err %d for col %d", ret, col);
 	}
 
-	aie_partition_teardown(priv->aie_dev);
-	aie_partition_release(priv->aie_dev);
+	aie_partition_teardown(priv->aie_part);
+	aie_partition_release(priv->aie_part);
 
 	return xrs_release_resource(xdna->dev_handle->xrs_hdl, (uintptr_t)hwctx);
 }
@@ -276,7 +276,7 @@ int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
 	 *  success case: number of bytes write, so, return value >= 0
 	 *  failure case: negative value, so, return value < 0
 	 */
-	ret = aie_partition_write(hwctx->priv->aie_dev, loc, VE2_EVENT_GENERATE_REG, sizeof(u32),
+	ret = aie_partition_write(hwctx->priv->aie_part, loc, VE2_EVENT_GENERATE_REG, sizeof(u32),
 				  (void *)&(value), 0);
 	if (ret < 0)
 		XDNA_DBG(xdna, "AIE write on event_generate register throw error %d for col %u\n",

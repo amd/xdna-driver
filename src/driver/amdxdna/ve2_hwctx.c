@@ -629,7 +629,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u64 paddr, u8 buf_type,
 				    u32 buf_sz, u32 col, bool attach)
 {
-	struct device *aie_dev = hwctx->priv->aie_dev;
+	struct device *aie_dev = hwctx->priv->aie_part;
 	struct handshake hs = { 0 };
 	int ret;
 

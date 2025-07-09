@@ -19,7 +19,7 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 	u32 req_bytes = 0, hw_i = 0;
 	struct amdxdna_ctx *hwctx;
 	unsigned long hwctx_id;
-	int ret = 0, idx;
+	int ret, idx;
 
 	hwctx_data = kzalloc(hwctx_data_sz, GFP_KERNEL);
 	if (!hwctx_data)
@@ -60,12 +60,6 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
 	mutex_unlock(&xdna->dev_lock);
-
-	if (hw_i == 0) {
-		XDNA_DBG(xdna, "pid %d failed to get hwctx\n", client->pid);
-		args->buffer_size = 0;
-	}
-
 out:
 	kfree(hwctx_data);
 	args->buffer_size = req_bytes;
@@ -73,8 +67,7 @@ out:
 	return ret;
 }
 
-static struct device *get_aie_device_handle(struct amdxdna_dev *xdna, u32 col,
-					    struct aie_location *loc)
+static struct device *get_aie_part(struct amdxdna_dev *xdna, u32 col, struct aie_location *loc)
 {
 	struct amdxdna_ctx *hwctx;
 
@@ -84,7 +77,7 @@ static struct device *get_aie_device_handle(struct amdxdna_dev *xdna, u32 col,
 
 	loc->col = col - hwctx->start_col;
 
-	return hwctx->priv->aie_dev;
+	return hwctx->priv->aie_part;
 }
 
 static int ve2_tile_data_reg_write(struct amdxdna_client *client,
@@ -109,7 +102,7 @@ static int ve2_tile_data_reg_write(struct amdxdna_client *client,
 	XDNA_DBG(xdev, "AIE Data Reg write req received for col %u, row %u, addr %u\n", info.row,
 		 info.col, info.addr);
 
-	aie_dev = get_aie_device_handle(xdev, info.col, &loc);
+	aie_dev = get_aie_part(xdev, info.col, &loc);
 	if (!aie_dev) {
 		XDNA_ERR(xdev, "AIE device handle not found for given col %u\n", info.col);
 		return -EINVAL;
@@ -133,7 +126,7 @@ static int ve2_tile_data_mem_write(struct amdxdna_client *client,
 	struct aie_location loc;
 	struct device *aie_dev;
 	void *local_buf;
-	int ret = 0;
+	int ret;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
@@ -148,7 +141,7 @@ static int ve2_tile_data_mem_write(struct amdxdna_client *client,
 	XDNA_DBG(xdev, "AIE Data mem write req received for col %u, row %u, addr %u\n", info.row,
 		 info.col, info.addr);
 
-	aie_dev = get_aie_device_handle(xdev, info.col, &loc);
+	aie_dev = get_aie_part(xdev, info.col, &loc);
 	if (!aie_dev) {
 		XDNA_ERR(xdev, "AIE device handle not found for given col %u\n", info.col);
 		return -EINVAL;
@@ -168,12 +161,14 @@ static int ve2_tile_data_mem_write(struct amdxdna_client *client,
 
 	loc.row = info.row;
 	ret = aie_partition_write(aie_dev, loc, info.addr, info.size, local_buf, 0);
-	if (ret < 0)
+	if (ret < 0) {
 		XDNA_ERR(xdev, "Error in AIE Data mem write operation, err: %d\n", ret);
+		return ret;
+	}
 
 	kfree(local_buf);
 
-	return ret > 0 ? 0 : ret;
+	return 0;
 }
 
 static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
@@ -182,7 +177,7 @@ static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_
 	struct amdxdna_drm_aie_reg info;
 	struct aie_location loc;
 	struct device *aie_dev;
-	int ret = 0;
+	int ret;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
@@ -197,7 +192,7 @@ static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_
 	XDNA_DBG(xdev, "AIE Data Reg read req received for col %u, row %u, addr %u\n", info.row,
 		 info.col, info.addr);
 
-	aie_dev = get_aie_device_handle(xdev, info.col, &loc);
+	aie_dev = get_aie_part(xdev, info.col, &loc);
 	if (!aie_dev) {
 		XDNA_ERR(xdev, "AIE device handle not found for given input args\n");
 		return -EINVAL;
@@ -207,13 +202,14 @@ static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_
 	ret = aie_partition_read(aie_dev, loc, info.addr, sizeof(u32), (void *)&info.val);
 	if (ret < 0) {
 		XDNA_ERR(xdev, "Error in AIE Data Reg read operation, err: %d\n", ret);
+		return ret;
 
 	} else if (copy_to_user(u64_to_user_ptr(args->buffer), &info, sizeof(info))) {
 		XDNA_ERR(xdev, "Error: unable to copy memory to userptr\n");
-		ret = -EFAULT;
+		return -EFAULT;
 	}
 
-	return ret > 0 ? 0 : ret;
+	return 0;
 }
 
 static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
@@ -223,7 +219,7 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 	struct aie_location loc;
 	struct device *aie_dev;
 	void *local_buf = NULL;
-	int ret = 0;
+	int ret;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
@@ -238,7 +234,7 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 	XDNA_DBG(xdev, "AIE Data Mem read req received for col %u, row %u, addr %u\n",
 		 info.row, info.col, info.addr);
 
-	aie_dev = get_aie_device_handle(xdev, info.col, &loc);
+	aie_dev = get_aie_part(xdev, info.col, &loc);
 	if (!aie_dev) {
 		XDNA_ERR(xdev, "AIE device handle not found for given input args\n");
 		return -EINVAL;
@@ -259,10 +255,12 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 
 	kfree(local_buf);
 
-	if (ret < 0)
+	if (ret < 0) {
 		XDNA_ERR(xdev, "Error in AIE Data mem read operation, err: %d\n", ret);
+		return ret;
+	}
 
-	return ret > 0 ? 0 : ret;
+	return 0;
 }
 
 static int ve2_get_firmware_version(struct amdxdna_client *client,

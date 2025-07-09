@@ -18,7 +18,7 @@
 struct amdxdna_ctx_priv {
 	u32			start_col;
 	u32			num_col;
-	struct device		*aie_dev;
+	struct device		*aie_part;
 	struct ve2_hsa_queue	hwctx_hsa_queue;
 	wait_queue_head_t	waitq;
 	struct amdxdna_sched_job *pending[HWCTX_MAX_CMDS];
