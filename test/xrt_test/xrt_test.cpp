@@ -276,14 +276,10 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   // Populate input & weight buffers
   init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/vadd.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/vadd.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:vadd"};
   xrt::run run{kernel};
 
   // Setting args for patching control code buffer
@@ -314,14 +310,10 @@ TEST_xrt_umq_memtiles(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/move_memtiles.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/move_memtiles.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{move_memtiles}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:move_memtiles"};
   xrt::run run{kernel};
 
   // Send the command to device and wait for it to complete
@@ -343,14 +335,10 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/ddr_memtile.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/ddr_memtile.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{move_ddr_memtile}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:move_ddr_memtile"};
   xrt::run run{kernel};
 
   // Setting args for patching control code buffer
@@ -370,14 +358,10 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/remote_barrier.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/remote_barrier.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{remote_barrier}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:remote_barrier"};
   xrt::run run{kernel};
 
   // Send the command to device and wait for it to complete
@@ -394,14 +378,10 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/nop.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/nop.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{nop}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
   xrt::run run{kernel};
 
   // Send the command to device and wait for it to complete
@@ -413,18 +393,15 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 }
 
-void TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
+void 
+TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/single_col_preemption.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
 
   xrt::elf elf{local_path("npu3_workspace/single_col_preemption.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{preemption}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:preemption"};
   xrt::run run{kernel};
 
   /* init input buffer */
@@ -456,21 +433,17 @@ void TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
   }
   else
     std::cout << "result matched" << std::endl;
-
 }
 
-void TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
+void 
+TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/multi_col_preemption.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/multi_col_preemption.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{preemption}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:preemption"};
   xrt::run run{kernel};
 
   /* init input buffer */
@@ -502,7 +475,6 @@ void TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
   }
   else
     std::cout << "result matched" << std::endl;
-
 }
 
 void
@@ -529,14 +501,10 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   read_bin_file<xrt_bo>(ofm_path, bo_ofm);
   read_bin_file<xrt_bo>(param_path, bo_param);
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/single_col_resnet50_1_layer.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_1_layer.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{resnet50}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:resnet50"};
   xrt::run run{kernel};
 
   run.set_arg(0, bo_ofm.get());
@@ -556,7 +524,7 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
 }
 
 void
-TEST_xrt_umq_resnet50_full(int device_index, arg_type& arg)
+TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 {
   std::vector<xrt_bo> wts_v;
   auto device = xrt::device{device_index};
@@ -574,14 +542,10 @@ TEST_xrt_umq_resnet50_full(int device_index, arg_type& arg)
 
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/resnet50.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
+  xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_all_layer.elf")};
 
-  xrt::elf elf{local_path("npu3_workspace/resnet50.elf")};
-  xrt::module mod{elf};
-
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:resnet50"};
   xrt::run run{kernel};
 
   run.set_arg(54, bo_ifm.get());
@@ -657,16 +621,11 @@ TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
   for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
     p[i] = i * 10000000;
 
-  auto xclbin = xrt::xclbin(
-      xclbinpath.empty() ? local_path("npu3_workspace/multi-layer.xclbin") : xclbinpath);
-  auto uuid = device.register_xclbin(xclbin);
-
   auto elf = xrt::elf(
-      elfpath.empty() ? local_path("npu3_workspace/multi-layer.elf") : elfpath);
-  xrt::module mod{elf};
+      elfpath.empty() ? local_path("npu3_workspace/multi_layer.elf") : elfpath);
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:vadd"};
   xrt::run run{kernel};
 
   // Setting args for patching control code buffer
@@ -713,14 +672,10 @@ TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
   for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
     p[i] = i;
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/core_equivalence.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/core_equivalence.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:vadd"};
   xrt::run run{kernel};
 
   // Setting args for patching control code buffer
@@ -779,14 +734,10 @@ TEST_xrt_umq_cascade_4ker_2lay(int device_index, arg_type& arg)
   for (uint32_t i = 0; i < bo_wts2.size() / sizeof (uint32_t); i++)
     p[i] = i;
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/ml4v2.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/ml4v2.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:vadd"};
   xrt::run run{kernel};
 
   // Setting args for patching control code buffer
@@ -852,14 +803,10 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
   for (uint32_t i = 0; i < bo_wts3.size() / sizeof (uint32_t); i++)
     p[i] = i;
 
-  auto xclbin = xrt::xclbin(local_path("npu3_workspace/parallel_branches.xclbin"));
-  auto uuid = device.register_xclbin(xclbin);
-
   xrt::elf elf{local_path("npu3_workspace/parallel_branches.elf")};
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{vadd}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:vadd"};
   xrt::run run{kernel};
 
   // Setting args for patching control code buffer
@@ -901,16 +848,11 @@ TEST_xrt_stress_run(int device_index, arg_type& arg)
   auto device = xrt::device{device_index};
   unsigned round = s_rounds;
 
-  auto xclbin = xrt::xclbin(
-    xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
-  auto uuid = device.register_xclbin(xclbin);
-
   auto elf = xrt::elf(
     elfpath.empty() ? local_path("npu3_workspace/nop.elf") : elfpath);
-  xrt::module mod{elf};
 
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, "dpu:{" + dpu + "}"};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:" + dpu};
 
   std::vector<xrt::run> run_handles;
 
@@ -939,24 +881,19 @@ TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
   auto device = xrt::device{device_index};
   unsigned round = m_rounds;
 
-  auto xclbin = xrt::xclbin(
-    xclbinpath.empty() ? local_path("npu3_workspace/nop.xclbin") : xclbinpath);
-  auto uuid = device.register_xclbin(xclbin);
-
   auto elf = xrt::elf(
     elfpath.empty() ? local_path("npu3_workspace/nop.elf") : elfpath);
-  xrt::module mod{elf};
 
   std::vector<xrt::hw_context> run_hwctxs;
 
   for (int i = 0; i < round; i++) {
-    xrt::hw_context hwctx{device, uuid};
+    xrt::hw_context hwctx{device, elf};
     run_hwctxs.push_back(std::move(hwctx));
   }
 
   for (int i = 0; i < round; i++) {
     auto hwctx = run_hwctxs[i];
-    auto kernel = xrt::ext::kernel{hwctx, mod, "dpu:{" + dpu + "}"};
+    auto kernel = xrt::ext::kernel{hwctx, "DPU:" + dpu};
 
     auto run = xrt::run(kernel);
 
@@ -974,19 +911,19 @@ TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
 std::vector<test_case> test_list {
   test_case{ "npu3 xrt vadd", TEST_xrt_umq_vadd, {} },
   test_case{ "npu3 xrt move memtiles", TEST_xrt_umq_memtiles, {} },
-  test_case{ "npu3 xrt ddr_memtile", TEST_xrt_umq_ddr_memtile, {} },
-  test_case{ "npu3 xrt remote_barrier", TEST_xrt_umq_remote_barrier, {} },
+  test_case{ "npu3 xrt ddr memtile", TEST_xrt_umq_ddr_memtile, {} },
+  test_case{ "npu3 xrt remote barrier", TEST_xrt_umq_remote_barrier, {} },
   test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
   test_case{ "npu3 xrt single col preemption", TEST_xrt_umq_single_col_preemption, {} },
   test_case{ "npu3 xrt multi col preemption", TEST_xrt_umq_multi_col_preemption, {} },
-  test_case{ "npu3 xrt single col resnet50", TEST_xrt_umq_single_col_resnet50_1_layer, {} },
-  test_case{ "npu3 xrt multi-layer", TEST_xrt_umq_multi_layer, {} },
+  test_case{ "npu3 xrt single col resnet50 1 layer", TEST_xrt_umq_single_col_resnet50_1_layer, {} },
+  test_case{ "npu3 xrt multi layer", TEST_xrt_umq_multi_layer, {} },
   test_case{ "npu3 xrt core equivalence", TEST_xrt_umq_core_equivalence, {} },
   test_case{ "npu3 xrt cascade 4 kernel 2 layer", TEST_xrt_umq_cascade_4ker_2lay, {} },
   test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
   test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
-  test_case{ "npu3 xrt resnet50 model", TEST_xrt_umq_resnet50_full, {} },
+  test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} }
 };
 
 /* test n threads of 1 or more tests */
@@ -1127,15 +1064,12 @@ main(int argc, char **argv)
 	  break;
 	}
 	case 'x': {
-	  xclbinpath = local_path("npu3_workspace/") + optarg + ".xclbin";
-	  std::ifstream xclbin(xclbinpath);
-          if (xclbin) {
-            elfpath = local_path("npu3_workspace/") + optarg + ".elf";
-	    std::cout << "Using xclbin file: " << xclbinpath << std::endl;
+    elfpath = local_path("npu3_workspace/") + optarg + ".elf";
+    if (!elfpath.empty()) {
 	    std::cout << "Using elf file: " << elfpath << std::endl;
 	    break;
-          } else {
-            std::cout << "Failed to open xclbin file: " << optarg << std::endl;
+    } else {
+      std::cout << "Failed to open elf file: " << optarg << std::endl;
 	    return 1;
 	  }
 	}
