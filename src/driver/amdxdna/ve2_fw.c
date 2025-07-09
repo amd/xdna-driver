@@ -90,14 +90,14 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 	u32 relative_col;
 	int ret;
 
-	if (!priv_ctx->aie_dev) {
+	if (!priv_ctx->aie_part) {
 		XDNA_ERR(xdna, "Partition does not have aie device handle\n");
 		return -ENODEV;
 	}
 
 	for (u32 col = start_col; col < start_col + num_col; col++) {
 		relative_col = col - start_col;
-		ret = get_firmware_status(xdna, priv_ctx->aie_dev, relative_col);
+		ret = get_firmware_status(xdna, priv_ctx->aie_part, relative_col);
 		if (ret < 0) {
 			XDNA_ERR(xdna, "Failed to get fw status for col %d ret %d\n", relative_col,
 				 ret);
