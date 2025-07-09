@@ -30,7 +30,11 @@ static void amdxdna_tdr_work(struct work_struct *work)
 
 static void amdxdna_tdr_timer(struct timer_list *t)
 {
+#if defined from_timer
 	struct amdxdna_tdr *tdr = from_timer(tdr, t, timer);
+#elif defined timer_container_of
+	struct amdxdna_tdr *tdr = timer_container_of(tdr, t, timer);
+#endif
 
 	queue_work(system_long_wq, &tdr->tdr_work);
 

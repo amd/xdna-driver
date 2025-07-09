@@ -400,6 +400,15 @@ struct amdxdna_dev_priv {
 #endif
 };
 
+struct aie2_mgmt_dma_hdl {
+	struct amdxdna_dev		*xdna;
+	enum dma_data_direction		dir;
+	void				*vaddr;
+	dma_addr_t			dma_hdl;
+	size_t				size;
+	size_t				aligned_size;
+};
+
 extern const struct amdxdna_dev_ops aie2_ops;
 
 static inline void aie2_calc_intr_reg(struct xdna_mailbox_chann_info *info)
@@ -417,10 +426,12 @@ int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
 extern uint aie2_control_flags;
 extern const struct amdxdna_dev_ops aie2_ops;
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor);
-void *aie2_mgmt_buff_alloc(struct amdxdna_dev_hdl *ndev, size_t size, size_t *aligned_sz,
-			   dma_addr_t *dma_handle);
-void aie2_mgmt_buff_free(struct amdxdna_dev_hdl *ndev, size_t aligned_sz,
-			 void *vaddr, dma_addr_t dma_handle);
+void *aie2_mgmt_buff_alloc(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+			   size_t size, enum dma_data_direction dir);
+void aie2_mgmt_buff_clflush(struct aie2_mgmt_dma_hdl *mgmt_hdl);
+dma_addr_t aie2_mgmt_buff_get_dma_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl);
+void *aie2_mgmt_buff_get_cpu_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl);
+void aie2_mgmt_buff_free(struct aie2_mgmt_dma_hdl *mgmt_hdl);
 
 /* aie2_smu.c */
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
@@ -487,10 +498,10 @@ int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev,
 				struct amdxdna_ctx *ctx, u32 us);
 int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev);
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid);
-int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
-			     u32 size, struct aie_version *version);
-int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
-			dma_addr_t addr, u32 size);
+int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+			     u32 type, u32 size, struct aie_version *version);
+int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+			u32 context_id, u32 size);
 int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
@@ -503,7 +514,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char *buf, u32 size, u32 *cols_filled);
-int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
+int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
 				 void *handle, int (*cb)(void*, void __iomem *, size_t));
 int aie2_self_test(struct amdxdna_dev_hdl *ndev);
 #ifdef AMDXDNA_DEVEL

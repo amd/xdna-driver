@@ -610,8 +610,6 @@ struct telemetry
     }
     case key_type::rtos_telemetry:
     {
-      amdxdna_drm_query_ctx* data;
-      const uint32_t output_size = 256 * sizeof(*data);
       query::rtos_telemetry::result_type output;
 
       auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
@@ -994,7 +992,7 @@ struct runner{
   static std::any
   get(const xrt_core::device* /*device*/, key_type key)
   {
-    throw xrt_core::query::no_such_key(key, "Not implemented"); 
+    throw xrt_core::query::no_such_key(key, "Not implemented");
   }
 
   static std::any
@@ -1444,6 +1442,7 @@ device::
 device(const pdev& pdev, handle_type shim_handle, id_type device_id)
   : noshim<xrt_core::device_pcie>{shim_handle, device_id, !pdev.m_is_mgmt}
   , m_pdev(pdev)
+  , m_pcidev_handle(xrt_core::pci::get_dev(device_id,is_userpf()))
 {
   m_pdev.open();
   shim_debug("Created device (%s) ...", m_pdev.m_sysfs_name.c_str());
