@@ -401,6 +401,39 @@ void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev)
 	aie2_deregister_log_buf_irq_hdl(ndev);
 }
 
+int aie2_set_event_trace_cfg(struct amdxdna_dev_hdl *ndev, u32 category)
+{
+	int ret;
+
+	if (!aie2_is_event_trace_supported_on_dev(ndev)) {
+		XDNA_DBG(ndev->xdna, "Event trace is not supported on this device");
+		return 0;
+	}
+
+	if (!aie2_is_event_trace_enable(ndev)) {
+		XDNA_DBG(ndev->xdna, "Event tracing is disabled");
+		return 0;
+	}
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_set_event_trace_categories(ndev, category);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Set event trace category failed %d", ret);
+		goto unlock;
+	}
+
+	ndev->event_trace_req->event_trace_category = category;
+
+unlock:
+	mutex_unlock(&ndev->aie2_lock);
+	return ret;
+}
+
+u32 aie2_get_event_trace_categories(struct amdxdna_dev_hdl *ndev)
+{
+	return ndev->event_trace_req->event_trace_category;
+}
+
 void aie2_config_event_trace(struct amdxdna_dev_hdl *ndev, u32 enable,
 			     u32 buff_size, u32 category)
 {
@@ -498,12 +531,7 @@ int aie2_event_trace_init(struct amdxdna_dev_hdl *ndev)
 
 void aie2_event_trace_fini(struct amdxdna_dev_hdl *ndev)
 {
-	if (!ndev->event_trace_req)
-		return;
-
-	if (aie2_is_event_trace_enable(ndev))
-		aie2_assign_event_trace_state(ndev, false);
-
+	aie2_assign_event_trace_state(ndev, false);
 	kfree(ndev->event_trace_req);
 	ndev->event_trace_req = NULL;
 }
