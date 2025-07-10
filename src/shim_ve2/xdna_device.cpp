@@ -292,9 +292,9 @@ struct firmware_version
     if (fw_type != query::firmware_version::firmware_type::uc_firmware)
        throw std::runtime_error("NPU firmware query not supported in this context");
 
-    amdxdna_drm_query_git_firmware_version fw_version{};
+    amdxdna_drm_query_ve2_firmware_version fw_version{};
     amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_QUERY_GIT_FIRMWARE_VERSION,
+      .param = DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION,
       .buffer_size = sizeof(fw_version),
       .buffer = reinterpret_cast<uintptr_t>(&fw_version)
     };

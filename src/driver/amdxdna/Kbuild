@@ -54,7 +54,9 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	amdxdna_of_drv.o \
 	ve2_solver.o \
 	ve2_mgmt.o \
-	ve2_hwctx.o
+	ve2_hwctx.o \
+	ve2_fw.o \
+	ve2_debug.o
 
 # Helper functions for amdxdna development, but not for upstreaming
 amdxdna-y += amdxdna_devel.o
