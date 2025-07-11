@@ -48,14 +48,14 @@ alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t, bool is_ubuf = false)
     return;
   }
 
-  static long cacheline_size = 0;
-  if (!cacheline_size)
-    cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+  static long page_size = 0;
+  if (!page_size)
+    page_size = sysconf(_SC_PAGESIZE);
 
-  // Allocate large enough buffer to pass cacheline algned user pointer for
+  // Allocate large enough buffer to pass page algned user pointer for
   // BO creation. Buffer is initially filled based on type.
   if (is_ubuf)
-    ibo.ubuf = std::vector<char>(sz + cacheline_size - 1, t);
+    ibo.ubuf = std::vector<char>(sz + page_size - 1, t);
 
   switch(t) {
   case IO_TEST_BO_CMD:
@@ -68,7 +68,7 @@ alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t, bool is_ubuf = false)
     break;
   default:
     if (ibo.ubuf.size())
-      ibo.tbo = std::make_shared<bo>(dev, aligned(ibo.ubuf.data(), cacheline_size), sz);
+      ibo.tbo = std::make_shared<bo>(dev, aligned(ibo.ubuf.data(), page_size), sz);
     else
       ibo.tbo = std::make_shared<bo>(dev, sz);
     break;

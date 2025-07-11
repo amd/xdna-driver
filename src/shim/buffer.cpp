@@ -14,6 +14,34 @@
 namespace {
 
 const uint64_t page_size = sysconf(_SC_PAGESIZE);
+const long cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+
+bool
+is_power_of_two(size_t x)
+{
+  return (x > 0) && ((x & (x - 1)) == 0);
+}
+
+void *
+next_aligned_addr(void *p, size_t align)
+{
+  if (!is_power_of_two(align))
+    shim_err(EINVAL, "Alignment 0x%lx is not power of two", align);
+  auto addr = reinterpret_cast<uint64_t>(p);
+  return reinterpret_cast<void*>((addr + align - 1) & ~(align - 1));
+}
+
+bool
+is_cacheline_aligned(void *ptr)
+{
+  return (ptr == next_aligned_addr(ptr, cacheline_size));
+}
+
+bool
+is_page_aligned(void *ptr)
+{
+  return (ptr == next_aligned_addr(ptr, page_size));
+}
 
 void *
 page_align(void *ptr)
@@ -31,6 +59,12 @@ page_offset(void *ptr)
 
   auto ap = reinterpret_cast<uintptr_t>(ptr);
   return ap & (page_size - 1);
+}
+
+size_t
+page_size_roundup(size_t size)
+{
+  return (size + page_size - 1) & ~(page_size - 1);
 }
 
 std::string
@@ -72,41 +106,10 @@ inline void flush_cache_line(const char *cur)
 #endif
 }
 
-long
-get_cacheline_size()
-{
-  static long cacheline_size = 0;
-
-  if (!cacheline_size) {
-    long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
-    if (sz <= 0)
-      shim_err(EINVAL, "Invalid cache line size: %ld", sz);
-    cacheline_size = sz;
-  }
-  return cacheline_size;
-}
-
-bool
-is_power_of_two(size_t x)
-{
-    return (x > 0) && ((x & (x - 1)) == 0);
-}
-
-void *
-align_addr(void *p, size_t align)
-{
-    if (!is_power_of_two(align))
-        shim_err(EINVAL, "Alignment 0x%lx is not power of two", align);
-    auto addr = reinterpret_cast<uint64_t>(p);
-    return reinterpret_cast<void*>((addr + align - 1) & ~(align - 1));
-}
-
 // flash cache line for non coherent memory
 inline void
 clflush_data(const void *base, size_t offset, size_t len)
 {
-  auto cacheline_size = get_cacheline_size();
-
   const char *cur = (const char *)base;
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
@@ -114,12 +117,6 @@ clflush_data(const void *base, size_t offset, size_t len)
     flush_cache_line(cur);
     cur += cacheline_size;
   } while (cur <= (const char *)lastline);
-}
-
-bool
-is_cacheline_aligned(void *ptr)
-{
-  return (ptr == align_addr(ptr, get_cacheline_size()));
 }
 
 bool
@@ -141,8 +138,8 @@ is_driver_pin_arg_bo()
 uint64_t
 bo_addr_align(int type)
 {
-  // Device mem heap must align at 64MB boundary.
-  return (type == AMDXDNA_BO_DEV_HEAP) ? 64ul * 1024 * 1024 : 0;
+  // Device mem heap must align at 64MB boundary. Others can be byte aligned.
+  return (type == AMDXDNA_BO_DEV_HEAP) ? 64ul * 1024 * 1024 : 1;
 }
 
 }
@@ -154,22 +151,43 @@ namespace shim_xdna {
 //
 
 mmap_ptr::
-mmap_ptr(size_t size) : m_size(size)
+mmap_ptr(size_t size, size_t alignment)
+  : m_size(page_size_roundup(size)) // Roundup size to page size
 {
-  m_ptr = mmap(0, m_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (m_ptr == MAP_FAILED)
+  if (!is_power_of_two(alignment))
+    shim_err(EINVAL, "Alignment 0x%lx is not power of two", alignment);
+
+  auto total_sz = m_size;
+  // Mmap should automatically return at least page aligned address.
+  if (alignment > page_size)
+    total_sz += alignment;
+
+  auto p = mmap(0, total_sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (p == MAP_FAILED)
     shim_err(-errno, "mmap_range(len=%ld) failed", size);
+  if (!is_page_aligned(p))
+    shim_err(EINVAL, "mmap_range is not page aligend");
+
+  m_ptr = next_aligned_addr(p, alignment);
+  auto pre_sz = reinterpret_cast<char*>(m_ptr) - reinterpret_cast<char*>(p);
+  total_sz -= pre_sz;
+
+  // Unmap prefix part
+  if (p != m_ptr)
+    munmap(p, pre_sz);
+  // Unmap suffix part
+  if (total_sz > m_size)
+    munmap(reinterpret_cast<char*>(m_ptr) + m_size, total_sz - m_size);
 }
 
 mmap_ptr::
-mmap_ptr(const pdev *dev, void *addr, uint64_t offset, size_t size)
+mmap_ptr(const pdev *dev, void *addr, uint64_t dev_offset, size_t size)
   : m_dev(dev), m_size(size)
 {
   int flags = addr ? MAP_FIXED : 0;
   m_ptr = dev->mmap(addr, size, PROT_READ | PROT_WRITE,
-    MAP_SHARED | MAP_LOCKED | flags, offset);
+    MAP_SHARED | MAP_LOCKED | flags, dev_offset);
 }
-
 
 mmap_ptr::
 ~mmap_ptr()
@@ -190,18 +208,36 @@ get() const
   return m_ptr;
 }
 
+std::unique_ptr<mmap_ptr>
+mmap_ptr::
+alloc(const pdev *dev, uint64_t dev_offset, size_t size)
+{
+  auto sz = page_size_roundup(size);
+  if (sz > m_size)
+    shim_err(ENOSPC, "mmap_alloc(len=%ld) failed", size);
+
+  auto new_mmap = std::make_unique<mmap_ptr>(dev, m_ptr, dev_offset, sz);
+  m_size -= sz;
+  if (m_size == 0)
+    m_ptr = nullptr;
+  else
+    m_ptr = reinterpret_cast<void*>(reinterpret_cast<char*>(m_ptr) + sz);
+  return std::move(new_mmap);
+}
+
 //
 // Impl for class drm_bo
 //
 
 drm_bo::
 drm_bo(const pdev& pdev, size_t size, int type)
-  : m_pdev(pdev), m_size(size), m_type(type)
+  : m_pdev(pdev), m_size(size)
 {
+  auto align = bo_addr_align(type);
   create_bo_arg arg = {
-    .type = m_type,
+    .type = type,
     .size = m_size,
-    .xdna_addr_align = bo_addr_align(m_type), 
+    .xdna_addr_align = (align == 1 ? 0 : align), 
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
   m_id = arg.bo;
@@ -211,7 +247,7 @@ drm_bo(const pdev& pdev, size_t size, int type)
 
 drm_bo::
 drm_bo(const pdev& pdev, size_t size, void *uptr)
-  : m_pdev(pdev), m_size(size), m_type(AMDXDNA_BO_SHARE)
+  : m_pdev(pdev), m_size(size)
 {
   create_uptr_bo_arg arg = {
     .buf = uptr,
@@ -231,7 +267,6 @@ drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
     .fd = ehdl,
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::import_bo, &arg);
-  m_type = arg.type;
   m_size = arg.size;
   m_id = arg.bo;
   m_xdna_addr = arg.xdna_addr;
@@ -241,6 +276,8 @@ drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
 drm_bo::
 ~drm_bo()
 {
+  m_vaddr.reset();
+
   try {
     destroy_bo_arg arg = {
       .bo = m_id,
@@ -279,45 +316,71 @@ buffer::
 buffer(const pdev& dev, size_t size, int type, void *uptr)
   : m_pdev(dev)
   , m_uptr(uptr)
+  , m_type(type)
+  , m_total_size(size)
+  , m_cur_size(0)
 {
-  // CPU and device can't share cacheline, especially when the BO is output, so
+  // CPU and device can't share cacheline, especially when the BO is output and
   // both CPU and device may write to it.
-  if (!is_cacheline_aligned(m_uptr))
-    shim_err(EINVAL, "User pointer %p must be cacheline aligned.", m_uptr);
-  if (m_uptr && type != AMDXDNA_BO_SHARE)
-    shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
+  // In case the BO is exported to other process, it has to be aligned on page
+  // boundary so that we don't implicitly share more than we need.
+  // Based on the above reasons, we'll enforce the pointer to be page aligned.
+  if (!is_page_aligned(m_uptr))
+    shim_err(EINVAL, "User pointer %p must be page aligned.", m_uptr);
   if (m_uptr && type != AMDXDNA_BO_SHARE)
     shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
 
-  if (m_uptr)
-    m_bo = std::make_unique<drm_bo>(dev, size + page_offset(m_uptr), page_align(m_uptr));
-  else
-    m_bo = std::make_unique<drm_bo>(dev, size, type);
-  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
-    mmap_drm_bo();
-  else if (m_bo->m_type != AMDXDNA_BO_DEV)
-    shim_err(EINVAL, "Non-DEV BO without mmap offset!");
-  
-  // Newly allocated buffer may contain dirty pages. If used as output buffer,
-  // the data in cacheline will be flushed onto memory and pollute the output
-  // from device. We perform a cache flush right after the BO is allocated to
-  // avoid this issue.
-  if (m_bo->m_type == AMDXDNA_BO_SHARE)
-    sync(direction::host2device, size, 0);
+  // Prepare the mmap range for the entire buffer
+  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, bo_addr_align(m_type));
 
+  // Obtain the buffer
+  expand(m_total_size);
   shim_debug("Created %s", describe().c_str());
 }
 
 buffer::
 buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl)
   : m_pdev(dev)
+  , m_type(AMDXDNA_BO_SHARE)
 {
-  m_bo = std::make_unique<drm_bo>(dev, ehdl);
-  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
-    mmap_drm_bo();
-  else if (m_bo->m_type != AMDXDNA_BO_DEV)
-    shim_err(EINVAL, "Non-DEV BO without mmap offset!");
+  auto bo = std::make_unique<drm_bo>(dev, ehdl);
+
+  m_total_size = m_cur_size = bo->m_size;
+  // Prepare the mmap range for the entire buffer
+  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, bo_addr_align(m_type));
+
+  mmap_drm_bo(bo.get());
+  m_bos.push_back(std::move(bo));
   shim_debug("Imported %s", describe().c_str());
+}
+
+void
+buffer::
+expand(size_t size)
+{
+  auto cur_sz = m_cur_size;
+  auto new_sz = size + m_cur_size;
+  shim_debug("Expanding BO from %ld to %ld", cur_sz, new_sz);
+
+  if (new_sz > m_total_size)
+    shim_err(EINVAL, "Can't expand BO beyond total size %ld", m_total_size);
+
+  std::unique_ptr<drm_bo> bo;
+  if (m_uptr)
+    bo = std::make_unique<drm_bo>(m_pdev, size, m_uptr);
+  else
+    bo = std::make_unique<drm_bo>(m_pdev, size, m_type);
+  mmap_drm_bo(bo.get());
+
+  m_bos.push_back(std::move(bo));
+  m_cur_size += size;
+  
+  // Newly allocated buffer may contain dirty pages. If used as output buffer,
+  // the data in cacheline will be flushed onto memory and pollute the output
+  // from device. We perform a cache flush right after the BO is allocated to
+  // avoid this issue.
+  if (m_type == AMDXDNA_BO_SHARE)
+    sync(direction::host2device, size, cur_sz);
 }
 
 buffer::
@@ -328,17 +391,14 @@ buffer::
 
 void
 buffer::
-mmap_drm_bo()
+mmap_drm_bo(drm_bo *bo)
 {
-  void *p = nullptr;
-  auto alignment = bo_addr_align(m_bo->m_type);
-
-  if (alignment) {
-    auto range_sz = alignment + m_bo->m_size - 1;
-    m_range_addr = std::make_unique<mmap_ptr>(range_sz);
-    p = align_addr(m_range_addr->get(), alignment);
+  if (bo->m_map_offset == AMDXDNA_INVALID_ADDR) {
+    if (m_type != AMDXDNA_BO_DEV)
+      shim_err(EINVAL, "Non-DEV BO without mmap offset!");
+    return;
   }
-  m_addr = std::make_unique<mmap_ptr>(&m_pdev, p, m_bo->m_map_offset, m_bo->m_size);
+  bo->m_vaddr = m_range_addr->alloc(&m_pdev, bo->m_map_offset, bo->m_size);
 }
 
 void *
@@ -357,8 +417,9 @@ vaddr() const
   if (m_uptr)
     return m_uptr;
 
-  if (m_bo->m_map_offset != AMDXDNA_INVALID_ADDR)
-    return reinterpret_cast<char*>(m_addr->get());
+  auto& bo = m_bos[0];
+  if (bo->m_map_offset != AMDXDNA_INVALID_ADDR)
+    return reinterpret_cast<char*>(bo->m_vaddr->get());
 
   // Must be DEV BO.
   auto base = static_cast<char*>(m_pdev.get_heap_vaddr());
@@ -369,7 +430,7 @@ size_t
 buffer::
 size() const
 {
-  return m_bo->m_size - page_offset(m_uptr);
+  return m_cur_size;
 }
 
 void
@@ -412,16 +473,23 @@ bo_id
 buffer::
 id() const
 {
-  return m_bo->m_id;
+  return id(0);
+}
+
+bo_id
+buffer::
+id(int index) const
+{
+  return m_bos[index]->m_id;
 }
 
 uint64_t
 buffer::
 paddr() const
 {
-  uint64_t ret = (m_bo->m_xdna_addr != AMDXDNA_INVALID_ADDR) ?
-    m_bo->m_xdna_addr : reinterpret_cast<uintptr_t>(m_addr->get());
-  return ret + page_offset(m_uptr);
+  auto xdna_addr = m_bos[0]->m_xdna_addr;
+  return (xdna_addr != AMDXDNA_INVALID_ADDR) ?
+    xdna_addr : reinterpret_cast<uintptr_t>(m_bos[0]->m_vaddr->get());
 }
 
 void
@@ -445,12 +513,14 @@ describe() const
   std::string desc = bo_sub_type_name() + ": ";
 
   desc += "type=";
-  desc += type_to_name(m_bo->m_type);
+  desc += type_to_name(m_type);
   desc += " ";
   desc += "hdl=";
-  desc += std::to_string(id().handle);
+  for (int i = 0; i < m_bos.size(); i++) {
+    desc += std::to_string(id(i).handle);
+    desc += " ";
+  }
 
-  desc += " ";
   desc += "sz=";
   desc += to_hex_string(size());
 
@@ -477,7 +547,7 @@ sync(direction, size_t sz, size_t offset)
   if (is_driver_sync()) {
     sync_bo_arg arg = {
       .bo = id(),
-      .offset = offset + page_offset(m_uptr),
+      .offset = offset,
       .size = sz,
     };
     m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
@@ -501,7 +571,7 @@ std::string
 buffer::
 bo_sub_type_name() const
 {
-  return m_uptr ? "USER_PTR BO" : "NORMAL BO";
+  return m_uptr ? "USER_PTR BO" : "Non-USER_PTR BO";
 }
 
 //

@@ -16,12 +16,15 @@ namespace shim_xdna {
 
 class mmap_ptr {
 public:
-  mmap_ptr(size_t size);
+  mmap_ptr(size_t size, size_t alignment);
   mmap_ptr(const pdev *dev, void *addr, uint64_t offset, size_t size);
   ~mmap_ptr();
 
   void *
   get() const;
+
+  std::unique_ptr<mmap_ptr>
+  alloc(const pdev *dev, uint64_t offset, size_t size);
 
 private:
   const pdev* m_dev = nullptr;
@@ -36,11 +39,11 @@ public:
   drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
   ~drm_bo();
 
-  int m_type = AMDXDNA_BO_INVALID;
   size_t m_size = 0;
   bo_id m_id;
   uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
   uint64_t m_map_offset = AMDXDNA_INVALID_ADDR;
+  std::unique_ptr<mmap_ptr> m_vaddr = nullptr;
 
 private:
   const pdev& m_pdev;
@@ -85,6 +88,9 @@ public:
   bo_id
   id() const;
 
+  bo_id
+  id(int index) const;
+
   uint64_t
   paddr() const;
 
@@ -101,6 +107,9 @@ public:
   virtual std::set<bo_id>
   get_arg_bo_ids() const;
 
+  void
+  expand(size_t size);
+
 protected:
   const pdev& m_pdev;
 
@@ -112,13 +121,15 @@ private:
   bo_sub_type_name() const;
 
   void
-  mmap_drm_bo(); // Obtain void* through mmap()
+  mmap_drm_bo(drm_bo *bo); // Obtain void* through mmap()
 
   uint64_t m_flags = 0;
   std::unique_ptr<mmap_ptr> m_range_addr = nullptr;
-  std::unique_ptr<mmap_ptr> m_addr = nullptr;
-  std::unique_ptr<drm_bo> m_bo = nullptr;
+  std::vector< std::unique_ptr<drm_bo> > m_bos;
   void *m_uptr = nullptr;
+  int m_type = AMDXDNA_BO_INVALID;
+  size_t m_total_size = 0;
+  size_t m_cur_size = 0;
 };
 
 class cmd_buffer : public buffer

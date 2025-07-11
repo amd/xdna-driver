@@ -96,9 +96,9 @@ struct test_case {
 };
 
 // For overall test result evaluation
-int test_passed = 0;
-int test_skipped = 0;
-int test_failed = 0;
+std::vector<int> test_passed;
+std::vector<int> test_skipped;
+std::vector<int> test_failed;
 
 // Device type filters
 bool
@@ -393,18 +393,18 @@ TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_
   std::vector<std::unique_ptr<bo>> bos;
   const uint64_t fill = 0x55aa55aa55aa55aa;
   std::vector< std::vector<char> > bufs;
-  static long cacheline_size = 0;
+  static long page_size = 0;
 
-  if (!cacheline_size)
-    cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+  if (!page_size)
+    page_size = sysconf(_SC_PAGESIZE);
 
   for (auto& size : bos_size) {
     if (size < 8)
       throw std::runtime_error("User ptr BO size too small");
-    bufs.emplace_back(size + cacheline_size); // allow cacheline size align
+    bufs.emplace_back(size + page_size); // allow page size align
 
     auto addr = reinterpret_cast<uintptr_t>(bufs.back().data());
-    auto p = reinterpret_cast<uint64_t*>((addr + cacheline_size - 1) & ~(cacheline_size - 1));
+    auto p = reinterpret_cast<uint64_t*>((addr + page_size - 1) & ~(page_size - 1));
     *p = fill;
     bos.push_back(std::make_unique<bo>(dev, p, static_cast<size_t>(size), boflags, ext_boflags));
   }
@@ -844,11 +844,11 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
   std::cout << "====== " << id << ": " << test.name << " " << result << " =====" << std::endl;
 
   if (skipped)
-    test_skipped++;
+    test_skipped.push_back(id);
   else if (failed)
-    test_failed++;
+    test_failed.push_back(id);
   else
-    test_passed++;
+    test_passed.push_back(id);
 }
 
 void
@@ -865,7 +865,13 @@ run_all_test(std::vector<int>& tests)
 
   if (total_dev == 0) {
     std::cout << "No testable devices on this machine. Failing all tests.\n";
-    test_failed = test_list.size();
+    if (tests.empty()) {
+      int id = 0;
+      for (const auto& t : test_list)
+        test_failed.push_back(id++);
+    } else {
+      test_failed = tests;
+    }
     return;
   }
 
@@ -990,18 +996,20 @@ main(int argc, char **argv)
 
   run_all_test(tests);
 
-  if (test_skipped)
-    std::cout << test_skipped << "\ttest(s) skipped" << std::endl;
+  std::cout << test_skipped.size() << "\ttest(s) skipped" << std::endl;
 
-  if (test_passed + test_failed == 0)
+  if (test_passed.size() + test_failed.size() == 0)
     return 0;
 
-  std::cout << test_passed + test_failed << "\ttest(s) executed" << std::endl;
-  if (test_failed == 0) {
-    std::cout << "ALL " << test_passed << " executed test(s) PASSED!" << std::endl;
+  std::cout << test_passed.size() + test_failed.size() << "\ttest(s) executed" << std::endl;
+  if (test_failed.size() == 0) {
+    std::cout << "ALL " << test_passed.size() << " executed test(s) PASSED!" << std::endl;
     return 0;
   }
-  std::cout << test_failed << "\ttest(s) \x1b[5m\x1b[31mFAILED\x1b[0m!" << std::endl;
+  std::cout << test_failed.size() << "\ttest(s) \x1b[5m\x1b[31mFAILED\x1b[0m: ";
+  for (int id : test_failed)
+    std::cout << id << " ";
+  std::cout << std::endl;
   return 1;
 }
 
