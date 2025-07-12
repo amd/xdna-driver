@@ -65,7 +65,14 @@ File:
   tools/bins/Runner/latency/strx/profile_latency.json
   tools/bins/Runner/latency/strx/recipe_latency.json
   tools/bins/Runner/latency/strx/validate.xclbin
-  tools/bins/Runner/throughput/phx/recipe_throughput.json
+	tools/bins/Runner/df_bandwidth/phx/df_bw.elf
+	tools/bins/Runner/df_bandwidth/phx/profile_df_bandwidth.json
+	tools/bins/Runner/df_bandwidth/phx/recipe_df_bandwidth.json
+	tools/bins/Runner/df_bandwidth/phx/validate.xclbin
+	tools/bins/Runner/df_bandwidth/strx/df_bw.elf
+	tools/bins/Runner/df_bandwidth/strx/profile_df_bandwidth.json
+	tools/bins/Runner/df_bandwidth/strx/recipe_df_bandwidth.json
+	tools/bins/Runner/df_bandwidth/strx/validate.xclbin
 
 Link:
 	tools/bins/17f3_10 -> tools/bins/17f1_10
