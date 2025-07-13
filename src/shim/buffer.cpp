@@ -176,8 +176,10 @@ mmap_ptr(size_t size, size_t alignment)
   if (p != m_ptr)
     munmap(p, pre_sz);
   // Unmap suffix part
-  if (total_sz > m_size)
+  if (total_sz > m_size) {
+    // coverity[bad_free]
     munmap(reinterpret_cast<char*>(m_ptr) + m_size, total_sz - m_size);
+  }
 }
 
 mmap_ptr::

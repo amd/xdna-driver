@@ -1012,7 +1012,7 @@ out:
 static int aie2_query_telemetry(struct amdxdna_client *client,
 				struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_telemetry_header header, *tmp;
+	struct amdxdna_drm_query_telemetry_header header, *tmp = NULL;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct aie2_mgmt_dma_hdl mgmt_hdl;
 	struct aie_version ver;
