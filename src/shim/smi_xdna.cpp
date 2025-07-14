@@ -30,7 +30,6 @@ config_gen_phoenix::
 config_gen_phoenix()
 {
   validate_test_desc = {
-    {"aie-reconfig-overhead", "Run end-to-end array reconfiguration overhead through shim DMA", "hidden"},
     {"all", "All applicable validate tests will be executed (default)", "common"},
     {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
     {"cmd-chain-throughput", "Run end-to-end throughput test using command chaining", "hidden"},
@@ -40,8 +39,6 @@ config_gen_phoenix()
     {"tct-all-col", "Measure average TCT processing time for all columns", "hidden"},
     {"tct-one-col", "Measure average TCT processing time for one column", "hidden"},
     {"throughput", "Run end-to-end throughput test", "common"},
-    {"temporal-sharing-overhead", "Run end-to-end temporal sharing overhead test", "hidden"},
-    {"preemption-overhead", "Measure preemption overhead at noop and memtile levels", "hidden"}
   }; 
 }
 
