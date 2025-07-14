@@ -6,11 +6,10 @@ using namespace xrt_core::smi;
 
 namespace shim_xdna::smi {
 
-  // Function to create the "validate" subcommand
-subcommand 
-config_gen_xdna::create_validate_subcommand()
+config_gen_xdna::
+config_gen_xdna()
 {
-  std::vector<basic_option> validate_test_desc = {
+  validate_test_desc = {
     {"aie-reconfig-overhead", "Run end-to-end array reconfiguration overhead through shim DMA", "hidden"},
     {"all", "All applicable validate tests will be executed (default)", "common"},
     {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
@@ -23,9 +22,33 @@ config_gen_xdna::create_validate_subcommand()
     {"tct-one-col", "Measure average TCT processing time for one column", "hidden"},
     {"throughput", "Run end-to-end throughput test", "common"},
     {"temporal-sharing-overhead", "Run end-to-end temporal sharing overhead test", "hidden"},
-    {"preemption-overhead", "Measure preemption overhead at noop and memtile levels", "hidden"},
-  };
+    {"preemption-overhead", "Measure preemption overhead at noop and memtile levels", "hidden"}
+  }; 
+}
 
+config_gen_phoenix::
+config_gen_phoenix()
+{
+  validate_test_desc = {
+    {"aie-reconfig-overhead", "Run end-to-end array reconfiguration overhead through shim DMA", "hidden"},
+    {"all", "All applicable validate tests will be executed (default)", "common"},
+    {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
+    {"cmd-chain-throughput", "Run end-to-end throughput test using command chaining", "hidden"},
+    {"df-bw", "Run bandwidth test on data fabric", "hidden"},
+    {"latency", "Run end-to-end latency test", "common"},
+    {"quick", "Run a subset of four tests: \n1. latency \n2. throughput \n3. cmd-chain-latency \n4. cmd-chain-throughput", "hidden"},
+    {"tct-all-col", "Measure average TCT processing time for all columns", "hidden"},
+    {"tct-one-col", "Measure average TCT processing time for one column", "hidden"},
+    {"throughput", "Run end-to-end throughput test", "common"},
+    {"temporal-sharing-overhead", "Run end-to-end temporal sharing overhead test", "hidden"},
+    {"preemption-overhead", "Measure preemption overhead at noop and memtile levels", "hidden"}
+  }; 
+}
+
+  // Function to create the "validate" subcommand
+subcommand 
+config_gen_xdna::create_validate_subcommand()
+{
   std::map<std::string, std::shared_ptr<option>> validate_suboptions;
   validate_suboptions.emplace("device", std::make_shared<option>("device", "d", "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest", "common", "", "string"));
   validate_suboptions.emplace("format", std::make_shared<option>("format", "f", "Report output format. Valid values are:\n"
@@ -34,7 +57,7 @@ config_gen_xdna::create_validate_subcommand()
   validate_suboptions.emplace("output", std::make_shared<option>("output", "o", "Direct the output to the given file", "common", "", "string"));
   validate_suboptions.emplace("help", std::make_shared<option>("help", "h", "Help to use this sub-command", "common", "", "none"));
   validate_suboptions.emplace("run", std::make_shared<listable_description_option>("run", "r", "Run a subset of the test suite. Valid options are:\n",
-                              "common", "",  "array", validate_test_desc));
+                              "common", "",  "array", get_validate_test_desc()));
   validate_suboptions.emplace("path", std::make_shared<option>("path", "p", "Path to the directory containing validate xclbins", "hidden", "", "string"));
   validate_suboptions.emplace("param", std::make_shared<option>("param", "", "Extended parameter for a given test. Format: <test-name>:<key>:<value>", "param", "", "string"));
   validate_suboptions.emplace("pmode", std::make_shared<option>("pmode", "", "Specify which power mode to run the benchmarks in. Note: Some tests might be unavailable for some modes", "hidden", "", "string")); 
@@ -95,6 +118,10 @@ populate_smi_instance(xrt_core::smi::smi* smi_instance, const xrt_core::device* 
 
   switch (hardware_type) {
   case smi_hardware_config::hardware_type::phx:
+  {
+    generator = std::make_shared<config_gen_phoenix>();
+    break;
+  }
   case smi_hardware_config::hardware_type::stxA0:
   case smi_hardware_config::hardware_type::stxB0:
   case smi_hardware_config::hardware_type::stxH:
