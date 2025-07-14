@@ -1,7 +1,7 @@
 #! /bin/bash
 
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2024 AMD, Inc. All rights reserved.
+# Copyright (C) 2023-2025 AMD, Inc. All rights reserved.
 
 RED="\e[31m"
 ENDCOLOR="\e[0m"
@@ -12,7 +12,7 @@ if [ "$build_type" = "Debug" ]; then
 	set -x
 fi
 
-installdir=/opt/xilinx/xrt
+installdir=@CMAKE_INSTALL_PREFIX@/xrt
 udev_rules_d=/etc/udev/rules.d
 amdxdna_rules_file=99-amdxdna.rules
 dracut_conf_d=/etc/dracut.conf.d
@@ -41,10 +41,13 @@ fi
 echo "KERNEL==\"accel*\",DRIVERS==\"amdxdna\",MODE=\"0666\"" > ${udev_rules_d}/${amdxdna_rules_file}
 
 rmmod amdxdna > /dev/null 2>&1
+@PF_RMMOD@
 if [ "$build_type" = "Debug" ]; then
 	modprobe amdxdna dyndbg=+pf
+	@PF_DBG_INSMOD@
 else
 	modprobe amdxdna
+	@PF_INSMOD@
 fi
 
 unset XILINX_XRT

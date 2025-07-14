@@ -41,7 +41,7 @@ xclbin_parser(const xrt::xclbin& xclbin)
     shim_err(EINVAL, "No valid DPU kernel found in xclbin");
   m_ops_per_cycle = aie_partition.ops_per_cycle;
   m_column_cnt = aie_partition.ncol;
-  print_info();
+  //print_info();
 }
 
 xclbin_parser::
@@ -144,6 +144,17 @@ hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
     m_cu_names.push_back(xp.get_cu_name(i));
 
   init_qos_info(qos);
+
+  create_ctx_on_device();
+}
+
+hwctx::
+hwctx(const device& dev, uint32_t partition_size, std::unique_ptr<hwq> queue)
+  : m_device(dev)
+  , m_q(std::move(queue))
+{
+  m_col_cnt = partition_size;
+  m_ops_per_cycle = 0;
 
   create_ctx_on_device();
 }

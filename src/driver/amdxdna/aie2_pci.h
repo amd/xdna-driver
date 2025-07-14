@@ -17,6 +17,7 @@
 #include <drm/gpu_scheduler.h>
 
 #include "drm_local/amdxdna_accel.h"
+#include "aie2_msg_priv.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -77,6 +78,8 @@
 struct amdxdna_ctx_priv;
 struct event_trace_req_buf;
 struct start_event_trace_resp;
+struct config_logging_dram_buf_resp;
+struct logging_req_buf;
 struct aie2_partition;
 
 enum aie2_smu_reg_idx {
@@ -219,6 +222,7 @@ struct amdxdna_ctx_priv {
 	atomic64_t			job_pending_cnt;
 	wait_queue_head_t		connect_waitq;
 	int				idle_cnt;
+	bool				active;
 	u64				disconn_cnt;
 	bool				force_yield;
 #define CTX_STATE_DISCONNECTED		0x0
@@ -279,6 +283,7 @@ struct aie2_ctx_rq {
 	u32			hwctx_limit;
 	u32			start_col;
 	u32			total_cols;
+	u32			start_col_orig;
 
 	struct workqueue_struct	*work_q;
 	struct work_struct	parts_work;
@@ -295,7 +300,7 @@ struct aie2_ctx_rq {
 	u32			num_parts;
 	u32			ctx_cnt;
 	u32			rt_ctx_cnt;
-	int			*col_arr;
+	int			*ctx_width_resv;
 	u32			max_cols;
 };
 
@@ -336,6 +341,7 @@ struct amdxdna_dev_hdl {
 	struct mailbox_channel		*mgmt_chann;
 	struct async_events		*async_events;
 	struct event_trace_req_buf	*event_trace_req;
+	struct logging_req_buf		*logging_req;
 
 	u32				dev_status;
 	u32				hwctx_cnt;
@@ -383,6 +389,7 @@ struct amdxdna_dev_priv {
 	u32				mbox_size;
 	u32				hwctx_limit; /* Hardware determine */
 	u32				ctx_limit; /* Driver determine */
+	u32				temporal_only;
 	u32				sram_dev_addr;
 	struct aie2_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
 	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
@@ -391,6 +398,15 @@ struct amdxdna_dev_priv {
 #ifdef AMDXDNA_DEVEL
 	struct rt_config		priv_load_cfg;
 #endif
+};
+
+struct aie2_mgmt_dma_hdl {
+	struct amdxdna_dev		*xdna;
+	enum dma_data_direction		dir;
+	void				*vaddr;
+	dma_addr_t			dma_hdl;
+	size_t				size;
+	size_t				aligned_size;
 };
 
 extern const struct amdxdna_dev_ops aie2_ops;
@@ -410,6 +426,12 @@ int aie2_runtime_cfg(struct amdxdna_dev_hdl *ndev,
 extern uint aie2_control_flags;
 extern const struct amdxdna_dev_ops aie2_ops;
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor);
+void *aie2_mgmt_buff_alloc(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+			   size_t size, enum dma_data_direction dir);
+void aie2_mgmt_buff_clflush(struct aie2_mgmt_dma_hdl *mgmt_hdl);
+dma_addr_t aie2_mgmt_buff_get_dma_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl);
+void *aie2_mgmt_buff_get_cpu_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl);
+void aie2_mgmt_buff_free(struct aie2_mgmt_dma_hdl *mgmt_hdl);
 
 /* aie2_smu.c */
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
@@ -425,8 +447,6 @@ int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
 /* aie2_pm.c */
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
 void aie2_pm_fini(struct amdxdna_dev_hdl *ndev);
-int aie2_pm_resume(struct amdxdna_dev_hdl *ndev);
-void aie2_pm_suspend(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 #define aie2_pm_add_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, true)
 #define aie2_pm_del_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, false)
@@ -462,9 +482,11 @@ void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,
 void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev);
 void aie2_config_event_trace(struct amdxdna_dev_hdl *ndev, u32 enable,
 			     u32 size, u32 category);
-void aie2_assign_event_trace_state(struct amdxdna_dev_hdl *ndev, bool state);
+void aie2_event_trace_suspend(struct amdxdna_dev_hdl *ndev);
+void aie2_event_trace_resume(struct amdxdna_dev_hdl *ndev);
 
 /* aie2_message.c */
+bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode);
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_resume_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type, u64 value);
@@ -476,10 +498,10 @@ int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev,
 				struct amdxdna_ctx *ctx, u32 us);
 int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev);
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid);
-int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr,
-			     u32 size, struct aie_version *version);
-int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
-			dma_addr_t addr, u32 size);
+int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+			     u32 type, u32 size, struct aie_version *version);
+int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+			u32 context_id, u32 size);
 int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
@@ -492,7 +514,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
 int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char *buf, u32 size, u32 *cols_filled);
-int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
+int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
 				 void *handle, int (*cb)(void*, void __iomem *, size_t));
 int aie2_self_test(struct amdxdna_dev_hdl *ndev);
 #ifdef AMDXDNA_DEVEL
@@ -502,13 +524,13 @@ int aie2_legacy_config_cu(struct amdxdna_ctx *ctx);
 #endif
 
 int aie2_config_cu(struct amdxdna_ctx *ctx);
-int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
+int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job, enum cmd_chain_class class,
 		 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
-				struct amdxdna_sched_job *job,
+				struct amdxdna_sched_job *job, enum cmd_chain_class class,
 				int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
-			       struct amdxdna_sched_job *job,
+			       struct amdxdna_sched_job *job, enum cmd_chain_class class,
 			       int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_sync_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, void __iomem *, size_t));
@@ -549,5 +571,22 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 int aie2_rq_submit_enter(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 void aie2_rq_submit_exit(struct amdxdna_ctx *ctx);
 void aie2_rq_yield(struct amdxdna_ctx *ctx);
+
+/* aie2_logging.c */
+bool aie2_is_dram_logging_enable(struct amdxdna_dev_hdl *ndev);
+int aie2_dram_logging_init(struct amdxdna_dev_hdl *ndev);
+void aie2_dram_logging_fini(struct amdxdna_dev_hdl *ndev);
+int aie2_configure_log_buf_irq(struct amdxdna_dev_hdl *ndev,
+			       struct config_logging_dram_buf_resp *resp);
+void aie2_remove_log_buf_irq(struct amdxdna_dev_hdl *ndev);
+int aie2_configure_dram_logging(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+void aie2_dram_logging_suspend(struct amdxdna_dev_hdl *ndev);
+void aie2_dram_logging_resume(struct amdxdna_dev_hdl *ndev);
+void aie2_set_dram_log_config(struct amdxdna_dev_hdl *ndev,
+			      u32 enable, u32 size, u32 loglevel);
+void aie2_set_dram_log_runtime_cfg(struct amdxdna_dev_hdl *ndev,
+				   u32 loglevel, u32 format, int dest);
+u32 aie2_get_log_level(struct amdxdna_dev_hdl *ndev);
+int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, u32 level);
 
 #endif /* _AIE2_PCI_H_ */

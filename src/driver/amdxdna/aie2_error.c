@@ -15,16 +15,11 @@ struct async_event {
 	struct async_event_msg_resp	resp;
 	struct workqueue_struct		*wq;
 	struct work_struct		work;
-	u8				*buf;
-	dma_addr_t			addr;
-	u32				size;
+	struct aie2_mgmt_dma_hdl	mgmt_hdl;
 };
 
 struct async_events {
 	struct workqueue_struct		*wq;
-	u8				*buf;
-	dma_addr_t			addr;
-	u32				size;
 	u32				event_cnt;
 	struct async_event		event[] __counted_by(event_cnt);
 };
@@ -221,9 +216,8 @@ static int aie2_error_async_cb(void *handle, void __iomem *data, size_t size)
 
 static int aie2_error_event_send(struct async_event *e)
 {
-	drm_clflush_virt_range(e->buf, e->size); /* device can access */
-	return aie2_register_asyn_event_msg(e->ndev, e->addr, e->size, e,
-					    aie2_error_async_cb);
+	aie2_mgmt_buff_clflush(&e->mgmt_hdl);
+	return aie2_register_asyn_event_msg(e->ndev, &e->mgmt_hdl, e, aie2_error_async_cb);
 }
 
 static void aie2_error_worker(struct work_struct *err_work)
@@ -231,6 +225,7 @@ static void aie2_error_worker(struct work_struct *err_work)
 	struct aie_err_info *info;
 	struct amdxdna_dev *xdna;
 	struct async_event *e;
+	void *vaddr;
 	u32 max_err;
 	u32 err_col;
 
@@ -243,13 +238,19 @@ static void aie2_error_worker(struct work_struct *err_work)
 
 	e->resp.status = MAX_AIE2_STATUS_CODE;
 
-	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     e->buf, 0x100, false);
 
-	info = (struct aie_err_info *)e->buf;
+	vaddr = aie2_mgmt_buff_get_cpu_addr(&e->mgmt_hdl);
+	if (IS_ERR(vaddr)) {
+		XDNA_ERR(xdna, "Failed to get a valid virtual addr: %ld", PTR_ERR(vaddr));
+		return;
+	}
+
+	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4, vaddr, 0x100, false);
+
+	info = (struct aie_err_info *)vaddr;
 	XDNA_DBG(xdna, "Error count %d return code %d", info->err_cnt, info->ret_code);
 
-	max_err = (e->size - sizeof(*info)) / sizeof(struct aie_error);
+	max_err = (ASYNC_BUF_SIZE - sizeof(*info)) / sizeof(struct aie_error);
 	if (unlikely(info->err_cnt > max_err)) {
 		WARN_ONCE(1, "Error count too large %d\n", info->err_cnt);
 		return;
@@ -288,62 +289,50 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_events *events;
+	int i;
 
 	drm_WARN_ON(&xdna->ddev, mutex_is_locked(&ndev->aie2_lock));
 	events = ndev->async_events;
 	destroy_workqueue(events->wq);
 
-	dma_free_noncoherent(xdna->ddev.dev, events->size, events->buf,
-			     events->addr, DMA_BIDIRECTIONAL);
+	for (i = 0; i < events->event_cnt; i++) {
+		struct async_event *e = &events->event[i];
+
+		aie2_mgmt_buff_free(&e->mgmt_hdl);
+	}
 	kfree(events);
 }
 
 int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	u32 total_col = ndev->total_col;
-	u32 total_size = ASYNC_BUF_SIZE * total_col;
 	struct async_events *events;
 	int i, ret;
 
-	events = kzalloc(struct_size(events, event, total_col), GFP_KERNEL);
+	events = kzalloc(struct_size(events, event, ndev->total_col), GFP_KERNEL);
 	if (!events)
 		return -ENOMEM;
 
-	/*
-	 * Note: We test the behavior of dma_alloc_noncoherent() on 6.13 kernel.
-	 * 1. This function eventually goes to __alloc_frozen_pages_noprof().
-	 * 2. The maximum size is 4MB (limited by MAX_PAGE_ORDER 10), otherwise
-	 * this will return NULL pointer.
-	 * 3. For valid size, this function returns physical contiguous memory.
-	 *
-	 * Thoughts, if there is requirement for larger than 4MB physical
-	 * contiguous memory, consider allocate buffer from carvedout memory?
-	 */
-	events->buf = dma_alloc_noncoherent(xdna->ddev.dev, total_size, &events->addr,
-					    DMA_BIDIRECTIONAL, GFP_KERNEL);
-	if (!events->buf) {
-		ret = -ENOMEM;
-		goto free_events;
-	}
-	events->size = total_size;
-	events->event_cnt = total_col;
-
+	events->event_cnt = ndev->total_col;
 	events->wq = alloc_ordered_workqueue("async_wq", 0);
 	if (!events->wq) {
 		ret = -ENOMEM;
-		goto free_buf;
+		goto free_events;
 	}
 
 	for (i = 0; i < events->event_cnt; i++) {
 		struct async_event *e = &events->event[i];
-		u32 offset = i * ASYNC_BUF_SIZE;
+		struct aie2_mgmt_dma_hdl *mgmt_hdl = &e->mgmt_hdl;
+		void *buf;
+
+		buf = aie2_mgmt_buff_alloc(ndev, mgmt_hdl, ASYNC_BUF_SIZE, DMA_FROM_DEVICE);
+		if (!buf) {
+			ret = -ENOMEM;
+			goto free_buf;
+		}
 
 		e->ndev = ndev;
 		e->wq = events->wq;
-		e->buf = &events->buf[offset];
-		e->addr = events->addr + offset;
-		e->size = ASYNC_BUF_SIZE;
 		e->resp.status = MAX_AIE2_STATUS_CODE;
 		INIT_WORK(&e->work, aie2_error_worker);
 	}
@@ -351,12 +340,17 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	ndev->async_events = events;
 
 	XDNA_DBG(xdna, "Async event count %d, buf total size 0x%x",
-		 events->event_cnt, events->size);
+		 events->event_cnt, ASYNC_BUF_SIZE);
 	return 0;
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, events->size, events->buf,
-			     events->addr, DMA_BIDIRECTIONAL);
+	while (i) {
+		struct async_event *e = &events->event[i - 1];
+
+		aie2_mgmt_buff_free(&e->mgmt_hdl);
+		--i;
+	}
+	destroy_workqueue(events->wq);
 free_events:
 	kfree(events);
 	return ret;

@@ -58,6 +58,7 @@ class hwctx : public xrt_core::hwctx_handle
 public:
   hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
     std::unique_ptr<hwq> queue);
+  hwctx(const device& dev, uint32_t partition_size, std::unique_ptr<hwq> queue);
   ~hwctx();
 
   slot_id

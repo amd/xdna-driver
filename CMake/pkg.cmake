@@ -2,20 +2,30 @@
 # Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 execute_process(
-  COMMAND uname -m
-  OUTPUT_VARIABLE XDNA_CPACK_ARCH
+  COMMAND awk -F= "$1==\"ID\" {print $2}" /etc/os-release
+  COMMAND tr -d "\""
+  OUTPUT_VARIABLE XDNA_CPACK_LINUX_FLAVOR
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )
+
+if ("${XDNA_CPACK_LINUX_FLAVOR}" MATCHES "^(ubuntu)")
+  execute_process(
+    COMMAND dpkg --print-architecture
+    OUTPUT_VARIABLE XDNA_CPACK_ARCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+else()
+  execute_process(
+    COMMAND uname -m
+    OUTPUT_VARIABLE XDNA_CPACK_ARCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
+
 execute_process(
   COMMAND awk -F= "$1==\"VERSION_ID\" {print $2}" /etc/os-release
   COMMAND tr -d "\""
   OUTPUT_VARIABLE XDNA_CPACK_LINUX_VERSION
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-execute_process(
-  COMMAND awk -F= "$1==\"ID\" {print $2}" /etc/os-release
-  COMMAND tr -d "\""
-  OUTPUT_VARIABLE XDNA_CPACK_LINUX_FLAVOR
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )
 execute_process(
@@ -45,7 +55,7 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/xrt/LICENSE")
 set(CPACK_PACKAGE_CONTACT "max.zhen@amd.com")
 set(CPACK_PACKAGE_NAME "xrt_plugin")
 set(CPACK_PACKAGE_FILE_NAME
-  "${CPACK_PACKAGE_NAME}.${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}_${XDNA_CPACK_LINUX_FLAVOR}${XDNA_CPACK_LINUX_VERSION}-${XDNA_CPACK_ARCH}")
+  "${CPACK_PACKAGE_NAME}.${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}_${XDNA_CPACK_LINUX_VERSION}-${XDNA_CPACK_ARCH}")
 math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
 set(XDNA_CPACK_XRT_BASE_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR})
 set(XDNA_CPACK_XRT_BASE_NEXT_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})
@@ -65,7 +75,15 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   PATTERN "*.xclbin"
   PATTERN "*.txt"
   PATTERN "*.elf"
+  PATTERN "*.bin"
+  PATTERN "*.json"
   )
+
+if(XDNA_DRV_PF_SRC_DIR)
+  set(PF_RMMOD "rmmod amdxdna_pf > /dev/null 2>&1")
+  set(PF_DBG_INSMOD "modprobe amdxdna_pf dyndbg=+pf")
+  set(PF_INSMOD "modprobe amdxdna_pf")
+endif()
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/postinst.in
@@ -78,7 +96,7 @@ configure_file(
   @ONLY
   )
 
-if ("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
+if("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
   set(CPACK_GENERATOR "DEB")
   set(CPACK_DEB_COMPONENT_INSTALL ON)
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "xrt-base (>= ${XDNA_CPACK_XRT_BASE_VERSION}), xrt-base (<< ${XDNA_CPACK_XRT_BASE_NEXT_VERSION})")

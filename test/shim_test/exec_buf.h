@@ -145,10 +145,10 @@ public:
     }
     std::cout << std::setfill(' ') << std::setw(0) << std::dec << std::endl;
 
-    std::cout << "Dumping ctrl_text arguement list:\n";
+    std::cout << "Dumping ctrl_text argument list:\n";
     for (auto& [arg_name, arg_addr] : m_ctrl_text_args)
       std::cout << "{ " << arg_name << ", 0x" << std::hex << arg_addr << std::dec << " }\n";
-    std::cout << "Dumping save_restore arguement list:\n";
+    std::cout << "Dumping save_restore argument list:\n";
     for (auto& [arg_name, arg_addr] : m_save_restore_args)
       std::cout << "{ " << arg_name << ", 0x" << std::hex << arg_addr << std::dec << " }\n";
   }

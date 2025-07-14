@@ -335,6 +335,7 @@ struct partition_info
       new_entry.instruction_mem = entry.heap_usage;
       new_entry.pasid = entry.pasid;
       new_entry.suspensions = entry.suspensions;
+      new_entry.is_suspended = entry.state == AMDXDNA_CTX_STATE_IDLE;
       output.push_back(std::move(new_entry));
     }
     return output;
@@ -609,8 +610,6 @@ struct telemetry
     }
     case key_type::rtos_telemetry:
     {
-      amdxdna_drm_query_ctx* data;
-      const uint32_t output_size = 256 * sizeof(*data);
       query::rtos_telemetry::result_type output;
 
       auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
@@ -759,11 +758,21 @@ struct firmware_version
 {
   using result_type = query::firmware_version::result_type;
 
-  static result_type
-  get(const xrt_core::device* device, key_type)
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
   {
-    amdxdna_drm_query_firmware_version fw_version{};
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
 
+  static result_type
+  get(const xrt_core::device* device, key_type,
+		  const std::any& req_type)
+  {
+    const auto fw_type = std::any_cast<query::firmware_version::firmware_type>(req_type);
+    if (fw_type != query::firmware_version::firmware_type::npu_firmware)
+       throw std::runtime_error("UC firmware query not supported in this context");
+
+    amdxdna_drm_query_firmware_version fw_version{};
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_FIRMWARE_VERSION,
       .buffer_size = sizeof(fw_version),
@@ -778,6 +787,8 @@ struct firmware_version
     output.minor = fw_version.minor;
     output.patch = fw_version.patch;
     output.build = fw_version.build;
+    output.git_hash = "N/A";
+    output.date = "N/A";
     return output;
   }
 };
@@ -938,7 +949,7 @@ struct xrt_smi_config
     const auto xrt_smi_config_type = std::any_cast<xrt_core::query::xrt_smi_config::type>(param);
     switch (xrt_smi_config_type) {
     case xrt_core::query::xrt_smi_config::type::options_config:
-      return shim_xdna::smi::get_smi_config();
+      return shim_xdna::smi::get_smi_config(device);
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
@@ -977,6 +988,58 @@ struct xrt_smi_lists
   }
 };
 
+struct runner{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::runner)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+    xrt_core::smi::smi_hardware_config smi_hrdw;
+    auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
+
+    std::string runner_name;
+    const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
+    switch (runner_type) {
+    case xrt_core::query::runner::type::throughput:
+      runner_name = "/Runner/throughput";
+      break;
+    case xrt_core::query::runner::type::latency:
+      runner_name = "/Runner/latency";
+      break;
+    case xrt_core::query::runner::type::df_bandwidth:
+      runner_name = "/Runner/df_bandwidth";
+      break;
+    case xrt_core::query::runner::type::gemm:
+      runner_name = "/Runner/gemm";
+      break;
+    }
+
+    switch (hardware_type)
+    {
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxA0:
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
+      case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
+        runner_name += "/strx";
+        break;
+      case xrt_core::smi::smi_hardware_config::hardware_type::phx:
+        runner_name += "/phx";
+        break;
+    }
+
+    return boost::str(boost::format("bins/%s/")
+      % runner_name);
+  }
+};
+
 struct xclbin_name
 {
   static std::any
@@ -1007,6 +1070,15 @@ struct xclbin_name
       break;
     case xrt_core::query::xclbin_name::type::gemm_elf:
       xclbin_name = "gemm_elf.xclbin";
+      break;
+    case xrt_core::query::xclbin_name::type::preemption_4x4:
+      xclbin_name = "preemption_4x4.xclbin";
+      break;
+    case xrt_core::query::xclbin_name::type::preemption_4x8:
+      xclbin_name = "preemption_4x8.xclbin";
+      break;
+    case xrt_core::query::xclbin_name::type::mobilenet_elf:
+      xclbin_name = "mobilenet_4col.xclbin";
       break;
     }
 
@@ -1053,6 +1125,42 @@ struct sequence_name
   }
 };
 
+struct mobilenet
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* /*device*/, key_type key, const std::any& reqType)
+  {
+    if (key != key_type::mobilenet)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    std::string bin_name;
+    const auto req_type = std::any_cast<xrt_core::query::mobilenet::type>(reqType);
+    switch (req_type) {
+    case xrt_core::query::mobilenet::type::mobilenet_ifm:
+      bin_name = "mobilenet_ifm.bin";
+      break;
+    case xrt_core::query::mobilenet::type::mobilenet_param:
+      bin_name = "mobilenet_param.bin";
+      break;
+    case xrt_core::query::mobilenet::type::buffer_sizes:
+      bin_name = "buffer_sizes.json";
+      break;
+    default:
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+    }
+    return boost::str(boost::format("bins/Mobilenet/%s") % bin_name);
+  }
+};
+
+
 struct elf_name
 {
   static std::any
@@ -1088,6 +1196,21 @@ struct elf_name
       break;
     case xrt_core::query::elf_name::type::gemm_int8:
       elf_file = "gemm_int8.elf";
+      break;
+    case xrt_core::query::elf_name::type::preemption_noop_4x4:
+      elf_file = "preemption_noop_4x4.elf";
+      break;
+    case xrt_core::query::elf_name::type::preemption_noop_4x8:
+      elf_file = "preemption_noop_4x8.elf";
+      break;
+    case xrt_core::query::elf_name::type::preemption_memtile_4x4:
+      elf_file = "preemption_memtile_4x4.elf";
+      break;
+    case xrt_core::query::elf_name::type::preemption_memtile_4x8:
+      elf_file = "preemption_memtile_4x8.elf";
+      break;
+    case xrt_core::query::elf_name::type::mobilenet:
+      elf_file = "mobilenet_4col.elf";
       break;
     }
 
@@ -1241,10 +1364,12 @@ initialize_query_table()
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
   emplace_func1_request<query::sequence_name,                  sequence_name>();
   emplace_func1_request<query::elf_name,                       elf_name>();
+  emplace_func1_request<query::mobilenet,                      mobilenet>();
+  emplace_func1_request<query::runner,                         runner>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
-  emplace_func0_request<query::firmware_version,               firmware_version>();
+  emplace_func1_request<query::firmware_version,               firmware_version>();
 }
 
 struct X { X() { initialize_query_table(); }};
@@ -1323,6 +1448,7 @@ device::
 device(const pdev& pdev, handle_type shim_handle, id_type device_id)
   : noshim<xrt_core::device_pcie>{shim_handle, device_id, !pdev.m_is_mgmt}
   , m_pdev(pdev)
+  , m_pcidev_handle(xrt_core::pci::get_dev(device_id,is_userpf()))
 {
   m_pdev.open();
   shim_debug("Created device (%s) ...", m_pdev.m_sysfs_name.c_str());
@@ -1385,6 +1511,18 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
     return std::make_unique<hwctx_kmq>(*this, get_xclbin(xclbin_uuid), qos);
 }
 
+std::unique_ptr<xrt_core::hwctx_handle>
+device::
+create_hw_context(uint32_t partition_size,
+                  const xrt::hw_context::cfg_param_type& cfg,
+                  xrt::hw_context::access_mode mode) const
+{
+  if (m_pdev.is_umq())
+    return std::make_unique<hwctx_umq>(*this, partition_size);
+  else
+    return std::make_unique<hwctx_kmq>(*this, partition_size);
+}
+
 std::unique_ptr<xrt_core::buffer_handle>
 device::
 alloc_bo(size_t size, uint64_t flags)
@@ -1400,11 +1538,13 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   auto f = xcl_bo_flags{flags};
   if (f.boflags == XCL_BO_FLAGS_NONE)
     shim_not_supported_err("unsupported buffer type: none flag");
-  if (userptr)
-    shim_not_supported_err("User ptr BO");
   auto type = bo_flags_to_type(flags, !!m_pdev.get_heap_vaddr());
   if (type == AMDXDNA_BO_INVALID)
     shim_not_supported_err("Bad BO flags");
+  if (userptr && type != AMDXDNA_BO_SHARE)
+    shim_not_supported_err("Non-AMDXDNA_BO_SHARE user ptr BO");
+  if (reinterpret_cast<uintptr_t>(userptr) % alignof(uint32_t))
+    shim_not_supported_err("User ptr must be at least uint32_t aligned");
 
   std::unique_ptr<buffer> bo;
   if (f.use == XRT_BO_USE_DEBUG)
@@ -1416,8 +1556,10 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
     bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, type);
   else if (type == AMDXDNA_BO_CMD)
     bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
-  else
+  else if (!userptr)
     bo = std::make_unique<buffer>(get_pdev(), size, type);
+  else
+    bo = std::make_unique<buffer>(get_pdev(), size, userptr);
   bo->set_flags(flags);
   return bo;
 }

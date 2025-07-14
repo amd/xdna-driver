@@ -29,7 +29,8 @@
 
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...)	dev_warn((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
-#define XDNA_ERR(xdna, fmt, args...)	dev_err((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
+#define XDNA_ERR(xdna, fmt, args...) \
+	dev_err_ratelimited((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
 #define XDNA_DBG(xdna, fmt, args...)	dev_dbg((xdna)->ddev.dev, fmt, ##args)
 
 #define XDNA_INFO_ONCE(xdna, fmt, args...)	dev_info_once((xdna)->ddev.dev, fmt, ##args)

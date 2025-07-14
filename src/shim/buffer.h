@@ -17,12 +17,15 @@ namespace shim_xdna {
 
 class mmap_ptr {
 public:
-  mmap_ptr(size_t size);
+  mmap_ptr(size_t size, size_t alignment);
   mmap_ptr(const pdev *dev, void *addr, uint64_t offset, size_t size);
   ~mmap_ptr();
 
   void *
   get() const;
+
+  std::unique_ptr<mmap_ptr>
+  alloc(const pdev *dev, uint64_t offset, size_t size);
 
 private:
   const pdev* m_dev = nullptr;
@@ -33,14 +36,15 @@ private:
 class drm_bo {
 public:
   drm_bo(const pdev& pdev, size_t size, int type);
+  drm_bo(const pdev& pdev, size_t size, void *uptr);
   drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
   ~drm_bo();
 
-  int m_type = AMDXDNA_BO_INVALID;
   size_t m_size = 0;
   bo_id m_id;
   uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
   uint64_t m_map_offset = AMDXDNA_INVALID_ADDR;
+  std::unique_ptr<mmap_ptr> m_vaddr = nullptr;
 
 private:
   const pdev& m_pdev;
@@ -50,6 +54,7 @@ class buffer : public xrt_core::buffer_handle
 {
 public:
   buffer(const pdev& dev, size_t size, int type);
+  buffer(const pdev& dev, size_t size, void *uptr);
   buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl);
   virtual ~buffer();
 
@@ -76,11 +81,16 @@ public:
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
 
 public:
+  buffer(const pdev& dev, size_t size, int type, void *uptr);
+
   void*
   vaddr() const;
 
   bo_id
   id() const;
+
+  bo_id
+  id(int index) const;
 
   uint64_t
   paddr() const;
@@ -101,6 +111,9 @@ public:
   virtual std::set<bo_id>
   get_arg_bo_ids() const;
 
+  void
+  expand(size_t size);
+
 protected:
   const pdev& m_pdev;
 
@@ -108,13 +121,19 @@ private:
   std::string
   describe() const;
 
+  virtual std::string
+  bo_sub_type_name() const;
+
   void
-  mmap_drm_bo(); // Obtain void* through mmap()
+  mmap_drm_bo(drm_bo *bo); // Obtain void* through mmap()
 
   uint64_t m_flags = 0;
   std::unique_ptr<mmap_ptr> m_range_addr = nullptr;
-  std::unique_ptr<mmap_ptr> m_addr = nullptr;
-  std::unique_ptr<drm_bo> m_bo = nullptr;
+  std::vector< std::unique_ptr<drm_bo> > m_bos;
+  void *m_uptr = nullptr;
+  int m_type = AMDXDNA_BO_INVALID;
+  size_t m_total_size = 0;
+  size_t m_cur_size = 0;
 };
 
 class cmd_buffer : public buffer
@@ -127,18 +146,32 @@ public:
 
 public:
   void
-  set_cmd_seq(uint64_t seq);
+  mark_enqueued() const;
 
+  void
+  mark_submitted(uint64_t seq) const;
+
+  // Returning final sequence number in HW queue, which can be waited on.
   uint64_t
-  get_cmd_seq() const;
+  wait_for_submitted() const;
 
   std::set<bo_id>
   get_arg_bo_ids() const override;
 
 private:
-  uint64_t m_cmd_seq = 0;
+  std::string
+  bo_sub_type_name() const override;
+
+  // Valid only when m_submitted is true.
+  mutable uint64_t m_cmd_seq = 0;
   std::map< size_t, std::set<bo_id> > m_args_map;
   mutable std::mutex m_args_map_lock;
+
+  mutable std::mutex m_submission_lock;
+  // Changed only once in the life time of cmd BO.
+  mutable bool m_submitted = false;
+  // Changed only once in the life time of cmd BO.
+  mutable std::condition_variable m_submission_cv;
 };
 
 class dbg_buffer : public buffer
@@ -154,6 +187,9 @@ public:
   unbind_hwctx() override;
 
 private:
+  std::string
+  bo_sub_type_name() const override;
+
   void
   config_debug_bo(bool is_detach);
 

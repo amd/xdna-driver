@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "header": {
+    "xclbin": "validate.xclbin"
+  },
+  "resources": {
+    "buffers": [
+      { "name": "ifm", "type": "input", "size": 1073741824 },
+      { "name": "ofm", "type": "input", "size": 1073741824 }
+    ],
+    "kernels": [
+      { "name": "k1", "instance": "DPU_ELF", "ctrlcode": "df_bw.elf" }
+    ]
+  },
+  "execution": {
+    "runs": [
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "ifm", "argidx": 3 },
+          { "name": "ofm", "argidx": 5 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      }
+    ]
+  }
+}

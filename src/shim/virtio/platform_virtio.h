@@ -79,14 +79,13 @@ private:
   submit_cmd(submit_cmd_arg& arg) const override;
 
   void
-  wait_syncobj(wait_syncobj_arg& arg) const override;
+  wait_cmd_syncobj(wait_cmd_arg& arg) const override;
 
   void
   export_bo(export_bo_arg& arg) const override;
 
   void
   import_bo(import_bo_arg& arg) const override;
-
 };
 
 }

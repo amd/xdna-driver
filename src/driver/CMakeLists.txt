@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2022-2023, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 set(XDNA_DRV amdxdna)
 
@@ -9,6 +9,16 @@ set(XDNA_DRV_PATH ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_TGT})
 set(XDNA_DRV_BLD_DIR driver/${XDNA_DRV_DIR})
 set(XDNA_DRV_BLD_SRC ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_BLD_DIR})
 set(XDNA_DRV_BLD_TGT ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_DIR})
+
+set(XDNA_DRV_PF amdxdna_pf)
+
+set(XDNA_DRV_PF_DIR amdxdna_pf)
+set(XDNA_DRV_PF_TGT ${XDNA_DRV_PF}.ko)
+set(XDNA_DRV_PF_PATH ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_PF_TGT})
+set(XDNA_DRV_PF_BLD_DIR driver/${XDNA_DRV_PF_DIR})
+set(XDNA_DRV_PF_BLD_SRC ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_PF_BLD_DIR})
+set(XDNA_DRV_PF_BLD_TGT ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_PF_DIR})
+
 # Common flags used for both building driver and configuring dkms
 if (DEFINED ENV{XDNA_DRV_BLD_FLAGS})
   set(XDNA_DRV_BLD_FLAGS_DKMS $ENV{XDNA_DRV_BLD_FLAGS})
@@ -38,7 +48,33 @@ add_custom_command(
   COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
   DEPENDS all_driver_source
   )
+
+add_custom_command(
+  OUTPUT pf_driver_source
+  COMMENT "Collect pf driver source code"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  COMMAND $(CMAKE_COMMAND) -E make_directory ${XDNA_DRV_PF_BLD_DIR}
+  COMMAND cp -rf ${XDNA_DRV_PF_SRC_DIR} ${XDNA_DRV_PF_BLD_DIR}
+  #temporary workaround to grab common code for pf driver
+  COMMAND cp ${XDNA_DRV_BLD_DIR}/amdxdna_mailbox.* ${XDNA_DRV_BLD_DIR}/amdxdna_trace.h ${XDNA_DRV_BLD_DIR}/aie4/aie4_msg_priv.h ${XDNA_DRV_PF_BLD_DIR}
+  DEPENDS all_driver_source
+)
+
+# Build amdxdna_pf driver
+add_custom_command(
+  OUTPUT ${XDNA_DRV_PF_TGT}
+  COMMENT "Build ${XDNA_DRV_PF_TGT}"
+  COMMAND $(MAKE) -f ${XDNA_DRV_PF_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_PF_BLD_TGT} ${KERNEL_VER} XDNA_BUS_TYPE=pci
+  COMMAND $(MAKE) -f ${XDNA_DRV_PF_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_PF_BLD_TGT} copy_ko
+  COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_PF_BLD_TGT}/${XDNA_DRV_PF_TGT} ${XDNA_DRV_PF_PATH}
+  DEPENDS pf_driver_source
+  )
+
+if(XDNA_DRV_PF_SRC_DIR)
+add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT} ${XDNA_DRV_PF_TGT})
+else()
 add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT})
+endif()
 
 # Tar and install driver source code for packaging
 set(XDNA_DRV_SRC_DIR
@@ -86,6 +122,21 @@ install(FILES ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ}
   COMPONENT ${XDNA_COMPONENT}
   )
 
+set(MAKE_DRV "cd driver/${XDNA_DRV_DIR}; make ${XDNA_DRV_BLD_FLAGS_DKMS} KERNEL_SRC=\${kernel_source_dir}; cd ../..")
+set(CLEAN_DRV "cd driver/${XDNA_DRV_DIR}; make clean KERNEL_SRC=\${kernel_source_dir}; cd ../..")
+set(MODULE_DRV "BUILT_MODULE_NAME[0]=${XDNA_DRV}
+BUILT_MODULE_LOCATION[0]=\"driver/${XDNA_DRV_DIR}/build/driver/amdxdna\"
+DEST_MODULE_LOCATION[0]=\"/kernel/extras\"")
+
+if(XDNA_DRV_PF_SRC_DIR)
+  set(MAKE_DRV "${MAKE_DRV}; cd driver/${XDNA_DRV_PF_DIR}; make KERNEL_SRC=\${kernel_source_dir}; cd ../..")
+  set(CLEAN_DRV "${CLEAN_DRV}; cd driver/${XDNA_DRV_PF_DIR}; make clean KERNEL_SRC=\${kernel_source_dir}; cd ../..")
+  set(MODULE_DRV "${MODULE_DRV}
+BUILT_MODULE_NAME[1]=${XDNA_DRV_PF}
+BUILT_MODULE_LOCATION[1]=\"driver/${XDNA_DRV_PF_DIR}/build/driver/amdxdna_pf\"
+DEST_MODULE_LOCATION[1]=\"/kernel/extras\"")
+endif()
+
 # Install config file and driver related scripts for packaging
 set(XDNA_DKMS_PKG_NAME xrt-${XDNA_DRV})
 configure_file(
@@ -99,7 +150,11 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dkms.conf
   )
 
 # install .ko for testing
+if(XDNA_DRV_PF_SRC_DIR)
+install(FILES ${XDNA_DRV_PATH} ${XDNA_DRV_PF_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
+else()
 install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
+endif()
 
 set(amdxdna_drv_tools
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/dkms_driver.sh

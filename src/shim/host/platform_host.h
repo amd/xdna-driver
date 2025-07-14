@@ -30,6 +30,9 @@ private:
   create_bo(create_bo_arg& arg) const override;
 
   void
+  create_uptr_bo(create_uptr_bo_arg& arg) const override;
+
+  void
   destroy_bo(destroy_bo_arg& arg) const override;
 
   void
@@ -45,13 +48,10 @@ private:
   submit_cmd(submit_cmd_arg& arg) const override;
 
   void
-  submit_dep(submit_dep_arg& arg) const override;
+  wait_cmd_ioctl(wait_cmd_arg& arg) const override;
 
   void
-  submit_sig(submit_sig_arg& arg) const override;
-
-  void
-  wait_cmd(wait_cmd_arg& arg) const override;
+  wait_cmd_syncobj(wait_cmd_arg& arg) const override;
 
   void
   get_info(amdxdna_drm_get_info& arg) const override;
@@ -62,23 +62,17 @@ private:
   void
   set_state(amdxdna_drm_set_state& arg) const override;
 
-  void
-  create_syncobj(create_destroy_syncobj_arg& arg) const override;
+  std::pair<uint64_t, uint64_t>
+  get_bo_info(uint32_t boh) const;
+
+  std::tuple<uint32_t, uint64_t, uint64_t>
+  create_drm_bo(void *uva_tbl, size_t size, int type) const;
 
   void
-  destroy_syncobj(create_destroy_syncobj_arg& arg) const override;
+  get_sysfs(get_sysfs_arg& arg) const override;
 
   void
-  export_syncobj(export_import_syncobj_arg& arg) const override;
-
-  void
-  import_syncobj(export_import_syncobj_arg& arg) const override;
-
-  void
-  signal_syncobj(signal_syncobj_arg& arg) const override;
-
-  void
-  wait_syncobj(wait_syncobj_arg& arg) const override;
+  put_sysfs(put_sysfs_arg& arg) const override;
 };
 
 }

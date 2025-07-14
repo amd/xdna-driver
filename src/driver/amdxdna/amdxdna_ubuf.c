@@ -193,6 +193,7 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 		ret = PTR_ERR(dbuf);
 		goto destroy_pages;
 	}
+	kvfree(va_ent);
 
 	return dbuf;
 

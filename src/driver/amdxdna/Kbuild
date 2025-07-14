@@ -18,6 +18,7 @@ obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
 	amdxdna_drm.o \
+	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
@@ -34,6 +35,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_error.o \
 	aie2_debugfs.o \
 	aie2_message.o \
+	aie2_logging.o \
 	aie2_event_trace.o \
 	aie2_ctx_runqueue.o \
 	aie2_pm.o \
@@ -49,7 +51,12 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	amdxdna_gem_of.o \
 	ve2_of.o \
 	ve2_regs.o \
-	amdxdna_of_drv.o
+	amdxdna_of_drv.o \
+	ve2_solver.o \
+	ve2_mgmt.o \
+	ve2_hwctx.o \
+	ve2_fw.o \
+	ve2_debug.o
 
 # Helper functions for amdxdna development, but not for upstreaming
 amdxdna-y += amdxdna_devel.o

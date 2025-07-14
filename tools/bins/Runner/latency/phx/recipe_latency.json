@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "header": {
+    "xclbin": "validate.xclbin"
+  },
+  "resources": {
+    "buffers": [
+      { "name": "instruct", "type": "input",  "size": 20 },
+      { "name": "ifm",      "type": "input",  "size": 20 },
+      { "name": "param",    "type": "input",  "size": 20 },
+      { "name": "ofm",      "type": "input",  "size": 20 },
+      { "name": "inter",    "type": "input",  "size": 20 },
+      { "name": "mc",       "type": "input",  "size": 20 }
+    ],
+    "kernels": [
+      { "name": "k1", "instance": "DPU_ELF", "ctrlcode": "nop.elf" }
+    ]
+  },
+  "execution": {
+    "runs": [
+      {
+        "name": "k1",
+        "arguments": [
+          { "name": "ifm",      "argidx": 3 },
+          { "name": "param",    "argidx": 4 },
+          { "name": "ofm",      "argidx": 5 },
+          { "name": "inter",    "argidx": 6 },
+          { "name": "mc",       "argidx": 7 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 } 
+        ]
+      }
+    ]
+  }
+}

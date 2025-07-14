@@ -3,6 +3,7 @@
 
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <chrono>
 
 #include "tcp_server.h"
 
@@ -63,7 +64,30 @@ start()
     while (loop)
     {
       int length = 0;
-      recv(clientSocket, &length, sizeof(int), 0);
+      ssize_t n = recv(clientSocket, &length, sizeof(int), MSG_DONTWAIT);
+
+      if (n == 0)
+      {
+        // connection closed, we detach.
+        shim_debug("Tcp connection lost!\n");
+        handle_detach();
+        loop = false;
+        break;
+      }
+      else if (n < 0)
+      {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+          continue;
+        }
+        else
+        {
+          shim_debug("Tcp connection exit!\n");
+          loop = false;
+          break;
+        }
+      }
 
       if (!length)
       {

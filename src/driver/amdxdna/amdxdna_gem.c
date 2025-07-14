@@ -15,6 +15,7 @@
 
 #include "amdxdna_carvedout_buf.h"
 #include "amdxdna_drm.h"
+#include "amdxdna_pm.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_ubuf.h"
 
@@ -69,8 +70,30 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 		pages = heap->base.pages;
 
 	align = 1 << max(PAGE_SHIFT, xdna->dev_info->dev_mem_buf_shift);
-	ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, mem->size,
-					 align, 0, DRM_MM_INSERT_BEST);
+	if (heap->mem.size > SZ_64M) {
+		/* TODO: remove this hack code path once FW is updated */
+		u64 threshold = SZ_64M; /* Determine small or large buffer */
+
+		XDNA_INFO(xdna, "Large heap allocation hack");
+		if (mem->size > threshold) {
+			XDNA_INFO(xdna, "Large buffer allocate start from bank 1");
+			ret = drm_mm_insert_node_in_range(&heap->mm, &abo->mm_node,
+							  mem->size, align, 0,
+							  heap->mem.dev_addr + SZ_64M /* start */,
+							  U64_MAX /* let DRM determine */,
+							  DRM_MM_INSERT_BEST);
+		} else {
+			XDNA_INFO(xdna, "Small buffer allocate in bank 0");
+			ret = drm_mm_insert_node_in_range(&heap->mm, &abo->mm_node,
+							  mem->size, align, 0,
+							  heap->mem.dev_addr /* start */,
+							  heap->mem.dev_addr + SZ_64M - 1 /* end */,
+							  DRM_MM_INSERT_BEST);
+		}
+	} else {
+		ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, mem->size,
+						 align, 0, DRM_MM_INSERT_BEST);
+	}
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		mutex_unlock(&client->mm_lock);
@@ -299,7 +322,11 @@ static void amdxdna_gem_vunmap(struct amdxdna_gem_obj *abo)
 	if (is_import_bo(abo))
 		dma_buf_vunmap_unlocked(abo->dma_buf, &map);
 	else
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 		drm_gem_vunmap_unlocked(to_gobj(abo), &map);
+#else
+		drm_gem_vunmap(to_gobj(abo), &map);
+#endif
 }
 
 static void amdxdna_gem_dev_obj_free(struct drm_gem_object *gobj)
@@ -317,7 +344,11 @@ static void amdxdna_gem_dev_obj_free(struct drm_gem_object *gobj)
 	if (abo->mem.kva) {
 		offset = abo->mem.dev_addr - client->dev_heap->mem.dev_addr;
 		iosys_map_set_vaddr(&heap_map, abo->mem.kva - offset);
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 		drm_gem_vunmap_unlocked(to_gobj(client->dev_heap), &heap_map);
+#else
+		drm_gem_vunmap(to_gobj(client->dev_heap), &heap_map);
+#endif
 	}
 
 	amdxdna_gem_heap_free(abo);
@@ -527,7 +558,9 @@ static void amdxdna_gem_obj_vunmap(struct drm_gem_object *obj, struct iosys_map 
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 	.cache_sgt_mapping = true,
+#endif
 	.attach = drm_gem_map_attach,
 	.detach = drm_gem_map_detach,
 	.map_dma_buf = drm_gem_map_dma_buf,
@@ -856,7 +889,11 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 	}
 	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 	ret = drm_gem_vmap_unlocked(to_gobj(client->dev_heap), &map);
+#else
+	ret = drm_gem_vmap(to_gobj(client->dev_heap), &map);
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "Vmap dev bo failed, ret %d", ret);
 		drm_gem_object_put(gobj);
@@ -894,7 +931,11 @@ amdxdna_drm_create_cmd_bo(struct drm_device *dev,
 	abo->type = AMDXDNA_BO_CMD;
 	abo->client = filp->driver_priv;
 
+#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
 	ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
+#else
+	ret = drm_gem_vmap(to_gobj(abo), &map);
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "Vmap cmd bo failed, ret %d", ret);
 		goto release_obj;
@@ -916,6 +957,10 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	if (args->flags)
 		return -EINVAL;
+
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		return ret;
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
@@ -947,10 +992,13 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 #endif
 		break;
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
+		goto suspend;
 	}
-	if (IS_ERR(abo))
-		return PTR_ERR(abo);
+	if (IS_ERR(abo)) {
+		ret = PTR_ERR(abo);
+		goto suspend;
+	}
 
 	/* ready to publish object to userspace */
 	ret = drm_gem_handle_create(filp, to_gobj(abo), &args->handle);
@@ -965,6 +1013,8 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 put_obj:
 	/* Dereference object reference. Handle holds it now. */
 	drm_gem_object_put(to_gobj(abo));
+suspend:
+	amdxdna_pm_suspend_put(dev->dev);
 	return ret;
 }
 
@@ -1041,10 +1091,15 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		return ret;
+
 	gobj = drm_gem_object_lookup(filp, args->handle);
 	if (!gobj) {
 		XDNA_DBG(xdna, "Lookup GEM object %d failed", args->handle);
-		return -ENOENT;
+		ret = -ENOENT;
+		goto suspend;
 	}
 
 	abo = to_xdna_obj(gobj);
@@ -1060,6 +1115,8 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 		 args->handle, args->map_offset, args->vaddr, args->xdna_addr);
 
 	drm_gem_object_put(gobj);
+suspend:
+	amdxdna_pm_suspend_put(dev->dev);
 	return ret;
 }
 
@@ -1131,10 +1188,15 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	u32 ctx_hdl;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(dev->dev);
+	if (ret)
+		return ret;
+
 	gobj = drm_gem_object_lookup(filp, args->handle);
 	if (!gobj) {
 		XDNA_ERR(xdna, "Lookup GEM object failed");
-		return -ENOENT;
+		ret = -ENOENT;
+		goto suspend;
 	}
 	abo = to_xdna_obj(gobj);
 
@@ -1189,6 +1251,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 
 put_obj:
 	drm_gem_object_put(gobj);
+suspend:
+	amdxdna_pm_suspend_put(dev->dev);
 	return ret;
 }
 

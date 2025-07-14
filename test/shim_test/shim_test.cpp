@@ -49,6 +49,8 @@ void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_with_ubuf_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_suspend_resume(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -94,9 +96,9 @@ struct test_case {
 };
 
 // For overall test result evaluation
-int test_passed = 0;
-int test_skipped = 0;
-int test_failed = 0;
+std::vector<int> test_passed;
+std::vector<int> test_skipped;
+std::vector<int> test_failed;
 
 // Device type filters
 bool
@@ -379,6 +381,42 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
+}
+
+void
+TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  uint32_t boflags = static_cast<unsigned int>(arg[0]);
+  uint32_t ext_boflags = static_cast<unsigned int>(arg[1]);
+  arg_type bos_size(arg.begin() + 2, arg.end());
+  std::vector<std::unique_ptr<bo>> bos;
+  const uint64_t fill = 0x55aa55aa55aa55aa;
+  std::vector< std::vector<char> > bufs;
+  static long page_size = 0;
+
+  if (!page_size)
+    page_size = sysconf(_SC_PAGESIZE);
+
+  for (auto& size : bos_size) {
+    if (size < 8)
+      throw std::runtime_error("User ptr BO size too small");
+    bufs.emplace_back(size + page_size); // allow page size align
+
+    auto addr = reinterpret_cast<uintptr_t>(bufs.back().data());
+    auto p = reinterpret_cast<uint64_t*>((addr + page_size - 1) & ~(page_size - 1));
+    *p = fill;
+    bos.push_back(std::make_unique<bo>(dev, p, static_cast<size_t>(size), boflags, ext_boflags));
+  }
+
+  for (auto& bo : bos) {
+    auto p = reinterpret_cast<uint64_t*>(bo->map());
+    if (*p != fill) {
+      printf("User ptr BO content is %lx@%p\n", *p, p);
+      throw std::runtime_error("User ptr BO content mis-match");
+    }
+    get_and_show_bo_properties(dev, bo->get());
+  }
 }
 
 void
@@ -734,9 +772,23 @@ std::vector<test_case> test_list {
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
-  // Disable for now. Require changes in XRT for argument patching.
-  //test_case{ "multi-command preempt ELF io test real kernel good run", {},
-  //  TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 1 }
+  test_case{ "multi-command preempt ELF io test real kernel good run", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 8 }
+  },
+  test_case{ "create and free user pointer bo", {},
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+  },
+  test_case{ "io test with user pointer BOs", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_with_ubuf_bo, {}
+  },
+  test_case{ "Real kernel delay run for auto-suspend/resume", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
+  },
+  test_case{ "io test real kernel bad run for health report", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
+  },
+  //test_case{ "io test no-op kernel good run", {},
+  //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
 };
 
@@ -788,15 +840,15 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
   if (skipped)
     result = "skipped";
   else
-    result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed";
-  std::cout << "====== " << id << ": " << test.name << " " << result << "  =====" << std::endl;
+    result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed ";
+  std::cout << "====== " << id << ": " << test.name << " " << result << " =====" << std::endl;
 
   if (skipped)
-    test_skipped++;
+    test_skipped.push_back(id);
   else if (failed)
-    test_failed++;
+    test_failed.push_back(id);
   else
-    test_passed++;
+    test_passed.push_back(id);
 }
 
 void
@@ -813,7 +865,13 @@ run_all_test(std::vector<int>& tests)
 
   if (total_dev == 0) {
     std::cout << "No testable devices on this machine. Failing all tests.\n";
-    test_failed = test_list.size();
+    if (tests.empty()) {
+      int id = 0;
+      for (const auto& t : test_list)
+        test_failed.push_back(id++);
+    } else {
+      test_failed = tests;
+    }
     return;
   }
 
@@ -899,10 +957,10 @@ main(int argc, char **argv)
       if (xclbin) {
         xclbin_path = optarg;
         std::cout << "Using xclbin file: " << xclbin_path << std::endl;
-	      break;
+        break;
       } else {
         std::cout << "Failed to open xclbin file: " << optarg << std::endl;
-	      return 1;
+        return 1;
       }
     }
     case 'k': {
@@ -938,18 +996,20 @@ main(int argc, char **argv)
 
   run_all_test(tests);
 
-  if (test_skipped)
-    std::cout << test_skipped << "\ttest(s) skipped" << std::endl;
+  std::cout << test_skipped.size() << "\ttest(s) skipped" << std::endl;
 
-  if (test_passed + test_failed == 0)
+  if (test_passed.size() + test_failed.size() == 0)
     return 0;
 
-  std::cout << test_passed + test_failed << "\ttest(s) executed" << std::endl;
-  if (test_failed == 0) {
-    std::cout << "ALL " << test_passed << " executed test(s) PASSED!" << std::endl;
+  std::cout << test_passed.size() + test_failed.size() << "\ttest(s) executed" << std::endl;
+  if (test_failed.size() == 0) {
+    std::cout << "ALL " << test_passed.size() << " executed test(s) PASSED!" << std::endl;
     return 0;
   }
-  std::cout << test_failed << "\ttest(s) \x1b[5m\x1b[31mFAILED\x1b[0m!" << std::endl;
+  std::cout << test_failed.size() << "\ttest(s) \x1b[5m\x1b[31mFAILED\x1b[0m: ";
+  for (int id : test_failed)
+    std::cout << id << " ";
+  std::cout << std::endl;
   return 1;
 }
 

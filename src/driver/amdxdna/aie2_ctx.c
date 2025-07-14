@@ -9,6 +9,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
+#include "amdxdna_pm.h"
 #include "amdxdna_trace.h"
 #include "aie2_pci.h"
 #include "aie2_msg_priv.h"
@@ -50,38 +51,49 @@ aie2_fence_state2str(struct dma_fence *fence)
 void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
-	struct app_health_report_v1 *report;
+	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct app_health_report *report;
+	size_t size = sizeof(*report);
 	struct amdxdna_dev_hdl *ndev;
-	const size_t size = 0x1000;
 	u64 comp = ctx->completed;
 	u64 sub = ctx->submitted;
-	dma_addr_t dma_addr;
 	void *buff;
 	int ret;
 
 	ndev = xdna->dev_handle;
 	XDNA_ERR(xdna, "Dumping ctx %s, hwctx %d, sub=%lld, comp=%lld",
 		 ctx->name, ctx->priv->id, sub, comp);
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, size, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
+	buff = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
 	if (!buff) {
 		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
 		return;
 	}
 
-	drm_clflush_virt_range(buff, size); /* device can access */
+	aie2_mgmt_buff_clflush(&mgmt_hdl);
 	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_get_app_health(ndev, ctx->priv->id, dma_addr, size);
+	ret = aie2_get_app_health(ndev, &mgmt_hdl, ctx->priv->id, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (!ret) {
 		report = buff;
-		print_hex_dump_debug("raw_report: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
-				     sizeof(*report), false);
+		print_hex_dump_debug("raw_report: ", DUMP_PREFIX_OFFSET, 16, 4, buff, size, false);
 		XDNA_ERR(xdna, "Firmware timeout state capture:");
 		XDNA_ERR(xdna, "\tDPU PC:    0x%x", report->dpu_pc);
 		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
+
+		/* Update version when we support non zero version number */
+		if (report->txn_op_id != APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE)
+			ctx->health_data.txn_op_idx = report->txn_op_id;
+		else
+			ctx->health_data.txn_op_idx = UINT_MAX;
+
+		if (report->dpu_pc != APP_HEALTH_REPORT_V1_DPU_PC_NONE)
+			ctx->health_data.ctx_pc = report->dpu_pc;
+		else
+			ctx->health_data.ctx_pc = 0;
+
+		ctx->health_reported = false;
 	}
-	dma_free_noncoherent(xdna->ddev.dev, size, buff, dma_addr, DMA_FROM_DEVICE);
+	aie2_mgmt_buff_free(&mgmt_hdl);
 
 	mutex_lock(&ctx->priv->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {
@@ -168,6 +180,28 @@ unlock_and_err:
 }
 
 static void
+aie2_ctx_cmd_health_data(struct amdxdna_ctx *ctx, struct amdxdna_gem_obj *cmd_abo)
+{
+	void *cmd_data;
+	u32 data_total;
+
+	if (ctx->health_reported) {
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
+		return;
+	}
+
+	cmd_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
+	if (unlikely(data_total < sizeof(ctx->health_data)))
+		XDNA_WARN(ctx->client->xdna, "Large health data, truncated");
+
+	data_total = min(data_total, sizeof(ctx->health_data));
+	memcpy(cmd_data, &ctx->health_data, data_total);
+	ctx->health_reported = true;
+
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+}
+
+static void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx *ctx = job->ctx;
@@ -185,7 +219,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	dma_fence_put(fence);
 	mmput_async(job->mm);
 	aie2_job_put(job);
-	aie2_pm_suspend(ctx->client->xdna->dev_handle);
+	amdxdna_pm_suspend_put(ctx->client->xdna->ddev.dev);
 }
 
 static int
@@ -200,8 +234,7 @@ aie2_sched_resp_handler(void *handle, void __iomem *data, size_t size)
 	cmd_abo = job->cmd_bo;
 
 	if (unlikely(!data)) {
-		XDNA_WARN(job->ctx->client->xdna, "No response. cmd state %d",
-			  amdxdna_cmd_get_state(cmd_abo));
+		aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
 		goto out;
 	}
 
@@ -261,7 +294,13 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 
 	amdxdna_stats_account(job->ctx->client);
 	cmd_abo = job->cmd_bo;
-	if (unlikely(!data) || unlikely(size != sizeof(u32) * 3)) {
+	if (unlikely(!data)) {
+		aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (unlikely(size != sizeof(u32) * 3)) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
@@ -281,12 +320,17 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	XDNA_DBG(xdna, "Failed cmd idx %d, status 0x%x",
 		 fail_cmd_idx, fail_cmd_status);
 
+	/*
+	 * The firmware may error out even before it starts processing subcmds in the cmdlist.
+	 * In such scenarios, the subcmd status returns with an uninitialized value of 0 i.e
+	 * AIE2_STATUS_SUCCESS.
+	 */
 	if (fail_cmd_status == AIE2_STATUS_SUCCESS) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		ret = -EINVAL;
 		goto out;
 	}
-	amdxdna_cmd_set_state(cmd_abo, fail_cmd_status);
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ERROR);
 
 	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
 		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
@@ -306,8 +350,10 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_ctx *ctx = job->ctx;
+	enum cmd_chain_class class;
 	struct dma_fence *fence;
 	int ret = 0;
+	u32 op;
 
 	trace_xdna_job(sched_job, ctx->name, "job run", job->seq, job->opcode);
 
@@ -331,12 +377,19 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 		goto out;
 	}
 
-	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN)
-		ret = aie2_cmdlist_multi_execbuf(ctx, job, aie2_sched_cmdlist_resp_handler);
+	/*
+	 * Transaction binaries are only supported with RAI 1.5 release onwards. Below
+	 * implementation returns -EOPNOTSUPP error code for any older firmware versions.
+	 */
+	class = aie2_is_supported_msg(ctx->client->xdna->dev_handle, MSG_OP_CHAIN_EXEC_NPU) ?
+		CMD_CHAIN_CLASS_PREEMPT : CMD_CHAIN_CLASS_NON_PREEMPT;
+	op = amdxdna_cmd_get_op(cmd_abo);
+	if (op == ERT_CMD_CHAIN)
+		ret = aie2_cmdlist_multi_execbuf(ctx, job, class, aie2_sched_cmdlist_resp_handler);
 	else if (force_cmdlist)
-		ret = aie2_cmdlist_single_execbuf(ctx, job, aie2_sched_cmdlist_resp_handler);
+		ret = aie2_cmdlist_single_execbuf(ctx, job, class, aie2_sched_cmdlist_resp_handler);
 	else
-		ret = aie2_execbuf(ctx, job, aie2_sched_resp_handler);
+		ret = aie2_execbuf(ctx, job, class, aie2_sched_resp_handler);
 
 out:
 	if (ret) {
@@ -447,7 +500,13 @@ static void aie2_calc_ctx_dpm(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *
 	u32 level;
 
 	if (!is_valid_qos_dpm_params(qos)) {
-		ctx->priv->req_dpm_level = ndev->max_dpm_level;
+		XDNA_DBG(ndev->xdna, "Invalid QoS gops %d fps %d latency %d",
+			 qos->gops, qos->fps, qos->latency);
+
+		if (qos->priority == AMDXDNA_QOS_LOW_PRIORITY)
+			ctx->priv->req_dpm_level =  0;
+		else
+			ctx->priv->req_dpm_level = ndev->max_dpm_level;
 		return;
 	}
 
@@ -569,6 +628,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 
 	aie2_calc_ctx_dpm(ndev, ctx);
 	aie2_pm_add_dpm_level(ndev, ctx->priv->req_dpm_level);
+	priv->active = true; /* Init context is counted as an activity */
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
@@ -853,7 +913,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	unsigned long timeout = 0;
 	int ret, i;
 
-	ret = aie2_pm_resume(xdna->dev_handle);
+	ret = amdxdna_pm_resume_get(xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Resume failed, ret %d", ret);
 		return ret;
@@ -960,7 +1020,7 @@ up_job_sem:
 	up(&ctx->priv->job_sem);
 	job->job_done = true;
 suspend:
-	aie2_pm_suspend(xdna->dev_handle);
+	amdxdna_pm_suspend_put(xdna->ddev.dev);
 	return ret;
 }
 
@@ -1003,12 +1063,12 @@ int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	struct drm_gem_object *gobj = to_gobj(abo);
-	long ret;
 
-	ret = dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
-				    true, MAX_SCHEDULE_TIMEOUT);
-	if (!ret || ret == -ERESTARTSYS)
-		XDNA_ERR(xdna, "Failed to wait for bo, ret %ld", ret);
+	/*
+	 * Must wait forever, otherwise, memory was unmapped then FW might crash.
+	 * In case FW not response, TDR will terminal context execution and unref all BOs.
+	 */
+	dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
+			      false /* non-interruptible */, MAX_SCHEDULE_TIMEOUT);
 }

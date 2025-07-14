@@ -58,17 +58,24 @@ const struct dpm_clk_freq npu1_dpm_clk_table[] = {
 	{ 0 }
 };
 
+const struct msg_op_ver npu1_msg_op_tbl[] = {
+	{ 8, MSG_OP_CHAIN_EXEC_NPU },
+	{ 0 },
+};
+
 const struct amdxdna_dev_priv npu1_dev_priv = {
 	.fw_path        = "amdnpu/1502_00/npu.dev.sbin",
 	.protocol_major = 5,
 	.protocol_minor = 7,
 	.rt_config	= npu1_default_rt_cfg,
 	.dpm_clk_tbl	= npu1_dpm_clk_table,
+	.optional_msg	= npu1_msg_op_tbl,
 	.col_opc	= 2048,
 	.mbox_dev_addr  = NPU1_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
 	.hwctx_limit	= 6,
 	.ctx_limit	= 6,
+	.temporal_only	= 0,
 	.sram_dev_addr  = NPU1_SRAM_BAR_BASE,
 	.sram_offs      = {
 		DEFINE_BAR_OFFSET(MBOX_CHANN_OFF, NPU1_SRAM, MPNPU_SRAM_X2I_MAILBOX_0),

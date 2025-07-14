@@ -77,6 +77,7 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 	.sram_dev_addr  = NPU4_SRAM_BAR_BASE,							\
 	.hwctx_limit	= 16,									\
 	.ctx_limit	= 32,									\
+	.temporal_only	= 1,									\
 	.sram_offs      = {									\
 		DEFINE_BAR_OFFSET(MBOX_CHANN_OFF, NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_0),		\
 		DEFINE_BAR_OFFSET(FW_ALIVE_OFF,   NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_15),	\

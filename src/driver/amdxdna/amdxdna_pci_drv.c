@@ -4,7 +4,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/pm_runtime.h>
 #include <linux/version.h>
 #if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 #include <drm/drm_managed.h>
@@ -12,14 +11,11 @@
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sysfs.h"
+#include "amdxdna_pm.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #include "amdxdna_carvedout_buf.h"
 #endif
-
-int autosuspend_ms = 5000;
-module_param(autosuspend_ms, int, 0644);
-MODULE_PARM_DESC(autosuspend_ms, "runtime suspend delay in miliseconds. < 0: prevent it");
 
 /*
  *  There are platforms which share the same PCI device ID
@@ -107,7 +103,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
 		return -EOPNOTSUPP;
 
-	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", 0);
+	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", WQ_MEM_RECLAIM);
 	if (!xdna->notifier_wq)
 		return -ENOMEM;
 
@@ -123,16 +119,11 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_dev_fini;
 	}
 
-	pm_runtime_set_autosuspend_delay(dev, autosuspend_ms);
-	pm_runtime_use_autosuspend(dev);
-	pm_runtime_allow(dev);
-
 	amdxdna_tdr_start(&xdna->tdr);
 
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
-		pm_runtime_forbid(dev);
 		goto failed_tdr_fini;
 	}
 
@@ -143,8 +134,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 #ifdef AMDXDNA_DEVEL
 	ida_init(&xdna->pdi_ida);
 #endif
-	pm_runtime_mark_last_busy(dev);
-	pm_runtime_put_autosuspend(dev);
+	amdxdna_pm_init(dev);
 	return 0;
 
 failed_tdr_fini:
@@ -167,8 +157,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	amdxdna_tdr_stop(&xdna->tdr);
 	amdxdna_sysfs_fini(xdna);
 
-	pm_runtime_get_noresume(dev);
-	pm_runtime_forbid(dev);
+	amdxdna_pm_fini(dev);
 
 #ifdef AMDXDNA_DEVEL
 	amdxdna_gem_dump_mm(xdna);
@@ -195,56 +184,6 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	ida_destroy(&xdna->pdi_ida);
 #endif
 }
-
-static int amdxdna_pmops_suspend(struct device *dev)
-{
-	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-
-	if (xdna->dev_info->ops->suspend)
-		xdna->dev_info->ops->suspend(xdna);
-
-	return 0;
-}
-
-static int amdxdna_pmops_resume(struct device *dev)
-{
-	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	int ret = 0;
-
-	if (xdna->dev_info->ops->resume)
-		ret = xdna->dev_info->ops->resume(xdna);
-
-	XDNA_DBG(xdna, "Resume done ret: %d", ret);
-	return ret;
-}
-
-static int amdxdna_rpmops_suspend(struct device *dev)
-{
-	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-
-	if (xdna->dev_info->ops->suspend)
-		xdna->dev_info->ops->suspend(xdna);
-
-	XDNA_DBG(xdna, "Runtime suspend done");
-	return 0;
-}
-
-static int amdxdna_rpmops_resume(struct device *dev)
-{
-	struct amdxdna_dev *xdna = pci_get_drvdata(to_pci_dev(dev));
-	int ret = 0;
-
-	if (xdna->dev_info->ops->resume)
-		ret = xdna->dev_info->ops->resume(xdna);
-
-	XDNA_DBG(xdna, "Runtime resume done ret: %d", ret);
-	return ret;
-}
-
-static const struct dev_pm_ops amdxdna_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(amdxdna_pmops_suspend, amdxdna_pmops_resume)
-	SET_RUNTIME_PM_OPS(amdxdna_rpmops_suspend, amdxdna_rpmops_resume, NULL)
-};
 
 static struct pci_driver amdxdna_pci_driver = {
 	.name = KBUILD_MODNAME,

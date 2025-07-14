@@ -24,6 +24,7 @@ const struct rt_cfg_ver npu4_rt_cfg_tbl[] = {
 };
 
 const struct msg_op_ver npu4_msg_op_tbl[] = {
+	{ 15, MSG_OP_CHAIN_EXEC_NPU },
 	{ 15, MSG_OP_UPDATE_PROPERTY },
 	{ 0 },
 };

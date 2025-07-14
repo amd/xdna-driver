@@ -1,0 +1,9 @@
+{
+  "buffer_sizes": {
+    "ifm_size": 201736,
+    "param_size": 7233612,
+    "inter_size": 7192640,
+    "mc_size": 16,
+    "ofm_size": 8224
+  }
+}

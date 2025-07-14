@@ -25,6 +25,8 @@ enum aie2_msg_opcode {
 	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
 	MSG_OP_CONFIG_DEBUG_BO		   = 0x14,
 	MSG_OP_EXEC_DPU_PREEMPT		   = 0x15,
+	MSG_OP_EXEC_NPU			   = 0x17,
+	MSG_OP_CHAIN_EXEC_NPU		   = 0x18,
 #ifdef AMDXDNA_DEVEL
 	MSG_OP_REGISTER_PDI                = 0x1,
 	MSG_OP_UNREGISTER_PDI              = 0xA,
@@ -45,6 +47,7 @@ enum aie2_msg_opcode {
 	MSG_OP_UPDATE_PROPERTY             = 0x113,
 	MSG_OP_GET_APP_HEALTH              = 0x114,
 	MSG_OP_ADD_HOST_BUFFER             = 0x115,
+	MSG_OP_CONFIG_LOGGING_DRAM_BUF	   = 0x116,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
@@ -404,8 +407,9 @@ struct async_event_msg_resp {
 } __packed;
 
 /* Start of event tracing data struct */
-#define EVENT_TRACE_BUF_METADATA_SIZE			0x40
 #define MAX_ONE_TIME_LOG_INFO_LEN			16
+#define DEFAULT_EVENT_BUF_SIZE				0x2000
+#define DEFAULT_EVENT_CATEGORY				0xFFFFFFFF
 
 enum event_trace_destination {
 	EVENT_TRACE_DEST_DEBUG_BUS,
@@ -448,6 +452,76 @@ struct stop_event_trace_resp {
 #define slot_has_space(slot, offset, payload_size)		\
 	(MAX_CHAIN_CMDBUF_SIZE >= (offset) + (payload_size) +	\
 	 sizeof(typeof(slot)))
+
+enum cmd_chain_class {
+	CMD_CHAIN_CLASS_NON_PREEMPT,
+	CMD_CHAIN_CLASS_PREEMPT,
+	CMD_CHAIN_CLASS_MAX,
+};
+
+#define DRAM_LOG_BUF_METADATA_SIZE			0x40
+#define DEFAULT_DRAM_LOG_BUF_SIZE			0x2000
+#define POLL_INTERVAL_MS				200
+#define LOG_FORMAT_FULL					0xc0
+#define LOG_MSG_ALIGN					8
+#define MSI_ADDR_MASK					0x00FFFFFF
+#define make_64bit(lo, hi)	((u64)(lo) | ((u64)(hi) << 32))
+
+enum runtime_configuration_type_ {
+	RUNTIME_CONFIGURATION_CLOCK_GATING = 1,
+	RUNTIME_CONFIGURATION_H_CLOCK_GATING = 2,
+	RUNTIME_CONFIGURATION_PWR_GATING = 3,
+	RUNTIME_CONFIGURATION_L1IMUIPU_PWR_GATING = 4,
+	RUNTIME_CONFIGURATION_PDI_LOADING_MODE = 5,
+	RUNTIME_CONFIGURATION_LOGGING_LEVEL = 6,
+	RUNTIME_CONFIGURATION_LOGGING_FORMAT = 7,
+	RUNTIME_CONFIGURATION_LOGGING_DESTINATION = 8,
+	RUNTIME_CONFIGURATION_DEBUG_BUF = 10,
+	RUNTIME_CONFIGURATION_SUPPORTED_NUM_OF_CONTEXTS = 11,
+	RUNTIME_CONFIGURATION_PREEMPTION_CONTROL = 12,
+	RUNTIME_CONFIGURATION_FORCE_PREEMPTION = 13,
+	RUNTIME_CONFIGURATION_FRAME_BOUNDARY_PREEMPTION_CONTROL = 14,
+	RUNTIME_CONFIGURATION_TURBO_MODE_CONTROL = 15,
+	MAX_RUNTIME_CONFIGURATION,
+};
+
+enum {
+	RUNTIME_CONFIGURATION_LOGGING_LEVEL_NONE = 0,
+	RUNTIME_CONFIGURATION_LOGGING_LEVEL_ERROR,
+	RUNTIME_CONFIGURATION_LOGGING_LEVEL_WARN,
+	RUNTIME_CONFIGURATION_LOGGING_LEVEL_INFO,
+	RUNTIME_CONFIGURATION_LOGGING_LEVEL_DEBUG,
+	MAX_RUNTIME_CONFIGURATION_LOGGING_LEVEL
+};
+
+enum {
+	RUNTIME_CONFIGURATION_LOGGING_FORMAT_FULL = 0,
+	RUNTIME_CONFIGURATION_LOGGING_FORMAT_CONCISE,
+	MAX_RUNTIME_CONFIGURATION_LOGGING_FORMAT
+};
+
+enum {
+	RUNTIME_CONFIGURATION_LOGGING_DEST_UTL = 0,
+	RUNTIME_CONFIGURATION_LOGGING_DEST_FIXED,
+	RUNTIME_CONFIGURATION_LOGGING_DEST_DEBUG_REGS,
+	RUNTIME_CONFIGURATION_LOGGING_DEST_STB,
+	RUNTIME_CONFIGURATION_LOGGING_DEST_DRAM,
+	MAX_RUNTIME_CONFIGURATION_LOGGING_DEST
+};
+
+struct config_logging_dram_buf_req {
+	dma_addr_t dram_buffer_address;
+	u32 dram_buffer_size;
+	u32 reserved[5];
+} __packed;
+
+struct config_logging_dram_buf_resp {
+	enum aie2_msg_status status;
+	u32 msi_idx;
+	u32 msi_address;
+	u32 reserved[5];
+} __packed;
+
 struct cmd_chain_slot_execbuf_cf {
 	u32 cu_idx;
 	u32 arg_cnt;
@@ -465,6 +539,51 @@ struct cmd_chain_slot_dpu {
 };
 
 struct cmd_chain_req {
+	u64 buf_addr;
+	u32 buf_size;
+	u32 count;
+} __packed;
+
+enum exec_npu_type {
+	EXEC_NPU_TYPE_NON_ELF		= 0x1,
+	EXEC_NPU_TYPE_PARTIAL_ELF	= 0x2,
+	EXEC_NPU_TYPE_PREEMPT		= 0x3,
+	EXEC_NPU_TYPE_ELF		= 0x4,
+	EXEC_NPU_TYPE_MAX
+};
+
+struct exec_npu_req {
+	u32	flags;
+	enum	exec_npu_type type;
+	u64	inst_buf_addr;
+	u64	save_buf_addr;
+	u64	restore_buf_addr;
+	u32	inst_size;
+	u32	save_size;
+	u32	restore_size;
+	u32	inst_prop_cnt;
+	u32	cu_idx;
+	u32	payload[27];
+} __packed;
+
+struct cmd_chain_slot_npu {
+	enum exec_npu_type type;
+	u64 inst_buf_addr;
+	u64 save_buf_addr;
+	u64 restore_buf_addr;
+	u32 inst_size;
+	u32 save_size;
+	u32 restore_size;
+	u32 inst_prop_cnt;
+	u32 cu_idx;
+	u32 arg_cnt;
+#define AIE2_EXEC_BUFFER_KERNEL_OP_TXN	3
+	u32 args[] __counted_by(arg_cnt);
+} __packed;
+
+struct cmd_chain_npu_req {
+	u32 flags;
+	u32 reserved;
 	u64 buf_addr;
 	u32 buf_size;
 	u32 count;
@@ -572,14 +691,32 @@ struct update_property_resp {
 	enum aie2_msg_status status;
 } __packed;
 
-struct app_health_report_hdr {
-	u32 version;
-	u32 size;
+struct fatal_error_info {
+	u32 fatal_type;         /* Fatal Error Type */
+	u32 exception_type;     /* Only valid if fatal_type is a specific value */
+	u32 exception_argument; /* meaning of the word varies based on exception type */
+	u32 exception_pc;       /* Program Counter at the time of the exception */
+	u32 app_module;         /* Error Module name */
+	u32 task_index;         /* Index of the task in which the error occurred */
+	u32 reserved[128];      /* for future use */
 };
 
-struct app_health_report_v1 {
-	/* header.version must be 1 */
-	struct app_health_report_hdr	header;
+struct col_status_info {
+	u32 num_dma_ch;
+	u32 num_locks;
+	u32 num_event_status_regs;
+	u32 num_xaie_cols;
+	u32 start_col_index;
+	u32 num_cols_valid;
+	u32 col_status_size;
+};
+
+struct app_health_report {
+	u16				major;
+	u16				minor;
+	u32				size;
+
+	/* minor = 1 fileds */
 	u32				context_id;
 	/*
 	 * PC of the most recently started DPU opcode, as reported by the ERT
@@ -602,6 +739,17 @@ struct app_health_report_v1 {
 	 */
 #define APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE	(~0U)
 	u32				txn_op_id;
+
+	/* minor = 2 fields */
+	/* TODO: Should driver parse below fileds? How? */
+	struct fatal_error_info		fatal_error_info;
+	struct col_status_info		col_status_info;
+	/*
+	 * TODO: There is a complex array binding with hardware details, like
+	 * columns and rows. Let's think about if driver really needs to parsing
+	 * so many hardware details. Just reserve some space for now.
+	 */
+	u32				resv[1521];
 };
 
 struct get_app_health_req {

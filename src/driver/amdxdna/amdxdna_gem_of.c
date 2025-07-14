@@ -4,10 +4,17 @@
  */
 
 #include <linux/dma-mapping.h>
+#include <linux/version.h>
 
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_drm.h"
 #include "amdxdna_gem_of.h"
+
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
+MODULE_IMPORT_NS(DMA_BUF);
+#else
+MODULE_IMPORT_NS("DMA_BUF");
+#endif
 
 struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client, u32 bo_hdl, u8 bo_type)
 {
@@ -169,7 +176,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_fil
 	abo = to_xdna_obj(gobj);
 
 	/* For now we only support CMA memory*/
-	bo_phyaddr = (uint64_t)abo->base.dma_addr;
+	bo_phyaddr = (u64)abo->base.dma_addr;
 	bo_phyaddr += args->offset;
 
 	if (args->direction == SYNC_DIRECT_TO_DEVICE) {

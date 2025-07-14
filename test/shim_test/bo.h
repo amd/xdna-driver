@@ -26,9 +26,14 @@ get_bo_flags(uint32_t flags, uint32_t ext_flags)
 class bo {
 public:
   bo(device* dev, size_t size, uint32_t boflags, uint32_t ext_boflags)
+    : bo(dev, nullptr, size, boflags, ext_boflags)
+  {
+  }
+
+  bo(device* dev, void *uptr, size_t size, uint32_t boflags, uint32_t ext_boflags)
     : m_dev(dev)
   {
-    m_handle = m_dev->alloc_bo(nullptr, size, get_bo_flags(boflags, ext_boflags));
+    m_handle = m_dev->alloc_bo(uptr, size, get_bo_flags(boflags, ext_boflags));
     map_and_chk();
   }
 
@@ -42,6 +47,11 @@ public:
   {
   }
 
+  bo(device* dev, void *ubuf, size_t size)
+    : bo(dev, ubuf, size, XCL_BO_FLAGS_HOST_ONLY, 0)
+  {
+  }
+
   bo(device* dev, pid_t pid, shared_handle::export_handle ehdl)
     : m_dev(dev)
   {
@@ -49,8 +59,8 @@ public:
     map_and_chk();
   }
 
-  bo(bo&& rbo) :
-    m_dev(rbo.m_dev)
+  bo(bo&& rbo)
+    : m_dev(rbo.m_dev)
     , m_handle(rbo.m_handle.release())
     , m_bop(rbo.m_bop)
     , m_no_unmap(rbo.m_no_unmap)

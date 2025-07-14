@@ -45,8 +45,8 @@ static void qos_to_rq_prio(struct amdxdna_ctx *ctx)
 		*rq_prio = CTX_RQ_LOW;
 		break;
 	default:
-		*qos = AMDXDNA_QOS_LOW_PRIORITY;
-		*rq_prio = CTX_RQ_LOW;
+		*qos = AMDXDNA_QOS_NORMAL_PRIORITY;
+		*rq_prio = CTX_RQ_NORMAL;
 	};
 }
 
@@ -127,6 +127,8 @@ part_ctx_dispatch(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 
 	ctx->priv->status = CTX_STATE_DISPATCHED;
 	ctx->priv->part = part;
+	ctx->priv->active = true; /* Dispatch context is counted as an activity */
+	ctx->priv->idle_cnt = 0;
 	XDNA_DBG(ctx->client->xdna, "%s dispatched, priority queue %d", ctx->name, prio_q);
 }
 
@@ -157,6 +159,8 @@ static bool part_handle_idle_ctx(struct aie2_partition *part, bool force)
 				 ctx->name, ctx->priv->idle_cnt);
 			ctx->priv->force_yield = true;
 			ctx->priv->status = CTX_STATE_DISCONNECTING;
+			ctx->priv->active = false;
+			ctx->priv->idle_cnt = 0;
 			queue_work(part->rq->work_q, &ctx->yield_work);
 			found = true;
 		}
@@ -225,9 +229,6 @@ rq_part_non_rt_select(struct aie2_ctx_rq *rq)
 {
 	struct aie2_partition *min = NULL;
 	struct aie2_partition *part;
-	int ratio, min_ratio;
-	int min_non_rt_ctx;
-	int non_rt_ctx;
 	int i;
 
 	for (i = 0; i < rq->num_parts; i++) {
@@ -235,15 +236,21 @@ rq_part_non_rt_select(struct aie2_ctx_rq *rq)
 		if (part->max_hwctx == part->max_rt_ctx)
 			continue;
 
-		non_rt_ctx = part->ctx_cnt - part->rt_ctx_cnt;
-		ratio = non_rt_ctx / part_max_non_rt_hwctx(part);
-
-		if (!min || ratio < min_ratio ||
-		    (ratio == min_ratio && non_rt_ctx < min_non_rt_ctx)) {
+		if (!min) {
 			min = part;
-			min_ratio = ratio;
-			min_non_rt_ctx = non_rt_ctx;
+			continue;
 		}
+
+		if (part->ctx_cnt > min->ctx_cnt)
+			continue;
+
+		if (part->ctx_cnt < min->ctx_cnt) {
+			min = part;
+			continue;
+		}
+
+		if (min->max_rt_ctx > part->max_rt_ctx)
+			min = part;
 	}
 
 	return min;
@@ -393,6 +400,7 @@ ctx_dead:
 
 static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 {
+	struct aie2_partition *part;
 	struct amdxdna_dev *xdna;
 	struct aie2_ctx_rq *rq;
 
@@ -407,17 +415,6 @@ static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 
 	list_move_tail(&ctx->entry, &rq->disconn_list);
 	ctx->priv->status = CTX_STATE_DISCONNECTED;
-}
-
-static void part_ctx_stop(struct amdxdna_ctx *ctx)
-{
-	struct aie2_partition *part;
-	struct amdxdna_dev *xdna;
-	struct aie2_ctx_rq *rq;
-
-	xdna = ctx->client->xdna;
-	rq = &xdna->dev_handle->ctx_rq;
-	part_ctx_stop_wait(ctx, true);
 
 	part = ctx->priv->part;
 	if (part) {
@@ -580,7 +577,7 @@ static void rq_yield_work(struct work_struct *work)
 	}
 
 	ctx->priv->should_block = false;
-	part_ctx_stop(ctx);
+	part_ctx_stop_wait(ctx, true);
 	if (rq->paused)
 		queue_work(rq->work_q, &rq->parts_work);
 	else
@@ -711,17 +708,14 @@ static bool should_update_parts(struct aie2_ctx_rq *rq)
 	if (rq->paused && !part_ctx)
 		return true;
 
-	/*
-	 * The counter of partition cols is zero.
-	 * Trimming partition is needed.
-	 */
-	if (!rq->col_arr[part_col])
-		return true;
+	rq->max_cols = xdna->dev_handle->total_col;
+	while (rq->max_cols) {
+		if (rq->ctx_width_resv[rq->max_cols])
+			break;
 
-	/*
-	 * When max cols not equals to partition cols,
-	 * it needs to update partition cols to new max cols.
-	 */
+		rq->max_cols--;
+	}
+
 	if (rq->max_cols != part_col)
 		return true;
 
@@ -760,7 +754,6 @@ static void rq_parts_work(struct work_struct *work)
 	struct amdxdna_ctx *ctx;
 	struct amdxdna_ctx *tmp;
 	struct aie2_ctx_rq *rq;
-	u32 part_col;
 	int i;
 
 	rq = container_of(work, struct aie2_ctx_rq, parts_work);
@@ -775,18 +768,6 @@ static void rq_parts_work(struct work_struct *work)
 	if (handle_busy_ctxs(rq)) {
 		XDNA_DBG(xdna, "Wait for disconneting active contexts");
 		goto out;
-	}
-
-	part_col = get_part_cols(&rq->parts[0]);
-	if (rq->max_cols == part_col) {
-		/* Find out the next maximum column in records */
-		for (i = rq->max_cols; i > 0; i--) {
-			if (!rq->col_arr[i])
-				continue;
-
-			rq->max_cols = i;
-			break;
-		}
 	}
 
 	for (i = 0; i < rq->num_parts; i++)
@@ -850,17 +831,58 @@ bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq)
 {
 	struct aie2_partition *part;
 	struct amdxdna_dev *xdna;
+	struct amdxdna_ctx *ctx;
+	int average, remainder;
+	int ctx_total = 0;
 	bool found = false;
 	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(ctx, &rq->disconn_list, entry) {
+		if (!ctx->priv->active)
+			continue;
+
+		ctx->priv->idle_cnt++;
+		if (ctx->priv->idle_cnt == RQ_CTX_IDLE_COUNT) {
+			ctx->priv->active = false;
+			ctx->priv->idle_cnt = 0;
+		}
+	}
+
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
+		ctx_total += part->ctx_cnt;
 		if (!part_handle_idle_ctx(part, false))
 			continue;
 
 		found = true;
+	}
+
+	average = ctx_total / rq->num_parts;
+	remainder = ctx_total - (average * rq->num_parts);
+	for (i = 0; i < rq->num_parts; i++) {
+		int num_move;
+
+		part = &rq->parts[i];
+		if (remainder)
+			num_move = part->ctx_cnt - (average + 1);
+		else
+			num_move = part->ctx_cnt - average;
+		if (num_move <= 0)
+			continue;
+
+		list_for_each_entry(ctx, &part->conn_list, entry) {
+			ctx->priv->force_yield = true;
+			ctx->priv->status = CTX_STATE_DISCONNECTING;
+			ctx->priv->active = false;
+			ctx->priv->idle_cnt = 0;
+			queue_work(part->rq->work_q, &ctx->yield_work);
+
+			num_move--;
+			if (!num_move)
+				break;
+		}
 	}
 	mutex_unlock(&xdna->dev_lock);
 
@@ -900,6 +922,9 @@ void aie2_rq_restart_all(struct aie2_ctx_rq *rq)
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
+	if (rq->paused)
+		queue_work(rq->work_q, &rq->parts_work);
+
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
 		queue_work(rq->work_q, &part->sched_work);
@@ -1012,6 +1037,66 @@ void aie2_rq_submit_exit(struct amdxdna_ctx *ctx)
 	up_read(&ctx->priv->io_sem);
 }
 
+static bool
+aie2_enable_special_case(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+
+	ndev = ctx_rq_to_ndev(rq);
+	xdna = ndev->xdna;
+	/*
+	 * Enable special case support when,
+	 * 1. The first column of the device is non-zero.
+	 * 2. The columns of context and device are the same.
+	 *
+	 * After spacial case support is enabled,
+	 * 1. Other context doesn't use all columns will fail to create.
+	 */
+	if (!xdna->dev_info->first_col) {
+		XDNA_DBG(xdna, "First column of the device is zero");
+		return false;
+	}
+
+	if (ctx->priv->orig_num_col != ndev->total_col) {
+		XDNA_DBG(xdna, "Context not the same as device total");
+		return false;
+	}
+
+	if (rq->ctx_cnt) {
+		XDNA_DBG(xdna, "Other context is running");
+		return false;
+	}
+
+	WARN_ON(!rq->start_col);
+	rq->start_col_orig = rq->start_col;
+	rq->start_col = 0;
+	rq->total_cols = ndev->total_col - rq->start_col;
+	XDNA_DBG(xdna, "Special case support enabled");
+
+	return true;
+}
+
+static void
+aie2_disable_special_case(struct aie2_ctx_rq *rq)
+{
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+
+	ndev = ctx_rq_to_ndev(rq);
+	xdna = ndev->xdna;
+	if (!rq->start_col_orig)
+		return;
+
+	if (rq->ctx_cnt)
+		return;
+
+	rq->start_col = rq->start_col_orig;
+	rq->total_cols = ndev->total_col - rq->start_col;
+	rq->start_col_orig = 0;
+	XDNA_DBG(xdna, "Special case support disabled");
+}
+
 int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
@@ -1041,11 +1126,19 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	}
 
 	num_col = ctx->priv->orig_num_col;
-	if (num_col > rq->total_cols) {
-		XDNA_ERR(xdna, "Require %d columns exceed %d",
-			 num_col, rq->total_cols);
-		ret = -ENOSPC;
+	if (rq->start_col_orig && num_col != rq->total_cols) {
+		XDNA_ERR(xdna, "Special context is running");
+		ret = -EBUSY;
 		goto error;
+	}
+
+	if (num_col > rq->total_cols) {
+		if (!aie2_enable_special_case(rq, ctx)) {
+			XDNA_ERR(xdna, "Require %d columns exceed %d",
+				 num_col, rq->total_cols);
+			ret = -ENOSPC;
+			goto error;
+		}
 	}
 
 	INIT_WORK(&ctx->dispatch_work, rq_dispatch_work);
@@ -1055,19 +1148,19 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	ctx->priv->should_block = false;
 	qos_to_rq_prio(ctx);
 
-	rq->col_arr[num_col]++;
+	rq->ctx_width_resv[num_col]++;
 	list_add_tail(&ctx->entry, &rq->disconn_list);
 	rq->ctx_cnt++;
 
+	/* Expand partition is needed*/
 	if (num_col > rq->max_cols) {
-		rq->max_cols = num_col;
+		XDNA_DBG(xdna, "%s request %d colomns, rq max_cols %d",
+			 ctx->name, num_col, rq->max_cols);
 		wait_parts = true;
 	}
 
-	if (!rq->ctx_cnt && num_col < rq->max_cols)
-		wait_parts = true;
-
 	if (ctx_is_rt(ctx)) {
+		XDNA_DBG(xdna, "%s is realtime", ctx->name);
 		rq->rt_ctx_cnt++;
 		wait_parts = true;
 	}
@@ -1094,13 +1187,12 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna;
 	bool wait_parts = false;
 	u32 num_col;
-	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
 	down_write(&ctx->priv->io_sem);
 	ctx->priv->should_block = false;
-	part_ctx_stop(ctx);
+	part_ctx_stop_wait(ctx, true);
 	up_write(&ctx->priv->io_sem);
 
 	list_del(&ctx->entry);
@@ -1111,16 +1203,12 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	}
 
 	num_col = ctx->priv->orig_num_col;
-	rq->col_arr[num_col]--;
-	if (!rq->col_arr[rq->max_cols]) {
-		for (i = rq->max_cols; i > 0; i--) {
-			if (!rq->col_arr[i])
-				continue;
+	rq->ctx_width_resv[num_col]--;
+	/* Shrink partition is needed */
+	if (!rq->ctx_width_resv[rq->max_cols])
+		wait_parts = true;
 
-			wait_parts = true;
-			break;
-		}
-	}
+	aie2_disable_special_case(rq);
 
 	if (wait_parts) {
 		list_add_tail(&ctx->parts_work_entry, &rq->parts_work_waitq);
@@ -1175,13 +1263,25 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 	if (!rq->parts)
 		return -ENOMEM;
 
-	rq->col_arr = kcalloc(ndev->total_col, sizeof(*rq->col_arr), GFP_KERNEL);
-	if (!rq->col_arr)
+	rq->ctx_width_resv = kcalloc(ndev->total_col + 1, sizeof(*rq->ctx_width_resv), GFP_KERNEL);
+	if (!rq->ctx_width_resv)
 		goto free_parts;
+
+	/*
+	 * For temporal shared only device, hardcoding the all columns counter
+	 * to be 1.
+	 * 1. There will be only 1 partition to use all available columns.
+	 * 2. All contexts will expand and there will be no shrinking.
+	 */
+	if (ndev->priv->temporal_only) {
+		XDNA_DBG(xdna, "Temporal share only device");
+		rq->ctx_width_resv[rq->total_cols] = 1;
+		rq->max_cols = rq->total_cols;
+	}
 
 	rq->work_q = alloc_ordered_workqueue("ctx_runqueue", 0);
 	if (!rq->work_q)
-		goto free_col_arr;
+		goto free_ctx_width_resv;
 
 	INIT_WORK(&rq->parts_work, rq_parts_work);
 	INIT_LIST_HEAD(&rq->parts_work_waitq);
@@ -1191,8 +1291,8 @@ int aie2_rq_init(struct aie2_ctx_rq *rq)
 
 	return 0;
 
-free_col_arr:
-	kfree(rq->col_arr);
+free_ctx_width_resv:
+	kfree(rq->ctx_width_resv);
 free_parts:
 	kfree(rq->parts);
 	return -ENOMEM;
@@ -1201,7 +1301,7 @@ free_parts:
 void aie2_rq_fini(struct aie2_ctx_rq *rq)
 {
 	destroy_workqueue(rq->work_q);
-	kfree(rq->col_arr);
+	kfree(rq->ctx_width_resv);
 	kfree(rq->parts);
 }
 

@@ -486,7 +486,11 @@ static irqreturn_t mailbox_irq_handler(int irq, void *p)
 #ifdef AMDXDNA_DEVEL
 static void mailbox_timer(struct timer_list *t)
 {
+#if defined from_timer
 	struct mailbox_channel *mb_chann = from_timer(mb_chann, t, timer);
+#elif defined timer_container_of
+	struct mailbox_channel *mb_chann = timer_container_of(mb_chann, t, timer);
+#endif
 	u32 tail;
 
 	/* The timer mimic interrupt. It is good to reuse irq routine */
@@ -1006,11 +1010,19 @@ struct mailbox *xdna_mailbox_create(struct device *dev,
 	spin_lock_init(&mb->mbox_lock);
 	INIT_LIST_HEAD(&mb->chann_list);
 	INIT_LIST_HEAD(&mb->poll_chann_list);
+	init_waitqueue_head(&mb->poll_wait);
+	mb->sent_msg = false;
+
+#if defined(CONFIG_DEBUG_FS)
+	INIT_LIST_HEAD(&mb->res_records);
+#endif /* CONFIG_DEBUG_FS */
 
 	/*
 	 * The polld kthread will only wakeup and handle those
-	 * MB_CHANNEL_USER_POLL channels. If no thing to do, polld should
+	 * MB_CHANNEL_USER_POLL channels. If nothing to do, polld should
 	 * just sleep. It is a per device kthread.
+	 *
+	 * Note: make sure polld is the last thing to initialize.
 	 */
 	mb->polld = kthread_run(mailbox_polld, mb, MAILBOX_NAME);
 	if (IS_ERR(mb->polld)) {
@@ -1018,12 +1030,6 @@ struct mailbox *xdna_mailbox_create(struct device *dev,
 		kfree(mb);
 		return NULL;
 	}
-	init_waitqueue_head(&mb->poll_wait);
-	mb->sent_msg = false;
-
-#if defined(CONFIG_DEBUG_FS)
-	INIT_LIST_HEAD(&mb->res_records);
-#endif /* CONFIG_DEBUG_FS */
 
 	return mb;
 }

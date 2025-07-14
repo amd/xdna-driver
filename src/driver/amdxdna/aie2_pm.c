@@ -3,7 +3,6 @@
  * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
  */
 
-#include <linux/pm_runtime.h>
 #include <drm/drm_managed.h>
 #include "aie2_pci.h"
 
@@ -124,21 +123,6 @@ void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add
 	mutex_unlock(&ndev->aie2_lock);
 }
 
-int aie2_pm_resume(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-
-	return pm_runtime_resume_and_get(xdna->ddev.dev);
-}
-
-void aie2_pm_suspend(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-
-	pm_runtime_mark_last_busy(xdna->ddev.dev);
-	pm_runtime_put_autosuspend(xdna->ddev.dev);
-}
-
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -170,7 +154,7 @@ int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
-	ndev->dft_dpm_level = ndev->max_dpm_level;
+	ndev->dft_dpm_level = 0; // Start with lowest DPM level
 	ndev->sys_eff_factor = sys_eff_factor;
 	if (!ndev->sys_eff_factor)
 		ndev->sys_eff_factor = DEFAULT_SYS_EFF_FACTOR;
