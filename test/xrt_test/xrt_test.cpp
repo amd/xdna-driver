@@ -967,12 +967,12 @@ run_test(int id, const test_case& test, int device_index)
     test.func(device_index, test.arg);
   }
   catch (const std::exception& ex) {
-    std::cerr << ex.what() << std::endl;
+    std::cerr << test.description << "exception: " << ex.what() << std::endl;
     failed = true;
   }
 
   std::string result;
-  result = failed ? "\x1b[5m\x1b[31mFAILED\x1b[0m" : "passed";
+  result = failed ? "FAILED" : "PASSED";
   std::cout << "====== " << id << ": " << test.description << " " << result << "  =====" << std::endl;
 
   if (failed)
