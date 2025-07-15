@@ -360,14 +360,14 @@ hcall(void *req, void *out_buf, size_t out_size) const
 {
   // We have one response buffer, so can't really share across multiple requests.
   std::lock_guard<std::mutex> lg(m_lock);
+  auto rsp_hdr = reinterpret_cast<amdxdna_ccmd_rsp*>(m_resp_buf->get());
+  rsp_hdr->ret = 0;
 
   auto sz = out_size;
   if (sz > resp_buffer_size)
     sz = resp_buffer_size;
 
   hcall(req);
-
-  auto rsp_hdr = reinterpret_cast<amdxdna_ccmd_rsp*>(m_resp_buf->get());
   if (rsp_hdr->ret) {
     auto r = reinterpret_cast<vdrm_ccmd_req*>(req);
     shim_err(rsp_hdr->ret, "%s HCALL received bad reponse", hcall_cmd2name(r->cmd).c_str());
@@ -479,6 +479,36 @@ get_info(amdxdna_drm_get_info& arg) const
     shim_not_supported_err(__func__);
   auto metadata = reinterpret_cast<amdxdna_drm_query_aie_metadata*>(arg.buffer);
   metadata->core.row_count = 4;
+}
+
+void
+platform_drv_virtio::
+get_info_array(amdxdna_drm_get_info_array& arg) const
+{
+}
+
+void
+platform_drv_virtio::
+get_sysfs(get_sysfs_arg& arg) const
+{
+  const int name_size = 256;
+  const int response_size = 4096;
+  if (arg.sysfs_node.size() >= name_size)
+    shim_err(EINVAL, "sysfs node name is too long: %s", arg.sysfs_node.c_str());
+  char req_data[sizeof(amdxdna_ccmd_read_sysfs_req) + name_size] = {};
+  auto req = reinterpret_cast<amdxdna_ccmd_read_sysfs_req*>(req_data);
+  char rsp_data[response_size] = {};
+  auto rsp = reinterpret_cast<amdxdna_ccmd_read_sysfs_rsp*>(rsp_data);
+
+  req->hdr.cmd = AMDXDNA_CCMD_READ_SYSFS;
+  req->hdr.len = sizeof(req_data);
+  strcpy(req->node_name, arg.sysfs_node.c_str());
+  hcall(req, rsp, response_size);
+
+  if (rsp->val_len > arg.data.size())
+    shim_err(EINVAL, "sysfs content is too long: %dB", rsp->val_len);
+  memcpy(arg.data.data(), rsp->val, rsp->val_len);
+  arg.real_size = rsp->val_len;
 }
 
 void
