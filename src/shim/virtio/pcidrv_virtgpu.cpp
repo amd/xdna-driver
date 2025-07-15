@@ -20,10 +20,12 @@ int
 get_dev_type(std::shared_ptr<const shim_xdna::platform_drv_virtio>& drv,
   const std::string& sysfs)
 {
-  // TODO: properly retrieve device type from host
+  std::vector<char> val(50);
+  shim_xdna::get_sysfs_arg arg = { "device_type", val, };
   drv->drv_open(sysfs);
+  drv->drv_ioctl(shim_xdna::drv_ioctl_cmd::get_sysfs, &arg);
   drv->drv_close();
-  return AMDXDNA_DEV_TYPE_KMQ;
+  return static_cast<int>(std::stoi(arg.data.data()));
 }
 
 }
