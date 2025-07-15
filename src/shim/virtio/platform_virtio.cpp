@@ -487,13 +487,13 @@ config_ctx_cu_config(config_ctx_cu_config_arg& arg) const
 {
   std::vector<char> cu_conf_param_buf(sizeof(amdxdna_ccmd_config_ctx_req) + arg.conf_buf.size());
   auto cu_conf_req = reinterpret_cast<amdxdna_ccmd_config_ctx_req *>(cu_conf_param_buf.data());
-  auto cu_conf_param = reinterpret_cast<amdxdna_ctx_param_config_cu *>(cu_conf_req->param_val);
+  auto cu_conf_param = reinterpret_cast<amdxdna_hwctx_param_config_cu *>(cu_conf_req->param_val);
 
   cu_conf_req->hdr.cmd = AMDXDNA_CCMD_CONFIG_CTX;
   cu_conf_req->hdr.len = cu_conf_param_buf.size();
   cu_conf_req->hdr.rsp_off = 0;
   cu_conf_req->handle = arg.ctx_handle;
-  cu_conf_req->param_type = DRM_AMDXDNA_CTX_CONFIG_CU;
+  cu_conf_req->param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
   cu_conf_req->param_val_size = cu_conf_req->hdr.len - sizeof(amdxdna_ccmd_config_ctx_req);
   std::memcpy(cu_conf_param_buf.data() + sizeof(amdxdna_ccmd_config_ctx_req),
     arg.conf_buf.data(), arg.conf_buf.size());

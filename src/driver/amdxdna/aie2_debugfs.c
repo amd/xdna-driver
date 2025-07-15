@@ -663,9 +663,9 @@ static int aie2_ioctl_id_show(struct seq_file *m, void *unused)
 #define drm_ioctl_id_seq_print(_name) \
 seq_printf(m, "%ld:%s\n", _name, #_name)
 
-	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_CTX);
-	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_DESTROY_CTX);
-	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CONFIG_CTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_HWCTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_BO);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_GET_BO_INFO);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SYNC_BO);
