@@ -13,6 +13,7 @@
 
 static const struct of_device_id amdxdna_of_table[] = {
 	{ .compatible = "amdxdna,ve2", .data = &dev_ve2_info },
+	{ .compatible = "xlnx,aiarm", .data = &dev_ve2_info },
 	{ /* end of table */ }
 };
 

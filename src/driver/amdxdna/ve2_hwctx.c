@@ -11,6 +11,16 @@
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
 
+int enable_polling;
+module_param(enable_polling, int, 0644);
+MODULE_PARM_DESC(enable_polling, "Enable polling mode. Polling mode disabled by default.");
+
+int verbosity;
+module_param(verbosity, int, 0644);
+MODULE_PARM_DESC(verbosity, "[Debug] Enabling verbosity. default is 0");
+
+#define CTX_TIMER	(nsecs_to_jiffies(1))
+
 /*
  * struct ve2_dpu_data - interpretation of data payload for ERT_START_DPU
  *
@@ -183,6 +193,93 @@ static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *q
 	}
 }
 
+void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
+{
+	if (slot_id >= HOST_QUEUE_ENTRY) {
+		XDNA_ERR(xdna, "Invalid slot_id: %llu\n", slot_id);
+		return;
+	}
+
+	// Print physical addresses
+	XDNA_DBG(xdna, "hsa dma_addr data 0x%llx\n", queue->hq_header.data_address);
+
+	// Print host_queue_packet
+	struct host_queue_packet *pkt = &queue->hq_entry[slot_id];
+
+	XDNA_DBG(xdna, "Packet Dump for slot_id %llu:\n", slot_id);
+	XDNA_DBG(xdna, "xrt_header.common_header.opcode: %u\n",
+		 pkt->xrt_header.common_header.opcode);
+	XDNA_DBG(xdna, "xrt_header.common_header.count: %u\n",
+		 pkt->xrt_header.common_header.count);
+	XDNA_DBG(xdna, "xrt_header.common_header.distribute: %u\n",
+		 pkt->xrt_header.common_header.distribute);
+	XDNA_DBG(xdna, "xrt_header.common_header.indirect: %u\n",
+		 pkt->xrt_header.common_header.indirect);
+	XDNA_DBG(xdna, "xrt_header.completion_signal: %llx\n",
+		 pkt->xrt_header.completion_signal);
+	for (int i = 0; i < 12; i++)
+		XDNA_DBG(xdna, "\tdata[%d]: %x\n", i, (u32)pkt->data[i]);
+
+	// Print physical address of host_queue_packet
+	u64 pkt_paddr = queue->hq_header.data_address + ((u64)pkt - (u64)queue->hq_entry);
+
+	XDNA_DBG(xdna, "Physical address of host_queue_packet: 0x%llx\n", pkt_paddr);
+
+	// Print host_queue_indirect_hdr
+	struct host_queue_indirect_hdr *indirect_hdr = &queue->hq_indirect_hdr[slot_id];
+	int total_entry = indirect_hdr->header.count / sizeof(struct host_indirect_packet_entry);
+
+	XDNA_DBG(xdna, "indirect_hdr.header.opcode: %u\n", indirect_hdr->header.opcode);
+	XDNA_DBG(xdna, "indirect_hdr.header.count: %u\n", indirect_hdr->header.count);
+	XDNA_DBG(xdna, "indirect_hdr.header.distribute: %u\n", indirect_hdr->header.distribute);
+	XDNA_DBG(xdna, "indirect_hdr.header.indirect: %u\n", indirect_hdr->header.indirect);
+	XDNA_DBG(xdna, "Total packet Entry %d\n", total_entry);
+	for (int i = 0; i < 2 * total_entry; i += 2) {
+		XDNA_DBG(xdna, "\tindirect_hdr.data[%d]: %x, indirect_hdr.data[%d]: %x\n",
+			 i, (u32)indirect_hdr->data[i], i + 1,
+			 (u32)(indirect_hdr->data[i + 1] & 0x1FFFFFF));
+		XDNA_DBG(xdna, "Retrieved dpu_uc_index: %u\n",
+			 (indirect_hdr->data[i + 1] >> 25) & 0x7F);
+	}
+
+	// Print physical address of host_queue_indirect_hdr
+	u64 indirect_hdr_paddr = queue->hq_header.data_address +
+			((u64)indirect_hdr - (u64)queue->hq_entry);
+	XDNA_DBG(xdna, "Physical addr of host_queue_indirect_hdr: 0x%llx\n", indirect_hdr_paddr);
+
+	// Print host_queue_indirect_pkt
+	for (int i = 0; i < total_entry; i++) {
+		struct host_queue_indirect_pkt *indirect_pkt = &queue->hq_indirect_pkt[slot_id][i];
+
+		// Print physical address of host_queue_indirect_pkt
+		u64 indirect_pkt_paddr = queue->hq_header.data_address +
+			((u64)indirect_pkt - (u64)queue->hq_entry);
+
+		XDNA_DBG(xdna, "\nPhysical address of indirect_pkt[%d]: 0x%llx\n", i,
+			 indirect_pkt_paddr);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.opcode: %u\n",
+			 i, indirect_pkt->header.opcode);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.count: %u\n",
+			 i, indirect_pkt->header.count);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.distribute: %u\n",
+			 i, indirect_pkt->header.distribute);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.indirect: %u\n",
+			 i, indirect_pkt->header.indirect);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.cu_index: %u\n",
+			 i, indirect_pkt->payload.cu_index);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.dpu_control_code_host_addr_low: %x\n",
+			 i, (u32)indirect_pkt->payload.dpu_control_code_host_addr_low);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.dpu_control_code_host_addr_high: %x\n",
+			 i, (u32)indirect_pkt->payload.dpu_control_code_host_addr_high);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.args_len: %u\n",
+			 i, indirect_pkt->payload.args_len);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.args_host_addr_low: %x\n",
+			 i, (u32)indirect_pkt->payload.args_host_addr_low);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.args_host_addr_high: %x\n",
+			 i, (u32)indirect_pkt->payload.args_host_addr_high);
+	}
+}
+
 /*
  * Create hsa queue in kernel and initialize queue slots.
  */
@@ -320,6 +417,10 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 		cebp->payload.args_host_addr_low = 0;
 		cebp->payload.args_host_addr_high = 0;
 	}
+
+	/* Enable for debug purpose */
+	if (verbosity >= VERBOSITY_LEVEL_DBG)
+		packet_dump(xdna, queue, slot_id);
 
 	hsa_queue_pkt_set_valid(pkt);
 
@@ -571,6 +672,39 @@ out:
 	return ret > 0 ? 0 : ret;
 }
 
+void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
+{
+	u32 col;
+
+	for (col = 0; col < max_cols; col++) {
+		kfree(xdna_hdl->fw_slots[col]);
+		xdna_hdl->fw_slots[col] = NULL;
+	}
+}
+
+static void timeout_cb(struct timer_list *t)
+{
+	struct amdxdna_ctx_priv *priv = from_timer(priv, t, event_timer);
+
+	wake_up_interruptible_all(&priv->waitq);
+	mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
+}
+
+static void ve2_clear_firmware_status(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+{
+	struct amdxdna_ctx_priv *priv = hwctx->priv;
+	struct ve2_firmware_status *fs;
+
+	for (u32 col = priv->start_col; col < priv->start_col + priv->num_col; col++) {
+		fs = xdna->dev_handle->fw_slots[col];
+		fs->state = 0;
+		fs->abs_page_index = 0;
+		fs->ppc = 0;
+		fs->idle_status = 0;
+		fs->misc_status = 0;
+	}
+}
+
 int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
@@ -593,6 +727,15 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	ret = ve2_mgmt_create_partition(xdna, hwctx);
 	if (ret)
 		goto free_hsa_queue;
+
+	if (enable_polling) {
+		XDNA_INFO(xdna, "Running in timer mode");
+		timer_setup(&priv->event_timer, timeout_cb, 0);
+		mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
+	}
+
+	if (verbosity >= VERBOSITY_LEVEL_DBG)
+		ve2_clear_firmware_status(xdna, hwctx);
 
 	return 0;
 
@@ -619,7 +762,11 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 		ve2_hwctx_job_release(hwctx, job);
 	}
 
-	ve2_get_firmware_status(hwctx);
+	if (enable_polling)
+		del_timer_sync(&hwctx->priv->event_timer);
+
+	if (verbosity >= VERBOSITY_LEVEL_DBG)
+		ve2_get_firmware_status(hwctx);
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
@@ -678,13 +825,28 @@ static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u64 paddr, u8 buf
 	return ret;
 }
 
-int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size)
+static int ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeout)
+{
+	struct device *aie_dev = hwctx->priv->aie_part;
+	struct handshake hs = { 0 };
+	int ret;
+
+	hs.opcode_timeout_config = op_timeout;
+	ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(hwctx->start_col) +
+						 offsetof(struct handshake, opcode_timeout_config),
+						 sizeof(u32), (void *)&hs.opcode_timeout_config);
+	return ret;
+}
+
+int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_gem_obj *abo, *mdata_abo;
 	struct fw_buffer_metadata *mdata;
+	u64 mdata_hdl = val;
 	u32 prev_buf_sz;
+	u32 op_timeout;
 	u64 buf_paddr;
 	u32 buf_sz;
 	int ret;
@@ -748,6 +910,16 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			 hwctx->name, ret);
 
 		amdxdna_gem_put_obj(mdata_abo);
+		break;
+	case DRM_AMDXDNA_CTX_CONFIG_OPCODE_TIMEOUT:
+		if (copy_from_user(&op_timeout, (u32 __user *)val, sizeof(u32)))
+			return -EFAULT;
+		ret = ve2_hwctx_config_op_timeout(hwctx, op_timeout);
+		if (ret < 0)
+			XDNA_ERR(xdna, "hwctx config req %d failed, err %d", type, ret);
+		else
+			XDNA_DBG(xdna, "Configured opcode timeout %u on hwctx %s col %u",
+				 op_timeout, hwctx->name, hwctx->start_col);
 		break;
 	default:
 		XDNA_DBG(xdna, "%s Not supported type %d", __func__, type);

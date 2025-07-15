@@ -213,6 +213,7 @@ struct amdxdna_drm_config_ctx {
 #define DRM_AMDXDNA_CTX_CONFIG_CU	0
 #define DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF	1
 #define DRM_AMDXDNA_CTX_REMOVE_DBG_BUF	2
+#define DRM_AMDXDNA_CTX_CONFIG_OPCODE_TIMEOUT	3
 	__u32 param_type;
 	__u64 param_val;
 	__u32 param_val_size;

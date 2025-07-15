@@ -115,6 +115,14 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
     m_aie_array = std::make_shared<xdna_aie_array>(&m_device, this);
 
   m_hwq->bind_hwctx(this);
+
+  u32 op_timeout = xrt_core::config::get_cert_timeout();
+  amdxdna_drm_config_ctx adbo;
+  adbo.handle = arg.handle;
+  adbo.param_val = (__u64)(uintptr_t)&op_timeout;
+  adbo.param_type = DRM_AMDXDNA_CTX_CONFIG_OPCODE_TIMEOUT;
+
+  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_CTX, &adbo);
 }
 
 xdna_hwctx::

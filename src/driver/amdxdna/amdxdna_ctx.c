@@ -236,6 +236,7 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 		break;
 	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
 	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_CTX_CONFIG_OPCODE_TIMEOUT:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;
