@@ -19,6 +19,7 @@ m_aie_attached(false), m_dbg_umq(dev), m_def_size(16), m_pdev(dev.get_pdev())
   m_data_bo = std::make_unique<buffer>(m_pdev, def_buf_size, AMDXDNA_BO_SHARE);
   m_data_buf = m_data_bo->vaddr();
   m_data_paddr = m_data_bo->paddr();
+  m_srv_stop = 0;
 }
 
 tcp_server::
@@ -29,8 +30,25 @@ tcp_server::
 
 void
 tcp_server::
+sigusr1_handler(int sig)
+{
+  if (sig == SIGUSR1)
+  {
+    shim_debug("SIGUSR1 received!");
+    m_srv_stop = 1;
+  }
+}
+
+void
+tcp_server::
 start()
 {
+  struct sigaction sa;
+  sa.sa_handler = tcp_server::sigusr1_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGUSR1, &sa, nullptr);
+
   int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
   
   // specifying the address
@@ -54,7 +72,7 @@ start()
     int clientSocket = accept(serverSocket, nullptr, nullptr);
     if (clientSocket < 0)
     { 
-      if (errno == EINTR)
+      if (errno == EINTR && m_srv_stop == 1)
       { 
         shim_debug("Tcp thread exit!\n");
         break;
@@ -82,7 +100,7 @@ start()
           std::this_thread::sleep_for(std::chrono::seconds(1));
           continue;
         }
-        else
+        else if (errno == EINTR && m_srv_stop == 1)
         {
           shim_debug("Tcp connection exit!\n");
           loop = false;

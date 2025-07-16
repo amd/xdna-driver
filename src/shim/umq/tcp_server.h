@@ -7,6 +7,7 @@
 #include "dbg_hwq.h"
 #include "../buffer.h"
 #include "../hwctx.h"
+#include <csignal>
 
 namespace shim_xdna {
 
@@ -28,6 +29,7 @@ private:
   bool m_aie_attached;
   hwctx* m_hwctx;
   const pdev& m_pdev;
+  static inline volatile std::sig_atomic_t m_srv_stop;
 
   std::unique_ptr<std::vector<uint32_t>>
   handle_read_mem(uint32_t addr, uint32_t length);
@@ -35,6 +37,7 @@ private:
   void buffer_extend(size_t new_size);
   uint32_t handle_attach(uint32_t);
   void handle_detach();
+  static void sigusr1_handler(int sig);
 };
 
 }

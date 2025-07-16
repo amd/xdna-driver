@@ -100,7 +100,7 @@ fini_tcp_server()
   if (m_thread_.joinable())
   {
     shim_debug("Kill TCP server...");
-    pthread_kill(m_thread_.native_handle(), SIGINT);
+    pthread_kill(m_thread_.native_handle(), SIGUSR1);
     m_thread_.join();
   }
 }
