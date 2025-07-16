@@ -838,7 +838,7 @@ static int ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeout
 	return ret;
 }
 
-static struct fw_buffer_metadata* get_fwbuf_metadata_hdl(struct amdxdna_client *client,
+static struct fw_buffer_metadata *get_fwbuf_metadata_hdl(struct amdxdna_client *client,
 							 u64 mdata_hdl)
 {
 	struct amdxdna_gem_obj *mdata_abo;
