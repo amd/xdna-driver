@@ -4,8 +4,14 @@
 #ifndef HWCTX_UMQ_H
 #define HWCTX_UMQ_H
 
+#include <thread>
+#include <signal.h>
+#include <functional>
+#include <map>
 #include "../hwctx.h"
 #include "../buffer.h"
+#include "tcp_server.h"
+#include "drm_local/amdxdna_accel.h"
 
 namespace shim_xdna {
 
@@ -16,32 +22,21 @@ public:
   ~hwctx_umq();
 
 private:
+  const pdev& m_pdev;
   std::unique_ptr<buffer> m_log_bo;
   uint32_t m_col_cnt = 0;
 
-  enum umq_log_flag {
-    UMQ_DEBUG_BUFFER = 0,
-    UMQ_TRACE_BUFFER,
-    UMQ_DBG_QUEUE,
-    UMQ_LOG_BUFFER
-  };
-
-  struct umq_log_metadata {
-    uint32_t magic_no;
-    uint8_t major;
-    uint8_t minor;
-    uint8_t umq_log_flag;
-    uint8_t num_ucs;       // how many valid ucs, up to 8 for now
-    uint64_t uc_paddr[8];  // device accessible address array for each valid uc
-    uint32_t uc_size[8];    // bo size for each valid uc
-  };
-
-  struct umq_log_metadata m_metadata;
   void *m_log_buf = nullptr;
+
+  std::unique_ptr<tcp_server> m_tcp_server;
+  std::thread m_thread_;
+
+  void init_tcp_server(const device& dev);
+  void fini_tcp_server();
 
   void init_log_buf();
   void fini_log_buf();
-  void set_metadata(int num_cols, size_t size, uint64_t bo_paddr, enum umq_log_flag flag);
+  void set_metadata(std::map<uint32_t, size_t>& buf_size, int num_cols, size_t size);
 };
 
 }
