@@ -838,35 +838,44 @@ static int ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeout
 	return ret;
 }
 
+static struct fw_buffer_metadata* get_fwbuf_metadata_hdl(struct amdxdna_client *client,
+							 u64 mdata_hdl)
+{
+	struct amdxdna_gem_obj *mdata_abo;
+	struct fw_buffer_metadata *mdata;
+
+	mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
+	if (!mdata_abo || !mdata_abo->mem.kva)
+		return NULL;
+
+	mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+	if (!mdata)
+		amdxdna_gem_put_obj(mdata_abo);
+
+	return mdata;
+}
+
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_gem_obj *abo, *mdata_abo;
 	struct fw_buffer_metadata *mdata;
-	u64 mdata_hdl = val;
 	u32 prev_buf_sz;
 	u32 op_timeout;
 	u64 buf_paddr;
 	u32 buf_sz;
 	int ret;
 
-	mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
-	if (!mdata_abo || !mdata_abo->mem.kva) {
-		XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
-		return -EINVAL;
-	}
-
-	mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
-	if (!mdata) {
-		XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
-		amdxdna_gem_put_obj(mdata_abo);
-		return -EINVAL;
-	}
-
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {
 	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
+		mdata = get_fwbuf_metadata_hdl(client, val);
+		if (!mdata) {
+			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
+				 val, type);
+			return -EINVAL;
+		}
 		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_DEV);
 		if (!abo || !abo->mem.kva) {
 			XDNA_ERR(xdna, "Get bo %lld failed for type %d", mdata->bo_handle, type);
@@ -897,6 +906,12 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
 	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
+		mdata = get_fwbuf_metadata_hdl(client, val);
+		if (!mdata) {
+			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
+				 val, type);
+			return -EINVAL;
+		}
 		for (u32 col = 0; col < hwctx->num_col; col++) {
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, 0, 0, col, false);
 			if (ret < 0) {
