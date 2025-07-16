@@ -679,7 +679,7 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 
 static int aie2_ctx_cu_config(struct amdxdna_ctx *ctx, void *buf, u32 size)
 {
-	struct amdxdna_ctx_param_config_cu *config = buf;
+	struct amdxdna_hwctx_param_config_cu *config = buf;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	u32 total_size;
 	int ret;
@@ -798,11 +798,11 @@ int aie2_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 
 	switch (type) {
-	case DRM_AMDXDNA_CTX_CONFIG_CU:
+	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
 		return aie2_ctx_cu_config(ctx, buf, size);
-	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
 		return aie2_ctx_attach_debug_bo(ctx, (u32)value);
-	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
 		return aie2_ctx_detach_debug_bo(ctx, (u32)value);
 	default:
 		XDNA_DBG(xdna, "Not supported type %d", type);

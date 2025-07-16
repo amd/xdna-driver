@@ -942,9 +942,9 @@ static int aie2_query_sensors(struct amdxdna_client *client,
 static int aie2_query_ctx_status(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_ctx __user *buf;
+	struct amdxdna_drm_query_hwctx __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_drm_query_ctx *tmp;
+	struct amdxdna_drm_query_hwctx *tmp;
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
@@ -1236,8 +1236,8 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 				       struct amdxdna_drm_get_info_array *args)
 {
-	struct amdxdna_drm_query_ctx_array __user *buf;
-	struct amdxdna_drm_query_ctx_array *tmp;
+	struct amdxdna_drm_query_hwctx_array __user *buf;
+	struct amdxdna_drm_query_hwctx_array *tmp;
 	struct amdxdna_dev *xdna = client->xdna;
 	int idx, ctx_limit, ctx_cnt, min, i;
 	struct amdxdna_client *tmp_client;
@@ -1302,9 +1302,9 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].suspensions = ctx->priv->disconn_cnt;
 
 			if (ctx->priv->active)
-				tmp[hw_i].state = AMDXDNA_CTX_STATE_ACTIVE;
+				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_ACTIVE;
 			else
-				tmp[hw_i].state = AMDXDNA_CTX_STATE_IDLE;
+				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_IDLE;
 
 			hw_i++;
 		}

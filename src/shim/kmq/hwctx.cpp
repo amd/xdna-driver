@@ -8,7 +8,7 @@ namespace {
 
 // For debug only
 void
-print_cu_config(amdxdna_ctx_param_config_cu *config)
+print_cu_config(amdxdna_hwctx_param_config_cu *config)
 {
   auto n = config->num_cus;
   auto conf = config->cu_configs;
@@ -27,8 +27,8 @@ hwctx_kmq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
 {
   xclbin_parser xp(xclbin);
   std::vector<char> cu_conf_param_buf(
-    sizeof(amdxdna_ctx_param_config_cu) + xp.get_num_cus() * sizeof(amdxdna_cu_config));
-  auto cu_conf_param = reinterpret_cast<amdxdna_ctx_param_config_cu *>(cu_conf_param_buf.data());
+    sizeof(amdxdna_hwctx_param_config_cu) + xp.get_num_cus() * sizeof(amdxdna_cu_config));
+  auto cu_conf_param = reinterpret_cast<amdxdna_hwctx_param_config_cu *>(cu_conf_param_buf.data());
 
   cu_conf_param->num_cus = xp.get_num_cus();
   xcl_bo_flags f = {};
