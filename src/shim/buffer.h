@@ -11,6 +11,7 @@
 #include "core/common/shim/hwctx_handle.h"
 #include "core/common/shim/buffer_handle.h"
 #include <set>
+#include "drm_local/amdxdna_accel.h"
 
 namespace shim_xdna {
 
@@ -100,9 +101,12 @@ public:
   virtual void
   bind_hwctx(const hwctx& hwctx);
 
+  virtual void
+  unbind_hwctx();
+
   // Save flags in buffer which later returns via get_properties()
-  void
-  set_flags(uint64_t flags);
+  void set_flags(uint64_t flags);
+  uint64_t get_flags() const;
 
   virtual std::set<bo_id>
   get_arg_bo_ids() const;
@@ -179,6 +183,9 @@ public:
   void
   bind_hwctx(const hwctx& hwctx) override;
 
+  void
+  unbind_hwctx() override;
+
 private:
   std::string
   bo_sub_type_name() const override;
@@ -187,6 +194,21 @@ private:
   config_debug_bo(bool is_detach);
 
   xrt_core::hwctx_handle::slot_id m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+};
+
+class uc_dbg_buffer : public buffer
+{
+public:
+  using buffer::buffer;
+
+  void
+  config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes) override;
+
+  void
+  unconfig(xrt_core::hwctx_handle* hwctx) override;
+
+private:
+  std::unique_ptr<buffer> m_metadata_bo;
 };
 
 }

@@ -13,6 +13,22 @@
 
 namespace {
 
+uint8_t
+use_to_fw_debug_type(uint8_t use)
+{
+  switch (use) {
+  case XRT_BO_USE_DEBUG:
+    return AMDXDNA_FW_BUF_DEBUG;
+  case XRT_BO_USE_DTRACE:
+    return AMDXDNA_FW_BUF_TRACE;
+  case XRT_BO_USE_DEBUG_QUEUE:
+    return AMDXDNA_FW_BUF_DBG_Q;
+  case XRT_BO_USE_LOG:
+    return AMDXDNA_FW_BUF_LOG;
+  }
+  throw;
+}
+
 const uint64_t page_size = sysconf(_SC_PAGESIZE);
 const long cacheline_size = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
 
@@ -68,10 +84,18 @@ page_size_roundup(size_t size)
 }
 
 std::string
-type_to_name(int type)
+type_to_name(int type, uint64_t flags)
 {
   switch (type) {
   case AMDXDNA_BO_SHARE:
+    if (xcl_bo_flags{flags}.use == XRT_BO_USE_DTRACE)
+      return std::string("AMDXDNA_BO_UC_DTRACE");
+    else if (xcl_bo_flags{flags}.use == XRT_BO_USE_LOG)
+      return std::string("AMDXDNA_BO_UC_LOG");
+    else if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG_QUEUE)
+      return std::string("AMDXDNA_BO_UC_DEBUG_QUEUE");
+    //else if (xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
+    //  return std::string("AMDXDNA_BO_UC_DEBUG_BUF");
     return std::string("AMDXDNA_BO_SHARE");
   case AMDXDNA_BO_DEV_HEAP:
     return std::string("AMDXDNA_BO_DEV_HEAP");
@@ -503,9 +527,23 @@ bind_hwctx(const hwctx& hwctx)
 
 void
 buffer::
+unbind_hwctx()
+{
+  // Nothing to do.
+}
+
+void
+buffer::
 set_flags(uint64_t flags)
 {
   m_flags = flags;
+}
+
+uint64_t
+buffer::
+get_flags() const
+{
+  return m_flags;
 }
 
 std::string
@@ -515,7 +553,7 @@ describe() const
   std::string desc = bo_sub_type_name() + ": ";
 
   desc += "type=";
-  desc += type_to_name(m_type);
+  desc += type_to_name(m_type, m_flags);
   desc += " ";
   desc += "hdl=";
   for (int i = 0; i < m_bos.size(); i++) {
@@ -672,6 +710,20 @@ bind_hwctx(const hwctx& hwctx)
 
 void
 dbg_buffer::
+unbind_hwctx()
+{
+  try {
+    config_debug_bo(true);
+    m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
+  } catch (const xrt_core::system_error& e) {
+    std::cout << "Failed to detach DEBUG BO " << std::to_string(id().handle)
+      << " from hwctx " << std::to_string(m_ctx_id)
+      << ": " << e.what() << std::endl;
+  }
+}
+
+void
+dbg_buffer::
 config_debug_bo(bool is_detach)
 {
   config_ctx_debug_bo_arg arg = {
@@ -702,6 +754,46 @@ dbg_buffer::
 bo_sub_type_name() const
 {
   return "DEBUG BO";
+}
+
+//
+// Impl for class uc_dbg_buffer
+//
+void
+uc_dbg_buffer::
+config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes)
+{
+  auto meta_buf_size = offsetof(struct fw_buffer_metadata, uc_info)
+     + buf_sizes.size() * sizeof(struct uc_info_entry);
+  m_metadata_bo = std::make_unique<dbg_buffer>(m_pdev, meta_buf_size, AMDXDNA_BO_SHARE);
+  auto metadata = reinterpret_cast<fw_buffer_metadata *>(m_metadata_bo->vaddr());
+  metadata->bo_handle = id().handle;
+  metadata->command_id = 0; //support this later
+  auto f = xcl_bo_flags{get_flags()};
+  metadata->buf_type = use_to_fw_debug_type(f.use);
+  metadata->num_ucs = buf_sizes.size();
+  int i = 0;
+  for (const auto& pair : buf_sizes)
+  {
+    metadata->uc_info[i].size = pair.second;
+    metadata->uc_info[i].index = pair.first;
+    i++;
+  }
+
+  shim_debug("Config CMD BO %d (%s) for %d uC", id().handle,
+    type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str(), i);
+
+  auto ctx = static_cast<shim_xdna::hwctx *>(hwctx);
+  m_metadata_bo->bind_hwctx(*ctx);
+}
+
+void
+uc_dbg_buffer::
+unconfig(xrt_core::hwctx_handle* hwctx)
+{
+  shim_debug("Unconfig CMD BO %d (%s)", id().handle,
+    type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str());
+  m_metadata_bo->unbind_hwctx();
 }
 
 }

@@ -234,9 +234,9 @@ exit:
 
 static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	/* Context */
-	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_CTX, amdxdna_drm_create_ctx_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_DESTROY_CTX, amdxdna_drm_destroy_ctx_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_CONFIG_CTX, amdxdna_drm_config_ctx_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_HWCTX, amdxdna_drm_create_hwctx_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_DESTROY_HWCTX, amdxdna_drm_destroy_hwctx_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_CONFIG_HWCTX, amdxdna_drm_config_hwctx_ioctl, 0),
 	/* BO */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_BO, amdxdna_drm_create_bo_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_BO_INFO, amdxdna_drm_get_bo_info_ioctl, 0),

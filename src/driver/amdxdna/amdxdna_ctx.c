@@ -71,7 +71,7 @@ static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct 
 /*
  * This should be called in flush() and remove(). DO NOT call in other syscalls.
  * This guarantee that when ctx and resources will be released, if user
- * doesn't call amdxdna_drm_destroy_ctx_ioctl.
+ * doesn't call amdxdna_drm_destroy_hwctx_ioctl.
  */
 void amdxdna_ctx_remove_all(struct amdxdna_client *client)
 {
@@ -86,10 +86,10 @@ void amdxdna_ctx_remove_all(struct amdxdna_client *client)
 	}
 }
 
-int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_create_ctx *args = data;
+	struct amdxdna_drm_create_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_ctx *ctx;
 	int ret, idx;
@@ -166,10 +166,10 @@ exit:
 	return ret;
 }
 
-int amdxdna_drm_destroy_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_destroy_ctx *args = data;
+	struct amdxdna_drm_destroy_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_ctx *ctx;
 	int ret, idx;
@@ -199,10 +199,10 @@ out:
 	return ret;
 }
 
-int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_config_ctx *args = data;
+	struct amdxdna_drm_config_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_ctx *ctx;
 	int ret, idx;
@@ -217,7 +217,7 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 	buf_size = args->param_val_size;
 
 	switch (args->param_type) {
-	case DRM_AMDXDNA_CTX_CONFIG_CU:
+	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
 		/* For those types that param_val is pointer */
 		if (buf_size > PAGE_SIZE) {
 			XDNA_ERR(xdna, "Config CU param buffer too large");
@@ -234,9 +234,9 @@ int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_
 		}
 
 		break;
-	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
-	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
-	case DRM_AMDXDNA_CTX_CONFIG_OPCODE_TIMEOUT:
+	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;
@@ -539,7 +539,7 @@ static int amdxdna_drm_submit_execbuf(struct amdxdna_client *client,
 	}
 
 	ret = amdxdna_cmd_submit(client, OP_USER, cmd_bo_hdl, arg_bo_hdls,
-				 args->arg_count, NULL, NULL, 0, args->ctx, &args->seq);
+				 args->arg_count, NULL, NULL, 0, args->hwctx, &args->seq);
 
 free_cmd_bo_hdls:
 	kfree(arg_bo_hdls);
@@ -590,7 +590,7 @@ static int amdxdna_drm_submit_dependency(struct amdxdna_client *client,
 
 	ret = amdxdna_cmd_submit(client, OP_NOOP, AMDXDNA_INVALID_BO_HANDLE, NULL, 0,
 				 syncobj_hdls, syncobj_pts, syncobj_cnt,
-				 args->ctx, &args->seq);
+				 args->hwctx, &args->seq);
 
 done:
 	kfree(argbuf);
@@ -608,7 +608,7 @@ static int amdxdna_drm_submit_signal(struct amdxdna_client *client,
 	struct dma_fence *ofence = NULL;
 	u64 syncobj_pt = args->args;
 	struct drm_syncobj *syncobj;
-	u32 ctx_hdl = args->ctx;
+	u32 ctx_hdl = args->hwctx;
 	struct amdxdna_ctx *ctx;
 	int ret = 0;
 	int idx;
@@ -740,12 +740,12 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 		return ret;
 
 	XDNA_DBG(xdna, "PID %d ctx %d timeout set %d ms for cmd %lld",
-		 client->pid, args->ctx, args->timeout, args->seq);
+		 client->pid, args->hwctx, args->timeout, args->seq);
 
-	ret = amdxdna_cmd_wait(client, args->ctx, args->seq, args->timeout);
+	ret = amdxdna_cmd_wait(client, args->hwctx, args->seq, args->timeout);
 
 	XDNA_DBG(xdna, "PID %d ctx %d cmd %lld wait finished, ret %d",
-		 client->pid, args->ctx, args->seq, ret);
+		 client->pid, args->hwctx, args->seq, ret);
 
 	amdxdna_pm_suspend_put(dev->dev);
 	return ret;

@@ -234,7 +234,7 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_query_ctx_array* data;
+    amdxdna_drm_query_hwctx_array* data;
     const uint32_t output_size = 32 * sizeof(*data);
 
     std::vector<char> payload(output_size);
@@ -254,7 +254,7 @@ struct partition_info
     } catch (const xrt_core::system_error& e) {
       if (e.get_code() == -EINVAL) {
         // If ioctl not supported, use legacy ioctl.
-        amdxdna_drm_query_ctx* legacy_data;
+        amdxdna_drm_query_hwctx* legacy_data;
         const uint32_t legacy_output_size = 256 * sizeof(*legacy_data);
         std::vector<char> legacy_payload(legacy_output_size);
         amdxdna_drm_get_info legacy_arg = {
@@ -335,7 +335,7 @@ struct partition_info
       new_entry.instruction_mem = entry.heap_usage;
       new_entry.pasid = entry.pasid;
       new_entry.suspensions = entry.suspensions;
-      new_entry.is_suspended = entry.state == AMDXDNA_CTX_STATE_IDLE;
+      new_entry.is_suspended = entry.state == AMDXDNA_HWCTX_STATE_IDLE;
       output.push_back(std::move(new_entry));
     }
     return output;
@@ -1549,6 +1549,11 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   std::unique_ptr<buffer> bo;
   if (f.use == XRT_BO_USE_DEBUG)
     bo = std::make_unique<dbg_buffer>(get_pdev(), size, type);
+  else if (f.use == XRT_BO_USE_DTRACE ||
+    f.use == XRT_BO_USE_LOG ||
+    f.use == XRT_BO_USE_DEBUG_QUEUE
+    /*f.use == XRT_BO_USE_UC_DEBUG*/) //need define last one in xrt 
+    bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, type);
   else if (type == AMDXDNA_BO_CMD)
     bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
   else if (!userptr)

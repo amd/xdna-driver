@@ -47,9 +47,9 @@ extern "C" {
  * We don't have extension now. The extension struct will define in the future.
  */
 
-#define	DRM_AMDXDNA_CREATE_CTX		0
-#define	DRM_AMDXDNA_DESTROY_CTX		1
-#define	DRM_AMDXDNA_CONFIG_CTX		2
+#define	DRM_AMDXDNA_CREATE_HWCTX		0
+#define	DRM_AMDXDNA_DESTROY_HWCTX		1
+#define	DRM_AMDXDNA_CONFIG_HWCTX		2
 #define	DRM_AMDXDNA_CREATE_BO		3
 #define	DRM_AMDXDNA_GET_BO_INFO		4
 #define	DRM_AMDXDNA_SYNC_BO		5
@@ -102,7 +102,7 @@ struct amdxdna_qos_info {
 };
 
 /**
- * struct amdxdna_drm_create_ctx - Create context.
+ * struct amdxdna_drm_create_hwctx - Create context.
  * @ext: MBZ.
  * @ext_flags: MBZ.
  * @qos_p: Address of QoS info.
@@ -115,7 +115,7 @@ struct amdxdna_qos_info {
  * @handle: Returned context handle.
  * @syncobj_handle: The drm timeline syncobj handle for command completion notification.
  */
-struct amdxdna_drm_create_ctx {
+struct amdxdna_drm_create_hwctx {
 	__u64 ext;
 	__u64 ext_flags;
 	__u64 qos_p;
@@ -130,11 +130,11 @@ struct amdxdna_drm_create_ctx {
 };
 
 /**
- * struct amdxdna_drm_destroy_ctx - Destroy context.
+ * struct amdxdna_drm_destroy_hwctx - Destroy context.
  * @handle: Context handle.
  * @pad: Structure padding.
  */
-struct amdxdna_drm_destroy_ctx {
+struct amdxdna_drm_destroy_hwctx {
 	__u32 handle;
 	__u32 pad;
 };
@@ -152,12 +152,12 @@ struct amdxdna_cu_config {
 };
 
 /**
- * struct amdxdna_ctx_param_config_cu - configuration for CUs in context
+ * struct amdxdna_hwctx_param_config_cu - configuration for CUs in context
  * @num_cus: Number of CUs to configure.
  * @pad: Structure padding.
  * @cu_configs: Array of CU configurations of struct amdxdna_cu_config.
  */
-struct amdxdna_ctx_param_config_cu {
+struct amdxdna_hwctx_param_config_cu {
 	__u16 num_cus;
 	__u16 pad[3];
 	struct amdxdna_cu_config cu_configs[];
@@ -197,7 +197,7 @@ struct fw_buffer_metadata {
 };
 
 /**
- * struct amdxdna_drm_config_ctx - Configure context.
+ * struct amdxdna_drm_config_hwctx - Configure context.
  * @handle: Context handle.
  * @param_type: Specifies the structure passed in via param_val.
  * @param_val: A structure specified by the param_type struct member.
@@ -208,12 +208,12 @@ struct fw_buffer_metadata {
  * Note: if the param_val is a pointer pointing to a buffer, the maximum size
  * of the buffer is 4KiB(PAGE_SIZE).
  */
-struct amdxdna_drm_config_ctx {
+struct amdxdna_drm_config_hwctx {
 	__u32 handle;
-#define DRM_AMDXDNA_CTX_CONFIG_CU	0
-#define DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF	1
-#define DRM_AMDXDNA_CTX_REMOVE_DBG_BUF	2
-#define DRM_AMDXDNA_CTX_CONFIG_OPCODE_TIMEOUT	3
+#define DRM_AMDXDNA_HWCTX_CONFIG_CU		0
+#define DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF	1
+#define DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF	2
+#define DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT	3
 	__u32 param_type;
 	__u64 param_val;
 	__u32 param_val_size;
@@ -316,7 +316,7 @@ struct amdxdna_drm_sync_bo {
 struct amdxdna_drm_exec_cmd {
 	__u64 ext;
 	__u64 ext_flags;
-	__u32 ctx;
+	__u32 hwctx;
 #define	AMDXDNA_CMD_SUBMIT_EXEC_BUF	0
 #define	AMDXDNA_CMD_SUBMIT_DEPENDENCY	1
 #define	AMDXDNA_CMD_SUBMIT_SIGNAL	2
@@ -338,7 +338,7 @@ struct amdxdna_drm_exec_cmd {
  * Wait a command specified by seq to be completed.
  */
 struct amdxdna_drm_wait_cmd {
-	__u32 ctx;
+	__u32 hwctx;
 	__u32 timeout;
 	__u64 seq;
 };
@@ -453,7 +453,7 @@ struct amdxdna_drm_query_sensor {
 };
 
 /**
- * struct amdxdna_drm_query_ctx - The data for single context.
+ * struct amdxdna_drm_query_hwctx - The data for single context.
  * @context_id: The ID for this context.
  * @start_col: The starting column for the partition assigned to this context.
  * @num_col: The number of columns in the partition assigned to this context.
@@ -468,7 +468,7 @@ struct amdxdna_drm_query_sensor {
  *
  * !!! NOTE: Never expand this struct. Use amdxdna_drm_query_ctx_array instead. !!!
  */
-struct amdxdna_drm_query_ctx {
+struct amdxdna_drm_query_hwctx {
 	__u32 context_id;
 	__u32 start_col;
 	__u32 num_col;
@@ -604,7 +604,7 @@ struct amdxdna_drm_query_telemetry_header {
 	__u32 minor;
 	__u32 type;
 	__u32 map_num_elements;
-	__u32 map[] __counted_by(map_num_elements);
+	__u32 map[];
 };
 
 /**
@@ -658,7 +658,7 @@ struct amdxdna_drm_get_info {
  * @latency: Frame response latency
  * @frame_exec_time: Frame execution time
  */
-struct amdxdna_drm_query_ctx_array {
+struct amdxdna_drm_query_hwctx_array {
 	__u32 context_id;
 	__u32 start_col;
 	__u32 num_col;
@@ -672,8 +672,8 @@ struct amdxdna_drm_query_ctx_array {
 	__u64 priority;
 	__u64 heap_usage;
 	__u64 suspensions;
-#define AMDXDNA_CTX_STATE_IDLE		0
-#define AMDXDNA_CTX_STATE_ACTIVE	1
+#define AMDXDNA_HWCTX_STATE_IDLE	0
+#define AMDXDNA_HWCTX_STATE_ACTIVE	1
 	__u32 state;
 	__u32 pasid;
 	__u32 gops;
@@ -727,17 +727,17 @@ struct amdxdna_drm_set_state {
 	__u64 buffer; /* in */
 };
 
-#define DRM_IOCTL_AMDXDNA_CREATE_CTX \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_CTX, \
-		 struct amdxdna_drm_create_ctx)
+#define DRM_IOCTL_AMDXDNA_CREATE_HWCTX \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_HWCTX, \
+		 struct amdxdna_drm_create_hwctx)
 
-#define DRM_IOCTL_AMDXDNA_DESTROY_CTX \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DESTROY_CTX, \
-		 struct amdxdna_drm_destroy_ctx)
+#define DRM_IOCTL_AMDXDNA_DESTROY_HWCTX \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_DESTROY_HWCTX, \
+		 struct amdxdna_drm_destroy_hwctx)
 
-#define DRM_IOCTL_AMDXDNA_CONFIG_CTX \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CONFIG_CTX, \
-		 struct amdxdna_drm_config_ctx)
+#define DRM_IOCTL_AMDXDNA_CONFIG_HWCTX \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CONFIG_HWCTX, \
+		 struct amdxdna_drm_config_hwctx)
 
 #define DRM_IOCTL_AMDXDNA_CREATE_BO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_CREATE_BO, \
