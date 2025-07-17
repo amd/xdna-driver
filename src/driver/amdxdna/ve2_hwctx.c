@@ -882,7 +882,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
-		mdata = get_fwbuf_metadata_hdl(client, val, &mdata_abo);
+		mdata = get_fwbuf_metadata_hdl(client, &mdata_abo, val);
 		if (!mdata) {
 			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
 				 val, type);
@@ -918,7 +918,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
-		mdata = get_fwbuf_metadata_hdl(client, val, &mdata_abo);
+		mdata = get_fwbuf_metadata_hdl(client, &mdata_abo, val);
 		if (!mdata) {
 			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
 				 val, type);

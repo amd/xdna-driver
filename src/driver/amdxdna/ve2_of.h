@@ -16,6 +16,10 @@
 #define VERBOSITY_LEVEL_DBG	2
 #define VE2_MAX_COL		36
 
+#define aie_calc_part_id(start_col, num_col)	\
+	(((start_col) << AIE_PART_ID_START_COL_SHIFT) + \
+	 ((num_col) << AIE_PART_ID_NUM_COLS_SHIFT))
+
 struct amdxdna_ctx_priv {
 	u32			start_col;
 	u32			num_col;
