@@ -215,9 +215,6 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
-	u32 start_col = priv->start_col;
-	u32 num_col = priv->num_col;
-	u32 rel_col;
 	int ret;
 
 	if (!priv->aie_part) {
@@ -225,11 +222,10 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 		return -ENODEV;
 	}
 
-	for (u32 col = start_col; col < start_col + num_col; col++) {
-		rel_col = col - start_col;
-		ret = cert_clear_partition(xdna, priv->aie_part, rel_col);
+	for (u32 col = 0; col < priv->num_col; col++) {
+		ret = cert_clear_partition(xdna, priv->aie_part, col);
 		if (ret < 0)
-			XDNA_ERR(xdna, "cert_clear_partition() err %d for col %d", ret, rel_col);
+			XDNA_ERR(xdna, "cert_clear_partition() err %d for col %d", ret, col);
 	}
 
 	aie_partition_teardown(priv->aie_part);
