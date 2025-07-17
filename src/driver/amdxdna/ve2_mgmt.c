@@ -169,7 +169,8 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
 
 	args.locs = NULL;
 	args.num_tiles = 0;
-	args.init_opts = AIE_PART_INIT_OPT_DEFAULT ^ AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) ^
+		AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	ret = aie_partition_initialize(aie_part, &args);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
@@ -214,6 +215,9 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
+	u32 start_col = priv->start_col;
+	u32 num_col = priv->num_col;
+	u32 rel_col;
 	int ret;
 
 	if (!priv->aie_part) {
@@ -221,10 +225,11 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 		return -ENODEV;
 	}
 
-	for (u32 col = 0; col < priv->num_col; col++) {
-		ret = cert_clear_partition(xdna, priv->aie_part, col);
+	for (u32 col = start_col; col < start_col + num_col; col++) {
+		rel_col = col - start_col;
+		ret = cert_clear_partition(xdna, priv->aie_part, rel_col);
 		if (ret < 0)
-			XDNA_ERR(xdna, "cert_clear_partition() err %d for col %d", ret, col);
+			XDNA_ERR(xdna, "cert_clear_partition() err %d for col %d", ret, rel_col);
 	}
 
 	aie_partition_teardown(priv->aie_part);
@@ -269,8 +274,6 @@ int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
 	u32 value = VE2_USER_EVENT_ID;
 	struct aie_location loc = {0};
 	int ret;
-
-	loc.col = hwctx->start_col;
 
 	/* aie_partition_write() returns below possible values:
 	 *  success case: number of bytes write, so, return value >= 0

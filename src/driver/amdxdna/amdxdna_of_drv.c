@@ -6,7 +6,6 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
-#include <drm/drm_managed.h>
 
 #include "amdxdna_devel.h"
 #include "amdxdna_of_drv.h"
@@ -40,7 +39,7 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 	if (!xdna->dev_info)
 		return -ENODEV;
 
-	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
+	devm_mutex_init(dev, &xdna->dev_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
 	platform_set_drvdata(pdev, xdna);
 
