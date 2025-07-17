@@ -571,11 +571,9 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(3600000*20 /* 20 hours, some simnow server are slow */);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  // wait forever for this test, it takes up to 10 hours on simulator
+  run.wait2();
 
   auto ofm = bo_ofm.map();
   std::ifstream ofm_ifs;
