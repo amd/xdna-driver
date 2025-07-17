@@ -11,9 +11,9 @@
 
 static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
-	size_t hwctx_data_sz = sizeof(struct amdxdna_drm_query_ctx);
-	struct amdxdna_drm_query_ctx *hwctx_data;
-	struct amdxdna_drm_query_ctx __user *buf;
+	size_t hwctx_data_sz = sizeof(struct amdxdna_drm_query_hwctx);
+	struct amdxdna_drm_query_hwctx *hwctx_data;
+	struct amdxdna_drm_query_hwctx __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
 	u32 req_bytes = 0, hw_i = 0;

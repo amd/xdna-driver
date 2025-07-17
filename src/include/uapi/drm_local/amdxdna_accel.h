@@ -466,7 +466,7 @@ struct amdxdna_drm_query_sensor {
  *               same partition.
  * @errors: The errors for this context.
  *
- * !!! NOTE: Never expand this struct. Use amdxdna_drm_query_ctx_array instead. !!!
+ * !!! NOTE: Never expand this struct. Use amdxdna_drm_query_hwctx_array instead. !!!
  */
 struct amdxdna_drm_query_hwctx {
 	__u32 context_id;
@@ -635,7 +635,7 @@ struct amdxdna_drm_get_info {
 };
 
 /**
- * struct amdxdna_drm_query_ctx_array - The element of a context in array
+ * struct amdxdna_drm_query_hwctx_array - The element of a context in array
  * @context_id: The ID for this context.
  * @start_col: The starting column for the partition assigned to this context.
  * @num_col: The number of columns in the partition assigned to this context.

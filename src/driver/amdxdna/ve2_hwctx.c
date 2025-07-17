@@ -200,10 +200,10 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 		return;
 	}
 
-	// Print physical addresses
+	/* Print physical addresses */
 	XDNA_DBG(xdna, "hsa dma_addr data 0x%llx\n", queue->hq_header.data_address);
 
-	// Print host_queue_packet
+	/* Print host_queue_packet */
 	struct host_queue_packet *pkt = &queue->hq_entry[slot_id];
 
 	XDNA_DBG(xdna, "Packet Dump for slot_id %llu:\n", slot_id);
@@ -220,12 +220,12 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 	for (int i = 0; i < 12; i++)
 		XDNA_DBG(xdna, "\tdata[%d]: %x\n", i, (u32)pkt->data[i]);
 
-	// Print physical address of host_queue_packet
+	/* Print physical address of host_queue_packet */
 	u64 pkt_paddr = queue->hq_header.data_address + ((u64)pkt - (u64)queue->hq_entry);
 
 	XDNA_DBG(xdna, "Physical address of host_queue_packet: 0x%llx\n", pkt_paddr);
 
-	// Print host_queue_indirect_hdr
+	/* Print host_queue_indirect_hdr */
 	struct host_queue_indirect_hdr *indirect_hdr = &queue->hq_indirect_hdr[slot_id];
 	int total_entry = indirect_hdr->header.count / sizeof(struct host_indirect_packet_entry);
 
@@ -242,16 +242,16 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 			 (indirect_hdr->data[i + 1] >> 25) & 0x7F);
 	}
 
-	// Print physical address of host_queue_indirect_hdr
+	/* Print physical address of host_queue_indirect_hdr */
 	u64 indirect_hdr_paddr = queue->hq_header.data_address +
 			((u64)indirect_hdr - (u64)queue->hq_entry);
 	XDNA_DBG(xdna, "Physical addr of host_queue_indirect_hdr: 0x%llx\n", indirect_hdr_paddr);
 
-	// Print host_queue_indirect_pkt
+	/* Print host_queue_indirect_pkt */
 	for (int i = 0; i < total_entry; i++) {
 		struct host_queue_indirect_pkt *indirect_pkt = &queue->hq_indirect_pkt[slot_id][i];
 
-		// Print physical address of host_queue_indirect_pkt
+		/* Print physical address of host_queue_indirect_pkt */
 		u64 indirect_pkt_paddr = queue->hq_header.data_address +
 			((u64)indirect_pkt - (u64)queue->hq_entry);
 
@@ -289,7 +289,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	int nslots = HOST_QUEUE_ENTRY;
 	dma_addr_t dma_handle;
 
-	// Allocate a single contiguous block of memory
+	/* Allocate a single contiguous block of memory */
 	queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
 						sizeof(struct hsa_queue) + sizeof(u64) * nslots,
 						&dma_handle,
@@ -297,17 +297,17 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	if (!queue->hsa_queue_p)
 		return -ENOMEM;
 
-	// Set the base DMA address for hsa queue
+	/* Set the base DMA address for hsa queue */
 	queue->hsa_queue_mem.dma_addr = dma_handle;
 
-	// Calculate the address for hqc_mem within the allocated block
+	/* Calculate the address for hqc_mem within the allocated block */
 	queue->hq_complete.hqc_mem =
 		(u64 *)((char *)queue->hsa_queue_p + sizeof(struct hsa_queue));
 	queue->hq_complete.hqc_dma_addr = queue->hsa_queue_mem.dma_addr + sizeof(struct hsa_queue);
 	queue->hsa_queue_p->hq_header.data_address = queue->hsa_queue_mem.dma_addr +
 		sizeof(struct host_queue_header);
 
-	// Set hsa queue slots to invalid
+	/* Set hsa queue slots to invalid */
 	for (int i = 0; i < nslots; i++) {
 		struct host_queue_indirect_hdr *hdr = &queue->hsa_queue_p->hq_indirect_hdr[i];
 
@@ -684,7 +684,11 @@ void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
 
 static void timeout_cb(struct timer_list *t)
 {
+#if defined from_timer
 	struct amdxdna_ctx_priv *priv = from_timer(priv, t, event_timer);
+#elif defined timer_container_of
+	struct amdxdna_ctx_priv *priv = timer_container_of(priv, t, event_timer);
+#endif
 
 	wake_up_interruptible_all(&priv->waitq);
 	mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
@@ -832,25 +836,33 @@ static int ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeout
 	int ret;
 
 	hs.opcode_timeout_config = op_timeout;
-	ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(hwctx->start_col) +
-						 offsetof(struct handshake, opcode_timeout_config),
-						 sizeof(u32), (void *)&hs.opcode_timeout_config);
-	return ret;
+	for (u32 col = 0; col < hwctx->num_col; col++) {
+		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
+							 offsetof(struct handshake,
+								  opcode_timeout_config),
+							 sizeof(u32),
+							 (void *)&hs.opcode_timeout_config);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
 }
 
 static struct fw_buffer_metadata *get_fwbuf_metadata_hdl(struct amdxdna_client *client,
+							 struct amdxdna_gem_obj **mdata_abo,
 							 u64 mdata_hdl)
 {
-	struct amdxdna_gem_obj *mdata_abo;
+	struct amdxdna_gem_obj *abo = *mdata_abo;
 	struct fw_buffer_metadata *mdata;
 
-	mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
-	if (!mdata_abo || !mdata_abo->mem.kva)
+	abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
+	if (!abo || !abo->mem.kva)
 		return NULL;
 
-	mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+	mdata = (struct fw_buffer_metadata *)(abo->mem.kva);
 	if (!mdata)
-		amdxdna_gem_put_obj(mdata_abo);
+		amdxdna_gem_put_obj(abo);
 
 	return mdata;
 }
@@ -869,8 +881,8 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {
-	case DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF:
-		mdata = get_fwbuf_metadata_hdl(client, val);
+	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
+		mdata = get_fwbuf_metadata_hdl(client, val, &mdata_abo);
 		if (!mdata) {
 			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
 				 val, type);
@@ -905,8 +917,8 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		amdxdna_gem_put_obj(abo);
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
-	case DRM_AMDXDNA_CTX_REMOVE_DBG_BUF:
-		mdata = get_fwbuf_metadata_hdl(client, val);
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+		mdata = get_fwbuf_metadata_hdl(client, val, &mdata_abo);
 		if (!mdata) {
 			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
 				 val, type);
@@ -926,15 +938,15 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
-	case DRM_AMDXDNA_CTX_CONFIG_OPCODE_TIMEOUT:
+	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
 		if (copy_from_user(&op_timeout, (u32 __user *)val, sizeof(u32)))
 			return -EFAULT;
 		ret = ve2_hwctx_config_op_timeout(hwctx, op_timeout);
 		if (ret < 0)
 			XDNA_ERR(xdna, "hwctx config req %d failed, err %d", type, ret);
 		else
-			XDNA_DBG(xdna, "Configured opcode timeout %u on hwctx %s col %u",
-				 op_timeout, hwctx->name, hwctx->start_col);
+			XDNA_DBG(xdna, "Configured opcode timeout %u on hwctx %s", op_timeout,
+				 hwctx->name);
 		break;
 	default:
 		XDNA_DBG(xdna, "%s Not supported type %d", __func__, type);
