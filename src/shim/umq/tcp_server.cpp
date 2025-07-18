@@ -68,6 +68,7 @@ start()
   if (ret == -1)
   {
     shim_debug("tcp server socket bind failed");
+    close(serverSocket);
     return;
   }
   
@@ -130,12 +131,14 @@ start()
 
       if (length <= 0)
       {
+        shim_debug("tcp server recv() length failure\n");
         break;
       }
       std::vector<uint32_t> buffer(length >> 2);
       n = recv(clientSocket, buffer.data(), length, 0);
       if (n <= 0)
       {
+        shim_debug("tcp server recv() data failure\n");
         break;
       }
 
