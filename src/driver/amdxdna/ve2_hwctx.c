@@ -849,24 +849,6 @@ static int ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeout
 	return 0;
 }
 
-static struct fw_buffer_metadata *get_fwbuf_metadata_hdl(struct amdxdna_client *client,
-							 struct amdxdna_gem_obj **mdata_abo,
-							 u64 mdata_hdl)
-{
-	struct amdxdna_gem_obj *abo = *mdata_abo;
-	struct fw_buffer_metadata *mdata;
-
-	abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_DEV);
-	if (!abo || !abo->mem.kva)
-		return NULL;
-
-	mdata = (struct fw_buffer_metadata *)(abo->mem.kva);
-	if (!mdata)
-		amdxdna_gem_put_obj(abo);
-
-	return mdata;
-}
-
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -882,10 +864,15 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
-		mdata = get_fwbuf_metadata_hdl(client, &mdata_abo, val);
+		mdata_abo = amdxdna_gem_get_obj(client, val, AMDXDNA_BO_DEV);
+		if (!mdata_abo || !mdata_abo->mem.kva) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", val, type);
+			return -EINVAL;
+		}
+		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
 		if (!mdata) {
-			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
-				 val, type);
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", val, type);
+			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
 		}
 		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_DEV);
@@ -918,10 +905,15 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
-		mdata = get_fwbuf_metadata_hdl(client, &mdata_abo, val);
+		mdata_abo = amdxdna_gem_get_obj(client, val, AMDXDNA_BO_DEV);
+		if (!mdata_abo || !mdata_abo->mem.kva) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", val, type);
+			return -EINVAL;
+		}
+		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
 		if (!mdata) {
-			XDNA_ERR(xdna, "Failed to read fw buffer metadata with bo %lld for type %d",
-				 val, type);
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", val, type);
+			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
 		}
 		for (u32 col = 0; col < hwctx->num_col; col++) {

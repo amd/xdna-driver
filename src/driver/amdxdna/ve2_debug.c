@@ -27,7 +27,6 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 
 	buf = u64_to_user_ptr(args->buffer);
 
-	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		amdxdna_for_each_ctx(tmp_client, hwctx_id, hwctx) {
@@ -37,7 +36,6 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 					 args->buffer_size, req_bytes);
 				ret = -EINVAL;
 				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
-				mutex_unlock(&xdna->dev_lock);
 				goto out;
 			}
 
@@ -52,14 +50,12 @@ static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_dr
 			if (copy_to_user(&buf[hw_i], hwctx_data, hwctx_data_sz)) {
 				ret = -EFAULT;
 				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
-				mutex_unlock(&xdna->dev_lock);
 				goto out;
 			}
 			hw_i++;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
-	mutex_unlock(&xdna->dev_lock);
 out:
 	kfree(hwctx_data);
 	args->buffer_size = req_bytes;
@@ -300,6 +296,7 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 
 	XDNA_DBG(xdna, "Received get air info request param %d", args->param);
 
+	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
 		ret = ve2_get_hwctx_status(client, args);
@@ -318,6 +315,7 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		ret = -EOPNOTSUPP;
 	}
 
+	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
 	return ret;
@@ -333,6 +331,7 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 
 	XDNA_DBG(xdna, "Received set aie status request param %d", args->param);
 
+	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_WRITE_AIE_MEM:
 		ret = ve2_tile_data_mem_write(client, args);
@@ -345,6 +344,7 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 		ret = -EOPNOTSUPP;
 	}
 
+	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
 	return ret;
