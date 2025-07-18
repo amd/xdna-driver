@@ -131,7 +131,7 @@ struct amdxdna_ctx {
 	u32				doorbell_offset;
 
 	struct amdxdna_qos_info		     qos;
-	struct amdxdna_ctx_param_config_cu *cus;
+	struct amdxdna_hwctx_param_config_cu *cus;
 
 	/* Submitted, completed, freed job counter */
 	u64				submitted;
@@ -283,9 +283,9 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
 		     u64 seq, u32 timeout);
 
-int amdxdna_drm_create_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
-int amdxdna_drm_config_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
-int amdxdna_drm_destroy_ctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 

@@ -15,12 +15,12 @@ std::string
 ioctl_cmd2name(unsigned long cmd)
 {
   switch(cmd) {
-  case DRM_IOCTL_AMDXDNA_CREATE_CTX:
-    return "DRM_IOCTL_AMDXDNA_CREATE_CTX";
-  case DRM_IOCTL_AMDXDNA_DESTROY_CTX:
-    return "DRM_IOCTL_AMDXDNA_DESTROY_CTX";
-  case DRM_IOCTL_AMDXDNA_CONFIG_CTX:
-    return "DRM_IOCTL_AMDXDNA_CONFIG_CTX";
+  case DRM_IOCTL_AMDXDNA_CREATE_HWCTX:
+    return "DRM_IOCTL_AMDXDNA_CREATE_HWCTX";
+  case DRM_IOCTL_AMDXDNA_DESTROY_HWCTX:
+    return "DRM_IOCTL_AMDXDNA_DESTROY_HWCTX";
+  case DRM_IOCTL_AMDXDNA_CONFIG_HWCTX:
+    return "DRM_IOCTL_AMDXDNA_CONFIG_HWCTX";
   case DRM_IOCTL_AMDXDNA_CREATE_BO:
     return "DRM_IOCTL_AMDXDNA_CREATE_BO";
   case DRM_IOCTL_AMDXDNA_GET_BO_INFO:
@@ -105,13 +105,13 @@ void
 platform_drv_host::
 create_ctx(create_ctx_arg& ctx_arg) const
 {
-  amdxdna_drm_create_ctx arg = {};
+  amdxdna_drm_create_hwctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&ctx_arg.qos);
   arg.umq_bo = ctx_arg.umq_bo.handle;
   arg.max_opc = ctx_arg.max_opc;
   arg.num_tiles = ctx_arg.num_tiles;
   arg.log_buf_bo = ctx_arg.log_buf_bo.handle;
-  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CREATE_CTX, &arg);
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
   
   ctx_arg.ctx_handle = arg.handle;
   ctx_arg.umq_doorbell = arg.umq_doorbell;
@@ -129,33 +129,33 @@ destroy_ctx(destroy_ctx_arg& ctx_arg) const
     destroy_syncobj(sarg);
   }
 
-  amdxdna_drm_destroy_ctx arg = {};
+  amdxdna_drm_destroy_hwctx arg = {};
   arg.handle = ctx_arg.ctx_handle;
-  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_DESTROY_CTX, &arg);
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
 }
 
 void
 platform_drv_host::
 config_ctx_cu_config(config_ctx_cu_config_arg& ctx_arg) const
 {
-  amdxdna_drm_config_ctx arg = {};
+  amdxdna_drm_config_hwctx arg = {};
   arg.handle = ctx_arg.ctx_handle;
-  arg.param_type = DRM_AMDXDNA_CTX_CONFIG_CU;
+  arg.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
   arg.param_val = reinterpret_cast<uintptr_t>(ctx_arg.conf_buf.data());
   arg.param_val_size = ctx_arg.conf_buf.size();
-  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_CTX, &arg);
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
 }
 
 void
 platform_drv_host::
 config_ctx_debug_bo(config_ctx_debug_bo_arg& ctx_arg) const
 {
-  amdxdna_drm_config_ctx arg = {};
+  amdxdna_drm_config_hwctx arg = {};
   arg.handle = ctx_arg.ctx_handle;
   arg.param_type = ctx_arg.is_detach ?
-    DRM_AMDXDNA_CTX_REMOVE_DBG_BUF : DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF;
+    DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF : DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF;
   arg.param_val = ctx_arg.bo.handle;
-  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_CTX, &arg);
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
 }
 
 std::pair<uint64_t, uint64_t>
@@ -289,7 +289,7 @@ submit_cmd(submit_cmd_arg& cmd_arg) const
     arg_bo_hdls[i++] = id.handle;
 
   amdxdna_drm_exec_cmd arg = {};
-  arg.ctx = cmd_arg.ctx_handle;
+  arg.hwctx = cmd_arg.ctx_handle;
   arg.type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   arg.cmd_handles = cmd_arg.cmd_bo.handle;
   arg.args = reinterpret_cast<uintptr_t>(arg_bo_hdls);
@@ -304,7 +304,7 @@ platform_drv_host::
 wait_cmd_ioctl(wait_cmd_arg& cmd_arg) const
 {
   amdxdna_drm_wait_cmd wcmd = {
-    .ctx = cmd_arg.ctx_handle,
+    .hwctx = cmd_arg.ctx_handle,
     .timeout = cmd_arg.timeout_ms,
     .seq = cmd_arg.seq,
   };

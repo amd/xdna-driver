@@ -73,6 +73,12 @@ private:
   get_info(amdxdna_drm_get_info& arg) const override;
 
   void
+  get_info_array(amdxdna_drm_get_info_array& arg) const override;
+
+  void
+  get_sysfs(get_sysfs_arg& arg) const override;
+
+  void
   config_ctx_cu_config(config_ctx_cu_config_arg& arg) const override;
 
   void

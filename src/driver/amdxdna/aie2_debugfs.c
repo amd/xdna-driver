@@ -17,6 +17,7 @@
 #include "aie2_pci.h"
 
 #if defined(CONFIG_DEBUG_FS)
+#define EVENT_CATEGORY_BUF_SIZE	22
 #define LOG_LEVEL_BUF_SIZE	11
 #define MIN_INPUT_ARG_SIZE	8
 #define MAX_INPUT_ARG_SIZE	40
@@ -400,8 +401,8 @@ static int aie2_dram_logging_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(dram_logging, aie2_dram_logging_show, aie2_dram_logging_write);
 
-static ssize_t aie2_log_runtime_cfg_write(struct file *file, const char __user *buf,
-					  size_t len, loff_t *off)
+static ssize_t aie2_dram_log_cfg_write(struct file *file, const char __user *buf,
+				       size_t len, loff_t *off)
 {
 	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
 	char log_level_buf[LOG_LEVEL_BUF_SIZE + 1];
@@ -453,7 +454,7 @@ static ssize_t aie2_log_runtime_cfg_write(struct file *file, const char __user *
 	return len;
 }
 
-static int aie2_log_runtime_cfg_show(struct seq_file *m, void *unused)
+static int aie2_dram_log_cfg_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
 	u32 log_level;
@@ -469,7 +470,78 @@ static int aie2_log_runtime_cfg_show(struct seq_file *m, void *unused)
 	return 0;
 }
 
-AIE2_DBGFS_FOPS(log_runtime_cfg, aie2_log_runtime_cfg_show, aie2_log_runtime_cfg_write);
+AIE2_DBGFS_FOPS(dram_log_cfg, aie2_dram_log_cfg_show, aie2_dram_log_cfg_write);
+
+static ssize_t aie2_event_trace_cfg_write(struct file *file, const char __user *buf,
+					  size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	char event_category_buf[EVENT_CATEGORY_BUF_SIZE + 1];
+	char *kbuf, *token, *key, *val;
+	u32 category;
+	int ret;
+
+	if (len > EVENT_CATEGORY_BUF_SIZE) {
+		XDNA_ERR(ndev->xdna, "Input length %zu > buffer size %d",
+			 len, EVENT_CATEGORY_BUF_SIZE);
+		return -EINVAL;
+	}
+
+	kbuf = event_category_buf;
+	if (copy_from_user(kbuf, buf, len))
+		return -EFAULT;
+
+	kbuf[len] = '\0';
+	token = strsep(&kbuf, " ");
+
+	if (token) {
+		key = strsep(&token, "=");
+		val = token;
+
+		if (!key || !val) {
+			XDNA_ERR(ndev->xdna, "Invalid \'key=val\' pair");
+			return -EINVAL;
+		}
+
+		if (strcmp(key, "category") == 0) {
+			ret = kstrtouint(val, 0, &category);
+			if (ret || !category) {
+				XDNA_ERR(ndev->xdna, "Invalid  %u",
+					 category);
+				return -EINVAL;
+			}
+
+			ret = aie2_set_event_trace_cfg(ndev, category);
+			if (ret) {
+				XDNA_ERR(ndev->xdna, "Failed to set event trace cfg: %d", ret);
+				return ret;
+			}
+		} else {
+			XDNA_ERR(ndev->xdna, "Invalid key %s, e.g. category=[0x1-0xFFFFFFFF]", key);
+			return -EINVAL;
+		}
+	}
+
+	return len;
+}
+
+static int aie2_event_trace_cfg_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	u32 categories;
+
+	if (!aie2_is_event_trace_enable(ndev)) {
+		seq_puts(m, "Event trace is disabled\n");
+	} else {
+		categories = aie2_get_event_trace_categories(ndev);
+		seq_printf(m, "categories 0x%08x\n", categories);
+		seq_puts(m, "To change event category echo category=[0x1-0xFFFFFFFF]\n");
+	}
+
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(event_trace_cfg, aie2_event_trace_cfg_show, aie2_event_trace_cfg_write);
 
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
@@ -663,9 +735,9 @@ static int aie2_ioctl_id_show(struct seq_file *m, void *unused)
 #define drm_ioctl_id_seq_print(_name) \
 seq_printf(m, "%ld:%s\n", _name, #_name)
 
-	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_CTX);
-	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_DESTROY_CTX);
-	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CONFIG_CTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_HWCTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX);
+	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_CREATE_BO);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_GET_BO_INFO);
 	drm_ioctl_id_seq_print(DRM_IOCTL_AMDXDNA_SYNC_BO);
@@ -827,10 +899,11 @@ const struct {
 	AIE2_DBGFS_FILE(telemetry_profiling, 0400),
 	AIE2_DBGFS_FILE(telemetry_debug, 0400),
 	AIE2_DBGFS_FILE(event_trace, 0600),
+	AIE2_DBGFS_FILE(event_trace_cfg, 0600),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
 	AIE2_DBGFS_FILE(dram_logging, 0600),
-	AIE2_DBGFS_FILE(log_runtime_cfg, 0600),
+	AIE2_DBGFS_FILE(dram_log_cfg, 0600),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
