@@ -748,10 +748,10 @@ struct app_health_report {
 	 */
 #define APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE	(~0U)
 	u32				txn_op_id;
-
+	/* The PC of the context at the time of the report */
+	u32				ctx_pc;
 	/* minor = 2 fields */
-	/* TODO: Should driver parse below fileds? How? */
-	struct fatal_error_info		fatal_error_info;
+	struct fatal_error_info		fatal_info;
 	struct col_status_info		col_status_info;
 	/*
 	 * TODO: There is a complex array binding with hardware details, like
