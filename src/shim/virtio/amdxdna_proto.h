@@ -210,14 +210,15 @@ struct amdxdna_ccmd_get_info_req {
     struct vdrm_ccmd_req hdr;
     uint32_t param;
     uint32_t size;
+    uint32_t num_element; /* non-zero means get info array */
     uint32_t info_res;
-    uint32_t _pad;
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_get_info_req)
 
 struct amdxdna_ccmd_get_info_rsp {
     struct amdxdna_ccmd_rsp hdr;
-    uint32_t info_size;
+    uint32_t size;
+    uint32_t num_element;
 };
 
 /*
