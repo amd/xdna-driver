@@ -42,17 +42,17 @@ config_drm_bo(std::shared_ptr<xdna_edgedev> m_edev,
 	      uint32_t mdata_size,
 	      bool attach)
 {
-  amdxdna_drm_config_ctx adbo;
+  amdxdna_drm_config_hwctx adbo;
   adbo.handle = ctx_id;
   adbo.param_val = mdata_boh;
   adbo.param_val_size = mdata_size;
 
   if (attach)
-    adbo.param_type = DRM_AMDXDNA_CTX_ASSIGN_DBG_BUF;
+    adbo.param_type = DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF;
   else
-    adbo.param_type = DRM_AMDXDNA_CTX_REMOVE_DBG_BUF;
+    adbo.param_type = DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF;
 
-  m_edev->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_CTX, &adbo);
+  m_edev->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
 }
 
 static uint32_t
