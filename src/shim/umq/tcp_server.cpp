@@ -51,6 +51,12 @@ start()
 
   int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
   
+  if (serverSocket < 0)
+  {
+    shim_debug("tcp server socket creation failed");
+    return;
+  }
+
   // specifying the address
   sockaddr_in serverAddress; 
   serverAddress.sin_family = AF_INET;
@@ -58,7 +64,13 @@ start()
   serverAddress.sin_addr.s_addr = INADDR_ANY;
   
   // binding socket. 
-  bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
+  int ret = bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
+  if (ret == -1)
+  {
+    shim_debug("tcp server socket bind failed");
+    close(serverSocket);
+    return;
+  }
   
   // listening to the assigned socket
   // we allow only one debugger running
@@ -76,6 +88,15 @@ start()
       { 
         shim_debug("Tcp thread exit!\n");
         break;
+      }
+      else if (errno == EAGAIN || errno == EWOULDBLOCK)
+      {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        continue;
+      }
+      else
+      {
+        throw;
       }
     }
 
@@ -108,12 +129,18 @@ start()
         }
       }
 
-      if (!length)
+      if (length <= 0)
       {
-          break;
+        shim_debug("tcp server recv() length failure\n");
+        break;
       }
       std::vector<uint32_t> buffer(length >> 2);
-      recv(clientSocket, buffer.data(), length, 0);
+      n = recv(clientSocket, buffer.data(), length, 0);
+      if (n <= 0)
+      {
+        shim_debug("tcp server recv() data failure\n");
+        break;
+      }
 
       auto cmd = reinterpret_cast<aie_debugger_cmd *>(buffer.data());
       switch (cmd->type)
@@ -124,7 +151,7 @@ start()
           std::vector<uint32_t> ret;
           ret.push_back(sizeof(uint32_t));
           ret.push_back(status);
-          send(clientSocket, ret.data(), ret.size() * sizeof(uint32_t), 0);
+          n = send(clientSocket, ret.data(), ret.size() * sizeof(uint32_t), 0);
           break;
         }
         case READ_MEM_CMD:
@@ -134,7 +161,7 @@ start()
           ret.push_back(sizeof(uint32_t) * (cmd->cmd.read_mem.length + 1));
           ret.insert(ret.end(), data->begin(), data->end());
 
-          send(clientSocket, ret.data(), ret.size() * sizeof(uint32_t), 0);
+          n = send(clientSocket, ret.data(), ret.size() * sizeof(uint32_t), 0);
           break;
         }
         case WRITE_MEM_CMD:
@@ -144,7 +171,7 @@ start()
           std::vector<uint32_t> ret;
           ret.push_back(sizeof(uint32_t));
           ret.push_back(status);
-          send(clientSocket, ret.data(), ret.size() * sizeof(uint32_t), 0);
+          n = send(clientSocket, ret.data(), ret.size() * sizeof(uint32_t), 0);
           break;
         }
         case DETACH_CMD:
@@ -153,6 +180,15 @@ start()
           break;
         default:
           break;
+      }
+
+      if (n <= 0)
+      {// if we can't send back data to front, something wrong happen
+       // just detach from cert
+        shim_debug("tcp server: failed to send data back to front");
+        handle_detach();
+        loop = false;
+        break;
       }
     }
     // closing the client socket.

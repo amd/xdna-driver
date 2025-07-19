@@ -256,10 +256,17 @@ namespace shim_xdna {
 
 platform_drv_virtio::response_buffer::
 response_buffer(int dev_fd)
+  : response_buffer(dev_fd, resp_buffer_size)
+{
+}
+
+platform_drv_virtio::response_buffer::
+response_buffer(int dev_fd, size_t size)
   : m_dev_fd(dev_fd)
+  , m_size(size)
 {
   // Create response buffer
-  m_id = drm_bo_alloc(m_dev_fd, resp_buffer_size);
+  m_id = drm_bo_alloc(m_dev_fd, m_size);
 
   // Mmap response buffer
   uint64_t mapoff;
@@ -270,8 +277,7 @@ response_buffer(int dev_fd)
     std::cout << "Failed to obtain mmap offset of response buffer: " << e.what() << std::endl;
     throw;
   }
-  m_ptr = mmap(nullptr, resp_buffer_size,
-    PROT_READ | PROT_WRITE, MAP_SHARED, m_dev_fd, mapoff);
+  m_ptr = mmap(nullptr, m_size, PROT_READ | PROT_WRITE, MAP_SHARED, m_dev_fd, mapoff);
   if (m_ptr == MAP_FAILED) {
     drm_bo_free(m_dev_fd, m_id.handle);
     shim_err(-errno, "Failed to mmap response buffer");
@@ -288,7 +294,7 @@ platform_drv_virtio::response_buffer::
     m_id.handle, m_id.res_id, m_ptr);
 
   try {
-    munmap(m_ptr, resp_buffer_size);
+    munmap(m_ptr, m_size);
     drm_bo_free(m_dev_fd, m_id.handle);
   } catch (const xrt_core::system_error& e) {
     std::cout << "Failed to free response buffer: " << e.what() << std::endl;
@@ -372,7 +378,7 @@ hcall(void *req, void *out_buf, size_t out_size) const
     auto r = reinterpret_cast<vdrm_ccmd_req*>(req);
     shim_err(rsp_hdr->ret, "%s HCALL received bad reponse", hcall_cmd2name(r->cmd).c_str());
   }
-  memcpy(out_buf, m_resp_buf->get(), sz);
+  std::memcpy(out_buf, m_resp_buf->get(), sz);
 }
 
 void
@@ -474,17 +480,30 @@ void
 platform_drv_virtio::
 get_info(amdxdna_drm_get_info& arg) const
 {
-  // TODO: properly retrieve info from host.
-  if (arg.param != DRM_AMDXDNA_QUERY_AIE_METADATA)
-    shim_not_supported_err(__func__);
-  auto metadata = reinterpret_cast<amdxdna_drm_query_aie_metadata*>(arg.buffer);
-  metadata->core.row_count = 4;
+  if (arg.param == DRM_AMDXDNA_QUERY_AIE_STATUS)
+    shim_not_supported_err("get_info: DRM_AMDXDNA_QUERY_AIE_METADATA");
+  if (arg.param == DRM_AMDXDNA_READ_AIE_MEM)
+    shim_not_supported_err("get_info: DRM_AMDXDNA_READ_AIE_MEM");
+  if (arg.param == DRM_AMDXDNA_READ_AIE_REG)
+    shim_not_supported_err("get_info: DRM_AMDXDNA_READ_AIE_MEM");
+
+  auto resp_buf = std::make_unique<response_buffer>(dev_fd(), arg.buffer_size);
+  amdxdna_ccmd_get_info_req req = {
+    .hdr = { AMDXDNA_CCMD_GET_INFO, sizeof(req) },
+    .param = arg.param,
+    .size = arg.buffer_size,
+    .info_res = resp_buf->res_id(),
+  };
+  amdxdna_ccmd_get_info_rsp rsp = {};
+  hcall(&req, &rsp, sizeof(rsp));
+  std::memcpy(reinterpret_cast<char*>(arg.buffer), resp_buf->get(), rsp.size);
 }
 
 void
 platform_drv_virtio::
 get_info_array(amdxdna_drm_get_info_array& arg) const
 {
+    shim_not_supported_err(__func__);
 }
 
 void
@@ -502,12 +521,12 @@ get_sysfs(get_sysfs_arg& arg) const
 
   req->hdr.cmd = AMDXDNA_CCMD_READ_SYSFS;
   req->hdr.len = sizeof(req_data);
-  strcpy(req->node_name, arg.sysfs_node.c_str());
+  std::strcpy(req->node_name, arg.sysfs_node.c_str());
   hcall(req, rsp, response_size);
 
   if (rsp->val_len > arg.data.size())
     shim_err(EINVAL, "sysfs content is too long: %dB", rsp->val_len);
-  memcpy(arg.data.data(), rsp->val, rsp->val_len);
+  std::memcpy(arg.data.data(), rsp->val, rsp->val_len);
   arg.real_size = rsp->val_len;
 }
 
