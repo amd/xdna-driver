@@ -497,13 +497,28 @@ get_info(amdxdna_drm_get_info& arg) const
   amdxdna_ccmd_get_info_rsp rsp = {};
   hcall(&req, &rsp, sizeof(rsp));
   std::memcpy(reinterpret_cast<char*>(arg.buffer), resp_buf->get(), rsp.size);
+  arg.buffer_size = rsp.size;
 }
 
 void
 platform_drv_virtio::
 get_info_array(amdxdna_drm_get_info_array& arg) const
 {
-    shim_not_supported_err(__func__);
+  auto total_buf_size = arg.element_size * arg.num_element;
+  auto resp_buf = std::make_unique<response_buffer>(dev_fd(), total_buf_size);
+
+  amdxdna_ccmd_get_info_req req = {
+    .hdr = { AMDXDNA_CCMD_GET_INFO, sizeof(req) },
+    .param = arg.param,
+    .size = arg.element_size,
+    .num_element = arg.num_element,
+    .info_res = resp_buf->res_id(),
+  };
+  amdxdna_ccmd_get_info_rsp rsp = {};
+  hcall(&req, &rsp, sizeof(rsp));
+  std::memcpy(reinterpret_cast<char*>(arg.buffer), resp_buf->get(), total_buf_size);
+  arg.element_size = rsp.size;
+  arg.num_element = arg.num_element;
 }
 
 void
