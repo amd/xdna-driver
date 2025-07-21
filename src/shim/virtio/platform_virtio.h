@@ -51,7 +51,7 @@ private:
   hcall(void *req, void *out_buf, size_t out_size) const;
 
   void
-  hcall(void *req) const;
+  hcall(void *req, bool host_async) const;
 
   void
   create_ctx(create_ctx_arg& arg) const override;
