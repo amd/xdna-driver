@@ -52,11 +52,11 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct aie2_mgmt_dma_hdl mgmt_hdl;
-	struct app_health_report *report;
-	size_t size = sizeof(*report);
 	struct amdxdna_dev_hdl *ndev;
+	struct app_health_report *r;
 	u64 comp = ctx->completed;
 	u64 sub = ctx->submitted;
+	size_t size = sizeof(*r);
 	void *buff;
 	int ret;
 
@@ -74,23 +74,31 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 	ret = aie2_get_app_health(ndev, &mgmt_hdl, ctx->priv->id, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (!ret) {
-		report = buff;
+		r = buff;
+
 		print_hex_dump_debug("raw_report: ", DUMP_PREFIX_OFFSET, 16, 4, buff, size, false);
+
 		XDNA_ERR(xdna, "Firmware timeout state capture:");
-		XDNA_ERR(xdna, "\tDPU PC:    0x%x", report->dpu_pc);
-		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
+		XDNA_ERR(xdna, "\tVersion: %d.%d", r->major, r->minor);
+		XDNA_ERR(xdna, "\tReport size: 0x%x", r->size);
+		XDNA_ERR(xdna, "\tContext ID: %d", r->context_id);
+		XDNA_ERR(xdna, "\tDPU PC: 0x%x", r->dpu_pc);
+		XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", r->txn_op_id);
+		XDNA_ERR(xdna, "\tContext PC: 0x%x", r->ctx_pc);
+		XDNA_ERR(xdna, "\tFatal error type: 0x%x", r->fatal_info.fatal_type);
+		XDNA_ERR(xdna, "\tFatal error exception type: 0x%x", r->fatal_info.exception_type);
+		XDNA_ERR(xdna, "\tFatal error exception PC: 0x%x", r->fatal_info.exception_pc);
+		XDNA_ERR(xdna, "\tFatal error app module: 0x%x", r->fatal_info.app_module);
+		XDNA_ERR(xdna, "\tFatal error task ID: %d", r->fatal_info.task_index);
 
-		/* Update version when we support non zero version number */
-		if (report->txn_op_id != APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE)
-			ctx->health_data.txn_op_idx = report->txn_op_id;
-		else
-			ctx->health_data.txn_op_idx = UINT_MAX;
-
-		if (report->dpu_pc != APP_HEALTH_REPORT_V1_DPU_PC_NONE)
-			ctx->health_data.ctx_pc = report->dpu_pc;
-		else
-			ctx->health_data.ctx_pc = 0;
-
+		ctx->health_data.fatal_error_exception_type = r->fatal_info.exception_type;
+		ctx->health_data.fatal_error_exception_pc = r->fatal_info.exception_pc;
+		ctx->health_data.fatal_error_app_module = r->fatal_info.app_module;
+		ctx->health_data.fatal_error_type = r->fatal_info.fatal_type;
+		ctx->health_data.app_health_report_size = r->size;
+		ctx->health_data.txn_op_idx = r->txn_op_id;
+		ctx->health_data.ctx_pc = r->ctx_pc;
+		ctx->health_data.version = 0;
 		ctx->health_reported = false;
 	}
 	aie2_mgmt_buff_free(&mgmt_hdl);

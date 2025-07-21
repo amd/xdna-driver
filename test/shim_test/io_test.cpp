@@ -23,7 +23,7 @@ namespace {
 io_test_parameter io_test_parameters;
 // Used for injectng hang instruction at this DPU program counter.
 // and verify if the context health report
-int bad_run_injected_ctc_pc = 3;
+int bad_run_injected_dpu_pc = 3;
 
 void
 io_test_parameter_init(int perf, int type, int wait, bool debug = false)
@@ -85,8 +85,8 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
     // mergesync opcode. This will lead to command run timeout but without async error
     // Use this test to validate context health data report
     // See io_test_cmd_submit_and_wait_latency() for how to validate the result
-    instruction_p[bad_run_injected_ctc_pc] = 0x03000000;
-    instruction_p[bad_run_injected_ctc_pc + 1] = 0x00010100;
+    instruction_p[bad_run_injected_dpu_pc] = 0x03000000;
+    instruction_p[bad_run_injected_dpu_pc + 1] = 0x00010100;
   }
 
   if (io_test_parameters.debug) {
@@ -151,26 +151,28 @@ io_test_cmd_submit_and_wait_latency(
           ert_packet *pkg = reinterpret_cast<ert_packet *>(std::get<1>(cmd));
           ert_ctx_health_data *data = reinterpret_cast<ert_ctx_health_data *>(pkg->data);
           std::cout << "CTX health data:" << std::hex
-                    << "\n  version:    " << data->version
-                    << "\n  txn_op_idx: " << data->txn_op_idx
-                    << "\n  ctx_pc:     " << data->ctx_pc
+                    << "\n\tversion:    " << data->version
+                    << "\n\ttxn_op_idx: " << data->txn_op_idx
                     << std::dec << std::endl;
 
-	  // Verify health data
-	  if (data->ctx_pc != bad_run_injected_ctc_pc ||
-	      data->txn_op_idx != 0xFFFFFFFF ||
-	      data->version != 0) {
+          // TODO: Grep the DPU_PC from dmesg if privileged
+          uint32_t dpu_pc = 3;
+
+          // Verify health data
+          if (dpu_pc != bad_run_injected_dpu_pc ||
+              data->txn_op_idx != 0xFFFFFFFF ||
+              data->version != 0) {
             std::cout << "\nExpecting:"
-                      << "\n  version:    0"
-                      << "\n  txn_op_idx: ffffffff"
-                      << "\n  ctx_pc:     " + std::to_string(bad_run_injected_ctc_pc)
+                      << "\n\tversion: 0"
+                      << "\n\ttxn_op_idx: 0xffffffff"
+                      << "\n\tdpu_pc: " + std::to_string(bad_run_injected_dpu_pc)
                       << std::endl;
             throw std::runtime_error(std::string("Health data incorrect"));
-	  }
-	  // Don't throw but avoid validate the output buffer
-	} else {
+          }
+          // Don't throw but avoid validate the output buffer
+        } else {
           throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
-	}
+        }
       }
       std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
       completed++;
@@ -267,24 +269,24 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   }
 
   if (io_test_parameters.type == IO_TEST_DELAY_RUN) {
-	  int seconds = 8;
+    int seconds = 8;
 
-	  std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
-	  // Waiting for auto-suspend.
-	  sleep(seconds);
+    std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
+    // Waiting for auto-suspend.
+    sleep(seconds);
 
-	  std::cout << "Submit command to resume" << std::endl;
-	  io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos);
-	  // The device should be in resume state.
-	  // Waiting for auto-suspend again.
-	  std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
-	  sleep(seconds);
-	  std::cout << "Submit command to resume" << std::endl;
+    std::cout << "Submit command to resume" << std::endl;
+    io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos);
+    // The device should be in resume state.
+    // Waiting for auto-suspend again.
+    std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
+    sleep(seconds);
+    std::cout << "Submit command to resume" << std::endl;
 
-	  /*
-	   * For this code path, we expecte 2 times of suspend and resume
-	   * in dmesg log if dyndbg=+pf is set.
-	   */
+    /*
+     * For this code path, we expecte 2 times of suspend and resume
+     * in dmesg log if dyndbg=+pf is set.
+     */
   }
 
   // Submit commands and wait for results

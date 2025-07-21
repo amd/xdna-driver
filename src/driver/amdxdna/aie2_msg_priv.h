@@ -710,55 +710,33 @@ struct fatal_error_info {
 	u32 reserved[128];      /* for future use */
 };
 
-struct col_status_info {
-	u32 num_dma_ch;
-	u32 num_locks;
-	u32 num_event_status_regs;
-	u32 num_xaie_cols;
-	u32 start_col_index;
-	u32 num_cols_valid;
-	u32 col_status_size;
-};
-
 struct app_health_report {
 	u16				major;
 	u16				minor;
 	u32				size;
-
-	/* minor = 1 fileds */
 	u32				context_id;
 	/*
-	 * PC of the most recently started DPU opcode, as reported by the ERT
-	 * application.  Before starting or after finishing successfully, this is
-	 * APP_HEALTH_REPORT_V1_DPU_PC_NONE.  If execution stops early due to an
-	 * error, this retains the opcode PC.
-	 * Note: For the sake of performance, the ERT might cut some corners in
-	 * reporting this.  Interpreting it correctly requires understanding the
-	 * nuances of the implementation.
+	 * Program Counter (PC) of the last initiated DPU opcode, as reported by the ERT
+	 * application. Before execution begins or after successful completion, the value is set
+	 * to UINT_MAX. If execution halts prematurely due to an error, this field retains the
+	 * opcode's PC value.
+	 * Note: To optimize performance, the ERT may simplify certain aspects of reporting.
+	 * Proper interpretation requires familiarity with the implementation details.
 	 */
-#define APP_HEALTH_REPORT_V1_DPU_PC_NONE	(~0U)
 	u32				dpu_pc;
 	/*
-	 * Index of the most recently started TXN opcode.  Before starting or after
-	 * finishing successfully, this is APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE.  If
-	 * execution stops early due to an error, this retains the opcode ID.
-	 * Note: For the sake of performance, the ERT might cut some corners in
-	 * reporting this.  Interpreting it correctly requires understanding the
-	 * nuances of the implementation.
+	 * Index of the last initiated TXN opcode.
+	 * Before execution starts or after successful completion, the value is set to UINT_MAX.
+	 * If execution halts prematurely due to an error, this field retains the opcode's ID.
+	 * Note: To optimize performance, the ERT may simplify certain aspects of reporting.
+	 * Proper interpretation requires familiarity with the implementation details.
 	 */
-#define APP_HEALTH_REPORT_V1_TXN_OP_ID_NONE	(~0U)
 	u32				txn_op_id;
-
-	/* minor = 2 fields */
-	/* TODO: Should driver parse below fileds? How? */
-	struct fatal_error_info		fatal_error_info;
-	struct col_status_info		col_status_info;
-	/*
-	 * TODO: There is a complex array binding with hardware details, like
-	 * columns and rows. Let's think about if driver really needs to parsing
-	 * so many hardware details. Just reserve some space for now.
-	 */
-	u32				resv[1521];
+	/* The PC of the context at the time of the report */
+	u32				ctx_pc;
+	struct fatal_error_info		fatal_info;
+	/* Below captures complex platform dependent data parsed by userspace */
+	u32				resv[1528];
 };
 
 struct get_app_health_req {
