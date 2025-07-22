@@ -520,7 +520,7 @@ get_info_array(amdxdna_drm_get_info_array& arg) const
   hcall(&req, &rsp, sizeof(rsp));
   std::memcpy(reinterpret_cast<char*>(arg.buffer), resp_buf->get(), total_buf_size);
   arg.element_size = rsp.size;
-  arg.num_element = arg.num_element;
+  arg.num_element = rsp.num_element;
 }
 
 void
