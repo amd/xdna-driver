@@ -6,13 +6,16 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
+#if KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE
 #include <drm/drm_managed.h>
+#endif
 
 #include "amdxdna_devel.h"
 #include "amdxdna_of_drv.h"
 
 static const struct of_device_id amdxdna_of_table[] = {
 	{ .compatible = "amdxdna,ve2", .data = &dev_ve2_info },
+	{ .compatible = "xlnx,aiarm", .data = &dev_ve2_info },
 	{ /* end of table */ }
 };
 
@@ -39,7 +42,11 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 	if (!xdna->dev_info)
 		return -ENODEV;
 
+#if KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
+#else
+	devm_mutex_init(dev, &xdna->dev_lock);
+#endif
 	INIT_LIST_HEAD(&xdna->client_list);
 	platform_set_drvdata(pdev, xdna);
 

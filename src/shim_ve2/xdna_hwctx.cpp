@@ -87,10 +87,10 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   m_hwq = std::make_unique<xdna_hwq>(m_device);
   init_qos_info(qos);
   parse_xclbin(xclbin);
-  amdxdna_drm_create_ctx arg = {};
+  amdxdna_drm_create_hwctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
   arg.num_tiles = m_num_cols;
-  // TODO: Need to use correct field once available in amdxdna_drm_create_ctx
+  // TODO: Need to use correct field once available in amdxdna_drm_create_hwctx
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
@@ -104,7 +104,7 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
 	  static_cast<bo*>(m_log_bo.get())->get_drm_bo_handle() :
 	  AMDXDNA_INVALID_BO_HANDLE;
 #endif
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_CTX, &arg);
+  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 
   set_slotidx(arg.handle);
   m_info = get_partition_info_hw(&m_device, xclbin.get_uuid(), arg.handle);
@@ -115,6 +115,15 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
     m_aie_array = std::make_shared<xdna_aie_array>(&m_device, this);
 
   m_hwq->bind_hwctx(this);
+
+  u32 op_timeout = xrt_core::config::get_cert_timeout();
+  amdxdna_drm_config_hwctx adbo;
+  adbo.handle = arg.handle;
+  adbo.param_val = (__u64)(uintptr_t)&op_timeout;
+  adbo.param_val_size = sizeof(u64);
+  adbo.param_type = DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT;
+
+  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
 }
 
 xdna_hwctx::
@@ -127,14 +136,14 @@ xdna_hwctx(const device_xdna& dev, uint32_t partition_size, const xrt::hw_contex
 {
   init_qos_info(qos);
 
-  amdxdna_drm_create_ctx arg = {};
+  amdxdna_drm_create_hwctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
   arg.num_tiles = m_num_cols;
-  // TODO: Need to use correct field once available in amdxdna_drm_create_ctx
+  // TODO: Need to use correct field once available in amdxdna_drm_create_hwctx
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_CTX, &arg);
+  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 
   set_slotidx(arg.handle);
   set_doorbell(arg.umq_doorbell);
@@ -153,9 +162,9 @@ xdna_hwctx::
       return;
 
     m_hwq->unbind_hwctx();
-    struct amdxdna_drm_destroy_ctx arg = {};
+    struct amdxdna_drm_destroy_hwctx arg = {};
     arg.handle = m_handle;
-    m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_CTX, &arg);
+    m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
 #if 0
     // Not supported yet
     fini_log_buf();

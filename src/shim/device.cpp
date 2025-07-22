@@ -1020,6 +1020,14 @@ struct runner{
     case xrt_core::query::runner::type::gemm:
       runner_name = "/Runner/gemm";
       break;
+    case xrt_core::query::runner::type::aie_reconfig_overhead:
+      runner_name = "/Runner/aie_reconfig_overhead";
+      break;
+    case xrt_core::query::runner::type::cmd_chain_latency:
+      runner_name = "/Runner/cmd_chain_latency";
+      break;
+    case xrt_core::query::runner::type::cmd_chain_throughput:
+      runner_name = "/Runner/cmd_chain_throughput";
     }
 
     switch (hardware_type)

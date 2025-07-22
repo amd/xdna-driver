@@ -26,6 +26,7 @@ private:
   class response_buffer {
   public:
     response_buffer(int dev_fd);
+    response_buffer(int dev_fd, size_t size);
     ~response_buffer();
 
     uint32_t
@@ -37,6 +38,7 @@ private:
   private:
     int m_dev_fd = -1;
     bo_id m_id;
+    size_t m_size;
     void *m_ptr = nullptr;
   };
 
@@ -49,7 +51,7 @@ private:
   hcall(void *req, void *out_buf, size_t out_size) const;
 
   void
-  hcall(void *req) const;
+  hcall(void *req, bool host_async) const;
 
   void
   create_ctx(create_ctx_arg& arg) const override;
