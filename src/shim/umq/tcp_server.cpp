@@ -129,7 +129,10 @@ start()
         }
       }
 
-      if (length <= 0)
+      //we don't expect front end read/write longer than 64k in one cmd
+      //and length must be multiple of word
+      if (length <= 0 || length > 0x10000 ||
+        (length % sizeof(uint32_t) != 0))
       {
         shim_debug("tcp server recv() length failure\n");
         break;
