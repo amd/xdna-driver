@@ -85,22 +85,42 @@ struct amdxdna_cmd_preempt_data {
 /*
  * Interpretation of payload for an amdxdna_cmd which has context health data
  *
- * @version:          context health data version
- * @txn_op_idx:       index of last TXN control code executed
- * @ctx_pc:           program counter for that context
+ * @version:                    context health data version.
+ *                              defines the interface version between driver and shim.
+ * @txn_op_idx:                 index of last TXN control code executed
+ * @ctx_pc:                     program counter for that context
+ * @fatal_error_type:           the fatal error type if context crashes
+ * @fatal_error_exception_type: LX7 exception type
+ * @fatal_error_exception_pc:   LX7 program counter at the time of the exception
+ * @fatal_error_app_module:     module name where the exception occurred
+ * @app_health_report_size:     size in bytes of the entire app health report
+ * @app_health_report:          binary blob of the entire app health report (contains aie states)
  *
- * Field              Default value  Comment
- * txn_op_idx:        0xFFFFFFFF     there is no txn control code is running or the
- *                                   last txn control code op idx is not captured
- * ctx_pc:            0              context .text program counter is not captured
- *
+ * Field                       Default value  Comment
+ * txn_op_idx:                 0xFFFFFFFF     there is no txn control code is running or the
+ *                                            last txn control code op idx is not captured
+ * ctx_pc:                     0              context .text program counter is not captured
+ * fatal_error_type:           0              no fatal error or fatal error is not captured
+ * fatal_error_exception_type: 0
+ * fatal_error_exception_pc:   0
+ * fatal_error_app_module:     0
+ * app_health_report_size:     0              The entire app health report size
+
  * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
  * amdxdna_cmd starting from payload will have the following information.
  */
 struct amdxdna_ctx_health_data {
-	u32 version; /* MBZ */
+	/* platform agnositic fields */
+	u32 version;
 	u32 txn_op_idx;
 	u32 ctx_pc;
+	u32 fatal_error_type;
+	u32 fatal_error_exception_type;
+	u32 fatal_error_exception_pc;
+	u32 fatal_error_app_module;
+	/* platform dependent */
+	u32 app_health_report_size;
+	u32 app_health_report[];
 };
 
 /* Exec buffer command header format */
