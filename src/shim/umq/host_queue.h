@@ -45,9 +45,6 @@ enum host_queue_packet_opcode
 
 /*
  * hsa pkt payload of exec_buf
- * this cmd has to be after the cu_config cmd, with which the cu_index in
- * this cmd can locate the pdi info corresponding to the cu, CERT then can
- * decide whether pdi load is required.
  * dpu_control_code_host_addr* is used to load control code interpreted by
  * the job runner in CERT
  * args contains the info of input/output frame, parameter of network
@@ -55,8 +52,7 @@ enum host_queue_packet_opcode
  */ 
 struct exec_buf
 {
-  uint16_t cu_index;
-  uint16_t reserved0;
+  uint32_t reserved0;
   uint32_t dpu_control_code_host_addr_low;
   uint32_t dpu_control_code_host_addr_high;
   uint16_t args_len;

@@ -138,7 +138,6 @@ dump() const
       volatile struct exec_buf *ebp =
         reinterpret_cast<volatile struct exec_buf *>(pkt->data);
 
-      shim_debug("\tcu_index:\t%d", ebp->cu_index);
       shim_debug("\tdpu: [0x%x 0x%x]",
         ebp->dpu_control_code_host_addr_high,
         ebp->dpu_control_code_host_addr_low);
@@ -155,7 +154,6 @@ dump() const
 	  reinterpret_cast<volatile struct host_indirect_data *>(m_umq_indirect_buf);
 	shim_debug("\t\th:distribute:\t%d", data[i].header.distribute);
 	shim_debug("\t\th:indirect:\t%d", data[i].header.indirect);
-	shim_debug("\t\tp:cu_index:\t%d", data[i].payload.cu_index);
 	shim_debug("\t\tp:dpu: [0x%x 0x%x]",
           data[i].payload.dpu_control_code_host_addr_high,
           data[i].payload.dpu_control_code_host_addr_low);
@@ -228,16 +226,16 @@ get_pkt(uint64_t index)
 
 uint64_t
 hwq_umq::
-issue_exec_buf(uint16_t cu_idx, ert_dpu_data *dpu, uint64_t comp)
+issue_exec_buf(ert_dpu_data *dpu, uint64_t comp)
 {
   auto slot_idx = reserve_slot();
   auto pkt = get_pkt(slot_idx);
   size_t pkt_size;
 
   if (get_ert_dpu_data_next(dpu))
-    pkt_size = fill_indirect_exec_buf(slot_idx, cu_idx, pkt, dpu);
+    pkt_size = fill_indirect_exec_buf(slot_idx, pkt, dpu);
   else
-    pkt_size = fill_direct_exec_buf(cu_idx, pkt, dpu); 
+    pkt_size = fill_direct_exec_buf(pkt, dpu); 
 
   auto hdr = &pkt->xrt_header;
   hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
@@ -250,9 +248,9 @@ issue_exec_buf(uint16_t cu_idx, ert_dpu_data *dpu, uint64_t comp)
 
 size_t
 hwq_umq::
-fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
-                        volatile struct host_queue_packet *pkt,
-                        ert_dpu_data *dpu) {
+fill_indirect_exec_buf(uint64_t slot_idx, 
+  volatile struct host_queue_packet *pkt,
+  ert_dpu_data *dpu) {
   auto pkt_size = (dpu->chained + 1) * sizeof(struct host_indirect_packet_entry);
 
   if (dpu->chained + 1 >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
@@ -281,7 +279,6 @@ fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
     auto cebp = &m_umq_indirect_buf[prefix_idx + i];
     // do not zero this buffer, the cebp->header is pre-set 
     // set every cebp->payload field in case of garbage data
-    cebp->payload.cu_index = cu_idx;
     cebp->payload.dpu_control_code_host_addr_low =
       static_cast<uint32_t>(dpu->instruction_buffer);
     cebp->payload.dpu_control_code_host_addr_high =
@@ -300,7 +297,7 @@ fill_indirect_exec_buf(uint64_t slot_idx, uint16_t cu_idx,
 
 size_t
 hwq_umq::
-fill_direct_exec_buf(uint16_t cu_idx, volatile struct host_queue_packet *pkt,
+fill_direct_exec_buf(volatile struct host_queue_packet *pkt,
                      ert_dpu_data *dpu) {
   auto pkt_size = sizeof(struct exec_buf);
   if (pkt_size > sizeof(pkt->data))
@@ -312,7 +309,6 @@ fill_direct_exec_buf(uint16_t cu_idx, volatile struct host_queue_packet *pkt,
   std::memset(data, 0, pkt_size);
   // set correct dpu control code
   volatile struct exec_buf *ebp = reinterpret_cast<volatile struct exec_buf *>(pkt->data);
-  ebp->cu_index = cu_idx;
   ebp->dpu_control_code_host_addr_low = static_cast<uint32_t>(dpu->instruction_buffer);
   ebp->dpu_control_code_host_addr_high = static_cast<uint32_t>(dpu->instruction_buffer >> 32);
 
@@ -367,7 +363,7 @@ issue_command(const cmd_buffer *cmd_bo)
   // Completion signal area has to be a full WORD, we utilze the command_bo
   uint64_t comp = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
 
-  auto seq = issue_exec_buf(ffs(cmd->cu_mask) - 1, dpu_data, comp);
+  auto seq = issue_exec_buf(dpu_data, comp);
   shim_debug("Submitted command (%ld)", seq);
   return seq;
 }
