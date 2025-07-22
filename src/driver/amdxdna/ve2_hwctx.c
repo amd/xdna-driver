@@ -777,7 +777,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	kfree(hwctx->priv);
 }
 
-static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u64 paddr, u8 buf_type,
+static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 paddr,
 				    u32 buf_sz, u32 col, bool attach)
 {
 	struct device *aie_dev = hwctx->priv->aie_part;
