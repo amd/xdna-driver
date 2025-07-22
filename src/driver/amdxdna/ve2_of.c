@@ -65,16 +65,6 @@ out:
 	return ret;
 }
 
-static void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
-{
-	u32 col;
-
-	for (col = 0; col < max_cols; col++) {
-		kfree(xdna_hdl->fw_slots[col]);
-		xdna_hdl->fw_slots[col] = NULL;
-	}
-}
-
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
@@ -125,6 +115,7 @@ done:
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
+	ve2_free_firmware_slots(xdna->dev_handle, VE2_MAX_COL);
 }
 
 const struct amdxdna_dev_ops ve2_ops = {

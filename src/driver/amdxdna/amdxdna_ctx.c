@@ -236,6 +236,7 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		break;
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;

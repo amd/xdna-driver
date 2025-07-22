@@ -49,7 +49,7 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
   uint32_t cmd_bo_hdl = boh->get_drm_bo_handle();
 
   amdxdna_drm_exec_cmd ecmd = {
-    .ctx = m_hwctx->get_slotidx(),
+    .hwctx = m_hwctx->get_slotidx(),
     .cmd_handles = boh->get_drm_bo_handle(),
     .args = reinterpret_cast<uintptr_t>(arg_bo_hdls),
     .cmd_count = 1,
@@ -72,7 +72,7 @@ wait_command(xrt_core::buffer_handle *cmd_bo, uint32_t timeout_ms) const
 
   shim_debug("Waiting for cmd (%ld)...", id);
   amdxdna_drm_wait_cmd wcmd = {
-    .ctx = m_hwctx->get_slotidx(),
+    .hwctx = m_hwctx->get_slotidx(),
     .timeout = timeout_ms,
     .seq = boh->get_cmd_id(),
   };

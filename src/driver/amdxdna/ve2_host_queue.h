@@ -138,13 +138,14 @@ struct handshake {
 	}
 	trace;
 	struct {
+  #define NUM_PDI_SAVE 2
 		u32	restore_page;
-		u32	pdi_id;
 		struct {
+			u32	id;
 			u16	page_index;
 			u16	page_len;
 		}
-		pdi_page;
+		pdi[NUM_PDI_SAVE];
 	}
 	ctx_save;
 	struct {
@@ -199,4 +200,5 @@ struct handshake {
 	u32 test_pdi_addr_high;
 	u32 test_pdi_addr_low;
 #endif
+	u32 opcode_timeout_config;
 };
