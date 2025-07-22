@@ -18,16 +18,13 @@ File:
 	tools/bins/17f0_20/validate_elf.xclbin
 	tools/bins/17f1_10/nop.elf
 	tools/bins/17f0_10/nop.elf
-	tools/bins/17f0_10/aie_reconfig_overhead.elf
 	tools/bins/17f0_10/tct_1col.elf
 	tools/bins/17f0_10/tct_4col.elf
 	tools/bins/17f0_10/gemm_int8.elf
 	tools/bins/17f0_11/nop.elf
-	tools/bins/17f0_11/aie_reconfig_overhead.elf
 	tools/bins/17f0_11/tct_1col.elf
 	tools/bins/17f0_11/tct_4col.elf
 	tools/bins/17f0_20/nop.elf
-	tools/bins/17f0_20/aie_reconfig_overhead.elf
 	tools/bins/17f0_20/tct_1col.elf
 	tools/bins/17f0_20/tct_4col.elf
 	tools/bins/17f0_10/mobilenet_4col.elf
@@ -62,6 +59,19 @@ File:
 	tools/bins/Runner/df_bandwidth/strx/profile_df_bandwidth.json
 	tools/bins/Runner/df_bandwidth/strx/recipe_df_bandwidth.json
 	tools/bins/Runner/df_bandwidth/strx/validate.xclbin
+	tools/bins/Runner/aie_reconfig_overhead/aie_reconfig_overhead.elf
+	tools/bins/Runner/aie_reconfig_overhead/recipe_aie_reconfig_overhead.json
+	tools/bins/Runner/aie_reconfig_overhead/recipe_nop.json
+	tools/bins/Runner/aie_reconfig_overhead/validate.xclbin
+	tools/bins/Runner/aie_reconfig_overhead/profile.json
+	tools/bins/Runner/cmd_chain_latency/strx/nop.elf
+	tools/bins/Runner/cmd_chain_latency/strx/profile_cmd_chain_latency.json
+	tools/bins/Runner/cmd_chain_latency/strx/recipe_cmd_chain_latency.json
+	tools/bins/Runner/cmd_chain_latency/strx/validate.xclbin
+	tools/bins/Runner/cmd_chain_throughput/strx/nop.elf
+	tools/bins/Runner/cmd_chain_throughput/strx/profile_cmd_chain_throughput.json
+	tools/bins/Runner/cmd_chain_throughput/strx/recipe_cmd_chain_throughput.json
+	tools/bins/Runner/cmd_chain_throughput/strx/validate.xclbin
 
 Link:
 	tools/bins/17f3_10 -> tools/bins/17f1_10

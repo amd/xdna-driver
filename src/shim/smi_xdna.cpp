@@ -31,11 +31,8 @@ config_gen_phoenix()
 {
   validate_test_desc = {
     {"all", "All applicable validate tests will be executed (default)", "common"},
-    {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
-    {"cmd-chain-throughput", "Run end-to-end throughput test using command chaining", "hidden"},
     {"df-bw", "Run bandwidth test on data fabric", "hidden"},
     {"latency", "Run end-to-end latency test", "common"},
-    {"quick", "Run a subset of four tests: \n1. latency \n2. throughput \n3. cmd-chain-latency \n4. cmd-chain-throughput", "hidden"},
     {"tct-all-col", "Measure average TCT processing time for all columns", "hidden"},
     {"tct-one-col", "Measure average TCT processing time for one column", "hidden"},
     {"throughput", "Run end-to-end throughput test", "common"},
