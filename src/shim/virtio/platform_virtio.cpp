@@ -82,6 +82,10 @@ hcall_cmd2name(unsigned long cmd)
     return "AMDXDNA_CCMD_EXEC_CMD";
   case AMDXDNA_CCMD_WAIT_CMD:
     return "AMDXDNA_CCMD_WAIT_CMD";
+  case AMDXDNA_CCMD_GET_INFO:
+    return "AMDXDNA_CCMD_GET_INFO";
+  case AMDXDNA_CCMD_READ_SYSFS:
+    return "AMDXDNA_CCMD_READ_SYSFS";
   }
 
   return "UNKNOWN(" + std::to_string(cmd) + ")";
@@ -527,7 +531,7 @@ void
 platform_drv_virtio::
 get_sysfs(get_sysfs_arg& arg) const
 {
-  const int name_size = 256;
+  const int name_size = 256; // Make sure size is multiple of 64 bits.
   const int response_size = 4096;
   if (arg.sysfs_node.size() >= name_size)
     shim_err(EINVAL, "sysfs node name is too long: %s", arg.sysfs_node.c_str());
@@ -564,6 +568,21 @@ config_ctx_cu_config(config_ctx_cu_config_arg& arg) const
   std::memcpy(cu_conf_param_buf.data() + sizeof(amdxdna_ccmd_config_ctx_req),
     arg.conf_buf.data(), arg.conf_buf.size());
   hcall(cu_conf_req, false);
+}
+
+void
+platform_drv_virtio::
+config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const
+{
+  amdxdna_ccmd_config_ctx_req req = {};
+
+  req.hdr.cmd = AMDXDNA_CCMD_CONFIG_CTX;
+  req.hdr.len = sizeof(req);
+  req.handle = arg.ctx_handle;
+  req.param_type = arg.is_detach ?
+    DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF : DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF;
+  req.inline_param = arg.bo.handle;
+  hcall(&req, false);
 }
 
 void

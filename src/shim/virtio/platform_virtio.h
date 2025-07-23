@@ -84,6 +84,9 @@ private:
   config_ctx_cu_config(config_ctx_cu_config_arg& arg) const override;
 
   void
+  config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const override;
+
+  void
   submit_cmd(submit_cmd_arg& arg) const override;
 
   void
