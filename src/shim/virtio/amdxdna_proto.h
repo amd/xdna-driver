@@ -129,6 +129,7 @@ struct amdxdna_ccmd_config_ctx_req {
     uint32_t _pad;
     uint32_t param_type;
     uint32_t param_val_size;
+    uint64_t inline_param; /* only when param_val_size is zero */
     uint64_t param_val[];
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_config_ctx_req)
