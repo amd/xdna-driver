@@ -47,5 +47,12 @@ is_umq() const
   return true;
 }
 
+void
+pdev_umq::
+create_drm_dev_bo(create_bo_arg *arg) const
+{
+  shim_not_supported_err(__func__);
+}
+
 }
 

@@ -13,6 +13,8 @@
 
 namespace {
 
+const auto heap_page_size = 64ul * 1024 * 1024;
+
 uint8_t
 use_to_fw_debug_type(uint8_t use)
 {
@@ -81,6 +83,12 @@ size_t
 page_size_roundup(size_t size)
 {
   return (size + page_size - 1) & ~(page_size - 1);
+}
+
+size_t
+heap_page_size_roundup(size_t size)
+{
+  return (size + heap_page_size - 1) & ~(heap_page_size - 1);
 }
 
 std::string
@@ -162,8 +170,8 @@ is_driver_pin_arg_bo()
 uint64_t
 bo_addr_align(int type)
 {
-  // Device mem heap must align at 64MB boundary. Others can be byte aligned.
-  return (type == AMDXDNA_BO_DEV_HEAP) ? 64ul * 1024 * 1024 : 1;
+  // Device mem heap must align at heap_page_size boundary. Others can be byte aligned.
+  return (type == AMDXDNA_BO_DEV_HEAP) ? heap_page_size : 1;
 }
 
 }
@@ -265,7 +273,10 @@ drm_bo(const pdev& pdev, size_t size, int type)
     .size = m_size,
     .xdna_addr_align = (align == 1 ? 0 : align), 
   };
-  m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
+  if (type == AMDXDNA_BO_DEV)
+    m_pdev.create_drm_dev_bo(&arg);
+  else
+    m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
   m_id = arg.bo;
   m_xdna_addr = arg.xdna_addr;
   m_map_offset = arg.map_offset;
@@ -349,7 +360,8 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   // CPU and device can't share cacheline, especially when the BO is output and
   // both CPU and device may write to it.
   // In case the BO is exported to other process, it has to be aligned on page
-  // boundary so that we don't implicitly share more than we need.
+  // boundary so that we don't implicitly share more than we need. Page size
+  // alignement is also required on Windows platform.
   // Based on the above reasons, we'll enforce the pointer to be page aligned.
   if (!is_page_aligned(m_uptr))
     shim_err(EINVAL, "User pointer %p must be page aligned.", m_uptr);
@@ -384,6 +396,7 @@ void
 buffer::
 expand(size_t size)
 {
+  size = (m_type == AMDXDNA_BO_DEV_HEAP) ? heap_page_size_roundup(size) : size;
   auto cur_sz = m_cur_size;
   auto new_sz = size + m_cur_size;
   shim_debug("Expanding BO from %ld to %ld", cur_sz, new_sz);
