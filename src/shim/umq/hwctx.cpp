@@ -45,10 +45,10 @@ void
 hwctx_umq::
 init_log_buf()
 {
-  size_t column_size = 1024;
+  size_t column_size = 4096;
   auto log_buf_size = m_col_cnt * column_size;
   m_log_bo = std::make_unique<uc_dbg_buffer>
-    (m_pdev, log_buf_size, AMDXDNA_BO_SHARE);
+    (m_pdev, log_buf_size, AMDXDNA_BO_CMD);
   auto log_buf = m_log_bo->vaddr();
   std::memset(log_buf, 0, log_buf_size);
 
@@ -65,7 +65,7 @@ init_log_buf()
   
   // TODO: configure log BO on the hwctx once driver and fw support it
   // we may use xrt.ini to control the config
-  //m_log_bo->config(this, buf_sizes);
+  m_log_bo->config(this, buf_sizes);
 }
 
 void
