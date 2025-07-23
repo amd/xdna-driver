@@ -1137,6 +1137,8 @@ aie2_cmdlist_prepare_request(void *req, struct amdxdna_gem_obj *cmdbuf_abo,
 	if (class == CMD_CHAIN_CLASS_PREEMPT) {
 		struct cmd_chain_npu_req *npu = req;
 
+		npu->flags = 0;
+		npu->reserved = 0;
 		npu->buf_addr = cmdbuf_abo->mem.dev_addr;
 		npu->buf_size = size;
 		npu->count = cnt;
