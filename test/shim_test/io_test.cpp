@@ -8,6 +8,7 @@
 #include "io_param.h"
 
 #include "core/common/device.h"
+#include <fstream>
 #include <string>
 #include <regex>
 
@@ -131,6 +132,47 @@ void io_test_cmd_wait(hwqueue_handle *hwq, std::shared_ptr<bo> bo)
     }
 }
 
+uint32_t io_test_get_latest_dpu_pc() {
+  const std::string tempFile = "/tmp/dmesg_output.txt";
+
+  if (geteuid() != 0)
+    throw std::runtime_error("Permission denied. User doesn't have admin privilege.");
+
+  // Run the `dmesg` command and redirect its output to a temporary file
+  int ret = system(("dmesg > " + tempFile).c_str());
+  if (ret)
+    throw std::runtime_error("Error executing dmesg command.");
+
+  std::ifstream file(tempFile);
+  if (!file.is_open())
+    throw std::runtime_error("Failed to open dmesg output file.");
+
+  uint32_t latest_dpu_pc = 0;
+  std::string line;
+
+  while (std::getline(file, line)) {
+    // Check if the line contains "DPU PC"
+    if (line.find("DPU PC:") != std::string::npos) {
+      // Extract the value after "DPU PC:"
+      std::size_t pos = line.find("DPU PC:");
+      if (pos != std::string::npos) {
+        std::istringstream iss(line.substr(pos + 8));
+        std::string value;
+        iss >> value;
+        latest_dpu_pc = std::stoul(value, nullptr, 0);
+      }
+    }
+  }
+
+  file.close();
+
+  ret = system(("rm -f " + tempFile).c_str());
+  if (ret)
+    throw std::runtime_error("Error removing temporary file.");
+
+  return latest_dpu_pc;
+}
+
 void
 io_test_cmd_submit_and_wait_latency(
   hwqueue_handle *hwq,
@@ -150,24 +192,24 @@ io_test_cmd_submit_and_wait_latency(
         if (io_test_parameters.type == IO_TEST_BAD_RUN_REPORT_CTX_PC && state == ERT_CMD_STATE_TIMEOUT) {
           ert_packet *pkg = reinterpret_cast<ert_packet *>(std::get<1>(cmd));
           ert_ctx_health_data *data = reinterpret_cast<ert_ctx_health_data *>(pkg->data);
+          uint32_t dpu_pc = io_test_get_latest_dpu_pc();
+
           std::cout << "CTX health data:" << std::hex
-                    << "\n\tversion:    " << data->version
+                    << "\n\tversion: " << data->version
+                    << "\n\tdpu_pc: " << dpu_pc
                     << "\n\ttxn_op_idx: " << data->txn_op_idx
                     << std::dec << std::endl;
-
-          // TODO: Grep the DPU_PC from dmesg if privileged
-          uint32_t dpu_pc = 3;
 
           // Verify health data
           if (dpu_pc != bad_run_injected_dpu_pc ||
               data->txn_op_idx != 0xFFFFFFFF ||
               data->version != 0) {
-            std::cout << "\nExpecting:"
+            std::cout << "\nExpected:"
                       << "\n\tversion: 0"
-                      << "\n\ttxn_op_idx: 0xffffffff"
                       << "\n\tdpu_pc: " + std::to_string(bad_run_injected_dpu_pc)
+                      << "\n\ttxn_op_idx: 0xffffffff"
                       << std::endl;
-            throw std::runtime_error(std::string("Health data incorrect"));
+            throw std::runtime_error(std::string("Incorrect App Health data"));
           }
           // Don't throw but avoid validate the output buffer
         } else {

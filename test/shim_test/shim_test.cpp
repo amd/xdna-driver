@@ -181,6 +181,15 @@ dev_filter_is_npu4(device::id_type id, device* dev)
   return device_id == npu4_device_id;
 }
 
+bool
+skip_unprivileged_npu4(device::id_type id, device* dev)
+{
+  // Root user ID is 0
+  if (dev_filter_is_npu4(id, dev) && !geteuid())
+    return true;
+  return false;
+}
+
 // All test case runners
 
 void
@@ -785,7 +794,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
   },
   test_case{ "io test real kernel bad run for health report", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
+    TEST_POSITIVE, skip_unprivileged_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
