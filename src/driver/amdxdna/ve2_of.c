@@ -55,9 +55,13 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	}
 
 	ret = aie_load_cert(xaie_dev, buf);
+	if (ret < 0)
+		goto teardown;
 
+	ve2_store_firmware_version(xdna_hdl, xaie_dev);
+
+teardown:
 	aie_partition_teardown(xaie_dev);
-
 release:
 	aie_partition_release(xaie_dev);
 out:
