@@ -843,15 +843,56 @@ static int aie2_ctx_rq_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(ctx_rq, aie2_ctx_rq_show, NULL);
 
+static ssize_t aie2_get_app_health_write(struct file *file, const char __user *buf, 
+			size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	char context_id_buf[16];
+	u32 context_id = 1; /* default context id */
+	char *kbuf, *token, *key, *val;
+	int ret;
+
+	if (len > 15) {
+		XDNA_ERR(xdna, "Input length %zu > buffer size %d", len, 15);
+		return -EINVAL;
+	}
+
+	kbuf = context_id_buf;
+	if (copy_from_user(kbuf, buf, len))
+		return -EFAULT;
+
+	kbuf[len] = '\0';
+	token = strsep(&kbuf, " ");
+
+	if (token) {
+		key = strsep(&token, "=");
+		val = token;
+
+		if (key && val && strcmp(key, "context_id") == 0) {
+			ret = kstrtouint(val, 0, &context_id);
+			if (ret) {
+				XDNA_ERR(xdna, "Invalid context_id value");
+				return -EINVAL;
+			}
+		}
+	}
+
+	/* Store context_id for later use in show function */
+	ndev->debug_context_id = context_id;
+	return len;
+}
+
 static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct aie2_mgmt_dma_hdl mgmt_hdl;
 	struct app_health_report *report;
-	const size_t size = 0x2000;
+	const size_t size = sizeof(*report);
 	void *buff;
 	int ret;
+	u32 context_id = ndev->debug_context_id ?: 1; /* default context id */
 
 	buff = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
 	if (!buff)
@@ -859,8 +900,7 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 
 	aie2_mgmt_buff_clflush(&mgmt_hdl);
 	mutex_lock(&ndev->aie2_lock);
-	/* Just for debug, always check context id 1 */
-	ret = aie2_get_app_health(ndev, &mgmt_hdl, 1, size);
+	ret = aie2_get_app_health(ndev, &mgmt_hdl, context_id, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed ret %d", ret);
@@ -873,13 +913,15 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	seq_printf(m, "context_id %d\n", report->context_id);
 	seq_printf(m, "dpu_pc     0x%x\n", report->dpu_pc);
 	seq_printf(m, "txn_op_id  0x%x\n", report->txn_op_id);
+	seq_printf(m, "ctx_pc     0x%x\n", report->ctx_pc);
+	seq_printf(m, "fatal_error_info: 0x%x\n", report->fatal_info.fatal_type);
 
 free_buf:
 	aie2_mgmt_buff_free(&mgmt_hdl);
-	return 0;
+	return ret;
 }
 
-AIE2_DBGFS_FOPS(get_app_health, aie2_get_app_health_show, NULL);
+AIE2_DBGFS_FOPS(get_app_health, aie2_get_app_health_show, aie2_get_app_health_write);
 
 const struct {
 	const char *name;

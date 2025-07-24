@@ -359,6 +359,8 @@ struct amdxdna_dev_hdl {
 	struct mutex			aie2_lock;
 
 	struct aie2_ctx_rq		ctx_rq;
+
+	u32 debug_context_id;
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
