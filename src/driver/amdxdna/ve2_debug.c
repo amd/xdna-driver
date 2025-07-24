@@ -8,6 +8,7 @@
 #include "ve2_fw.h"
 #include "ve2_mgmt.h"
 #include "ve2_of.h"
+#include "ve2_res_solver.h"
 
 static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
@@ -286,6 +287,30 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 	return 0;
 }
 
+static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_aie_metadata *mdata;
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret = 0;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
+	mdata = kzalloc(sizeof(*mdata), GFP_KERNEL);
+	if (!mdata)
+		return -ENOMEM;
+
+	mdata->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
+	if (copy_to_user(u64_to_user_ptr(args->buffer), mdata, args->buffer_size))
+		ret = -EFAULT;
+
+	kfree(mdata);
+
+	return ret;
+}
+
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -309,6 +334,9 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		break;
 	case DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION:
 		ret = ve2_get_firmware_version(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_METADATA:
+		ret = ve2_get_total_col(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

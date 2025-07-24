@@ -52,7 +52,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	ve2_of.o \
 	ve2_regs.o \
 	amdxdna_of_drv.o \
-	ve2_solver.o \
+	ve2_res_solver.o \
 	ve2_mgmt.o \
 	ve2_hwctx.o \
 	ve2_fw.o \
