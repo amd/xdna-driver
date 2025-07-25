@@ -20,6 +20,12 @@ namespace {
 
 const size_t resp_buffer_size = 0x1000;
 
+size_t
+roundup_64bit(size_t size)
+{
+  return (size + sizeof(uint64_t) - 1) & ~(sizeof(uint64_t) - 1);
+}
+
 #ifndef VIRTGPU_DRM_CAPSET_DRM
 #define VIRTGPU_DRM_CAPSET_DRM 6
 #endif
@@ -103,7 +109,7 @@ void
 sync_wait(int fd, int timeout)
 {
   struct timespec poll_start, poll_end;
-  struct pollfd fds = {0};
+  struct pollfd fds = {};
   int ret;
 
   fds.fd = fd;
@@ -137,7 +143,7 @@ set_virtgpu_context(int dev_fd)
   };
   struct drm_virtgpu_context_init args = {
     .num_params = 2,
-    .ctx_set_params = (uintptr_t)params,
+    .ctx_set_params = reinterpret_cast<uintptr_t>(params),
   };
 
   ioctl(dev_fd, DRM_IOCTL_VIRTGPU_CONTEXT_INIT, &args);
@@ -146,10 +152,11 @@ set_virtgpu_context(int dev_fd)
 void
 hcall_no_wait(int dev_fd, void *buf, size_t size)
 {
-  drm_virtgpu_execbuffer exec = {};
+  drm_virtgpu_execbuffer exec = {
+    .size = static_cast<uint32_t>(size),
+    .command = reinterpret_cast<uintptr_t>(buf),
+  };
 
-  exec.command = reinterpret_cast<uintptr_t>(buf);
-  exec.size = size;
   try {
     ioctl(dev_fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
   } catch (const xrt_core::system_error& e) {
@@ -159,16 +166,16 @@ hcall_no_wait(int dev_fd, void *buf, size_t size)
 }
 
 void
-hcall_wait(int dev_fd, void *buf, size_t size, bool host_async)
+hcall_wait(int dev_fd, void *buf, size_t size)
 {
   auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
-  drm_virtgpu_execbuffer exec = {};
+  drm_virtgpu_execbuffer exec = {
+    .flags = VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX,
+    .size = static_cast<uint32_t>(size),
+    .command = reinterpret_cast<uintptr_t>(buf),
+    .ring_idx = (req->cmd == AMDXDNA_CCMD_WAIT_CMD) ? 1u : 0u,
+  };
 
-  exec.flags = VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX;
-  exec.command = reinterpret_cast<uintptr_t>(buf);
-  exec.size = size;
-  exec.fence_fd = 0;
-  exec.ring_idx = host_async ? 1 : 0;
   try {
     shim_debug("%s HCALL IOCTL started", hcall_cmd2name(req->cmd).c_str());
     ioctl(dev_fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &exec);
@@ -185,10 +192,10 @@ hcall_wait(int dev_fd, void *buf, size_t size, bool host_async)
 void
 register_resp_buf(int dev_fd, uint32_t res_id)
 {
-  amdxdna_ccmd_init_req req = {};
-  req.hdr.cmd = AMDXDNA_CCMD_INIT;
-  req.hdr.len = sizeof(req);
-  req.rsp_res_id = res_id;
+  amdxdna_ccmd_init_req req = {
+    .hdr = { AMDXDNA_CCMD_INIT, sizeof(req) },
+    .rsp_res_id = res_id,
+  };
   hcall_no_wait(dev_fd, &req, sizeof(req));
 }
 
@@ -356,12 +363,12 @@ drv_close() const
 
 void
 platform_drv_virtio::
-hcall(void *req, bool host_async) const
+hcall(void *req) const
 {
   // Assume the request buffer always starts with vdrm_ccmd_req!
   auto hdr = reinterpret_cast<vdrm_ccmd_req*>(req);
   auto fd = dev_fd();
-  hcall_wait(fd, req, hdr->len, host_async);
+  hcall_wait(fd, req, hdr->len);
 }
 
 void
@@ -377,7 +384,7 @@ hcall(void *req, void *out_buf, size_t out_size) const
   if (sz > resp_buffer_size)
     sz = resp_buffer_size;
 
-  hcall(req, false);
+  hcall(req);
   if (rsp_hdr->ret) {
     auto r = reinterpret_cast<vdrm_ccmd_req*>(req);
     shim_err(rsp_hdr->ret, "%s HCALL received bad reponse", hcall_cmd2name(r->cmd).c_str());
@@ -390,16 +397,16 @@ platform_drv_virtio::
 create_ctx(create_ctx_arg& arg) const
 {
   amdxdna_ccmd_create_ctx_req req = {
-    { AMDXDNA_CCMD_CREATE_CTX, sizeof(req) },
+    .hdr = { AMDXDNA_CCMD_CREATE_CTX, sizeof(req) },
+    .qos_info = arg.qos,
+    .umq_blob_id = arg.umq_bo.handle,
+    .log_buf_blob_id = arg.log_buf_bo.handle,
+    .max_opc = arg.max_opc,
+    .num_tiles = arg.num_tiles,
+    .mem_size = arg.mem_size,
   };
   amdxdna_ccmd_create_ctx_rsp rsp = {};
 
-  req.qos_info = arg.qos;
-  req.umq_blob_id = arg.umq_bo.handle;
-  req.log_buf_blob_id = arg.log_buf_bo.handle;
-  req.max_opc = arg.max_opc;
-  req.num_tiles = arg.num_tiles;
-  req.mem_size = arg.mem_size;
   hcall(&req, &rsp, sizeof(rsp));
   arg.ctx_handle = rsp.handle;
   arg.syncobj_handle = rsp.syncobj_hdl;
@@ -410,27 +417,26 @@ platform_drv_virtio::
 destroy_ctx(destroy_ctx_arg& arg) const
 {
   amdxdna_ccmd_destroy_ctx_req req = {
-    { AMDXDNA_CCMD_DESTROY_CTX, sizeof(req) },
+    .hdr = { AMDXDNA_CCMD_DESTROY_CTX, sizeof(req) },
+    .handle = arg.ctx_handle,
+    .syncobj_hdl = arg.syncobj_handle,
   };
-
-  req.handle = arg.ctx_handle;
-  req.syncobj_hdl = arg.syncobj_handle;
-  hcall(&req, false);
+  hcall(&req);
 }
 
 std::pair<uint32_t, uint64_t>
 platform_drv_virtio::
-host_bo_alloc(int type, size_t size, uint32_t res_id, uint64_t align) const
+host_bo_alloc(uint32_t type, size_t size, uint32_t res_id, uint64_t align) const
 {
   amdxdna_ccmd_create_bo_req req = {
-    { AMDXDNA_CCMD_CREATE_BO, sizeof(req) },
+    .hdr = { AMDXDNA_CCMD_CREATE_BO, sizeof(req) },
+    .res_id = res_id,
+    .bo_type = type,
+    .size = size,
+    .map_align = align,
   };
   amdxdna_ccmd_create_bo_rsp rsp = {};
 
-  req.res_id = res_id;
-  req.bo_type = type;
-  req.size = size;
-  req.map_align = align;
   hcall(&req, &rsp, sizeof(rsp));
   return { rsp.handle, rsp.xdna_addr };
 }
@@ -440,11 +446,10 @@ platform_drv_virtio::
 host_bo_free(uint32_t host_hdl) const
 {
   amdxdna_ccmd_destroy_bo_req req = {
-    { AMDXDNA_CCMD_DESTROY_BO, sizeof(req) },
+    .hdr = { AMDXDNA_CCMD_DESTROY_BO, sizeof(req) },
+    .handle = host_hdl,
   };
-
-  req.handle = host_hdl;
-  hcall(&req, false);
+  hcall(&req);
 }
 
 void
@@ -555,34 +560,32 @@ void
 platform_drv_virtio::
 config_ctx_cu_config(config_ctx_cu_config_arg& arg) const
 {
-  std::vector<char> cu_conf_param_buf(sizeof(amdxdna_ccmd_config_ctx_req) + arg.conf_buf.size());
+  std::vector<char> cu_conf_param_buf(sizeof(amdxdna_ccmd_config_ctx_req) + roundup_64bit(arg.conf_buf.size()));
   auto cu_conf_req = reinterpret_cast<amdxdna_ccmd_config_ctx_req *>(cu_conf_param_buf.data());
   auto cu_conf_param = reinterpret_cast<amdxdna_hwctx_param_config_cu *>(cu_conf_req->param_val);
 
   cu_conf_req->hdr.cmd = AMDXDNA_CCMD_CONFIG_CTX;
   cu_conf_req->hdr.len = cu_conf_param_buf.size();
-  cu_conf_req->hdr.rsp_off = 0;
   cu_conf_req->handle = arg.ctx_handle;
   cu_conf_req->param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
   cu_conf_req->param_val_size = cu_conf_req->hdr.len - sizeof(amdxdna_ccmd_config_ctx_req);
   std::memcpy(cu_conf_param_buf.data() + sizeof(amdxdna_ccmd_config_ctx_req),
     arg.conf_buf.data(), arg.conf_buf.size());
-  hcall(cu_conf_req, false);
+  hcall(cu_conf_req);
 }
 
 void
 platform_drv_virtio::
 config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const
 {
-  amdxdna_ccmd_config_ctx_req req = {};
-
-  req.hdr.cmd = AMDXDNA_CCMD_CONFIG_CTX;
-  req.hdr.len = sizeof(req);
-  req.handle = arg.ctx_handle;
-  req.param_type = arg.is_detach ?
-    DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF : DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF;
-  req.inline_param = arg.bo.handle;
-  hcall(&req, false);
+  amdxdna_ccmd_config_ctx_req req = {
+    .hdr = { AMDXDNA_CCMD_CONFIG_CTX, sizeof(req) },
+    .handle = arg.ctx_handle,
+    .param_type = static_cast<uint32_t>(arg.is_detach ?
+      DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF : DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF),
+    .inline_param = arg.bo.handle,
+  };
+  hcall(&req);
 }
 
 void
@@ -600,13 +603,12 @@ submit_cmd(submit_cmd_arg& arg) const
   req_sz += nargs * sizeof(uint32_t); // For args handle
   // Get a 64 bit aligned buffer for req
   auto req_sz_in_u64 = req_sz / sizeof(uint64_t) + 1;
-  uint64_t req_buf[req_sz_in_u64];
+  uint64_t req_buf[req_sz_in_u64] = {};
   auto req = reinterpret_cast<amdxdna_ccmd_exec_cmd_req*>(req_buf);
   amdxdna_ccmd_exec_cmd_rsp rsp = {};
 
   req->hdr.cmd = AMDXDNA_CCMD_EXEC_CMD;
   req->hdr.len = req_sz_in_u64 * sizeof(uint64_t);
-  req->hdr.rsp_off = 0;
   req->ctx_handle = arg.ctx_handle;
   req->type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   req->cmd_count = 1;
@@ -626,23 +628,23 @@ platform_drv_virtio::
 wait_cmd_syncobj(wait_cmd_arg& arg) const
 {
   amdxdna_ccmd_wait_cmd_req req = {
-    { AMDXDNA_CCMD_WAIT_CMD, sizeof(req) },
+    .hdr = { AMDXDNA_CCMD_WAIT_CMD, sizeof(req) },
+    .seq = arg.seq,
+    .syncobj_hdl = arg.ctx_syncobj_handle,
   };
-
-  req.seq = arg.seq;
-  req.syncobj_hdl = arg.ctx_syncobj_handle;
   // TODO: needs to pass timeout to host
-  hcall(&req, true);
+  hcall(&req);
 }
 
 void
 platform_drv_virtio::
 export_bo(export_bo_arg& bo_arg) const
 {
-  drm_prime_handle arg = {};
-  arg.handle = bo_arg.bo.res_id;
-  arg.flags = DRM_RDWR | DRM_CLOEXEC;
-  arg.fd = -1;
+  drm_prime_handle arg = {
+    .handle = bo_arg.bo.res_id,
+    .flags = DRM_RDWR | DRM_CLOEXEC,
+    .fd = -1,
+  };
   ioctl(dev_fd(), DRM_IOCTL_PRIME_HANDLE_TO_FD, &arg);
   bo_arg.fd = arg.fd;
 }
@@ -652,10 +654,11 @@ platform_drv_virtio::
 import_bo(import_bo_arg& bo_arg) const
 {
   auto fd = dev_fd();
-  drm_prime_handle carg = {};
-  carg.handle = AMDXDNA_INVALID_BO_HANDLE;
-  carg.flags = 0;
-  carg.fd = bo_arg.fd;
+  drm_prime_handle carg = {
+    .handle = AMDXDNA_INVALID_BO_HANDLE,
+    .flags = 0,
+    .fd = bo_arg.fd,
+  };
   ioctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &carg);
   auto gboh = carg.handle;
 
