@@ -169,7 +169,7 @@ static void aie2_print_trace_event_log(struct amdxdna_dev_hdl *ndev)
 		payload = ((u64)log_content->payload_hi << 32) | log_content->payload_low;
 		fw_ticks = log_content->counter - req_buf->resp_timestamp;
 		fw_ticks = fw_ticks / 24 + req_buf->sys_start_time;
-		pr_debug("[NPU]::[%llu] type: 0x%04x payload:0x%016llx",
+		XDNA_INFO(ndev->xdna, "[NPU]::[%llu] type: 0x%04x payload:0x%016llx",
 			 fw_ticks, log_content->type, payload);
 		str += MAX_ONE_TIME_LOG_INFO_LEN;
 	}

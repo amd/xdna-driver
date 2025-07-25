@@ -50,6 +50,10 @@ struct log_msg_header {
 	u32 module      : 16;
 };
 
+static const char *s_log_level_str[] = {
+    "NONE", "ERROR", "WARN", "INFO", "DEBUG",
+};
+
 static void clear_logging_msix(struct amdxdna_dev_hdl *ndev)
 {
 	u64 iohub_ptr = ndev->logging_req->msi_address;
@@ -182,7 +186,7 @@ static void aie2_print_log_buffer_data(struct amdxdna_dev_hdl *ndev)
 		msg_size = (header->argc) * sizeof(u32);
 		if (msg_size > 0 && (char *)(msg + msg_size) <= end) {
 			*(char *)((char *)msg + msg_size - 1) = 0;
-			pr_debug("[NPU FW]%s", msg);
+			XDNA_INFO(ndev->xdna, "[NPU FW %s]: %s", s_log_level_str[header->level], msg);
 		}
 
 		/* move to next msg */
