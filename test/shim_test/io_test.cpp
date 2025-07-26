@@ -152,7 +152,7 @@ uint32_t io_test_get_latest_dpu_pc() {
 
   while (std::getline(file, line)) {
     // Check if the line contains "DPU PC"
-    if (line.find("DPU PC:") != std::string::npos) {
+    if (line.size() < 4096 && line.find("DPU PC:") != std::string::npos) {
       // Extract the value after "DPU PC:"
       std::size_t pos = line.find("DPU PC:");
       if (pos != std::string::npos) {
