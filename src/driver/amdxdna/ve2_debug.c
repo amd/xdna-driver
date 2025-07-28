@@ -86,11 +86,6 @@ static int ve2_tile_data_reg_write(struct amdxdna_client *client,
 	struct aie_location loc;
 	int ret;
 
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
-
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy aie_reg info request from user");
 		return -EFAULT;
@@ -124,11 +119,6 @@ static int ve2_tile_data_mem_write(struct amdxdna_client *client,
 	struct device *aie_dev;
 	void *local_buf;
 	int ret;
-
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
 
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy aie_mem info request from user");
@@ -176,11 +166,6 @@ static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_
 	struct device *aie_dev;
 	int ret;
 
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
-
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy request from user");
 		return -EFAULT;
@@ -217,11 +202,6 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 	struct device *aie_dev;
 	void *local_buf = NULL;
 	int ret;
-
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
 
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy request from user");
@@ -267,11 +247,6 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 	struct amdxdna_dev *xdev = client->xdna;
 	struct ve2_firmware_version *cver = &xdev->dev_handle->fw_version;
 
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
-
 	if (args->buffer_size < sizeof(version))
 		return -EINVAL;
 
@@ -293,18 +268,15 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret = 0;
 
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
-
 	mdata = kzalloc(sizeof(*mdata), GFP_KERNEL);
 	if (!mdata)
 		return -ENOMEM;
 
 	mdata->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
-	if (copy_to_user(u64_to_user_ptr(args->buffer), mdata, args->buffer_size))
+	if (copy_to_user(u64_to_user_ptr(args->buffer), mdata, args->buffer_size)) {
+		XDNA_ERR(xdna, "Error in data copy to user buffer\n");
 		ret = -EFAULT;
+	}
 
 	kfree(mdata);
 
