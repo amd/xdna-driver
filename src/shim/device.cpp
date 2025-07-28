@@ -1229,6 +1229,25 @@ struct elf_name
   }
 };
 
+struct sub_device_path
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static std::any
+  get(const xrt_core::device* device, key_type key, const std::any& param)
+  {
+    if (key != key_type::sub_device_path)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    return boost::str(boost::format("/sys/bus/pci/devices/%s") % pci_dev_impl.m_sysfs_name);
+  }
+};
+
 template <typename QueryRequestType>
 struct sysfs_get : virtual QueryRequestType
 {
@@ -1378,6 +1397,7 @@ initialize_query_table()
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
   emplace_func1_request<query::firmware_version,               firmware_version>();
+  emplace_func1_request<query::sub_device_path,                sub_device_path>();
 }
 
 struct X { X() { initialize_query_table(); }};

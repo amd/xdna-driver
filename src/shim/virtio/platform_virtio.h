@@ -51,7 +51,7 @@ private:
   hcall(void *req, void *out_buf, size_t out_size) const;
 
   void
-  hcall(void *req, bool host_async) const;
+  hcall(void *req) const;
 
   void
   create_ctx(create_ctx_arg& arg) const override;
@@ -60,7 +60,7 @@ private:
   destroy_ctx(destroy_ctx_arg& arg) const override;
 
   std::pair<uint32_t, uint64_t>
-  host_bo_alloc(int type, size_t size, uint32_t res_id, uint64_t align) const;
+  host_bo_alloc(uint32_t type, size_t size, uint32_t res_id, uint64_t align) const;
 
   void
   host_bo_free(uint32_t host_hdl) const;
