@@ -78,7 +78,7 @@ public:
   is_umq() const = 0;
 
   virtual void
-  create_drm_dev_bo(create_bo_arg *arg) const = 0;
+  create_drm_bo(create_bo_arg *arg) const = 0;
 
 private:
   virtual void

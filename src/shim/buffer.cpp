@@ -273,10 +273,7 @@ drm_bo(const pdev& pdev, size_t size, int type)
     .size = m_size,
     .xdna_addr_align = (align == 1 ? 0 : align), 
   };
-  if (type == AMDXDNA_BO_DEV)
-    m_pdev.create_drm_dev_bo(&arg);
-  else
-    m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
+  m_pdev.create_drm_bo(&arg);
   m_id = arg.bo;
   m_xdna_addr = arg.xdna_addr;
   m_map_offset = arg.map_offset;

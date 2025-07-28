@@ -49,9 +49,9 @@ is_umq() const
 
 void
 pdev_umq::
-create_drm_dev_bo(create_bo_arg *arg) const
+create_drm_bo(create_bo_arg *arg) const
 {
-  shim_not_supported_err(__func__);
+  drv_ioctl(drv_ioctl_cmd::create_bo, arg);
 }
 
 }
