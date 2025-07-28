@@ -266,6 +266,7 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 {
 	struct amdxdna_drm_query_aie_metadata *mdata;
 	struct amdxdna_dev *xdna = client->xdna;
+	size_t copy_size;
 	int ret = 0;
 
 	mdata = kzalloc(sizeof(*mdata), GFP_KERNEL);
@@ -273,7 +274,9 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 		return -ENOMEM;
 
 	mdata->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
-	if (copy_to_user(u64_to_user_ptr(args->buffer), mdata, args->buffer_size)) {
+
+	copy_size = min(args->buffer_size, sizeof(*mdata));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), mdata, copy_size)) {
 		XDNA_ERR(xdna, "Error in data copy to user buffer\n");
 		ret = -EFAULT;
 	}
