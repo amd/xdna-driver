@@ -382,10 +382,13 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 		drm_mm_takedown(&abo->mm);
 
 #ifdef AMDXDNA_DEVEL
-	if (abo->type == AMDXDNA_BO_CMD)
-		amdxdna_mem_unmap(xdna, &abo->mem);
-	else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
-		amdxdna_bo_dma_unmap(abo);
+	if (!is_import_bo(abo)) {
+		XDNA_WARN(xdna, "unmap bo for non import bo");
+		if (abo->type == AMDXDNA_BO_CMD)
+			amdxdna_mem_unmap(xdna, &abo->mem);
+		else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
+			amdxdna_bo_dma_unmap(abo);
+	}
 #endif
 	amdxdna_gem_vunmap(abo);
 	mutex_destroy(&abo->lock);
@@ -979,8 +982,10 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 #ifdef AMDXDNA_DEVEL
 		if (IS_ERR(abo))
 			break;
-		if (is_import_bo(abo))
+		if (is_import_bo(abo)) {
+			XDNA_WARN(xdna, "skip mem map for import bo");
 			break;
+		}
 		if (!abo->mem.pages) {
 			abo->mem.pages = abo->base.pages;
 			abo->mem.nr_pages = to_gobj(abo)->size >> PAGE_SHIFT;
