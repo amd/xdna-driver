@@ -418,7 +418,7 @@ struct performance_mode
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_set_power_mode state;
+    amdxdna_drm_set_power_mode state = {0};
     state.power_mode = static_cast<int>(std::any_cast<xrt_core::query::performance_mode::power_type>(any));
 
     amdxdna_drm_set_state arg = {
