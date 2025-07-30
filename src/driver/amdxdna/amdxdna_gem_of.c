@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
-
+#include <linux/kernel.h>
 #include <linux/dma-mapping.h>
 #include <linux/version.h>
 
@@ -43,7 +43,14 @@ static void amdxdna_gem_dma_obj_free(struct drm_gem_object *gobj)
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
-	drm_gem_dma_object_free(gobj);
+	printk("[bs]: %s: BO type %d xdna_addr 0x%llx", __func__, abo->type, abo->mem.dev_addr);
+	// drm_gem_dma_object_free(gobj);
+
+	if (abo->mem.kva && abo->mem.dev_addr)
+		dma_free_coherent(gobj->dev->dev, abo->mem.size, abo->mem.kva, abo->mem.dev_addr);
+
+	drm_gem_object_release(gobj);
+	kfree(abo);
 }
 
 static const struct drm_gem_object_funcs amdxdna_gem_dma_funcs = {
@@ -84,20 +91,51 @@ static struct amdxdna_gem_obj *amdxdna_drm_create_dma_bo(struct drm_device *dev,
 	struct drm_gem_dma_object *dma;
 	struct amdxdna_gem_obj *abo;
 	size_t size = args->size;
+	dma_addr_t dma_addr;
+	void *vaddr;
 
 	/* Round up to more than 4K to ensure to allocate memory from CMA always */
 	if (size <= PAGE_SIZE)
 		size = round_up(size, 2 * PAGE_SIZE);
 
-	dma = drm_gem_dma_create(dev, size);
-	if (IS_ERR(dma))
-		return ERR_CAST(dma);
+	// dma = drm_gem_dma_create(dev, size);
+	// if (IS_ERR(dma))
+	// 	return ERR_CAST(dma);
 
-	abo = to_xdna_obj(&dma->base);
+	vaddr = dma_alloc_coherent(dev->dev, size, &dma_addr, GFP_KERNEL);
+	if (!vaddr)
+		return ERR_PTR(-ENOMEM);
+
+	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
+	if (!abo) {
+		dma_free_coherent(dev->dev, size, vaddr, dma_addr);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	dma = &abo->base;
+
+	//manually init the drm gem obj
+	if (drm_gem_object_init(dev, &dma->base, size)) {
+		dma_free_coherent(dev->dev, size, vaddr, dma_addr);
+		kfree(abo);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	if (drm_gem_create_mmap_offset(&dma->base)) {
+		dma_free_coherent(dev->dev, size, vaddr, dma_addr);
+		drm_gem_object_release(&dma->base);
+		kfree(abo);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	dma->base.funcs = &amdxdna_gem_dma_funcs;
+	dma->dma_addr = dma_addr;
+	dma->vaddr = vaddr;
 
 	abo->mem.dev_addr = dma->dma_addr;
 	abo->mem.kva = dma->vaddr;
 	abo->type = args->type;
+	abo->mem.size = size;
 
 	return abo;
 }
