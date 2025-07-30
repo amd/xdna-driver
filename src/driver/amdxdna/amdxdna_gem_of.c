@@ -40,7 +40,7 @@ struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client, u32 b
 static void amdxdna_gem_dma_obj_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
-	struct amdxdna_gem_obj *abo = container_of(gobj, struct amdxdna_gem_obj, base.base);
+	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
 
@@ -112,7 +112,6 @@ static struct drm_gem_dma_object *amdxdna_cma_create(struct drm_device *dev, siz
 	return cma_obj;
 
 error:
-	memset(&cma_obj->base, 0, sizeof(cma_obj->base));
 	kfree(gem_obj);
 	return ERR_PTR(ret);
 
@@ -139,20 +138,16 @@ static struct amdxdna_gem_obj *amdxdna_drm_create_dma_bo(struct drm_device *dev,
 		return ERR_PTR(-ENOMEM);
 
 	vaddr = dma_alloc_coherent(dev->dev, size, &dma_addr, GFP_KERNEL);
-	if (!vaddr) {
-		drm_gem_object_release(&cma_obj->base);
-		kfree(to_xdna_obj(&cma_obj->base));
-		memset(&cma_obj->base, 0 , sizeof(cma_obj->base));
-		return ERR_PTR(-ENOMEM);
-	}
+	if (!vaddr)
+		goto error_free_gem;
 
 	cma_obj->dma_addr = dma_addr;
 	cma_obj->vaddr = vaddr;
 
 	abo = to_xdna_obj(&cma_obj->base);
 
-	abo->mem.dev_addr = dma_addr;
-	abo->mem.kva = vaddr;
+	abo->mem.dev_addr = cma_obj->dma_addr;
+	abo->mem.kva = cma_obj->vaddr;
 	abo->type = args->type;
 	abo->mem.size = size;
 
@@ -160,6 +155,11 @@ static struct amdxdna_gem_obj *amdxdna_drm_create_dma_bo(struct drm_device *dev,
 	abo->mem.userptr = AMDXDNA_INVALID_ADDR;
 
 	return abo;
+
+error_free_gem:
+	drm_gem_object_release(&cma_obj->base);
+	kfree(to_xdna_obj(&cma_obj->base));
+	return ERR_PTR(-ENOMEM);
 }
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
