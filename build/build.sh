@@ -14,9 +14,9 @@ Options:
 	-help										Display this help
 	-clean									Clean build directory
 	-debug									Only debug build
-	-release								release build
-	-example								example build
-	-package								Generate xrt_plugin .deb package
+	-release								release build and generate .deb package
+	-example								example build and generate .deb package
+	-package                                                                ignored (present for backward compatibility)
 	-j <n>									Compile parallel (default: num of CPUs)
 	-nocmake								Do not regenerate cmake files
 	-install_prefix <path>	Set CMAKE_INSTALL_PREFIX to path"
@@ -244,22 +244,27 @@ if [[ $example == 1 ]]; then
 	exit 0
 fi
 
-if [[ $package == 1 ]]; then
-	download_npufws
-  # Prepare xbutil validate related files for packaging
-	mkdir -p $XBUTIL_VALIDATE_BINS_DIR
-  cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
-	package_targets $DEBUG_BUILD_TYPE
-	package_targets $RELEASE_BUILD_TYPE
-	exit 0
-fi
-
 if [[ $release == 1 ]]; then
 	build_targets $RELEASE_BUILD_TYPE
+	download_npufws
+	# Prepare xbutil validate related files for packaging
+	mkdir -p $XBUTIL_VALIDATE_BINS_DIR
+	cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
+	package_targets $RELEASE_BUILD_TYPE
 fi
 
 if [[ $debug == 1 ]]; then
 	build_targets $DEBUG_BUILD_TYPE
+	download_npufws
+	# Prepare xbutil validate related files for packaging
+	mkdir -p $XBUTIL_VALIDATE_BINS_DIR
+	cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
+	package_targets $DEBUG_BUILD_TYPE
+fi
+
+if [[ $package == 1 ]]; then
+	echo "Packaging is automatically done as part of build"
+	exit 0
 fi
 
 # vim: ts=2 sw=2
