@@ -13,9 +13,9 @@ Usage: build.sh [options]
 Options:
 	-help										Display this help
 	-clean									Clean build directory
-	-debug									Only debug build
+	-debug									debug build and generate .deb package
 	-release								release build and generate .deb package
-	-example								example build and generate .deb package
+	-example								example build
 	-package                                                                ignored (present for backward compatibility)
 	-j <n>									Compile parallel (default: num of CPUs)
 	-nocmake								Do not regenerate cmake files
