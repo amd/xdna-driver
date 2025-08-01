@@ -8,6 +8,8 @@
 
 #include "drm_hw.h"
 
+#define AMDXDNA_MAX_RING_NUM 64
+
 enum amdxdna_ccmd {
     AMDXDNA_CCMD_NOP = 1,
     AMDXDNA_CCMD_INIT,
@@ -103,8 +105,7 @@ DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_create_ctx_req)
 
 struct amdxdna_ccmd_create_ctx_rsp {
     struct amdxdna_ccmd_rsp hdr;
-    uint32_t handle;
-    uint32_t syncobj_hdl;
+    uint32_t handle; /* ctx handle. It is also ring_idx. */
 };
 
 /*
@@ -113,7 +114,7 @@ struct amdxdna_ccmd_create_ctx_rsp {
 struct amdxdna_ccmd_destroy_ctx_req {
     struct vdrm_ccmd_req hdr;
     uint32_t handle;
-    uint32_t syncobj_hdl;
+    uint32_t _pad;
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_destroy_ctx_req)
 
@@ -156,7 +157,7 @@ struct amdxdna_ccmd_exec_cmd_rsp {
 struct amdxdna_ccmd_wait_cmd_req {
     struct vdrm_ccmd_req hdr;
     uint64_t seq;
-    uint32_t syncobj_hdl;
+    uint32_t ctx_handle;
     uint32_t _pad;
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_wait_cmd_req)
