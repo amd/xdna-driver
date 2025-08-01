@@ -775,7 +775,7 @@ config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_size
 {
   auto meta_buf_size = offsetof(struct fw_buffer_metadata, uc_info)
      + buf_sizes.size() * sizeof(struct uc_info_entry);
-  m_metadata_bo = std::make_unique<dbg_buffer>(m_pdev, meta_buf_size, AMDXDNA_BO_SHARE);
+  m_metadata_bo = std::make_unique<dbg_buffer>(m_pdev, meta_buf_size, AMDXDNA_BO_CMD);
   auto metadata = reinterpret_cast<fw_buffer_metadata *>(m_metadata_bo->vaddr());
   metadata->bo_handle = id().handle;
   metadata->command_id = 0; //support this later
