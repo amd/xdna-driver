@@ -139,7 +139,7 @@ set_virtgpu_context(int dev_fd)
 {
   struct drm_virtgpu_context_set_param params[] = {
     { VIRTGPU_CONTEXT_PARAM_CAPSET_ID, VIRTGPU_DRM_CAPSET_DRM },
-    { VIRTGPU_CONTEXT_PARAM_NUM_RINGS, 64 },
+    { VIRTGPU_CONTEXT_PARAM_NUM_RINGS, AMDXDNA_MAX_RING_NUM },
   };
   struct drm_virtgpu_context_init args = {
     .num_params = 2,
@@ -169,11 +169,19 @@ void
 hcall_wait(int dev_fd, void *buf, size_t size)
 {
   auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
+  uint32_t ring_idx = 0;
+
+  // For now, only AMDXDNA_CCMD_WAIT_CMD requires non-zero ring index
+  if (req->cmd == AMDXDNA_CCMD_WAIT_CMD) {
+    auto wcmd = reinterpret_cast<amdxdna_ccmd_wait_cmd_req*>(req);
+    ring_idx = wcmd->ctx_handle;
+  }
+
   drm_virtgpu_execbuffer exec = {
     .flags = VIRTGPU_EXECBUF_FENCE_FD_OUT | VIRTGPU_EXECBUF_RING_IDX,
     .size = static_cast<uint32_t>(size),
     .command = reinterpret_cast<uintptr_t>(buf),
-    .ring_idx = (req->cmd == AMDXDNA_CCMD_WAIT_CMD) ? 1u : 0u,
+    .ring_idx = ring_idx,
   };
 
   try {
@@ -409,7 +417,7 @@ create_ctx(create_ctx_arg& arg) const
 
   hcall(&req, &rsp, sizeof(rsp));
   arg.ctx_handle = rsp.handle;
-  arg.syncobj_handle = rsp.syncobj_hdl;
+  arg.syncobj_handle = AMDXDNA_INVALID_FENCE_HANDLE;
 }
 
 void
@@ -419,7 +427,6 @@ destroy_ctx(destroy_ctx_arg& arg) const
   amdxdna_ccmd_destroy_ctx_req req = {
     .hdr = { AMDXDNA_CCMD_DESTROY_CTX, sizeof(req) },
     .handle = arg.ctx_handle,
-    .syncobj_hdl = arg.syncobj_handle,
   };
   hcall(&req);
 }
@@ -625,12 +632,12 @@ submit_cmd(submit_cmd_arg& arg) const
 
 void
 platform_drv_virtio::
-wait_cmd_syncobj(wait_cmd_arg& arg) const
+wait_cmd_ioctl(wait_cmd_arg& arg) const
 {
   amdxdna_ccmd_wait_cmd_req req = {
     .hdr = { AMDXDNA_CCMD_WAIT_CMD, sizeof(req) },
     .seq = arg.seq,
-    .syncobj_hdl = arg.ctx_syncobj_handle,
+    .ctx_handle = arg.ctx_handle,
   };
   // TODO: needs to pass timeout to host
   hcall(&req);
