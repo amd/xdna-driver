@@ -115,11 +115,9 @@ cd xrt/build
 sudo apt reinstall ./Release/xrt_202510.2.19.0_22.04-amd64-base.deb
 cd ../../build
 
-# Start XDNA driver release build
+# Start XDNA driver release build and create release DEB package
 ./build.sh -release
 
-# Create DEB package for existed release or debug build.
-./build.sh -package
 # To adapt according to your OS & version
 sudo apt reinstall ./Release/xrt_plugin.2.19.0_ubuntu22.04-x86_64-amdxdna.deb
 ```
@@ -148,8 +146,7 @@ cd <root-of-source-tree>/build
 
 ### Q: I want to debug my application, how to build library with `-g`?
 
-A: We have debug version of library, which is compiled with `-g` option. You can run `./build.sh -debug` or `./build.sh`.
-To create a debug DEB package, run `./build.sh -package` afterward.
+A: We have debug version of library, which is compiled with `-g` option. You can run `./build.sh -debug` or `./build.sh` which should also create debug DEB package.
 
 ### Q: I'm developing amdxdna.ko driver module. How to enable XDNA_DBG() print?
 
