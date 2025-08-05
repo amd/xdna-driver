@@ -5,7 +5,7 @@
 
 #include "amdxdna_mailbox_helper.h"
 
-int xdna_msg_dummy_cb(void *handle, void __iomem *data, size_t size)
+int xdna_msg_noresp_cb(void *handle, void __iomem *data, size_t size)
 {
 	struct amdxdna_dev *xdna = handle;
 	u32 status;

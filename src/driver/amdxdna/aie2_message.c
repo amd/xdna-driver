@@ -10,6 +10,7 @@
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_trace.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_pm.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 
@@ -58,10 +59,11 @@ aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 	struct xdna_notify *hdl = msg->handle;
 	int ret;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
+
 	if (!ndev->mgmt_chann)
 		return -ENODEV;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
 		xdna_mailbox_stop_channel(ndev->mgmt_chann);
@@ -712,6 +714,17 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *
 	return ret;
 }
 
+static int aie2_notify_config_cu(void *handle, void __iomem *data, size_t size)
+{
+	struct amdxdna_dev *xdna = handle;
+	int ret;
+
+	ret = xdna_msg_noresp_cb(handle, data, size);
+	amdxdna_pm_suspend_put(xdna);
+
+	return ret;
+}
+
 /* Below messages are to hardware context mailbox channel */
 int aie2_config_cu(struct amdxdna_ctx *ctx)
 {
@@ -759,9 +772,18 @@ int aie2_config_cu(struct amdxdna_ctx *ctx)
 	}
 	req.num_cus = ctx->cus->num_cus;
 
+	if (!pm_runtime_active(xdna->ddev.dev)) {
+		XDNA_ERR(xdna, "Device inactive\n");
+		return -EFAULT;
+	}
+	pm_runtime_get_noresume(xdna->ddev.dev);
+
+	msg.notify_cb = aie2_notify_config_cu;
 	ret = xdna_mailbox_send_msg(chann, &msg, TX_TIMEOUT);
-	if (ret)
+	if (ret) {
 		XDNA_ERR(xdna, "Send message failed, ret %d", ret);
+		pm_runtime_put_noidle(xdna->ddev.dev);
+	}
 
 	return ret;
 }

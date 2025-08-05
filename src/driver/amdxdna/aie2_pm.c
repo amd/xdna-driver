@@ -95,7 +95,8 @@ void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add
 	XDNA_DBG(xdna, "Default DPM %d, %s level %d", ndev->dft_dpm_level,
 		 add ? "add" : "delete", level);
 
-	mutex_lock(&ndev->aie2_lock);
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
+
 	if (unlikely(level > ndev->max_dpm_level)) {
 		level = ndev->max_dpm_level;
 		WARN_ON(1);
@@ -119,8 +120,6 @@ void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add
 	if (ndev->pw_mode == POWER_MODE_DEFAULT && ndev->dev_status == AIE2_DEV_START)
 		ndev->priv->hw_ops.set_dpm(ndev, level);
 	ndev->dft_dpm_level = level;
-
-	mutex_unlock(&ndev->aie2_lock);
 }
 
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev)

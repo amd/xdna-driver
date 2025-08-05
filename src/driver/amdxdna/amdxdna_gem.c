@@ -958,10 +958,6 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	if (args->flags)
 		return -EINVAL;
 
-	ret = amdxdna_pm_resume_get(dev->dev);
-	if (ret)
-		return ret;
-
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
 	switch (args->type) {
@@ -993,11 +989,11 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		break;
 	default:
 		ret = -EINVAL;
-		goto suspend;
+		goto out;
 	}
 	if (IS_ERR(abo)) {
 		ret = PTR_ERR(abo);
-		goto suspend;
+		goto out;
 	}
 
 	/* ready to publish object to userspace */
@@ -1013,8 +1009,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 put_obj:
 	/* Dereference object reference. Handle holds it now. */
 	drm_gem_object_put(to_gobj(abo));
-suspend:
-	amdxdna_pm_suspend_put(dev->dev);
+out:
 	return ret;
 }
 
@@ -1091,15 +1086,10 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
-	ret = amdxdna_pm_resume_get(dev->dev);
-	if (ret)
-		return ret;
-
 	gobj = drm_gem_object_lookup(filp, args->handle);
 	if (!gobj) {
 		XDNA_DBG(xdna, "Lookup GEM object %d failed", args->handle);
-		ret = -ENOENT;
-		goto suspend;
+		return -ENOENT;
 	}
 
 	abo = to_xdna_obj(gobj);
@@ -1115,8 +1105,6 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 		 args->handle, args->map_offset, args->vaddr, args->xdna_addr);
 
 	drm_gem_object_put(gobj);
-suspend:
-	amdxdna_pm_suspend_put(dev->dev);
 	return ret;
 }
 
@@ -1188,15 +1176,10 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	u32 ctx_hdl;
 	int ret;
 
-	ret = amdxdna_pm_resume_get(dev->dev);
-	if (ret)
-		return ret;
-
 	gobj = drm_gem_object_lookup(filp, args->handle);
 	if (!gobj) {
 		XDNA_ERR(xdna, "Lookup GEM object failed");
-		ret = -ENOENT;
-		goto suspend;
+		return -ENOENT;
 	}
 	abo = to_xdna_obj(gobj);
 
@@ -1251,8 +1234,6 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 
 put_obj:
 	drm_gem_object_put(gobj);
-suspend:
-	amdxdna_pm_suspend_put(dev->dev);
 	return ret;
 }
 
