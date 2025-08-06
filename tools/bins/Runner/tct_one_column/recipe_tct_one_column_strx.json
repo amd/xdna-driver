@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "header": {
+    "xclbin": "validate_strx.xclbin"
+  },
+  "resources": {
+    "buffers": [
+      { "name": "arg0", "type": "input", "size": 4 },
+      { "name": "arg2", "type": "input", "size": 16 }
+    ],
+    "kernels": [
+      { "name": "k1", "instance": "DPU" , "ctrlcode": "tct_1col.elf"}
+    ]
+  },
+  "execution": {
+    "runs": [
+      {
+        "name": "k1",
+        "arguments" : [
+          { "name": "arg0", "argidx": 3 },
+          { "name": "arg2", "argidx": 5 }
+        ],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      }
+    ]
+  }
+}
