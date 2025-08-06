@@ -468,6 +468,7 @@ disable_dev:
 
 static void aie2_hw_suspend(struct amdxdna_dev *xdna)
 {
+	guard(mutex)(&xdna->dev_lock);
 	aie2_event_trace_suspend(xdna->dev_handle);
 	aie2_dram_logging_suspend(xdna->dev_handle);
 	aie2_rq_stop_all(&xdna->dev_handle->ctx_rq);
@@ -479,6 +480,7 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	int ret;
 
 	XDNA_DBG(xdna, "firmware resuming...");
+	guard(mutex)(&xdna->dev_lock);
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "resume NPU firmware failed");

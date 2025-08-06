@@ -16,7 +16,6 @@ static int amdxdna_pmops_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev_get_drvdata(dev));
 
-	guard(mutex)(&xdna->dev_lock);
 	if (xdna->dev_info->ops->suspend)
 		xdna->dev_info->ops->suspend(xdna);
 
@@ -29,7 +28,6 @@ static int amdxdna_pmops_resume(struct device *dev)
 	struct amdxdna_dev *xdna = to_xdna_dev(dev_get_drvdata(dev));
 	int ret = 0;
 
-	guard(mutex)(&xdna->dev_lock);
 	if (xdna->dev_info->ops->resume)
 		ret = xdna->dev_info->ops->resume(xdna);
 
