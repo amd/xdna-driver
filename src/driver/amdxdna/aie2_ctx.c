@@ -146,7 +146,6 @@ void aie2_ctx_disconnect(struct amdxdna_ctx *ctx, bool wait)
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	aie2_hwctx_stop(ctx);
 	ctx->priv->disconn_cnt++;
-	aie2_pm_del_dpm_level(xdna->dev_handle, ctx->priv->req_dpm_level);
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 }
 
@@ -156,11 +155,9 @@ int aie2_ctx_connect(struct amdxdna_ctx *ctx)
 	int ret;
 
 	mutex_lock(&xdna->dev_handle->aie2_lock);
-	aie2_pm_add_dpm_level(xdna->dev_handle, ctx->priv->req_dpm_level);
-
 	ret = aie2_hwctx_start(ctx);
 	if (ret)
-		goto del_dpm_level;
+		goto unlock_and_err;
 
 #ifdef AMDXDNA_DEVEL
 	if (priv_load) {
@@ -185,8 +182,7 @@ skip_config_cu:
 
 failed:
 	aie2_hwctx_stop(ctx);
-del_dpm_level:
-	aie2_pm_del_dpm_level(xdna->dev_handle, ctx->priv->req_dpm_level);
+unlock_and_err:
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	return ret;
 }
@@ -647,6 +643,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	init_waitqueue_head(&priv->connect_waitq);
 
 	aie2_calc_ctx_dpm(ndev, ctx);
+	aie2_pm_add_dpm_level(ndev, ctx->priv->req_dpm_level);
 	priv->active = true; /* Init context is counted as an activity */
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
@@ -674,6 +671,10 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 	int idx;
 
 	aie2_rq_del(&xdna->dev_handle->ctx_rq, ctx);
+	if (!amdxdna_pm_resume_get(xdna)) {
+		aie2_pm_del_dpm_level(xdna->dev_handle, ctx->priv->req_dpm_level);
+		amdxdna_pm_suspend_put(xdna);
+	}
 
 	aie2_ctx_syncobj_destroy(ctx);
 	for (idx = 0; idx < ARRAY_SIZE(ctx->priv->cmd_buf); idx++)
