@@ -98,7 +98,7 @@ static struct drm_gem_dma_object *amdxdna_cma_create(struct drm_device *dev, siz
 
 	gem_obj->funcs = &amdxdna_gem_dma_funcs;
 
-	//manually init the drm gem obj
+	/* manually init the drm gem obj */
 	ret = drm_gem_object_init(dev, gem_obj, size);
 	if (ret)
 		goto error;
