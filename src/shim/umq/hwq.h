@@ -64,18 +64,18 @@ private:
   init_indirect_buf(volatile struct host_indirect_data *indirect_buf, int size);
 
   size_t
-  fill_direct_exec_buf(uint16_t cu_idx,
-    volatile struct host_queue_packet *pkt, ert_dpu_data *dpu);
+  fill_direct_exec_buf(volatile struct host_queue_packet *pkt,
+    ert_dpu_data *dpu);
 
   size_t 
-  fill_indirect_exec_buf(uint64_t idx, uint16_t cu_idx,
+  fill_indirect_exec_buf(uint64_t idx,
     volatile struct host_queue_packet *pkt, ert_dpu_data *dpu);
 
   void
   fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size);
 
   uint64_t
-  issue_exec_buf(uint16_t cu_idx, ert_dpu_data *dpu_data, uint64_t comp);
+  issue_exec_buf(ert_dpu_data *dpu_data, uint64_t comp);
 
   void
   map_doorbell(uint32_t doorbell_offset);
