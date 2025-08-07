@@ -37,11 +37,6 @@ struct xdna_notify {
 		.notify_cb = xdna_msg_cb,				\
 	}
 
-struct xdna_dummy_notify {
-	struct amdxdna_dev	*xdna;
-	u32			opcode;
-};
-
 #define DECLARE_XDNA_MSG_NO_RESP(name, op, xdna)			\
 	struct name##_req	req = { 0 };				\
 	struct xdna_mailbox_msg msg = {					\
@@ -49,13 +44,13 @@ struct xdna_dummy_notify {
 		.send_size = sizeof(req),				\
 		.handle = xdna,						\
 		.opcode = op,						\
-		.notify_cb = xdna_msg_dummy_cb,				\
+		.notify_cb = xdna_msg_noresp_cb,			\
 	}
 
 #define XDNA_STATUS_OFFSET(name) (offsetof(struct name##_resp, status) / sizeof(u32))
 
 int xdna_msg_cb(void *handle, void __iomem *data, size_t size);
-int xdna_msg_dummy_cb(void *handle, void __iomem *data, size_t size);
+int xdna_msg_noresp_cb(void *handle, void __iomem *data, size_t size);
 int xdna_send_msg_wait(struct amdxdna_dev *xdna, struct mailbox_channel *chann,
 		       struct xdna_mailbox_msg *msg);
 

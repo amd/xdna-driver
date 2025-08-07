@@ -134,7 +134,6 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 #ifdef AMDXDNA_DEVEL
 	ida_init(&xdna->pdi_ida);
 #endif
-	amdxdna_pm_init(dev);
 	return 0;
 
 failed_tdr_fini:
@@ -150,14 +149,11 @@ destroy_notifier_wq:
 static void amdxdna_remove(struct pci_dev *pdev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
-	struct device *dev = &pdev->dev;
 	struct amdxdna_client *client;
 
 	destroy_workqueue(xdna->notifier_wq);
 	amdxdna_tdr_stop(&xdna->tdr);
 	amdxdna_sysfs_fini(xdna);
-
-	amdxdna_pm_fini(dev);
 
 #ifdef AMDXDNA_DEVEL
 	amdxdna_gem_dump_mm(xdna);

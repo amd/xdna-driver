@@ -22,6 +22,7 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
+#include "amdxdna_pm.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif

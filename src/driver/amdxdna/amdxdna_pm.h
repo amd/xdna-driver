@@ -6,13 +6,14 @@
 #ifndef _AMDXDNA_PM_H_
 #define _AMDXDNA_PM_H_
 
-#include <linux/pm.h>
+#include <linux/pm_runtime.h>
+#include "amdxdna_drm.h"
 
 extern const struct dev_pm_ops amdxdna_pm_ops;
 
-int amdxdna_pm_resume_get(struct device *dev);
-void amdxdna_pm_suspend_put(struct device *dev);
-void amdxdna_pm_init(struct device *dev);
-void amdxdna_pm_fini(struct device *dev);
+int amdxdna_pm_resume_get(struct amdxdna_dev *xdna);
+void amdxdna_pm_suspend_put(struct amdxdna_dev *xdna);
+void amdxdna_rpm_init(struct amdxdna_dev *xdna);
+void amdxdna_rpm_fini(struct amdxdna_dev *xdna);
 
 #endif /* _AMDXDNA_PM_H_ */
