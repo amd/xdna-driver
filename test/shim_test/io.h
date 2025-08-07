@@ -22,6 +22,7 @@ enum io_test_bo_type {
   IO_TEST_BO_SCRATCH_PAD,
   IO_TEST_BO_SAVE_INSTRUCTION,
   IO_TEST_BO_RESTORE_INSTRUCTION,
+  IO_TEST_BO_2ND_PARAMETERS,
   IO_TEST_BO_MAX_TYPES
 };
 
@@ -73,6 +74,9 @@ public:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
   get_bos();
 
+  virtual unsigned long
+  get_preemption_checkpoints();
+
 protected:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES> m_bo_array;
   const std::string m_xclbin_name;
@@ -114,22 +118,20 @@ class elf_preempt_io_test_bo_set : public io_test_bo_set_base
 public:
   elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
-  ~elf_preempt_io_test_bo_set() {
-    --m_total_cmds;
-  }
-
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 
   void
   verify_result() override;
 
+  unsigned long
+  get_preemption_checkpoints() override;
+
 private:
   const xrt::elf m_elf;
   int m_user_tid = -1;
   std::vector<std::pair<int, uint64_t>> m_fine_preemptions;
   unsigned long m_total_fine_preemption_checkpoints;
-  static unsigned long m_total_cmds;
 };
 
 #endif // _SHIMTEST_IO_H_

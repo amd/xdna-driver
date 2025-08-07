@@ -224,6 +224,15 @@ xclbin_info xclbin_infos[] = {
     .data = "",
     .type = KERNEL_TYPE_TXN_PREEMPT,
   },
+  {
+    .name = "pm_reload.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {},
+    .workspace = "local_shim_test_data/xclbin2elf_preempt_tinyyolo",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
+  },
 };
 
 }

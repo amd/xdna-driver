@@ -12,7 +12,8 @@ using namespace xrt_core;
 enum kernel_type {
   KERNEL_TYPE_DPU_SEQ = 0,
   KERNEL_TYPE_TXN,
-  KERNEL_TYPE_TXN_PREEMPT
+  KERNEL_TYPE_TXN_PREEMPT,
+  KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
 };
 
 struct xclbin_info {

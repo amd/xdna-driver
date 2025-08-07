@@ -15,8 +15,6 @@ using namespace xrt_core;
 
 namespace {
 
-std::unique_ptr<aiebu::aiebu_assembler> asp = nullptr;
-
 std::array io_test_bo_type_names {
   "IO_TEST_BO_CMD",
   "IO_TEST_BO_INSTRUCTION",
@@ -29,6 +27,7 @@ std::array io_test_bo_type_names {
   "IO_TEST_BO_SCRATCH_PAD",
   "IO_TEST_BO_SAVE_INSTRUCTION",
   "IO_TEST_BO_RESTORE_INSTRUCTION",
+  "IO_TEST_BO_2ND_PARAMETERS",
 };
 
 char *
@@ -108,17 +107,35 @@ get_ofm_format(const std::string& config_file)
     return { conf["valid_bytes_per_section"], conf["section_size"], conf["total_size"] };
 }
 
-xrt::elf
-txn2elf(std::vector<char>& txn_buf, std::vector<char>& pm_ctrlpkt)
+std::tuple<size_t, std::vector<char>>
+read_binary_file(const std::string& filename)
 {
-  if (pm_ctrlpkt.size()) {
+  size_t size = get_bin_size(filename);
+  std::vector<char> bin_buf(size);
+
+  if (size)
+    read_data_from_bin(filename, 0, size, reinterpret_cast<int*>(bin_buf.data()));
+  return { size, bin_buf };
+}
+
+const xrt::elf
+txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
+{
+  auto [ instr_size, txn_buf ] = read_binary_file(ml_txn);
+  auto [ pm_ctrlpkt_size, pm_ctrlpkt_buf ] = read_binary_file(pm_ctrlpkt);
+
+  if (!instr_size)
+    throw std::runtime_error("Can't open TXN bin file?");
+
+  std::unique_ptr<aiebu::aiebu_assembler> asp = nullptr;
+  if (pm_ctrlpkt_buf.size()) {
     std::vector<char> buffer2 = {};
     std::vector<char> patch_json = {};
     std::vector<std::string> libs = { "preempt" };
     std::vector<std::string> libpaths = { get_preemption_libs_path() };
     std::map< uint32_t, std::vector<char> > m_ctrlpkt = {};
-    m_ctrlpkt[0] = pm_ctrlpkt;
-    m_ctrlpkt[1] = pm_ctrlpkt;
+    m_ctrlpkt[0] = pm_ctrlpkt_buf;
+    m_ctrlpkt[1] = pm_ctrlpkt_buf;
     asp = std::make_unique<aiebu::aiebu_assembler>(
       aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf,
       buffer2, patch_json, libs, libpaths, m_ctrlpkt);
@@ -132,31 +149,22 @@ txn2elf(std::vector<char>& txn_buf, std::vector<char>& pm_ctrlpkt)
   //dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
   xrt::elf elf{elf_stream};
   return elf;
-}
 
-const xrt::elf
-txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
-{
-  size_t instr_size = get_bin_size(ml_txn);
-  if (instr_size == 0)
-    throw std::runtime_error("Zero instruction length");
-  std::vector<char> txn_buf(instr_size);
-  read_data_from_bin(ml_txn, 0, instr_size, reinterpret_cast<int*>(txn_buf.data()));
-
-  size_t pm_ctrlpkt_size = get_bin_size(pm_ctrlpkt);
-  std::vector<char> pm_ctrlpkt_buf(pm_ctrlpkt_size);
-  if (pm_ctrlpkt_size)
-    read_data_from_bin(pm_ctrlpkt, 0, pm_ctrlpkt_size, reinterpret_cast<int*>(pm_ctrlpkt_buf.data()));
-  return txn2elf(txn_buf, pm_ctrlpkt_buf);
 }
 
 unsigned long
-get_fine_preemption_checkpoints(const xrt::elf elf)
+get_fine_preemption_checkpoints(const std::string& ml_txn)
 {
   unsigned long count = 0;
   std::ostringstream out;
   size_t pos = 0;
 
+  auto [ instr_size, txn_buf ] = read_binary_file(ml_txn);
+  if (!instr_size)
+    throw std::runtime_error("Can't open TXN bin file?");
+
+  auto asp = std::make_unique<aiebu::aiebu_assembler>(
+    aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf);
   asp->get_report(out);
   std::string report = out.str();
 
@@ -182,40 +190,6 @@ get_fine_preemption_checkpoints(const xrt::elf elf)
     throw std::runtime_error("Preemptible kernel must have atleast 1 preemption checkpoint");
 
   return count;
-}
-
-std::vector<std::pair<int, uint64_t>>
-get_fine_preemption_counters(device *dev)
-{
-  std::vector<std::pair<int, uint64_t>> counters;
-
-  const auto telemetry = device_query<query::rtos_telemetry>(dev);
-  for (auto& task : telemetry) {
-    auto user_tid = task.preemption_data.slot_index;
-    auto value = task.preemption_data.preemption_checkpoint_event;
-
-    counters.emplace_back(user_tid, value);
-  }
-  return counters;
-}
-
-int
-force_fine_preemption(device *dev, bool control)
-{
-  try {
-    device_update<query::preemption>(dev, static_cast<uint32_t>(control));
-  }
-  catch (const std::runtime_error& e) {
-    if (errno == EACCES) {
-      std::cerr << "User doesn't have admin privilege. Skipping force preemption.\n";
-      return -1;
-    }
-  }
-  catch (...) {
-    throw std::runtime_error("Caught an unknown exception.");
-  }
-
-  return 0;
 }
 
 } // namespace
@@ -279,15 +253,7 @@ io_test_bo_set(device* dev, const std::string& xclbin_name, bool use_ubuf) :
       ibo.size = DUMMY_MC_CODE_BUFFER_SIZE;
       alloc_bo(ibo, m_dev, type, use_ubuf);
       break;
-    case IO_TEST_BO_CTRL_PKT_PM:
-    case IO_TEST_BO_SCRATCH_PAD:
-    case IO_TEST_BO_SAVE_INSTRUCTION:
-    case IO_TEST_BO_RESTORE_INSTRUCTION:
-      // No need for ctrl_pm, scratch pad, save and restore instruction BOs
-      // They are meant for ELF flow.
-      break;
     default:
-      throw std::runtime_error(std::string("unknown BO type ") + std::to_string(type));
       break;
     }
   }
@@ -354,10 +320,6 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       ibo.size = get_bin_size(file);
       alloc_bo(ibo, m_dev, type);
       break;
-    case IO_TEST_BO_INTERMEDIATE:
-    case IO_TEST_BO_MC_CODE:
-      // No need for intermediate/mc_code BO
-      break;
     case IO_TEST_BO_CTRL_PKT_PM:
       file = m_local_data_path + "/pm_ctrlpkt.bin";
       ibo.size = get_bin_size(file);
@@ -367,13 +329,7 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
         init_bo(ibo, file);
       }
       break;
-    case IO_TEST_BO_SAVE_INSTRUCTION:
-    case IO_TEST_BO_RESTORE_INSTRUCTION:
-    case IO_TEST_BO_SCRATCH_PAD:
-      // Save, restore instruction and scratch pad buffer is required for preemption kernel
-      break;
     default:
-      throw std::runtime_error("unknown BO type");
       break;
     }
   }
@@ -383,7 +339,7 @@ elf_preempt_io_test_bo_set::
 elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   io_test_bo_set_base(dev, xclbin_name)
   , m_elf(txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin"))
-  , m_total_fine_preemption_checkpoints(get_fine_preemption_checkpoints(m_elf))
+  , m_total_fine_preemption_checkpoints(get_fine_preemption_checkpoints(m_local_data_path + "/ml_txn.bin"))
 {
   std::string file;
 
@@ -434,10 +390,6 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       ibo.size = get_bin_size(file);
       alloc_bo(ibo, m_dev, type);
       break;
-    case IO_TEST_BO_INTERMEDIATE:
-    case IO_TEST_BO_MC_CODE:
-      // No need for intermediate/mc_code BO
-      break;
     case IO_TEST_BO_CTRL_PKT_PM:
       file = m_local_data_path + "/pm_ctrlpkt.bin";
       ibo.size = get_bin_size(file);
@@ -456,10 +408,9 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       break;
     }
     default:
-      throw std::runtime_error("Unknown BO type");
+      break;
     }
   }
-  ++m_total_cmds;
 }
 
 void
@@ -481,6 +432,7 @@ sync_before_run()
     case IO_TEST_BO_MC_CODE:
     case IO_TEST_BO_CTRL_PKT_PM:
     case IO_TEST_BO_SCRATCH_PAD:
+    case IO_TEST_BO_2ND_PARAMETERS:
       ibo->tbo->get()->sync(buffer_handle::direction::host2device, ibo->tbo->size(), 0);
       break;
     default:
@@ -588,22 +540,6 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
     xrt_core::patcher::buf_type::preempt_save, m_elf);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
     xrt_core::patcher::buf_type::preempt_restore, m_elf);
-
-  if (force_fine_preemption(m_dev, true))
-    return;
-
-  const auto info = device_query<query::aie_partition_info>(m_dev);
-  auto pid = getpid();
-
-  for (auto& partition: info) {
-    if (partition.pid == pid)
-      m_user_tid = std::stoi(partition.metadata.id);
-  }
-
-  if (m_user_tid == -1)
-    throw std::runtime_error("Invalid user task ID!");
-
-  m_fine_preemptions = get_fine_preemption_counters(m_dev);
 }
 
 // For debug only
@@ -688,31 +624,6 @@ verify_result()
   }
   if (count)
     throw std::runtime_error(std::to_string(count) + " bytes result mismatch!!!");
-
-  if (force_fine_preemption(m_dev, false))
-    return;
-
-  std::vector<std::pair<int, uint64_t>> post_run = get_fine_preemption_counters(m_dev);
-  uint64_t fine_preemption_count;
-  int hw_ctx_id = -1;
-
-  // Find the HW Context ID for the current user TID
-  for (auto i =  0; i < post_run.size(); i++) {
-    auto tid = post_run[i].first;
-
-    if (tid == m_user_tid) {
-      fine_preemption_count = post_run[i].second;
-      hw_ctx_id = i;
-      break;
-    }
-  }
-
-  if (hw_ctx_id == -1)
-    throw std::runtime_error("Invalid hw context ID");
-
-  auto delta = fine_preemption_count - m_fine_preemptions.at(hw_ctx_id).second;
-  if (m_total_fine_preemption_checkpoints * m_total_cmds != delta)
-    throw std::runtime_error("All cmds failed to preempt!");
 }
 
 const char *
@@ -780,4 +691,18 @@ io_test_bo_set_base::
 get_bos()
 {
   return m_bo_array;
+}
+
+unsigned long
+io_test_bo_set_base::
+get_preemption_checkpoints()
+{
+  return 0;
+}
+
+unsigned long
+elf_preempt_io_test_bo_set::
+get_preemption_checkpoints()
+{
+  return m_total_fine_preemption_checkpoints;
 }
