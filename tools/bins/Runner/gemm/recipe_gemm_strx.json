@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "header": {
+    "xclbin": "gemm_strx.xclbin"
+  },
+  "resources": {
+    "buffers": [
+      { "name": "bo_result", "type": "debug", "size": 131072 }
+    ],
+    "kernels": [
+      { "name": "k1", "instance": "DPU", "ctrlcode": "gemm_int8_strx.elf" }
+    ]
+  },
+  "execution": {
+    "runs": [
+      {
+        "name": "k1",
+        "arguments": [],
+        "constants": [
+          { "value": 3, "type": "int", "argidx": 0 }
+        ]
+      }
+    ]
+  }
+}

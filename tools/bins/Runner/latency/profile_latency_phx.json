@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+
+  "execution" : {
+    "iterations": 10000,
+    "verbose": false
+  }
+}
