@@ -225,7 +225,7 @@ xclbin_info xclbin_infos[] = {
     .type = KERNEL_TYPE_TXN_PREEMPT,
   },
   {
-    .name = "pm_reload.xclbin",
+    .name = "yolo_fullelf_aximm.elf",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {},

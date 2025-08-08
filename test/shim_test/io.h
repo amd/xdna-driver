@@ -66,7 +66,7 @@ public:
   dump_content();
 
   virtual void
-  verify_result() = 0;
+  verify_result();
 
   static const char *
   bo_type2name(int type);
@@ -106,9 +106,6 @@ public:
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 
-  void
-  verify_result() override;
-
 private:
   const xrt::elf m_elf;
 };
@@ -121,17 +118,21 @@ public:
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 
-  void
-  verify_result() override;
-
   unsigned long
   get_preemption_checkpoints() override;
 
-private:
+protected:
   const xrt::elf m_elf;
-  int m_user_tid = -1;
-  std::vector<std::pair<int, uint64_t>> m_fine_preemptions;
   unsigned long m_total_fine_preemption_checkpoints;
+};
+
+class full_elf_preempt_io_test_bo_set : public elf_preempt_io_test_bo_set
+{
+public:
+  full_elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 };
 
 #endif // _SHIMTEST_IO_H_

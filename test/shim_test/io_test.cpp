@@ -47,6 +47,9 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
   case KERNEL_TYPE_TXN_PREEMPT:
     base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
     break;
+  case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
+    base = std::make_unique<full_elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
+    break;
   default:
     throw std::runtime_error("Unknown kernel type");
   }
@@ -325,11 +328,15 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   // Creating HW context for cmd submission
   hw_ctx hwctx{dev, xclbin};
   auto hwq = hwctx.get()->get_hw_queue();
-  auto ip_name = get_kernel_name(dev, xclbin);
-  if (ip_name.empty())
-    throw std::runtime_error("Cannot find any kernel name matched DPU.*");
-  auto cu_idx = hwctx.get()->open_cu_context(ip_name);
-  std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
+  auto kernel_type = get_kernel_type(dev, xclbin);
+  xrt_core::cuidx_type cu_idx;
+  if (kernel_type != KERNEL_TYPE_TXN_FULL_ELF_PREEMPT) {
+    auto ip_name = get_kernel_name(dev, xclbin);
+    if (ip_name.empty())
+      throw std::runtime_error("Cannot find any kernel name matched DPU.*");
+    cu_idx = hwctx.get()->open_cu_context(ip_name);
+    std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
+  }
 
   // Finalize cmd before submission
   for (auto& boset : bo_set) {
@@ -546,4 +553,10 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
 
   io_test_parameter_init(IO_TEST_NO_PERF, IO_TEST_DELAY_RUN, IO_TEST_IOCTL_WAIT);
   io_test(id, sdev.get(), 1, 1, 1, nullptr);
+}
+
+void
+TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
+{
+  elf_io(id, sdev, arg, "yolo_fullelf_aximm.elf");
 }

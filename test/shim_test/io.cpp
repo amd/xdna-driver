@@ -336,9 +336,11 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
 }
 
 elf_preempt_io_test_bo_set::
-elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name) :
-  io_test_bo_set_base(dev, xclbin_name)
-  , m_elf(txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin"))
+elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
+  : io_test_bo_set_base(dev, xclbin_name)
+  , m_elf(get_kernel_type(dev, xclbin_name.c_str()) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT ?
+      xrt::elf(get_xclbin_path(dev, xclbin_name.c_str())) :
+      txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin"))
   , m_total_fine_preemption_checkpoints(get_fine_preemption_checkpoints(m_local_data_path + "/ml_txn.bin"))
 {
   std::string file;
@@ -385,6 +387,15 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name) :
         init_bo(ibo, file);
       }
       break;
+    case IO_TEST_BO_2ND_PARAMETERS:
+      file = m_local_data_path + "/wts_2nd.bin";
+      ibo.size = get_bin_size(file);
+      // May not have wts_2nd.bin
+      if (ibo.size) {
+        alloc_bo(ibo, m_dev, type);
+        init_bo(ibo, file);
+      }
+      break;
     case IO_TEST_BO_OUTPUT:
       file = m_local_data_path + "/ofm.bin";
       ibo.size = get_bin_size(file);
@@ -411,6 +422,12 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       break;
     }
   }
+}
+
+full_elf_preempt_io_test_bo_set::
+full_elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
+  : elf_preempt_io_test_bo_set(dev, xclbin_name)
+{
 }
 
 void
@@ -542,6 +559,38 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
     xrt_core::patcher::buf_type::preempt_restore, m_elf);
 }
 
+void
+full_elf_preempt_io_test_bo_set::
+init_cmd(xrt_core::cuidx_type idx, bool dump)
+{
+  auto dev_id = device_query<query::pcie_device>(m_dev);
+  uint32_t cmd = ERT_START_NPU_PREEMPT_ELF;
+
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), cmd);
+  ebuf.add_ctrl_bo(
+    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    *m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
+    *m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get()
+  );
+  ebuf.add_arg_64(3);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_32(0);
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_2ND_PARAMETERS].tbo.get());
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+  ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+  if (dump)
+    ebuf.dump();
+
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    xrt_core::patcher::buf_type::ctrltext, m_elf);
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
+    xrt_core::patcher::buf_type::preempt_save, m_elf);
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
+    xrt_core::patcher::buf_type::preempt_restore, m_elf);
+}
+
 // For debug only
 void
 io_test_bo_set_base::
@@ -562,6 +611,32 @@ dump_content()
 }
 
 void
+io_test_bo_set_base::
+verify_result()
+{
+  auto bo_ofm = m_bo_array[IO_TEST_BO_OUTPUT].tbo;
+  auto ofm_p = reinterpret_cast<char*>(bo_ofm->map());
+  auto sz = bo_ofm->size();
+
+  std::vector<char> buf_ofm_golden(sz);
+  auto ofm_golden_p = reinterpret_cast<char*>(buf_ofm_golden.data());
+  read_data_from_bin(m_local_data_path + "/ofm.bin", 0, sz, reinterpret_cast<int*>(ofm_golden_p));
+
+  auto [ valid_per_sec, sec_size, total_size ] = get_ofm_format(m_local_data_path + "/ofm_format.ini");
+  if (total_size == 0)
+    valid_per_sec = sec_size = total_size = sz;
+  size_t count = 0;
+  for (size_t i = 0; i < total_size; i += sec_size) {
+    for (size_t j = i; j < i + valid_per_sec; j++) {
+      if (ofm_p[i] != ofm_golden_p[i])
+        count++;
+    }
+  }
+  if (count)
+    throw std::runtime_error(std::to_string(count) + " bytes result mismatch!!!");
+}
+
+void
 io_test_bo_set::
 verify_result()
 {
@@ -572,58 +647,6 @@ verify_result()
     dump_content();
     throw std::runtime_error("Test failed!!!");
   }
-}
-
-void
-elf_io_test_bo_set::
-verify_result()
-{
-  auto bo_ofm = m_bo_array[IO_TEST_BO_OUTPUT].tbo;
-  auto ofm_p = reinterpret_cast<char*>(bo_ofm->map());
-  auto sz = bo_ofm->size();
-
-  std::vector<char> buf_ofm_golden(sz);
-  auto ofm_golden_p = reinterpret_cast<char*>(buf_ofm_golden.data());
-  read_data_from_bin(m_local_data_path + "/ofm.bin", 0, sz, reinterpret_cast<int*>(ofm_golden_p));
-
-  auto [ valid_per_sec, sec_size, total_size ] = get_ofm_format(m_local_data_path + "/ofm_format.ini");
-  if (total_size == 0)
-    valid_per_sec = sec_size = total_size = sz;
-  size_t count = 0;
-  for (size_t i = 0; i < total_size; i += sec_size) {
-    for (size_t j = i; j < i + valid_per_sec; j++) {
-      if (ofm_p[i] != ofm_golden_p[i])
-        count++;
-    }
-  }
-  if (count)
-    throw std::runtime_error(std::to_string(count) + " bytes result mismatch!!!");
-}
-
-void
-elf_preempt_io_test_bo_set::
-verify_result()
-{
-  auto bo_ofm = m_bo_array[IO_TEST_BO_OUTPUT].tbo;
-  auto ofm_p = reinterpret_cast<char*>(bo_ofm->map());
-  auto sz = bo_ofm->size();
-
-  std::vector<char> buf_ofm_golden(sz);
-  auto ofm_golden_p = reinterpret_cast<char*>(buf_ofm_golden.data());
-  read_data_from_bin(m_local_data_path + "/ofm.bin", 0, sz, reinterpret_cast<int*>(ofm_golden_p));
-
-  auto [ valid_per_sec, sec_size, total_size ] = get_ofm_format(m_local_data_path + "/ofm_format.ini");
-  if (total_size == 0)
-    valid_per_sec = sec_size = total_size = sz;
-  size_t count = 0;
-  for (size_t i = 0; i < total_size; i += sec_size) {
-    for (size_t j = i; j < i + valid_per_sec; j++) {
-      if (ofm_p[i] != ofm_golden_p[i])
-        count++;
-    }
-  }
-  if (count)
-    throw std::runtime_error(std::to_string(count) + " bytes result mismatch!!!");
 }
 
 const char *
