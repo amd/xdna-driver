@@ -165,7 +165,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	struct amdxdna_drm_destroy_hwctx *args = data;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_ctx *ctx;
-	int ret, idx;
+	int ret = 0, idx;
 
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
