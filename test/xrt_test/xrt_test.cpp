@@ -41,6 +41,7 @@ std::string curpath;
 std::string xclbinpath;
 std::string elfpath;
 bool printing_on;
+bool elf_flow = true;
 
 void
 usage(const std::string& prog)
@@ -75,17 +76,6 @@ set_xrt_path()
 {
   setenv("XILINX_XRT", local_path("").c_str(), true);
 }
-
-static void test_pause()
-{
-  std::cout << "press any key to continue..." << std::endl;
-  std::cin.get();
-}
-
-enum test_mode {
-  TEST_POSITIVE,
-  TEST_NEGATIVE,
-};
 
 struct test_case { // Definition of one test case
   const char *description;
@@ -130,6 +120,32 @@ private:
   xrt::bo m_boh;
   int *m_bop;
 };
+
+xrt::run get_xrt_run(
+  xrt::device& device,
+  const std::string xclbin_path,
+  const std::string xclbin_elf,
+  const std::string xclbin_kernel,
+  const std::string full_elf,
+  const std::string full_elf_kernel)
+{
+  xrt::kernel kernel;
+
+  if (elf_flow) {
+    xrt::elf elf{local_path(full_elf)};
+    xrt::hw_context hwctx{device, elf};
+    kernel = xrt::ext::kernel{hwctx, full_elf_kernel};
+  } else {
+    xrt::xclbin xclbin = xrt::xclbin(local_path(xclbin_path));
+    auto uuid = device.register_xclbin(xclbin);
+    xrt::elf elf{local_path(xclbin_elf)};
+    xrt::module mod{elf};
+    xrt::hw_context hwctx{device, uuid};
+    kernel = xrt::ext::kernel{hwctx, mod, xclbin_kernel};
+  }
+
+  return xrt::run{kernel};
+}
 
 template <typename TEST_BO>
 void init_umq_ifm_bo(TEST_BO& ifm)
@@ -276,11 +292,12 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   // Populate input & weight buffers
   init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
 
-  xrt::elf elf{local_path("npu3_workspace/vadd.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:vadd"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_vadd.xclbin",
+		  "npu3_workspace/xclbin_vadd.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/vadd.elf",
+		  "DPU:vadd");
 
   // Setting args for patching control code buffer
   run.set_arg(0, bo_ifm.get());
@@ -969,9 +986,10 @@ run_test(int id, const test_case& test, int device_index)
     failed = true;
   }
 
-  std::string result;
-  result = failed ? "FAILED" : "PASSED";
-  std::cout << "====== " << id << ": " << test.description << " " << result << "  =====" << std::endl;
+  std::string result = failed ? "FAILED" : "PASSED";
+  std::string flow = elf_flow ? "ELF Flow" : "XCLBIN Flow";
+  std::cout << "====== " << id << ": " << test.description  << " "
+	    << flow << " " << result << "  =====" << std::endl;
 
   if (failed)
     test_failed++;
@@ -1010,7 +1028,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:h")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -1043,8 +1061,8 @@ main(int argc, char **argv)
 	}
 	case 't': {
 	  val = std::stoi(optarg);
-	  if (val < 0) {
-		  std::cout << "Invalid thread count" << std::endl;
+	  if (val <= 0) {
+		  std::cout << "Thread count should be greater than 0" << std::endl;
                   return 1;
 	  }
 	  std::cout << "Creating " << val << " threads" << std::endl;
@@ -1062,15 +1080,19 @@ main(int argc, char **argv)
 	  break;
 	}
 	case 'x': {
-    elfpath = local_path("npu3_workspace/") + optarg + ".elf";
-    if (!elfpath.empty()) {
-	    std::cout << "Using elf file: " << elfpath << std::endl;
-	    break;
-    } else {
-      std::cout << "Failed to open elf file: " << optarg << std::endl;
+          elfpath = local_path("npu3_workspace/") + optarg + ".elf";
+          if (!elfpath.empty()) {
+            std::cout << "Using elf file: " << elfpath << std::endl;
+            break;
+          } else {
+            std::cout << "Failed to open elf file: " << optarg << std::endl;
 	    return 1;
 	  }
 	}
+        case 'l':
+          std::cout << "swtiching to xclbin flow" << std::endl;
+          elf_flow = false;
+	  break;
 	case 'h':
 	  usage(program);
 	  return 0;
