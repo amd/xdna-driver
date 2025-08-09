@@ -375,11 +375,12 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  xrt::elf elf{local_path("npu3_workspace/remote_barrier.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:remote_barrier"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_rmb.xclbin",
+		  "npu3_workspace/xclbin_rmb.elf",
+		  "dpu:{remote_barrier}",
+		  "npu3_workspace/remote_barrier.elf",
+		  "DPU:remote_barrier");
 
   // Send the command to device and wait for it to complete
   run.start();
