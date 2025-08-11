@@ -3,7 +3,6 @@
 
 #include "io.h"
 #include "hwctx.h"
-#include "exec_buf.h"
 #include "io_config.h"
 #include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 
@@ -39,38 +38,31 @@ aligned(const char *ptr, uintptr_t align)
 }
 
 void
-alloc_bo(io_test_bo& ibo, device* dev, io_test_bo_type t, bool is_ubuf = false)
+alloc_cmd_bo(io_test_bo& ibo, device* dev)
 {
-  auto sz = ibo.size;
-  if (sz == 0) {
-    ibo.tbo = nullptr;
-    return;
-  }
+  ibo.tbo = std::make_shared<bo>(dev, 0x1000l, XCL_BO_FLAGS_EXECBUF);
+}
 
-  static long page_size = 0;
-  if (!page_size)
-    page_size = sysconf(_SC_PAGESIZE);
+void
+alloc_ctrl_bo(io_test_bo& ibo, device* dev, size_t size)
+{
+  ibo.tbo = std::make_shared<bo>(dev, size, XCL_BO_FLAGS_CACHEABLE);
+}
 
-  // Allocate large enough buffer to pass page algned user pointer for
-  // BO creation. Buffer is initially filled based on type.
-  if (is_ubuf)
-    ibo.ubuf = std::vector<char>(sz + page_size - 1, t);
+void
+alloc_data_bo(io_test_bo& ibo, device* dev, size_t size, bool is_ubuf)
+{
+  if (is_ubuf) {
+    static long page_size = 0;
+    if (!page_size)
+      page_size = sysconf(_SC_PAGESIZE);
 
-  switch(t) {
-  case IO_TEST_BO_CMD:
-    ibo.tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_EXECBUF);
-    break;
-  case IO_TEST_BO_INSTRUCTION:
-  case IO_TEST_BO_SAVE_INSTRUCTION:
-  case IO_TEST_BO_RESTORE_INSTRUCTION:
-    ibo.tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
-    break;
-  default:
-    if (ibo.ubuf.size())
-      ibo.tbo = std::make_shared<bo>(dev, aligned(ibo.ubuf.data(), page_size), sz);
-    else
-      ibo.tbo = std::make_shared<bo>(dev, sz);
-    break;
+    // Allocate large enough buffer to pass page algned user pointer for
+    // BO creation. Buffer is initially filled with 0xaa.
+    ibo.ubuf = std::vector<char>(size + page_size - 1, 0xaa);
+    ibo.tbo = std::make_shared<bo>(dev, aligned(ibo.ubuf.data(), page_size), size);
+  } else {
+    ibo.tbo = std::make_shared<bo>(dev, size);
   }
 }
 
@@ -192,6 +184,20 @@ get_fine_preemption_checkpoints(const std::string& ml_txn)
   return count;
 }
 
+uint32_t
+get_column_size(const xrt::xclbin& xclbin)
+{
+  auto axlf = xclbin.get_axlf();
+  auto aie_partition = xrt_core::xclbin::get_aie_partition(axlf);
+  return aie_partition.ncol;
+}
+
+uint32_t
+get_column_size(const xrt::elf& elf)
+{
+  return elf_int::get_partition_size(elf);
+}
+
 } // namespace
 
 io_test_bo_set_base::
@@ -200,7 +206,38 @@ io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
   , m_xclbin_name(xclbin_name)
   , m_local_data_path(get_xclbin_data(dev, xclbin_name.c_str()))
   , m_dev(dev)
+  , m_kernel_index(module_int::no_ctrl_code_id)
 {
+}
+
+void
+io_test_bo_set_base::
+create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags)
+{
+  auto file = m_local_data_path + "/" + filename;
+  auto size = get_bin_size(file);
+  bool ubuf = !!(flags & m_FLAG_UBUF);
+  bool opt = !!(flags & m_FLAG_OPT);
+  bool nofill = !!(flags & m_FLAG_NO_FILL);
+
+  if (size) {
+    alloc_data_bo(ibo, m_dev, size, ubuf);
+    if (!nofill)
+      init_bo(ibo, file);
+  } else if (!opt) {
+    std::string err = "Missing file: " + filename;
+    throw std::runtime_error(err);
+  }
+}
+
+void
+io_test_bo_set_base::
+create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type)
+{
+  auto size = exec_buf::get_ctrl_code_size(m_elf, type, m_kernel_index);
+  if (size == 0)
+    throw std::runtime_error("instruction size cannot be 0");
+  alloc_ctrl_bo(ibo, m_dev, size);
 }
 
 io_test_bo_set::
@@ -213,45 +250,40 @@ io_test_bo_set(device* dev, const std::string& xclbin_name, bool use_ubuf) :
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
     auto type = static_cast<io_test_bo_type>(i);
+    size_t size;
 
     switch(type) {
     case IO_TEST_BO_CMD:
-      ibo.size = 0x1000;
-      alloc_bo(ibo, m_dev, type);
+      alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
       file = m_local_data_path + instr_file;
-      ibo.size = get_instr_size(file) * sizeof(int32_t);
-      if (ibo.size == 0)
+      size = get_instr_size(file) * sizeof(int32_t);
+      if (size == 0)
         throw std::runtime_error("instruction size cannot be 0");
-      alloc_bo(ibo, m_dev, type);
+      alloc_ctrl_bo(ibo, m_dev, size);
       read_instructions_from_txt(file, ibo.tbo->map());
       break;
     case IO_TEST_BO_INPUT:
-      ibo.size = IFM_SIZE(tp);
       ibo.init_offset = IFM_DIRTY_BYTES(tp);
-      alloc_bo(ibo, m_dev, type, use_ubuf);
+      alloc_data_bo(ibo, m_dev, IFM_SIZE(tp), use_ubuf);
       init_bo(ibo, m_local_data_path + ifm_file);
       break;
     case IO_TEST_BO_PARAMETERS:
-      ibo.size = PARAM_SIZE(tp);
-      alloc_bo(ibo, m_dev, type, use_ubuf);
+      alloc_data_bo(ibo, m_dev, PARAM_SIZE(tp), use_ubuf);
       init_bo(ibo, m_local_data_path + param_file);
       break;
     case IO_TEST_BO_OUTPUT:
-      ibo.size = OFM_SIZE(tp);
-      alloc_bo(ibo, m_dev, type, use_ubuf);
+      alloc_data_bo(ibo, m_dev, OFM_SIZE(tp), use_ubuf);
       break;
     case IO_TEST_BO_INTERMEDIATE:
-      ibo.size = INTER_SIZE(tp);
-      alloc_bo(ibo, m_dev, type, use_ubuf);
+      alloc_data_bo(ibo, m_dev, OFM_SIZE(tp), use_ubuf);
       break;
     case IO_TEST_BO_MC_CODE:
       // Do not support patching MC_CODE. */
       if (MC_CODE_SIZE(tp))
         throw std::runtime_error("MC_CODE_SIZE is non zero!!!");
-      ibo.size = DUMMY_MC_CODE_BUFFER_SIZE;
-      alloc_bo(ibo, m_dev, type, use_ubuf);
+      alloc_data_bo(ibo, m_dev, DUMMY_MC_CODE_BUFFER_SIZE, use_ubuf);
       break;
     default:
       break;
@@ -269,65 +301,37 @@ io_test_bo_set(device* dev, bool use_ubuf) : io_test_bo_set(dev, get_xclbin_name
 {
 }
 
-uint32_t
-get_column_size(const std::string& xclbin_path)
-{
-  auto xclbin = xrt::xclbin(xclbin_path);
-  auto axlf = xclbin.get_axlf();
-  auto aie_partition = xrt_core::xclbin::get_aie_partition(axlf);
-  return aie_partition.ncol;
-}
-
 elf_io_test_bo_set::
 elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   io_test_bo_set_base(dev, xclbin_name)
-  , m_elf(txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin"))
 {
   std::string file;
+
+  m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
     auto type = static_cast<io_test_bo_type>(i);
+    size_t size;
 
     switch(type) {
     case IO_TEST_BO_CMD:
-      ibo.size = 0x1000;
-      alloc_bo(ibo, m_dev, type);
+      alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      ibo.size = exec_buf::get_ctrl_code_size(m_elf, xrt_core::patcher::buf_type::ctrltext);
-      if (ibo.size == 0)
-        throw std::runtime_error("instruction size cannot be 0");
-      alloc_bo(ibo, m_dev, type);
+      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_INPUT:
-      file = m_local_data_path + "/ifm.bin";
-      ibo.size = get_bin_size(file);
-      alloc_bo(ibo, m_dev, type);
-      init_bo(ibo, file);
+      create_data_bo_from_file(ibo, "ifm.bin", 0);
       break;
     case IO_TEST_BO_PARAMETERS:
-      file = m_local_data_path + "/wts.bin";
-      ibo.size = get_bin_size(file);
-      // May not have wts.bin
-      if (ibo.size) {
-        alloc_bo(ibo, m_dev, type);
-        init_bo(ibo, file);
-      }
+      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_OUTPUT:
-      file = m_local_data_path + "/ofm.bin";
-      ibo.size = get_bin_size(file);
-      alloc_bo(ibo, m_dev, type);
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL);
       break;
     case IO_TEST_BO_CTRL_PKT_PM:
-      file = m_local_data_path + "/pm_ctrlpkt.bin";
-      ibo.size = get_bin_size(file);
-      // May not have pm_ctrlpkt.bin
-      if (ibo.size) {
-        alloc_bo(ibo, m_dev, type);
-        init_bo(ibo, file);
-      }
+      create_data_bo_from_file(ibo, "pm_ctrlpkt.bin", m_FLAG_OPT);
       break;
     default:
       break;
@@ -338,96 +342,68 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
 elf_preempt_io_test_bo_set::
 elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
   : io_test_bo_set_base(dev, xclbin_name)
-  , m_elf(get_kernel_type(dev, xclbin_name.c_str()) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT ?
-      xrt::elf(get_xclbin_path(dev, xclbin_name.c_str())) :
-      txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin"))
+  , m_is_full_elf(get_kernel_type(dev, xclbin_name.c_str()) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT)
   , m_total_fine_preemption_checkpoints(get_fine_preemption_checkpoints(m_local_data_path + "/ml_txn.bin"))
 {
   std::string file;
 
+  m_elf = m_is_full_elf ?
+      xrt::elf(get_xclbin_path(dev, xclbin_name.c_str())) :
+      txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
+  m_kernel_index = m_is_full_elf ?
+      get_kernel_index(dev, xclbin_name.c_str()).index : module_int::no_ctrl_code_id;
+
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
     auto type = static_cast<io_test_bo_type>(i);
+    size_t size;
 
     switch(type) {
     case IO_TEST_BO_CMD:
-      ibo.size = 0x1000;
-      alloc_bo(ibo, m_dev, type);
+      alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      ibo.size = exec_buf::get_ctrl_code_size(m_elf, xrt_core::patcher::buf_type::ctrltext);
-      if (ibo.size == 0)
-        throw std::runtime_error("instruction size cannot be 0");
-      alloc_bo(ibo, m_dev, type);
+      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_SAVE_INSTRUCTION:
-      ibo.size = exec_buf::get_ctrl_code_size(m_elf, xrt_core::patcher::buf_type::preempt_save);
-      if (ibo.size == 0)
-        throw std::runtime_error("save instruction size cannot be 0");
-      alloc_bo(ibo, m_dev, type);
+      create_ctrl_bo_from_elf(ibo, patcher::buf_type::preempt_save);
       break;
     case IO_TEST_BO_RESTORE_INSTRUCTION:
-      ibo.size = exec_buf::get_ctrl_code_size(m_elf, xrt_core::patcher::buf_type::preempt_restore);
-      if (ibo.size == 0)
-        throw std::runtime_error("restore instruction size cannot be 0");
-      alloc_bo(ibo, m_dev, type);
+      create_ctrl_bo_from_elf(ibo, patcher::buf_type::preempt_restore);
       break;
     case IO_TEST_BO_INPUT:
-      file = m_local_data_path + "/ifm.bin";
-      ibo.size = get_bin_size(file);
-      alloc_bo(ibo, m_dev, type);
-      init_bo(ibo, file);
+      create_data_bo_from_file(ibo, "ifm.bin", 0);
       break;
     case IO_TEST_BO_PARAMETERS:
-      file = m_local_data_path + "/wts.bin";
-      ibo.size = get_bin_size(file);
-      // May not have wts.bin
-      if (ibo.size) {
-        alloc_bo(ibo, m_dev, type);
-        init_bo(ibo, file);
-      }
+      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_2ND_PARAMETERS:
-      file = m_local_data_path + "/wts_2nd.bin";
-      ibo.size = get_bin_size(file);
-      // May not have wts_2nd.bin
-      if (ibo.size) {
-        alloc_bo(ibo, m_dev, type);
-        init_bo(ibo, file);
-      }
+      create_data_bo_from_file(ibo, "wts_2nd.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_OUTPUT:
-      file = m_local_data_path + "/ofm.bin";
-      ibo.size = get_bin_size(file);
-      alloc_bo(ibo, m_dev, type);
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL);
       break;
     case IO_TEST_BO_CTRL_PKT_PM:
-      file = m_local_data_path + "/pm_ctrlpkt.bin";
-      ibo.size = get_bin_size(file);
-      // May not have pm_ctrlpkt.bin
-      if (ibo.size) {
-        alloc_bo(ibo, m_dev, type);
-        init_bo(ibo, file);
-      }
+      create_data_bo_from_file(ibo, "pm_ctrlpkt.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_SCRATCH_PAD: {
       // Only support mem tile size for NPU4
       const size_t mem_tile_sz = 512 * 1024;
 
-      ibo.size = mem_tile_sz * get_column_size(m_local_data_path + "/" + xclbin_name);
-      alloc_bo(ibo, m_dev, type);
+      if (get_kernel_type(dev, xclbin_name.c_str()) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT)
+        size = mem_tile_sz * get_column_size(m_elf);
+      else
+        size = mem_tile_sz * get_column_size(xrt::xclbin(get_xclbin_path(dev, xclbin_name.c_str())));
+      alloc_data_bo(ibo, m_dev, size, false);
       break;
     }
+    case IO_TEST_BO_PDI:
+      create_data_bo_from_file(ibo, "pdi.bin", m_FLAG_OPT);
+      break;
     default:
       break;
     }
   }
-}
-
-full_elf_preempt_io_test_bo_set::
-full_elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
-  : elf_preempt_io_test_bo_set(dev, xclbin_name)
-{
 }
 
 void
@@ -450,6 +426,7 @@ sync_before_run()
     case IO_TEST_BO_CTRL_PKT_PM:
     case IO_TEST_BO_SCRATCH_PAD:
     case IO_TEST_BO_2ND_PARAMETERS:
+    case IO_TEST_BO_PDI:
       ibo->tbo->get()->sync(buffer_handle::direction::host2device, ibo->tbo->size(), 0);
       break;
     default:
@@ -481,11 +458,12 @@ sync_after_run()
 
 void
 io_test_bo_set::
-init_cmd(xrt_core::cuidx_type idx, bool dump)
+init_cmd(cuidx_type idx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_CU);
 
   ebuf.set_cu_idx(idx);
+
   ebuf.add_arg_64(1);
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
@@ -494,20 +472,19 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.add_arg_32(m_bo_array[IO_TEST_BO_INSTRUCTION].tbo->size() / sizeof(int32_t));
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_MC_CODE].tbo.get());
+
   if (dump)
     ebuf.dump();
 }
 
 void
 elf_io_test_bo_set::
-init_cmd(xrt_core::cuidx_type idx, bool dump)
+init_cmd(cuidx_type idx, bool dump)
 {
-  auto dev_id = device_query<query::pcie_device>(m_dev);
-  uint32_t cmd = ERT_START_NPU;
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
 
-  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), cmd);
   ebuf.set_cu_idx(idx);
-  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+
   ebuf.add_arg_64(3);
   ebuf.add_arg_64(0);
   ebuf.add_arg_32(0);
@@ -516,79 +493,60 @@ init_cmd(xrt_core::cuidx_type idx, bool dump)
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
   ebuf.add_arg_64(0);
   ebuf.add_arg_64(0);
+
   if (dump)
     ebuf.dump();
 
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    xrt_core::patcher::buf_type::ctrltext, m_elf);
+    patcher::buf_type::ctrltext, m_elf, module_int::no_ctrl_code_id);
 }
 
 void
 elf_preempt_io_test_bo_set::
-init_cmd(xrt_core::cuidx_type idx, bool dump)
+init_cmd(cuidx_type idx, bool dump)
 {
-  auto dev_id = device_query<query::pcie_device>(m_dev);
-  uint32_t cmd = ERT_START_NPU_PREEMPT;
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(),
+    m_is_full_elf ? ERT_START_NPU_PREEMPT_ELF : ERT_START_NPU_PREEMPT);
 
-  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), cmd);
-  ebuf.set_cu_idx(idx);
+  if (m_is_full_elf) {
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_2ND_PARAMETERS].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PDI].tbo.get(), ".pdi.0");
+    ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+  } else {
+    ebuf.set_cu_idx(idx);
+
+    ebuf.add_arg_64(3);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_32(0);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-0");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-1");
+    ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+  }
+
   ebuf.add_ctrl_bo(
     *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
     *m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
     *m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get()
   );
-  ebuf.add_arg_64(3);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_32(0);
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-0");
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-1");
-  ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+
   if (dump)
     ebuf.dump();
 
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    xrt_core::patcher::buf_type::ctrltext, m_elf);
+    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
-    xrt_core::patcher::buf_type::preempt_save, m_elf);
+    patcher::buf_type::preempt_save, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
-    xrt_core::patcher::buf_type::preempt_restore, m_elf);
-}
-
-void
-full_elf_preempt_io_test_bo_set::
-init_cmd(xrt_core::cuidx_type idx, bool dump)
-{
-  auto dev_id = device_query<query::pcie_device>(m_dev);
-  uint32_t cmd = ERT_START_NPU_PREEMPT_ELF;
-
-  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), cmd);
-  ebuf.add_ctrl_bo(
-    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    *m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
-    *m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get()
-  );
-  ebuf.add_arg_64(3);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_32(0);
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_2ND_PARAMETERS].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
-  ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
-  if (dump)
-    ebuf.dump();
-
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    xrt_core::patcher::buf_type::ctrltext, m_elf);
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
-    xrt_core::patcher::buf_type::preempt_save, m_elf);
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
-    xrt_core::patcher::buf_type::preempt_restore, m_elf);
+    patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
 }
 
 // For debug only
@@ -660,8 +618,8 @@ bo_type2name(int type)
 
 void
 io_test_bo_set_base::
-run(const std::vector<xrt_core::fence_handle*>& wait_fences,
-  const std::vector<xrt_core::fence_handle*>& signal_fences, bool no_check_result)
+run(const std::vector<fence_handle*>& wait_fences,
+  const std::vector<fence_handle*>& signal_fences, bool no_check_result)
 {
   hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
   auto hwq = hwctx.get()->get_hw_queue();
@@ -695,8 +653,8 @@ void
 io_test_bo_set_base::
 run()
 {
-  const std::vector<xrt_core::fence_handle*> sfences{};
-  const std::vector<xrt_core::fence_handle*> wfences{};
+  const std::vector<fence_handle*> sfences{};
+  const std::vector<fence_handle*> wfences{};
   run(wfences, sfences, false);
 }
 
@@ -704,8 +662,8 @@ void
 io_test_bo_set_base::
 run_no_check_result()
 {
-  const std::vector<xrt_core::fence_handle*> sfences{};
-  const std::vector<xrt_core::fence_handle*> wfences{};
+  const std::vector<fence_handle*> sfences{};
+  const std::vector<fence_handle*> wfences{};
   run(wfences, sfences, true);
 }
 

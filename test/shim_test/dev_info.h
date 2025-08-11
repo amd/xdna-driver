@@ -42,6 +42,7 @@ const uint16_t npu6_revision_id = 0x20;
 const xclbin_info& get_xclbin_info(device* dev, const char *xclbin_name=nullptr);
 std::string get_xclbin_name(device* dev); // Find default xclbin name for this device
 std::string get_kernel_name(device* dev, const char*);
+cuidx_type get_kernel_index(device* dev, const char*);
 kernel_type get_kernel_type(device* dev, const char*);
 std::string get_xclbin_data(device* dev, const char *xclbin_name=nullptr);
 std::string get_xclbin_path(device* dev, const char *xclbin_name=nullptr);

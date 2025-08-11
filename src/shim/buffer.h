@@ -80,6 +80,9 @@ public:
   void
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
 
+  void
+  reset() override;
+
 public:
   buffer(const pdev& dev, size_t size, int type, void *uptr);
 
@@ -110,6 +113,9 @@ public:
 
   virtual std::set<bo_id>
   get_arg_bo_ids() const;
+
+  virtual std::set<const buffer *>
+  get_arg_bos() const;
 
   void
   expand(size_t size);
@@ -144,6 +150,9 @@ public:
   void
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
 
+  void
+  reset() override;
+
 public:
   void
   mark_enqueued() const;
@@ -158,6 +167,9 @@ public:
   std::set<bo_id>
   get_arg_bo_ids() const override;
 
+  std::set<const buffer *>
+  get_arg_bos() const override;
+
 private:
   std::string
   bo_sub_type_name() const override;
@@ -165,6 +177,9 @@ private:
   // Valid only when m_submitted is true.
   mutable uint64_t m_cmd_seq = 0;
   std::map< size_t, std::set<bo_id> > m_args_map;
+  // For dumping arg BO content only
+  std::map< size_t, std::set<const buffer *> > m_arg_bos_map;
+  bool m_dump_arg_bos = false;
   mutable std::mutex m_args_map_lock;
 
   mutable std::mutex m_submission_lock;

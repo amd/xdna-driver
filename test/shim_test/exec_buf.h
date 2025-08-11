@@ -29,6 +29,7 @@ public:
     m_cmd_pkt->opcode = m_op;
     m_cmd_pkt->type = ERT_CU;
     inc_pkt_count(sizeof(int32_t)); // One word for cu mask
+    bo_execbuf.get()->reset();
   }
 
   static void
@@ -47,11 +48,15 @@ public:
   void
   add_ctrl_bo(bo& bo_ctrl, bo& bo_save, bo& bo_restore)
   {
-    if (m_op != ERT_START_NPU_PREEMPT)
-      throw std::runtime_error("Expecting ERT_START_NPU_PREEMPT op, got: " + std::to_string(m_op));
+    if (m_op != ERT_START_NPU_PREEMPT && m_op != ERT_START_NPU_PREEMPT_ELF)
+      throw std::runtime_error("Expecting ERT_START_NPU_PREEMPT(_ELF) op, got: " + std::to_string(m_op));
 
     auto cmd_packet = reinterpret_cast<ert_start_kernel_cmd *>(m_exec_buf_bo.map());
-    auto dpu_data = get_ert_npu_preempt_data(cmd_packet);
+    ert_npu_preempt_data *dpu_data = nullptr;
+    if (m_op == ERT_START_NPU_PREEMPT)
+      dpu_data = get_ert_npu_preempt_data(cmd_packet);
+    else
+      dpu_data = get_ert_npu_elf_data(cmd_packet);
     dpu_data->instruction_buffer = bo_ctrl.paddr();
     dpu_data->instruction_buffer_size = bo_ctrl.size();
     dpu_data->save_buffer = bo_save.paddr();
@@ -59,6 +64,11 @@ public:
     dpu_data->restore_buffer = bo_restore.paddr();
     dpu_data->restore_buffer_size = bo_restore.size();
     inc_pkt_count(sizeof(*dpu_data));
+
+    // Make sure position does not clash with real args.
+    m_exec_buf_bo.get()->bind_at(1000, bo_ctrl.get(), 0, bo_ctrl.size());
+    m_exec_buf_bo.get()->bind_at(1001, bo_save.get(), 0, bo_save.size());
+    m_exec_buf_bo.get()->bind_at(1002, bo_restore.get(), 0, bo_restore.size());
   }
 
   void
@@ -88,6 +98,9 @@ public:
     default:
       throw std::runtime_error("Bad exec buf op code: " + std::to_string(m_op));
     }
+
+    // Make sure position does not clash with real args.
+    m_exec_buf_bo.get()->bind_at(1000, bo_ctrl.get(), 0, bo_ctrl.size());
   }
 
   void
@@ -115,12 +128,15 @@ public:
     // Add to argument list for driver
     m_exec_buf_bo.get()->bind_at(m_arg_cnt, bo_arg.get(), 0, bo_arg.size());
     // Add to argument list for control code patching
-    if (arg_name.empty())
+    if (arg_name.empty()) {
       m_ctrl_text_args.emplace_back(std::to_string(m_arg_cnt), bo_arg.paddr());
-    else
+      // Only increase m_arg_cnt now after it's used by code above.
+      // Index will be used for patching name, will show in exec_buf.
+      add_arg_64(bo_arg.paddr());
+    } else {
+      // Named arg is for patching only, no need to show in exec_buf.
       m_ctrl_text_args.emplace_back(arg_name, bo_arg.paddr());
-    // Only increase m_arg_cnt now after it's used by code above.
-    add_arg_64(bo_arg.paddr());
+    }
   }
 
   void
@@ -157,26 +173,26 @@ public:
   get_ctrl_code_size(const std::string& elf_path, xrt_core::patcher::buf_type type)
   {
     auto elf = xrt::elf{elf_path};
-    return get_ctrl_code_size(elf, type);
+    return get_ctrl_code_size(elf, type, xrt_core::module_int::no_ctrl_code_id);
   }
 
   void
   patch_ctrl_code(bo& bo_ctrl, xrt_core::patcher::buf_type type, const std::string& elf_path)
   {
     auto elf = xrt::elf{elf_path};
-    patch_ctrl_code(bo_ctrl, type, elf);
+    patch_ctrl_code(bo_ctrl, type, elf, xrt_core::module_int::no_ctrl_code_id);
   }
 
   static size_t
-  get_ctrl_code_size(const xrt::elf& elf, xrt_core::patcher::buf_type type)
+  get_ctrl_code_size(const xrt::elf& elf, xrt_core::patcher::buf_type type, uint32_t group_idx)
   {
     auto mod = xrt::module{elf};
-    size_t instr_size = xrt_core::module_int::get_patch_buf_size(mod, type);
+    size_t instr_size = xrt_core::module_int::get_patch_buf_size(mod, type, group_idx);
     return instr_size;
   }
 
   void
-  patch_ctrl_code(bo& bo_ctrl, xrt_core::patcher::buf_type type, const xrt::elf& elf)
+  patch_ctrl_code(bo& bo_ctrl, xrt_core::patcher::buf_type type, const xrt::elf& elf, uint32_t group_idx)
   {
     auto mod = xrt::module{elf};
     size_t instr_size = bo_ctrl.size();
@@ -188,7 +204,7 @@ public:
       arglist = &m_save_restore_args;
 
     xrt_core::module_int::patch(
-      mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), instr_size, arglist, type);
+      mod, reinterpret_cast<uint8_t*>(bo_ctrl.map()), instr_size, arglist, type, group_idx);
     bo_ctrl.get()->sync(buffer_handle::direction::host2device, instr_size, 0);
   }
 

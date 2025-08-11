@@ -228,7 +228,9 @@ xclbin_info xclbin_infos[] = {
     .name = "yolo_fullelf_aximm.elf",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
-    .ip_name2idx = {},
+    .ip_name2idx = {
+      { "DPU:dpu", {11} },
+    },
     .workspace = "local_shim_test_data/xclbin2elf_preempt_tinyyolo",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
@@ -261,6 +263,12 @@ std::string
 get_kernel_name(device* dev, const char *xclbin)
 {
   return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->first;
+}
+
+cuidx_type
+get_kernel_index(device* dev, const char *xclbin)
+{
+  return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->second;
 }
 
 kernel_type

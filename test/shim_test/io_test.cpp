@@ -45,10 +45,8 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
     base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
     break;
   case KERNEL_TYPE_TXN_PREEMPT:
-    base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
-    break;
   case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
-    base = std::make_unique<full_elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
+    base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
     break;
   default:
     throw std::runtime_error("Unknown kernel type");
@@ -115,6 +113,7 @@ io_test_init_runlist_cmd(bo* cmd_bo, std::vector<bo*>& cmd_bos)
   payload->submit_index = 0;
   payload->error_index = 0;
 
+  cmd_bo->get()->reset();
   for (size_t i = 0; i < cmd_bos.size(); i++) {
     auto run_bo = cmd_bos[i];
     payload->data[i] = run_bo->get()->get_properties().kmhdl;
@@ -328,8 +327,9 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   // Creating HW context for cmd submission
   hw_ctx hwctx{dev, xclbin};
   auto hwq = hwctx.get()->get_hw_queue();
+
+  xrt_core::cuidx_type cu_idx{0};
   auto kernel_type = get_kernel_type(dev, xclbin);
-  xrt_core::cuidx_type cu_idx;
   if (kernel_type != KERNEL_TYPE_TXN_FULL_ELF_PREEMPT) {
     auto ip_name = get_kernel_name(dev, xclbin);
     if (ip_name.empty())

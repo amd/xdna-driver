@@ -6,8 +6,9 @@
 
 #include "bo.h"
 #include "dev_info.h"
-
+#include "exec_buf.h"
 #include "core/common/device.h"
+#include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 #include <memory>
 
 enum io_test_bo_type {
@@ -23,11 +24,11 @@ enum io_test_bo_type {
   IO_TEST_BO_SAVE_INSTRUCTION,
   IO_TEST_BO_RESTORE_INSTRUCTION,
   IO_TEST_BO_2ND_PARAMETERS,
+  IO_TEST_BO_PDI,
   IO_TEST_BO_MAX_TYPES
 };
 
 struct io_test_bo {
-  size_t size = 0;
   size_t init_offset = 0;
   std::vector<char> ubuf;
   std::shared_ptr<bo> tbo;
@@ -82,6 +83,17 @@ protected:
   const std::string m_xclbin_name;
   const std::string m_local_data_path;
   device *m_dev;
+  xrt::elf m_elf = {};
+  uint32_t m_kernel_index;
+  const int m_FLAG_UBUF =     1 << 0;
+  const int m_FLAG_OPT =      1 << 1;
+  const int m_FLAG_NO_FILL =  1 << 2;
+
+  void
+  create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags);
+
+  void
+  create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type);
 };
 
 class io_test_bo_set : public io_test_bo_set_base
@@ -107,7 +119,6 @@ public:
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 
 private:
-  const xrt::elf m_elf;
 };
 
 class elf_preempt_io_test_bo_set : public io_test_bo_set_base
@@ -121,18 +132,9 @@ public:
   unsigned long
   get_preemption_checkpoints() override;
 
-protected:
-  const xrt::elf m_elf;
+private:
+  bool m_is_full_elf;
   unsigned long m_total_fine_preemption_checkpoints;
-};
-
-class full_elf_preempt_io_test_bo_set : public elf_preempt_io_test_bo_set
-{
-public:
-  full_elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
-
-  void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 };
 
 #endif // _SHIMTEST_IO_H_
