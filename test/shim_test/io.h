@@ -7,8 +7,8 @@
 #include "bo.h"
 #include "dev_info.h"
 #include "exec_buf.h"
+
 #include "core/common/device.h"
-#include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 #include <memory>
 
 enum io_test_bo_type {
