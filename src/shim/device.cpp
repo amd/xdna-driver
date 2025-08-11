@@ -470,6 +470,46 @@ struct preemption
   }
 };
 
+struct event_trace 
+{
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    amdxdna_drm_attribute_state force;
+    force.state = std::any_cast<uint32_t>(any);
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_EVENT_TRACE,
+      .buffer_size = sizeof(force),
+      .buffer = reinterpret_cast<uintptr_t>(&force)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+
+  }
+}
+
+struct firmware_log 
+{
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    amdxdna_drm_attribute_state force;
+    force.state = std::any_cast<uint32_t>(any);
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FIRMWARE_LOG,
+      .buffer_size = sizeof(force),
+      .buffer = reinterpret_cast<uintptr_t>(&force)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+
+  }
+};
+
 struct frame_boundary_preemption
 {
   using result_type = query::frame_boundary_preemption::result_type;
@@ -1379,6 +1419,8 @@ initialize_query_table()
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
+  emplace_func0_getput<query::event_trace,                     event_trace>();
+  emplace_func0_getput<query::firmware_log,                    firmware_log>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
   emplace_func0_request<query::opcode_telemetry,               telemetry>();
