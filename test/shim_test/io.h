@@ -85,9 +85,10 @@ protected:
   device *m_dev;
   xrt::elf m_elf = {};
   uint32_t m_kernel_index;
-  const int m_FLAG_UBUF =     1 << 0;
+  const int m_FLAG_USR_BUF =  1 << 0;
   const int m_FLAG_OPT =      1 << 1;
   const int m_FLAG_NO_FILL =  1 << 2;
+  const int m_FLAG_DEV_BUF =  1 << 3;
 
   void
   create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags);

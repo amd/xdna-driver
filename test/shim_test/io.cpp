@@ -216,12 +216,16 @@ create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags)
 {
   auto file = m_local_data_path + "/" + filename;
   auto size = get_bin_size(file);
-  bool ubuf = !!(flags & m_FLAG_UBUF);
+  bool ubuf = !!(flags & m_FLAG_USR_BUF);
+  bool dbuf = !!(flags & m_FLAG_DEV_BUF);
   bool opt = !!(flags & m_FLAG_OPT);
   bool nofill = !!(flags & m_FLAG_NO_FILL);
 
   if (size) {
-    alloc_data_bo(ibo, m_dev, size, ubuf);
+    if (dbuf)
+      alloc_ctrl_bo(ibo, m_dev, size);
+    else
+      alloc_data_bo(ibo, m_dev, size, ubuf);
     if (!nofill)
       init_bo(ibo, file);
   } else if (!opt) {
@@ -398,7 +402,7 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
       break;
     }
     case IO_TEST_BO_PDI:
-      create_data_bo_from_file(ibo, "pdi.bin", m_FLAG_OPT);
+      create_data_bo_from_file(ibo, "pdi.bin", m_FLAG_OPT | m_FLAG_DEV_BUF);
       break;
     default:
       break;
