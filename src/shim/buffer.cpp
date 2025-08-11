@@ -683,6 +683,9 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
   m_args_map[pos] = boh->get_arg_bo_ids();
+
+  // Collecting BO handles for dumping BO content before cmd submission.
+  // BO content dumping out is off by default.
   if (m_dump_arg_bos)
     m_arg_bos_map[pos] = boh->get_arg_bos();
 
@@ -701,6 +704,7 @@ reset()
 {
   std::lock_guard<std::mutex> lg(m_args_map_lock);
   m_args_map.clear();
+  m_arg_bos_map.clear();
 }
 
 std::set<bo_id>

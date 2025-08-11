@@ -27,6 +27,7 @@ std::array io_test_bo_type_names {
   "IO_TEST_BO_SAVE_INSTRUCTION",
   "IO_TEST_BO_RESTORE_INSTRUCTION",
   "IO_TEST_BO_2ND_PARAMETERS",
+  "IO_TEST_BO_PDI",
 };
 
 char *
