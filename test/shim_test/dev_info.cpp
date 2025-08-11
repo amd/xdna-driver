@@ -209,7 +209,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {1} },
     },
-    .workspace = "local_shim_test_data/elf_txn_no_cp_npu2",
+    .workspace = "local_shim_test_data/elf_txn_no_cp_npu4",
     .data = "",
     .type = KERNEL_TYPE_TXN,
   },
@@ -220,7 +220,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {1} },
     },
-    .workspace = "local_shim_test_data/elf_txn_preempt_no_cp_npu2",
+    .workspace = "local_shim_test_data/elf_txn_preempt_no_cp_npu4",
     .data = "",
     .type = KERNEL_TYPE_TXN_PREEMPT,
   },
@@ -231,7 +231,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {11} },
     },
-    .workspace = "local_shim_test_data/xclbin2elf_preempt_tinyyolo",
+    .workspace = "local_shim_test_data/xclbin2elf_preempt_tinyyolo_npu4",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
   },
