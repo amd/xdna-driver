@@ -118,8 +118,6 @@ public:
 
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-private:
 };
 
 class elf_preempt_io_test_bo_set : public io_test_bo_set_base

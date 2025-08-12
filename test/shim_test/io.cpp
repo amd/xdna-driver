@@ -515,10 +515,11 @@ init_cmd(cuidx_type idx, bool dump)
     m_is_full_elf ? ERT_START_NPU_PREEMPT_ELF : ERT_START_NPU_PREEMPT);
 
   if (m_is_full_elf) {
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_2ND_PARAMETERS].tbo.get());
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+    ebuf.add_arg_64(3);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get(), "0");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_2ND_PARAMETERS].tbo.get(), "1");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "2");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "3");
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PDI].tbo.get(), ".pdi.0");
     ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
   } else {
