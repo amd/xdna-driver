@@ -731,9 +731,12 @@ struct app_health_report {
 	 * Note: To optimize performance, the ERT may simplify certain aspects of reporting.
 	 * Proper interpretation requires familiarity with the implementation details.
 	 */
+#define AIE2_APP_HEALTH_RESET_TXN_OP_ID		(~0U)
 	u32				txn_op_id;
 	/* The PC of the context at the time of the report */
+#define AIE2_APP_HEALTH_RESET_CTX_PC		0
 	u32				ctx_pc;
+#define AIE2_APP_HEALTH_RESET_FATAL_INFO	0
 	struct fatal_error_info		fatal_info;
 	/* Below captures complex platform dependent data parsed by userspace */
 	u32				resv[1528];
