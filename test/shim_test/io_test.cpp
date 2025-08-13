@@ -310,6 +310,11 @@ get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pai
     }
   }
 
+  if (index == -1)
+    throw std::runtime_error("Can't determine user task ID for ctx!");
+  if (fine_preemption_count < pre.at(index).second)
+    throw std::runtime_error("Find preemption counter is smaller after the run!");
+
   return fine_preemption_count - pre.at(index).second;
 }
 
