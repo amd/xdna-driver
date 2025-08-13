@@ -657,6 +657,12 @@ struct amdxdna_drm_get_info {
  * @dma_bandwidth: DMA bandwidth
  * @latency: Frame response latency
  * @frame_exec_time: Frame execution time
+ * @txn_op_idx: index of last TXN control code executed
+ * @ctx_pc: program counter for that context
+ * @fatal_error_type: the fatal error type if context crashes
+ * @fatal_error_exception_type: LX7 exception type
+ * @fatal_error_exception_pc: LX7 program counter at the time of the exception
+ * @fatal_error_app_module: module name where the exception occurred
  */
 struct amdxdna_drm_query_hwctx_array {
 	__u32 context_id;
@@ -681,6 +687,12 @@ struct amdxdna_drm_query_hwctx_array {
 	__u32 dma_bandwidth;
 	__u32 latency;
 	__u32 frame_exec_time;
+	__u32 txn_op_idx;
+	__u32 ctx_pc;
+	__u32 fatal_error_type;
+	__u32 fatal_error_exception_type;
+	__u32 fatal_error_exception_pc;
+	__u32 fatal_error_app_module;
 };
 
 /**

@@ -1224,6 +1224,8 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	struct amdxdna_dev *xdna = client->xdna;
 	int idx, ctx_limit, ctx_cnt, min, i;
 	struct amdxdna_client *tmp_client;
+	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct app_health_report *r;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
 	u32 hw_i = 0;
@@ -1251,6 +1253,12 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
+
+	r = aie2_mgmt_buff_alloc(xdna->dev_handle, &mgmt_hdl, sizeof(*r), DMA_FROM_DEVICE);
+	if (!r) {
+		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
+		return -ENOMEM;
+	}
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		int heap_usage;
@@ -1289,6 +1297,31 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			else
 				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_IDLE;
 
+			if (ctx->priv->status == CTX_STATE_CONNECTED) {
+				aie2_mgmt_buff_clflush(&mgmt_hdl);
+
+				mutex_lock(&xdna->dev_handle->aie2_lock);
+				ret = aie2_get_app_health(xdna->dev_handle, &mgmt_hdl,
+							  ctx->priv->id, sizeof(*r));
+				mutex_unlock(&xdna->dev_handle->aie2_lock);
+				if (ret)
+					return ret;
+			} else {
+				r->fatal_info.exception_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.exception_pc = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.app_module = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.fatal_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->txn_op_id = AIE2_APP_HEALTH_RESET_TXN_OP_ID;
+				r->ctx_pc = AIE2_APP_HEALTH_RESET_CTX_PC;
+			}
+
+			tmp[hw_i].fatal_error_exception_type = r->fatal_info.exception_type;
+			tmp[hw_i].fatal_error_exception_pc = r->fatal_info.exception_pc;
+			tmp[hw_i].fatal_error_app_module = r->fatal_info.app_module;
+			tmp[hw_i].fatal_error_type = r->fatal_info.fatal_type;
+			tmp[hw_i].txn_op_idx = r->txn_op_id;
+			tmp[hw_i].ctx_pc = r->ctx_pc;
+
 			hw_i++;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
@@ -1302,6 +1335,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 		}
 	}
 
+	aie2_mgmt_buff_free(&mgmt_hdl);
 	kfree(tmp);
 	args->element_size = min;
 	args->num_element = hw_i;
