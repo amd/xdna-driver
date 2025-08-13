@@ -28,9 +28,13 @@ public:
   bool
   is_umq() const override;
 
+  void
+  create_drm_bo(create_bo_arg *arg) const override;
+
 private:
   // Alloc'ed on first open and freed on last close
   mutable std::unique_ptr<buffer> m_dev_heap_bo;
+  mutable std::mutex m_lock;
 
   virtual void
   on_first_open() const override;

@@ -13,6 +13,8 @@
 
 namespace {
 
+const auto heap_page_size = 64ul * 1024 * 1024;
+
 uint8_t
 use_to_fw_debug_type(uint8_t use)
 {
@@ -81,6 +83,12 @@ size_t
 page_size_roundup(size_t size)
 {
   return (size + page_size - 1) & ~(page_size - 1);
+}
+
+size_t
+heap_page_size_roundup(size_t size)
+{
+  return (size + heap_page_size - 1) & ~(heap_page_size - 1);
 }
 
 std::string
@@ -162,8 +170,8 @@ is_driver_pin_arg_bo()
 uint64_t
 bo_addr_align(int type)
 {
-  // Device mem heap must align at 64MB boundary. Others can be byte aligned.
-  return (type == AMDXDNA_BO_DEV_HEAP) ? 64ul * 1024 * 1024 : 1;
+  // Device mem heap must align at heap_page_size boundary. Others can be byte aligned.
+  return (type == AMDXDNA_BO_DEV_HEAP) ? heap_page_size : 1;
 }
 
 }
@@ -265,7 +273,7 @@ drm_bo(const pdev& pdev, size_t size, int type)
     .size = m_size,
     .xdna_addr_align = (align == 1 ? 0 : align), 
   };
-  m_pdev.drv_ioctl(drv_ioctl_cmd::create_bo, &arg);
+  m_pdev.create_drm_bo(&arg);
   m_id = arg.bo;
   m_xdna_addr = arg.xdna_addr;
   m_map_offset = arg.map_offset;
@@ -349,7 +357,8 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   // CPU and device can't share cacheline, especially when the BO is output and
   // both CPU and device may write to it.
   // In case the BO is exported to other process, it has to be aligned on page
-  // boundary so that we don't implicitly share more than we need.
+  // boundary so that we don't implicitly share more than we need. Page size
+  // alignement is also required on Windows platform.
   // Based on the above reasons, we'll enforce the pointer to be page aligned.
   if (!is_page_aligned(m_uptr))
     shim_err(EINVAL, "User pointer %p must be page aligned.", m_uptr);
@@ -384,6 +393,7 @@ void
 buffer::
 expand(size_t size)
 {
+  size = (m_type == AMDXDNA_BO_DEV_HEAP) ? heap_page_size_roundup(size) : size;
   auto cur_sz = m_cur_size;
   auto new_sz = size + m_cur_size;
   shim_debug("Expanding BO from %ld to %ld", cur_sz, new_sz);
@@ -490,6 +500,14 @@ share() const
 void
 buffer::
 bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
+{
+  // Should only be supported for cmd_buffer.
+  shim_not_supported_err(__func__);
+}
+
+void
+buffer::
+reset()
 {
   // Should only be supported for cmd_buffer.
   shim_not_supported_err(__func__);
@@ -607,6 +625,15 @@ get_arg_bo_ids() const
   return ret;
 }
 
+std::set<const buffer *>
+buffer::
+get_arg_bos() const
+{
+  // For non-cmd BO, arg bo handles contains only its own handle.
+  std::set<const buffer *> ret = { this };
+  return ret;
+}
+
 std::string
 buffer::
 bo_sub_type_name() const
@@ -655,11 +682,12 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   auto boh = reinterpret_cast<const buffer*>(bh);
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
-  // Hack for now. Should move to buffer_handle::reset() when it is available
-  if (!pos)
-    m_args_map.clear();
-
   m_args_map[pos] = boh->get_arg_bo_ids();
+
+  // Collecting BO handles for dumping BO content before cmd submission.
+  // BO content dumping out is off by default.
+  if (m_dump_arg_bos)
+    m_arg_bos_map[pos] = boh->get_arg_bos();
 
 #ifdef XDNA_SHIM_DEBUG
   std::string bohs;
@@ -670,15 +698,37 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
 #endif
 }
 
+void
+cmd_buffer::
+reset()
+{
+  std::lock_guard<std::mutex> lg(m_args_map_lock);
+  m_args_map.clear();
+  m_arg_bos_map.clear();
+}
+
 std::set<bo_id>
 cmd_buffer::
 get_arg_bo_ids() const
 {
   std::set<bo_id> ret;
-  // For cmd BO, arg bo handles contains everything in args_map.
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
+  // For cmd BO, arg bo handles contains everything in args_map.
   for (const auto& m : m_args_map)
+    ret.insert(m.second.begin(), m.second.end());
+  return ret;
+}
+
+std::set<const buffer *>
+cmd_buffer::
+get_arg_bos() const
+{
+  std::set<const buffer *> ret;
+  std::lock_guard<std::mutex> lg(m_args_map_lock);
+
+  // For cmd BO, arg bo handles contains everything in args_map.
+  for (const auto& m : m_arg_bos_map)
     ret.insert(m.second.begin(), m.second.end());
   return ret;
 }
@@ -765,7 +815,7 @@ config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_size
 {
   auto meta_buf_size = offsetof(struct fw_buffer_metadata, uc_info)
      + buf_sizes.size() * sizeof(struct uc_info_entry);
-  m_metadata_bo = std::make_unique<dbg_buffer>(m_pdev, meta_buf_size, AMDXDNA_BO_SHARE);
+  m_metadata_bo = std::make_unique<dbg_buffer>(m_pdev, meta_buf_size, AMDXDNA_BO_CMD);
   auto metadata = reinterpret_cast<fw_buffer_metadata *>(m_metadata_bo->vaddr());
   metadata->bo_handle = id().handle;
   metadata->command_id = 0; //support this later

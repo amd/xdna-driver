@@ -268,23 +268,6 @@ static void aie2_error_worker(struct work_struct *err_work)
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 }
 
-int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct async_event *e;
-	int i, ret;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-	for (i = 0; i < ndev->async_events->event_cnt; i++) {
-		e = &ndev->async_events->event[i];
-		ret = aie2_error_event_send(e);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
 void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -307,6 +290,7 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_events *events;
+	struct async_event *e;
 	int i, ret;
 
 	events = kzalloc(struct_size(events, event, ndev->total_col), GFP_KERNEL);
@@ -338,6 +322,20 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	}
 
 	ndev->async_events = events;
+
+	for (i = 0; i < ndev->async_events->event_cnt; i++) {
+		e = &ndev->async_events->event[i];
+		ret = aie2_error_event_send(e);
+		if (ret)
+			goto free_buf;
+	}
+
+	/* Just to make sure firmware handled async events */
+	ret = aie2_query_aie_firmware_version(ndev, &ndev->xdna->fw_ver);
+	if (ret) {
+		XDNA_ERR(xdna, "Re-query firmware version failed");
+		goto free_buf;
+	}
 
 	XDNA_DBG(xdna, "Async event count %d, buf total size 0x%x",
 		 events->event_cnt, ASYNC_BUF_SIZE);

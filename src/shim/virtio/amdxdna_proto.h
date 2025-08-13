@@ -8,6 +8,8 @@
 
 #include "drm_hw.h"
 
+#define AMDXDNA_MAX_RING_NUM 64
+
 enum amdxdna_ccmd {
     AMDXDNA_CCMD_NOP = 1,
     AMDXDNA_CCMD_INIT,
@@ -18,9 +20,6 @@ enum amdxdna_ccmd {
     AMDXDNA_CCMD_CONFIG_CTX,
     AMDXDNA_CCMD_EXEC_CMD,
     AMDXDNA_CCMD_WAIT_CMD,
-    AMDXDNA_CCMD_GET_LAST_SEQ,
-    AMDXDNA_CCMD_ADD_SYNCOBJ,
-    AMDXDNA_CCMD_SIG_SYNCOBJ,
     AMDXDNA_CCMD_GET_INFO,
     AMDXDNA_CCMD_READ_SYSFS,
 };
@@ -106,8 +105,7 @@ DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_create_ctx_req)
 
 struct amdxdna_ccmd_create_ctx_rsp {
     struct amdxdna_ccmd_rsp hdr;
-    uint32_t handle;
-    uint32_t syncobj_hdl;
+    uint32_t handle; /* ctx handle. It is also ring_idx. */
 };
 
 /*
@@ -116,7 +114,7 @@ struct amdxdna_ccmd_create_ctx_rsp {
 struct amdxdna_ccmd_destroy_ctx_req {
     struct vdrm_ccmd_req hdr;
     uint32_t handle;
-    uint32_t syncobj_hdl;
+    uint32_t _pad;
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_destroy_ctx_req)
 
@@ -129,6 +127,7 @@ struct amdxdna_ccmd_config_ctx_req {
     uint32_t _pad;
     uint32_t param_type;
     uint32_t param_val_size;
+    uint64_t inline_param; /* only when param_val_size is zero */
     uint64_t param_val[];
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_config_ctx_req)
@@ -158,50 +157,10 @@ struct amdxdna_ccmd_exec_cmd_rsp {
 struct amdxdna_ccmd_wait_cmd_req {
     struct vdrm_ccmd_req hdr;
     uint64_t seq;
-    uint32_t syncobj_hdl;
-    uint32_t _pad;
-};
-DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_wait_cmd_req)
-
-/*
- * AMDXDNA_CCMD_get_last_seq_req
- */
-struct amdxdna_ccmd_get_last_seq_req {
-    struct vdrm_ccmd_req hdr;
-    uint32_t syncobj_hdl;
-    uint32_t _pad;
-};
-DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_get_last_seq_req)
-
-struct amdxdna_ccmd_get_last_seq_rsp {
-    struct amdxdna_ccmd_rsp hdr;
-    uint64_t seq;
-};
-
-/*
- * AMDXDNA_CCMD_ADD_SYNCOBJ
- */
-struct amdxdna_ccmd_add_syncobj_req {
-    struct vdrm_ccmd_req hdr;
     uint32_t ctx_handle;
     uint32_t _pad;
 };
-DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_add_syncobj_req)
-
-struct amdxdna_ccmd_add_syncobj_rsp {
-    struct amdxdna_ccmd_rsp hdr;
-    uint32_t syncobj_hdl;
-};
-
-/*
- * AMDXDNA_CCMD_SIG_SYNCOBJ
- */
-struct amdxdna_ccmd_sig_syncobj_req {
-    struct vdrm_ccmd_req hdr;
-    uint32_t syncobj_hdl;
-    uint32_t _pad;
-};
-DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_sig_syncobj_req)
+DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_wait_cmd_req)
 
 /*
  * AMDXDNA_CCMD_GET_INFO

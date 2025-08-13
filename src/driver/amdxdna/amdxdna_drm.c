@@ -163,15 +163,9 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	ret = amdxdna_pm_resume_get(dev->dev);
-	if (ret)
-		goto exit;
-
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	ret = xdna->dev_info->ops->get_aie_info(client, args);
 
-	amdxdna_pm_suspend_put(dev->dev);
-exit:
 	drm_dev_exit(idx);
 	return ret;
 }
@@ -193,15 +187,9 @@ static int amdxdna_drm_get_info_array_ioctl(struct drm_device *dev, void *data,
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	ret = amdxdna_pm_resume_get(dev->dev);
-	if (ret)
-		goto exit;
-
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	ret = xdna->dev_info->ops->get_aie_info_array(client, args);
 
-	amdxdna_pm_suspend_put(dev->dev);
-exit:
 	drm_dev_exit(idx);
 	return ret;
 }
@@ -219,15 +207,9 @@ static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struc
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	ret = amdxdna_pm_resume_get(dev->dev);
-	if (ret)
-		goto exit;
-
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	ret = xdna->dev_info->ops->set_aie_state(client, args);
 
-	amdxdna_pm_suspend_put(dev->dev);
-exit:
 	drm_dev_exit(idx);
 	return ret;
 }

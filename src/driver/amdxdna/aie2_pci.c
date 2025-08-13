@@ -286,15 +286,6 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	if (!ndev->async_events)
-		return 0;
-
-	ret = aie2_error_async_events_send(ndev);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "Send async events failed");
-		return ret;
-	}
-
 	return 0;
 }
 
@@ -319,6 +310,8 @@ static int aie2_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->xdna, "Query AIE metadata failed");
 		return ret;
 	}
+
+	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
 
 	return 0;
 }
@@ -353,6 +346,8 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	aie2_psp_stop(ndev->psp_hdl);
 	aie2_smu_stop(ndev);
 	mutex_unlock(&ndev->aie2_lock);
+
+	aie2_error_async_events_free(ndev);
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
 
@@ -433,11 +428,25 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto destroy_mgmt_chann;
 	}
 
+	ret = aie2_mgmt_fw_query(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to query fw, ret %d", ret);
+		goto pm_fini;
+	}
+
+	ret = aie2_error_async_events_alloc(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
+		goto pm_fini;
+	}
+
 	mutex_unlock(&ndev->aie2_lock);
 	ndev->dev_status = AIE2_DEV_START;
 
 	return 0;
 
+pm_fini:
+	aie2_pm_fini(ndev);
 destroy_mgmt_chann:
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
@@ -459,6 +468,7 @@ disable_dev:
 
 static void aie2_hw_suspend(struct amdxdna_dev *xdna)
 {
+	guard(mutex)(&xdna->dev_lock);
 	aie2_event_trace_suspend(xdna->dev_handle);
 	aie2_dram_logging_suspend(xdna->dev_handle);
 	aie2_rq_stop_all(&xdna->dev_handle->ctx_rq);
@@ -470,6 +480,7 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	int ret;
 
 	XDNA_DBG(xdna, "firmware resuming...");
+	guard(mutex)(&xdna->dev_lock);
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "resume NPU firmware failed");
@@ -600,42 +611,10 @@ skip_pasid:
 		goto disable_sva;
 	}
 
-	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_mgmt_fw_query(ndev);
-	mutex_unlock(&ndev->aie2_lock);
-	if (ret) {
-		XDNA_ERR(xdna, "Query firmware failed, ret %d", ret);
-		goto stop_hw;
-	}
-	ndev->total_col = min(aie2_max_col, ndev->metadata.cols);
-
 	ret = aie2_rq_init(&ndev->ctx_rq);
 	if (ret) {
 		XDNA_ERR(xdna, "Context runqueue init failed");
 		goto stop_hw;
-	}
-
-	ret = aie2_error_async_events_alloc(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
-		goto fini_rq;
-	}
-
-	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_error_async_events_send(ndev);
-	mutex_unlock(&ndev->aie2_lock);
-	if (ret) {
-		XDNA_ERR(xdna, "Send async events failed, ret %d", ret);
-		goto async_event_free;
-	}
-
-	/* Just to make sure firmware handled async events */
-	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_query_aie_firmware_version(ndev, &ndev->xdna->fw_ver);
-	mutex_unlock(&ndev->aie2_lock);
-	if (ret) {
-		XDNA_ERR(xdna, "Re-query firmware version failed");
-		goto async_event_free;
 	}
 
 	ret = aie2_event_trace_init(ndev);
@@ -647,12 +626,9 @@ skip_pasid:
 		XDNA_DBG(xdna, "Dram logging init failed, ret %d", ret);
 
 	release_firmware(fw);
+	amdxdna_rpm_init(xdna);
 	return 0;
 
-async_event_free:
-	aie2_error_async_events_free(ndev);
-fini_rq:
-	aie2_rq_fini(&ndev->ctx_rq);
 stop_hw:
 	aie2_hw_stop(xdna);
 disable_sva:
@@ -672,11 +648,11 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
+	amdxdna_rpm_fini(xdna);
 	aie2_event_trace_fini(ndev);
 	aie2_dram_logging_fini(ndev);
 	aie2_rq_fini(&ndev->ctx_rq);
 	aie2_hw_stop(xdna);
-	aie2_error_async_events_free(ndev);
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
@@ -708,6 +684,7 @@ static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
 	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
 
+	guard(mutex)(&xdna->dev_lock);
 	aie2_rq_dump_all(rq);
 	if (dump_only)
 		return;
@@ -1175,6 +1152,10 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
@@ -1228,6 +1209,8 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	}
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	mutex_unlock(&xdna->dev_lock);
+
+	amdxdna_pm_suspend_put(xdna);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
@@ -1241,6 +1224,8 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	struct amdxdna_dev *xdna = client->xdna;
 	int idx, ctx_limit, ctx_cnt, min, i;
 	struct amdxdna_client *tmp_client;
+	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct app_health_report *r;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
 	u32 hw_i = 0;
@@ -1268,6 +1253,12 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
+
+	r = aie2_mgmt_buff_alloc(xdna->dev_handle, &mgmt_hdl, sizeof(*r), DMA_FROM_DEVICE);
+	if (!r) {
+		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
+		return -ENOMEM;
+	}
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		int heap_usage;
@@ -1306,6 +1297,31 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			else
 				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_IDLE;
 
+			if (ctx->priv->status == CTX_STATE_CONNECTED) {
+				aie2_mgmt_buff_clflush(&mgmt_hdl);
+
+				mutex_lock(&xdna->dev_handle->aie2_lock);
+				ret = aie2_get_app_health(xdna->dev_handle, &mgmt_hdl,
+							  ctx->priv->id, sizeof(*r));
+				mutex_unlock(&xdna->dev_handle->aie2_lock);
+				if (ret)
+					return ret;
+			} else {
+				r->fatal_info.exception_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.exception_pc = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.app_module = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.fatal_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->txn_op_id = AIE2_APP_HEALTH_RESET_TXN_OP_ID;
+				r->ctx_pc = AIE2_APP_HEALTH_RESET_CTX_PC;
+			}
+
+			tmp[hw_i].fatal_error_exception_type = r->fatal_info.exception_type;
+			tmp[hw_i].fatal_error_exception_pc = r->fatal_info.exception_pc;
+			tmp[hw_i].fatal_error_app_module = r->fatal_info.app_module;
+			tmp[hw_i].fatal_error_type = r->fatal_info.fatal_type;
+			tmp[hw_i].txn_op_idx = r->txn_op_id;
+			tmp[hw_i].ctx_pc = r->ctx_pc;
+
 			hw_i++;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
@@ -1319,6 +1335,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 		}
 	}
 
+	aie2_mgmt_buff_free(&mgmt_hdl);
 	kfree(tmp);
 	args->element_size = min;
 	args->num_element = hw_i;
@@ -1330,6 +1347,10 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
+
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
 
 	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&xdna->dev_handle->aie2_lock);
@@ -1345,6 +1366,8 @@ static int aie2_get_info_array(struct amdxdna_client *client,
 	}
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	mutex_unlock(&xdna->dev_lock);
+
+	amdxdna_pm_suspend_put(xdna);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
@@ -1442,6 +1465,10 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
@@ -1467,6 +1494,7 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	}
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
+	amdxdna_pm_suspend_put(xdna);
 	return ret;
 }
 

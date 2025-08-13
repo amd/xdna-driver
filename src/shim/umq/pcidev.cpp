@@ -47,5 +47,12 @@ is_umq() const
   return true;
 }
 
+void
+pdev_umq::
+create_drm_bo(create_bo_arg *arg) const
+{
+  drv_ioctl(drv_ioctl_cmd::create_bo, arg);
+}
+
 }
 

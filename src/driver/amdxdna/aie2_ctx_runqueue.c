@@ -499,10 +499,15 @@ static void part_sched_work(struct work_struct *work)
 	struct amdxdna_ctx *next;
 	struct amdxdna_ctx *curr;
 	struct aie2_ctx_rq *rq;
+	int ret;
 
 	part = container_of(work, struct aie2_partition, sched_work);
 	xdna = ctx_rq_to_xdna_dev(part->rq);
 	rq = part->rq;
+
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return;
 
 	mutex_lock(&xdna->dev_lock);
 	XDNA_DBG(xdna, "partition [%d, %d] max_hwctx %d hwctx %d cnt %d",
@@ -545,6 +550,8 @@ static void part_sched_work(struct work_struct *work)
 	}
 out:
 	mutex_unlock(&xdna->dev_lock);
+
+	amdxdna_pm_suspend_put(xdna);
 }
 
 static void rq_yield_work(struct work_struct *work)
@@ -898,7 +905,9 @@ void aie2_rq_stop_all(struct aie2_ctx_rq *rq)
 	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
-	mutex_lock(&xdna->dev_lock);
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
 		list_for_each_entry_safe(ctx, tmp, &part->conn_list, entry) {
@@ -911,7 +920,6 @@ void aie2_rq_stop_all(struct aie2_ctx_rq *rq)
 			up_write(&ctx->priv->io_sem);
 		}
 	}
-	mutex_unlock(&xdna->dev_lock);
 }
 
 void aie2_rq_restart_all(struct aie2_ctx_rq *rq)
@@ -921,7 +929,8 @@ void aie2_rq_restart_all(struct aie2_ctx_rq *rq)
 	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
-	mutex_lock(&xdna->dev_lock);
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	if (rq->paused)
 		queue_work(rq->work_q, &rq->parts_work);
 
@@ -929,7 +938,6 @@ void aie2_rq_restart_all(struct aie2_ctx_rq *rq)
 		part = &rq->parts[i];
 		queue_work(rq->work_q, &part->sched_work);
 	}
-	mutex_unlock(&xdna->dev_lock);
 }
 
 void aie2_rq_dump_all(struct aie2_ctx_rq *rq)
@@ -940,13 +948,13 @@ void aie2_rq_dump_all(struct aie2_ctx_rq *rq)
 	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
-	mutex_lock(&xdna->dev_lock);
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
 		list_for_each_entry(ctx, &part->conn_list, entry)
 			aie2_dump_ctx(ctx);
 	}
-	mutex_unlock(&xdna->dev_lock);
 }
 
 /* This is called when command completed. Do NOT hold lock */

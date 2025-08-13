@@ -68,5 +68,27 @@ is_umq() const
   return false;
 }
 
+void
+pdev_kmq::
+create_drm_bo(create_bo_arg *arg) const
+{
+  if (arg->type != AMDXDNA_BO_DEV) {
+    drv_ioctl(drv_ioctl_cmd::create_bo, arg);
+    return;
+  }
+
+  // Dynamically expanding heap buffer when allocating device BO.
+  const std::lock_guard<std::mutex> lock(m_lock);
+  try {
+    drv_ioctl(drv_ioctl_cmd::create_bo, arg);
+  } catch (const xrt_core::system_error& ex) {
+    if (ex.get_code() != ENOMEM)
+      throw;
+    // Expanding current heap size and try one more time.
+    m_dev_heap_bo->expand(arg->size);
+    drv_ioctl(drv_ioctl_cmd::create_bo, arg);
+  }
+}
+
 } // namespace shim_xdna
 

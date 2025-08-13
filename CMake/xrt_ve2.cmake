@@ -26,9 +26,9 @@ add_compile_definitions(XRT_BUILD XDNA_VE2)
 include_directories(${PROJECT_SOURCE_DIR}/src/)
 
 set(AIE_XRT_DIR xrt)
-set(XRT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${AIE_XRT_DIR}")
+set(XRT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${AIE_XRT_DIR}/src")
 
-set(XRT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/${AIE_XRT_DIR}")
+set(XRT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/${AIE_XRT_DIR}/src")
 
 
 include_directories(
@@ -37,7 +37,7 @@ include_directories(
 add_subdirectory(${AIE_XRT_DIR})
 
 include_directories(
-        ${XRT_SOURCE_DIR}/src/runtime_src
-        ${XRT_SOURCE_DIR}/src/runtime_src/core/include
-        ${XRT_BINARY_DIR}/src/gen
+        ${XRT_SOURCE_DIR}/runtime_src
+        ${XRT_SOURCE_DIR}/runtime_src/core/include
+        ${XRT_BINARY_DIR}/gen
         )

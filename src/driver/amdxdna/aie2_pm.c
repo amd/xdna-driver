@@ -96,6 +96,7 @@ void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add
 		 add ? "add" : "delete", level);
 
 	mutex_lock(&ndev->aie2_lock);
+
 	if (unlikely(level > ndev->max_dpm_level)) {
 		level = ndev->max_dpm_level;
 		WARN_ON(1);

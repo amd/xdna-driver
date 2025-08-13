@@ -59,6 +59,7 @@ void TEST_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_preempt_full_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 
 inline void
 set_xrt_path()
@@ -113,6 +114,18 @@ is_xdna_dev(device* dev)
     is_xdna = true;
   }
   return is_xdna;
+}
+
+bool
+is_amdxdna_drv(device* dev)
+{
+  const std::string amdxdna = "amdxdna";
+
+  query::sub_device_path::args query_arg = {std::string(""), 0};
+  auto sysfs = device_query<query::sub_device_path>(dev, query_arg);
+  auto drv_path = std::filesystem::read_symlink(sysfs + "/driver");
+  auto drv_name = drv_path.filename();
+  return drv_name == amdxdna;
 }
 
 bool
@@ -179,6 +192,35 @@ dev_filter_is_npu4(device::id_type id, device* dev)
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
   return device_id == npu4_device_id;
+}
+
+bool
+dev_filter_is_privileged_npu4(device::id_type id, device* dev)
+{
+  // Root user ID is 0
+  if (dev_filter_is_npu4(id, dev) && !geteuid())
+    return true;
+  return false;
+}
+
+bool
+dev_filter_is_xdna_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!is_xdna_dev(dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
+bool
+dev_filter_is_aie2_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_aie2(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
 }
 
 // All test case runners
@@ -773,23 +815,26 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_NORMAL_RUN, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+    TEST_POSITIVE, dev_filter_is_xdna_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "io test with user pointer BOs", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_with_ubuf_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
   },
   test_case{ "io test real kernel bad run for health report", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
+    TEST_POSITIVE, dev_filter_is_privileged_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
+  test_case{ "multi-command preempt full ELF io test real kernel good run", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+  },
 };
 
 // Test case executor implementation
@@ -996,7 +1041,10 @@ main(int argc, char **argv)
 
   run_all_test(tests);
 
-  std::cout << test_skipped.size() << "\ttest(s) skipped" << std::endl;
+  std::cout << test_skipped.size() << "\ttest(s) skipped: ";
+  for (int id : test_skipped)
+    std::cout << id << " ";
+  std::cout << std::endl;
 
   if (test_passed.size() + test_failed.size() == 0)
     return 0;

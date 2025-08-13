@@ -77,6 +77,9 @@ public:
   virtual bool
   is_umq() const = 0;
 
+  virtual void
+  create_drm_bo(create_bo_arg *arg) const = 0;
+
 private:
   virtual void
   on_first_open() const = 0;
