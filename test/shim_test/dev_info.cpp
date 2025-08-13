@@ -229,7 +229,7 @@ xclbin_info xclbin_infos[] = {
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:dpu", {11} },
+      { "DPU:dpu", {0xffffffff} }, // CU index is not needed for full ELF
     },
     .workspace = "local_shim_test_data/xclbin2elf_preempt_tinyyolo_npu4",
     .data = "",
@@ -263,12 +263,6 @@ std::string
 get_kernel_name(device* dev, const char *xclbin)
 {
   return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->first;
-}
-
-cuidx_type
-get_kernel_index(device* dev, const char *xclbin)
-{
-  return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->second;
 }
 
 kernel_type
