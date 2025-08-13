@@ -17,7 +17,7 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 #include "xrt/xrt_bo.h"
-#include "experimental/xrt_kernel.h" /* For xrt::runlist */
+#include "xrt/experimental/xrt_kernel.h" /* For xrt::runlist */
 
 const int total_run = 32000; /* Total times of run obj execution */
 const int total_runobj = 512; /* Total number of run obj to be allocated */

@@ -505,6 +505,14 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   shim_not_supported_err(__func__);
 }
 
+void
+buffer::
+reset()
+{
+  // Should only be supported for cmd_buffer.
+  shim_not_supported_err(__func__);
+}
+
 bo_id
 buffer::
 id() const
@@ -617,6 +625,15 @@ get_arg_bo_ids() const
   return ret;
 }
 
+std::set<const buffer *>
+buffer::
+get_arg_bos() const
+{
+  // For non-cmd BO, arg bo handles contains only its own handle.
+  std::set<const buffer *> ret = { this };
+  return ret;
+}
+
 std::string
 buffer::
 bo_sub_type_name() const
@@ -665,11 +682,12 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   auto boh = reinterpret_cast<const buffer*>(bh);
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
-  // Hack for now. Should move to buffer_handle::reset() when it is available
-  if (!pos)
-    m_args_map.clear();
-
   m_args_map[pos] = boh->get_arg_bo_ids();
+
+  // Collecting BO handles for dumping BO content before cmd submission.
+  // BO content dumping out is off by default.
+  if (m_dump_arg_bos)
+    m_arg_bos_map[pos] = boh->get_arg_bos();
 
 #ifdef XDNA_SHIM_DEBUG
   std::string bohs;
@@ -680,15 +698,37 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
 #endif
 }
 
+void
+cmd_buffer::
+reset()
+{
+  std::lock_guard<std::mutex> lg(m_args_map_lock);
+  m_args_map.clear();
+  m_arg_bos_map.clear();
+}
+
 std::set<bo_id>
 cmd_buffer::
 get_arg_bo_ids() const
 {
   std::set<bo_id> ret;
-  // For cmd BO, arg bo handles contains everything in args_map.
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
+  // For cmd BO, arg bo handles contains everything in args_map.
   for (const auto& m : m_args_map)
+    ret.insert(m.second.begin(), m.second.end());
+  return ret;
+}
+
+std::set<const buffer *>
+cmd_buffer::
+get_arg_bos() const
+{
+  std::set<const buffer *> ret;
+  std::lock_guard<std::mutex> lg(m_args_map_lock);
+
+  // For cmd BO, arg bo handles contains everything in args_map.
+  for (const auto& m : m_arg_bos_map)
     ret.insert(m.second.begin(), m.second.end());
   return ret;
 }

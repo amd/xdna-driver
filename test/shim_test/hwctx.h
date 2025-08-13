@@ -15,8 +15,7 @@ class hw_ctx {
 public:
   hw_ctx(device* dev, const char *xclbin_name=nullptr)
   {
-    auto path = get_xclbin_path(dev, xclbin_name);
-    hw_ctx_init(dev, path);
+    hw_ctx_init(dev, xclbin_name);
   }
 
   hwctx_handle *
@@ -29,24 +28,35 @@ private:
   std::unique_ptr<hwctx_handle> m_handle;
 
   void
-  hw_ctx_init(device* dev, const std::string& xclbin_path)
+  hw_ctx_init(device* dev, const char *xclbin_name)
   {
     xrt::xclbin xclbin;
+    xrt::elf elf;
+    auto is_full_elf = (get_kernel_type(dev, xclbin_name) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT);
+    auto path = get_xclbin_path(dev, xclbin_name);
 
     try {
-      xclbin = xrt::xclbin(xclbin_path);
+      if (is_full_elf)
+        elf = xrt::elf(path);
+      else
+        xclbin = xrt::xclbin(path);
     } catch (...) {
       throw std::runtime_error(
-        xclbin_path + " not found?\n"
+        path + " not found?\n"
         "specify xclbin path or run \"build.sh -xclbin_only\" to download them");
     }
-    dev->record_xclbin(xclbin);
-    auto xclbin_uuid = xclbin.get_uuid();
+
     xrt::hw_context::qos_type qos{ {"gops", 100}, {"priority", 0x180} };
     xrt::hw_context::access_mode mode = xrt::hw_context::access_mode::shared;
+    if (is_full_elf) {
+      m_handle = dev->create_hw_context(elf, qos, mode);
+    } else {
+      dev->record_xclbin(xclbin);
+      auto xclbin_uuid = xclbin.get_uuid();
+      m_handle = dev->create_hw_context(xclbin_uuid, qos, mode);
+    }
 
-    m_handle = dev->create_hw_context(xclbin_uuid, qos, mode);
-    std::cout << "loaded " << xclbin_path << std::endl;
+    std::cout << "loaded " << path << std::endl;
   }
 };
 

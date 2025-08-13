@@ -6,6 +6,7 @@
 
 #include "bo.h"
 #include "dev_info.h"
+#include "exec_buf.h"
 
 #include "core/common/device.h"
 #include <memory>
@@ -22,11 +23,12 @@ enum io_test_bo_type {
   IO_TEST_BO_SCRATCH_PAD,
   IO_TEST_BO_SAVE_INSTRUCTION,
   IO_TEST_BO_RESTORE_INSTRUCTION,
+  IO_TEST_BO_2ND_PARAMETERS,
+  IO_TEST_BO_PDI,
   IO_TEST_BO_MAX_TYPES
 };
 
 struct io_test_bo {
-  size_t size = 0;
   size_t init_offset = 0;
   std::vector<char> ubuf;
   std::shared_ptr<bo> tbo;
@@ -65,7 +67,7 @@ public:
   dump_content();
 
   virtual void
-  verify_result() = 0;
+  verify_result();
 
   static const char *
   bo_type2name(int type);
@@ -73,11 +75,26 @@ public:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
   get_bos();
 
+  virtual unsigned long
+  get_preemption_checkpoints();
+
 protected:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES> m_bo_array;
   const std::string m_xclbin_name;
   const std::string m_local_data_path;
   device *m_dev;
+  xrt::elf m_elf = {};
+  uint32_t m_kernel_index;
+  const int m_FLAG_USR_BUF =  1 << 0;
+  const int m_FLAG_OPT =      1 << 1;
+  const int m_FLAG_NO_FILL =  1 << 2;
+  const int m_FLAG_DEV_BUF =  1 << 3;
+
+  void
+  create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags);
+
+  void
+  create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type);
 };
 
 class io_test_bo_set : public io_test_bo_set_base
@@ -101,12 +118,6 @@ public:
 
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-  void
-  verify_result() override;
-
-private:
-  const xrt::elf m_elf;
 };
 
 class elf_preempt_io_test_bo_set : public io_test_bo_set_base
@@ -114,22 +125,15 @@ class elf_preempt_io_test_bo_set : public io_test_bo_set_base
 public:
   elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
-  ~elf_preempt_io_test_bo_set() {
-    --m_total_cmds;
-  }
-
   void
   init_cmd(xrt_core::cuidx_type idx, bool dump) override;
 
-  void
-  verify_result() override;
+  unsigned long
+  get_preemption_checkpoints() override;
 
 private:
-  const xrt::elf m_elf;
-  int m_user_tid = -1;
-  std::vector<std::pair<int, uint64_t>> m_fine_preemptions;
+  bool m_is_full_elf;
   unsigned long m_total_fine_preemption_checkpoints;
-  static unsigned long m_total_cmds;
 };
 
 #endif // _SHIMTEST_IO_H_
