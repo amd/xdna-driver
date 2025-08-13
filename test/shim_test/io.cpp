@@ -354,9 +354,8 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
 
   if (m_is_full_elf) {
     m_elf = xrt::elf(get_xclbin_path(dev, xclbin_name.c_str()));
-    auto nm = get_kernel_name(dev, xclbin_name.c_str());
     auto mod = xrt::module{m_elf};
-    m_kernel_index = module_int::get_ctrlcode_id(mod, std::string(nm));
+    m_kernel_index = module_int::get_ctrlcode_id(mod, get_kernel_name(dev, xclbin_name.c_str()));
   } else {
     m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
     m_kernel_index = module_int::no_ctrl_code_id;
