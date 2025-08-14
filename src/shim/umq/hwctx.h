@@ -24,9 +24,10 @@ public:
 private:
   const pdev& m_pdev;
   std::unique_ptr<buffer> m_log_bo;
-  uint32_t m_col_cnt = 0;
+  uint32_t m_uc_cnt = 0;
 
   void *m_log_buf = nullptr;
+  size_t m_log_buf_size;
 
   std::unique_ptr<tcp_server> m_tcp_server;
   std::thread m_thread_;
