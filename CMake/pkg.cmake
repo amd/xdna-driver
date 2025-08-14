@@ -60,14 +60,6 @@ math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
 set(XDNA_CPACK_XRT_BASE_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR})
 set(XDNA_CPACK_XRT_BASE_NEXT_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})
 
-install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
-  DESTINATION /usr/lib/firmware/amdnpu
-  COMPONENT ${XDNA_COMPONENT}
-  FILES_MATCHING
-  PATTERN "*.sbin"
-  PATTERN "download_raw" EXCLUDE
-  )
-
 install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   DESTINATION xrt/${XDNA_COMPONENT}/bins
   COMPONENT ${XDNA_COMPONENT}
@@ -77,6 +69,16 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   PATTERN "*.elf"
   PATTERN "*.bin"
   PATTERN "*.json"
+  )
+
+if(NOT SKIP_KMOD)
+
+install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
+  DESTINATION /usr/lib/firmware/amdnpu
+  COMPONENT ${XDNA_COMPONENT}
+  FILES_MATCHING
+  PATTERN "*.sbin"
+  PATTERN "download_raw" EXCLUDE
   )
 
 if(XDNA_DRV_PF_SRC_DIR)
@@ -96,18 +98,24 @@ configure_file(
   @ONLY
   )
 
+endif()
+
 if("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
   set(CPACK_GENERATOR "DEB")
   set(CPACK_DEB_COMPONENT_INSTALL ON)
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "xrt-base (>= ${XDNA_CPACK_XRT_BASE_VERSION}), xrt-base (<< ${XDNA_CPACK_XRT_BASE_NEXT_VERSION})")
-  set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/package/postinst" 
-    "${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
+  if(NOT SKIP_KMOD)
+    set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/package/postinst" 
+      "${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
+  endif()
 elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
   set(CPACK_GENERATOR "RPM")
   set(CPACK_RPM_COMPONENT_INSTALL ON)
   set(CPACK_RPM_PACKAGE_REQUIRES "xrt-base >= ${XDNA_CPACK_XRT_BASE_VERSION}, xrt-base < ${XDNA_CPACK_XRT_BASE_NEXT_VERSION}")
-  set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/postinst") 
-  set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm") 
+  if(NOT SKIP_KMOD)
+    set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/postinst") 
+    set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm") 
+  endif()
 else()
   message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}")
 endif()

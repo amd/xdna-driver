@@ -29,7 +29,6 @@ endif(DEFINED ENV{XDNA_DRV_BLD_FLAGS})
 message("-- Extra driver source dir: ${XDNA_EXTRA_DRV_DIR}")
 message("-- Extra driver tar exclude rules: ${XDNA_EXTRA_DRV_EXCLUDES}")
 
-if(NOT SKIP_KMOD)
 add_custom_command(
   OUTPUT all_driver_source
   COMMENT "Collect all driver source code"
@@ -161,12 +160,6 @@ set(amdxdna_drv_tools
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
   )
-else()
-set(amdxdna_drv_tools
-  ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
-  ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
-  )
-endif()
 install(FILES ${amdxdna_drv_tools}
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
   DESTINATION xrt/${XDNA_COMPONENT}

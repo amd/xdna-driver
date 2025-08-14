@@ -219,7 +219,7 @@ if [[ $CMAKE_MAJOR_VERSION != 3 ]]; then
 fi
 # Sanity check end
 
-cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix -DXRT_INSTALL_PREFIX=$xrt_install_prefix"
+cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix"
 
 if [[ ! -z "$skip_kmod" ]]; then
   cmake_extra_flags+=" -DSKIP_KMOD=$skip_kmod"

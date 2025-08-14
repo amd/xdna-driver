@@ -43,6 +43,7 @@ set(XRT_SUBMOD_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/xrt)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/pkg.cmake)
 
+if(NOT SKIP_KMOD)
 add_subdirectory(test)
 
 set(amdxdna_tools
@@ -53,4 +54,6 @@ install(FILES ${amdxdna_tools}
   DESTINATION xrt/${XDNA_COMPONENT}
   COMPONENT ${XDNA_COMPONENT}
   )
+endif()
+
 endif()
