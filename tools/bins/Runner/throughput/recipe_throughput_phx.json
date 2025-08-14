@@ -13,7 +13,7 @@
       { "name": "mc",       "type": "input",  "size": 8 }
     ],
     "kernels": [
-      { "name": "k1", "instance": "DPU_PDI_0"}
+      { "name": "k1", "instance": "DPU_ELF", "ctrlcode": "nop.elf"}
     ]
   },
   "execution": {
@@ -21,66 +21,66 @@
       {
         "name": "k1",
         "arguments": [
-          { "name": "ifm",      "argidx": 1 },
-          { "name": "param",    "argidx": 2 },
-          { "name": "ofm",      "argidx": 3 },
-          { "name": "inter",    "argidx": 4 },
+          { "name": "ifm",      "argidx": 3 },
+          { "name": "param",    "argidx": 4 },
+          { "name": "ofm",      "argidx": 5 },
+          { "name": "inter",    "argidx": 6 },
           { "name": "mc",       "argidx": 7 }
         ],
         "constants": [
-          { "value": 1, "type": "int", "argidx": 0 } 
+          { "value": 3, "type": "int", "argidx": 0 } 
         ]
       },
       {
         "name": "k1",
         "arguments": [
-          { "name": "ifm",      "argidx": 1 },
-          { "name": "param",    "argidx": 2 },
-          { "name": "ofm",      "argidx": 3 },
-          { "name": "inter",    "argidx": 4 },
+          { "name": "ifm",      "argidx": 3 },
+          { "name": "param",    "argidx": 4 },
+          { "name": "ofm",      "argidx": 5 },
+          { "name": "inter",    "argidx": 6 },
           { "name": "mc",       "argidx": 7 }
         ],
         "constants": [
-          { "value": 1, "type": "int", "argidx": 0 }
+          { "value": 3, "type": "int", "argidx": 0 }
         ]
       },
       {
         "name": "k1",
         "arguments": [
-          { "name": "ifm",      "argidx": 1 },
-          { "name": "param",    "argidx": 2 },
-          { "name": "ofm",      "argidx": 3 },
-          { "name": "inter",    "argidx": 4 },
+          { "name": "ifm",      "argidx": 3 },
+          { "name": "param",    "argidx": 4 },
+          { "name": "ofm",      "argidx": 5 },
+          { "name": "inter",    "argidx": 6 },
           { "name": "mc",       "argidx": 7 }
         ],
         "constants": [
-          { "value": 1, "type": "int", "argidx": 0 }
+          { "value": 3, "type": "int", "argidx": 0 }
         ]
       },
       {
         "name": "k1",
         "arguments": [
-          { "name": "ifm",      "argidx": 1 },
-          { "name": "param",    "argidx": 2 },
-          { "name": "ofm",      "argidx": 3 },
-          { "name": "inter",    "argidx": 4 },
+          { "name": "ifm",      "argidx": 3 },
+          { "name": "param",    "argidx": 4 },
+          { "name": "ofm",      "argidx": 5 },
+          { "name": "inter",    "argidx": 6 },
           { "name": "mc",       "argidx": 7 }
         ],
         "constants": [
-          { "value": 1, "type": "int", "argidx": 0 }
+          { "value": 3, "type": "int", "argidx": 0 }
         ]
       },
       {
         "name": "k1",
         "arguments": [
-          { "name": "ifm",      "argidx": 1 },
-          { "name": "param",    "argidx": 2 },
-          { "name": "ofm",      "argidx": 3 },
-          { "name": "inter",    "argidx": 4 },
+          { "name": "ifm",      "argidx": 3 },
+          { "name": "param",    "argidx": 4 },
+          { "name": "ofm",      "argidx": 5 },
+          { "name": "inter",    "argidx": 6 },
           { "name": "mc",       "argidx": 7 }
         ],
         "constants": [
-          { "value": 1, "type": "int", "argidx": 0 }
+          { "value": 3, "type": "int", "argidx": 0 }
         ]
       }
     ]

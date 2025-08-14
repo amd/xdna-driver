@@ -12,7 +12,7 @@
       { "name": "arg4", "type": "input", "size": 20 }
     ],
     "kernels": [
-      { "name": "k1", "instance": "DPU"}
+      { "name": "k1", "instance": "DPU", "ctrlcode": "nop.elf"}
     ]
   },
   "execution": {
