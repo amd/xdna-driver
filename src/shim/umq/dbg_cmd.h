@@ -11,7 +11,7 @@ extern "C"
 
 #define DBG_PKT_SUCCESS (1)
 #define DBG_PKT_EXIT (2)
-#define DBG_PKT_INVALID (2)
+#define DBG_PKT_INVALID (3)
 
 enum dbg_packet_opcode
 {            
