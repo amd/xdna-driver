@@ -352,11 +352,12 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
 
-  xrt::elf elf{local_path("npu3_workspace/ddr_memtile.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:move_ddr_memtile"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_ddr.xclbin",
+		  "npu3_workspace/xclbin_ddr.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/ddr_memtile.elf",
+		  "DPU:move_ddr_memtile");
 
   // Setting args for patching control code buffer
   run.set_arg(0, bo_data.get());
@@ -378,7 +379,7 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
   auto run = get_xrt_run(device,
 		  "npu3_workspace/xclbin_rmb.xclbin",
 		  "npu3_workspace/xclbin_rmb.elf",
-		  "dpu:{remote_barrier}",
+		  "dpu:{vadd}",
 		  "npu3_workspace/remote_barrier.elf",
 		  "DPU:remote_barrier");
 
@@ -416,11 +417,12 @@ TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  xrt::elf elf{local_path("npu3_workspace/single_col_preemption.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:preemption"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_single_preempt.xclbin",
+		  "npu3_workspace/xclbin_single_preempt.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/single_col_preemption.elf",
+		  "DPU:preemption");
 
   /* init input buffer */
   const uint32_t data = 0x12345678;
@@ -458,11 +460,12 @@ TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  xrt::elf elf{local_path("npu3_workspace/multi_col_preemption.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:preemption"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_multi_preempt.xclbin",
+		  "npu3_workspace/xclbin_multi_preempt.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/multi_col_preemption.elf",
+		  "DPU:preemption");
 
   /* init input buffer */
   const uint32_t data = 0x12345678;
@@ -519,11 +522,12 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   read_bin_file<xrt_bo>(ofm_path, bo_ofm);
   read_bin_file<xrt_bo>(param_path, bo_param);
 
-  xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_1_layer.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:resnet50"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_single_resnet50.xclbin",
+		  "npu3_workspace/xclbin_single_resnet50.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/single_col_resnet50_1_layer.elf",
+		  "DPU:resnet50");
 
   run.set_arg(0, bo_ofm.get());
   run.set_arg(1, bo_ifm.get());
@@ -560,11 +564,12 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
-  xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_all_layer.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:resnet50"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_resnet50.xclbin",
+		  "npu3_workspace/xclbin_resnet50.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/single_col_resnet50_all_layer.elf",
+		  "DPU:resnet50");
 
   run.set_arg(54, bo_ifm.get());
 
