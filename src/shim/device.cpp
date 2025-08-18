@@ -8,7 +8,9 @@
 #include "fence.h"
 #include "smi_xdna.h"
 #include "core/common/query_requests.h"
+#include "core/include/ert.h"
 #include <sys/syscall.h>
+#include <algorithm>
 
 namespace {
 
@@ -338,6 +340,90 @@ struct partition_info
       new_entry.is_suspended = entry.state == AMDXDNA_HWCTX_STATE_IDLE;
       output.push_back(std::move(new_entry));
     }
+    return output;
+  }
+};
+
+struct context_health_info
+{
+  using result_type = std::any;
+
+  // Original method for emplace_func0_request registration
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    // Delegate to parameterized version with empty context_ids
+    return get(device, key, std::any{});
+  }
+
+  // Parameterized method for filtering support
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& context_ids_param)
+  {
+    if (key != key_type::context_health_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // Extract context_ids from the parameter if provided
+    std::vector<uint32_t> context_ids;
+    bool has_context_filter = false;
+    
+    if (context_ids_param.has_value()) {
+      try {
+        context_ids = std::any_cast<std::vector<uint32_t>>(context_ids_param);
+        has_context_filter = !context_ids.empty();
+      } catch (const std::bad_any_cast&) {
+        // If cast fails, treat as no filter
+        has_context_filter = false;
+      }
+    }
+
+    amdxdna_drm_query_hwctx_array* data;
+    const uint32_t output_size = 32 * sizeof(*data);
+
+    std::vector<char> payload(output_size);
+    amdxdna_drm_get_info_array arg = {
+      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY,
+      .element_size = sizeof(*data),
+      .num_element = 32,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    uint32_t data_size = 0;
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+    data_size = arg.num_element;
+    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    query::context_health_info::result_type output;
+    for (uint32_t i = 0; i < data_size; i++) {
+      const auto& entry = data[i];
+
+      ert_ctx_health_data new_entry{};
+      new_entry.version = 0; // Default version
+      new_entry.txn_op_idx = entry.txn_op_idx;
+      new_entry.ctx_pc = entry.ctx_pc;
+      new_entry.fatal_error_type = entry.fatal_error_type;
+      new_entry.fatal_error_exception_type = entry.fatal_error_exception_type;
+      new_entry.fatal_error_exception_pc = entry.fatal_error_exception_pc;
+      new_entry.fatal_error_app_module = entry.fatal_error_app_module;
+      new_entry.app_health_report_size = 0; // No app health report available
+      output.push_back(std::move(new_entry));
+    }
+
+    // Apply context ID filtering if requested
+    if (has_context_filter) {
+      query::context_health_info::result_type filtered_output;
+      
+      // TODO: Add proper filtering when context_id field is available in ert_ctx_health_data
+      // For now, include all contexts since we don't have a proper context_id field to filter on
+      for (const auto& context : output) {
+        // When context_id field is available, implement:
+        // if (std::find(context_ids.begin(), context_ids.end(), context.context_id) != context_ids.end())
+        filtered_output.push_back(context);
+      }
+      return filtered_output;
+    }
+
     return output;
   }
 };
@@ -1362,6 +1448,7 @@ static void
 initialize_query_table()
 {
   emplace_func0_request<query::aie_partition_info,             partition_info>();
+  emplace_func1_request<query::context_health_info,           context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
