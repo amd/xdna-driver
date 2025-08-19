@@ -6,6 +6,56 @@
 #include "buffer.h"
 #include "shim_debug.h"
 #include "core/common/trace.h"
+#include <fstream>
+#include <filesystem>
+
+namespace {
+
+std::string
+to_hex_string(uint64_t num) {
+  std::stringstream ss;
+  ss << "0x" << std::hex << num;
+  return ss.str();
+}
+
+void
+dump_buf_to_file(void *buf, size_t size, const std::string& dumpfile)
+{
+  std::ofstream ofs(dumpfile, std::ios::out | std::ios::binary);
+  if (!ofs.is_open())
+    shim_err(errno, "Failed to open dump file: %s", dumpfile);
+
+  for (int i = 0; i < size; i++)
+    ofs.write(reinterpret_cast<char *>(buf) + i, 1);
+}
+
+void
+dump_arg_bos(const shim_xdna::cmd_buffer *cmd_bo)
+{
+  auto bos = cmd_bo->get_arg_bos();
+  if (bos.empty())
+    return;
+
+  // Dump exec buf and all argument BO content for debugging.
+  std::string dir_path = "/tmp/BO_DUMPS.";
+  dir_path += std::to_string(getpid()) + "/";
+  std::error_code ec;
+  std::filesystem::create_directories(dir_path, ec);
+  if (ec)
+    shim_err(ec.value(), "Failed to create BO dump dir: %s: %s", dir_path, ec.message());
+
+  std::string filename = "exec_buf.";
+  filename += std::to_string(cmd_bo->id().handle);
+  dump_buf_to_file(cmd_bo->vaddr(), cmd_bo->size(), dir_path + filename);
+
+  for (const auto& bo : bos) {
+    std::string filename = std::to_string(bo->id().handle) + ".";
+    filename += to_hex_string(bo->paddr());
+    dump_buf_to_file(bo->vaddr(), bo->size(), dir_path + filename);
+  }
+}
+
+}
 
 namespace shim_xdna {
 
@@ -124,6 +174,8 @@ submit_command(xrt_core::buffer_handle *cmd)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
   auto boh = static_cast<cmd_buffer*>(cmd);
+
+  dump_arg_bos(boh);
 
   // If pending queue is empty, submit directly to driver, else enqueue.
   if (pending_queue_empty()) {

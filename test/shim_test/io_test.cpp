@@ -15,10 +15,6 @@
 using namespace xrt_core;
 using arg_type = const std::vector<uint64_t>;
 
-// Initialize static member to track the number cmds submitted in a runlist.
-// Required for validating preemption checkpoints in the forced preemption case.
-unsigned long elf_preempt_io_test_bo_set::m_total_cmds = 0;
-
 namespace {
 
 io_test_parameter io_test_parameters;
@@ -49,6 +45,7 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
     base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
     break;
   case KERNEL_TYPE_TXN_PREEMPT:
+  case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
     base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
     break;
   default:
@@ -116,6 +113,7 @@ io_test_init_runlist_cmd(bo* cmd_bo, std::vector<bo*>& cmd_bos)
   payload->submit_index = 0;
   payload->error_index = 0;
 
+  cmd_bo->get()->reset();
   for (size_t i = 0; i < cmd_bos.size(); i++) {
     auto run_bo = cmd_bos[i];
     payload->data[i] = run_bo->get()->get_properties().kmhdl;
@@ -260,6 +258,66 @@ io_test_cmd_submit_and_wait_thruput(
   }
 }
 
+std::vector<std::pair<int, uint64_t>>
+get_fine_preemption_counters(device *dev)
+{
+  std::vector<std::pair<int, uint64_t>> counters;
+
+  const auto telemetry = device_query<query::rtos_telemetry>(dev);
+  for (auto& task : telemetry) {
+    auto user_tid = task.preemption_data.slot_index;
+    auto value = task.preemption_data.preemption_checkpoint_event;
+
+    counters.emplace_back(user_tid, value);
+  }
+  return counters;
+}
+
+int
+force_fine_preemption(device *dev, bool control)
+{
+  try {
+    device_update<query::preemption>(dev, static_cast<uint32_t>(control));
+  }
+  catch (const std::runtime_error& e) {
+    if (errno == EACCES) {
+      std::cerr << "User doesn't have admin privilege. Skipping force preemption.\n";
+      return -1;
+    }
+  }
+  catch (...) {
+    throw std::runtime_error("Caught an unknown exception.");
+  }
+
+  return 0;
+}
+
+uint64_t
+get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pair<int, uint64_t>>& pre)
+{
+  auto ctx_id = ctx.get()->get_slotidx();
+  auto cur = get_fine_preemption_counters(dev);
+  uint64_t fine_preemption_count;
+  int index = -1;
+  
+  // Find the user task ID for the ctx id
+  for (int i = 0; i < cur.size(); i++) {
+    auto id = cur[i].first;
+    if (id == ctx_id) {
+      fine_preemption_count = cur[i].second;
+      index = i;
+      break;
+    }
+  }
+
+  if (index == -1)
+    throw std::runtime_error("Can't determine user task ID for ctx!");
+  if (fine_preemption_count < pre.at(index).second)
+    throw std::runtime_error("Find preemption counter is smaller after the run!");
+
+  return fine_preemption_count - pre.at(index).second;
+}
+
 void
 io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   int cmds_per_list, const char *xclbin)
@@ -274,11 +332,16 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   // Creating HW context for cmd submission
   hw_ctx hwctx{dev, xclbin};
   auto hwq = hwctx.get()->get_hw_queue();
-  auto ip_name = get_kernel_name(dev, xclbin);
-  if (ip_name.empty())
-    throw std::runtime_error("Cannot find any kernel name matched DPU.*");
-  auto cu_idx = hwctx.get()->open_cu_context(ip_name);
-  std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
+
+  xrt_core::cuidx_type cu_idx{0};
+  auto kernel_type = get_kernel_type(dev, xclbin);
+  if (kernel_type != KERNEL_TYPE_TXN_FULL_ELF_PREEMPT) {
+    auto ip_name = get_kernel_name(dev, xclbin);
+    if (ip_name.empty())
+      throw std::runtime_error("Cannot find any kernel name matched DPU.*");
+    cu_idx = hwctx.get()->open_cu_context(ip_name);
+    std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
+  }
 
   // Finalize cmd before submission
   for (auto& boset : bo_set) {
@@ -310,7 +373,13 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
     }
   }
 
-  if (io_test_parameters.type == IO_TEST_DELAY_RUN) {
+  bool preemption_enabled = false;
+  std::vector<std::pair<int, uint64_t>> pre_cntrs;
+  if (io_test_parameters.type == IO_TEST_FORCE_PREEMPTION) {
+    // Enable force preemption and take snapshot of current fw counters before running any cmd.
+    preemption_enabled = !force_fine_preemption(dev, true);
+    pre_cntrs = get_fine_preemption_counters(dev);
+  } else if (io_test_parameters.type == IO_TEST_DELAY_RUN) {
     int seconds = 8;
 
     std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
@@ -338,6 +407,16 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   else
     io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos);
   auto end = clk::now();
+
+  // Verify preemption counters
+  if (preemption_enabled) {
+    force_fine_preemption(dev, false);
+    auto delta = get_fine_preemption_counter_delta(dev, hwctx, pre_cntrs);
+    auto total_cmds = total_hwq_submit * num_cmdlist * cmds_per_list;
+    auto expected_preemption_count = total_cmds * bo_set[0]->get_preemption_checkpoints();
+    if (delta != expected_preemption_count)
+      throw std::runtime_error("Preemption counter does not match expectation!");
+  }
 
   // Verify result
   if (io_test_parameters.type != IO_TEST_NOOP_RUN &&
@@ -479,4 +558,10 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
 
   io_test_parameter_init(IO_TEST_NO_PERF, IO_TEST_DELAY_RUN, IO_TEST_IOCTL_WAIT);
   io_test(id, sdev.get(), 1, 1, 1, nullptr);
+}
+
+void
+TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
+{
+  elf_io(id, sdev, arg, "yolo_fullelf_aximm.elf");
 }

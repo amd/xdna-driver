@@ -217,7 +217,7 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
     get_info(*static_cast<amdxdna_drm_get_info*>(cmd_arg));
     break;
   case drv_ioctl_cmd::get_info_array:
-    get_info_array(*static_cast<amdxdna_drm_get_info_array*>(cmd_arg));
+    get_info_array(*static_cast<amdxdna_drm_get_array*>(cmd_arg));
     break;
   case drv_ioctl_cmd::set_state:
     set_state(*static_cast<amdxdna_drm_set_state*>(cmd_arg));

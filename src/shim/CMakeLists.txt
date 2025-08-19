@@ -44,10 +44,10 @@ target_compile_options(${XDNA_TARGET} PRIVATE
   )
 
 target_include_directories(${XDNA_TARGET} PRIVATE
-  ${XRT_SOURCE_DIR}/src/runtime_src
-  ${XRT_SOURCE_DIR}/src/runtime_src/core/include
-  ${XRT_SOURCE_DIR}/src/runtime_src/core/common/gsl/include
-  ${XRT_BINARY_DIR}/src/gen
+  ${XRT_SOURCE_DIR}/runtime_src
+  ${XRT_SOURCE_DIR}/runtime_src/core/include
+  ${XRT_SOURCE_DIR}/runtime_src/core/common/gsl/include
+  ${XRT_BINARY_DIR}/gen
   ${CMAKE_CURRENT_SOURCE_DIR}/../include/uapi
   )
 

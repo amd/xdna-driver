@@ -519,7 +519,7 @@ get_info(amdxdna_drm_get_info& arg) const
 
 void
 platform_drv_virtio::
-get_info_array(amdxdna_drm_get_info_array& arg) const
+get_info_array(amdxdna_drm_get_array& arg) const
 {
   auto total_buf_size = arg.element_size * arg.num_element;
   auto resp_buf = std::make_unique<response_buffer>(dev_fd(), total_buf_size);

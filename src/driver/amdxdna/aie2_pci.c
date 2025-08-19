@@ -1217,51 +1217,39 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 }
 
 static int aie2_query_ctx_status_array(struct amdxdna_client *client,
-				       struct amdxdna_drm_get_info_array *args)
+				       struct amdxdna_drm_hwctx_entry *tmp, pid_t pid, u32 ctx_id)
 {
-	struct amdxdna_drm_query_hwctx_array __user *buf;
-	struct amdxdna_drm_query_hwctx_array *tmp;
 	struct amdxdna_dev *xdna = client->xdna;
-	int idx, ctx_limit, ctx_cnt, min, i;
 	struct amdxdna_client *tmp_client;
+	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct app_health_report *r;
 	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
+	unsigned long id;
 	u32 hw_i = 0;
-	u32 buf_size;
-	int ret = 0;
+	int ret, idx;
 
-	ctx_limit = aie2_rq_context_limit(&xdna->dev_handle->ctx_rq);
-	WARN_ON(ctx_limit > AMDXDNA_MAX_NUM_ELEMENT);
-	ctx_cnt = aie2_rq_active_context(&xdna->dev_handle->ctx_rq);
-	if (args->num_element < ctx_cnt) {
-		XDNA_DBG(xdna, "Not enough space. Total ctx %d, got %d",
-			 ctx_cnt, args->num_element);
-		args->num_element = ctx_cnt;
-		return -ENOSPC;
-	}
-
-	buf_size = args->num_element * args->element_size;
-	buf = u64_to_user_ptr(args->buffer);
-	if (!access_ok(buf, buf_size)) {
-		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
-			 args->num_element, args->element_size);
-		return -EFAULT;
-	}
-
-	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
-	if (!tmp)
+	r = aie2_mgmt_buff_alloc(xdna->dev_handle, &mgmt_hdl, sizeof(*r), DMA_FROM_DEVICE);
+	if (!r) {
+		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
 		return -ENOMEM;
+	}
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		int heap_usage;
+
+		if (pid && pid != tmp_client->pid)
+			continue;
 
 		mutex_lock(&tmp_client->mm_lock);
 		heap_usage = tmp_client->heap_usage;
 		mutex_unlock(&tmp_client->mm_lock);
 
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
-		amdxdna_for_each_ctx(tmp_client, ctx_id, ctx) {
+		amdxdna_for_each_ctx(tmp_client, id, ctx) {
 			if (!ctx->priv)
+				continue;
+
+			if (ctx_id && ctx_id != ctx->id)
 				continue;
 
 			tmp[hw_i].pid = tmp_client->pid;
@@ -1289,48 +1277,130 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			else
 				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_IDLE;
 
+			if (ctx->priv->status == CTX_STATE_CONNECTED) {
+				aie2_mgmt_buff_clflush(&mgmt_hdl);
+
+				mutex_lock(&xdna->dev_handle->aie2_lock);
+				ret = aie2_get_app_health(xdna->dev_handle, &mgmt_hdl,
+							  ctx->priv->id, sizeof(*r));
+				mutex_unlock(&xdna->dev_handle->aie2_lock);
+				if (ret)
+					return ret;
+			} else {
+				r->fatal_info.exception_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.exception_pc = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.app_module = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->fatal_info.fatal_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+				r->txn_op_id = AIE2_APP_HEALTH_RESET_TXN_OP_ID;
+				r->ctx_pc = AIE2_APP_HEALTH_RESET_CTX_PC;
+			}
+
+			tmp[hw_i].fatal_error_exception_type = r->fatal_info.exception_type;
+			tmp[hw_i].fatal_error_exception_pc = r->fatal_info.exception_pc;
+			tmp[hw_i].fatal_error_app_module = r->fatal_info.app_module;
+			tmp[hw_i].fatal_error_type = r->fatal_info.fatal_type;
+			tmp[hw_i].txn_op_idx = r->txn_op_id;
+			tmp[hw_i].ctx_pc = r->ctx_pc;
+
 			hw_i++;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
 
-	min = min(args->element_size, sizeof(*tmp));
-	for (i = 0; i < hw_i; i++) {
-		if (copy_to_user(&buf[i], &tmp[i], min)) {
-			ret = -EFAULT;
-			break;
-		}
+	if (pid && ctx_id && !hw_i) {
+		XDNA_ERR(xdna, "Invalid context ID %d for PID %d", ctx_id, pid);
+		ret = -EINVAL;
 	}
 
-	kfree(tmp);
-	args->element_size = min;
-	args->num_element = hw_i;
+	aie2_mgmt_buff_free(&mgmt_hdl);
 	return ret;
 }
 
-static int aie2_get_info_array(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info_array *args)
+static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
+	struct amdxdna_drm_hwctx_entry __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret;
+	struct amdxdna_drm_hwctx_entry *tmp;
+	int ctx_limit, ctx_cnt, min, i, ret;
+	u32 buf_size;
 
 	ret = amdxdna_pm_resume_get(xdna);
 	if (ret)
 		return ret;
 
 	mutex_lock(&xdna->dev_lock);
-	mutex_lock(&xdna->dev_handle->aie2_lock);
+
+	buf_size = args->num_element * args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
 	switch (args->param) {
-	case DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY:
-		mutex_unlock(&xdna->dev_handle->aie2_lock);
-		ret = aie2_query_ctx_status_array(client, args);
-		mutex_lock(&xdna->dev_handle->aie2_lock);
+	case DRM_AMDXDNA_HW_CONTEXT_ARRAY:
+		ctx_limit = aie2_rq_context_limit(&xdna->dev_handle->ctx_rq);
+		WARN_ON(ctx_limit > AMDXDNA_MAX_NUM_ELEMENT);
+		ctx_cnt = aie2_rq_active_context(&xdna->dev_handle->ctx_rq);
+
+		if (args->num_element < ctx_cnt) {
+			XDNA_ERR(xdna, "Not enough space. Total ctx %d, got %d",
+				 ctx_cnt, args->num_element);
+			args->num_element = ctx_cnt;
+			ret = -ENOSPC;
+			goto exit;
+		}
+
+		ret = aie2_query_ctx_status_array(client, tmp, 0, 0);
+		if (ret)
+			goto exit;
+
+		break;
+	case DRM_AMDXDNA_HW_CONTEXT:
+		struct amdxdna_drm_hwctx_entry input;
+
+		if (copy_from_user(&input, u64_to_user_ptr(args->buffer), sizeof(input))) {
+			ret = -EFAULT;
+			goto exit;
+		}
+
+		if (args->num_element > 1U || !input.context_id || !input.pid) {
+			XDNA_ERR(xdna, "Invalid context ID %d, PID %lld or num_elements %d",
+				 input.context_id, input.pid, args->num_element);
+			ret = -EINVAL;
+			goto exit;
+		}
+
+		ctx_cnt = 1;
+
+		ret = aie2_query_ctx_status_array(client, tmp, input.pid, input.context_id);
+		if (ret)
+			goto exit;
+
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
+		goto exit;
 	}
-	mutex_unlock(&xdna->dev_handle->aie2_lock);
+
+	min = min(args->element_size, sizeof(*tmp));
+	for (i = 0; i < ctx_cnt; i++) {
+		if (copy_to_user(&buf[i], &tmp[i], min)) {
+			ret = -EFAULT;
+			goto exit;
+		}
+	}
+	args->num_element = ctx_cnt;
+	args->element_size = min;
+
+exit:
+	kfree(tmp);
 	mutex_unlock(&xdna->dev_lock);
 
 	amdxdna_pm_suspend_put(xdna);
@@ -1545,7 +1615,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.resume			= aie2_hw_resume,
 	.suspend		= aie2_hw_suspend,
 	.get_aie_info		= aie2_get_info,
-	.get_aie_info_array	= aie2_get_info_array,
+	.get_aie_array		= aie2_get_array,
 	.set_aie_state		= aie2_set_state,
 	.ctx_init		= aie2_ctx_init,
 	.ctx_fini		= aie2_ctx_fini,

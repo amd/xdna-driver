@@ -383,7 +383,7 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 
 #ifdef AMDXDNA_DEVEL
 	if (!is_import_bo(abo)) {
-		XDNA_WARN(xdna, "unmap bo for non import bo");
+		XDNA_DBG(xdna, "unmap bo for non import bo");
 		if (abo->type == AMDXDNA_BO_CMD)
 			amdxdna_mem_unmap(xdna, &abo->mem);
 		else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)

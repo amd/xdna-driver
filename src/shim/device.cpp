@@ -234,12 +234,12 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_query_hwctx_array* data;
+    amdxdna_drm_hwctx_entry* data;
     const uint32_t output_size = 32 * sizeof(*data);
 
     std::vector<char> payload(output_size);
-    amdxdna_drm_get_info_array arg = {
-      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY,
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ARRAY,
       .element_size = sizeof(*data),
       .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
@@ -303,7 +303,7 @@ struct partition_info
 
         if (updated_output_size < arg.element_size * arg.num_element) {
           throw xrt_core::query::exception(
-            boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY - Insufficient buffer size. Need: %u") % arg.element_size));
+            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ARRAY - Insufficient buffer size. Need: %u") % arg.element_size));
         }
 
         data_size = arg.num_element;
@@ -1045,29 +1045,86 @@ struct runner{
     xrt_core::smi::smi_hardware_config smi_hrdw;
     auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
 
-    std::string runner_name;
+    std::string file_name;
     const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
     switch (runner_type) {
-    case xrt_core::query::runner::type::throughput:
-      runner_name = "/Runner/throughput";
+    case xrt_core::query::runner::type::throughput_path:
+      return std::string("bins/Runner/throughput/"); 
+    case xrt_core::query::runner::type::throughput_recipe:
+      file_name = std::string("Runner/throughput/recipe_throughput");
       break;
-    case xrt_core::query::runner::type::latency:
-      runner_name = "/Runner/latency";
+    case xrt_core::query::runner::type::throughput_profile:
+      file_name = std::string("Runner/throughput/profile_throughput");
       break;
-    case xrt_core::query::runner::type::df_bandwidth:
-      runner_name = "/Runner/df_bandwidth";
+    case xrt_core::query::runner::type::latency_path:
+      return std::string("bins/Runner/latency/");
+    case xrt_core::query::runner::type::latency_recipe:
+      file_name = std::string("Runner/latency/recipe_latency");
       break;
-    case xrt_core::query::runner::type::gemm:
-      runner_name = "/Runner/gemm";
+    case xrt_core::query::runner::type::latency_profile:
+      file_name = std::string("Runner/latency/profile_latency");
       break;
-    case xrt_core::query::runner::type::aie_reconfig_overhead:
-      runner_name = "/Runner/aie_reconfig_overhead";
+    case xrt_core::query::runner::type::df_bandwidth_path:
+      return std::string("bins/Runner/df_bandwidth/");
+    case xrt_core::query::runner::type::df_bandwidth_recipe:
+      file_name = std::string("Runner/df_bandwidth/recipe_df_bandwidth");
       break;
-    case xrt_core::query::runner::type::cmd_chain_latency:
-      runner_name = "/Runner/cmd_chain_latency";
+    case xrt_core::query::runner::type::df_bandwidth_profile:
+      file_name = std::string("Runner/df_bandwidth/profile_df_bandwidth");
       break;
-    case xrt_core::query::runner::type::cmd_chain_throughput:
-      runner_name = "/Runner/cmd_chain_throughput";
+    case xrt_core::query::runner::type::gemm_path:
+      return std::string("bins/Runner/gemm/");
+    case xrt_core::query::runner::type::gemm_recipe:
+      file_name = std::string("Runner/gemm/recipe_gemm");
+      break;
+    case xrt_core::query::runner::type::gemm_profile:
+      file_name = std::string("Runner/gemm/profile_gemm");
+      break;
+    case xrt_core::query::runner::type::aie_reconfig_overhead_path:
+      return std::string("bins/Runner/aie_reconfig_overhead/");
+    case xrt_core::query::runner::type::aie_reconfig_overhead_recipe:
+      file_name = std::string("Runner/aie_reconfig_overhead/recipe_aie_reconfig");
+      break;
+    case xrt_core::query::runner::type::aie_reconfig_overhead_profile:
+      file_name = std::string("Runner/aie_reconfig_overhead/profile_aie_reconfig");
+      break;
+    case xrt_core::query::runner::type::aie_reconfig_overhead_nop_recipe:
+      file_name = std::string("Runner/aie_reconfig_overhead/recipe_aie_reconfig_nop");
+      break;
+    case xrt_core::query::runner::type::cmd_chain_latency_path:
+      return std::string("bins/Runner/cmd_chain_latency/");
+    case xrt_core::query::runner::type::cmd_chain_latency_recipe:
+      file_name = std::string("Runner/cmd_chain_latency/recipe_cmd_chain_latency");
+      break;
+    case xrt_core::query::runner::type::cmd_chain_latency_profile:
+      file_name = std::string("Runner/cmd_chain_latency/profile_cmd_chain_latency");
+      break;
+    case xrt_core::query::runner::type::cmd_chain_throughput_path:
+      return std::string("bins/Runner/cmd_chain_throughput/");
+    case xrt_core::query::runner::type::cmd_chain_throughput_recipe:
+      file_name = std::string("Runner/cmd_chain_throughput/recipe_cmd_chain_throughput");
+      break;
+    case xrt_core::query::runner::type::cmd_chain_throughput_profile:
+      file_name = std::string("Runner/cmd_chain_throughput/profile_cmd_chain_throughput");
+      break;
+    case xrt_core::query::runner::type::tct_one_column_recipe:
+      file_name = std::string("Runner/tct_one_column/recipe_tct_one_column");
+      break;
+    case xrt_core::query::runner::type::tct_one_column_profile:
+      file_name = std::string("Runner/tct_one_column/profile_tct_one_column");
+      break;
+    case xrt_core::query::runner::type::tct_one_column_path:
+      return std::string("bins/Runner/tct_one_column/");
+    case xrt_core::query::runner::type::tct_all_column_recipe:
+      file_name = std::string("Runner/tct_all_column/recipe_tct_all_column");
+      break;
+    case xrt_core::query::runner::type::tct_all_column_profile:
+      file_name = std::string("Runner/tct_all_column/profile_tct_all_column");
+      break;
+    case xrt_core::query::runner::type::tct_all_column_path:
+      return std::string("bins/Runner/tct_all_column/");
+    default:
+      throw xrt_core::query::no_such_key(key, "Not implemented");
     }
 
     switch (hardware_type)
@@ -1076,15 +1133,18 @@ struct runner{
       case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
       case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
       case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
-        runner_name += "/strx";
+        file_name += "_strx.json";
         break;
       case xrt_core::smi::smi_hardware_config::hardware_type::phx:
-        runner_name += "/phx";
+        file_name += "_phx.json";
         break;
-    }
+      default:
+        // For all other hardware types, we assume the runner is not available
+        throw xrt_core::query::no_such_key(key, "Test not supported on this device type");
+    } 
 
-    return boost::str(boost::format("bins/%s/")
-      % runner_name);
+    return boost::str(boost::format("bins/%s")
+      % file_name);
   }
 };
 
@@ -1136,43 +1196,6 @@ struct xclbin_name
       % xclbin_name);
   }
 };
-
-struct sequence_name
-{
-  static std::any
-  get(const xrt_core::device* /*device*/, key_type key)
-  {
-    throw xrt_core::query::no_such_key(key, "Not implemented");
-  }
-
-  static std::any
-  get(const xrt_core::device* device, key_type key, const std::any& param)
-  {
-    if (key != key_type::sequence_name)
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-
-    auto fmt = boost::format("bins/dpu_sequence/%s");
-
-    std::string seq_name;
-    switch (std::any_cast<xrt_core::query::sequence_name::type>(param)) {
-    case xrt_core::query::sequence_name::type::df_bandwidth:
-      seq_name = "df_bw.txt";
-      break;
-    case xrt_core::query::sequence_name::type::tct_one_column:
-      seq_name = "tct_1col.txt";
-      break;
-    case xrt_core::query::sequence_name::type::tct_all_column:
-      seq_name = "tct_4col.txt";
-      break;
-    case xrt_core::query::sequence_name::type::gemm_int8:
-      seq_name = "gemm_int8.txt";
-      break;
-    }
-
-    return boost::str(fmt % seq_name);
-  }
-};
-
 struct mobilenet
 {
   using result_type = std::any;
@@ -1229,21 +1252,6 @@ struct elf_name
     switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
     case xrt_core::query::elf_name::type::nop:
       elf_file = "nop.elf";
-      break;
-    case xrt_core::query::elf_name::type::df_bandwidth:
-      elf_file = "df_bw.elf";
-      break;
-    case xrt_core::query::elf_name::type::tct_one_column:
-      elf_file = "tct_1col.elf";
-      break;
-    case xrt_core::query::elf_name::type::tct_all_column:
-      elf_file = "tct_4col.elf";
-      break;
-    case xrt_core::query::elf_name::type::aie_reconfig_overhead:
-      elf_file = "aie_reconfig_overhead.elf";
-      break;
-    case xrt_core::query::elf_name::type::gemm_int8:
-      elf_file = "gemm_int8.elf";
       break;
     case xrt_core::query::elf_name::type::preemption_noop_4x4:
       elf_file = "preemption_noop_4x4.elf";
@@ -1431,7 +1439,6 @@ initialize_query_table()
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
-  emplace_func1_request<query::sequence_name,                  sequence_name>();
   emplace_func1_request<query::elf_name,                       elf_name>();
   emplace_func1_request<query::mobilenet,                      mobilenet>();
   emplace_func1_request<query::runner,                         runner>();
