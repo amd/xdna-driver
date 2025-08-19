@@ -286,7 +286,7 @@ private:
   { shim_not_supported_err(__func__); }
 
   virtual void
-  get_info_array(amdxdna_drm_get_info_array& arg) const
+  get_info_array(amdxdna_drm_get_array& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void

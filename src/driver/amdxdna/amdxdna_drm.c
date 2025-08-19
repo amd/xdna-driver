@@ -170,15 +170,14 @@ static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct
 	return ret;
 }
 
-static int amdxdna_drm_get_info_array_ioctl(struct drm_device *dev, void *data,
-					    struct drm_file *filp)
+static int amdxdna_drm_get_array_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_drm_get_info_array *args = data;
+	struct amdxdna_drm_get_array *args = data;
 	int ret, idx;
 
-	if (!xdna->dev_info->ops->get_aie_info_array)
+	if (!xdna->dev_info->ops->get_aie_array)
 		return -EOPNOTSUPP;
 
 	if (!args->num_element || args->num_element > AMDXDNA_MAX_NUM_ELEMENT)
@@ -188,7 +187,7 @@ static int amdxdna_drm_get_info_array_ioctl(struct drm_device *dev, void *data,
 		return -ENODEV;
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
-	ret = xdna->dev_info->ops->get_aie_info_array(client, args);
+	ret = xdna->dev_info->ops->get_aie_array(client, args);
 
 	drm_dev_exit(idx);
 	return ret;
@@ -228,7 +227,7 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_WAIT_CMD, amdxdna_drm_wait_cmd_ioctl, 0),
 	/* AIE hardware */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_INFO, amdxdna_drm_get_info_ioctl, 0),
-	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_INFO_ARRAY, amdxdna_drm_get_info_array_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_ARRAY, amdxdna_drm_get_array_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 

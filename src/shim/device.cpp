@@ -234,12 +234,12 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_query_hwctx_array* data;
+    amdxdna_drm_hwctx_entry* data;
     const uint32_t output_size = 32 * sizeof(*data);
 
     std::vector<char> payload(output_size);
-    amdxdna_drm_get_info_array arg = {
-      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY,
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ARRAY,
       .element_size = sizeof(*data),
       .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
@@ -303,7 +303,7 @@ struct partition_info
 
         if (updated_output_size < arg.element_size * arg.num_element) {
           throw xrt_core::query::exception(
-            boost::str(boost::format("DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY - Insufficient buffer size. Need: %u") % arg.element_size));
+            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ARRAY - Insufficient buffer size. Need: %u") % arg.element_size));
         }
 
         data_size = arg.num_element;
