@@ -7,16 +7,39 @@
 #include "umq/hwctx.h"
 #include "fence.h"
 #include "smi_xdna.h"
+
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
 #include <sys/syscall.h>
 #include <algorithm>
+#include <libgen.h>
+#include <limits.h>
+#include <dlfcn.h>
 #include <sstream>
 
 namespace {
 
 namespace query = xrt_core::query;
 using key_type = query::key_type;
+
+std::string
+get_shim_lib_path()
+{
+    Dl_info info;
+
+    if (dladdr((void*)&get_shim_lib_path, &info)) {
+      char resolved[PATH_MAX];
+      if (realpath(info.dli_fname, resolved))
+        return std::string(dirname(resolved));
+    }
+    return {};
+}
+
+std::string
+get_shim_data_dir()
+{
+  return get_shim_lib_path() + "/../share/amdxdna/";
+}
 
 inline std::shared_ptr<xrt_core::pci::dev>
 get_pcidev(const xrt_core::device* device)
@@ -1091,10 +1114,12 @@ struct runner{
     auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
 
     std::string file_name;
+    std::string path;
     const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
     switch (runner_type) {
     case xrt_core::query::runner::type::throughput_path:
-      return std::string("bins/Runner/throughput/"); 
+      path = std::string("bins/Runner/throughput/"); 
+      break;
     case xrt_core::query::runner::type::throughput_recipe:
       file_name = std::string("Runner/throughput/recipe_throughput");
       break;
@@ -1102,7 +1127,8 @@ struct runner{
       file_name = std::string("Runner/throughput/profile_throughput");
       break;
     case xrt_core::query::runner::type::latency_path:
-      return std::string("bins/Runner/latency/");
+      path = std::string("bins/Runner/latency/");
+      break;
     case xrt_core::query::runner::type::latency_recipe:
       file_name = std::string("Runner/latency/recipe_latency");
       break;
@@ -1110,7 +1136,8 @@ struct runner{
       file_name = std::string("Runner/latency/profile_latency");
       break;
     case xrt_core::query::runner::type::df_bandwidth_path:
-      return std::string("bins/Runner/df_bandwidth/");
+      path = std::string("bins/Runner/df_bandwidth/");
+      break;
     case xrt_core::query::runner::type::df_bandwidth_recipe:
       file_name = std::string("Runner/df_bandwidth/recipe_df_bandwidth");
       break;
@@ -1118,7 +1145,8 @@ struct runner{
       file_name = std::string("Runner/df_bandwidth/profile_df_bandwidth");
       break;
     case xrt_core::query::runner::type::gemm_path:
-      return std::string("bins/Runner/gemm/");
+      path = std::string("bins/Runner/gemm/");
+      break;
     case xrt_core::query::runner::type::gemm_recipe:
       file_name = std::string("Runner/gemm/recipe_gemm");
       break;
@@ -1126,7 +1154,8 @@ struct runner{
       file_name = std::string("Runner/gemm/profile_gemm");
       break;
     case xrt_core::query::runner::type::aie_reconfig_overhead_path:
-      return std::string("bins/Runner/aie_reconfig_overhead/");
+      path = std::string("bins/Runner/aie_reconfig_overhead/");
+      break;
     case xrt_core::query::runner::type::aie_reconfig_overhead_recipe:
       file_name = std::string("Runner/aie_reconfig_overhead/recipe_aie_reconfig");
       break;
@@ -1137,7 +1166,8 @@ struct runner{
       file_name = std::string("Runner/aie_reconfig_overhead/recipe_aie_reconfig_nop");
       break;
     case xrt_core::query::runner::type::cmd_chain_latency_path:
-      return std::string("bins/Runner/cmd_chain_latency/");
+      path = std::string("bins/Runner/cmd_chain_latency/");
+      break;
     case xrt_core::query::runner::type::cmd_chain_latency_recipe:
       file_name = std::string("Runner/cmd_chain_latency/recipe_cmd_chain_latency");
       break;
@@ -1145,7 +1175,8 @@ struct runner{
       file_name = std::string("Runner/cmd_chain_latency/profile_cmd_chain_latency");
       break;
     case xrt_core::query::runner::type::cmd_chain_throughput_path:
-      return std::string("bins/Runner/cmd_chain_throughput/");
+      path = std::string("bins/Runner/cmd_chain_throughput/");
+      break;
     case xrt_core::query::runner::type::cmd_chain_throughput_recipe:
       file_name = std::string("Runner/cmd_chain_throughput/recipe_cmd_chain_throughput");
       break;
@@ -1159,7 +1190,8 @@ struct runner{
       file_name = std::string("Runner/tct_one_column/profile_tct_one_column");
       break;
     case xrt_core::query::runner::type::tct_one_column_path:
-      return std::string("bins/Runner/tct_one_column/");
+      path = std::string("bins/Runner/tct_one_column/");
+      break;
     case xrt_core::query::runner::type::tct_all_column_recipe:
       file_name = std::string("Runner/tct_all_column/recipe_tct_all_column");
       break;
@@ -1167,10 +1199,14 @@ struct runner{
       file_name = std::string("Runner/tct_all_column/profile_tct_all_column");
       break;
     case xrt_core::query::runner::type::tct_all_column_path:
-      return std::string("bins/Runner/tct_all_column/");
+      path = std::string("bins/Runner/tct_all_column/");
+      break;
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
+
+    if (!path.empty())
+      return get_shim_data_dir() + path;
 
     switch (hardware_type)
     {
@@ -1188,7 +1224,7 @@ struct runner{
         throw xrt_core::query::no_such_key(key, "Test not supported on this device type");
     } 
 
-    return boost::str(boost::format("bins/%s")
+    return get_shim_data_dir() + boost::str(boost::format("bins/%s")
       % file_name);
   }
 };
@@ -1235,7 +1271,7 @@ struct xclbin_name
       break;
     }
 
-    return boost::str(boost::format("bins/%04x_%02x/%s")
+    return get_shim_data_dir() + boost::str(boost::format("bins/%04x_%02x/%s")
       % pcie_id.device_id
       % static_cast<uint16_t>(pcie_id.revision_id)
       % xclbin_name);
@@ -1272,7 +1308,7 @@ struct mobilenet
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
-    return boost::str(boost::format("bins/Mobilenet/%s") % bin_name);
+    return get_shim_data_dir() + boost::str(boost::format("bins/Mobilenet/%s") % bin_name);
   }
 };
 
@@ -1315,7 +1351,7 @@ struct elf_name
       break;
     }
 
-    return boost::str(boost::format("bins/%04x_%02x/%s")
+    return get_shim_data_dir() + boost::str(boost::format("bins/%04x_%02x/%s")
       % pcie_id.device_id
       % static_cast<uint16_t>(pcie_id.revision_id)
       % elf_file);

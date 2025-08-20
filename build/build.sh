@@ -127,7 +127,7 @@ verbose=
 skip_kmod=
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
-xrt_install_prefix="/opt/xilinx"
+xrt_install_prefix="/opt/xilinx/xrt"
 hello_umq=n
 
 while [ $# -gt 0 ]; do

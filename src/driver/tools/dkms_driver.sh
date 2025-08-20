@@ -23,7 +23,7 @@ if [[ -z "${XILINX_XRT}" ]]; then
 	exit 1
 fi
 DRV_NAME="amdxdna"
-DRV_SRC_DIR=${XILINX_XRT}/${DRV_NAME}
+DRV_SRC_DIR=${XILINX_XRT_DATADIR}
 DKMS_PKG_NAME=`cat ${DRV_SRC_DIR}/dkms.conf | grep ^PACKAGE_NAME | awk -F= '{print $2}' | tr -d '"'`
 DKMS_PKG_VER=`cat ${DRV_SRC_DIR}/dkms.conf | grep ^PACKAGE_VERSION | awk -F= '{print $2}' | tr -d '"'`
 DKMS_DRV_DIR_NAME=${DKMS_PKG_NAME}-${DKMS_PKG_VER}
