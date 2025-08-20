@@ -8,7 +8,10 @@
 #include "fence.h"
 #include "smi_xdna.h"
 #include "core/common/query_requests.h"
+#include "core/include/ert.h"
 #include <sys/syscall.h>
+#include <algorithm>
+#include <sstream>
 
 namespace {
 
@@ -337,6 +340,88 @@ struct partition_info
       new_entry.suspensions = entry.suspensions;
       new_entry.is_suspended = entry.state == AMDXDNA_HWCTX_STATE_IDLE;
       output.push_back(std::move(new_entry));
+    }
+    return output;
+  }
+};
+
+struct context_health_info {
+
+  static ert_ctx_health_data 
+  fill_health_entry(const amdxdna_drm_hwctx_entry& entry)
+  {
+    ert_ctx_health_data new_entry{};
+    new_entry.txn_op_idx = entry.txn_op_idx;
+    new_entry.ctx_pc = entry.ctx_pc;
+    new_entry.fatal_error_type = entry.fatal_error_type;
+    new_entry.fatal_error_exception_type = entry.fatal_error_exception_type;
+    new_entry.fatal_error_exception_pc = entry.fatal_error_exception_pc;
+    new_entry.fatal_error_app_module = entry.fatal_error_app_module;
+    return new_entry;
+  }
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::context_health_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // Query all contexts
+    amdxdna_drm_hwctx_entry* data;
+    const uint32_t output_size = 32 * sizeof(*data);
+    std::vector<char> payload(output_size);
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ARRAY,
+      .element_size = sizeof(*data),
+      .num_element = 32,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    uint32_t data_size = 0;
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+    data_size = arg.num_element;
+    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    query::context_health_info::result_type output;
+    for (uint32_t i = 0; i < data_size; i++) {
+      output.push_back(fill_health_entry(data[i]));
+    }
+    return output;
+  }
+
+  /* Get method for case when <ctx_id,pid> are provided*/
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& context_pid_pair)
+  {
+    if (key != key_type::context_health_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // Extract filter parameters from the parameter if provided
+    std::vector<std::pair<uint32_t, uint32_t>> context_pid_pairs;
+    if (context_pid_pair.has_value()) {
+      context_pid_pairs = std::any_cast<std::vector<std::pair<uint32_t, uint32_t>>>(context_pid_pair);
+    }
+    query::context_health_info::result_type output;
+    for (const auto& pair : context_pid_pairs) {
+      std::vector<char> payload(sizeof(amdxdna_drm_hwctx_entry));
+      auto* entry = reinterpret_cast<amdxdna_drm_hwctx_entry*>(payload.data());
+      entry->context_id = pair.first;
+      entry->pid = pair.second;
+
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_HW_CONTEXT,
+        .element_size = sizeof(amdxdna_drm_hwctx_entry),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(payload.data())
+      };
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+
+      auto* data = reinterpret_cast<amdxdna_drm_hwctx_entry*>(payload.data());
+      output.push_back(fill_health_entry(*data));
     }
     return output;
   }
@@ -1362,6 +1447,7 @@ static void
 initialize_query_table()
 {
   emplace_func0_request<query::aie_partition_info,             partition_info>();
+  emplace_func1_request<query::context_health_info,           context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
