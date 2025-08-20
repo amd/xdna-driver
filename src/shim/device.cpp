@@ -11,6 +11,7 @@
 #include "core/include/ert.h"
 #include <sys/syscall.h>
 #include <algorithm>
+#include <sstream>
 
 namespace {
 
@@ -348,41 +349,18 @@ struct context_health_info
 {
   using result_type = std::any;
 
-  // Original method for emplace_func0_request registration
   static result_type
   get(const xrt_core::device* device, key_type key)
-  {
-    // Delegate to parameterized version with empty context_ids
-    return get(device, key, std::any{});
-  }
-
-  // Parameterized method for filtering support
-  static result_type
-  get(const xrt_core::device* device, key_type key, const std::any& context_ids_param)
   {
     if (key != key_type::context_health_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    // Extract context_ids from the parameter if provided
-    std::vector<uint32_t> context_ids;
-    bool has_context_filter = false;
-    
-    if (context_ids_param.has_value()) {
-      try {
-        context_ids = std::any_cast<std::vector<uint32_t>>(context_ids_param);
-        has_context_filter = !context_ids.empty();
-      } catch (const std::bad_any_cast&) {
-        // If cast fails, treat as no filter
-        has_context_filter = false;
-      }
-    }
-
-    amdxdna_drm_query_hwctx_array* data;
+    // Query all contexts
+    amdxdna_drm_hwctx_entry* data;
     const uint32_t output_size = 32 * sizeof(*data);
-
     std::vector<char> payload(output_size);
-    amdxdna_drm_get_info_array arg = {
-      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY,
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ARRAY,
       .element_size = sizeof(*data),
       .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
@@ -397,33 +375,74 @@ struct context_health_info
     query::context_health_info::result_type output;
     for (uint32_t i = 0; i < data_size; i++) {
       const auto& entry = data[i];
-
       ert_ctx_health_data new_entry{};
-      new_entry.version = 0; // Default version
       new_entry.txn_op_idx = entry.txn_op_idx;
       new_entry.ctx_pc = entry.ctx_pc;
       new_entry.fatal_error_type = entry.fatal_error_type;
       new_entry.fatal_error_exception_type = entry.fatal_error_exception_type;
       new_entry.fatal_error_exception_pc = entry.fatal_error_exception_pc;
       new_entry.fatal_error_app_module = entry.fatal_error_app_module;
-      new_entry.app_health_report_size = 0; // No app health report available
-      output.push_back(std::move(new_entry));
+      output.push_back(new_entry);
     }
+    return output;
+  }
 
-    // Apply context ID filtering if requested
-    if (has_context_filter) {
-      query::context_health_info::result_type filtered_output;
-      
-      // TODO: Add proper filtering when context_id field is available in ert_ctx_health_data
-      // For now, include all contexts since we don't have a proper context_id field to filter on
-      for (const auto& context : output) {
-        // When context_id field is available, implement:
-        // if (std::find(context_ids.begin(), context_ids.end(), context.context_id) != context_ids.end())
-        filtered_output.push_back(context);
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& context_pid_pair)
+  {
+    if (key != key_type::context_health_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // Extract filter parameters from the parameter if provided
+    std::vector<std::pair<uint32_t, uint32_t>> context_pid_pairs;
+    bool has_filter = false;
+    
+    if (context_pid_pair.has_value()) {
+      try {
+        // Try to cast as vector<pair<uint32_t, uint32_t>> (context_id, pid pairs)
+        context_pid_pairs = std::any_cast<std::vector<std::pair<uint32_t, uint32_t>>>(context_pid_pair);
+        has_filter = !context_pid_pairs.empty();
+      } catch (const std::bad_any_cast&) {
+        try {
+          // Fallback: try to cast as vector<uint32_t> for backward compatibility (context_ids only)
+          auto context_ids = std::any_cast<std::vector<uint32_t>>(context_pid_pair);
+          for (auto ctx_id : context_ids) {
+            context_pid_pairs.emplace_back(ctx_id, 0); // pair with pid=0
+          }
+          has_filter = !context_pid_pairs.empty();
+        } catch (const std::bad_any_cast&) {
+          // If both casts fail, treat as no filter
+          has_filter = false;
+        }
       }
-      return filtered_output;
     }
+    query::context_health_info::result_type output;
+    for (const auto& pair : context_pid_pairs) {
+      std::vector<char> payload(sizeof(amdxdna_drm_hwctx_entry));
+      auto* entry = reinterpret_cast<amdxdna_drm_hwctx_entry*>(payload.data());
+      entry->context_id = pair.first;
+      entry->pid = pair.second;
 
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_HW_CONTEXT,
+        .element_size = sizeof(amdxdna_drm_hwctx_entry),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(payload.data())
+      };
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+
+      auto* data = reinterpret_cast<amdxdna_drm_hwctx_entry*>(payload.data());
+      ert_ctx_health_data new_entry{};
+      new_entry.txn_op_idx = data->txn_op_idx;
+      new_entry.ctx_pc = data->ctx_pc;
+      new_entry.fatal_error_type = data->fatal_error_type;
+      new_entry.fatal_error_exception_type = data->fatal_error_exception_type;
+      new_entry.fatal_error_exception_pc = data->fatal_error_exception_pc;
+      new_entry.fatal_error_app_module = data->fatal_error_app_module;
+      output.push_back(new_entry);
+    }
     return output;
   }
 };
