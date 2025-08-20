@@ -11,11 +11,11 @@
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
 #include <sys/syscall.h>
-#include <algorithm>
+#include <cstring>
 #include <libgen.h>
 #include <limits.h>
 #include <dlfcn.h>
-#include <sstream>
+#include <vector>
 
 namespace {
 
@@ -578,43 +578,89 @@ struct preemption
   }
 };
 
-struct event_trace 
+struct event_trace
 {
+  using result_type = std::any;
+
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state force;
-    force.state = std::any_cast<uint32_t>(any);
+    // TODO : Implement IOCTL to set event_trace configuration
+  }
 
-    amdxdna_drm_set_state arg = {
-      .param = DRM_AMDXDNA_SET_EVENT_TRACE,
-      .buffer_size = sizeof(force),
-      .buffer = reinterpret_cast<uintptr_t>(&force)
-    };
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    switch (key) {
+    case key_type::event_trace_data:
+    {
+      query::firmware_debug_buffer log_buffer;
+      // TODO : implement IOCTL to get event_trace data
+      return log_buffer;
+    }
+    case key_type::event_trace_version:
+    {
+      query::event_trace_version::result_type version;
+      // TODO : Implement IOCTL to get firmware event_trace yaml version
+      return version;
+    }
+    case key_type::event_trace_config:
+    {
+      return std::string(get_shim_data_dir() + "bins/configs/trace_events.json");
+    }
+    case key_type::event_trace_state:
+    {
+      query::event_trace_state::result_type state;
+      // TODO : implement IOCTL to get event_trace state
+      return state;
+    }
 
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+    default:
+      throw xrt_core::error("Unsupported event_trace query key");
+    }
+  }
+};
+
+struct firmware_log
+{
+  using result_type = std::any;
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    //TODO : implement IOCTL to set firmware log configuration
 
   }
-}
 
-struct firmware_log 
-{
-  static void
-  put(const xrt_core::device* device, key_type key, const std::any& any)
+  static result_type
+  get(const xrt_core::device* device, key_type key)
   {
-    amdxdna_drm_attribute_state force;
-    force.state = std::any_cast<uint32_t>(any);
-
-    amdxdna_drm_set_state arg = {
-      .param = DRM_AMDXDNA_SET_FIRMWARE_LOG,
-      .buffer_size = sizeof(force),
-      .buffer = reinterpret_cast<uintptr_t>(&force)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
-
+    switch (key) {
+    case key_type::firmware_log_data:
+    {
+      static query::firmware_debug_buffer log_buffer;
+      // TODO : implement IOCTL to get firmware log data
+      return log_buffer;
+    }
+    case key_type::firmware_log_version:
+    {
+      query::firmware_log_version::result_type version;
+      // TODO : implement IOCTL to get firmware log version
+      return version;
+    }
+    case key_type::firmware_log_config:
+    {
+      return std::string(get_shim_data_dir() + "bins/configs/firmware_log.json");
+    }
+    case key_type::firmware_log_state:
+    {
+      query::firmware_log_state::result_type state;
+      // TODO : implement IOCTL to get firmware log state
+      return state;
+    }
+    default:
+      throw xrt_core::error("Unsupported firmware_log query key");
+    }
   }
 };
 
@@ -1485,6 +1531,31 @@ template <typename QueryRequestType, typename GetPut>
 struct function0_getput : function0_get<QueryRequestType, GetPut>, function_putter<QueryRequestType, GetPut>
 {};
 
+// Template for parameterized queries that handle multiple key types
+template <typename QueryRequestType, typename GetPut>
+struct function1_getput : query::request
+{
+  std::any
+  get(const xrt_core::device* device, const std::any& key) const override
+  {
+    if (key.has_value()) {
+      auto key_val = std::any_cast<query::key_type>(key);
+      return GetPut::get(device, key_val);
+    }
+    // Fallback to default key type
+    return GetPut::get(device, QueryRequestType::key);
+  }
+
+  void
+  put(const xrt_core::device* device, const std::any& any) const override
+  {
+    if (auto uhdl = device->get_user_handle())
+      GetPut::put(device, QueryRequestType::key, any);
+    else
+      throw xrt_core::internal_error("No device handle");
+  }
+};
+
 static std::map<xrt_core::query::key_type, std::unique_ptr<query::request>> query_tbl;
 
 template <typename QueryRequestType>
@@ -1519,6 +1590,14 @@ emplace_func0_getput()
   query_tbl.emplace(k, std::make_unique<function0_getput<QueryRequestType, GetPut>>());
 }
 
+template <typename QueryRequestType, typename GetPut>
+static void
+emplace_func1_getput()
+{
+  auto k = QueryRequestType::key;
+  query_tbl.emplace(k, std::make_unique<function1_getput<QueryRequestType, GetPut>>());
+}
+
 static void
 initialize_query_table()
 {
@@ -1549,8 +1628,14 @@ initialize_query_table()
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
-  emplace_func0_getput<query::event_trace,                     event_trace>();
-  emplace_func0_getput<query::firmware_log,                    firmware_log>();
+  
+  emplace_func0_request<query::event_trace_data,               event_trace>();
+  emplace_func0_request<query::event_trace_version,            event_trace>();
+  emplace_func0_request<query::event_trace_config,               event_trace>();
+  emplace_func1_getput<query::event_trace_state,               event_trace>();
+  emplace_func0_request<query::firmware_log_data,              firmware_log>();
+  emplace_func0_request<query::firmware_log_version,           firmware_log>();
+  emplace_func1_getput<query::firmware_log_state,              firmware_log>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
   emplace_func0_request<query::opcode_telemetry,               telemetry>();
