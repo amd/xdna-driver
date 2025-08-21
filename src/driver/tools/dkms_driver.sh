@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 #
-# Script to install driver source code and enable DKMS
+# Script to install or remove driver source code and via DKMS
 
 verbose=0
 if [[ "$DKMS_DRIVER_VERBOSE" == "true" ]]; then
@@ -17,15 +17,12 @@ if [[ -z $1 || ! -z $2 || ( "--install" != $1 && "--remove" != $1 ) ]]; then
 	exit 1
 fi
 
-# Set up global variables
-if [[ -z "${XILINX_XRT}" ]]; then
-	echo "XILINX_XRT is not set properly"
-	exit 1
-fi
-DRV_NAME="amdxdna"
-DRV_SRC_DIR=${XILINX_XRT}/${DRV_NAME}
-DKMS_PKG_NAME=`cat ${DRV_SRC_DIR}/dkms.conf | grep ^PACKAGE_NAME | awk -F= '{print $2}' | tr -d '"'`
-DKMS_PKG_VER=`cat ${DRV_SRC_DIR}/dkms.conf | grep ^PACKAGE_VERSION | awk -F= '{print $2}' | tr -d '"'`
+# Assuming dkms.conf and driver source are in the same directory as this script
+DRV_SRC_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+DKMS_CONF_FILE="${DRV_SRC_DIR}/dkms.conf"
+DRV_NAME=`cat ${DKMS_CONF_FILE} | grep 'BUILT_MODULE_NAME\[0\]' | cut -d= -f2`
+DKMS_PKG_NAME=`cat ${DKMS_CONF_FILE} | grep ^PACKAGE_NAME | awk -F= '{print $2}' | tr -d '"'`
+DKMS_PKG_VER=`cat ${DKMS_CONF_FILE} | grep ^PACKAGE_VERSION | awk -F= '{print $2}' | tr -d '"'`
 DKMS_DRV_DIR_NAME=${DKMS_PKG_NAME}-${DKMS_PKG_VER}
 DKMS_DRV_DIR=/usr/src/${DKMS_DRV_DIR_NAME}
 DKMS_DRV_MODULE_NAME=${DKMS_PKG_NAME}/${DKMS_PKG_VER}
@@ -51,7 +48,7 @@ if [[ $1 == "--install" ]]; then
 		exit 1
 	fi
 	# Copy dkms.conf
-	cp ${DRV_SRC_DIR}/dkms.conf .
+	cp ${DKMS_CONF_FILE} .
 	# Enable DKMS for the driver
 	if [[ $verbose == 1 ]]; then
 		dkms install --verbose --force ${DKMS_DRV_MODULE_NAME}
