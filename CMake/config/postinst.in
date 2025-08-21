@@ -18,7 +18,6 @@ udev_rules_d=/etc/udev/rules.d
 amdxdna_rules_file=99-amdxdna.rules
 dracut_conf_d=/etc/dracut.conf.d
 dracut_conf_file=amdxdna.dracut.conf
-export XILINX_XRT_DATADIR=$install_datadir
 
 # On Fedora/Redhat system, exclude driver from initram
 if [ -e ${dracut_conf_d} ]; then
@@ -51,7 +50,6 @@ else
 	@PF_INSMOD@
 fi
 
-unset XILINX_XRT_DATADIR
 if [ "$build_type" = "Debug" ]; then
 	echo "========= Postinst Debug end ========="
 	set +x

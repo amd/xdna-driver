@@ -30,13 +30,11 @@ if [ -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
 	rm -rf ${udev_rules_d}/${amdxdna_rules_file}
 fi
 
-export XILINX_XRT_DATADIR=$install_datadir
 if [ "$build_type" = "Debug" ]; then
 	DKMS_DRIVER_VERBOSE=true $install_datadir/dkms_driver.sh --remove
 else
 	$install_datadir/dkms_driver.sh --remove
 fi
-unset XILINX_XRT_DATADIR
 
 if [ "$build_type" = "Debug" ]; then
 	echo "========= Prerm Debug end ========="
