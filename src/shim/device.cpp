@@ -610,9 +610,9 @@ struct event_trace
     }
     case key_type::event_trace_state:
     {
-      query::event_trace_state::result_type state;
+      // query::event_trace_state::result_type state;
       // TODO : implement IOCTL to get event_trace state
-      return state;
+      // return state;
     }
 
     default:
@@ -654,9 +654,9 @@ struct firmware_log
     }
     case key_type::firmware_log_state:
     {
-      query::firmware_log_state::result_type state;
+      // query::firmware_log_state::result_type state;
       // TODO : implement IOCTL to get firmware log state
-      return state;
+      // return state;
     }
     default:
       throw xrt_core::error("Unsupported firmware_log query key");
@@ -1599,10 +1599,10 @@ initialize_query_table()
   emplace_func0_request<query::event_trace_data,               event_trace>();
   emplace_func0_request<query::event_trace_version,            event_trace>();
   emplace_func0_request<query::event_trace_config,             event_trace>();
-  emplace_func1_getput<query::event_trace_state,               event_trace>();
+  emplace_func0_getput<query::event_trace_state,               event_trace>();
   emplace_func0_request<query::firmware_log_data,              firmware_log>();
   emplace_func0_request<query::firmware_log_version,           firmware_log>();
-  emplace_func1_getput<query::firmware_log_state,              firmware_log>();
+  emplace_func0_getput<query::firmware_log_state,              firmware_log>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
   emplace_func0_request<query::opcode_telemetry,               telemetry>();
