@@ -72,7 +72,6 @@ config_gen_xdna::create_examine_subcommand()
     {"telemetry", "Telemetry data for the device", "hidden"},
     {"preemption", "Preemption telemetry data for the device", "hidden"},
     {"clocks", "Clock frequency information", "hidden"},
-    {"event-trace", "Event trace information for the device", "hidden"},
     {"context-health", "Log to console context health information", "hidden"},
   };
 

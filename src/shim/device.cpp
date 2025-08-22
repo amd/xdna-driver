@@ -11,11 +11,11 @@
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
 #include <sys/syscall.h>
-#include <cstring>
+#include <algorithm>
 #include <libgen.h>
 #include <limits.h>
 #include <dlfcn.h>
-#include <vector>
+#include <sstream>
 
 namespace {
 
@@ -1531,31 +1531,6 @@ template <typename QueryRequestType, typename GetPut>
 struct function0_getput : function0_get<QueryRequestType, GetPut>, function_putter<QueryRequestType, GetPut>
 {};
 
-// Template for parameterized queries that handle multiple key types
-template <typename QueryRequestType, typename GetPut>
-struct function1_getput : query::request
-{
-  std::any
-  get(const xrt_core::device* device, const std::any& key) const override
-  {
-    if (key.has_value()) {
-      auto key_val = std::any_cast<query::key_type>(key);
-      return GetPut::get(device, key_val);
-    }
-    // Fallback to default key type
-    return GetPut::get(device, QueryRequestType::key);
-  }
-
-  void
-  put(const xrt_core::device* device, const std::any& any) const override
-  {
-    if (auto uhdl = device->get_user_handle())
-      GetPut::put(device, QueryRequestType::key, any);
-    else
-      throw xrt_core::internal_error("No device handle");
-  }
-};
-
 static std::map<xrt_core::query::key_type, std::unique_ptr<query::request>> query_tbl;
 
 template <typename QueryRequestType>
@@ -1588,14 +1563,6 @@ emplace_func0_getput()
 {
   auto k = QueryRequestType::key;
   query_tbl.emplace(k, std::make_unique<function0_getput<QueryRequestType, GetPut>>());
-}
-
-template <typename QueryRequestType, typename GetPut>
-static void
-emplace_func1_getput()
-{
-  auto k = QueryRequestType::key;
-  query_tbl.emplace(k, std::make_unique<function1_getput<QueryRequestType, GetPut>>());
 }
 
 static void
@@ -1631,7 +1598,7 @@ initialize_query_table()
   
   emplace_func0_request<query::event_trace_data,               event_trace>();
   emplace_func0_request<query::event_trace_version,            event_trace>();
-  emplace_func0_request<query::event_trace_config,               event_trace>();
+  emplace_func0_request<query::event_trace_config,             event_trace>();
   emplace_func1_getput<query::event_trace_state,               event_trace>();
   emplace_func0_request<query::firmware_log_data,              firmware_log>();
   emplace_func0_request<query::firmware_log_version,           firmware_log>();
