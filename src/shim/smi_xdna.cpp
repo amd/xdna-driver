@@ -71,7 +71,8 @@ config_gen_xdna::create_examine_subcommand()
     {"platform", "Platforms flashed on the device", "common"},
     {"telemetry", "Telemetry data for the device", "hidden"},
     {"preemption", "Preemption telemetry data for the device", "hidden"},
-    {"clocks", "Clock frequency information", "hidden"}
+    {"clocks", "Clock frequency information", "hidden"},
+    {"context-health", "Log to console context health information", "hidden"},
   };
 
   std::map<std::string, std::shared_ptr<option>> examine_suboptions; 

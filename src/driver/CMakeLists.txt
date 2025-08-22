@@ -29,7 +29,6 @@ endif(DEFINED ENV{XDNA_DRV_BLD_FLAGS})
 message("-- Extra driver source dir: ${XDNA_EXTRA_DRV_DIR}")
 message("-- Extra driver tar exclude rules: ${XDNA_EXTRA_DRV_EXCLUDES}")
 
-if(NOT SKIP_KMOD)
 add_custom_command(
   OUTPUT all_driver_source
   COMMENT "Collect all driver source code"
@@ -118,7 +117,7 @@ add_custom_command(
   )
 add_custom_target(driver_ver_tarball ALL DEPENDS ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ} driver)
 install(FILES ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ}
-  DESTINATION xrt/${XDNA_COMPONENT}
+  DESTINATION ${XDNA_PKG_DATA_DIR}
   COMPONENT ${XDNA_COMPONENT}
   )
 
@@ -135,7 +134,7 @@ if(XDNA_DRV_PF_SRC_DIR)
 BUILT_MODULE_NAME[1]=${XDNA_DRV_PF}
 BUILT_MODULE_LOCATION[1]=\"driver/${XDNA_DRV_PF_DIR}/build/driver/amdxdna_pf\"
 DEST_MODULE_LOCATION[1]=\"/kernel/extras\"")
-endif()
+endif(XDNA_DRV_PF_SRC_DIR)
 
 # Install config file and driver related scripts for packaging
 set(XDNA_DKMS_PKG_NAME xrt-${XDNA_DRV})
@@ -145,31 +144,25 @@ configure_file(
   @ONLY
   )
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dkms.conf
-  DESTINATION xrt/${XDNA_COMPONENT}
+  DESTINATION ${XDNA_PKG_DATA_DIR}
   COMPONENT ${XDNA_COMPONENT}
   )
 
 # install .ko for testing
 if(XDNA_DRV_PF_SRC_DIR)
-install(FILES ${XDNA_DRV_PATH} ${XDNA_DRV_PF_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
+  install(FILES ${XDNA_DRV_PATH} ${XDNA_DRV_PF_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
 else()
-install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
+  install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver)
 endif()
 
 set(amdxdna_drv_tools
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/dkms_driver.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/io_page_fault_flags
   )
-else()
-set(amdxdna_drv_tools
-  ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
-  ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
-  )
-endif()
 install(FILES ${amdxdna_drv_tools}
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-  DESTINATION xrt/${XDNA_COMPONENT}
+  DESTINATION ${XDNA_PKG_DATA_DIR}
   COMPONENT ${XDNA_COMPONENT}
   )
-

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 # Bring in XRT git submodule and exclude parts of XRT we don't need
 set(XRT_EXCLUDE_SUB_DIRECTORY

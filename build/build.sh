@@ -1,8 +1,7 @@
 #! /bin/bash -
 
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2024, Advanced Micro Devices, Inc.
-#
+# Copyright (C) 2024-2025 AMD, Inc. All rights reserved.
 
 set -euo pipefail
 
@@ -127,7 +126,7 @@ verbose=
 skip_kmod=
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
-xrt_install_prefix="/opt/xilinx"
+xrt_install_prefix="/opt/xilinx/xrt"
 hello_umq=n
 
 while [ $# -gt 0 ]; do
@@ -219,7 +218,7 @@ if [[ $CMAKE_MAJOR_VERSION != 3 ]]; then
 fi
 # Sanity check end
 
-cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix -DXRT_INSTALL_PREFIX=$xrt_install_prefix"
+cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix"
 
 if [[ ! -z "$skip_kmod" ]]; then
   cmake_extra_flags+=" -DSKIP_KMOD=$skip_kmod"
@@ -247,7 +246,10 @@ fi
 if [[ $release == 1 ]]; then
   build_targets $RELEASE_BUILD_TYPE
   if [[ $nocmake == 0 ]]; then
-    download_npufws
+    # No need to download firmware if driver build is skipped
+    if [[ -z "$skip_kmod" ]]; then
+      download_npufws
+    fi
     # Prepare xbutil validate related files for packaging
     mkdir -p $XBUTIL_VALIDATE_BINS_DIR
     cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
@@ -258,7 +260,10 @@ fi
 if [[ $debug == 1 ]]; then
   build_targets $DEBUG_BUILD_TYPE
   if [[ $nocmake == 0 ]]; then
-    download_npufws
+    # No need to download firmware if driver build is skipped
+    if [[ -z "$skip_kmod" ]]; then
+      download_npufws
+    fi
     # Prepare xbutil validate related files for packaging
     mkdir -p $XBUTIL_VALIDATE_BINS_DIR
     cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
