@@ -70,30 +70,8 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 		pages = heap->base.pages;
 
 	align = 1 << max(PAGE_SHIFT, xdna->dev_info->dev_mem_buf_shift);
-	if (heap->mem.size > SZ_64M) {
-		/* TODO: remove this hack code path once FW is updated */
-		u64 threshold = SZ_64M; /* Determine small or large buffer */
-
-		XDNA_INFO(xdna, "Large heap allocation hack");
-		if (mem->size > threshold) {
-			XDNA_INFO(xdna, "Large buffer allocate start from bank 1");
-			ret = drm_mm_insert_node_in_range(&heap->mm, &abo->mm_node,
-							  mem->size, align, 0,
-							  heap->mem.dev_addr + SZ_64M /* start */,
-							  U64_MAX /* let DRM determine */,
-							  DRM_MM_INSERT_BEST);
-		} else {
-			XDNA_INFO(xdna, "Small buffer allocate in bank 0");
-			ret = drm_mm_insert_node_in_range(&heap->mm, &abo->mm_node,
-							  mem->size, align, 0,
-							  heap->mem.dev_addr /* start */,
-							  heap->mem.dev_addr + SZ_64M - 1 /* end */,
-							  DRM_MM_INSERT_BEST);
-		}
-	} else {
-		ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, mem->size,
-						 align, 0, DRM_MM_INSERT_BEST);
-	}
+	ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node, mem->size,
+					 align, 0, DRM_MM_INSERT_BEST);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		mutex_unlock(&client->mm_lock);
@@ -819,6 +797,7 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 	int ret;
 
 	WARN_ON(!is_power_of_2(xdna->dev_info->dev_mem_size));
+	XDNA_DBG(xdna, "The dev heap size 0x%llx is ", args->size);
 	if (!IS_ALIGNED(args->size, xdna->dev_info->dev_mem_size)) {
 		XDNA_ERR(xdna, "The dev heap size 0x%llx is not multiple of 0x%lx",
 			 args->size, xdna->dev_info->dev_mem_size);
