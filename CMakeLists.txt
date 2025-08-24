@@ -16,15 +16,23 @@ endif()
 # Default install compoment will install to shim test area
 set(XDNA_COMPONENT "amdxdna")
 
-# Set install path
+# Set destination paths in install command
+# Relocatable by ${CMAKE_INSTALL_PREFIX}
 include (GNUInstallDirs)
 set(XDNA_PKG_DIR      .)
 set(XDNA_PKG_LIB_DIR  ${XDNA_PKG_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(XDNA_PKG_DATA_DIR ${XDNA_PKG_DIR}/${CMAKE_INSTALL_DATADIR}/${XDNA_COMPONENT})
-set(XDNA_PKG_FW_DIR   /usr/lib/firmware/amdnpu) # firmware bins are not relocatable
+# Non-relocatable by ${CMAKE_INSTALL_PREFIX}
+set(XDNA_PKG_FW_DIR   /usr/lib/firmware/amdnpu)
+set(XDNA_BIN_DIR      /bins) # For saving all built artifacts for quick testing
 message("-- XDNA_PKG_LIB_DIR=${XDNA_PKG_LIB_DIR}")
 message("-- XDNA_PKG_DATA_DIR=${XDNA_PKG_DATA_DIR}")
 message("-- XDNA_PKG_FW_DIR=${XDNA_PKG_FW_DIR}")
+message("-- XDNA_BIN_DIR=${XDNA_BIN_DIR}")
+
+# By default, build/build.sh downloads binaries to build/amdxdna_bins/
+# Absolute path, cannot be used in install command as destination.
+set(AMDXDNA_BINS_DIR ${CMAKE_BINARY_DIR}/../amdxdna_bins)
 
 if(XDNA_VE2)
 
@@ -43,12 +51,6 @@ if(NOT SKIP_KMOD)
   include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/version.cmake)
 endif()
 
-# By default, build/build.sh downloads binaries to build/amdxdna_bins/
-set(AMDXDNA_BINS_DIR ${CMAKE_BINARY_DIR}/../amdxdna_bins)
-# For saving all built artifacts for quick testing purpose
-# Should be redirected/prefixed by DESTDIR in make command line
-# Can only be used with cmake install() command
-set(XDNA_BIN_DIR /bins)
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/pkg.cmake)
 
 add_subdirectory(src)
