@@ -32,22 +32,38 @@ struct logging_req_buf {
 	bool                     enabled;
 };
 
-struct log_buffer_metadata {
-	u32	tail_lo;
-	u32	tail_hi;
-	u64	head;
-	u32	reserved[12];
+struct log_buffer_footer {
+	u8			minor;
+	u8			major;
+	u8			type;
+	u8			reserved1;
+	u32			payload_version;
+	u8			reserved2[56];
+	u32			tail;
+	u8			reserved3[1980];
+	u32			head;
+	u8			reserved4[2044];
 };
 
 struct log_msg_header {
+	u64 timestamp;
 	u32 format      : 1;
 	u32 reserved_1  : 7;
 	u32 level       : 3;
-	u32 reserved_11	: 5;
+	u32 reserved_11 : 5;
 	u32 appn        : 8;
 	u32 argc        : 8;
 	u32 line        : 16;
 	u32 module      : 16;
+};
+
+static const char * const log_level_str[] = {
+	"OFF",
+	"ERR",
+	"WRN",
+	"INF",
+	"DBG",
+	"MAX"
 };
 
 static void clear_logging_msix(struct amdxdna_dev_hdl *ndev)
@@ -92,36 +108,39 @@ static int aie2_validate_dram_log_config(struct amdxdna_dev_hdl *ndev, u32 enabl
 static u32 aie2_get_log_content(struct logging_req_buf *req_buf)
 {
 	struct amdxdna_dev_hdl *ndev = req_buf->ndev;
-	struct log_buffer_metadata log_metadata;
+	struct log_buffer_footer *log_metadata;
 	u8 *kern_buf = req_buf->kern_log_buf;
 	u8 *sys_buf = req_buf->buf;
 	u32 head_wrap, tail_wrap;
-	u64 head, tail;
-
 	u32 log_rb_size = 0;
 	u32 log_size = 0;
+	u64 head, tail;
 
-	log_rb_size = req_buf->dram_buffer_size - sizeof(log_metadata);
+	log_metadata = kmalloc(sizeof(*log_metadata), GFP_KERNEL);
+	if (!log_metadata)
+		return -ENOMEM;
+
+	log_rb_size = req_buf->dram_buffer_size - sizeof(*log_metadata);
 	WARN_ON(log_rb_size <= 0);
 
-	drm_clflush_virt_range(sys_buf + log_rb_size, sizeof(log_metadata));
-	memcpy(&log_metadata, sys_buf + log_rb_size, sizeof(log_metadata));
+	drm_clflush_virt_range(sys_buf + log_rb_size, sizeof(*log_metadata));
+	memcpy(log_metadata, sys_buf + log_rb_size, sizeof(*log_metadata));
 
 	head = req_buf->rb_head;
-	tail = make_64bit(log_metadata.tail_lo, log_metadata.tail_hi);
+	tail = log_metadata->tail;
 
 	head_wrap = head % log_rb_size;
 	tail_wrap = tail % log_rb_size;
 	log_size = tail - head;
 
 	if (!log_size)
-		return log_size;
+		goto exit;
 
 	req_buf->rb_head = tail;
 
 	/* Handle buffer overflow case, dump all log w.r.t timestamp */
 	if (log_size > log_rb_size) {
-		XDNA_DBG(ndev->xdna, "log_size is %u, buffer overflow!", log_size);
+		XDNA_ERR(ndev->xdna, "log_size is %u, buffer overflow!", log_size);
 		u32 part_log = log_rb_size - tail_wrap;
 
 		drm_clflush_virt_range((u8 *)sys_buf + tail_wrap, part_log);
@@ -129,7 +148,7 @@ static u32 aie2_get_log_content(struct logging_req_buf *req_buf)
 
 		drm_clflush_virt_range(sys_buf, tail_wrap);
 		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_wrap);
-		return log_rb_size;
+		goto exit;
 	}
 
 	/*Buffer split into two section when tail is wrapped and copy both */
@@ -141,54 +160,60 @@ static u32 aie2_get_log_content(struct logging_req_buf *req_buf)
 
 		drm_clflush_virt_range(sys_buf, tail_wrap);
 		memcpy((u8 *)(kern_buf + part_log), (u8 *)sys_buf, tail_wrap);
-		return log_size;
+		goto exit;
 	}
 
 	/* General case when tail > head and with in log buff size */
 	drm_clflush_virt_range((u8 *)sys_buf + head_wrap, log_size);
 	memcpy((u8 *)kern_buf, (u8 *)sys_buf + head_wrap, log_size);
+exit:
+	kfree(log_metadata);
 	return log_size;
-}
-
-static char *aie2_get_valid_msg_header(char *start, char *end)
-{
-	while (start && start < end && *start != LOG_FORMAT_FULL)
-		start += sizeof(char) * LOG_MSG_ALIGN;
-	return start;
 }
 
 static void aie2_print_log_buffer_data(struct amdxdna_dev_hdl *ndev)
 {
-	u32 header_size = sizeof(struct log_msg_header);
+	const u32 header_size = sizeof(struct log_msg_header);
 	struct logging_req_buf *req_buf;
 	u32 log_size;
+	u8 *log_ptr;
 
 	req_buf = ndev->logging_req;
 	log_size = aie2_get_log_content(req_buf);
-	XDNA_DBG(ndev->xdna, "FW log size in bytes %u", log_size);
 
 	if (!log_size)
 		return;
 
-	char *str = (char *)req_buf->kern_log_buf;
-	char *end = (char *)str + log_size;
-
-	str = aie2_get_valid_msg_header(str, end);
-	while (str && str < end) {
-		struct log_msg_header *header = (struct log_msg_header *)str;
-		char *msg = (char *)(str + header_size);
+	log_ptr = req_buf->kern_log_buf;
+	while (log_ptr && log_ptr < (req_buf->kern_log_buf + log_size)) {
+		struct log_msg_header *header = (struct log_msg_header *)log_ptr;
+		char appid[20];
 		u32 msg_size;
 
-		msg_size = (header->argc) * sizeof(u32);
-		if (msg_size > 0 && (char *)(msg + msg_size) <= end) {
-			*(char *)((char *)msg + msg_size - 1) = 0;
-			pr_debug("[NPU FW]%s", msg);
+		if (header->format != LOG_FORMAT_FULL) {
+			XDNA_ERR(ndev->xdna, "Invalid log format: %u", header->format);
+			return;
 		}
 
-		/* move to next msg */
-		msg_size = ((msg_size + LOG_MSG_ALIGN - 1) / LOG_MSG_ALIGN) * LOG_MSG_ALIGN;
-		str += (header_size + msg_size);
-		str = aie2_get_valid_msg_header(str, end);
+		if (!header->argc)
+			XDNA_ERR(ndev->xdna, "Log entry has no message");
+
+		msg_size = (header->argc) * sizeof(u32);
+		if (msg_size + header_size > log_size) {
+			XDNA_ERR(ndev->xdna, "Log entry size exceeds available buffer size");
+			return;
+		}
+		log_ptr[header_size + msg_size - 1] = '\0';
+
+		if (header->appn > 15)
+			scnprintf(appid, sizeof(appid), "[MGMNT]");
+		else
+			scnprintf(appid, sizeof(appid), "[APP%2d]", header->appn);
+
+		XDNA_INFO(ndev->xdna, "[NPU FW] [%s] %s: %s", log_level_str[header->level],
+			  appid, (char *)(log_ptr + header_size));
+
+		log_ptr += ALIGN(header_size + msg_size, LOG_MSG_ALIGN);
 	}
 }
 
