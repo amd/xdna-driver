@@ -65,7 +65,11 @@ target_link_options(${XDNA_TARGET} PRIVATE
   )
 
 # install components for packaging
-install(TARGETS ${XDNA_TARGET} DESTINATION ${XDNA_PKG_LIB_DIR} COMPONENT ${XDNA_COMPONENT})
+install(TARGETS ${XDNA_TARGET}
+  LIBRARY DESTINATION ${XDNA_PKG_LIB_DIR}
+  NAMELINK_SKIP
+  COMPONENT ${XDNA_COMPONENT}
+  )
 
 # install components for testing
 install(TARGETS ${XRT_CORE_TARGET} DESTINATION ${XDNA_BIN_DIR}/${XDNA_PKG_LIB_DIR})
