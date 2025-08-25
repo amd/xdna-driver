@@ -70,6 +70,7 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   PATTERN "*.elf"
   PATTERN "*.bin"
   PATTERN "*.json"
+  PATTERN "*.yaml"
   )
 
 if(NOT SKIP_KMOD)
