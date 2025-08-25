@@ -469,13 +469,11 @@ enum cmd_chain_class {
 	CMD_CHAIN_CLASS_MAX,
 };
 
-#define DRAM_LOG_BUF_METADATA_SIZE			0x40
-#define DEFAULT_DRAM_LOG_BUF_SIZE			0x2000
+#define DEFAULT_DRAM_LOG_BUF_SIZE			SZ_64K
 #define POLL_INTERVAL_MS				200
-#define LOG_FORMAT_FULL					0xc0
+#define LOG_FORMAT_FULL					0x0
 #define LOG_MSG_ALIGN					8
 #define MSI_ADDR_MASK					0x00FFFFFF
-#define make_64bit(lo, hi)	((u64)(lo) | ((u64)(hi) << 32))
 
 enum runtime_configuration_type_ {
 	RUNTIME_CONFIGURATION_CLOCK_GATING = 1,

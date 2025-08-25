@@ -312,7 +312,7 @@ static const char *aie2_dram_logging_input_info(void)
 {
 	return	"echo enable=1 size=1K loglevel=4 -> Follow given input format to enable\n"
 		"enable=[0, 1] -> enable=1 to enable, enable=0 to disable\n"
-		"size=[1K, 2K, 4K...512K to 1M] -> buffer size should be pow of 2\n"
+		"size=[8K, 16K, 32K...512K to 1M] -> buffer size should be pow of 2\n"
 		"loglevel=[0 - 4] -> None-Err...Dbg\n";
 }
 
