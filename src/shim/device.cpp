@@ -578,6 +578,92 @@ struct preemption
   }
 };
 
+struct event_trace
+{
+  using result_type = std::any;
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    // TODO : Implement IOCTL to set event_trace configuration
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    switch (key) {
+    case key_type::event_trace_data:
+    {
+      query::firmware_debug_buffer log_buffer;
+      // TODO : implement IOCTL to get event_trace data
+      return log_buffer;
+    }
+    case key_type::event_trace_version:
+    {
+      query::event_trace_version::result_type version;
+      // TODO : Implement IOCTL to get firmware event_trace yaml version
+      return version;
+    }
+    case key_type::event_trace_config:
+    {
+      return std::string(get_shim_data_dir() + "bins/configs/trace_events.json");
+    }
+    case key_type::event_trace_state:
+    {
+      // query::event_trace_state::result_type state;
+      // TODO : implement IOCTL to get event_trace state
+      // return state;
+    }
+
+    default:
+      throw xrt_core::error("Unsupported event_trace query key");
+    }
+  }
+};
+
+struct firmware_log
+{
+  using result_type = std::any;
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    //TODO : implement IOCTL to set firmware log configuration
+
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    switch (key) {
+    case key_type::firmware_log_data:
+    {
+      static query::firmware_debug_buffer log_buffer;
+      // TODO : implement IOCTL to get firmware log data
+      return log_buffer;
+    }
+    case key_type::firmware_log_version:
+    {
+      query::firmware_log_version::result_type version;
+      // TODO : implement IOCTL to get firmware log version
+      return version;
+    }
+    case key_type::firmware_log_config:
+    {
+      return std::string(get_shim_data_dir() + "bins/configs/firmware_log.json");
+    }
+    case key_type::firmware_log_state:
+    {
+      // query::firmware_log_state::result_type state;
+      // TODO : implement IOCTL to get firmware log state
+      // return state;
+    }
+    default:
+      throw xrt_core::error("Unsupported firmware_log query key");
+    }
+  }
+};
+
 struct frame_boundary_preemption
 {
   using result_type = query::frame_boundary_preemption::result_type;
@@ -1509,6 +1595,14 @@ initialize_query_table()
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
+  
+  emplace_func0_request<query::event_trace_data,               event_trace>();
+  emplace_func0_request<query::event_trace_version,            event_trace>();
+  emplace_func0_request<query::event_trace_config,             event_trace>();
+  emplace_func0_getput<query::event_trace_state,               event_trace>();
+  emplace_func0_request<query::firmware_log_data,              firmware_log>();
+  emplace_func0_request<query::firmware_log_version,           firmware_log>();
+  emplace_func0_getput<query::firmware_log_state,              firmware_log>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
   emplace_func0_request<query::opcode_telemetry,               telemetry>();
