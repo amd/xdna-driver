@@ -399,6 +399,9 @@ int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
 	DECLARE_AIE2_MSG(start_event_trace, MSG_OP_START_EVENT_TRACE);
 	int ret;
 
+	if (!aie2_is_supported_msg(ndev, MSG_OP_START_EVENT_TRACE))
+		return -EOPNOTSUPP;
+
 	req.dram_buffer_address = addr;
 	req.dram_buffer_size = size;
 	req.event_trace_dest = EVENT_TRACE_DEST_DRAM;
