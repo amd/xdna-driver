@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.19.0)
 project("amd-xdna")
 set(PROJECT_DESCRIPTION "AMD XDNA driver and SHIM for Linux")
-option(SKIP_KMOD "Building and packaging SHIM without driver and firmware" OFF)
+option(SKIP_KMOD "Building and packaging SHIM without driver and firmware" 1)
 
 if (DEFINED ENV{XRT_PLUGIN_VERSION_PATCH})
   SET(XRT_PLUGIN_VERSION_PATCH $ENV{XRT_PLUGIN_VERSION_PATCH})
