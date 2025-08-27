@@ -171,6 +171,8 @@ hcall_wait(int dev_fd, void *buf, size_t size)
   auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
   uint32_t ring_idx = 0;
 
+  XRT_TRACE_POINT_SCOPE1(hcall, req->cmd);
+
   // For now, only AMDXDNA_CCMD_WAIT_CMD requires non-zero ring index
   if (req->cmd == AMDXDNA_CCMD_WAIT_CMD) {
     auto wcmd = reinterpret_cast<amdxdna_ccmd_wait_cmd_req*>(req);
