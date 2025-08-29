@@ -1,0 +1,76 @@
+{
+  "version": {
+    "major": 0,
+    "minor": 1
+  },
+  "enumerations": {
+    "ipu_log_format": {
+      "enumerators": {
+        "full": 0,
+        "concise": 1
+      }
+    },
+    "ipu_log_level": {
+      "enumerators": {
+        "err": 1,
+        "wrn": 2,
+        "inf": 3,
+        "dbg": 4
+      }
+    }
+  },
+  "structures": {
+    "ipu_log_message_header": {
+      "fields": [
+        {
+          "name": "format",
+          "enumeration": "ipu_log_format",
+          "type": "uint32_t",
+          "width": 1
+        },
+        {
+          "name": "reserved_1",
+          "type": "uint32_t",
+          "width": 7,
+          "format": "0b{:07b}"
+        },
+        {
+          "name": "level",
+          "enumeration": "ipu_log_level",
+          "type": "uint32_t",
+          "width": 3
+        },
+        {
+          "name": "reserved_11",
+          "type": "uint32_t",
+          "width": 5,
+          "format": "0b{:05b}"
+        },
+        {
+          "name": "appn",
+          "type": "uint32_t",
+          "width": 8,
+          "format": "0x{:02X}"
+        },
+        {
+          "name": "argc",
+          "type": "uint32_t",
+          "width": 8,
+          "format": "0x{:02X}"
+        },
+        {
+          "name": "line",
+          "type": "uint32_t",
+          "width": 16,
+          "format": "0x{:04X}"
+        },
+        {
+          "name": "module",
+          "type": "uint32_t",
+          "width": 16,
+          "format": "0x{:04X}"
+        }
+      ]
+    }
+  }
+}
