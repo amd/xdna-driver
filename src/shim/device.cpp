@@ -594,15 +594,15 @@ struct event_trace
     switch (key) {
     case key_type::event_trace_data:
     {
-      query::firmware_debug_buffer log_buffer;
+      // static query::firmware_debug_buffer log_buffer;
       // TODO : implement IOCTL to get event_trace data
-      return log_buffer;
+      // return log_buffer;
     }
     case key_type::event_trace_version:
     {
-      query::event_trace_version::result_type version;
+      // query::event_trace_version::result_type version;
       // TODO : Implement IOCTL to get firmware event_trace yaml version
-      return version;
+      // return version;
     }
     case key_type::event_trace_config:
     {
@@ -638,15 +638,15 @@ struct firmware_log
     switch (key) {
     case key_type::firmware_log_data:
     {
-      static query::firmware_debug_buffer log_buffer;
+      // static query::firmware_debug_buffer log_buffer;
       // TODO : implement IOCTL to get firmware log data
-      return log_buffer;
+      // return log_buffer;
     }
     case key_type::firmware_log_version:
     {
-      query::firmware_log_version::result_type version;
+      // query::firmware_log_version::result_type version;
       // TODO : implement IOCTL to get firmware log version
-      return version;
+      // return version;
     }
     case key_type::firmware_log_config:
     {
@@ -1602,6 +1602,7 @@ initialize_query_table()
   emplace_func0_getput<query::event_trace_state,               event_trace>();
   emplace_func0_request<query::firmware_log_data,              firmware_log>();
   emplace_func0_request<query::firmware_log_version,           firmware_log>();
+  emplace_func0_request<query::firmware_log_config,            firmware_log>();
   emplace_func0_getput<query::firmware_log_state,              firmware_log>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
