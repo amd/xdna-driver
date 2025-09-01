@@ -23,6 +23,12 @@
     "ipu_log_message_header": {
       "fields": [
         {
+          "name": "timestamp",
+          "type": "uint64_t",
+          "width": 64,
+          "format": "0x{:016X}"
+        },
+        {
           "name": "format",
           "enumeration": "ipu_log_format",
           "type": "uint32_t",
