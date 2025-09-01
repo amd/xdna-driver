@@ -118,7 +118,7 @@ public:
   detach_from_ctx(uint32_t flag);
 
   void
-  config(xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_sizes) override;
+  config(const xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_sizes) override;
 
   void
   get_drm_bo_info(uint32_t boh);

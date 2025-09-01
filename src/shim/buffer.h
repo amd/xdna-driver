@@ -217,10 +217,10 @@ public:
   using buffer::buffer;
 
   void
-  config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes) override;
+  config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes) override;
 
   void
-  unconfig(xrt_core::hwctx_handle* hwctx) override;
+  unconfig(const xrt_core::hwctx_handle* hwctx) override;
 
 private:
   std::unique_ptr<buffer> m_metadata_bo;

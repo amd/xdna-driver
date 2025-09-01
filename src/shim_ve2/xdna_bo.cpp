@@ -322,22 +322,23 @@ get_drm_bo_handle() const
 
 void
 xdna_bo::
-config(xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_sizes)
+config(const xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_sizes)
 {
-  if (m_owner_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
+  auto ctx_id = ctx ? ctx->get_slotidx() : m_owner_ctx_id;
+  if (ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
     return;
 
   xcl_bo_flags xflags{ m_flags };
   auto boh = get_drm_bo_handle();
-  auto total_cols = get_total_cols(m_core_device, m_owner_ctx_id);
+  auto total_cols = get_total_cols(m_core_device, ctx_id);
   auto mdata_size = sizeof(struct fw_buffer_metadata) + total_cols * sizeof(struct uc_info_entry);
 
   auto xdev = static_cast<const device_xdna*>(m_core_device);
-  xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_DEV);
+  xdna_bo mdata_bo = xdna_bo(*xdev, ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_DEV);
   init_metadata_buffer(mdata_bo, boh, total_cols, xflags.use, buf_sizes, true);
 
-  shim_debug("Configuring BO %d on ctx: %d", boh, m_owner_ctx_id);
-  config_drm_bo(m_edev, m_owner_ctx_id, mdata_bo.get_drm_bo_handle(), mdata_size, true);
+  shim_debug("Configuring BO %d on ctx: %d", boh, ctx_id);
+  config_drm_bo(m_edev, ctx_id, mdata_bo.get_drm_bo_handle(), mdata_size, true);
 }
 
 void
