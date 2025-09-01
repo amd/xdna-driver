@@ -525,6 +525,13 @@ static void aie2_calc_ctx_dpm(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *
 		return;
 	}
 
+	if (qos->priority == AMDXDNA_QOS_LOW_PRIORITY) {
+		XDNA_DBG(ndev->xdna, "%s priority is %d, use DPM level 0",
+			 ctx->name, qos->priority);
+		ctx->priv->req_dpm_level =  0;
+		return;
+	}
+
 	req_gops = request_gops(qos->gops, qos->fps, qos->latency,
 				ndev->sys_eff_factor);
 	if (!req_gops) {
