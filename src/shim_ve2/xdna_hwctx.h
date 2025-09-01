@@ -44,6 +44,9 @@ public:
   slot_id
   get_slotidx() const override;
 
+  size_t
+  get_num_uc() const override;
+
   xrt_core::hwqueue_handle*
   get_hw_queue() override;
 
