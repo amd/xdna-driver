@@ -1343,7 +1343,7 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 		return -ENOMEM;
 
 	switch (args->param) {
-	case DRM_AMDXDNA_HW_CONTEXT_ARRAY:
+	case DRM_AMDXDNA_HW_CONTEXT_ALL:
 		ctx_limit = aie2_rq_context_limit(&xdna->dev_handle->ctx_rq);
 		WARN_ON(ctx_limit > AMDXDNA_MAX_NUM_ELEMENT);
 		ctx_cnt = aie2_rq_active_context(&xdna->dev_handle->ctx_rq);
@@ -1361,7 +1361,7 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 			goto exit;
 
 		break;
-	case DRM_AMDXDNA_HW_CONTEXT:
+	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
 		struct amdxdna_drm_hwctx_entry input;
 
 		if (copy_from_user(&input, u64_to_user_ptr(args->buffer), sizeof(input))) {
