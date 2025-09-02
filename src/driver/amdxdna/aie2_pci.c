@@ -14,6 +14,7 @@
 
 #include "aie2_pci.h"
 #include "aie2_msg_priv.h"
+#include "amdxdna_mgmt.h"
 
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
@@ -469,8 +470,6 @@ disable_dev:
 static void aie2_hw_suspend(struct amdxdna_dev *xdna)
 {
 	guard(mutex)(&xdna->dev_lock);
-	aie2_event_trace_suspend(xdna->dev_handle);
-	aie2_dram_logging_suspend(xdna->dev_handle);
 	aie2_rq_stop_all(&xdna->dev_handle->ctx_rq);
 	aie2_hw_stop(xdna);
 }
@@ -489,8 +488,6 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 
 	XDNA_DBG(xdna, "context resuming...");
 	aie2_rq_restart_all(&xdna->dev_handle->ctx_rq);
-	aie2_event_trace_resume(xdna->dev_handle);
-	aie2_dram_logging_resume(xdna->dev_handle);
 	return 0;
 }
 
@@ -617,14 +614,6 @@ skip_pasid:
 		goto stop_hw;
 	}
 
-	ret = aie2_event_trace_init(ndev);
-	if (ret)
-		XDNA_DBG(xdna, "Event trace init failed, ret %d", ret);
-
-	ret = aie2_dram_logging_init(ndev);
-	if (ret)
-		XDNA_DBG(xdna, "Dram logging init failed, ret %d", ret);
-
 	release_firmware(fw);
 	amdxdna_rpm_init(xdna);
 	return 0;
@@ -649,8 +638,6 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	amdxdna_rpm_fini(xdna);
-	aie2_event_trace_fini(ndev);
-	aie2_dram_logging_fini(ndev);
 	aie2_rq_fini(&ndev->ctx_rq);
 	aie2_hw_stop(xdna);
 #ifdef AMDXDNA_DEVEL
@@ -1614,6 +1601,9 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.recover		= aie2_recover,
 	.resume			= aie2_hw_resume,
 	.suspend		= aie2_hw_suspend,
+	.debugfs		= aie2_debugfs_init,
+	.fw_log_init		= aie2_fw_log_init,
+	.fw_log_fini		= aie2_fw_log_fini,
 	.get_aie_info		= aie2_get_info,
 	.get_aie_array		= aie2_get_array,
 	.set_aie_state		= aie2_set_state,
@@ -1623,6 +1613,5 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.cmd_submit		= aie2_cmd_submit,
 	.cmd_wait		= aie2_cmd_wait,
 	.hmm_invalidate		= aie2_hmm_invalidate,
-	.debugfs		= aie2_debugfs_init,
 	.cmd_get_out_fence	= aie2_cmd_get_out_fence,
 };

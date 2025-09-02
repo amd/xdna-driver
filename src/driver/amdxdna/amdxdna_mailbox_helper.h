@@ -10,8 +10,8 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_mailbox.h"
 
-#define TX_TIMEOUT 2000 /* miliseconds */
-#define RX_TIMEOUT 5000 /* miliseconds */
+#define TX_TIMEOUT 2000 /* milliseconds */
+#define RX_TIMEOUT 5000 /* milliseconds */
 
 struct xdna_notify {
 	struct completion       comp;
