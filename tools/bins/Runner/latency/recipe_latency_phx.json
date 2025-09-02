@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "validate_phx.xclbin"
+    "xclbin": "validate_latency_phx.xclbin"
   },
   "resources": {
     "buffers": [
@@ -13,7 +13,7 @@
       { "name": "mc",       "type": "input",  "size": 20 }
     ],
     "kernels": [
-      { "name": "k1", "instance": "DPU_ELF", "ctrlcode": "nop.elf"}
+      { "name": "k1", "instance": "DPU_PDI_0"}
     ]
   },
   "execution": {
@@ -21,14 +21,14 @@
       {
         "name": "k1",
         "arguments": [
-          { "name": "ifm",      "argidx": 3 },
-          { "name": "param",    "argidx": 4 },
-          { "name": "ofm",      "argidx": 5 },
-          { "name": "inter",    "argidx": 6 },
+          { "name": "ifm",      "argidx": 1 },
+          { "name": "param",    "argidx": 2 },
+          { "name": "ofm",      "argidx": 3 },
+          { "name": "inter",    "argidx": 4 },
           { "name": "mc",       "argidx": 7 }
         ],
         "constants": [
-          { "value": 3, "type": "int", "argidx": 0 } 
+          { "value": 1, "type": "int", "argidx": 0 } 
         ]
       }
     ]

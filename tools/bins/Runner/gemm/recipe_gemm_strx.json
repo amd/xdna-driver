@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "gemm_strx.xclbin"
+    "xclbin": "gemm_elf_strx.xclbin"
   },
   "resources": {
     "buffers": [

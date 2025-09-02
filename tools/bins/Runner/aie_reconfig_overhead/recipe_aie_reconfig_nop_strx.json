@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "validate_strx.xclbin"
+    "xclbin": "aie_reconfig_strx.xclbin"
   },
   "resources": {
     "buffers": [

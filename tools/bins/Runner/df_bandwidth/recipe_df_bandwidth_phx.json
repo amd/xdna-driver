@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "validate_phx.xclbin"
+    "xclbin": "validate_df_bandwidth_phx.xclbin"
   },
   "resources": {
     "buffers": [
@@ -9,7 +9,7 @@
       { "name": "ofm", "type": "input", "size": 1073741824 }
     ],
     "kernels": [
-      { "name": "k1", "instance": "DPU_ELF", "ctrlcode": "df_bw_phx.elf" }
+      { "name": "k1", "instance": "DPU", "ctrlcode": "df_bw_phx.elf" }
     ]
   },
   "execution": {

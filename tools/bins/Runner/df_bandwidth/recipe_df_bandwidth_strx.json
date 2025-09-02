@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "validate_strx.xclbin"
+    "xclbin": "validate_df_bandwidth_strx.xclbin"
   },
   "resources": {
     "buffers": [

@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "validate_phx.xclbin"
+    "xclbin": "tct_one_col_phx.xclbin"
   },
   "resources": {
     "buffers": [

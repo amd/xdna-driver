@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "validate_strx.xclbin"
+    "xclbin": "tct_all_col_strx.xclbin"
   },
   "resources": {
     "buffers": [

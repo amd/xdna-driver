@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "header": {
-    "xclbin": "validate_strx.xclbin"
+    "xclbin": "validate_throughput_strx.xclbin"
   },
   "resources": {
     "buffers": [
@@ -12,7 +12,7 @@
       { "name": "arg4", "type": "input", "size": 20 }
     ],
     "kernels": [
-      { "name": "k1", "instance": "DPU", "ctrlcode": "nop.elf"}
+      { "name": "k1", "instance": "DPU" , "ctrlcode": "nop_throughput_strx.elf"}
     ]
   },
   "execution": {
