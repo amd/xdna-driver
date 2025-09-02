@@ -703,8 +703,8 @@ struct amdxdna_drm_hwctx_entry {
  * @buffer: Pointer to an array whose elements are structure specified by the param struct member.
  */
 struct amdxdna_drm_get_array {
-#define DRM_AMDXDNA_HW_CONTEXT_ARRAY	0
-#define DRM_AMDXDNA_HW_CONTEXT		1
+#define DRM_AMDXDNA_HW_CONTEXT_ALL	0
+#define DRM_AMDXDNA_HW_CONTEXT_BY_ID	1
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024

@@ -265,7 +265,7 @@ struct partition_info
 
     std::vector<char> payload(output_size);
     amdxdna_drm_get_array arg = {
-      .param = DRM_AMDXDNA_HW_CONTEXT_ARRAY,
+      .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
       .element_size = sizeof(*data),
       .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
@@ -329,7 +329,7 @@ struct partition_info
 
         if (updated_output_size < arg.element_size * arg.num_element) {
           throw xrt_core::query::exception(
-            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ARRAY - Insufficient buffer size. Need: %u") % arg.element_size));
+            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ALL - Insufficient buffer size. Need: %u") % arg.element_size));
         }
 
         data_size = arg.num_element;
@@ -395,7 +395,7 @@ struct context_health_info {
     const uint32_t output_size = 32 * sizeof(*data);
     std::vector<char> payload(output_size);
     amdxdna_drm_get_array arg = {
-      .param = DRM_AMDXDNA_HW_CONTEXT_ARRAY,
+      .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
       .element_size = sizeof(*data),
       .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
@@ -434,7 +434,7 @@ struct context_health_info {
       entry->pid = pair.second;
 
       amdxdna_drm_get_array arg = {
-        .param = DRM_AMDXDNA_HW_CONTEXT,
+        .param = DRM_AMDXDNA_HW_CONTEXT_BY_ID,
         .element_size = sizeof(amdxdna_drm_hwctx_entry),
         .num_element = 1,
         .buffer = reinterpret_cast<uintptr_t>(payload.data())
