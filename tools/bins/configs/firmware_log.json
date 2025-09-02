@@ -1,7 +1,9 @@
 {
   "version": {
-    "major": 0,
-    "minor": 1
+    "product": 0,
+    "schema": 0,
+    "major": 1,
+    "minor": 0
   },
   "enumerations": {
     "ipu_log_format": {
