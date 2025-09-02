@@ -1,7 +1,7 @@
 #! /bin/bash
 
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2024 AMD, Inc. All rights reserved.
+# Copyright (C) 2023-2025 AMD, Inc. All rights reserved.
 
 RED="\e[31m"
 ENDCOLOR="\e[0m"
@@ -12,7 +12,7 @@ if [ "$build_type" = "Debug" ]; then
 	set -x
 fi
 
-installdir=@CMAKE_INSTALL_PREFIX@/xrt
+install_datadir=@CMAKE_INSTALL_PREFIX@/@XDNA_PKG_DATA_DIR@
 udev_rules_d=/etc/udev/rules.d
 amdxdna_rules_file=99-amdxdna.rules
 dracut_conf_d=/etc/dracut.conf.d
@@ -29,13 +29,11 @@ if [ -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
 	rm -rf ${udev_rules_d}/${amdxdna_rules_file}
 fi
 
-export XILINX_XRT=$installdir
 if [ "$build_type" = "Debug" ]; then
-	DKMS_DRIVER_VERBOSE=true $installdir/amdxdna/dkms_driver.sh --remove
+	DKMS_DRIVER_VERBOSE=true $install_datadir/dkms_driver.sh --remove
 else
-	$installdir/amdxdna/dkms_driver.sh --remove
+	$install_datadir/dkms_driver.sh --remove
 fi
-unset XILINX_XRT
 
 if [ "$build_type" = "Debug" ]; then
 	echo "========= Prerm Debug end ========="

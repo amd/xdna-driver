@@ -811,7 +811,7 @@ bo_sub_type_name() const
 //
 void
 uc_dbg_buffer::
-config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes)
+config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes)
 {
   auto meta_buf_size = offsetof(struct fw_buffer_metadata, uc_info)
      + buf_sizes.size() * sizeof(struct uc_info_entry);
@@ -833,13 +833,13 @@ config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_size
   shim_debug("Config CMD BO %d (%s) for %d uC", id().handle,
     type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str(), i);
 
-  auto ctx = static_cast<shim_xdna::hwctx *>(hwctx);
+  auto ctx = static_cast<const shim_xdna::hwctx *>(hwctx);
   m_metadata_bo->bind_hwctx(*ctx);
 }
 
 void
 uc_dbg_buffer::
-unconfig(xrt_core::hwctx_handle* hwctx)
+unconfig(const xrt_core::hwctx_handle* hwctx)
 {
   shim_debug("Unconfig CMD BO %d (%s)", id().handle,
     type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str());

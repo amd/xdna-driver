@@ -21,7 +21,7 @@ target_link_libraries(${XDNA_XRT_TEST} PRIVATE
 
 set_target_properties(${XDNA_XRT_TEST} PROPERTIES
   BUILD_WITH_INSTALL_RPATH FALSE
-  LINK_FLAGS "-Wl,-rpath,$ORIGIN/../lib"
+  LINK_FLAGS "-Wl,-rpath,$ORIGIN/../${XDNA_PKG_LIB_DIR}"
   )
 
 target_include_directories(${XDNA_XRT_TEST} PRIVATE

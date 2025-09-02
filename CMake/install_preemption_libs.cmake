@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+
 # Use one sample file name for the search
 set(PREEMPT_FILE_NAME preempt_save_stx_4x8.bin)
 

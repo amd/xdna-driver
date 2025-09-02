@@ -95,7 +95,6 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		ctx->health_data.fatal_error_exception_pc = r->fatal_info.exception_pc;
 		ctx->health_data.fatal_error_app_module = r->fatal_info.app_module;
 		ctx->health_data.fatal_error_type = r->fatal_info.fatal_type;
-		ctx->health_data.app_health_report_size = r->size;
 		ctx->health_data.txn_op_idx = r->txn_op_id;
 		ctx->health_data.ctx_pc = r->ctx_pc;
 		ctx->health_data.version = 0;

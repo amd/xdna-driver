@@ -659,6 +659,8 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+	trace_amdxdna_debug_point(current->comm, args->type, "job received");
+
 	switch (args->type) {
 	case AMDXDNA_CMD_SUBMIT_EXEC_BUF:
 		ret = amdxdna_drm_submit_execbuf(client, args);
@@ -719,5 +721,6 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	XDNA_DBG(xdna, "PID %d ctx %d cmd %lld wait finished, ret %d",
 		 client->pid, args->hwctx, args->seq, ret);
 
+	trace_amdxdna_debug_point(current->comm, args->seq, "job returned to user");
 	return ret;
 }

@@ -78,6 +78,7 @@ enum aie2_msg_status {
 	AIE2_STATUS_MGMT_ERT_ENTER_SUSPEND_FAILURE,
 	AIE2_STATUS_MGMT_ERT_BUSY,
 	AIE2_STATUS_MGMT_ERT_APPLICATION_ACTIVE,
+	AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID,
 	MAX_MGMT_ERT_STATUS_CODE,
 	/* APP ERT Error codes */
 	AIE2_STATUS_APP_ERT_FIRST_ERROR			= 0x3000001,
@@ -468,13 +469,11 @@ enum cmd_chain_class {
 	CMD_CHAIN_CLASS_MAX,
 };
 
-#define DRAM_LOG_BUF_METADATA_SIZE			0x40
-#define DEFAULT_DRAM_LOG_BUF_SIZE			0x2000
+#define DEFAULT_DRAM_LOG_BUF_SIZE			SZ_64K
 #define POLL_INTERVAL_MS				200
-#define LOG_FORMAT_FULL					0xc0
+#define LOG_FORMAT_FULL					0x0
 #define LOG_MSG_ALIGN					8
 #define MSI_ADDR_MASK					0x00FFFFFF
-#define make_64bit(lo, hi)	((u64)(lo) | ((u64)(hi) << 32))
 
 enum runtime_configuration_type_ {
 	RUNTIME_CONFIGURATION_CLOCK_GATING = 1,
@@ -738,8 +737,6 @@ struct app_health_report {
 	u32				ctx_pc;
 #define AIE2_APP_HEALTH_RESET_FATAL_INFO	0
 	struct fatal_error_info		fatal_info;
-	/* Below captures complex platform dependent data parsed by userspace */
-	u32				resv[1528];
 };
 
 struct get_app_health_req {
@@ -750,6 +747,8 @@ struct get_app_health_req {
 
 struct get_app_health_resp {
 	enum aie2_msg_status status;
+	u32 required_buffer_size;
+	u32 reserved[7];
 } __packed;
 
 /* Do NOT put any firmware defined struct, enum etc. start from here */

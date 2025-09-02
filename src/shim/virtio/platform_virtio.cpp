@@ -171,6 +171,8 @@ hcall_wait(int dev_fd, void *buf, size_t size)
   auto req = reinterpret_cast<vdrm_ccmd_req*>(buf);
   uint32_t ring_idx = 0;
 
+  XRT_TRACE_POINT_SCOPE1(hcall, req->cmd);
+
   // For now, only AMDXDNA_CCMD_WAIT_CMD requires non-zero ring index
   if (req->cmd == AMDXDNA_CCMD_WAIT_CMD) {
     auto wcmd = reinterpret_cast<amdxdna_ccmd_wait_cmd_req*>(req);
@@ -519,7 +521,7 @@ get_info(amdxdna_drm_get_info& arg) const
 
 void
 platform_drv_virtio::
-get_info_array(amdxdna_drm_get_info_array& arg) const
+get_info_array(amdxdna_drm_get_array& arg) const
 {
   auto total_buf_size = arg.element_size * arg.num_element;
   auto resp_buf = std::make_unique<response_buffer>(dev_fd(), total_buf_size);

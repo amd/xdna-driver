@@ -565,10 +565,83 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
   auto run = get_xrt_run(device,
-		  "npu3_workspace/xclbin_resnet50.xclbin",
-		  "npu3_workspace/xclbin_resnet50.elf",
+		  "npu3_workspace/xclbin_resnet50_all.xclbin",
+		  "npu3_workspace/xclbin_resnet50_all.elf",
 		  "dpu:{vadd}",
-		  "npu3_workspace/single_col_resnet50_all_layer.elf",
+		  "npu3_workspace/resnet50_all_layer.elf",
+		  "DPU:resnet50");
+
+  run.set_arg(54, bo_ifm.get());
+
+  std::ifstream wts_ifs(wts_path);
+  if (!wts_ifs.is_open())
+    throw std::runtime_error("Unable to open weights file: " + wts_path);
+
+  auto p = bo_wts.map();
+  uint32_t tmp;
+  int i = 0;
+  while (wts_ifs >> std::hex >> tmp) {
+    p[i] = tmp;
+    i++;
+  }
+  wts_ifs.close();
+
+  for (int i = 0; i < 54; i++) {
+    run.set_arg(i, bo_wts.get().address() + (wts_offset[i] * sizeof(uint32_t)));
+  }
+
+  run.set_arg(55, bo_ofm.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+
+  // wait forever for this test, it takes up to 10 hours on simulator
+  run.wait2();
+
+  auto ofm = bo_ofm.map();
+  std::ifstream ofm_ifs;
+  ofm_ifs.open(ofm_path);
+  if (!ofm_ifs.is_open()) {
+    std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
+  }
+  int err = 0;
+  for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+    uint32_t gld;
+    ofm_ifs >> std::hex >> gld;
+    if (gld != ofm[i]) {
+      std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
+      err++;
+    }
+  }
+  ofm_ifs.close();
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+void
+TEST_xrt_umq_single_col_resnet50_multi_layer(int device_index, arg_type& arg)
+{
+  std::vector<xrt_bo> wts_v;
+  auto device = xrt::device{device_index};
+
+  std::string ifm_path = local_path("npu3_workspace/mem32_ref_l46.txt");
+  std::string wts_path = local_path("npu3_workspace/wts32_multi.txt");
+  std::string ofm_path = local_path("npu3_workspace/ofm32_ref_l53.txt");
+
+  const uint32_t IFM_BYTE_SIZE = 3145782;
+  const uint32_t WTS_BYTE_SIZE = 25704832;
+  const uint32_t OFM_BYTE_SIZE = 1024;
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  read_txt_file<xrt_bo>(ifm_path, bo_ifm);
+
+  auto run = get_xrt_run(device, "", "", "",
+		  "npu3_workspace/resnet50_multi.elf",
 		  "DPU:resnet50");
 
   run.set_arg(54, bo_ifm.get());
@@ -944,7 +1017,8 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
   test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
-  test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} }
+  test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
+  test_case{ "npu3 xrt single col resnet50 multi layer", TEST_xrt_umq_single_col_resnet50_multi_layer, {} }
 };
 
 /* test n threads of 1 or more tests */
