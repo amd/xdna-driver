@@ -33,6 +33,7 @@ struct amdxdna_mem {
 	u32				nr_pages;
 	struct list_head		umap_list;
 	bool				map_invalid;
+	bool				cma;
 #ifdef AMDXDNA_DEVEL
 	struct sg_table			*sgt;
 	u64				dma_addr; /* IOVA DMA address */

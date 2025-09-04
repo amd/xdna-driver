@@ -150,7 +150,6 @@ void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 	amdxdna_free_sgt(xdna, sgt);
 }
 
-#ifndef AMDXDNA_OF
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -188,16 +187,6 @@ void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 	drm_gem_shmem_put_pages_locked(&abo->base);
 #endif
 }
-#else
-int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
-{
-	return -EOPNOTSUPP;
-}
-
-void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
-{
-}
-#endif
 
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
 {

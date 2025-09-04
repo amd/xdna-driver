@@ -57,7 +57,7 @@ flag_to_type(uint64_t bo_flags)
   case XCL_BO_FLAGS_HOST_ONLY:
     return AMDXDNA_BO_SHARE;
   case XCL_BO_FLAGS_CACHEABLE:
-    return AMDXDNA_BO_DEV;
+    return AMDXDNA_BO_SHARE;
   case XCL_BO_FLAGS_EXECBUF:
     return AMDXDNA_BO_CMD;
   default:
