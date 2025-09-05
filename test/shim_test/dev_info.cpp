@@ -235,6 +235,17 @@ xclbin_info xclbin_infos[] = {
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
   },
+  {
+    .name = "timeout.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .workspace = "local_shim_test_data/elf_txn_no_cp_timeout_npu4",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_PREEMPT,
+  },
 };
 
 }
