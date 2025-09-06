@@ -313,6 +313,7 @@ const struct drm_driver amdxdna_drm_drv = {
 #ifdef AMDXDNA_OF
 	.gem_create_object = amdxdna_gem_create_object_cb,
 	.gem_prime_import_sg_table = drm_gem_dma_prime_import_sg_table,
+	.gem_prime_import = amdxdna_gem_prime_import,
 #else
 	/* For shmem object create */
 	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
