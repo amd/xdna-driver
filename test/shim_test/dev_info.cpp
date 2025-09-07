@@ -244,7 +244,7 @@ xclbin_info xclbin_infos[] = {
     },
     .workspace = "local_shim_test_data/elf_txn_no_cp_timeout_npu4",
     .data = "",
-    .type = KERNEL_TYPE_TXN_PREEMPT,
+    .type = KERNEL_TYPE_TXN,
   },
 };
 
