@@ -18,9 +18,6 @@ using arg_type = const std::vector<uint64_t>;
 namespace {
 
 io_test_parameter io_test_parameters;
-// Used for injectng hang instruction at this DPU program counter.
-// and verify if the context health report
-int bad_run_injected_dpu_pc = 3;
 
 void
 io_test_parameter_init(int perf, int type, int wait, bool debug = false)
