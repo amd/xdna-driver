@@ -790,6 +790,8 @@ dbg_buffer::
   if (m_ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
     return;
 
+  // TODO FIXME 
+#if 0
   try {
     config_debug_bo(true);
   } catch (const xrt_core::system_error& e) {
@@ -797,6 +799,7 @@ dbg_buffer::
       << " from hwctx " << std::to_string(m_ctx_id)
       << ": " << e.what() << std::endl;
   }
+#endif
 }
 
 std::string

@@ -176,6 +176,13 @@ get_slotidx() const
   return m_handle;
 }
 
+size_t
+hwctx::
+get_num_uc() const
+{
+  return m_col_cnt;
+}
+
 xrt_core::cuidx_type
 hwctx::
 open_cu_context(const std::string& cu_name)
