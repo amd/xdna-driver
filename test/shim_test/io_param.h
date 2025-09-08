@@ -13,7 +13,6 @@ struct io_test_parameter {
 #define IO_TEST_NORMAL_RUN    		0
 #define IO_TEST_NOOP_RUN      		1
 #define IO_TEST_BAD_RUN       		2
-#define IO_TEST_DELAY_RUN     		3
 #define IO_TEST_FORCE_PREEMPTION	5
   int type;
 #define IO_TEST_IOCTL_WAIT    0
