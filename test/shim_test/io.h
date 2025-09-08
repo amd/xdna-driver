@@ -47,7 +47,7 @@ public:
   void
   run_no_check_result();
 
-  void
+  virtual void
   run();
 
   void
@@ -134,6 +134,21 @@ public:
 private:
   bool m_is_full_elf;
   unsigned long m_total_fine_preemption_checkpoints;
+};
+
+class elf_io_timeout_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_io_timeout_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+
+  void
+  run() override;
+
+  void
+  verify_result() override;
 };
 
 #endif // _SHIMTEST_IO_H_

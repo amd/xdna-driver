@@ -44,6 +44,7 @@ using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -192,15 +193,6 @@ dev_filter_is_npu4(device::id_type id, device* dev)
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
   return device_id == npu4_device_id;
-}
-
-bool
-dev_filter_is_privileged_npu4(device::id_type id, device* dev)
-{
-  // Root user ID is 0
-  if (dev_filter_is_npu4(id, dev) && !geteuid())
-    return true;
-  return false;
 }
 
 bool
@@ -826,8 +818,8 @@ std::vector<test_case> test_list {
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
   },
-  test_case{ "io test real kernel bad run for health report", {},
-    TEST_POSITIVE, dev_filter_is_privileged_npu4, TEST_io, { IO_TEST_BAD_RUN_REPORT_CTX_PC, 1 }
+  test_case{ "io test timeout run for context health report", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
