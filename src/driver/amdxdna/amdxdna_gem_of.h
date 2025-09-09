@@ -54,6 +54,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 
 struct drm_gem_object *amdxdna_gem_create_object_cb(struct drm_device *dev, size_t size);
+struct drm_gem_object *amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf);
 
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);

@@ -5,6 +5,8 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/version.h>
+#include <linux/dma-buf.h>
+#include <drm/drm_gem_dma_helper.h>
 
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_drm.h"
@@ -75,6 +77,52 @@ struct drm_gem_object *amdxdna_gem_create_object_cb(struct drm_device *dev, size
 	abo->mem.size = size;
 
 	return to_gobj(abo);
+}
+
+struct drm_gem_object *amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
+{
+	struct dma_buf_attachment *attach;
+	struct amdxdna_gem_obj *abo;
+	struct drm_gem_object *gobj;
+	struct sg_table *sgt;
+	int ret;
+
+	get_dma_buf(dma_buf);
+
+	attach = dma_buf_attach(dma_buf, dev->dev);
+	if (IS_ERR(attach)) {
+		ret = PTR_ERR(attach);
+		goto put_buf;
+	}
+
+	sgt = dma_buf_map_attachment_unlocked(attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		ret = PTR_ERR(sgt);
+		goto fail_detach;
+	}
+
+	gobj = drm_gem_dma_prime_import_sg_table(dev, attach, sgt);
+	if (IS_ERR(gobj)) {
+		ret = PTR_ERR(gobj);
+		goto fail_unmap;
+	}
+
+	abo = to_xdna_obj(gobj);
+	abo->mem.size = dma_buf->size;
+	abo->type = AMDXDNA_BO_SHARE;
+	abo->flags = 0;
+	abo->mem.dev_addr = sg_dma_address(sgt->sgl);
+
+	return gobj;
+
+fail_unmap:
+	dma_buf_unmap_attachment_unlocked(attach, sgt, DMA_BIDIRECTIONAL);
+fail_detach:
+	dma_buf_detach(dma_buf, attach);
+put_buf:
+	dma_buf_put(dma_buf);
+
+	return ERR_PTR(ret);
 }
 
 static struct amdxdna_gem_obj *amdxdna_drm_create_dma_bo(struct drm_device *dev,
