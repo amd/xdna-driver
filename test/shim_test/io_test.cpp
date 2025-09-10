@@ -58,18 +58,6 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
     auto tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
     bos[IO_TEST_BO_INSTRUCTION].tbo = tbo;
     std::memset(tbo->map(), 0, sz);
-  } else if (io_test_parameters.type == IO_TEST_BAD_RUN) {
-    if (kernel_type != KERNEL_TYPE_DPU_SEQ)
-      throw std::runtime_error("ELF flow can't support bad run");
-
-    auto instruction_p = bos[IO_TEST_BO_INSTRUCTION].tbo->map();
-    auto sz = bos[IO_TEST_BO_INSTRUCTION].tbo->size();
-    std::memset(instruction_p, 0, sz);
-    // Error Event ID: 64
-    // Expect "Row: 0, Col: 1, module 2, event ID 64, category 4" in dmesg
-    instruction_p[0] = 0x02000000;
-    instruction_p[1] = 0x00034008;
-    instruction_p[2] = 0x00000040;
   }
 
   if (io_test_parameters.debug) {
@@ -485,6 +473,12 @@ TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
 {
   elf_io_timeout_test_bo_set boset{sdev.get(), "timeout.xclbin"};
   boset.run();
-  boset.verify_result();
+}
+
+void
+TEST_io_async_err(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  io_async_err_test_bo_set boset{sdev.get()};
+  boset.run();
 }
 

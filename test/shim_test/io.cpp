@@ -306,6 +306,37 @@ io_test_bo_set(device* dev, bool use_ubuf) : io_test_bo_set(dev, get_xclbin_name
 {
 }
 
+io_async_err_test_bo_set::
+io_async_err_test_bo_set(device* dev)
+  : io_test_bo_set_base(dev, get_xclbin_name(dev))
+{
+  std::string file;
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION: {
+      auto size = 3 * sizeof(uint32_t);
+      alloc_ctrl_bo(ibo, m_dev, size);
+      auto instruction_p = ibo.tbo->map();
+      // Error Event ID: 64
+      // Expect "Row: 0, Col: 1, module 2, event ID 64, category 4" in dmesg
+      instruction_p[0] = 0x02000000;
+      instruction_p[1] = 0x00034008;
+      instruction_p[2] = 0x00000040;
+      break;
+    }
+    default:
+      break;
+    }
+  }
+}
+
 elf_io_test_bo_set::
 elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   io_test_bo_set_base(dev, xclbin_name)
@@ -510,6 +541,27 @@ init_cmd(cuidx_type idx, bool dump)
 }
 
 void
+io_async_err_test_bo_set::
+init_cmd(cuidx_type idx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_CU);
+
+  ebuf.set_cu_idx(idx);
+
+  ebuf.add_arg_64(1);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.add_arg_32(m_bo_array[IO_TEST_BO_INSTRUCTION].tbo->size() / sizeof(int32_t));
+  ebuf.add_arg_64(0);
+
+  if (dump)
+    ebuf.dump();
+}
+
+void
 elf_io_test_bo_set::
 init_cmd(cuidx_type idx, bool dump)
 {
@@ -665,6 +717,13 @@ verify_result()
 }
 
 void
+io_async_err_test_bo_set::
+verify_result()
+{
+  // TODO: Fetch async error from driver and check.
+}
+
+void
 elf_io_timeout_test_bo_set::
 verify_result()
 {
@@ -727,6 +786,30 @@ run()
 }
 
 void
+io_async_err_test_bo_set::
+run()
+{
+  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
+  if (kernel.empty())
+    throw std::runtime_error("No kernel found");
+  auto cu_idx = hwctx.get()->open_cu_context(kernel);
+  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
+
+  init_cmd(cu_idx, false);
+  sync_before_run();
+
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto chdl = cbo->get();
+  hwq->submit_command(chdl);
+  hwq->wait_command(chdl, 5000);
+  // Don't check command status, it does not matter.
+ 
+  verify_result();
+}
+
+void
 elf_io_timeout_test_bo_set::
 run()
 {
@@ -747,6 +830,7 @@ run()
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_TIMEOUT) // Command must time out, or we fail
     throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+  verify_result();
 }
 
 void

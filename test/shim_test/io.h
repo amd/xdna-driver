@@ -151,4 +151,19 @@ public:
   verify_result() override;
 };
 
+class io_async_err_test_bo_set : public io_test_bo_set_base
+{
+public:
+  io_async_err_test_bo_set(device *dev);
+
+  void
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+
+  void
+  run() override;
+
+  void
+  verify_result() override;
+};
+
 #endif // _SHIMTEST_IO_H_
