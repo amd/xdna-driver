@@ -151,8 +151,6 @@ struct amdxdna_ctx {
 	u64				completed ____cacheline_aligned_in_smp;
 	/* Counter for freed job */
 	atomic64_t			job_free_cnt;
-	/* For context runqueue to keep last completed. low frequency update */
-	u64				last_completed;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
 	struct amdxdna_ctx_health_data	health_data;

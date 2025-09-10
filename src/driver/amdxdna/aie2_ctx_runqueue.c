@@ -171,33 +171,21 @@ static bool part_handle_idle_ctx(struct aie2_partition *part, bool force)
 }
 
 static bool
-part_is_all_ctx_stuck(struct aie2_partition *part)
+part_has_pending_cmd(struct aie2_partition *part)
 {
 	struct amdxdna_dev *xdna;
 	struct amdxdna_ctx *ctx;
-	int progress_cnt = 0;
-	int running_cnt = 0;
 
 	xdna = ctx_rq_to_xdna_dev(part->rq);
 	list_for_each_entry(ctx, &part->conn_list, entry) {
-		u64 completed = ctx->completed;
-		u64 last = ctx->last_completed;
-		u64 submitted = ctx->submitted;
-
-		XDNA_DBG(xdna, "%s @[%d, %d] submitted %lld completed %lld last %lld",
+		XDNA_DBG(xdna, "%s @[%d, %d] submitted %lld completed %lld",
 			 ctx->name, part->start_col, part->end_col,
-			 submitted, completed, last);
-		if (submitted == completed)
-			continue;
-
-		running_cnt++;
-		if (last != completed) {
-			ctx->last_completed = completed;
-			progress_cnt++;
-		}
+			 ctx->submitted, ctx->completed);
+		if (ctx->submitted != ctx->completed)
+			return true;
 	}
 
-	return running_cnt && !progress_cnt;
+	return false;
 }
 
 static struct aie2_partition *
@@ -812,26 +800,37 @@ out:
  */
 bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq)
 {
+	struct amdxdna_dev_hdl *ndev;
 	struct aie2_partition *part;
 	struct amdxdna_dev *xdna;
-	int active_cnt = 0;
-	int stuck_cnt = 0;
+	bool pending = false;
+	u32 tdr;
 	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
+	ndev = xdna->dev_handle;
 	mutex_lock(&xdna->dev_lock);
 	for (i = 0; i < rq->num_parts; i++) {
 		part = &rq->parts[i];
 		if (!part->hwctx_cnt)
 			continue;
 
-		active_cnt++;
-		if (part_is_all_ctx_stuck(part))
-			stuck_cnt++;
+		pending = part_has_pending_cmd(part);
+		if (pending)
+			break;
 	}
 	mutex_unlock(&xdna->dev_lock);
 
-	return active_cnt && active_cnt == stuck_cnt;
+	tdr = READ_ONCE(ndev->tdr_status);
+	if (pending && xdna->tdr.progress == tdr && tdr == AIE2_TDR_WAIT)
+		return true;
+
+	if (tdr != AIE2_TDR_WAIT)
+		WRITE_ONCE(ndev->tdr_status, AIE2_TDR_WAIT);
+
+	xdna->tdr.progress = tdr;
+
+	return false;
 }
 
 bool aie2_rq_handle_idle_ctx(struct aie2_ctx_rq *rq)
