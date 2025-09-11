@@ -76,6 +76,9 @@
 #define ctx_rq_to_xdna_dev(r) \
 	(ctx_rq_to_ndev(r)->xdna)
 
+#define AIE2_TDR_WAIT		0
+#define AIE2_TDR_SIGNALED	1
+
 struct amdxdna_ctx_priv;
 struct event_trace_req_buf;
 struct start_event_trace_resp;
@@ -360,6 +363,8 @@ struct amdxdna_dev_hdl {
 	struct mutex			aie2_lock;
 
 	struct aie2_ctx_rq		ctx_rq;
+
+	u32				tdr_status;
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \

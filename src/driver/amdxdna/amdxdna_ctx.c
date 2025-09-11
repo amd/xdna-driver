@@ -113,7 +113,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 
 	ctx->client = client;
-	ctx->last_completed = -1;
 	ctx->num_tiles = args->num_tiles;
 	ctx->mem_size = args->mem_size;
 	ctx->max_opc = args->max_opc;
