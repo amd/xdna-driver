@@ -20,6 +20,7 @@
 #include "aie2_msg_priv.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_error.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pm.h"
@@ -370,6 +371,8 @@ struct amdxdna_dev_hdl {
 	struct aie2_ctx_rq		ctx_rq;
 
 	u32				tdr_status;
+
+	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
@@ -476,6 +479,8 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
 void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_msg_thread(void *data);
+int aie2_error_async_cache_init(struct amdxdna_dev_hdl *ndev);
+int aie2_error_get_last_async(struct amdxdna_dev *xdna, u32 num_errs, void *errors);
 
 /* aie2_message.c */
 bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode);

@@ -26,7 +26,8 @@ amdxdna-y := \
 	amdxdna_mgmt.o \
 	amdxdna_tdr.o \
 	amdxdna_ubuf.o \
-	amdxdna_carvedout_buf.o
+	amdxdna_carvedout_buf.o \
+	amdxdna_error.o
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	amdxdna_gem.o \
