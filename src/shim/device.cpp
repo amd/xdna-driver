@@ -370,7 +370,7 @@ struct partition_info
 
 struct context_health_info {
 
-  static ert_ctx_health_data 
+  static xrt_core::query::context_health_info::smi_context_health
   fill_health_entry(const amdxdna_drm_hwctx_entry& entry)
   {
     ert_ctx_health_data new_entry{};
@@ -380,7 +380,12 @@ struct context_health_info {
     new_entry.fatal_error_exception_type = entry.fatal_error_exception_type;
     new_entry.fatal_error_exception_pc = entry.fatal_error_exception_pc;
     new_entry.fatal_error_app_module = entry.fatal_error_app_module;
-    return new_entry;
+
+    xrt_core::query::context_health_info::smi_context_health val{};
+    val.ctx_id = entry.context_id;
+    val.pid = entry.pid;
+    val.health_data = new_entry;
+    return val;
   }
   using result_type = std::any;
 
@@ -589,15 +594,25 @@ struct event_trace
   }
 
   static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    switch (key) {
+      case key_type::event_trace_data:
+      {
+        // static query::firmware_debug_buffer log_buffer;
+        // TODO : implement IOCTL to get event_trace data
+        // return log_buffer;
+      }
+      default:
+        throw xrt_core::error("Unsupported event_trace query key");
+    }
+    // TODO : Implement IOCTL to get event_trace configuration
+  }
+
+  static result_type
   get(const xrt_core::device* device, key_type key)
   {
     switch (key) {
-    case key_type::event_trace_data:
-    {
-      // static query::firmware_debug_buffer log_buffer;
-      // TODO : implement IOCTL to get event_trace data
-      // return log_buffer;
-    }
     case key_type::event_trace_version:
     {
       // query::event_trace_version::result_type version;
@@ -633,15 +648,26 @@ struct firmware_log
   }
 
   static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    switch (key) {
+      case key_type::firmware_log_data:
+      {
+        // static query::firmware_debug_buffer log_buffer;
+        // TODO : implement IOCTL to get firmware_log data
+        // return log_buffer;
+      }
+      default:
+        throw xrt_core::error("Unsupported firmware_log query key");
+    }
+    // TODO : Implement IOCTL to get firmware_log configuration
+  }
+
+  static result_type
   get(const xrt_core::device* device, key_type key)
   {
     switch (key) {
-    case key_type::firmware_log_data:
-    {
-      // static query::firmware_debug_buffer log_buffer;
-      // TODO : implement IOCTL to get firmware log data
-      // return log_buffer;
-    }
+    
     case key_type::firmware_log_version:
     {
       // query::firmware_log_version::result_type version;
@@ -660,6 +686,39 @@ struct firmware_log
     }
     default:
       throw xrt_core::error("Unsupported firmware_log query key");
+    }
+  }
+};
+
+struct archive_path
+{
+  using result_type = query::archive_path::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+    xrt_core::smi::smi_hardware_config smi_hrdw;
+    auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
+
+    switch (key) {
+    case key_type::archive_path:
+    {
+      switch (hardware_type)
+      {
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxA0:
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
+      case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
+      case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_strx.a");
+      case xrt_core::smi::smi_hardware_config::hardware_type::phx:
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_phx.a");
+      default:
+        throw xrt_core::error("Unsupported hardware type");
+      }
+    }
+    default:
+      throw xrt_core::error("Unsupported archive_path query key");
     }
   }
 };
@@ -1596,14 +1655,15 @@ initialize_query_table()
   emplace_func0_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
   
-  emplace_func0_request<query::event_trace_data,               event_trace>();
+  emplace_func1_request<query::event_trace_data,               event_trace>();
   emplace_func0_request<query::event_trace_version,            event_trace>();
   emplace_func0_request<query::event_trace_config,             event_trace>();
   emplace_func0_getput<query::event_trace_state,               event_trace>();
-  emplace_func0_request<query::firmware_log_data,              firmware_log>();
+  emplace_func1_request<query::firmware_log_data,              firmware_log>();
   emplace_func0_request<query::firmware_log_version,           firmware_log>();
   emplace_func0_request<query::firmware_log_config,            firmware_log>();
   emplace_func0_getput<query::firmware_log_state,              firmware_log>();
+  emplace_func0_request<query::archive_path,                   archive_path>();
   emplace_func0_request<query::aie_telemetry,                  telemetry>();
   emplace_func0_request<query::misc_telemetry,                 telemetry>();
   emplace_func0_request<query::opcode_telemetry,               telemetry>();
