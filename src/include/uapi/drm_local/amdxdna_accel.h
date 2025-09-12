@@ -696,6 +696,24 @@ struct amdxdna_drm_hwctx_entry {
 };
 
 /**
+ * struct amdxdna_async_error - XDNA async error structure
+ * @err_code: error code, ErrorNum + Driver + Severity + Module + Class
+ *            Refer to amdxnda_xrt_error.h for error code encoding details
+ * @ts_us: timestamp in us
+ * @ex_err_code: extra error code
+ * @reserved0: reserved field
+ * @reserved1: reserved field
+ *
+ * This structure definition refers to XRT error code definition
+ */
+struct amdxdna_async_error {
+	__u64 err_code;
+	__u64 ts_us;
+	__u64 ex_err_code;
+	__u64 reserved0;
+};
+
+/**
  * struct amdxdna_drm_get_array - Get some information from the AIE hardware, return array.
  * @param: Specifies the structure passed in the buffer.
  * @element_size: Size of each element in the array.
@@ -705,6 +723,7 @@ struct amdxdna_drm_hwctx_entry {
 struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_HW_CONTEXT_ALL	0
 #define DRM_AMDXDNA_HW_CONTEXT_BY_ID	1
+#define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2	/* Get last async error */
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
