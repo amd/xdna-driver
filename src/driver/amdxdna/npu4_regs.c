@@ -20,6 +20,9 @@ const struct rt_cfg_ver npu4_rt_cfg_tbl[] = {
 	{ 12, NPU4_RT_TYPE_FINE_PREEMPTION },
 	{ 12, NPU4_RT_TYPE_FORCE_PREEMPTION },
 	{ 12, NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION },
+	{ 19, NPU4_RT_TYPE_LOG_LEVEL },
+	{ 19, NPU4_RT_TYPE_LOG_FORMAT },
+	{ 19, NPU4_RT_TYPE_LOG_DESTINATION },
 	{ 0 },
 };
 
@@ -27,6 +30,7 @@ const struct msg_op_ver npu4_msg_op_tbl[] = {
 	{ 15, MSG_OP_CHAIN_EXEC_NPU },
 	{ 15, MSG_OP_UPDATE_PROPERTY },
 	{ 18, MSG_OP_GET_APP_HEALTH },
+	{ 19, MSG_OP_CONFIG_FW_LOG },
 	{ 0 },
 };
 

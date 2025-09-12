@@ -10,17 +10,19 @@
 
 int autosuspend_ms = 5000;
 module_param(autosuspend_ms, int, 0644);
-MODULE_PARM_DESC(autosuspend_ms, "runtime suspend delay in miliseconds. < 0: prevent it");
+MODULE_PARM_DESC(autosuspend_ms, "runtime suspend delay in milliseconds. < 0: prevent it");
 
 static int amdxdna_pmops_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev_get_drvdata(dev));
+	int ret;
 
+	ret = amdxdna_fw_log_suspend(xdna);
 	if (xdna->dev_info->ops->suspend)
 		xdna->dev_info->ops->suspend(xdna);
 
 	XDNA_DBG(xdna, "Runtime suspend done");
-	return 0;
+	return ret;
 }
 
 static int amdxdna_pmops_resume(struct device *dev)
@@ -31,6 +33,7 @@ static int amdxdna_pmops_resume(struct device *dev)
 	if (xdna->dev_info->ops->resume)
 		ret = xdna->dev_info->ops->resume(xdna);
 
+	ret = amdxdna_fw_log_resume(xdna);
 	XDNA_DBG(xdna, "Runtime resume done ret: %d", ret);
 	return ret;
 }
