@@ -488,3 +488,12 @@ TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
   boset.verify_result();
 }
 
+void
+TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  async_error_io_test_bo_set async_error_io_test_bo_set{sdev.get()};
+  // verification is inside run()
+  async_error_io_test_bo_set.run();
+  // Run again to check if we can catch newly generated async error
+  async_error_io_test_bo_set.run();
+}
