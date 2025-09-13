@@ -1285,14 +1285,9 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 							  ctx->priv->id, sizeof(*r));
 				mutex_unlock(&xdna->dev_handle->aie2_lock);
 				if (ret)
-					return ret;
+					aie2_reset_app_health_report(r);
 			} else {
-				r->fatal_info.exception_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
-				r->fatal_info.exception_pc = AIE2_APP_HEALTH_RESET_FATAL_INFO;
-				r->fatal_info.app_module = AIE2_APP_HEALTH_RESET_FATAL_INFO;
-				r->fatal_info.fatal_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
-				r->txn_op_id = AIE2_APP_HEALTH_RESET_TXN_OP_ID;
-				r->ctx_pc = AIE2_APP_HEALTH_RESET_CTX_PC;
+				aie2_reset_app_health_report(r);
 			}
 
 			tmp[hw_i].fatal_error_exception_type = r->fatal_info.exception_type;
