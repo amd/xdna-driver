@@ -50,51 +50,6 @@ static void qos_to_rq_prio(struct amdxdna_ctx *ctx)
 	};
 }
 
-static inline bool ctx_is_rt(struct amdxdna_ctx *ctx)
-{
-	return ctx->priv->priority == CTX_RQ_REALTIME;
-}
-
-static inline bool ctx_is_debug(struct amdxdna_ctx *ctx)
-{
-	return ctx->priv->status == CTX_STATE_DEBUG;
-}
-
-static inline bool ctx_is_fatal(struct amdxdna_ctx *ctx)
-{
-	if (ctx->priv->status == CTX_STATE_DEAD)
-		return true;
-
-	return ctx_is_debug(ctx);
-}
-
-static inline bool ctx_is_disconnected(struct amdxdna_ctx *ctx)
-{
-	return ctx->priv->status == CTX_STATE_DISCONNECTED;
-}
-
-static inline bool ctx_is_dispatched(struct amdxdna_ctx *ctx)
-{
-	return ctx->priv->status == CTX_STATE_DISPATCHED;
-}
-
-static inline bool ctx_is_connected(struct amdxdna_ctx *ctx)
-{
-	return ctx->priv->status == CTX_STATE_CONNECTED;
-}
-
-static inline bool ctx_is_disconnecting(struct amdxdna_ctx *ctx)
-{
-	return ctx->priv->status == CTX_STATE_DISCONNECTING;
-}
-
-static inline bool ctx_should_stop(struct amdxdna_ctx *ctx)
-{
-	return ctx_is_connected(ctx) ||
-		ctx_is_disconnecting(ctx) ||
-		ctx_is_debug(ctx);
-}
-
 static inline u32 part_max_non_rt_hwctx(struct aie2_partition *part)
 {
 	return part->max_hwctx - part->max_rt_ctx;
@@ -122,7 +77,7 @@ part_ctx_dispatch(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 
 	list_move_tail(&ctx->entry, &part->runqueue[prio_q]);
 	part->ctx_cnt++;
-	if (ctx_is_rt(ctx))
+	if (aie2_is_ctx_rt(ctx))
 		part->rt_ctx_cnt++;
 
 	ctx->priv->status = CTX_STATE_DISPATCHED;
@@ -247,7 +202,7 @@ rq_part_non_rt_select(struct aie2_ctx_rq *rq)
 static struct aie2_partition *
 rq_part_select(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
-	if (ctx_is_rt(ctx))
+	if (aie2_is_ctx_rt(ctx))
 		return rq_part_rt_select(rq);
 	else
 		return rq_part_non_rt_select(rq);
@@ -381,7 +336,7 @@ static void part_ctx_start(struct aie2_partition *part, struct amdxdna_ctx *ctx)
 ctx_dead:
 	list_move_tail(&ctx->entry, &part->rq->disconn_list);
 	part->ctx_cnt--;
-	if (ctx_is_rt(ctx))
+	if (aie2_is_ctx_rt(ctx))
 		part->rt_ctx_cnt--;
 	ctx->priv->part = NULL;
 }
@@ -408,7 +363,7 @@ static void part_ctx_stop_wait(struct amdxdna_ctx *ctx, bool wait)
 	if (part) {
 		part->hwctx_cnt--;
 		part->ctx_cnt--;
-		if (ctx_is_rt(ctx))
+		if (aie2_is_ctx_rt(ctx))
 			part->rt_ctx_cnt--;
 	}
 	ctx->priv->part = NULL;
@@ -432,7 +387,7 @@ static void rq_ctx_cancel(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	part = ctx->priv->part;
 	if (part) {
 		part->ctx_cnt--;
-		if (ctx_is_rt(ctx))
+		if (aie2_is_ctx_rt(ctx))
 			part->rt_ctx_cnt--;
 	}
 	ctx->priv->part = NULL;
@@ -471,7 +426,7 @@ static void part_cleanup(struct aie2_partition *part)
 		list_for_each_entry_safe(ctx, tmp, q, entry) {
 			list_move_tail(&ctx->entry, &rq->disconn_list);
 			part->ctx_cnt--;
-			if (ctx_is_rt(ctx))
+			if (aie2_is_ctx_rt(ctx))
 				part->rt_ctx_cnt--;
 			ctx->priv->status = CTX_STATE_DISCONNECTED;
 			ctx->priv->part = NULL;
@@ -509,7 +464,7 @@ static void part_sched_work(struct work_struct *work)
 		if (!next)
 			break;
 
-		if (!ctx_is_rt(next) && part_connect_is_full(part))
+		if (!aie2_is_ctx_rt(next) && part_connect_is_full(part))
 			break;
 
 		part_ctx_start(part, next);
@@ -600,7 +555,7 @@ static void rq_dispatch_work(struct work_struct *work)
 	down_write(&ctx->priv->io_sem);
 	XDNA_DBG(xdna, "Dispatching %s status %d QoS priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
-	if (!ctx_is_disconnected(ctx))
+	if (!aie2_is_ctx_disconnected(ctx))
 		goto out;
 
 	if (rq->paused) {
@@ -981,14 +936,14 @@ static int rq_submit_enter_slow(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 again:
 	queue_work(rq->work_q, &ctx->dispatch_work);
 	ret = wait_event_interruptible(ctx->priv->connect_waitq,
-				       ctx_is_connected(ctx) || ctx_is_fatal(ctx));
+				       aie2_is_ctx_connected(ctx) || aie2_is_ctx_fatal(ctx));
 	if (ret) {
 		XDNA_DBG(xdna, "%s status %d ret %d", ctx->name,
 			 ctx->priv->status, ret);
 		goto exit_and_cleanup;
 	}
 
-	if (ctx_is_fatal(ctx)) {
+	if (aie2_is_ctx_fatal(ctx)) {
 		atomic64_dec(&ctx->priv->job_pending_cnt);
 		XDNA_ERR(xdna, "%s fatal error", ctx->name);
 		return -EIO;
@@ -1000,7 +955,7 @@ again:
 	 * At this point, this context will not be swapped out.
 	 */
 	down_read(&ctx->priv->io_sem);
-	if (!ctx_is_connected(ctx)) {
+	if (!aie2_is_ctx_connected(ctx)) {
 		up_read(&ctx->priv->io_sem);
 		goto again;
 	}
@@ -1012,9 +967,9 @@ exit_and_cleanup:
 	atomic64_dec(&ctx->priv->job_pending_cnt);
 
 	mutex_lock(&xdna->dev_lock);
-	if (ctx_is_dispatched(ctx))
+	if (aie2_is_ctx_dispatched(ctx))
 		rq_ctx_cancel(rq, ctx);
-	if (ctx_is_connected(ctx))
+	if (aie2_is_ctx_connected(ctx))
 		queue_work(rq->work_q, &ctx->yield_work);
 	mutex_unlock(&xdna->dev_lock);
 	return ret;
@@ -1026,10 +981,10 @@ int aie2_rq_submit_enter(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	down_read(&ctx->priv->io_sem);
-	if (ctx_is_connected(ctx))
+	if (aie2_is_ctx_connected(ctx))
 		return 0;
 
-	if (ctx_is_fatal(ctx)) {
+	if (aie2_is_ctx_fatal(ctx)) {
 		up_read(&ctx->priv->io_sem);
 		return -EIO;
 	}
@@ -1125,7 +1080,7 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		goto error;
 	}
 
-	if (rq->ctx_cnt > rq->rt_ctx_cnt && ctx_is_rt(ctx) &&
+	if (rq->ctx_cnt > rq->rt_ctx_cnt && aie2_is_ctx_rt(ctx) &&
 	    rq->rt_ctx_cnt + 1 == rq->hwctx_limit) {
 		XDNA_ERR(xdna, "Not more hwctx for RT");
 		ret = -ENOENT;
@@ -1166,7 +1121,7 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		wait_parts = true;
 	}
 
-	if (ctx_is_rt(ctx)) {
+	if (aie2_is_ctx_rt(ctx)) {
 		XDNA_DBG(xdna, "%s is realtime", ctx->name);
 		rq->rt_ctx_cnt++;
 		wait_parts = true;
@@ -1204,7 +1159,7 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 
 	list_del(&ctx->entry);
 	rq->ctx_cnt--;
-	if (ctx_is_rt(ctx)) {
+	if (aie2_is_ctx_rt(ctx)) {
 		rq->rt_ctx_cnt--;
 		wait_parts = true;
 	}

@@ -82,10 +82,6 @@
 #define AIE2_DPT_MSI_ADDR_MASK	GENMASK(23, 0)
 
 struct amdxdna_ctx_priv;
-struct event_trace_req_buf;
-struct start_event_trace_resp;
-struct config_logging_dram_buf_resp;
-struct logging_req_buf;
 struct aie2_partition;
 
 enum aie2_smu_reg_idx {
@@ -355,8 +351,6 @@ struct amdxdna_dev_hdl {
 	struct mailbox			*mbox;
 	struct mailbox_channel		*mgmt_chann;
 	struct async_events		*async_events;
-	struct event_trace_req_buf	*event_trace_req;
-	struct logging_req_buf		*logging_req;
 
 	u32				dev_status;
 	u32				hwctx_cnt;
@@ -505,9 +499,6 @@ int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *ver
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 				    struct amdxdna_fw_ver *fw_ver);
-int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
-			   u32 size, u32 event_category);
-int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev);
 int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, enum fw_log_level level);
 int aie2_set_log_format(struct amdxdna_dev_hdl *ndev, enum fw_log_format format);
 int aie2_set_log_destination(struct amdxdna_dev_hdl *ndev, enum fw_log_destination destination);
@@ -575,6 +566,50 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 int aie2_rq_submit_enter(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 void aie2_rq_submit_exit(struct amdxdna_ctx *ctx);
 void aie2_rq_yield(struct amdxdna_ctx *ctx);
+
+static inline bool aie2_is_ctx_connected(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_CONNECTED;
+}
+
+static inline bool aie2_is_ctx_rt(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->priority == CTX_RQ_REALTIME;
+}
+
+static inline bool aie2_is_ctx_debug(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DEBUG;
+}
+
+static inline bool aie2_is_ctx_fatal(struct amdxdna_ctx *ctx)
+{
+	if (ctx->priv->status == CTX_STATE_DEAD)
+		return true;
+
+	return aie2_is_ctx_debug(ctx);
+}
+
+static inline bool aie2_is_ctx_disconnected(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DISCONNECTED;
+}
+
+static inline bool aie2_is_ctx_dispatched(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DISPATCHED;
+}
+
+static inline bool aie2_is_ctx_disconnecting(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DISCONNECTING;
+}
+
+static inline bool ctx_should_stop(struct amdxdna_ctx *ctx)
+{
+	return aie2_is_ctx_connected(ctx) || aie2_is_ctx_disconnecting(ctx) ||
+	       aie2_is_ctx_debug(ctx);
+}
 
 /* aie2_dpt.c */
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level);
