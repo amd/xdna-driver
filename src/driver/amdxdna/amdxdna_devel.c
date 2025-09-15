@@ -165,11 +165,6 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 	/* Device doesn't do scatter/gather, fail non-contiguous map */
 	if (drm_prime_get_contiguous_size(sgt) != abo->mem.size) {
 		XDNA_ERR(xdna, "noncontiguous dma map, size:%ld", abo->mem.size);
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-		drm_gem_shmem_put_pages(&abo->base);
-#else
-		drm_gem_shmem_put_pages_locked(&abo->base);
-#endif
 		return -ENOMEM;
 	}
 
