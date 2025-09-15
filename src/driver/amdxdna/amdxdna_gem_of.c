@@ -39,12 +39,27 @@ struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client, u32 b
 	return NULL;
 }
 
+static void amdxdna_imported_obj_free(struct amdxdna_gem_obj *abo)
+{
+	dma_buf_unmap_attachment_unlocked(abo->attach, abo->base.sgt, DMA_BIDIRECTIONAL);
+	dma_buf_detach(abo->dma_buf, abo->attach);
+	dma_buf_put(abo->dma_buf);
+	drm_gem_object_release(to_gobj(abo));
+	kfree(abo);
+}
+
 static void amdxdna_gem_dma_obj_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
+
+	if (is_import_bo(abo)) {
+		amdxdna_imported_obj_free(abo);
+		return;
+	}
+
 	drm_gem_dma_object_free(gobj);
 }
 
@@ -109,9 +124,9 @@ struct drm_gem_object *amdxdna_gem_prime_import(struct drm_device *dev, struct d
 
 	abo = to_xdna_obj(gobj);
 	abo->mem.size = dma_buf->size;
-	abo->type = AMDXDNA_BO_SHARE;
-	abo->flags = 0;
 	abo->mem.dev_addr = sg_dma_address(sgt->sgl);
+	abo->attach = attach;
+	abo->dma_buf = dma_buf;
 
 	return gobj;
 
