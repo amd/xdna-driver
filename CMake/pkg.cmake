@@ -73,8 +73,10 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   PATTERN "*.yaml"
   )
 
-# Install VTD runner archive file
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/VTD/runner/xrt_smi_strx.a
+# Install VTD runner archive files
+install(FILES 
+  ${CMAKE_CURRENT_SOURCE_DIR}/VTD/runner/xrt_smi_strx.a
+  ${CMAKE_CURRENT_SOURCE_DIR}/VTD/runner/xrt_smi_phx.a
   DESTINATION ${XDNA_PKG_DATA_DIR}/bins
   COMPONENT ${XDNA_COMPONENT}
   )
