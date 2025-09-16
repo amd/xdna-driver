@@ -180,7 +180,7 @@ size_t
 hwctx::
 get_num_uc() const
 {
-  return m_col_cnt;
+  return m_col_cnt * 2;
 }
 
 xrt_core::cuidx_type
