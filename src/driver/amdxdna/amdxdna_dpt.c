@@ -426,6 +426,5 @@ int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 	amdxdna_mgmt_buff_free(log_hdl->dma_hdl);
 	kfree(log_hdl);
 	xdna->fw_log = NULL;
-	log_hdl->enabled = false;
 	return 0;
 }
