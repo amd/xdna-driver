@@ -16,6 +16,7 @@
 #include <linux/seqlock_types.h>
 
 #include "amdxdna_ctx.h"
+#include "amdxdna_dpt.h"
 #ifdef AMDXDNA_OF
 /*
  * TODO: remove this and implement physical contiguous memory by carvedout memory
@@ -47,6 +48,7 @@ struct amdxdna_dev;
 struct amdxdna_client;
 struct amdxdna_dev_hdl;
 struct amdxdna_dev_priv;
+struct amdxdna_mgmt_dma_hdl;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
@@ -60,6 +62,8 @@ struct amdxdna_dev_ops {
 	void (*suspend)(struct amdxdna_dev *xdna);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
+	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);
+	int (*fw_log_fini)(struct amdxdna_dev *xdna);
 
 	/* Below device ops are called by IOCTL */
 	int (*ctx_init)(struct amdxdna_ctx *ctx);
@@ -126,6 +130,7 @@ struct amdxdna_dev {
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
 	struct amdxdna_tdr		tdr;
+	struct amdxdna_dpt		*fw_log;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
