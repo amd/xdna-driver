@@ -352,7 +352,7 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 /*
  * mailbox_get_msg() is the key function to get message from ring buffer.
  * If it returns 0, means 1 message was consumed.
- * If it returns -ENOENT, means ring buffer is emtpy.
+ * If it returns -ENOENT, means ring buffer is empty.
  * If it returns other value, means ERROR.
  */
 static int mailbox_get_msg(struct mailbox_channel *mb_chann)

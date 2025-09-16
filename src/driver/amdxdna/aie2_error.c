@@ -238,7 +238,6 @@ static void aie2_error_worker(struct work_struct *err_work)
 
 	e->resp.status = MAX_AIE2_STATUS_CODE;
 
-
 	vaddr = aie2_mgmt_buff_get_cpu_addr(&e->mgmt_hdl);
 	if (IS_ERR(vaddr)) {
 		XDNA_ERR(xdna, "Failed to get a valid virtual addr: %ld", PTR_ERR(vaddr));

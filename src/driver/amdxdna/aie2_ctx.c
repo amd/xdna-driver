@@ -957,9 +957,8 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	int ret, i;
 
 	ret = down_killable(&ctx->priv->job_sem);
-	if (ret) {
+	if (ret)
 		XDNA_ERR(xdna, "%s Grab job sem failed, ret %d", ctx->name, ret);
-	}
 
 	ret = aie2_rq_submit_enter(&xdna->dev_handle->ctx_rq, ctx);
 	if (ret) {

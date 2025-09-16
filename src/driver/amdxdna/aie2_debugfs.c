@@ -3,6 +3,8 @@
  * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
  */
 
+#include <drm/drm_debugfs.h>
+#include <drm/drm_cache.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/debugfs.h>
@@ -10,17 +12,12 @@
 #include <linux/vmalloc.h>
 #include <linux/completion.h>
 #include <linux/pm_runtime.h>
-#include <drm/drm_debugfs.h>
-#include <drm/drm_cache.h>
+#include <linux/wait.h>
 
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 
 #if defined(CONFIG_DEBUG_FS)
-#define EVENT_CATEGORY_BUF_SIZE	22
-#define LOG_LEVEL_BUF_SIZE	11
-#define MIN_INPUT_ARG_SIZE	8
-#define MAX_INPUT_ARG_SIZE	40
 #define SIZE			31
 
 #define TX_TIMEOUT 2000 /* milliseconds */
@@ -219,329 +216,6 @@ static int aie2_dpm_level_get(struct seq_file *m, void *unused)
 }
 
 AIE2_DBGFS_FOPS(dpm_level, aie2_dpm_level_get, aie2_dpm_level_set);
-
-static const char *aie2_event_trace_input_info(void)
-{
-	return	"echo enable=1 size=1K category=0xFFFFFF -> Follow given input format to enable\n"
-		"enable=[0, 1] -> enable=1 to enable, enable=0 to disable\n"
-		"size=[1K, 2K, 4K...512K to 1M] -> buffer size should be pow of 2\n"
-		"category=[0x1 - 0xFFFFFFFF] -> 32 bit word\n";
-}
-
-static ssize_t aie2_event_trace_write(struct file *file, const char __user *buf,
-				      size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	char event_trace_cfg_buf[MAX_INPUT_ARG_SIZE + 1];
-	u32 enable = 0, buf_size = 0, event_category = 0;
-	char *kbuf, *token, *key, *val;
-	int ret = 0;
-
-	if (len < MIN_INPUT_ARG_SIZE || len > MAX_INPUT_ARG_SIZE) {
-		XDNA_ERR(ndev->xdna, "Input length %zu beyond buffer size [%d, %d]",
-			 len, MIN_INPUT_ARG_SIZE, MAX_INPUT_ARG_SIZE);
-		return -EINVAL;
-	}
-
-	kbuf = event_trace_cfg_buf;
-	if (copy_from_user(kbuf, buf, len))
-		return -EFAULT;
-
-	kbuf[len] = '\0';
-	token = strsep(&kbuf, " ");
-
-	while (token) {
-		key = strsep(&token, "=");
-		val = token;
-
-		if (key && val) {
-			if (strcmp(key, "enable") == 0) {
-				ret = kstrtouint(val, 10, &enable);
-				if (ret) {
-					ret = -EINVAL;
-					goto out;
-				}
-			} else if (strcmp(key, "size") == 0) {
-				buf_size = memparse(val, NULL);
-			} else if (strcmp(key, "category") == 0) {
-				ret = kstrtouint(val, 0, &event_category);
-				if (ret) {
-					ret = -EINVAL;
-					goto out;
-				}
-			} else {
-				ret = -EINVAL;
-				goto out;
-			}
-		}
-		token = strsep(&kbuf, " ");
-	}
-
-	if (enable && (!buf_size || !event_category)) {
-		XDNA_ERR(ndev->xdna, "Invalid config: %u, %u, 0x%08x",
-			 enable, buf_size, event_category);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	aie2_config_event_trace(ndev, enable, buf_size, event_category);
-	return len;
-
-out:
-	if (ret == -EINVAL)
-		XDNA_INFO(ndev->xdna, "%s", aie2_event_trace_input_info());
-
-	return ret;
-}
-
-static int aie2_event_trace_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = m->private;
-
-	if (aie2_is_event_trace_enable(ndev))
-		seq_puts(m, "Event trace is enabled\n");
-	else
-		seq_printf(m, "Event trace is disabled\n%s",
-			   aie2_event_trace_input_info());
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(event_trace, aie2_event_trace_show, aie2_event_trace_write);
-
-static const char *aie2_dram_logging_input_info(void)
-{
-	return	"echo enable=1 size=1K loglevel=4 -> Follow given input format to enable\n"
-		"enable=[0, 1] -> enable=1 to enable, enable=0 to disable\n"
-		"size=[8K, 16K, 32K...512K to 1M] -> buffer size should be pow of 2\n"
-		"loglevel=[0 - 4] -> None-Err...Dbg\n";
-}
-
-static ssize_t aie2_dram_logging_write(struct file *file, const char __user *buf,
-				       size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	u32 enable = 0, buf_size = 0, loglevel = 0;
-	char *kbuf, *token, *key, *val;
-	int ret = 0;
-
-	if (len < MIN_INPUT_ARG_SIZE || len > MAX_INPUT_ARG_SIZE) {
-		XDNA_ERR(ndev->xdna, "Input length %zu beyond buffer size [%d, %d]",
-			 len, MIN_INPUT_ARG_SIZE, MAX_INPUT_ARG_SIZE);
-		return -EINVAL;
-	}
-
-	kbuf = kzalloc(len + 1, GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
-
-	if (copy_from_user(kbuf, buf, len)) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	kbuf[len] = '\0';
-	token = strsep(&kbuf, " ");
-
-	while (token) {
-		key = strsep(&token, "=");
-		val = token;
-
-		if (key && val) {
-			if (strcmp(key, "enable") == 0) {
-				ret = kstrtouint(val, 10, &enable);
-				if (ret) {
-					ret = -EINVAL;
-					goto out;
-				}
-			} else if (strcmp(key, "size") == 0) {
-				buf_size = memparse(val, NULL);
-			} else if (strcmp(key, "loglevel") == 0) {
-				ret = kstrtouint(val, 0, &loglevel);
-				if (ret) {
-					ret = -EINVAL;
-					goto out;
-				}
-			} else {
-				ret = -EINVAL;
-				goto out;
-			}
-		}
-		token = strsep(&kbuf, " ");
-	}
-
-	if (enable && !buf_size) {
-		XDNA_ERR(ndev->xdna, "Invalid config: %u, %u, %u",
-			 enable, buf_size, loglevel);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	aie2_set_dram_log_config(ndev, enable, buf_size, loglevel);
-	ret = len;
-
-out:
-	if (ret == -EINVAL)
-		XDNA_INFO(ndev->xdna, "%s", aie2_dram_logging_input_info());
-
-	kfree(kbuf);
-	return ret;
-}
-
-static int aie2_dram_logging_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = m->private;
-
-	if (aie2_is_dram_logging_enable(ndev))
-		seq_puts(m, "Dram logging is enabled\n");
-	else
-		seq_printf(m, "Dram logging is disabled\n%s",
-			   aie2_dram_logging_input_info());
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(dram_logging, aie2_dram_logging_show, aie2_dram_logging_write);
-
-static ssize_t aie2_dram_log_cfg_write(struct file *file, const char __user *buf,
-				       size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	char log_level_buf[LOG_LEVEL_BUF_SIZE + 1];
-	char *kbuf, *token, *key, *val;
-	u32 loglevel;
-	int ret;
-
-	if (len > LOG_LEVEL_BUF_SIZE) {
-		XDNA_ERR(ndev->xdna, "Input length %zu > buffer size %d",
-			 len, LOG_LEVEL_BUF_SIZE);
-		return -EINVAL;
-	}
-
-	kbuf = log_level_buf;
-	if (copy_from_user(kbuf, buf, len))
-		return -EFAULT;
-
-	kbuf[len] = '\0';
-	token = strsep(&kbuf, " ");
-
-	if (token) {
-		key = strsep(&token, "=");
-		val = token;
-
-		if (!key || !val) {
-			XDNA_ERR(ndev->xdna, "Invalid \'key=val\' pair e.g loglevel=[0-4]");
-			return -EINVAL;
-		}
-
-		if (strcmp(key, "loglevel") == 0) {
-			ret = kstrtouint(val, 0, &loglevel);
-			if (ret || loglevel > 4) {
-				XDNA_ERR(ndev->xdna, "Invalid log level %u",
-					 loglevel);
-				return -EINVAL;
-			}
-
-			ret = aie2_set_log_level(ndev, loglevel);
-			if (ret) {
-				XDNA_ERR(ndev->xdna, "Failed to set log level: %d", ret);
-				return ret;
-			}
-		} else {
-			XDNA_ERR(ndev->xdna, "Invalid key %s, e.g. loglevel=[0-4]", key);
-			return -EINVAL;
-		}
-	}
-
-	return len;
-}
-
-static int aie2_dram_log_cfg_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = m->private;
-	u32 log_level;
-
-	if (!aie2_is_dram_logging_enable(ndev)) {
-		seq_puts(m, "Dram logging is disabled\n");
-	} else {
-		log_level = aie2_get_log_level(ndev);
-		seq_printf(m, "log level %u\n", log_level);
-		seq_puts(m, "To change log level echo loglevel=[0-4]\n");
-	}
-
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(dram_log_cfg, aie2_dram_log_cfg_show, aie2_dram_log_cfg_write);
-
-static ssize_t aie2_event_trace_cfg_write(struct file *file, const char __user *buf,
-					  size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
-	char event_category_buf[EVENT_CATEGORY_BUF_SIZE + 1];
-	char *kbuf, *token, *key, *val;
-	u32 category;
-	int ret;
-
-	if (len > EVENT_CATEGORY_BUF_SIZE) {
-		XDNA_ERR(ndev->xdna, "Input length %zu > buffer size %d",
-			 len, EVENT_CATEGORY_BUF_SIZE);
-		return -EINVAL;
-	}
-
-	kbuf = event_category_buf;
-	if (copy_from_user(kbuf, buf, len))
-		return -EFAULT;
-
-	kbuf[len] = '\0';
-	token = strsep(&kbuf, " ");
-
-	if (token) {
-		key = strsep(&token, "=");
-		val = token;
-
-		if (!key || !val) {
-			XDNA_ERR(ndev->xdna, "Invalid \'key=val\' pair");
-			return -EINVAL;
-		}
-
-		if (strcmp(key, "category") == 0) {
-			ret = kstrtouint(val, 0, &category);
-			if (ret || !category) {
-				XDNA_ERR(ndev->xdna, "Invalid  %u",
-					 category);
-				return -EINVAL;
-			}
-
-			ret = aie2_set_event_trace_cfg(ndev, category);
-			if (ret) {
-				XDNA_ERR(ndev->xdna, "Failed to set event trace cfg: %d", ret);
-				return ret;
-			}
-		} else {
-			XDNA_ERR(ndev->xdna, "Invalid key %s, e.g. category=[0x1-0xFFFFFFFF]", key);
-			return -EINVAL;
-		}
-	}
-
-	return len;
-}
-
-static int aie2_event_trace_cfg_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev_hdl *ndev = m->private;
-	u32 categories;
-
-	if (!aie2_is_event_trace_enable(ndev)) {
-		seq_puts(m, "Event trace is disabled\n");
-	} else {
-		categories = aie2_get_event_trace_categories(ndev);
-		seq_printf(m, "categories 0x%08x\n", categories);
-		seq_puts(m, "To change event category echo category=[0x1-0xFFFFFFFF]\n");
-	}
-
-	return 0;
-}
-
-AIE2_DBGFS_FOPS(event_trace_cfg, aie2_event_trace_cfg_show, aie2_event_trace_cfg_write);
 
 static int test_case01(struct amdxdna_dev_hdl *ndev)
 {
@@ -881,6 +555,50 @@ free_buf:
 
 AIE2_DBGFS_FOPS(get_app_health, aie2_get_app_health_show, NULL);
 
+static ssize_t aie2_dump_fw_log_set(struct file *file, const char __user *ptr,
+				    size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	bool dump;
+	int ret;
+
+	if (!xdna->fw_log || !xdna->fw_log->enabled) {
+		XDNA_ERR(xdna, "FW logging disabled or unsupported");
+		return -EINVAL;
+	}
+
+	ret =  kstrtobool_from_user(ptr, len, &dump);
+	if (ret) {
+		XDNA_ERR(xdna, "Invalid input value, ret %d", ret);
+		return ret;
+	}
+
+	ret = amdxdna_dpt_dump_to_dmesg(xdna->fw_log, dump);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to %s FW log dump, ret %d",
+			 dump ? "enable" : "disable", ret);
+		return ret;
+	}
+	return len;
+}
+
+static int aie2_dump_fw_log_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	if (!ndev->xdna->fw_log || !ndev->xdna->fw_log->enabled) {
+		XDNA_ERR(ndev->xdna, "FW logging is not enabled");
+		return -EINVAL;
+	}
+
+	seq_printf(m, "%s\n", ndev->xdna->fw_log->dump_to_dmesg ? "enabled" : "disabled");
+
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dump_fw_log, aie2_dump_fw_log_get, aie2_dump_fw_log_set);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -898,12 +616,9 @@ const struct {
 	AIE2_DBGFS_FILE(telemetry_error_info, 0400),
 	AIE2_DBGFS_FILE(telemetry_profiling, 0400),
 	AIE2_DBGFS_FILE(telemetry_debug, 0400),
-	AIE2_DBGFS_FILE(event_trace, 0600),
-	AIE2_DBGFS_FILE(event_trace_cfg, 0600),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
-	AIE2_DBGFS_FILE(dram_logging, 0600),
-	AIE2_DBGFS_FILE(dram_log_cfg, 0600),
+	AIE2_DBGFS_FILE(dump_fw_log, 0600),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
