@@ -961,7 +961,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		if (IS_ERR(abo))
 			break;
 		if (is_import_bo(abo)) {
-			XDNA_WARN(xdna, "skip mem map for import bo");
+			XDNA_DBG(xdna, "skip mem map for import bo");
 			break;
 		}
 		if (!abo->mem.pages) {
