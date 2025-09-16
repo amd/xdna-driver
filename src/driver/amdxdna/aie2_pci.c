@@ -1599,6 +1599,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.debugfs		= aie2_debugfs_init,
 	.fw_log_init		= aie2_fw_log_init,
 	.fw_log_fini		= aie2_fw_log_fini,
+	.fw_log_parse		= aie2_fw_log_parse,
 	.get_aie_info		= aie2_get_info,
 	.get_aie_array		= aie2_get_array,
 	.set_aie_state		= aie2_set_state,

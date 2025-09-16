@@ -7,6 +7,66 @@
 #include "aie2_msg_priv.h"
 #include "amdxdna_mgmt.h"
 
+#define AIE2_MGMT_APP_ID		0xFF
+
+static const char * const fw_log_level_str[] = {
+	"OFF",
+	"ERR",
+	"WRN",
+	"INF",
+	"DBG",
+	"MAX"
+};
+
+void aie2_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+{
+	char *end = buffer + size;
+
+	if (!size)
+		return;
+
+	while (buffer < end) {
+		struct fw_log_header {
+			u64 timestamp;
+			u32 format      : 1;
+			u32 reserved_1  : 7;
+			u32 level       : 3;
+			u32 reserved_11 : 5;
+			u32 appn        : 8;
+			u32 argc        : 8;
+			u32 line        : 16;
+			u32 module      : 16;
+		} *header;
+		const u32 header_size = sizeof(struct fw_log_header);
+		char appid[20];
+		u32 msg_size;
+
+		header = (struct fw_log_header *)buffer;
+
+		if (header->format != FW_LOG_FORMAT_FULL || !header->argc || header->level > 4) {
+			XDNA_ERR(xdna, "Potential buffer overflow or corruption!\n");
+			buffer += AMDXDNA_DPT_FW_LOG_MSG_ALIGN;
+			continue;
+		}
+
+		msg_size = (header->argc) * sizeof(u32);
+		if (msg_size + header_size > size) {
+			XDNA_ERR(xdna, "Log entry size exceeds available buffer size");
+			return;
+		}
+
+		if (header->appn == AIE2_MGMT_APP_ID)
+			scnprintf(appid, sizeof(appid), "MGMNT");
+		else
+			scnprintf(appid, sizeof(appid), "APP%2d", header->appn);
+
+		XDNA_INFO(xdna, "[%lld] [%s] [%s]: %s", header->timestamp,
+			  fw_log_level_str[header->level], appid, (char *)(buffer + header_size));
+
+		buffer += ALIGN(header_size + msg_size, AMDXDNA_DPT_FW_LOG_MSG_ALIGN);
+	}
+}
+
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl = xdna->fw_log->dma_hdl;

@@ -30,8 +30,6 @@ bool poll_fw_log;
 module_param(poll_fw_log, bool, 0444);
 MODULE_PARM_DESC(poll_fw_log, " Enable firmware log polling (Default false)");
 
-#define AMDXDNA_MGMT_APP_ID		0xFF
-
 static bool fw_log_dump_to_dmesg;
 
 static bool amdxdna_update_tail(struct amdxdna_dpt *dpt)
@@ -61,70 +59,12 @@ static bool amdxdna_update_tail(struct amdxdna_dpt *dpt)
 	return false;
 }
 
-static const char * const fw_log_level_str[] = {
-	"OFF",
-	"ERR",
-	"WRN",
-	"INF",
-	"DBG",
-	"MAX"
-};
-
-static void amdxdna_fw_log_print(struct amdxdna_dpt *log, u8 *buffer, size_t size)
-{
-	u8 *end = buffer + size;
-
-	if (!size)
-		return;
-
-	while (buffer < end) {
-		struct fw_log_header {
-			u64 timestamp;
-			u32 format      : 1;
-			u32 reserved_1  : 7;
-			u32 level       : 3;
-			u32 reserved_11 : 5;
-			u32 appn        : 8;
-			u32 argc        : 8;
-			u32 line        : 16;
-			u32 module      : 16;
-		} *header;
-		const u32 header_size = sizeof(struct fw_log_header);
-		char appid[20];
-		u32 msg_size;
-
-		header = (struct fw_log_header *)buffer;
-
-		if (header->format != FW_LOG_FORMAT_FULL || !header->argc || header->level > 4) {
-			XDNA_ERR(log->xdna, "Potential buffer overflow or corruption!\n");
-			buffer += AMDXDNA_DPT_FW_LOG_MSG_ALIGN;
-			continue;
-		}
-
-		msg_size = (header->argc) * sizeof(u32);
-		if (msg_size + header_size > size) {
-			XDNA_ERR(log->xdna, "Log entry size exceeds available buffer size");
-			return;
-		}
-
-		if (header->appn == AMDXDNA_MGMT_APP_ID)
-			scnprintf(appid, sizeof(appid), "MGMNT");
-		else
-			scnprintf(appid, sizeof(appid), "APP%2d", header->appn);
-
-		XDNA_INFO(log->xdna, "[%lld] [%s] [%s]: %s", header->timestamp,
-			  fw_log_level_str[header->level], appid, (char *)(buffer + header_size));
-
-		buffer += ALIGN(header_size + msg_size, AMDXDNA_DPT_FW_LOG_MSG_ALIGN);
-	}
-}
-
 static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buffer, size_t *size)
 {
 	struct amdxdna_dev *xdna = dpt->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	size_t req_size, log_size;
-	u32 start, aligned, end;
+	u32 start, end;
 	u64 tail;
 
 	dma_hdl = dpt->dma_hdl;
@@ -136,12 +76,6 @@ static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buffer, size_t
 
 	if (start == end)
 		return 0;
-
-	if (!IS_ALIGNED(start, AMDXDNA_DPT_FW_LOG_MSG_ALIGN)) {
-		XDNA_WARN(xdna, "Unaligned start offset");
-		aligned = ALIGN(start, AMDXDNA_DPT_FW_LOG_MSG_ALIGN);
-		start = aligned > log_size ? 0 : aligned;
-	}
 
 	req_size = (end > start) ? (end - start) : (log_size - start + end);
 
@@ -182,10 +116,8 @@ static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
 	dpt->minor = footer->minor;
 	dpt->major = footer->major;
 
-	XDNA_DBG(dpt->xdna, "%s: version: %d.%d",
-		 dpt->name, dpt->major, dpt->minor);
-	XDNA_DBG(dpt->xdna, "%s: payload version: %d",
-		 dpt->name, dpt->payload_version);
+	XDNA_DBG(dpt->xdna, "%s: version: %d.%d", dpt->name, dpt->major, dpt->minor);
+	XDNA_DBG(dpt->xdna, "%s: payload version: 0x%x", dpt->name, dpt->payload_version);
 }
 
 static irqreturn_t dpt_irq_handler(int irq, void *data)
@@ -270,8 +202,10 @@ static void amdxdna_dpt_worker(struct work_struct *w)
 		return;
 
 	/* Skip fetch and print to dmesg if dump_fw_log is not enabled */
-	if (!dpt->dump_to_dmesg)
+	if (!dpt->dump_to_dmesg || !dpt->xdna->dev_info->ops->fw_log_parse) {
+		XDNA_INFO(dpt->xdna, "Skipped dumping to dmesg");
 		return;
+	}
 
 	ret = amdxdna_dpt_fetch_payload(dpt, dpt->local_buffer, &size);
 	if (ret) {
@@ -279,7 +213,7 @@ static void amdxdna_dpt_worker(struct work_struct *w)
 		return;
 	}
 
-	amdxdna_fw_log_print(dpt, dpt->local_buffer, size);
+	dpt->xdna->dev_info->ops->fw_log_parse(dpt->xdna, dpt->local_buffer, size);
 }
 
 static void amdxdna_dpt_timer(struct timer_list *t)
