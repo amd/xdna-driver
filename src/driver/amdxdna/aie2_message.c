@@ -705,8 +705,10 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *
 	dma_addr_t addr;
 	int ret;
 
-	if (!aie2_is_supported_msg(ndev, MSG_OP_GET_APP_HEALTH))
+	if (!aie2_is_supported_msg(ndev, MSG_OP_GET_APP_HEALTH)) {
+		XDNA_DBG(xdna, "Get app health unsupported for the device or firmware version");
 		return -EOPNOTSUPP;
+	}
 
 	addr = aie2_mgmt_buff_get_dma_addr(mgmt_hdl);
 	if (!addr) {
@@ -722,12 +724,13 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *
 	if (ret)
 		XDNA_DBG(xdna, "Get app health failed, ret %d", ret);
 
-	if (resp.status == AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID) {
-		XDNA_ERR(xdna, "Invalid buffer size(required 0x%x) for get app health cmd",
-			 resp.required_buffer_size);
-		ret = -EINVAL;
-	} else if (resp.status != AIE2_STATUS_SUCCESS) {
-		XDNA_ERR(xdna, "Get app health got status 0x%x", resp.status);
+	if (resp.status != AIE2_STATUS_SUCCESS) {
+		if (resp.status == AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID) {
+			XDNA_ERR(xdna, "Invalid buffer size(required 0x%x) for get app health cmd",
+				 resp.required_buffer_size);
+		} else {
+			XDNA_ERR(xdna, "Get app health got status 0x%x", resp.status);
+		}
 		ret = -EINVAL;
 	}
 

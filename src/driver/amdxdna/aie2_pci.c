@@ -1264,7 +1264,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			else
 				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_IDLE;
 
-			if (ctx->priv->status == CTX_STATE_CONNECTED) {
+			if (aie2_is_ctx_connected(ctx)) {
 				aie2_mgmt_buff_clflush(&mgmt_hdl);
 
 				mutex_lock(&xdna->dev_handle->aie2_lock);
