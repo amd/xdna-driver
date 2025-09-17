@@ -33,11 +33,12 @@ struct amdxdna_gem_obj {
 	u64                             flags;
 	struct mutex                    lock; /* Protects: pinned, assigned_hwctx */
 	struct amdxdna_mem              mem;
+	struct dma_buf                  *dma_buf;
+	struct dma_buf_attachment       *attach;
 };
 
 #define to_gobj(obj)		(&(obj)->base.base)
-#define is_import_bo(obj)	(to_gobj(obj)->import_attach)
-
+#define is_import_bo(obj)       ((obj)->attach)
 static inline struct amdxdna_gem_obj *to_xdna_obj(struct drm_gem_object *gobj)
 {
 	return container_of(gobj, struct amdxdna_gem_obj, base.base);
