@@ -685,6 +685,19 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_
 	return xdna_mailbox_send_msg(ndev->mgmt_chann, &msg, TX_TIMEOUT);
 }
 
+void aie2_reset_app_health_report(struct app_health_report *r)
+{
+	if (!r)
+		return;
+
+	r->fatal_info.exception_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->fatal_info.exception_pc = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->fatal_info.app_module = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->fatal_info.fatal_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->txn_op_id = AIE2_APP_HEALTH_RESET_TXN_OP_ID;
+	r->ctx_pc = AIE2_APP_HEALTH_RESET_CTX_PC;
+}
+
 int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
 			u32 context_id, u32 size)
 {
