@@ -364,8 +364,6 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 		XDNA_DBG(xdna, "unmap bo for non import bo");
 		if (abo->type == AMDXDNA_BO_CMD)
 			amdxdna_mem_unmap(xdna, &abo->mem);
-		else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
-			amdxdna_bo_dma_unmap(abo);
 	}
 #endif
 	amdxdna_gem_vunmap(abo);
@@ -657,6 +655,11 @@ amdxdna_gem_create_user_object(struct drm_device *dev, struct amdxdna_drm_create
 	if (va_tbl.num_entries > 0) {
 		if (args->type == AMDXDNA_BO_CMD)
 			flags |= AMDXDNA_UBUF_FLAG_MAP_DMA;
+
+#ifdef AMDXDNA_DEVEL
+		if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
+			flags |= AMDXDNA_UBUF_FLAG_MAP_DMA;
+#endif
 
 		dma_buf = amdxdna_get_ubuf(dev, flags, va_tbl.num_entries,
 					   u64_to_user_ptr(args->vaddr + sizeof(va_tbl)));
@@ -958,7 +961,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		if (IS_ERR(abo))
 			break;
 		if (is_import_bo(abo)) {
-			XDNA_WARN(xdna, "skip mem map for import bo");
+			XDNA_DBG(xdna, "skip mem map for import bo");
 			break;
 		}
 		if (!abo->mem.pages) {
