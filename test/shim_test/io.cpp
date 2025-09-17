@@ -671,8 +671,16 @@ verify_result()
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
   auto cdata = reinterpret_cast<ert_ctx_health_data *>(cpkt->data);
-  if (cdata->txn_op_idx != 0x11800)
+  if (cdata->txn_op_idx != 0x11800) {
+    std::cerr << "Incorrect app health data:\n";
+    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->txn_op_idx << "\n";
+    std::cerr << "\tContext PC: 0x" << std::hex << cdata->ctx_pc << "\n";
+    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->fatal_error_type << "\n";
+    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->fatal_error_exception_type << "\n";
+    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->fatal_error_exception_pc << "\n";
+    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->fatal_error_app_module << "\n";
     throw std::runtime_error("Incorrect txn_op_idx in context health data!!!");
+  }
 }
 
 const char *
@@ -743,7 +751,7 @@ run()
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto chdl = cbo->get();
   hwq->submit_command(chdl);
-  hwq->wait_command(chdl, 5000);
+  hwq->wait_command(chdl, 0); // Wait forever and expect the driver TDR to kick-in
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_TIMEOUT) // Command must time out, or we fail
     throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
