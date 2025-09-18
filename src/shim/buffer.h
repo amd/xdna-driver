@@ -75,7 +75,7 @@ public:
   share() const override;
 
   void
-  sync(direction, size_t size, size_t offset) override;
+  sync(direction dir, size_t size, size_t offset) override;
 
   void
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
@@ -122,6 +122,9 @@ public:
 
 protected:
   const pdev& m_pdev;
+
+  void
+  sync_by_driver(direction dir, size_t size, size_t offset);
 
 private:
   std::string
@@ -200,6 +203,9 @@ public:
 
   void
   unbind_hwctx() override;
+
+  void
+  sync(direction dir, size_t size, size_t offset) override;
 
 private:
   std::string
