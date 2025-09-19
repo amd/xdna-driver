@@ -4,6 +4,8 @@
 #ifndef _SHIMTEST_HWCTX_H_
 #define _SHIMTEST_HWCTX_H_
 
+#include <iostream>
+
 #include "dev_info.h"
 
 #include "core/common/shim/hwctx_handle.h"

@@ -13,6 +13,7 @@
 #include "core/include/ert.h"
 #include "core/common/cuidx_type.h"
 #include <cstring>
+#include <iostream>
 
 class exec_buf {
 public:
