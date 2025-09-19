@@ -4,6 +4,8 @@
 // Disable debug print in this file.
 //#undef XDNA_SHIM_DEBUG
 
+#include <iostream>
+
 #include "buffer.h"
 #include "shim_debug.h"
 #include "core/common/config_reader.h"
