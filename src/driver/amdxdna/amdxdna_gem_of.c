@@ -70,6 +70,7 @@ static const struct drm_gem_object_funcs amdxdna_gem_dma_funcs = {
 	.vmap = drm_gem_dma_object_vmap,
 	.mmap = drm_gem_dma_object_mmap,
 	.vm_ops = &drm_gem_dma_vm_ops,
+	.export = drm_gem_prime_export,
 };
 
 /* For drm_driver->gem_create_object callback */
