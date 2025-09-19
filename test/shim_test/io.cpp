@@ -5,9 +5,11 @@
 #include "hwctx.h"
 #include "io_config.h"
 #include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
+#include "xrt/detail/xrt_error_code.h"
 
 #include <climits>
 #include <string>
+#include <sstream>
 #include <regex>
 
 using namespace xrt_core;
@@ -785,4 +787,131 @@ elf_preempt_io_test_bo_set::
 get_preemption_checkpoints()
 {
   return m_total_fine_preemption_checkpoints;
+}
+
+const std::map<uint32_t, enum xrtErrorNum>
+async_error_io_test_bo_set::
+m_shim_event_err_num_map = {
+  {64, XRT_ERROR_NUM_AIE_BUS},
+  {65, XRT_ERROR_NUM_AIE_STREAM},
+  {66, XRT_ERROR_NUM_AIE_STREAM},
+  {67, XRT_ERROR_NUM_AIE_BUS},
+  {68, XRT_ERROR_NUM_AIE_BUS},
+  {69, XRT_ERROR_NUM_AIE_BUS},
+  {70, XRT_ERROR_NUM_AIE_BUS},
+  {71, XRT_ERROR_NUM_AIE_BUS},
+  {72, XRT_ERROR_NUM_AIE_DMA},
+  {73, XRT_ERROR_NUM_AIE_DMA},
+  {74, XRT_ERROR_NUM_AIE_LOCK},
+};
+
+async_error_io_test_bo_set::
+async_error_io_test_bo_set(device* dev)
+  : m_last_err_timestamp(0), io_test_bo_set_base(dev, get_xclbin_name(dev))
+{
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+    size_t size;
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+    {
+      auto size = 3 * sizeof(uint32_t);
+      alloc_ctrl_bo(ibo, m_dev, size);
+
+      auto instruction_p = ibo.tbo->map();
+      // Error Event ID: 64
+      // Expect "Row: 0, Col: 1, module 2, event ID 64, category 4" in dmesg
+      uint32_t event_id = 0x00000040;
+      instruction_p[0] = 0x02000000;
+      instruction_p[1] = 0x00034008;
+      instruction_p[2] = event_id;
+
+      uint64_t err_num = m_shim_event_err_num_map.at(event_id);
+      uint64_t err_drv = XRT_ERROR_DRIVER_AIE;
+      uint64_t err_severity = XRT_ERROR_SEVERITY_CRITICAL;
+      uint64_t err_module = XRT_ERROR_MODULE_AIE_PL;
+      uint64_t err_class = XRT_ERROR_CLASS_AIE;
+      m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
+    }
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void
+async_error_io_test_bo_set::
+init_cmd(cuidx_type idx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_CU);
+  ebuf.set_cu_idx(idx);
+  ebuf.add_arg_64(1);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.add_arg_32(m_bo_array[IO_TEST_BO_INSTRUCTION].tbo->size() / sizeof(int32_t));
+
+  if (dump)
+    ebuf.dump();
+}
+
+void
+async_error_io_test_bo_set::
+verify_result()
+{
+  auto buf = device_query<query::xocl_errors>(m_dev);
+  if (buf.empty())
+    throw std::runtime_error("failed to get async errors, return empty information.");
+
+  auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
+  xrtErrorCode err_code;
+  xrtErrorTime err_timstamp;
+  std::tie(err_code, err_timstamp) = ect;
+  if (err_code != m_expect_err_code) {
+    std::stringstream ss;
+    ss << "failed to get async errors, unexpected error code, 0x" << std::hex << err_code
+       << ", 0x" << std::hex << m_expect_err_code << ".";
+    throw std::runtime_error(ss.str());
+  }
+  if (err_timstamp == m_last_err_timestamp) {
+    std::stringstream ss;
+    ss << "failed to get async errors, return old timestamp: " << m_last_err_timestamp << ".";
+    throw std::runtime_error(ss.str());
+  }
+  m_last_err_timestamp = err_timstamp;
+}
+
+void
+async_error_io_test_bo_set::
+run()
+{
+  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto kernel_type = get_kernel_type(m_dev, m_xclbin_name.c_str());
+  if (kernel_type != KERNEL_TYPE_DPU_SEQ)
+      throw std::runtime_error("ELF flow can't support async error test");
+
+  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
+  if (kernel.empty())
+    throw std::runtime_error("No kernel found");
+  auto cu_idx = hwctx.get()->open_cu_context(kernel);
+
+  init_cmd(cu_idx, false);
+  sync_before_run();
+
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto chdl = cbo->get();
+  hwq->submit_command(chdl);
+  // Async errors will be raised, command can return successful or failed
+  // No need to check the wait_command return.
+  hwq->wait_command(chdl, 2000);
+  verify_result();
 }
