@@ -51,6 +51,8 @@ public:
 
   uint32_t
   get_queue_bo();
+  
+~xdna_hwq() {}
 
 private:
   const xdna_hwctx *m_hwctx;

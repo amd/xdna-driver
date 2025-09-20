@@ -82,9 +82,9 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   : m_device(dev), 
     m_doorbell(0), 
     m_log_buf(nullptr), 
+    m_hwq (std::make_unique<xdna_hwq>(m_device)),
     m_uuid(xclbin.get_uuid())
 {
-  m_hwq = std::make_unique<xdna_hwq>(m_device);
   init_qos_info(qos);
   parse_xclbin(xclbin);
   amdxdna_drm_create_hwctx arg = {};
