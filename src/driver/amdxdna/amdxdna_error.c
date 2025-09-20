@@ -46,8 +46,10 @@ int amdxdna_error_get_last_async(struct amdxdna_dev *xdna,
 
 	/* Retrieve the last async error information */
 	mutex_lock(&err_cache->lock);
-	if (!cached_last_err->err_code)
+	if (!cached_last_err->err_code) {
+		mutex_unlock(&err_cache->lock);
 		return 0;
+	}
 
 	memcpy(errors, cached_last_err, sizeof(*cached_last_err));
 	mutex_unlock(&err_cache->lock);
