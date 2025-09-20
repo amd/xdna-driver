@@ -181,12 +181,54 @@ static void amdxdna_remove(struct pci_dev *pdev)
 #endif
 }
 
+static pci_ers_result_t amdxdna_error_detected(struct pci_dev *pdev,
+					       pci_channel_state_t state)
+{
+	/* Return PCI_ERS_RESULT_CAN_RECOVER to indicate the driver thinks recovery is possible.
+	 * Return PCI_ERS_RESULT_NEED_RESET to force a reset.
+	 * Return PCI_ERS_RESULT_DISCONNECT to say the device is lost.
+	 */
+
+	return PCI_ERS_RESULT_NEED_RESET;
+}
+
+static void amdxdna_reset_prepare(struct pci_dev *pdev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+
+	if (!xdna->dev_info->ops->reset_prepare)
+		XDNA_ERR(xdna, "Reset prepare not supported on this device");
+	else
+		xdna->dev_info->ops->reset_prepare(xdna);
+}
+
+static void amdxdna_reset_done(struct pci_dev *pdev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+	int ret;
+
+	if (!xdna->dev_info->ops->reset_done) {
+		XDNA_ERR(xdna, "Reset done not supported on this device");
+	} else {
+		ret = xdna->dev_info->ops->reset_done(xdna);
+		if (ret)
+			XDNA_ERR(xdna, "Reset done could not resume device, ret %d", ret);
+	}
+}
+
+static const struct pci_error_handlers amdxdna_err_handler = {
+	.error_detected = amdxdna_error_detected,
+	.reset_prepare = amdxdna_reset_prepare,
+	.reset_done = amdxdna_reset_done,
+};
+
 static struct pci_driver amdxdna_pci_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = pci_ids,
 	.probe = amdxdna_probe,
 	.remove = amdxdna_remove,
 	.driver.pm = &amdxdna_pm_ops,
+	.err_handler = &amdxdna_err_handler,
 };
 
 static int __init amdxdna_mod_init(void)
