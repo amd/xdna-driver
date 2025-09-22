@@ -752,6 +752,7 @@ amdxdna_gem_create_share_object(struct drm_device *dev,
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 {
+	struct amdxdna_dev *xdna =to_xdna_dev(dev);
 	struct dma_buf_attachment *attach;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
@@ -782,6 +783,9 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo->attach = attach;
 	abo->dma_buf = dma_buf;
 	gobj->resv = dma_buf->resv;
+
+	if (xdna->use_cma)
+		abo->mem.cma= true;
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
