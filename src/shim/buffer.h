@@ -75,7 +75,7 @@ public:
   share() const override;
 
   void
-  sync(direction, size_t size, size_t offset) override;
+  sync(direction dir, size_t size, size_t offset) override;
 
   void
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
@@ -122,6 +122,9 @@ public:
 
 protected:
   const pdev& m_pdev;
+
+  void
+  sync_by_driver(direction dir, size_t size, size_t offset);
 
 private:
   std::string
@@ -201,6 +204,9 @@ public:
   void
   unbind_hwctx() override;
 
+  void
+  sync(direction dir, size_t size, size_t offset) override;
+
 private:
   std::string
   bo_sub_type_name() const override;
@@ -217,10 +223,10 @@ public:
   using buffer::buffer;
 
   void
-  config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes) override;
+  config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes) override;
 
   void
-  unconfig(xrt_core::hwctx_handle* hwctx) override;
+  unconfig(const xrt_core::hwctx_handle* hwctx) override;
 
 private:
   std::unique_ptr<buffer> m_metadata_bo;

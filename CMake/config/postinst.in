@@ -12,12 +12,11 @@ if [ "$build_type" = "Debug" ]; then
 	set -x
 fi
 
-installdir=@CMAKE_INSTALL_PREFIX@/xrt
+install_datadir=@CMAKE_INSTALL_PREFIX@/@XDNA_PKG_DATA_DIR@
 udev_rules_d=/etc/udev/rules.d
 amdxdna_rules_file=99-amdxdna.rules
 dracut_conf_d=/etc/dracut.conf.d
 dracut_conf_file=amdxdna.dracut.conf
-export XILINX_XRT=$installdir
 
 # On Fedora/Redhat system, exclude driver from initram
 if [ -e ${dracut_conf_d} ]; then
@@ -29,9 +28,9 @@ fi
 
 echo "Installing new amdxdna Linux kernel module in dkms"
 if [ "$build_type" = "Debug" ]; then
-	DKMS_DRIVER_VERBOSE=true $installdir/amdxdna/dkms_driver.sh --install
+	DKMS_DRIVER_VERBOSE=true $install_datadir/dkms_driver.sh --install
 else
-	$installdir/amdxdna/dkms_driver.sh --install
+	$install_datadir/dkms_driver.sh --install
 fi
 
 echo "Loading new amdxdna Linux kernel module"
@@ -50,7 +49,6 @@ else
 	@PF_INSMOD@
 fi
 
-unset XILINX_XRT
 if [ "$build_type" = "Debug" ]; then
 	echo "========= Postinst Debug end ========="
 	set +x

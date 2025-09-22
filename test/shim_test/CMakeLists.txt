@@ -27,7 +27,7 @@ set_target_properties(${XDNA_SHIM_TEST} PROPERTIES
   # RPATH   is searched *before* LD_LIBRARY_PATH
   # RUNPATH is searched *after*  LD_LIBRARY_PATH
   # We want RPATH behavior for XDNA_SHIM_TEST
-  LINK_FLAGS "-Wl,-rpath,$ORIGIN/../lib -Wl,--disable-new-dtags"
+  LINK_FLAGS "-Wl,-rpath,$ORIGIN/../${XDNA_PKG_LIB_DIR} -Wl,--disable-new-dtags"
   )
 
 target_include_directories(${XDNA_SHIM_TEST} PRIVATE

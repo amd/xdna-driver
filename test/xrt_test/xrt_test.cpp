@@ -14,6 +14,7 @@
 #include <fstream>
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
 #include <libgen.h>
 #include <set>
 #include <stdlib.h>
@@ -32,6 +33,8 @@ unsigned s_rounds = 128;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
 unsigned threads = 2;
+unsigned vf_cnt;
+bool vf_test = false;
 std::vector<unsigned> exec_list;
 std::string dpu = "nop";
 
@@ -58,6 +61,8 @@ usage(const std::string& prog)
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
   std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test1 -e test2 ...]\n";
+  std::cout << "\t" << "-v" << ": apply each thread to corresponding vf, max 4\n";
+  std::cout << "\t" << "-l" << ": use xclbin flow if available\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
   std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
   std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
@@ -352,11 +357,12 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
 
-  xrt::elf elf{local_path("npu3_workspace/ddr_memtile.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:move_ddr_memtile"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_ddr.xclbin",
+		  "npu3_workspace/xclbin_ddr.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/ddr_memtile.elf",
+		  "DPU:move_ddr_memtile");
 
   // Setting args for patching control code buffer
   run.set_arg(0, bo_data.get());
@@ -378,7 +384,7 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
   auto run = get_xrt_run(device,
 		  "npu3_workspace/xclbin_rmb.xclbin",
 		  "npu3_workspace/xclbin_rmb.elf",
-		  "dpu:{remote_barrier}",
+		  "dpu:{vadd}",
 		  "npu3_workspace/remote_barrier.elf",
 		  "DPU:remote_barrier");
 
@@ -416,11 +422,12 @@ TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  xrt::elf elf{local_path("npu3_workspace/single_col_preemption.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:preemption"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_single_preempt.xclbin",
+		  "npu3_workspace/xclbin_single_preempt.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/single_col_preemption.elf",
+		  "DPU:preemption");
 
   /* init input buffer */
   const uint32_t data = 0x12345678;
@@ -458,11 +465,12 @@ TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  xrt::elf elf{local_path("npu3_workspace/multi_col_preemption.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:preemption"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_multi_preempt.xclbin",
+		  "npu3_workspace/xclbin_multi_preempt.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/multi_col_preemption.elf",
+		  "DPU:preemption");
 
   /* init input buffer */
   const uint32_t data = 0x12345678;
@@ -519,11 +527,12 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   read_bin_file<xrt_bo>(ofm_path, bo_ofm);
   read_bin_file<xrt_bo>(param_path, bo_param);
 
-  xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_1_layer.elf")};
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:resnet50"};
-  xrt::run run{kernel};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_single_resnet50.xclbin",
+		  "npu3_workspace/xclbin_single_resnet50.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/single_col_resnet50_1_layer.elf",
+		  "DPU:resnet50");
 
   run.set_arg(0, bo_ofm.get());
   run.set_arg(1, bo_ifm.get());
@@ -560,11 +569,85 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
-  xrt::elf elf{local_path("npu3_workspace/single_col_resnet50_all_layer.elf")};
+  auto run = get_xrt_run(device,
+		  "npu3_workspace/xclbin_resnet50_all.xclbin",
+		  "npu3_workspace/xclbin_resnet50_all.elf",
+		  "dpu:{vadd}",
+		  "npu3_workspace/resnet50_all_layer.elf",
+		  "DPU:resnet50");
 
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:resnet50"};
-  xrt::run run{kernel};
+  run.set_arg(54, bo_ifm.get());
+
+  std::ifstream wts_ifs(wts_path);
+  if (!wts_ifs.is_open())
+    throw std::runtime_error("Unable to open weights file: " + wts_path);
+
+  auto p = bo_wts.map();
+  uint32_t tmp;
+  int i = 0;
+  while (wts_ifs >> std::hex >> tmp) {
+    p[i] = tmp;
+    i++;
+  }
+  wts_ifs.close();
+
+  for (int i = 0; i < 54; i++) {
+    run.set_arg(i, bo_wts.get().address() + (wts_offset[i] * sizeof(uint32_t)));
+  }
+
+  run.set_arg(55, bo_ofm.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+
+  // wait forever for this test, it takes up to 10 hours on simulator
+  run.wait2();
+
+  auto ofm = bo_ofm.map();
+  std::ifstream ofm_ifs;
+  ofm_ifs.open(ofm_path);
+  if (!ofm_ifs.is_open()) {
+    std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
+  }
+  int err = 0;
+  for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+    uint32_t gld;
+    ofm_ifs >> std::hex >> gld;
+    if (gld != ofm[i]) {
+      std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
+      err++;
+    }
+  }
+  ofm_ifs.close();
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+void
+TEST_xrt_umq_single_col_resnet50_multi_layer(int device_index, arg_type& arg)
+{
+  std::vector<xrt_bo> wts_v;
+  auto device = xrt::device{device_index};
+
+  std::string ifm_path = local_path("npu3_workspace/mem32_ref_l46.txt");
+  std::string wts_path = local_path("npu3_workspace/wts32_multi.txt");
+  std::string ofm_path = local_path("npu3_workspace/ofm32_ref_l53.txt");
+
+  const uint32_t IFM_BYTE_SIZE = 3145782;
+  const uint32_t WTS_BYTE_SIZE = 25704832;
+  const uint32_t OFM_BYTE_SIZE = 1024;
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  read_txt_file<xrt_bo>(ifm_path, bo_ifm);
+
+  auto run = get_xrt_run(device, "", "", "",
+		  "npu3_workspace/resnet50_multi.elf",
+		  "DPU:resnet50");
 
   run.set_arg(54, bo_ifm.get());
 
@@ -939,7 +1022,8 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt parallel branches", TEST_xrt_umq_parallel_branches, {} },
   test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
-  test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} }
+  test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
+  test_case{ "npu3 xrt single col resnet50 multi layer", TEST_xrt_umq_single_col_resnet50_multi_layer, {} }
 };
 
 /* test n threads of 1 or more tests */
@@ -947,6 +1031,7 @@ void
 TEST_xrt_threads(int device_index, arg_type& arg)
 {
   std::vector<std::thread> m_threads;
+  std::vector<bool> m_failed(threads, false);
 
   if (exec_list.empty())
     exec_list.insert(exec_list.begin(), threads, 0);
@@ -955,16 +1040,42 @@ TEST_xrt_threads(int device_index, arg_type& arg)
   else
     threads = exec_list.size(); // if more tests than threads, increase threads to run all tests
 
-  for (int i = 0; i < threads; i++) {
-    m_threads.push_back(std::thread([&, i](){
-      std::cout << "Thread " << i << " started" << std::endl;
-      test_list[exec_list[i]].func(device_index, test_list[exec_list[i]].arg);
-    })
-    );
+  if (vf_test) {
+    for (int i = 0; i < threads; i++) {
+      m_threads.push_back(std::thread([&, i](){
+        std::cout << "Thread " << i << " started" << std::endl;
+	try {
+	  test_list[exec_list[i]].func(i % vf_cnt, test_list[exec_list[i]].arg);
+	} catch (const std::exception& ex) {
+	  m_failed[i] = true;
+	  std::cerr << "Thread " << i << " failed: " << ex.what() << std::endl;
+	}
+      })
+      );
+    }
+  }
+  else {
+    for (int i = 0; i < threads; i++) {
+      m_threads.push_back(std::thread([&, i](){
+        std::cout << "Thread " << i << " started" << std::endl;
+	try {
+	  test_list[exec_list[i]].func(device_index, test_list[exec_list[i]].arg);
+	} catch (const std::exception& ex) {
+	  m_failed[i] = true;
+	  std::cerr << "Thread " << i << " failed: " << ex.what() << std::endl;
+	}
+      })
+      );
+    }
   }
 
   for (int i = 0; i < threads; i++)
-      m_threads[i].join();
+    m_threads[i].join();
+
+  for (int i = 0; i < threads; i++) {
+    if (m_failed[i])
+      throw std::runtime_error("At least one thread has failed");
+  }
 
 }
 
@@ -1029,7 +1140,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:v:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -1090,10 +1201,21 @@ main(int argc, char **argv)
 	    return 1;
 	  }
 	}
-        case 'l':
-          std::cout << "swtiching to xclbin flow" << std::endl;
-          elf_flow = false;
+	case 'l': {
+	  std::cout << "swtiching to xclbin flow" << std::endl;
+	  elf_flow = false;
 	  break;
+	}
+	case 'v': {
+	  val = std::stoi(optarg);
+	  if (val > 4 || val < 1) {
+	    std::cout << "VF count is between 1-4" << std::endl;
+	    return 1;
+	  }
+	  vf_cnt = val;
+	  vf_test = true;
+	  break;
+	}
 	case 'h':
 	  usage(program);
 	  return 0;

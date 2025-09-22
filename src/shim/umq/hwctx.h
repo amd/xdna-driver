@@ -23,21 +23,12 @@ public:
 
 private:
   const pdev& m_pdev;
-  std::unique_ptr<buffer> m_log_bo;
-  uint32_t m_uc_cnt = 0;
-
-  void *m_log_buf = nullptr;
-  size_t m_log_buf_size;
-
+  uint32_t m_col_cnt = 0;
   std::unique_ptr<tcp_server> m_tcp_server;
   std::thread m_thread_;
 
   void init_tcp_server(const device& dev);
   void fini_tcp_server();
-
-  void init_log_buf();
-  void fini_log_buf();
-  void set_metadata(std::map<uint32_t, size_t>& buf_size, int num_cols, size_t size);
 };
 
 }

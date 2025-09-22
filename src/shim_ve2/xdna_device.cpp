@@ -5,7 +5,10 @@
 #include <boost/tokenizer.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
+#include <dlfcn.h>
 #include <fcntl.h>
+#include <libgen.h>
+#include <limits.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -24,6 +27,25 @@ namespace {
 
 namespace query = xrt_core::query;
 using key_type = query::key_type;
+
+std::string
+get_shim_lib_path()
+{
+    Dl_info info;
+
+    if (dladdr((void*)&get_shim_lib_path, &info)) {
+      char resolved[PATH_MAX];
+      if (realpath(info.dli_fname, resolved))
+        return std::string(dirname(resolved));
+    }
+    return {};
+}
+
+std::string
+get_shim_data_dir()
+{
+  return get_shim_lib_path() + "/../share/amdxdna/";
+}
 
 uint32_t
 flag_to_type(uint64_t bo_flags)
@@ -218,6 +240,8 @@ struct xrt_smi_lists
 
     const auto xrt_smi_lists_type = std::any_cast<xrt_core::query::xrt_smi_lists::type>(reqType);
     switch (xrt_smi_lists_type) {
+    case xrt_core::query::xrt_smi_lists::type::validate_tests:
+      return xrt_core::smi::get_list("validate", "run");
     case xrt_core::query::xrt_smi_lists::type::examine_reports:
       return xrt_core::smi::get_list("examine", "report");
     default:
@@ -312,6 +336,42 @@ struct firmware_version
 
     return output;
   }
+};
+struct runner
+{
+    static std::any
+    get(const xrt_core::device* /*device*/, key_type key)
+    {
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+    }
+
+    static std::any
+    get(const xrt_core::device* device, key_type key, const std::any& param)
+    {
+      if (key != key_type::runner)
+        throw xrt_core::query::no_such_key(key, "Not implemented");
+
+      std::string file_name;
+      std::string path;
+      const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
+      switch (runner_type) {
+      case xrt_core::query::runner::type::latency_path:
+        path = get_shim_data_dir() + std::string("latency/");
+        break;
+      case xrt_core::query::runner::type::latency_recipe:
+        file_name = "latency/recipe_latency.json";
+        break;
+      case xrt_core::query::runner::type::latency_profile:
+        file_name = "latency/profile_latency.json";
+        break;
+      }
+
+      if (!path.empty())
+          return get_shim_data_dir() + path;
+
+      return get_shim_data_dir() + boost::str(boost::format("%s")
+        % file_name);
+    }
 };
 
 struct total_cols
@@ -571,6 +631,7 @@ initialize_query_table()
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
+  emplace_func1_request<query::runner,                  runner>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }

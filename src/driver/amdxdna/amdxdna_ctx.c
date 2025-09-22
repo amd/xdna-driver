@@ -113,7 +113,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 
 	ctx->client = client;
-	ctx->last_completed = -1;
 	ctx->num_tiles = args->num_tiles;
 	ctx->mem_size = args->mem_size;
 	ctx->max_opc = args->max_opc;
@@ -659,6 +658,8 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+	trace_amdxdna_debug_point(current->comm, args->type, "job received");
+
 	switch (args->type) {
 	case AMDXDNA_CMD_SUBMIT_EXEC_BUF:
 		ret = amdxdna_drm_submit_execbuf(client, args);
@@ -719,5 +720,6 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	XDNA_DBG(xdna, "PID %d ctx %d cmd %lld wait finished, ret %d",
 		 client->pid, args->hwctx, args->seq, ret);
 
+	trace_amdxdna_debug_point(current->comm, args->seq, "job returned to user");
 	return ret;
 }

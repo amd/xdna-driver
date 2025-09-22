@@ -5,10 +5,9 @@
 
 #include <linux/module.h>
 #include <linux/version.h>
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 #include <drm/drm_managed.h>
-#endif
 
+#include "amdxdna_dpt.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_sysfs.h"
 #include "amdxdna_pm.h"
@@ -85,11 +84,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->dev_info)
 		return -ENODEV;
 
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
-#else
-	devm_mutex_init(dev, &xdna->dev_lock);
-#endif
 	init_rwsem(&xdna->notifier_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
 	pci_set_drvdata(pdev, xdna);
@@ -127,6 +122,10 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_tdr_fini;
 	}
 
+	ret = amdxdna_fw_log_init(xdna);
+	if (ret)
+		XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
+
 	/* Debug fs needs to go after register DRM dev */
 	if (xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
@@ -151,6 +150,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
 
+	amdxdna_fw_log_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
 	amdxdna_tdr_stop(&xdna->tdr);
 	amdxdna_sysfs_fini(xdna);
@@ -181,12 +181,54 @@ static void amdxdna_remove(struct pci_dev *pdev)
 #endif
 }
 
+static pci_ers_result_t amdxdna_error_detected(struct pci_dev *pdev,
+					       pci_channel_state_t state)
+{
+	/* Return PCI_ERS_RESULT_CAN_RECOVER to indicate the driver thinks recovery is possible.
+	 * Return PCI_ERS_RESULT_NEED_RESET to force a reset.
+	 * Return PCI_ERS_RESULT_DISCONNECT to say the device is lost.
+	 */
+
+	return PCI_ERS_RESULT_NEED_RESET;
+}
+
+static void amdxdna_reset_prepare(struct pci_dev *pdev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+
+	if (!xdna->dev_info->ops->reset_prepare)
+		XDNA_ERR(xdna, "Reset prepare not supported on this device");
+	else
+		xdna->dev_info->ops->reset_prepare(xdna);
+}
+
+static void amdxdna_reset_done(struct pci_dev *pdev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+	int ret;
+
+	if (!xdna->dev_info->ops->reset_done) {
+		XDNA_ERR(xdna, "Reset done not supported on this device");
+	} else {
+		ret = xdna->dev_info->ops->reset_done(xdna);
+		if (ret)
+			XDNA_ERR(xdna, "Reset done could not resume device, ret %d", ret);
+	}
+}
+
+static const struct pci_error_handlers amdxdna_err_handler = {
+	.error_detected = amdxdna_error_detected,
+	.reset_prepare = amdxdna_reset_prepare,
+	.reset_done = amdxdna_reset_done,
+};
+
 static struct pci_driver amdxdna_pci_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = pci_ids,
 	.probe = amdxdna_probe,
 	.remove = amdxdna_remove,
 	.driver.pm = &amdxdna_pm_ops,
+	.err_handler = &amdxdna_err_handler,
 };
 
 static int __init amdxdna_mod_init(void)

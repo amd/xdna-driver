@@ -20,6 +20,7 @@
 #include "aie2_msg_priv.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_error.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pm.h"
@@ -76,11 +77,12 @@
 #define ctx_rq_to_xdna_dev(r) \
 	(ctx_rq_to_ndev(r)->xdna)
 
+#define AIE2_TDR_WAIT		0
+#define AIE2_TDR_SIGNALED	1
+
+#define AIE2_DPT_MSI_ADDR_MASK	GENMASK(23, 0)
+
 struct amdxdna_ctx_priv;
-struct event_trace_req_buf;
-struct start_event_trace_resp;
-struct config_logging_dram_buf_resp;
-struct logging_req_buf;
 struct aie2_partition;
 
 enum aie2_smu_reg_idx {
@@ -307,6 +309,15 @@ struct aie2_ctx_rq {
 
 struct async_events;
 
+struct aie2_mgmt_dma_hdl {
+	struct amdxdna_dev		*xdna;
+	enum dma_data_direction		dir;
+	void				*vaddr;
+	dma_addr_t			dma_hdl;
+	size_t				size;
+	size_t				aligned_size;
+};
+
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
@@ -341,8 +352,6 @@ struct amdxdna_dev_hdl {
 	struct mailbox			*mbox;
 	struct mailbox_channel		*mgmt_chann;
 	struct async_events		*async_events;
-	struct event_trace_req_buf	*event_trace_req;
-	struct logging_req_buf		*logging_req;
 
 	u32				dev_status;
 	u32				hwctx_cnt;
@@ -360,6 +369,10 @@ struct amdxdna_dev_hdl {
 	struct mutex			aie2_lock;
 
 	struct aie2_ctx_rq		ctx_rq;
+
+	u32				tdr_status;
+
+	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
 };
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
@@ -401,15 +414,6 @@ struct amdxdna_dev_priv {
 #endif
 };
 
-struct aie2_mgmt_dma_hdl {
-	struct amdxdna_dev		*xdna;
-	enum dma_data_direction		dir;
-	void				*vaddr;
-	dma_addr_t			dma_hdl;
-	size_t				size;
-	size_t				aligned_size;
-};
-
 extern const struct amdxdna_dev_ops aie2_ops;
 
 static inline void aie2_calc_intr_reg(struct xdna_mailbox_chann_info *info)
@@ -433,6 +437,9 @@ void aie2_mgmt_buff_clflush(struct aie2_mgmt_dma_hdl *mgmt_hdl);
 dma_addr_t aie2_mgmt_buff_get_dma_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl);
 void *aie2_mgmt_buff_get_cpu_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl);
 void aie2_mgmt_buff_free(struct aie2_mgmt_dma_hdl *mgmt_hdl);
+int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level);
+int aie2_fw_log_fini(struct amdxdna_dev *xdna);
+void aie2_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 /* aie2_smu.c */
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
@@ -473,21 +480,8 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
 void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_msg_thread(void *data);
-
-/* aie2_event_trace.c */
-bool aie2_is_event_trace_enable(struct amdxdna_dev_hdl *ndev);
-int  aie2_event_trace_init(struct amdxdna_dev_hdl *ndev);
-void aie2_event_trace_fini(struct amdxdna_dev_hdl *ndev);
-void aie2_set_trace_timestamp(struct amdxdna_dev_hdl *ndev,
-			      struct start_event_trace_resp *resp);
-void aie2_unset_trace_timestamp(struct amdxdna_dev_hdl *ndev);
-void aie2_config_event_trace(struct amdxdna_dev_hdl *ndev, u32 enable,
-			     u32 size, u32 category);
-void aie2_event_trace_suspend(struct amdxdna_dev_hdl *ndev);
-void aie2_event_trace_resume(struct amdxdna_dev_hdl *ndev);
-int  aie2_set_event_trace_cfg(struct amdxdna_dev_hdl *ndev, u32 category);
-int  aie2_set_event_trace_categories(struct amdxdna_dev_hdl *ndev, u32 category);
-u32  aie2_get_event_trace_categories(struct amdxdna_dev_hdl *ndev);
+int aie2_error_async_cache_init(struct amdxdna_dev_hdl *ndev);
+int aie2_error_get_last_async(struct amdxdna_dev *xdna, u32 num_errs, void *errors);
 
 /* aie2_message.c */
 bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode);
@@ -506,13 +500,14 @@ int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_
 			     u32 type, u32 size, struct aie_version *version);
 int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
 			u32 context_id, u32 size);
+void aie2_reset_app_health_report(struct app_health_report *r);
 int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 				    struct amdxdna_fw_ver *fw_ver);
-int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
-			   u32 size, u32 event_category);
-int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev);
+int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, enum fw_log_level level);
+int aie2_set_log_format(struct amdxdna_dev_hdl *ndev, enum fw_log_format format);
+int aie2_set_log_destination(struct amdxdna_dev_hdl *ndev, enum fw_log_destination destination);
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			struct xdna_mailbox_chann_info *info);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
@@ -526,6 +521,8 @@ int aie2_register_pdis(struct amdxdna_ctx *ctx);
 int aie2_unregister_pdis(struct amdxdna_ctx *ctx);
 int aie2_legacy_config_cu(struct amdxdna_ctx *ctx);
 #endif
+int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+		       size_t size, u32 *msi_id, u32 *msi_addr);
 
 int aie2_config_cu(struct amdxdna_ctx *ctx);
 int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job, enum cmd_chain_class class,
@@ -558,7 +555,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx);
 int aie2_hwctx_start(struct amdxdna_ctx *ctx);
 void aie2_hwctx_stop(struct amdxdna_ctx *ctx);
 
-/* aid2_ctx_runqueue.c */
+/* aie2_ctx_runqueue.c */
 int aie2_rq_init(struct aie2_ctx_rq *rq);
 void aie2_rq_fini(struct aie2_ctx_rq *rq);
 int aie2_rq_context_limit(struct aie2_ctx_rq *rq);
@@ -576,21 +573,52 @@ int aie2_rq_submit_enter(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx);
 void aie2_rq_submit_exit(struct amdxdna_ctx *ctx);
 void aie2_rq_yield(struct amdxdna_ctx *ctx);
 
-/* aie2_logging.c */
-bool aie2_is_dram_logging_enable(struct amdxdna_dev_hdl *ndev);
-int aie2_dram_logging_init(struct amdxdna_dev_hdl *ndev);
-void aie2_dram_logging_fini(struct amdxdna_dev_hdl *ndev);
-int aie2_configure_log_buf_irq(struct amdxdna_dev_hdl *ndev,
-			       struct config_logging_dram_buf_resp *resp);
-void aie2_remove_log_buf_irq(struct amdxdna_dev_hdl *ndev);
-int aie2_configure_dram_logging(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
-void aie2_dram_logging_suspend(struct amdxdna_dev_hdl *ndev);
-void aie2_dram_logging_resume(struct amdxdna_dev_hdl *ndev);
-void aie2_set_dram_log_config(struct amdxdna_dev_hdl *ndev,
-			      u32 enable, u32 size, u32 loglevel);
-void aie2_set_dram_log_runtime_cfg(struct amdxdna_dev_hdl *ndev,
-				   u32 loglevel, u32 format, int dest);
-u32 aie2_get_log_level(struct amdxdna_dev_hdl *ndev);
-int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, u32 level);
+static inline bool aie2_is_ctx_connected(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_CONNECTED;
+}
+
+static inline bool aie2_is_ctx_rt(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->priority == CTX_RQ_REALTIME;
+}
+
+static inline bool aie2_is_ctx_debug(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DEBUG;
+}
+
+static inline bool aie2_is_ctx_fatal(struct amdxdna_ctx *ctx)
+{
+	if (ctx->priv->status == CTX_STATE_DEAD)
+		return true;
+
+	return aie2_is_ctx_debug(ctx);
+}
+
+static inline bool aie2_is_ctx_disconnected(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DISCONNECTED;
+}
+
+static inline bool aie2_is_ctx_dispatched(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DISPATCHED;
+}
+
+static inline bool aie2_is_ctx_disconnecting(struct amdxdna_ctx *ctx)
+{
+	return ctx->priv->status == CTX_STATE_DISCONNECTING;
+}
+
+static inline bool ctx_should_stop(struct amdxdna_ctx *ctx)
+{
+	return aie2_is_ctx_connected(ctx) || aie2_is_ctx_disconnecting(ctx) ||
+	       aie2_is_ctx_debug(ctx);
+}
+
+/* aie2_dpt.c */
+int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level);
+int aie2_fw_log_fini(struct amdxdna_dev *xdna);
 
 #endif /* _AIE2_PCI_H_ */

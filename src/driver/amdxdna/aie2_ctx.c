@@ -95,7 +95,6 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		ctx->health_data.fatal_error_exception_pc = r->fatal_info.exception_pc;
 		ctx->health_data.fatal_error_app_module = r->fatal_info.app_module;
 		ctx->health_data.fatal_error_type = r->fatal_info.fatal_type;
-		ctx->health_data.app_health_report_size = r->size;
 		ctx->health_data.txn_op_idx = r->txn_op_id;
 		ctx->health_data.ctx_pc = r->ctx_pc;
 		ctx->health_data.version = 0;
@@ -214,11 +213,14 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct dma_fence *fence = job->fence;
+	struct amdxdna_dev_hdl *ndev;
 	int idx;
 
 	amdxdna_pm_suspend_put(ctx->client->xdna);
 
 	ctx->completed++;
+	ndev = ctx->client->xdna->dev_handle;
+	WRITE_ONCE(ndev->tdr_status, AIE2_TDR_SIGNALED);
 	trace_xdna_job(&job->base, ctx->name, "signaling fence", job->seq, job->opcode);
 	job->job_done = true;
 	dma_fence_signal(fence);
@@ -359,6 +361,7 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_ctx *ctx = job->ctx;
+	struct amdxdna_dev_hdl *ndev;
 	enum cmd_chain_class class;
 	struct dma_fence *fence;
 	int ret = 0;
@@ -416,6 +419,8 @@ out:
 	} else {
 		if (job->opcode != OP_NOOP)
 			amdxdna_stats_start(ctx->client);
+		ndev = ctx->client->xdna->dev_handle;
+		WRITE_ONCE(ndev->tdr_status, AIE2_TDR_SIGNALED);
 	}
 
 	return fence;
@@ -523,6 +528,13 @@ static void aie2_calc_ctx_dpm(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *
 			ctx->priv->req_dpm_level =  0;
 		else
 			ctx->priv->req_dpm_level = ndev->max_dpm_level;
+		return;
+	}
+
+	if (qos->priority == AMDXDNA_QOS_LOW_PRIORITY) {
+		XDNA_DBG(ndev->xdna, "%s priority is %d, use DPM level 0",
+			 ctx->name, qos->priority);
+		ctx->priv->req_dpm_level =  0;
 		return;
 	}
 
@@ -945,9 +957,8 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	int ret, i;
 
 	ret = down_killable(&ctx->priv->job_sem);
-	if (ret) {
+	if (ret)
 		XDNA_ERR(xdna, "%s Grab job sem failed, ret %d", ctx->name, ret);
-	}
 
 	ret = aie2_rq_submit_enter(&xdna->dev_handle->ctx_rq, ctx);
 	if (ret) {
@@ -962,7 +973,12 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		goto rq_yield;
 	}
 
+#if KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE
+	ret = drm_sched_job_init(&job->base, &ctx->priv->entity, 1, ctx,
+				 ctx->client->filp->client_id);
+#else
 	ret = drm_sched_job_init(&job->base, &ctx->priv->entity, 1, ctx);
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "DRM job init failed, ret %d", ret);
 		goto free_chain;

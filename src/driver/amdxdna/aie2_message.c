@@ -200,6 +200,42 @@ int aie2_frame_boundary_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 	return 0;
 }
 
+int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, enum fw_log_level level)
+{
+	u32 type = NPU4_RT_TYPE_LOG_LEVEL;
+
+	if (!is_supported_rt_cfg(ndev, type)) {
+		XDNA_DBG(ndev->xdna, "Skipped");
+		return 0;
+	}
+
+	return aie2_set_runtime_cfg(ndev, type, level);
+}
+
+int aie2_set_log_format(struct amdxdna_dev_hdl *ndev, enum fw_log_format format)
+{
+	u32 type = NPU4_RT_TYPE_LOG_FORMAT;
+
+	if (!is_supported_rt_cfg(ndev, type)) {
+		XDNA_DBG(ndev->xdna, "Skipped");
+		return 0;
+	}
+
+	return aie2_set_runtime_cfg(ndev, type, format);
+}
+
+int aie2_set_log_destination(struct amdxdna_dev_hdl *ndev, enum fw_log_destination destination)
+{
+	u32 type = NPU4_RT_TYPE_LOG_DESTINATION;
+
+	if (!is_supported_rt_cfg(ndev, type)) {
+		XDNA_DBG(ndev->xdna, "Skipped");
+		return 0;
+	}
+
+	return aie2_set_runtime_cfg(ndev, type, destination);
+}
+
 static int
 aie2_runtime_update_prop(struct amdxdna_dev_hdl *ndev,
 			 struct amdxdna_ctx *ctx, u32 type, u32 value)
@@ -393,72 +429,38 @@ int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-int aie2_start_event_trace(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
-			   u32 size, u32 event_category)
+int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+		       size_t size, u32 *msi_idx, u32 *msi_address)
 {
-	DECLARE_AIE2_MSG(start_event_trace, MSG_OP_START_EVENT_TRACE);
+	DECLARE_AIE2_MSG(config_fw_log, MSG_OP_CONFIG_FW_LOG);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	dma_addr_t addr;
 	int ret;
 
-	req.dram_buffer_address = addr;
-	req.dram_buffer_size = size;
-	req.event_trace_dest = EVENT_TRACE_DEST_DRAM;
-	req.event_trace_categories = event_category;
-	req.event_trace_timestamp = EVENT_TRACE_TIMESTAMP_FW_CHRONO;
+	if (!aie2_is_supported_msg(ndev, MSG_OP_CONFIG_FW_LOG))
+		return -EOPNOTSUPP;
 
-	XDNA_DBG(ndev->xdna, "send start event trace msg");
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
+		return -EINVAL;
+	}
+
+	/* Cmd with buffer size 0 detaches log buffer from FW */
+	req.buf_size = size;
+	req.buf_addr = addr;
+
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
-	if (ret)
-		return ret;
+	if (ret) {
+		XDNA_ERR(xdna, "Config fw log failed, ret 0x%x", resp.status);
+		return -EINVAL;
+	}
 
-	aie2_set_trace_timestamp(ndev, &resp);
-	return 0;
-}
+	if (size && msi_idx && msi_address) {
+		*msi_address = resp.msi_address;
+		*msi_idx = resp.msi_idx;
+	}
 
-int aie2_stop_event_trace(struct amdxdna_dev_hdl *ndev)
-{
-	DECLARE_AIE2_MSG(stop_event_trace, MSG_OP_STOP_EVENT_TRACE);
-	int ret;
-
-	XDNA_DBG(ndev->xdna, "send stop event trace msg");
-	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
-	if (ret)
-		return ret;
-
-	aie2_unset_trace_timestamp(ndev);
-	return 0;
-}
-
-int aie2_set_event_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories)
-{
-	DECLARE_AIE2_MSG(set_event_trace_categories, MSG_OP_SET_EVENT_TRACE_CATEGORIES);
-	int ret;
-
-	req.event_trace_categories = categories;
-	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
-	if (ret)
-		return ret;
-
-	return resp.status;
-}
-
-int aie2_configure_dram_logging(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size)
-{
-	DECLARE_AIE2_MSG(config_logging_dram_buf, MSG_OP_CONFIG_LOGGING_DRAM_BUF);
-	int ret;
-
-	req.dram_buffer_address = addr;
-	req.dram_buffer_size = size;
-
-	XDNA_DBG(ndev->xdna, "send configure dram logging msg");
-	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
-	if (ret)
-		return ret;
-
-	/* Send same cmd with size 0, to detach logger from FW */
-	if (!size)
-		return 0;
-
-	aie2_configure_log_buf_irq(ndev, &resp);
 	return 0;
 }
 
@@ -682,6 +684,19 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_
 	return xdna_mailbox_send_msg(ndev->mgmt_chann, &msg, TX_TIMEOUT);
 }
 
+void aie2_reset_app_health_report(struct app_health_report *r)
+{
+	if (!r)
+		return;
+
+	r->fatal_info.exception_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->fatal_info.exception_pc = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->fatal_info.app_module = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->fatal_info.fatal_type = AIE2_APP_HEALTH_RESET_FATAL_INFO;
+	r->txn_op_id = AIE2_APP_HEALTH_RESET_TXN_OP_ID;
+	r->ctx_pc = AIE2_APP_HEALTH_RESET_CTX_PC;
+}
+
 int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
 			u32 context_id, u32 size)
 {
@@ -689,6 +704,11 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *
 	struct amdxdna_dev *xdna = ndev->xdna;
 	dma_addr_t addr;
 	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_GET_APP_HEALTH)) {
+		XDNA_DBG(xdna, "Get app health unsupported for the device or firmware version");
+		return -EOPNOTSUPP;
+	}
 
 	addr = aie2_mgmt_buff_get_dma_addr(mgmt_hdl);
 	if (!addr) {
@@ -701,13 +721,16 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *
 	req.buf_size = size;
 
 	ret = aie2_send_mgmt_msg_wait_silent(ndev, &msg);
-	if (ret) {
-		XDNA_DBG(xdna, "Get app health failed, ret 0x%x", ret);
-		return ret;
-	}
+	if (ret)
+		XDNA_DBG(xdna, "Get app health failed, ret %d", ret);
 
 	if (resp.status != AIE2_STATUS_SUCCESS) {
-		XDNA_DBG(xdna, "Get app health got status 0x%x", resp.status);
+		if (resp.status == AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID) {
+			XDNA_ERR(xdna, "Invalid buffer size(required 0x%x) for get app health cmd",
+				 resp.required_buffer_size);
+		} else {
+			XDNA_ERR(xdna, "Get app health got status 0x%x", resp.status);
+		}
 		ret = -EINVAL;
 	}
 

@@ -71,7 +71,10 @@ config_gen_xdna::create_examine_subcommand()
     {"platform", "Platforms flashed on the device", "common"},
     {"telemetry", "Telemetry data for the device", "hidden"},
     {"preemption", "Preemption telemetry data for the device", "hidden"},
-    {"clocks", "Clock frequency information", "hidden"}
+    {"clocks", "Clock frequency information", "hidden"},
+    {"context-health", "Log to console context health information", "hidden"},
+    {"event-trace", "Event trace report", "hidden"},
+    {"firmware-log", "Firmware Log report", "hidden"}
   };
 
   std::map<std::string, std::shared_ptr<option>> examine_suboptions; 
@@ -96,6 +99,8 @@ config_gen_xdna::create_configure_subcommand()
   configure_suboptions.emplace("help", std::make_shared<option>("help", "h", "Help to use this sub-command", "common", "", "none"));
   configure_suboptions.emplace("pmode", std::make_shared<option>("pmode", "", "Modes: default, powersaver, balanced, performance, turbo", "common", "", "string", true));
   configure_suboptions.emplace("force-preemption", std::make_shared<option>("force-preemption", "", "Force enable|disable and see status of preemption", "hidden", "", "string", true));
+  configure_suboptions.emplace("event-trace", std::make_shared<option>("event-trace", "", "Enable|disable and see status of event tracing", "hidden", "", "string", true));
+  configure_suboptions.emplace("firmware-log", std::make_shared<option>("firmware-log", "", "Enable|disable and see status of firmware logging", "hidden", "", "string", true));
 
   return {"configure", "Device and host configuration", "common", std::move(configure_suboptions)};
 }

@@ -47,7 +47,7 @@ public:
   void
   run_no_check_result();
 
-  void
+  virtual void
   run();
 
   void
@@ -134,6 +134,40 @@ public:
 private:
   bool m_is_full_elf;
   unsigned long m_total_fine_preemption_checkpoints;
+};
+
+class elf_io_timeout_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_io_timeout_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+
+  void
+  run() override;
+
+  void
+  verify_result() override;
+};
+
+class async_error_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  async_error_io_test_bo_set(device *dev);
+
+  void
+  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+
+  void
+  run() override;
+
+  void
+  verify_result() override;
+private:
+  uint64_t m_expect_err_code;
+  uint64_t m_last_err_timestamp;
+  static const std::map<uint32_t, enum xrtErrorNum> m_shim_event_err_num_map;
 };
 
 #endif // _SHIMTEST_IO_H_

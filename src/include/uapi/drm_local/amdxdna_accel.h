@@ -47,9 +47,9 @@ extern "C" {
  * We don't have extension now. The extension struct will define in the future.
  */
 
-#define	DRM_AMDXDNA_CREATE_HWCTX		0
-#define	DRM_AMDXDNA_DESTROY_HWCTX		1
-#define	DRM_AMDXDNA_CONFIG_HWCTX		2
+#define	DRM_AMDXDNA_CREATE_HWCTX	0
+#define	DRM_AMDXDNA_DESTROY_HWCTX	1
+#define	DRM_AMDXDNA_CONFIG_HWCTX	2
 #define	DRM_AMDXDNA_CREATE_BO		3
 #define	DRM_AMDXDNA_GET_BO_INFO		4
 #define	DRM_AMDXDNA_SYNC_BO		5
@@ -57,7 +57,7 @@ extern "C" {
 #define	DRM_AMDXDNA_GET_INFO		7
 #define	DRM_AMDXDNA_SET_STATE		8
 #define	DRM_AMDXDNA_WAIT_CMD		9
-#define DRM_AMDXDNA_GET_INFO_ARRAY	10
+#define DRM_AMDXDNA_GET_ARRAY		10
 
 #define	AMDXDNA_DEV_TYPE_UNKNOWN	-1
 #define	AMDXDNA_DEV_TYPE_KMQ		0
@@ -466,7 +466,7 @@ struct amdxdna_drm_query_sensor {
  *               same partition.
  * @errors: The errors for this context.
  *
- * !!! NOTE: Never expand this struct. Use amdxdna_drm_query_hwctx_array instead. !!!
+ * !!! NOTE: Never expand this struct. Use amdxdna_drm_hwctx_entry instead. !!!
  */
 struct amdxdna_drm_query_hwctx {
 	__u32 context_id;
@@ -635,7 +635,7 @@ struct amdxdna_drm_get_info {
 };
 
 /**
- * struct amdxdna_drm_query_hwctx_array - The element of a context in array
+ * struct amdxdna_drm_hwctx_entry - The element of a context in array
  * @context_id: The ID for this context.
  * @start_col: The starting column for the partition assigned to this context.
  * @num_col: The number of columns in the partition assigned to this context.
@@ -664,7 +664,7 @@ struct amdxdna_drm_get_info {
  * @fatal_error_exception_pc: LX7 program counter at the time of the exception
  * @fatal_error_app_module: module name where the exception occurred
  */
-struct amdxdna_drm_query_hwctx_array {
+struct amdxdna_drm_hwctx_entry {
 	__u32 context_id;
 	__u32 start_col;
 	__u32 num_col;
@@ -696,14 +696,34 @@ struct amdxdna_drm_query_hwctx_array {
 };
 
 /**
- * struct amdxdna_drm_get_info_array - Get some information from the AIE hardware, return array.
+ * struct amdxdna_async_error - XDNA async error structure
+ * @err_code: error code, ErrorNum + Driver + Severity + Module + Class
+ *            Refer to amdxnda_xrt_error.h for error code encoding details
+ * @ts_us: timestamp in us
+ * @ex_err_code: extra error code
+ * @reserved0: reserved field
+ * @reserved1: reserved field
+ *
+ * This structure definition refers to XRT error code definition
+ */
+struct amdxdna_async_error {
+	__u64 err_code;
+	__u64 ts_us;
+	__u64 ex_err_code;
+	__u64 reserved0;
+};
+
+/**
+ * struct amdxdna_drm_get_array - Get some information from the AIE hardware, return array.
  * @param: Specifies the structure passed in the buffer.
  * @element_size: Size of each element in the array.
  * @num_element: The number of elements.
  * @buffer: Pointer to an array whose elements are structure specified by the param struct member.
  */
-struct amdxdna_drm_get_info_array {
-#define DRM_AMDXDNA_QUERY_HW_CONTEXTS_ARRAY	0
+struct amdxdna_drm_get_array {
+#define DRM_AMDXDNA_HW_CONTEXT_ALL	0
+#define DRM_AMDXDNA_HW_CONTEXT_BY_ID	1
+#define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2	/* Get last async error */
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
@@ -775,9 +795,9 @@ struct amdxdna_drm_set_state {
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO, \
 		 struct amdxdna_drm_get_info)
 
-#define DRM_IOCTL_AMDXDNA_GET_INFO_ARRAY \
-	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO_ARRAY, \
-		struct amdxdna_drm_get_info_array)
+#define DRM_IOCTL_AMDXDNA_GET_ARRAY \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_ARRAY, \
+		struct amdxdna_drm_get_array)
 
 #define DRM_IOCTL_AMDXDNA_SET_STATE \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_SET_STATE, \

@@ -93,8 +93,6 @@ struct amdxdna_cmd_preempt_data {
  * @fatal_error_exception_type: LX7 exception type
  * @fatal_error_exception_pc:   LX7 program counter at the time of the exception
  * @fatal_error_app_module:     module name where the exception occurred
- * @app_health_report_size:     size in bytes of the entire app health report
- * @app_health_report:          binary blob of the entire app health report (contains aie states)
  *
  * Field                       Default value  Comment
  * txn_op_idx:                 0xFFFFFFFF     there is no txn control code is running or the
@@ -104,13 +102,11 @@ struct amdxdna_cmd_preempt_data {
  * fatal_error_exception_type: 0
  * fatal_error_exception_pc:   0
  * fatal_error_app_module:     0
- * app_health_report_size:     0              The entire app health report size
 
  * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
  * amdxdna_cmd starting from payload will have the following information.
  */
 struct amdxdna_ctx_health_data {
-	/* platform agnositic fields */
 	u32 version;
 	u32 txn_op_idx;
 	u32 ctx_pc;
@@ -118,9 +114,6 @@ struct amdxdna_ctx_health_data {
 	u32 fatal_error_exception_type;
 	u32 fatal_error_exception_pc;
 	u32 fatal_error_app_module;
-	/* platform dependent */
-	u32 app_health_report_size;
-	u32 app_health_report[];
 };
 
 /* Exec buffer command header format */
@@ -158,8 +151,6 @@ struct amdxdna_ctx {
 	u64				completed ____cacheline_aligned_in_smp;
 	/* Counter for freed job */
 	atomic64_t			job_free_cnt;
-	/* For context runqueue to keep last completed. low frequency update */
-	u64				last_completed;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
 	struct amdxdna_ctx_health_data	health_data;

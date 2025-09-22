@@ -4,6 +4,7 @@
 #ifndef _MULTI_THREADS_H_
 #define _MULTI_THREADS_H_
 
+#include <iostream>
 #include <thread>
 
 #include "core/common/device.h"

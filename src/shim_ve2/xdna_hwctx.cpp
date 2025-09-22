@@ -189,6 +189,13 @@ get_slotidx() const
   return m_handle;
 }
 
+size_t
+xdna_hwctx::
+get_num_uc() const
+{
+  return m_num_cols;
+}
+
 void
 xdna_hwctx::
 set_slotidx(slot_id id)

@@ -5,6 +5,8 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/version.h>
+#include <linux/dma-buf.h>
+#include <drm/drm_gem_dma_helper.h>
 
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_drm.h"
@@ -37,12 +39,27 @@ struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client, u32 b
 	return NULL;
 }
 
+static void amdxdna_imported_obj_free(struct amdxdna_gem_obj *abo)
+{
+	dma_buf_unmap_attachment_unlocked(abo->attach, abo->base.sgt, DMA_BIDIRECTIONAL);
+	dma_buf_detach(abo->dma_buf, abo->attach);
+	dma_buf_put(abo->dma_buf);
+	drm_gem_object_release(to_gobj(abo));
+	kfree(abo);
+}
+
 static void amdxdna_gem_dma_obj_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
+
+	if (is_import_bo(abo)) {
+		amdxdna_imported_obj_free(abo);
+		return;
+	}
+
 	drm_gem_dma_object_free(gobj);
 }
 
@@ -53,6 +70,7 @@ static const struct drm_gem_object_funcs amdxdna_gem_dma_funcs = {
 	.vmap = drm_gem_dma_object_vmap,
 	.mmap = drm_gem_dma_object_mmap,
 	.vm_ops = &drm_gem_dma_vm_ops,
+	.export = drm_gem_prime_export,
 };
 
 /* For drm_driver->gem_create_object callback */
@@ -75,6 +93,52 @@ struct drm_gem_object *amdxdna_gem_create_object_cb(struct drm_device *dev, size
 	abo->mem.size = size;
 
 	return to_gobj(abo);
+}
+
+struct drm_gem_object *amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
+{
+	struct dma_buf_attachment *attach;
+	struct amdxdna_gem_obj *abo;
+	struct drm_gem_object *gobj;
+	struct sg_table *sgt;
+	int ret;
+
+	get_dma_buf(dma_buf);
+
+	attach = dma_buf_attach(dma_buf, dev->dev);
+	if (IS_ERR(attach)) {
+		ret = PTR_ERR(attach);
+		goto put_buf;
+	}
+
+	sgt = dma_buf_map_attachment_unlocked(attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		ret = PTR_ERR(sgt);
+		goto fail_detach;
+	}
+
+	gobj = drm_gem_dma_prime_import_sg_table(dev, attach, sgt);
+	if (IS_ERR(gobj)) {
+		ret = PTR_ERR(gobj);
+		goto fail_unmap;
+	}
+
+	abo = to_xdna_obj(gobj);
+	abo->mem.size = dma_buf->size;
+	abo->mem.dev_addr = sg_dma_address(sgt->sgl);
+	abo->attach = attach;
+	abo->dma_buf = dma_buf;
+
+	return gobj;
+
+fail_unmap:
+	dma_buf_unmap_attachment_unlocked(attach, sgt, DMA_BIDIRECTIONAL);
+fail_detach:
+	dma_buf_detach(dma_buf, attach);
+put_buf:
+	dma_buf_put(dma_buf);
+
+	return ERR_PTR(ret);
 }
 
 static struct amdxdna_gem_obj *amdxdna_drm_create_dma_bo(struct drm_device *dev,

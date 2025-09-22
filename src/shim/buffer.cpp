@@ -4,6 +4,8 @@
 // Disable debug print in this file.
 //#undef XDNA_SHIM_DEBUG
 
+#include <iostream>
+
 #include "buffer.h"
 #include "shim_debug.h"
 #include "core/common/config_reader.h"
@@ -594,24 +596,35 @@ describe() const
 
 void
 buffer::
-sync(direction, size_t sz, size_t offset)
+sync_by_driver(direction dir, size_t sz, size_t offset)
+{
+  if (offset + sz > size())
+    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
+
+  sync_bo_arg arg = {
+    .bo = id(),
+    .direction = dir,
+    .offset = offset,
+    .size = sz,
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
+  shim_debug("Sync'ed BO %d in driver: offset=%ld, size=%ld", id().handle, offset, sz);
+}
+
+void
+buffer::
+sync(direction dir, size_t sz, size_t offset)
 {
   if (m_pdev.is_cache_coherent())
     return;
 
-  if (offset + sz > size())
-    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
-
   if (is_driver_sync()) {
-    sync_bo_arg arg = {
-      .bo = id(),
-      .offset = offset,
-      .size = sz,
-    };
-    m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
+    sync_by_driver(dir, sz, offset);
     return;
   }
 
+  if (offset + sz > size())
+    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
   clflush_data(vaddr(), offset, sz); 
   shim_debug("Sync'ed BO %d: offset=%ld, size=%ld", id().handle, offset, sz);
 }
@@ -806,12 +819,22 @@ bo_sub_type_name() const
   return "DEBUG BO";
 }
 
+void
+dbg_buffer::
+sync(direction dir, size_t sz, size_t offset)
+{
+  if (dir == xrt_core::buffer_handle::direction::host2device)
+    buffer::sync(dir, sz, offset);
+  else
+    buffer::sync_by_driver(dir, sz, offset);
+}
+
 //
 // Impl for class uc_dbg_buffer
 //
 void
 uc_dbg_buffer::
-config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes)
+config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes)
 {
   auto meta_buf_size = offsetof(struct fw_buffer_metadata, uc_info)
      + buf_sizes.size() * sizeof(struct uc_info_entry);
@@ -833,13 +856,13 @@ config(xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_size
   shim_debug("Config CMD BO %d (%s) for %d uC", id().handle,
     type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str(), i);
 
-  auto ctx = static_cast<shim_xdna::hwctx *>(hwctx);
+  auto ctx = static_cast<const shim_xdna::hwctx *>(hwctx);
   m_metadata_bo->bind_hwctx(*ctx);
 }
 
 void
 uc_dbg_buffer::
-unconfig(xrt_core::hwctx_handle* hwctx)
+unconfig(const xrt_core::hwctx_handle* hwctx)
 {
   shim_debug("Unconfig CMD BO %d (%s)", id().handle,
     type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str());

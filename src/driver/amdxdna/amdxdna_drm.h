@@ -16,6 +16,7 @@
 #include <linux/seqlock_types.h>
 
 #include "amdxdna_ctx.h"
+#include "amdxdna_dpt.h"
 #ifdef AMDXDNA_OF
 /*
  * TODO: remove this and implement physical contiguous memory by carvedout memory
@@ -47,6 +48,7 @@ struct amdxdna_dev;
 struct amdxdna_client;
 struct amdxdna_dev_hdl;
 struct amdxdna_dev_priv;
+struct amdxdna_mgmt_dma_hdl;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
@@ -58,8 +60,13 @@ struct amdxdna_dev_ops {
 	void (*recover)(struct amdxdna_dev *xdna, bool dump_only);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
+	void (*reset_prepare)(struct amdxdna_dev *xdna);
+	int (*reset_done)(struct amdxdna_dev *xdna);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
+	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);
+	int (*fw_log_fini)(struct amdxdna_dev *xdna);
+	void (*fw_log_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 	/* Below device ops are called by IOCTL */
 	int (*ctx_init)(struct amdxdna_ctx *ctx);
@@ -70,8 +77,7 @@ struct amdxdna_dev_ops {
 			  u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
-	int (*get_aie_info_array)(struct amdxdna_client *client,
-				  struct amdxdna_drm_get_info_array *args);
+	int (*get_aie_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 	struct dma_fence *(*cmd_get_out_fence)(struct amdxdna_ctx *ctx, u64 seq);
 };
@@ -127,6 +133,7 @@ struct amdxdna_dev {
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
 	struct amdxdna_tdr		tdr;
+	struct amdxdna_dpt		*fw_log;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif

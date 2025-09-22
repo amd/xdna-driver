@@ -19,6 +19,7 @@ struct amdxdna_tdr {
 	struct work_struct	tdr_work;
 	int			tdr_counter;
 	int			started;
+	u32			progress;
 };
 
 void amdxdna_tdr_start(struct amdxdna_tdr *tdr);
