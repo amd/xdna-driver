@@ -60,6 +60,8 @@ struct amdxdna_dev_ops {
 	void (*recover)(struct amdxdna_dev *xdna, bool dump_only);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
+	void (*reset_prepare)(struct amdxdna_dev *xdna);
+	int (*reset_done)(struct amdxdna_dev *xdna);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);

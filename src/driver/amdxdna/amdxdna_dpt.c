@@ -203,7 +203,7 @@ static void amdxdna_dpt_worker(struct work_struct *w)
 
 	/* Skip fetch and print to dmesg if dump_fw_log is not enabled */
 	if (!dpt->dump_to_dmesg || !dpt->xdna->dev_info->ops->fw_log_parse) {
-		XDNA_INFO(dpt->xdna, "Skipped dumping to dmesg");
+		XDNA_DBG(dpt->xdna, "Skipped dumping to dmesg");
 		return;
 	}
 

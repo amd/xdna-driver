@@ -33,6 +33,8 @@ unsigned s_rounds = 128;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
 unsigned threads = 2;
+unsigned vf_cnt;
+bool vf_test = false;
 std::vector<unsigned> exec_list;
 std::string dpu = "nop";
 
@@ -59,6 +61,8 @@ usage(const std::string& prog)
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
   std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test1 -e test2 ...]\n";
+  std::cout << "\t" << "-v" << ": apply each thread to corresponding vf, max 4\n";
+  std::cout << "\t" << "-l" << ": use xclbin flow if available\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
   std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
   std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
@@ -1027,6 +1031,7 @@ void
 TEST_xrt_threads(int device_index, arg_type& arg)
 {
   std::vector<std::thread> m_threads;
+  std::vector<bool> m_failed(threads, false);
 
   if (exec_list.empty())
     exec_list.insert(exec_list.begin(), threads, 0);
@@ -1035,16 +1040,42 @@ TEST_xrt_threads(int device_index, arg_type& arg)
   else
     threads = exec_list.size(); // if more tests than threads, increase threads to run all tests
 
-  for (int i = 0; i < threads; i++) {
-    m_threads.push_back(std::thread([&, i](){
-      std::cout << "Thread " << i << " started" << std::endl;
-      test_list[exec_list[i]].func(device_index, test_list[exec_list[i]].arg);
-    })
-    );
+  if (vf_test) {
+    for (int i = 0; i < threads; i++) {
+      m_threads.push_back(std::thread([&, i](){
+        std::cout << "Thread " << i << " started" << std::endl;
+	try {
+	  test_list[exec_list[i]].func(i % vf_cnt, test_list[exec_list[i]].arg);
+	} catch (const std::exception& ex) {
+	  m_failed[i] = true;
+	  std::cerr << "Thread " << i << " failed: " << ex.what() << std::endl;
+	}
+      })
+      );
+    }
+  }
+  else {
+    for (int i = 0; i < threads; i++) {
+      m_threads.push_back(std::thread([&, i](){
+        std::cout << "Thread " << i << " started" << std::endl;
+	try {
+	  test_list[exec_list[i]].func(device_index, test_list[exec_list[i]].arg);
+	} catch (const std::exception& ex) {
+	  m_failed[i] = true;
+	  std::cerr << "Thread " << i << " failed: " << ex.what() << std::endl;
+	}
+      })
+      );
+    }
   }
 
   for (int i = 0; i < threads; i++)
-      m_threads[i].join();
+    m_threads[i].join();
+
+  for (int i = 0; i < threads; i++) {
+    if (m_failed[i])
+      throw std::runtime_error("At least one thread has failed");
+  }
 
 }
 
@@ -1109,7 +1140,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:v:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -1170,10 +1201,21 @@ main(int argc, char **argv)
 	    return 1;
 	  }
 	}
-        case 'l':
-          std::cout << "swtiching to xclbin flow" << std::endl;
-          elf_flow = false;
+	case 'l': {
+	  std::cout << "swtiching to xclbin flow" << std::endl;
+	  elf_flow = false;
 	  break;
+	}
+	case 'v': {
+	  val = std::stoi(optarg);
+	  if (val > 4 || val < 1) {
+	    std::cout << "VF count is between 1-4" << std::endl;
+	    return 1;
+	  }
+	  vf_cnt = val;
+	  vf_test = true;
+	  break;
+	}
 	case 'h':
 	  usage(program);
 	  return 0;

@@ -10,6 +10,7 @@
 
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
+#include "core/include/xclerr_int.h"
 #include <sys/syscall.h>
 #include <algorithm>
 #include <libgen.h>
@@ -450,6 +451,45 @@ struct context_health_info {
 
       auto* data = reinterpret_cast<amdxdna_drm_hwctx_entry*>(payload.data());
       output.push_back(fill_health_entry(*data));
+    }
+    return output;
+  }
+};
+
+struct xocl_errors
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::xocl_errors)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // Query all contexts
+    amdxdna_async_error* data;
+    const uint32_t drv_output = 32 * sizeof(*data);
+    std::vector<char> payload(drv_output);
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_LAST_ASYNC_ERR,
+      .element_size = sizeof(*data),
+      .num_element = 32,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    uint32_t data_size = 0;
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+    data_size = arg.num_element;
+    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    query::xocl_errors::result_type output(sizeof(xcl_errors));
+    xcl_errors *out_xcl_errors = reinterpret_cast<xcl_errors*>(output.data());
+    out_xcl_errors->num_err = arg.num_element;
+    for (uint32_t i = 0; i < arg.num_element; i++) {
+      out_xcl_errors->errors[i].err_code = data[i].err_code;
+      out_xcl_errors->errors[i].ts = data[i].ts_us;
+      out_xcl_errors->errors[i].ex_error_code = data[i].ex_err_code;
     }
     return output;
   }
@@ -1495,6 +1535,7 @@ static void
 initialize_query_table()
 {
   emplace_func0_request<query::aie_partition_info,             partition_info>();
+  emplace_func0_request<query::xocl_errors,                    xocl_errors>();
   emplace_func1_request<query::context_health_info,           context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
