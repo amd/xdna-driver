@@ -14,16 +14,13 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 {
 	struct amdxdna_dev *xdna = xdna_hdl->xdna;
 	struct ve2_firmware_version *version;
-	struct aie_location loc;
-	int ret;
+	int ret = 0;
 
 	version = kzalloc(sizeof(*version), GFP_KERNEL);
 	if (!version)
 		return -ENOMEM;
 
-	loc.col = 0;
-	loc.row = 0;
-	ret = aie_partition_read(xaie_dev, loc, VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
+	ret = ve2_partition_read(xaie_dev, 0, 0, 0, VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
 				 VE2_CERT_VERSION_SIZE, version);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie_partition_read failed with ret %d\n", ret);
@@ -38,14 +35,13 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 	XDNA_INFO(xdna, "CERT git hash date: %s\n", xdna_hdl->fw_version.date);
 	kfree(version);
 
-	return 0;
+	return ret;
 }
 
-static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev, u32 col)
+static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev, u32 lead_col, u32 col)
 {
-	struct ve2_firmware_status *cs = xdna->dev_handle->fw_slots[col];
-	struct aie_location loc;
-	struct handshake *hs;
+	struct ve2_firmware_status *cs = xdna->dev_handle->fw_slots[lead_col + col];
+	struct handshake *hs = NULL;
 	int ret = 0;
 
 	hs = kzalloc(sizeof(*hs), GFP_KERNEL);
@@ -54,10 +50,9 @@ static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev,
 		return -ENOMEM;
 	}
 
-	loc.col = col;
-	loc.row = 0;
-
-	ret = aie_partition_read(aie_dev, loc, 0, sizeof(*hs), hs);
+	ret = ve2_partition_read_privileged_mem(aie_dev, lead_col, col,
+			offsetof(struct handshake, mpaie_alive),
+			sizeof(struct handshake), (void *)hs);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie_partition_read failed with ret %d\n", ret);
 		goto done;
@@ -70,10 +65,10 @@ static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev,
 	cs->misc_status = hs->misc_status;
 
 	XDNA_INFO(xdna, "Firmware status of col = %u\n", col);
-	XDNA_INFO(xdna, "state: %u\n", cs->state);
+	XDNA_INFO(xdna, "FW state: %u\n", cs->state);
 	XDNA_INFO(xdna, "abs_page_index: %u\n", cs->abs_page_index);
 	XDNA_INFO(xdna, "ppc: %u\n", cs->ppc);
-	XDNA_INFO(xdna, "idle_status: %u\n", cs->idle_status);
+	XDNA_INFO(xdna, "FW idle_status: %u\n", cs->idle_status);
 	XDNA_INFO(xdna, "misc_status: %u\n", cs->misc_status);
 
 done:
@@ -85,23 +80,17 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	u32 start_col = priv_ctx->start_col;
-	u32 num_col = priv_ctx->num_col;
-	u32 relative_col;
-	int ret;
+	int ret = 0;
 
-	if (!priv_ctx->aie_part) {
+	if (!priv_ctx->aie_dev) {
 		XDNA_ERR(xdna, "Partition does not have aie device handle\n");
 		return -ENODEV;
 	}
 
-	for (u32 col = start_col; col < start_col + num_col; col++) {
-		relative_col = col - start_col;
-		ret = get_firmware_status(xdna, priv_ctx->aie_part, relative_col);
+	for (u32 col = 0; col < priv_ctx->num_col; col++) {
+		ret = get_firmware_status(xdna, priv_ctx->aie_dev, priv_ctx->start_col, col);
 		if (ret < 0) {
-			XDNA_ERR(xdna, "Failed to get fw status for col %d ret %d\n", relative_col,
-				 ret);
-			break;
+			XDNA_ERR(xdna, "Failed to get cert status for col %d ret = %d\n", col, ret);
 		}
 	}
 
