@@ -674,7 +674,6 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 	abo->mem.dma_addr = cmabuf->dma_addr;
 	abo->mem.dev_addr = cmabuf->dma_addr;
 	abo->mem.size = cmabuf->size;
-	abo->mem.cma = true;
 	abo->type = args->type;
 
 	return abo;
@@ -752,7 +751,6 @@ amdxdna_gem_create_share_object(struct drm_device *dev,
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 {
-	struct amdxdna_dev *xdna =to_xdna_dev(dev);
 	struct dma_buf_attachment *attach;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
@@ -783,9 +781,6 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo->attach = attach;
 	abo->dma_buf = dma_buf;
 	gobj->resv = dma_buf->resv;
-
-	if (xdna->use_cma)
-		abo->mem.cma= true;
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
@@ -1232,7 +1227,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		goto put_obj;
 	}
 
-	if (abo->mem.cma) {
+	if (xdna->use_cma) {
 		bo_phyaddr = (u64)abo->mem.dma_addr;
 		bo_phyaddr += args->offset;
 		if (args->direction == SYNC_DIRECT_TO_DEVICE)

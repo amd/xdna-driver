@@ -95,12 +95,10 @@ static int amdxdna_cmabuf_mmap(struct dma_buf *dbuf, struct vm_area_struct *vma)
 			cmabuf->cpu_addr,
 			cmabuf->dma_addr,
 			cmabuf->size);
-	if (ret)
-		return ret;
 
 	vma->vm_pgoff = vm_pgoff;
 
-	return 0;
+	return ret;
 }
 
 static int amdxdna_cmabuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
