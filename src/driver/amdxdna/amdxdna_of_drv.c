@@ -13,6 +13,9 @@
 #include "amdxdna_devel.h"
 #include "amdxdna_of_drv.h"
 
+extern int max_col;
+extern int start_col;
+
 static const struct of_device_id amdxdna_of_table[] = {
 	{ .compatible = "amdxdna,ve2", .data = &dev_ve2_info },
 	{ .compatible = "xlnx,aiarm", .data = &dev_ve2_info },
@@ -23,6 +26,7 @@ MODULE_DEVICE_TABLE(of, amdxdna_of_table);
 
 static int amdxdna_of_probe(struct platform_device *pdev)
 {
+	struct init_config xrs_cfg = { 0 };
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *id;
 	struct amdxdna_dev *xdna;
@@ -80,11 +84,33 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 			XDNA_ERR(xdna, "DMA configuration failed: 0x%x\n", ret);
 			goto out;
 		}
+
 		XDNA_WARN(xdna, "DMA configuration downgraded to 32bit Mask\n");
 	}
 
-	//VE2 doesn't support iommu PASID mode, use hardcoding value.
+	if (xdna->dev_info->ops->debugfs)
+		xdna->dev_info->ops->debugfs(xdna);
+
+	xrs_cfg.ddev = &xdna->ddev;
+
+	if (max_col > 0 && start_col >= 0 &&
+			(max_col + start_col) < XRS_MAX_COL) {
+		xrs_cfg.total_col = max_col;
+	} else {
+		xrs_cfg.total_col = XRS_MAX_COL;
+	}
+
+	if (xdna->dev_handle)
+		xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle || !xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialize resolver failed");
+		drm_dev_put(&xdna->ddev);
+		return -EINVAL;
+	}
+
 	iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+
+	XDNA_DBG(xdna, "pdev %p",pdev);
 
 	return 0;
 out:

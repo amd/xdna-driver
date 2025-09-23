@@ -44,26 +44,34 @@ struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
 	return NULL;
 }
 
-static void remove_partition_node(struct solver_rgroup *rgp, struct partition_node *pt_node)
+static void remove_partition_node(struct solver_rgroup *rgp, struct partition_node *pt_node,
+                struct xrs_action_load *action)
 {
-	pt_node->nshared--;
-	if (pt_node->nshared > 0)
-		return;
+        pt_node->nshared--;
+        if (pt_node->nshared > 0) {
+                action->release_aie_part = false;
+                return;
+        }
 
-	list_del(&pt_node->list);
-	rgp->npartition_node--;
+        list_del(&pt_node->list);
 
-	bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncols);
-	kfree(pt_node);
+        if (pt_node->exclusive) {
+                rgp->npartition_node--;
+                bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncols);
+        }
+                
+        kfree(pt_node);
+        action->release_aie_part = true;
 }
 
-static void remove_solver_node(struct solver_rgroup *rgp, struct solver_node *node)
+static void remove_solver_node(struct solver_rgroup *rgp, struct solver_node *node,
+                struct xrs_action_load *action)
 {
 	list_del(&node->list);
 	rgp->nnode--;
 
 	if (node->pt_node)
-		remove_partition_node(rgp, node->pt_node);
+		remove_partition_node(rgp, node->pt_node, action);
 
 	kfree(node);
 }
@@ -91,11 +99,7 @@ static int get_free_partition(struct solver_state *xrs, struct solver_node *snod
 	pt_node->nshared = 1;
 	pt_node->start_col = col;
 	pt_node->ncols = ncols;
-
-	/*
-	 * Always set exclusive to false for now.
-	 */
-	pt_node->exclusive = true;
+        pt_node->exclusive = req->rqos.exclusive;
 
 	list_add_tail(&pt_node->list, &xrs->rgp.pt_node_list);
 	xrs->rgp.npartition_node++;
@@ -106,43 +110,91 @@ static int get_free_partition(struct solver_state *xrs, struct solver_node *snod
 	return 0;
 }
 
-static int allocate_partition(struct solver_state *xrs, struct solver_node *snode,
-			      struct alloc_requests *req)
+static int allocate_partition_exclusive(struct solver_state *xrs,
+                              struct solver_node *snode,
+                              struct alloc_requests *req)
 {
-	struct partition_node *pt_node, *rpt_node = NULL;
-	int idx, ret;
+        struct partition_node *pt_node, *rpt_node = NULL;
+        int idx, ret;
 
-	ret = get_free_partition(xrs, snode, req);
-	if (!ret)
-		return ret;
+        ret = get_free_partition(xrs, snode, req);
+        if (!ret)
+                return ret;
 
-	/* try to get a share-able partition */
-	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (pt_node->exclusive)
-			continue;
+        /* try to get a exclusive partition */
+        list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+                if (rpt_node && pt_node->nshared >= rpt_node->nshared)
+                        continue;
 
-		if (rpt_node && pt_node->nshared >= rpt_node->nshared)
-			continue;
+                for (idx = 0; idx < snode->cols_len; idx++) {
+                        if (snode->start_cols[idx] != pt_node->start_col)
+                                continue;
 
-		for (idx = 0; idx < snode->cols_len; idx++) {
-			if (snode->start_cols[idx] != pt_node->start_col)
-				continue;
+                        if (req->cdo.ncols != pt_node->ncols)
+                                continue;
 
-			if (req->cdo.ncols != pt_node->ncols)
-				continue;
+                        rpt_node = pt_node;
+                        break;
+                }
+        }
 
-			rpt_node = pt_node;
-			break;
-		}
-	}
+        if (!rpt_node)
+                return -ENODEV;
 
-	if (!rpt_node)
-		return -ENODEV;
+        rpt_node->nshared++;
+        snode->pt_node = rpt_node;
 
-	rpt_node->nshared++;
-	snode->pt_node = rpt_node;
+        return 0;
+}
 
-	return 0;
+static int allocate_partition_shared(struct solver_state *xrs,
+                              struct solver_node *snode,
+                              struct alloc_requests *req)
+{
+        struct partition_node *pt_node, *rpt_node = NULL;
+        u32 col = snode->start_cols[0];
+        u32 ncols = req->cdo.ncols;
+        int idx;
+
+        /* try to get a share-able partition */
+        list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+                if (pt_node->exclusive)
+                        continue;
+
+                if (rpt_node && pt_node->nshared >= rpt_node->nshared)
+                        continue;
+
+                for (idx = 0; idx < snode->cols_len; idx++) {
+                        if (snode->start_cols[idx] != pt_node->start_col)
+                                continue;
+
+                        if (req->cdo.ncols != pt_node->ncols)
+                                continue;
+
+                        rpt_node = pt_node;
+                        break;
+                }
+        }
+
+        if (!rpt_node) {
+                pt_node = kzalloc(sizeof(*pt_node), GFP_KERNEL);
+                if (!pt_node)
+                        return -ENOMEM;
+
+                pt_node->nshared = 1;
+                pt_node->start_col = col;
+                pt_node->ncols = ncols;
+                pt_node->exclusive = req->rqos.exclusive;
+
+                list_add_tail(&pt_node->list, &xrs->rgp.pt_node_list);
+                xrs->rgp.npartition_node++;
+                rpt_node = pt_node;
+        } else {
+                rpt_node->nshared++;
+        }
+
+        snode->pt_node = rpt_node;
+        return 0;
 }
 
 static struct solver_node *create_solver_node(struct solver_state *xrs, struct alloc_requests *req)
@@ -159,7 +211,11 @@ static struct solver_node *create_solver_node(struct solver_state *xrs, struct a
 	node->cols_len = cdop->cols_len;
 	memcpy(node->start_cols, cdop->start_cols, cdop->cols_len * sizeof(u32));
 
-	ret = allocate_partition(xrs, node, req);
+        if (req->rqos.exclusive)
+                ret = allocate_partition_exclusive(xrs, node, req);
+        else
+                ret = allocate_partition_shared(xrs, node, req);
+
 	if (ret)
 		goto free_node;
 
@@ -178,6 +234,11 @@ static void fill_load_action(struct solver_state *xrs, struct solver_node *snode
 	action->rid = snode->rid;
 	action->part.start_col = snode->pt_node->start_col;
 	action->part.ncols = snode->pt_node->ncols;
+        if (snode->pt_node->nshared == 1)
+                action->create_aie_part = true;
+        else
+                action->create_aie_part = false;
+
 }
 
 /*
@@ -192,7 +253,7 @@ static void fill_load_action(struct solver_state *xrs, struct solver_node *snode
  * Note:
  *      Ensure that all resources associated with the request id are properly released.
  */
-int xrs_release_resource(void *hdl, u64 rid)
+int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action)
 {
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
@@ -204,7 +265,8 @@ int xrs_release_resource(void *hdl, u64 rid)
 		mutex_unlock(&xrs->xrs_lock);
 		return -ENODEV;
 	}
-	remove_solver_node(&xrs->rgp, node);
+
+        remove_solver_node(&xrs->rgp, node, action);
 	mutex_unlock(&xrs->xrs_lock);
 
 	return 0;
@@ -243,6 +305,11 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct xrs_acti
 		drm_err(xrs->cfg.ddev, "rid %lld is in-use", req->rid);
 		return -EEXIST;
 	}
+
+        if (req->rqos.priority == AMDXDNA_QOS_REALTIME_PRIORITY)
+                req->rqos.exclusive = true;
+        else
+                req->rqos.exclusive = false;
 
 	snode = create_solver_node(xrs, req);
 	if (IS_ERR(snode))
