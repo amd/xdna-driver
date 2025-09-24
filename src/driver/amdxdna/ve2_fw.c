@@ -20,7 +20,7 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 	if (!version)
 		return -ENOMEM;
 
-	ret = ve2_partition_read(xaie_dev, 0, 0, 0, VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
+	ret = ve2_partition_read(xaie_dev, 0, 0, VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
 				 VE2_CERT_VERSION_SIZE, version);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie_partition_read failed with ret %d\n", ret);
@@ -50,7 +50,7 @@ static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev,
 		return -ENOMEM;
 	}
 
-	ret = ve2_partition_read_privileged_mem(aie_dev, lead_col, col,
+	ret = ve2_partition_read_privileged_mem(aie_dev, col,
 			offsetof(struct handshake, mpaie_alive),
 			sizeof(struct handshake), (void *)hs);
 	if (ret < 0) {

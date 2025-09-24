@@ -101,6 +101,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
 	else
 		xdna_hdl->hwctx_limit = xdna_hdl->priv->hwctx_limit;
+
 	XDNA_INFO(xdna, "Maximum limit %d hardware context(s)", xdna_hdl->hwctx_limit);
 
 	ret = ve2_load_fw(xdna_hdl);

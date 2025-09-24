@@ -39,7 +39,7 @@ struct aie_qos {
 	u32		latency;	/* Frame response latency */
 	u32		exec_time;	/* Frame execution time */
 	u32		priority;	/* Request priority */
-        u32             exclusive;      /* Exclusive Request or not */
+	u32             exclusive;      /* Exclusive Request or not */
 };
 
 /*
@@ -67,8 +67,8 @@ struct alloc_requests {
 struct xrs_action_load {
 	u32			rid;
 	struct aie_part		part;
-        bool                    create_aie_part;
-        bool                    release_aie_part;
+	bool                    create_aie_part;
+	bool                    release_aie_part;
 };
 
 /*

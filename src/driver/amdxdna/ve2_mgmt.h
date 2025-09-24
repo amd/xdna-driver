@@ -59,14 +59,10 @@ struct misc_info {
 
 // Read from handshake memory
 static inline int
-ve2_partition_read_privileged_mem(struct device *aie_dev, u32 lead_col, u32 col,
+ve2_partition_read_privileged_mem(struct device *aie_dev, u32 col,
 		size_t field_offset, size_t size, void *p_read_mem)
 {
         u32 offset;
-
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-        col = col + lead_col;
-#endif
 
         offset = CERT_HANDSHAKE_OFF(col) + field_offset;
         return aie_partition_read_privileged_mem(aie_dev, offset, size, p_read_mem);
@@ -74,36 +70,27 @@ ve2_partition_read_privileged_mem(struct device *aie_dev, u32 lead_col, u32 col,
 
 // Write to handshake memory
 static inline int
-ve2_partition_write_privileged_mem(struct device *aie_dev, u32 lead_col, u32 col,
+ve2_partition_write_privileged_mem(struct device *aie_dev, u32 col,
 		size_t field_offset, size_t size, void *p_write_mem)
 {
         u32 offset;
 
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-        col = col + lead_col;
-#endif
         offset = CERT_HANDSHAKE_OFF(col) + field_offset;
         return aie_partition_write_privileged_mem(aie_dev, offset, size, p_write_mem);
 }
 
 // Wake up cert via UC wakeup
 static inline int 
-ve2_partition_uc_wakeup(struct device *aie_dev, u32 lead_col, u32 col)
+ve2_partition_uc_wakeup(struct device *aie_dev, u32 col)
 {
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-        col = col + lead_col;
-#endif
         struct aie_location loc = { .col = col };
         return aie_partition_uc_wakeup(aie_dev, &loc);
 }
 
 static inline int 
-ve2_partition_write(struct device *aie_dev, u32 lead_col,
+ve2_partition_write(struct device *aie_dev,
 		u32 col, u32 row, u32 offset, size_t size, void *buf)
 {
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-	col = col + lead_col;
-#endif
 	struct aie_location loc = { .col = col };
 	loc.row = row;
 
@@ -112,12 +99,9 @@ ve2_partition_write(struct device *aie_dev, u32 lead_col,
 }
 
 static inline int 
-ve2_partition_read(struct device *aie_dev, u32 lead_col,
+ve2_partition_read(struct device *aie_dev,
 		u32 col, u32 row, u32 offset, size_t size, void *buf)
 {
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-	col = col + lead_col;
-#endif
 	struct aie_location loc = { .col = col };
 	loc.row = row;
 
@@ -128,12 +112,7 @@ static inline int
 ve2_partition_initialize(struct device *dev,
 		struct aie_partition_init_args *args)
 {
-#if KERNEL_VERSION(6, 10, 0) <= LINUX_VERSION_CODE
         args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
-#else
-        args->init_opts = AIE_PART_INIT_OPT_DEFAULT & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
-
-#endif
 	return aie_partition_initialize(dev, args);
 }
 
