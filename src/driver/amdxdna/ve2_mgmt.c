@@ -50,11 +50,11 @@ static void cert_setup_partition(struct amdxdna_dev *xdna, struct device *aie_de
 	cert_comm.mpaie_alive = ALIVE_MAGIC;
 
 	/* write to cert handshake shared memory */
-	ve2_partition_write_privileged_mem(aie_dev, lead_col, col, 0,
+	ve2_partition_write_privileged_mem(aie_dev, col, 0,
 			sizeof(cert_comm), (void *)&cert_comm);
 
 	/* wake up cert */
-	ve2_partition_uc_wakeup(aie_dev, lead_col, col);
+	ve2_partition_uc_wakeup(aie_dev, col);
 }
 
 static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req, u32 num_col)
@@ -196,7 +196,7 @@ static u32 get_ctx_bit(struct amdxdna_mgmtctx *mgmtctx)
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	u32 val;
 
-	ve2_partition_read_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_read_privileged_mem(aie_dev, 0,
 			offsetof(struct handshake, ctx_switch_req), sizeof(u32), &val);
 	return val;
 }
@@ -244,12 +244,12 @@ static int ve2_request_context_switch(struct amdxdna_dev *xdna,
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	u32 val, pval;
 
-	ve2_partition_read_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_read_privileged_mem(aie_dev, 0,
 			offsetof(struct handshake, ctx_switch_req), sizeof(u32), &val);
 
 	pval = val;
 	val |= RR_SHARING;
-	ve2_partition_write_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_write_privileged_mem(aie_dev, 0,
 			offsetof(struct handshake, ctx_switch_req),
 			sizeof(u32), (void *)&val);
 
@@ -367,7 +367,7 @@ static bool ve2_check_idle(struct amdxdna_mgmtctx  *mgmtctx)
 	uint32_t cert_idle_status = 0;
 	uint32_t val = 0;
 
-	ve2_partition_read_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_read_privileged_mem(aie_dev, 0,
 		       offsetof(struct handshake, cert_idle_status),
 		       sizeof(cert_idle_status), (void *)&cert_idle_status);
 	
@@ -389,7 +389,7 @@ static bool ve2_check_queue_not_empty(struct amdxdna_mgmtctx  *mgmtctx)
 	uint32_t cert_idle_status = 0;
 	uint32_t val = 0;
 
-	ve2_partition_read_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_read_privileged_mem(aie_dev, 0,
 		       offsetof(struct handshake, cert_idle_status),
 		       sizeof(cert_idle_status), (void *)&cert_idle_status);
 	
@@ -410,7 +410,7 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	uint32_t misc_status = 0;
 
-	ve2_partition_read_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_read_privileged_mem(aie_dev, 0,
 			offsetof(struct handshake, misc_status),
 			sizeof(misc_status), (void *)&misc_status);
 	/*This may occur when control code is hanged or any exception*/
@@ -432,7 +432,7 @@ static bool ve2_check_idle_or_queue_not_empty(struct amdxdna_mgmtctx  *mgmtctx)
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	uint32_t cert_idle_status = 0;
 
-	ve2_partition_read_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_read_privileged_mem(aie_dev, 0,
 		       offsetof(struct handshake, cert_idle_status),
 		       sizeof(cert_idle_status), (void *)&cert_idle_status);
 
@@ -494,7 +494,7 @@ static u32 get_cert_idle_status(struct amdxdna_mgmtctx  *mgmtctx)
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	uint32_t cert_idle_status = 0;
 
-	ve2_partition_read_privileged_mem(aie_dev, mgmtctx->start_col, 0,
+	ve2_partition_read_privileged_mem(aie_dev, 0,
 		       offsetof(struct handshake, cert_idle_status),
 		       sizeof(cert_idle_status), (void *)&cert_idle_status);
 
@@ -642,11 +642,11 @@ static int ve2_xrs_release(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
         return xrs_release_resource(xdna->dev_handle->xrs_hdl, (uintptr_t)hwctx, load_act);
 }
 
-static void cert_clear_partition(struct amdxdna_dev *xdna, struct device *aie_dev, u32 lead_col, u32 col)
+static void cert_clear_partition(struct amdxdna_dev *xdna, struct device *aie_dev, u32 col)
 {
 	struct handshake cert_comm = { 0 };
 
-	ve2_partition_write_privileged_mem(aie_dev, lead_col, col, 0,
+	ve2_partition_write_privileged_mem(aie_dev, col, 0,
 			sizeof(cert_comm), (void *)&cert_comm);
 }
 
@@ -682,7 +682,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
         mgmtctx = &xdna->dev_handle->ve2_mgmtctx[start_col];
         if(load_act.release_aie_part) {
                 for (u32 col = 0; col < num_col; col++)
-                        cert_clear_partition(xdna, nhwctx->aie_dev, start_col, col);
+                        cert_clear_partition(xdna, nhwctx->aie_dev, col);
 
                 aie_partition_teardown(nhwctx->aie_dev);
                 aie_partition_release(nhwctx->aie_dev);
@@ -745,7 +745,7 @@ int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
 	u32 value = VE2_USER_EVENT_ID;
 	int ret;
 
-	ret = ve2_partition_write(hwctx->priv->aie_dev, hwctx->start_col, 0, 0,
+	ret = ve2_partition_write(hwctx->priv->aie_dev, 0, 0,
 			VE2_EVENT_GENERATE_REG, sizeof(u32), (void *)&(value));
 	if (ret < 0)
 		XDNA_DBG(xdna, "AIE write on event_generate register throw error %d\n",

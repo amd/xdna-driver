@@ -698,7 +698,7 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				return -ENOMEM;
 			}
 
-			ret = ve2_partition_read_privileged_mem(aie_dev, hwctx->start_col, 0,
+			ret = ve2_partition_read_privileged_mem(aie_dev, 0,
 					offsetof(struct handshake, mpaie_alive),
 					sizeof(struct handshake), (void *)hs);
 
