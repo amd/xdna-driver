@@ -77,14 +77,14 @@ include(FetchContent)
 
 FetchContent_Declare(
   vtd_strx_archive
-  URL "https://github.com/Xilinx/VTD/raw/8b3c59d74b61c693445bef92d4b620098999472e/runner/xrt_smi_strx.a"
+  URL "https://github.com/Xilinx/VTD/raw/403740c18e709f82b3880fae53d412331ed907b1/runner/strx/xrt_smi_strx.a"
   DOWNLOAD_NO_EXTRACT ON
   DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
 )
 
 FetchContent_Declare(
   vtd_phx_archive
-  URL "https://github.com/Xilinx/VTD/raw/8b3c59d74b61c693445bef92d4b620098999472e/runner/xrt_smi_phx.a"
+  URL "https://github.com/Xilinx/VTD/raw/403740c18e709f82b3880fae53d412331ed907b1/runner/phx/xrt_smi_phx.a"
   DOWNLOAD_NO_EXTRACT ON
   DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
 )
