@@ -1230,11 +1230,11 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	if (xdna->use_cma) {
 		bo_phyaddr = (u64)abo->mem.dma_addr;
 		bo_phyaddr += args->offset;
-		if (args->direction == SYNC_DIRECT_TO_DEVICE)
+		if (args->direction == SYNC_DIRECT_TO_DEVICE) {
 			dma_sync_single_for_device(dev->dev, bo_phyaddr, args->size, DMA_TO_DEVICE);
-		else if (args->direction == SYNC_DIRECT_FROM_DEVICE)
+		} else if (args->direction == SYNC_DIRECT_FROM_DEVICE) {
 			dma_sync_single_for_cpu(dev->dev, bo_phyaddr, args->size, DMA_FROM_DEVICE);
-		else {
+		} else {
 			XDNA_ERR(xdna, "Invalid direction %d requested", args->direction);
 			ret = -EINVAL;
 		}

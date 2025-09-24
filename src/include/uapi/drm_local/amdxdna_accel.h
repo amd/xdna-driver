@@ -259,7 +259,6 @@ struct amdxdna_drm_create_bo {
 #define	AMDXDNA_BO_DEV_HEAP	2 /* Shared host memory to device as heap memory */
 #define	AMDXDNA_BO_DEV		3 /* Allocated from BO_DEV_HEAP */
 #define	AMDXDNA_BO_CMD		4 /* User and driver accessible BO */
-#define	AMDXDNA_BO_DMA		5 /* DRM GEM DMA BO */
 	__u32	type;
 	__u32	handle;
 };

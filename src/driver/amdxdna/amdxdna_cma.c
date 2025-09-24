@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
@@ -9,7 +9,7 @@
 
 static struct sg_table *
 amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
-			enum dma_data_direction dir)
+		   enum dma_data_direction dir)
 {
 	struct amdxdna_cmabuf_priv *cbuf = attach->dmabuf->priv;
 	struct scatterlist *sg;
@@ -28,8 +28,8 @@ amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
 
 	sg_init_table(sg, 1);
 	sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->dma_addr,
-						cbuf->size, dir,
-						DMA_ATTR_SKIP_CPU_SYNC);
+					      cbuf->size, dir,
+					      DMA_ATTR_SKIP_CPU_SYNC);
 	ret = dma_mapping_error(attach->dev, sg->dma_address);
 	if (ret)
 		goto free_sg;
@@ -51,13 +51,13 @@ free_sgt:
 }
 
 static void amdxdna_cmabuf_unmap(struct dma_buf_attachment *attach,
-				struct sg_table *sgt,
-				enum dma_data_direction dir)
+				 struct sg_table *sgt,
+				 enum dma_data_direction dir)
 {
 	struct scatterlist *sg = sgt->sgl;
 
 	dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg),
-				dir, DMA_ATTR_SKIP_CPU_SYNC);
+			   dir, DMA_ATTR_SKIP_CPU_SYNC);
 	kfree(sg);
 	kfree(sgt);
 }
@@ -70,7 +70,7 @@ static void amdxdna_cmabuf_release(struct dma_buf *dbuf)
 		return;
 
 	dma_free_coherent(cmabuf->dev->dev, cmabuf->size,
-			cmabuf->cpu_addr, cmabuf->dma_addr);
+			  cmabuf->cpu_addr, cmabuf->dma_addr);
 	kfree(cmabuf);
 	dbuf->priv = NULL;
 }
@@ -92,9 +92,9 @@ static int amdxdna_cmabuf_mmap(struct dma_buf *dbuf, struct vm_area_struct *vma)
 	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
 
 	ret = dma_mmap_coherent(cmabuf->dev->dev, vma,
-			cmabuf->cpu_addr,
-			cmabuf->dma_addr,
-			cmabuf->size);
+				cmabuf->cpu_addr,
+				cmabuf->dma_addr,
+				cmabuf->size);
 
 	vma->vm_pgoff = vm_pgoff;
 
@@ -119,7 +119,7 @@ static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
 };
 
 struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev,
-				size_t size)
+				    size_t size)
 {
 	struct amdxdna_cmabuf_priv *cmabuf;
 	struct dma_buf *dbuf;
