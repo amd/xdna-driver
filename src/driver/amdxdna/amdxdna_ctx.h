@@ -14,11 +14,7 @@
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
 
-#ifdef AMDXDNA_OF
-#include "amdxdna_gem_of.h"
-#else
 #include "amdxdna_gem.h"
-#endif
 
 struct amdxdna_ctx_priv;
 
