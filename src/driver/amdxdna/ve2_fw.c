@@ -38,9 +38,9 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 	return ret;
 }
 
-static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev, u32 lead_col, u32 col)
+static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev, u32 col)
 {
-	struct ve2_firmware_status *cs = xdna->dev_handle->fw_slots[lead_col + col];
+	struct ve2_firmware_status *cs = xdna->dev_handle->fw_slots[col];
 	struct handshake *hs = NULL;
 	int ret = 0;
 
@@ -88,7 +88,7 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 	}
 
 	for (u32 col = 0; col < priv_ctx->num_col; col++) {
-		ret = get_firmware_status(xdna, priv_ctx->aie_dev, priv_ctx->start_col, col);
+		ret = get_firmware_status(xdna, priv_ctx->aie_dev, priv_ctx->start_col + col);
 		if (ret < 0) {
 			XDNA_ERR(xdna, "Failed to get cert status for col %d ret = %d\n", col, ret);
 		}
