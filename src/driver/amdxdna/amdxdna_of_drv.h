@@ -18,5 +18,7 @@
 
 /* Add device info below */
 extern const struct amdxdna_dev_info dev_ve2_info;
+extern int max_col;
+extern int start_col;
 
 #endif /* _AMDXDNA_VE2_DRV_H_ */

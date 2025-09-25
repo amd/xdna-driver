@@ -54,7 +54,7 @@ struct common_header {
 			u16 acquire_fence_scope: 2;
 			u16 release_fence_scope: 2;
 		};
-		u16 	header;
+		u16	header;
 	};
 	u16	opcode;
 	u16	count;
@@ -67,10 +67,9 @@ struct xrt_packet_header {
 	u64			completion_signal;
 };
 
-struct xrt_packet
-{
-  	struct xrt_packet_header 	xrt_header;
-	u64 				xrt_payload_host_addr;
+struct xrt_packet {
+	struct xrt_packet_header	xrt_header;
+	u64				xrt_payload_host_addr;
 };
 
 struct host_queue_packet {
@@ -120,8 +119,7 @@ struct ve2_hsa_queue {
 
 //handshake
 #define ALIVE_MAGIC 0x404C5645
-struct handshake
-{
+struct handshake {
 	u32 mpaie_alive; //0
 	u32 partition_base_address; //4
 	struct {
@@ -142,18 +140,15 @@ struct handshake
 	u32 log_buf_size; //2c
 	u32 host_time_high; //30
 	u32 host_time_low; //34
-	struct
-	{
+	struct {
 		u32 dtrace_addr_high; //38
 		u32 dtrace_addr_low; //3c
 	}
 	trace;
-	struct
-	{
+	struct {
 #define NUM_PDI_SAVE 2 //we can save one ss and one elf
 		u32 restore_page; //40
-		struct
-		{
+		struct {
 			u32 id; //44 4c
 			u16 page_index; //48 50
 			u16 page_len;
@@ -161,37 +156,32 @@ struct handshake
 		pdi[NUM_PDI_SAVE];
 	}
 	ctx_save;
-	struct
-	{
+	struct {
 		u32 hsa_addr_high; //54
 		u32 hsa_addr_low; //58
 	}
 	dbg;
-	struct
-	{
+	struct {
 		u32 dbg_buf_addr_high; //5c
 		u32 dbg_buf_addr_low;  //60
 		u32 size;   // 64
 	}
 	dbg_buf;
 	u32 reserved1[14]; //make sure vm (below) starts at offset 0xa0
-	volatile struct
-	{
+	volatile struct { /* Hardware sync required */
 		u32 fw_state;
-		u32 abs_page_index; //absolute index of page where current control code are in 
-		u32 ppc; // previous pc (relative address to current page) that drives current_job_context to NULL
+		u32 abs_page_index; //absolute index of page where current control code are in
+		u32 ppc; // previous pc (relative to current page) drives current_job_context to NULL
 	}
 	vm;
-	volatile struct
-	{
+	volatile struct { /* Hardware sync required */
 		u32 ear; //exception address
 		u32 esr; //exception status
 		u32 pc; //exception pc
 	}
 	exception;
-	volatile struct
-	{
-		u32 c_job_readiness_checked; // number of checks whether there are jobs ready 
+	volatile struct { /* Hardware sync required */
+		u32 c_job_readiness_checked; // number of checks whether there are jobs ready
 		u32 c_opcode; // number of opcode run
 		u32 c_job_launched;
 		u32 c_job_finished;
@@ -205,8 +195,8 @@ struct handshake
 		u16 c_preemption_ucdma_sync; // run out of wait handle UC_DMA_WRITE_DES_SYNC opcode
 		u16 c_preemption_poll; // POLL_32 opcode retry times
 		u16 c_preemption_mask_poll; // MASK_POLL_32 opcode retry times
-		u16 c_preemption_remote_barrier; // run out of physical barrier REMOTE_BARRIER opcode
-		u16 c_preemption_wait_tct; // actor entry overflow or run out of wait handle WAIT_TCTS opcode
+		u16 c_preemption_remote_barrier; // run out of physical barrier REMOTE_BARRIER
+		u16 c_preemption_wait_tct; // actor entry overflow or run out of wait handle WAIT_TCTS
 		u16 c_block_ucdma; // block UC_DMA_WRITE_DES opcode
 		u16 c_block_ucdma_sync; // block UC_DMA_WRITE_DES_SYNC opcode
 		u16 c_block_local_barrier; // block local_barrier opcode

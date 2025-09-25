@@ -11,9 +11,6 @@
 #include "amdxdna_devel.h"
 #include "amdxdna_of_drv.h"
 
-extern int max_col;
-extern int start_col;
-
 static const struct of_device_id amdxdna_of_table[] = {
 	{ .compatible = "amdxdna,ve2", .data = &dev_ve2_info },
 	{ .compatible = "xlnx,aiarm", .data = &dev_ve2_info },
@@ -88,7 +85,7 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 	xrs_cfg.ddev = &xdna->ddev;
 
 	if (max_col > 0 && start_col >= 0 &&
-			(max_col + start_col) < XRS_MAX_COL) {
+		(max_col + start_col) < XRS_MAX_COL) {
 		xrs_cfg.total_col = max_col;
 	} else {
 		xrs_cfg.total_col = XRS_MAX_COL;
@@ -105,7 +102,7 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 
 	iommu_mode = AMDXDNA_IOMMU_NO_PASID;
 
-	XDNA_DBG(xdna, "pdev %p",pdev);
+	XDNA_DBG(xdna, "pdev %p", pdev);
 
 	return 0;
 out:
