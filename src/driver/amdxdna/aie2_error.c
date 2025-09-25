@@ -15,7 +15,7 @@ struct async_event {
 	struct async_event_msg_resp	resp;
 	struct workqueue_struct		*wq;
 	struct work_struct		work;
-	struct aie2_mgmt_dma_hdl	mgmt_hdl;
+	struct amdxdna_mgmt_dma_hdl	*dma_hdl;
 };
 
 struct async_events {
@@ -289,8 +289,8 @@ static int aie2_error_async_cb(void *handle, void __iomem *data, size_t size)
 
 static int aie2_error_event_send(struct async_event *e)
 {
-	aie2_mgmt_buff_clflush(&e->mgmt_hdl);
-	return aie2_register_asyn_event_msg(e->ndev, &e->mgmt_hdl, e, aie2_error_async_cb);
+	amdxdna_mgmt_buff_clflush(e->dma_hdl, 0, 0);
+	return aie2_register_asyn_event_msg(e->ndev, e->dma_hdl, e, aie2_error_async_cb);
 }
 
 static void aie2_error_worker(struct work_struct *err_work)
@@ -311,7 +311,7 @@ static void aie2_error_worker(struct work_struct *err_work)
 
 	e->resp.status = MAX_AIE2_STATUS_CODE;
 
-	vaddr = aie2_mgmt_buff_get_cpu_addr(&e->mgmt_hdl);
+	vaddr = amdxdna_mgmt_buff_get_cpu_addr(e->dma_hdl, 0);
 	if (IS_ERR(vaddr)) {
 		XDNA_ERR(xdna, "Failed to get a valid virtual addr: %ld", PTR_ERR(vaddr));
 		return;
@@ -355,7 +355,7 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 	for (i = 0; i < events->event_cnt; i++) {
 		struct async_event *e = &events->event[i];
 
-		aie2_mgmt_buff_free(&e->mgmt_hdl);
+		amdxdna_mgmt_buff_free(e->dma_hdl);
 	}
 	kfree(events);
 }
@@ -379,13 +379,10 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	}
 
 	for (i = 0; i < events->event_cnt; i++) {
-		struct async_event *e = &events->event[i];
-		struct aie2_mgmt_dma_hdl *mgmt_hdl = &e->mgmt_hdl;
-		void *buf;
-
-		buf = aie2_mgmt_buff_alloc(ndev, mgmt_hdl, ASYNC_BUF_SIZE, DMA_FROM_DEVICE);
-		if (!buf) {
-			ret = -ENOMEM;
+		e = &events->event[i];
+		e->dma_hdl = amdxdna_mgmt_buff_alloc(xdna, ASYNC_BUF_SIZE, DMA_FROM_DEVICE);
+		if (IS_ERR(e->dma_hdl)) {
+			ret = PTR_ERR(e->dma_hdl);
 			goto free_buf;
 		}
 
@@ -419,7 +416,7 @@ free_buf:
 	while (i) {
 		struct async_event *e = &events->event[i - 1];
 
-		aie2_mgmt_buff_free(&e->mgmt_hdl);
+		amdxdna_mgmt_buff_free(e->dma_hdl);
 		--i;
 	}
 	destroy_workqueue(events->wq);

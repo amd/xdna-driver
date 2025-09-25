@@ -51,32 +51,31 @@ aie2_fence_state2str(struct dma_fence *fence)
 void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
-	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_dev_hdl *ndev;
 	struct app_health_report *r;
 	u64 comp = ctx->completed;
 	u64 sub = ctx->submitted;
 	size_t size = sizeof(*r);
-	void *buff;
 	int ret;
 
 	ndev = xdna->dev_handle;
 	XDNA_ERR(xdna, "Dumping ctx %s, hwctx %d, sub=%lld, comp=%lld",
 		 ctx->name, ctx->priv->id, sub, comp);
-	buff = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
-	if (!buff) {
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl)) {
 		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
 		return;
 	}
 
-	aie2_mgmt_buff_clflush(&mgmt_hdl);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_get_app_health(ndev, &mgmt_hdl, ctx->priv->id, size);
+	ret = aie2_get_app_health(ndev, dma_hdl, ctx->priv->id, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (!ret) {
-		r = buff;
+		r = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
 
-		print_hex_dump_debug("raw_report: ", DUMP_PREFIX_OFFSET, 16, 4, buff, size, false);
+		print_hex_dump_debug("raw_report: ", DUMP_PREFIX_OFFSET, 16, 4, r, size, false);
 
 		XDNA_ERR(xdna, "Firmware timeout state capture:");
 		XDNA_ERR(xdna, "\tVersion: %d.%d", r->major, r->minor);
@@ -100,7 +99,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		ctx->health_data.version = 0;
 		ctx->health_reported = false;
 	}
-	aie2_mgmt_buff_free(&mgmt_hdl);
+	amdxdna_mgmt_buff_free(dma_hdl);
 
 	mutex_lock(&ctx->priv->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {

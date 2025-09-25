@@ -303,7 +303,7 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			     u32 type, u32 size, struct aie_version *version)
 {
 	DECLARE_AIE2_MSG(get_telemetry, MSG_OP_GET_TELEMETRY);
@@ -316,7 +316,7 @@ int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_
 		return -EINVAL;
 	}
 
-	addr = aie2_mgmt_buff_get_dma_addr(mgmt_hdl);
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
 	if (!addr) {
 		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
 		return -EINVAL;
@@ -587,13 +587,12 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 {
 	DECLARE_AIE2_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_client *client;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
 	u32 aie_bitmap = 0;
 	dma_addr_t addr;
-	u8 *buff_addr;
 	int ret, idx;
 
 	if (!access_ok(buf, size)) {
@@ -601,9 +600,9 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 		return -EFAULT;
 	}
 
-	buff_addr = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
-	if (!buff_addr)
-		return -ENOMEM;
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl))
+		return PTR_ERR(dma_hdl);
 
 	/* Go through each context and mark the AIE columns that are active */
 	list_for_each_entry(client, &xdna->client_list, node) {
@@ -613,7 +612,7 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 		srcu_read_unlock(&client->ctx_srcu, idx);
 	}
 
-	addr = aie2_mgmt_buff_get_dma_addr(&mgmt_hdl);
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
 	if (!addr) {
 		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
 		return -EINVAL;
@@ -625,7 +624,7 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	req.num_cols = hweight32(aie_bitmap);
 	req.aie_bitmap = aie_bitmap;
 
-	aie2_mgmt_buff_clflush(&mgmt_hdl);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
@@ -645,7 +644,7 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 		goto fail;
 	}
 
-	if (copy_to_user(buf, buff_addr, resp.size)) {
+	if (copy_to_user(buf, amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), resp.size)) {
 		ret = -EFAULT;
 		XDNA_ERR(xdna, "Failed to copy NPU status to user space");
 		goto fail;
@@ -654,12 +653,13 @@ int aie2_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	*cols_filled = aie_bitmap;
 
 fail:
-	aie2_mgmt_buff_free(&mgmt_hdl);
+	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
 }
 
-int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
-				 void *handle, int (*cb)(void*, void __iomem *, size_t))
+int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
+				 struct amdxdna_mgmt_dma_hdl *dma_hdl, void *handle,
+				 int (*cb)(void*, void __iomem *, size_t))
 {
 	struct async_event_msg_req req = { 0 };
 	struct xdna_mailbox_msg msg = {
@@ -671,7 +671,7 @@ int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_
 	};
 	dma_addr_t addr;
 
-	addr = aie2_mgmt_buff_get_dma_addr(mgmt_hdl);
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
 	if (!addr) {
 		XDNA_ERR(ndev->xdna, "Invalid DMA address: %lld", addr);
 		return -EINVAL;
@@ -697,7 +697,7 @@ void aie2_reset_app_health_report(struct app_health_report *r)
 	r->ctx_pc = AIE2_APP_HEALTH_RESET_CTX_PC;
 }
 
-int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
+int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			u32 context_id, u32 size)
 {
 	DECLARE_AIE2_MSG(get_app_health, MSG_OP_GET_APP_HEALTH);
@@ -710,7 +710,7 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *
 		return -EOPNOTSUPP;
 	}
 
-	addr = aie2_mgmt_buff_get_dma_addr(mgmt_hdl);
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
 	if (!addr) {
 		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
 		return -EINVAL;

@@ -984,7 +984,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 {
 	struct amdxdna_drm_query_telemetry_header header, *tmp = NULL;
 	struct amdxdna_dev *xdna = client->xdna;
-	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct aie_version ver;
 	size_t size, offset;
 	void *buff;
@@ -1011,14 +1011,15 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 	 */
 	size = args->buffer_size - offset;
 
-	buff = aie2_mgmt_buff_alloc(xdna->dev_handle, &mgmt_hdl, size, DMA_FROM_DEVICE);
-	if (!buff)
-		return -ENOMEM;
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl))
+		return PTR_ERR(dma_hdl);
 
+	buff = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
 	memset(buff, 0, size);
-	aie2_mgmt_buff_clflush(&mgmt_hdl);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 
-	ret = aie2_query_aie_telemetry(xdna->dev_handle, &mgmt_hdl, header.type, size, &ver);
+	ret = aie2_query_aie_telemetry(xdna->dev_handle, dma_hdl, header.type, size, &ver);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
 		goto free_buf;
@@ -1056,7 +1057,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 
 free_buf:
 	kfree(tmp);
-	aie2_mgmt_buff_free(&mgmt_hdl);
+	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
 }
 
@@ -1213,18 +1214,18 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 				       struct amdxdna_drm_hwctx_entry *tmp, pid_t pid, u32 ctx_id)
 {
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_client *tmp_client;
-	struct aie2_mgmt_dma_hdl mgmt_hdl;
 	struct app_health_report *r;
 	struct amdxdna_ctx *ctx;
 	unsigned long id;
 	int ret = 0, idx;
 	u32 hw_i = 0;
 
-	r = aie2_mgmt_buff_alloc(xdna->dev_handle, &mgmt_hdl, sizeof(*r), DMA_FROM_DEVICE);
-	if (!r) {
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*r), DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl)) {
 		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
-		return -ENOMEM;
+		return PTR_ERR(dma_hdl);
 	}
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
@@ -1271,10 +1272,10 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_IDLE;
 
 			if (aie2_is_ctx_connected(ctx)) {
-				aie2_mgmt_buff_clflush(&mgmt_hdl);
+				amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 
 				mutex_lock(&xdna->dev_handle->aie2_lock);
-				ret = aie2_get_app_health(xdna->dev_handle, &mgmt_hdl,
+				ret = aie2_get_app_health(xdna->dev_handle, dma_hdl,
 							  ctx->priv->id, sizeof(*r));
 				mutex_unlock(&xdna->dev_handle->aie2_lock);
 				if (ret) {
@@ -1309,7 +1310,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 		ret = -EINVAL;
 	}
 
-	aie2_mgmt_buff_free(&mgmt_hdl);
+	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
 }
 
@@ -1536,78 +1537,6 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 
 	amdxdna_pm_suspend_put(xdna);
 	return ret;
-}
-
-void *aie2_mgmt_buff_alloc(struct amdxdna_dev_hdl *ndev, struct aie2_mgmt_dma_hdl *mgmt_hdl,
-			   size_t size, enum dma_data_direction dir)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-
-	if (!size)
-		return NULL;
-
-	/*
-	 * The aligned size calculation is implemented to work around a known firmware issue that
-	 * can cause the system to hang. By aligning the size to the nearest power of two and then
-	 * doubling it, we ensure that the memory allocation is compatible with the firmware's
-	 * requirements, thus preventing potential system instability.
-	 */
-	mgmt_hdl->aligned_size = PAGE_ALIGN(size);
-	mgmt_hdl->aligned_size = roundup_pow_of_two(mgmt_hdl->aligned_size);
-	mgmt_hdl->aligned_size *= 2;
-
-	/*
-	 * The behavior of dma_alloc_noncoherent() was tested on the 6.13 kernel.
-	 * 1. This function eventually calls __alloc_frozen_pages_noprof().
-	 * 2. The maximum allocatable size is 4MB, constrained by MAX_PAGE_ORDER 10.
-	 *    Exceeding this limit results in a NULL pointer return.
-	 * 3. For valid sizes, this function provides physically contiguous memory.
-	 *
-	 * If there is a requirement for physical contiguous memory larger than 4MB,
-	 * consider allocating the buffer from carved-out memory.
-	 */
-	mgmt_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, mgmt_hdl->aligned_size,
-						&mgmt_hdl->dma_hdl, dir, GFP_KERNEL);
-	if (!mgmt_hdl->vaddr)
-		return NULL;
-
-	mgmt_hdl->size = size;
-	mgmt_hdl->xdna = xdna;
-	mgmt_hdl->dir = dir;
-
-	return mgmt_hdl->vaddr;
-}
-
-void aie2_mgmt_buff_clflush(struct aie2_mgmt_dma_hdl *mgmt_hdl)
-{
-	/*
-	 * After flushing the buffer and handing it over to the device,
-	 * the user must wait for the device to complete its operations and return
-	 * control before attempting to write to the buffer again.
-	 */
-	drm_clflush_virt_range(mgmt_hdl->vaddr, mgmt_hdl->size);
-}
-
-dma_addr_t aie2_mgmt_buff_get_dma_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl)
-{
-	if (!mgmt_hdl->aligned_size)
-		return 0;
-
-	return mgmt_hdl->dma_hdl;
-}
-
-void *aie2_mgmt_buff_get_cpu_addr(struct aie2_mgmt_dma_hdl *mgmt_hdl)
-{
-	if (!mgmt_hdl->aligned_size)
-		return ERR_PTR(-EINVAL);
-
-	return mgmt_hdl->vaddr;
-}
-
-void aie2_mgmt_buff_free(struct aie2_mgmt_dma_hdl *mgmt_hdl)
-{
-	dma_free_noncoherent(mgmt_hdl->xdna->ddev.dev, mgmt_hdl->aligned_size, mgmt_hdl->vaddr,
-			     mgmt_hdl->dma_hdl, mgmt_hdl->dir);
 }
 
 const struct amdxdna_dev_ops aie2_ops = {
