@@ -11,7 +11,7 @@
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
 
-int enable_polling = 0;
+int enable_polling;
 module_param(enable_polling, int, 0644);
 MODULE_PARM_DESC(enable_polling, "Enable polling mode. Polling mode disabled by default.");
 
@@ -27,11 +27,11 @@ unsigned int ve2_hwctx_limit;
 module_param(ve2_hwctx_limit, uint, 0400);
 MODULE_PARM_DESC(ve2_hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default");
 
-int start_col = 0;
+int start_col;
 module_param(start_col, int, 0644);
 MODULE_PARM_DESC(start_col, "Test only option: lead column set to start_col");
 
-int max_col = 0;
+int max_col;
 module_param(max_col, int, 0644);
 MODULE_PARM_DESC(max_col, "Max column supported by this driver");
 
@@ -212,9 +212,9 @@ static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *q
 
 	if (queue->hsa_queue_p) {
 		dma_free_coherent(&pdev->dev,
-				sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
-				queue->hsa_queue_p,
-				queue->hsa_queue_mem.dma_addr);
+				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
+				  queue->hsa_queue_p,
+				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
 	}
 }
@@ -388,9 +388,9 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 		return -EINVAL;
 	}
 
-        *seq = slot_id;
-        XDNA_DBG(xdna, "slot %llx is selected", slot_id);
-        slot_id = slot_id & (queue->hq_header.capacity - 1);
+	*seq = slot_id;
+	XDNA_DBG(xdna, "slot %llx is selected", slot_id);
+	slot_id = slot_id & (queue->hq_header.capacity - 1);
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
@@ -594,7 +594,7 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 	int ret;
 	u32 op;
 
-	if(hwctx->priv->misc_intrpt_flag == true) {
+	if (hwctx->priv->misc_intrpt_flag) {
 		XDNA_ERR(xdna, "Failed to submit a command, because of misc interrupt\n");
 		return -EINVAL;
 	}
@@ -625,7 +625,7 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
  * Handle interrupt notification based on read_index and write_index.
  */
 static inline bool check_read_index(struct amdxdna_ctx *hwctx,
-		u64 seq, u32 print_interval)
+				     u64 seq, u32 print_interval)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	static u64 counter;
@@ -642,9 +642,10 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 
 	if (counter % print_interval == 0) {
 		struct amdxdna_dev *xdna = hwctx->client->xdna;
+
 		XDNA_DBG(xdna, "read index address: 0x%llx", (u64)read_index);
 		XDNA_WARN(xdna, "hwctx [%p] check read idx (%llu) > cmd idx (%llu)",
-				hwctx, *read_index, seq);
+			  hwctx, *read_index, seq);
 	}
 
 	counter++;
@@ -669,11 +670,11 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	mutex_lock(&priv_ctx->hwctx_hsa_queue.hq_lock);
 	if (wait_jifs)
 		ret = wait_event_interruptible_timeout(priv_ctx->waitq,
-				check_read_index(hwctx, seq, print_interval),
-				wait_jifs);
+						       check_read_index(hwctx, seq, print_interval),
+						       wait_jifs);
 	else
 		ret = wait_event_interruptible(priv_ctx->waitq,
-				check_read_index(hwctx, seq, print_interval));
+					       check_read_index(hwctx, seq, print_interval));
 	mutex_unlock(&priv_ctx->hwctx_hsa_queue.hq_lock);
 
 	XDNA_DBG(xdna, "wait_event returned %d (timeout_jiffies=%lu)", ret, wait_jifs);
@@ -685,43 +686,48 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			goto out;
 		}
 
-		//amdxdna_cmd_set_state(job->cmd_bo, priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[seq]);
-		// below check need to be removed once we have a clean solution
-		// to use completion signal
+		/*
+		 * amdxdna_cmd_set_state(job->cmd_bo,
+		 *                       priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[seq]);
+		 */
+		/*
+		 * below check need to be removed once we have a clean solution
+		 * to use completion signal
+		 */
 		if (priv_ctx->misc_intrpt_flag) {
 			struct device *aie_dev = priv_ctx->aie_dev;
 			struct handshake *hs = NULL;
 			int ret = 0;
-			hs = kmalloc(sizeof(struct handshake), GFP_KERNEL);
+
+			hs = kmalloc(sizeof(*hs), GFP_KERNEL);
 			if (!hs) {
 				XDNA_ERR(xdna, "No memory for handshake.\n");
 				return -ENOMEM;
 			}
 
 			ret = ve2_partition_read_privileged_mem(aie_dev, 0,
-					offsetof(struct handshake, mpaie_alive),
-					sizeof(struct handshake), (void *)hs);
+								offsetof(struct handshake, mpaie_alive),
+								sizeof(struct handshake), (void *)hs);
 
 			if (ret < 0) {
 				XDNA_ERR(xdna, "aie_partition_read failed with ret=%d\n", ret);
 				kfree(hs);
-				return ret; 
+				return ret;
 			}
 
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 
 			XDNA_INFO(xdna, "MISC interrupt happened!!\n");
-			XDNA_INFO(xdna, "FW_STATE=%x\nABS_PAGE_INDEX=%d\nPPC=%x\n", hs->vm.fw_state,
-					hs->vm.abs_page_index, hs->vm.ppc);
+			XDNA_INFO(xdna, "FW_STATE=%x\nABS_PAGE_INDEX=%d\nPPC=%x\n",
+				  hs->vm.fw_state, hs->vm.abs_page_index, hs->vm.ppc);
 
 			kfree(hs);
-		}
-		else if (wait_jifs && !ret) {
+		} else if (wait_jifs && !ret) {
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 			XDNA_INFO(xdna, "Requested command TIMEOUT!!");
-		}
-		else
+		} else {
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_COMPLETED);
+		}
 
 		ve2_hwctx_job_release(hwctx, job);
 
@@ -802,9 +808,9 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		XDNA_INFO(xdna, "Running in timer mode");
 		timer_setup(&priv->event_timer, timeout_cb, 0);
 		mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
-	}
-	else 
+	} else {
 		XDNA_INFO(xdna, "Running in interrupt mode");
+	}
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_clear_firmware_status(xdna, hwctx);
@@ -846,30 +852,31 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 }
 
 static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 paddr,
-				    u32 buf_sz, u32 col, bool attach)
+				     u32 buf_sz, u32 col, bool attach)
 {
-        struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
+	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 
 	switch (buf_type) {
 	case AMDXDNA_FW_BUF_DEBUG:
-                nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_addr = paddr;
-                nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_size = buf_sz;
-                break;
-
-        case AMDXDNA_FW_BUF_TRACE:		
-                nhwctx->hwctx_config[hwctx->start_col + col].dtrace_addr = paddr;
+		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_addr = paddr;
+		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_size = buf_sz;
 		break;
 
-        case AMDXDNA_FW_BUF_LOG:
-		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_addr = paddr;
-                nhwctx->hwctx_config[hwctx->start_col + col].log_buf_size = buf_sz;
-                break;
+	case AMDXDNA_FW_BUF_TRACE:
+		nhwctx->hwctx_config[hwctx->start_col + col].dtrace_addr = paddr;
+		break;
 
-        default:
-                struct amdxdna_dev *xdna = hwctx->client->xdna;
-	        XDNA_ERR(xdna, "Invalid Request");
-                return -EOPNOTSUPP;
-        }
+	case AMDXDNA_FW_BUF_LOG:
+		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_addr = paddr;
+		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_size = buf_sz;
+		break;
+
+	default:
+		struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+		XDNA_ERR(xdna, "Invalid Request");
+		return -EOPNOTSUPP;
+	}
 
 	return 0;
 }
@@ -940,7 +947,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
 
-        case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
 		mdata_abo = amdxdna_gem_get_obj(client, val, AMDXDNA_BO_DEV);
 		if (!mdata_abo || !mdata_abo->mem.kva) {
 			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", val, type);
@@ -974,8 +981,8 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		}
 
 		ve2_hwctx_config_op_timeout(hwctx, op_timeout);
-		XDNA_DBG(xdna, "Configured opcode timeout %u on hwctx %s", op_timeout,
-				hwctx->name);
+		XDNA_DBG(xdna, "Configured opcode timeout %u on hwctx %s",
+			 op_timeout, hwctx->name);
 		break;
 
 	default:
