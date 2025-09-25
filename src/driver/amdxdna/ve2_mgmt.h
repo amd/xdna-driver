@@ -60,104 +60,104 @@ struct misc_info {
 // Read from handshake memory
 static inline int
 ve2_partition_read_privileged_mem(struct device *aie_dev, u32 col,
-		size_t field_offset, size_t size, void *p_read_mem)
+				  size_t field_offset, size_t size, void *p_read_mem)
 {
-        u32 offset;
+	u32 offset;
 
-        offset = CERT_HANDSHAKE_OFF(col) + field_offset;
-        return aie_partition_read_privileged_mem(aie_dev, offset, size, p_read_mem);
+	offset = CERT_HANDSHAKE_OFF(col) + field_offset;
+	return aie_partition_read_privileged_mem(aie_dev, offset, size, p_read_mem);
 }
 
 // Write to handshake memory
 static inline int
 ve2_partition_write_privileged_mem(struct device *aie_dev, u32 col,
-		size_t field_offset, size_t size, void *p_write_mem)
+				   size_t field_offset, size_t size, void *p_write_mem)
 {
-        u32 offset;
+	u32 offset;
 
-        offset = CERT_HANDSHAKE_OFF(col) + field_offset;
-        return aie_partition_write_privileged_mem(aie_dev, offset, size, p_write_mem);
+	offset = CERT_HANDSHAKE_OFF(col) + field_offset;
+	return aie_partition_write_privileged_mem(aie_dev, offset, size, p_write_mem);
 }
 
 // Wake up cert via UC wakeup
-static inline int 
+static inline int
 ve2_partition_uc_wakeup(struct device *aie_dev, u32 col)
 {
-        struct aie_location loc = { .col = col };
-        return aie_partition_uc_wakeup(aie_dev, &loc);
+	struct aie_location loc = { .col = col };
+
+	return aie_partition_uc_wakeup(aie_dev, &loc);
 }
 
-static inline int 
+static inline int
 ve2_partition_write(struct device *aie_dev,
-		u32 col, u32 row, u32 offset, size_t size, void *buf)
+		    u32 col, u32 row, u32 offset, size_t size, void *buf)
 {
-	struct aie_location loc = { .col = col };
-	loc.row = row;
+	struct aie_location loc = { .col = col, .row = row };
 
 	return aie_partition_write(aie_dev, loc, offset,
 			size, buf, 0);
 }
 
-static inline int 
+static inline int
 ve2_partition_read(struct device *aie_dev,
-		u32 col, u32 row, u32 offset, size_t size, void *buf)
+		   u32 col, u32 row, u32 offset, size_t size, void *buf)
 {
-	struct aie_location loc = { .col = col };
-	loc.row = row;
+	struct aie_location loc = { .col = col, .row = row };
 
 	return aie_partition_read(aie_dev, loc, offset, size, buf);
 }
 
-static inline int 
+static inline int
 ve2_partition_initialize(struct device *dev,
-		struct aie_partition_init_args *args)
+			 struct aie_partition_init_args *args)
 {
-        args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+	args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) &
+		~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	return aie_partition_initialize(dev, args);
 }
 
 static inline int get_ctx_read_index(struct amdxdna_ctx *hwctx, u64 *read_index)
 {
-    u64 *index_ptr;
+	u64 *index_ptr;
 
-    if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p || !read_index)
-        return -EINVAL;
+	if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p || !read_index)
+		return -EINVAL;
 
-    index_ptr = (u64 *)((char *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p +
-                        HSA_QUEUE_READ_INDEX_OFFSET);
-    *read_index = *index_ptr;
+	index_ptr = (u64 *)((char *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p +
+			HSA_QUEUE_READ_INDEX_OFFSET);
+	*read_index = *index_ptr;
 
-    return 0;
+	return 0;
 }
 
 static inline int get_ctx_write_index(struct amdxdna_ctx *hwctx, u64 *write_index)
 {
-    u64 *index_ptr;
+	u64 *index_ptr;
 
-    if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p || !write_index)
-        return -EINVAL;
+	if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p || !write_index)
+		return -EINVAL;
 
-    index_ptr = (u64 *)((char *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p +
-                        HSA_QUEUE_WRITE_INDEX_OFFSET);
-    *write_index = *index_ptr;
+	index_ptr = (u64 *)((char *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p +
+			HSA_QUEUE_WRITE_INDEX_OFFSET);
+	*write_index = *index_ptr;
 
-    return 0;
+	return 0;
 }
 
 static inline void update_ctx_write_index(struct amdxdna_ctx *hwctx, int incr_cnt)
 {
-    struct ve2_hsa_queue *queue;
-    struct host_queue_header *header;
+	struct ve2_hsa_queue *queue;
+	struct host_queue_header *header;
 
-    if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p)
-        return;
+	if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p)
+		return;
 
-    queue = &hwctx->priv->hwctx_hsa_queue;
-    header = &queue->hsa_queue_p->hq_header;
+	queue = &hwctx->priv->hwctx_hsa_queue;
+	header = &queue->hsa_queue_p->hq_header;
 
-    mutex_lock(&queue->hq_lock);
-    header->write_index += (u64)incr_cnt;
-    mutex_unlock(&queue->hq_lock);
+	mutex_lock(&queue->hq_lock);
+	header->write_index += (u64)incr_cnt;
+	mutex_unlock(&queue->hq_lock);
 }
 
 /**
@@ -175,7 +175,7 @@ int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwct
  *
  * Returns 0 on success or a negative error code.
  */
- 
+
 int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx);
 /**
  * ve2_get_hwctx - Retrieve the hardware context for a given column.
@@ -216,8 +216,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
  *
  * Returns 0 on success or a negative error code.
  */
-int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna,
-				struct amdxdna_ctx *hwctx, u64 seq);
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq);
 
 /**
  * ve2_mgmt_handshake_init - Initialize handshake with firmware for a context.
