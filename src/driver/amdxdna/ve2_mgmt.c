@@ -165,9 +165,10 @@ free_xrs_req:
 }
 
 // Function to display the queue
-static void ve2_fifo_displayQueue(struct amdxdna_mgmtctx* mgmtctx)
+static void ve2_fifo_display_queue(struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct amdxdna_ctx_command_fifo *c_ctx, *t_ctx;
+
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list)
 		XDNA_DBG(mgmtctx->xdna, "CTX : %p command index: %llu\n", c_ctx->ctx, c_ctx->command_index);
 }
@@ -212,7 +213,7 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 	start_col = nhwctx->start_col;
 	num_col = nhwctx->num_col;
 
-	XDNA_DBG(xdna, "Handshake init hwctx : %p \n", hwctx);
+	XDNA_DBG(xdna, "Handshake init hwctx : %p\n", hwctx);
 	ret = ve2_partition_initialize(nhwctx->aie_dev, nhwctx->args);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
@@ -237,7 +238,7 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 	}
 }
 
-#define RR_SHARING (1UL << 0)
+#define RR_SHARING BIT(0)
 static int ve2_request_context_switch(struct amdxdna_dev *xdna,
 		struct amdxdna_mgmtctx  *mgmtctx)
 {
@@ -266,7 +267,7 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 	struct amdxdna_ctx *hwctx = NULL;
 
 	/* Check if already locked */
-	WARN_ON(!spin_is_locked(&mgmtctx->ctx_lock));
+	lockdep_assert_held(&mgmtctx->ctx_lock);
 	XDNA_DBG(xdna, "printing fifo before context switch:\n");
 
 	/* Debug Only */
@@ -299,9 +300,9 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u
 	struct amdxdna_mgmtctx  *mgmtctx =
 		&xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
 	u64 write_index = 0;
-	int ret; 
+	int ret;
 
-	spin_lock(&mgmtctx->ctx_lock);        
+	spin_lock(&mgmtctx->ctx_lock);
 	//enqueue ctx and command in ctx_command_fifo
 	if (get_ctx_write_index(hwctx, &write_index)) {
 		XDNA_ERR(xdna, "Failed to get write index");
@@ -318,17 +319,17 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u
 
 	if (!mgmtctx->active_ctx) {
 		mgmtctx->is_partition_idle = 0;
-		XDNA_DBG(xdna, "First command request hwctx %p \n", hwctx);
+		XDNA_DBG(xdna, "First command request hwctx %p\n", hwctx);
 		/* First command request. Initiate the handshake */
 		ve2_mgmt_handshake_init(xdna, hwctx);
 		mgmtctx->active_ctx = hwctx;
-	} else if(mgmtctx->active_ctx != hwctx) {
+	} else if (mgmtctx->active_ctx != hwctx) {
 		if (mgmtctx->is_partition_idle == 1) {
 			mgmtctx->is_partition_idle = 0;
-			XDNA_DBG(mgmtctx->xdna, "Context switch possible as partition is idle active hwctx:%p ------> \n", mgmtctx->active_ctx);
+			XDNA_DBG(mgmtctx->xdna, "Context switch possible as partition is idle active hwctx:%p ------>\n", mgmtctx->active_ctx);
 			ve2_response_ctx_switch_req(mgmtctx);
 		} else {
-			XDNA_DBG(mgmtctx->xdna, "Commad pushed in queue as active context:%p  new context:%p \n", mgmtctx->active_ctx, hwctx);
+			XDNA_DBG(mgmtctx->xdna, "Commad pushed in queue as active context:%p  new context:%p\n", mgmtctx->active_ctx, hwctx);
 		}
 	} else {
 		if (mgmtctx->is_idle_due_to_context == 1) {
@@ -347,8 +348,7 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u
 
 static bool ve2_check_context_req(struct amdxdna_mgmtctx  *mgmtctx)
 {
-	if (mgmtctx->is_context_req == 1)
-	{
+	if (mgmtctx->is_context_req == 1) {
 		mgmtctx->is_context_req = 0;
 		mgmtctx->is_idle_due_to_context = 1;
 		return true;
@@ -410,7 +410,7 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 			offsetof(struct handshake, misc_status),
 			sizeof(misc_status), (void *)&misc_status);
 	/*This may occur when control code is hanged or any exception*/
-	if(misc_status != 0) {
+	if (misc_status != 0) {
 		if (mgmtctx->active_ctx && mgmtctx->active_ctx->priv)
 			mgmtctx->active_ctx->priv->misc_intrpt_flag = true;
 		else
@@ -449,15 +449,16 @@ static void ve2_scheduler_work(struct work_struct *work)
 		container_of(work, struct amdxdna_mgmtctx, sched_work);
 
 	spin_lock(&mgmtctx->ctx_lock);
-	/* 3 case possible:
-	   1. it was completion interrupt but idle/queue_not_empty bit was set as cert moved forward
-	   2. idle bit is set
-	   3. queue_not_empty bit is set
-	   */
+	/*
+	 * 3 case possible:
+	 * 1. it was completion interrupt but idle/queue_not_empty bit was set as cert moved forward
+	 * 2. idle bit is set
+	 * 3. queue_not_empty bit is set
+	 */
 
 	ve2_check_context_req(mgmtctx);
 
-	if(mgmtctx->active_ctx->priv->misc_intrpt_flag == true) {
+	if (mgmtctx->active_ctx->priv->misc_intrpt_flag) {
 		XDNA_ERR(mgmtctx->xdna, "MISC interrupt from firmware!!!\n");
 	} else if (ve2_check_queue_not_empty(mgmtctx)) {
 		// there are more command but cert ack ctx switch bit
@@ -476,7 +477,7 @@ static void ve2_scheduler_work(struct work_struct *work)
 			XDNA_DBG(mgmtctx->xdna, "No more command in fifo and Partition is IDLE active hwctx:%p ------> ", mgmtctx->active_ctx);
 		}
 	} else {
-		XDNA_ERR(mgmtctx->xdna, "None of the the bit (idle/queue_not_empty/misc) was set active ctx:%p\n", mgmtctx->active_ctx);
+		XDNA_ERR(mgmtctx->xdna, "None of the bit (idle/queue_not_empty/misc) was set active ctx:%p\n", mgmtctx->active_ctx);
 	}
 	spin_unlock(&mgmtctx->ctx_lock);
 }
@@ -493,12 +494,13 @@ static u32 get_cert_idle_status(struct amdxdna_mgmtctx  *mgmtctx)
 	return cert_idle_status;
 }
 
-static int pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx* mgmtctx, struct amdxdna_ctx* active_ctx, u64 read_index)
+static int pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_ctx *active_ctx, u64 read_index)
 {
 	struct amdxdna_ctx_command_fifo *c_ctx, *t_ctx;
+
 	XDNA_DBG(mgmtctx->xdna, "pop_from_ctx_command_fifo_till for active_ctx:%p read_index:%llu\n", active_ctx, read_index);
 	XDNA_DBG(mgmtctx->xdna, "printing fifo before pop:\n");
-	ve2_fifo_displayQueue(mgmtctx);
+	ve2_fifo_display_queue(mgmtctx);
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
 		if (c_ctx->ctx != active_ctx) {
 			XDNA_DBG(mgmtctx->xdna, "POP BREAK as next_ctx=%p != ctx:%p so setting ctx switch bit\n", c_ctx->ctx, c_ctx);
@@ -671,7 +673,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	}
 
 	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[start_col];
-	if(load_act.release_aie_part) {
+	if (load_act.release_aie_part) {
 		for (u32 col = 0; col < num_col; col++)
 			cert_clear_partition(xdna, nhwctx->aie_dev, col);
 
