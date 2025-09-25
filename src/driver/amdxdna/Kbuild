@@ -47,7 +47,8 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	npu4_regs.o \
 	npu5_regs.o \
 	npu6_regs.o \
-	amdxdna_pci_drv.o
+	amdxdna_pci_drv.o \
+	amdxdna_cma.o
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	amdxdna_gem_of.o \
