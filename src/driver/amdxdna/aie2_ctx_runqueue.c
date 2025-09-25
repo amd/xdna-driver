@@ -262,19 +262,15 @@ select_highest_prio_ctx(struct aie2_partition *part)
 static void
 insert_ctx_to_conn_list(struct aie2_partition *part, struct amdxdna_ctx *new)
 {
+	struct list_head *pos = &part->conn_list;
 	struct amdxdna_ctx *curr;
-	struct list_head *pos;
 
-	if (list_empty(&part->conn_list)) {
-		pos = &part->conn_list;
+	if (list_empty(&part->conn_list))
 		goto out;
-	}
 
 	curr = list_last_entry(&part->conn_list, typeof(*curr), entry);
-	if (curr->priv->priority < new->priv->priority) {
-		pos = &part->conn_list;
+	if (curr->priv->priority < new->priv->priority)
 		goto out;
-	}
 
 	list_for_each_entry(curr, &part->conn_list, entry) {
 		if (curr->priv->priority < new->priv->priority)

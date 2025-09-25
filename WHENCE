@@ -8,25 +8,6 @@ distributed for use with the XRT plug-in for NPU device.
 --------------------------------------------------------------------------
 
 File:
-	tools/bins/1502_00/validate.xclbin
-	tools/bins/17f1_10/validate_elf.xclbin
-	tools/bins/17f0_10/validate.xclbin
-	tools/bins/17f0_10/validate_elf.xclbin
-	tools/bins/17f0_11/validate.xclbin
-	tools/bins/17f0_11/validate_elf.xclbin
-	tools/bins/17f0_20/validate.xclbin
-	tools/bins/17f0_20/validate_elf.xclbin
-	tools/bins/17f1_10/nop.elf
-	tools/bins/17f0_10/nop.elf
-	tools/bins/17f0_10/tct_1col.elf
-	tools/bins/17f0_10/tct_4col.elf
-	tools/bins/17f0_10/gemm_int8.elf
-	tools/bins/17f0_11/nop.elf
-	tools/bins/17f0_11/tct_1col.elf
-	tools/bins/17f0_11/tct_4col.elf
-	tools/bins/17f0_20/nop.elf
-	tools/bins/17f0_20/tct_1col.elf
-	tools/bins/17f0_20/tct_4col.elf
 	tools/bins/17f0_10/mobilenet_4col.elf
   tools/bins/17f0_10/mobilenet_4col.xclbin
   tools/bins/17f0_11/mobilenet_4col.elf
@@ -35,59 +16,5 @@ File:
   tools/bins/17f0_20/mobilenet_4col.xclbin
   tools/bins/Mobilenet/mobilenet_ifm.bin
   tools/bins/Mobilenet/mobilenet_param.bin
-	tools/bins/Runner/aie_reconfig_overhead/aie_reconfig_overhead_strx.elf
-	tools/bins/Runner/aie_reconfig_overhead/profile_aie_reconfig_strx.json
-	tools/bins/Runner/aie_reconfig_overhead/recipe_aie_reconfig_nop_strx.json
-	tools/bins/Runner/aie_reconfig_overhead/recipe_aie_reconfig_strx.json
-	tools/bins/Runner/aie_reconfig_overhead/validate_strx.xclbin
-	tools/bins/Runner/cmd_chain_latency/profile_cmd_chain_latency_strx.json
-	tools/bins/Runner/cmd_chain_latency/recipe_cmd_chain_latency_strx.json
-	tools/bins/Runner/cmd_chain_latency/strx/recipe_cmd_chain_latency.json
-	tools/bins/Runner/cmd_chain_latency/validate_strx.xclbin
-	tools/bins/Runner/cmd_chain_throughput/profile_cmd_chain_throughput_strx.json
-	tools/bins/Runner/cmd_chain_throughput/recipe_cmd_chain_throughput_strx.json
-	tools/bins/Runner/cmd_chain_throughput/validate_strx.xclbin
-	tools/bins/Runner/df_bandwidth/df_bw_phx.elf
-	tools/bins/Runner/df_bandwidth/df_bw_strx.elf
-	tools/bins/Runner/df_bandwidth/profile_df_bandwidth_phx.json
-	tools/bins/Runner/df_bandwidth/profile_df_bandwidth_strx.json
-	tools/bins/Runner/df_bandwidth/recipe_df_bandwidth_phx.json
-	tools/bins/Runner/df_bandwidth/recipe_df_bandwidth_strx.json
-	tools/bins/Runner/df_bandwidth/validate_phx.xclbin
-	tools/bins/Runner/df_bandwidth/validate_strx.xclbin
-	tools/bins/Runner/gemm/gemm_int8_strx.elf
-	tools/bins/Runner/gemm/gemm_strx.xclbin
-	tools/bins/Runner/gemm/profile_gemm_strx.json
-	tools/bins/Runner/gemm/recipe_gemm_strx.json
-	tools/bins/Runner/latency/profile_latency_phx.json
-	tools/bins/Runner/latency/profile_latency_strx.json
-	tools/bins/Runner/latency/recipe_latency_phx.json
-	tools/bins/Runner/latency/recipe_latency_strx.json
-	tools/bins/Runner/latency/validate_phx.xclbin
-	tools/bins/Runner/latency/validate_strx.xclbin
-	tools/bins/Runner/tct_all_column/profile_tct_all_column_phx.json
-	tools/bins/Runner/tct_all_column/profile_tct_all_column_strx.json
-	tools/bins/Runner/tct_all_column/recipe_tct_all_column_phx.json
-	tools/bins/Runner/tct_all_column/recipe_tct_all_column_strx.json
-	tools/bins/Runner/tct_all_column/tct_4col.elf
-	tools/bins/Runner/tct_all_column/validate_phx.xclbin
-	tools/bins/Runner/tct_all_column/validate_strx.xclbin
-	tools/bins/Runner/tct_one_column/profile_tct_one_column_phx.json
-	tools/bins/Runner/tct_one_column/profile_tct_one_column_strx.json
-	tools/bins/Runner/tct_one_column/recipe_tct_one_column_phx.json
-	tools/bins/Runner/tct_one_column/recipe_tct_one_column_strx.json
-	tools/bins/Runner/tct_one_column/tct_1col.elf
-	tools/bins/Runner/tct_one_column/validate_phx.xclbin
-	tools/bins/Runner/tct_one_column/validate_strx.xclbin
-	tools/bins/Runner/throughput/nop_phx.elf
-	tools/bins/Runner/throughput/profile_throughput_phx.json
-	tools/bins/Runner/throughput/profile_throughput_strx.json
-	tools/bins/Runner/throughput/recipe_throughput_phx.json
-	tools/bins/Runner/throughput/recipe_throughput_strx.json
-	tools/bins/Runner/throughput/validate_phx.xclbin
-	tools/bins/Runner/throughput/validate_strx.xclbin
-
-Link:
-	tools/bins/17f3_10 -> tools/bins/17f1_10
 
 Licence: Redistributable. See LICENSE.amdnpu for details.

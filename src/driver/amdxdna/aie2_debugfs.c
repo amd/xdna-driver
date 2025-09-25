@@ -448,18 +448,18 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	const size_t size = 0x1000;
 	void *buff;
 	int ret;
 
-	buff = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
-	if (!buff)
-		return -ENOMEM;
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl))
+		return PTR_ERR(dma_hdl);
 
-	aie2_mgmt_buff_clflush(&mgmt_hdl);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
-	ret = aie2_query_aie_telemetry(ndev, &mgmt_hdl, type, size, NULL);
+	ret = aie2_query_aie_telemetry(ndev, dma_hdl, type, size, NULL);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
@@ -469,7 +469,7 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 	seq_write(m, buff, size);
 
 free_buf:
-	aie2_mgmt_buff_free(&mgmt_hdl);
+	amdxdna_mgmt_buff_free(dma_hdl);
 	return 0;
 }
 
@@ -521,20 +521,20 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct aie2_mgmt_dma_hdl mgmt_hdl;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct app_health_report *report;
 	const size_t size = 0x2000;
 	void *buff;
 	int ret;
 
-	buff = aie2_mgmt_buff_alloc(ndev, &mgmt_hdl, size, DMA_FROM_DEVICE);
-	if (!buff)
-		return -ENOMEM;
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl))
+		return PTR_ERR(dma_hdl);
 
-	aie2_mgmt_buff_clflush(&mgmt_hdl);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
 	/* Just for debug, always check context id 1 */
-	ret = aie2_get_app_health(ndev, &mgmt_hdl, 1, size);
+	ret = aie2_get_app_health(ndev, dma_hdl, 1, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed ret %d", ret);
@@ -549,7 +549,7 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	seq_printf(m, "txn_op_id  0x%x\n", report->txn_op_id);
 
 free_buf:
-	aie2_mgmt_buff_free(&mgmt_hdl);
+	amdxdna_mgmt_buff_free(dma_hdl);
 	return 0;
 }
 
