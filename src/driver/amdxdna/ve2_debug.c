@@ -114,7 +114,7 @@ static int ve2_tile_data_reg_write(struct amdxdna_client *client,
 	}
 
 	ret = ve2_partition_write(aie_dev, info.col, info.row, info.addr,
-					   sizeof(uint32_t), (void *)&(info.val));
+				  sizeof(uint32_t), (void *)&info.val);
 	if (ret < 0)
 		XDNA_ERR(xdev, "Error in AIE Data Reg write operation, err: %d\n", ret);
 
@@ -162,8 +162,8 @@ static int ve2_tile_data_mem_write(struct amdxdna_client *client,
 	}
 
 	ret = ve2_partition_write(aie_dev, info.col, info.row, info.addr,
-					   info.size, local_buf);
-	
+				  info.size, local_buf);
+
 	if (ret < 0)
 		XDNA_ERR(xdev, "Error in AIE Data mem write operation, err: %d\n", ret);
 
@@ -198,8 +198,8 @@ static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_
 	}
 
 	ret = ve2_partition_read(aie_dev, info.col, info.row, info.addr,
-					  sizeof(uint32_t),
-					  (void *)&(info.val));
+				 sizeof(uint32_t),
+				 (void *)&info.val);
 	/* aie_partition_read(write)_register() API return values
 	 *   Number of bytes it reads/writes: on success
 	 *   Error code: on failure
@@ -248,7 +248,7 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 		return -ENOMEM;
 
 	ret = ve2_partition_read(aie_dev, info.col, info.row, info.addr,
-					  info.size, local_buf);
+				 info.size, local_buf);
 
 	if (copy_to_user(u64_to_user_ptr(info.buf_p), local_buf, info.size)) {
 		XDNA_ERR(xdev, "Error: unable to copy memory to userptr\n");
@@ -267,45 +267,45 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 static int ve2_get_firmware_version(struct amdxdna_client *client,
 				    struct amdxdna_drm_get_info *args)
 {
-    struct amdxdna_dev_hdl *hdl = client->xdna->dev_handle;
-    struct ve2_firmware_version *fver = &hdl->fw_version;
-    struct amdxdna_drm_query_ve2_firmware_version version;
+	struct amdxdna_dev_hdl *hdl = client->xdna->dev_handle;
+	struct ve2_firmware_version *fver = &hdl->fw_version;
+	struct amdxdna_drm_query_ve2_firmware_version version;
 
-    memset(&version, 0, sizeof(version));
+	memset(&version, 0, sizeof(version));
 
-    version.major = fver->major;
-    version.minor = fver->minor;
+	version.major = fver->major;
+	version.minor = fver->minor;
 
-    memcpy(version.date, fver->date, VE2_FW_DATE_STRING_LENGTH);
-    memcpy(version.git_hash, fver->git_hash, VE2_FW_HASH_STRING_LENGTH);
+	memcpy(version.date, fver->date, VE2_FW_DATE_STRING_LENGTH);
+	memcpy(version.git_hash, fver->git_hash, VE2_FW_HASH_STRING_LENGTH);
 
-    if (args->buffer_size < sizeof(version))
-        return -EINVAL;
-    if (copy_to_user((u64_to_user_ptr(args->buffer)), &version, sizeof(version)))
-        return -EFAULT;
+	if (args->buffer_size < sizeof(version))
+		return -EINVAL;
+	if (copy_to_user((u64_to_user_ptr(args->buffer)), &version, sizeof(version)))
+		return -EFAULT;
 
-    return 0;
+	return 0;
 }
 
 static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
-       struct amdxdna_dev *xdna = client->xdna;
-       struct amdxdna_drm_query_aie_metadata *meta;
-       int ret = 0;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drm_query_aie_metadata *meta;
+	int ret = 0;
 
-       if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-               XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
-               return -EFAULT;
-       }
-       meta = kzalloc(sizeof(*meta), GFP_KERNEL);
-       if (!meta)
-               return -ENOMEM;
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
+	if (!meta)
+		return -ENOMEM;
 
-       meta->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
-       if (copy_to_user(u64_to_user_ptr(args->buffer), meta, args->buffer_size))
-               ret = -EFAULT;
-       kfree(meta);
-       return ret;
+	meta->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
+	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, args->buffer_size))
+		ret = -EFAULT;
+	kfree(meta);
+	return ret;
 }
 
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
