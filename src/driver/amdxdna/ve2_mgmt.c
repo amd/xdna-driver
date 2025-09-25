@@ -11,12 +11,13 @@
 #include "ve2_res_solver.h"
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
-		struct amdxdna_ctx *hwctx, struct xrs_action_load *load_act);
+				      struct amdxdna_ctx *hwctx,
+				      struct xrs_action_load *load_act);
 
 static void cert_setup_partition(struct amdxdna_dev *xdna, struct device *aie_dev,
-		struct ve2_config_hwctx *hwctx_cfg, u32 col,
-		u32 lead_col, u32 partition_size,
-		u64 hsa_addr)
+				  struct ve2_config_hwctx *hwctx_cfg, u32 col,
+				  u32 lead_col, u32 partition_size,
+				  u64 hsa_addr)
 {
 	u32 lead_col_addr = VE2_ADDR(lead_col, 0, 0);
 	struct handshake cert_comm = { 0 };
@@ -51,7 +52,7 @@ static void cert_setup_partition(struct amdxdna_dev *xdna, struct device *aie_de
 
 	/* write to cert handshake shared memory */
 	ve2_partition_write_privileged_mem(aie_dev, col, 0,
-			sizeof(cert_comm), (void *)&cert_comm);
+					   sizeof(cert_comm), (void *)&cert_comm);
 
 	/* wake up cert */
 	ve2_partition_uc_wakeup(aie_dev, col);
@@ -68,7 +69,8 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 
 	if (start_col >= 0) {
 		if (start_col + num_col > total_col) {
-			XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d", start_col, num_col);
+			XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d",
+				 start_col, num_col);
 			return -EINVAL;
 		}
 		first = start_col;
@@ -86,9 +88,12 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 		}
 	}
 
-	XDNA_DBG(xdna, "start %d end %d first %d last %d, entries %d", start, end, first, last, entries);
+	XDNA_DBG(xdna, "start %d end %d first %d last %d, entries %d",
+		 start, end, first, last, entries);
 
-	xrs_req->cdo.start_cols = kmalloc_array(entries, sizeof(*xrs_req->cdo.start_cols), GFP_KERNEL);
+	xrs_req->cdo.start_cols = kmalloc_array(entries,
+						sizeof(*xrs_req->cdo.start_cols),
+						GFP_KERNEL);
 	if (!xrs_req->cdo.start_cols)
 		return -ENOMEM;
 
@@ -97,7 +102,8 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 		xrs_req->cdo.start_cols[i] = first + i * width;
 
 	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
-			xrs_req->cdo.start_cols, entries * sizeof(*xrs_req->cdo.start_cols), false);
+			      xrs_req->cdo.start_cols,
+			      entries * sizeof(*xrs_req->cdo.start_cols), false);
 
 	return 0;
 }
@@ -170,12 +176,13 @@ static void ve2_fifo_display_queue(struct amdxdna_mgmtctx *mgmtctx)
 	struct amdxdna_ctx_command_fifo *c_ctx, *t_ctx;
 
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list)
-		XDNA_DBG(mgmtctx->xdna, "CTX : %p command index: %llu\n", c_ctx->ctx, c_ctx->command_index);
+		XDNA_DBG(mgmtctx->xdna, "CTX : %p command index: %llu\n",
+			 c_ctx->ctx, c_ctx->command_index);
 }
 
 // Enqueue a context into the FIFO queue
 static int ve2_fifo_enqueue(struct amdxdna_mgmtctx *mgmtctx,
-		struct amdxdna_ctx *ctx, u64 command_index)
+			     struct amdxdna_ctx *ctx, u64 command_index)
 {
 	struct amdxdna_ctx_command_fifo *node;
 
@@ -197,13 +204,14 @@ static u32 get_ctx_bit(struct amdxdna_mgmtctx *mgmtctx)
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	u32 val;
 
-	ve2_partition_read_privileged_mem(
-			aie_dev, 0, offsetof(struct handshake, ctx_switch_req), sizeof(u32), &val);
+	ve2_partition_read_privileged_mem(aie_dev, 0,
+					  offsetof(struct handshake, ctx_switch_req),
+					  sizeof(u32), &val);
 	return val;
 }
 
 void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
-		struct amdxdna_ctx *hwctx)
+			     struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 	u32 start_col;
@@ -233,26 +241,27 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 		}
 
 		cert_setup_partition(xdna, nhwctx->aie_dev,
-				&nhwctx->hwctx_config[start_col + col], col,
-				start_col, num_col, hsa_addr);
+				     &nhwctx->hwctx_config[start_col + col], col,
+				     start_col, num_col, hsa_addr);
 	}
 }
 
 #define RR_SHARING BIT(0)
 static int ve2_request_context_switch(struct amdxdna_dev *xdna,
-		struct amdxdna_mgmtctx  *mgmtctx)
+				       struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	u32 val, pval;
 
 	ve2_partition_read_privileged_mem(aie_dev, 0,
-			offsetof(struct handshake, ctx_switch_req), sizeof(u32), &val);
+					  offsetof(struct handshake, ctx_switch_req),
+					  sizeof(u32), &val);
 
 	pval = val;
 	val |= RR_SHARING;
 	ve2_partition_write_privileged_mem(aie_dev, 0,
-			offsetof(struct handshake, ctx_switch_req),
-			sizeof(u32), (void *)&val);
+					   offsetof(struct handshake, ctx_switch_req),
+					   sizeof(u32), (void *)&val);
 
 	mgmtctx->is_context_req = 1;
 
@@ -326,10 +335,14 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u
 	} else if (mgmtctx->active_ctx != hwctx) {
 		if (mgmtctx->is_partition_idle == 1) {
 			mgmtctx->is_partition_idle = 0;
-			XDNA_DBG(mgmtctx->xdna, "Context switch possible as partition is idle active hwctx:%p ------>\n", mgmtctx->active_ctx);
+			XDNA_DBG(mgmtctx->xdna,
+				 "Context switch possible as partition is idle active hwctx:%p ------>\n",
+				 mgmtctx->active_ctx);
 			ve2_response_ctx_switch_req(mgmtctx);
 		} else {
-			XDNA_DBG(mgmtctx->xdna, "Commad pushed in queue as active context:%p  new context:%p\n", mgmtctx->active_ctx, hwctx);
+			XDNA_DBG(mgmtctx->xdna,
+				 "Commad pushed in queue as active context:%p  new context:%p\n",
+				 mgmtctx->active_ctx, hwctx);
 		}
 	} else {
 		if (mgmtctx->is_idle_due_to_context == 1) {
@@ -369,12 +382,14 @@ static bool ve2_check_idle(struct amdxdna_mgmtctx  *mgmtctx)
 
 	/* Make it always true for now */
 	if (cert_idle_status & CERT_IS_IDLE) {
-		XDNA_DBG(mgmtctx->xdna, "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->FOUND\n",
-				__func__, mgmtctx->active_ctx, cert_idle_status, val);
+		XDNA_DBG(mgmtctx->xdna,
+			 "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->FOUND\n",
+			 __func__, mgmtctx->active_ctx, cert_idle_status, val);
 		return true;
 	}
-	XDNA_DBG(mgmtctx->xdna, "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->NOT Found\n",
-			__func__, mgmtctx->active_ctx, cert_idle_status, val);
+	XDNA_DBG(mgmtctx->xdna,
+		 "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->NOT Found\n",
+		 __func__, mgmtctx->active_ctx, cert_idle_status, val);
 
 	return false;
 }
@@ -391,12 +406,14 @@ static bool ve2_check_queue_not_empty(struct amdxdna_mgmtctx  *mgmtctx)
 
 	/* Make it always true for now */
 	if (cert_idle_status & HSA_QUEUE_NOT_EMPTY) {
-		XDNA_DBG(mgmtctx->xdna, "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->FOUND\n",
-				__func__, mgmtctx->active_ctx, cert_idle_status, val);
+		XDNA_DBG(mgmtctx->xdna,
+			 "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->FOUND\n",
+			 __func__, mgmtctx->active_ctx, cert_idle_status, val);
 		return true;
 	}
-	XDNA_DBG(mgmtctx->xdna, "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->Not Found\n",
-			__func__, mgmtctx->active_ctx, cert_idle_status, val);
+	XDNA_DBG(mgmtctx->xdna,
+		 "%s: active hwctx %p cert_idle_status:%x cert_ctx_switch_bit:%x -->Not Found\n",
+		 __func__, mgmtctx->active_ctx, cert_idle_status, val);
 
 	return false;
 }
@@ -407,14 +424,15 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 	u32 misc_status = 0;
 
 	ve2_partition_read_privileged_mem(aie_dev, 0,
-			offsetof(struct handshake, misc_status),
-			sizeof(misc_status), (void *)&misc_status);
+					  offsetof(struct handshake, misc_status),
+					  sizeof(misc_status), (void *)&misc_status);
 	/*This may occur when control code is hanged or any exception*/
 	if (misc_status != 0) {
 		if (mgmtctx->active_ctx && mgmtctx->active_ctx->priv)
 			mgmtctx->active_ctx->priv->misc_intrpt_flag = true;
 		else
-			XDNA_ERR(mgmtctx->xdna, "misc_status interrupt: active_ctx or priv is NULL");
+			XDNA_ERR(mgmtctx->xdna,
+				 "misc_status interrupt: active_ctx or priv is NULL");
 
 		return true;
 	}
@@ -428,17 +446,20 @@ static bool ve2_check_idle_or_queue_not_empty(struct amdxdna_mgmtctx  *mgmtctx)
 	u32 cert_idle_status = 0;
 
 	ve2_partition_read_privileged_mem(aie_dev, 0,
-			offsetof(struct handshake, cert_idle_status),
-			sizeof(cert_idle_status), (void *)&cert_idle_status);
+					  offsetof(struct handshake, cert_idle_status),
+					  sizeof(cert_idle_status),
+					  (void *)&cert_idle_status);
 
 	/* Make it always true for now */
 	if (cert_idle_status & HSA_QUEUE_NOT_EMPTY || cert_idle_status & CERT_IS_IDLE) {
-		XDNA_DBG(mgmtctx->xdna, "%s: active hwctx %p cert_idle_status:%x -> FOUND\n",
-				__func__, mgmtctx->active_ctx, cert_idle_status);
+		XDNA_DBG(mgmtctx->xdna,
+			 "%s: active hwctx %p cert_idle_status:%x -> FOUND\n",
+			 __func__, mgmtctx->active_ctx, cert_idle_status);
 		return true;
 	}
-	XDNA_DBG(mgmtctx->xdna, "%s: active hwctx %p cert_idle_status:%x -> Not Found\n",
-			__func__, mgmtctx->active_ctx, cert_idle_status);
+	XDNA_DBG(mgmtctx->xdna,
+		 "%s: active hwctx %p cert_idle_status:%x -> Not Found\n",
+		 __func__, mgmtctx->active_ctx, cert_idle_status);
 
 	return false;
 }
@@ -461,23 +482,36 @@ static void ve2_scheduler_work(struct work_struct *work)
 	if (mgmtctx->active_ctx->priv->misc_intrpt_flag) {
 		XDNA_ERR(mgmtctx->xdna, "MISC interrupt from firmware!!!\n");
 	} else if (ve2_check_queue_not_empty(mgmtctx)) {
-		// there are more command but cert ack ctx switch bit
-		// we schedule next ctx and if no more ctx are there we set partition idle
+		/*
+		 * there are more command but cert ack ctx switch bit
+		 * we schedule next ctx and if no more ctx are there we set partition idle
+		 */
 		if (!ve2_response_ctx_switch_req(mgmtctx)) {
 			mgmtctx->is_partition_idle = 1;
-			//no more command in fifo and Partition is IDLE, this can never happen as we got queue_not_empty bit, that means active ctx should have more commands
-			XDNA_DBG(mgmtctx->xdna, "No more command in fifo and Partition is IDLE active hwctx:%p ------> ", mgmtctx->active_ctx);
+			/*
+			 * no more command in fifo and Partition is IDLE, this can never happen
+			 * as we got queue_not_empty bit, that means active ctx should have more commands
+			 */
+			XDNA_DBG(mgmtctx->xdna,
+				 "No more command in fifo and Partition is IDLE active hwctx:%p ------> ",
+				 mgmtctx->active_ctx);
 		}
 	} else if (ve2_check_idle(mgmtctx)) {
-		// 1. no more command and cert is in idle
-		// 2. no more command and cert ack ctx switch bit
-		// in both condition we schedule next ctx and if no more ctx are there we set partition idle
+		/*
+		 * 1. no more command and cert is in idle
+		 * 2. no more command and cert ack ctx switch bit
+		 * in both condition we schedule next ctx and if no more ctx are there we set partition idle
+		 */
 		if (!ve2_response_ctx_switch_req(mgmtctx)) {
 			mgmtctx->is_partition_idle = 1;
-			XDNA_DBG(mgmtctx->xdna, "No more command in fifo and Partition is IDLE active hwctx:%p ------> ", mgmtctx->active_ctx);
+			XDNA_DBG(mgmtctx->xdna,
+				 "No more command in fifo and Partition is IDLE active hwctx:%p ------> ",
+				 mgmtctx->active_ctx);
 		}
 	} else {
-		XDNA_ERR(mgmtctx->xdna, "None of the bit (idle/queue_not_empty/misc) was set active ctx:%p\n", mgmtctx->active_ctx);
+		XDNA_ERR(mgmtctx->xdna,
+			 "None of the bit (idle/queue_not_empty/misc) was set active ctx:%p\n",
+			 mgmtctx->active_ctx);
 	}
 	spin_unlock(&mgmtctx->ctx_lock);
 }
@@ -494,26 +528,34 @@ static u32 get_cert_idle_status(struct amdxdna_mgmtctx  *mgmtctx)
 	return cert_idle_status;
 }
 
-static int pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_ctx *active_ctx, u64 read_index)
+static int pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx,
+					   struct amdxdna_ctx *active_ctx,
+					   u64 read_index)
 {
 	struct amdxdna_ctx_command_fifo *c_ctx, *t_ctx;
 
-	XDNA_DBG(mgmtctx->xdna, "pop_from_ctx_command_fifo_till for active_ctx:%p read_index:%llu\n", active_ctx, read_index);
+	XDNA_DBG(mgmtctx->xdna, "%s for active_ctx:%p read_index:%llu\n",
+		 __func__, active_ctx, read_index);
 	XDNA_DBG(mgmtctx->xdna, "printing fifo before pop:\n");
 	ve2_fifo_display_queue(mgmtctx);
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
 		if (c_ctx->ctx != active_ctx) {
-			XDNA_DBG(mgmtctx->xdna, "POP BREAK as next_ctx=%p != ctx:%p so setting ctx switch bit\n", c_ctx->ctx, c_ctx);
+			XDNA_DBG(mgmtctx->xdna,
+				 "POP BREAK as next_ctx=%p != ctx:%p so setting ctx switch bit\n",
+				 c_ctx->ctx, c_ctx);
 			ve2_request_context_switch(mgmtctx->xdna, mgmtctx);
 			break;
 		}
 
 		if (c_ctx->command_index <= read_index) {
-			XDNA_DBG(mgmtctx->xdna, "POP ctx:%p command index:%llu\n", c_ctx->ctx, c_ctx->command_index);
+			XDNA_DBG(mgmtctx->xdna, "POP ctx:%p command index:%llu\n",
+				 c_ctx->ctx, c_ctx->command_index);
 			list_del(&c_ctx->list);
 			kfree(c_ctx);
 		} else {
-			XDNA_DBG(mgmtctx->xdna, "POP BREAK at temp_ctx:%p command index:%llu active_ctx:%p read_index:%llu\n", c_ctx->ctx, c_ctx->command_index, active_ctx, read_index);
+			XDNA_DBG(mgmtctx->xdna,
+				 "POP BREAK at temp_ctx:%p command index:%llu active_ctx:%p read_index:%llu\n",
+				 c_ctx->ctx, c_ctx->command_index, active_ctx, read_index);
 			break;
 		}
 	}
@@ -553,8 +595,10 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 		return;
 	}
 
-	XDNA_DBG(xdna, "In IRQ hwctx %p read_index=%lld, write index=%lld cert_ctx_switch_bit:%u cert_idle_status:%u\n",
-			hwctx, read_index, write_index, get_ctx_bit(mgmtctx), get_cert_idle_status(mgmtctx));
+	XDNA_DBG(xdna,
+		 "In IRQ hwctx %p read_index=%lld, write index=%lld cert_ctx_switch_bit:%u cert_idle_status:%u\n",
+		 hwctx, read_index, write_index, get_ctx_bit(mgmtctx),
+		 get_cert_idle_status(mgmtctx));
 
 	/* Race condition: what happen if more command completed bet this point and
 	 * point waiq get executed(check for command completed). This will only happen
@@ -569,7 +613,7 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
 
 	if (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
-			ve2_check_misc_interrupt(mgmtctx))
+	    ve2_check_misc_interrupt(mgmtctx))
 		queue_work(mgmtctx->mgmtctx_workq, &mgmtctx->sched_work);
 }
 
@@ -584,7 +628,8 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
  * Returns 0 on success or a negative error code on failure.
  */
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
-		struct amdxdna_ctx *hwctx, struct xrs_action_load *load_act)
+				      struct amdxdna_ctx *hwctx,
+				      struct xrs_action_load *load_act)
 {
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 	struct aie_partition_req request = { 0 };
@@ -595,11 +640,13 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 	if (load_act->create_aie_part) {
 		request.user_event1_complete = ve2_irq_handler;
 		request.user_event1_priv = mgmtctx;
-		request.partition_id = aie_calc_part_id(load_act->part.start_col, load_act->part.ncols);
+		request.partition_id = aie_calc_part_id(load_act->part.start_col,
+							 load_act->part.ncols);
 
 		mgmtctx->mgmt_aiedev = aie_partition_request(&request);
 		if (IS_ERR(mgmtctx->mgmt_aiedev)) {
-			XDNA_ERR(xdna, "aie parition request failed for part id %d", request.partition_id);
+			XDNA_ERR(xdna, "aie parition request failed for part id %d",
+				 request.partition_id);
 			return -ENODEV;
 		}
 
@@ -630,7 +677,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 }
 
 static int ve2_xrs_release(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
-		struct xrs_action_load *load_act)
+			    struct xrs_action_load *load_act)
 {
 	return xrs_release_resource(xdna->dev_handle->xrs_hdl, (uintptr_t)hwctx, load_act);
 }
@@ -640,11 +687,12 @@ static void cert_clear_partition(struct amdxdna_dev *xdna, struct device *aie_de
 	struct handshake cert_comm = { 0 };
 
 	ve2_partition_write_privileged_mem(aie_dev, col, 0,
-			sizeof(cert_comm), (void *)&cert_comm);
+					   sizeof(cert_comm), (void *)&cert_comm);
 }
 
 /**
- * ve2_mgmt_destroy_partition - Destroys a VE2 management partition and releases associated resources.
+ * ve2_mgmt_destroy_partition - Destroys a VE2 management partition and releases
+ *                              associated resources.
  * @hwctx: Pointer to the hardware context to be destroyed.
  *
  * This function releases the XRS resource, clears the partition handshake memory,
@@ -709,8 +757,8 @@ struct amdxdna_ctx *ve2_get_hwctx(struct amdxdna_dev *xdna, u32 col)
 			start = hwctx->start_col;
 			end = start + hwctx->num_col;
 			if (col >= start && col < end) {
-				XDNA_DBG(xdna, "hwctx found with id %d & pid %d\n", hwctx->id,
-						hwctx->client->pid);
+				XDNA_DBG(xdna, "hwctx found with id %d & pid %d\n",
+					 hwctx->id, hwctx->client->pid);
 				srcu_read_unlock(&client->ctx_srcu, idx);
 				return hwctx;
 			}
@@ -738,10 +786,11 @@ int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
 	int ret;
 
 	ret = ve2_partition_write(hwctx->priv->aie_dev, 0, 0,
-			VE2_EVENT_GENERATE_REG, sizeof(u32), (void *)&(value));
+				  VE2_EVENT_GENERATE_REG, sizeof(u32),
+				  (void *)&(value));
 	if (ret < 0)
 		XDNA_DBG(xdna, "AIE write on event_generate register throw error %d\n",
-				ret);
+			 ret);
 
 	return ret;
 }
