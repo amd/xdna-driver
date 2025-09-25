@@ -85,7 +85,7 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 	xrs_cfg.ddev = &xdna->ddev;
 
 	if (max_col > 0 && start_col >= 0 &&
-		(max_col + start_col) < XRS_MAX_COL) {
+	    (max_col + start_col) < XRS_MAX_COL) {
 		xrs_cfg.total_col = max_col;
 	} else {
 		xrs_cfg.total_col = XRS_MAX_COL;

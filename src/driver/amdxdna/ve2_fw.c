@@ -51,8 +51,8 @@ static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev,
 	}
 
 	ret = ve2_partition_read_privileged_mem(aie_dev, col,
-											offsetof(struct handshake, mpaie_alive),
-											sizeof(struct handshake), (void *)hs);
+						offsetof(struct handshake, mpaie_alive),
+						sizeof(struct handshake), (void *)hs);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie_partition_read failed with ret %d\n", ret);
 		goto done;

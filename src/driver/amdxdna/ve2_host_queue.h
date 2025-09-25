@@ -196,7 +196,7 @@ struct handshake {
 		u16 c_preemption_poll; // POLL_32 opcode retry times
 		u16 c_preemption_mask_poll; // MASK_POLL_32 opcode retry times
 		u16 c_preemption_remote_barrier; // run out of physical barrier REMOTE_BARRIER
-		u16 c_preemption_wait_tct; // actor entry overflow or run out of wait handle WAIT_TCTS
+		u16 c_preemption_wait_tct;//actor entry overflow or run out of wait handle WAIT_TCTS
 		u16 c_block_ucdma; // block UC_DMA_WRITE_DES opcode
 		u16 c_block_ucdma_sync; // block UC_DMA_WRITE_DES_SYNC opcode
 		u16 c_block_local_barrier; // block local_barrier opcode
