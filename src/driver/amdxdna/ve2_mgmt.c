@@ -11,13 +11,13 @@
 #include "ve2_res_solver.h"
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
-				      struct amdxdna_ctx *hwctx,
-				      struct xrs_action_load *load_act);
+				     struct amdxdna_ctx *hwctx,
+				     struct xrs_action_load *load_act);
 
 static void cert_setup_partition(struct amdxdna_dev *xdna, struct device *aie_dev,
-				  struct ve2_config_hwctx *hwctx_cfg, u32 col,
-				  u32 lead_col, u32 partition_size,
-				  u64 hsa_addr)
+				 struct ve2_config_hwctx *hwctx_cfg, u32 col,
+				 u32 lead_col, u32 partition_size,
+				 u64 hsa_addr)
 {
 	u32 lead_col_addr = VE2_ADDR(lead_col, 0, 0);
 	struct handshake cert_comm = { 0 };
@@ -102,8 +102,8 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 		xrs_req->cdo.start_cols[i] = first + i * width;
 
 	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
-			      xrs_req->cdo.start_cols,
-			      entries * sizeof(*xrs_req->cdo.start_cols), false);
+			     xrs_req->cdo.start_cols,
+			     entries * sizeof(*xrs_req->cdo.start_cols), false);
 
 	return 0;
 }
@@ -182,7 +182,7 @@ static void ve2_fifo_display_queue(struct amdxdna_mgmtctx *mgmtctx)
 
 // Enqueue a context into the FIFO queue
 static int ve2_fifo_enqueue(struct amdxdna_mgmtctx *mgmtctx,
-			     struct amdxdna_ctx *ctx, u64 command_index)
+			    struct amdxdna_ctx *ctx, u64 command_index)
 {
 	struct amdxdna_ctx_command_fifo *node;
 
@@ -248,7 +248,7 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 
 #define RR_SHARING BIT(0)
 static int ve2_request_context_switch(struct amdxdna_dev *xdna,
-				       struct amdxdna_mgmtctx *mgmtctx)
+				      struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct device *aie_dev = mgmtctx->mgmt_aiedev;
 	u32 val, pval;
@@ -377,8 +377,8 @@ static bool ve2_check_idle(struct amdxdna_mgmtctx  *mgmtctx)
 	u32 val = 0;
 
 	ve2_partition_read_privileged_mem(aie_dev, 0,
-			offsetof(struct handshake, cert_idle_status),
-			sizeof(cert_idle_status), (void *)&cert_idle_status);
+					  offsetof(struct handshake, cert_idle_status),
+					  sizeof(cert_idle_status), (void *)&cert_idle_status);
 
 	/* Make it always true for now */
 	if (cert_idle_status & CERT_IS_IDLE) {
@@ -401,8 +401,8 @@ static bool ve2_check_queue_not_empty(struct amdxdna_mgmtctx  *mgmtctx)
 	u32 val = 0;
 
 	ve2_partition_read_privileged_mem(aie_dev, 0,
-			offsetof(struct handshake, cert_idle_status),
-			sizeof(cert_idle_status), (void *)&cert_idle_status);
+					  offsetof(struct handshake, cert_idle_status),
+					  sizeof(cert_idle_status), (void *)&cert_idle_status);
 
 	/* Make it always true for now */
 	if (cert_idle_status & HSA_QUEUE_NOT_EMPTY) {
@@ -490,7 +490,8 @@ static void ve2_scheduler_work(struct work_struct *work)
 			mgmtctx->is_partition_idle = 1;
 			/*
 			 * no more command in fifo and Partition is IDLE, this can never happen
-			 * as we got queue_not_empty bit, that means active ctx should have more commands
+			 * as we got queue_not_empty bit, that means active ctx should have more
+			 * commands.
 			 */
 			XDNA_DBG(mgmtctx->xdna,
 				 "No more command in fifo and Partition is IDLE active hwctx:%p ------> ",
@@ -500,7 +501,8 @@ static void ve2_scheduler_work(struct work_struct *work)
 		/*
 		 * 1. no more command and cert is in idle
 		 * 2. no more command and cert ack ctx switch bit
-		 * in both condition we schedule next ctx and if no more ctx are there we set partition idle
+		 * in both condition we schedule next ctx and if no more ctx are there we set
+		 * partition idle.
 		 */
 		if (!ve2_response_ctx_switch_req(mgmtctx)) {
 			mgmtctx->is_partition_idle = 1;
@@ -522,15 +524,15 @@ static u32 get_cert_idle_status(struct amdxdna_mgmtctx  *mgmtctx)
 	u32 cert_idle_status = 0;
 
 	ve2_partition_read_privileged_mem(aie_dev, 0,
-			offsetof(struct handshake, cert_idle_status),
-			sizeof(cert_idle_status), (void *)&cert_idle_status);
+					  offsetof(struct handshake, cert_idle_status),
+					  sizeof(cert_idle_status), (void *)&cert_idle_status);
 
 	return cert_idle_status;
 }
 
 static int pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx,
-					   struct amdxdna_ctx *active_ctx,
-					   u64 read_index)
+					  struct amdxdna_ctx *active_ctx,
+					  u64 read_index)
 {
 	struct amdxdna_ctx_command_fifo *c_ctx, *t_ctx;
 
@@ -628,8 +630,8 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
  * Returns 0 on success or a negative error code on failure.
  */
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
-				      struct amdxdna_ctx *hwctx,
-				      struct xrs_action_load *load_act)
+				     struct amdxdna_ctx *hwctx,
+				     struct xrs_action_load *load_act)
 {
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 	struct aie_partition_req request = { 0 };
@@ -641,7 +643,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		request.user_event1_complete = ve2_irq_handler;
 		request.user_event1_priv = mgmtctx;
 		request.partition_id = aie_calc_part_id(load_act->part.start_col,
-							 load_act->part.ncols);
+							load_act->part.ncols);
 
 		mgmtctx->mgmt_aiedev = aie_partition_request(&request);
 		if (IS_ERR(mgmtctx->mgmt_aiedev)) {
@@ -677,7 +679,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 }
 
 static int ve2_xrs_release(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
-			    struct xrs_action_load *load_act)
+			   struct xrs_action_load *load_act)
 {
 	return xrs_release_resource(xdna->dev_handle->xrs_hdl, (uintptr_t)hwctx, load_act);
 }

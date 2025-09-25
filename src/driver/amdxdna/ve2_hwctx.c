@@ -625,7 +625,7 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
  * Handle interrupt notification based on read_index and write_index.
  */
 static inline bool check_read_index(struct amdxdna_ctx *hwctx,
-				     u64 seq, u32 print_interval)
+				    u64 seq, u32 print_interval)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	static u64 counter;
@@ -706,8 +706,10 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			}
 
 			ret = ve2_partition_read_privileged_mem(aie_dev, 0,
-								offsetof(struct handshake, mpaie_alive),
-								sizeof(struct handshake), (void *)hs);
+								offsetof(struct handshake,
+									 mpaie_alive),
+								sizeof(struct handshake),
+								(void *)hs);
 
 			if (ret < 0) {
 				XDNA_ERR(xdna, "aie_partition_read failed with ret=%d\n", ret);
@@ -852,7 +854,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 }
 
 static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 paddr,
-				     u32 buf_sz, u32 col, bool attach)
+				    u32 buf_sz, u32 col, bool attach)
 {
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 
@@ -887,7 +889,6 @@ static void ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeou
 
 	for (u32 col = 0; col < hwctx->num_col; col++)
 		nhwctx->hwctx_config[hwctx->start_col + col].opcode_timeout_config = op_timeout;
-
 }
 
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u32 size)

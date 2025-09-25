@@ -80,7 +80,7 @@ struct amdxdna_ctx_priv {
 	wait_queue_head_t		waitq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	struct timer_list		event_timer;
-	volatile bool			misc_intrpt_flag; /* Hardware sync required */
+	bool			misc_intrpt_flag; /* Hardware sync required */
 	struct mutex			privctx_lock; /* protect private ctx */
 };
 
@@ -101,9 +101,9 @@ struct amdxdna_mgmtctx {
 	spinlock_t			ctx_lock; /* protect ctx add/remove/update */
 	struct work_struct		sched_work;
 	struct workqueue_struct		*mgmtctx_workq;
-	volatile u32			is_partition_idle; /* Hardware sync required */
-	volatile u32			is_context_req; /* Hardware sync required */
-	volatile u32			is_idle_due_to_context; /* Hardware sync required */
+	u32			is_partition_idle; /* Hardware sync required */
+	u32			is_context_req; /* Hardware sync required */
+	u32			is_idle_due_to_context; /* Hardware sync required */
 };
 
 struct amdxdna_dev_hdl {
