@@ -47,6 +47,7 @@ void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -704,6 +705,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
+  },
+  test_case{ "io test with intruction code invalid address access", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
