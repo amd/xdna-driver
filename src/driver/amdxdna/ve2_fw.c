@@ -51,8 +51,8 @@ static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev,
 	}
 
 	ret = ve2_partition_read_privileged_mem(aie_dev, col,
-			offsetof(struct handshake, mpaie_alive),
-			sizeof(struct handshake), (void *)hs);
+											offsetof(struct handshake, mpaie_alive),
+											sizeof(struct handshake), (void *)hs);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie_partition_read failed with ret %d\n", ret);
 		goto done;
@@ -89,9 +89,8 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 
 	for (u32 col = 0; col < priv_ctx->num_col; col++) {
 		ret = get_firmware_status(xdna, priv_ctx->aie_dev, priv_ctx->start_col + col);
-		if (ret < 0) {
+		if (ret < 0)
 			XDNA_ERR(xdna, "Failed to get cert status for col %d ret = %d\n", col, ret);
-		}
 	}
 
 	return ret;
