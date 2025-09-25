@@ -46,6 +46,7 @@ void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -638,6 +639,11 @@ std::vector<test_case> test_list {
   test_case{ "query(rom_fpga_name)", {},
     TEST_NEGATIVE, dev_filter_xdna, TEST_query_userpf<query::rom_fpga_name>, {}
   },
+  // get async error in multi thread before running any other tests
+  // there may or may not be async error.
+  test_case{ "get async error in multithread - INITIAL", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_async_error_multi, {false}
+  },
   //test_case{ "non_xdna_userpf: query(rom_vbnv)", {},
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
   //},
@@ -827,6 +833,10 @@ std::vector<test_case> test_list {
   //},
   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+  },
+  // get async error in multi thread after async error has raised.
+  test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
   },
 };
 
