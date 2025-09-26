@@ -78,7 +78,7 @@ public:
   is_umq() const = 0;
 
   virtual void
-  create_drm_bo(create_bo_arg *arg) const = 0;
+  create_drm_bo(bo_info *arg) const = 0;
 
 private:
   virtual void
@@ -88,7 +88,8 @@ private:
   on_last_close() const = 0;
 
   mutable int m_dev_users = 0;
-  mutable std::mutex m_lock;
+  mutable std::mutex m_open_close_lock;
+
   std::shared_ptr<const platform_drv> m_driver;
 };
 

@@ -27,7 +27,7 @@ public:
   is_umq() const override;
 
   void
-  create_drm_bo(create_bo_arg *arg) const override;
+  create_drm_bo(bo_info *arg) const override;
 
 private:
   virtual void

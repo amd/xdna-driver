@@ -463,7 +463,7 @@ host_bo_free(uint32_t host_hdl) const
 
 void
 platform_drv_virtio::
-create_bo(create_bo_arg& arg) const
+create_bo(bo_info& arg) const
 {
   bo_id id;
   auto fd = dev_fd();
@@ -685,13 +685,13 @@ import_bo(import_bo_arg& bo_arg) const
   uint64_t map_offset = AMDXDNA_INVALID_ADDR;
   map_offset = drm_bo_get_map_offset(fd, gboh);
 
-  bo_arg.bo.handle = hboh;
-  bo_arg.bo.res_id = gboh;
-  bo_arg.xdna_addr = xdna_addr;
-  bo_arg.vaddr = nullptr;
-  bo_arg.map_offset = map_offset;
-  bo_arg.type = AMDXDNA_BO_SHARE;
-  bo_arg.size = size;
+  bo_arg.boinfo.bo.handle = hboh;
+  bo_arg.boinfo.bo.res_id = gboh;
+  bo_arg.boinfo.xdna_addr = xdna_addr;
+  bo_arg.boinfo.vaddr = nullptr;
+  bo_arg.boinfo.map_offset = map_offset;
+  bo_arg.boinfo.type = AMDXDNA_BO_SHARE;
+  bo_arg.boinfo.size = size;
 }
 
 }

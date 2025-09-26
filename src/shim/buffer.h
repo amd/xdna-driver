@@ -35,7 +35,7 @@ private:
 
 class drm_bo {
 public:
-  drm_bo(const pdev& pdev, size_t size, int type);
+  drm_bo(const pdev& pdev, size_t size, uint32_t type);
   drm_bo(const pdev& pdev, size_t size, void *uptr);
   drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
   ~drm_bo();

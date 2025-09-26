@@ -70,7 +70,7 @@ is_umq() const
 
 void
 pdev_kmq::
-create_drm_bo(create_bo_arg *arg) const
+create_drm_bo(bo_info *arg) const
 {
   if (arg->type != AMDXDNA_BO_DEV) {
     drv_ioctl(drv_ioctl_cmd::create_bo, arg);

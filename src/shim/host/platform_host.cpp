@@ -192,7 +192,7 @@ create_drm_bo(void *uva_tbl, size_t size, int type) const
 
 void
 platform_drv_host::
-create_bo(create_bo_arg& bo_arg) const
+create_bo(bo_info& bo_arg) const
 {
   bo_arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
   std::tie(bo_arg.bo.handle, bo_arg.xdna_addr, bo_arg.map_offset) =
@@ -201,14 +201,14 @@ create_bo(create_bo_arg& bo_arg) const
 
 void
 platform_drv_host::
-create_uptr_bo(create_uptr_bo_arg& bo_arg) const
+create_uptr_bo(bo_info& bo_arg) const
 {
   alignas(amdxdna_drm_va_tbl)
   char buf[sizeof(amdxdna_drm_va_tbl) + sizeof(amdxdna_drm_va_entry)];
   auto tbl = reinterpret_cast<amdxdna_drm_va_tbl*>(buf);
   tbl->udma_fd = -1;
   tbl->num_entries = 1;
-  tbl->va_entries[0].vaddr = reinterpret_cast<uintptr_t>(bo_arg.buf);
+  tbl->va_entries[0].vaddr = reinterpret_cast<uintptr_t>(bo_arg.vaddr);
   tbl->va_entries[0].len = page_roundup(bo_arg.size);
 
   bo_arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
@@ -263,13 +263,13 @@ import_bo(import_bo_arg& bo_arg) const
   amdxdna_drm_get_bo_info iarg = {};
   iarg.handle = carg.handle;
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_GET_BO_INFO, &iarg);
-  bo_arg.bo.handle = carg.handle;
-  bo_arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
-  bo_arg.xdna_addr = iarg.xdna_addr;
-  bo_arg.vaddr = to_ptr(iarg.vaddr);
-  bo_arg.map_offset = iarg.map_offset;
-  bo_arg.type = AMDXDNA_BO_SHARE;
-  bo_arg.size = lseek(bo_arg.fd, 0, SEEK_END);
+  bo_arg.boinfo.bo.handle = carg.handle;
+  bo_arg.boinfo.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
+  bo_arg.boinfo.xdna_addr = iarg.xdna_addr;
+  bo_arg.boinfo.vaddr = to_ptr(iarg.vaddr);
+  bo_arg.boinfo.map_offset = iarg.map_offset;
+  bo_arg.boinfo.type = AMDXDNA_BO_SHARE;
+  bo_arg.boinfo.size = lseek(bo_arg.fd, 0, SEEK_END);
   lseek(bo_arg.fd, 0, SEEK_SET);
 }
 

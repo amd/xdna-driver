@@ -85,21 +85,19 @@ struct config_ctx_debug_bo_arg {
   bo_id bo;
 };
 
-struct create_bo_arg {
-  int type;
-  size_t size;
+struct bo_info {
   uint64_t xdna_addr_align;
+  size_t size;
   bo_id bo;
   uint64_t xdna_addr;
+  void *vaddr;
   uint64_t map_offset;
+  uint32_t type;
 };
 
-struct create_uptr_bo_arg {
-  void *buf;
-  size_t size;
-  bo_id bo;
-  uint64_t xdna_addr;
-  uint64_t map_offset;
+struct import_bo_arg {
+  int fd;
+  bo_info boinfo;
 };
 
 struct destroy_bo_arg {
@@ -116,16 +114,6 @@ struct sync_bo_arg {
 struct export_bo_arg {
   bo_id bo;
   int fd;
-};
-
-struct import_bo_arg {
-  int fd;
-  uint32_t type;
-  size_t size;
-  bo_id bo;
-  uint64_t xdna_addr;
-  void *vaddr;
-  uint64_t map_offset;
 };
 
 struct submit_cmd_arg {
@@ -226,6 +214,17 @@ private:
   mutable int m_dev_fd = -1;
   mutable std::string m_sysfs_root;
 
+  // Proces-wide drm_bo map to allow retrieving the bo by handle.
+  // If a bo is exported, then imported within the same process, we will
+  // get back the same bo handle. We can, then, retrieve the bo back
+  // from this map to avoid creating a new bo instance in shim which
+  // points to the same bo instance in driver. If we have multiple bo
+  // instances in shim pointing to the same bo in driver, any one of
+  // the bo is destroyed will cause the driver bo to be freed while
+  // other bo intances may still be in-use in shim.
+  mutable std::mutex m_drm_bo_map_lock;
+  std::map<uint32_t, bo_info> m_drm_bo_map;
+
   std::string
   get_dev_node(const std::string& sysfs_name);
 
@@ -246,11 +245,11 @@ private:
   { shim_not_supported_err(__func__); }
 
   virtual void
-  create_bo(create_bo_arg& arg) const
+  create_bo(bo_info& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void
-  create_uptr_bo(create_uptr_bo_arg& arg) const
+  create_uptr_bo(bo_info& arg) const
   { shim_not_supported_err(__func__); }
 
   virtual void
