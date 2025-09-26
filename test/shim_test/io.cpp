@@ -417,10 +417,12 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
 }
 
 elf_io_timeout_test_bo_set::
-elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name)
-  : io_test_bo_set_base(dev, xclbin_name)
+elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name,
+                           const std::string& elf_name, uint32_t exp_txn_op_idx)
+  : m_expect_txn_op_idx(exp_txn_op_idx),
+    io_test_bo_set_base(dev, xclbin_name)
 {
-  m_elf = xrt::elf(m_local_data_path + "/timeout.elf");
+  m_elf = xrt::elf(m_local_data_path + elf_name);
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -439,6 +441,11 @@ elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name)
     }
   }
 }
+
+elf_io_timeout_test_bo_set::
+elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name)
+  : elf_io_timeout_test_bo_set(dev, xclbin_name, "timeout.elf", 0x11800)
+{}
 
 void
 io_test_bo_set_base::
@@ -673,7 +680,7 @@ verify_result()
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
   auto cdata = reinterpret_cast<ert_ctx_health_data *>(cpkt->data);
-  if (cdata->txn_op_idx != 0x11800) {
+  if (cdata->txn_op_idx != m_expect_txn_op_idx) {
     std::cerr << "Incorrect app health data:\n";
     std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->txn_op_idx << "\n";
     std::cerr << "\tContext PC: 0x" << std::hex << cdata->ctx_pc << "\n";

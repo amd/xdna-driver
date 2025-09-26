@@ -538,3 +538,14 @@ void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, a
   threads.run_test(id, sdev, arg);
 }
 
+void
+TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  elf_io_timeout_test_bo_set invalid_addr_txn_set{sdev.get(), "timeout.xclbin",
+                                                  "instr_invalid_addr.elf", 0xFFFFFFFF};
+  // verification is inside run()
+  invalid_addr_txn_set.run();
+
+  std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
+  elf_io(id, sdev, params, "design.xclbin");
+}
