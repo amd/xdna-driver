@@ -484,12 +484,17 @@ create_bo(bo_info& arg) const
     drm_bo_free(fd, arg.bo.res_id);
     throw;
   }
+
+  save_bo_info(arg.bo.res_id, arg);
 }
 
 void
 platform_drv_virtio::
 destroy_bo(destroy_bo_arg& arg) const
 {
+  if (!delete_bo_info(arg.bo.res_id))
+    return;
+
   host_bo_free(arg.bo.handle);
   drm_bo_free(dev_fd(), arg.bo.res_id);
 }
@@ -671,6 +676,22 @@ import_bo(import_bo_arg& bo_arg) const
   ioctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &carg);
   auto gboh = carg.handle;
 
+  bo_info info;
+  auto bo_exist = true;
+  try {
+    load_bo_info(gboh, info);
+  } catch (const xrt_core::system_error& e) {
+    if (e.get_code() != ENOENT)
+      throw;
+    bo_exist = false;
+  }
+  if (bo_exist) {
+    // Found existing BO, just use the info.
+    bo_arg.boinfo = info;
+    return;
+  }
+
+  // New BO is created.
   auto [ resource, size ] = drm_bo_get_info(fd, gboh);
 
   uint32_t hboh = AMDXDNA_INVALID_BO_HANDLE;

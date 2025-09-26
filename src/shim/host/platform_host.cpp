@@ -197,6 +197,7 @@ create_bo(bo_info& bo_arg) const
   bo_arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
   std::tie(bo_arg.bo.handle, bo_arg.xdna_addr, bo_arg.map_offset) =
     create_drm_bo(nullptr, bo_arg.size, bo_arg.type);
+  save_bo_info(bo_arg.bo.handle, bo_arg);
 }
 
 void
@@ -214,12 +215,16 @@ create_uptr_bo(bo_info& bo_arg) const
   bo_arg.bo.res_id = AMDXDNA_INVALID_BO_HANDLE;
   std::tie(bo_arg.bo.handle, bo_arg.xdna_addr, bo_arg.map_offset) =
     create_drm_bo(buf, 0, AMDXDNA_BO_SHARE);
+  save_bo_info(bo_arg.bo.handle, bo_arg);
 }
 
 void
 platform_drv_host::
 destroy_bo(destroy_bo_arg& bo_arg) const
 {
+  if (!delete_bo_info(bo_arg.bo.handle))
+    return;
+
   drm_gem_close arg = {};
   arg.handle = bo_arg.bo.handle;
   ioctl(dev_fd(), DRM_IOCTL_GEM_CLOSE, &arg);
@@ -259,6 +264,21 @@ import_bo(import_bo_arg& bo_arg) const
   carg.flags = 0;
   carg.fd = bo_arg.fd;
   ioctl(dev_fd(), DRM_IOCTL_PRIME_FD_TO_HANDLE, &carg);
+
+  bo_info info;
+  auto bo_exist = true;
+  try {
+    load_bo_info(carg.handle, info);
+  } catch (const xrt_core::system_error& e) {
+    if (e.get_code() != ENOENT)
+      throw;
+    bo_exist = false;
+  }
+  if (bo_exist) {
+    // Found existing BO, just use the info.
+    bo_arg.boinfo = info;
+    return;
+  }
 
   amdxdna_drm_get_bo_info iarg = {};
   iarg.handle = carg.handle;

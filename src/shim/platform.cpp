@@ -252,4 +252,51 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
   }
 }
 
+void
+platform_drv::
+save_bo_info(uint32_t key, bo_info& info) const
+{
+  const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
+
+  if (m_drm_bo_map.find(key) != m_drm_bo_map.end())
+    shim_err(EEXIST, "BO info for %d already exists", key);
+  m_drm_bo_map[key] = { 1, info };
+}
+
+bool
+platform_drv::
+delete_bo_info(uint32_t key) const
+{
+  const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
+  bool erased;
+
+  auto it = m_drm_bo_map.find(key);
+  if (it == m_drm_bo_map.end())
+    shim_err(ENOENT, "BO info for %d not found", key);
+
+  if (it->second.first == 1) {
+    m_drm_bo_map.erase(key);
+    erased = true;
+  } else {
+    it->second.first--;
+    erased = false;
+  }
+
+  return erased;
+}
+
+void
+platform_drv::
+load_bo_info(uint32_t key, bo_info& info) const
+{
+  const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
+
+  auto it = m_drm_bo_map.find(key);
+  if (it == m_drm_bo_map.end())
+    shim_err(ENOENT, "BO info for %d not found", key);
+
+  it->second.first++;
+  info = it->second.second;
+}
+
 }

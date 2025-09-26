@@ -206,6 +206,15 @@ protected:
   virtual void
   signal_syncobj(signal_syncobj_arg& arg) const;
 
+  void
+  save_bo_info(uint32_t key, bo_info& info) const;
+
+  bool
+  delete_bo_info(uint32_t key) const;
+
+  void
+  load_bo_info(uint32_t key, bo_info& info) const;
+
 private:
   std::shared_ptr<const drv> m_driver;
 
@@ -223,7 +232,7 @@ private:
   // the bo is destroyed will cause the driver bo to be freed while
   // other bo intances may still be in-use in shim.
   mutable std::mutex m_drm_bo_map_lock;
-  std::map<uint32_t, bo_info> m_drm_bo_map;
+  mutable std::map< uint32_t, std::pair<int, bo_info> > m_drm_bo_map;
 
   std::string
   get_dev_node(const std::string& sysfs_name);
