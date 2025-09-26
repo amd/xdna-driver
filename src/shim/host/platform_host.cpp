@@ -291,6 +291,8 @@ import_bo(import_bo_arg& bo_arg) const
   bo_arg.boinfo.type = AMDXDNA_BO_SHARE;
   bo_arg.boinfo.size = lseek(bo_arg.fd, 0, SEEK_END);
   lseek(bo_arg.fd, 0, SEEK_SET);
+
+  save_bo_info(carg.handle, bo_arg.boinfo);
 }
 
 void

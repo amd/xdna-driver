@@ -713,6 +713,8 @@ import_bo(import_bo_arg& bo_arg) const
   bo_arg.boinfo.map_offset = map_offset;
   bo_arg.boinfo.type = AMDXDNA_BO_SHARE;
   bo_arg.boinfo.size = size;
+
+  save_bo_info(gboh, bo_arg.boinfo);
 }
 
 }
