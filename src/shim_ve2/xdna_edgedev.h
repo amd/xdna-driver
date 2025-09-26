@@ -25,6 +25,9 @@ namespace shim_xdna_edge {
 
 class xdna_edgedev {
 public:
+  void bo_handle_ref_inc(uint32_t hdl);
+  bool bo_handle_ref_dec(uint32_t hdl);
+
   void
   ioctl(unsigned long cmd, void* arg) const;
 
@@ -91,6 +94,8 @@ public:
   get_edgedev();
 
 private:
+  std::mutex m_bo_ref_mtx;
+  std::unordered_map<uint32_t,int> m_bo_refcnt;
   std::fstream
   sysfs_open(const std::string& entry, std::string& err,
 		  bool write = false, bool binary = false) const;
