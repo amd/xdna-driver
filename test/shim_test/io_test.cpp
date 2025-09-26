@@ -3,6 +3,7 @@
 
 #include "io.h"
 #include "hwctx.h"
+#include "multi_threads.h"
 #include "speed.h"
 #include "dev_info.h"
 #include "io_param.h"
@@ -497,3 +498,43 @@ TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
   // Run again to check if we can catch newly generated async error
   async_error_io_test_bo_set.run();
 }
+
+/**
+ * This test is to test if t here is deadlock in reading async error ioctl
+ */
+static void TEST_async_error_continue_read(device::id_type id, std::shared_ptr<device>& sdev,
+                                           arg_type& arg)
+{
+  auto devptr = sdev.get();
+  auto must_error = arg[0];
+  xrtErrorTime last_err_timestamp;
+
+  constexpr uint32_t iters = 2;
+  for (uint32_t i = 0; i < iters; i++) {
+    auto buf = device_query<query::xocl_errors>(devptr);
+    if (buf.empty())
+      throw std::runtime_error("async error multithread failed, buffer is null.");
+
+    auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
+    xrtErrorTime err_timestamp;
+    xrtErrorCode err_code;
+    std::tie(err_code, err_timestamp) = ect;
+    if (must_error && !err_code)
+      throw std::runtime_error("async error multithread failed, expect error, but no error.");
+
+    if (i && (err_timestamp != last_err_timestamp)) {
+      std::stringstream ss;
+      ss << "async error continuous read failed, timestamp different: " << err_timestamp
+         << ", " << last_err_timestamp << ".";
+      throw std::runtime_error(ss.str());
+    }
+    last_err_timestamp = err_timestamp;
+  }
+}
+
+void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  multi_thread threads(10, TEST_async_error_continue_read);
+  threads.run_test(id, sdev, arg);
+}
+
