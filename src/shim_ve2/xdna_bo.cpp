@@ -118,7 +118,7 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_map_offset(0)
 {
   alloc_bo();
-
+  m_edev->bo_handle_ref_inc(m_handle);
   xcl_bo_flags xflags{ m_flags };
   if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
@@ -134,6 +134,7 @@ xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   , m_import(ehdl)
 {
   uint32_t boh = shim_xdna_edge::xdna_bo::import_drm_bo(m_import, &m_type, &m_aligned_size);
+  m_edev->bo_handle_ref_inc(boh);
   shim_xdna_edge::xdna_bo::get_drm_bo_info(boh);
 }
 
@@ -161,8 +162,13 @@ xdna_bo::
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
     detach_from_ctx(xflags.use);
 
-  drm_gem_close close_bo = {m_handle, 0};
-  m_edev->ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
+  if (m_handle) {
+    bool last = m_edev->bo_handle_ref_dec(m_handle);
+    if (last) {
+      drm_gem_close close_bo{ m_handle, 0 };
+      m_edev->ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
+    }
+  }
 }
 
 void
