@@ -329,6 +329,25 @@ munmap(void* addr, size_t len) const
 {
   ::munmap(addr, len);
 }
+void xdna_edgedev::bo_handle_ref_inc(uint32_t hdl)
+{
+  if (!hdl) return;
+  std::lock_guard<std::mutex> lk(m_bo_ref_mtx);
+  m_bo_refcnt[hdl]++;          // insert or increment
+}
 
+bool xdna_edgedev::bo_handle_ref_dec(uint32_t hdl)
+{
+  if (!hdl) return true;
+  std::lock_guard<std::mutex> lk(m_bo_ref_mtx);
+  auto it = m_bo_refcnt.find(hdl);
+  if (it == m_bo_refcnt.end())
+    return true;
+  if (--it->second == 0) {
+    m_bo_refcnt.erase(it);
+    return true;
+  }
+  return false;
+}
 } // namespace shim_xdna_edge
 
