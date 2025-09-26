@@ -1224,8 +1224,14 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 
 	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*r), DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl)) {
-		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
+		XDNA_WARN(xdna, "Failed to allocate memory for app health");
 		return PTR_ERR(dma_hdl);
+	}
+
+	r = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(r)) {
+		XDNA_WARN(xdna, "Failed to get CPU address for app health");
+		return PTR_ERR(r);
 	}
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
