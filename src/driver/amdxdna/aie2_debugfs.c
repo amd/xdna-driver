@@ -466,11 +466,18 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 		goto free_buf;
 	}
 
+	buff = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(buff)) {
+		XDNA_ERR(xdna, "Failed to get CPU address for telemetry buffer");
+		ret = PTR_ERR(buff);
+		goto free_buf;
+	}
+
 	seq_write(m, buff, size);
 
 free_buf:
 	amdxdna_mgmt_buff_free(dma_hdl);
-	return 0;
+	return ret;
 }
 
 static int aie2_telemetry_disabled_show(struct seq_file *m, void *unused)
@@ -523,25 +530,29 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct app_health_report *report;
-	const size_t size = 0x2000;
-	void *buff;
 	int ret;
 
-	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*report), DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl))
 		return PTR_ERR(dma_hdl);
 
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
 	/* Just for debug, always check context id 1 */
-	ret = aie2_get_app_health(ndev, dma_hdl, 1, size);
+	ret = aie2_get_app_health(ndev, dma_hdl, 1, sizeof(*report));
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed ret %d", ret);
 		goto free_buf;
 	}
 
-	report = buff;
+	report = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(report)) {
+		XDNA_ERR(xdna, "Failed to get CPU address for app health");
+		ret = PTR_ERR(report);
+		goto free_buf;
+	}
+
 	seq_printf(m, "version    %d.%d\n", report->major, report->minor);
 	seq_printf(m, "size       %d\n", report->size);
 	seq_printf(m, "context_id %d\n", report->context_id);
@@ -550,7 +561,7 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 
 free_buf:
 	amdxdna_mgmt_buff_free(dma_hdl);
-	return 0;
+	return ret;
 }
 
 AIE2_DBGFS_FOPS(get_app_health, aie2_get_app_health_show, NULL);

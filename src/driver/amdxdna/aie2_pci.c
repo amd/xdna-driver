@@ -1016,19 +1016,25 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 		return PTR_ERR(dma_hdl);
 
 	buff = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(buff)) {
+		XDNA_ERR(xdna, "Failed to get CPU address for telemetry buffer");
+		ret = PTR_ERR(buff);
+		goto free_mbuf;
+	}
+
 	memset(buff, 0, size);
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 
 	ret = aie2_query_aie_telemetry(xdna->dev_handle, dma_hdl, header.type, size, &ver);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
-		goto free_buf;
+		goto free_mbuf;
 	}
 
 	tmp = kzalloc(offset, GFP_KERNEL);
 	if (!tmp) {
 		ret = -ENOMEM;
-		goto free_buf;
+		goto free_kbuf;
 	}
 
 	tmp->map_num_elements = header.map_num_elements;
@@ -1049,14 +1055,15 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), tmp, offset)) {
 		ret = -EFAULT;
-		goto free_buf;
+		goto free_kbuf;
 	}
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer + offset), buff, size))
 		ret = -EFAULT;
 
-free_buf:
+free_kbuf:
 	kfree(tmp);
+free_mbuf:
 	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
 }
@@ -1224,14 +1231,15 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 
 	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*r), DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl)) {
-		XDNA_WARN(xdna, "Failed to allocate memory for app health");
+		XDNA_ERR(xdna, "Failed to allocate memory for app health");
 		return PTR_ERR(dma_hdl);
 	}
 
 	r = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
 	if (IS_ERR(r)) {
-		XDNA_WARN(xdna, "Failed to get CPU address for app health");
-		return PTR_ERR(r);
+		XDNA_ERR(xdna, "Failed to get CPU address for app health");
+		ret = PTR_ERR(r);
+		goto exit;
 	}
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
@@ -1316,6 +1324,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 		ret = -EINVAL;
 	}
 
+exit:
 	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
 }
