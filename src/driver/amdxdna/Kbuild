@@ -27,10 +27,11 @@ amdxdna-y := \
 	amdxdna_tdr.o \
 	amdxdna_ubuf.o \
 	amdxdna_carvedout_buf.o \
-	amdxdna_error.o
+	amdxdna_error.o \
+	amdxdna_gem.o \
+	amdxdna_cma.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
-	amdxdna_gem.o \
 	aie2_smu.o \
 	aie2_psp.o \
 	aie2_ctx.o \
@@ -47,11 +48,9 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	npu4_regs.o \
 	npu5_regs.o \
 	npu6_regs.o \
-	amdxdna_pci_drv.o \
-	amdxdna_cma.o
+	amdxdna_pci_drv.o
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
-	amdxdna_gem_of.o \
 	ve2_of.o \
 	ve2_regs.o \
 	amdxdna_of_drv.o \

@@ -4,9 +4,10 @@
  */
 #include <drm/drm_cache.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma-buf.h>
 
 #include "amdxdna_ctx.h"
-#include "amdxdna_gem_of.h"
+#include "amdxdna_gem.h"
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
@@ -891,11 +892,12 @@ static void ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeou
 		nhwctx->hwctx_config[hwctx->start_col + col].opcode_timeout_config = op_timeout;
 }
 
-int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u32 size)
+int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_gem_obj *abo, *mdata_abo;
+	struct amdxdna_cmabuf_priv *cmabuf;
 	struct fw_buffer_metadata *mdata;
 	u32 prev_buf_sz = 0;
 	u32 op_timeout;
@@ -906,20 +908,21 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
-		mdata_abo = amdxdna_gem_get_obj(client, val, AMDXDNA_BO_DEV);
-		if (!mdata_abo || !mdata_abo->mem.kva) {
-			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", val, type);
+		mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_SHARE);
+		if (!mdata_abo || !mdata_abo->dma_buf) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
 			return -EINVAL;
 		}
-		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+		cmabuf = mdata_abo->dma_buf->priv;
+		mdata = (struct fw_buffer_metadata *)(cmabuf->cpu_addr);
 		if (!mdata) {
-			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", val, type);
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
 		}
 
-		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_DEV);
-		if (!abo || !abo->mem.kva) {
+		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_SHARE);
+		if (!abo) {
 			XDNA_ERR(xdna, "Get bo %lld failed for type %d", mdata->bo_handle, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
@@ -949,14 +952,15 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		break;
 
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
-		mdata_abo = amdxdna_gem_get_obj(client, val, AMDXDNA_BO_DEV);
-		if (!mdata_abo || !mdata_abo->mem.kva) {
-			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", val, type);
+		mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_SHARE);
+		if (!mdata_abo || !mdata_abo->dma_buf) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
 			return -EINVAL;
 		}
-		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+		cmabuf = mdata_abo->dma_buf->priv;
+		mdata = (struct fw_buffer_metadata *)(cmabuf->cpu_addr);
 		if (!mdata) {
-			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", val, type);
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
 		}
@@ -976,7 +980,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		break;
 
 	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
-		if (copy_from_user(&op_timeout, (u32 __user *)(uintptr_t)val, sizeof(u32))) {
+		if (copy_from_user(&op_timeout, (u32 __user *)(uintptr_t)mdata_hdl, sizeof(u32))) {
 			XDNA_ERR(xdna, "hwctx config req %d failed", type);
 			return -EFAULT;
 		}

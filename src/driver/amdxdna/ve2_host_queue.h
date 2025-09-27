@@ -117,7 +117,7 @@ struct ve2_hsa_queue {
 	struct mutex			hq_lock;
 };
 
-//handshake
+/* handshake */
 #define ALIVE_MAGIC 0x404C5645
 struct handshake {
 	u32 mpaie_alive; //0
