@@ -32,6 +32,7 @@ unsigned s_rounds = 128;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
 unsigned threads = 2;
+unsigned timeout_ms = 600000;
 std::vector<unsigned> exec_list;
 std::string dpu = "nop";
 
@@ -58,6 +59,7 @@ usage(const std::string& prog)
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
   std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test1 -e test2 ...]\n";
+  std::cout << "\t" << "-w" << ": timeout in seconds (default 600 sec, some simnow server are slow)\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
   std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
   std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
@@ -311,9 +313,16 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
     init_umq_ofm_bo(bo_ofm);
 
     run.start();
-    auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
-    if (state == ERT_CMD_STATE_TIMEOUT)
+    auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+    if (state == ERT_CMD_STATE_TIMEOUT) 
+    {
+      try {
+        check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
+      } catch (const std::exception& ex) {
+        std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+      }
       throw std::runtime_error(std::string("exec buf timed out."));
+    }
     if (state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -335,7 +344,7 @@ TEST_xrt_umq_memtiles(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -364,7 +373,7 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -385,7 +394,7 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -405,7 +414,7 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -439,9 +448,20 @@ TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    // Check result
+    auto ofm_mapped = bo_ofm.map();
+    if (ofm_mapped[0] != ifm_mapped[0]) {
+      std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
+      std::cout << "exec buf timed out ofm comparison result mis-matched" << std::endl;
+    }
+    else
+      std::cout << "exec buf timed out ofm comparison result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -482,9 +502,20 @@ TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    // Check result
+    auto ofm_mapped = bo_ofm.map();
+    if (ofm_mapped[0] != ifm_mapped[0]) {
+      std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
+      std::cout << "exec buf timed out ofm comparison result mis-matched" << std::endl;
+    }
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -536,9 +567,16 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    try {
+      check_umq_resnet50_result(bo_ofm.map(), ofm_path);
+    } catch (const std::exception& ex) {
+      std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+    }
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -730,9 +768,16 @@ TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    try {
+      check_umq_multi_layer_result(bo_ifm.map(), bo_wts.map(), bo_wts2.map(), bo_ofm.map());
+    } catch (const std::exception& ex) {
+      std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+    }
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -780,9 +825,26 @@ TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    // Check result
+    auto ofm_mapped = bo_ofm.map();
+    int err = 0;
+    for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+      if (ofm_mapped[i] != core_equivalence[i]) {
+        std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << core_equivalence[i] << std::endl;
+        err++;
+      }
+    }
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -842,9 +904,25 @@ TEST_xrt_umq_cascade_4ker_2lay(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    auto ofm_mapped = bo_ofm.map();
+    int err = 0;
+    for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+      if (ofm_mapped[i] != core_equivalence[i]) {
+        std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << core_equivalence[i] << std::endl;
+        err++;
+      }
+    }
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -913,9 +991,25 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    auto ofm_mapped = bo_ofm.map();
+    int err = 0;
+    for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+      if (ofm_mapped[i] != parallel_branches[i]) {
+        std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << parallel_branches[i] << std::endl;
+        err++;
+      }
+    }
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -960,7 +1054,7 @@ TEST_xrt_stress_run(int device_index, arg_type& arg)
   }
 
   for (int i = 0; i < round; i++) {
-    auto state = run_handles[i].wait(60000 * round /* give 1 minute per round */);
+    auto state = run_handles[i].wait(timeout_ms * round /* give 1 minute per round */);
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
     if (state != ERT_CMD_STATE_COMPLETED)
@@ -992,7 +1086,7 @@ TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
     auto run = xrt::run(kernel);
 
     run.start();
-    auto state = run.wait(60000 * round /* give 1 minute per round */);
+    auto state = run.wait(timeout_ms * round /* give 2 sec per round, silicon */);
 
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
@@ -1108,7 +1202,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:w:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -1159,6 +1253,16 @@ main(int argc, char **argv)
           exec_list.push_back(val);
 	  break;
 	}
+  case 'w': {
+    val = std::stoi(optarg);
+    if (val <= 0) {
+        std::cout << "Timeout should be greater than 0 seconds" << std::endl;
+        return 1;
+    }
+    timeout_ms = val * 1000; // Convert seconds to milliseconds
+    std::cout << "Using timeout: " << val << " seconds (" << timeout_ms << " ms)" << std::endl;
+    break;
+  }
 	case 'x': {
           elfpath = local_path("npu3_workspace/") + optarg + ".elf";
           if (!elfpath.empty()) {
