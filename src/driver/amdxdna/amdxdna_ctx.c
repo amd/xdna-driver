@@ -145,6 +145,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	XDNA_DBG(xdna, "PID %d create context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
+
 	return 0;
 
 free_name:
