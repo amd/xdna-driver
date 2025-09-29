@@ -270,7 +270,7 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 
 	if (args->buffer_size < sizeof(version))
 		return -EINVAL;
-	
+
 	if (copy_to_user((u64_to_user_ptr(args->buffer)), &version, sizeof(version)))
 		return -EFAULT;
 
