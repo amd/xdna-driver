@@ -168,19 +168,19 @@ struct handshake {
 	}
 	dbg_buf;
 	u32 reserved1[14]; //make sure vm (below) starts at offset 0xa0
-	volatile struct { /* Hardware sync required */
+	struct { /* Hardware sync required */
 		u32 fw_state;
 		u32 abs_page_index; //absolute index of page where current control code are in
 		u32 ppc; // previous pc (relative to current page) drives current_job_context to NULL
 	}
 	vm;
-	volatile struct { /* Hardware sync required */
+	struct { /* Hardware sync required */
 		u32 ear; //exception address
 		u32 esr; //exception status
 		u32 pc; //exception pc
 	}
 	exception;
-	volatile struct { /* Hardware sync required */
+	struct { /* Hardware sync required */
 		u32 c_job_readiness_checked; // number of checks whether there are jobs ready
 		u32 c_opcode; // number of opcode run
 		u32 c_job_launched;
