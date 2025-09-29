@@ -96,11 +96,6 @@ static int ve2_tile_data_reg_write(struct amdxdna_client *client,
 	u32 rel_col;
 	int ret = 0;
 
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
-
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy request from user");
 		return -EFAULT;
@@ -132,11 +127,6 @@ static int ve2_tile_data_mem_write(struct amdxdna_client *client,
 	void *local_buf = NULL;
 	u32 rel_col;
 	int ret = 0;
-
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
 
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy aie_mem info request from user");
@@ -180,12 +170,7 @@ static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_
 	struct amdxdna_drm_aie_reg info;
 	struct device *aie_dev;
 	u32 rel_col;
-	int ret = 0;
-
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
+	int ret;
 
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy request from user");
@@ -214,10 +199,10 @@ static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_
 
 	} else if (copy_to_user(u64_to_user_ptr(args->buffer), &info, sizeof(info))) {
 		XDNA_ERR(xdev, "Error: unable to copy memory to userptr\n");
-		ret = -EFAULT;
+		return -EFAULT;
 	}
 
-	return ret > 0 ? 0 : ret;
+	return 0;
 }
 
 static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
@@ -227,12 +212,7 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 	struct device *aie_dev;
 	void *local_buf = NULL;
 	u32 rel_col;
-	int ret = 0;
-
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdev, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
+	int ret;
 
 	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
 		XDNA_ERR(xdev, "Failed to copy request from user");
@@ -254,6 +234,10 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 
 	ret = ve2_partition_read(aie_dev, rel_col, info.row, info.addr,
 				 info.size, local_buf);
+	if (ret < 0) {
+		XDNA_ERR(xdev, "Error in AIE Data mem read operation, err: %d\n", ret);
+		return ret;
+	}
 
 	if (copy_to_user(u64_to_user_ptr(info.buf_p), local_buf, info.size)) {
 		XDNA_ERR(xdev, "Error: unable to copy memory to userptr\n");
@@ -263,10 +247,7 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 
 	kfree(local_buf);
 
-	if (ret < 0)
-		XDNA_ERR(xdev, "Error in AIE Data mem read operation, err: %d\n", ret);
-
-	return ret > 0 ? 0 : ret;
+	return 0;
 }
 
 static int ve2_get_firmware_version(struct amdxdna_client *client,
@@ -289,6 +270,7 @@ static int ve2_get_firmware_version(struct amdxdna_client *client,
 
 	if (args->buffer_size < sizeof(version))
 		return -EINVAL;
+	
 	if (copy_to_user((u64_to_user_ptr(args->buffer)), &version, sizeof(version)))
 		return -EFAULT;
 
@@ -301,17 +283,14 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 	struct amdxdna_drm_query_aie_metadata *meta;
 	int ret = 0;
 
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
-	}
-	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
+	meta = kmalloc(sizeof(*meta), GFP_KERNEL);
 	if (!meta)
 		return -ENOMEM;
 
 	meta->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
 	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, args->buffer_size))
 		ret = -EFAULT;
+
 	kfree(meta);
 	return ret;
 }
