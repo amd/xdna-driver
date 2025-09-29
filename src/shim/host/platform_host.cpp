@@ -265,20 +265,9 @@ import_bo(import_bo_arg& bo_arg) const
   carg.fd = bo_arg.fd;
   ioctl(dev_fd(), DRM_IOCTL_PRIME_FD_TO_HANDLE, &carg);
 
-  bo_info info;
-  auto bo_exist = true;
-  try {
-    load_bo_info(carg.handle, info);
-  } catch (const xrt_core::system_error& e) {
-    if (e.get_code() != ENOENT)
-      throw;
-    bo_exist = false;
-  }
-  if (bo_exist) {
-    // Found existing BO, just use the info.
-    bo_arg.boinfo = info;
+  // Found existing BO, just use the saved info.
+  if (load_bo_info(carg.handle, bo_arg.boinfo))
     return;
-  }
 
   amdxdna_drm_get_bo_info iarg = {};
   iarg.handle = carg.handle;

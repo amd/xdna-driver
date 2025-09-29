@@ -258,6 +258,9 @@ save_bo_info(uint32_t key, bo_info& info) const
 {
   const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
 
+  if (key == AMDXDNA_INVALID_BO_HANDLE)
+    return;
+
   if (m_drm_bo_map.find(key) != m_drm_bo_map.end())
     shim_err(EEXIST, "BO info for %d already exists", key);
   m_drm_bo_map[key] = { 1, info };
@@ -269,6 +272,9 @@ delete_bo_info(uint32_t key) const
 {
   const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
   bool erased;
+
+  if (key == AMDXDNA_INVALID_BO_HANDLE)
+    return true;
 
   auto it = m_drm_bo_map.find(key);
   if (it == m_drm_bo_map.end())
@@ -285,7 +291,7 @@ delete_bo_info(uint32_t key) const
   return erased;
 }
 
-void
+bool
 platform_drv::
 load_bo_info(uint32_t key, bo_info& info) const
 {
@@ -293,10 +299,11 @@ load_bo_info(uint32_t key, bo_info& info) const
 
   auto it = m_drm_bo_map.find(key);
   if (it == m_drm_bo_map.end())
-    shim_err(ENOENT, "BO info for %d not found", key);
+    return false;
 
   it->second.first++;
   info = it->second.second;
+  return true;
 }
 
 }

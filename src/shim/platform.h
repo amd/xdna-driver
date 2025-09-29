@@ -212,7 +212,7 @@ protected:
   bool
   delete_bo_info(uint32_t key) const;
 
-  void
+  bool
   load_bo_info(uint32_t key, bo_info& info) const;
 
 private:
