@@ -66,7 +66,7 @@ private:
   host_bo_free(uint32_t host_hdl) const;
 
   void
-  create_bo(create_bo_arg& arg) const override;
+  create_bo(bo_info& arg) const override;
 
   void
   destroy_bo(destroy_bo_arg& arg) const override;
