@@ -1329,19 +1329,45 @@ exit:
 	return ret;
 }
 
-static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+static int aie2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_async_error tmp;
+	void __user *buf;
+	int ret;
+
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, sizeof(tmp))) {
+		XDNA_ERR(xdna, "Failed to access assync error buffer, 0x%lx",
+			 sizeof(tmp));
+		return -EFAULT;
+	}
+
+	ret = amdxdna_error_get_last_async(xdna, &xdna->dev_handle->async_errs_cache, 1, &tmp);
+	if (ret < 0)
+		goto exit;
+	/* only return last async error */
+	args->num_element = ret;
+	if (ret > 0) {
+		args->element_size = sizeof(tmp);
+		if (copy_to_user(buf, &tmp, sizeof(tmp))) {
+			ret = -EFAULT;
+			goto exit;
+		}
+	}
+
+	ret = 0;
+
+exit:
+	return ret;
+}
+
+static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_drm_hwctx_entry __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_drm_hwctx_entry *tmp;
 	int ctx_limit, ctx_cnt, min, i, ret;
 	u32 buf_size;
-
-	ret = amdxdna_pm_resume_get(xdna);
-	if (ret)
-		return ret;
-
-	mutex_lock(&xdna->dev_lock);
 
 	buf_size = args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
@@ -1354,6 +1380,8 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
+
+	mutex_lock(&xdna->dev_lock);
 
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
@@ -1374,6 +1402,7 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 			goto exit;
 
 		break;
+
 	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
 		struct amdxdna_drm_hwctx_entry input;
 
@@ -1396,13 +1425,6 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 			goto exit;
 
 		break;
-	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
-		ret = aie2_error_get_last_async(xdna, args->num_element, tmp);
-		if (ret < 0)
-			goto exit;
-		ctx_cnt = ret;
-
-		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -1418,13 +1440,34 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	}
 	args->num_element = ctx_cnt;
 	args->element_size = min;
-
 exit:
-	kfree(tmp);
 	mutex_unlock(&xdna->dev_lock);
+	kfree(tmp);
+
+	return ret;
+}
+
+static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret;
+
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
+	switch (args->param) {
+	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		ret = aie2_get_array_async_error(xdna, args);
+		break;
+	default:
+		ret = aie2_get_array_hwctx(client, args);
+		break;
+	}
 
 	amdxdna_pm_suspend_put(xdna);
-	XDNA_DBG(xdna, "Got param %d", args->param);
+	if (!ret)
+		XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
 }
