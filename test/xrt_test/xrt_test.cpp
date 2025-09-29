@@ -241,6 +241,32 @@ void check_umq_resnet50_result(int *ofm, const std::string& filename)
 
 template <typename TEST_BO>
 void
+dump_ofm_to_file(TEST_BO& ofm_bo)
+{
+  auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+  
+  std::string filename = "ofm_dump_" + std::to_string(timestamp) + ".txt";
+  
+  std::ofstream outfile(filename);
+  if (!outfile) {
+    std::cout << "Failed to create dump file: " << filename << std::endl;
+    return;
+  }
+  
+  auto ofm_mapped = ofm_bo.map();
+  size_t ofm_size = ofm_bo.size() / sizeof(uint32_t);
+  
+  for (size_t i = 0; i < ofm_size; i++) {
+    outfile << std::hex << "0x" << ofm_mapped[i] << std::endl;
+  }
+  
+  outfile.close();
+  std::cout << "OFM data dumped to: " << filename << " (" << ofm_size << " words)" << std::endl;
+}
+
+template <typename TEST_BO>
+void
 read_bin_file(std::string& filename, TEST_BO& test_bo)
 {
   uint32_t value;
@@ -316,6 +342,7 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
     auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
     if (state == ERT_CMD_STATE_TIMEOUT) 
     {
+      dump_ofm_to_file<xrt_bo>(bo_ofm);
       try {
         check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
       } catch (const std::exception& ex) {
@@ -451,6 +478,7 @@ TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
   auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
     // Check result
     auto ofm_mapped = bo_ofm.map();
     if (ofm_mapped[0] != ifm_mapped[0]) {
@@ -505,6 +533,7 @@ TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
   auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
     // Check result
     auto ofm_mapped = bo_ofm.map();
     if (ofm_mapped[0] != ifm_mapped[0]) {
@@ -570,6 +599,7 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
     try {
       check_umq_resnet50_result(bo_ofm.map(), ofm_path);
     } catch (const std::exception& ex) {
@@ -634,7 +664,37 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
   run.start();
 
   // wait forever for this test, it takes up to 10 hours on simulator
-  run.wait2();
+  // run.wait2();
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    auto ofm = bo_ofm.map();
+    std::ifstream ofm_ifs;
+    ofm_ifs.open(ofm_path);
+    if (!ofm_ifs.is_open()) {
+      std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
+    }
+    int err = 0;
+    for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+      uint32_t gld;
+      ofm_ifs >> std::hex >> gld;
+      if (gld != ofm[i]) {
+        std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
+        err++;
+      }
+    }
+    ofm_ifs.close();
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
+    throw std::runtime_error(std::string("exec buf timed out."));
+  }
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
   auto ofm = bo_ofm.map();
   std::ifstream ofm_ifs;
@@ -707,7 +767,37 @@ TEST_xrt_umq_single_col_resnet50_multi_layer(int device_index, arg_type& arg)
   run.start();
 
   // wait forever for this test, it takes up to 10 hours on simulator
-  run.wait2();
+  // run.wait2();
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    auto ofm = bo_ofm.map();
+    std::ifstream ofm_ifs;
+    ofm_ifs.open(ofm_path);
+    if (!ofm_ifs.is_open()) {
+      std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
+    }
+    int err = 0;
+    for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+      uint32_t gld;
+      ofm_ifs >> std::hex >> gld;
+      if (gld != ofm[i]) {
+        std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
+        err++;
+      }
+    }
+    ofm_ifs.close();
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
+    throw std::runtime_error(std::string("exec buf timed out."));
+  }
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
   auto ofm = bo_ofm.map();
   std::ifstream ofm_ifs;
@@ -771,6 +861,7 @@ TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
   auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
     try {
       check_umq_multi_layer_result(bo_ifm.map(), bo_wts.map(), bo_wts2.map(), bo_ofm.map());
     } catch (const std::exception& ex) {
@@ -828,6 +919,7 @@ TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
   auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
     // Check result
     auto ofm_mapped = bo_ofm.map();
     int err = 0;
@@ -907,6 +999,7 @@ TEST_xrt_umq_cascade_4ker_2lay(int device_index, arg_type& arg)
   auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
     auto ofm_mapped = bo_ofm.map();
     int err = 0;
     for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
@@ -994,6 +1087,7 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
   auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
     auto ofm_mapped = bo_ofm.map();
     int err = 0;
     for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
