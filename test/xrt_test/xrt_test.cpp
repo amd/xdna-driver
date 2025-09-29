@@ -239,6 +239,38 @@ void check_umq_resnet50_result(int *ofm, const std::string& filename)
     std::cout << "result matched" << std::endl;
 }
 
+void check_umq_yolov3_result(int *ofm, const std::string& filename)
+{
+uint32_t value;
+  int err = 0;
+  int i = 0;
+
+  std::ifstream infile(filename, std::ios::binary);
+  if (!infile)
+    throw std::runtime_error("Unable to open .bin file");
+
+  while (infile.read(reinterpret_cast<char*>(&value), sizeof(value))) {
+    // LSB tolerance check: allow ±1 difference for each byte
+    bool
+    tolerance_ok = (abs((int)(value & 0xFF) - (int)(ofm[i] & 0xFF)) <= 1) &&
+                   (abs((int)((value >> 8) & 0xFF) - (int)((ofm[i] >> 8) & 0xFF)) <= 1) &&
+                   (abs((int)((value >> 16) & 0xFF) - (int)((ofm[i] >> 16) & 0xFF)) <= 1) &&
+                   (abs((int)((value >> 24) & 0xFF) - (int)((ofm[i] >> 24) & 0xFF)) <= 1);
+
+    if (!tolerance_ok) {
+      std::cout << "error@" << i <<": " << std::hex << "0x" << ofm[i] << ", expecting: 0x" << value << std::dec << std::endl;
+      err++;
+    }
+    i++;
+  }
+  infile.close();
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
 template <typename TEST_BO>
 void
 dump_ofm_to_file(TEST_BO& ofm_bo)
@@ -1123,6 +1155,60 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
     std::cout << "result matched" << std::endl;
 }
 
+void
+TEST_xrt_umq_yolov3(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  std::string ifm_path = local_path("npu3_workspace/ifm_yolov3.bin");
+  std::string param_path = local_path("npu3_workspace/param_yolov3.bin");
+  std::string wgt_path = local_path("npu3_workspace/wgt_yolov3.bin");
+  std::string ofm_path = local_path("npu3_workspace/ofm_yolov3.bin");
+
+  const uint32_t IFM_BYTE_SIZE = std::filesystem::file_size(ifm_path);
+  const uint32_t WTS_BYTE_SIZE = std::filesystem::file_size(wgt_path);
+  const uint32_t OFM_BYTE_SIZE = std::filesystem::file_size(ofm_path);
+  const uint32_t PARAM_BYTE_SIZE = std::filesystem::file_size(param_path);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_param{device, PARAM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  read_bin_file<xrt_bo>(ifm_path, bo_ifm);
+  read_bin_file<xrt_bo>(wgt_path, bo_wts);
+  read_bin_file<xrt_bo>(ofm_path, bo_ofm);
+  read_bin_file<xrt_bo>(param_path, bo_param);
+
+  xrt::elf elf{local_path("npu3_workspace/yolov3.elf")};
+
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:yolov3"};
+  xrt::run run{kernel};
+
+  run.set_arg(0, bo_ofm.get());
+  run.set_arg(1, bo_ifm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_param.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    try {
+      check_umq_yolov3_result(bo_ofm.map(), ofm_path);
+    } catch (const std::exception& ex) {
+      std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+    }
+    throw std::runtime_error(std::string("exec buf timed out."));
+  }
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  check_umq_yolov3_result(bo_ofm.map(), ofm_path);
+}
+
 /* run.start n requests, then run.wait all of them */
 void
 TEST_xrt_stress_run(int device_index, arg_type& arg)
@@ -1206,7 +1292,8 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
-  test_case{ "npu3 xrt single col resnet50 multi layer", TEST_xrt_umq_single_col_resnet50_multi_layer, {} }
+  test_case{ "npu3 xrt single col resnet50 multi layer", TEST_xrt_umq_single_col_resnet50_multi_layer, {} },
+  test_case{ "npu3 xrt yolov3", TEST_xrt_umq_yolov3, {} }
 };
 
 /* test n threads of 1 or more tests */
