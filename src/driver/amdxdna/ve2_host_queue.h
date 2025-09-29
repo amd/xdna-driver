@@ -171,7 +171,7 @@ struct handshake {
 	struct { /* Hardware sync required */
 		u32 fw_state;
 		u32 abs_page_index; //absolute index of page where current control code are in
-		u32 ppc; // previous pc (relative to current page) drives current_job_context to NULL
+		u32 ppc; // previous pc(relative to current page) drives current_job_context to NULL
 	}
 	vm;
 	struct { /* Hardware sync required */
