@@ -32,6 +32,7 @@ unsigned s_rounds = 128;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
 unsigned threads = 2;
+unsigned timeout_ms = 600000;
 std::vector<unsigned> exec_list;
 std::string dpu = "nop";
 
@@ -58,6 +59,7 @@ usage(const std::string& prog)
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
   std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test1 -e test2 ...]\n";
+  std::cout << "\t" << "-w" << ": timeout in seconds (default 600 sec, some simnow server are slow)\n";
   std::cout << "\t" << "-h" << ": print this help message\n\n";
   std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
   std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
@@ -237,6 +239,64 @@ void check_umq_resnet50_result(int *ofm, const std::string& filename)
     std::cout << "result matched" << std::endl;
 }
 
+void check_umq_yolov3_result(int *ofm, const std::string& filename)
+{
+uint32_t value;
+  int err = 0;
+  int i = 0;
+
+  std::ifstream infile(filename, std::ios::binary);
+  if (!infile)
+    throw std::runtime_error("Unable to open .bin file");
+
+  while (infile.read(reinterpret_cast<char*>(&value), sizeof(value))) {
+    // LSB tolerance check: allow ±1 difference for each byte
+    bool
+    tolerance_ok = (abs((int)(value & 0xFF) - (int)(ofm[i] & 0xFF)) <= 1) &&
+                   (abs((int)((value >> 8) & 0xFF) - (int)((ofm[i] >> 8) & 0xFF)) <= 1) &&
+                   (abs((int)((value >> 16) & 0xFF) - (int)((ofm[i] >> 16) & 0xFF)) <= 1) &&
+                   (abs((int)((value >> 24) & 0xFF) - (int)((ofm[i] >> 24) & 0xFF)) <= 1);
+
+    if (!tolerance_ok) {
+      std::cout << "error@" << i <<": " << std::hex << "0x" << ofm[i] << ", expecting: 0x" << value << std::dec << std::endl;
+      err++;
+    }
+    i++;
+  }
+  infile.close();
+
+  if (err)
+    throw std::runtime_error("result mis-match");
+  else
+    std::cout << "result matched" << std::endl;
+}
+
+template <typename TEST_BO>
+void
+dump_ofm_to_file(TEST_BO& ofm_bo)
+{
+  auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+  
+  std::string filename = "ofm_dump_" + std::to_string(timestamp) + ".txt";
+  
+  std::ofstream outfile(filename);
+  if (!outfile) {
+    std::cout << "Failed to create dump file: " << filename << std::endl;
+    return;
+  }
+  
+  auto ofm_mapped = ofm_bo.map();
+  size_t ofm_size = ofm_bo.size() / sizeof(uint32_t);
+  
+  for (size_t i = 0; i < ofm_size; i++) {
+    outfile << std::hex << "0x" << ofm_mapped[i] << std::endl;
+  }
+  
+  outfile.close();
+  std::cout << "OFM data dumped to: " << filename << " (" << ofm_size << " words)" << std::endl;
+}
+
 template <typename TEST_BO>
 void
 read_bin_file(std::string& filename, TEST_BO& test_bo)
@@ -311,9 +371,17 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
     init_umq_ofm_bo(bo_ofm);
 
     run.start();
-    auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
-    if (state == ERT_CMD_STATE_TIMEOUT)
+    auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+    if (state == ERT_CMD_STATE_TIMEOUT) 
+    {
+      dump_ofm_to_file<xrt_bo>(bo_ofm);
+      try {
+        check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
+      } catch (const std::exception& ex) {
+        std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+      }
       throw std::runtime_error(std::string("exec buf timed out."));
+    }
     if (state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -335,7 +403,7 @@ TEST_xrt_umq_memtiles(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -364,7 +432,7 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -385,7 +453,7 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -405,7 +473,7 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
@@ -439,9 +507,21 @@ TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    // Check result
+    auto ofm_mapped = bo_ofm.map();
+    if (ofm_mapped[0] != ifm_mapped[0]) {
+      std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
+      std::cout << "exec buf timed out ofm comparison result mis-matched" << std::endl;
+    }
+    else
+      std::cout << "exec buf timed out ofm comparison result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -482,9 +562,21 @@ TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    // Check result
+    auto ofm_mapped = bo_ofm.map();
+    if (ofm_mapped[0] != ifm_mapped[0]) {
+      std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
+      std::cout << "exec buf timed out ofm comparison result mis-matched" << std::endl;
+    }
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -536,9 +628,17 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    try {
+      check_umq_resnet50_result(bo_ofm.map(), ofm_path);
+    } catch (const std::exception& ex) {
+      std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+    }
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -596,7 +696,37 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
   run.start();
 
   // wait forever for this test, it takes up to 10 hours on simulator
-  run.wait2();
+  // run.wait2();
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    auto ofm = bo_ofm.map();
+    std::ifstream ofm_ifs;
+    ofm_ifs.open(ofm_path);
+    if (!ofm_ifs.is_open()) {
+      std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
+    }
+    int err = 0;
+    for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+      uint32_t gld;
+      ofm_ifs >> std::hex >> gld;
+      if (gld != ofm[i]) {
+        std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
+        err++;
+      }
+    }
+    ofm_ifs.close();
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
+    throw std::runtime_error(std::string("exec buf timed out."));
+  }
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
   auto ofm = bo_ofm.map();
   std::ifstream ofm_ifs;
@@ -669,7 +799,37 @@ TEST_xrt_umq_single_col_resnet50_multi_layer(int device_index, arg_type& arg)
   run.start();
 
   // wait forever for this test, it takes up to 10 hours on simulator
-  run.wait2();
+  // run.wait2();
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    auto ofm = bo_ofm.map();
+    std::ifstream ofm_ifs;
+    ofm_ifs.open(ofm_path);
+    if (!ofm_ifs.is_open()) {
+      std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
+    }
+    int err = 0;
+    for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+      uint32_t gld;
+      ofm_ifs >> std::hex >> gld;
+      if (gld != ofm[i]) {
+        std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
+        err++;
+      }
+    }
+    ofm_ifs.close();
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
+    throw std::runtime_error(std::string("exec buf timed out."));
+  }
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
   auto ofm = bo_ofm.map();
   std::ifstream ofm_ifs;
@@ -730,9 +890,17 @@ TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    try {
+      check_umq_multi_layer_result(bo_ifm.map(), bo_wts.map(), bo_wts2.map(), bo_ofm.map());
+    } catch (const std::exception& ex) {
+      std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+    }
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -780,9 +948,27 @@ TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    // Check result
+    auto ofm_mapped = bo_ofm.map();
+    int err = 0;
+    for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+      if (ofm_mapped[i] != core_equivalence[i]) {
+        std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << core_equivalence[i] << std::endl;
+        err++;
+      }
+    }
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -842,9 +1028,26 @@ TEST_xrt_umq_cascade_4ker_2lay(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    auto ofm_mapped = bo_ofm.map();
+    int err = 0;
+    for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+      if (ofm_mapped[i] != core_equivalence[i]) {
+        std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << core_equivalence[i] << std::endl;
+        err++;
+      }
+    }
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -913,9 +1116,26 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
 
   // Send the command to device and wait for it to complete
   run.start();
-  auto state = run.wait(600000 /* 600 sec, some simnow server are slow */);
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
   if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    auto ofm_mapped = bo_ofm.map();
+    int err = 0;
+    for (uint32_t i = 0; i < bo_ofm.size() / sizeof (uint32_t); i++) {
+      if (ofm_mapped[i] != parallel_branches[i]) {
+        std::cout << "error@" << i <<": " << ofm_mapped[i] << ", expecting: " << parallel_branches[i] << std::endl;
+        err++;
+      }
+    }
+
+    if (err)
+      std::cout << "exec buf timed out result mis-matched" << std::endl;
+    else
+      std::cout << "exec buf timed out result matched" << std::endl;
+
     throw std::runtime_error(std::string("exec buf timed out."));
+  }
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
@@ -933,6 +1153,60 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
     throw std::runtime_error("result mis-match");
   else
     std::cout << "result matched" << std::endl;
+}
+
+void
+TEST_xrt_umq_yolov3(int device_index, arg_type& arg)
+{
+  auto device = xrt::device{device_index};
+
+  std::string ifm_path = local_path("npu3_workspace/ifm_yolov3.bin");
+  std::string param_path = local_path("npu3_workspace/param_yolov3.bin");
+  std::string wgt_path = local_path("npu3_workspace/wgt_yolov3.bin");
+  std::string ofm_path = local_path("npu3_workspace/ofm_yolov3.bin");
+
+  const uint32_t IFM_BYTE_SIZE = std::filesystem::file_size(ifm_path);
+  const uint32_t WTS_BYTE_SIZE = std::filesystem::file_size(wgt_path);
+  const uint32_t OFM_BYTE_SIZE = std::filesystem::file_size(ofm_path);
+  const uint32_t PARAM_BYTE_SIZE = std::filesystem::file_size(param_path);
+  xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
+  xrt_bo bo_param{device, PARAM_BYTE_SIZE, xrt::bo::flags::host_only};
+
+  read_bin_file<xrt_bo>(ifm_path, bo_ifm);
+  read_bin_file<xrt_bo>(wgt_path, bo_wts);
+  read_bin_file<xrt_bo>(ofm_path, bo_ofm);
+  read_bin_file<xrt_bo>(param_path, bo_param);
+
+  xrt::elf elf{local_path("npu3_workspace/yolov3.elf")};
+
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:yolov3"};
+  xrt::run run{kernel};
+
+  run.set_arg(0, bo_ofm.get());
+  run.set_arg(1, bo_ifm.get());
+  run.set_arg(2, bo_wts.get());
+  run.set_arg(3, bo_param.get());
+
+  // Send the command to device and wait for it to complete
+  run.start();
+  auto state = run.wait(timeout_ms /* 600 sec, some simnow server are slow */);
+  if (state == ERT_CMD_STATE_TIMEOUT)
+  {
+    dump_ofm_to_file<xrt_bo>(bo_ofm);
+    try {
+      check_umq_yolov3_result(bo_ofm.map(), ofm_path);
+    } catch (const std::exception& ex) {
+      std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
+    }
+    throw std::runtime_error(std::string("exec buf timed out."));
+  }
+  if (state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+
+  check_umq_yolov3_result(bo_ofm.map(), ofm_path);
 }
 
 /* run.start n requests, then run.wait all of them */
@@ -960,7 +1234,7 @@ TEST_xrt_stress_run(int device_index, arg_type& arg)
   }
 
   for (int i = 0; i < round; i++) {
-    auto state = run_handles[i].wait(60000 * round /* give 1 minute per round */);
+    auto state = run_handles[i].wait(timeout_ms * round /* give 1 minute per round */);
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
     if (state != ERT_CMD_STATE_COMPLETED)
@@ -992,7 +1266,7 @@ TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
     auto run = xrt::run(kernel);
 
     run.start();
-    auto state = run.wait(60000 * round /* give 1 minute per round */);
+    auto state = run.wait(timeout_ms * round /* give 2 sec per round, silicon */);
 
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
@@ -1018,7 +1292,8 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
-  test_case{ "npu3 xrt single col resnet50 multi layer", TEST_xrt_umq_single_col_resnet50_multi_layer, {} }
+  test_case{ "npu3 xrt single col resnet50 multi layer", TEST_xrt_umq_single_col_resnet50_multi_layer, {} },
+  test_case{ "npu3 xrt yolov3", TEST_xrt_umq_yolov3, {} }
 };
 
 /* test n threads of 1 or more tests */
@@ -1108,7 +1383,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:w:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -1159,6 +1434,16 @@ main(int argc, char **argv)
           exec_list.push_back(val);
 	  break;
 	}
+  case 'w': {
+    val = std::stoi(optarg);
+    if (val <= 0) {
+        std::cout << "Timeout should be greater than 0 seconds" << std::endl;
+        return 1;
+    }
+    timeout_ms = val * 1000; // Convert seconds to milliseconds
+    std::cout << "Using timeout: " << val << " seconds (" << timeout_ms << " ms)" << std::endl;
+    break;
+  }
 	case 'x': {
           elfpath = local_path("npu3_workspace/") + optarg + ".elf";
           if (!elfpath.empty()) {
