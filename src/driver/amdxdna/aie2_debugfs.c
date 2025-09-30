@@ -610,6 +610,29 @@ static int aie2_dump_fw_log_get(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(dump_fw_log, aie2_dump_fw_log_get, aie2_dump_fw_log_set);
 
+static int aie2_dump_fw_log_buffer_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+
+	if (!ndev->xdna->fw_log || !ndev->xdna->fw_log->enabled) {
+		XDNA_ERR(ndev->xdna, "FW logging is not enabled");
+		return -EINVAL;
+	}
+
+	dma_hdl = ndev->xdna->fw_log->dma_hdl;
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	seq_printf(m, "FW log buffer vaddr: 0x%llx\n",
+		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
+	seq_printf(m, "FW log buffer DMA addr: 0x%llx\n", amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
+	seq_printf(m, "FW log buffer size: 0x%lx\n", dma_hdl->size);
+	seq_hex_dump(m, "[FW LOG BUF]: ", DUMP_PREFIX_OFFSET, 16, 4,
+		     amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), dma_hdl->size, true);
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dump_fw_log_buffer, aie2_dump_fw_log_buffer_get, NULL);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -630,6 +653,7 @@ const struct {
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
 	AIE2_DBGFS_FILE(dump_fw_log, 0600),
+	AIE2_DBGFS_FILE(dump_fw_log_buffer, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)
