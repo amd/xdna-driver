@@ -466,14 +466,14 @@ struct xocl_errors
     if (key != key_type::xocl_errors)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    // Query all contexts
     amdxdna_async_error* data;
-    const uint32_t drv_output = 32 * sizeof(*data);
+    const uint32_t drv_output = sizeof(*data);
     std::vector<char> payload(drv_output);
+    // Only request last async error
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_LAST_ASYNC_ERR,
       .element_size = sizeof(*data),
-      .num_element = 32,
+      .num_element = 1,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
@@ -485,6 +485,9 @@ struct xocl_errors
 
     query::xocl_errors::result_type output(sizeof(xcl_errors));
     xcl_errors *out_xcl_errors = reinterpret_cast<xcl_errors*>(output.data());
+    if (arg.num_element > 1)
+      throw xrt_core::query::exception("Driver returned more than one async error entry");
+
     out_xcl_errors->num_err = arg.num_element;
     for (uint32_t i = 0; i < arg.num_element; i++) {
       out_xcl_errors->errors[i].err_code = data[i].err_code;

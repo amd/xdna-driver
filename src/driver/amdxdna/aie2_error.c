@@ -434,23 +434,3 @@ int aie2_error_async_cache_init(struct amdxdna_dev_hdl *ndev)
 {
 	return amdxdna_error_async_cache_init(&ndev->async_errs_cache);
 }
-
-/**
- * amdxdna_aie2_get_last_async_error - Retrieve the last asynchronous error information.
- * @xdna: Pointer to the xdna structure.
- * @num_errs: in/out, Number of error structures to populate.
- * @errors_ret: async errors information array to return
- *
- * This function obtains the most recent asynchronous error that occurred
- * in the AIE2 subsystem and populates the provided error information structure.
- * It is typically used for error handling and diagnostics in the driver.
- * Today, only one last async error is cached. And thus, this function will only
- * return 1 last async error.
- *
- * Return: 0 on success, negative error code on failure.
- */
-int aie2_error_get_last_async(struct amdxdna_dev *xdna, u32 num_errs, void *errors_ret)
-{
-	return amdxdna_error_get_last_async(xdna, &xdna->dev_handle->async_errs_cache, num_errs,
-										errors_ret);
-}
