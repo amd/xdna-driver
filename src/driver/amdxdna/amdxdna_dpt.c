@@ -10,6 +10,7 @@
 #include <linux/pci.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
+#include <linux/string_helpers.h>
 #include <linux/timer.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
@@ -39,7 +40,7 @@ static bool amdxdna_update_tail(struct amdxdna_dpt *dpt)
 	u64 tail;
 
 	offset = dpt->dma_hdl->size - AMDXDNA_DPT_FOOTER_SIZE;
-	footer = dpt->dma_hdl->vaddr + offset;
+	footer = amdxdna_mgmt_buff_get_cpu_addr(dpt->dma_hdl, offset);
 
 	amdxdna_mgmt_buff_clflush(dpt->dma_hdl, offset, sizeof(*footer));
 
@@ -49,7 +50,7 @@ static bool amdxdna_update_tail(struct amdxdna_dpt *dpt)
 		tail += BIT_ULL(32);
 
 	drm_WARN_ONCE(&dpt->xdna->ddev, tail - dpt->tail > BIT_ULL(31),
-		      "Unexpceted jump in tail pointer. Missed IRQ or bug");
+		      "Unexpected jump in tail pointer. Missed IRQ or bug");
 
 	if (dpt->tail != tail) {
 		WRITE_ONCE(dpt->tail, tail);
@@ -108,7 +109,7 @@ static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
 	u32 offset;
 
 	offset = dpt->dma_hdl->size - AMDXDNA_DPT_FOOTER_SIZE;
-	footer = dpt->dma_hdl->vaddr + offset;
+	footer = amdxdna_mgmt_buff_get_cpu_addr(dpt->dma_hdl, offset);
 
 	amdxdna_mgmt_buff_clflush(dpt->dma_hdl, offset, sizeof(*footer));
 
@@ -269,6 +270,7 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_dpt *log_hdl;
+	char print_size[32];
 	int ret;
 
 	if (!xdna->dev_info->ops->fw_log_init)
@@ -294,6 +296,11 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 		ret = PTR_ERR(dma_hdl);
 		goto kfree;
 	}
+
+	string_get_size(fw_log_size, 1, STRING_UNITS_2, print_size, sizeof(print_size));
+	XDNA_DBG(xdna, "Allocated %s FW log buffer at 0x%p with DMA addr: 0x%llx", print_size,
+		 amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0),
+		 amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
 
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 

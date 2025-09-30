@@ -304,6 +304,9 @@ mailbox_send_msg(struct mailbox_channel *mb_chann, struct mailbox_msg *mb_msg)
 		tail = 0;
 	}
 
+	print_hex_dump_debug("req data: ", DUMP_PREFIX_OFFSET, 16, 4, &mb_msg->pkg,
+			     mb_msg->pkg_size, false);
+
 	write_addr = mb_chann->mb->res.ringbuf_base + start_addr + tail;
 	memcpy_toio(write_addr, &mb_msg->pkg, mb_msg->pkg_size);
 	mailbox_set_tailptr(mb_chann, tail + mb_msg->pkg_size);
@@ -338,7 +341,7 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 		return -EINVAL;
 	}
 
-	MB_DBG(mb_chann, "opcode 0x%x size %d id 0x%x",
+	MB_DBG(mb_chann, "resp opcode 0x%x size %d id 0x%x",
 	       header->opcode, header->total_size, header->id);
 	ret = mb_msg->notify_cb(mb_msg->handle, data, header->total_size);
 	if (unlikely(ret))
@@ -689,7 +692,7 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 	header->id = ret;
 	msg->id = header->id;
 
-	MB_DBG(mb_chann, "opcode 0x%x size %d id 0x%x",
+	MB_DBG(mb_chann, "req opcode 0x%x size %d id 0x%x",
 	       header->opcode, header->total_size, header->id);
 
 	ret = mailbox_send_msg(mb_chann, mb_msg);
