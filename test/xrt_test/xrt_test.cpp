@@ -48,6 +48,27 @@ std::string elfpath;
 bool printing_on;
 bool elf_flow = true;
 
+std::string dolphinPass = R"(
+                                         .--.
+                  _______             .-"  .'
+          .---u"""       """"---._  ."    %
+        .'                        "--.    %
+   __.--'  o                          "".. "
+  (____.                                  ":
+   `----.__                                 ".
+           `----------__                     ".
+                 ".   . ""--.                 ".
+                   ". ". pass ""-.              ".
+                     "-.)        ""-.           ".
+                                     "".         ".
+                                        "".       ".
+                                           "".      ".
+                                              "".    ".
+                        ^~^~^~^~^~^~^~^~^~^~^~^~^"".  "^~^~^~^~^
+                                              ^~^~^~^  ~^~
+                                                   ^~^~^~
+    )";
+
 void
 usage(const std::string& prog)
 {
@@ -752,8 +773,10 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 
   if (err)
     throw std::runtime_error("result mis-match");
-  else
+  else {
+    std::cout << dolphinPass << std::endl;
     std::cout << "result matched" << std::endl;
+  }
 }
 
 void
