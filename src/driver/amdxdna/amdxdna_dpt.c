@@ -298,10 +298,11 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	}
 
 	string_get_size(fw_log_size, 1, STRING_UNITS_2, print_size, sizeof(print_size));
-	XDNA_DBG(xdna, "Allocated %s FW log buffer at 0x%p with DMA addr: 0x%llx", print_size,
-		 amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0),
+	XDNA_DBG(xdna, "Allocated %s FW log buffer at 0x%llx with DMA addr: 0x%llx", print_size,
+		 (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0),
 		 amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
 
+	memset(amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), 0xFF, fw_log_size);
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 
 	strscpy(log_hdl->name, AMDXDNA_DPT_FW_LOG_NAME, sizeof(log_hdl->name));
