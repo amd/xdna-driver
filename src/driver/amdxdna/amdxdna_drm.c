@@ -41,6 +41,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		goto failed;
 	}
 	client->pasid = iommu_sva_get_pasid(client->sva);
+	XDNA_WARN(xdna, "pasid is: %d", client->pasid);
 	if (client->pasid == IOMMU_PASID_INVALID) {
 		XDNA_ERR(xdna, "SVA get pasid failed");
 		ret = -ENODEV;

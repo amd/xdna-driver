@@ -637,7 +637,7 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
 
   read_bin_file<xrt_bo>(ifm_path, bo_ifm);
   read_bin_file<xrt_bo>(wgt_path, bo_wts);
-  read_bin_file<xrt_bo>(ofm_path, bo_ofm);
+  //read_bin_file<xrt_bo>(ofm_path, bo_ofm);
   read_bin_file<xrt_bo>(param_path, bo_param);
 
   auto run = get_xrt_run(device,
