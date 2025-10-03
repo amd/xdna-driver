@@ -17,6 +17,7 @@ extern const struct rt_cfg_ver npu4_rt_cfg_tbl[];
 extern const struct amdxdna_dev_priv npu4_dev_priv;
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
+#define MPNPU_PWAITMODE                0x301003C
 #define MPNPU_PUB_SEC_INTR             0x3010060
 #define MPNPU_PUB_PWRMGMT_INTR         0x3010064
 #define MPNPU_PUB_SCRATCH0             0x301006C
@@ -35,6 +36,7 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 #define MPNPU_PUB_SCRATCH13            0x30100A0
 #define MPNPU_PUB_SCRATCH14            0x30100A4
 #define MPNPU_PUB_SCRATCH15            0x30100A8
+#define MPNPU_SUSP_RDY                 0x3010AC0
 #define MP0_C2PMSG_73                  0x3810A24
 #define MP0_C2PMSG_123                 0x3810AEC
 
@@ -83,13 +85,15 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 		DEFINE_BAR_OFFSET(FW_ALIVE_OFF,   NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_15),	\
 	},											\
 	.psp_regs_off   = {									\
-		DEFINE_BAR_OFFSET(PSP_CMD_REG,    NPU4_PSP, MP0_C2PMSG_123),			\
-		DEFINE_BAR_OFFSET(PSP_ARG0_REG,   NPU4_REG, MPNPU_PUB_SCRATCH3),		\
-		DEFINE_BAR_OFFSET(PSP_ARG1_REG,   NPU4_REG, MPNPU_PUB_SCRATCH4),		\
-		DEFINE_BAR_OFFSET(PSP_ARG2_REG,   NPU4_REG, MPNPU_PUB_SCRATCH9),		\
-		DEFINE_BAR_OFFSET(PSP_INTR_REG,   NPU4_PSP, MP0_C2PMSG_73),			\
-		DEFINE_BAR_OFFSET(PSP_STATUS_REG, NPU4_PSP, MP0_C2PMSG_123),			\
-		DEFINE_BAR_OFFSET(PSP_RESP_REG,   NPU4_REG, MPNPU_PUB_SCRATCH3),		\
+		DEFINE_BAR_OFFSET(PSP_CMD_REG,       NPU4_PSP, MP0_C2PMSG_123),			\
+		DEFINE_BAR_OFFSET(PSP_ARG0_REG,      NPU4_REG, MPNPU_PUB_SCRATCH3),		\
+		DEFINE_BAR_OFFSET(PSP_ARG1_REG,      NPU4_REG, MPNPU_PUB_SCRATCH4),		\
+		DEFINE_BAR_OFFSET(PSP_ARG2_REG,      NPU4_REG, MPNPU_PUB_SCRATCH9),		\
+		DEFINE_BAR_OFFSET(PSP_INTR_REG,      NPU4_PSP, MP0_C2PMSG_73),			\
+		DEFINE_BAR_OFFSET(PSP_STATUS_REG,    NPU4_PSP, MP0_C2PMSG_123),			\
+		DEFINE_BAR_OFFSET(PSP_RESP_REG,      NPU4_REG, MPNPU_PUB_SCRATCH3),		\
+		DEFINE_BAR_OFFSET(PSP_SUSP_RDY_REG,  NPU4_REG, MPNPU_SUSP_RDY),			\
+		DEFINE_BAR_OFFSET(PSP_PWAITMODE_REG, NPU4_REG, MPNPU_PWAITMODE),		\
 	},											\
 	.smu_regs_off   = {									\
 		DEFINE_BAR_OFFSET(SMU_CMD_REG,  NPU4_SMU, MP1_C2PMSG_0),			\

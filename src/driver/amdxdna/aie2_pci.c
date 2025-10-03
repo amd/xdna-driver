@@ -321,6 +321,7 @@ static void aie2_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 {
 	if (aie2_suspend_fw(ndev))
 		XDNA_ERR(ndev->xdna, "suspend_fw failed");
+	aie2_psp_reg_wait(ndev->psp_hdl);
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
 
