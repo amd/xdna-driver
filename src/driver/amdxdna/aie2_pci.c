@@ -857,6 +857,7 @@ static int aie2_query_sensors(struct amdxdna_client *client,
 {
 	struct amdxdna_drm_query_sensor *sensor;
 	struct amdxdna_dev *xdna = client->xdna;
+	int power_estimate;
 	int ret = 0;
 	int min;
 
@@ -870,8 +871,9 @@ static int aie2_query_sensors(struct amdxdna_client *client,
 	if (!sensor)
 		return -ENOMEM;
 
+	power_estimate = aie2_smu_get_power_estimate();
 	sensor->type = AMDXDNA_SENSOR_TYPE_POWER;
-	sensor->input = __UINT32_MAX__; /* TODO: query the device and get the power data */
+	sensor->input = power_estimate >= 0 ? power_estimate : __UINT32_MAX__;
 	sensor->unitm = -3; /* in milliwatts */
 	snprintf(sensor->label, sizeof(sensor->label), "Total Power");
 	snprintf(sensor->units, sizeof(sensor->units), "mW");
