@@ -116,6 +116,7 @@ enum psp_reg_idx {
 	PSP_INTR_REG = PSP_NUM_IN_REGS,
 	PSP_STATUS_REG,
 	PSP_RESP_REG,
+	PSP_PWAITMODE_REG,
 	PSP_MAX_REGS /* Keep this at the end */
 };
 
@@ -456,6 +457,7 @@ static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
 int aie2_psp_start(struct psp_device *psp);
 void aie2_psp_stop(struct psp_device *psp);
+int aie2_psp_waitmode_poll(struct psp_device *psp);
 
 /* aie2_debugfs.c */
 void aie2_debugfs_init(struct amdxdna_dev *xdna);
