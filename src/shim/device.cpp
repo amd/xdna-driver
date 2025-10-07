@@ -693,24 +693,53 @@ struct firmware_log
   static result_type
   get(const xrt_core::device* device, key_type key, const std::any& any)
   {
+    xrt_core::query::firmware_debug_buffer output{};
+
     switch (key) {
       case key_type::firmware_log_data:
       {
-        // static query::firmware_debug_buffer log_buffer;
-        // TODO : implement IOCTL to get firmware_log data
-        // return log_buffer;
+        auto request = std::any_cast<xrt_core::query::firmware_debug_buffer>(any);
+        uint32_t offset = request.size - sizeof(amdxdna_get_fw_log_footer);
+        amdxdna_get_fw_log_footer *fw_log = reinterpret_cast<amdxdna_get_fw_log_footer *>(
+          static_cast<std::byte *>(request.data) + offset
+        );
+
+        fw_log->offset = request.abs_offset;
+        fw_log->size = offset;
+        fw_log->watch = request.b_wait;
+
+        amdxdna_drm_get_array arg = {
+          .param = DRM_AMDXDNA_FW_LOG,
+          .element_size = static_cast<std::uint32_t>(request.size),
+          .num_element = 1,
+          .buffer = reinterpret_cast<uintptr_t>(request.data)
+        };
+
+        try {
+          auto& pci_dev_impl = get_pcidev_impl(device);
+          pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+        } catch (const xrt_core::system_error& e) {
+          if(e.get_code() == -EINTR)
+            throw xrt_core::error("Query interrupted by user");
+          throw std::runtime_error("Failed to get firmware log");
+        }
+
+        output.abs_offset = fw_log->offset;
+        output.size = fw_log->size;
+        output.b_wait = fw_log->watch;
+        output.data = request.data;
+        return output;
       }
       default:
         throw xrt_core::error("Unsupported firmware_log query key");
     }
-    // TODO : Implement IOCTL to get firmware_log configuration
   }
 
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
     switch (key) {
-    
+
     case key_type::firmware_log_version:
     {
       // query::firmware_log_version::result_type version;
@@ -1539,7 +1568,7 @@ initialize_query_table()
 {
   emplace_func0_request<query::aie_partition_info,             partition_info>();
   emplace_func0_request<query::xocl_errors,                    xocl_errors>();
-  emplace_func1_request<query::context_health_info,           context_health_info>();
+  emplace_func1_request<query::context_health_info,            context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
@@ -1565,7 +1594,7 @@ initialize_query_table()
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
-  
+
   emplace_func1_request<query::event_trace_data,               event_trace>();
   emplace_func0_request<query::event_trace_version,            event_trace>();
   emplace_func0_request<query::event_trace_config,             event_trace>();
@@ -1774,7 +1803,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   else if (f.use == XRT_BO_USE_DTRACE ||
     f.use == XRT_BO_USE_LOG ||
     f.use == XRT_BO_USE_DEBUG_QUEUE
-    /*f.use == XRT_BO_USE_UC_DEBUG*/) //need define last one in xrt 
+    /*f.use == XRT_BO_USE_UC_DEBUG*/) //need define last one in xrt
     bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, type);
   else if (type == AMDXDNA_BO_CMD)
     bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
