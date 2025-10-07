@@ -1087,13 +1087,20 @@ int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 	signed long remaining = MAX_SCHEDULE_TIMEOUT;
 	long ret;
 
+	if (!out_fence) {
+		XDNA_ERR(ctx->client->xdna, "Invalid syncobj or sequence number");
+		return -EINVAL;
+	}
+
 	if (timeout)
 		remaining = msecs_to_jiffies(timeout);
+
 	ret = dma_fence_wait_timeout(out_fence, true, remaining);
 	if (!ret)
 		ret = -ETIME;
 	else if (ret > 0)
 		ret = 0;
+
 	dma_fence_put(out_fence);
 	return ret;
 }
