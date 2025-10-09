@@ -27,7 +27,6 @@ amdxdna-y := \
 	amdxdna_tdr.o \
 	amdxdna_ubuf.o \
 	amdxdna_carvedout_buf.o \
-	amdxdna_error.o \
 	amdxdna_gem.o \
 	amdxdna_cma.o \
 
