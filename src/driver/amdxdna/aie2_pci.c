@@ -601,11 +601,8 @@ skip_pasid:
 		goto disable_sva;
 	}
 
-	ret = aie2_error_async_cache_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "failed to init async error cache, ret %d", ret);
-		goto disable_sva;
-	}
+	mutex_init(&ndev->async_errs_cache.lock);
+
 	xdna->dev_handle = ndev;
 
 	ret = aie2_hw_start(xdna);
@@ -1342,7 +1339,7 @@ static int aie2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_d
 		return -EFAULT;
 	}
 
-	ret = amdxdna_error_get_last_async(xdna, &xdna->dev_handle->async_errs_cache, 1, &tmp);
+	ret = aie2_error_get_last_async(xdna, &xdna->dev_handle->async_errs_cache, 1, &tmp);
 	if (ret < 0)
 		goto exit;
 	/* only return last async error */

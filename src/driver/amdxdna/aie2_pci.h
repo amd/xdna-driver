@@ -468,6 +468,9 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_msg_thread(void *data);
 int aie2_error_async_cache_init(struct amdxdna_dev_hdl *ndev);
+int aie2_error_get_last_async(struct amdxdna_dev *xdna,
+			      struct amdxdna_async_err_cache *err_cache, u32 num_errs,
+			      void *errors);
 
 /* aie2_message.c */
 bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode);
