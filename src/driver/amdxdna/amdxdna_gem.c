@@ -1014,16 +1014,16 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 			break;
 		}
 
-     	if (iommu_mode != AMDXDNA_IOMMU_PASID) {
-		if (!abo->mem.pages) {
-			abo->mem.pages = abo->base.pages;
-			abo->mem.nr_pages = to_gobj(abo)->size >> PAGE_SHIFT;
+		if (iommu_mode != AMDXDNA_IOMMU_PASID) {
+			if (!abo->mem.pages) {
+				abo->mem.pages = abo->base.pages;
+				abo->mem.nr_pages = to_gobj(abo)->size >> PAGE_SHIFT;
+			}
+			ret = amdxdna_mem_map(xdna, &abo->mem);
+			if (ret)
+				goto put_obj;
+			abo->mem.dev_addr = abo->mem.dma_addr;
 		}
-		ret = amdxdna_mem_map(xdna, &abo->mem);
-		if (ret)
-			goto put_obj;
-		abo->mem.dev_addr = abo->mem.dma_addr;
-	}
 #endif
 		break;
 	default:
