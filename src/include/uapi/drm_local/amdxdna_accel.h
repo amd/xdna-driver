@@ -258,7 +258,7 @@ struct amdxdna_drm_create_bo {
 #define	AMDXDNA_BO_SHARE	1 /* Regular BO shared between user and device */
 #define	AMDXDNA_BO_DEV_HEAP	2 /* Shared host memory to device as heap memory */
 #define	AMDXDNA_BO_DEV		3 /* Allocated from BO_DEV_HEAP */
-#define	AMDXDNA_BO_CMD		4 /* User and driver accessible BO */
+#define	AMDXDNA_BO_CMD		4 /* Alias to share BO, keep for backward compatibility */
 	__u32	type;
 	__u32	handle;
 };

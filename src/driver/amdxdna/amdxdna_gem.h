@@ -25,8 +25,7 @@ struct amdxdna_umap {
 
 struct amdxdna_mem {
 	u64				userptr;
-	void				*kva;
-	u32				kva_use_count;
+	void				*kv_addr;
 	u64				dev_addr;
 	size_t				size;
 	struct page			**pages;
@@ -45,7 +44,7 @@ struct amdxdna_gem_obj {
 	struct amdxdna_client		*client;
 	u8				type;
 	u64				flags;
-	struct mutex			lock; /* Protects: pinned, assigned_ctx */
+	struct mutex			lock; /* Protects: pinned, assigned_ctx, mem.kv_addr */
 	struct amdxdna_mem		mem;
 
 	/* Below members are initialized when needed */
@@ -92,5 +91,7 @@ void amdxdna_gem_clear_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl);
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+
+void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo);
 
 #endif /* _AMDXDNA_GEM_H_ */

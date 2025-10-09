@@ -1141,7 +1141,7 @@ aie2_cmdlist_fill_one_slot(u32 op, struct amdxdna_gem_obj *cmdbuf_abo, u32 offse
 			   enum cmd_chain_class class, struct amdxdna_gem_obj *abo, u32 *size)
 {
 	u32 this_op = amdxdna_cmd_get_op(abo);
-	void *cmd_buf = cmdbuf_abo->mem.kva;
+	void *cmd_buf = amdxdna_gem_vmap(cmdbuf_abo);
 	int ret;
 
 	if (this_op != op) {
@@ -1201,7 +1201,7 @@ aie2_cmdlist_prepare_request(void *req, struct amdxdna_gem_obj *cmdbuf_abo,
 		dpu->buf_size = size;
 		dpu->count = cnt;
 	}
-	drm_clflush_virt_range(cmdbuf_abo->mem.kva, size);
+	drm_clflush_virt_range(amdxdna_gem_vmap(cmdbuf_abo), size);
 	XDNA_DBG(cmdbuf_abo->client->xdna, "Command buf addr 0x%llx size 0x%x count %d",
 		 cmdbuf_abo->mem.dev_addr, size, cnt);
 }
@@ -1250,7 +1250,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 		u32 boh = (u32)(payload->data[i]);
 		struct amdxdna_gem_obj *abo;
 
-		abo = amdxdna_gem_get_obj(client, boh, AMDXDNA_BO_CMD);
+		abo = amdxdna_gem_get_obj(client, boh, AMDXDNA_BO_SHARE);
 		if (!abo) {
 			XDNA_ERR(client->xdna, "Failed to find cmd BO %d", boh);
 			return -ENOENT;
@@ -1277,7 +1277,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 #ifdef AMDXDNA_DEVEL
 	XDNA_DBG(client->xdna, "Total %d commands:", payload->command_count);
 	print_hex_dump_debug("cmdbufs: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     cmdbuf_abo->mem.kva, offset, false);
+			     amdxdna_gem_vmap(cmdbuf_abo), offset, false);
 #endif
 
 	/* The offset is the accumulated total size of the cmd buffer */
@@ -1339,7 +1339,7 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
 		return ret;
 #ifdef AMDXDNA_DEVEL
 	print_hex_dump_debug("cmdbuf: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     cmdbuf_abo->mem.kva, size, false);
+			     amdxdna_gem_vmap(cmdbuf_abo), size, false);
 #endif
 
 	aie2_cmdlist_prepare_request(&req, cmdbuf_abo, class, size, 1);

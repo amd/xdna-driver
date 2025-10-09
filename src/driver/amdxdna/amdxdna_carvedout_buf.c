@@ -8,6 +8,7 @@
 
 #include "amdxdna_carvedout_buf.h"
 #include "amdxdna_drm.h"
+#include "amdxdna_devel.h"
 
 /*
  * Carvedout memory is a chunk of memory which is physically contiguous and
@@ -72,13 +73,20 @@ static struct sg_table *amdxdna_cbuf_map(struct dma_buf_attachment *attach,
 	}
 
 	sg_init_table(sg, 1);
-	sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->node.start,
-					      cbuf->node.size, direction,
-					      DMA_ATTR_SKIP_CPU_SYNC);
-	ret = dma_mapping_error(attach->dev, sg->dma_address);
-	if (ret)
-		goto free_sg;
-
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
+		sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->node.start,
+						      cbuf->node.size, direction,
+						      DMA_ATTR_SKIP_CPU_SYNC);
+		ret = dma_mapping_error(attach->dev, sg_dma_address(sg));
+		if (ret)
+			goto free_sg;
+	} else {
+		sg_dma_address(sg) = cbuf->node.start;
+	}
+#else
+	sg_dma_address(sg) = cbuf->node.start;
+#endif
 	sg_assign_page(sg, NULL);
 	sg->offset = 0;
 	sg_dma_len(sg) = cbuf->node.size;
@@ -101,8 +109,12 @@ static void amdxdna_cbuf_unmap(struct dma_buf_attachment *attach,
 {
 	struct scatterlist *sg = sgt->sgl;
 
-	dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg),
-			   direction, DMA_ATTR_SKIP_CPU_SYNC);
+#ifdef AMDXDNA_DEVEL
+	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
+		dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg),
+				   direction, DMA_ATTR_SKIP_CPU_SYNC);
+	}
+#endif
 	kfree(sg);
 	kfree(sgt);
 }
@@ -174,6 +186,19 @@ static const struct dma_buf_ops amdxdna_cbuf_dmabuf_ops = {
 	.vunmap = amdxdna_cbuf_vunmap,
 };
 
+static void amdxdna_cbuf_clear(struct dma_buf *dbuf)
+{
+	struct iosys_map vmap = IOSYS_MAP_INIT_VADDR(NULL);
+
+	dma_buf_vmap(dbuf, &vmap);
+	if (!vmap.vaddr) {
+		pr_err("Failed to vmap carveout dma buf\n");
+		return;
+	}
+	memset(vmap.vaddr, 0, dbuf->size);
+	dma_buf_vunmap(dbuf, &vmap);
+}
+
 struct dma_buf *amdxdna_get_carvedout_buf(struct drm_device *dev, size_t size,
 					  u64 alignment)
 {
@@ -204,6 +229,7 @@ struct dma_buf *amdxdna_get_carvedout_buf(struct drm_device *dev, size_t size,
 		goto remove_node;
 	}
 
+	amdxdna_cbuf_clear(dbuf);
 	return dbuf;
 
 remove_node:
