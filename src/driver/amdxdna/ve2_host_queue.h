@@ -47,11 +47,14 @@ enum host_queue_packet_opcode {
 };
 
 struct common_header {
-	struct {
-		u16 type: 8;
-		u16 barrier: 1;
-		u16 acquire_fence_scope: 2;
-		u16 release_fence_scope: 2;
+	union {
+		struct {
+			u16 type: 8;
+			u16 barrier: 1;
+			u16 acquire_fence_scope: 2;
+			u16 release_fence_scope: 2;
+		};
+		u16	header;
 	};
 	u16	opcode;
 	u16	count;
@@ -62,6 +65,11 @@ struct common_header {
 struct xrt_packet_header {
 	struct common_header	common_header;
 	u64			completion_signal;
+};
+
+struct xrt_packet {
+	struct xrt_packet_header	xrt_header;
+	u64				xrt_payload_host_addr;
 };
 
 struct host_queue_packet {
@@ -109,96 +117,103 @@ struct ve2_hsa_queue {
 	struct mutex			hq_lock;
 };
 
-// Handshake packet structure format
-#define ALIVE_MAGIC		0x404C5645
+/* handshake */
+#define ALIVE_MAGIC 0x404C5645
 struct handshake {
-	u32	mpaie_alive;
-	u32	partition_base_address;
+	u32 mpaie_alive; //0
+	u32 partition_base_address; //4
 	struct {
-		u32	partition_size:7;
-		u32	reserved:23;
-		u32	mode:1;
-		u32	uc_b:1;
+		u32 partition_size:7; //8
+		u32 reserved:23; //8
+		u32 mode:1; //8
+		u32 uc_b:1; //8
 	}
 	aie_info;
-	u32	hsa_addr_high;
-	u32	hsa_addr_low;
-	u32	ctx_switch_req;
-	u32	hsa_location;
-	u32	cert_idle_status;
-	u32	misc_status;
-	u32	log_addr_high;
-	u32	log_addr_low;
-	u32	log_buf_size;
-	u32	host_time_high;
-	u32	host_time_low;
+	u32 hsa_addr_high; //c
+	u32 hsa_addr_low; //10
+	u32 ctx_switch_req; //14
+	u32 hsa_location; //18
+	u32 cert_idle_status; //1c
+	u32 misc_status; //20
+	u32 log_addr_high; //24
+	u32 log_addr_low; //28
+	u32 log_buf_size; //2c
+	u32 host_time_high; //30
+	u32 host_time_low; //34
 	struct {
-		u32	dtrace_addr_high;
-		u32	dtrace_addr_low;
+		u32 dtrace_addr_high; //38
+		u32 dtrace_addr_low; //3c
 	}
 	trace;
 	struct {
-  #define NUM_PDI_SAVE 2
-		u32	restore_page;
+#define NUM_PDI_SAVE 2 //we can save one ss and one elf
+		u32 restore_page; //40
 		struct {
-			u32	id;
-			u16	page_index;
-			u16	page_len;
+			u32 id; //44 4c
+			u16 page_index; //48 50
+			u16 page_len;
 		}
 		pdi[NUM_PDI_SAVE];
 	}
 	ctx_save;
 	struct {
-		u32	hsa_addr_high;
-		u32	hsa_addr_low;
+		u32 hsa_addr_high; //54
+		u32 hsa_addr_low; //58
 	}
 	dbg;
 	struct {
-		u32	dbg_buf_addr_high;
-		u32	dbg_buf_addr_low;
-		u32	size;
+		u32 dbg_buf_addr_high; //5c
+		u32 dbg_buf_addr_low;  //60
+		u32 size;   // 64
 	}
 	dbg_buf;
-	struct {
-		u32	c_job_readiness_checked;
-		u32	c_opcode;
-		u32	c_job_launched;
-		u32	c_job_finished;
-		u32	c_hsa_pkt;
-		u32	c_page;
-		u32	c_doorbell;
-		u32	c_uc_scrub;
-		u32	c_tct_requested;
-		u32	c_tct_received;
-		u16	c_preemption_ucdma;
-		u16	c_preemption_ucdma_sync;
-		u16	c_preemption_poll;
-		u16	c_preemption_mask_poll;
-		u16	c_preemption_remote_barrier;
-		u16	c_preemption_wait_tct;
-		u16	c_block_ucdma;
-		u16	c_block_ucdma_sync;
-		u16	c_block_local_barrier;
-		u16	c_block_remote_barrier;
-		u16	c_block_wait_tct;
-		u16	c_actor_hash_conflict;
-	}
-	counter;
-	struct {
-		u32	fw_state;
-		u32	abs_page_index;
-		u32	ppc;
+	u32 reserved1[14]; //make sure vm (below) starts at offset 0xa0
+	struct { /* Hardware sync required */
+		u32 fw_state;
+		u32 abs_page_index; //absolute index of page where current control code are in
+		u32 ppc; // previous pc(relative to current page) drives current_job_context to NULL
 	}
 	vm;
-	struct {
-		u32	ear;
-		u32	esr;
-		u32	pc;
+	struct { /* Hardware sync required */
+		u32 ear; //exception address
+		u32 esr; //exception status
+		u32 pc; //exception pc
 	}
 	exception;
+	struct { /* Hardware sync required */
+		u32 c_job_readiness_checked; // number of checks whether there are jobs ready
+		u32 c_opcode; // number of opcode run
+		u32 c_job_launched;
+		u32 c_job_finished;
+		u32 c_hsa_pkt; // number of hsa pkt handled
+		u32 c_page; // number of pages loaded
+		u32 c_doorbell; // number of hsa doorbell ring
+		u32 c_uc_scrub; // number of uc memory(PM) scrub
+		u32 c_tct_requested; // number of tct requested
+		u32 c_tct_received; // number of tct received
+		u16 c_preemption_ucdma; // run out of wait handle UC_DMA_WRITE_DES opcode
+		u16 c_preemption_ucdma_sync; // run out of wait handle UC_DMA_WRITE_DES_SYNC opcode
+		u16 c_preemption_poll; // POLL_32 opcode retry times
+		u16 c_preemption_mask_poll; // MASK_POLL_32 opcode retry times
+		u16 c_preemption_remote_barrier; // run out of physical barrier REMOTE_BARRIER
+		u16 c_preemption_wait_tct;//actor entry overflow or run out of wait handle WAIT_TCTS
+		u16 c_block_ucdma; // block UC_DMA_WRITE_DES opcode
+		u16 c_block_ucdma_sync; // block UC_DMA_WRITE_DES_SYNC opcode
+		u16 c_block_local_barrier; // block local_barrier opcode
+		u16 c_block_remote_barrier; // block REMOTE_BARRIER opcode
+		u16 c_block_wait_tct; // block WAIT_TCTS opcode
+		u16 c_actor_hash_conflict; // number of slow actor entry lookup
+	}
+	counter;
 #ifdef PDI_LOAD_TEST
 	u32 test_pdi_addr_high;
 	u32 test_pdi_addr_low;
 #endif
 	u32 opcode_timeout_config;
+	struct {
+		u32 host_addr_offset_high_bits:25;
+		u32 reserved:6;
+		u32 valid:1;
+	} host_addr_offset_high;
+	u32 host_addr_offset_low;
 };

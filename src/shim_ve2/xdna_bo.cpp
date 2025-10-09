@@ -118,9 +118,7 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_map_offset(0)
 {
   alloc_bo();
-  if (m_type == AMDXDNA_BO_SHARE)
-    sync(direction::host2device, size, 0);
-
+  m_edev->bo_handle_ref_inc(m_handle);
   xcl_bo_flags xflags{ m_flags };
   if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
@@ -136,6 +134,7 @@ xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   , m_import(ehdl)
 {
   uint32_t boh = shim_xdna_edge::xdna_bo::import_drm_bo(m_import, &m_type, &m_aligned_size);
+  m_edev->bo_handle_ref_inc(boh);
   shim_xdna_edge::xdna_bo::get_drm_bo_info(boh);
 }
 
@@ -163,8 +162,13 @@ xdna_bo::
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
     detach_from_ctx(xflags.use);
 
-  drm_gem_close close_bo = {m_handle, 0};
-  m_edev->ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
+  if (m_handle) {
+    bool last = m_edev->bo_handle_ref_dec(m_handle);
+    if (last) {
+      drm_gem_close close_bo{ m_handle, 0 };
+      m_edev->ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
+    }
+  }
 }
 
 void
@@ -334,7 +338,7 @@ config(const xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_
   auto mdata_size = sizeof(struct fw_buffer_metadata) + total_cols * sizeof(struct uc_info_entry);
 
   auto xdev = static_cast<const device_xdna*>(m_core_device);
-  xdna_bo mdata_bo = xdna_bo(*xdev, ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_DEV);
+  xdna_bo mdata_bo = xdna_bo(*xdev, ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_SHARE);
   init_metadata_buffer(mdata_bo, boh, total_cols, xflags.use, buf_sizes, true);
 
   shim_debug("Configuring BO %d on ctx: %d", boh, ctx_id);
@@ -360,7 +364,7 @@ attach_to_ctx(uint32_t flag)
 
   auto mdata_size = sizeof(struct fw_buffer_metadata) + total_cols * sizeof(struct uc_info_entry);
   auto xdev = static_cast<const device_xdna*>(m_core_device);
-  xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_DEV);
+  xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_SHARE);
   init_metadata_buffer(mdata_bo, boh, total_cols, flag, buf_sizes, true);
   shim_debug("Attaching drm_bo %d to ctx: %d", boh, m_owner_ctx_id);
   config_drm_bo(m_edev, m_owner_ctx_id, mdata_bo.get_drm_bo_handle(), mdata_size, true);
@@ -376,7 +380,7 @@ detach_from_ctx(uint32_t flag)
   auto boh = get_drm_bo_handle();
   auto mdata_size = sizeof(struct fw_buffer_metadata);
   auto xdev = static_cast<const device_xdna*>(m_core_device);
-  xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_DEV);
+  xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_SHARE);
   init_metadata_buffer(mdata_bo, 0, 0, flag, std::map<uint32_t, size_t>{}, false);
   shim_debug("Detaching drm_bo %d from ctx: %d", boh, m_owner_ctx_id);
   config_drm_bo(m_edev, m_owner_ctx_id, mdata_bo.get_drm_bo_handle(), mdata_size, false);

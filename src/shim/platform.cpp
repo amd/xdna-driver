@@ -187,10 +187,10 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
     config_ctx_debug_bo(*static_cast<config_ctx_debug_bo_arg*>(cmd_arg));
     break;
   case drv_ioctl_cmd::create_bo:
-    create_bo(*static_cast<create_bo_arg*>(cmd_arg));
+    create_bo(*static_cast<bo_info*>(cmd_arg));
     break;
   case drv_ioctl_cmd::create_uptr_bo:
-    create_uptr_bo(*static_cast<create_uptr_bo_arg*>(cmd_arg));
+    create_uptr_bo(*static_cast<bo_info*>(cmd_arg));
     break;
   case drv_ioctl_cmd::destroy_bo:
     destroy_bo(*static_cast<destroy_bo_arg*>(cmd_arg));
@@ -250,6 +250,60 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
     shim_err(EINVAL, "Unknown drv_ioctl: %d", cmd);
     break;
   }
+}
+
+void
+platform_drv::
+save_bo_info(uint32_t key, bo_info& info) const
+{
+  const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
+
+  if (key == AMDXDNA_INVALID_BO_HANDLE)
+    return;
+
+  if (m_drm_bo_map.find(key) != m_drm_bo_map.end())
+    shim_err(EEXIST, "BO info for %d already exists", key);
+  m_drm_bo_map[key] = { 1, info };
+}
+
+bool
+platform_drv::
+delete_bo_info(uint32_t key) const
+{
+  const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
+  bool erased;
+
+  if (key == AMDXDNA_INVALID_BO_HANDLE)
+    return true;
+
+  auto it = m_drm_bo_map.find(key);
+  if (it == m_drm_bo_map.end())
+    shim_err(ENOENT, "BO info for %d not found", key);
+
+  if (it->second.first == 1) {
+    m_drm_bo_map.erase(key);
+    erased = true;
+  } else {
+    it->second.first--;
+    erased = false;
+  }
+
+  return erased;
+}
+
+bool
+platform_drv::
+load_bo_info(uint32_t key, bo_info& info) const
+{
+  const std::lock_guard<std::mutex> lock(m_drm_bo_map_lock);
+
+  auto it = m_drm_bo_map.find(key);
+  if (it == m_drm_bo_map.end())
+    return false;
+
+  it->second.first++;
+  info = it->second.second;
+  return true;
 }
 
 }

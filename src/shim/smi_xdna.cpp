@@ -73,6 +73,8 @@ config_gen_xdna::create_examine_subcommand()
     {"preemption", "Preemption telemetry data for the device", "hidden"},
     {"clocks", "Clock frequency information", "hidden"},
     {"context-health", "Log to console context health information", "hidden"},
+    {"event-trace", "Event trace report", "hidden"},
+    {"firmware-log", "Firmware Log report", "hidden"}
   };
 
   std::map<std::string, std::shared_ptr<option>> examine_suboptions; 

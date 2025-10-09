@@ -73,6 +73,33 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   PATTERN "*.yaml"
   )
 
+include(FetchContent)
+
+FetchContent_Declare(
+  vtd_strx_archive
+  URL "https://github.com/Xilinx/VTD/raw/403740c18e709f82b3880fae53d412331ed907b1/runner/strx/xrt_smi_strx.a"
+  DOWNLOAD_NO_EXTRACT ON
+  DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
+)
+
+FetchContent_Declare(
+  vtd_phx_archive
+  URL "https://github.com/Xilinx/VTD/raw/403740c18e709f82b3880fae53d412331ed907b1/runner/phx/xrt_smi_phx.a"
+  DOWNLOAD_NO_EXTRACT ON
+  DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
+)
+
+message(STATUS "Downloading VTD archives from GitHub...")
+FetchContent_MakeAvailable(vtd_strx_archive vtd_phx_archive)
+message(STATUS "VTD archives downloaded successfully")
+
+install(FILES 
+  "${vtd_strx_archive_SOURCE_DIR}/xrt_smi_strx.a"
+  "${vtd_phx_archive_SOURCE_DIR}/xrt_smi_phx.a"
+  DESTINATION ${XDNA_PKG_DATA_DIR}/bins
+  COMPONENT ${XDNA_COMPONENT}
+  )
+
 if(NOT SKIP_KMOD)
 
 install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/

@@ -16,15 +16,9 @@
 #include <linux/seqlock_types.h>
 
 #include "amdxdna_ctx.h"
-#ifdef AMDXDNA_OF
-/*
- * TODO: remove this and implement physical contiguous memory by carvedout memory
- * supported by amdxdna_gem.h"
- */
-#include "amdxdna_gem_of.h"
-#else
+#include "amdxdna_dpt.h"
+#include "amdxdna_cma.h"
 #include "amdxdna_gem.h"
-#endif
 #include "amdxdna_tdr.h"
 
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
@@ -47,6 +41,7 @@ struct amdxdna_dev;
 struct amdxdna_client;
 struct amdxdna_dev_hdl;
 struct amdxdna_dev_priv;
+struct amdxdna_mgmt_dma_hdl;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
@@ -58,8 +53,13 @@ struct amdxdna_dev_ops {
 	void (*recover)(struct amdxdna_dev *xdna, bool dump_only);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
+	void (*reset_prepare)(struct amdxdna_dev *xdna);
+	int (*reset_done)(struct amdxdna_dev *xdna);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
+	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);
+	int (*fw_log_fini)(struct amdxdna_dev *xdna);
+	void (*fw_log_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 	/* Below device ops are called by IOCTL */
 	int (*ctx_init)(struct amdxdna_ctx *ctx);
@@ -126,11 +126,13 @@ struct amdxdna_dev {
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
 	struct amdxdna_tdr		tdr;
+	struct amdxdna_dpt		*fw_log;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
+	bool				use_cma;
 };
 
 struct amdxdna_stats {

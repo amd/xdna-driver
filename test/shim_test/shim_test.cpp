@@ -45,6 +45,9 @@ void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&)
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -209,6 +212,16 @@ bool
 dev_filter_is_aie2_and_amdxdna_drv(device::id_type id, device* dev)
 {
   if (!dev_filter_is_aie2(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
+bool
+dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_npu4(id, dev))
     return false;
   if (!is_amdxdna_drv(dev))
     return false;
@@ -637,6 +650,11 @@ std::vector<test_case> test_list {
   test_case{ "query(rom_fpga_name)", {},
     TEST_NEGATIVE, dev_filter_xdna, TEST_query_userpf<query::rom_fpga_name>, {}
   },
+  // get async error in multi thread before running any other tests
+  // there may or may not be async error.
+  test_case{ "get async error in multithread - INITIAL", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_async_error_multi, {false}
+  },
   //test_case{ "non_xdna_userpf: query(rom_vbnv)", {},
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
   //},
@@ -692,11 +710,14 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_hw_queue, {}
   },
   // Keep bad run before normal run to test recovery of hw ctx
-  test_case{ "io test real kernel bad run", {},
-    TEST_NEGATIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_BAD_RUN, 1 }
+  test_case{ "io test async error", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_io, {}
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
+  },
+  test_case{ "io test with intruction code invalid address access", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
@@ -807,7 +828,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
     TEST_POSITIVE, dev_filter_is_xdna_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
@@ -825,7 +846,11 @@ std::vector<test_case> test_list {
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+  },
+  // get async error in multi thread after async error has raised.
+  test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
   },
 };
 

@@ -150,7 +150,6 @@ void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
 	amdxdna_free_sgt(xdna, sgt);
 }
 
-#ifndef AMDXDNA_OF
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -165,11 +164,6 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 	/* Device doesn't do scatter/gather, fail non-contiguous map */
 	if (drm_prime_get_contiguous_size(sgt) != abo->mem.size) {
 		XDNA_ERR(xdna, "noncontiguous dma map, size:%ld", abo->mem.size);
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-		drm_gem_shmem_put_pages(&abo->base);
-#else
-		drm_gem_shmem_put_pages_locked(&abo->base);
-#endif
 		return -ENOMEM;
 	}
 
@@ -193,16 +187,6 @@ void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
 	drm_gem_shmem_put_pages_locked(&abo->base);
 #endif
 }
-#else
-int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
-{
-	return -EOPNOTSUPP;
-}
-
-void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
-{
-}
-#endif
 
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
 {

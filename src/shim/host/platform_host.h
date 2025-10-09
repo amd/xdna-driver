@@ -27,10 +27,10 @@ private:
   config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const override;
 
   void
-  create_bo(create_bo_arg& arg) const override;
+  create_bo(bo_info& arg) const override;
 
   void
-  create_uptr_bo(create_uptr_bo_arg& arg) const override;
+  create_uptr_bo(bo_info& arg) const override;
 
   void
   destroy_bo(destroy_bo_arg& arg) const override;

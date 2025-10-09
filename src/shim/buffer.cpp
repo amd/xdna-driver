@@ -4,6 +4,8 @@
 // Disable debug print in this file.
 //#undef XDNA_SHIM_DEBUG
 
+#include <iostream>
+
 #include "buffer.h"
 #include "shim_debug.h"
 #include "core/common/config_reader.h"
@@ -102,8 +104,8 @@ type_to_name(int type, uint64_t flags)
       return std::string("AMDXDNA_BO_UC_LOG");
     else if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG_QUEUE)
       return std::string("AMDXDNA_BO_UC_DEBUG_QUEUE");
-    //else if (xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
-    //  return std::string("AMDXDNA_BO_UC_DEBUG_BUF");
+    else if (xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
+      return std::string("AMDXDNA_BO_UC_DEBUG_BUF");
     return std::string("AMDXDNA_BO_SHARE");
   case AMDXDNA_BO_DEV_HEAP:
     return std::string("AMDXDNA_BO_DEV_HEAP");
@@ -264,14 +266,14 @@ alloc(const pdev *dev, uint64_t dev_offset, size_t size)
 //
 
 drm_bo::
-drm_bo(const pdev& pdev, size_t size, int type)
+drm_bo(const pdev& pdev, size_t size, uint32_t type)
   : m_pdev(pdev), m_size(size)
 {
   auto align = bo_addr_align(type);
-  create_bo_arg arg = {
-    .type = type,
-    .size = m_size,
+  bo_info arg = {
     .xdna_addr_align = (align == 1 ? 0 : align), 
+    .size = m_size,
+    .type = type,
   };
   m_pdev.create_drm_bo(&arg);
   m_id = arg.bo;
@@ -283,9 +285,9 @@ drm_bo::
 drm_bo(const pdev& pdev, size_t size, void *uptr)
   : m_pdev(pdev), m_size(size)
 {
-  create_uptr_bo_arg arg = {
-    .buf = uptr,
+  bo_info arg = {
     .size = m_size,
+    .vaddr = uptr,
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::create_uptr_bo, &arg);
   m_id = arg.bo;
@@ -301,33 +303,20 @@ drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl)
     .fd = ehdl,
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::import_bo, &arg);
-  m_size = arg.size;
-  m_id = arg.bo;
-  m_xdna_addr = arg.xdna_addr;
-  m_map_offset = arg.map_offset;
+  m_size = arg.boinfo.size;
+  m_id = arg.boinfo.bo;
+  m_xdna_addr = arg.boinfo.xdna_addr;
+  m_map_offset = arg.boinfo.map_offset;
 }
 
 drm_bo::
 ~drm_bo()
 {
   m_vaddr.reset();
-
-  try {
-    destroy_bo_arg arg = {
-      .bo = m_id,
-    };
-    m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
-  } catch (const xrt_core::system_error& e) {
-    // In case BO is exported and imported in the same process, the same BO
-    // could be destroyed twice (once by exported BO, and once by imported BO).
-    // The last BO destroy will see EINVAL error. Ignore it.
-    if (e.get_code() != EINVAL) {
-      std::cout << "Failed to destroy DRM BO "
-        << std::to_string(m_id.handle)
-        << ": " << e.what()
-        << std::endl;
-    }
-  }
+  destroy_bo_arg arg = {
+    .bo = m_id,
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
 }
 
 //
@@ -594,24 +583,35 @@ describe() const
 
 void
 buffer::
-sync(direction, size_t sz, size_t offset)
+sync_by_driver(direction dir, size_t sz, size_t offset)
+{
+  if (offset + sz > size())
+    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
+
+  sync_bo_arg arg = {
+    .bo = id(),
+    .direction = dir,
+    .offset = offset,
+    .size = sz,
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
+  shim_debug("Sync'ed BO %d in driver: offset=%ld, size=%ld", id().handle, offset, sz);
+}
+
+void
+buffer::
+sync(direction dir, size_t sz, size_t offset)
 {
   if (m_pdev.is_cache_coherent())
     return;
 
-  if (offset + sz > size())
-    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
-
   if (is_driver_sync()) {
-    sync_bo_arg arg = {
-      .bo = id(),
-      .offset = offset,
-      .size = sz,
-    };
-    m_pdev.drv_ioctl(drv_ioctl_cmd::sync_bo, &arg);
+    sync_by_driver(dir, sz, offset);
     return;
   }
 
+  if (offset + sz > size())
+    shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
   clflush_data(vaddr(), offset, sz); 
   shim_debug("Sync'ed BO %d: offset=%ld, size=%ld", id().handle, offset, sz);
 }
@@ -804,6 +804,16 @@ dbg_buffer::
 bo_sub_type_name() const
 {
   return "DEBUG BO";
+}
+
+void
+dbg_buffer::
+sync(direction dir, size_t sz, size_t offset)
+{
+  if (dir == xrt_core::buffer_handle::direction::host2device)
+    buffer::sync(dir, sz, offset);
+  else
+    buffer::sync_by_driver(dir, sz, offset);
 }
 
 //

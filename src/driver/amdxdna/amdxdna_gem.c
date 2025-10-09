@@ -18,6 +18,7 @@
 #include "amdxdna_pm.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_ubuf.h"
+#include "amdxdna_cma.h"
 
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
@@ -152,6 +153,10 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	struct amdxdna_umap *mapp;
+
+	/* hmm_invalidate op is not valid for VE2 */
+	if (!xdna->dev_info->ops->hmm_invalidate)
+		return;
 
 	down_read(&xdna->notifier_lock);
 	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
@@ -351,7 +356,10 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, abo->mem.dev_addr);
 
 	amdxdna_hmm_unregister(abo, NULL);
-	flush_workqueue(xdna->notifier_wq);
+
+	/* workqueue is not valid for VE2 */
+	if (xdna->notifier_wq)
+		flush_workqueue(xdna->notifier_wq);
 
 	if (abo->flags & BO_SUBMIT_PINNED)
 		amdxdna_gem_unpin(abo);
@@ -364,8 +372,6 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 		XDNA_DBG(xdna, "unmap bo for non import bo");
 		if (abo->type == AMDXDNA_BO_CMD)
 			amdxdna_mem_unmap(xdna, &abo->mem);
-		else if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
-			amdxdna_bo_dma_unmap(abo);
 	}
 #endif
 	amdxdna_gem_vunmap(abo);
@@ -455,6 +461,10 @@ static int amdxdna_gem_shmem_obj_mmap(struct drm_gem_object *gobj,
 	XDNA_DBG(xdna, "SHMEM BO map_offset 0x%llx type %d userptr 0x%lx size 0x%lx",
 		 drm_vma_node_offset_addr(&gobj->vma_node), abo->type,
 		 vma->vm_start, gobj->size);
+
+	abo->mem.user_pasid_addr = vma->vm_start;
+	pr_warn("DZ_ set user_pasid_addr 0x%llx\n", abo->mem.user_pasid_addr);
+
 	return 0;
 
 hmm_unreg:
@@ -641,6 +651,39 @@ amdxdna_gem_create_carvedout_object(struct drm_device *dev, size_t size, u64 ali
 }
 
 static struct amdxdna_gem_obj *
+amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
+{
+	struct amdxdna_cmabuf_priv *cmabuf;
+	struct amdxdna_gem_obj *abo;
+	struct drm_gem_object *gobj;
+	struct dma_buf *dma_buf;
+	size_t size = args->size;
+
+	dma_buf = amdxdna_get_cma_buf(dev, size);
+	if (IS_ERR(dma_buf))
+		return ERR_CAST(dma_buf);
+
+	gobj = dev->driver->gem_prime_import(dev, dma_buf);
+	if (IS_ERR(gobj)) {
+		dma_buf_put(dma_buf);
+		return ERR_CAST(gobj);
+	}
+
+	cmabuf = dma_buf->priv;
+
+	dma_buf_put(dma_buf);
+
+	abo = to_xdna_obj(gobj);
+
+	abo->mem.dma_addr = cmabuf->dma_addr;
+	abo->mem.dev_addr = cmabuf->dma_addr;
+	abo->mem.size = cmabuf->size;
+	abo->type = args->type;
+
+	return abo;
+}
+
+static struct amdxdna_gem_obj *
 amdxdna_gem_create_user_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
@@ -657,6 +700,11 @@ amdxdna_gem_create_user_object(struct drm_device *dev, struct amdxdna_drm_create
 	if (va_tbl.num_entries > 0) {
 		if (args->type == AMDXDNA_BO_CMD)
 			flags |= AMDXDNA_UBUF_FLAG_MAP_DMA;
+
+#ifdef AMDXDNA_DEVEL
+		if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
+			flags |= AMDXDNA_UBUF_FLAG_MAP_DMA;
+#endif
 
 		dma_buf = amdxdna_get_ubuf(dev, flags, va_tbl.num_entries,
 					   u64_to_user_ptr(args->vaddr + sizeof(va_tbl)));
@@ -682,10 +730,14 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_share_object(struct drm_device *dev,
 				struct amdxdna_drm_create_bo *args)
 {
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	size_t aligned_sz = PAGE_ALIGN(args->size);
 
 	if (args->vaddr)
 		return amdxdna_gem_create_user_object(dev, args);
+
+	if (xdna->use_cma)
+		return amdxdna_gem_create_cma_object(dev, args);
 
 	if (amdxdna_use_carvedout()) {
 		struct amdxdna_dev *xdna = to_xdna_dev(dev);
@@ -958,9 +1010,11 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		if (IS_ERR(abo))
 			break;
 		if (is_import_bo(abo)) {
-			XDNA_WARN(xdna, "skip mem map for import bo");
+			XDNA_DBG(xdna, "skip mem map for import bo");
 			break;
 		}
+
+     	if (iommu_mode != AMDXDNA_IOMMU_PASID) {
 		if (!abo->mem.pages) {
 			abo->mem.pages = abo->base.pages;
 			abo->mem.nr_pages = to_gobj(abo)->size >> PAGE_SHIFT;
@@ -969,6 +1023,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		if (ret)
 			goto put_obj;
 		abo->mem.dev_addr = abo->mem.dma_addr;
+	}
 #endif
 		break;
 	default:
@@ -1157,6 +1212,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	struct amdxdna_drm_sync_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
+	dma_addr_t bo_phyaddr;
 	u32 ctx_hdl;
 	int ret;
 
@@ -1178,8 +1234,20 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		goto put_obj;
 	}
 
+	if (xdna->use_cma) {
+		bo_phyaddr = (u64)abo->mem.dma_addr;
+		bo_phyaddr += args->offset;
+		if (args->direction == SYNC_DIRECT_TO_DEVICE) {
+			dma_sync_single_for_device(dev->dev, bo_phyaddr, args->size, DMA_TO_DEVICE);
+		} else if (args->direction == SYNC_DIRECT_FROM_DEVICE) {
+			dma_sync_single_for_cpu(dev->dev, bo_phyaddr, args->size, DMA_FROM_DEVICE);
+		} else {
+			XDNA_ERR(xdna, "Invalid direction %d requested", args->direction);
+			ret = -EINVAL;
+		}
+	}
 	/* For import bo, still sync whole BO */
-	if (abo->mem.kva)
+	else if (abo->mem.kva)
 		drm_clflush_virt_range(abo->mem.kva + args->offset, args->size);
 	else if (abo->mem.pages || abo->base.pages)
 		amdxdna_drm_clflush(abo, args->offset, args->size);

@@ -15,7 +15,7 @@ struct async_event {
 	struct async_event_msg_resp	resp;
 	struct workqueue_struct		*wq;
 	struct work_struct		work;
-	struct aie2_mgmt_dma_hdl	mgmt_hdl;
+	struct amdxdna_mgmt_dma_hdl	*dma_hdl;
 };
 
 struct async_events {
@@ -54,10 +54,13 @@ enum aie_error_category {
 
 /* Don't pack, unless XAIE side changed */
 struct aie_error {
-	__u8			row;
-	__u8			col;
-	__u32			mod_type;
-	__u8			event_id;
+	u8			row;
+	u8			col;
+	u16			reserved_0;
+	u32			mod_type;
+	u8			event_id;
+	u8			reserved_1;
+	u16			reserved_2;
 };
 
 struct aie_err_info {
@@ -70,6 +73,16 @@ struct aie_err_info {
 struct aie_event_category {
 	u8			event_id;
 	enum aie_error_category category;
+};
+
+struct aie_cat_xrt_err_num {
+	enum aie_error_category category;
+	enum xrt_error_num xrt_num;
+};
+
+struct aie_mod_xrt_err_mod {
+	enum aie_module_type mod_type;
+	enum xrt_error_module xrt_mod;
 };
 
 #define EVENT_CATEGORY(id, cat) { id, cat }
@@ -132,6 +145,43 @@ static const struct aie_event_category aie_ml_shim_tile_event_cat[] = {
 	EVENT_CATEGORY(74U, AIE_ERROR_LOCK),
 };
 
+static const struct aie_cat_xrt_err_num aie_cat_err_num_map[] = {
+	{ AIE_ERROR_SATURATION, XRT_ERROR_NUM_AIE_SATURATION },
+	{ AIE_ERROR_FP, XRT_ERROR_NUM_AIE_FP },
+	{ AIE_ERROR_STREAM, XRT_ERROR_NUM_AIE_STREAM },
+	{ AIE_ERROR_ACCESS, XRT_ERROR_NUM_AIE_ACCESS },
+	{ AIE_ERROR_BUS, XRT_ERROR_NUM_AIE_BUS },
+	{ AIE_ERROR_INSTRUCTION, XRT_ERROR_NUM_AIE_INSTRUCTION },
+	{ AIE_ERROR_ECC, XRT_ERROR_NUM_AIE_ECC },
+	{ AIE_ERROR_LOCK, XRT_ERROR_NUM_AIE_LOCK },
+	{ AIE_ERROR_DMA, XRT_ERROR_NUM_AIE_DMA },
+	{ AIE_ERROR_MEM_PARITY, XRT_ERROR_NUM_AIE_MEM_PARITY },
+};
+
+static const struct aie_mod_xrt_err_mod aie_mod_xrt_err_mod_map[] = {
+	{ AIE_MEM_MOD, XRT_ERROR_MODULE_AIE_MEMORY },
+	{ AIE_CORE_MOD, XRT_ERROR_MODULE_AIE_CORE },
+	{ AIE_PL_MOD, XRT_ERROR_MODULE_AIE_PL },
+};
+
+static enum xrt_error_module aie_get_xrt_error_mod(enum aie_module_type mod_type)
+{
+	for (int i = 0; i < ARRAY_SIZE(aie_mod_xrt_err_mod_map); i++) {
+		if (aie_mod_xrt_err_mod_map[i].mod_type == mod_type)
+			return aie_mod_xrt_err_mod_map[i].xrt_mod;
+	}
+	return XRT_ERROR_MODULE_UNKNOWN;
+}
+
+static enum xrt_error_num aie_err_cat_get_xrt_err_num(enum aie_error_category cat)
+{
+	for (int i = 0; i < ARRAY_SIZE(aie_cat_err_num_map); i++) {
+		if (aie_cat_err_num_map[i].category == cat)
+			return aie_cat_err_num_map[i].xrt_num;
+	}
+	return XRT_ERROR_NUM_UNKNOWN;
+}
+
 static enum aie_error_category
 aie_get_error_category(u8 row, u8 event_id, enum aie_module_type mod_type)
 {
@@ -171,6 +221,31 @@ aie_get_error_category(u8 row, u8 event_id, enum aie_module_type mod_type)
 	return AIE_ERROR_UNKNOWN;
 }
 
+static void aie2_async_errors_cache(struct amdxdna_dev_hdl *ndev, void *err_info, u32 num_err)
+{
+	struct amdxdna_async_error *record = &ndev->async_errs_cache.err;
+	u64 current_time_us = ktime_to_us(ktime_get_real());
+	struct aie_error *errs = err_info;
+	enum xrt_error_module xrt_err_mod;
+	enum xrt_error_num err_num;
+	struct aie_error *err;
+	u64 err_code;
+
+	/* Cache the last async error only */
+	err = &errs[num_err - 1];
+	err_num = aie_err_cat_get_xrt_err_num(aie_get_error_category(err->row, err->event_id,
+								     err->mod_type));
+	xrt_err_mod = aie_get_xrt_error_mod(err->mod_type);
+	err_code = XRT_ERROR_CODE_BUILD(err_num, XRT_ERROR_DRIVER_AIE,
+					XRT_ERROR_SEVERITY_CRITICAL, xrt_err_mod,
+					XRT_ERROR_CLASS_AIE);
+
+	mutex_lock(&ndev->async_errs_cache.lock);
+	record->ts_us = current_time_us;
+	record->err_code = err_code;
+	mutex_unlock(&ndev->async_errs_cache.lock);
+}
+
 static u32 aie2_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u32 num_err)
 {
 	struct aie_error *errs = err_info;
@@ -196,8 +271,6 @@ static u32 aie2_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u3
 		err_col |= (1 << err->col);
 	}
 
-	/* TODO: Send AIE error to EDAC system */
-
 	return err_col;
 }
 
@@ -216,8 +289,8 @@ static int aie2_error_async_cb(void *handle, void __iomem *data, size_t size)
 
 static int aie2_error_event_send(struct async_event *e)
 {
-	aie2_mgmt_buff_clflush(&e->mgmt_hdl);
-	return aie2_register_asyn_event_msg(e->ndev, &e->mgmt_hdl, e, aie2_error_async_cb);
+	amdxdna_mgmt_buff_clflush(e->dma_hdl, 0, 0);
+	return aie2_register_asyn_event_msg(e->ndev, e->dma_hdl, e, aie2_error_async_cb);
 }
 
 static void aie2_error_worker(struct work_struct *err_work)
@@ -238,8 +311,7 @@ static void aie2_error_worker(struct work_struct *err_work)
 
 	e->resp.status = MAX_AIE2_STATUS_CODE;
 
-
-	vaddr = aie2_mgmt_buff_get_cpu_addr(&e->mgmt_hdl);
+	vaddr = amdxdna_mgmt_buff_get_cpu_addr(e->dma_hdl, 0);
 	if (IS_ERR(vaddr)) {
 		XDNA_ERR(xdna, "Failed to get a valid virtual addr: %ld", PTR_ERR(vaddr));
 		return;
@@ -261,6 +333,8 @@ static void aie2_error_worker(struct work_struct *err_work)
 		return;
 	}
 
+	aie2_async_errors_cache(e->ndev, info->payload, info->err_cnt);
+
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	/* Re-sent this event to firmware */
 	if (aie2_error_event_send(e))
@@ -281,7 +355,7 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 	for (i = 0; i < events->event_cnt; i++) {
 		struct async_event *e = &events->event[i];
 
-		aie2_mgmt_buff_free(&e->mgmt_hdl);
+		amdxdna_mgmt_buff_free(e->dma_hdl);
 	}
 	kfree(events);
 }
@@ -305,13 +379,10 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	}
 
 	for (i = 0; i < events->event_cnt; i++) {
-		struct async_event *e = &events->event[i];
-		struct aie2_mgmt_dma_hdl *mgmt_hdl = &e->mgmt_hdl;
-		void *buf;
-
-		buf = aie2_mgmt_buff_alloc(ndev, mgmt_hdl, ASYNC_BUF_SIZE, DMA_FROM_DEVICE);
-		if (!buf) {
-			ret = -ENOMEM;
+		e = &events->event[i];
+		e->dma_hdl = amdxdna_mgmt_buff_alloc(xdna, ASYNC_BUF_SIZE, DMA_FROM_DEVICE);
+		if (IS_ERR(e->dma_hdl)) {
+			ret = PTR_ERR(e->dma_hdl);
 			goto free_buf;
 		}
 
@@ -345,11 +416,21 @@ free_buf:
 	while (i) {
 		struct async_event *e = &events->event[i - 1];
 
-		aie2_mgmt_buff_free(&e->mgmt_hdl);
+		amdxdna_mgmt_buff_free(e->dma_hdl);
 		--i;
 	}
 	destroy_workqueue(events->wq);
 free_events:
 	kfree(events);
 	return ret;
+}
+
+/**
+ * amdxdna_error_async_cache_init - Initialize async error cache
+ * @ndev: XDNA device handle for async errors cache initialization
+ * Return: 0 for success.
+ */
+int aie2_error_async_cache_init(struct amdxdna_dev_hdl *ndev)
+{
+	return amdxdna_error_async_cache_init(&ndev->async_errs_cache);
 }

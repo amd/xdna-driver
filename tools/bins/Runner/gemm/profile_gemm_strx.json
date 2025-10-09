@@ -1,7 +1,0 @@
-{
-  "version": "1.0",
-  "execution" : {
-    "iterations": 200,
-    "verbose": false
-  }
-}

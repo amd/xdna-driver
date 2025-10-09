@@ -5,7 +5,10 @@
 #include <boost/tokenizer.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
+#include <dlfcn.h>
 #include <fcntl.h>
+#include <libgen.h>
+#include <limits.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -25,6 +28,25 @@ namespace {
 namespace query = xrt_core::query;
 using key_type = query::key_type;
 
+std::string
+get_shim_lib_path()
+{
+    Dl_info info;
+
+    if (dladdr((void*)&get_shim_lib_path, &info)) {
+      char resolved[PATH_MAX];
+      if (realpath(info.dli_fname, resolved))
+        return std::string(dirname(resolved));
+    }
+    return {};
+}
+
+std::string
+get_shim_data_dir()
+{
+  return get_shim_lib_path() + "/../share/amdxdna/";
+}
+
 uint32_t
 flag_to_type(uint64_t bo_flags)
 {
@@ -33,9 +55,8 @@ flag_to_type(uint64_t bo_flags)
   switch (boflags) {
   case XCL_BO_FLAGS_NONE:
   case XCL_BO_FLAGS_HOST_ONLY:
-    return AMDXDNA_BO_SHARE;
   case XCL_BO_FLAGS_CACHEABLE:
-    return AMDXDNA_BO_DEV;
+    return AMDXDNA_BO_SHARE;
   case XCL_BO_FLAGS_EXECBUF:
     return AMDXDNA_BO_CMD;
   default:
@@ -218,6 +239,8 @@ struct xrt_smi_lists
 
     const auto xrt_smi_lists_type = std::any_cast<xrt_core::query::xrt_smi_lists::type>(reqType);
     switch (xrt_smi_lists_type) {
+    case xrt_core::query::xrt_smi_lists::type::validate_tests:
+      return xrt_core::smi::get_list("validate", "run");
     case xrt_core::query::xrt_smi_lists::type::examine_reports:
       return xrt_core::smi::get_list("examine", "report");
     default:
@@ -312,6 +335,42 @@ struct firmware_version
 
     return output;
   }
+};
+struct runner
+{
+    static std::any
+    get(const xrt_core::device* /*device*/, key_type key)
+    {
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+    }
+
+    static std::any
+    get(const xrt_core::device* device, key_type key, const std::any& param)
+    {
+      if (key != key_type::runner)
+        throw xrt_core::query::no_such_key(key, "Not implemented");
+
+      std::string file_name;
+      std::string path;
+      const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
+      switch (runner_type) {
+      case xrt_core::query::runner::type::latency_path:
+        path = get_shim_data_dir() + std::string("latency/");
+        break;
+      case xrt_core::query::runner::type::latency_recipe:
+        file_name = "latency/recipe_latency.json";
+        break;
+      case xrt_core::query::runner::type::latency_profile:
+        file_name = "latency/profile_latency.json";
+        break;
+      }
+
+      if (!path.empty())
+          return get_shim_data_dir() + path;
+
+      return get_shim_data_dir() + boost::str(boost::format("%s")
+        % file_name);
+    }
 };
 
 struct total_cols
@@ -571,6 +630,7 @@ initialize_query_table()
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
+  emplace_func1_request<query::runner,                  runner>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }
@@ -638,10 +698,15 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
   m_uuid = xclbin_uuid.to_string(); // maintaining uuid in device class
   auto mutable_qos = qos; // Create a local copy
 
-  if (mode == xrt::hw_context::access_mode::exclusive)
-    mutable_qos["priority"] = AMDXDNA_QOS_REALTIME_PRIORITY;
-  else
-    mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
+  //if qos already has priority parameter, then dont overwrite with access_mode
+  if (mutable_qos.find("priority") == mutable_qos.end()) {
+  
+    if (mode == xrt::hw_context::access_mode::exclusive)
+      mutable_qos["priority"] = AMDXDNA_QOS_REALTIME_PRIORITY;
+    else
+      mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
+
+  }
 
   auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, get_xclbin(xclbin_uuid), mutable_qos);
 
@@ -663,11 +728,15 @@ create_hw_context(uint32_t partition_size,
 {
   auto mutable_qos = qos; // Create a local copy
 
-  if (mode == xrt::hw_context::access_mode::exclusive)
-    mutable_qos["priority"] = AMDXDNA_QOS_REALTIME_PRIORITY;
-  else
-    mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
+  //if qos already has priority parameter, then dont overwrite with access_mode
+  if (mutable_qos.find("priority") == mutable_qos.end()) {
 
+    if (mode == xrt::hw_context::access_mode::exclusive)
+      mutable_qos["priority"] = AMDXDNA_QOS_REALTIME_PRIORITY;
+    else
+      mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
+
+  }
   auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, partition_size, mutable_qos);
   // TODO : Get AIE_METADATA info from ELF and register aie array
 

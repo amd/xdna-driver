@@ -41,6 +41,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		goto failed;
 	}
 	client->pasid = iommu_sva_get_pasid(client->sva);
+	XDNA_WARN(xdna, "pasid is: %d", client->pasid);
 	if (client->pasid == IOMMU_PASID_INVALID) {
 		XDNA_ERR(xdna, "SVA get pasid failed");
 		ret = -ENODEV;
@@ -310,13 +311,7 @@ const struct drm_driver amdxdna_drm_drv = {
 	.ioctls = amdxdna_drm_ioctls,
 	.num_ioctls = ARRAY_SIZE(amdxdna_drm_ioctls),
 	.show_fdinfo = amdxdna_show_fdinfo,
-#ifdef AMDXDNA_OF
-	.gem_create_object = amdxdna_gem_create_object_cb,
-	.gem_prime_import_sg_table = drm_gem_dma_prime_import_sg_table,
-	.gem_prime_import = amdxdna_gem_prime_import,
-#else
 	/* For shmem object create */
 	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
 	.gem_prime_import = amdxdna_gem_prime_import,
-#endif
 };

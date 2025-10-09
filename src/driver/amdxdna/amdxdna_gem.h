@@ -36,6 +36,7 @@ struct amdxdna_mem {
 #ifdef AMDXDNA_DEVEL
 	struct sg_table			*sgt;
 	u64				dma_addr; /* IOVA DMA address */
+	u64				user_pasid_addr;
 #endif
 };
 

@@ -36,7 +36,7 @@ void
 pdev::
 open() const
 {
-  const std::lock_guard<std::mutex> lock(m_lock);
+  const std::lock_guard<std::mutex> lock(m_open_close_lock);
 
   if (m_dev_users == 0) {
     m_driver->drv_open(m_sysfs_name);
@@ -54,7 +54,7 @@ void
 pdev::
 close() const
 {
-  const std::lock_guard<std::mutex> lock(m_lock);
+  const std::lock_guard<std::mutex> lock(m_open_close_lock);
 
   --m_dev_users;
   if (m_dev_users == 0) {
