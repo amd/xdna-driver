@@ -37,7 +37,6 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_mem *mem = &abo->mem;
 	struct amdxdna_gem_obj *heap;
-	struct page **pages = NULL;
 	u64 offset;
 	u32 align;
 	int ret;
@@ -46,13 +45,6 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 
 	heap = client->dev_heap;
 	if (!heap) {
-		mutex_unlock(&client->mm_lock);
-		return -EINVAL;
-	}
-
-	pages = heap->base.pages;
-	if (!pages) {
-		XDNA_ERR(xdna, "Heap BO has no pages yet");
 		mutex_unlock(&client->mm_lock);
 		return -EINVAL;
 	}
@@ -83,8 +75,6 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 	mem->dev_addr = abo->mm_node.start;
 	offset = mem->dev_addr - client->dev_heap->mem.dev_addr;
 	mem->userptr = client->dev_heap->mem.userptr + offset;
-	mem->pages = &pages[offset >> PAGE_SHIFT];
-	mem->nr_pages = mem->size >> PAGE_SHIFT;
 
 	drm_gem_object_get(to_gobj(heap));
 
@@ -519,7 +509,6 @@ put_obj:
 static int amdxdna_gem_obj_vmap(struct drm_gem_object *obj, struct iosys_map *map)
 {
 	struct amdxdna_gem_obj *abo = to_xdna_obj(obj);
-	struct amdxdna_mem *mem = &abo->mem;
 
 	iosys_map_clear(map);
 
@@ -527,8 +516,6 @@ static int amdxdna_gem_obj_vmap(struct drm_gem_object *obj, struct iosys_map *ma
 
 	if (is_import_bo(abo))
 		dma_buf_vmap(abo->dma_buf, map);
-	else if (abo->type == AMDXDNA_BO_DEV)
-		iosys_map_set_vaddr(map, vmap(mem->pages, mem->nr_pages, VM_MAP, PAGE_KERNEL));
 	else
 		drm_gem_shmem_object_vmap(obj, map);
 
@@ -546,10 +533,25 @@ static void amdxdna_gem_obj_vunmap(struct drm_gem_object *obj, struct iosys_map 
 
 	if (is_import_bo(abo))
 		dma_buf_vunmap(abo->dma_buf, map);
-	else if (abo->type == AMDXDNA_BO_DEV)
-		vunmap(abo->mem.kv_addr);
 	else
 		drm_gem_shmem_object_vunmap(obj, map);
+}
+
+static int amdxdna_gem_dev_obj_vmap(struct drm_gem_object *obj, struct iosys_map *map)
+{
+	struct amdxdna_gem_obj *abo = to_xdna_obj(obj);
+	struct amdxdna_gem_obj *heap = abo->client->dev_heap;
+	u64 offset = abo->mem.dev_addr - heap->mem.dev_addr;
+	void *base = amdxdna_gem_vmap(heap);
+
+	if (!base)
+		return -ENOMEM;
+	iosys_map_set_vaddr(map, base + offset);
+	return 0;
+}
+
+static void amdxdna_gem_dev_obj_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
+{
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
@@ -600,8 +602,8 @@ static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 
 static const struct drm_gem_object_funcs amdxdna_gem_dev_obj_funcs = {
 	.free = amdxdna_gem_dev_obj_free,
-	.vmap = amdxdna_gem_obj_vmap,
-	.vunmap = amdxdna_gem_obj_vunmap,
+	.vmap = amdxdna_gem_dev_obj_vmap,
+	.vunmap = amdxdna_gem_dev_obj_vunmap,
 };
 
 /* For drm_driver->gem_create_object callback, only support shmem */
@@ -1139,8 +1141,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		}
 	}
 	/* For import bo, still sync whole BO */
-	else if (abo->mem.kv_addr)
-		drm_clflush_virt_range(abo->mem.kv_addr + args->offset, args->size);
+	else if (amdxdna_gem_vmap(abo))
+		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + args->offset, args->size);
 	else if (abo->mem.pages || abo->base.pages)
 		amdxdna_drm_clflush(abo, args->offset, args->size);
 	else if (abo->base.sgt)
@@ -1155,9 +1157,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		u64 seq;
 
 		ctx_hdl = amdxdna_gem_get_assigned_ctx(client, args->handle);
-		if (ctx_hdl == AMDXDNA_INVALID_CTX_HANDLE ||
-		    args->direction != SYNC_DIRECT_FROM_DEVICE) {
-			XDNA_ERR(xdna, "Sync failed, dir %d", args->direction);
+		if (ctx_hdl == AMDXDNA_INVALID_CTX_HANDLE) {
+			XDNA_ERR(xdna, "Failed to find ctx for BO sync");
 			ret = -EINVAL;
 			goto put_obj;
 		}
