@@ -547,7 +547,7 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
-  check_umq_resnet50_result(bo_ofm.map(), ofm_path);
+  check_umq_resnet50_result(bo_ofm.map(), ofm_gold_path);
 }
 
 void
