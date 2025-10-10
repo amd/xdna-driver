@@ -116,6 +116,7 @@ enum psp_reg_idx {
 	PSP_INTR_REG = PSP_NUM_IN_REGS,
 	PSP_STATUS_REG,
 	PSP_RESP_REG,
+	PSP_PWAITMODE_REG,
 	PSP_MAX_REGS /* Keep this at the end */
 };
 
@@ -456,6 +457,7 @@ static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
 struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
 int aie2_psp_start(struct psp_device *psp);
 void aie2_psp_stop(struct psp_device *psp);
+int aie2_psp_waitmode_poll(struct psp_device *psp);
 
 /* aie2_debugfs.c */
 void aie2_debugfs_init(struct amdxdna_dev *xdna);
@@ -466,6 +468,9 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_msg_thread(void *data);
 int aie2_error_async_cache_init(struct amdxdna_dev_hdl *ndev);
+int aie2_error_get_last_async(struct amdxdna_dev *xdna,
+			      struct amdxdna_async_err_cache *err_cache, u32 num_errs,
+			      void *errors);
 
 /* aie2_message.c */
 bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode);

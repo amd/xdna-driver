@@ -700,8 +700,6 @@ struct amdxdna_drm_hwctx_entry {
  *            Refer to amdxnda_xrt_error.h for error code encoding details
  * @ts_us: timestamp in us
  * @ex_err_code: extra error code
- * @reserved0: reserved field
- * @reserved1: reserved field
  *
  * This structure definition refers to XRT error code definition
  */
@@ -709,7 +707,6 @@ struct amdxdna_async_error {
 	__u64 err_code;
 	__u64 ts_us;
 	__u64 ex_err_code;
-	__u64 reserved0;
 };
 
 /**
