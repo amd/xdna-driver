@@ -112,6 +112,131 @@ struct amdxdna_ctx_health_data {
 	u32 fatal_error_app_module;
 };
 
+/**
+ * Interpretation of payload for an ert v1 packet which has context health data for npu0
+ *
+ * @txn_op_idx:                 index of last TXN control code executed
+ * @ctx_pc:                     program counter for that context
+ * @fatal_error_type:           the fatal error type if context crashes
+ * @fatal_error_exception_type: LX7 exception type
+ * @fatal_error_exception_pc:   LX7 program counter at the time of the exception
+ * @fatal_error_app_module:     module name where the exception occurred
+ *
+ * Field                       Default value  Comment
+ * txn_op_idx:                 0xFFFFFFFF     there is no txn control code is running or the
+ *                                            last txn control code op idx is not captured
+ * ctx_pc:                     0              context .text program counter is not captured
+ * fatal_error_type:           0              no fatal error or fatal error is not captured
+ * fatal_error_exception_type: 0
+ * fatal_error_exception_pc:   0
+ * fatal_error_app_module:     0
+ *
+ * Once an ert packet completes with state ERT_CMD_STATE_TIMEOUT, the ert
+ * v1 packet will have the following information for npu0 generation.
+ */
+struct amdxdna_ctx_health_data_aie2 {
+	u32 txn_op_idx;
+	u32 ctx_pc;
+	u32 fatal_error_type;
+	u32 fatal_error_exception_type;
+	u32 fatal_error_exception_pc;
+	u32 fatal_error_app_module;
+};
+
+/**
+ * struct uc_health_info: Health data for each cert
+ *
+ * @uc_idx:            uC index in this context, 0 is the lead
+ * @uc_idle_status:    valid when CERT is CTX_IDEL, represent the reason CERT is idle
+ *                     hsa_lite_status register:
+ *                         bit 0: HSA queue not empty
+ *                         bit 1: preemption save completion
+ *                         bit 2: CERT is idle
+ * @misc_status:       valid when UCCTX_ERROR, represent the reason UC hangs
+ *                         bit 0: uC fw exception
+ *                         bit 1: control code hang
+ * @fw_state:          uC FW state
+ * @page_idx:          page index of the current control code
+ * @offset:            bytes offset inside page
+ * @restore_page:      in case context is preempted, the page index to be executed on resume
+ * @restore_offset:    in case context is preempted, the bytes offset inside restore_page to be
+ *                     executed on resume
+ * @uc_ear:            in case of uC crash, the exception address of uC
+ * @uc_esr:            in case of uC crash, the exception status of uC
+ * @uc_pc:             in case of uC crash, the PC of the current uC
+ */
+struct uc_health_info {
+	u32 uc_idx;
+	u32 uc_idle_status;
+	u32 misc_status;
+	u32 fw_state;
+	u32 page_idx;
+	u32 offset;
+	u32 restore_page;
+	u32 restore_offset;
+	u32 uc_ear;
+	u32 uc_esr;
+	u32 uc_pc;
+};
+
+/**
+ * Interpretation of payload for an ert v1 packet which has context health data for AIE2PS and AIE4
+ *
+ * @ctx_state:             context state
+ * @num_ucs:               number of uC reported
+ * @uc_info:               array for health data for each uC in the context.
+ *                         the array size is based on num_certs.
+ *
+ * Once an ert packet completes with state ERT_CMD_STATE_TIMEOUT, the ert
+ * v1 packet will have the following information for aie2ps/aie4 generation.
+ */
+struct amdxdna_ctx_health_data_aie4 {
+	u32 ctx_state;
+	u32 num_uc;
+	struct uc_health_info uc_info[];
+};
+
+/**
+ * Interpretation of payload for an ert v1 packet
+ *
+ * @version:               context health data version (1)
+ * @npu_gen:               npu generation
+ * @aie2:                  context health data for npu generation aie2/aie2p
+ * @aie4:                  context health data for npu generation aie2ps/aie4
+ *
+ * If version is 1, we should use this data structure to parse context health data
+ * starting from the ert packet payload. And use corresponding data structure based
+ * on the npu generation.
+ */
+struct amdxdna_ctx_health_data_v1 {
+	u32 version;
+	u32 npu_gen;
+	union {
+		struct amdxdna_ctx_health_data_aie2 aie2;
+		struct amdxdna_ctx_health_data_aie4 aie4;
+	};
+};
+
+/**
+ * Enum for context health data version (between XRT shim and driver).
+ * The version field in ert_ctx_health_data/_v1 will be set by the driver
+ */
+enum ert_ctx_health_data_version {
+	AMDXDNA_CTX_HEALTH_DATA_V0 = 0,
+	AMDXDNA_CTX_HEALTH_DATA_V1 = 1
+};
+
+/**
+ * Enum for device generation type.
+ * The npu_gen field in ert_ctx_health_data_v1 is set by the driver based on the npu device device:
+ *   NPU_GEN_AIE2 -> for AIE2/AIE2P
+ *   NPU_GEN_AIE4 -> for AIE4/AIE2PS
+ */
+enum npu_gen_type {
+	NPU_GEN_AIE2,
+	NPU_GEN_AIE4
+};
+
 /* Exec buffer command header format */
 #define AMDXDNA_CMD_STATE		GENMASK(3, 0)
 #define AMDXDNA_CMD_EXTRA_CU_MASK	GENMASK(11, 10)
@@ -150,6 +275,7 @@ struct amdxdna_ctx {
 	/* For command completion notification. */
 	u32				syncobj_hdl;
 	struct amdxdna_ctx_health_data	health_data;
+	struct amdxdna_ctx_health_data_v1 health_data_v1;
 	bool				health_reported;
 
 	struct list_head		entry;
