@@ -10,7 +10,6 @@
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_drm.h"
 #include "amdxdna_ubuf.h"
-#include "amdxdna_devel.h"
 
 struct amdxdna_ubuf_priv {
 	struct page **pages;
@@ -33,13 +32,10 @@ static struct sg_table *amdxdna_ubuf_map(struct dma_buf_attachment *attach,
 	if (ret)
 		return ERR_PTR(ret);
 
-#ifdef AMDXDNA_DEVEL
-	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
-		ret = dma_map_sgtable(attach->dev, sg, direction, 0);
-		if (ret)
-			return ERR_PTR(ret);
-	}
-#endif
+	ret = dma_map_sgtable(attach->dev, sg, direction, 0);
+	if (ret)
+		return ERR_PTR(ret);
+
 	return sg;
 }
 
@@ -47,10 +43,7 @@ static void amdxdna_ubuf_unmap(struct dma_buf_attachment *attach,
 			       struct sg_table *sg,
 			       enum dma_data_direction direction)
 {
-#ifdef AMDXDNA_DEVEL
-	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
-		dma_unmap_sgtable(attach->dev, sg, direction, 0);
-#endif
+	dma_unmap_sgtable(attach->dev, sg, direction, 0);
 	sg_free_table(sg);
 	kfree(sg);
 }

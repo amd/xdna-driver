@@ -24,17 +24,12 @@ struct amdxdna_umap {
 };
 
 struct amdxdna_mem {
-	u64				userptr;
-	void				*kv_addr;
-	u64				dev_addr;
+	void				*kva;
 	size_t				size;
-	struct page			**pages;
-	u32				nr_pages;
 	struct list_head		umap_list;
 	bool				map_invalid;
 #ifdef AMDXDNA_DEVEL
-	struct sg_table			*sgt;
-	u64				dma_addr; /* IOVA DMA address */
+	u64				dma_addr; /* DMA mapped addr */
 #endif
 };
 
@@ -93,5 +88,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 
 void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo);
+u64 amdxdna_gem_uva(struct amdxdna_gem_obj *abo);
+u64 amdxdna_gem_dev_addr(struct amdxdna_gem_obj *abo);
 
 #endif /* _AMDXDNA_GEM_H_ */

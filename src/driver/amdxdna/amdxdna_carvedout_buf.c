@@ -8,7 +8,6 @@
 
 #include "amdxdna_carvedout_buf.h"
 #include "amdxdna_drm.h"
-#include "amdxdna_devel.h"
 
 /*
  * Carvedout memory is a chunk of memory which is physically contiguous and
@@ -73,20 +72,13 @@ static struct sg_table *amdxdna_cbuf_map(struct dma_buf_attachment *attach,
 	}
 
 	sg_init_table(sg, 1);
-#ifdef AMDXDNA_DEVEL
-	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
-		sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->node.start,
-						      cbuf->node.size, direction,
-						      DMA_ATTR_SKIP_CPU_SYNC);
-		ret = dma_mapping_error(attach->dev, sg_dma_address(sg));
-		if (ret)
-			goto free_sg;
-	} else {
-		sg_dma_address(sg) = cbuf->node.start;
-	}
-#else
-	sg_dma_address(sg) = cbuf->node.start;
-#endif
+	sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->node.start,
+					      cbuf->node.size, direction,
+					      DMA_ATTR_SKIP_CPU_SYNC);
+	ret = dma_mapping_error(attach->dev, sg_dma_address(sg));
+	if (ret)
+		goto free_sg;
+
 	sg_assign_page(sg, NULL);
 	sg->offset = 0;
 	sg_dma_len(sg) = cbuf->node.size;
@@ -109,12 +101,8 @@ static void amdxdna_cbuf_unmap(struct dma_buf_attachment *attach,
 {
 	struct scatterlist *sg = sgt->sgl;
 
-#ifdef AMDXDNA_DEVEL
-	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
-		dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg),
-				   direction, DMA_ATTR_SKIP_CPU_SYNC);
-	}
-#endif
+	dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg),
+			   direction, DMA_ATTR_SKIP_CPU_SYNC);
 	kfree(sg);
 	kfree(sgt);
 }

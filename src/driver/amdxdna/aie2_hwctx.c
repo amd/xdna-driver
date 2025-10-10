@@ -127,13 +127,13 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
 		ret = aie2_map_host_buf(xdna->dev_handle, ctx->priv->id,
 					heap->mem.dma_addr, heap->mem.size);
-		goto skip;
+	} else {
+		ret = aie2_map_host_buf(xdna->dev_handle, ctx->priv->id,
+					amdxdna_gem_uva(heap), heap->mem.size);
 	}
-#endif
+#else
 	ret = aie2_map_host_buf(xdna->dev_handle, ctx->priv->id,
-				heap->mem.userptr, heap->mem.size);
-#ifdef AMDXDNA_DEVEL
-skip:
+				amdxdna_gem_uva(heap), heap->mem.size);
 #endif
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
