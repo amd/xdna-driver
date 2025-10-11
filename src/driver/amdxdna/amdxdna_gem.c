@@ -272,7 +272,7 @@ amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
  * Obtains a kernel virtual address on the BO.
  * The mapping is established on the first call and stays until BO is freed.
  * If user obtains a kernel virtual address on this BO through drm_gem_vmap(),
- * the mapping needs to be explicitely freed by drm_gem_vunmap().
+ * the mapping needs to be explicitly freed by drm_gem_vunmap().
  */
 void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
 {
@@ -315,7 +315,7 @@ u64 amdxdna_gem_uva(struct amdxdna_gem_obj *abo)
 	if (abo->type == AMDXDNA_BO_DEV) {
 		struct amdxdna_gem_obj *heap = abo->client->dev_heap;
 		u64 off = amdxdna_gem_dev_addr(abo) - amdxdna_gem_dev_addr(heap);
-		
+
 		return amdxdna_gem_uva(heap) + off;
 	}
 
@@ -939,7 +939,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 		 args->type, args->vaddr, args->size, args->flags);
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
-	/*FALLTHRU*/
+		fallthrough;
 	case AMDXDNA_BO_CMD:
 		abo = amdxdna_drm_create_share_bo(dev, args, filp);
 		break;
