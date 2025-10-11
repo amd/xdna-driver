@@ -152,7 +152,7 @@ static int amdxdna_cbuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
 	struct amdxdna_cbuf_priv *cbuf = dbuf->priv;
 	void *kva;
 
-	kva = ioremap_uc(cbuf->node.start, cbuf->node.size);
+	kva = ioremap_cache(cbuf->node.start, cbuf->node.size);
 	if (!kva)
 		return -EINVAL;
 
