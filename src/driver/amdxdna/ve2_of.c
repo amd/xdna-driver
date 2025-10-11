@@ -61,7 +61,15 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	}
 	XDNA_INFO(xdna, "aie load cert complete");
 
-	ve2_store_firmware_version(xdna_hdl, xaie_dev);
+	ret = ve2_store_firmware_version(&xdna_hdl->fw_version, xaie_dev);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "cert status read failed with err %d", ret);
+		goto teardown;
+	}
+	XDNA_INFO(xdna, "CERT major: %d\n", xdna_hdl->fw_version.major);
+	XDNA_INFO(xdna, "CERT minor: %d\n", xdna_hdl->fw_version.minor);
+	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.git_hash);
+	XDNA_INFO(xdna, "CERT git hash date: %s\n", xdna_hdl->fw_version.date);
 
 teardown:
 	aie_partition_teardown(xaie_dev);
