@@ -35,7 +35,8 @@ unsigned device_index = 0;
 unsigned threads = 2;
 unsigned vf_cnt;
 bool vf_test = false;
-unsigned timeout_ms = 600000;
+// silicon default timeout 10s
+unsigned timeout_ms = 10000;
 std::vector<unsigned> exec_list;
 std::string dpu = "nop";
 
