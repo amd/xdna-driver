@@ -75,7 +75,7 @@ static struct sg_table *amdxdna_cbuf_map(struct dma_buf_attachment *attach,
 	sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->node.start,
 					      cbuf->node.size, direction,
 					      DMA_ATTR_SKIP_CPU_SYNC);
-	ret = dma_mapping_error(attach->dev, sg->dma_address);
+	ret = dma_mapping_error(attach->dev, sg_dma_address(sg));
 	if (ret)
 		goto free_sg;
 
@@ -152,7 +152,7 @@ static int amdxdna_cbuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
 	struct amdxdna_cbuf_priv *cbuf = dbuf->priv;
 	void *kva;
 
-	kva = ioremap_uc(cbuf->node.start, cbuf->node.size);
+	kva = ioremap_cache(cbuf->node.start, cbuf->node.size);
 	if (!kva)
 		return -EINVAL;
 
@@ -173,6 +173,19 @@ static const struct dma_buf_ops amdxdna_cbuf_dmabuf_ops = {
 	.vmap = amdxdna_cbuf_vmap,
 	.vunmap = amdxdna_cbuf_vunmap,
 };
+
+static void amdxdna_cbuf_clear(struct dma_buf *dbuf)
+{
+	struct iosys_map vmap = IOSYS_MAP_INIT_VADDR(NULL);
+
+	dma_buf_vmap(dbuf, &vmap);
+	if (!vmap.vaddr) {
+		pr_err("Failed to vmap carveout dma buf\n");
+		return;
+	}
+	memset(vmap.vaddr, 0, dbuf->size);
+	dma_buf_vunmap(dbuf, &vmap);
+}
 
 struct dma_buf *amdxdna_get_carvedout_buf(struct drm_device *dev, size_t size,
 					  u64 alignment)
@@ -204,6 +217,7 @@ struct dma_buf *amdxdna_get_carvedout_buf(struct drm_device *dev, size_t size,
 		goto remove_node;
 	}
 
+	amdxdna_cbuf_clear(dbuf);
 	return dbuf;
 
 remove_node:

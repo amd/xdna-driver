@@ -404,7 +404,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		return -ENOMEM;
 
 	if (cmd_bo_hdl != AMDXDNA_INVALID_BO_HANDLE) {
-		job->cmd_bo = amdxdna_gem_get_obj(client, cmd_bo_hdl, AMDXDNA_BO_CMD);
+		job->cmd_bo = amdxdna_gem_get_obj(client, cmd_bo_hdl, AMDXDNA_BO_SHARE);
 		if (!job->cmd_bo) {
 			XDNA_ERR(xdna, "Failed to get cmd bo from %d", cmd_bo_hdl);
 			ret = -EINVAL;
