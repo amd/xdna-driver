@@ -274,7 +274,6 @@ struct amdxdna_ctx {
 	atomic64_t			job_free_cnt;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
-	struct amdxdna_ctx_health_data	health_data;
 	struct amdxdna_ctx_health_data_v1 health_data_v1;
 	bool				health_reported;
 
