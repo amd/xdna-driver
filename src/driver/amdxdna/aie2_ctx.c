@@ -627,7 +627,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 		}
 
 		XDNA_DBG(xdna, "Command buf %d addr 0x%llx size 0x%lx",
-			 i, abo->mem.dev_addr, abo->mem.size);
+			 i, amdxdna_gem_dev_addr(abo), abo->mem.size);
 		priv->cmd_buf[i] = abo;
 	}
 
