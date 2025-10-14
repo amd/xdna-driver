@@ -90,14 +90,14 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "\tFatal error app module: 0x%x", r->fatal_info.app_module);
 		XDNA_ERR(xdna, "\tFatal error task ID: %d", r->fatal_info.task_index);
 
-		ctx->health_data_v1.version = AMDXDNA_CTX_HEALTH_DATA_V0;
-		ctx->health_data_v1.npu_gen = NPU_GEN_AIE2;
-		ctx->health_data_v1.aie2.fatal_error_exception_type = r->fatal_info.exception_type;
-		ctx->health_data_v1.aie2.fatal_error_exception_pc = r->fatal_info.exception_pc;
-		ctx->health_data_v1.aie2.fatal_error_app_module = r->fatal_info.app_module;
-		ctx->health_data_v1.aie2.fatal_error_type = r->fatal_info.fatal_type;
-		ctx->health_data_v1.aie2.txn_op_idx = r->txn_op_id;
-		ctx->health_data_v1.aie2.ctx_pc = r->ctx_pc;
+		ctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
+		ctx->health_data.npu_gen = NPU_GEN_AIE2;
+		ctx->health_data.aie2.fatal_error_exception_type = r->fatal_info.exception_type;
+		ctx->health_data.aie2.fatal_error_exception_pc = r->fatal_info.exception_pc;
+		ctx->health_data.aie2.fatal_error_app_module = r->fatal_info.app_module;
+		ctx->health_data.aie2.fatal_error_type = r->fatal_info.fatal_type;
+		ctx->health_data.aie2.txn_op_idx = r->txn_op_id;
+		ctx->health_data.aie2.ctx_pc = r->ctx_pc;
 		ctx->health_reported = false;
 	}
 	amdxdna_mgmt_buff_free(dma_hdl);
@@ -198,11 +198,11 @@ aie2_ctx_cmd_health_data(struct amdxdna_ctx *ctx, struct amdxdna_gem_obj *cmd_ab
 	}
 
 	cmd_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
-	if (unlikely(data_total < sizeof(ctx->health_data_v1)))
+	if (unlikely(data_total < sizeof(ctx->health_data)))
 		XDNA_WARN(ctx->client->xdna, "Large health data, truncated");
 
-	data_total = min(data_total, sizeof(ctx->health_data_v1));
-	memcpy(cmd_data, &ctx->health_data_v1, data_total);
+	data_total = min(data_total, sizeof(ctx->health_data));
+	memcpy(cmd_data, &ctx->health_data, data_total);
 	ctx->health_reported = true;
 
 	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);

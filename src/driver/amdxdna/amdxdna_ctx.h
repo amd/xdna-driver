@@ -78,40 +78,6 @@ struct amdxdna_cmd_preempt_data {
 	u32 prop_args[];    /* properties and regular kernel arguments */
 };
 
-/*
- * Interpretation of payload for an amdxdna_cmd which has context health data
- *
- * @version:                    context health data version.
- *                              defines the interface version between driver and shim.
- * @txn_op_idx:                 index of last TXN control code executed
- * @ctx_pc:                     program counter for that context
- * @fatal_error_type:           the fatal error type if context crashes
- * @fatal_error_exception_type: LX7 exception type
- * @fatal_error_exception_pc:   LX7 program counter at the time of the exception
- * @fatal_error_app_module:     module name where the exception occurred
- *
- * Field                       Default value  Comment
- * txn_op_idx:                 0xFFFFFFFF     there is no txn control code is running or the
- *                                            last txn control code op idx is not captured
- * ctx_pc:                     0              context .text program counter is not captured
- * fatal_error_type:           0              no fatal error or fatal error is not captured
- * fatal_error_exception_type: 0
- * fatal_error_exception_pc:   0
- * fatal_error_app_module:     0
-
- * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
- * amdxdna_cmd starting from payload will have the following information.
- */
-struct amdxdna_ctx_health_data {
-	u32 version;
-	u32 txn_op_idx;
-	u32 ctx_pc;
-	u32 fatal_error_type;
-	u32 fatal_error_exception_type;
-	u32 fatal_error_exception_pc;
-	u32 fatal_error_app_module;
-};
-
 /**
  * Interpretation of payload for an ert v1 packet which has context health data for npu0
  *
@@ -208,7 +174,7 @@ struct amdxdna_ctx_health_data_aie4 {
  * starting from the ert packet payload. And use corresponding data structure based
  * on the npu generation.
  */
-struct amdxdna_ctx_health_data_v1 {
+struct amdxdna_ctx_health_data {
 	u32 version;
 	u32 npu_gen;
 	union {
@@ -218,24 +184,20 @@ struct amdxdna_ctx_health_data_v1 {
 };
 
 /**
- * Enum for context health data version (between XRT shim and driver).
- * The version field in ert_ctx_health_data/_v1 will be set by the driver
+ * Macros for context health data version (between XRT shim and driver).
+ * The version field in amdxnda_ctx_health_data will be set by the driver
  */
-enum ert_ctx_health_data_version {
-	AMDXDNA_CTX_HEALTH_DATA_V0 = 0,
-	AMDXDNA_CTX_HEALTH_DATA_V1 = 1
-};
+#define AMDXDNA_CTX_HEALTH_DATA_V0	0
+#define AMDXDNA_CTX_HEALTH_DATA_V1	1
 
 /**
- * Enum for device generation type.
+ * Macros for device generation type.
  * The npu_gen field in ert_ctx_health_data_v1 is set by the driver based on the npu device device:
- *   NPU_GEN_AIE2 -> for AIE2/AIE2P
- *   NPU_GEN_AIE4 -> for AIE4/AIE2PS
+ *   AMDXDNA_NPU_GEN_AIE2 -> for AIE2/AIE2P
+ *   AMDXDNA_NPU_GEN_AIE4 -> for AIE4/AIE2PS
  */
-enum npu_gen_type {
-	NPU_GEN_AIE2,
-	NPU_GEN_AIE4
-};
+#define NPU_GEN_AIE2			0
+#define NPU_GEN_AIE4			1
 
 /* Exec buffer command header format */
 #define AMDXDNA_CMD_STATE		GENMASK(3, 0)
@@ -274,7 +236,7 @@ struct amdxdna_ctx {
 	atomic64_t			job_free_cnt;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
-	struct amdxdna_ctx_health_data_v1 health_data_v1;
+	struct amdxdna_ctx_health_data health_data;
 	bool				health_reported;
 
 	struct list_head		entry;

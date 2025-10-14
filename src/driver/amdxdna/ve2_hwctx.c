@@ -713,11 +713,11 @@ static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 		kfree(hs);
 	}
 
-	hwctx->health_data_v1.version = AMDXDNA_CTX_HEALTH_DATA_V1;
-	hwctx->health_data_v1.npu_gen = NPU_GEN_AIE4;
-	hwctx->health_data_v1.aie4.ctx_state = priv_ctx->state;
-	hwctx->health_data_v1.aie4.num_uc = priv_ctx->num_col;
-	memcpy(hwctx->health_data_v1.aie4.uc_info, r->uc_info, priv_ctx->num_col *
+	hwctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	hwctx->health_data.npu_gen = NPU_GEN_AIE4;
+	hwctx->health_data.aie4.ctx_state = priv_ctx->state;
+	hwctx->health_data.aie4.num_uc = priv_ctx->num_col;
+	memcpy(hwctx->health_data.aie4.uc_info, r->uc_info, priv_ctx->num_col *
 	       sizeof(struct uc_health_info));
 
 	kfree(r);
@@ -774,14 +774,14 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			ve2_dump_ctx(xdna, hwctx);
 
 			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
-			size_t total_size = sizeof(struct amdxdna_ctx_health_data_v1) +
+			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
 					priv_ctx->num_col * sizeof(struct uc_health_info);
-			if (unlikely(data_total < sizeof(hwctx->health_data_v1)))
+			if (unlikely(data_total < sizeof(hwctx->health_data)))
 				XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu", __func__,
 					  data_total, total_size);
 
 			data_total = min(data_total, total_size);
-			memcpy(cmd_data, &hwctx->health_data_v1, total_size);
+			memcpy(cmd_data, &hwctx->health_data, total_size);
 			hwctx->health_reported = true;
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 		} else {
