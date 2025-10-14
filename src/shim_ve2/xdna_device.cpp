@@ -336,41 +336,16 @@ struct firmware_version
     return output;
   }
 };
-struct runner
+
+struct archive_path
 {
-    static std::any
-    get(const xrt_core::device* /*device*/, key_type key)
-    {
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-    }
+  using result_type = query::archive_path::result_type;
 
-    static std::any
-    get(const xrt_core::device* device, key_type key, const std::any& param)
-    {
-      if (key != key_type::runner)
-        throw xrt_core::query::no_such_key(key, "Not implemented");
-
-      std::string file_name;
-      std::string path;
-      const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
-      switch (runner_type) {
-      case xrt_core::query::runner::type::latency_path:
-        path = get_shim_data_dir() + std::string("latency/");
-        break;
-      case xrt_core::query::runner::type::latency_recipe:
-        file_name = "latency/recipe_latency.json";
-        break;
-      case xrt_core::query::runner::type::latency_profile:
-        file_name = "latency/profile_latency.json";
-        break;
-      }
-
-      if (!path.empty())
-          return get_shim_data_dir() + path;
-
-      return get_shim_data_dir() + boost::str(boost::format("%s")
-        % file_name);
-    }
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_ve2.ar");
+  }
 };
 
 struct total_cols
@@ -629,8 +604,8 @@ initialize_query_table()
   emplace_func0_request<query::rom_vbnv,                dev_info>();
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();
+  emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
-  emplace_func1_request<query::runner,                  runner>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }
