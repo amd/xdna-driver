@@ -36,6 +36,13 @@ install (TARGETS ${XDNA_VE2_TARGET}
   LIBRARY DESTINATION ${XRT_INSTALL_LIB_DIR}
   )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Runner/
-	DESTINATION ${CMAKE_INSTALL_DATADIR}/amdxdna/
+set(vtd_file "${CMAKE_CURRENT_BINARY_DIR}/xrt_smi_ve2.ar")
+
+file(DOWNLOAD
+  "https://github.com/Xilinx/VTD/raw/b935283f0ff7a5b68cc87cf1139eef83f344a208/archive/ve2/xrt_smi_ve2.a"
+  "${vtd_file}"
+)
+
+install(FILES "${vtd_file}"
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/amdxdna/bins/
 )
