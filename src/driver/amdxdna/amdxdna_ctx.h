@@ -79,7 +79,7 @@ struct amdxdna_cmd_preempt_data {
 };
 
 /**
- * Interpretation of payload for an ert v1 packet which has context health data for npu0
+ * Interpretation of payload for an amdxdna_cmd which has context health data for npu0
  *
  * @txn_op_idx:                 index of last TXN control code executed
  * @ctx_pc:                     program counter for that context
@@ -97,8 +97,8 @@ struct amdxdna_cmd_preempt_data {
  * fatal_error_exception_pc:   0
  * fatal_error_app_module:     0
  *
- * Once an ert packet completes with state ERT_CMD_STATE_TIMEOUT, the ert
- * v1 packet will have the following information for npu0 generation.
+ * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
+ * amdxdna_cmd starting from payload will have the following information for npu0 gen.
  */
 struct amdxdna_ctx_health_data_aie2 {
 	u32 txn_op_idx;
@@ -146,15 +146,15 @@ struct uc_health_info {
 };
 
 /**
- * Interpretation of payload for an ert v1 packet which has context health data for AIE2PS and AIE4
+ * Interpretation of payload for an amdxdna_cmd which has context health data for AIE2PS and AIE4
  *
  * @ctx_state:             context state
  * @num_ucs:               number of uC reported
  * @uc_info:               array for health data for each uC in the context.
  *                         the array size is based on num_certs.
  *
- * Once an ert packet completes with state ERT_CMD_STATE_TIMEOUT, the ert
- * v1 packet will have the following information for aie2ps/aie4 generation.
+ * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
+ * amdxdna_cmd starting from payload will have the following information for aie2ps/aie4 generation.
  */
 struct amdxdna_ctx_health_data_aie4 {
 	u32 ctx_state;
@@ -163,7 +163,7 @@ struct amdxdna_ctx_health_data_aie4 {
 };
 
 /**
- * Interpretation of payload for an ert v1 packet
+ * Interpretation of payload for an amdxdna_cmd
  *
  * @version:               context health data version (1)
  * @npu_gen:               npu generation
@@ -171,7 +171,7 @@ struct amdxdna_ctx_health_data_aie4 {
  * @aie4:                  context health data for npu generation aie2ps/aie4
  *
  * If version is 1, we should use this data structure to parse context health data
- * starting from the ert packet payload. And use corresponding data structure based
+ * starting from the amdxdna_cmd payload. And use corresponding data structure based
  * on the npu generation.
  */
 struct amdxdna_ctx_health_data {
