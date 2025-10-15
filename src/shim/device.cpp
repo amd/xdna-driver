@@ -374,13 +374,13 @@ struct context_health_info {
   static xrt_core::query::context_health_info::smi_context_health
   fill_health_entry(const amdxdna_drm_hwctx_entry& entry)
   {
-    ert_ctx_health_data_v1 new_entry{};
-    new_entry.aie2.txn_op_idx = entry.txn_op_idx;
-    new_entry.aie2.ctx_pc = entry.ctx_pc;
-    new_entry.aie2.fatal_error_type = entry.fatal_error_type;
-    new_entry.aie2.fatal_error_exception_type = entry.fatal_error_exception_type;
-    new_entry.aie2.fatal_error_exception_pc = entry.fatal_error_exception_pc;
-    new_entry.aie2.fatal_error_app_module = entry.fatal_error_app_module;
+    ert_ctx_health_data new_entry{};
+    new_entry.txn_op_idx = entry.txn_op_idx;
+    new_entry.ctx_pc = entry.ctx_pc;
+    new_entry.fatal_error_type = entry.fatal_error_type;
+    new_entry.fatal_error_exception_type = entry.fatal_error_exception_type;
+    new_entry.fatal_error_exception_pc = entry.fatal_error_exception_pc;
+    new_entry.fatal_error_app_module = entry.fatal_error_app_module;
 
     xrt_core::query::context_health_info::smi_context_health val{};
     val.ctx_id = entry.context_id;

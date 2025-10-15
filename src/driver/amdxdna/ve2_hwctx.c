@@ -575,7 +575,7 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 		void *cmd_data;
 		u32 cmd_data_len;
 
-		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_CMD);
+		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!abo) {
 			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
 			return -ENOENT;
