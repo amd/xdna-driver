@@ -91,7 +91,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "\tFatal error task ID: %d", r->fatal_info.task_index);
 
 		ctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
-		ctx->health_data.npu_gen = NPU_GEN_AIE2;
+		ctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE2;
 		ctx->health_data.aie2.fatal_error_exception_type = r->fatal_info.exception_type;
 		ctx->health_data.aie2.fatal_error_exception_pc = r->fatal_info.exception_pc;
 		ctx->health_data.aie2.fatal_error_app_module = r->fatal_info.app_module;
