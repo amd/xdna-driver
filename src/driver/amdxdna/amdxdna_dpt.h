@@ -15,7 +15,7 @@
 #define AMDXDNA_DPT_FOOTER_SIZE		SZ_4K
 #define AMDXDNA_DPT_FW_LOG_NAME		"xdna_fw_log"
 #define AMDXDNA_DPT_FW_LOG_MSG_ALIGN	8
-#define AMDXDNA_DPT_POLL_INTERVAL_MS	50
+#define AMDXDNA_DPT_POLL_INTERVAL_MS	10
 
 struct amdxdna_dpt_footer {
 	u8				minor;
@@ -55,6 +55,8 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna);
 int amdxdna_fw_log_fini(struct amdxdna_dev *xdna);
 int amdxdna_fw_log_resume(struct amdxdna_dev *xdna);
 int amdxdna_fw_log_suspend(struct amdxdna_dev *xdna);
+
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
+int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
 
 #endif /* _AMDXDNA_DPT_H_ */

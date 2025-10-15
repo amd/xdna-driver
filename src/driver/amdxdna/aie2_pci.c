@@ -1457,6 +1457,9 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = aie2_get_array_async_error(xdna, args);
 		break;
+	case DRM_AMDXDNA_FW_LOG:
+		ret = amdxdna_get_fw_log(xdna, args);
+		break;
 	default:
 		ret = aie2_get_array_hwctx(client, args);
 		break;

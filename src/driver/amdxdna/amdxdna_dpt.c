@@ -33,6 +33,94 @@ MODULE_PARM_DESC(poll_fw_log, " Enable firmware log polling (Default false)");
 
 static bool fw_log_dump_to_dmesg;
 
+static inline int amdxnda_dpt_cpy(void *to, void *from, size_t size, bool user)
+{
+	if (user) {
+		if (copy_to_user(to, from, size))
+			return -EFAULT;
+	} else {
+		memcpy(to, from, size);
+	}
+	return 0;
+}
+
+static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buffer, u64 *offset, u32 *size,
+				     bool user)
+{
+	struct amdxdna_dev *xdna = dpt->xdna;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+	size_t req_size, log_size;
+	u32 start, end;
+	u64 tail;
+
+	dma_hdl = dpt->dma_hdl;
+	log_size = dma_hdl->size - SZ_4K; /* 4K size is reserved for the footer */
+
+	tail = READ_ONCE(dpt->tail);
+
+	if (tail < *offset) {
+		XDNA_ERR(xdna, "%s: invalid fetch offset: 0x%llx", dpt->name, *offset);
+		return -EINVAL;
+	}
+
+	if (tail == *offset) {
+		req_size = 0;
+		goto exit;
+	}
+
+	start = *offset % log_size;
+	end = tail % log_size;
+
+	/*
+	 * Start at 0 if the writer (tail) has advanced past one full buffer plus our current slot
+	 * (offset % log_size), meaning our position was overwritten
+	 */
+	if (tail - *offset >= log_size + start)
+		start = 0;
+
+	if (end > start) {
+		req_size = end - start;
+		if (req_size > *size) {
+			/* Return as much data as it can fit */
+			XDNA_DBG(xdna, "%s: insufficient buffer size: 0x%lx", dpt->name, req_size);
+			end = start + req_size;
+		}
+	} else {
+		req_size = log_size - start + end;
+		if (req_size > *size) {
+			/* Return as much data as it can fit */
+			XDNA_DBG(xdna, "%s: insufficient buffer size: 0x%lx", dpt->name, req_size);
+			if (start + req_size <= log_size)
+				end = start + req_size;
+			else
+				end = req_size - (log_size - start);
+		}
+	}
+
+	if (start > end) {
+		/* First chuck: Copy from start point until the end of log buffer */
+		amdxdna_mgmt_buff_clflush(dma_hdl, start, log_size - start);
+		if (amdxnda_dpt_cpy(buffer, amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, start),
+				    log_size - start, user))
+			return -EFAULT;
+
+		/* Last chuck: Wrap around and copy from the start of log buffer to end */
+		amdxdna_mgmt_buff_clflush(dma_hdl, 0, end);
+		if (amdxnda_dpt_cpy(buffer + (log_size - start),
+				    amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), end, user))
+			return -EFAULT;
+	} else {
+		amdxdna_mgmt_buff_clflush(dma_hdl, start, end - start);
+		if (amdxnda_dpt_cpy(buffer, amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, start),
+				    end - start, user))
+			return -EFAULT;
+	}
+exit:
+	*size = req_size;
+	*offset = tail;
+	return 0;
+}
+
 static bool amdxdna_update_tail(struct amdxdna_dpt *dpt)
 {
 	struct amdxdna_dpt_footer *footer;
@@ -54,53 +142,11 @@ static bool amdxdna_update_tail(struct amdxdna_dpt *dpt)
 
 	if (dpt->tail != tail) {
 		WRITE_ONCE(dpt->tail, tail);
+		XDNA_DBG(dpt->xdna, "%s: Tail updated: 0x%llx", dpt->name, tail);
 		wake_up(&dpt->wait);
 		return true;
 	}
 	return false;
-}
-
-static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buffer, size_t *size)
-{
-	struct amdxdna_dev *xdna = dpt->xdna;
-	struct amdxdna_mgmt_dma_hdl *dma_hdl;
-	size_t req_size, log_size;
-	u32 start, end;
-	u64 tail;
-
-	dma_hdl = dpt->dma_hdl;
-	log_size = dma_hdl->size;
-
-	tail = READ_ONCE(dpt->tail);
-	start = dpt->head % log_size;
-	end = tail % log_size;
-
-	if (start == end)
-		return 0;
-
-	req_size = (end > start) ? (end - start) : (log_size - start + end);
-
-	if (req_size > *size) {
-		XDNA_ERR(xdna, "Insufficient driver log buffer size: 0x%lx", req_size);
-		return -ENOSPC;
-	}
-
-	if (start > end) {
-		/* First chuck: Copy from start point until the end of log buffer */
-		amdxdna_mgmt_buff_clflush(dma_hdl, start, log_size - start);
-		memcpy(buffer, amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, start), log_size - start);
-		/* Last chuck: Wrap around and copy from the start of log buffer to end */
-		amdxdna_mgmt_buff_clflush(dma_hdl, 0, end);
-		memcpy(buffer + (log_size - start),
-		       amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), end);
-	} else {
-		amdxdna_mgmt_buff_clflush(dma_hdl, start, end - start);
-		memcpy(buffer, amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, start), end - start);
-	}
-
-	*size = req_size;
-	dpt->head = tail;
-	return 0;
 }
 
 static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
@@ -192,29 +238,34 @@ int amdxdna_fw_log_suspend(struct amdxdna_dev *xdna)
 	return amdxdna_fw_log_fini(xdna);
 }
 
-static void amdxdna_dpt_worker(struct work_struct *w)
+static void amdxdna_dpt_fetch_and_dump_to_dmesg(struct amdxdna_dpt *dpt)
 {
-	struct amdxdna_dpt *dpt = container_of(w, struct amdxdna_dpt, work);
-	size_t size = fw_log_size;
+	u32 size = fw_log_size;
 	int ret;
 
-	ret = amdxdna_update_tail(dpt);
-	if (!ret)
-		return;
-
-	/* Skip fetch and print to dmesg if dump_fw_log is not enabled */
-	if (!dpt->dump_to_dmesg || !dpt->xdna->dev_info->ops->fw_log_parse) {
-		XDNA_DBG(dpt->xdna, "Skipped dumping to dmesg");
-		return;
-	}
-
-	ret = amdxdna_dpt_fetch_payload(dpt, dpt->local_buffer, &size);
+	ret = amdxdna_dpt_fetch_payload(dpt, dpt->local_buffer, &dpt->head, &size, false);
 	if (ret) {
-		XDNA_ERR(dpt->xdna, "Failed to fetch fw buffer: %d", ret);
+		XDNA_ERR(dpt->xdna, "Failed to fetch FW buffer: %d", ret);
 		return;
 	}
 
 	dpt->xdna->dev_info->ops->fw_log_parse(dpt->xdna, dpt->local_buffer, size);
+}
+
+static void amdxdna_dpt_drain_pending_data(struct amdxdna_dpt *dpt)
+{
+	if (dpt->head != dpt->tail)
+		amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
+}
+
+static void amdxdna_dpt_worker(struct work_struct *w)
+{
+	struct amdxdna_dpt *dpt = container_of(w, struct amdxdna_dpt, work);
+
+	if (amdxdna_update_tail(dpt)) {
+		if (dpt->dump_to_dmesg && dpt->xdna->dev_info->ops->fw_log_parse)
+			amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
+	}
 }
 
 static void amdxdna_dpt_timer(struct timer_list *t)
@@ -252,14 +303,17 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
 	if (dump) {
 		dpt->local_buffer = kzalloc(fw_log_size, GFP_KERNEL);
 		if (!dpt->local_buffer) {
-			XDNA_ERR(dpt->xdna, "Failed to allocate fw fetch buffer");
+			XDNA_ERR(dpt->xdna, "Failed to allocate FW fetch buffer");
 			return -ENOMEM;
 		}
 		amdxdna_dpt_enable_polling(dpt, true);
+		/* Drain any data already logged in the buffer before dump_to_dmesg was enabled */
+		amdxdna_dpt_drain_pending_data(dpt);
 	} else {
 		if (!poll_fw_log)
 			amdxdna_dpt_enable_polling(dpt, false);
 		kfree(dpt->local_buffer);
+		dpt->head = 0;
 	}
 
 	dpt->dump_to_dmesg = dump;
@@ -282,7 +336,7 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	}
 
 	if (fw_log_size < SZ_8K || fw_log_size > SZ_4M) {
-		XDNA_ERR(xdna, "Invalid fw log buffer size: 0x%llx", fw_log_size);
+		XDNA_ERR(xdna, "Invalid FW log buffer size: 0x%llx", fw_log_size);
 		return -EINVAL;
 	}
 
@@ -292,7 +346,7 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 
 	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, fw_log_size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl)) {
-		XDNA_ERR(xdna, "Failed to allocate fw log buffer of size: 0x%llx", fw_log_size);
+		XDNA_ERR(xdna, "Failed to allocate FW log buffer of size: 0x%llx", fw_log_size);
 		ret = PTR_ERR(dma_hdl);
 		goto kfree;
 	}
@@ -316,9 +370,9 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 
 	ret = xdna->dev_info->ops->fw_log_init(xdna, fw_log_size, fw_log_level);
 	if (ret) {
-		/* Sliently fail for device generation that don't support FW logging */
+		/* Silently fail for device generation that don't support FW logging */
 		if (ret != -EOPNOTSUPP)
-			XDNA_ERR(xdna, "Failed to configure fw logging: %d", ret);
+			XDNA_ERR(xdna, "Failed to configure FW logging: %d", ret);
 		else
 			ret = 0;
 		goto mfree;
@@ -326,7 +380,7 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 
 	ret = amdxdna_dpt_irq_init(log_hdl);
 	if (ret)
-		XDNA_ERR(xdna, "Failed to init fw logging IRQ: %d", ret);
+		XDNA_ERR(xdna, "Failed to init FW logging IRQ: %d", ret);
 
 	/* Enable polling, if IRQ initialization fails or enabled by default */
 	if (ret || poll_fw_log)
@@ -360,7 +414,7 @@ int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 
 	ret = xdna->dev_info->ops->fw_log_fini(xdna);
 	if (ret)
-		XDNA_ERR(xdna, "Failed to disable fw logging: %d", ret);
+		XDNA_ERR(xdna, "Failed to disable FW logging: %d", ret);
 
 	amdxdna_dpt_irq_fini(log_hdl);
 	amdxdna_dpt_enable_polling(log_hdl, false);
@@ -369,4 +423,63 @@ int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 	kfree(log_hdl);
 	xdna->fw_log = NULL;
 	return 0;
+}
+
+int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_get_fw_log_footer footer = {};
+	struct amdxdna_dpt *fw_log;
+	u32 buf_size, offset;
+	void __user *buf;
+	int ret = 0;
+
+	buf_size = args->num_element * args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	offset = buf_size - sizeof(footer);
+	if (copy_from_user(&footer, buf + offset, sizeof(footer)))
+		return -EFAULT;
+
+	XDNA_DBG(xdna, "FW log requested at offset 0x%llx with watch %s", footer.offset,
+		 footer.watch ? "on" : "off");
+
+	fw_log = xdna->fw_log;
+
+	if (footer.offset == READ_ONCE(fw_log->tail)) {
+		if (footer.watch) {
+			ret = wait_event_interruptible(fw_log->wait,
+						       footer.offset != READ_ONCE(fw_log->tail));
+			if (ret) {
+				XDNA_WARN(xdna, "Wait for FW log interrupted by signal: %d", ret);
+				footer.offset = footer.offset;
+				footer.size = 0;
+				ret = -EINTR;
+				goto exit;
+			}
+		} else {
+			footer.offset = footer.offset;
+			footer.size = 0;
+			goto exit;
+		}
+	}
+
+	ret = amdxdna_dpt_fetch_payload(fw_log, buf, &footer.offset, &footer.size, true);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to fetch FW buffer: %d", ret);
+		footer.offset = 0;
+		footer.size = 0;
+		ret = -EINVAL;
+	}
+
+exit:
+	if (copy_to_user(buf + offset, &footer, sizeof(footer)))
+		return -EFAULT;
+
+	XDNA_DBG(xdna, "Returned FW log with size 0x%x offset 0x%llx", footer.size, footer.offset);
+	return ret;
 }

@@ -133,13 +133,7 @@ If you haven't read [System Requirements](#system-requirements), double check it
 
 ``` bash
 source /opt/xilinx/xrt/setup.sh
-cd <root-of-source-tree>/build
-
-# Build the test program
-./build.sh -example
-
-# Run the test
-./example_build/example_noop_test ../tools/bins/1502_00/validate.xclbin
+xrt-smi validate
 ```
 
 ## Q&A
@@ -177,28 +171,6 @@ ulimit -l # The result is in kbytes
 
 # Reboot the machine, then check if the limite is changed
 ulimit -l
-```
-
-### Q: What is carvedout memory and how to use it?
-
-A: Carvedout memory refeers to a reserved region of physical memory that is allocated at boot time. This memory region is used as backing storage for buffer objects supported by the xdna driver.
-
-To use carvedout memory, reserve the desired memory range using a Linux command line parameter.
-Then, enable its usage in the driver by setting module parameters, carvedout_addr and carvedout_size.
-If this is correctly set, all the buffer object will backed by Carvedout memory instead of SHMEM on x86.
-
-``` bash
-# For example, reserve 1 GiB memory on 4 GiB location. Add "memmap=1G$4G" to Linux command line.
-# On Ubuntu system, you can edit /etc/default/grub and update GRUB_CMDLINE_LINUX.
-GRUB_CMDLINE_LINUX=" memmap=1G\\\$4G "
-
-# Update grub2 then reboot
-$ update-grub
-$ reboot
-
-# Once machine is rebooted, check /proc/cmdline to verify if memmap=1G$4G is presented
-# If it is, run below command to load driver
-$ modprobe amdxdna carvedout_addr=0x100000000 carvedout_size=0x40000000
 ```
 
 ## Contributor Guidelines
