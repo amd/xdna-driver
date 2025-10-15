@@ -714,7 +714,7 @@ static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	}
 
 	hwctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
-	hwctx->health_data.npu_gen = NPU_GEN_AIE4;
+	hwctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE4;
 	hwctx->health_data.aie4.ctx_state = priv_ctx->state;
 	hwctx->health_data.aie4.num_uc = priv_ctx->num_col;
 	memcpy(hwctx->health_data.aie4.uc_info, r->uc_info, priv_ctx->num_col *
@@ -992,7 +992,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			buf_sz = mdata->uc_info[col].size;
 			if (buf_sz == 0)
 				continue;
-			buf_paddr = abo->mem.dev_addr + prev_buf_sz;
+			buf_paddr = amdxdna_gem_dev_addr(abo) + prev_buf_sz;
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, buf_paddr, buf_sz,
 						       col, true);
 			if (ret < 0) {
