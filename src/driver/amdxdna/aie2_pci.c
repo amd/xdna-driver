@@ -1460,6 +1460,9 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	case DRM_AMDXDNA_FW_LOG:
 		ret = amdxdna_get_fw_log(xdna, args);
 		break;
+	case DRM_AMDXDNA_FW_TRACE:
+		ret = amdxdna_get_fw_trace(xdna, args);
+		break;
 	default:
 		ret = aie2_get_array_hwctx(client, args);
 		break;
@@ -1609,6 +1612,9 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.fw_log_init		= aie2_fw_log_init,
 	.fw_log_fini		= aie2_fw_log_fini,
 	.fw_log_parse		= aie2_fw_log_parse,
+	.fw_trace_init		= aie2_fw_trace_init,
+	.fw_trace_fini		= aie2_fw_trace_fini,
+	.fw_trace_parse		= aie2_fw_trace_parse,
 	.get_aie_info		= aie2_get_info,
 	.get_aie_array		= aie2_get_array,
 	.set_aie_state		= aie2_set_state,

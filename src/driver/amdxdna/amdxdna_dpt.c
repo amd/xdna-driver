@@ -18,20 +18,33 @@
 #include "amdxdna_dpt.h"
 #include "aie2_msg_priv.h"
 
-u8 fw_log_level = 1;
+static u8 fw_log_level = 1;
 module_param(fw_log_level, byte, 0444);
 MODULE_PARM_DESC(fw_log_level,
 		 " Firmware log verbosity: 0: DISABLE 1: ERROR (Default) 2: WARN 3: INFO 4: DEBUG");
 
-u64 fw_log_size = SZ_4M;
+static u64 fw_log_size = SZ_4M;
 module_param(fw_log_size, ullong, 0444);
 MODULE_PARM_DESC(fw_log_size, " Size of firmware log (Default 4MB). Min 8KB, Max 4MB");
 
-bool poll_fw_log;
+static bool poll_fw_log;
 module_param(poll_fw_log, bool, 0444);
 MODULE_PARM_DESC(poll_fw_log, " Enable firmware log polling (Default false)");
 
+static u32 fw_trace_categories;
+module_param(fw_trace_categories, uint, 0444);
+MODULE_PARM_DESC(fw_trace_uint, " Bitmask to enable firmware trace event categories (Default 0)");
+
+static u64 fw_trace_size = SZ_4M;
+module_param(fw_trace_size, ullong, 0444);
+MODULE_PARM_DESC(fw_trace_size, " Size of firmware trace (Default 4MB). Min 8KB, Max 4MB");
+
+static bool poll_fw_trace;
+module_param(poll_fw_trace, bool, 0444);
+MODULE_PARM_DESC(poll_fw_trace, " Enable firmware trace polling (Default false)");
+
 static bool fw_log_dump_to_dmesg;
+static bool fw_trace_dump_to_dmesg;
 
 static inline int amdxnda_dpt_cpy(void *to, void *from, size_t size, bool user)
 {
@@ -217,30 +230,9 @@ static void amdxdna_dpt_irq_fini(struct amdxdna_dpt *dpt)
 	dpt->msi_idx = 0;
 }
 
-int amdxdna_fw_log_resume(struct amdxdna_dev *xdna)
-{
-	int ret;
-
-	ret = amdxdna_fw_log_init(xdna);
-	if (ret) {
-		XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
-		return ret;
-	}
-
-	if (fw_log_dump_to_dmesg)
-		amdxdna_dpt_dump_to_dmesg(xdna->fw_log, true);
-
-	return 0;
-}
-
-int amdxdna_fw_log_suspend(struct amdxdna_dev *xdna)
-{
-	return amdxdna_fw_log_fini(xdna);
-}
-
 static void amdxdna_dpt_fetch_and_dump_to_dmesg(struct amdxdna_dpt *dpt)
 {
-	u32 size = fw_log_size;
+	u32 size = dpt->size;
 	int ret;
 
 	ret = amdxdna_dpt_fetch_payload(dpt, dpt->local_buffer, &dpt->head, &size, false);
@@ -249,7 +241,7 @@ static void amdxdna_dpt_fetch_and_dump_to_dmesg(struct amdxdna_dpt *dpt)
 		return;
 	}
 
-	dpt->xdna->dev_info->ops->fw_log_parse(dpt->xdna, dpt->local_buffer, size);
+	dpt->parse(dpt->xdna, dpt->local_buffer, size);
 }
 
 static void amdxdna_dpt_drain_pending_data(struct amdxdna_dpt *dpt)
@@ -301,7 +293,7 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
 		return 0;
 
 	if (dump) {
-		dpt->local_buffer = kzalloc(fw_log_size, GFP_KERNEL);
+		dpt->local_buffer = kzalloc(dpt->size, GFP_KERNEL);
 		if (!dpt->local_buffer) {
 			XDNA_ERR(dpt->xdna, "Failed to allocate FW fetch buffer");
 			return -ENOMEM;
@@ -320,7 +312,7 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
 	return 0;
 }
 
-int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
+static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_dpt *log_hdl;
@@ -360,6 +352,8 @@ int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 
 	strscpy(log_hdl->name, AMDXDNA_DPT_FW_LOG_NAME, sizeof(log_hdl->name));
+	log_hdl->parse = xdna->dev_info->ops->fw_log_parse;
+	log_hdl->size = fw_log_size;
 	log_hdl->dma_hdl = dma_hdl;
 	log_hdl->xdna = xdna;
 	log_hdl->tail = 0;
@@ -398,7 +392,7 @@ kfree:
 	return ret;
 }
 
-int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
+static int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dpt *log_hdl = xdna->fw_log;
 	int ret;
@@ -427,7 +421,7 @@ int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 
 int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_get_fw_log_footer footer = {};
+	struct amdxdna_dpt_metadata footer = {};
 	struct amdxdna_dpt *fw_log;
 	u32 buf_size, offset;
 	void __user *buf;
@@ -481,5 +475,250 @@ exit:
 		return -EFAULT;
 
 	XDNA_DBG(xdna, "Returned FW log with size 0x%x offset 0x%llx", footer.size, footer.offset);
+	return ret;
+}
+
+static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+	struct amdxdna_dpt *trace_hdl;
+	char print_size[32];
+	int ret;
+
+	if (!xdna->dev_info->ops->fw_trace_init)
+		return -EOPNOTSUPP;
+
+	if (!fw_trace_categories) {
+		XDNA_DBG(xdna, "FW trace disabled. Default categories: %d", fw_trace_categories);
+		return 0;
+	}
+
+	if (fw_trace_size < SZ_8K || fw_trace_size > SZ_4M) {
+		XDNA_ERR(xdna, "Invalid FW trace buffer size: 0x%llx", fw_trace_size);
+		return -EINVAL;
+	}
+
+	trace_hdl = kzalloc(sizeof(*trace_hdl), GFP_KERNEL);
+	if (!trace_hdl)
+		return -ENOMEM;
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, fw_trace_size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl)) {
+		XDNA_ERR(xdna, "Failed to allocate FW trace buffer of size: 0x%llx", fw_trace_size);
+		ret = PTR_ERR(dma_hdl);
+		goto kfree;
+	}
+
+	string_get_size(fw_trace_size, 1, STRING_UNITS_2, print_size, sizeof(print_size));
+	XDNA_DBG(xdna, "Allocated %s FW trace buffer at 0x%llx with DMA addr: 0x%llx", print_size,
+		 (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0),
+		 amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
+
+	memset(amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), 0xFF, fw_trace_size);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+
+	strscpy(trace_hdl->name, AMDXDNA_DPT_FW_TRACE_NAME, sizeof(trace_hdl->name));
+	trace_hdl->parse = xdna->dev_info->ops->fw_trace_parse;
+	trace_hdl->size = fw_trace_size;
+	trace_hdl->dma_hdl = dma_hdl;
+	trace_hdl->xdna = xdna;
+	trace_hdl->tail = 0;
+	trace_hdl->head = 0;
+	init_waitqueue_head(&trace_hdl->wait);
+	INIT_WORK(&trace_hdl->work, amdxdna_dpt_worker);
+	xdna->fw_trace = trace_hdl;
+
+	ret = xdna->dev_info->ops->fw_trace_init(xdna, fw_trace_size, fw_trace_categories);
+	if (ret) {
+		/* Silently fail for device generation that don't support FW trace */
+		if (ret != -EOPNOTSUPP)
+			XDNA_ERR(xdna, "Failed to configure FW trace: %d", ret);
+		else
+			ret = 0;
+		goto mfree;
+	}
+
+	ret = amdxdna_dpt_irq_init(trace_hdl);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to init FW trace IRQ: %d", ret);
+
+	/* Enable polling, if IRQ initialization fails or enabled by default */
+	if (ret || poll_fw_trace)
+		amdxdna_dpt_enable_polling(trace_hdl, true);
+
+	amdxdna_dpt_read_metadata(trace_hdl);
+
+	trace_hdl->enabled = true;
+	return 0;
+mfree:
+	amdxdna_mgmt_buff_free(dma_hdl);
+kfree:
+	kfree(trace_hdl);
+	xdna->fw_trace = NULL;
+	return ret;
+}
+
+static int amdxdna_fw_trace_fini(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dpt *trace_hdl = xdna->fw_trace;
+	int ret;
+
+	if (!trace_hdl || !trace_hdl->enabled)
+		return 0;
+
+	if (!xdna->dev_info->ops->fw_trace_fini)
+		return -EOPNOTSUPP;
+
+	/* Retain the state of dump_to_dmesg across suspend/resume */
+	fw_trace_dump_to_dmesg = xdna->fw_trace->dump_to_dmesg;
+
+	ret = xdna->dev_info->ops->fw_trace_fini(xdna);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to disable FW trace: %d", ret);
+
+	amdxdna_dpt_irq_fini(trace_hdl);
+	amdxdna_dpt_enable_polling(trace_hdl, false);
+	amdxdna_dpt_dump_to_dmesg(trace_hdl, false);
+	amdxdna_mgmt_buff_free(trace_hdl->dma_hdl);
+	kfree(trace_hdl);
+	xdna->fw_trace = NULL;
+	return 0;
+}
+
+int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dpt_metadata footer = {};
+	struct amdxdna_dpt *fw_trace;
+	u32 buf_size, offset;
+	void __user *buf;
+	int ret = 0;
+
+	buf_size = args->num_element * args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	offset = buf_size - sizeof(footer);
+	if (copy_from_user(&footer, buf + offset, sizeof(footer)))
+		return -EFAULT;
+
+	XDNA_DBG(xdna, "FW trace requested at offset 0x%llx with watch %s", footer.offset,
+		 footer.watch ? "on" : "off");
+
+	fw_trace = xdna->fw_trace;
+
+	if (footer.offset == READ_ONCE(fw_trace->tail)) {
+		if (footer.watch) {
+			ret = wait_event_interruptible(fw_trace->wait,
+						       footer.offset != READ_ONCE(fw_trace->tail));
+			if (ret) {
+				XDNA_WARN(xdna, "Wait for FW trace interrupted by signal: %d", ret);
+				footer.offset = offset;
+				footer.size = 0;
+				ret = -EINTR;
+				goto exit;
+			}
+		} else {
+			footer.offset = footer.offset;
+			footer.size = 0;
+			goto exit;
+		}
+	}
+
+	ret = amdxdna_dpt_fetch_payload(fw_trace, buf, &footer.offset, &footer.size, true);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to fetch FW buffer: %d", ret);
+		footer.offset = 0;
+		footer.size = 0;
+		ret = -EINVAL;
+	}
+
+exit:
+	if (copy_to_user(buf + offset, &footer, sizeof(footer)))
+		return -EFAULT;
+
+	XDNA_DBG(xdna, "Returned FW trace with size 0x%x offset 0x%llx",
+		 footer.size, footer.offset);
+	return ret;
+}
+
+int amdxdna_dpt_init(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = amdxdna_fw_log_init(xdna);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
+		return ret;
+	}
+
+	ret = amdxdna_fw_trace_init(xdna);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to enable firmware tracing: %d", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+int amdxdna_dpt_fini(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = amdxdna_fw_log_fini(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to disable FW logging: %d", ret);
+		return ret;
+	}
+
+	ret = amdxdna_fw_trace_fini(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to disable FW tracing: %d", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = amdxdna_fw_log_init(xdna);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to resume firmware logging: %d", ret);
+		return ret;
+	}
+
+	if (fw_log_dump_to_dmesg)
+		amdxdna_dpt_dump_to_dmesg(xdna->fw_log, true);
+
+	ret = amdxdna_fw_trace_init(xdna);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to resume firmware tracing: %d", ret);
+		return ret;
+	}
+
+	if (fw_trace_dump_to_dmesg)
+		amdxdna_dpt_dump_to_dmesg(xdna->fw_trace, true);
+
+	return 0;
+}
+
+int amdxdna_dpt_suspend(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = amdxdna_fw_log_fini(xdna);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to suspend FW logging: %d", ret);
+
+	ret = amdxdna_fw_trace_fini(xdna);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to suspend FW tracing: %d", ret);
+
 	return ret;
 }

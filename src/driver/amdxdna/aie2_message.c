@@ -471,6 +471,58 @@ int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl
 	return 0;
 }
 
+int aie2_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address)
+{
+	DECLARE_AIE2_MSG(start_fw_trace, MSG_OP_START_FW_TRACE);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	dma_addr_t addr;
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_START_FW_TRACE))
+		return -EOPNOTSUPP;
+
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
+		return -EINVAL;
+	}
+
+	req.destination = FW_TRACE_DESTINATION_DRAM;
+	req.timestamp = FW_TRACE_TIMESTAMP_FW_CHRONO;
+	req.categories = categories;
+	req.buf_size = size;
+	req.buf_addr = addr;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "start fw trace failed, ret 0x%x", resp.status);
+		return -EINVAL;
+	}
+
+	*msi_address = resp.msi_address;
+	*msi_idx = resp.msi_idx;
+	return 0;
+}
+
+int aie2_stop_fw_trace(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE2_MSG(stop_fw_trace, MSG_OP_STOP_FW_TRACE);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_STOP_FW_TRACE))
+		return -EOPNOTSUPP;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "stop fw trace failed, ret 0x%x", resp.status);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			struct xdna_mailbox_chann_info *info)
 {

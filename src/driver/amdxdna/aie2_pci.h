@@ -426,6 +426,9 @@ int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level);
 int aie2_fw_log_fini(struct amdxdna_dev *xdna);
 void aie2_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
+int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories);
+int aie2_fw_trace_fini(struct amdxdna_dev *xdna);
+void aie2_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 /* aie2_smu.c */
 int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
@@ -513,6 +516,9 @@ int aie2_legacy_config_cu(struct amdxdna_ctx *ctx);
 #endif
 int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 		       size_t size, u32 *msi_id, u32 *msi_addr);
+int aie2_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address);
+int aie2_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
 
 int aie2_config_cu(struct amdxdna_ctx *ctx);
 int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job, enum cmd_chain_class class,
