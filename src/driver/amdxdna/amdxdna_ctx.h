@@ -175,29 +175,17 @@ struct amdxdna_ctx_health_data_aie4 {
  * on the npu generation.
  */
 struct amdxdna_ctx_health_data {
+#define AMDXDNA_CTX_HEALTH_DATA_V0	0
+#define AMDXDNA_CTX_HEALTH_DATA_V1	1
 	u32 version;
+#define AMDXDNA_NPU_GEN_AIE2		0
+#define AMDXDNA_NPU_GEN_AIE4		1
 	u32 npu_gen;
 	union {
 		struct amdxdna_ctx_health_data_aie2 aie2;
 		struct amdxdna_ctx_health_data_aie4 aie4;
 	};
 };
-
-/**
- * Macros for context health data version (between XRT shim and driver).
- * The version field in amdxnda_ctx_health_data will be set by the driver
- */
-#define AMDXDNA_CTX_HEALTH_DATA_V0	0
-#define AMDXDNA_CTX_HEALTH_DATA_V1	1
-
-/**
- * Macros for device generation type.
- * The npu_gen field in ert_ctx_health_data_v1 is set by the driver based on the npu device device:
- *   AMDXDNA_NPU_GEN_AIE2 -> for AIE2/AIE2P
- *   AMDXDNA_NPU_GEN_AIE4 -> for AIE4/AIE2PS
- */
-#define NPU_GEN_AIE2			0
-#define NPU_GEN_AIE4			1
 
 /* Exec buffer command header format */
 #define AMDXDNA_CMD_STATE		GENMASK(3, 0)
