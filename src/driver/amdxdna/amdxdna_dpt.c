@@ -456,7 +456,7 @@ int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *a
 						       footer.offset != READ_ONCE(fw_log->tail));
 			if (ret) {
 				XDNA_WARN(xdna, "Wait for FW log interrupted by signal: %d", ret);
-				footer.offset = footer.offset;
+				footer.offset = offset;
 				footer.size = 0;
 				ret = -EINTR;
 				goto exit;
