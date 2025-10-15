@@ -511,17 +511,18 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   std::string ifm_path = local_path("npu3_workspace/ifm.bin");
   std::string param_path = local_path("npu3_workspace/param.bin");
   std::string wgt_path = local_path("npu3_workspace/wgt.bin");
-  std::string ofm_path = local_path("npu3_workspace/ofm.bin");
+  std::string ofm_gold_path = local_path("npu3_workspace/ofm.bin");
 
   const uint32_t IFM_BYTE_SIZE = std::filesystem::file_size(ifm_path);
   const uint32_t WTS_BYTE_SIZE = std::filesystem::file_size(wgt_path);
-  const uint32_t OFM_BYTE_SIZE = std::filesystem::file_size(ofm_path);
+  const uint32_t OFM_BYTE_SIZE = std::filesystem::file_size(ofm_gold_path);
   const uint32_t PARAM_BYTE_SIZE = std::filesystem::file_size(param_path);
   xrt_bo bo_ifm{device, IFM_BYTE_SIZE, xrt::bo::flags::host_only};
   xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
   xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
   xrt_bo bo_param{device, PARAM_BYTE_SIZE, xrt::bo::flags::host_only};
 
+  /* bo_ofm created as empty with ofm_gold file size */
   read_bin_file<xrt_bo>(ifm_path, bo_ifm);
   read_bin_file<xrt_bo>(wgt_path, bo_wts);
   read_bin_file<xrt_bo>(param_path, bo_param);
@@ -546,7 +547,7 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
 
-  check_umq_resnet50_result(bo_ofm.map(), ofm_path);
+  check_umq_resnet50_result(bo_ofm.map(), ofm_gold_path);
 }
 
 void
