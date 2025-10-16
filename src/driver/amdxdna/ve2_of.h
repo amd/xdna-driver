@@ -73,6 +73,7 @@ struct amdxdna_ctx_command_fifo {
 struct amdxdna_ctx_priv {
 	u32				start_col;
 	u32				num_col;
+	u32				state;
 	struct device			*aie_dev;
 	struct aie_partition_init_args	*args;
 	struct ve2_hsa_queue		hwctx_hsa_queue;

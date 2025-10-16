@@ -132,6 +132,7 @@ static inline int ve2_hwctx_add_job(struct amdxdna_ctx *hwctx, struct amdxdna_sc
 
 	hwctx->priv->pending[idx] = job;
 	kref_get(&job->refcnt);
+	hwctx->priv->state = AMDXDNA_HWCTX_STATE_ACTIVE;
 	mutex_unlock(&hwctx->priv->privctx_lock);
 
 	return 0;
@@ -144,6 +145,22 @@ static inline struct amdxdna_sched_job *ve2_hwctx_get_job(struct amdxdna_ctx *hw
 
 static inline void ve2_hwctx_job_release(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job)
 {
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
+	struct amdxdna_cmd_chain *cmd_chain;
+	u32 op, cmd_cnt;
+
+	op = amdxdna_cmd_get_op(cmd_bo);
+	if (op == ERT_CMD_CHAIN) {
+		cmd_chain = amdxdna_cmd_get_payload(cmd_bo, NULL);
+		cmd_cnt = cmd_chain->command_count;
+	} else {
+		cmd_cnt = 1;
+	}
+	hwctx->completed += cmd_cnt;
+	if (hwctx->completed == hwctx->submitted)
+		priv_ctx->state = AMDXDNA_HWCTX_STATE_IDLE;
+
 	for (int i = 0; i < job->bo_cnt; i++) {
 		if (!job->bos[i].obj)
 			break;
@@ -818,6 +835,8 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_clear_firmware_status(xdna, hwctx);
 
+	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
+
 	return 0;
 
 free_hsa_queue:
@@ -852,6 +871,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv);
+	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
+		 hwctx, hwctx->submitted, hwctx->completed);
 }
 
 static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 paddr,
@@ -932,7 +953,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			buf_sz = mdata->uc_info[col].size;
 			if (buf_sz == 0)
 				continue;
-			buf_paddr = abo->mem.dev_addr + prev_buf_sz;
+			buf_paddr = amdxdna_gem_dev_addr(abo) + prev_buf_sz;
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, buf_paddr, buf_sz,
 						       col, true);
 			if (ret < 0) {
