@@ -70,34 +70,6 @@ struct amdxdna_ctx_command_fifo {
 	struct list_head                list;
 };
 
-struct cert_health_info {
-	u32 cert_idx;         // CERT index in this context
-	u32 cert_idle_state;  // Valid when CERT is idle, represent the reason CERT is idle
-				   // hsa_lite_status register:
-				   // bit 0: HSA queue not empty
-				   // bit 1: preemption save completion
-				   // bit 2: CERT is idle
-	u32 misc_status;      // Valid when CERT hangs, represent the reason CERT hangs
-				   // bit 0: cert fw exception
-				   // bit 1: control code hang
-	u32 fw_status;
-	u32 page_idx;         // Page index of the current control code
-	u32 offset;           // Bytes offset inside page
-	u32 cert_ear;         // In case of CERT crash, the exception address of CERT
-	u32 cert_esr;         // In case of CERT crash, the exception status of CERT
-	u32 cert_pc;          // In case of CERT crash, the PC of the current CERT
-};
-
-// Application Health report for AIE2PS/AIE4
-struct app_health_report {
-	u32 major_version : 16;
-	u32 minor_version : 16;
-	u32 context_id;
-	u32 ctx_status;              // The status of the context at the time of the report
-	u32 num_certs;               // Number of CERTs reported
-	struct cert_health_info certs_info[16];  // Array of CERTs health info
-};
-
 struct amdxdna_ctx_priv {
 	u32				start_col;
 	u32				num_col;

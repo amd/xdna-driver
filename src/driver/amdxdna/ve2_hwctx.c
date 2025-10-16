@@ -680,7 +680,7 @@ static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 
 	r = kzalloc(sizeof(*r) + priv_ctx->num_col * sizeof(struct uc_health_info), GFP_KERNEL);
 	if (!r) {
-		XDNA_ERR(xdna, "No memory for struct app_health_report.\n");
+		XDNA_ERR(xdna, "No memory for struct amdxdna_ctx_health_data_aie4\n");
 		return;
 	}
 
