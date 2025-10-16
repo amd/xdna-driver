@@ -364,6 +364,18 @@ read_txt_file(std::string& filename, TEST_BO& test_bo)
 }
 
 void
+sync_bo_to_dev(xrt_bo& bo)
+{
+  bo.get().sync(XCL_BO_SYNC_BO_TO_DEVICE, bo.size(), 0);
+}
+
+void
+sync_bo_from_dev(xrt_bo& bo)
+{
+  bo.get().sync(XCL_BO_SYNC_BO_FROM_DEVICE, bo.size(), 0);
+}
+
+void
 TEST_xrt_umq_vadd(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
@@ -397,8 +409,15 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
     //cleanup ofm on each run
     init_umq_ofm_bo(bo_ofm);
 
+    sync_bo_to_dev(bo_ifm);
+    sync_bo_to_dev(bo_wts);
+    sync_bo_to_dev(bo_ofm);
+
     run.start();
     auto state = run.wait(timeout_ms);
+
+    sync_bo_from_dev(bo_ofm);
+
     if (state == ERT_CMD_STATE_TIMEOUT) 
     {
       dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -456,6 +475,7 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
 
   // Setting args for patching control code buffer
   run.set_arg(0, bo_data.get());
+  sync_bo_to_dev(bo_data);
 
   // Send the command to device and wait for it to complete
   run.start();
@@ -532,9 +552,15 @@ TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
   run.set_arg(0, bo_ifm.get());
   run.set_arg(1, bo_ofm.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -587,9 +613,15 @@ TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
   run.set_arg(0, bo_ifm.get());
   run.set_arg(1, bo_ofm.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -653,9 +685,17 @@ TEST_xrt_umq_single_col_resnet50_1_layer(int device_index, arg_type& arg)
   run.set_arg(2, bo_wts.get());
   run.set_arg(3, bo_param.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_param);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -719,11 +759,18 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 
   run.set_arg(55, bo_ofm.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_ofm);
+
   // Send the command to device and wait for it to complete
   run.start();
 
   // increase this to even 10 hours on simnow env
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -823,12 +870,19 @@ TEST_xrt_umq_single_col_resnet50_multi_layer(int device_index, arg_type& arg)
 
   run.set_arg(55, bo_ofm.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_ofm);
+
   // Send the command to device and wait for it to complete
   run.start();
 
   // wait forever for this test, it takes up to 10 hours on simulator
   // run.wait2();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -916,9 +970,17 @@ TEST_xrt_umq_multi_layer(int device_index, arg_type& arg)
   run.set_arg(2, bo_wts.get());
   run.set_arg(3, bo_wts2.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_wts2);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -974,9 +1036,17 @@ TEST_xrt_umq_core_equivalence(int device_index, arg_type& arg)
   run.set_arg(2, bo_wts.get());
   run.set_arg(3, bo_wts2.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_wts2);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -1054,9 +1124,17 @@ TEST_xrt_umq_cascade_4ker_2lay(int device_index, arg_type& arg)
   run.set_arg(2, bo_wts.get());
   run.set_arg(3, bo_wts2.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_wts2);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -1142,9 +1220,20 @@ TEST_xrt_umq_parallel_branches(int device_index, arg_type& arg)
   run.set_arg(4, bo_wts2r.get());
   run.set_arg(5, bo_wts3.get());
 
+
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_wts2l);
+  sync_bo_to_dev(bo_wts2r);
+  sync_bo_to_dev(bo_wts3);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
@@ -1218,9 +1307,17 @@ TEST_xrt_umq_yolov3(int device_index, arg_type& arg)
   run.set_arg(2, bo_wts.get());
   run.set_arg(3, bo_param.get());
 
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_ofm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_param);
+
   // Send the command to device and wait for it to complete
   run.start();
   auto state = run.wait(timeout_ms);
+
+  sync_bo_from_dev(bo_ofm);
+
   if (state == ERT_CMD_STATE_TIMEOUT)
   {
     dump_ofm_to_file<xrt_bo>(bo_ofm);
