@@ -575,7 +575,7 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 		void *cmd_data;
 		u32 cmd_data_len;
 
-		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_CMD);
+		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!abo) {
 			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
 			return -ENOENT;
@@ -670,6 +670,59 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 	return (*read_index > seq);
 }
 
+static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+{
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	struct device *aie_dev = priv_ctx->aie_dev;
+	struct amdxdna_ctx_health_data_aie4 *r;
+	struct handshake *hs = NULL;
+	int ret = 0;
+
+	r = kzalloc(sizeof(*r) + priv_ctx->num_col * sizeof(struct uc_health_info), GFP_KERNEL);
+	if (!r) {
+		XDNA_ERR(xdna, "No memory for struct amdxdna_ctx_health_data_aie4\n");
+		return;
+	}
+
+	for (u32 col = 0; col < priv_ctx->num_col; col++) {
+		hs = kzalloc(sizeof(*hs), GFP_KERNEL);
+		if (!hs) {
+			XDNA_ERR(xdna, "No memory for handshake.\n");
+			return;
+		}
+		ret = ve2_partition_read_privileged_mem(aie_dev, col,
+							offsetof(struct handshake, mpaie_alive),
+							sizeof(struct handshake), (void *)hs);
+
+		if (ret < 0) {
+			XDNA_ERR(xdna, "aie_partition_read failed with ret=%d\n", ret);
+			kfree(hs);
+			kfree(r);
+			return;
+		}
+
+		r->uc_info[col].uc_idx = hwctx->start_col + col;
+		r->uc_info[col].page_idx = hs->vm.abs_page_index;
+		r->uc_info[col].offset = hs->vm.ppc;
+		r->uc_info[col].uc_idle_status = hs->cert_idle_status;
+		r->uc_info[col].misc_status = hs->misc_status;
+		r->uc_info[col].uc_pc = hs->exception.pc;
+		r->uc_info[col].uc_ear = hs->exception.ear;
+		r->uc_info[col].uc_esr = hs->exception.esr;
+		r->uc_info[col].fw_state = hs->vm.fw_state;
+		kfree(hs);
+	}
+
+	hwctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	hwctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	hwctx->health_data.aie4.ctx_state = priv_ctx->state;
+	hwctx->health_data.aie4.num_uc = priv_ctx->num_col;
+	memcpy(hwctx->health_data.aie4.uc_info, r->uc_info, priv_ctx->num_col *
+	       sizeof(struct uc_health_info));
+
+	kfree(r);
+}
+
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
@@ -712,39 +765,25 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 		 * below check need to be removed once we have a clean solution
 		 * to use completion signal
 		 */
-		if (priv_ctx->misc_intrpt_flag) {
-			struct device *aie_dev = priv_ctx->aie_dev;
-			struct handshake *hs = NULL;
-			int ret = 0;
+		if (priv_ctx->misc_intrpt_flag || (wait_jifs && !ret)) {
+			XDNA_ERR(xdna, "cmd timeout. misc_intr_flag=%u timeout_jiffies=%lu ret=%d",
+				 priv_ctx->misc_intrpt_flag, wait_jifs, ret);
+			void *cmd_data;
+			u32 data_total;
 
-			hs = kmalloc(sizeof(*hs), GFP_KERNEL);
-			if (!hs) {
-				XDNA_ERR(xdna, "No memory for handshake.\n");
-				return -ENOMEM;
-			}
+			ve2_dump_ctx(xdna, hwctx);
 
-			ret = ve2_partition_read_privileged_mem(aie_dev, 0,
-								offsetof(struct handshake,
-									 mpaie_alive),
-								sizeof(struct handshake),
-								(void *)hs);
+			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
+			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
+					priv_ctx->num_col * sizeof(struct uc_health_info);
+			if (unlikely(data_total < sizeof(hwctx->health_data)))
+				XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu", __func__,
+					  data_total, total_size);
 
-			if (ret < 0) {
-				XDNA_ERR(xdna, "aie_partition_read failed with ret=%d\n", ret);
-				kfree(hs);
-				return ret;
-			}
-
+			data_total = min(data_total, total_size);
+			memcpy(cmd_data, &hwctx->health_data, total_size);
+			hwctx->health_reported = true;
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
-
-			XDNA_INFO(xdna, "MISC interrupt happened!!\n");
-			XDNA_INFO(xdna, "FW_STATE=%x\nABS_PAGE_INDEX=%d\nPPC=%x\n",
-				  hs->vm.fw_state, hs->vm.abs_page_index, hs->vm.ppc);
-
-			kfree(hs);
-		} else if (wait_jifs && !ret) {
-			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
-			XDNA_INFO(xdna, "Requested command TIMEOUT!!");
 		} else {
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_COMPLETED);
 		}

@@ -90,13 +90,14 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "\tFatal error app module: 0x%x", r->fatal_info.app_module);
 		XDNA_ERR(xdna, "\tFatal error task ID: %d", r->fatal_info.task_index);
 
-		ctx->health_data.fatal_error_exception_type = r->fatal_info.exception_type;
-		ctx->health_data.fatal_error_exception_pc = r->fatal_info.exception_pc;
-		ctx->health_data.fatal_error_app_module = r->fatal_info.app_module;
-		ctx->health_data.fatal_error_type = r->fatal_info.fatal_type;
-		ctx->health_data.txn_op_idx = r->txn_op_id;
-		ctx->health_data.ctx_pc = r->ctx_pc;
-		ctx->health_data.version = 0;
+		ctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
+		ctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE2;
+		ctx->health_data.aie2.fatal_error_exception_type = r->fatal_info.exception_type;
+		ctx->health_data.aie2.fatal_error_exception_pc = r->fatal_info.exception_pc;
+		ctx->health_data.aie2.fatal_error_app_module = r->fatal_info.app_module;
+		ctx->health_data.aie2.fatal_error_type = r->fatal_info.fatal_type;
+		ctx->health_data.aie2.txn_op_idx = r->txn_op_id;
+		ctx->health_data.aie2.ctx_pc = r->ctx_pc;
 		ctx->health_reported = false;
 	}
 	amdxdna_mgmt_buff_free(dma_hdl);
