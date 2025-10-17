@@ -17,7 +17,6 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_dpt.h"
-#include "amdxdna_cma.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_tdr.h"
 
@@ -132,7 +131,6 @@ struct amdxdna_dev {
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
-	bool				use_cma;
 };
 
 struct amdxdna_stats {
