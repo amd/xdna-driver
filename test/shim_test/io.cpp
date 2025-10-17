@@ -679,15 +679,15 @@ verify_result()
 {
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
-  auto cdata = reinterpret_cast<ert_ctx_health_data *>(cpkt->data);
-  if (cdata->txn_op_idx != m_expect_txn_op_idx) {
+  auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
+  if (cdata->aie2.txn_op_idx != m_expect_txn_op_idx) {
     std::cerr << "Incorrect app health data:\n";
-    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->txn_op_idx << "\n";
-    std::cerr << "\tContext PC: 0x" << std::hex << cdata->ctx_pc << "\n";
-    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->fatal_error_type << "\n";
-    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->fatal_error_exception_type << "\n";
-    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->fatal_error_exception_pc << "\n";
-    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->fatal_error_app_module << "\n";
+    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
+    std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
+    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
+    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
+    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
+    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
     throw std::runtime_error("Incorrect txn_op_idx in context health data!!!");
   }
 }
