@@ -23,19 +23,23 @@ int start_col_index = -1;
 module_param(start_col_index, int, 0600);
 MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)");
 
+bool is_iommu_off(struct amdxdna_dev *xdna)
+{
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
+	return !iommu_present(xdna->ddev.dev->bus);
+#else
+	return !device_iommu_mapped(xdna->ddev.dev);
+#endif
+}
+
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = NULL;
 
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-	if (!iommu_present(xdna->ddev.dev->bus)) {
-#else
-	if (!device_iommu_mapped(xdna->ddev.dev)) {
-#endif
-		if (amdxdna_use_carvedout()) {
-			iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+	if (is_iommu_off(xdna)) {
+		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+		if (amdxdna_use_carvedout() || amdxdna_use_cma())
 			return 0;
-		}
 
 		XDNA_ERR(xdna, "No carvedout memory and IOMMU is off");
 		return -ENODEV;

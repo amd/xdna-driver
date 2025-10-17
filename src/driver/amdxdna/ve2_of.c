@@ -98,7 +98,6 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	xdna_hdl->xdna = xdna;
 	xdna_hdl->priv = xdna->dev_info->dev_priv;
 
-	xdna->use_cma = true;
 	xdna->dev_handle = xdna_hdl;
 	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
 	if (!xdna->dev_handle->xrs_hdl) {

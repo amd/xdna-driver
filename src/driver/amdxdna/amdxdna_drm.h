@@ -132,7 +132,6 @@ struct amdxdna_dev {
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
-	bool				use_cma;
 };
 
 struct amdxdna_stats {

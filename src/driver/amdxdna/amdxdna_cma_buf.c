@@ -7,6 +7,13 @@
 #include <linux/dma-buf.h>
 #include "amdxdna_cma.h"
 
+struct amdxdna_cmabuf_priv {
+	struct drm_device *dev;
+	dma_addr_t dma_addr;
+	void *cpu_addr;
+	size_t size;
+};
+
 static struct sg_table *
 amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
 		   enum dma_data_direction dir)
@@ -163,4 +170,15 @@ free_dma:
 free_cmabuf:
 	kfree(cmabuf);
 	return ERR_PTR(ret);
+}
+
+bool amdxdna_use_cma(void)
+{
+#ifdef CONFIG_CMA
+	static bool cma = !!dev_get_cma_area(NULL);
+
+	return cma;
+#else
+	return false;
+#endif
 }
