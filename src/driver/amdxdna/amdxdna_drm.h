@@ -17,7 +17,6 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_dpt.h"
-#include "amdxdna_cma.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_tdr.h"
 

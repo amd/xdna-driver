@@ -28,7 +28,7 @@ amdxdna-y := \
 	amdxdna_ubuf.o \
 	amdxdna_carvedout_buf.o \
 	amdxdna_gem.o \
-	amdxdna_cma.o \
+	amdxdna_cma_buf.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_smu.o \

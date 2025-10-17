@@ -18,7 +18,7 @@
 #include "amdxdna_pm.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_ubuf.h"
-#include "amdxdna_cma.h"
+#include "amdxdna_cma_buf.h"
 
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"

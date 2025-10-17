@@ -8,6 +8,7 @@
 #include <linux/sched/clock.h>
 
 #include "amdxdna_carvedout_buf.h"
+#include "amdxdna_cma_buf.h"
 #include "amdxdna_devel.h"
 #include "amdxdna_trace.h"
 

@@ -5,7 +5,7 @@
 
 #include <linux/kernel.h>
 #include <linux/dma-buf.h>
-#include "amdxdna_cma.h"
+#include "amdxdna_cma_buf.h"
 
 struct amdxdna_cmabuf_priv {
 	struct drm_device *dev;
