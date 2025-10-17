@@ -918,7 +918,6 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_gem_obj *abo, *mdata_abo;
-	struct amdxdna_cmabuf_priv *cmabuf;
 	struct fw_buffer_metadata *mdata;
 	u32 prev_buf_sz = 0;
 	u32 op_timeout;

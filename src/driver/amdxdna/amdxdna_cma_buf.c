@@ -175,9 +175,7 @@ free_cmabuf:
 bool amdxdna_use_cma(void)
 {
 #ifdef CONFIG_CMA
-	static bool cma = !!dev_get_cma_area(NULL);
-
-	return cma;
+	return true;
 #else
 	return false;
 #endif
