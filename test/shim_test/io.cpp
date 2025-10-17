@@ -683,7 +683,7 @@ verify_result()
   if (cdata->aie2.txn_op_idx != m_expect_txn_op_idx) {
     std::cerr << "Incorrect app health data:\n";
     std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
-    std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.tx_pc << "\n";
+    std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
     std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
     std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
     std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
