@@ -52,6 +52,8 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 #ifdef AMDXDNA_NPU3
 	{ 0x17f1, 0x10,  &dev_npu3_info },
 	{ 0x17f3, 0x10,  &dev_npu3_info },
+	{ 0x17f1, 0x00,  &dev_npu3_info },
+	{ 0x17f3, 0x00,  &dev_npu3_info },
 	{ 0x1B0A, 0x00,  &dev_npu3_info },
 	{ 0x1B0C, 0x00,  &dev_npu3_info },
 #endif

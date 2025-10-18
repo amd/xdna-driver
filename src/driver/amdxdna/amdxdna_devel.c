@@ -32,7 +32,7 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 #else
 	if (!device_iommu_mapped(xdna->ddev.dev)) {
 #endif
-		if (amdxdna_use_carvedout()) {
+		if (amdxdna_use_carvedout() || xdna->use_cma) {
 			iommu_mode = AMDXDNA_IOMMU_NO_PASID;
 			return 0;
 		}
