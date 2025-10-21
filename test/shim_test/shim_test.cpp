@@ -45,6 +45,7 @@ void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&)
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
@@ -851,6 +852,9 @@ std::vector<test_case> test_list {
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
+  },
+  test_case{ "gemm and debug BO", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
   },
 };
 
