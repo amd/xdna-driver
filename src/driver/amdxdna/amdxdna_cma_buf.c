@@ -5,7 +5,14 @@
 
 #include <linux/kernel.h>
 #include <linux/dma-buf.h>
-#include "amdxdna_cma.h"
+#include "amdxdna_cma_buf.h"
+
+struct amdxdna_cmabuf_priv {
+	struct drm_device *dev;
+	dma_addr_t dma_addr;
+	void *cpu_addr;
+	size_t size;
+};
 
 static struct sg_table *
 amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
@@ -163,4 +170,13 @@ free_dma:
 free_cmabuf:
 	kfree(cmabuf);
 	return ERR_PTR(ret);
+}
+
+bool amdxdna_use_cma(void)
+{
+#ifdef CONFIG_CMA
+	return true;
+#else
+	return false;
+#endif
 }

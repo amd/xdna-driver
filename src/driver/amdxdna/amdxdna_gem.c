@@ -18,7 +18,7 @@
 #include "amdxdna_pm.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_ubuf.h"
-#include "amdxdna_cma.h"
+#include "amdxdna_cma_buf.h"
 
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
@@ -110,7 +110,8 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 	mmu_interval_set_seq(&mapp->notifier, cur_seq);
 	up_write(&xdna->notifier_lock);
 
-	xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
+	if (xdna->dev_info->ops->hmm_invalidate)
+		xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
 
 	if (range->event == MMU_NOTIFY_UNMAP) {
 		down_write(&xdna->notifier_lock);
@@ -135,7 +136,7 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
 	struct amdxdna_umap *mapp;
 
 	/* hmm_invalidate op is not valid for VE2 */
-	if (!xdna->dev_info->ops->hmm_invalidate)
+	if (!xdna->notifier_wq)
 		return;
 
 	down_read(&xdna->notifier_lock);
@@ -194,7 +195,7 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	u32 nr_pages;
 	int ret;
 
-	if (!xdna->dev_info->ops->hmm_invalidate)
+	if (!xdna->notifier_wq)
 		return 0;
 
 	mapp = kzalloc(sizeof(*mapp), GFP_KERNEL);
@@ -706,11 +707,15 @@ amdxdna_gem_create_carvedout_object(struct drm_device *dev, struct amdxdna_drm_c
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
-	struct amdxdna_cmabuf_priv *cmabuf;
-	struct amdxdna_gem_obj *abo;
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	size_t size = PAGE_ALIGN(args->size);
 	struct drm_gem_object *gobj;
-	size_t size = args->size;
 	struct dma_buf *dma_buf;
+
+	if (args->type == AMDXDNA_BO_DEV_HEAP) {
+		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
+		return NULL;
+	}
 
 	dma_buf = amdxdna_get_cma_buf(dev, size);
 	if (IS_ERR(dma_buf))
@@ -722,17 +727,8 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 		return ERR_CAST(gobj);
 	}
 
-	cmabuf = dma_buf->priv;
-
 	dma_buf_put(dma_buf);
-
-	abo = to_xdna_obj(gobj);
-
-	abo->mem.dma_addr = cmabuf->dma_addr;
-	abo->mem.size = cmabuf->size;
-	abo->type = args->type;
-
-	return abo;
+	return to_xdna_obj(gobj);
 }
 
 static struct amdxdna_gem_obj *
@@ -835,10 +831,12 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 
 	if (args->vaddr)
 		abo = amdxdna_gem_create_user_object(dev, args);
-	else if (xdna->use_cma)
+#ifdef AMDXDNA_DEVEL
+	else if (is_iommu_off(xdna) && amdxdna_use_cma())
 		abo = amdxdna_gem_create_cma_object(dev, args);
-	else if (amdxdna_use_carvedout())
+	else if (is_iommu_off(xdna) && amdxdna_use_carvedout())
 		abo = amdxdna_gem_create_carvedout_object(dev, args);
+#endif
 	else
 		abo = amdxdna_gem_create_shmem_object(dev, args);
 	if (IS_ERR(abo))
@@ -1157,7 +1155,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		goto put_obj;
 	}
 
-	if (xdna->use_cma) {
+	if (amdxdna_use_cma()) {
 		bo_phyaddr = abo->mem.dma_addr;
 		bo_phyaddr += args->offset;
 		if (args->direction == SYNC_DIRECT_TO_DEVICE) {

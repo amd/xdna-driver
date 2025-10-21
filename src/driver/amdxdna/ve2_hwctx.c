@@ -957,7 +957,6 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_gem_obj *abo, *mdata_abo;
-	struct amdxdna_cmabuf_priv *cmabuf;
 	struct fw_buffer_metadata *mdata;
 	u32 prev_buf_sz = 0;
 	u32 op_timeout;
@@ -973,8 +972,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
 			return -EINVAL;
 		}
-		cmabuf = mdata_abo->dma_buf->priv;
-		mdata = (struct fw_buffer_metadata *)(cmabuf->cpu_addr);
+		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
 		if (!mdata) {
 			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
@@ -1017,8 +1015,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
 			return -EINVAL;
 		}
-		cmabuf = mdata_abo->dma_buf->priv;
-		mdata = (struct fw_buffer_metadata *)(cmabuf->cpu_addr);
+		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
 		if (!mdata) {
 			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
