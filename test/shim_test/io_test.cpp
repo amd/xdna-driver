@@ -549,3 +549,11 @@ TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, ar
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
   elf_io(id, sdev, params, "design.xclbin");
 }
+
+void
+TEST_io_gemm(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  elf_io_gemm_test_bo_set boset{sdev.get(), "gemm.xclbin", "gemm_int8.elf"};
+  boset.run();
+  boset.verify_result();
+}
