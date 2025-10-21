@@ -110,7 +110,8 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 	mmu_interval_set_seq(&mapp->notifier, cur_seq);
 	up_write(&xdna->notifier_lock);
 
-	xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
+	if (xdna->dev_info->ops->hmm_invalidate)
+		xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
 
 	if (range->event == MMU_NOTIFY_UNMAP) {
 		down_write(&xdna->notifier_lock);
@@ -135,7 +136,7 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
 	struct amdxdna_umap *mapp;
 
 	/* hmm_invalidate op is not valid for VE2 */
-	if (!xdna->dev_info->ops->hmm_invalidate)
+	if (!xdna->notifier_wq)
 		return;
 
 	down_read(&xdna->notifier_lock);
@@ -194,7 +195,7 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	u32 nr_pages;
 	int ret;
 
-	if (!xdna->dev_info->ops->hmm_invalidate)
+	if (!xdna->notifier_wq)
 		return 0;
 
 	mapp = kzalloc(sizeof(*mapp), GFP_KERNEL);
