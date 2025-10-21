@@ -9,7 +9,8 @@ xrt_core::smi::subcommand
 create_validate_subcommand()
 {
   std::vector<xrt_core::smi::basic_option> validate_test_desc = {
-   {"latency", "Run end-to-end latency test", "common"}
+   {"latency", "Run end-to-end latency test", "common"},
+   {"throughput", "Run end-to-end throughput test", "common"}
   };
 
   std::map<std::string, std::shared_ptr<xrt_core::smi::option>> validate_suboptions;
