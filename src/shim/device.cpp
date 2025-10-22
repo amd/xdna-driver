@@ -639,17 +639,47 @@ struct event_trace
   static result_type
   get(const xrt_core::device* device, key_type key, const std::any& any)
   {
+    xrt_core::query::firmware_debug_buffer output{};
+
     switch (key) {
       case key_type::event_trace_data:
       {
-        // static query::firmware_debug_buffer log_buffer;
-        // TODO : implement IOCTL to get event_trace data
-        // return log_buffer;
+        auto request = std::any_cast<xrt_core::query::firmware_debug_buffer>(any);
+        uint32_t offset = request.size - sizeof(amdxdna_dpt_metadata);
+        amdxdna_dpt_metadata *fw_trace = reinterpret_cast<amdxdna_dpt_metadata *>(
+          static_cast<std::byte *>(request.data) + offset
+        );
+
+        fw_trace->offset = request.abs_offset;
+        fw_trace->size = offset;
+        fw_trace->watch = request.b_wait;
+
+        amdxdna_drm_get_array arg = {
+          .param = DRM_AMDXDNA_FW_TRACE,
+          .element_size = static_cast<std::uint32_t>(request.size),
+          .num_element = 1,
+          .buffer = reinterpret_cast<uintptr_t>(request.data)
+        };
+
+        try {
+          auto& pci_dev_impl = get_pcidev_impl(device);
+          pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+        } catch (const xrt_core::system_error& e) {
+          if(e.get_code() == -EINTR)
+            throw xrt_core::error("Query interrupted by user");
+          throw std::runtime_error("Failed to get event_trace");
+        }
+
+        output.abs_offset = fw_trace->offset;
+        output.size = fw_trace->size;
+        output.b_wait = fw_trace->watch;
+        output.data = request.data;
+        return output;
+
       }
       default:
         throw xrt_core::error("Unsupported event_trace query key");
     }
-    // TODO : Implement IOCTL to get event_trace configuration
   }
 
   static result_type
@@ -699,8 +729,8 @@ struct firmware_log
       case key_type::firmware_log_data:
       {
         auto request = std::any_cast<xrt_core::query::firmware_debug_buffer>(any);
-        uint32_t offset = request.size - sizeof(amdxdna_get_fw_log_footer);
-        amdxdna_get_fw_log_footer *fw_log = reinterpret_cast<amdxdna_get_fw_log_footer *>(
+        uint32_t offset = request.size - sizeof(amdxdna_dpt_metadata);
+        amdxdna_dpt_metadata *fw_log = reinterpret_cast<amdxdna_dpt_metadata *>(
           static_cast<std::byte *>(request.data) + offset
         );
 

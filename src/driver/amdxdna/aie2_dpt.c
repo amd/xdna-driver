@@ -136,3 +136,51 @@ int aie2_fw_log_fini(struct amdxdna_dev *xdna)
 	mutex_unlock(&xdna->dev_handle->aie2_lock);
 	return 0;
 }
+
+void aie2_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+{
+	if (!size)
+		return;
+
+	print_hex_dump_debug("[FW TRACE]: ", DUMP_PREFIX_OFFSET, 16, 4, buffer, size, false);
+}
+
+int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
+{
+	struct amdxdna_mgmt_dma_hdl *dma_hdl = xdna->fw_trace->dma_hdl;
+	u32 msi_idx, msi_address;
+	int ret;
+
+	mutex_lock(&xdna->dev_handle->aie2_lock);
+	ret = aie2_start_fw_trace(xdna->dev_handle, dma_hdl, size, categories, &msi_idx,
+				  &msi_address);
+	if (ret) {
+		/* Sliently fail for device generation that don't support FW tracing */
+		if (ret != -EOPNOTSUPP)
+			XDNA_ERR(xdna, "Failed to init fw trace buffer: %d", ret);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
+		return ret;
+	}
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
+
+	xdna->fw_trace->io_base = xdna->dev_handle->mbox_base;
+	xdna->fw_trace->msi_address = msi_address & AIE2_DPT_MSI_ADDR_MASK;
+	xdna->fw_trace->msi_idx = msi_idx;
+
+	return ret;
+}
+
+int aie2_fw_trace_fini(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	mutex_lock(&xdna->dev_handle->aie2_lock);
+	ret = aie2_stop_fw_trace(xdna->dev_handle);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to stop fw trace: %d", ret);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
+		return ret;
+	}
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
+	return 0;
+}

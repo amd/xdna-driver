@@ -59,6 +59,9 @@ struct amdxdna_dev_ops {
 	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);
 	int (*fw_log_fini)(struct amdxdna_dev *xdna);
 	void (*fw_log_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
+	int (*fw_trace_init)(struct amdxdna_dev *xdna, size_t size, u32 categories);
+	int (*fw_trace_fini)(struct amdxdna_dev *xdna);
+	void (*fw_trace_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 	/* Below device ops are called by IOCTL */
 	int (*ctx_init)(struct amdxdna_ctx *ctx);
@@ -126,6 +129,7 @@ struct amdxdna_dev {
 	struct amdxdna_fw_ver		fw_ver;
 	struct amdxdna_tdr		tdr;
 	struct amdxdna_dpt		*fw_log;
+	struct amdxdna_dpt		*fw_trace;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif

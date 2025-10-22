@@ -31,6 +31,8 @@ const struct msg_op_ver npu4_msg_op_tbl[] = {
 	{ 15, MSG_OP_UPDATE_PROPERTY },
 	{ 18, MSG_OP_GET_APP_HEALTH },
 	{ 19, MSG_OP_CONFIG_FW_LOG },
+	{ 19, MSG_OP_START_FW_TRACE },
+	{ 19, MSG_OP_STOP_FW_TRACE },
 	{ 0 },
 };
 

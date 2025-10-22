@@ -709,7 +709,7 @@ struct amdxdna_async_error {
 	__u64 ex_err_code;
 };
 
-struct amdxdna_get_fw_log_footer {
+struct amdxdna_dpt_metadata {
 	__u64 offset;
 	__u32 size;
 	__u8 watch;
@@ -728,6 +728,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_HW_CONTEXT_BY_ID	1
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
 #define DRM_AMDXDNA_FW_LOG		3
+#define DRM_AMDXDNA_FW_TRACE		4
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
