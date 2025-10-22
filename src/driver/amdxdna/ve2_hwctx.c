@@ -688,6 +688,7 @@ static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 		hs = kzalloc(sizeof(*hs), GFP_KERNEL);
 		if (!hs) {
 			XDNA_ERR(xdna, "No memory for handshake.\n");
+			kfree(r);
 			return;
 		}
 		ret = ve2_partition_read_privileged_mem(aie_dev, col,
