@@ -18,8 +18,8 @@ module_param(tdr_dump_ctx, bool, 0644);
 MODULE_PARM_DESC(tdr_dump_ctx, "Instead of resetting, just dump the ctx info for debugging");
 
 #define TDR_TIMEOUT_JIFF msecs_to_jiffies(timeout_in_sec * 1000)
-#define to_tdr(work) \
-	((struct aie2_tdr *)container_of(work, struct aie2_tdr, work))
+#define to_tdr(w) \
+	((struct aie2_tdr *)container_of(w, struct aie2_tdr, work))
 #define tdr_to_xdna(t) \
 	(((struct amdxdna_dev_hdl *)container_of(t, struct amdxdna_dev_hdl, tdr))->xdna)
 
