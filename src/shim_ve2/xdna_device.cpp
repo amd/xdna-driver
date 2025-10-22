@@ -737,9 +737,6 @@ device_xdna::
 alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags)
 {
-  if (userptr)
-    shim_not_supported_err("User ptr BO");;
-
   // TODO:
   // For now, debug BO is just a normal device BO. Let's associate all device
   // BO with a HW CTX (if not passed in) since we can't tell if it is a
@@ -747,6 +744,11 @@ alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   auto f = xcl_bo_flags{flags};
   if ((ctx_id == AMDXDNA_INVALID_CTX_HANDLE) && !!(f.flags & XRT_BO_FLAGS_CACHEABLE))
     ctx_id = f.slot;
+
+  if (userptr) {
+    printf("[shim] %s: calling xdna_bo() for user ptr\n", __func__);
+    return std::make_unique<xdna_bo>(*this, ctx_id, size, userptr);
+  }
 
   return std::make_unique<xdna_bo>(*this, ctx_id, size, flags, flag_to_type(flags));
 }
