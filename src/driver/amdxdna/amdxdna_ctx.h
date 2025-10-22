@@ -78,11 +78,9 @@ struct amdxdna_cmd_preempt_data {
 	u32 prop_args[];    /* properties and regular kernel arguments */
 };
 
-/*
- * Interpretation of payload for an amdxdna_cmd which has context health data
+/**
+ * Interpretation of payload for an amdxdna_cmd which has context health data for npu0
  *
- * @version:                    context health data version.
- *                              defines the interface version between driver and shim.
  * @txn_op_idx:                 index of last TXN control code executed
  * @ctx_pc:                     program counter for that context
  * @fatal_error_type:           the fatal error type if context crashes
@@ -98,18 +96,95 @@ struct amdxdna_cmd_preempt_data {
  * fatal_error_exception_type: 0
  * fatal_error_exception_pc:   0
  * fatal_error_app_module:     0
-
+ *
  * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
- * amdxdna_cmd starting from payload will have the following information.
+ * amdxdna_cmd starting from payload will have the following information for npu0 gen.
  */
-struct amdxdna_ctx_health_data {
-	u32 version;
+struct amdxdna_ctx_health_data_aie2 {
 	u32 txn_op_idx;
 	u32 ctx_pc;
 	u32 fatal_error_type;
 	u32 fatal_error_exception_type;
 	u32 fatal_error_exception_pc;
 	u32 fatal_error_app_module;
+};
+
+/**
+ * struct uc_health_info: Health data for each cert
+ *
+ * @uc_idx:            uC index in this context, 0 is the lead
+ * @uc_idle_status:    valid when CERT is CTX_IDEL, represent the reason CERT is idle
+ *                     hsa_lite_status register:
+ *                         bit 0: HSA queue not empty
+ *                         bit 1: preemption save completion
+ *                         bit 2: CERT is idle
+ * @misc_status:       valid when UCCTX_ERROR, represent the reason UC hangs
+ *                         bit 0: uC fw exception
+ *                         bit 1: control code hang
+ * @fw_state:          uC FW state
+ * @page_idx:          page index of the current control code
+ * @offset:            bytes offset inside page
+ * @restore_page:      in case context is preempted, the page index to be executed on resume
+ * @restore_offset:    in case context is preempted, the bytes offset inside restore_page to be
+ *                     executed on resume
+ * @uc_ear:            in case of uC crash, the exception address of uC
+ * @uc_esr:            in case of uC crash, the exception status of uC
+ * @uc_pc:             in case of uC crash, the PC of the current uC
+ */
+struct uc_health_info {
+	u32 uc_idx;
+	u32 uc_idle_status;
+	u32 misc_status;
+	u32 fw_state;
+	u32 page_idx;
+	u32 offset;
+	u32 restore_page;
+	u32 restore_offset;
+	u32 uc_ear;
+	u32 uc_esr;
+	u32 uc_pc;
+};
+
+/**
+ * Interpretation of payload for an amdxdna_cmd which has context health data for AIE2PS and AIE4
+ *
+ * @ctx_state:             context state
+ * @num_ucs:               number of uC reported
+ * @uc_info:               array for health data for each uC in the context.
+ *                         the array size is based on num_certs.
+ *
+ * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
+ * amdxdna_cmd starting from payload will have the following information for aie2ps/aie4 generation.
+ */
+struct amdxdna_ctx_health_data_aie4 {
+	u32 ctx_state;
+	u32 num_uc;
+	struct uc_health_info uc_info[];
+};
+
+/**
+ * Interpretation of payload for an amdxdna_cmd
+ *
+ * @version:               context health data version (1)
+ * @npu_gen:               npu generation
+ * @aie2:                  context health data for npu generation aie2/aie2p
+ * @aie4:                  context health data for npu generation aie2ps/aie4
+ *
+ * If version is 1, we should use this data structure to parse context health data
+ * starting from the amdxdna_cmd payload. And use corresponding data structure based
+ * on the npu generation.
+ */
+struct amdxdna_ctx_health_data {
+#define AMDXDNA_CTX_HEALTH_DATA_V0	0
+#define AMDXDNA_CTX_HEALTH_DATA_V1	1
+	u32 version;
+#define AMDXDNA_NPU_GEN_AIE2		0
+#define AMDXDNA_NPU_GEN_AIE4		1
+	u32 npu_gen;
+	union {
+		struct amdxdna_ctx_health_data_aie2 aie2;
+		struct amdxdna_ctx_health_data_aie4 aie4;
+	};
 };
 
 /* Exec buffer command header format */
