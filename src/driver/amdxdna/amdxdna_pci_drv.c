@@ -114,7 +114,8 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_dev_fini;
 	}
 
-	amdxdna_tdr_start(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_start)
+		xdna->dev_info->ops->tdr_start(xdna);
 
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
@@ -136,7 +137,8 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 failed_tdr_fini:
-	amdxdna_tdr_stop(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_stop)
+		xdna->dev_info->ops->tdr_stop(xdna);
 	amdxdna_sysfs_fini(xdna);
 failed_dev_fini:
 	xdna->dev_info->ops->fini(xdna);
@@ -152,7 +154,8 @@ static void amdxdna_remove(struct pci_dev *pdev)
 
 	amdxdna_fw_log_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
-	amdxdna_tdr_stop(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_stop)
+		xdna->dev_info->ops->tdr_stop(xdna);
 	amdxdna_sysfs_fini(xdna);
 
 #ifdef AMDXDNA_DEVEL

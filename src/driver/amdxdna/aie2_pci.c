@@ -659,29 +659,6 @@ skip_pasid:
 	mutex_destroy(&ndev->aie2_lock);
 }
 
-/* This function returns recover is needed or not */
-static bool aie2_detect(struct amdxdna_dev *xdna)
-{
-	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
-
-	if (aie2_rq_handle_idle_ctx(rq))
-		return false;
-
-	return aie2_rq_is_all_context_stuck(rq);
-}
-
-static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
-{
-	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
-
-	guard(mutex)(&xdna->dev_lock);
-	aie2_rq_dump_all(rq);
-	if (dump_only)
-		return;
-	aie2_rq_stop_all(rq);
-	aie2_rq_restart_all(rq);
-}
-
 static int aie2_query_status(struct amdxdna_client *client,
 			     struct amdxdna_drm_get_info *args)
 {
@@ -1601,8 +1578,8 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.mmap			= NULL,
 	.init			= aie2_init,
 	.fini			= aie2_fini,
-	.detect			= aie2_detect,
-	.recover		= aie2_recover,
+	.tdr_start		= aie2_tdr_start,
+	.tdr_stop		= aie2_tdr_stop,
 	.resume			= aie2_hw_resume,
 	.suspend		= aie2_hw_suspend,
 	.debugfs		= aie2_debugfs_init,

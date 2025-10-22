@@ -24,7 +24,6 @@ amdxdna-y := \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
 	amdxdna_mgmt.o \
-	amdxdna_tdr.o \
 	amdxdna_ubuf.o \
 	amdxdna_carvedout_buf.o \
 	amdxdna_gem.o \
@@ -37,6 +36,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_hwctx.o \
 	aie2_error.o \
 	aie2_debugfs.o \
+	aie2_tdr.o \
 	aie2_dpt.o \
 	aie2_message.o \
 	aie2_ctx_runqueue.o \

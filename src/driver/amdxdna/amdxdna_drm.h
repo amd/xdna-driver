@@ -18,7 +18,6 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
-#include "amdxdna_tdr.h"
 
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...)	dev_warn((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
@@ -30,9 +29,6 @@
 
 #define to_xdna_dev(drm_dev) \
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
-
-#define tdr_to_xdna_dev(t) \
-	((struct amdxdna_dev *)container_of(t, struct amdxdna_dev, tdr))
 
 extern const struct drm_driver amdxdna_drm_drv;
 
@@ -48,8 +44,8 @@ struct amdxdna_mgmt_dma_hdl;
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);
 	void (*fini)(struct amdxdna_dev *xdna);
-	bool (*detect)(struct amdxdna_dev *xdna);
-	void (*recover)(struct amdxdna_dev *xdna, bool dump_only);
+	void (*tdr_start)(struct amdxdna_dev *xdna);
+	void (*tdr_stop)(struct amdxdna_dev *xdna);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
 	void (*reset_prepare)(struct amdxdna_dev *xdna);
@@ -124,7 +120,6 @@ struct amdxdna_dev {
 	struct mutex			dev_lock;
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
-	struct amdxdna_tdr		tdr;
 	struct amdxdna_dpt		*fw_log;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;

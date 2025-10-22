@@ -18,6 +18,7 @@
 
 #include "drm_local/amdxdna_accel.h"
 #include "aie2_msg_priv.h"
+#include "aie2_tdr.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_error.h"
@@ -362,7 +363,8 @@ struct amdxdna_dev_hdl {
 
 	struct aie2_ctx_rq		ctx_rq;
 
-	u32				tdr_status;
+	struct aie2_tdr			tdr;
+
 
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
 };
@@ -447,6 +449,10 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
 int npu1_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 int npu4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
+
+/* aie2_tdr.c */
+void aie2_tdr_start(struct amdxdna_dev *xdna);
+void aie2_tdr_stop(struct amdxdna_dev *xdna);
 
 static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
 {
