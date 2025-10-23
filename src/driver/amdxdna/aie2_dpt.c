@@ -142,7 +142,7 @@ void aie2_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
 	if (!size)
 		return;
 
-	print_hex_dump_debug("[FW TRACE]: ", DUMP_PREFIX_OFFSET, 16, 4, buffer, size, false);
+	print_hex_dump(KERN_INFO, "[FW TRACE]: ", DUMP_PREFIX_OFFSET, 16, 4, buffer, size, false);
 }
 
 int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
