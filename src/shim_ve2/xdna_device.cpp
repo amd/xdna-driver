@@ -337,6 +337,53 @@ struct firmware_version
   }
 };
 
+//Implement aie_coredump query
+struct aie_coredump
+{
+  using result_type = std::vector<char>;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key,
+		  const std::any& req_type)
+  {
+    if (key != key_type::aie_coredump)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto hxctx_id = std::any_cast<uint32_t>(req_type);
+    std::vector<char> payload(0);
+    amdxdna_drm_aie_coredump dump;
+
+    dump.context_id = hxctx_id;
+    dump.size = 0;
+    dump.buf_p = reinterpret_cast<uintptr_t>(payload.data());
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_READ_AIE_COREDUMP,
+      .buffer_size = sizeof(dump),
+      .buffer = reinterpret_cast<uintptr_t>(&dump)
+    };
+
+    auto edev = get_edgedev(device);
+    try {
+      edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    } catch (const xrt_core::system_error& e) {
+      if (e.code().value() == ENOBUFS) {
+        payload.resize(dump.size);
+        dump.buf_p = reinterpret_cast<uintptr_t>(payload.data());
+        edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      }
+    }
+
+    return payload;
+  }
+};
+
 struct archive_path
 {
   using result_type = query::archive_path::result_type;
@@ -606,6 +653,7 @@ initialize_query_table()
   emplace_func0_request<query::total_cols,              total_cols>();
   emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
+  emplace_func1_request<query::aie_coredump,		aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }
