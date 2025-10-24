@@ -678,11 +678,6 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-#define MEM_TILE_MEMORY_SIZE		0x80000
-#define MEM_TILE_FIRST_REG_ADDRESS	0x91000
-#define CORE_TILE_MEMORY_SIZE		0x10000
-#define CORE_TILE_FIRST_REG_ADDRESS	0x11000
-
 int ve2_create_coredump(struct amdxdna_dev *xdna,
 			struct amdxdna_ctx *hwctx,
 			void* buffer,

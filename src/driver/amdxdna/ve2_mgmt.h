@@ -45,10 +45,16 @@ struct amdxdna_ctx;
 #define CORE_TILE_MEMORY_OFF(col, row, off) \
 	VE2_ADDR(col, row, VE2_CORE_TILE_MEMORY_OFF + (off))
 
-#define TILE_ADDRESS_SPACE		1048576
+#define TILE_ADDRESS_SPACE		0x100000
 #define GET_TILE_ADDRESS(buffer, num_row, row, col) \
 	(buffer + (((num_row*col) + row) * TILE_ADDRESS_SPACE))
-#define MAX_ROW 6
+
+#define MAX_ROW				6
+
+#define MEM_TILE_MEMORY_SIZE		0x80000
+#define MEM_TILE_FIRST_REG_ADDRESS	0x91000
+#define CORE_TILE_MEMORY_SIZE		0x10000
+#define CORE_TILE_FIRST_REG_ADDRESS	0x11000
 
 /**
  * struct misc_info - Holds miscellaneous context information for VE2 management.
