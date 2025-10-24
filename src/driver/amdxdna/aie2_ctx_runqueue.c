@@ -772,14 +772,14 @@ bool aie2_rq_is_all_context_stuck(struct aie2_ctx_rq *rq)
 	}
 	mutex_unlock(&xdna->dev_lock);
 
-	tdr = READ_ONCE(ndev->tdr_status);
-	if (pending && xdna->tdr.progress == tdr && tdr == AIE2_TDR_WAIT)
+	tdr = READ_ONCE(ndev->tdr.status);
+	if (pending && ndev->tdr.progress == tdr && tdr == AIE2_TDR_WAIT)
 		return true;
 
 	if (tdr != AIE2_TDR_WAIT)
-		WRITE_ONCE(ndev->tdr_status, AIE2_TDR_WAIT);
+		WRITE_ONCE(ndev->tdr.status, AIE2_TDR_WAIT);
 
-	xdna->tdr.progress = tdr;
+	ndev->tdr.progress = tdr;
 
 	return false;
 }

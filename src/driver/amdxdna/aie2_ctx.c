@@ -220,7 +220,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 
 	ctx->completed++;
 	ndev = ctx->client->xdna->dev_handle;
-	WRITE_ONCE(ndev->tdr_status, AIE2_TDR_SIGNALED);
+	WRITE_ONCE(ndev->tdr.status, AIE2_TDR_SIGNALED);
 	trace_xdna_job(&job->base, ctx->name, "signaling fence", job->seq, job->opcode);
 	job->job_done = true;
 	dma_fence_signal(fence);
@@ -420,7 +420,7 @@ out:
 		if (job->opcode != OP_NOOP)
 			amdxdna_stats_start(ctx->client);
 		ndev = ctx->client->xdna->dev_handle;
-		WRITE_ONCE(ndev->tdr_status, AIE2_TDR_SIGNALED);
+		WRITE_ONCE(ndev->tdr.status, AIE2_TDR_SIGNALED);
 	}
 
 	return fence;
