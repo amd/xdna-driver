@@ -15,6 +15,8 @@
 #include <linux/workqueue.h>
 #include <linux/completion.h>
 #include <drm/gpu_scheduler.h>
+#include <linux/version.h>
+#include <linux/amd-pmf-io.h>
 
 #include "drm_local/amdxdna_accel.h"
 #include "aie2_msg_priv.h"
@@ -437,11 +439,13 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
 int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
-int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
+int aie2_smu_get_power_estimate(void);
+#if KERNEL_VERSION(6, 18, 0) < LINUX_VERSION_CODE
+int aie2_smu_get_npu_metrics(struct amd_pmf_npu_metrics *data);
+#endif
 
 /* aie2_pm.c */
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
