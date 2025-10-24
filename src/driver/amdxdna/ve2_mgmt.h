@@ -45,6 +45,11 @@ struct amdxdna_ctx;
 #define CORE_TILE_MEMORY_OFF(col, row, off) \
 	VE2_ADDR(col, row, VE2_CORE_TILE_MEMORY_OFF + (off))
 
+#define TILE_ADDRESS_SPACE		1048576
+#define GET_TILE_ADDRESS(buffer, num_row, row, col) \
+	(buffer + (((num_row*col) + row) * TILE_ADDRESS_SPACE))
+#define MAX_ROW 6
+
 /**
  * struct misc_info - Holds miscellaneous context information for VE2 management.
  * @fw_state: Firmware state indicator.
@@ -153,6 +158,7 @@ static inline int get_ctx_write_index(struct amdxdna_ctx *hwctx, u64 *write_inde
  */
 int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 
+int ve2_create_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, void* buffer, u32 size);
 /**
  * ve2_mgmt_destroy_partition - Destroy a VE2 hardware partition for a context.
  * @hwctx: Pointer to the hardware context.
