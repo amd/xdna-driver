@@ -39,7 +39,7 @@ install (TARGETS ${XDNA_VE2_TARGET}
 set(vtd_file "${CMAKE_CURRENT_BINARY_DIR}/xrt_smi_ve2.ar")
 
 file(DOWNLOAD
-  "https://github.com/Xilinx/VTD/raw/7473843b9eb88ca83498f0498e905db913886572/archive/ve2/xrt_smi_ve2.a"
+  "https://github.com/Xilinx/VTD/raw/66cd853d8c2002e9059a749fbbd34b58cc8674da/archive/ve2/xrt_smi_ve2.a"
   "${vtd_file}"
 )
 
