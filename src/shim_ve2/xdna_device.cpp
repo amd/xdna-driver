@@ -360,6 +360,7 @@ struct aie_coredump
     amdxdna_drm_aie_coredump dump;
 
     dump.context_id = hxctx_id;
+    // first call is to get needed size
     dump.size = 0;
     dump.buf_p = reinterpret_cast<uintptr_t>(payload.data());
 
@@ -653,7 +654,7 @@ initialize_query_table()
   emplace_func0_request<query::total_cols,              total_cols>();
   emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
-  emplace_func1_request<query::aie_coredump,		aie_coredump>();
+  emplace_func1_request<query::aie_coredump,            aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }

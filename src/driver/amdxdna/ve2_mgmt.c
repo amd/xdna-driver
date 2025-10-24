@@ -678,6 +678,8 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 	return 0;
 }
 
+// we split ve2_partition_read into multiple call for mem and core tile till aie driver provide
+// api to read complete 1MB address space
 int ve2_create_coredump(struct amdxdna_dev *xdna,
 			struct amdxdna_ctx *hwctx,
 			void* buffer,
