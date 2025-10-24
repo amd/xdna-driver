@@ -419,10 +419,10 @@ static int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 	return 0;
 }
 
-int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dpt_metadata footer = {};
-	struct amdxdna_dpt *fw_log;
+	struct amdxdna_dev *xdna = dpt->xdna;
 	u32 buf_size, offset;
 	void __user *buf;
 	int ret = 0;
@@ -439,32 +439,29 @@ int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *a
 	if (copy_from_user(&footer, buf + offset, sizeof(footer)))
 		return -EFAULT;
 
-	XDNA_DBG(xdna, "FW log requested at offset 0x%llx with watch %s", footer.offset,
+	XDNA_DBG(xdna, "%s requested at offset 0x%llx with watch %s", dpt->name, footer.offset,
 		 footer.watch ? "on" : "off");
 
-	fw_log = xdna->fw_log;
-
-	if (footer.offset == READ_ONCE(fw_log->tail)) {
+	if (footer.offset == READ_ONCE(dpt->tail)) {
 		if (footer.watch) {
-			ret = wait_event_interruptible(fw_log->wait,
-						       footer.offset != READ_ONCE(fw_log->tail));
+			ret = wait_event_interruptible(dpt->wait,
+						       footer.offset != READ_ONCE(dpt->tail));
 			if (ret) {
-				XDNA_WARN(xdna, "Wait for FW log interrupted by signal: %d", ret);
-				footer.offset = offset;
+				XDNA_WARN(xdna, "%s wait for data interrupted by signal: %d",
+					  dpt->name, ret);
 				footer.size = 0;
 				ret = -EINTR;
 				goto exit;
 			}
 		} else {
-			footer.offset = footer.offset;
 			footer.size = 0;
 			goto exit;
 		}
 	}
 
-	ret = amdxdna_dpt_fetch_payload(fw_log, buf, &footer.offset, &footer.size, true);
+	ret = amdxdna_dpt_fetch_payload(dpt, buf, &footer.offset, &footer.size, true);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to fetch FW buffer: %d", ret);
+		XDNA_ERR(xdna, "%s failed to fetch FW buffer: %d", dpt->name, ret);
 		footer.offset = 0;
 		footer.size = 0;
 		ret = -EINVAL;
@@ -474,8 +471,14 @@ exit:
 	if (copy_to_user(buf + offset, &footer, sizeof(footer)))
 		return -EFAULT;
 
-	XDNA_DBG(xdna, "Returned FW log with size 0x%x offset 0x%llx", footer.size, footer.offset);
+	XDNA_DBG(xdna, "%s returned with size 0x%x offset 0x%llx", dpt->name, footer.size,
+		 footer.offset);
 	return ret;
+}
+
+int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	return amdxdna_dpt_get_data(xdna->fw_log, args);
 }
 
 static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
@@ -587,62 +590,7 @@ static int amdxdna_fw_trace_fini(struct amdxdna_dev *xdna)
 
 int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_dpt_metadata footer = {};
-	struct amdxdna_dpt *fw_trace;
-	u32 buf_size, offset;
-	void __user *buf;
-	int ret = 0;
-
-	buf_size = args->num_element * args->element_size;
-	buf = u64_to_user_ptr(args->buffer);
-	if (!access_ok(buf, buf_size)) {
-		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
-			 args->num_element, args->element_size);
-		return -EFAULT;
-	}
-
-	offset = buf_size - sizeof(footer);
-	if (copy_from_user(&footer, buf + offset, sizeof(footer)))
-		return -EFAULT;
-
-	XDNA_DBG(xdna, "FW trace requested at offset 0x%llx with watch %s", footer.offset,
-		 footer.watch ? "on" : "off");
-
-	fw_trace = xdna->fw_trace;
-
-	if (footer.offset == READ_ONCE(fw_trace->tail)) {
-		if (footer.watch) {
-			ret = wait_event_interruptible(fw_trace->wait,
-						       footer.offset != READ_ONCE(fw_trace->tail));
-			if (ret) {
-				XDNA_WARN(xdna, "Wait for FW trace interrupted by signal: %d", ret);
-				footer.offset = offset;
-				footer.size = 0;
-				ret = -EINTR;
-				goto exit;
-			}
-		} else {
-			footer.offset = footer.offset;
-			footer.size = 0;
-			goto exit;
-		}
-	}
-
-	ret = amdxdna_dpt_fetch_payload(fw_trace, buf, &footer.offset, &footer.size, true);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to fetch FW buffer: %d", ret);
-		footer.offset = 0;
-		footer.size = 0;
-		ret = -EINVAL;
-	}
-
-exit:
-	if (copy_to_user(buf + offset, &footer, sizeof(footer)))
-		return -EFAULT;
-
-	XDNA_DBG(xdna, "Returned FW trace with size 0x%x offset 0x%llx",
-		 footer.size, footer.offset);
-	return ret;
+	return amdxdna_dpt_get_data(xdna->fw_trace, args);
 }
 
 int amdxdna_dpt_init(struct amdxdna_dev *xdna)
