@@ -144,22 +144,6 @@ static inline int get_ctx_write_index(struct amdxdna_ctx *hwctx, u64 *write_inde
 	return 0;
 }
 
-static inline void update_ctx_write_index(struct amdxdna_ctx *hwctx, int incr_cnt)
-{
-	struct ve2_hsa_queue *queue;
-	struct host_queue_header *header;
-
-	if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p)
-		return;
-
-	queue = &hwctx->priv->hwctx_hsa_queue;
-	header = &queue->hsa_queue_p->hq_header;
-
-	mutex_lock(&queue->hq_lock);
-	header->write_index += (u64)incr_cnt;
-	mutex_unlock(&queue->hq_lock);
-}
-
 /**
  * ve2_mgmt_create_partition - Create a VE2 hardware partition for a context.
  * @xdna: Pointer to the device structure (VE2 device instance).
