@@ -78,7 +78,7 @@ static int hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 		mutex_unlock(&queue->hq_lock);
 		return -EINVAL;
 	} else if ((header->write_index - header->read_index) < header->capacity) {
-		*slot = header->write_index;
+		*slot = header->write_index++;
 		XDNA_DBG(xdna, "slot %lld", *slot);
 	} else {
 		XDNA_ERR(xdna, "HSQ Queue is full");
@@ -468,8 +468,6 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 		packet_dump(xdna, queue, slot_id);
 
 	hsa_queue_pkt_set_valid(pkt);
-	/* Update write index here */
-	update_ctx_write_index(hwctx, 1);
 
 	return 0;
 }
@@ -523,8 +521,6 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
 	XDNA_DBG(xdna, "dpu instruction addr: 0x%llx", dpu_cmd->instruction_buffer);
 
 	hsa_queue_pkt_set_valid(pkt);
-	/* Update write index here */
-	update_ctx_write_index(hwctx, 1);
 
 	return 0;
 }
