@@ -557,7 +557,7 @@ struct performance_mode
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_get_power_mode state;
+    amdxdna_drm_get_power_mode state = {};
 
     amdxdna_drm_get_info arg = {
         .param = DRM_AMDXDNA_GET_POWER_MODE,
@@ -595,7 +595,7 @@ struct preemption
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state force;
+    amdxdna_drm_attribute_state force = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
@@ -612,7 +612,7 @@ struct preemption
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state force;
+    amdxdna_drm_attribute_state force = {};
     force.state = std::any_cast<uint32_t>(any);
 
     amdxdna_drm_set_state arg = {
@@ -832,7 +832,7 @@ struct frame_boundary_preemption
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state preempt;
+    amdxdna_drm_attribute_state preempt = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
@@ -849,7 +849,7 @@ struct frame_boundary_preemption
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state preempt;
+    amdxdna_drm_attribute_state preempt = {};
     preempt.state = std::any_cast<uint32_t>(any);
 
     amdxdna_drm_set_state arg = {
@@ -1042,7 +1042,7 @@ struct clock_topology
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_query_clock_metadata clock_metadata;
+    amdxdna_drm_query_clock_metadata clock_metadata = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
@@ -1082,7 +1082,7 @@ struct resource_info
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_get_resource_info resource_info;
+    amdxdna_drm_get_resource_info resource_info = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_RESOURCE_INFO,
