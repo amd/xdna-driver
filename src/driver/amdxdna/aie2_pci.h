@@ -365,7 +365,6 @@ struct amdxdna_dev_hdl {
 
 	struct aie2_tdr			tdr;
 
-
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
 };
 
@@ -621,6 +620,7 @@ static inline bool ctx_should_stop(struct amdxdna_ctx *ctx)
 
 /* aie2_dpt.c */
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level);
+int aie2_fw_log_config(struct amdxdna_dev *xdna, u8 level);
 int aie2_fw_log_fini(struct amdxdna_dev *xdna);
 
 #endif /* _AIE2_PCI_H_ */

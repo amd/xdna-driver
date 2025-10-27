@@ -716,8 +716,19 @@ struct firmware_log
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    //TODO : implement IOCTL to set firmware log configuration
+    auto config = std::any_cast<xrt_core::query::firmware_log_state::value_type>(any);
+    amdxdna_drm_set_dpt_state fw_log;
+    fw_log.action = !!config.action;
+    fw_log.config = config.log_level;
 
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FW_LOG_STATE,
+      .buffer_size = sizeof(fw_log),
+      .buffer = reinterpret_cast<uintptr_t>(&fw_log)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
   }
 
   static result_type

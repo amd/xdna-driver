@@ -73,6 +73,11 @@ int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 	u32 msi_idx, msi_address;
 	int ret;
 
+	if (level >= MAX_FW_LOG_LEVEL) {
+		XDNA_ERR(xdna,  "Invalid firmware log level: %d", level);
+		return -EINVAL;
+	}
+
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	ret = aie2_config_fw_log(xdna->dev_handle, dma_hdl, size, &msi_idx, &msi_address);
 	if (ret) {
@@ -108,6 +113,24 @@ int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 	xdna->fw_log->io_base = xdna->dev_handle->mbox_base;
 	xdna->fw_log->msi_address = msi_address & AIE2_DPT_MSI_ADDR_MASK;
 	xdna->fw_log->msi_idx = msi_idx;
+
+	return ret;
+}
+
+int aie2_fw_log_config(struct amdxdna_dev *xdna, u8 level)
+{
+	int ret;
+
+	if (level == FW_LOG_LEVEL_NONE || level >= MAX_FW_LOG_LEVEL) {
+		XDNA_ERR(xdna,  "Invalid firmware log level: %d", level);
+		return -EINVAL;
+	}
+
+	mutex_lock(&xdna->dev_handle->aie2_lock);
+	ret = aie2_set_log_level(xdna->dev_handle, level);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to init fw log level: %d", ret);
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
 	return ret;
 }

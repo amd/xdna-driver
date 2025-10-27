@@ -709,11 +709,29 @@ struct amdxdna_async_error {
 	__u64 ex_err_code;
 };
 
+/**
+ * struct amdxdna_dpt_metadata - DPT metadata shared between shim and driver
+ * @offset: ever increamenting DPT read pointer
+ * @size: size of the buffer
+ * @watch: boolean value to indicate if this request can wait in the kernel until new data is
+ *	   available
+ */
 struct amdxdna_dpt_metadata {
 	__u64 offset;
 	__u32 size;
 	__u8 watch;
 	__u8 reserved[3];
+};
+
+/**
+ * struct amdxdna_drm_set_dpt_state - Structure to configure DPT
+ * @action: 1 to enable. 0 to disable
+ * @config: for firmware logging this value indicates log level
+ */
+struct amdxdna_drm_set_dpt_state {
+	__u32 action;
+	__u32 config;
+	__u64 reserved;
 };
 
 /**
@@ -759,6 +777,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_WRITE_AIE_REG		2
 #define	DRM_AMDXDNA_SET_FORCE_PREEMPT		3
 #define	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT	4
+#define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

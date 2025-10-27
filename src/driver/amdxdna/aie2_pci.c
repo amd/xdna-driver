@@ -1559,6 +1559,11 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
 		ret = aie2_set_frame_boundary_preempt_state(client, args);
 		break;
+	case DRM_AMDXDNA_SET_FW_LOG_STATE:
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
+		ret = amdxdna_set_fw_log_state(xdna, args);
+		mutex_lock(&xdna->dev_handle->aie2_lock);
+		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_WRITE_AIE_MEM:
 		ret = aie2_write_aie_mem(client, args);
@@ -1587,6 +1592,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.suspend		= aie2_hw_suspend,
 	.debugfs		= aie2_debugfs_init,
 	.fw_log_init		= aie2_fw_log_init,
+	.fw_log_config		= aie2_fw_log_config,
 	.fw_log_fini		= aie2_fw_log_fini,
 	.fw_log_parse		= aie2_fw_log_parse,
 	.fw_trace_init		= aie2_fw_trace_init,
