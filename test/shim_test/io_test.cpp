@@ -131,8 +131,13 @@ io_test_cmd_submit_and_wait_latency(
       hwq->submit_command(std::get<0>(cmd).get()->get());
       io_test_cmd_wait(hwq, std::get<0>(cmd));
       auto state = std::get<1>(cmd)->state;
-      if (state != ERT_CMD_STATE_COMPLETED)
-        throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
+      if (state != ERT_CMD_STATE_COMPLETED) {
+        std::string errmsg = "Command ";
+        errmsg += std::to_string(completed);
+        errmsg += " failed, state=";
+        errmsg += std::to_string(state);
+        throw std::runtime_error(errmsg);
+      }
 
       std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
       completed++;

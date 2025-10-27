@@ -10,6 +10,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <thread>
 
 namespace {
 
@@ -207,8 +208,13 @@ int verify_output(int8_t* buf, const std::string &wrk_path)
     ss.str(line);
     ss >> key >> str_val;
     ss.clear();
+    std::ostringstream oss;
+    oss << std::this_thread::get_id();
     golden_output_files.push_back(wrk_path + "golden_" + str_val + ".bin");
-    dump_output_files.push_back("/tmp/dump_" + str_val + "." + std::to_string(getpid()) + ".bin");
+    dump_output_files.push_back("/tmp/dump_" + str_val +
+      "." + std::to_string(getpid()) +
+      "." + oss.str() +
+      ".bin");
 
     getline(myfile, line);
     ss.str(line);
