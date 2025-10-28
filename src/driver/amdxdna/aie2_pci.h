@@ -365,7 +365,6 @@ struct amdxdna_dev_hdl {
 
 	struct aie2_tdr			tdr;
 
-
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
 };
 

@@ -273,15 +273,15 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		struct amdxdna_ctx *hw_ctx;
-		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
 
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
 			if (info.context_id == hwctx_id)
 				hwctx = hw_ctx;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
 
-	if (hwctx == NULL) {
+	if (!hwctx) {
 		XDNA_ERR(xdna, "hw context :%u not found\n", info.context_id);
 		return -EINVAL;
 	}
@@ -302,10 +302,9 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		return -ENOBUFS;
 	}
 
-	local_buf = (void*)vmalloc(rel_size);
-	if (!local_buf) {
+	local_buf = vmalloc(rel_size);
+	if (!local_buf)
 		return -ENOMEM;
-	}
 
 	ret = ve2_create_coredump(xdna, hwctx, local_buf, rel_size);
 	XDNA_DBG(xdna, "created dump of size:%d\n", ret);
