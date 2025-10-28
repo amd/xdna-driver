@@ -745,10 +745,8 @@ alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   if ((ctx_id == AMDXDNA_INVALID_CTX_HANDLE) && !!(f.flags & XRT_BO_FLAGS_CACHEABLE))
     ctx_id = f.slot;
 
-  if (userptr) {
-    printf("[shim] %s: calling xdna_bo() for user ptr\n", __func__);
+  if (userptr)
     return std::make_unique<xdna_bo>(*this, ctx_id, size, userptr);
-  }
 
   return std::make_unique<xdna_bo>(*this, ctx_id, size, flags, flag_to_type(flags));
 }

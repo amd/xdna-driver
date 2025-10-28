@@ -128,7 +128,6 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
 	     m_ptr, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
 }
 
-/* Merged the code wit existing xdna_bo() */
 xdna_bo::
 xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, void *uptr)
