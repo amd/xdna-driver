@@ -287,31 +287,6 @@ static void amdxdna_dpt_enable_polling(struct amdxdna_dpt *dpt, bool enable)
 	dpt->polling = enable;
 }
 
-int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
-{
-	if (dpt->dump_to_dmesg == dump)
-		return 0;
-
-	if (dump) {
-		dpt->local_buffer = kzalloc(dpt->size, GFP_KERNEL);
-		if (!dpt->local_buffer) {
-			XDNA_ERR(dpt->xdna, "Failed to allocate FW fetch buffer");
-			return -ENOMEM;
-		}
-		amdxdna_dpt_enable_polling(dpt, true);
-		/* Drain any data already logged in the buffer before dump_to_dmesg was enabled */
-		amdxdna_dpt_drain_pending_data(dpt);
-	} else {
-		if (!poll_fw_log)
-			amdxdna_dpt_enable_polling(dpt, false);
-		kfree(dpt->local_buffer);
-		dpt->head = 0;
-	}
-
-	dpt->dump_to_dmesg = dump;
-	return 0;
-}
-
 static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
@@ -383,6 +358,8 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	amdxdna_dpt_read_metadata(log_hdl);
 
 	log_hdl->enabled = true;
+
+	XDNA_DBG(xdna, "FW logging enabled at level: %d", fw_log_level);
 	return 0;
 mfree:
 	amdxdna_mgmt_buff_free(dma_hdl);
@@ -416,6 +393,9 @@ static int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 	amdxdna_mgmt_buff_free(log_hdl->dma_hdl);
 	kfree(log_hdl);
 	xdna->fw_log = NULL;
+
+	XDNA_DBG(xdna, "FW logging disabled");
+
 	return 0;
 }
 
@@ -474,11 +454,6 @@ exit:
 	XDNA_DBG(xdna, "%s returned with size 0x%x offset 0x%llx", dpt->name, footer.size,
 		 footer.offset);
 	return ret;
-}
-
-int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
-{
-	return amdxdna_dpt_get_data(xdna->fw_log, args);
 }
 
 static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
@@ -588,9 +563,29 @@ static int amdxdna_fw_trace_fini(struct amdxdna_dev *xdna)
 	return 0;
 }
 
-int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
 {
-	return amdxdna_dpt_get_data(xdna->fw_trace, args);
+	if (dpt->dump_to_dmesg == dump)
+		return 0;
+
+	if (dump) {
+		dpt->local_buffer = kzalloc(dpt->size, GFP_KERNEL);
+		if (!dpt->local_buffer) {
+			XDNA_ERR(dpt->xdna, "Failed to allocate FW fetch buffer");
+			return -ENOMEM;
+		}
+		amdxdna_dpt_enable_polling(dpt, true);
+		/* Drain any data already logged in the buffer before dump_to_dmesg was enabled */
+		amdxdna_dpt_drain_pending_data(dpt);
+	} else {
+		if (!poll_fw_log)
+			amdxdna_dpt_enable_polling(dpt, false);
+		kfree(dpt->local_buffer);
+		dpt->head = 0;
+	}
+
+	dpt->dump_to_dmesg = dump;
+	return 0;
 }
 
 int amdxdna_dpt_init(struct amdxdna_dev *xdna)
@@ -669,4 +664,63 @@ int amdxdna_dpt_suspend(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Failed to suspend FW tracing: %d", ret);
 
 	return ret;
+}
+
+int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	return amdxdna_dpt_get_data(xdna->fw_log, args);
+}
+
+int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	return amdxdna_dpt_get_data(xdna->fw_trace, args);
+}
+
+int amdxdna_set_fw_log_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_set_dpt_state fw_log;
+	int ret = 0;
+
+	if (args->buffer_size != sizeof(fw_log)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
+			 args->buffer_size, sizeof(fw_log));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&fw_log, u64_to_user_ptr(args->buffer), sizeof(fw_log)))
+		return -EFAULT;
+
+	if (!fw_log.action) {
+		if (xdna->fw_log && fw_log.action != xdna->fw_log->enabled) {
+			ret = amdxdna_fw_log_fini(xdna);
+			if (ret)
+				XDNA_ERR(xdna, "Failed to disable FW logging: %d", ret);
+		}
+		fw_log_level = 0;
+		return ret;
+	}
+
+	if (!xdna->fw_log) {
+		fw_log_level = fw_log.config;
+		ret = amdxdna_fw_log_init(xdna);
+		if (ret) {
+			XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
+			return ret;
+		}
+	}
+
+	if (fw_log.config != fw_log_level) {
+		if (!xdna->dev_info->ops->fw_log_config)
+			return -EOPNOTSUPP;
+
+		ret = xdna->dev_info->ops->fw_log_config(xdna, fw_log.config);
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to change FW log level to %d: %d",
+				 fw_log.config, ret);
+			return ret;
+		}
+		fw_log_level = fw_log.config;
+	}
+
+	return 0;
 }
