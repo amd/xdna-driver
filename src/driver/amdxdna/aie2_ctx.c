@@ -209,18 +209,25 @@ aie2_ctx_cmd_health_data(struct amdxdna_ctx *ctx, struct amdxdna_gem_obj *cmd_ab
 }
 
 static void
+reset_tdr_timer(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_ctx *ctx = job->ctx;
+	struct amdxdna_dev_hdl *ndev = ctx->client->xdna->dev_handle;
+
+	WRITE_ONCE(ndev->tdr.status, AIE2_TDR_SIGNALED);
+}
+
+static void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct dma_fence *fence = job->fence;
-	struct amdxdna_dev_hdl *ndev;
 	int idx;
 
 	amdxdna_pm_suspend_put(ctx->client->xdna);
 
 	ctx->completed++;
-	ndev = ctx->client->xdna->dev_handle;
-	WRITE_ONCE(ndev->tdr.status, AIE2_TDR_SIGNALED);
+	reset_tdr_timer(job);
 	trace_xdna_job(&job->base, ctx->name, "signaling fence", job->seq, job->opcode);
 	job->job_done = true;
 	dma_fence_signal(fence);
@@ -361,7 +368,6 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_ctx *ctx = job->ctx;
-	struct amdxdna_dev_hdl *ndev;
 	enum cmd_chain_class class;
 	struct dma_fence *fence;
 	int ret = 0;
@@ -419,8 +425,6 @@ out:
 	} else {
 		if (job->opcode != OP_NOOP)
 			amdxdna_stats_start(ctx->client);
-		ndev = ctx->client->xdna->dev_handle;
-		WRITE_ONCE(ndev->tdr.status, AIE2_TDR_SIGNALED);
 	}
 
 	return fence;
@@ -1032,6 +1036,11 @@ retry:
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 	for (i = 0; i < job->bo_cnt; i++)
 		dma_resv_add_fence(job->bos[i].obj->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+	/*
+	 * Resetting TDR timer before updating ctx->submitted to avoid
+	 * racing with TDR detection.
+	 */
+	reset_tdr_timer(job);
 	job->seq = ctx->submitted++;
 	ctx->priv->pending[get_job_idx(job->seq)] = job;
 	kref_get(&job->refcnt);
