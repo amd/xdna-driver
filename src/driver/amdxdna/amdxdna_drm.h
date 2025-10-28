@@ -57,6 +57,7 @@ struct amdxdna_dev_ops {
 	int (*fw_log_fini)(struct amdxdna_dev *xdna);
 	void (*fw_log_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
 	int (*fw_trace_init)(struct amdxdna_dev *xdna, size_t size, u32 categories);
+	int (*fw_trace_config)(struct amdxdna_dev *xdna, u32 categories);
 	int (*fw_trace_fini)(struct amdxdna_dev *xdna);
 	void (*fw_trace_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
 

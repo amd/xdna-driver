@@ -1548,35 +1548,44 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	if (ret)
 		return ret;
 
-	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_set_power_mode(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_set_force_preempt_state(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_set_frame_boundary_preempt_state(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 	case DRM_AMDXDNA_SET_FW_LOG_STATE:
-		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		ret = amdxdna_set_fw_log_state(xdna, args);
-		mutex_lock(&xdna->dev_handle->aie2_lock);
+		break;
+	case DRM_AMDXDNA_SET_FW_TRACE_STATE:
+		ret = amdxdna_set_fw_trace_state(xdna, args);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_WRITE_AIE_MEM:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_write_aie_mem(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 	case DRM_AMDXDNA_WRITE_AIE_REG:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_write_aie_reg(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 #endif
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
-	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
 	amdxdna_pm_suspend_put(xdna);
 	return ret;
@@ -1596,6 +1605,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.fw_log_fini		= aie2_fw_log_fini,
 	.fw_log_parse		= aie2_fw_log_parse,
 	.fw_trace_init		= aie2_fw_trace_init,
+	.fw_trace_config	= aie2_fw_trace_config,
 	.fw_trace_fini		= aie2_fw_trace_fini,
 	.fw_trace_parse		= aie2_fw_trace_parse,
 	.get_aie_info		= aie2_get_info,

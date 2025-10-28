@@ -33,6 +33,7 @@ const struct msg_op_ver npu4_msg_op_tbl[] = {
 	{ 19, MSG_OP_CONFIG_FW_LOG },
 	{ 19, MSG_OP_START_FW_TRACE },
 	{ 19, MSG_OP_STOP_FW_TRACE },
+	{ 19, MSG_OP_SET_FW_TRACE_CATEGORIES },
 	{ 0 },
 };
 
