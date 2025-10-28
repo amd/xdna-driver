@@ -302,7 +302,7 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		return -ENOBUFS;
 	}
 
-	local_buf = (void*)vmalloc(rel_size);
+	local_buf = (void *)vmalloc(rel_size);
 	if (!local_buf) {
 		return -ENOMEM;
 	}

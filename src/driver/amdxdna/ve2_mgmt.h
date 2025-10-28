@@ -163,7 +163,7 @@ static inline int get_ctx_write_index(struct amdxdna_ctx *hwctx, u64 *write_inde
  */
 int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 
-int ve2_create_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, void* buffer, u32 size);
+int ve2_create_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, void *buffer, u32 size);
 /**
  * ve2_mgmt_destroy_partition - Destroy a VE2 hardware partition for a context.
  * @hwctx: Pointer to the hardware context.

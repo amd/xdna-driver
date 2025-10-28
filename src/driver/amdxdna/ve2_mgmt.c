@@ -682,7 +682,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 // api to read complete 1MB address space
 int ve2_create_coredump(struct amdxdna_dev *xdna,
 			struct amdxdna_ctx *hwctx,
-			void* buffer,
+			void *buffer,
 			u32 size)
 {
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
@@ -697,7 +697,7 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 	}
 
 	// TODO: Replace MAX_ROW with dynamic value from aie_get_device_info()
-	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d ", nhwctx->num_col );
+	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
 	for (int col = 0; col < nhwctx->num_col; ++col) {
 		int rel_col = col + nhwctx->start_col;
 		for (int row = 0; row < MAX_ROW; ++row) {
@@ -715,7 +715,7 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 							      GET_TILE_ADDRESS(buffer, MAX_ROW, row, col)+ MEM_TILE_FIRST_REG_ADDRESS);
 				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.", col + nhwctx->start_col, row, ret1);
 				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.", col + nhwctx->start_col, row, ret2);
-				if (ret1 < 0 || ret2< 0)
+				if (ret1 < 0 || ret2 < 0)
 					return -EINVAL;
 			} else if (row > 2) {
 				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0, CORE_TILE_MEMORY_SIZE,
