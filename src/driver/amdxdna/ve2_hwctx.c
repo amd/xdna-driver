@@ -755,10 +755,6 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 		}
 
 		/*
-		 * amdxdna_cmd_set_state(job->cmd_bo,
-		 *                       priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[seq]);
-		 */
-		/*
 		 * below check need to be removed once we have a clean solution
 		 * to use completion signal
 		 */
@@ -782,7 +778,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			hwctx->health_reported = true;
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 		} else {
-			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_COMPLETED);
+			amdxdna_cmd_set_state(job->cmd_bo,
+					      priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[seq]);
 		}
 
 		ve2_hwctx_job_release(hwctx, job);
