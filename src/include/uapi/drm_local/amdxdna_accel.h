@@ -517,6 +517,20 @@ struct amdxdna_drm_aie_reg {
 };
 
 /**
+ * struct amdxdna_drm_aie_coredump - The data for AIE coredump
+ * @context_id: The hw context id
+ * @size:  The size of bytes to read/write
+ * @buf_p: The buffer to store write data
+ *
+ * This is used for DRM_AMDXDNA_READ_AIE_COREDUMP parameters.
+ */
+struct amdxdna_drm_aie_coredump {
+	__u32 context_id;
+	__u32 size;
+	__u64 buf_p;
+};
+
+/**
  * struct amdxdna_drm_get_power_mode - Get the power mode of the AIE hardware
  * @power_mode: Returned current power mode
  * @pad: MBZ.
@@ -628,6 +642,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_QUERY_RESOURCE_INFO			12
 #define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
 #define	DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION		14
+#define	DRM_AMDXDNA_READ_AIE_COREDUMP			15
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
