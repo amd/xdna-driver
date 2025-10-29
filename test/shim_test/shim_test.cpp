@@ -684,7 +684,7 @@ std::vector<test_case> test_list {
   },
   test_case{ "create_and_free_input_output_bo huge pages", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_bo,
-    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x20000000}
+    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x140000000}
   },
   test_case{ "sync_bo for dpu sequence bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
