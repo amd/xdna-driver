@@ -789,6 +789,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FORCE_PREEMPT		3
 #define	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT	4
 #define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
+#define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

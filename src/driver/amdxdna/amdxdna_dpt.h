@@ -65,6 +65,7 @@ int amdxdna_dpt_suspend(struct amdxdna_dev *xdna);
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
 
 int amdxdna_set_fw_log_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
+int amdxdna_set_fw_trace_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 
 int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
 int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);

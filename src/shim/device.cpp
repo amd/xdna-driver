@@ -633,7 +633,19 @@ struct event_trace
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    // TODO : Implement IOCTL to set event_trace configuration
+    auto config = std::any_cast<xrt_core::query::event_trace_state::value_type>(any);
+    amdxdna_drm_set_dpt_state fw_trace;
+    fw_trace.action = !!config.action;
+    fw_trace.config = config.categories;
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FW_TRACE_STATE,
+      .buffer_size = sizeof(fw_trace),
+      .buffer = reinterpret_cast<uintptr_t>(&fw_trace)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
   }
 
   static result_type

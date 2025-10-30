@@ -193,6 +193,19 @@ int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
 	return ret;
 }
 
+int aie2_fw_trace_config(struct amdxdna_dev *xdna, u32 categories)
+{
+	int ret;
+
+	mutex_lock(&xdna->dev_handle->aie2_lock);
+	ret = aie2_set_trace_categories(xdna->dev_handle, categories);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to init fw trace categories: %d", ret);
+	mutex_unlock(&xdna->dev_handle->aie2_lock);
+
+	return ret;
+}
+
 int aie2_fw_trace_fini(struct amdxdna_dev *xdna)
 {
 	int ret;
