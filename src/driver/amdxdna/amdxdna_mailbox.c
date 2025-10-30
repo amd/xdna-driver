@@ -341,7 +341,7 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 		return -EINVAL;
 	}
 
-	MB_DBG(mb_chann, "resp opcode 0x%x size %d id 0x%x",
+	MB_DBG(mb_chann, "nishads......resp opcode 0x%x size %d id 0x%x",
 	       header->opcode, header->total_size, header->id);
 	ret = mb_msg->notify_cb(mb_msg->handle, data, header->total_size);
 	if (unlikely(ret))

@@ -302,20 +302,23 @@ out:
 static int
 aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 {
+	u32 fail_cmd_status, fail_cmd_idx, cmd_status;
 	struct amdxdna_sched_job *job = handle;
 	struct amdxdna_gem_obj *cmd_abo;
+	struct amdxdna_cmd_chain *cc;
 	struct amdxdna_dev *xdna;
-	u32 fail_cmd_status;
-	u32 fail_cmd_idx;
-	u32 cmd_status;
-	u32 ret = 0;
+	bool timeout = false;
+	int ret = 0;
+	u32 i;
 
 	amdxdna_stats_account(job->ctx->client);
+	xdna = job->ctx->client->xdna;
 	cmd_abo = job->cmd_bo;
+
 	if (unlikely(!data)) {
-		aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
+		timeout = true;
 		ret = -EINVAL;
-		goto out;
+		goto fail;
 	}
 
 	if (unlikely(size != sizeof(u32) * 3)) {
@@ -325,8 +328,7 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	}
 
 	cmd_status = readl(data + offsetof(struct cmd_chain_resp, status));
-	xdna = job->ctx->client->xdna;
-	XDNA_DBG(xdna, "Status 0x%x", cmd_status);
+	XDNA_DBG(xdna, "Cmd status 0x%x", cmd_status);
 	if (cmd_status == AIE2_STATUS_SUCCESS) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
 		goto out;
@@ -335,8 +337,7 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	/* Slow path to handle error, read from ringbuf on BAR */
 	fail_cmd_idx = readl(data + offsetof(struct cmd_chain_resp, fail_cmd_idx));
 	fail_cmd_status = readl(data + offsetof(struct cmd_chain_resp, fail_cmd_status));
-	XDNA_DBG(xdna, "Failed cmd idx %d, status 0x%x",
-		 fail_cmd_idx, fail_cmd_status);
+	XDNA_DBG(xdna, "Failed cmd idx %d, status 0x%x", fail_cmd_idx, fail_cmd_status);
 
 	/*
 	 * The firmware may error out even before it starts processing subcmds in the cmdlist.
@@ -349,13 +350,44 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 		goto out;
 	}
 	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ERROR);
+fail:
+	if (amdxdna_cmd_get_op(cmd_abo) != ERT_CMD_CHAIN) {
+		aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
+		goto out;
+	}
 
-	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
-		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
+	cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
+	cc->error_index = fail_cmd_idx;
 
-		cc->error_index = fail_cmd_idx;
-		if (cc->error_index >= cc->command_count)
-			cc->error_index = 0;
+	if (cc->error_index >= cc->command_count)
+		cc->error_index = 0;
+
+	if (timeout)
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+
+	for (i = 0; i < cc->command_count; i++) {
+		u32 boh = (u32)(cc->data[i]);
+		struct amdxdna_gem_obj *abo;
+
+		abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!abo) {
+			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
+			ret = -ENOENT;
+			goto out;
+		}
+
+		if (i < cc->error_index) {
+			amdxdna_cmd_set_state(abo, ERT_CMD_STATE_COMPLETED);
+		} else if (i == cc->error_index) {
+			if (timeout)
+				aie2_ctx_cmd_health_data(job->ctx, abo);
+			else
+				amdxdna_cmd_set_state(abo, ERT_CMD_STATE_ERROR);
+		} else {
+			amdxdna_cmd_set_state(abo, ERT_CMD_STATE_ABORT);
+		}
+
+		amdxdna_gem_put_obj(abo);
 	}
 out:
 	aie2_sched_notify(job);
