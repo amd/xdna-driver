@@ -55,10 +55,8 @@ static void remove_partition_node(struct solver_rgroup *rgp, struct partition_no
 
 	list_del(&pt_node->list);
 
-	if (pt_node->exclusive) {
-		rgp->npartition_node--;
-		bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncols);
-	}
+	rgp->npartition_node--;
+	bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncols);
 
 	kfree(pt_node);
 	action->release_aie_part = true;
@@ -114,87 +112,76 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 					struct solver_node *snode,
 					struct alloc_requests *req)
 {
-	struct partition_node *pt_node, *rpt_node = NULL;
-	int idx, ret;
-
-	ret = get_free_partition(xrs, snode, req);
-	if (!ret)
-		return ret;
-
-	/* try to get a exclusive partition */
-	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (rpt_node && pt_node->nshared >= rpt_node->nshared)
-			continue;
-
-		for (idx = 0; idx < snode->cols_len; idx++) {
-			if (snode->start_cols[idx] != pt_node->start_col)
-				continue;
-
-			if (req->cdo.ncols != pt_node->ncols)
-				continue;
-
-			rpt_node = pt_node;
-			break;
-		}
-	}
-
-	if (!rpt_node)
-		return -ENODEV;
-
-	rpt_node->nshared++;
-	snode->pt_node = rpt_node;
-
-	return 0;
+	return get_free_partition(xrs, snode, req);
 }
 
 static int allocate_partition_shared(struct solver_state *xrs,
 				     struct solver_node *snode,
 				     struct alloc_requests *req)
 {
-	struct partition_node *pt_node, *rpt_node = NULL;
-	u32 col = snode->start_cols[0];
+	struct partition_node *pt_node, *least_used = NULL;
 	u32 ncols = req->cdo.ncols;
 	int idx;
 
-	/* try to get a share-able partition */
-	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (pt_node->exclusive)
-			continue;
+	drm_dbg(xrs->cfg.ddev, "rid=%llu ncols=%u cols_len=%u\n", snode->rid, ncols,
+		snode->cols_len);
 
-		if (rpt_node && pt_node->nshared >= rpt_node->nshared)
-			continue;
+	/* STEP 1: Try to find a completely unused column to create new partition */
+	for (idx = 0; idx < snode->cols_len; idx++) {
+		u32 candidate_col = snode->start_cols[idx];
+		bool in_use = false;
 
-		for (idx = 0; idx < snode->cols_len; idx++) {
-			if (snode->start_cols[idx] != pt_node->start_col)
-				continue;
+		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+			if (pt_node->start_col == candidate_col)
+				in_use = true;
+		}
 
-			if (req->cdo.ncols != pt_node->ncols)
-				continue;
+		if (!in_use) {
+			drm_info(xrs->cfg.ddev, "Allocating new shared partition at UNUSED col=%u\n",
+				 candidate_col);
+			pt_node = kzalloc(sizeof(*pt_node), GFP_KERNEL);
+			if (!pt_node)
+				return -ENOMEM;
 
-			rpt_node = pt_node;
-			break;
+			pt_node->start_col = candidate_col;
+			pt_node->ncols = ncols;
+			pt_node->exclusive = false;
+			pt_node->nshared = 1;
+
+			list_add_tail(&pt_node->list, &xrs->rgp.pt_node_list);
+			xrs->rgp.npartition_node++;
+			snode->pt_node = pt_node;
+	                bitmap_set(xrs->rgp.resbit, pt_node->start_col, pt_node->ncols);
+			return 0;
 		}
 	}
 
-	if (!rpt_node) {
-		pt_node = kzalloc(sizeof(*pt_node), GFP_KERNEL);
-		if (!pt_node)
-			return -ENOMEM;
+	/* STEP 2: All cols in use, pick the least-used one */
+	for (idx = 0; idx < snode->cols_len; idx++) {
+		u32 candidate_col = snode->start_cols[idx];
 
-		pt_node->nshared = 1;
-		pt_node->start_col = col;
-		pt_node->ncols = ncols;
-		pt_node->exclusive = req->rqos.exclusive;
+		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+			if (pt_node->exclusive)
+				continue;
 
-		list_add_tail(&pt_node->list, &xrs->rgp.pt_node_list);
-		xrs->rgp.npartition_node++;
-		rpt_node = pt_node;
-	} else {
-		rpt_node->nshared++;
+			if (pt_node->start_col == candidate_col && pt_node->ncols == ncols) {
+				if (!least_used || pt_node->nshared < least_used->nshared)
+					least_used = pt_node;
+			}
+		}
 	}
 
-	snode->pt_node = rpt_node;
-	return 0;
+	if (least_used) {
+		least_used->nshared++;
+		snode->pt_node = least_used;
+		drm_info(xrs->cfg.ddev, "Reused shared partition at col=%u (nshared now %u)\n",
+			 least_used->start_col, least_used->nshared);
+		return 0;
+	}
+
+	drm_info(xrs->cfg.ddev, "No available shared partition\n");
+
+	return -ENODEV;
 }
 
 static struct solver_node *create_solver_node(struct solver_state *xrs, struct alloc_requests *req)

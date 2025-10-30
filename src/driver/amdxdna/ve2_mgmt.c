@@ -60,52 +60,46 @@ static void cert_setup_partition(struct amdxdna_dev *xdna, struct device *aie_de
 
 static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req, u32 num_col)
 {
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	u32 width = num_col;
-	int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
-	int start = 0, end = total_col - num_col;
-	int first, last, entries = 0;
-	int i;
+        struct amdxdna_dev *xdna = hwctx->client->xdna;
+        int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
+        int i, start;
+        int max_start = total_col - num_col;
+        int entries = 0;
 
-	if (start_col >= 0) {
-		if (start_col + num_col > total_col) {
-			XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d",
-				 start_col, num_col);
-			return -EINVAL;
-		}
-		first = start_col;
-		entries = (end - first) / width + 1;
-	} else {
-		first = start + (width - start % width) % width;
-		last = end - end % width;
+        if (start_col > 0) {
+                if (start_col + num_col > total_col) {
+                        XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d",
+                                 start_col, num_col);
+                        return -EINVAL;
+                }
 
-		if (last >= first)
-			entries = (last - first) / width + 1;
+                for (start = start_col; start <= max_start; start += num_col)
+                        entries++;
+        } else {
+                for (start = 0; start <= max_start; start += num_col)
+                        entries++;
+        }
 
-		if (!entries) {
-			XDNA_ERR(xdna, "Start %d end %d width %d", start, end, width);
-			return -EINVAL;
-		}
-	}
+        if (entries == 0) {
+                XDNA_ERR(xdna, "No valid start_col found for num_col %d in total_col %d", num_col, total_col);
+                return -EINVAL;
+        }
 
-	XDNA_DBG(xdna, "start %d end %d first %d last %d, entries %d",
-		 start, end, first, last, entries);
+        xrs_req->cdo.start_cols = kmalloc_array(entries,
+                                                sizeof(*xrs_req->cdo.start_cols),
+                                                GFP_KERNEL);
+        if (!xrs_req->cdo.start_cols)
+                return -ENOMEM;
 
-	xrs_req->cdo.start_cols = kmalloc_array(entries,
-						sizeof(*xrs_req->cdo.start_cols),
-						GFP_KERNEL);
-	if (!xrs_req->cdo.start_cols)
-		return -ENOMEM;
+        xrs_req->cdo.cols_len = entries;
+        for (i = 0, start = (start_col > 0 ? start_col : 0); start <= max_start; start += num_col, i++)
+                xrs_req->cdo.start_cols[i] = start;
 
-	xrs_req->cdo.cols_len = entries;
-	for (i = 0; i < entries; i++)
-		xrs_req->cdo.start_cols[i] = first + i * width;
+        print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
+                             xrs_req->cdo.start_cols,
+                             entries * sizeof(*xrs_req->cdo.start_cols), false);
 
-	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     xrs_req->cdo.start_cols,
-			     entries * sizeof(*xrs_req->cdo.start_cols), false);
-
-	return 0;
+        return 0;
 }
 
 int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
@@ -136,6 +130,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	ret = ve2_xrs_col_list(hwctx, xrs_req, xrs_req->cdo.ncols);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate XRS col resource failed, ret %d", ret);
+		mutex_unlock(&xrs->xrs_lock);
 		goto free_xrs_req;
 	}
 
@@ -144,12 +139,14 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	ret = xrs_allocate_resource(xrs, xrs_req, &load_act);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate XRS resource failed, ret %d", ret);
+		mutex_unlock(&xrs->xrs_lock);
 		goto free_start_cols;
 	}
 
 	ret = ve2_create_mgmt_partition(xdna, hwctx, &load_act);
 	if (ret) {
 		XDNA_ERR(xdna, "Creating AIE partition failed, ret %d", ret);
+		mutex_unlock(&xrs->xrs_lock);
 		goto xrs_release;
 	}
 
@@ -166,7 +163,7 @@ free_start_cols:
 	kfree(xrs_req->cdo.start_cols);
 free_xrs_req:
 	kfree(xrs_req);
-	mutex_unlock(&xrs->xrs_lock);
+	XDNA_ERR(xdna, "XRS Request Failed. Ret %d", ret);
 	return ret;
 }
 
