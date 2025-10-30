@@ -735,6 +735,16 @@ struct amdxdna_drm_set_dpt_state {
 };
 
 /**
+ * struct amdxdna_drm_aie_coredump - The data for AIE coredump
+ * @context_id: The hw context id
+ *
+ * This is used for DRM_AMDXDNA_READ_AIE_COREDUMP parameters.
+ */
+struct amdxdna_drm_aie_coredump {
+	__u32 context_id;
+};
+
+/**
  * struct amdxdna_drm_get_array - Get some information from the AIE hardware, return array.
  * @param: Specifies the structure passed in the buffer.
  * @element_size: Size of each element in the array.
@@ -747,6 +757,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
 #define DRM_AMDXDNA_FW_LOG		3
 #define DRM_AMDXDNA_FW_TRACE		4
+#define DRM_AMDXDNA_AIE_COREDUMP	5
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
