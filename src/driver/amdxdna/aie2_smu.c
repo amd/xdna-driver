@@ -107,14 +107,26 @@ int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	return 0;
 }
 
-int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev)
+#if KERNEL_VERSION(6, 18, 0) < LINUX_VERSION_CODE
+int aie2_smu_get_npu_metrics(struct amd_pmf_npu_metrics *data)
 {
-	return ndev->npuclk_freq;
+	return amd_pmf_get_npu_data(data);
 }
+#endif
 
-int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev)
+int aie2_smu_get_power_estimate(void)
 {
-	return ndev->hclk_freq;
+#if KERNEL_VERSION(6, 18, 0) < LINUX_VERSION_CODE
+	struct amd_pmf_npu_metrics npu_metrics;
+	int ret;
+
+	ret = aie2_smu_get_npu_metrics(&npu_metrics);
+	if (ret)
+		return ret;
+
+	return npu_metrics.npu_power;
+#endif
+	return -EOPNOTSUPP;
 }
 
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev)
