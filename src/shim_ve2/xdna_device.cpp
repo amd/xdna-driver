@@ -355,29 +355,29 @@ struct aie_coredump
     if (key != key_type::aie_coredump)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    const auto hxctx_id = std::any_cast<uint32_t>(req_type);
-    std::vector<char> payload(0);
-    amdxdna_drm_aie_coredump dump;
+    const auto hwctx_id = std::any_cast<uint32_t>(req_type);
+    std::vector<char> payload(sizeof(amdxdna_drm_aie_coredump));
+    amdxdna_drm_aie_coredump *dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
+    dump->context_id = hwctx_id;
 
-    dump.context_id = hxctx_id;
-    // first call is to get needed size
-    dump.size = 0;
-    dump.buf_p = reinterpret_cast<uintptr_t>(payload.data());
-
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_READ_AIE_COREDUMP,
-      .buffer_size = sizeof(dump),
-      .buffer = reinterpret_cast<uintptr_t>(&dump)
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_AIE_COREDUMP,
+      .element_size = static_cast<u32>(payload.size()),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto edev = get_edgedev(device);
     try {
-      edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+      edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
     } catch (const xrt_core::system_error& e) {
       if (e.code().value() == ENOBUFS) {
-        payload.resize(dump.size);
-        dump.buf_p = reinterpret_cast<uintptr_t>(payload.data());
-        edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+        payload.resize(arg.element_size + sizeof(amdxdna_drm_aie_coredump));
+        dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data()+arg.element_size);
+        dump->context_id = hwctx_id;
+        arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
+        arg.element_size = payload.size();
+        edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
       }
     }
 

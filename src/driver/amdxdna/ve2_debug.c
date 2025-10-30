@@ -251,38 +251,40 @@ static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_
 	return 0;
 }
 
-static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_drm_aie_coredump info;
+	struct amdxdna_drm_aie_coredump footer = {};
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_ctx *hwctx = NULL;
 	unsigned long hwctx_id;
 	void *local_buf = NULL;
 	int ret = 0, idx;
 	u32 rel_size = 0;
+	u32 offset;
 
-	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
+	u32 buf_size = args->num_element * args->element_size;
+	offset = buf_size - sizeof(footer);
+	if (copy_from_user(&footer, u64_to_user_ptr(args->buffer) + offset, sizeof(footer))) {
 		XDNA_ERR(xdna, "Failed to copy request from user");
 		return -EFAULT;
 	}
 
 	XDNA_DBG(xdna, "AIE Coredump request received for context_id = %u buffer size %u\n",
-		 info.context_id, info.size);
+		 footer.context_id, buf_size);
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
 		struct amdxdna_ctx *hw_ctx;
 		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
-
-			if (info.context_id == hwctx_id)
+			if (footer.context_id == hwctx_id)
 				hwctx = hw_ctx;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
 
 	if (hwctx == NULL) {
-		XDNA_ERR(xdna, "hw context :%u not found\n", info.context_id);
+		XDNA_ERR(xdna, "hw context :%u not found\n", footer.context_id);
 		return -EINVAL;
 	}
 
@@ -292,13 +294,9 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 
 	// TODO: Replace MAX_ROW with dynamic value from aie_get_device_info()
 	rel_size = hwctx->priv->num_col * MAX_ROW * TILE_ADDRESS_SPACE;
-	if (rel_size > info.size) {
-		XDNA_ERR(xdna, "Invalid buffer size\n");
-		info.size = rel_size;
-		if (copy_to_user(u64_to_user_ptr(args->buffer), &info, sizeof(info))) {
-			XDNA_ERR(xdna, "Error: unable to copy memory to userptr\n");
-			return -EFAULT;
-		}
+	if (rel_size > buf_size) {
+		XDNA_DBG(xdna, "Invalid buffer size:%d (rel_size:%d)\n", buf_size, rel_size);
+		args->element_size = rel_size;
 		return -ENOBUFS;
 	}
 
@@ -316,7 +314,7 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		return ret;
 	}
 
-	if (copy_to_user(u64_to_user_ptr(info.buf_p), local_buf, ret)) {
+	if (copy_to_user(u64_to_user_ptr(args->buffer), local_buf, ret)) {
 		XDNA_ERR(xdna, "Error: unable to copy memory to userptr\n");
 		vfree(local_buf);
 		return -EFAULT;
@@ -397,7 +395,30 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = ve2_get_total_col(client, args);
 		break;
-	case DRM_AMDXDNA_READ_AIE_COREDUMP:
+	default:
+		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
+		ret = -EOPNOTSUPP;
+	}
+
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	return ret;
+}
+
+int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret, idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	XDNA_DBG(xdna, "Received get air info request param %d", args->param);
+
+	mutex_lock(&xdna->dev_lock);
+	switch (args->param) {
+	case DRM_AMDXDNA_AIE_COREDUMP:
 		ret = ve2_coredump_read(client, args);
 		break;
 	default:

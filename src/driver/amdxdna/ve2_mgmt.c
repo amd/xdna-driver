@@ -725,7 +725,7 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 							      GET_TILE_ADDRESS(buffer, MAX_ROW, row, col) + CORE_TILE_FIRST_REG_ADDRESS);
 				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.", col + nhwctx->start_col, row, ret1);
 				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.", col + nhwctx->start_col, row, ret2);
-				if (ret1 < 0 || ret2< 0)
+				if (ret1 < 0 || ret2 < 0)
 					return -EINVAL;
 			}
 			rel_size += TILE_ADDRESS_SPACE;
