@@ -692,8 +692,9 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 	int rel_size = 0;
 
 	if (mgmtctx->active_ctx != hwctx) {
-		XDNA_ERR(xdna, "hwctx %p is not the last scheduled."
-			" The last scheduled was %p.\n", hwctx, mgmtctx->active_ctx);
+		XDNA_ERR(xdna,
+			 "hwctx %p is not the last scheduled. The last scheduled was %p.\n",
+			 hwctx, mgmtctx->active_ctx);
 		return -1;
 	}
 
