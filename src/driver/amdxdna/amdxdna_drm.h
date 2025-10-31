@@ -171,6 +171,8 @@ struct amdxdna_client {
 	struct mutex			mm_lock; /* protect memory related */
 	struct amdxdna_gem_obj		*dev_heap;
 	u32				heap_usage;
+	size_t				total_bo_usage;
+	size_t				total_int_bo_usage;
 
 	struct iommu_sva		*sva;
 	int				pasid;

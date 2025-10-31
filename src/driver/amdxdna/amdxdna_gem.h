@@ -48,6 +48,24 @@ struct amdxdna_gem_obj {
 	u32				assigned_ctx; /* For debug bo */
 	struct dma_buf			*dma_buf;
 	struct dma_buf_attachment	*attach;
+
+	/*
+	 * This is for BO mem foot print accounting purpose.
+	 * BOs managed by XRT/SHIM/driver is counted as internal.
+	 * Others are counted as external which are managed by applications.
+	 *
+	 * Among all types of BOs:
+	 *   AMDXDNA_BO_DEV_HEAP - is counted for internal.
+	 *   AMDXDNA_BO_SHARE    - some (CMD BO) are counted for internal.
+	 *   AMDXDNA_BO_DEV      - is counted by client->heap_usage only, not internal
+	 *                         or external. It does not add to the total memory
+	 *                         foot print since its mem comes from heap which is
+	 *                         already accounted for.
+	 */
+	/* True, if accounted for internal BO usage */
+	bool				acct_total;
+	/* True, if accounted for total (both internal and external) BO usage */
+	bool				acct_int;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)

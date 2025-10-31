@@ -396,6 +396,43 @@ static void amdxdna_imported_obj_free(struct amdxdna_gem_obj *abo)
 	kfree(abo);
 }
 
+static void
+amdxdna_gem_shmem_add_bo_usage(struct amdxdna_gem_obj *abo, bool internal)
+{
+	struct amdxdna_client *client = abo->client;
+
+	mutex_lock(&client->mm_lock);
+
+	client->total_bo_usage += abo->mem.size;
+	abo->acct_total = true;
+
+	if (internal) {
+		client->total_int_bo_usage += abo->mem.size;
+		abo->acct_int = true;
+	}
+
+	mutex_unlock(&abo->client->mm_lock);
+}
+
+static void
+amdxdna_gem_shmem_del_bo_usage(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_client *client = abo->client;
+
+	mutex_lock(&client->mm_lock);
+
+	if (abo->acct_total) {
+		client->total_bo_usage -= abo->mem.size;
+		abo->acct_total = false;
+	}
+	if (abo->acct_int) {
+		client->total_int_bo_usage -= abo->mem.size;
+		abo->acct_int = false;
+	}
+
+	mutex_unlock(&abo->client->mm_lock);
+}
+
 static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
@@ -404,6 +441,7 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, amdxdna_gem_dev_addr(abo));
 
 	amdxdna_hmm_unregister(abo, NULL);
+	amdxdna_gem_shmem_del_bo_usage(abo);
 
 	/* workqueue is not valid for VE2 */
 	if (xdna->notifier_wq)
@@ -586,6 +624,7 @@ static int amdxdna_gem_dev_obj_vmap(struct drm_gem_object *obj, struct iosys_map
 
 static void amdxdna_gem_dev_obj_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
 {
+	// Do nothing.
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
@@ -843,7 +882,15 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 		return ERR_CAST(abo);
 
 	abo->client = filp->driver_priv;
-	abo->type = AMDXDNA_BO_SHARE;
+	if (args->type == AMDXDNA_BO_DEV_HEAP)
+		abo->type = AMDXDNA_BO_DEV_HEAP;
+	else
+		abo->type = AMDXDNA_BO_SHARE;
+
+	amdxdna_gem_shmem_add_bo_usage(abo,
+				       args->type == AMDXDNA_BO_CMD ||
+				       args->type == AMDXDNA_BO_DEV_HEAP);
+
 	return abo;
 }
 
@@ -864,31 +911,31 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 		return ERR_PTR(-EINVAL);
 	}
 
+	/* HEAP BO is a special case of SHARE BO. */
+	abo = amdxdna_drm_create_share_bo(dev, args, filp);
+	if (IS_ERR(abo))
+		return ERR_CAST(abo);
+
+	/* Set up heap for this client. */
 	mutex_lock(&client->mm_lock);
+
 	if (client->dev_heap) {
 		XDNA_ERR(xdna, "dev heap is already created");
 		ret = -EBUSY;
 		goto mm_unlock;
 	}
-
-	/* HEAP BO is a special case of SHARE BO. */
-	abo = amdxdna_drm_create_share_bo(dev, args, filp);
-	if (IS_ERR(abo)) {
-		ret = PTR_ERR(abo);
-		goto mm_unlock;
-	}
-
-	/* Further tweak the bo setup based on the newly created SHARE BO. */
-	abo->type = AMDXDNA_BO_DEV_HEAP;
-	drm_mm_init(&abo->mm, xdna->dev_info->dev_mem_base, abo->mem.size);
 	client->dev_heap = abo;
 	drm_gem_object_get(to_gobj(abo));
+
+	drm_mm_init(&abo->mm, xdna->dev_info->dev_mem_base, abo->mem.size);
+
 	mutex_unlock(&client->mm_lock);
 
 	return abo;
 
 mm_unlock:
 	mutex_unlock(&client->mm_lock);
+	drm_gem_object_put(to_gobj(abo));
 	return ERR_PTR(ret);
 }
 
@@ -920,6 +967,8 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 	}
 	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
+	abo->acct_total = false;
+	abo->acct_int = false;
 	return abo;
 }
 
