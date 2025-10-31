@@ -745,6 +745,35 @@ struct amdxdna_drm_aie_coredump {
 };
 
 /**
+ * struct amdxdna_drm_bo_usage - The BO usage statistics
+ * @pid: The ID of the process to query from
+ * @total_usage: Total BO size used by process
+ * @internal_usage: Total internal BO size used by process
+ * @heap_usage: Total device BO size used by process
+ *
+ * This is used for DRM_AMDXDNA_BO_USAGE parameters.
+ * 
+ * This is for querying BO mem foot print.
+ * BOs managed by XRT/SHIM/driver is counted as internal.
+ * Others are counted as external which are managed by applications.
+ *
+ * Among all types of BOs:
+ *   AMDXDNA_BO_DEV_HEAP - is counted for internal.
+ *   AMDXDNA_BO_SHARE    - is counted for external.
+ *   AMDXDNA_BO_CMD      - is counted for internal.
+ *   AMDXDNA_BO_DEV      - is counted by heap_usage only, not internal
+ *                         or external. It does not add to the total memory
+ *                         foot print since its mem comes from heap which is
+ *                         already accounted as internal.
+ */
+struct amdxdna_drm_bo_usage {
+	__s64 pid;
+	__u64 total_usage;
+	__u64 internal_usage;
+	__u64 heap_usage;
+};
+
+/**
  * struct amdxdna_drm_get_array - Get some information from the AIE hardware, return array.
  * @param: Specifies the structure passed in the buffer.
  * @element_size: Size of each element in the array.
@@ -758,6 +787,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_FW_LOG		3
 #define DRM_AMDXDNA_FW_TRACE		4
 #define DRM_AMDXDNA_AIE_COREDUMP	5
+#define DRM_AMDXDNA_BO_USAGE		6
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024

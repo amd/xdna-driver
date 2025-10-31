@@ -366,7 +366,11 @@ drm_bo::
   destroy_bo_arg arg = {
     .bo = m_id,
   };
-  m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
+  try {
+    m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
+  } catch (const xrt_core::system_error& e) {
+    std::cout << "Failed to destroy DRM BO: " << e.what() << std::endl;
+  }
 }
 
 //

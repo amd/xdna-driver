@@ -411,13 +411,17 @@ amdxdna_gem_shmem_add_bo_usage(struct amdxdna_gem_obj *abo, bool internal)
 		abo->acct_int = true;
 	}
 
-	mutex_unlock(&abo->client->mm_lock);
+	mutex_unlock(&client->mm_lock);
 }
 
 static void
 amdxdna_gem_shmem_del_bo_usage(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_client *client = abo->client;
+
+	// Imported BO should not be counted.
+	if (!client)
+		return;
 
 	mutex_lock(&client->mm_lock);
 
@@ -430,7 +434,7 @@ amdxdna_gem_shmem_del_bo_usage(struct amdxdna_gem_obj *abo)
 		abo->acct_int = false;
 	}
 
-	mutex_unlock(&abo->client->mm_lock);
+	mutex_unlock(&client->mm_lock);
 }
 
 static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)

@@ -956,20 +956,21 @@ out:
 static int aie2_query_telemetry(struct amdxdna_client *client,
 				struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_telemetry_header header, *tmp = NULL;
+	struct amdxdna_drm_query_telemetry_header header = {}, *tmp = NULL;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct aie_version ver;
 	size_t size, offset;
+	int ret, i, min;
 	void *buff;
-	int ret, i;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
 		return -EFAULT;
 	}
 
-	if (copy_from_user(&header, u64_to_user_ptr(args->buffer), sizeof(header))) {
+	min = min(args->buffer_size, sizeof(header));
+	if (copy_from_user(&header, u64_to_user_ptr(args->buffer), min)) {
 		XDNA_ERR(xdna, "Failed to copy telemetry header from user");
 		return -EFAULT;
 	}
@@ -1306,50 +1307,25 @@ exit:
 static int aie2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_async_error tmp;
-	void __user *buf;
 	int ret;
-
-	buf = u64_to_user_ptr(args->buffer);
-	if (!access_ok(buf, sizeof(tmp))) {
-		XDNA_ERR(xdna, "Failed to access assync error buffer, 0x%lx",
-			 sizeof(tmp));
-		return -EFAULT;
-	}
 
 	ret = aie2_error_get_last_async(xdna, &xdna->dev_handle->async_errs_cache, 1, &tmp);
 	if (ret < 0)
 		goto exit;
-	/* only return last async error */
-	args->num_element = ret;
-	if (ret > 0) {
-		args->element_size = sizeof(tmp);
-		if (copy_to_user(buf, &tmp, sizeof(tmp))) {
-			ret = -EFAULT;
-			goto exit;
-		}
-	}
 
-	ret = 0;
-
+	ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), ret);
 exit:
 	return ret;
 }
 
 static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_drm_hwctx_entry __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_drm_hwctx_entry *tmp;
-	int ctx_limit, ctx_cnt, min, i, ret;
+	int ctx_limit, ctx_cnt, ret;
 	u32 buf_size;
 
 	buf_size = args->num_element * args->element_size;
-	buf = u64_to_user_ptr(args->buffer);
-	if (!access_ok(buf, buf_size)) {
-		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
-			 args->num_element, args->element_size);
-		return -EFAULT;
-	}
 
 	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
@@ -1376,14 +1352,12 @@ static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_dr
 			goto exit;
 
 		break;
-
 	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
-		struct amdxdna_drm_hwctx_entry input;
+		struct amdxdna_drm_hwctx_entry input = {};
 
-		if (copy_from_user(&input, u64_to_user_ptr(args->buffer), sizeof(input))) {
-			ret = -EFAULT;
+		ret = amdxdna_drm_copy_array_from_user(args, &input, sizeof(input), 1);
+		if (ret)
 			goto exit;
-		}
 
 		if (args->num_element > 1U || !input.context_id || !input.pid) {
 			XDNA_ERR(xdna, "Invalid context ID %d, PID %lld or num_elements %d",
@@ -1405,15 +1379,7 @@ static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_dr
 		goto exit;
 	}
 
-	min = min(args->element_size, sizeof(*tmp));
-	for (i = 0; i < ctx_cnt; i++) {
-		if (copy_to_user(&buf[i], &tmp[i], min)) {
-			ret = -EFAULT;
-			goto exit;
-		}
-	}
-	args->num_element = ctx_cnt;
-	args->element_size = min;
+	ret = amdxdna_drm_copy_array_to_user(args, tmp, sizeof(*tmp), ctx_cnt);
 exit:
 	mutex_unlock(&xdna->dev_lock);
 	kfree(tmp);
@@ -1454,7 +1420,7 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 
 static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_drm_set_power_mode power_state;
+	struct amdxdna_drm_set_power_mode power_state = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	int power_mode, min;
 
@@ -1479,7 +1445,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 					struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_drm_attribute_state force;
+	struct amdxdna_drm_attribute_state force = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	int min;
 
@@ -1508,9 +1474,9 @@ static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 						 struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
-	struct amdxdna_drm_attribute_state preempt;
+	struct amdxdna_drm_attribute_state preempt = {};
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret;
+	int ret, min;
 
 	if (args->buffer_size != sizeof(preempt)) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
@@ -1518,6 +1484,7 @@ static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 		return -EINVAL;
 	}
 
+	min = min(args->buffer_size, sizeof(preempt));
 	if (copy_from_user(&preempt, u64_to_user_ptr(args->buffer), sizeof(preempt)))
 		return -EFAULT;
 
