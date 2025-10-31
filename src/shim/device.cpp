@@ -838,6 +838,13 @@ struct archive_path
         return std::string(get_shim_data_dir() + "bins/xrt_smi_strx.a");
       case xrt_core::smi::smi_hardware_config::hardware_type::phx:
         return std::string(get_shim_data_dir() + "bins/xrt_smi_phx.a");
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f1:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f2:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f3:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B01:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_npu3.a");
       default:
         throw xrt_core::error("Unsupported hardware type");
       }

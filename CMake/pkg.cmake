@@ -88,14 +88,20 @@ FetchContent_Declare(
   DOWNLOAD_NO_EXTRACT ON
   DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
 )
-
+FetchContent_Declare(
+  vtd_npu3_archive
+  URL "https://github.com/Xilinx/VTD/raw/5f7fec23620be7a3984c8970bc514f0faa2b2ee3/archive/npu3/xrt_smi_npu3.a"
+  DOWNLOAD_NO_EXTRACT ON
+  DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
+)
 message(STATUS "Downloading VTD archives from GitHub...")
-FetchContent_MakeAvailable(vtd_strx_archive vtd_phx_archive)
+FetchContent_MakeAvailable(vtd_strx_archive vtd_phx_archive vtd_npu3_archive)
 message(STATUS "VTD archives downloaded successfully")
 
 install(FILES 
   "${vtd_strx_archive_SOURCE_DIR}/xrt_smi_strx.a"
   "${vtd_phx_archive_SOURCE_DIR}/xrt_smi_phx.a"
+  "${vtd_npu3_archive_SOURCE_DIR}/xrt_smi_npu3.a"
   DESTINATION ${XDNA_PKG_DATA_DIR}/bins
   COMPONENT ${XDNA_COMPONENT}
   )
