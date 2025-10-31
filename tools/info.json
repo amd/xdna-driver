@@ -40,5 +40,22 @@
 	],
 	"aie4_firmwares" : {
 		"umq_version": "20251013-7f7d8dc"
-	}
+	},
+	"vtd_archives": [
+		{
+			"device": "strx",
+			"url": "https://github.com/Xilinx/VTD/raw/5f7fec23620be7a3984c8970bc514f0faa2b2ee3/archive/strx/xrt_smi_strx.a",
+			"filename": "xrt_smi_strx.a"
+		},
+		{
+			"device": "phx",
+			"url": "https://github.com/Xilinx/VTD/raw/5f7fec23620be7a3984c8970bc514f0faa2b2ee3/archive/phx/xrt_smi_phx.a",
+			"filename": "xrt_smi_phx.a"
+		},
+		{
+			"device": "npu3",
+			"url": "https://github.com/Xilinx/VTD/raw/5f7fec23620be7a3984c8970bc514f0faa2b2ee3/archive/npu3/xrt_smi_npu3.a",
+			"filename": "xrt_smi_npu3.a"
+		}
+	]
 }
