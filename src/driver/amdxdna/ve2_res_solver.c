@@ -151,7 +151,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 			list_add_tail(&pt_node->list, &xrs->rgp.pt_node_list);
 			xrs->rgp.npartition_node++;
 			snode->pt_node = pt_node;
-	                bitmap_set(xrs->rgp.resbit, pt_node->start_col, pt_node->ncols);
+			bitmap_set(xrs->rgp.resbit, pt_node->start_col, pt_node->ncols);
 			return 0;
 		}
 	}
