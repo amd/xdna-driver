@@ -60,46 +60,47 @@ static void cert_setup_partition(struct amdxdna_dev *xdna, struct device *aie_de
 
 static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req, u32 num_col)
 {
-        struct amdxdna_dev *xdna = hwctx->client->xdna;
-        int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
-        int i, start;
-        int max_start = total_col - num_col;
-        int entries = 0;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
+	int i, start;
+	int max_start = total_col - num_col;
+	int entries = 0;
 
-        if (start_col > 0) {
-                if (start_col + num_col > total_col) {
-                        XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d",
-                                 start_col, num_col);
-                        return -EINVAL;
-                }
+	if (start_col > 0) {
+		if (start_col + num_col > total_col) {
+			XDNA_ERR(xdna, "Invalid start_col_index %d, num col %d",
+				 start_col, num_col);
+			return -EINVAL;
+		}
 
-                for (start = start_col; start <= max_start; start += num_col)
-                        entries++;
-        } else {
-                for (start = 0; start <= max_start; start += num_col)
-                        entries++;
-        }
+		for (start = start_col; start <= max_start; start += num_col)
+			entries++;
+	} else {
+		for (start = 0; start <= max_start; start += num_col)
+			entries++;
+	}
 
-        if (entries == 0) {
-                XDNA_ERR(xdna, "No valid start_col found for num_col %d in total_col %d", num_col, total_col);
-                return -EINVAL;
-        }
+	if (entries == 0) {
+		XDNA_ERR(xdna, "No valid start_col found for num_col %d in total_col %d",
+			 num_col, total_col);
+		return -EINVAL;
+	}
 
-        xrs_req->cdo.start_cols = kmalloc_array(entries,
-                                                sizeof(*xrs_req->cdo.start_cols),
-                                                GFP_KERNEL);
-        if (!xrs_req->cdo.start_cols)
-                return -ENOMEM;
+	xrs_req->cdo.start_cols = kmalloc_array(entries, sizeof(*xrs_req->cdo.start_cols),
+						GFP_KERNEL);
+	if (!xrs_req->cdo.start_cols)
+		return -ENOMEM;
 
-        xrs_req->cdo.cols_len = entries;
-        for (i = 0, start = (start_col > 0 ? start_col : 0); start <= max_start; start += num_col, i++)
-                xrs_req->cdo.start_cols[i] = start;
+	xrs_req->cdo.cols_len = entries;
+	for (i = 0, start = (start_col > 0 ? start_col : 0);
+	     start <= max_start; start += num_col, i++)
+		xrs_req->cdo.start_cols[i] = start;
 
-        print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
-                             xrs_req->cdo.start_cols,
-                             entries * sizeof(*xrs_req->cdo.start_cols), false);
+	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     xrs_req->cdo.start_cols,
+			     entries * sizeof(*xrs_req->cdo.start_cols), false);
 
-        return 0;
+	return 0;
 }
 
 int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
