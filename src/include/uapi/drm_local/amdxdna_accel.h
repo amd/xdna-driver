@@ -752,7 +752,7 @@ struct amdxdna_drm_aie_coredump {
  * @heap_usage: Total device BO size used by process
  *
  * This is used for DRM_AMDXDNA_BO_USAGE parameters.
- * 
+ *
  * This is for querying BO mem foot print.
  * BOs managed by XRT/SHIM/driver is counted as internal.
  * Others are counted as external which are managed by applications.
