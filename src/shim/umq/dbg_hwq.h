@@ -33,7 +33,6 @@ private:
   volatile uint32_t *m_dbg_umq_comp_ptr = nullptr;
 
   uint32_t submit();
-  void set_use_flag() const;
 };
 
 }
