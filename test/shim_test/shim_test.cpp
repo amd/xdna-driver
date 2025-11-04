@@ -48,6 +48,7 @@ int base_read_speed;
 using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_export_bo_then_close_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -912,6 +913,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "create and free internal bo", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
+  },
+  test_case{ "export BO then close device", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_bo_then_close_device, {}
   },
 };
 

@@ -419,16 +419,14 @@ amdxdna_gem_shmem_del_bo_usage(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_client *client = abo->client;
 
-	// Imported BO should not be counted.
-	if (!client)
+	if (!abo->acct_total)
 		return;
 
 	mutex_lock(&client->mm_lock);
 
-	if (abo->acct_total) {
-		client->total_bo_usage -= abo->mem.size;
-		abo->acct_total = false;
-	}
+	client->total_bo_usage -= abo->mem.size;
+	abo->acct_total = false;
+
 	if (abo->acct_int) {
 		client->total_int_bo_usage -= abo->mem.size;
 		abo->acct_int = false;
@@ -445,6 +443,11 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 	XDNA_DBG(xdna, "BO type %d xdna_addr 0x%llx", abo->type, amdxdna_gem_dev_addr(abo));
 
 	amdxdna_hmm_unregister(abo, NULL);
+	/*
+	 * For driver's internal BOs without handle, do the clean-up here
+	 * and driver needs to make sure abo->client is still valid (BO isn't exported
+	 * and is freed before device is closed).
+	 */
 	amdxdna_gem_shmem_del_bo_usage(abo);
 
 	/* workqueue is not valid for VE2 */
@@ -466,6 +469,17 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 	}
 
 	drm_gem_shmem_free(&abo->base);
+}
+
+static void amdxdna_gem_shmem_obj_close(struct drm_gem_object *gobj, struct drm_file *file)
+{
+	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+
+	/*
+	 * For BOs with handle, do the clean-up here when abo->client is
+	 * guaranteed to be valid.
+	 */
+	amdxdna_gem_shmem_del_bo_usage(abo);
 }
 
 static int amdxdna_gem_shmem_insert_pages(struct amdxdna_gem_obj *abo,
@@ -666,6 +680,7 @@ static struct dma_buf *amdxdna_gem_prime_export(struct drm_gem_object *gobj, int
 
 static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 	.free = amdxdna_gem_shmem_obj_free,
+	.close = amdxdna_gem_shmem_obj_close,
 	.print_info = drm_gem_shmem_object_print_info,
 	.pin = drm_gem_shmem_object_pin,
 	.unpin = drm_gem_shmem_object_unpin,
