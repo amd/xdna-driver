@@ -101,30 +101,6 @@ download_npufws()
     done
 }
 
-download_vtd_archives()
-{
-  local vtd_dir=${DOWNLOAD_BINS_DIR}/vtd_archives
-
-  jq -c '.vtd_archives[]' "$INFO_JSON" |
-    while IFS= read -r line; do
-      local device=$(echo $line | jq -r '.device')
-      local filename=$(echo $line | jq -r '.filename')
-      local url=$(echo $line | jq -r '.url')
-
-      if [[ -z "$url" ]]; then
-        echo "Empty URL for $device VTD archive, SKIP."
-        continue
-      fi
-
-      echo "Download $device VTD archive:"
-      if [ -f "${vtd_dir}/$filename" ]; then
-        rm ${vtd_dir}/$filename
-      fi
-      mkdir -p ${vtd_dir}
-      wget -O ${vtd_dir}/$filename $url
-
-    done
-}
 
 do_build()
 {
@@ -135,8 +111,6 @@ do_build()
     if [[ $skip_kmod == 0 ]]; then
       download_npufws
     fi
-    # Download VTD archives
-    download_vtd_archives
     # Prepare xbutil validate related files for packaging
     mkdir -p $XBUTIL_VALIDATE_BINS_DIR
     cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
