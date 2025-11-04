@@ -171,6 +171,8 @@ struct amdxdna_client {
 	struct mutex			mm_lock; /* protect memory related */
 	struct amdxdna_gem_obj		*dev_heap;
 	u32				heap_usage;
+	size_t				total_bo_usage;
+	size_t				total_int_bo_usage;
 
 	struct iommu_sva		*sva;
 	int				pasid;
@@ -185,5 +187,9 @@ struct amdxdna_client {
 
 void amdxdna_stats_start(struct amdxdna_client *client);
 void amdxdna_stats_account(struct amdxdna_client *client);
+int amdxdna_drm_copy_array_to_user(struct amdxdna_drm_get_array *tgt,
+				   void *array, size_t element_size, size_t num_element);
+int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
+				     void *array, size_t element_size, size_t num_element);
 
 #endif /* _AMDXDNA_DRM_H_ */

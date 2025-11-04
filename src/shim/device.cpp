@@ -1703,33 +1703,6 @@ import_fd(pid_t pid, int ehdl)
   return fd;
 }
 
-int
-bo_flags_to_type(uint64_t bo_flags, bool has_dev_mem)
-{
-  auto flags = xcl_bo_flags{bo_flags};
-  auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
-
-  /*
-   * boflags scope:
-   * HOST_ONLY: any input, output buffers, can be large size
-   * CACHEABLE: control code buffer, can be large size too
-   *            on cache coherent systems, no need to sync.
-   * EXECBUF: small size buffer that can be accessed by both
-   *          userland(map), kernel(kva) and device(dev_addr).
-   */
-  switch (boflags) {
-  case XCL_BO_FLAGS_HOST_ONLY:
-    return AMDXDNA_BO_SHARE;
-  case XCL_BO_FLAGS_CACHEABLE:
-    return has_dev_mem ? AMDXDNA_BO_DEV : AMDXDNA_BO_SHARE;
-  case XCL_BO_FLAGS_EXECBUF:
-    return AMDXDNA_BO_CMD;
-  default:
-    break;
-  }
-  return AMDXDNA_BO_INVALID;
-}
-
 }
 
 namespace shim_xdna {
@@ -1838,33 +1811,22 @@ std::unique_ptr<xrt_core::buffer_handle>
 device::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
-  // Sanity check
   auto f = xcl_bo_flags{flags};
   if (f.boflags == XCL_BO_FLAGS_NONE)
     shim_not_supported_err("unsupported buffer type: none flag");
-  auto type = bo_flags_to_type(flags, !!m_pdev.get_heap_vaddr());
-  if (type == AMDXDNA_BO_INVALID)
-    shim_not_supported_err("Bad BO flags");
-  if (userptr && type != AMDXDNA_BO_SHARE)
-    shim_not_supported_err("Non-AMDXDNA_BO_SHARE user ptr BO");
-  if (reinterpret_cast<uintptr_t>(userptr) % alignof(uint32_t))
-    shim_not_supported_err("User ptr must be at least uint32_t aligned");
 
   std::unique_ptr<buffer> bo;
   if (f.use == XRT_BO_USE_DEBUG)
-    bo = std::make_unique<dbg_buffer>(get_pdev(), size, type);
+    bo = std::make_unique<dbg_buffer>(get_pdev(), size, flags);
   else if (f.use == XRT_BO_USE_DTRACE ||
     f.use == XRT_BO_USE_LOG ||
-    f.use == XRT_BO_USE_DEBUG_QUEUE
-    /*f.use == XRT_BO_USE_UC_DEBUG*/) //need define last one in xrt
-    bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, type);
-  else if (type == AMDXDNA_BO_CMD)
-    bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
-  else if (!userptr)
-    bo = std::make_unique<buffer>(get_pdev(), size, type);
+    f.use == XRT_BO_USE_DEBUG_QUEUE ||
+    f.use == XRT_BO_USE_UC_DEBUG)
+    bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, flags);
+  else if (f.boflags == (XCL_BO_FLAGS_EXECBUF >> 24))
+    bo = std::make_unique<cmd_buffer>(get_pdev(), size, flags);
   else
-    bo = std::make_unique<buffer>(get_pdev(), size, userptr);
-  bo->set_flags(flags);
+    bo = std::make_unique<buffer>(get_pdev(), size, userptr, flags);
   return bo;
 }
 
