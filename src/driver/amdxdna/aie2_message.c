@@ -471,6 +471,26 @@ int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl
 	return 0;
 }
 
+int aie2_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories)
+{
+	DECLARE_AIE2_MSG(set_fw_trace_categories, MSG_OP_SET_FW_TRACE_CATEGORIES);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_SET_FW_TRACE_CATEGORIES))
+		return -EOPNOTSUPP;
+
+	req.fw_trace_categories = categories;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to set fw trace categories, ret 0x%x", resp.status);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 int aie2_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address)
 {

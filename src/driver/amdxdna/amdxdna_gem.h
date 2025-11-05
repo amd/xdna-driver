@@ -48,6 +48,11 @@ struct amdxdna_gem_obj {
 	u32				assigned_ctx; /* For debug bo */
 	struct dma_buf			*dma_buf;
 	struct dma_buf_attachment	*attach;
+
+	/* True, if accounted for internal BO usage */
+	bool				acct_total;
+	/* True, if accounted for total (both internal and external) BO usage */
+	bool				acct_int;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)

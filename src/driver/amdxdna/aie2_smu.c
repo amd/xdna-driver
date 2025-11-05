@@ -150,6 +150,17 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
+	/*
+	 * If the hardware was not powered off properly, try to set
+	 * power off. Failing to power off indicates an unrecoverable
+	 * issue, return failure.
+	 */
+	ret = aie2_smu_set_power_off(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Access power failed, ret %d", ret);
+		return ret;
+	}
+
 	ret = aie2_smu_set_power_on(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Power on failed, ret %d", ret);
