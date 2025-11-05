@@ -6,7 +6,8 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/xlnx-ai-engine.h>
-#include <linux/firmware.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/of_address.h>
 
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
@@ -82,6 +83,82 @@ release:
 out:
 	kfree(buf);
 	return ret;
+}
+
+static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
+{
+	int i;
+
+	for (i = 0; i < MAX_MEM_REGIONS; i++) {
+		struct amdxdna_cma_mem_region *region;
+
+		region = &xdna->cma_mem_regions[i];
+		if (region->initialized) {
+			of_reserved_mem_device_release(region->dev);
+			region->dev = NULL;
+			region->initialized = false;
+		}
+	}
+}
+
+static int
+ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
+			struct platform_device *pdev)
+{
+	int num_regions;
+	int ret = 0;
+	int i;
+
+	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
+						 "memory-region", NULL);
+	xdna->num_cma_regions = 0;
+
+	if (num_regions <= 0)
+		return -EINVAL;
+
+	for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
+		struct device *child_dev;
+
+		child_dev = devm_kzalloc(&pdev->dev, sizeof(*child_dev),
+					 GFP_KERNEL);
+		if (!child_dev) {
+			XDNA_ERR(xdna,
+				 "Failed to alloc child_dev for cma region %d\n",
+				 i);
+			ve2_cma_mem_region_remove(xdna);
+			return -ENOMEM;
+		}
+
+		child_dev->parent = &pdev->dev;
+		child_dev->of_node = pdev->dev.of_node;
+		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+
+		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
+		if (ret) {
+			XDNA_DBG(xdna,
+				 "Failed to set name for cma region %d\n", i);
+			devm_kfree(&pdev->dev, child_dev);
+			continue;
+		}
+
+		ret = of_reserved_mem_device_init_by_idx(child_dev,
+							 pdev->dev.of_node, i);
+		if (ret) {
+			XDNA_DBG(xdna,
+				 "Failed to init reserved cma region %d\n", i);
+			devm_kfree(&pdev->dev, child_dev);
+			continue;
+		}
+
+		xdna->cma_mem_regions[i].dev = child_dev;
+		xdna->cma_mem_regions[i].initialized = true;
+		xdna->num_cma_regions++;
+	}
+
+	if (xdna->num_cma_regions == 0)
+		return -EINVAL;
+
+	return 0;
 }
 
 static int ve2_init(struct amdxdna_dev *xdna)
@@ -166,6 +243,10 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		xdna->dev_handle->fw_slots[col] = fw_slots;
 	}
 
+	ret = ve2_cma_mem_region_init(xdna, pdev);
+	if (ret < 0)
+		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+
 	return 0;
 }
 
@@ -173,6 +254,8 @@ static void ve2_fini(struct amdxdna_dev *xdna)
 {
 	/* All resources are managed by devm_/drmm_ */
 	XDNA_DBG(xdna, "VE2 device cleanup function");
+
+	ve2_cma_mem_region_remove(xdna);
 }
 const struct amdxdna_dev_ops ve2_ops = {
 	.init		= ve2_init,

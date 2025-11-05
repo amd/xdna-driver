@@ -8,7 +8,7 @@
 #include "amdxdna_cma_buf.h"
 
 struct amdxdna_cmabuf_priv {
-	struct drm_device *dev;
+	struct device *dev;
 	dma_addr_t dma_addr;
 	void *cpu_addr;
 	size_t size;
@@ -76,7 +76,7 @@ static void amdxdna_cmabuf_release(struct dma_buf *dbuf)
 	if (!cmabuf)
 		return;
 
-	dma_free_coherent(cmabuf->dev->dev, cmabuf->size,
+	dma_free_coherent(cmabuf->dev, cmabuf->size,
 			  cmabuf->cpu_addr, cmabuf->dma_addr);
 	kfree(cmabuf);
 	dbuf->priv = NULL;
@@ -98,7 +98,7 @@ static int amdxdna_cmabuf_mmap(struct dma_buf *dbuf, struct vm_area_struct *vma)
 
 	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
 
-	ret = dma_mmap_coherent(cmabuf->dev->dev, vma,
+	ret = dma_mmap_coherent(cmabuf->dev, vma,
 				cmabuf->cpu_addr,
 				cmabuf->dma_addr,
 				cmabuf->size);
@@ -125,7 +125,7 @@ static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
 	.vmap = amdxdna_cmabuf_vmap,
 };
 
-struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev,
+struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 				    size_t size)
 {
 	struct amdxdna_cmabuf_priv *cmabuf;
@@ -141,7 +141,7 @@ struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev,
 
 	size = PAGE_ALIGN(size);
 
-	cpu_addr = dma_alloc_coherent(dev->dev, size, &dma_addr, GFP_KERNEL);
+	cpu_addr = dma_alloc_coherent(dev, size, &dma_addr, GFP_KERNEL);
 	if (!cpu_addr) {
 		ret = -ENOMEM;
 		goto free_cmabuf;
@@ -166,7 +166,7 @@ struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev,
 	return dbuf;
 
 free_dma:
-	dma_free_coherent(dev->dev, size, cpu_addr, dma_addr);
+	dma_free_coherent(dev, size, cpu_addr, dma_addr);
 free_cmabuf:
 	kfree(cmabuf);
 	return ERR_PTR(ret);
@@ -179,4 +179,13 @@ bool amdxdna_use_cma(void)
 #else
 	return false;
 #endif
+}
+
+int get_cma_mem_index(u64 flags)
+{
+	/* Extract lower 8 bits for memory index (0-255 range)
+	 * Values 0-15: valid memory index
+	 * Values >=16: used to track invalid memory indexes
+	 */
+	return ((flags) & 0xFF);
 }
