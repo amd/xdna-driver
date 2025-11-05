@@ -19,6 +19,8 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
 
+#define MAX_MEM_REGIONS	16
+
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...)	dev_warn((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
 #define XDNA_ERR(xdna, fmt, args...) \
@@ -115,6 +117,10 @@ struct amdxdna_fw_ver {
 	u32 sub;
 	u32 build;
 };
+struct ve2_cma_mem_region {
+	struct device	*dev;
+	bool	initialized;
+};
 
 struct amdxdna_dev {
 	struct drm_device		ddev;
@@ -132,6 +138,10 @@ struct amdxdna_dev {
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
+
+	/* TODO: Lets discuss where to keep these */
+	u32				num_mem_regions;
+	struct ve2_cma_mem_region	cma_mem_regions[MAX_MEM_REGIONS];
 };
 
 struct amdxdna_stats {

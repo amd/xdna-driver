@@ -766,16 +766,44 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct dma_buf *dma_buf = ERR_PTR(-EINVAL);
+	int num_regions = xdna->num_mem_regions;
 	size_t size = PAGE_ALIGN(args->size);
 	struct drm_gem_object *gobj;
-	struct dma_buf *dma_buf;
+	int mem_index = -1;
+	int i;
 
 	if (args->type == AMDXDNA_BO_DEV_HEAP) {
 		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
-	dma_buf = amdxdna_get_cma_buf(dev, size);
+	mem_index = get_cma_mem_index(args->flags);
+
+	/* Try indexed allocation if mem_index is valid and region is initialized */
+	if (num_regions > 0 && mem_index >= 0 && mem_index < num_regions &&
+	    mem_index < MAX_MEM_REGIONS && xdna->cma_mem_regions[mem_index].initialized)
+		dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[mem_index].dev, size);
+	else if (mem_index >= 0)
+		XDNA_DBG(xdna, "Invalid CMA mem_index %d, allocating from any of the cma regions\n",
+			 mem_index);
+
+	/* If index based allocation fails, allocate from any of the initialized cma regions */
+	if (IS_ERR(dma_buf)) {
+		for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
+			if (!xdna->cma_mem_regions[i].initialized)
+				continue;
+
+			dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[i].dev, size);
+			if (!IS_ERR(dma_buf))
+				break;
+		}
+	}
+
+	/* If allocation from any of the cma regions fails, allocate from default cma */
+	if (IS_ERR(dma_buf))
+		dma_buf = amdxdna_get_cma_buf(dev->dev, size);
+
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
@@ -831,6 +859,9 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	struct drm_gem_object *gobj;
 	struct sg_table *sgt;
 	int ret;
+
+	if (!dma_buf)
+		return ERR_PTR(-EINVAL);
 
 	get_dma_buf(dma_buf);
 
@@ -997,9 +1028,6 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_drm_create_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	int ret;
-
-	if (args->flags)
-		return -EINVAL;
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
