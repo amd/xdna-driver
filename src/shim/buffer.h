@@ -54,7 +54,8 @@ class buffer : public xrt_core::buffer_handle
 {
 public:
   buffer(const pdev& dev, size_t size, int type);
-  buffer(const pdev& dev, size_t size, void *uptr);
+  buffer(const pdev& dev, size_t size, uint64_t flags);
+  buffer(const pdev& dev, size_t size, void *uptr, uint64_t flags);
   buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl);
   virtual ~buffer();
 
@@ -107,8 +108,6 @@ public:
   virtual void
   unbind_hwctx();
 
-  // Save flags in buffer which later returns via get_properties()
-  void set_flags(uint64_t flags);
   uint64_t get_flags() const;
 
   virtual std::set<bo_id>
@@ -129,9 +128,6 @@ protected:
 private:
   std::string
   describe() const;
-
-  virtual std::string
-  bo_sub_type_name() const;
 
   void
   mmap_drm_bo(drm_bo *bo); // Obtain void* through mmap()
@@ -174,9 +170,6 @@ public:
   get_arg_bos() const override;
 
 private:
-  std::string
-  bo_sub_type_name() const override;
-
   // Valid only when m_submitted is true.
   mutable uint64_t m_cmd_seq = 0;
   std::map< size_t, std::set<bo_id> > m_args_map;
@@ -208,9 +201,6 @@ public:
   sync(direction dir, size_t size, size_t offset) override;
 
 private:
-  std::string
-  bo_sub_type_name() const override;
-
   void
   config_debug_bo(bool is_detach);
 
