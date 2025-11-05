@@ -541,8 +541,8 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
 	ebp->args_host_addr_high = 0;
 	XDNA_DBG(xdna, "dpu instruction addr: 0x%llx", dpu_cmd->instruction_buffer);
 
-	hsa_queue_pkt_set_valid(pkt);
 	hq_queue->hq_complete.hqc_mem[slot_id] = ERT_CMD_STATE_SUBMITTED;
+	hsa_queue_pkt_set_valid(pkt);
 
 	return 0;
 }
