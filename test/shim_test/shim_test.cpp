@@ -28,6 +28,11 @@
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+// FIXME
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include "../../src/include/uapi/drm_local/amdxdna_accel.h"
+// enf of FIXME
 
 struct kern_version {
   int major;
@@ -43,6 +48,7 @@ int base_read_speed;
 using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_export_bo_then_close_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -227,6 +233,34 @@ dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   if (!is_amdxdna_drv(dev))
     return false;
   return true;
+}
+
+std::tuple<uint64_t, uint64_t, uint64_t>
+get_bo_usage(device* dev, int pid)
+{
+  // FIXME: reimplement this when query key is defined in xrt
+  const char *xdna = "/dev/accel/accel0";
+  int fd = open(xdna, O_RDONLY);
+  if (fd < 0) {
+    std::perror("open");
+    return {0, 0, 0};
+  }
+
+  amdxdna_drm_bo_usage usage = { .pid = pid };
+  amdxdna_drm_get_array arg = {
+    .param = DRM_AMDXDNA_BO_USAGE,
+    .element_size = sizeof(usage),
+    .num_element = 1,
+    .buffer = reinterpret_cast<uintptr_t>(&usage)
+  };
+  int ret = ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+  close(fd);
+  if (ret == -1) {
+    std::perror("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY)");
+    return {0, 0, 0};
+  }
+
+  return {usage.total_usage, usage.internal_usage, usage.heap_usage};
 }
 
 // All test case runners
@@ -429,6 +463,27 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
+}
+
+void
+TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto boflags = XRT_BO_FLAGS_HOST_ONLY;
+  auto ext_boflags = XRT_BO_USE_CTRLPKT << 4;
+  auto size = 0x4000;
+  auto bo = dev->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  auto [total, internal, heap] = get_bo_usage(dev, getpid());
+  uint64_t expected_total = size;
+  uint64_t expected_internal = size;
+  uint64_t expected_heap = 0;
+  if (dev_filter_is_aie2(id, dev)) {
+    // Add heap size
+    expected_total += 64 * 1024 * 1024;
+    expected_internal += 64 * 1024 * 1024;
+  }
+  if (total != expected_total || internal != expected_internal || heap != expected_heap)
+    throw std::runtime_error("BO usage mis-match");
 }
 
 void
@@ -855,6 +910,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "gemm and debug BO", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
+  },
+  test_case{ "create and free internal bo", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
+  },
+  test_case{ "export BO then close device", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_bo_then_close_device, {}
   },
 };
 

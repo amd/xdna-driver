@@ -5,6 +5,7 @@
 #define SHARED_XDNA_H
 
 #include "core/common/shim/shared_handle.h"
+#include "shim_debug.h"
 
 namespace shim_xdna {
 
@@ -16,8 +17,10 @@ public:
 
   ~shared() override
   {
-    if (m_fd != -1)
+    if (m_fd != -1) {
+      shim_debug("Closing exported fd %d", m_fd);
       close(m_fd);
+    }
   }
 
   export_handle
