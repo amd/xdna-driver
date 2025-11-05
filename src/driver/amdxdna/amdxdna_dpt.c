@@ -187,7 +187,7 @@ static irqreturn_t dpt_irq_handler(int irq, void *data)
 	/* Clear the interrupt */
 	writel(0, dpt->io_base + dpt->msi_address);
 
-#if KERNEL_VERSION(6, 17, 0) > LINUX_VERSION_CODE
+#if KERNEL_VERSION(6, 18, 0) > LINUX_VERSION_CODE
 	queue_work(system_wq, &dpt->work);
 #else
 	queue_work(system_percpu_wq, &dpt->work);
@@ -264,7 +264,7 @@ static void amdxdna_dpt_timer(struct timer_list *t)
 {
 	struct amdxdna_dpt *dpt = container_of(t, struct amdxdna_dpt, timer);
 
-#if KERNEL_VERSION(6, 17, 0) > LINUX_VERSION_CODE
+#if KERNEL_VERSION(6, 18, 0) > LINUX_VERSION_CODE
 	queue_work(system_wq, &dpt->work);
 #else
 	queue_work(system_percpu_wq, &dpt->work);
