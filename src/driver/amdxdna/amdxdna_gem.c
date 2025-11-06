@@ -863,7 +863,7 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 		ret = amdxdna_bo_dma_map(abo);
 		if (ret) {
 			drm_gem_object_put(gobj);
-			goto fail_unmap;
+			return ERR_PTR(ret);
 		}
 	}
 #endif
