@@ -169,6 +169,7 @@ dev_filter_is_aie2(device::id_type id, device* dev)
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
+  std::cout << "device_id" << device_id << std::endl;
   return device_id == npu1_device_id || device_id == npu4_device_id;
 }
 

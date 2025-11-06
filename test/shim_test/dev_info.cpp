@@ -63,24 +63,26 @@ xclbin_info xclbin_infos[] = {
     .data = "data",
   },
   {
-    .name = "vadd.xclbin",
+    .name = "vadd.elf",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "dpu:vadd", {0} },
+      { "DPU:vadd", {0} },
     },
     .workspace = "npu3_workspace",
     .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
   },
   {
-    .name = "vadd.xclbin",
+    .name = "vadd.elf",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "dpu:vadd", {0} },
+      { "DPU:vadd", {0} },
     },
     .workspace = "npu3_workspace",
     .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
   },
   {
     .name = "move_memtiles.xclbin",
