@@ -44,17 +44,17 @@
 	"vtd_archives": [
 		{
 			"device": "strx",
-			"url": "https://github.com/Xilinx/VTD/raw/5f7fec23620be7a3984c8970bc514f0faa2b2ee3/archive/strx/xrt_smi_strx.a",
+			"url": "https://github.com/Xilinx/VTD/raw/9c5df7a93620bc624e969ca26204a47e8d0e6ace/archive/strx/xrt_smi_strx.a",
 			"filename": "xrt_smi_strx.a"
 		},
 		{
 			"device": "phx",
-			"url": "https://github.com/Xilinx/VTD/raw/5f7fec23620be7a3984c8970bc514f0faa2b2ee3/archive/phx/xrt_smi_phx.a",
+			"url": "https://github.com/Xilinx/VTD/raw/9c5df7a93620bc624e969ca26204a47e8d0e6ace/archive/phx/xrt_smi_phx.a",
 			"filename": "xrt_smi_phx.a"
 		},
 		{
 			"device": "npu3",
-			"url": "https://github.com/Xilinx/VTD/raw/5f7fec23620be7a3984c8970bc514f0faa2b2ee3/archive/npu3/xrt_smi_npu3.a",
+			"url": "https://github.com/Xilinx/VTD/raw/9c5df7a93620bc624e969ca26204a47e8d0e6ace/archive/npu3/xrt_smi_npu3.a",
 			"filename": "xrt_smi_npu3.a"
 		}
 	]
