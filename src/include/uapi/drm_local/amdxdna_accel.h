@@ -80,6 +80,8 @@ extern "C" {
 #define	AMDXDNA_QOS_LOW_PRIORITY	0x280
 /* The maximum number of priority */
 #define	AMDXDNA_NUM_PRIORITY		4
+/* user start column request or not */
+#define	USER_START_COL_NOT_REQUESTED	0xFF
 
 /**
  * struct qos_info - QoS information for driver.
@@ -89,6 +91,7 @@ extern "C" {
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @start_col_req: User requested a start col
  *
  * User program can provide QoS hints to driver.
  */
@@ -99,6 +102,7 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 start_col_req;
 };
 
 /**

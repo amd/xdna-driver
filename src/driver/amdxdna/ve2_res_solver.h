@@ -40,6 +40,7 @@ struct aie_qos {
 	u32		exec_time;	/* Frame execution time */
 	u32		priority;	/* Request priority */
 	u32             exclusive;      /* Exclusive Request or not */
+	u32             req_start_col;  /* Start Col Requested by user */
 };
 
 /*
@@ -59,6 +60,7 @@ struct alloc_requests {
 	u64			rid;
 	struct cdo_parts	cdo;
 	struct aie_qos		rqos;	/* Requested QoS */
+	bool 			is_user_start_col; /* User requested a start col */
 };
 
 /*

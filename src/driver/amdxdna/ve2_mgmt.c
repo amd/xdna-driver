@@ -136,6 +136,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	}
 
 	xrs_req->rqos.priority = hwctx->qos.priority;
+	xrs_req->rqos.start_col_req = hwctx->qos.start_col_req;
 	xrs_req->rid = (uintptr_t)hwctx;
 	ret = xrs_allocate_resource(xrs, xrs_req, &load_act);
 	if (ret) {
