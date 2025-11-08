@@ -40,7 +40,7 @@ struct aie_qos {
 	u32		exec_time;	/* Frame execution time */
 	u32		priority;	/* Request priority */
 	u32             exclusive;      /* Exclusive Request or not */
-	u32             req_start_col;  /* Start Col Requested by user */
+	u32             start_col_req;  /* Start Col Requested by user */
 };
 
 /*
