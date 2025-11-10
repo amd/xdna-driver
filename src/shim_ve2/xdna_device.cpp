@@ -719,7 +719,6 @@ device_xdna::
 create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type& qos,
 		  xrt::hw_context::access_mode mode) const
 {
-  m_uuid = xclbin_uuid.to_string(); // maintaining uuid in device class
   auto mutable_qos = qos; // Create a local copy
 
   //if qos already has priority parameter, then dont overwrite with access_mode
@@ -731,14 +730,16 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
       mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
 
   }
+  auto xclbin = get_xclbin(xclbin_uuid);
+  std::memcpy((&m_uuid), xclbin.get_uuid().get(), sizeof(xuid_t));
 
-  auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, get_xclbin(xclbin_uuid), mutable_qos);
+  auto hwctx_obj = std::make_unique<xdna_hwctx>(this, xclbin, mutable_qos);
 
   auto data = get_axlf_section(AIE_METADATA, xclbin_uuid);
 
   if (data.first && data.second)
   {
-    device_xdna* non_const_this = const_cast<device_xdna*>(this); 
+    device_xdna* non_const_this = const_cast<device_xdna*>(this);
     non_const_this->register_aie_array(hwctx_obj.get());
   }
   return hwctx_obj;
@@ -761,7 +762,7 @@ create_hw_context(uint32_t partition_size,
       mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
 
   }
-  auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, partition_size, mutable_qos);
+  auto hwctx_obj = std::make_unique<xdna_hwctx>(this, partition_size, mutable_qos);
   // TODO : Get AIE_METADATA info from ELF and register aie array
 
   return hwctx_obj;
