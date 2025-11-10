@@ -85,6 +85,7 @@ static void remove_solver_node(struct solver_rgroup *rgp, struct solver_node *no
 static inline struct partition_node *create_partition_node(u32 start_col, u32 ncols, bool exclusive)
 {
 	struct partition_node *pt_node = kzalloc(sizeof(*pt_node), GFP_KERNEL);
+
 	if (!pt_node)
 		return NULL;
 
@@ -108,8 +109,8 @@ static inline struct partition_node *create_partition_node(u32 start_col, u32 nc
  * Returns: 0 on success, -ENODEV if no free partition, -ENOMEM if allocation fails.
  */
 static int allocate_partition_exclusive(struct solver_state *xrs,
-		struct solver_node *snode,
-		struct alloc_requests *req)
+					struct solver_node *snode,
+					struct alloc_requests *req)
 {
 	struct partition_node *pt_node;
 	u32 ncols = req->cdo.ncols;
@@ -171,7 +172,7 @@ static inline bool is_partition_in_use(struct solver_state *xrs, u32 col, u32 nc
  * Returns: Pointer to least-used partition or NULL if none found.
  */
 static inline struct partition_node *find_least_used_partition(struct solver_state *xrs,
-		u32 col, u32 ncols)
+							       u32 col, u32 ncols)
 {
 	struct partition_node *pt_node, *least_used = NULL;
 
@@ -197,8 +198,8 @@ static inline struct partition_node *find_least_used_partition(struct solver_sta
  * Returns: 0 on success, -ENOMEM if allocation fails, -ENODEV if no partition available.
  */
 static int allocate_partition_shared(struct solver_state *xrs,
-		struct solver_node *snode,
-		struct alloc_requests *req)
+				     struct solver_node *snode,
+				     struct alloc_requests *req)
 {
 	struct partition_node *pt_node, *least_used = NULL;
 	u32 ncols = req->cdo.ncols;
@@ -207,7 +208,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 	int idx;
 
 	drm_dbg(xrs->cfg.ddev, "rid=%llu ncols=%u cols_len=%u\n",
-			snode->rid, ncols, snode->cols_len);
+		snode->rid, ncols, snode->cols_len);
 
 	/* STEP 1: Check if requested or any column is free */
 	if (req->rqos.start_col_req == USER_START_COL_NOT_REQUESTED) {
@@ -226,7 +227,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 	/* STEP 2: Allocate new partition if unused */
 	if (!in_use) {
 		drm_info(xrs->cfg.ddev, "Allocating new shared partition at UNUSED col=%u\n",
-				candidate_col);
+			 candidate_col);
 		pt_node = create_partition_node(candidate_col, ncols, false);
 		if (!pt_node)
 			return -ENOMEM;
@@ -255,7 +256,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 		least_used->nshared++;
 		snode->pt_node = least_used;
 		drm_info(xrs->cfg.ddev, "Reused shared partition at col=%u (nshared now %u)\n",
-				least_used->start_col, least_used->nshared);
+			 least_used->start_col, least_used->nshared);
 		return 0;
 	}
 

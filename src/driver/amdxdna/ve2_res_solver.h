@@ -60,7 +60,7 @@ struct alloc_requests {
 	u64			rid;
 	struct cdo_parts	cdo;
 	struct aie_qos		rqos;	/* Requested QoS */
-	bool 			is_user_start_col; /* User requested a start col */
+	bool			is_user_start_col; /* User requested a start col */
 };
 
 /*

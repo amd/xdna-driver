@@ -85,7 +85,6 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
     m_uuid(xclbin.get_uuid())
 {
   m_hwq = std::make_unique<xdna_hwq>(m_device);
-	printf("[%s %d ]******** I am here ************ \n", __func__, __LINE__);
   init_qos_info(qos);
   parse_xclbin(xclbin);
   amdxdna_drm_create_hwctx arg = {};
@@ -135,8 +134,6 @@ xdna_hwctx(const device_xdna& dev, uint32_t partition_size, const xrt::hw_contex
   , m_doorbell(0)
   , m_log_buf(nullptr)
 {
-
-	printf("[%s %d ]******** I am here ************ \n", __func__, __LINE__);
   init_qos_info(qos);
 
   amdxdna_drm_create_hwctx arg = {};
