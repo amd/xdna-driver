@@ -78,13 +78,13 @@ get_partition_info_hw(const xrt_core::device* device, const xrt::uuid xclbin_uui
 }
 
 xdna_hwctx::
-xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
-  : m_device(dev), 
-    m_doorbell(0), 
-    m_log_buf(nullptr), 
-    m_uuid(xclbin.get_uuid())
+xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
+   : m_device(const_cast<device_xdna*>(dev)),
+    m_hwq(std::make_unique<xdna_hwq>(m_device)),
+    m_doorbell(0),
+    m_log_buf(nullptr)
 {
-  m_hwq = std::make_unique<xdna_hwq>(m_device);
+  std::memcpy((&m_uuid), xclbin.get_uuid().get(), sizeof(xuid_t));
   init_qos_info(qos);
   parse_xclbin(xclbin);
   amdxdna_drm_create_hwctx arg = {};
@@ -94,25 +94,15 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
-  // FIXME
-#if 0
-  // Not supported yet
-  arg.umq_bo = m_q->get_queue_bo();
-  arg.max_opc = m_ops_per_cycle;
-  arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
-  arg.log_buf_bo = m_log_bo ?
-	  static_cast<bo*>(m_log_bo.get())->get_drm_bo_handle() :
-	  AMDXDNA_INVALID_BO_HANDLE;
-#endif
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 
   set_slotidx(arg.handle);
-  m_info = get_partition_info_hw(&m_device, xclbin.get_uuid(), arg.handle);
+  m_info = get_partition_info_hw(m_device, xclbin.get_uuid(), arg.handle);
   set_doorbell(arg.umq_doorbell);
 
-  auto data = m_device.get_axlf_section(AIE_TRACE_METADATA, xclbin.get_uuid());
+  auto data = m_device->get_axlf_section(AIE_TRACE_METADATA, xclbin.get_uuid());
   if (data.first && data.second)
-    m_aie_array = std::make_shared<xdna_aie_array>(&m_device, this);
+    m_aie_array = std::make_shared<xdna_aie_array>(m_device, this);
 
   m_hwq->bind_hwctx(this);
 
@@ -123,12 +113,12 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   adbo.param_val_size = sizeof(u64);
   adbo.param_type = DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT;
 
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
 }
 
 xdna_hwctx::
-xdna_hwctx(const device_xdna& dev, uint32_t partition_size, const xrt::hw_context::qos_type& qos)
-  : m_device(dev)
+xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_context::qos_type& qos)
+  : m_device(const_cast<device_xdna*>(dev))
   , m_hwq{ std::make_unique<xdna_hwq>(m_device) }
   , m_num_cols(partition_size)
   , m_doorbell(0)
@@ -143,7 +133,7 @@ xdna_hwctx(const device_xdna& dev, uint32_t partition_size, const xrt::hw_contex
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
 
   set_slotidx(arg.handle);
   set_doorbell(arg.umq_doorbell);
@@ -164,7 +154,7 @@ xdna_hwctx::
     m_hwq->unbind_hwctx();
     struct amdxdna_drm_destroy_hwctx arg = {};
     arg.handle = m_handle;
-    m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
+    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
 #if 0
     // Not supported yet
     fini_log_buf();
@@ -235,15 +225,15 @@ xdna_hwctx::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
   // const_cast: alloc_bo() is not const yet in device class
-  auto& dev = const_cast<device_xdna&>(get_device());
+  auto dev = const_cast<device_xdna*>(get_device());
 
   // Debug or dtrace buffers are specific to context.
   if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG || xcl_bo_flags{flags}.use == XRT_BO_USE_DTRACE ||
       xcl_bo_flags{flags}.use == XRT_BO_USE_LOG || xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
-    return dev.alloc_bo(userptr, get_slotidx(), size, flags);
+    return dev->alloc_bo(userptr, get_slotidx(), size, flags);
 
   // Other BOs are shared across all contexts.
-  return dev.alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
+  return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
@@ -251,8 +241,8 @@ xdna_hwctx::
 import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
   // const_cast: import_bo() is not const yet in device class
-  auto& dev = const_cast<device_xdna&>(get_device());
-  return dev.import_bo(pid, ehdl);
+  auto dev = const_cast<device_xdna*>(get_device());
+  return dev->import_bo(pid, ehdl);
 }
 
 xrt_core::hwqueue_handle*
@@ -332,7 +322,7 @@ parse_xclbin(const xrt::xclbin& xclbin)
   print_xclbin_info();
 }
 
-const device_xdna&
+device_xdna*
 xdna_hwctx::
 get_device()
 {

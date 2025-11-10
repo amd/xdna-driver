@@ -14,7 +14,9 @@ namespace shim_xdna_edge {
 class xdna_hwq : public xrt_core::hwqueue_handle
 {
 public:
-  xdna_hwq(const device_xdna& device);
+  xdna_hwq(const device_xdna* device);
+  xdna_hwq() = default;
+  virtual ~xdna_hwq(){};
 
   void
   submit_command(xrt_core::buffer_handle *) override;
@@ -53,8 +55,7 @@ public:
   get_queue_bo();
 
 private:
-  const xdna_hwctx *m_hwctx;
-  std::shared_ptr<xdna_edgedev> m_edev;
+  xdna_hwctx *m_hwctx;
   uint32_t m_queue_boh;
 };
 
