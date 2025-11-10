@@ -826,7 +826,7 @@ struct firmware_log
     switch (key) {
     case key_type::firmware_log_version:
     {
-      query::firmware_log_state::result_type version;
+      query::firmware_log_version::result_type version;
       amdxdna_drm_get_dpt_state config;
 
       amdxdna_drm_get_array arg = {
