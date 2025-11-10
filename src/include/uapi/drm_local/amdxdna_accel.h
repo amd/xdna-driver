@@ -735,6 +735,19 @@ struct amdxdna_drm_set_dpt_state {
 };
 
 /**
+ * struct amdxdna_drm_get_dpt_state - Structure to get current DPT state
+ * @version: Payload version
+ * @status: 1 implies enabled. 0 implies disabled
+ * @config: signifies log level for firmware logging or categories for firmware trace
+ */
+struct amdxdna_drm_get_dpt_state {
+	__u32 version;
+	__u32 status;
+	__u32 config;
+	__u32 reserved;
+};
+
+/**
  * struct amdxdna_drm_aie_coredump - The data for AIE coredump
  * @context_id: The hw context id
  *
@@ -788,6 +801,8 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_FW_TRACE		4
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
+#define DRM_AMDXDNA_FW_LOG_CONFIG	7
+#define DRM_AMDXDNA_FW_TRACE_CONFIG	8
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
