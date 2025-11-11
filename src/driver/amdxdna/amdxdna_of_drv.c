@@ -134,5 +134,5 @@ module_platform_driver(amdxdna_of_plat_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
-MODULE_VERSION("0.1");
+MODULE_VERSION(MODULE_VER_STR);
 MODULE_DESCRIPTION("amdxdna_of driver");
