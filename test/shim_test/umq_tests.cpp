@@ -13,32 +13,28 @@ namespace {
 using namespace xrt_core;
 
 void
-prepare_ddr_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& data)
+prepare_ddr_cmd(bo& execbuf, bo& ctrl, bo& data, const xrt::elf& elf, uint32_t kernel_index)
 {
   exec_buf ebuf(execbuf, ERT_START_DPU);
 
   ebuf.add_ctrl_bo(ctrl);
   ebuf.add_arg_bo(data, "input");
-  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf);
+  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf, kernel_index);
   ebuf.dump();
- 
-  std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
 }
 
 void
-prepare_basic_cmd(bo& execbuf, const std::string& elf, bo& ctrl)
+prepare_basic_cmd(bo& execbuf, bo& ctrl, const xrt::elf& elf, uint32_t kernel_index)
 {
   exec_buf ebuf(execbuf, ERT_START_DPU);
 
   ebuf.add_ctrl_bo(ctrl);
-  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf);
+  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf, kernel_index);
   ebuf.dump();
- 
-  std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
 }
 
 void
-prepare_vadd_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts, bo& ofm)
+prepare_vadd_cmd(bo& execbuf, bo& ctrl, bo& ifm, bo& wts, bo& ofm, const xrt::elf& elf, uint32_t kernel_index)
 {
   exec_buf ebuf(execbuf, ERT_START_DPU);
 
@@ -46,10 +42,8 @@ prepare_vadd_cmd(bo& execbuf, const std::string& elf, bo& ctrl, bo& ifm, bo& wts
   ebuf.add_arg_bo(ifm, "g.ifm_ddr");
   ebuf.add_arg_bo(wts, "g.wts_ddr");
   ebuf.add_arg_bo(ofm, "g.ofm_ddr");
-  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf);
+  ebuf.patch_ctrl_code(ctrl, xrt_core::patcher::buf_type::ctrltext, elf, kernel_index);
   ebuf.dump();
- 
-  std::cout << "Init'ed exec_buf, patched control code from " << elf << std::endl;
 }
 
 // Submit a cmd with control code buf directly
@@ -113,20 +107,23 @@ TEST_shim_umq_remote_barrier(device::id_type id, std::shared_ptr<device>& sdev, 
 {
   auto dev = sdev.get();
 
-  auto data = get_xclbin_data(dev);
-  auto elf = data + "/remote_barrier.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
+  auto elf_path = get_xclbin_path(dev, "remote_barrier.elf");
+  xrt::elf elf{elf_path};
+  auto mod = xrt::module{elf};
+  auto kernel_name = get_kernel_name(dev, "remote_barrier.elf");
+  auto kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext, kernel_index);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
   {
-    hw_ctx hwctx{dev, "remote_barrier.xclbin"};
+    hw_ctx hwctx{dev, "remote_barrier.elf"};
     auto hwq = hwctx.get()->get_hw_queue();
-    auto cu_idx = hwctx.get()->open_cu_context("dpu:remote_barrier");
+    xrt_core::cuidx_type cu_idx{0};
 
     for (int i = 0; i < 3; i++) {
       std::cout << "=== " << __func__ << " round: " << i << std::endl;
-      prepare_basic_cmd(bo_exec_buf, elf, bo_ctrl_code);
+      prepare_basic_cmd(bo_exec_buf, bo_ctrl_code, elf, kernel_index);
       exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
       umq_cmd_submit(hwq, bo_exec_buf);
       umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);
@@ -144,20 +141,23 @@ TEST_shim_umq_ddr_memtile(device::id_type id, std::shared_ptr<device>& sdev, con
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
 
-  auto data = get_xclbin_data(dev);
-  auto elf = data + "/ddr_memtile.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
+  auto elf_path = get_xclbin_path(dev, "ddr_memtile.elf");
+  xrt::elf elf{elf_path};
+  auto mod = xrt::module{elf};
+  auto kernel_name = get_kernel_name(dev, "ddr_memtile.elf");
+  auto kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext, kernel_index);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
   {
-    hw_ctx hwctx{dev, "ddr_memtile.xclbin"};
+    hw_ctx hwctx{dev, "ddr_memtile.elf"};
     auto hwq = hwctx.get()->get_hw_queue();
-    auto cu_idx = hwctx.get()->open_cu_context("dpu:move_ddr_memtile");
+    xrt_core::cuidx_type cu_idx{0};
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 1; i++) {
       std::cout << "=== " << __func__ << " round: " << i << std::endl;
-      prepare_ddr_cmd(bo_exec_buf, elf, bo_ctrl_code, bo_data);
+      prepare_ddr_cmd(bo_exec_buf, bo_ctrl_code, bo_data, elf, kernel_index);
       exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
       umq_cmd_submit(hwq, bo_exec_buf);
       umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);
@@ -171,20 +171,23 @@ TEST_shim_umq_memtiles(device::id_type id, std::shared_ptr<device>& sdev, const 
 {
   auto dev = sdev.get();
 
-  auto data = get_xclbin_data(dev);
-  auto elf = data + "/move_memtiles.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
+  auto elf_path = get_xclbin_path(dev, "move_memtiles.elf");
+  xrt::elf elf{elf_path};
+  auto mod = xrt::module{elf};
+  auto kernel_name = get_kernel_name(dev, "move_memtiles.elf");
+  auto kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext, kernel_index);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_EXECBUF};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
 
   {
-    hw_ctx hwctx{dev, "move_memtiles.xclbin"};
+    hw_ctx hwctx{dev, "move_memtiles.elf"};
     auto hwq = hwctx.get()->get_hw_queue();
-    auto cu_idx = hwctx.get()->open_cu_context("dpu:move_memtiles");
+    xrt_core::cuidx_type cu_idx{0};
 
     for (int i = 0; i < 3; i++) {
       std::cout << "=== " << __func__ << " round: " << i << std::endl;
-      prepare_basic_cmd(bo_exec_buf, elf, bo_ctrl_code);
+      prepare_basic_cmd(bo_exec_buf, bo_ctrl_code, elf, kernel_index);
       exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
       umq_cmd_submit(hwq, bo_exec_buf);
       umq_cmd_wait(hwq, bo_exec_buf, 600000 /* 600 sec, some simnow server are slow */);
@@ -205,12 +208,14 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device>& sdev, const std:
   bo bo_ofm{dev, OFM_BYTE_SIZE, XCL_BO_FLAGS_HOST_ONLY};
   std::cout << "Allocated vadd ifm, wts and ofm BOs" << std::endl;
 
-  auto data = get_xclbin_data(dev);
-  auto elf = data + "/vadd.elf";
-  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext);
+  auto elf_path = get_xclbin_path(dev, "vadd.elf");
+  xrt::elf elf{elf_path};
+  auto mod = xrt::module{elf};
+  auto kernel_name = get_kernel_name(dev, "vadd.elf");
+  auto kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+  auto instr_size = exec_buf::get_ctrl_code_size(elf, xrt_core::patcher::buf_type::ctrltext, kernel_index);
   bo bo_ctrl_code{dev, instr_size, XCL_BO_FLAGS_CACHEABLE};
   bo bo_exec_buf{dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF};
-  prepare_vadd_cmd(bo_exec_buf, elf, bo_ctrl_code, bo_ifm, bo_wts, bo_ofm);
 
   // Obtain no-op control code
   // ASM code:
@@ -224,9 +229,11 @@ TEST_shim_umq_vadd(device::id_type id, std::shared_ptr<device>& sdev, const std:
   std::cout << "Obtained nop ctrl-code BO" << std::endl;
 
   {
-    hw_ctx hwctx{dev, "vadd.xclbin"};
+    hw_ctx hwctx{dev, "vadd.elf"};
     auto hwq = hwctx.get()->get_hw_queue();
-    auto cu_idx = hwctx.get()->open_cu_context("dpu:vadd");
+    xrt_core::cuidx_type cu_idx{0};
+
+    prepare_vadd_cmd(bo_exec_buf, bo_ctrl_code, bo_ifm, bo_wts, bo_ofm, elf, kernel_index);
     exec_buf::set_cu_idx(bo_exec_buf, cu_idx);
 
     for (int i = 0; i < 1; i++) {

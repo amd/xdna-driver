@@ -1854,8 +1854,7 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
 
 std::unique_ptr<xrt_core::hwctx_handle>
 device::
-create_hw_context(uint32_t partition_size,
-                  const xrt::hw_context::cfg_param_type& cfg,
+create_hw_context(uint32_t partition_size, const xrt::hw_context::qos_type& qos,
                   xrt::hw_context::access_mode mode) const
 {
   if (m_pdev.is_umq())

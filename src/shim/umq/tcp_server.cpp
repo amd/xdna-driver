@@ -74,12 +74,13 @@ start()
   
   // listening to the assigned socket
   // we allow only one debugger running
-  listen(serverSocket, 1);
-  
-  while (1)
-  { 
-    shim_debug("Waiting for incoming connection...\n");
+  listen(serverSocket, 1); 
+  int flags = fcntl(serverSocket, F_GETFL, 0);
+  fcntl(serverSocket, F_SETFL, flags | O_NONBLOCK);
 
+  shim_debug("Waiting for incoming connection...\n");
+  while (!m_srv_stop)
+  { 
     // accepting connection request
     int clientSocket = accept(serverSocket, nullptr, nullptr);
     if (clientSocket < 0)

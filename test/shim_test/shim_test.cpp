@@ -169,7 +169,6 @@ dev_filter_is_aie2(device::id_type id, device* dev)
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
-  std::cout << "device_id" << device_id << std::endl;
   return device_id == npu1_device_id || device_id == npu4_device_id;
 }
 
@@ -323,8 +322,10 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>&
     auto info = get_bdf_info(i);
     auto bdf = bdf_info2str(info);
     std::cout << "device[" << i << "]: " << bdf << std::endl;
-    auto devid = get_device_id(bdf);
-    std::cout << "device[" << bdf << "]: " << devid << std::endl;
+    auto dev = get_userpf_device(i);
+    auto devid = device_query<query::pcie_device>(dev);
+    std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
+
   }
 }
 
