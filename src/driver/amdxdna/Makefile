@@ -37,6 +37,12 @@ ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF
 endif
 
+GIT_HASH := $(shell git rev-parse HEAD)
+ifndef MODULE_VER_STR
+MODULE_VER_STR := $(GIT_HASH)
+endif
+DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
+
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
 
