@@ -1462,18 +1462,6 @@ struct xclbin_name
     case xrt_core::query::xclbin_name::type::validate_elf:
       xclbin_name = "validate_elf.xclbin";
       break;
-    case xrt_core::query::xclbin_name::type::gemm:
-      xclbin_name = "gemm.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::gemm_elf:
-      xclbin_name = "gemm_elf.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::preemption_4x4:
-      xclbin_name = "preemption_4x4.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::preemption_4x8:
-      xclbin_name = "preemption_4x8.xclbin";
-      break;
     case xrt_core::query::xclbin_name::type::mobilenet_elf:
       xclbin_name = "mobilenet_4col.xclbin";
       break;
@@ -1541,18 +1529,6 @@ struct elf_name
     switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
     case xrt_core::query::elf_name::type::nop:
       elf_file = "nop.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_noop_4x4:
-      elf_file = "preemption_noop_4x4.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_noop_4x8:
-      elf_file = "preemption_noop_4x8.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_memtile_4x4:
-      elf_file = "preemption_memtile_4x4.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_memtile_4x8:
-      elf_file = "preemption_memtile_4x8.elf";
       break;
     case xrt_core::query::elf_name::type::mobilenet:
       elf_file = "mobilenet_4col.elf";
