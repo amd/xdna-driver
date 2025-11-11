@@ -700,9 +700,25 @@ struct event_trace
     switch (key) {
     case key_type::event_trace_version:
     {
-      // query::event_trace_version::result_type version;
-      // TODO : Implement IOCTL to get firmware event_trace yaml version
-      // return version;
+      query::event_trace_version::result_type version;
+      amdxdna_drm_get_dpt_state config;
+
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_TRACE_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get event_trace version");
+      }
+
+      memcpy(&version, &config.version, sizeof(version));
+      return version;
     }
     case key_type::event_trace_config:
     {
@@ -710,11 +726,27 @@ struct event_trace
     }
     case key_type::event_trace_state:
     {
-      // query::event_trace_state::result_type state;
-      // TODO : implement IOCTL to get event_trace state
-      // return state;
-    }
+      query::event_trace_state::result_type state;
+      amdxdna_drm_get_dpt_state config;
 
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_TRACE_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get event_trace state");
+      }
+
+      state.action = config.status;
+      state.categories = config.config;
+      return state;
+    }
     default:
       throw xrt_core::error("Unsupported event_trace query key");
     }
@@ -792,12 +824,27 @@ struct firmware_log
   get(const xrt_core::device* device, key_type key)
   {
     switch (key) {
-
     case key_type::firmware_log_version:
     {
-      // query::firmware_log_version::result_type version;
-      // TODO : implement IOCTL to get firmware log version
-      // return version;
+      query::firmware_log_version::result_type version;
+      amdxdna_drm_get_dpt_state config;
+
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_LOG_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get firmware log version");
+      }
+
+      memcpy(&version, &config.version, sizeof(version));
+      return version;
     }
     case key_type::firmware_log_config:
     {
@@ -805,9 +852,26 @@ struct firmware_log
     }
     case key_type::firmware_log_state:
     {
-      // query::firmware_log_state::result_type state;
-      // TODO : implement IOCTL to get firmware log state
-      // return state;
+      query::firmware_log_state::result_type state;
+      amdxdna_drm_get_dpt_state config;
+
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_LOG_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get firmware log state");
+      }
+
+      state.action = config.status;
+      state.log_level = config.config;
+      return state;
     }
     default:
       throw xrt_core::error("Unsupported firmware_log query key");
