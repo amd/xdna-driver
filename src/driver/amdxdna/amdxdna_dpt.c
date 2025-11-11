@@ -681,6 +681,37 @@ int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *a
 	return amdxdna_dpt_get_data(xdna->fw_log, args);
 }
 
+int amdxdna_get_fw_log_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_get_dpt_state config = {};
+	void __user *buf;
+	u32 buf_size;
+
+	buf_size = args->num_element * args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	if (buf_size < sizeof(config)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		return -ENOSPC;
+	}
+
+	if (!xdna->fw_log)
+		goto exit;
+
+	config.version = xdna->fw_log->payload_version;
+	config.status = xdna->fw_log->enabled;
+	config.config = fw_log_level;
+exit:
+	if (copy_to_user(buf, &config, sizeof(config)))
+		return -EFAULT;
+	return 0;
+}
+
 int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
 {
 	if (!xdna->fw_trace) {
@@ -689,6 +720,37 @@ int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array 
 	}
 
 	return amdxdna_dpt_get_data(xdna->fw_trace, args);
+}
+
+int amdxdna_get_fw_trace_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_get_dpt_state config = {};
+	void __user *buf;
+	u32 buf_size;
+
+	buf_size = args->num_element * args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	if (buf_size < sizeof(config)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		return -ENOSPC;
+	}
+
+	if (!xdna->fw_trace)
+		goto exit;
+
+	config.version = xdna->fw_trace->payload_version;
+	config.status = xdna->fw_trace->enabled;
+	config.config = fw_trace_categories;
+exit:
+	if (copy_to_user(buf, &config, sizeof(config)))
+		return -EFAULT;
+	return 0;
 }
 
 int amdxdna_set_fw_log_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args)
