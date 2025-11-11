@@ -87,19 +87,19 @@ public:
   int
   get_info(xclDeviceInfo2 *info) const;
 
-  std::shared_ptr<xdna_aie_array> 
+  std::shared_ptr<xdna_aie_array>
   get_aie_array();
 
-  void 
+  void
   register_aie_array(const xdna_hwctx* hwctx_obj);
 
-  bool 
+  bool
   is_aie_registered();
 
   std::string
   get_uuid() const
   {
-    return m_uuid;
+    return m_uuid.to_string();
   }
 
 private:
@@ -109,7 +109,7 @@ private:
   const xrt_core::query::request&
   lookup_query(xrt_core::query::key_type query_key) const override;
   std::shared_ptr<xdna_aie_array> m_aie_array;
-  mutable std::string m_uuid;
+  mutable xrt::uuid m_uuid;
 
 };
 
