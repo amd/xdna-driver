@@ -259,21 +259,32 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_query_hwctx* data;
+    amdxdna_drm_hwctx_entry* data;
     const uint32_t output_size = 32 * sizeof(*data);
     std::vector<char> payload(output_size);
-
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
-      .buffer_size = output_size,
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
+      .element_size = sizeof(*data),
+      .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto edev = get_edgedev(device);
-    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
-
-    uint32_t data_size = arg.buffer_size / sizeof(*data);
-    data = reinterpret_cast<decltype(data)>(payload.data());
+    uint32_t data_size = 0;
+    try {
+      edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+      data_size = arg.num_element;
+      data = reinterpret_cast<decltype(data)>(payload.data());
+    } catch (const xrt_core::system_error& e) {
+      if (e.code().value() == ENOSPC) {
+        const uint32_t updated_output_size = arg.num_element * sizeof(*data);
+        payload.resize(updated_output_size);
+        arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
+        edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+        data_size = arg.num_element;
+        data = reinterpret_cast<decltype(data)>(payload.data());
+      }
+    }
 
     query::aie_partition_info::result_type output;
     for (uint32_t i = 0; i < data_size; i++) {
@@ -289,8 +300,18 @@ struct partition_info
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
-      new_entry.qos.priority = 0x200;
-      output.push_back(new_entry);
+      new_entry.qos.priority = entry.priority;
+      new_entry.qos.gops = entry.gops;
+      new_entry.qos.fps = entry.fps;
+      new_entry.qos.dma_bandwidth = entry.dma_bandwidth;
+      new_entry.qos.latency = entry.latency;
+      new_entry.qos.frame_exec_time = entry.frame_exec_time;
+      new_entry.pasid = entry.pasid;
+      new_entry.suspensions = entry.suspensions;
+      new_entry.memory_usage = entry.heap_usage;
+      new_entry.is_suspended = entry.state;
+
+      output.push_back(std::move(new_entry));
     }
 
     return output;

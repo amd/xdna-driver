@@ -76,6 +76,133 @@ out:
 	return ret;
 }
 
+static int ve2_query_ctx_status_array(struct amdxdna_client *client,
+				      struct amdxdna_drm_hwctx_entry *tmp, pid_t pid, u32 ctx_id)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *ctx;
+	unsigned long id;
+	int ret = 0, idx;
+	u32 hw_i = 0;
+
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		size_t total_bo_usage;
+		u32 pid, pasid;
+
+		if (pid && pid != tmp_client->pid)
+			continue;
+
+		mutex_lock(&tmp_client->mm_lock);
+		total_bo_usage = tmp_client->total_bo_usage;
+		pid = tmp_client->pid;
+		pasid = tmp_client->pasid;
+		mutex_unlock(&tmp_client->mm_lock);
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, id, ctx) {
+			if (!ctx->priv)
+				continue;
+
+			if (ctx_id && ctx_id != ctx->id)
+				continue;
+
+			tmp[hw_i].pid = pid;
+			tmp[hw_i].context_id = ctx->id;
+			tmp[hw_i].hwctx_id = ctx->id;
+			tmp[hw_i].start_col = ctx->start_col;
+			tmp[hw_i].num_col = ctx->num_col;
+			tmp[hw_i].command_submissions = ctx->submitted;
+			tmp[hw_i].command_completions = ctx->completed;
+			tmp[hw_i].migrations = 0;
+			tmp[hw_i].preemptions = 0;
+			tmp[hw_i].errors = 0;
+			tmp[hw_i].pasid = pasid;
+			tmp[hw_i].priority = ctx->qos.priority;
+			tmp[hw_i].gops = ctx->qos.gops;
+			tmp[hw_i].fps = ctx->qos.fps;
+			tmp[hw_i].dma_bandwidth = ctx->qos.dma_bandwidth;
+			tmp[hw_i].latency = ctx->qos.latency;
+			tmp[hw_i].frame_exec_time = ctx->qos.frame_exec_time;
+			/* Using heap_usage for total_bo_usage for VE2 */
+			tmp[hw_i].heap_usage = total_bo_usage;
+			tmp[hw_i].suspensions = 0;
+			tmp[hw_i].state = ctx->priv->state;
+
+			hw_i++;
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+
+	if (pid && ctx_id && !hw_i) {
+		XDNA_ERR(xdna, "Invalid context ID %d for PID %d", ctx_id, pid);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
+static int ve2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_hwctx_entry __user *buf = u64_to_user_ptr(args->buffer);
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drm_hwctx_entry *tmp;
+	int ctx_limit, ctx_cnt, ret, i;
+
+	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
+	if (!tmp) {
+		XDNA_ERR(xdna, "Failed to allocate memory for hwctx array");
+		return -ENOMEM;
+	}
+
+	switch (args->param) {
+	case DRM_AMDXDNA_HW_CONTEXT_ALL:
+		ctx_limit = ve2_hwctx_limit;
+		WARN_ON(ctx_limit > AMDXDNA_MAX_NUM_ELEMENT);
+		ctx_cnt = 0;
+		struct amdxdna_client *tmp_client;
+		list_for_each_entry(tmp_client, &xdna->client_list, node) {
+			unsigned long id;
+			struct amdxdna_ctx *ctx;
+
+			xa_for_each(&tmp_client->ctx_xa, id, ctx)
+				if (ctx->priv)
+					ctx_cnt++;
+		}
+
+		if (args->num_element < ctx_cnt) {
+			XDNA_ERR(xdna, "Not enough space. Total ctx %d, got %d",
+				 ctx_cnt, args->num_element);
+			args->num_element = ctx_cnt;
+			ret = -ENOSPC;
+			goto exit;
+		}
+
+		ret = ve2_query_ctx_status_array(client, tmp, 0, 0);
+		if (ret)
+			goto exit;
+
+		break;
+
+	default:
+		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
+		ret = -EOPNOTSUPP;
+		goto exit;
+	}
+
+	for (i = 0; i < ctx_cnt; i++) {
+		if (copy_to_user(&buf[i], &tmp[i], sizeof(*tmp))) {
+			ret = -EFAULT;
+			goto exit;
+		}
+	}
+	args->num_element = ctx_cnt;
+
+exit:
+	kfree(tmp);
+	return ret;
+}
+
 static struct device *get_aie_device_handle(struct amdxdna_dev *xdna, u32 col, u32 *rel_col)
 {
 	struct amdxdna_ctx *hwctx;
@@ -421,6 +548,9 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_COREDUMP:
 		ret = ve2_coredump_read(client, args);
+		break;
+	case DRM_AMDXDNA_HW_CONTEXT_ALL:
+		ret = ve2_get_array_hwctx(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
