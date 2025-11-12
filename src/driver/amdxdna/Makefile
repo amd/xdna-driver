@@ -37,10 +37,15 @@ ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF
 endif
 
-GIT_HASH := $(shell git rev-parse HEAD)
+# Driver version
+XDNA_DRIVER_VERSION ?= 2.21.0
+XDNA_DATE ?= $(shell date +%Y%m%d)
+XDNA_HASH ?= $(shell git rev-parse HEAD)
+
 ifndef MODULE_VER_STR
-MODULE_VER_STR := $(GIT_HASH)
+MODULE_VER_STR := $(XDNA_DRIVER_VERSION)_$(XDNA_DATE),$(XDNA_HASH)
 endif
+
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
 modules:
