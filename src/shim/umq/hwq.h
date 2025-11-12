@@ -9,12 +9,6 @@
 
 namespace shim_xdna {
 
-// Should be moved to host_queue.h?
-struct host_indirect_data {
-  struct common_header	header;
-  struct exec_buf		payload;
-};
-
 class hwq_umq : public hwq
 {
 public:
@@ -40,7 +34,7 @@ private:
   volatile uint32_t *m_mapped_doorbell = nullptr;
 
   uint64_t
-  issue_command(const cmd_buffer *) override;
+  issue_command(const cmd_buffer *cmd_bo) override;
 
   void
   dump() const;
@@ -61,7 +55,7 @@ private:
   fill_indirect_exec_buf(uint32_t idx, ert_dpu_data *dpu);
 
   uint64_t
-  issue_single_exec_buf(ert_dpu_data *dpu_data, uint64_t comp);
+  issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain);
 };
 
 }

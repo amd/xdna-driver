@@ -144,7 +144,8 @@ private:
 class cmd_buffer : public buffer
 {
 public:
-  using buffer::buffer;
+  cmd_buffer(const pdev& dev, size_t size, uint64_t flags);
+  ~cmd_buffer();
 
   void
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
@@ -169,6 +170,9 @@ public:
   std::set<const buffer *>
   get_arg_bos() const override;
 
+  std::vector<const cmd_buffer *>&
+  get_subcmd_list() const;
+
 private:
   // Valid only when m_submitted is true.
   mutable uint64_t m_cmd_seq = 0;
@@ -183,6 +187,8 @@ private:
   mutable bool m_submitted = false;
   // Changed only once in the life time of cmd BO.
   mutable std::condition_variable m_submission_cv;
+  // For chained cmd, contains submitted sub-cmd pointers
+  mutable std::vector<const cmd_buffer *> m_subcmds;
 };
 
 class dbg_buffer : public buffer

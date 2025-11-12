@@ -697,6 +697,18 @@ get_arg_bos() const
 //
 // Impl for class cmd_buffer
 //
+cmd_buffer::
+cmd_buffer(const pdev& dev, size_t size, uint64_t flags)
+  : buffer(dev, size, flags)
+{
+  dev.insert_bo_handle(id().handle, this);
+}
+
+cmd_buffer::
+~cmd_buffer()
+{
+  m_pdev.remove_bo_handle(id().handle);
+}
 
 void
 cmd_buffer::
@@ -758,6 +770,8 @@ reset()
   std::lock_guard<std::mutex> lg(m_args_map_lock);
   m_args_map.clear();
   m_arg_bos_map.clear();
+  m_subcmds.clear();
+  m_subcmds.shrink_to_fit();
 }
 
 std::set<bo_id>
@@ -784,6 +798,13 @@ get_arg_bos() const
   for (const auto& m : m_arg_bos_map)
     ret.insert(m.second.begin(), m.second.end());
   return ret;
+}
+
+std::vector<const cmd_buffer *>&
+cmd_buffer::
+get_subcmd_list() const
+{
+  return m_subcmds;
 }
 
 //

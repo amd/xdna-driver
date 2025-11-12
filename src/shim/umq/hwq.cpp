@@ -6,7 +6,7 @@
 namespace {
 
 void
-init_indirect_buf(volatile struct shim_xdna::host_indirect_data *indirect_buf, int size)
+init_indirect_buf(volatile struct host_indirect_data *indirect_buf, int size)
 {
   for (int i = 0; i < size; i++) {
     indirect_buf[i].header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
@@ -181,8 +181,22 @@ get_pkt(uint32_t index)
 
 uint64_t
 hwq_umq::
-issue_single_exec_buf(ert_dpu_data *dpu, uint64_t comp)
+issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
 {
+  auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->vaddr());
+  auto dpu = get_ert_dpu_data(cmd);
+
+  // Sanity check
+  if (!dpu) {
+    // For debugging: dumping out at most 6 words in case count is insanely large
+    const uint32_t max_dump_word = std::min(cmd->count + 1, 6);
+    shim_debug("Dumping first %d words out of %d words:", max_dump_word, cmd->count + 1);
+    for (uint32_t i = 0; i < max_dump_word; i++)
+      shim_debug("EXEC_BUF[%d]: 0x%x", i, (reinterpret_cast<uint32_t *>(cmd))[i]);
+
+    shim_err(EINVAL, "No dpu data, invalid exec buf");
+  }
+
   auto slot_idx = get_next_avail_slot();
 
   if (get_ert_dpu_data_next(dpu))
@@ -193,20 +207,24 @@ issue_single_exec_buf(ert_dpu_data *dpu, uint64_t comp)
   auto pkt = get_pkt(slot_idx);
   auto hdr = &pkt->xrt_header;
   hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
-  hdr->completion_signal = comp;
+  // Completion signal area has to be a full WORD, we utilze the command_bo header.
+  hdr->completion_signal = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
   // TODO: remove once uC stops looking at this field.
   hdr->common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 
-  /* Issue mfence instruction to make sure all writes to the slot before is done */
+  // Issue mfence instruction to make sure all writes to the slot before is done.
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   // Indicates the slot is ready for processing by uC.
   // Must be the last step after pkt is filled up.
-  uint64_t wi = m_umq_hdr->write_index;
-  m_umq_hdr->write_index++;
+  uint64_t wi = m_umq_hdr->write_index++;
 
   // Wake up uC in case it is sleeping and waiting.
   *m_mapped_doorbell = 0;
 
+  shim_debug("Submitted %s-uC %scommand (%ld)",
+    get_ert_dpu_data_next(dpu) ? "multi" : "single",
+    last_of_chain ? "last-of-chain " : "",
+    wi);
   return wi;
 }
 
@@ -287,25 +305,25 @@ uint64_t
 hwq_umq::
 issue_command(const cmd_buffer *cmd_bo)
 {
-  auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->vaddr());
+  auto cmd = reinterpret_cast<ert_packet *>(cmd_bo->vaddr());
+  auto& subcmds = cmd_bo->get_subcmd_list();
+  subcmds.clear();
 
-  // Sanity check
-  auto dpu_data = get_ert_dpu_data(cmd);
-  if (!dpu_data) {
-    // For debugging: dumping out at most 6 words in case count is insanely large
-    const uint32_t max_dump_word = std::min(cmd->count + 1, 6);
-    shim_debug("Dumping first %d words out of %d words:", max_dump_word, cmd->count + 1);
-    for (uint32_t i = 0; i < max_dump_word; i++)
-      shim_debug("EXEC_BUF[%d]: 0x%x", i, (reinterpret_cast<uint32_t *>(cmd))[i]);
+  // Single command submission.
+  if (cmd->opcode != ERT_CMD_CHAIN)
+    return issue_single_exec_buf(cmd_bo, true);
 
-    shim_err(EINVAL, "No dpu data, invalid exec buf");
+  // Runlist command submission.
+  auto payload = get_ert_cmd_chain_data(cmd);
+  if (subcmds.capacity() < payload->command_count)
+    subcmds.reserve(payload->command_count);
+
+  uint64_t seq;
+  for (size_t i = 0; i < payload->command_count; i++) {
+    auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[i]));
+    seq = issue_single_exec_buf(subcmd, i == payload->command_count - 1);
+    subcmds.push_back(subcmd);
   }
-
-  // Completion signal area has to be a full WORD, we utilze the command_bo header
-  uint64_t comp = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
-  auto seq = issue_single_exec_buf(dpu_data, comp);
-
-  shim_debug("Submitted %s-uC command (%ld)", get_ert_dpu_data_next(dpu_data) ? "multi" : "single", seq);
   return seq;
 }
 
