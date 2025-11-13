@@ -11,73 +11,9 @@
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
 
-static int ve2_get_hwctx_status(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
-{
-	size_t hwctx_data_sz = sizeof(struct amdxdna_drm_query_hwctx);
-	struct amdxdna_drm_query_hwctx *hwctx_data;
-	struct amdxdna_drm_query_hwctx __user *buf;
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_client *tmp_client;
-	u32 req_bytes = 0, hw_i = 0;
-	struct amdxdna_ctx *hwctx;
-	unsigned long hwctx_id;
-	bool overflow = false;
-	int ret = 0, idx;
-
-	hwctx_data = kzalloc(hwctx_data_sz, GFP_KERNEL);
-	if (!hwctx_data)
-		return -ENOMEM;
-
-	buf = u64_to_user_ptr(args->buffer);
-
-	list_for_each_entry(tmp_client, &xdna->client_list, node) {
-		idx = srcu_read_lock(&tmp_client->ctx_srcu);
-		amdxdna_for_each_ctx(tmp_client, hwctx_id, hwctx) {
-			req_bytes += hwctx_data_sz;
-			if (args->buffer_size < req_bytes) {
-				/* Continue iterating to get the required size */
-				overflow = true;
-				continue;
-			}
-
-			hwctx_data->pid = hwctx->client->pid;
-			hwctx_data->context_id = hwctx->id;
-			hwctx_data->start_col = hwctx->start_col;
-			hwctx_data->num_col = hwctx->num_col;
-			XDNA_DBG(xdna, "cl_pid: %llu, hwctx_id: %u, start_col %u, ncol %u\n",
-				 hwctx_data->pid, hwctx_data->context_id, hwctx_data->start_col,
-				 hwctx_data->num_col);
-
-			if (copy_to_user(&buf[hw_i], hwctx_data, hwctx_data_sz)) {
-				ret = -EFAULT;
-				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
-				goto out;
-			}
-			hw_i++;
-		}
-		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
-	}
-
-	if (overflow) {
-		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %u.",
-			 args->buffer_size, req_bytes);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (hw_i == 0) {
-		XDNA_ERR(xdna, "pid %d failed to get hwctx\n", client->pid);
-		ret = -EINVAL;
-	}
-
-out:
-	kfree(hwctx_data);
-	args->buffer_size = req_bytes;
-	return ret;
-}
-
 static int ve2_query_ctx_status_array(struct amdxdna_client *client,
-				      struct amdxdna_drm_hwctx_entry *tmp, pid_t pid, u32 ctx_id)
+				      struct amdxdna_drm_hwctx_entry *tmp,
+				      pid_t pid, u32 ctx_id)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
@@ -142,13 +78,15 @@ static int ve2_query_ctx_status_array(struct amdxdna_client *client,
 	return ret;
 }
 
-static int ve2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+static int ve2_get_array_hwctx(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_drm_hwctx_entry __user *buf = u64_to_user_ptr(args->buffer);
+	struct amdxdna_drm_hwctx_entry __user *buf;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_drm_hwctx_entry *tmp;
 	int ctx_limit, ctx_cnt, ret, i;
 
+	buf = u64_to_user_ptr(args->buffer);
 	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
 	if (!tmp) {
 		XDNA_ERR(xdna, "Failed to allocate memory for hwctx array");
@@ -161,6 +99,7 @@ static int ve2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm
 		WARN_ON(ctx_limit > AMDXDNA_MAX_NUM_ELEMENT);
 		ctx_cnt = 0;
 		struct amdxdna_client *tmp_client;
+
 		list_for_each_entry(tmp_client, &xdna->client_list, node) {
 			unsigned long id;
 			struct amdxdna_ctx *ctx;
@@ -185,7 +124,8 @@ static int ve2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm
 		break;
 
 	default:
-		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
+		XDNA_ERR(xdna, "Not supported request parameter %u",
+			 args->param);
 		ret = -EOPNOTSUPP;
 		goto exit;
 	}
@@ -508,9 +448,6 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
-	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
-		ret = ve2_get_hwctx_status(client, args);
-		break;
 	case DRM_AMDXDNA_READ_AIE_MEM:
 		ret = ve2_tile_data_mem_read(client, args);
 		break;
