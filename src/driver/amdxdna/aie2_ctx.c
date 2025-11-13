@@ -311,9 +311,33 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 ret = 0;
 
 	amdxdna_stats_account(job->ctx->client);
+	xdna = job->ctx->client->xdna;
 	cmd_abo = job->cmd_bo;
 	if (unlikely(!data)) {
-		aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
+		if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
+			struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
+			struct amdxdna_gem_obj *abo;
+			u32 boh = cc->data[0];
+
+			/*
+			 * In the async callback/timeout case, driver sets the error index to 0,
+			 * state to timeout, and dump the app health in the first subcmd BO.
+			 */
+			cc->error_index = 0;
+			amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+			abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
+			if (!abo) {
+				XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
+				ret = -ENOENT;
+				goto out;
+			}
+			amdxdna_cmd_set_state(abo, ERT_CMD_STATE_TIMEOUT);
+			aie2_ctx_cmd_health_data(job->ctx, abo);
+			amdxdna_gem_put_obj(abo);
+		} else {
+			/* Forced command chaining */
+			aie2_ctx_cmd_health_data(job->ctx, cmd_abo);
+		}
 		ret = -EINVAL;
 		goto out;
 	}
@@ -325,7 +349,6 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	}
 
 	cmd_status = readl(data + offsetof(struct cmd_chain_resp, status));
-	xdna = job->ctx->client->xdna;
 	XDNA_DBG(xdna, "Status 0x%x", cmd_status);
 	if (cmd_status == AIE2_STATUS_SUCCESS) {
 		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
@@ -353,6 +376,11 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
 		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
 
+		/*
+		 * In the sync callback/command error case, driver only sets the error index to the
+		 * index of the failing subcmd. It is the responsibility of XRT core to set the
+		 * subcmd BO states to appropriate values.
+		 */
 		cc->error_index = fail_cmd_idx;
 		if (cc->error_index >= cc->command_count)
 			cc->error_index = 0;

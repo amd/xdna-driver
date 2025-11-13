@@ -68,6 +68,8 @@ int amdxdna_set_fw_log_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_st
 int amdxdna_set_fw_trace_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
 
 int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
+int amdxdna_get_fw_log_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
 int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
+int amdxdna_get_fw_trace_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
 
 #endif /* _AMDXDNA_DPT_H_ */

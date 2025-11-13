@@ -719,7 +719,6 @@ device_xdna::
 create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type& qos,
 		  xrt::hw_context::access_mode mode) const
 {
-  m_uuid = xclbin_uuid.to_string(); // maintaining uuid in device class
   auto mutable_qos = qos; // Create a local copy
 
   //if qos already has priority parameter, then dont overwrite with access_mode
@@ -729,6 +728,8 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
     else
       mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
   }
+  auto xclbin = get_xclbin(xclbin_uuid);
+  std::memcpy((&m_uuid), xclbin.get_uuid().get(), sizeof(xuid_t));
 
   if (mutable_qos.find("start_col") == mutable_qos.end())
     mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
@@ -739,7 +740,7 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
 
   if (data.first && data.second)
   {
-    device_xdna* non_const_this = const_cast<device_xdna*>(this); 
+    device_xdna* non_const_this = const_cast<device_xdna*>(this);
     non_const_this->register_aie_array(hwctx_obj.get());
   }
   return hwctx_obj;
