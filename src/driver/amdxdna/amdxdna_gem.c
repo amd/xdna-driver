@@ -762,15 +762,25 @@ amdxdna_gem_create_carvedout_object(struct drm_device *dev, struct amdxdna_drm_c
 	return to_xdna_obj(gobj);
 }
 
+static bool is_valid_cma_region(struct amdxdna_dev *xdna, int mem_index)
+{
+	if (mem_index < 0 || mem_index >= MAX_MEM_REGIONS)
+		return false;
+
+	if (mem_index >= xdna->num_cma_regions)
+		return false;
+
+	return xdna->cma_mem_regions[mem_index].initialized;
+}
+
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct dma_buf *dma_buf = ERR_PTR(-EINVAL);
-	int num_regions = xdna->num_mem_regions;
 	size_t size = PAGE_ALIGN(args->size);
 	struct drm_gem_object *gobj;
-	int mem_index = -1;
+	int mem_index;
 	int i;
 
 	if (args->type == AMDXDNA_BO_DEV_HEAP) {
@@ -781,32 +791,34 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 	mem_index = get_cma_mem_index(args->flags);
 
 	/* Try indexed allocation if mem_index is valid and region is initialized */
-	if (num_regions > 0 && mem_index >= 0 && mem_index < num_regions &&
-	    mem_index < MAX_MEM_REGIONS && xdna->cma_mem_regions[mem_index].initialized)
+	if (is_valid_cma_region(xdna, mem_index)) {
 		dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[mem_index].dev, size);
-	else if (mem_index >= 0)
-		XDNA_DBG(xdna, "Invalid CMA mem_index %d, allocating from any of the cma regions\n",
+		if (!IS_ERR(dma_buf))
+			goto import_buf;
+
+		XDNA_DBG(xdna, "CMA region %d allocation failed, trying others\n",
 			 mem_index);
-
-	/* If index based allocation fails, allocate from any of the initialized cma regions */
-	if (IS_ERR(dma_buf)) {
-		for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
-			if (!xdna->cma_mem_regions[i].initialized)
-				continue;
-
-			dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[i].dev, size);
-			if (!IS_ERR(dma_buf))
-				break;
-		}
+	} else if (mem_index >= 0) {
+		XDNA_DBG(xdna, "Invalid CMA mem_index %d, trying other regions\n",
+			 mem_index);
 	}
 
-	/* If allocation from any of the cma regions fails, allocate from default cma */
-	if (IS_ERR(dma_buf))
-		dma_buf = amdxdna_get_cma_buf(dev->dev, size);
+	/* Try any available initialized region */
+	for (i = 0; i < MAX_MEM_REGIONS; i++) {
+		if (!is_valid_cma_region(xdna, i))
+			continue;
 
+		dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[i].dev, size);
+		if (!IS_ERR(dma_buf))
+			goto import_buf;
+	}
+
+	/* Final fallback to system default CMA */
+	dma_buf = amdxdna_get_cma_buf(dev->dev, size);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
+import_buf:
 	gobj = dev->driver->gem_prime_import(dev, dma_buf);
 	if (IS_ERR(gobj)) {
 		dma_buf_put(dma_buf);
