@@ -264,6 +264,11 @@ static int allocate_partition_shared(struct solver_state *xrs,
 				break;
 			}
 		}
+		/* If no valid column was found, return error */
+		if (idx == snode->cols_len) {
+			drm_info(xrs->cfg.ddev, "No available non-exclusive shared partition found\n");
+			return -ENODEV;
+		}
 	} else {
 		candidate_col = req->rqos.user_start_col;
 		if (is_exclusive_partition(xrs, candidate_col, ncols)) {
