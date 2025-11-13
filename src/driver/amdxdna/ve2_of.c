@@ -86,12 +86,17 @@ out:
 	return ret;
 }
 
-static int ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct platform_device *pdev)
+static int
+ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
+			struct platform_device *pdev)
 {
-	int num_regions = of_count_phandle_with_args(pdev->dev.of_node, "memory-region", NULL);
-	xdna->num_mem_regions = 0;
+	int num_regions;
 	int ret = 0;
 	int i;
+
+	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
+						 "memory-region", NULL);
+	xdna->num_mem_regions = 0;
 
 	if (num_regions <= 0)
 		return -EINVAL;
@@ -99,9 +104,12 @@ static int ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct platform_dev
 	for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
 		struct device *child_dev;
 
-		child_dev = devm_kzalloc(&pdev->dev, sizeof(struct device), GFP_KERNEL);
+		child_dev = devm_kzalloc(&pdev->dev, sizeof(*child_dev),
+					 GFP_KERNEL);
 		if (!child_dev) {
-			XDNA_ERR(xdna, "Failed to allocate mem for child_dev for the cma mem region %d\n", i);
+			XDNA_ERR(xdna,
+				 "Failed to alloc child_dev for cma region %d\n",
+				 i);
 			return -ENOMEM;
 		}
 
@@ -111,13 +119,16 @@ static int ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct platform_dev
 
 		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
 		if (ret) {
-			XDNA_DBG(xdna, "Failed to set name for the cma mem region %d\n", i);
+			XDNA_DBG(xdna,
+				 "Failed to set name for cma region %d\n", i);
 			continue;
 		}
 
-		ret = of_reserved_mem_device_init_by_idx(child_dev, pdev->dev.of_node, i);
+		ret = of_reserved_mem_device_init_by_idx(child_dev,
+							 pdev->dev.of_node, i);
 		if (ret) {
-			XDNA_DBG(xdna, "Failed to init reserved cma mem region %d\n", i);
+			XDNA_DBG(xdna,
+				 "Failed to init reserved cma region %d\n", i);
 			continue;
 		}
 
@@ -134,11 +145,14 @@ static int ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct platform_dev
 static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 {
 	int i;
+
 	for (i = 0; i < MAX_MEM_REGIONS; i++) {
-		if (xdna->cma_mem_regions[i].initialized) {
-			of_reserved_mem_device_release(xdna->cma_mem_regions[i].dev);
-			xdna->cma_mem_regions[i].dev = NULL;
-			xdna->cma_mem_regions[i].initialized = false;
+		struct ve2_cma_mem_region *region = &xdna->cma_mem_regions[i];
+
+		if (region->initialized) {
+			of_reserved_mem_device_release(region->dev);
+			region->dev = NULL;
+			region->initialized = false;
 		}
 	}
 }
