@@ -731,7 +731,7 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
   }
 
   if (mutable_qos.find("start_col") == mutable_qos.end())
-    mutable_qos["start_col_req"] = USER_START_COL_NOT_REQUESTED;
+    mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
 
   auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, get_xclbin(xclbin_uuid), mutable_qos);
 
@@ -762,7 +762,7 @@ create_hw_context(uint32_t partition_size,
   }
   
   if (mutable_qos.find("start_col") == mutable_qos.end())
-    mutable_qos["start_col_req"] = USER_START_COL_NOT_REQUESTED;
+    mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
 
   auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, partition_size, mutable_qos);
   // TODO : Get AIE_METADATA info from ELF and register aie array

@@ -98,6 +98,26 @@ static inline struct partition_node *create_partition_node(u32 start_col, u32 nc
 }
 
 /**
+ * is_partition_in_use - Check if a partition with given start_col and ncols exists
+ * @xrs: Solver state
+ * @col: Starting column
+ * @ncols: Number of columns
+ *
+ * Returns: true if partition exists, false otherwise.
+ */
+ static inline bool is_partition_in_use(struct solver_state *xrs, u32 col, u32 ncols)
+ {
+	 struct partition_node *pt_node;
+ 
+	 list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+		 if (pt_node->start_col == col && pt_node->ncols == ncols)
+			 return true;
+	 }
+ 
+	 return false;
+ }
+ 
+/**
  * allocate_partition_exclusive - Find and allocate a free partition for exclusive use
  * @xrs: Solver state containing resource group info
  * @snode: Solver node requesting partition
@@ -116,15 +136,28 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 	u32 ncols = req->cdo.ncols;
 	u32 col, i;
 
-	/* Find first column range that is free */
-	for (i = 0; i < snode->cols_len; i++) {
-		col = snode->start_cols[i];
-		if (find_next_bit(xrs->rgp.resbit, XRS_MAX_COL, col) >= col + ncols)
-			break;
-	}
+	drm_dbg(xrs->cfg.ddev, "Allocating new exclusive partition\n");
 
-	if (i == snode->cols_len)
-		return -ENODEV; /* No free partition found */
+	if (req->rqos.start_col_req == USER_START_COL_NOT_REQUESTED) {
+		for (i = 0; i < snode->cols_len; i++) {
+			col = snode->start_cols[i];
+			if (!is_partition_in_use(xrs, col, ncols)) {
+				drm_dbg(xrs->cfg.ddev, "Found free exclusive partition at col=%u\n", col);
+				break;
+			}
+		}
+		if (i == snode->cols_len) {
+			drm_err(xrs->cfg.ddev, "No free exclusive partition found\n");
+			return -ENODEV; /* No free partition found */
+		}
+	} else {
+		col = req->rqos.start_col_req;
+		if (is_partition_in_use(xrs, col, ncols)) {
+			drm_err(xrs->cfg.ddev, "Requested exclusive partition start col %u is in use\n", col);
+			return -ENODEV; /* No free partition found */
+		}
+		drm_dbg(xrs->cfg.ddev, "Requested exclusive partition from user request at col=%u\n", col);
+	}
 
 	/* Allocate and initialize partition node */
 	pt_node = create_partition_node(col, ncols, req->rqos.exclusive);
@@ -137,28 +170,9 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 	bitmap_set(xrs->rgp.resbit, pt_node->start_col, pt_node->ncols);
 
 	snode->pt_node = pt_node;
-
+	drm_dbg(xrs->cfg.ddev, "Allocated new exclusive partition at col=%u\n",
+		pt_node->start_col);
 	return 0;
-}
-
-/**
- * is_partition_in_use - Check if a partition with given start_col and ncols exists
- * @xrs: Solver state
- * @col: Starting column
- * @ncols: Number of columns
- *
- * Returns: true if partition exists, false otherwise.
- */
-static inline bool is_partition_in_use(struct solver_state *xrs, u32 col, u32 ncols)
-{
-	struct partition_node *pt_node;
-
-	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (pt_node->start_col == col && pt_node->ncols == ncols)
-			return true;
-	}
-
-	return false;
 }
 
 /**
@@ -190,6 +204,28 @@ static inline struct partition_node *find_least_used_partition(struct solver_sta
 }
 
 /**
+ * is_exclusive_partition - Check if a partition at 'col' and 'ncols' is exclusive
+ * @xrs: Solver state pointer
+ * @col: Starting column for the partition to check
+ * @ncols: Number of columns in the partition
+ *
+ * Returns: true if a matching exclusive partition exists, false otherwise.
+ */
+static inline bool is_exclusive_partition(struct solver_state *xrs, u32 col, u32 ncols)
+{
+	struct partition_node *pt_node;
+
+	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+		if (pt_node->exclusive &&
+		    pt_node->start_col == col &&
+		    pt_node->ncols == ncols)
+			return true;
+	}
+
+	return false;
+}
+
+/**
  * allocate_partition_shared - Allocate or reuse a shared partition
  * @xrs: Solver state
  * @snode: Solver node requesting partition
@@ -212,21 +248,27 @@ static int allocate_partition_shared(struct solver_state *xrs,
 
 	/* STEP 1: Check if requested or any column is free */
 	if (req->rqos.start_col_req == USER_START_COL_NOT_REQUESTED) {
-		for (idx = 0; idx < snode->cols_len; idx++) {
+		drm_dbg(xrs->cfg.ddev, "Searching for free shared partition\n");
+		for (idx = 0; idx < snode->cols_len; idx++) {	
 			candidate_col = snode->start_cols[idx];
-			if (is_partition_in_use(xrs, candidate_col, ncols)) {
-				in_use = true;
+			if (is_exclusive_partition(xrs, candidate_col, ncols))
+				continue;
+			
+			in_use = is_partition_in_use(xrs, candidate_col, ncols);
+			if (!in_use) {
+				drm_dbg(xrs->cfg.ddev, "Found free shared partition at col=%u\n", candidate_col);
 				break;
 			}
 		}
 	} else {
 		candidate_col = req->rqos.start_col_req;
+		drm_dbg(xrs->cfg.ddev, "Requested shared partition from user request at col=%u\n", candidate_col);
 		in_use = is_partition_in_use(xrs, candidate_col, ncols);
 	}
 
 	/* STEP 2: Allocate new partition if unused */
 	if (!in_use) {
-		drm_info(xrs->cfg.ddev, "Allocating new shared partition at UNUSED col=%u\n",
+		drm_dbg(xrs->cfg.ddev, "Allocating new shared partition at UNUSED col=%u\n",
 			 candidate_col);
 		pt_node = create_partition_node(candidate_col, ncols, false);
 		if (!pt_node)
@@ -247,15 +289,27 @@ static int allocate_partition_shared(struct solver_state *xrs,
 			if (least_used)
 				break;
 		}
-	} else {
+		
 		candidate_col = req->rqos.start_col_req;
-		least_used = find_least_used_partition(xrs, candidate_col, ncols);
+		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+			if (pt_node->exclusive)
+				continue;
+			
+			if (pt_node->start_col == candidate_col && pt_node->ncols == ncols) {
+				least_used = pt_node;
+				break;
+			}
+		}
+		if (!least_used) {
+			drm_err(xrs->cfg.ddev, "No least-used shared partition found at col=%u\n", candidate_col);
+			return -ENODEV;
+		}
 	}
 
 	if (least_used) {
 		least_used->nshared++;
 		snode->pt_node = least_used;
-		drm_info(xrs->cfg.ddev, "Reused shared partition at col=%u (nshared now %u)\n",
+		drm_dbg(xrs->cfg.ddev, "Reused shared partition at col=%u (nshared now %u)\n",
 			 least_used->start_col, least_used->nshared);
 		return 0;
 	}
