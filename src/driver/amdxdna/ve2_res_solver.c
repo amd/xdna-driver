@@ -252,25 +252,26 @@ static int allocate_partition_shared(struct solver_state *xrs,
 	/* STEP 1: Check if requested or any column is free */
 	if (req->rqos.user_start_col == USER_START_COL_NOT_REQUESTED) {
 		drm_dbg(xrs->cfg.ddev, "Searching for free shared partition\n");
+		in_use = true;
 		for (idx = 0; idx < snode->cols_len; idx++) {
 			candidate_col = snode->start_cols[idx];
+
+			// Skip if this range is already exclusively allocated
 			if (is_exclusive_partition(xrs, candidate_col, ncols))
 				continue;
 
-			in_use = is_partition_in_use(xrs, candidate_col, ncols);
-			if (!in_use) {
+			// If not in use, we've found a free column range
+			if (!is_partition_in_use(xrs, candidate_col, ncols)) {
 				drm_dbg(xrs->cfg.ddev,
 					"Found free shared partition at col=%u\n", candidate_col);
+				in_use = false;
 				break;
 			}
 		}
-		/* If no valid column was found, return error */
-		if (idx == snode->cols_len) {
-			drm_info(xrs->cfg.ddev, "No available non-exclusive shared partition found\n");
-			return -ENODEV;
-		}
 	} else {
 		candidate_col = req->rqos.user_start_col;
+
+		// Check if user-requested region is exclusively allocated
 		if (is_exclusive_partition(xrs, candidate_col, ncols)) {
 			drm_err(xrs->cfg.ddev,
 				"Cannot allocate shared partition at col=%u: "
