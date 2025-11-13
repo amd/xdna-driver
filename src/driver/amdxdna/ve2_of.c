@@ -96,7 +96,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 
 	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
 						 "memory-region", NULL);
-	xdna->num_mem_regions = 0;
+	xdna->num_cma_regions = 0;
 
 	if (num_regions <= 0)
 		return -EINVAL;
@@ -137,7 +137,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 	}
 
 	platform_set_drvdata(pdev, xdna);
-	xdna->num_mem_regions = num_regions;
+	xdna->num_cma_regions = num_regions;
 
 	return 0;
 }
@@ -147,7 +147,7 @@ static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 	int i;
 
 	for (i = 0; i < MAX_MEM_REGIONS; i++) {
-		struct ve2_cma_mem_region *region = &xdna->cma_mem_regions[i];
+		struct amdxdna_cma_mem_region *region = &xdna->cma_mem_regions[i];
 
 		if (region->initialized) {
 			of_reserved_mem_device_release(region->dev);
@@ -207,7 +207,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	}
 
 	ret = ve2_cma_mem_region_init(xdna, pdev);
-	if (xdna->num_mem_regions > 0 && ret)
+	if (xdna->num_cma_regions > 0 && ret)
 		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
 
 	return 0;

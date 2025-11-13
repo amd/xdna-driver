@@ -250,7 +250,12 @@ struct amdxdna_drm_va_tbl {
 
 /**
  * struct amdxdna_drm_create_bo - Create a buffer object.
- * @flags: Buffer flags. MBZ.
+ * @flags: Buffer flags.
+ *         Bits [3:0] - CMA memory region index (0-15) for allocation.
+ *                      Used on platforms with multiple reserved CMA regions.
+ *                      If index is invalid or region unavailable, driver
+ *                      falls back to any available region or system default.
+ *         Bits [63:4] - Reserved. MBZ.
  * @vaddr: Pointer of va address table.
  * @size: Size in bytes.
  * @type: Buffer type.
