@@ -187,7 +187,7 @@ private:
   mutable bool m_submitted = false;
   // Changed only once in the life time of cmd BO.
   mutable std::condition_variable m_submission_cv;
-  // For chained cmd, contains submitted sub-cmd pointers
+  // For chained cmd, contains submitted sub-cmd pointers.
   mutable std::vector<const cmd_buffer *> m_subcmds;
 };
 

@@ -242,6 +242,9 @@ pdev::
 find_bo_by_handle(uint64_t handle) const
 {
   std::shared_lock<std::shared_mutex> lock(m_bo_map_lock);
+  auto it = m_bo_map.find(handle);
+  if (it == m_bo_map.end())
+    shim_err(EINVAL, "BO handle %d is not found in BO map", handle);
   return m_bo_map[handle];
 }
 

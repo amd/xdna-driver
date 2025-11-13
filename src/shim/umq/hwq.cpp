@@ -207,7 +207,7 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   auto pkt = get_pkt(slot_idx);
   auto hdr = &pkt->xrt_header;
   hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
-  // Completion signal area has to be a full WORD, we utilze the command_bo header.
+  // Completion signal area has to be a full WORD, we utilize the command_bo header.
   hdr->completion_signal = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
   // TODO: remove once uC stops looking at this field.
   hdr->common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
@@ -240,7 +240,7 @@ fill_indirect_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
       dpu->chained + 1, HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 
   if (pkt_size > sizeof(pkt->data))
-    shim_err(EINVAL, "dpu pkt_size=0x%lx > pkt_data max size=%x%lx",
+    shim_err(EINVAL, "dpu pkt_size=0x%zx > pkt_data max size=0x%zx",
       pkt_size, sizeof(pkt->data));
 
   // no need to memset to zero, all buffer will be set
@@ -315,10 +315,13 @@ issue_command(const cmd_buffer *cmd_bo)
 
   // Runlist command submission.
   auto payload = get_ert_cmd_chain_data(cmd);
+  if (payload->command_count == 0 || payload->command_count > 100)
+    shim_err(EINVAL, "Runlist exec buf with bad num of subcmds: %zx", payload->command_count);
+
   if (subcmds.capacity() < payload->command_count)
     subcmds.reserve(payload->command_count);
 
-  uint64_t seq;
+  uint64_t seq = 0;
   for (size_t i = 0; i < payload->command_count; i++) {
     auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[i]));
     seq = issue_single_exec_buf(subcmd, i == payload->command_count - 1);
