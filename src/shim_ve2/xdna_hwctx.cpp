@@ -280,7 +280,7 @@ init_qos_info(const qos_type& qos)
     else if (key == "priority")
       m_qos.priority = value;
     else if (key == "start_col")
-      m_qos.start_col_req = value;
+      m_qos.user_start_col = value;
   }
 }
 

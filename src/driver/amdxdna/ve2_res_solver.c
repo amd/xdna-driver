@@ -138,7 +138,7 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 
 	drm_dbg(xrs->cfg.ddev, "Allocating new exclusive partition\n");
 
-	if (req->rqos.start_col_req == USER_START_COL_NOT_REQUESTED) {
+	if (req->rqos.user_start_col == USER_START_COL_NOT_REQUESTED) {
 		for (i = 0; i < snode->cols_len; i++) {
 			col = snode->start_cols[i];
 			if (!is_partition_in_use(xrs, col, ncols)) {
@@ -151,7 +151,7 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 			return -ENODEV; /* No free partition found */
 		}
 	} else {
-		col = req->rqos.start_col_req;
+		col = req->rqos.user_start_col;
 		if (is_partition_in_use(xrs, col, ncols)) {
 			drm_err(xrs->cfg.ddev, "Requested exclusive partition start col %u is in use\n", col);
 			return -ENODEV; /* No free partition found */
@@ -247,7 +247,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 		snode->rid, ncols, snode->cols_len);
 
 	/* STEP 1: Check if requested or any column is free */
-	if (req->rqos.start_col_req == USER_START_COL_NOT_REQUESTED) {
+	if (req->rqos.user_start_col == USER_START_COL_NOT_REQUESTED) {
 		drm_dbg(xrs->cfg.ddev, "Searching for free shared partition\n");
 		for (idx = 0; idx < snode->cols_len; idx++) {	
 			candidate_col = snode->start_cols[idx];
@@ -261,7 +261,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 			}
 		}
 	} else {
-		candidate_col = req->rqos.start_col_req;
+		candidate_col = req->rqos.user_start_col;
 		drm_dbg(xrs->cfg.ddev, "Requested shared partition from user request at col=%u\n", candidate_col);
 		in_use = is_partition_in_use(xrs, candidate_col, ncols);
 	}
@@ -282,7 +282,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 	}
 
 	/* STEP 3: Reuse least-used partition */
-	if (req->rqos.start_col_req == USER_START_COL_NOT_REQUESTED) {
+	if (req->rqos.user_start_col == USER_START_COL_NOT_REQUESTED) {
 		for (idx = 0; idx < snode->cols_len; idx++) {
 			candidate_col = snode->start_cols[idx];
 			least_used = find_least_used_partition(xrs, candidate_col, ncols);
@@ -290,7 +290,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 				break;
 		}
 		
-		candidate_col = req->rqos.start_col_req;
+		candidate_col = req->rqos.user_start_col;
 		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
 			if (pt_node->exclusive)
 				continue;
