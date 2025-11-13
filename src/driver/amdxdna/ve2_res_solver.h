@@ -39,8 +39,8 @@ struct aie_qos {
 	u32		latency;	/* Frame response latency */
 	u32		exec_time;	/* Frame execution time */
 	u32		priority;	/* Request priority */
-	u32             exclusive;      /* Exclusive Request or not */
-	u32             start_col_req;  /* Start Col Requested by user */
+	u32		exclusive;      /* Exclusive Request or not */
+	u32		user_start_col; /* Start Col Requested by user */
 };
 
 /*
@@ -60,7 +60,7 @@ struct alloc_requests {
 	u64			rid;
 	struct cdo_parts	cdo;
 	struct aie_qos		rqos;	/* Requested QoS */
-	bool			is_user_start_col; /* User requested a start col */
+	bool			is_user_start_col; /* Start Col Requested by user */
 };
 
 /*
