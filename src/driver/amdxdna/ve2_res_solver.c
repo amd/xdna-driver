@@ -266,6 +266,13 @@ static int allocate_partition_shared(struct solver_state *xrs,
 		}
 	} else {
 		candidate_col = req->rqos.user_start_col;
+		if (is_exclusive_partition(xrs, candidate_col, ncols)) {
+			drm_err(xrs->cfg.ddev,
+				"Cannot allocate shared partition at col=%u: "
+				"exclusive partition already exists\n", candidate_col);
+			return -ENODEV;
+		}
+
 		drm_dbg(xrs->cfg.ddev,
 			"Requested shared partition from user request at col=%u\n", candidate_col);
 		in_use = is_partition_in_use(xrs, candidate_col, ncols);
@@ -294,7 +301,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 			if (least_used)
 				break;
 		}
-
+	} else {
 		candidate_col = req->rqos.user_start_col;
 		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
 			if (pt_node->exclusive)
@@ -307,7 +314,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 		}
 		if (!least_used) {
 			drm_err(xrs->cfg.ddev,
-				"No least-used shared partition found at col=%u\n", candidate_col);
+				"No shared partition found at col=%u\n", candidate_col);
 			return -ENODEV;
 		}
 	}
