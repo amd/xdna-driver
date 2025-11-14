@@ -8,6 +8,7 @@
 #include "xrt/experimental/xrt_elf.h"
 #include "xrt/experimental/xrt_ext.h"
 #include "xrt/experimental/xrt_module.h"
+#include "xrt/experimental/xrt_kernel.h"
 #include "multi-layer.h"
 #include "resnet50.h"
 
@@ -525,6 +526,36 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
     throw std::runtime_error(std::string("exec buf timed out."));
   if (state != ERT_CMD_STATE_COMPLETED)
     throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+}
+
+void
+TEST_xrt_umq_runlist_nop(int device_index, arg_type& arg)
+{
+  const int num_runs = 10;
+  std::vector<xrt::run> runs;
+  auto device = xrt::device{device_index};
+
+  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
+
+  // Create all runs
+  for (int i = 0; i < num_runs; i++)
+    runs.emplace_back(kernel);
+
+  // Add all runs into runlist
+  xrt::runlist run_list{hwctx};
+  for (auto& r : runs)
+    run_list.add(r);
+
+  // Submit and wait for the runlist to complete
+  run_list.execute();
+  auto state = run_list.wait(timeout_ms * num_runs * std::chrono::milliseconds{1});
+
+  if (state == std::cv_status::timeout) 
+    throw std::runtime_error(std::string("exec buf timed out."));
+  if (run_list.state() != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("bad command state: ") + std::to_string(run_list.state()));
 }
 
 void 
@@ -1418,7 +1449,8 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
   test_case{ "npu3 xrt single col resnet50 multi layer", TEST_xrt_umq_single_col_resnet50_multi_layer, {} },
-  test_case{ "npu3 xrt yolov3", TEST_xrt_umq_yolov3, {} }
+  test_case{ "npu3 xrt yolov3", TEST_xrt_umq_yolov3, {} },
+  test_case{ "npu3 xrt runlist of vadd", TEST_xrt_umq_runlist_nop, {} }
 };
 
 /* test n threads of 1 or more tests */

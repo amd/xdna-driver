@@ -221,4 +221,31 @@ sysfs_put(const std::string& subdev, const std::string& entry, std::string& err,
   err = ss.str();
 }
 
+void
+pdev::
+insert_bo_handle(uint64_t handle, xrt_core::buffer_handle *ptr) const
+{
+  std::unique_lock<std::shared_mutex> lock(m_bo_map_lock);
+  m_bo_map[handle] = ptr;
+}
+
+void
+pdev::
+remove_bo_handle(uint64_t handle) const
+{
+  std::unique_lock<std::shared_mutex> lock(m_bo_map_lock);
+  m_bo_map.erase(handle);
+}
+
+xrt_core::buffer_handle *
+pdev::
+find_bo_by_handle(uint64_t handle) const
+{
+  std::shared_lock<std::shared_mutex> lock(m_bo_map_lock);
+  auto it = m_bo_map.find(handle);
+  if (it == m_bo_map.end())
+    shim_err(EINVAL, "BO handle %d is not found in BO map", handle);
+  return m_bo_map[handle];
+}
+
 }
