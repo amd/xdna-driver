@@ -112,7 +112,7 @@ static inline bool is_partition_free(struct solver_state *xrs, u32 col, u32 ncol
 	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
 		if (pt_node->start_col == col && pt_node->ncols == ncols) {
 			for (u32 i = 0; i < ncols; i++) {
-				if (test_bit(col + i, xrs->rgp.col_bitmap))
+				if (test_bit(col + i, xrs->rgp.resbit))
 					return false;
 			}
 			return true;
