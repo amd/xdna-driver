@@ -26,7 +26,7 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 
 int xrs_get_total_cols(struct solver_state *xrs)
 {
-	if (!xrs && !xrs->cfg.total_col)
+	if (!xrs || !xrs->cfg.total_col)
 		return -EINVAL;
 
 	return xrs->cfg.total_col;
@@ -98,20 +98,25 @@ static inline struct partition_node *create_partition_node(u32 start_col, u32 nc
 }
 
 /**
- * is_partition_in_use - Check if a partition with given start_col and ncols exists
+ * is_partition_free - Check if a partition with given start_col and ncols is free
  * @xrs: Solver state
  * @col: Starting column
  * @ncols: Number of columns
  *
- * Returns: true if partition exists, false otherwise.
+ * Returns: true if partition is free, false otherwise.
  */
-static inline bool is_partition_in_use(struct solver_state *xrs, u32 col, u32 ncols)
+static inline bool is_partition_free(struct solver_state *xrs, u32 col, u32 ncols)
 {
 	struct partition_node *pt_node;
 
 	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (pt_node->start_col == col && pt_node->ncols == ncols)
+		if (pt_node->start_col == col && pt_node->ncols == ncols) {
+			for (u32 i = 0; i < ncols; i++) {
+				if (test_bit(col + i, xrs->rgp.col_bitmap))
+					return false;
+			}
 			return true;
+		}
 	}
 
 	return false;
@@ -134,14 +139,15 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 {
 	struct partition_node *pt_node;
 	u32 ncols = req->cdo.ncols;
-	u32 col, i;
+	u32 col;
+	u32 i;
 
 	drm_dbg(xrs->cfg.ddev, "Allocating new exclusive partition\n");
 
 	if (req->rqos.user_start_col == USER_START_COL_NOT_REQUESTED) {
 		for (i = 0; i < snode->cols_len; i++) {
 			col = snode->start_cols[i];
-			if (!is_partition_in_use(xrs, col, ncols)) {
+			if (is_partition_free(xrs, col, ncols)) {
 				drm_dbg(xrs->cfg.ddev,
 					"Found free exclusive partition at col=%u\n", col);
 				break;
@@ -153,9 +159,9 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 		}
 	} else {
 		col = req->rqos.user_start_col;
-		if (is_partition_in_use(xrs, col, ncols)) {
+		if (!is_partition_free(xrs, col, ncols)) {
 			drm_err(xrs->cfg.ddev,
-				"Requested exclusive partition start col %u is in use\n", col);
+				"Requested exclusive partition start col %u is not free\n", col);
 			return -ENODEV; /* No free partition found */
 		}
 		drm_dbg(xrs->cfg.ddev,
@@ -175,6 +181,7 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 	snode->pt_node = pt_node;
 	drm_dbg(xrs->cfg.ddev, "Allocated new exclusive partition at col=%u\n",
 		pt_node->start_col);
+
 	return 0;
 }
 
@@ -191,13 +198,14 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 static inline struct partition_node *find_least_used_partition(struct solver_state *xrs,
 							       u32 col, u32 ncols)
 {
-	struct partition_node *pt_node, *least_used = NULL;
+	struct partition_node *pt_node;
+	struct partition_node *least_used = NULL;
 
 	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (pt_node->exclusive)
-			continue;
-
-		if (pt_node->start_col == col && pt_node->ncols == ncols) {
+		/* Only consider non-exclusive partitions matching col and ncols */
+		if (!pt_node->exclusive &&
+		    pt_node->start_col == col &&
+		    pt_node->ncols == ncols) {
 			if (!least_used || pt_node->nshared < least_used->nshared)
 				least_used = pt_node;
 		}
@@ -242,7 +250,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 {
 	struct partition_node *pt_node, *least_used = NULL;
 	u32 ncols = req->cdo.ncols;
-	bool in_use = false;
+	bool is_free = false;
 	u32 candidate_col;
 	int idx;
 
@@ -252,7 +260,6 @@ static int allocate_partition_shared(struct solver_state *xrs,
 	/* STEP 1: Check if requested or any column is free */
 	if (req->rqos.user_start_col == USER_START_COL_NOT_REQUESTED) {
 		drm_dbg(xrs->cfg.ddev, "Searching for free shared partition\n");
-		in_use = true;
 		for (idx = 0; idx < snode->cols_len; idx++) {
 			candidate_col = snode->start_cols[idx];
 
@@ -260,18 +267,18 @@ static int allocate_partition_shared(struct solver_state *xrs,
 			if (is_exclusive_partition(xrs, candidate_col, ncols))
 				continue;
 
-			/* If not in use, we've found a free column range */
-			if (!is_partition_in_use(xrs, candidate_col, ncols)) {
+			/* Try to find a free column range */
+			if (is_partition_free(xrs, candidate_col, ncols)) {
+				is_free = true;
 				drm_dbg(xrs->cfg.ddev,
 					"Found free shared partition at col=%u\n", candidate_col);
-				in_use = false;
 				break;
 			}
 		}
 	} else {
 		candidate_col = req->rqos.user_start_col;
 
-		/* Check if user-requested region is exclusively allocated */
+		/* Skip if this range is already exclusively allocated */
 		if (is_exclusive_partition(xrs, candidate_col, ncols)) {
 			drm_err(xrs->cfg.ddev,
 				"Can't allocate shared partition col : %u. Exclusive already\n",
@@ -281,11 +288,11 @@ static int allocate_partition_shared(struct solver_state *xrs,
 
 		drm_dbg(xrs->cfg.ddev,
 			"Requested shared partition from user request at col=%u\n", candidate_col);
-		in_use = is_partition_in_use(xrs, candidate_col, ncols);
+		is_free = is_partition_free(xrs, candidate_col, ncols);
 	}
 
 	/* STEP 2: Allocate new partition if unused */
-	if (!in_use) {
+	if (is_free) {
 		drm_dbg(xrs->cfg.ddev, "Allocating new shared partition at UNUSED col=%u\n",
 			candidate_col);
 		pt_node = create_partition_node(candidate_col, ncols, false);
@@ -310,34 +317,28 @@ static int allocate_partition_shared(struct solver_state *xrs,
 	} else {
 		candidate_col = req->rqos.user_start_col;
 		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-			if (pt_node->exclusive)
-				continue;
-
-			if (pt_node->start_col == candidate_col && pt_node->ncols == ncols) {
+			if (!pt_node->exclusive &&
+			    pt_node->start_col == candidate_col &&
+			    pt_node->ncols == ncols) {
 				least_used = pt_node;
 				break;
 			}
 		}
-		if (!least_used) {
-			drm_err(xrs->cfg.ddev,
-				"No shared partition found at col=%u\n", candidate_col);
-			return -ENODEV;
-		}
 	}
 
-	if (least_used) {
-		least_used->nshared++;
-		snode->pt_node = least_used;
-		drm_dbg(xrs->cfg.ddev, "Reused shared partition at col=%u (nshared now %u)\n",
+	if (!least_used) {
+		drm_err(xrs->cfg.ddev, "No available shared partition for col=%u ncols=%u\n",
+				candidate_col, ncols);
+		return -ENODEV;
+	}
+
+	least_used->nshared++;
+	snode->pt_node = least_used;
+	drm_dbg(xrs->cfg.ddev, "Reused shared partition at col=%u (nshared now %u)\n",
 			least_used->start_col, least_used->nshared);
-		return 0;
-	}
 
-	drm_info(xrs->cfg.ddev, "No available shared partition\n");
-
-	return -ENODEV;
+	return 0;
 }
-
 static struct solver_node *create_solver_node(struct solver_state *xrs, struct alloc_requests *req)
 {
 	struct cdo_parts *cdop = &req->cdo;
