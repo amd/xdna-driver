@@ -75,7 +75,6 @@ struct host_queue_header
   uint64_t data_address;
 };
 
-
 enum host_queue_packet_type
 {            
   HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC = 0,
@@ -244,6 +243,11 @@ struct host_queue_packet
 {
   struct xrt_packet_header xrt_header;	
   uint32_t data[12];
+};
+
+struct host_indirect_data {
+  struct common_header header;
+  struct exec_buf  payload;
 };
 
 /*
