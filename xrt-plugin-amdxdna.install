@@ -1,0 +1,70 @@
+post_install() {
+  echo "Installing AMD XDNA driver via DKMS..."
+
+  install_datadir=/opt/xilinx/xrt/share/amdxdna
+  udev_rules_d=/etc/udev/rules.d
+  amdxdna_rules_file=99-amdxdna.rules
+  dracut_conf_d=/etc/dracut.conf.d
+  dracut_conf_file=amdxdna.dracut.conf
+
+  # On systems with dracut, exclude driver from initram
+  if [ -e ${dracut_conf_d} ]; then
+    if [ ! -f ${dracut_conf_d}/${dracut_conf_file} ]; then
+      touch ${dracut_conf_d}/${dracut_conf_file}
+    fi
+    echo "omit_drivers+=\" amdxdna \"" > ${dracut_conf_d}/${dracut_conf_file}
+  fi
+
+  # Install DKMS module
+  echo "Installing amdxdna Linux kernel module via DKMS..."
+  $install_datadir/dkms_driver.sh --install
+
+  # Setup udev rules
+  echo "Setting up udev rules..."
+  if [ ! -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
+    touch ${udev_rules_d}/${amdxdna_rules_file}
+  fi
+  echo 'KERNEL=="accel*",DRIVERS=="amdxdna",MODE="0666"' > ${udev_rules_d}/${amdxdna_rules_file}
+
+  # Load the kernel module
+  echo "Loading amdxdna kernel module..."
+  rmmod amdxdna > /dev/null 2>&1 || true
+  modprobe amdxdna
+
+  echo "AMD XDNA driver installation complete!"
+  echo "You can test it with: source /opt/xilinx/xrt/setup.sh && xrt-smi validate"
+}
+
+post_upgrade() {
+  post_install
+}
+
+pre_remove() {
+  echo "Removing AMD XDNA driver..."
+
+  install_datadir=/opt/xilinx/xrt/share/amdxdna
+  udev_rules_d=/etc/udev/rules.d
+  amdxdna_rules_file=99-amdxdna.rules
+  dracut_conf_d=/etc/dracut.conf.d
+  dracut_conf_file=amdxdna.dracut.conf
+
+  # Unload kernel module
+  if lsmod | grep -q "amdxdna "; then
+    rmmod amdxdna
+  fi
+
+  # Remove dracut config
+  if [ -f ${dracut_conf_d}/${dracut_conf_file} ]; then
+    rm -f ${dracut_conf_d}/${dracut_conf_file}
+  fi
+
+  # Remove udev rules
+  if [ -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
+    rm -f ${udev_rules_d}/${amdxdna_rules_file}
+  fi
+
+  # Remove DKMS module
+  $install_datadir/dkms_driver.sh --remove
+
+  echo "AMD XDNA driver removed!"
+}

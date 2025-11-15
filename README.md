@@ -103,7 +103,7 @@ cd <root-of-source-tree>
 exit
 ```
 
-### Steps to create release build DEB package:
+### Steps to create release build DEB package (Ubuntu/Debian):
 
 ``` bash
 cd <root-of-source-tree>/build
@@ -121,7 +121,54 @@ cd ../../build
 # To adapt according to your OS & version
 sudo apt reinstall ./Release/xrt_plugin.2.19.0_ubuntu22.04-x86_64-amdxdna.deb
 ```
-You will find `xrt_plugin\*-amdxdna.deb` in Release/ folder. This package includes:
+
+### Steps to create release build packages (Arch Linux):
+
+``` bash
+cd <root-of-source-tree>
+
+# Install dependencies (requires sudo)
+sudo ./tools/amdxdna_deps.sh
+
+# Get submodules
+git submodule update --init --recursive
+
+# Build XRT
+cd xrt/build
+./build.sh -npu -opt
+
+# Build and install XRT packages using pacman
+# PKGBUILDs are in xrt/packaging/arch/
+cd ../packaging/arch
+makepkg -p PKGBUILD-xrt-base
+sudo pacman -U xrt-base-*.pkg.tar.zst
+
+makepkg -p PKGBUILD-xrt-npu
+sudo pacman -U xrt-npu-*.pkg.tar.zst
+
+# Build XDNA driver
+cd ../../../build
+./build.sh -release
+
+# Build and install XDNA plugin package
+cd ..
+makepkg -p PKGBUILD-xrt-plugin
+sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
+
+# Configure memory limits (required for NPU access)
+sudo bash -c 'echo "* soft memlock unlimited" >> /etc/security/limits.conf'
+sudo bash -c 'echo "* hard memlock unlimited" >> /etc/security/limits.conf'
+
+# Log out and log back in (or reboot) for memory limit changes to take effect
+```
+
+**Note for Arch Linux users**: The build system generates `.tar.gz` packages which are repackaged into proper Arch packages (`.pkg.tar.zst`) using the provided PKGBUILDs:
+- XRT packages: `xrt/packaging/arch/` (PKGBUILD-xrt-base, PKGBUILD-xrt-npu)
+- XDNA driver: root directory (PKGBUILD-xrt-plugin)
+
+This ensures proper integration with pacman for installation, upgrades, and removal.
+
+You will find `xrt_plugin\*-amdxdna.deb` (Ubuntu/Debian) or `xrt_plugin*.tar.gz` (Arch Linux) in Release/ folder. This package includes:
 * The `.so` library files, which will be installed into `/opt/xilinx/xrt/lib` folder
 * The XDNA driver and DKMS script, which build, install and load
   `amdxdna.ko` driver when installing the .DEB package on target machine
