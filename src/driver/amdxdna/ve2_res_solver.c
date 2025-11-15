@@ -328,17 +328,18 @@ static int allocate_partition_shared(struct solver_state *xrs,
 
 	if (!least_used) {
 		drm_err(xrs->cfg.ddev, "No available shared partition for col=%u ncols=%u\n",
-				candidate_col, ncols);
+			candidate_col, ncols);
 		return -ENODEV;
 	}
 
 	least_used->nshared++;
 	snode->pt_node = least_used;
 	drm_dbg(xrs->cfg.ddev, "Reused shared partition at col=%u (nshared now %u)\n",
-			least_used->start_col, least_used->nshared);
+		least_used->start_col, least_used->nshared);
 
 	return 0;
 }
+
 static struct solver_node *create_solver_node(struct solver_state *xrs, struct alloc_requests *req)
 {
 	struct cdo_parts *cdop = &req->cdo;
