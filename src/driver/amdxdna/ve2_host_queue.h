@@ -6,6 +6,10 @@
 #define HOST_QUEUE_ENTRY        32
 #define HOST_INDIRECT_PKT_NUM   36
 
+
+#define LAST_CMD (0)
+#define NOT_LAST_CMD (1)
+
 struct exec_buf {
 	u16	cu_index;
 	u16	reserved0;
@@ -56,7 +60,8 @@ struct common_header {
 		};
 		u16	header;
 	};
-	u16	opcode;
+	u8	opcode;
+	u8	chain_flag;
 	u16	count;
 	u8	distribute;
 	u8	indirect;
@@ -147,7 +152,12 @@ struct handshake {
 	trace;
 	struct {
 #define NUM_PDI_SAVE 2 //we can save one ss and one elf
-		u32 restore_page; //40
+		struct {
+			u16 page_index:15;
+			u16 cmd_chain_failure:1;
+			u16 page_offset;
+		}
+		restore_page;
 		struct {
 			u32 id; //44 4c
 			u16 page_index; //48 50
@@ -167,14 +177,30 @@ struct handshake {
 		u32 size;   // 64
 	}
 	dbg_buf;
-	u32 reserved1[14]; //make sure vm (below) starts at offset 0xa0
-	struct { /* Hardware sync required */
+	union {
+		struct {
+			u16 page_index;
+			u16 fired_count;
+		}
+		info;
+		u32 raw;
+	}
+	trace_save; // 68 This needs to be saved/restored during ctx switch to support preemption
+	u32 doorbell_pending; // 6c  this is to solve the race condition.
+			      //MPNPU will set it to 1 when it receives doorbell from host.
+	u32 completion_status;
+	u32 reserved1[7]; //make sure vm (below) starts at offset 0xa0
+	u32 last_ddr_dm2mm_addr_high; // 90
+	u32 last_ddr_dm2mm_addr_low; // 94
+	u32 last_ddr_mm2dm_addr_high; // 98
+	u32 last_ddr_mm2dm_addr_low;  // 9c
+	struct { /* Hardware sync required */ // a0
 		u32 fw_state;
 		u32 abs_page_index; //absolute index of page where current control code are in
 		u32 ppc; // previous pc(relative to current page) drives current_job_context to NULL
 	}
 	vm;
-	struct { /* Hardware sync required */
+	struct { /* Hardware sync required */ // ac
 		u32 ear; //exception address
 		u32 esr; //exception status
 		u32 pc; //exception pc

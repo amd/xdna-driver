@@ -16,7 +16,7 @@ class drv_xdna : public xrt_core::edge::drv
 {
 public:
   std::string
-  name() const override { return "aiarm"; }
+  name() const override { return "amdxdna"; }
 
   void
   scan_devices(std::vector<std::shared_ptr<xrt_core::edge::dev>>& dev_list) override;

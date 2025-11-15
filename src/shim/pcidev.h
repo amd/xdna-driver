@@ -6,6 +6,7 @@
 
 #include "platform.h"
 #include "core/pcie/linux/pcidev.h"
+#include <shared_mutex>
 
 namespace shim_xdna {
 
@@ -80,6 +81,16 @@ public:
   virtual void
   create_drm_bo(bo_info *arg) const = 0;
 
+  // Maintaining bo handle to ptr mapping.
+  // For now, used by runlist processing where cmd_bo handles are passed down
+  // in exec buf. These handles has to be mapped to original ptr for submission.
+  void
+  insert_bo_handle(uint64_t handle, xrt_core::buffer_handle *ptr) const;
+  void
+  remove_bo_handle(uint64_t handle) const;
+  xrt_core::buffer_handle *
+  find_bo_by_handle(uint64_t handle) const;
+
 private:
   virtual void
   on_first_open() const = 0;
@@ -91,6 +102,9 @@ private:
   mutable std::mutex m_open_close_lock;
 
   std::shared_ptr<const platform_drv> m_driver;
+
+  mutable std::shared_mutex m_bo_map_lock;
+  mutable std::unordered_map<uint64_t, xrt_core::buffer_handle *> m_bo_map;
 };
 
 }
