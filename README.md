@@ -138,8 +138,8 @@ cd xrt/build
 ./build.sh -npu -opt
 
 # Build and install XRT packages using pacman
-# PKGBUILDs are in xrt/packaging/arch/
-cd ../packaging/arch
+# PKGBUILDs are in xrt/build/arch/
+cd arch
 makepkg -p PKGBUILD-xrt-base
 sudo pacman -U xrt-base-*.pkg.tar.zst
 
@@ -163,7 +163,7 @@ sudo bash -c 'echo "* hard memlock unlimited" >> /etc/security/limits.conf'
 ```
 
 **Note for Arch Linux users**: The build system generates `.tar.gz` packages which are repackaged into proper Arch packages (`.pkg.tar.zst`) using the provided PKGBUILDs:
-- XRT packages: `xrt/packaging/arch/` (PKGBUILD-xrt-base, PKGBUILD-xrt-npu)
+- XRT packages: `xrt/build/arch/` (PKGBUILD-xrt-base, PKGBUILD-xrt-npu)
 - XDNA driver: root directory (PKGBUILD-xrt-plugin)
 
 This ensures proper integration with pacman for installation, upgrades, and removal.
