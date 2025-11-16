@@ -2,6 +2,7 @@
 // Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "hwq.h"
+#include "core/common/trace.h"
 
 namespace {
 
@@ -220,6 +221,7 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
 
   // Wake up uC in case it is sleeping and waiting.
   *m_mapped_doorbell = 0;
+  XRT_DETAIL_TRACE_POINT_LOG(umq_cmd_submitted, cmd_bo->id().handle, wi);
 
   shim_debug("Submitted %s-uC %scommand (%ld)",
     get_ert_dpu_data_next(dpu) ? "multi" : "single",
