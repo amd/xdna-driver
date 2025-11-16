@@ -131,9 +131,19 @@ DEFINE_EVENT(xdna_mbox_name_id, mbox_irq_handle,
 	     TP_ARGS(name, irq)
 );
 
+DEFINE_EVENT(xdna_mbox_name_id, uc_irq_handle,
+	     TP_PROTO(char *name, int msix_index),
+	     TP_ARGS(name, msix_index)
+);
+
 DEFINE_EVENT(xdna_mbox_name_id, mbox_rx_worker,
 	     TP_PROTO(char *name, int irq),
 	     TP_ARGS(name, irq)
+);
+
+DEFINE_EVENT(xdna_mbox_name_id, uc_wakeup,
+	     TP_PROTO(char *name, int msix_index),
+	     TP_ARGS(name, msix_index)
 );
 
 DEFINE_EVENT(xdna_mbox_name_id, mbox_poll_handle,

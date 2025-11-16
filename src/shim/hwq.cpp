@@ -111,6 +111,8 @@ int
 hwq::
 wait_command(uint64_t seq, uint32_t timeout_ms) const
 {
+  XRT_TRACE_POINT_SCOPE1(wait_command, seq);
+
   int ret = 1;
 
   shim_debug("Waiting for cmd (%ld)...", seq);
@@ -206,8 +208,10 @@ void
 hwq::
 submit_command(xrt_core::buffer_handle *cmd)
 {
-  std::unique_lock<std::mutex> lock(m_mutex);
   auto boh = static_cast<cmd_buffer*>(cmd);
+
+  XRT_TRACE_POINT_SCOPE1(submit_command, boh->id().handle);
+  std::unique_lock<std::mutex> lock(m_mutex);
 
   dump_arg_bos(boh);
 
