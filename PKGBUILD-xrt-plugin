@@ -11,16 +11,28 @@ provides=('xrt-plugin-amdxdna')
 conflicts=('amdxdna-driver' 'amdxdna-driver-bin')
 install=xrt-plugin-amdxdna.install
 
+# Set this to your xdna-driver build directory
+: ${XDNA_BUILD_DIR:="build/Release"}
+
 package() {
   cd "$srcdir"
 
   # Extract the tarball directly into the package directory
-  tar -xzf /home/kashif/Downloads/xdna-driver/build/Release/xrt_plugin.2.21.0_-x86_64-amdxdna.tar.gz -C "$pkgdir"
+  # The tarball should be at $XDNA_BUILD_DIR/xrt_plugin*.tar.gz
+  local tarball=$(ls ${XDNA_BUILD_DIR}/xrt_plugin*-amdxdna.tar.gz 2>/dev/null | head -1)
+  if [ -z "$tarball" ]; then
+    error "XDNA plugin tarball not found in ${XDNA_BUILD_DIR}"
+    error "Please build XDNA driver first: cd build && ./build.sh -release"
+    return 1
+  fi
+
+  msg2 "Extracting $tarball"
+  tar -xzf "$tarball" -C "$pkgdir"
 
   # Copy the install scripts for reference (they'll be called from .install file)
   mkdir -p "$pkgdir/opt/xilinx/xrt/share/amdxdna/package"
-  install -Dm755 /home/kashif/Downloads/xdna-driver/build/Release/package/postinst \
+  install -Dm755 ${XDNA_BUILD_DIR}/package/postinst \
     "$pkgdir/opt/xilinx/xrt/share/amdxdna/package/postinst"
-  install -Dm755 /home/kashif/Downloads/xdna-driver/build/Release/package/prerm \
+  install -Dm755 ${XDNA_BUILD_DIR}/package/prerm \
     "$pkgdir/opt/xilinx/xrt/share/amdxdna/package/prerm"
 }
