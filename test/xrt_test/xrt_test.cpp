@@ -520,12 +520,19 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
   xrt::run run{kernel};
 
   // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(timeout_ms);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0 ; i < c_rounds; i++) {
+    run.start();
+    auto state = run.wait(timeout_ms);
+    if (state == ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  std::cout << "Executed " << c_rounds << " NOP commands in " << duration_us
+	    << "us, average latency: " << duration_us * 1.0 / c_rounds << "us\n";
 }
 
 void
