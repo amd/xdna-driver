@@ -183,6 +183,9 @@ bool amdxdna_use_cma(void)
 
 int get_cma_mem_index(u64 flags)
 {
-	/* Using the lower 4 bits as a memory index */
-	return ((flags) & 0xF);
+	/* Extract lower 8 bits for memory index (0-255 range)
+	 * Values 0-15: valid memory index
+	 * Values >=16: invalid memory index
+	 */
+	return ((flags) & 0xFF);
 }
