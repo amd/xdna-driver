@@ -14,18 +14,19 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
 				     struct xrs_action_load *load_act);
 
-static void cert_setup_partition(struct amdxdna_dev *xdna,struct amdxdna_ctx_priv *nhwctx,
-	u32 col, struct handshake* cert_hs)
+static void cert_setup_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *nhwctx,
+u32 col, struct handshake *cert_hs)
 {
 	u32 start_col = nhwctx->start_col;
 	u32 num_col = nhwctx->num_col;
 	u64 hsa_addr = 0xFFFFFFFFFFFFFFFF;
 	struct ve2_config_hwctx *hwctx_cfg = &nhwctx->hwctx_config[start_col + col];
-	if (col == 0) {
+
+	if (col == 0)
 		hsa_addr = nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr;
-	}
 
 	u32 lead_col_addr = VE2_ADDR(start_col, 0, 0);
+
 	cert_hs->partition_base_address = lead_col_addr;
 	cert_hs->aie_info.partition_size = num_col;
 	cert_hs->hsa_addr_high =  upper_32_bits(hsa_addr);
@@ -53,23 +54,24 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,struct amdxdna_ctx_pri
 
 static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols)
 {
-        if (!hs_data)
-                return;
+	if (!hs_data)
+		return;
 
 	for (u32 col = 0; col < max_cols; col++) {
-		if (hs_data[col].addr)
-			kfree(hs_data[col].addr);
+		kfree(hs_data[col].addr);
 		hs_data[col].addr = NULL;
 	}
-        kfree(hs_data);
-        hs_data = NULL;
+	kfree(hs_data);
+	hs_data = NULL;
 }
 
-static struct aie_op_handshake_data* ve2_prepare_hs_data(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *nhwctx, bool init)
+static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdna,
+struct amdxdna_ctx_priv *nhwctx, bool init)
 {
 	u32 num_col = nhwctx->num_col;
 	struct aie_op_handshake_data *hs_data;
-	hs_data = kmalloc(sizeof(struct aie_op_handshake_data) * num_col, GFP_KERNEL);
+
+	hs_data = kmalloc_array(num_col, sizeof(*hs_data), GFP_KERNEL);
 	if (!hs_data) {
 		XDNA_ERR(xdna, "No memory for handshake data allocation\n");
 		return NULL;
@@ -77,9 +79,9 @@ static struct aie_op_handshake_data* ve2_prepare_hs_data(struct amdxdna_dev *xdn
 	struct aie_location aie_loc;
 
 	for (u32 col = 0; col < num_col; col++) {
-		struct handshake* cert_hs;
-		aie_loc.col = col;
+		struct handshake *cert_hs;
 
+		aie_loc.col = col;
 		cert_hs = kmalloc(sizeof(*cert_hs), GFP_KERNEL);
 		if (!cert_hs) {
 			XDNA_ERR(xdna, "No memory for cert hs packet\n");
@@ -88,9 +90,9 @@ static struct aie_op_handshake_data* ve2_prepare_hs_data(struct amdxdna_dev *xdn
 			return NULL;
 		}
 		memset(cert_hs, 0, sizeof(*cert_hs));
-                if (init)
-                        cert_setup_partition(xdna, nhwctx, col, cert_hs);
-	
+		if (init)
+			cert_setup_partition(xdna, nhwctx, col, cert_hs);
+
 		hs_data[col].addr = (void *)cert_hs;
 		hs_data[col].size = sizeof(struct handshake);
 		hs_data[col].offset = 0x0;
@@ -265,26 +267,24 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 	hs_data = ve2_prepare_hs_data(xdna, nhwctx, true);
 	if (!hs_data) {
 		XDNA_ERR(xdna, "preparing cert handshake data failed: %d", ret);
-                return;
+		return;
 	}
 	nhwctx->args->handshake_cols = num_col;
 	nhwctx->args->handshake = (struct aie_op_handshake_data *)hs_data;
-        nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_HANDSHAKE | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) &
-                 ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+	nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_HANDSHAKE |
+		AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	XDNA_DBG(xdna, "Handshake init hwctx : %p\n", hwctx);
 	ret = ve2_partition_initialize(nhwctx->aie_dev, nhwctx->args);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
-                goto release_hs_data;
-		return;
+		goto release_hs_data;
 	}
 
-        for (int col = num_col - 1; col >= 0; col--) {
-                ve2_partition_uc_wakeup(nhwctx->aie_dev, col);
-        }
+	for (int col = num_col - 1; col >= 0; col--)
+		ve2_partition_uc_wakeup(nhwctx->aie_dev, col);
+
 release_hs_data:
 	ve2_free_hs_data(hs_data, num_col);
-
 }
 
 #define RR_SHARING BIT(0)
@@ -512,7 +512,7 @@ static void ve2_scheduler_work(struct work_struct *work)
 
 	spin_lock(&mgmtctx->ctx_lock);
 
-        /* Check if context is being destroyed */
+	/* Check if context is being destroyed */
 	if (!mgmtctx->active_ctx || !mgmtctx->active_ctx->priv) {
 		spin_unlock(&mgmtctx->ctx_lock);
 		return;
@@ -665,7 +665,7 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
 
 	if (mgmtctx->mgmtctx_workq && (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
-	    ve2_check_misc_interrupt(mgmtctx)))
+		ve2_check_misc_interrupt(mgmtctx)))
 		queue_work(mgmtctx->mgmtctx_workq, &mgmtctx->sched_work);
 }
 
@@ -709,7 +709,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		mgmtctx->args.num_tiles = 0;
 		nhwctx->args = &mgmtctx->args;
 		nhwctx->aie_dev = mgmtctx->mgmt_aiedev;
-                spin_lock_init(&mgmtctx->ctx_lock);
+		spin_lock_init(&mgmtctx->ctx_lock);
 		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 		/* Create workqueue for scheduling the command */
 		mgmtctx->mgmtctx_workq = create_workqueue("ve2_mgmtctx_scheduler");
@@ -814,6 +814,7 @@ static void cert_clear_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx_pr
 	u32 num_col = nhwctx->num_col;
 	int ret = 0;
 	struct aie_op_handshake_data *hs_data;
+
 	hs_data = ve2_prepare_hs_data(xdna, nhwctx, false);
 	if (!hs_data) {
 		XDNA_ERR(xdna, "No memory for hs_data\n");
@@ -857,19 +858,19 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 
 	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[start_col];
 	if (load_act.release_aie_part) {
-                struct workqueue_struct *wq = NULL;
-		cert_clear_partition(xdna, nhwctx);
+		struct workqueue_struct *wq = NULL;
 
+		cert_clear_partition(xdna, nhwctx);
 		spin_lock(&mgmtctx->ctx_lock);
 		/* Update the active context as partition doesn't exists any more */
 		mgmtctx->active_ctx = NULL;
-                wq = mgmtctx->mgmtctx_workq;
-                mgmtctx->mgmtctx_workq = NULL;
+		wq = mgmtctx->mgmtctx_workq;
+		mgmtctx->mgmtctx_workq = NULL;
 
 		spin_unlock(&mgmtctx->ctx_lock);
 
-                if (wq)
-                        destroy_workqueue(wq);
+		if (wq)
+			destroy_workqueue(wq);
 		aie_partition_teardown(nhwctx->aie_dev);
 		aie_partition_release(nhwctx->aie_dev);
 	} else {

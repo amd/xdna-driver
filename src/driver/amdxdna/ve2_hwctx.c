@@ -918,12 +918,12 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
-        struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
+	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_sched_job *job;
 	int idx;
 
-        if (enable_polling)
+	if (enable_polling)
 		del_timer_sync(&hwctx->priv->event_timer);
 
 	/*

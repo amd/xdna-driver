@@ -48,9 +48,10 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 
 	args.locs = NULL;
 	args.num_tiles = 0;
-        args.handshake_cols = 0;
-        args.handshake = NULL;
-        args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+	args.handshake_cols = 0;
+	args.handshake = NULL;
+	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
+	& ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	ret = ve2_partition_initialize(xaie_dev, &args);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
