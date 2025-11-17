@@ -155,7 +155,8 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 		xdna->num_cma_regions++;
 	}
 
-	platform_set_drvdata(pdev, xdna);
+	if (xdna->num_cma_regions == 0)
+		return -EINVAL;
 
 	return 0;
 }
