@@ -121,8 +121,6 @@ static inline int
 ve2_partition_initialize(struct device *dev,
 			 struct aie_partition_init_args *args)
 {
-	args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR) &
-		~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	return aie_partition_initialize(dev, args);
 }
 
