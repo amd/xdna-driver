@@ -185,7 +185,7 @@ int get_cma_mem_index(u64 flags)
 {
 	/* Extract lower 8 bits for memory index (0-255 range)
 	 * Values 0-15: valid memory index
-	 * Values >=16: invalid memory index
+	 * Values >=16: used to track invalid memory indexes
 	 */
 	return ((flags) & 0xFF);
 }

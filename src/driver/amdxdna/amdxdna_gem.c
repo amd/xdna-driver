@@ -787,16 +787,17 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 
 	mem_index = get_cma_mem_index(args->flags);
 
-	/* Try indexed allocation if mem_index is valid and region is initialized */
-	if (mem_index < xdna->num_cma_regions && is_valid_cma_region(xdna, mem_index)) {
-		dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[mem_index].dev, size);
+	/* Try indexed allocation with mem_index */
+	if (is_valid_cma_region(xdna, mem_index)) {
+		dma_buf = amdxdna_get_cma_buf(
+				xdna->cma_mem_regions[mem_index].dev, size);
 		if (!IS_ERR(dma_buf))
 			goto import_buf;
 
-		XDNA_DBG(xdna, "CMA region %d allocation failed, trying others\n",
+		XDNA_DBG(xdna, "CMA region %d failed, trying others\n",
 			 mem_index);
-	} else if (mem_index >= 0) {
-		XDNA_DBG(xdna, "Invalid CMA mem_index %d, trying other regions\n",
+	} else {
+		XDNA_DBG(xdna, "Invalid mem_index %d, trying other regions\n",
 			 mem_index);
 	}
 
@@ -805,7 +806,8 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 		if (i == mem_index || !is_valid_cma_region(xdna, i))
 			continue;
 
-		dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[i].dev, size);
+		dma_buf = amdxdna_get_cma_buf(
+				xdna->cma_mem_regions[i].dev, size);
 		if (!IS_ERR(dma_buf))
 			goto import_buf;
 	}
@@ -1038,7 +1040,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_gem_obj *abo;
 	int ret;
 
-	XDNA_INFO(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
+	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		  args->type, args->vaddr, args->size, args->flags);
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
