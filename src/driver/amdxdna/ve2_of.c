@@ -6,7 +6,6 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/xlnx-ai-engine.h>
-#include <linux/firmware.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/of_address.h>
 
@@ -86,6 +85,22 @@ out:
 	return ret;
 }
 
+static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
+{
+	int i;
+
+	for (i = 0; i < MAX_MEM_REGIONS; i++) {
+		struct amdxdna_cma_mem_region *region;
+
+		region = &xdna->cma_mem_regions[i];
+		if (region->initialized) {
+			of_reserved_mem_device_release(region->dev);
+			region->dev = NULL;
+			region->initialized = false;
+		}
+	}
+}
+
 static int
 ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 			struct platform_device *pdev)
@@ -110,6 +125,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 			XDNA_ERR(xdna,
 				 "Failed to alloc child_dev for cma region %d\n",
 				 i);
+			ve2_cma_mem_region_remove(xdna);
 			return -ENOMEM;
 		}
 
@@ -121,6 +137,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 		if (ret) {
 			XDNA_DBG(xdna,
 				 "Failed to set name for cma region %d\n", i);
+			devm_kfree(&pdev->dev, child_dev);
 			continue;
 		}
 
@@ -129,6 +146,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 		if (ret) {
 			XDNA_DBG(xdna,
 				 "Failed to init reserved cma region %d\n", i);
+			devm_kfree(&pdev->dev, child_dev);
 			continue;
 		}
 
@@ -140,21 +158,6 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 	xdna->num_cma_regions = num_regions;
 
 	return 0;
-}
-
-static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
-{
-	int i;
-
-	for (i = 0; i < MAX_MEM_REGIONS; i++) {
-		struct amdxdna_cma_mem_region *region = &xdna->cma_mem_regions[i];
-
-		if (region->initialized) {
-			of_reserved_mem_device_release(region->dev);
-			region->dev = NULL;
-			region->initialized = false;
-		}
-	}
 }
 
 static int ve2_init(struct amdxdna_dev *xdna)
@@ -207,7 +210,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	}
 
 	ret = ve2_cma_mem_region_init(xdna, pdev);
-	if (xdna->num_cma_regions > 0 && ret)
+	if (ret < 0)
 		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
 
 	return 0;
