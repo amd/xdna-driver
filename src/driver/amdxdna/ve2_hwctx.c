@@ -918,8 +918,32 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
+        struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
+	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_sched_job *job;
 	int idx;
+
+        if (enable_polling)
+		del_timer_sync(&hwctx->priv->event_timer);
+
+	/*
+	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work,
+	 * then cancel any pending work to ensure no work is accessing this context
+	 */
+	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[nhwctx->start_col];
+	spin_lock(&mgmtctx->ctx_lock);
+	if (mgmtctx->active_ctx == hwctx)
+		mgmtctx->active_ctx = NULL;
+	spin_unlock(&mgmtctx->ctx_lock);
+
+	/* Now cancel any pending work - it will see active_ctx as NULL and bail out */
+	if (mgmtctx->mgmtctx_workq)
+		cancel_work_sync(&mgmtctx->sched_work);
+
+	/*
+	 * Release jobs first to decrement BO refcounts, but they may not
+	 * be freed immediately if the application still holds references
+	 */
 
 	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
 		job = hwctx->priv->pending[idx];
@@ -928,9 +952,6 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 
 		ve2_hwctx_job_release(hwctx, job);
 	}
-
-	if (enable_polling)
-		del_timer_sync(&hwctx->priv->event_timer);
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_get_firmware_status(hwctx);
