@@ -14,48 +14,94 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
 				     struct xrs_action_load *load_act);
 
-static void cert_setup_partition(struct amdxdna_dev *xdna, struct device *aie_dev,
-				 struct ve2_config_hwctx *hwctx_cfg, u32 col,
-				 u32 lead_col, u32 partition_size,
-				 u64 hsa_addr)
+static void cert_setup_partition(struct amdxdna_dev *xdna,
+				 struct amdxdna_ctx_priv *nhwctx,
+				 u32 col, struct handshake *cert_hs)
 {
-	u32 lead_col_addr = VE2_ADDR(lead_col, 0, 0);
-	struct handshake cert_comm = { 0 };
+	u32 start_col = nhwctx->start_col;
+	u32 num_col = nhwctx->num_col;
+	u64 hsa_addr = 0xFFFFFFFFFFFFFFFF;
+	struct ve2_config_hwctx *hwctx_cfg = &nhwctx->hwctx_config[start_col + col];
 
-	cert_comm.partition_base_address = lead_col_addr;
-	cert_comm.aie_info.partition_size = partition_size;
-	cert_comm.hsa_addr_high =  upper_32_bits(hsa_addr);
-	cert_comm.hsa_addr_low =  lower_32_bits(hsa_addr);
+	if (col == 0)
+		hsa_addr = nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr;
 
-	/* Log Buffer */
-	cert_comm.log_addr_high = upper_32_bits(hwctx_cfg->log_buf_addr);
-	cert_comm.log_addr_low = lower_32_bits(hwctx_cfg->log_buf_addr);
-	cert_comm.log_buf_size = hwctx_cfg->log_buf_size;
+	u32 lead_col_addr = VE2_ADDR(start_col, 0, 0);
 
-	/* Debug Buffer */
-	cert_comm.dbg_buf.dbg_buf_addr_high = upper_32_bits(hwctx_cfg->debug_buf_addr);
-	cert_comm.dbg_buf.dbg_buf_addr_low = lower_32_bits(hwctx_cfg->debug_buf_addr);
-	cert_comm.dbg_buf.size = hwctx_cfg->debug_buf_size;
+	cert_hs->partition_base_address = lead_col_addr;
+	cert_hs->aie_info.partition_size = num_col;
+	cert_hs->hsa_addr_high =  upper_32_bits(hsa_addr);
+	cert_hs->hsa_addr_low =  lower_32_bits(hsa_addr);
+	cert_hs->log_addr_high = upper_32_bits(hwctx_cfg->log_buf_addr);
+	cert_hs->log_addr_low = lower_32_bits(hwctx_cfg->log_buf_addr);
+	cert_hs->log_buf_size = hwctx_cfg->log_buf_size;
+	cert_hs->dbg_buf.dbg_buf_addr_high = upper_32_bits(hwctx_cfg->debug_buf_addr);
+	cert_hs->dbg_buf.dbg_buf_addr_low = lower_32_bits(hwctx_cfg->debug_buf_addr);
+	cert_hs->dbg_buf.size = hwctx_cfg->debug_buf_size;
 
 	/* Dtrace Buffer */
-	cert_comm.trace.dtrace_addr_high = upper_32_bits(hwctx_cfg->dtrace_addr);
-	cert_comm.trace.dtrace_addr_low = lower_32_bits(hwctx_cfg->dtrace_addr);
+	cert_hs->trace.dtrace_addr_high = upper_32_bits(hwctx_cfg->dtrace_addr);
+	cert_hs->trace.dtrace_addr_low = lower_32_bits(hwctx_cfg->dtrace_addr);
 
 	/* Opcode Timeout */
-	cert_comm.opcode_timeout_config = hwctx_cfg->opcode_timeout_config;
+	cert_hs->opcode_timeout_config = hwctx_cfg->opcode_timeout_config;
 
-	cert_comm.ctx_switch_req = 0;
-	cert_comm.hsa_location = 0;
-	cert_comm.dbg.hsa_addr_high = 0xFFFFFFFF;
-	cert_comm.dbg.hsa_addr_low = 0xFFFFFFFF;
-	cert_comm.mpaie_alive = ALIVE_MAGIC;
+	cert_hs->ctx_switch_req = 0;
+	cert_hs->hsa_location = 0;
+	cert_hs->dbg.hsa_addr_high = 0xFFFFFFFF;
+	cert_hs->dbg.hsa_addr_low = 0xFFFFFFFF;
+	cert_hs->mpaie_alive = ALIVE_MAGIC;
+}
 
-	/* write to cert handshake shared memory */
-	ve2_partition_write_privileged_mem(aie_dev, col, 0,
-					   sizeof(cert_comm), (void *)&cert_comm);
+static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols)
+{
+	if (!hs_data)
+		return;
 
-	/* wake up cert */
-	ve2_partition_uc_wakeup(aie_dev, col);
+	for (u32 col = 0; col < max_cols; col++) {
+		kfree(hs_data[col].addr);
+		hs_data[col].addr = NULL;
+	}
+	kfree(hs_data);
+	hs_data = NULL;
+}
+
+static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdna,
+							 struct amdxdna_ctx_priv *nhwctx,
+							 bool init)
+{
+	struct aie_op_handshake_data *hs_data;
+	u32 num_col = nhwctx->num_col;
+	struct aie_location aie_loc;
+
+	hs_data = kmalloc_array(num_col, sizeof(*hs_data), GFP_KERNEL);
+	if (!hs_data) {
+		XDNA_ERR(xdna, "No memory for handshake data allocation\n");
+		return NULL;
+	}
+
+	for (u32 col = 0; col < num_col; col++) {
+		struct handshake *cert_hs;
+
+		aie_loc.col = col;
+		cert_hs = kmalloc(sizeof(*cert_hs), GFP_KERNEL);
+		if (!cert_hs) {
+			XDNA_ERR(xdna, "No memory for cert hs packet\n");
+			/* Free previously allocated handshakes */
+			ve2_free_hs_data(hs_data, col);
+			return NULL;
+		}
+		memset(cert_hs, 0, sizeof(*cert_hs));
+		if (init)
+			cert_setup_partition(xdna, nhwctx, col, cert_hs);
+
+		hs_data[col].addr = (void *)cert_hs;
+		hs_data[col].size = sizeof(struct handshake);
+		hs_data[col].offset = 0x0;
+		hs_data[col].loc = aie_loc;
+	}
+
+	return hs_data;
 }
 
 static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req, u32 num_col)
@@ -212,6 +258,7 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 			     struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
+	struct aie_op_handshake_data *hs_data;
 	u32 start_col;
 	u32 num_col;
 	int ret = 0;
@@ -219,29 +266,27 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 	start_col = nhwctx->start_col;
 	num_col = nhwctx->num_col;
 
+	hs_data = ve2_prepare_hs_data(xdna, nhwctx, true);
+	if (!hs_data) {
+		XDNA_ERR(xdna, "preparing cert handshake data failed ");
+		return;
+	}
+	nhwctx->args->handshake_cols = num_col;
+	nhwctx->args->handshake = (struct aie_op_handshake_data *)hs_data;
+	nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_HANDSHAKE |
+		AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	XDNA_DBG(xdna, "Handshake init hwctx : %p\n", hwctx);
 	ret = ve2_partition_initialize(nhwctx->aie_dev, nhwctx->args);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
-		return;
+		goto release_hs_data;
 	}
 
-	/* We should make sure the lead CERT has to start at last */
-	for (int col = num_col - 1; col >= 0; col--) {
-		u64 hsa_addr = 0xFFFFFFFFFFFFFFFF;
+	for (int col = num_col - 1; col >= 0; col--)
+		ve2_partition_uc_wakeup(nhwctx->aie_dev, col);
 
-		/*
-		 * Only lead cert(the first column[relative]) should be set with HSA Queue
-		 */
-		if (col == 0) {
-			hsa_addr = nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr;
-			XDNA_DBG(xdna, "hsa 0x%llx", hsa_addr);
-		}
-
-		cert_setup_partition(xdna, nhwctx->aie_dev,
-				     &nhwctx->hwctx_config[start_col + col], col,
-				     start_col, num_col, hsa_addr);
-	}
+release_hs_data:
+	ve2_free_hs_data(hs_data, num_col);
 }
 
 #define RR_SHARING BIT(0)
@@ -468,6 +513,13 @@ static void ve2_scheduler_work(struct work_struct *work)
 		container_of(work, struct amdxdna_mgmtctx, sched_work);
 
 	spin_lock(&mgmtctx->ctx_lock);
+
+	/* Check if context is being destroyed */
+	if (!mgmtctx->active_ctx || !mgmtctx->active_ctx->priv) {
+		spin_unlock(&mgmtctx->ctx_lock);
+		return;
+	}
+
 	/*
 	 * 3 case possible:
 	 * 1. it was completion interrupt but idle/queue_not_empty bit was set as cert moved forward
@@ -587,11 +639,13 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 
 	if (get_ctx_read_index(hwctx, &read_index)) {
 		XDNA_ERR(xdna, "Failed to get read index");
+		spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
 		return;
 	}
 
 	if (get_ctx_write_index(hwctx, &write_index)) {
 		XDNA_ERR(xdna, "Failed to get write index");
+		spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
 		return;
 	}
 
@@ -612,8 +666,8 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 
 	spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
 
-	if (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
-	    ve2_check_misc_interrupt(mgmtctx))
+	if (mgmtctx->mgmtctx_workq && (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
+				       ve2_check_misc_interrupt(mgmtctx)))
 		queue_work(mgmtctx->mgmtctx_workq, &mgmtctx->sched_work);
 }
 
@@ -657,6 +711,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		mgmtctx->args.num_tiles = 0;
 		nhwctx->args = &mgmtctx->args;
 		nhwctx->aie_dev = mgmtctx->mgmt_aiedev;
+		spin_lock_init(&mgmtctx->ctx_lock);
 		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 		/* Create workqueue for scheduling the command */
 		mgmtctx->mgmtctx_workq = create_workqueue("ve2_mgmtctx_scheduler");
@@ -755,12 +810,23 @@ static int ve2_xrs_release(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 	return xrs_release_resource(xdna->dev_handle->xrs_hdl, (uintptr_t)hwctx, load_act);
 }
 
-static void cert_clear_partition(struct amdxdna_dev *xdna, struct device *aie_dev, u32 col)
+static void cert_clear_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *nhwctx)
 {
-	struct handshake cert_comm = { 0 };
+	struct device *aie_dev = nhwctx->aie_dev;
+	u32 num_col = nhwctx->num_col;
+	int ret = 0;
+	struct aie_op_handshake_data *hs_data;
 
-	ve2_partition_write_privileged_mem(aie_dev, col, 0,
-					   sizeof(cert_comm), (void *)&cert_comm);
+	hs_data = ve2_prepare_hs_data(xdna, nhwctx, false);
+	if (!hs_data) {
+		XDNA_ERR(xdna, "No memory for hs_data\n");
+		return;
+	}
+
+	ret = aie_partition_handshake_update(aie_dev, hs_data, num_col);
+	if (ret < 0)
+		XDNA_ERR(xdna, "aie partition handshake update failed, ret: %d\n", ret);
+	ve2_free_hs_data(hs_data, num_col);
 }
 
 /**
@@ -779,7 +845,6 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	struct amdxdna_mgmtctx  *mgmtctx = NULL;
 	u32 start_col = nhwctx->start_col;
 	struct xrs_action_load load_act;
-	u32 num_col = nhwctx->num_col;
 	int ret;
 
 	if (!nhwctx->aie_dev) {
@@ -795,17 +860,21 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 
 	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[start_col];
 	if (load_act.release_aie_part) {
-		for (u32 col = 0; col < num_col; col++)
-			cert_clear_partition(xdna, nhwctx->aie_dev, col);
+		struct workqueue_struct *wq = NULL;
 
-		aie_partition_teardown(nhwctx->aie_dev);
-		aie_partition_release(nhwctx->aie_dev);
-
+		cert_clear_partition(xdna, nhwctx);
 		spin_lock(&mgmtctx->ctx_lock);
 		/* Update the active context as partition doesn't exists any more */
 		mgmtctx->active_ctx = NULL;
+		wq = mgmtctx->mgmtctx_workq;
+		mgmtctx->mgmtctx_workq = NULL;
+
 		spin_unlock(&mgmtctx->ctx_lock);
-		destroy_workqueue(mgmtctx->mgmtctx_workq);
+
+		if (wq)
+			destroy_workqueue(wq);
+		aie_partition_teardown(nhwctx->aie_dev);
+		aie_partition_release(nhwctx->aie_dev);
 	} else {
 		spin_lock(&mgmtctx->ctx_lock);
 		if (mgmtctx->active_ctx == hwctx)

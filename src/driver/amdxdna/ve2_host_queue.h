@@ -6,7 +6,6 @@
 #define HOST_QUEUE_ENTRY        32
 #define HOST_INDIRECT_PKT_NUM   36
 
-
 #define LAST_CMD (0)
 #define NOT_LAST_CMD (1)
 
