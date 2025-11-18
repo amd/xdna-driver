@@ -151,7 +151,6 @@ cd ../../../build
 ./build.sh -release
 
 # Build and install XDNA plugin package
-cd ..
 makepkg -p PKGBUILD-xrt-plugin
 sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
 
@@ -164,7 +163,7 @@ sudo bash -c 'echo "* hard memlock unlimited" >> /etc/security/limits.conf'
 
 **Note for Arch Linux users**: The build system generates `.tar.gz` packages which are repackaged into proper Arch packages (`.pkg.tar.zst`) using the provided PKGBUILDs:
 - XRT packages: `xrt/build/arch/` (PKGBUILD-xrt-base, PKGBUILD-xrt-npu)
-- XDNA driver: root directory (PKGBUILD-xrt-plugin)
+- XDNA driver: `build/` directory (PKGBUILD-xrt-plugin)
 
 This ensures proper integration with pacman for installation, upgrades, and removal.
 

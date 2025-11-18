@@ -11,8 +11,8 @@ provides=('xrt-plugin-amdxdna')
 conflicts=('amdxdna-driver' 'amdxdna-driver-bin')
 install=xrt-plugin-amdxdna.install
 
-# Set this to your xdna-driver build directory (relative to PKGBUILD location)
-: ${XDNA_BUILD_DIR:="build/Release"}
+# Set this to your xdna-driver build output directory (relative to PKGBUILD location)
+: ${XDNA_BUILD_DIR:="Release"}
 
 package() {
   cd "$srcdir"
