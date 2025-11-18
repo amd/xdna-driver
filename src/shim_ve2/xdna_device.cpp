@@ -755,7 +755,7 @@ create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type&
   if (mutable_qos.find("start_col") == mutable_qos.end())
     mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
 
-  auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, xclbin, mutable_qos);
+  auto hwctx_obj = std::make_unique<xdna_hwctx>(this, xclbin, mutable_qos);
 
   auto data = get_axlf_section(AIE_METADATA, xclbin_uuid);
 
