@@ -754,13 +754,36 @@ struct amdxdna_drm_get_dpt_state {
 };
 
 /**
- * struct amdxdna_drm_aie_coredump - The data for AIE coredump
- * @context_id: The hw context id
+ * struct amdxdna_drm_aie - The data for AIE memory/register read/write
+ * @pid: The Process ID of the process that created this context.
+ * @context_id: The hw context id.
+ * @col:   The AIE column index
+ * @row:   The AIE row index
+ * @addr:  The AIE memory address to read/write
+ * @size:  The size of bytes to read/write
  *
- * This is used for DRM_AMDXDNA_READ_AIE_COREDUMP parameters.
+ * This is used for DRM_AMDXDNA_AIE_READ and DRM_AMDXDNA_AIE_WRITE
+ * parameters.
+ */
+struct amdxdna_drm_aie {
+	__u64 pid;
+	__u32 context_id;
+	__u32 col;
+	__u32 row;
+	__u32 addr;
+	__u32 size;
+};
+
+/**
+ * struct amdxdna_drm_aie_coredump - The data for AIE coredump
+ * @context_id: The hw context id.
+ * @pid: The Process ID of the process that created this context.
+ *
+ * This is used for DRM_AMDXDNA_AIE_COREDUMP parameters.
  */
 struct amdxdna_drm_aie_coredump {
 	__u32 context_id;
+	__u64 pid;
 };
 
 /**
@@ -809,6 +832,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_BO_USAGE		6
 #define DRM_AMDXDNA_FW_LOG_CONFIG	7
 #define DRM_AMDXDNA_FW_TRACE_CONFIG	8
+#define DRM_AMDXDNA_AIE_READ		9
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
