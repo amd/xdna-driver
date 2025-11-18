@@ -67,18 +67,18 @@ static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols
 }
 
 static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdna,
-							  struct amdxdna_ctx_priv *nhwctx,
-							  bool init)
+							 struct amdxdna_ctx_priv *nhwctx,
+							 bool init)
 {
-	u32 num_col = nhwctx->num_col;
 	struct aie_op_handshake_data *hs_data;
+	u32 num_col = nhwctx->num_col;
+	struct aie_location aie_loc;
 
 	hs_data = kmalloc_array(num_col, sizeof(*hs_data), GFP_KERNEL);
 	if (!hs_data) {
 		XDNA_ERR(xdna, "No memory for handshake data allocation\n");
 		return NULL;
 	}
-	struct aie_location aie_loc;
 
 	for (u32 col = 0; col < num_col; col++) {
 		struct handshake *cert_hs;
@@ -258,17 +258,17 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 			     struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
+	struct aie_op_handshake_data *hs_data;
 	u32 start_col;
 	u32 num_col;
 	int ret = 0;
-	struct aie_op_handshake_data *hs_data;
 
 	start_col = nhwctx->start_col;
 	num_col = nhwctx->num_col;
 
 	hs_data = ve2_prepare_hs_data(xdna, nhwctx, true);
 	if (!hs_data) {
-		XDNA_ERR(xdna, "preparing cert handshake data failed: %d", ret);
+		XDNA_ERR(xdna, "preparing cert handshake data failed ");
 		return;
 	}
 	nhwctx->args->handshake_cols = num_col;
