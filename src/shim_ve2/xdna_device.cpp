@@ -786,7 +786,7 @@ create_hw_context(uint32_t partition_size,
   if (mutable_qos.find("start_col") == mutable_qos.end())
     mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
 
-  auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, partition_size, mutable_qos);
+  auto hwctx_obj = std::make_unique<xdna_hwctx>(this, partition_size, mutable_qos);
   // TODO : Get AIE_METADATA info from ELF and register aie array
 
   return hwctx_obj;
