@@ -14,8 +14,9 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
 				     struct xrs_action_load *load_act);
 
-static void cert_setup_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *nhwctx,
-u32 col, struct handshake *cert_hs)
+static void cert_setup_partition(struct amdxdna_dev *xdna,
+				 struct amdxdna_ctx_priv *nhwctx,
+				 u32 col, struct handshake *cert_hs)
 {
 	u32 start_col = nhwctx->start_col;
 	u32 num_col = nhwctx->num_col;
@@ -66,7 +67,8 @@ static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols
 }
 
 static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdna,
-struct amdxdna_ctx_priv *nhwctx, bool init)
+							  struct amdxdna_ctx_priv *nhwctx,
+							  bool init)
 {
 	u32 num_col = nhwctx->num_col;
 	struct aie_op_handshake_data *hs_data;
@@ -665,7 +667,7 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
 
 	if (mgmtctx->mgmtctx_workq && (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
-		ve2_check_misc_interrupt(mgmtctx)))
+				       ve2_check_misc_interrupt(mgmtctx)))
 		queue_work(mgmtctx->mgmtctx_workq, &mgmtctx->sched_work);
 }
 
