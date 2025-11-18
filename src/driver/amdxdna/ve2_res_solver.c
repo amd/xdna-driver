@@ -103,20 +103,31 @@ static inline struct partition_node *create_partition_node(u32 start_col, u32 nc
  * @col: Starting column
  * @ncols: Number of columns
  *
- * Returns: true if partition is free, false otherwise.
+ * Returns: true if partition is free (no bits set in the range), false otherwise.
  */
 static inline bool is_partition_free(struct solver_state *xrs, u32 col, u32 ncols)
 {
-	struct partition_node *pt_node;
+	/* Check if any bit in the requested range is already set */
+	for (u32 i = col; i < col + ncols; i++) {
+		if (test_bit(i, xrs->rgp.resbit))
+			return false;
+	}
 
-	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (pt_node->start_col == col && pt_node->ncols == ncols) {
-			for (u32 i = 0; i < ncols; i++) {
-				if (test_bit(col + i, xrs->rgp.resbit))
-					return false;
-			}
+	return true;
+}
+
+/**
+ * is_valid_start_col - Check if the requested start column is valid per XCLBIN metadata
+ * @snode: Solver node containing valid start columns from XCLBIN
+ * @col: Starting column to validate
+ *
+ * Returns: true if col is one of the valid start columns, false otherwise.
+ */
+static inline bool is_valid_start_col(struct solver_node *snode, u32 col)
+{
+	for (u32 i = 0; i < snode->cols_len; i++) {
+		if (snode->start_cols[i] == col)
 			return true;
-		}
 	}
 
 	return false;
@@ -159,6 +170,15 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 		}
 	} else {
 		col = req->rqos.user_start_col;
+
+		/* Validate that requested column is one of the valid start columns */
+		if (!is_valid_start_col(snode, col)) {
+			drm_err(xrs->cfg.ddev,
+				"Requested start col %u is not a valid start column for this partition\n",
+				col);
+			return -EINVAL;
+		}
+
 		if (!is_partition_free(xrs, col, ncols)) {
 			drm_err(xrs->cfg.ddev,
 				"Requested exclusive partition start col %u is not free\n", col);
@@ -215,22 +235,25 @@ static inline struct partition_node *find_least_used_partition(struct solver_sta
 }
 
 /**
- * is_exclusive_partition - Check if a partition at 'col' and 'ncols' is exclusive
+ * is_exclusive_partition - Check if any exclusive partition overlaps with the requested range
  * @xrs: Solver state pointer
  * @col: Starting column for the partition to check
  * @ncols: Number of columns in the partition
  *
- * Returns: true if a matching exclusive partition exists, false otherwise.
+ * Returns: true if any overlapping exclusive partition exists, false otherwise.
  */
 static inline bool is_exclusive_partition(struct solver_state *xrs, u32 col, u32 ncols)
 {
 	struct partition_node *pt_node;
+	u32 req_end = col + ncols;
 
 	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		if (pt_node->exclusive &&
-		    pt_node->start_col == col &&
-		    pt_node->ncols == ncols)
-			return true;
+		if (pt_node->exclusive) {
+			u32 pt_end = pt_node->start_col + pt_node->ncols;
+			/* Check if ranges overlap */
+			if (col < pt_end && req_end > pt_node->start_col)
+				return true;
+		}
 	}
 
 	return false;
@@ -277,6 +300,14 @@ static int allocate_partition_shared(struct solver_state *xrs,
 		}
 	} else {
 		candidate_col = req->rqos.user_start_col;
+
+		/* Validate that requested column is one of the valid start columns */
+		if (!is_valid_start_col(snode, candidate_col)) {
+			drm_err(xrs->cfg.ddev,
+				"Requested start col %u is not a valid start column for this partition\n",
+				candidate_col);
+			return -EINVAL;
+		}
 
 		/* Skip if this range is already exclusively allocated */
 		if (is_exclusive_partition(xrs, candidate_col, ncols)) {
