@@ -269,6 +269,8 @@ init_qos_info(const qos_type& qos)
       m_qos.frame_exec_time = value;
     else if (key == "priority")
       m_qos.priority = value;
+    else if (key == "start_col")
+      m_qos.user_start_col = value;
   }
 }
 

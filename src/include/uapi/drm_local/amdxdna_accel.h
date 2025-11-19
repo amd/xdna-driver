@@ -80,15 +80,19 @@ extern "C" {
 #define	AMDXDNA_QOS_LOW_PRIORITY	0x280
 /* The maximum number of priority */
 #define	AMDXDNA_NUM_PRIORITY		4
+/* user start column request or not */
+#define	USER_START_COL_NOT_REQUESTED	0xFF
 
 /**
- * struct qos_info - QoS information for driver.
+ * struct amdxdna_qos_info - QoS information for driver.
  * @gops: Giga operations per workload.
  * @fps: Workload per second.
- * @dma_bandwidth: DMA bandwidtha.
+ * @dma_bandwidth: DMA bandwidth.
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @user_start_col: User preferred start column, or USER_START_COL_NOT_REQUESTED if not specified.
+ * @reserved: Padding for 64-bit alignment (MBZ, reserved for future use).
  *
  * User program can provide QoS hints to driver.
  */
@@ -99,6 +103,8 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 user_start_col;
+	__u32 reserved; /* ensure 64-bit alignment */
 };
 
 /**

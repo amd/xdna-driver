@@ -182,6 +182,19 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	}
 
 	xrs_req->rqos.priority = hwctx->qos.priority;
+
+	/* Validate user_start_col if set */
+	if (hwctx->qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+		if (hwctx->qos.user_start_col >= xrs->cfg.total_col ||
+		    hwctx->qos.user_start_col + xrs_req->cdo.ncols > xrs->cfg.total_col) {
+			XDNA_ERR(xdna, "Invalid user_start_col: %u (ncols: %u, max: %u)",
+				 hwctx->qos.user_start_col, xrs_req->cdo.ncols, xrs->cfg.total_col);
+			mutex_unlock(&xrs->xrs_lock);
+			ret = -EINVAL;
+			goto free_start_cols;
+		}
+	}
+	xrs_req->rqos.user_start_col = hwctx->qos.user_start_col;
 	xrs_req->rid = (uintptr_t)hwctx;
 	ret = xrs_allocate_resource(xrs, xrs_req, &load_act);
 	if (ret) {
