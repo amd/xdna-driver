@@ -248,6 +248,7 @@ static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *q
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 
+	mutex_destroy(&queue->hq_lock);
 	if (queue->hsa_queue_p) {
 		dma_free_coherent(&pdev->dev,
 				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
@@ -396,6 +397,9 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 
 	WARN_ON(!is_power_of_2(nslots));
 	queue->hsa_queue_p->hq_header.capacity = nslots;
+
+	/* Initialize mutex here */
+	mutex_init(&queue->hq_lock);
 
 	XDNA_DBG(xdna, "created ve2 hsq queue with capacity %d slots", nslots);
 	return 0;
