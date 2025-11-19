@@ -58,12 +58,12 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 		goto release;
 	}
 
-	ret = aie_load_cert(xaie_dev, buf);
+	ret = aie_load_cert_broadcast(xaie_dev, buf);
 	if (ret) {
-		XDNA_ERR(xdna, "aie load cert failed %d", ret);
+		XDNA_ERR(xdna, "aie load cert broadcast failed %d", ret);
 		goto teardown;
 	}
-	XDNA_INFO(xdna, "aie load cert complete");
+	XDNA_INFO(xdna, "aie load cert broadcast complete");
 
 	ret = ve2_store_firmware_version(&xdna_hdl->fw_version, xaie_dev);
 	if (ret < 0) {
