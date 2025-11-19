@@ -486,7 +486,7 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
 		ret = ve2_get_array_hwctx(client, args);
 		break;
-	case DRM_AMDXDNA_AIE_READ:
+	case DRM_AMDXDNA_AIE_TILE_READ:
 		ret = ve2_aie_read(client, args);
 		break;
 	default:
@@ -512,7 +512,7 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
-	case DRM_AMDXDNA_AIE_WRITE:
+	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		ret = ve2_aie_write(client, args);
 		break;
 	default:

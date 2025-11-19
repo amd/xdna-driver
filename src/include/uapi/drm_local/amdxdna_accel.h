@@ -762,7 +762,7 @@ struct amdxdna_drm_get_dpt_state {
  * @addr:  The AIE memory address to read/write
  * @size:  The size of bytes to read/write
  *
- * This is used for DRM_AMDXDNA_AIE_READ and DRM_AMDXDNA_AIE_WRITE
+ * This is used for DRM_AMDXDNA_AIE_TILE_READ and DRM_AMDXDNA_AIE_TILE_WRITE
  * parameters.
  */
 struct amdxdna_drm_aie_tile_access {
@@ -834,7 +834,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_BO_USAGE		6
 #define DRM_AMDXDNA_FW_LOG_CONFIG	7
 #define DRM_AMDXDNA_FW_TRACE_CONFIG	8
-#define DRM_AMDXDNA_AIE_READ		9
+#define DRM_AMDXDNA_AIE_TILE_READ	9
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
@@ -867,7 +867,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT	4
 #define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
 #define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
-#define	DRM_AMDXDNA_AIE_WRITE			7
+#define	DRM_AMDXDNA_AIE_TILE_WRITE		7
 
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */

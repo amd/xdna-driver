@@ -388,7 +388,7 @@ struct aie_read
     aie_data->size = args.size;
 
     amdxdna_drm_get_array arg = {
-      .param = DRM_AMDXDNA_AIE_READ,
+      .param = DRM_AMDXDNA_AIE_TILE_READ,
       .element_size = static_cast<__u32>(payload.size()),
       .num_element = 1,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
@@ -439,7 +439,7 @@ struct aie_write
     aie_data->size = args.data.size();
 
     amdxdna_drm_set_state arg = {
-      .param = DRM_AMDXDNA_AIE_WRITE,
+      .param = DRM_AMDXDNA_AIE_TILE_WRITE,
       .buffer_size = static_cast<__u32>(payload.size()),
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
