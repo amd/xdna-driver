@@ -9,6 +9,7 @@
 #include <drm/drm_device.h>
 
 bool amdxdna_use_cma(void);
-struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev, size_t size);
+int get_cma_mem_index(u64 flags);
+struct dma_buf *amdxdna_get_cma_buf(struct device *dev, size_t size);
 
 #endif /* _AMDXDNA_CMA_BUF_H */
