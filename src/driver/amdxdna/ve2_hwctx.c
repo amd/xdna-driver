@@ -365,7 +365,6 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 
 	/* Initialize mutex here */
 	mutex_init(&queue->hq_lock);
-	
 	/* Set the base DMA address for hsa queue */
 	queue->hsa_queue_mem.dma_addr = dma_handle;
 
