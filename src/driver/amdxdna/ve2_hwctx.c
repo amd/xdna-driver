@@ -249,13 +249,13 @@ static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *q
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 
 	if (queue->hsa_queue_p) {
-		mutex_destroy(&queue->hq_lock);
 		dma_free_coherent(&pdev->dev,
 				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
 				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
 		queue->hsa_queue_mem.dma_addr = 0;
+		mutex_destroy(&queue->hq_lock);
 	}
 }
 
