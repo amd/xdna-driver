@@ -902,6 +902,13 @@ struct archive_path
         return std::string(get_shim_data_dir() + "bins/xrt_smi_strx.a");
       case xrt_core::smi::smi_hardware_config::hardware_type::phx:
         return std::string(get_shim_data_dir() + "bins/xrt_smi_phx.a");
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f1:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f2:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f3:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B01:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_npu3.a");
       default:
         throw xrt_core::error("Unsupported hardware type");
       }
@@ -1455,21 +1462,6 @@ struct xclbin_name
     case xrt_core::query::xclbin_name::type::validate_elf:
       xclbin_name = "validate_elf.xclbin";
       break;
-    case xrt_core::query::xclbin_name::type::gemm:
-      xclbin_name = "gemm.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::gemm_elf:
-      xclbin_name = "gemm_elf.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::preemption_4x4:
-      xclbin_name = "preemption_4x4.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::preemption_4x8:
-      xclbin_name = "preemption_4x8.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::mobilenet_elf:
-      xclbin_name = "mobilenet_4col.xclbin";
-      break;
     }
 
     return get_shim_data_dir() + boost::str(boost::format("bins/%04x_%02x/%s")
@@ -1478,41 +1470,6 @@ struct xclbin_name
       % xclbin_name);
   }
 };
-struct mobilenet
-{
-  using result_type = std::any;
-
-  static result_type
-  get(const xrt_core::device* /*device*/, key_type key)
-  {
-    throw xrt_core::query::no_such_key(key, "Not implemented");
-  }
-
-  static result_type
-  get(const xrt_core::device* /*device*/, key_type key, const std::any& reqType)
-  {
-    if (key != key_type::mobilenet)
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-
-    std::string bin_name;
-    const auto req_type = std::any_cast<xrt_core::query::mobilenet::type>(reqType);
-    switch (req_type) {
-    case xrt_core::query::mobilenet::type::mobilenet_ifm:
-      bin_name = "mobilenet_ifm.bin";
-      break;
-    case xrt_core::query::mobilenet::type::mobilenet_param:
-      bin_name = "mobilenet_param.bin";
-      break;
-    case xrt_core::query::mobilenet::type::buffer_sizes:
-      bin_name = "buffer_sizes.json";
-      break;
-    default:
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-    }
-    return get_shim_data_dir() + boost::str(boost::format("bins/Mobilenet/%s") % bin_name);
-  }
-};
-
 
 struct elf_name
 {
@@ -1534,21 +1491,6 @@ struct elf_name
     switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
     case xrt_core::query::elf_name::type::nop:
       elf_file = "nop.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_noop_4x4:
-      elf_file = "preemption_noop_4x4.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_noop_4x8:
-      elf_file = "preemption_noop_4x8.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_memtile_4x4:
-      elf_file = "preemption_memtile_4x4.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_memtile_4x8:
-      elf_file = "preemption_memtile_4x8.elf";
-      break;
-    case xrt_core::query::elf_name::type::mobilenet:
-      elf_file = "mobilenet_4col.elf";
       break;
     }
 
@@ -1732,7 +1674,6 @@ initialize_query_table()
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
   emplace_func1_request<query::elf_name,                       elf_name>();
-  emplace_func1_request<query::mobilenet,                      mobilenet>();
   emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
