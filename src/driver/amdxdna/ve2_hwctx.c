@@ -254,6 +254,8 @@ static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *q
 				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
+		queue->hsa_queue_mem.dma_addr = 0;
+		mutex_destroy(&queue->hq_lock);
 	}
 }
 
@@ -361,6 +363,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	if (!queue->hsa_queue_p)
 		return -ENOMEM;
 
+	/* Initialize mutex here */
+	mutex_init(&queue->hq_lock);
 	/* Set the base DMA address for hsa queue */
 	queue->hsa_queue_mem.dma_addr = dma_handle;
 
