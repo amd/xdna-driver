@@ -1276,7 +1276,6 @@ aie2_cmdlist_get_cmd_buf(struct amdxdna_sched_job *job)
 	return job->ctx->priv->cmd_buf[idx];
 }
 
-
 int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, void __iomem *, size_t))
 {
