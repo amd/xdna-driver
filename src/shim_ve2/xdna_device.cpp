@@ -378,8 +378,8 @@ struct aie_read
     const auto& args = std::any_cast<const query::aie_read::args&>(args_any);
 
     // Initial payload: data buffer + aie_data structure at the end
-    std::vector<char> payload(args.size + sizeof(amdxdna_drm_aie));
-    amdxdna_drm_aie *aie_data = reinterpret_cast<amdxdna_drm_aie *>(payload.data() + args.size);
+    std::vector<char> payload(args.size + sizeof(amdxdna_drm_aie_tile_access));
+    amdxdna_drm_aie_tile_access *aie_data = reinterpret_cast<amdxdna_drm_aie_tile_access *>(payload.data() + args.size);
     aie_data->pid = static_cast<__u64>(args.pid);
     aie_data->context_id = static_cast<__u32>(args.context_id);
     aie_data->col = static_cast<__u32>(args.col);
@@ -401,6 +401,53 @@ struct aie_read
     payload.resize(args.size);
 
     return payload;
+  }
+};
+
+// Implement aie_write query
+struct aie_write
+{
+  using result_type = size_t;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
+  {
+    if (key != key_type::aie_write)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& args = std::any_cast<const query::aie_write::args&>(args_any);
+
+    // Initial payload: data buffer + aie_data structure at the end
+    std::vector<char> payload(args.data.size() + sizeof(amdxdna_drm_aie_tile_access));
+
+    // Copy data to payload
+    std::memcpy(payload.data(), args.data.data(), args.data.size());
+
+    // Add metadata at the end
+    amdxdna_drm_aie_tile_access *aie_data = reinterpret_cast<amdxdna_drm_aie_tile_access *>(payload.data() + args.data.size());
+    aie_data->pid = static_cast<__u64>(args.pid);
+    aie_data->context_id = static_cast<__u32>(args.context_id);
+    aie_data->col = static_cast<__u32>(args.col);
+    aie_data->row = static_cast<__u32>(args.row);
+    aie_data->addr = args.offset;
+    aie_data->size = args.data.size();
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_WRITE_AIE_REG_MEM,
+      .buffer_size = static_cast<__u32>(payload.size()),
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+
+    return args.data.size();
   }
 };
 
@@ -725,6 +772,7 @@ initialize_query_table()
   emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func1_request<query::aie_read,                aie_read>();
+  emplace_func1_request<query::aie_write,               aie_write>();
   emplace_func2_request<query::aie_coredump,            aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
