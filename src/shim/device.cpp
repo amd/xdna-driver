@@ -1609,8 +1609,6 @@ initialize_query_table()
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
-  emplace_func1_request<query::elf_name,                       elf_name>();
-  emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
   emplace_func1_request<query::firmware_version,               firmware_version>();
