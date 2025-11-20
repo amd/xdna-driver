@@ -163,7 +163,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
-	XDNA_DBG(xdna, "AIE write request received for context_id = %u, col = %u, row = %u, addr = 0x%x, size = %u\n",
+	XDNA_DBG(xdna, "Write request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u\n",
 		 footer.context_id, footer.col, footer.row, footer.addr, footer.size);
 
 	/* Find the hardware context */
@@ -179,7 +179,8 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id, footer.pid);
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+			 footer.pid);
 		return -EINVAL;
 	}
 
@@ -252,7 +253,7 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 		return -EFAULT;
 	}
 
-	XDNA_DBG(xdna, "AIE read request received for context_id = %u, col = %u, row = %u, addr = 0x%x, size = %u\n",
+	XDNA_DBG(xdna, "Read request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u\n",
 		 footer.context_id, footer.col, footer.row, footer.addr, footer.size);
 
 	/* Find the hardware context */
@@ -268,7 +269,8 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id, footer.pid);
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+			 footer.pid);
 		return -EINVAL;
 	}
 
@@ -356,7 +358,8 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id, footer.pid);
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+			 footer.pid);
 		return -EINVAL;
 	}
 
