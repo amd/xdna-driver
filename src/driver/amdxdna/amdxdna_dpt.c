@@ -401,7 +401,7 @@ static int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 
 static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt, struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_dpt_metadata footer = {};
+	struct amdxdna_dpt_metadata data = {};
 	struct amdxdna_dev *xdna = dpt->xdna;
 	u32 buf_size, offset;
 	void __user *buf;
@@ -415,44 +415,59 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt, struct amdxdna_drm_get_
 		return -EFAULT;
 	}
 
-	offset = buf_size - sizeof(footer);
-	if (copy_from_user(&footer, buf + offset, sizeof(footer)))
+	offset = buf_size - sizeof(data);
+	if (copy_from_user(&data, buf + offset, sizeof(data)))
 		return -EFAULT;
 
-	XDNA_DBG(xdna, "%s requested at offset 0x%llx with watch %s", dpt->name, footer.offset,
-		 footer.watch ? "on" : "off");
+	XDNA_DBG(xdna, "%s requested at offset 0x%llx with watch %s", dpt->name, data.offset,
+		 data.watch ? "on" : "off");
 
-	if (footer.offset == READ_ONCE(dpt->tail)) {
-		if (footer.watch) {
-			ret = wait_event_interruptible(dpt->wait,
-						       footer.offset != READ_ONCE(dpt->tail));
-			if (ret) {
-				XDNA_WARN(xdna, "%s wait for data interrupted by signal: %d",
-					  dpt->name, ret);
-				footer.size = 0;
+	if (data.offset == READ_ONCE(dpt->tail)) {
+		if (!data.watch) {
+			data.size = 0;
+			goto exit;
+		}
+
+		/* Wait up to 500ms; on timeout, requeue work and keep waiting */
+		while (data.offset == READ_ONCE(dpt->tail)) {
+			ret = wait_event_interruptible_timeout(dpt->wait,
+							       data.offset != READ_ONCE(dpt->tail),
+							       msecs_to_jiffies(500));
+
+			if (ret == 0) {
+				/* Timed out; requeue work and try again */
+#if KERNEL_VERSION(6, 17, 0) > LINUX_VERSION_CODE
+				queue_work(system_wq, &dpt->work);
+#else
+				queue_work(system_percpu_wq, &dpt->work);
+#endif
+				continue;
+			} else if (ret < 0) {
+				/* Interrupted by signal */
+				XDNA_DBG(xdna, "%s wait for data interrupted by signal: %d",
+					 dpt->name, ret);
+				data.size = 0;
 				ret = -EINTR;
 				goto exit;
 			}
-		} else {
-			footer.size = 0;
-			goto exit;
+			/* ret > 0 means condition met; loop will exit */
 		}
 	}
 
-	ret = amdxdna_dpt_fetch_payload(dpt, buf, &footer.offset, &footer.size, true);
+	ret = amdxdna_dpt_fetch_payload(dpt, buf, &data.offset, &data.size, true);
 	if (ret) {
 		XDNA_ERR(xdna, "%s failed to fetch FW buffer: %d", dpt->name, ret);
-		footer.offset = 0;
-		footer.size = 0;
+		data.offset = 0;
+		data.size = 0;
 		ret = -EINVAL;
 	}
 
 exit:
-	if (copy_to_user(buf + offset, &footer, sizeof(footer)))
+	if (copy_to_user(buf + offset, &data, sizeof(data)))
 		return -EFAULT;
 
-	XDNA_DBG(xdna, "%s returned with size 0x%x offset 0x%llx", dpt->name, footer.size,
-		 footer.offset);
+	XDNA_DBG(xdna, "%s returned with size 0x%x offset 0x%llx", dpt->name, data.size,
+		 data.offset);
 	return ret;
 }
 
