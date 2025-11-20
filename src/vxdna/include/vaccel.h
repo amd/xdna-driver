@@ -2,7 +2,7 @@
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 /**
- * @file vaccelh
+ * @file vaccel.h
  * @brief virtual accelerator host backend library public API
  *
  * Multi-device with cookie-based device management, per-device

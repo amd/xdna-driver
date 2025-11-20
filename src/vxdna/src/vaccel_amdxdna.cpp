@@ -17,13 +17,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/sysmacros.h>
 #include <errno.h>
 #include <vector>
 
 #include <drm/drm.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#ifdef __linux__
+#include <sys/sysmacros.h>
+#else
+#error "non-Linux platform not supported"
+#endif
 
 #include "drm_local/amdxdna_accel.h"
 #include "amdxdna_proto.h"
@@ -911,7 +915,7 @@ void
 vxdna::
 dispatch_ccmd(std::shared_ptr<vxdna_context> &ctx, const struct vdrm_ccmd_req *hdr)
 {
-    if (hdr->cmd > ARRAY_SIZE(amdxdna_ccmd_dispatch_table))
+    if (!hdr->cmd || hdr->cmd > ARRAY_SIZE(amdxdna_ccmd_dispatch_table))
         VACCEL_THROW_MSG(-EINVAL, "invalid cmd: %u", hdr->cmd);
 
     const struct amdxdna_ccmd_dispatch_entry *ccmd = &amdxdna_ccmd_dispatch_table[hdr->cmd - 1];
