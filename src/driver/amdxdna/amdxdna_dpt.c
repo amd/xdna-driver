@@ -18,7 +18,7 @@
 #include "amdxdna_dpt.h"
 #include "aie2_msg_priv.h"
 
-static u8 fw_log_level = 1;
+static u8 fw_log_level = 2;
 module_param(fw_log_level, byte, 0444);
 MODULE_PARM_DESC(fw_log_level,
 		 " Firmware log verbosity: 0: DISABLE 1: ERROR (Default) 2: WARN 3: INFO 4: DEBUG");
