@@ -322,8 +322,10 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>&
     auto info = get_bdf_info(i);
     auto bdf = bdf_info2str(info);
     std::cout << "device[" << i << "]: " << bdf << std::endl;
-    auto devid = get_device_id(bdf);
-    std::cout << "device[" << bdf << "]: " << devid << std::endl;
+    auto dev = get_userpf_device(i);
+    auto devid = device_query<query::pcie_device>(dev);
+    std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
+
   }
 }
 
