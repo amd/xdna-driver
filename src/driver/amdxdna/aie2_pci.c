@@ -1108,8 +1108,6 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
-	priv->hw_ops.get_tops(ndev, &tops_max, &tops_curr);
-
 	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
 	res_info.npu_tops_max = tops_max;
 	res_info.npu_task_max = priv->hwctx_limit;
