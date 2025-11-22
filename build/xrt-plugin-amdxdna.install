@@ -49,7 +49,7 @@ pre_remove() {
   dracut_conf_file=amdxdna.dracut.conf
 
   # Unload kernel module
-  if lsmod | grep -q "amdxdna "; then
+  if lsmod | grep -q "amdxdna"; then
     rmmod amdxdna
   fi
 
