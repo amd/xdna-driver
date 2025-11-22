@@ -39,7 +39,8 @@ struct aie_qos {
 	u32		latency;	/* Frame response latency */
 	u32		exec_time;	/* Frame execution time */
 	u32		priority;	/* Request priority */
-	u32             exclusive;      /* Exclusive Request or not */
+	u32		exclusive;      /* Exclusive Request or not */
+	u32		user_start_col; /* Start Col Requested by user */
 };
 
 /*

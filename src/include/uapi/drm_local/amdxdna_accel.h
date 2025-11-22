@@ -80,15 +80,19 @@ extern "C" {
 #define	AMDXDNA_QOS_LOW_PRIORITY	0x280
 /* The maximum number of priority */
 #define	AMDXDNA_NUM_PRIORITY		4
+/* user start column request or not */
+#define	USER_START_COL_NOT_REQUESTED	0xFF
 
 /**
- * struct qos_info - QoS information for driver.
+ * struct amdxdna_qos_info - QoS information for driver.
  * @gops: Giga operations per workload.
  * @fps: Workload per second.
- * @dma_bandwidth: DMA bandwidtha.
+ * @dma_bandwidth: DMA bandwidth.
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @user_start_col: User preferred start column, or USER_START_COL_NOT_REQUESTED if not specified.
+ * @reserved: Padding for 64-bit alignment (MBZ, reserved for future use).
  *
  * User program can provide QoS hints to driver.
  */
@@ -99,6 +103,8 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 user_start_col;
+	__u32 reserved; /* ensure 64-bit alignment */
 };
 
 /**
@@ -748,13 +754,38 @@ struct amdxdna_drm_get_dpt_state {
 };
 
 /**
- * struct amdxdna_drm_aie_coredump - The data for AIE coredump
- * @context_id: The hw context id
+ * struct amdxdna_drm_aie_tile_access - The data for AIE memory/register read/write
+ * @pid: The Process ID of the process that created this context.
+ * @context_id: The hw context id.
+ * @col:   The AIE column index
+ * @row:   The AIE row index
+ * @addr:  The AIE memory address to read/write
+ * @size:  The size of bytes to read/write
  *
- * This is used for DRM_AMDXDNA_READ_AIE_COREDUMP parameters.
+ * This is used for DRM_AMDXDNA_AIE_TILE_READ and DRM_AMDXDNA_AIE_TILE_WRITE
+ * parameters.
+ */
+struct amdxdna_drm_aie_tile_access {
+	__u64 pid;
+	__u32 context_id;
+	__u32 col;
+	__u32 row;
+	__u32 addr;
+	__u32 size;
+	__u32 pad;
+};
+
+/**
+ * struct amdxdna_drm_aie_coredump - The data for AIE coredump
+ * @pid: The Process ID of the process that created this context.
+ * @context_id: The hw context id.
+ *
+ * This is used for DRM_AMDXDNA_AIE_COREDUMP parameters.
  */
 struct amdxdna_drm_aie_coredump {
+	__u64 pid;
 	__u32 context_id;
+	__u32 pad;
 };
 
 /**
@@ -803,6 +834,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_BO_USAGE		6
 #define DRM_AMDXDNA_FW_LOG_CONFIG	7
 #define DRM_AMDXDNA_FW_TRACE_CONFIG	8
+#define DRM_AMDXDNA_AIE_TILE_READ	9
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
@@ -835,6 +867,8 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT	4
 #define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
 #define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
+#define	DRM_AMDXDNA_AIE_TILE_WRITE		7
+
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

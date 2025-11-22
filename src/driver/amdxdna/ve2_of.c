@@ -48,18 +48,22 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 
 	args.locs = NULL;
 	args.num_tiles = 0;
+	args.handshake_cols = 0;
+	args.handshake = NULL;
+	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
+	& ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	ret = ve2_partition_initialize(xaie_dev, &args);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release;
 	}
 
-	ret = aie_load_cert(xaie_dev, buf);
+	ret = aie_load_cert_broadcast(xaie_dev, buf);
 	if (ret) {
-		XDNA_ERR(xdna, "aie load cert failed %d", ret);
+		XDNA_ERR(xdna, "aie load cert broadcast failed %d", ret);
 		goto teardown;
 	}
-	XDNA_INFO(xdna, "aie load cert complete");
+	XDNA_INFO(xdna, "aie load cert broadcast complete");
 
 	ret = ve2_store_firmware_version(&xdna_hdl->fw_version, xaie_dev);
 	if (ret < 0) {
