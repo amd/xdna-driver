@@ -269,22 +269,11 @@ static void amdxdna_dpt_timer(struct timer_list *t)
 #else
 	queue_work(system_percpu_wq, &dpt->work);
 #endif
-	mod_timer(&dpt->timer, jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
-}
 
-static void amdxdna_dpt_enable_polling(struct amdxdna_dpt *dpt, bool enable)
-{
-	if (dpt->polling == enable)
-		return;
-
-	if (enable) {
-		timer_setup(&dpt->timer, amdxdna_dpt_timer, 0);
-		mod_timer(&dpt->timer, jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
-	} else {
-		timer_delete_sync(&dpt->timer);
-		cancel_work_sync(&dpt->work);
-	}
-	dpt->polling = enable;
+	/* Only rearm timer if there are active users (timer_users > 0) */
+	if (atomic_read(&dpt->timer_users) > 0)
+		mod_timer(&dpt->timer,
+			  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
 }
 
 static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
@@ -333,8 +322,10 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	log_hdl->xdna = xdna;
 	log_hdl->tail = 0;
 	log_hdl->head = 0;
+	atomic_set(&log_hdl->timer_users, 0);
 	init_waitqueue_head(&log_hdl->wait);
 	INIT_WORK(&log_hdl->work, amdxdna_dpt_worker);
+	timer_setup(&log_hdl->timer, amdxdna_dpt_timer, 0);
 	xdna->fw_log = log_hdl;
 
 	ret = xdna->dev_info->ops->fw_log_init(xdna, fw_log_size, fw_log_level);
@@ -351,9 +342,12 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to init FW logging IRQ: %d", ret);
 
-	/* Enable polling, if IRQ initialization fails or enabled by default */
-	if (ret || poll_fw_log)
-		amdxdna_dpt_enable_polling(log_hdl, true);
+	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
+	if (ret || poll_fw_log) {
+		atomic_inc(&log_hdl->timer_users);
+		mod_timer(&log_hdl->timer,
+			  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
+	}
 
 	amdxdna_dpt_read_metadata(log_hdl);
 
@@ -388,8 +382,9 @@ static int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Failed to disable FW logging: %d", ret);
 
 	amdxdna_dpt_irq_fini(log_hdl);
-	amdxdna_dpt_enable_polling(log_hdl, false);
 	amdxdna_dpt_dump_to_dmesg(log_hdl, false);
+	timer_delete_sync(&log_hdl->timer);
+	cancel_work_sync(&log_hdl->work);
 	amdxdna_mgmt_buff_free(log_hdl->dma_hdl);
 	kfree(log_hdl);
 	xdna->fw_log = NULL;
@@ -424,8 +419,17 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt, struct amdxdna_drm_get_
 
 	if (footer.offset == READ_ONCE(dpt->tail)) {
 		if (footer.watch) {
+			/* Increment timer_users and arm timer if transitioning from 0 to 1 */
+			if (atomic_inc_return(&dpt->timer_users) == 1)
+				mod_timer(&dpt->timer,
+					  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
+
 			ret = wait_event_interruptible(dpt->wait,
 						       footer.offset != READ_ONCE(dpt->tail));
+
+			/* Decrement timer_users - timer won't rearm when it reaches 0 */
+			atomic_dec(&dpt->timer_users);
+
 			if (ret) {
 				XDNA_WARN(xdna, "%s wait for data interrupted by signal: %d",
 					  dpt->name, ret);
@@ -502,8 +506,10 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
 	trace_hdl->xdna = xdna;
 	trace_hdl->tail = 0;
 	trace_hdl->head = 0;
+	atomic_set(&trace_hdl->timer_users, 0);
 	init_waitqueue_head(&trace_hdl->wait);
 	INIT_WORK(&trace_hdl->work, amdxdna_dpt_worker);
+	timer_setup(&trace_hdl->timer, amdxdna_dpt_timer, 0);
 	xdna->fw_trace = trace_hdl;
 
 	ret = xdna->dev_info->ops->fw_trace_init(xdna, fw_trace_size, fw_trace_categories);
@@ -520,9 +526,12 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to init FW trace IRQ: %d", ret);
 
-	/* Enable polling, if IRQ initialization fails or enabled by default */
-	if (ret || poll_fw_trace)
-		amdxdna_dpt_enable_polling(trace_hdl, true);
+	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
+	if (ret || poll_fw_trace) {
+		atomic_inc(&trace_hdl->timer_users);
+		mod_timer(&trace_hdl->timer,
+			  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
+	}
 
 	amdxdna_dpt_read_metadata(trace_hdl);
 
@@ -557,8 +566,9 @@ static int amdxdna_fw_trace_fini(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Failed to disable FW trace: %d", ret);
 
 	amdxdna_dpt_irq_fini(trace_hdl);
-	amdxdna_dpt_enable_polling(trace_hdl, false);
 	amdxdna_dpt_dump_to_dmesg(trace_hdl, false);
+	timer_delete_sync(&trace_hdl->timer);
+	cancel_work_sync(&trace_hdl->work);
 	amdxdna_mgmt_buff_free(trace_hdl->dma_hdl);
 	kfree(trace_hdl);
 	xdna->fw_trace = NULL;
@@ -579,12 +589,18 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
 			XDNA_ERR(dpt->xdna, "Failed to allocate FW fetch buffer");
 			return -ENOMEM;
 		}
-		amdxdna_dpt_enable_polling(dpt, true);
+
+		/* Increment timer_users and arm timer if transitioning from 0 to 1 */
+		if (atomic_inc_return(&dpt->timer_users) == 1)
+			mod_timer(&dpt->timer,
+				  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
+
 		/* Drain any data already logged in the buffer before dump_to_dmesg was enabled */
 		amdxdna_dpt_drain_pending_data(dpt);
 	} else {
-		if (!poll_fw_log)
-			amdxdna_dpt_enable_polling(dpt, false);
+		/* Decrement timer_users - timer will not rearm itself when it reaches 0 */
+		atomic_dec(&dpt->timer_users);
+
 		kfree(dpt->local_buffer);
 		dpt->head = 0;
 	}

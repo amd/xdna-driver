@@ -39,7 +39,6 @@ struct amdxdna_dpt {
 	struct amdxdna_dev		*xdna;
 	struct amdxdna_mgmt_dma_hdl	*dma_hdl;
 	struct wait_queue_head		wait;
-	bool				polling;
 	struct work_struct		work;
 	struct timer_list		timer;
 	void			__iomem *io_base;
@@ -47,6 +46,7 @@ struct amdxdna_dpt {
 	u32				msi_idx;
 	u32				msi_address;
 	u64				tail;
+	atomic_t			timer_users;
 
 	/* Below members are required only until dumping to dmesg is supported */
 	bool				dump_to_dmesg;
