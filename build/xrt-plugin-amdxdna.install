@@ -12,7 +12,7 @@ post_install() {
     if [ ! -f ${dracut_conf_d}/${dracut_conf_file} ]; then
       touch ${dracut_conf_d}/${dracut_conf_file}
     fi
-    echo "omit_drivers+=\" amdxdna \"" > ${dracut_conf_d}/${dracut_conf_file}
+    grep -q '^omit_drivers\+=\" amdxdna \"' "${dracut_conf_d}/${dracut_conf_file}" || echo 'omit_drivers+=" amdxdna "' >> "${dracut_conf_d}/${dracut_conf_file}"
   fi
 
   # Install DKMS module
