@@ -24,7 +24,8 @@ post_install() {
   if [ ! -f ${udev_rules_d}/${amdxdna_rules_file} ]; then
     touch ${udev_rules_d}/${amdxdna_rules_file}
   fi
-  echo 'KERNEL=="accel*",DRIVERS=="amdxdna",MODE="0666"' > ${udev_rules_d}/${amdxdna_rules_file}
+  grep -q '^KERNEL=="accel\*",DRIVERS=="amdxdna",MODE="0666"$' ${udev_rules_d}/${amdxdna_rules_file} || \
+    echo 'KERNEL=="accel*",DRIVERS=="amdxdna",MODE="0666"' >> ${udev_rules_d}/${amdxdna_rules_file}
 
   # Load the kernel module
   echo "Loading amdxdna kernel module..."
