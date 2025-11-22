@@ -7,7 +7,7 @@ post_install() {
   dracut_conf_d=/etc/dracut.conf.d
   dracut_conf_file=amdxdna.dracut.conf
 
-  # On systems with dracut, exclude driver from initram
+  # On systems with dracut, exclude driver from initramfs
   if [ -e ${dracut_conf_d} ]; then
     if [ ! -f ${dracut_conf_d}/${dracut_conf_file} ]; then
       touch ${dracut_conf_d}/${dracut_conf_file}
