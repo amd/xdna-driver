@@ -221,7 +221,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	}
 
 	/* Write to AIE memory */
-	ret = ve2_partition_write(aie_dev, footer.col , footer.row, footer.addr,
+	ret = ve2_partition_write(aie_dev, footer.col, footer.row, footer.addr,
 				  footer.size, local_buf);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Error in AIE memory write operation, err: %d\n", ret);
