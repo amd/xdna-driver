@@ -221,7 +221,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	}
 
 	/* Write to AIE memory */
-	ret = ve2_partition_write(aie_dev, footer.col + hwctx->start_col, footer.row, footer.addr,
+	ret = ve2_partition_write(aie_dev, footer.col, footer.row, footer.addr,
 				  footer.size, local_buf);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Error in AIE memory write operation, err: %d\n", ret);
@@ -304,7 +304,7 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 		return -ENOMEM;
 
 	/* Read from AIE memory */
-	ret = ve2_partition_read(aie_dev, footer.col + hwctx->start_col, footer.row, footer.addr,
+	ret = ve2_partition_read(aie_dev, footer.col, footer.row, footer.addr,
 				 footer.size, local_buf);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Error in AIE memory read operation, err: %d\n", ret);
