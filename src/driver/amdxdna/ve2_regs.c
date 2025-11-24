@@ -7,7 +7,7 @@
 #include "ve2_of.h"
 
 const struct amdxdna_dev_priv ve2_dev_priv = {
-	.fw_path	= "amdnpu/cert_ve2.elf",
+	.fw_path	= "amdnpu/release_cert_ve2.elf",
 	.hwctx_limit	= 255,
 	.ctx_limit	= 255,
 };
