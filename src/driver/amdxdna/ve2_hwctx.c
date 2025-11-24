@@ -405,7 +405,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	return 0;
 }
 
-static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
+static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq,
+				   bool last_cmd)
 {
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -436,6 +437,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
 	hdr->common_header.count = sizeof(struct host_indirect_packet_entry);
 	hdr->common_header.distribute = 1;
 	hdr->common_header.indirect = 1;
@@ -496,7 +498,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	return 0;
 }
 
-static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
+static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, bool last_cmd)
 {
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -526,6 +528,7 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
 	hdr->completion_signal =
 		(u64)(hq_queue->hq_complete.hqc_dma_addr + slot_id * sizeof(u64));
 #define XRT_PKT_OPCODE(p) ((p)->xrt_header.common_header.opcode)
@@ -566,9 +569,9 @@ static int ve2_submit_cmd_single(struct amdxdna_ctx *hwctx, struct amdxdna_sched
 	}
 
 	if (get_ve2_dpu_data_next(cmd_data))
-		ret = submit_command_indirect(hwctx, cmd_data, seq);
+		ret = submit_command_indirect(hwctx, cmd_data, seq, true);
 	else
-		ret = submit_command(hwctx, cmd_data, seq);
+		ret = submit_command(hwctx, cmd_data, seq, true);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit single command failed, error %d", ret);
 		return ret;
@@ -594,8 +597,9 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 	for (int i = 0; i < cmd_chain->command_count; i++) {
 		u32 boh = (u32)(cmd_chain->data[i]);
 		struct amdxdna_gem_obj *abo;
-		void *cmd_data;
+		bool last_cmd = false;
 		u32 cmd_data_len;
+		void *cmd_data;
 
 		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!abo) {
@@ -610,10 +614,12 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 			return -EINVAL;
 		}
 
+		if (i == cmd_chain->command_count - 1)
+			last_cmd = true;
 		if (get_ve2_dpu_data_next(cmd_data))
-			ret = submit_command_indirect(hwctx, cmd_data, seq);
+			ret = submit_command_indirect(hwctx, cmd_data, seq, last_cmd);
 		else
-			ret = submit_command(hwctx, cmd_data, seq);
+			ret = submit_command(hwctx, cmd_data, seq, last_cmd);
 		if (ret) {
 			XDNA_ERR(xdna, "Submit chain command(%d/%d) failed, error %d", i,
 				 cmd_chain->command_count, ret);
