@@ -20,12 +20,13 @@ package() {
   # Extract the tarball directly into the package directory
   # The tarball should be at $startdir/$XDNA_BUILD_DIR/xrt_plugin*.tar.gz
   local tarballs=("$startdir/${XDNA_BUILD_DIR}"/xrt_plugin*-amdxdna.tar.gz)
-  if [ -z "$tarball" ]; then
+  if [ ${#tarballs[@]} -eq 0 ] || [ ! -f "${tarballs[0]}" ]; then
     error "XDNA plugin tarball not found in ${XDNA_BUILD_DIR}"
     error "Please build XDNA driver first: cd build && ./build.sh -release"
     return 1
   fi
 
+  local tarball="${tarballs[0]}"
   msg2 "Extracting $tarball"
   tar -xzf "$tarball" -C "$pkgdir"
 
