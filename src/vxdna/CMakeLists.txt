@@ -76,3 +76,8 @@ install(FILES
     COMPONENT ${XDNA_COMPONENT}
 )
 
+# Enable testing
+if(BUILD_VXDNA_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
