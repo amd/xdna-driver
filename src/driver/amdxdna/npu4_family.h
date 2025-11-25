@@ -14,6 +14,7 @@ extern const struct dpm_clk_freq npu4_dpm_clk_table[];
 extern const struct rt_config npu4_default_rt_cfg[];
 extern const struct msg_op_ver npu4_msg_op_tbl[];
 extern const struct rt_cfg_ver npu4_rt_cfg_tbl[];
+extern const struct aie2_fw_feature_tbl npu4_fw_feature_table[];
 extern const struct amdxdna_dev_priv npu4_dev_priv;
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
@@ -71,6 +72,7 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 	.optional_msg	= npu4_msg_op_tbl,							\
 	.optional_cfg	= npu4_rt_cfg_tbl,							\
 	.dpm_clk_tbl	= npu4_dpm_clk_table,							\
+	.fw_feature_tbl = npu4_fw_feature_table,						\
 	.priv_load_cfg = { 5, 0, AIE2_RT_CFG_INIT },						\
 	.col_opc	= 4096,									\
 	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,							\

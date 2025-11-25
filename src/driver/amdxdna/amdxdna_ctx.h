@@ -19,6 +19,7 @@
 struct amdxdna_ctx_priv;
 
 enum ert_cmd_opcode {
+	ERT_INVALID_CMD	= ~0U,
 	ERT_START_CU			= 0,
 	ERT_START_DPU			= 18,
 	ERT_CMD_CHAIN			= 19,
@@ -197,6 +198,8 @@ struct amdxdna_cmd {
 	u32 data[];
 };
 
+#define INVALID_CU_IDX		(~0U)
+
 struct amdxdna_ctx {
 	struct amdxdna_client		*client;
 	struct amdxdna_ctx_priv		*priv;
@@ -321,7 +324,7 @@ amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 	return &cmd->data[num_masks];
 }
 
-static inline int
+static inline u32
 amdxdna_cmd_get_cu_idx(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
@@ -330,7 +333,7 @@ amdxdna_cmd_get_cu_idx(struct amdxdna_gem_obj *abo)
 	int cu_idx;
 
 	if (amdxdna_cmd_get_op(abo) == ERT_CMD_CHAIN)
-		return -1;
+		return INVALID_CU_IDX;
 
 	num_masks = 1 + FIELD_GET(AMDXDNA_CMD_EXTRA_CU_MASK, cmd->header);
 	cu_mask = cmd->data;
