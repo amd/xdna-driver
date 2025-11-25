@@ -858,6 +858,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	struct amdxdna_mgmtctx  *mgmtctx = NULL;
 	u32 start_col = nhwctx->start_col;
 	struct xrs_action_load load_act;
+	struct solver_state *xrs = xdna->dev_handle->xrs_hdl;
 	int ret;
 
 	if (!nhwctx->aie_dev) {
@@ -865,9 +866,11 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 		return -ENODEV;
 	}
 
+	mutex_lock(&xrs->xrs_lock);
 	ret = ve2_xrs_release(xdna, hwctx, &load_act);
 	if (ret) {
 		XDNA_ERR(xdna, "XRS Release failed ret %d", ret);
+                mutex_unlock(&xrs->xrs_lock);
 		return ret;
 	}
 
@@ -895,6 +898,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 		spin_unlock(&mgmtctx->ctx_lock);
 	}
 
+	mutex_unlock(&xrs->xrs_lock);
 	return ret;
 }
 

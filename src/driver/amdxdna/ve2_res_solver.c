@@ -431,16 +431,13 @@ int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action)
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
 
-	mutex_lock(&xrs->xrs_lock);
 	node = rg_search_node(&xrs->rgp, rid);
 	if (!node) {
 		drm_err(xrs->cfg.ddev, "node not exist");
-		mutex_unlock(&xrs->xrs_lock);
 		return -ENODEV;
 	}
 
 	remove_solver_node(&xrs->rgp, node, action);
-	mutex_unlock(&xrs->xrs_lock);
 
 	return 0;
 }
