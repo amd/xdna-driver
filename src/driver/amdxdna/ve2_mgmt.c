@@ -862,7 +862,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	int ret;
 
 	if (!nhwctx->aie_dev) {
-		XDNA_ERR(xdna, "Parition does not have aie device handle");
+		XDNA_ERR(xdna, "Partition does not have aie device handle");
 		return -ENODEV;
 	}
 
