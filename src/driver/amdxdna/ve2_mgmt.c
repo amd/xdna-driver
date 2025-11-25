@@ -870,7 +870,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	ret = ve2_xrs_release(xdna, hwctx, &load_act);
 	if (ret) {
 		XDNA_ERR(xdna, "XRS Release failed ret %d", ret);
-                mutex_unlock(&xrs->xrs_lock);
+        mutex_unlock(&xrs->xrs_lock);
 		return ret;
 	}
 
