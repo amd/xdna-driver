@@ -176,6 +176,7 @@ struct rt_config {
 	u32	type;
 	u32	value;
 	u32	category;
+	unsigned long feature_mask;
 };
 
 struct dpm_clk_freq {
@@ -311,6 +312,19 @@ struct aie2_ctx_rq {
 
 struct async_events;
 
+struct aie2_exec_msg_ops {
+	int (*init_cu_req)(struct amdxdna_gem_obj *cmd_bo, void *req,
+			   size_t *size, u32 *msg_op);
+	int (*init_dpu_req)(struct amdxdna_gem_obj *cmd_bo, void *req,
+			    size_t *size, u32 *msg_op);
+	void (*init_chain_req)(void *req, u64 slot_addr, size_t size, u32 cmd_cnt);
+	int (*fill_cf_slot)(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *size);
+	int (*fill_dpu_slot)(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *size);
+	int (*fill_preempt_slot)(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *size);
+	int (*fill_elf_slot)(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *size);
+	u32 (*get_chain_msg_op)(u32 cmd_op);
+};
+
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
@@ -326,6 +340,8 @@ struct amdxdna_dev_hdl {
 	u32				total_col;
 	struct aie_version		version;
 	struct aie_metadata		metadata;
+	unsigned long			feature_mask;
+	struct aie2_exec_msg_ops	*exec_msg_ops;
 
 	/*power management and clock */
 	int				pw_mode;
@@ -381,6 +397,20 @@ struct aie2_hw_ops {
 	int (*get_tops)(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 };
 
+enum aie2_fw_feature {
+	AIE2_NPU_COMMAND,
+	AIE2_PREEMPT,
+	AIE2_FEATURE_MAX
+};
+
+struct aie2_fw_feature_tbl {
+	enum aie2_fw_feature feature;
+	u32 max_minor;
+	u32 min_minor;
+};
+
+#define AIE2_FEATURE_ON(ndev, feature)	test_bit(feature, &(ndev)->feature_mask)
+
 struct amdxdna_dev_priv {
 	const char			*fw_path;
 	u64				protocol_major;
@@ -389,6 +419,7 @@ struct amdxdna_dev_priv {
 	const struct dpm_clk_freq	*dpm_clk_tbl;
 	const struct msg_op_ver		*optional_msg;
 	const struct rt_cfg_ver		*optional_cfg;
+	const struct aie2_fw_feature_tbl *fw_feature_tbl;
 
 	u32				col_opc;
 	u32				mbox_dev_addr;
@@ -475,6 +506,7 @@ int aie2_error_get_last_async(struct amdxdna_dev *xdna,
 			      void *errors);
 
 /* aie2_message.c */
+void aie2_msg_init(struct amdxdna_dev_hdl *ndev);
 bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode);
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie2_resume_fw(struct amdxdna_dev_hdl *ndev);
@@ -521,13 +553,13 @@ int aie2_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
 int aie2_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories);
 
 int aie2_config_cu(struct amdxdna_ctx *ctx);
-int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job, enum cmd_chain_class class,
+int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_single_execbuf(struct amdxdna_ctx *ctx,
-				struct amdxdna_sched_job *job, enum cmd_chain_class class,
+				struct amdxdna_sched_job *job,
 				int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
-			       struct amdxdna_sched_job *job, enum cmd_chain_class class,
+			       struct amdxdna_sched_job *job,
 			       int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_sync_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, void __iomem *, size_t));

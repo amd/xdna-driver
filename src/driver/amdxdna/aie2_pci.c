@@ -77,6 +77,7 @@ struct mgmt_mbox_chann_info {
 
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor)
 {
+	const struct aie2_fw_feature_tbl *feature;
 	struct amdxdna_dev *xdna = ndev->xdna;
 
 	/*
@@ -104,6 +105,17 @@ int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor
 		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
 		return -EINVAL;
 	}
+
+	for (feature = ndev->priv->fw_feature_tbl; feature && feature->min_minor;
+	     feature++) {
+		if (fw_minor < feature->min_minor)
+			continue;
+		if (feature->max_minor > 0 && fw_minor > feature->max_minor)
+			continue;
+
+		set_bit(feature->feature, &ndev->feature_mask);
+	}
+
 	return 0;
 }
 
@@ -618,6 +630,7 @@ skip_pasid:
 	}
 
 	release_firmware(fw);
+	aie2_msg_init(ndev);
 	amdxdna_rpm_init(xdna);
 	return 0;
 
