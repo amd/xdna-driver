@@ -367,18 +367,18 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u
 	u64 write_index = 0;
 	int ret;
 
-	spin_lock(&mgmtctx->ctx_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
 	//enqueue ctx and command in ctx_command_fifo
 	if (get_ctx_write_index(hwctx, &write_index)) {
 		XDNA_ERR(xdna, "Failed to get write index");
-		spin_unlock(&mgmtctx->ctx_lock);
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return -EINVAL;
 	}
 
 	/* Only enqueue if write_index is valid */
 	ret = ve2_fifo_enqueue(mgmtctx, hwctx, write_index);
 	if (ret) {
-		spin_unlock(&mgmtctx->ctx_lock);
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return ret;
 	}
 
@@ -409,7 +409,7 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u
 		}
 	}
 
-	spin_unlock(&mgmtctx->ctx_lock);
+	mutex_unlock(&mgmtctx->ctx_lock);
 	notify_fw_cmd_ready(mgmtctx->active_ctx);
 
 	return 0;
@@ -525,11 +525,11 @@ static void ve2_scheduler_work(struct work_struct *work)
 	struct amdxdna_mgmtctx *mgmtctx =
 		container_of(work, struct amdxdna_mgmtctx, sched_work);
 
-	spin_lock(&mgmtctx->ctx_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
 
 	/* Check if context is being destroyed */
 	if (!mgmtctx->active_ctx || !mgmtctx->active_ctx->priv) {
-		spin_unlock(&mgmtctx->ctx_lock);
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
 
@@ -578,7 +578,7 @@ static void ve2_scheduler_work(struct work_struct *work)
 			 "None of the bit (idle/queue_not_empty/misc) was set active ctx:%p\n",
 			 mgmtctx->active_ctx);
 	}
-	spin_unlock(&mgmtctx->ctx_lock);
+	mutex_unlock(&mgmtctx->ctx_lock);
 }
 
 static u32 get_cert_idle_status(struct amdxdna_mgmtctx  *mgmtctx)
@@ -633,32 +633,31 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	u64 read_index = 0, write_index = 0;
 	struct amdxdna_ctx *hwctx;
 	struct amdxdna_dev *xdna;
-	unsigned long flags;
 
 	if (!mgmtctx)
 		return;
 
 	xdna = mgmtctx->xdna;
 	XDNA_DBG(xdna, "Received an IRQ\n");
-	spin_lock_irqsave(&mgmtctx->ctx_lock, flags);
+	mutex_lock(&mgmtctx->ctx_lock);
 
 	/* Just wake active hwctx */
 	hwctx = mgmtctx->active_ctx;
 	if (!hwctx || !hwctx->priv) {
 		XDNA_ERR(xdna, "Invalid hwctx");
-		spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
 
 	if (get_ctx_read_index(hwctx, &read_index)) {
 		XDNA_ERR(xdna, "Failed to get read index");
-		spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
 
 	if (get_ctx_write_index(hwctx, &write_index)) {
 		XDNA_ERR(xdna, "Failed to get write index");
-		spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
 
@@ -677,7 +676,7 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 
 	wake_up_interruptible_all(&hwctx->priv->waitq);
 
-	spin_unlock_irqrestore(&mgmtctx->ctx_lock, flags);
+	mutex_unlock(&mgmtctx->ctx_lock);
 
 	if (mgmtctx->mgmtctx_workq && (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
 				       ve2_check_misc_interrupt(mgmtctx)))
@@ -724,7 +723,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		mgmtctx->args.num_tiles = 0;
 		nhwctx->args = &mgmtctx->args;
 		nhwctx->aie_dev = mgmtctx->mgmt_aiedev;
-		spin_lock_init(&mgmtctx->ctx_lock);
+		mutex_init(&mgmtctx->ctx_lock);
 		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 		/* Create workqueue for scheduling the command */
 		mgmtctx->mgmtctx_workq = create_workqueue("ve2_mgmtctx_scheduler");
@@ -878,23 +877,23 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 		struct workqueue_struct *wq = NULL;
 
 		cert_clear_partition(xdna, nhwctx);
-		spin_lock(&mgmtctx->ctx_lock);
+		mutex_lock(&mgmtctx->ctx_lock);
 		/* Update the active context as partition doesn't exists any more */
 		mgmtctx->active_ctx = NULL;
 		wq = mgmtctx->mgmtctx_workq;
 		mgmtctx->mgmtctx_workq = NULL;
 
-		spin_unlock(&mgmtctx->ctx_lock);
+		mutex_unlock(&mgmtctx->ctx_lock);
 
 		if (wq)
 			destroy_workqueue(wq);
 		aie_partition_teardown(nhwctx->aie_dev);
 		aie_partition_release(nhwctx->aie_dev);
 	} else {
-		spin_lock(&mgmtctx->ctx_lock);
+		mutex_lock(&mgmtctx->ctx_lock);
 		if (mgmtctx->active_ctx == hwctx)
 			mgmtctx->active_ctx = NULL;
-		spin_unlock(&mgmtctx->ctx_lock);
+		mutex_unlock(&mgmtctx->ctx_lock);
 	}
 
 unlock_xrs_lock:

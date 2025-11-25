@@ -941,10 +941,10 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	 * then cancel any pending work to ensure no work is accessing this context
 	 */
 	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[nhwctx->start_col];
-	spin_lock(&mgmtctx->ctx_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx == hwctx)
 		mgmtctx->active_ctx = NULL;
-	spin_unlock(&mgmtctx->ctx_lock);
+	mutex_unlock(&mgmtctx->ctx_lock);
 
 	/* Now cancel any pending work - it will see active_ctx as NULL and bail out */
 	if (mgmtctx->mgmtctx_workq)
