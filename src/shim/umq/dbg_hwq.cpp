@@ -31,7 +31,8 @@ dbg_hwq_umq(const device& dev)
   std::memset(m_dbg_umq_bo_buf, 0, umq_sz);
   m_dbg_umq_pkt->xrt_header.completion_signal = m_dbg_umq_comp;
   
-  m_dbg_umq_pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
+  m_dbg_umq_pkt->xrt_header.common_header.type =
+    HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
   m_dbg_umq_hdr->capacity = 1;
   m_dbg_umq_hdr->data_address = m_dbg_umq_bo->paddr() + header_sz;
 
@@ -89,8 +90,6 @@ submit()
 {
   *m_dbg_umq_comp_ptr = 0;
 
-  m_dbg_umq_pkt->xrt_header.common_header.type =
-    HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
   /* Issue mfence instruction to make sure all writes to the slot before is done */
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   m_dbg_umq_hdr->write_index++;
