@@ -857,17 +857,19 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	struct amdxdna_mgmtctx  *mgmtctx = NULL;
 	u32 start_col = nhwctx->start_col;
 	struct xrs_action_load load_act;
+	struct solver_state *xrs = xdna->dev_handle->xrs_hdl;
 	int ret;
 
 	if (!nhwctx->aie_dev) {
-		XDNA_ERR(xdna, "Parition does not have aie device handle");
+		XDNA_ERR(xdna, "Partition does not have aie device handle");
 		return -ENODEV;
 	}
 
+	mutex_lock(&xrs->xrs_lock);
 	ret = ve2_xrs_release(xdna, hwctx, &load_act);
 	if (ret) {
 		XDNA_ERR(xdna, "XRS Release failed ret %d", ret);
-		return ret;
+		goto unlock_xrs_lock;
 	}
 
 	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[start_col];
@@ -894,6 +896,8 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 		mutex_unlock(&mgmtctx->ctx_lock);
 	}
 
+unlock_xrs_lock:
+	mutex_unlock(&xrs->xrs_lock);
 	return ret;
 }
 
