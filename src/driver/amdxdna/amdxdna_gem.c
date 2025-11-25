@@ -871,9 +871,6 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	struct sg_table *sgt;
 	int ret;
 
-	if (!dma_buf)
-		return ERR_PTR(-EINVAL);
-
 	get_dma_buf(dma_buf);
 
 	attach = dma_buf_attach(dma_buf, dev->dev);
