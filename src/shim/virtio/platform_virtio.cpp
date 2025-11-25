@@ -463,7 +463,7 @@ host_bo_free(uint32_t host_hdl) const
 
 void
 platform_drv_virtio::
-create_bo(create_bo_arg& arg) const
+create_bo(bo_info& arg) const
 {
   bo_id id;
   auto fd = dev_fd();
@@ -484,14 +484,21 @@ create_bo(create_bo_arg& arg) const
     drm_bo_free(fd, arg.bo.res_id);
     throw;
   }
+
+  save_bo_info(arg.bo.res_id, arg);
 }
 
 void
 platform_drv_virtio::
 destroy_bo(destroy_bo_arg& arg) const
 {
+  auto id = arg.bo.res_id;
+
+  if (!delete_bo_info(id))
+    return;
+
   host_bo_free(arg.bo.handle);
-  drm_bo_free(dev_fd(), arg.bo.res_id);
+  drm_bo_free(dev_fd(), id);
 }
 
 void
@@ -671,6 +678,11 @@ import_bo(import_bo_arg& bo_arg) const
   ioctl(fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &carg);
   auto gboh = carg.handle;
 
+  // Found existing BO, just use the saved info.
+  if (load_bo_info(gboh, bo_arg.boinfo))
+    return;
+
+  // New BO is created.
   auto [ resource, size ] = drm_bo_get_info(fd, gboh);
 
   uint32_t hboh = AMDXDNA_INVALID_BO_HANDLE;
@@ -685,13 +697,15 @@ import_bo(import_bo_arg& bo_arg) const
   uint64_t map_offset = AMDXDNA_INVALID_ADDR;
   map_offset = drm_bo_get_map_offset(fd, gboh);
 
-  bo_arg.bo.handle = hboh;
-  bo_arg.bo.res_id = gboh;
-  bo_arg.xdna_addr = xdna_addr;
-  bo_arg.vaddr = nullptr;
-  bo_arg.map_offset = map_offset;
-  bo_arg.type = AMDXDNA_BO_SHARE;
-  bo_arg.size = size;
+  bo_arg.boinfo.bo.handle = hboh;
+  bo_arg.boinfo.bo.res_id = gboh;
+  bo_arg.boinfo.xdna_addr = xdna_addr;
+  bo_arg.boinfo.vaddr = nullptr;
+  bo_arg.boinfo.map_offset = map_offset;
+  bo_arg.boinfo.type = AMDXDNA_BO_SHARE;
+  bo_arg.boinfo.size = size;
+
+  save_bo_info(gboh, bo_arg.boinfo);
 }
 
 }

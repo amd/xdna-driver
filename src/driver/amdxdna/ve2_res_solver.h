@@ -39,6 +39,8 @@ struct aie_qos {
 	u32		latency;	/* Frame response latency */
 	u32		exec_time;	/* Frame execution time */
 	u32		priority;	/* Request priority */
+	u32		exclusive;      /* Exclusive Request or not */
+	u32		user_start_col; /* Start Col Requested by user */
 };
 
 /*
@@ -66,6 +68,8 @@ struct alloc_requests {
 struct xrs_action_load {
 	u32			rid;
 	struct aie_part		part;
+	bool                    create_aie_part;
+	bool                    release_aie_part;
 };
 
 /*
@@ -132,7 +136,7 @@ struct solver_state {
 
 void *xrsm_init(struct init_config *cfg);
 int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct xrs_action_load *load_act);
-int xrs_release_resource(void *hdl, u64 rid);
+int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action);
 
 struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid);
 

@@ -17,16 +17,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_dpt.h"
-#ifdef AMDXDNA_OF
-/*
- * TODO: remove this and implement physical contiguous memory by carvedout memory
- * supported by amdxdna_gem.h"
- */
-#include "amdxdna_gem_of.h"
-#else
 #include "amdxdna_gem.h"
-#endif
-#include "amdxdna_tdr.h"
 
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...)	dev_warn((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
@@ -38,9 +29,6 @@
 
 #define to_xdna_dev(drm_dev) \
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
-
-#define tdr_to_xdna_dev(t) \
-	((struct amdxdna_dev *)container_of(t, struct amdxdna_dev, tdr))
 
 extern const struct drm_driver amdxdna_drm_drv;
 
@@ -56,8 +44,8 @@ struct amdxdna_mgmt_dma_hdl;
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);
 	void (*fini)(struct amdxdna_dev *xdna);
-	bool (*detect)(struct amdxdna_dev *xdna);
-	void (*recover)(struct amdxdna_dev *xdna, bool dump_only);
+	void (*tdr_start)(struct amdxdna_dev *xdna);
+	void (*tdr_stop)(struct amdxdna_dev *xdna);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
 	void (*reset_prepare)(struct amdxdna_dev *xdna);
@@ -65,8 +53,13 @@ struct amdxdna_dev_ops {
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);
+	int (*fw_log_config)(struct amdxdna_dev *xdna, u8 level);
 	int (*fw_log_fini)(struct amdxdna_dev *xdna);
 	void (*fw_log_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
+	int (*fw_trace_init)(struct amdxdna_dev *xdna, size_t size, u32 categories);
+	int (*fw_trace_config)(struct amdxdna_dev *xdna, u32 categories);
+	int (*fw_trace_fini)(struct amdxdna_dev *xdna);
+	void (*fw_trace_parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 	/* Below device ops are called by IOCTL */
 	int (*ctx_init)(struct amdxdna_ctx *ctx);
@@ -132,8 +125,8 @@ struct amdxdna_dev {
 	struct mutex			dev_lock;
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
-	struct amdxdna_tdr		tdr;
 	struct amdxdna_dpt		*fw_log;
+	struct amdxdna_dpt		*fw_trace;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
@@ -178,6 +171,8 @@ struct amdxdna_client {
 	struct mutex			mm_lock; /* protect memory related */
 	struct amdxdna_gem_obj		*dev_heap;
 	u32				heap_usage;
+	size_t				total_bo_usage;
+	size_t				total_int_bo_usage;
 
 	struct iommu_sva		*sva;
 	int				pasid;
@@ -192,5 +187,9 @@ struct amdxdna_client {
 
 void amdxdna_stats_start(struct amdxdna_client *client);
 void amdxdna_stats_account(struct amdxdna_client *client);
+int amdxdna_drm_copy_array_to_user(struct amdxdna_drm_get_array *tgt,
+				   void *array, size_t element_size, size_t num_element);
+int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
+				     void *array, size_t element_size, size_t num_element);
 
 #endif /* _AMDXDNA_DRM_H_ */

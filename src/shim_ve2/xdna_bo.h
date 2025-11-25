@@ -27,8 +27,6 @@ public:
 
   ~shared() override
   {
-    if (m_fd != -1)
-      close(m_fd);
   }
 
   export_handle
@@ -70,6 +68,9 @@ public:
   xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
      size_t size, uint64_t flags, uint32_t type);
 
+  xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
+     size_t size, void *uptr);
+
   xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl);
 
   ~xdna_bo();
@@ -80,6 +81,10 @@ public:
   // Alloc BO from driver
   void
   alloc_bo();
+
+  // Alloc user ptr BO from driver
+  void
+  alloc_userptr_bo(void *buf);
 
   // Sync the BO
   void
@@ -144,6 +149,7 @@ public:
   off_t m_map_offset = AMDXDNA_INVALID_ADDR;
   uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
   uint64_t m_vaddr = AMDXDNA_INVALID_ADDR;
+  void *m_uptr = nullptr;
 
   const shared m_import;
 

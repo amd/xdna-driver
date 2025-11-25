@@ -73,31 +73,15 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
   PATTERN "*.yaml"
   )
 
-include(FetchContent)
+# VTD archives are downloaded by build script based on info.json configuration
+set(VTD_ARCHIVES_DIR "${CMAKE_CURRENT_BINARY_DIR}/../amdxdna_bins/vtd_archives")
+message(STATUS "Using VTD archives from ${VTD_ARCHIVES_DIR}")
 
-FetchContent_Declare(
-  vtd_strx_archive
-  URL "https://github.com/Xilinx/VTD/raw/8b3c59d74b61c693445bef92d4b620098999472e/runner/xrt_smi_strx.a"
-  DOWNLOAD_NO_EXTRACT ON
-  DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
-)
-
-FetchContent_Declare(
-  vtd_phx_archive
-  URL "https://github.com/Xilinx/VTD/raw/8b3c59d74b61c693445bef92d4b620098999472e/runner/xrt_smi_phx.a"
-  DOWNLOAD_NO_EXTRACT ON
-  DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
-)
-
-message(STATUS "Downloading VTD archives from GitHub...")
-FetchContent_MakeAvailable(vtd_strx_archive vtd_phx_archive)
-message(STATUS "VTD archives downloaded successfully")
-
-install(FILES 
-  "${vtd_strx_archive_SOURCE_DIR}/xrt_smi_strx.a"
-  "${vtd_phx_archive_SOURCE_DIR}/xrt_smi_phx.a"
+install(DIRECTORY ${VTD_ARCHIVES_DIR}/
   DESTINATION ${XDNA_PKG_DATA_DIR}/bins
   COMPONENT ${XDNA_COMPONENT}
+  FILES_MATCHING
+  PATTERN "*.a"
   )
 
 if(NOT SKIP_KMOD)

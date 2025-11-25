@@ -42,9 +42,9 @@ enum aie2_msg_opcode {
 	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
 	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
-	MSG_OP_START_EVENT_TRACE           = 0x10F,
-	MSG_OP_STOP_EVENT_TRACE            = 0x110,
-	MSG_OP_SET_EVENT_TRACE_CATEGORIES  = 0x111,
+	MSG_OP_START_FW_TRACE              = 0x10F,
+	MSG_OP_STOP_FW_TRACE               = 0x110,
+	MSG_OP_SET_FW_TRACE_CATEGORIES     = 0x111,
 	MSG_OP_UPDATE_PROPERTY             = 0x113,
 	MSG_OP_GET_APP_HEALTH              = 0x114,
 	MSG_OP_ADD_HOST_BUFFER             = 0x115,
@@ -213,6 +213,11 @@ struct exec_dpu_preempt_req {
 	u32	cu_idx;
 	u32	payload[29];
 } __packed;
+
+union exec_req {
+	struct execute_buffer_req ebuf;
+	struct exec_dpu_req dpu_req;
+};
 
 struct execute_buffer_resp {
 	enum aie2_msg_status	status;
@@ -411,51 +416,46 @@ struct async_event_msg_resp {
 	enum async_event_type	type;
 } __packed;
 
-/* Start of event tracing data struct */
-#define MAX_ONE_TIME_LOG_INFO_LEN			16
-#define DEFAULT_EVENT_BUF_SIZE				0x2000
-#define DEFAULT_EVENT_CATEGORY				0xFFFFFFFF
-
-enum event_trace_destination {
-	EVENT_TRACE_DEST_DEBUG_BUS,
-	EVENT_TRACE_DEST_DRAM,
-	EVENT_TRACE_DEST_COUNT
+enum fw_trace_destination {
+	FW_TRACE_DESTINATION_DEBUG_BUS = 0,
+	FW_TRACE_DESTINATION_DRAM,
+	FW_TRACE_DESTINATION_COUNT
 };
 
-enum event_trace_timestamp {
-	EVENT_TRACE_TIMESTAMP_FW_CHRONO,
-	EVENT_TRACE_TIMESTAMP_CPU_CCOUNT,
-	EVENT_TRACE_TIMESTAMP_COUNT
+enum fw_trace_timestamp {
+	FW_TRACE_TIMESTAMP_FW_CHRONO,
+	FW_TRACE_TIMESTAMP_CPU_CCOUNT,
+	FW_TRACE_TIMESTAMP_COUNT
 };
 
-struct start_event_trace_req {
-	u32 event_trace_categories;
-	enum event_trace_destination event_trace_dest;
-	enum event_trace_timestamp event_trace_timestamp;
-	u64 dram_buffer_address;
-	u32 dram_buffer_size;
+struct start_fw_trace_req {
+	u32 categories;
+	enum fw_trace_destination destination;
+	enum fw_trace_timestamp timestamp;
+	u64 buf_addr;
+	u32 buf_size;
 } __packed;
 
-struct start_event_trace_resp {
+struct start_fw_trace_resp {
 	enum aie2_msg_status status;
 	u32 msi_idx;
 	u64 current_timestamp;
 	u32 msi_address;
 } __packed;
 
-struct stop_event_trace_req {
-	u32 place_holder;
+struct stop_fw_trace_req {
+	u32 reserved;
 } __packed;
 
-struct stop_event_trace_resp {
+struct stop_fw_trace_resp {
 	enum aie2_msg_status status;
 } __packed;
 
-struct set_event_trace_categories_req {
-	u32 event_trace_categories;
+struct set_fw_trace_categories_req {
+	u32 fw_trace_categories;
 } __packed;
 
-struct set_event_trace_categories_resp {
+struct set_fw_trace_categories_resp {
 	enum aie2_msg_status status;
 } __packed;
 
@@ -553,6 +553,7 @@ struct exec_npu_req {
 	u32	payload[27];
 } __packed;
 
+#define MAX_NPU_ARGS_SIZE (26 * sizeof(__u32))
 struct cmd_chain_slot_npu {
 	enum exec_npu_type type;
 	u64 inst_buf_addr;
@@ -575,6 +576,11 @@ struct cmd_chain_npu_req {
 	u32 buf_size;
 	u32 count;
 } __packed;
+
+union exec_chain_req {
+	struct cmd_chain_npu_req npu_req;
+	struct cmd_chain_req req;
+};
 
 struct cmd_chain_resp {
 	enum aie2_msg_status	status;

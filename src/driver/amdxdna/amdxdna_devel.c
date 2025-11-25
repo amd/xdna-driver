@@ -8,6 +8,7 @@
 #include <linux/sched/clock.h>
 
 #include "amdxdna_carvedout_buf.h"
+#include "amdxdna_cma_buf.h"
 #include "amdxdna_devel.h"
 #include "amdxdna_trace.h"
 
@@ -23,19 +24,23 @@ int start_col_index = -1;
 module_param(start_col_index, int, 0600);
 MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)");
 
+bool is_iommu_off(struct amdxdna_dev *xdna)
+{
+#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
+	return !iommu_present(xdna->ddev.dev->bus);
+#else
+	return !device_iommu_mapped(xdna->ddev.dev);
+#endif
+}
+
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = NULL;
 
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-	if (!iommu_present(xdna->ddev.dev->bus)) {
-#else
-	if (!device_iommu_mapped(xdna->ddev.dev)) {
-#endif
-		if (amdxdna_use_carvedout()) {
-			iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+	if (is_iommu_off(xdna)) {
+		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+		if (amdxdna_use_carvedout() || amdxdna_use_cma())
 			return 0;
-		}
 
 		XDNA_ERR(xdna, "No carvedout memory and IOMMU is off");
 		return -ENODEV;
@@ -94,63 +99,6 @@ void amdxdna_free_sgt(struct amdxdna_dev *xdna, struct sg_table *sgt)
 	kfree(sgt);
 }
 
-int amdxdna_mem_map(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
-{
-	struct device *dev = xdna->ddev.dev;
-	struct sg_table *sgt = NULL;
-	int ret;
-
-	if (!mem) {
-		XDNA_ERR(xdna, "mem is not init");
-		return -EINVAL;
-	}
-
-	XDNA_DBG(xdna, "size %ld, nr_pages %d", mem->size, mem->nr_pages);
-
-	sgt = amdxdna_alloc_sgt(xdna, mem->size, mem->pages, mem->nr_pages);
-	if (!sgt)
-		return -ENOMEM;
-
-	if (!dma_map_sg(dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL)) {
-		XDNA_ERR(xdna, "dma map sg failed");
-		ret = -ENOMEM;
-		goto free_sgt;
-	}
-
-	/* Device doesn't do scatter/gather, fail non-contiguous map */
-	if (drm_prime_get_contiguous_size(sgt) != mem->size) {
-		XDNA_ERR(xdna, "noncontiguous dma map, size:%ld", mem->size);
-		ret = -ENOMEM;
-		goto unmap_and_free;
-	}
-
-	mem->sgt = sgt;
-	mem->dma_addr = sg_dma_address(sgt->sgl);
-
-	XDNA_DBG(xdna, "dma_addr 0x%llx phy_addr 0x%llx", mem->dma_addr, sg_phys(sgt->sgl));
-
-	return 0;
-
-unmap_and_free:
-	dma_unmap_sg(dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL);
-free_sgt:
-	amdxdna_free_sgt(xdna, sgt);
-	return ret;
-}
-
-void amdxdna_mem_unmap(struct amdxdna_dev *xdna, struct amdxdna_mem *mem)
-{
-	struct device *dev = xdna->ddev.dev;
-	struct sg_table *sgt = mem->sgt;
-
-	if (!sgt)
-		return;
-
-	dma_unmap_sg(dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL);
-	amdxdna_free_sgt(xdna, sgt);
-}
-
-#ifndef AMDXDNA_OF
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -173,31 +121,6 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 	XDNA_DBG(xdna, "BO type %d dma_addr 0x%llx", abo->type, abo->mem.dma_addr);
 	return 0;
 }
-
-void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
-
-	XDNA_DBG(xdna, "BO type %d dma_addr 0x%llx", abo->type, abo->mem.dma_addr);
-	if (is_import_bo(abo))
-		return;
-
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-	drm_gem_shmem_put_pages(&abo->base);
-#else
-	drm_gem_shmem_put_pages_locked(&abo->base);
-#endif
-}
-#else
-int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
-{
-	return -EOPNOTSUPP;
-}
-
-void amdxdna_bo_dma_unmap(struct amdxdna_gem_obj *abo)
-{
-}
-#endif
 
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
 {

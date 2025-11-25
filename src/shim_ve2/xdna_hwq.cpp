@@ -8,10 +8,9 @@
 namespace shim_xdna_edge {
 
 xdna_hwq::
-xdna_hwq(const device_xdna& device)
+xdna_hwq(const device_xdna* device)
   : m_hwctx(nullptr)
   , m_queue_boh(AMDXDNA_INVALID_BO_HANDLE)
-  , m_edev(device.get_edev())
 {
 }
 
@@ -19,7 +18,9 @@ void
 xdna_hwq::
 bind_hwctx(const xdna_hwctx *ctx)
 {
-  m_hwctx = ctx;
+  if (m_hwctx)
+    shim_err(EINVAL, "one queue can be bind to one hw_context only\n");
+  m_hwctx = const_cast<xdna_hwctx*>(ctx);
   shim_debug("Bond HW queue to HW context %d", m_hwctx->get_slotidx());
 }
 
@@ -27,6 +28,8 @@ void
 xdna_hwq::
 unbind_hwctx()
 {
+  if (!m_hwctx)
+    shim_err(EINVAL, "cannot unbind queue multiple times \n");
   shim_debug("Unbond HW queue from HW context %d", m_hwctx->get_slotidx());
   m_hwctx = nullptr;
 }
@@ -48,6 +51,9 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
   auto boh = static_cast<shim_xdna_edge::xdna_bo*>(cmd_bo);
   uint32_t cmd_bo_hdl = boh->get_drm_bo_handle();
 
+  if (!m_hwctx)
+    shim_err(EINVAL, "No hw_context bind to submit the command \n");
+
   amdxdna_drm_exec_cmd ecmd = {
     .hwctx = m_hwctx->get_slotidx(),
     .cmd_handles = boh->get_drm_bo_handle(),
@@ -56,7 +62,7 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
     .arg_count = static_cast<uint32_t>(boh->get_arg_bo_handles(arg_bo_hdls, max_arg_bos)),
   };
 
-  m_edev->ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
+  m_hwctx->get_device()->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
   auto id = ecmd.seq;
   boh->set_cmd_id(id);
   shim_debug("Submitted command (%ld)", id);
@@ -70,6 +76,9 @@ wait_command(xrt_core::buffer_handle *cmd_bo, uint32_t timeout_ms) const
   auto boh = static_cast<shim_xdna_edge::xdna_bo*>(cmd_bo);
   auto id = boh->get_cmd_id();
 
+  if (!m_hwctx)
+    shim_err(EINVAL, "No hw_context bind to wait for the command \n");
+
   shim_debug("Waiting for cmd (%ld)...", id);
   amdxdna_drm_wait_cmd wcmd = {
     .hwctx = m_hwctx->get_slotidx(),
@@ -78,7 +87,7 @@ wait_command(xrt_core::buffer_handle *cmd_bo, uint32_t timeout_ms) const
   };
 
   try {
-    m_edev->ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
+    m_hwctx->get_device()->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_WAIT_CMD, &wcmd);
   }
   catch (const xrt_core::system_error& ex) {
     if (ex.get_code() != ETIME)

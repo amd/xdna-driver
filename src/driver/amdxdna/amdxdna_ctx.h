@@ -14,15 +14,12 @@
 #include <drm/gpu_scheduler.h>
 #include "drm_local/amdxdna_accel.h"
 
-#ifdef AMDXDNA_OF
-#include "amdxdna_gem_of.h"
-#else
 #include "amdxdna_gem.h"
-#endif
 
 struct amdxdna_ctx_priv;
 
 enum ert_cmd_opcode {
+	ERT_INVALID_CMD	= ~0U,
 	ERT_START_CU			= 0,
 	ERT_START_DPU			= 18,
 	ERT_CMD_CHAIN			= 19,
@@ -82,11 +79,9 @@ struct amdxdna_cmd_preempt_data {
 	u32 prop_args[];    /* properties and regular kernel arguments */
 };
 
-/*
- * Interpretation of payload for an amdxdna_cmd which has context health data
+/**
+ * Interpretation of payload for an amdxdna_cmd which has context health data for npu0
  *
- * @version:                    context health data version.
- *                              defines the interface version between driver and shim.
  * @txn_op_idx:                 index of last TXN control code executed
  * @ctx_pc:                     program counter for that context
  * @fatal_error_type:           the fatal error type if context crashes
@@ -102,18 +97,95 @@ struct amdxdna_cmd_preempt_data {
  * fatal_error_exception_type: 0
  * fatal_error_exception_pc:   0
  * fatal_error_app_module:     0
-
+ *
  * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
- * amdxdna_cmd starting from payload will have the following information.
+ * amdxdna_cmd starting from payload will have the following information for npu0 gen.
  */
-struct amdxdna_ctx_health_data {
-	u32 version;
+struct amdxdna_ctx_health_data_aie2 {
 	u32 txn_op_idx;
 	u32 ctx_pc;
 	u32 fatal_error_type;
 	u32 fatal_error_exception_type;
 	u32 fatal_error_exception_pc;
 	u32 fatal_error_app_module;
+};
+
+/**
+ * struct uc_health_info: Health data for each cert
+ *
+ * @uc_idx:            uC index in this context, 0 is the lead
+ * @uc_idle_status:    valid when CERT is CTX_IDEL, represent the reason CERT is idle
+ *                     hsa_lite_status register:
+ *                         bit 0: HSA queue not empty
+ *                         bit 1: preemption save completion
+ *                         bit 2: CERT is idle
+ * @misc_status:       valid when UCCTX_ERROR, represent the reason UC hangs
+ *                         bit 0: uC fw exception
+ *                         bit 1: control code hang
+ * @fw_state:          uC FW state
+ * @page_idx:          page index of the current control code
+ * @offset:            bytes offset inside page
+ * @restore_page:      in case context is preempted, the page index to be executed on resume
+ * @restore_offset:    in case context is preempted, the bytes offset inside restore_page to be
+ *                     executed on resume
+ * @uc_ear:            in case of uC crash, the exception address of uC
+ * @uc_esr:            in case of uC crash, the exception status of uC
+ * @uc_pc:             in case of uC crash, the PC of the current uC
+ */
+struct uc_health_info {
+	u32 uc_idx;
+	u32 uc_idle_status;
+	u32 misc_status;
+	u32 fw_state;
+	u32 page_idx;
+	u32 offset;
+	u32 restore_page;
+	u32 restore_offset;
+	u32 uc_ear;
+	u32 uc_esr;
+	u32 uc_pc;
+};
+
+/**
+ * Interpretation of payload for an amdxdna_cmd which has context health data for AIE2PS and AIE4
+ *
+ * @ctx_state:             context state
+ * @num_ucs:               number of uC reported
+ * @uc_info:               array for health data for each uC in the context.
+ *                         the array size is based on num_certs.
+ *
+ * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
+ * amdxdna_cmd starting from payload will have the following information for aie2ps/aie4 generation.
+ */
+struct amdxdna_ctx_health_data_aie4 {
+	u32 ctx_state;
+	u32 num_uc;
+	struct uc_health_info uc_info[];
+};
+
+/**
+ * Interpretation of payload for an amdxdna_cmd
+ *
+ * @version:               context health data version (1)
+ * @npu_gen:               npu generation
+ * @aie2:                  context health data for npu generation aie2/aie2p
+ * @aie4:                  context health data for npu generation aie2ps/aie4
+ *
+ * If version is 1, we should use this data structure to parse context health data
+ * starting from the amdxdna_cmd payload. And use corresponding data structure based
+ * on the npu generation.
+ */
+struct amdxdna_ctx_health_data {
+#define AMDXDNA_CTX_HEALTH_DATA_V0	0
+#define AMDXDNA_CTX_HEALTH_DATA_V1	1
+	u32 version;
+#define AMDXDNA_NPU_GEN_AIE2		0
+#define AMDXDNA_NPU_GEN_AIE4		1
+	u32 npu_gen;
+	union {
+		struct amdxdna_ctx_health_data_aie2 aie2;
+		struct amdxdna_ctx_health_data_aie4 aie4;
+	};
 };
 
 /* Exec buffer command header format */
@@ -125,6 +197,8 @@ struct amdxdna_cmd {
 	u32 header;
 	u32 data[];
 };
+
+#define INVALID_CU_IDX		(~0U)
 
 struct amdxdna_ctx {
 	struct amdxdna_client		*client;
@@ -196,7 +270,7 @@ struct amdxdna_sched_job {
 static inline u32
 amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
 
 	return FIELD_GET(AMDXDNA_CMD_OPCODE, cmd->header);
 }
@@ -204,7 +278,7 @@ amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
 static inline void
 amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
 
 	cmd->header &= ~AMDXDNA_CMD_STATE;
 	cmd->header |= FIELD_PREP(AMDXDNA_CMD_STATE, s);
@@ -213,7 +287,7 @@ amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 static inline enum ert_cmd_state
 amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
 
 	return FIELD_GET(AMDXDNA_CMD_STATE, cmd->header);
 }
@@ -221,7 +295,7 @@ amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 static inline void *
 amdxdna_cmd_get_data(struct amdxdna_gem_obj *abo, u32 *size)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
 
 	*size = abo->mem.size - offsetof(struct amdxdna_cmd, data);
 	return cmd->data;
@@ -231,7 +305,7 @@ amdxdna_cmd_get_data(struct amdxdna_gem_obj *abo, u32 *size)
 static inline void *
 amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
 	u32 num_masks, count;
 
 	if (amdxdna_cmd_get_op(abo) == ERT_CMD_CHAIN)
@@ -250,16 +324,16 @@ amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 	return &cmd->data[num_masks];
 }
 
-static inline int
+static inline u32
 amdxdna_cmd_get_cu_idx(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
 	u32 num_masks, i;
 	u32 *cu_mask;
 	int cu_idx;
 
 	if (amdxdna_cmd_get_op(abo) == ERT_CMD_CHAIN)
-		return -1;
+		return INVALID_CU_IDX;
 
 	num_masks = 1 + FIELD_GET(AMDXDNA_CMD_EXTRA_CU_MASK, cmd->header);
 	cu_mask = cmd->data;

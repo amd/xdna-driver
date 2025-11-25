@@ -72,34 +72,22 @@ public:
   std::unique_ptr<xrt_core::buffer_handle>
   import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl) override;
 
-  virtual std::vector<char>
-  read_aie_mem(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*offset*/, uint32_t /*size*/) override;
-
-  virtual size_t
-  write_aie_mem(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*offset*/, const std::vector<char>& /*data*/) override;
-
-  virtual uint32_t
-  read_aie_reg(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*reg_addr*/) override;
-
-  virtual bool
-  write_aie_reg(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*reg_addr*/, uint32_t /*reg_val*/) override;
-
   int
   get_info(xclDeviceInfo2 *info) const;
 
-  std::shared_ptr<xdna_aie_array> 
+  std::shared_ptr<xdna_aie_array>
   get_aie_array();
 
-  void 
+  void
   register_aie_array(const xdna_hwctx* hwctx_obj);
 
-  bool 
+  bool
   is_aie_registered();
 
   std::string
   get_uuid() const
   {
-    return m_uuid;
+    return m_uuid.to_string();
   }
 
 private:
@@ -109,7 +97,7 @@ private:
   const xrt_core::query::request&
   lookup_query(xrt_core::query::key_type query_key) const override;
   std::shared_ptr<xdna_aie_array> m_aie_array;
-  mutable std::string m_uuid;
+  mutable xrt::uuid m_uuid;
 
 };
 

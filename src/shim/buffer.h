@@ -35,7 +35,7 @@ private:
 
 class drm_bo {
 public:
-  drm_bo(const pdev& pdev, size_t size, int type);
+  drm_bo(const pdev& pdev, size_t size, uint32_t type);
   drm_bo(const pdev& pdev, size_t size, void *uptr);
   drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
   ~drm_bo();
@@ -54,7 +54,8 @@ class buffer : public xrt_core::buffer_handle
 {
 public:
   buffer(const pdev& dev, size_t size, int type);
-  buffer(const pdev& dev, size_t size, void *uptr);
+  buffer(const pdev& dev, size_t size, uint64_t flags);
+  buffer(const pdev& dev, size_t size, void *uptr, uint64_t flags);
   buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl);
   virtual ~buffer();
 
@@ -107,8 +108,6 @@ public:
   virtual void
   unbind_hwctx();
 
-  // Save flags in buffer which later returns via get_properties()
-  void set_flags(uint64_t flags);
   uint64_t get_flags() const;
 
   virtual std::set<bo_id>
@@ -130,9 +129,6 @@ private:
   std::string
   describe() const;
 
-  virtual std::string
-  bo_sub_type_name() const;
-
   void
   mmap_drm_bo(drm_bo *bo); // Obtain void* through mmap()
 
@@ -148,7 +144,8 @@ private:
 class cmd_buffer : public buffer
 {
 public:
-  using buffer::buffer;
+  cmd_buffer(const pdev& dev, size_t size, uint64_t flags);
+  ~cmd_buffer();
 
   void
   bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size) override;
@@ -173,10 +170,10 @@ public:
   std::set<const buffer *>
   get_arg_bos() const override;
 
-private:
-  std::string
-  bo_sub_type_name() const override;
+  std::vector<const cmd_buffer *>&
+  get_subcmd_list() const;
 
+private:
   // Valid only when m_submitted is true.
   mutable uint64_t m_cmd_seq = 0;
   std::map< size_t, std::set<bo_id> > m_args_map;
@@ -190,6 +187,8 @@ private:
   mutable bool m_submitted = false;
   // Changed only once in the life time of cmd BO.
   mutable std::condition_variable m_submission_cv;
+  // For chained cmd, contains submitted sub-cmd pointers.
+  mutable std::vector<const cmd_buffer *> m_subcmds;
 };
 
 class dbg_buffer : public buffer
@@ -208,9 +207,6 @@ public:
   sync(direction dir, size_t size, size_t offset) override;
 
 private:
-  std::string
-  bo_sub_type_name() const override;
-
   void
   config_debug_bo(bool is_detach);
 

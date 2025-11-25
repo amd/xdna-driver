@@ -242,7 +242,18 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {0} },
     },
-    .workspace = "local_shim_test_data/elf_txn_no_cp_timeout_npu4",
+    .workspace = "local_shim_test_data/elf_no_cp_timeout_npu4",
+    .data = "",
+    .type = KERNEL_TYPE_TXN,
+  },
+  {
+    .name = "gemm.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .workspace = "local_shim_test_data/elf_no_cp_gemm_npu4",
     .data = "",
     .type = KERNEL_TYPE_TXN,
   },

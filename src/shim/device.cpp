@@ -374,18 +374,18 @@ struct context_health_info {
   static xrt_core::query::context_health_info::smi_context_health
   fill_health_entry(const amdxdna_drm_hwctx_entry& entry)
   {
-    ert_ctx_health_data new_entry{};
-    new_entry.txn_op_idx = entry.txn_op_idx;
-    new_entry.ctx_pc = entry.ctx_pc;
-    new_entry.fatal_error_type = entry.fatal_error_type;
-    new_entry.fatal_error_exception_type = entry.fatal_error_exception_type;
-    new_entry.fatal_error_exception_pc = entry.fatal_error_exception_pc;
-    new_entry.fatal_error_app_module = entry.fatal_error_app_module;
+    ert_ctx_health_data_v1 new_entry{};
+    new_entry.aie2.txn_op_idx = entry.txn_op_idx;
+    new_entry.aie2.ctx_pc = entry.ctx_pc;
+    new_entry.aie2.fatal_error_type = entry.fatal_error_type;
+    new_entry.aie2.fatal_error_exception_type = entry.fatal_error_exception_type;
+    new_entry.aie2.fatal_error_exception_pc = entry.fatal_error_exception_pc;
+    new_entry.aie2.fatal_error_app_module = entry.fatal_error_app_module;
 
     xrt_core::query::context_health_info::smi_context_health val{};
     val.ctx_id = entry.context_id;
     val.pid = entry.pid;
-    val.health_data = new_entry;
+    val.health_data_v1 = new_entry;
     return val;
   }
   using result_type = std::any;
@@ -466,14 +466,14 @@ struct xocl_errors
     if (key != key_type::xocl_errors)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    // Query all contexts
     amdxdna_async_error* data;
-    const uint32_t drv_output = 32 * sizeof(*data);
+    const uint32_t drv_output = sizeof(*data);
     std::vector<char> payload(drv_output);
+    // Only request last async error
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_LAST_ASYNC_ERR,
       .element_size = sizeof(*data),
-      .num_element = 32,
+      .num_element = 1,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
@@ -485,6 +485,9 @@ struct xocl_errors
 
     query::xocl_errors::result_type output(sizeof(xcl_errors));
     xcl_errors *out_xcl_errors = reinterpret_cast<xcl_errors*>(output.data());
+    if (arg.num_element > 1)
+      throw xrt_core::query::exception("Driver returned more than one async error entry");
+
     out_xcl_errors->num_err = arg.num_element;
     for (uint32_t i = 0; i < arg.num_element; i++) {
       out_xcl_errors->errors[i].err_code = data[i].err_code;
@@ -554,7 +557,7 @@ struct performance_mode
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_get_power_mode state;
+    amdxdna_drm_get_power_mode state = {};
 
     amdxdna_drm_get_info arg = {
         .param = DRM_AMDXDNA_GET_POWER_MODE,
@@ -592,7 +595,7 @@ struct preemption
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state force;
+    amdxdna_drm_attribute_state force = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
@@ -609,7 +612,7 @@ struct preemption
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state force;
+    amdxdna_drm_attribute_state force = {};
     force.state = std::any_cast<uint32_t>(any);
 
     amdxdna_drm_set_state arg = {
@@ -630,23 +633,65 @@ struct event_trace
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    // TODO : Implement IOCTL to set event_trace configuration
+    auto config = std::any_cast<xrt_core::query::event_trace_state::value_type>(any);
+    amdxdna_drm_set_dpt_state fw_trace;
+    fw_trace.action = !!config.action;
+    fw_trace.config = config.categories;
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FW_TRACE_STATE,
+      .buffer_size = sizeof(fw_trace),
+      .buffer = reinterpret_cast<uintptr_t>(&fw_trace)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
   }
 
   static result_type
   get(const xrt_core::device* device, key_type key, const std::any& any)
   {
+    xrt_core::query::firmware_debug_buffer output{};
+
     switch (key) {
       case key_type::event_trace_data:
       {
-        // static query::firmware_debug_buffer log_buffer;
-        // TODO : implement IOCTL to get event_trace data
-        // return log_buffer;
+        auto request = std::any_cast<xrt_core::query::firmware_debug_buffer>(any);
+        uint32_t offset = request.size - sizeof(amdxdna_dpt_metadata);
+        amdxdna_dpt_metadata *fw_trace = reinterpret_cast<amdxdna_dpt_metadata *>(
+          static_cast<std::byte *>(request.data) + offset
+        );
+
+        fw_trace->offset = request.abs_offset;
+        fw_trace->size = offset;
+        fw_trace->watch = request.b_wait;
+
+        amdxdna_drm_get_array arg = {
+          .param = DRM_AMDXDNA_FW_TRACE,
+          .element_size = static_cast<std::uint32_t>(request.size),
+          .num_element = 1,
+          .buffer = reinterpret_cast<uintptr_t>(request.data)
+        };
+
+        try {
+          auto& pci_dev_impl = get_pcidev_impl(device);
+          pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+        } catch (const xrt_core::system_error& e) {
+          if(e.get_code() == -EINTR)
+            throw xrt_core::error("Query interrupted by user");
+          throw std::runtime_error("Failed to get event_trace");
+        }
+
+        output.abs_offset = fw_trace->offset;
+        output.size = fw_trace->size;
+        output.b_wait = fw_trace->watch;
+        output.data = request.data;
+        return output;
+
       }
       default:
         throw xrt_core::error("Unsupported event_trace query key");
     }
-    // TODO : Implement IOCTL to get event_trace configuration
   }
 
   static result_type
@@ -655,9 +700,25 @@ struct event_trace
     switch (key) {
     case key_type::event_trace_version:
     {
-      // query::event_trace_version::result_type version;
-      // TODO : Implement IOCTL to get firmware event_trace yaml version
-      // return version;
+      query::event_trace_version::result_type version;
+      amdxdna_drm_get_dpt_state config;
+
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_TRACE_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get event_trace version");
+      }
+
+      memcpy(&version, &config.version, sizeof(version));
+      return version;
     }
     case key_type::event_trace_config:
     {
@@ -665,11 +726,27 @@ struct event_trace
     }
     case key_type::event_trace_state:
     {
-      // query::event_trace_state::result_type state;
-      // TODO : implement IOCTL to get event_trace state
-      // return state;
-    }
+      query::event_trace_state::result_type state;
+      amdxdna_drm_get_dpt_state config;
 
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_TRACE_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get event_trace state");
+      }
+
+      state.action = config.status;
+      state.categories = config.config;
+      return state;
+    }
     default:
       throw xrt_core::error("Unsupported event_trace query key");
     }
@@ -683,36 +760,91 @@ struct firmware_log
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    //TODO : implement IOCTL to set firmware log configuration
+    auto config = std::any_cast<xrt_core::query::firmware_log_state::value_type>(any);
+    amdxdna_drm_set_dpt_state fw_log;
+    fw_log.action = !!config.action;
+    fw_log.config = config.log_level;
 
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_FW_LOG_STATE,
+      .buffer_size = sizeof(fw_log),
+      .buffer = reinterpret_cast<uintptr_t>(&fw_log)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
   }
 
   static result_type
   get(const xrt_core::device* device, key_type key, const std::any& any)
   {
+    xrt_core::query::firmware_debug_buffer output{};
+
     switch (key) {
       case key_type::firmware_log_data:
       {
-        // static query::firmware_debug_buffer log_buffer;
-        // TODO : implement IOCTL to get firmware_log data
-        // return log_buffer;
+        auto request = std::any_cast<xrt_core::query::firmware_debug_buffer>(any);
+        uint32_t offset = request.size - sizeof(amdxdna_dpt_metadata);
+        amdxdna_dpt_metadata *fw_log = reinterpret_cast<amdxdna_dpt_metadata *>(
+          static_cast<std::byte *>(request.data) + offset
+        );
+
+        fw_log->offset = request.abs_offset;
+        fw_log->size = offset;
+        fw_log->watch = request.b_wait;
+
+        amdxdna_drm_get_array arg = {
+          .param = DRM_AMDXDNA_FW_LOG,
+          .element_size = static_cast<std::uint32_t>(request.size),
+          .num_element = 1,
+          .buffer = reinterpret_cast<uintptr_t>(request.data)
+        };
+
+        try {
+          auto& pci_dev_impl = get_pcidev_impl(device);
+          pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+        } catch (const xrt_core::system_error& e) {
+          if(e.get_code() == -EINTR)
+            throw xrt_core::error("Query interrupted by user");
+          throw std::runtime_error("Failed to get firmware log");
+        }
+
+        output.abs_offset = fw_log->offset;
+        output.size = fw_log->size;
+        output.b_wait = fw_log->watch;
+        output.data = request.data;
+        return output;
       }
       default:
         throw xrt_core::error("Unsupported firmware_log query key");
     }
-    // TODO : Implement IOCTL to get firmware_log configuration
   }
 
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
     switch (key) {
-    
     case key_type::firmware_log_version:
     {
-      // query::firmware_log_version::result_type version;
-      // TODO : implement IOCTL to get firmware log version
-      // return version;
+      query::firmware_log_version::result_type version;
+      amdxdna_drm_get_dpt_state config;
+
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_LOG_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get firmware log version");
+      }
+
+      memcpy(&version, &config.version, sizeof(version));
+      return version;
     }
     case key_type::firmware_log_config:
     {
@@ -720,9 +852,26 @@ struct firmware_log
     }
     case key_type::firmware_log_state:
     {
-      // query::firmware_log_state::result_type state;
-      // TODO : implement IOCTL to get firmware log state
-      // return state;
+      query::firmware_log_state::result_type state;
+      amdxdna_drm_get_dpt_state config;
+
+      amdxdna_drm_get_array arg = {
+        .param = DRM_AMDXDNA_FW_LOG_CONFIG,
+        .element_size = sizeof(amdxdna_drm_get_dpt_state),
+        .num_element = 1,
+        .buffer = reinterpret_cast<uintptr_t>(&config)
+      };
+
+      try {
+        auto& pci_dev_impl = get_pcidev_impl(device);
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } catch (const xrt_core::system_error& e) {
+        throw std::runtime_error("Failed to get firmware log state");
+      }
+
+      state.action = config.status;
+      state.log_level = config.config;
+      return state;
     }
     default:
       throw xrt_core::error("Unsupported firmware_log query key");
@@ -753,6 +902,13 @@ struct archive_path
         return std::string(get_shim_data_dir() + "bins/xrt_smi_strx.a");
       case xrt_core::smi::smi_hardware_config::hardware_type::phx:
         return std::string(get_shim_data_dir() + "bins/xrt_smi_phx.a");
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f1:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f2:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f3:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B01:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
+      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_npu3.a");
       default:
         throw xrt_core::error("Unsupported hardware type");
       }
@@ -770,7 +926,7 @@ struct frame_boundary_preemption
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state preempt;
+    amdxdna_drm_attribute_state preempt = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
@@ -787,7 +943,7 @@ struct frame_boundary_preemption
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state preempt;
+    amdxdna_drm_attribute_state preempt = {};
     preempt.state = std::any_cast<uint32_t>(any);
 
     amdxdna_drm_set_state arg = {
@@ -980,7 +1136,7 @@ struct clock_topology
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_query_clock_metadata clock_metadata;
+    amdxdna_drm_query_clock_metadata clock_metadata = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
@@ -1020,7 +1176,7 @@ struct resource_info
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_get_resource_info resource_info;
+    amdxdna_drm_get_resource_info resource_info = {};
 
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_RESOURCE_INFO,
@@ -1281,267 +1437,6 @@ struct xrt_smi_lists
   }
 };
 
-struct runner{
-  static std::any
-  get(const xrt_core::device* /*device*/, key_type key)
-  {
-    throw xrt_core::query::no_such_key(key, "Not implemented");
-  }
-
-  static std::any
-  get(const xrt_core::device* device, key_type key, const std::any& param)
-  {
-    if (key != key_type::runner)
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-
-    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-    xrt_core::smi::smi_hardware_config smi_hrdw;
-    auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
-
-    std::string file_name;
-    std::string path;
-    const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
-    switch (runner_type) {
-    case xrt_core::query::runner::type::throughput_path:
-      path = std::string("bins/Runner/throughput/"); 
-      break;
-    case xrt_core::query::runner::type::throughput_recipe:
-      file_name = std::string("Runner/throughput/recipe_throughput");
-      break;
-    case xrt_core::query::runner::type::throughput_profile:
-      file_name = std::string("Runner/throughput/profile_throughput");
-      break;
-    case xrt_core::query::runner::type::latency_path:
-      path = std::string("bins/Runner/latency/");
-      break;
-    case xrt_core::query::runner::type::latency_recipe:
-      file_name = std::string("Runner/latency/recipe_latency");
-      break;
-    case xrt_core::query::runner::type::latency_profile:
-      file_name = std::string("Runner/latency/profile_latency");
-      break;
-    case xrt_core::query::runner::type::df_bandwidth_path:
-      path = std::string("bins/Runner/df_bandwidth/");
-      break;
-    case xrt_core::query::runner::type::df_bandwidth_recipe:
-      file_name = std::string("Runner/df_bandwidth/recipe_df_bandwidth");
-      break;
-    case xrt_core::query::runner::type::df_bandwidth_profile:
-      file_name = std::string("Runner/df_bandwidth/profile_df_bandwidth");
-      break;
-    case xrt_core::query::runner::type::gemm_path:
-      path = std::string("bins/Runner/gemm/");
-      break;
-    case xrt_core::query::runner::type::gemm_recipe:
-      file_name = std::string("Runner/gemm/recipe_gemm");
-      break;
-    case xrt_core::query::runner::type::gemm_profile:
-      file_name = std::string("Runner/gemm/profile_gemm");
-      break;
-    case xrt_core::query::runner::type::aie_reconfig_overhead_path:
-      path = std::string("bins/Runner/aie_reconfig_overhead/");
-      break;
-    case xrt_core::query::runner::type::aie_reconfig_overhead_recipe:
-      file_name = std::string("Runner/aie_reconfig_overhead/recipe_aie_reconfig");
-      break;
-    case xrt_core::query::runner::type::aie_reconfig_overhead_profile:
-      file_name = std::string("Runner/aie_reconfig_overhead/profile_aie_reconfig");
-      break;
-    case xrt_core::query::runner::type::aie_reconfig_overhead_nop_recipe:
-      file_name = std::string("Runner/aie_reconfig_overhead/recipe_aie_reconfig_nop");
-      break;
-    case xrt_core::query::runner::type::cmd_chain_latency_path:
-      path = std::string("bins/Runner/cmd_chain_latency/");
-      break;
-    case xrt_core::query::runner::type::cmd_chain_latency_recipe:
-      file_name = std::string("Runner/cmd_chain_latency/recipe_cmd_chain_latency");
-      break;
-    case xrt_core::query::runner::type::cmd_chain_latency_profile:
-      file_name = std::string("Runner/cmd_chain_latency/profile_cmd_chain_latency");
-      break;
-    case xrt_core::query::runner::type::cmd_chain_throughput_path:
-      path = std::string("bins/Runner/cmd_chain_throughput/");
-      break;
-    case xrt_core::query::runner::type::cmd_chain_throughput_recipe:
-      file_name = std::string("Runner/cmd_chain_throughput/recipe_cmd_chain_throughput");
-      break;
-    case xrt_core::query::runner::type::cmd_chain_throughput_profile:
-      file_name = std::string("Runner/cmd_chain_throughput/profile_cmd_chain_throughput");
-      break;
-    case xrt_core::query::runner::type::tct_one_column_recipe:
-      file_name = std::string("Runner/tct_one_column/recipe_tct_one_column");
-      break;
-    case xrt_core::query::runner::type::tct_one_column_profile:
-      file_name = std::string("Runner/tct_one_column/profile_tct_one_column");
-      break;
-    case xrt_core::query::runner::type::tct_one_column_path:
-      path = std::string("bins/Runner/tct_one_column/");
-      break;
-    case xrt_core::query::runner::type::tct_all_column_recipe:
-      file_name = std::string("Runner/tct_all_column/recipe_tct_all_column");
-      break;
-    case xrt_core::query::runner::type::tct_all_column_profile:
-      file_name = std::string("Runner/tct_all_column/profile_tct_all_column");
-      break;
-    case xrt_core::query::runner::type::tct_all_column_path:
-      path = std::string("bins/Runner/tct_all_column/");
-      break;
-    default:
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-    }
-
-    if (!path.empty())
-      return get_shim_data_dir() + path;
-
-    switch (hardware_type)
-    {
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxA0:
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
-      case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
-        file_name += "_strx.json";
-        break;
-      case xrt_core::smi::smi_hardware_config::hardware_type::phx:
-        file_name += "_phx.json";
-        break;
-      default:
-        // For all other hardware types, we assume the runner is not available
-        throw xrt_core::query::no_such_key(key, "Test not supported on this device type");
-    } 
-
-    return get_shim_data_dir() + boost::str(boost::format("bins/%s")
-      % file_name);
-  }
-};
-
-struct xclbin_name
-{
-  static std::any
-  get(const xrt_core::device* /*device*/, key_type key)
-  {
-    throw xrt_core::query::no_such_key(key, "Not implemented");
-  }
-
-  static std::any
-  get(const xrt_core::device* device, key_type key, const std::any& param)
-  {
-    if (key != key_type::xclbin_name)
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-
-    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-
-    std::string xclbin_name;
-    const auto xclbin_type = std::any_cast<xrt_core::query::xclbin_name::type>(param);
-    switch (xclbin_type) {
-    case xrt_core::query::xclbin_name::type::validate:
-      xclbin_name = "validate.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::validate_elf:
-      xclbin_name = "validate_elf.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::gemm:
-      xclbin_name = "gemm.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::gemm_elf:
-      xclbin_name = "gemm_elf.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::preemption_4x4:
-      xclbin_name = "preemption_4x4.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::preemption_4x8:
-      xclbin_name = "preemption_4x8.xclbin";
-      break;
-    case xrt_core::query::xclbin_name::type::mobilenet_elf:
-      xclbin_name = "mobilenet_4col.xclbin";
-      break;
-    }
-
-    return get_shim_data_dir() + boost::str(boost::format("bins/%04x_%02x/%s")
-      % pcie_id.device_id
-      % static_cast<uint16_t>(pcie_id.revision_id)
-      % xclbin_name);
-  }
-};
-struct mobilenet
-{
-  using result_type = std::any;
-
-  static result_type
-  get(const xrt_core::device* /*device*/, key_type key)
-  {
-    throw xrt_core::query::no_such_key(key, "Not implemented");
-  }
-
-  static result_type
-  get(const xrt_core::device* /*device*/, key_type key, const std::any& reqType)
-  {
-    if (key != key_type::mobilenet)
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-
-    std::string bin_name;
-    const auto req_type = std::any_cast<xrt_core::query::mobilenet::type>(reqType);
-    switch (req_type) {
-    case xrt_core::query::mobilenet::type::mobilenet_ifm:
-      bin_name = "mobilenet_ifm.bin";
-      break;
-    case xrt_core::query::mobilenet::type::mobilenet_param:
-      bin_name = "mobilenet_param.bin";
-      break;
-    case xrt_core::query::mobilenet::type::buffer_sizes:
-      bin_name = "buffer_sizes.json";
-      break;
-    default:
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-    }
-    return get_shim_data_dir() + boost::str(boost::format("bins/Mobilenet/%s") % bin_name);
-  }
-};
-
-
-struct elf_name
-{
-  static std::any
-  get(const xrt_core::device* /*device*/, key_type key)
-  {
-    throw xrt_core::query::no_such_key(key, "Not implemented");
-  }
-
-  static std::any
-  get(const xrt_core::device* device, key_type key, const std::any& param)
-  {
-    if (key != key_type::elf_name)
-      throw xrt_core::query::no_such_key(key, "Not implemented");
-
-    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-
-    std::string elf_file;
-    switch (std::any_cast<xrt_core::query::elf_name::type>(param)) {
-    case xrt_core::query::elf_name::type::nop:
-      elf_file = "nop.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_noop_4x4:
-      elf_file = "preemption_noop_4x4.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_noop_4x8:
-      elf_file = "preemption_noop_4x8.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_memtile_4x4:
-      elf_file = "preemption_memtile_4x4.elf";
-      break;
-    case xrt_core::query::elf_name::type::preemption_memtile_4x8:
-      elf_file = "preemption_memtile_4x8.elf";
-      break;
-    case xrt_core::query::elf_name::type::mobilenet:
-      elf_file = "mobilenet_4col.elf";
-      break;
-    }
-
-    return get_shim_data_dir() + boost::str(boost::format("bins/%04x_%02x/%s")
-      % pcie_id.device_id
-      % static_cast<uint16_t>(pcie_id.revision_id)
-      % elf_file);
-  }
-};
 
 struct sub_device_path
 {
@@ -1669,7 +1564,7 @@ initialize_query_table()
 {
   emplace_func0_request<query::aie_partition_info,             partition_info>();
   emplace_func0_request<query::xocl_errors,                    xocl_errors>();
-  emplace_func1_request<query::context_health_info,           context_health_info>();
+  emplace_func1_request<query::context_health_info,            context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
   emplace_func0_request<query::aie_tiles_stats,                aie_info>();
   emplace_func1_request<query::aie_tiles_status_info,          aie_info>();
@@ -1695,7 +1590,7 @@ initialize_query_table()
   emplace_func0_getput<query::performance_mode,                performance_mode>();
   emplace_func0_getput<query::preemption,                      preemption>();
   emplace_func0_getput<query::frame_boundary_preemption,       frame_boundary_preemption>();
-  
+
   emplace_func1_request<query::event_trace_data,               event_trace>();
   emplace_func0_request<query::event_trace_version,            event_trace>();
   emplace_func0_request<query::event_trace_config,             event_trace>();
@@ -1715,10 +1610,6 @@ initialize_query_table()
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
-  emplace_func1_request<query::elf_name,                       elf_name>();
-  emplace_func1_request<query::mobilenet,                      mobilenet>();
-  emplace_func1_request<query::runner,                         runner>();
-  emplace_func1_request<query::xclbin_name,                    xclbin_name>();
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
   emplace_func1_request<query::firmware_version,               firmware_version>();
@@ -1750,33 +1641,6 @@ import_fd(pid_t pid, int ehdl)
     }
   }
   return fd;
-}
-
-int
-bo_flags_to_type(uint64_t bo_flags, bool has_dev_mem)
-{
-  auto flags = xcl_bo_flags{bo_flags};
-  auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
-
-  /*
-   * boflags scope:
-   * HOST_ONLY: any input, output buffers, can be large size
-   * CACHEABLE: control code buffer, can be large size too
-   *            on cache coherent systems, no need to sync.
-   * EXECBUF: small size buffer that can be accessed by both
-   *          userland(map), kernel(kva) and device(dev_addr).
-   */
-  switch (boflags) {
-  case XCL_BO_FLAGS_HOST_ONLY:
-    return AMDXDNA_BO_SHARE;
-  case XCL_BO_FLAGS_CACHEABLE:
-    return has_dev_mem ? AMDXDNA_BO_DEV : AMDXDNA_BO_SHARE;
-  case XCL_BO_FLAGS_EXECBUF:
-    return AMDXDNA_BO_CMD;
-  default:
-    break;
-  }
-  return AMDXDNA_BO_INVALID;
 }
 
 }
@@ -1887,33 +1751,22 @@ std::unique_ptr<xrt_core::buffer_handle>
 device::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
-  // Sanity check
   auto f = xcl_bo_flags{flags};
   if (f.boflags == XCL_BO_FLAGS_NONE)
     shim_not_supported_err("unsupported buffer type: none flag");
-  auto type = bo_flags_to_type(flags, !!m_pdev.get_heap_vaddr());
-  if (type == AMDXDNA_BO_INVALID)
-    shim_not_supported_err("Bad BO flags");
-  if (userptr && type != AMDXDNA_BO_SHARE)
-    shim_not_supported_err("Non-AMDXDNA_BO_SHARE user ptr BO");
-  if (reinterpret_cast<uintptr_t>(userptr) % alignof(uint32_t))
-    shim_not_supported_err("User ptr must be at least uint32_t aligned");
 
   std::unique_ptr<buffer> bo;
   if (f.use == XRT_BO_USE_DEBUG)
-    bo = std::make_unique<dbg_buffer>(get_pdev(), size, type);
+    bo = std::make_unique<dbg_buffer>(get_pdev(), size, flags);
   else if (f.use == XRT_BO_USE_DTRACE ||
     f.use == XRT_BO_USE_LOG ||
-    f.use == XRT_BO_USE_DEBUG_QUEUE
-    /*f.use == XRT_BO_USE_UC_DEBUG*/) //need define last one in xrt 
-    bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, type);
-  else if (type == AMDXDNA_BO_CMD)
-    bo = std::make_unique<cmd_buffer>(get_pdev(), size, type);
-  else if (!userptr)
-    bo = std::make_unique<buffer>(get_pdev(), size, type);
+    f.use == XRT_BO_USE_DEBUG_QUEUE ||
+    f.use == XRT_BO_USE_UC_DEBUG)
+    bo = std::make_unique<uc_dbg_buffer>(get_pdev(), size, flags);
+  else if (f.boflags == (XCL_BO_FLAGS_EXECBUF >> 24))
+    bo = std::make_unique<cmd_buffer>(get_pdev(), size, flags);
   else
-    bo = std::make_unique<buffer>(get_pdev(), size, userptr);
-  bo->set_flags(flags);
+    bo = std::make_unique<buffer>(get_pdev(), size, userptr, flags);
   return bo;
 }
 

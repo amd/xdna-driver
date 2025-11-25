@@ -8,6 +8,7 @@
 #include "aie2_pci.h"
 
 /* Address definition from NPU1 docs */
+#define MPNPU_PWAITMODE			0x3010034
 #define MPNPU_PUB_SEC_INTR		0x3010090
 #define MPNPU_PUB_PWRMGMT_INTR		0x3010094
 #define MPNPU_PUB_SCRATCH2		0x30100A0
@@ -63,6 +64,11 @@ const struct msg_op_ver npu1_msg_op_tbl[] = {
 	{ 0 },
 };
 
+static const struct aie2_fw_feature_tbl npu1_fw_feature_table[] = {
+	{ .feature = AIE2_NPU_COMMAND, .min_minor = 8 },
+	{ 0 }
+};
+
 const struct amdxdna_dev_priv npu1_dev_priv = {
 	.fw_path        = "amdnpu/1502_00/npu.dev.sbin",
 	.protocol_major = 5,
@@ -70,6 +76,7 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 	.rt_config	= npu1_default_rt_cfg,
 	.dpm_clk_tbl	= npu1_dpm_clk_table,
 	.optional_msg	= npu1_msg_op_tbl,
+	.fw_feature_tbl = npu1_fw_feature_table,
 	.col_opc	= 2048,
 	.mbox_dev_addr  = NPU1_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
@@ -89,6 +96,7 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 		DEFINE_BAR_OFFSET(PSP_INTR_REG,   NPU1_PSP, MPNPU_PUB_SEC_INTR),
 		DEFINE_BAR_OFFSET(PSP_STATUS_REG, NPU1_PSP, MPNPU_PUB_SCRATCH2),
 		DEFINE_BAR_OFFSET(PSP_RESP_REG,   NPU1_PSP, MPNPU_PUB_SCRATCH3),
+		DEFINE_BAR_OFFSET(PSP_PWAITMODE_REG, NPU1_PSP, MPNPU_PWAITMODE),
 	},
 	.smu_regs_off   = {
 		DEFINE_BAR_OFFSET(SMU_CMD_REG,  NPU1_SMU, MPNPU_PUB_SCRATCH5),
@@ -99,7 +107,6 @@ const struct amdxdna_dev_priv npu1_dev_priv = {
 	},
 	.hw_ops		= {
 		.set_dpm = npu1_set_dpm,
-		.get_tops = npu1_get_tops,
 	},
 
 #ifdef AMDXDNA_DEVEL

@@ -31,6 +31,9 @@ const struct msg_op_ver npu4_msg_op_tbl[] = {
 	{ 15, MSG_OP_UPDATE_PROPERTY },
 	{ 18, MSG_OP_GET_APP_HEALTH },
 	{ 19, MSG_OP_CONFIG_FW_LOG },
+	{ 19, MSG_OP_START_FW_TRACE },
+	{ 19, MSG_OP_STOP_FW_TRACE },
+	{ 19, MSG_OP_SET_FW_TRACE_CATEGORIES },
 	{ 0 },
 };
 
@@ -43,6 +46,12 @@ const struct dpm_clk_freq npu4_dpm_clk_table[] = {
 	{1056, 1408},
 	{1152, 1584},
 	{1267, 1800},
+	{ 0 }
+};
+
+const struct aie2_fw_feature_tbl npu4_fw_feature_table[] = {
+	{ .feature = AIE2_NPU_COMMAND, .min_minor = 15 },
+	{ .feature = AIE2_PREEMPT, .min_minor = 12 },
 	{ 0 }
 };
 

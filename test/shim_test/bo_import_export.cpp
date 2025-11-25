@@ -88,3 +88,19 @@ TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device>& s
   boset2.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev, getpid(), share->get_export_handle());
   boset2.run();
 }
+
+void
+TEST_export_bo_then_close_device(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
+{
+  auto dev = sdev.get();
+  std::unique_ptr<xrt_core::shared_handle> share;
+
+  // Create IO test BO set and export input BO
+  {
+    io_test_bo_set boset1{dev};
+    share = boset1.get_bos()[IO_TEST_BO_INPUT].tbo->get()->share();
+  }
+  // Close device fd while holding onto the exported BO
+  sdev.reset();
+  // Exported BO is freed here
+}

@@ -14,7 +14,6 @@ Options:
   -clean                  Clean build directory
   -debug                  Debug build and generate .deb package
   -release                Release build and generate .deb package
-  -example                Example build
   -package                Ignored (present for backward compatibility)
   -j <n>                  Compile parallel (default: num of CPUs)
   -nocmake                Do not regenerate cmake files
@@ -74,18 +73,6 @@ package_targets()
   cd ..
 }
 
-build_example()
-{
-
-  mkdir -p $EXAMPLE_BUILD_DIR
-  cd $EXAMPLE_BUILD_DIR
-
-  time $CMAKE $BUILD_DIR/../example/
-  time make
-
-  cd ..
-}
-
 download_npufws()
 {
   local firmware_dir=${DOWNLOAD_BINS_DIR}/firmware
@@ -114,6 +101,31 @@ download_npufws()
     done
 }
 
+download_vtd_archives()
+{
+  local vtd_dir=${DOWNLOAD_BINS_DIR}/vtd_archives
+
+  jq -c '.vtd_archives[]' "$INFO_JSON" |
+    while IFS= read -r line; do
+      local device=$(echo $line | jq -r '.device')
+      local filename=$(echo $line | jq -r '.filename')
+      local url=$(echo $line | jq -r '.url')
+
+      if [[ -z "$url" ]]; then
+        echo "Empty URL for $device VTD archive, SKIP."
+        continue
+      fi
+
+      echo "Download $device VTD archive:"
+      if [ -f "${vtd_dir}/$filename" ]; then
+        rm ${vtd_dir}/$filename
+      fi
+      mkdir -p ${vtd_dir}
+      wget -O ${vtd_dir}/$filename $url
+
+    done
+}
+
 do_build()
 {
   BUILD_TYPE=$1
@@ -123,6 +135,8 @@ do_build()
     if [[ $skip_kmod == 0 ]]; then
       download_npufws
     fi
+    # Download VTD archives
+    download_vtd_archives
     # Prepare xbutil validate related files for packaging
     mkdir -p $XBUTIL_VALIDATE_BINS_DIR
     cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
@@ -136,7 +150,6 @@ distclean=0
 debug=1
 release=0
 package=0
-example=0
 nocmake=0
 verbose=
 skip_kmod=0
@@ -165,9 +178,6 @@ while [ $# -gt 0 ]; do
     -release)
       debug=0
       release=1
-      ;;
-    -example)
-      example=1
       ;;
     -package)
       package=1
@@ -217,7 +227,6 @@ RELEASE_BUILD_TYPE=Release
 CMAKE=cmake
 CMAKE_MAJOR_VERSION=`cmake --version | head -n 1 | awk '{print $3}' |awk -F. '{print $1}'`
 cmake_extra_flags=""
-EXAMPLE_BUILD_DIR=example_build
 INFO_JSON=${BUILD_DIR}/../tools/info.json
 DOWNLOAD_BINS_DIR=./amdxdna_bins
 XBUTIL_VALIDATE_BINS_DIR=$DOWNLOAD_BINS_DIR/download_raw/xbutil_validate/bins
@@ -244,15 +253,10 @@ fi
 
 if [[ $clean == 1 ]]; then
   echo "Only clean the build directory, will not perform other options if apply"
-  rm -rf $DEBUG_BUILD_TYPE $RELEASE_BUILD_TYPE $EXAMPLE_BUILD_DIR
+  rm -rf $DEBUG_BUILD_TYPE $RELEASE_BUILD_TYPE
   if [[ $distclean == 1 ]]; then
     rm -rf ${DOWNLOAD_BINS_DIR}
   fi
-  exit 0
-fi
-
-if [[ $example == 1 ]]; then
-  build_example
   exit 0
 fi
 

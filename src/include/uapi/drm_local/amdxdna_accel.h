@@ -80,15 +80,19 @@ extern "C" {
 #define	AMDXDNA_QOS_LOW_PRIORITY	0x280
 /* The maximum number of priority */
 #define	AMDXDNA_NUM_PRIORITY		4
+/* user start column request or not */
+#define	USER_START_COL_NOT_REQUESTED	0xFF
 
 /**
- * struct qos_info - QoS information for driver.
+ * struct amdxdna_qos_info - QoS information for driver.
  * @gops: Giga operations per workload.
  * @fps: Workload per second.
- * @dma_bandwidth: DMA bandwidtha.
+ * @dma_bandwidth: DMA bandwidth.
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @user_start_col: User preferred start column, or USER_START_COL_NOT_REQUESTED if not specified.
+ * @reserved: Padding for 64-bit alignment (MBZ, reserved for future use).
  *
  * User program can provide QoS hints to driver.
  */
@@ -99,6 +103,8 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 user_start_col;
+	__u32 reserved; /* ensure 64-bit alignment */
 };
 
 /**
@@ -258,8 +264,7 @@ struct amdxdna_drm_create_bo {
 #define	AMDXDNA_BO_SHARE	1 /* Regular BO shared between user and device */
 #define	AMDXDNA_BO_DEV_HEAP	2 /* Shared host memory to device as heap memory */
 #define	AMDXDNA_BO_DEV		3 /* Allocated from BO_DEV_HEAP */
-#define	AMDXDNA_BO_CMD		4 /* User and driver accessible BO */
-#define	AMDXDNA_BO_DMA		5 /* DRM GEM DMA BO */
+#define	AMDXDNA_BO_CMD		4 /* Same as share BO, used only by XRT internally */
 	__u32	type;
 	__u32	handle;
 };
@@ -701,8 +706,6 @@ struct amdxdna_drm_hwctx_entry {
  *            Refer to amdxnda_xrt_error.h for error code encoding details
  * @ts_us: timestamp in us
  * @ex_err_code: extra error code
- * @reserved0: reserved field
- * @reserved1: reserved field
  *
  * This structure definition refers to XRT error code definition
  */
@@ -710,7 +713,108 @@ struct amdxdna_async_error {
 	__u64 err_code;
 	__u64 ts_us;
 	__u64 ex_err_code;
-	__u64 reserved0;
+};
+
+/**
+ * struct amdxdna_dpt_metadata - DPT metadata shared between shim and driver
+ * @offset: ever increamenting DPT read pointer
+ * @size: size of the buffer
+ * @watch: boolean value to indicate if this request can wait in the kernel until new data is
+ *	   available
+ */
+struct amdxdna_dpt_metadata {
+	__u64 offset;
+	__u32 size;
+	__u8 watch;
+	__u8 reserved[3];
+};
+
+/**
+ * struct amdxdna_drm_set_dpt_state - Structure to configure DPT
+ * @action: 1 to enable. 0 to disable
+ * @config: for firmware logging this value indicates log level
+ */
+struct amdxdna_drm_set_dpt_state {
+	__u32 action;
+	__u32 config;
+	__u64 reserved;
+};
+
+/**
+ * struct amdxdna_drm_get_dpt_state - Structure to get current DPT state
+ * @version: Payload version
+ * @status: 1 implies enabled. 0 implies disabled
+ * @config: signifies log level for firmware logging or categories for firmware trace
+ */
+struct amdxdna_drm_get_dpt_state {
+	__u32 version;
+	__u32 status;
+	__u32 config;
+	__u32 reserved;
+};
+
+/**
+ * struct amdxdna_drm_aie_tile_access - The data for AIE memory/register read/write
+ * @pid: The Process ID of the process that created this context.
+ * @context_id: The hw context id.
+ * @col:   The AIE column index
+ * @row:   The AIE row index
+ * @addr:  The AIE memory address to read/write
+ * @size:  The size of bytes to read/write
+ *
+ * This is used for DRM_AMDXDNA_AIE_TILE_READ and DRM_AMDXDNA_AIE_TILE_WRITE
+ * parameters.
+ */
+struct amdxdna_drm_aie_tile_access {
+	__u64 pid;
+	__u32 context_id;
+	__u32 col;
+	__u32 row;
+	__u32 addr;
+	__u32 size;
+	__u32 pad;
+};
+
+/**
+ * struct amdxdna_drm_aie_coredump - The data for AIE coredump
+ * @pid: The Process ID of the process that created this context.
+ * @context_id: The hw context id.
+ *
+ * This is used for DRM_AMDXDNA_AIE_COREDUMP parameters.
+ */
+struct amdxdna_drm_aie_coredump {
+	__u64 pid;
+	__u32 context_id;
+	__u32 pad;
+};
+
+/**
+ * struct amdxdna_drm_bo_usage - The BO usage statistics
+ * @pid: The ID of the process to query from
+ * @total_usage: Total BO size used by process
+ * @internal_usage: Total internal BO size used by process
+ * @heap_usage: Total device BO size used by process
+ *
+ * This is used for DRM_AMDXDNA_BO_USAGE parameters.
+ *
+ * This is for querying BO mem foot print.
+ * BOs managed by XRT/SHIM/driver is counted as internal.
+ * Others are counted as external which are managed by applications.
+ *
+ * Among all types of BOs:
+ *   AMDXDNA_BO_DEV_HEAP - is counted for internal.
+ *   AMDXDNA_BO_SHARE    - is counted for external.
+ *   AMDXDNA_BO_CMD      - is counted for internal.
+ *   AMDXDNA_BO_DEV      - is counted by heap_usage only, not internal
+ *                         or external. It does not add to the total memory
+ *                         foot print since its mem comes from heap which is
+ *                         already accounted as internal.
+ */
+struct amdxdna_drm_bo_usage {
+	__s64 pid;
+	__u64 total_usage;
+	__u64 internal_usage;
+	__u64 heap_usage;
 };
 
 /**
@@ -723,7 +827,14 @@ struct amdxdna_async_error {
 struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_HW_CONTEXT_ALL	0
 #define DRM_AMDXDNA_HW_CONTEXT_BY_ID	1
-#define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2	/* Get last async error */
+#define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
+#define DRM_AMDXDNA_FW_LOG		3
+#define DRM_AMDXDNA_FW_TRACE		4
+#define DRM_AMDXDNA_AIE_COREDUMP	5
+#define DRM_AMDXDNA_BO_USAGE		6
+#define DRM_AMDXDNA_FW_LOG_CONFIG	7
+#define DRM_AMDXDNA_FW_TRACE_CONFIG	8
+#define DRM_AMDXDNA_AIE_TILE_READ	9
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
@@ -754,6 +865,10 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_WRITE_AIE_REG		2
 #define	DRM_AMDXDNA_SET_FORCE_PREEMPT		3
 #define	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT	4
+#define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
+#define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
+#define	DRM_AMDXDNA_AIE_TILE_WRITE		7
+
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

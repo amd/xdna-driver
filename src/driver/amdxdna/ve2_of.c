@@ -6,9 +6,10 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/xlnx-ai-engine.h>
+#include <linux/firmware.h>
 
 #include "ve2_of.h"
-#include "ve2_res_solver.h"
+#include "ve2_mgmt.h"
 
 static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 {
@@ -47,18 +48,32 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 
 	args.locs = NULL;
 	args.num_tiles = 0;
-	args.init_opts = AIE_PART_INIT_OPT_DEFAULT ^ AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
-	ret = aie_partition_initialize(xaie_dev, &args);
+	args.handshake_cols = 0;
+	args.handshake = NULL;
+	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
+	& ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+	ret = ve2_partition_initialize(xaie_dev, &args);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release;
 	}
 
-	ret = aie_load_cert(xaie_dev, buf);
-	if (ret < 0)
+	ret = aie_load_cert_broadcast(xaie_dev, buf);
+	if (ret) {
+		XDNA_ERR(xdna, "aie load cert broadcast failed %d", ret);
 		goto teardown;
+	}
+	XDNA_INFO(xdna, "aie load cert broadcast complete");
 
-	ve2_store_firmware_version(xdna_hdl, xaie_dev);
+	ret = ve2_store_firmware_version(&xdna_hdl->fw_version, xaie_dev);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "cert status read failed with err %d", ret);
+		goto teardown;
+	}
+	XDNA_INFO(xdna, "CERT major: %d\n", xdna_hdl->fw_version.major);
+	XDNA_INFO(xdna, "CERT minor: %d\n", xdna_hdl->fw_version.minor);
+	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.git_hash);
+	XDNA_INFO(xdna, "CERT git hash date: %s\n", xdna_hdl->fw_version.date);
 
 teardown:
 	aie_partition_teardown(xaie_dev);
@@ -94,6 +109,13 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		return -EINVAL;
 	}
 
+	if (ve2_hwctx_limit)
+		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
+	else
+		xdna_hdl->hwctx_limit = xdna_hdl->priv->hwctx_limit;
+
+	XDNA_INFO(xdna, "Maximum limit %d hardware context(s)", xdna_hdl->hwctx_limit);
+
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
@@ -105,6 +127,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		fw_slots = kzalloc(sizeof(*fw_slots), GFP_KERNEL);
 		if (!fw_slots) {
 			ret = -ENOMEM;
+			XDNA_ERR(xdna, "No memory for fw status. ret: %d\n", ret);
 			goto done;
 		}
 		xdna->dev_handle->fw_slots[col] = fw_slots;
@@ -132,4 +155,5 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.cmd_wait	= ve2_cmd_wait,
 	.get_aie_info	= ve2_get_aie_info,
 	.set_aie_state	= ve2_set_aie_state,
+	.get_aie_array	= ve2_get_array,
 };

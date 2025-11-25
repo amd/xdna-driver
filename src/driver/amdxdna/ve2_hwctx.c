@@ -4,9 +4,10 @@
  */
 #include <drm/drm_cache.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma-buf.h>
 
 #include "amdxdna_ctx.h"
-#include "amdxdna_gem_of.h"
+#include "amdxdna_gem.h"
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
@@ -18,6 +19,22 @@ MODULE_PARM_DESC(enable_polling, "Enable polling mode. Polling mode disabled by 
 int verbosity;
 module_param(verbosity, int, 0644);
 MODULE_PARM_DESC(verbosity, "[Debug] Enabling verbosity. default is 0");
+
+int partition_size = 4;
+module_param(partition_size, int, 0644);
+MODULE_PARM_DESC(partition_size, "Test only option: default partition size");
+
+unsigned int ve2_hwctx_limit;
+module_param(ve2_hwctx_limit, uint, 0400);
+MODULE_PARM_DESC(ve2_hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default");
+
+int start_col;
+module_param(start_col, int, 0644);
+MODULE_PARM_DESC(start_col, "Test only option: lead column set to start_col");
+
+int max_col;
+module_param(max_col, int, 0644);
+MODULE_PARM_DESC(max_col, "Max column supported by this driver");
 
 #define CTX_TIMER	(nsecs_to_jiffies(1))
 
@@ -53,23 +70,34 @@ static int hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 {
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
-	int ret;
+	u32 capacity = header->capacity;
+	u32 slot_idx;
 
 	mutex_lock(&queue->hq_lock);
 	if (header->write_index < header->read_index) {
-		XDNA_ERR(xdna, "Error: HSA Queue read %llx before write %llx", header->read_index,
-			 header->write_index);
-		ret = -EINVAL;
-	} else if ((header->write_index - header->read_index) < header->capacity) {
-		*slot = header->write_index++;
-		XDNA_DBG(xdna, "reserved slot %lld", *slot);
-	} else {
-		XDNA_ERR(xdna, "Error: HSQ Queue is full");
-		ret = -EIO;
-	}
-	mutex_unlock(&queue->hq_lock);
+		XDNA_ERR(xdna, "HSA Queue read %llx before write %llx",
+			 header->read_index, header->write_index);
+		mutex_unlock(&queue->hq_lock);
+		return -EINVAL;
+	} else if ((header->write_index - header->read_index) < capacity) {
+		slot_idx = header->write_index % capacity;
+		enum ert_cmd_state state = queue->hq_complete.hqc_mem[slot_idx];
 
-	return ret;
+		if (state != ERT_CMD_STATE_INVALID) {
+			XDNA_ERR(xdna, "slot %u is still active with state %u", slot_idx, state);
+			mutex_unlock(&queue->hq_lock);
+			return -EIO;
+		}
+		*slot = header->write_index++;
+		XDNA_DBG(xdna, "slot %lld", *slot);
+	} else {
+		XDNA_ERR(xdna, "HSQ Queue is full");
+		mutex_unlock(&queue->hq_lock);
+		return -EIO;
+	}
+
+	mutex_unlock(&queue->hq_lock);
+	return 0;
 }
 
 static void ve2_job_release(struct kref *ref)
@@ -86,28 +114,36 @@ static void ve2_job_put(struct amdxdna_sched_job *job)
 	kref_put(&job->refcnt, ve2_job_release);
 }
 
+/**
+ * ve2_hwctx_add_job - Add a job to the hardware context's pending list.
+ * @hwctx: Pointer to the hardware context.
+ * @job: Pointer to the job to be added.
+ * @seq: Sequence number associated with the job.
+ * @cmd_cnt: Number of commands submitted with this job.
+ *
+ * Returns 0 on success, or a negative error code if the job cannot be added.
+ */
 static inline int ve2_hwctx_add_job(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job,
 				    u64 seq, u32 cmd_cnt)
 {
-	struct amdxdna_sched_job *other_job;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int idx;
 
+	mutex_lock(&hwctx->priv->privctx_lock);
 	hwctx->submitted += cmd_cnt;
 	job->seq = seq;
 
 	idx = get_job_idx(job->seq);
-	// When pending list full, hwctx->submitted points to oldest fence
-	other_job = hwctx->priv->pending[idx];
-	if (other_job && other_job->fence)
-		return -EAGAIN;
-
-	if (other_job) {
-		dma_fence_put(other_job->fence);
-		ve2_job_put(other_job);
+	if (hwctx->priv->pending[idx]) {
+		XDNA_ERR(xdna, "No more room for new command!!!");
+		mutex_unlock(&hwctx->priv->privctx_lock);
+		return -EINVAL;
 	}
 
 	hwctx->priv->pending[idx] = job;
 	kref_get(&job->refcnt);
+	hwctx->priv->state = AMDXDNA_HWCTX_STATE_ACTIVE;
+	mutex_unlock(&hwctx->priv->privctx_lock);
 
 	return 0;
 }
@@ -119,6 +155,22 @@ static inline struct amdxdna_sched_job *ve2_hwctx_get_job(struct amdxdna_ctx *hw
 
 static inline void ve2_hwctx_job_release(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job)
 {
+	u32 capacity = hwctx->priv->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
+	struct amdxdna_cmd_chain *cmd_chain;
+	u32 cmd_cnt = 1;
+	u32 op;
+
+	op = amdxdna_cmd_get_op(cmd_bo);
+	if (op == ERT_CMD_CHAIN) {
+		cmd_chain = amdxdna_cmd_get_payload(cmd_bo, NULL);
+		cmd_cnt = cmd_chain->command_count;
+	}
+	hwctx->completed += cmd_cnt;
+	if (hwctx->completed == hwctx->submitted)
+		priv_ctx->state = AMDXDNA_HWCTX_STATE_IDLE;
+
 	for (int i = 0; i < job->bo_cnt; i++) {
 		if (!job->bos[i].obj)
 			break;
@@ -127,11 +179,21 @@ static inline void ve2_hwctx_job_release(struct amdxdna_ctx *hwctx, struct amdxd
 	}
 	drm_gem_object_put(to_gobj(job->cmd_bo));
 
+	mutex_lock(&hwctx->priv->privctx_lock);
+
+	// In cmd chain job, drivers receives completion for last command.
+	// So, mark all slots of these commands in this job to free.
+	u32 slot = job->seq % capacity;
+
+	for (int i = 0; i < cmd_cnt; i++) {
+		hwctx->priv->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
+		slot = (slot == 0) ? (capacity - 1) : (slot - 1);
+	}
+
 	// Reset the pending list
 	hwctx->priv->pending[get_job_idx(job->seq)] = NULL;
-	if (job->fence)
-		dma_fence_put(job->fence);
-	kfree(job);
+	ve2_job_put(job);
+	mutex_unlock(&hwctx->priv->privctx_lock);
 }
 
 static inline struct host_queue_packet *hsa_queue_get_pkt(struct hsa_queue *queue, u64 slot)
@@ -187,9 +249,13 @@ static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *q
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 
 	if (queue->hsa_queue_p) {
-		dma_free_coherent(&pdev->dev, sizeof(struct hsa_queue), queue->hsa_queue_p,
+		dma_free_coherent(&pdev->dev,
+				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
+				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
+		queue->hsa_queue_mem.dma_addr = 0;
+		mutex_destroy(&queue->hq_lock);
 	}
 }
 
@@ -297,6 +363,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	if (!queue->hsa_queue_p)
 		return -ENOMEM;
 
+	/* Initialize mutex here */
+	mutex_init(&queue->hq_lock);
 	/* Set the base DMA address for hsa queue */
 	queue->hsa_queue_mem.dma_addr = dma_handle;
 
@@ -337,7 +405,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	return 0;
 }
 
-static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
+static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq,
+				   bool last_cmd)
 {
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -363,10 +432,12 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	}
 
 	*seq = slot_id;
+	XDNA_DBG(xdna, "slot %llx is selected", slot_id);
 	slot_id = slot_id & (queue->hq_header.capacity - 1);
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
 	hdr->common_header.count = sizeof(struct host_indirect_packet_entry);
 	hdr->common_header.distribute = 1;
 	hdr->common_header.indirect = 1;
@@ -427,7 +498,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	return 0;
 }
 
-static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
+static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, bool last_cmd)
 {
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -453,11 +524,15 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
 	*seq = slot_id;
 	XDNA_DBG(xdna, "pkt %p of slot %llx is selected", (void *)pkt, slot_id);
 	slot_id = slot_id & (hq_queue->hsa_queue_p->hq_header.capacity - 1);
+	hq_queue->hq_complete.hqc_mem[slot_id] = ERT_CMD_STATE_NEW;
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
 	hdr->completion_signal =
 		(u64)(hq_queue->hq_complete.hqc_dma_addr + slot_id * sizeof(u64));
+#define XRT_PKT_OPCODE(p) ((p)->xrt_header.common_header.opcode)
+	XDNA_DBG(xdna, "Queue packet opcode: %u\n", XRT_PKT_OPCODE(pkt));
 
 	hdr->common_header.count = sizeof(struct exec_buf);
 	hdr->common_header.distribute = 0;
@@ -473,6 +548,7 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
 	ebp->args_host_addr_high = 0;
 	XDNA_DBG(xdna, "dpu instruction addr: 0x%llx", dpu_cmd->instruction_buffer);
 
+	hq_queue->hq_complete.hqc_mem[slot_id] = ERT_CMD_STATE_SUBMITTED;
 	hsa_queue_pkt_set_valid(pkt);
 
 	return 0;
@@ -493,9 +569,9 @@ static int ve2_submit_cmd_single(struct amdxdna_ctx *hwctx, struct amdxdna_sched
 	}
 
 	if (get_ve2_dpu_data_next(cmd_data))
-		ret = submit_command_indirect(hwctx, cmd_data, seq);
+		ret = submit_command_indirect(hwctx, cmd_data, seq, true);
 	else
-		ret = submit_command(hwctx, cmd_data, seq);
+		ret = submit_command(hwctx, cmd_data, seq, true);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit single command failed, error %d", ret);
 		return ret;
@@ -521,10 +597,11 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 	for (int i = 0; i < cmd_chain->command_count; i++) {
 		u32 boh = (u32)(cmd_chain->data[i]);
 		struct amdxdna_gem_obj *abo;
-		void *cmd_data;
+		bool last_cmd = false;
 		u32 cmd_data_len;
+		void *cmd_data;
 
-		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_CMD);
+		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!abo) {
 			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
 			return -ENOENT;
@@ -537,12 +614,15 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 			return -EINVAL;
 		}
 
+		if (i == cmd_chain->command_count - 1)
+			last_cmd = true;
 		if (get_ve2_dpu_data_next(cmd_data))
-			ret = submit_command_indirect(hwctx, cmd_data, seq);
+			ret = submit_command_indirect(hwctx, cmd_data, seq, last_cmd);
 		else
-			ret = submit_command(hwctx, cmd_data, seq);
+			ret = submit_command(hwctx, cmd_data, seq, last_cmd);
 		if (ret) {
-			XDNA_ERR(xdna, "Submit chain command(%d) failed, error %d", i, ret);
+			XDNA_ERR(xdna, "Submit chain command(%d/%d) failed, error %d", i,
+				 cmd_chain->command_count, ret);
 			amdxdna_gem_put_obj(abo);
 			return ret;
 		}
@@ -561,6 +641,11 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 	int ret;
 	u32 op;
 
+	if (hwctx->priv->misc_intrpt_flag) {
+		XDNA_ERR(xdna, "Failed to submit a command, because of misc interrupt\n");
+		return -EINVAL;
+	}
+
 	op = amdxdna_cmd_get_op(cmd_bo);
 	if (op != ERT_START_DPU && op != ERT_CMD_CHAIN) {
 		XDNA_WARN(xdna, "Unsupported ERT cmd: %d received", op);
@@ -577,84 +662,172 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 		return ret;
 	}
 
-	//TODO: return value will be handled in future commit.
-	notify_fw_cmd_ready(hwctx);
+	XDNA_DBG(xdna, "Command submitted with temporal sharing enabled");
+	ve2_mgmt_schedule_cmd(xdna, hwctx, *seq);
 
 	return 0;
 }
 
 /*
- * Handling interrupt notification based on read_index and write_index.
+ * Handle interrupt notification based on read_index and write_index.
  */
-static inline bool check_read_index(struct amdxdna_ctx_priv *priv_ctx, struct amdxdna_ctx *hwctx,
-				    struct amdxdna_dev *xdna, u64 seq)
+static inline bool check_read_index(struct amdxdna_ctx *hwctx,
+				    u64 seq, u32 print_interval)
 {
-	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
-	u32 print_interval = 300;
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	static u64 counter;
 	u64 *read_index;
 
-	mutex_lock(&queue->hq_lock);
-	read_index = (u64 *)((char *)priv_ctx->hwctx_hsa_queue.hsa_queue_p +
-		HSA_QUEUE_READ_INDEX_OFFSET);
-	if (counter % print_interval == 0) {
-		XDNA_DBG(xdna, "read idx addr (0x%llx)", (u64)read_index);
-		XDNA_WARN(xdna, "hwctx [%p] check read idx (%lld) > cmd idx (%lld)", hwctx,
-			  *read_index, seq);
-	}
-	counter++;
-	mutex_unlock(&queue->hq_lock);
+	if (!hwctx || !priv_ctx || !priv_ctx->hwctx_hsa_queue.hsa_queue_p)
+		return false;
 
-	return ((*read_index) > seq);
+	if (priv_ctx->misc_intrpt_flag)
+		return true;
+
+	read_index = (u64 *)((char *)priv_ctx->hwctx_hsa_queue.hsa_queue_p +
+			HSA_QUEUE_READ_INDEX_OFFSET);
+
+	if (counter % print_interval == 0) {
+		struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+		XDNA_DBG(xdna, "read index address: 0x%llx", (u64)read_index);
+		XDNA_WARN(xdna, "hwctx [%p] check read idx (%llu) > cmd idx (%llu)",
+			  hwctx, *read_index, seq);
+	}
+
+	counter++;
+	return (*read_index > seq);
+}
+
+static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+{
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	struct device *aie_dev = priv_ctx->aie_dev;
+	struct amdxdna_ctx_health_data_aie4 *r;
+	struct handshake *hs = NULL;
+	int ret = 0;
+
+	r = kzalloc(sizeof(*r) + priv_ctx->num_col * sizeof(struct uc_health_info), GFP_KERNEL);
+	if (!r) {
+		XDNA_ERR(xdna, "No memory for struct amdxdna_ctx_health_data_aie4\n");
+		return;
+	}
+
+	for (u32 col = 0; col < priv_ctx->num_col; col++) {
+		hs = kzalloc(sizeof(*hs), GFP_KERNEL);
+		if (!hs) {
+			XDNA_ERR(xdna, "No memory for handshake.\n");
+			kfree(r);
+			return;
+		}
+		ret = ve2_partition_read_privileged_mem(aie_dev, col,
+							offsetof(struct handshake, mpaie_alive),
+							sizeof(struct handshake), (void *)hs);
+
+		if (ret < 0) {
+			XDNA_ERR(xdna, "aie_partition_read failed with ret=%d\n", ret);
+			kfree(hs);
+			kfree(r);
+			return;
+		}
+
+		r->uc_info[col].uc_idx = hwctx->start_col + col;
+		r->uc_info[col].page_idx = hs->vm.abs_page_index;
+		r->uc_info[col].offset = hs->vm.ppc;
+		r->uc_info[col].uc_idle_status = hs->cert_idle_status;
+		r->uc_info[col].misc_status = hs->misc_status;
+		r->uc_info[col].uc_pc = hs->exception.pc;
+		r->uc_info[col].uc_ear = hs->exception.ear;
+		r->uc_info[col].uc_esr = hs->exception.esr;
+		r->uc_info[col].fw_state = hs->vm.fw_state;
+		kfree(hs);
+	}
+
+	hwctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	hwctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	hwctx->health_data.aie4.ctx_state = priv_ctx->state;
+	hwctx->health_data.aie4.num_uc = priv_ctx->num_col;
+	memcpy(hwctx->health_data.aie4.uc_info, r->uc_info, priv_ctx->num_col *
+	       sizeof(struct uc_health_info));
+
+	kfree(r);
 }
 
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
-	struct amdxdna_client *client = hwctx->client;
-	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_sched_job *job;
-	unsigned long timeout_jiffies;
-	int ret;
+	u32 print_interval = 300;
+	unsigned long wait_jifs;
+	int ret = 0;
 
 	/*
 	 * NOTE: this is simplified hwctx which has no col_entry list for different ctx
 	 * sharing the same lead col.
 	 * The current version assumes one hwctx is 1:1 mapping with one lead cert col
 	 */
-	timeout_jiffies = msecs_to_jiffies(timeout);
-	if (timeout_jiffies)
+	wait_jifs = msecs_to_jiffies(timeout);
+	mutex_lock(&priv_ctx->hwctx_hsa_queue.hq_lock);
+	if (wait_jifs)
 		ret = wait_event_interruptible_timeout(priv_ctx->waitq,
-						       check_read_index(priv_ctx, hwctx, xdna, seq),
-						       timeout_jiffies);
+						       check_read_index(hwctx, seq, print_interval),
+						       wait_jifs);
 	else
 		ret = wait_event_interruptible(priv_ctx->waitq,
-					       check_read_index(priv_ctx, hwctx, xdna, seq));
+					       check_read_index(hwctx, seq, print_interval));
 
-	XDNA_DBG(xdna, "wait_event returned %d (timeout_jiffies=%lu)", ret, timeout_jiffies);
+	XDNA_DBG(xdna, "wait_event returned %d (timeout_jiffies=%lu)", ret, wait_jifs);
 
-	if (ret == -ERESTARTSYS)
-		return ret;
-
-	if ((!timeout_jiffies && !ret) || ret > 0) {
+	if ((!wait_jifs && !ret) || ret > 0) {
 		job = ve2_hwctx_get_job(hwctx, seq);
 		if (unlikely(!job)) {
 			ret = 0;
 			goto out;
 		}
 
-		if (timeout_jiffies && !ret) {
+		/*
+		 * below check need to be removed once we have a clean solution
+		 * to use completion signal
+		 */
+		if (priv_ctx->misc_intrpt_flag || (wait_jifs && !ret)) {
+			XDNA_ERR(xdna, "cmd timeout. misc_intr_flag=%u timeout_jiffies=%lu ret=%d",
+				 priv_ctx->misc_intrpt_flag, wait_jifs, ret);
+			void *cmd_data;
+			u32 data_total;
+
+			ve2_dump_ctx(xdna, hwctx);
+
+			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
+			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
+					priv_ctx->num_col * sizeof(struct uc_health_info);
+			if (unlikely(data_total < sizeof(hwctx->health_data)))
+				XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu", __func__,
+					  data_total, total_size);
+
+			data_total = min(data_total, total_size);
+			memcpy(cmd_data, &hwctx->health_data, total_size);
+			hwctx->health_reported = true;
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
-			XDNA_ERR(xdna, "Requested command [%d] TIMEOUT!!", (int)seq);
 		} else {
-			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_COMPLETED);
+			u32 slot =
+				seq % (priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity);
+			enum ert_cmd_state state;
+
+			state = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
+			if (state <= ERT_CMD_STATE_INVALID || state > ERT_CMD_STATE_NORESPONSE) {
+				XDNA_WARN(xdna, "state %u at hqc_mem[%u]", state, slot);
+				ret = 0;
+				goto out;
+			}
+			amdxdna_cmd_set_state(job->cmd_bo, state);
 		}
 
 		ve2_hwctx_job_release(hwctx, job);
 
-		if (!timeout_jiffies) {
-			ret = 0;
-			goto out;
+		if (!wait_jifs) {
+			mutex_unlock(&priv_ctx->hwctx_hsa_queue.hq_lock);
+			return 0;
 		}
 	}
 
@@ -662,12 +835,12 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	 * wait_event_interruptible_timeout() returns 0 when the condition evaluated to false
 	 * after the timeout elapsed. So, return -ETIME in this case
 	 */
-	if (timeout_jiffies && !ret)
+	if (!ret)
 		ret = -ETIME;
 
 out:
-	XDNA_INFO(xdna, "Requested command [%d] finished with ret %d", (int)seq, ret);
-
+	mutex_unlock(&priv_ctx->hwctx_hsa_queue.hq_lock);
+	XDNA_DBG(xdna, "wait_cmd ret:%d", ret);
 	/* 0 is success, others are timeout */
 	return ret > 0 ? 0 : ret;
 }
@@ -684,11 +857,7 @@ void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
 
 static void timeout_cb(struct timer_list *t)
 {
-#if defined from_timer
 	struct amdxdna_ctx_priv *priv = from_timer(priv, t, event_timer);
-#elif defined timer_container_of
-	struct amdxdna_ctx_priv *priv = timer_container_of(priv, t, event_timer);
-#endif
 
 	wake_up_interruptible_all(&priv->waitq);
 	mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
@@ -728,7 +897,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	if (ret)
 		goto free_priv;
 
-	ret = ve2_mgmt_create_partition(xdna, hwctx);
+	ret = ve2_xrs_request(xdna, hwctx);
 	if (ret)
 		goto free_hsa_queue;
 
@@ -736,10 +905,14 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		XDNA_INFO(xdna, "Running in timer mode");
 		timer_setup(&priv->event_timer, timeout_cb, 0);
 		mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
+	} else {
+		XDNA_INFO(xdna, "Running in interrupt mode");
 	}
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_clear_firmware_status(xdna, hwctx);
+
+	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
 
 	return 0;
 
@@ -753,10 +926,34 @@ free_priv:
 
 void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 {
+	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_sched_job *job;
 	int idx;
+
+	if (enable_polling)
+		del_timer_sync(&hwctx->priv->event_timer);
+
+	/*
+	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work,
+	 * then cancel any pending work to ensure no work is accessing this context
+	 */
+	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[nhwctx->start_col];
+	spin_lock(&mgmtctx->ctx_lock);
+	if (mgmtctx->active_ctx == hwctx)
+		mgmtctx->active_ctx = NULL;
+	spin_unlock(&mgmtctx->ctx_lock);
+
+	/* Now cancel any pending work - it will see active_ctx as NULL and bail out */
+	if (mgmtctx->mgmtctx_workq)
+		cancel_work_sync(&mgmtctx->sched_work);
+
+	/*
+	 * Release jobs first to decrement BO refcounts, but they may not
+	 * be freed immediately if the application still holds references
+	 */
 
 	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
 		job = hwctx->priv->pending[idx];
@@ -766,96 +963,61 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 		ve2_hwctx_job_release(hwctx, job);
 	}
 
-	if (enable_polling)
-		del_timer_sync(&hwctx->priv->event_timer);
-
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_get_firmware_status(hwctx);
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv);
+	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
+		 hwctx, hwctx->submitted, hwctx->completed);
 }
 
 static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 paddr,
 				    u32 buf_sz, u32 col, bool attach)
 {
-	struct device *aie_dev = hwctx->priv->aie_part;
-	struct handshake hs = { 0 };
-	int ret;
-
-	WARN_ON(!aie_dev);
+	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 
 	switch (buf_type) {
 	case AMDXDNA_FW_BUF_DEBUG:
-		if (attach) {
-			hs.dbg_buf.dbg_buf_addr_high = upper_32_bits(paddr);
-			hs.dbg_buf.dbg_buf_addr_low = lower_32_bits(paddr);
-			hs.dbg_buf.size = buf_sz;
-		}
-		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
-							 offsetof(struct handshake,
-								  dbg_buf.dbg_buf_addr_high),
-							 sizeof(hs.dbg_buf), (void *)&hs.dbg_buf);
+		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_addr = paddr;
+		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_size = buf_sz;
 		break;
+
 	case AMDXDNA_FW_BUF_TRACE:
-		if (attach) {
-			hs.trace.dtrace_addr_high = upper_32_bits(paddr);
-			hs.trace.dtrace_addr_low = lower_32_bits(paddr);
-		}
-		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
-							 offsetof(struct handshake,
-								  trace.dtrace_addr_high),
-							 sizeof(hs.trace), (void *)&hs.trace);
+		nhwctx->hwctx_config[hwctx->start_col + col].dtrace_addr = paddr;
 		break;
+
 	case AMDXDNA_FW_BUF_LOG:
-		if (attach) {
-			hs.log_addr_high = upper_32_bits(paddr);
-			hs.log_addr_low = lower_32_bits(paddr);
-			hs.log_buf_size = buf_sz;
-		}
-		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
-							 offsetof(struct handshake, log_addr_high),
-							 sizeof(hs.log_addr_high) +
-							 sizeof(hs.log_addr_high) +
-							 sizeof(hs.log_buf_size),
-							 (void *)&hs.log_addr_high);
+		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_addr = paddr;
+		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_size = buf_sz;
 		break;
+
 	default:
-		ret = -EOPNOTSUPP;
-		break;
-	}
+		struct amdxdna_dev *xdna = hwctx->client->xdna;
 
-	return ret;
-}
-
-static int ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeout)
-{
-	struct device *aie_dev = hwctx->priv->aie_part;
-	struct handshake hs = { 0 };
-	int ret;
-
-	hs.opcode_timeout_config = op_timeout;
-	for (u32 col = 0; col < hwctx->num_col; col++) {
-		ret = aie_partition_write_privileged_mem(aie_dev, CERT_HANDSHAKE_OFF(col) +
-							 offsetof(struct handshake,
-								  opcode_timeout_config),
-							 sizeof(u32),
-							 (void *)&hs.opcode_timeout_config);
-		if (ret < 0)
-			return ret;
+		XDNA_ERR(xdna, "Invalid Request");
+		return -EOPNOTSUPP;
 	}
 
 	return 0;
 }
 
-int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u32 size)
+static void ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeout)
+{
+	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
+
+	for (u32 col = 0; col < hwctx->num_col; col++)
+		nhwctx->hwctx_config[hwctx->start_col + col].opcode_timeout_config = op_timeout;
+}
+
+int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_gem_obj *abo, *mdata_abo;
 	struct fw_buffer_metadata *mdata;
-	u32 prev_buf_sz;
+	u32 prev_buf_sz = 0;
 	u32 op_timeout;
 	u64 buf_paddr;
 	u32 buf_sz;
@@ -864,19 +1026,20 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
-		mdata_abo = amdxdna_gem_get_obj(client, val, AMDXDNA_BO_DEV);
-		if (!mdata_abo || !mdata_abo->mem.kva) {
-			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", val, type);
+		mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_SHARE);
+		if (!mdata_abo || !mdata_abo->dma_buf) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
 			return -EINVAL;
 		}
-		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
 		if (!mdata) {
-			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", val, type);
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
 		}
-		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_DEV);
-		if (!abo || !abo->mem.kva) {
+
+		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_SHARE);
+		if (!abo) {
 			XDNA_ERR(xdna, "Get bo %lld failed for type %d", mdata->bo_handle, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
@@ -886,7 +1049,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 			buf_sz = mdata->uc_info[col].size;
 			if (buf_sz == 0)
 				continue;
-			buf_paddr = abo->mem.dev_addr + prev_buf_sz;
+			buf_paddr = amdxdna_gem_dev_addr(abo) + prev_buf_sz;
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, buf_paddr, buf_sz,
 						       col, true);
 			if (ret < 0) {
@@ -904,15 +1067,16 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 		amdxdna_gem_put_obj(abo);
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
+
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
-		mdata_abo = amdxdna_gem_get_obj(client, val, AMDXDNA_BO_DEV);
-		if (!mdata_abo || !mdata_abo->mem.kva) {
-			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", val, type);
+		mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_SHARE);
+		if (!mdata_abo || !mdata_abo->dma_buf) {
+			XDNA_ERR(xdna, "Get metadata bo %lld failed for type %d", mdata_hdl, type);
 			return -EINVAL;
 		}
-		mdata = (struct fw_buffer_metadata *)(mdata_abo->mem.kva);
+		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
 		if (!mdata) {
-			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", val, type);
+			XDNA_ERR(xdna, "No metadata defined for bo %lld type %d", mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
 		}
@@ -930,20 +1094,23 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 val, void *buf, u3
 
 		amdxdna_gem_put_obj(mdata_abo);
 		break;
+
 	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
-		if (copy_from_user(&op_timeout, (u32 __user *)val, sizeof(u32)))
+		if (copy_from_user(&op_timeout, (u32 __user *)(uintptr_t)mdata_hdl, sizeof(u32))) {
+			XDNA_ERR(xdna, "hwctx config req %d failed", type);
 			return -EFAULT;
-		ret = ve2_hwctx_config_op_timeout(hwctx, op_timeout);
-		if (ret < 0)
-			XDNA_ERR(xdna, "hwctx config req %d failed, err %d", type, ret);
-		else
-			XDNA_DBG(xdna, "Configured opcode timeout %u on hwctx %s", op_timeout,
-				 hwctx->name);
+		}
+
+		ve2_hwctx_config_op_timeout(hwctx, op_timeout);
+		XDNA_DBG(xdna, "Configured opcode timeout %u on hwctx %s",
+			 op_timeout, hwctx->name);
 		break;
+
 	default:
 		XDNA_DBG(xdna, "%s Not supported type %d", __func__, type);
 		ret = -EOPNOTSUPP;
-		amdxdna_gem_put_obj(mdata_abo);
+		if (mdata_abo)
+			amdxdna_gem_put_obj(mdata_abo);
 		break;
 	}
 

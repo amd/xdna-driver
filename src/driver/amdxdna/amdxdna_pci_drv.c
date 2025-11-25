@@ -30,6 +30,8 @@ static const struct pci_device_id pci_ids[] = {
 #ifdef AMDXDNA_NPU3
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f1) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f3) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1B0A) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1B0C) },
 #endif
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_ANY_ID),
 		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
@@ -50,6 +52,8 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 #ifdef AMDXDNA_NPU3
 	{ 0x17f1, 0x10,  &dev_npu3_info },
 	{ 0x17f3, 0x10,  &dev_npu3_info },
+	{ 0x1B0A, 0x00,  &dev_npu3_info },
+	{ 0x1B0C, 0x00,  &dev_npu3_info },
 #endif
 	{ 0x17f0, 0x10, &dev_npu4_info },
 	{ 0x17f0, 0x11, &dev_npu5_info },
@@ -114,7 +118,8 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_dev_fini;
 	}
 
-	amdxdna_tdr_start(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_start)
+		xdna->dev_info->ops->tdr_start(xdna);
 
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
@@ -122,9 +127,9 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_tdr_fini;
 	}
 
-	ret = amdxdna_fw_log_init(xdna);
+	ret = amdxdna_dpt_init(xdna);
 	if (ret)
-		XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
+		XDNA_WARN(xdna, "Failed to enable firmware debug/profile/trace: %d", ret);
 
 	/* Debug fs needs to go after register DRM dev */
 	if (xdna->dev_info->ops->debugfs)
@@ -136,7 +141,8 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 failed_tdr_fini:
-	amdxdna_tdr_stop(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_stop)
+		xdna->dev_info->ops->tdr_stop(xdna);
 	amdxdna_sysfs_fini(xdna);
 failed_dev_fini:
 	xdna->dev_info->ops->fini(xdna);
@@ -150,9 +156,10 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
 
-	amdxdna_fw_log_fini(xdna);
+	amdxdna_dpt_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
-	amdxdna_tdr_stop(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_stop)
+		xdna->dev_info->ops->tdr_stop(xdna);
 	amdxdna_sysfs_fini(xdna);
 
 #ifdef AMDXDNA_DEVEL

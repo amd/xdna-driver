@@ -28,6 +28,11 @@
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+// FIXME
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include "../../src/include/uapi/drm_local/amdxdna_accel.h"
+// enf of FIXME
 
 struct kern_version {
   int major;
@@ -43,9 +48,13 @@ int base_read_speed;
 using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_export_bo_then_close_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -214,6 +223,44 @@ dev_filter_is_aie2_and_amdxdna_drv(device::id_type id, device* dev)
   if (!is_amdxdna_drv(dev))
     return false;
   return true;
+}
+
+bool
+dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_npu4(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
+std::tuple<uint64_t, uint64_t, uint64_t>
+get_bo_usage(device* dev, int pid)
+{
+  // FIXME: reimplement this when query key is defined in xrt
+  const char *xdna = "/dev/accel/accel0";
+  int fd = open(xdna, O_RDONLY);
+  if (fd < 0) {
+    std::perror("open");
+    return {0, 0, 0};
+  }
+
+  amdxdna_drm_bo_usage usage = { .pid = pid };
+  amdxdna_drm_get_array arg = {
+    .param = DRM_AMDXDNA_BO_USAGE,
+    .element_size = sizeof(usage),
+    .num_element = 1,
+    .buffer = reinterpret_cast<uintptr_t>(&usage)
+  };
+  int ret = ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+  close(fd);
+  if (ret == -1) {
+    std::perror("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY)");
+    return {0, 0, 0};
+  }
+
+  return {usage.total_usage, usage.internal_usage, usage.heap_usage};
 }
 
 // All test case runners
@@ -416,6 +463,27 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
+}
+
+void
+TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto boflags = XRT_BO_FLAGS_HOST_ONLY;
+  auto ext_boflags = XRT_BO_USE_CTRLPKT << 4;
+  auto size = 0x4000;
+  auto bo = dev->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  auto [total, internal, heap] = get_bo_usage(dev, getpid());
+  uint64_t expected_total = size;
+  uint64_t expected_internal = size;
+  uint64_t expected_heap = 0;
+  if (dev_filter_is_aie2(id, dev)) {
+    // Add heap size
+    expected_total += 64 * 1024 * 1024;
+    expected_internal += 64 * 1024 * 1024;
+  }
+  if (total != expected_total || internal != expected_internal || heap != expected_heap)
+    throw std::runtime_error("BO usage mis-match");
 }
 
 void
@@ -638,6 +706,11 @@ std::vector<test_case> test_list {
   test_case{ "query(rom_fpga_name)", {},
     TEST_NEGATIVE, dev_filter_xdna, TEST_query_userpf<query::rom_fpga_name>, {}
   },
+  // get async error in multi thread before running any other tests
+  // there may or may not be async error.
+  test_case{ "get async error in multithread - INITIAL", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_async_error_multi, {false}
+  },
   //test_case{ "non_xdna_userpf: query(rom_vbnv)", {},
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
   //},
@@ -666,7 +739,7 @@ std::vector<test_case> test_list {
   },
   test_case{ "create_and_free_input_output_bo huge pages", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_bo,
-    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x20000000}
+    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x140000000}
   },
   test_case{ "sync_bo for dpu sequence bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
@@ -698,6 +771,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
+  },
+  test_case{ "io test with intruction code invalid address access", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
@@ -808,7 +884,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
     TEST_POSITIVE, dev_filter_is_xdna_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
@@ -826,7 +902,20 @@ std::vector<test_case> test_list {
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+  },
+  // get async error in multi thread after async error has raised.
+  test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
+  },
+  test_case{ "gemm and debug BO", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
+  },
+  test_case{ "create and free internal bo", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
+  },
+  test_case{ "export BO then close device", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_bo_then_close_device, {}
   },
 };
 

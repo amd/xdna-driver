@@ -111,6 +111,8 @@ int
 hwq::
 wait_command(uint64_t seq, uint32_t timeout_ms) const
 {
+  XRT_TRACE_POINT_SCOPE1(wait_command, seq);
+
   int ret = 1;
 
   shim_debug("Waiting for cmd (%ld)...", seq);
@@ -142,12 +144,46 @@ int
 hwq::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
+  // Check status to avoid calling into driver, if it's already completed
   if (poll_command(cmd))
       return 1;
 
   auto boh = static_cast<cmd_buffer*>(cmd);
+  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
   auto seq = boh->wait_for_submitted();
-  return wait_command(seq, timeout_ms);
+  auto ret = wait_command(seq, timeout_ms);
+  auto& subcmds = boh->get_subcmd_list();
+
+  // The timeout_ms expired.
+  if (!ret)
+    return ret;
+
+  // Non-chained cmd or kernel mode submission
+  if (!subcmds.size())
+    return ret;
+
+  // Chained cmd submitted in user mode
+  auto last_cmd_bo = subcmds.back();
+  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
+  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
+    return ret;
+  }
+
+  // One of the sub-cmds has failed, find the first failed one and set the
+  // chained cmd status accordingly.
+  auto chain_data = get_ert_cmd_chain_data(cmdpkt);
+  chain_data->error_index = 0;
+  for (auto subcmd_bo : subcmds) {
+    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd_bo->vaddr());
+    if (subcmd_pkt->state == ERT_CMD_STATE_COMPLETED) {
+      chain_data->error_index++;
+    } else {
+      cmdpkt->state = subcmd_pkt->state;
+      break;
+    }
+  }
+  return ret;
 }
 
 void
@@ -172,8 +208,10 @@ void
 hwq::
 submit_command(xrt_core::buffer_handle *cmd)
 {
-  std::unique_lock<std::mutex> lock(m_mutex);
   auto boh = static_cast<cmd_buffer*>(cmd);
+
+  XRT_TRACE_POINT_SCOPE1(submit_command, boh->id().handle);
+  std::unique_lock<std::mutex> lock(m_mutex);
 
   dump_arg_bos(boh);
 

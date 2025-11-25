@@ -14,9 +14,11 @@ extern const struct dpm_clk_freq npu4_dpm_clk_table[];
 extern const struct rt_config npu4_default_rt_cfg[];
 extern const struct msg_op_ver npu4_msg_op_tbl[];
 extern const struct rt_cfg_ver npu4_rt_cfg_tbl[];
+extern const struct aie2_fw_feature_tbl npu4_fw_feature_table[];
 extern const struct amdxdna_dev_priv npu4_dev_priv;
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
+#define MPNPU_PWAITMODE                0x301003C
 #define MPNPU_PUB_SEC_INTR             0x3010060
 #define MPNPU_PUB_PWRMGMT_INTR         0x3010064
 #define MPNPU_PUB_SCRATCH0             0x301006C
@@ -70,6 +72,7 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 	.optional_msg	= npu4_msg_op_tbl,							\
 	.optional_cfg	= npu4_rt_cfg_tbl,							\
 	.dpm_clk_tbl	= npu4_dpm_clk_table,							\
+	.fw_feature_tbl = npu4_fw_feature_table,						\
 	.priv_load_cfg = { 5, 0, AIE2_RT_CFG_INIT },						\
 	.col_opc	= 4096,									\
 	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,							\
@@ -83,13 +86,14 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 		DEFINE_BAR_OFFSET(FW_ALIVE_OFF,   NPU4_SRAM, MPNPU_SRAM_X2I_MAILBOX_15),	\
 	},											\
 	.psp_regs_off   = {									\
-		DEFINE_BAR_OFFSET(PSP_CMD_REG,    NPU4_PSP, MP0_C2PMSG_123),			\
-		DEFINE_BAR_OFFSET(PSP_ARG0_REG,   NPU4_REG, MPNPU_PUB_SCRATCH3),		\
-		DEFINE_BAR_OFFSET(PSP_ARG1_REG,   NPU4_REG, MPNPU_PUB_SCRATCH4),		\
-		DEFINE_BAR_OFFSET(PSP_ARG2_REG,   NPU4_REG, MPNPU_PUB_SCRATCH9),		\
-		DEFINE_BAR_OFFSET(PSP_INTR_REG,   NPU4_PSP, MP0_C2PMSG_73),			\
-		DEFINE_BAR_OFFSET(PSP_STATUS_REG, NPU4_PSP, MP0_C2PMSG_123),			\
-		DEFINE_BAR_OFFSET(PSP_RESP_REG,   NPU4_REG, MPNPU_PUB_SCRATCH3),		\
+		DEFINE_BAR_OFFSET(PSP_CMD_REG,       NPU4_PSP, MP0_C2PMSG_123),			\
+		DEFINE_BAR_OFFSET(PSP_ARG0_REG,      NPU4_REG, MPNPU_PUB_SCRATCH3),		\
+		DEFINE_BAR_OFFSET(PSP_ARG1_REG,      NPU4_REG, MPNPU_PUB_SCRATCH4),		\
+		DEFINE_BAR_OFFSET(PSP_ARG2_REG,      NPU4_REG, MPNPU_PUB_SCRATCH9),		\
+		DEFINE_BAR_OFFSET(PSP_INTR_REG,      NPU4_PSP, MP0_C2PMSG_73),			\
+		DEFINE_BAR_OFFSET(PSP_STATUS_REG,    NPU4_PSP, MP0_C2PMSG_123),			\
+		DEFINE_BAR_OFFSET(PSP_RESP_REG,      NPU4_REG, MPNPU_PUB_SCRATCH3),		\
+		DEFINE_BAR_OFFSET(PSP_PWAITMODE_REG, NPU4_REG, MPNPU_PWAITMODE),		\
 	},											\
 	.smu_regs_off   = {									\
 		DEFINE_BAR_OFFSET(SMU_CMD_REG,  NPU4_SMU, MP1_C2PMSG_0),			\
@@ -100,7 +104,6 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 	},											\
 	.hw_ops		= {									\
 		.set_dpm = npu4_set_dpm,							\
-		.get_tops = npu4_get_tops,							\
 	}
 
 #define NPU4_COMMON_DEV_INFO \
