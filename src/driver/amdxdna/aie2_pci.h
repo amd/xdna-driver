@@ -354,6 +354,8 @@ struct amdxdna_dev_hdl {
 	u32				clk_gating;
 	u32				npuclk_freq;
 	u32				hclk_freq;
+	u32				max_tops;
+	u32				curr_tops;
 	bool				force_preempt_enabled;
 	bool				frame_boundary_preempt;
 
@@ -394,7 +396,6 @@ struct aie2_bar_off_pair {
 
 struct aie2_hw_ops {
 	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-	int (*get_tops)(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 };
 
 enum aie2_fw_feature {
@@ -474,8 +475,6 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 #define aie2_pm_add_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, true)
 #define aie2_pm_del_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, false)
 void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
-int npu1_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
-int npu4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 
 /* aie2_tdr.c */
 void aie2_tdr_start(struct amdxdna_dev *xdna);

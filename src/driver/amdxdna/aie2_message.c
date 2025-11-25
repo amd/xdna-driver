@@ -19,12 +19,6 @@
 
 #define EXEC_MSG_OPS(xdna)	((xdna)->dev_handle->exec_msg_ops)
 
-#define aie2_send_mgmt_msg_wait(ndev, msg) \
-	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0, false)
-
-#define aie2_send_mgmt_msg_wait_silent(ndev, msg) \
-	aie2_send_mgmt_msg_wait_offset(ndev, msg, 0, true)
-
 static bool
 is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
 {
@@ -52,20 +46,17 @@ is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
 	return false;
 }
 
-static int
-aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
-			       struct xdna_mailbox_msg *msg,
-			       u32 offset, bool silent)
+static int aie2_send_mgmt_msg_wait(struct amdxdna_dev_hdl *ndev,
+				   struct xdna_mailbox_msg *msg)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct xdna_notify *hdl = msg->handle;
 	int ret;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-
 	if (!ndev->mgmt_chann)
 		return -ENODEV;
 
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
 	ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
 	if (ret == -ETIME) {
 		xdna_mailbox_stop_channel(ndev->mgmt_chann);
@@ -73,11 +64,9 @@ aie2_send_mgmt_msg_wait_offset(struct amdxdna_dev_hdl *ndev,
 		ndev->mgmt_chann = NULL;
 	}
 
-	if (!ret && hdl->data[offset] != AIE2_STATUS_SUCCESS) {
-		if (!silent) {
-			XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
-				 msg->opcode, *hdl->data);
-		}
+	if (!ret && *hdl->status != AIE2_STATUS_SUCCESS) {
+		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
+			 msg->opcode, *hdl->data);
 		ret = -EINVAL;
 	}
 
@@ -335,7 +324,7 @@ int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_d
 	req.buf_size = size;
 	req.type = type;
 
-	ret = aie2_send_mgmt_msg_wait_offset(ndev, &msg, XDNA_STATUS_OFFSET(get_telemetry), false);
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get telemetry, ret %d", ret);
 		return ret;
@@ -801,11 +790,8 @@ int aie2_get_app_health(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hd
 	req.context_id = context_id;
 	req.buf_size = size;
 
-	ret = aie2_send_mgmt_msg_wait_silent(ndev, &msg);
-	if (ret)
-		XDNA_DBG(xdna, "Get app health failed, ret %d", ret);
-
-	if (resp.status != AIE2_STATUS_SUCCESS) {
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
 		if (resp.status == AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID) {
 			XDNA_ERR(xdna, "Invalid buffer size(required 0x%x) for get app health cmd",
 				 resp.required_buffer_size);
