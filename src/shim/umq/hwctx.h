@@ -24,6 +24,7 @@ public:
 private:
   const pdev& m_pdev;
   uint32_t m_col_cnt = 0;
+  bool tcp_server_running = false;
   std::unique_ptr<tcp_server> m_tcp_server;
   std::thread m_thread_;
 
