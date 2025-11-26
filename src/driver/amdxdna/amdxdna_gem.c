@@ -774,9 +774,9 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct dma_buf *dma_buf = ERR_PTR(-EINVAL);
 	size_t size = PAGE_ALIGN(args->size);
 	struct drm_gem_object *gobj;
+	struct dma_buf *dma_buf;
 	int mem_index;
 	int i;
 
@@ -789,8 +789,8 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 
 	/* Try indexed allocation with mem_index */
 	if (is_valid_cma_region(xdna, mem_index)) {
-		dma_buf = amdxdna_get_cma_buf(
-				xdna->cma_mem_regions[mem_index].dev, size);
+		dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[mem_index].dev,
+					      size);
 		if (!IS_ERR(dma_buf))
 			goto import_buf;
 
@@ -806,8 +806,8 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 		if (i == mem_index || !is_valid_cma_region(xdna, i))
 			continue;
 
-		dma_buf = amdxdna_get_cma_buf(
-				xdna->cma_mem_regions[i].dev, size);
+		dma_buf = amdxdna_get_cma_buf(xdna->cma_mem_regions[i].dev,
+					      size);
 		if (!IS_ERR(dma_buf))
 			goto import_buf;
 	}
@@ -1038,7 +1038,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	int ret;
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
-		  args->type, args->vaddr, args->size, args->flags);
+		 args->type, args->vaddr, args->size, args->flags);
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
 		fallthrough;

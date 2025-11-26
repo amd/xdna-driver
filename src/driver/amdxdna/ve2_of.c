@@ -87,6 +87,11 @@ out:
 
 static void ve2_cma_device_release(struct device *dev)
 {
+	/*
+	 * All DMA and reserved memory resources are released by
+	 * of_reserved_mem_device_release() before this function is called.
+	 * This release function only needs to free the device structure itself.
+	 */
 	kfree(dev);
 }
 
@@ -251,8 +256,10 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	}
 
 	ret = ve2_cma_mem_region_init(xdna, pdev);
-	if (ret < 0)
+	if (ret < 0) {
+		/* CMA region initialization is optional - system will fall back to default CMA */
 		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+	}
 
 	return 0;
 }
