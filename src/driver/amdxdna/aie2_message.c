@@ -1338,7 +1338,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 	if (!payload)
 		return -EINVAL;
 
-	if (op != ERT_CMD_CHAIN || !payload || !payload->command_count ||
+	if (op != ERT_CMD_CHAIN || !payload->command_count ||
 	    payload_len < struct_size(payload, data, payload->command_count))
 		return -EINVAL;
 
