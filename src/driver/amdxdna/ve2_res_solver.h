@@ -10,8 +10,6 @@
 
 #include "ve2_of.h"
 
-#define XRS_MAX_COL	36
-
 /*
  * Structure used to describe a partition. A partition is column based
  * allocation unit described by its start column and number of columns.
@@ -122,7 +120,7 @@ struct solver_rgroup {
 	u32			rgid;
 	u32			nnode;
 	u32			npartition_node;
-	DECLARE_BITMAP(resbit, XRS_MAX_COL);
+	unsigned long		*resbit;
 	struct list_head	node_list;
 	struct list_head	pt_node_list;
 };
