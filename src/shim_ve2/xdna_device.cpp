@@ -473,7 +473,7 @@ struct aie_coredump
     std::vector<char> payload(sizeof(amdxdna_drm_aie_coredump));
     amdxdna_drm_aie_coredump *dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
     dump->context_id = aie_coredump_args.context_id;
-    dump->pid =  aie_coredump_args.pid;
+    dump->pid = aie_coredump_args.pid;
 
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_AIE_COREDUMP,
