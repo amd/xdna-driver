@@ -25,6 +25,13 @@ tcp_server(const device& dev, hwctx* hwctx)
   m_data_buf = m_data_bo->vaddr();
   m_data_paddr = m_data_bo->paddr();
   m_srv_stop = 0;
+
+  // issue ioctl to attach the dbg hsa queue
+  std::map<uint32_t, size_t> buf_sizes;
+  buf_sizes[0] = 32; // we don't care size
+
+  m_dbg_umq.get_dbg_umq_bo()->config(m_hwctx, buf_sizes);
+  shim_debug("TCP server ioctl: debugger attach\n");
 }
 
 tcp_server::
@@ -293,13 +300,15 @@ buffer_extend(size_t new_size)
 uint32_t
 tcp_server::
 handle_attach(uint32_t uc_index)
-{ 
+{
+  // Idea was the q can be attached to any uc, but now to simplify,
+  // always attach to uc0
   // issue ioctl to attach the dbg hsa queue
-  std::map<uint32_t, size_t> buf_sizes;
-  buf_sizes[uc_index] = 0; //we don't care size
+  // std::map<uint32_t, size_t> buf_sizes;
+  // buf_sizes[uc_index] = 0; //we don't care size
 
-  m_dbg_umq.get_dbg_umq_bo()->config(m_hwctx, buf_sizes);
-  shim_debug("TCP server ioctl: debugger attach\n");
+  // m_dbg_umq.get_dbg_umq_bo()->config(m_hwctx, buf_sizes);
+  // shim_debug("TCP server ioctl: debugger attach\n");
 
   m_aie_attached = true;
   return AIE_DBG_SUCCESS;
@@ -311,7 +320,7 @@ handle_detach()
 {
   m_dbg_umq.issue_exit_cmd();
   // issue ioctl to detach the dbg hsa queue
-  m_dbg_umq.get_dbg_umq_bo()->unconfig(m_hwctx);
+  // m_dbg_umq.get_dbg_umq_bo()->unconfig(m_hwctx);
 
   m_aie_attached = false;
   shim_debug("TCP server ioctl: debugger queue detach\n");
