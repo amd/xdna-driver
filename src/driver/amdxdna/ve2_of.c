@@ -85,6 +85,11 @@ out:
 	return ret;
 }
 
+static void ve2_cma_device_release(struct device *dev)
+{
+	kfree(dev);
+}
+
 static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 {
 	int i;
@@ -95,6 +100,7 @@ static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 		region = &xdna->cma_mem_regions[i];
 		if (region->initialized) {
 			of_reserved_mem_device_release(region->dev);
+			put_device(region->dev);
 			region->dev = NULL;
 			region->initialized = false;
 		}
@@ -109,18 +115,17 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 	int ret = 0;
 	int i;
 
-	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
-						 "memory-region", NULL);
 	xdna->num_cma_regions = 0;
 
+	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
+						 "memory-region", NULL);
 	if (num_regions <= 0)
 		return -EINVAL;
 
 	for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
 		struct device *child_dev;
 
-		child_dev = devm_kzalloc(&pdev->dev, sizeof(*child_dev),
-					 GFP_KERNEL);
+		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
 		if (!child_dev) {
 			XDNA_ERR(xdna,
 				 "Failed to alloc child_dev for cma region %d\n",
@@ -129,15 +134,17 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 			return -ENOMEM;
 		}
 
+		device_initialize(child_dev);
 		child_dev->parent = &pdev->dev;
 		child_dev->of_node = pdev->dev.of_node;
 		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		child_dev->release = ve2_cma_device_release;
 
 		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
 		if (ret) {
 			XDNA_DBG(xdna,
 				 "Failed to set name for cma region %d\n", i);
-			devm_kfree(&pdev->dev, child_dev);
+			put_device(child_dev);
 			continue;
 		}
 
@@ -146,7 +153,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 		if (ret) {
 			XDNA_DBG(xdna,
 				 "Failed to init reserved cma region %d\n", i);
-			devm_kfree(&pdev->dev, child_dev);
+			put_device(child_dev);
 			continue;
 		}
 
