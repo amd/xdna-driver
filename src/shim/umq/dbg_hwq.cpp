@@ -94,7 +94,7 @@ submit()
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   m_dbg_umq_hdr->write_index++;
 
-  shim_debug("dbg umq: submit cmd widx: %ld ridx: %ld",
+  shim_debug("dbg umq: submit cmd widx: %lu ridx: %lu",
     m_dbg_umq_hdr->write_index,
     m_dbg_umq_hdr->read_index);
   shim_debug("dbg umq: cmd opcode: %d count: %d",

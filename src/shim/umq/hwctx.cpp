@@ -4,6 +4,7 @@
 #include "hwctx.h"
 #include "hwq.h"
 #include "core/common/config_reader.h"
+#include <filesystem>
 
 namespace shim_xdna {
 
