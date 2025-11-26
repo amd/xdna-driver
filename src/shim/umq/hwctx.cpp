@@ -18,7 +18,7 @@ hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
   m_col_cnt = xp.get_column_cnt();
 
   auto path = xrt_core::config::get_dtrace_control_file_path();
-  if (!std::filesystem::exists(path))
+  if (std::filesystem::exists(path))
   { //tcp server is running only when we run dtrace
     init_tcp_server(device);
     tcp_server_running = true;
@@ -33,7 +33,7 @@ hwctx_umq(const device& device, uint32_t partition_size)
   m_col_cnt = partition_size;
 
   auto path = xrt_core::config::get_dtrace_control_file_path();
-  if (!std::filesystem::exists(path))
+  if (std::filesystem::exists(path))
   {
     init_tcp_server(device);
     tcp_server_running = true;
