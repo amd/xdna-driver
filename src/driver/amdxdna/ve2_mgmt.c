@@ -213,10 +213,21 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	nhwctx = hwctx->priv;
 	hwctx->start_col = nhwctx->start_col;
 	hwctx->num_col = nhwctx->num_col;
+	/* Allocate hwctx_config array based on total columns */
+	nhwctx->hwctx_config = kcalloc(xdna->dev_handle->aie_dev_info.cols,
+				       sizeof(*nhwctx->hwctx_config), GFP_KERNEL);
+	if (!nhwctx->hwctx_config) {
+		XDNA_ERR(xdna, "Failed to allocate hwctx_config");
+		mutex_unlock(&xrs->xrs_lock);
+		ret = -ENOMEM;
+		goto destroy_partition;
+	}
 	mutex_unlock(&xrs->xrs_lock);
 
 	return 0;
 
+destroy_partition:
+	ve2_mgmt_destroy_partition(hwctx);
 xrs_release:
 	xrs_release_resource(xrs, (uintptr_t)hwctx, &load_act);
 free_start_cols:

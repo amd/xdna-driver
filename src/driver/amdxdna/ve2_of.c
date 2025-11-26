@@ -93,8 +93,6 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	int ret;
 	u32 col;
 
-	xrs_cfg.ddev = &xdna->ddev;
-	xrs_cfg.total_col = XRS_MAX_COL;
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
@@ -108,6 +106,16 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
 		return -EINVAL;
 	}
+	ret = aie_get_device_info(&xdna_hdl->aie_dev_info);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
+		return ret;
+	}
+	XDNA_INFO(xdna, "AIE device: %d columns, %d rows",
+		  xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows);
+
+	xrs_cfg.ddev = &xdna->ddev;
+	xrs_cfg.total_col = xdna_hdl->aie_dev_info.cols;
 
 	if (ve2_hwctx_limit)
 		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
@@ -123,31 +131,35 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	}
 	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 
-	for (col = 0; col < VE2_MAX_COL; col++) {
-		fw_slots = kzalloc(sizeof(*fw_slots), GFP_KERNEL);
+	/* Allocate arrays based on actual column count from device */
+	xdna_hdl->fw_slots = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+					  sizeof(*xdna_hdl->fw_slots), GFP_KERNEL);
+	if (!xdna_hdl->fw_slots) {
+		XDNA_ERR(xdna, "No memory for fw_slots array");
+		return -ENOMEM;
+	}
+
+	xdna_hdl->ve2_mgmtctx = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+					     sizeof(*xdna_hdl->ve2_mgmtctx), GFP_KERNEL);
+	if (!xdna_hdl->ve2_mgmtctx) {
+		XDNA_ERR(xdna, "No memory for ve2_mgmtctx array");
+		return -ENOMEM;
+	}
+
+	for (col = 0; col < xdna_hdl->aie_dev_info.cols; col++) {
+		fw_slots = devm_kzalloc(&pdev->dev, sizeof(*fw_slots), GFP_KERNEL);
 		if (!fw_slots) {
-			ret = -ENOMEM;
-			XDNA_ERR(xdna, "No memory for fw status. ret: %d\n", ret);
-			goto done;
+			XDNA_ERR(xdna, "No memory for fw status\n");
+			return -ENOMEM;
 		}
 		xdna->dev_handle->fw_slots[col] = fw_slots;
 	}
 
 	return 0;
-done:
-	ve2_free_firmware_slots(xdna_hdl, VE2_MAX_COL);
-
-	return ret;
-}
-
-static void ve2_fini(struct amdxdna_dev *xdna)
-{
-	ve2_free_firmware_slots(xdna->dev_handle, VE2_MAX_COL);
 }
 
 const struct amdxdna_dev_ops ve2_ops = {
 	.init		= ve2_init,
-	.fini		= ve2_fini,
 	.ctx_init	= ve2_hwctx_init,
 	.ctx_fini	= ve2_hwctx_fini,
 	.ctx_config     = ve2_hwctx_config,

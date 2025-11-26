@@ -845,16 +845,6 @@ out:
 	return ret > 0 ? 0 : ret;
 }
 
-void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
-{
-	u32 col;
-
-	for (col = 0; col < max_cols; col++) {
-		kfree(xdna_hdl->fw_slots[col]);
-		xdna_hdl->fw_slots[col] = NULL;
-	}
-}
-
 static void timeout_cb(struct timer_list *t)
 {
 	struct amdxdna_ctx_priv *priv = from_timer(priv, t, event_timer);
@@ -968,6 +958,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
+	kfree(hwctx->priv->hwctx_config);
 	kfree(hwctx->priv);
 	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
 		 hwctx, hwctx->submitted, hwctx->completed);
