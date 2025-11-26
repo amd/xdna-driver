@@ -99,13 +99,15 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	xdna_hdl->xdna = xdna;
 	xdna_hdl->priv = xdna->dev_info->dev_priv;
-
 	xdna->dev_handle = xdna_hdl;
-	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
-	if (!xdna->dev_handle->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
-		return -EINVAL;
-	}
+
+	if (ve2_hwctx_limit)
+		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
+	else
+		xdna_hdl->hwctx_limit = xdna_hdl->priv->hwctx_limit;
+
+	XDNA_INFO(xdna, "Maximum limit %d hardware context(s)", xdna_hdl->hwctx_limit);
+
 	ret = aie_get_device_info(&xdna_hdl->aie_dev_info);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
@@ -115,15 +117,24 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		  xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows);
 
 	xrs_cfg.ddev = &xdna->ddev;
-	xrs_cfg.total_col = xdna_hdl->aie_dev_info.cols;
 
-	if (ve2_hwctx_limit)
-		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
-	else
-		xdna_hdl->hwctx_limit = xdna_hdl->priv->hwctx_limit;
+	/* Support module parameters to override column count if valid */
+	if (max_col > 0 && start_col >= 0 &&
+	    (max_col + start_col) <= xdna_hdl->aie_dev_info.cols) {
+		xrs_cfg.total_col = max_col;
+		XDNA_INFO(xdna, "Using module parameter: max_col=%d, start_col=%d",
+			  max_col, start_col);
+	} else {
+		xrs_cfg.total_col = xdna_hdl->aie_dev_info.cols;
+	}
 
-	XDNA_INFO(xdna, "Maximum limit %d hardware context(s)", xdna_hdl->hwctx_limit);
+	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
+		return -EINVAL;
+	}
 
+	/* Load firmware */
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
@@ -149,7 +160,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	for (col = 0; col < xdna_hdl->aie_dev_info.cols; col++) {
 		fw_slots = devm_kzalloc(&pdev->dev, sizeof(*fw_slots), GFP_KERNEL);
 		if (!fw_slots) {
-			XDNA_ERR(xdna, "No memory for fw status\n");
+			XDNA_ERR(xdna, "No memory for fw status");
 			return -ENOMEM;
 		}
 		xdna->dev_handle->fw_slots[col] = fw_slots;
@@ -158,8 +169,14 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	return 0;
 }
 
+static void ve2_fini(struct amdxdna_dev *xdna)
+{
+	/* All resources are managed by devm_/drmm_ */
+	XDNA_DBG(xdna, "VE2 device cleanup function");
+}
 const struct amdxdna_dev_ops ve2_ops = {
 	.init		= ve2_init,
+	.init		= ve2_fini,
 	.ctx_init	= ve2_hwctx_init,
 	.ctx_fini	= ve2_hwctx_fini,
 	.ctx_config     = ve2_hwctx_config,

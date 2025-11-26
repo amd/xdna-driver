@@ -21,7 +21,7 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,
 	u32 start_col = nhwctx->start_col;
 	u32 num_col = nhwctx->num_col;
 	u64 hsa_addr = 0xFFFFFFFFFFFFFFFF;
-	struct ve2_config_hwctx *hwctx_cfg = &nhwctx->hwctx_config[start_col + col];
+	struct ve2_config_hwctx *hwctx_cfg = &nhwctx->hwctx_config[col];
 
 	if (col == 0)
 		hsa_addr = nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr;
@@ -213,8 +213,8 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	nhwctx = hwctx->priv;
 	hwctx->start_col = nhwctx->start_col;
 	hwctx->num_col = nhwctx->num_col;
-	/* Allocate hwctx_config array based on total columns */
-	nhwctx->hwctx_config = kcalloc(xdna->dev_handle->aie_dev_info.cols,
+	/* Allocate hwctx_config array based on number of columns for this context */
+	nhwctx->hwctx_config = kcalloc(nhwctx->num_col,
 				       sizeof(*nhwctx->hwctx_config), GFP_KERNEL);
 	if (!nhwctx->hwctx_config) {
 		XDNA_ERR(xdna, "Failed to allocate hwctx_config");
