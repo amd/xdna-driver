@@ -1109,7 +1109,6 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	const struct amdxdna_dev_priv *priv;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
-	u64 tops_max, tops_curr;
 	int min;
 
 	xdna = client->xdna;
@@ -1122,9 +1121,9 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	}
 
 	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
-	res_info.npu_tops_max = tops_max;
+	res_info.npu_tops_max = ndev->max_tops;
 	res_info.npu_task_max = priv->hwctx_limit;
-	res_info.npu_tops_curr = tops_curr;
+	res_info.npu_tops_curr = ndev->curr_tops;
 	res_info.npu_task_curr = ndev->hwctx_cnt;
 
 	min = min(args->buffer_size, sizeof(res_info));

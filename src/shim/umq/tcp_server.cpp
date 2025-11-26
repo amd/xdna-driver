@@ -11,8 +11,13 @@
 namespace shim_xdna {
 
 tcp_server::
-tcp_server(const device& dev, hwctx* hwctx) :
-m_aie_attached(false), m_dbg_umq(dev), m_def_size(16), m_pdev(dev.get_pdev())
+tcp_server(const device& dev, hwctx* hwctx)
+  : m_dbg_umq(dev)
+  , m_def_size(16)
+  , m_ctrl_buf(nullptr)
+  , m_ctrl_paddr(0)
+  , m_aie_attached(false)
+  , m_pdev(dev.get_pdev())
 {
   m_hwctx = hwctx;
   auto def_buf_size = m_def_size * sizeof(uint32_t);
