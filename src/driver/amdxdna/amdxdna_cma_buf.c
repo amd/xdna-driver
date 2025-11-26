@@ -188,5 +188,5 @@ int get_cma_mem_index(u64 flags)
 	 * Valid indexes: 0-15 (validated at call site against MAX_MEM_REGIONS)
 	 * Invalid indexes (>=16): handled as fallback to default CMA
 	 */
-	return ((flags) & 0xFF);
+	return flags & 0xFF;
 }
