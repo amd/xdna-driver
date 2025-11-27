@@ -44,7 +44,7 @@
 	"vtd_archives": [
 		{
 			"device": "strx",
-			"url": "https://github.com/Xilinx/VTD/raw/3a7307ba389037c51d462f8c451c06766be2e707/archive/strx/xrt_smi_strx.a",
+			"url": "https://github.com/Xilinx/VTD/raw/c79b5d21568a4ffa5b0612a8279b352fc4e1109a/archive/strx/xrt_smi_strx.a",
 			"filename": "xrt_smi_strx.a"
 		},
 		{
