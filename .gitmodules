@@ -1,4 +1,3 @@
 [submodule "xrt"]
 	path = xrt
-	url = https://github.com/kashif/XRT.git
-	branch = arch
+	url = https://github.com/Xilinx/XRT.git
