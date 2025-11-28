@@ -3,6 +3,8 @@
 
 #include "hwctx.h"
 #include "hwq.h"
+#include "core/common/config_reader.h"
+#include <filesystem>
 
 namespace shim_xdna {
 
@@ -15,7 +17,12 @@ hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
   xclbin_parser xp(xclbin);
   m_col_cnt = xp.get_column_cnt();
 
-  init_tcp_server(device);
+  auto path = xrt_core::config::get_dtrace_control_file_path();
+  if (std::filesystem::exists(path))
+  { //tcp server is running only when we run dtrace
+    init_tcp_server(device);
+    tcp_server_running = true;
+  }
 }
 
 hwctx_umq::
@@ -25,7 +32,12 @@ hwctx_umq(const device& device, uint32_t partition_size)
 {
   m_col_cnt = partition_size;
 
-  init_tcp_server(device);
+  auto path = xrt_core::config::get_dtrace_control_file_path();
+  if (std::filesystem::exists(path))
+  {
+    init_tcp_server(device);
+    tcp_server_running = true;
+  }
   shim_debug("Created UMQ HW context (%d)", get_slotidx());
 }
 
@@ -33,7 +45,10 @@ hwctx_umq::
 ~hwctx_umq()
 {
   shim_debug("Destroying UMQ HW context (%d)...", get_slotidx());
-  fini_tcp_server();
+  if (tcp_server_running)
+  {
+    fini_tcp_server();
+  }
 }
 
 void

@@ -77,6 +77,7 @@ struct mgmt_mbox_chann_info {
 
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor)
 {
+	const struct aie2_fw_feature_tbl *feature;
 	struct amdxdna_dev *xdna = ndev->xdna;
 
 	/*
@@ -104,6 +105,17 @@ int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor
 		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
 		return -EINVAL;
 	}
+
+	for (feature = ndev->priv->fw_feature_tbl; feature && feature->min_minor;
+	     feature++) {
+		if (fw_minor < feature->min_minor)
+			continue;
+		if (feature->max_minor > 0 && fw_minor > feature->max_minor)
+			continue;
+
+		set_bit(feature->feature, &ndev->feature_mask);
+	}
+
 	return 0;
 }
 
@@ -618,6 +630,7 @@ skip_pasid:
 	}
 
 	release_firmware(fw);
+	aie2_msg_init(ndev);
 	amdxdna_rpm_init(xdna);
 	return 0;
 
@@ -1096,7 +1109,6 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	const struct amdxdna_dev_priv *priv;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
-	u64 tops_max, tops_curr;
 	int min;
 
 	xdna = client->xdna;
@@ -1108,12 +1120,10 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
-	priv->hw_ops.get_tops(ndev, &tops_max, &tops_curr);
-
 	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
-	res_info.npu_tops_max = tops_max;
+	res_info.npu_tops_max = ndev->max_tops;
 	res_info.npu_task_max = priv->hwctx_limit;
-	res_info.npu_tops_curr = tops_curr;
+	res_info.npu_tops_curr = ndev->curr_tops;
 	res_info.npu_task_curr = ndev->hwctx_cnt;
 
 	min = min(args->buffer_size, sizeof(res_info));
