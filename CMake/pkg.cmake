@@ -131,17 +131,18 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
   endif()
 elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch")
   set(CPACK_GENERATOR "TGZ")
-  # For Arch Linux, we generate a tarball that can be used for manual installation
-  # or to create a PKGBUILD. Post-install scripts need to be run manually.
+  # For Arch Linux, we generate a tarball that can be repackaged into a proper
+  # Arch package using the provided PKGBUILD. When using the PKGBUILD, install
+  # hooks handle post-install/pre-remove automatically via pacman.
   set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
   message(STATUS "Arch Linux detected - generating TGZ package")
   if(NOT SKIP_KMOD)
     message(STATUS "Post-install script: ${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
     message(STATUS "Pre-remove script: ${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
-    message(STATUS "Note: For Arch Linux, you'll need to run these scripts manually or create a PKGBUILD")
+    message(STATUS "Note: Use the provided PKGBUILD to create an Arch package with proper install hooks")
   endif()
-else("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
+else()
   message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}")
-endif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
+endif()
 
 include(CPack)
