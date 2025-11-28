@@ -8,7 +8,7 @@ post_install() {
   dracut_conf_file=amdxdna.dracut.conf
 
   # On systems with dracut, exclude driver from initramfs
-  if [ -e ${dracut_conf_d} ]; then
+  if [ -d ${dracut_conf_d} ]; then
     if [ ! -f ${dracut_conf_d}/${dracut_conf_file} ]; then
       touch ${dracut_conf_d}/${dracut_conf_file}
     fi
@@ -17,7 +17,11 @@ post_install() {
 
   # Install DKMS module
   echo "Installing amdxdna Linux kernel module via DKMS..."
-  $install_datadir/dkms_driver.sh --install
+  if [ ! -x "$install_datadir/dkms_driver.sh" ]; then
+    echo "Error: $install_datadir/dkms_driver.sh not found or not executable." >&2
+    return 1
+  fi
+  "$install_datadir/dkms_driver.sh" --install
 
   # Setup udev rules
   echo "Setting up udev rules..."
@@ -30,7 +34,7 @@ post_install() {
   # Load the kernel module
   echo "Loading amdxdna kernel module..."
   rmmod amdxdna > /dev/null 2>&1 || true
-  modprobe amdxdna
+  modprobe amdxdna || echo "Warning: Failed to load amdxdna module. Check dmesg for details."
 
   echo "AMD XDNA driver installation complete!"
   echo "You can test it with: source /opt/xilinx/xrt/setup.sh && xrt-smi validate"
