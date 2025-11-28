@@ -99,7 +99,7 @@ struct amdxdna_mgmtctx {
 	u32				mgmt_partid;
 	struct aie_partition_init_args	args;
 	struct list_head		ctx_command_fifo_head;
-	spinlock_t			ctx_lock; /* protect ctx add/remove/update */
+	struct mutex			ctx_lock; /* protect ctx add/remove/update */
 	struct work_struct		sched_work;
 	struct workqueue_struct		*mgmtctx_workq;
 	u32			is_partition_idle; /* Hardware sync required */
