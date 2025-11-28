@@ -463,8 +463,7 @@ struct aie_coredump
   }
 
   static result_type
-  get(const xrt_core::device* device, key_type key,
-		  const std::any& args_any)
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
   {
     if (key != key_type::aie_coredump)
       throw xrt_core::query::no_such_key(key, "Not implemented");
