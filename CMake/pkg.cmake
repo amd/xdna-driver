@@ -130,7 +130,7 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
     set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm") 
   endif()
 else("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
-  message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}")
+  message(WARNING "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}")
 endif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
 
 include(CPack)
