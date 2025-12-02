@@ -23,6 +23,8 @@ use_to_fw_debug_type(uint8_t use)
   switch (use) {
   case XRT_BO_USE_DEBUG:
     return AMDXDNA_FW_BUF_DEBUG;
+  case XRT_BO_USE_UC_DEBUG:
+    return AMDXDNA_FW_BUF_DEBUG;
   case XRT_BO_USE_DTRACE:
     return AMDXDNA_FW_BUF_TRACE;
   case XRT_BO_USE_DEBUG_QUEUE:
