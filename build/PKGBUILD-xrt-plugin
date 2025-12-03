@@ -19,7 +19,11 @@ package() {
 
   # Extract the tarball directly into the package directory
   # The tarball should be at $startdir/$XDNA_BUILD_DIR/xrt_plugin*.tar.gz
+  # Use nullglob to handle case where no files match the glob pattern
+  local _nullglob_set=$(shopt -p nullglob)
+  shopt -s nullglob
   local tarballs=("$startdir/${XDNA_BUILD_DIR}"/xrt_plugin*-amdxdna.tar.gz)
+  $_nullglob_set
   if [ ${#tarballs[@]} -eq 0 ] || [ ! -f "${tarballs[0]}" ]; then
     error "XDNA plugin tarball not found in ${XDNA_BUILD_DIR}"
     error "Please build XDNA driver first: cd build && ./build.sh -release"
