@@ -463,18 +463,16 @@ struct aie_coredump
   }
 
   static result_type
-  get(const xrt_core::device* device, key_type key,
-		  const std::any& h, const std::any& p)
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
   {
     if (key != key_type::aie_coredump)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    const auto hwctx_id = std::any_cast<uint32_t>(h);
-    const auto pid = std::any_cast<uint64_t>(p);
+    const auto& aie_coredump_args = std::any_cast<const query::aie_coredump::args&>(args_any);
     std::vector<char> payload(sizeof(amdxdna_drm_aie_coredump));
     amdxdna_drm_aie_coredump *dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
-    dump->context_id = hwctx_id;
-    dump->pid = pid;
+    dump->context_id = aie_coredump_args.context_id;
+    dump->pid = aie_coredump_args.pid;
 
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_AIE_COREDUMP,
@@ -490,8 +488,8 @@ struct aie_coredump
       if (e.code().value() == ENOBUFS) {
         payload.resize(arg.element_size + sizeof(amdxdna_drm_aie_coredump));
         dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data()+arg.element_size);
-        dump->context_id = hwctx_id;
-        dump->pid = pid;
+        dump->context_id = aie_coredump_args.context_id;
+        dump->pid = aie_coredump_args.pid;
         arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
         arg.element_size = payload.size();
         edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
@@ -773,7 +771,7 @@ initialize_query_table()
   emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func1_request<query::aie_read,                aie_read>();
   emplace_func1_request<query::aie_write,               aie_write>();
-  emplace_func2_request<query::aie_coredump,            aie_coredump>();
+  emplace_func1_request<query::aie_coredump,            aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }
