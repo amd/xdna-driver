@@ -1123,10 +1123,12 @@ main(int argc, char **argv)
   std::vector<int> tests;
   for (int i = optind; i < argc; i++) {
     int idx = get_test_case_index(argv[i]);
-    if (idx >= 0)
+    if (idx >= 0 && idx < test_list.size()) {
       tests.push_back(idx);
-    else
+    } else {
+      std::cout << "Invalid test index : " << idx << std::endl;
       return 1;
+    }
   }
 
   cur_path = dirname(argv[0]);

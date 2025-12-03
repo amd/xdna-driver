@@ -140,12 +140,11 @@ private:
   unsigned long m_total_fine_preemption_checkpoints;
 };
 
-class elf_io_timeout_test_bo_set : public io_test_bo_set_base
+class elf_io_negative_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_timeout_test_bo_set(device *dev, const std::string& xclbin_name);
-  elf_io_timeout_test_bo_set(device *dev, const std::string& xclbin_name,
-    const std::string& elf_name, uint32_t exp_txn_op_idx);
+  elf_io_negative_test_bo_set(device *dev, const std::string& xclbin_name,
+    const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -155,6 +154,7 @@ public:
 
 private:
   uint32_t m_expect_txn_op_idx;
+  uint32_t m_expect_cmd_status;
 };
 
 class async_error_io_test_bo_set : public io_test_bo_set_base

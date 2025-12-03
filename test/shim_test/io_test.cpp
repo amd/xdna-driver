@@ -486,7 +486,8 @@ TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, cons
 void
 TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_timeout_test_bo_set boset{sdev.get(), "timeout.xclbin"};
+  elf_io_negative_test_bo_set boset{sdev.get(),
+    "bad_txn.xclbin", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
   boset.run();
 }
 
@@ -542,10 +543,9 @@ void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, a
 void
 TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_timeout_test_bo_set invalid_addr_txn_set{sdev.get(), "timeout.xclbin",
-                                                  "instr_invalid_addr.elf", 0xFFFFFFFF};
-  // verification is inside run()
-  invalid_addr_txn_set.run();
+  elf_io_negative_test_bo_set bo_set{sdev.get(),
+    "bad_txn.xclbin", "instr_invalid_addr.elf", ERT_CMD_STATE_TIMEOUT, 0xFFFFFFFF};
+  bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
   elf_io(id, sdev, params, "design.xclbin");
@@ -565,10 +565,13 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
 #if 0
   elf_io_test_bo_set boset{sdev.get(), "design.xclbin"};
   boset.run();
-  elf_io_timeout_test_bo_set boset_timeout{sdev.get(), "timeout.xclbin"};
-  boset_timeout.run();
-  elf_io_timeout_test_bo_set invalid_addr_txn_set{sdev.get(), "timeout.xclbin",
-                                                  "instr_invalid_op.elf", 0xFFFFFFFF};
-  invalid_addr_txn_set.run();
+#endif
+  elf_io_negative_test_bo_set bo_set{sdev.get(),
+    "bad_txn.xclbin", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+  bo_set.run();
+#if 0
+  elf_io_negative_test_bo_set bo_set{sdev.get(),
+    "bad_txn.xclbin", "instr_invalid_op.elf", ERT_CMD_STATE_ERROR, 0};
+  bo_set.run();
 #endif
 }

@@ -449,11 +449,12 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
   }
 }
 
-elf_io_timeout_test_bo_set::
-elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name,
-  const std::string& elf_name, uint32_t exp_txn_op_idx)
-  : m_expect_txn_op_idx(exp_txn_op_idx),
-    io_test_bo_set_base(dev, xclbin_name)
+elf_io_negative_test_bo_set::
+elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
+  const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx)
+  : m_expect_txn_op_idx(exp_txn_op_idx)
+  , m_expect_cmd_status(exp_status)
+  , io_test_bo_set_base(dev, xclbin_name)
 {
   m_elf = xrt::elf(m_local_data_path + elf_name);
 
@@ -473,11 +474,12 @@ elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name,
     }
   }
 }
-
+#if 0
 elf_io_timeout_test_bo_set::
 elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name)
   : elf_io_timeout_test_bo_set(dev, xclbin_name, "timeout.elf", 0x11800)
 {}
+#endif
 
 elf_io_gemm_test_bo_set::
 elf_io_gemm_test_bo_set(device* dev, const std::string& xclbin_name, const std::string& elf_name)
@@ -647,7 +649,7 @@ init_cmd(hw_ctx& hwctx, bool dump)
 }
 
 void
-elf_io_timeout_test_bo_set::
+elf_io_negative_test_bo_set::
 init_cmd(hw_ctx& hwctx, bool dump)
 {
   elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
@@ -752,15 +754,21 @@ verify_result()
 }
 
 void
-elf_io_timeout_test_bo_set::
+elf_io_negative_test_bo_set::
 verify_result()
 {
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
 
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
-  if (cpkt->state != ERT_CMD_STATE_TIMEOUT) // Command must time out, or we fail
-    throw std::runtime_error(std::string("Command didn't timeout, state=") + std::to_string(cpkt->state));
+  if (cpkt->state != m_expect_cmd_status) {
+    throw std::runtime_error(std::string("Command status=") + std::to_string(cpkt->state) +
+      ", expect=" + std::to_string(m_expect_cmd_status));
+  }
 
+  if (m_expect_cmd_status != ERT_CMD_STATE_TIMEOUT)
+    return;
+
+  // In case of timeout, further check context health data
   auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
   if (cdata->aie2.txn_op_idx != m_expect_txn_op_idx) {
     std::cerr << "Incorrect app health data:\n";
@@ -770,7 +778,8 @@ verify_result()
     std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
     std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
     std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
-    throw std::runtime_error("Incorrect txn_op_idx in context health data!!!");
+    throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
+      ", expect=" + std::to_string(m_expect_txn_op_idx));
   }
 }
 
