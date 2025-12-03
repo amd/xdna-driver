@@ -5,6 +5,7 @@
 #define _SHIMTEST_IO_H_
 
 #include "bo.h"
+#include "hwctx.h"
 #include "dev_info.h"
 #include "exec_buf.h"
 
@@ -47,7 +48,7 @@ public:
   void
   run_no_check_result();
 
-  virtual void
+  void
   run();
 
   void
@@ -61,7 +62,7 @@ public:
   sync_after_run();
 
   virtual void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) = 0;
+  init_cmd(hw_ctx& hwctx, bool dump) = 0;
 
   void
   dump_content();
@@ -95,6 +96,9 @@ protected:
 
   void
   create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type);
+
+  xrt_core::cuidx_type
+  get_cu_idx(hw_ctx& hwctx);
 };
 
 class io_test_bo_set : public io_test_bo_set_base
@@ -105,7 +109,7 @@ public:
   io_test_bo_set(device *dev, bool use_ubuf);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
@@ -117,7 +121,7 @@ public:
   elf_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 };
 
 class elf_preempt_io_test_bo_set : public io_test_bo_set_base
@@ -126,7 +130,7 @@ public:
   elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   unsigned long
   get_preemption_checkpoints() override;
@@ -144,10 +148,7 @@ public:
     const std::string& elf_name, uint32_t exp_txn_op_idx);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-  void
-  run() override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
@@ -162,13 +163,11 @@ public:
   async_error_io_test_bo_set(device *dev);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-  void
-  run() override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
+
 private:
   uint64_t m_expect_err_code;
   uint64_t m_last_err_timestamp;
@@ -182,13 +181,13 @@ public:
     const std::string& elf_name);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-  void
-  run() override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
+
+private:
+  std::unique_ptr<xrt_core::buffer_handle> m_dbo;
 };
 
 #endif // _SHIMTEST_IO_H_

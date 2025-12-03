@@ -2,7 +2,6 @@
 // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "io.h"
-#include "hwctx.h"
 #include "io_config.h"
 #include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 #include "xrt/detail/xrt_error_code.h"
@@ -120,7 +119,7 @@ txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
   auto [ pm_ctrlpkt_size, pm_ctrlpkt_buf ] = read_binary_file(pm_ctrlpkt);
 
   if (!instr_size)
-    throw std::runtime_error("Can't open TXN bin file?");
+    throw std::runtime_error("Can't open TXN bin file: " + ml_txn);
 
   std::unique_ptr<aiebu::aiebu_assembler> asp = nullptr;
   if (pm_ctrlpkt_buf.size()) {
@@ -141,7 +140,7 @@ txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
   auto elf_buf = asp->get_elf();
   std::istringstream elf_stream;
   elf_stream.rdbuf()->pubsetbuf(elf_buf.data(), elf_buf.size());
-  //dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
+  dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
   xrt::elf elf{elf_stream};
   return elf;
 
@@ -267,6 +266,18 @@ create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type)
   if (size == 0)
     throw std::runtime_error("instruction size cannot be 0");
   alloc_ctrl_bo(ibo, m_dev, size);
+}
+
+xrt_core::cuidx_type
+io_test_bo_set_base::
+get_cu_idx(hw_ctx& hwctx)
+{
+  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
+  if (kernel.empty())
+    throw std::runtime_error("No kernel found");
+  auto cu_idx = hwctx.get()->open_cu_context(kernel);
+  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
+  return cu_idx;
 }
 
 io_test_bo_set::
@@ -543,11 +554,11 @@ sync_after_run()
 
 void
 io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_CU);
 
-  ebuf.set_cu_idx(idx);
+  ebuf.set_cu_idx(get_cu_idx(hwctx));
 
   ebuf.add_arg_64(1);
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
@@ -564,11 +575,11 @@ init_cmd(cuidx_type idx, bool dump)
 
 void
 elf_io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
 
-  ebuf.set_cu_idx(idx);
+  ebuf.set_cu_idx(get_cu_idx(hwctx));
 
   ebuf.add_arg_64(3);
   ebuf.add_arg_64(0);
@@ -589,7 +600,7 @@ init_cmd(cuidx_type idx, bool dump)
 
 void
 elf_preempt_io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(),
     m_is_full_elf ? ERT_START_NPU_PREEMPT_ELF : ERT_START_NPU_PREEMPT);
@@ -603,7 +614,7 @@ init_cmd(cuidx_type idx, bool dump)
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PDI].tbo.get(), ".pdi.0");
     ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
   } else {
-    ebuf.set_cu_idx(idx);
+    ebuf.set_cu_idx(get_cu_idx(hwctx));
 
     ebuf.add_arg_64(3);
     ebuf.add_arg_64(0);
@@ -637,20 +648,31 @@ init_cmd(cuidx_type idx, bool dump)
 
 void
 elf_io_timeout_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
-  elf_init_no_arg_cmd(m_elf, idx, dump,
+  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
     *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
     *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
 }
 
 void
 elf_io_gemm_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
-  elf_init_no_arg_cmd(m_elf, idx, dump,
+  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
     *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
     *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+
+  // Get a debug BO
+  auto boflags = XRT_BO_FLAGS_CACHEABLE;
+  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
+  const size_t size = 4096;
+  m_dbo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
+
+  // Initializing debug BO content to -1
+  std::memset(dbo_p, 0xff, size);
+  m_dbo.get()->sync(buffer_handle::direction::host2device, size, 0);
 }
 
 // For debug only
@@ -676,7 +698,18 @@ void
 io_test_bo_set_base::
 verify_result()
 {
+  // Verify command completion status
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+
+  // If no ofm, skip the rest of validation
   auto bo_ofm = m_bo_array[IO_TEST_BO_OUTPUT].tbo;
+  if (!bo_ofm)
+    return;
+
+  // Compare result with data in ofm.bin
   auto ofm_p = reinterpret_cast<char*>(bo_ofm->map());
   auto sz = bo_ofm->size();
 
@@ -702,6 +735,13 @@ void
 io_test_bo_set::
 verify_result()
 {
+  // Verify command completion status
+  printf("haha\n");
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+
   auto ofm_bo = m_bo_array[IO_TEST_BO_OUTPUT].tbo.get();
   auto ofm_p = reinterpret_cast<int8_t *>(ofm_bo->map());
 
@@ -716,7 +756,11 @@ elf_io_timeout_test_bo_set::
 verify_result()
 {
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_TIMEOUT) // Command must time out, or we fail
+    throw std::runtime_error(std::string("Command didn't timeout, state=") + std::to_string(cpkt->state));
+
   auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
   if (cdata->aie2.txn_op_idx != m_expect_txn_op_idx) {
     std::cerr << "Incorrect app health data:\n";
@@ -734,7 +778,30 @@ void
 elf_io_gemm_test_bo_set::
 verify_result()
 {
-// Verification is done in run() already
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+
+  // Updating debug BO content after execution
+  m_dbo.get()->sync(buffer_handle::direction::device2host, m_dbo->get_properties().size, 0);
+  auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
+
+  // Validating debug BO content.
+  // The first 32 Dwords should be 0xde, the rest should be initial values
+  int i = 0;
+  while (i < 32) {
+    if (dbo_p[i] != 0xde)
+      throw std::runtime_error(std::string("bad debug bo content, expecting 222, got ")
+        + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
+    ++i;
+  }
+  while (i < 1024) {
+    if (dbo_p[i] != -1)
+      throw std::runtime_error(std::string("bad debug bo content, expecting -1, got ")
+        + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
+    ++i;
+  }
 }
 
 const char *
@@ -753,13 +820,8 @@ run(const std::vector<fence_handle*>& wait_fences,
 {
   hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
   auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
-  if (kernel.empty())
-    throw std::runtime_error("No kernel found");
-  auto cu_idx = hwctx.get()->open_cu_context(kernel);
-  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
 
-  init_cmd(cu_idx, false);
+  init_cmd(hwctx, false);
   sync_before_run();
 
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
@@ -769,10 +831,7 @@ run(const std::vector<fence_handle*>& wait_fences,
   hwq->submit_command(chdl);
   for (const auto& fence : signal_fences)
     hwq->submit_signal(fence);
-  hwq->wait_command(chdl, 5000);
-  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+  hwq->wait_command(chdl, 0);
 
   sync_after_run();
   if (!no_check_result)
@@ -786,83 +845,6 @@ run()
   const std::vector<fence_handle*> sfences{};
   const std::vector<fence_handle*> wfences{};
   run(wfences, sfences, false);
-}
-
-void
-elf_io_timeout_test_bo_set::
-run()
-{
-  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
-  auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
-  if (kernel.empty())
-    throw std::runtime_error("No kernel found");
-  auto cu_idx = hwctx.get()->open_cu_context(kernel);
-  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
-
-  init_cmd(cu_idx, false);
-
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto chdl = cbo->get();
-  hwq->submit_command(chdl);
-  hwq->wait_command(chdl, 0); // Wait forever and expect the driver TDR to kick-in
-  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  if (cpkt->state != ERT_CMD_STATE_TIMEOUT) // Command must time out, or we fail
-    throw std::runtime_error(std::string("Command didn't timeout, state=") + std::to_string(cpkt->state));
-}
-
-void
-elf_io_gemm_test_bo_set::
-run()
-{
-  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
-  auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
-  if (kernel.empty())
-    throw std::runtime_error("No kernel found");
-  auto cu_idx = hwctx.get()->open_cu_context(kernel);
-  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
-
-  init_cmd(cu_idx, false);
-
-  // Get a debug BO
-  auto boflags = XRT_BO_FLAGS_CACHEABLE;
-  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
-  const size_t size = 4096;
-  auto dbo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
-  auto dbo_p = static_cast<int32_t *>(dbo->map(buffer_handle::map_type::write));
-
-  // Initializing debug BO content to -1
-  std::memset(dbo_p, 0xff, size);
-  dbo.get()->sync(buffer_handle::direction::host2device, size, 0);
-
-  // Execute the control code
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto chdl = cbo->get();
-  hwq->submit_command(chdl);
-  hwq->wait_command(chdl, 0);
-  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
-
-  // Updating debug BO content after execution
-  dbo.get()->sync(buffer_handle::direction::device2host, size, 0);
-
-  // Validating debug BO content.
-  // The first 32 Dwords should be 0xde, the rest should be initial values
-  int i = 0;
-  while (i < 32) {
-    if (dbo_p[i] != 0xde)
-      throw std::runtime_error(std::string("bad debug bo content, expecting 222, got ")
-        + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
-    ++i;
-  }
-  while (i < 1024) {
-    if (dbo_p[i] != -1)
-      throw std::runtime_error(std::string("bad debug bo content, expecting -1, got ")
-        + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
-    ++i;
-  }
 }
 
 void
@@ -924,8 +906,7 @@ async_error_io_test_bo_set(device* dev)
     case IO_TEST_BO_CMD:
       alloc_cmd_bo(ibo, m_dev);
       break;
-    case IO_TEST_BO_INSTRUCTION:
-    {
+    case IO_TEST_BO_INSTRUCTION: {
       auto size = 3 * sizeof(uint32_t);
       alloc_ctrl_bo(ibo, m_dev, size);
 
@@ -943,8 +924,8 @@ async_error_io_test_bo_set(device* dev)
       uint64_t err_module = XRT_ERROR_MODULE_AIE_PL;
       uint64_t err_class = XRT_ERROR_CLASS_AIE;
       m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
-    }
       break;
+    }
     default:
       break;
     }
@@ -953,10 +934,10 @@ async_error_io_test_bo_set(device* dev)
 
 void
 async_error_io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_CU);
-  ebuf.set_cu_idx(idx);
+  ebuf.set_cu_idx(get_cu_idx(hwctx));
   ebuf.add_arg_64(1);
   ebuf.add_arg_64(0);
   ebuf.add_arg_64(0);
@@ -973,6 +954,8 @@ void
 async_error_io_test_bo_set::
 verify_result()
 {
+  // Don't care about command completion status, it may succeed or timeout
+
   auto buf = device_query<query::xocl_errors>(m_dev);
   if (buf.empty())
     throw std::runtime_error("failed to get async errors, return empty information.");
@@ -993,31 +976,4 @@ verify_result()
     throw std::runtime_error(ss.str());
   }
   m_last_err_timestamp = err_timstamp;
-}
-
-void
-async_error_io_test_bo_set::
-run()
-{
-  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
-  auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel_type = get_kernel_type(m_dev, m_xclbin_name.c_str());
-  if (kernel_type != KERNEL_TYPE_DPU_SEQ)
-      throw std::runtime_error("ELF flow can't support async error test");
-
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
-  if (kernel.empty())
-    throw std::runtime_error("No kernel found");
-  auto cu_idx = hwctx.get()->open_cu_context(kernel);
-
-  init_cmd(cu_idx, false);
-  sync_before_run();
-
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto chdl = cbo->get();
-  hwq->submit_command(chdl);
-  // Async errors will be raised, command can return successful or failed
-  // No need to check the wait_command return.
-  hwq->wait_command(chdl, 2000);
-  verify_result();
 }
