@@ -506,14 +506,17 @@ void *xrsm_init(struct init_config *cfg)
 {
 	struct solver_rgroup *rgp;
 	struct solver_state *xrs;
+	size_t bitmap_size;
 
-	xrs = drmm_kzalloc(cfg->ddev, sizeof(*xrs), GFP_KERNEL);
+	bitmap_size = BITS_TO_LONGS(cfg->total_col) * sizeof(unsigned long);
+	xrs = drmm_kzalloc(cfg->ddev, sizeof(*xrs) + bitmap_size, GFP_KERNEL);
 	if (!xrs)
 		return NULL;
 
 	memcpy(&xrs->cfg, cfg, sizeof(*cfg));
 
 	rgp = &xrs->rgp;
+	rgp->resbit = (unsigned long *)(xrs + 1);
 	INIT_LIST_HEAD(&rgp->node_list);
 	INIT_LIST_HEAD(&rgp->pt_node_list);
 	mutex_init(&xrs->xrs_lock);

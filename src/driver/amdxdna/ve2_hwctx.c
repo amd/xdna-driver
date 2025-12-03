@@ -845,16 +845,6 @@ out:
 	return ret > 0 ? 0 : ret;
 }
 
-void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
-{
-	u32 col;
-
-	for (col = 0; col < max_cols; col++) {
-		kfree(xdna_hdl->fw_slots[col]);
-		xdna_hdl->fw_slots[col] = NULL;
-	}
-}
-
 static void timeout_cb(struct timer_list *t)
 {
 	struct amdxdna_ctx_priv *priv = from_timer(priv, t, event_timer);
@@ -968,6 +958,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
+	kfree(hwctx->priv->hwctx_config);
 	kfree(hwctx->priv);
 	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
 		 hwctx, hwctx->submitted, hwctx->completed);
@@ -980,17 +971,17 @@ static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 
 
 	switch (buf_type) {
 	case AMDXDNA_FW_BUF_DEBUG:
-		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_addr = paddr;
-		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_size = buf_sz;
+		nhwctx->hwctx_config[col].debug_buf_addr = paddr;
+		nhwctx->hwctx_config[col].debug_buf_size = buf_sz;
 		break;
 
 	case AMDXDNA_FW_BUF_TRACE:
-		nhwctx->hwctx_config[hwctx->start_col + col].dtrace_addr = paddr;
+		nhwctx->hwctx_config[col].dtrace_addr = paddr;
 		break;
 
 	case AMDXDNA_FW_BUF_LOG:
-		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_addr = paddr;
-		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_size = buf_sz;
+		nhwctx->hwctx_config[col].log_buf_addr = paddr;
+		nhwctx->hwctx_config[col].log_buf_size = buf_sz;
 		break;
 
 	default:
@@ -1008,7 +999,7 @@ static void ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeou
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 
 	for (u32 col = 0; col < hwctx->num_col; col++)
-		nhwctx->hwctx_config[hwctx->start_col + col].opcode_timeout_config = op_timeout;
+		nhwctx->hwctx_config[col].opcode_timeout_config = op_timeout;
 }
 
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size)
