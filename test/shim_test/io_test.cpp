@@ -139,10 +139,10 @@ io_test_cmd_submit_and_wait_latency(
         throw std::runtime_error(errmsg);
       }
 
-      std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
       completed++;
       if (completed >= total_cmd_submission)
         break;
+      std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
     }
   }
 }
@@ -159,6 +159,7 @@ io_test_cmd_submit_and_wait_thruput(
   int wait_idx = 0;
 
   for (auto& cmd : cmdlist_bos) {
+    std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
     hwq->submit_command(std::get<0>(cmd).get()->get());
     issued++;
     if (issued >= total_cmd_submission)
@@ -170,10 +171,10 @@ io_test_cmd_submit_and_wait_thruput(
     auto state = std::get<1>(cmdlist_bos[wait_idx])->state;
     if (state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
-    std::get<1>(cmdlist_bos[wait_idx])->state = ERT_CMD_STATE_NEW;
     completed++;
 
     if (issued < total_cmd_submission) {
+      std::get<1>(cmdlist_bos[wait_idx])->state = ERT_CMD_STATE_NEW;
       hwq->submit_command(std::get<0>(cmdlist_bos[wait_idx]).get()->get());
       issued++;
     }
@@ -258,19 +259,9 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   hw_ctx hwctx{dev, xclbin};
   auto hwq = hwctx.get()->get_hw_queue();
 
-  xrt_core::cuidx_type cu_idx{0};
-  auto kernel_type = get_kernel_type(dev, xclbin);
-  if (kernel_type != KERNEL_TYPE_TXN_FULL_ELF_PREEMPT) {
-    auto ip_name = get_kernel_name(dev, xclbin);
-    if (ip_name.empty())
-      throw std::runtime_error("Cannot find any kernel name matched DPU.*");
-    cu_idx = hwctx.get()->open_cu_context(ip_name);
-    std::cout << "Found kernel: " << ip_name << " with cu index " << cu_idx.index << std::endl;
-  }
-
-  // Finalize cmd before submission
+  // Initialize cmd before submission
   for (auto& boset : bo_set) {
-    boset->init_cmd(cu_idx, io_test_parameters.debug);
+    boset->init_cmd(hwctx, io_test_parameters.debug);
     boset->sync_before_run();
   }
 
@@ -279,9 +270,9 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   if (cmds_per_list == 1) {
     // Single command per list, just send the command BO itself
     for (auto& boset : bo_set) {
-      auto& cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo;
+      auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo;
       auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-      cmdlist_bos.push_back( {std::move(cbo), cmdpkt} );
+      cmdlist_bos.push_back( {cbo, cmdpkt} );
     }
   } else {
     // Multiple commands per list, create and send the chained command
@@ -327,6 +318,12 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   // Verify result
   if (io_test_parameters.type != IO_TEST_NOOP_RUN) {
     for (auto& boset : bo_set) {
+      // In case of runlist submission, status of original cmd BO won't be updated.
+      // Let's update them here to indicate success. If any cmd processing has failed,
+      // we'll throw before we get here.
+      auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo;
+      auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+      cmdpkt->state = ERT_CMD_STATE_COMPLETED;
       boset->sync_after_run();
       //boset->dump_content();
       boset->verify_result();
@@ -489,9 +486,9 @@ TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, cons
 void
 TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_timeout_test_bo_set boset{sdev.get(), "timeout.xclbin"};
+  elf_io_negative_test_bo_set boset{sdev.get(),
+    "bad_txn.xclbin", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
   boset.run();
-  boset.verify_result();
 }
 
 void
@@ -546,10 +543,9 @@ void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, a
 void
 TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_timeout_test_bo_set invalid_addr_txn_set{sdev.get(), "timeout.xclbin",
-                                                  "instr_invalid_addr.elf", 0xFFFFFFFF};
-  // verification is inside run()
-  invalid_addr_txn_set.run();
+  elf_io_negative_test_bo_set bo_set{sdev.get(),
+    "bad_txn.xclbin", "instr_invalid_addr.elf", ERT_CMD_STATE_TIMEOUT, 0xFFFFFFFF};
+  bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
   elf_io(id, sdev, params, "design.xclbin");
@@ -560,5 +556,82 @@ TEST_io_gemm(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   elf_io_gemm_test_bo_set boset{sdev.get(), "gemm.xclbin", "gemm_int8.elf"};
   boset.run();
-  boset.verify_result();
+}
+
+void
+TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  bool is_timeout = static_cast<bool>(arg[0]);
+  const char *good_xclbin = "design.xclbin";
+  const char *bad_xclbin = "bad_txn.xclbin";
+
+  // Creating commands and BOs
+
+  // Two good ones
+  elf_io_test_bo_set good_bo_set1{sdev.get(), good_xclbin};
+  elf_io_test_bo_set good_bo_set2{sdev.get(), good_xclbin};
+  // A timeout one
+  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), bad_xclbin,
+    "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+  // A error one
+  elf_io_negative_test_bo_set error_bo_set{sdev.get(), bad_xclbin,
+    "instr_invalid_op.elf", ERT_CMD_STATE_ERROR, 0};
+
+  // Creating HW context for cmd submission. We use the good xclbin here to
+  // make sure good cmd can complete successfully. The bad ones don't really
+  // require any specific xclbin to fail.
+  hw_ctx hwctx{sdev.get(), good_xclbin};
+
+  // Initialize cmd before submission
+  good_bo_set1.init_cmd(hwctx, false);
+  good_bo_set1.sync_before_run();
+  good_bo_set2.init_cmd(hwctx, false);
+  good_bo_set2.sync_before_run();
+  timeout_bo_set.init_cmd(hwctx, false);
+  timeout_bo_set.sync_before_run();
+  error_bo_set.init_cmd(hwctx, false);
+  error_bo_set.sync_before_run();
+
+  // Create and send the chained command, keep the bad one in the middle
+  // Command chain: good, bad (error or timeout), good
+  // In case of timeout, the index returned from fw is always 0.
+  const uint32_t bad_index = is_timeout ? 0 : 1;
+  const uint32_t bad_state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ERROR;
+  io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : &error_bo_set;
+  std::vector<bo*> tmp_cmd_bos;
+  tmp_cmd_bos.push_back(good_bo_set1.get_bos()[IO_TEST_BO_CMD].tbo.get());
+  tmp_cmd_bos.push_back((*bad).get_bos()[IO_TEST_BO_CMD].tbo.get());
+  tmp_cmd_bos.push_back(good_bo_set2.get_bos()[IO_TEST_BO_CMD].tbo.get());
+
+  auto cbo = std::make_unique<bo>(sdev.get(), 0x1000ul, XCL_BO_FLAGS_EXECBUF);
+  io_test_init_runlist_cmd(cbo.get(), tmp_cmd_bos);
+
+  // Submit the chained command and wait for completion/timeout
+  auto hwq = hwctx.get()->get_hw_queue();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+
+  // Check the result
+  auto cmd_packet = reinterpret_cast<ert_packet *>(cbo->map());
+  auto payload = get_ert_cmd_chain_data(cmd_packet);
+  if (bad_state != cmd_packet->state || bad_index != payload->error_index) {
+    throw std::runtime_error(
+      std::string("runlist state=") + std::to_string(cmd_packet->state) +
+      std::string(", error index=") + std::to_string(payload->error_index) +
+      std::string(", expected state=") + std::to_string(bad_state) +
+      std::string(", expected error index=") + std::to_string(bad_index)
+      );
+  }
+  auto err_cmd_packet_by_index = reinterpret_cast<ert_packet *>(tmp_cmd_bos[bad_index]->map());
+  // Setting the error state of the bad one for verify_result call on the bad one later.
+  err_cmd_packet_by_index->state = cmd_packet->state;
+  // In case of timeout, the returned context health data is in index 0's cmd pkt,
+  // copy it to the real bad command for verify_result call on the bad one later.
+  if (is_timeout) {
+    auto cmdpkt = (*bad).get_bos()[IO_TEST_BO_CMD].tbo.get()->map();
+    auto size = (*bad).get_bos()[IO_TEST_BO_CMD].tbo.get()->size();
+    std::memcpy(cmdpkt, err_cmd_packet_by_index, size);
+  }
+
+  (*bad).verify_result();
 }
