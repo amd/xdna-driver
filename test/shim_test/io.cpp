@@ -140,7 +140,7 @@ txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
   auto elf_buf = asp->get_elf();
   std::istringstream elf_stream;
   elf_stream.rdbuf()->pubsetbuf(elf_buf.data(), elf_buf.size());
-  dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
+  //dump_buf_to_file((int8_t*)elf_buf.data(), elf_buf.size(), "/tmp/elf");
   xrt::elf elf{elf_stream};
   return elf;
 
@@ -474,12 +474,6 @@ elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
     }
   }
 }
-#if 0
-elf_io_timeout_test_bo_set::
-elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name)
-  : elf_io_timeout_test_bo_set(dev, xclbin_name, "timeout.elf", 0x11800)
-{}
-#endif
 
 elf_io_gemm_test_bo_set::
 elf_io_gemm_test_bo_set(device* dev, const std::string& xclbin_name, const std::string& elf_name)
