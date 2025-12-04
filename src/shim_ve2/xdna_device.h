@@ -72,18 +72,6 @@ public:
   std::unique_ptr<xrt_core::buffer_handle>
   import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl) override;
 
-  virtual std::vector<char>
-  read_aie_mem(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*offset*/, uint32_t /*size*/) override;
-
-  virtual size_t
-  write_aie_mem(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*offset*/, const std::vector<char>& /*data*/) override;
-
-  virtual uint32_t
-  read_aie_reg(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*reg_addr*/) override;
-
-  virtual bool
-  write_aie_reg(uint16_t /*col*/, uint16_t /*row*/, uint32_t /*reg_addr*/, uint32_t /*reg_val*/) override;
-
   int
   get_info(xclDeviceInfo2 *info) const;
 

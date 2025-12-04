@@ -254,6 +254,8 @@ static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *q
 				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
+		queue->hsa_queue_mem.dma_addr = 0;
+		mutex_destroy(&queue->hq_lock);
 	}
 }
 
@@ -361,6 +363,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	if (!queue->hsa_queue_p)
 		return -ENOMEM;
 
+	/* Initialize mutex here */
+	mutex_init(&queue->hq_lock);
 	/* Set the base DMA address for hsa queue */
 	queue->hsa_queue_mem.dma_addr = dma_handle;
 
@@ -401,7 +405,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	return 0;
 }
 
-static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
+static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq,
+				   bool last_cmd)
 {
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -432,6 +437,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
 	hdr->common_header.count = sizeof(struct host_indirect_packet_entry);
 	hdr->common_header.distribute = 1;
 	hdr->common_header.indirect = 1;
@@ -492,7 +498,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	return 0;
 }
 
-static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
+static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, bool last_cmd)
 {
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -522,6 +528,7 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq)
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
 	hdr->completion_signal =
 		(u64)(hq_queue->hq_complete.hqc_dma_addr + slot_id * sizeof(u64));
 #define XRT_PKT_OPCODE(p) ((p)->xrt_header.common_header.opcode)
@@ -562,9 +569,9 @@ static int ve2_submit_cmd_single(struct amdxdna_ctx *hwctx, struct amdxdna_sched
 	}
 
 	if (get_ve2_dpu_data_next(cmd_data))
-		ret = submit_command_indirect(hwctx, cmd_data, seq);
+		ret = submit_command_indirect(hwctx, cmd_data, seq, true);
 	else
-		ret = submit_command(hwctx, cmd_data, seq);
+		ret = submit_command(hwctx, cmd_data, seq, true);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit single command failed, error %d", ret);
 		return ret;
@@ -590,8 +597,9 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 	for (int i = 0; i < cmd_chain->command_count; i++) {
 		u32 boh = (u32)(cmd_chain->data[i]);
 		struct amdxdna_gem_obj *abo;
-		void *cmd_data;
+		bool last_cmd = false;
 		u32 cmd_data_len;
+		void *cmd_data;
 
 		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!abo) {
@@ -606,10 +614,12 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 			return -EINVAL;
 		}
 
+		if (i == cmd_chain->command_count - 1)
+			last_cmd = true;
 		if (get_ve2_dpu_data_next(cmd_data))
-			ret = submit_command_indirect(hwctx, cmd_data, seq);
+			ret = submit_command_indirect(hwctx, cmd_data, seq, last_cmd);
 		else
-			ret = submit_command(hwctx, cmd_data, seq);
+			ret = submit_command(hwctx, cmd_data, seq, last_cmd);
 		if (ret) {
 			XDNA_ERR(xdna, "Submit chain command(%d/%d) failed, error %d", i,
 				 cmd_chain->command_count, ret);
@@ -835,16 +845,6 @@ out:
 	return ret > 0 ? 0 : ret;
 }
 
-void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols)
-{
-	u32 col;
-
-	for (col = 0; col < max_cols; col++) {
-		kfree(xdna_hdl->fw_slots[col]);
-		xdna_hdl->fw_slots[col] = NULL;
-	}
-}
-
 static void timeout_cb(struct timer_list *t)
 {
 	struct amdxdna_ctx_priv *priv = from_timer(priv, t, event_timer);
@@ -916,10 +916,34 @@ free_priv:
 
 void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 {
+	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_sched_job *job;
 	int idx;
+
+	if (enable_polling)
+		del_timer_sync(&hwctx->priv->event_timer);
+
+	/*
+	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work,
+	 * then cancel any pending work to ensure no work is accessing this context
+	 */
+	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[nhwctx->start_col];
+	mutex_lock(&mgmtctx->ctx_lock);
+	if (mgmtctx->active_ctx == hwctx)
+		mgmtctx->active_ctx = NULL;
+	mutex_unlock(&mgmtctx->ctx_lock);
+
+	/* Now cancel any pending work - it will see active_ctx as NULL and bail out */
+	if (mgmtctx->mgmtctx_workq)
+		cancel_work_sync(&mgmtctx->sched_work);
+
+	/*
+	 * Release jobs first to decrement BO refcounts, but they may not
+	 * be freed immediately if the application still holds references
+	 */
 
 	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
 		job = hwctx->priv->pending[idx];
@@ -929,14 +953,12 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 		ve2_hwctx_job_release(hwctx, job);
 	}
 
-	if (enable_polling)
-		del_timer_sync(&hwctx->priv->event_timer);
-
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_get_firmware_status(hwctx);
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
+	kfree(hwctx->priv->hwctx_config);
 	kfree(hwctx->priv);
 	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
 		 hwctx, hwctx->submitted, hwctx->completed);
@@ -949,17 +971,17 @@ static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 
 
 	switch (buf_type) {
 	case AMDXDNA_FW_BUF_DEBUG:
-		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_addr = paddr;
-		nhwctx->hwctx_config[hwctx->start_col + col].debug_buf_size = buf_sz;
+		nhwctx->hwctx_config[col].debug_buf_addr = paddr;
+		nhwctx->hwctx_config[col].debug_buf_size = buf_sz;
 		break;
 
 	case AMDXDNA_FW_BUF_TRACE:
-		nhwctx->hwctx_config[hwctx->start_col + col].dtrace_addr = paddr;
+		nhwctx->hwctx_config[col].dtrace_addr = paddr;
 		break;
 
 	case AMDXDNA_FW_BUF_LOG:
-		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_addr = paddr;
-		nhwctx->hwctx_config[hwctx->start_col + col].log_buf_size = buf_sz;
+		nhwctx->hwctx_config[col].log_buf_addr = paddr;
+		nhwctx->hwctx_config[col].log_buf_size = buf_sz;
 		break;
 
 	default:
@@ -977,7 +999,7 @@ static void ve2_hwctx_config_op_timeout(struct amdxdna_ctx *hwctx, u32 op_timeou
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 
 	for (u32 col = 0; col < hwctx->num_col; col++)
-		nhwctx->hwctx_config[hwctx->start_col + col].opcode_timeout_config = op_timeout;
+		nhwctx->hwctx_config[col].opcode_timeout_config = op_timeout;
 }
 
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size)

@@ -143,178 +143,183 @@ exit:
 	return ret;
 }
 
-static struct device *get_aie_device_handle(struct amdxdna_dev *xdna, u32 col, u32 *rel_col)
+static int ve2_aie_write(struct amdxdna_client *client,
+			 struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_ctx *hwctx;
-
-	hwctx = ve2_get_hwctx(xdna, col);
-	if (!hwctx || !hwctx->priv)
-		return NULL;
-
-	*rel_col = col - hwctx->start_col;
-	return hwctx->priv->aie_dev;
-}
-
-static int ve2_tile_data_reg_write(struct amdxdna_client *client,
-				   struct amdxdna_drm_set_state *args)
-{
-	struct amdxdna_dev *xdev = client->xdna;
-	struct amdxdna_drm_aie_reg info;
-	struct device *aie_dev = NULL;
-	u32 rel_col;
-	int ret = 0;
-
-	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
-		XDNA_ERR(xdev, "Failed to copy request from user");
-		return -EFAULT;
-	}
-
-	XDNA_DBG(xdev, "AIE Data Reg write req received for col %u, row %u, addr %u\n", info.row,
-		 info.col, info.addr);
-
-	aie_dev = get_aie_device_handle(xdev, info.col, &rel_col);
-	if (!aie_dev) {
-		XDNA_ERR(xdev, "AIE device handle not found for given col %u\n", info.col);
-		return -EINVAL;
-	}
-
-	ret = ve2_partition_write(aie_dev, rel_col, info.row, info.addr,
-				  sizeof(uint32_t), (void *)&info.val);
-	if (ret < 0)
-		XDNA_ERR(xdev, "Error in AIE Data Reg write operation, err: %d\n", ret);
-
-	return ret > 0 ? 0 : ret;
-}
-
-static int ve2_tile_data_mem_write(struct amdxdna_client *client,
-				   struct amdxdna_drm_set_state *args)
-{
-	struct amdxdna_dev *xdev = client->xdna;
-	struct amdxdna_drm_aie_mem info;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drm_aie_tile_access footer = {};
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
 	struct device *aie_dev;
+	unsigned long hwctx_id;
 	void *local_buf = NULL;
-	u32 rel_col;
-	int ret = 0;
+	int ret = 0, idx;
+	u32 offset;
 
-	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
-		XDNA_ERR(xdev, "Failed to copy aie_mem info request from user");
+	/* Extract footer from the end of the buffer */
+	offset = args->buffer_size - sizeof(footer);
+	if (copy_from_user(&footer, u64_to_user_ptr(args->buffer) + offset, sizeof(footer))) {
+		XDNA_ERR(xdna, "Failed to copy request footer from user");
 		return -EFAULT;
 	}
 
-	XDNA_DBG(xdev, "AIE Data mem write req received for col %u, row %u, addr %u\n", info.row,
-		 info.col, info.addr);
+	XDNA_DBG(xdna, "Write request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u\n",
+		 footer.context_id, footer.col, footer.row, footer.addr, footer.size);
 
-	aie_dev = get_aie_device_handle(xdev, info.col, &rel_col);
-	if (!aie_dev) {
-		XDNA_ERR(xdev, "AIE device handle not found for given col %u\n", info.col);
+	/* Find the hardware context */
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		struct amdxdna_ctx *hw_ctx;
+
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
+			if (footer.context_id == hwctx_id && footer.pid == hw_ctx->client->pid)
+				hwctx = hw_ctx;
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+			 footer.pid);
 		return -EINVAL;
 	}
 
-	local_buf = kzalloc(info.size, GFP_KERNEL);
-	if (!local_buf) {
-		XDNA_ERR(xdev, "Error: not enough memory to store %d\n", info.size);
-		return -ENOMEM;
-	}
+	XDNA_DBG(xdna, "Found hwctx: cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n",
+		 hwctx->client->pid, hwctx->id, hwctx->start_col, hwctx->num_col);
 
-	if (copy_from_user(local_buf, u64_to_user_ptr(info.buf_p), info.size)) {
-		XDNA_ERR(xdev, "Error: unable to copy memory to userptr\n");
-		kfree(local_buf);
-		return -EFAULT;
-	}
-
-	ret = ve2_partition_write(aie_dev, rel_col, info.row, info.addr,
-				  info.size, local_buf);
-
-	if (ret < 0)
-		XDNA_ERR(xdev, "Error in AIE Data mem write operation, err: %d\n", ret);
-
-	kfree(local_buf);
-	return ret > 0 ? 0 : ret;
-}
-
-static int ve2_tile_data_reg_read(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_dev *xdev = client->xdna;
-	struct amdxdna_drm_aie_reg info;
-	struct device *aie_dev;
-	u32 rel_col;
-	int ret;
-
-	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
-		XDNA_ERR(xdev, "Failed to copy request from user");
-		return -EFAULT;
-	}
-
-	XDNA_DBG(xdev, "AIE Data Reg read req received for col %u, row %u, addr %u\n", info.row,
-		 info.col, info.addr);
-
-	aie_dev = get_aie_device_handle(xdev, info.col, &rel_col);
-	if (!aie_dev) {
-		XDNA_ERR(xdev, "AIE device handle not found for given input args\n");
+	/* Validate column is within partition */
+	if (footer.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)\n",
+			 footer.col, hwctx->num_col);
 		return -EINVAL;
 	}
 
-	ret = ve2_partition_read(aie_dev, rel_col, info.row, info.addr,
-				 sizeof(uint32_t),
-				 (void *)&info.val);
-	/* aie_partition_read(write)_register() API return values
-	 *   Number of bytes it reads/writes: on success
-	 *   Error code: on failure
-	 */
-	if (ret < 0) {
-		XDNA_ERR(xdev, "Error in AIE Data Reg read operation, err: %d\n", ret);
-		return ret;
-
-	} else if (copy_to_user(u64_to_user_ptr(args->buffer), &info, sizeof(info))) {
-		XDNA_ERR(xdev, "Error: unable to copy memory to userptr\n");
-		return -EFAULT;
-	}
-
-	return 0;
-}
-
-static int ve2_tile_data_mem_read(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_dev *xdev = client->xdna;
-	struct amdxdna_drm_aie_mem info;
-	struct device *aie_dev;
-	void *local_buf = NULL;
-	u32 rel_col;
-	int ret;
-
-	if (copy_from_user(&info, u64_to_user_ptr(args->buffer), sizeof(info))) {
-		XDNA_ERR(xdev, "Failed to copy request from user");
-		return -EFAULT;
-	}
-
-	XDNA_DBG(xdev, "AIE Data Mem read req received for col %u, row %u, addr %u\n",
-		 info.row, info.col, info.addr);
-
-	aie_dev = get_aie_device_handle(xdev, info.col, &rel_col);
-	if (!aie_dev) {
-		XDNA_ERR(xdev, "AIE device handle not found for given input args\n");
+	/* Validate row */
+	if (footer.row >= MAX_ROW) {
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
+			 footer.row, MAX_ROW);
 		return -EINVAL;
 	}
 
-	local_buf = kzalloc(info.size, GFP_KERNEL);
+	/* Get AIE device handle */
+	aie_dev = hwctx->priv->aie_dev;
+	if (!aie_dev) {
+		XDNA_ERR(xdna, "AIE device handle not found\n");
+		return -EINVAL;
+	}
+
+	/* Allocate local buffer for write data */
+	local_buf = kzalloc(footer.size, GFP_KERNEL);
 	if (!local_buf)
 		return -ENOMEM;
 
-	ret = ve2_partition_read(aie_dev, rel_col, info.row, info.addr,
-				 info.size, local_buf);
+	/* Copy data from user space (data is at the beginning of buffer) */
+	if (copy_from_user(local_buf, u64_to_user_ptr(args->buffer), footer.size)) {
+		XDNA_ERR(xdna, "Error: unable to copy data from userptr\n");
+		kfree(local_buf);
+		return -EFAULT;
+	}
+
+	/* Write to AIE memory */
+	ret = ve2_partition_write(aie_dev, footer.col, footer.row, footer.addr,
+				  footer.size, local_buf);
 	if (ret < 0) {
-		XDNA_ERR(xdev, "Error in AIE Data mem read operation, err: %d\n", ret);
+		XDNA_ERR(xdna, "Error in AIE memory write operation, err: %d\n", ret);
+		kfree(local_buf);
 		return ret;
 	}
 
-	if (copy_to_user(u64_to_user_ptr(info.buf_p), local_buf, info.size)) {
-		XDNA_ERR(xdev, "Error: unable to copy memory to userptr\n");
+	kfree(local_buf);
+	return 0;
+}
+
+static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drm_aie_tile_access footer = {};
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct device *aie_dev;
+	unsigned long hwctx_id;
+	void *local_buf = NULL;
+	int ret = 0, idx;
+	u32 buf_size;
+	u32 offset;
+
+	buf_size = args->num_element * args->element_size;
+	offset = buf_size - sizeof(footer);
+	if (copy_from_user(&footer, u64_to_user_ptr(args->buffer) + offset, sizeof(footer))) {
+		XDNA_ERR(xdna, "Failed to copy request from user");
+		return -EFAULT;
+	}
+
+	XDNA_DBG(xdna, "Read request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u\n",
+		 footer.context_id, footer.col, footer.row, footer.addr, footer.size);
+
+	/* Find the hardware context */
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		struct amdxdna_ctx *hw_ctx;
+
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
+			if (footer.context_id == hwctx_id && footer.pid == hw_ctx->client->pid)
+				hwctx = hw_ctx;
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+			 footer.pid);
+		return -EINVAL;
+	}
+
+	XDNA_DBG(xdna, "Found hwctx: cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n",
+		 hwctx->client->pid, hwctx->id, hwctx->start_col, hwctx->num_col);
+
+	/* Validate column is within partition */
+	if (footer.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)\n",
+			 footer.col, hwctx->num_col);
+		return -EINVAL;
+	}
+
+	/* Validate row */
+	if (footer.row >= MAX_ROW) {
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
+			 footer.row, MAX_ROW);
+		return -EINVAL;
+	}
+
+	/* Get AIE device handle and relative column */
+	aie_dev = hwctx->priv->aie_dev;
+	if (!aie_dev) {
+		XDNA_ERR(xdna, "AIE device handle not found\n");
+		return -EINVAL;
+	}
+
+	/* Allocate local buffer for read */
+	local_buf = kzalloc(footer.size, GFP_KERNEL);
+	if (!local_buf)
+		return -ENOMEM;
+
+	/* Read from AIE memory */
+	ret = ve2_partition_read(aie_dev, footer.col, footer.row, footer.addr,
+				 footer.size, local_buf);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "Error in AIE memory read operation, err: %d\n", ret);
+		kfree(local_buf);
+		return ret;
+	}
+
+	/* Copy data to user space */
+	if (copy_to_user(u64_to_user_ptr(args->buffer), local_buf, footer.size)) {
+		XDNA_ERR(xdna, "Error: unable to copy memory to userptr\n");
 		kfree(local_buf);
 		return -EFAULT;
 	}
 
 	kfree(local_buf);
-
 	return 0;
 }
 
@@ -346,14 +351,15 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		struct amdxdna_ctx *hw_ctx;
 
 		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
-			if (footer.context_id == hwctx_id)
+			if (footer.context_id == hwctx_id && footer.pid == hw_ctx->client->pid)
 				hwctx = hw_ctx;
 		}
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u not found\n", footer.context_id);
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+			 footer.pid);
 		return -EINVAL;
 	}
 
@@ -448,12 +454,6 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
-	case DRM_AMDXDNA_READ_AIE_MEM:
-		ret = ve2_tile_data_mem_read(client, args);
-		break;
-	case DRM_AMDXDNA_READ_AIE_REG:
-		ret = ve2_tile_data_reg_read(client, args);
-		break;
 	case DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION:
 		ret = ve2_get_firmware_version(client, args);
 		break;
@@ -489,6 +489,9 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
 		ret = ve2_get_array_hwctx(client, args);
 		break;
+	case DRM_AMDXDNA_AIE_TILE_READ:
+		ret = ve2_aie_read(client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -512,11 +515,8 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
-	case DRM_AMDXDNA_WRITE_AIE_MEM:
-		ret = ve2_tile_data_mem_write(client, args);
-		break;
-	case DRM_AMDXDNA_WRITE_AIE_REG:
-		ret = ve2_tile_data_reg_write(client, args);
+	case DRM_AMDXDNA_AIE_TILE_WRITE:
+		ret = ve2_aie_write(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

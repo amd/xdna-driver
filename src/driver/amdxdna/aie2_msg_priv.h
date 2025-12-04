@@ -214,6 +214,11 @@ struct exec_dpu_preempt_req {
 	u32	payload[29];
 } __packed;
 
+union exec_req {
+	struct execute_buffer_req ebuf;
+	struct exec_dpu_req dpu_req;
+};
+
 struct execute_buffer_resp {
 	enum aie2_msg_status	status;
 } __packed;
@@ -548,6 +553,7 @@ struct exec_npu_req {
 	u32	payload[27];
 } __packed;
 
+#define MAX_NPU_ARGS_SIZE (26 * sizeof(__u32))
 struct cmd_chain_slot_npu {
 	enum exec_npu_type type;
 	u64 inst_buf_addr;
@@ -570,6 +576,11 @@ struct cmd_chain_npu_req {
 	u32 buf_size;
 	u32 count;
 } __packed;
+
+union exec_chain_req {
+	struct cmd_chain_npu_req npu_req;
+	struct cmd_chain_req req;
+};
 
 struct cmd_chain_resp {
 	enum aie2_msg_status	status;

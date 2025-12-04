@@ -48,18 +48,22 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 
 	args.locs = NULL;
 	args.num_tiles = 0;
+	args.handshake_cols = 0;
+	args.handshake = NULL;
+	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
+	& ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	ret = ve2_partition_initialize(xaie_dev, &args);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release;
 	}
 
-	ret = aie_load_cert(xaie_dev, buf);
+	ret = aie_load_cert_broadcast(xaie_dev, buf);
 	if (ret) {
-		XDNA_ERR(xdna, "aie load cert failed %d", ret);
+		XDNA_ERR(xdna, "aie load cert broadcast failed %d", ret);
 		goto teardown;
 	}
-	XDNA_INFO(xdna, "aie load cert complete");
+	XDNA_INFO(xdna, "aie load cert broadcast complete");
 
 	ret = ve2_store_firmware_version(&xdna_hdl->fw_version, xaie_dev);
 	if (ret < 0) {
@@ -89,21 +93,13 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	int ret;
 	u32 col;
 
-	xrs_cfg.ddev = &xdna->ddev;
-	xrs_cfg.total_col = XRS_MAX_COL;
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
 
 	xdna_hdl->xdna = xdna;
 	xdna_hdl->priv = xdna->dev_info->dev_priv;
-
 	xdna->dev_handle = xdna_hdl;
-	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
-	if (!xdna->dev_handle->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
-		return -EINVAL;
-	}
 
 	if (ve2_hwctx_limit)
 		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
@@ -112,6 +108,33 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	XDNA_INFO(xdna, "Maximum limit %d hardware context(s)", xdna_hdl->hwctx_limit);
 
+	ret = aie_get_device_info(&xdna_hdl->aie_dev_info);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
+		return ret;
+	}
+	XDNA_INFO(xdna, "AIE device: %d columns, %d rows",
+		  xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows);
+
+	xrs_cfg.ddev = &xdna->ddev;
+
+	/* Support module parameters to override column count if valid */
+	if (max_col > 0 && start_col >= 0 &&
+	    (max_col + start_col) <= xdna_hdl->aie_dev_info.cols) {
+		xrs_cfg.total_col = max_col;
+		XDNA_INFO(xdna, "Using module parameter: max_col=%d, start_col=%d",
+			  max_col, start_col);
+	} else {
+		xrs_cfg.total_col = xdna_hdl->aie_dev_info.cols;
+	}
+
+	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
+		return -EINVAL;
+	}
+
+	/* Load firmware */
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
@@ -119,28 +142,38 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	}
 	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 
-	for (col = 0; col < VE2_MAX_COL; col++) {
-		fw_slots = kzalloc(sizeof(*fw_slots), GFP_KERNEL);
+	/* Allocate arrays based on actual column count from device */
+	xdna_hdl->fw_slots = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+					  sizeof(*xdna_hdl->fw_slots), GFP_KERNEL);
+	if (!xdna_hdl->fw_slots) {
+		XDNA_ERR(xdna, "No memory for fw_slots array");
+		return -ENOMEM;
+	}
+
+	xdna_hdl->ve2_mgmtctx = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+					     sizeof(*xdna_hdl->ve2_mgmtctx), GFP_KERNEL);
+	if (!xdna_hdl->ve2_mgmtctx) {
+		XDNA_ERR(xdna, "No memory for ve2_mgmtctx array");
+		return -ENOMEM;
+	}
+
+	for (col = 0; col < xdna_hdl->aie_dev_info.cols; col++) {
+		fw_slots = devm_kzalloc(&pdev->dev, sizeof(*fw_slots), GFP_KERNEL);
 		if (!fw_slots) {
-			ret = -ENOMEM;
-			XDNA_ERR(xdna, "No memory for fw status. ret: %d\n", ret);
-			goto done;
+			XDNA_ERR(xdna, "No memory for fw status");
+			return -ENOMEM;
 		}
 		xdna->dev_handle->fw_slots[col] = fw_slots;
 	}
 
 	return 0;
-done:
-	ve2_free_firmware_slots(xdna_hdl, VE2_MAX_COL);
-
-	return ret;
 }
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
-	ve2_free_firmware_slots(xdna->dev_handle, VE2_MAX_COL);
+	/* All resources are managed by devm_/drmm_ */
+	XDNA_DBG(xdna, "VE2 device cleanup function");
 }
-
 const struct amdxdna_dev_ops ve2_ops = {
 	.init		= ve2_init,
 	.fini		= ve2_fini,

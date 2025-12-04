@@ -1,7 +1,7 @@
 {
 	"copyright": "Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
-		"version": "202610.2.21.21",
+		"version": "202610.2.21.49",
 		"os_rel": ["22.04", "24.04"]
 	},
 	"firmwares": [
@@ -40,5 +40,22 @@
 	],
 	"aie4_firmwares" : {
 		"umq_version": "20251013-7f7d8dc"
-	}
+	},
+	"vtd_archives": [
+		{
+			"device": "strx",
+			"url": "https://github.com/Xilinx/VTD/raw/c79b5d21568a4ffa5b0612a8279b352fc4e1109a/archive/strx/xrt_smi_strx.a",
+			"filename": "xrt_smi_strx.a"
+		},
+		{
+			"device": "phx",
+			"url": "https://github.com/Xilinx/VTD/raw/c79b5d21568a4ffa5b0612a8279b352fc4e1109a/archive/phx/xrt_smi_phx.a",
+			"filename": "xrt_smi_phx.a"
+		},
+		{
+			"device": "npu3",
+			"url": "https://github.com/Xilinx/VTD/raw/c79b5d21568a4ffa5b0612a8279b352fc4e1109a/archive/npu3/xrt_smi_npu3.a",
+			"filename": "xrt_smi_npu3.a"
+		}
+	]
 }

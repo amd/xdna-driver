@@ -14,7 +14,6 @@
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
 
 #define VERBOSITY_LEVEL_DBG	2
-#define VE2_MAX_COL		36
 
 #define aie_calc_part_id(start_col, num_col)	\
 	(((start_col) << AIE_PART_ID_START_COL_SHIFT) + \
@@ -77,7 +76,7 @@ struct amdxdna_ctx_priv {
 	struct device			*aie_dev;
 	struct aie_partition_init_args	*args;
 	struct ve2_hsa_queue		hwctx_hsa_queue;
-	struct ve2_config_hwctx		hwctx_config[VE2_MAX_COL];
+	struct ve2_config_hwctx		*hwctx_config;
 	wait_queue_head_t		waitq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	struct timer_list		event_timer;
@@ -99,7 +98,7 @@ struct amdxdna_mgmtctx {
 	u32				mgmt_partid;
 	struct aie_partition_init_args	args;
 	struct list_head		ctx_command_fifo_head;
-	spinlock_t			ctx_lock; /* protect ctx add/remove/update */
+	struct mutex			ctx_lock; /* protect ctx add/remove/update */
 	struct work_struct		sched_work;
 	struct workqueue_struct		*mgmtctx_workq;
 	u32			is_partition_idle; /* Hardware sync required */
@@ -114,8 +113,9 @@ struct amdxdna_dev_hdl {
 	u32				hwctx_cnt;
 	void				*xrs_hdl;
 	struct ve2_firmware_version	fw_version;
-	struct ve2_firmware_status	*fw_slots[VE2_MAX_COL];
-	struct amdxdna_mgmtctx          ve2_mgmtctx[VE2_MAX_COL];
+	struct aie_device_info		aie_dev_info;
+	struct ve2_firmware_status	**fw_slots;
+	struct amdxdna_mgmtctx          *ve2_mgmtctx;
 };
 
 /* ve2_of.c */
