@@ -646,9 +646,9 @@ wait_cmd_ioctl(wait_cmd_arg& arg) const
   amdxdna_ccmd_wait_cmd_req req = {
     .hdr = { AMDXDNA_CCMD_WAIT_CMD, sizeof(req) },
     .seq = arg.seq,
+    .timeout_nsec = shim_xdna::platform_drv::timeout_ms2abs_ns(arg.timeout_ms),
     .ctx_handle = arg.ctx_handle,
   };
-  // TODO: needs to pass timeout to host
   hcall(&req);
 }
 

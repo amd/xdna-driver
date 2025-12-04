@@ -157,6 +157,8 @@ struct amdxdna_ccmd_exec_cmd_rsp {
 struct amdxdna_ccmd_wait_cmd_req {
     struct vdrm_ccmd_req hdr;
     uint64_t seq;
+    /* absolute timeout */
+	int64_t timeout_nsec;
     uint32_t ctx_handle;
     uint32_t _pad;
 };
