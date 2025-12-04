@@ -134,4 +134,5 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id);
 int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
+int ve2_get_aie_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 #endif /* _VE2_OF_H_ */

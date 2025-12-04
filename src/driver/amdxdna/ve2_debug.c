@@ -463,6 +463,7 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
+		break;
 	}
 
 	mutex_unlock(&xdna->dev_lock);
@@ -491,6 +492,11 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 		break;
 	case DRM_AMDXDNA_AIE_TILE_READ:
 		ret = ve2_aie_read(client, args);
+		break;
+	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		XDNA_INFO(xdna, "Received DRM_AMDXDNA_HW_LAST_ASYNC_ERR\n");
+		XDNA_INFO(xdna, "TODO: skip calling ve2_get_array_async_error()\n");
+//		ret = ve2_get_array_async_error(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

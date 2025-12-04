@@ -694,6 +694,50 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 		queue_work(mgmtctx->mgmtctx_workq, &mgmtctx->sched_work);
 }
 
+static void ve2_aie_error_cb(void *arg)
+{
+	struct amdxdna_mgmtctx *mgmtctx = arg;
+	struct aie_errors *aie_errs;
+	int i;
+
+	pr_info("%s: Invoked from AIE driver\n", __func__);
+	if (!mgmtctx) {
+		pr_err("%s: mgmt hwctx is not initialized\n", __func__);
+		return;
+	}
+
+	spin_lock(&mgmtctx->ctx_lock);
+
+	if (!mgmtctx->mgmt_aiedev) {
+		pr_err("%s: AIE partition is not loaded and it is pointing to NULL\n", __func__);
+		spin_unlock(&mgmtctx->ctx_lock);
+		return;
+	}
+
+	aie_errs = aie_get_errors(mgmtctx->mgmt_aiedev);
+	if (IS_ERR(aie_errs)) {
+		pr_err("%s: aie_get_errors failed\n", __func__);
+		spin_unlock(&mgmtctx->ctx_lock);
+		return;
+	}
+
+	pr_info("%s: AIE asynchronous Error count: %d", __func__, aie_errs->num_err);
+	for (i = 0; i < aie_errs->num_err; i++) {
+		pr_info("%s: Get AIE asynchronous Error: "
+				"error_id %d Mod %d, category %d, Col %d, Row %d\n", __func__,
+				aie_errs->errors[i].error_id,
+				aie_errs->errors[i].module,
+				aie_errs->errors[i].category,
+				aie_errs->errors[i].loc.col,
+				aie_errs->errors[i].loc.row
+			);
+	}
+
+	aie_free_errors(aie_errs);
+
+	spin_unlock(&mgmtctx->ctx_lock);
+}
+
 /**
  * ve2_create_mgmt_partition - Create and initialize a management partition for VE2 device
  * @xdna: Pointer to the AMD XDNA device structure
@@ -713,6 +757,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 	u32 start_col = load_act->part.start_col;
 	struct amdxdna_mgmtctx  *mgmtctx =
 		&xdna->dev_handle->ve2_mgmtctx[start_col];
+	int ret = 0;
 
 	if (load_act->create_aie_part) {
 		request.user_event1_complete = ve2_irq_handler;
@@ -744,6 +789,9 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 			return -ENOMEM;
 		}
 		INIT_WORK(&mgmtctx->sched_work, ve2_scheduler_work);
+		/* Register AIE error call back function. */
+		ret = aie_register_error_notification(nhwctx->aie_dev, ve2_aie_error_cb, mgmtctx);
+		XDNA_INFO(xdna, "Registered AIE error call back function, ret : %d\n", ret);
 	} else {
 		nhwctx->aie_dev = mgmtctx->mgmt_aiedev;
 		nhwctx->args = &mgmtctx->args;
@@ -898,6 +946,8 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 
 		if (wq)
 			destroy_workqueue(wq);
+		aie_unregister_error_notification(nhwctx->aie_dev);
+		XDNA_INFO(xdna, "%s: Un-registered ve2_aie_error_cb() callback\n", __func__);
 		aie_partition_teardown(nhwctx->aie_dev);
 		aie_partition_release(nhwctx->aie_dev);
 	} else {
