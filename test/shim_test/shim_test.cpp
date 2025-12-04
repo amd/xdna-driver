@@ -923,11 +923,9 @@ std::vector<test_case> test_list {
   test_case{ "failed chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
   },
-#if 0
   test_case{ "timed out chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
   },
-#endif
 };
 
 // Test case executor implementation

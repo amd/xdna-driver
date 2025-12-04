@@ -562,16 +562,76 @@ void
 TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   bool is_timeout = static_cast<bool>(arg[0]);
-#if 0
-  elf_io_test_bo_set boset{sdev.get(), "design.xclbin"};
-  boset.run();
-#endif
-  elf_io_negative_test_bo_set bo_set{sdev.get(),
-    "bad_txn.xclbin", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
-  bo_set.run();
-#if 0
-  elf_io_negative_test_bo_set bo_set{sdev.get(),
-    "bad_txn.xclbin", "instr_invalid_op.elf", ERT_CMD_STATE_ERROR, 0};
-  bo_set.run();
-#endif
+  const char *good_xclbin = "design.xclbin";
+  const char *bad_xclbin = "bad_txn.xclbin";
+
+  // Creating commands and BOs
+
+  // Two good ones
+  elf_io_test_bo_set good_bo_set1{sdev.get(), good_xclbin};
+  elf_io_test_bo_set good_bo_set2{sdev.get(), good_xclbin};
+  // A timeout one
+  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), bad_xclbin,
+    "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+  // A error one
+  elf_io_negative_test_bo_set error_bo_set{sdev.get(), bad_xclbin,
+    "instr_invalid_op.elf", ERT_CMD_STATE_ERROR, 0};
+
+  // Creating HW context for cmd submission. We use the good xclbin here to
+  // make sure good cmd can complete successfully. The bad ones don't really
+  // require any specific xclbin to fail.
+  hw_ctx hwctx{sdev.get(), good_xclbin};
+
+  // Initialize cmd before submission
+  good_bo_set1.init_cmd(hwctx, false);
+  good_bo_set1.sync_before_run();
+  good_bo_set2.init_cmd(hwctx, false);
+  good_bo_set2.sync_before_run();
+  timeout_bo_set.init_cmd(hwctx, false);
+  timeout_bo_set.sync_before_run();
+  error_bo_set.init_cmd(hwctx, false);
+  error_bo_set.sync_before_run();
+
+  // Create and send the chained command, keep the bad one in the middle
+  // Command chain: good, bad (error or timeout), good
+  // In case of timeout, the index returned from fw is always 0.
+  const uint32_t bad_index = is_timeout ? 0 : 1;
+  const uint32_t bad_state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ERROR;
+  io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : &error_bo_set;
+  std::vector<bo*> tmp_cmd_bos;
+  tmp_cmd_bos.push_back(good_bo_set1.get_bos()[IO_TEST_BO_CMD].tbo.get());
+  tmp_cmd_bos.push_back((*bad).get_bos()[IO_TEST_BO_CMD].tbo.get());
+  tmp_cmd_bos.push_back(good_bo_set2.get_bos()[IO_TEST_BO_CMD].tbo.get());
+
+  auto cbo = std::make_unique<bo>(sdev.get(), 0x1000ul, XCL_BO_FLAGS_EXECBUF);
+  io_test_init_runlist_cmd(cbo.get(), tmp_cmd_bos);
+
+  // Submit the chained command and wait for completion/timeout
+  auto hwq = hwctx.get()->get_hw_queue();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+
+  // Check the result
+  auto cmd_packet = reinterpret_cast<ert_packet *>(cbo->map());
+  auto payload = get_ert_cmd_chain_data(cmd_packet);
+  if (bad_state != cmd_packet->state || bad_index != payload->error_index) {
+    throw std::runtime_error(
+      std::string("runlist state=") + std::to_string(cmd_packet->state) +
+      std::string(", error index=") + std::to_string(payload->error_index) +
+      std::string(", expected state=") + std::to_string(bad_state) +
+      std::string(", expected error index=") + std::to_string(bad_index)
+      );
+  }
+  auto err_cmd_packet_by_index = reinterpret_cast<ert_packet *>(tmp_cmd_bos[bad_index]->map());
+  // Setting the error state of the bad one for verify_result call on the bad one later.
+  err_cmd_packet_by_index->state = cmd_packet->state;
+  // In case of timeout, the returned context health data is in index 0's cmd pkt,
+  // copy it to the real bad command for verify_result call on the bad one later.
+  if (is_timeout) {
+    auto cmdpkt = (*bad).get_bos()[IO_TEST_BO_CMD].tbo.get()->map();
+    auto size = (*bad).get_bos()[IO_TEST_BO_CMD].tbo.get()->size();
+    std::memcpy(cmdpkt, err_cmd_packet_by_index, size);
+  }
+
+  (*bad).verify_result();
 }
