@@ -663,7 +663,7 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 	}
 
 	XDNA_DBG(xdna, "Command submitted with temporal sharing enabled");
-	ve2_mgmt_schedule_cmd(xdna, hwctx, *seq);
+	ve2_mgmt_schedule_cmd(xdna, hwctx);
 
 	return 0;
 }

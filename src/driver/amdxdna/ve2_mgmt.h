@@ -206,11 +206,10 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
  * ve2_mgmt_schedule_cmd - Schedule a command for execution.
  * @xdna: Pointer to the device structure.
  * @hwctx: Pointer to the hardware context.
- * @seq: Sequence number for the command.
  *
  * Returns 0 on success or a negative error code.
  */
-int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq);
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 
 /**
  * ve2_mgmt_handshake_init - Initialize handshake with firmware for a context.

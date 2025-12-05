@@ -224,6 +224,9 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	}
 	mutex_unlock(&xrs->xrs_lock);
 
+	/* Lets add this hwctx to the scheduler */
+	ve2_mgmt_schedule_cmd(xdna, hwctx);
+
 	return 0;
 
 destroy_partition:
@@ -335,7 +338,7 @@ static int ve2_request_context_switch(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-	static struct amdxdna_ctx *
+static struct amdxdna_ctx *
 ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
@@ -371,7 +374,7 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 	return hwctx;
 }
 
-int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq)
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_mgmtctx  *mgmtctx =
 		&xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
