@@ -18,6 +18,9 @@
 #include "amdxdna_dpt.h"
 #include "aie2_msg_priv.h"
 
+#define AMDXDNA_DPT_FW_LOG_MAX_DEFAULT		1
+#define AMDXDNA_DPT_FW_TRACE_MAX_DEFAULT	(~0)
+
 static u8 fw_log_level = 1;
 module_param(fw_log_level, byte, 0444);
 MODULE_PARM_DESC(fw_log_level,
@@ -287,7 +290,7 @@ static void amdxdna_dpt_enable_polling(struct amdxdna_dpt *dpt, bool enable)
 	dpt->polling = enable;
 }
 
-static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
+static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_dpt *log_hdl;
@@ -297,8 +300,8 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	if (!xdna->dev_info->ops->fw_log_init)
 		return -EOPNOTSUPP;
 
-	if (!fw_log_level) {
-		XDNA_WARN(xdna, "FW logging disabled. Default level: %d", fw_log_level);
+	if (!log_level) {
+		XDNA_WARN(xdna, "FW logging disabled. Default level: %d", log_level);
 		return 0;
 	}
 
@@ -337,7 +340,7 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 	INIT_WORK(&log_hdl->work, amdxdna_dpt_worker);
 	xdna->fw_log = log_hdl;
 
-	ret = xdna->dev_info->ops->fw_log_init(xdna, fw_log_size, fw_log_level);
+	ret = xdna->dev_info->ops->fw_log_init(xdna, fw_log_size, log_level);
 	if (ret) {
 		/* Silently fail for device generation that don't support FW logging */
 		if (ret != -EOPNOTSUPP)
@@ -357,9 +360,10 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna)
 
 	amdxdna_dpt_read_metadata(log_hdl);
 
+	fw_log_level = log_level;
 	log_hdl->enabled = true;
 
-	XDNA_DBG(xdna, "FW logging enabled at level: %d", fw_log_level);
+	XDNA_DBG(xdna, "FW logging enabled at level: %d", log_level);
 	return 0;
 mfree:
 	amdxdna_mgmt_buff_free(dma_hdl);
@@ -456,7 +460,7 @@ exit:
 	return ret;
 }
 
-static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
+static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna, u32 categories)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_dpt *trace_hdl;
@@ -466,8 +470,8 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
 	if (!xdna->dev_info->ops->fw_trace_init)
 		return -EOPNOTSUPP;
 
-	if (!fw_trace_categories) {
-		XDNA_DBG(xdna, "FW tracing disabled. Default categories: %d", fw_trace_categories);
+	if (!categories) {
+		XDNA_DBG(xdna, "FW tracing disabled. Default categories: %d", categories);
 		return 0;
 	}
 
@@ -506,7 +510,7 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
 	INIT_WORK(&trace_hdl->work, amdxdna_dpt_worker);
 	xdna->fw_trace = trace_hdl;
 
-	ret = xdna->dev_info->ops->fw_trace_init(xdna, fw_trace_size, fw_trace_categories);
+	ret = xdna->dev_info->ops->fw_trace_init(xdna, fw_trace_size, categories);
 	if (ret) {
 		/* Silently fail for device generation that don't support FW trace */
 		if (ret != -EOPNOTSUPP)
@@ -526,9 +530,10 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna)
 
 	amdxdna_dpt_read_metadata(trace_hdl);
 
+	fw_trace_categories = categories;
 	trace_hdl->enabled = true;
 
-	XDNA_DBG(xdna, "FW tracing enabled for event categories: 0x%x", fw_trace_categories);
+	XDNA_DBG(xdna, "FW tracing enabled for event categories: 0x%x", categories);
 	return 0;
 mfree:
 	amdxdna_mgmt_buff_free(dma_hdl);
@@ -597,13 +602,13 @@ int amdxdna_dpt_init(struct amdxdna_dev *xdna)
 {
 	int ret;
 
-	ret = amdxdna_fw_log_init(xdna);
+	ret = amdxdna_fw_log_init(xdna, fw_log_level);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
 		return ret;
 	}
 
-	ret = amdxdna_fw_trace_init(xdna);
+	ret = amdxdna_fw_trace_init(xdna, fw_trace_categories);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to enable firmware tracing: %d", ret);
 		return ret;
@@ -635,7 +640,7 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 {
 	int ret;
 
-	ret = amdxdna_fw_log_init(xdna);
+	ret = amdxdna_fw_log_init(xdna, fw_log_level);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to resume firmware logging: %d", ret);
 		return ret;
@@ -644,7 +649,7 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 	if (fw_log_dump_to_dmesg)
 		amdxdna_dpt_dump_to_dmesg(xdna->fw_log, true);
 
-	ret = amdxdna_fw_trace_init(xdna);
+	ret = amdxdna_fw_trace_init(xdna, fw_trace_categories);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to resume firmware tracing: %d", ret);
 		return ret;
@@ -777,14 +782,12 @@ int amdxdna_set_fw_log_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_st
 		return ret;
 	}
 
-	if (!xdna->fw_log) {
-		fw_log_level = fw_log.config;
-		ret = amdxdna_fw_log_init(xdna);
-		if (ret) {
-			XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
-			return ret;
-		}
-	}
+	/* Enable log cmd with uninitialized level; fallback to max default value */
+	if (!fw_log.config)
+		fw_log.config = AMDXDNA_DPT_FW_LOG_MAX_DEFAULT;
+
+	if (!xdna->fw_log)
+		return amdxdna_fw_log_init(xdna, fw_log.config);
 
 	if (fw_log.config != fw_log_level) {
 		if (!xdna->dev_info->ops->fw_log_config)
@@ -797,6 +800,7 @@ int amdxdna_set_fw_log_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_st
 			return ret;
 		}
 		fw_log_level = fw_log.config;
+		XDNA_DBG(xdna, "FW log level changed to %d", fw_log_level);
 	}
 
 	return 0;
@@ -826,14 +830,12 @@ int amdxdna_set_fw_trace_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_
 		return ret;
 	}
 
-	if (!xdna->fw_trace) {
-		fw_trace_categories = fw_trace.config;
-		ret = amdxdna_fw_trace_init(xdna);
-		if (ret) {
-			XDNA_WARN(xdna, "Failed to enable firmware traceging: %d", ret);
-			return ret;
-		}
-	}
+	/* Enable trace cmd with uninitialized categories; fallback to max default value */
+	if (!fw_trace.config)
+		fw_trace.config = AMDXDNA_DPT_FW_TRACE_MAX_DEFAULT;
+
+	if (!xdna->fw_trace)
+		return amdxdna_fw_trace_init(xdna, fw_trace.config);
 
 	if (fw_trace.config != fw_trace_categories) {
 		if (!xdna->dev_info->ops->fw_trace_config)
@@ -846,6 +848,7 @@ int amdxdna_set_fw_trace_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_
 			return ret;
 		}
 		fw_trace_categories = fw_trace.config;
+		XDNA_DBG(xdna, "FW event trace categories 0x%x", fw_trace_categories);
 	}
 
 	return 0;
