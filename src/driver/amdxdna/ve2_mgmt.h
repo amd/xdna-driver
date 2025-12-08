@@ -46,7 +46,6 @@ struct amdxdna_ctx;
 	VE2_ADDR(col, row, VE2_CORE_TILE_MEMORY_OFF + (off))
 
 #define TILE_ADDRESS_SPACE		0x100000
-#define MAX_ROW				6
 #define MEM_TILE_MEMORY_SIZE		0x80000
 #define MEM_TILE_FIRST_REG_ADDRESS	0x91000
 #define CORE_TILE_MEMORY_SIZE		0x10000
