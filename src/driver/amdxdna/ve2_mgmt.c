@@ -777,16 +777,16 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 		return -1;
 	}
 
-	// TODO: Replace MAX_ROW with dynamic value from aie_get_device_info()
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
+	int num_rows = xdna->dev_handle->aie_dev_info.rows;
 	for (int col = 0; col < nhwctx->num_col; ++col) {
 		int rel_col = col + nhwctx->start_col;
 
-		for (int row = 0; row < MAX_ROW; ++row) {
+		for (int row = 0; row < num_rows; ++row) {
 			if (row == 0) {
 				int ret = ve2_partition_read(aie_dev, rel_col, row, 0,
 							     TILE_ADDRESS_SPACE, GET_TILE_ADDRESS
-							     (buffer, MAX_ROW, row, col));
+							     (buffer, num_rows, row, col));
 				XDNA_DBG(xdna, "Read shim tile col:%d row:%d ret: %d.",
 					 col + nhwctx->start_col, row, ret);
 				if (ret < 0)
@@ -795,11 +795,11 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 			} else if (row == 1 || row == 2) {
 				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
 						MEM_TILE_MEMORY_SIZE, GET_TILE_ADDRESS
-						(buffer, MAX_ROW, row, col));
+						(buffer, num_rows, row, col));
 				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
 						MEM_TILE_FIRST_REG_ADDRESS,
 						TILE_ADDRESS_SPACE - MEM_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col)
+						GET_TILE_ADDRESS(buffer, num_rows, row, col)
 						+ MEM_TILE_FIRST_REG_ADDRESS);
 				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.",
 					 col + nhwctx->start_col, row, ret1);
@@ -810,11 +810,11 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 			} else if (row > 2) {
 				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
 						CORE_TILE_MEMORY_SIZE,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col));
+						GET_TILE_ADDRESS(buffer, num_rows, row, col));
 				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
 						CORE_TILE_FIRST_REG_ADDRESS,
 						TILE_ADDRESS_SPACE - CORE_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col)
+						GET_TILE_ADDRESS(buffer, num_rows, row, col)
 							      + CORE_TILE_FIRST_REG_ADDRESS);
 				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.",
 					 col + nhwctx->start_col, row, ret1);
