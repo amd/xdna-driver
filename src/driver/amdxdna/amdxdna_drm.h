@@ -141,7 +141,6 @@ struct amdxdna_dev {
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
 
-	u32				num_cma_regions;
 	struct amdxdna_cma_mem_region	cma_mem_regions[MAX_MEM_REGIONS];
 };
 
