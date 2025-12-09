@@ -301,7 +301,7 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
 		return -EOPNOTSUPP;
 
 	if (!log_level) {
-		XDNA_WARN(xdna, "FW logging disabled. Default level: %d", log_level);
+		XDNA_DBG(xdna, "FW logging disabled. Default level: %d", log_level);
 		return 0;
 	}
 
@@ -575,6 +575,9 @@ static int amdxdna_fw_trace_fini(struct amdxdna_dev *xdna)
 
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
 {
+	if (!dpt)
+		return -EINVAL;
+
 	if (dpt->dump_to_dmesg == dump)
 		return 0;
 
@@ -646,7 +649,7 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 		return ret;
 	}
 
-	if (fw_log_dump_to_dmesg)
+	if (fw_log_level && fw_log_dump_to_dmesg)
 		amdxdna_dpt_dump_to_dmesg(xdna->fw_log, true);
 
 	ret = amdxdna_fw_trace_init(xdna, fw_trace_categories);
@@ -655,7 +658,7 @@ int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 		return ret;
 	}
 
-	if (fw_trace_dump_to_dmesg)
+	if (fw_trace_categories && fw_trace_dump_to_dmesg)
 		amdxdna_dpt_dump_to_dmesg(xdna->fw_trace, true);
 
 	return 0;
