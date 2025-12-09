@@ -18,53 +18,123 @@ static const char * const fw_log_level_str[] = {
 	"MAX"
 };
 
-void aie2_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+struct fw_log_header {
+#define AIE2_DPT_ENTRY_MAGIC_HEAD	0xCA
+	u8 magic;
+	u8 data_word_len;
+	u16 seq_num;
+	u32 reserved;
+} __packed;
+
+struct fw_log_data {
+	u64 timestamp;
+	u32 format      : 1;
+	u32 reserved_1  : 7;
+	u32 level       : 3;
+	u32 reserved_11 : 5;
+	u32 appn        : 8;
+	u32 argc        : 8;
+	u32 line        : 16;
+	u32 module      : 16;
+} __packed;
+
+struct fw_log_footer {
+	u32 reserved;
+	u16 seq_num;
+	u8 data_word_len;
+#define AIE2_DPT_ENTRY_MAGIC_FOOTER	0xBA
+	u8 magic;
+} __packed;
+
+static
+void aie2_dpt_parse(struct amdxdna_dev *xdna, char *buffer, size_t size,
+		    void (*print)(struct amdxdna_dev *xdna, const char *payload, size_t size))
 {
 	char *end = buffer + size;
+	bool has_prev_seq = false;
+	char *p = buffer;
+	u16 prev_seq = 0;
 
-	if (!size)
+	if (!print)
 		return;
 
-	while (buffer < end) {
-		struct fw_log_header {
-			u64 timestamp;
-			u32 format      : 1;
-			u32 reserved_1  : 7;
-			u32 level       : 3;
-			u32 reserved_11 : 5;
-			u32 appn        : 8;
-			u32 argc        : 8;
-			u32 line        : 16;
-			u32 module      : 16;
-		} *header;
-		const u32 header_size = sizeof(struct fw_log_header);
-		char appid[20];
-		u32 msg_size;
+	while ((size_t)(end - p) >= sizeof(struct fw_log_header)) {
+		unsigned int increment_bytes = 4; /* default scan step (min alignment) */
+		bool corrupted = true;
 
-		header = (struct fw_log_header *)buffer;
+		const struct fw_log_header *hdr = (const struct fw_log_header *)p;
 
-		if (header->format != FW_LOG_FORMAT_FULL || !header->argc || header->level > 4) {
-			XDNA_ERR(xdna, "Potential buffer overflow or corruption!\n");
-			buffer += AMDXDNA_DPT_FW_LOG_MSG_ALIGN;
-			continue;
+		/* Fast path */
+		if (likely(hdr->magic == AIE2_DPT_ENTRY_MAGIC_HEAD)) {
+			u16 seq = hdr->seq_num;
+			size_t payload_bytes = hdr->data_word_len * sizeof(u64);
+			size_t total_entry_size = sizeof(struct fw_log_header) +
+						  payload_bytes +
+						  sizeof(struct fw_log_footer);
+
+			/* Partial entry at end: stop to avoid overread */
+			if ((size_t)(end - p) < total_entry_size)
+				break;
+
+			const char *payload = p + sizeof(struct fw_log_header);
+			const struct fw_log_footer *ftr = (const struct fw_log_footer *)
+				(payload + payload_bytes);
+			bool valid = (ftr->magic == AIE2_DPT_ENTRY_MAGIC_FOOTER) &&
+				     (seq > 0) && (seq == ftr->seq_num) &&
+				     (hdr->data_word_len == ftr->data_word_len);
+
+			if (likely(valid)) {
+				if (likely(!has_prev_seq || (seq == (u16)(prev_seq + 1)))) {
+					has_prev_seq = true;
+					prev_seq = seq;
+
+					print(xdna, payload, payload_bytes);
+					corrupted = false;
+					increment_bytes = (unsigned int)total_entry_size;
+				}
+			}
+
+			if (unlikely(corrupted)) {
+				XDNA_WARN(xdna, "Entry overwritten/corrupted");
+				has_prev_seq = false;
+			}
 		}
 
-		msg_size = (header->argc) * sizeof(u32);
-		if (msg_size + header_size > size) {
-			XDNA_ERR(xdna, "Log entry size exceeds available buffer size");
-			return;
-		}
+		/* Advance by increment_bytes safely */
+		if (unlikely(increment_bytes == 0) || (size_t)(end - p) < increment_bytes)
+			break;
 
-		if (header->appn == AIE2_MGMT_APP_ID)
-			scnprintf(appid, sizeof(appid), "MGMNT");
-		else
-			scnprintf(appid, sizeof(appid), "APP%2d", header->appn);
-
-		XDNA_INFO(xdna, "[%lld] [%s] [%s]: %s", header->timestamp,
-			  fw_log_level_str[header->level], appid, (char *)(buffer + header_size));
-
-		buffer += ALIGN(header_size + msg_size, AMDXDNA_DPT_FW_LOG_MSG_ALIGN);
+		p += increment_bytes;
 	}
+}
+
+static void aie2_fw_log_print(struct amdxdna_dev *xdna, const char *payload, size_t size)
+{
+	struct fw_log_data *data = (struct fw_log_data *)payload;
+	const char *level_str;
+	char appid[20];
+
+	if (size < sizeof(struct fw_log_data))
+		return;
+
+	if (data->level < ARRAY_SIZE(fw_log_level_str))
+		level_str = fw_log_level_str[data->level];
+	else
+		level_str = "UNK";
+
+	if (data->appn == AIE2_MGMT_APP_ID)
+		scnprintf(appid, sizeof(appid), "MGMNT");
+	else
+		scnprintf(appid, sizeof(appid), "APP%2d", data->appn);
+
+	XDNA_INFO(xdna, "[%lld] [%s] [%s]: %.*s", data->timestamp, level_str,
+		  appid, (int)(size - sizeof(struct fw_log_data)),
+		  (char *)(payload + sizeof(struct fw_log_data)));
+}
+
+void aie2_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+{
+	return aie2_dpt_parse(xdna, buffer, size, aie2_fw_log_print);
 }
 
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
@@ -160,12 +230,17 @@ int aie2_fw_log_fini(struct amdxdna_dev *xdna)
 	return 0;
 }
 
-void aie2_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+static void aie2_fw_trace_print(struct amdxdna_dev *xdna, const char *buffer, size_t size)
 {
 	if (!size)
 		return;
 
 	print_hex_dump(KERN_INFO, "[FW TRACE]: ", DUMP_PREFIX_OFFSET, 16, 4, buffer, size, false);
+}
+
+void aie2_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+{
+	return aie2_dpt_parse(xdna, buffer, size, aie2_fw_trace_print);
 }
 
 int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
