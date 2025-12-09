@@ -52,14 +52,7 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
 
   auto& bos = base->get_bos();
 
-  if (io_test_parameters.type == IO_TEST_NOOP_RUN) {
-    // Preparing no-op kernel's special control code
-    size_t sz = 32 * sizeof(int32_t);
-    //size_t sz = 0x100000 * 128; // 128 MB
-    auto tbo = std::make_shared<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
-    bos[IO_TEST_BO_INSTRUCTION].tbo = tbo;
-    std::memset(tbo->map(), 0, sz);
-  } else if (io_test_parameters.type == IO_TEST_BAD_RUN) {
+  if (io_test_parameters.type == IO_TEST_BAD_RUN) {
     if (kernel_type != KERNEL_TYPE_DPU_SEQ)
       throw std::runtime_error("ELF flow can't support bad run");
 
@@ -316,18 +309,16 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   }
 
   // Verify result
-  if (io_test_parameters.type != IO_TEST_NOOP_RUN) {
-    for (auto& boset : bo_set) {
-      // In case of runlist submission, status of original cmd BO won't be updated.
-      // Let's update them here to indicate success. If any cmd processing has failed,
-      // we'll throw before we get here.
-      auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo;
-      auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-      cmdpkt->state = ERT_CMD_STATE_COMPLETED;
-      boset->sync_after_run();
-      //boset->dump_content();
-      boset->verify_result();
-    }
+  for (auto& boset : bo_set) {
+    // In case of runlist submission, status of original cmd BO won't be updated.
+    // Let's update them here to indicate success. If any cmd processing has failed,
+    // we'll throw before we get here.
+    auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo;
+    auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
+    boset->sync_after_run();
+    //boset->dump_content();
+    boset->verify_result();
   }
 
   // Report the performance numbers
@@ -361,7 +352,7 @@ TEST_io_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
   unsigned int total = static_cast<unsigned int>(arg[2]);
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 1, 1, nullptr);
+  io_test(id, sdev.get(), total, 1, 1, run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
 }
 
 void
@@ -372,7 +363,7 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device>& sdev, arg_type& 
   unsigned int total = static_cast<unsigned int>(arg[2]);
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 8, 1, nullptr);
+  io_test(id, sdev.get(), total, 8, 1, run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
 }
 
 void
@@ -388,7 +379,8 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_t
     if (cmds_per_list > max_cmd_per_list)
       cmds_per_list = max_cmd_per_list;
     int total_hwq_submit = total / cmds_per_list;
-    io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list, nullptr);
+    io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list,
+      run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
   }
 }
 
@@ -408,7 +400,8 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, ar
       cmds_per_list = max_cmd_per_list;
     int num_cmdlist = num_bo_set / cmds_per_list;
     int total_hwq_submit = total_commands / cmds_per_list;
-    io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list, nullptr);
+    io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list,
+      run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
   }
 }
 
