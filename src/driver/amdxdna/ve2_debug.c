@@ -195,9 +195,9 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	}
 
 	/* Validate row */
-	if (footer.row >= MAX_ROW) {
+	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
 		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
-			 footer.row, MAX_ROW);
+			 footer.row, xdna->dev_handle->aie_dev_info.rows);
 		return -EINVAL;
 	}
 
@@ -285,9 +285,9 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	}
 
 	/* Validate row */
-	if (footer.row >= MAX_ROW) {
+	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
 		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
-			 footer.row, MAX_ROW);
+			 footer.row, xdna->dev_handle->aie_dev_info.rows);
 		return -EINVAL;
 	}
 
@@ -367,8 +367,7 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		 hwctx->client->pid, hwctx->id, hwctx->start_col,
 		 hwctx->num_col);
 
-	// TODO: Replace MAX_ROW with dynamic value from aie_get_device_info()
-	rel_size = hwctx->priv->num_col * MAX_ROW * TILE_ADDRESS_SPACE;
+	rel_size = hwctx->priv->num_col * xdna->dev_handle->aie_dev_info.rows * TILE_ADDRESS_SPACE;
 	if (rel_size > buf_size) {
 		XDNA_DBG(xdna, "Invalid buffer size:%d (rel_size:%d)\n", buf_size, rel_size);
 		args->element_size = rel_size;

@@ -46,7 +46,6 @@ struct amdxdna_ctx;
 	VE2_ADDR(col, row, VE2_CORE_TILE_MEMORY_OFF + (off))
 
 #define TILE_ADDRESS_SPACE		0x100000
-#define MAX_ROW				6
 #define MEM_TILE_MEMORY_SIZE		0x80000
 #define MEM_TILE_FIRST_REG_ADDRESS	0x91000
 #define CORE_TILE_MEMORY_SIZE		0x10000
@@ -206,11 +205,10 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
  * ve2_mgmt_schedule_cmd - Schedule a command for execution.
  * @xdna: Pointer to the device structure.
  * @hwctx: Pointer to the hardware context.
- * @seq: Sequence number for the command.
  *
  * Returns 0 on success or a negative error code.
  */
-int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq);
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 
 /**
  * ve2_mgmt_handshake_init - Initialize handshake with firmware for a context.

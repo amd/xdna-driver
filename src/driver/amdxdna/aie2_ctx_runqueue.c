@@ -1130,7 +1130,7 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	mutex_unlock(&xdna->dev_lock);
 
 	if (wait_update_parts && wait_parts)
-		wait_for_completion_killable(&ctx->priv->parts_work_comp);
+		wait_for_completion(&ctx->priv->parts_work_comp);
 	XDNA_DBG(xdna, "%s added, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);
 	return 0;
@@ -1175,7 +1175,8 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	mutex_unlock(&xdna->dev_lock);
 
 	if (wait_update_parts && wait_parts)
-		wait_for_completion_killable(&ctx->priv->parts_work_comp);
+		wait_for_completion(&ctx->priv->parts_work_comp);
+	cancel_work_sync(&ctx->dispatch_work);
 	flush_work(&ctx->yield_work);
 	XDNA_DBG(xdna, "%s deleted, status %d priority %d",
 		 ctx->name, ctx->priv->status, ctx->priv->priority);

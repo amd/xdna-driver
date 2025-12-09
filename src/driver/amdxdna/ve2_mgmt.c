@@ -781,7 +781,6 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
 	int num_rows = xdna->dev_handle->aie_dev_info.rows;
-
 	for (int col = 0; col < nhwctx->num_col; ++col) {
 		int rel_col = col + nhwctx->start_col;
 
