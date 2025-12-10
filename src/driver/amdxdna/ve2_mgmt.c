@@ -156,6 +156,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	struct solver_state *xrs = xdna->dev_handle->xrs_hdl;
 	struct xrs_action_load load_act = {0};
 	struct amdxdna_ctx_priv *nhwctx = NULL;
+	struct amdxdna_mgmtctx  *mgmtctx = NULL;
 	struct alloc_requests *xrs_req;
 	int ret;
 
@@ -228,6 +229,8 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 
 	/* Lets add this hwctx to the scheduler */
 	ve2_mgmt_schedule_cmd(xdna, hwctx);
+	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
+        mgmtctx->is_idle_due_to_context = 1;
 
 	return 0;
 
