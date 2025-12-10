@@ -104,7 +104,9 @@ static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdn
 	return hs_data;
 }
 
-static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req, u32 num_col)
+#define MIN_COL_SUPPORT 4
+static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req,
+			    u32 num_col)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
@@ -119,10 +121,10 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 			return -EINVAL;
 		}
 
-		for (start = start_col; start <= max_start; start += num_col)
+		for (start = start_col; start <= max_start; start += MIN_COL_SUPPORT)
 			entries++;
 	} else {
-		for (start = 0; start <= max_start; start += num_col)
+		for (start = 0; start <= max_start; start += MIN_COL_SUPPORT)
 			entries++;
 	}
 
@@ -132,20 +134,20 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 		return -EINVAL;
 	}
 
-	xrs_req->cdo.start_cols = kmalloc_array(entries, sizeof(*xrs_req->cdo.start_cols),
+	xrs_req->cdo.start_cols = kmalloc_array(entries,
+						sizeof(*xrs_req->cdo.start_cols),
 						GFP_KERNEL);
 	if (!xrs_req->cdo.start_cols)
 		return -ENOMEM;
 
 	xrs_req->cdo.cols_len = entries;
-	for (i = 0, start = (start_col > 0 ? start_col : 0);
-	     start <= max_start; start += num_col, i++)
+	for (i = 0, start = (start_col > 0 ? start_col : 0); start <= max_start;
+	     start += MIN_COL_SUPPORT, i++)
 		xrs_req->cdo.start_cols[i] = start;
 
 	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     xrs_req->cdo.start_cols,
 			     entries * sizeof(*xrs_req->cdo.start_cols), false);
-
 	return 0;
 }
 
