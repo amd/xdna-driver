@@ -40,14 +40,9 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	/* request all cols */
 	xaie_dev = aie_partition_request(&request);
 	if (IS_ERR(xaie_dev)) {
-		ret = PTR_ERR(xaie_dev);
-		if (ret == -ENODEV) {
-			XDNA_DBG(xdna, "AIE partition not ready yet, deferring probe");
-			ret = -EPROBE_DEFER;
-		} else {
-			XDNA_ERR(xdna, "aie partition request failed: %d", ret);
-		}
-			goto out;
+		XDNA_ERR(xdna, "aie partition request failed: %d", ret);
+		ret = -ENODEV;
+		goto out;
 	}
 	XDNA_DBG(xdna, "aie partition request succeeded: 0x%x", request.partition_id);
 
@@ -116,7 +111,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	ret = aie_get_device_info(&xdna_hdl->aie_dev_info);
 	if (ret) {
 		if (ret == -ENODEV) {
-			XDNA_DBG(xdna, "AIE device not ready yet, deferring probe");
+			XDNA_INFO(xdna, "AIE device not ready yet, deferring probe");
 			return -EPROBE_DEFER;
 		}
 		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
@@ -146,12 +141,8 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	/* Load firmware */
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
-		if (ret == -EPROBE_DEFER)
-			XDNA_DBG(xdna, "AIE partition not ready yet, deferring probe");
-		else{
-		        XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
-		        return ret;
-		}
+		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
+		return ret;
 	}
 	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 
