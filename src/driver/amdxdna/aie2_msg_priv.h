@@ -9,48 +9,49 @@
 #include <linux/uuid.h>
 
 enum aie2_msg_opcode {
-	MSG_OP_CREATE_CONTEXT              = 0x2,
-	MSG_OP_DESTROY_CONTEXT             = 0x3,
+	MSG_OP_CREATE_CONTEXT			= 0x2,
+	MSG_OP_DESTROY_CONTEXT			= 0x3,
 #ifdef AMDXDNA_DEVEL
-	MSG_OP_GET_TELEMETRY               = 0x4,
+	MSG_OP_GET_TELEMETRY			= 0x4,
 #endif
-	MSG_OP_SYNC_BO			   = 0x7,
-	MSG_OP_EXECUTE_BUFFER_CF           = 0xC,
-	MSG_OP_QUERY_COL_STATUS            = 0xD,
-	MSG_OP_QUERY_AIE_TILE_INFO         = 0xE,
-	MSG_OP_QUERY_AIE_VERSION           = 0xF,
-	MSG_OP_EXEC_DPU                    = 0x10,
-	MSG_OP_CONFIG_CU                   = 0x11,
-	MSG_OP_CHAIN_EXEC_BUFFER_CF        = 0x12,
-	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
-	MSG_OP_CONFIG_DEBUG_BO		   = 0x14,
-	MSG_OP_EXEC_DPU_PREEMPT		   = 0x15,
-	MSG_OP_EXEC_NPU			   = 0x17,
-	MSG_OP_CHAIN_EXEC_NPU		   = 0x18,
+	MSG_OP_SYNC_BO				= 0x7,
+	MSG_OP_EXECUTE_BUFFER_CF		= 0xC,
+	MSG_OP_QUERY_COL_STATUS			= 0xD,
+	MSG_OP_QUERY_AIE_TILE_INFO		= 0xE,
+	MSG_OP_QUERY_AIE_VERSION		= 0xF,
+	MSG_OP_EXEC_DPU				= 0x10,
+	MSG_OP_CONFIG_CU			= 0x11,
+	MSG_OP_CHAIN_EXEC_BUFFER_CF		= 0x12,
+	MSG_OP_CHAIN_EXEC_DPU			= 0x13,
+	MSG_OP_CONFIG_DEBUG_BO			= 0x14,
+	MSG_OP_EXEC_DPU_PREEMPT			= 0x15,
+	MSG_OP_EXEC_NPU				= 0x17,
+	MSG_OP_CHAIN_EXEC_NPU			= 0x18,
 #ifdef AMDXDNA_DEVEL
-	MSG_OP_REGISTER_PDI                = 0x1,
-	MSG_OP_UNREGISTER_PDI              = 0xA,
-	MSG_OP_LEGACY_CONFIG_CU            = 0xB,
+	MSG_OP_REGISTER_PDI			= 0x1,
+	MSG_OP_UNREGISTER_PDI			= 0xA,
+	MSG_OP_LEGACY_CONFIG_CU			= 0xB,
 #endif
 	MSG_OP_MAX_XRT_OPCODE,
-	MSG_OP_SUSPEND                     = 0x101,
-	MSG_OP_RESUME                      = 0x102,
-	MSG_OP_ASSIGN_MGMT_PASID           = 0x103,
-	MSG_OP_INVOKE_SELF_TEST            = 0x104,
-	MSG_OP_MAP_HOST_BUFFER             = 0x106,
-	MSG_OP_GET_FIRMWARE_VERSION        = 0x108,
-	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
-	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
-	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
-	MSG_OP_START_FW_TRACE              = 0x10F,
-	MSG_OP_STOP_FW_TRACE               = 0x110,
-	MSG_OP_SET_FW_TRACE_CATEGORIES     = 0x111,
-	MSG_OP_UPDATE_PROPERTY             = 0x113,
-	MSG_OP_GET_APP_HEALTH              = 0x114,
-	MSG_OP_ADD_HOST_BUFFER             = 0x115,
-	MSG_OP_CONFIG_FW_LOG		   = 0x116,
+	MSG_OP_SUSPEND				= 0x101,
+	MSG_OP_RESUME				= 0x102,
+	MSG_OP_ASSIGN_MGMT_PASID		= 0x103,
+	MSG_OP_INVOKE_SELF_TEST			= 0x104,
+	MSG_OP_MAP_HOST_BUFFER			= 0x106,
+	MSG_OP_GET_FIRMWARE_VERSION		= 0x108,
+	MSG_OP_SET_RUNTIME_CONFIG		= 0x10A,
+	MSG_OP_GET_RUNTIME_CONFIG		= 0x10B,
+	MSG_OP_REGISTER_ASYNC_EVENT_MSG		= 0x10C,
+	MSG_OP_START_FW_TRACE			= 0x10F,
+	MSG_OP_STOP_FW_TRACE			= 0x110,
+	MSG_OP_SET_FW_TRACE_CATEGORIES		= 0x111,
+	MSG_OP_UPDATE_PROPERTY			= 0x113,
+	MSG_OP_GET_APP_HEALTH			= 0x114,
+	MSG_OP_ADD_HOST_BUFFER			= 0x115,
+	MSG_OP_CONFIG_FW_LOG			= 0x116,
+	MSG_OP_GET_COREDUMP			= 0x119,
 	MSG_OP_MAX_DRV_OPCODE,
-	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
+	MSG_OP_GET_PROTOCOL_VERSION		= 0x301,
 	MSG_OP_MAX_OPCODE
 };
 
@@ -737,5 +738,23 @@ struct rt_cfg_ver {
 	u32			fw_minor;
 	u32			type;
 };
+
+struct buffer_list {
+	u64			buf_addr;
+	u32			buf_size;
+	u32			reserved;
+} __packed;
+
+struct get_coredump_req {
+	u32			context_id;
+	u32			num_bufs;
+	u64			list_addr;
+} __packed;
+
+struct get_coredump_resp {
+	enum			aie2_msg_status status;
+	u32			required_buffer_size;
+	u32			reserved[7];
+} __packed;
 
 #endif /* _AIE2_MSG_PRIV_H_ */
