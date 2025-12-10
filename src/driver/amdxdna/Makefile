@@ -41,6 +41,7 @@ endif
 XDNA_DRIVER_VERSION ?= 2.21.0
 XDNA_DATE ?= $(shell date +%Y%m%d)
 XDNA_HASH ?= $(shell git rev-parse HEAD)
+USE_LLVM ?= $(shell zgrep "CONFIG_CC_IS_CLANG" /proc/config.gz 1>/dev/null && echo -n "LLVM=1")
 
 ifndef MODULE_VER_STR
 MODULE_VER_STR := $(XDNA_DRIVER_VERSION)_$(XDNA_DATE),$(XDNA_HASH)
@@ -49,7 +50,7 @@ endif
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
 modules:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) $(USE_LLVM) modules
 
 modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install
