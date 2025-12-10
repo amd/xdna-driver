@@ -119,11 +119,6 @@ struct amdxdna_fw_ver {
 	u32 build;
 };
 
-struct amdxdna_cma_mem_region {
-	struct device	*dev;
-	bool	initialized;
-};
-
 struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
@@ -141,7 +136,7 @@ struct amdxdna_dev {
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
 
-	struct amdxdna_cma_mem_region	cma_mem_regions[MAX_MEM_REGIONS];
+	struct device			*cma_region_devs[MAX_MEM_REGIONS];
 };
 
 struct amdxdna_stats {

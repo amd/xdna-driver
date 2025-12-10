@@ -88,9 +88,11 @@ out:
 static void ve2_cma_device_release(struct device *dev)
 {
 	/*
-	 * All DMA and reserved memory resources are released by
-	 * of_reserved_mem_device_release() before this function is called.
-	 * This release function only needs to free the device structure itself.
+	 * This is the device release callback invoked by put_device().
+	 * The caller (ve2_cma_mem_region_remove) must call
+	 * of_reserved_mem_device_release() to release DMA/reserved memory
+	 * resources before calling put_device().
+	 * This callback only frees the device structure allocated by kzalloc().
 	 */
 	kfree(dev);
 }
@@ -100,14 +102,12 @@ static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 	int i;
 
 	for (i = 0; i < MAX_MEM_REGIONS; i++) {
-		struct amdxdna_cma_mem_region *region;
+		struct device *dev = xdna->cma_region_devs[i];
 
-		region = &xdna->cma_mem_regions[i];
-		if (region->initialized) {
-			of_reserved_mem_device_release(region->dev);
-			put_device(region->dev);
-			region->dev = NULL;
-			region->initialized = false;
+		if (dev) {
+			of_reserved_mem_device_release(dev);
+			put_device(dev);
+			xdna->cma_region_devs[i] = NULL;
 		}
 	}
 }
@@ -130,7 +130,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
 		if (!child_dev) {
 			XDNA_ERR(xdna,
-				 "Failed to alloc child_dev for cma region %d\n",
+				 "Failed to alloc child_dev for cma region %d",
 				 i);
 			ret = -ENOMEM;
 			goto cleanup;
@@ -145,7 +145,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
 		if (ret) {
 			XDNA_ERR(xdna,
-				 "Failed to set name for cma region %d\n", i);
+				 "Failed to set name for cma region %d", i);
 			goto put_dev;
 		}
 
@@ -153,12 +153,11 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 							 pdev->dev.of_node, i);
 		if (ret) {
 			XDNA_ERR(xdna,
-				 "Failed to init reserved cma region %d\n", i);
+				 "Failed to init reserved cma region %d", i);
 			goto put_dev;
 		}
 
-		xdna->cma_mem_regions[i].dev = child_dev;
-		xdna->cma_mem_regions[i].initialized = true;
+		xdna->cma_region_devs[i] = child_dev;
 	}
 
 	return 0;

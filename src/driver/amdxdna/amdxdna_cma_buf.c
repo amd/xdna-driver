@@ -185,8 +185,55 @@ int get_cma_mem_index(u64 flags)
 {
 	/*
 	 * Extract lower 8 bits for memory index (0-255 range).
-	 * Valid indexes: 0-15 (validated at call site against MAX_MEM_REGIONS)
-	 * Invalid indexes (>=16): handled as fallback to default CMA
+	 * Valid indexes: 0-15
+	 * Invalid indexes (16-255): trigger fallback to default CMA region
 	 */
 	return flags & 0xFF;
+}
+
+/**
+ * amdxdna_get_cma_buf_with_fallback - Allocate CMA buffer with region fallback
+ * @region_devs: Array of device pointers for CMA regions (NULL = not initialized)
+ * @max_regions: Maximum number of regions in the array
+ * @fallback_dev: Device to use as final fallback (system default CMA)
+ * @size: Size of buffer to allocate
+ * @flags: Flags containing region index in bits [7:0]
+ *
+ * Attempts allocation in order:
+ * 1. Requested region (extracted from flags)
+ * 2. Other available initialized regions
+ * 3. System default CMA (fallback_dev)
+ *
+ * Return: dma_buf pointer on success, ERR_PTR on failure
+ */
+struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_devs,
+						  int max_regions,
+						  struct device *fallback_dev,
+						  size_t size, u64 flags)
+{
+	struct dma_buf *dma_buf;
+	int mem_index;
+	int i;
+
+	mem_index = get_cma_mem_index(flags);
+
+	/* Try requested region first */
+	if (mem_index < max_regions && region_devs[mem_index]) {
+		dma_buf = amdxdna_get_cma_buf(region_devs[mem_index], size);
+		if (!IS_ERR(dma_buf))
+			return dma_buf;
+	}
+
+	/* Try any other available initialized region */
+	for (i = 0; i < max_regions; i++) {
+		if (i == mem_index || !region_devs[i])
+			continue;
+
+		dma_buf = amdxdna_get_cma_buf(region_devs[i], size);
+		if (!IS_ERR(dma_buf))
+			return dma_buf;
+	}
+
+	/* Final fallback to system default CMA */
+	return amdxdna_get_cma_buf(fallback_dev, size);
 }
