@@ -294,15 +294,6 @@ struct resume_resp {
 	enum aie2_msg_status	status;
 } __packed;
 
-struct check_header_hash_req {
-	u64		hash_high;
-	u64		hash_low;
-} __packed;
-
-struct check_header_hash_resp {
-	enum aie2_msg_status	status;
-} __packed;
-
 #if defined(CONFIG_DEBUG_FS)
 struct check_self_test_req {
 	u32    test_mask;

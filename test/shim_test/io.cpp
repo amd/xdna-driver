@@ -276,7 +276,7 @@ get_cu_idx(hw_ctx& hwctx)
   if (kernel.empty())
     throw std::runtime_error("No kernel found");
   auto cu_idx = hwctx.get()->open_cu_context(kernel);
-  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
+  //std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
   return cu_idx;
 }
 
@@ -345,9 +345,14 @@ elf_io_test_bo_set::
 elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   io_test_bo_set_base(dev, xclbin_name)
 {
-  std::string file;
+  // Find elf with the same name as xclbin file
+  std::filesystem::path elf_path(get_xclbin_path(dev, xclbin_name.c_str()));
+  elf_path.replace_extension(".elf");
 
-  m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
+  if (std::filesystem::exists(elf_path))
+    m_elf = xrt::elf(elf_path);
+  else
+    m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -362,13 +367,13 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_INPUT:
-      create_data_bo_from_file(ibo, "ifm.bin", 0);
+      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_PARAMETERS:
       create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_OUTPUT:
-      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL);
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL|m_FLAG_OPT);
       break;
     case IO_TEST_BO_CTRL_PKT_PM:
       create_data_bo_from_file(ibo, "pm_ctrlpkt.bin", m_FLAG_OPT);
@@ -580,9 +585,15 @@ init_cmd(hw_ctx& hwctx, bool dump)
   ebuf.add_arg_64(3);
   ebuf.add_arg_64(0);
   ebuf.add_arg_32(0);
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+  if (m_bo_array[IO_TEST_BO_INPUT].tbo.get()) {
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+  } else {
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+  }
   ebuf.add_arg_64(0);
   ebuf.add_arg_64(0);
 
@@ -732,7 +743,6 @@ io_test_bo_set::
 verify_result()
 {
   // Verify command completion status
-  printf("haha\n");
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_COMPLETED)
