@@ -161,6 +161,7 @@ struct amdxdna_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
+	kuid_t				uid;
 	/* To avoid deadlock, do NOT wait this srcu when dev_lock is hold */
 	struct srcu_struct		ctx_srcu;
 	struct xarray			ctx_xa;
