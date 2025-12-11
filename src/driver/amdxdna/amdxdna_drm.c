@@ -28,6 +28,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		return -ENOMEM;
 
 	client->pid = pid_nr(filp->pid);
+	client->uid = current_euid();
 	client->xdna = xdna;
 
 #ifdef AMDXDNA_DEVEL

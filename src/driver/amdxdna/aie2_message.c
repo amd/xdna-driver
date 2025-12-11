@@ -1514,6 +1514,43 @@ int aie2_config_debug_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	return 0;
 }
 
+int aie2_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			  u32 context_id, u32 num_bufs)
+{
+	DECLARE_AIE2_MSG(get_coredump, MSG_OP_GET_COREDUMP);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	dma_addr_t addr;
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_GET_COREDUMP)) {
+		XDNA_DBG(xdna, "Get coredump unsupported for the device or firmware version");
+		return -EOPNOTSUPP;
+	}
+
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
+		return -EINVAL;
+	}
+
+	req.context_id = context_id;
+	req.num_bufs = num_bufs;
+	req.list_addr = addr;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		if (resp.status == AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID) {
+			XDNA_ERR(xdna, "Invalid buffer size(required 0x%x) for get coredump",
+				 resp.required_buffer_size);
+		} else {
+			XDNA_ERR(xdna, "Get coredump got status 0x%x", resp.status);
+		}
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
 #ifdef AMDXDNA_DEVEL
 int aie2_register_pdis(struct amdxdna_ctx *ctx)
 {

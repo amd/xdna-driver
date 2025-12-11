@@ -41,7 +41,7 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	/* request all cols */
 	xaie_dev = aie_partition_request(&request);
 	if (IS_ERR(xaie_dev)) {
-		XDNA_ERR(xdna, "aie partition request failed");
+		XDNA_ERR(xdna, "aie partition request failed: %d", ret);
 		ret = -ENODEV;
 		goto out;
 	}
@@ -195,6 +195,10 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	ret = aie_get_device_info(&xdna_hdl->aie_dev_info);
 	if (ret) {
+		if (ret == -ENODEV) {
+			XDNA_INFO(xdna, "AIE device not ready yet, deferring probe");
+			return -EPROBE_DEFER;
+		}
 		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
 		return ret;
 	}
