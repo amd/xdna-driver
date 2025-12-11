@@ -772,10 +772,13 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 
 	if (args->type == AMDXDNA_BO_DEV_HEAP) {
 		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
-	dma_buf = amdxdna_get_cma_buf(dev, size);
+	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna->cma_region_devs,
+						    MAX_MEM_REGIONS,
+						    dev->dev, size,
+						    args->flags);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
@@ -996,9 +999,6 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_drm_create_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	int ret;
-
-	if (args->flags)
-		return -EINVAL;
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
