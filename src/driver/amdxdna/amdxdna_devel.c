@@ -37,7 +37,7 @@ int amdxdna_iommu_mode_check(struct amdxdna_dev *xdna)
 	bool iommu_iova = domain ? iommu_is_dma_domain(domain) : false;
 	bool iommu_off = is_iommu_off(xdna);
 
-	// Non-PASID mode
+	/* Non-PASID mode */
 	if (amdxdna_use_carvedout() || amdxdna_use_cma()) {
 		if (iommu_off)
 			XDNA_INFO(xdna, "Physical address mode enabled");
