@@ -31,7 +31,7 @@ static bool is_iommu_off(struct amdxdna_dev *xdna)
 #endif
 }
 
-int amdxdna_iommu_mode_check(struct amdxdna_dev *xdna)
+int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
 	struct iommu_domain *domain = iommu_get_domain_for_dev(xdna->ddev.dev);
 	bool iommu_iova = domain ? iommu_is_dma_domain(domain) : false;

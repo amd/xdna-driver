@@ -581,7 +581,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 
 #ifdef AMDXDNA_DEVEL
-	ret = amdxdna_iommu_mode_check(xdna);
+	ret = amdxdna_iommu_mode_setup(xdna);
 	if (ret)
 		goto free_irq;
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)

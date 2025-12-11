@@ -17,7 +17,7 @@ extern int iommu_mode;
 extern bool priv_load;
 extern int start_col_index;
 
-int amdxdna_iommu_mode_check(struct amdxdna_dev *aie);
+int amdxdna_iommu_mode_setup(struct amdxdna_dev *aie);
 struct sg_table *amdxdna_alloc_sgt(struct amdxdna_dev *aie, size_t sz,
 				   struct page **pages, u32 nr_pages);
 void amdxdna_free_sgt(struct amdxdna_dev *aie, struct sg_table *sgt);
