@@ -581,11 +581,9 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 
 #ifdef AMDXDNA_DEVEL
-	ret = amdxdna_iommu_mode_setup(xdna);
-	if (ret) {
-		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
+	ret = amdxdna_iommu_mode_check(xdna);
+	if (ret)
 		goto free_irq;
-	}
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
 #endif
@@ -599,9 +597,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 #endif
 #ifdef AMDXDNA_DEVEL
 skip_pasid:
-	XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
 #endif
-
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)

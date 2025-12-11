@@ -884,15 +884,14 @@ static struct amdxdna_gem_obj *
 amdxdna_drm_create_share_bo(struct drm_device *dev,
 			    struct amdxdna_drm_create_bo *args, struct drm_file *filp)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_gem_obj *abo;
 
 	if (args->vaddr)
 		abo = amdxdna_gem_create_user_object(dev, args);
 #ifdef AMDXDNA_DEVEL
-	else if (is_iommu_off(xdna) && amdxdna_use_cma())
+	else if (amdxdna_use_cma())
 		abo = amdxdna_gem_create_cma_object(dev, args);
-	else if (is_iommu_off(xdna) && amdxdna_use_carvedout())
+	else if (amdxdna_use_carvedout())
 		abo = amdxdna_gem_create_carvedout_object(dev, args);
 #endif
 	else
