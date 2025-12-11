@@ -47,7 +47,7 @@ int amdxdna_iommu_mode_check(struct amdxdna_dev *xdna)
 		return 0;
 	}
 
-	// PASID mode
+	/* PASID mode */
 	if (iommu_off || iommu_iova) {
 		XDNA_ERR(xdna, "PASID required, but not enabled by IOMMU");
 		return -ENODEV;
