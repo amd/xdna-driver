@@ -1203,6 +1203,64 @@ struct resource_info
   }
 };
 
+struct aie_coredump
+{
+  using result_type = std::vector<char>;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
+  {
+    if (key != key_type::aie_coredump)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& aie_coredump_args = std::any_cast<const query::aie_coredump::args&>(args_any);
+
+    // Calculate buffer size: (sum of all row_counts) * num_cols * 1MB
+    auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(device);
+    auto total_rows = aie_stats.core_rows + aie_stats.mem_rows + aie_stats.shim_rows;
+    auto num_cols = aie_stats.cols;
+    auto num_tiles = total_rows * num_cols;
+    std::vector<char> payload(num_tiles * 1024 * 1024);
+
+    // Driver expects config struct at the beginning of the buffer
+    amdxdna_drm_aie_coredump *dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
+    dump->context_id = aie_coredump_args.context_id;
+    dump->pid = aie_coredump_args.pid;
+
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_AIE_COREDUMP,
+      .element_size = static_cast<uint32_t>(payload.size()),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    try {
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+    } catch (const xrt_core::system_error& e) {
+      if (e.get_code() == -ENOSPC) {
+        payload.resize(arg.element_size);
+        dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
+        dump->context_id = aie_coredump_args.context_id;
+        dump->pid = aie_coredump_args.pid;
+        arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
+        arg.element_size = static_cast<uint32_t>(payload.size());
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } else {
+        throw;
+      }
+    }
+
+    return payload;
+  }
+};
+
 struct firmware_version
 {
   using result_type = query::firmware_version::result_type;
@@ -1614,6 +1672,7 @@ initialize_query_table()
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
   emplace_func1_request<query::firmware_version,               firmware_version>();
   emplace_func1_request<query::sub_device_path,                sub_device_path>();
+  emplace_func1_request<query::aie_coredump,                   aie_coredump>();
 }
 
 struct X { X() { initialize_query_table(); }};

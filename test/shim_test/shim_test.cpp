@@ -59,6 +59,7 @@ void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_runlist_bad_cmd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_with_ubuf_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_suspend_resume(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -867,9 +868,6 @@ std::vector<test_case> test_list {
   test_case{ "Multi context IO test 3 (npu1)", {},
     TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 6 }
   },
-  //test_case{ "Multi context IO test 4 (npu1)", {},
-  //  TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 10 }
-  //},
   test_case{ "Multi context IO test 1 (npu4)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2 }
   },
@@ -918,6 +916,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_bo_then_close_device, {}
+  },
+  test_case{ "failed chained command", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
+  },
+  test_case{ "timed out chained command", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
   },
 };
 
@@ -1114,10 +1118,12 @@ main(int argc, char **argv)
   std::vector<int> tests;
   for (int i = optind; i < argc; i++) {
     int idx = get_test_case_index(argv[i]);
-    if (idx >= 0)
+    if (idx >= 0 && idx < test_list.size()) {
       tests.push_back(idx);
-    else
+    } else {
+      std::cout << "Invalid test index : " << idx << std::endl;
       return 1;
+    }
   }
 
   cur_path = dirname(argv[0]);

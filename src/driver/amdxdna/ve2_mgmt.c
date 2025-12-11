@@ -104,7 +104,9 @@ static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdn
 	return hs_data;
 }
 
-static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req, u32 num_col)
+#define MIN_COL_SUPPORT 4
+static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req,
+			    u32 num_col)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
@@ -119,10 +121,10 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 			return -EINVAL;
 		}
 
-		for (start = start_col; start <= max_start; start += num_col)
+		for (start = start_col; start <= max_start; start += MIN_COL_SUPPORT)
 			entries++;
 	} else {
-		for (start = 0; start <= max_start; start += num_col)
+		for (start = 0; start <= max_start; start += MIN_COL_SUPPORT)
 			entries++;
 	}
 
@@ -132,20 +134,20 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 		return -EINVAL;
 	}
 
-	xrs_req->cdo.start_cols = kmalloc_array(entries, sizeof(*xrs_req->cdo.start_cols),
+	xrs_req->cdo.start_cols = kmalloc_array(entries,
+						sizeof(*xrs_req->cdo.start_cols),
 						GFP_KERNEL);
 	if (!xrs_req->cdo.start_cols)
 		return -ENOMEM;
 
 	xrs_req->cdo.cols_len = entries;
-	for (i = 0, start = (start_col > 0 ? start_col : 0);
-	     start <= max_start; start += num_col, i++)
+	for (i = 0, start = (start_col > 0 ? start_col : 0); start <= max_start;
+	     start += MIN_COL_SUPPORT, i++)
 		xrs_req->cdo.start_cols[i] = start;
 
 	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     xrs_req->cdo.start_cols,
 			     entries * sizeof(*xrs_req->cdo.start_cols), false);
-
 	return 0;
 }
 
@@ -154,6 +156,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	struct solver_state *xrs = xdna->dev_handle->xrs_hdl;
 	struct xrs_action_load load_act = {0};
 	struct amdxdna_ctx_priv *nhwctx = NULL;
+	struct amdxdna_mgmtctx *mgmtctx = NULL;
 	struct alloc_requests *xrs_req;
 	int ret;
 
@@ -223,6 +226,11 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 		goto destroy_partition;
 	}
 	mutex_unlock(&xrs->xrs_lock);
+
+	/* Lets add this hwctx to the scheduler */
+	ve2_mgmt_schedule_cmd(xdna, hwctx);
+	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
+	mgmtctx->is_idle_due_to_context = 1;
 
 	return 0;
 
@@ -335,7 +343,7 @@ static int ve2_request_context_switch(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-	static struct amdxdna_ctx *
+static struct amdxdna_ctx *
 ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
@@ -371,7 +379,7 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 	return hwctx;
 }
 
-int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq)
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_mgmtctx  *mgmtctx =
 		&xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
@@ -822,16 +830,16 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 		return -1;
 	}
 
-	// TODO: Replace MAX_ROW with dynamic value from aie_get_device_info()
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
+	int num_rows = xdna->dev_handle->aie_dev_info.rows;
 	for (int col = 0; col < nhwctx->num_col; ++col) {
 		int rel_col = col + nhwctx->start_col;
 
-		for (int row = 0; row < MAX_ROW; ++row) {
+		for (int row = 0; row < num_rows; ++row) {
 			if (row == 0) {
 				int ret = ve2_partition_read(aie_dev, rel_col, row, 0,
 							     TILE_ADDRESS_SPACE, GET_TILE_ADDRESS
-							     (buffer, MAX_ROW, row, col));
+							     (buffer, num_rows, row, col));
 				XDNA_DBG(xdna, "Read shim tile col:%d row:%d ret: %d.",
 					 col + nhwctx->start_col, row, ret);
 				if (ret < 0)
@@ -840,11 +848,11 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 			} else if (row == 1 || row == 2) {
 				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
 						MEM_TILE_MEMORY_SIZE, GET_TILE_ADDRESS
-						(buffer, MAX_ROW, row, col));
+						(buffer, num_rows, row, col));
 				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
 						MEM_TILE_FIRST_REG_ADDRESS,
 						TILE_ADDRESS_SPACE - MEM_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col)
+						GET_TILE_ADDRESS(buffer, num_rows, row, col)
 						+ MEM_TILE_FIRST_REG_ADDRESS);
 				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.",
 					 col + nhwctx->start_col, row, ret1);
@@ -855,11 +863,11 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 			} else if (row > 2) {
 				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
 						CORE_TILE_MEMORY_SIZE,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col));
+						GET_TILE_ADDRESS(buffer, num_rows, row, col));
 				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
 						CORE_TILE_FIRST_REG_ADDRESS,
 						TILE_ADDRESS_SPACE - CORE_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col)
+						GET_TILE_ADDRESS(buffer, num_rows, row, col)
 							      + CORE_TILE_FIRST_REG_ADDRESS);
 				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.",
 					 col + nhwctx->start_col, row, ret1);

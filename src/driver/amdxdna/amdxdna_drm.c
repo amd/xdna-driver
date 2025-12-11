@@ -28,6 +28,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		return -ENOMEM;
 
 	client->pid = pid_nr(filp->pid);
+	client->uid = current_euid();
 	client->xdna = xdna;
 
 #ifdef AMDXDNA_DEVEL
@@ -183,10 +184,10 @@ int amdxdna_drm_copy_array_to_user(struct amdxdna_drm_get_array *tgt,
 	int i;
 
 	for (i = 0; i < min_num; i++) {
-		buf += i * tgt->element_size;
-		array += i * element_size;
 		if (copy_to_user(buf, array, min_sz))
 			return -EFAULT;
+		buf += tgt->element_size;
+		array += element_size;
 	}
 	tgt->num_element = min_num;
 	tgt->element_size = min_sz;
@@ -206,10 +207,10 @@ int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
 	int i;
 
 	for (i = 0; i < min_num; i++) {
-		buf += i * src->element_size;
-		array += i * element_size;
 		if (copy_from_user(array, buf, min_sz))
 			return -EFAULT;
+		buf += src->element_size;
+		array += element_size;
 	}
 	return 0;
 }
