@@ -37,7 +37,7 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 	bool iommu_iova = domain ? iommu_is_dma_domain(domain) : false;
 	bool iommu_off = is_iommu_off(xdna);
 
-	/* Non-PASID mode */
+	/* Working non-PASID mode */
 	if (amdxdna_use_carvedout() || amdxdna_use_cma()) {
 		if (iommu_off)
 			XDNA_INFO(xdna, "Physical address mode enabled");
@@ -47,12 +47,21 @@ int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 		return 0;
 	}
 
-	/* PASID mode */
-	if (iommu_off || iommu_iova) {
-		XDNA_ERR(xdna, "PASID required, but not enabled by IOMMU");
+	/* IOVA mode w/o carveout, warn user about potential failure. */
+	if (iommu_iova) {
+		XDNA_WARN(xdna,
+			  "IOVA address mode enabled w/o carveout, BO allocation may fail");
+		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+		return 0;
+	}
+
+	/* Physical memory mode w/o carveout, not supported */
+	if (iommu_off) {
+		XDNA_ERR(xdna, "IOMMU is off, require carveout memory");
 		return -ENODEV;
 	}
 
+	/* PASID mode */
 	XDNA_INFO(xdna, "PASID address mode enabled");
 	iommu_mode = AMDXDNA_IOMMU_PASID;
 	return 0;
