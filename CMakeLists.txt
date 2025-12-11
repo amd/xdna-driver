@@ -22,6 +22,7 @@ include (GNUInstallDirs)
 set(XDNA_PKG_DIR      .)
 set(XDNA_PKG_LIB_DIR  ${XDNA_PKG_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(XDNA_PKG_DATA_DIR ${XDNA_PKG_DIR}/${CMAKE_INSTALL_DATADIR}/${XDNA_COMPONENT})
+set(XDNA_PKG_INCLUDE_DIR ${XDNA_PKG_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
 # Non-relocatable by ${CMAKE_INSTALL_PREFIX}
 set(XDNA_PKG_FW_DIR   /usr/lib/firmware/amdnpu)
 set(XDNA_BIN_DIR      /bins) # For saving all built artifacts for quick testing

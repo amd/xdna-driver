@@ -62,18 +62,30 @@ target_link_libraries(vxdna PRIVATE
     pthread
 )
 
-# Install library
-install(TARGETS vxdna
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT ${XDNA_COMPONENT}
-)
-
 # Install headers
 install(FILES
     include/vaccel.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    DESTINATION ${XDNA_PKG_INCLUDE_DIR}
     COMPONENT ${XDNA_COMPONENT}
+)
+
+# install components for packaging
+install(TARGETS vxdna
+  LIBRARY DESTINATION ${XDNA_PKG_LIB_DIR}
+  COMPONENT ${XDNA_COMPONENT}
+)
+
+# install components for testing
+install(TARGETS vxdna DESTINATION ${XDNA_BIN_DIR}/${XDNA_PKG_LIB_DIR})
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/vxdna.pc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/vxdna.pc
+  @ONLY
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/vxdna.pc
+  DESTINATION ${XDNA_PKG_LIB_DIR}/pkgconfig
+  COMPONENT ${XDNA_COMPONENT}
 )
 
 # Enable testing
