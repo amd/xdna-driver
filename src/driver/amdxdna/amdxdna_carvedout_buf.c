@@ -70,7 +70,7 @@ static struct sg_table *amdxdna_cbuf_map(struct dma_buf_attachment *attach,
 		return ERR_PTR(-ENOMEM);
 
 	/* Sglist entry does not support > 4GB size, split into max 2GB entries. */
-	n_entries = (cbuf->node.size + MAX_SG_ENTRY_SIZE -1) / MAX_SG_ENTRY_SIZE;
+	n_entries = (cbuf->node.size + MAX_SG_ENTRY_SIZE - 1) / MAX_SG_ENTRY_SIZE;
 	sgl = kcalloc(n_entries, sizeof(*sg), GFP_KERNEL);
 	if (!sgl) {
 		ret = -ENOMEM;
