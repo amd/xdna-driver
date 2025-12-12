@@ -14,6 +14,7 @@
 
 #include <dlfcn.h>
 #include <libgen.h>
+#include <linux/limits.h>
 #include <sys/syscall.h>
 
 #include <algorithm>
