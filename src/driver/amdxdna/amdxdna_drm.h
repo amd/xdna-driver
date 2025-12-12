@@ -19,10 +19,13 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
 
+#define MAX_MEM_REGIONS	16
+
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
-#define XDNA_WARN(xdna, fmt, args...)	dev_warn((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
+#define XDNA_WARN(xdna, fmt, args...) \
+	dev_warn((xdna)->ddev.dev, "%s: " fmt, __func__, ##args)
 #define XDNA_ERR(xdna, fmt, args...) \
-	dev_err_ratelimited((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
+	dev_err_ratelimited((xdna)->ddev.dev, "%s: " fmt, __func__, ##args)
 #define XDNA_DBG(xdna, fmt, args...)	dev_dbg((xdna)->ddev.dev, fmt, ##args)
 
 #define XDNA_INFO_ONCE(xdna, fmt, args...)	dev_info_once((xdna)->ddev.dev, fmt, ##args)
@@ -132,6 +135,8 @@ struct amdxdna_dev {
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
+
+	struct device			*cma_region_devs[MAX_MEM_REGIONS];
 };
 
 struct amdxdna_stats {
@@ -161,6 +166,7 @@ struct amdxdna_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
+	kuid_t				uid;
 	/* To avoid deadlock, do NOT wait this srcu when dev_lock is hold */
 	struct srcu_struct		ctx_srcu;
 	struct xarray			ctx_xa;

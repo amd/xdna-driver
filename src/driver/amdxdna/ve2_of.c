@@ -6,7 +6,8 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/xlnx-ai-engine.h>
-#include <linux/firmware.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/of_address.h>
 
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
@@ -40,7 +41,7 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	/* request all cols */
 	xaie_dev = aie_partition_request(&request);
 	if (IS_ERR(xaie_dev)) {
-		XDNA_ERR(xdna, "aie partition request failed");
+		XDNA_ERR(xdna, "aie partition request failed: %d", ret);
 		ret = -ENODEV;
 		goto out;
 	}
@@ -84,6 +85,90 @@ out:
 	return ret;
 }
 
+static void ve2_cma_device_release(struct device *dev)
+{
+	/*
+	 * This is the device release callback invoked by put_device().
+	 * The caller (ve2_cma_mem_region_remove) must call
+	 * of_reserved_mem_device_release() to release DMA/reserved memory
+	 * resources before calling put_device().
+	 * This callback only frees the device structure allocated by kzalloc().
+	 */
+	kfree(dev);
+}
+
+static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
+{
+	int i;
+
+	for (i = 0; i < MAX_MEM_REGIONS; i++) {
+		struct device *dev = xdna->cma_region_devs[i];
+
+		if (dev) {
+			of_reserved_mem_device_release(dev);
+			put_device(dev);
+			xdna->cma_region_devs[i] = NULL;
+		}
+	}
+}
+
+static int
+ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
+			struct platform_device *pdev)
+{
+	struct device *child_dev;
+	int num_regions;
+	int ret;
+	int i;
+
+	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
+						 "memory-region", NULL);
+	if (num_regions <= 0)
+		return -EINVAL;
+
+	for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
+		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
+		if (!child_dev) {
+			XDNA_ERR(xdna,
+				 "Failed to alloc child_dev for cma region %d",
+				 i);
+			ret = -ENOMEM;
+			goto cleanup;
+		}
+
+		device_initialize(child_dev);
+		child_dev->parent = &pdev->dev;
+		child_dev->of_node = pdev->dev.of_node;
+		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		child_dev->release = ve2_cma_device_release;
+
+		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Failed to set name for cma region %d", i);
+			goto put_dev;
+		}
+
+		ret = of_reserved_mem_device_init_by_idx(child_dev,
+							 pdev->dev.of_node, i);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Failed to init reserved cma region %d", i);
+			goto put_dev;
+		}
+
+		xdna->cma_region_devs[i] = child_dev;
+	}
+
+	return 0;
+
+put_dev:
+	put_device(child_dev);
+cleanup:
+	ve2_cma_mem_region_remove(xdna);
+	return ret;
+}
+
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
@@ -110,6 +195,10 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	ret = aie_get_device_info(&xdna_hdl->aie_dev_info);
 	if (ret) {
+		if (ret == -ENODEV) {
+			XDNA_INFO(xdna, "AIE device not ready yet, deferring probe");
+			return -EPROBE_DEFER;
+		}
 		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
 		return ret;
 	}
@@ -166,6 +255,12 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		xdna->dev_handle->fw_slots[col] = fw_slots;
 	}
 
+	ret = ve2_cma_mem_region_init(xdna, pdev);
+	if (ret < 0) {
+		/* CMA region initialization is optional - system will fall back to default CMA */
+		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+	}
+
 	return 0;
 }
 
@@ -173,6 +268,8 @@ static void ve2_fini(struct amdxdna_dev *xdna)
 {
 	/* All resources are managed by devm_/drmm_ */
 	XDNA_DBG(xdna, "VE2 device cleanup function");
+
+	ve2_cma_mem_region_remove(xdna);
 }
 const struct amdxdna_dev_ops ve2_ops = {
 	.init		= ve2_init,

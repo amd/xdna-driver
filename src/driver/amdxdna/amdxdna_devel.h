@@ -23,6 +23,5 @@ struct sg_table *amdxdna_alloc_sgt(struct amdxdna_dev *aie, size_t sz,
 void amdxdna_free_sgt(struct amdxdna_dev *aie, struct sg_table *sgt);
 int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo);
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna);
-bool is_iommu_off(struct amdxdna_dev *xdna);
 
 #endif /* _AMDXDNA_DEVEL_ */

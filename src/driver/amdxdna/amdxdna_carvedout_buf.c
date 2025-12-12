@@ -9,6 +9,8 @@
 #include "amdxdna_carvedout_buf.h"
 #include "amdxdna_drm.h"
 
+#define MAX_SG_ENTRY_SIZE	(2UL * 1024 * 1024 * 1024)
+
 /*
  * Carvedout memory is a chunk of memory which is physically contiguous and
  * is reserved during early boot time. There is only one chunk of such memory
@@ -57,39 +59,48 @@ static struct sg_table *amdxdna_cbuf_map(struct dma_buf_attachment *attach,
 					 enum dma_data_direction direction)
 {
 	struct amdxdna_cbuf_priv *cbuf = attach->dmabuf->priv;
-	struct scatterlist *sg;
+	struct scatterlist *sgl, *sg;
+	int ret, n_entries, i;
 	struct sg_table *sgt;
-	int ret;
+	dma_addr_t dma_addr;
+	size_t dma_size;
 
 	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
 	if (!sgt)
 		return ERR_PTR(-ENOMEM);
 
-	sg = kzalloc(sizeof(*sg), GFP_KERNEL);
-	if (!sg) {
+	/* Sglist entry does not support > 4GB size, split into max 2GB entries. */
+	n_entries = (cbuf->node.size + MAX_SG_ENTRY_SIZE - 1) / MAX_SG_ENTRY_SIZE;
+	sgl = kcalloc(n_entries, sizeof(*sg), GFP_KERNEL);
+	if (!sgl) {
 		ret = -ENOMEM;
 		goto free_sgt;
 	}
+	sg_init_table(sgl, n_entries);
+	sgt->orig_nents = n_entries;
+	sgt->nents = n_entries;
+	sgt->sgl = sgl;
 
-	sg_init_table(sg, 1);
-	sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->node.start,
-					      cbuf->node.size, direction,
-					      DMA_ATTR_SKIP_CPU_SYNC);
-	ret = dma_mapping_error(attach->dev, sg_dma_address(sg));
+	dma_size = cbuf->node.size;
+	dma_addr = dma_map_resource(attach->dev, cbuf->node.start,
+				    dma_size, direction, DMA_ATTR_SKIP_CPU_SYNC);
+	ret = dma_mapping_error(attach->dev, dma_addr);
 	if (ret)
-		goto free_sg;
+		goto free_sgl;
 
-	sg_assign_page(sg, NULL);
-	sg->offset = 0;
-	sg_dma_len(sg) = cbuf->node.size;
-	sgt->orig_nents = 1;
-	sgt->nents = sgt->orig_nents;
-	sgt->sgl = sg;
+	for_each_sgtable_dma_sg(sgt, sg, i) {
+		unsigned int len = min(MAX_SG_ENTRY_SIZE, dma_size);
+
+		sg_dma_address(sg) = dma_addr;
+		sg_dma_len(sg) = len;
+		dma_addr += len;
+		dma_size -= len;
+	}
 
 	return sgt;
 
-free_sg:
-	kfree(sg);
+free_sgl:
+	kfree(sgl);
 free_sgt:
 	kfree(sgt);
 	return ERR_PTR(ret);
@@ -101,7 +112,8 @@ static void amdxdna_cbuf_unmap(struct dma_buf_attachment *attach,
 {
 	struct scatterlist *sg = sgt->sgl;
 
-	dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg),
+	dma_unmap_resource(attach->dev,
+			   sg_dma_address(sg), drm_prime_get_contiguous_size(sgt),
 			   direction, DMA_ATTR_SKIP_CPU_SYNC);
 	kfree(sg);
 	kfree(sgt);

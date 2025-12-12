@@ -582,10 +582,8 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 #ifdef AMDXDNA_DEVEL
 	ret = amdxdna_iommu_mode_setup(xdna);
-	if (ret) {
-		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
+	if (ret)
 		goto free_irq;
-	}
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
 #endif
@@ -599,9 +597,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 #endif
 #ifdef AMDXDNA_DEVEL
 skip_pasid:
-	XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
 #endif
-
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
@@ -1328,6 +1324,198 @@ exit:
 	return ret;
 }
 
+/*
+ * Returns true if caller is root (CAP_SYS_ADMIN) or, when root_only is false,
+ * if the caller owns the context.
+ */
+static bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only)
+{
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	bool is_admin = capable(CAP_SYS_ADMIN);
+	bool is_owner;
+
+	if (root_only) {
+		XDNA_DBG(xdna, "Access check (root only): is_admin=%d", is_admin);
+		return is_admin;
+	}
+
+	is_owner = uid_eq(current_euid(), ctx->client->uid);
+	XDNA_DBG(xdna, "Access check: is_admin=%d is_owner=%d", is_admin, is_owner);
+
+	return is_admin || is_owner;
+}
+
+static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_aie_coredump config = {};
+	struct amdxdna_mgmt_dma_hdl **data_hdls = NULL;
+	struct amdxdna_mgmt_dma_hdl *list_hdl = NULL;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct buffer_list *buf_list;
+	unsigned long hwctx_id;
+	u32 total_size;
+	size_t list_size;
+	u32 offset = 0;
+	void __user *buf;
+	u32 num_bufs;
+	u32 buf_size;
+	int ret = 0;
+	int idx, i;
+
+	buf_size = args->num_element * args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	if (buf_size < sizeof(config)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		return -ENOSPC;
+	}
+
+	ret = amdxdna_drm_copy_array_from_user(args, &config, sizeof(config), 1);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to copy config from user");
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "AIE Coredump request for context_id=%u pid=%llu",
+		 config.context_id, config.pid);
+
+	/* Search and validate if context coredump can be fetched for given PID and context ID */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_ctx *hw_ctx;
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
+			if (config.context_id == hwctx_id && config.pid == hw_ctx->client->pid) {
+				hwctx = hw_ctx;
+				break;
+			}
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+		if (hwctx)
+			break;
+	}
+
+	if (!hwctx) {
+		mutex_unlock(&xdna->dev_lock);
+		XDNA_ERR(xdna, "Context %u for pid %llu not found", config.context_id, config.pid);
+		return -EINVAL;
+	}
+
+	/* Check if caller is root or owns the context */
+	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
+		mutex_unlock(&xdna->dev_lock);
+		XDNA_ERR(xdna, "Permission denied for context %u", config.context_id);
+		return -EPERM;
+	}
+
+	num_bufs = ndev->metadata.rows * hwctx->priv->orig_num_col;
+	total_size = num_bufs * SZ_1M;
+
+	if (buf_size < total_size) {
+		mutex_unlock(&xdna->dev_lock);
+		XDNA_DBG(xdna, "Insufficient buffer size %u, need %u", buf_size, total_size);
+		args->element_size = total_size;
+		return -ENOSPC;
+	}
+
+	list_size = max_t(size_t, num_bufs * sizeof(struct buffer_list), SZ_8K);
+	list_hdl = amdxdna_mgmt_buff_alloc(xdna, list_size, DMA_TO_DEVICE);
+	if (IS_ERR(list_hdl)) {
+		mutex_unlock(&xdna->dev_lock);
+		XDNA_ERR(xdna, "Failed to allocate buffer list");
+		return PTR_ERR(list_hdl);
+	}
+
+	buf_list = amdxdna_mgmt_buff_get_cpu_addr(list_hdl, 0);
+	if (IS_ERR(buf_list)) {
+		mutex_unlock(&xdna->dev_lock);
+		XDNA_ERR(xdna, "Failed to get CPU address for buffer list");
+		ret = PTR_ERR(buf_list);
+		goto free_list_hdl;
+	}
+	memset(buf_list, 0, list_size);
+
+	/* Allocate array to track data buffer handles */
+	data_hdls = kcalloc(num_bufs, sizeof(*data_hdls), GFP_KERNEL);
+	if (!data_hdls) {
+		mutex_unlock(&xdna->dev_lock);
+		ret = -ENOMEM;
+		goto free_list_hdl;
+	}
+
+	for (i = 0; i < num_bufs; i++) {
+		void *buf_addr;
+
+		data_hdls[i] = amdxdna_mgmt_buff_alloc(xdna, SZ_1M, DMA_FROM_DEVICE);
+		if (IS_ERR(data_hdls[i])) {
+			XDNA_ERR(xdna, "Failed to allocate data buffer %d", i);
+			ret = PTR_ERR(data_hdls[i]);
+			data_hdls[i] = NULL;
+			mutex_unlock(&xdna->dev_lock);
+			goto free_data_hdls;
+		}
+
+		buf_addr = amdxdna_mgmt_buff_get_cpu_addr(data_hdls[i], 0);
+		if (IS_ERR(buf_addr)) {
+			ret = PTR_ERR(buf_addr);
+			mutex_unlock(&xdna->dev_lock);
+			goto free_data_hdls;
+		}
+		memset(buf_addr, 0, SZ_1M);
+		amdxdna_mgmt_buff_clflush(data_hdls[i], 0, 0);
+
+		buf_list[i].buf_addr = amdxdna_mgmt_buff_get_dma_addr(data_hdls[i]);
+		buf_list[i].buf_size = SZ_1M;
+		buf_list[i].reserved = 0;
+	}
+
+	amdxdna_mgmt_buff_clflush(list_hdl, 0, 0);
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_get_aie_coredump(ndev, list_hdl, hwctx->priv->id, num_bufs);
+	mutex_unlock(&ndev->aie2_lock);
+	mutex_unlock(&xdna->dev_lock);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to get coredump from firmware, ret=%d", ret);
+		goto free_data_hdls;
+	}
+
+	for (i = 0; i < num_bufs; i++) {
+		void *data = amdxdna_mgmt_buff_get_cpu_addr(data_hdls[i], 0);
+
+		if (IS_ERR(data)) {
+			ret = PTR_ERR(data);
+			goto free_data_hdls;
+		}
+
+		if (copy_to_user(buf + offset, data, SZ_1M)) {
+			ret = -EFAULT;
+			goto free_data_hdls;
+		}
+		offset += SZ_1M;
+	}
+
+free_data_hdls:
+	for (i = 0; i < num_bufs; i++) {
+		if (data_hdls[i])
+			amdxdna_mgmt_buff_free(data_hdls[i]);
+	}
+	kfree(data_hdls);
+free_list_hdl:
+	amdxdna_mgmt_buff_free(list_hdl);
+	return ret;
+}
+
 static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1421,6 +1609,9 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 		break;
 	case DRM_AMDXDNA_FW_TRACE_CONFIG:
 		ret = amdxdna_get_fw_trace_configs(xdna, args);
+		break;
+	case DRM_AMDXDNA_AIE_COREDUMP:
+		ret = aie2_get_coredump(client, args);
 		break;
 	default:
 		ret = aie2_get_array_hwctx(client, args);

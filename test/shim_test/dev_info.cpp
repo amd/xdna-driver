@@ -264,13 +264,13 @@ xclbin_info xclbin_infos[] = {
     .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
   },
   {
-    .name = "timeout.xclbin",
+    .name = "bad_txn.xclbin",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {0} },
     },
-    .workspace = "local_shim_test_data/elf_no_cp_timeout_npu4",
+    .workspace = "local_shim_test_data/elf_no_cp_bad_txn_npu4",
     .data = "",
     .type = KERNEL_TYPE_TXN,
   },
@@ -285,6 +285,29 @@ xclbin_info xclbin_infos[] = {
     .data = "",
     .type = KERNEL_TYPE_TXN,
   },
+  {
+    .name = "nop.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {1} },
+    },
+    .workspace = "local_shim_test_data/elf_no_op_npu4",
+    .data = "",
+    .type = KERNEL_TYPE_TXN,
+  },
+  {
+    .name = "nop.xclbin",
+    .device = npu1_device_id,
+    .revision_id = npu1_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {1} },
+    },
+    .workspace = "local_shim_test_data/elf_no_op_npu1",
+    .data = "",
+    .type = KERNEL_TYPE_TXN,
+  },
+
 };
 
 }

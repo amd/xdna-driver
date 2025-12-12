@@ -1043,6 +1043,7 @@ aie2_cmdlist_fill_npu_cf(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *siz
 	u32 cmd_len;
 	void *cmd;
 
+	memset(npu_slot, 0, sizeof(*npu_slot));
 	cmd = amdxdna_cmd_get_payload(cmd_bo, &cmd_len);
 	if (!cmd)
 		return -EINVAL;
@@ -1053,7 +1054,6 @@ aie2_cmdlist_fill_npu_cf(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *siz
 	if (npu_slot->cu_idx == INVALID_CU_IDX)
 		return -EINVAL;
 
-	memset(npu_slot, 0, sizeof(*npu_slot));
 	npu_slot->type = EXEC_NPU_TYPE_NON_ELF;
 	npu_slot->arg_cnt = cmd_len / sizeof(u32);
 	memcpy(npu_slot->args, cmd, cmd_len);
@@ -1070,6 +1070,7 @@ aie2_cmdlist_fill_npu_dpu(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *si
 	u32 cmd_len;
 	u32 arg_sz;
 
+	memset(npu_slot, 0, sizeof(*npu_slot));
 	sn = amdxdna_cmd_get_payload(cmd_bo, &cmd_len);
 	if (!sn)
 		return -EINVAL;
@@ -1085,7 +1086,6 @@ aie2_cmdlist_fill_npu_dpu(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *si
 	if (npu_slot->cu_idx == INVALID_CU_IDX)
 		return -EINVAL;
 
-	memset(npu_slot, 0, sizeof(*npu_slot));
 	npu_slot->type = EXEC_NPU_TYPE_PARTIAL_ELF;
 	npu_slot->inst_buf_addr = sn->buffer;
 	npu_slot->inst_size = sn->buffer_size;
@@ -1105,6 +1105,7 @@ aie2_cmdlist_fill_npu_preempt(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t
 	u32 cmd_len;
 	u32 arg_sz;
 
+	memset(npu_slot, 0, sizeof(*npu_slot));
 	pd = amdxdna_cmd_get_payload(cmd_bo, &cmd_len);
 	if (!pd)
 		return -EINVAL;
@@ -1120,7 +1121,6 @@ aie2_cmdlist_fill_npu_preempt(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t
 	if (npu_slot->cu_idx == INVALID_CU_IDX)
 		return -EINVAL;
 
-	memset(npu_slot, 0, sizeof(*npu_slot));
 	npu_slot->type = EXEC_NPU_TYPE_PREEMPT;
 	npu_slot->inst_buf_addr = pd->inst_buf;
 	npu_slot->save_buf_addr = pd->save_buf;
@@ -1144,6 +1144,7 @@ aie2_cmdlist_fill_npu_elf(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *si
 	u32 cmd_len;
 	u32 arg_sz;
 
+	memset(npu_slot, 0, sizeof(*npu_slot));
 	pd = amdxdna_cmd_get_payload(cmd_bo, &cmd_len);
 	if (!pd)
 		return -EINVAL;
@@ -1155,7 +1156,6 @@ aie2_cmdlist_fill_npu_elf(struct amdxdna_gem_obj *cmd_bo, void *slot, size_t *si
 	if (*size < sizeof(*npu_slot) + arg_sz)
 		return -EINVAL;
 
-	memset(npu_slot, 0, sizeof(*npu_slot));
 	npu_slot->type = EXEC_NPU_TYPE_ELF;
 	npu_slot->inst_buf_addr = pd->inst_buf;
 	npu_slot->save_buf_addr = pd->save_buf;
@@ -1275,7 +1275,6 @@ aie2_cmdlist_get_cmd_buf(struct amdxdna_sched_job *job)
 
 	return job->ctx->priv->cmd_buf[idx];
 }
-
 
 int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		 int (*notify_cb)(void *, void __iomem *, size_t))
@@ -1513,6 +1512,43 @@ int aie2_config_debug_bo(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 	job->msg_id = msg.id;
 
 	return 0;
+}
+
+int aie2_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			  u32 context_id, u32 num_bufs)
+{
+	DECLARE_AIE2_MSG(get_coredump, MSG_OP_GET_COREDUMP);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	dma_addr_t addr;
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_GET_COREDUMP)) {
+		XDNA_DBG(xdna, "Get coredump unsupported for the device or firmware version");
+		return -EOPNOTSUPP;
+	}
+
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
+		return -EINVAL;
+	}
+
+	req.context_id = context_id;
+	req.num_bufs = num_bufs;
+	req.list_addr = addr;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		if (resp.status == AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID) {
+			XDNA_ERR(xdna, "Invalid buffer size(required 0x%x) for get coredump",
+				 resp.required_buffer_size);
+		} else {
+			XDNA_ERR(xdna, "Get coredump got status 0x%x", resp.status);
+		}
+		ret = -EINVAL;
+	}
+
+	return ret;
 }
 
 #ifdef AMDXDNA_DEVEL
