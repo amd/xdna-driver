@@ -385,7 +385,8 @@ struct context_health_info {
     xrt_core::query::context_health_info::smi_context_health val{};
     val.ctx_id = entry.context_id;
     val.pid = entry.pid;
-    val.health_data_v1 = new_entry;
+    val.health_data_raw.resize(sizeof(ert_ctx_health_data_v1));
+    memcpy(val.health_data_raw.data(), &new_entry, sizeof(new_entry));
     return val;
   }
   using result_type = std::any;
