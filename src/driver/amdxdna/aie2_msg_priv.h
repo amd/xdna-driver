@@ -730,12 +730,12 @@ struct get_app_health_resp {
 
 /* Do NOT put any firmware defined struct, enum etc. start from here */
 struct msg_op_ver {
-	u32			fw_minor;
+	u32			min_fw_version;  /* AIE2_FW_VERSION(major, minor) */
 	enum aie2_msg_opcode	op;
 };
 
 struct rt_cfg_ver {
-	u32			fw_minor;
+	u32			min_fw_version;  /* AIE2_FW_VERSION(major, minor) */
 	u32			type;
 };
 
