@@ -413,7 +413,7 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device>& sdev, arg
 {
   auto dev = sdev.get();
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
-  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
+  auto ext_boflags = dev_filter_is_aie4(id, dev) ? (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
   auto size = static_cast<size_t>(arg[0]);
 
   // Create ctx -> create bo -> destroy bo -> destroy ctx
@@ -766,7 +766,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_open_close_cu_context, {}
   },
   test_case{ "create_destroy_hw_queue", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_hw_queue, {}
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_hw_queue, {}
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
@@ -785,10 +785,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "create and free debug bo", {-1, -1},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x1000 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_debug_bo, { 0x1000 }
   },
   test_case{ "create and free large debug bo", {-1, -1},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x100000 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
@@ -806,7 +806,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_host, {}
+    TEST_POSITIVE, dev_filter_is_aie, TEST_cmd_fence_host, {}
   },
   test_case{ "npu3 shim move memory tiles", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_memtiles, {}
