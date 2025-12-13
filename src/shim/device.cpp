@@ -11,11 +11,14 @@
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
 #include "core/include/xclerr_int.h"
-#include <sys/syscall.h>
-#include <algorithm>
-#include <libgen.h>
-#include <limits.h>
+
 #include <dlfcn.h>
+#include <libgen.h>
+#include <linux/limits.h>
+#include <sys/syscall.h>
+
+#include <algorithm>
+#include <climits>
 #include <sstream>
 
 namespace {
@@ -23,7 +26,7 @@ namespace {
 namespace query = xrt_core::query;
 using key_type = query::key_type;
 
-std::string
+static std::string
 get_shim_lib_path()
 {
     Dl_info info;
@@ -36,7 +39,7 @@ get_shim_lib_path()
     return {};
 }
 
-std::string
+static std::string
 get_shim_data_dir()
 {
   return get_shim_lib_path() + "/../share/amdxdna/";
@@ -900,16 +903,16 @@ struct archive_path
       case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
       case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
       case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
-        return std::string(get_shim_data_dir() + "bins/xrt_smi_strx.a");
+        return std::string("amdxdna/bins/xrt_smi_strx.a");
       case xrt_core::smi::smi_hardware_config::hardware_type::phx:
-        return std::string(get_shim_data_dir() + "bins/xrt_smi_phx.a");
+        return std::string("amdxdna/bins/xrt_smi_phx.a");
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f1:
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f2:
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f3:
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B01:
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
-        return std::string(get_shim_data_dir() + "bins/xrt_smi_npu3.a");
+        return std::string("amdxdna/bins/xrt_smi_npu3.a");
       default:
         throw xrt_core::error("Unsupported hardware type");
       }
