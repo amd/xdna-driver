@@ -24,10 +24,10 @@
 #include "amdxdna_devel.h"
 #endif
 
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
-#else
+#ifdef HAVE_6_13_MODULE_IMPORT_NS
 MODULE_IMPORT_NS("DMA_BUF");
+#else
+MODULE_IMPORT_NS(DMA_BUF);
 #endif
 
 static int
@@ -287,10 +287,10 @@ void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
 	mutex_lock(&abo->lock);
 
 	if (!abo->mem.kva) {
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-		ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
-#else
+#ifdef HAVE_drm_gem_vmap_vunmap
 		ret = drm_gem_vmap(to_gobj(abo), &map);
+#else
+		ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
 #endif
 		if (ret)
 			XDNA_ERR(abo->client->xdna, "Vmap bo failed, ret %d", ret);
@@ -362,10 +362,10 @@ static void amdxdna_gem_vunmap(struct amdxdna_gem_obj *abo)
 		return;
 	}
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-	drm_gem_vunmap_unlocked(to_gobj(abo), &map);
-#else
+#ifdef HAVE_drm_gem_vmap_vunmap
 	drm_gem_vunmap(to_gobj(abo), &map);
+#else
+	drm_gem_vunmap_unlocked(to_gobj(abo), &map);
 #endif
 
 	abo->mem.kva = NULL;
@@ -646,7 +646,7 @@ static void amdxdna_gem_dev_obj_vunmap(struct drm_gem_object *obj, struct iosys_
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_cache_sgt_mapping
 	.cache_sgt_mapping = true,
 #endif
 	.attach = drm_gem_map_attach,
