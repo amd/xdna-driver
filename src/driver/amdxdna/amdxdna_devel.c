@@ -24,10 +24,10 @@ MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)"
 
 static bool is_iommu_off(struct amdxdna_dev *xdna)
 {
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-	return !iommu_present(xdna->ddev.dev->bus);
-#else
+#ifdef HAVE_device_iommu_mapped
 	return !device_iommu_mapped(xdna->ddev.dev);
+#else
+	return !iommu_present(xdna->ddev.dev->bus);
 #endif
 }
 
@@ -124,10 +124,7 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
 {
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-	struct drm_printer p = drm_debug_printer(NULL);
-#else
 	struct drm_printer p = drm_dbg_printer(&xdna->ddev, DRM_UT_DRIVER, NULL);
-#endif
+
 	drm_mm_print(&xdna->ddev.vma_offset_manager->vm_addr_space_mm, &p);
 }

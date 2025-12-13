@@ -8,3 +8,5 @@ CLEAN="@CLEAN_DRV@"
 @MODULE_DRV@
 
 AUTOINSTALL="yes"
+
+PRE_BUILD="./configure_kernel.sh"

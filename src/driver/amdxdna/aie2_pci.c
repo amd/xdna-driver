@@ -588,7 +588,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 		goto skip_pasid;
 #endif
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	ret = iommu_dev_enable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
 		XDNA_ERR(xdna, "Enable PASID failed, ret %d", ret);
@@ -633,7 +633,7 @@ skip_pasid:
 stop_hw:
 	aie2_hw_stop(xdna);
 disable_sva:
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 #endif
 free_irq:
@@ -657,7 +657,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 		goto skip_pasid;
 #endif
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 #endif
 

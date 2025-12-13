@@ -25,15 +25,9 @@ TRACE_EVENT(amdxdna_debug_point,
 			     __field(u64, number)
 			     __string(str, str)),
 
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-	    TP_fast_assign(__assign_str(name, name);
-			   __entry->number = number;
-			   __assign_str(str, str);),
-#else
 	    TP_fast_assign(__assign_str(name);
 			   __entry->number = number;
 			   __assign_str(str);),
-#endif
 
 	    TP_printk("%s:%llu %s", __get_str(name), __entry->number,
 		      __get_str(str))
@@ -52,13 +46,8 @@ TRACE_EVENT(xdna_job,
 			     __field(u64, seq)
 			     __field(u32, op)),
 
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-	    TP_fast_assign(__assign_str(name, name);
-			   __assign_str(str, str);
-#else
 	    TP_fast_assign(__assign_str(name);
 			   __assign_str(str);
-#endif
 			   __entry->fence_context = sched_job->s_fence->finished.context;
 			   __entry->fence_seqno = sched_job->s_fence->finished.seqno;
 			   __entry->seq = seq;
@@ -81,17 +70,10 @@ DECLARE_EVENT_CLASS(xdna_mbox_msg,
 				     __field(u32, opcode)
 				     __field(u32, msg_id)),
 
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-		    TP_fast_assign(__assign_str(name, name);
-				   __entry->chann_id = chann_id;
-				   __entry->opcode = opcode;
-				   __entry->msg_id = msg_id;),
-#else
 		    TP_fast_assign(__assign_str(name);
 				   __entry->chann_id = chann_id;
 				   __entry->opcode = opcode;
 				   __entry->msg_id = msg_id;),
-#endif
 
 		    TP_printk("%s.%d id 0x%x opcode 0x%x", __get_str(name),
 			      __entry->chann_id, __entry->msg_id, __entry->opcode)
@@ -115,13 +97,8 @@ DECLARE_EVENT_CLASS(xdna_mbox_name_id,
 		    TP_STRUCT__entry(__string(name, name)
 				     __field(int, irq)),
 
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-		    TP_fast_assign(__assign_str(name, name);
-				   __entry->irq = irq;),
-#else
 		    TP_fast_assign(__assign_str(name);
 				   __entry->irq = irq;),
-#endif
 
 		    TP_printk("%s.%d", __get_str(name), __entry->irq)
 );

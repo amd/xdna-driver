@@ -20,6 +20,7 @@ fi
 # Assuming dkms.conf and driver source are in the same directory as this script
 DRV_SRC_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 DKMS_CONF_FILE="${DRV_SRC_DIR}/dkms.conf"
+CONFIG_KERNEL_FILE="${DRV_SRC_DIR}/configure_kernel.sh"
 DRV_NAME=`cat ${DKMS_CONF_FILE} | grep 'BUILT_MODULE_NAME\[0\]' | cut -d= -f2`
 DKMS_PKG_NAME=`cat ${DKMS_CONF_FILE} | grep ^PACKAGE_NAME | awk -F= '{print $2}' | tr -d '"'`
 DKMS_PKG_VER=`cat ${DKMS_CONF_FILE} | grep ^PACKAGE_VERSION | awk -F= '{print $2}' | tr -d '"'`
@@ -47,8 +48,9 @@ if [[ $1 == "--install" ]]; then
 		echo "Failed to install driver source under ${DKMS_DRV_DIR}"
 		exit 1
 	fi
-	# Copy dkms.conf
+	# Copy dkms.conf and configure_kernel.sh
 	cp ${DKMS_CONF_FILE} .
+	cp ${CONFIG_KERNEL_FILE} .
 	# Enable DKMS for the driver
 	if [[ $verbose == 1 ]]; then
 		dkms install --verbose --force ${DKMS_DRV_MODULE_NAME}

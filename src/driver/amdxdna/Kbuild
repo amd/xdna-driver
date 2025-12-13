@@ -10,6 +10,8 @@ ccflags-y += -I$(ROOT)/
 ccflags-y += -I$(ROOT)/../../include/uapi
 # version.h
 ccflags-y += -I$(ROOT)/../../include
+# Make every C file in this dir see config-kernel.h
+ccflags-y += -include $(ROOT)/config_kernel.h
 
 # All warning will report as error and debug build
 ccflags-y += -g -Werror
