@@ -7,10 +7,14 @@
 
 /* NPU2 is the prototype of NPU4. It will be obsoleted in near future. */
 
+static const struct aie2_supported_fw_ver npu2_supported_fw_vers[] = {
+	{ .major = 6, .min_fw_version = AIE2_FW_VERSION(6, 6) },
+};
+
 const struct amdxdna_dev_priv npu2_dev_priv = {
-	.fw_path        = "amdnpu/17f0_00/npu.dev.sbin",
-	.protocol_major = 0x6,
-	.protocol_minor = 0x6,
+	.fw_path              = "amdnpu/17f0_00/npu.dev.sbin",
+	.supported_fw_vers    = npu2_supported_fw_vers,
+	.num_supported_fw_vers = ARRAY_SIZE(npu2_supported_fw_vers),
 	NPU4_COMMON_DEV_PRIV,
 };
 

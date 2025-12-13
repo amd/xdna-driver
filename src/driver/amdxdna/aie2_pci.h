@@ -32,6 +32,11 @@
 #define AIE2_INTERVAL	20000	/* us */
 #define AIE2_TIMEOUT	1000000	/* us */
 
+/* Firmware version encoding: major * 100 + minor */
+#define AIE2_FW_VERSION(major, minor)	((major) * 100 + (minor))
+#define AIE2_FW_MAJOR(version)		((version) / 100)
+#define AIE2_FW_MINOR(version)		((version) % 100)
+
 /* Firmware determines device memory base address and size */
 #define AIE2_DEVM_BASE	0x4000000
 #define AIE2_DEVM_SIZE	SZ_64M
@@ -334,8 +339,7 @@ struct amdxdna_dev_hdl {
 	struct psp_device		*psp_hdl;
 
 	struct xdna_mailbox_chann_info	mgmt_info;
-	u32				mgmt_prot_major;
-	u32				mgmt_prot_minor;
+	u32				mgmt_fw_version; /* Unified: major * 100 + minor */
 
 	u32				total_col;
 	struct aie_version		version;
@@ -398,6 +402,11 @@ struct aie2_hw_ops {
 	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 };
 
+struct aie2_supported_fw_ver {
+	u32 major;
+	u32 min_fw_version;  /* Combined: AIE2_FW_VERSION(major, min_minor) */
+};
+
 enum aie2_fw_feature {
 	AIE2_NPU_COMMAND,
 	AIE2_PREEMPT,
@@ -406,16 +415,16 @@ enum aie2_fw_feature {
 
 struct aie2_fw_feature_tbl {
 	enum aie2_fw_feature feature;
-	u32 max_minor;
-	u32 min_minor;
+	u32 min_fw_version;  /* AIE2_FW_VERSION(major, minor) */
+	u32 max_fw_version;  /* 0 = no upper limit */
 };
 
 #define AIE2_FEATURE_ON(ndev, feature)	test_bit(feature, &(ndev)->feature_mask)
 
 struct amdxdna_dev_priv {
 	const char			*fw_path;
-	u64				protocol_major;
-	u64				protocol_minor;
+	const struct aie2_supported_fw_ver *supported_fw_vers;
+	u32				num_supported_fw_vers;
 	const struct rt_config		*rt_config;
 	const struct dpm_clk_freq	*dpm_clk_tbl;
 	const struct msg_op_ver		*optional_msg;
