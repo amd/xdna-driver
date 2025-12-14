@@ -9,7 +9,9 @@
 #include "core/common/config_reader.h"
 #include "core/common/query_requests.h"
 #include "core/common/api/xclbin_int.h"
+#include "core/common/message.h"
 #include "core/common/xclbin_parser.h"
+
 #include "xdna_bo.h"
 #include "xdna_hwctx.h"
 #include "xdna_hwq.h"
@@ -17,6 +19,9 @@
 namespace shim_xdna_edge {
 
 namespace pt = boost::property_tree;
+
+// Minimum column alignment required by the driver (must be a multiple of this value)
+constexpr uint32_t MIN_COL_SUPPORT = 4;
 
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
 {
@@ -44,16 +49,19 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
 {
   partition_info info;
   info.start_column = 0;
-  info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address");
+  info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address", 0);
+  auto column_shift = aie_meta.get<uint8_t>("aie_metadata.driver_config.column_shift", 0);
 
   bool partinfo_found = false;
+  pid_t pid = getpid();
   auto data = xrt_core::device_query_default<xrt_core::query::aie_partition_info>(device, {});
   
   for (const auto& entry : data) {
-    if ( std::stoi(entry.metadata.id) == hw_context_id) {
+    if (entry.pid == pid && std::stoi(entry.metadata.id) == hw_context_id) {
       info.num_columns = entry.num_cols;
       info.start_column = entry.start_col;
       info.partition_id = (entry.num_cols << 8U) | (entry.start_col & 0xffU);
+      info.base_address += (info.start_column << column_shift);
       partinfo_found = true;
       break;
     }
@@ -69,11 +77,10 @@ partition_info
 get_partition_info_hw(const xrt_core::device* device, const xrt::uuid xclbin_uuid, uint32_t hw_context_id)
 {
   auto data = device->get_axlf_section(AIE_TRACE_METADATA, xclbin_uuid);
-  if (!data.first || !data.second)
-    return {};
-
   pt::ptree aie_meta;
-  read_aie_metadata_hw(data.first, data.second, aie_meta);
+  if (data.first && data.second)
+    read_aie_metadata_hw(data.first, data.second, aie_meta);
+
   return get_partition_info_main(device,aie_meta, hw_context_id);
 }
 
@@ -98,6 +105,12 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
 
   set_slotidx(arg.handle);
   m_info = get_partition_info_hw(m_device, xclbin.get_uuid(), arg.handle);
+  std::stringstream ss;
+  ss << "Partition Created with start_col "<<m_info.start_column
+          <<" num_columns "<<m_info.num_columns
+          <<" partition_id "<<m_info.partition_id;
+  xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_xdna", ss.str());
+
   set_doorbell(arg.umq_doorbell);
 
   auto data = m_device->get_axlf_section(AIE_TRACE_METADATA, xclbin.get_uuid());
@@ -152,6 +165,11 @@ xdna_hwctx::
       return;
 
     m_hwq->unbind_hwctx();
+
+    // Explicitly destroy the aie_array before destroying the hw context
+    if(m_aie_array)
+      m_aie_array.reset();
+
     struct amdxdna_drm_destroy_hwctx arg = {};
     arg.handle = m_handle;
     m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
@@ -252,7 +270,7 @@ get_hw_queue()
   return m_hwq.get();
 }
 
-void
+int
 xdna_hwctx::
 init_qos_info(const qos_type& qos)
 {
@@ -272,6 +290,30 @@ init_qos_info(const qos_type& qos)
     else if (key == "start_col")
       m_qos.user_start_col = value;
   }
+
+  // Validate user_start_col if specified
+  if (m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+    // Query total columns available on the device
+    auto total_cols = xrt_core::device_query<xrt_core::query::total_cols>(m_device);
+
+    // Check if start_col is aligned to MIN_COL_SUPPORT (must be multiple of 4)
+    if (m_qos.user_start_col % MIN_COL_SUPPORT != 0) {
+      throw xrt_core::system_error(EINVAL,
+        "Invalid start_col " + std::to_string(m_qos.user_start_col) +
+        ": must be a multiple of " + std::to_string(MIN_COL_SUPPORT) +
+        " (valid values: 0, 4, 8, ...)");
+    }
+
+    // Check if start_col exceeds maximum columns available
+    if (m_qos.user_start_col >= total_cols) {
+      throw xrt_core::system_error(ERANGE,
+        "Invalid start_col " + std::to_string(m_qos.user_start_col) +
+        ": exceeds maximum columns available on device (" +
+        std::to_string(total_cols) + ")");
+    }
+  }
+
+  return 0;
 }
 
 void

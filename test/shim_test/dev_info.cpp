@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "dev_info.h"
 
@@ -67,88 +67,44 @@ xclbin_info xclbin_infos[] = {
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:vadd", {0xffffffff} },
+      { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "npu3_workspace",
+    .workspace = "local_shim_test_data/elf_vadd_npu3",
     .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
+    .type = KERNEL_TYPE_TXN_FULL_ELF,
+  },
+  {
+    .name = "nop.elf",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .workspace = "local_shim_test_data/elf_no_op_npu3",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
   {
     .name = "vadd.elf",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:vadd", {0xffffffff} },
+      { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "npu3_workspace",
+    .workspace = "local_shim_test_data/elf_vadd_npu3",
     .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
+    .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
   {
-    .name = "move_memtiles.elf",
-    .device = npu3_device_id,
-    .revision_id = npu_any_revision_id,
-    .ip_name2idx = {
-      { "DPU:move_memtiles", {0xffffffff} },
-    },
-    .workspace = "npu3_workspace",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
-  },
-  {
-    .name = "move_memtiles.elf",
+    .name = "nop.elf",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:move_memtiles", {0xffffffff} },
+      { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "npu3_workspace",
+    .workspace = "local_shim_test_data/elf_no_op_npu3",
     .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
-  },
-  {
-    .name = "ddr_memtile.elf",
-    .device = npu3_device_id,
-    .revision_id = npu_any_revision_id,
-    .ip_name2idx = {
-      { "DPU:move_ddr_memtile", {0xffffffff} },
-    },
-    .workspace = "npu3_workspace",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
-  },
-  {
-    .name = "ddr_memtile.elf",
-    .device = npu3_device_id1,
-    .revision_id = npu_any_revision_id,
-    .ip_name2idx = {
-      { "DPU:move_ddr_memtile", {0xffffffff} },
-    },
-    .workspace = "npu3_workspace",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
-  },
-  {
-    .name = "remote_barrier.elf",
-    .device = npu3_device_id,
-    .revision_id = npu_any_revision_id,
-    .ip_name2idx = {
-      { "DPU:remote_barrier", {0xffffffff} },
-    },
-    .workspace = "npu3_workspace",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
-  },
-  {
-    .name = "remote_barrier.elf",
-    .device = npu3_device_id1,
-    .revision_id = npu_any_revision_id,
-    .ip_name2idx = {
-      { "DPU:remote_barrier", {0xffffffff} },
-    },
-    .workspace = "npu3_workspace",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
+    .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
   {
     .name = "1x4.xclbin",
@@ -264,13 +220,13 @@ xclbin_info xclbin_infos[] = {
     .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
   },
   {
-    .name = "timeout.xclbin",
+    .name = "bad_txn.xclbin",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {0} },
     },
-    .workspace = "local_shim_test_data/elf_no_cp_timeout_npu4",
+    .workspace = "local_shim_test_data/elf_no_cp_bad_txn_npu4",
     .data = "",
     .type = KERNEL_TYPE_TXN,
   },
@@ -285,6 +241,29 @@ xclbin_info xclbin_infos[] = {
     .data = "",
     .type = KERNEL_TYPE_TXN,
   },
+  {
+    .name = "nop.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {1} },
+    },
+    .workspace = "local_shim_test_data/elf_no_op_npu4",
+    .data = "",
+    .type = KERNEL_TYPE_TXN,
+  },
+  {
+    .name = "nop.xclbin",
+    .device = npu1_device_id,
+    .revision_id = npu1_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {1} },
+    },
+    .workspace = "local_shim_test_data/elf_no_op_npu1",
+    .data = "",
+    .type = KERNEL_TYPE_TXN,
+  },
+
 };
 
 }
@@ -350,10 +329,4 @@ const std::map<const char*, cuidx_type>&
 get_xclbin_ip_name2index(device* dev, const char *xclbin_name)
 {
   return get_xclbin_info(dev, xclbin_name).ip_name2idx;
-}
-
-std::string
-get_preemption_libs_path()
-{
-  return cur_path + "/../" + "preemption_libs" + "/";
 }

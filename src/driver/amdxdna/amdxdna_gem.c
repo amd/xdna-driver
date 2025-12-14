@@ -24,11 +24,23 @@
 #include "amdxdna_devel.h"
 #endif
 
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
-#else
+#ifdef HAVE_6_13_MODULE_IMPORT_NS
 MODULE_IMPORT_NS("DMA_BUF");
+#else
+MODULE_IMPORT_NS(DMA_BUF);
 #endif
+
+/*
+ * Safe wrapper for PAGE_ALIGN that checks for integer overflow.
+ * Returns 0 on overflow or invalid size, otherwise returns the aligned size.
+ */
+static inline size_t amdxdna_page_align(__u64 size)
+{
+	if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1))
+		return 0;
+
+	return PAGE_ALIGN(size);
+}
 
 static int
 amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
@@ -257,6 +269,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	abo->assigned_ctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_init(&abo->lock);
 	abo->mem.size = size;
+	abo->mem.dma_addr = AMDXDNA_INVALID_ADDR;
 	INIT_LIST_HEAD(&abo->mem.umap_list);
 
 	return abo;
@@ -287,10 +300,10 @@ void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
 	mutex_lock(&abo->lock);
 
 	if (!abo->mem.kva) {
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-		ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
-#else
+#ifdef HAVE_drm_gem_vmap_vunmap
 		ret = drm_gem_vmap(to_gobj(abo), &map);
+#else
+		ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
 #endif
 		if (ret)
 			XDNA_ERR(abo->client->xdna, "Vmap bo failed, ret %d", ret);
@@ -362,10 +375,10 @@ static void amdxdna_gem_vunmap(struct amdxdna_gem_obj *abo)
 		return;
 	}
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-	drm_gem_vunmap_unlocked(to_gobj(abo), &map);
-#else
+#ifdef HAVE_drm_gem_vmap_vunmap
 	drm_gem_vunmap(to_gobj(abo), &map);
+#else
+	drm_gem_vunmap_unlocked(to_gobj(abo), &map);
 #endif
 
 	abo->mem.kva = NULL;
@@ -460,6 +473,9 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 	if (abo->type == AMDXDNA_BO_DEV_HEAP)
 		drm_mm_takedown(&abo->mm);
 
+	if (amdxdna_iova_enabled(xdna))
+		amdxdna_iommu_unmap_bo(xdna, abo);
+
 	amdxdna_gem_vunmap(abo);
 	mutex_destroy(&abo->lock);
 
@@ -518,19 +534,28 @@ static int amdxdna_gem_shmem_insert_pages(struct amdxdna_gem_obj *abo,
 		return ret;
 	}
 
-	do {
-		vm_fault_t fault_ret;
+	/*
+	 * The per-page fault loop is needed for SVM to immediately populate PTEs.
+	 * Without SVM (notifier_wq == NULL), dma_buf_mmap() already set up the
+	 * mapping and we can skip the redundant per-page faulting.
+	 */
+	if (!xdna->notifier_wq) {
+		XDNA_DBG(xdna, "No SVM, skip per-page fault");
+	} else {
+		do {
+			vm_fault_t fault_ret;
 
-		fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
-					    FAULT_FLAG_WRITE, NULL);
-		if (fault_ret & VM_FAULT_ERROR) {
-			vma->vm_ops->close(vma);
-			XDNA_ERR(xdna, "Fault in page failed");
-			return -EFAULT;
-		}
+			fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
+						    FAULT_FLAG_WRITE, NULL);
+			if (fault_ret & VM_FAULT_ERROR) {
+				vma->vm_ops->close(vma);
+				XDNA_ERR(xdna, "Fault in page failed");
+				return -EFAULT;
+			}
 
-		offset += PAGE_SIZE;
-	} while (--num_pages);
+			offset += PAGE_SIZE;
+		} while (--num_pages);
+	}
 
 	/* Drop the reference drm_gem_mmap_obj() acquired.*/
 	drm_gem_object_put(to_gobj(abo));
@@ -646,7 +671,7 @@ static void amdxdna_gem_dev_obj_vunmap(struct drm_gem_object *obj, struct iosys_
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_cache_sgt_mapping
 	.cache_sgt_mapping = true,
 #endif
 	.attach = drm_gem_map_attach,
@@ -742,10 +767,15 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_carvedout_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	size_t size = PAGE_ALIGN(args->size);
+	size_t size = amdxdna_page_align(args->size);
 	struct drm_gem_object *gobj;
 	struct dma_buf *dma_buf;
 	u64 align = (args->type == AMDXDNA_BO_DEV_HEAP) ?  xdna->dev_info->dev_mem_size : 0;
+
+	if (!size) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
 
 	dma_buf = amdxdna_get_carvedout_buf(dev, size, align);
 	if (IS_ERR(dma_buf))
@@ -766,16 +796,24 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	size_t size = PAGE_ALIGN(args->size);
+	size_t size = amdxdna_page_align(args->size);
 	struct drm_gem_object *gobj;
 	struct dma_buf *dma_buf;
 
 	if (args->type == AMDXDNA_BO_DEV_HEAP) {
 		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
-	dma_buf = amdxdna_get_cma_buf(dev, size);
+	if (!size) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
+
+	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna->cma_region_devs,
+						    MAX_MEM_REGIONS,
+						    dev->dev, size,
+						    args->flags);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
@@ -884,15 +922,14 @@ static struct amdxdna_gem_obj *
 amdxdna_drm_create_share_bo(struct drm_device *dev,
 			    struct amdxdna_drm_create_bo *args, struct drm_file *filp)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_gem_obj *abo;
 
 	if (args->vaddr)
 		abo = amdxdna_gem_create_user_object(dev, args);
 #ifdef AMDXDNA_DEVEL
-	else if (is_iommu_off(xdna) && amdxdna_use_cma())
+	else if (amdxdna_use_cma())
 		abo = amdxdna_gem_create_cma_object(dev, args);
-	else if (is_iommu_off(xdna) && amdxdna_use_carvedout())
+	else if (amdxdna_use_carvedout())
 		abo = amdxdna_gem_create_carvedout_object(dev, args);
 #endif
 	else
@@ -964,10 +1001,15 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	size_t aligned_sz = PAGE_ALIGN(args->size);
+	size_t aligned_sz = amdxdna_page_align(args->size);
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 	int ret;
+
+	if (!aligned_sz) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
 
 	abo = amdxdna_gem_create_obj(dev, aligned_sz);
 	if (IS_ERR(abo))
@@ -997,9 +1039,6 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_drm_create_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	int ret;
-
-	if (args->flags)
-		return -EINVAL;
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
@@ -1212,7 +1251,9 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	}
 	abo = to_xdna_obj(gobj);
 
-	if (gobj->size < args->offset + args->size) {
+	if (gobj->size < args->offset ||
+	    gobj->size < args->size   ||
+	    args->offset > gobj->size - args->size) {
 		ret = -EINVAL;
 		goto put_obj;
 	}

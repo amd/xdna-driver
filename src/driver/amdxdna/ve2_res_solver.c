@@ -208,26 +208,31 @@ static int allocate_partition_exclusive(struct solver_state *xrs,
 /**
  * find_least_used_partition - Find least shared partition for given col and ncols
  * @xrs: Solver state
- * @col: Starting column
- * @ncols: Number of columns
+ * @node: Solver node
+ * @ncols: Number of columns requested
  *
  * Skips exclusive partitions and returns the one with minimum nshared count.
  *
  * Returns: Pointer to least-used partition or NULL if none found.
  */
 static inline struct partition_node *find_least_used_partition(struct solver_state *xrs,
-							       u32 col, u32 ncols)
+							       struct solver_node *snode, u32 ncols)
 {
 	struct partition_node *pt_node;
 	struct partition_node *least_used = NULL;
+	int idx;
+	u32 candidate_col;
 
-	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
-		/* Only consider non-exclusive partitions matching col and ncols */
-		if (!pt_node->exclusive &&
-		    pt_node->start_col == col &&
-		    pt_node->ncols == ncols) {
-			if (!least_used || pt_node->nshared < least_used->nshared)
-				least_used = pt_node;
+	for (idx = 0; idx < snode->cols_len; idx++) {
+		candidate_col = snode->start_cols[idx];
+		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
+			/* Only consider non-exclusive partitions matching col and ncols */
+			if (!pt_node->exclusive &&
+			    pt_node->start_col == candidate_col &&
+			    pt_node->ncols == ncols) {
+				if (!least_used || pt_node->nshared < least_used->nshared)
+					least_used = pt_node;
+			}
 		}
 	}
 
@@ -339,12 +344,7 @@ static int allocate_partition_shared(struct solver_state *xrs,
 
 	/* STEP 3: Reuse least-used partition */
 	if (req->rqos.user_start_col == USER_START_COL_NOT_REQUESTED) {
-		for (idx = 0; idx < snode->cols_len; idx++) {
-			candidate_col = snode->start_cols[idx];
-			least_used = find_least_used_partition(xrs, candidate_col, ncols);
-			if (least_used)
-				break;
-		}
+		least_used = find_least_used_partition(xrs, snode, ncols);
 	} else {
 		candidate_col = req->rqos.user_start_col;
 		list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
@@ -486,8 +486,9 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct xrs_acti
 		return PTR_ERR(snode);
 
 	fill_load_action(xrs, snode, load_act);
-	drm_dbg(xrs->cfg.ddev, "start col %d ncols %d\n", snode->pt_node->start_col,
-		snode->pt_node->ncols);
+	drm_dbg(xrs->cfg.ddev, "start col %d ncols %d is exclusive ? %s\n",
+		snode->pt_node->start_col, snode->pt_node->ncols,
+		req->rqos.exclusive ? "true" : "false");
 
 	return 0;
 }

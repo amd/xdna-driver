@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
-
 #include <boost/format.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -533,6 +532,41 @@ struct total_cols
   }
 };
 
+struct clock_topology
+{
+  using result_type = query::clock_freq_topology_raw::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_clock_metadata clock_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+      .buffer_size = sizeof(clock_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    std::vector<clock_freq> clocks;
+    clock_freq aie_clock;
+    strncpy(aie_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name),
+	     sizeof(aie_clock.m_name) - 1);
+    aie_clock.m_type = CT_SYSTEM;
+    aie_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
+    clocks.push_back(aie_clock);
+
+    std::vector<char> payload(sizeof(int16_t) + (clocks.size() * sizeof(struct clock_freq)));
+    auto data = reinterpret_cast<struct clock_freq_topology*>(payload.data());
+    data->m_count = clocks.size();
+    memcpy(data->m_clock_freq, clocks.data(), (clocks.size() * sizeof(struct clock_freq)));
+
+    return payload;
+  }
+};
+
 struct xclbin_slots
 {
   using result_type = query::xclbin_slots::result_type;
@@ -580,6 +614,81 @@ struct xclbin_slots
     //data.uuid = "393ef246-8fca-29b2-2085-ab98489b3c87";
     //xclbin_data.push_back(std::move(data));
     return xclbin_data;
+  }
+};
+
+struct xocl_errors
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::xocl_errors)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    amdxdna_async_error* data;
+    const uint32_t drv_output = sizeof(*data);
+    std::vector<char> payload(drv_output);
+    // Only request last async error
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_LAST_ASYNC_ERR,
+      .element_size = sizeof(*data),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+
+    uint32_t data_size = 0;
+    data_size = arg.num_element;
+    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    query::xocl_errors::result_type output(sizeof(xcl_errors));
+    xcl_errors *out_xcl_errors = reinterpret_cast<xcl_errors*>(output.data());
+    if (arg.num_element > 1)
+      throw xrt_core::query::exception("Driver returned more than one async error entry");
+
+    out_xcl_errors->num_err = arg.num_element;
+
+    // Dump errors to stderr if any found
+    if (arg.num_element > 0) {
+      for (uint32_t i = 0; i < arg.num_element; i++) {
+        out_xcl_errors->errors[i].err_code = data[i].err_code;
+        out_xcl_errors->errors[i].ts = data[i].ts_us;
+        out_xcl_errors->errors[i].ex_error_code = data[i].ex_err_code;
+#if 0
+        // Dump detailed error information to stderr
+        std::cerr << "Error[" << i << "]:\n";
+
+        // Decode error code components
+        uint64_t err_code = data[i].err_code;
+        uint16_t err_num = (err_code >> 0) & 0xFFFF;
+        uint8_t err_driver = (err_code >> 16) & 0xF;
+        uint8_t err_severity = (err_code >> 24) & 0xF;
+        uint8_t err_module = (err_code >> 32) & 0xF;
+        uint8_t err_class = (err_code >> 40) & 0xF;
+
+        std::cerr << "  Error Code (combined): 0x" << std::hex << err_code << std::dec << "\n";
+        std::cerr << "    Error Number: " << err_num << "\n";
+        std::cerr << "    Error Driver: " << static_cast<int>(err_driver) << "\n";
+        std::cerr << "    Error Severity: " << static_cast<int>(err_severity) << "\n";
+        std::cerr << "    Error Module: " << static_cast<int>(err_module) << "\n";
+        std::cerr << "    Error Class: " << static_cast<int>(err_class) << "\n";
+        std::cerr << "  Timestamp (us): " << data[i].ts_us << "\n";
+        std::cerr << "  Extra Error Code: 0x" << std::hex << data[i].ex_err_code << std::dec << "\n";
+
+        // Decode extra error code (tile location)
+        uint8_t row = (data[i].ex_err_code >> 8) & 0xF;
+        uint8_t col = data[i].ex_err_code & 0xF;
+        std::cerr << "  Tile Location: Row=" << static_cast<int>(row)
+                   << ", Col=" << static_cast<int>(col) << "\n";
+#endif
+      }
+    }
+
+    return output;
   }
 };
 
@@ -768,6 +877,8 @@ initialize_query_table()
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();
   emplace_func0_request<query::archive_path,            archive_path>();
+  emplace_func0_request<query::xocl_errors,             xocl_errors>();
+  emplace_func0_request<query::clock_freq_topology_raw, clock_topology>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func1_request<query::aie_read,                aie_read>();
   emplace_func1_request<query::aie_write,               aie_write>();

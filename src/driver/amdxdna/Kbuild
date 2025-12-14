@@ -10,15 +10,20 @@ ccflags-y += -I$(ROOT)/
 ccflags-y += -I$(ROOT)/../../include/uapi
 # version.h
 ccflags-y += -I$(ROOT)/../../include
+# Make every C file in this dir see config-kernel.h
+ccflags-y += -include $(ROOT)/config_kernel.h
 
 # All warning will report as error and debug build
 ccflags-y += -g -Werror
+
+ccflags-${UMQ_HELLO_TEST} += -DUMQ_HELLO_TEST
 
 obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
 	amdxdna_dpt.o \
 	amdxdna_drm.o \
+	amdxdna_iommu.o \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \
@@ -42,8 +47,21 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_ctx_runqueue.o \
 	aie2_pm.o \
 	aie2_pci.o \
+	aie4_smu.o \
+	aie4_psp.o \
+	aie4_hwctx.o \
+	aie4_debugfs.o \
+	aie4_devel.o \
+	aie4_error.o \
+	aie4_pm.o \
+	aie4_dpt.o \
+	aie4_message.o \
+	aie4_pci.o \
+	aie4_solver.o \
+	aie4_sriov.o \
 	npu1_regs.o \
 	npu2_regs.o \
+	npu3_regs.o \
 	npu4_regs.o \
 	npu5_regs.o \
 	npu6_regs.o \

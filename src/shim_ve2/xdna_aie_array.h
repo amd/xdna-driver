@@ -28,6 +28,7 @@ public:
 	XAie_DevInst *get_dev();
    adf::driver_config get_driver_config_hwctx(const xrt_core::device* device, const xdna_hwctx* hwctx);
 private:
+  int get_aie_partition_fd(const xdna_hwctx* hwctx_obj);
   int num_cols;
   int fd;
   XAie_DevInst* dev_inst;         // AIE Device Instance pointer

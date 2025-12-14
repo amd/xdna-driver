@@ -5,11 +5,17 @@
 #include <linux/device.h>
 #include <linux/version.h>
 #include <linux/vmalloc.h>
+#include <linux/completion.h>
+#include <linux/jiffies.h>
+#include <linux/sched.h>
+#include <linux/fdtable.h>
 
 #include "ve2_fw.h"
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
+#include "amdxdna_error.h"
+#include "amdxdna_drm.h"
 
 static int ve2_query_ctx_status_array(struct amdxdna_client *client,
 				      struct amdxdna_drm_hwctx_entry *tmp,
@@ -195,9 +201,9 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	}
 
 	/* Validate row */
-	if (footer.row >= MAX_ROW) {
+	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
 		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
-			 footer.row, MAX_ROW);
+			 footer.row, xdna->dev_handle->aie_dev_info.rows);
 		return -EINVAL;
 	}
 
@@ -285,9 +291,9 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	}
 
 	/* Validate row */
-	if (footer.row >= MAX_ROW) {
+	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
 		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
-			 footer.row, MAX_ROW);
+			 footer.row, xdna->dev_handle->aie_dev_info.rows);
 		return -EINVAL;
 	}
 
@@ -367,8 +373,7 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		 hwctx->client->pid, hwctx->id, hwctx->start_col,
 		 hwctx->num_col);
 
-	// TODO: Replace MAX_ROW with dynamic value from aie_get_device_info()
-	rel_size = hwctx->priv->num_col * MAX_ROW * TILE_ADDRESS_SPACE;
+	rel_size = hwctx->priv->num_col * xdna->dev_handle->aie_dev_info.rows * TILE_ADDRESS_SPACE;
 	if (rel_size > buf_size) {
 		XDNA_DBG(xdna, "Invalid buffer size:%d (rel_size:%d)\n", buf_size, rel_size);
 		args->element_size = rel_size;
@@ -442,6 +447,106 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 	return ret;
 }
 
+static int ve2_get_clock_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_clock_metadata clock_metadata = {};
+	struct aie_partition_req part_req = { 0 };
+	struct xrs_action_load action = {};
+	struct alloc_requests req = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct device *aie_dev = NULL;
+	struct solver_state *xrs = NULL;
+	unsigned long ctx_id;
+	u32 partition_id;
+	u32 num_cols = MIN_COL_SUPPORT;
+	u64 aie_freq = 0;
+	int ret, idx;
+
+	if (args->buffer_size != sizeof(clock_metadata)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u, Expected: %lu",
+			 args->buffer_size, sizeof(clock_metadata));
+		return -EINVAL;
+	}
+
+	/* Search for existing context with AIE partition across all clients */
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, ctx_id, hwctx) {
+			if (hwctx && hwctx->priv && hwctx->priv->aie_dev) {
+				aie_dev = hwctx->priv->aie_dev;
+				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+				ret = aie_partition_get_freq(aie_dev, &aie_freq);
+				if (ret) {
+					XDNA_ERR(xdna, "Failed to read AIE frequency: %d", ret);
+					return ret;
+				}
+				goto fill_metadata;
+			}
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	/* No existing context - allocate temporary partition using resolver */
+	req.cdo.ncols = num_cols;
+	ret = ve2_xrs_col_list(xdna, &req, num_cols);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to build column list: %d", ret);
+		return ret;
+	}
+	req.rid = (u64)client;
+	req.rqos.user_start_col = USER_START_COL_NOT_REQUESTED;
+
+	xrs = (struct solver_state *)xdna->dev_handle->xrs_hdl;
+	mutex_lock(&xrs->xrs_lock);
+	ret = xrs_allocate_resource(xdna->dev_handle->xrs_hdl, &req, &action);
+	mutex_unlock(&xrs->xrs_lock);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to allocate temporary partition: %d", ret);
+		kfree(req.cdo.start_cols);
+		return ret;
+	}
+	partition_id = aie_calc_part_id(action.part.start_col, action.part.ncols);
+	part_req.partition_id = partition_id;
+	aie_dev = aie_partition_request(&part_req);
+	if (IS_ERR(aie_dev)) {
+		ret = PTR_ERR(aie_dev);
+
+		mutex_lock(&xrs->xrs_lock);
+		xrs_release_resource(xdna->dev_handle->xrs_hdl, req.rid, &action);
+		mutex_unlock(&xrs->xrs_lock);
+
+		kfree(req.cdo.start_cols);
+		XDNA_ERR(xdna, "Failed to request AIE partition %u: %d", partition_id, ret);
+		return ret;
+	}
+	ret = aie_partition_get_freq(aie_dev, &aie_freq);
+	aie_partition_release(aie_dev);
+
+	mutex_lock(&xrs->xrs_lock);
+	xrs_release_resource(xdna->dev_handle->xrs_hdl, req.rid, &action);
+	mutex_unlock(&xrs->xrs_lock);
+
+	kfree(req.cdo.start_cols);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to read AIE frequency: %d", ret);
+		return ret;
+	}
+
+fill_metadata:
+	strscpy(clock_metadata.mp_npu_clock.name, "AIE Clock");
+	clock_metadata.mp_npu_clock.freq_mhz = (u16)(aie_freq / 1000000);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &clock_metadata, sizeof(clock_metadata))) {
+		XDNA_ERR(xdna, "Failed to copy clock metadata to user");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -460,14 +565,160 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = ve2_get_total_col(client, args);
 		break;
+	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
+		ret = ve2_get_clock_metadata(client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
+		break;
 	}
 
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
+	return ret;
+}
+
+static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_async_error tmp;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_dev_hdl *hdl = xdna->dev_handle;
+	int ret = 0;
+	u32 i, max_idx;
+	/* 50ms to wait for callback to start */
+	unsigned long poll_timeout = msecs_to_jiffies(50);
+	/* 100ms timeout for callback completion */
+	unsigned long wait_timeout = msecs_to_jiffies(100);
+
+	/* Set num_element to 0 to indicate no errors */
+	args->num_element = 0;
+
+	/* Check if dev_handle and ve2_mgmtctx are valid */
+	if (!hdl || !hdl->ve2_mgmtctx)
+		return 0;
+
+	/* Wait for any pending error callbacks to complete before reading cached errors.
+	 * This ensures async errors are cached before we query for them.
+	 * The error callback may start after command completion, so we poll briefly
+	 * to catch cases where it starts shortly after the query.
+	 */
+	max_idx = min_t(u32, hdl->hwctx_limit, hdl->aie_dev_info.cols);
+	for (i = 0; i < max_idx; i++) {
+		mgmtctx = &hdl->ve2_mgmtctx[i];
+		/* Check if mgmtctx is initialized */
+		if (!mgmtctx->xdna)
+			continue;
+
+		/* Check if mgmt_aiedev is valid before checking callback status */
+		mutex_lock(&mgmtctx->ctx_lock);
+		if (!mgmtctx->mgmt_aiedev) {
+			mutex_unlock(&mgmtctx->ctx_lock);
+			continue;
+		}
+		mutex_unlock(&mgmtctx->ctx_lock);
+
+		/* Poll briefly to see if error callback starts */
+		unsigned long poll_start = jiffies;
+		bool callback_started = false;
+
+		while (time_before(jiffies, poll_start + poll_timeout)) {
+			if (atomic_read(&mgmtctx->error_cb_in_progress)) {
+				callback_started = true;
+				break;
+			}
+			/* Small delay to avoid busy waiting */
+			schedule_timeout_uninterruptible(msecs_to_jiffies(1));
+		}
+
+		/* If callback started (or was already in progress), wait for it to complete */
+		if (callback_started || atomic_read(&mgmtctx->error_cb_in_progress)) {
+			XDNA_DBG(xdna, "Waiting for error callback to complete on mgmtctx[%u]", i);
+			if (wait_for_completion_timeout(&mgmtctx->error_cb_completion,
+							wait_timeout) == 0) {
+				XDNA_WARN(xdna, "Timeout waiting for err callback completion\n");
+			}
+		}
+	}
+
+	/* Find the first mgmtctx with a cached error */
+	/* Use min of hwctx_limit and cols to prevent out-of-bounds access */
+	max_idx = min_t(u32, hdl->hwctx_limit, hdl->aie_dev_info.cols);
+	for (i = 0; i < max_idx; i++) {
+		mgmtctx = &hdl->ve2_mgmtctx[i];
+		/* Check if mgmtctx is initialized */
+		if (!mgmtctx->xdna)
+			continue;
+
+		/* Lock ctx_lock first to ensure mgmtctx structure is stable */
+		mutex_lock(&mgmtctx->ctx_lock);
+		/* Re-check mgmt_aiedev after acquiring lock to ensure it's still valid */
+		if (!mgmtctx->mgmt_aiedev) {
+			mutex_unlock(&mgmtctx->ctx_lock);
+			continue;
+		}
+
+		/* Now lock async_errs_cache to access error data */
+		mutex_lock(&mgmtctx->async_errs_cache.lock);
+		if (mgmtctx->async_errs_cache.err.err_code) {
+			args->num_element++;
+			memcpy(&tmp, &mgmtctx->async_errs_cache.err, sizeof(tmp));
+			mutex_unlock(&mgmtctx->async_errs_cache.lock);
+			mutex_unlock(&mgmtctx->ctx_lock);
+			ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), 1);
+			return ret;
+		}
+		mutex_unlock(&mgmtctx->async_errs_cache.lock);
+		mutex_unlock(&mgmtctx->ctx_lock);
+	}
+
+	return 0;
+}
+
+static int ve2_get_aie_part_fd(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_ctx_priv *nhwctx;
+	struct amdxdna_ctx *ctx;
+	u32 hwctx_handle;
+	int srcu_idx;
+	int ret = 0;
+	int aie_fd;
+
+	hwctx_handle = args->num_element;
+	srcu_idx = srcu_read_lock(&client->ctx_srcu);
+	ctx = xa_load(&client->ctx_xa, hwctx_handle);
+	if (!ctx) {
+		XDNA_ERR(xdna, "Failed to get ctx %u", hwctx_handle);
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	nhwctx = ctx->priv;
+	if (!nhwctx || !nhwctx->aie_dev) {
+		XDNA_ERR(xdna, "AIE partition not available for hwctx %p", ctx);
+		ret = -ENODEV;
+		goto unlock;
+	}
+
+	aie_fd = aie_partition_get_fd(nhwctx->aie_dev);
+	if (aie_fd < 0) {
+		XDNA_ERR(xdna, "Failed to get AIE partition FD: %d", aie_fd);
+		ret = aie_fd;
+		goto unlock;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &aie_fd, sizeof(aie_fd))) {
+		XDNA_ERR(xdna, "Failed to copy AIE partition FD to user");
+		close_fd(aie_fd);
+		ret = -EFAULT;
+		goto unlock;
+	}
+
+unlock:
+	srcu_read_unlock(&client->ctx_srcu, srcu_idx);
 	return ret;
 }
 
@@ -492,9 +743,16 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	case DRM_AMDXDNA_AIE_TILE_READ:
 		ret = ve2_aie_read(client, args);
 		break;
+	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		ret = ve2_get_array_async_error(xdna, args);
+		break;
+	case DRM_AMDXDNA_HWCTX_AIE_PART_FD:
+		ret = ve2_get_aie_part_fd(client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
+		break;
 	}
 
 	mutex_unlock(&xdna->dev_lock);
@@ -521,6 +779,7 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
+		break;
 	}
 
 	mutex_unlock(&xdna->dev_lock);

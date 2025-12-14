@@ -238,6 +238,7 @@ xdna_bo::
 alloc_bo()
 {
   amdxdna_drm_create_bo cbo = {
+    .flags = m_flags,
     .size = m_aligned_size,
     .type = m_type,
   };

@@ -11,6 +11,7 @@
 #include <drm/drm_print.h>
 #include <drm/drm_file.h>
 #include <linux/hmm.h>
+#include <linux/iova.h>
 #include <linux/timekeeping.h>
 #include <linux/workqueue.h>
 #include <linux/seqlock_types.h>
@@ -19,10 +20,13 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
 
+#define MAX_MEM_REGIONS	16
+
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
-#define XDNA_WARN(xdna, fmt, args...)	dev_warn((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
+#define XDNA_WARN(xdna, fmt, args...) \
+	dev_warn((xdna)->ddev.dev, "%s: " fmt, __func__, ##args)
 #define XDNA_ERR(xdna, fmt, args...) \
-	dev_err_ratelimited((xdna)->ddev.dev, "%s: "fmt, __func__, ##args)
+	dev_err_ratelimited((xdna)->ddev.dev, "%s: " fmt, __func__, ##args)
 #define XDNA_DBG(xdna, fmt, args...)	dev_dbg((xdna)->ddev.dev, fmt, ##args)
 
 #define XDNA_INFO_ONCE(xdna, fmt, args...)	dev_info_once((xdna)->ddev.dev, fmt, ##args)
@@ -44,12 +48,14 @@ struct amdxdna_mgmt_dma_hdl;
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);
 	void (*fini)(struct amdxdna_dev *xdna);
+	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 	void (*tdr_start)(struct amdxdna_dev *xdna);
 	void (*tdr_stop)(struct amdxdna_dev *xdna);
 	int (*resume)(struct amdxdna_dev *xdna);
 	void (*suspend)(struct amdxdna_dev *xdna);
 	void (*reset_prepare)(struct amdxdna_dev *xdna);
 	int (*reset_done)(struct amdxdna_dev *xdna);
+	int (*sriov_configure)(struct amdxdna_dev *xdna, int num_vfs);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);
@@ -75,6 +81,12 @@ struct amdxdna_dev_ops {
 	struct dma_fence *(*cmd_get_out_fence)(struct amdxdna_ctx *ctx, u64 seq);
 };
 
+/* Revision to VBNV string mapping table entry */
+struct amdxdna_rev_vbnv {
+	u32		revision;
+	const char	*vbnv;
+};
+
 /*
  * struct amdxdna_dev_info - Device hardware information
  * Record device static information, like reg, mbox, PSP, SMU bar index,
@@ -89,7 +101,10 @@ struct amdxdna_dev_ops {
  * @dev_mem_buf_shift: heap buffer alignment shift
  * @dev_mem_base: Base address of device heap memory
  * @dev_mem_size: Size of device heap memory
- * @vbnv: the VBNV string
+ * @default_vbnv: Default board name based on PCIe device ID. Different boards
+ *                may share the same PCIe device ID, so this may not accurately
+ *                identify the board. Used as fallback when firmware query fails.
+ * @rev_vbnv_tbl: Table mapping device revision to VBNV string (NULL terminated)
  * @dev_priv: Device private data
  * @ops: Device operations callback
  */
@@ -104,7 +119,8 @@ struct amdxdna_dev_info {
 	u32				dev_mem_buf_shift;
 	u64				dev_mem_base;
 	size_t				dev_mem_size;
-	char				*vbnv;
+	char				*default_vbnv;
+	const struct amdxdna_rev_vbnv	*rev_vbnv_tbl;
 	const struct amdxdna_dev_priv	*dev_priv;
 	const struct amdxdna_dev_ops	*ops;
 };
@@ -121,6 +137,9 @@ struct amdxdna_dev {
 	struct amdxdna_dev_hdl		*dev_handle;
 	const struct amdxdna_dev_info	*dev_info;
 
+	/* Accurate board name queried from firmware, or default_vbnv as fallback */
+	const char			*vbnv;
+
 	/* This protects client list */
 	struct mutex			dev_lock;
 	struct list_head		client_list;
@@ -132,6 +151,12 @@ struct amdxdna_dev {
 #endif
 	struct rw_semaphore		notifier_lock; /* for mmu notifier */
 	struct workqueue_struct		*notifier_wq;
+
+	struct device			*cma_region_devs[MAX_MEM_REGIONS];
+
+	struct iommu_group		*group;
+	struct iommu_domain		*domain;
+	struct iova_domain		iovad;
 };
 
 struct amdxdna_stats {
@@ -161,6 +186,7 @@ struct amdxdna_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
+	kuid_t				uid;
 	/* To avoid deadlock, do NOT wait this srcu when dev_lock is hold */
 	struct srcu_struct		ctx_srcu;
 	struct xarray			ctx_xa;
@@ -191,5 +217,19 @@ int amdxdna_drm_copy_array_to_user(struct amdxdna_drm_get_array *tgt,
 				   void *array, size_t element_size, size_t num_element);
 int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
 				     void *array, size_t element_size, size_t num_element);
+bool amdxdna_admin_access_allowed(struct amdxdna_dev *xdna);
+bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only);
+
+int amdxdna_iommu_init(struct amdxdna_dev *xdna);
+void amdxdna_iommu_fini(struct amdxdna_dev *xdna);
+int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
+void amdxdna_iommu_unmap_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
+void *amdxdna_iommu_alloc(struct amdxdna_dev *xdna, size_t size, dma_addr_t *dma_addr);
+void amdxdna_iommu_free(struct amdxdna_dev *xdna, size_t size,
+			void *cpu_addr, dma_addr_t dma_addr);
+static inline bool amdxdna_iova_enabled(struct amdxdna_dev *xdna)
+{
+	return !!xdna->domain;
+}
 
 #endif /* _AMDXDNA_DRM_H_ */

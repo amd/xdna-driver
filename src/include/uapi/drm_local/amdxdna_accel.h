@@ -62,6 +62,7 @@ extern "C" {
 #define	AMDXDNA_DEV_TYPE_UNKNOWN	-1
 #define	AMDXDNA_DEV_TYPE_KMQ		0
 #define	AMDXDNA_DEV_TYPE_UMQ		1
+#define	AMDXDNA_DEV_TYPE_PF		2
 
 /*
  * Define priority in application's QoS.
@@ -250,7 +251,9 @@ struct amdxdna_drm_va_tbl {
 
 /**
  * struct amdxdna_drm_create_bo - Create a buffer object.
- * @flags: Buffer flags. MBZ.
+ * @flags: Buffer flags.
+ *         Bits [7:0] - CMA memory region index for allocation.
+ *         Bits [63:8] - Reserved for other flags.
  * @vaddr: Pointer of va address table.
  * @size: Size in bytes.
  * @type: Buffer type.
@@ -835,6 +838,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_FW_LOG_CONFIG	7
 #define DRM_AMDXDNA_FW_TRACE_CONFIG	8
 #define DRM_AMDXDNA_AIE_TILE_READ	9
+#define DRM_AMDXDNA_HWCTX_AIE_PART_FD		10
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024

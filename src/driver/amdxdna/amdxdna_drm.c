@@ -28,23 +28,26 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		return -ENOMEM;
 
 	client->pid = pid_nr(filp->pid);
+	client->uid = current_euid();
 	client->xdna = xdna;
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_sva_bind;
 #endif
-	client->sva = iommu_sva_bind_device(xdna->ddev.dev, current->mm);
-	if (IS_ERR(client->sva)) {
-		ret = PTR_ERR(client->sva);
-		XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
-		goto failed;
-	}
-	client->pasid = iommu_sva_get_pasid(client->sva);
-	if (client->pasid == IOMMU_PASID_INVALID) {
-		XDNA_ERR(xdna, "SVA get pasid failed");
-		ret = -ENODEV;
-		goto unbind_sva;
+	if (!amdxdna_iova_enabled(xdna)) {
+		client->sva = iommu_sva_bind_device(xdna->ddev.dev, current->mm);
+		if (IS_ERR(client->sva)) {
+			ret = PTR_ERR(client->sva);
+			XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
+			goto failed;
+		}
+		client->pasid = iommu_sva_get_pasid(client->sva);
+		if (client->pasid == IOMMU_PASID_INVALID) {
+			XDNA_ERR(xdna, "SVA get pasid failed");
+			ret = -ENODEV;
+			goto unbind_sva;
+		}
 	}
 #ifdef AMDXDNA_DEVEL
 skip_sva_bind:
@@ -69,7 +72,8 @@ skip_sva_bind:
 	return 0;
 
 unbind_sva:
-	iommu_sva_unbind_device(client->sva);
+	if (!IS_ERR_OR_NULL(client->sva))
+		iommu_sva_unbind_device(client->sva);
 failed:
 	kfree(client);
 	return ret;
@@ -92,7 +96,8 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_sva_unbind;
 #endif
-	iommu_sva_unbind_device(client->sva);
+	if (!IS_ERR_OR_NULL(client->sva))
+		iommu_sva_unbind_device(client->sva);
 #ifdef AMDXDNA_DEVEL
 skip_sva_unbind:
 #endif
@@ -183,10 +188,10 @@ int amdxdna_drm_copy_array_to_user(struct amdxdna_drm_get_array *tgt,
 	int i;
 
 	for (i = 0; i < min_num; i++) {
-		buf += i * tgt->element_size;
-		array += i * element_size;
 		if (copy_to_user(buf, array, min_sz))
 			return -EFAULT;
+		buf += tgt->element_size;
+		array += element_size;
 	}
 	tgt->num_element = min_num;
 	tgt->element_size = min_sz;
@@ -206,10 +211,10 @@ int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
 	int i;
 
 	for (i = 0; i < min_num; i++) {
-		buf += i * src->element_size;
-		array += i * element_size;
 		if (copy_from_user(array, buf, min_sz))
 			return -EFAULT;
+		buf += src->element_size;
+		array += element_size;
 	}
 	return 0;
 }
@@ -318,6 +323,37 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_ARRAY, amdxdna_drm_get_array_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
+
+/*
+ * Returns true if caller is root (CAP_SYS_ADMIN).
+ * Use this for device-wide operations that don't have a context.
+ */
+bool amdxdna_admin_access_allowed(struct amdxdna_dev *xdna)
+{
+	bool is_admin = capable(CAP_SYS_ADMIN);
+
+	XDNA_DBG(xdna, "Admin access check: is_admin=%d", is_admin);
+	return is_admin;
+}
+
+/*
+ * Returns true if caller is root (CAP_SYS_ADMIN) or, when root_only is false,
+ * if the caller owns the context.
+ */
+bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only)
+{
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	bool is_admin = amdxdna_admin_access_allowed(xdna);
+	bool is_owner;
+
+	if (root_only)
+		return is_admin;
+
+	is_owner = uid_eq(current_euid(), ctx->client->uid);
+	XDNA_DBG(xdna, "Access check: is_admin=%d is_owner=%d", is_admin, is_owner);
+
+	return is_admin || is_owner;
+}
 
 void amdxdna_stats_start(struct amdxdna_client *client)
 {

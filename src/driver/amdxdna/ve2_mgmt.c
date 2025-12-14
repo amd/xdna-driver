@@ -4,11 +4,14 @@
  */
 #include <linux/device.h>
 #include <linux/version.h>
+#include <linux/completion.h>
+#include <linux/atomic.h>
 
 #include "amdxdna_ctx.h"
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
+#include "amdxdna_error.h"
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
@@ -104,9 +107,9 @@ static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdn
 	return hs_data;
 }
 
-static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req, u32 num_col)
+int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req,
+		     u32 num_col)
 {
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
 	int i, start;
 	int max_start = total_col - num_col;
@@ -119,10 +122,10 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 			return -EINVAL;
 		}
 
-		for (start = start_col; start <= max_start; start += num_col)
+		for (start = start_col; start <= max_start; start += MIN_COL_SUPPORT)
 			entries++;
 	} else {
-		for (start = 0; start <= max_start; start += num_col)
+		for (start = 0; start <= max_start; start += MIN_COL_SUPPORT)
 			entries++;
 	}
 
@@ -132,20 +135,20 @@ static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xr
 		return -EINVAL;
 	}
 
-	xrs_req->cdo.start_cols = kmalloc_array(entries, sizeof(*xrs_req->cdo.start_cols),
+	xrs_req->cdo.start_cols = kmalloc_array(entries,
+						sizeof(*xrs_req->cdo.start_cols),
 						GFP_KERNEL);
 	if (!xrs_req->cdo.start_cols)
 		return -ENOMEM;
 
 	xrs_req->cdo.cols_len = entries;
-	for (i = 0, start = (start_col > 0 ? start_col : 0);
-	     start <= max_start; start += num_col, i++)
+	for (i = 0, start = (start_col > 0 ? start_col : 0); start <= max_start;
+	     start += MIN_COL_SUPPORT, i++)
 		xrs_req->cdo.start_cols[i] = start;
 
 	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     xrs_req->cdo.start_cols,
 			     entries * sizeof(*xrs_req->cdo.start_cols), false);
-
 	return 0;
 }
 
@@ -174,7 +177,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 
 	XDNA_DBG(xdna, "User requested num_col %d", xrs_req->cdo.ncols);
 
-	ret = ve2_xrs_col_list(hwctx, xrs_req, xrs_req->cdo.ncols);
+	ret = ve2_xrs_col_list(xdna, xrs_req, xrs_req->cdo.ncols);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate XRS col resource failed, ret %d", ret);
 		mutex_unlock(&xrs->xrs_lock);
@@ -185,12 +188,21 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 
 	/* Validate user_start_col if set */
 	if (hwctx->qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
-		if (hwctx->qos.user_start_col >= xrs->cfg.total_col ||
-		    hwctx->qos.user_start_col + xrs_req->cdo.ncols > xrs->cfg.total_col) {
-			XDNA_ERR(xdna, "Invalid user_start_col: %u (ncols: %u, max: %u)",
-				 hwctx->qos.user_start_col, xrs_req->cdo.ncols, xrs->cfg.total_col);
+		/* Check alignment: start_col must be a multiple of MIN_COL_SUPPORT (4) */
+		if (hwctx->qos.user_start_col % MIN_COL_SUPPORT != 0) {
+			XDNA_ERR(xdna, "user_start_col %u not aligned to %u",
+				 hwctx->qos.user_start_col, MIN_COL_SUPPORT);
 			mutex_unlock(&xrs->xrs_lock);
 			ret = -EINVAL;
+			goto free_start_cols;
+		}
+
+		/* Check bounds: start_col + ncols must not exceed total columns */
+		if (hwctx->qos.user_start_col + xrs_req->cdo.ncols > xrs->cfg.total_col) {
+			XDNA_ERR(xdna, "user_start_col %u + ncols %u exceeds total %u",
+				 hwctx->qos.user_start_col, xrs_req->cdo.ncols, xrs->cfg.total_col);
+			mutex_unlock(&xrs->xrs_lock);
+			ret = -ERANGE;
 			goto free_start_cols;
 		}
 	}
@@ -224,6 +236,8 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	}
 	mutex_unlock(&xrs->xrs_lock);
 
+	kfree(xrs_req->cdo.start_cols);
+	kfree(xrs_req);
 	return 0;
 
 destroy_partition:
@@ -264,6 +278,32 @@ static int ve2_fifo_enqueue(struct amdxdna_mgmtctx *mgmtctx,
 	list_add_tail(&node->list, &mgmtctx->ctx_command_fifo_head);
 
 	return 0;
+}
+
+/**
+ * ve2_fifo_remove_ctx - Remove all FIFO entries for a given context
+ * @mgmtctx: Pointer to the management context
+ * @ctx: Pointer to the context to remove
+ *
+ * Must be called with mgmtctx->ctx_lock held.
+ * This prevents use-after-free when a context is destroyed while
+ * entries for it still exist in the scheduler FIFO.
+ */
+void ve2_fifo_remove_ctx(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_ctx_command_fifo *c_ctx, *t_ctx;
+
+	lockdep_assert_held(&mgmtctx->ctx_lock);
+
+	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
+		if (c_ctx->ctx == ctx) {
+			XDNA_DBG(mgmtctx->xdna,
+				 "Removing FIFO entry for ctx %p, cmd_index %llu\n",
+				 ctx, c_ctx->command_index);
+			list_del(&c_ctx->list);
+			kfree(c_ctx);
+		}
+	}
 }
 
 // Get the context switch request bit
@@ -335,7 +375,7 @@ static int ve2_request_context_switch(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-	static struct amdxdna_ctx *
+static struct amdxdna_ctx *
 ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct amdxdna_dev *xdna = mgmtctx->xdna;
@@ -371,7 +411,7 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 	return hwctx;
 }
 
-int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq)
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_mgmtctx  *mgmtctx =
 		&xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
@@ -585,7 +625,7 @@ static void ve2_scheduler_work(struct work_struct *work)
 				 mgmtctx->active_ctx);
 		}
 	} else {
-		XDNA_ERR(mgmtctx->xdna,
+		XDNA_DBG(mgmtctx->xdna,
 			 "None of the bit (idle/queue_not_empty/misc) was set active ctx:%p\n",
 			 mgmtctx->active_ctx);
 	}
@@ -680,7 +720,7 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	/* Race condition: what happen if more command completed bet this point and
 	 * point waiq get executed(check for command completed). This will only happen
 	 * when cert is not in sleep ... that means we got completion interrupt..
-	 * if cert move forwared to execute more command that is the expected behaviour..
+	 * if cert move forwarded to execute more command that is the expected behaviour..
 	 * max to max we will go out of order.
 	 */
 	pop_from_ctx_command_fifo_till(mgmtctx, hwctx, read_index);
@@ -692,6 +732,135 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	if (mgmtctx->mgmtctx_workq && (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
 				       ve2_check_misc_interrupt(mgmtctx)))
 		queue_work(mgmtctx->mgmtctx_workq, &mgmtctx->sched_work);
+}
+
+static void ve2_aie_error_cb(void *arg)
+{
+	struct amdxdna_mgmtctx *mgmtctx = arg;
+	struct aie_errors *aie_errs;
+	struct amdxdna_dev *xdna;
+	int i;
+
+	if (!mgmtctx) {
+		pr_err("%s: mgmt hwctx is not initialized\n", __func__);
+		return;
+	}
+
+	xdna = mgmtctx->xdna;
+	/* Mark error callback as in progress */
+	atomic_set(&mgmtctx->error_cb_in_progress, 1);
+	reinit_completion(&mgmtctx->error_cb_completion);
+
+	mutex_lock(&mgmtctx->ctx_lock);
+
+	if (!mgmtctx->mgmt_aiedev) {
+		XDNA_ERR(xdna, "%s: AIE partition is not loaded\n", __func__);
+		mutex_unlock(&mgmtctx->ctx_lock);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
+		complete(&mgmtctx->error_cb_completion);
+		return;
+	}
+	aie_errs = aie_get_errors(mgmtctx->mgmt_aiedev);
+	if (IS_ERR_OR_NULL(aie_errs)) {
+		XDNA_ERR(xdna, "%s: aie_get_errors returns NULL\n", __func__);
+		mutex_unlock(&mgmtctx->ctx_lock);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
+		complete(&mgmtctx->error_cb_completion);
+		return;
+	}
+
+	/* Cache the last async error FIRST, before logging, to ensure user space
+	 * queries can find it immediately even if logging hasn't completed yet.
+	 */
+	if (aie_errs->num_err > 0) {
+		struct amdxdna_async_error *record = &mgmtctx->async_errs_cache.err;
+		struct aie_error *last_err = &aie_errs->errors[aie_errs->num_err - 1];
+		enum amdxdna_error_num err_num;
+		enum amdxdna_error_module err_mod;
+		u64 err_code;
+		u64 current_time_us = ktime_to_us(ktime_get_real());
+
+		/* Convert category to amdxdna error number */
+		switch (last_err->category) {
+		case 0: /* AIE_ERROR_SATURATION */
+			err_num = AMDXDNA_ERROR_NUM_AIE_SATURATION;
+			break;
+		case 1: /* AIE_ERROR_FP */
+			err_num = AMDXDNA_ERROR_NUM_AIE_FP;
+			break;
+		case 2: /* AIE_ERROR_STREAM */
+			err_num = AMDXDNA_ERROR_NUM_AIE_STREAM;
+			break;
+		case 3: /* AIE_ERROR_ACCESS */
+			err_num = AMDXDNA_ERROR_NUM_AIE_ACCESS;
+			break;
+		case 4: /* AIE_ERROR_BUS */
+			err_num = AMDXDNA_ERROR_NUM_AIE_BUS;
+			break;
+		case 5: /* AIE_ERROR_INSTRUCTION */
+			err_num = AMDXDNA_ERROR_NUM_AIE_INSTRUCTION;
+			break;
+		case 6: /* AIE_ERROR_ECC */
+			err_num = AMDXDNA_ERROR_NUM_AIE_ECC;
+			break;
+		case 7: /* AIE_ERROR_LOCK */
+			err_num = AMDXDNA_ERROR_NUM_AIE_LOCK;
+			break;
+		case 8: /* AIE_ERROR_DMA */
+			err_num = AMDXDNA_ERROR_NUM_AIE_DMA;
+			break;
+		case 9: /* AIE_ERROR_MEM_PARITY */
+			err_num = AMDXDNA_ERROR_NUM_AIE_MEM_PARITY;
+			break;
+		default:
+			err_num = AMDXDNA_ERROR_NUM_UNKNOWN;
+			break;
+		}
+
+		/* Convert module to amdxdna error module */
+		switch (last_err->module) {
+		case 0: /* AIE_MEM_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_MEMORY;
+			break;
+		case 1: /* AIE_CORE_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_CORE;
+			break;
+		case 2: /* AIE_PL_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_PL;
+			break;
+		default:
+			err_mod = AMDXDNA_ERROR_MODULE_UNKNOWN;
+			break;
+		}
+
+		err_code = AMDXDNA_CRITICAL_ERROR_CODE_BUILD(err_num, err_mod);
+
+		mutex_lock(&mgmtctx->async_errs_cache.lock);
+		record->ts_us = current_time_us;
+		record->err_code = err_code;
+		record->ex_err_code = AMDXDNA_ERROR_EXTRA_CODE_BUILD(last_err->loc.row,
+								     last_err->loc.col);
+		mutex_unlock(&mgmtctx->async_errs_cache.lock);
+	}
+
+	/* Log error details after caching to ensure cache is available for queries */
+	for (i = 0; i < aie_errs->num_err; i++) {
+		XDNA_INFO(xdna, "Display AIE asynchronous Error data:\n");
+		XDNA_INFO(xdna, "error_id %d Mod %d, category %d, Col %d, Row %d\n",
+			  aie_errs->errors[i].error_id,
+			  aie_errs->errors[i].module,
+			  aie_errs->errors[i].category,
+			  aie_errs->errors[i].loc.col,
+			  aie_errs->errors[i].loc.row);
+	}
+
+	aie_free_errors(aie_errs);
+
+	mutex_unlock(&mgmtctx->ctx_lock);
+
+	/* Mark error callback as complete and signal waiting threads */
+	atomic_set(&mgmtctx->error_cb_in_progress, 0);
+	complete(&mgmtctx->error_cb_completion);
 }
 
 /**
@@ -713,6 +882,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 	u32 start_col = load_act->part.start_col;
 	struct amdxdna_mgmtctx  *mgmtctx =
 		&xdna->dev_handle->ve2_mgmtctx[start_col];
+	int ret = 0;
 
 	if (load_act->create_aie_part) {
 		request.user_event1_complete = ve2_irq_handler;
@@ -735,6 +905,10 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		nhwctx->args = &mgmtctx->args;
 		nhwctx->aie_dev = mgmtctx->mgmt_aiedev;
 		mutex_init(&mgmtctx->ctx_lock);
+		mutex_init(&mgmtctx->async_errs_cache.lock);
+		memset(&mgmtctx->async_errs_cache.err, 0, sizeof(mgmtctx->async_errs_cache.err));
+		init_completion(&mgmtctx->error_cb_completion);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
 		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 		/* Create workqueue for scheduling the command */
 		mgmtctx->mgmtctx_workq = create_workqueue("ve2_mgmtctx_scheduler");
@@ -744,6 +918,9 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 			return -ENOMEM;
 		}
 		INIT_WORK(&mgmtctx->sched_work, ve2_scheduler_work);
+		/* Register AIE error call back function. */
+		ret = aie_register_error_notification(nhwctx->aie_dev, ve2_aie_error_cb, mgmtctx);
+		XDNA_DBG(xdna, "Registered AIE error call back function, ret : %d\n", ret);
 	} else {
 		nhwctx->aie_dev = mgmtctx->mgmt_aiedev;
 		nhwctx->args = &mgmtctx->args;
@@ -774,55 +951,13 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 		return -1;
 	}
 
-	// TODO: Replace MAX_ROW with dynamic value from aie_get_device_info()
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
-	for (int col = 0; col < nhwctx->num_col; ++col) {
-		int rel_col = col + nhwctx->start_col;
-
-		for (int row = 0; row < MAX_ROW; ++row) {
-			if (row == 0) {
-				int ret = ve2_partition_read(aie_dev, rel_col, row, 0,
-							     TILE_ADDRESS_SPACE, GET_TILE_ADDRESS
-							     (buffer, MAX_ROW, row, col));
-				XDNA_DBG(xdna, "Read shim tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret);
-				if (ret < 0)
-					return -EINVAL;
-
-			} else if (row == 1 || row == 2) {
-				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
-						MEM_TILE_MEMORY_SIZE, GET_TILE_ADDRESS
-						(buffer, MAX_ROW, row, col));
-				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
-						MEM_TILE_FIRST_REG_ADDRESS,
-						TILE_ADDRESS_SPACE - MEM_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col)
-						+ MEM_TILE_FIRST_REG_ADDRESS);
-				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret1);
-				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret2);
-				if (ret1 < 0 || ret2 < 0)
-					return -EINVAL;
-			} else if (row > 2) {
-				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
-						CORE_TILE_MEMORY_SIZE,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col));
-				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
-						CORE_TILE_FIRST_REG_ADDRESS,
-						TILE_ADDRESS_SPACE - CORE_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, MAX_ROW, row, col)
-							      + CORE_TILE_FIRST_REG_ADDRESS);
-				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret1);
-				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret2);
-				if (ret1 < 0 || ret2 < 0)
-					return -EINVAL;
-			}
-			rel_size += TILE_ADDRESS_SPACE;
-		}
+	rel_size = ve2_partition_coredump(aie_dev, size, buffer);
+	if (rel_size < 0) {
+		XDNA_ERR(xdna, "Failed to read coredump, err:%d\n", rel_size);
+		return -EINVAL;
 	}
+	XDNA_DBG(xdna, "Reading coredump ret:%d\n", rel_size);
 
 	return rel_size;
 }
@@ -898,6 +1033,8 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 
 		if (wq)
 			destroy_workqueue(wq);
+		aie_unregister_error_notification(nhwctx->aie_dev);
+		XDNA_DBG(xdna, "%s: Un-registered ve2_aie_error_cb() callback\n", __func__);
 		aie_partition_teardown(nhwctx->aie_dev);
 		aie_partition_release(nhwctx->aie_dev);
 	} else {

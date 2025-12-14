@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _SHIMTEST_HWCTX_H_
 #define _SHIMTEST_HWCTX_H_
@@ -34,7 +34,9 @@ private:
   {
     xrt::xclbin xclbin;
     xrt::elf elf;
-    auto is_full_elf = (get_kernel_type(dev, xclbin_name) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT);
+    auto kernel_type = get_kernel_type(dev, xclbin_name);
+    auto is_full_elf = (kernel_type == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT ||
+		        kernel_type == KERNEL_TYPE_TXN_FULL_ELF);
     auto path = get_xclbin_path(dev, xclbin_name);
 
     try {

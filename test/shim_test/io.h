@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _SHIMTEST_IO_H_
 #define _SHIMTEST_IO_H_
 
 #include "bo.h"
+#include "hwctx.h"
 #include "dev_info.h"
 #include "exec_buf.h"
 
@@ -47,7 +48,7 @@ public:
   void
   run_no_check_result();
 
-  virtual void
+  void
   run();
 
   void
@@ -61,7 +62,7 @@ public:
   sync_after_run();
 
   virtual void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) = 0;
+  init_cmd(hw_ctx& hwctx, bool dump) = 0;
 
   void
   dump_content();
@@ -71,6 +72,12 @@ public:
 
   static const char *
   bo_type2name(int type);
+
+  void
+  cache_cmd_header(const xrt_core::buffer_handle *cmd_hdl, const ert_start_kernel_cmd *cmd);
+
+  void
+  restore_cmd_header(const xrt_core::buffer_handle *cmd_hdl, ert_start_kernel_cmd *cmd);
 
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
   get_bos();
@@ -85,6 +92,7 @@ protected:
   device *m_dev;
   xrt::elf m_elf = {};
   uint32_t m_kernel_index;
+  uint32_t m_cached_header = 0;
   const int m_FLAG_USR_BUF =  1 << 0;
   const int m_FLAG_OPT =      1 << 1;
   const int m_FLAG_NO_FILL =  1 << 2;
@@ -95,6 +103,9 @@ protected:
 
   void
   create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type);
+
+  xrt_core::cuidx_type
+  get_cu_idx(hw_ctx& hwctx);
 };
 
 class io_test_bo_set : public io_test_bo_set_base
@@ -105,7 +116,7 @@ public:
   io_test_bo_set(device *dev, bool use_ubuf);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
@@ -117,7 +128,16 @@ public:
   elf_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
+};
+
+class elf_full_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_full_io_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 };
 
 class elf_preempt_io_test_bo_set : public io_test_bo_set_base
@@ -126,7 +146,7 @@ public:
   elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   unsigned long
   get_preemption_checkpoints() override;
@@ -136,24 +156,21 @@ private:
   unsigned long m_total_fine_preemption_checkpoints;
 };
 
-class elf_io_timeout_test_bo_set : public io_test_bo_set_base
+class elf_io_negative_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_timeout_test_bo_set(device *dev, const std::string& xclbin_name);
-  elf_io_timeout_test_bo_set(device *dev, const std::string& xclbin_name,
-    const std::string& elf_name, uint32_t exp_txn_op_idx);
+  elf_io_negative_test_bo_set(device *dev, const std::string& xclbin_name,
+    const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-  void
-  run() override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
 
 private:
   uint32_t m_expect_txn_op_idx;
+  uint32_t m_expect_cmd_status;
 };
 
 class async_error_io_test_bo_set : public io_test_bo_set_base
@@ -162,13 +179,11 @@ public:
   async_error_io_test_bo_set(device *dev);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-  void
-  run() override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
+
 private:
   uint64_t m_expect_err_code;
   uint64_t m_last_err_timestamp;
@@ -182,13 +197,13 @@ public:
     const std::string& elf_name);
 
   void
-  init_cmd(xrt_core::cuidx_type idx, bool dump) override;
-
-  void
-  run() override;
+  init_cmd(hw_ctx& hwctx, bool dump) override;
 
   void
   verify_result() override;
+
+private:
+  std::unique_ptr<xrt_core::buffer_handle> m_dbo;
 };
 
 #endif // _SHIMTEST_IO_H_

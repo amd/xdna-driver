@@ -88,7 +88,19 @@ start()
   // we allow only one debugger running
   listen(serverSocket, 1); 
   int flags = fcntl(serverSocket, F_GETFL, 0);
-  fcntl(serverSocket, F_SETFL, flags | O_NONBLOCK);
+  if (flags == -1)
+  {
+    shim_debug("F_GETFL over tcp server socket failed: %d", errno);
+    close(serverSocket);
+    return;
+  }
+  ret = fcntl(serverSocket, F_SETFL, flags | O_NONBLOCK);
+  if (ret == -1)
+  {
+    shim_debug("F_SETFL over tcp server socket failed: %d", errno);
+    close(serverSocket);
+    return;
+  }
 
   shim_debug("Waiting for incoming connection...\n");
   while (!m_srv_stop)

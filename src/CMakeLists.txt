@@ -10,4 +10,11 @@ add_subdirectory(driver)
 endif()
 
 add_subdirectory(shim)
+
+# Optionally build vxdna library
+option(BUILD_VXDNA "Build vxdna library" OFF)
+if(BUILD_VXDNA)
+    add_subdirectory(vxdna)
+endif()
+
 endif()

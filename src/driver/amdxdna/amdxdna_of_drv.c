@@ -55,6 +55,9 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	/* Set vbnv to default - OF devices don't query revision from firmware */
+	xdna->vbnv = xdna->dev_info->default_vbnv;
+
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);

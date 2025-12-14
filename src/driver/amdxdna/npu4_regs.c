@@ -17,23 +17,26 @@ const struct rt_config npu4_default_rt_cfg[] = {
 };
 
 const struct rt_cfg_ver npu4_rt_cfg_tbl[] = {
-	{ 12, NPU4_RT_TYPE_FINE_PREEMPTION },
-	{ 12, NPU4_RT_TYPE_FORCE_PREEMPTION },
-	{ 12, NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION },
-	{ 19, NPU4_RT_TYPE_LOG_LEVEL },
-	{ 19, NPU4_RT_TYPE_LOG_FORMAT },
-	{ 19, NPU4_RT_TYPE_LOG_DESTINATION },
+	{ AIE2_FW_VERSION(6, 12), NPU4_RT_TYPE_FINE_PREEMPTION },
+	{ AIE2_FW_VERSION(6, 12), NPU4_RT_TYPE_FORCE_PREEMPTION },
+	{ AIE2_FW_VERSION(6, 12), NPU4_RT_TYPE_FRAME_BOUNDARY_PREEMPTION },
+	{ AIE2_FW_VERSION(6, 19), NPU4_RT_TYPE_LOG_LEVEL },
+	{ AIE2_FW_VERSION(6, 19), NPU4_RT_TYPE_LOG_FORMAT },
+	{ AIE2_FW_VERSION(6, 19), NPU4_RT_TYPE_LOG_DESTINATION },
 	{ 0 },
 };
 
 const struct msg_op_ver npu4_msg_op_tbl[] = {
-	{ 15, MSG_OP_CHAIN_EXEC_NPU },
-	{ 15, MSG_OP_UPDATE_PROPERTY },
-	{ 18, MSG_OP_GET_APP_HEALTH },
-	{ 19, MSG_OP_CONFIG_FW_LOG },
-	{ 19, MSG_OP_START_FW_TRACE },
-	{ 19, MSG_OP_STOP_FW_TRACE },
-	{ 19, MSG_OP_SET_FW_TRACE_CATEGORIES },
+	{ AIE2_FW_VERSION(6, 15), MSG_OP_CHAIN_EXEC_NPU },
+	{ AIE2_FW_VERSION(6, 15), MSG_OP_UPDATE_PROPERTY },
+	{ AIE2_FW_VERSION(6, 18), MSG_OP_GET_APP_HEALTH },
+	{ AIE2_FW_VERSION(6, 19), MSG_OP_CONFIG_FW_LOG },
+	{ AIE2_FW_VERSION(6, 19), MSG_OP_START_FW_TRACE },
+	{ AIE2_FW_VERSION(6, 19), MSG_OP_STOP_FW_TRACE },
+	{ AIE2_FW_VERSION(6, 19), MSG_OP_SET_FW_TRACE_CATEGORIES },
+	{ AIE2_FW_VERSION(6, 24), MSG_OP_GET_COREDUMP },
+	{ AIE2_FW_VERSION(6, 24), MSG_OP_CALIBRATE_TIME },
+	{ AIE2_FW_VERSION(6, 24), MSG_OP_GET_DEV_REVISION },
 	{ 0 },
 };
 
@@ -50,20 +53,31 @@ const struct dpm_clk_freq npu4_dpm_clk_table[] = {
 };
 
 const struct aie2_fw_feature_tbl npu4_fw_feature_table[] = {
-	{ .feature = AIE2_NPU_COMMAND, .min_minor = 15 },
-	{ .feature = AIE2_PREEMPT, .min_minor = 12 },
+	{ .feature = AIE2_NPU_COMMAND, .min_fw_version = AIE2_FW_VERSION(6, 15) },
+	{ .feature = AIE2_PREEMPT, .min_fw_version = AIE2_FW_VERSION(6, 12) },
+	{ 0 }
+};
+
+const struct amdxdna_rev_vbnv npu4_rev_vbnv_tbl[] = {
+	{ AIE2_DEV_REVISION_STXA, "NPU Strix" },
+	{ AIE2_DEV_REVISION_STXB, "NPU Strix" },
+	{ AIE2_DEV_REVISION_KRK1, "NPU Krackan 1" },
+	{ AIE2_DEV_REVISION_KRK2, "NPU Krackan 2" },
+	{ AIE2_DEV_REVISION_HALO, "NPU Strix Halo" },
+	{ AIE2_DEV_REVISION_GPT1, "NPU Gorgon Point 1" },
+	{ AIE2_DEV_REVISION_GPT2, "NPU Gorgon Point 2" },
+	{ AIE2_DEV_REVISION_GPT3, "NPU Gorgon Point 3" },
 	{ 0 }
 };
 
 const struct amdxdna_dev_priv npu4_dev_priv = {
-	.fw_path        = "amdnpu/17f0_10/npu.dev.sbin",
-	.protocol_major = 6,
-	.protocol_minor = 12,
+	.fw_path	= "amdnpu/17f0_10/npu.dev.sbin",
+	.min_fw_version	= AIE2_FW_VERSION(6, 12),
 	NPU4_COMMON_DEV_PRIV,
 };
 
 const struct amdxdna_dev_info dev_npu4_info = {
-	.vbnv              = "NPU Strix",
+	.default_vbnv      = "NPU Strix",
 	.dev_priv          = &npu4_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };
