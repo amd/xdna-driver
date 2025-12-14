@@ -1485,6 +1485,7 @@ free_list_hdl:
 static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drm_hwctx_entry input = {};
 	struct amdxdna_drm_hwctx_entry *tmp;
 	int ctx_limit, ctx_cnt, ret;
 	u32 buf_size;
@@ -1517,8 +1518,6 @@ static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_dr
 
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
-		struct amdxdna_drm_hwctx_entry input = {};
-
 		ret = amdxdna_drm_copy_array_from_user(args, &input, sizeof(input), 1);
 		if (ret)
 			goto exit;

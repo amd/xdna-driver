@@ -28,11 +28,15 @@ execute_process(
   OUTPUT_VARIABLE XDNA_CPACK_LINUX_VERSION
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )
-execute_process(
-  COMMAND bash -c "source /etc/os-release && echo \"\$ID \$ID_LIKE\""
-  OUTPUT_VARIABLE XDNA_CPACK_LINUX_PKG_FLAVOR
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
+if (EXISTS "/etc/arch-release")
+  set(XDNA_CPACK_LINUX_PKG_FLAVOR "arch")
+else()
+  execute_process(
+    COMMAND bash -c "source /etc/os-release && echo \"\$ID \$ID_LIKE\""
+    OUTPUT_VARIABLE XDNA_CPACK_LINUX_PKG_FLAVOR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
 execute_process(
   COMMAND echo ${XRT_VERSION_STRING}
   COMMAND awk -F. "{print $1}"
