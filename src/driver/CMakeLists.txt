@@ -76,7 +76,7 @@ add_custom_command(
   COMMAND $(MAKE) -f ${XDNA_DRV_PF_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_PF_BLD_TGT} ${KERNEL_VER} XDNA_BUS_TYPE=pci
   COMMAND $(MAKE) -f ${XDNA_DRV_PF_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_PF_BLD_TGT} copy_ko
   COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_PF_BLD_TGT}/${XDNA_DRV_PF_TGT} ${XDNA_DRV_PF_PATH}
-  DEPENDS ${XDNA_DRV_BLD_SRC}/configure_kernel.h
+  DEPENDS ${XDNA_DRV_BLD_SRC}/configure_kernel.h pf_driver_source
   )
 
 if(XDNA_DRV_PF_SRC_DIR)
