@@ -37,7 +37,13 @@ DEFINES := -DAMDXDNA_DEVEL
 XDNA_DRIVER_VERSION ?= 2.21.0
 XDNA_DATE ?= $(shell date +%Y%m%d)
 XDNA_HASH ?= $(shell git rev-parse HEAD)
-USE_LLVM ?= $(shell zgrep "CONFIG_CC_IS_CLANG" /proc/config.gz 1>/dev/null && echo -n "LLVM=1")
+# Detect if kernel was built with Clang - check /proc/config.gz first, then /boot/config-*
+USE_LLVM ?= $(shell \
+    if [ -e /proc/config.gz ]; then \
+        zgrep -q "CONFIG_CC_IS_CLANG=y" /proc/config.gz 2>/dev/null && echo -n "LLVM=1"; \
+    elif [ -e /boot/config-$(KERNEL_VER) ]; then \
+        grep -q "CONFIG_CC_IS_CLANG=y" /boot/config-$(KERNEL_VER) 2>/dev/null && echo -n "LLVM=1"; \
+    fi)
 
 ifndef MODULE_VER_STR
 MODULE_VER_STR := $(XDNA_DRIVER_VERSION)_$(XDNA_DATE),$(XDNA_HASH)

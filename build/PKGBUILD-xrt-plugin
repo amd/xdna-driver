@@ -36,8 +36,8 @@ package() {
 
   # Copy the install scripts for reference (they'll be called from .install file)
   mkdir -p "$pkgdir/opt/xilinx/xrt/share/amdxdna/package"
-  install -Dm755 $startdir/${XDNA_BUILD_DIR}/package/postinst \
+  install -Dm755 "$startdir/${XDNA_BUILD_DIR}/package/postinst" \
     "$pkgdir/opt/xilinx/xrt/share/amdxdna/package/postinst"
-  install -Dm755 $startdir/${XDNA_BUILD_DIR}/package/prerm \
+  install -Dm755 "$startdir/${XDNA_BUILD_DIR}/package/prerm" \
     "$pkgdir/opt/xilinx/xrt/share/amdxdna/package/prerm"
 }

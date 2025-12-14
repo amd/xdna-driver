@@ -146,7 +146,9 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch")
     message(STATUS "Note: Use the provided PKGBUILD to create an Arch package with proper install hooks")
   endif()
 else()
-  message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}")
+  message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}. "
+    "Supported distributions: Debian/Ubuntu (deb), Fedora/RHEL (rpm), Arch Linux (TGZ). "
+    "To add support for your distribution, please open an issue at https://github.com/amd/xdna-driver/issues")
 endif()
 
 include(CPack)
