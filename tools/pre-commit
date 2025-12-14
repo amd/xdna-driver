@@ -1,4 +1,8 @@
 #! /bin/bash --
+#
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2025, Advanced Micro Devices, Inc.
+#
 
 # Copy this file to .git/hooks/ in your repository.
 # This will be called in every 'git commit', unless you use '--no-verify' option to disable it.

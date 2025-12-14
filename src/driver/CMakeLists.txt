@@ -36,7 +36,17 @@ add_custom_command(
   COMMAND $(CMAKE_COMMAND) -E make_directory ${XDNA_DRV_BLD_DIR}
   COMMAND cp -rf ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}/* ${XDNA_EXTRA_DRV_DIR} ${XDNA_DRV_BLD_DIR}
   COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/../include .
+  COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_kernel.sh .
   )
+
+# Generate config_kernel.h before doing build
+add_custom_command(
+  OUTPUT ${XDNA_DRV_BLD_SRC}/configure_kernel.h
+  COMMENT "Configuring kernel compatibility header"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  COMMAND ${CMAKE_COMMAND} -E env bash ./configure_kernel.sh
+  DEPENDS all_driver_source
+)
 
 # Because ${XDNA_DRV_TGT} is generated in ${XDNA_DRV_BLD_TGT}. So this custom command will always run.
 add_custom_command(
@@ -45,7 +55,7 @@ add_custom_command(
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} ${KERNEL_VER} UMQ_HELLO_TEST=${UMQ_HELLO_TEST} ${XDNA_DRV_BLD_FLAGS_MAKE} XDNA_BUS_TYPE=pci
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} copy_ko
   COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
-  DEPENDS all_driver_source
+  DEPENDS ${XDNA_DRV_BLD_SRC}/configure_kernel.h
   )
 
 add_custom_command(
@@ -66,7 +76,7 @@ add_custom_command(
   COMMAND $(MAKE) -f ${XDNA_DRV_PF_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_PF_BLD_TGT} ${KERNEL_VER} XDNA_BUS_TYPE=pci
   COMMAND $(MAKE) -f ${XDNA_DRV_PF_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_PF_BLD_TGT} copy_ko
   COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_PF_BLD_TGT}/${XDNA_DRV_PF_TGT} ${XDNA_DRV_PF_PATH}
-  DEPENDS pf_driver_source
+  DEPENDS ${XDNA_DRV_BLD_SRC}/configure_kernel.h pf_driver_source
   )
 
 if(XDNA_DRV_PF_SRC_DIR)
@@ -156,6 +166,7 @@ else()
 endif()
 
 set(amdxdna_drv_tools
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_kernel.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/dkms_driver.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
