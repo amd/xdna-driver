@@ -1,6 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-# configure_kernel.sh
 # Generate driver/amdxdna/config_kernel.h by feature-testing the kernel headers.
 
 set -e
