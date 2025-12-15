@@ -62,6 +62,13 @@ try_compile() {
     tmpdir=$(mktemp -d /tmp/conftest-XXXXXX)
     conftest_c="$tmpdir/conftest.c"
     conftest_mk="$tmpdir/Makefile"
+    USE_LLVM=""
+    if [ -e /proc/config.gz ]; then
+        USE_LLVM=$(zgrep -q "CONFIG_CC_IS_CLANG=y" /proc/config.gz 2>/dev/null && echo -n "LLVM=1");
+    elif [ -e /boot/config-$(KERNEL_VER) ]; then
+        USE_LLVM=$(grep -q "CONFIG_CC_IS_CLANG=y" /boot/config-$(KERNEL_VER) 2>/dev/null && echo -n "LLVM=1");
+    fi
+
 
     # Minimal Kbuild for an external module
     cat > "$conftest_mk" <<EOF
@@ -79,7 +86,7 @@ EOF
     cat >> "$conftest_c"
 
     # Now build it like your real driver
-    if make -s -C "$KERNEL_SRC" M="$tmpdir"  modules >/dev/null 2>&1; then
+    if make -s -C "$KERNEL_SRC" M="$tmpdir"  modules "$USE_LLVM" >/dev/null 2>&1; then
         echo "#define $macro 1" >> "$OUT"
         echo ">>>  + $macro: yes" >&2
     else
