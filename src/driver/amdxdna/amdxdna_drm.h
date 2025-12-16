@@ -197,5 +197,7 @@ int amdxdna_drm_copy_array_to_user(struct amdxdna_drm_get_array *tgt,
 				   void *array, size_t element_size, size_t num_element);
 int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
 				     void *array, size_t element_size, size_t num_element);
+bool amdxdna_admin_access_allowed(struct amdxdna_dev *xdna);
+bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only);
 
 #endif /* _AMDXDNA_DRM_H_ */

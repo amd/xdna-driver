@@ -397,9 +397,9 @@ enum async_event_type {
 	MAX_ASYNC_EVENT_TYPE
 };
 
-#define ASYNC_BUF_SIZE 0x2000
 struct async_event_msg_req {
 	u64 buf_addr;
+#define ASYNC_BUF_SIZE		SZ_8K
 	u32 buf_size;
 } __packed;
 
