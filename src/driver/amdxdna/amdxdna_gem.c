@@ -24,10 +24,10 @@
 #include "amdxdna_devel.h"
 #endif
 
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-MODULE_IMPORT_NS(DMA_BUF);
-#else
+#ifdef HAVE_6_13_MODULE_IMPORT_NS
 MODULE_IMPORT_NS("DMA_BUF");
+#else
+MODULE_IMPORT_NS(DMA_BUF);
 #endif
 
 static int
@@ -287,10 +287,10 @@ void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
 	mutex_lock(&abo->lock);
 
 	if (!abo->mem.kva) {
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-		ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
-#else
+#ifdef HAVE_drm_gem_vmap_vunmap
 		ret = drm_gem_vmap(to_gobj(abo), &map);
+#else
+		ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
 #endif
 		if (ret)
 			XDNA_ERR(abo->client->xdna, "Vmap bo failed, ret %d", ret);
@@ -362,10 +362,10 @@ static void amdxdna_gem_vunmap(struct amdxdna_gem_obj *abo)
 		return;
 	}
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
-	drm_gem_vunmap_unlocked(to_gobj(abo), &map);
-#else
+#ifdef HAVE_drm_gem_vmap_vunmap
 	drm_gem_vunmap(to_gobj(abo), &map);
+#else
+	drm_gem_vunmap_unlocked(to_gobj(abo), &map);
 #endif
 
 	abo->mem.kva = NULL;
@@ -646,7 +646,7 @@ static void amdxdna_gem_dev_obj_vunmap(struct drm_gem_object *obj, struct iosys_
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_cache_sgt_mapping
 	.cache_sgt_mapping = true,
 #endif
 	.attach = drm_gem_map_attach,
@@ -772,10 +772,13 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 
 	if (args->type == AMDXDNA_BO_DEV_HEAP) {
 		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
-	dma_buf = amdxdna_get_cma_buf(dev, size);
+	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna->cma_region_devs,
+						    MAX_MEM_REGIONS,
+						    dev->dev, size,
+						    args->flags);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
@@ -884,15 +887,14 @@ static struct amdxdna_gem_obj *
 amdxdna_drm_create_share_bo(struct drm_device *dev,
 			    struct amdxdna_drm_create_bo *args, struct drm_file *filp)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_gem_obj *abo;
 
 	if (args->vaddr)
 		abo = amdxdna_gem_create_user_object(dev, args);
 #ifdef AMDXDNA_DEVEL
-	else if (is_iommu_off(xdna) && amdxdna_use_cma())
+	else if (amdxdna_use_cma())
 		abo = amdxdna_gem_create_cma_object(dev, args);
-	else if (is_iommu_off(xdna) && amdxdna_use_carvedout())
+	else if (amdxdna_use_carvedout())
 		abo = amdxdna_gem_create_carvedout_object(dev, args);
 #endif
 	else
@@ -997,9 +999,6 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_drm_create_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	int ret;
-
-	if (args->flags)
-		return -EINVAL;
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);

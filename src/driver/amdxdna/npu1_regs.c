@@ -60,19 +60,18 @@ const struct dpm_clk_freq npu1_dpm_clk_table[] = {
 };
 
 const struct msg_op_ver npu1_msg_op_tbl[] = {
-	{ 8, MSG_OP_CHAIN_EXEC_NPU },
+	{ AIE2_FW_VERSION(5, 8), MSG_OP_CHAIN_EXEC_NPU },
 	{ 0 },
 };
 
 static const struct aie2_fw_feature_tbl npu1_fw_feature_table[] = {
-	{ .feature = AIE2_NPU_COMMAND, .min_minor = 8 },
+	{ .feature = AIE2_NPU_COMMAND, .min_fw_version = AIE2_FW_VERSION(5, 8) },
 	{ 0 }
 };
 
 const struct amdxdna_dev_priv npu1_dev_priv = {
-	.fw_path        = "amdnpu/1502_00/npu.dev.sbin",
-	.protocol_major = 5,
-	.protocol_minor = 7,
+	.fw_path	= "amdnpu/1502_00/npu.dev.sbin",
+	.min_fw_version	= AIE2_FW_VERSION(5, 7),
 	.rt_config	= npu1_default_rt_cfg,
 	.dpm_clk_tbl	= npu1_dpm_clk_table,
 	.optional_msg	= npu1_msg_op_tbl,

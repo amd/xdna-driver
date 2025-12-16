@@ -12,9 +12,7 @@
 #include "amdxdna_devel.h"
 #include "amdxdna_trace.h"
 
-int iommu_mode;
-module_param(iommu_mode, int, 0444);
-MODULE_PARM_DESC(iommu_mode, "0 = w/ PASID (Default), 1 = wo/ PASID");
+int iommu_mode = AMDXDNA_IOMMU_PASID;
 
 bool priv_load;
 module_param(priv_load, bool, 0644);
@@ -24,49 +22,48 @@ int start_col_index = -1;
 module_param(start_col_index, int, 0600);
 MODULE_PARM_DESC(start_col_index, "Force start column, default -1 (auto select)");
 
-bool is_iommu_off(struct amdxdna_dev *xdna)
+static bool is_iommu_off(struct amdxdna_dev *xdna)
 {
-#if KERNEL_VERSION(6, 13, 0) > LINUX_VERSION_CODE
-	return !iommu_present(xdna->ddev.dev->bus);
-#else
+#ifdef HAVE_device_iommu_mapped
 	return !device_iommu_mapped(xdna->ddev.dev);
+#else
+	return !iommu_present(xdna->ddev.dev->bus);
 #endif
 }
 
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
-	struct iommu_domain *domain = NULL;
+	struct iommu_domain *domain = iommu_get_domain_for_dev(xdna->ddev.dev);
+	bool iommu_iova = domain ? iommu_is_dma_domain(domain) : false;
+	bool iommu_off = is_iommu_off(xdna);
 
-	if (is_iommu_off(xdna)) {
+	/* Working non-PASID mode */
+	if (amdxdna_use_carvedout() || amdxdna_use_cma()) {
+		if (iommu_off)
+			XDNA_INFO(xdna, "Physical address mode enabled");
+		else
+			XDNA_INFO(xdna, "IOVA address mode enabled");
 		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
-		if (amdxdna_use_carvedout() || amdxdna_use_cma())
-			return 0;
+		return 0;
+	}
 
-		XDNA_ERR(xdna, "No carvedout memory and IOMMU is off");
+	/* IOVA mode w/o carveout, warn user about potential failure. */
+	if (iommu_iova) {
+		XDNA_WARN(xdna,
+			  "IOVA address mode enabled w/o carveout, BO allocation may fail");
+		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+		return 0;
+	}
+
+	/* Physical memory mode w/o carveout, not supported */
+	if (iommu_off) {
+		XDNA_ERR(xdna, "IOMMU is off, require carveout memory");
 		return -ENODEV;
 	}
 
-	if (iommu_mode == AMDXDNA_IOMMU_PASID)
-		return 0;
-
-	if (iommu_mode != AMDXDNA_IOMMU_NO_PASID) {
-		XDNA_ERR(xdna, "Invalid IOMMU mode %d", iommu_mode);
-		return -EINVAL;
-	}
-
-	/*
-	 * Set amd_iommu=force_isolation in the Linux cmdline makes SVA capable
-	 * device to force use legacy v1 page table, which not support PASID but
-	 * supports the old IOVA. In this mode, dma_map_*() can map uncontiguous
-	 * host memory to contiguous IOVA space.
-	 * This will not needed if AMD IOMMU changed the behavior.
-	 */
-	domain = iommu_get_domain_for_dev(xdna->ddev.dev);
-	if (!iommu_is_dma_domain(domain)) {
-		XDNA_WARN(xdna, "fallback to iommu_mode 0");
-		iommu_mode = AMDXDNA_IOMMU_PASID;
-	}
-
+	/* PASID mode */
+	XDNA_INFO(xdna, "PASID address mode enabled");
+	iommu_mode = AMDXDNA_IOMMU_PASID;
 	return 0;
 }
 
@@ -103,6 +100,7 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	struct sg_table *sgt;
+	size_t contig_sz;
 
 	sgt = drm_gem_shmem_get_pages_sgt(&abo->base);
 	if (IS_ERR(sgt)) {
@@ -111,8 +109,10 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 	}
 
 	/* Device doesn't do scatter/gather, fail non-contiguous map */
-	if (drm_prime_get_contiguous_size(sgt) != abo->mem.size) {
-		XDNA_ERR(xdna, "noncontiguous dma map, size:%ld", abo->mem.size);
+	contig_sz = drm_prime_get_contiguous_size(sgt);
+	if (contig_sz != abo->mem.size) {
+		XDNA_ERR(xdna, "noncontiguous dma map, contig size:%ld, expected size:%ld",
+			 contig_sz, abo->mem.size);
 		return -ENOMEM;
 	}
 
@@ -124,10 +124,7 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 
 void amdxdna_gem_dump_mm(struct amdxdna_dev *xdna)
 {
-#if KERNEL_VERSION(6, 10, 0) > LINUX_VERSION_CODE
-	struct drm_printer p = drm_debug_printer(NULL);
-#else
 	struct drm_printer p = drm_dbg_printer(&xdna->ddev, DRM_UT_DRIVER, NULL);
-#endif
+
 	drm_mm_print(&xdna->ddev.vma_offset_manager->vm_addr_space_mm, &p);
 }
