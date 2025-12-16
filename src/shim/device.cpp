@@ -50,7 +50,7 @@ get_pcidev(const xrt_core::device* device)
 {
   auto pdev = xrt_core::pci::get_dev(device->get_device_id(), device->is_userpf());
   if (!pdev)
-    throw xrt_core::error("Invalid device handle");
+    throw xrt_core::generic_error(EINVAL, "Invalid device handle");
   return pdev;
 }
 
@@ -59,7 +59,7 @@ get_pcidev_impl(const xrt_core::device* device)
 {
   auto device_impl = dynamic_cast<const shim_xdna::device*>(device);
   if (!device_impl)
-    throw xrt_core::error("Invalid device handle");
+    throw xrt_core::generic_error(EINVAL, "Invalid device handle");
   return device_impl->get_pdev();
 }
 
@@ -282,7 +282,7 @@ struct partition_info
       data_size = arg.num_element;
       data = reinterpret_cast<decltype(data)>(payload.data());
     } catch (const xrt_core::system_error& e) {
-      if (e.get_code() == -EINVAL) {
+      if (e.get_code() == EINVAL) {
         // If ioctl not supported, use legacy ioctl.
         amdxdna_drm_query_hwctx* legacy_data;
         const uint32_t legacy_output_size = 256 * sizeof(*legacy_data);
@@ -322,7 +322,7 @@ struct partition_info
         }
         return output;
       }
-      if (e.get_code() == -ENOSPC) {
+      if (e.get_code() == ENOSPC) {
         // Retry ioctl with driver-returned number of elements.
         const uint32_t updated_output_size = arg.num_element * sizeof(*data);
 
@@ -681,8 +681,10 @@ struct event_trace
           auto& pci_dev_impl = get_pcidev_impl(device);
           pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
         } catch (const xrt_core::system_error& e) {
-          if(e.get_code() == -EINTR)
-            throw xrt_core::error("Query interrupted by user");
+          if (e.get_code() == EINTR)
+            throw xrt_core::system_error(EINTR, "Query interrupted by user");
+          else if (e.get_code() == EPERM)
+            throw xrt_core::system_error(EPERM, "Must be root to access event trace");
           throw std::runtime_error("Failed to get event_trace");
         }
 
@@ -694,7 +696,7 @@ struct event_trace
 
       }
       default:
-        throw xrt_core::error("Unsupported event_trace query key");
+        throw xrt_core::generic_error(ENOTSUP, "Unsupported event_trace query key");
     }
   }
 
@@ -714,12 +716,8 @@ struct event_trace
         .buffer = reinterpret_cast<uintptr_t>(&config)
       };
 
-      try {
-        auto& pci_dev_impl = get_pcidev_impl(device);
-        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-      } catch (const xrt_core::system_error& e) {
-        throw std::runtime_error("Failed to get event_trace version");
-      }
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
 
       memcpy(&version, &config.version, sizeof(version));
       return version;
@@ -740,19 +738,15 @@ struct event_trace
         .buffer = reinterpret_cast<uintptr_t>(&config)
       };
 
-      try {
-        auto& pci_dev_impl = get_pcidev_impl(device);
-        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-      } catch (const xrt_core::system_error& e) {
-        throw std::runtime_error("Failed to get event_trace state");
-      }
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
 
       state.action = config.status;
       state.categories = config.config;
       return state;
     }
     default:
-      throw xrt_core::error("Unsupported event_trace query key");
+      throw xrt_core::generic_error(ENOTSUP, "Unsupported event_trace query key");
     }
   }
 };
@@ -808,8 +802,10 @@ struct firmware_log
           auto& pci_dev_impl = get_pcidev_impl(device);
           pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
         } catch (const xrt_core::system_error& e) {
-          if(e.get_code() == -EINTR)
-            throw xrt_core::error("Query interrupted by user");
+          if (e.get_code() == EINTR)
+            throw xrt_core::system_error(EINTR, "Query interrupted by user");
+          else if (e.get_code() == EPERM)
+            throw xrt_core::system_error(EPERM, "Must be root to access firmware log");
           throw std::runtime_error("Failed to get firmware log");
         }
 
@@ -820,7 +816,7 @@ struct firmware_log
         return output;
       }
       default:
-        throw xrt_core::error("Unsupported firmware_log query key");
+        throw xrt_core::generic_error(ENOTSUP, "Unsupported firmware_log query key");
     }
   }
 
@@ -840,12 +836,8 @@ struct firmware_log
         .buffer = reinterpret_cast<uintptr_t>(&config)
       };
 
-      try {
-        auto& pci_dev_impl = get_pcidev_impl(device);
-        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-      } catch (const xrt_core::system_error& e) {
-        throw std::runtime_error("Failed to get firmware log version");
-      }
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
 
       memcpy(&version, &config.version, sizeof(version));
       return version;
@@ -866,19 +858,15 @@ struct firmware_log
         .buffer = reinterpret_cast<uintptr_t>(&config)
       };
 
-      try {
-        auto& pci_dev_impl = get_pcidev_impl(device);
-        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-      } catch (const xrt_core::system_error& e) {
-        throw std::runtime_error("Failed to get firmware log state");
-      }
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
 
       state.action = config.status;
       state.log_level = config.config;
       return state;
     }
     default:
-      throw xrt_core::error("Unsupported firmware_log query key");
+      throw xrt_core::generic_error(ENOTSUP, "Unsupported firmware_log query key");
     }
   }
 };
@@ -914,11 +902,11 @@ struct archive_path
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
         return std::string("amdxdna/bins/xrt_smi_npu3.a");
       default:
-        throw xrt_core::error("Unsupported hardware type");
+        throw xrt_core::generic_error(ENOTSUP, "Unsupported hardware type");
       }
     }
     default:
-      throw xrt_core::error("Unsupported archive_path query key");
+      throw xrt_core::generic_error(ENOTSUP, "Unsupported archive_path query key");
     }
   }
 };
@@ -1248,7 +1236,7 @@ struct aie_coredump
     try {
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
     } catch (const xrt_core::system_error& e) {
-      if (e.get_code() == -ENOSPC) {
+      if (e.get_code() == ENOSPC) {
         payload.resize(arg.element_size);
         dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
         dump->context_id = aie_coredump_args.context_id;
@@ -1256,6 +1244,8 @@ struct aie_coredump
         arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
         arg.element_size = static_cast<uint32_t>(payload.size());
         pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+      } else if (e.get_code() == EPERM) {
+        throw xrt_core::system_error(EPERM, "Must be root or context owner to access coredump");
       } else {
         throw;
       }
