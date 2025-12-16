@@ -77,40 +77,28 @@ struct mgmt_mbox_chann_info {
 
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor)
 {
+	u64 min_fw_version = ndev->priv->min_fw_version;
 	const struct aie2_fw_feature_tbl *feature;
 	struct amdxdna_dev *xdna = ndev->xdna;
+	u64 fw_version;
 
-	/*
-	 * The driver supported mailbox behavior is defined by
-	 * ndev->priv->protocol_major and protocol_minor.
-	 *
-	 * When major different, it means incompatible behavior.
-	 * When only minor different, the greater minor means more opcode etc.
-	 *
-	 * Thus,
-	 * 1. driver and fw major must be the same
-	 * 2. driver minor must smaller than or equal to fw minor
-	 */
-	if (ndev->priv->protocol_major != fw_major) {
-		XDNA_ERR(xdna, "Incompatible firmware protocol major %d minor %d",
-			 fw_major, fw_minor);
+	fw_version = AIE2_FW_VERSION(fw_major, fw_minor);
+
+	if (fw_version < min_fw_version) {
+		XDNA_ERR(xdna, "Firmware %d.%d below minimum %d.%d", fw_major, fw_minor,
+			 AIE2_FW_MAJOR(min_fw_version), AIE2_FW_MINOR(min_fw_version));
 		return -EINVAL;
 	}
 
-	/*
-	 * Greater protocol minor version means new messages/status/emun are
-	 * added into the firmware interface protocol.
-	 */
-	if (ndev->priv->protocol_minor > fw_minor) {
-		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
-		return -EINVAL;
-	}
+	/* Store unified version for later use */
+	ndev->mgmt_fw_version = fw_version;
 
-	for (feature = ndev->priv->fw_feature_tbl; feature && feature->min_minor;
-	     feature++) {
-		if (fw_minor < feature->min_minor)
+	/* Enable features based on unified version comparison */
+	for (feature = ndev->priv->fw_feature_tbl;
+	     feature && feature->min_fw_version; feature++) {
+		if (fw_version < feature->min_fw_version)
 			continue;
-		if (feature->max_minor > 0 && fw_minor > feature->max_minor)
+		if (feature->max_fw_version && fw_version > feature->max_fw_version)
 			continue;
 
 		set_bit(feature->feature, &ndev->feature_mask);
@@ -132,14 +120,16 @@ static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(xdna, "x2i ringbuf 0x%x", ndev->mgmt_info.x2i.rb_start_addr);
 	XDNA_DBG(xdna, "x2i rsize   0x%x", ndev->mgmt_info.x2i.rb_size);
 	XDNA_DBG(xdna, "x2i chann index 0x%x", ndev->mgmt_info.msix_id);
-	if (!ndev->mgmt_prot_major)
+
+	if (!ndev->mgmt_fw_version)
 		return;
 
-	XDNA_DBG(xdna, "mailbox protocol major 0x%x", ndev->mgmt_prot_major);
-	XDNA_DBG(xdna, "mailbox protocol minor 0x%x", ndev->mgmt_prot_minor);
+	XDNA_DBG(xdna, "mailbox protocol version %d.%d",
+		 AIE2_FW_MAJOR(ndev->mgmt_fw_version),
+		 AIE2_FW_MINOR(ndev->mgmt_fw_version));
 }
 
-static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
+static int aie2_mgmt_chann_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct mgmt_mbox_chann_info info_regs;
 	struct xdna_mailbox_chann_res *i2x;
@@ -186,9 +176,7 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	}
 
 	ndev->mgmt_info.msix_id  = info_regs.msi_id;
-	ndev->mgmt_prot_major = info_regs.prot_major;
-	ndev->mgmt_prot_minor = info_regs.prot_minor;
-	if (aie2_check_protocol(ndev, ndev->mgmt_prot_major, ndev->mgmt_prot_minor))
+	if (aie2_check_protocol(ndev, info_regs.prot_major, info_regs.prot_minor))
 		ret = -EINVAL;
 
 done:
@@ -254,14 +242,6 @@ static int aie2_xdna_reset(struct amdxdna_dev_hdl *ndev)
 static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
-
-	if (!ndev->mgmt_prot_major) {
-		ret = aie2_check_protocol_version(ndev);
-		if (ret) {
-			XDNA_ERR(ndev->xdna, "Check protocol version failed");
-			return ret;
-		}
-	}
 
 	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_INIT, NULL);
 	if (ret) {
@@ -403,9 +383,9 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto fini_smu;
 	}
 
-	ret = aie2_get_mgmt_chann_info(ndev);
+	ret = aie2_mgmt_chann_init(ndev);
 	if (ret) {
-		XDNA_ERR(xdna, "firmware mgmt info ret %d", ret);
+		XDNA_ERR(xdna, "firmware mgmt channel init failed, ret %d", ret);
 		goto stop_psp;
 	}
 
