@@ -1538,6 +1538,7 @@ int aie2_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_
 	req.context_id = context_id;
 	req.num_bufs = num_bufs;
 	req.list_addr = addr;
+	req.list_size = dma_hdl->size;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
