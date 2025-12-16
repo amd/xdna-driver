@@ -973,7 +973,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 	 * struct amdxdna_drm_query_telemetry_header sized bytes are reserved for metadata shared
 	 * between the driver and shim. Rest is for the data shared between the firmware and shim
 	 */
-	size = args->buffer_size - offset;
+	size = max_t(size_t, args->buffer_size - offset, SZ_8K);
 
 	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl))
@@ -1022,7 +1022,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 		goto free_kbuf;
 	}
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer + offset), buff, size))
+	if (copy_to_user(u64_to_user_ptr(args->buffer + offset), buff, args->buffer_size - offset))
 		ret = -EFAULT;
 
 free_kbuf:
@@ -1189,8 +1189,10 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	unsigned long id;
 	int ret = 0, idx;
 	u32 hw_i = 0;
+	size_t size;
 
-	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*r), DMA_FROM_DEVICE);
+	size = max_t(size_t, sizeof(*r), SZ_8K);
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl)) {
 		XDNA_ERR(xdna, "Failed to allocate memory for app health");
 		return PTR_ERR(dma_hdl);
@@ -1251,7 +1253,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 
 				mutex_lock(&xdna->dev_handle->aie2_lock);
 				ret = aie2_get_app_health(xdna->dev_handle, dma_hdl,
-							  ctx->priv->id, sizeof(*r));
+							  ctx->priv->id, size);
 				mutex_unlock(&xdna->dev_handle->aie2_lock);
 				if (ret) {
 					aie2_reset_app_health_report(r);
