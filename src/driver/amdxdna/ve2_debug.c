@@ -5,11 +5,14 @@
 #include <linux/device.h>
 #include <linux/version.h>
 #include <linux/vmalloc.h>
+#include <linux/timekeeping.h>
 
 #include "ve2_fw.h"
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
+#include "amdxdna_error.h"
+#include "amdxdna_drm.h"
 
 static int ve2_query_ctx_status_array(struct amdxdna_client *client,
 				      struct amdxdna_drm_hwctx_entry *tmp,
@@ -471,6 +474,35 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	return ret;
 }
 
+static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_async_error tmp;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_dev_hdl *hdl = xdna->dev_handle;
+	int ret = 0;
+	u32 i;
+
+	/* Find the first mgmtctx with a cached error */
+	for (i = 0; i < hdl->hwctx_limit; i++) {
+		mgmtctx = &hdl->ve2_mgmtctx[i];
+		if (!mgmtctx->xdna)
+			continue;
+
+		mutex_lock(&mgmtctx->async_errs_cache.lock);
+		if (mgmtctx->async_errs_cache.err.err_code) {
+			memcpy(&tmp, &mgmtctx->async_errs_cache.err, sizeof(tmp));
+			mutex_unlock(&mgmtctx->async_errs_cache.lock);
+			ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), 1);
+			return ret;
+		}
+		mutex_unlock(&mgmtctx->async_errs_cache.lock);
+	}
+
+	/* No error found - set num_element to 0 to indicate no errors */
+	args->num_element = 0;
+	return 0;
+}
+
 int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -493,13 +525,12 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 		ret = ve2_aie_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
-		XDNA_INFO(xdna, "Received DRM_AMDXDNA_HW_LAST_ASYNC_ERR\n");
-		XDNA_INFO(xdna, "TODO: skip calling ve2_get_array_async_error()\n");
-//		ret = ve2_get_array_async_error(xdna, args);
+		ret = ve2_get_array_async_error(xdna, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
+		break;
 	}
 
 	mutex_unlock(&xdna->dev_lock);
@@ -526,6 +557,7 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
+		break;
 	}
 
 	mutex_unlock(&xdna->dev_lock);

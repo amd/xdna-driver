@@ -9,6 +9,7 @@
 #include "amdxdna_of_drv.h"
 #include "ve2_host_queue.h"
 #include "ve2_fw.h"
+#include "amdxdna_error.h"
 
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
@@ -104,6 +105,7 @@ struct amdxdna_mgmtctx {
 	u32			is_partition_idle; /* Hardware sync required */
 	u32			is_context_req; /* Hardware sync required */
 	u32			is_idle_due_to_context; /* Hardware sync required */
+	struct amdxdna_async_err_cache	async_errs_cache; /* cache for async errors */
 };
 
 struct amdxdna_dev_hdl {
@@ -134,5 +136,4 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id);
 int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
-int ve2_get_aie_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 #endif /* _VE2_OF_H_ */

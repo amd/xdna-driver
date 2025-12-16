@@ -617,15 +617,46 @@ struct xocl_errors
       throw xrt_core::query::exception("Driver returned more than one async error entry");
 
     out_xcl_errors->num_err = arg.num_element;
-    std::cout << "++++ Async errors count: " << arg.num_element << std::endl;
-    for (uint32_t i = 0; i < arg.num_element; i++) {
-      out_xcl_errors->errors[i].err_code = data[i].err_code;
-      out_xcl_errors->errors[i].ts = data[i].ts_us;
-      out_xcl_errors->errors[i].ex_error_code = data[i].ex_err_code;
-      std::cout << "++++ i=" << i << ", err_code=" << data[i].err_code << std::endl;
-      std::cout << "++++ i=" << i << ", ts=" << data[i].ts_us << std::endl;
-      std::cout << "++++ i=" << i << ", ex_err_code=" << data[i].ex_err_code << std::endl;
+
+    // Dump errors to stderr if any found
+    if (arg.num_element > 0) {
+      std::cerr << "========================================\n";
+      std::cerr << "ERROR DETECTED: AIE Async Error Found!\n";
+      std::cerr << "========================================\n";
+      for (uint32_t i = 0; i < arg.num_element; i++) {
+        out_xcl_errors->errors[i].err_code = data[i].err_code;
+        out_xcl_errors->errors[i].ts = data[i].ts_us;
+        out_xcl_errors->errors[i].ex_error_code = data[i].ex_err_code;
+
+        // Dump detailed error information to stderr
+        std::cerr << "Error[" << i << "]:\n";
+
+        // Decode error code components
+        uint64_t err_code = data[i].err_code;
+        uint16_t err_num = (err_code >> 0) & 0xFFFF;
+        uint8_t err_driver = (err_code >> 16) & 0xF;
+        uint8_t err_severity = (err_code >> 24) & 0xF;
+        uint8_t err_module = (err_code >> 32) & 0xF;
+        uint8_t err_class = (err_code >> 40) & 0xF;
+
+        std::cerr << "  Error Code (combined): 0x" << std::hex << err_code << std::dec << "\n";
+        std::cerr << "    Error Number: " << err_num << "\n";
+        std::cerr << "    Error Driver: " << static_cast<int>(err_driver) << "\n";
+        std::cerr << "    Error Severity: " << static_cast<int>(err_severity) << "\n";
+        std::cerr << "    Error Module: " << static_cast<int>(err_module) << "\n";
+        std::cerr << "    Error Class: " << static_cast<int>(err_class) << "\n";
+        std::cerr << "  Timestamp (us): " << data[i].ts_us << "\n";
+        std::cerr << "  Extra Error Code: 0x" << std::hex << data[i].ex_err_code << std::dec << "\n";
+
+        // Decode extra error code (tile location)
+        uint8_t row = (data[i].ex_err_code >> 8) & 0xF;
+        uint8_t col = data[i].ex_err_code & 0xF;
+        std::cerr << "  Tile Location: Row=" << static_cast<int>(row)
+                   << ", Col=" << static_cast<int>(col) << "\n";
+      }
+      std::cerr << "========================================\n";
     }
+
     return output;
   }
 };

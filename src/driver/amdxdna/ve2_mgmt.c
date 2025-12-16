@@ -4,11 +4,13 @@
  */
 #include <linux/device.h>
 #include <linux/version.h>
+#include <linux/timekeeping.h>
 
 #include "amdxdna_ctx.h"
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
+#include "amdxdna_error.h"
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
@@ -702,31 +704,28 @@ static void ve2_aie_error_cb(void *arg)
 	struct aie_errors *aie_errs;
 	int i;
 
-	pr_info("%s: Invoked from AIE driver\n", __func__);
 	if (!mgmtctx) {
 		pr_err("%s: mgmt hwctx is not initialized\n", __func__);
 		return;
 	}
 
-	spin_lock(&mgmtctx->ctx_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
 
 	if (!mgmtctx->mgmt_aiedev) {
-		pr_err("%s: AIE partition is not loaded and it is pointing to NULL\n", __func__);
-		spin_unlock(&mgmtctx->ctx_lock);
+		XDNA_ERR(mgmtctx->xdna, "AIE partition is not loaded and it is pointing to NULL\n");
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
-
 	aie_errs = aie_get_errors(mgmtctx->mgmt_aiedev);
-	if (IS_ERR(aie_errs)) {
-		pr_err("%s: aie_get_errors failed\n", __func__);
-		spin_unlock(&mgmtctx->ctx_lock);
+	if (IS_ERR_OR_NULL(aie_errs)) {
+		XDNA_ERR(mgmtctx->xdna, "aie_get_errors returns NULL\n");
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
 
-	pr_info("%s: AIE asynchronous Error count: %d", __func__, aie_errs->num_err);
 	for (i = 0; i < aie_errs->num_err; i++) {
-		pr_info("%s: Get AIE asynchronous Error: "
-				"error_id %d Mod %d, category %d, Col %d, Row %d\n", __func__,
+		XDNA_ERR(mgmtctx->xdna, "Get AIE asynchronous Error: "
+			 "error_id %d Mod %d, category %d, Col %d, Row %d\n",
 				aie_errs->errors[i].error_id,
 				aie_errs->errors[i].module,
 				aie_errs->errors[i].category,
@@ -735,9 +734,81 @@ static void ve2_aie_error_cb(void *arg)
 			);
 	}
 
+	/* Cache the last async error */
+	if (aie_errs->num_err > 0) {
+		struct amdxdna_async_error *record = &mgmtctx->async_errs_cache.err;
+		struct aie_error *last_err = &aie_errs->errors[aie_errs->num_err - 1];
+		enum amdxdna_error_num err_num;
+		enum amdxdna_error_module err_mod;
+		u64 err_code;
+		u64 current_time_us = ktime_to_us(ktime_get_real());
+
+		/* Convert category to amdxdna error number */
+		switch (last_err->category) {
+		case 0: /* AIE_ERROR_SATURATION */
+			err_num = AMDXDNA_ERROR_NUM_AIE_SATURATION;
+			break;
+		case 1: /* AIE_ERROR_FP */
+			err_num = AMDXDNA_ERROR_NUM_AIE_FP;
+			break;
+		case 2: /* AIE_ERROR_STREAM */
+			err_num = AMDXDNA_ERROR_NUM_AIE_STREAM;
+			break;
+		case 3: /* AIE_ERROR_ACCESS */
+			err_num = AMDXDNA_ERROR_NUM_AIE_ACCESS;
+			break;
+		case 4: /* AIE_ERROR_BUS */
+			err_num = AMDXDNA_ERROR_NUM_AIE_BUS;
+			break;
+		case 5: /* AIE_ERROR_INSTRUCTION */
+			err_num = AMDXDNA_ERROR_NUM_AIE_INSTRUCTION;
+			break;
+		case 6: /* AIE_ERROR_ECC */
+			err_num = AMDXDNA_ERROR_NUM_AIE_ECC;
+			break;
+		case 7: /* AIE_ERROR_LOCK */
+			err_num = AMDXDNA_ERROR_NUM_AIE_LOCK;
+			break;
+		case 8: /* AIE_ERROR_DMA */
+			err_num = AMDXDNA_ERROR_NUM_AIE_DMA;
+			break;
+		case 9: /* AIE_ERROR_MEM_PARITY */
+			err_num = AMDXDNA_ERROR_NUM_AIE_MEM_PARITY;
+			break;
+		default:
+			err_num = AMDXDNA_ERROR_NUM_UNKNOWN;
+			break;
+		}
+
+		/* Convert module to amdxdna error module */
+		switch (last_err->module) {
+		case 0: /* AIE_MEM_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_MEMORY;
+			break;
+		case 1: /* AIE_CORE_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_CORE;
+			break;
+		case 2: /* AIE_PL_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_PL;
+			break;
+		default:
+			err_mod = AMDXDNA_ERROR_MODULE_UNKNOWN;
+			break;
+		}
+
+		err_code = AMDXDNA_CRITICAL_ERROR_CODE_BUILD(err_num, err_mod);
+
+		mutex_lock(&mgmtctx->async_errs_cache.lock);
+		record->ts_us = current_time_us;
+		record->err_code = err_code;
+		record->ex_err_code = AMDXDNA_ERROR_EXTRA_CODE_BUILD(last_err->loc.row,
+								     last_err->loc.col);
+		mutex_unlock(&mgmtctx->async_errs_cache.lock);
+	}
+
 	aie_free_errors(aie_errs);
 
-	spin_unlock(&mgmtctx->ctx_lock);
+	mutex_unlock(&mgmtctx->ctx_lock);
 }
 
 /**
@@ -782,6 +853,8 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		nhwctx->args = &mgmtctx->args;
 		nhwctx->aie_dev = mgmtctx->mgmt_aiedev;
 		mutex_init(&mgmtctx->ctx_lock);
+		mutex_init(&mgmtctx->async_errs_cache.lock);
+		memset(&mgmtctx->async_errs_cache.err, 0, sizeof(mgmtctx->async_errs_cache.err));
 		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 		/* Create workqueue for scheduling the command */
 		mgmtctx->mgmtctx_workq = create_workqueue("ve2_mgmtctx_scheduler");
@@ -826,6 +899,7 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
 	int num_rows = xdna->dev_handle->aie_dev_info.rows;
+
 	for (int col = 0; col < nhwctx->num_col; ++col) {
 		int rel_col = col + nhwctx->start_col;
 
