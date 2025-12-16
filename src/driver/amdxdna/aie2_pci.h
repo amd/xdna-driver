@@ -520,6 +520,7 @@ int aie2_frame_boundary_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev,
 				struct amdxdna_ctx *ctx, u32 us);
 int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev);
+int aie2_calibrate_time(struct amdxdna_dev_hdl *ndev);
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid);
 int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			     u32 type, u32 size, struct aie_version *version);

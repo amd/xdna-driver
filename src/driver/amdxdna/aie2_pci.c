@@ -279,6 +279,12 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	ret = aie2_calibrate_time(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Calibrate system clock failed");
+		return ret;
+	}
+
 	return 0;
 }
 
