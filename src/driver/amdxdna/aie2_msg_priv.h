@@ -749,6 +749,7 @@ struct get_coredump_req {
 	u32			context_id;
 	u32			num_bufs;
 	u64			list_addr;
+	u32			list_size;
 } __packed;
 
 struct get_coredump_resp {
