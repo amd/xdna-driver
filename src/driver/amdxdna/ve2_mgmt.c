@@ -778,6 +778,10 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
 	rel_size = ve2_partition_coredump(aie_dev, size, buffer);
+	if (rel_size < 0) {
+		XDNA_ERR(xdna, "Failed to read coredump, err:%d\n", rel_size);
+		return -EINVAL;
+	}
 	XDNA_DBG(xdna, "Reading coredump ret:%d\n", rel_size);
 
 	return rel_size;
