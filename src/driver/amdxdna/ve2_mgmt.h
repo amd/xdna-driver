@@ -117,6 +117,12 @@ ve2_partition_read(struct device *aie_dev,
 }
 
 static inline int
+ve2_partition_coredump(struct device *aie_dev, size_t size, void *buf)
+{
+	return aie_partition_coredump(aie_dev, size, buf);
+}
+
+static inline int
 ve2_partition_initialize(struct device *dev,
 			 struct aie_partition_init_args *args)
 {
