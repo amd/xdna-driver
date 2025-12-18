@@ -9,11 +9,12 @@ set -e
 # ---- Locate kernel source tree -----------------------------------------
 
 # Priority:
-#   1) $KERNEL_SRC (can set this from CMake)
-#   2) $kernel_source_dir (DKMS gives this)
-#   3) /lib/modules/$(uname -r)/build (Normal build flow sets this)
-KERNEL_SRC="${KERNEL_SRC:-${kernel_source_dir:-/lib/modules/$(uname -r)/build}}"
+#   1) $KERNEL_VER (Can set this from CMake)
+#   2) $kernelver (DKMS gives this)
+#   3) $(uname -r) (Fall back to current running kernel)
+KERNEL_VER="${KERNEL_VER:-${kernelver:-$(uname -r)}}"
 
+KERNEL_SRC="${KERNEL_SRC:-/lib/modules/${KERNEL_VER}/build}"
 if [ ! -d "$KERNEL_SRC/include/linux" ]; then
     echo "ERROR: Cannot find kernel headers under $KERNEL_SRC" >&2
     exit 1
