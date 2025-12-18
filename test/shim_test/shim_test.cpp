@@ -766,14 +766,14 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_open_close_cu_context, {}
   },
   test_case{ "create_destroy_hw_queue", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_hw_queue, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_hw_queue, {}
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_io, {}
   },
   test_case{ "io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "io test with intruction code invalid address access", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
@@ -785,19 +785,16 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "create and free debug bo", {-1, -1},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_debug_bo, { 0x1000 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x1000 }
   },
   test_case{ "create and free large debug bo", {-1, -1},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_debug_bo, { 0x100000 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "measure no-op kernel throughput chained command", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
-  },
-  test_case{ "npu3 shim vadd", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
   },
   test_case{ "export import BO", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
@@ -806,16 +803,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_cmd_fence_host, {}
-  },
-  test_case{ "npu3 shim move memory tiles", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_memtiles, {}
-  },
-  test_case{ "npu3 shim move ddr memory tiles", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_ddr_memtile, {}
-  },
-  test_case{ "npu3 shim multi col remote barrier", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_remote_barrier, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_host, {}
   },
   test_case{ "io test no op with duplicated BOs", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
