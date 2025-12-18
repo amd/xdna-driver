@@ -70,6 +70,12 @@ public:
   virtual void
   verify_result();
 
+  void
+  cache_cmd_header();
+
+  void
+  restore_cmd_header();
+
   static const char *
   bo_type2name(int type);
 
@@ -90,6 +96,7 @@ protected:
   const int m_FLAG_OPT =      1 << 1;
   const int m_FLAG_NO_FILL =  1 << 2;
   const int m_FLAG_DEV_BUF =  1 << 3;
+  uint32_t m_cached_cmd_header = 0;
 
   void
   create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags);
@@ -119,6 +126,15 @@ class elf_io_test_bo_set : public io_test_bo_set_base
 {
 public:
   elf_io_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(hw_ctx& hwctx, bool dump) override;
+};
+
+class elf_full_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_full_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
