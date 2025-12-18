@@ -253,6 +253,31 @@ static void amdxdna_dpt_drain_pending_data(struct amdxdna_dpt *dpt)
 		amdxdna_dpt_fetch_and_dump_to_dmesg(dpt);
 }
 
+static void amdxdna_dpt_timer_get(struct amdxdna_dpt *dpt)
+{
+	mutex_lock(&dpt->timer_lock);
+	if (!refcount_read(&dpt->timer_refs)) {
+		refcount_set(&dpt->timer_refs, 1);
+		mod_timer(&dpt->timer, jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
+	} else {
+		refcount_inc(&dpt->timer_refs);
+	}
+	mutex_unlock(&dpt->timer_lock);
+}
+
+static void amdxdna_dpt_timer_put(struct amdxdna_dpt *dpt)
+{
+	mutex_lock(&dpt->timer_lock);
+	if (WARN_ON(!refcount_read(&dpt->timer_refs))) {
+		mutex_unlock(&dpt->timer_lock);
+		return;
+	}
+
+	if (refcount_dec_and_test(&dpt->timer_refs))
+		timer_delete_sync(&dpt->timer);
+	mutex_unlock(&dpt->timer_lock);
+}
+
 static void amdxdna_dpt_worker(struct work_struct *w)
 {
 	struct amdxdna_dpt *dpt = container_of(w, struct amdxdna_dpt, work);
@@ -272,22 +297,8 @@ static void amdxdna_dpt_timer(struct timer_list *t)
 #else
 	queue_work(system_wq, &dpt->work);
 #endif
+
 	mod_timer(&dpt->timer, jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
-}
-
-static void amdxdna_dpt_enable_polling(struct amdxdna_dpt *dpt, bool enable)
-{
-	if (dpt->polling == enable)
-		return;
-
-	if (enable) {
-		timer_setup(&dpt->timer, amdxdna_dpt_timer, 0);
-		mod_timer(&dpt->timer, jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
-	} else {
-		timer_delete_sync(&dpt->timer);
-		cancel_work_sync(&dpt->work);
-	}
-	dpt->polling = enable;
 }
 
 static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
@@ -336,8 +347,11 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
 	log_hdl->xdna = xdna;
 	log_hdl->tail = 0;
 	log_hdl->head = 0;
+	mutex_init(&log_hdl->timer_lock);
+	refcount_set(&log_hdl->timer_refs, 0);
 	init_waitqueue_head(&log_hdl->wait);
 	INIT_WORK(&log_hdl->work, amdxdna_dpt_worker);
+	timer_setup(&log_hdl->timer, amdxdna_dpt_timer, 0);
 	xdna->fw_log = log_hdl;
 
 	ret = xdna->dev_info->ops->fw_log_init(xdna, fw_log_size, log_level);
@@ -354,9 +368,9 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to init FW logging IRQ: %d", ret);
 
-	/* Enable polling, if IRQ initialization fails or enabled by default */
+	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
 	if (ret || poll_fw_log)
-		amdxdna_dpt_enable_polling(log_hdl, true);
+		amdxdna_dpt_timer_get(log_hdl);
 
 	amdxdna_dpt_read_metadata(log_hdl);
 
@@ -392,8 +406,12 @@ static int amdxdna_fw_log_fini(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Failed to disable FW logging: %d", ret);
 
 	amdxdna_dpt_irq_fini(log_hdl);
-	amdxdna_dpt_enable_polling(log_hdl, false);
 	amdxdna_dpt_dump_to_dmesg(log_hdl, false);
+	/* Wake up any waiters and force-stop timer */
+	log_hdl->enabled = false;
+	wake_up_all(&log_hdl->wait);
+	timer_delete_sync(&log_hdl->timer);
+	cancel_work_sync(&log_hdl->work);
 	amdxdna_mgmt_buff_free(log_hdl->dma_hdl);
 	kfree(log_hdl);
 	xdna->fw_log = NULL;
@@ -428,8 +446,20 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt, struct amdxdna_drm_get_
 
 	if (footer.offset == READ_ONCE(dpt->tail)) {
 		if (footer.watch) {
+			amdxdna_dpt_timer_get(dpt);
 			ret = wait_event_interruptible(dpt->wait,
+						       !dpt->enabled ||
 						       footer.offset != READ_ONCE(dpt->tail));
+
+			amdxdna_dpt_timer_put(dpt);
+
+			/* Woken up by fini path tearing down the DPT */
+			if (!dpt->enabled) {
+				footer.size = 0;
+				ret = -ESHUTDOWN;
+				goto exit;
+			}
+
 			if (ret) {
 				XDNA_WARN(xdna, "%s wait for data interrupted by signal: %d",
 					  dpt->name, ret);
@@ -506,8 +536,11 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna, u32 categories)
 	trace_hdl->xdna = xdna;
 	trace_hdl->tail = 0;
 	trace_hdl->head = 0;
+	mutex_init(&trace_hdl->timer_lock);
+	refcount_set(&trace_hdl->timer_refs, 0);
 	init_waitqueue_head(&trace_hdl->wait);
 	INIT_WORK(&trace_hdl->work, amdxdna_dpt_worker);
+	timer_setup(&trace_hdl->timer, amdxdna_dpt_timer, 0);
 	xdna->fw_trace = trace_hdl;
 
 	ret = xdna->dev_info->ops->fw_trace_init(xdna, fw_trace_size, categories);
@@ -524,9 +557,9 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna, u32 categories)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to init FW trace IRQ: %d", ret);
 
-	/* Enable polling, if IRQ initialization fails or enabled by default */
+	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
 	if (ret || poll_fw_trace)
-		amdxdna_dpt_enable_polling(trace_hdl, true);
+		amdxdna_dpt_timer_get(trace_hdl);
 
 	amdxdna_dpt_read_metadata(trace_hdl);
 
@@ -562,8 +595,12 @@ static int amdxdna_fw_trace_fini(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Failed to disable FW trace: %d", ret);
 
 	amdxdna_dpt_irq_fini(trace_hdl);
-	amdxdna_dpt_enable_polling(trace_hdl, false);
 	amdxdna_dpt_dump_to_dmesg(trace_hdl, false);
+	/* Wake up any waiters and force-stop timer */
+	trace_hdl->enabled = false;
+	wake_up_all(&trace_hdl->wait);
+	timer_delete_sync(&trace_hdl->timer);
+	cancel_work_sync(&trace_hdl->work);
 	amdxdna_mgmt_buff_free(trace_hdl->dma_hdl);
 	kfree(trace_hdl);
 	xdna->fw_trace = NULL;
@@ -587,12 +624,14 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool dump)
 			XDNA_ERR(dpt->xdna, "Failed to allocate FW fetch buffer");
 			return -ENOMEM;
 		}
-		amdxdna_dpt_enable_polling(dpt, true);
+
+		amdxdna_dpt_timer_get(dpt);
+
 		/* Drain any data already logged in the buffer before dump_to_dmesg was enabled */
 		amdxdna_dpt_drain_pending_data(dpt);
 	} else {
-		if (!poll_fw_log)
-			amdxdna_dpt_enable_polling(dpt, false);
+		amdxdna_dpt_timer_put(dpt);
+
 		kfree(dpt->local_buffer);
 		dpt->head = 0;
 	}
@@ -682,8 +721,8 @@ int amdxdna_dpt_suspend(struct amdxdna_dev *xdna)
 int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
 {
 	if (!xdna->fw_log) {
-		XDNA_ERR(xdna, "FW logging not enabled");
-		return -EPERM;
+		XDNA_DBG(xdna, "FW logging not enabled");
+		return -ESHUTDOWN;
 	}
 
 	return amdxdna_dpt_get_data(xdna->fw_log, args);
@@ -723,8 +762,8 @@ exit:
 int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
 {
 	if (!xdna->fw_trace) {
-		XDNA_ERR(xdna, "FW trace not enabled");
-		return -EPERM;
+		XDNA_DBG(xdna, "FW trace not enabled");
+		return -ESHUTDOWN;
 	}
 
 	return amdxdna_dpt_get_data(xdna->fw_trace, args);
