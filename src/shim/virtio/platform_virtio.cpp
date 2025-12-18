@@ -212,7 +212,7 @@ register_resp_buf(int dev_fd, uint32_t res_id)
 uint32_t
 get_capset(int dev_fd)
 {
-  virgl_renderer_capset_drm caps = {};
+  vaccel_drm_capset caps = {};
   drm_virtgpu_get_caps args = {
     .cap_set_id = VIRTGPU_DRM_CAPSET_DRM,
     .cap_set_ver = 0,
@@ -223,13 +223,37 @@ get_capset(int dev_fd)
   return caps.context_type;
 }
 
-shim_xdna::bo_id
-drm_bo_alloc(int fd, size_t size)
+static bool
+get_host_visible(int dev_fd)
 {
+  int host_visible = 0;
+  drm_virtgpu_getparam args = {
+    .param = VIRTGPU_PARAM_HOST_VISIBLE,
+    .value = reinterpret_cast<uint64_t>(&host_visible),
+  };
+
+  // Use ioctl directly since this is optional - don't throw on failure
+  ioctl(dev_fd, DRM_IOCTL_VIRTGPU_GETPARAM, &args);
+  shim_debug("platform_virtio: Host visible: %d", host_visible);
+  return host_visible != 0;
+}
+
+shim_xdna::bo_id
+drm_bo_alloc(int fd, size_t size, uint32_t type, bool use_host_mem = false)
+{
+  uint32_t blob_mem, blob_id = 0;
+  if (use_host_mem) {
+    blob_mem = VIRTGPU_BLOB_MEM_HOST3D;
+    blob_id = type;
+  }
+  else {
+    blob_mem = VIRTGPU_BLOB_MEM_GUEST;
+  }
   drm_virtgpu_resource_create_blob args = {
-    .blob_mem   = VIRTGPU_BLOB_MEM_GUEST,
+    .blob_mem   = blob_mem,
     .blob_flags = VIRTGPU_BLOB_FLAG_USE_MAPPABLE,
     .size       = size,
+    .blob_id    = blob_id,
   };
   ioctl(fd, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &args);
   return {args.res_handle, args.bo_handle};
@@ -287,7 +311,7 @@ response_buffer(int dev_fd, size_t size)
   , m_size(size)
 {
   // Create response buffer
-  m_id = drm_bo_alloc(m_dev_fd, m_size);
+  m_id = drm_bo_alloc(m_dev_fd, m_size, AMDXDNA_BO_SHARE, false);
 
   // Mmap response buffer
   uint64_t mapoff;
@@ -350,6 +374,9 @@ drv_open(const std::string& sysfs_name) const
   auto fd = dev_fd();
   if (get_capset(fd) != VIRTGPU_DRM_CONTEXT_AMDXDNA)
     shim_err(EINVAL, "%s is not NPU device", sysfs_name.c_str());
+
+  // Check if host memory is available via VIRTGPU_GETPARAM
+  m_use_hostmem = get_host_visible(fd);
 
   set_virtgpu_context(fd);
   m_resp_buf = std::make_unique<response_buffer>(fd);
@@ -469,7 +496,7 @@ create_bo(bo_info& arg) const
   auto fd = dev_fd();
 
   if (arg.type != AMDXDNA_BO_DEV) {
-    id = drm_bo_alloc(fd, arg.size);
+    id = drm_bo_alloc(fd, arg.size, arg.type, m_use_hostmem);
     arg.bo.res_id = id.handle;
     arg.map_offset = drm_bo_get_map_offset(fd, id.handle);
   } else {
