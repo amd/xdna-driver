@@ -67,7 +67,7 @@ xclbin_info xclbin_infos[] = {
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:vadd", {0xffffffff} },
+      { "DPU:dpu", {0xffffffff} },
     },
     .workspace = "local_shim_test_data/elf_vadd_npu3",
     .data = "",
@@ -78,7 +78,7 @@ xclbin_info xclbin_infos[] = {
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:nop", {0xffffffff} },
+      { "DPU:dpu", {0xffffffff} },
     },
     .workspace = "local_shim_test_data/elf_no_op_npu3",
     .data = "",
@@ -89,7 +89,7 @@ xclbin_info xclbin_infos[] = {
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:vadd", {0xffffffff} },
+      { "DPU:dpu", {0xffffffff} },
     },
     .workspace = "local_shim_test_data/elf_vadd_npu3",
     .data = "",
@@ -100,7 +100,7 @@ xclbin_info xclbin_infos[] = {
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
-      { "DPU:nop", {0xffffffff} },
+      { "DPU:dpu", {0xffffffff} },
     },
     .workspace = "local_shim_test_data/elf_no_op_npu3",
     .data = "",
