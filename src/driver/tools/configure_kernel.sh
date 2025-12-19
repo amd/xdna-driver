@@ -22,7 +22,7 @@ fi
 
 # ---- Output header path ------------------------------------------------
 
-OUT="driver/amdxdna/config_kernel.h"
+OUT="${OUT:-driver/amdxdna/config_kernel.h}"
 
 # ---- Helper: try to compile a small snippet ----------------------------
 
