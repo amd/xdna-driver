@@ -23,16 +23,6 @@
  *  pair as a key to select the devices.
  */
 static const struct pci_device_id pci_ids[] = {
-#ifdef AMDXDNA_NPU3_LEGACY
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1569) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_ATI, 0x1640) },
-#endif
-#ifdef AMDXDNA_NPU3
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f1) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f3) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1B0A) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1B0C) },
-#endif
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_ANY_ID),
 		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
 		.class_mask = 0xFFFF00,
@@ -45,16 +35,10 @@ MODULE_DEVICE_TABLE(pci, pci_ids);
 static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x1502, 0x0,  &dev_npu1_info },
 	{ 0x17f0, 0x0,  &dev_npu2_info },
-#ifdef AMDXDNA_NPU3_LEGACY
-	{ 0x1569, 0x0,  &dev_npu3_info },
-	{ 0x1640, 0x0,  &dev_npu3_info },
-#endif
-#ifdef AMDXDNA_NPU3
 	{ 0x17f1, 0x10,  &dev_npu3_info },
 	{ 0x17f3, 0x10,  &dev_npu3_info },
 	{ 0x1B0A, 0x00,  &dev_npu3_info },
 	{ 0x1B0C, 0x00,  &dev_npu3_info },
-#endif
 	{ 0x17f0, 0x10, &dev_npu4_info },
 	{ 0x17f0, 0x11, &dev_npu5_info },
 	{ 0x17f0, 0x20, &dev_npu6_info },

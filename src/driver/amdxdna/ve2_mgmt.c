@@ -682,7 +682,7 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	/* Race condition: what happen if more command completed bet this point and
 	 * point waiq get executed(check for command completed). This will only happen
 	 * when cert is not in sleep ... that means we got completion interrupt..
-	 * if cert move forwared to execute more command that is the expected behaviour..
+	 * if cert move forwarded to execute more command that is the expected behaviour..
 	 * max to max we will go out of order.
 	 */
 	pop_from_ctx_command_fifo_till(mgmtctx, hwctx, read_index);
