@@ -1,7 +1,6 @@
-/*
- * Copyright 2022 Google LLC
- * SPDX-License-Identifier: MIT
- */
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright 2022 Google LLC
 
 #ifndef DRM_HW_H_
 #define DRM_HW_H_

@@ -1,7 +1,5 @@
-/*
- * Copyright 2025 Advanced Micro Devices, Inc.
- * SPDX-License-Identifier: MIT
- */
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef AMDXDNA_PROTO_H_
 #define AMDXDNA_PROTO_H_
@@ -157,8 +155,8 @@ struct amdxdna_ccmd_exec_cmd_rsp {
 struct amdxdna_ccmd_wait_cmd_req {
     struct vdrm_ccmd_req hdr;
     uint64_t seq;
-    /* absolute timeout */
-	int64_t timeout_nsec;
+    /* absolute timeout in nanoseconds (absolute timestamp, not a duration) */
+    int64_t timeout_nsec;
     uint32_t ctx_handle;
     uint32_t _pad;
 };
