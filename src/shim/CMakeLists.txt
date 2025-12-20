@@ -46,6 +46,7 @@ target_include_directories(${XDNA_TARGET} PRIVATE
   ${XRT_SOURCE_DIR}/runtime_src/core/common/gsl/include
   ${XRT_BINARY_DIR}/gen
   ${CMAKE_CURRENT_SOURCE_DIR}/../include/uapi
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vxdna/src
   )
 
 # driver plugin will be loaded while xrt_core is still being

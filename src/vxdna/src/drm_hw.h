@@ -1,7 +1,6 @@
-/*
- * Copyright 2022 Google LLC
- * SPDX-License-Identifier: MIT
- */
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright 2022 Google LLC
 
 #ifndef DRM_HW_H_
 #define DRM_HW_H_
@@ -22,7 +21,7 @@
 #define VIRTGPU_CAP_BOOL_TRUE                 1
 
 
-struct virgl_renderer_capset_drm {
+struct vaccel_drm_capset {
    uint32_t wire_format_version;
    /* Underlying drm device version: */
    uint32_t version_major;
@@ -33,34 +32,6 @@ struct virgl_renderer_capset_drm {
 #define VIRTGPU_DRM_CONTEXT_AMDXDNA  3
    uint32_t context_type;
    uint32_t pad;
-   union {
-      struct {
-         uint32_t has_cached_coherent;
-         uint32_t priorities;
-         uint64_t va_start;
-         uint64_t va_size;
-         uint32_t gpu_id;
-         uint32_t gmem_size;
-         uint64_t gmem_base;
-         uint64_t chip_id;
-         uint32_t max_freq;
-         uint32_t highest_bank_bit;
-         uint64_t ubwc_swizzle;
-         uint64_t macrotile_mode;
-         uint32_t has_raytracing;  /* VIRTGPU_CAP_BOOL_x */
-         uint32_t has_preemption;  /* VIRTGPU_CAP_BOOL_x */
-         uint64_t uche_trap_base;
-      } msm;  /* context_type == VIRTGPU_DRM_CONTEXT_MSM */
-      struct {
-         uint32_t address32_hi;
-         uint32_t __pad;
-#ifdef ENABLE_DRM_AMDGPU
-         struct amdgpu_buffer_size_alignments alignments;
-         struct amdgpu_gpu_info gpu_info;
-#endif
-         char marketing_name[128];
-      } amdgpu;   /* context_type == VIRTGPU_DRM_CONTEXT_AMDGPU */
-   } u;
 };
 
 /**
