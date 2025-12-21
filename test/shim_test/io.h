@@ -124,6 +124,15 @@ public:
   init_cmd(hw_ctx& hwctx, bool dump) override;
 };
 
+class elf_full_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_full_io_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(hw_ctx& hwctx, bool dump) override;
+};
+
 class elf_preempt_io_test_bo_set : public io_test_bo_set_base
 {
 public:

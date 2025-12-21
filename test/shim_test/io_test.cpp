@@ -43,6 +43,9 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
     base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
     break;
   case KERNEL_TYPE_TXN_PREEMPT:
+  case KERNEL_TYPE_TXN_FULL_ELF:
+    base = std::make_unique<elf_full_io_test_bo_set>(dev, xclbin ? std::string(xclbin) : get_xclbin_name(dev));
+    break;
   case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
     base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
     break;
