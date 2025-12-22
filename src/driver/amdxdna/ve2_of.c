@@ -271,6 +271,7 @@ static void ve2_fini(struct amdxdna_dev *xdna)
 
 	ve2_cma_mem_region_remove(xdna);
 }
+
 const struct amdxdna_dev_ops ve2_ops = {
 	.init		= ve2_init,
 	.fini		= ve2_fini,

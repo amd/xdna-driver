@@ -47,6 +47,10 @@ private:
   // Lock to serialize hypercall.
   mutable std::mutex m_lock;
 
+  // indicate if host memory is used for shared memory
+  // Setup once and used forever
+  mutable bool m_use_hostmem = false;
+
   void
   hcall(void *req, void *out_buf, size_t out_size) const;
 

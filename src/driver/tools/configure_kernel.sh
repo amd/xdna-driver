@@ -9,11 +9,12 @@ set -e
 # ---- Locate kernel source tree -----------------------------------------
 
 # Priority:
-#   1) $KERNEL_SRC (can set this from CMake)
-#   2) $kernel_source_dir (DKMS gives this)
-#   3) /lib/modules/$(uname -r)/build (Normal build flow sets this)
-KERNEL_SRC="${KERNEL_SRC:-${kernel_source_dir:-/lib/modules/$(uname -r)/build}}"
+#   1) $KERNEL_VER (Can set this from CMake)
+#   2) $kernelver (DKMS gives this)
+#   3) $(uname -r) (Fall back to current running kernel)
+KERNEL_VER="${KERNEL_VER:-${kernelver:-$(uname -r)}}"
 
+KERNEL_SRC="${KERNEL_SRC:-/lib/modules/${KERNEL_VER}/build}"
 if [ ! -d "$KERNEL_SRC/include/linux" ]; then
     echo "ERROR: Cannot find kernel headers under $KERNEL_SRC" >&2
     exit 1
@@ -21,7 +22,7 @@ fi
 
 # ---- Output header path ------------------------------------------------
 
-OUT="driver/amdxdna/config_kernel.h"
+OUT="${OUT:-driver/amdxdna/config_kernel.h}"
 
 # ---- Helper: try to compile a small snippet ----------------------------
 
@@ -178,9 +179,14 @@ EOF
 # #define MODULE_IMPORT_NS(ns)
 try_compile HAVE_6_13_MODULE_IMPORT_NS << 'EOF'
 #include <linux/module.h>
+#include <linux/dma-buf.h>
 int main(void)
 {
 	MODULE_IMPORT_NS("DMA_BUF");
+
+	struct dma_buf *a = NULL;
+	struct iosys_map *b = NULL;
+	(void)dma_buf_vmap(a, b);
 	return 0;
 }
 EOF

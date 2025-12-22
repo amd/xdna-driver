@@ -35,6 +35,7 @@ const struct msg_op_ver npu4_msg_op_tbl[] = {
 	{ AIE2_FW_VERSION(6, 19), MSG_OP_STOP_FW_TRACE },
 	{ AIE2_FW_VERSION(6, 19), MSG_OP_SET_FW_TRACE_CATEGORIES },
 	{ AIE2_FW_VERSION(6, 24), MSG_OP_GET_COREDUMP },
+	{ AIE2_FW_VERSION(6, 24), MSG_OP_CALIBRATE_TIME },
 	{ 0 },
 };
 

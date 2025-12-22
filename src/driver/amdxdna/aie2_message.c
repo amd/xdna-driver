@@ -303,6 +303,28 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+int aie2_calibrate_time(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE2_MSG(calibrate_time, MSG_OP_CALIBRATE_TIME);
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_CALIBRATE_TIME)) {
+		XDNA_DBG(ndev->xdna, "Calibrate time not supported, skipped");
+		return 0;
+	}
+
+	req.timestamp_ns = ktime_get_real_ns();
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Calibrate time failed, ret %d", ret);
+		return ret;
+	}
+
+	XDNA_DBG(ndev->xdna, "System clock calibrated with firmware");
+	return 0;
+}
+
 int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			     u32 type, u32 size, struct aie_version *version)
 {
@@ -1538,6 +1560,7 @@ int aie2_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_
 	req.context_id = context_id;
 	req.num_bufs = num_bufs;
 	req.list_addr = addr;
+	req.list_size = dma_hdl->size;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {

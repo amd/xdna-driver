@@ -14,7 +14,7 @@
 #include "ve2_res_solver.h"
 
 #define AMDXDNA_DRIVER_NAME "amdxdna_of"
-#define AMDXDNA_VE2_AUTOSUSPEND_DELAY       5000 /* miliseconds */
+#define AMDXDNA_VE2_AUTOSUSPEND_DELAY       5000 /* milliseconds */
 
 /* Add device info below */
 extern const struct amdxdna_dev_info dev_ve2_info;

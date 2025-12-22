@@ -320,6 +320,37 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 
+/*
+ * Returns true if caller is root (CAP_SYS_ADMIN).
+ * Use this for device-wide operations that don't have a context.
+ */
+bool amdxdna_admin_access_allowed(struct amdxdna_dev *xdna)
+{
+	bool is_admin = capable(CAP_SYS_ADMIN);
+
+	XDNA_DBG(xdna, "Admin access check: is_admin=%d", is_admin);
+	return is_admin;
+}
+
+/*
+ * Returns true if caller is root (CAP_SYS_ADMIN) or, when root_only is false,
+ * if the caller owns the context.
+ */
+bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only)
+{
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	bool is_admin = amdxdna_admin_access_allowed(xdna);
+	bool is_owner;
+
+	if (root_only)
+		return is_admin;
+
+	is_owner = uid_eq(current_euid(), ctx->client->uid);
+	XDNA_DBG(xdna, "Access check: is_admin=%d is_owner=%d", is_admin, is_owner);
+
+	return is_admin || is_owner;
+}
+
 void amdxdna_stats_start(struct amdxdna_client *client)
 {
 	ktime_t now;

@@ -684,7 +684,7 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	/* Race condition: what happen if more command completed bet this point and
 	 * point waiq get executed(check for command completed). This will only happen
 	 * when cert is not in sleep ... that means we got completion interrupt..
-	 * if cert move forwared to execute more command that is the expected behaviour..
+	 * if cert move forwarded to execute more command that is the expected behaviour..
 	 * max to max we will go out of order.
 	 */
 	pop_from_ctx_command_fifo_till(mgmtctx, hwctx, read_index);
@@ -898,55 +898,12 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 	}
 
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);
-	int num_rows = xdna->dev_handle->aie_dev_info.rows;
-
-	for (int col = 0; col < nhwctx->num_col; ++col) {
-		int rel_col = col + nhwctx->start_col;
-
-		for (int row = 0; row < num_rows; ++row) {
-			if (row == 0) {
-				int ret = ve2_partition_read(aie_dev, rel_col, row, 0,
-							     TILE_ADDRESS_SPACE, GET_TILE_ADDRESS
-							     (buffer, num_rows, row, col));
-				XDNA_DBG(xdna, "Read shim tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret);
-				if (ret < 0)
-					return -EINVAL;
-
-			} else if (row == 1 || row == 2) {
-				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
-						MEM_TILE_MEMORY_SIZE, GET_TILE_ADDRESS
-						(buffer, num_rows, row, col));
-				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
-						MEM_TILE_FIRST_REG_ADDRESS,
-						TILE_ADDRESS_SPACE - MEM_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, num_rows, row, col)
-						+ MEM_TILE_FIRST_REG_ADDRESS);
-				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret1);
-				XDNA_DBG(xdna, "Read mem tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret2);
-				if (ret1 < 0 || ret2 < 0)
-					return -EINVAL;
-			} else if (row > 2) {
-				int ret1 = ve2_partition_read(aie_dev, rel_col, row, 0,
-						CORE_TILE_MEMORY_SIZE,
-						GET_TILE_ADDRESS(buffer, num_rows, row, col));
-				int ret2 = ve2_partition_read(aie_dev, rel_col, row,
-						CORE_TILE_FIRST_REG_ADDRESS,
-						TILE_ADDRESS_SPACE - CORE_TILE_FIRST_REG_ADDRESS,
-						GET_TILE_ADDRESS(buffer, num_rows, row, col)
-							      + CORE_TILE_FIRST_REG_ADDRESS);
-				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret1);
-				XDNA_DBG(xdna, "Read core tile col:%d row:%d ret: %d.",
-					 col + nhwctx->start_col, row, ret2);
-				if (ret1 < 0 || ret2 < 0)
-					return -EINVAL;
-			}
-			rel_size += TILE_ADDRESS_SPACE;
-		}
+	rel_size = ve2_partition_coredump(aie_dev, size, buffer);
+	if (rel_size < 0) {
+		XDNA_ERR(xdna, "Failed to read coredump, err:%d\n", rel_size);
+		return -EINVAL;
 	}
+	XDNA_DBG(xdna, "Reading coredump ret:%d\n", rel_size);
 
 	return rel_size;
 }

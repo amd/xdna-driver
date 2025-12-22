@@ -279,6 +279,12 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	ret = aie2_calibrate_time(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Calibrate system clock failed");
+		return ret;
+	}
+
 	return 0;
 }
 
@@ -1154,6 +1160,10 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_get_power_mode(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
+		if (!amdxdna_admin_access_allowed(xdna)) {
+			ret = -EPERM;
+			break;
+		}
 		ret = aie2_query_telemetry(client, args);
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
@@ -1304,27 +1314,6 @@ static int aie2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_d
 	ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), ret);
 exit:
 	return ret;
-}
-
-/*
- * Returns true if caller is root (CAP_SYS_ADMIN) or, when root_only is false,
- * if the caller owns the context.
- */
-static bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only)
-{
-	struct amdxdna_dev *xdna = ctx->client->xdna;
-	bool is_admin = capable(CAP_SYS_ADMIN);
-	bool is_owner;
-
-	if (root_only) {
-		XDNA_DBG(xdna, "Access check (root only): is_admin=%d", is_admin);
-		return is_admin;
-	}
-
-	is_owner = uid_eq(current_euid(), ctx->client->uid);
-	XDNA_DBG(xdna, "Access check: is_admin=%d is_owner=%d", is_admin, is_owner);
-
-	return is_admin || is_owner;
 }
 
 static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
@@ -1581,9 +1570,17 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 		ret = aie2_get_array_async_error(xdna, args);
 		break;
 	case DRM_AMDXDNA_FW_LOG:
+		if (!amdxdna_admin_access_allowed(xdna)) {
+			ret = -EPERM;
+			break;
+		}
 		ret = amdxdna_get_fw_log(xdna, args);
 		break;
 	case DRM_AMDXDNA_FW_TRACE:
+		if (!amdxdna_admin_access_allowed(xdna)) {
+			ret = -EPERM;
+			break;
+		}
 		ret = amdxdna_get_fw_trace(xdna, args);
 		break;
 	case DRM_AMDXDNA_FW_LOG_CONFIG:

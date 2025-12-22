@@ -33,10 +33,6 @@ all: $(BUILD_ROOT_DIR)
 # add EXTRA_CFLAGS='-save-temps' to keep intermedia files
 DEFINES := -DAMDXDNA_DEVEL
 
-ifeq ($(XDNA_BUS_TYPE), of)
-DEFINES += -DAMDXDNA_OF
-endif
-
 # Driver version
 XDNA_DRIVER_VERSION ?= 2.21.0
 XDNA_DATE ?= $(shell date +%Y%m%d)
@@ -48,8 +44,20 @@ endif
 
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
+ifeq ($(XDNA_BUS_TYPE), of)
+DEFINES += -DAMDXDNA_OF
+# Generate config_kernel.h when building directly (Yocto/DKMS flow)
+modules: $(SRC_DIR)/config_kernel.h
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
+
+$(SRC_DIR)/config_kernel.h:
+	@echo "[INFO] Generating config_kernel.h for OF build..."
+	@KERNEL_SRC=$(KERNEL_SRC) OUT="$(SRC_DIR)/config_kernel.h" bash $(SRC_DIR)/../../../../tools/configure_kernel.sh
+else
+# PCI builds: CMake generates config_kernel.h
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
+endif
 
 modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install
