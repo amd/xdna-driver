@@ -723,14 +723,13 @@ static void ve2_aie_error_cb(void *arg)
 	}
 
 	for (i = 0; i < aie_errs->num_err; i++) {
-		XDNA_ERR(mgmtctx->xdna, "Get AIE asynchronous Error: "
-			 "error_id %d Mod %d, category %d, Col %d, Row %d\n",
-				aie_errs->errors[i].error_id,
-				aie_errs->errors[i].module,
-				aie_errs->errors[i].category,
-				aie_errs->errors[i].loc.col,
-				aie_errs->errors[i].loc.row
-			);
+		XDNA_INFO(mgmtctx->xdna, "Display AIE asynchronous Error data:\n");
+		XDNA_INFO(mgmtctx->xdna, "error_id %d Mod %d, category %d, Col %d, Row %d\n",
+			  aie_errs->errors[i].error_id,
+			  aie_errs->errors[i].module,
+			  aie_errs->errors[i].category,
+			  aie_errs->errors[i].loc.col,
+			  aie_errs->errors[i].loc.row);
 	}
 
 	/* Cache the last async error */
