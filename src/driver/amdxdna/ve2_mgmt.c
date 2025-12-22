@@ -226,6 +226,8 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	}
 	mutex_unlock(&xrs->xrs_lock);
 
+	kfree(xrs_req->cdo.start_cols);
+	kfree(xrs_req);
 	return 0;
 
 destroy_partition:
