@@ -6,10 +6,11 @@
 #ifndef _VE2_OF_H_
 #define _VE2_OF_H_
 
+#include <linux/timekeeping.h>
+#include "amdxdna_error.h"
 #include "amdxdna_of_drv.h"
 #include "ve2_host_queue.h"
 #include "ve2_fw.h"
-#include "amdxdna_error.h"
 
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))

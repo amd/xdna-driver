@@ -5,7 +5,6 @@
 #include <linux/device.h>
 #include <linux/version.h>
 #include <linux/vmalloc.h>
-#include <linux/timekeeping.h>
 
 #include "ve2_fw.h"
 #include "ve2_of.h"

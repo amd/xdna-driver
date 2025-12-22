@@ -4,7 +4,6 @@
  */
 #include <linux/device.h>
 #include <linux/version.h>
-#include <linux/timekeeping.h>
 
 #include "amdxdna_ctx.h"
 #include "ve2_of.h"
