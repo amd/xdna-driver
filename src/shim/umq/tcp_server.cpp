@@ -88,6 +88,12 @@ start()
   // we allow only one debugger running
   listen(serverSocket, 1); 
   int flags = fcntl(serverSocket, F_GETFL, 0);
+  if (flags == -1)
+  {
+    shim_debug("tcp server socket getting flag failed");
+    close(serverSocket);
+    return;
+  }
   fcntl(serverSocket, F_SETFL, flags | O_NONBLOCK);
 
   shim_debug("Waiting for incoming connection...\n");
