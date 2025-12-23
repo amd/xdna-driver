@@ -687,11 +687,12 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 
 	if (ret) {
 		 /* Caller expecting this return value for retry. */
-		if (ret != -EAGAIN)
-			return -ERESTARTSYS;
+		if (ret == -EAGAIN) {
+			XDNA_DBG(xdna, "Failed to submit a command (retry expected). ret %d\n", ret);
+			return ret;
+		}
 
-		XDNA_DBG(xdna, "Failed to submit a command (retry expected). ret %d\n", ret);
-		return ret;
+		return -ERESTARTSYS;
 	}
 
 	XDNA_DBG(xdna, "Command submitted with temporal sharing enabled");
