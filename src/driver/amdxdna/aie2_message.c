@@ -22,7 +22,6 @@
 static bool
 is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
 {
-	int fw_minor = ndev->mgmt_prot_minor;
 	const struct rt_cfg_ver *rt_cfg_tbl;
 	int i;
 
@@ -30,16 +29,18 @@ is_supported_rt_cfg(struct amdxdna_dev_hdl *ndev, u32 type)
 	if (!rt_cfg_tbl)
 		return false;
 
-	for (i = 0; rt_cfg_tbl[i].fw_minor; i++) {
+	for (i = 0; rt_cfg_tbl[i].min_fw_version; i++) {
 		if (rt_cfg_tbl[i].type != type)
 			continue;
 
-		if (fw_minor >= rt_cfg_tbl[i].fw_minor)
+		if (ndev->mgmt_fw_version >= rt_cfg_tbl[i].min_fw_version)
 			return true;
 
-		XDNA_DBG(ndev->xdna, "Runtime cfg %d protocol %lld.%d, fw is %d.%d",
-			 type, ndev->priv->protocol_major, rt_cfg_tbl[i].fw_minor,
-			 ndev->mgmt_prot_major, ndev->mgmt_prot_minor);
+		XDNA_DBG(ndev->xdna, "Runtime cfg %d requires %d.%d, fw is %d.%d", type,
+			 AIE2_FW_MAJOR(rt_cfg_tbl[i].min_fw_version),
+			 AIE2_FW_MINOR(rt_cfg_tbl[i].min_fw_version),
+			 AIE2_FW_MAJOR(ndev->mgmt_fw_version),
+			 AIE2_FW_MINOR(ndev->mgmt_fw_version));
 		return false;
 	}
 
@@ -75,7 +76,6 @@ static int aie2_send_mgmt_msg_wait(struct amdxdna_dev_hdl *ndev,
 
 bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode opcode)
 {
-	int fw_minor = ndev->mgmt_prot_minor;
 	const struct msg_op_ver *op_tbl;
 	int i;
 
@@ -83,16 +83,18 @@ bool aie2_is_supported_msg(struct amdxdna_dev_hdl *ndev, enum aie2_msg_opcode op
 	if (!op_tbl)
 		return false;
 
-	for (i = 0; op_tbl[i].fw_minor; i++) {
+	for (i = 0; op_tbl[i].min_fw_version; i++) {
 		if (op_tbl[i].op != opcode)
 			continue;
 
-		if (fw_minor >= op_tbl[i].fw_minor)
+		if (ndev->mgmt_fw_version >= op_tbl[i].min_fw_version)
 			return true;
 
-		XDNA_DBG(ndev->xdna, "Opcode %d protocol %lld.%d, fw is %d.%d",
-			 opcode, ndev->priv->protocol_major, op_tbl[i].fw_minor,
-			 ndev->mgmt_prot_major, ndev->mgmt_prot_minor);
+		XDNA_DBG(ndev->xdna, "Opcode %d requires %d.%d, fw is %d.%d", opcode,
+			 AIE2_FW_MAJOR(op_tbl[i].min_fw_version),
+			 AIE2_FW_MINOR(op_tbl[i].min_fw_version),
+			 AIE2_FW_MAJOR(ndev->mgmt_fw_version),
+			 AIE2_FW_MINOR(ndev->mgmt_fw_version));
 		return false;
 	}
 
@@ -298,6 +300,28 @@ int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev)
 		return -EINVAL;
 	}
 
+	return 0;
+}
+
+int aie2_calibrate_time(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE2_MSG(calibrate_time, MSG_OP_CALIBRATE_TIME);
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_CALIBRATE_TIME)) {
+		XDNA_DBG(ndev->xdna, "Calibrate time not supported, skipped");
+		return 0;
+	}
+
+	req.timestamp_ns = ktime_get_real_ns();
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Calibrate time failed, ret %d", ret);
+		return ret;
+	}
+
+	XDNA_DBG(ndev->xdna, "System clock calibrated with firmware");
 	return 0;
 }
 
@@ -1536,6 +1560,7 @@ int aie2_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_
 	req.context_id = context_id;
 	req.num_bufs = num_bufs;
 	req.list_addr = addr;
+	req.list_size = dma_hdl->size;
 
 	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {

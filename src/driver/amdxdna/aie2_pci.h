@@ -28,9 +28,15 @@
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
+#include "amdxdna_aie.h"
 
 #define AIE2_INTERVAL	20000	/* us */
 #define AIE2_TIMEOUT	1000000	/* us */
+
+/* Firmware version encoding: major in high 32 bits, minor in low 32 bits */
+#define AIE2_FW_VERSION(major, minor)	(((u64)(major) << 32) | (minor))
+#define AIE2_FW_MAJOR(version)		upper_32_bits(version)
+#define AIE2_FW_MINOR(version)		lower_32_bits(version)
 
 /* Firmware determines device memory base address and size */
 #define AIE2_DEVM_BASE	0x4000000
@@ -41,15 +47,6 @@
 #define AIE2_SRAM_OFF(ndev, addr) ((addr) - (ndev)->priv->sram_dev_addr)
 #define AIE2_MBOX_OFF(ndev, addr) ((addr) - (ndev)->priv->mbox_dev_addr)
 
-#define PSP_REG_BAR(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].bar_idx)
-#define PSP_REG_OFF(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].offset)
-#define SRAM_REG_OFF(ndev, idx) ((ndev)->priv->sram_offs[(idx)].offset)
-
-#define SMU_REG(ndev, idx) \
-({ \
-	typeof(ndev) _ndev = ndev; \
-	((_ndev)->smu_base + (_ndev)->priv->smu_regs_off[(idx)].offset); \
-})
 #define SRAM_GET_ADDR(ndev, idx) \
 ({ \
 	typeof(ndev) _ndev = ndev; \
@@ -81,90 +78,15 @@
 #define AIE2_TDR_WAIT		0
 #define AIE2_TDR_SIGNALED	1
 
-#define AIE2_DPT_MSI_ADDR_MASK	GENMASK(23, 0)
+#define AIE2_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
 
 struct amdxdna_ctx_priv;
 struct aie2_partition;
-
-enum aie2_smu_reg_idx {
-	SMU_CMD_REG = 0,
-	SMU_ARG_REG,
-	SMU_INTR_REG,
-	SMU_RESP_REG,
-	SMU_OUT_REG,
-	SMU_MAX_REGS /* Keep this at the end */
-};
-
-enum aie2_smu_rev {
-	SMU_REVISION_NONE = 0,
-	SMU_REVISION_NPU1,
-	SMU_REVISION_NPU4,
-	SMU_REVISION_MAX
-};
 
 enum aie2_sram_reg_idx {
 	MBOX_CHANN_OFF = 0,
 	FW_ALIVE_OFF,
 	SRAM_MAX_INDEX /* Keep this at the end */
-};
-
-enum psp_reg_idx {
-	PSP_CMD_REG = 0,
-	PSP_ARG0_REG,
-	PSP_ARG1_REG,
-	PSP_ARG2_REG,
-	PSP_NUM_IN_REGS, /* number of input registers */
-	PSP_INTR_REG = PSP_NUM_IN_REGS,
-	PSP_STATUS_REG,
-	PSP_RESP_REG,
-	PSP_PWAITMODE_REG,
-	PSP_MAX_REGS /* Keep this at the end */
-};
-
-enum dpm_level {
-	DPM_LEVEL_0 = 0,
-	DPM_LEVEL_1,
-	DPM_LEVEL_2,
-	DPM_LEVEL_3,
-	DPM_LEVEL_4,
-	DPM_LEVEL_5,
-	DPM_LEVEL_6,
-	DPM_LEVEL_7,
-	DPM_LEVEL_MAX,
-};
-
-struct dpm_clk {
-	u32 npuclk;
-	u32 hclk;
-};
-
-struct psp_config {
-	const void	*fw_buf;
-	u32		fw_size;
-	void __iomem	*psp_regs[PSP_MAX_REGS];
-};
-
-struct aie_version {
-	u32 major;
-	u32 minor;
-};
-
-struct aie_tile_metadata {
-	u16 row_count;
-	u16 row_start;
-	u16 dma_channel_count;
-	u16 lock_count;
-	u16 event_reg_count;
-};
-
-struct aie_metadata {
-	u32 size;
-	u16 cols;
-	u16 rows;
-	struct aie_version version;
-	struct aie_tile_metadata core;
-	struct aie_tile_metadata mem;
-	struct aie_tile_metadata shim;
 };
 
 enum rt_config_category {
@@ -177,11 +99,6 @@ struct rt_config {
 	u32	value;
 	u32	category;
 	unsigned long feature_mask;
-};
-
-struct dpm_clk_freq {
-	u32	npuclk;
-	u32	hclk;
 };
 
 #ifdef AMDXDNA_DEVEL
@@ -257,11 +174,6 @@ enum aie2_dev_status {
 	AIE2_DEV_START,
 };
 
-enum aie2_power_state {
-	SMU_POWER_OFF,
-	SMU_POWER_ON,
-};
-
 struct aie2_partition {
 #define CTX_RQ_REALTIME		0
 #define CTX_RQ_HIGH		1
@@ -334,8 +246,7 @@ struct amdxdna_dev_hdl {
 	struct psp_device		*psp_hdl;
 
 	struct xdna_mailbox_chann_info	mgmt_info;
-	u32				mgmt_prot_major;
-	u32				mgmt_prot_minor;
+	u64				mgmt_fw_version;
 
 	u32				total_col;
 	struct aie_version		version;
@@ -345,7 +256,7 @@ struct amdxdna_dev_hdl {
 
 	/*power management and clock */
 	int				pw_mode;
-	enum aie2_power_state		power_state;
+	enum aie_power_state		power_state;
 	u32				sys_eff_factor;
 	u32				dpm_level;
 	u32				dft_dpm_level;
@@ -406,36 +317,35 @@ enum aie2_fw_feature {
 
 struct aie2_fw_feature_tbl {
 	enum aie2_fw_feature feature;
-	u32 max_minor;
-	u32 min_minor;
+	u64 min_fw_version;
+	u64 max_fw_version;  /* 0 = no upper limit */
 };
 
 #define AIE2_FEATURE_ON(ndev, feature)	test_bit(feature, &(ndev)->feature_mask)
 
 struct amdxdna_dev_priv {
-	const char			*fw_path;
-	u64				protocol_major;
-	u64				protocol_minor;
-	const struct rt_config		*rt_config;
-	const struct dpm_clk_freq	*dpm_clk_tbl;
-	const struct msg_op_ver		*optional_msg;
-	const struct rt_cfg_ver		*optional_cfg;
-	const struct aie2_fw_feature_tbl *fw_feature_tbl;
+	const char				*fw_path;
+	u64					min_fw_version;
+	const struct rt_config			*rt_config;
+	const struct dpm_clk_freq		*dpm_clk_tbl;
+	const struct msg_op_ver			*optional_msg;
+	const struct rt_cfg_ver			*optional_cfg;
+	const struct aie2_fw_feature_tbl	*fw_feature_tbl;
 
-	u32				col_opc;
-	u32				mbox_dev_addr;
+	u32					col_opc;
+	u32					mbox_dev_addr;
 	/* If mbox_size is 0, use BAR size. See MBOX_SIZE macro */
-	u32				mbox_size;
-	u32				hwctx_limit; /* Hardware determine */
-	u32				ctx_limit; /* Driver determine */
-	u32				temporal_only;
-	u32				sram_dev_addr;
-	struct aie2_bar_off_pair	sram_offs[SRAM_MAX_INDEX];
-	struct aie2_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
-	struct aie2_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
-	struct aie2_hw_ops		hw_ops;
+	u32					mbox_size;
+	u32					hwctx_limit; /* Hardware determine */
+	u32					ctx_limit; /* Driver determine */
+	u32					temporal_only;
+	u32					sram_dev_addr;
+	struct aie_bar_off_pair			sram_offs[SRAM_MAX_INDEX];
+	struct aie_bar_off_pair			psp_regs_off[PSP_MAX_REGS];
+	struct aie_bar_off_pair			smu_regs_off[SMU_MAX_REGS];
+	struct aie_hw_ops			hw_ops;
 #ifdef AMDXDNA_DEVEL
-	struct rt_config		priv_load_cfg;
+	struct rt_config			priv_load_cfg;
 #endif
 };
 
@@ -517,6 +427,7 @@ int aie2_frame_boundary_preemption(struct amdxdna_dev_hdl *ndev, bool enable);
 int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev,
 				struct amdxdna_ctx *ctx, u32 us);
 int aie2_check_protocol_version(struct amdxdna_dev_hdl *ndev);
+int aie2_calibrate_time(struct amdxdna_dev_hdl *ndev);
 int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid);
 int aie2_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			     u32 type, u32 size, struct aie_version *version);

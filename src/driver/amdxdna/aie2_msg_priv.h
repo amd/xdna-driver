@@ -50,6 +50,7 @@ enum aie2_msg_opcode {
 	MSG_OP_ADD_HOST_BUFFER			= 0x115,
 	MSG_OP_CONFIG_FW_LOG			= 0x116,
 	MSG_OP_GET_COREDUMP			= 0x119,
+	MSG_OP_CALIBRATE_TIME			= 0x11C,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION		= 0x301,
 	MSG_OP_MAX_OPCODE
@@ -397,9 +398,9 @@ enum async_event_type {
 	MAX_ASYNC_EVENT_TYPE
 };
 
-#define ASYNC_BUF_SIZE 0x2000
 struct async_event_msg_req {
 	u64 buf_addr;
+#define ASYNC_BUF_SIZE		SZ_8K
 	u32 buf_size;
 } __packed;
 
@@ -730,12 +731,12 @@ struct get_app_health_resp {
 
 /* Do NOT put any firmware defined struct, enum etc. start from here */
 struct msg_op_ver {
-	u32			fw_minor;
+	u64			min_fw_version;
 	enum aie2_msg_opcode	op;
 };
 
 struct rt_cfg_ver {
-	u32			fw_minor;
+	u64			min_fw_version;
 	u32			type;
 };
 
@@ -749,12 +750,21 @@ struct get_coredump_req {
 	u32			context_id;
 	u32			num_bufs;
 	u64			list_addr;
+	u32			list_size;
 } __packed;
 
 struct get_coredump_resp {
-	enum			aie2_msg_status status;
+	enum aie2_msg_status	status;
 	u32			required_buffer_size;
 	u32			reserved[7];
+} __packed;
+
+struct calibrate_time_req {
+	u64			timestamp_ns;
+} __packed;
+
+struct calibrate_time_resp {
+	enum aie2_msg_status	status;
 } __packed;
 
 #endif /* _AIE2_MSG_PRIV_H_ */

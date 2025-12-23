@@ -449,7 +449,7 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
-	const size_t size = 0x1000;
+	const size_t size = SZ_8K;
 	void *buff;
 	int ret;
 
@@ -530,16 +530,18 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct app_health_report *report;
+	size_t size;
 	int ret;
 
-	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*report), DMA_FROM_DEVICE);
+	size = max_t(size_t, sizeof(*report), SZ_8K);
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl))
 		return PTR_ERR(dma_hdl);
 
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
 	/* Just for debug, always check context id 1 */
-	ret = aie2_get_app_health(ndev, dma_hdl, 1, sizeof(*report));
+	ret = aie2_get_app_health(ndev, dma_hdl, 1, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed ret %d", ret);

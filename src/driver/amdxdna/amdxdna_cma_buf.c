@@ -174,7 +174,7 @@ free_cmabuf:
 
 bool amdxdna_use_cma(void)
 {
-#ifdef CONFIG_CMA
+#if defined(CONFIG_CMA) && !defined(CONFIG_X86_64) && !defined(CONFIG_X86)
 	return true;
 #else
 	return false;

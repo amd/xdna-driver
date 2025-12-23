@@ -56,12 +56,13 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 	struct app_health_report *r;
 	u64 comp = ctx->completed;
 	u64 sub = ctx->submitted;
-	size_t size = sizeof(*r);
+	size_t size;
 	int ret;
 
 	ndev = xdna->dev_handle;
 	XDNA_ERR(xdna, "Dumping ctx %s, hwctx %d, sub=%lld, comp=%lld",
 		 ctx->name, ctx->priv->id, sub, comp);
+	size = max_t(size_t, sizeof(*r), SZ_8K);
 	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl)) {
 		XDNA_WARN(xdna, "Allocate memory failed, skip get app health");
@@ -1001,7 +1002,7 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		goto rq_yield;
 	}
 
-#if KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE
+#ifdef HAVE_6_17_drm_sched_job_init
 	ret = drm_sched_job_init(&job->base, &ctx->priv->entity, 1, ctx,
 				 ctx->client->filp->client_id);
 #else

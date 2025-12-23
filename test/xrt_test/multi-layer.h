@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+
 uint32_t multi_layer[] = {0,
 10010001,
 20020002,
