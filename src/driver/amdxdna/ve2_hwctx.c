@@ -805,7 +805,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 
 			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
-				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
+										       NULL);
 				// TODO: get error_index based on how many passed.
 				cc->error_index = 0;
 				if (cc->error_index >= cc->command_count)
