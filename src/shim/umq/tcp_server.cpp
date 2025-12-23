@@ -90,11 +90,17 @@ start()
   int flags = fcntl(serverSocket, F_GETFL, 0);
   if (flags == -1)
   {
-    shim_debug("tcp server socket getting flag failed");
+    shim_debug("F_GETFL over tcp server socket failed: %d", errno);
     close(serverSocket);
     return;
   }
-  fcntl(serverSocket, F_SETFL, flags | O_NONBLOCK);
+  ret = fcntl(serverSocket, F_SETFL, flags | O_NONBLOCK);
+  if (ret == -1)
+  {
+    shim_debug("F_SETFL over tcp server socket failed: %d", errno);
+    close(serverSocket);
+    return;
+  }
 
   shim_debug("Waiting for incoming connection...\n");
   while (!m_srv_stop)
