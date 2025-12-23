@@ -486,7 +486,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct xrs_acti
 		return PTR_ERR(snode);
 
 	fill_load_action(xrs, snode, load_act);
-	drm_info(xrs->cfg.ddev, "start col %d ncols %d is exclusive ? %s\n",
+	drm_dbg(xrs->cfg.ddev, "start col %d ncols %d is exclusive ? %s\n",
 		 snode->pt_node->start_col, snode->pt_node->ncols,
 		 req->rqos.exclusive ? "true" : "false");
 

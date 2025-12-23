@@ -685,7 +685,7 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 		struct amdxdna_dev *xdna = hwctx->client->xdna;
 
 		XDNA_DBG(xdna, "read index address: 0x%llx", (u64)read_index);
-		XDNA_WARN(xdna, "hwctx [%p] check read idx (%llu) > cmd idx (%llu)",
+		XDNA_DBG(xdna, "hwctx [%p] check read idx (%llu) > cmd idx (%llu)",
 			  hwctx, *read_index, seq);
 	}
 
@@ -895,11 +895,11 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		goto free_hsa_queue;
 
 	if (enable_polling) {
-		XDNA_INFO(xdna, "Running in timer mode");
+		XDNA_DBG(xdna, "Running in timer mode");
 		timer_setup(&priv->event_timer, timeout_cb, 0);
 		mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
 	} else {
-		XDNA_INFO(xdna, "Running in interrupt mode");
+		XDNA_DBG(xdna, "Running in interrupt mode");
 	}
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
