@@ -181,14 +181,14 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 		priv_ctx->state = AMDXDNA_HWCTX_STATE_IDLE;
 
 	/* Caller already holds hq_lock, just acquire privctx_lock */
-	mutex_lock(&hwctx->priv->privctx_lock);
+	mutex_lock(&priv_ctx->privctx_lock);
 
 	// In cmd chain job, drivers receives completion for last command.
 	// So, mark all slots of these commands in this job to free.
 	slot = job->seq % capacity;
 
 	for (int i = 0; i < cmd_cnt; i++) {
-		hwctx->priv->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
+		priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
 		slot = (slot == 0) ? (capacity - 1) : (slot - 1);
 	}
 
@@ -197,9 +197,9 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 		job->fence = NULL;
 	}
 	// Reset the pending list
-	hwctx->priv->pending[get_job_idx(job->seq)] = NULL;
+	priv_ctx->pending[get_job_idx(job->seq)] = NULL;
 	ve2_job_put(job);
-	mutex_unlock(&hwctx->priv->privctx_lock);
+	mutex_unlock(&priv_ctx->privctx_lock);
 }
 
 /*
@@ -229,25 +229,18 @@ static inline int hsa_queue_pkt_is_valid(struct host_queue_packet *pkt)
 static void *get_host_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct amdxdna_ctx_priv *priv;
 	struct hsa_queue *queue = NULL;
 	struct host_queue_packet *pkt;
 	int ret;
 
-	priv = READ_ONCE(hwctx->priv);
-	if (!priv) {
-		XDNA_ERR(xdna, "get_host_queue_pkt: hwctx->priv is NULL\n");
-		return NULL;
-	}
-
-	ret = hsa_queue_reserve_slot(xdna, priv, seq);
+	ret = hsa_queue_reserve_slot(xdna, hwctx->priv, seq);
 	if (ret) {
 		/* Expected during retry - use DBG level */
 		XDNA_DBG(xdna, "No slot available in Host queue");
 		return NULL;
 	}
 
-	queue = (struct hsa_queue *)priv->hwctx_hsa_queue.hsa_queue_p;
+	queue = (struct hsa_queue *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p;
 	if (!queue) {
 		XDNA_ERR(xdna, "Invalid Host queue");
 		return NULL;
@@ -436,7 +429,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq,
 				   bool last_cmd)
 {
-	struct amdxdna_ctx_priv *ve2_ctx;
+	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct ve2_hsa_queue *hq_queue;
 	struct xrt_packet_header *hdr;
@@ -445,12 +438,6 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	struct hsa_queue *queue;
 	u64 slot_id = 0;
 	int ret;
-
-	ve2_ctx = READ_ONCE(hwctx->priv);
-	if (!ve2_ctx) {
-		XDNA_ERR(xdna, "submit_command_indirect: hwctx->priv is NULL (hwctx=%px)\n", hwctx);
-		return -EINVAL;
-	}
 
 	dpu = (struct ve2_dpu_data *)cmd_data;
 	ret = hsa_queue_reserve_slot(xdna, ve2_ctx, &slot_id);
@@ -534,22 +521,15 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, bool last_cmd)
 {
-	struct amdxdna_ctx_priv *ve2_ctx;
+	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct ve2_hsa_queue *hq_queue;
+	struct ve2_hsa_queue *hq_queue = &ve2_ctx->hwctx_hsa_queue;
 	struct ve2_dpu_data *dpu_cmd;
 	struct xrt_packet_header *hdr;
 	struct host_queue_packet *pkt;
 	struct exec_buf *ebp;
 	u64 slot_id = 0;
 
-	ve2_ctx = READ_ONCE(hwctx->priv);
-	if (!ve2_ctx) {
-		XDNA_ERR(xdna, "submit_command: hwctx->priv is NULL (hwctx=%px)\n", hwctx);
-		return -EINVAL;
-	}
-
-	hq_queue = (struct ve2_hsa_queue *)&ve2_ctx->hwctx_hsa_queue;
 	if (!cmd_data) {
 		XDNA_ERR(xdna, "Invalid command requested");
 		return -EINVAL;
@@ -686,18 +666,10 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
-	struct amdxdna_ctx_priv *priv;
 	int ret;
 	u32 op;
 
-	/* Use READ_ONCE to get consistent pointer value and prevent re-reading */
-	priv = READ_ONCE(hwctx->priv);
-	if (!priv) {
-		XDNA_ERR(xdna, "ve2_cmd_submit: hwctx->priv is NULL (hwctx=%px)\n", hwctx);
-		return -EINVAL;
-	}
-
-	if (priv->misc_intrpt_flag) {
+	if (hwctx->priv->misc_intrpt_flag) {
 		XDNA_ERR(xdna, "Failed to submit a command, because of misc interrupt\n");
 		return -EINVAL;
 	}
@@ -859,8 +831,6 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 		 */
 
 		if (priv_ctx->misc_intrpt_flag || (wait_jifs && !ret)) {
-			XDNA_ERR(xdna, "cmd timeout. misc_intr_flag=%u timeout_jiffies=%lu ret=%d",
-				 priv_ctx->misc_intrpt_flag, wait_jifs, ret);
 			void *cmd_data;
 			u32 data_total;
 
@@ -950,6 +920,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		return -ENOMEM;
 
 	hwctx->priv = priv;
+	mutex_init(&priv->privctx_lock);
 	init_waitqueue_head(&priv->waitq);
 
 	/* one host_queue entry per hwctx */
@@ -1039,6 +1010,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv->hwctx_config);
+	mutex_destroy(&hwctx->priv->privctx_lock);
 	kfree(hwctx->priv);
 	hwctx->priv = NULL;	
 	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
