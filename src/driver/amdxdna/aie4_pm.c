@@ -8,8 +8,8 @@
 static int aie4_pm_set_clock_gating(struct amdxdna_dev_hdl *ndev, bool enable)
 {
 	const struct rt_config_clk_gating *config;
+	int ret = 0;
 	u32 value;
-	int ret;
 
 	if (enable == ndev->clk_gate_enabled)
 		return 0;

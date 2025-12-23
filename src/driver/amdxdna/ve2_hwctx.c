@@ -141,7 +141,6 @@ static inline int ve2_hwctx_add_job(struct amdxdna_ctx *hwctx, struct amdxdna_sc
 	}
 
 	hwctx->priv->pending[idx] = job;
-	kref_get(&job->refcnt);
 	hwctx->priv->state = AMDXDNA_HWCTX_STATE_ACTIVE;
 	mutex_unlock(&hwctx->priv->privctx_lock);
 
@@ -171,14 +170,6 @@ static inline void ve2_hwctx_job_release(struct amdxdna_ctx *hwctx, struct amdxd
 	if (hwctx->completed == hwctx->submitted)
 		priv_ctx->state = AMDXDNA_HWCTX_STATE_IDLE;
 
-	for (int i = 0; i < job->bo_cnt; i++) {
-		if (!job->bos[i].obj)
-			break;
-
-		drm_gem_object_put(job->bos[i].obj);
-	}
-	drm_gem_object_put(to_gobj(job->cmd_bo));
-
 	mutex_lock(&hwctx->priv->privctx_lock);
 
 	// In cmd chain job, drivers receives completion for last command.
@@ -189,7 +180,10 @@ static inline void ve2_hwctx_job_release(struct amdxdna_ctx *hwctx, struct amdxd
 		hwctx->priv->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
 		slot = (slot == 0) ? (capacity - 1) : (slot - 1);
 	}
-
+	if (job->fence) {
+		dma_fence_put(job->fence);
+		job->fence = NULL;
+	}
 	// Reset the pending list
 	hwctx->priv->pending[get_job_idx(job->seq)] = NULL;
 	ve2_job_put(job);

@@ -285,7 +285,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		u32 index = entry->index;
 		u64 off_addr;
 
-		if (index > MAX_NUM_CERTS) {
+		if (index >= MAX_NUM_CERTS) {
 			XDNA_ERR(xdna, "got invalid index %d, stop", index);
 			ret = -EINVAL;
 			goto put_log_bo;

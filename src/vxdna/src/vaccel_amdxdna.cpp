@@ -290,15 +290,16 @@ vxdna_hwctx(const vxdna_context &ctx,
     m_stop_polling.store(false, std::memory_order_relaxed);
     m_polling_thread = std::thread([this]() {
         while (!m_stop_polling.load(std::memory_order_relaxed)) {
-            std::unique_lock<std::mutex> lock(m_fences_lock);
-            m_cv.wait(lock, [this] {
-                return m_stop_polling.load(std::memory_order_relaxed) || !m_pending_fences.empty();
-            });
-            if (m_stop_polling.load(std::memory_order_relaxed))
-                break;
-            std::vector<std::shared_ptr<vaccel_fence>> tmp_pending_fences = std::move(m_pending_fences);
-            m_pending_fences.clear();
-            lock.unlock();
+            std::vector<std::shared_ptr<vaccel_fence>> tmp_pending_fences;
+            {
+                std::unique_lock<std::mutex> lock(m_fences_lock);
+                m_cv.wait(lock, [this] {
+                    return m_stop_polling.load(std::memory_order_relaxed) || !m_pending_fences.empty();
+                });
+                if (m_stop_polling.load(std::memory_order_relaxed))
+                    break;
+                tmp_pending_fences.swap(m_pending_fences);
+            }
             poll_and_retire_pending(std::move(tmp_pending_fences));
         }
     });
