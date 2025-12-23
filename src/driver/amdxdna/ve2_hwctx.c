@@ -84,7 +84,7 @@ static int hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 		enum ert_cmd_state state = queue->hq_complete.hqc_mem[slot_idx];
 
 		if (state != ERT_CMD_STATE_INVALID) {
-			/* Slot is still active - return EAGAIN without error print (expected during retries) */
+			/* Slot is still active */
 			mutex_unlock(&queue->hq_lock);
 			return -EAGAIN;
 		}
@@ -686,13 +686,10 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 		ret = ve2_submit_cmd_single(hwctx, job, seq);
 
 	if (ret) {
-		/* Don't print if it's EAGAIN (queue full or slot active) - this is expected during retries.
-		   Caller expecting this return value for retry.
-		 */
+		 /* Caller expecting this return value for retry. */
 		if (ret != -EAGAIN)
 			return -ERESTARTSYS;
 
-		/* EAGAIN is expected during retries - use DBG level */
 		XDNA_DBG(xdna, "Failed to submit a command (retry expected). ret %d\n", ret);
 		return ret;
 	}
@@ -727,7 +724,7 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 
 		XDNA_DBG(xdna, "read index address: 0x%llx", (u64)read_index);
 		XDNA_DBG(xdna, "hwctx [%p] check read idx (%llu) > cmd idx (%llu)",
-			  hwctx, *read_index, seq);
+			 hwctx, *read_index, seq);
 	}
 
 	counter++;
@@ -1012,7 +1009,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	kfree(hwctx->priv->hwctx_config);
 	mutex_destroy(&hwctx->priv->privctx_lock);
 	kfree(hwctx->priv);
-	hwctx->priv = NULL;	
+	hwctx->priv = NULL;
 	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
 		 hwctx, hwctx->submitted, hwctx->completed);
 }
