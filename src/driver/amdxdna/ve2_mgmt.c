@@ -589,7 +589,7 @@ static void ve2_scheduler_work(struct work_struct *work)
 				 mgmtctx->active_ctx);
 		}
 	} else {
-		XDNA_ERR(mgmtctx->xdna,
+		XDNA_DBG(mgmtctx->xdna,
 			 "None of the bit (idle/queue_not_empty/misc) was set active ctx:%p\n",
 			 mgmtctx->active_ctx);
 	}
