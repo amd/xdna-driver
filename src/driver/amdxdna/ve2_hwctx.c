@@ -229,18 +229,25 @@ static inline int hsa_queue_pkt_is_valid(struct host_queue_packet *pkt)
 static void *get_host_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_ctx_priv *priv;
 	struct hsa_queue *queue = NULL;
 	struct host_queue_packet *pkt;
 	int ret;
 
-	ret = hsa_queue_reserve_slot(xdna, hwctx->priv, seq);
+	priv = READ_ONCE(hwctx->priv);
+	if (!priv) {
+		XDNA_ERR(xdna, "get_host_queue_pkt: hwctx->priv is NULL\n");
+		return NULL;
+	}
+
+	ret = hsa_queue_reserve_slot(xdna, priv, seq);
 	if (ret) {
 		/* Expected during retry - use DBG level */
 		XDNA_DBG(xdna, "No slot available in Host queue");
 		return NULL;
 	}
 
-	queue = (struct hsa_queue *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p;
+	queue = (struct hsa_queue *)priv->hwctx_hsa_queue.hsa_queue_p;
 	if (!queue) {
 		XDNA_ERR(xdna, "Invalid Host queue");
 		return NULL;
@@ -679,15 +686,18 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
+	struct amdxdna_ctx_priv *priv;
 	int ret;
 	u32 op;
 
-	if (!hwctx->priv) {
-		XDNA_ERR(xdna, "hwctx->priv is NULL, context may have been destroyed\n");
+	/* Use READ_ONCE to get consistent pointer value and prevent re-reading */
+	priv = READ_ONCE(hwctx->priv);
+	if (!priv) {
+		XDNA_ERR(xdna, "ve2_cmd_submit: hwctx->priv is NULL (hwctx=%px)\n", hwctx);
 		return -EINVAL;
 	}
 
-	if (hwctx->priv->misc_intrpt_flag) {
+	if (priv->misc_intrpt_flag) {
 		XDNA_ERR(xdna, "Failed to submit a command, because of misc interrupt\n");
 		return -EINVAL;
 	}
