@@ -75,6 +75,7 @@ set(XDNA_DRV_EXCLUDES
   --exclude=CMake*
   --exclude=tools
   --exclude=doc
+  --exclude=configure_kernel.h
   ${XDNA_EXTRA_DRV_EXCLUDES}
   )
 file(GLOB_RECURSE ALL_DRV_FILES
