@@ -34,7 +34,7 @@ add_custom_command(
   COMMAND $(CMAKE_COMMAND) -E make_directory ${XDNA_DRV_BLD_DIR}
   COMMAND cp -rf ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}/* ${XDNA_EXTRA_DRV_DIR} ${XDNA_DRV_BLD_DIR}
   COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/../include .
-  COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_kernel.sh .
+  COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/tools/${XDNA_DRV_CONFIG_KERNEL_SCRIPT} .
   )
 
 # Generate XDNA_DRV_CONFIG_KERNEL_HEADER before doing build
@@ -146,7 +146,7 @@ else()
 endif()
 
 set(amdxdna_drv_tools
-  ${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_kernel.sh
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/${XDNA_DRV_CONFIG_KERNEL_SCRIPT}
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/dkms_driver.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_trace.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/npu_perf_analyze.sh
