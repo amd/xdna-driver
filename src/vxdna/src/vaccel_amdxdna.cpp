@@ -300,6 +300,7 @@ vxdna_hwctx(const vxdna_context &ctx,
             m_pending_fences.clear();
             lock.unlock();
             poll_and_retire_pending(std::move(tmp_pending_fences));
+            lock.lock();
         }
     });
 }
