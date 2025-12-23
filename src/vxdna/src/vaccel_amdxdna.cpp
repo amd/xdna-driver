@@ -298,8 +298,7 @@ vxdna_hwctx(const vxdna_context &ctx,
                 });
                 if (m_stop_polling.load(std::memory_order_relaxed))
                     break;
-                tmp_pending_fences = std::move(m_pending_fences);
-                m_pending_fences.clear();
+                tmp_pending_fences.swap(m_pending_fences);
             }
             poll_and_retire_pending(std::move(tmp_pending_fences));
         }
