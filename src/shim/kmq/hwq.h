@@ -16,10 +16,6 @@ public:
 
   bo_id
   get_queue_bo() const override;
-
-private:
-  uint64_t
-  issue_command(const cmd_buffer *) override;
 };
 
 }

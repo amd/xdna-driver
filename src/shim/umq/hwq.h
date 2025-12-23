@@ -24,6 +24,9 @@ public:
   bo_id
   get_queue_bo() const override;
 
+  int
+  wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
+
 private:
   std::unique_ptr<buffer> m_umq_bo;
   void *m_umq_bo_buf;
@@ -56,6 +59,9 @@ private:
 
   uint64_t
   issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain);
+
+  bool
+  is_driver_cmd_submission() const;
 };
 
 }

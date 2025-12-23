@@ -166,7 +166,7 @@ get_next_avail_slot()
     } else {
       shim_debug("Queue is full, wait for next available slot");
       // The ri is the first available slot.
-      wait_command(ri, 0);
+      hwq::wait_command(ri, 0);
     }
   } while (true);
 
@@ -311,6 +311,9 @@ uint64_t
 hwq_umq::
 issue_command(const cmd_buffer *cmd_bo)
 {
+  if (is_driver_cmd_submission())
+    return hwq::issue_command(cmd_bo);
+
   auto cmd = reinterpret_cast<ert_packet *>(cmd_bo->vaddr());
   auto& subcmds = cmd_bo->get_subcmd_list();
   subcmds.clear();
@@ -343,7 +346,9 @@ bind_hwctx(const hwctx& ctx)
   // link hwctx by parent class
   hwq::bind_hwctx(ctx);
   // setup doorbell mapping by child class
-  m_mapped_doorbell = map_doorbell(m_pdev, ctx.get_doorbell());
+  auto doorbell_offset = ctx.get_doorbell();
+  if (doorbell_offset != AMDXDNA_INVALID_DOORBELL_OFFSET)
+    m_mapped_doorbell = map_doorbell(m_pdev, ctx.get_doorbell());
 }
 
 void
@@ -353,7 +358,8 @@ unbind_hwctx()
   // unlink hwctx by parent class
   hwq::unbind_hwctx();
   // teardown doorbell mapping by child class
-  m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
+  if (m_mapped_doorbell)
+    m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
 }
 
 bo_id
@@ -361,6 +367,53 @@ hwq_umq::
 get_queue_bo() const
 {
   return m_umq_bo->id();
+}
+
+bool
+hwq_umq::
+is_driver_cmd_submission() const
+{
+  return !m_mapped_doorbell;
+}
+
+int
+hwq_umq::
+wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
+{
+  auto ret = hwq::wait_command(cmd, timeout_ms);
+  // The timeout_ms expired.
+  if (!ret)
+    return ret;
+
+  auto boh = static_cast<cmd_buffer*>(cmd);
+  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
+  auto& subcmds = boh->get_subcmd_list();
+  // Non-chained cmd or kernel mode submission
+  if (!subcmds.size())
+    return ret;
+
+  // Chained cmd submitted in user mode
+  auto last_cmd_bo = subcmds.back();
+  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
+  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
+    return ret;
+  }
+
+  // One of the sub-cmds has failed, find the first failed one and set the
+  // chained cmd status accordingly.
+  auto chain_data = get_ert_cmd_chain_data(cmdpkt);
+  chain_data->error_index = 0;
+  for (auto subcmd_bo : subcmds) {
+    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd_bo->vaddr());
+    if (subcmd_pkt->state == ERT_CMD_STATE_COMPLETED) {
+      chain_data->error_index++;
+    } else {
+      cmdpkt->state = subcmd_pkt->state;
+      break;
+    }
+  }
+  return ret;
 }
 
 } // shim_xdna

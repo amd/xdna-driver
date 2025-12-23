@@ -166,39 +166,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
   auto seq = boh->wait_for_submitted();
-  auto ret = wait_command(seq, timeout_ms);
-  auto& subcmds = boh->get_subcmd_list();
-
-  // The timeout_ms expired.
-  if (!ret)
-    return ret;
-
-  // Non-chained cmd or kernel mode submission
-  if (!subcmds.size())
-    return ret;
-
-  // Chained cmd submitted in user mode
-  auto last_cmd_bo = subcmds.back();
-  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
-  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
-    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
-    return ret;
-  }
-
-  // One of the sub-cmds has failed, find the first failed one and set the
-  // chained cmd status accordingly.
-  auto chain_data = get_ert_cmd_chain_data(cmdpkt);
-  chain_data->error_index = 0;
-  for (auto subcmd_bo : subcmds) {
-    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd_bo->vaddr());
-    if (subcmd_pkt->state == ERT_CMD_STATE_COMPLETED) {
-      chain_data->error_index++;
-    } else {
-      cmdpkt->state = subcmd_pkt->state;
-      break;
-    }
-  }
-  return ret;
+  return wait_command(seq, timeout_ms);
 }
 
 void
@@ -345,6 +313,20 @@ process_pending_queue()
   }
 
   shim_debug("Pending queue thread stopped!");
+}
+
+uint64_t
+hwq::
+issue_command(const cmd_buffer *cmd_bo)
+{
+  submit_cmd_arg ecmd = {
+    .ctx_handle = m_ctx->get_slotidx(),
+    .cmd_bo = cmd_bo->id(),
+    .arg_bos = cmd_bo->get_arg_bo_ids(),
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::submit_cmd, &ecmd);
+  shim_debug("Submitted command (%ld)", ecmd.seq);
+  return ecmd.seq;
 }
 
 }

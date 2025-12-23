@@ -118,6 +118,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	ctx->max_opc = args->max_opc;
 	ctx->umq_bo = args->umq_bo;
 	ctx->log_buf_bo = args->log_buf_bo;
+	ctx->doorbell_offset = AMDXDNA_INVALID_DOORBELL_OFFSET;
 	ret = xa_alloc_cyclic(&client->ctx_xa, &ctx->id, ctx,
 			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_CTX_ID),
 			      &client->next_ctxid, GFP_KERNEL);
