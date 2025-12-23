@@ -9,6 +9,8 @@ set(XDNA_DRV_PATH ${CMAKE_BINARY_DIR}/driver/${XDNA_DRV_TGT})
 set(XDNA_DRV_BLD_DIR driver/${XDNA_DRV_DIR})
 set(XDNA_DRV_BLD_SRC ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_BLD_DIR})
 set(XDNA_DRV_BLD_TGT ${CMAKE_CURRENT_BINARY_DIR}/${XDNA_DRV_DIR})
+set(XDNA_DRV_CONFIG_KERNEL_HEADER config_kernel.h)
+set(XDNA_DRV_CONFIG_KERNEL_SCRIPT configure_kernel.sh)
 
 # Include extra driver definitions if available - must be early to define variables
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/CMAKE.extra)
@@ -35,12 +37,12 @@ add_custom_command(
   COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/tools/configure_kernel.sh .
   )
 
-# Generate config_kernel.h before doing build
+# Generate XDNA_DRV_CONFIG_KERNEL_HEADER before doing build
 add_custom_command(
-  OUTPUT ${XDNA_DRV_BLD_SRC}/configure_kernel.h
+  OUTPUT ${XDNA_DRV_BLD_SRC}/${XDNA_DRV_CONFIG_KERNEL_HEADER}
   COMMENT "Configuring kernel compatibility header"
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  COMMAND ${CMAKE_COMMAND} -E env bash ./configure_kernel.sh
+  COMMAND ${CMAKE_COMMAND} -E env bash ./${XDNA_DRV_CONFIG_KERNEL_SCRIPT}
   DEPENDS all_driver_source
 )
 
@@ -51,7 +53,7 @@ add_custom_command(
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} ${KERNEL_VER} UMQ_HELLO_TEST=${UMQ_HELLO_TEST} ${XDNA_DRV_BLD_FLAGS_MAKE} XDNA_BUS_TYPE=pci
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} copy_ko
   COMMAND $(CMAKE_COMMAND) -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
-  DEPENDS ${XDNA_DRV_BLD_SRC}/configure_kernel.h
+  DEPENDS ${XDNA_DRV_BLD_SRC}/config_kernel.h
   )
 
 # Include extra driver build commands if available
@@ -75,7 +77,7 @@ set(XDNA_DRV_EXCLUDES
   --exclude=CMake*
   --exclude=tools
   --exclude=doc
-  --exclude=configure_kernel.h
+  --exclude=${XDNA_DRV_CONFIG_KERNEL_HEADER}
   ${XDNA_EXTRA_DRV_EXCLUDES}
   )
 file(GLOB_RECURSE ALL_DRV_FILES
