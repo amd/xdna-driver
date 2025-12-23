@@ -618,6 +618,7 @@ struct xocl_errors
 
     out_xcl_errors->num_err = arg.num_element;
 
+#if 0
     // Dump errors to stderr if any found
     if (arg.num_element > 0) {
       std::cerr << "========================================\n";
@@ -656,6 +657,7 @@ struct xocl_errors
       }
       std::cerr << "========================================\n";
     }
+#endif
 
     return output;
   }
