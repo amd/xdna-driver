@@ -17,7 +17,7 @@ int main() {
 if(HAVE_DRM_SET_CLIENT_NAME)
     message(STATUS "DRM_IOCTL_SET_CLIENT_NAME is supported")
 else()
-    message(WARNING "DRM_IOCTL_SET_CLIENT_NAME is not supported - client name setting will be disabled")
+    message(STATUS "DRM_IOCTL_SET_CLIENT_NAME is not supported - client name setting will be disabled")
 endif()
 
 # Check if struct iovec is defined

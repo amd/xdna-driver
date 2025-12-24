@@ -803,6 +803,15 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			memcpy(cmd_data, &hwctx->health_data, total_size);
 			hwctx->health_reported = true;
 			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
+
+			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
+										       NULL);
+				// TODO: get error_index based on how many passed.
+				cc->error_index = 0;
+				if (cc->error_index >= cc->command_count)
+					cc->error_index = 0;
+			}
 		} else {
 			u32 slot =
 				seq % (priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity);
