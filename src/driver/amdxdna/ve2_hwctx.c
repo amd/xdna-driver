@@ -688,11 +688,12 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 	if (ret) {
 		 /* Caller expecting this return value for retry. */
 		if (ret == -EAGAIN) {
-			XDNA_DBG(xdna, "Failed to submit a command (retry expected). ret %d\n", ret);
-			return ret;
+			XDNA_DBG(xdna, "Failed to submit a command (retry expected)\n");
+			return -ERESTARTSYS;
 		}
 
-		return -ERESTARTSYS;
+		XDNA_ERR(xdna, "Failed to submit a command. ret %d\n", ret);
+		return ret;
 	}
 
 	XDNA_DBG(xdna, "Command submitted with temporal sharing enabled");
@@ -927,7 +928,6 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		return -ENOMEM;
 
 	hwctx->priv = priv;
-	mutex_init(&priv->privctx_lock);
 	init_waitqueue_head(&priv->waitq);
 
 	/* one host_queue entry per hwctx */
@@ -950,6 +950,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_clear_firmware_status(xdna, hwctx);
 
+	mutex_init(&priv->privctx_lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
 
 	return 0;
