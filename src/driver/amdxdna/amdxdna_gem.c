@@ -1213,7 +1213,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 
 	if (gobj->size < args->offset ||
 	    gobj->size < args->size   ||
-	    gobj->size < args->offset + args->size) {
+	    args->offset > gobj->size - args->size) {
 		ret = -EINVAL;
 		goto put_obj;
 	}
