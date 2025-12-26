@@ -1211,7 +1211,9 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	}
 	abo = to_xdna_obj(gobj);
 
-	if (gobj->size < args->offset + args->size) {
+	if (gobj->size < args->offset ||
+	    gobj->size < args->size   ||
+	    gobj->size < args->offset + args->size) {
 		ret = -EINVAL;
 		goto put_obj;
 	}
