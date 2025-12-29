@@ -6,6 +6,8 @@
 #ifndef _VE2_OF_H_
 #define _VE2_OF_H_
 
+#include <linux/timekeeping.h>
+#include "amdxdna_error.h"
 #include "amdxdna_of_drv.h"
 #include "ve2_host_queue.h"
 #include "ve2_fw.h"
@@ -104,6 +106,7 @@ struct amdxdna_mgmtctx {
 	u32			is_partition_idle; /* Hardware sync required */
 	u32			is_context_req; /* Hardware sync required */
 	u32			is_idle_due_to_context; /* Hardware sync required */
+	struct amdxdna_async_err_cache	async_errs_cache; /* cache for async errors */
 };
 
 struct amdxdna_dev_hdl {
