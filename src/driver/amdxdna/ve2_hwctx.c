@@ -112,7 +112,6 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	/* Reserve this slot by incrementing reserved_write_index. */
 	*slot = queue->reserved_write_index++;
 	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_NEW;
-	queue->slot_owner_pid[slot_idx] = current->pid;
 
 	mutex_unlock(&queue->hq_lock);
 
