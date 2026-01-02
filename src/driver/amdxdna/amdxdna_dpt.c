@@ -46,7 +46,6 @@ static bool poll_fw_trace;
 module_param(poll_fw_trace, bool, 0444);
 MODULE_PARM_DESC(poll_fw_trace, " Enable firmware trace polling (Default false)");
 
-
 static inline int amdxnda_dpt_cpy(void *to, void *from, size_t size, bool user)
 {
 	if (user) {
