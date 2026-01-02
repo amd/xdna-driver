@@ -205,6 +205,12 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 	((*read_index) > seq);							\
 })
 
+int aie4_cmd_submit(struct amdxdna_sched_job *job,
+		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
+{
+	return 0;
+}
+
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 {
 	struct amdxdna_ctx_priv *nctx = ctx->priv;

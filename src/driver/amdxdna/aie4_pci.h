@@ -176,6 +176,8 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx);
 void aie4_ctx_fini(struct amdxdna_ctx *ctx);
 void aie4_ctx_suspend(struct amdxdna_ctx *ctx, bool wait);
 int aie4_ctx_resume(struct amdxdna_ctx *ctx);
+int aie4_cmd_submit(struct amdxdna_sched_job *job,
+		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 int aie4_parse_priority(u32 priority);

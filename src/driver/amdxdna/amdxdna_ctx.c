@@ -314,7 +314,7 @@ void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 	amdxdna_gem_put_obj(job->cmd_bo);
 }
 
-int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+static int amdxdna_lock_job_bos(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = job->ctx->client->xdna;
 	int contended = -1, i, ret;
@@ -374,7 +374,7 @@ retry:
 	return 0;
 }
 
-void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+static void amdxdna_unlock_job_bos(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
 {
 	int i;
 
@@ -387,6 +387,56 @@ void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx
 	}
 
 	ww_acquire_fini(ctx);
+}
+
+int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+{
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
+	struct amdxdna_gem_obj *abo;
+	unsigned long timeout = 0;
+	int ret, i;
+
+retry:
+	ret = amdxdna_lock_job_bos(job, ctx);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to lock job bos, ret %d", ret);
+		return ret;
+	}
+
+	for (i = 0; i < job->bo_cnt; i++) {
+		ret = dma_resv_reserve_fences(job->bos[i].obj->resv, 1);
+		if (ret) {
+			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
+			amdxdna_unlock_job_bos(job, ctx);
+			return ret;
+		}
+	}
+
+	down_read(&xdna->notifier_lock);
+	for (i = 0; i < job->bo_cnt; i++) {
+		abo = to_xdna_obj(job->bos[i].obj);
+		if (!abo->mem.map_invalid)
+			continue;
+
+		up_read(&xdna->notifier_lock);
+		amdxdna_unlock_objects(job, ctx);
+		if (!timeout)
+			timeout = jiffies + msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
+		else if (time_after(jiffies, timeout))
+			return -ETIME;
+
+		ret = amdxdna_populate_range(abo);
+		if (ret)
+			return ret;
+		goto retry;
+	}
+	return 0;
+}
+
+void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+{
+	up_read(&job->ctx->client->xdna->notifier_lock);
+	amdxdna_unlock_job_bos(job, ctx);
 }
 
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
@@ -445,7 +495,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	}
 	kref_init(&job->refcnt);
 
-	ret = xdna->dev_info->ops->cmd_submit(ctx, job, syncobj_hdls,
+	ret = xdna->dev_info->ops->cmd_submit(job, syncobj_hdls,
 					      syncobj_points, syncobj_cnt, seq);
 	if (ret) {
 		if (ret != -ERESTARTSYS)

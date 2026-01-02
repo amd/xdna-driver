@@ -249,9 +249,9 @@ struct amdxdna_sched_job {
 	struct kref		refcnt;
 	struct amdxdna_ctx	*ctx;
 	struct mm_struct	*mm;
-	/* The fence to notice DRM scheduler that job is done by hardware */
+	/* The fence to indicate that job is done by hardware */
 	struct dma_fence	*fence;
-	/* user can wait on this fence */
+	/* Job submitter can wait on this fence */
 	struct dma_fence	*out_fence;
 	bool			job_done;
 	u64			seq;

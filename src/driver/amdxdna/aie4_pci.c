@@ -1993,6 +1993,7 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.ctx_init		= aie4_ctx_init,
 	.ctx_fini		= aie4_ctx_fini,
 	.ctx_config		= aie4_ctx_config,
+	.cmd_submit		= aie4_cmd_submit,
 	.cmd_wait		= aie4_cmd_wait,
 	.debugfs		= aie4_debugfs_init,
 	.sriov_configure        = aie4_sriov_configure,

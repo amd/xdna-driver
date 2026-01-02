@@ -12,18 +12,6 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <linux/hmm.h>
 
-struct amdxdna_umap {
-	struct vm_area_struct		*vma;
-	struct mmu_interval_notifier	notifier;
-	struct hmm_range		range;
-	struct work_struct		hmm_unreg_work;
-	struct amdxdna_gem_obj		*abo;
-	struct list_head		node;
-	struct kref			refcnt;
-	bool				invalid;
-	bool				unmapped;
-};
-
 struct amdxdna_mem {
 	void				*kva;
 	size_t				size;
@@ -71,8 +59,7 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 	drm_gem_object_put(to_gobj(abo));
 }
 
-void amdxdna_umap_put(struct amdxdna_umap *mapp);
-
+int amdxdna_populate_range(struct amdxdna_gem_obj *abo);
 struct drm_gem_object *
 amdxdna_gem_create_shmem_object_cb(struct drm_device *dev, size_t size);
 struct drm_gem_object *

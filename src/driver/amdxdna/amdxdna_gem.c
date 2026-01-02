@@ -42,6 +42,18 @@ static inline size_t amdxdna_page_align(__u64 size)
 	return PAGE_ALIGN(size);
 }
 
+struct amdxdna_umap {
+	struct vm_area_struct		*vma;
+	struct mmu_interval_notifier	notifier;
+	struct hmm_range		range;
+	struct work_struct		hmm_unreg_work;
+	struct amdxdna_gem_obj		*abo;
+	struct list_head		node;
+	struct kref			refcnt;
+	bool				invalid;
+	bool				unmapped;
+};
+
 static int
 amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 {
@@ -184,7 +196,7 @@ static void amdxdna_umap_release(struct kref *ref)
 	kfree(mapp);
 }
 
-void amdxdna_umap_put(struct amdxdna_umap *mapp)
+static void amdxdna_umap_put(struct amdxdna_umap *mapp)
 {
 	kref_put(&mapp->refcnt, amdxdna_umap_release);
 }
@@ -254,6 +266,77 @@ free_pfns:
 	kvfree(mapp->range.hmm_pfns);
 free_map:
 	kfree(mapp);
+	return ret;
+}
+
+int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct amdxdna_umap *mapp;
+	unsigned long timeout;
+	struct mm_struct *mm;
+	bool found;
+	int ret;
+
+	timeout = jiffies + msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
+again:
+	found = false;
+	down_write(&xdna->notifier_lock);
+	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
+		if (mapp->invalid) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		abo->mem.map_invalid = false;
+		up_write(&xdna->notifier_lock);
+		return 0;
+	}
+	kref_get(&mapp->refcnt);
+	up_write(&xdna->notifier_lock);
+
+	XDNA_DBG(xdna, "populate memory range %lx %lx",
+		 mapp->vma->vm_start, mapp->vma->vm_end);
+	mm = mapp->notifier.mm;
+	if (!mmget_not_zero(mm)) {
+		amdxdna_umap_put(mapp);
+		return -EFAULT;
+	}
+
+	mapp->range.notifier_seq = mmu_interval_read_begin(&mapp->notifier);
+	mmap_read_lock(mm);
+	ret = hmm_range_fault(&mapp->range);
+	mmap_read_unlock(mm);
+	if (ret) {
+		if (time_after(jiffies, timeout)) {
+			ret = -ETIME;
+			goto put_mm;
+		}
+
+		if (ret == -EBUSY) {
+			amdxdna_umap_put(mapp);
+			goto again;
+		}
+
+		goto put_mm;
+	}
+
+	down_write(&xdna->notifier_lock);
+	if (mmu_interval_read_retry(&mapp->notifier, mapp->range.notifier_seq)) {
+		up_write(&xdna->notifier_lock);
+		amdxdna_umap_put(mapp);
+		goto again;
+	}
+	mapp->invalid = false;
+	up_write(&xdna->notifier_lock);
+	amdxdna_umap_put(mapp);
+	goto again;
+
+put_mm:
+	amdxdna_umap_put(mapp);
+	mmput(mm);
 	return ret;
 }
 

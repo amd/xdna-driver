@@ -882,77 +882,6 @@ int aie2_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32
 	return ret;
 }
 
-static int aie2_populate_range(struct amdxdna_gem_obj *abo)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
-	struct amdxdna_umap *mapp;
-	unsigned long timeout;
-	struct mm_struct *mm;
-	bool found;
-	int ret;
-
-	timeout = jiffies + msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
-again:
-	found = false;
-	down_write(&xdna->notifier_lock);
-	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
-		if (mapp->invalid) {
-			found = true;
-			break;
-		}
-	}
-
-	if (!found) {
-		abo->mem.map_invalid = false;
-		up_write(&xdna->notifier_lock);
-		return 0;
-	}
-	kref_get(&mapp->refcnt);
-	up_write(&xdna->notifier_lock);
-
-	XDNA_DBG(xdna, "populate memory range %lx %lx",
-		 mapp->vma->vm_start, mapp->vma->vm_end);
-	mm = mapp->notifier.mm;
-	if (!mmget_not_zero(mm)) {
-		amdxdna_umap_put(mapp);
-		return -EFAULT;
-	}
-
-	mapp->range.notifier_seq = mmu_interval_read_begin(&mapp->notifier);
-	mmap_read_lock(mm);
-	ret = hmm_range_fault(&mapp->range);
-	mmap_read_unlock(mm);
-	if (ret) {
-		if (time_after(jiffies, timeout)) {
-			ret = -ETIME;
-			goto put_mm;
-		}
-
-		if (ret == -EBUSY) {
-			amdxdna_umap_put(mapp);
-			goto again;
-		}
-
-		goto put_mm;
-	}
-
-	down_write(&xdna->notifier_lock);
-	if (mmu_interval_read_retry(&mapp->notifier, mapp->range.notifier_seq)) {
-		up_write(&xdna->notifier_lock);
-		amdxdna_umap_put(mapp);
-		goto again;
-	}
-	mapp->invalid = false;
-	up_write(&xdna->notifier_lock);
-	amdxdna_umap_put(mapp);
-	goto again;
-
-put_mm:
-	amdxdna_umap_put(mapp);
-	mmput(mm);
-	return ret;
-}
-
 static int aie2_add_job_dependency(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 				   u64 *syncobj_points, u32 syncobj_cnt)
 {
@@ -975,16 +904,16 @@ static int aie2_add_job_dependency(struct amdxdna_sched_job *job, u32 *syncobj_h
 	return ret;
 }
 
-int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
+int aie2_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
-	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_ctx *ctx = job->ctx;
 	struct ww_acquire_ctx acquire_ctx;
 	struct dma_fence_chain *chain;
-	struct amdxdna_gem_obj *abo;
-	unsigned long timeout = 0;
+	struct amdxdna_dev *xdna;
 	int ret, i;
 
+	xdna = ctx->client->xdna;
 	ret = down_killable(&ctx->priv->job_sem);
 	if (ret)
 		XDNA_ERR(xdna, "%s Grab job sem failed, ret %d", ctx->name, ret);
@@ -1019,41 +948,10 @@ int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
 		goto cleanup_job;
 	}
 
-retry:
 	ret = amdxdna_lock_objects(job, &acquire_ctx);
 	if (ret) {
 		XDNA_WARN(xdna, "Failed to lock objects, ret %d", ret);
 		goto cleanup_job;
-	}
-
-	for (i = 0; i < job->bo_cnt; i++) {
-		ret = dma_resv_reserve_fences(job->bos[i].obj->resv, 1);
-		if (ret) {
-			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
-			amdxdna_unlock_objects(job, &acquire_ctx);
-			goto cleanup_job;
-		}
-	}
-
-	down_read(&xdna->notifier_lock);
-	for (i = 0; i < job->bo_cnt; i++) {
-		abo = to_xdna_obj(job->bos[i].obj);
-		if (abo->mem.map_invalid) {
-			up_read(&xdna->notifier_lock);
-			amdxdna_unlock_objects(job, &acquire_ctx);
-			if (!timeout) {
-				timeout = jiffies +
-					msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
-			} else if (time_after(jiffies, timeout)) {
-				ret = -ETIME;
-				goto cleanup_job;
-			}
-
-			ret = aie2_populate_range(abo);
-			if (ret)
-				goto cleanup_job;
-			goto retry;
-		}
 	}
 
 	mutex_lock(&ctx->priv->io_lock);
@@ -1075,7 +973,6 @@ retry:
 	drm_syncobj_add_point(ctx->priv->syncobj, chain, job->out_fence, *seq);
 	mutex_unlock(&ctx->priv->io_lock);
 
-	up_read(&xdna->notifier_lock);
 	amdxdna_unlock_objects(job, &acquire_ctx);
 	aie2_rq_submit_exit(ctx);
 
