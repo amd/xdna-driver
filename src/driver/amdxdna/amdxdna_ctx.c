@@ -119,6 +119,9 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	ctx->umq_bo = args->umq_bo;
 	ctx->log_buf_bo = args->log_buf_bo;
 	ctx->doorbell_offset = AMDXDNA_INVALID_DOORBELL_OFFSET;
+	ctx->syncobj = NULL;
+	ctx->syncobj_hdl = AMDXDNA_INVALID_FENCE_HANDLE;
+
 	ret = xa_alloc_cyclic(&client->ctx_xa, &ctx->id, ctx,
 			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_CTX_ID),
 			      &client->next_ctxid, GFP_KERNEL);
@@ -774,4 +777,42 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 
 	trace_amdxdna_debug_point(current->comm, args->seq, "job returned to user");
 	return ret;
+}
+
+int amdxdna_ctx_syncobj_create(struct amdxdna_ctx *ctx)
+{
+	struct drm_syncobj *syncobj;
+	struct amdxdna_dev *xdna;
+	struct drm_file *filp;
+	u32 hdl;
+	int ret;
+
+	xdna = ctx->client->xdna;
+	filp = ctx->client->filp;
+
+	ret = drm_syncobj_create(&syncobj, 0, NULL);
+	if (ret) {
+		XDNA_ERR(xdna, "Create ctx syncobj failed, ret %d", ret);
+		return ret;
+	}
+	ret = drm_syncobj_get_handle(filp, syncobj, &hdl);
+	if (ret) {
+		drm_syncobj_put(syncobj);
+		XDNA_ERR(xdna, "Create ctx syncobj handle failed, ret %d", ret);
+		return ret;
+	}
+	ctx->syncobj = syncobj;
+	ctx->syncobj_hdl = hdl;
+
+	return 0;
+}
+
+void amdxdna_ctx_syncobj_destroy(struct amdxdna_ctx *ctx)
+{
+	/*
+	 * The syncobj_hdl is owned by user space and will be cleaned up
+	 * separately.
+	 */
+	if (ctx->syncobj)
+		drm_syncobj_put(ctx->syncobj);
 }

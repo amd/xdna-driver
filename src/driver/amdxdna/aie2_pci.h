@@ -131,8 +131,6 @@ struct amdxdna_ctx_priv {
 #endif
 	struct semaphore		job_sem;
 
-	struct drm_syncobj		*syncobj;
-
 	/* Driver needs to wait for all jobs freed before fini DRM scheduler */
 	wait_queue_head_t		job_free_waitq;
 

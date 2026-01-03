@@ -227,6 +227,8 @@ struct amdxdna_ctx {
 	atomic64_t			job_free_cnt;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
+	struct drm_syncobj		*syncobj;
+
 	struct amdxdna_ctx_health_data	health_data;
 	bool				health_reported;
 
@@ -365,6 +367,8 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt,
 		       u32 ctx_hdl, u64 *seq);
 
+int amdxdna_ctx_syncobj_create(struct amdxdna_ctx *ctx);
+void amdxdna_ctx_syncobj_destroy(struct amdxdna_ctx *ctx);
 int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
 		     u64 seq, u32 timeout);
 
