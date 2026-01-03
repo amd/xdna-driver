@@ -12,10 +12,12 @@
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
+#include <climits>
 #include <sstream>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 #include <sys/stat.h>
 #include <errno.h>
 #include <vector>
@@ -603,9 +605,37 @@ read_sysfs(const struct amdxdna_ccmd_read_sysfs_req *req)
     if (ret)
         VACCEL_THROW_MSG(-errno, "fstat failed ret %d, errno %d", ret, errno);
 
-    std::ostringstream oss;
-    oss << "/sys/dev/char/" << major(st.st_rdev) << ":" << minor(st.st_rdev) << "/device/" << req->node_name;
-    path = oss.str();
+    std::ostringstream device_root_oss;
+    device_root_oss << "/sys/dev/char/" << major(st.st_rdev) << ":" << minor(st.st_rdev) << "/device";
+    std::string device_root = device_root_oss.str();
+
+    std::ostringstream req_path_oss;
+    req_path_oss << device_root << "/" << req->node_name;
+    std::string req_path = req_path_oss.str();
+
+    std::filesystem::path real_device_root_path, real_req_path;
+    try {
+        real_device_root_path = std::filesystem::canonical(device_root);
+    } catch (const std::exception& e) {
+        VACCEL_THROW_MSG(-EINVAL, "Failed to resolve device sysfs root: %s, error: %s", device_root.c_str(), e.what());
+    }
+    try {
+        real_req_path = std::filesystem::canonical(req_path);
+    } catch (const std::exception& e) {
+        VACCEL_THROW_MSG(-EINVAL, "Failed to resolve requested sysfs path: %s, error: %s", req_path.c_str(), e.what());
+    }
+
+    // Ensure the resolved req_path is under device_root (including trailing slash)
+    auto real_device_root_str = real_device_root_path.string();
+    auto real_req_path_str = real_req_path.string();
+
+    if (real_req_path_str.size() <= (real_device_root_str.size() + 1) ||
+        real_req_path_str.compare(0, real_device_root_str.size(), real_device_root_str) != 0 ||
+        real_req_path_str[real_device_root_str.size()] != '/') {
+        VACCEL_THROW_MSG(-EINVAL, "Requested sysfs path %s is not under device sysfs root %s",
+            real_req_path_str.c_str(), real_device_root_str.c_str());
+    }
+    path = real_req_path_str;
 
     // Open the sysfs file in binary mode and read the full contents into a buffer.
     std::ifstream file(path, std::ios::binary);
