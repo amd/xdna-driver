@@ -17,6 +17,10 @@
 #include "amdxdna_devel.h"
 #endif
 
+bool kernel_mode_submission = true;
+module_param(kernel_mode_submission, bool, 0600);
+MODULE_PARM_DESC(kernel_mode_submission, "I/O submission through driver (Default true)");
+
 static int aie4_alloc_resource(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
@@ -90,6 +94,21 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 		return ret;
 	}
 
+	if (kernel_mode_submission) {
+		/*
+		 * If kernel-mode-submission, create per ctx syncobj for user
+		 * to wait for cmd completion since driver can create timeline
+		 * for the cmd during submission. Otherwise, leave syncobj as
+		 * NULL, so that user has to make IOCTL call and pass in the
+		 * cmd sequence number for explicit waiting in driver.
+		 */
+		ret = amdxdna_ctx_syncobj_create(ctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
+			goto suspend;
+		}
+	}
+
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv) {
 		ret = -ENOMEM;
@@ -132,6 +151,7 @@ put_bo:
 free_priv:
 	kfree(ctx->priv);
 suspend:
+	amdxdna_ctx_syncobj_destroy(ctx);
 	pm_runtime_mark_last_busy(xdna->ddev.dev);
 	pm_runtime_put_autosuspend(xdna->ddev.dev);
 	return ret;
@@ -141,6 +161,8 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
 	struct amdxdna_ctx_priv *priv = ctx->priv;
+
+	amdxdna_ctx_syncobj_destroy(ctx);
 
 	xdna = ctx->client->xdna;
 

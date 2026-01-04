@@ -28,6 +28,8 @@
 
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
 
+extern bool kernel_mode_submission;
+
 struct clock_entry {
 	char name[16];
 	u32 freq_mhz;
@@ -49,6 +51,11 @@ struct amdxdna_ctx_priv {
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
+	/*
+	 * In non-kernel-mode-submission mode, it will be passed to user space
+	 * through ctx->doorbell_offset. Otherwise, it stays here as private.
+	 */
+	u32				doorbell_offset;
 };
 
 enum aie4_dev_status {

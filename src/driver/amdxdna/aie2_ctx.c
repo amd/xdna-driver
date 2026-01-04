@@ -103,7 +103,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 	}
 	amdxdna_mgmt_buff_free(dma_hdl);
 
-	mutex_lock(&ctx->priv->io_lock);
+	mutex_lock(&ctx->io_lock);
 	for (int i = 0; i < CTX_MAX_CMDS; i++) {
 		struct amdxdna_sched_job *j;
 
@@ -117,7 +117,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "\tfence: %s", aie2_fence_state2str(j->fence));
 		XDNA_ERR(xdna, "\tout_fence: %s", aie2_fence_state2str(j->out_fence));
 	}
-	mutex_unlock(&ctx->priv->io_lock);
+	mutex_unlock(&ctx->io_lock);
 }
 
 static void aie2_ctx_wait_for_idle(struct amdxdna_ctx *ctx)
@@ -235,7 +235,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	aie2_rq_yield(ctx);
 	idx = get_job_idx(job->seq);
 	ctx->priv->pending[idx] = NULL;
-	up(&job->ctx->priv->job_sem);
+	up(&job->ctx->io_slot_sem);
 	dma_fence_put(fence);
 	mmput_async(job->mm);
 	aie2_job_put(job);
@@ -467,7 +467,7 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 		idx = get_job_idx(job->seq);
 		/* No contention with submit, no lock */
 		ctx->priv->pending[idx] = NULL;
-		up(&ctx->priv->job_sem);
+		up(&ctx->io_slot_sem);
 	}
 
 	drm_sched_job_cleanup(sched_job);
@@ -594,7 +594,6 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	drm_gem_object_get(to_gobj(heap));
 	mutex_unlock(&client->mm_lock);
 	priv->heap = heap;
-	sema_init(&priv->job_sem, CTX_MAX_CMDS);
 
 	ret = amdxdna_gem_pin(heap);
 	if (ret) {
@@ -622,12 +621,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 		priv->cmd_buf[i] = abo;
 	}
 
-	mutex_init(&priv->io_lock);
 	init_waitqueue_head(&priv->job_free_waitq);
-
-	fs_reclaim_acquire(GFP_KERNEL);
-	might_lock(&priv->io_lock);
-	fs_reclaim_release(GFP_KERNEL);
 
 	ret = amdxdna_ctx_syncobj_create(ctx);
 	if (ret) {
@@ -638,7 +632,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	ret = aie2_rq_add(&xdna->dev_handle->ctx_rq, ctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Add ctx %s failed, ret %d", ctx->name, ret);
-		goto destroy_syncobj;
+		goto free_cmd_bufs;
 	}
 	init_rwsem(&priv->io_sem);
 	atomic64_set(&priv->job_pending_cnt, 0);
@@ -651,8 +645,6 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
 
-destroy_syncobj:
-	amdxdna_ctx_syncobj_destroy(ctx);
 free_cmd_bufs:
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
 		if (!priv->cmd_buf[i])
@@ -664,6 +656,7 @@ put_heap:
 	drm_gem_object_put(to_gobj(heap));
 free_priv:
 	kfree(priv);
+	amdxdna_ctx_syncobj_destroy(ctx);
 	return ret;
 }
 
@@ -693,7 +686,6 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx)
 
 	XDNA_DBG(xdna, "%s total completed jobs %lld",
 		 ctx->name, ctx->completed);
-	mutex_destroy(&ctx->priv->io_lock);
 	kfree(ctx->priv);
 	kfree(ctx->cus);
 }
@@ -875,7 +867,7 @@ int aie2_cmd_submit(struct amdxdna_sched_job *job,
 	int ret, i;
 
 	xdna = ctx->client->xdna;
-	ret = down_killable(&ctx->priv->job_sem);
+	ret = down_killable(&ctx->io_slot_sem);
 	if (ret)
 		XDNA_ERR(xdna, "%s Grab job sem failed, ret %d", ctx->name, ret);
 
@@ -883,7 +875,7 @@ int aie2_cmd_submit(struct amdxdna_sched_job *job,
 	if (ret) {
 		if (ret != -ERESTARTSYS)
 			XDNA_ERR(xdna, "Submit enter failed, ret %d", ret);
-		goto up_job_sem;
+		goto up_io_slot_sem;
 	}
 
 	chain = dma_fence_chain_alloc();
@@ -915,7 +907,7 @@ int aie2_cmd_submit(struct amdxdna_sched_job *job,
 		goto cleanup_job;
 	}
 
-	mutex_lock(&ctx->priv->io_lock);
+	mutex_lock(&ctx->io_lock);
 	drm_sched_job_arm(&job->base);
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
 	for (i = 0; i < job->bo_cnt; i++)
@@ -932,7 +924,7 @@ int aie2_cmd_submit(struct amdxdna_sched_job *job,
 
 	*seq = job->seq;
 	drm_syncobj_add_point(ctx->syncobj, chain, job->out_fence, *seq);
-	mutex_unlock(&ctx->priv->io_lock);
+	mutex_unlock(&ctx->io_lock);
 
 	amdxdna_unlock_objects(job, &acquire_ctx);
 	aie2_rq_submit_exit(ctx);
@@ -948,8 +940,8 @@ free_chain:
 rq_yield:
 	aie2_rq_yield(ctx);
 	aie2_rq_submit_exit(ctx);
-up_job_sem:
-	up(&ctx->priv->job_sem);
+up_io_slot_sem:
+	up(&ctx->io_slot_sem);
 	job->job_done = true;
 	return ret;
 }

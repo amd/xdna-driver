@@ -200,6 +200,11 @@ struct amdxdna_cmd {
 
 #define INVALID_CU_IDX		(~0U)
 
+/*
+ * Define the maximum number of outstanding commands in a context.
+ * Must be power of 2!
+ */
+#define CTX_MAX_CMDS			4
 struct amdxdna_ctx {
 	struct amdxdna_client		*client;
 	struct amdxdna_ctx_priv		*priv;
@@ -228,6 +233,8 @@ struct amdxdna_ctx {
 	/* For command completion notification. */
 	u32				syncobj_hdl;
 	struct drm_syncobj		*syncobj;
+	struct mutex			io_lock; /* protect job queue and enforce cmd order */
+	struct semaphore		io_slot_sem;
 
 	struct amdxdna_ctx_health_data	health_data;
 	bool				health_reported;

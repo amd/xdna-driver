@@ -64,6 +64,7 @@ static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct 
 	synchronize_srcu(ss);
 
 	xdna->dev_info->ops->ctx_fini(ctx);
+	mutex_destroy(&ctx->io_lock);
 	kfree(ctx->name);
 	kfree(ctx);
 }
@@ -121,13 +122,19 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	ctx->doorbell_offset = AMDXDNA_INVALID_DOORBELL_OFFSET;
 	ctx->syncobj = NULL;
 	ctx->syncobj_hdl = AMDXDNA_INVALID_FENCE_HANDLE;
+	sema_init(&ctx->io_slot_sem, CTX_MAX_CMDS);
+	mutex_init(&ctx->io_lock);
+	fs_reclaim_acquire(GFP_KERNEL);
+	might_lock(&ctx->io_lock);
+	fs_reclaim_release(GFP_KERNEL);
+	atomic64_set(&ctx->job_free_cnt, 0);
 
 	ret = xa_alloc_cyclic(&client->ctx_xa, &ctx->id, ctx,
 			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_CTX_ID),
 			      &client->next_ctxid, GFP_KERNEL);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Allocate ctx ID failed, ret %d", ret);
-		goto free_ctx;
+		goto destroy_io_lock;
 	}
 
 	ctx->name = kasprintf(GFP_KERNEL, "ctx.%d.%d", client->pid, ctx->id);
@@ -142,7 +149,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto free_name;
 	}
 
-	atomic64_set(&ctx->job_free_cnt, 0);
 	args->handle = ctx->id;
 	args->syncobj_handle = ctx->syncobj_hdl;
 	args->umq_doorbell = ctx->doorbell_offset;
@@ -156,6 +162,8 @@ free_name:
 	kfree(ctx->name);
 rm_id:
 	xa_erase(&client->ctx_xa, ctx->id);
+destroy_io_lock:
+	mutex_destroy(&ctx->io_lock);
 free_ctx:
 	kfree(ctx);
 exit:

@@ -893,7 +893,15 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	}
 
 	ctx->priv->hw_ctx_id = resp.hw_context_id;
-	ctx->doorbell_offset = resp.doorbell_offset;
+	ctx->priv->doorbell_offset = resp.doorbell_offset;
+	/*
+	 * If user-mode-submission, pass doorbell offset to user via
+	 * ctx->doorbell_offset. Driver does not ring the doorbell.
+	 * Otherwise, keep doorbell offset as private and disallow
+	 * user space code to ring the doorbell.
+	 */
+	ctx->doorbell_offset = kernel_mode_submission ?
+		AMDXDNA_INVALID_DOORBELL_OFFSET : ctx->priv->doorbell_offset;
 
 	XDNA_DBG(xdna, "created hw context id %d", ctx->priv->hw_ctx_id);
 
