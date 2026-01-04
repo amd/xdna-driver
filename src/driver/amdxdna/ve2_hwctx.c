@@ -131,13 +131,12 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 	u32 slot_idx = slot % capacity;
 	struct host_queue_packet *pkt = &queue->hsa_queue_p->hq_entry[slot_idx];
 
+	mutex_lock(&queue->hq_lock);
 	/* Set packet type to valid so CERT can process it */
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 
 	/* Mark this slot as ready in driver tracking */
 	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_SUBMITTED;
-
-	mutex_lock(&queue->hq_lock);
 
 	/* Advance write_index as far as possible through all ready slots. */
 	while (header->write_index < queue->reserved_write_index) {
