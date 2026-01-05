@@ -552,7 +552,8 @@ struct clock_topology
 
     std::vector<clock_freq> clocks;
     clock_freq aie_clock;
-    strcpy(aie_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name));
+    strncpy(aie_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name),
+	     sizeof(aie_clock.m_name) - 1);
     aie_clock.m_type = CT_SYSTEM;
     aie_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
     clocks.push_back(aie_clock);
