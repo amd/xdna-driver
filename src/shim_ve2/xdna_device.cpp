@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
-
 #include <boost/format.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -533,6 +532,40 @@ struct total_cols
   }
 };
 
+struct clock_topology
+{
+  using result_type = query::clock_freq_topology_raw::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_clock_metadata clock_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+      .buffer_size = sizeof(clock_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    std::vector<clock_freq> clocks;
+    clock_freq aie_clock;
+    strcpy(aie_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name));
+    aie_clock.m_type = CT_SYSTEM;
+    aie_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
+    clocks.push_back(aie_clock);
+
+    std::vector<char> payload(sizeof(int16_t) + (clocks.size() * sizeof(struct clock_freq)));
+    auto data = reinterpret_cast<struct clock_freq_topology*>(payload.data());
+    data->m_count = clocks.size();
+    memcpy(data->m_clock_freq, clocks.data(), (clocks.size() * sizeof(struct clock_freq)));
+
+    return payload;
+  }
+};
+
 struct xclbin_slots
 {
   using result_type = query::xclbin_slots::result_type;
@@ -844,6 +877,7 @@ initialize_query_table()
   emplace_func0_request<query::total_cols,              total_cols>();
   emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func0_request<query::xocl_errors,             xocl_errors>();
+  emplace_func0_request<query::clock_freq_topology_raw, clock_topology>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func1_request<query::aie_read,                aie_read>();
   emplace_func1_request<query::aie_write,               aie_write>();
