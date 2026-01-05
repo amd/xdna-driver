@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
-#include <iostream>
 #include <boost/format.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/property_tree/ptree.hpp>

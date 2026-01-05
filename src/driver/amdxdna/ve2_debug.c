@@ -443,6 +443,89 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 	return ret;
 }
 
+static int ve2_get_aie_freq(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_aie_freq_scale freq_arg;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct aie_partition_req request = { 0 };
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct device *aie_dev = NULL;
+	unsigned long ctx_id;
+	u32 partition_id;
+	int ret, idx;
+
+	if (args->buffer_size != sizeof(freq_arg)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u, Expected: %lu",
+			 args->buffer_size, sizeof(freq_arg));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&freq_arg, u64_to_user_ptr(args->buffer), sizeof(freq_arg))) {
+		XDNA_ERR(xdna, "Failed to copy AIE freq data from user");
+		return -EFAULT;
+	}
+
+	if (freq_arg.dir != 0) {
+		XDNA_ERR(xdna, "Set AIE frequency not supported");
+		return -EOPNOTSUPP;
+	}
+
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, ctx_id, hwctx) {
+			if (hwctx && hwctx->priv && hwctx->priv->aie_dev) {
+				aie_dev = hwctx->priv->aie_dev;
+				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+				ret = aie_partition_get_freq(aie_dev, &freq_arg.freq);
+
+				if (ret) {
+					XDNA_ERR(xdna, "Failed to read AIE frequency: %d", ret);
+					return ret;
+				}
+
+				if (copy_to_user(u64_to_user_ptr(args->buffer),
+						 &freq_arg, sizeof(freq_arg))) {
+					XDNA_ERR(xdna, "Failed to copy AIE freq data to user");
+					return -EFAULT;
+				}
+
+				return 0;
+			}
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+
+	mutex_unlock(&xdna->dev_lock);
+
+	partition_id = aie_calc_part_id((start_col >= 0) ? start_col : 0, 4);
+
+	request.partition_id = partition_id;
+	aie_dev = aie_partition_request(&request);
+	if (IS_ERR(aie_dev)) {
+		ret = PTR_ERR(aie_dev);
+		XDNA_ERR(xdna, "Failed to request AIE partition %u: %d", partition_id, ret);
+		mutex_lock(&xdna->dev_lock);
+		return ret;
+	}
+
+	ret = aie_partition_get_freq(aie_dev, &freq_arg.freq);
+	aie_partition_release(aie_dev);
+	mutex_lock(&xdna->dev_lock);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to read AIE frequency from temp partition: %d", ret);
+		return ret;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &freq_arg, sizeof(freq_arg))) {
+		XDNA_ERR(xdna, "Failed to copy AIE freq data to user");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -460,6 +543,9 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = ve2_get_total_col(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_AIE_FREQ:
+		ret = ve2_get_aie_freq(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
