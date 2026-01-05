@@ -636,6 +636,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_QUERY_RESOURCE_INFO			12
 #define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
 #define	DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION		14
+#define	DRM_AMDXDNA_QUERY_AIE_FREQ			15
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
@@ -789,7 +790,17 @@ struct amdxdna_drm_aie_coredump {
 	__u32 context_id;
 	__u32 pad;
 };
-
+/**
+ * struct amdxdna_drm_aie_freq_scale - Query/Set AIE frequency
+ * @freq: Frequency value in Hz
+ * @dir: Direction - 0 for get, 1 for set
+ * This is used for DRM_AMDXDNA_QUERY_AIE_FREQ parameter.
+ */
+struct amdxdna_drm_aie_freq_scale {
+	__u64 freq;
+	__u8  dir;
+	__u8  pad[7];
+};
 /**
  * struct amdxdna_drm_bo_usage - The BO usage statistics
  * @pid: The ID of the process to query from

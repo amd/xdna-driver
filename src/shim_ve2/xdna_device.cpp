@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
-
+#include <iostream>
 #include <boost/format.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -533,6 +533,28 @@ struct total_cols
   }
 };
 
+struct aie_get_freq
+{
+  using result_type = query::aie_get_freq::result_type;
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& partition_id)
+  {
+    amdxdna_drm_aie_freq_scale freq_arg = {};
+    freq_arg.freq = 0;
+    freq_arg.dir = 0;  // 0 for get frequency
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_AIE_FREQ,
+      .buffer_size = sizeof(freq_arg),
+      .buffer = reinterpret_cast<uintptr_t>(&freq_arg)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    return freq_arg.freq;
+  }
+};
+
 struct xclbin_slots
 {
   using result_type = query::xclbin_slots::result_type;
@@ -848,6 +870,7 @@ initialize_query_table()
   emplace_func1_request<query::aie_read,                aie_read>();
   emplace_func1_request<query::aie_write,               aie_write>();
   emplace_func1_request<query::aie_coredump,            aie_coredump>();
+  emplace_func4_request<query::aie_get_freq,            aie_get_freq>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }
