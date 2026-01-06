@@ -17,7 +17,7 @@
 #include "amdxdna_devel.h"
 #endif
 
-bool kernel_mode_submission = true;
+bool kernel_mode_submission = false;
 module_param(kernel_mode_submission, bool, 0600);
 MODULE_PARM_DESC(kernel_mode_submission, "I/O submission through driver (Default true)");
 
@@ -226,6 +226,7 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 	XDNA_DBG(xdna, "read_idx %lld > seq %lld", *read_index, seq);		\
 	((*read_index) > seq);							\
 })
+#define ring_doorbell(ctx)	(writel(0, (ctx)->priv->doorbell_addr))
 
 int aie4_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)

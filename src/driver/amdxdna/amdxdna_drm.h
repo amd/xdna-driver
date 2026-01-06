@@ -96,6 +96,7 @@ struct amdxdna_rev_vbnv {
  * @sram_bar: Index of SRAM BAR
  * @psp_bar: Index of PSP BAR
  * @smu_bar: Index of SMU BAR
+ * @doorbell_bar: Index of DOORBELL BAR
  * @device_type: type of the device
  * @first_col: First column for application
  * @dev_mem_buf_shift: heap buffer alignment shift
@@ -114,6 +115,7 @@ struct amdxdna_dev_info {
 	int				sram_bar;
 	int				psp_bar;
 	int				smu_bar;
+	int				doorbell_bar;
 	int				device_type;
 	int				first_col;
 	u32				dev_mem_buf_shift;

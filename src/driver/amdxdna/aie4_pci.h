@@ -44,18 +44,13 @@ struct rt_config_clk_gating {
 
 struct amdxdna_ctx_priv {
 	struct amdxdna_gem_obj		*umq_bo;
-	struct sg_table			*umq_sgt;
+	void			__iomem	*doorbell_addr;
 	u32				meta_bo_hdl;
 	struct col_entry		*col_entry;
 	u32				hw_ctx_id;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
-	/*
-	 * In non-kernel-mode-submission mode, it will be passed to user space
-	 * through ctx->doorbell_offset. Otherwise, it stays here as private.
-	 */
-	u32				doorbell_offset;
 };
 
 enum aie4_dev_status {
@@ -67,10 +62,7 @@ enum aie4_dev_status {
 struct amdxdna_dev_priv {
 	const char		*npufw_path;
 	const char		*certfw_path;
-	u32			mbox_bar;
-	u32			mbox_rbuf_bar;
 	u64			mbox_info_off;
-	u32			doorbell_bar;
 	u32			doorbell_off;
 	struct rt_config_clk_gating	clk_gating;
 	const struct dpm_clk_freq	*dpm_clk_tbl;
