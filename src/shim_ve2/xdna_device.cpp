@@ -618,17 +618,14 @@ struct xocl_errors
 
     out_xcl_errors->num_err = arg.num_element;
 
-#if 0
     // Dump errors to stderr if any found
     if (arg.num_element > 0) {
-      std::cerr << "========================================\n";
-      std::cerr << "ERROR DETECTED: AIE Async Error Found!\n";
-      std::cerr << "========================================\n";
+      std::cerr << "ERROR DETECTED: AIE Async Error Found, Error Count: " << arg.num_element << std::endl;
       for (uint32_t i = 0; i < arg.num_element; i++) {
         out_xcl_errors->errors[i].err_code = data[i].err_code;
         out_xcl_errors->errors[i].ts = data[i].ts_us;
         out_xcl_errors->errors[i].ex_error_code = data[i].ex_err_code;
-
+#if 0
         // Dump detailed error information to stderr
         std::cerr << "Error[" << i << "]:\n";
 
@@ -654,10 +651,9 @@ struct xocl_errors
         uint8_t col = data[i].ex_err_code & 0xF;
         std::cerr << "  Tile Location: Row=" << static_cast<int>(row)
                    << ", Col=" << static_cast<int>(col) << "\n";
-      }
-      std::cerr << "========================================\n";
-    }
 #endif
+      }
+    }
 
     return output;
   }
