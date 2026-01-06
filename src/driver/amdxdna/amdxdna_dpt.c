@@ -30,10 +30,6 @@ static u64 fw_log_size = SZ_4M;
 module_param(fw_log_size, ullong, 0444);
 MODULE_PARM_DESC(fw_log_size, " Size of firmware log (Default 4MB). Min 8KB, Max 4MB");
 
-static bool poll_fw_log;
-module_param(poll_fw_log, bool, 0444);
-MODULE_PARM_DESC(poll_fw_log, " Enable firmware log polling (Default false)");
-
 static u32 fw_trace_categories;
 module_param(fw_trace_categories, uint, 0444);
 MODULE_PARM_DESC(fw_trace_uint, " Bitmask to enable firmware trace event categories (Default 0)");
@@ -41,11 +37,6 @@ MODULE_PARM_DESC(fw_trace_uint, " Bitmask to enable firmware trace event categor
 static u64 fw_trace_size = SZ_4M;
 module_param(fw_trace_size, ullong, 0444);
 MODULE_PARM_DESC(fw_trace_size, " Size of firmware trace (Default 4MB). Min 8KB, Max 4MB");
-
-static bool poll_fw_trace;
-module_param(poll_fw_trace, bool, 0444);
-MODULE_PARM_DESC(poll_fw_trace, " Enable firmware trace polling (Default false)");
-
 
 static inline int amdxnda_dpt_cpy(void *to, void *from, size_t size, bool user)
 {
@@ -366,8 +357,8 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to init FW logging IRQ: %d", ret);
 
-	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
-	if (ret || poll_fw_log)
+	/* Enable continuous polling if IRQ initialization fails */
+	if (ret)
 		amdxdna_dpt_timer_get(log_hdl);
 
 	amdxdna_dpt_read_metadata(log_hdl);
@@ -466,8 +457,8 @@ static int amdxdna_fw_log_resume(struct amdxdna_dev *xdna)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to reinit FW logging IRQ: %d", ret);
 
-	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
-	if (ret || poll_fw_log)
+	/* Enable continuous polling if IRQ initialization fails */
+	if (ret)
 		amdxdna_dpt_timer_get(log_hdl);
 
 	log_hdl->enabled = true;
@@ -617,8 +608,8 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna, u32 categories)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to init FW trace IRQ: %d", ret);
 
-	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
-	if (ret || poll_fw_trace)
+	/* Enable continuous polling if IRQ initialization fails */
+	if (ret)
 		amdxdna_dpt_timer_get(trace_hdl);
 
 	amdxdna_dpt_read_metadata(trace_hdl);
@@ -717,8 +708,8 @@ static int amdxdna_fw_trace_resume(struct amdxdna_dev *xdna)
 	if (ret)
 		XDNA_ERR(xdna, "Failed to reinit FW trace IRQ: %d", ret);
 
-	/* Enable continuous polling if IRQ initialization fails or enabled by module param */
-	if (ret || poll_fw_trace)
+	/* Enable continuous polling if IRQ initialization fails */
+	if (ret)
 		amdxdna_dpt_timer_get(trace_hdl);
 
 	trace_hdl->enabled = true;
