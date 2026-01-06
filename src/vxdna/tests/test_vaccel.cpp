@@ -1273,6 +1273,72 @@ TEST_F(VaccelRendererTest, SubmitCcmdReadSysfsEmptyNodeName) {
     EXPECT_LT(ret, 0) << "Should fail with empty node name";
 }
 
+TEST_F(VaccelRendererTest, SubmitCcmdReadSysfsPathTraversal) {
+    if (drm_fd_ < 0) {
+        GTEST_SKIP() << "No DRM device available";
+    }
+
+    // Create device and context
+    int ret = createTestDevice(VIRACCEL_CAPSET_ID_AMDXDNA);
+    ASSERT_EQ(ret, 0);
+
+    uint32_t ctx_id = 1;
+    ret = vaccel_create_ctx_with_flags(cookie_, ctx_id, 0, 0, nullptr);
+    ASSERT_EQ(ret, 0);
+
+    // Create response resource
+    std::vector<uint8_t> resp_buf(4096);
+    struct iovec resp_iov = {
+        .iov_base = resp_buf.data(),
+        .iov_len = resp_buf.size()
+    };
+
+    struct vaccel_create_resource_blob_args resp_res_args = {};
+    resp_res_args.res_handle = 100;
+    resp_res_args.size = resp_buf.size();
+    resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
+    resp_res_args.iovecs = &resp_iov;
+    resp_res_args.num_iovs = 1;
+
+    ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
+    ASSERT_EQ(ret, 0);
+
+    // Send INIT command
+    struct amdxdna_ccmd_init_req init_cmd = {};
+    init_cmd.hdr.cmd = AMDXDNA_CCMD_INIT;
+    init_cmd.hdr.len = sizeof(init_cmd);
+    init_cmd.rsp_res_id = 100;
+
+    ret = vaccel_submit_ccmd(cookie_, ctx_id, &init_cmd, sizeof(init_cmd));
+    EXPECT_EQ(ret, 0);
+
+    // Test various path traversal attack patterns
+    // These should all be rejected because they attempt to escape the device sysfs root
+    const char *malicious_paths[] = {
+        "../../../etc/passwd",                    // Classic path traversal to /etc/passwd
+        "../../../../etc/shadow",                 // Attempt to read shadow file
+        "../../../proc/self/environ",             // Attempt to read process environment
+        "foo/../../../etc/passwd",                // Traversal with valid prefix
+        "subsystem/../../../etc/passwd",          // Traversal through symlink-like path
+        "../../../root/.ssh/id_rsa",              // Attempt to read SSH keys
+        "..%2F..%2F..%2Fetc%2Fpasswd",            // URL-encoded traversal (should fail or be treated literally)
+    };
+
+    for (const char *malicious_path : malicious_paths) {
+        alignas(struct amdxdna_ccmd_read_sysfs_req) char cmd_buf[256];
+        auto *read_sysfs_cmd = reinterpret_cast<struct amdxdna_ccmd_read_sysfs_req*>(cmd_buf);
+        read_sysfs_cmd->hdr.cmd = AMDXDNA_CCMD_READ_SYSFS;
+        read_sysfs_cmd->hdr.len = sizeof(struct amdxdna_ccmd_read_sysfs_req) + strlen(malicious_path) + 1;
+        read_sysfs_cmd->hdr.rsp_off = 0;
+        constexpr size_t node_name_len = sizeof(cmd_buf) - sizeof(struct amdxdna_ccmd_read_sysfs_req);
+        strncpy(read_sysfs_cmd->node_name, malicious_path, node_name_len - 1);
+        read_sysfs_cmd->node_name[node_name_len - 1] = '\0';
+
+        ret = vaccel_submit_ccmd(cookie_, ctx_id, read_sysfs_cmd, read_sysfs_cmd->hdr.len);
+        EXPECT_LT(ret, 0) << "Path traversal attack should be blocked: " << malicious_path;
+    }
+}
+
 // =============================================================================
 // Integration Test
 // =============================================================================

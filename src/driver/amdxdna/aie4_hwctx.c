@@ -191,8 +191,6 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 ({ \
 	u64 *read_index = (u64 *)((char *)amdxdna_gem_vmap(nctx->umq_bo) +	\
 		HSA_QUEUE_READ_INDEX_OFFSET);					\
-	XDNA_DBG(xdna, "kva 0x%llx", (u64)amdxdna_gem_vmap(nctx->umq_bo));	\
-	drm_clflush_virt_range((void *)read_index, sizeof(u64));		\
 	XDNA_DBG(xdna, "read_idx %lld > seq %lld", *read_index, seq);		\
 	((*read_index) > seq);							\
 })
