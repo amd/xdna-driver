@@ -71,18 +71,34 @@ static inline struct ve2_dpu_data *get_ve2_dpu_data_next(struct ve2_dpu_data *dp
  *
  * Returns true if at least one slot is available, false otherwise.
  * This is used as the condition for wait_event_interruptible_timeout.
+ *
  */
 static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
+	u32 capacity = header->capacity;
+	enum ert_cmd_state state;
 	u64 outstanding;
 	bool available;
+	u32 slot_idx;
 
 	mutex_lock(&queue->hq_lock);
 	outstanding = queue->reserved_write_index - header->read_index;
-	available = outstanding < header->capacity;
+	if (outstanding >= capacity) {
+		mutex_unlock(&queue->hq_lock);
+		return false;
+	}
+
+	/*
+	 * Also check that the next slot to be reserved is actually available.
+	 * Slot is available when in INVALID state (set by ve2_hwctx_job_release
+	 * after job completion, or zero-initialized for fresh slots).
+	 */
+	slot_idx = queue->reserved_write_index % capacity;
+	state = queue->hq_complete.hqc_mem[slot_idx];
+	available = (state == ERT_CMD_STATE_INVALID);
 	mutex_unlock(&queue->hq_lock);
 
 	return available;
@@ -156,10 +172,10 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	/*
 	 * Slot can only be reused when it's in INVALID state, which is set by
 	 * ve2_hwctx_job_release() after the job is fully released from pending array.
-	 * State 0 is also allowed for initial/uninitialized slots.
+	 * Note: ERT_CMD_STATE_INVALID == 0, so this also covers zero-initialized slots.
 	 * This ensures the pending array slot is free before we reserve the HSA queue slot.
 	 */
-	if (state != ERT_CMD_STATE_INVALID && state != 0) {
+	if (state != ERT_CMD_STATE_INVALID) {
 		XDNA_DBG(xdna, "Slot %u is still in use with state %u", slot_idx, state);
 		mutex_unlock(&queue->hq_lock);
 		return ERR_PTR(-EBUSY);
