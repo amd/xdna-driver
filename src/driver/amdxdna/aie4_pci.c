@@ -439,7 +439,7 @@ disable_device:
 
 static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
+	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -477,7 +477,7 @@ static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 
 static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
+	DECLARE_AIE4_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -788,7 +788,7 @@ static void put_col_entry(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
 static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
 				    int graceful)
 {
-	DECLARE_AIE4_MSG(aie4_destroy_hw_context, AIE4_MSG_OP_DESTROY_HW_CONTEXT);
+	DECLARE_AIE4_MSG(aie4_msg_destroy_hw_context, AIE4_MSG_OP_DESTROY_HW_CONTEXT);
 
 	req.hw_context_id = hw_context_id;
 	req.graceful_flag = graceful ? 1 : 0;
@@ -797,7 +797,7 @@ static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context
 
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
-	DECLARE_AIE4_MSG(aie4_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
+	DECLARE_AIE4_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_client *client = ctx->client;
@@ -836,7 +836,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	req.hsa_addr_low = lower_32_bits(amdxdna_gem_dev_addr(nctx->umq_bo));
 
 	/* fix passid and priority_band later */
-	req.priority_band = CONTEXT_PRIORITY_BAND_NORMAL;
+	req.priority_band = AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
 
 	XDNA_DBG(xdna, "set pasid raw 0x%x", req.pasid.raw);
 
