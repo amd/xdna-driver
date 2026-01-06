@@ -94,7 +94,7 @@ download_npufws()
       fi
 
       echo "Download $device NPUFW version $version:"
-      if [ -d "${firmware_dir}/${pci_dev_id}_${pci_rev_id}" ]; then
+      if [ -f "${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name" ]; then
         rm -r ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
       fi
       mkdir -p ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
