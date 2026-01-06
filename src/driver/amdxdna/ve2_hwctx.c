@@ -977,12 +977,15 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 
 	/*
 	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work,
+	 * remove all FIFO entries for this context to prevent use-after-free,
 	 * then cancel any pending work to ensure no work is accessing this context
 	 */
 	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[nhwctx->start_col];
 	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx == hwctx)
 		mgmtctx->active_ctx = NULL;
+	/* Remove all FIFO entries for this context before freeing it */
+	ve2_fifo_remove_ctx(mgmtctx, hwctx);
 	mutex_unlock(&mgmtctx->ctx_lock);
 
 	/* Now cancel any pending work - it will see active_ctx as NULL and bail out */

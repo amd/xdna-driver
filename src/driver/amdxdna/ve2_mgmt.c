@@ -271,6 +271,32 @@ static int ve2_fifo_enqueue(struct amdxdna_mgmtctx *mgmtctx,
 	return 0;
 }
 
+/**
+ * ve2_fifo_remove_ctx - Remove all FIFO entries for a given context
+ * @mgmtctx: Pointer to the management context
+ * @ctx: Pointer to the context to remove
+ *
+ * Must be called with mgmtctx->ctx_lock held.
+ * This prevents use-after-free when a context is destroyed while
+ * entries for it still exist in the scheduler FIFO.
+ */
+void ve2_fifo_remove_ctx(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_ctx_command_fifo *c_ctx, *t_ctx;
+
+	lockdep_assert_held(&mgmtctx->ctx_lock);
+
+	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
+		if (c_ctx->ctx == ctx) {
+			XDNA_DBG(mgmtctx->xdna,
+				 "Removing FIFO entry for ctx %p, cmd_index %llu\n",
+				 ctx, c_ctx->command_index);
+			list_del(&c_ctx->list);
+			kfree(c_ctx);
+		}
+	}
+}
+
 // Get the context switch request bit
 static u32 get_ctx_bit(struct amdxdna_mgmtctx *mgmtctx)
 {
