@@ -492,11 +492,12 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
 	struct amdxdna_dev_hdl *ndev;
 	struct psp_config psp_conf;
 	const struct firmware *fw;
-	void __iomem * const *tbl;
-	int i, bars, nvec, ret;
+	unsigned long bars = 0;
+	int i, nvec, ret;
 
 	XDNA_DBG(xdna, "Control flags 0x%x", aie2_control_flags);
 	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
@@ -521,28 +522,24 @@ static int aie2_init(struct amdxdna_dev *xdna)
 		goto release_fw;
 	}
 
-	bars = pci_select_bars(pdev, IORESOURCE_MEM);
-	for (i = 0; i < PSP_MAX_REGS; i++) {
-		if (!(BIT(PSP_REG_BAR(ndev, i)) && bars)) {
-			XDNA_ERR(xdna, "does not get pci bar%d",
-				 PSP_REG_BAR(ndev, i));
-			ret = -EINVAL;
+	for (i = 0; i < PSP_MAX_REGS; i++)
+		set_bit(PSP_REG_BAR(ndev, i), &bars);
+
+	set_bit(xdna->dev_info->sram_bar, &bars);
+	set_bit(xdna->dev_info->smu_bar, &bars);
+	set_bit(xdna->dev_info->mbox_bar, &bars);
+
+	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
+		if (!test_bit(i, &bars))
+			continue;
+		tbl[i] = pcim_iomap(pdev, i, 0);
+		if (!tbl[i]) {
+			XDNA_ERR(xdna, "map bar %d failed", i);
+			ret = -ENOMEM;
 			goto release_fw;
 		}
 	}
 
-	ret = pcim_iomap_regions(pdev, bars, "amdxdna-npu");
-	if (ret) {
-		XDNA_ERR(xdna, "map regions failed, ret %d", ret);
-		goto release_fw;
-	}
-
-	tbl = pcim_iomap_table(pdev);
-	if (!tbl) {
-		XDNA_ERR(xdna, "Cannot get iomap table");
-		ret = -ENOMEM;
-		goto release_fw;
-	}
 	ndev->sram_base = tbl[xdna->dev_info->sram_bar];
 	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];

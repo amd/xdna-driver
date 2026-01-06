@@ -481,6 +481,9 @@ static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_dr
 	int ret = 0;
 	u32 i;
 
+	/* Set num_element to 0 to indicate no errors */
+	args->num_element = 0;
+
 	/* Find the first mgmtctx with a cached error */
 	for (i = 0; i < hdl->hwctx_limit; i++) {
 		mgmtctx = &hdl->ve2_mgmtctx[i];
@@ -489,6 +492,7 @@ static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_dr
 
 		mutex_lock(&mgmtctx->async_errs_cache.lock);
 		if (mgmtctx->async_errs_cache.err.err_code) {
+			args->num_element++;
 			memcpy(&tmp, &mgmtctx->async_errs_cache.err, sizeof(tmp));
 			mutex_unlock(&mgmtctx->async_errs_cache.lock);
 			ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), 1);
@@ -497,8 +501,6 @@ static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_dr
 		mutex_unlock(&mgmtctx->async_errs_cache.lock);
 	}
 
-	/* No error found - set num_element to 0 to indicate no errors */
-	args->num_element = 0;
 	return 0;
 }
 
