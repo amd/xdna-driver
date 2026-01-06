@@ -194,14 +194,16 @@ struct handshake {
 	u32 last_ddr_dm2mm_addr_low; // 94
 	u32 last_ddr_mm2dm_addr_high; // 98
 	u32 last_ddr_mm2dm_addr_low;  // 9c
-	struct { /* Hardware sync required */ // a0
+	/* Hardware sync required - offset 0xa0 */
+	struct {
 		u32 fw_state;
 		u32 abs_page_index; //absolute index of page where current control code are in
 		u32 ppc; // previous pc(relative to current page) drives current_job_context to NULL
 	}
 	vm;
-	struct { /* Hardware sync required */ // ac
-		u32 ear; //exception address
+	/* Hardware sync required - offset 0xac */
+	struct {
+		u32 ear; /* exception address */
 		u32 esr; //exception status
 		u32 pc; //exception pc
 	}
