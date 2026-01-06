@@ -173,6 +173,8 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	/*
 	 * Slot can only be reused when it's in INVALID state, which is set by
 	 * ve2_hwctx_job_release() after the job is fully released from pending array.
+	 * Note: ERT_CMD_STATE_INVALID == 0, so this also covers zero-initialized slots.
+	 * This ensures the pending array slot is free before we reserve the HSA queue slot.
 	 */
 	if (state != ERT_CMD_STATE_INVALID) {
 		XDNA_DBG(xdna, "Slot %u is still in use with state %u", slot_idx, state);
