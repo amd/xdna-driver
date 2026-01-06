@@ -620,7 +620,6 @@ struct xocl_errors
 
     // Dump errors to stderr if any found
     if (arg.num_element > 0) {
-      std::cerr << "ERROR DETECTED: AIE Async Error Found, Error Count: " << arg.num_element << std::endl;
       for (uint32_t i = 0; i < arg.num_element; i++) {
         out_xcl_errors->errors[i].err_code = data[i].err_code;
         out_xcl_errors->errors[i].ts = data[i].ts_us;
