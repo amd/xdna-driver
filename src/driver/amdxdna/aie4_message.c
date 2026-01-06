@@ -84,7 +84,7 @@ int aie4_send_msg_wait(struct amdxdna_dev_hdl *ndev,
 	if (ret)
 		return ret;
 
-	if (*hdl->data != AIE4_STATUS_SUCCESS) {
+	if (*hdl->data != AIE4_MSG_STATUS_SUCCESS) {
 		XDNA_ERR(xdna, "command opcode 0x%x failed, status 0x%x",
 			 msg->opcode, *hdl->data);
 		return -EINVAL;
@@ -95,7 +95,7 @@ int aie4_send_msg_wait(struct amdxdna_dev_hdl *ndev,
 
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_suspend, AIE4_MSG_OP_SUSPEND);
+	DECLARE_AIE4_MSG(aie4_msg_suspend, AIE4_MSG_OP_SUSPEND);
 	int ret;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
@@ -111,7 +111,7 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev)
 
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
 	struct aie4_msg_runtime_config_force_preemption *force_preempt;
 	u32 type = AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION;
 	int ret;
@@ -133,7 +133,7 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
 
 int aie4_check_firmware_version(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_identify, AIE4_MSG_OP_IDENTIFY);
+	DECLARE_AIE4_MSG(aie4_msg_identify, AIE4_MSG_OP_IDENTIFY);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -163,7 +163,7 @@ int aie4_check_firmware_version(struct amdxdna_dev_hdl *ndev)
 int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 			  u32 size, u32 *cols_filled)
 {
-	DECLARE_AIE4_MSG(aie4_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
+	DECLARE_AIE4_MSG(aie4_msg_aie4_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_client *client;
@@ -211,7 +211,7 @@ int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 		goto fail;
 	}
 
-	if (resp.status != AIE4_STATUS_SUCCESS) {
+	if (resp.status != AIE4_MSG_STATUS_SUCCESS) {
 		XDNA_ERR(xdna, "Query NPU status failed, status 0x%x", resp.status);
 		ret = -EINVAL;
 		goto fail;
@@ -238,7 +238,7 @@ fail:
 
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version)
 {
-	DECLARE_AIE4_MSG(aie4_version_info, AIE4_MSG_OP_AIE_VERSION_INFO);
+	DECLARE_AIE4_MSG(aie4_msg_aie4_version_info, AIE4_MSG_OP_AIE_VERSION_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -257,7 +257,7 @@ int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *ver
 
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata)
 {
-	DECLARE_AIE4_MSG(aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
+	DECLARE_AIE4_MSG(aie4_msg_aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
 	int ret;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
@@ -294,11 +294,11 @@ int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *m
 
 int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, u32 size)
 {
-	DECLARE_AIE4_MSG(aie4_get_telemetry, AIE4_MSG_OP_GET_TELEMETRY);
+	DECLARE_AIE4_MSG(aie4_msg_get_telemetry, AIE4_MSG_OP_GET_TELEMETRY);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	if (type >= TELEMETRY_TYPE_MAX_SIZE) {
+	if (type >= AIE4_TELEMETRY_TYPE_MAX_SIZE) {
 		XDNA_ERR(xdna, "Invalid telemetry type %d", type);
 		return -EINVAL;
 	}
@@ -318,7 +318,7 @@ int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t 
 
 int aie4_set_pm_msg(struct amdxdna_dev_hdl *ndev, u32 target)
 {
-	DECLARE_AIE4_MSG(aie4_power_override, AIE4_MSG_OP_POWER_OVERRIDE);
+	DECLARE_AIE4_MSG(aie4_msg_power_override, AIE4_MSG_OP_POWER_OVERRIDE);
 	int ret;
 
 	req.power_mode = target;
@@ -333,7 +333,7 @@ int aie4_set_pm_msg(struct amdxdna_dev_hdl *ndev, u32 target)
 int aie4_register_async_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
 				  void *handle, int (*cb)(void*, void __iomem *, size_t))
 {
-	struct aie4_async_event_msg_config_req req = { 0 };
+	struct aie4_msg_async_event_config_req req = { 0 };
 	struct xdna_mailbox_msg msg = {
 		.send_data = (u8 *)&req,
 		.send_size = sizeof(req),
@@ -352,7 +352,7 @@ int aie4_register_async_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl, u8 level,
 		      size_t size, u32 *msi_idx, u32 *msi_address)
 {
-	DECLARE_AIE4_MSG(aie4_fw_log_start, AIE4_MSG_OP_FW_LOG_START);
+	DECLARE_AIE4_MSG(aie4_msg_dram_logging_start, AIE4_MSG_OP_DRAM_LOGGING_START);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	dma_addr_t addr;
 	int ret;
@@ -385,14 +385,14 @@ int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl 
 
 int aie4_set_log_level(struct amdxdna_dev_hdl *ndev, u8 level)
 {
-	DECLARE_AIE4_MSG(aie4_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
-	struct aie4_msg_runtime_config_fw_log_level *log;
-	u32 type = AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL;
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_dynamic_logging_level *log;
+	u32 type = AIE4_RUNTIME_CONFIG_DYNAMIC_LOGGING_LEVEL;
 	int ret;
 
 	req.type = type;
-	log = (struct aie4_msg_runtime_config_fw_log_level *)req.data;
-	log->level = level;
+	log = (struct aie4_msg_runtime_config_dynamic_logging_level *)req.data;
+	log->log_level = level;
 
 	msg.send_size = sizeof(req.type) + sizeof(*log);
 
@@ -407,7 +407,7 @@ int aie4_set_log_level(struct amdxdna_dev_hdl *ndev, u8 level)
 
 int aie4_stop_fw_log(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_fw_log_stop, AIE4_MSG_OP_FW_LOG_STOP);
+	DECLARE_AIE4_MSG(aie4_msg_dram_logging_stop, AIE4_MSG_OP_DRAM_LOGGING_STOP);
 	int ret;
 
 	ret = aie4_send_msg_wait(ndev, &msg);

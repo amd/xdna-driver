@@ -39,7 +39,7 @@
  */
 int aie4_hello_test(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
-	DECLARE_AIE4_MSG(aie4_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
+	DECLARE_AIE4_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;

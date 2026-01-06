@@ -12,9 +12,9 @@
 #include <drm/drm_debugfs.h>
 #include <drm/drm_cache.h>
 
-#include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "aie4_message.h"
+#include "aie4_msg_priv.h"
 
 #if defined(CONFIG_DEBUG_FS)
 #define SIZE            31
@@ -54,7 +54,7 @@ struct debugfs_args {
 /* test mpaie echo command via mailbox */
 static int test_msg_echo_impl(struct amdxdna_dev_hdl *ndev, u32 val1, u32 val2)
 {
-	DECLARE_AIE4_MSG(aie4_echo, AIE4_MSG_OP_ECHO);
+	DECLARE_AIE4_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -151,7 +151,7 @@ static int test_flr(struct amdxdna_dev_hdl *ndev)
 
 static int test_msg_identify(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_identify, AIE4_MSG_OP_IDENTIFY);
+	DECLARE_AIE4_MSG(aie4_msg_identify, AIE4_MSG_OP_IDENTIFY);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -178,7 +178,7 @@ done:
 /* test mpaie tile_info command via mailbox */
 static int test_msg_tile_info(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
+	DECLARE_AIE4_MSG(aie4_msg_aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -226,7 +226,7 @@ static int test_msg_tile_info(struct amdxdna_dev_hdl *ndev)
 /* test mpaie version_info command via mailbox */
 static int test_msg_version_info(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_version_info, AIE4_MSG_OP_AIE_VERSION_INFO);
+	DECLARE_AIE4_MSG(aie4_msg_aie4_version_info, AIE4_MSG_OP_AIE_VERSION_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -250,7 +250,7 @@ static int test_msg_version_info(struct amdxdna_dev_hdl *ndev)
 /* test mpaie column_info command via mailbox */
 static int test_msg_column_info(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
+	DECLARE_AIE4_MSG(aie4_msg_aie4_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	dma_addr_t dma_addr;
 	u8 *buff_addr;
@@ -317,14 +317,14 @@ free_buf:
 
 static int aie4_telemetry_disabled_show(struct seq_file *m, void *unused)
 {
-	return aie4_telemetry(m, TELEMETRY_TYPE_DISABLED);
+	return aie4_telemetry(m, AIE4_TELEMETRY_TYPE_DISABLED);
 }
 
 DBGFS_FOPS_RW(telemetry_disabled, aie4_telemetry_disabled_show, NULL);
 
 static int aie4_telemetry_perf_show(struct seq_file *m, void *unused)
 {
-	return aie4_telemetry(m, TELEMETRY_TYPE_PERF_COUNTER);
+	return aie4_telemetry(m, AIE4_TELEMETRY_TYPE_PERF_COUNTER);
 }
 
 DBGFS_FOPS_RW(telemetry_perf, aie4_telemetry_perf_show, NULL);
@@ -332,7 +332,7 @@ DBGFS_FOPS_RW(telemetry_perf, aie4_telemetry_perf_show, NULL);
 /* test mpaie async_event command via mailbox */
 static int test_msg_async_event(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_async_event_msg_config, AIE4_MSG_OP_ASYNC_EVENT_MSG);
+	DECLARE_AIE4_MSG(aie4_msg_async_event_config, AIE4_MSG_OP_ASYNC_EVENT_MSG);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 async_buf_size = 8192;
 	int ret;
@@ -740,7 +740,7 @@ DBGFS_FOPS_RW(dump_fw_log_buffer, aie4_dump_fw_log_buffer_get, NULL);
 static ssize_t aie4_keep_partition_write(struct file *file, const char __user *ptr,
 					 size_t len, loff_t *off)
 {
-	DECLARE_AIE4_MSG(aie4_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
 	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct aie4_msg_runtime_config_keep_partitions *keep_partition;
