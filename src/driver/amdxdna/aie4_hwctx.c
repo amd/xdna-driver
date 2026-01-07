@@ -219,7 +219,7 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 
 static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int attach)
 {
-	DECLARE_AIE4_MSG(aie4_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
 	struct amdxdna_client *client = ctx->client;
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -249,19 +249,19 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		 * apply workaround here before xrt-smi can enable single file for cert_log
 		 * so that kernel doesn't need to touch the kva anymore.
 		 */
-		config_property = CONFIGURE_HW_CONTEXT_PROPERTY_CERT_LOG_BUFFER;
+		config_property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_LOG_BUFFER;
 		log_bo = amdxdna_gem_get_obj(client, meta_buffer->bo_handle, AMDXDNA_BO_SHARE);
 		break;
 	case AMDXDNA_FW_BUF_DEBUG:
-		config_property = CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_BUFFER;
+		config_property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_BUFFER;
 		log_bo = amdxdna_gem_get_obj(client, meta_buffer->bo_handle, AMDXDNA_BO_SHARE);
 		break;
 	case AMDXDNA_FW_BUF_TRACE:
-		config_property = CONFIGURE_HW_CONTEXT_PROPERTY_CERT_TRACE_BUFFER;
+		config_property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_TRACE_BUFFER;
 		log_bo = amdxdna_gem_get_obj(client, meta_buffer->bo_handle, AMDXDNA_BO_SHARE);
 		break;
 	case AMDXDNA_FW_BUF_DBG_Q:
-		config_property = CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_QUEUE;
+		config_property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_QUEUE;
 		log_bo = amdxdna_gem_get_obj(client, meta_buffer->bo_handle, AMDXDNA_BO_SHARE);
 		break;
 	default:

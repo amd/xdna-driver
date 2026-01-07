@@ -7,12 +7,12 @@
 #include <linux/kernel.h>
 #include <linux/dma-mapping.h>
 #include <drm/drm_cache.h>
-#include "aie4_msg_priv.h"
 #include "aie4_pci.h"
+#include "aie4_msg_priv.h"
 
 struct async_event {
 	struct amdxdna_dev_hdl		*ndev;
-	struct aie4_async_event_msg_config_resp	resp;
+	struct aie4_msg_async_event_config_resp	resp;
 	struct workqueue_struct		*wq;
 	struct work_struct		work;
 	u8				*buf;
@@ -28,6 +28,8 @@ struct async_events {
 	u32				event_cnt;
 	struct async_event		event[] __counted_by(event_cnt);
 };
+
+#define ASYNC_BUF_SIZE	SZ_8K
 
 /*
  * Below enum, struct and lookup tables are porting from XAIE util header file.
@@ -208,15 +210,15 @@ static u32 aie4_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u3
 
 static int aie4_error_async_cb(void *handle, void __iomem *data, size_t size)
 {
-	//struct aie4_async_event_msg_config_resp *resp;
+	//struct aie4_msg_async_event_config_resp *resp;
 	struct async_event *e = handle;
 
 	if (data) {
 		e->resp.type = readl(data +
-				offsetof(struct aie4_async_event_msg_config_resp, type));
+				offsetof(struct aie4_msg_async_event_config_resp, type));
 		wmb(); /* Update status in the end, so that no lock for here */
 		e->resp.status = readl(data +
-				offsetof(struct aie4_async_event_msg_config_resp, status));
+				offsetof(struct aie4_msg_async_event_config_resp, status));
 	}
 	queue_work(e->wq, &e->work);
 	return 0;
@@ -241,10 +243,10 @@ static void aie4_error_worker(struct work_struct *err_work)
 
 	xdna = e->ndev->xdna;
 
-	if (e->resp.status == MAX_AIE4_STATUS_CODE)
+	if (e->resp.status == MAX_AIE4_MSG_STATUS_CODE)
 		return;
 
-	e->resp.status = MAX_AIE4_STATUS_CODE;
+	e->resp.status = MAX_AIE4_MSG_STATUS_CODE;
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     e->buf, 0x100, false);
@@ -335,7 +337,7 @@ int aie4_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 		e->buf = &events->buf[offset];
 		e->addr = events->addr + offset;
 		e->size = ASYNC_BUF_SIZE;
-		e->resp.status = MAX_AIE4_STATUS_CODE;
+		e->resp.status = MAX_AIE4_MSG_STATUS_CODE;
 		INIT_WORK(&e->work, aie4_error_worker);
 	}
 

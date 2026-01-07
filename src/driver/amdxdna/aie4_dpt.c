@@ -69,7 +69,7 @@ int aie4_fw_log_config(struct amdxdna_dev *xdna, u8 level)
 		return -EOPNOTSUPP;
 	}
 
-	if (level == AIE4_FW_LOG_LEVEL_NONE || level >= AIE4_MAX_FW_LOG_LEVEL) {
+	if (level == AIE4_DYNAMIC_LOG_NONE || level > AIE4_DYNAMIC_LOG_DBG) {
 		XDNA_ERR(xdna,  "Invalid firmware log level: %d", level);
 		return -EINVAL;
 	}
