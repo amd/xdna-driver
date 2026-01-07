@@ -23,11 +23,15 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	char *buf;
 	int ret;
 
+	XDNA_DBG(xdna, "Loading firmware: %s", xdna_hdl->priv->fw_path);
+
 	ret = request_firmware(&fw, xdna_hdl->priv->fw_path, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "request fw %s failed %d", xdna_hdl->priv->fw_path, ret);
 		return -ENODEV;
 	}
+
+	XDNA_DBG(xdna, "Firmware loaded: size=%zu bytes", fw->size);
 
 	buf = kmalloc(fw->size, GFP_KERNEL);
 	if (!buf) {
@@ -178,6 +182,8 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	int ret;
 	u32 col;
 
+	XDNA_DBG(xdna, "Initializing VE2 device");
+
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
@@ -261,15 +267,20 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
 	}
 
+	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",
+		 xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows,
+		 xdna_hdl->hwctx_limit);
+
 	return 0;
 }
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
-	/* All resources are managed by devm_/drmm_ */
-	XDNA_DBG(xdna, "VE2 device cleanup function");
+	XDNA_DBG(xdna, "VE2 device cleanup: releasing resources");
 
 	ve2_cma_mem_region_remove(xdna);
+
+	XDNA_DBG(xdna, "VE2 device cleanup complete");
 }
 
 const struct amdxdna_dev_ops ve2_ops = {
