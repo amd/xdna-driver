@@ -65,39 +65,91 @@ static inline struct ve2_dpu_data *get_ve2_dpu_data_next(struct ve2_dpu_data *dp
 	return dpu_data + 1;
 }
 
-static int hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv,
-				  u64 *slot)
+static struct host_queue_packet *
+hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, u64 *slot)
 {
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
 	u32 capacity = header->capacity;
 	u32 slot_idx;
+	u64 outstanding;
 
 	mutex_lock(&queue->hq_lock);
-	if (header->write_index < header->read_index) {
-		XDNA_ERR(xdna, "HSA Queue read %llx before write %llx",
-			 header->read_index, header->write_index);
-		mutex_unlock(&queue->hq_lock);
-		return -EINVAL;
-	} else if ((header->write_index - header->read_index) < capacity) {
-		slot_idx = header->write_index % capacity;
-		enum ert_cmd_state state = queue->hq_complete.hqc_mem[slot_idx];
 
-		if (state != ERT_CMD_STATE_INVALID) {
-			/* Slot is still active */
-			mutex_unlock(&queue->hq_lock);
-			return -EAGAIN;
-		}
-		*slot = header->write_index++;
-		XDNA_DBG(xdna, "slot %lld", *slot);
-	} else {
-		/* Queue is full - return EAGAIN without error print (expected during retries) */
+	/*
+	 * Check against reserved_write_index to account for in-flight reservations.
+	 */
+	if (queue->reserved_write_index < header->read_index) {
+		XDNA_ERR(xdna, "HSA Queue: reserved_write_index(%llu) < read_index(%llu)",
+			 queue->reserved_write_index, header->read_index);
 		mutex_unlock(&queue->hq_lock);
-		return -EAGAIN;
+		return NULL;
+	}
+
+	outstanding = queue->reserved_write_index - header->read_index;
+	if (outstanding >= capacity) {
+		XDNA_ERR(xdna, "HSA Queue full: outstanding=%llu >= capacity=%u",
+			 outstanding, capacity);
+		mutex_unlock(&queue->hq_lock);
+		return NULL;
+	}
+
+	slot_idx = queue->reserved_write_index % capacity;
+	enum ert_cmd_state state = queue->hq_complete.hqc_mem[slot_idx];
+
+	/*
+	 * Slot can only be reused when it's in INVALID state, which is set by
+	 * ve2_hwctx_job_release() after the job is fully released from pending array.
+	 * State 0 is also allowed for initial/uninitialized slots.
+	 * This ensures the pending array slot is free before we reserve the HSA queue slot.
+	 */
+	if (state != ERT_CMD_STATE_INVALID && state != 0) {
+		XDNA_DBG(xdna, "Slot %u is still in use with state %u", slot_idx, state);
+		mutex_unlock(&queue->hq_lock);
+		return NULL;
+	}
+
+	/* Reserve this slot by incrementing reserved_write_index. */
+	*slot = queue->reserved_write_index++;
+	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_NEW;
+
+	mutex_unlock(&queue->hq_lock);
+
+	/* Return packet pointer. Caller can now prepare packet in parallel. */
+	return &queue->hsa_queue_p->hq_entry[slot_idx];
+}
+
+/* Commit the prepared packet by updating write_index when all prior slots are ready.
+ * This ensures CERT sees packets in order even if prepared out-of-order.
+ */
+static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv,
+				  u64 slot)
+{
+	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
+	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
+	u32 capacity = header->capacity;
+	u32 slot_idx = slot % capacity;
+	struct host_queue_packet *pkt = &queue->hsa_queue_p->hq_entry[slot_idx];
+
+	mutex_lock(&queue->hq_lock);
+	/* Set packet type to valid so CERT can process it */
+	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+
+	/* Mark this slot as ready in driver tracking */
+	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_SUBMITTED;
+
+	/* Advance write_index as far as possible through all ready slots. */
+	while (header->write_index < queue->reserved_write_index) {
+		u32 next_idx = header->write_index % capacity;
+		enum ert_cmd_state state = queue->hq_complete.hqc_mem[next_idx];
+
+		if (state != ERT_CMD_STATE_SUBMITTED)
+			break;
+
+		header->write_index++;
 	}
 
 	mutex_unlock(&queue->hq_lock);
-	return 0;
 }
 
 static void ve2_job_release(struct kref *ref)
@@ -221,43 +273,19 @@ static inline struct host_queue_packet *hsa_queue_get_pkt(struct hsa_queue *queu
 	return &queue->hq_entry[slot & (queue->hq_header.capacity - 1)];
 }
 
-static inline int hsa_queue_pkt_is_valid(struct host_queue_packet *pkt)
-{
-	return pkt->xrt_header.common_header.type == HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
-}
-
 static void *get_host_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct hsa_queue *queue = NULL;
 	struct host_queue_packet *pkt;
-	int ret;
 
-	ret = hsa_queue_reserve_slot(xdna, hwctx->priv, seq);
-	if (ret) {
+	pkt = hsa_queue_reserve_slot(xdna, hwctx->priv, seq);
+	if (!pkt) {
 		/* Expected during retry - use DBG level */
 		XDNA_DBG(xdna, "No slot available in Host queue");
 		return NULL;
 	}
 
-	queue = (struct hsa_queue *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p;
-	if (!queue) {
-		XDNA_ERR(xdna, "Invalid Host queue");
-		return NULL;
-	}
-
-	pkt = hsa_queue_get_pkt(queue, *seq);
-	if (hsa_queue_pkt_is_valid(pkt)) {
-		XDNA_ERR(xdna, "pkt of slot %llx is already selected", *seq);
-		return NULL;
-	}
-
 	return pkt;
-}
-
-static inline void hsa_queue_pkt_set_valid(struct host_queue_packet *pkt)
-{
-	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 }
 
 static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
@@ -386,6 +414,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 
 	/* Initialize mutex here */
 	mutex_init(&queue->hq_lock);
+	/* Initialize reserved_write_index to track slot reservations */
+	queue->reserved_write_index = 0;
 	/* Set the base DMA address for hsa queue */
 	queue->hsa_queue_mem.dma_addr = dma_handle;
 
@@ -437,20 +467,16 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	struct ve2_dpu_data *dpu;
 	struct hsa_queue *queue;
 	u64 slot_id = 0;
-	int ret;
 
 	dpu = (struct ve2_dpu_data *)cmd_data;
-	ret = hsa_queue_reserve_slot(xdna, ve2_ctx, &slot_id);
-	if (ret)
-		return ret;
+	pkt = hsa_queue_reserve_slot(xdna, ve2_ctx, &slot_id);
+	if (!pkt) {
+		XDNA_DBG(xdna, "No slot available in Host queue");
+		return -EAGAIN;
+	}
 
 	hq_queue = (struct ve2_hsa_queue *)&ve2_ctx->hwctx_hsa_queue;
 	queue = (struct hsa_queue *)hq_queue->hsa_queue_p;
-	pkt = hsa_queue_get_pkt(queue, slot_id);
-	if (hsa_queue_pkt_is_valid(pkt)) {
-		XDNA_ERR(xdna, "pkt of slot %llx is already selected", slot_id);
-		return -EINVAL;
-	}
 
 	*seq = slot_id;
 	XDNA_DBG(xdna, "slot %llx is selected", slot_id);
@@ -514,7 +540,8 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		packet_dump(xdna, queue, slot_id);
 
-	hsa_queue_pkt_set_valid(pkt);
+	/* Commit the slot - this sets hqc_mem to SUBMITTED and advances write_index */
+	hsa_queue_commit_slot(xdna, ve2_ctx, *seq);
 
 	return 0;
 }
@@ -539,16 +566,12 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 	if (!pkt) {
 		/* Expected during retry - use DBG level */
 		XDNA_DBG(xdna, "Getting host queue packet failed");
-		return -EINVAL;
+		return -EAGAIN;
 	}
 
 	*seq = slot_id;
 	XDNA_DBG(xdna, "pkt %p of slot %llx is selected", (void *)pkt, slot_id);
 	slot_id = slot_id & (hq_queue->hsa_queue_p->hq_header.capacity - 1);
-
-	mutex_lock(&hq_queue->hq_lock);
-	hq_queue->hq_complete.hqc_mem[slot_id] = ERT_CMD_STATE_NEW;
-	mutex_unlock(&hq_queue->hq_lock);
 
 	hdr = &pkt->xrt_header;
 	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
@@ -572,10 +595,8 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 	ebp->args_host_addr_high = 0;
 	XDNA_DBG(xdna, "dpu instruction addr: 0x%llx", dpu_cmd->instruction_buffer);
 
-	mutex_lock(&hq_queue->hq_lock);
-	hq_queue->hq_complete.hqc_mem[slot_id] = ERT_CMD_STATE_SUBMITTED;
-	mutex_unlock(&hq_queue->hq_lock);
-	hsa_queue_pkt_set_valid(pkt);
+	/* Commit the slot - this sets hqc_mem to SUBMITTED and advances write_index */
+	hsa_queue_commit_slot(xdna, ve2_ctx, *seq);
 
 	return 0;
 }
