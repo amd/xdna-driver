@@ -519,11 +519,13 @@ static int amdxdna_gem_shmem_insert_pages(struct amdxdna_gem_obj *abo,
 	}
 
 	/*
-	 * For CMA buffers, dma_mmap_coherent() already establishes the
-	 * complete mapping, so we can skip the per-page fault loop.
-	 * For other buffer types, we need to fault in each page.
+	 * For CMA buffers (nents == 1), the exporter's mmap handler called
+	 * via dma_buf_mmap() establishes the complete mapping.
+	 * For non-contiguous buffers, we must fault in each page individually.
 	 */
-	if (!amdxdna_is_cma_buf(abo->dma_buf)) {
+	if (abo->base.sgt && abo->base.sgt->nents == 1) {
+		XDNA_DBG(xdna, "Contiguous import (nents=1), skip per-page fault");
+	} else {
 		do {
 			vm_fault_t fault_ret;
 
