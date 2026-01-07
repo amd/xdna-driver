@@ -7,10 +7,10 @@
  */
 
 #include "vxdna_debug.h"
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdarg>
+#include <cstdlib>
+#include <cstring>
 
 /* Global log level - default to INFO */
 static enum vxdna_log_level g_log_level = VXDNA_LOG_INFO;

@@ -12,8 +12,10 @@
 #ifndef VXDNA_DEBUG_H
 #define VXDNA_DEBUG_H
 
-#include <stdio.h>
-#include <stdarg.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #ifdef __cplusplus
 extern "C" {

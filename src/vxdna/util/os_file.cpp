@@ -24,7 +24,12 @@ os_dupfd_cloexec(int fd)
 #else
     int new_fd = dup(fd);
     if (new_fd >= 0) {
-        fcntl(new_fd, F_SETFD, FD_CLOEXEC);
+        int ret = fcntl(new_fd, F_SETFD, FD_CLOEXEC);
+        if (ret < 0) {
+            ret = -errno;
+            close(new_fd);
+            return ret;
+        }
     }
     return new_fd;
 #endif

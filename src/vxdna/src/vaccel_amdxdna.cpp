@@ -11,14 +11,13 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <climits>
 #include <sstream>
-#include <cstdlib>
-#include <cstring>
 #include <sys/stat.h>
 #include <thread>
 #include <vector>
@@ -105,6 +104,8 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
     auto num_iovs = res->get_iovecs(&iovecs);
 
     // Use vector to avoid VLA and potential stack overflow
+    if (num_iovs > ((UINT32_MAX - sizeof(amdxdna_drm_va_tbl)) / sizeof(amdxdna_drm_va_entry)))
+        VACCEL_THROW_MSG(-EINVAL, "Too many iovecs: %u", num_iovs);
     size_t buf_size = sizeof(amdxdna_drm_va_tbl) + sizeof(amdxdna_drm_va_entry) * num_iovs;
     std::vector<uint8_t> buf_vec(buf_size);
     auto tbl = reinterpret_cast<amdxdna_drm_va_tbl*>(buf_vec.data());
@@ -216,7 +217,7 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
 }
 
 vxdna_bo::
-~vxdna_bo()
+~vxdna_bo() noexcept
 {
     vxdna_dbg("vxdna Destroying bo: ctx_fd=%d, handle=%u, vaddr=%lx, map_size=%lu",
                m_ctx_fd, m_bo_handle, m_vaddr, m_map_size);
@@ -322,7 +323,7 @@ vxdna_hwctx(const vxdna_context &ctx,
 }
 
 vxdna_context::vxdna_hwctx::
-~vxdna_hwctx()
+~vxdna_hwctx() noexcept
 {
     vxdna_dbg("HW context finishing: ctx_id=%u, hwctx_handle=%u", m_ctx_id, m_hwctx_handle);
     // Signal polling thread to stop
@@ -461,7 +462,7 @@ int
 vxdna_context::
 export_resource_fd(const std::shared_ptr<vaccel_resource> &res)
 {
-    if (res->get_opaque_handle() < 0)
+    if (res->get_opaque_handle() < AMDXDNA_INVALID_BO_HANDLE)
         VACCEL_THROW_MSG(-EINVAL, "Resource is not opaque");
     struct drm_prime_handle args = {};
     args.handle = static_cast<uint32_t>(res->get_opaque_handle());
@@ -595,6 +596,10 @@ get_info(const struct amdxdna_ccmd_get_info_req *req)
     if (cmd == DRM_IOCTL_AMDXDNA_GET_ARRAY) {
         rsp.num_element = array_args.num_element;
         rsp.size = array_args.element_size;
+        if (array_args.element_size > 0 &&
+            array_args.num_element > UINT32_MAX / array_args.element_size)
+            VACCEL_THROW_MSG(-EINVAL, "Info size overflow: element_size=%u, num_element=%u",
+                             array_args.element_size, array_args.num_element);
         info_size = array_args.element_size * array_args.num_element;
     } else {
         rsp.size = args.buffer_size;
@@ -611,7 +616,6 @@ vxdna_context::
 read_sysfs(const struct amdxdna_ccmd_read_sysfs_req *req)
 {
     struct amdxdna_ccmd_read_sysfs_rsp rsp = {};
-    std::string path;
     struct stat st = {};
     int ret;
 
@@ -649,17 +653,17 @@ read_sysfs(const struct amdxdna_ccmd_read_sysfs_req *req)
         VACCEL_THROW_MSG(-EINVAL, "Requested sysfs path %s is not under device sysfs root %s",
             real_req_path_str.c_str(), real_device_root_str.c_str());
     }
-    path = real_req_path_str;
 
     // Open the sysfs file in binary mode and read the full contents into a buffer.
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(real_req_path_str, std::ios::binary);
     if (!file.is_open())
-        VACCEL_THROW_MSG(-errno, "Open %s failed, errno %d", path.c_str(), errno);
+        VACCEL_THROW_MSG(-ENOENT, "Failed to open sysfs file %s (file not found or permission denied)",
+                         real_req_path_str.c_str());
 
     // Read all content into buffer
     std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(file)),
                                 std::istreambuf_iterator<char>());
-    rsp.val_len = buffer.size();
+    rsp.val_len = static_cast<int32_t>(buffer.size());
     rsp.hdr.base.len = sizeof(rsp) + rsp.val_len;
     write_rsp(&rsp, sizeof(rsp), req->hdr.rsp_off);
     write_rsp(buffer.data(), buffer.size(), req->hdr.rsp_off + sizeof(rsp));
@@ -699,7 +703,8 @@ get_blob_impl(const struct vaccel_create_resource_blob_args *args)
     auto ret = ioctl(get_fd(), DRM_IOCTL_AMDXDNA_CREATE_BO, &blob_args);
     if (ret) {
         VACCEL_THROW_MSG(-errno, "Create blob failed ret %d, %d, %s, type %d, size %lld\n",
-                         ret, -errno, strerror(errno), (uint32_t)blob_args.type, blob_args.size);
+                         ret, -errno, strerror(errno), static_cast<uint32_t>(blob_args.type),
+                         blob_args.size);
     }
 
     return blob_args.handle;
@@ -734,9 +739,9 @@ fill_capset(uint32_t capset_size, void *capset_buf)
 
 void
 vxdna::
-create_ctx(uint32_t ctx_id, uint32_t ctx_flags, uint32_t nlen, const char *name)
+create_ctx(uint32_t ctx_id, [[maybe_unused]] uint32_t ctx_flags, uint32_t nlen,
+           [[maybe_unused]] const char *name)
 {
-    (void)ctx_flags;  // Currently unused
     vxdna_dbg("Creating execution ctx: ctx_id=%u, flags=0x%x, nlen=%u, name=%s",
               ctx_id, ctx_flags, nlen, name ? name : "(null)");
     // Pass reference to this device - context accesses cookie/callbacks through device
@@ -753,11 +758,10 @@ create_ctx(uint32_t ctx_id, uint32_t ctx_flags, uint32_t nlen, const char *name)
         }
     }
 #else
-    (void)nlen;
-    (void)name;
     // DRM_IOCTL_SET_CLIENT_NAME not available on this system
     if (name != nullptr && nlen > 0) {
-        VACCEL_THROW_MSG(-EINVAL, "DRM_IOCTL_SET_CLIENT_NAME not available on this system");
+        vxdna_info("DRM_IOCTL_SET_CLIENT_NAME not available on this system, ctx_id=%u, name=%s",
+                  ctx_id, name);
     }
 #endif
     add_ctx(ctx_id, std::move(ctx));
@@ -789,23 +793,20 @@ create_resource_from_blob(const struct vaccel_create_resource_blob_args *args)
 
 void
 vxdna::
-destroy_resource(const std::shared_ptr<vaccel_resource> &res)
+destroy_resource([[maybe_unused]] const std::shared_ptr<vaccel_resource> &res)
 {
-    (void)res;
     // Required by vaccel<T>::destroy_resource
     // TODO: it is not required for now as guest xdna shim virtio
-    // driver already ensures the sequence by first creating the resource
-    // blob and then creating the BO, and it destroys them in reverse order.
+    // driver already ensures the sequence by first creating the resource blob
+    // and then creating the BO, and it destroys them in reverse order.
 }
 
 // Forward declarations of handler functions (to be implemented elsewhere)
 static void
-vxdna_ccmd_nop(vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
-                 const void *hdr)
+vxdna_ccmd_nop([[maybe_unused]] vxdna &device,
+               [[maybe_unused]] const std::shared_ptr<vxdna_context>& ctx,
+               [[maybe_unused]] const void *hdr)
 {
-    (void)device;
-    (void)ctx;
-    (void)hdr;
 }
 
 static void
@@ -823,9 +824,9 @@ vxdna_ccmd_init(vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
 }
 
 static void
-vxdna_ccmd_create_bo(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_create_bo([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                     const void *hdr)
 {
-    (void)device;  // Context accesses device via get_device()
     auto *req = static_cast<const struct amdxdna_ccmd_create_bo_req *>(hdr);
     vxdna_ccmd_error_wrap(ctx, [&]() {
         ctx->create_bo(req);
@@ -833,9 +834,9 @@ vxdna_ccmd_create_bo(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, c
 }
 
 static void
-vxdna_ccmd_destroy_bo(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_destroy_bo([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                       const void *hdr)
 {
-    (void)device;
     auto *req = static_cast<const struct amdxdna_ccmd_destroy_bo_req *>(hdr);
 
     vxdna_ccmd_error_wrap(ctx, [&]() {
@@ -844,9 +845,9 @@ vxdna_ccmd_destroy_bo(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, 
 }
 
 static void
-vxdna_ccmd_create_ctx(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_create_ctx([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                      const void *hdr)
 {
-    (void)device;
     auto *req = static_cast<const struct amdxdna_ccmd_create_ctx_req *>(hdr);
 
     vxdna_ccmd_error_wrap(ctx, [&]() {
@@ -855,9 +856,9 @@ vxdna_ccmd_create_ctx(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, 
 }
 
 static void
-vxdna_ccmd_destroy_ctx(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_destroy_ctx([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                       const void *hdr)
 {
-    (void)device;
     auto *req = static_cast<const struct amdxdna_ccmd_destroy_ctx_req *>(hdr);
 
     vxdna_ccmd_error_wrap(ctx, [&]() {
@@ -866,9 +867,9 @@ vxdna_ccmd_destroy_ctx(vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
 }
 
 static void
-vxdna_ccmd_config_ctx(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_config_ctx([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                      const void *hdr)
 {
-    (void)device;
     auto *req = static_cast<const struct amdxdna_ccmd_config_ctx_req *>(hdr);
 
     vxdna_ccmd_error_wrap(ctx, [&]() {
@@ -877,9 +878,9 @@ vxdna_ccmd_config_ctx(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, 
 }
 
 static void
-vxdna_ccmd_exec_cmd(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_exec_cmd([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                    const void *hdr)
 {
-    (void)device;
     auto *req = static_cast<const struct amdxdna_ccmd_exec_cmd_req *>(hdr);
 
     vxdna_ccmd_error_wrap(ctx, [&]() {
@@ -888,9 +889,9 @@ vxdna_ccmd_exec_cmd(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, co
 }
 
 static void
-vxdna_ccmd_wait_cmd(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_wait_cmd([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                    const void *hdr)
 {
-    (void)device;
     auto *req = static_cast<const struct amdxdna_ccmd_wait_cmd_req *>(hdr);
 
     vxdna_ccmd_error_wrap(ctx, [&]() {
@@ -899,9 +900,9 @@ vxdna_ccmd_wait_cmd(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, co
 }
 
 static void
-vxdna_ccmd_get_info(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_get_info([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                    const void *hdr)
 {
-    (void)device;  // Context accesses device via get_device()
     auto *req = static_cast<const struct amdxdna_ccmd_get_info_req *>(hdr);
     vxdna_ccmd_error_wrap(ctx, [&]() {
         ctx->get_info(req);
@@ -909,9 +910,9 @@ vxdna_ccmd_get_info(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, co
 }
 
 static void
-vxdna_ccmd_read_sysfs(vxdna &device, const std::shared_ptr<vxdna_context>& ctx, const void *hdr)
+vxdna_ccmd_read_sysfs([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                      const void *hdr)
 {
-    (void)device;
     auto *req = static_cast<const struct amdxdna_ccmd_read_sysfs_req *>(hdr);
     vxdna_ccmd_error_wrap(ctx, [&]() {
         ctx->read_sysfs(req);
@@ -930,19 +931,14 @@ struct amdxdna_ccmd_dispatch_entry {
     uint32_t size;
 };
 
-// Helper macro to calculate array size at compile-time
-#ifndef ARRAY_SIZE
-#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
-#endif
-
 // Macro to statically define and initialize amdxdna_ccmd_dispatch_entry with a command name.
 // The macro accepts the command name (without quotes) and expands to:
 // { #name, amdxdna_ccmd_<name>, sizeof(struct amdxdna_ccmd_<name>_req) }
 #define AMD_CCMD_DISPATCH_ENTRY(name) \
     { #name, vxdna_ccmd_##name, sizeof(struct amdxdna_ccmd_##name##_req) }
 
-
-constexpr std::array<amdxdna_ccmd_dispatch_entry, 11> amdxdna_ccmd_dispatch_table = {{
+constexpr size_t AMDXDNA_CCMD_COUNT = 11;
+constexpr std::array<amdxdna_ccmd_dispatch_entry, AMDXDNA_CCMD_COUNT> amdxdna_ccmd_dispatch_table = {{
     AMD_CCMD_DISPATCH_ENTRY(nop),
     AMD_CCMD_DISPATCH_ENTRY(init),
     AMD_CCMD_DISPATCH_ENTRY(create_bo),
@@ -960,7 +956,7 @@ void
 vxdna::
 dispatch_ccmd(std::shared_ptr<vxdna_context> &ctx, const struct vdrm_ccmd_req *hdr)
 {
-    if (!hdr->cmd || hdr->cmd > ARRAY_SIZE(amdxdna_ccmd_dispatch_table))
+    if (!hdr->cmd || hdr->cmd > amdxdna_ccmd_dispatch_table.size())
         VACCEL_THROW_MSG(-EINVAL, "invalid cmd: %u", hdr->cmd);
 
     const struct amdxdna_ccmd_dispatch_entry *ccmd = &amdxdna_ccmd_dispatch_table[hdr->cmd - 1];
