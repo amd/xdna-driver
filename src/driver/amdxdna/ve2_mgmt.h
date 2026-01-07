@@ -223,4 +223,14 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
  */
 void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 
+/**
+ * ve2_fifo_remove_ctx - Remove all FIFO entries for a given context.
+ * @mgmtctx: Pointer to the management context.
+ * @ctx: Pointer to the context to remove.
+ *
+ * Must be called with mgmtctx->ctx_lock held.
+ * This prevents use-after-free when a context is destroyed.
+ */
+void ve2_fifo_remove_ctx(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_ctx *ctx);
+
 #endif /* _VE2_MGMT_H_ */

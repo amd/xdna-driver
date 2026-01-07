@@ -21,6 +21,8 @@
 #define AIE4_TIMEOUT		1000000	/* us */
 #endif
 
+#define MAX_NUM_CERTS		6
+
 #define CERTFW_MAX_SIZE		(SZ_32K + SZ_256)
 
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
