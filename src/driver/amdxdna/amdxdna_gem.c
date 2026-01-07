@@ -518,19 +518,26 @@ static int amdxdna_gem_shmem_insert_pages(struct amdxdna_gem_obj *abo,
 		return ret;
 	}
 
-	do {
-		vm_fault_t fault_ret;
+	/*
+	 * For CMA buffers, dma_mmap_coherent() already establishes the
+	 * complete mapping, so we can skip the per-page fault loop.
+	 * For other buffer types, we need to fault in each page.
+	 */
+	if (!amdxdna_is_cma_buf(abo->dma_buf)) {
+		do {
+			vm_fault_t fault_ret;
 
-		fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
-					    FAULT_FLAG_WRITE, NULL);
-		if (fault_ret & VM_FAULT_ERROR) {
-			vma->vm_ops->close(vma);
-			XDNA_ERR(xdna, "Fault in page failed");
-			return -EFAULT;
-		}
+			fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
+						    FAULT_FLAG_WRITE, NULL);
+			if (fault_ret & VM_FAULT_ERROR) {
+				vma->vm_ops->close(vma);
+				XDNA_ERR(xdna, "Fault in page failed");
+				return -EFAULT;
+			}
 
-		offset += PAGE_SIZE;
-	} while (--num_pages);
+			offset += PAGE_SIZE;
+		} while (--num_pages);
+	}
 
 	/* Drop the reference drm_gem_mmap_obj() acquired.*/
 	drm_gem_object_put(to_gobj(abo));

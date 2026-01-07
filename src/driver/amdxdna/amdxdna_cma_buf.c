@@ -172,6 +172,11 @@ free_cmabuf:
 	return ERR_PTR(ret);
 }
 
+bool amdxdna_is_cma_buf(struct dma_buf *dbuf)
+{
+	return dbuf && dbuf->ops == &amdxdna_cmabuf_dmabuf_ops;
+}
+
 bool amdxdna_use_cma(void)
 {
 #if defined(CONFIG_CMA) && !defined(CONFIG_X86_64) && !defined(CONFIG_X86)

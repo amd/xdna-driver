@@ -15,5 +15,6 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_d
 						  int max_regions,
 						  struct device *fallback_dev,
 						  size_t size, u64 flags);
+bool amdxdna_is_cma_buf(struct dma_buf *dbuf);
 
 #endif /* _AMDXDNA_CMA_BUF_H */
