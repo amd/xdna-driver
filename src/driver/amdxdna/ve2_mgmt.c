@@ -105,10 +105,9 @@ static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdn
 	return hs_data;
 }
 
-int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req,
+int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req,
 			    u32 num_col)
 {
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
 	int i, start;
 	int max_start = total_col - num_col;
@@ -176,7 +175,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 
 	XDNA_DBG(xdna, "User requested num_col %d", xrs_req->cdo.ncols);
 
-	ret = ve2_xrs_col_list(hwctx, xrs_req, xrs_req->cdo.ncols);
+	ret = ve2_xrs_col_list(xdna, xrs_req, xrs_req->cdo.ncols);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate XRS col resource failed, ret %d", ret);
 		mutex_unlock(&xrs->xrs_lock);
