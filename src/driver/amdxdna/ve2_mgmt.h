@@ -166,6 +166,9 @@ static inline int get_ctx_write_index(struct amdxdna_ctx *hwctx, u64 *write_inde
  */
 int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 
+int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req,
+		     u32 num_col);
+
 int ve2_create_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 			void *buffer, u32 size);
 /**

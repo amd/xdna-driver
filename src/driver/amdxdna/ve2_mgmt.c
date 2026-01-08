@@ -105,7 +105,7 @@ static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdn
 	return hs_data;
 }
 
-static int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req,
+int ve2_xrs_col_list(struct amdxdna_ctx *hwctx, struct alloc_requests *xrs_req,
 			    u32 num_col)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
