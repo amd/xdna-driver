@@ -118,6 +118,8 @@ struct amdxdna_mgmtctx {
 	u32			is_context_req; /* Hardware sync required */
 	u32			is_idle_due_to_context; /* Hardware sync required */
 	struct amdxdna_async_err_cache	async_errs_cache; /* cache for async errors */
+	struct completion	error_cb_completion; /* completion for error callback */
+	atomic_t		error_cb_in_progress; /* track if error callback is running */
 };
 
 struct amdxdna_dev_hdl {

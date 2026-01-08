@@ -518,19 +518,28 @@ static int amdxdna_gem_shmem_insert_pages(struct amdxdna_gem_obj *abo,
 		return ret;
 	}
 
-	do {
-		vm_fault_t fault_ret;
+	/*
+	 * The per-page fault loop is needed for SVM to immediately populate PTEs.
+	 * Without SVM (notifier_wq == NULL), dma_buf_mmap() already set up the
+	 * mapping and we can skip the redundant per-page faulting.
+	 */
+	if (!xdna->notifier_wq) {
+		XDNA_DBG(xdna, "No SVM, skip per-page fault");
+	} else {
+		do {
+			vm_fault_t fault_ret;
 
-		fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
-					    FAULT_FLAG_WRITE, NULL);
-		if (fault_ret & VM_FAULT_ERROR) {
-			vma->vm_ops->close(vma);
-			XDNA_ERR(xdna, "Fault in page failed");
-			return -EFAULT;
-		}
+			fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
+						    FAULT_FLAG_WRITE, NULL);
+			if (fault_ret & VM_FAULT_ERROR) {
+				vma->vm_ops->close(vma);
+				XDNA_ERR(xdna, "Fault in page failed");
+				return -EFAULT;
+			}
 
-		offset += PAGE_SIZE;
-	} while (--num_pages);
+			offset += PAGE_SIZE;
+		} while (--num_pages);
+	}
 
 	/* Drop the reference drm_gem_mmap_obj() acquired.*/
 	drm_gem_object_put(to_gobj(abo));

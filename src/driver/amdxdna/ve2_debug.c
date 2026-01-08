@@ -5,6 +5,9 @@
 #include <linux/device.h>
 #include <linux/version.h>
 #include <linux/vmalloc.h>
+#include <linux/completion.h>
+#include <linux/jiffies.h>
+#include <linux/sched.h>
 
 #include "ve2_fw.h"
 #include "ve2_of.h"
@@ -582,26 +585,91 @@ static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_dr
 	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_dev_hdl *hdl = xdna->dev_handle;
 	int ret = 0;
-	u32 i;
+	u32 i, max_idx;
+	/* 50ms to wait for callback to start */
+	unsigned long poll_timeout = msecs_to_jiffies(50);
+	/* 100ms timeout for callback completion */
+	unsigned long wait_timeout = msecs_to_jiffies(100);
 
 	/* Set num_element to 0 to indicate no errors */
 	args->num_element = 0;
 
-	/* Find the first mgmtctx with a cached error */
-	for (i = 0; i < hdl->hwctx_limit; i++) {
+	/* Check if dev_handle and ve2_mgmtctx are valid */
+	if (!hdl || !hdl->ve2_mgmtctx)
+		return 0;
+
+	/* Wait for any pending error callbacks to complete before reading cached errors.
+	 * This ensures async errors are cached before we query for them.
+	 * The error callback may start after command completion, so we poll briefly
+	 * to catch cases where it starts shortly after the query.
+	 */
+	max_idx = min_t(u32, hdl->hwctx_limit, hdl->aie_dev_info.cols);
+	for (i = 0; i < max_idx; i++) {
 		mgmtctx = &hdl->ve2_mgmtctx[i];
+		/* Check if mgmtctx is initialized */
 		if (!mgmtctx->xdna)
 			continue;
 
+		/* Check if mgmt_aiedev is valid before checking callback status */
+		mutex_lock(&mgmtctx->ctx_lock);
+		if (!mgmtctx->mgmt_aiedev) {
+			mutex_unlock(&mgmtctx->ctx_lock);
+			continue;
+		}
+		mutex_unlock(&mgmtctx->ctx_lock);
+
+		/* Poll briefly to see if error callback starts */
+		unsigned long poll_start = jiffies;
+		bool callback_started = false;
+
+		while (time_before(jiffies, poll_start + poll_timeout)) {
+			if (atomic_read(&mgmtctx->error_cb_in_progress)) {
+				callback_started = true;
+				break;
+			}
+			/* Small delay to avoid busy waiting */
+			schedule_timeout_uninterruptible(msecs_to_jiffies(1));
+		}
+
+		/* If callback started (or was already in progress), wait for it to complete */
+		if (callback_started || atomic_read(&mgmtctx->error_cb_in_progress)) {
+			XDNA_DBG(xdna, "Waiting for error callback to complete on mgmtctx[%u]", i);
+			if (wait_for_completion_timeout(&mgmtctx->error_cb_completion,
+							wait_timeout) == 0) {
+				XDNA_WARN(xdna, "Timeout waiting for err callback completion\n");
+			}
+		}
+	}
+
+	/* Find the first mgmtctx with a cached error */
+	/* Use min of hwctx_limit and cols to prevent out-of-bounds access */
+	max_idx = min_t(u32, hdl->hwctx_limit, hdl->aie_dev_info.cols);
+	for (i = 0; i < max_idx; i++) {
+		mgmtctx = &hdl->ve2_mgmtctx[i];
+		/* Check if mgmtctx is initialized */
+		if (!mgmtctx->xdna)
+			continue;
+
+		/* Lock ctx_lock first to ensure mgmtctx structure is stable */
+		mutex_lock(&mgmtctx->ctx_lock);
+		/* Re-check mgmt_aiedev after acquiring lock to ensure it's still valid */
+		if (!mgmtctx->mgmt_aiedev) {
+			mutex_unlock(&mgmtctx->ctx_lock);
+			continue;
+		}
+
+		/* Now lock async_errs_cache to access error data */
 		mutex_lock(&mgmtctx->async_errs_cache.lock);
 		if (mgmtctx->async_errs_cache.err.err_code) {
 			args->num_element++;
 			memcpy(&tmp, &mgmtctx->async_errs_cache.err, sizeof(tmp));
 			mutex_unlock(&mgmtctx->async_errs_cache.lock);
+			mutex_unlock(&mgmtctx->ctx_lock);
 			ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), 1);
 			return ret;
 		}
 		mutex_unlock(&mgmtctx->async_errs_cache.lock);
+		mutex_unlock(&mgmtctx->ctx_lock);
 	}
 
 	return 0;
