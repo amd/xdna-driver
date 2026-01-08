@@ -813,6 +813,7 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 	struct amdxdna_cmd_chain *cmd_chain;
 	u32 total_submitted = 0;
 	u32 submitted_count = 0;
+	u32 no_progress_count = 0;
 	u32 start_idx = 0;
 	int ret;
 
@@ -831,6 +832,27 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 		} else if (ret == -EBUSY) {
 			total_submitted += submitted_count;
 			start_idx += submitted_count;
+
+			/*
+			 * If no commands were submitted, track consecutive no-progress
+			 * retries to prevent infinite loops when queue stays busy.
+			 */
+			if (submitted_count == 0) {
+				no_progress_count++;
+				if (no_progress_count >= VE2_MAX_NO_PROGRESS_RETRIES) {
+					XDNA_ERR(xdna,
+						 "Submit chain failed: no progress after %u retries (%u/%u cmds done)",
+						 no_progress_count, total_submitted,
+						 cmd_chain->command_count);
+					if (total_submitted > 0) {
+						ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+						amdxdna_cmd_set_state(cmd_bo, ERT_CMD_STATE_TIMEOUT);
+					}
+					return -EAGAIN;
+				}
+			} else {
+				no_progress_count = 0;
+			}
 
 			XDNA_DBG(xdna,
 				 "Queue full at cmd %u/%u, waiting for slot (IRQ-driven)",

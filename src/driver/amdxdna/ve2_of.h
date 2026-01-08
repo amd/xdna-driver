@@ -27,6 +27,17 @@
  */
 #define VE2_RETRY_TIMEOUT_MS	5000
 
+/*
+ * VE2_MAX_NO_PROGRESS_RETRIES - Maximum consecutive retries without progress
+ *
+ * When submitting a command chain, if the queue returns -EBUSY and no commands
+ * were submitted (submitted_count == 0), we track consecutive no-progress
+ * retries. If this limit is reached, we abort to prevent infinite loops.
+ * This can happen if ve2_wait_for_retry_slot succeeds but the queue remains
+ * busy (e.g., slot freed but immediately taken by another context).
+ */
+#define VE2_MAX_NO_PROGRESS_RETRIES	10
+
 #define aie_calc_part_id(start_col, num_col)	\
 	(((start_col) << AIE_PART_ID_START_COL_SHIFT) + \
 	 ((num_col) << AIE_PART_ID_NUM_COLS_SHIFT))
