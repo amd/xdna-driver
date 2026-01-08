@@ -806,6 +806,29 @@ static int ve2_submit_cmd_chain_partial(struct amdxdna_ctx *hwctx, struct amdxdn
 	return 0;
 }
 
+/*
+ * ve2_register_partial_chain_job - Register a partially submitted command chain job
+ * @hwctx: Hardware context
+ * @job: Job being submitted
+ * @seq: Sequence number of last submitted command
+ * @total_submitted: Number of commands successfully submitted
+ * @set_timeout: Whether to mark the command as timed out
+ *
+ * Helper function to register partial job submissions on error paths.
+ * Only registers the job if at least one command was submitted.
+ */
+static void ve2_register_partial_chain_job(struct amdxdna_ctx *hwctx,
+					   struct amdxdna_sched_job *job,
+					   u64 seq, u32 total_submitted,
+					   bool set_timeout)
+{
+	if (total_submitted > 0) {
+		ve2_hwctx_add_job(hwctx, job, seq, total_submitted);
+		if (set_timeout)
+			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
+	}
+}
+
 static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -844,10 +867,8 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 						 "Submit chain failed: no progress after %u retries (%u/%u cmds done)",
 						 no_progress_count, total_submitted,
 						 cmd_chain->command_count);
-					if (total_submitted > 0) {
-						ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
-						amdxdna_cmd_set_state(cmd_bo, ERT_CMD_STATE_TIMEOUT);
-					}
+					ve2_register_partial_chain_job(hwctx, job, *seq,
+								       total_submitted, true);
 					return -EAGAIN;
 				}
 			} else {
@@ -864,15 +885,13 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 					 "Submit chain timeout: no slot available after %ums (%u/%u cmds done)",
 					 VE2_RETRY_TIMEOUT_MS, total_submitted,
 					 cmd_chain->command_count);
-				if (total_submitted > 0) {
-					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
-					amdxdna_cmd_set_state(cmd_bo, ERT_CMD_STATE_TIMEOUT);
-				}
+				ve2_register_partial_chain_job(hwctx, job, *seq,
+							       total_submitted, true);
 				return -EAGAIN;
 			} else if (ret < 0) {
 				XDNA_ERR(xdna, "Submit chain interrupted while waiting for slot");
-				if (total_submitted > 0)
-					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+				ve2_register_partial_chain_job(hwctx, job, *seq,
+							       total_submitted, false);
 				return ret;
 			}
 
@@ -882,8 +901,8 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 		} else {
 			XDNA_ERR(xdna, "Submit chain failed with error %d (%u/%u cmds done)",
 				 ret, total_submitted, cmd_chain->command_count);
-			if (total_submitted > 0)
-				ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+			ve2_register_partial_chain_job(hwctx, job, *seq,
+						       total_submitted, false);
 			return ret;
 		}
 	}
