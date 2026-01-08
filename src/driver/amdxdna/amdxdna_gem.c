@@ -519,12 +519,12 @@ static int amdxdna_gem_shmem_insert_pages(struct amdxdna_gem_obj *abo,
 	}
 
 	/*
-	 * For CMA buffers (nents == 1), the exporter's mmap handler called
-	 * via dma_buf_mmap() establishes the complete mapping.
-	 * For non-contiguous buffers, we must fault in each page individually.
+	 * The per-page fault loop is needed for SVM to immediately populate PTEs.
+	 * Without SVM (notifier_wq == NULL), dma_buf_mmap() already set up the
+	 * mapping and we can skip the redundant per-page faulting.
 	 */
-	if (abo->base.sgt && abo->base.sgt->nents == 1) {
-		XDNA_DBG(xdna, "Contiguous import (nents=1), skip per-page fault");
+	if (!xdna->notifier_wq) {
+		XDNA_DBG(xdna, "No SVM, skip per-page fault");
 	} else {
 		do {
 			vm_fault_t fault_ret;
