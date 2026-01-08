@@ -4,6 +4,8 @@
  */
 #include <linux/device.h>
 #include <linux/version.h>
+#include <linux/completion.h>
+#include <linux/atomic.h>
 
 #include "amdxdna_ctx.h"
 #include "ve2_of.h"
@@ -727,6 +729,7 @@ static void ve2_aie_error_cb(void *arg)
 {
 	struct amdxdna_mgmtctx *mgmtctx = arg;
 	struct aie_errors *aie_errs;
+	struct amdxdna_dev *xdna;
 	int i;
 
 	if (!mgmtctx) {
@@ -734,31 +737,32 @@ static void ve2_aie_error_cb(void *arg)
 		return;
 	}
 
+	xdna = mgmtctx->xdna;
+	/* Mark error callback as in progress */
+	atomic_set(&mgmtctx->error_cb_in_progress, 1);
+	reinit_completion(&mgmtctx->error_cb_completion);
+
 	mutex_lock(&mgmtctx->ctx_lock);
 
 	if (!mgmtctx->mgmt_aiedev) {
-		XDNA_ERR(mgmtctx->xdna, "AIE partition is not loaded and it is pointing to NULL\n");
+		XDNA_ERR(xdna, "%s: AIE partition is not loaded\n", __func__);
 		mutex_unlock(&mgmtctx->ctx_lock);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
+		complete(&mgmtctx->error_cb_completion);
 		return;
 	}
 	aie_errs = aie_get_errors(mgmtctx->mgmt_aiedev);
 	if (IS_ERR_OR_NULL(aie_errs)) {
-		XDNA_ERR(mgmtctx->xdna, "aie_get_errors returns NULL\n");
+		XDNA_ERR(xdna, "%s: aie_get_errors returns NULL\n", __func__);
 		mutex_unlock(&mgmtctx->ctx_lock);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
+		complete(&mgmtctx->error_cb_completion);
 		return;
 	}
 
-	for (i = 0; i < aie_errs->num_err; i++) {
-		XDNA_INFO(mgmtctx->xdna, "Display AIE asynchronous Error data:\n");
-		XDNA_INFO(mgmtctx->xdna, "error_id %d Mod %d, category %d, Col %d, Row %d\n",
-			  aie_errs->errors[i].error_id,
-			  aie_errs->errors[i].module,
-			  aie_errs->errors[i].category,
-			  aie_errs->errors[i].loc.col,
-			  aie_errs->errors[i].loc.row);
-	}
-
-	/* Cache the last async error */
+	/* Cache the last async error FIRST, before logging, to ensure user space
+	 * queries can find it immediately even if logging hasn't completed yet.
+	 */
 	if (aie_errs->num_err > 0) {
 		struct amdxdna_async_error *record = &mgmtctx->async_errs_cache.err;
 		struct aie_error *last_err = &aie_errs->errors[aie_errs->num_err - 1];
@@ -830,9 +834,24 @@ static void ve2_aie_error_cb(void *arg)
 		mutex_unlock(&mgmtctx->async_errs_cache.lock);
 	}
 
+	/* Log error details after caching to ensure cache is available for queries */
+	for (i = 0; i < aie_errs->num_err; i++) {
+		XDNA_INFO(xdna, "Display AIE asynchronous Error data:\n");
+		XDNA_INFO(xdna, "error_id %d Mod %d, category %d, Col %d, Row %d\n",
+			  aie_errs->errors[i].error_id,
+			  aie_errs->errors[i].module,
+			  aie_errs->errors[i].category,
+			  aie_errs->errors[i].loc.col,
+			  aie_errs->errors[i].loc.row);
+	}
+
 	aie_free_errors(aie_errs);
 
 	mutex_unlock(&mgmtctx->ctx_lock);
+
+	/* Mark error callback as complete and signal waiting threads */
+	atomic_set(&mgmtctx->error_cb_in_progress, 0);
+	complete(&mgmtctx->error_cb_completion);
 }
 
 /**
@@ -879,6 +898,8 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		mutex_init(&mgmtctx->ctx_lock);
 		mutex_init(&mgmtctx->async_errs_cache.lock);
 		memset(&mgmtctx->async_errs_cache.err, 0, sizeof(mgmtctx->async_errs_cache.err));
+		init_completion(&mgmtctx->error_cb_completion);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
 		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 		/* Create workqueue for scheduling the command */
 		mgmtctx->mgmtctx_workq = create_workqueue("ve2_mgmtctx_scheduler");
