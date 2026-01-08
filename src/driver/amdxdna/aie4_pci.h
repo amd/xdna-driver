@@ -12,6 +12,7 @@
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_mailbox.h"
+#include "amdxdna_error.h"
 #include "amdxdna_aie.h"
 
 #define AIE4_INTERVAL		20000	/* us */
@@ -113,6 +114,8 @@ struct amdxdna_dev_hdl {
 	/* Protect mgmt_chann */
 	struct mutex                    aie4_lock;
 
+	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
+
 	struct debugfs_args		*dbgfs_args;
 };
 
@@ -143,7 +146,6 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna);
 /* aie4_error.c */
 int aie4_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
 void aie4_error_async_events_free(struct amdxdna_dev_hdl *ndev);
-int aie4_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie4_error_async_msg_thread(void *data);
 
 /* aie4_message.c*/
@@ -151,8 +153,9 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_resume_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev);
 int aie4_check_firmware_version(struct amdxdna_dev_hdl *ndev);
-int aie4_register_async_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
-				  void *handle, int (*cb)(void*, void __iomem *, size_t));
+int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
+				 struct amdxdna_mgmt_dma_hdl *dma_hdl, void *handle,
+				 int (*cb)(void*, void __iomem *, size_t));
 int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char *buf, u32 size, u32 *cols_filled);
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);

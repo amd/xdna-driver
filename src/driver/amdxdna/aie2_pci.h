@@ -407,7 +407,6 @@ void aie2_debugfs_init(struct amdxdna_dev *xdna);
 /* aie2_error.c */
 int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
 void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
-int aie2_error_async_events_send(struct amdxdna_dev_hdl *ndev);
 int aie2_error_async_msg_thread(void *data);
 int aie2_error_async_cache_init(struct amdxdna_dev_hdl *ndev);
 int aie2_error_get_last_async(struct amdxdna_dev *xdna,

@@ -416,6 +416,10 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	if (ret)
 		goto stop_pm;
 
+	ret = aie4_error_async_events_alloc(ndev);
+	if (ret)
+		goto stop_pm;
+
 	mutex_unlock(&ndev->aie4_lock);
 	ndev->dev_status = AIE4_DEV_START;
 

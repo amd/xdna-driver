@@ -17,6 +17,8 @@
 #define RX_TIMEOUT 5000 /* milliseconds */
 #endif
 
+#define ASYNC_BUF_SIZE		SZ_8K
+
 int aie4_xdna_msg_cb(void *handle, void __iomem *data, size_t size)
 {
 	struct xdna_notify *cb_arg = handle;
@@ -330,8 +332,9 @@ int aie4_set_pm_msg(struct amdxdna_dev_hdl *ndev, u32 target)
 	return 0;
 }
 
-int aie4_register_async_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
-				  void *handle, int (*cb)(void*, void __iomem *, size_t))
+int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
+				 struct amdxdna_mgmt_dma_hdl *dma_hdl, void *handle,
+				 int (*cb)(void*, void __iomem *, size_t))
 {
 	struct aie4_msg_async_event_config_req req = { 0 };
 	struct xdna_mailbox_msg msg = {
@@ -341,11 +344,18 @@ int aie4_register_async_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr,
 		.opcode = AIE4_MSG_OP_ASYNC_EVENT_MSG,
 		.notify_cb = cb,
 	};
+	dma_addr_t addr;
+
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!addr) {
+		XDNA_ERR(ndev->xdna, "Invalid DMA address: %lld", addr);
+		return -EINVAL;
+	}
 
 	req.buff_addr = addr;
-	req.buff_size = size;
+	req.buff_size = ASYNC_BUF_SIZE;
 
-	XDNA_DBG(ndev->xdna, "Register addr 0x%llx size 0x%x", addr, size);
+	XDNA_DBG(ndev->xdna, "Register addr 0x%llx size 0x%x", req.buff_addr, req.buff_size);
 	return xdna_mailbox_send_msg(ndev->mgmt_chann, &msg, TX_TIMEOUT);
 }
 
