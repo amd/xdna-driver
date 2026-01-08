@@ -42,6 +42,7 @@ create_examine_subcommand()
       {"aieshim", "AIE shim tile status", "common"},
       {"aie-partitions", "AIE partition information", "common"},
       {"host", "Host information", "common"},
+      {"clocks", "Clock frequency information", "hidden"},
       {"platform", "Platforms flashed on the device", "common"}
     };
     

@@ -443,6 +443,106 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 	return ret;
 }
 
+static int ve2_get_clock_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_clock_metadata clock_metadata = {};
+	struct aie_partition_req part_req = { 0 };
+	struct xrs_action_load action = {};
+	struct alloc_requests req = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct device *aie_dev = NULL;
+	struct solver_state *xrs = NULL;
+	unsigned long ctx_id;
+	u32 partition_id;
+	u32 num_cols = MIN_COL_SUPPORT;
+	u64 aie_freq = 0;
+	int ret, idx;
+
+	if (args->buffer_size != sizeof(clock_metadata)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u, Expected: %lu",
+			 args->buffer_size, sizeof(clock_metadata));
+		return -EINVAL;
+	}
+
+	/* Search for existing context with AIE partition across all clients */
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, ctx_id, hwctx) {
+			if (hwctx && hwctx->priv && hwctx->priv->aie_dev) {
+				aie_dev = hwctx->priv->aie_dev;
+				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+				ret = aie_partition_get_freq(aie_dev, &aie_freq);
+				if (ret) {
+					XDNA_ERR(xdna, "Failed to read AIE frequency: %d", ret);
+					return ret;
+				}
+				goto fill_metadata;
+			}
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	/* No existing context - allocate temporary partition using resolver */
+	req.cdo.ncols = num_cols;
+	ret = ve2_xrs_col_list(xdna, &req, num_cols);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to build column list: %d", ret);
+		return ret;
+	}
+	req.rid = (u64)client;
+	req.rqos.user_start_col = USER_START_COL_NOT_REQUESTED;
+
+	xrs = (struct solver_state *)xdna->dev_handle->xrs_hdl;
+	mutex_lock(&xrs->xrs_lock);
+	ret = xrs_allocate_resource(xdna->dev_handle->xrs_hdl, &req, &action);
+	mutex_unlock(&xrs->xrs_lock);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to allocate temporary partition: %d", ret);
+		kfree(req.cdo.start_cols);
+		return ret;
+	}
+	partition_id = aie_calc_part_id(action.part.start_col, action.part.ncols);
+	part_req.partition_id = partition_id;
+	aie_dev = aie_partition_request(&part_req);
+	if (IS_ERR(aie_dev)) {
+		ret = PTR_ERR(aie_dev);
+
+		mutex_lock(&xrs->xrs_lock);
+		xrs_release_resource(xdna->dev_handle->xrs_hdl, req.rid, &action);
+		mutex_unlock(&xrs->xrs_lock);
+
+		kfree(req.cdo.start_cols);
+		XDNA_ERR(xdna, "Failed to request AIE partition %u: %d", partition_id, ret);
+		return ret;
+	}
+	ret = aie_partition_get_freq(aie_dev, &aie_freq);
+	aie_partition_release(aie_dev);
+
+	mutex_lock(&xrs->xrs_lock);
+	xrs_release_resource(xdna->dev_handle->xrs_hdl, req.rid, &action);
+	mutex_unlock(&xrs->xrs_lock);
+
+	kfree(req.cdo.start_cols);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to read AIE frequency: %d", ret);
+		return ret;
+	}
+
+fill_metadata:
+	strscpy(clock_metadata.mp_npu_clock.name, "AIE Clock");
+	clock_metadata.mp_npu_clock.freq_mhz = (u16)(aie_freq / 1000000);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &clock_metadata, sizeof(clock_metadata))) {
+		XDNA_ERR(xdna, "Failed to copy clock metadata to user");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -460,6 +560,9 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = ve2_get_total_col(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
+		ret = ve2_get_clock_metadata(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
