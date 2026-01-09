@@ -108,7 +108,7 @@ static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdn
 }
 
 int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req,
-			    u32 num_col)
+		     u32 num_col)
 {
 	int total_col = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
 	int i, start;

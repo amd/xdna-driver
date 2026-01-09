@@ -12,10 +12,9 @@
 #include "ve2_host_queue.h"
 #include "ve2_fw.h"
 
-#define MIN_COL_SUPPORT 	4
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
-
+#define MIN_COL_SUPPORT		4
 #define VERBOSITY_LEVEL_DBG	2
 
 /*
