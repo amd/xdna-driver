@@ -544,7 +544,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
 
-	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(47));
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to set DMA mask: %d", ret);
 		goto release_fw;

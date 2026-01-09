@@ -83,14 +83,15 @@ struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, s
 		dma_hdl->aligned_size = SZ_4M;
 
 	if (amdxdna_iova_enabled(xdna)) {
-		dma_hdl->vaddr = amdxdna_iommu_alloc(xdna, dma_hdl->aligned_size, &dma_hdl->dma_hdl);
+		dma_hdl->vaddr = amdxdna_iommu_alloc(xdna, dma_hdl->aligned_size,
+						     &dma_hdl->dma_hdl);
 		if (IS_ERR(dma_hdl->vaddr)) {
 			kfree(dma_hdl);
 			return ERR_CAST(dma_hdl->vaddr);
 		}
 	} else {
 		dma_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, dma_hdl->aligned_size,
-					       &dma_hdl->dma_hdl, dir, GFP_KERNEL);
+						       &dma_hdl->dma_hdl, dir, GFP_KERNEL);
 		if (!dma_hdl->vaddr) {
 			kfree(dma_hdl);
 			return ERR_PTR(-ENOMEM);

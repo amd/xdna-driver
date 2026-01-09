@@ -20,7 +20,7 @@ static struct iova *amdxdna_iommu_alloc_iova(struct amdxdna_dev *xdna,
 	unsigned long shift, end;
 	struct iova *iova;
 
-	end = dma_get_mask(xdna->ddev.dev) + 1;
+	end = xdna->domain->geometry.aperture_end;
 	shift = iova_shift(&xdna->iovad);
 	size = iova_align(&xdna->iovad, size);
 
@@ -122,13 +122,13 @@ void amdxdna_iommu_free(struct amdxdna_dev *xdna, size_t size,
 	free_pages((unsigned long)cpu_addr, get_order(size));
 }
 
-
 int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 {
+	enum iommufd_hwpt_alloc_flags flags;
 	unsigned long order;
 	int ret;
 
-	if (!force_iova)
+	if (!force_iova || !xdna->ddev.dev->iommu)
 		return 0;
 
 	xdna->group = iommu_group_get(xdna->ddev.dev);
@@ -137,7 +137,8 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 		return 0;
 	}
 
-	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
+	flags = xdna->ddev.dev->iommu->max_pasids ? IOMMU_HWPT_ALLOC_PASID : 0;
+	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev, flags);
 	if (IS_ERR(xdna->domain)) {
 		XDNA_ERR(xdna, "Failed to alloc iommu domain");
 		ret = PTR_ERR(xdna->domain);
