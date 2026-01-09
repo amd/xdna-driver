@@ -8,6 +8,7 @@
  */
 
 #include <algorithm>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,7 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <sys/stat.h>
-#include <errno.h>
+#include <thread>
 #include <vector>
 
 #include <drm/drm.h>
@@ -290,21 +291,34 @@ vxdna_hwctx(const vxdna_context &ctx,
 
     // Start polling thread to retire fences
     m_stop_polling.store(false, std::memory_order_relaxed);
-    m_polling_thread = std::thread([this]() {
-        while (!m_stop_polling.load(std::memory_order_relaxed)) {
-            std::vector<std::shared_ptr<vaccel_fence>> tmp_pending_fences;
-            {
-                std::unique_lock<std::mutex> lock(m_fences_lock);
-                m_cv.wait(lock, [this] {
-                    return m_stop_polling.load(std::memory_order_relaxed) || !m_pending_fences.empty();
-                });
-                if (m_stop_polling.load(std::memory_order_relaxed))
-                    break;
-                tmp_pending_fences.swap(m_pending_fences);
+    try {
+        m_polling_thread = std::thread([this]() {
+            while (!m_stop_polling.load(std::memory_order_relaxed)) {
+                std::vector<std::shared_ptr<vaccel_fence>> tmp_pending_fences;
+                {
+                    std::unique_lock<std::mutex> lock(m_fences_lock);
+                    m_cv.wait(lock, [this] {
+                        return m_stop_polling.load(std::memory_order_relaxed) || !m_pending_fences.empty();
+                    });
+                    if (m_stop_polling.load(std::memory_order_relaxed))
+                        break;
+                    tmp_pending_fences.swap(m_pending_fences);
+                }
+                poll_and_retire_pending(std::move(tmp_pending_fences));
             }
-            poll_and_retire_pending(std::move(tmp_pending_fences));
-        }
-    });
+        });
+    } catch (...) {
+        vxdna_err("vxdna_hwctx ctor: failed to start polling thread.");
+        // Clean up hwctx and syncobj
+        struct drm_syncobj_destroy sync_arg = {};
+        sync_arg.handle = m_syncobj_handle;
+        ioctl(m_ctx_fd, DRM_IOCTL_SYNCOBJ_DESTROY, &sync_arg);
+
+        struct amdxdna_drm_destroy_hwctx hwctx_arg = {};
+        hwctx_arg.handle = m_hwctx_handle;
+        ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &hwctx_arg);
+        throw;
+    }
 }
 
 vxdna_context::vxdna_hwctx::
@@ -314,7 +328,7 @@ vxdna_context::vxdna_hwctx::
     // Signal polling thread to stop
     m_stop_polling.store(true, std::memory_order_relaxed);
     m_cv.notify_all();
-    
+
     // Wait for polling thread to finish
     if (m_polling_thread.joinable()) {
         m_polling_thread.join();
