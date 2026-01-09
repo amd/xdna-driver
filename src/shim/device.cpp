@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. - All rights reserved
+// Copyright (C) 2022-2026, Advanced Micro Devices, Inc. - All rights reserved
 
 #include "device.h"
 #include "buffer.h"
@@ -424,24 +424,26 @@ struct context_health_info {
     return output;
   }
 
-  /* Get method for case when <ctx_id,pid> are provided*/
+  /* Get method for case when <ctx_id,pid> pairs are provided */
   static result_type
-  get(const xrt_core::device* device, key_type key, const std::any& context_pid_pair)
+  get(const xrt_core::device* device, key_type key, const std::any& context_info)
   {
     if (key != key_type::context_health_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    // Extract filter parameters from the parameter if provided
-    std::vector<std::pair<uint32_t, uint32_t>> context_pid_pairs;
-    if (context_pid_pair.has_value()) {
-      context_pid_pairs = std::any_cast<std::vector<std::pair<uint32_t, uint32_t>>>(context_pid_pair);
-    }
+    // If no filter provided, fall back to get all contexts
+    if (!context_info.has_value())
+      return get(device, key);
+
+    // Extract (context_id, pid) pairs from XRT - both ctx_id and pid are required on Linux
+    auto context_pid_pairs = std::any_cast<std::vector<std::pair<uint64_t, uint64_t>>>(context_info);
+
     query::context_health_info::result_type output;
     for (const auto& pair : context_pid_pairs) {
       std::vector<char> payload(sizeof(amdxdna_drm_hwctx_entry));
       auto* entry = reinterpret_cast<amdxdna_drm_hwctx_entry*>(payload.data());
-      entry->context_id = pair.first;
-      entry->pid = pair.second;
+      entry->context_id = static_cast<uint32_t>(pair.first);
+      entry->pid = static_cast<int64_t>(pair.second);
 
       amdxdna_drm_get_array arg = {
         .param = DRM_AMDXDNA_HW_CONTEXT_BY_ID,
