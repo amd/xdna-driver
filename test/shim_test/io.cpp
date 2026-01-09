@@ -948,32 +948,6 @@ get_preemption_checkpoints()
   return 0;
 }
 
-void
-io_test_bo_set_base::
-cache_cmd_header()
-{
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  if (!cbo)
-    return;
-  auto pkt = reinterpret_cast<ert_packet *>(cbo->map());
-  if (!m_cached_cmd_header)
-    m_cached_cmd_header = pkt->header;
-}
-
-void
-io_test_bo_set_base::
-restore_cmd_header()
-{
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  if (!cbo || !m_cached_cmd_header)
-    return;
-
-  auto pkt = reinterpret_cast<ert_packet *>(cbo->map());
-  pkt->header = m_cached_cmd_header;
-  pkt->state = ERT_CMD_STATE_NEW;
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-}
-
 unsigned long
 elf_preempt_io_test_bo_set::
 get_preemption_checkpoints()

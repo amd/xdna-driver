@@ -56,6 +56,10 @@ private:
 
   uint64_t
   issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain);
+
+  // Cache for command buffer headers (firmware corrupts them)
+  // Key: BO handle, Value: cached header word
+  std::map<uint32_t, uint32_t> m_cmd_header_cache;
 };
 
 }

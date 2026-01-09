@@ -74,7 +74,7 @@ xclbin_info xclbin_infos[] = {
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
   {
-    .name = "nop.xclbin",
+    .name = "nop.elf",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
@@ -96,7 +96,7 @@ xclbin_info xclbin_infos[] = {
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
   {
-    .name = "nop.xclbin",
+    .name = "nop.elf",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
