@@ -4,6 +4,7 @@
  */
 
 #include <linux/iommu.h>
+#include <uapi/linux/iommufd.h>
 #include <linux/iova.h>
 
 #include "amdxdna_gem.h"
@@ -124,11 +125,10 @@ void amdxdna_iommu_free(struct amdxdna_dev *xdna, size_t size,
 
 int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 {
-	enum iommufd_hwpt_alloc_flags flags;
 	unsigned long order;
 	int ret;
 
-	if (!force_iova || !xdna->ddev.dev->iommu)
+	if (!force_iova)
 		return 0;
 
 	xdna->group = iommu_group_get(xdna->ddev.dev);
@@ -137,8 +137,7 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 		return 0;
 	}
 
-	flags = xdna->ddev.dev->iommu->max_pasids ? IOMMU_HWPT_ALLOC_PASID : 0;
-	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev, flags);
+	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev, IOMMU_HWPT_ALLOC_PASID);
 	if (IS_ERR(xdna->domain)) {
 		XDNA_ERR(xdna, "Failed to alloc iommu domain");
 		ret = PTR_ERR(xdna->domain);
