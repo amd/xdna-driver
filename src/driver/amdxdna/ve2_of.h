@@ -14,8 +14,18 @@
 
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
-
+#define MIN_COL_SUPPORT		4
 #define VERBOSITY_LEVEL_DBG	2
+
+/*
+ * VE2_RETRY_TIMEOUT_MS - Total timeout for command retry attempts
+ *
+ * This is the maximum time we'll wait for a queue slot to become available
+ * when the hardware queue is full. The wait is event-driven (IRQ wakes us
+ * when a slot frees up), not polling-based, so this timeout is only hit
+ * if the hardware becomes unresponsive.
+ */
+#define VE2_RETRY_TIMEOUT_MS	5000
 
 #define aie_calc_part_id(start_col, num_col)	\
 	(((start_col) << AIE_PART_ID_START_COL_SHIFT) + \

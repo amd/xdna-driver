@@ -65,6 +65,77 @@ static inline struct ve2_dpu_data *get_ve2_dpu_data_next(struct ve2_dpu_data *dp
 	return dpu_data + 1;
 }
 
+/*
+ * ve2_check_slot_available - Check if a queue slot is available
+ * @hwctx: Hardware context
+ *
+ * Returns true if at least one slot is available, false otherwise.
+ * This is used as the condition for wait_event_interruptible_timeout.
+ *
+ */
+static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
+{
+	struct amdxdna_ctx_priv *priv = hwctx->priv;
+	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
+	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
+	u32 capacity = header->capacity;
+	enum ert_cmd_state state;
+	u64 outstanding;
+	bool available;
+	u32 slot_idx;
+
+	mutex_lock(&queue->hq_lock);
+	outstanding = queue->reserved_write_index - header->read_index;
+	if (outstanding >= capacity) {
+		mutex_unlock(&queue->hq_lock);
+		return false;
+	}
+
+	/*
+	 * Also check that the next slot to be reserved is actually available.
+	 * Slot is available when in INVALID state (set by ve2_hwctx_job_release
+	 * after job completion, or zero-initialized for fresh slots).
+	 */
+	slot_idx = queue->reserved_write_index % capacity;
+	state = queue->hq_complete.hqc_mem[slot_idx];
+	available = (state == ERT_CMD_STATE_INVALID);
+	mutex_unlock(&queue->hq_lock);
+
+	return available;
+}
+
+/*
+ * ve2_wait_for_retry_slot - Wait for a queue slot to become available
+ * @hwctx: Hardware context
+ * @timeout_ms: Maximum time to wait in milliseconds
+ *
+ * This function uses wait_event_interruptible_timeout to sleep until
+ * a slot becomes available. The IRQ handler will wake us up when
+ * commands complete and slots are freed.
+ *
+ * Returns:
+ *   0 on success (slot available)
+ *   -ETIMEDOUT if timeout expired
+ *   negative error code if interrupted
+ */
+static int ve2_wait_for_retry_slot(struct amdxdna_ctx *hwctx, u32 timeout_ms)
+{
+	struct amdxdna_ctx_priv *priv = hwctx->priv;
+	unsigned long timeout_jiffies = msecs_to_jiffies(timeout_ms);
+	int ret;
+
+	ret = wait_event_interruptible_timeout(priv->waitq,
+					       ve2_check_slot_available(hwctx),
+					       timeout_jiffies);
+
+	if (ret == 0)
+		return -ETIMEDOUT;
+	if (ret < 0)
+		return ret;  /* Interrupted */
+
+	return 0;
+}
+
 static struct host_queue_packet *
 hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, u64 *slot)
 {
@@ -88,10 +159,11 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 
 	outstanding = queue->reserved_write_index - header->read_index;
 	if (outstanding >= capacity) {
-		XDNA_ERR(xdna, "HSA Queue full: outstanding=%llu >= capacity=%u",
+		/* Use DBG level - expected during high queue utilization */
+		XDNA_DBG(xdna, "HSA Queue full: outstanding=%llu >= capacity=%u",
 			 outstanding, capacity);
 		mutex_unlock(&queue->hq_lock);
-		return NULL;
+		return ERR_PTR(-EBUSY);
 	}
 
 	slot_idx = queue->reserved_write_index % capacity;
@@ -100,13 +172,11 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	/*
 	 * Slot can only be reused when it's in INVALID state, which is set by
 	 * ve2_hwctx_job_release() after the job is fully released from pending array.
-	 * State 0 is also allowed for initial/uninitialized slots.
-	 * This ensures the pending array slot is free before we reserve the HSA queue slot.
 	 */
-	if (state != ERT_CMD_STATE_INVALID && state != 0) {
+	if (state != ERT_CMD_STATE_INVALID) {
 		XDNA_DBG(xdna, "Slot %u is still in use with state %u", slot_idx, state);
 		mutex_unlock(&queue->hq_lock);
-		return NULL;
+		return ERR_PTR(-EBUSY);
 	}
 
 	/* Reserve this slot by incrementing reserved_write_index. */
@@ -273,18 +343,20 @@ static inline struct host_queue_packet *hsa_queue_get_pkt(struct hsa_queue *queu
 	return &queue->hq_entry[slot & (queue->hq_header.capacity - 1)];
 }
 
-static void *get_host_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq)
+static void *get_host_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq, int *err)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct host_queue_packet *pkt;
 
 	pkt = hsa_queue_reserve_slot(xdna, hwctx->priv, seq);
-	if (!pkt) {
+	if (IS_ERR(pkt)) {
+		*err = PTR_ERR(pkt);
 		/* Expected during retry - use DBG level */
-		XDNA_DBG(xdna, "No slot available in Host queue");
+		XDNA_DBG(xdna, "No slot available in Host queue (err=%d)", *err);
 		return NULL;
 	}
 
+	*err = 0;
 	return pkt;
 }
 
@@ -470,9 +542,9 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	dpu = (struct ve2_dpu_data *)cmd_data;
 	pkt = hsa_queue_reserve_slot(xdna, ve2_ctx, &slot_id);
-	if (!pkt) {
+	if (IS_ERR(pkt)) {
 		XDNA_DBG(xdna, "No slot available in Host queue");
-		return -EAGAIN;
+		return PTR_ERR(pkt);
 	}
 
 	hq_queue = (struct ve2_hsa_queue *)&ve2_ctx->hwctx_hsa_queue;
@@ -556,17 +628,18 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 	struct host_queue_packet *pkt;
 	struct exec_buf *ebp;
 	u64 slot_id = 0;
+	int err;
 
 	if (!cmd_data) {
 		XDNA_ERR(xdna, "Invalid command requested");
 		return -EINVAL;
 	}
 
-	pkt = (struct host_queue_packet *)get_host_queue_pkt(hwctx, &slot_id);
+	pkt = (struct host_queue_packet *)get_host_queue_pkt(hwctx, &slot_id, &err);
 	if (!pkt) {
 		/* Expected during retry - use DBG level */
-		XDNA_DBG(xdna, "Getting host queue packet failed");
-		return -EAGAIN;
+		XDNA_DBG(xdna, "Getting host queue packet failed (err=%d)", err);
+		return err;
 	}
 
 	*seq = slot_id;
@@ -615,26 +688,61 @@ static int ve2_submit_cmd_single(struct amdxdna_ctx *hwctx, struct amdxdna_sched
 		return -EINVAL;
 	}
 
-	if (get_ve2_dpu_data_next(cmd_data))
-		ret = submit_command_indirect(hwctx, cmd_data, seq, true);
-	else
-		ret = submit_command(hwctx, cmd_data, seq, true);
+	while (true) {
+		if (get_ve2_dpu_data_next(cmd_data))
+			ret = submit_command_indirect(hwctx, cmd_data, seq, true);
+		else
+			ret = submit_command(hwctx, cmd_data, seq, true);
+
+		if (ret != -EBUSY)
+			break;
+
+		XDNA_DBG(xdna, "Queue full, waiting for slot to become available (IRQ-driven)");
+
+		ret = ve2_wait_for_retry_slot(hwctx, VE2_RETRY_TIMEOUT_MS);
+		if (ret == -ETIMEDOUT) {
+			XDNA_DBG(xdna, "Submit timeout: no slot available after %ums",
+				 VE2_RETRY_TIMEOUT_MS);
+			return -EAGAIN;
+		} else if (ret < 0) {
+			XDNA_ERR(xdna, "Submit interrupted while waiting for slot");
+			return ret;
+		}
+
+		XDNA_DBG(xdna, "Slot available, retrying single command submission");
+	}
+
 	if (ret) {
-		/* Expected during retry - use DBG level */
-		XDNA_DBG(xdna, "Submit single command failed, error %d", ret);
+		XDNA_ERR(xdna, "Submit single command failed, error %d", ret);
 		return ret;
 	}
 
 	return ve2_hwctx_add_job(hwctx, job, *seq, 1);
 }
 
-static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
+/*
+ * ve2_submit_cmd_chain_partial - Submit commands from a chain starting at start_idx
+ * @hwctx: Hardware context
+ * @job: Job containing the command chain
+ * @start_idx: Index to start submitting from
+ * @seq: Output sequence number (set to last submitted command's slot)
+ * @submitted_count: Output count of successfully submitted commands
+ *
+ * Returns:
+ *   0 on success (all remaining commands submitted)
+ *   -EBUSY if queue became full (partial submission, check submitted_count)
+ *   Other negative error codes on failure
+ */
+static int ve2_submit_cmd_chain_partial(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job,
+					u32 start_idx, u64 *seq, u32 *submitted_count)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
 	struct amdxdna_cmd_chain *cmd_chain;
 	u32 cmd_chain_len;
-	int ret;
+	int ret = 0;
+
+	*submitted_count = 0;
 
 	cmd_chain = amdxdna_cmd_get_payload(cmd_bo, &cmd_chain_len);
 	if (!cmd_chain || cmd_chain_len < struct_size(cmd_chain, data, cmd_chain->command_count)) {
@@ -642,7 +750,7 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 		return -EINVAL;
 	}
 
-	for (int i = 0; i < cmd_chain->command_count; i++) {
+	for (u32 i = start_idx; i < cmd_chain->command_count; i++) {
 		u32 boh = (u32)(cmd_chain->data[i]);
 		struct amdxdna_gem_obj *abo;
 		bool last_cmd = false;
@@ -668,15 +776,83 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 			ret = submit_command_indirect(hwctx, cmd_data, seq, last_cmd);
 		else
 			ret = submit_command(hwctx, cmd_data, seq, last_cmd);
-		if (ret) {
-			/* Expected during retry - use DBG level */
-			XDNA_DBG(xdna, "Submit chain command(%d/%d) failed, error %d", i,
+
+		amdxdna_gem_put_obj(abo);
+
+		if (ret == -EBUSY) {
+			/* Queue full - return with partial count for retry */
+			XDNA_DBG(xdna, "Queue full at cmd %u/%u", i, cmd_chain->command_count);
+			return -EBUSY;
+		} else if (ret) {
+			XDNA_ERR(xdna, "Submit chain command(%u/%u) failed, error %d", i,
 				 cmd_chain->command_count, ret);
-			amdxdna_gem_put_obj(abo);
 			return ret;
 		}
 
-		amdxdna_gem_put_obj(abo);
+		(*submitted_count)++;
+	}
+
+	return 0;
+}
+
+static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
+	struct amdxdna_cmd_chain *cmd_chain;
+	u32 total_submitted = 0;
+	u32 submitted_count = 0;
+	u32 start_idx = 0;
+	int ret;
+
+	cmd_chain = amdxdna_cmd_get_payload(cmd_bo, NULL);
+	if (!cmd_chain) {
+		XDNA_ERR(xdna, "Invalid command chain");
+		return -EINVAL;
+	}
+
+	while (start_idx < cmd_chain->command_count) {
+		ret = ve2_submit_cmd_chain_partial(hwctx, job, start_idx, seq, &submitted_count);
+
+		if (ret == 0) {
+			total_submitted += submitted_count;
+			break;
+		} else if (ret == -EBUSY) {
+			total_submitted += submitted_count;
+			start_idx += submitted_count;
+
+			XDNA_DBG(xdna,
+				 "Queue full at cmd %u/%u, waiting for slot (IRQ-driven)",
+				 start_idx, cmd_chain->command_count);
+
+			ret = ve2_wait_for_retry_slot(hwctx, VE2_RETRY_TIMEOUT_MS);
+			if (ret == -ETIMEDOUT) {
+				XDNA_DBG(xdna,
+					 "Submit chain timeout: no slot available after %ums (%u/%u cmds done)",
+					 VE2_RETRY_TIMEOUT_MS, total_submitted,
+					 cmd_chain->command_count);
+				if (total_submitted > 0) {
+					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+					amdxdna_cmd_set_state(cmd_bo, ERT_CMD_STATE_TIMEOUT);
+				}
+				return -EAGAIN;
+			} else if (ret < 0) {
+				XDNA_ERR(xdna, "Submit chain interrupted while waiting for slot");
+				if (total_submitted > 0)
+					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+				return ret;
+			}
+
+			XDNA_DBG(xdna,
+				 "Slot available, retrying chain submission from cmd %u/%u",
+				 start_idx, cmd_chain->command_count);
+		} else {
+			XDNA_ERR(xdna, "Submit chain failed with error %d (%u/%u cmds done)",
+				 ret, total_submitted, cmd_chain->command_count);
+			if (total_submitted > 0)
+				ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+			return ret;
+		}
 	}
 
 	return ve2_hwctx_add_job(hwctx, job, *seq, cmd_chain->command_count);
@@ -707,9 +883,9 @@ int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32
 		ret = ve2_submit_cmd_single(hwctx, job, seq);
 
 	if (ret) {
-		 /* Caller expecting this return value for retry. */
+		/* Return -ERESTARTSYS for -EAGAIN so userspace can retry */
 		if (ret == -EAGAIN) {
-			XDNA_DBG(xdna, "Failed to submit a command (retry expected)\n");
+			XDNA_ERR(xdna, "Failed to submit a command (retry expected)\n");
 			return -ERESTARTSYS;
 		}
 

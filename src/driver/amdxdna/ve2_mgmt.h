@@ -32,7 +32,7 @@ struct amdxdna_ctx;
 #define HSA_QUEUE_WRITE_INDEX_OFFSET	0x10
 #define HSA_QUEUE_NOT_EMPTY		1
 #define CERT_IS_IDLE			4
-#define MIN_COL_SUPPORT                 4
+
 #define SHIM_DATA_MEMORY_OFF(col, row, off) \
 	VE2_ADDR(col, row, VE2_SHIM_DATA_MEMORY_OFF + (off))
 
@@ -166,6 +166,9 @@ static inline int get_ctx_write_index(struct amdxdna_ctx *hwctx, u64 *write_inde
  */
 int ve2_mgmt_create_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 
+int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req,
+		     u32 num_col);
+
 int ve2_create_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 			void *buffer, u32 size);
 /**
@@ -206,7 +209,7 @@ int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx);
  * Returns 0 on success or a negative error code.
  */
 int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
-int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req, u32 num_col);
+
 /**
  * ve2_mgmt_schedule_cmd - Schedule a command for execution.
  * @xdna: Pointer to the device structure.
