@@ -194,6 +194,9 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 	if (ret)
 		goto fail;
 
+	INIT_LIST_HEAD(&priv->job_list);
+	init_waitqueue_head(&priv->outstanding_job_wq);
+
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
 	return 0;
 

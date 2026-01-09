@@ -255,6 +255,7 @@ struct amdxdna_job_bo {
 
 struct amdxdna_sched_job {
 	struct drm_sched_job	base;
+	struct list_head	list;
 	struct kref		refcnt;
 	struct amdxdna_ctx	*ctx;
 	struct mm_struct	*mm;

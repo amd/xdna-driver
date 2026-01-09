@@ -48,7 +48,13 @@ struct amdxdna_ctx_priv {
 	u64				*umq_write_index;
 	struct host_queue_packet	*umq_pkts;
 	struct host_indirect_packet_data *umq_indirect_pkts;
+
+	struct amdxdna_sched_job	*outstanding_job; /* The very next job to be submitted. */
+	wait_queue_head_t		outstanding_job_wq;
+	struct list_head		job_list;
+
 	void			__iomem	*doorbell_addr;
+
 	u32				meta_bo_hdl;
 	struct col_entry		*col_entry;
 	u32				hw_ctx_id;

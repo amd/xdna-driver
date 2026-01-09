@@ -832,7 +832,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 #ifdef UMQ_HELLO_TEST
 	return aie4_hello_test(ndev, ctx);
 #endif
-	if (!nctx || !nctx->umq_bo) {
+	if (!nctx || nctx->umq_bo == AMDXDNA_INVALID_BO_HANDLE) {
 		XDNA_WARN(xdna, "cannot create hwctx due to NULL nctx or umq buffer");
 		return -EINVAL;
 	}

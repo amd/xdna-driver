@@ -505,6 +505,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		goto unlock_srcu;
 	}
 	kref_init(&job->refcnt);
+	INIT_LIST_HEAD(&job->list);
 
 	ret = xdna->dev_info->ops->cmd_submit(job, syncobj_hdls,
 					      syncobj_points, syncobj_cnt, seq);
