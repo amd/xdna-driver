@@ -257,6 +257,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	abo->assigned_ctx = AMDXDNA_INVALID_CTX_HANDLE;
 	mutex_init(&abo->lock);
 	abo->mem.size = size;
+	abo->mem.dma_addr = AMDXDNA_INVALID_ADDR;
 	INIT_LIST_HEAD(&abo->mem.umap_list);
 
 	return abo;
@@ -459,6 +460,9 @@ static void amdxdna_gem_shmem_obj_free(struct drm_gem_object *gobj)
 
 	if (abo->type == AMDXDNA_BO_DEV_HEAP)
 		drm_mm_takedown(&abo->mm);
+
+	if (amdxdna_iova_enabled(xdna))
+		amdxdna_iommu_unmap_bo(xdna, abo);
 
 	amdxdna_gem_vunmap(abo);
 	mutex_destroy(&abo->lock);

@@ -82,11 +82,19 @@ struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, s
 	if (dma_hdl->aligned_size > SZ_4M)
 		dma_hdl->aligned_size = SZ_4M;
 
-	dma_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, dma_hdl->aligned_size,
+	if (amdxdna_iova_enabled(xdna)) {
+		dma_hdl->vaddr = amdxdna_iommu_alloc(xdna, dma_hdl->aligned_size, &dma_hdl->dma_hdl);
+		if (IS_ERR(dma_hdl->vaddr)) {
+			kfree(dma_hdl);
+			return ERR_CAST(dma_hdl->vaddr);
+		}
+	} else {
+		dma_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, dma_hdl->aligned_size,
 					       &dma_hdl->dma_hdl, dir, GFP_KERNEL);
-	if (!dma_hdl->vaddr) {
-		kfree(dma_hdl);
-		return ERR_PTR(-ENOMEM);
+		if (!dma_hdl->vaddr) {
+			kfree(dma_hdl);
+			return ERR_PTR(-ENOMEM);
+		}
 	}
 
 	if (amdxdna_mgmt_buff_validate(xdna, dma_hdl->dma_hdl, dma_hdl->aligned_size))
@@ -147,8 +155,15 @@ void amdxdna_mgmt_buff_free(struct amdxdna_mgmt_dma_hdl *dma_hdl)
 	if (!dma_hdl)
 		return;
 
-	dma_free_noncoherent(dma_hdl->xdna->ddev.dev, dma_hdl->aligned_size, dma_hdl->vaddr,
-			     dma_hdl->dma_hdl, dma_hdl->dir);
+	if (amdxdna_iova_enabled(dma_hdl->xdna)) {
+		amdxdna_iommu_free(dma_hdl->xdna, dma_hdl->aligned_size,
+				   dma_hdl->vaddr, dma_hdl->dma_hdl);
+	} else {
+		dma_free_noncoherent(dma_hdl->xdna->ddev.dev,
+				     dma_hdl->aligned_size, dma_hdl->vaddr,
+				     dma_hdl->dma_hdl, dma_hdl->dir);
+	}
+
 	dma_hdl->vaddr = NULL;
 	dma_hdl->size = 0;
 	dma_hdl->dma_hdl = 0;

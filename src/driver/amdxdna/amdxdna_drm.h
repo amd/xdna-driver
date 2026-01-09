@@ -11,6 +11,7 @@
 #include <drm/drm_print.h>
 #include <drm/drm_file.h>
 #include <linux/hmm.h>
+#include <linux/iova.h>
 #include <linux/timekeeping.h>
 #include <linux/workqueue.h>
 #include <linux/seqlock_types.h>
@@ -137,6 +138,10 @@ struct amdxdna_dev {
 	struct workqueue_struct		*notifier_wq;
 
 	struct device			*cma_region_devs[MAX_MEM_REGIONS];
+
+	struct iommu_group		*group;
+	struct iommu_domain		*domain;
+	struct iova_domain		iovad;
 };
 
 struct amdxdna_stats {
@@ -199,5 +204,17 @@ int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
 				     void *array, size_t element_size, size_t num_element);
 bool amdxdna_admin_access_allowed(struct amdxdna_dev *xdna);
 bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only);
+
+int amdxdna_iommu_init(struct amdxdna_dev *xdna);
+void amdxdna_iommu_fini(struct amdxdna_dev *xdna);
+int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
+void amdxdna_iommu_unmap_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
+void *amdxdna_iommu_alloc(struct amdxdna_dev *xdna, size_t size, dma_addr_t *dma_addr);
+void amdxdna_iommu_free(struct amdxdna_dev *xdna, size_t size,
+                        void *cpu_addr, dma_addr_t dma_addr);
+static inline bool amdxdna_iova_enabled(struct amdxdna_dev *xdna)
+{
+	return !!xdna->domain;
+}
 
 #endif /* _AMDXDNA_DRM_H_ */
