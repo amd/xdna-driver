@@ -16,6 +16,7 @@
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
+#include "aie4_host_queue.h"
 
 bool kernel_mode_submission = false;
 module_param(kernel_mode_submission, bool, 0600);
@@ -81,10 +82,73 @@ static int aie4_ctx_col_list_init(struct amdxdna_ctx *ctx)
 	return 0;
 }
 
+static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
+{
+	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
+		sizeof(struct host_indirect_packet_data);
+	const size_t pkts_sz = CTX_MAX_CMDS * sizeof(struct host_queue_packet);
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_ctx_priv *priv = ctx->priv;
+	struct host_queue_header *qhdr;
+	struct amdxdna_gem_obj *umq_bo;
+	size_t umq_sz;
+	void *umq_va;
+	int i;
+
+	umq_bo = amdxdna_gem_get_obj(ctx->client, ctx->umq_bo, AMDXDNA_BO_SHARE);
+	if (!umq_bo) {
+		XDNA_ERR(xdna, "cannot find umq_bo handle %d", ctx->umq_bo);
+		return -ENOENT;
+	}
+	priv->umq_bo = umq_bo;
+
+	umq_va = amdxdna_gem_vmap(umq_bo);
+	priv->umq_pkts = umq_va + sizeof(*qhdr);
+	priv->umq_indirect_pkts = umq_va + sizeof(*qhdr) + pkts_sz;
+
+	qhdr = umq_va;
+	priv->umq_read_index = &qhdr->read_index;
+	priv->umq_write_index = &qhdr->write_index;
+
+	if (!kernel_mode_submission)
+		return 0;
+
+	/*
+	 * Kernel mode submission requires driver to reinitialize the UMQ
+	 * content to driver's need.
+	 */
+
+	umq_sz = umq_bo->mem.size;
+	if (umq_sz < sizeof(*qhdr) + pkts_sz + indir_pkts_sz) {
+		XDNA_ERR(xdna, "umq BO size %ldB is too small", umq_sz);
+		drm_gem_object_put(to_gobj(umq_bo));
+		priv->umq_bo = NULL;
+		return -EINVAL;
+	}
+
+	/* Init umq content */
+	memset(umq_va, 0, umq_sz);
+	qhdr->capacity = CTX_MAX_CMDS;
+	qhdr->data_address = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
+	for (i = 0; i < CTX_MAX_CMDS; i++)
+		priv->umq_pkts[i].pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
+	for (i = 0; i < CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES; i++) {
+		priv->umq_indirect_pkts[i].header.opcode = OPCODE_EXEC_BUF;
+		priv->umq_indirect_pkts[i].header.count = sizeof(struct exec_buf);
+		priv->umq_indirect_pkts[i].header.distribute = 1;
+	}
+	return 0;
+}
+
+static void aie4_ctx_umq_fini(struct amdxdna_ctx *ctx)
+{
+	if (ctx->priv && ctx->priv->umq_bo)
+		drm_gem_object_put(to_gobj(ctx->priv->umq_bo));
+}
+
 int aie4_ctx_init(struct amdxdna_ctx *ctx)
 {
-	struct amdxdna_client *client = ctx->client;
-	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = NULL;
 	int ret;
 
@@ -98,59 +162,45 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 		/*
 		 * If kernel-mode-submission, create per ctx syncobj for user
 		 * to wait for cmd completion since driver can create timeline
-		 * for the cmd during submission. Otherwise, leave syncobj as
+		 * for each cmd after submission. Otherwise, leave syncobj as
 		 * NULL, so that user has to make IOCTL call and pass in the
 		 * cmd sequence number for explicit waiting in driver.
 		 */
 		ret = amdxdna_ctx_syncobj_create(ctx);
 		if (ret) {
 			XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
-			goto suspend;
+			goto fail;
 		}
 	}
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv) {
 		ret = -ENOMEM;
-		goto suspend;
+		goto fail;
 	}
 	ctx->priv = priv;
 
-	priv->umq_bo = amdxdna_gem_get_obj(client, ctx->umq_bo, AMDXDNA_BO_SHARE);
-	if (!priv->umq_bo) {
-		XDNA_ERR(xdna, "cannot find umq_bo handle %d", ctx->umq_bo);
-		ret = -ENOENT;
-		goto free_priv;
-	}
+	ret = aie4_ctx_umq_init(ctx);
+	if (ret)
+		goto fail;
 
 	/* col_list must be provided to the resolver */
 	ret = aie4_ctx_col_list_init(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
-		goto put_bo;
-	}
+	if (ret)
+		goto fail;
 
 	/* resolver to call load->aie4_create_context */
 	ret = aie4_alloc_resource(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
-		goto free_col_list;
-	}
+	if (ret)
+		goto fail;
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
-
 	return 0;
 
-free_col_list:
+fail:
 	aie4_ctx_col_list_fini(ctx);
-
-put_bo:
-	if (priv->umq_bo)
-		drm_gem_object_put(to_gobj(priv->umq_bo));
-
-free_priv:
+	aie4_ctx_umq_fini(ctx);
 	kfree(ctx->priv);
-suspend:
 	amdxdna_ctx_syncobj_destroy(ctx);
 	pm_runtime_mark_last_busy(xdna->ddev.dev);
 	pm_runtime_put_autosuspend(xdna->ddev.dev);
@@ -159,12 +209,7 @@ suspend:
 
 void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 {
-	struct amdxdna_dev *xdna;
-	struct amdxdna_ctx_priv *priv = ctx->priv;
-
-	amdxdna_ctx_syncobj_destroy(ctx);
-
-	xdna = ctx->client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {
@@ -173,12 +218,10 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 		amdxdna_pm_suspend_put(xdna);
 	}
 
-	/* free col_list */
 	aie4_ctx_col_list_fini(ctx);
-	if (priv->umq_bo)
-		drm_gem_object_put(to_gobj(priv->umq_bo));
-
+	aie4_ctx_umq_fini(ctx);
 	kfree(ctx->priv);
+	amdxdna_ctx_syncobj_destroy(ctx);
 	pm_runtime_mark_last_busy(xdna->ddev.dev);
 	pm_runtime_put_autosuspend(xdna->ddev.dev);
 }
@@ -218,15 +261,19 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 	return ret;
 }
 
-#define HSA_QUEUE_READ_INDEX_OFFSET 0
-#define check_read_index \
-({ \
-	u64 *read_index = (u64 *)((char *)amdxdna_gem_vmap(nctx->umq_bo) +	\
-		HSA_QUEUE_READ_INDEX_OFFSET);					\
-	XDNA_DBG(xdna, "read_idx %lld > seq %lld", *read_index, seq);		\
-	((*read_index) > seq);							\
-})
-#define ring_doorbell(ctx)	(writel(0, (ctx)->priv->doorbell_addr))
+static inline bool check_cmd_done(struct amdxdna_ctx *ctx, u64 seq)
+{
+	struct amdxdna_ctx_priv *nctx = ctx->priv;
+	u64 ri = READ_ONCE(*nctx->umq_read_index);
+
+	XDNA_DBG(ctx->client->xdna, "checking if read_idx %lld > seq %lld", ri, seq);
+	return ri > seq;
+}
+
+static inline void ring_doorbell(struct amdxdna_ctx *ctx)
+{
+	writel(0, ctx->priv->doorbell_addr);
+}
 
 int aie4_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
@@ -237,9 +284,8 @@ int aie4_cmd_submit(struct amdxdna_sched_job *job,
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 {
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
-	struct col_entry *col_entry = nctx->col_entry;
-	struct amdxdna_dev *xdna = ctx->client->xdna;
 	unsigned long wait_jifs = MAX_SCHEDULE_TIMEOUT;
+	struct col_entry *col_entry = nctx->col_entry;
 	long ret = 0;
 
 	if (timeout)
@@ -247,7 +293,7 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 
 	ret = wait_event_interruptible_timeout(col_entry->col_event,
 					       ((col_entry && col_entry->needs_reset) ||
-					       check_read_index),
+					       check_cmd_done(ctx, seq)),
 					       wait_jifs);
 
 	if (col_entry && col_entry->needs_reset)

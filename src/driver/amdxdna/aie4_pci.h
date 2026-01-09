@@ -44,6 +44,10 @@ struct rt_config_clk_gating {
 
 struct amdxdna_ctx_priv {
 	struct amdxdna_gem_obj		*umq_bo;
+	u64				*umq_read_index;
+	u64				*umq_write_index;
+	struct host_queue_packet	*umq_pkts;
+	struct host_indirect_packet_data *umq_indirect_pkts;
 	void			__iomem	*doorbell_addr;
 	u32				meta_bo_hdl;
 	struct col_entry		*col_entry;
