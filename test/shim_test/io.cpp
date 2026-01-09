@@ -384,6 +384,47 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   }
 }
 
+elf_full_io_test_bo_set::
+elf_full_io_test_bo_set(device* dev, const std::string& xclbin_name)
+  : io_test_bo_set_base(dev, xclbin_name)
+{
+  auto elf_path = get_xclbin_path(dev, xclbin_name.c_str());
+  m_elf = xrt::elf(elf_path);
+  auto mod = xrt::module{m_elf};
+  auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+
+  try {
+    m_kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+  } catch (const std::exception& e) {
+    m_kernel_index = module_int::no_ctrl_code_id;
+  }
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      break;
+    case IO_TEST_BO_INPUT:
+      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
+      break;
+    case IO_TEST_BO_OUTPUT:
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL|m_FLAG_OPT);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
 elf_preempt_io_test_bo_set::
 elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
   : io_test_bo_set_base(dev, xclbin_name)
@@ -603,6 +644,30 @@ init_cmd(hw_ctx& hwctx, bool dump)
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
     patcher::buf_type::ctrltext, m_elf, module_int::no_ctrl_code_id);
+}
+
+void
+elf_full_io_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
+
+  xrt_core::cuidx_type cu_idx{0};
+  ebuf.set_cu_idx(cu_idx);
+
+  if (m_bo_array[IO_TEST_BO_INPUT].tbo.get()) {
+    ebuf.add_arg_64(3);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "0");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get(), "1");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "2");
+  }
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
 }
 
 void

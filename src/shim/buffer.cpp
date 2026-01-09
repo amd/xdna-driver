@@ -21,7 +21,8 @@ uint8_t
 use_to_fw_debug_type(uint8_t use)
 {
   switch (use) {
-  case XRT_BO_USE_DEBUG:
+  case XRT_BO_USE_DEBUG: // USE_DEBUG and USE_UC_DEBUG should return same type, 2 different cases for different devices
+  case XRT_BO_USE_UC_DEBUG:
     return AMDXDNA_FW_BUF_DEBUG;
   case XRT_BO_USE_DTRACE:
     return AMDXDNA_FW_BUF_TRACE;

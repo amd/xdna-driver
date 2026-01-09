@@ -42,6 +42,9 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
   case KERNEL_TYPE_TXN:
     base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
     break;
+  case KERNEL_TYPE_TXN_FULL_ELF:
+    base = std::make_unique<elf_full_io_test_bo_set>(dev, xclbin ? std::string(xclbin) : get_xclbin_name(dev));
+    break;
   case KERNEL_TYPE_TXN_PREEMPT:
   case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
     base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
@@ -350,9 +353,10 @@ TEST_io_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 1, 1, run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+  io_test(id, sdev.get(), total, 1, 1, run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
 }
 
 void
@@ -361,9 +365,10 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device>& sdev, arg_type& 
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 8, 1, run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+  io_test(id, sdev.get(), total, 8, 1, run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
 }
 
 void
@@ -372,6 +377,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
   const size_t max_cmd_per_list = 24;
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
@@ -380,7 +386,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_t
       cmds_per_list = max_cmd_per_list;
     int total_hwq_submit = total / cmds_per_list;
     io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list,
-      run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+      run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
   }
 }
 
@@ -390,18 +396,18 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, ar
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total_commands = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
   int num_bo_set = 256;
   const size_t max_cmd_per_list = 24;
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-
   for (int cmds_per_list = 1; cmds_per_list <= 32; cmds_per_list *= 2) {
     if (cmds_per_list > max_cmd_per_list)
       cmds_per_list = max_cmd_per_list;
     int num_cmdlist = num_bo_set / cmds_per_list;
     int total_hwq_submit = total_commands / cmds_per_list;
     io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list,
-      run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+      run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
   }
 }
 

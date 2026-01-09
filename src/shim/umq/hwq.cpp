@@ -185,6 +185,14 @@ hwq_umq::
 issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
 {
   auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(cmd_bo->vaddr());
+  auto handle = cmd_bo->id().handle;
+
+  // Restore header if this is a resubmission
+  auto it = m_cmd_header_cache.find(handle);
+  if (it != m_cmd_header_cache.end()) {
+    cmd->header = it->second;
+  }
+
   auto dpu = get_ert_dpu_data(cmd);
 
   // Sanity check
@@ -196,6 +204,10 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
       shim_debug("EXEC_BUF[%d]: 0x%x", i, (reinterpret_cast<uint32_t *>(cmd))[i]);
 
     shim_err(EINVAL, "No dpu data, invalid exec buf");
+  }
+
+  if (it == m_cmd_header_cache.end()) {
+    m_cmd_header_cache[handle] = cmd->header;
   }
 
   auto slot_idx = get_next_avail_slot();
@@ -316,6 +328,14 @@ issue_command(const cmd_buffer *cmd_bo)
     return issue_single_exec_buf(cmd_bo, true);
 
   // Runlist command submission.
+  auto handle = cmd_bo->id().handle;
+
+  // Restore chain BO header if this is a resubmission
+  auto it = m_cmd_header_cache.find(handle);
+  if (it != m_cmd_header_cache.end()) {
+    cmd->header = it->second;
+  }
+
   auto payload = get_ert_cmd_chain_data(cmd);
   if (payload->command_count == 0 || payload->command_count > 100)
     shim_err(EINVAL, "Runlist exec buf with bad num of subcmds: %zx", payload->command_count);
@@ -329,6 +349,12 @@ issue_command(const cmd_buffer *cmd_bo)
     seq = issue_single_exec_buf(subcmd, i == payload->command_count - 1);
     subcmds.push_back(subcmd);
   }
+
+  // Cache chain BO header on first submission
+  if (it == m_cmd_header_cache.end()) {
+    m_cmd_header_cache[handle] = cmd->header;
+  }
+
   return seq;
 }
 
