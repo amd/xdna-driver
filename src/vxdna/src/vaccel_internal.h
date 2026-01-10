@@ -14,13 +14,13 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
+#include <cstddef>
 #include <cstring>
 #include <functional>
 #include <unordered_map>
 #include <memory>
 #include <mutex>
-#include <stdint.h>
-#include <stddef.h>
 #include <sys/mman.h>
 #ifdef HAVE_STRUCT_IOVEC
 #include <sys/uio.h>
@@ -232,7 +232,7 @@ public:
     /**
      * @brief Destructor - unmaps memory if mapped
      */
-    ~vaccel_resource()
+    ~vaccel_resource() noexcept
     {
         munmap();
     }
@@ -812,12 +812,12 @@ public:
      * @return File descriptor on success
      * @throws vaccel_error on failure
      */
-    int export_resource_fd(uint32_t res_id)
+    [[nodiscard]] int export_resource_fd(uint32_t res_id)
     {
         auto res = get_resource(res_id);
         if (!res)
             VACCEL_THROW_MSG(-ENOENT, "Resource not found: res_id=%u", res_id);
-        if (res->get_opaque_handle() < 0)
+        if (res->get_opaque_handle() <= 0)
             VACCEL_THROW_MSG(-EINVAL, "Resource is not opaque");
         auto ctx_id = res->get_ctx_id();
         auto ctx = get_ctx(ctx_id);

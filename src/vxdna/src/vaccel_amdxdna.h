@@ -67,7 +67,7 @@ public:
     /**
      * @brief Destructor - unmaps memory and closes GEM handle
      */
-    ~vxdna_bo();
+    ~vxdna_bo() noexcept;
 
     // Non-copyable, non-movable
     vxdna_bo(const vxdna_bo&) = delete;
@@ -188,7 +188,7 @@ public:
      * @return File descriptor on success
      * @throws vaccel_error on failure
      */
-    int export_resource_fd(const std::shared_ptr<vaccel_resource> &res);
+    [[nodiscard]] int export_resource_fd(const std::shared_ptr<vaccel_resource> &res);
 
     /** @name Buffer Object Management
      * @{
@@ -344,7 +344,7 @@ public:
      * @return GEM handle on success
      * @throws vaccel_error on creation failure
      */
-    int get_blob_impl(const struct vaccel_create_resource_blob_args *args);
+    [[nodiscard]] int get_blob_impl(const struct vaccel_create_resource_blob_args *args);
 private:
     /**
      * @brief Hardware execution context for NPU command submission
@@ -392,7 +392,7 @@ private:
         /**
          * @brief Destructor - stops polling thread and destroys DRM handles
          */
-        ~vxdna_hwctx();
+        ~vxdna_hwctx() noexcept;
 
         /**
          * @brief Configure hardware context parameters
