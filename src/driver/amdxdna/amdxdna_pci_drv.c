@@ -86,9 +86,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
 		return -EOPNOTSUPP;
 
+	ret = amdxdna_iommu_init(xdna);
+	if (ret)
+		return ret;
+
 	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", WQ_MEM_RECLAIM);
-	if (!xdna->notifier_wq)
-		return -ENOMEM;
+	if (!xdna->notifier_wq) {
+		ret = -ENOMEM;
+		goto iommu_fini;
+	}
 
 	ret = xdna->dev_info->ops->init(xdna);
 	if (ret) {
@@ -132,6 +138,8 @@ failed_dev_fini:
 	xdna->dev_info->ops->fini(xdna);
 destroy_notifier_wq:
 	destroy_workqueue(xdna->notifier_wq);
+iommu_fini:
+	amdxdna_iommu_fini(xdna);
 	return ret;
 }
 
@@ -167,6 +175,7 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	mutex_unlock(&xdna->dev_lock);
 
 	xdna->dev_info->ops->fini(xdna);
+	amdxdna_iommu_fini(xdna);
 #ifdef AMDXDNA_DEVEL
 	ida_destroy(&xdna->pdi_ida);
 #endif

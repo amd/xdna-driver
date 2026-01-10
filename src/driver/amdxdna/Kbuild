@@ -23,6 +23,7 @@ amdxdna-y := \
 	amdxdna_ctx.o \
 	amdxdna_dpt.o \
 	amdxdna_drm.o \
+	amdxdna_iommu.o \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \

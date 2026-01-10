@@ -33,9 +33,18 @@ static bool is_iommu_off(struct amdxdna_dev *xdna)
 
 int amdxdna_iommu_mode_setup(struct amdxdna_dev *xdna)
 {
-	struct iommu_domain *domain = iommu_get_domain_for_dev(xdna->ddev.dev);
-	bool iommu_iova = domain ? iommu_is_dma_domain(domain) : false;
-	bool iommu_off = is_iommu_off(xdna);
+	struct iommu_domain *domain;
+	bool iommu_iova;
+	bool iommu_off;
+
+	if (amdxdna_iova_enabled(xdna)) {
+		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+		return 0;
+	}
+
+	domain = iommu_get_domain_for_dev(xdna->ddev.dev);
+	iommu_iova = domain ? iommu_is_dma_domain(domain) : false;
+	iommu_off = is_iommu_off(xdna);
 
 	/* Working non-PASID mode */
 	if (amdxdna_use_carvedout() || amdxdna_use_cma()) {
@@ -101,6 +110,9 @@ int amdxdna_bo_dma_map(struct amdxdna_gem_obj *abo)
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	struct sg_table *sgt;
 	size_t contig_sz;
+
+	if (amdxdna_iova_enabled(xdna))
+		return amdxdna_iommu_map_bo(xdna, abo);
 
 	sgt = drm_gem_shmem_get_pages_sgt(&abo->base);
 	if (IS_ERR(sgt)) {
