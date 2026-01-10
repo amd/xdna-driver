@@ -1555,7 +1555,7 @@ struct aie4_msg_runtime_config_cert_timeout {
 };
 
 /**
- * Event trace current status for the calling function (PF/VF).
+ * Event trace current status for the calling function.
  *
  * @enabled 1 to indicate event trace is currently enabled, 0 otherwise.
  * @categories Bitmask for the current enabled categories.
