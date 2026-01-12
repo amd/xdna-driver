@@ -40,13 +40,13 @@ fi
 echo "KERNEL==\"accel*\",DRIVERS==\"amdxdna\",MODE=\"0666\"" > ${udev_rules_d}/${amdxdna_rules_file}
 
 rmmod amdxdna > /dev/null 2>&1
-@PF_RMMOD@
+@INT_RMMOD@
 if [ "$build_type" = "Debug" ]; then
 	modprobe amdxdna dyndbg=+pf
-	@PF_DBG_INSMOD@
+	@INT_DBG_INSMOD@
 else
 	modprobe amdxdna
-	@PF_INSMOD@
+	@INT_INSMOD@
 fi
 
 if [ "$build_type" = "Debug" ]; then
