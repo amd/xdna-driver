@@ -837,6 +837,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_FW_LOG_CONFIG	7
 #define DRM_AMDXDNA_FW_TRACE_CONFIG	8
 #define DRM_AMDXDNA_AIE_TILE_READ	9
+#define DRM_AMDXDNA_HWCTX_AIE_PART_FD		10
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024

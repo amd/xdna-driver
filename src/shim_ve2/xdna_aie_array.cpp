@@ -49,6 +49,24 @@ get_driver_config(const pt::ptree& aie_meta)
   return driver_config;
 }
 
+int
+xdna_aie_array::
+get_aie_partition_fd(const xdna_hwctx* hwctx_obj)
+{
+  int aie_fd = -1;
+  auto dev = const_cast<xdna_hwctx*>(hwctx_obj)->get_device();
+
+  amdxdna_drm_get_array arg = {};
+  arg.param = DRM_AMDXDNA_HWCTX_AIE_PART_FD;
+  arg.element_size = sizeof(aie_fd);
+  arg.num_element = hwctx_obj->get_slotidx();  /* hwctx handle passed via num_element */
+  arg.buffer = reinterpret_cast<uintptr_t>(&aie_fd);
+
+  dev->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+
+  return aie_fd;
+}
+
 xdna_aie_array::
 xdna_aie_array(const xrt_core::device* device)
 {
@@ -72,7 +90,7 @@ xdna_aie_array(const xrt_core::device* device)
   int RC = XAie_GetPartitionFdList(&dev_inst_obj);
 
   if (RC != XAIE_OK) 
-   throw xrt_core::error(RC,"XAie_GetPartitionFdList failed \n");
+    throw xrt_core::error(RC, "XAie_GetPartitionFdList failed\n");
 
   XAie_List *NodePtr;
   XAie_PartitionList *ListNode;
@@ -83,10 +101,8 @@ xdna_aie_array(const xrt_core::device* device)
 
   int aie_part_fd = ListNode->PartitionFd;
 
-  //int aie_part_fd = fd;
-
   if (aie_part_fd < 0)
-    throw xrt_core::error(aie_part_fd,"fd is NEGATIVE\n");
+    throw xrt_core::error(aie_part_fd, "fd is NEGATIVE\n");
 
   fd = aie_part_fd;
   ConfigPtr.PartProp.Handle = fd;
@@ -125,22 +141,10 @@ xdna_aie_array(const xrt_core::device* device, const xdna_hwctx* hwctx_obj)
       throw xrt_core::error(-EINVAL, "Failed to setup AIE Partition: " + std::to_string(rc1));
   }
 
-  int RC = XAie_GetPartitionFdList(&dev_inst_obj);
-
-  if (RC != XAIE_OK) 
-   throw xrt_core::error(RC,"XAie_GetPartitionFdList failed \n");
-
-  XAie_List *NodePtr;
-  XAie_PartitionList *ListNode;
-
-  NodePtr = (XAie_List *)&dev_inst_obj.PartitionList.Next->Next;
-
-  ListNode = (XAie_PartitionList *)XAIE_CONTAINER_OF(NodePtr, XAie_PartitionList, Node);
-
-  int aie_part_fd = ListNode->PartitionFd;
-
+  // Get AIE partition FD from kernel via ioctl
+  int aie_part_fd = get_aie_partition_fd(hwctx_obj);
   if (aie_part_fd < 0)
-    throw xrt_core::error(aie_part_fd,"fd is NEGATIVE\n");
+    throw xrt_core::error(aie_part_fd, "Failed to get AIE partition FD\n");
 
   fd = aie_part_fd;
   ConfigPtr.PartProp.Handle = fd;
