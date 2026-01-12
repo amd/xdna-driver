@@ -47,10 +47,11 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
   info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address");
 
   bool partinfo_found = false;
+  pid_t pid = getpid();
   auto data = xrt_core::device_query_default<xrt_core::query::aie_partition_info>(device, {});
   
   for (const auto& entry : data) {
-    if ( std::stoi(entry.metadata.id) == hw_context_id) {
+    if (entry.pid == pid && std::stoi(entry.metadata.id) == hw_context_id) {
       info.num_columns = entry.num_cols;
       info.start_column = entry.start_col;
       info.partition_id = (entry.num_cols << 8U) | (entry.start_col & 0xffU);
@@ -152,6 +153,11 @@ xdna_hwctx::
       return;
 
     m_hwq->unbind_hwctx();
+
+    // Explicitly destroy the aie_array before destroying the hw context
+    if(m_aie_array)
+      m_aie_array.reset();
+
     struct amdxdna_drm_destroy_hwctx arg = {};
     arg.handle = m_handle;
     m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
