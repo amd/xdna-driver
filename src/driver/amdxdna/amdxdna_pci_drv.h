@@ -29,8 +29,16 @@ struct amdxdna_device_id {
 extern const struct amdxdna_dev_info dev_npu1_info;
 extern const struct amdxdna_dev_info dev_npu3_info;
 extern const struct amdxdna_dev_info dev_npu3_pf_info;
+extern const struct amdxdna_dev_info dev_npu7_info;
+extern const struct amdxdna_dev_info dev_npu7_pf_info;
 extern const struct amdxdna_dev_info dev_npu4_info;
 extern const struct amdxdna_dev_info dev_npu5_info;
 extern const struct amdxdna_dev_info dev_npu6_info;
+extern const struct amdxdna_dev_info dev_npu8_info;
+extern const struct amdxdna_dev_info dev_npu8_pf_info;
+extern const struct amdxdna_dev_info dev_npu9_info;
+extern const struct amdxdna_dev_info dev_npu9_pf_info;
+extern const struct amdxdna_dev_info dev_npu10_info;
+extern const struct amdxdna_dev_info dev_npu10_pf_info;
 
 #endif /* _AMDXDNA_PCI_DRV_H_ */

@@ -61,9 +61,13 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie4_sriov.o \
 	npu1_regs.o \
 	npu3_regs.o \
+	npu7_regs.o \
 	npu4_regs.o \
 	npu5_regs.o \
 	npu6_regs.o \
+	npu8_regs.o \
+	npu9_regs.o \
+	npu10_regs.o \
 	amdxdna_pci_drv.o \
 	amdxdna_xen.o \
 
