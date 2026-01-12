@@ -70,14 +70,14 @@ public:
   virtual void
   verify_result();
 
-  void
-  cache_cmd_header();
-
-  void
-  restore_cmd_header();
-
   static const char *
   bo_type2name(int type);
+
+  void
+  cache_cmd_header(const xrt_core::buffer_handle *cmd_hdl, const ert_start_kernel_cmd *cmd);
+
+  void
+  restore_cmd_header(const xrt_core::buffer_handle *cmd_hdl, ert_start_kernel_cmd *cmd);
 
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
   get_bos();
@@ -92,11 +92,11 @@ protected:
   device *m_dev;
   xrt::elf m_elf = {};
   uint32_t m_kernel_index;
+  uint32_t m_cached_header = 0;
   const int m_FLAG_USR_BUF =  1 << 0;
   const int m_FLAG_OPT =      1 << 1;
   const int m_FLAG_NO_FILL =  1 << 2;
   const int m_FLAG_DEV_BUF =  1 << 3;
-  uint32_t m_cached_cmd_header = 0;
 
   void
   create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags);

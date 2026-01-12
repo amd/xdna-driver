@@ -224,6 +224,21 @@ elf_init_no_arg_cmd(xrt::elf& elf, cuidx_type idx, bool dump, bo& cmd, bo& inst)
 
 } // namespace
 
+void
+io_test_bo_set_base::
+cache_cmd_header(const buffer_handle *cmd_hdl, const ert_start_kernel_cmd *cmd)
+{
+  m_cached_header = cmd->header;
+}
+
+void
+io_test_bo_set_base::
+restore_cmd_header(const buffer_handle *cmd_hdl, ert_start_kernel_cmd *cmd)
+{
+  if (m_cached_header != 0)
+    cmd->header = m_cached_header;
+}
+
 io_test_bo_set_base::
 io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
   m_bo_array{}
@@ -904,6 +919,11 @@ run(const std::vector<fence_handle*>& wait_fences,
 
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto chdl = cbo->get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  
+  restore_cmd_header(chdl, cpkt);
+  cache_cmd_header(chdl, cpkt);
+
   for (const auto& fence : wait_fences)
     hwq->submit_wait(fence);
   hwq->submit_command(chdl);
@@ -946,32 +966,6 @@ io_test_bo_set_base::
 get_preemption_checkpoints()
 {
   return 0;
-}
-
-void
-io_test_bo_set_base::
-cache_cmd_header()
-{
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  if (!cbo)
-    return;
-  auto pkt = reinterpret_cast<ert_packet *>(cbo->map());
-  if (!m_cached_cmd_header)
-    m_cached_cmd_header = pkt->header;
-}
-
-void
-io_test_bo_set_base::
-restore_cmd_header()
-{
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  if (!cbo || !m_cached_cmd_header)
-    return;
-
-  auto pkt = reinterpret_cast<ert_packet *>(cbo->map());
-  pkt->header = m_cached_cmd_header;
-  pkt->state = ERT_CMD_STATE_NEW;
-  std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
 unsigned long
