@@ -36,6 +36,7 @@ const struct msg_op_ver npu4_msg_op_tbl[] = {
 	{ AIE2_FW_VERSION(6, 19), MSG_OP_SET_FW_TRACE_CATEGORIES },
 	{ AIE2_FW_VERSION(6, 24), MSG_OP_GET_COREDUMP },
 	{ AIE2_FW_VERSION(6, 24), MSG_OP_CALIBRATE_TIME },
+	{ AIE2_FW_VERSION(6, 24), MSG_OP_GET_DEV_REVISION },
 	{ 0 },
 };
 
@@ -57,6 +58,18 @@ const struct aie2_fw_feature_tbl npu4_fw_feature_table[] = {
 	{ 0 }
 };
 
+const struct amdxdna_rev_vbnv npu4_rev_vbnv_tbl[] = {
+	{ AIE2_DEV_REVISION_STXA, "NPU Strix" },
+	{ AIE2_DEV_REVISION_STXB, "NPU Strix" },
+	{ AIE2_DEV_REVISION_KRK1, "NPU Krackan 1" },
+	{ AIE2_DEV_REVISION_KRK2, "NPU Krackan 2" },
+	{ AIE2_DEV_REVISION_HALO, "NPU Strix Halo" },
+	{ AIE2_DEV_REVISION_GPT1, "NPU Gorgon Point 1" },
+	{ AIE2_DEV_REVISION_GPT2, "NPU Gorgon Point 2" },
+	{ AIE2_DEV_REVISION_GPT3, "NPU Gorgon Point 3" },
+	{ 0 }
+};
+
 const struct amdxdna_dev_priv npu4_dev_priv = {
 	.fw_path	= "amdnpu/17f0_10/npu.dev.sbin",
 	.min_fw_version	= AIE2_FW_VERSION(6, 12),
@@ -64,7 +77,7 @@ const struct amdxdna_dev_priv npu4_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu4_info = {
-	.vbnv              = "NPU Strix",
+	.default_vbnv      = "NPU Strix",
 	.dev_priv          = &npu4_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };
