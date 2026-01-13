@@ -4,7 +4,9 @@
  */
 
 #include <linux/iommu.h>
+#ifndef AMDXDNA_OF
 #include <uapi/linux/iommufd.h>
+#endif
 #include <linux/iova.h>
 
 #include "amdxdna_gem.h"
@@ -137,7 +139,11 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 		return 0;
 	}
 
+#ifdef AMDXDNA_OF
+	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
+#else
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev, IOMMU_HWPT_ALLOC_PASID);
+#endif
 	if (IS_ERR(xdna->domain)) {
 		XDNA_ERR(xdna, "Failed to alloc iommu domain");
 		ret = PTR_ERR(xdna->domain);
