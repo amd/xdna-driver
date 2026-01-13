@@ -613,7 +613,6 @@ skip_pasid:
 
 	release_firmware(fw);
 	aie2_msg_init(ndev);
-	amdxdna_rpm_init(xdna);
 	return 0;
 
 stop_hw:
@@ -635,7 +634,6 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	amdxdna_rpm_fini(xdna);
 	aie2_rq_fini(&ndev->ctx_rq);
 	aie2_hw_stop(xdna);
 #ifdef AMDXDNA_DEVEL
@@ -1744,10 +1742,27 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	return ret;
 }
 
+static int aie2_get_dev_rev(struct amdxdna_dev *xdna, u32 *rev)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	enum aie2_dev_revision aie2_rev;
+	int ret;
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_get_dev_revision(ndev, &aie2_rev);
+	mutex_unlock(&ndev->aie2_lock);
+
+	if (!ret)
+		*rev = (u32)aie2_rev;
+
+	return ret;
+}
+
 const struct amdxdna_dev_ops aie2_ops = {
 	.mmap			= NULL,
 	.init			= aie2_init,
 	.fini			= aie2_fini,
+	.get_dev_revision	= aie2_get_dev_rev,
 	.tdr_start		= aie2_tdr_start,
 	.tdr_stop		= aie2_tdr_stop,
 	.resume			= aie2_hw_resume,

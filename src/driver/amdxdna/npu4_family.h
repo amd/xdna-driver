@@ -15,6 +15,7 @@ extern const struct rt_config npu4_default_rt_cfg[];
 extern const struct msg_op_ver npu4_msg_op_tbl[];
 extern const struct rt_cfg_ver npu4_rt_cfg_tbl[];
 extern const struct aie2_fw_feature_tbl npu4_fw_feature_table[];
+extern const struct amdxdna_rev_vbnv npu4_rev_vbnv_tbl[];
 extern const struct amdxdna_dev_priv npu4_dev_priv;
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
@@ -116,6 +117,7 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 	.dev_mem_buf_shift = 15, /* 32 KiB aligned */						\
 	.dev_mem_base      = AIE2_DEVM_BASE,							\
 	.dev_mem_size      = AIE2_DEVM_SIZE,							\
+	.rev_vbnv_tbl      = npu4_rev_vbnv_tbl,							\
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,						\
 	.ops               = &aie2_ops
 

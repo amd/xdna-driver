@@ -47,6 +47,7 @@ struct amdxdna_mgmt_dma_hdl;
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);
 	void (*fini)(struct amdxdna_dev *xdna);
+	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 	void (*tdr_start)(struct amdxdna_dev *xdna);
 	void (*tdr_stop)(struct amdxdna_dev *xdna);
 	int (*resume)(struct amdxdna_dev *xdna);
@@ -78,6 +79,12 @@ struct amdxdna_dev_ops {
 	struct dma_fence *(*cmd_get_out_fence)(struct amdxdna_ctx *ctx, u64 seq);
 };
 
+/* Revision to VBNV string mapping table entry */
+struct amdxdna_rev_vbnv {
+	u32		revision;
+	const char	*vbnv;
+};
+
 /*
  * struct amdxdna_dev_info - Device hardware information
  * Record device static information, like reg, mbox, PSP, SMU bar index,
@@ -92,7 +99,10 @@ struct amdxdna_dev_ops {
  * @dev_mem_buf_shift: heap buffer alignment shift
  * @dev_mem_base: Base address of device heap memory
  * @dev_mem_size: Size of device heap memory
- * @vbnv: the VBNV string
+ * @default_vbnv: Default board name based on PCIe device ID. Different boards
+ *                may share the same PCIe device ID, so this may not accurately
+ *                identify the board. Used as fallback when firmware query fails.
+ * @rev_vbnv_tbl: Table mapping device revision to VBNV string (NULL terminated)
  * @dev_priv: Device private data
  * @ops: Device operations callback
  */
@@ -107,7 +117,8 @@ struct amdxdna_dev_info {
 	u32				dev_mem_buf_shift;
 	u64				dev_mem_base;
 	size_t				dev_mem_size;
-	char				*vbnv;
+	char				*default_vbnv;
+	const struct amdxdna_rev_vbnv	*rev_vbnv_tbl;
 	const struct amdxdna_dev_priv	*dev_priv;
 	const struct amdxdna_dev_ops	*ops;
 };
@@ -123,6 +134,9 @@ struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
 	const struct amdxdna_dev_info	*dev_info;
+
+	/* Accurate board name queried from firmware, or default_vbnv as fallback */
+	const char			*vbnv;
 
 	/* This protects client list */
 	struct mutex			dev_lock;
