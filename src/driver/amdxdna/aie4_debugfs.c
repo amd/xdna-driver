@@ -121,9 +121,7 @@ static int test_flr(struct amdxdna_dev_hdl *ndev)
 
 	XDNA_INFO(xdna, "trigger flr");
 
-	mutex_lock(&ndev->aie4_lock);
-	aie4_context_quiesce(ndev);
-	mutex_unlock(&ndev->aie4_lock);
+	aie4_reset_prepare(xdna);
 
 	ret = pci_save_state(pdev);
 	if (ret) {
@@ -142,9 +140,7 @@ static int test_flr(struct amdxdna_dev_hdl *ndev)
 
 	XDNA_INFO(xdna, "pci restore state done");
 
-	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_context_restart(ndev);
-	mutex_unlock(&ndev->aie4_lock);
+	ret = aie4_reset_done(xdna);
 
 	return ret;
 }
