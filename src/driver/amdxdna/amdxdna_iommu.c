@@ -3,8 +3,11 @@
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
 
+#include <linux/version.h>
 #include <linux/iommu.h>
+#if KERNEL_VERSION(6, 13, 0) <= LINUX_VERSION_CODE
 #include <uapi/linux/iommufd.h>
+#endif
 #include <linux/iova.h>
 
 #include "amdxdna_gem.h"
@@ -137,7 +140,11 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 		return 0;
 	}
 
+#if KERNEL_VERSION(6, 13, 0) <= LINUX_VERSION_CODE
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev, IOMMU_HWPT_ALLOC_PASID);
+#else
+	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
+#endif
 	if (IS_ERR(xdna->domain)) {
 		XDNA_ERR(xdna, "Failed to alloc iommu domain");
 		ret = PTR_ERR(xdna->domain);
