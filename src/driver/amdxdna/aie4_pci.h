@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AIE4_PCI_H_
@@ -167,6 +167,10 @@ int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl 
 		      size_t size, u32 *msi_idx, u32 *msi_address);
 int aie4_set_log_level(struct amdxdna_dev_hdl *ndev, u8 level);
 int aie4_stop_fw_log(struct amdxdna_dev_hdl *ndev);
+int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address);
+int aie4_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories);
+int aie4_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
 void aie4_reset_prepare(struct amdxdna_dev *xdna);
 int aie4_reset_done(struct amdxdna_dev *xdna);
 
@@ -209,6 +213,10 @@ int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level);
 int aie4_fw_log_config(struct amdxdna_dev *xdna, u8 level);
 int aie4_fw_log_fini(struct amdxdna_dev *xdna);
 void aie4_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
+int aie4_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories);
+int aie4_fw_trace_fini(struct amdxdna_dev *xdna);
+int aie4_fw_trace_config(struct amdxdna_dev *xdna, u32 categories);
+void aie4_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 /* aie4_sriov.c */
 int aie4_sriov_configure(struct amdxdna_dev *xdna, int num_vfs);

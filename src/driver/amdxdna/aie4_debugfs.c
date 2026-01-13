@@ -1,41 +1,76 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright 2022-2026 Advanced Micro Devices, Inc.
  * All rights reserved.
  */
 
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/debugfs.h>
-#include <linux/string.h>
-#include <linux/completion.h>
 #include <drm/drm_debugfs.h>
 #include <drm/drm_cache.h>
+#include <linux/debugfs.h>
+#include <linux/completion.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/pm_runtime.h>
+#include <linux/string.h>
 
 #include "aie4_pci.h"
 #include "aie4_message.h"
 #include "aie4_msg_priv.h"
+#include "amdxdna_dpt.h"
+#include "amdxdna_mgmt.h"
 
 #if defined(CONFIG_DEBUG_FS)
 #define SIZE            31
 
-#define _DBGFS_FOPS_RW(_open, _write) \
-{ \
-	.owner = THIS_MODULE, \
-	.open = _open, \
-	.read = seq_read, \
-	.llseek = seq_lseek, \
-	.release = single_release, \
-	.write = _write, \
+static int aie4_dbgfs_entry_open(struct inode *inode, struct file *file,
+				 int (*show)(struct seq_file *, void *))
+{
+	struct amdxdna_dev_hdl *ndev = inode->i_private;
+	int ret;
+
+	ret = pm_runtime_resume_and_get(ndev->xdna->ddev.dev);
+	if (ret)
+		return ret;
+
+	ret = single_open(file, show, ndev);
+	if (ret) {
+		pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
+		pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
+	}
+
+	return ret;
 }
 
-#define DBGFS_FOPS_RW(_name, _show, _write) \
-	static int dbgfs_##_name##_open(struct inode *inode, struct file *file) \
-	{									\
-		return single_open(file, _show, inode->i_private);		\
-	}									\
-	const struct file_operations fops_##_name =				\
-		_DBGFS_FOPS_RW(dbgfs_##_name##_open, _write)
+static int aie4_dbgfs_entry_release(struct inode *inode, struct file *file)
+{
+	struct amdxdna_dev_hdl *ndev = inode->i_private;
+
+	pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
+	pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
+	return single_release(inode, file);
+}
+
+#define _DBGFS_FOPS_RW(_open, _release, _write)		\
+{							\
+	.owner = THIS_MODULE,				\
+	.open = _open,					\
+	.read = seq_read,				\
+	.llseek = seq_lseek,				\
+	.release = _release,				\
+	.write = _write,				\
+}
+
+#define DBGFS_FOPS_RW(_name, _show, _write)						\
+	static int dbgfs_##_name##_open(struct inode *inode, struct file *file)		\
+	{										\
+		return aie4_dbgfs_entry_open(inode, file, _show);			\
+	}										\
+	static int dbgfs_##_name##_release(struct inode *inode, struct file *file)	\
+	{										\
+		return aie4_dbgfs_entry_release(inode, file);				\
+	} \
+	const struct file_operations fops_##_name =					\
+		_DBGFS_FOPS_RW(dbgfs_##_name##_open, dbgfs_##_name##_release, _write)
 
 #define DBGFS_FILE(_name, _mode) { #_name, &fops_##_name, _mode }
 
@@ -733,6 +768,75 @@ static int aie4_dump_fw_log_buffer_get(struct seq_file *m, void *unused)
 
 DBGFS_FOPS_RW(dump_fw_log_buffer, aie4_dump_fw_log_buffer_get, NULL);
 
+static ssize_t aie4_dump_fw_trace_set(struct file *file, const char __user *ptr,
+				      size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	bool dump;
+	int ret;
+
+	if (!xdna->fw_trace || !xdna->fw_trace->enabled) {
+		XDNA_ERR(xdna, "FW tracing is not enabled");
+		return -EINVAL;
+	}
+
+	ret =  kstrtobool_from_user(ptr, len, &dump);
+	if (ret) {
+		XDNA_ERR(xdna, "Invalid input value, ret %d", ret);
+		return ret;
+	}
+
+	ret = amdxdna_dpt_dump_to_dmesg(xdna->fw_trace, dump);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to %s FW trace dump, ret %d",
+			 dump ? "enable" : "disable", ret);
+		return ret;
+	}
+	return len;
+}
+
+static int aie4_dump_fw_trace_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	if (!ndev->xdna->fw_trace || !ndev->xdna->fw_trace->enabled) {
+		XDNA_ERR(ndev->xdna, "FW tracing is not enabled");
+		return -EINVAL;
+	}
+
+	seq_printf(m, "%s\n", ndev->xdna->fw_trace->dump_to_dmesg ? "enabled" : "disabled");
+
+	return 0;
+}
+
+DBGFS_FOPS_RW(dump_fw_trace, aie4_dump_fw_trace_get, aie4_dump_fw_trace_set);
+
+static int aie4_dump_fw_trace_buffer_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+
+	if (!ndev->xdna->fw_trace || !ndev->xdna->fw_trace->enabled) {
+		XDNA_ERR(ndev->xdna, "FW tracing is not enabled");
+		return -EINVAL;
+	}
+
+	dma_hdl = ndev->xdna->fw_trace->dma_hdl;
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	seq_printf(m, "FW trace buffer vaddr: 0x%llx\n",
+		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
+	seq_printf(m, "FW trace buffer DMA addr: 0x%llx\n",
+		   amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
+	seq_printf(m, "FW trace buffer size: 0x%lx\n", dma_hdl->size);
+	seq_hex_dump(m, "[FW trace BUF]: ", DUMP_PREFIX_OFFSET, 16, 4,
+		     amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), dma_hdl->size, true);
+
+	return 0;
+}
+
+DBGFS_FOPS_RW(dump_fw_trace_buffer, aie4_dump_fw_trace_buffer_get, NULL);
+
 static ssize_t aie4_keep_partition_write(struct file *file, const char __user *ptr,
 					 size_t len, loff_t *off)
 {
@@ -781,6 +885,8 @@ const struct {
 	DBGFS_FILE(ioctl_id, 0400),
 	DBGFS_FILE(dump_fw_log, 0600),
 	DBGFS_FILE(dump_fw_log_buffer, 0400),
+	DBGFS_FILE(dump_fw_trace, 0600),
+	DBGFS_FILE(dump_fw_trace_buffer, 0400),
 	DBGFS_FILE(keep_partition, 0600),
 };
 
