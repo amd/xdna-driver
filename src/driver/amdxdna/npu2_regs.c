@@ -14,7 +14,7 @@ const struct amdxdna_dev_priv npu2_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu2_info = {
-	.vbnv              = "RyzenAI-npu2",
+	.default_vbnv      = "RyzenAI-npu2",
 	.dev_priv          = &npu2_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };

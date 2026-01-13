@@ -451,6 +451,31 @@ int aie2_query_aie_firmware_version(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+int aie2_get_dev_revision(struct amdxdna_dev_hdl *ndev, enum aie2_dev_revision *rev)
+{
+	DECLARE_AIE2_MSG(get_dev_revision, MSG_OP_GET_DEV_REVISION);
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_GET_DEV_REVISION))
+		return -EOPNOTSUPP;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret)
+		return ret;
+
+	*rev = resp.rev;
+
+	if (*rev >= AIE2_DEV_REVISION_UNKN) {
+		XDNA_ERR(ndev->xdna, "Unknown device revision: %d (raw fuse: 0x%x)",
+			 *rev, resp.raw_fuse_data);
+		return -EINVAL;
+	}
+
+	XDNA_DBG(ndev->xdna, "Device revision: %d (raw fuse: 0x%x)", *rev, resp.raw_fuse_data);
+
+	return 0;
+}
+
 int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 		       size_t size, u32 *msi_idx, u32 *msi_address)
 {
