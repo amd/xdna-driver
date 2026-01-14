@@ -34,7 +34,9 @@ private:
   {
     xrt::xclbin xclbin;
     xrt::elf elf;
-    auto is_full_elf = (get_kernel_type(dev, xclbin_name) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT);
+    auto kernel_type = get_kernel_type(dev, xclbin_name);
+    auto is_full_elf = (kernel_type == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT ||
+		        kernel_type == KERNEL_TYPE_TXN_FULL_ELF);
     auto path = get_xclbin_path(dev, xclbin_name);
 
     try {

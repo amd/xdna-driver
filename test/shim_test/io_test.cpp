@@ -42,6 +42,9 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
   case KERNEL_TYPE_TXN:
     base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
     break;
+  case KERNEL_TYPE_TXN_FULL_ELF:
+    base = std::make_unique<elf_full_io_test_bo_set>(dev, xclbin ? std::string(xclbin) : get_xclbin_name(dev));
+    break;
   case KERNEL_TYPE_TXN_PREEMPT:
   case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
     base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
@@ -113,29 +116,44 @@ void
 io_test_cmd_submit_and_wait_latency(
   hwqueue_handle *hwq,
   int total_cmd_submission,
-  std::vector< std::pair<std::shared_ptr<bo>, ert_start_kernel_cmd *> >& cmdlist_bos
+  std::vector< std::pair<std::shared_ptr<bo>, ert_start_kernel_cmd *> >& cmdlist_bos,
+  std::vector< std::unique_ptr<io_test_bo_set_base> >& bo_set,
+  int cmds_per_list
   )
 {
   int completed = 0;
-  int wait_idx = 0;
 
   while (completed < total_cmd_submission) {
+    size_t cmd_idx = 0;
     for (auto& cmd : cmdlist_bos) {
-      hwq->submit_command(std::get<0>(cmd).get()->get());
-      io_test_cmd_wait(hwq, std::get<0>(cmd));
-      auto state = std::get<1>(cmd)->state;
-      if (state != ERT_CMD_STATE_COMPLETED) {
-        std::string errmsg = "Command ";
-        errmsg += std::to_string(completed);
-        errmsg += " failed, state=";
-        errmsg += std::to_string(state);
-        throw std::runtime_error(errmsg);
+      auto cmd_hdl = std::get<0>(cmd).get()->get();
+      auto cmd_pkt = std::get<1>(cmd);
+
+      if (cmd_pkt->opcode == ERT_CMD_CHAIN) {
+        size_t start_idx = cmd_idx * cmds_per_list;
+        size_t end_idx = std::min(start_idx + cmds_per_list, bo_set.size());
+        for (size_t i = start_idx; i < end_idx; i++) {
+          auto subcmd_bo = bo_set[i]->get_bos()[IO_TEST_BO_CMD].tbo.get();
+          auto subcmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(subcmd_bo->map());
+          bo_set[i]->restore_cmd_header(subcmd_bo->get(), subcmd_pkt);
+        }
+      } else {
+        bo_set[cmd_idx]->restore_cmd_header(cmd_hdl, cmd_pkt);
+        bo_set[cmd_idx]->cache_cmd_header(cmd_hdl, cmd_pkt);
       }
 
+      hwq->submit_command(cmd_hdl);
+      io_test_cmd_wait(hwq, std::get<0>(cmd));
+
+      if (cmd_pkt->state != ERT_CMD_STATE_COMPLETED)
+        throw std::runtime_error("Command " + std::to_string(completed) +
+                                 " failed, state=" + std::to_string(cmd_pkt->state));
+
       completed++;
+      cmd_idx++;
       if (completed >= total_cmd_submission)
         break;
-      std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
+      cmd_pkt->state = ERT_CMD_STATE_NEW;
     }
   }
 }
@@ -144,31 +162,51 @@ void
 io_test_cmd_submit_and_wait_thruput(
   hwqueue_handle *hwq,
   int total_cmd_submission,
-  std::vector< std::pair<std::shared_ptr<bo>, ert_start_kernel_cmd *> >& cmdlist_bos
+  std::vector< std::pair<std::shared_ptr<bo>, ert_start_kernel_cmd *> >& cmdlist_bos,
+  std::vector< std::unique_ptr<io_test_bo_set_base> >& bo_set,
+  int cmds_per_list
   )
 {
   int issued = 0;
   int completed = 0;
-  int wait_idx = 0;
+  size_t wait_idx = 0;
 
-  for (auto& cmd : cmdlist_bos) {
-    std::get<1>(cmd)->state = ERT_CMD_STATE_NEW;
-    hwq->submit_command(std::get<0>(cmd).get()->get());
-    issued++;
-    if (issued >= total_cmd_submission)
+  for (size_t i = 0; i < cmdlist_bos.size(); i++) {
+    auto cmd_hdl = std::get<0>(cmdlist_bos[i]).get()->get();
+    auto cmd_pkt = std::get<1>(cmdlist_bos[i]);
+
+    if (cmd_pkt->opcode != ERT_CMD_CHAIN)
+      bo_set[i]->cache_cmd_header(cmd_hdl, cmd_pkt);
+    cmd_pkt->state = ERT_CMD_STATE_NEW;
+    hwq->submit_command(cmd_hdl);
+    if (++issued >= total_cmd_submission)
       break;
   }
 
   while (completed < issued) {
     io_test_cmd_wait(hwq, std::get<0>(cmdlist_bos[wait_idx]));
-    auto state = std::get<1>(cmdlist_bos[wait_idx])->state;
-    if (state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("Command failed, state=") + std::to_string(state));
+    auto cmd_pkt = std::get<1>(cmdlist_bos[wait_idx]);
+    if (cmd_pkt->state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error("Command failed, state=" + std::to_string(cmd_pkt->state));
     completed++;
 
     if (issued < total_cmd_submission) {
-      std::get<1>(cmdlist_bos[wait_idx])->state = ERT_CMD_STATE_NEW;
-      hwq->submit_command(std::get<0>(cmdlist_bos[wait_idx]).get()->get());
+      auto cmd_hdl = std::get<0>(cmdlist_bos[wait_idx]).get()->get();
+
+      if (cmd_pkt->opcode == ERT_CMD_CHAIN) {
+        size_t start_idx = wait_idx * cmds_per_list;
+        size_t end_idx = std::min(start_idx + cmds_per_list, bo_set.size());
+        for (size_t i = start_idx; i < end_idx; i++) {
+          auto subcmd_bo = bo_set[i]->get_bos()[IO_TEST_BO_CMD].tbo.get();
+          auto subcmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(subcmd_bo->map());
+          bo_set[i]->restore_cmd_header(subcmd_bo->get(), subcmd_pkt);
+        }
+      } else {
+        bo_set[wait_idx]->restore_cmd_header(cmd_hdl, cmd_pkt);
+      }
+
+      cmd_pkt->state = ERT_CMD_STATE_NEW;
+      hwq->submit_command(cmd_hdl);
       issued++;
     }
 
@@ -271,7 +309,10 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
     // Multiple commands per list, create and send the chained command
     std::vector<bo*> tmp_cmd_bos;
     for (auto& boset : bo_set) {
-      tmp_cmd_bos.push_back(boset->get_bos()[IO_TEST_BO_CMD].tbo.get());
+      auto subcmd_bo = boset->get_bos()[IO_TEST_BO_CMD].tbo.get();
+      auto subcmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(subcmd_bo->map());
+      boset->cache_cmd_header(subcmd_bo->get(), subcmd_pkt);
+      tmp_cmd_bos.push_back(subcmd_bo);
       if ((tmp_cmd_bos.size() % cmds_per_list) == 0) {
         auto cbo = std::make_unique<bo>(dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF);
         auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
@@ -293,9 +334,9 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   // Submit commands and wait for results
   auto start = clk::now();
   if (io_test_parameters.perf == IO_TEST_THRUPUT_PERF)
-    io_test_cmd_submit_and_wait_thruput(hwq, total_hwq_submit, cmdlist_bos);
+    io_test_cmd_submit_and_wait_thruput(hwq, total_hwq_submit, cmdlist_bos, bo_set, cmds_per_list);
   else
-    io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos);
+    io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos, bo_set, cmds_per_list);
   auto end = clk::now();
 
   // Verify preemption counters
@@ -350,9 +391,10 @@ TEST_io_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 1, 1, run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+  io_test(id, sdev.get(), total, 1, 1, run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
 }
 
 void
@@ -361,9 +403,10 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device>& sdev, arg_type& 
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 8, 1, run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+  io_test(id, sdev.get(), total, 8, 1, run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
 }
 
 void
@@ -372,6 +415,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
   const size_t max_cmd_per_list = 24;
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
@@ -380,7 +424,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_t
       cmds_per_list = max_cmd_per_list;
     int total_hwq_submit = total / cmds_per_list;
     io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list,
-      run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+      run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
   }
 }
 
@@ -390,18 +434,18 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, ar
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total_commands = static_cast<unsigned int>(arg[2]);
+  bool elf = arg[3];
   int num_bo_set = 256;
   const size_t max_cmd_per_list = 24;
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-
   for (int cmds_per_list = 1; cmds_per_list <= 32; cmds_per_list *= 2) {
     if (cmds_per_list > max_cmd_per_list)
       cmds_per_list = max_cmd_per_list;
     int num_cmdlist = num_bo_set / cmds_per_list;
     int total_hwq_submit = total_commands / cmds_per_list;
     io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list,
-      run_type == IO_TEST_NOOP_RUN ? "nop.xclbin" : nullptr);
+      run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
   }
 }
 
@@ -601,8 +645,11 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
 
   // Submit the chained command and wait for completion/timeout
   auto hwq = hwctx.get()->get_hw_queue();
-  hwq->submit_command(cbo->get());
-  hwq->wait_command(cbo->get(), 0);
+  auto cmd_hdl = cbo->get();
+  auto cmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  
+  hwq->submit_command(cmd_hdl);
+  hwq->wait_command(cmd_hdl, 0);
 
   // Check the result
   auto cmd_packet = reinterpret_cast<ert_packet *>(cbo->map());
