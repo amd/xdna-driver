@@ -63,9 +63,20 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/elf_bad_ctrl_npu3",
+    .workspace = "local_shim_test_data/npu3/bad_ctrl",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
+  },
+  {
+    .name = "resnet50.elf",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .workspace = "local_shim_test_data/npu3/resnet50",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT_AIE4,
   },
   {
     .name = "nop.elf",
@@ -96,9 +107,20 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/elf_bad_ctrl_npu3",
+    .workspace = "local_shim_test_data/npu3a/bad_ctrl",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
+  },
+  {
+    .name = "resnet50.elf",
+    .device = npu3_device_id1,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .workspace = "local_shim_test_data/npu3a/resnet50",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT_AIE4,
   },
   {
     .name = "nop.elf",

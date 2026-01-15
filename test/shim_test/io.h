@@ -156,6 +156,18 @@ private:
   unsigned long m_total_fine_preemption_checkpoints;
 };
 
+class elf_preempt_aie4_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_preempt_aie4_io_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(hw_ctx& hwctx, bool dump) override;
+
+  void
+  verify_result() override;
+};
+
 class elf_io_negative_test_bo_set : public io_test_bo_set_base
 {
 public:

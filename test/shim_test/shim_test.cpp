@@ -214,6 +214,15 @@ dev_filter_is_aie4_or_npu4(device::id_type id, device* dev)
 }
 
 bool
+dev_filter_is_npu3(device::id_type id, device* dev)
+{
+  if (!is_xdna_dev(dev))
+    return false;
+  auto device_id = device_query<query::pcie_device>(dev);
+  return device_id == npu3_device_id || device_id == npu3_device_id1;
+}
+
+bool
 dev_filter_is_xdna_and_amdxdna_drv(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
@@ -386,9 +395,11 @@ TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device>&
   int is_negative = static_cast<unsigned int>(arg[0]);
   int num_virt_ctx;
 
-  // XDNA driver by default supports 6 virtual context on npu1 and 32 virtual context on npu4
+  // XDNA driver by default supports 6 virtual context on npu1, 128 on npu3, and 32 virtual context on npu4
   if (device_id == npu1_device_id)
     num_virt_ctx = 6;
+  else if (device_id == npu3_device_id)
+    num_virt_ctx = 128;
   else
     num_virt_ctx = 32;
 
@@ -412,7 +423,7 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
   int num_virt_ctx = static_cast<unsigned int>(arg[0]);
 
   multi_thread threads(num_virt_ctx, TEST_io_latency);
-  threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
+  threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000, arg[1]});
 }
 
 void
@@ -881,34 +892,44 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "virtual context test", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 0 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_virtual_context, { 0 }
   },
   test_case{ "virtual context bad test", {},
-    TEST_NEGATIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 1 }
+    TEST_NEGATIVE, dev_filter_xdna, TEST_create_destroy_virtual_context, { 1 }
   },
   test_case{ "Multi context IO test 1 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 2 }
+    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 2, 0 }
   },
   test_case{ "Multi context IO test 2 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 4 }
+    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 4, 0 }
   },
   test_case{ "Multi context IO test 3 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 6 }
+    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 6, 0 }
   },
   test_case{ "Multi context IO test 1 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2 }
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2, 0 }
   },
   test_case{ "Multi context IO test 2 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 4 }
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 4, 0 }
   },
   test_case{ "Multi context IO test 3 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 16 }
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 16, 0 }
   },
   test_case{ "Multi context IO test 4 (npu4)", {},
-    TEST_POSITIVE, skip_dev_filter, TEST_multi_context_io_test, { 20 }
+    TEST_POSITIVE, skip_dev_filter, TEST_multi_context_io_test, { 20, 0 }
   },
+  // Skip this test for now until b2b vadd is fixed
+  //test_case{ "Multi context IO test 1 (npu3)", {},
+   // TEST_POSITIVE, dev_filter_is_npu3, TEST_multi_context_io_test, { 4, 1 }
+  //},
+  //test_case{ "Multi context IO test 2 (npu3)", {},
+    //TEST_POSITIVE, dev_filter_is_npu3, TEST_multi_context_io_test, { 8, 1 }
+  //},
+  //test_case{ "Multi context IO test 3 (npu3)", {},
+    //TEST_POSITIVE, skip_dev_filter, TEST_multi_context_io_test, { 32, 1 }
+  //},
   test_case{ "Create and destroy devices", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
@@ -929,8 +950,12 @@ std::vector<test_case> test_list {
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8, 0 }
   },
+  // Wait for telemetry support in aie4
+  //test_case{ "multi-command preempt full ELF io test real kernel good run (aie4)", {},
+    //TEST_POSITIVE, dev_filter_is_aie4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 1, 1 }
+  //},
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
