@@ -49,6 +49,9 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
   case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
     base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
     break;
+  case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT_AIE4:
+    base = std::make_unique<elf_preempt_aie4_io_test_bo_set>(dev, std::string(xclbin));
+    break;
   default:
     throw std::runtime_error("Unknown kernel type");
   }
@@ -517,7 +520,7 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
 void
 TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, sdev, arg, "yolo_fullelf_aximm.elf");
+  elf_io(id, sdev, arg, arg[2] ? "resnet50.elf" : "yolo_fullelf_aximm.elf");
 }
 
 void
