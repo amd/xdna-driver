@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // WARNING: This file contains test cases calling XRT's SHIM layer APIs directly.
 // These APIs are XRT's internal APIs and are not meant for any external XRT
