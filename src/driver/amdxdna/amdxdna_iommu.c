@@ -150,8 +150,10 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 
 #ifdef HAVE_iommu_paging_domain_alloc_flags
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev, IOMMU_HWPT_ALLOC_PASID);
-#else
+#elif defined(HAVE_iommu_paging_domain_alloc)
 	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
+#else
+	xdna->domain = iommu_domain_alloc(xdna->ddev.dev->bus);
 #endif
 	if (IS_ERR(xdna->domain)) {
 		XDNA_ERR(xdna, "Failed to alloc iommu domain");
