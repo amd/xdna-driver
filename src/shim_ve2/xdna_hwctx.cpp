@@ -18,6 +18,9 @@ namespace shim_xdna_edge {
 
 namespace pt = boost::property_tree;
 
+// Minimum column alignment required by the driver (must be a multiple of this value)
+constexpr uint32_t MIN_COL_SUPPORT = 4;
+
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
 {
   std::stringstream aie_stream;
@@ -277,6 +280,24 @@ init_qos_info(const qos_type& qos)
       m_qos.priority = value;
     else if (key == "start_col")
       m_qos.user_start_col = value;
+  }
+
+  // Validate user_start_col if specified
+  if (m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+    // Query total columns available on the device
+    auto total_cols = xrt_core::device_query<xrt_core::query::total_cols>(m_device);
+
+    // Check if start_col is aligned to MIN_COL_SUPPORT (must be multiple of 4)
+    if (m_qos.user_start_col % MIN_COL_SUPPORT != 0) {
+      shim_err(EINVAL, "Invalid start_col %u: must be a multiple of %u (valid values: 0, 4, 8, ...)",
+               m_qos.user_start_col, MIN_COL_SUPPORT);
+    }
+
+    // Check if start_col exceeds maximum columns available
+    if (m_qos.user_start_col >= total_cols) {
+      shim_err(ERANGE, "Invalid start_col %u: exceeds maximum columns available on device (%u)",
+               m_qos.user_start_col, total_cols);
+    }
   }
 }
 

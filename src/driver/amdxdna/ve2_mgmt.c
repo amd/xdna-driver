@@ -188,12 +188,21 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 
 	/* Validate user_start_col if set */
 	if (hwctx->qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
-		if (hwctx->qos.user_start_col >= xrs->cfg.total_col ||
-		    hwctx->qos.user_start_col + xrs_req->cdo.ncols > xrs->cfg.total_col) {
-			XDNA_ERR(xdna, "Invalid user_start_col: %u (ncols: %u, max: %u)",
-				 hwctx->qos.user_start_col, xrs_req->cdo.ncols, xrs->cfg.total_col);
+		/* Check alignment: start_col must be a multiple of MIN_COL_SUPPORT (4) */
+		if (hwctx->qos.user_start_col % MIN_COL_SUPPORT != 0) {
+			XDNA_ERR(xdna, "Invalid user_start_col: %u is not aligned to %u (valid values: 0, 4, 8, ...)",
+				 hwctx->qos.user_start_col, MIN_COL_SUPPORT);
 			mutex_unlock(&xrs->xrs_lock);
 			ret = -EINVAL;
+			goto free_start_cols;
+		}
+
+		/* Check bounds: start_col + ncols must not exceed total columns */
+		if (hwctx->qos.user_start_col + xrs_req->cdo.ncols > xrs->cfg.total_col) {
+			XDNA_ERR(xdna, "Invalid user_start_col: %u with %u columns exceeds device limit (%u total columns)",
+				 hwctx->qos.user_start_col, xrs_req->cdo.ncols, xrs->cfg.total_col);
+			mutex_unlock(&xrs->xrs_lock);
+			ret = -ERANGE;
 			goto free_start_cols;
 		}
 	}
