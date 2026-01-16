@@ -292,9 +292,11 @@ int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t 
 		return -EINVAL;
 	}
 
+	req.type = (type == 0) ? AIE4_TELEMETRY_TYPE_PERF_COUNTER : type;
 	req.buf_addr = addr;
+	req.pasid.raw = 0;
 	req.buf_size = size;
-	req.type = type;
+	req.hw_context_id = 0;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {

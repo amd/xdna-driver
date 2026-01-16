@@ -963,7 +963,52 @@ struct telemetry
   static constexpr uint32_t NPU_MAX_SLEEP_COUNT = 9;
   static constexpr uint32_t NPU_MAX_OPCODE_COUNT = 30;
   static constexpr uint32_t NPU_MAX_DTLB_COUNT = 12;
+  static constexpr uint16_t NPU3_DEVICE_ID = 0x17f1;
+  static constexpr uint16_t NPU3_PF_DEVICE_ID = 0x17f2;
+  static constexpr uint16_t NPU3_DEVICE_ID1 = 0x1b0a;
+  static constexpr uint16_t NPU3_PF_DEVICE_ID1 = 0x1b0b;
   static constexpr uint16_t NPU4_DEVICE_ID = 0x17f0;
+
+  // AIE4 firmware telemetry constants and structs
+  static constexpr uint32_t AIE4_MAX_NUM_SUPERVISORS = 4;
+  static constexpr uint32_t AIE4_TOTAL_NUM_UC = 6;
+  static constexpr uint32_t AIE4_TRACE_COUNT = 16;
+  static constexpr size_t AIE4_TELEMETRY_BUFFER_SIZE = 128 * 1024;  // 128KB minimum required by firmware
+
+  struct aie4_clk_deep_slp {
+    uint8_t ipuaie;
+    uint8_t ipuhclk;
+    uint8_t nbif;
+    uint8_t axi2sdp;
+    uint8_t mpipu;
+    uint8_t reserved[3];
+  };
+
+  struct aie4_telemetry_opcodes {
+    uint32_t hyp_opcode[AIE4_TRACE_COUNT];
+    uint32_t sup_opcode[AIE4_MAX_NUM_SUPERVISORS][AIE4_TRACE_COUNT];
+    struct {
+      uint16_t hyp_at;
+      uint16_t sup_at[AIE4_MAX_NUM_SUPERVISORS];
+#if ((AIE4_MAX_NUM_SUPERVISORS + 1) % 2) != 0
+      uint16_t reserved;
+#endif
+    } counters;
+  };
+
+  struct aie4_fw_telemetry {
+    uint8_t enabled;
+    uint8_t reserved[3];
+    struct aie4_clk_deep_slp deep_slp;
+    uint64_t l1_interrupt;
+    uint64_t context_starting[AIE4_MAX_NUM_SUPERVISORS + 1];
+    uint64_t scheduler_scheduled[AIE4_MAX_NUM_SUPERVISORS + 1];
+    uint64_t did_dma;
+    uint64_t resource_acquired[AIE4_MAX_NUM_SUPERVISORS];
+    struct aie4_telemetry_opcodes opcodes;
+    uint64_t preemption_frame_boundary_counter[AIE4_TOTAL_NUM_UC];
+    uint64_t preemption_checkpoint_event_counter[AIE4_TOTAL_NUM_UC];
+  };
 
   struct amdxdna_drm_query_telemetry {
     uint32_t major;
@@ -987,16 +1032,16 @@ struct telemetry
     uint64_t reserved1[126];
   };
 
-  using result_type = std::any;
+  // Device-specific telemetry handler interface
+  // Base class provides AIE2 implementation
+  class telemetry_handler {
+  public:
+    virtual ~telemetry_handler() = default;
 
-  static result_type
-  get(const xrt_core::device* device, key_type key)
-  {
-    switch (key) {
-    case key_type::aie_telemetry:
-    {
-      query::aie_telemetry::result_type output;
+    virtual xrt_core::query::aie_telemetry::result_type
+    query_aie_telemetry(const shim_xdna::pdev& pci_dev) const {
 
+      xrt_core::query::aie_telemetry::result_type output;
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1005,20 +1050,19 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
-        query::aie_telemetry::data task;
+        xrt_core::query::aie_telemetry::data task;
         task.deep_sleep_count = telemetry.deep_sleep_count[i];
         output.push_back(std::move(task));
       }
       return output;
     }
-    case key_type::misc_telemetry:
-    {
-      query::misc_telemetry::result_type output;
 
+    virtual xrt_core::query::misc_telemetry::result_type
+    query_misc_telemetry(const shim_xdna::pdev& pci_dev) const {
+      xrt_core::query::misc_telemetry::result_type output;
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1027,16 +1071,14 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
-
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
       output.l1_interrupts = telemetry.l1_interrupts;
       return output;
     }
-    case key_type::opcode_telemetry:
-    {
-      query::opcode_telemetry::result_type output;
 
+    virtual xrt_core::query::opcode_telemetry::result_type
+    query_opcode_telemetry(const shim_xdna::pdev& pci_dev) const {
+      xrt_core::query::opcode_telemetry::result_type output;
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1045,25 +1087,20 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
-        query::opcode_telemetry::data task;
+        xrt_core::query::opcode_telemetry::data task;
         task.count = telemetry.trace_opcode[i];
         output.push_back(std::move(task));
       }
       return output;
     }
-    case key_type::rtos_telemetry:
-    {
-      query::rtos_telemetry::result_type output;
 
-      auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
-      if (device_id != NPU4_DEVICE_ID)
-        return output;
-
-      amdxdna_drm_query_telemetry telemetry {};
+    virtual xrt_core::query::rtos_telemetry::result_type
+    query_rtos_telemetry(const shim_xdna::pdev& pci_dev) const {
+      xrt_core::query::rtos_telemetry::result_type output;
+      amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
@@ -1071,11 +1108,10 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < telemetry.ctx_map_num_elements; i++) {
-        query::rtos_telemetry::data task;
+        xrt_core::query::rtos_telemetry::data task;
 
         task.context_starts = telemetry.context_started_count[i];
         task.schedules = telemetry.scheduled_count[i];
@@ -1083,9 +1119,9 @@ struct telemetry
         task.dma_access = telemetry.dma_access_count[i];
         task.resource_acquisition = telemetry.resource_acquisition_count[i];
 
-        std::vector<query::rtos_telemetry::dtlb_data> dtlbs;
+        std::vector<xrt_core::query::rtos_telemetry::dtlb_data> dtlbs;
         for (auto j = 0; j < NPU_MAX_DTLB_COUNT; j++) {
-          query::rtos_telemetry::dtlb_data dtlb = {
+          xrt_core::query::rtos_telemetry::dtlb_data dtlb = {
             .misses = telemetry.dtlb_misses[i][j]
           };
           dtlbs.push_back(std::move(dtlb));
@@ -1099,10 +1135,10 @@ struct telemetry
       }
       return output;
     }
-    case key_type::stream_buffer_telemetry:
-    {
-      query::stream_buffer_telemetry::result_type output;
 
+    virtual xrt_core::query::stream_buffer_telemetry::result_type
+    query_stream_buffer_telemetry(const shim_xdna::pdev& pci_dev) const {
+      xrt_core::query::stream_buffer_telemetry::result_type output;
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1111,16 +1147,187 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
-      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_STREAM_BUFFER_COUNT; i++) {
-        query::stream_buffer_telemetry::data task;
+        xrt_core::query::stream_buffer_telemetry::data task;
         task.tokens = telemetry.sb_tokens[i];
         output.push_back(std::move(task));
       }
       return output;
     }
+  };
+
+  // AIE4 telemetry handler
+  class aie4_telemetry_handler : public telemetry_handler {
+  public:
+    xrt_core::query::aie_telemetry::result_type
+    query_aie_telemetry(const shim_xdna::pdev& pci_dev) const override {
+      xrt_core::query::aie_telemetry::result_type output;
+      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+      amdxdna_drm_get_info query_telemetry = {
+        .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+        .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+        .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+      };
+
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+
+      // AIE4: Map clock domain deep sleep modes (5 domains)
+      const uint8_t* clock_domains[] = {
+        &fw_telemetry->deep_slp.ipuaie,
+        &fw_telemetry->deep_slp.ipuhclk,
+        &fw_telemetry->deep_slp.nbif,
+        &fw_telemetry->deep_slp.axi2sdp,
+        &fw_telemetry->deep_slp.mpipu
+      };
+
+      for (const auto* domain : clock_domains) {
+        xrt_core::query::aie_telemetry::data task;
+        task.deep_sleep_count = static_cast<uint64_t>(*domain);
+        output.push_back(std::move(task));
+      }
+      return output;
+    }
+
+    xrt_core::query::misc_telemetry::result_type
+    query_misc_telemetry(const shim_xdna::pdev& pci_dev) const override {
+      xrt_core::query::misc_telemetry::result_type output;
+      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+      amdxdna_drm_get_info query_telemetry = {
+        .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+        .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+        .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+      };
+
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+      output.l1_interrupts = fw_telemetry->l1_interrupt;
+      return output;
+    }
+
+    xrt_core::query::opcode_telemetry::result_type
+    query_opcode_telemetry(const shim_xdna::pdev& pci_dev) const override {
+      xrt_core::query::opcode_telemetry::result_type output;
+      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+      amdxdna_drm_get_info query_telemetry = {
+        .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+        .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+        .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+      };
+
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+
+      // Flatten hypervisor + supervisor opcode arrays
+      for (auto i = 0; i < AIE4_TRACE_COUNT; i++) {
+        xrt_core::query::opcode_telemetry::data task;
+        task.count = static_cast<uint64_t>(fw_telemetry->opcodes.hyp_opcode[i]);
+        output.push_back(std::move(task));
+      }
+
+      // Add each supervisor's opcodes
+      for (auto sup = 0; sup < AIE4_MAX_NUM_SUPERVISORS; sup++) {
+        for (auto i = 0; i < AIE4_TRACE_COUNT; i++) {
+          xrt_core::query::opcode_telemetry::data task;
+          task.count = static_cast<uint64_t>(fw_telemetry->opcodes.sup_opcode[sup][i]);
+          output.push_back(std::move(task));
+        }
+      }
+      return output;
+    }
+
+    xrt_core::query::rtos_telemetry::result_type
+    query_rtos_telemetry(const shim_xdna::pdev& pci_dev) const override {
+      xrt_core::query::rtos_telemetry::result_type output;
+      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+      amdxdna_drm_get_info query_telemetry = {
+        .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+        .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+        .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+      };
+
+      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+
+      for (auto i = 0; i < AIE4_MAX_NUM_SUPERVISORS + 1; i++) {
+        xrt_core::query::rtos_telemetry::data task;
+
+        task.context_starts = fw_telemetry->context_starting[i];
+        task.schedules = fw_telemetry->scheduler_scheduled[i];
+        task.syscalls = 0;  // Not available in AIE4
+
+        // DMA access only available for hypervisor (index 0)
+        task.dma_access = (i == 0) ? fw_telemetry->did_dma : 0;
+
+        // Resource acquisition only for supervisors (not hypervisor)
+        task.resource_acquisition = (i > 0 && i <= AIE4_MAX_NUM_SUPERVISORS) ?
+                                     fw_telemetry->resource_acquired[i - 1] : 0;
+
+        // DTLB data not available in AIE4
+        task.dtlbs = std::vector<xrt_core::query::rtos_telemetry::dtlb_data>();
+        task.preemption_data.slot_index = i;
+        task.preemption_data.preemption_checkpoint_event =
+          (i < AIE4_TOTAL_NUM_UC) ? fw_telemetry->preemption_checkpoint_event_counter[i] : 0;
+        task.preemption_data.preemption_frame_boundary_events =
+          (i < AIE4_TOTAL_NUM_UC) ? fw_telemetry->preemption_frame_boundary_counter[i] : 0;
+
+        output.push_back(std::move(task));
+      }
+      return output;
+    }
+
+    xrt_core::query::stream_buffer_telemetry::result_type
+    query_stream_buffer_telemetry(const shim_xdna::pdev& pci_dev) const override {
+      // No stream buffer telemetry support yet
+      throw xrt_core::query::no_such_key(xrt_core::query::key_type::stream_buffer_telemetry,
+                                          "Not supported by firmware");
+    }
+  };
+
+  static std::unique_ptr<telemetry_handler> create_telemetry_handler(uint16_t device_id) {
+    bool is_aie4 = (device_id == NPU3_DEVICE_ID || device_id == NPU3_PF_DEVICE_ID ||
+                    device_id == NPU3_DEVICE_ID1 || device_id == NPU3_PF_DEVICE_ID1);
+    
+    if (is_aie4)
+      return std::make_unique<aie4_telemetry_handler>();
+    
+    return std::make_unique<telemetry_handler>();
+  }
+
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
+    auto telemetry = create_telemetry_handler(device_id);
+    auto& pci_dev_impl = get_pcidev_impl(device);
+
+    switch (key) {
+    case key_type::aie_telemetry:
+      return telemetry->query_aie_telemetry(pci_dev_impl);
+
+    case key_type::misc_telemetry:
+      return telemetry->query_misc_telemetry(pci_dev_impl);
+
+    case key_type::opcode_telemetry:
+      return telemetry->query_opcode_telemetry(pci_dev_impl);
+
+    case key_type::rtos_telemetry:
+      return telemetry->query_rtos_telemetry(pci_dev_impl);
+
+    case key_type::stream_buffer_telemetry:
+      return telemetry->query_stream_buffer_telemetry(pci_dev_impl);
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
