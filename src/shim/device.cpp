@@ -963,7 +963,52 @@ struct telemetry
   static constexpr uint32_t NPU_MAX_SLEEP_COUNT = 9;
   static constexpr uint32_t NPU_MAX_OPCODE_COUNT = 30;
   static constexpr uint32_t NPU_MAX_DTLB_COUNT = 12;
+  static constexpr uint16_t NPU3_DEVICE_ID = 0x17f1;
+  static constexpr uint16_t NPU3A_DEVICE_ID = 0x17f3;
+  static constexpr uint16_t NPU3_DEVICE_ID1 = 0x1b0a;
+  static constexpr uint16_t NPU3A_DEVICE_ID1 = 0x1b0c;
   static constexpr uint16_t NPU4_DEVICE_ID = 0x17f0;
+
+  // AIE4 firmware telemetry constants and structs
+  static constexpr uint32_t AIE4_MAX_NUM_SUPERVISORS = 4;
+  static constexpr uint32_t AIE4_TOTAL_NUM_UC = 6;
+  static constexpr uint32_t AIE4_TRACE_COUNT = 16;
+  static constexpr size_t AIE4_TELEMETRY_BUFFER_SIZE = 128 * 1024;  // 128KB minimum required by firmware
+
+  struct aie4_clk_deep_slp {
+    uint8_t ipuaie;
+    uint8_t ipuhclk;
+    uint8_t nbif;
+    uint8_t axi2sdp;
+    uint8_t mpipu;
+    uint8_t reserved[3];
+  };
+
+  struct aie4_telemetry_opcodes {
+    uint32_t hyp_opcode[AIE4_TRACE_COUNT];
+    uint32_t sup_opcode[AIE4_MAX_NUM_SUPERVISORS][AIE4_TRACE_COUNT];
+    struct {
+      uint16_t hyp_at;
+      uint16_t sup_at[AIE4_MAX_NUM_SUPERVISORS];
+#if ((AIE4_MAX_NUM_SUPERVISORS + 1) % 2) != 0
+      uint16_t reserved;
+#endif
+    } counters;
+  };
+
+  struct aie4_fw_telemetry {
+    uint8_t enabled;
+    uint8_t reserved[3];
+    struct aie4_clk_deep_slp deep_slp;
+    uint64_t l1_interrupt;
+    uint64_t context_starting[AIE4_MAX_NUM_SUPERVISORS + 1];
+    uint64_t scheduler_scheduled[AIE4_MAX_NUM_SUPERVISORS + 1];
+    uint64_t did_dma;
+    uint64_t resource_acquired[AIE4_MAX_NUM_SUPERVISORS];
+    struct aie4_telemetry_opcodes opcodes;
+    uint64_t preemption_frame_boundary_counter[AIE4_TOTAL_NUM_UC];
+    uint64_t preemption_checkpoint_event_counter[AIE4_TOTAL_NUM_UC];
+  };
 
   struct amdxdna_drm_query_telemetry {
     uint32_t major;
@@ -992,10 +1037,48 @@ struct telemetry
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
+    auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
+    bool is_npu3 = (device_id == NPU3_DEVICE_ID || device_id == NPU3A_DEVICE_ID ||
+                    device_id == NPU3_DEVICE_ID1 || device_id == NPU3A_DEVICE_ID1);
+    bool is_npu4 = (device_id == NPU4_DEVICE_ID);
+
     switch (key) {
     case key_type::aie_telemetry:
     {
       query::aie_telemetry::result_type output;
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+
+      if (is_npu3) {
+        std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+        amdxdna_drm_get_info query_telemetry = {
+          .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+          .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+          .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+        };
+
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+        // Parse first sizeof(aie4_fw_telemetry) bytes from the 128KB buffer
+        auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+
+        // AIE4: Map clock domain deep sleep modes (5 domains)
+        const uint8_t* clock_domains[] = {
+          &fw_telemetry->deep_slp.ipuaie,
+          &fw_telemetry->deep_slp.ipuhclk,
+          &fw_telemetry->deep_slp.nbif,
+          &fw_telemetry->deep_slp.axi2sdp,
+          &fw_telemetry->deep_slp.mpipu
+        };
+
+        for (const auto* domain : clock_domains) {
+          query::aie_telemetry::data task;
+          task.deep_sleep_count = static_cast<uint64_t>(*domain);
+          output.push_back(std::move(task));
+        }
+        return output;
+      }
 
       amdxdna_drm_query_telemetry telemetry{};
 
@@ -1005,7 +1088,6 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
@@ -1019,6 +1101,24 @@ struct telemetry
     {
       query::misc_telemetry::result_type output;
 
+      auto& pci_dev_impl = get_pcidev_impl(device);
+
+      if (is_npu3) {
+        std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+        amdxdna_drm_get_info query_telemetry = {
+          .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+          .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+          .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+        };
+
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+        auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+        output.l1_interrupts = fw_telemetry->l1_interrupt;
+        return output;
+      }
+
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1027,7 +1127,6 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       output.l1_interrupts = telemetry.l1_interrupts;
@@ -1037,6 +1136,39 @@ struct telemetry
     {
       query::opcode_telemetry::result_type output;
 
+      auto& pci_dev_impl = get_pcidev_impl(device);
+
+      if (is_npu3) {
+        std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+        amdxdna_drm_get_info query_telemetry = {
+          .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+          .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+          .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+        };
+
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+        auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+
+        // AIE4: Flatten hypervisor + supervisor opcode arrays
+        for (auto i = 0; i < AIE4_TRACE_COUNT; i++) {
+          query::opcode_telemetry::data task;
+          task.count = static_cast<uint64_t>(fw_telemetry->opcodes.hyp_opcode[i]);
+          output.push_back(std::move(task));
+        }
+
+        // Add each supervisor's opcodes
+        for (auto sup = 0; sup < AIE4_MAX_NUM_SUPERVISORS; sup++) {
+          for (auto i = 0; i < AIE4_TRACE_COUNT; i++) {
+            query::opcode_telemetry::data task;
+            task.count = static_cast<uint64_t>(fw_telemetry->opcodes.sup_opcode[sup][i]);
+            output.push_back(std::move(task));
+          }
+        }
+        return output;
+      }
+
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1045,7 +1177,6 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
@@ -1059,9 +1190,50 @@ struct telemetry
     {
       query::rtos_telemetry::result_type output;
 
-      auto device_id = sysfs_fcn<uint16_t>::get(get_pcidev(device), "", "device");
-      if (device_id != NPU4_DEVICE_ID)
+      if (!is_npu3 && !is_npu4)
         return output;
+
+      auto& pci_dev_impl = get_pcidev_impl(device);
+
+      if (is_npu3) {
+        std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+
+        amdxdna_drm_get_info query_telemetry = {
+          .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+          .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
+          .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
+        };
+
+        pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+
+        auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+
+        for (auto i = 0; i < AIE4_MAX_NUM_SUPERVISORS + 1; i++) {
+          query::rtos_telemetry::data task;
+
+          task.context_starts = fw_telemetry->context_starting[i];
+          task.schedules = fw_telemetry->scheduler_scheduled[i];
+          task.syscalls = 0;  // Not available in AIE4
+
+          // DMA access only available for hypervisor (index 0)
+          task.dma_access = (i == 0) ? fw_telemetry->did_dma : 0;
+
+          // Resource acquisition only for supervisors (not hypervisor)
+          task.resource_acquisition = (i > 0 && i <= AIE4_MAX_NUM_SUPERVISORS) ?
+                                       fw_telemetry->resource_acquired[i - 1] : 0;
+
+          // DTLB data not available in AIE4
+          task.dtlbs = std::vector<query::rtos_telemetry::dtlb_data>();
+          task.preemption_data.slot_index = i;
+          task.preemption_data.preemption_checkpoint_event =
+            (i < AIE4_TOTAL_NUM_UC) ? fw_telemetry->preemption_checkpoint_event_counter[i] : 0;
+          task.preemption_data.preemption_frame_boundary_events =
+            (i < AIE4_TOTAL_NUM_UC) ? fw_telemetry->preemption_frame_boundary_counter[i] : 0;
+
+          output.push_back(std::move(task));
+        }
+        return output;
+      }
 
       amdxdna_drm_query_telemetry telemetry {};
 
@@ -1071,7 +1243,6 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      auto& pci_dev_impl = get_pcidev_impl(device);
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
       for (auto i = 0; i < telemetry.ctx_map_num_elements; i++) {
@@ -1102,6 +1273,10 @@ struct telemetry
     case key_type::stream_buffer_telemetry:
     {
       query::stream_buffer_telemetry::result_type output;
+
+      if (is_npu3) {
+        throw xrt_core::query::no_such_key(key, "Not supported by firmware");
+      }
 
       amdxdna_drm_query_telemetry telemetry{};
 

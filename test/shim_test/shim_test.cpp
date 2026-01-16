@@ -941,10 +941,9 @@ std::vector<test_case> test_list {
   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8, 0 }
   },
-  // Wait for telemetry support in aie4
-  //test_case{ "multi-command preempt full ELF io test real kernel good run (aie4)", {},
-    //TEST_POSITIVE, dev_filter_is_aie4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 1, 1 }
-  //},
+  test_case{ "multi-command preempt full ELF io test real kernel good run (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 1, 1 }
+  },
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
