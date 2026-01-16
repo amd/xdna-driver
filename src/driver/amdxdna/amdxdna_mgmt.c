@@ -86,8 +86,10 @@ struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, s
 		dma_hdl->vaddr = amdxdna_iommu_alloc(xdna, dma_hdl->aligned_size,
 						     &dma_hdl->dma_hdl);
 		if (IS_ERR(dma_hdl->vaddr)) {
+			int ret = PTR_ERR(dma_hdl->vaddr);
+
 			kfree(dma_hdl);
-			return ERR_CAST(dma_hdl->vaddr);
+			return ERR_PTR(ret);
 		}
 	} else {
 		dma_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, dma_hdl->aligned_size,
