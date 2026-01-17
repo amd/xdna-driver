@@ -229,7 +229,6 @@ static void ve2_job_release(struct kref *ref)
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
 	amdxdna_sched_job_cleanup(job);
-	kfree(job);
 }
 
 static void ve2_job_put(struct amdxdna_sched_job *job)
@@ -313,11 +312,6 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 	for (int i = 0; i < cmd_cnt; i++) {
 		priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
 		slot = (slot == 0) ? (capacity - 1) : (slot - 1);
-	}
-
-	if (job->fence) {
-		dma_fence_put(job->fence);
-		job->fence = NULL;
 	}
 	// Reset the pending list
 	priv_ctx->pending[get_job_idx(job->seq)] = NULL;

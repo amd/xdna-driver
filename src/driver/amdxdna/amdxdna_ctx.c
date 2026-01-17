@@ -320,9 +320,17 @@ put_arg_bos:
 
 void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 {
-	trace_amdxdna_debug_point(job->ctx->name, job->seq, "job release");
+	struct amdxdna_ctx *ctx = job->ctx;
+
+	trace_amdxdna_debug_point(ctx->name, job->seq, "job release");
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
+	if (job->out_fence)
+		dma_fence_put(job->out_fence);
+	if (job->fence)
+		dma_fence_put(job->fence);
+	kfree(job);
+	atomic64_inc(&ctx->job_free_cnt);
 }
 
 static int amdxdna_lock_job_bos(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
@@ -497,15 +505,15 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	job->ctx = ctx;
 	job->mm = current->mm;
 	job->opcode = opcode;
-
+	kref_init(&job->refcnt);
+	INIT_LIST_HEAD(&job->list);
 	job->fence = amdxdna_fence_create(ctx);
 	if (!job->fence) {
 		XDNA_ERR(xdna, "Failed to create fence");
 		ret = -ENOMEM;
 		goto unlock_srcu;
 	}
-	kref_init(&job->refcnt);
-	INIT_LIST_HEAD(&job->list);
+	job->state = JOB_STATE_INIT;
 
 	ret = xdna->dev_info->ops->cmd_submit(job, syncobj_hdls,
 					      syncobj_points, syncobj_cnt, seq);

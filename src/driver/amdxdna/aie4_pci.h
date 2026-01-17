@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/iopoll.h>
 #include <linux/io.h>
+#include <linux/wait.h>
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_mailbox.h"
@@ -43,15 +44,19 @@ struct rt_config_clk_gating {
 };
 
 struct amdxdna_ctx_priv {
+	struct amdxdna_ctx		*ctx;
 	struct amdxdna_gem_obj		*umq_bo;
 	u64				*umq_read_index;
 	u64				*umq_write_index;
 	struct host_queue_packet	*umq_pkts;
 	struct host_indirect_packet_data *umq_indirect_pkts;
 
-	struct amdxdna_sched_job	*outstanding_job; /* The very next job to be submitted. */
-	wait_queue_head_t		outstanding_job_wq;
-	struct list_head		job_list;
+	bool				stop_job_worker;
+	struct work_struct		job_work;
+	struct workqueue_struct		*job_work_q;
+	wait_queue_head_t		job_list_wq;
+	struct list_head		pending_job_list;
+	struct list_head		running_job_list;
 
 	void			__iomem	*doorbell_addr;
 

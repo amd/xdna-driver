@@ -158,7 +158,7 @@ static void col_timer(struct timer_list *t)
 	mutex_lock(&ndev->col_list_lock);
 	list_for_each_entry(col_entry, &ndev->col_entry_list, col_list) {
 		XDNA_DBG(xdna, "wake up all for idx %d", col_entry->msix_idx);
-		wake_up_interruptible_all(&col_entry->col_event);
+		wake_up_all(&col_entry->col_event);
 	}
 	mutex_unlock(&ndev->col_list_lock);
 
@@ -713,7 +713,7 @@ static irqreturn_t col_irq_handler(int irq, void *p)
 {
 	struct col_entry *col = (struct col_entry *)p;
 
-	wake_up_interruptible_all(&col->col_event);
+	wake_up_all(&col->col_event);
 
 	return IRQ_HANDLED;
 }

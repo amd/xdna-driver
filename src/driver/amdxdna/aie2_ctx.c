@@ -26,12 +26,6 @@ static void aie2_job_release(struct kref *ref)
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
 	ctx = job->ctx;
 	amdxdna_sched_job_cleanup(job);
-	if (job->out_fence)
-		dma_fence_put(job->out_fence);
-
-	kfree(job);
-
-	atomic64_inc(&ctx->job_free_cnt);
 	wake_up(&ctx->priv->job_free_waitq);
 }
 
@@ -222,7 +216,6 @@ static void
 aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx *ctx = job->ctx;
-	struct dma_fence *fence = job->fence;
 	int idx;
 
 	amdxdna_pm_suspend_put(ctx->client->xdna);
@@ -230,13 +223,14 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	ctx->completed++;
 	reset_tdr_timer(job);
 	trace_xdna_job(&job->base, ctx->name, "signaling fence", job->seq, job->opcode);
-	job->job_done = true;
-	dma_fence_signal(fence);
+	job->state = JOB_STATE_DONE;
+	dma_fence_signal(job->fence);
 	aie2_rq_yield(ctx);
 	idx = get_job_idx(job->seq);
 	ctx->priv->pending[idx] = NULL;
 	up(&job->ctx->io_slot_sem);
-	dma_fence_put(fence);
+	dma_fence_put(job->fence);
+	job->fence = NULL;
 	mmput_async(job->mm);
 	aie2_job_put(job);
 }
@@ -461,7 +455,7 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 	struct amdxdna_ctx *ctx = job->ctx;
 
 	trace_xdna_job(sched_job, ctx->name, "job free", job->seq, job->opcode);
-	if (!job->job_done) {
+	if (job->state != JOB_STATE_DONE) {
 		int idx;
 
 		idx = get_job_idx(job->seq);
@@ -942,7 +936,7 @@ rq_yield:
 	aie2_rq_submit_exit(ctx);
 up_io_slot_sem:
 	up(&ctx->io_slot_sem);
-	job->job_done = true;
+	job->state = JOB_STATE_DONE;
 	return ret;
 }
 
