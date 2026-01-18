@@ -1015,6 +1015,16 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
+
+	/* Validate size to prevent PAGE_ALIGN integer overflow */
+	if (args->size == 0) {
+		XDNA_ERR(xdna, "Invalid zero size for BO creation");
+		return -EINVAL;
+	}
+	if (args->size > SIZE_MAX - (PAGE_SIZE - 1)) {
+		XDNA_ERR(xdna, "Size 0x%llx would overflow PAGE_ALIGN", args->size);
+		return -EINVAL;
+	}
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
 		fallthrough;
