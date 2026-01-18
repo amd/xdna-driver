@@ -106,8 +106,6 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	/* Need to find right register address for aie4 */
-	//return aie4_psp_waitmode_poll(ndev->psp_hdl);
 	return ret;
 }
 

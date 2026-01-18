@@ -55,6 +55,7 @@ struct amdxdna_dev_ops {
 	void (*suspend)(struct amdxdna_dev *xdna);
 	void (*reset_prepare)(struct amdxdna_dev *xdna);
 	int (*reset_done)(struct amdxdna_dev *xdna);
+	int (*sriov_configure)(struct amdxdna_dev *xdna, int num_vfs);
 	int (*mmap)(struct amdxdna_dev *xdna, struct vm_area_struct *vma);
 	void (*debugfs)(struct amdxdna_dev *xdna);
 	int (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u8 level);
