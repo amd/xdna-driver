@@ -188,6 +188,7 @@
  *          Bump protocol_minor when driver can ignore an opcode;
  */
 enum aie4_msg_opcode {
+	/* Common PF/VF Opcodes:  0x10000..0x1FFFF */
 	AIE4_MSG_OP_ECHO                             = 0x10001,
 	AIE4_MSG_OP_IDENTIFY                         = 0x10002,
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
@@ -203,9 +204,14 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_DRAM_WORK_BUFFER                 = 0x1000d,
 	AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER         = 0x1000e,
 
+	/* PF-only Opcodes:  0x20000..0x2FFFF */
+	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
+	AIE4_MSG_OP_DESTROY_VFS                      = 0x20002,
+	AIE4_MSG_OP_CONFIGURE_VF                     = 0x20003,
 	AIE4_MSG_OP_DRAM_LOGGING_START               = 0x20004,
 	AIE4_MSG_OP_DRAM_LOGGING_STOP                = 0x20005,
 
+	/* VF-only Opcodes:  0x30000..0x3FFFF */
 	AIE4_MSG_OP_CREATE_PARTITION                 = 0x30001,
 	AIE4_MSG_OP_DESTROY_PARTITION                = 0x30002,
 	AIE4_MSG_OP_CREATE_HW_CONTEXT                = 0x30003,
@@ -1555,7 +1561,7 @@ struct aie4_msg_runtime_config_cert_timeout {
 };
 
 /**
- * Event trace current status for the calling function.
+ * Event trace current status for the calling function (PF/VF).
  *
  * @enabled 1 to indicate event trace is currently enabled, 0 otherwise.
  * @categories Bitmask for the current enabled categories.

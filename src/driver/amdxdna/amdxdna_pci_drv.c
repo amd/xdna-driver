@@ -16,6 +16,13 @@
 #include "amdxdna_carvedout_buf.h"
 #endif
 
+static int amdxdna_sriov_configure(struct pci_dev *pdev, int num_vfs);
+/* common util inline functions */
+static inline int is_pf_dev(const struct pci_dev *pdev)
+{
+	return (pdev->device == 0x17F2 || pdev->device == 0x1B0B);
+}
+
 /*
  *  There are platforms which share the same PCI device ID
  *  but have different PCI revision IDs. So, let the PCI class
@@ -36,8 +43,10 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x1502, 0x0,  &dev_npu1_info },
 	{ 0x17f0, 0x0,  &dev_npu2_info },
 	{ 0x17f1, 0x10,  &dev_npu3_info },
+	{ 0x17f2, 0x10,  &dev_npu3_pf_info },
 	{ 0x17f3, 0x10,  &dev_npu3_info },
 	{ 0x1B0A, 0x00,  &dev_npu3_info },
+	{ 0x1B0B, 0x00,  &dev_npu3_pf_info },
 	{ 0x1B0C, 0x00,  &dev_npu3_info },
 	{ 0x17f0, 0x10, &dev_npu4_info },
 	{ 0x17f0, 0x11, &dev_npu5_info },
@@ -166,7 +175,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	 * Moving rpm_init() here avoids a race where autosuspend could trigger
 	 * before probe finishes.
 	 */
-	amdxdna_rpm_init(xdna);
+	is_pf_dev(pdev) ? amdxdna_rpm_fini(xdna) : amdxdna_rpm_init(xdna);
 
 #ifdef AMDXDNA_DEVEL
 	ida_init(&xdna->pdi_ida);
@@ -190,6 +199,8 @@ static void amdxdna_remove(struct pci_dev *pdev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
+
+	amdxdna_sriov_configure(pdev, 0);
 
 	amdxdna_dpt_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
@@ -270,6 +281,16 @@ static const struct pci_error_handlers amdxdna_err_handler = {
 	.reset_done = amdxdna_reset_done,
 };
 
+static int amdxdna_sriov_configure(struct pci_dev *pdev, int num_vfs)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+
+	if (xdna->dev_info->ops->sriov_configure)
+		return xdna->dev_info->ops->sriov_configure(xdna, num_vfs);
+
+	return -EOPNOTSUPP;
+}
+
 static struct pci_driver amdxdna_pci_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = pci_ids,
@@ -277,6 +298,7 @@ static struct pci_driver amdxdna_pci_driver = {
 	.remove = amdxdna_remove,
 	.driver.pm = &amdxdna_pm_ops,
 	.err_handler = &amdxdna_err_handler,
+	.sriov_configure = amdxdna_sriov_configure,
 };
 
 static int __init amdxdna_mod_init(void)

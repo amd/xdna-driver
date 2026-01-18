@@ -7,6 +7,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
+#include "amdxdna_pm.h"
 
 #include "aie4_pci.h"
 #include "aie4_message.h"
@@ -143,8 +144,12 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 
 	xdna = ctx->client->xdna;
 
-	/* resolver to call unload->aie4_destroy_context */
-	aie4_release_resource(ctx);
+	/* only access hardware if device is active */
+	if (!amdxdna_pm_resume_get(xdna)) {
+		/* resolver to call unload->aie4_destroy_context */
+		aie4_release_resource(ctx);
+		amdxdna_pm_suspend_put(xdna);
+	}
 
 	/* free col_list */
 	aie4_ctx_col_list_fini(ctx);
@@ -176,8 +181,13 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
-	ret = aie4_create_context(xdna->dev_handle, ctx);
+	if (!ctx->priv) {
+		XDNA_DBG(xdna, "skip uninitialized ctx");
+		return 0;
+	}
 
+	/* recreate existing ctx */
+	ret = aie4_create_context(xdna->dev_handle, ctx);
 	if (!ret)
 		ctx->priv->status = CTX_STATE_CONNECTED;
 	else

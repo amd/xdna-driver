@@ -62,6 +62,7 @@ extern "C" {
 #define	AMDXDNA_DEV_TYPE_UNKNOWN	-1
 #define	AMDXDNA_DEV_TYPE_KMQ		0
 #define	AMDXDNA_DEV_TYPE_UMQ		1
+#define	AMDXDNA_DEV_TYPE_PF		2
 
 /*
  * Define priority in application's QoS.
