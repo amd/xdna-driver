@@ -35,6 +35,7 @@
 			"pci_device_id": "17f1",
 			"pci_revision_id": "10",
 			"version": "20251218",
+			"git_hash": "b031923",
 			"fw_name": "cert.dev.sbin"
 		},
 		{
@@ -51,6 +52,7 @@
 			"pci_device_id": "17f2",
 			"pci_revision_id": "10",
 			"version": "20251218",
+			"git_hash": "b031923",
 			"fw_name": "cert.dev.sbin"
 		},
 		{
