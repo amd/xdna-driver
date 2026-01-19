@@ -9,7 +9,9 @@
 #include "core/common/config_reader.h"
 #include "core/common/query_requests.h"
 #include "core/common/api/xclbin_int.h"
+#include "core/common/message.h"
 #include "core/common/xclbin_parser.h"
+
 #include "xdna_bo.h"
 #include "xdna_hwctx.h"
 #include "xdna_hwq.h"
@@ -44,7 +46,7 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
 {
   partition_info info;
   info.start_column = 0;
-  info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address");
+  info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address", 0);
 
   bool partinfo_found = false;
   pid_t pid = getpid();
@@ -70,11 +72,10 @@ partition_info
 get_partition_info_hw(const xrt_core::device* device, const xrt::uuid xclbin_uuid, uint32_t hw_context_id)
 {
   auto data = device->get_axlf_section(AIE_TRACE_METADATA, xclbin_uuid);
-  if (!data.first || !data.second)
-    return {};
-
   pt::ptree aie_meta;
-  read_aie_metadata_hw(data.first, data.second, aie_meta);
+  if (data.first && data.second)
+    read_aie_metadata_hw(data.first, data.second, aie_meta);
+
   return get_partition_info_main(device,aie_meta, hw_context_id);
 }
 
@@ -99,6 +100,12 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
 
   set_slotidx(arg.handle);
   m_info = get_partition_info_hw(m_device, xclbin.get_uuid(), arg.handle);
+  std::stringstream ss;
+  ss << "Partition Created with start_col "<<m_info.start_column
+          <<" num_columns "<<m_info.num_columns
+          <<" partition_id "<<m_info.partition_id;
+  xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_xdna", ss.str());
+
   set_doorbell(arg.umq_doorbell);
 
   auto data = m_device->get_axlf_section(AIE_TRACE_METADATA, xclbin.get_uuid());
