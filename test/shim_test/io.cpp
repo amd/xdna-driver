@@ -125,8 +125,8 @@ txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
   if (pm_ctrlpkt_buf.size()) {
     std::vector<char> buffer2 = {};
     std::vector<char> patch_json = {};
-    std::vector<std::string> libs = { "preempt" };
-    std::vector<std::string> libpaths = { get_preemption_libs_path() };
+    std::vector<std::string> libs = {};
+    std::vector<std::string> libpaths = {};
     std::map< uint32_t, std::vector<char> > m_ctrlpkt = {};
     m_ctrlpkt[0] = pm_ctrlpkt_buf;
     m_ctrlpkt[1] = pm_ctrlpkt_buf;
