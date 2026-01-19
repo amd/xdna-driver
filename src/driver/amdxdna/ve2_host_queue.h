@@ -10,12 +10,11 @@
 #define NOT_LAST_CMD (1)
 
 struct exec_buf {
-	u16	cu_index;
-	u16	reserved0;
+	u32	dtrace_buf_host_addr_low;
 	u32	dpu_control_code_host_addr_low;
 	u32	dpu_control_code_host_addr_high;
 	u16	args_len;
-	u16	reserved1;
+	u16	dtrace_buf_host_addr_high;
 	u32	args_host_addr_low;
 	u32	args_host_addr_high;
 };
