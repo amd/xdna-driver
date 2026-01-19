@@ -200,7 +200,8 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
 
-	amdxdna_sriov_configure(pdev, 0);
+	if (is_pf_dev(pdev))
+		amdxdna_sriov_configure(pdev, 0);
 
 	amdxdna_dpt_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
