@@ -316,7 +316,6 @@ amdxdna_cmd_get_data(struct amdxdna_gem_obj *abo, u32 *size)
 	return cmd->data;
 }
 
-// TODO: need to verify size <= cmd_bo size before return?
 static inline void *
 amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 {
@@ -330,6 +329,10 @@ amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 
 	if (size) {
 		count = FIELD_GET(AMDXDNA_CMD_COUNT, cmd->header);
+		/*
+		 * BO size is at least 4k, count is at most 10 bits (1k - 1)
+		 * so it won't exceed BO size.
+		 */
 		if (unlikely(count <= num_masks)) {
 			*size = 0;
 			return NULL;
@@ -337,6 +340,24 @@ amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 		*size = (count - num_masks) * sizeof(u32);
 	}
 	return &cmd->data[num_masks];
+}
+
+static inline struct amdxdna_cmd_chain *
+amdxdna_cmd_get_chained_payload(struct amdxdna_gem_obj *cmd_abo, u32 *sub_cmd_cnt)
+{
+#define	MAX_CHAINED_SUB_CMD	64
+	struct amdxdna_cmd_chain *payload;
+	u32 payload_len, ccnt;
+
+	payload = amdxdna_cmd_get_payload(cmd_abo, &payload_len);
+	if (!payload)
+		return NULL;
+	ccnt = payload->command_count;
+	if (!ccnt || ccnt > MAX_CHAINED_SUB_CMD ||
+	    payload_len < struct_size(payload, data, ccnt))
+		return NULL;
+	*sub_cmd_cnt = ccnt;
+	return payload;
 }
 
 static inline u32

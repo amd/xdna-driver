@@ -1373,25 +1373,18 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 	struct amdxdna_cmd_chain *payload;
 	struct xdna_mailbox_msg msg;
 	union exec_chain_req req;
-	u32 payload_len;
+	u32 op, i, ccnt;
 	u32 offset = 0;
 	u64 dev_addr;
 	size_t size;
 	int ret;
-	u32 op;
-	u32 i;
 
-	op = amdxdna_cmd_get_op(cmd_abo);
-	payload = amdxdna_cmd_get_payload(cmd_abo, &payload_len);
+	payload = amdxdna_cmd_get_chained_payload(cmd_abo, &ccnt);
 	if (!payload)
 		return -EINVAL;
 
-	if (op != ERT_CMD_CHAIN || !payload->command_count ||
-	    payload_len < struct_size(payload, data, payload->command_count))
-		return -EINVAL;
-
 	op = ERT_INVALID_CMD;
-	for (i = 0; i < payload->command_count; i++) {
+	for (i = 0; i < ccnt; i++) {
 		u32 boh = (u32)(payload->data[i]);
 		struct amdxdna_gem_obj *abo;
 
@@ -1410,7 +1403,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 		offset += size;
 	}
 #ifdef AMDXDNA_DEVEL
-	XDNA_DBG(client->xdna, "Total %d commands:", payload->command_count);
+	XDNA_DBG(client->xdna, "Total %d commands:", ccnt);
 	print_hex_dump_debug("cmdbufs: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     amdxdna_gem_vmap(cmdbuf_abo), offset, false);
 #endif
@@ -1421,7 +1414,7 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_ctx *ctx,
 
 	/* The offset is the accumulated total size of the cmd buffer */
 	dev_addr = amdxdna_gem_dev_addr(cmdbuf_abo);
-	EXEC_MSG_OPS(xdna)->init_chain_req(&req, dev_addr, offset, payload->command_count);
+	EXEC_MSG_OPS(xdna)->init_chain_req(&req, dev_addr, offset, ccnt);
 	drm_clflush_virt_range(cmd_buf, offset);
 
 	msg.handle = job;

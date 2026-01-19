@@ -449,9 +449,25 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
-  xrt::run run{kernel};
+  xrt::run run1{kernel};
+  xrt::run run2{kernel};
+  xrt::run run3{kernel};
+  xrt::run run4{kernel};
+  xrt::run run5{kernel};
+  run1.start();
+  run2.start();
+  run3.start();
+  run4.start();
+  run5.start();
+  printf("run1 state = %d\n", run1.wait(timeout_ms));
+  printf("run2 state = %d\n", run2.wait(timeout_ms));
+  printf("run3 state = %d\n", run3.wait(timeout_ms));
+  printf("run4 state = %d\n", run4.wait(timeout_ms));
+  printf("run5 state = %d\n", run5.wait(timeout_ms));
+  return;
 
   // Send the command to device and wait for it to complete
+  xrt::run run{kernel};
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0 ; i < c_rounds; i++) {
     run.start();
@@ -812,6 +828,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
   test_case{ "npu3 xrt runlist of vadd", TEST_xrt_umq_runlist_nop, {} }
+  test_case{ "npu3 xrt runlist of nop", TEST_xrt_umq_runlist_nop, {} }
 };
 
 /* test n threads of 1 or more tests */

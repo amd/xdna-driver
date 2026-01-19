@@ -371,14 +371,17 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
 		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
 
-		/*
-		 * In the sync callback/command error case, driver only sets the error index to the
-		 * index of the failing subcmd. It is the responsibility of XRT core to set the
-		 * subcmd BO states to appropriate values.
-		 */
-		cc->error_index = fail_cmd_idx;
-		if (cc->error_index >= cc->command_count)
-			cc->error_index = 0;
+		if (cc) {
+			/*
+			 * In the sync callback/command error case, driver only sets the
+			 * error index to the index of the failing subcmd. It is the
+			 * responsibility of XRT core to set the subcmd BO states to
+			 * appropriate values.
+			 */
+			cc->error_index = fail_cmd_idx;
+			if (cc->error_index >= cc->command_count)
+				cc->error_index = 0;
+		}
 	}
 out:
 	aie2_sched_notify(job);

@@ -66,6 +66,9 @@ struct amdxdna_ctx_priv {
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
+
+	// maxzhen: Simulating CERT
+	struct work_struct		cert_work;
 };
 
 enum aie4_dev_status {

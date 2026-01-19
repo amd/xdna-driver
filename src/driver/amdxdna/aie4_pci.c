@@ -897,6 +897,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 
 	nctx->hw_ctx_id = resp.hw_context_id;
 	nctx->doorbell_addr = ndev->doorbell_base + resp.doorbell_offset;
+	nctx->status = CTX_STATE_CONNECTED;
 	/*
 	 * If user-mode-submission, pass doorbell offset to user via
 	 * ctx->doorbell_offset. Driver will not ring the doorbell.
