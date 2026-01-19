@@ -76,6 +76,9 @@ create_pcidev(const std::string& sysfs) const
     return std::make_shared<pdev_kmq>(platform_driver, sysfs);
   if (device_type == AMDXDNA_DEV_TYPE_UMQ)
     return std::make_shared<pdev_umq>(platform_driver, sysfs);
+  if (device_type == AMDXDNA_DEV_TYPE_PF)
+    return nullptr;
+
   shim_err(EINVAL, "Unknown device type: %d", device_type);
 }
 

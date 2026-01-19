@@ -257,6 +257,18 @@ int main(void)
 }
 EOF
 
+# Test iommu_paging_domain_alloc() signature in 6.13+:
+# struct iommu_domain *iommu_paging_domain_alloc(struct device *dev)
+try_compile HAVE_iommu_paging_domain_alloc << 'EOF'
+#include <linux/iommu.h>
+int main(void)
+{
+	struct device *a = NULL;
+	(void)iommu_paging_domain_alloc(a);
+	return 0;
+}
+EOF
+
 # ---- Header trailer ----------------------------------------------------
 
 cat >> "$OUT" <<EOF
