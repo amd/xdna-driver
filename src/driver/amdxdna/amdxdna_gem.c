@@ -30,6 +30,18 @@ MODULE_IMPORT_NS("DMA_BUF");
 MODULE_IMPORT_NS(DMA_BUF);
 #endif
 
+/*
+ * Safe wrapper for PAGE_ALIGN that checks for integer overflow.
+ * Returns 0 on overflow or invalid size, otherwise returns the aligned size.
+ */
+static inline size_t amdxdna_page_align(__u64 size)
+{
+	if (size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1))
+		return 0;
+
+	return PAGE_ALIGN(size);
+}
+
 static int
 amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 {
@@ -755,10 +767,15 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_carvedout_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	size_t size = PAGE_ALIGN(args->size);
+	size_t size = amdxdna_page_align(args->size);
 	struct drm_gem_object *gobj;
 	struct dma_buf *dma_buf;
 	u64 align = (args->type == AMDXDNA_BO_DEV_HEAP) ?  xdna->dev_info->dev_mem_size : 0;
+
+	if (!size) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
 
 	dma_buf = amdxdna_get_carvedout_buf(dev, size, align);
 	if (IS_ERR(dma_buf))
@@ -779,12 +796,17 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	size_t size = PAGE_ALIGN(args->size);
+	size_t size = amdxdna_page_align(args->size);
 	struct drm_gem_object *gobj;
 	struct dma_buf *dma_buf;
 
 	if (args->type == AMDXDNA_BO_DEV_HEAP) {
 		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
+		return ERR_PTR(-EINVAL);
+	}
+
+	if (!size) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -979,10 +1001,15 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	size_t aligned_sz = PAGE_ALIGN(args->size);
+	size_t aligned_sz = amdxdna_page_align(args->size);
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
 	int ret;
+
+	if (!aligned_sz) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
 
 	abo = amdxdna_gem_create_obj(dev, aligned_sz);
 	if (IS_ERR(abo))
