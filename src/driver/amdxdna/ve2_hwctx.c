@@ -51,6 +51,7 @@ MODULE_PARM_DESC(max_col, "Max column supported by this driver");
  * arguments.
  */
 struct ve2_dpu_data {
+	u64 dtrace_buffer;		/* dtrace buffer address 2 words */
 	u64 instruction_buffer;		/* buffer address 2 words */
 	u32 instruction_buffer_size;	/* size of buffer in bytes */
 	u16 uc_index;			/* microblaze controller index */
@@ -452,8 +453,6 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 			 i, indirect_pkt->header.distribute);
 		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.indirect: %u\n",
 			 i, indirect_pkt->header.indirect);
-		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.cu_index: %u\n",
-			 i, indirect_pkt->payload.cu_index);
 		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.dpu_control_code_host_addr_low: %x\n",
 			 i, (u32)indirect_pkt->payload.dpu_control_code_host_addr_low);
 		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.dpu_control_code_host_addr_high: %x\n",
@@ -602,7 +601,15 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 			lower_32_bits(dpu->instruction_buffer);
 		cebp->payload.dpu_control_code_host_addr_high =
 			upper_32_bits(dpu->instruction_buffer);
-		cebp->payload.cu_index = 0;
+
+		cebp->payload.dtrace_buf_host_addr_high =
+			upper_32_bits(dpu->dtrace_buffer);
+		cebp->payload.dtrace_buf_host_addr_low =
+			lower_32_bits(dpu->dtrace_buffer);
+
+		XDNA_DBG(xdna, "indirect[%d] dtrace addr: 0x%llx", i,
+			 dpu->dtrace_buffer);
+
 		cebp->payload.args_len = 0;
 		cebp->payload.args_host_addr_low = 0;
 		cebp->payload.args_host_addr_high = 0;
@@ -660,9 +667,12 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 
 	dpu_cmd = (struct ve2_dpu_data *)cmd_data;
 	ebp = (struct exec_buf *)pkt->data;
-	ebp->cu_index = 0;
 	ebp->dpu_control_code_host_addr_high = upper_32_bits(dpu_cmd->instruction_buffer);
 	ebp->dpu_control_code_host_addr_low = lower_32_bits(dpu_cmd->instruction_buffer);
+
+	ebp->dtrace_buf_host_addr_high = upper_32_bits(dpu_cmd->dtrace_buffer);
+	ebp->dtrace_buf_host_addr_low = lower_32_bits(dpu_cmd->dtrace_buffer);
+
 	ebp->args_len = 0;
 	ebp->args_host_addr_low = 0;
 	ebp->args_host_addr_high = 0;
