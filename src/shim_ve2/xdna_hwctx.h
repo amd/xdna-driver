@@ -129,7 +129,7 @@ private:
   xrt::uuid m_uuid;
   partition_info m_info;
 
-  void
+  int
   init_qos_info(const qos_type& qos);
 
   void
