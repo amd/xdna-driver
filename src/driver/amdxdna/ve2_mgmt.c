@@ -190,7 +190,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	if (hwctx->qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
 		/* Check alignment: start_col must be a multiple of MIN_COL_SUPPORT (4) */
 		if (hwctx->qos.user_start_col % MIN_COL_SUPPORT != 0) {
-			XDNA_ERR(xdna, "Invalid user_start_col: %u is not aligned to %u (valid values: 0, 4, 8, ...)",
+			XDNA_ERR(xdna, "user_start_col %u not aligned to %u",
 				 hwctx->qos.user_start_col, MIN_COL_SUPPORT);
 			mutex_unlock(&xrs->xrs_lock);
 			ret = -EINVAL;
@@ -199,7 +199,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 
 		/* Check bounds: start_col + ncols must not exceed total columns */
 		if (hwctx->qos.user_start_col + xrs_req->cdo.ncols > xrs->cfg.total_col) {
-			XDNA_ERR(xdna, "Invalid user_start_col: %u with %u columns exceeds device limit (%u total columns)",
+			XDNA_ERR(xdna, "user_start_col %u + ncols %u exceeds total %u",
 				 hwctx->qos.user_start_col, xrs_req->cdo.ncols, xrs->cfg.total_col);
 			mutex_unlock(&xrs->xrs_lock);
 			ret = -ERANGE;
