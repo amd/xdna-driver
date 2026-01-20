@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/version.h>
@@ -16,6 +16,8 @@
 #include "aie4_message.h"
 #include "aie4_solver.h"
 #include "aie4_devel.h"
+#include "amdxdna_dpt.h"
+#include "amdxdna_pm.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -1700,6 +1702,10 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&xdna->dev_handle->aie4_lock);
 	switch (args->param) {
@@ -1742,6 +1748,7 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	}
 	mutex_unlock(&xdna->dev_handle->aie4_lock);
 	mutex_unlock(&xdna->dev_lock);
+	amdxdna_pm_suspend_put(xdna);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
@@ -1845,6 +1852,10 @@ static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
 		ret = aie4_get_ctx_status_array(client, args);
@@ -1852,10 +1863,21 @@ static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	case DRM_AMDXDNA_FW_LOG:
 		ret = amdxdna_get_fw_log(xdna, args);
 		break;
+	case DRM_AMDXDNA_FW_TRACE:
+		ret = amdxdna_get_fw_trace(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_LOG_CONFIG:
+		ret = amdxdna_get_fw_log_configs(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_TRACE_CONFIG:
+		ret = amdxdna_get_fw_trace_configs(xdna, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
+
+	amdxdna_pm_suspend_put(xdna);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
@@ -1920,6 +1942,10 @@ static int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
 		mutex_lock(&xdna->dev_handle->aie4_lock);
@@ -1934,11 +1960,15 @@ static int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	case DRM_AMDXDNA_SET_FW_LOG_STATE:
 		ret = amdxdna_set_fw_log_state(xdna, args);
 		break;
+	case DRM_AMDXDNA_SET_FW_TRACE_STATE:
+		ret = amdxdna_set_fw_trace_state(xdna, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
 
+	amdxdna_pm_suspend_put(xdna);
 	return ret;
 }
 
@@ -1952,6 +1982,10 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.fw_log_config		= aie4_fw_log_config,
 	.fw_log_fini		= aie4_fw_log_fini,
 	.fw_log_parse		= aie4_fw_log_parse,
+	.fw_trace_init		= aie4_fw_trace_init,
+	.fw_trace_config	= aie4_fw_trace_config,
+	.fw_trace_fini		= aie4_fw_trace_fini,
+	.fw_trace_parse		= aie4_fw_trace_parse,
 	.reset_prepare		= aie4_reset_prepare,
 	.reset_done		= aie4_reset_done,
 	.get_aie_info		= aie4_get_info,

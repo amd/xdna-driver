@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #include "aie4_pci.h"
 #include "amdxdna_mailbox.h"
+#include "amdxdna_mgmt.h"
 #include "aie4_message.h"
 
 #include "aie4_msg_priv.h"
@@ -421,6 +422,75 @@ int aie4_stop_fw_log(struct amdxdna_dev_hdl *ndev)
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Start fw log failed, ret 0x%x", resp.status);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address)
+{
+	DECLARE_AIE4_MSG(aie4_msg_start_event_trace, AIE4_MSG_OP_START_EVENT_TRACE);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	dma_addr_t addr;
+	int ret;
+
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
+		return -EINVAL;
+	}
+
+	req.event_trace_dest = AIE4_MSG_EVENT_TRACE_DEST_DRAM;
+	req.event_trace_timestamp = AIE4_MSG_EVENT_TRACE_TIMESTAMP_NS_OFFSET;
+	req.event_trace_categories = categories;
+	req.dram_buffer_size = size;
+	req.dram_buffer_address = addr;
+	req.pasid.raw = 0;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "start fw trace failed, ret 0x%x", resp.status);
+		return -EINVAL;
+	}
+
+	/*
+	 * TODO: Unlike aie2, current version of FW interface doesn't define MSI info in the
+	 * response. Return the MSI info once implemented
+	 */
+	*msi_address = 0;
+	*msi_idx = 0;
+	return 0;
+}
+
+int aie4_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories)
+{
+	DECLARE_AIE4_MSG(aie4_msg_set_event_trace_categories,
+			 AIE4_MSG_OP_SET_EVENT_TRACE_CATEGORIES);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	req.event_trace_categories = categories;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to set fw trace categories, ret 0x%x", resp.status);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int aie4_stop_fw_trace(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_stop_event_trace, AIE4_MSG_OP_STOP_EVENT_TRACE);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "stop fw trace failed, ret 0x%x", resp.status);
 		return -EINVAL;
 	}
 
