@@ -261,7 +261,7 @@ get_hw_queue()
   return m_hwq.get();
 }
 
-void
+int
 xdna_hwctx::
 init_qos_info(const qos_type& qos)
 {
@@ -289,16 +289,22 @@ init_qos_info(const qos_type& qos)
 
     // Check if start_col is aligned to MIN_COL_SUPPORT (must be multiple of 4)
     if (m_qos.user_start_col % MIN_COL_SUPPORT != 0) {
-      shim_err(EINVAL, "Invalid start_col %u: must be a multiple of %u (valid values: 0, 4, 8, ...)",
-               m_qos.user_start_col, MIN_COL_SUPPORT);
+      throw xrt_core::system_error(EINVAL,
+        "Invalid start_col " + std::to_string(m_qos.user_start_col) +
+        ": must be a multiple of " + std::to_string(MIN_COL_SUPPORT) +
+        " (valid values: 0, 4, 8, ...)");
     }
 
     // Check if start_col exceeds maximum columns available
     if (m_qos.user_start_col >= total_cols) {
-      shim_err(ERANGE, "Invalid start_col %u: exceeds maximum columns available on device (%u)",
-               m_qos.user_start_col, total_cols);
+      throw xrt_core::system_error(ERANGE,
+        "Invalid start_col " + std::to_string(m_qos.user_start_col) +
+        ": exceeds maximum columns available on device (" +
+        std::to_string(total_cols) + ")");
     }
   }
+
+  return 0;
 }
 
 void
