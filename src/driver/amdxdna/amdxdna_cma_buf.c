@@ -70,18 +70,24 @@ static void amdxdna_cmabuf_unmap(struct dma_buf_attachment *attach,
 	kfree(sgt);
 }
 
+static void amdxdna_cmabuf_free(struct device *dev, void *cpu_addr,
+				dma_addr_t dma_addr, size_t size,
+				bool cacheable)
+{
+	if (cacheable)
+		dma_free_wc(dev, size, cpu_addr, dma_addr);
+	else
+		dma_free_coherent(dev, size, cpu_addr, dma_addr);
+}
+
 static void amdxdna_cmabuf_release(struct dma_buf *dbuf)
 {
 	struct amdxdna_cmabuf_priv *cmabuf = dbuf->priv;
 
 	if (!cmabuf)
 		return;
-	if (cmabuf->cacheable)
-		dma_free_wc(cmabuf->dev, cmabuf->size,
-			    cmabuf->cpu_addr, cmabuf->dma_addr);
-	else
-		dma_free_coherent(cmabuf->dev, cmabuf->size,
-				  cmabuf->cpu_addr, cmabuf->dma_addr);
+	amdxdna_cmabuf_free(cmabuf->dev, cmabuf->cpu_addr, cmabuf->dma_addr,
+			    cmabuf->size, cmabuf->cacheable);
 	kfree(cmabuf);
 	dbuf->priv = NULL;
 }
@@ -180,10 +186,7 @@ struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 	return dbuf;
 
 free_dma:
-	if (cacheable)
-		dma_free_wc(dev, size, cpu_addr, dma_addr);
-	else
-		dma_free_coherent(dev, size, cpu_addr, dma_addr);
+	amdxdna_cmabuf_free(dev, cpu_addr, dma_addr, size, cacheable);
 free_cmabuf:
 	kfree(cmabuf);
 	return ERR_PTR(ret);

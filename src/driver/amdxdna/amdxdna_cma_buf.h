@@ -7,8 +7,9 @@
 #define _AMDXDNA_CMA_BUF_H_
 
 #include <drm/drm_device.h>
+#include <linux/bitops.h>
 
-#define AMDXDNA_BO_FLAGS_CACHEABLE		(1U << 24)
+#define AMDXDNA_BO_FLAGS_CACHEABLE	BIT(24)
 
 bool amdxdna_use_cma(void);
 int get_cma_mem_index(u64 flags);
