@@ -20,6 +20,9 @@ namespace shim_xdna_edge {
 
 namespace pt = boost::property_tree;
 
+// Minimum column alignment required by the driver (must be a multiple of this value)
+constexpr uint32_t MIN_COL_SUPPORT = 4;
+
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
 {
   std::stringstream aie_stream;
@@ -265,7 +268,7 @@ get_hw_queue()
   return m_hwq.get();
 }
 
-void
+int
 xdna_hwctx::
 init_qos_info(const qos_type& qos)
 {
@@ -285,6 +288,30 @@ init_qos_info(const qos_type& qos)
     else if (key == "start_col")
       m_qos.user_start_col = value;
   }
+
+  // Validate user_start_col if specified
+  if (m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+    // Query total columns available on the device
+    auto total_cols = xrt_core::device_query<xrt_core::query::total_cols>(m_device);
+
+    // Check if start_col is aligned to MIN_COL_SUPPORT (must be multiple of 4)
+    if (m_qos.user_start_col % MIN_COL_SUPPORT != 0) {
+      throw xrt_core::system_error(EINVAL,
+        "Invalid start_col " + std::to_string(m_qos.user_start_col) +
+        ": must be a multiple of " + std::to_string(MIN_COL_SUPPORT) +
+        " (valid values: 0, 4, 8, ...)");
+    }
+
+    // Check if start_col exceeds maximum columns available
+    if (m_qos.user_start_col >= total_cols) {
+      throw xrt_core::system_error(ERANGE,
+        "Invalid start_col " + std::to_string(m_qos.user_start_col) +
+        ": exceeds maximum columns available on device (" +
+        std::to_string(total_cols) + ")");
+    }
+  }
+
+  return 0;
 }
 
 void
