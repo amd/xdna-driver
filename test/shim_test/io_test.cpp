@@ -538,8 +538,16 @@ TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
   async_error_io_test_bo_set.run();
 }
 
+void
+TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  async_error_aie4_io_test_bo_set async_error_aie4_io_test_bo_set{sdev.get(), "bad_ctrl.elf"};
+  // verification is inside run()
+  async_error_aie4_io_test_bo_set.run();
+}
+
 /**
- * This test is to test if t here is deadlock in reading async error ioctl
+ * This test is to test if there is deadlock in reading async error ioctl
  */
 static void TEST_async_error_continue_read(device::id_type id, std::shared_ptr<device>& sdev,
                                            arg_type& arg)
