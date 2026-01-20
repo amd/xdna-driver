@@ -172,6 +172,9 @@ void aie4_debugfs_init(struct amdxdna_dev *xdna);
 int aie4_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
 void aie4_error_async_events_free(struct amdxdna_dev_hdl *ndev);
 int aie4_error_async_msg_thread(void *data);
+int aie4_error_get_last_async(struct amdxdna_dev *xdna,
+			      struct amdxdna_async_err_cache *err_cache, u32 num_errs,
+			      void *errors);
 
 /* aie4_message.c*/
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
