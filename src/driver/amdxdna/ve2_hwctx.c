@@ -497,6 +497,9 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 	queue->hsa_queue_p->hq_header.data_address = queue->hsa_queue_mem.dma_addr +
 		sizeof(struct host_queue_header);
 
+	WARN_ON(!is_power_of_2(nslots));
+	queue->hsa_queue_p->hq_header.capacity = nslots;
+
 	/* Set hsa queue slots to invalid */
 	for (int i = 0; i < nslots; i++) {
 		struct host_queue_indirect_hdr *hdr = &queue->hsa_queue_p->hq_indirect_hdr[i];
@@ -519,9 +522,6 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 			pkt->header.indirect = 0;
 		}
 	}
-
-	WARN_ON(!is_power_of_2(nslots));
-	queue->hsa_queue_p->hq_header.capacity = nslots;
 
 	XDNA_DBG(xdna, "created ve2 hsq queue with capacity %d slots", nslots);
 	return 0;
