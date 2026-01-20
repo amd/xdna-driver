@@ -607,7 +607,8 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 		cebp->payload.dtrace_buf_host_addr_low =
 			lower_32_bits(dpu->dtrace_buffer);
 
-		XDNA_DBG(xdna, "indirect[%d] dpu dtrace buffer addr: 0x%llx", i, dpu->dtrace_buffer);
+		XDNA_DBG(xdna, "indirect[%d] dtrace addr: 0x%llx", i,
+			 dpu->dtrace_buffer);
 
 		cebp->payload.args_len = 0;
 		cebp->payload.args_host_addr_low = 0;
