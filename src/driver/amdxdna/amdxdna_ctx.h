@@ -263,11 +263,12 @@ struct amdxdna_sched_job {
 	struct dma_fence	*fence;
 	/* Job submitter can wait on this fence */
 	struct dma_fence	*out_fence;
-#define JOB_STATE_INIT		0
-#define JOB_STATE_PENDING	1
-#define JOB_STATE_SUBMITTING	2
-#define JOB_STATE_SUBMITTED	3
-#define JOB_STATE_DONE		4
+#define JOB_STATE_INIT			0
+#define JOB_STATE_PENDING		1
+#define JOB_STATE_SUBMITTING		2
+#define JOB_STATE_SUBMITTED		3
+#define JOB_STATE_SUBMITTED_CHAIN	4
+#define JOB_STATE_DONE			5
 	int			state;
 	u64			seq;
 #define OP_USER			0

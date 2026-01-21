@@ -193,7 +193,7 @@ static void job_done(struct amdxdna_sched_job *job)
 	kref_put(&job->refcnt, job_release);
 }
 
-static int job_detect_1st_error_cmd(struct amdxdna_sched_job *job, u32 *index, u32 *err_state)
+static void job_1st_error_cmd(struct amdxdna_sched_job *job, u32 *index, u32 *err_state)
 {
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_cmd_chain *payload;
@@ -203,15 +203,15 @@ static int job_detect_1st_error_cmd(struct amdxdna_sched_job *job, u32 *index, u
 	*index = 0;
 	*err_state = ERT_CMD_STATE_COMPLETED;
 
-	if (amdxdna_cmd_get_op(cmd_abo) != ERT_CMD_CHAIN) {
+	if (job->state == JOB_STATE_SUBMITTED) {
 		*err_state = amdxdna_cmd_get_state(cmd_abo);
-		return 0;
+		return;
 	}
 
 	payload = amdxdna_cmd_get_chained_payload(cmd_abo, &ccnt);
 	if (!payload) {
 		*err_state = ERT_CMD_STATE_ABORT;
-		return 0;
+		return;
 	}
 	for (i = ccnt - 1; i >= 0; i--) {
 		u32 boh = payload->data[i];
@@ -220,79 +220,95 @@ static int job_detect_1st_error_cmd(struct amdxdna_sched_job *job, u32 *index, u
 
 		abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!abo) {
+			state = ERT_CMD_STATE_ABORT;
 			XDNA_ERR(job->ctx->client->xdna, "Failed to find cmd BO %d", boh);
-			return -ENOENT;
+		} else {
+			state = amdxdna_cmd_get_state(abo);
+			amdxdna_gem_put_obj(abo);
 		}
-		state = amdxdna_cmd_get_state(abo);
-		amdxdna_gem_put_obj(abo);
 		if (state == ERT_CMD_STATE_COMPLETED)
 			break;
 		*index = i;
 		*err_state = state;
 	}
-	return 0;
 }
 
-static void job_complete(struct amdxdna_sched_job *job, bool is_timeout)
+static void job_complete(struct amdxdna_sched_job *job)
 {
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
-	struct amdxdna_ctx_health_data *health_data;
 	struct amdxdna_cmd_chain *payload;
-	u32 data_total, state, i = 0;
-	int ret;
+	u32 state, i;
 
-	ret = job_detect_1st_error_cmd(job, &i, &state);
-	/*
-	 * ERT_CMD_STATE_NEW indicates that CERT did not get a chance to
-	 * respond to this cmd either because it times out or doesn't even
-	 * see it (submitssion was aborted).
-	 */
-	if (ret || state == ERT_CMD_STATE_NEW)
-		state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ABORT;
-	amdxdna_cmd_set_state(cmd_abo, state);
-	if (state == ERT_CMD_STATE_COMPLETED) {
-		job_done(job);
-		return;
-	}
-
-	/* Error handling path. */
+	job_1st_error_cmd(job, &i, &state);
+	if (state == ERT_CMD_STATE_NEW)
+		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 
 	/* Single cmd. */
-	if (amdxdna_cmd_get_op(cmd_abo) != ERT_CMD_CHAIN) {
-		if (state == ERT_CMD_STATE_TIMEOUT) {
-			/* TODO: retrieve context health data. */
-			health_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
-			health_data->version = AMDXDNA_CTX_HEALTH_DATA_V1;
-			health_data->npu_gen = AMDXDNA_NPU_GEN_AIE4;
-			health_data->aie4.num_uc = 0;
-		}
-		job_done(job);
-		return;
+	if (job->state == JOB_STATE_SUBMITTED)
+		goto done;
+
+	/* Chained cmd. */
+	amdxdna_cmd_set_state(cmd_abo, state);
+	if (state == ERT_CMD_STATE_COMPLETED)
+		goto done;
+
+	payload = amdxdna_cmd_get_payload(cmd_abo, NULL);
+	if (payload)
+		payload->error_index = i;
+	else
+		XDNA_ERR(xdna, "Failed to find cmd BO payload");
+
+done:
+	job_done(job);
+}
+
+static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo)
+{
+	struct amdxdna_ctx_health_data *health_data;
+	u32 data_total;
+
+	/* TODO: retrieve context health data. */
+	health_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
+	health_data->version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	health_data->npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	health_data->aie4.num_uc = 0;
+}
+
+static void job_timeout(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct amdxdna_gem_obj *sub_cmd_abo;
+	struct amdxdna_cmd_chain *payload;
+	u32 state, boh, i = 0;
+
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+
+	/* Single cmd. */
+	if (job->state == JOB_STATE_SUBMITTED) {
+		aie4_fill_health_data(cmd_abo);
+		goto done;
 	}
 
 	/* Chained cmd. */
+	job_1st_error_cmd(job, &i, &state);
 	payload = amdxdna_cmd_get_payload(cmd_abo, NULL);
 	if (payload) {
+		boh = payload->data[i];
 		payload->error_index = i;
-		if (state == ERT_CMD_STATE_TIMEOUT) {
-			struct amdxdna_gem_obj *sub_cmd_abo;
-			u32 boh = payload->data[i];
-
-			sub_cmd_abo = amdxdna_gem_get_obj(job->ctx->client, boh,
-							  AMDXDNA_BO_SHARE);
-			if (!sub_cmd_abo) {
-				XDNA_ERR(job->ctx->client->xdna,
-					 "Failed to find cmd BO %d", boh);
-			} else {
-				/* TODO: retrieve context health data. */
-				health_data = amdxdna_cmd_get_data(sub_cmd_abo, &data_total);
-				health_data->version = AMDXDNA_CTX_HEALTH_DATA_V1;
-				health_data->npu_gen = AMDXDNA_NPU_GEN_AIE4;
-				health_data->aie4.num_uc = 0;
-			}
+		sub_cmd_abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!sub_cmd_abo) {
+			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
+		} else {
+			aie4_fill_health_data(sub_cmd_abo);
 			amdxdna_gem_put_obj(sub_cmd_abo);
 		}
+	} else {
+		XDNA_ERR(xdna, "Failed to find cmd BO payload");
 	}
+
+done:
 	job_done(job);
 }
 
@@ -347,7 +363,7 @@ static inline int wait_till_job_done(struct amdxdna_sched_job *job)
 	return wait_till_seq_completed(job->ctx, job->seq);
 }
 
-static inline bool is_first_pending_job_partially_submitted(struct amdxdna_ctx *ctx)
+static inline bool is_first_pending_job_submitting(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_sched_job *job;
 	struct list_head *pl;
@@ -373,7 +389,7 @@ static void job_worker(struct work_struct *work)
 	struct amdxdna_sched_job *job;
 	struct amdxdna_dev *xdna;
 	struct amdxdna_ctx *ctx;
-	bool abort = false;
+	bool aborting = false;
 	int ret;
 
 	priv = container_of(work, struct amdxdna_ctx_priv, job_work);
@@ -388,37 +404,27 @@ static void job_worker(struct work_struct *work)
 
 		while (!!(job = next_running_job(ctx))) {
 			ret = wait_till_job_done(job);
-			if (ret) {
-				/*
-				 * Ctx has just failed, timeout this one and
-				 * abort the rest.
-				 */
-				if (!abort) {
-					job_complete(job, true);
-					abort = true;
-				} else {
-					job_complete(job, false);
-				}
+			if (ret && !aborting) {
+				/* Ctx has just failed, timeout this one. */
+				job_timeout(job);
+				/* Abort the rest. */
+				aborting = true;
 			} else {
-				job_complete(job, false);
+				job_complete(job);
 			}
 		}
-		if (!abort)
+		if (!aborting)
 			continue;
 
 		/*
-		 * In case we need to abort jobs, after aborting all jobs in running
-		 * queue, we also need to check if the first pending job should be
-		 * aborted as well, if it is partially submitted already.
+		 * In case we need to abort jobs, after aborting all jobs in
+		 * running queue, we also need to check if the first pending
+		 * job should be aborted as well, if it is partially submitted
+		 * already. The abort is completed when running queue is empty
+		 * and first pending job is not submitting.
 		 */
-		if (!is_first_pending_job_partially_submitted(ctx)) {
-			/*
-			 * We have aborted all jobs, reset flag.
-			 * Otherwise, we'll keep flag set and wait
-			 * for the pending job to be transferred to
-			 * running list, so we can abort it.
-			 */
-			abort = false;
+		if (!is_first_pending_job_submitting(ctx)) {
+			aborting = false;
 			/*
 			 * Until ctx status is recovered, there will be
 			 * no new cmd pushed to the HSA queue and running
@@ -439,9 +445,7 @@ static void cert_worker(struct work_struct *work)
 
 	while (priv->status == CTX_STATE_CONNECTED &&
 	       *priv->umq_read_index < *priv->umq_write_index) {
-		printk(KERN_INFO "BEFORE SLEEP\n");
 		msleep(500);
-		printk(KERN_INFO "AFTER SLEEP\n");
 		++(*priv->umq_read_index);
 		wake_up_all(&priv->col_entry->col_event);
 	}
@@ -669,7 +673,7 @@ static int submit_job(struct amdxdna_sched_job *job)
 		job->state = JOB_STATE_SUBMITTING;
 	}
 	if (i == ccnt)
-		job->state = JOB_STATE_SUBMITTED;
+		job->state = JOB_STATE_SUBMITTED_CHAIN;
 
 done:
 	if (job->state == JOB_STATE_PENDING) {
