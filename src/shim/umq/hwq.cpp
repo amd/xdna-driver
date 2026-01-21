@@ -69,7 +69,7 @@ hwq_umq(const device& dev, size_t nslots) : hwq(dev)
   // indirect buf starts after queue
   m_indirect_paddr = m_umq_hdr->data_address + queue_sz;
 
-  shim_debug("Created UMQ HW queue");
+  shim_debug("Created UMQ HW queue, size: %d", umq_sz);
 }
 
 hwq_umq::
