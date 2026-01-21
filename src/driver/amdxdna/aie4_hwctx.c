@@ -602,7 +602,7 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx, struct amdxdna_gem_obj *cmd_a
 
 	/* Simulating: submit the command, mark state as done, wake up job_worker. */
 	*seq = inc_write_index(ctx);
-	XDNA_DBG(ctx->client->xdna, "Submitted one cmd, seq 0x%lld", *seq);
+	XDNA_DBG(ctx->client->xdna, "Submitted one cmd, seq %lld", *seq);
 
 	/* Simulating CERT to complete one cmd. */
 	//amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);

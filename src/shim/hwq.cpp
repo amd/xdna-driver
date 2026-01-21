@@ -98,22 +98,6 @@ hwq::
 poll_command(xrt_core::buffer_handle *cmd) const
 {
   auto boh = static_cast<cmd_buffer*>(cmd);
-  auto& subcmds = boh->get_subcmd_list();
-  // For chain commands in user mode
-  if (subcmds.size()) {
-    auto last_cmd_bo = subcmds.back();
-    auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
-    if (last_cmdpkt->state >= ERT_CMD_STATE_COMPLETED) {
-      // Update chain BO state to match
-      auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
-      cmdpkt->state = last_cmdpkt->state;
-      XRT_TRACE_POINT_LOG(poll_command_done);
-      return 1;
-    }
-    return 0;
-  }
-  
-  // Single command
   auto cmdpkt = reinterpret_cast<volatile ert_packet *>(boh->vaddr());
   if (cmdpkt->state >= ERT_CMD_STATE_COMPLETED) {
     XRT_TRACE_POINT_LOG(poll_command_done);
