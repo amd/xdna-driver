@@ -50,6 +50,7 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
   partition_info info;
   info.start_column = 0;
   info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address", 0);
+  auto column_shift = aie_meta.get<uint8_t>("aie_metadata.driver_config.column_shift", 0);
 
   bool partinfo_found = false;
   pid_t pid = getpid();
@@ -60,6 +61,7 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
       info.num_columns = entry.num_cols;
       info.start_column = entry.start_col;
       info.partition_id = (entry.num_cols << 8U) | (entry.start_col & 0xffU);
+      info.base_address = (info.base_address + (info.start_column << column_shift));
       partinfo_found = true;
       break;
     }
