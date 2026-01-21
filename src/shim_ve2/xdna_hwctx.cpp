@@ -61,7 +61,7 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
       info.num_columns = entry.num_cols;
       info.start_column = entry.start_col;
       info.partition_id = (entry.num_cols << 8U) | (entry.start_col & 0xffU);
-      info.base_address = (info.base_address + (info.start_column << column_shift));
+      info.base_address += (info.start_column << column_shift);
       partinfo_found = true;
       break;
     }
