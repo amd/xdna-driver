@@ -437,12 +437,13 @@ static void cert_worker(struct work_struct *work)
 
 	priv = container_of(work, struct amdxdna_ctx_priv, cert_work);
 
-	while (*priv->umq_read_index < *priv->umq_write_index) {
-		if (priv->status == CTX_STATE_CONNECTED) {
-			msleep(1000);
-			++(*priv->umq_read_index);
-			wake_up_all(&priv->col_entry->col_event);
-		}
+	while (priv->status == CTX_STATE_CONNECTED &&
+	       *priv->umq_read_index < *priv->umq_write_index) {
+		printk(KERN_INFO "BEFORE SLEEP\n");
+		msleep(500);
+		printk(KERN_INFO "AFTER SLEEP\n");
+		++(*priv->umq_read_index);
+		wake_up_all(&priv->col_entry->col_event);
 	}
 }
 
@@ -488,7 +489,8 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 	// maxzhen: Simulating CERT
 	INIT_WORK(&priv->cert_work, cert_worker);
 	priv->job_work_q = create_singlethread_workqueue(ctx->name);
-	if (!priv->job_work_q) {
+	priv->cert_work_q = create_singlethread_workqueue(ctx->name);
+	if (!priv->job_work_q || !priv->cert_work_q) {
 		XDNA_ERR(xdna, "Create job_work_q failed");
 		goto fail;
 	}
@@ -514,11 +516,14 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 fail:
 	aie4_ctx_col_list_fini(ctx);
 	aie4_ctx_umq_fini(ctx);
+	if (priv->cert_work_q) {
+		cancel_work_sync(&priv->cert_work);
+		destroy_workqueue(priv->cert_work_q);
+	}
 	if (priv->job_work_q) {
 		priv->stop_job_worker = true;
 		wake_up_all(&ctx->priv->job_list_wq);
 		destroy_workqueue(priv->job_work_q);
-		cancel_work_sync(&priv->cert_work);
 	}
 	kfree(ctx->priv);
 	amdxdna_ctx_syncobj_destroy(ctx);
@@ -536,6 +541,7 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	wake_up_all(&ctx->priv->job_list_wq);
 	destroy_workqueue(priv->job_work_q);
 	cancel_work_sync(&priv->cert_work);
+	destroy_workqueue(priv->cert_work_q);
 
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {
@@ -600,11 +606,11 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx, struct amdxdna_gem_obj *cmd_a
 
 	/* Simulating CERT to complete one cmd. */
 	//amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
-	if (*seq == 0)
-		ctx->priv->status = CTX_STATE_DISCONNECTED;
-	if (*seq == 4)
-		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
-	queue_work(system_wq, &ctx->priv->cert_work);
+	//if (*seq == 0)
+	//	ctx->priv->status = CTX_STATE_DISCONNECTED;
+	//if (*seq == 4)
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_COMPLETED);
+	queue_work(ctx->priv->cert_work_q, &ctx->priv->cert_work);
 	return 0;
 }
 
@@ -812,6 +818,14 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 	unsigned long wait_jifs = MAX_SCHEDULE_TIMEOUT;
 	struct col_entry *col_entry = nctx->col_entry;
 	long ret = 0;
+
+	/*
+	 * In kernel mode submission, waiting for read_index is not enough. User
+	 * needs to wait for drm_syncobj and driver will signal it when driver
+	 * is ready to give up on this command.
+	 */
+	if (kernel_mode_submission)
+		return -ENOTSUPP;
 
 	if (timeout)
 		wait_jifs = msecs_to_jiffies(timeout);

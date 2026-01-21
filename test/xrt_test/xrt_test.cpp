@@ -441,7 +441,7 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 }
 
 void
-TEST_xrt_umq_nop(int device_index, arg_type& arg)
+TEST_xrt_umq_nop_latency(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
@@ -449,25 +449,9 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
-  xrt::run run1{kernel};
-  xrt::run run2{kernel};
-  xrt::run run3{kernel};
-  xrt::run run4{kernel};
-  xrt::run run5{kernel};
-  run1.start();
-  run2.start();
-  run3.start();
-  run4.start();
-  run5.start();
-  printf("run1 state = %d\n", run1.wait(timeout_ms));
-  printf("run2 state = %d\n", run2.wait(timeout_ms));
-  printf("run3 state = %d\n", run3.wait(timeout_ms));
-  printf("run4 state = %d\n", run4.wait(timeout_ms));
-  printf("run5 state = %d\n", run5.wait(timeout_ms));
-  return;
+  xrt::run run{kernel};
 
   // Send the command to device and wait for it to complete
-  xrt::run run{kernel};
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0 ; i < c_rounds; i++) {
     run.start();
@@ -480,14 +464,60 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
   auto end = std::chrono::high_resolution_clock::now();
   auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   std::cout << "Executed " << c_rounds << " NOP commands in " << duration_us
-	    << "us, average latency: " << duration_us * 1.0 / c_rounds << "us\n";
+	    << "us in latency mode, average latency: " << duration_us * 1.0 / c_rounds << "us\n";
 }
 
 void
-TEST_xrt_umq_runlist_nop(int device_index, arg_type& arg)
+TEST_xrt_umq_nop_throughput(int device_index, arg_type& arg)
 {
-  const int num_runs = 10;
+  const int max_num_cmd_per_batch = 4;
+  auto device = xrt::device{device_index};
+
+  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
   std::vector<xrt::run> runs;
+
+  // Create all runs
+  for (int i = 0; i < max_num_cmd_per_batch; i++)
+    runs.emplace_back(kernel);
+
+  int submitted = 0;
+  int completed = 0;
+  auto start = std::chrono::high_resolution_clock::now();
+
+  while (submitted < runs.size() && submitted < c_rounds) {
+    runs[submitted].start();
+    submitted++;
+  }
+  while (completed < submitted) {
+    auto i = completed % runs.size();
+    auto state = runs[i].wait(timeout_ms);
+    completed++;
+    if (state == ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+    if (submitted < c_rounds) {
+      runs[i].start();
+      submitted++;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  std::cout << "Executed " << c_rounds << " NOP commands in " << duration_us
+	    << "us in throughput mode, average latency: " << duration_us * 1.0 / c_rounds << "us\n";
+}
+
+void
+TEST_xrt_umq_nop_runlist(int device_index, arg_type& arg)
+{
+  const int max_num_run_per_runlist = 24;
+  const int max_num_runlist_per_batch = 2;
+  std::vector<xrt::run> runs;
+  std::vector<xrt::runlist> runlists;
   auto device = xrt::device{device_index};
 
   xrt::elf elf{local_path("npu3_workspace/nop.elf")};
@@ -495,22 +525,45 @@ TEST_xrt_umq_runlist_nop(int device_index, arg_type& arg)
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
 
   // Create all runs
-  for (int i = 0; i < num_runs; i++)
+  auto num_runs_per_batch = max_num_run_per_runlist * max_num_runlist_per_batch;
+  for (int i = 0; i < num_runs_per_batch; i++)
     runs.emplace_back(kernel);
 
   // Add all runs into runlist
-  xrt::runlist run_list{hwctx};
-  for (auto& r : runs)
-    run_list.add(r);
+  for (int i = 0; i < max_num_runlist_per_batch; i++) {
+    runlists.emplace_back(hwctx);
+    for (int j = 0; j < max_num_run_per_runlist; j++)
+      runlists[i].add(runs[i * max_num_run_per_runlist + j]);
+  }
 
-  // Submit and wait for the runlist to complete
-  run_list.execute();
-  auto state = run_list.wait(timeout_ms * num_runs * std::chrono::milliseconds{1});
+  int submitted = 0;
+  int completed = 0;
+  auto start = std::chrono::high_resolution_clock::now();
 
-  if (state == std::cv_status::timeout) 
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (run_list.state() != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(run_list.state()));
+  while (submitted < runlists.size() && submitted < c_rounds) {
+    runlists[submitted].execute();
+    submitted++;
+  }
+  while (completed < submitted) {
+    auto i = completed % runlists.size();
+    auto state = runlists[i].wait(
+      timeout_ms * max_num_run_per_runlist * std::chrono::milliseconds{1});
+    completed++;
+    if (state == std::cv_status::timeout) 
+      throw std::runtime_error(std::string("exec buf timed out."));
+    auto ert_state = runlists[i].state();
+    if (ert_state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(ert_state));
+    if (submitted < c_rounds) {
+      runlists[i].execute();
+      submitted++;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  std::cout << "Executed " << c_rounds << " NOP commands in " << duration_us
+	    << "us in throughput mode, average latency: " << duration_us * 1.0 / (max_num_run_per_runlist * c_rounds) << "us\n";
 }
 
 void 
@@ -821,14 +874,15 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt move memtiles", TEST_xrt_umq_memtiles, {} },
   test_case{ "npu3 xrt ddr memtile", TEST_xrt_umq_ddr_memtile, {} },
   test_case{ "npu3 xrt remote barrier", TEST_xrt_umq_remote_barrier, {} },
-  test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
+  test_case{ "npu3 xrt nop latency", TEST_xrt_umq_nop_latency, {} },
   test_case{ "npu3 xrt single col preemption", TEST_xrt_umq_single_col_preemption, {} },
   test_case{ "npu3 xrt multi col preemption", TEST_xrt_umq_multi_col_preemption, {} },
   test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
-  test_case{ "npu3 xrt runlist of vadd", TEST_xrt_umq_runlist_nop, {} }
   test_case{ "npu3 xrt runlist of nop", TEST_xrt_umq_runlist_nop, {} }
+  test_case{ "npu3 xrt runlist of nop", TEST_xrt_umq_nop_runlist, {} },
+  test_case{ "npu3 xrt nop throughput", TEST_xrt_umq_nop_throughput, {} },
 };
 
 /* test n threads of 1 or more tests */

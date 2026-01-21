@@ -159,10 +159,6 @@ int
 hwq::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
-  // Check status to avoid calling into driver, if it's already completed
-  if (poll_command(cmd))
-      return 1;
-
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
   auto seq = boh->wait_for_submitted();

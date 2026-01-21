@@ -324,7 +324,7 @@ issue_command(const cmd_buffer *cmd_bo)
 
   // Runlist command submission.
   auto payload = get_ert_cmd_chain_data(cmd);
-  if (payload->command_count == 0 || payload->command_count > 100)
+  if (payload->command_count == 0 || payload->command_count > 64)
     shim_err(EINVAL, "Runlist exec buf with bad num of subcmds: %zx", payload->command_count);
 
   if (subcmds.capacity() < payload->command_count)

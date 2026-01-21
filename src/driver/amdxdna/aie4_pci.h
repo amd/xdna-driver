@@ -54,6 +54,7 @@ struct amdxdna_ctx_priv {
 	bool				stop_job_worker;
 	struct work_struct		job_work;
 	struct workqueue_struct		*job_work_q;
+	struct workqueue_struct		*cert_work_q;
 	wait_queue_head_t		job_list_wq;
 	struct list_head		pending_job_list;
 	struct list_head		running_job_list;
