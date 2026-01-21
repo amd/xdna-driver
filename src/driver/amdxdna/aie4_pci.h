@@ -70,6 +70,7 @@ struct amdxdna_ctx_priv {
 
 	// maxzhen: Simulating CERT
 	struct work_struct		cert_work;
+	bool				timeout_done;
 };
 
 enum aie4_dev_status {

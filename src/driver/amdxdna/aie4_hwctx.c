@@ -241,14 +241,17 @@ static void job_complete(struct amdxdna_sched_job *job)
 	u32 state, i;
 
 	job_1st_error_cmd(job, &i, &state);
-	if (state == ERT_CMD_STATE_NEW)
-		amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 
 	/* Single cmd. */
-	if (job->state == JOB_STATE_SUBMITTED)
+	if (job->state == JOB_STATE_SUBMITTED) {
+		if (state == ERT_CMD_STATE_NEW)
+			amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 		goto done;
+	}
 
 	/* Chained cmd. */
+	if (state == ERT_CMD_STATE_NEW)
+		state = ERT_CMD_STATE_ABORT;
 	amdxdna_cmd_set_state(cmd_abo, state);
 	if (state == ERT_CMD_STATE_COMPLETED)
 		goto done;
@@ -431,6 +434,7 @@ static void job_worker(struct work_struct *work)
 			 * list will stay empty.
 			 */
 			/* TODO: we should recover the ctx here */
+			*priv->umq_read_index = *priv->umq_write_index = 0;
 			priv->status = CTX_STATE_CONNECTED;
 			wake_up_all(&ctx->priv->job_list_wq);
 		}
@@ -446,7 +450,12 @@ static void cert_worker(struct work_struct *work)
 	while (priv->status == CTX_STATE_CONNECTED &&
 	       *priv->umq_read_index < *priv->umq_write_index) {
 		msleep(500);
-		++(*priv->umq_read_index);
+		if (*priv->umq_read_index == 23 && !priv->timeout_done) {
+			priv->status = CTX_STATE_DISCONNECTED;
+			priv->timeout_done = true;
+		} else {
+			++(*priv->umq_read_index);
+		}
 		wake_up_all(&priv->col_entry->col_event);
 	}
 }
