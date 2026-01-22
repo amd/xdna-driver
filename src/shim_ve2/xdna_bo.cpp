@@ -397,7 +397,8 @@ attach_to_ctx(uint32_t flag)
   auto boh = get_drm_bo_handle();
   uint32_t total_cols = get_total_cols(m_core_device, m_owner_ctx_id);
   if(total_cols == 0)
-    throw xrt_core::error(-EINVAL, "attach_to_ctx: partition info not found");
+    throw xrt_core::error(-EINVAL, std::string("attach_to_ctx: partition info not found (err=") +
+                          std::to_string(EINVAL) + ": " + errno_to_str(EINVAL) + ")");
 
   auto buf_size = get_properties().size;
   std::map<uint32_t, size_t> buf_sizes;
