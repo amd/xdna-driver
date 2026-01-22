@@ -181,6 +181,7 @@ void aie4_ctx_suspend(struct amdxdna_ctx *ctx, bool wait);
 int aie4_ctx_resume(struct amdxdna_ctx *ctx);
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
+int aie4_parse_priority(u32 priority);
 
 /* aie4_smu.c */
 int aie4_smu_start(struct amdxdna_dev_hdl *ndev);

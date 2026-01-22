@@ -870,6 +870,57 @@ static ssize_t aie4_keep_partition_write(struct file *file, const char __user *p
 
 DBGFS_FOPS_RW(keep_partition, NULL, aie4_keep_partition_write);
 
+static ssize_t aie4_dpm_override_write(struct file *file, const char __user *ptr,
+				       size_t len, loff_t *off)
+{
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_dpm_override *dpm_override;
+	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
+	int hclk_dpm_level, aieclk_dpm_level, ret, force_dpm;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	char *buf;
+
+	buf = memdup_user_nul(ptr, len);
+	if (IS_ERR(buf)) {
+		XDNA_ERR(xdna, "Failed to copy input from user");
+		return PTR_ERR(buf);
+	}
+
+	if (sscanf(buf, "%d %d", &hclk_dpm_level, &aieclk_dpm_level) != 2) {
+		if (kstrtoint(buf, 10, &force_dpm) == 0 && force_dpm == 0) {
+			hclk_dpm_level = 0;
+			aieclk_dpm_level = 0;
+		} else {
+			kfree(buf);
+			XDNA_ERR(xdna, "Incorrect number of args");
+			return -EINVAL;
+		}
+	} else {
+		force_dpm = 1;
+	}
+
+	kfree(buf);
+
+	req.type = AIE4_RUNTIME_CONFIG_DPM_OVERRIDE;
+	dpm_override = (struct aie4_msg_runtime_config_dpm_override *)req.data;
+	dpm_override->force_dpm = force_dpm;
+	dpm_override->forced_ipuhclk_dpm_level = (u8)hclk_dpm_level;
+	dpm_override->forced_ipuaieclk_dpm_level = (u8)aieclk_dpm_level;
+
+	msg.send_size = sizeof(req.type) + sizeof(*dpm_override);
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_send_msg_wait(ndev, &msg);
+	mutex_unlock(&ndev->aie4_lock);
+
+	XDNA_INFO(xdna, "request hclk: %d request aieclk: %d, %s", hclk_dpm_level,
+		  aieclk_dpm_level, ret ? ">>DPM OVERRIDE FAIL<<" : ">>DPM OVERRIDE PASS<<");
+
+	return ret ? ret : len;
+}
+
+DBGFS_FOPS_RW(dpm_override, NULL, aie4_dpm_override_write);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -888,6 +939,7 @@ const struct {
 	DBGFS_FILE(dump_fw_trace, 0600),
 	DBGFS_FILE(dump_fw_trace_buffer, 0400),
 	DBGFS_FILE(keep_partition, 0600),
+	DBGFS_FILE(dpm_override, 0600),
 };
 
 void aie4_debugfs_init(struct amdxdna_dev *xdna)
