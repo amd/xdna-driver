@@ -141,8 +141,8 @@ static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
 	.vmap = amdxdna_cmabuf_vmap,
 };
 
-struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
-				    size_t size, bool cacheable)
+static struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
+					   size_t size, bool cacheable)
 {
 	struct amdxdna_cmabuf_priv *cmabuf;
 	struct dma_buf *dbuf;
@@ -201,7 +201,7 @@ bool amdxdna_use_cma(void)
 #endif
 }
 
-int get_cma_mem_index(u64 flags)
+static int get_cma_mem_index(u64 flags)
 {
 	/*
 	 * Extract lower 8 bits for memory index (0-255 range).
@@ -211,7 +211,7 @@ int get_cma_mem_index(u64 flags)
 	return flags & 0xFF;
 }
 
-bool get_cacheable_flag(u64 flags)
+static bool get_cacheable_flag(u64 flags)
 {
 	return (flags & AMDXDNA_BO_FLAGS_CACHEABLE) != 0;
 }

@@ -12,9 +12,6 @@
 #define AMDXDNA_BO_FLAGS_CACHEABLE	BIT(24)
 
 bool amdxdna_use_cma(void);
-int get_cma_mem_index(u64 flags);
-bool get_cacheable_flag(u64 flags);
-struct dma_buf *amdxdna_get_cma_buf(struct device *dev, size_t size, bool cacheable);
 struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_devs,
 						  int max_regions,
 						  struct device *fallback_dev,
