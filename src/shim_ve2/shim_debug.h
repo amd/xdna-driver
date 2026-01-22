@@ -67,7 +67,7 @@ errno_to_str(int err)
   case ENODEV:     return "No such device";
   case EFAULT:     return "Bad address";
   case ENOSPC:     return "No space left on device";
-  case EOPNOTSUPP: return "Operation not supported";
+  case EOPNOTSUPP: return "Operation not supported";  // Same as ENOTSUP on Linux
   case ERANGE:     return "Result too large";
   case EEXIST:     return "File exists";
   case ENOBUFS:    return "No buffer space available";
@@ -77,24 +77,33 @@ errno_to_str(int err)
   case ENXIO:      return "No such device or address";
   case ENOTTY:     return "Inappropriate ioctl for device";
   case ENOSYS:     return "Function not implemented";
-  case ENOTSUP:    return "Not supported";
   default:         return "Unknown error";
   }
 }
 
+/**
+ * shim_err - Throw system error with formatted message
+ * @err: errno value
+ * @fmt: printf-style format string
+ * @args: format arguments
+ *
+ * Note: xrt_core::system_error::what() automatically appends the system
+ * error string (e.g., ": Invalid argument"), so we only include the
+ * error code number in our message to avoid duplication.
+ */
 template <typename ...Args>
 [[ noreturn ]] void
 shim_err(int err, const char* fmt, Args&&... args)
 {
   std::string format = std::string(fmt);
-  format += " (err=%d: %s)";
-  int sz = std::snprintf(nullptr, 0, format.c_str(), args ..., err, errno_to_str(err)) + 1;
+  format += " (err=%d)";
+  int sz = std::snprintf(nullptr, 0, format.c_str(), args ..., err) + 1;
   if(sz <= 0)
     throw xrt_core::system_error(sz, "could not format error string");
 
   auto size = static_cast<size_t>(sz);
   std::unique_ptr<char[]> buf(new char[size]);
-  std::snprintf(buf.get(), size, format.c_str(), args ..., err, errno_to_str(err));
+  std::snprintf(buf.get(), size, format.c_str(), args ..., err);
   throw xrt_core::system_error(err, std::string(buf.get()));
 }
 

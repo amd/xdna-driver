@@ -1215,7 +1215,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	struct amdxdna_sched_job *job;
 	int idx;
 
-	XDNA_DBG(xdna, "Finalizing hwctx %p: start_col=%u, num_col=%u, submitted=%llu, completed=%llu",
+	XDNA_DBG(xdna,
+		 "Finalizing hwctx %p: start_col=%u, num_col=%u, submitted=%llu, completed=%llu",
 		 hwctx, nhwctx->start_col, nhwctx->num_col,
 		 hwctx->submitted, hwctx->completed);
 
@@ -1361,7 +1362,9 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, buf_paddr, buf_sz,
 						       col, true);
 			if (ret) {
-				XDNA_ERR(xdna, "%s: Failed to update handshake pkt for col %u, buf_type %d, ret %d",
+				XDNA_ERR(xdna,
+					 "%s: Failed to update handshake pkt for"
+					 " col %u, buf_type %d, ret %d",
 					 __func__, col, mdata->buf_type, ret);
 				amdxdna_gem_put_obj(abo);
 				amdxdna_gem_put_obj(mdata_abo);
@@ -1394,7 +1397,8 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 		for (u32 col = 0; col < hwctx->num_col; col++) {
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, 0, 0, col, false);
 			if (ret) {
-				XDNA_ERR(xdna, "%s: Failed to detach buf_type %d BO %lld from hwctx %s col %u, ret %d",
+				XDNA_ERR(xdna, "%s: Failed to detach buf_type %d BO %lld from"
+					 " hwctx %s col %u, ret %d",
 					 __func__, mdata->buf_type, mdata->bo_handle,
 					 hwctx->name, col, ret);
 				amdxdna_gem_put_obj(mdata_abo);
