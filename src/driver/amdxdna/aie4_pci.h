@@ -73,7 +73,6 @@ struct amdxdna_dev_priv {
 };
 
 struct async_events;
-struct debugfs_args;
 
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
@@ -117,8 +116,6 @@ struct amdxdna_dev_hdl {
 	struct mutex                    aie4_lock;
 
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
-
-	struct debugfs_args		*dbgfs_args;
 };
 
 struct col_entry {
