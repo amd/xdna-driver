@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2025 Xilinx, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2025 - 2026 Xilinx, Inc. All rights reserved.
 
 prefix=@CMAKE_INSTALL_PREFIX@/@XRT_INSTALL_DIR@
 exec_prefix=${prefix}

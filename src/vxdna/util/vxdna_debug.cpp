@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 - 2026, Advanced Micro Devices, Inc. All rights reserved.
 
 /**
  * @file vxdna_debug.cpp
@@ -7,10 +7,10 @@
  */
 
 #include "vxdna_debug.h"
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdarg>
+#include <cstdlib>
+#include <cstring>
 
 /* Global log level - default to INFO */
 static enum vxdna_log_level g_log_level = VXDNA_LOG_INFO;

@@ -12,7 +12,7 @@ const struct amdxdna_dev_priv npu5_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu5_info = {
-	.vbnv              = "NPU Strix Halo",
+	.default_vbnv      = "NPU Strix Halo",
 	.dev_priv          = &npu5_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };

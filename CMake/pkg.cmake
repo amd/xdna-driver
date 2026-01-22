@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 execute_process(
   COMMAND awk -F= "$1==\"ID\" {print $2}" /etc/os-release
@@ -94,11 +94,11 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
   PATTERN "download_raw" EXCLUDE
   )
 
-if(XDNA_DRV_PF_SRC_DIR)
-  set(PF_RMMOD "rmmod amdxdna_pf > /dev/null 2>&1")
-  set(PF_DBG_INSMOD "modprobe amdxdna_pf dyndbg=+pf")
-  set(PF_INSMOD "modprobe amdxdna_pf")
-endif(XDNA_DRV_PF_SRC_DIR)
+if(XDNA_DRV_INT_SRC_DIR AND XDNA_DRV_INT_NAME)
+  set(INT_RMMOD "rmmod ${XDNA_DRV_INT_NAME} > /dev/null 2>&1")
+  set(INT_DBG_INSMOD "modprobe ${XDNA_DRV_INT_NAME} dyndbg=+pf")
+  set(INT_INSMOD "modprobe ${XDNA_DRV_INT_NAME}")
+endif()
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/postinst.in

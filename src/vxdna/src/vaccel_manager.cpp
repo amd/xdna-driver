@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 - 2026, Advanced Micro Devices, Inc. All rights reserved.
 
 /*
  * Device Manager
@@ -31,7 +31,7 @@ mmap(int fd)
     if (m_map_addr == MAP_FAILED)
         VACCEL_THROW_MSG(-errno, "Failed to mmap resource: errno %d, %s", errno, strerror(errno));
     m_map_info = 1; // TODO:Used by linux kernel virtio-gpu driver vram, to set pgprot for mapping
-                    // 1 is for CACHED
+                  // 1 is for CACHED
     return m_map_addr;
 }
 

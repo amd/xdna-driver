@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 - 2026, Advanced Micro Devices, Inc. All rights reserved.
 
 /**
  * @file vxdna_debug.h
@@ -12,8 +12,10 @@
 #ifndef VXDNA_DEBUG_H
 #define VXDNA_DEBUG_H
 
-#include <stdio.h>
-#include <stdarg.h>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #ifdef __cplusplus
 extern "C" {

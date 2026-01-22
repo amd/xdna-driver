@@ -8,6 +8,7 @@
 #include <linux/completion.h>
 #include <linux/jiffies.h>
 #include <linux/sched.h>
+#include <linux/fdtable.h>
 
 #include "ve2_fw.h"
 #include "ve2_of.h"
@@ -675,6 +676,52 @@ static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_dr
 	return 0;
 }
 
+static int ve2_get_aie_part_fd(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_ctx_priv *nhwctx;
+	struct amdxdna_ctx *ctx;
+	u32 hwctx_handle;
+	int srcu_idx;
+	int ret = 0;
+	int aie_fd;
+
+	hwctx_handle = args->num_element;
+	srcu_idx = srcu_read_lock(&client->ctx_srcu);
+	ctx = xa_load(&client->ctx_xa, hwctx_handle);
+	if (!ctx) {
+		XDNA_ERR(xdna, "Failed to get ctx %u", hwctx_handle);
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	nhwctx = ctx->priv;
+	if (!nhwctx || !nhwctx->aie_dev) {
+		XDNA_ERR(xdna, "AIE partition not available for hwctx %p", ctx);
+		ret = -ENODEV;
+		goto unlock;
+	}
+
+	aie_fd = aie_partition_get_fd(nhwctx->aie_dev);
+	if (aie_fd < 0) {
+		XDNA_ERR(xdna, "Failed to get AIE partition FD: %d", aie_fd);
+		ret = aie_fd;
+		goto unlock;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &aie_fd, sizeof(aie_fd))) {
+		XDNA_ERR(xdna, "Failed to copy AIE partition FD to user");
+		close_fd(aie_fd);
+		ret = -EFAULT;
+		goto unlock;
+	}
+
+unlock:
+	srcu_read_unlock(&client->ctx_srcu, srcu_idx);
+	return ret;
+}
+
 int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -698,6 +745,9 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = ve2_get_array_async_error(xdna, args);
+		break;
+	case DRM_AMDXDNA_HWCTX_AIE_PART_FD:
+		ret = ve2_get_aie_part_fd(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

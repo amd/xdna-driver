@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 - 2026, Advanced Micro Devices, Inc. All rights reserved.
 
 // Disable debug print in this file.
 #undef XDNA_SHIM_DEBUG
@@ -373,7 +373,12 @@ drv_open(const std::string& sysfs_name) const
 
   auto fd = dev_fd();
   if (get_capset(fd) != VIRTGPU_DRM_CONTEXT_AMDXDNA)
-    shim_err(EINVAL, "%s is not NPU device", sysfs_name.c_str());
+    // This function is called by XRT when it scans devices to find out the NPU
+    // device in VM such as QEMU KVM. When there is an exception, XRT will only
+    // continue to scan when it is std::invalid_argument. And thus, we throw
+    // std::invalid_argument when the virtio gpu device is not NPU so that XRT
+    // will continue to check for the next device.
+    throw std::invalid_argument(sysfs_name + " is not NPU device");
 
   // Check if host memory is available via VIRTGPU_GETPARAM
   m_use_hostmem = get_host_visible(fd);

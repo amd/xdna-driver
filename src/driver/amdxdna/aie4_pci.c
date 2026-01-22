@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/version.h>
@@ -16,6 +16,8 @@
 #include "aie4_message.h"
 #include "aie4_solver.h"
 #include "aie4_devel.h"
+#include "amdxdna_dpt.h"
+#include "amdxdna_pm.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -296,8 +298,8 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	if (!(is_npu3a_dev(pdev) || is_npu3_dev(pdev))) {
-		XDNA_DBG(ndev->xdna, "skip aie check on non npu3 or npu3a device");
+	if (is_npu3_pf_dev(pdev)) {
+		XDNA_DBG(ndev->xdna, "skip aie check on non npu3 pf device");
 		return 0;
 	}
 
@@ -323,8 +325,8 @@ static inline int aie4_fw_load_support(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	if (is_npu3a_dev(pdev)) {
-		XDNA_DBG(xdna, "skip loading fw on unsupported device");
+	if (is_npu3_vf_dev(pdev)) {
+		XDNA_DBG(xdna, "skip loading fw on vf device");
 		return 0;
 	}
 
@@ -445,7 +447,13 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
+
+	if (is_npu3_pf_dev(pdev)) {
+		XDNA_DBG(xdna, "skip on pf device");
+		return 0;
+	}
 
 	/*
 	 * There is only single partition for the entire 3*4 aie hardware for now.
@@ -483,7 +491,13 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
+
+	if (is_npu3_pf_dev(pdev)) {
+		XDNA_DBG(xdna, "skip on pf device");
+		return;
+	}
 
 	req.partition_id = ndev->partition_id;
 
@@ -506,9 +520,7 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 		return;
 	}
 
-	if (!is_npu3a_dev(pdev))
-		(void)aie4_partition_fini(ndev);
-
+	aie4_partition_fini(ndev);
 	aie4_pm_fini(ndev);
 	aie4_mgmt_fw_fini(ndev);
 	aie4_mailbox_fini(ndev);
@@ -817,8 +829,8 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 #ifdef UMQ_HELLO_TEST
 	return aie4_hello_test(ndev, ctx);
 #endif
-	if (!nctx->umq_bo) {
-		XDNA_ERR(xdna, "cannot create hwctx without umq buffer");
+	if (!nctx || !nctx->umq_bo) {
+		XDNA_WARN(xdna, "cannot create hwctx due to NULL nctx or umq buffer");
 		return -EINVAL;
 	}
 
@@ -995,24 +1007,6 @@ static void aie4_ctx_resume_all(struct amdxdna_dev *xdna)
 	XDNA_DBG(xdna, "finished ctx_resume_all");
 }
 
-void aie4_context_quiesce(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
-
-	/* mark dev status to avoid new incoming requests */
-	ndev->dev_status = AIE4_DEV_INIT;
-
-	aie4_ctx_suspend_all(xdna);
-
-	/* fini mailbox service */
-	aie4_mailbox_fini(ndev);
-
-	/* set mailbox alive to 0 */
-	aie4_fw_clear_alive(xdna);
-}
-
 static int aie4_fw_reload(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -1049,63 +1043,83 @@ static int aie4_fw_reload(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-int aie4_context_restart(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-	int ret;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
-
-	ret = aie4_mailbox_init(xdna);
-	if (ret)
-		return ret;
-
-	ret = aie4_fw_reload(ndev);
-	if (ret)
-		return ret;
-
-	ret = aie4_partition_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "re-init partition failed ret %d", ret);
-		aie4_mailbox_fini(ndev);
-		return ret;
-	}
-
-	aie4_ctx_resume_all(xdna);
-
-	/* mark dev status to allow new incoming requests */
-	ndev->dev_status = AIE4_DEV_START;
-	return 0;
-}
-
-static void aie4_reset_prepare(struct amdxdna_dev *xdna)
+void aie4_reset_prepare(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	XDNA_INFO(xdna, "reset prepare start");
 
 	mutex_lock(&ndev->aie4_lock);
-	aie4_context_quiesce(xdna->dev_handle);
+
+	/* mark dev status to avoid new incoming requests */
+	ndev->dev_status = AIE4_DEV_INIT;
+
+	if (!is_npu3_pf_dev(pdev))
+		aie4_ctx_suspend_all(xdna);
+
+	/* fini mailbox service */
+	aie4_mailbox_fini(ndev);
+
+	/* set mailbox alive to 0 */
+	aie4_fw_clear_alive(xdna);
+
 	mutex_unlock(&ndev->aie4_lock);
 
 	XDNA_INFO(xdna, "reset prepare finished");
 }
 
-static int aie4_reset_done(struct amdxdna_dev *xdna)
+int aie4_reset_done(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	XDNA_INFO(xdna, "reset done start");
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_context_restart(xdna->dev_handle);
-	mutex_unlock(&ndev->aie4_lock);
+	ret = aie4_mailbox_init(xdna);
 	if (ret)
-		return ret;
+		goto error;
+
+	ret = aie4_fw_reload(ndev);
+	if (ret)
+		goto error;
+
+	ret = aie4_partition_init(ndev);
+	if (ret) {
+		aie4_mailbox_fini(ndev);
+		goto error;
+	}
+
+	if (is_npu3_pf_dev(pdev)) {
+		int numvfs;
+
+		mutex_unlock(&ndev->aie4_lock);
+		numvfs = aie4_sriov_configure(xdna, ndev->num_vfs);
+		mutex_lock(&ndev->aie4_lock);
+
+		if (numvfs != ndev->num_vfs) {
+			XDNA_ERR(xdna, "reconfigure %d num_vfs but configured %d",
+				 ndev->num_vfs, numvfs);
+			ret = -EINVAL;
+			goto error;
+		}
+	} else {
+		aie4_ctx_resume_all(xdna);
+	}
+
+	/* mark dev status to allow new incoming requests */
+	ndev->dev_status = AIE4_DEV_START;
+
+	mutex_unlock(&ndev->aie4_lock);
 
 	XDNA_INFO(xdna, "reset done finished");
 	return 0;
+
+error:
+	mutex_unlock(&ndev->aie4_lock);
+	return ret;
 }
 
 static void aie4_hw_suspend(struct amdxdna_dev *xdna)
@@ -1123,7 +1137,6 @@ static int aie4_hw_resume(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	int ret;
 
-	XDNA_DBG(xdna, "firmware resuming...");
 	ret = aie4_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "resume hw failed ret %d", ret);
@@ -1153,7 +1166,7 @@ static void aie4_iommu_fini(struct amdxdna_dev_hdl *ndev)
 		return;
 #endif
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	iommu_dev_disable_feature(ndev->xdna->ddev.dev, IOMMU_DEV_FEAT_SVA);
 #endif
 }
@@ -1193,7 +1206,7 @@ static int aie4_iommu_init(struct amdxdna_dev_hdl *ndev)
 		goto skip_pasid;
 #endif
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	ret = iommu_dev_enable_feature(xdna->ddev.dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
 		XDNA_ERR(xdna, "Enable PASID failed, ret %d", ret);
@@ -1689,6 +1702,10 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&xdna->dev_handle->aie4_lock);
 	switch (args->param) {
@@ -1731,6 +1748,7 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	}
 	mutex_unlock(&xdna->dev_handle->aie4_lock);
 	mutex_unlock(&xdna->dev_lock);
+	amdxdna_pm_suspend_put(xdna);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
@@ -1834,6 +1852,10 @@ static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
 		ret = aie4_get_ctx_status_array(client, args);
@@ -1841,10 +1863,21 @@ static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 	case DRM_AMDXDNA_FW_LOG:
 		ret = amdxdna_get_fw_log(xdna, args);
 		break;
+	case DRM_AMDXDNA_FW_TRACE:
+		ret = amdxdna_get_fw_trace(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_LOG_CONFIG:
+		ret = amdxdna_get_fw_log_configs(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_TRACE_CONFIG:
+		ret = amdxdna_get_fw_trace_configs(xdna, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
+
+	amdxdna_pm_suspend_put(xdna);
 	XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
@@ -1909,6 +1942,10 @@ static int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret;
 
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
 		mutex_lock(&xdna->dev_handle->aie4_lock);
@@ -1923,11 +1960,15 @@ static int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	case DRM_AMDXDNA_SET_FW_LOG_STATE:
 		ret = amdxdna_set_fw_log_state(xdna, args);
 		break;
+	case DRM_AMDXDNA_SET_FW_TRACE_STATE:
+		ret = amdxdna_set_fw_trace_state(xdna, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
 
+	amdxdna_pm_suspend_put(xdna);
 	return ret;
 }
 
@@ -1941,6 +1982,10 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.fw_log_config		= aie4_fw_log_config,
 	.fw_log_fini		= aie4_fw_log_fini,
 	.fw_log_parse		= aie4_fw_log_parse,
+	.fw_trace_init		= aie4_fw_trace_init,
+	.fw_trace_config	= aie4_fw_trace_config,
+	.fw_trace_fini		= aie4_fw_trace_fini,
+	.fw_trace_parse		= aie4_fw_trace_parse,
 	.reset_prepare		= aie4_reset_prepare,
 	.reset_done		= aie4_reset_done,
 	.get_aie_info		= aie4_get_info,
@@ -1951,4 +1996,5 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.ctx_config		= aie4_ctx_config,
 	.cmd_wait		= aie4_cmd_wait,
 	.debugfs		= aie4_debugfs_init,
+	.sriov_configure        = aie4_sriov_configure,
 };

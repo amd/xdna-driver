@@ -7,6 +7,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
+#include "amdxdna_pm.h"
 
 #include "aie4_pci.h"
 #include "aie4_message.h"
@@ -143,8 +144,12 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 
 	xdna = ctx->client->xdna;
 
-	/* resolver to call unload->aie4_destroy_context */
-	aie4_release_resource(ctx);
+	/* only access hardware if device is active */
+	if (!amdxdna_pm_resume_get(xdna)) {
+		/* resolver to call unload->aie4_destroy_context */
+		aie4_release_resource(ctx);
+		amdxdna_pm_suspend_put(xdna);
+	}
 
 	/* free col_list */
 	aie4_ctx_col_list_fini(ctx);
@@ -176,8 +181,13 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
-	ret = aie4_create_context(xdna->dev_handle, ctx);
+	if (!ctx->priv) {
+		XDNA_DBG(xdna, "skip uninitialized ctx");
+		return 0;
+	}
 
+	/* recreate existing ctx */
+	ret = aie4_create_context(xdna->dev_handle, ctx);
 	if (!ret)
 		ctx->priv->status = CTX_STATE_CONNECTED;
 	else
@@ -233,7 +243,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 
 	meta_bo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_SHARE);
 	if (!meta_bo) {
-		XDNA_ERR(xdna, "Get bo %d failed", bo_hdl);
+		XDNA_ERR(xdna, "Get meta_bo %d failed", bo_hdl);
 		ret = -EINVAL;
 		goto err_out;
 	}
@@ -265,7 +275,8 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		log_bo = amdxdna_gem_get_obj(client, meta_buffer->bo_handle, AMDXDNA_BO_SHARE);
 		break;
 	default:
-		XDNA_ERR(xdna, "unsupported buffer type %d", meta_buffer->buf_type);
+		XDNA_ERR(xdna, "unsupported buffer type %d bo %lld",
+			 meta_buffer->buf_type, meta_buffer->bo_handle);
 		ret = -EOPNOTSUPP;
 		goto put_meta_bo;
 	}
@@ -275,6 +286,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		ret = -EINVAL;
 		goto put_meta_bo;
 	}
+	XDNA_DBG(xdna, "Found bo %lld", meta_buffer->bo_handle);
 
 	/* assign dev_addr + offse to firmware */
 	prev_size = 0;
@@ -297,7 +309,6 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		}
 
 		off_addr = (u64)((char *)amdxdna_gem_dev_addr(log_bo) + prev_size);
-		off_addr += prev_size;
 
 		/* skip any empty entry */
 		if (entry->size == 0)

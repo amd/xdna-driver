@@ -1,7 +1,7 @@
 {
 	"copyright": "Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
-		"version": "202610.2.21.75",
+		"version": "202610.2.23.109",
 		"os_rel": ["22.04", "24.04"]
 	},
 	"firmwares": [
@@ -35,6 +35,24 @@
 			"pci_device_id": "17f1",
 			"pci_revision_id": "10",
 			"version": "20251218",
+			"git_hash": "b031923",
+			"fw_name": "cert.dev.sbin"
+		},
+		{
+			"device": "npu3",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/npu.sbin.0.0.12.75",
+			"pci_device_id": "17f2",
+			"pci_revision_id": "10",
+			"version": "0.0.12.75",
+			"fw_name": "npu.dev.sbin"
+		},
+		{
+			"device": "npu3",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/cert.sbin.20251218",
+			"pci_device_id": "17f2",
+			"pci_revision_id": "10",
+			"version": "20251218",
+			"git_hash": "b031923",
 			"fw_name": "cert.dev.sbin"
 		},
 		{

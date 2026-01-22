@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/iommu.h>
-#include <uapi/linux/iommufd.h>
 #include <linux/iova.h>
+#ifdef HAVE_iommu_paging_domain_alloc_flags
+/* IOMMU_HWPT_ALLOC_PASID is defined in uiommufd.h */
+#include <uapi/linux/iommufd.h>
+#else
+/* used GENMASK() to define iommu iova upper limit */
+#include <linux/bits.h>
+#endif
 
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
@@ -21,7 +27,12 @@ static struct iova *amdxdna_iommu_alloc_iova(struct amdxdna_dev *xdna,
 	unsigned long shift, end;
 	struct iova *iova;
 
+#ifdef HAVE_iommu_paging_domain_alloc_flags
 	end = xdna->domain->geometry.aperture_end;
+#else
+	/* xdna PD_MODE_V2 device uses a 47-bit IOVA address space (0 to GENMASK(46, 0)) */
+	end = GENMASK(46, 0);
+#endif
 	shift = iova_shift(&xdna->iovad);
 	size = iova_align(&xdna->iovad, size);
 
@@ -137,7 +148,13 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 		return 0;
 	}
 
+#ifdef HAVE_iommu_paging_domain_alloc_flags
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev, IOMMU_HWPT_ALLOC_PASID);
+#elif defined(HAVE_iommu_paging_domain_alloc)
+	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
+#else
+	xdna->domain = iommu_domain_alloc(xdna->ddev.dev->bus);
+#endif
 	if (IS_ERR(xdna->domain)) {
 		XDNA_ERR(xdna, "Failed to alloc iommu domain");
 		ret = PTR_ERR(xdna->domain);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _SHIMTEST_IO_H_
 #define _SHIMTEST_IO_H_
@@ -73,6 +73,12 @@ public:
   static const char *
   bo_type2name(int type);
 
+  void
+  cache_cmd_header(const xrt_core::buffer_handle *cmd_hdl, const ert_start_kernel_cmd *cmd);
+
+  void
+  restore_cmd_header(const xrt_core::buffer_handle *cmd_hdl, ert_start_kernel_cmd *cmd);
+
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
   get_bos();
 
@@ -86,6 +92,7 @@ protected:
   device *m_dev;
   xrt::elf m_elf = {};
   uint32_t m_kernel_index;
+  uint32_t m_cached_header = 0;
   const int m_FLAG_USR_BUF =  1 << 0;
   const int m_FLAG_OPT =      1 << 1;
   const int m_FLAG_NO_FILL =  1 << 2;
@@ -119,6 +126,15 @@ class elf_io_test_bo_set : public io_test_bo_set_base
 {
 public:
   elf_io_test_bo_set(device *dev, const std::string& xclbin_name);
+
+  void
+  init_cmd(hw_ctx& hwctx, bool dump) override;
+};
+
+class elf_full_io_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_full_io_test_bo_set(device *dev, const std::string& xclbin_name);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
