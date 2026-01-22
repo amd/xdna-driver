@@ -270,6 +270,8 @@ fill_indirect_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
     cebp->payload.args_len = 0;
     cebp->payload.args_host_addr_low = 0;
     cebp->payload.args_host_addr_high = 0;
+    cebp->payload.dtrace_buf_host_addr_low = static_cast<uint32_t>(dpu->dtrace_buffer);
+    cebp->payload.dtrace_buf_host_addr_high = static_cast<uint16_t>(dpu->dtrace_buffer >> 32);
   }
 
   auto hdr = &pkt->xrt_header;
@@ -296,6 +298,8 @@ fill_direct_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
   volatile struct exec_buf *ebp = reinterpret_cast<volatile struct exec_buf *>(pkt->data);
   ebp->dpu_control_code_host_addr_low = static_cast<uint32_t>(dpu->instruction_buffer);
   ebp->dpu_control_code_host_addr_high = static_cast<uint32_t>(dpu->instruction_buffer >> 32);
+  ebp->dtrace_buf_host_addr_low = static_cast<uint32_t>(dpu->dtrace_buffer);
+  ebp->dtrace_buf_host_addr_high = static_cast<uint16_t>(dpu->dtrace_buffer >> 32);
 
   auto hdr = &pkt->xrt_header;
   hdr->common_header.distribute = 0;
