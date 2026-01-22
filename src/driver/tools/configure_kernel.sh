@@ -64,9 +64,9 @@ try_compile() {
     conftest_mk="$tmpdir/Makefile"
     USE_LLVM=""
     if [ -e /proc/config.gz ]; then
-        USE_LLVM=$(zgrep -q "CONFIG_CC_IS_CLANG=y" /proc/config.gz 2>/dev/null && echo -n "LLVM=1");
-    elif [ -e /boot/config-$(KERNEL_VER) ]; then
-        USE_LLVM=$(grep -q "CONFIG_CC_IS_CLANG=y" /boot/config-$(KERNEL_VER) 2>/dev/null && echo -n "LLVM=1");
+        USE_LLVM=$(zgrep -q "CONFIG_CC_IS_CLANG=y" /proc/config.gz 2>/dev/null && echo -n "LLVM=1" || true)
+    elif [ -e "/boot/config-$KERNEL_VER" ]; then
+        USE_LLVM=$(grep -q "CONFIG_CC_IS_CLANG=y" "/boot/config-$KERNEL_VER" 2>/dev/null && echo -n "LLVM=1" || true)
     fi
 
 
