@@ -6,8 +6,14 @@
 #include <linux/version.h>
 #include <linux/completion.h>
 #include <linux/atomic.h>
+#include <linux/delay.h>
 
 #include "amdxdna_ctx.h"
+
+/* Module parameter: delay in seconds before waking threads on AIE error (for devmem debug) */
+static int aie_error_delay_sec;
+module_param(aie_error_delay_sec, int, 0644);
+MODULE_PARM_DESC(aie_error_delay_sec, "Delay in seconds on AIE error before waking threads (for devmem debug, default=0)");
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_res_solver.h"
@@ -756,6 +762,175 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 		queue_work(mgmtctx->mgmtctx_workq, &mgmtctx->sched_work);
 }
 
+/**
+ * ve2_dump_debug_state - Dump HSA queue state and handshake data for debugging
+ * @xdna: Pointer to the AMD XDNA device structure
+ * @mgmtctx: Pointer to the management context
+ *
+ * This function dumps critical debug information when an AIE error occurs,
+ * including HSA queue indices, completion states, and firmware handshake data.
+ */
+static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
+				 struct amdxdna_mgmtctx *mgmtctx)
+{
+	struct amdxdna_ctx *hwctx = mgmtctx->active_ctx;
+	struct amdxdna_ctx_priv *priv;
+	struct ve2_hsa_queue *hq;
+	struct hsa_queue *queue;
+	struct handshake hs;
+	int i;
+
+	if (!hwctx || !hwctx->priv) {
+		XDNA_ERR(xdna, "=== DEBUG DUMP: No active context ===\n");
+		return;
+	}
+
+	priv = hwctx->priv;
+	hq = &priv->hwctx_hsa_queue;
+	queue = hq->hsa_queue_p;
+
+	if (!queue) {
+		XDNA_ERR(xdna, "=== DEBUG DUMP: No HSA queue allocated ===\n");
+		return;
+	}
+
+	XDNA_ERR(xdna, "=== VE2 DEBUG DUMP START (hwctx=%p) ===\n", hwctx);
+
+	/* Dump HSA queue header */
+	XDNA_ERR(xdna, "HSA Queue Header:\n");
+	XDNA_ERR(xdna, "  read_index:     %llu\n", queue->hq_header.read_index);
+	XDNA_ERR(xdna, "  write_index:    %llu\n", queue->hq_header.write_index);
+	XDNA_ERR(xdna, "  reserved_write: %llu\n", hq->reserved_write_index);
+	XDNA_ERR(xdna, "  capacity:       %u\n", queue->hq_header.capacity);
+	XDNA_ERR(xdna, "  data_address:   0x%llx\n", queue->hq_header.data_address);
+	XDNA_ERR(xdna, "  dma_addr:       0x%llx\n", hq->hsa_queue_mem.dma_addr);
+
+	/* Calculate pending commands */
+	XDNA_ERR(xdna, "  pending_cmds:   %llu\n",
+		 queue->hq_header.write_index - queue->hq_header.read_index);
+
+	/* Dump completion status for all slots */
+	XDNA_ERR(xdna, "HSA Queue Completion Status:\n");
+	for (i = 0; i < HOST_QUEUE_ENTRY; i++) {
+		u64 completion = hq->hq_complete.hqc_mem[i];
+
+		if (completion != 0 && completion != ERT_CMD_STATE_INVALID)
+			XDNA_ERR(xdna, "  slot[%2d]: state=%llu\n", i, completion);
+	}
+
+	/* Dump packet info for pending slots */
+	XDNA_ERR(xdna, "HSA Queue Packet Details:\n");
+	for (i = 0; i < HOST_QUEUE_ENTRY; i++) {
+		struct host_queue_packet *pkt = &queue->hq_entry[i];
+		u64 completion = hq->hq_complete.hqc_mem[i];
+		u64 expected_signal = hq->hq_complete.hqc_dma_addr + i * sizeof(u64);
+
+		/* Show all non-invalid packets OR packets with unexpected state */
+		if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID ||
+		    (completion != 0 && completion != ERT_CMD_STATE_INVALID)) {
+			XDNA_ERR(xdna, "  slot[%2d]: type=%u opcode=%u count=%u chain=%u dist=%u indir=%u\n",
+				 i,
+				 pkt->xrt_header.common_header.type,
+				 pkt->xrt_header.common_header.opcode,
+				 pkt->xrt_header.common_header.count,
+				 pkt->xrt_header.common_header.chain_flag,
+				 pkt->xrt_header.common_header.distribute,
+				 pkt->xrt_header.common_header.indirect);
+			XDNA_ERR(xdna, "           signal=0x%llx (expected=0x%llx) state=%llu\n",
+				 pkt->xrt_header.completion_signal, expected_signal, completion);
+			/* Check for signal mismatch - indicates potential corruption */
+			if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID &&
+			    pkt->xrt_header.completion_signal != expected_signal) {
+				XDNA_ERR(xdna, "  *** SIGNAL MISMATCH! Possible packet corruption ***\n");
+			}
+			/* Check for invalid opcode - potential corruption */
+			if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID &&
+			    pkt->xrt_header.common_header.opcode != HOST_QUEUE_PACKET_EXEC_BUF) {
+				XDNA_ERR(xdna, "  *** INVALID OPCODE %u! Expected %u. Possible corruption ***\n",
+					 pkt->xrt_header.common_header.opcode,
+					 HOST_QUEUE_PACKET_EXEC_BUF);
+			}
+			/* Check for invalid count */
+			if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID &&
+			    !pkt->xrt_header.common_header.indirect &&
+			    pkt->xrt_header.common_header.count != sizeof(struct exec_buf)) {
+				XDNA_ERR(xdna, "  *** INVALID COUNT %u! Expected %zu. Possible corruption ***\n",
+					 pkt->xrt_header.common_header.count,
+					 sizeof(struct exec_buf));
+			}
+
+			/* Dump exec_buf data (instruction buffer addresses) for non-indirect packets */
+			if (!pkt->xrt_header.common_header.indirect) {
+				struct exec_buf *ebp = (struct exec_buf *)pkt->data;
+				u64 instr_addr = ((u64)ebp->dpu_control_code_host_addr_high << 32) |
+						 ebp->dpu_control_code_host_addr_low;
+				u64 dtrace_addr = ((u64)ebp->dtrace_buf_host_addr_high << 32) |
+						  ebp->dtrace_buf_host_addr_low;
+
+				XDNA_ERR(xdna, "           instr_addr=0x%llx dtrace=0x%llx args_len=%u\n",
+					 instr_addr, dtrace_addr, ebp->args_len);
+
+				/* Flag potentially invalid addresses */
+				if (!instr_addr)
+					XDNA_ERR(xdna, "  *** ZERO INSTRUCTION ADDR! Possible corruption ***\n");
+			}
+		}
+	}
+
+	/* Read and dump handshake data from firmware */
+	memset(&hs, 0, sizeof(hs));
+	ve2_partition_read_privileged_mem(priv->aie_dev, 0, 0, sizeof(hs), &hs);
+
+	XDNA_ERR(xdna, "Firmware Handshake Data:\n");
+	XDNA_ERR(xdna, "  mpaie_alive:        0x%x %s\n", hs.mpaie_alive,
+		 (hs.mpaie_alive == ALIVE_MAGIC) ? "(ALIVE)" : "(NOT ALIVE!)");
+	XDNA_ERR(xdna, "  partition_base:     0x%x\n", hs.partition_base_address);
+	XDNA_ERR(xdna, "  partition_size:     %u cols\n", hs.aie_info.partition_size);
+	XDNA_ERR(xdna, "  hsa_addr:           0x%x%08x\n", hs.hsa_addr_high, hs.hsa_addr_low);
+	XDNA_ERR(xdna, "  ctx_switch_req:     0x%x\n", hs.ctx_switch_req);
+	XDNA_ERR(xdna, "  cert_idle_status:   0x%x\n", hs.cert_idle_status);
+	XDNA_ERR(xdna, "  misc_status:        0x%x\n", hs.misc_status);
+	XDNA_ERR(xdna, "  completion_status:  0x%x\n", hs.completion_status);
+	XDNA_ERR(xdna, "  doorbell_pending:   %u\n", hs.doorbell_pending);
+
+	/* Dump VM state (firmware execution context) */
+	XDNA_ERR(xdna, "Firmware VM State:\n");
+	XDNA_ERR(xdna, "  fw_state:           0x%x\n", hs.vm.fw_state);
+	XDNA_ERR(xdna, "  abs_page_index:     0x%x\n", hs.vm.abs_page_index);
+	XDNA_ERR(xdna, "  ppc:                0x%x\n", hs.vm.ppc);
+
+	/* Dump exception info if any */
+	if (hs.exception.ear || hs.exception.esr || hs.exception.pc) {
+		XDNA_ERR(xdna, "Firmware Exception:\n");
+		XDNA_ERR(xdna, "  EAR (addr):         0x%x\n", hs.exception.ear);
+		XDNA_ERR(xdna, "  ESR (status):       0x%x\n", hs.exception.esr);
+		XDNA_ERR(xdna, "  PC:                 0x%x\n", hs.exception.pc);
+	}
+
+	/* Dump firmware counters for insight into workload */
+	XDNA_ERR(xdna, "Firmware Counters:\n");
+	XDNA_ERR(xdna, "  c_job_launched:     %u\n", hs.counter.c_job_launched);
+	XDNA_ERR(xdna, "  c_job_finished:     %u\n", hs.counter.c_job_finished);
+	XDNA_ERR(xdna, "  c_hsa_pkt:          %u\n", hs.counter.c_hsa_pkt);
+	XDNA_ERR(xdna, "  c_opcode:           %u\n", hs.counter.c_opcode);
+	XDNA_ERR(xdna, "  c_doorbell:         %u\n", hs.counter.c_doorbell);
+	XDNA_ERR(xdna, "  c_page:             %u\n", hs.counter.c_page);
+
+	/* Dump DMA addresses for debugging DMA errors */
+	XDNA_ERR(xdna, "Last DMA Addresses:\n");
+	XDNA_ERR(xdna, "  dm2mm:              0x%x%08x\n",
+		 hs.last_ddr_dm2mm_addr_high, hs.last_ddr_dm2mm_addr_low);
+	XDNA_ERR(xdna, "  mm2dm:              0x%x%08x\n",
+		 hs.last_ddr_mm2dm_addr_high, hs.last_ddr_mm2dm_addr_low);
+
+	/* Dump context save/restore state */
+	XDNA_ERR(xdna, "Context Save State:\n");
+	XDNA_ERR(xdna, "  restore_page_idx:   %u\n", hs.ctx_save.restore_page.page_index);
+	XDNA_ERR(xdna, "  cmd_chain_failure:  %u\n", hs.ctx_save.restore_page.cmd_chain_failure);
+
+	XDNA_ERR(xdna, "=== VE2 DEBUG DUMP END ===\n");
+}
+
 static void ve2_aie_error_cb(void *arg)
 {
 	struct amdxdna_mgmtctx *mgmtctx = arg;
@@ -877,6 +1052,31 @@ static void ve2_aie_error_cb(void *arg)
 	}
 
 	aie_free_errors(aie_errs);
+
+	/* Dump HSA queue and handshake data for debugging */
+	ve2_dump_debug_state(xdna, mgmtctx);
+
+	/*
+	 * Optional delay for devmem debugging - allows user to dump instruction buffers
+	 * before the application exits. Set via: echo N > /sys/module/amdxdna/parameters/aie_error_delay_sec
+	 */
+	if (aie_error_delay_sec > 0) {
+		XDNA_ERR(xdna, "*** WAITING %d SECONDS FOR DEVMEM DUMP ***\n", aie_error_delay_sec);
+		XDNA_ERR(xdna, "*** Run: ./dump_instr_buf.sh <addr> 40960 dump.txt ***\n");
+		ssleep(aie_error_delay_sec);
+		XDNA_ERR(xdna, "*** WAIT COMPLETE, RESUMING ***\n");
+	}
+
+	/*
+	 * Set misc_intrpt_flag and wake up waiting threads so they don't hang
+	 * indefinitely when an AIE error occurs. This allows ve2_cmd_wait() to
+	 * detect the error via check_read_index() and return with timeout status.
+	 */
+	if (mgmtctx->active_ctx && mgmtctx->active_ctx->priv) {
+		mgmtctx->active_ctx->priv->misc_intrpt_flag = true;
+		wake_up_interruptible_all(&mgmtctx->active_ctx->priv->waitq);
+		XDNA_ERR(xdna, "AIE error detected, waking up waiting threads\n");
+	}
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 
