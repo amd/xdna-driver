@@ -17,7 +17,11 @@ dbg_hwq_umq(const device& dev)
 
   shim_debug("dbg umq sz %ld", umq_sz);
 
-  m_dbg_umq_bo = std::make_unique<uc_dbg_buffer>(m_pdev, umq_sz, AMDXDNA_BO_CMD);
+  auto f = xcl_bo_flags{0};
+  f.use = XRT_BO_USE_DEBUG_QUEUE;
+  f.flags = XRT_BO_FLAGS_CACHEABLE;
+  f.dir = XRT_BO_ACCESS_READ_WRITE;
+  m_dbg_umq_bo = std::make_unique<uc_dbg_buffer>(m_pdev, umq_sz, f.all);
   m_dbg_umq_bo_buf = m_dbg_umq_bo->vaddr();
   m_dbg_umq_hdr =
     reinterpret_cast<volatile struct host_queue_header *>(m_dbg_umq_bo_buf);

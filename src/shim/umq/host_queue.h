@@ -56,11 +56,11 @@ enum host_queue_packet_opcode
  */ 
 struct exec_buf
 {
-  uint32_t reserved0;
+  uint32_t dtrace_buf_host_addr_low;
   uint32_t dpu_control_code_host_addr_low;
   uint32_t dpu_control_code_host_addr_high;
   uint16_t args_len;
-  uint16_t reserved1;
+  uint16_t dtrace_buf_host_addr_high;
   uint32_t args_host_addr_low;
   uint32_t args_host_addr_high;
 };
