@@ -7,10 +7,11 @@
 #define _AMDXDNA_CMA_BUF_H_
 
 #include <drm/drm_device.h>
+#include <linux/bitops.h>
+
+#define AMDXDNA_BO_FLAGS_CACHEABLE	BIT(24)
 
 bool amdxdna_use_cma(void);
-int get_cma_mem_index(u64 flags);
-struct dma_buf *amdxdna_get_cma_buf(struct device *dev, size_t size);
 struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_devs,
 						  int max_regions,
 						  struct device *fallback_dev,
