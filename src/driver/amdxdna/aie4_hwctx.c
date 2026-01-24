@@ -351,6 +351,22 @@ static int aie4_ctx_detach_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl)
 	return aie4_ctx_config_debug_bo(ctx, bo_hdl, 0);
 }
 
+int aie4_parse_priority(u32 priority)
+{
+	switch (priority) {
+	case AIE4_CONTEXT_PRIORITY_BAND_IDLE:
+		return AMDXDNA_QOS_LOW_PRIORITY;
+	case AIE4_CONTEXT_PRIORITY_BAND_NORMAL:
+		return AMDXDNA_QOS_NORMAL_PRIORITY;
+	case AIE4_CONTEXT_PRIORITY_BAND_FOCUS:
+		return AMDXDNA_QOS_HIGH_PRIORITY;
+	case AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME:
+		return AMDXDNA_QOS_REALTIME_PRIORITY;
+	default:
+		return 0;
+	}
+}
+
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
