@@ -79,6 +79,18 @@ struct amdxdna_cmd_preempt_data {
 	u32 prop_args[];    /* properties and regular kernel arguments */
 };
 
+/*
+ * struct amdxdna_cmd_start_dpu - interpretation of data payload for
+ * ERT_START_DPU in amdxdna_cmd.
+ */
+struct amdxdna_cmd_start_dpu {
+	u64 dtrace_buffer;		/* dtrace buffer address 2 words */
+	u64 instruction_buffer;		/* buffer address 2 words */
+	u32 instruction_buffer_size;	/* size of buffer in bytes */
+	u16 uc_index;			/* microblaze controller index */
+	u16 chained;			/* number of following amdxdna_cmd_start_dpu elements */
+};
+
 /**
  * Interpretation of payload for an amdxdna_cmd which has context health data for npu0
  *
@@ -200,11 +212,6 @@ struct amdxdna_cmd {
 
 #define INVALID_CU_IDX		(~0U)
 
-/*
- * Define the maximum number of outstanding commands in a context.
- * Must be power of 2!
- */
-#define CTX_MAX_CMDS			4
 struct amdxdna_ctx {
 	struct amdxdna_client		*client;
 	struct amdxdna_ctx_priv		*priv;
@@ -353,11 +360,13 @@ amdxdna_cmd_get_chained_payload(struct amdxdna_gem_obj *cmd_abo, u32 *sub_cmd_cn
 	payload = amdxdna_cmd_get_payload(cmd_abo, &payload_len);
 	if (!payload)
 		return NULL;
-	ccnt = payload->command_count;
-	if (!ccnt || ccnt > MAX_CHAINED_SUB_CMD ||
-	    payload_len < struct_size(payload, data, ccnt))
-		return NULL;
-	*sub_cmd_cnt = ccnt;
+	if (sub_cmd_cnt) {
+		ccnt = payload->command_count;
+		if (!ccnt || ccnt > MAX_CHAINED_SUB_CMD ||
+		    payload_len < struct_size(payload, data, ccnt))
+			return NULL;
+		*sub_cmd_cnt = ccnt;
+	}
 	return payload;
 }
 

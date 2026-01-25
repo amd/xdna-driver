@@ -714,7 +714,6 @@ static irqreturn_t col_irq_handler(int irq, void *p)
 	struct col_entry *col = (struct col_entry *)p;
 
 	wake_up_all(&col->col_event);
-
 	return IRQ_HANDLED;
 }
 
@@ -877,7 +876,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		goto done;
 	}
 
-	XDNA_DBG(xdna, "resp msix %d, ctx %d, door %d, irq %d",
+	XDNA_DBG(xdna, "resp msix %d, ctx %d, doorbell %d, irq %d",
 		 resp.job_complete_msix_idx,
 		 resp.hw_context_id,
 		 resp.doorbell_offset,

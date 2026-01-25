@@ -228,7 +228,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	aie2_rq_yield(ctx);
 	idx = get_job_idx(job->seq);
 	ctx->priv->pending[idx] = NULL;
-	up(&job->ctx->io_slot_sem);
+	up(&job->ctx->priv->job_sem);
 	dma_fence_put(job->fence);
 	job->fence = NULL;
 	mmput_async(job->mm);
@@ -464,7 +464,7 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 		idx = get_job_idx(job->seq);
 		/* No contention with submit, no lock */
 		ctx->priv->pending[idx] = NULL;
-		up(&ctx->io_slot_sem);
+		up(&ctx->priv->job_sem);
 	}
 
 	drm_sched_job_cleanup(sched_job);
@@ -591,6 +591,7 @@ int aie2_ctx_init(struct amdxdna_ctx *ctx)
 	drm_gem_object_get(to_gobj(heap));
 	mutex_unlock(&client->mm_lock);
 	priv->heap = heap;
+	sema_init(&priv->job_sem, CTX_MAX_CMDS);
 
 	ret = amdxdna_gem_pin(heap);
 	if (ret) {
@@ -864,7 +865,7 @@ int aie2_cmd_submit(struct amdxdna_sched_job *job,
 	int ret, i;
 
 	xdna = ctx->client->xdna;
-	ret = down_killable(&ctx->io_slot_sem);
+	ret = down_killable(&ctx->priv->job_sem);
 	if (ret)
 		XDNA_ERR(xdna, "%s Grab job sem failed, ret %d", ctx->name, ret);
 
@@ -872,7 +873,7 @@ int aie2_cmd_submit(struct amdxdna_sched_job *job,
 	if (ret) {
 		if (ret != -ERESTARTSYS)
 			XDNA_ERR(xdna, "Submit enter failed, ret %d", ret);
-		goto up_io_slot_sem;
+		goto up_job_sem;
 	}
 
 	chain = dma_fence_chain_alloc();
@@ -937,8 +938,8 @@ free_chain:
 rq_yield:
 	aie2_rq_yield(ctx);
 	aie2_rq_submit_exit(ctx);
-up_io_slot_sem:
-	up(&ctx->io_slot_sem);
+up_job_sem:
+	up(&ctx->priv->job_sem);
 	job->state = JOB_STATE_DONE;
 	return ret;
 }

@@ -36,17 +36,16 @@ hwq_umq(const device& dev, size_t nslots) : hwq(dev)
   // host queue layout:
   //   host_queue_header_t
   //   host_queue_packet_t [nslots]
-  //   indirect [4 * indirect_buffer * nslots]
+  //   indirect [HSA_MAX_LEVEL1_INDIRECT_ENTRIES * indirect_buffer * nslots]
   const size_t header_sz = sizeof(struct host_queue_header);
   const size_t queue_sz = sizeof(struct host_queue_packet) * nslots;
-  const size_t indirect_sz = (sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES) * nslots;
+  const size_t indirect_sz = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES * nslots;
 
 #ifdef UMQ_HELLO_TEST
   const size_t umq_sz = 0x200000;
 #else
   const size_t umq_sz = header_sz + queue_sz + indirect_sz;
 #endif
-
   shim_debug("Creating UMQ HW queue of size %ld", umq_sz);
 
   m_umq_bo = std::make_unique<buffer>(m_pdev, umq_sz, AMDXDNA_BO_CMD);
@@ -208,10 +207,9 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   auto pkt = get_pkt(slot_idx);
   auto hdr = &pkt->xrt_header;
   hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+  hdr->common_header.chain_flag = last_of_chain ? LAST_CMD : NOT_LAST_CMD;
   // Completion signal area has to be a full WORD, we utilize the command_bo header.
   hdr->completion_signal = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
-  // TODO: remove once uC stops looking at this field.
-  hdr->common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 
   // Issue mfence instruction to make sure all writes to the slot before is done.
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
@@ -237,7 +235,7 @@ fill_indirect_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
   auto pkt = get_pkt(slot_idx);
   auto pkt_size = (dpu->chained + 1) * sizeof(struct host_indirect_packet_entry);
 
-  if (dpu->chained + 1 >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
+  if (dpu->chained >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
     shim_err(EINVAL, "unsupported indirect number %d, valid number <= %d",
       dpu->chained + 1, HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 

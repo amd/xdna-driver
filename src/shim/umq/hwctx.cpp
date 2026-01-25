@@ -8,9 +8,12 @@
 
 namespace shim_xdna {
 
+// Allow at least one runlist (24 sub-cms) plus a few single cmds.
+const size_t total_queue_slots = 32;
+
 hwctx_umq::
 hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
-  : hwctx(device, qos, xclbin, std::make_unique<hwq_umq>(device, 8))
+  : hwctx(device, qos, xclbin, std::make_unique<hwq_umq>(device, total_queue_slots))
   , m_pdev(device.get_pdev())
 {
   shim_debug("Created UMQ HW context (%d)", get_slotidx());
@@ -27,7 +30,7 @@ hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
 
 hwctx_umq::
 hwctx_umq(const device& device, uint32_t partition_size)
-  : hwctx(device, partition_size, std::make_unique<hwq_umq>(device, 8))
+  : hwctx(device, partition_size, std::make_unique<hwq_umq>(device, total_queue_slots))
   , m_pdev(device.get_pdev())
 {
   m_col_cnt = partition_size;

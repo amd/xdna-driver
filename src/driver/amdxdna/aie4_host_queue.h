@@ -6,6 +6,8 @@
 #ifndef _AIE4_HOST_QUEUE_H_
 #define _AIE4_HOST_QUEUE_H_
 
+/* Allow at least one runlist cmd and a few single cmds. Must be power of 2. */
+#define CTX_MAX_CMDS			32
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES	6
 
 struct host_queue_header {
@@ -21,11 +23,11 @@ struct host_queue_header {
 
 struct exec_buf
 {
-	u32 reserved0;
+	u32 dtrace_buf_host_addr_low;
 	u32 dpu_control_code_host_addr_low;
 	u32 dpu_control_code_host_addr_high;
-	u32 args_len;
-	u32 reserved1;
+	u16 args_len;
+	u16 dtrace_buf_host_addr_high;
 	u32 args_host_addr_low;
 	u32 args_host_addr_high;
 };

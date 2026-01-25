@@ -29,7 +29,7 @@
 
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
 
-extern bool kernel_mode_submission;
+extern int kernel_mode_submission;
 
 struct clock_entry {
 	char name[16];
@@ -48,13 +48,14 @@ struct amdxdna_ctx_priv {
 	struct amdxdna_gem_obj		*umq_bo;
 	u64				*umq_read_index;
 	u64				*umq_write_index;
+	u64				write_index;
 	struct host_queue_packet	*umq_pkts;
 	struct host_indirect_packet_data *umq_indirect_pkts;
+	u64				umq_indirect_pkts_dev_addr;
 
-	bool				stop_job_worker;
 	struct work_struct		job_work;
+	bool				job_aborting;
 	struct workqueue_struct		*job_work_q;
-	struct workqueue_struct		*cert_work_q;
 	wait_queue_head_t		job_list_wq;
 	struct list_head		pending_job_list;
 	struct list_head		running_job_list;
@@ -68,9 +69,12 @@ struct amdxdna_ctx_priv {
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
 
-	// maxzhen: Simulating CERT
+	/* CERT Simulation for debug only, remove later. */
+	struct workqueue_struct		*cert_work_q;
 	struct work_struct		cert_work;
-	bool				timeout_done;
+	u64				cert_timeout_seq;
+	u64				cert_error_seq;
+	u64				cert_read_index;
 };
 
 enum aie4_dev_status {

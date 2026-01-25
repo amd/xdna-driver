@@ -122,7 +122,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	ctx->doorbell_offset = AMDXDNA_INVALID_DOORBELL_OFFSET;
 	ctx->syncobj = NULL;
 	ctx->syncobj_hdl = AMDXDNA_INVALID_FENCE_HANDLE;
-	sema_init(&ctx->io_slot_sem, CTX_MAX_CMDS);
 	mutex_init(&ctx->io_lock);
 	fs_reclaim_acquire(GFP_KERNEL);
 	might_lock(&ctx->io_lock);

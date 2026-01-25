@@ -111,6 +111,11 @@ struct ctx_pdi {
 };
 #endif
 
+/*
+ * Define the maximum number of outstanding commands in a context.
+ * Must be power of 2!
+ */
+#define CTX_MAX_CMDS			4
 #define get_job_idx(seq) ((seq) & (CTX_MAX_CMDS - 1))
 struct amdxdna_ctx_priv {
 	struct amdxdna_gem_obj		*heap;
@@ -122,6 +127,7 @@ struct amdxdna_ctx_priv {
 #ifdef AMDXDNA_DEVEL
 	struct amdxdna_sched_job	*pending[CTX_MAX_CMDS];
 #endif
+	struct semaphore		job_sem;
 
 	/* Driver needs to wait for all jobs freed before fini DRM scheduler */
 	wait_queue_head_t		job_free_waitq;
