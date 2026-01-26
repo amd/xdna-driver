@@ -88,6 +88,18 @@ static int aie4_ctx_col_list_init(struct amdxdna_ctx *ctx)
 	return 0;
 }
 
+static inline void aie4_ctx_umq_dump(struct amdxdna_ctx *ctx)
+{
+	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
+		sizeof(struct host_indirect_packet_data);
+	const size_t pkts_sz = CTX_MAX_CMDS * sizeof(struct host_queue_packet);
+	const size_t hdr_sz = sizeof(struct host_queue_header);
+	void *umq_va = amdxdna_gem_vmap(ctx->priv->umq_bo);
+
+	print_hex_dump_debug("raw_umq: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     umq_va, hdr_sz + pkts_sz + indir_pkts_sz, false);
+}
+
 static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 {
 	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
@@ -767,6 +779,8 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 		fill_direct_pkt(priv, slot_idx, dpu);
 
 	pkt = &priv->umq_pkts[slot_idx];
+	pkt->pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
+	pkt->pkt_header.common_header.reserved = 0x0; /* Remove after update CERT. */
 	pkt->pkt_header.common_header.chain_flag =
 		last_of_chain ? CHAIN_FLG_LAST_CMD : CHAIN_FLG_NOT_LAST_CMD;
 	if (kernel_mode_submission == KMS_REAL_CERT)
@@ -775,6 +789,7 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 		pkt->pkt_header.completion_signal = (uintptr_t)amdxdna_gem_vmap(cmd_abo);
 	pkt->pkt_header.completion_signal += offsetof(struct amdxdna_cmd, header);
 	*seq = publish_cmd(ctx);
+	/*aie4_ctx_umq_dump(ctx);*/
 	if (kernel_mode_submission == KMS_REAL_CERT)
 		ring_doorbell(ctx);
 	else
