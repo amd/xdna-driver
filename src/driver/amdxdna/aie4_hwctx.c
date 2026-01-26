@@ -9,6 +9,7 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_trace.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -209,6 +210,7 @@ static void job_done(struct amdxdna_sched_job *job)
 
 	XDNA_DBG(xdna, "ctx %s job 0x%llx done, state %d",
 		 ctx->name, (u64)job, amdxdna_cmd_get_state(job->cmd_bo));
+	trace_amdxdna_debug_point(ctx->name, job->seq, "signaling fence");
 	job->state = JOB_STATE_DONE;
 	dma_fence_signal(job->fence);
 	mmput_async(job->mm);
@@ -451,6 +453,7 @@ static void job_worker(struct work_struct *work)
 	while (!!(job = next_running_job(ctx))) {
 		if (!priv->job_aborting)
 			ret = wait_till_job_done(job);
+		trace_amdxdna_debug_point(ctx->name, job->seq, "job returned");
 		if (ret) {
 			XDNA_ERR(xdna, "ctx %s has timed out", ctx->name);
 			/* Ctx has just failed, timeout this one. */
@@ -867,6 +870,7 @@ done:
 	ctx->submitted++;
 	list_move_tail(&job->list, &ctx->priv->running_job_list);
 	mutex_unlock(&ctx->io_lock);
+	trace_amdxdna_debug_point(ctx->name, job->seq, "job submitted");
 	queue_work(ctx->priv->job_work_q, &ctx->priv->job_work);
 	wake_up_all(&ctx->priv->job_list_wq);
 	return 0;

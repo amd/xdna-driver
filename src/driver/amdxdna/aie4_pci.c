@@ -18,6 +18,7 @@
 #include "aie4_devel.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_trace.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -713,6 +714,7 @@ static irqreturn_t col_irq_handler(int irq, void *p)
 {
 	struct col_entry *col = (struct col_entry *)p;
 
+	trace_amdxdna_debug_point("ISR fired", col->col_irq, "command completed");
 	wake_up_all(&col->col_event);
 	return IRQ_HANDLED;
 }
