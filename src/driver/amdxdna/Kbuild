@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
 #
 
 ROOT := $(src)
@@ -60,7 +60,6 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie4_solver.o \
 	aie4_sriov.o \
 	npu1_regs.o \
-	npu2_regs.o \
 	npu3_regs.o \
 	npu4_regs.o \
 	npu5_regs.o \
