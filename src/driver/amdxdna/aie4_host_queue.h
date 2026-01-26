@@ -57,6 +57,7 @@ struct host_indirect_packet_entry {
 	u32 host_addr_low;
 	u32 host_addr_high_uc_index;
 };
+
 #define HIPE_HOST_ADDR_HIGH_SHIFT	0
 #define HIPE_HOST_ADDR_HIGH_MASK	GENMASK(24, 0)
 #define HIPE_UC_INDEX_SHIFT		25
