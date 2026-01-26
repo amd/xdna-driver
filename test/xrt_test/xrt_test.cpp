@@ -484,7 +484,7 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
   auto end = std::chrono::high_resolution_clock::now();
   auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
   std::cout << "Executed total " << c_rounds << " NOP commands in " << duration_us
-	    << "us with max outstanding " << o_cmds << "NOP commands, average latency: "
+	    << "us with max outstanding " << o_cmds << " commands, average latency: "
 	    << duration_us * 1.0 / c_rounds << "us\n";
 }
 
@@ -536,8 +536,8 @@ TEST_xrt_umq_nop_runlist(int device_index, arg_type& arg)
 
   auto end = std::chrono::high_resolution_clock::now();
   auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  std::cout << "Executed total " << c_rounds << " NOP runlist commands in " << duration_us
-	    << "us with max " << o_cmds << " outstanding runlist commands (" << r_cmds
+  std::cout << "Executed total " << c_rounds << " NOP runlist in " << duration_us
+	    << "us with max " << o_cmds << " outstanding runlist (" << r_cmds
 	    <<" commands per runlist), average latency: "
 	    << duration_us * 1.0 / (r_cmds * c_rounds) << "us\n";
 }
