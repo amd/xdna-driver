@@ -26,8 +26,7 @@
 int kernel_mode_submission = 1;
 module_param(kernel_mode_submission, int, 0600);
 MODULE_PARM_DESC(kernel_mode_submission,
-		 "I/O submission via driver, 0 for user mode submission, "
-		 "2 for simulating cert (Default 1 for real cert)");
+		 "I/O submission, 0 - by user, 1 by driver (default), 2 - simulated cert for debugging");
 
 static int aie4_alloc_resource(struct amdxdna_ctx *ctx)
 {
@@ -1016,7 +1015,7 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 	 * is ready to give up on this command.
 	 */
 	if (kernel_mode_submission != NO_KMS)
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 
 	if (timeout)
 		wait_jifs = msecs_to_jiffies(timeout);

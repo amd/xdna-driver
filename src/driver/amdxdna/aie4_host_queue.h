@@ -21,8 +21,7 @@ struct host_queue_header {
 	u64 data_address; /* The xdna dev addr for payload. */
 };
 
-struct exec_buf
-{
+struct exec_buf {
 	u32 dtrace_buf_host_addr_low;
 	u32 dpu_control_code_host_addr_low;
 	u32 dpu_control_code_host_addr_high;
@@ -35,8 +34,7 @@ struct exec_buf
 #define OPCODE_EXEC_BUF		1
 #define CHAIN_FLG_LAST_CMD	0
 #define CHAIN_FLG_NOT_LAST_CMD	1
-struct common_header
-{
+struct common_header {
 	u16 reserved; /* MBZ. */
 	u8 opcode;
 	u8 chain_flag;
@@ -45,20 +43,17 @@ struct common_header
 	u8 indirect;
 };
 
-struct host_queue_packet_header
-{
-	struct common_header common_header;	
+struct host_queue_packet_header {
+	struct common_header common_header;
 	u64 completion_signal;
 };
 
-struct host_queue_packet
-{
+struct host_queue_packet {
 	struct host_queue_packet_header pkt_header;
 	u32 data[12]; /* total 64-byte packet */
 };
 
-struct host_indirect_packet_entry
-{
+struct host_indirect_packet_entry {
 	u32 host_addr_low;
 	u32 host_addr_high_uc_index;
 };
