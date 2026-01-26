@@ -457,6 +457,7 @@ static void job_worker(struct work_struct *work)
 			job_timeout(job);
 			/* Abort the rest. */
 			priv->job_aborting = true;
+			ret = 0;
 		} else {
 			job_complete(job);
 		}
@@ -502,11 +503,12 @@ static void cert_worker(struct work_struct *work)
 			/* Simulating timeout. */
 			XDNA_DBG(xdna, "Simulating CERT timeout @%lld", priv->cert_read_index);
 			priv->status = CTX_STATE_DISCONNECTED;
+			wake_up_all(&priv->col_entry->col_event);
 			priv->cert_timeout_seq = ~0UL;
 			priv->cert_read_index = 0;
 			break;
 		}
-		msleep(100);
+		msleep(300);
 		if (priv->cert_read_index == priv->cert_error_seq) {
 			/* Simulating error. */
 			XDNA_DBG(xdna, "Simulating CERT error @%lld", priv->cert_read_index);
@@ -525,7 +527,6 @@ static void cert_worker(struct work_struct *work)
 					 priv->cert_read_index - 1);
 				*ebuf_state = ERT_CMD_STATE_COMPLETED;
 			}
-			priv->cert_error_seq = ~0UL;
 			*priv->umq_read_index = priv->cert_read_index;
 			wake_up_all(&priv->col_entry->col_event);
 		}
@@ -623,6 +624,9 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = ctx->priv;
 
+	cancel_work_sync(&priv->cert_work);
+	destroy_workqueue(priv->cert_work_q);
+
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {
 		/* resolver to call unload->aie4_destroy_context */
@@ -634,8 +638,6 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	wake_up_all(&priv->col_entry->col_event);
 	cancel_work_sync(&priv->job_work);
 	destroy_workqueue(priv->job_work_q);
-	cancel_work_sync(&priv->cert_work);
-	destroy_workqueue(priv->cert_work_q);
 
 	aie4_ctx_col_list_fini(ctx);
 	aie4_ctx_umq_fini(ctx);
