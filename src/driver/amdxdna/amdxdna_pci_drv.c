@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/module.h>
@@ -41,7 +41,6 @@ MODULE_DEVICE_TABLE(pci, pci_ids);
 
 static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x1502, 0x0,  &dev_npu1_info },
-	{ 0x17f0, 0x0,  &dev_npu2_info },
 	{ 0x17f1, 0x10,  &dev_npu3_info },
 	{ 0x17f2, 0x10,  &dev_npu3_pf_info },
 	{ 0x17f3, 0x10,  &dev_npu3_info },
