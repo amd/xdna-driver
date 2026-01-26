@@ -61,18 +61,6 @@ math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
 set(XDNA_CPACK_XRT_BASE_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR})
 set(XDNA_CPACK_XRT_BASE_NEXT_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})
 
-install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
-  DESTINATION ${XDNA_PKG_DATA_DIR}/bins
-  COMPONENT ${XDNA_COMPONENT}
-  FILES_MATCHING
-  PATTERN "*.xclbin"
-  PATTERN "*.txt"
-  PATTERN "*.elf"
-  PATTERN "*.bin"
-  PATTERN "*.json"
-  PATTERN "*.yaml"
-  )
-
 # VTD archives are downloaded by build script based on info.json configuration
 set(VTD_ARCHIVES_DIR "${CMAKE_CURRENT_BINARY_DIR}/../amdxdna_bins/vtd_archives")
 message(STATUS "Using VTD archives from ${VTD_ARCHIVES_DIR}")
