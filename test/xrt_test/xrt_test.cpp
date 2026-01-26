@@ -80,6 +80,7 @@ usage(const std::string& prog)
   std::cout << "\t" << "xrt_test" << " [test case ID separated by space] - run specified test cases\n";
   std::cout << "\t" << "-c" << ": n rounds in sequence within 1 hwctx\n";
   std::cout << "\t" << "-o" << ": max n outstanding cmds within 1 hwctx\n";
+  std::cout << "\t" << "-r" << ": n cmds per runlist\n";
   std::cout << "\t" << "-s" << ": n rounds in parallel within 1 hwctx\n";
   std::cout << "\t" << "-m" << ": n hwctx in parallel\n";
   std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress test and multi-layer)\n";
@@ -535,8 +536,8 @@ TEST_xrt_umq_nop_runlist(int device_index, arg_type& arg)
 
   auto end = std::chrono::high_resolution_clock::now();
   auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  std::cout << "Executed total " << c_rounds << " NOP commands in " << duration_us
-	    << "us with max " << o_cmds << "outstanding runlist commands (" << r_cmds
+  std::cout << "Executed total " << c_rounds << " NOP runlist commands in " << duration_us
+	    << "us with max " << o_cmds << " outstanding runlist commands (" << r_cmds
 	    <<" commands per runlist), average latency: "
 	    << duration_us * 1.0 / (r_cmds * c_rounds) << "us\n";
 }
@@ -972,7 +973,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:o:s:m:x:d:i:t:e:v:w:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:o:r:s:m:x:d:i:t:e:v:w:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
