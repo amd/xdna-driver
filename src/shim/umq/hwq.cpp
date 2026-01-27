@@ -210,6 +210,8 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   hdr->common_header.chain_flag = last_of_chain ? LAST_CMD : NOT_LAST_CMD;
   // Completion signal area has to be a full WORD, we utilize the command_bo header.
   hdr->completion_signal = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
+  // TODO: remove once uC stops looking at this field.
+  hdr->common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
   // Issue mfence instruction to make sure all writes to the slot before is done.
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   // Indicates the slot is ready for processing by uC.
@@ -222,8 +224,9 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
 
   shim_debug("Submitted %s-uC %scommand (%ld)",
     get_ert_dpu_data_next(dpu) ? "multi" : "single",
-    last_of_chain ? "last-of-chain " : "",
+    last_of_chain ? "last-of-chain " : "middle-of-chain",
     wi);
+  dump();
   return wi;
 }
 
