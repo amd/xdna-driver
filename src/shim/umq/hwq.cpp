@@ -226,7 +226,6 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
     get_ert_dpu_data_next(dpu) ? "multi" : "single",
     last_of_chain ? "last-of-chain " : "middle-of-chain",
     wi);
-  dump();
   return wi;
 }
 
