@@ -73,7 +73,6 @@ struct amdxdna_dev_priv {
 };
 
 struct async_events;
-struct debugfs_args;
 
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
@@ -117,8 +116,6 @@ struct amdxdna_dev_hdl {
 	struct mutex                    aie4_lock;
 
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
-
-	struct debugfs_args		*dbgfs_args;
 };
 
 struct col_entry {
@@ -181,6 +178,7 @@ void aie4_ctx_suspend(struct amdxdna_ctx *ctx, bool wait);
 int aie4_ctx_resume(struct amdxdna_ctx *ctx);
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
+int aie4_parse_priority(u32 priority);
 
 /* aie4_smu.c */
 int aie4_smu_start(struct amdxdna_dev_hdl *ndev);

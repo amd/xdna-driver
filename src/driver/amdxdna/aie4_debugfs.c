@@ -81,11 +81,6 @@ static int aie4_dbgfs_entry_release(struct inode *inode, struct file *file)
 
 #define MAKE_MAGIC(a, b, c, d)  ((u32)((a) << 24 | (b) << 16 | (c) << 8 | (d)))
 
-struct debugfs_args {
-	struct amdxdna_dev_hdl *ndev;
-	int			index;
-};
-
 /* test mpaie echo command via mailbox */
 static int test_msg_echo_impl(struct amdxdna_dev_hdl *ndev, u32 val1, u32 val2)
 {
@@ -460,215 +455,6 @@ static int aie4_test_show(struct seq_file *m, void *unused)
 
 DBGFS_FOPS_RW(aie4_test, aie4_test_show, aie4_test_write);
 
-/* 0xFFFF is not a valid pid */
-static u32 current_pid = -1U;
-/* default is 1 if not specified */
-static u32 current_ctx_id = 1;
-static u32 current_meta_bo = AMDXDNA_BO_INVALID;
-
-static int cert_pid_show(struct seq_file *m, void *unused)
-{
-	seq_printf(m, "current pid %d\n", current_pid);
-	return 0;
-}
-
-static ssize_t cert_pid_write(struct file *file, const char __user *ptr,
-			      size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
-	int ret, err;
-	char input[SIZE + 1];
-	unsigned long input_val;
-
-	if (len > SIZE) {
-		XDNA_ERR(ndev->xdna, "Length:%ld of the buffer exceeds size:%d", len, SIZE);
-		return -EINVAL;
-	}
-
-	ret = copy_from_user(input, ptr, len);
-	if (ret < 0) {
-		XDNA_ERR(ndev->xdna, "Unable to copy from user.");
-		return -EINVAL;
-	}
-
-	input[len] = '\0';
-	err = kstrtoul(input, 10, &input_val);
-	if (err) {
-		XDNA_ERR(ndev->xdna, "Invalid parameter: %s", input);
-		return err;
-	}
-
-	current_pid = input_val;
-
-	return len;
-}
-
-DBGFS_FOPS_RW(cert_pid, cert_pid_show, cert_pid_write);
-
-static int cert_ctx_id_show(struct seq_file *m, void *unused)
-{
-	seq_printf(m, "current ctx id %d\n", current_ctx_id);
-	return 0;
-}
-
-static ssize_t cert_ctx_id_write(struct file *file, const char __user *ptr,
-				 size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
-	int ret, err;
-	char input[SIZE + 1];
-	unsigned long input_val;
-
-	if (len > SIZE) {
-		XDNA_ERR(ndev->xdna, "Length:%ld of the buffer exceeds size:%d", len, SIZE);
-		return -EINVAL;
-	}
-
-	ret = copy_from_user(input, ptr, len);
-	if (ret < 0) {
-		XDNA_ERR(ndev->xdna, "Unable to copy from user.");
-		return -EINVAL;
-	}
-
-	input[len] = '\0';
-	err = kstrtoul(input, 10, &input_val);
-	if (err) {
-		XDNA_ERR(ndev->xdna, "Invalid parameter: %s", input);
-		return err;
-	}
-
-	current_ctx_id = input_val;
-
-	return len;
-}
-
-DBGFS_FOPS_RW(cert_ctx_id, cert_ctx_id_show, cert_ctx_id_write);
-
-static int cert_meta_bo_show(struct seq_file *m, void *unused)
-{
-	seq_printf(m, "current meta bo %d\n", current_meta_bo);
-	return 0;
-}
-
-static ssize_t cert_meta_bo_write(struct file *file, const char __user *ptr,
-				  size_t len, loff_t *off)
-{
-	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
-	int ret, err;
-	char input[SIZE + 1];
-	unsigned long input_val;
-
-	if (len > SIZE) {
-		XDNA_ERR(ndev->xdna, "Length:%ld of the buffer exceeds size:%d", len, SIZE);
-		return -EINVAL;
-	}
-
-	ret = copy_from_user(input, ptr, len);
-	if (ret < 0) {
-		XDNA_ERR(ndev->xdna, "Unable to copy from user.");
-		return -EINVAL;
-	}
-
-	input[len] = '\0';
-	err = kstrtoul(input, 10, &input_val);
-	if (err) {
-		XDNA_ERR(ndev->xdna, "Invalid parameter: %s", input);
-		return err;
-	}
-
-	current_meta_bo = input_val;
-
-	return len;
-}
-
-DBGFS_FOPS_RW(cert_meta_bo, cert_meta_bo_show, cert_meta_bo_write);
-
-static void aie4_cert_log_dump(struct seq_file *m, struct amdxdna_client *client, u32 bo_hdl,
-			       int index)
-{
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_gem_obj *meta_bo;
-	struct amdxdna_gem_obj *log_bo;
-	struct fw_buffer_metadata *meta_buffer;
-	u32 prev_size;
-
-	meta_bo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_SHARE);
-	if (!meta_bo) {
-		XDNA_ERR(xdna, "Get bo %d failed", bo_hdl);
-		return;
-	}
-	meta_buffer = (struct fw_buffer_metadata *)meta_bo->mem.kva;
-	log_bo = amdxdna_gem_get_obj(client, meta_buffer->bo_handle, AMDXDNA_BO_SHARE);
-	if (!log_bo) {
-		XDNA_ERR(xdna, "Get log_bo %lld failed", meta_buffer->bo_handle);
-		goto put_meta_bo;
-	}
-
-	prev_size = 0;
-	for (int i = 0; i < meta_buffer->num_ucs; i++) {
-		struct uc_info_entry *entry = &meta_buffer->uc_info[i];
-		u64 off_addr;
-
-		if (entry->index == index) {
-			off_addr += prev_size;
-			XDNA_INFO(xdna, "dump data for index %d, size %d", index, entry->size);
-			seq_write(m, (char *)log_bo->mem.kva + off_addr, entry->size);
-			goto put_log_bo;
-		}
-
-		if (entry->size == 0)
-			continue;
-		prev_size += entry->size;
-	}
-
-	XDNA_ERR(xdna, "Cannot find data for index %d", index);
-
-put_log_bo:
-	amdxdna_gem_put_obj(log_bo);
-put_meta_bo:
-	amdxdna_gem_put_obj(meta_bo);
-}
-
-static int cert_log_show(struct seq_file *m, void *unused)
-{
-	struct debugfs_args *args = read_file_to_args(m);
-	struct amdxdna_dev_hdl *ndev = args->ndev;
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct amdxdna_client *client;
-	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
-
-	XDNA_DBG(xdna, "in");
-
-	/*
-	 * If current_meta_bo is valid, then honer the meta_bo;
-	 * otherwise, each current_pid and current_ctx_id for a match.
-	 */
-	list_for_each_entry(client, &xdna->client_list, node) {
-		amdxdna_for_each_ctx(client, ctx_id, ctx) {
-			if (current_meta_bo != AMDXDNA_BO_INVALID) {
-				if (ctx->priv->meta_bo_hdl != current_meta_bo)
-					continue;
-
-				aie4_cert_log_dump(m, client, ctx->priv->meta_bo_hdl, args->index);
-				return 0;
-			}
-
-			if (client->pid != current_pid)
-				continue;
-
-			if (ctx_id != current_ctx_id)
-				continue;
-
-			aie4_cert_log_dump(m, client, ctx->priv->meta_bo_hdl, args->index);
-		}
-	}
-
-	return 0;
-}
-
-DBGFS_FOPS_RW(cert_log, cert_log_show, NULL);
-
 static int aie4_ioctl_id_show(struct seq_file *m, void *unused)
 {
 #define drm_ioctl_id_seq_print(_name) \
@@ -870,16 +656,63 @@ static ssize_t aie4_keep_partition_write(struct file *file, const char __user *p
 
 DBGFS_FOPS_RW(keep_partition, NULL, aie4_keep_partition_write);
 
+static ssize_t aie4_dpm_override_write(struct file *file, const char __user *ptr,
+				       size_t len, loff_t *off)
+{
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_dpm_override *dpm_override;
+	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
+	int hclk_dpm_level, aieclk_dpm_level, ret, force_dpm;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	char *buf;
+
+	buf = memdup_user_nul(ptr, len);
+	if (IS_ERR(buf)) {
+		XDNA_ERR(xdna, "Failed to copy input from user");
+		return PTR_ERR(buf);
+	}
+
+	if (sscanf(buf, "%d %d", &hclk_dpm_level, &aieclk_dpm_level) != 2) {
+		if (kstrtoint(buf, 10, &force_dpm) == 0 && force_dpm == 0) {
+			hclk_dpm_level = 0;
+			aieclk_dpm_level = 0;
+		} else {
+			kfree(buf);
+			XDNA_ERR(xdna, "Incorrect number of args");
+			return -EINVAL;
+		}
+	} else {
+		force_dpm = 1;
+	}
+
+	kfree(buf);
+
+	req.type = AIE4_RUNTIME_CONFIG_DPM_OVERRIDE;
+	dpm_override = (struct aie4_msg_runtime_config_dpm_override *)req.data;
+	dpm_override->force_dpm = force_dpm;
+	dpm_override->forced_ipuhclk_dpm_level = (u8)hclk_dpm_level;
+	dpm_override->forced_ipuaieclk_dpm_level = (u8)aieclk_dpm_level;
+
+	msg.send_size = sizeof(req.type) + sizeof(*dpm_override);
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_send_msg_wait(ndev, &msg);
+	mutex_unlock(&ndev->aie4_lock);
+
+	XDNA_INFO(xdna, "request hclk: %d request aieclk: %d, %s", hclk_dpm_level,
+		  aieclk_dpm_level, ret ? ">>DPM OVERRIDE FAIL<<" : ">>DPM OVERRIDE PASS<<");
+
+	return ret ? ret : len;
+}
+
+DBGFS_FOPS_RW(dpm_override, NULL, aie4_dpm_override_write);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
 	umode_t mode;
 } dbgfs_files[] = {
 	DBGFS_FILE(aie4_test, 0400),
-	DBGFS_FILE(cert_log, 0400),
-	DBGFS_FILE(cert_pid, 0400),
-	DBGFS_FILE(cert_ctx_id, 0400),
-	DBGFS_FILE(cert_meta_bo, 0400),
 	DBGFS_FILE(telemetry_disabled, 0400),
 	DBGFS_FILE(telemetry_perf, 0400),
 	DBGFS_FILE(ioctl_id, 0400),
@@ -888,50 +721,20 @@ const struct {
 	DBGFS_FILE(dump_fw_trace, 0600),
 	DBGFS_FILE(dump_fw_trace_buffer, 0400),
 	DBGFS_FILE(keep_partition, 0600),
+	DBGFS_FILE(dpm_override, 0600),
 };
 
 void aie4_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct drm_minor *minor = xdna->ddev.accel;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	struct dentry *debugfs_subdir;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	for (int i = 0; i < ARRAY_SIZE(dbgfs_files); i++) {
-		/* skip creating cert_log in parent dir */
-		if (i == 1)
-			continue;
-
 		debugfs_create_file(dbgfs_files[i].name,
 				    dbgfs_files[i].mode,
 				    minor->debugfs_root,
 				    ndev,
 				    dbgfs_files[i].fops);
-	}
-
-	ndev->dbgfs_args =
-		devm_kzalloc(&pdev->dev, sizeof(struct debugfs_args) * MAX_NUM_CERTS, GFP_KERNEL);
-
-	for (int i = 0; i < MAX_NUM_CERTS; i++) {
-		char sub_dir[32] = "";
-
-		snprintf(sub_dir, sizeof(sub_dir), "cert_index_%d", i);
-
-		debugfs_subdir = debugfs_create_dir(sub_dir, minor->debugfs_root);
-		if (!debugfs_subdir || IS_ERR(debugfs_subdir)) {
-			XDNA_ERR(xdna, "failed to create debugfs %s", sub_dir);
-			return;
-		}
-
-		ndev->dbgfs_args[i].ndev = ndev;
-		ndev->dbgfs_args[i].index = i;
-
-		/* only create cert_log in child dir */
-		debugfs_create_file(dbgfs_files[1].name,
-				    dbgfs_files[1].mode,
-				    debugfs_subdir,
-				    &ndev->dbgfs_args[i],
-				    dbgfs_files[1].fops);
 	}
 
 	XDNA_DBG(xdna, "debugfs init finished");

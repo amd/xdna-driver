@@ -269,6 +269,17 @@ int main(void)
 }
 EOF
 
+# Test xen_phy_dma_ops signature:
+# const struct dma_map_ops xen_phy_dma_ops;
+try_compile HAVE_xen_phy_dma_ops << 'EOF'
+#include <xen/phy-dma-ops.h>
+int main(void)
+{
+	const struct dma_map_ops *a = &xen_phy_dma_ops;
+	return 0;
+}
+EOF
+
 # ---- Header trailer ----------------------------------------------------
 
 cat >> "$OUT" <<EOF

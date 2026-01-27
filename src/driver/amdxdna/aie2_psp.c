@@ -8,6 +8,8 @@
 #include <linux/iopoll.h>
 #include "aie2_pci.h"
 
+#include "amdxdna_xen.h"
+
 #define PSP_STATUS_READY	BIT(31)
 
 /* PSP commands */
@@ -35,7 +37,11 @@ struct psp_device {
 	u32		  fw_buf_sz;
 	u64		  fw_paddr;
 	void		  *fw_buffer;
+	dma_addr_t	  fw_dma_handle;
 	void __iomem	  *psp_regs[PSP_MAX_REGS];
+#ifdef HAVE_xen_phy_dma_ops
+	struct device	  xen_dma_dev;
+#endif
 };
 
 static inline char *psp_decode_resp(u32 resp)
@@ -149,16 +155,32 @@ struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf)
 	memcpy(psp->psp_regs, conf->psp_regs, sizeof(psp->psp_regs));
 
 	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN);
-	psp->fw_buffer = devm_kmalloc(psp->dev, psp->fw_buf_sz + PSP_FW_ALIGN, GFP_KERNEL);
-	if (!psp->fw_buffer) {
-		dev_err(psp->dev, "no memory for fw buffer");
-		return NULL;
+	if (is_xen_initial_pvh_domain()) {
+		psp->fw_buffer = amdxdna_xen_alloc_buf_phys(psp->dev, psp->fw_buf_sz + PSP_FW_ALIGN,
+							    &psp->fw_dma_handle);
+		if (!psp->fw_buffer)
+			return NULL;
+		psp->fw_paddr = psp->fw_dma_handle;
+	} else {
+		psp->fw_buffer = devm_kmalloc(psp->dev, psp->fw_buf_sz + PSP_FW_ALIGN, GFP_KERNEL);
+		if (!psp->fw_buffer)
+			return NULL;
+
+		psp->fw_paddr = virt_to_phys(psp->fw_buffer);
 	}
 
-	psp->fw_paddr = virt_to_phys(psp->fw_buffer);
 	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
 	psp->fw_paddr += offset;
 	memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
 
 	return psp;
+}
+
+void aie2_psp_destroy(struct device *dev, void *psp_hdl)
+{
+	struct psp_device *psp = psp_hdl;
+
+	if (is_xen_initial_pvh_domain())
+		amdxdna_xen_free_buf_phys(dev, psp->fw_buffer, psp->fw_dma_handle,
+					  psp->fw_buf_sz + PSP_FW_ALIGN);
 }
