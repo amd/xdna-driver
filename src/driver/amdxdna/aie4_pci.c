@@ -530,15 +530,16 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 
 	aie4_fw_unload(ndev);
 
+	/* set mailbox alive to 0 */
+	aie4_fw_clear_alive(xdna);
+
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
 
 	ndev->dev_status = AIE4_DEV_INIT;
 }
 
-static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
-				 const struct firmware **npufw,
-				 const struct firmware **certfw)
+static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
@@ -556,7 +557,7 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 	}
 
 	XDNA_DBG(xdna, "Request fw %s", fw_name);
-	ret = request_firmware(npufw, fw_name, &pdev->dev);
+	ret = request_firmware(&ndev->npufw, fw_name, &pdev->dev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d", fw_name, ret);
 		return ret;
@@ -571,13 +572,13 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 	}
 
 	XDNA_DBG(xdna, "Request fw %s", fw_name);
-	ret = request_firmware(certfw, fw_name, &pdev->dev);
+	ret = request_firmware(&ndev->certfw, fw_name, &pdev->dev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to request_firmware %s, ret %d", fw_name, ret);
 		goto release_npufw;
 	}
 
-	if ((*certfw)->size > CERTFW_MAX_SIZE) {
+	if (ndev->certfw->size > CERTFW_MAX_SIZE) {
 		XDNA_ERR(xdna, "CERTFW over maximum size of 32 KB + 256 B");
 		ret = -EINVAL;
 		goto release_certfw;
@@ -586,28 +587,29 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 	return 0;
 
 release_certfw:
-	release_firmware(*certfw);
+	release_firmware(ndev->certfw);
 release_npufw:
-	release_firmware(*npufw);
+	release_firmware(ndev->npufw);
 
 	return ret;
 }
 
-static int aie4_release_firmware(struct amdxdna_dev_hdl *ndev,
-				 const struct firmware *npufw,
-				 const struct firmware *certfw)
+static int aie4_release_firmware(struct amdxdna_dev_hdl *ndev)
 {
 	if (!aie4_fw_load_support(ndev))
 		return 0;
 
-	release_firmware(certfw);
-	release_firmware(npufw);
+	if (!ndev->npufw && !ndev->certfw)
+		return 0;
+
+	release_firmware(ndev->certfw);
+	release_firmware(ndev->npufw);
+	ndev->npufw = NULL;
+	ndev->certfw = NULL;
 	return 0;
 }
 
-static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
-				 const struct firmware *npufw,
-				 const struct firmware *certfw)
+static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
@@ -625,10 +627,10 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	if (!ndev->smu_base)
 		return -ENOMEM;
 
-	psp_conf.fw_size = npufw->size;
-	psp_conf.fw_buf = npufw->data;
-	psp_conf.certfw_size = certfw->size;
-	psp_conf.certfw_buf = certfw->data;
+	psp_conf.fw_size = ndev->npufw->size;
+	psp_conf.fw_buf = ndev->npufw->data;
+	psp_conf.certfw_size = ndev->certfw->size;
+	psp_conf.certfw_buf = ndev->certfw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = ndev->psp_base + PSP_REG_OFF(ndev, i);
 
@@ -646,10 +648,9 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
-	const struct firmware *npufw, *certfw;
 	int ret;
 
-	ret = aie4_request_firmware(ndev, &npufw, &certfw);
+	ret = aie4_request_firmware(ndev);
 	if (ret)
 		return ret;
 
@@ -678,7 +679,7 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 		goto release_fw;
 	}
 
-	ret = aie4_prepare_firmware(ndev, npufw, certfw);
+	ret = aie4_prepare_firmware(ndev);
 	if (ret)
 		goto release_fw;
 
@@ -701,8 +702,7 @@ hw_stop:
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
 release_fw:
-	aie4_release_firmware(ndev, npufw, certfw);
-
+	aie4_release_firmware(ndev);
 	return ret;
 }
 
@@ -1186,6 +1186,11 @@ static void aie4_pci_fini(struct amdxdna_dev *xdna)
 	aie4_iommu_fini(ndev);
 
 	aie4_pcidev_fini(ndev);
+
+	if (ndev->psp_hdl)
+		ndev->psp_hdl = NULL;
+
+	aie4_release_firmware(ndev);
 
 	mutex_destroy(&ndev->aie4_lock);
 }

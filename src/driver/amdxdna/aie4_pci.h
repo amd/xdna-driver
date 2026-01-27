@@ -79,6 +79,8 @@ struct amdxdna_dev_hdl {
 	const struct amdxdna_dev_priv	*priv;
 	void				*xrs_hdl;
 	struct psp_device               *psp_hdl;
+	const struct firmware		*npufw;
+	const struct firmware		*certfw;
 
 	u32				partition_id;
 
