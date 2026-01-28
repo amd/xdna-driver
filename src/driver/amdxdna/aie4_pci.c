@@ -1612,14 +1612,12 @@ static int aie4_query_telemetry(struct amdxdna_client *client,
 
 	memset(buff, 0, aligned_sz);
 	drm_clflush_virt_range(buff, aligned_sz); /* device can access */
-	ret = aie4_query_aie_telemetry(ndev, type, dma_addr + sizeof(u64), aligned_sz);
+	ret = aie4_query_aie_telemetry(ndev, type, dma_addr, aligned_sz);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
 		goto free_buf;
 	}
 
-	print_hex_dump_debug("telemetry: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
-			     aligned_sz, false);
 	if (copy_to_user(u64_to_user_ptr(args->buffer), buff, args->buffer_size))
 		ret = -EFAULT;
 
