@@ -1128,7 +1128,7 @@ int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx)
 				  VE2_EVENT_GENERATE_REG, sizeof(u32),
 				  (void *)&(value));
 	if (ret < 0)
-		XDNA_ERR(xdna, "AIE write on event_generate register failed, err=%d", ret);
+		XDNA_ERR(xdna, "Failed to write event_generate register, err=%d", ret);
 
 	return ret;
 }
