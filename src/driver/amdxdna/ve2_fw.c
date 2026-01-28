@@ -22,6 +22,7 @@ int ve2_store_firmware_version(struct ve2_firmware_version *c_version, struct de
 	ret = ve2_partition_read(xaie_dev, 0, 0, VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
 				 VE2_CERT_VERSION_SIZE, version);
 	if (ret < 0) {
+		pr_err("Failed to read firmware version, ret=%d\n", ret);
 		kfree(version);
 		return ret;
 	}
@@ -33,6 +34,9 @@ int ve2_store_firmware_version(struct ve2_firmware_version *c_version, struct de
 	strscpy(c_version->date, version->date, VE2_FW_DATE_STRING_LENGTH);
 	c_version->date[VE2_FW_DATE_STRING_LENGTH - 1] = '\0';
 	kfree(version);
+
+	pr_debug("Firmware version: %u.%u, hash=%s, date=%s\n",
+		 c_version->major, c_version->minor, c_version->git_hash, c_version->date);
 
 	return 0;
 }
@@ -81,6 +85,9 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret = 0;
+
+	XDNA_DBG(xdna, "Getting firmware status: hwctx=%p, start_col=%u, num_col=%u",
+		 hwctx, priv_ctx->start_col, priv_ctx->num_col);
 
 	if (!priv_ctx->aie_dev) {
 		XDNA_ERR(xdna, "Partition does not have aie device handle\n");

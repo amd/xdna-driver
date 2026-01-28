@@ -28,6 +28,8 @@ static int ve2_query_ctx_status_array(struct amdxdna_client *client,
 	int ret = 0, idx;
 	u32 hw_i = 0;
 
+	XDNA_DBG(xdna, "Query context status: pid=%d, ctx_id=%u", pid, ctx_id);
+
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		size_t total_bo_usage;
 		u32 pid, pasid;
@@ -349,8 +351,8 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		return -EFAULT;
 	}
 
-	XDNA_DBG(xdna, "AIE Coredump request received for context_id = %u buffer size %u\n",
-		 footer.context_id, buf_size);
+	XDNA_DBG(xdna, "Coredump read: ctx_id=%u, pid=%llu, buf_size=%u",
+		 footer.context_id, footer.pid, buf_size);
 
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		idx = srcu_read_lock(&tmp_client->ctx_srcu);
@@ -555,14 +557,16 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	XDNA_DBG(xdna, "Received get air info request param %d", args->param);
+	XDNA_DBG(xdna, "Get AIE info: param=%u, buffer_size=%u", args->param, args->buffer_size);
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION:
+		XDNA_DBG(xdna, "Querying firmware version");
 		ret = ve2_get_firmware_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
+		XDNA_DBG(xdna, "Querying AIE metadata");
 		ret = ve2_get_total_col(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
@@ -574,6 +578,7 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		break;
 	}
 
+	XDNA_DBG(xdna, "Get AIE info result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
@@ -730,20 +735,25 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	XDNA_DBG(xdna, "Received get air info request param %d", args->param);
+	XDNA_DBG(xdna, "Get array: param=%u, num_element=%u, element_size=%u",
+		 args->param, args->num_element, args->element_size);
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_COREDUMP:
+		XDNA_DBG(xdna, "Reading AIE coredump");
 		ret = ve2_coredump_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
+		XDNA_DBG(xdna, "Getting all hardware contexts");
 		ret = ve2_get_array_hwctx(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_READ:
+		XDNA_DBG(xdna, "Reading AIE tile");
 		ret = ve2_aie_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		XDNA_DBG(xdna, "Getting last async error");
 		ret = ve2_get_array_async_error(xdna, args);
 		break;
 	case DRM_AMDXDNA_HWCTX_AIE_PART_FD:
@@ -755,6 +765,7 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 		break;
 	}
 
+	XDNA_DBG(xdna, "Get array result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
@@ -769,11 +780,12 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	XDNA_DBG(xdna, "Received set aie status request param %d", args->param);
+	XDNA_DBG(xdna, "Set AIE state: param=%u, buffer_size=%u", args->param, args->buffer_size);
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
+		XDNA_DBG(xdna, "Writing AIE tile");
 		ret = ve2_aie_write(client, args);
 		break;
 	default:
@@ -782,6 +794,7 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 		break;
 	}
 
+	XDNA_DBG(xdna, "Set AIE state result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
