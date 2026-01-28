@@ -1062,10 +1062,28 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 		 */
 
 		if (priv_ctx->misc_intrpt_flag || (wait_jifs && !ret)) {
+			u32 capacity =
+				priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
+			u32 start_slot = 0;
+			u32 cmd_count = 1;
 			void *cmd_data;
 			u32 data_total;
 
 			ve2_dump_ctx(xdna, hwctx);
+
+			/* Read command_count BEFORE overwriting command buffer with health data */
+			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
+										       NULL);
+				if (cc) {
+					cmd_count = cc->command_count;
+					/*
+					 * seq is the LAST sequence number of the command chain.
+					 * Calculate start_slot by going back (cmd_count - 1) slots.
+					 */
+					start_slot = (seq - cmd_count + 1) % capacity;
+				}
+			}
 
 			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
 			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
@@ -1082,10 +1100,16 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
 				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
 										       NULL);
-				// TODO: get error_index based on how many passed.
-				cc->error_index = 0;
-				if (cc->error_index >= cc->command_count)
+				XDNA_INFO(xdna, "start_slot %u, num_col %u, cmd_count %u",
+					  start_slot, priv_ctx->num_col, cmd_count);
+				if (!cc) {
+					XDNA_WARN(xdna, "cmd_chain timeout: failed to get payload");
+				} else {
+					/* In the async callback/timeout case,
+					 * driver sets error index to 0
+					 */
 					cc->error_index = 0;
+				}
 			}
 		} else {
 			u32 slot =
@@ -1099,9 +1123,59 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				ret = 0;
 				goto out;
 			}
-			amdxdna_cmd_set_state(job->cmd_bo, state);
-		}
+			if (state == ERT_CMD_STATE_ERROR &&
+			    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+				u32 capacity =
+					priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
+				struct amdxdna_cmd_chain *cc =
+					amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+				enum ert_cmd_state slot_state;
+				u32 fail_cmd_idx = 0;
+				u32 start_slot = 0;
+				u32 cmd_count = 0;
+				int i;
 
+				if (!cc) {
+					XDNA_WARN(xdna, "Failed to get payload, seq %llu", seq);
+					amdxdna_cmd_set_state(job->cmd_bo, state);
+					goto release_job;
+				}
+				cmd_count = cc->command_count;
+				/*
+				 * In the sync callback/command error case, driver determines the
+				 * error index by traversing the command chain slots to find which
+				 * subcmd has ERROR state. The starting slot is calculated by going
+				 * back (command_count - 1) slots from the current seq.
+				 */
+				start_slot = (seq - cmd_count + 1) % capacity;
+
+				XDNA_DBG(xdna, "seq %llu, start_slot %u, cmd_count %u", seq,
+					 start_slot, cmd_count);
+
+				for (i = 0; i < cmd_count; i++) {
+					u32 slot = (start_slot + i) % capacity;
+
+					slot_state =
+						priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
+					if (slot_state == ERT_CMD_STATE_ERROR) {
+						fail_cmd_idx = i;
+						break;
+					}
+				}
+
+				cc->error_index = fail_cmd_idx;
+				if (cc->error_index >= cmd_count)
+					cc->error_index = 0;
+
+				XDNA_ERR(xdna, "Error at index %u (slot %u) slot_state %d",
+					 fail_cmd_idx, (start_slot + fail_cmd_idx) %
+					 capacity, slot_state);
+				amdxdna_cmd_set_state(job->cmd_bo, slot_state);
+			} else {
+				amdxdna_cmd_set_state(job->cmd_bo, state);
+			}
+		}
+release_job:
 		ve2_hwctx_job_release_locked(hwctx, job);
 		ve2_job_put(job);
 
