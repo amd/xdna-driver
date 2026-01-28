@@ -142,7 +142,9 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
     destroy_arg.handle = arg.handle;
     try {
       m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_arg);
-    } catch (...) {}
+    } catch (...) {
+      shim_debug("Failed to cleanup hwctx during error recovery");
+    }
     throw;
   }
 
