@@ -77,8 +77,11 @@ const struct amdxdna_dev_info dev_npu3_info = {
 };
 
 const struct amdxdna_dev_info dev_npu3_pf_info = {
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
 	.psp_bar		= NPU3_PSP_BAR_INDEX,
 	.smu_bar		= NPU3_SMU_BAR_INDEX,
+	.doorbell_bar		= NPU3_DOORBELL_BAR,
 	.default_vbnv		= "RyzenAI-npu3-pf",
 	.device_type		= AMDXDNA_DEV_TYPE_PF,
 	.dev_priv		= &npu3_dev_priv,
