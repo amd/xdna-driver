@@ -1218,6 +1218,77 @@ int aie4_parse_priority(u32 priority)
 	}
 }
 
+static int aie4_ctx_config_priority_band(struct amdxdna_ctx *ctx, u32 priority)
+{
+	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	if (priority >= AIE4_CONTEXT_PRIORITY_BAND_COUNT) {
+		XDNA_ERR(xdna, "Invalid priority band %d", priority);
+		return -EINVAL;
+	}
+
+	req.hw_context_id = ctx->priv->hw_ctx_id;
+	req.property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_PRIORITY_BAND;
+	req.priority_band = priority;
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_send_msg_wait(ndev, &msg);
+	mutex_unlock(&ndev->aie4_lock);
+
+	return ret;
+}
+
+static int aie4_ctx_config_scheduling(struct amdxdna_ctx *ctx, void *buf)
+{
+	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	struct amdxdna_hwctx_param_config_scheduling *scheduling = buf;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	if (scheduling->in_process_priority < -7 || scheduling->in_process_priority > 7) {
+		XDNA_ERR(xdna, "Invalid in_process_priority %d", scheduling->in_process_priority);
+		return -EINVAL;
+	}
+
+	req.hw_context_id = ctx->priv->hw_ctx_id;
+	req.property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_SCHEDULING;
+	req.scheduling.quantum = scheduling->quantum;
+	req.scheduling.in_process_priority = scheduling->in_process_priority;
+	req.scheduling.realtime_band_priority_level = scheduling->realtime_band_priority_level;
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_send_msg_wait(ndev, &msg);
+	mutex_unlock(&ndev->aie4_lock);
+
+	return ret;
+}
+
+static int aie4_ctx_config_dpm(struct amdxdna_ctx *ctx, void *buf)
+{
+	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	struct amdxdna_hwctx_param_config_dpm *dpm = buf;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	req.hw_context_id = ctx->priv->hw_ctx_id;
+	req.property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_DPM;
+	req.dpm.egops = dpm->egops;
+	req.dpm.fps = dpm->fps;
+	req.dpm.data_movement = dpm->data_movement;
+	req.dpm.latency_in_us = dpm->latency_in_us;
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_send_msg_wait(ndev, &msg);
+	mutex_unlock(&ndev->aie4_lock);
+
+	return ret;
+}
+
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
@@ -1227,6 +1298,12 @@ int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32
 		return aie4_ctx_attach_debug_bo(ctx, (u32)value);
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
 		return aie4_ctx_detach_debug_bo(ctx, (u32)value);
+	case DRM_AMDXDNA_HWCTX_CONFIG_PRIORITY_BAND:
+		return aie4_ctx_config_priority_band(ctx, (u32)value);
+	case DRM_AMDXDNA_HWCTX_CONFIG_SCHEDULING:
+		return aie4_ctx_config_scheduling(ctx, buf);
+	case DRM_AMDXDNA_HWCTX_CONFIG_DPM:
+		return aie4_ctx_config_dpm(ctx, buf);
 	default:
 		XDNA_DBG(xdna, "Not supported type %d", type);
 		return -EOPNOTSUPP;
