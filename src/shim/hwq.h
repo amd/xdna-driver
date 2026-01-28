@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef HWQ_XDNA_H
 #define HWQ_XDNA_H
@@ -24,7 +24,7 @@ public:
   int
   poll_command(xrt_core::buffer_handle *) const override;
 
-  int
+  virtual int
   wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
 
   void
@@ -54,6 +54,9 @@ protected:
   int
   wait_command(uint64_t seq, uint32_t timeout_ms) const;
 
+  virtual uint64_t
+  issue_command(const cmd_buffer *);
+
 private:
   enum class pending_cmd_type
   {
@@ -67,9 +70,6 @@ private:
     uint64_t m_fence_state;
     uint64_t m_last_seq;
   };
-
-  virtual uint64_t
-  issue_command(const cmd_buffer *) = 0;
 
   bool
   pending_queue_empty() const;

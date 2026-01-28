@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #include "drm_local/amdxdna_accel.h"
@@ -40,10 +40,7 @@
 const struct amdxdna_dev_priv npu3_dev_priv = {
 	.npufw_path		= "npu.dev.sbin",
 	.certfw_path		= "cert.dev.sbin",
-	.mbox_bar		= NPU3_MBOX_BAR,
-	.mbox_rbuf_bar		= NPU3_MBOX_BUFFER_BAR,
 	.mbox_info_off		= NPU3_MBOX_INFO_OFF,
-	.doorbell_bar		= NPU3_DOORBELL_BAR,
 	.doorbell_off		= NPU3_DOORBELL_OFF,
 	.psp_regs_off   = {
 		DEFINE_BAR_OFFSET(PSP_CMD_REG,    NPU3_PSP, MPASP_C2PMSG_123_ALT_1),
@@ -68,8 +65,11 @@ const struct amdxdna_dev_priv npu3_dev_priv = {
 };
 
 const struct amdxdna_dev_info dev_npu3_info = {
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
 	.psp_bar		= NPU3_PSP_BAR_INDEX,
 	.smu_bar		= NPU3_SMU_BAR_INDEX,
+	.doorbell_bar		= NPU3_DOORBELL_BAR,
 	.default_vbnv		= "RyzenAI-npu3",
 	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.dev_priv		= &npu3_dev_priv,
@@ -77,8 +77,11 @@ const struct amdxdna_dev_info dev_npu3_info = {
 };
 
 const struct amdxdna_dev_info dev_npu3_pf_info = {
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
 	.psp_bar		= NPU3_PSP_BAR_INDEX,
 	.smu_bar		= NPU3_SMU_BAR_INDEX,
+	.doorbell_bar		= NPU3_DOORBELL_BAR,
 	.default_vbnv		= "RyzenAI-npu3-pf",
 	.device_type		= AMDXDNA_DEV_TYPE_PF,
 	.dev_priv		= &npu3_dev_priv,

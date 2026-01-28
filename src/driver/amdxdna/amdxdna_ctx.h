@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_CTX_H_
@@ -77,6 +77,18 @@ struct amdxdna_cmd_preempt_data {
 	u32 restore_size;   /* size of restore buffer in bytes */
 	u32 inst_prop_cnt;  /* properties count */
 	u32 prop_args[];    /* properties and regular kernel arguments */
+};
+
+/*
+ * struct amdxdna_cmd_start_dpu - interpretation of data payload for
+ * ERT_START_DPU in amdxdna_cmd.
+ */
+struct amdxdna_cmd_start_dpu {
+	u64 dtrace_buffer;		/* dtrace buffer address 2 words */
+	u64 instruction_buffer;		/* buffer address 2 words */
+	u32 instruction_buffer_size;	/* size of buffer in bytes */
+	u16 uc_index;			/* microblaze controller index */
+	u16 chained;			/* number of following amdxdna_cmd_start_dpu elements */
 };
 
 /**
@@ -227,6 +239,10 @@ struct amdxdna_ctx {
 	atomic64_t			job_free_cnt;
 	/* For command completion notification. */
 	u32				syncobj_hdl;
+	struct drm_syncobj		*syncobj;
+	struct mutex			io_lock; /* protect job queue and enforce cmd order */
+	struct semaphore		io_slot_sem;
+
 	struct amdxdna_ctx_health_data	health_data;
 	bool				health_reported;
 
@@ -246,14 +262,21 @@ struct amdxdna_job_bo {
 
 struct amdxdna_sched_job {
 	struct drm_sched_job	base;
+	struct list_head	list;
 	struct kref		refcnt;
 	struct amdxdna_ctx	*ctx;
 	struct mm_struct	*mm;
-	/* The fence to notice DRM scheduler that job is done by hardware */
+	/* The fence to indicate that job is done by hardware */
 	struct dma_fence	*fence;
-	/* user can wait on this fence */
+	/* Job submitter can wait on this fence */
 	struct dma_fence	*out_fence;
-	bool			job_done;
+#define JOB_STATE_INIT			0
+#define JOB_STATE_PENDING		1
+#define JOB_STATE_SUBMITTING		2
+#define JOB_STATE_SUBMITTED		3
+#define JOB_STATE_SUBMITTED_CHAIN	4
+#define JOB_STATE_DONE			5
+	int			state;
 	u64			seq;
 #define OP_USER			0
 #define OP_SYNC_BO		1
@@ -301,7 +324,6 @@ amdxdna_cmd_get_data(struct amdxdna_gem_obj *abo, u32 *size)
 	return cmd->data;
 }
 
-// TODO: need to verify size <= cmd_bo size before return?
 static inline void *
 amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 {
@@ -315,6 +337,10 @@ amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 
 	if (size) {
 		count = FIELD_GET(AMDXDNA_CMD_COUNT, cmd->header);
+		/*
+		 * BO size is at least 4k, count is at most 10 bits (1k - 1)
+		 * so it won't exceed BO size.
+		 */
 		if (unlikely(count <= num_masks)) {
 			*size = 0;
 			return NULL;
@@ -322,6 +348,26 @@ amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 		*size = (count - num_masks) * sizeof(u32);
 	}
 	return &cmd->data[num_masks];
+}
+
+static inline struct amdxdna_cmd_chain *
+amdxdna_cmd_get_chained_payload(struct amdxdna_gem_obj *cmd_abo, u32 *sub_cmd_cnt)
+{
+#define	MAX_CHAINED_SUB_CMD	64
+	struct amdxdna_cmd_chain *payload;
+	u32 payload_len, ccnt;
+
+	payload = amdxdna_cmd_get_payload(cmd_abo, &payload_len);
+	if (!payload)
+		return NULL;
+	if (sub_cmd_cnt) {
+		ccnt = payload->command_count;
+		if (!ccnt || ccnt > MAX_CHAINED_SUB_CMD ||
+		    payload_len < struct_size(payload, data, ccnt))
+			return NULL;
+		*sub_cmd_cnt = ccnt;
+	}
+	return payload;
 }
 
 static inline u32
@@ -365,6 +411,8 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		       u32 *sync_obj_hdls, u64 *sync_obj_pts, u32 sync_obj_cnt,
 		       u32 ctx_hdl, u64 *seq);
 
+int amdxdna_ctx_syncobj_create(struct amdxdna_ctx *ctx);
+void amdxdna_ctx_syncobj_destroy(struct amdxdna_ctx *ctx);
 int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
 		     u64 seq, u32 timeout);
 
