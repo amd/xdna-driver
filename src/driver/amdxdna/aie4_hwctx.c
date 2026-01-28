@@ -629,17 +629,25 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	cancel_work_sync(&priv->cert_work);
 	destroy_workqueue(priv->cert_work_q);
 
+	/*
+	 * TODO: this is temp hack. The hwctx should be destroyed on device
+	 * before job_worker can be stopped. Otherwise, it is not safe to
+	 * start releasing host data structure when it is still shared w/
+	 * device. We have to apply this hack since, today,
+	 * aie4_release_resource(ctx) also releases col_event which is used
+	 * by job_worker, so...
+	 */
+	priv->status = CTX_STATE_DISCONNECTED;
+	wake_up_all(&priv->col_entry->col_event);
+	cancel_work_sync(&priv->job_work);
+	destroy_workqueue(priv->job_work_q);
+
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {
 		/* resolver to call unload->aie4_destroy_context */
 		aie4_release_resource(ctx);
 		amdxdna_pm_suspend_put(xdna);
 	}
-
-	priv->status = CTX_STATE_DISCONNECTED;
-	wake_up_all(&priv->col_entry->col_event);
-	cancel_work_sync(&priv->job_work);
-	destroy_workqueue(priv->job_work_q);
 
 	aie4_ctx_col_list_fini(ctx);
 	aie4_ctx_umq_fini(ctx);
