@@ -649,38 +649,35 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	const struct firmware *npufw, *certfw;
 	int ret;
 
-	ret = aie4_request_firmware(ndev, &npufw, &certfw);
-	if (ret)
-		return ret;
-
 	/* Enable managed PCI device */
 	ret = pcim_enable_device(pdev);
 	if (ret) {
 		XDNA_ERR(xdna, "pcim enable device failed, ret %d", ret);
-		goto release_fw;
+		return ret;
 	}
 
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 	if (ret) {
 		XDNA_ERR(xdna, "failed to set DMA mask to 64:%d", ret);
-		goto release_fw;
+		return ret;
 	}
 
 	ndev->mbox_base = pcim_iomap(pdev, npriv->mbox_bar, 0);
-	if (!ndev->mbox_base) {
-		ret = -ENOMEM;
-		goto release_fw;
-	}
+	if (!ndev->mbox_base)
+		return -ENOMEM;
 
 	ndev->rbuf_base = pcim_iomap(pdev, npriv->mbox_rbuf_bar, 0);
-	if (!ndev->rbuf_base) {
-		ret = -ENOMEM;
-		goto release_fw;
-	}
+	if (!ndev->rbuf_base)
+		return -ENOMEM;
 
+	ret = aie4_request_firmware(ndev, &npufw, &certfw);
+	if (ret)
+		return ret;
 	ret = aie4_prepare_firmware(ndev, npufw, certfw);
 	if (ret)
 		goto release_fw;
+
+	aie4_release_firmware(ndev, npufw, certfw);
 
 	ret = aie4_hw_start(xdna);
 	if (ret) {
