@@ -690,29 +690,34 @@ static inline bool is_first_pending_job(struct amdxdna_sched_job *job)
 }
 
 static inline void
-fill_indirect_pkt(struct amdxdna_ctx_priv *priv, u64 slot_idx,
+fill_indirect_pkt(struct amdxdna_ctx_priv *priv, u64 slot_idx, u32 total_slots,
 		  struct amdxdna_cmd_start_dpu *dpu, u16 entries)
 {
-	struct host_indirect_packet_data *hipd =
-		&priv->umq_indirect_pkts[slot_idx * HSA_MAX_LEVEL1_INDIRECT_ENTRIES];
-	u64 indirect_pkt_dev_addr = priv->umq_indirect_pkts_dev_addr +
-		sizeof(struct host_indirect_packet_data) *
-		HSA_MAX_LEVEL1_INDIRECT_ENTRIES * slot_idx;
 	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
 	struct host_indirect_packet_entry *hipe =
 		(struct host_indirect_packet_entry *)(pkt->data);
 	u16 i;
 
-	for (i = 0; i < entries; i++,
-	     dpu++,
-	     hipe++,
-	     hipd++,
-	     indirect_pkt_dev_addr += sizeof(struct host_indirect_packet_data)) {
+	for (i = 0; i < entries; i++, dpu++, hipe++) {
+		struct host_indirect_packet_data *hipd;
+		u64 indirect_pkt_dev_addr;
+		u32 uci = dpu->uc_index;
+		u32 idx;
+
+		if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
+			XDNA_ERR(priv->ctx->client->xdna, "Invalid uc index %d", uci);
+			continue;
+		}
+		idx = uci * total_slots + slot_idx;
+		hipd = &priv->umq_indirect_pkts[idx];
+		indirect_pkt_dev_addr = priv->umq_indirect_pkts_dev_addr +
+			sizeof(struct host_indirect_packet_data) * idx;
+
 		/* Fill in indirect entry to point to indirect pkt. */
 		hipe->host_addr_low = lower_32_bits(indirect_pkt_dev_addr);
 		hipe_set_host_addr_high(&hipe->host_addr_high_uc_index,
 					upper_32_bits(indirect_pkt_dev_addr));
-		hipe_set_uc_index(&hipe->host_addr_high_uc_index, dpu->uc_index);
+		hipe_set_uc_index(&hipe->host_addr_high_uc_index, uci);
 
 		/* Fill in indirect pkt. */
 		hipd->payload.dpu_control_code_host_addr_low =
@@ -786,7 +791,7 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 
 	slot_idx = ctx->priv->write_index & (CTX_MAX_CMDS - 1);
 	if (chained)
-		fill_indirect_pkt(priv, slot_idx, dpu, chained + 1);
+		fill_indirect_pkt(priv, slot_idx, CTX_MAX_CMDS, dpu, chained + 1);
 	else
 		fill_direct_pkt(priv, slot_idx, dpu);
 

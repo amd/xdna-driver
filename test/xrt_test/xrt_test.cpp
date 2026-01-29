@@ -436,12 +436,15 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 		  "DPU:remote_barrier");
 
   // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(timeout_ms);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  for (int i = 0 ; i < c_rounds; i++) {
+    std::cout << "c_rounds: " << i << std::endl;
+    run.start();
+    auto state = run.wait(timeout_ms);
+    if (state == ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  }
 }
 
 void

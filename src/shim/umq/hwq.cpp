@@ -200,7 +200,7 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   auto slot_idx = get_next_avail_slot();
 
   if (get_ert_dpu_data_next(dpu))
-    fill_indirect_exec_buf(slot_idx, dpu);
+    fill_indirect_exec_buf(slot_idx, m_umq_hdr->capacity, dpu);
   else
     fill_direct_exec_buf(slot_idx, dpu); 
 
@@ -210,7 +210,7 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   hdr->common_header.chain_flag = last_of_chain ? LAST_CMD : NOT_LAST_CMD;
   // Completion signal area has to be a full WORD, we utilize the command_bo header.
   hdr->completion_signal = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
-  // TODO: remove once uC stops looking at this field.
+  // TODO: remove once uC stops looking at and updating this field.
   hdr->common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
   // Issue mfence instruction to make sure all writes to the slot before is done.
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
@@ -231,7 +231,7 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
 
 void
 hwq_umq::
-fill_indirect_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
+fill_indirect_exec_buf(uint32_t slot_idx, uint32_t total_slots, ert_dpu_data *dpu)
 {
   auto pkt = get_pkt(slot_idx);
   auto pkt_size = (dpu->chained + 1) * sizeof(struct host_indirect_packet_entry);
@@ -248,18 +248,18 @@ fill_indirect_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
   volatile struct host_indirect_packet_entry *hp =
     reinterpret_cast<volatile struct host_indirect_packet_entry *>(pkt->data);
 
-  for (int i = 0; dpu; i++, hp++, dpu = get_ert_dpu_data_next(dpu)) {
-    auto data_size = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES;
-    auto prefix_off = slot_idx * data_size;
-    auto prefix_idx = slot_idx * HSA_MAX_LEVEL1_INDIRECT_ENTRIES;
-    auto buf_paddr = m_indirect_paddr + prefix_off +
-       sizeof(struct host_indirect_data) * i;
+  for (; dpu; hp++, dpu = get_ert_dpu_data_next(dpu)) {
+    auto uci = dpu->uc_index;
+    if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
+      shim_err(EINVAL, "dpu uc_index %d is invalid", uci);
+    auto prefix_idx = uci * total_slots + slot_idx;
+    auto buf_paddr = m_indirect_paddr + prefix_idx * sizeof(struct host_indirect_data);
 
     hp->host_addr_low = static_cast<uint32_t>(buf_paddr);
     hp->host_addr_high = static_cast<uint32_t>(buf_paddr >> 32);
-    hp->uc_index = dpu->uc_index;
+    hp->uc_index = uci;
 
-    auto cebp = &m_umq_indirect_buf[prefix_idx + i];
+    auto cebp = &m_umq_indirect_buf[prefix_idx];
     // do not zero this buffer, the cebp->header is pre-set 
     // set every cebp->payload field in case of garbage data
     cebp->payload.dpu_control_code_host_addr_low =

@@ -55,7 +55,7 @@ private:
   fill_direct_exec_buf(uint32_t idx, ert_dpu_data *dpu);
 
   void 
-  fill_indirect_exec_buf(uint32_t idx, ert_dpu_data *dpu);
+  fill_indirect_exec_buf(uint32_t idx, uint32_t total_slots, ert_dpu_data *dpu);
 
   uint64_t
   issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain);
