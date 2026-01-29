@@ -198,11 +198,11 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_SET_RUNTIME_CONFIG               = 0x10007,
 	AIE4_MSG_OP_GET_RUNTIME_CONFIG               = 0x10008,
 	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x10009,
-	AIE4_MSG_OP_START_EVENT_TRACE                = 0x1000a,
-	AIE4_MSG_OP_STOP_EVENT_TRACE                 = 0x1000b,
-	AIE4_MSG_OP_SET_EVENT_TRACE_CATEGORIES       = 0x1000c,
-	AIE4_MSG_OP_DRAM_WORK_BUFFER                 = 0x1000d,
-	AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER         = 0x1000e,
+	AIE4_MSG_OP_START_EVENT_TRACE                = 0x1000A,
+	AIE4_MSG_OP_STOP_EVENT_TRACE                 = 0x1000B,
+	AIE4_MSG_OP_SET_EVENT_TRACE_CATEGORIES       = 0x1000C,
+	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
+	AIE4_MSG_OP_DETACH_WORK_BUFFER               = 0x1000E,
 
 	/* PF-only Opcodes:  0x20000..0x2FFFF */
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
@@ -1754,36 +1754,34 @@ struct aie4_msg_get_runtime_cfg_resp {
 	// Additional data here.
 };
 
-#define AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE    (4 * 1024 * 1024)  /* 4 MB */
-
 /**
- * AIE4_MSG_OP_DRAM_WORK_BUFFER
+ * AIE4_MSG_OP_ATTACH_WORK_BUFFER
  * Specifies the DRAM buffer that the mpnpufw requires for runtime.
  * This must be set before any contexts can be created.
  *
- * @buff_addr: The buffer address. This must be aligned to @buff_size
+ * @buf_addr: The buffer address. This must be aligned to @buf_size
  * @pasid: The PASID.
- * @buff_size: The buffer size.  The valid sizes are:
- *                4 MB, 8 MB, 16 MB, 32 MB, or 64 MB
+ * @buf_size: The buffer size.  The valid sizes are: 4 MB, 8 MB, 16 MB, 32 MB, or 64 MB
  */
-struct aie4_msg_dram_work_buffer_req {
-	u64 buff_addr;
+struct aie4_attach_work_buffer_req {
+	u64 buf_addr;
 	union aie4_msg_pasid pasid;
-	u32 buff_size;
+#define AIE4_MPNPU_WORK_BUFFER_MIN_SIZE		(4 * 1024 * 1024)  /* 4 MB */
+	u32 buf_size;
 };
 
 /**
- * AIE4_MSG_OP_DRAM_WORK_BUFFER
+ * AIE4_MSG_OP_ATTACH_WORK_BUFFER
  * DRAM buffer response
  *
- * @status: enum aie4_msg_status.
+ * @status: enum npu_msg_status.
  */
-struct aie4_msg_dram_work_buffer_resp {
-	enum aie4_msg_status status;
+struct aie4_attach_work_buffer_resp {
+	u32 status;
 };
 
 /**
- * AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER
+ * AIE4_MSG_OP_DETACH_WORK_BUFFER
  * Instructs the mpnpufw to release the DRAM work buffer so the OS can reclaim
  * the memory. Any features that depend on this buffer will be disabled and no
  * new contexts can be created. All existing contexts must be destroyed before
@@ -1791,18 +1789,18 @@ struct aie4_msg_dram_work_buffer_resp {
  *
  * @resvd Reserved for future use.
  */
-struct aie4_msg_release_dram_work_buffer_req {
+struct aie4_detach_work_buffer_req {
 	u32 resvd;
 };
 
 /**
- * AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER
+ * AIE4_MSG_OP_DETACH_WORK_BUFFER
  * Release DRAM work buffer response
  *
- * @status: enum aie4_msg_status
+ * @status: enum npu_msg_status
  */
-struct aie4_msg_release_dram_work_buffer_resp {
-	enum aie4_msg_status status;
+struct aie4_detach_work_buffer_resp {
+	u32 status;
 };
 
 #pragma pack(pop)
