@@ -8,6 +8,7 @@
 #include <linux/kthread.h>
 #include <linux/iommu.h>
 #include <linux/firmware.h>
+#include <linux/string_helpers.h>
 #include <linux/uaccess.h>
 #include <drm/drm_cache.h>
 #include "drm_local/amdxdna_accel.h"
@@ -40,6 +41,10 @@ MODULE_PARM_DESC(skip_fw_load, "Skip fw load via psp");
 static int fw_reload;
 module_param(fw_reload, int, 0644);
 MODULE_PARM_DESC(fw_reload, "enforce fw reload during flr");
+
+static int skip_work_buffer;
+module_param(skip_work_buffer, int, 0644);
+MODULE_PARM_DESC(skip_work_buffer, "Skip MPNPU work buffer attach");
 
 /*
  * This struct is the register layout.
@@ -282,8 +287,20 @@ static int aie4_mailbox_init(struct amdxdna_dev *xdna)
 
 static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
-	/* TODO */
-	return 0;
+	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+	dma_addr_t dma_addr;
+
+	if (is_npu3_vf_dev(pdev) || skip_work_buffer)
+		return 0;
+
+	dma_hdl = ndev->mpnpu_work_buffer;
+	dma_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+
+	if (!dma_addr)
+		XDNA_ERR(ndev->xdna, "Invalid DMA address: 0x%llx", dma_addr);
+
+	return aie4_attach_work_buffer(ndev, 0, dma_addr, dma_hdl->size);
 }
 
 static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
@@ -478,13 +495,19 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 
 static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 {
+	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 	int ret;
 
+	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
+		aie4_detach_work_buffer(ndev);
+
 	ret = aie4_suspend_fw(ndev);
-	if (ret)
+	if (ret) {
 		XDNA_ERR(ndev->xdna, "suspend_fw failed, ret %d", ret);
-	else
-		XDNA_DBG(ndev->xdna, "npu firmware suspended");
+		return;
+	}
+
+	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
 
 static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
@@ -641,6 +664,38 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+	char print_size[32];
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE,
+					  DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl)) {
+		XDNA_ERR(xdna, "Failed to allocate MPNPU buffer of size: 0x%x",
+			 AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE);
+		return PTR_ERR(dma_hdl);
+	}
+
+	memset(amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), 0,
+	       AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	string_get_size(dma_hdl->size, 1, STRING_UNITS_2, print_size, sizeof(print_size));
+	XDNA_DBG(xdna, "Allocated %s MPNPU work buffer at 0x%llx with DMA addr: 0x%llx",
+		 print_size, (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0),
+		 amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
+	ndev->mpnpu_work_buffer = dma_hdl;
+
+	return 0;
+}
+
+static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	if (ndev->mpnpu_work_buffer)
+		amdxdna_mgmt_buff_free(ndev->mpnpu_work_buffer);
+}
+
 static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -682,10 +737,16 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto release_fw;
 
+	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer) {
+		ret = aie4_alloc_work_buffer(ndev);
+		if (ret)
+			goto release_fw;
+	}
+
 	ret = aie4_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "aie4 hw start failed, ret %d", ret);
-		goto release_fw;
+		goto free_work_buf;
 	}
 
 	mutex_lock(&ndev->aie4_lock);
@@ -700,6 +761,9 @@ hw_stop:
 	mutex_lock(&ndev->aie4_lock);
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
+free_work_buf:
+	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
+		aie4_free_work_buffer(ndev);
 release_fw:
 	aie4_release_firmware(ndev, npufw, certfw);
 
@@ -1173,10 +1237,13 @@ static void aie4_iommu_fini(struct amdxdna_dev_hdl *ndev)
 static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	mutex_lock(&ndev->aie4_lock);
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
+	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
+		aie4_free_work_buffer(ndev);
 }
 
 static void aie4_pci_fini(struct amdxdna_dev *xdna)

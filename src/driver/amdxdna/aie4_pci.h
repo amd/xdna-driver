@@ -14,6 +14,7 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_error.h"
 #include "amdxdna_aie.h"
+#include "amdxdna_mgmt.h"
 
 #define AIE4_INTERVAL		20000	/* us */
 #ifdef AMDXDNA_DEVEL
@@ -78,7 +79,7 @@ struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
 	void				*xrs_hdl;
-	struct psp_device               *psp_hdl;
+	struct psp_device		*psp_hdl;
 
 	u32				partition_id;
 
@@ -96,11 +97,11 @@ struct amdxdna_dev_hdl {
 
 	struct list_head		col_entry_list;
 	struct mutex			col_list_lock; // lock for col_entry_list
-	void			__iomem	*doorbell_base;
+	void			__iomem *doorbell_base;
 	void			__iomem *mbox_base;
 	void			__iomem *rbuf_base;
-	void                    __iomem *psp_base;
-	void                    __iomem *smu_base;
+	void			__iomem *psp_base;
+	void			__iomem *smu_base;
 
 	int				pw_mode;
 	enum aie_power_state		power_state;
@@ -109,13 +110,15 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	bool				force_preempt_enabled;
 
-	int                             num_vfs;
+	int				num_vfs;
 
-	struct async_events             *async_events;
-	/* Protect mgmt_chann */
-	struct mutex                    aie4_lock;
-
+	struct async_events		*async_events;
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
+
+	struct amdxdna_mgmt_dma_hdl	*mpnpu_work_buffer;
+
+	/* Protect mgmt_chann */
+	struct mutex			aie4_lock;
 };
 
 struct col_entry {
@@ -168,6 +171,8 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hd
 			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address);
 int aie4_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories);
 int aie4_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
+int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, u32 pasid, dma_addr_t addr, u32 size);
+int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev);
 void aie4_reset_prepare(struct amdxdna_dev *xdna);
 int aie4_reset_done(struct amdxdna_dev *xdna);
 
