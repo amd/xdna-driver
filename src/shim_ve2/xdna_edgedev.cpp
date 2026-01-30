@@ -7,6 +7,9 @@
 #include "xdna_edgedev.h"
 
 namespace {
+
+// errno_to_str is now available from shim_debug.h
+
 std::string
 ioctl_cmd2name(unsigned long cmd)
 {
@@ -231,31 +234,37 @@ void
 xdna_edgedev::
 open() const
 {
-  int fd;
+  int fd = -1;
   const std::lock_guard<std::mutex> lock(m_lock);
-  std::cout << __func__ << " : DEV name  " << m_dev_name.c_str() <<
-		std::endl;
+
+  shim_debug("Opening device: %s (current users=%d)", m_dev_name.c_str(), m_dev_users);
+
   if (m_dev_users == 0) {
     if (std::filesystem::exists(m_dev_name.c_str())) {
       fd = ::open(m_dev_name.c_str(), O_RDWR);
-      if (fd < 0)
-        shim_err(EINVAL, "Failed to open edge device %s",
-		 m_dev_name.c_str());
-	else
-	  shim_debug("Device opened, fd=%d", fd);
+      if (fd < 0) {
+        int saved_errno = errno;
+        shim_err(saved_errno, "Failed to open device %s: %s",
+                 m_dev_name.c_str(), errno_to_str(saved_errno));
+      }
+      shim_debug("Device opened: %s, fd=%d", m_dev_name.c_str(), fd);
     }
     /*
      * Aiarm node is not present in some platforms static dtb, it gets loaded
      * using overlay dtb, drm device node is not created until aiarm is present
      * So if enable_flat is set return 1 valid device
      */
-    else if (xrt_core::config::get_enable_flat())
-      shim_debug("Device opened as a flat platform, fd=%d", fd);
+    else if (xrt_core::config::get_enable_flat()) {
+      shim_debug("Device opened as flat platform (device node not found)");
+    } else {
+      shim_err(ENODEV, "Device %s not found and flat platform mode not enabled",
+               m_dev_name.c_str());
+    }
 
     std::vector<char> name(128,0);
     std::vector<char> desc(512,0);
     std::vector<char> date(128,0);
-    
+
     const char* name_str = "amdxdna_ve2";
     const char* desc_str = "This driver is for VE2 device";
     const char* date_str = "02042025";
@@ -273,17 +282,23 @@ open() const
     version.date = date.data();
     version.date_len = 128;
 
-    int result;
-    result = ::ioctl(fd, DRM_IOCTL_VERSION, &version);
+    int result = ::ioctl(fd, DRM_IOCTL_VERSION, &version);
     if (result) {
+      int saved_errno = errno;
       ::close(fd);
-      shim_err(EINVAL, "Failed to open edge device %s", m_dev_name.c_str());
+      shim_err(saved_errno, "DRM_IOCTL_VERSION failed for device %s: %s",
+               m_dev_name.c_str(), errno_to_str(saved_errno));
     }
+
+    shim_debug("Device version: name=%s, desc=%s, date=%s",
+               version.name, version.desc, version.date);
+
     result = std::strncmp(version.name, "AIARM", 5);
     // Publish the fd for other threads to use.
     m_dev_fd = fd;
-   }
-   ++m_dev_users;
+  }
+  ++m_dev_users;
+  shim_debug("Device open completed: fd=%d, users=%d", m_dev_fd, m_dev_users);
 }
 
 void
@@ -293,14 +308,25 @@ close() const
   int fd;
   const std::lock_guard<std::mutex> lock(m_lock);
 
+  shim_debug("Closing device: users=%d", m_dev_users);
+
+  if (m_dev_users <= 0) {
+    shim_debug("Device already closed or invalid user count");
+    return;
+  }
+
   --m_dev_users;
   if (m_dev_users == 0) {
     // Stop new users of the fd from other threads.
     fd = m_dev_fd;
     m_dev_fd = -1;
     // Kernel will wait for existing users to quit.
-    ::close(fd);
-    shim_debug("Device closed, fd=%d", fd);
+    if (fd >= 0) {
+      ::close(fd);
+      shim_debug("Device closed: fd=%d", fd);
+    }
+  } else {
+    shim_debug("Device still in use: remaining_users=%d", m_dev_users);
   }
 }
 
@@ -308,18 +334,33 @@ void
 xdna_edgedev::
 ioctl(unsigned long cmd, void* arg) const
 {
-  if (::ioctl(m_dev_fd, cmd, arg) == -1)
-    shim_err(errno, "%s IOCTL failed", ioctl_cmd2name(cmd).c_str());
+  int saved_errno;
+
+  shim_debug("ioctl: %s (fd=%d, arg=%p)", ioctl_cmd2name(cmd).c_str(), m_dev_fd, arg);
+
+  if (::ioctl(m_dev_fd, cmd, arg) == -1) {
+    saved_errno = errno;
+    shim_err(saved_errno, "%s IOCTL failed: %s",
+             ioctl_cmd2name(cmd).c_str(), errno_to_str(saved_errno));
+  }
 }
 
 void*
 xdna_edgedev::
 mmap(void *addr, size_t len, int prot, int flags, off_t offset) const
 {
+  shim_debug("mmap: addr=%p, len=%zu, prot=0x%x, flags=0x%x, offset=0x%lx, fd=%d",
+             addr, len, prot, flags, offset, m_dev_fd);
+
   void* ret = ::mmap(addr, len, prot, flags, m_dev_fd, offset);
 
-  if (ret == reinterpret_cast<void*>(-1))
-    shim_err(errno, "mmap(addr=%p, len=%ld, prot=%d, flags=%d, offset=%ld) failed", addr, len, prot, flags, offset);
+  if (ret == reinterpret_cast<void*>(-1)) {
+    int saved_errno = errno;
+    shim_err(saved_errno, "mmap failed: addr=%p, len=%zu, prot=0x%x, flags=0x%x, offset=0x%lx: %s",
+             addr, len, prot, flags, offset, errno_to_str(saved_errno));
+  }
+
+  shim_debug("mmap succeeded: returned addr=%p", ret);
   return ret;
 }
 
@@ -327,7 +368,12 @@ void
 xdna_edgedev::
 munmap(void* addr, size_t len) const
 {
-  ::munmap(addr, len);
+  shim_debug("munmap: addr=%p, len=%zu", addr, len);
+  if (::munmap(addr, len) != 0) {
+    int saved_errno = errno;
+    shim_debug("munmap warning: addr=%p, len=%zu failed: %s",
+               addr, len, errno_to_str(saved_errno));
+  }
 }
 void xdna_edgedev::bo_handle_ref_inc(uint32_t hdl)
 {

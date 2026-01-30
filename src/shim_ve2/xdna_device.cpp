@@ -1048,15 +1048,21 @@ import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
   
 #if defined(SYS_pidfd_open) && defined(SYS_pidfd_getfd)
   auto pidfd = syscall(SYS_pidfd_open, pid, 0);
-  if (pidfd < 0)
-    throw xrt_core::system_error(errno, "pidfd_open failed");
+  if (pidfd < 0) {
+    int saved_errno = errno;
+    throw xrt_core::system_error(saved_errno, std::string("pidfd_open failed (err=") +
+                                 std::to_string(saved_errno) + ": " + errno_to_str(saved_errno) + ")");
+  }
 
   auto bofd = syscall(SYS_pidfd_getfd, pidfd, ehdl, 0);
-  if (bofd < 0)
+  if (bofd < 0) {
+    int saved_errno = errno;
     throw xrt_core::system_error
-      (errno, "pidfd_getfd failed, check that ptrace access mode "
-       "allows PTRACE_MODE_ATTACH_REALCREDS.  For more details please "
+      (saved_errno, std::string("pidfd_getfd failed (err=") + std::to_string(saved_errno) + ": " +
+       errno_to_str(saved_errno) + "). Check that ptrace access mode "
+       "allows PTRACE_MODE_ATTACH_REALCREDS. For more details please "
        "check /etc/sysctl.d/10-ptrace.conf");
+  }
 
   return std::make_unique<xdna_bo>(*this, bofd);
 #else
