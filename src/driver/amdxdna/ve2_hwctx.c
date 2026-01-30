@@ -862,9 +862,10 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 	return ve2_hwctx_add_job(hwctx, job, *seq, cmd_chain->command_count);
 }
 
-int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32 *syncobj_hdls,
+int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 		   u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
+	struct amdxdna_ctx *hwctx = job->ctx;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
 	int ret;
