@@ -659,8 +659,14 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	char print_size[32];
+
+	if (is_npu3_vf_dev(pdev) || skip_work_buffer) {
+		XDNA_DBG(xdna, "skip alloc work buffer");
+		return 0;
+	}
 
 	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE,
 					  DMA_FROM_DEVICE);
@@ -684,6 +690,14 @@ static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 
 static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+
+	if (is_npu3_vf_dev(pdev) || skip_work_buffer) {
+		XDNA_DBG(xdna, "skip free work buffer");
+		return;
+	}
+
 	if (ndev->mpnpu_work_buffer)
 		amdxdna_mgmt_buff_free(ndev->mpnpu_work_buffer);
 }
@@ -697,21 +711,17 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	unsigned long bars = 0;
 	int ret, i;
 
-	ret = aie4_request_firmware(ndev, &npufw, &certfw);
-	if (ret)
-		return ret;
-
 	/* Enable managed PCI device */
 	ret = pcim_enable_device(pdev);
 	if (ret) {
 		XDNA_ERR(xdna, "pcim enable device failed, ret %d", ret);
-		goto release_fw;
+		return ret;
 	}
 
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 	if (ret) {
 		XDNA_ERR(xdna, "failed to set DMA mask to 64:%d", ret);
-		goto release_fw;
+		return ret;
 	}
 
 	set_bit(xdna->dev_info->mbox_bar, &bars);
@@ -737,15 +747,17 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->doorbell_base = tbl[xdna->dev_info->doorbell_bar];
 
+	ret = aie4_request_firmware(ndev, &npufw, &certfw);
+	if (ret)
+		return ret;
 	ret = aie4_prepare_firmware(ndev, npufw, certfw);
 	if (ret)
 		goto release_fw;
+	aie4_release_firmware(ndev, npufw, certfw);
 
-	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer) {
-		ret = aie4_alloc_work_buffer(ndev);
-		if (ret)
-			goto release_fw;
-	}
+	ret = aie4_alloc_work_buffer(ndev);
+	if (ret)
+		goto release_fw;
 
 	ret = aie4_hw_start(xdna);
 	if (ret) {
@@ -766,8 +778,7 @@ hw_stop:
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
 free_work_buf:
-	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
-		aie4_free_work_buffer(ndev);
+	aie4_free_work_buffer(ndev);
 release_fw:
 	aie4_release_firmware(ndev, npufw, certfw);
 
@@ -1250,13 +1261,11 @@ static void aie4_iommu_fini(struct amdxdna_dev_hdl *ndev)
 static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	mutex_lock(&ndev->aie4_lock);
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
-	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
-		aie4_free_work_buffer(ndev);
+	aie4_free_work_buffer(ndev);
 }
 
 static void aie4_pci_fini(struct amdxdna_dev *xdna)
