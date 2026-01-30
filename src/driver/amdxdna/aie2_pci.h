@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AIE2_PCI_H_
@@ -112,10 +112,10 @@ struct ctx_pdi {
 #endif
 
 /*
- * Define the maximum number of pending commands in a context.
+ * Define the maximum number of outstanding commands in a context.
  * Must be power of 2!
  */
-#define CTX_MAX_CMDS		4
+#define CTX_MAX_CMDS			4
 #define get_job_idx(seq) ((seq) & (CTX_MAX_CMDS - 1))
 struct amdxdna_ctx_priv {
 	struct amdxdna_gem_obj		*heap;
@@ -124,14 +124,10 @@ struct amdxdna_ctx_priv {
 #endif
 
 	struct amdxdna_gem_obj		*cmd_buf[CTX_MAX_CMDS];
-
-	struct mutex			io_lock; /* protect seq and cmd order */
 #ifdef AMDXDNA_DEVEL
 	struct amdxdna_sched_job	*pending[CTX_MAX_CMDS];
 #endif
 	struct semaphore		job_sem;
-
-	struct drm_syncobj		*syncobj;
 
 	/* Driver needs to wait for all jobs freed before fini DRM scheduler */
 	wait_queue_head_t		job_free_waitq;
@@ -485,7 +481,7 @@ void aie2_ctx_fini(struct amdxdna_ctx *ctx);
 int aie2_ctx_connect(struct amdxdna_ctx *ctx);
 void aie2_ctx_disconnect(struct amdxdna_ctx *ctx, bool wait);
 int aie2_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
-int aie2_cmd_submit(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
+int aie2_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int aie2_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 struct dma_fence *aie2_cmd_get_out_fence(struct amdxdna_ctx *ctx, u64 seq);

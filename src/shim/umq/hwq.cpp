@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "hwq.h"
 #include "core/common/trace.h"
@@ -36,17 +36,16 @@ hwq_umq(const device& dev, size_t nslots) : hwq(dev)
   // host queue layout:
   //   host_queue_header_t
   //   host_queue_packet_t [nslots]
-  //   indirect [4 * indirect_buffer * nslots]
+  //   indirect [HSA_MAX_LEVEL1_INDIRECT_ENTRIES * indirect_buffer * nslots]
   const size_t header_sz = sizeof(struct host_queue_header);
   const size_t queue_sz = sizeof(struct host_queue_packet) * nslots;
-  const size_t indirect_sz = (sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES) * nslots;
+  const size_t indirect_sz = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES * nslots;
 
 #ifdef UMQ_HELLO_TEST
   const size_t umq_sz = 0x200000;
 #else
   const size_t umq_sz = header_sz + queue_sz + indirect_sz;
 #endif
-
   shim_debug("Creating UMQ HW queue of size %ld", umq_sz);
 
   m_umq_bo = std::make_unique<buffer>(m_pdev, umq_sz, AMDXDNA_BO_CMD);
@@ -166,7 +165,7 @@ get_next_avail_slot()
     } else {
       shim_debug("Queue is full, wait for next available slot");
       // The ri is the first available slot.
-      wait_command(ri, 0);
+      hwq::wait_command(ri, 0);
     }
   } while (true);
 
@@ -201,18 +200,18 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   auto slot_idx = get_next_avail_slot();
 
   if (get_ert_dpu_data_next(dpu))
-    fill_indirect_exec_buf(slot_idx, dpu);
+    fill_indirect_exec_buf(slot_idx, m_umq_hdr->capacity, dpu);
   else
     fill_direct_exec_buf(slot_idx, dpu); 
 
   auto pkt = get_pkt(slot_idx);
   auto hdr = &pkt->xrt_header;
   hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+  hdr->common_header.chain_flag = last_of_chain ? LAST_CMD : NOT_LAST_CMD;
   // Completion signal area has to be a full WORD, we utilize the command_bo header.
   hdr->completion_signal = cmd_bo->paddr() + offsetof(ert_start_kernel_cmd, header);
-  // TODO: remove once uC stops looking at this field.
+  // TODO: remove once uC stops looking at and updating this field.
   hdr->common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
-
   // Issue mfence instruction to make sure all writes to the slot before is done.
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
   // Indicates the slot is ready for processing by uC.
@@ -225,19 +224,19 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
 
   shim_debug("Submitted %s-uC %scommand (%ld)",
     get_ert_dpu_data_next(dpu) ? "multi" : "single",
-    last_of_chain ? "last-of-chain " : "",
+    last_of_chain ? "last-of-chain " : "middle-of-chain",
     wi);
   return wi;
 }
 
 void
 hwq_umq::
-fill_indirect_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
+fill_indirect_exec_buf(uint32_t slot_idx, uint32_t total_slots, ert_dpu_data *dpu)
 {
   auto pkt = get_pkt(slot_idx);
   auto pkt_size = (dpu->chained + 1) * sizeof(struct host_indirect_packet_entry);
 
-  if (dpu->chained + 1 >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
+  if (dpu->chained >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
     shim_err(EINVAL, "unsupported indirect number %d, valid number <= %d",
       dpu->chained + 1, HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 
@@ -249,18 +248,18 @@ fill_indirect_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
   volatile struct host_indirect_packet_entry *hp =
     reinterpret_cast<volatile struct host_indirect_packet_entry *>(pkt->data);
 
-  for (int i = 0; dpu; i++, hp++, dpu = get_ert_dpu_data_next(dpu)) {
-    auto data_size = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES;
-    auto prefix_off = slot_idx * data_size;
-    auto prefix_idx = slot_idx * HSA_MAX_LEVEL1_INDIRECT_ENTRIES;
-    auto buf_paddr = m_indirect_paddr + prefix_off +
-       sizeof(struct host_indirect_data) * i;
+  for (; dpu; hp++, dpu = get_ert_dpu_data_next(dpu)) {
+    auto uci = dpu->uc_index;
+    if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
+      shim_err(EINVAL, "dpu uc_index %d is invalid", uci);
+    auto prefix_idx = uci * total_slots + slot_idx;
+    auto buf_paddr = m_indirect_paddr + prefix_idx * sizeof(struct host_indirect_data);
 
     hp->host_addr_low = static_cast<uint32_t>(buf_paddr);
     hp->host_addr_high = static_cast<uint32_t>(buf_paddr >> 32);
-    hp->uc_index = dpu->uc_index;
+    hp->uc_index = uci;
 
-    auto cebp = &m_umq_indirect_buf[prefix_idx + i];
+    auto cebp = &m_umq_indirect_buf[prefix_idx];
     // do not zero this buffer, the cebp->header is pre-set 
     // set every cebp->payload field in case of garbage data
     cebp->payload.dpu_control_code_host_addr_low =
@@ -311,6 +310,9 @@ uint64_t
 hwq_umq::
 issue_command(const cmd_buffer *cmd_bo)
 {
+  if (is_driver_cmd_submission())
+    return hwq::issue_command(cmd_bo);
+
   auto cmd = reinterpret_cast<ert_packet *>(cmd_bo->vaddr());
   auto& subcmds = cmd_bo->get_subcmd_list();
   subcmds.clear();
@@ -321,7 +323,7 @@ issue_command(const cmd_buffer *cmd_bo)
 
   // Runlist command submission.
   auto payload = get_ert_cmd_chain_data(cmd);
-  if (payload->command_count == 0 || payload->command_count > 100)
+  if (payload->command_count == 0 || payload->command_count > 64)
     shim_err(EINVAL, "Runlist exec buf with bad num of subcmds: %zx", payload->command_count);
 
   if (subcmds.capacity() < payload->command_count)
@@ -343,7 +345,9 @@ bind_hwctx(const hwctx& ctx)
   // link hwctx by parent class
   hwq::bind_hwctx(ctx);
   // setup doorbell mapping by child class
-  m_mapped_doorbell = map_doorbell(m_pdev, ctx.get_doorbell());
+  auto doorbell_offset = ctx.get_doorbell();
+  if (doorbell_offset != AMDXDNA_INVALID_DOORBELL_OFFSET)
+    m_mapped_doorbell = map_doorbell(m_pdev, ctx.get_doorbell());
 }
 
 void
@@ -353,7 +357,8 @@ unbind_hwctx()
   // unlink hwctx by parent class
   hwq::unbind_hwctx();
   // teardown doorbell mapping by child class
-  m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
+  if (m_mapped_doorbell)
+    m_pdev.munmap(const_cast<uint32_t*>(m_mapped_doorbell), sizeof(uint32_t));
 }
 
 bo_id
@@ -361,6 +366,53 @@ hwq_umq::
 get_queue_bo() const
 {
   return m_umq_bo->id();
+}
+
+bool
+hwq_umq::
+is_driver_cmd_submission() const
+{
+  return !m_mapped_doorbell;
+}
+
+int
+hwq_umq::
+wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
+{
+  auto ret = hwq::wait_command(cmd, timeout_ms);
+  // The timeout_ms expired.
+  if (!ret)
+    return ret;
+
+  auto boh = static_cast<cmd_buffer*>(cmd);
+  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
+  auto& subcmds = boh->get_subcmd_list();
+  // Non-chained cmd or kernel mode submission
+  if (!subcmds.size())
+    return ret;
+
+  // Chained cmd submitted in user mode
+  auto last_cmd_bo = subcmds.back();
+  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
+  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
+    return ret;
+  }
+
+  // One of the sub-cmds has failed, find the first failed one and set the
+  // chained cmd status accordingly.
+  auto chain_data = get_ert_cmd_chain_data(cmdpkt);
+  chain_data->error_index = 0;
+  for (auto subcmd_bo : subcmds) {
+    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd_bo->vaddr());
+    if (subcmd_pkt->state == ERT_CMD_STATE_COMPLETED) {
+      chain_data->error_index++;
+    } else {
+      cmdpkt->state = subcmd_pkt->state;
+      break;
+    }
+  }
+  return ret;
 }
 
 } // shim_xdna

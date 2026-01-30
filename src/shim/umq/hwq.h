@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef HWQ_UMQ_H
 #define HWQ_UMQ_H
@@ -23,6 +23,9 @@ public:
 
   bo_id
   get_queue_bo() const override;
+
+  int
+  wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
 
 private:
   std::unique_ptr<buffer> m_umq_bo;
@@ -52,10 +55,13 @@ private:
   fill_direct_exec_buf(uint32_t idx, ert_dpu_data *dpu);
 
   void 
-  fill_indirect_exec_buf(uint32_t idx, ert_dpu_data *dpu);
+  fill_indirect_exec_buf(uint32_t idx, uint32_t total_slots, ert_dpu_data *dpu);
 
   uint64_t
   issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain);
+
+  bool
+  is_driver_cmd_submission() const;
 };
 
 }

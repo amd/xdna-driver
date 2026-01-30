@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/iopoll.h>
 #include <linux/io.h>
+#include <linux/wait.h>
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_mailbox.h"
@@ -29,6 +30,8 @@
 
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
 
+extern int kernel_mode_submission;
+
 struct clock_entry {
 	char name[16];
 	u32 freq_mhz;
@@ -42,14 +45,37 @@ struct rt_config_clk_gating {
 };
 
 struct amdxdna_ctx_priv {
+	struct amdxdna_ctx		*ctx;
 	struct amdxdna_gem_obj		*umq_bo;
-	struct sg_table			*umq_sgt;
+	u64				*umq_read_index;
+	u64				*umq_write_index;
+	u64				write_index;
+	struct host_queue_packet	*umq_pkts;
+	struct host_indirect_packet_data *umq_indirect_pkts;
+	u64				umq_indirect_pkts_dev_addr;
+
+	struct work_struct		job_work;
+	bool				job_aborting;
+	struct workqueue_struct		*job_work_q;
+	wait_queue_head_t		job_list_wq;
+	struct list_head		pending_job_list;
+	struct list_head		running_job_list;
+
+	void			__iomem	*doorbell_addr;
+
 	u32				meta_bo_hdl;
 	struct col_entry		*col_entry;
 	u32				hw_ctx_id;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
+
+	/* CERT Simulation for debug only, remove later. */
+	struct workqueue_struct		*cert_work_q;
+	struct work_struct		cert_work;
+	u64				cert_timeout_seq;
+	u64				cert_error_seq;
+	u64				cert_read_index;
 };
 
 enum aie4_dev_status {
@@ -61,10 +87,7 @@ enum aie4_dev_status {
 struct amdxdna_dev_priv {
 	const char		*npufw_path;
 	const char		*certfw_path;
-	u32			mbox_bar;
-	u32			mbox_rbuf_bar;
 	u64			mbox_info_off;
-	u32			doorbell_bar;
 	u32			doorbell_off;
 	struct rt_config_clk_gating	clk_gating;
 	const struct dpm_clk_freq	*dpm_clk_tbl;
@@ -181,6 +204,8 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx);
 void aie4_ctx_fini(struct amdxdna_ctx *ctx);
 void aie4_ctx_suspend(struct amdxdna_ctx *ctx, bool wait);
 int aie4_ctx_resume(struct amdxdna_ctx *ctx);
+int aie4_cmd_submit(struct amdxdna_sched_job *job,
+		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 int aie4_parse_priority(u32 priority);

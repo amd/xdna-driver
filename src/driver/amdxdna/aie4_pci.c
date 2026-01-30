@@ -19,6 +19,7 @@
 #include "aie4_devel.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_trace.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -163,7 +164,7 @@ static void col_timer(struct timer_list *t)
 	mutex_lock(&ndev->col_list_lock);
 	list_for_each_entry(col_entry, &ndev->col_entry_list, col_list) {
 		XDNA_DBG(xdna, "wake up all for idx %d", col_entry->msix_idx);
-		wake_up_interruptible_all(&col_entry->col_event);
+		wake_up_all(&col_entry->col_event);
 	}
 	mutex_unlock(&ndev->col_list_lock);
 
@@ -222,14 +223,13 @@ static int aie4_mailbox_start(struct amdxdna_dev *xdna,
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
 	int ret = 0;
 
 	struct xdna_mailbox_res mbox_res = {
 		.ringbuf_base = ndev->rbuf_base,
-		.ringbuf_size = pci_resource_len(pdev, npriv->mbox_rbuf_bar),
+		.ringbuf_size = pci_resource_len(pdev, xdna->dev_info->sram_bar),
 		.mbox_base = ndev->mbox_base,
-		.mbox_size = pci_resource_len(pdev, npriv->mbox_bar),
+		.mbox_size = pci_resource_len(pdev, xdna->dev_info->mbox_bar),
 		.name = "xdna_aie4_mailbox",
 	};
 
@@ -640,14 +640,6 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	if (!aie4_fw_load_support(ndev))
 		return 0;
 
-	ndev->psp_base = pcim_iomap(pdev, xdna->dev_info->psp_bar, 0);
-	if (!ndev->psp_base)
-		return -ENOMEM;
-
-	ndev->smu_base = pcim_iomap(pdev, xdna->dev_info->smu_bar, 0);
-	if (!ndev->smu_base)
-		return -ENOMEM;
-
 	psp_conf.fw_size = npufw->size;
 	psp_conf.fw_buf = npufw->data;
 	psp_conf.certfw_size = certfw->size;
@@ -700,9 +692,10 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
+	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
 	const struct firmware *npufw, *certfw;
-	int ret;
+	unsigned long bars = 0;
+	int ret, i;
 
 	ret = aie4_request_firmware(ndev, &npufw, &certfw);
 	if (ret)
@@ -721,17 +714,28 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 		goto release_fw;
 	}
 
-	ndev->mbox_base = pcim_iomap(pdev, npriv->mbox_bar, 0);
-	if (!ndev->mbox_base) {
-		ret = -ENOMEM;
-		goto release_fw;
+	set_bit(xdna->dev_info->mbox_bar, &bars);
+	set_bit(xdna->dev_info->sram_bar, &bars);
+	set_bit(xdna->dev_info->psp_bar, &bars);
+	set_bit(xdna->dev_info->smu_bar, &bars);
+	set_bit(xdna->dev_info->doorbell_bar, &bars);
+
+	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
+		if (!test_bit(i, &bars))
+			continue;
+		tbl[i] = pcim_iomap(pdev, i, 0);
+		if (!tbl[i]) {
+			XDNA_ERR(xdna, "map bar %d failed", i);
+			ret = -ENOMEM;
+			goto release_fw;
+		}
 	}
 
-	ndev->rbuf_base = pcim_iomap(pdev, npriv->mbox_rbuf_bar, 0);
-	if (!ndev->rbuf_base) {
-		ret = -ENOMEM;
-		goto release_fw;
-	}
+	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
+	ndev->rbuf_base = tbl[xdna->dev_info->sram_bar];
+	ndev->psp_base = tbl[xdna->dev_info->psp_bar];
+	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
+	ndev->doorbell_base = tbl[xdna->dev_info->doorbell_bar];
 
 	ret = aie4_prepare_firmware(ndev, npufw, certfw);
 	if (ret)
@@ -774,8 +778,8 @@ static irqreturn_t col_irq_handler(int irq, void *p)
 {
 	struct col_entry *col = (struct col_entry *)p;
 
-	wake_up_interruptible_all(&col->col_event);
-
+	trace_amdxdna_debug_point("ISR fired", col->col_irq, "command completed");
+	wake_up_all(&col->col_event);
 	return IRQ_HANDLED;
 }
 
@@ -878,9 +882,9 @@ static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_client *client = ctx->client;
+	struct amdxdna_ctx_priv *nctx = ctx->priv;
+	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
@@ -893,7 +897,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 #ifdef UMQ_HELLO_TEST
 	return aie4_hello_test(ndev, ctx);
 #endif
-	if (!nctx || !nctx->umq_bo) {
+	if (!nctx || nctx->umq_bo == AMDXDNA_INVALID_BO_HANDLE) {
 		XDNA_WARN(xdna, "cannot create hwctx due to NULL nctx or umq buffer");
 		return -EINVAL;
 	}
@@ -938,7 +942,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		goto done;
 	}
 
-	XDNA_DBG(xdna, "resp msix %d, ctx %d, door %d, irq %d",
+	XDNA_DBG(xdna, "resp msix %d, ctx %d, doorbell %d, irq %d",
 		 resp.job_complete_msix_idx,
 		 resp.hw_context_id,
 		 resp.doorbell_offset,
@@ -956,10 +960,19 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		goto done;
 	}
 
-	ctx->priv->hw_ctx_id = resp.hw_context_id;
-	ctx->doorbell_offset = resp.doorbell_offset;
+	nctx->hw_ctx_id = resp.hw_context_id;
+	nctx->doorbell_addr = ndev->doorbell_base + resp.doorbell_offset;
+	nctx->status = CTX_STATE_CONNECTED;
+	/*
+	 * If user-mode-submission, pass doorbell offset to user via
+	 * ctx->doorbell_offset. Driver will not ring the doorbell.
+	 * Otherwise, pass AMDXDNA_INVALID_DOORBELL_OFFSET to user to
+	 * prevent user space code from mapping/ringing the doorbell.
+	 */
+	ctx->doorbell_offset = kernel_mode_submission ?
+		AMDXDNA_INVALID_DOORBELL_OFFSET : resp.doorbell_offset;
 
-	XDNA_DBG(xdna, "created hw context id %d", ctx->priv->hw_ctx_id);
+	XDNA_DBG(xdna, "created hw context id %d", nctx->hw_ctx_id);
 
 	return 0;
 done:
@@ -1357,17 +1370,23 @@ static int aie4_doorbell_mmap(struct amdxdna_dev *xdna, struct vm_area_struct *v
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
-	phys_addr_t res_start;
+	phys_addr_t res_start, res_end;
 	unsigned long pfn;
 	int ret;
 
-	XDNA_DBG(xdna, "mmap res at bar %d, off 0x%x", npriv->doorbell_bar, npriv->doorbell_off);
+	XDNA_DBG(xdna, "mmap res at bar %d, off 0x%x",
+		 xdna->dev_info->doorbell_bar, npriv->doorbell_off);
 
-	res_start = pci_resource_start(pdev, npriv->doorbell_bar) + npriv->doorbell_off;
+	res_start = pci_resource_start(pdev, xdna->dev_info->doorbell_bar) + npriv->doorbell_off;
+	res_end = pci_resource_end(pdev, xdna->dev_info->doorbell_bar);
+	pfn = (res_start >> PAGE_SHIFT) + vma->vm_pgoff;
+	if (pfn > (res_end >> PAGE_SHIFT)) {
+		XDNA_ERR(xdna, "Invalid doorbell page offset 0x%lx", vma->vm_pgoff);
+		return -EINVAL;
+	}
+
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
-
-	pfn = (res_start >> PAGE_SHIFT) + vma->vm_pgoff;
 	ret = io_remap_pfn_range(vma, vma->vm_start,
 				 pfn,
 				 PAGE_SIZE,
@@ -2060,6 +2079,7 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.ctx_init		= aie4_ctx_init,
 	.ctx_fini		= aie4_ctx_fini,
 	.ctx_config		= aie4_ctx_config,
+	.cmd_submit		= aie4_cmd_submit,
 	.cmd_wait		= aie4_cmd_wait,
 	.debugfs		= aie4_debugfs_init,
 	.sriov_configure        = aie4_sriov_configure,

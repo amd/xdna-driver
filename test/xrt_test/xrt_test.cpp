@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 // XRT includes
 #include "xrt/xrt_device.h"
@@ -29,6 +29,8 @@ namespace {
 
 using arg_type = const std::vector<uint64_t>;
 unsigned c_rounds = 1;
+unsigned o_cmds = 1;
+unsigned r_cmds = 24;
 unsigned s_rounds = 128;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
@@ -76,7 +78,9 @@ usage(const std::string& prog)
   std::cout << "Options:\n";
   std::cout << "\t" << "xrt_test" << " - run all test cases\n";
   std::cout << "\t" << "xrt_test" << " [test case ID separated by space] - run specified test cases\n";
-  std::cout << "\t" << "-c" << ": n rounds in sequence within 1 hwctx (for vadd only)\n";
+  std::cout << "\t" << "-c" << ": n rounds in sequence within 1 hwctx\n";
+  std::cout << "\t" << "-o" << ": max n outstanding cmds within 1 hwctx\n";
+  std::cout << "\t" << "-r" << ": n cmds per runlist\n";
   std::cout << "\t" << "-s" << ": n rounds in parallel within 1 hwctx\n";
   std::cout << "\t" << "-m" << ": n hwctx in parallel\n";
   std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress test and multi-layer)\n";
@@ -432,12 +436,15 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 		  "DPU:remote_barrier");
 
   // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(timeout_ms);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  for (int i = 0 ; i < c_rounds; i++) {
+    std::cout << "c_rounds: " << i << std::endl;
+    run.start();
+    auto state = run.wait(timeout_ms);
+    if (state == ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  }
 }
 
 void
@@ -449,29 +456,46 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
-  xrt::run run{kernel};
+  std::vector<xrt::run> runs;
 
-  // Send the command to device and wait for it to complete
+  // Create all runs
+  for (int i = 0; i < o_cmds; i++)
+    runs.emplace_back(kernel);
+
+  int submitted = 0;
+  int completed = 0;
   auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0 ; i < c_rounds; i++) {
-    run.start();
-    auto state = run.wait(timeout_ms);
+
+  while (submitted < runs.size() && submitted < c_rounds) {
+    runs[submitted].start();
+    submitted++;
+  }
+  while (completed < submitted) {
+    auto i = completed % runs.size();
+    auto state = runs[i].wait(timeout_ms);
+    completed++;
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
     if (state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+    if (submitted < c_rounds) {
+      runs[i].start();
+      submitted++;
+    }
   }
+
   auto end = std::chrono::high_resolution_clock::now();
   auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  std::cout << "Executed " << c_rounds << " NOP commands in " << duration_us
-	    << "us, average latency: " << duration_us * 1.0 / c_rounds << "us\n";
+  std::cout << "Executed total " << c_rounds << " NOP commands in " << duration_us
+	    << "us with max outstanding " << o_cmds << " commands, average latency: "
+	    << duration_us * 1.0 / c_rounds << "us\n";
 }
 
 void
-TEST_xrt_umq_runlist_nop(int device_index, arg_type& arg)
+TEST_xrt_umq_nop_runlist(int device_index, arg_type& arg)
 {
-  const int num_runs = 10;
   std::vector<xrt::run> runs;
+  std::vector<xrt::runlist> runlists;
   auto device = xrt::device{device_index};
 
   xrt::elf elf{local_path("npu3_workspace/nop.elf")};
@@ -479,22 +503,46 @@ TEST_xrt_umq_runlist_nop(int device_index, arg_type& arg)
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
 
   // Create all runs
-  for (int i = 0; i < num_runs; i++)
+  auto num_runs_per_batch = r_cmds * o_cmds;
+  for (int i = 0; i < num_runs_per_batch; i++)
     runs.emplace_back(kernel);
 
   // Add all runs into runlist
-  xrt::runlist run_list{hwctx};
-  for (auto& r : runs)
-    run_list.add(r);
+  for (int i = 0; i < o_cmds; i++) {
+    runlists.emplace_back(hwctx);
+    for (int j = 0; j < r_cmds; j++)
+      runlists[i].add(runs[i * r_cmds + j]);
+  }
 
-  // Submit and wait for the runlist to complete
-  run_list.execute();
-  auto state = run_list.wait(timeout_ms * num_runs * std::chrono::milliseconds{1});
+  int submitted = 0;
+  int completed = 0;
+  auto start = std::chrono::high_resolution_clock::now();
 
-  if (state == std::cv_status::timeout) 
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (run_list.state() != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(run_list.state()));
+  while (submitted < runlists.size() && submitted < c_rounds) {
+    runlists[submitted].execute();
+    submitted++;
+  }
+  while (completed < submitted) {
+    auto i = completed % runlists.size();
+    auto state = runlists[i].wait(timeout_ms * r_cmds * std::chrono::milliseconds{1});
+    completed++;
+    if (state == std::cv_status::timeout) 
+      throw std::runtime_error(std::string("exec buf timed out."));
+    auto ert_state = runlists[i].state();
+    if (ert_state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(ert_state));
+    if (submitted < c_rounds) {
+      runlists[i].execute();
+      submitted++;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  std::cout << "Executed total " << c_rounds << " NOP runlist in " << duration_us
+	    << "us with max " << o_cmds << " outstanding runlist (" << r_cmds
+	    <<" commands per runlist), average latency: "
+	    << duration_us * 1.0 / (r_cmds * c_rounds) << "us\n";
 }
 
 void 
@@ -811,7 +859,7 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
-  test_case{ "npu3 xrt runlist of vadd", TEST_xrt_umq_runlist_nop, {} }
+  test_case{ "npu3 xrt runlist of nop", TEST_xrt_umq_nop_runlist, {} },
 };
 
 /* test n threads of 1 or more tests */
@@ -928,12 +976,24 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:s:m:x:d:i:t:e:v:w:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:o:r:s:m:x:d:i:t:e:v:w:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
 	  std::cout << "Using c_rounds: " << val << std::endl;
 	  c_rounds = val;
+	  break;
+        }
+        case 'o': {
+          val = std::stoi(optarg);
+	  std::cout << "Maximum outstanding cmds " << val << std::endl;
+	  o_cmds = val;
+	  break;
+        }
+        case 'r': {
+          val = std::stoi(optarg);
+	  std::cout << "Per runlist cmds: " << val << std::endl;
+	  r_cmds = val;
 	  break;
         }
 	case 's': {
