@@ -269,6 +269,7 @@ free_map:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_HMM_MIRROR)
 int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
@@ -339,6 +340,12 @@ put_mm:
 	mmput(mm);
 	return ret;
 }
+#else
+int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
+{
+	return 0;
+}
+#endif /* CONFIG_HMM_MIRROR */
 
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
