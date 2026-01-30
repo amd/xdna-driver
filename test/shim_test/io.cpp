@@ -510,6 +510,47 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
   }
 }
 
+elf_preempt_aie4_io_test_bo_set::
+elf_preempt_aie4_io_test_bo_set(device* dev, const std::string& xclbin_name)
+  : io_test_bo_set_base(dev, xclbin_name)
+{
+  auto elf_path = get_xclbin_path(dev, xclbin_name.c_str());
+  m_elf = xrt::elf(elf_path);
+  auto mod = xrt::module{m_elf};
+  auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+
+  try {
+    m_kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+  } catch (const std::exception& e) {
+    m_kernel_index = module_int::no_ctrl_code_id;
+  }
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      break;
+    case IO_TEST_BO_INPUT:
+      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
+      break;
+    case IO_TEST_BO_OUTPUT:
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL|m_FLAG_OPT);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
 elf_io_negative_test_bo_set::
 elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
   const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx)
@@ -731,6 +772,62 @@ init_cmd(hw_ctx& hwctx, bool dump)
     patcher::buf_type::preempt_save, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
     patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
+}
+
+void
+elf_preempt_aie4_io_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  std::vector<uint32_t> wts_offsets;
+  uint32_t offset;
+
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
+
+  xrt_core::cuidx_type cu_idx{0};
+  ebuf.set_cu_idx(cu_idx);
+
+  std::string wts_offset_file = m_local_data_path + "/wts_offsets.txt";
+  std::ifstream ifs(wts_offset_file);
+  if (!ifs.is_open())
+    throw std::runtime_error("cannot open weight offsets file: " + wts_offset_file);
+
+  while (ifs >> offset)
+    wts_offsets.push_back(offset);
+  ifs.close();
+
+  if (wts_offsets.empty())
+    throw std::runtime_error("no weight offsets found in: " + wts_offset_file);
+
+  ebuf.add_arg_64(56);
+  auto wts_bo = m_bo_array[IO_TEST_BO_PARAMETERS].tbo;
+  auto wts_paddr = wts_bo->paddr();
+  for (size_t i = 0; i < wts_offsets.size(); i++)
+    ebuf.add_arg_64_patched(wts_paddr + (wts_offsets[i] * sizeof(uint32_t)), std::to_string(i));
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "54");
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "55");
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+}
+
+void
+elf_preempt_aie4_io_test_bo_set::
+verify_result()
+{
+  auto ofm_bo = m_bo_array[IO_TEST_BO_OUTPUT].tbo.get();
+  auto ofm_p = reinterpret_cast<char*>(ofm_bo->map());
+  auto sz = ofm_bo->size();
+
+  std::vector<char> buf_ofm_golden(sz);
+  read_data_from_bin(m_local_data_path + "/ofm.bin", 0, sz, 
+                     reinterpret_cast<int*>(buf_ofm_golden.data()));
+
+  if (std::memcmp(ofm_p, buf_ofm_golden.data(), sz))
+    throw std::runtime_error("result mis-match");
 }
 
 void
