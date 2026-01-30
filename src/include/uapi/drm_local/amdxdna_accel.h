@@ -205,6 +205,32 @@ struct fw_buffer_metadata {
 };
 
 /**
+ * struct amdxdna_hwctx_param_config_scheduling - Scheduling configuration
+ * @quantum: Context quantum in 100ns units (defaults to 5ms = 50000)
+ * @in_process_priority: Priority relative to other contexts in same process (-7 to +7, default 0)
+ * @realtime_band_priority_level: Priority level within realtime band (0-31, ignore for other bands)
+ */
+struct amdxdna_hwctx_param_config_scheduling {
+	__u32 quantum;
+	__s32 in_process_priority;
+	__u32 realtime_band_priority_level;
+};
+
+/**
+ * struct amdxdna_hwctx_param_config_dpm - DPM configuration
+ * @egops: Effective giga-operations per workload
+ * @fps: Workloads per second that this hardware context will run at
+ * @data_movement: Total bytes transferred for 1 workload
+ * @latency_in_us: Maximum time within which workload must be completed
+ */
+struct amdxdna_hwctx_param_config_dpm {
+	__u32 egops;
+	__u32 fps;
+	__u32 data_movement;
+	__u32 latency_in_us;
+};
+
+/**
  * struct amdxdna_drm_config_hwctx - Configure context.
  * @handle: Context handle.
  * @param_type: Specifies the structure passed in via param_val.
@@ -222,6 +248,9 @@ struct amdxdna_drm_config_hwctx {
 #define DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF	1
 #define DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF	2
 #define DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT	3
+#define DRM_AMDXDNA_HWCTX_CONFIG_PRIORITY_BAND	4
+#define DRM_AMDXDNA_HWCTX_CONFIG_SCHEDULING	5
+#define DRM_AMDXDNA_HWCTX_CONFIG_DPM		6
 	__u32 param_type;
 	__u64 param_val;
 	__u32 param_val_size;
