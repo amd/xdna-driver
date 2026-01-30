@@ -691,6 +691,7 @@ static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	if (is_npu3_vf_dev(pdev) || skip_work_buffer) {
 		XDNA_DBG(xdna, "skip free work buffer");
@@ -1260,7 +1261,6 @@ static void aie4_iommu_fini(struct amdxdna_dev_hdl *ndev)
 static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	mutex_lock(&ndev->aie4_lock);
 	aie4_hw_stop(xdna);
