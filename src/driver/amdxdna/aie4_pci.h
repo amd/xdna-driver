@@ -186,6 +186,7 @@ int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *ver
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, u32 size);
 int aie4_set_pm_msg(struct amdxdna_dev_hdl *ndev, u32 target);
+int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev);
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl, u8 level,
 		      size_t size, u32 *msi_idx, u32 *msi_address);
 int aie4_set_log_level(struct amdxdna_dev_hdl *ndev, u8 level);
