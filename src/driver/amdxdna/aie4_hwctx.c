@@ -488,7 +488,7 @@ static void job_worker(struct work_struct *work)
 			/* Job is completed (be it success or failure) normally by CERT. */
 			job_complete(job);
 		} else if (priv->job_aborting) {
-			/* Mark job as aborted followed a timeout. */
+			/* Mark job as aborted following a timeout. */
 			job_abort(job);
 		} else {
 			XDNA_ERR(xdna, "ctx %s has timed out", ctx->name);
