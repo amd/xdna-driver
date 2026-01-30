@@ -325,6 +325,23 @@ int aie4_set_pm_msg(struct amdxdna_dev_hdl *ndev, u32 target)
 	return 0;
 }
 
+int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_calibrate_clock_trace, AIE4_MSG_OP_CALIBRATE_CLOCK);
+	int ret;
+
+	req.time_base_ns = ktime_get_real_ns();
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Calibrate clock failed, ret %d", ret);
+		return ret;
+	}
+
+	XDNA_DBG(ndev->xdna, "System clock calibrated with firmware");
+	return 0;
+}
+
 int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
 				 struct amdxdna_mgmt_dma_hdl *dma_hdl, void *handle,
 				 int (*cb)(void*, void __iomem *, size_t))
