@@ -39,6 +39,7 @@ struct aie_qos {
 	u32		priority;	/* Request priority */
 	u32		exclusive;      /* Exclusive Request or not */
 	u32		user_start_col; /* Start Col Requested by user */
+	u32		mem_index;	/* Memory region index */
 };
 
 /*
