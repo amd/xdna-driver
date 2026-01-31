@@ -104,8 +104,8 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
-  shim_debug("Calling DRM_IOCTL_AMDXDNA_CREATE_HWCTX: num_tiles=%u, qos_p=0x%lx, user_start_col=%u",
-             arg.num_tiles, arg.qos_p, m_qos.user_start_col);
+  shim_debug("Calling DRM_IOCTL_AMDXDNA_CREATE_HWCTX: num_tiles=%u, qos_p=0x%lx, user_start_col=%u, mem_index=%u",
+             arg.num_tiles, arg.qos_p, m_qos.user_start_col, m_qos.mem_index);
 
   try {
     m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
@@ -201,8 +201,8 @@ xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_contex
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
-  shim_debug("Calling DRM_IOCTL_AMDXDNA_CREATE_HWCTX: num_tiles=%u, qos_p=0x%lx, user_start_col=%u",
-             arg.num_tiles, arg.qos_p, m_qos.user_start_col);
+  shim_debug("Calling DRM_IOCTL_AMDXDNA_CREATE_HWCTX: num_tiles=%u, qos_p=0x%lx, user_start_col=%u, mem_index=%u",
+             arg.num_tiles, arg.qos_p, m_qos.user_start_col, m_qos.mem_index);
 
   try {
     m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
@@ -381,10 +381,16 @@ init_qos_info(const qos_type& qos)
       m_qos.priority = value;
     else if (key == "start_col")
       m_qos.user_start_col = value;
+    else if (key == "mem_index")
+      m_qos.mem_index = value;
   }
 
   if (m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
     shim_debug("QoS user_start_col requested: %u", m_qos.user_start_col);
+  }
+
+  if (m_qos.mem_index != 0) {
+    shim_debug("QoS mem_index requested: %u", m_qos.mem_index);
   }
 
   return 0;

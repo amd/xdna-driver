@@ -119,6 +119,7 @@ struct ve2_hsa_queue {
 	// hq_lock protects [read | write]_index and reserved_write_index
 	struct mutex			hq_lock;
 	u64				reserved_write_index;
+	struct device			*alloc_dev; /* Device used for dma allocation */
 };
 
 /* handshake */

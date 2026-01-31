@@ -378,16 +378,23 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
+	struct device *free_dev;
 
 	if (queue->hsa_queue_p) {
-		XDNA_DBG(xdna, "Freeing host queue: dma_addr=0x%llx",
-			 queue->hsa_queue_mem.dma_addr);
-		dma_free_coherent(&pdev->dev,
+		/* Use the device that was used for allocation, or default to pdev if not set */
+		free_dev = queue->alloc_dev ? queue->alloc_dev : &pdev->dev;
+
+		XDNA_DBG(xdna, "Freeing host queue: dma_addr=0x%llx from %s",
+			 queue->hsa_queue_mem.dma_addr,
+			 free_dev == &pdev->dev ? "default CMA" : "CMA region");
+
+		dma_free_coherent(free_dev,
 				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
 				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
 		queue->hsa_queue_mem.dma_addr = 0;
+		queue->alloc_dev = NULL;
 		mutex_destroy(&queue->hq_lock);
 	}
 }
@@ -479,26 +486,52 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 
 /*
  * Create hsa queue in kernel and initialize queue slots.
+ * Allocates memory from CMA region specified by mem_index in hwctx->qos.
  */
-static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
+static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
+				 struct ve2_hsa_queue *queue)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	int nslots = HOST_QUEUE_ENTRY;
 	dma_addr_t dma_handle;
 	size_t alloc_size;
+	struct device *alloc_dev;
+	u32 mem_index;
 
 	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * nslots;
-	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
+	mem_index = hwctx->qos.mem_index;
+
+	/*
+	 * Select device for allocation:
+	 * If mem_index is within range and the region device exists, use it.
+	 * Otherwise, fall back to the default platform device.
+	 */
+	if (mem_index < MAX_MEM_REGIONS && xdna->cma_region_devs[mem_index]) {
+		alloc_dev = xdna->cma_region_devs[mem_index];
+		XDNA_DBG(xdna, "Creating host queue from CMA region %u: nslots=%d, alloc_size=%zu",
+			 mem_index, nslots, alloc_size);
+	} else {
+		alloc_dev = &pdev->dev;
+		if (mem_index != 0)
+			XDNA_DBG(xdna, "CMA region %u not available, using default device", mem_index);
+		XDNA_DBG(xdna, "Creating host queue from default CMA: nslots=%d, alloc_size=%zu",
+			 nslots, alloc_size);
+	}
 
 	/* Allocate a single contiguous block of memory */
-	queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
+	queue->hsa_queue_p = dma_alloc_coherent(alloc_dev,
 						alloc_size,
 						&dma_handle,
 						GFP_KERNEL);
 	if (!queue->hsa_queue_p) {
-		XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu", alloc_size);
+		XDNA_ERR(xdna, "Failed to allocate host queue memory from %s, size=%zu",
+			 alloc_dev == &pdev->dev ? "default CMA" : "CMA region",
+			 alloc_size);
 		return -ENOMEM;
 	}
+
+	/* Store the device used for allocation so we can free from the same device */
+	queue->alloc_dev = alloc_dev;
 
 	/* Initialize mutex here */
 	mutex_init(&queue->hq_lock);
@@ -516,6 +549,10 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 
 	WARN_ON(!is_power_of_2(nslots));
 	queue->hsa_queue_p->hq_header.capacity = nslots;
+
+	XDNA_DBG(xdna, "Host queue allocated: dma_addr=0x%llx, virt_addr=%p, capacity=%d, mem_index=%u, device=%s",
+		 queue->hsa_queue_mem.dma_addr, queue->hsa_queue_p, nslots, mem_index,
+		 alloc_dev == &pdev->dev ? "default" : "region");
 
 	/* Set hsa queue slots to invalid */
 	for (int i = 0; i < nslots; i++) {
@@ -540,9 +577,17 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue 
 		}
 	}
 
-	XDNA_DBG(xdna, "Created host queue: dma_addr=0x%llx, capacity=%d, data_addr=0x%llx",
-		 queue->hsa_queue_mem.dma_addr, nslots,
-		 queue->hsa_queue_p->hq_header.data_address);
+	XDNA_DBG(xdna, "Host queue created successfully:");
+	XDNA_DBG(xdna, "  Queue DMA addr:       0x%llx", queue->hsa_queue_mem.dma_addr);
+	XDNA_DBG(xdna, "  Queue virtual addr:   %p", queue->hsa_queue_p);
+	XDNA_DBG(xdna, "  Queue header addr:    0x%llx", queue->hsa_queue_mem.dma_addr);
+	XDNA_DBG(xdna, "  Queue header virt:    %p", &queue->hsa_queue_p->hq_header);
+	XDNA_DBG(xdna, "  Queue data addr:      0x%llx", queue->hsa_queue_p->hq_header.data_address);
+	XDNA_DBG(xdna, "  Complete DMA addr:    0x%llx", queue->hq_complete.hqc_dma_addr);
+	XDNA_DBG(xdna, "  Complete virtual addr: %p", queue->hq_complete.hqc_mem);
+	XDNA_DBG(xdna, "  Capacity:             %d", nslots);
+	XDNA_DBG(xdna, "  Mem index:            %u", mem_index);
+	XDNA_DBG(xdna, "  Allocated from:       %s", alloc_dev == &pdev->dev ? "default CMA" : "CMA region");
 	return 0;
 }
 
@@ -1240,7 +1285,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	init_waitqueue_head(&priv->waitq);
 
 	/* one host_queue entry per hwctx */
-	ret = ve2_create_host_queue(xdna, &priv->hwctx_hsa_queue);
+	ret = ve2_create_host_queue(xdna, hwctx, &priv->hwctx_hsa_queue);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to create host queue, ret=%d", ret);
 		goto free_priv;

@@ -92,7 +92,7 @@ extern "C" {
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
  * @user_start_col: User preferred start column, or USER_START_COL_NOT_REQUESTED if not specified.
- * @reserved: Padding for 64-bit alignment (MBZ, reserved for future use).
+ * @mem_index: Memory region index for hw_context buffers (0-255).
  *
  * User program can provide QoS hints to driver.
  */
@@ -104,7 +104,7 @@ struct amdxdna_qos_info {
 	__u32 frame_exec_time;
 	__u32 priority;
 	__u32 user_start_col;
-	__u32 reserved; /* ensure 64-bit alignment */
+	__u32 mem_index;
 };
 
 /**
