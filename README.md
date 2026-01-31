@@ -171,7 +171,7 @@ EOF
 
 This ensures proper integration with pacman for installation, upgrades, and removal.
 
-You will find `xrt_plugin*-amdxdna.deb` (Ubuntu/Debian) or `xrt_plugin*.tar.gz` (Arch Linux) in Release/ folder. This package includes:
+You will find `xrt_plugin.<version>_<distro-version>-<arch>-amdxdna.deb` (Ubuntu/Debian) or `xrt_plugin.<version>_-<arch>-amdxdna.tar.gz` (Arch Linux) in the `Release/` folder. This package includes:
 * The `.so` library files, which will be installed into `/opt/xilinx/xrt/lib` folder
 * The XDNA driver and DKMS script, which build, install and load
   `amdxdna.ko` driver when installing the .DEB package on target machine
