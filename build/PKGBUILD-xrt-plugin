@@ -1,6 +1,6 @@
 # Maintainer: Your Name <your@email.com>
 pkgname=xrt-plugin-amdxdna
-pkgver=2.21.0
+pkgver=2.23.0
 pkgrel=1
 pkgdesc="AMD XDNA Driver plugin for Xilinx RunTime"
 arch=('x86_64')
