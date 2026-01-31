@@ -1075,3 +1075,122 @@ verify_result()
   }
   m_last_err_timestamp = err_timstamp;
 }
+
+async_error_aie4_io_test_bo_set::
+async_error_aie4_io_test_bo_set(device* dev, const std::string& xclbin_name)
+  : m_expect_err_code(0), m_last_err_timestamp(0), io_test_bo_set_base(dev, xclbin_name)
+{
+  auto elf_path = get_xclbin_path(dev, xclbin_name.c_str());
+  m_elf = xrt::elf(elf_path);
+  auto mod = xrt::module{m_elf};
+  auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+
+  try {
+    m_kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+  } catch (const std::exception& e) {
+    m_kernel_index = module_int::no_ctrl_code_id;
+  }
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      break;
+    default:
+      break;
+    }
+  }
+
+  // bad_ctrl.elf triggers AIE4 context error (UC firmware exception)
+  // error_type = UC_COMPLETION_TIMEOUT (4) or UC_CRITICAL_ERROR (5)
+  // Both map to KDS_EXEC error number
+  uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
+  uint64_t err_drv = XRT_ERROR_DRIVER_AIE;
+  uint64_t err_severity = XRT_ERROR_SEVERITY_CRITICAL;
+  uint64_t err_module = XRT_ERROR_MODULE_AIE_CORE;
+  uint64_t err_class = XRT_ERROR_CLASS_AIE;
+  m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
+}
+
+void
+async_error_aie4_io_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
+
+  xrt_core::cuidx_type cu_idx{0};
+  ebuf.set_cu_idx(cu_idx);
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+}
+
+void
+async_error_aie4_io_test_bo_set::
+run()
+{
+  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
+  auto hwq = hwctx.get()->get_hw_queue();
+
+  init_cmd(hwctx, false);
+  sync_before_run();
+
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto chdl = cbo->get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  
+  restore_cmd_header(chdl, cpkt);
+  cache_cmd_header(chdl, cpkt);
+
+  hwq->submit_command(chdl);
+  
+  // Use 2 second timeout for error-triggering ELF
+  try {
+    hwq->wait_command(chdl, 2000);
+  } catch (const std::exception& e) {
+    std::cout << "Command wait exception (expected for bad ELF): " << e.what() << std::endl;
+  }
+
+  sync_after_run();
+  verify_result();
+}
+
+void
+async_error_aie4_io_test_bo_set::
+verify_result()
+{
+  // Don't care about command completion status, it may succeed or timeout
+
+  auto buf = device_query<query::xocl_errors>(m_dev);
+  if (buf.empty())
+    throw std::runtime_error("failed to get async errors, return empty information.");
+
+  auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
+  xrtErrorCode err_code;
+  xrtErrorTime err_timstamp;
+  std::tie(err_code, err_timstamp) = ect;
+  
+  if (err_code != m_expect_err_code) {
+    std::stringstream ss;
+    ss << "failed to get async errors, unexpected error code, 0x" << std::hex << err_code
+       << ", expected 0x" << m_expect_err_code << ".";
+    throw std::runtime_error(ss.str());
+  }
+  
+  if (err_timstamp == m_last_err_timestamp) {
+    std::stringstream ss;
+    ss << "failed to get async errors, return old timestamp: " << m_last_err_timestamp << ".";
+    throw std::runtime_error(ss.str());
+  }
+  m_last_err_timestamp = err_timstamp;
+}
