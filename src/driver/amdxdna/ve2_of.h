@@ -140,7 +140,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx);
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size);
 void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols);
 
-int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32 *syncobj_hdls,
+int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 		   u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout);
 

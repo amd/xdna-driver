@@ -46,23 +46,6 @@ xclbin_info xclbin_infos[] = {
     .data = "data",
   },
   {
-    .name = "1x4.xclbin",
-    .device = npu4_device_id,
-    .revision_id = npu2_revision_id,
-    .ip_name2idx = {
-      { "DPU_PDI_0:IPUV1CNN",         {0} },
-      { "DPU_PDI_1:IPUV1CNN",         {1} },
-      { "DPU_PDI_2:IPUV1CNN",         {2} },
-      { "DPU_PDI_3:IPUV1CNN",         {3} },
-      { "DPU_PDI_4:IPUV1CNN",         {4} },
-      { "DPU_PDI_5:IPUV1CNN",         {5} },
-      { "DPU_PDI_6:IPUV1CNN",         {6} },
-      { "DPU_PDI_7:IPUV1CNN",         {7} },
-    },
-    .workspace = "npu2_workspace",
-    .data = "data",
-  },
-  {
     .name = "vadd.elf",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,

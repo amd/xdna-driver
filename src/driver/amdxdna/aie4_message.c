@@ -149,12 +149,6 @@ int aie4_check_firmware_version(struct amdxdna_dev_hdl *ndev)
 	xdna->fw_ver.sub = resp.fw_patch;
 	xdna->fw_ver.build = resp.fw_build;
 
-	//if (resp.protocol_major != ndev->version.major) {
-		//XDNA_ERR(xdna, "Incompatible firmware protocol version major %d minor %d",
-			 //resp.protocol_major, resp.protocol_minor);
-		//return -EINVAL;
-	//}
-
 	XDNA_DBG(xdna, "FW version: %d.%d.%d.%d", xdna->fw_ver.major,
 		 xdna->fw_ver.minor, xdna->fw_ver.sub, xdna->fw_ver.build);
 
@@ -495,4 +489,43 @@ int aie4_stop_fw_trace(struct amdxdna_dev_hdl *ndev)
 	}
 
 	return 0;
+}
+
+int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, u32 pasid, dma_addr_t addr, u32 size)
+{
+	DECLARE_AIE4_MSG(aie4_msg_dram_work_buffer, AIE4_MSG_OP_DRAM_WORK_BUFFER);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (size < AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE || !addr) {
+		XDNA_ERR(xdna, "Invalid work buffer address 0x%llx or size %d", addr, size);
+		return -EINVAL;
+	}
+
+	req.buff_addr = addr;
+	req.buff_size = size;
+	req.pasid.raw = pasid;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to attach mpnpu work buffer, ret %d", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_release_dram_work_buffer, AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to detach mpnpu work buffer, ret %d", ret);
+		return ret;
+	}
+
+	return ret;
 }

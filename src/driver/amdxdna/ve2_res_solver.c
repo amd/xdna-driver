@@ -50,8 +50,13 @@ static void remove_partition_node(struct solver_rgroup *rgp, struct partition_no
 	pt_node->nshared--;
 	if (pt_node->nshared > 0) {
 		action->release_aie_part = false;
+		pr_debug("Partition still shared: start_col=%u, nshared=%u\n",
+			 pt_node->start_col, pt_node->nshared);
 		return;
 	}
+
+	pr_debug("Removing partition: start_col=%u, ncols=%u\n",
+		 pt_node->start_col, pt_node->ncols);
 
 	list_del(&pt_node->list);
 
@@ -377,6 +382,9 @@ static struct solver_node *create_solver_node(struct solver_state *xrs, struct a
 	struct solver_node *node;
 	int ret;
 
+	drm_dbg(xrs->cfg.ddev, "Creating solver node: rid=0x%llx, ncols=%u, cols_len=%u\n",
+		req->rid, cdop->ncols, cdop->cols_len);
+
 	node = kzalloc(struct_size(node, start_cols, cdop->cols_len), GFP_KERNEL);
 	if (!node)
 		return ERR_PTR(-ENOMEM);
@@ -385,16 +393,25 @@ static struct solver_node *create_solver_node(struct solver_state *xrs, struct a
 	node->cols_len = cdop->cols_len;
 	memcpy(node->start_cols, cdop->start_cols, cdop->cols_len * sizeof(u32));
 
-	if (req->rqos.exclusive)
+	if (req->rqos.exclusive) {
+		drm_dbg(xrs->cfg.ddev, "Allocating exclusive partition\n");
 		ret = allocate_partition_exclusive(xrs, node, req);
-	else
+	} else {
+		drm_dbg(xrs->cfg.ddev, "Allocating shared partition\n");
 		ret = allocate_partition_shared(xrs, node, req);
+	}
 
-	if (ret)
+	if (ret) {
+		drm_dbg(xrs->cfg.ddev, "Partition allocation failed: ret=%d\n", ret);
 		goto free_node;
+	}
 
 	list_add_tail(&node->list, &xrs->rgp.node_list);
 	xrs->rgp.nnode++;
+
+	drm_dbg(xrs->cfg.ddev, "Solver node created: nnode=%u, npartition=%u\n",
+		xrs->rgp.nnode, xrs->rgp.npartition_node);
+
 	return node;
 
 free_node:
@@ -431,13 +448,23 @@ int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action)
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
 
+	drm_dbg(xrs->cfg.ddev, "Releasing resource: rid=0x%llx\n", rid);
+
 	node = rg_search_node(&xrs->rgp, rid);
 	if (!node) {
-		drm_err(xrs->cfg.ddev, "node not exist");
+		drm_err(xrs->cfg.ddev, "node not exist for rid=0x%llx\n", rid);
 		return -ENODEV;
 	}
 
+	drm_dbg(xrs->cfg.ddev, "Removing node: rid=0x%llx, start_col=%u, ncols=%u, nshared=%u\n",
+		node->rid, node->pt_node ? node->pt_node->start_col : 0,
+		node->pt_node ? node->pt_node->ncols : 0,
+		node->pt_node ? node->pt_node->nshared : 0);
+
 	remove_solver_node(&xrs->rgp, node, action);
+
+	drm_dbg(xrs->cfg.ddev, "Resource released: release_aie_part=%d\n",
+		action->release_aie_part);
 
 	return 0;
 }
@@ -465,14 +492,18 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct xrs_acti
 	struct solver_node *snode;
 	int ret;
 
+	drm_dbg(xrs->cfg.ddev, "Allocating resource: rid=0x%llx, ncols=%u, priority=%u\n",
+		req->rid, req->cdo.ncols, req->rqos.priority);
+
 	ret = sanity_check(xrs, req);
 	if (ret) {
-		drm_err(xrs->cfg.ddev, "invalid request");
+		drm_err(xrs->cfg.ddev, "invalid request: ncols=%u > total_col=%u\n",
+			req->cdo.ncols, xrs->cfg.total_col);
 		return ret;
 	}
 
 	if (rg_search_node(&xrs->rgp, req->rid)) {
-		drm_err(xrs->cfg.ddev, "rid %lld is in-use", req->rid);
+		drm_err(xrs->cfg.ddev, "rid 0x%llx is in-use\n", req->rid);
 		return -EEXIST;
 	}
 
@@ -481,14 +512,19 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, struct xrs_acti
 	else
 		req->rqos.exclusive = false;
 
+	drm_dbg(xrs->cfg.ddev, "Resource request: exclusive=%d, user_start_col=%u\n",
+		req->rqos.exclusive, req->rqos.user_start_col);
+
 	snode = create_solver_node(xrs, req);
-	if (IS_ERR(snode))
+	if (IS_ERR(snode)) {
+		drm_err(xrs->cfg.ddev, "Failed to create solver node, err=%ld\n", PTR_ERR(snode));
 		return PTR_ERR(snode);
+	}
 
 	fill_load_action(xrs, snode, load_act);
-	drm_dbg(xrs->cfg.ddev, "start col %d ncols %d is exclusive ? %s\n",
+	drm_dbg(xrs->cfg.ddev, "Resource allocated: start_col=%u, ncols=%u, exclusive=%s, create_part=%d\n",
 		snode->pt_node->start_col, snode->pt_node->ncols,
-		req->rqos.exclusive ? "true" : "false");
+		req->rqos.exclusive ? "true" : "false", load_act->create_aie_part);
 
 	return 0;
 }
@@ -509,10 +545,14 @@ void *xrsm_init(struct init_config *cfg)
 	struct solver_state *xrs;
 	size_t bitmap_size;
 
+	drm_dbg(cfg->ddev, "Initializing resource solver: total_col=%u\n", cfg->total_col);
+
 	bitmap_size = BITS_TO_LONGS(cfg->total_col) * sizeof(unsigned long);
 	xrs = drmm_kzalloc(cfg->ddev, sizeof(*xrs) + bitmap_size, GFP_KERNEL);
-	if (!xrs)
+	if (!xrs) {
+		drm_err(cfg->ddev, "Failed to allocate resource solver state\n");
 		return NULL;
+	}
 
 	memcpy(&xrs->cfg, cfg, sizeof(*cfg));
 
@@ -521,6 +561,8 @@ void *xrsm_init(struct init_config *cfg)
 	INIT_LIST_HEAD(&rgp->node_list);
 	INIT_LIST_HEAD(&rgp->pt_node_list);
 	mutex_init(&xrs->xrs_lock);
+
+	drm_dbg(cfg->ddev, "Resource solver initialized: bitmap_size=%zu\n", bitmap_size);
 
 	return xrs;
 }

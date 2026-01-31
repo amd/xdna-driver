@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_DRM_H_
@@ -72,7 +72,7 @@ struct amdxdna_dev_ops {
 	void (*ctx_fini)(struct amdxdna_ctx *ctx);
 	int (*ctx_config)(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-	int (*cmd_submit)(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
+	int (*cmd_submit)(struct amdxdna_sched_job *job,
 			  u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
@@ -96,6 +96,7 @@ struct amdxdna_rev_vbnv {
  * @sram_bar: Index of SRAM BAR
  * @psp_bar: Index of PSP BAR
  * @smu_bar: Index of SMU BAR
+ * @doorbell_bar: Index of DOORBELL BAR
  * @device_type: type of the device
  * @first_col: First column for application
  * @dev_mem_buf_shift: heap buffer alignment shift
@@ -114,6 +115,7 @@ struct amdxdna_dev_info {
 	int				sram_bar;
 	int				psp_bar;
 	int				smu_bar;
+	int				doorbell_bar;
 	int				device_type;
 	int				first_col;
 	u32				dev_mem_buf_shift;

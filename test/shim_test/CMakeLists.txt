@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 set(XDNA_SHIM_TEST shim_test.elf)
 
@@ -47,12 +47,6 @@ install(CODE "execute_process( \
   )"
   )
 
-install(CODE "execute_process( \
-  COMMAND ${CMAKE_COMMAND} -E create_symlink \
-  ${AMDXDNA_BINS_DIR}/workspaces/NPU2_1x4_TESTCASES \
-  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu2_workspace \
-  )"
-  )
 
 install(CODE "execute_process( \
   COMMAND ${CMAKE_COMMAND} -E create_symlink \

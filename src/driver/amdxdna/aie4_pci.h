@@ -9,11 +9,13 @@
 #include <linux/device.h>
 #include <linux/iopoll.h>
 #include <linux/io.h>
+#include <linux/wait.h>
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_error.h"
 #include "amdxdna_aie.h"
+#include "amdxdna_mgmt.h"
 
 #define AIE4_INTERVAL		20000	/* us */
 #ifdef AMDXDNA_DEVEL
@@ -28,6 +30,8 @@
 
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
 
+extern int kernel_mode_submission;
+
 struct clock_entry {
 	char name[16];
 	u32 freq_mhz;
@@ -41,14 +45,37 @@ struct rt_config_clk_gating {
 };
 
 struct amdxdna_ctx_priv {
+	struct amdxdna_ctx		*ctx;
 	struct amdxdna_gem_obj		*umq_bo;
-	struct sg_table			*umq_sgt;
+	u64				*umq_read_index;
+	u64				*umq_write_index;
+	u64				write_index;
+	struct host_queue_packet	*umq_pkts;
+	struct host_indirect_packet_data *umq_indirect_pkts;
+	u64				umq_indirect_pkts_dev_addr;
+
+	struct work_struct		job_work;
+	bool				job_aborting;
+	struct workqueue_struct		*job_work_q;
+	wait_queue_head_t		job_list_wq;
+	struct list_head		pending_job_list;
+	struct list_head		running_job_list;
+
+	void			__iomem	*doorbell_addr;
+
 	u32				meta_bo_hdl;
 	struct col_entry		*col_entry;
 	u32				hw_ctx_id;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
+
+	/* CERT Simulation for debug only, remove later. */
+	struct workqueue_struct		*cert_work_q;
+	struct work_struct		cert_work;
+	u64				cert_timeout_seq;
+	u64				cert_error_seq;
+	u64				cert_read_index;
 };
 
 enum aie4_dev_status {
@@ -60,10 +87,7 @@ enum aie4_dev_status {
 struct amdxdna_dev_priv {
 	const char		*npufw_path;
 	const char		*certfw_path;
-	u32			mbox_bar;
-	u32			mbox_rbuf_bar;
 	u64			mbox_info_off;
-	u32			doorbell_bar;
 	u32			doorbell_off;
 	struct rt_config_clk_gating	clk_gating;
 	const struct dpm_clk_freq	*dpm_clk_tbl;
@@ -73,13 +97,12 @@ struct amdxdna_dev_priv {
 };
 
 struct async_events;
-struct debugfs_args;
 
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
 	void				*xrs_hdl;
-	struct psp_device               *psp_hdl;
+	struct psp_device		*psp_hdl;
 
 	u32				partition_id;
 
@@ -97,11 +120,11 @@ struct amdxdna_dev_hdl {
 
 	struct list_head		col_entry_list;
 	struct mutex			col_list_lock; // lock for col_entry_list
-	void			__iomem	*doorbell_base;
+	void			__iomem *doorbell_base;
 	void			__iomem *mbox_base;
 	void			__iomem *rbuf_base;
-	void                    __iomem *psp_base;
-	void                    __iomem *smu_base;
+	void			__iomem *psp_base;
+	void			__iomem *smu_base;
 
 	int				pw_mode;
 	enum aie_power_state		power_state;
@@ -110,15 +133,15 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	bool				force_preempt_enabled;
 
-	int                             num_vfs;
+	int				num_vfs;
 
-	struct async_events             *async_events;
-	/* Protect mgmt_chann */
-	struct mutex                    aie4_lock;
-
+	struct async_events		*async_events;
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
 
-	struct debugfs_args		*dbgfs_args;
+	struct amdxdna_mgmt_dma_hdl	*mpnpu_work_buffer;
+
+	/* Protect mgmt_chann */
+	struct mutex			aie4_lock;
 };
 
 struct col_entry {
@@ -171,6 +194,8 @@ int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hd
 			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address);
 int aie4_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories);
 int aie4_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
+int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, u32 pasid, dma_addr_t addr, u32 size);
+int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev);
 void aie4_reset_prepare(struct amdxdna_dev *xdna);
 int aie4_reset_done(struct amdxdna_dev *xdna);
 
@@ -179,8 +204,11 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx);
 void aie4_ctx_fini(struct amdxdna_ctx *ctx);
 void aie4_ctx_suspend(struct amdxdna_ctx *ctx, bool wait);
 int aie4_ctx_resume(struct amdxdna_ctx *ctx);
+int aie4_cmd_submit(struct amdxdna_sched_job *job,
+		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
+int aie4_parse_priority(u32 priority);
 
 /* aie4_smu.c */
 int aie4_smu_start(struct amdxdna_dev_hdl *ndev);

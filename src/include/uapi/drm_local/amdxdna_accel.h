@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef AMDXDNA_ACCEL_H_
@@ -25,6 +25,7 @@ extern "C" {
 #define AMDXDNA_INVALID_CTX_HANDLE	0
 #define AMDXDNA_INVALID_BO_HANDLE	0
 #define AMDXDNA_INVALID_FENCE_HANDLE	0
+#define AMDXDNA_INVALID_DOORBELL_OFFSET	(~0U)
 
 #define POWER_MODE_DEFAULT	0
 #define POWER_MODE_LOW		1

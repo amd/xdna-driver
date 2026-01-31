@@ -1,21 +1,32 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  */
 #include <linux/pm_runtime.h>
+#include <drm/drm_syncobj.h>
 #include <drm/drm_cache.h>
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_trace.h"
+#ifdef AMDXDNA_DEVEL
+#include "amdxdna_devel.h"
+#endif
 
 #include "aie4_pci.h"
 #include "aie4_message.h"
 #include "aie4_solver.h"
 #include "aie4_msg_priv.h"
-#ifdef AMDXDNA_DEVEL
-#include "amdxdna_devel.h"
-#endif
+#include "aie4_host_queue.h"
+
+#define	NO_KMS			0
+#define	KMS_REAL_CERT		1
+#define	KMS_SIMULATING_CERT	2
+int kernel_mode_submission = 1;
+module_param(kernel_mode_submission, int, 0600);
+MODULE_PARM_DESC(kernel_mode_submission,
+		 "I/O submission, 0 - by user, 1 by driver (default), 2 - simulated cert for debugging");
 
 static int aie4_alloc_resource(struct amdxdna_ctx *ctx)
 {
@@ -77,10 +88,490 @@ static int aie4_ctx_col_list_init(struct amdxdna_ctx *ctx)
 	return 0;
 }
 
+static inline void aie4_ctx_umq_dump(struct amdxdna_ctx *ctx)
+{
+	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
+		sizeof(struct host_indirect_packet_data);
+	const size_t pkts_sz = CTX_MAX_CMDS * sizeof(struct host_queue_packet);
+	const size_t hdr_sz = sizeof(struct host_queue_header);
+	void *umq_va = amdxdna_gem_vmap(ctx->priv->umq_bo);
+
+	print_hex_dump_debug("raw_umq: ", DUMP_PREFIX_OFFSET, 16, 4,
+			     umq_va, hdr_sz + pkts_sz + indir_pkts_sz, false);
+}
+
+static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
+{
+	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
+		sizeof(struct host_indirect_packet_data);
+	const size_t pkts_sz = CTX_MAX_CMDS * sizeof(struct host_queue_packet);
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_ctx_priv *priv = ctx->priv;
+	struct host_queue_header *qhdr;
+	struct amdxdna_gem_obj *umq_bo;
+	size_t umq_sz;
+	void *umq_va;
+	int i;
+
+	umq_bo = amdxdna_gem_get_obj(ctx->client, ctx->umq_bo, AMDXDNA_BO_SHARE);
+	if (!umq_bo) {
+		XDNA_ERR(xdna, "cannot find umq_bo handle %d", ctx->umq_bo);
+		return -ENOENT;
+	}
+	priv->umq_bo = umq_bo;
+
+	umq_va = amdxdna_gem_vmap(umq_bo);
+	qhdr = umq_va;
+	priv->umq_read_index = &qhdr->read_index;
+
+	if (kernel_mode_submission == NO_KMS)
+		return 0;
+
+	/*
+	 * Kernel mode submission requires driver to reinitialize the UMQ
+	 * content to driver's need.
+	 *
+	 * Security notes:
+	 * Since umq is shared b/w user and driver, the content can't be trusted
+	 * and should not be read and used by driver at any time with below exceptions:
+	 *   - read index: to tell if a command has been completed or not.
+	 */
+	priv->umq_write_index = &qhdr->write_index;
+	priv->umq_pkts = umq_va + sizeof(*qhdr);
+	priv->umq_indirect_pkts = umq_va + sizeof(*qhdr) + pkts_sz;
+	priv->umq_indirect_pkts_dev_addr =
+		amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr) + pkts_sz;
+	priv->write_index = 0;
+
+	umq_sz = umq_bo->mem.size;
+	if (umq_sz < sizeof(*qhdr) + pkts_sz + indir_pkts_sz) {
+		XDNA_ERR(xdna, "umq BO size %ldB is too small", umq_sz);
+		drm_gem_object_put(to_gobj(umq_bo));
+		priv->umq_bo = NULL;
+		return -EINVAL;
+	}
+
+	/* Init umq content */
+	memset(umq_va, 0, umq_sz);
+	qhdr->capacity = CTX_MAX_CMDS;
+	qhdr->data_address = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
+	for (i = 0; i < CTX_MAX_CMDS; i++)
+		priv->umq_pkts[i].pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
+	for (i = 0; i < CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES; i++) {
+		priv->umq_indirect_pkts[i].header.opcode = OPCODE_EXEC_BUF;
+		priv->umq_indirect_pkts[i].header.count = sizeof(struct exec_buf);
+		priv->umq_indirect_pkts[i].header.distribute = 1;
+	}
+	return 0;
+}
+
+static void aie4_ctx_umq_fini(struct amdxdna_ctx *ctx)
+{
+	if (ctx->priv && ctx->priv->umq_bo)
+		drm_gem_object_put(to_gobj(ctx->priv->umq_bo));
+}
+
+static inline bool is_running_list_empty(struct amdxdna_ctx *ctx)
+{
+	bool is_empty;
+
+	mutex_lock(&ctx->io_lock);
+	is_empty = list_empty(&ctx->priv->running_job_list);
+	mutex_unlock(&ctx->io_lock);
+	return is_empty;
+}
+
+static inline struct amdxdna_sched_job *next_running_job(struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_sched_job *job;
+
+	mutex_lock(&ctx->io_lock);
+	job = list_first_entry_or_null(&ctx->priv->running_job_list,
+				       struct amdxdna_sched_job, list);
+	if (job)
+		list_del(&job->list);
+	mutex_unlock(&ctx->io_lock);
+	return job;
+}
+
+static void job_release(struct kref *ref)
+{
+	struct amdxdna_sched_job *job;
+
+	job = container_of(ref, struct amdxdna_sched_job, refcnt);
+	amdxdna_sched_job_cleanup(job);
+}
+
+static void job_done(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_ctx *ctx = job->ctx;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+
+	XDNA_DBG(xdna, "ctx %s job 0x%llx done, state %d",
+		 ctx->name, (u64)job, amdxdna_cmd_get_state(job->cmd_bo));
+	trace_amdxdna_debug_point(ctx->name, job->seq, "signaling fence");
+	job->state = JOB_STATE_DONE;
+	dma_fence_signal(job->fence);
+	mmput_async(job->mm);
+	amdxdna_pm_suspend_put(xdna);
+	kref_put(&job->refcnt, job_release);
+}
+
+static void job_1st_error_cmd(struct amdxdna_sched_job *job, u32 *index, u32 *err_state)
+{
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct amdxdna_cmd_chain *payload;
+	u32 ccnt;
+	int i;
+
+	*index = 0;
+	*err_state = ERT_CMD_STATE_COMPLETED;
+
+	if (job->state == JOB_STATE_SUBMITTED) {
+		*err_state = amdxdna_cmd_get_state(cmd_abo);
+		return;
+	}
+
+	/*
+	 * Command chain result updated by CERT:
+	 * 1. If all sub-cmds are processed successfully, the last sub-cmd state
+	 *    is ERT_CMD_STATE_COMPLETED
+	 * 2. If one sub-cmds failed, the state of the failed one is updated. All
+	 *    sub-cmds after it will be skipped and set to ERT_CMD_STATE_ABORT
+	 * 3. In case CERT hangs or did not start processing, all sub-cmds state
+	 *    should stay as ERT_CMD_STATE_NEW
+	 */
+	payload = amdxdna_cmd_get_chained_payload(cmd_abo, &ccnt);
+	if (!payload) {
+		*err_state = ERT_CMD_STATE_ABORT;
+		return;
+	}
+	for (i = ccnt - 1; i >= 0; i--) {
+		u32 boh = payload->data[i];
+		struct amdxdna_gem_obj *abo;
+		u32 state;
+
+		abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!abo) {
+			*index = 0;
+			*err_state = ERT_CMD_STATE_ABORT;
+			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
+			break;
+		}
+
+		state = amdxdna_cmd_get_state(abo);
+		amdxdna_gem_put_obj(abo);
+		if (state == ERT_CMD_STATE_COMPLETED || state == ERT_CMD_STATE_NEW) {
+			if (i != ccnt - 1)
+				XDNA_ERR(xdna, "Unexpected state %d", state);
+			*index = 0;
+			*err_state = state;
+			break;
+		}
+
+		if (state != ERT_CMD_STATE_ABORT) {
+			*index = i;
+			*err_state = state;
+			break;
+		}
+	}
+	if (i < 0) {
+		XDNA_ERR(xdna, "Failed to detect 1st err state");
+		*index = 0;
+		*err_state = ERT_CMD_STATE_ABORT;
+	}
+}
+
+static void job_complete(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct amdxdna_cmd_chain *payload;
+	u32 state, i;
+
+	/*
+	 * Single cmd. Don't access the cmd_bo since CERT's update of the cmd_bo
+	 * state may have been picked up by user space when it polls. The cmd_bo
+	 * could be used for another run by now. Just clean up the job in driver.
+	 */
+	if (job->state == JOB_STATE_SUBMITTED)
+		goto done;
+
+	/*
+	 * Chained cmd. Should be safe to use cmd_bo since it's not exposed to
+	 * CERT directly.
+	 */
+	job_1st_error_cmd(job, &i, &state);
+	if (state == ERT_CMD_STATE_NEW)
+		XDNA_ERR(xdna, "Chained cmd completed, but state is still NEW!");
+	amdxdna_cmd_set_state(cmd_abo, state);
+	if (state == ERT_CMD_STATE_COMPLETED)
+		goto done;
+
+	payload = amdxdna_cmd_get_chained_payload(cmd_abo, NULL);
+	if (payload)
+		payload->error_index = i;
+	else
+		XDNA_ERR(xdna, "Failed to find cmd BO payload");
+
+done:
+	job_done(job);
+}
+
+static void job_abort(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct amdxdna_cmd_chain *payload;
+
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
+
+	/* Single cmd. */
+	if (job->state == JOB_STATE_SUBMITTED)
+		goto done;
+
+	/* Chained cmd. */
+	payload = amdxdna_cmd_get_chained_payload(cmd_abo, NULL);
+	if (payload)
+		payload->error_index = 0;
+	else
+		XDNA_ERR(job->ctx->client->xdna, "Failed to find cmd BO payload");
+
+done:
+	job_done(job);
+}
+
+static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo)
+{
+	struct amdxdna_ctx_health_data *health_data;
+	u32 data_total;
+
+	/* TODO: retrieve context health data. */
+	health_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
+	health_data->version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	health_data->npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	health_data->aie4.num_uc = 0;
+}
+
+static void job_timeout(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct amdxdna_gem_obj *sub_cmd_abo;
+	struct amdxdna_cmd_chain *payload;
+	u32 boh, i = 0;
+
+	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+
+	/* Single cmd. */
+	if (job->state == JOB_STATE_SUBMITTED) {
+		aie4_fill_health_data(cmd_abo);
+		goto done;
+	}
+
+	/* Chained cmd. */
+	/* TODO: 'i' should come from health data. */
+	i = 0;
+	payload = amdxdna_cmd_get_chained_payload(cmd_abo, NULL);
+	if (payload) {
+		boh = payload->data[i];
+		payload->error_index = i;
+		sub_cmd_abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!sub_cmd_abo) {
+			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
+		} else {
+			aie4_fill_health_data(sub_cmd_abo);
+			amdxdna_gem_put_obj(sub_cmd_abo);
+		}
+	} else {
+		XDNA_ERR(xdna, "Failed to find cmd BO payload");
+	}
+
+done:
+	job_done(job);
+}
+
+static inline void ring_doorbell(struct amdxdna_ctx *ctx)
+{
+	writel(0, ctx->priv->doorbell_addr);
+}
+
+static inline u64 get_read_index(struct amdxdna_ctx *ctx)
+{
+	u64 ri = READ_ONCE(*ctx->priv->umq_read_index);
+
+	/* Make sure CERT has updated read_index before we complete the job. */
+	dma_rmb();
+	return ri;
+}
+
+/* Publish cmd to CERT and return the assigned cmd ID. */
+static inline u64 publish_cmd(struct amdxdna_ctx *ctx)
+{
+	u64 wi = ctx->priv->write_index;
+
+	/* Make sure the writes to the cmd slot are completed before notifying CERT. */
+	dma_wmb();
+	WRITE_ONCE(*ctx->priv->umq_write_index, ++ctx->priv->write_index);
+	return wi;
+}
+
+static inline bool check_completed(struct amdxdna_ctx *ctx, u64 seq)
+{
+	u64 ri = get_read_index(ctx);
+
+	return ctx->priv->status != CTX_STATE_CONNECTED || ri > seq;
+}
+
+static inline int wait_till_seq_completed(struct amdxdna_ctx *ctx, u64 seq)
+{
+	struct amdxdna_ctx_priv *nctx = ctx->priv;
+	struct col_entry *col_entry = nctx->col_entry;
+
+	wait_event(col_entry->col_event, check_completed(ctx, seq));
+	if (nctx->status != CTX_STATE_CONNECTED)
+		return -EAGAIN; /* Ctx is not ready, come back later. */
+	return 0;
+}
+
+static inline int wait_till_hsa_not_full(struct amdxdna_ctx *ctx)
+{
+	u64 wi = ctx->priv->write_index;
+
+	if (wi < CTX_MAX_CMDS)
+		return 0;
+	return wait_till_seq_completed(ctx, wi - CTX_MAX_CMDS);
+}
+
+static inline void wait_till_job_done(struct amdxdna_sched_job *job)
+{
+	wait_till_seq_completed(job->ctx, job->seq);
+}
+
+static inline bool is_first_pending_job_submitting(struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_sched_job *job;
+	struct list_head *pl;
+	bool ret;
+
+	mutex_lock(&ctx->io_lock);
+
+	pl = &ctx->priv->pending_job_list;
+	if (list_empty(pl)) {
+		ret = false;
+	} else {
+		job = list_first_entry(pl, struct amdxdna_sched_job, list);
+		ret = (job->state == JOB_STATE_SUBMITTING);
+	}
+
+	mutex_unlock(&ctx->io_lock);
+	return ret;
+}
+
+static void job_worker(struct work_struct *work)
+{
+	struct amdxdna_ctx_priv *priv;
+	struct amdxdna_sched_job *job;
+	struct amdxdna_dev *xdna;
+	struct amdxdna_ctx *ctx;
+
+	priv = container_of(work, struct amdxdna_ctx_priv, job_work);
+	ctx = priv->ctx;
+	xdna = ctx->client->xdna;
+
+	while (!!(job = next_running_job(ctx))) {
+		if (!priv->job_aborting)
+			wait_till_job_done(job);
+		trace_amdxdna_debug_point(ctx->name, job->seq, "job complete");
+
+		if (get_read_index(ctx) > job->seq) {
+			/* Job is completed (be it success or failure) normally by CERT. */
+			job_complete(job);
+		} else if (priv->job_aborting) {
+			/* Mark job as aborted following a timeout. */
+			job_abort(job);
+		} else {
+			XDNA_ERR(xdna, "ctx %s has timed out", ctx->name);
+			/* Ctx has just failed, timeout this one. */
+			job_timeout(job);
+			/* Abort the rest. */
+			priv->job_aborting = true;
+		}
+		ctx->completed++;
+	}
+	if (!priv->job_aborting)
+		return;
+
+	/*
+	 * In case we need to abort jobs, after aborting all jobs in
+	 * running queue, we also need to check if the first pending
+	 * job should be aborted, if it is partially submitted already.
+	 * The abort is completed when running queue is empty and first
+	 * pending job has not started submitting.
+	 */
+	if (!is_first_pending_job_submitting(ctx)) {
+		priv->job_aborting = false;
+
+		/* TODO: we should recover the ctx in the async error handler. */
+		*priv->umq_read_index = *priv->umq_write_index = priv->write_index = 0;
+		priv->status = CTX_STATE_CONNECTED;
+		wake_up_all(&ctx->priv->job_list_wq);
+	}
+}
+
+/* CERT Simulation for debug only, remove later. */
+static void cert_worker(struct work_struct *work)
+{
+	struct amdxdna_ctx_priv *priv;
+	struct host_queue_packet *pkt;
+	struct amdxdna_dev *xdna;
+	u32 *ebuf_state;
+
+	priv = container_of(work, struct amdxdna_ctx_priv, cert_work);
+	xdna = priv->ctx->client->xdna;
+
+	while (priv->status == CTX_STATE_CONNECTED &&
+	       priv->cert_read_index < *priv->umq_write_index) {
+		pkt = &priv->umq_pkts[priv->cert_read_index & (CTX_MAX_CMDS - 1)];
+		ebuf_state = (u32 *)(uintptr_t)(pkt->pkt_header.completion_signal);
+		XDNA_DBG(xdna, "Simulating CERT processing @%lld", priv->cert_read_index);
+		if (priv->cert_read_index == priv->cert_timeout_seq) {
+			/* Simulating timeout. */
+			XDNA_DBG(xdna, "Simulating CERT timeout @%lld", priv->cert_read_index);
+			priv->status = CTX_STATE_DISCONNECTED;
+			wake_up_all(&priv->col_entry->col_event);
+			priv->cert_timeout_seq = ~0UL;
+			priv->cert_read_index = 0;
+			break;
+		}
+		msleep(300);
+		if (priv->cert_read_index == priv->cert_error_seq) {
+			/* Simulating error. */
+			XDNA_DBG(xdna, "Simulating CERT error @%lld", priv->cert_read_index);
+			*ebuf_state = ERT_CMD_STATE_ERROR;
+		} else if (priv->cert_read_index > priv->cert_error_seq) {
+			/* Simulating abort after error. */
+			XDNA_DBG(xdna, "Simulating CERT abort after error @%lld",
+				 priv->cert_read_index);
+			*ebuf_state = ERT_CMD_STATE_ABORT;
+		}
+		++priv->cert_read_index;
+		if (pkt->pkt_header.common_header.chain_flag == CHAIN_FLG_LAST_CMD) {
+			/* Simulating success. */
+			if (FIELD_GET(AMDXDNA_CMD_STATE, *ebuf_state) == ERT_CMD_STATE_NEW) {
+				XDNA_DBG(xdna, "Simulating CERT success @%lld",
+					 priv->cert_read_index - 1);
+				*ebuf_state = ERT_CMD_STATE_COMPLETED;
+			}
+			*priv->umq_read_index = priv->cert_read_index;
+			wake_up_all(&priv->col_entry->col_event);
+		}
+	}
+}
+
 int aie4_ctx_init(struct amdxdna_ctx *ctx)
 {
-	struct amdxdna_client *client = ctx->client;
-	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = NULL;
 	int ret;
 
@@ -90,48 +581,75 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 		return ret;
 	}
 
+	if (kernel_mode_submission != NO_KMS) {
+		/*
+		 * If kernel-mode-submission, create per ctx syncobj for user
+		 * to wait for cmd completion since driver can create timeline
+		 * for each cmd after submission. Otherwise, leave syncobj as
+		 * NULL, so that user has to make IOCTL call and pass in the
+		 * cmd sequence number for explicit waiting in driver.
+		 */
+		ret = amdxdna_ctx_syncobj_create(ctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
+			goto fail;
+		}
+	}
+
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv) {
 		ret = -ENOMEM;
-		goto suspend;
+		goto fail;
 	}
 	ctx->priv = priv;
-
-	priv->umq_bo = amdxdna_gem_get_obj(client, ctx->umq_bo, AMDXDNA_BO_SHARE);
-	if (!priv->umq_bo) {
-		XDNA_ERR(xdna, "cannot find umq_bo handle %d", ctx->umq_bo);
-		ret = -ENOENT;
-		goto free_priv;
+	priv->ctx = ctx;
+	INIT_LIST_HEAD(&priv->pending_job_list);
+	INIT_LIST_HEAD(&priv->running_job_list);
+	init_waitqueue_head(&priv->job_list_wq);
+	INIT_WORK(&priv->job_work, job_worker);
+	priv->job_work_q = create_singlethread_workqueue(ctx->name);
+	if (!priv->job_work_q) {
+		XDNA_ERR(xdna, "Create job_work_q failed");
+		goto fail;
 	}
+
+	/* CERT Simulation for debugging only, remove later. */
+	INIT_WORK(&priv->cert_work, cert_worker);
+	priv->cert_work_q = create_singlethread_workqueue(ctx->name);
+	priv->cert_timeout_seq = ~0UL;
+	priv->cert_error_seq = ~0UL;
+	priv->cert_read_index = 0UL;
+
+	ret = aie4_ctx_umq_init(ctx);
+	if (ret)
+		goto fail;
 
 	/* col_list must be provided to the resolver */
 	ret = aie4_ctx_col_list_init(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
-		goto put_bo;
-	}
+	if (ret)
+		goto fail;
 
 	/* resolver to call load->aie4_create_context */
 	ret = aie4_alloc_resource(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Alloc hw resource failed, ret %d", ret);
-		goto free_col_list;
-	}
+	if (ret)
+		goto fail;
 
 	XDNA_DBG(xdna, "ctx %s init completed", ctx->name);
-
 	return 0;
 
-free_col_list:
+fail:
 	aie4_ctx_col_list_fini(ctx);
-
-put_bo:
-	if (priv->umq_bo)
-		drm_gem_object_put(to_gobj(priv->umq_bo));
-
-free_priv:
+	aie4_ctx_umq_fini(ctx);
+	if (priv->cert_work_q) {
+		cancel_work_sync(&priv->cert_work);
+		destroy_workqueue(priv->cert_work_q);
+	}
+	if (priv->job_work_q) {
+		cancel_work_sync(&priv->job_work);
+		destroy_workqueue(priv->job_work_q);
+	}
 	kfree(ctx->priv);
-suspend:
+	amdxdna_ctx_syncobj_destroy(ctx);
 	pm_runtime_mark_last_busy(xdna->ddev.dev);
 	pm_runtime_put_autosuspend(xdna->ddev.dev);
 	return ret;
@@ -139,10 +657,24 @@ suspend:
 
 void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 {
-	struct amdxdna_dev *xdna;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = ctx->priv;
 
-	xdna = ctx->client->xdna;
+	cancel_work_sync(&priv->cert_work);
+	destroy_workqueue(priv->cert_work_q);
+
+	/*
+	 * TODO: this is temp hack. The hwctx should be destroyed on device
+	 * before job_worker can be stopped. Otherwise, it is not safe to
+	 * start releasing host data structure when it is still shared w/
+	 * device. We have to apply this hack since, today,
+	 * aie4_release_resource(ctx) also releases col_event which is used
+	 * by job_worker, so...
+	 */
+	priv->status = CTX_STATE_DISCONNECTED;
+	wake_up_all(&priv->col_entry->col_event);
+	cancel_work_sync(&priv->job_work);
+	destroy_workqueue(priv->job_work_q);
 
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {
@@ -151,14 +683,327 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 		amdxdna_pm_suspend_put(xdna);
 	}
 
-	/* free col_list */
 	aie4_ctx_col_list_fini(ctx);
-	if (priv->umq_bo)
-		drm_gem_object_put(to_gobj(priv->umq_bo));
-
+	aie4_ctx_umq_fini(ctx);
 	kfree(ctx->priv);
+	amdxdna_ctx_syncobj_destroy(ctx);
 	pm_runtime_mark_last_busy(xdna->ddev.dev);
 	pm_runtime_put_autosuspend(xdna->ddev.dev);
+}
+
+static inline void enqueue_pending_job(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_ctx *ctx = job->ctx;
+
+	mutex_lock(&ctx->io_lock);
+	list_add_tail(&job->list, &ctx->priv->pending_job_list);
+	job->state = JOB_STATE_PENDING;
+	mutex_unlock(&ctx->io_lock);
+}
+
+static inline void cancel_pending_job(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_ctx *ctx = job->ctx;
+
+	mutex_lock(&ctx->io_lock);
+	list_del(&job->list);
+	job->state = JOB_STATE_INIT;
+	mutex_unlock(&ctx->io_lock);
+	wake_up_all(&ctx->priv->job_list_wq);
+}
+
+static inline bool is_first_pending_job(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_ctx *ctx = job->ctx;
+	bool is_first;
+
+	mutex_lock(&ctx->io_lock);
+	is_first = list_is_first(&job->list, &ctx->priv->pending_job_list);
+	mutex_unlock(&ctx->io_lock);
+	return is_first;
+}
+
+static inline void
+fill_indirect_pkt(struct amdxdna_ctx_priv *priv, u64 slot_idx, u32 total_slots,
+		  struct amdxdna_cmd_start_dpu *dpu, u16 entries)
+{
+	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
+	struct host_indirect_packet_entry *hipe =
+		(struct host_indirect_packet_entry *)(pkt->data);
+	u16 i;
+
+	for (i = 0; i < entries; i++, dpu++, hipe++) {
+		struct host_indirect_packet_data *hipd;
+		u64 indirect_pkt_dev_addr;
+		u32 uci = dpu->uc_index;
+		u32 idx;
+
+		if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
+			XDNA_ERR(priv->ctx->client->xdna, "Invalid uc index %d", uci);
+			continue;
+		}
+		idx = uci * total_slots + slot_idx;
+		hipd = &priv->umq_indirect_pkts[idx];
+		indirect_pkt_dev_addr = priv->umq_indirect_pkts_dev_addr +
+			sizeof(struct host_indirect_packet_data) * idx;
+
+		/* Fill in indirect entry to point to indirect pkt. */
+		hipe->host_addr_low = lower_32_bits(indirect_pkt_dev_addr);
+		hipe_set_host_addr_high(&hipe->host_addr_high_uc_index,
+					upper_32_bits(indirect_pkt_dev_addr));
+		hipe_set_uc_index(&hipe->host_addr_high_uc_index, uci);
+
+		/* Fill in indirect pkt. */
+		hipd->payload.dpu_control_code_host_addr_low =
+			lower_32_bits(dpu->instruction_buffer);
+		hipd->payload.dpu_control_code_host_addr_high =
+			upper_32_bits(dpu->instruction_buffer);
+		hipd->payload.dtrace_buf_host_addr_low =
+			lower_32_bits(dpu->dtrace_buffer);
+		hipd->payload.dtrace_buf_host_addr_high =
+			lower_16_bits(upper_32_bits(dpu->dtrace_buffer));
+	}
+	pkt->pkt_header.common_header.distribute = 1;
+	pkt->pkt_header.common_header.indirect = 1;
+	pkt->pkt_header.common_header.count = entries * sizeof(*hipe);
+}
+
+static inline void
+fill_direct_pkt(struct amdxdna_ctx_priv *priv, u64 slot_idx,
+		struct amdxdna_cmd_start_dpu *dpu)
+{
+	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
+	struct exec_buf *ebuf = (struct exec_buf *)(pkt->data);
+
+	memset(pkt->data, 0, sizeof(pkt->data));
+	ebuf->dpu_control_code_host_addr_low = lower_32_bits(dpu->instruction_buffer);
+	ebuf->dpu_control_code_host_addr_high = upper_32_bits(dpu->instruction_buffer);
+	ebuf->dtrace_buf_host_addr_low = lower_32_bits(dpu->dtrace_buffer);
+	ebuf->dtrace_buf_host_addr_high = lower_16_bits(upper_32_bits(dpu->dtrace_buffer));
+	pkt->pkt_header.common_header.distribute = 0;
+	pkt->pkt_header.common_header.indirect = 0;
+	pkt->pkt_header.common_header.count = sizeof(*ebuf);
+}
+
+static int submit_one_cmd(struct amdxdna_ctx *ctx,
+			  struct amdxdna_gem_obj *cmd_abo, bool last_of_chain, u64 *seq)
+{
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_ctx_priv *priv = ctx->priv;
+	struct amdxdna_cmd_start_dpu *dpu;
+	struct host_queue_packet *pkt;
+	u64 slot_idx;
+	u16 chained;
+	int ret;
+	u32 op;
+
+	/*
+	 * Security notes:
+	 * The cmd_abo is always shared b/w user and driver. Its content should
+	 * never be trusted. Driver should cache key data and validate them after
+	 * they are cached in local variable. Driver should only use the cached
+	 * version and make sure it will not cause out-of-boundary access.
+	 */
+	op = amdxdna_cmd_get_op(cmd_abo);
+	if (op != ERT_START_DPU) {
+		XDNA_ERR(xdna, "Invalid exec buf op, %d", op);
+		return -EINVAL;
+	}
+
+	dpu = amdxdna_cmd_get_payload(cmd_abo, NULL);
+	chained = dpu->chained;
+	if (chained >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
+		XDNA_ERR(xdna, "Invalid DPU data");
+		return -EINVAL;
+	}
+
+	mutex_unlock(&ctx->io_lock);
+	ret = wait_till_hsa_not_full(ctx);
+	mutex_lock(&ctx->io_lock);
+	if (ret)
+		return ret;
+
+	slot_idx = ctx->priv->write_index & (CTX_MAX_CMDS - 1);
+	if (chained)
+		fill_indirect_pkt(priv, slot_idx, CTX_MAX_CMDS, dpu, chained + 1);
+	else
+		fill_direct_pkt(priv, slot_idx, dpu);
+
+	pkt = &priv->umq_pkts[slot_idx];
+	pkt->pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
+	pkt->pkt_header.common_header.reserved = 0x0; /* Remove after update CERT. */
+	pkt->pkt_header.common_header.chain_flag =
+		last_of_chain ? CHAIN_FLG_LAST_CMD : CHAIN_FLG_NOT_LAST_CMD;
+	if (kernel_mode_submission == KMS_REAL_CERT)
+		pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo);
+	else
+		pkt->pkt_header.completion_signal = (uintptr_t)amdxdna_gem_vmap(cmd_abo);
+	pkt->pkt_header.completion_signal += offsetof(struct amdxdna_cmd, header);
+	*seq = publish_cmd(ctx);
+	/*aie4_ctx_umq_dump(ctx);*/
+	if (kernel_mode_submission == KMS_REAL_CERT)
+		ring_doorbell(ctx);
+	else
+		queue_work(priv->cert_work_q, &priv->cert_work);
+	XDNA_DBG(xdna, "Submitted one cmd, seq %lld", *seq);
+	return 0;
+}
+
+static int submit_job(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	u32 op = amdxdna_cmd_get_op(cmd_abo);
+	struct amdxdna_ctx *ctx = job->ctx;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_cmd_chain *payload;
+	u32 ccnt;
+	int ret;
+	u32 i;
+
+	mutex_lock(&ctx->io_lock);
+
+	if (job->opcode != OP_USER) {
+		XDNA_ERR(xdna, "Invalid job opcode %d", job->opcode);
+		ret = -EINVAL;
+		goto done;
+	}
+
+	/* Single cmd. */
+	if (op == ERT_START_DPU) {
+		ret = submit_one_cmd(ctx, cmd_abo, true, &job->seq);
+		if (!ret)
+			job->state = JOB_STATE_SUBMITTED;
+		goto done;
+	}
+
+	/* Cmd chain. */
+	if (op != ERT_CMD_CHAIN) {
+		XDNA_ERR(xdna, "Invalid cmd opcode %d", op);
+		ret = -EINVAL;
+		goto done;
+	}
+	payload = amdxdna_cmd_get_chained_payload(cmd_abo, &ccnt);
+	if (!payload) {
+		XDNA_ERR(xdna, "Invalid cmd payload for chained cmd");
+		ret = -EINVAL;
+		goto done;
+	}
+	for (i = 0; i < ccnt; i++) {
+		u32 boh = (u32)(payload->data[i]);
+		struct amdxdna_gem_obj *abo;
+
+		abo = amdxdna_gem_get_obj(ctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!abo) {
+			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
+			break;
+		}
+		ret = submit_one_cmd(ctx, abo, i + 1 == ccnt, &job->seq);
+		amdxdna_gem_put_obj(abo);
+		if (ret)
+			break;
+		job->state = JOB_STATE_SUBMITTING;
+	}
+	if (i == ccnt)
+		job->state = JOB_STATE_SUBMITTED_CHAIN;
+
+done:
+	if (job->state == JOB_STATE_PENDING) {
+		/* Did not send any cmd, no need to transfer to running list. */
+		mutex_unlock(&ctx->io_lock);
+		return ret;
+	}
+	/* Some/all cmds has been sent, transfer to running list to wait. */
+	ctx->submitted++;
+	list_move_tail(&job->list, &ctx->priv->running_job_list);
+	mutex_unlock(&ctx->io_lock);
+	trace_amdxdna_debug_point(ctx->name, job->seq, "job submitted");
+	queue_work(ctx->priv->job_work_q, &ctx->priv->job_work);
+	wake_up_all(&ctx->priv->job_list_wq);
+	return 0;
+}
+
+int aie4_cmd_submit(struct amdxdna_sched_job *job,
+		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
+{
+	struct dma_fence_chain *chain = dma_fence_chain_alloc();
+	struct amdxdna_ctx *ctx = job->ctx;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct ww_acquire_ctx acquire_ctx;
+	struct dma_fence *stub;
+	size_t i;
+	int ret;
+
+	XDNA_DBG(xdna, "ctx %s job 0x%llx received", ctx->name, (u64)job);
+
+	if (!chain)
+		return -ENOMEM;
+
+	enqueue_pending_job(job);
+	/*
+	 * After submit_job(), job may be completed right away before we return
+	 * from this function call. Get a ref to make sure it is available for
+	 * the rest of the code in this function after submit_job().
+	 */
+	kref_get(&job->refcnt);
+	/* On AIE4 platform, out_fence is the hardware completion fence. */
+	job->out_fence = dma_fence_get(job->fence);
+
+wait_till_1st:
+	ret = wait_event_killable(ctx->priv->job_list_wq,
+				  (ctx->priv->status == CTX_STATE_CONNECTED) &&
+				  is_first_pending_job(job));
+	if (ret)
+		goto fail_wait_till_1st;
+
+	ret = amdxdna_lock_objects(job, &acquire_ctx);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to lock objects, ret %d", ret);
+		goto fail_wait_till_1st;
+	}
+
+	if (!mmget_not_zero(job->mm)) {
+		ret = -ESRCH;
+		goto fail_mmget;
+	}
+
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		goto fail_pm_resume;
+
+	for (i = 0; i < job->bo_cnt; i++) {
+		dma_resv_add_fence(job->bos[i].obj->resv, job->out_fence,
+				   DMA_RESV_USAGE_WRITE);
+	}
+
+	ret = submit_job(job);
+	if (ret)
+		goto fail_submit_job;
+
+	drm_syncobj_add_point(ctx->syncobj, chain, job->out_fence, job->seq);
+	*seq = job->seq;
+	amdxdna_unlock_objects(job, &acquire_ctx);
+	kref_put(&job->refcnt, job_release);
+	return 0;
+
+fail_submit_job:
+	stub = dma_fence_get_stub();
+	for (i = 0; i < job->bo_cnt; i++) {
+		dma_resv_replace_fences(job->bos[i].obj->resv, job->out_fence->context,
+					stub, DMA_RESV_USAGE_WRITE);
+	}
+	dma_fence_put(stub);
+	amdxdna_pm_suspend_put(xdna);
+fail_pm_resume:
+	mmput(job->mm);
+fail_mmget:
+	amdxdna_unlock_objects(job, &acquire_ctx);
+	if (ret == -EAGAIN)
+		goto wait_till_1st;
+fail_wait_till_1st:
+	kref_put(&job->refcnt, job_release);
+	cancel_pending_job(job);
+	dma_fence_chain_free(chain);
+	return ret;
 }
 
 void aie4_ctx_suspend(struct amdxdna_ctx *ctx, bool wait)
@@ -196,29 +1041,35 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 	return ret;
 }
 
-#define HSA_QUEUE_READ_INDEX_OFFSET 0
-#define check_read_index \
-({ \
-	u64 *read_index = (u64 *)((char *)amdxdna_gem_vmap(nctx->umq_bo) +	\
-		HSA_QUEUE_READ_INDEX_OFFSET);					\
-	XDNA_DBG(xdna, "read_idx %lld > seq %lld", *read_index, seq);		\
-	((*read_index) > seq);							\
-})
+static inline bool check_cmd_done(struct amdxdna_ctx *ctx, u64 seq)
+{
+	u64 ri = get_read_index(ctx);
+
+	XDNA_DBG(ctx->client->xdna, "checking if read_idx %lld > seq %lld", ri, seq);
+	return ri > seq;
+}
 
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 {
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
-	struct col_entry *col_entry = nctx->col_entry;
-	struct amdxdna_dev *xdna = ctx->client->xdna;
 	unsigned long wait_jifs = MAX_SCHEDULE_TIMEOUT;
+	struct col_entry *col_entry = nctx->col_entry;
 	long ret = 0;
+
+	/*
+	 * In kernel mode submission, waiting for read_index is not enough. User
+	 * needs to wait for drm_syncobj and driver will signal it when driver
+	 * is ready to give up on this command.
+	 */
+	if (kernel_mode_submission != NO_KMS)
+		return -EOPNOTSUPP;
 
 	if (timeout)
 		wait_jifs = msecs_to_jiffies(timeout);
 
 	ret = wait_event_interruptible_timeout(col_entry->col_event,
 					       ((col_entry && col_entry->needs_reset) ||
-					       check_read_index),
+					       check_cmd_done(ctx, seq)),
 					       wait_jifs);
 
 	if (col_entry && col_entry->needs_reset)
@@ -349,6 +1200,22 @@ static int aie4_ctx_attach_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl)
 static int aie4_ctx_detach_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl)
 {
 	return aie4_ctx_config_debug_bo(ctx, bo_hdl, 0);
+}
+
+int aie4_parse_priority(u32 priority)
+{
+	switch (priority) {
+	case AIE4_CONTEXT_PRIORITY_BAND_IDLE:
+		return AMDXDNA_QOS_LOW_PRIORITY;
+	case AIE4_CONTEXT_PRIORITY_BAND_NORMAL:
+		return AMDXDNA_QOS_NORMAL_PRIORITY;
+	case AIE4_CONTEXT_PRIORITY_BAND_FOCUS:
+		return AMDXDNA_QOS_HIGH_PRIORITY;
+	case AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME:
+		return AMDXDNA_QOS_REALTIME_PRIORITY;
+	default:
+		return 0;
+	}
 }
 
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size)
