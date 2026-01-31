@@ -1,6 +1,5 @@
 # Maintainer: Your Name <your@email.com>
 pkgname=xrt-plugin-amdxdna
-pkgver=2.23.0
 pkgrel=1
 pkgdesc="AMD XDNA Driver plugin for Xilinx RunTime"
 arch=('x86_64')
@@ -14,11 +13,15 @@ install=xrt-plugin-amdxdna.install
 # Set this to your xdna-driver build output directory (relative to $startdir, the PKGBUILD's directory)
 : ${XDNA_BUILD_DIR:="Release"}
 
+# Extract version from the built tarball filename
+_tarball=$(ls ${XDNA_BUILD_DIR}/xrt_plugin*-amdxdna.tar.gz 2>/dev/null | head -1)
+pkgver=${_tarball#*xrt_plugin.}
+pkgver=${pkgver%%_*}
+
 package() {
   cd "$srcdir"
 
   # Extract the tarball directly into the package directory
-  # The tarball should be at $startdir/$XDNA_BUILD_DIR/xrt_plugin*.tar.gz
   # Use nullglob to handle case where no files match the glob pattern
   local _nullglob_set=$(shopt -p nullglob)
   shopt -s nullglob
