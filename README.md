@@ -155,8 +155,12 @@ makepkg -p PKGBUILD-xrt-plugin
 sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
 
 # Configure memory limits (required for NPU access)
-sudo bash -c 'echo "* soft memlock unlimited" >> /etc/security/limits.conf'
-sudo bash -c 'echo "* hard memlock unlimited" >> /etc/security/limits.conf'
+# Using limits.d drop-in file (survives package upgrades)
+sudo mkdir -p /etc/security/limits.d
+sudo tee /etc/security/limits.d/99-amdxdna.conf > /dev/null << 'EOF'
+* soft memlock unlimited
+* hard memlock unlimited
+EOF
 
 # Log out and log back in (or reboot) for memory limit changes to take effect
 ```
@@ -209,13 +213,15 @@ In our test, the "max locked memory" is the key. You can follow below steps to c
 ``` bash
 ulimit -l # The result is in kbytes
 
-# Open /etc/security/limits.conf, add below two lines.
-# * soft  memlock <max-size-in-kbytes>
-# * hard  memlock <max-size-in-kbytes>
-#
-# See comments of the file for the meaning of each column.
+# Create a drop-in file in /etc/security/limits.d/ (survives package upgrades)
+sudo mkdir -p /etc/security/limits.d
+sudo tee /etc/security/limits.d/99-amdxdna.conf > /dev/null << 'EOF'
+* soft memlock <max-size-in-kbytes>
+* hard memlock <max-size-in-kbytes>
+EOF
+# Use "unlimited" instead of a numeric value if unsure
 
-# Reboot the machine, then check if the limite is changed
+# Log out and log back in (or reboot), then check if the limit changed
 ulimit -l
 ```
 
