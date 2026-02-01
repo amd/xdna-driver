@@ -151,6 +151,7 @@ cd ../../../build
 ./build.sh -release
 
 # Build and install XDNA plugin package
+cd arch
 makepkg -p PKGBUILD-xrt-plugin
 sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
 
@@ -167,7 +168,7 @@ EOF
 
 **Note for Arch Linux users**: The build system generates `.tar.gz` packages which are repackaged into proper Arch packages (`.pkg.tar.zst`) using the provided PKGBUILDs:
 - XRT packages: `xrt/build/arch/` (PKGBUILD-xrt-base, PKGBUILD-xrt-npu)
-- XDNA driver: `build/` directory (PKGBUILD-xrt-plugin)
+- XDNA driver: `build/arch/` directory (PKGBUILD-xrt-plugin)
 
 This ensures proper integration with pacman for installation, upgrades, and removal.
 

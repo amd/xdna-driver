@@ -11,7 +11,7 @@ conflicts=('amdxdna-driver' 'amdxdna-driver-bin')
 install=xrt-plugin-amdxdna.install
 
 # Set this to your xdna-driver build output directory (relative to $startdir, the PKGBUILD's directory)
-: ${XDNA_BUILD_DIR:="Release"}
+: ${XDNA_BUILD_DIR:="../Release"}
 
 # Extract version from the built tarball filename
 _tarball=$(ls ${XDNA_BUILD_DIR}/xrt_plugin*-amdxdna.tar.gz 2>/dev/null | head -1)
