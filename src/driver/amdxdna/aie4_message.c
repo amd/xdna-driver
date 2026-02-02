@@ -397,6 +397,29 @@ int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl 
 	return 0;
 }
 
+int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
+{
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_ctx_switch_hysteresis *hyst;
+	int ret;
+
+	req.type = AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS;
+	hyst = (struct aie4_msg_runtime_config_ctx_switch_hysteresis *)req.data;
+	hyst->timeout_us = timeout_us;
+
+	msg.send_size = sizeof(req.type) + sizeof(*hyst);
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to set runtime config, ret %d", ret);
+		return ret;
+	}
+
+	XDNA_DBG(ndev->xdna, "Context hysteresis set to %dus", timeout_us);
+
+	return 0;
+}
+
 int aie4_set_log_level(struct amdxdna_dev_hdl *ndev, u8 level)
 {
 	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);

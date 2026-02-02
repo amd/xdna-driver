@@ -23,6 +23,7 @@
 #else
 #define AIE4_TIMEOUT		1000000	/* us */
 #endif
+#define AIE4_CTX_HYSTERESIS_US	1000	/* us */
 
 #define MAX_NUM_CERTS		6
 
@@ -199,6 +200,7 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, u32 pasid, dma_addr_t 
 int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev);
 void aie4_reset_prepare(struct amdxdna_dev *xdna);
 int aie4_reset_done(struct amdxdna_dev *xdna);
+int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
 
 /* aie4_hwctx.c */
 int aie4_ctx_init(struct amdxdna_ctx *ctx);
