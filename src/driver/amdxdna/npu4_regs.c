@@ -37,6 +37,7 @@ const struct msg_op_ver npu4_msg_op_tbl[] = {
 	{ AIE2_FW_VERSION(6, 24), MSG_OP_GET_COREDUMP },
 	{ AIE2_FW_VERSION(6, 24), MSG_OP_CALIBRATE_TIME },
 	{ AIE2_FW_VERSION(6, 24), MSG_OP_GET_DEV_REVISION },
+	{ AIE2_FW_VERSION(6, 24), MSG_OP_AIE_RW_ACCESS },
 	{ 0 },
 };
 

@@ -460,6 +460,10 @@ int aie2_start_fw_trace(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hd
 			size_t size, u32 categories, u32 *msi_idx, u32 *msi_address);
 int aie2_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
 int aie2_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories);
+int aie2_rw_aie_reg(struct amdxdna_dev_hdl *ndev, enum aie2_access_type type,
+		    u8 ctx_id, u8 row, u8 col, u32 addr, u32 *value);
+int aie2_rw_aie_mem(struct amdxdna_dev_hdl *ndev, enum aie2_access_type type,
+		    u8 ctx_id, u8 row, u8 col, u32 aie_addr, u64 dram_addr, u32 size);
 
 int aie2_config_cu(struct amdxdna_ctx *ctx);
 int aie2_execbuf(struct amdxdna_ctx *ctx, struct amdxdna_sched_job *job,
