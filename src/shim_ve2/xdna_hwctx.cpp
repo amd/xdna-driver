@@ -337,13 +337,19 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   // const_cast: alloc_bo() is not const yet in device class
   auto dev = const_cast<device_xdna*>(get_device());
 
-  // Debug or dtrace buffers are specific to context.
-  if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG || xcl_bo_flags{flags}.use == XRT_BO_USE_DTRACE ||
-      xcl_bo_flags{flags}.use == XRT_BO_USE_LOG || xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
-    return dev->alloc_bo(userptr, get_slotidx(), size, flags);
+  // Inject hwctx's mem_index (corrected by driver) into BO flags
+  // This ensures BOs are allocated from the correct CMA region
+  xcl_bo_flags xflags{flags};
+  xflags.bank = m_qos.mem_index & 0xFF;  // Lower 8 bits
+  uint64_t corrected_flags = xflags.all;
 
-  // Other BOs are shared across all contexts.
-  return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
+  // Debug or dtrace buffers are specific to context.
+  if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
+      xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
+    return dev->alloc_bo(userptr, get_slotidx(), size, corrected_flags);
+
+  // Other BOs are shared across all contexts, but use hwctx's mem_index for region selection
+  return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, corrected_flags);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

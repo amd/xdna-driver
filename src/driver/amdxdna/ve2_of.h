@@ -121,6 +121,17 @@ struct amdxdna_mgmtctx {
 	atomic_t		error_cb_in_progress; /* track if error callback is running */
 };
 
+struct ve2_mem_region {
+	u32	start_col;
+	u32	end_col;
+	u32	mem_index;
+};
+
+struct ve2_mem_topology {
+	u32			num_regions;
+	struct ve2_mem_region	regions[MAX_MEM_REGIONS];
+};
+
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
@@ -131,10 +142,13 @@ struct amdxdna_dev_hdl {
 	struct aie_device_info		aie_dev_info;
 	struct ve2_firmware_status	**fw_slots;
 	struct amdxdna_mgmtctx          *ve2_mgmtctx;
+	struct ve2_mem_topology		mem_topology;
 };
 
 /* ve2_of.c */
 extern const struct amdxdna_dev_ops ve2_ops;
+int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_device *pdev);
+void ve2_auto_select_mem_index(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 int ve2_hwctx_init(struct amdxdna_ctx *hwctx);
 void ve2_hwctx_fini(struct amdxdna_ctx *hwctx);
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size);

@@ -1239,6 +1239,9 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	hwctx->priv = priv;
 	init_waitqueue_head(&priv->waitq);
 
+	/* Auto-select mem_index based on start_col from memory topology */
+	ve2_auto_select_mem_index(xdna, hwctx);
+
 	/* one host_queue entry per hwctx */
 	ret = ve2_create_host_queue(xdna, &priv->hwctx_hsa_queue);
 	if (ret) {

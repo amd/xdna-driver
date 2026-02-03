@@ -138,6 +138,12 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto free_name;
 	}
 
+	/* Write back the corrected QoS (mem_index may have been auto-selected) */
+	if (copy_to_user(u64_to_user_ptr(args->qos_p), &ctx->qos, sizeof(ctx->qos))) {
+		XDNA_WARN(xdna, "Failed to write back QoS info to userspace");
+		/* Non-fatal: context is created successfully, just log warning */
+	}
+
 	atomic64_set(&ctx->job_free_cnt, 0);
 	args->handle = ctx->id;
 	args->syncobj_handle = ctx->syncobj_hdl;
