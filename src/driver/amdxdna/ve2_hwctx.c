@@ -369,14 +369,13 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
 }
 
-static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
+static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue,
+			       struct device *cma_dev)
 {
-	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
-
 	if (queue->hsa_queue_p) {
-		XDNA_DBG(xdna, "Freeing host queue: dma_addr=0x%llx",
-			 queue->hsa_queue_mem.dma_addr);
-		dma_free_coherent(&pdev->dev,
+		XDNA_DBG(xdna, "Freeing host queue: dma_addr=0x%llx, cma_dev=%s",
+			 queue->hsa_queue_mem.dma_addr, dev_name(cma_dev));
+		dma_free_coherent(cma_dev,
 				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
 				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
@@ -474,18 +473,19 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 /*
  * Create hsa queue in kernel and initialize queue slots.
  */
-static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
+static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue,
+				 struct device *cma_dev)
 {
-	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	int nslots = HOST_QUEUE_ENTRY;
 	dma_addr_t dma_handle;
 	size_t alloc_size;
 
 	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * nslots;
-	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
+	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu, cma_dev=%s",
+		 nslots, alloc_size, dev_name(cma_dev));
 
-	/* Allocate a single contiguous block of memory */
-	queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
+	/* Allocate a single contiguous block of memory from the correct CMA region */
+	queue->hsa_queue_p = dma_alloc_coherent(cma_dev,
 						alloc_size,
 						&dma_handle,
 						GFP_KERNEL);
@@ -1222,6 +1222,8 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx_priv *priv = NULL;
+	struct platform_device *pdev;
+	struct device *cma_dev;
 	int ret;
 
 	XDNA_DBG(xdna, "Initializing hwctx for client pid %d, num_tiles=%u, priority=%u",
@@ -1234,17 +1236,37 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	hwctx->priv = priv;
 	init_waitqueue_head(&priv->waitq);
 
-	/* one host_queue entry per hwctx */
-	ret = ve2_create_host_queue(xdna, &priv->hwctx_hsa_queue);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to create host queue, ret=%d", ret);
-		goto free_priv;
-	}
-
+	/* Request columns from XRS first to get actual allocated start_col */
 	ret = ve2_xrs_request(xdna, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "XRS resource request failed, ret=%d", ret);
-		goto free_hsa_queue;
+		goto free_priv;
+	}
+
+	/* Auto-select mem_index based on ACTUAL allocated start_col from XRS */
+	ve2_auto_select_mem_index(xdna, hwctx);
+
+	/*
+	 * Get the correct CMA device for this mem_index.
+	 * If mem_index >= MAX_MEM_REGIONS (no topology) or region doesn't exist,
+	 * fall back to default platform CMA device.
+	 */
+	if (priv->mem_index < MAX_MEM_REGIONS && xdna->cma_region_devs[priv->mem_index]) {
+		cma_dev = xdna->cma_region_devs[priv->mem_index];
+		XDNA_DBG(xdna, "Using CMA region %u device for HSA queue", priv->mem_index);
+	} else {
+		/* Use default platform device for invalid/uninitialized regions */
+		pdev = to_platform_device(xdna->ddev.dev);
+		cma_dev = &pdev->dev;
+		XDNA_DBG(xdna, "Using default platform CMA for HSA queue (mem_index=%u)",
+			 priv->mem_index);
+	}
+
+	/* one host_queue entry per hwctx - allocate from correct CMA region */
+	ret = ve2_create_host_queue(xdna, &priv->hwctx_hsa_queue, cma_dev);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to create host queue, ret=%d", ret);
+		goto destroy_partition;
 	}
 
 	if (enable_polling) {
@@ -1267,8 +1289,8 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	return 0;
 
-free_hsa_queue:
-	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
+destroy_partition:
+	ve2_mgmt_destroy_partition(hwctx);
 free_priv:
 	kfree(hwctx->priv);
 
@@ -1282,6 +1304,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_mgmtctx *mgmtctx;
 	struct amdxdna_sched_job *job;
+	struct platform_device *pdev;
+	struct device *cma_dev;
 	int idx;
 
 	XDNA_DBG(xdna,
@@ -1336,7 +1360,19 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 		ve2_get_firmware_status(hwctx);
 
 	ve2_mgmt_destroy_partition(hwctx);
-	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
+
+	/*
+	 * Get the CMA device used for this context (same logic as init).
+	 * Must match the device used during allocation for proper cleanup.
+	 */
+	if (hwctx->priv->mem_index < MAX_MEM_REGIONS &&
+	    xdna->cma_region_devs[hwctx->priv->mem_index]) {
+		cma_dev = xdna->cma_region_devs[hwctx->priv->mem_index];
+	} else {
+		pdev = to_platform_device(xdna->ddev.dev);
+		cma_dev = &pdev->dev;
+	}
+	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue, cma_dev);
 	kfree(hwctx->priv->hwctx_config);
 	mutex_destroy(&hwctx->priv->privctx_lock);
 	kfree(hwctx->priv);
