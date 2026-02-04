@@ -23,6 +23,10 @@ namespace pt = boost::property_tree;
 // Minimum column alignment required by the driver (must be a multiple of this value)
 constexpr uint32_t MIN_COL_SUPPORT = 4;
 
+// Maximum number of CMA memory regions supported by the driver.
+// This must match MAX_MEM_REGIONS in kernel (amdxdna_drm.h).
+constexpr uint32_t MAX_MEM_REGIONS = 16;
+
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
 {
   std::stringstream aie_stream;
@@ -261,9 +265,9 @@ query_mem_index()
     m_mem_index = mem_index;
     shim_debug("Queried mem_index=%u for hwctx handle=%u", m_mem_index, m_handle);
   } catch (const xrt_core::system_error& ex) {
-    // Query failed, use default
-    m_mem_index = 0xffU;
-    shim_debug("Failed to query mem_index (using default=0xFF=no-op): %s (err=%d: %s)",
+    // Query failed, use MAX_MEM_REGIONS as invalid value
+    m_mem_index = MAX_MEM_REGIONS;
+    shim_debug("Failed to query mem_index (using MAX_MEM_REGIONS): %s (err=%d: %s)",
                ex.what(), ex.get_code(), errno_to_str(ex.get_code()));
   }
 }
@@ -369,9 +373,8 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
 
   // Inject hwctx's mem_index (queried from driver) into BO flags
   // This ensures BOs are allocated from the correct CMA region
-  // Special case: mem_index=0xFF means no topology, skip bank injection
   xcl_bo_flags xflags{flags};
-  if (m_mem_index != 0xFF)
+  if (m_mem_index < MAX_MEM_REGIONS)
     xflags.bank = m_mem_index & 0xFF;  // Lower 8 bits
   uint64_t corrected_flags = xflags.all;
 

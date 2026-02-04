@@ -580,15 +580,6 @@ static int ve2_get_hwctx_mem_index(struct amdxdna_client *client,
 	mem_index = hwctx->priv->mem_index;
 	srcu_read_unlock(&client->ctx_srcu, idx);
 
-	/*
-	 * If mem_index is MAX_MEM_REGIONS (no topology or start_col not found),
-	 * return 0xFF to userspace as a "no-op" sentinel. The shim will recognize
-	 * this and skip modifying BO bank bits, letting kernel fallback logic handle
-	 * CMA device selection (default platform CMA for both HSA queue and BOs).
-	 */
-	if (mem_index >= MAX_MEM_REGIONS)
-		mem_index = 0xFF;
-
 	XDNA_DBG(xdna, "Returning mem_index=%u for context_id=%u", mem_index, context_id);
 
 	/* Return mem_index via buffer */
