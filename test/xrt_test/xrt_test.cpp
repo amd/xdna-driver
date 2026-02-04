@@ -31,7 +31,6 @@ using arg_type = const std::vector<uint64_t>;
 unsigned c_rounds = 1;
 unsigned o_cmds = 1;
 unsigned r_cmds = 24;
-unsigned s_rounds = 128;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
 unsigned threads = 2;
@@ -40,13 +39,16 @@ bool vf_test = false;
 // silicon default timeout 10s
 unsigned timeout_ms = 10000;
 std::vector<unsigned> exec_list;
-std::string dpu = "nop";
 
 std::string program;
 // Test harness setup helpers
 std::string curpath;
-std::string xclbinpath;
 std::string elfpath;
+#ifdef __aarch64__
+std::string path = "local_shim_test_data/npu3a/";
+#else
+std::string path = "local_shim_test_data/npu3/";
+#endif
 bool printing_on;
 bool elf_flow = true;
 
@@ -81,19 +83,17 @@ usage(const std::string& prog)
   std::cout << "\t" << "-c" << ": n rounds in sequence within 1 hwctx\n";
   std::cout << "\t" << "-o" << ": max n outstanding cmds within 1 hwctx\n";
   std::cout << "\t" << "-r" << ": n cmds per runlist\n";
-  std::cout << "\t" << "-s" << ": n rounds in parallel within 1 hwctx\n";
   std::cout << "\t" << "-m" << ": n hwctx in parallel\n";
-  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (only effects stress test and multi-layer)\n";
-  std::cout << "\t" << "-d" << ": specify dpu kernel (only effects stress test)\n";
+  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (stress and runlist only)\n";
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
-  std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test1 -e test2 ...]\n";
+  std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test# -e test# ...]\n";
   std::cout << "\t" << "-v" << ": apply each thread to corresponding vf, max 4\n";
   std::cout << "\t" << "-w" << ": timeout in seconds (default 600 sec, some simnow server are slow)\n";
   std::cout << "\t" << "-l" << ": use xclbin flow if available\n";
-  std::cout << "\t" << "-h" << ": print this help message\n\n";
-  std::cout << "\t" << "Example Usage: ./xrt_test <# for stress test> -s 20 -d vadd -x vadd\n";
-  std::cout << "\t" << "               Run stress test with Vadd kernel and xclbin for 20 rounds\n";
+  std::cout << "\t" << "-h" << ": print this help message and available test cases\n\n";
+  std::cout << "\t" << "Example Usage: ./xrt_test 7 -c 20 -o 2 -x vadd\n";
+  std::cout << "\t" << "               Run stress test with vadd elf for 20 rounds with 2 outstanding commands\n";
   std::cout << std::endl;
 }
 
@@ -165,13 +165,13 @@ xrt::run get_xrt_run(
   xrt::kernel kernel;
 
   if (elf_flow) {
-    xrt::elf elf{local_path(full_elf)};
+    xrt::elf elf{local_path(path + full_elf)};
     xrt::hw_context hwctx{device, elf};
     kernel = xrt::ext::kernel{hwctx, full_elf_kernel};
   } else {
-    xrt::xclbin xclbin = xrt::xclbin(local_path(xclbin_path));
+    xrt::xclbin xclbin = xrt::xclbin(local_path(path + xclbin_path));
     auto uuid = device.register_xclbin(xclbin);
-    xrt::elf elf{local_path(xclbin_elf)};
+    xrt::elf elf{local_path(path + xclbin_elf)};
     xrt::module mod{elf};
     xrt::hw_context hwctx{device, uuid};
     kernel = xrt::ext::kernel{hwctx, mod, xclbin_kernel};
@@ -329,11 +329,11 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
 
   auto run = get_xrt_run(device,
-		  "npu3_workspace/xclbin_vadd.xclbin",
-		  "npu3_workspace/xclbin_vadd.elf",
+		  "vadd/xclbin_vadd.xclbin",
+		  "vadd/xclbin_vadd.elf",
 		  "dpu:{vadd}",
-		  "npu3_workspace/vadd.elf",
-		  "DPU:vadd");
+		  "vadd/vadd.elf",
+		  "DPU:dpu");
 
   // Setting args for patching control code buffer
   run.set_arg(0, bo_ifm.get());
@@ -378,10 +378,10 @@ TEST_xrt_umq_memtiles(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  xrt::elf elf{local_path("npu3_workspace/move_memtiles.elf")};
+  xrt::elf elf{local_path(path + "move_memtiles/move_memtiles.elf")};
 
   xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:move_memtiles"};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
   xrt::run run{kernel};
 
   // Send the command to device and wait for it to complete
@@ -404,11 +404,11 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
   p[0] = 0xabcdabcd;
 
   auto run = get_xrt_run(device,
-		  "npu3_workspace/xclbin_ddr.xclbin",
-		  "npu3_workspace/xclbin_ddr.elf",
+		  "ddr_memtile/xclbin_ddr.xclbin",
+		  "ddr_memtile/xclbin_ddr.elf",
 		  "dpu:{vadd}",
-		  "npu3_workspace/ddr_memtile.elf",
-		  "DPU:move_ddr_memtile");
+		  "ddr_memtile/ddr_memtile.elf",
+		  "DPU:dpu");
 
   // Setting args for patching control code buffer
   run.set_arg(0, bo_data.get());
@@ -429,11 +429,11 @@ TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
   auto device = xrt::device{device_index};
 
   auto run = get_xrt_run(device,
-		  "npu3_workspace/xclbin_rmb.xclbin",
-		  "npu3_workspace/xclbin_rmb.elf",
+		  "remote_barrier/xclbin_rmb.xclbin",
+		  "remote_barrier/xclbin_rmb.elf",
 		  "dpu:{vadd}",
-		  "npu3_workspace/remote_barrier.elf",
-		  "DPU:remote_barrier");
+		  "remote_barrier/remote_barrier.elf",
+		  "DPU:dpu");
 
   // Send the command to device and wait for it to complete
   for (int i = 0 ; i < c_rounds; i++) {
@@ -452,10 +452,11 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
+  auto elf = xrt::elf(
+    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
 
   xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
   std::vector<xrt::run> runs;
 
   // Create all runs
@@ -491,71 +492,17 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 	    << duration_us * 1.0 / c_rounds << "us\n";
 }
 
-void
-TEST_xrt_umq_nop_runlist(int device_index, arg_type& arg)
-{
-  std::vector<xrt::run> runs;
-  std::vector<xrt::runlist> runlists;
-  auto device = xrt::device{device_index};
-
-  xrt::elf elf{local_path("npu3_workspace/nop.elf")};
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:nop"};
-
-  // Create all runs
-  auto num_runs_per_batch = r_cmds * o_cmds;
-  for (int i = 0; i < num_runs_per_batch; i++)
-    runs.emplace_back(kernel);
-
-  // Add all runs into runlist
-  for (int i = 0; i < o_cmds; i++) {
-    runlists.emplace_back(hwctx);
-    for (int j = 0; j < r_cmds; j++)
-      runlists[i].add(runs[i * r_cmds + j]);
-  }
-
-  int submitted = 0;
-  int completed = 0;
-  auto start = std::chrono::high_resolution_clock::now();
-
-  while (submitted < runlists.size() && submitted < c_rounds) {
-    runlists[submitted].execute();
-    submitted++;
-  }
-  while (completed < submitted) {
-    auto i = completed % runlists.size();
-    auto state = runlists[i].wait(timeout_ms * r_cmds * std::chrono::milliseconds{1});
-    completed++;
-    if (state == std::cv_status::timeout) 
-      throw std::runtime_error(std::string("exec buf timed out."));
-    auto ert_state = runlists[i].state();
-    if (ert_state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("bad command state: ") + std::to_string(ert_state));
-    if (submitted < c_rounds) {
-      runlists[i].execute();
-      submitted++;
-    }
-  }
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  std::cout << "Executed total " << c_rounds << " NOP runlist in " << duration_us
-	    << "us with max " << o_cmds << " outstanding runlist (" << r_cmds
-	    <<" commands per runlist), average latency: "
-	    << duration_us * 1.0 / (r_cmds * c_rounds) << "us\n";
-}
-
 void 
 TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
   auto run = get_xrt_run(device,
-		  "npu3_workspace/xclbin_single_preempt.xclbin",
-		  "npu3_workspace/xclbin_single_preempt.elf",
+		  "single_col_preemption/xclbin_single_preempt.xclbin",
+		  "single_col_preemption/xclbin_single_preempt.elf",
 		  "dpu:{vadd}",
-		  "npu3_workspace/single_col_preemption.elf",
-		  "DPU:preemption");
+		  "single_col_preemption/single_col_preemption.elf",
+		  "DPU:dpu");
 
   /* init input buffer */
   const uint32_t data = 0x12345678;
@@ -612,11 +559,11 @@ TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
   auto device = xrt::device{device_index};
 
   auto run = get_xrt_run(device,
-		  "npu3_workspace/xclbin_multi_preempt.xclbin",
-		  "npu3_workspace/xclbin_multi_preempt.elf",
+		  "multi_col_preemption/xclbin_multi_preempt.xclbin",
+		  "multi_col_preemption/xclbin_multi_preempt.elf",
 		  "dpu:{vadd}",
-		  "npu3_workspace/multi_col_preemption.elf",
-		  "DPU:preemption");
+		  "multi_col_preemption/multi_col_preemption.elf",
+		  "DPU:dpu");
 
   /* init input buffer */
   const uint32_t data = 0x12345678;
@@ -673,9 +620,9 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
   std::vector<xrt_bo> wts_v;
   auto device = xrt::device{device_index};
 
-  std::string ifm_path = local_path("npu3_workspace/ifm32.txt");
-  std::string wts_path = local_path("npu3_workspace/wts32.txt");
-  std::string ofm_path = local_path("npu3_workspace/ofm32.txt");
+  std::string ifm_path = local_path(path + "resnet50/ifm32.txt");
+  std::string wts_path = local_path(path + "resnet50/wts32.txt");
+  std::string ofm_path = local_path(path + "resnet50/ofm32.txt");
 
   const uint32_t IFM_BYTE_SIZE = 233472;
   const uint32_t WTS_BYTE_SIZE = 25704832;
@@ -687,11 +634,11 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
   auto run = get_xrt_run(device,
-		  "npu3_workspace/xclbin_resnet50_all.xclbin",
-		  "npu3_workspace/xclbin_resnet50_all.elf",
+		  "resnet50/xclbin_resnet50.xclbin",
+		  "resnet50/xclbin_resnet50.elf",
 		  "dpu:{vadd}",
-		  "npu3_workspace/resnet50_all_layer.elf",
-		  "DPU:resnet50");
+		  "resnet50/resnet50.elf",
+		  "DPU:dpu");
 
   run.set_arg(54, bo_ifm.get());
 
@@ -781,37 +728,50 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
   }
 }
 
-/* run.start n requests, then run.wait all of them */
+/* run.start and run.wait o_cmds commands for c_rounds times */
 void
 TEST_xrt_stress_run(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  unsigned round = s_rounds;
 
   auto elf = xrt::elf(
-    elfpath.empty() ? local_path("npu3_workspace/nop.elf") : elfpath);
+    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
 
   xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:" + dpu};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
 
   std::vector<xrt::run> run_handles;
 
-  for (int i = 0; i < round; i++) {
-    auto run = xrt::run(kernel);
-    run_handles.push_back(std::move(run));
-  }
+  for (int i = 0; i < o_cmds; i++)
+    run_handles.emplace_back(kernel);
 
-  for (int i = 0; i < round; i++) {
-    run_handles[i].start();
-  }
+  int submitted = 0;
+  int completed = 0;
+  auto start = std::chrono::high_resolution_clock::now();
 
-  for (int i = 0; i < round; i++) {
-    auto state = run_handles[i].wait(timeout_ms * round /* give 1 minute per round */);
+  while (submitted < run_handles.size() && submitted < c_rounds) {
+    run_handles[submitted].start();
+    submitted++;
+  }
+  while (completed < submitted) {
+    auto i = completed % run_handles.size();
+    auto state = run_handles[i].wait(timeout_ms);
+    completed++;
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
     if (state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+    if (submitted < c_rounds) {
+      run_handles[i].start();
+      submitted++;
+    }
   }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  std::cout << "Executed total " << c_rounds << " commands in " << duration_us
+	    << "us with max " << o_cmds << " outstanding commands, average latency: "
+	    << duration_us * 1.0 / c_rounds << "us\n";
 }
 
 /* create n hwctx  */
@@ -819,32 +779,86 @@ void
 TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  unsigned round = m_rounds;
 
   auto elf = xrt::elf(
-    elfpath.empty() ? local_path("npu3_workspace/nop.elf") : elfpath);
+    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
 
   std::vector<xrt::hw_context> run_hwctxs;
 
-  for (int i = 0; i < round; i++) {
+  for (int i = 0; i < m_rounds; i++) {
     xrt::hw_context hwctx{device, elf};
     run_hwctxs.push_back(std::move(hwctx));
   }
 
-  for (int i = 0; i < round; i++) {
+  for (int i = 0; i < m_rounds; i++) {
     auto hwctx = run_hwctxs[i];
-    auto kernel = xrt::ext::kernel{hwctx, "DPU:" + dpu};
+    auto kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
 
     auto run = xrt::run(kernel);
 
     run.start();
-    auto state = run.wait(timeout_ms * round /* give 2 sec per round, silicon */);
+    auto state = run.wait(timeout_ms * m_rounds /* give 2 sec per round, silicon */);
 
     if (state == ERT_CMD_STATE_TIMEOUT)
       throw std::runtime_error(std::string("exec buf timed out."));
     if (state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
   }
+}
+
+void
+TEST_xrt_umq_runlist(int device_index, arg_type& arg)
+{
+  std::vector<xrt::run> runs;
+  std::vector<xrt::runlist> runlists;
+  auto device = xrt::device{device_index};
+
+  auto elf = xrt::elf(
+    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
+
+  // Create all runs
+  auto num_runs_per_batch = r_cmds * o_cmds;
+  for (int i = 0; i < num_runs_per_batch; i++)
+    runs.emplace_back(kernel);
+
+  // Add all runs into runlist
+  for (int i = 0; i < o_cmds; i++) {
+    runlists.emplace_back(hwctx);
+    for (int j = 0; j < r_cmds; j++)
+      runlists[i].add(runs[i * r_cmds + j]);
+  }
+
+  int submitted = 0;
+  int completed = 0;
+  auto start = std::chrono::high_resolution_clock::now();
+
+  while (submitted < runlists.size() && submitted < c_rounds) {
+    runlists[submitted].execute();
+    submitted++;
+  }
+  while (completed < submitted) {
+    auto i = completed % runlists.size();
+    auto state = runlists[i].wait(timeout_ms * r_cmds * std::chrono::milliseconds{1});
+    completed++;
+    if (state == std::cv_status::timeout) 
+      throw std::runtime_error(std::string("exec buf timed out."));
+    auto ert_state = runlists[i].state();
+    if (ert_state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(ert_state));
+    if (submitted < c_rounds) {
+      runlists[i].execute();
+      submitted++;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  std::cout << "Executed total " << c_rounds << " runlists in " << duration_us
+	    << "us with max " << o_cmds << " outstanding runlist (" << r_cmds
+	    << " commands per runlist), average latency: "
+	    << duration_us * 1.0 / (r_cmds * c_rounds) << "us\n";
 }
 
 // List of all test cases
@@ -853,14 +867,25 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt move memtiles", TEST_xrt_umq_memtiles, {} },
   test_case{ "npu3 xrt ddr memtile", TEST_xrt_umq_ddr_memtile, {} },
   test_case{ "npu3 xrt remote barrier", TEST_xrt_umq_remote_barrier, {} },
-  test_case{ "npu3 xrt nop", TEST_xrt_umq_nop, {} },
+  test_case{ "npu3 xrt nop/multi nop", TEST_xrt_umq_nop, {} },
   test_case{ "npu3 xrt single col preemption", TEST_xrt_umq_single_col_preemption, {} },
   test_case{ "npu3 xrt multi col preemption", TEST_xrt_umq_multi_col_preemption, {} },
-  test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {s_rounds} },
-  test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {m_rounds} },
+  test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {} },
+  test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
-  test_case{ "npu3 xrt runlist of nop", TEST_xrt_umq_nop_runlist, {} },
+  test_case{ "npu3 xrt runlist", TEST_xrt_umq_runlist, {} },
 };
+
+void
+print_available_tests()
+{
+  std::cout << "Available Test Cases:\n";
+  for (size_t i = 0; i < test_list.size(); i++) {
+    std::cout << "  #" << i << " - " << test_list[i].description << "\n";
+  }
+  std::cout << "  #99 - npu3 xrt thread test\n";
+  std::cout << std::endl;
+}
 
 /* test n threads of 1 or more tests */
 void
@@ -930,14 +955,12 @@ run_test(int id, const test_case& test, int device_index)
     test.func(device_index, test.arg);
   }
   catch (const std::exception& ex) {
-    std::cerr << test.description << "exception: " << ex.what() << std::endl;
+    std::cerr << test.description << " exception: " << ex.what() << std::endl;
     failed = true;
   }
 
   std::string result = failed ? "FAILED" : "PASSED";
-  std::string flow = elf_flow ? "ELF Flow" : "XCLBIN Flow";
-  std::cout << "====== " << id << ": " << test.description  << " "
-	    << flow << " " << result << "  =====" << std::endl;
+  std::cout << "====== " << id << ": " << test.description  << " " << result << "  =====" << std::endl;
 
   if (failed)
     test_failed++;
@@ -976,7 +999,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:o:r:s:m:x:d:i:t:e:v:w:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:o:r:m:x:i:t:e:v:w:lh")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -996,97 +1019,87 @@ main(int argc, char **argv)
 	  r_cmds = val;
 	  break;
         }
-	case 's': {
-	  val = std::stoi(optarg);
-	  std::cout << "Using s_rounds: " << val << std::endl;
-	  s_rounds = val;
-	  break;
-	}
-	case 'm': {
-	  val = std::stoi(optarg);
-	  std::cout << "Using m_rounds: " << val << std::endl;
-	  m_rounds = val;
-	  break;
-	}
-	case 'd': {
-	  dpu = optarg;
-	  std::cout << "Using dpu: " << dpu << std::endl;
-	  break;
-	}
-	case 'i': {
-	  val = std::stoi(optarg);
-	  std::cout << "Using device_index: " << val << std::endl;
+        case 'm': {
+          val = std::stoi(optarg);
+          std::cout << "Using m_rounds: " << val << std::endl;
+          m_rounds = val;
+          break;
+        }
+        case 'i': {
+          val = std::stoi(optarg);
+          std::cout << "Using device_index: " << val << std::endl;
           device_index = val;
-	  break;
-	}
-	case 't': {
-	  val = std::stoi(optarg);
-	  if (val <= 0) {
-		  std::cout << "Thread count should be greater than 0" << std::endl;
-                  return 1;
-	  }
-	  std::cout << "Creating " << val << " threads" << std::endl;
-	  threads = val;
-	  break;
-	}
-	case 'e': {
-	  val = std::stoi(optarg);
-	  if (val > test_list.size() - 1 || val < 0) {
-		  std::cout << "Invalid test number" << std::endl;
-		  return 1;
-	  }
+          break;
+        }
+        case 't': {
+          val = std::stoi(optarg);
+          if (val <= 0) {
+            std::cout << "Thread count should be greater than 0" << std::endl;
+            return 1;
+          }
+          std::cout << "Creating " << val << " threads" << std::endl;
+          threads = val;
+          break;
+        }
+        case 'e': {
+          val = std::stoi(optarg);
+          if (val > test_list.size() - 1 || val < 0) {
+            std::cout << "Invalid test number" << std::endl;
+            return 1;
+          }
           std::cout << "Add test #" << val << " to thread test" << std::endl;
           exec_list.push_back(val);
-	  break;
-	}
-	case 'w': {
-	  val = std::stoi(optarg);
-	  if (val <= 0) {
-	    std::cout << "Timeout should be greater than 0 seconds" << std::endl;
-	    return 1;
-	  }
-	  timeout_ms = val * 1000; // Convert seconds to milliseconds
-	  std::cout << "Using timeout: " << val << " seconds (" << timeout_ms << " ms)" << std::endl;
-	  break;
-	}
-	case 'x': {
-          elfpath = local_path("npu3_workspace/") + optarg + ".elf";
+          break;
+        }
+        case 'w': {
+          val = std::stoi(optarg);
+          if (val <= 0) {
+            std::cout << "Timeout should be greater than 0 seconds" << std::endl;
+            return 1;
+          }
+          timeout_ms = val * 1000; // Convert seconds to milliseconds
+          std::cout << "Using timeout: " << val << " seconds (" << timeout_ms << " ms)" << std::endl;
+          break;
+        }
+        case 'x': {
+          elfpath = local_path(path + optarg + "/" + optarg + ".elf");
           if (!elfpath.empty()) {
             std::cout << "Using elf file: " << elfpath << std::endl;
             break;
           } else {
-            std::cout << "Failed to open elf file: " << optarg << std::endl;
-	    return 1;
-	  }
-	}
-	case 'l': {
-	  std::cout << "swtiching to xclbin flow" << std::endl;
-	  elf_flow = false;
-	  break;
-	}
-	case 'v': {
-	  val = std::stoi(optarg);
-	  if (val > 4 || val < 1) {
-	    std::cout << "VF count is between 1-4" << std::endl;
-	    return 1;
-	  }
-	  vf_cnt = val;
-	  vf_test = true;
-	  break;
-	}
-	case 'h':
-	  usage(program);
-	  return 0;
-	case '?':
-      	  std::cout << "Unknown option: " << static_cast<char>(optopt) << std::endl;
-	  usage(program);
-      	  return 1;
-    	case ':':
-      	  std::cout << "Missing value for option: " << argv[optind-1] << std::endl;
-      	  return 1;
-    	default:
-      	  usage(program);
-      	  return 1;
+            std::cout << "Failed to open elf file: " << elfpath << std::endl;
+            return 1;
+          }
+        }
+        case 'l': {
+          std::cout << "swtiching to xclbin flow" << std::endl;
+          elf_flow = false;
+          break;
+        }
+        case 'v': {
+          val = std::stoi(optarg);
+          if (val > 4 || val < 1) {
+            std::cout << "VF count is between 1-4" << std::endl;
+            return 1;
+          }
+          vf_cnt = val;
+          vf_test = true;
+          break;
+        }
+        case 'h':
+          usage(program);
+          print_available_tests();
+          return 0;
+        case '?':
+          std::cout << "Unknown option: " << static_cast<char>(optopt) << std::endl;
+          usage(program);
+          return 1;
+        case ':':
+          std::cout << "Missing value for option: " << argv[optind-1] << std::endl;
+          return 1;
+        default:
+          usage(program);
+          return 1;
       }
     }
 

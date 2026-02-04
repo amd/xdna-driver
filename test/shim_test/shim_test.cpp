@@ -87,7 +87,7 @@ usage(const std::string& prog)
 {
   std::cout << "\nUsage: " << prog << " [options] [test case ID/name separated by spaces]\n";
   std::cout << "Options:\n";
-  std::cout << "\t" << "-h" << ": print this help message\n";
+  std::cout << "\t" << "-h" << ": print this help message and available test cases\n";
   std::cout << "\t" << "-k" << ": evaluate test result based on kernel version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
   std::cout << std::endl;
@@ -941,6 +941,16 @@ std::vector<test_case> test_list {
   },
 };
 
+void
+print_available_tests()
+{
+  std::cout << "Available Test Cases:\n";
+  for (size_t i = 0; i < test_list.size(); i++) {
+    std::cout << "  #" << i << " - " << test_list[i].name << "\n";
+  }
+  std::cout << std::endl;
+}
+
 // Test case executor implementation
 
 bool
@@ -1100,6 +1110,7 @@ main(int argc, char **argv)
     switch (option) {
     case 'h':
       usage(program);
+      print_available_tests();
       return 0;
     case 'x': {
       std::ifstream xclbin(optarg);
