@@ -173,6 +173,157 @@ cleanup:
 	return ret;
 }
 
+/**
+ * ve2_parse_mem_topology - Parse AIE memory topology from device tree
+ * @xdna: Pointer to the device structure
+ * @pdev: Platform device
+ *
+ * Parses the aie_memory_topology node from device tree and stores the
+ * column to memory region mapping in xdna_hdl->mem_topology.
+ *
+ * Returns 0 on success, negative error code on failure.
+ * If the node doesn't exist, returns -ENOENT (not fatal, backward compat).
+ */
+int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_device *pdev)
+{
+	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
+	struct device_node *topo_np, *region_np;
+	struct device_node *mem_node;
+	u32 columns[2];
+	int i, ret;
+	u32 reg;
+
+	/* First try as child of telluride_drm */
+	topo_np = of_get_child_by_name(pdev->dev.of_node, "aie_memory_topology");
+ 
+	/* If not found, try as sibling (in parent node) */
+	if (!topo_np && pdev->dev.of_node->parent)
+		topo_np = of_get_child_by_name(pdev->dev.of_node->parent, "aie_memory_topology");
+
+	if (!topo_np) {
+		XDNA_DBG(xdna, "No aie_memory_topology node found, using backward compat mode");
+		xdna_hdl->mem_topology.num_regions = 0;
+		return -ENOENT;
+	}
+
+	xdna_hdl->mem_topology.num_regions = 0;
+ 
+	for_each_child_of_node(topo_np, region_np) {
+		if (xdna_hdl->mem_topology.num_regions >= MAX_MEM_REGIONS) {
+			XDNA_DBG(xdna, "Too many memory regions, max %d", MAX_MEM_REGIONS);
+			break;
+		}
+
+		ret = of_property_read_u32(region_np, "reg", &reg);
+		if (ret) {
+			XDNA_DBG(xdna, "Failed to read reg property: %d", ret);
+			continue;
+		}
+
+		ret = of_property_read_u32_array(region_np, "columns", columns, 2);
+		if (ret) {
+			XDNA_DBG(xdna, "Failed to read columns property: %d", ret);
+			continue;
+		}
+
+		mem_node = of_parse_phandle(region_np, "memory-region", 0);
+		if (!mem_node) {
+			XDNA_DBG(xdna, "Failed to parse memory-region phandle");
+			continue;
+		}
+
+		/* Match phandle to telluride_drm's memory-region array index */
+		for (i = 0; i < MAX_MEM_REGIONS; i++) {
+			struct device_node *drm_mem_node;
+
+			drm_mem_node = of_parse_phandle(pdev->dev.of_node, "memory-region", i);
+			if (!drm_mem_node)
+				break;
+ 
+			if (drm_mem_node == mem_node) {
+				/* Found match - i is the CMA region index */
+				if (xdna->cma_region_devs[i]) {
+					xdna_hdl->mem_topology.regions[reg].start_col = columns[0];
+					xdna_hdl->mem_topology.regions[reg].end_col = columns[1];
+					xdna_hdl->mem_topology.regions[reg].mem_index = i;
+					xdna_hdl->mem_topology.num_regions++;
+
+					XDNA_DBG(xdna, "Mem region %d: cols %d-%d -> mem_idx %d",
+							reg, columns[0], columns[1], i);
+				}
+				of_node_put(drm_mem_node);
+				of_node_put(mem_node);
+				break;
+			}
+			of_node_put(drm_mem_node);
+		}
+
+		if (i == MAX_MEM_REGIONS) {
+			XDNA_DBG(xdna, "Failed to match memory-region phandle to CMA device");
+			of_node_put(mem_node);
+		}
+	}
+
+	of_node_put(topo_np);
+	return 0;
+}
+ 
+/**
+ * ve2_auto_select_mem_index - Auto-select memory index based on start_col
+ * @xdna: Pointer to the device structure
+ * @hwctx: Hardware context (must be called AFTER ve2_xrs_request)
+ *
+ * Automatically selects the correct mem_index for the hardware context based
+ * on the ACTUAL allocated start_col (set by XRS) and the parsed memory topology.
+ * Stores the selected mem_index in hwctx->priv->mem_index.
+ * 
+ * Falls back to MAX_MEM_REGIONS if topology unavailable or start_col not found.
+ * This sentinel is returned to userspace as 0xFF, signaling the shim to skip
+ * bank injection. Both HSA queue and BOs then use default platform CMA through
+ * kernel fallback logic.
+ */
+void ve2_auto_select_mem_index(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+{
+	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
+	struct ve2_mem_topology *topo = &xdna_hdl->mem_topology;
+	struct amdxdna_ctx_priv *priv = hwctx->priv;
+	u32 start_col = priv->start_col;  /* Use ACTUAL allocated start_col from XRS */
+	u32 selected_mem_index;
+	bool found = false;
+	int i;
+
+	if (topo->num_regions == 0) {
+		XDNA_DBG(xdna, "No memory topology, using default platform CMA");
+		priv->mem_index = MAX_MEM_REGIONS;
+		return;
+	}
+
+	/* Find which region contains the allocated start_col */
+	for (i = 0; i < MAX_MEM_REGIONS; i++) {
+		if (topo->regions[i].start_col == 0 && topo->regions[i].end_col == 0)
+			continue;  /* Skip uninitialized regions */
+
+		if (start_col >= topo->regions[i].start_col &&
+			start_col <= topo->regions[i].end_col) {
+			selected_mem_index = topo->regions[i].mem_index;
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		XDNA_DBG(xdna, "start_col %u not in topology, using default platform CMA",
+				start_col);
+		priv->mem_index = MAX_MEM_REGIONS;
+		return;
+	}
+
+	/* Store the auto-selected mem_index */
+	priv->mem_index = selected_mem_index;
+	XDNA_DBG(xdna, "Auto-selected mem_index=%u for start_col=%u",
+			selected_mem_index, start_col);
+}
+
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
@@ -265,6 +416,18 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	if (ret < 0) {
 		/* CMA region initialization is optional - system will fall back to default CMA */
 		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+	}
+
+	/* Parse memory topology to enable automatic CMA region selection */
+	ret = ve2_parse_mem_topology(xdna, pdev);
+	if (ret == -ENOENT) {
+		/* Topology not found - backward compatibility mode */
+		XDNA_DBG(xdna, "No memory topology found, using backward compatibility mode");
+	} else if (ret < 0) {
+		XDNA_WARN(xdna, "Failed to parse memory topology: %d", ret);
+	} else {
+		XDNA_INFO(xdna, "Memory topology parsed: %d regions",
+				xdna_hdl->mem_topology.num_regions);
 	}
 
 	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",

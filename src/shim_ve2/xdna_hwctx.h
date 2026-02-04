@@ -122,6 +122,7 @@ private:
   std::unique_ptr<xdna_hwq> m_hwq;
   uint32_t m_ops_per_cycle;
   uint32_t m_num_cols;
+  uint32_t m_mem_index = 0;
   uint32_t m_doorbell;
   std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
   std::shared_ptr<xdna_aie_array> m_aie_array;
@@ -137,6 +138,9 @@ private:
 
   void
   print_xclbin_info();
+
+  void
+  query_mem_index();
 };
 
 } // shim_xdna_edge
