@@ -293,7 +293,7 @@ int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_device *pde
 	of_node_put(topo_np);
 	return 0;
 }
- 
+
 /**
  * ve2_auto_select_mem_index - Auto-select memory index based on start_col
  * @xdna: Pointer to the device structure
