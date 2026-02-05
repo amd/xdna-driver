@@ -1240,7 +1240,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	ret = ve2_xrs_request(xdna, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "XRS resource request failed, ret=%d", ret);
-		goto free_priv;
+		goto cleanup_priv;
 	}
 
 	/* Auto-select mem_index based on ACTUAL allocated start_col from XRS */
@@ -1291,7 +1291,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 destroy_partition:
 	ve2_mgmt_destroy_partition(hwctx);
-free_priv:
+cleanup_priv:
 	kfree(hwctx->priv);
 
 	return ret;
