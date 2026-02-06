@@ -1761,3 +1761,74 @@ int aie2_legacy_config_cu(struct amdxdna_ctx *ctx)
 	return ret;
 }
 #endif
+
+int aie2_rw_aie_reg(struct amdxdna_dev_hdl *ndev, enum aie2_access_type type,
+		    u8 ctx_id, u8 row, u8 col, u32 addr, u32 *value)
+{
+	DECLARE_AIE2_MSG(aie_rw_access, MSG_OP_AIE_RW_ACCESS);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_AIE_RW_ACCESS)) {
+		XDNA_DBG(xdna, "AIE RW access unsupported for the device or firmware version");
+		return -EOPNOTSUPP;
+	}
+
+	req.type = type;
+	req.ctx_id = ctx_id;
+	req.row = row;
+	req.col = col;
+	req.reg.aie_offset = addr;
+	if (type == AIE2_ACCESS_TYPE_REG_WRITE)
+		req.reg.write_value = *value;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE reg %s failed, ret %d",
+			 type == AIE2_ACCESS_TYPE_REG_READ ? "read" : "write", ret);
+		return ret;
+	}
+
+	if (type == AIE2_ACCESS_TYPE_REG_READ)
+		*value = resp.reg_read_value;
+
+	XDNA_DBG(xdna, "AIE reg %s ctx %u row %u col %u addr 0x%x value 0x%x",
+		 type == AIE2_ACCESS_TYPE_REG_READ ? "read" : "write",
+		 ctx_id, row, col, addr, *value);
+
+	return 0;
+}
+
+int aie2_rw_aie_mem(struct amdxdna_dev_hdl *ndev, enum aie2_access_type type,
+		    u8 ctx_id, u8 row, u8 col, u32 aie_addr, u64 dram_addr, u32 size)
+{
+	DECLARE_AIE2_MSG(aie_rw_access, MSG_OP_AIE_RW_ACCESS);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	if (!aie2_is_supported_msg(ndev, MSG_OP_AIE_RW_ACCESS)) {
+		XDNA_DBG(xdna, "AIE RW access unsupported for the device or firmware version");
+		return -EOPNOTSUPP;
+	}
+
+	req.type = type;
+	req.ctx_id = ctx_id;
+	req.row = row;
+	req.col = col;
+	req.mem.aie_offset = aie_addr;
+	req.mem.dram_addr = dram_addr;
+	req.mem.size = size;
+
+	ret = aie2_send_mgmt_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE mem %s failed, ret %d",
+			 type == AIE2_ACCESS_TYPE_MEM_READ ? "read" : "write", ret);
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "AIE mem %s ctx %u row %u col %u aie_addr 0x%x size %u",
+		 type == AIE2_ACCESS_TYPE_MEM_READ ? "read" : "write",
+		 ctx_id, row, col, aie_addr, size);
+
+	return 0;
+}

@@ -53,6 +53,8 @@ enum aie2_msg_opcode {
 	MSG_OP_GET_COREDUMP			= 0x119,
 	MSG_OP_CALIBRATE_TIME			= 0x11C,
 	MSG_OP_MAX_DRV_OPCODE,
+	MSG_OP_AIE_RW_ACCESS			= 0x203,
+	MSG_OP_MAX_ASYNC_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION		= 0x301,
 	MSG_OP_MAX_OPCODE
 };
@@ -789,5 +791,37 @@ struct get_dev_revision_resp {
 	enum aie2_dev_revision	rev;
 	u32			raw_fuse_data;
 } __packed;
+
+enum aie2_access_type {
+	AIE2_ACCESS_TYPE_MEM_READ,
+	AIE2_ACCESS_TYPE_MEM_WRITE,
+	AIE2_ACCESS_TYPE_REG_READ,
+	AIE2_ACCESS_TYPE_REG_WRITE,
+	AIE2_ACCESS_TYPE_MAX
+};
+
+struct aie_rw_access_req {
+	enum aie2_access_type	type;
+	u8			ctx_id;
+	u8			row;
+	u8			col;
+	u8			reserved;
+	union {
+		struct {
+			u64	dram_addr;
+			u32	aie_offset;
+			u32	size;
+		} __packed mem;
+		struct {
+			u32	aie_offset;
+			u32	write_value;
+		} __packed reg;
+	};
+} __packed;
+
+struct aie_rw_access_resp {
+	enum aie2_msg_status	status;
+	u32			reg_read_value;
+};
 
 #endif /* _AIE2_MSG_PRIV_H_ */

@@ -858,16 +858,16 @@ struct amdxdna_drm_bo_usage {
  * @buffer: Pointer to an array whose elements are structure specified by the param struct member.
  */
 struct amdxdna_drm_get_array {
-#define DRM_AMDXDNA_HW_CONTEXT_ALL	0
-#define DRM_AMDXDNA_HW_CONTEXT_BY_ID	1
-#define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
-#define DRM_AMDXDNA_FW_LOG		3
-#define DRM_AMDXDNA_FW_TRACE		4
-#define DRM_AMDXDNA_AIE_COREDUMP	5
-#define DRM_AMDXDNA_BO_USAGE		6
-#define DRM_AMDXDNA_FW_LOG_CONFIG	7
-#define DRM_AMDXDNA_FW_TRACE_CONFIG	8
-#define DRM_AMDXDNA_AIE_TILE_READ	9
+#define DRM_AMDXDNA_HW_CONTEXT_ALL		0
+#define DRM_AMDXDNA_HW_CONTEXT_BY_ID		1
+#define DRM_AMDXDNA_HW_LAST_ASYNC_ERR		2
+#define DRM_AMDXDNA_FW_LOG			3
+#define DRM_AMDXDNA_FW_TRACE			4
+#define DRM_AMDXDNA_AIE_COREDUMP		5
+#define DRM_AMDXDNA_BO_USAGE			6
+#define DRM_AMDXDNA_FW_LOG_CONFIG		7
+#define DRM_AMDXDNA_FW_TRACE_CONFIG		8
+#define DRM_AMDXDNA_AIE_TILE_READ		9
 #define DRM_AMDXDNA_HWCTX_AIE_PART_FD		10
 	__u32 param; /* in */
 	__u32 element_size; /* in/out */
@@ -902,7 +902,6 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
 #define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
 #define	DRM_AMDXDNA_AIE_TILE_WRITE		7
-
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

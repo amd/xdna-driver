@@ -1261,6 +1261,94 @@ struct aie_coredump
   }
 };
 
+struct aie_read
+{
+  using result_type = query::aie_read::result_type;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
+  {
+    if (key != key_type::aie_read)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& args = std::any_cast<const query::aie_read::args&>(args_any);
+
+    // Payload: aie_tile_access structure at beginning, followed by space for data
+    // Driver will overwrite the access struct with returned data starting at offset 0
+    std::vector<char> payload(args.size + sizeof(amdxdna_drm_aie_tile_access));
+    auto *access = reinterpret_cast<amdxdna_drm_aie_tile_access *>(payload.data());
+    access->pid = static_cast<uint64_t>(args.pid);
+    access->context_id = static_cast<uint32_t>(args.context_id);
+    access->col = static_cast<uint32_t>(args.col);
+    access->row = static_cast<uint32_t>(args.row);
+    access->addr = args.offset;
+    access->size = args.size;
+
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_AIE_TILE_READ,
+      .element_size = static_cast<uint32_t>(payload.size()),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+
+    payload.resize(args.size);
+    return payload;
+  }
+};
+
+struct aie_write
+{
+  using result_type = query::aie_write::result_type;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
+  {
+    if (key != key_type::aie_write)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& args = std::any_cast<const query::aie_write::args&>(args_any);
+
+    // Payload: aie_tile_access structure at beginning, followed by data
+    std::vector<char> payload(sizeof(amdxdna_drm_aie_tile_access) + args.data.size());
+
+    auto *access = reinterpret_cast<amdxdna_drm_aie_tile_access *>(payload.data());
+    access->pid = static_cast<uint64_t>(args.pid);
+    access->context_id = static_cast<uint32_t>(args.context_id);
+    access->col = static_cast<uint32_t>(args.col);
+    access->row = static_cast<uint32_t>(args.row);
+    access->addr = args.offset;
+    access->size = args.data.size();
+
+    std::memcpy(payload.data() + sizeof(amdxdna_drm_aie_tile_access), args.data.data(), args.data.size());
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_AIE_TILE_WRITE,
+      .buffer_size = static_cast<uint32_t>(payload.size()),
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+
+    return args.data.size();
+  }
+};
+
 struct firmware_version
 {
   using result_type = query::firmware_version::result_type;
@@ -1673,6 +1761,8 @@ initialize_query_table()
   emplace_func1_request<query::firmware_version,               firmware_version>();
   emplace_func1_request<query::sub_device_path,                sub_device_path>();
   emplace_func1_request<query::aie_coredump,                   aie_coredump>();
+  emplace_func1_request<query::aie_read,                       aie_read>();
+  emplace_func1_request<query::aie_write,                      aie_write>();
 }
 
 struct X { X() { initialize_query_table(); }};
