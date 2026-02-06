@@ -66,6 +66,9 @@ struct misc_info {
 	u32 ppc;
 };
 
+int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, uint32_t opcode,
+		uint32_t aie_addr, u64 paddr, uint32_t length);
+
 // Read from handshake memory
 static inline int
 ve2_partition_read_privileged_mem(struct device *aie_dev, u32 col,
