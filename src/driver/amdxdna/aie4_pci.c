@@ -290,8 +290,18 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	dma_addr_t dma_addr;
+	int ret;
 
-	if (is_npu3_vf_dev(pdev) || skip_work_buffer)
+	if (is_npu3_vf_dev(pdev))
+		return 0;
+
+	ret = aie4_calibrate_clock(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Calibrate system clock failed");
+		return ret;
+	}
+
+	if (skip_work_buffer)
 		return 0;
 
 	dma_hdl = ndev->mpnpu_work_buffer;
