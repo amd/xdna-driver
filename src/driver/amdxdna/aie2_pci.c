@@ -1314,24 +1314,26 @@ exit:
 
 static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_drm_aie_coredump config = {};
 	struct amdxdna_mgmt_dma_hdl **data_hdls = NULL;
 	struct amdxdna_mgmt_dma_hdl *list_hdl = NULL;
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_drm_aie_coredump config = {};
+	struct amdxdna_client *ctx_client = NULL;
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_dev_hdl *ndev;
 	struct buffer_list *buf_list;
+	struct amdxdna_dev *xdna;
+	int ret = 0, idx = 0, i;
 	unsigned long hwctx_id;
-	u32 total_size;
 	size_t list_size;
-	u32 offset = 0;
 	void __user *buf;
+	u32 total_size;
+	u32 offset = 0;
 	u32 num_bufs;
 	u32 buf_size;
-	int ret = 0;
-	int idx, i;
 
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
 	buf_size = args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
@@ -1363,48 +1365,48 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
 			if (config.context_id == hwctx_id && config.pid == hw_ctx->client->pid) {
 				hwctx = hw_ctx;
+				ctx_client = tmp_client;
 				break;
 			}
 		}
-		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 		if (hwctx)
 			break;
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
 	}
+	mutex_unlock(&xdna->dev_lock);
 
 	if (!hwctx) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Context %u for pid %llu not found", config.context_id, config.pid);
 		return -EINVAL;
 	}
 
 	/* Check if caller is root or owns the context */
 	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Permission denied for context %u", config.context_id);
-		return -EPERM;
+		ret = -EPERM;
+		goto unlock_srcu;
 	}
 
 	num_bufs = ndev->metadata.rows * hwctx->priv->orig_num_col;
 	total_size = num_bufs * SZ_1M;
 
 	if (buf_size < total_size) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_DBG(xdna, "Insufficient buffer size %u, need %u", buf_size, total_size);
 		args->element_size = total_size;
-		return -ENOSPC;
+		ret = -ENOSPC;
+		goto unlock_srcu;
 	}
 
 	list_size = max_t(size_t, num_bufs * sizeof(struct buffer_list), SZ_8K);
 	list_hdl = amdxdna_mgmt_buff_alloc(xdna, list_size, DMA_TO_DEVICE);
 	if (IS_ERR(list_hdl)) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Failed to allocate buffer list");
-		return PTR_ERR(list_hdl);
+		ret = PTR_ERR(list_hdl);
+		goto unlock_srcu;
 	}
 
 	buf_list = amdxdna_mgmt_buff_get_cpu_addr(list_hdl, 0);
 	if (IS_ERR(buf_list)) {
-		mutex_unlock(&xdna->dev_lock);
 		XDNA_ERR(xdna, "Failed to get CPU address for buffer list");
 		ret = PTR_ERR(buf_list);
 		goto free_list_hdl;
@@ -1414,7 +1416,6 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	/* Allocate array to track data buffer handles */
 	data_hdls = kcalloc(num_bufs, sizeof(*data_hdls), GFP_KERNEL);
 	if (!data_hdls) {
-		mutex_unlock(&xdna->dev_lock);
 		ret = -ENOMEM;
 		goto free_list_hdl;
 	}
@@ -1427,14 +1428,12 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 			XDNA_ERR(xdna, "Failed to allocate data buffer %d", i);
 			ret = PTR_ERR(data_hdls[i]);
 			data_hdls[i] = NULL;
-			mutex_unlock(&xdna->dev_lock);
 			goto free_data_hdls;
 		}
 
 		buf_addr = amdxdna_mgmt_buff_get_cpu_addr(data_hdls[i], 0);
 		if (IS_ERR(buf_addr)) {
 			ret = PTR_ERR(buf_addr);
-			mutex_unlock(&xdna->dev_lock);
 			goto free_data_hdls;
 		}
 		memset(buf_addr, 0, SZ_1M);
@@ -1450,7 +1449,6 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_get_aie_coredump(ndev, list_hdl, hwctx->priv->id, num_bufs);
 	mutex_unlock(&ndev->aie2_lock);
-	mutex_unlock(&xdna->dev_lock);
 
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get coredump from firmware, ret=%d", ret);
@@ -1480,6 +1478,8 @@ free_data_hdls:
 	kfree(data_hdls);
 free_list_hdl:
 	amdxdna_mgmt_buff_free(list_hdl);
+unlock_srcu:
+	srcu_read_unlock(&ctx_client->ctx_srcu, idx);
 	return ret;
 }
 
