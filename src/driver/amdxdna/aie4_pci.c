@@ -1864,6 +1864,20 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	return ret;
 }
 
+static int aie4_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_async_error tmp;
+	int ret;
+
+	ret = aie4_error_get_last_async(xdna, &xdna->dev_handle->async_errs_cache, 1, &tmp);
+	if (ret < 0)
+		goto exit;
+
+	ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), ret);
+exit:
+	return ret;
+}
+
 static int aie4_get_ctx_status_array(struct amdxdna_client *client,
 				     struct amdxdna_drm_get_array *args)
 {
@@ -1967,6 +1981,9 @@ static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 		return ret;
 
 	switch (args->param) {
+	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		ret = aie4_get_array_async_error(xdna, args);
+		break;
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
 		ret = aie4_get_ctx_status_array(client, args);
 		break;

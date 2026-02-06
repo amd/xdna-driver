@@ -246,6 +246,154 @@ static void aie4_async_errors_cache(struct amdxdna_dev_hdl *ndev, void *err_info
 	mutex_unlock(&ndev->async_errs_cache.lock);
 }
 
+/*
+ * When a critical context error occurs, find the matching context and mark it
+ * as DISCONNECTED. This wakes up both the job_worker thread and any waiting
+ * user-space threads, allowing them to return with an error instead of hanging.
+ */
+static void aie4_ctx_disconnect(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_client *client;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
+	int wakeup_count = 0;
+
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(client, &xdna->client_list, node) {
+		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
+			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
+				ctx->priv->status = CTX_STATE_DISCONNECTED;
+				ctx->priv->col_entry->needs_reset = true;
+				wake_up_all(&ctx->priv->col_entry->col_event);
+				wakeup_count++;
+				XDNA_DBG(xdna, "Context ctx_id=%lu marked DISCONNECTED", ctx_id);
+			}
+		}
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	/* Delayed/stale fw notification after ctx destroy can reference unknown hw_ctx_id */
+	if (wakeup_count == 0)
+		XDNA_DBG(xdna, "Could not find context for hw_ctx_id=%u", hw_ctx_id);
+	else
+		XDNA_DBG(xdna, "Woke up %d contexts after hw_ctx_id=%u",
+			 wakeup_count, hw_ctx_id);
+}
+
+static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id,
+					 struct aie4_msg_app_health_report *health)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_ctx_priv *priv;
+	struct amdxdna_client *client;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
+
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(client, &xdna->client_list, node) {
+		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
+			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
+				priv = ctx->priv;
+
+				if (!priv->cached_health_report) {
+					priv->cached_health_report =
+						kmalloc(sizeof(struct aie4_msg_app_health_report),
+							GFP_KERNEL);
+				}
+				if (priv->cached_health_report) {
+					memcpy(priv->cached_health_report, health,
+					       sizeof(struct aie4_msg_app_health_report));
+					priv->cached_health_valid = true;
+				}
+			}
+		}
+	}
+	mutex_unlock(&xdna->dev_lock);
+}
+
+static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
+				       struct aie4_async_ctx_error *ctx_err)
+{
+	struct amdxdna_async_error *record = &ndev->async_errs_cache.err;
+	u64 current_time_us = ktime_to_us(ktime_get_real());
+	struct aie4_msg_app_health_report *health;
+	enum amdxdna_error_num err_num;
+	struct uc_health_info *uc;
+	struct amdxdna_dev *xdna;
+	u64 err_code;
+	int i;
+
+	xdna = ndev->xdna;
+
+	switch (ctx_err->error_type) {
+	case AIE4_ASYNC_EVENT_CTX_ERR_HWSCH_FAILURE:
+	case AIE4_ASYNC_EVENT_CTX_ERR_STOP_FAILURE:
+		err_num = AMDXDNA_ERROR_NUM_KDS_CU;
+		break;
+	case AIE4_ASYNC_EVENT_CTX_ERR_NEW_PROCESS_FAILURE:
+	case AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_FAILURE:
+	case AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_TIMEOUT:
+	case AIE4_ASYNC_EVENT_CTX_ERR_UC_COMPLETION_TIMEOUT:
+	case AIE4_ASYNC_EVENT_CTX_ERR_UC_CRITICAL_ERROR:
+		err_num = AMDXDNA_ERROR_NUM_KDS_EXEC;
+		break;
+	default:
+		err_num = AMDXDNA_ERROR_NUM_UNKNOWN;
+		break;
+	}
+
+	err_code = AMDXDNA_CRITICAL_ERROR_CODE_BUILD(err_num, AMDXDNA_ERROR_MODULE_AIE_CORE);
+
+	/* Log additional health report information if available */
+	health = &ctx_err->app_health_report;
+	XDNA_ERR(xdna, "Health report: version %u.%u, ctx_status=%u, num_uc=%u",
+		 health->major_version, health->minor_version,
+		 health->ctx_status, health->num_uc);
+
+	/* Log each UC's health information for debugging */
+	for (i = 0; i < min(health->num_uc, AIE4_MPNPUFW_MAX_UC_COUNT); i++) {
+		uc = &health->uc_info[i];
+		XDNA_ERR(xdna, "  UC[%u]: idx=%u fw_state=%u page=%u offset=0x%x",
+			 i, uc->uc_idx, uc->fw_state, uc->page_idx, uc->offset);
+		/* Parse idle_status bits */
+		if (uc->uc_idle_status) {
+			XDNA_ERR(xdna, "        idle_status=0x%x: %s%s%s",
+				 uc->uc_idle_status,
+				 (uc->uc_idle_status & BIT(0)) ? "HSA_queue_not_empty " : "",
+				 (uc->uc_idle_status & BIT(1)) ? "preempt_done " : "",
+				 (uc->uc_idle_status & BIT(2)) ? "CERT_idle" : "");
+		}
+		/* Parse misc_status bits */
+		if (uc->misc_status) {
+			XDNA_ERR(xdna, "        misc_status=0x%x: %s%s",
+				 uc->misc_status,
+				 (uc->misc_status & BIT(0)) ? "FW_EXCEPTION " : "",
+				 (uc->misc_status & BIT(1)) ? "CTRL_CODE_HANG" : "");
+		}
+		/* Exception details */
+		if (uc->misc_status & BIT(0)) {
+			XDNA_ERR(xdna, "        Exception: PC=0x%x EAR=0x%x ESR=0x%x",
+				 uc->uc_pc, uc->uc_ear, uc->uc_esr);
+			/*
+			 * PC  = Program Counter at crash (instruction address)
+			 * EAR = Exception Address Register (faulting memory address)
+			 * ESR = Exception Status Register (arch-specific exception info)
+			 */
+		}
+	}
+
+	mutex_lock(&ndev->async_errs_cache.lock);
+	record->ts_us = current_time_us;
+	record->err_code = err_code;
+	record->ex_err_code = ((u64)health->ctx_status << 32) | ctx_err->ctx_id;
+	mutex_unlock(&ndev->async_errs_cache.lock);
+
+	aie4_ctx_cache_health_report(ndev, ctx_err->ctx_id, health);
+	/* Disconnect the errored context to unblock any waiting threads */
+	aie4_ctx_disconnect(ndev, ctx_err->ctx_id);
+}
+
 static u32 aie4_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u32 num_err)
 {
 	struct aie_error *errs = err_info;
@@ -298,6 +446,7 @@ static int aie4_error_event_send(struct async_event *e)
 
 static void aie4_error_worker(struct work_struct *err_work)
 {
+	struct aie4_async_ctx_error *ctx_err;
 	struct aie_err_info *info;
 	struct amdxdna_dev *xdna;
 	struct async_event *e;
@@ -322,6 +471,20 @@ static void aie4_error_worker(struct work_struct *err_work)
 
 	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4, vaddr, 0x100, false);
 
+	/* Check event type from mailbox response (read by callback) */
+	if (e->resp.type >= MAX_AIE4_ASYNC_EVENT_TYPE) {
+		XDNA_WARN(xdna, "Unknown async event type %d, skipping", e->resp.type);
+		goto reregister;
+	}
+	if (e->resp.type == AIE4_ASYNC_EVENT_TYPE_CTX_ERROR) {
+		/* Context error - uses struct aie4_async_ctx_error */
+		ctx_err = (struct aie4_async_ctx_error *)(vaddr);
+		XDNA_ERR(xdna, "Context error: ctx_id=%u error_type=%u",
+			 ctx_err->ctx_id, ctx_err->error_type);
+		aie4_async_ctx_error_cache(e->ndev, ctx_err);
+		goto reregister;
+	}
+
 	info = (struct aie_err_info *)vaddr;
 	XDNA_DBG(xdna, "Error count %d return code %d", info->err_cnt, info->ret_code);
 
@@ -338,6 +501,7 @@ static void aie4_error_worker(struct work_struct *err_work)
 
 	aie4_async_errors_cache(e->ndev, info->payload, info->err_cnt);
 
+reregister:
 	mutex_lock(&xdna->dev_handle->aie4_lock);
 	/* Re-sent this event to firmware */
 	if (aie4_error_event_send(e))
@@ -426,4 +590,29 @@ free_buf:
 free_events:
 	kfree(events);
 	return ret;
+}
+
+int aie4_error_get_last_async(struct amdxdna_dev *xdna,
+			      struct amdxdna_async_err_cache *err_cache, u32 num_errs,
+			      void *errors)
+{
+	struct amdxdna_async_error *cached_last_err = &err_cache->err;
+
+	if (num_errs == 0 || !errors) {
+		XDNA_ERR(xdna,
+			 "get last async failed due to invalid input num_errors or empty errors array.");
+		return -EINVAL;
+	}
+
+	/* Retrieve the last async error information */
+	mutex_lock(&err_cache->lock);
+	if (!cached_last_err->err_code) {
+		mutex_unlock(&err_cache->lock);
+		return 0;
+	}
+
+	memcpy(errors, cached_last_err, sizeof(*cached_last_err));
+	mutex_unlock(&err_cache->lock);
+
+	return 1;
 }

@@ -57,6 +57,17 @@ xclbin_info xclbin_infos[] = {
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
   {
+    .name = "bad_ctrl.elf",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .workspace = "local_shim_test_data/elf_bad_ctrl_npu3",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF,
+  },
+  {
     .name = "nop.elf",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
@@ -75,6 +86,17 @@ xclbin_info xclbin_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .workspace = "local_shim_test_data/elf_vadd_npu3",
+    .data = "",
+    .type = KERNEL_TYPE_TXN_FULL_ELF,
+  },
+  {
+    .name = "bad_ctrl.elf",
+    .device = npu3_device_id1,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .workspace = "local_shim_test_data/elf_bad_ctrl_npu3",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
