@@ -436,7 +436,6 @@ retry:
 		if (!abo->mem.map_invalid)
 			continue;
 
-		up_read(&xdna->notifier_lock);
 		amdxdna_unlock_objects(job, ctx);
 		if (!timeout)
 			timeout = jiffies + msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);

@@ -30,6 +30,11 @@ struct amdxdna_gem_obj {
 	u64				flags;
 	struct mutex			lock; /* Protects: pinned, assigned_ctx, mem.kv_addr */
 	struct amdxdna_mem		mem;
+	/*
+	 * Cache the first mmap uva as PASID addr, which can be accessed by driver
+	 * without taking notifier_lock.
+	 */
+	u64				uva;
 
 	/* Below members are initialized when needed */
 	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */

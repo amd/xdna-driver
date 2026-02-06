@@ -845,7 +845,7 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 		ring_doorbell(ctx);
 	else
 		queue_work(priv->cert_work_q, &priv->cert_work);
-	XDNA_DBG(xdna, "Submitted one cmd, seq %lld", *seq);
+	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", ctx->name, *seq);
 	return 0;
 }
 

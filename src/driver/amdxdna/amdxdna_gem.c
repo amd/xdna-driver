@@ -180,16 +180,19 @@ static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
 static void amdxdna_umap_release(struct kref *ref)
 {
 	struct amdxdna_umap *mapp = container_of(ref, struct amdxdna_umap, refcnt);
+	struct amdxdna_gem_obj *abo = mapp->abo;
 	struct vm_area_struct *vma = mapp->vma;
 	struct amdxdna_dev *xdna;
 
 	mmu_interval_notifier_remove(&mapp->notifier);
-	if (is_import_bo(mapp->abo) && vma->vm_file && vma->vm_file->f_mapping)
+	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
 		mapping_clear_unevictable(vma->vm_file->f_mapping);
 
-	xdna = to_xdna_dev(to_gobj(mapp->abo)->dev);
+	xdna = to_xdna_dev(to_gobj(abo)->dev);
 	down_write(&xdna->notifier_lock);
 	list_del(&mapp->node);
+	if (list_empty(&abo->mem.umap_list))
+		abo->uva = AMDXDNA_INVALID_ADDR;
 	up_write(&xdna->notifier_lock);
 
 	kvfree(mapp->range.hmm_pfns);
@@ -257,6 +260,8 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 		mapping_set_unevictable(vma->vm_file->f_mapping);
 
 	down_write(&xdna->notifier_lock);
+	if (list_empty(&abo->mem.umap_list))
+		abo->uva = vma->vm_start;
 	list_add_tail(&mapp->node, &abo->mem.umap_list);
 	up_write(&xdna->notifier_lock);
 
@@ -360,6 +365,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	mutex_init(&abo->lock);
 	abo->mem.size = size;
 	abo->mem.dma_addr = AMDXDNA_INVALID_ADDR;
+	abo->uva = AMDXDNA_INVALID_ADDR;
 	INIT_LIST_HEAD(&abo->mem.umap_list);
 
 	return abo;
@@ -412,27 +418,16 @@ void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
  */
 u64 amdxdna_gem_uva(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
-	u64 uva = AMDXDNA_INVALID_ADDR;
-	struct amdxdna_umap *mapp;
-
 	if (abo->type == AMDXDNA_BO_DEV) {
 		struct amdxdna_gem_obj *heap = abo->client->dev_heap;
 		u64 off = amdxdna_gem_dev_addr(abo) - amdxdna_gem_dev_addr(heap);
 
-		return amdxdna_gem_uva(heap) + off;
+		if (amdxdna_gem_uva(heap) != AMDXDNA_INVALID_ADDR)
+			return amdxdna_gem_uva(heap) + off;
+		return AMDXDNA_INVALID_ADDR;
 	}
 
-	down_read(&xdna->notifier_lock);
-	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
-		if (mapp->unmapped)
-			continue;
-		uva = mapp->vma->vm_start;
-		break;
-	}
-	up_read(&xdna->notifier_lock);
-
-	return uva;
+	return abo->uva;
 }
 
 /*
@@ -444,10 +439,8 @@ u64 amdxdna_gem_dev_addr(struct amdxdna_gem_obj *abo)
 		return abo->client->xdna->dev_info->dev_mem_base;
 	if (abo->type == AMDXDNA_BO_DEV)
 		return abo->mm_node.start;
-#ifdef AMDXDNA_DEVEL
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID)
 		return abo->mem.dma_addr;
-#endif
 	return amdxdna_gem_uva(abo);
 }
 

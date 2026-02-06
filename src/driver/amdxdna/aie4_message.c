@@ -55,11 +55,6 @@ static int xdna_send_msg_wait(struct amdxdna_dev *xdna,
 		return ret;
 	}
 
-#ifdef AMDXDNA_DEVEL
-	/* for devel version, we run on slower simulator, wait forever */
-	wait_for_completion(&hdl->comp);
-#else
-	/* should we consider timeout as serious hardware issue? */
 	ret = wait_for_completion_timeout(&hdl->comp,
 					  msecs_to_jiffies(RX_TIMEOUT));
 	if (!ret) {
@@ -67,7 +62,6 @@ static int xdna_send_msg_wait(struct amdxdna_dev *xdna,
 		return -ETIME;
 	}
 
-#endif
 	return hdl->error;
 }
 
