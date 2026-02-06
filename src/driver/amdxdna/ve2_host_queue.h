@@ -123,6 +123,32 @@ struct ve2_hsa_queue {
 	struct device			*alloc_dev;
 };
 
+enum dbg_cmd_type {
+	DBG_CMD_EXIT = 11,
+	DBG_CMD_READ = 12,
+	DBG_CMD_WRITE = 13,
+};
+
+struct rw_mem {
+	uint32_t			aie_addr;
+	uint32_t			length;
+	uint32_t			host_addr_high;
+	uint32_t			host_addr_low;
+};
+struct dbg_queue {
+	struct host_queue_header	hq_header;
+	struct host_queue_packet	hq_entry[HOST_QUEUE_ENTRY];
+};
+
+struct ve2_dbg_queue {
+	struct dbg_queue		*dbg_queue_p;
+	struct ve2_mem			dbg_queue_mem;
+	struct ve2_hq_complete		hq_complete;
+	// hq_lock protects [read | write]_index and reserved_write_index
+	struct mutex			hq_lock;
+	u64				reserved_write_index;
+};
+
 /* handshake */
 #define ALIVE_MAGIC 0x404C5645
 struct handshake {
