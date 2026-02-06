@@ -20,7 +20,7 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
 
-#define MAX_MEM_REGIONS	16
+#define MAX_MEM_REGIONS	8
 
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...) \

@@ -122,7 +122,8 @@ private:
   std::unique_ptr<xdna_hwq> m_hwq;
   uint32_t m_ops_per_cycle;
   uint32_t m_num_cols;
-  uint32_t m_mem_index = 0;
+  // m_mem_index is a bitmap of memory regions available for the hwctx
+  uint32_t m_mem_index = 0;  /* sentinel: use default CMA */
   uint32_t m_doorbell;
   std::unique_ptr<xrt_core::buffer_handle> m_log_bo;
   std::shared_ptr<xdna_aie_array> m_aie_array;

@@ -580,9 +580,8 @@ static int ve2_get_hwctx_mem_index(struct amdxdna_client *client,
 	mem_index = hwctx->priv->mem_index;
 	srcu_read_unlock(&client->ctx_srcu, idx);
 
-	XDNA_DBG(xdna, "Returning mem_index=%u for context_id=%u", mem_index, context_id);
+	XDNA_DBG(xdna, "Returning mem_index=0x%x for context_id=%u", mem_index, context_id);
 
-	/* Return mem_index via buffer */
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &mem_index, sizeof(mem_index))) {
 		XDNA_ERR(xdna, "Failed to copy mem_index to user");
 		return -EFAULT;

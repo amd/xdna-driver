@@ -15,6 +15,7 @@
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
 #define MIN_COL_SUPPORT		4
+#define AIE_MAX_COL		36	/* 36 columns total: valid indices 0..(AIE_MAX_COL-1) */
 #define VERBOSITY_LEVEL_DBG	2
 
 /*
@@ -148,7 +149,6 @@ struct amdxdna_dev_hdl {
 
 /* ve2_of.c */
 extern const struct amdxdna_dev_ops ve2_ops;
-int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_device *pdev);
 void ve2_auto_select_mem_index(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 int ve2_hwctx_init(struct amdxdna_ctx *hwctx);
 void ve2_hwctx_fini(struct amdxdna_ctx *hwctx);
