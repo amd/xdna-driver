@@ -66,8 +66,8 @@ struct misc_info {
 	u32 ppc;
 };
 
-int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, uint32_t opcode,
-		uint32_t aie_addr, u64 paddr, uint32_t length);
+int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode,
+				u32 aie_addr, u64 paddr, u32 length);
 
 // Read from handshake memory
 static inline int

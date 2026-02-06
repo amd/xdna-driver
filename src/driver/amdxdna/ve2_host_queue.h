@@ -130,11 +130,12 @@ enum dbg_cmd_type {
 };
 
 struct rw_mem {
-	uint32_t			aie_addr;
-	uint32_t			length;
-	uint32_t			host_addr_high;
-	uint32_t			host_addr_low;
+	u32				aie_addr;
+	u32				length;
+	u32				host_addr_high;
+	u32				host_addr_low;
 };
+
 struct dbg_queue {
 	struct host_queue_header	hq_header;
 	struct host_queue_packet	hq_entry[HOST_QUEUE_ENTRY];

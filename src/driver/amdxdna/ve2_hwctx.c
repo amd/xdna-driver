@@ -193,15 +193,10 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 }
 
 static struct host_queue_packet *
-ve2_queue_reserve_slot(struct amdxdna_dev *xdna,
-			const char *qname,
-			struct mutex *hq_lock,
-			u64 *reserved_write_index,
-			u64 read_index,
-			u32 capacity,
-			struct ve2_hq_complete *hq_complete,
-			struct host_queue_packet *hq_entry,
-			u64 *slot)
+ve2_queue_reserve_slot(struct amdxdna_dev *xdna, const char *qname, struct mutex *hq_lock,
+		       u64 *reserved_write_index, u64 read_index, u32 capacity,
+		       struct ve2_hq_complete *hq_complete, struct host_queue_packet *hq_entry,
+		       u64 *slot)
 {
 	enum ert_cmd_state state;
 	u64 outstanding;
@@ -257,12 +252,10 @@ ve2_queue_reserve_slot(struct amdxdna_dev *xdna,
  * This ensures CERT sees packets in order even if prepared out-of-order.
  * Generic version that works with both HSA queue and DBG queue.
  */
-static void ve2_queue_commit_slot(struct mutex *hq_lock,
-	u64 *reserved_write_index,
-	struct host_queue_header *header,
-	struct host_queue_packet *hq_entry,
-	struct ve2_hq_complete *hq_complete,
-	u64 slot)
+static void ve2_queue_commit_slot(struct mutex *hq_lock, u64 *reserved_write_index,
+				  struct host_queue_header *header,
+				  struct host_queue_packet *hq_entry,
+				  struct ve2_hq_complete *hq_complete, u64 slot)
 {
 	u32 capacity = header->capacity;
 	u32 slot_idx = slot % capacity;
@@ -289,16 +282,10 @@ static void ve2_queue_commit_slot(struct mutex *hq_lock,
 	mutex_unlock(hq_lock);
 }
 
-static void *ve2_get_queue_pkt(struct amdxdna_ctx *hwctx,
-				u64 *seq,
-				int *err,
-				const char *qname,
-				struct mutex *hq_lock,
-				u64 *reserved_write_index,
-				u64 read_index,
-				u32 capacity,
-				struct ve2_hq_complete *hq_complete,
-				struct host_queue_packet *hq_entry)
+static void *ve2_get_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq, int *err, const char *qname,
+			       struct mutex *hq_lock, u64 *reserved_write_index, u64 read_index,
+			       u32 capacity, struct ve2_hq_complete *hq_complete,
+			       struct host_queue_packet *hq_entry)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct host_queue_packet *pkt;
@@ -440,7 +427,8 @@ static inline void ve2_hwctx_job_release(struct amdxdna_ctx *hwctx, struct amdxd
 	mutex_unlock(&hwctx->priv->hwctx_hsa_queue.hq_lock);
 }
 
-static inline struct host_queue_packet *ve2_queue_get_pkt(struct host_queue_packet *hq_entry, u32 capacity, u64 slot)
+static inline struct host_queue_packet *ve2_queue_get_pkt(struct host_queue_packet *hq_entry,
+							  u32 capacity, u64 slot)
 {
 	return &hq_entry[slot & (capacity - 1)];
 }
@@ -585,7 +573,8 @@ static int ve2_create_dbg_queue(struct amdxdna_dev *xdna, struct ve2_dbg_queue *
 	/* Set dbg queue slots to invalid */
 	for (int i = 0; i < nslots; i++) {
 		ve2_queue_pkt_set_invalid(ve2_queue_get_pkt(queue->dbg_queue_p->hq_entry,
-			queue->dbg_queue_p->hq_header.capacity, i));
+							    queue->dbg_queue_p->hq_header.capacity,
+							    i));
 	}
 
 	XDNA_DBG(xdna, "Created dbg queue: dma_addr=0x%llx, capacity=%d, data_addr=0x%llx",
@@ -593,7 +582,8 @@ static int ve2_create_dbg_queue(struct amdxdna_dev *xdna, struct ve2_dbg_queue *
 	return 0;
 }
 
-int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, uint32_t opcode, uint32_t aie_addr, u64 paddr, uint32_t length)
+int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode, u32 aie_addr, u64 paddr,
+				u32 length)
 {
 	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -639,21 +629,18 @@ int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, uint32_t opcode, uint
 	ebp->host_addr_low = lower_32_bits(paddr);
 	ebp->length = length;
 
-	ve2_queue_commit_slot(&dbg_queue->hq_lock,
-		&dbg_queue->reserved_write_index,
-		&dbg_queue->dbg_queue_p->hq_header,
-		dbg_queue->dbg_queue_p->hq_entry,
-		&dbg_queue->hq_complete,
-		slot_id);
+	ve2_queue_commit_slot(&dbg_queue->hq_lock, &dbg_queue->reserved_write_index,
+			      &dbg_queue->dbg_queue_p->hq_header, dbg_queue->dbg_queue_p->hq_entry,
+			      &dbg_queue->hq_complete, slot_id);
 
 	wait_event_interruptible_timeout(ve2_ctx->dbg_q_waitq,
-			dbg_queue->dbg_queue_p->hq_header.read_index ==
-			dbg_queue->dbg_queue_p->hq_header.write_index,
-			msecs_to_jiffies(5000));
+					 dbg_queue->dbg_queue_p->hq_header.read_index ==
+					 dbg_queue->dbg_queue_p->hq_header.write_index,
+					 msecs_to_jiffies(5000));
 
 	XDNA_DBG(xdna, "After command sumbition write_index is %llx, read_index is %llx\n",
-			dbg_queue->dbg_queue_p->hq_header.write_index,
-			dbg_queue->dbg_queue_p->hq_header.read_index);
+		 dbg_queue->dbg_queue_p->hq_header.write_index,
+		 dbg_queue->dbg_queue_p->hq_header.read_index);
 
 	return 0;
 }
@@ -723,7 +710,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 		struct host_queue_indirect_hdr *hdr = &queue->hsa_queue_p->hq_indirect_hdr[i];
 
 		ve2_queue_pkt_set_invalid(ve2_queue_get_pkt(queue->hsa_queue_p->hq_entry,
-			queue->hsa_queue_p->hq_header.capacity, i));
+							    queue->hsa_queue_p->hq_header.capacity,
+							    i));
 		hdr->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 		hdr->header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
 		hdr->header.count = 0;
@@ -841,12 +829,9 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 		packet_dump(xdna, queue, slot_id);
 
 	/* Commit the slot - this sets hqc_mem to SUBMITTED and advances write_index */
-	ve2_queue_commit_slot(&hq_queue->hq_lock,
-		&hq_queue->reserved_write_index,
-		&hq_queue->hsa_queue_p->hq_header,
-		hq_queue->hsa_queue_p->hq_entry,
-		&hq_queue->hq_complete,
-		*seq);
+	ve2_queue_commit_slot(&hq_queue->hq_lock, &hq_queue->reserved_write_index,
+			      &hq_queue->hsa_queue_p->hq_header, hq_queue->hsa_queue_p->hq_entry,
+			      &hq_queue->hq_complete, *seq);
 
 	return 0;
 }
@@ -913,12 +898,9 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 	XDNA_DBG(xdna, "dpu instruction addr: 0x%llx", dpu_cmd->instruction_buffer);
 
 	/* Commit the slot - this sets hqc_mem to SUBMITTED and advances write_index */
-	ve2_queue_commit_slot(&hq_queue->hq_lock,
-		&hq_queue->reserved_write_index,
-		&hq_queue->hsa_queue_p->hq_header,
-		hq_queue->hsa_queue_p->hq_entry,
-		&hq_queue->hq_complete,
-		*seq);
+	ve2_queue_commit_slot(&hq_queue->hq_lock, &hq_queue->reserved_write_index,
+			      &hq_queue->hsa_queue_p->hq_header,
+			      hq_queue->hsa_queue_p->hq_entry, &hq_queue->hq_complete, *seq);
 
 	return 0;
 }
