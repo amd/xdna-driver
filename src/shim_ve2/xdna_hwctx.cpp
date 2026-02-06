@@ -25,7 +25,7 @@ constexpr uint32_t MIN_COL_SUPPORT = 4;
 
 // Maximum number of CMA memory regions supported by the driver.
 // This must match MAX_MEM_REGIONS in kernel (amdxdna_drm.h).
-constexpr uint32_t MAX_MEM_REGIONS = 16;
+constexpr uint32_t MAX_MEM_REGIONS = 8;
 
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
 {
@@ -263,11 +263,10 @@ query_mem_index()
   try {
     m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &array_args);
     m_mem_index = mem_index;
-    shim_debug("Queried mem_index=%u for hwctx handle=%u", m_mem_index, m_handle);
+    shim_debug("Queried mem_index=0x%x for hwctx handle=%u", m_mem_index, m_handle);
   } catch (const xrt_core::system_error& ex) {
-    // Query failed, use MAX_MEM_REGIONS as invalid value
-    m_mem_index = MAX_MEM_REGIONS;
-    shim_debug("Failed to query mem_index (using MAX_MEM_REGIONS): %s (err=%d: %s)",
+    m_mem_index = 0;
+    shim_debug("Failed to query mem_index (using default CMA): %s (err=%d: %s)",
                ex.what(), ex.get_code(), errno_to_str(ex.get_code()));
   }
 }
@@ -371,11 +370,18 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   // const_cast: alloc_bo() is not const yet in device class
   auto dev = const_cast<device_xdna*>(get_device());
 
-  // Inject hwctx's mem_index (queried from driver) into BO flags
-  // This ensures BOs are allocated from the correct CMA region
+  /* Inject hwctx mem_index (queried from driver) into BO flags. */
   xcl_bo_flags xflags{flags};
-  if (m_mem_index < MAX_MEM_REGIONS)
-    xflags.bank = m_mem_index & 0xFF;  // Lower 8 bits
+
+  if (xflags.use > 0) {
+    /* Internal BO: pass whole bitmap */
+    xflags.bank = m_mem_index;
+  } else {
+    /* External BO: pass the same bank in bitmap */
+    uint32_t bank = xflags.bank;
+    xflags.bank = (m_mem_index == 0) ? 0 : (1U << bank);
+  }
+
   uint64_t corrected_flags = xflags.all;
 
   // Debug or dtrace buffers are specific to context.
@@ -383,7 +389,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
     return dev->alloc_bo(userptr, get_slotidx(), size, corrected_flags);
 
-  // Other BOs are shared across all contexts, but use hwctx's mem_index for region selection
+  // Other BOs are shared across all contexts.
   return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, corrected_flags);
 }
 
