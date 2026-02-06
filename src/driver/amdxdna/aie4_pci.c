@@ -310,7 +310,13 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 	if (!dma_addr)
 		XDNA_ERR(ndev->xdna, "Invalid DMA address: 0x%llx", dma_addr);
 
-	return aie4_attach_work_buffer(ndev, 0, dma_addr, dma_hdl->size);
+	ret = aie4_attach_work_buffer(ndev, 0, dma_addr, dma_hdl->size);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to attach DRAM work buffer");
+		return ret;
+	}
+
+	return aie4_set_ctx_hysteresis(ndev, AIE4_CTX_HYSTERESIS_US);
 }
 
 static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
