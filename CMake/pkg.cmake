@@ -28,11 +28,15 @@ execute_process(
   OUTPUT_VARIABLE XDNA_CPACK_LINUX_VERSION
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )
-execute_process(
-  COMMAND bash -c "source /etc/os-release && echo \"\$ID \$ID_LIKE\""
-  OUTPUT_VARIABLE XDNA_CPACK_LINUX_PKG_FLAVOR
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
+if (EXISTS "/etc/arch-release")
+  set(XDNA_CPACK_LINUX_PKG_FLAVOR "arch")
+else()
+  execute_process(
+    COMMAND bash -c "source /etc/os-release && echo \"\$ID \$ID_LIKE\""
+    OUTPUT_VARIABLE XDNA_CPACK_LINUX_PKG_FLAVOR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
 execute_process(
   COMMAND echo ${XRT_VERSION_STRING}
   COMMAND awk -F. "{print $1}"
@@ -117,8 +121,22 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
     set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
     set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
   endif()
-else("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
-  message(WARNING "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}")
-endif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
+elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch")
+  set(CPACK_GENERATOR "TGZ")
+  # For Arch Linux, we generate a tarball that can be repackaged into a proper
+  # Arch package using the provided PKGBUILD. When using the PKGBUILD, install
+  # hooks handle post-install/pre-remove automatically via pacman.
+  set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+  message(STATUS "Arch Linux detected - generating TGZ package")
+  if(NOT SKIP_KMOD)
+    message(STATUS "Post-install script: ${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
+    message(STATUS "Pre-remove script: ${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
+    message(STATUS "Note: Use the provided PKGBUILD to create an Arch package with proper install hooks")
+  endif()
+else()
+  message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}. "
+    "Supported distributions: Debian/Ubuntu (deb), Fedora/RHEL (rpm), Arch Linux (TGZ). "
+    "To add support for your distribution, please open an issue at https://github.com/amd/xdna-driver/issues")
+endif()
 
 include(CPack)
