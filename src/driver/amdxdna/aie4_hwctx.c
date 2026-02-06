@@ -341,16 +341,38 @@ done:
 	job_done(job);
 }
 
-static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo)
+static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo,
+				  struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_ctx_health_data *health_data;
+	struct aie4_msg_app_health_report *report;
+	size_t hdr_size;
+	u32 num_uc_copy;
 	u32 data_total;
 
-	/* TODO: retrieve context health data. */
 	health_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
 	health_data->version = AMDXDNA_CTX_HEALTH_DATA_V1;
 	health_data->npu_gen = AMDXDNA_NPU_GEN_AIE4;
-	health_data->aie4.num_uc = 0;
+
+	/* Use health report cached when async context error was raised */
+	if (ctx->priv->cached_health_valid && ctx->priv->cached_health_report) {
+		report = ctx->priv->cached_health_report;
+		health_data->aie4.ctx_state = report->ctx_status;
+		hdr_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
+		num_uc_copy = 0;
+		if (data_total > hdr_size) {
+			num_uc_copy = min(report->num_uc,
+					  (u32)((data_total - hdr_size) /
+					      sizeof(struct uc_health_info)));
+			if (num_uc_copy > 0)
+				memcpy(health_data->aie4.uc_info, report->uc_info,
+				       num_uc_copy * sizeof(struct uc_health_info));
+		}
+		health_data->aie4.num_uc = num_uc_copy;
+	} else {
+		health_data->aie4.ctx_state = 0;
+		health_data->aie4.num_uc = 0;
+	}
 }
 
 static void job_timeout(struct amdxdna_sched_job *job)
@@ -365,7 +387,7 @@ static void job_timeout(struct amdxdna_sched_job *job)
 
 	/* Single cmd. */
 	if (job->state == JOB_STATE_SUBMITTED) {
-		aie4_fill_health_data(cmd_abo);
+		aie4_fill_health_data(cmd_abo, job->ctx);
 		goto done;
 	}
 
@@ -380,7 +402,7 @@ static void job_timeout(struct amdxdna_sched_job *job)
 		if (!sub_cmd_abo) {
 			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
 		} else {
-			aie4_fill_health_data(sub_cmd_abo);
+			aie4_fill_health_data(sub_cmd_abo, job->ctx);
 			amdxdna_gem_put_obj(sub_cmd_abo);
 		}
 	} else {
@@ -675,6 +697,10 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	wake_up_all(&priv->col_entry->col_event);
 	cancel_work_sync(&priv->job_work);
 	destroy_workqueue(priv->job_work_q);
+
+	kfree(priv->cached_health_report);
+	priv->cached_health_report = NULL;
+	priv->cached_health_valid = false;
 
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {

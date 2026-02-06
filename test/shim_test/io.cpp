@@ -410,7 +410,7 @@ elf_full_io_test_bo_set(device* dev, const std::string& xclbin_name)
 
   try {
     m_kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     m_kernel_index = module_int::no_ctrl_code_id;
   }
 
@@ -1060,20 +1060,20 @@ verify_result()
 
   auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
   xrtErrorCode err_code;
-  xrtErrorTime err_timstamp;
-  std::tie(err_code, err_timstamp) = ect;
+  xrtErrorTime err_timestamp;
+  std::tie(err_code, err_timestamp) = ect;
   if (err_code != m_expect_err_code) {
     std::stringstream ss;
     ss << "failed to get async errors, unexpected error code, 0x" << std::hex << err_code
        << ", 0x" << std::hex << m_expect_err_code << ".";
     throw std::runtime_error(ss.str());
   }
-  if (err_timstamp == m_last_err_timestamp) {
+  if (err_timestamp == m_last_err_timestamp) {
     std::stringstream ss;
     ss << "failed to get async errors, return old timestamp: " << m_last_err_timestamp << ".";
     throw std::runtime_error(ss.str());
   }
-  m_last_err_timestamp = err_timstamp;
+  m_last_err_timestamp = err_timestamp;
 }
 
 async_error_aie4_io_test_bo_set::
@@ -1087,7 +1087,7 @@ async_error_aie4_io_test_bo_set(device* dev, const std::string& xclbin_name)
 
   try {
     m_kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     m_kernel_index = module_int::no_ctrl_code_id;
   }
 
@@ -1145,8 +1145,8 @@ verify_result()
 
   auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
   xrtErrorCode err_code;
-  xrtErrorTime err_timstamp;
-  std::tie(err_code, err_timstamp) = ect;
+  xrtErrorTime err_timestamp;
+  std::tie(err_code, err_timestamp) = ect;
 
   if (err_code != m_expect_err_code) {
     std::stringstream ss;
@@ -1155,12 +1155,12 @@ verify_result()
     throw std::runtime_error(ss.str());
   }
 
-  if (err_timstamp == m_last_err_timestamp) {
+  if (err_timestamp == m_last_err_timestamp) {
     std::stringstream ss;
     ss << "failed to get async errors, return old timestamp: " << m_last_err_timestamp << ".";
     throw std::runtime_error(ss.str());
   }
-  m_last_err_timestamp = err_timstamp;
+  m_last_err_timestamp = err_timestamp;
 
   // Verify context health report in command packet (bad_ctrl.elf timeout path)
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();

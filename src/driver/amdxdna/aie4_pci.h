@@ -76,6 +76,9 @@ struct amdxdna_ctx_priv {
 	u64				cert_timeout_seq;
 	u64				cert_error_seq;
 	u64				cert_read_index;
+
+	bool					cached_health_valid;
+	struct aie4_msg_app_health_report	*cached_health_report;
 };
 
 enum aie4_dev_status {

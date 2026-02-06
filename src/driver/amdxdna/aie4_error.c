@@ -281,6 +281,37 @@ static void aie4_ctx_disconnect(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
 			 wakeup_count, hw_ctx_id);
 }
 
+static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id,
+					 struct aie4_msg_app_health_report *health)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_ctx_priv *priv;
+	struct amdxdna_client *client;
+	struct amdxdna_ctx *ctx;
+	unsigned long ctx_id;
+
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(client, &xdna->client_list, node) {
+		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
+			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
+				priv = ctx->priv;
+
+				if (!priv->cached_health_report) {
+					priv->cached_health_report =
+						kmalloc(sizeof(struct aie4_msg_app_health_report),
+							GFP_KERNEL);
+				}
+				if (priv->cached_health_report) {
+					memcpy(priv->cached_health_report, health,
+					       sizeof(struct aie4_msg_app_health_report));
+					priv->cached_health_valid = true;
+				}
+			}
+		}
+	}
+	mutex_unlock(&xdna->dev_lock);
+}
+
 static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 				       struct aie4_async_ctx_error *ctx_err)
 {
@@ -348,8 +379,6 @@ static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 			 * PC  = Program Counter at crash (instruction address)
 			 * EAR = Exception Address Register (faulting memory address)
 			 * ESR = Exception Status Register (arch-specific exception info)
-			 *       Exact bit layout is microcontroller-specific and not
-			 *       documented in driver headers. Consult UC firmware docs.
 			 */
 		}
 	}
@@ -360,6 +389,7 @@ static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 	record->ex_err_code = ((u64)health->ctx_status << 32) | ctx_err->ctx_id;
 	mutex_unlock(&ndev->async_errs_cache.lock);
 
+	aie4_ctx_cache_health_report(ndev, ctx_err->ctx_id, health);
 	/* Disconnect the errored context to unblock any waiting threads */
 	aie4_ctx_disconnect(ndev, ctx_err->ctx_id);
 }
