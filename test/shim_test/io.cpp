@@ -718,6 +718,10 @@ init_cmd(hw_ctx& hwctx, bool dump)
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "2");
   }
 
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  if (cbo)
+    cache_cmd_header(cbo->get(), reinterpret_cast<ert_start_kernel_cmd *>(cbo->map()));
+
   if (dump)
     ebuf.dump();
 
@@ -1017,7 +1021,7 @@ run(const std::vector<fence_handle*>& wait_fences,
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto chdl = cbo->get();
   auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  
+
   restore_cmd_header(chdl, cpkt);
   cache_cmd_header(chdl, cpkt);
 

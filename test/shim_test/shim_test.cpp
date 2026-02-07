@@ -837,10 +837,9 @@ std::vector<test_case> test_list {
   test_case{ "measure real kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
   },
-  //Skip this test for now until b2b vadd is fixed
-  //test_case{ "measure real kernel latency (aie4)", {},
-    //TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
-  //},
+  test_case{ "measure real kernel latency (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
+  },
   test_case{ "create and free debug bo", {-1, -1},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x1000 }
   },
@@ -946,16 +945,15 @@ std::vector<test_case> test_list {
   test_case{ "Multi context IO test 4 (npu4)", {},
     TEST_POSITIVE, skip_dev_filter, TEST_multi_context_io_test, { 20, 0 }
   },
-  // Skip this test for now until b2b vadd is fixed
-  //test_case{ "Multi context IO test 1 (npu3)", {},
-   // TEST_POSITIVE, dev_filter_is_npu3, TEST_multi_context_io_test, { 4, 1 }
-  //},
-  //test_case{ "Multi context IO test 2 (npu3)", {},
-    //TEST_POSITIVE, dev_filter_is_npu3, TEST_multi_context_io_test, { 8, 1 }
-  //},
-  //test_case{ "Multi context IO test 3 (npu3)", {},
-    //TEST_POSITIVE, skip_dev_filter, TEST_multi_context_io_test, { 32, 1 }
-  //},
+  test_case{ "Multi context IO test 1 (npu3)", {},
+    TEST_POSITIVE, dev_filter_is_npu3, TEST_multi_context_io_test, { 4, 1 }
+  },
+  test_case{ "Multi context IO test 2 (npu3)", {},
+    TEST_POSITIVE, dev_filter_is_npu3, TEST_multi_context_io_test, { 16, 1 }
+  },
+  test_case{ "Multi context IO test 3 (npu3)", {},
+    TEST_POSITIVE, dev_filter_is_npu3, TEST_multi_context_io_test, { 20, 1 }
+  },
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
   },
