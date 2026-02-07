@@ -52,7 +52,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3/vadd/",
+    .workspace = "local_shim_test_data/npu3/vadd",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
@@ -63,7 +63,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/elf_bad_ctrl_npu3",
+    .workspace = "local_shim_test_data/npu3/bad_ctrl",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
@@ -74,7 +74,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3/nop/",
+    .workspace = "local_shim_test_data/npu3/nop",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
@@ -85,7 +85,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3a/vadd/",
+    .workspace = "local_shim_test_data/npu3a/vadd",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
@@ -96,7 +96,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/elf_bad_ctrl_npu3",
+    .workspace = "local_shim_test_data/npu3a/bad_ctrl",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
@@ -107,7 +107,7 @@ xclbin_info xclbin_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3a/nop/",
+    .workspace = "local_shim_test_data/npu3a/nop",
     .data = "",
     .type = KERNEL_TYPE_TXN_FULL_ELF,
   },
