@@ -1971,6 +1971,178 @@ static int aie4_get_ctx_status_array(struct amdxdna_client *client,
 	return ret;
 }
 
+static int aie4_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_mgmt_dma_hdl **data_hdls = NULL;
+	struct amdxdna_mgmt_dma_hdl *list_hdl = NULL;
+	struct amdxdna_drm_aie_coredump config = {};
+	struct coredump_buffer_list_entry *buf_list;
+	struct amdxdna_client *ctx_client = NULL;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	int ret = 0, idx = 0, i;
+	unsigned long hwctx_id;
+	size_t list_size;
+	void __user *buf;
+	u32 total_size;
+	u32 offset = 0;
+	u32 num_bufs;
+	u32 buf_size;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+	buf_size = args->num_element * args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	if (buf_size < sizeof(config)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		return -ENOSPC;
+	}
+
+	ret = amdxdna_drm_copy_array_from_user(args, &config, sizeof(config), 1);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to copy config from user");
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "AIE Coredump request for context_id=%u pid=%llu",
+		 config.context_id, config.pid);
+
+	/* Search and validate if context coredump can be fetched for given PID and context ID */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_ctx *hw_ctx;
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
+			if (config.context_id == hwctx_id && config.pid == hw_ctx->client->pid) {
+				hwctx = hw_ctx;
+				ctx_client = tmp_client;
+				break;
+			}
+		}
+		if (hwctx)
+			break;
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Context %u for pid %llu not found", config.context_id, config.pid);
+		return -EINVAL;
+	}
+
+	/* Check if caller is root or owns the context */
+	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
+		XDNA_ERR(xdna, "Permission denied for context %u", config.context_id);
+		ret = -EPERM;
+		goto unlock_srcu;
+	}
+
+	num_bufs = ndev->metadata.rows * ndev->metadata.cols;
+	total_size = num_bufs * SZ_1M;
+
+	if (buf_size < total_size) {
+		XDNA_DBG(xdna, "Insufficient buffer size %u, need %u", buf_size, total_size);
+		args->element_size = total_size;
+		ret = -ENOSPC;
+		goto unlock_srcu;
+	}
+
+	list_size = max_t(size_t, num_bufs * sizeof(struct coredump_buffer_list_entry), SZ_8K);
+	list_hdl = amdxdna_mgmt_buff_alloc(xdna, list_size, DMA_TO_DEVICE);
+	if (IS_ERR(list_hdl)) {
+		XDNA_ERR(xdna, "Failed to allocate buffer list");
+		ret = PTR_ERR(list_hdl);
+		goto unlock_srcu;
+	}
+
+	buf_list = amdxdna_mgmt_buff_get_cpu_addr(list_hdl, 0);
+	if (IS_ERR(buf_list)) {
+		XDNA_ERR(xdna, "Failed to get CPU address for buffer list");
+		ret = PTR_ERR(buf_list);
+		goto free_list_hdl;
+	}
+	memset(buf_list, 0, list_size);
+
+	/* Allocate array to track data buffer handles */
+	data_hdls = kcalloc(num_bufs, sizeof(*data_hdls), GFP_KERNEL);
+	if (!data_hdls) {
+		ret = -ENOMEM;
+		goto free_list_hdl;
+	}
+
+	for (i = 0; i < num_bufs; i++) {
+		void *buf_addr;
+
+		data_hdls[i] = amdxdna_mgmt_buff_alloc(xdna, SZ_1M, DMA_FROM_DEVICE);
+		if (IS_ERR(data_hdls[i])) {
+			XDNA_ERR(xdna, "Failed to allocate data buffer %d", i);
+			ret = PTR_ERR(data_hdls[i]);
+			data_hdls[i] = NULL;
+			goto free_data_hdls;
+		}
+
+		buf_addr = amdxdna_mgmt_buff_get_cpu_addr(data_hdls[i], 0);
+		if (IS_ERR(buf_addr)) {
+			ret = PTR_ERR(buf_addr);
+			goto free_data_hdls;
+		}
+		memset(buf_addr, 0, SZ_1M);
+		amdxdna_mgmt_buff_clflush(data_hdls[i], 0, 0);
+
+		buf_list[i].buffer_address = amdxdna_mgmt_buff_get_dma_addr(data_hdls[i]);
+		buf_list[i].buffer_size = SZ_1M;
+		buf_list[i].reserved = 0;
+	}
+
+	amdxdna_mgmt_buff_clflush(list_hdl, 0, 0);
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_get_aie_coredump(ndev, list_hdl, hwctx->priv->hw_ctx_id, hwctx->client->pasid,
+				    num_bufs);
+	mutex_unlock(&ndev->aie4_lock);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to get coredump from firmware, ret=%d", ret);
+		goto free_data_hdls;
+	}
+
+	for (i = 0; i < num_bufs; i++) {
+		void *data = amdxdna_mgmt_buff_get_cpu_addr(data_hdls[i], 0);
+
+		if (IS_ERR(data)) {
+			ret = PTR_ERR(data);
+			goto free_data_hdls;
+		}
+
+		if (copy_to_user(buf + offset, data, SZ_1M)) {
+			ret = -EFAULT;
+			goto free_data_hdls;
+		}
+		offset += SZ_1M;
+	}
+
+free_data_hdls:
+	for (i = 0; i < num_bufs; i++) {
+		if (data_hdls[i])
+			amdxdna_mgmt_buff_free(data_hdls[i]);
+	}
+	kfree(data_hdls);
+free_list_hdl:
+	amdxdna_mgmt_buff_free(list_hdl);
+unlock_srcu:
+	srcu_read_unlock(&ctx_client->ctx_srcu, idx);
+	return ret;
+}
+
 static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1998,6 +2170,9 @@ static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 		break;
 	case DRM_AMDXDNA_FW_TRACE_CONFIG:
 		ret = amdxdna_get_fw_trace_configs(xdna, args);
+		break;
+	case DRM_AMDXDNA_AIE_COREDUMP:
+		ret = aie4_get_coredump(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
