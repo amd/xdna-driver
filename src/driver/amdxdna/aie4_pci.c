@@ -723,7 +723,7 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
-	const struct firmware *npufw, *certfw;
+	const struct firmware *npufw = NULL, *certfw = NULL;
 	unsigned long bars = 0;
 	int ret, i;
 

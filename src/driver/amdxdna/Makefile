@@ -55,7 +55,7 @@ ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF
 # Generate config_kernel.h when building directly (Yocto/DKMS flow)
 modules: $(SRC_DIR)/config_kernel.h
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) $(USE_LLVM) modules
 
 $(SRC_DIR)/config_kernel.h:
 	@echo "[INFO] Generating config_kernel.h for OF build..."
