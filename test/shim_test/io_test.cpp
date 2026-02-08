@@ -49,6 +49,9 @@ alloc_and_init_bo_set(device* dev, const char *xclbin)
   case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
     base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
     break;
+  case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT_AIE4:
+    base = std::make_unique<elf_preempt_aie4_io_test_bo_set>(dev, std::string(xclbin));
+    break;
   default:
     throw std::runtime_error("Unknown kernel type");
   }
@@ -112,6 +115,25 @@ void io_test_cmd_wait(hwqueue_handle *hwq, std::shared_ptr<bo> bo)
     }
 }
 
+static void
+restore_cmd_headers_before_submit(
+  std::vector<std::unique_ptr<io_test_bo_set_base>>& bo_set,
+  size_t list_idx, int cmds_per_list,
+  const xrt_core::buffer_handle* cmd_hdl, ert_start_kernel_cmd* cmd_pkt)
+{
+  if (cmd_pkt->opcode == ERT_CMD_CHAIN) {
+    size_t start_idx = list_idx * cmds_per_list;
+    size_t end_idx = std::min(start_idx + static_cast<size_t>(cmds_per_list), bo_set.size());
+    for (size_t i = start_idx; i < end_idx; i++) {
+      auto subcmd_bo = bo_set[i]->get_bos()[IO_TEST_BO_CMD].tbo.get();
+      auto subcmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(subcmd_bo->map());
+      bo_set[i]->restore_cmd_header(subcmd_bo->get(), subcmd_pkt);
+    }
+  } else {
+    bo_set[list_idx]->restore_cmd_header(cmd_hdl, cmd_pkt);
+  }
+}
+
 void
 io_test_cmd_submit_and_wait_latency(
   hwqueue_handle *hwq,
@@ -129,18 +151,7 @@ io_test_cmd_submit_and_wait_latency(
       auto cmd_hdl = std::get<0>(cmd).get()->get();
       auto cmd_pkt = std::get<1>(cmd);
 
-      if (cmd_pkt->opcode == ERT_CMD_CHAIN) {
-        size_t start_idx = cmd_idx * cmds_per_list;
-        size_t end_idx = std::min(start_idx + cmds_per_list, bo_set.size());
-        for (size_t i = start_idx; i < end_idx; i++) {
-          auto subcmd_bo = bo_set[i]->get_bos()[IO_TEST_BO_CMD].tbo.get();
-          auto subcmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(subcmd_bo->map());
-          bo_set[i]->restore_cmd_header(subcmd_bo->get(), subcmd_pkt);
-        }
-      } else {
-        bo_set[cmd_idx]->restore_cmd_header(cmd_hdl, cmd_pkt);
-        bo_set[cmd_idx]->cache_cmd_header(cmd_hdl, cmd_pkt);
-      }
+      restore_cmd_headers_before_submit(bo_set, cmd_idx, cmds_per_list, cmd_hdl, cmd_pkt);
 
       hwq->submit_command(cmd_hdl);
       io_test_cmd_wait(hwq, std::get<0>(cmd));
@@ -175,8 +186,6 @@ io_test_cmd_submit_and_wait_thruput(
     auto cmd_hdl = std::get<0>(cmdlist_bos[i]).get()->get();
     auto cmd_pkt = std::get<1>(cmdlist_bos[i]);
 
-    if (cmd_pkt->opcode != ERT_CMD_CHAIN)
-      bo_set[i]->cache_cmd_header(cmd_hdl, cmd_pkt);
     cmd_pkt->state = ERT_CMD_STATE_NEW;
     hwq->submit_command(cmd_hdl);
     if (++issued >= total_cmd_submission)
@@ -193,17 +202,7 @@ io_test_cmd_submit_and_wait_thruput(
     if (issued < total_cmd_submission) {
       auto cmd_hdl = std::get<0>(cmdlist_bos[wait_idx]).get()->get();
 
-      if (cmd_pkt->opcode == ERT_CMD_CHAIN) {
-        size_t start_idx = wait_idx * cmds_per_list;
-        size_t end_idx = std::min(start_idx + cmds_per_list, bo_set.size());
-        for (size_t i = start_idx; i < end_idx; i++) {
-          auto subcmd_bo = bo_set[i]->get_bos()[IO_TEST_BO_CMD].tbo.get();
-          auto subcmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(subcmd_bo->map());
-          bo_set[i]->restore_cmd_header(subcmd_bo->get(), subcmd_pkt);
-        }
-      } else {
-        bo_set[wait_idx]->restore_cmd_header(cmd_hdl, cmd_pkt);
-      }
+      restore_cmd_headers_before_submit(bo_set, wait_idx, cmds_per_list, cmd_hdl, cmd_pkt);
 
       cmd_pkt->state = ERT_CMD_STATE_NEW;
       hwq->submit_command(cmd_hdl);
@@ -310,8 +309,6 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
     std::vector<bo*> tmp_cmd_bos;
     for (auto& boset : bo_set) {
       auto subcmd_bo = boset->get_bos()[IO_TEST_BO_CMD].tbo.get();
-      auto subcmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(subcmd_bo->map());
-      boset->cache_cmd_header(subcmd_bo->get(), subcmd_pkt);
       tmp_cmd_bos.push_back(subcmd_bo);
       if ((tmp_cmd_bos.size() % cmds_per_list) == 0) {
         auto cbo = std::make_unique<bo>(dev, 0x1000ul, XCL_BO_FLAGS_EXECBUF);
@@ -517,7 +514,7 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
 void
 TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, sdev, arg, "yolo_fullelf_aximm.elf");
+  elf_io(id, sdev, arg, arg[2] ? "resnet50.elf" : "yolo_fullelf_aximm.elf");
 }
 
 void

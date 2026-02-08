@@ -20,6 +20,7 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_pm.h"
 #include "amdxdna_trace.h"
+#include "amdxdna_mgmt.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -1697,9 +1698,10 @@ static int aie4_query_telemetry(struct amdxdna_client *client,
 				struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_dev_hdl *ndev;
 	dma_addr_t dma_addr;
-	size_t aligned_sz;
+	size_t aligned_sz, size;
 	void *buff;
 	u32 type;
 	int ret;
@@ -1714,28 +1716,41 @@ static int aie4_query_telemetry(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
+	/* AIE4 firmware requires minimum 128KB buffer for telemetry */
 	ndev = xdna->dev_handle;
-	aligned_sz = PAGE_ALIGN(args->buffer_size);
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, aligned_sz, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
-	if (!buff)
-		return -ENOMEM;
+	size = max_t(size_t, args->buffer_size, SZ_128K);
+
+	if (args->buffer_size < SZ_128K)
+		XDNA_DBG(xdna, "Telemetry: user buffer %u bytes < minimum %u bytes",
+			 args->buffer_size, SZ_128K);
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl))
+		return PTR_ERR(dma_hdl);
+
+	buff = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(buff)) {
+		XDNA_ERR(xdna, "Failed to get CPU address for telemetry buffer");
+		ret = PTR_ERR(buff);
+		goto free_buf;
+	}
+
+	dma_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	aligned_sz = dma_hdl->aligned_size;
 
 	memset(buff, 0, aligned_sz);
-	drm_clflush_virt_range(buff, aligned_sz); /* device can access */
-	ret = aie4_query_aie_telemetry(ndev, type, dma_addr + sizeof(u64), aligned_sz);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	ret = aie4_query_aie_telemetry(ndev, type, dma_addr, aligned_sz);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
 		goto free_buf;
 	}
 
-	print_hex_dump_debug("telemetry: ", DUMP_PREFIX_OFFSET, 16, 4, buff,
-			     aligned_sz, false);
 	if (copy_to_user(u64_to_user_ptr(args->buffer), buff, args->buffer_size))
 		ret = -EFAULT;
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, aligned_sz, buff, dma_addr, DMA_FROM_DEVICE);
+	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
 }
 
