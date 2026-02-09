@@ -139,7 +139,7 @@ static int ve2_wait_for_retry_slot(struct amdxdna_ctx *hwctx, u32 timeout_ms)
 
 static struct host_queue_packet *
 ve2_queue_reserve_slot(struct amdxdna_dev *xdna, const char *qname, struct mutex *hq_lock,
-		       u64 *reserved_write_index, u64 read_index, u32 capacity,
+		       u64 *reserved_write_index, struct host_queue_header *header,
 		       struct ve2_hq_complete *hq_complete, struct host_queue_packet *hq_entry,
 		       u64 *slot)
 {
@@ -149,6 +149,8 @@ ve2_queue_reserve_slot(struct amdxdna_dev *xdna, const char *qname, struct mutex
 
 	mutex_lock(hq_lock);
 
+	u64 read_index = header->read_index;
+	u32 capacity = header->capacity;
 	/*
 	 * Check against reserved_write_index to account for in-flight reservations.
 	 */
@@ -228,8 +230,9 @@ static void ve2_queue_commit_slot(struct mutex *hq_lock, u64 *reserved_write_ind
 }
 
 static void *ve2_get_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq, int *err, const char *qname,
-			       struct mutex *hq_lock, u64 *reserved_write_index, u64 read_index,
-			       u32 capacity, struct ve2_hq_complete *hq_complete,
+			       struct mutex *hq_lock, u64 *reserved_write_index,
+			       struct host_queue_header *header,
+			       struct ve2_hq_complete *hq_complete,
 			       struct host_queue_packet *hq_entry)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -239,8 +242,7 @@ static void *ve2_get_queue_pkt(struct amdxdna_ctx *hwctx, u64 *seq, int *err, co
 				     qname,
 				     hq_lock,
 				     reserved_write_index,
-				     read_index,
-				     capacity,
+				     header,
 				     hq_complete,
 				     hq_entry,
 				     seq);
@@ -544,8 +546,7 @@ int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode, u32 aie_a
 		"DBG",
 		&dbg_queue->hq_lock,
 		&dbg_queue->reserved_write_index,
-		dbg_queue->dbg_queue_p->hq_header.read_index,
-		dbg_queue->dbg_queue_p->hq_header.capacity,
+		&dbg_queue->dbg_queue_p->hq_header,
 		&dbg_queue->hq_complete,
 		dbg_queue->dbg_queue_p->hq_entry);
 	if (!pkt) {
@@ -561,8 +562,7 @@ int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode, u32 aie_a
 	hdr->completion_signal =
 		(u64)(dbg_queue->hq_complete.hqc_dma_addr + slot_id * sizeof(u64));
 
-#define XRT_PKT_OPCODE(p) ((p)->xrt_header.common_header.opcode)
-	XDNA_DBG(xdna, "Debug Queue packet opcode: %u\n", XRT_PKT_OPCODE(pkt));
+	XDNA_DBG(xdna, "Debug Queue packet opcode: %u", pkt->xrt_header.common_header.opcode);
 
 	hdr->common_header.count = sizeof(struct rw_mem);
 	hdr->common_header.distribute = 0;
@@ -591,7 +591,7 @@ int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode, u32 aie_a
 		return wait_ret;
 	}
 
-	XDNA_DBG(xdna, "After command submission write_index is %llx, read_index is %llx\n",
+	XDNA_DBG(xdna, "After command submission write_index is %llx, read_index is %llx",
 		 dbg_queue->dbg_queue_p->hq_header.write_index,
 		 dbg_queue->dbg_queue_p->hq_header.read_index);
 
@@ -704,8 +704,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	pkt = ve2_queue_reserve_slot(xdna, "HSA", &hq_queue->hq_lock,
 				     &hq_queue->reserved_write_index,
-				     hq_queue->hsa_queue_p->hq_header.read_index,
-				     hq_queue->hsa_queue_p->hq_header.capacity,
+				     &hq_queue->hsa_queue_p->hq_header,
 				     &hq_queue->hq_complete,
 				     hq_queue->hsa_queue_p->hq_entry,
 				     &slot_id);
@@ -810,8 +809,7 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 		"HSA",
 		&hq_queue->hq_lock,
 		&hq_queue->reserved_write_index,
-		hq_queue->hsa_queue_p->hq_header.read_index,
-		hq_queue->hsa_queue_p->hq_header.capacity,
+		&hq_queue->hsa_queue_p->hq_header,
 		&hq_queue->hq_complete,
 		hq_queue->hsa_queue_p->hq_entry);
 
@@ -830,8 +828,7 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
 	hdr->completion_signal =
 		(u64)(hq_queue->hq_complete.hqc_dma_addr + slot_id * sizeof(u64));
-#define XRT_PKT_OPCODE(p) ((p)->xrt_header.common_header.opcode)
-	XDNA_DBG(xdna, "Queue packet opcode: %u\n", XRT_PKT_OPCODE(pkt));
+	XDNA_DBG(xdna, "Queue packet opcode: %u", pkt->xrt_header.common_header.opcode);
 
 	hdr->common_header.count = sizeof(struct exec_buf);
 	hdr->common_header.distribute = 0;
