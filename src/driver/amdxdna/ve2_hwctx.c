@@ -580,10 +580,10 @@ int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode, u32 aie_a
 			      &dbg_queue->hq_complete, slot_id);
 
 	wait_ret = wait_event_interruptible_timeout(ve2_ctx->dbg_q_waitq,
-					 dbg_queue->dbg_queue_p->hq_header.read_index ==
-					 dbg_queue->dbg_queue_p->hq_header.write_index,
-					 msecs_to_jiffies(5000));
-	
+						    dbg_queue->dbg_queue_p->hq_header.read_index ==
+						    dbg_queue->dbg_queue_p->hq_header.write_index,
+						    msecs_to_jiffies(5000));
+
 	if (wait_ret == 0) {
 		XDNA_ERR(xdna, "DBG Queue command wait timeout");
 		return -ETIMEDOUT;
@@ -705,7 +705,8 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	dpu = (struct ve2_dpu_data *)cmd_data;
 	hq_queue = (struct ve2_hsa_queue *)&ve2_ctx->hwctx_hsa_queue;
 
-	pkt = ve2_queue_reserve_slot(xdna, "HSA", &hq_queue->hq_lock, &hq_queue->reserved_write_index,
+	pkt = ve2_queue_reserve_slot(xdna, "HSA", &hq_queue->hq_lock,
+				     &hq_queue->reserved_write_index,
 				     hq_queue->hsa_queue_p->hq_header.read_index,
 				     hq_queue->hsa_queue_p->hq_header.capacity,
 				     &hq_queue->hq_complete,
