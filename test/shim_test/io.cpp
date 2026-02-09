@@ -197,7 +197,7 @@ get_column_size(const xrt::xclbin& xclbin)
 uint32_t
 get_column_size(const xrt::elf& elf)
 {
-  return elf_int::get_partition_size(elf);
+  return elf.get_partition_size();
 }
 
 void
@@ -219,7 +219,7 @@ elf_init_no_arg_cmd(xrt::elf& elf, cuidx_type idx, bool dump, bo& cmd, bo& inst)
     ebuf.dump();
 
   ebuf.add_ctrl_bo(inst);
-  ebuf.patch_ctrl_code(inst, patcher::buf_type::ctrltext, elf, module_int::no_ctrl_code_id);
+  ebuf.patch_ctrl_code(inst, elf_patcher::buf_type::ctrltext, elf, elf_int::no_ctrl_code_id);
 }
 
 } // namespace
@@ -245,7 +245,7 @@ io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
   , m_xclbin_name(xclbin_name)
   , m_local_data_path(get_xclbin_data(dev, xclbin_name.c_str()))
   , m_dev(dev)
-  , m_kernel_index(module_int::no_ctrl_code_id)
+  , m_kernel_index(elf_int::no_ctrl_code_id)
 {
 }
 
@@ -275,7 +275,7 @@ create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags)
 
 void
 io_test_bo_set_base::
-create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type)
+create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::elf_patcher::buf_type type)
 {
   auto size = exec_buf::get_ctrl_code_size(m_elf, type, m_kernel_index);
   if (size == 0)
@@ -379,7 +379,7 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_INPUT:
       create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
@@ -409,9 +409,9 @@ elf_full_io_test_bo_set(device* dev, const std::string& xclbin_name)
   auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
 
   try {
-    m_kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
   } catch (const std::exception&) {
-    m_kernel_index = module_int::no_ctrl_code_id;
+    m_kernel_index = elf_int::no_ctrl_code_id;
   }
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -423,7 +423,7 @@ elf_full_io_test_bo_set(device* dev, const std::string& xclbin_name)
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_INPUT:
       create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
@@ -451,10 +451,10 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
   if (m_is_full_elf) {
     m_elf = xrt::elf(get_xclbin_path(dev, xclbin_name.c_str()));
     auto mod = xrt::module{m_elf};
-    m_kernel_index = module_int::get_ctrlcode_id(mod, get_kernel_name(dev, xclbin_name.c_str()));
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(get_kernel_name(dev, xclbin_name.c_str()));
   } else {
     m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
-    m_kernel_index = module_int::no_ctrl_code_id;
+    m_kernel_index = elf_int::no_ctrl_code_id;
   }
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -467,13 +467,13 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_SAVE_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::preempt_save);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::preempt_save);
       break;
     case IO_TEST_BO_RESTORE_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::preempt_restore);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::preempt_restore);
       break;
     case IO_TEST_BO_INPUT:
       create_data_bo_from_file(ibo, "ifm.bin", 0);
@@ -528,7 +528,7 @@ elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     default:
       break;
@@ -551,7 +551,7 @@ elf_io_gemm_test_bo_set(device* dev, const std::string& xclbin_name, const std::
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     default:
       break;
@@ -658,7 +658,7 @@ init_cmd(hw_ctx& hwctx, bool dump)
 
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    patcher::buf_type::ctrltext, m_elf, module_int::no_ctrl_code_id);
+    elf_patcher::buf_type::ctrltext, m_elf, elf_int::no_ctrl_code_id);
 }
 
 void
@@ -682,7 +682,7 @@ init_cmd(hw_ctx& hwctx, bool dump)
 
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
 }
 
 void
@@ -726,11 +726,11 @@ init_cmd(hw_ctx& hwctx, bool dump)
     ebuf.dump();
 
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
-    patcher::buf_type::preempt_save, m_elf, m_kernel_index);
+    elf_patcher::buf_type::preempt_save, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
-    patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
+    elf_patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
 }
 
 void
@@ -1086,9 +1086,9 @@ async_error_aie4_io_test_bo_set(device* dev, const std::string& xclbin_name)
   auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
 
   try {
-    m_kernel_index = module_int::get_ctrlcode_id(mod, kernel_name);
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
   } catch (const std::exception&) {
-    m_kernel_index = module_int::no_ctrl_code_id;
+    m_kernel_index = elf_int::no_ctrl_code_id;
   }
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -1100,7 +1100,7 @@ async_error_aie4_io_test_bo_set(device* dev, const std::string& xclbin_name)
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     default:
       break;
@@ -1132,7 +1132,7 @@ init_cmd(hw_ctx& hwctx, bool dump)
 
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
 }
 
 void
