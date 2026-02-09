@@ -16,6 +16,7 @@
 #include "amdxdna_error.h"
 #include "amdxdna_aie.h"
 #include "amdxdna_mgmt.h"
+#include "aie4_msg_priv.h"
 
 #define AIE4_INTERVAL		20000	/* us */
 #ifdef AMDXDNA_DEVEL
@@ -204,6 +205,11 @@ int aie4_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories);
 int aie4_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, u32 pasid, dma_addr_t addr, u32 size);
 int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev);
+int aie4_rw_aie_reg(struct amdxdna_dev_hdl *ndev, enum aie4_aie_debug_op op,
+		    u32 ctx_id, u8 row, u8 col, u32 addr, u32 *value);
+int aie4_rw_aie_mem(struct amdxdna_dev_hdl *ndev, enum aie4_aie_debug_op op,
+		    u32 ctx_id, u8 row, u8 col, u32 aie_addr, u64 dram_addr,
+		    u32 size, u32 pasid);
 int aie4_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			  u32 context_id, u32 pasid, u32 num_bufs);
 void aie4_reset_prepare(struct amdxdna_dev *xdna);
