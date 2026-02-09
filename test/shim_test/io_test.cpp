@@ -248,6 +248,14 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   for (int i = 0; i < num_cmdlist * cmds_per_list; i++)
     bo_set.push_back(std::move(alloc_and_init_bo_set(dev, xclbin)));
 
+  bool preemption_enabled = false;
+  std::vector<std::pair<int, uint64_t>> pre_cntrs;
+  if (io_test_parameters.type == IO_TEST_FORCE_PREEMPTION) {
+    // Enable force preemption and take snapshot of current fw counters before running any cmd.
+    preemption_enabled = !force_fine_preemption(dev, true);
+    pre_cntrs = get_fine_preemption_counters(dev);
+  }
+
   // Creating HW context for cmd submission
   hw_ctx hwctx{dev, xclbin};
   auto hwq = hwctx.get()->get_hw_queue();
@@ -280,14 +288,6 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
         cmdlist_bos.push_back( {std::move(cbo), cmdpkt} );
       }
     }
-  }
-
-  bool preemption_enabled = false;
-  std::vector<std::pair<int, uint64_t>> pre_cntrs;
-  if (io_test_parameters.type == IO_TEST_FORCE_PREEMPTION) {
-    // Enable force preemption and take snapshot of current fw counters before running any cmd.
-    preemption_enabled = !force_fine_preemption(dev, true);
-    pre_cntrs = get_fine_preemption_counters(dev);
   }
 
   // Submit commands and wait for results
