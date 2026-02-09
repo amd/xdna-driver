@@ -204,6 +204,8 @@ int aie4_set_trace_categories(struct amdxdna_dev_hdl *ndev, u32 categories);
 int aie4_stop_fw_trace(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, u32 pasid, dma_addr_t addr, u32 size);
 int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev);
+int aie4_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			  u32 context_id, u32 pasid, u32 num_bufs);
 void aie4_reset_prepare(struct amdxdna_dev *xdna);
 int aie4_reset_done(struct amdxdna_dev *xdna);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);

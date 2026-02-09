@@ -563,3 +563,34 @@ int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev)
 
 	return ret;
 }
+
+int aie4_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
+			  u32 context_id, u32 pasid, u32 num_bufs)
+{
+	DECLARE_AIE4_MSG(aie4_msg_aie4_coredump, AIE4_MSG_OP_AIE_COREDUMP);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	dma_addr_t addr;
+	int ret;
+
+	addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address: %lld", addr);
+		return -EINVAL;
+	}
+
+	req.context_id = context_id;
+	req.pasid.raw = 0;
+	req.pasid.f.pasid = pasid;
+	req.pasid.f.pasid_vld = 1;
+	req.num_buffers = num_bufs;
+	req.reserved = 0;
+	req.buffer_list_addr = addr;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Get AIE coredump failed, status 0x%x", resp.status);
+		return -EINVAL;
+	}
+
+	return 0;
+}
