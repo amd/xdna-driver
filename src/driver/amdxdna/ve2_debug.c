@@ -162,6 +162,10 @@ static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdev, struct amdxdna_ctx *h
 	void *virt_ptr = NULL;
 	int ret = 0;
 
+	if (size % 4 != 0) {
+		XDNA_ERR(xdev, "Size (%zu) must be a multiple of 4 bytes\n", size);
+		return -EINVAL;
+	}
 	/*Allocate phy memory and pass it to submit function*/
 	virt_ptr = dma_alloc_coherent(&pdev->dev, size, &dma_handle, GFP_KERNEL);
 	if (!virt_ptr) {
@@ -189,11 +193,10 @@ static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdev, struct amdxdna_ctx *h
 	break;
 	default:
 		XDNA_ERR(xdev, "CMD_TYPE is not supported\n");
-		return -EINVAL;
+		ret = -EINVAL;
 	break;
 	}
 	dma_free_coherent(&pdev->dev, size, virt_ptr, dma_handle);
-
 	return ret;
 }
 
