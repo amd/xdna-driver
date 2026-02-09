@@ -2143,6 +2143,288 @@ unlock_srcu:
 	return ret;
 }
 
+static int aie4_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_aie_tile_access access = {};
+	struct amdxdna_mgmt_dma_hdl *dma_hdl = NULL;
+	struct amdxdna_client *ctx_client = NULL;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	unsigned long hwctx_id;
+	dma_addr_t dram_addr;
+	int ret, idx = 0;
+	void *cpu_addr;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+
+	/* Access struct is at the beginning of the buffer */
+	ret = amdxdna_drm_copy_array_from_user(args, &access, sizeof(access), 1);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to copy request from user");
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "AIE tile read: ctx %u pid %llu col %u row %u addr 0x%x size %u",
+		 access.context_id, access.pid, access.col, access.row, access.addr, access.size);
+
+	/* Find the hardware context and hold SRCU lock for the duration */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_ctx *tmp_ctx;
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, tmp_ctx) {
+			if (access.context_id == hwctx_id && access.pid == tmp_ctx->client->pid) {
+				hwctx = tmp_ctx;
+				ctx_client = tmp_client;
+				break;
+			}
+		}
+		if (hwctx)
+			break;
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Context %u for pid %llu not found", access.context_id, access.pid);
+		return -EINVAL;
+	}
+
+	/* Check if caller is root or owns the context */
+	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
+		XDNA_ERR(xdna, "Permission denied for context %u", access.context_id);
+		ret = -EPERM;
+		goto unlock_srcu;
+	}
+
+	if (access.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)",
+			 access.col, hwctx->num_col);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	if (access.row >= ndev->metadata.rows) {
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)", access.row, ndev->metadata.rows);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	/* Register read: size == 4 bytes */
+	if (access.size == sizeof(u32)) {
+		u32 reg_val = 0;
+
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_rw_aie_reg(ndev, AIE4_AIE_DBG_OP_REG_READ, hwctx->priv->hw_ctx_id,
+				      access.row, access.col, access.addr, &reg_val);
+		mutex_unlock(&ndev->aie4_lock);
+		if (ret) {
+			XDNA_ERR(xdna, "AIE register read failed, ret %d", ret);
+			goto unlock_srcu;
+		}
+
+		ret = amdxdna_drm_copy_array_to_user(args, &reg_val, sizeof(reg_val), 1);
+		if (ret)
+			XDNA_ERR(xdna, "Failed to copy register data to user");
+
+		goto unlock_srcu;
+	}
+
+	/* Memory read: size > 4 bytes, use DMA buffer */
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, max_t(u32, access.size, SZ_8K), DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl)) {
+		ret = PTR_ERR(dma_hdl);
+		XDNA_ERR(xdna, "Failed to allocate DMA buffer, ret %d", ret);
+		goto unlock_srcu;
+	}
+
+	cpu_addr = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(cpu_addr)) {
+		ret = PTR_ERR(cpu_addr);
+		goto free_dma;
+	}
+
+	dram_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!dram_addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		ret = -EINVAL;
+		goto free_dma;
+	}
+
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_rw_aie_mem(ndev, AIE4_AIE_DBG_OP_BLOCK_READ, hwctx->priv->hw_ctx_id,
+			      access.row, access.col, access.addr, dram_addr, access.size,
+			      hwctx->client->pasid);
+	mutex_unlock(&ndev->aie4_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE memory read failed, ret %d", ret);
+		goto free_dma;
+	}
+
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+
+	ret = amdxdna_drm_copy_array_to_user(args, cpu_addr, access.size, 1);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to copy data to user");
+		goto free_dma;
+	}
+
+free_dma:
+	amdxdna_mgmt_buff_free(dma_hdl);
+unlock_srcu:
+	srcu_read_unlock(&ctx_client->ctx_srcu, idx);
+	return ret;
+}
+
+static int aie4_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_aie_tile_access access = {};
+	struct amdxdna_mgmt_dma_hdl *dma_hdl = NULL;
+	struct amdxdna_client *ctx_client = NULL;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	unsigned long hwctx_id;
+	dma_addr_t dram_addr;
+	int ret, idx = 0;
+	void *cpu_addr;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+
+	/* Access struct is at the beginning of the buffer, data follows after */
+	if (copy_from_user(&access, u64_to_user_ptr(args->buffer), sizeof(access))) {
+		XDNA_ERR(xdna, "Failed to copy request from user");
+		return -EFAULT;
+	}
+
+	XDNA_DBG(xdna, "AIE tile write: ctx %u pid %llu col %u row %u addr 0x%x size %u",
+		 access.context_id, access.pid, access.col, access.row, access.addr, access.size);
+
+	/* Find the hardware context and hold SRCU lock for the duration */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_ctx *tmp_ctx;
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, tmp_ctx) {
+			if (access.context_id == hwctx_id && access.pid == tmp_ctx->client->pid) {
+				hwctx = tmp_ctx;
+				ctx_client = tmp_client;
+				break;
+			}
+		}
+		if (hwctx)
+			break;
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Context %u for pid %llu not found", access.context_id, access.pid);
+		return -EINVAL;
+	}
+
+	/* Check if caller is root or owns the context */
+	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
+		XDNA_ERR(xdna, "Permission denied for context %u", access.context_id);
+		ret = -EPERM;
+		goto unlock_srcu;
+	}
+
+	if (access.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)",
+			 access.col, hwctx->num_col);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	if (access.row >= ndev->metadata.rows) {
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)",
+			 access.row, ndev->metadata.rows);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	/* Register write: size == 4 bytes */
+	if (access.size == sizeof(u32)) {
+		u32 reg_val;
+
+		/* Data is after the access struct */
+		if (copy_from_user(&reg_val,
+				   u64_to_user_ptr(args->buffer) + sizeof(access),
+				   sizeof(reg_val))) {
+			XDNA_ERR(xdna, "Failed to copy register data from user");
+			ret = -EFAULT;
+			goto unlock_srcu;
+		}
+
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_rw_aie_reg(ndev, AIE4_AIE_DBG_OP_REG_WRITE, hwctx->priv->hw_ctx_id,
+				      access.row, access.col, access.addr, &reg_val);
+		mutex_unlock(&ndev->aie4_lock);
+		if (ret)
+			XDNA_ERR(xdna, "AIE register write failed, ret %d", ret);
+
+		goto unlock_srcu;
+	}
+
+	/* Memory write: size > 4 bytes, use DMA buffer */
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, max_t(u32, access.size, SZ_8K), DMA_TO_DEVICE);
+	if (IS_ERR(dma_hdl)) {
+		ret = PTR_ERR(dma_hdl);
+		XDNA_ERR(xdna, "Failed to allocate DMA buffer, ret %d", ret);
+		goto unlock_srcu;
+	}
+
+	cpu_addr = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(cpu_addr)) {
+		ret = PTR_ERR(cpu_addr);
+		goto free_dma;
+	}
+
+	dram_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!dram_addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		ret = -EINVAL;
+		goto free_dma;
+	}
+
+	/* Copy data from user space (data is after the access struct) */
+	if (copy_from_user(cpu_addr, u64_to_user_ptr(args->buffer) + sizeof(access), access.size)) {
+		XDNA_ERR(xdna, "Failed to copy data from user");
+		ret = -EFAULT;
+		goto free_dma;
+	}
+
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_rw_aie_mem(ndev, AIE4_AIE_DBG_OP_BLOCK_WRITE, hwctx->priv->hw_ctx_id,
+			      access.row, access.col, access.addr, dram_addr, access.size,
+			      hwctx->client->pasid);
+	mutex_unlock(&ndev->aie4_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE memory write failed, ret %d", ret);
+		goto free_dma;
+	}
+
+free_dma:
+	amdxdna_mgmt_buff_free(dma_hdl);
+unlock_srcu:
+	srcu_read_unlock(&ctx_client->ctx_srcu, idx);
+	return ret;
+}
+
 static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -2173,6 +2455,9 @@ static int aie4_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 		break;
 	case DRM_AMDXDNA_AIE_COREDUMP:
 		ret = aie4_get_coredump(client, args);
+		break;
+	case DRM_AMDXDNA_AIE_TILE_READ:
+		ret = aie4_aie_tile_read(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -2264,6 +2549,9 @@ static int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 		break;
 	case DRM_AMDXDNA_SET_FW_TRACE_STATE:
 		ret = amdxdna_set_fw_trace_state(xdna, args);
+		break;
+	case DRM_AMDXDNA_AIE_TILE_WRITE:
+		ret = aie4_aie_tile_write(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

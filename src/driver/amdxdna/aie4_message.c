@@ -564,6 +564,72 @@ int aie4_detach_work_buffer(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
+int aie4_rw_aie_reg(struct amdxdna_dev_hdl *ndev, enum aie4_aie_debug_op op,
+		    u32 ctx_id, u8 row, u8 col, u32 addr, u32 *value)
+{
+	DECLARE_AIE4_MSG(aie4_msg_aie4_debug_access, AIE4_MSG_OP_AIE_DEBUG_ACCESS);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	req.opcode = op;
+	req.hw_context_id = ctx_id;
+	req.row = row;
+	req.col = col;
+	req.reg_access.reg_addr = addr;
+	if (op == AIE4_AIE_DBG_OP_REG_WRITE)
+		req.reg_access.reg_wval = *value;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE reg %s failed, ret %d",
+			 op == AIE4_AIE_DBG_OP_REG_READ ? "read" : "write", ret);
+		return ret;
+	}
+
+	if (op == AIE4_AIE_DBG_OP_REG_READ)
+		*value = resp.reg_access.reg_rval;
+
+	XDNA_DBG(xdna, "AIE reg %s ctx %u row %u col %u addr 0x%x value 0x%x",
+		 op == AIE4_AIE_DBG_OP_REG_READ ? "read" : "write",
+		 ctx_id, row, col, addr, *value);
+
+	return 0;
+}
+
+int aie4_rw_aie_mem(struct amdxdna_dev_hdl *ndev, enum aie4_aie_debug_op op,
+		    u32 ctx_id, u8 row, u8 col, u32 aie_addr, u64 dram_addr,
+		    u32 size, u32 pasid)
+{
+	DECLARE_AIE4_MSG(aie4_msg_aie4_debug_access, AIE4_MSG_OP_AIE_DEBUG_ACCESS);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	req.opcode = op;
+	req.hw_context_id = ctx_id;
+	req.row = row;
+	req.col = col;
+	req.mem_access.buffer_addr = dram_addr;
+	req.mem_access.buffer_size = size;
+	req.mem_access.mem_addr = aie_addr;
+	req.mem_access.mem_size = size;
+	req.mem_access.pasid.raw = 0;
+	req.mem_access.pasid.f.pasid = pasid;
+	req.mem_access.pasid.f.pasid_vld = 1;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE mem %s failed, ret %d",
+			 op == AIE4_AIE_DBG_OP_BLOCK_READ ? "read" : "write", ret);
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "AIE mem %s ctx %u row %u col %u aie_addr 0x%x size %u",
+		 op == AIE4_AIE_DBG_OP_BLOCK_READ ? "read" : "write",
+		 ctx_id, row, col, aie_addr, size);
+
+	return 0;
+}
+
 int aie4_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl,
 			  u32 context_id, u32 pasid, u32 num_bufs)
 {

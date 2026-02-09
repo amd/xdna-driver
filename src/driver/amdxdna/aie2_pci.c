@@ -1567,13 +1567,10 @@ static int aie2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 			goto unlock_srcu;
 		}
 
-		if (copy_to_user(u64_to_user_ptr(args->buffer), &reg_val, sizeof(reg_val))) {
+		ret = amdxdna_drm_copy_array_to_user(args, &reg_val, sizeof(reg_val), 1);
+		if (ret)
 			XDNA_ERR(xdna, "Failed to copy register data to user");
-			ret = -EFAULT;
-			goto unlock_srcu;
-		}
 
-		ret = 0;
 		goto unlock_srcu;
 	}
 
@@ -1612,13 +1609,11 @@ static int aie2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), cpu_addr, access.size)) {
+	ret = amdxdna_drm_copy_array_to_user(args, cpu_addr, access.size, 1);
+	if (ret) {
 		XDNA_ERR(xdna, "Failed to copy data to user");
-		ret = -EFAULT;
 		goto free_dma;
 	}
-
-	ret = 0;
 
 free_dma:
 	amdxdna_mgmt_buff_free(dma_hdl);
