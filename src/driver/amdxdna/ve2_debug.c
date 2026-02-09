@@ -155,25 +155,23 @@ static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdev, struct amdxdna_ctx *h
 				 u32 col, u32 row, u32 addr, void *data, size_t size,
 				 int cmd_type)
 {
-#define ROW_SHIFT 20
-#define COL_SHIFT 25
 	struct platform_device *pdev = to_platform_device(xdev->ddev.dev);
 	dma_addr_t dma_handle;
 	void *virt_ptr = NULL;
 	int ret = 0;
 
 	if (size % 4 != 0) {
-		XDNA_ERR(xdev, "Size (%zu) must be a multiple of 4 bytes\n", size);
+		XDNA_ERR(xdev, "Size (%zu) must be a multiple of 4 bytes", size);
 		return -EINVAL;
 	}
 	/*Allocate phy memory and pass it to submit function*/
 	virt_ptr = dma_alloc_coherent(&pdev->dev, size, &dma_handle, GFP_KERNEL);
 	if (!virt_ptr) {
-		XDNA_ERR(xdev, "Failed to allocate DMA buffer\n");
+		XDNA_ERR(xdev, "Failed to allocate DMA buffer");
 		return -ENOMEM;
 	}
 
-	addr = addr + ((col << COL_SHIFT) + (row << ROW_SHIFT));
+	addr = addr + ((col << VE2_COL_SHIFT) + (row << VE2_ROW_SHIFT));
 
 	switch (cmd_type) {
 	case DBG_CMD_WRITE:
@@ -192,7 +190,7 @@ static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdev, struct amdxdna_ctx *h
 						  size / 4);
 	break;
 	default:
-		XDNA_ERR(xdev, "CMD_TYPE is not supported\n");
+		XDNA_ERR(xdev, "CMD_TYPE is not supported");
 		ret = -EINVAL;
 	break;
 	}
@@ -220,7 +218,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
-	XDNA_DBG(xdna, "Write request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u\n",
+	XDNA_DBG(xdna, "Write request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u",
 		 footer.context_id, footer.col, footer.row, footer.addr, footer.size);
 
 	/* Find the hardware context */
@@ -236,24 +234,24 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found", footer.context_id,
 			 footer.pid);
 		return -EINVAL;
 	}
 
-	XDNA_DBG(xdna, "Found hwctx: cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n",
+	XDNA_DBG(xdna, "Found hwctx: cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u",
 		 hwctx->client->pid, hwctx->id, hwctx->start_col, hwctx->num_col);
 
 	/* Validate column is within partition */
 	if (footer.col >= hwctx->num_col) {
-		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)\n",
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)",
 			 footer.col, hwctx->num_col);
 		return -EINVAL;
 	}
 
 	/* Validate row */
 	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
-		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)",
 			 footer.row, xdna->dev_handle->aie_dev_info.rows);
 		return -EINVAL;
 	}
@@ -261,7 +259,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	/* Get AIE device handle */
 	aie_dev = hwctx->priv->aie_dev;
 	if (!aie_dev) {
-		XDNA_ERR(xdna, "AIE device handle not found\n");
+		XDNA_ERR(xdna, "AIE device handle not found");
 		return -EINVAL;
 	}
 
@@ -272,7 +270,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 
 	/* Copy data from user space (data is at the beginning of buffer) */
 	if (copy_from_user(local_buf, u64_to_user_ptr(args->buffer), footer.size)) {
-		XDNA_ERR(xdna, "Error: unable to copy data from userptr\n");
+		XDNA_ERR(xdna, "Error: unable to copy data from userptr");
 		kfree(local_buf);
 		return -EFAULT;
 	}
@@ -288,7 +286,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	}
 
 	if (ret < 0) {
-		XDNA_ERR(xdna, "Error in AIE memory write operation, err: %d\n", ret);
+		XDNA_ERR(xdna, "Error in AIE memory write operation, err: %d", ret);
 		kfree(local_buf);
 		return ret;
 	}
@@ -317,7 +315,7 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 		return -EFAULT;
 	}
 
-	XDNA_DBG(xdna, "Read request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u\n",
+	XDNA_DBG(xdna, "Read request for ctx_id: %u, col: %u, row: %u, addr: 0x%x, size: %u",
 		 footer.context_id, footer.col, footer.row, footer.addr, footer.size);
 
 	/* Find the hardware context */
@@ -333,24 +331,24 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found", footer.context_id,
 			 footer.pid);
 		return -EINVAL;
 	}
 
-	XDNA_DBG(xdna, "Found hwctx: cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n",
+	XDNA_DBG(xdna, "Found hwctx: cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u",
 		 hwctx->client->pid, hwctx->id, hwctx->start_col, hwctx->num_col);
 
 	/* Validate column is within partition */
 	if (footer.col >= hwctx->num_col) {
-		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)\n",
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)",
 			 footer.col, hwctx->num_col);
 		return -EINVAL;
 	}
 
 	/* Validate row */
 	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
-		XDNA_ERR(xdna, "Row %u is outside range [0, %u)\n",
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)",
 			 footer.row, xdna->dev_handle->aie_dev_info.rows);
 		return -EINVAL;
 	}
@@ -358,7 +356,7 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	/* Get AIE device handle and relative column */
 	aie_dev = hwctx->priv->aie_dev;
 	if (!aie_dev) {
-		XDNA_ERR(xdna, "AIE device handle not found\n");
+		XDNA_ERR(xdna, "AIE device handle not found");
 		return -EINVAL;
 	}
 
@@ -371,14 +369,14 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
 				    footer.addr, local_buf, footer.size, DBG_CMD_READ);
 	if (ret < 0) {
-		XDNA_ERR(xdna, "Error in AIE memory read operation, err: %d\n", ret);
+		XDNA_ERR(xdna, "Error in AIE memory read operation, err: %d", ret);
 		kfree(local_buf);
 		return ret;
 	}
 
 	/* Copy data to user space */
 	if (copy_to_user(u64_to_user_ptr(args->buffer), local_buf, footer.size)) {
-		XDNA_ERR(xdna, "Error: unable to copy memory to userptr\n");
+		XDNA_ERR(xdna, "Error: unable to copy memory to userptr");
 		kfree(local_buf);
 		return -EFAULT;
 	}
@@ -422,18 +420,18 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
+		XDNA_ERR(xdna, "hw context :%u pid:%llu not found", footer.context_id,
 			 footer.pid);
 		return -EINVAL;
 	}
 
-	XDNA_DBG(xdna, "cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n",
+	XDNA_DBG(xdna, "cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u",
 		 hwctx->client->pid, hwctx->id, hwctx->start_col,
 		 hwctx->num_col);
 
 	rel_size = hwctx->priv->num_col * xdna->dev_handle->aie_dev_info.rows * TILE_ADDRESS_SPACE;
 	if (rel_size > buf_size) {
-		XDNA_DBG(xdna, "Invalid buffer size:%d (rel_size:%d)\n", buf_size, rel_size);
+		XDNA_DBG(xdna, "Invalid buffer size:%d (rel_size:%d)", buf_size, rel_size);
 		args->element_size = rel_size;
 		return -ENOBUFS;
 	}
@@ -443,16 +441,16 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 		return -ENOMEM;
 
 	ret = ve2_create_coredump(xdna, hwctx, local_buf, rel_size);
-	XDNA_DBG(xdna, "created dump of size:%d\n", ret);
+	XDNA_DBG(xdna, "created dump of size:%d", ret);
 
 	if (ret < 0) {
-		XDNA_ERR(xdna, "Error in AIE Data mem read operation, err: %d\n", ret);
+		XDNA_ERR(xdna, "Error in AIE Data mem read operation, err: %d", ret);
 		vfree(local_buf);
 		return ret;
 	}
 
 	if (copy_to_user(u64_to_user_ptr(args->buffer), local_buf, ret)) {
-		XDNA_ERR(xdna, "Error: unable to copy memory to userptr\n");
+		XDNA_ERR(xdna, "Error: unable to copy memory to userptr");
 		vfree(local_buf);
 		return -EFAULT;
 	}
@@ -740,7 +738,7 @@ static int ve2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_dr
 			XDNA_DBG(xdna, "Waiting for error callback to complete on mgmtctx[%u]", i);
 			if (wait_for_completion_timeout(&mgmtctx->error_cb_completion,
 							wait_timeout) == 0) {
-				XDNA_WARN(xdna, "Timeout waiting for err callback completion\n");
+				XDNA_WARN(xdna, "Timeout waiting for err callback completion");
 			}
 		}
 	}
