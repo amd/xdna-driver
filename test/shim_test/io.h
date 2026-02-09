@@ -102,7 +102,7 @@ protected:
   create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags);
 
   void
-  create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type);
+  create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::elf_patcher::buf_type type);
 
   xrt_core::cuidx_type
   get_cu_idx(hw_ctx& hwctx);

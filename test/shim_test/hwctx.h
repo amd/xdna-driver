@@ -53,7 +53,7 @@ private:
     xrt::hw_context::qos_type qos{ {"gops", 100}, {"priority", 0x180} };
     xrt::hw_context::access_mode mode = xrt::hw_context::access_mode::shared;
     if (is_full_elf) {
-      m_handle = dev->create_hw_context(elf_int::get_partition_size(elf), qos, mode);
+      m_handle = dev->create_hw_context(elf.get_partition_size(), qos, mode);
     } else {
       dev->record_xclbin(xclbin);
       auto xclbin_uuid = xclbin.get_uuid();
