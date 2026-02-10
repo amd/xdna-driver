@@ -1208,3 +1208,80 @@ verify_result()
       " npu_gen=" + std::to_string(NPU_GEN_AIE4));
   }
 }
+
+elf_io_coredump_test_bo_set::
+elf_io_coredump_test_bo_set(device* dev, const std::string& xclbin_name, const std::string& elf_name)
+  : io_test_bo_set_base(dev, xclbin_name)
+{
+  constexpr size_t COREDUMP_IFM_SIZE = 512 * 1024 * 4;
+  constexpr size_t COREDUMP_WTS_SIZE = 20;
+  m_elf = xrt::elf(m_local_data_path + elf_name);
+
+  try {
+    auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+  } catch (const std::exception&) {
+    m_kernel_index = elf_int::no_ctrl_code_id;
+  }
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      break;
+    case IO_TEST_BO_INPUT:
+      create_data_bo_from_file(ibo, "ifm.bin", 0);
+      break;
+    case IO_TEST_BO_OUTPUT:
+      alloc_data_bo(ibo, m_dev, COREDUMP_IFM_SIZE, false);
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      alloc_data_bo(ibo, m_dev, COREDUMP_WTS_SIZE, false);
+      break;
+    case IO_TEST_BO_2ND_PARAMETERS:
+      alloc_data_bo(ibo, m_dev, COREDUMP_WTS_SIZE, false);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void
+elf_io_coredump_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
+
+  xrt_core::cuidx_type cu_idx{0};
+  ebuf.set_cu_idx(cu_idx);
+
+  ebuf.add_arg_64(3);
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "3");
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "4");
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
+}
+
+void
+elf_io_coredump_test_bo_set::
+verify_result()
+{
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Coredump test command failed, state=") + std::to_string(cpkt->state));
+}

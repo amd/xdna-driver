@@ -223,4 +223,17 @@ private:
   std::unique_ptr<xrt_core::buffer_handle> m_dbo;
 };
 
+class elf_io_coredump_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_io_coredump_test_bo_set(device *dev, const std::string& xclbin_name,
+    const std::string& elf_name);
+
+  void
+  init_cmd(hw_ctx& hwctx, bool dump) override;
+
+  void
+  verify_result() override;
+};
+
 #endif // _SHIMTEST_IO_H_

@@ -268,6 +268,17 @@ xclbin_info xclbin_infos[] = {
     .data = "",
     .type = KERNEL_TYPE_TXN,
   },
+  {
+    .name = "verify_4x4.xclbin",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .workspace = "local_shim_test_data/elf_core_dump_npu4",
+    .data = "",
+    .type = KERNEL_TYPE_TXN,
+  },
 
 };
 
