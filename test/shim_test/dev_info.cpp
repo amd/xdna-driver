@@ -268,7 +268,16 @@ binary_info binary_infos[] = {
     .path = "local_shim_test_data/npu1/nop/nop.xclbin",
     .flow = PARTIAL_ELF,
   },
-
+  {
+    .tag = "aie_debug",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .path = "local_shim_test_data/npu4/aie_debug/verify_4x4.xclbin",
+    .flow = PARTIAL_ELF,
+  },
 };
 
 }
