@@ -237,7 +237,9 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 		}
 
 		mem_idx_bmap = 0;
-		for (phdl_idx = 0; phdl_idx < (u32)num_phandles && phdl_idx < MAX_MEM_REGIONS; phdl_idx++) {
+		for (phdl_idx = 0;
+		     phdl_idx < (u32)num_phandles && phdl_idx < MAX_MEM_REGIONS;
+		     phdl_idx++) {
 			mem_node = of_parse_phandle(region_np, "memory-region", phdl_idx);
 			if (!mem_node)
 				continue;
@@ -253,7 +255,8 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 		}
 
 		if (mem_idx_bmap == 0) {
-			XDNA_DBG(xdna, "No valid CMA phandles for cols %u-%u", columns[0], columns[1]);
+			XDNA_DBG(xdna, "No valid CMA phandles for cols %u-%u",
+				 columns[0], columns[1]);
 			continue;
 		}
 
@@ -409,7 +412,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	/* Parse memory topology to enable automatic CMA region selection */
 	ret = ve2_parse_mem_topology(xdna, pdev);
 	if (ret < 0)
-		XDNA_DBG(xdna, "Failed to parse memory topology \n");
+		XDNA_DBG(xdna, "Failed to parse memory topology\n");
 
 	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",
 		 xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows,

@@ -474,7 +474,7 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
  * Create hsa queue in kernel and initialize queue slots.
  */
 static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
-				  struct ve2_hsa_queue *queue)
+				 struct ve2_hsa_queue *queue)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	int nslots = HOST_QUEUE_ENTRY;
@@ -489,7 +489,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	for (int i = 0; i < MAX_MEM_REGIONS; i++) {
 		alloc_dev = xdna->cma_region_devs[i];
 		if ((hwctx->priv->mem_index & (1 << i)) && alloc_dev) {
-			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size, &dma_handle, GFP_KERNEL);
+			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
+								&dma_handle, GFP_KERNEL);
 			if (!queue->hsa_queue_p)
 				continue;
 			queue->alloc_dev = alloc_dev;
@@ -500,11 +501,12 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	/* if no allocation was successful, allocate from the default device */
 	if (!queue->hsa_queue_p) {
 		queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
-						alloc_size,
-						&dma_handle,
-						GFP_KERNEL);
+							alloc_size,
+							&dma_handle,
+							GFP_KERNEL);
 		if (!queue->hsa_queue_p) {
-			XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu", alloc_size);
+			XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu",
+				 alloc_size);
 			return -ENOMEM;
 		}
 		queue->alloc_dev = &pdev->dev;
