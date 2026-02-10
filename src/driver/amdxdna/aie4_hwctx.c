@@ -435,7 +435,7 @@ static inline u64 publish_cmd(struct amdxdna_ctx *ctx)
 {
 	u64 wi = ctx->priv->write_index++;
 
-	/* Make sure the writes to the cmd slot are completed before notifying CERT. */
+	/* Ensure the writes to the cmd slot are completed before notifying CERT. */
 	wmb();
 	WRITE_ONCE(*ctx->priv->umq_write_index, ctx->priv->write_index);
 	return wi;
