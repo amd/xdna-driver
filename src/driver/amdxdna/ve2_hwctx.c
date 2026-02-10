@@ -585,17 +585,28 @@ int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode, u32 aie_a
 
 	if (wait_ret == 0) {
 		XDNA_ERR(xdna, "DBG Queue command wait timeout");
-		return -ETIMEDOUT;
+		err = -ETIMEDOUT;
+		goto cleanup_slot_id;
 	} else if (wait_ret < 0) {
 		XDNA_ERR(xdna, "DBG Queue command wait interrupted");
-		return wait_ret;
+		err = wait_ret;
+		goto cleanup_slot_id;
 	}
 
 	XDNA_DBG(xdna, "After command submission write_index is %llx, read_index is %llx",
 		 dbg_queue->dbg_queue_p->hq_header.write_index,
 		 dbg_queue->dbg_queue_p->hq_header.read_index);
 
-	return 0;
+	err = 0;
+
+cleanup_slot_id:
+	/* Reset slot to INVALID after completion (success, timeout, or interruption) */
+	mutex_lock(&dbg_queue->hq_lock);
+	dbg_queue->hq_complete.hqc_mem[slot_id] = ERT_CMD_STATE_INVALID;
+	ve2_queue_pkt_set_invalid(pkt);
+	mutex_unlock(&dbg_queue->hq_lock);
+
+	return err;
 }
 
 /*
@@ -1432,7 +1443,6 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	init_waitqueue_head(&priv->dbg_q_waitq);
 	timer_setup(&priv->dbg_q_timer, dbg_q_timeout_cb, 0);
 	mod_timer(&priv->dbg_q_timer, jiffies + CTX_TIMER);
-
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_clear_firmware_status(xdna, hwctx);
