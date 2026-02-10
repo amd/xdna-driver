@@ -62,7 +62,7 @@ public:
   sync_after_run();
 
   virtual void
-  init_cmd(hw_ctx& hwctx, bool dump) = 0;
+  init_cmd(hw_ctx& hwctx, bool dump);
 
   void
   dump_content();
@@ -74,10 +74,7 @@ public:
   bo_type2name(int type);
 
   void
-  cache_cmd_header(const xrt_core::buffer_handle *cmd_hdl, const ert_start_kernel_cmd *cmd);
-
-  void
-  restore_cmd_header(const xrt_core::buffer_handle *cmd_hdl, ert_start_kernel_cmd *cmd);
+  reset_cmd_header();
 
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
   get_bos();
@@ -106,6 +103,10 @@ protected:
 
   xrt_core::cuidx_type
   get_cu_idx(hw_ctx& hwctx);
+
+private:
+  void
+  cache_cmd_header();
 };
 
 class io_test_bo_set : public io_test_bo_set_base

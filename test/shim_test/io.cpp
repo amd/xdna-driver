@@ -226,17 +226,29 @@ elf_init_no_arg_cmd(xrt::elf& elf, cuidx_type idx, bool dump, bo& cmd, bo& inst)
 
 void
 io_test_bo_set_base::
-cache_cmd_header(const buffer_handle *cmd_hdl, const ert_start_kernel_cmd *cmd)
+cache_cmd_header()
 {
-  m_cached_header = cmd->header;
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  if (cbo)
+    m_cached_header = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map())->header;
 }
 
 void
 io_test_bo_set_base::
-restore_cmd_header(const buffer_handle *cmd_hdl, ert_start_kernel_cmd *cmd)
+reset_cmd_header()
 {
-  if (m_cached_header != 0)
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  if (cbo && m_cached_header != 0) {
+    auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
     cmd->header = m_cached_header;
+  }
+}
+
+void
+io_test_bo_set_base::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  cache_cmd_header();
 }
 
 io_test_bo_set_base::
@@ -628,6 +640,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
 
   if (dump)
     ebuf.dump();
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
@@ -659,6 +673,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
     elf_patcher::buf_type::ctrltext, m_elf, elf_int::no_ctrl_code_id);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
@@ -683,6 +699,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
     elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
@@ -731,6 +749,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
     elf_patcher::buf_type::preempt_save, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
     elf_patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
@@ -740,6 +760,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
   elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
     *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
     *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
@@ -760,6 +782,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
   // Initializing debug BO content to -1
   std::memset(dbo_p, 0xff, size);
   m_dbo.get()->sync(buffer_handle::direction::host2device, size, 0);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 // For debug only
@@ -918,18 +942,15 @@ run(const std::vector<fence_handle*>& wait_fences,
   sync_before_run();
 
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto chdl = cbo->get();
-  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  
-  restore_cmd_header(chdl, cpkt);
-  cache_cmd_header(chdl, cpkt);
+  reset_cmd_header();
+  cache_cmd_header();
 
   for (const auto& fence : wait_fences)
     hwq->submit_wait(fence);
-  hwq->submit_command(chdl);
+  hwq->submit_command(cbo->get());
   for (const auto& fence : signal_fences)
     hwq->submit_signal(fence);
-  hwq->wait_command(chdl, 0);
+  hwq->wait_command(cbo->get(), 0);
 
   sync_after_run();
   if (!no_check_result)
@@ -1046,6 +1067,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
 
   if (dump)
     ebuf.dump();
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
@@ -1133,6 +1156,8 @@ init_cmd(hw_ctx& hwctx, bool dump)
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
     elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
