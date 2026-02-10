@@ -322,7 +322,11 @@ done:
 static void job_abort(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct amdxdna_ctx *ctx = job->ctx;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_cmd_chain *payload;
+
+	XDNA_ERR(xdna, "aborting ctx %s job %lld", ctx->name, job->seq);
 
 	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
 
@@ -335,7 +339,7 @@ static void job_abort(struct amdxdna_sched_job *job)
 	if (payload)
 		payload->error_index = 0;
 	else
-		XDNA_ERR(job->ctx->client->xdna, "Failed to find cmd BO payload");
+		XDNA_ERR(xdna, "Failed to find cmd BO payload");
 
 done:
 	job_done(job);
@@ -377,11 +381,14 @@ static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo,
 
 static void job_timeout(struct amdxdna_sched_job *job)
 {
-	struct amdxdna_dev *xdna = job->ctx->client->xdna;
+	struct amdxdna_ctx *ctx = job->ctx;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
 	struct amdxdna_gem_obj *sub_cmd_abo;
 	struct amdxdna_cmd_chain *payload;
 	u32 boh, i = 0;
+
+	XDNA_ERR(xdna, "timing out ctx %s job %lld", ctx->name, job->seq);
 
 	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
 
@@ -398,7 +405,7 @@ static void job_timeout(struct amdxdna_sched_job *job)
 	if (payload) {
 		boh = payload->data[i];
 		payload->error_index = i;
-		sub_cmd_abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
+		sub_cmd_abo = amdxdna_gem_get_obj(ctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!sub_cmd_abo) {
 			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
 		} else {
@@ -420,21 +427,17 @@ static inline void ring_doorbell(struct amdxdna_ctx *ctx)
 
 static inline u64 get_read_index(struct amdxdna_ctx *ctx)
 {
-	u64 ri = READ_ONCE(*ctx->priv->umq_read_index);
-
-	/* Make sure CERT has updated read_index before we complete the job. */
-	dma_rmb();
-	return ri;
+	return READ_ONCE(*ctx->priv->umq_read_index);
 }
 
 /* Publish cmd to CERT and return the assigned cmd ID. */
 static inline u64 publish_cmd(struct amdxdna_ctx *ctx)
 {
-	u64 wi = ctx->priv->write_index;
+	u64 wi = ctx->priv->write_index++;
 
-	/* Make sure the writes to the cmd slot are completed before notifying CERT. */
-	dma_wmb();
-	WRITE_ONCE(*ctx->priv->umq_write_index, ++ctx->priv->write_index);
+	/* Ensure the writes to the cmd slot are completed before notifying CERT. */
+	wmb();
+	WRITE_ONCE(*ctx->priv->umq_write_index, ctx->priv->write_index);
 	return wi;
 }
 
@@ -857,7 +860,6 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 
 	pkt = &priv->umq_pkts[slot_idx];
 	pkt->pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
-	pkt->pkt_header.common_header.reserved = 0x0; /* Remove after update CERT. */
 	pkt->pkt_header.common_header.chain_flag =
 		last_of_chain ? CHAIN_FLG_LAST_CMD : CHAIN_FLG_NOT_LAST_CMD;
 	if (kernel_mode_submission == KMS_REAL_CERT)
@@ -865,6 +867,7 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 	else
 		pkt->pkt_header.completion_signal = (uintptr_t)amdxdna_gem_vmap(cmd_abo);
 	pkt->pkt_header.completion_signal += offsetof(struct amdxdna_cmd, header);
+	pkt->pkt_header.common_header.reserved = 0x0; /* Remove after update CERT. */
 	*seq = publish_cmd(ctx);
 	/*aie4_ctx_umq_dump(ctx);*/
 	if (kernel_mode_submission == KMS_REAL_CERT)
