@@ -221,8 +221,6 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 	for_each_child_of_node(topo_np, region_np) {
 		if (xdna_hdl->mem_topology.num_regions >= MAX_MEM_REGIONS) {
 			XDNA_DBG(xdna, "Too many topology entries, max %d", MAX_MEM_REGIONS);
-			/* Iterator does not put current child; must put when breaking out. */
-			of_node_put(region_np);
 			break;
 		}
 
