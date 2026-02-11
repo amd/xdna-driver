@@ -17,6 +17,8 @@
 #include "amdxdna_error.h"
 #include "amdxdna_drm.h"
 
+extern int enable_debug_queue;
+
 static int ve2_query_ctx_status_array(struct amdxdna_client *client,
 				      struct amdxdna_drm_hwctx_entry *tmp,
 				      pid_t pid, u32 ctx_id)
@@ -277,12 +279,19 @@ static int ve2_aie_write(struct amdxdna_client *client,
 
 	/* Write to AIE memory */
 	//TODO This is temporary fix to exit the debug queue.
-	if (footer.col == 3) {
-		ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
-					    footer.addr, local_buf, footer.size, DBG_CMD_EXIT);
+	if (enable_debug_queue) {
+		if (footer.col == 3) {
+			ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
+						    footer.addr, local_buf, footer.size,
+						    DBG_CMD_EXIT);
+		} else {
+			ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
+						    footer.addr, local_buf, footer.size,
+						    DBG_CMD_WRITE);
+		}
 	} else {
-		ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
-					    footer.addr, local_buf, footer.size, DBG_CMD_WRITE);
+		ret = ve2_partition_write(aie_dev, footer.col, footer.row, footer.addr,
+					  footer.size, local_buf);
 	}
 
 	if (ret < 0) {
@@ -366,8 +375,13 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 		return -ENOMEM;
 
 	/* Read from AIE memory */
-	ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
-				    footer.addr, local_buf, footer.size, DBG_CMD_READ);
+	if (enable_debug_queue) {
+		ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
+					    footer.addr, local_buf, footer.size, DBG_CMD_READ);
+	} else {
+		ret = ve2_partition_read(aie_dev, footer.col, footer.row, footer.addr,
+					 footer.size, local_buf);
+	}
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Error in AIE memory read operation, err: %d", ret);
 		kfree(local_buf);

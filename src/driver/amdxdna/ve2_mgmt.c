@@ -19,6 +19,8 @@ static int aie_error_delay_sec;
 module_param(aie_error_delay_sec, int, 0644);
 MODULE_PARM_DESC(aie_error_delay_sec, "Delay in seconds on AIE error before waking threads (for devmem debug, default=0)");
 
+extern int enable_debug_queue;
+
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
 				     struct xrs_action_load *load_act);
@@ -36,7 +38,8 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,
 
 	if (col == 0) {
 		hsa_addr = nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr;
-		dbg_addr = nhwctx->hwctx_dbg_queue.dbg_queue_mem.dma_addr;
+		if (enable_debug_queue)
+			dbg_addr = nhwctx->hwctx_dbg_queue.dbg_queue_mem.dma_addr;
 	}
 
 	u32 lead_col_addr = VE2_ADDR(start_col, 0, 0);
