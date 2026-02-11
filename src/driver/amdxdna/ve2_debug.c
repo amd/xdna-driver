@@ -550,7 +550,7 @@ fill_metadata:
 }
 
 static int ve2_get_hwctx_mem_bitmap(struct amdxdna_client *client,
-				     struct amdxdna_drm_get_array *args)
+				    struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx *hwctx;

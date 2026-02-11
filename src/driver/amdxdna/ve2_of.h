@@ -15,7 +15,6 @@
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
 #define MIN_COL_SUPPORT		4
-#define AIE_MAX_COL		36	/* 36 columns total: valid indices 0..(AIE_MAX_COL-1) */
 #define VERBOSITY_LEVEL_DBG	2
 
 /*

@@ -235,9 +235,11 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 			XDNA_DBG(xdna, "Invalid columns range: %u-%u", col_range[0], col_range[1]);
 			continue;
 		}
-		if (col_range[0] > col_range[1] || col_range[1] >= AIE_MAX_COL) {
+		if (col_range[0] > col_range[1] ||
+		    col_range[1] >= xdna_hdl->aie_dev_info.cols) {
 			XDNA_DBG(xdna, "Columns range %u-%u out of bounds (valid 0..%u)",
-				 col_range[0], col_range[1], AIE_MAX_COL - 1);
+				 col_range[0], col_range[1],
+				 xdna_hdl->aie_dev_info.cols - 1);
 			continue;
 		}
 
@@ -423,8 +425,10 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	/* Parse memory topology to enable automatic CMA region selection */
 	ret = ve2_parse_mem_topology(xdna, pdev);
-	if (ret < 0)
-		XDNA_DBG(xdna, "Failed to parse memory topology\n");
+	if (ret == -ENOENT)
+		XDNA_DBG(xdna, "Memory topology not present; using default CMA\n");
+	else if (ret < 0)
+		XDNA_DBG(xdna, "Failed to parse memory topology (err=%d)\n", ret);
 
 	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",
 		 xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows,

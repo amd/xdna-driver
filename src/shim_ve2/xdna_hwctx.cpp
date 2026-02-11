@@ -368,14 +368,14 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
 
   /* Inject hwctx mem_bitmap (queried from driver) into BO flags. */
   xcl_bo_flags xflags{flags};
-
+  /* When m_mem_bitmap == 0 (no topology), pass 0 so kernel uses default CMA. */
   if (xflags.use > 0) {
     /* Internal BO: pass whole bitmap */
     xflags.bank = m_mem_bitmap;
   } else {
-    /* External BO: pass the same bank in bitmap */
-    uint32_t bank = xflags.bank;
-    xflags.bank = (m_mem_bitmap == 0) ? 0 : (1U << bank);
+    /* External BO: single region from bitmap, or 0 for default CMA */
+    uint32_t bank_index = xflags.bank;
+    xflags.bank = (m_mem_bitmap == 0) ? 0 : (1U << bank_index);
   }
 
   uint64_t corrected_flags = xflags.all;
