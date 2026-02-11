@@ -36,6 +36,10 @@ int max_col;
 module_param(max_col, int, 0644);
 MODULE_PARM_DESC(max_col, "Max column supported by this driver");
 
+int enable_debug_queue;
+module_param(enable_debug_queue, int, 0644);
+MODULE_PARM_DESC(enable_debug_queue, "Enable debug queue. It is disabled by default.");
+
 #define CTX_TIMER	(nsecs_to_jiffies(1))
 
 /*
@@ -542,6 +546,10 @@ int submit_command_to_dbg_queue(struct amdxdna_ctx *hwctx, u32 opcode, u32 aie_a
 	u64 slot_id = 0;
 	int err;
 
+	if (!ve2_ctx || !ve2_ctx->hwctx_dbg_queue.dbg_queue_p) {
+		XDNA_ERR(xdna, "Debug queue is not initialized");
+		return -EINVAL;
+	}
 	dbg_queue = (struct ve2_dbg_queue *)&ve2_ctx->hwctx_dbg_queue;
 	pkt = (struct host_queue_packet *)ve2_get_queue_pkt(hwctx, &slot_id, &err,
 		"DBG",
@@ -1383,6 +1391,9 @@ static void dbg_q_timeout_cb(struct timer_list *t)
 {
 	struct amdxdna_ctx_priv *priv = from_timer(priv, t, dbg_q_timer);
 
+	if (!priv || !priv->hwctx_dbg_queue.dbg_queue_p)
+		return;
+
 	wake_up_interruptible(&priv->dbg_q_waitq);
 	mod_timer(&priv->dbg_q_timer, jiffies + CTX_TIMER);
 }
@@ -1442,15 +1453,19 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		XDNA_DBG(xdna, "Running in interrupt mode");
 	}
 
-	/* one dbg_queue entry per hwctx */
-	ret = ve2_create_dbg_queue(xdna, &priv->hwctx_dbg_queue);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to create dbg queue, ret=%d", ret);
-		goto free_hsa_queue;
+	if (enable_debug_queue) {
+		/* one dbg_queue entry per hwctx */
+		ret = ve2_create_dbg_queue(xdna, &priv->hwctx_dbg_queue);
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to create dbg queue, ret=%d", ret);
+			goto free_hsa_queue;
+		}
 	}
-	init_waitqueue_head(&priv->dbg_q_waitq);
-	timer_setup(&priv->dbg_q_timer, dbg_q_timeout_cb, 0);
-	mod_timer(&priv->dbg_q_timer, jiffies + CTX_TIMER);
+	if (enable_debug_queue) {
+		init_waitqueue_head(&priv->dbg_q_waitq);
+		timer_setup(&priv->dbg_q_timer, dbg_q_timeout_cb, 0);
+		mod_timer(&priv->dbg_q_timer, jiffies + CTX_TIMER);
+	}
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_clear_firmware_status(xdna, hwctx);
@@ -1493,7 +1508,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 		 hwctx, nhwctx->start_col, nhwctx->num_col,
 		 hwctx->submitted, hwctx->completed);
 
-	del_timer_sync(&hwctx->priv->dbg_q_timer);
+	if (enable_debug_queue && hwctx->priv)
+		del_timer_sync(&hwctx->priv->dbg_q_timer);
 
 	if (enable_polling)
 		del_timer_sync(&hwctx->priv->event_timer);
@@ -1547,11 +1563,13 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 		 &hwctx->priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr,
 		 &hwctx->priv->hwctx_hsa_queue.hq_lock,
 		 sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
-	ve2_free_queue(xdna, "DBG", (void **)&hwctx->priv->hwctx_dbg_queue.dbg_queue_p,
-		 &hwctx->priv->hwctx_dbg_queue.alloc_dev,
-		 &hwctx->priv->hwctx_dbg_queue.dbg_queue_mem.dma_addr,
-		 &hwctx->priv->hwctx_dbg_queue.hq_lock,
-		 sizeof(struct dbg_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
+	if (enable_debug_queue) {
+		ve2_free_queue(xdna, "DBG", (void **)&hwctx->priv->hwctx_dbg_queue.dbg_queue_p,
+		 	       &hwctx->priv->hwctx_dbg_queue.alloc_dev,
+			       &hwctx->priv->hwctx_dbg_queue.dbg_queue_mem.dma_addr,
+			       &hwctx->priv->hwctx_dbg_queue.hq_lock,
+			       sizeof(struct dbg_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
+	}
 
 	kfree(hwctx->priv->hwctx_config);
 	mutex_destroy(&hwctx->priv->privctx_lock);
