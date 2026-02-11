@@ -142,6 +142,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 
 		device_initialize(child_dev);
 		child_dev->parent = &pdev->dev;
+		child_dev->of_node = pdev->dev.of_node;
 		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
 		child_dev->release = ve2_cma_device_release;
 
@@ -231,10 +232,6 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 			continue;
 		}
 
-		if (col_range[0] == U32_MAX || col_range[1] == U32_MAX) {
-			XDNA_DBG(xdna, "Invalid columns range: %u-%u", col_range[0], col_range[1]);
-			continue;
-		}
 		if (col_range[0] > col_range[1] ||
 		    col_range[1] >= xdna_hdl->aie_dev_info.cols) {
 			XDNA_DBG(xdna, "Columns range %u-%u out of bounds (valid 0..%u)",
