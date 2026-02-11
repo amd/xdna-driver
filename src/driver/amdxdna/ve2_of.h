@@ -85,7 +85,7 @@ struct amdxdna_ctx_command_fifo {
 struct amdxdna_ctx_priv {
 	u32				start_col;
 	u32				num_col;
-	u32				mem_index;
+	u32				mem_bitmap;
 	u32				state;
 	struct device			*aie_dev;
 	struct aie_partition_init_args	*args;
@@ -126,7 +126,7 @@ struct amdxdna_mgmtctx {
 struct ve2_mem_region {
 	u32	start_col;
 	u32	end_col;
-	u32	mem_index;
+	u32	mem_bitmap;
 };
 
 struct ve2_mem_topology {
@@ -149,7 +149,7 @@ struct amdxdna_dev_hdl {
 
 /* ve2_of.c */
 extern const struct amdxdna_dev_ops ve2_ops;
-void ve2_auto_select_mem_index(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
+void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx);
 int ve2_hwctx_init(struct amdxdna_ctx *hwctx);
 void ve2_hwctx_fini(struct amdxdna_ctx *hwctx);
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size);

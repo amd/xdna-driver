@@ -23,10 +23,6 @@ namespace pt = boost::property_tree;
 // Minimum column alignment required by the driver (must be a multiple of this value)
 constexpr uint32_t MIN_COL_SUPPORT = 4;
 
-// Maximum number of CMA memory regions supported by the driver.
-// This must match MAX_MEM_REGIONS in kernel (amdxdna_drm.h).
-constexpr uint32_t MAX_MEM_REGIONS = 8;
-
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
 {
   std::stringstream aie_stream;
@@ -137,8 +133,8 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   set_slotidx(arg.handle);
   shim_debug("HW context created with handle=%u", arg.handle);
 
-  // Query the auto-selected mem_index from the driver
-  query_mem_index();
+  // Query the auto-selected mem_bitmap from the driver
+  query_mem_bitmap();
 
   try {
     m_info = get_partition_info_hw(m_device, xclbin.get_uuid(), arg.handle);
@@ -238,8 +234,8 @@ xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_contex
   set_doorbell(arg.umq_doorbell);
   shim_debug("HW context created: handle=%u, doorbell=%u", arg.handle, arg.umq_doorbell);
 
-  // Query the auto-selected mem_index from the driver
-  query_mem_index();
+  // Query the auto-selected mem_bitmap from the driver
+  query_mem_bitmap();
 
   // TODO : create xdna_aie_array object after ELF has AIE_METADATA, AIE_PARTITION
   // sections added
@@ -250,23 +246,23 @@ xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_contex
 
 void
 xdna_hwctx::
-query_mem_index()
+query_mem_bitmap()
 {
-  uint32_t mem_index = 0;
+  uint32_t mem_bitmap = 0;
 
   amdxdna_drm_get_array array_args = {};
-  array_args.param = DRM_AMDXDNA_HWCTX_MEM_INDEX;
+  array_args.param = DRM_AMDXDNA_HWCTX_MEM_BITMAP;
   array_args.element_size = m_handle;  // Pass context_id via element_size
   array_args.num_element = 1;
-  array_args.buffer = reinterpret_cast<uint64_t>(&mem_index);
+  array_args.buffer = reinterpret_cast<uint64_t>(&mem_bitmap);
 
   try {
     m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &array_args);
-    m_mem_index = mem_index;
-    shim_debug("Queried mem_index=0x%x for hwctx handle=%u", m_mem_index, m_handle);
+    m_mem_bitmap = mem_bitmap;
+    shim_debug("Queried mem_bitmap=0x%x for hwctx handle=%u", m_mem_bitmap, m_handle);
   } catch (const xrt_core::system_error& ex) {
-    m_mem_index = 0;
-    shim_debug("Failed to query mem_index (using default CMA): %s (err=%d: %s)",
+    m_mem_bitmap = 0;
+    shim_debug("Failed to query mem_bitmap (using default CMA): %s (err=%d: %s)",
                ex.what(), ex.get_code(), errno_to_str(ex.get_code()));
   }
 }
@@ -370,16 +366,16 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   // const_cast: alloc_bo() is not const yet in device class
   auto dev = const_cast<device_xdna*>(get_device());
 
-  /* Inject hwctx mem_index (queried from driver) into BO flags. */
+  /* Inject hwctx mem_bitmap (queried from driver) into BO flags. */
   xcl_bo_flags xflags{flags};
 
   if (xflags.use > 0) {
     /* Internal BO: pass whole bitmap */
-    xflags.bank = m_mem_index;
+    xflags.bank = m_mem_bitmap;
   } else {
     /* External BO: pass the same bank in bitmap */
     uint32_t bank = xflags.bank;
-    xflags.bank = (m_mem_index == 0) ? 0 : (1U << bank);
+    xflags.bank = (m_mem_bitmap == 0) ? 0 : (1U << bank);
   }
 
   uint64_t corrected_flags = xflags.all;

@@ -142,7 +142,6 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 
 		device_initialize(child_dev);
 		child_dev->parent = &pdev->dev;
-		child_dev->of_node = pdev->dev.of_node;
 		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
 		child_dev->release = ve2_cma_device_release;
 
@@ -178,24 +177,32 @@ cleanup:
  * @xdna: Pointer to the device structure
  * @pdev: Pointer to the platform device
  *
- * Finds the aie_mem_topology node by compatible (root or sibling of telluride_drm).
- * Each child defines columns = <start end> and one or more memory-region phandles;
- * phandles are resolved to CMA indices and stored as a bitmap per entry.
- * Topology is stored as a compact list (regions[0..num_regions-1]), cap MAX_MEM_REGIONS.
+ * Finds the aie_mem_topology node by compatible. Search starts from the
+ * platform device's parent so the topology node is expected as a sibling
+ * (same parent as the amdxdna node). Uses standard of_find_compatible_node().
+ * Each child defines columns = <start end> and one or more memory-region
+ * phandles; phandles are resolved to CMA indices and stored as a bitmap.
+ * Topology is stored as regions[0..num_regions-1], cap MAX_MEM_REGIONS.
  */
 static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_device *pdev)
 {
 	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
 	struct device_node *pdev_mem_nodes[MAX_MEM_REGIONS];
-	struct device_node *topo_np, *region_np;
-	struct device_node *mem_node;
-	u32 columns[2], mem_idx_bmap;
+	struct device_node *mem_region_np;
+	struct device_node *region_np;
+	struct device_node *topo_np;
+	u32 cma_region_bitmap;
+	u32 cma_region_idx;
+	u32 col_range[2];
 	int num_phandles;
-	u32 phdl_idx;
+	int region_idx;
+	int phandle_idx;
 	int ret;
-	u32 i;
 
-	topo_np = of_find_compatible_node(of_root, NULL, "xlnx,aie-mem-topology");
+	topo_np = NULL;
+	if (pdev->dev.of_node && pdev->dev.of_node->parent)
+		topo_np = of_find_compatible_node(pdev->dev.of_node->parent, NULL,
+						  "xlnx,aie-mem-topology");
 	if (!topo_np) {
 		XDNA_DBG(xdna, "No aie_mem_topology node found, using default CMA");
 		xdna_hdl->mem_topology.num_regions = 0;
@@ -203,30 +210,34 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 	}
 
 	/* Build phandle -> CMA index map from platform device's memory-region */
-	for (i = 0; i < MAX_MEM_REGIONS; i++)
-		pdev_mem_nodes[i] = of_parse_phandle(pdev->dev.of_node, "memory-region", i);
+	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++)
+		pdev_mem_nodes[cma_region_idx] = of_parse_phandle(pdev->dev.of_node,
+								  "memory-region",
+								  cma_region_idx);
 
 	xdna_hdl->mem_topology.num_regions = 0;
 
 	for_each_child_of_node(topo_np, region_np) {
 		if (xdna_hdl->mem_topology.num_regions >= MAX_MEM_REGIONS) {
 			XDNA_DBG(xdna, "Too many topology entries, max %d", MAX_MEM_REGIONS);
+			/* Iterator does not put current child; must put when breaking out. */
+			of_node_put(region_np);
 			break;
 		}
 
-		ret = of_property_read_u32_array(region_np, "columns", columns, 2);
+		ret = of_property_read_u32_array(region_np, "columns", col_range, 2);
 		if (ret) {
 			XDNA_DBG(xdna, "Failed to read columns property: %d", ret);
 			continue;
 		}
 
-		if (columns[0] == U32_MAX || columns[1] == U32_MAX) {
-			XDNA_DBG(xdna, "Invalid columns range: %u-%u", columns[0], columns[1]);
+		if (col_range[0] == U32_MAX || col_range[1] == U32_MAX) {
+			XDNA_DBG(xdna, "Invalid columns range: %u-%u", col_range[0], col_range[1]);
 			continue;
 		}
-		if (columns[0] > columns[1] || columns[1] >= AIE_MAX_COL) {
+		if (col_range[0] > col_range[1] || col_range[1] >= AIE_MAX_COL) {
 			XDNA_DBG(xdna, "Columns range %u-%u out of bounds (valid 0..%u)",
-				 columns[0], columns[1], AIE_MAX_COL - 1);
+				 col_range[0], col_range[1], AIE_MAX_COL - 1);
 			continue;
 		}
 
@@ -236,83 +247,84 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 			continue;
 		}
 
-		mem_idx_bmap = 0;
-		for (phdl_idx = 0;
-		     phdl_idx < (u32)num_phandles && phdl_idx < MAX_MEM_REGIONS;
-		     phdl_idx++) {
-			mem_node = of_parse_phandle(region_np, "memory-region", phdl_idx);
-			if (!mem_node)
+		cma_region_bitmap = 0;
+		for (phandle_idx = 0;
+		     phandle_idx < (u32)num_phandles && phandle_idx < MAX_MEM_REGIONS;
+		     phandle_idx++) {
+			mem_region_np = of_parse_phandle(region_np, "memory-region", phandle_idx);
+			if (!mem_region_np)
 				continue;
-			for (i = 0; i < MAX_MEM_REGIONS; i++) {
-				if (!pdev_mem_nodes[i])
+			for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS;
+			     cma_region_idx++) {
+				if (!pdev_mem_nodes[cma_region_idx])
 					break;
-				if (pdev_mem_nodes[i] == mem_node) {
-					mem_idx_bmap |= (1U << i);
+				if (pdev_mem_nodes[cma_region_idx] == mem_region_np) {
+					cma_region_bitmap |= (1U << cma_region_idx);
 					break;
 				}
 			}
-			of_node_put(mem_node);
+			of_node_put(mem_region_np);
 		}
 
-		if (mem_idx_bmap == 0) {
+		if (cma_region_bitmap == 0) {
 			XDNA_DBG(xdna, "No valid CMA phandles for cols %u-%u",
-				 columns[0], columns[1]);
+				 col_range[0], col_range[1]);
 			continue;
 		}
 
-		i = xdna_hdl->mem_topology.num_regions;
-		xdna_hdl->mem_topology.regions[i].start_col = columns[0];
-		xdna_hdl->mem_topology.regions[i].end_col = columns[1];
-		xdna_hdl->mem_topology.regions[i].mem_index = mem_idx_bmap;
+		region_idx = xdna_hdl->mem_topology.num_regions;
+		xdna_hdl->mem_topology.regions[region_idx].start_col = col_range[0];
+		xdna_hdl->mem_topology.regions[region_idx].end_col = col_range[1];
+		xdna_hdl->mem_topology.regions[region_idx].mem_bitmap = cma_region_bitmap;
 		xdna_hdl->mem_topology.num_regions++;
 
 		XDNA_DBG(xdna, "Mem topology entry %u: cols %u-%u bitmap=0x%x",
-			 i, columns[0], columns[1], mem_idx_bmap);
+			 region_idx, col_range[0], col_range[1], cma_region_bitmap);
 	}
 
-	for (i = 0; i < MAX_MEM_REGIONS; i++) {
-		if (pdev_mem_nodes[i])
-			of_node_put(pdev_mem_nodes[i]);
+	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++) {
+		if (pdev_mem_nodes[cma_region_idx])
+			of_node_put(pdev_mem_nodes[cma_region_idx]);
 	}
 	of_node_put(topo_np);
 	return 0;
 }
 
 /**
- * ve2_auto_select_mem_index - Auto-select memory bitmap based on start_col
+ * ve2_auto_select_mem_bitmap - Auto-select memory bitmap based on start_col
  * @xdna: Pointer to the device structure
  * @hwctx: Hardware context (must be called AFTER ve2_xrs_request)
  *
  * Uses the ACTUAL allocated start_col (from XRS) and the parsed memory topology.
- * Stores the selected mem_index in hwctx->priv->mem_index.
+ * Stores the selected mem_bitmap in hwctx->priv->mem_bitmap.
  * If no topology or start_col not in any range, sets 0 (use default CMA).
  */
-void ve2_auto_select_mem_index(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
 	u32 start_col = priv->start_col;
 	struct ve2_mem_topology *topo;
-	u32 i;
+	u32 region_idx;
 
 	if (!xdna_hdl) {
-		priv->mem_index = 0;
+		priv->mem_bitmap = 0;
 		return;
 	}
 
 	topo = &xdna_hdl->mem_topology;
-	for (i = 0; i < topo->num_regions; i++) {
-		if (start_col >= topo->regions[i].start_col &&
-		    start_col <= topo->regions[i].end_col) {
-			priv->mem_index = topo->regions[i].mem_index;
-			XDNA_DBG(xdna, "Auto-selected mem_index=0x%x for start_col=%u",
-				 topo->regions[i].mem_index, start_col);
+	for (region_idx = 0; region_idx < topo->num_regions; region_idx++) {
+		if (start_col >= topo->regions[region_idx].start_col &&
+		    start_col <= topo->regions[region_idx].end_col) {
+			priv->mem_bitmap = topo->regions[region_idx].mem_bitmap;
+			XDNA_DBG(xdna, "Auto-selected mem_bitmap=0x%x for start_col=%u",
+				 topo->regions[region_idx].mem_bitmap, start_col);
 			return;
 		}
 	}
 
 	XDNA_DBG(xdna, "No topology match for start_col=%u, using default CMA", start_col);
-	priv->mem_index = 0;
+	priv->mem_bitmap = 0;
 }
 
 static int ve2_init(struct amdxdna_dev *xdna)

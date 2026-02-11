@@ -549,19 +549,19 @@ fill_metadata:
 	return 0;
 }
 
-static int ve2_get_hwctx_mem_index(struct amdxdna_client *client,
-				   struct amdxdna_drm_get_array *args)
+static int ve2_get_hwctx_mem_bitmap(struct amdxdna_client *client,
+				     struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx *hwctx;
 	u32 context_id;
-	u32 mem_index;
+	u32 mem_bitmap;
 	int idx;
 
 	/* Context ID is passed via element_size */
 	context_id = args->element_size;
 
-	XDNA_DBG(xdna, "Query mem_index for context_id=%u", context_id);
+	XDNA_DBG(xdna, "Query mem_bitmap for context_id=%u", context_id);
 
 	idx = srcu_read_lock(&client->ctx_srcu);
 	hwctx = xa_load(&client->ctx_xa, context_id);
@@ -577,13 +577,13 @@ static int ve2_get_hwctx_mem_index(struct amdxdna_client *client,
 		return -EINVAL;
 	}
 
-	mem_index = hwctx->priv->mem_index;
+	mem_bitmap = hwctx->priv->mem_bitmap;
 	srcu_read_unlock(&client->ctx_srcu, idx);
 
-	XDNA_DBG(xdna, "Returning mem_index=0x%x for context_id=%u", mem_index, context_id);
+	XDNA_DBG(xdna, "Returning mem_bitmap=0x%x for context_id=%u", mem_bitmap, context_id);
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &mem_index, sizeof(mem_index))) {
-		XDNA_ERR(xdna, "Failed to copy mem_index to user");
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &mem_bitmap, sizeof(mem_bitmap))) {
+		XDNA_ERR(xdna, "Failed to copy mem_bitmap to user");
 		return -EFAULT;
 	}
 
@@ -801,9 +801,9 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	case DRM_AMDXDNA_HWCTX_AIE_PART_FD:
 		ret = ve2_get_aie_part_fd(client, args);
 		break;
-	case DRM_AMDXDNA_HWCTX_MEM_INDEX:
-		XDNA_DBG(xdna, "Getting hardware context mem_index");
-		ret = ve2_get_hwctx_mem_index(client, args);
+	case DRM_AMDXDNA_HWCTX_MEM_BITMAP:
+		XDNA_DBG(xdna, "Getting hardware context mem_bitmap");
+		ret = ve2_get_hwctx_mem_bitmap(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

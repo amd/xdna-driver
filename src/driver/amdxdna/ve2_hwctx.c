@@ -480,15 +480,16 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	int nslots = HOST_QUEUE_ENTRY;
 	struct device *alloc_dev;
 	dma_addr_t dma_handle;
+	int cma_region_idx;
 	size_t alloc_size;
 
 	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * nslots;
 	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
 
-	/* Allocate a single contiguous block of memory */
-	for (int i = 0; i < MAX_MEM_REGIONS; i++) {
-		alloc_dev = xdna->cma_region_devs[i];
-		if ((hwctx->priv->mem_index & (1 << i)) && alloc_dev) {
+	/* Allocate from context's CMA region(s); try bitmap order (region 0, 1, ...). */
+	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++) {
+		alloc_dev = xdna->cma_region_devs[cma_region_idx];
+		if ((hwctx->priv->mem_bitmap & (1 << cma_region_idx)) && alloc_dev) {
 			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
 								&dma_handle, GFP_KERNEL);
 			if (!queue->hsa_queue_p)
@@ -498,7 +499,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 		}
 	}
 
-	/* if no allocation was successful, allocate from the default device */
+	/* If no allocation succeeded, use the default device */
 	if (!queue->hsa_queue_p) {
 		queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
 							alloc_size,
@@ -1258,10 +1259,10 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		goto cleanup_priv;
 	}
 
-	/* Auto-select memory index based on start_col */
-	ve2_auto_select_mem_index(xdna, hwctx);
+	/* Auto-select memory bitmap based on start_col */
+	ve2_auto_select_mem_bitmap(xdna, hwctx);
 
-	/* one host_queue entry per hwctx */
+	/* One host_queue entry per hwctx */
 	ret = ve2_create_host_queue(xdna, hwctx, &priv->hwctx_hsa_queue);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to create host queue, ret=%d", ret);
@@ -1289,6 +1290,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	return 0;
 
 cleanup_xrs:
+	/* Releases XRS and partition (ve2_mgmt_destroy_partition calls ve2_xrs_release). */
 	ve2_mgmt_destroy_partition(hwctx);
 cleanup_priv:
 	kfree(hwctx->priv);
