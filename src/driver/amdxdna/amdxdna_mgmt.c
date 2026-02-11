@@ -4,15 +4,52 @@
  */
 
 #include <drm/drm_cache.h>
+#include <linux/log2.h>
+#include <linux/string_helpers.h>
 
 #include "amdxdna_mgmt.h"
+
+#define MGMT_BUF_REGION_SIZE		SZ_64M
+
+/*
+ * Validate DMA buffer constraints:
+ * 1. Buffer must be entirely within a single 64MB-aligned region
+ * 2. Buffer size must be between 8KB (inclusive) and 64MB (inclusive)
+ * 3. Buffer size must be a power of 2
+ * 4. Buffer address must be aligned to the buffer size
+ */
+static int amdxdna_mgmt_buff_validate(struct amdxdna_dev *xdna, dma_addr_t addr, size_t size)
+{
+	if (size < SZ_8K || size > MGMT_BUF_REGION_SIZE) {
+		XDNA_ERR(xdna, "Buffer size 0x%lx not in range [8KB, 64MB]", size);
+		return -EINVAL;
+	}
+
+	if (!is_power_of_2(size)) {
+		XDNA_ERR(xdna, "Buffer size 0x%lx is not a power of 2", size);
+		return -EINVAL;
+	}
+
+	if (!IS_ALIGNED(addr, size)) {
+		XDNA_ERR(xdna, "Buffer addr 0x%llx is not aligned to size 0x%lx", addr, size);
+		return -EINVAL;
+	}
+
+	if ((addr & ~(MGMT_BUF_REGION_SIZE - 1)) !=
+	    ((addr + size - 1) & ~(MGMT_BUF_REGION_SIZE - 1))) {
+		XDNA_ERR(xdna, "Buffer [0x%llx, 0x%llx) crosses 64MB boundary", addr, addr + size);
+		return -EINVAL;
+	}
+
+	return 0;
+}
 
 struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, size_t size,
 						     enum dma_data_direction dir)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 
-	if (!size)
+	if (!size || size < SZ_8K)
 		return ERR_PTR(-EINVAL);
 
 	if (size > SZ_4M)
@@ -45,18 +82,36 @@ struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, s
 	if (dma_hdl->aligned_size > SZ_4M)
 		dma_hdl->aligned_size = SZ_4M;
 
-	dma_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, dma_hdl->aligned_size,
-					       &dma_hdl->dma_hdl, dir, GFP_KERNEL);
-	if (!dma_hdl->vaddr) {
-		kfree(dma_hdl);
-		return ERR_PTR(-ENOMEM);
+	if (amdxdna_iova_enabled(xdna)) {
+		dma_hdl->vaddr = amdxdna_iommu_alloc(xdna, dma_hdl->aligned_size,
+						     &dma_hdl->dma_hdl);
+		if (IS_ERR(dma_hdl->vaddr)) {
+			int ret = PTR_ERR(dma_hdl->vaddr);
+
+			kfree(dma_hdl);
+			return ERR_PTR(ret);
+		}
+	} else {
+		dma_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, dma_hdl->aligned_size,
+						       &dma_hdl->dma_hdl, dir, GFP_KERNEL);
+		if (!dma_hdl->vaddr) {
+			kfree(dma_hdl);
+			return ERR_PTR(-ENOMEM);
+		}
 	}
+
+	if (amdxdna_mgmt_buff_validate(xdna, dma_hdl->dma_hdl, dma_hdl->aligned_size))
+		goto free_buf;
 
 	dma_hdl->size = size;
 	dma_hdl->xdna = xdna;
 	dma_hdl->dir = dir;
 
 	return dma_hdl;
+
+free_buf:
+	amdxdna_mgmt_buff_free(dma_hdl);
+	return ERR_PTR(-EINVAL);
 }
 
 int amdxdna_mgmt_buff_clflush(struct amdxdna_mgmt_dma_hdl *dma_hdl, u32 offset, size_t size)
@@ -103,8 +158,15 @@ void amdxdna_mgmt_buff_free(struct amdxdna_mgmt_dma_hdl *dma_hdl)
 	if (!dma_hdl)
 		return;
 
-	dma_free_noncoherent(dma_hdl->xdna->ddev.dev, dma_hdl->aligned_size, dma_hdl->vaddr,
-			     dma_hdl->dma_hdl, dma_hdl->dir);
+	if (amdxdna_iova_enabled(dma_hdl->xdna)) {
+		amdxdna_iommu_free(dma_hdl->xdna, dma_hdl->aligned_size,
+				   dma_hdl->vaddr, dma_hdl->dma_hdl);
+	} else {
+		dma_free_noncoherent(dma_hdl->xdna->ddev.dev,
+				     dma_hdl->aligned_size, dma_hdl->vaddr,
+				     dma_hdl->dma_hdl, dma_hdl->dir);
+	}
+
 	dma_hdl->vaddr = NULL;
 	dma_hdl->size = 0;
 	dma_hdl->dma_hdl = 0;

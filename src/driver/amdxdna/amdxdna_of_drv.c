@@ -21,7 +21,6 @@ MODULE_DEVICE_TABLE(of, amdxdna_of_table);
 
 static int amdxdna_of_probe(struct platform_device *pdev)
 {
-	struct init_config xrs_cfg = { 0 };
 	struct device *dev = &pdev->dev;
 	const struct of_device_id *id;
 	struct amdxdna_dev *xdna;
@@ -56,6 +55,9 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	/* Set vbnv to default - OF devices don't query revision from firmware */
+	xdna->vbnv = xdna->dev_info->default_vbnv;
+
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
@@ -81,24 +83,6 @@ static int amdxdna_of_probe(struct platform_device *pdev)
 
 	if (xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
-
-	xrs_cfg.ddev = &xdna->ddev;
-
-	if (max_col > 0 && start_col >= 0 &&
-	    (max_col + start_col) < XRS_MAX_COL) {
-		xrs_cfg.total_col = max_col;
-	} else {
-		xrs_cfg.total_col = XRS_MAX_COL;
-	}
-
-	if (xdna->dev_handle)
-		xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
-
-	if (!xdna->dev_handle || !xdna->dev_handle->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialize resolver failed");
-		drm_dev_put(&xdna->ddev);
-		return -EINVAL;
-	}
 
 	iommu_mode = AMDXDNA_IOMMU_NO_PASID;
 
@@ -134,5 +118,5 @@ module_platform_driver(amdxdna_of_plat_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
-MODULE_VERSION("0.1");
+MODULE_VERSION(MODULE_VER_STR);
 MODULE_DESCRIPTION("amdxdna_of driver");

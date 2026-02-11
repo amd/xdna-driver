@@ -6,15 +6,26 @@
 #ifndef _VE2_OF_H_
 #define _VE2_OF_H_
 
+#include <linux/timekeeping.h>
+#include "amdxdna_error.h"
 #include "amdxdna_of_drv.h"
 #include "ve2_host_queue.h"
 #include "ve2_fw.h"
 
 #define HWCTX_MAX_CMDS		HOST_QUEUE_ENTRY
 #define get_job_idx(seq)	((seq) & (HWCTX_MAX_CMDS - 1))
-
+#define MIN_COL_SUPPORT		4
 #define VERBOSITY_LEVEL_DBG	2
-#define VE2_MAX_COL		36
+
+/*
+ * VE2_RETRY_TIMEOUT_MS - Total timeout for command retry attempts
+ *
+ * This is the maximum time we'll wait for a queue slot to become available
+ * when the hardware queue is full. The wait is event-driven (IRQ wakes us
+ * when a slot frees up), not polling-based, so this timeout is only hit
+ * if the hardware becomes unresponsive.
+ */
+#define VE2_RETRY_TIMEOUT_MS	5000
 
 #define aie_calc_part_id(start_col, num_col)	\
 	(((start_col) << AIE_PART_ID_START_COL_SHIFT) + \
@@ -73,10 +84,11 @@ struct amdxdna_ctx_command_fifo {
 struct amdxdna_ctx_priv {
 	u32				start_col;
 	u32				num_col;
+	u32				state;
 	struct device			*aie_dev;
 	struct aie_partition_init_args	*args;
 	struct ve2_hsa_queue		hwctx_hsa_queue;
-	struct ve2_config_hwctx		hwctx_config[VE2_MAX_COL];
+	struct ve2_config_hwctx		*hwctx_config;
 	wait_queue_head_t		waitq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	struct timer_list		event_timer;
@@ -98,12 +110,15 @@ struct amdxdna_mgmtctx {
 	u32				mgmt_partid;
 	struct aie_partition_init_args	args;
 	struct list_head		ctx_command_fifo_head;
-	spinlock_t			ctx_lock; /* protect ctx add/remove/update */
+	struct mutex			ctx_lock; /* protect ctx add/remove/update */
 	struct work_struct		sched_work;
 	struct workqueue_struct		*mgmtctx_workq;
 	u32			is_partition_idle; /* Hardware sync required */
 	u32			is_context_req; /* Hardware sync required */
 	u32			is_idle_due_to_context; /* Hardware sync required */
+	struct amdxdna_async_err_cache	async_errs_cache; /* cache for async errors */
+	struct completion	error_cb_completion; /* completion for error callback */
+	atomic_t		error_cb_in_progress; /* track if error callback is running */
 };
 
 struct amdxdna_dev_hdl {
@@ -113,8 +128,9 @@ struct amdxdna_dev_hdl {
 	u32				hwctx_cnt;
 	void				*xrs_hdl;
 	struct ve2_firmware_version	fw_version;
-	struct ve2_firmware_status	*fw_slots[VE2_MAX_COL];
-	struct amdxdna_mgmtctx          ve2_mgmtctx[VE2_MAX_COL];
+	struct aie_device_info		aie_dev_info;
+	struct ve2_firmware_status	**fw_slots;
+	struct amdxdna_mgmtctx          *ve2_mgmtctx;
 };
 
 /* ve2_of.c */
@@ -124,7 +140,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx);
 int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *buf, u32 size);
 void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols);
 
-int ve2_cmd_submit(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job, u32 *syncobj_hdls,
+int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 		   u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout);
 
@@ -132,4 +148,5 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout);
 int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id);
+int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 #endif /* _VE2_OF_H_ */

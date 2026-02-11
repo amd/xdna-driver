@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/version.h>
@@ -64,6 +64,7 @@ static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct 
 	synchronize_srcu(ss);
 
 	xdna->dev_info->ops->ctx_fini(ctx);
+	mutex_destroy(&ctx->io_lock);
 	kfree(ctx->name);
 	kfree(ctx);
 }
@@ -118,12 +119,21 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	ctx->max_opc = args->max_opc;
 	ctx->umq_bo = args->umq_bo;
 	ctx->log_buf_bo = args->log_buf_bo;
+	ctx->doorbell_offset = AMDXDNA_INVALID_DOORBELL_OFFSET;
+	ctx->syncobj = NULL;
+	ctx->syncobj_hdl = AMDXDNA_INVALID_FENCE_HANDLE;
+	mutex_init(&ctx->io_lock);
+	fs_reclaim_acquire(GFP_KERNEL);
+	might_lock(&ctx->io_lock);
+	fs_reclaim_release(GFP_KERNEL);
+	atomic64_set(&ctx->job_free_cnt, 0);
+
 	ret = xa_alloc_cyclic(&client->ctx_xa, &ctx->id, ctx,
 			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_CTX_ID),
 			      &client->next_ctxid, GFP_KERNEL);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Allocate ctx ID failed, ret %d", ret);
-		goto free_ctx;
+		goto destroy_io_lock;
 	}
 
 	ctx->name = kasprintf(GFP_KERNEL, "ctx.%d.%d", client->pid, ctx->id);
@@ -138,7 +148,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto free_name;
 	}
 
-	atomic64_set(&ctx->job_free_cnt, 0);
 	args->handle = ctx->id;
 	args->syncobj_handle = ctx->syncobj_hdl;
 	args->umq_doorbell = ctx->doorbell_offset;
@@ -152,6 +161,8 @@ free_name:
 	kfree(ctx->name);
 rm_id:
 	xa_erase(&client->ctx_xa, ctx->id);
+destroy_io_lock:
+	mutex_destroy(&ctx->io_lock);
 free_ctx:
 	kfree(ctx);
 exit:
@@ -205,9 +216,11 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	switch (args->param_type) {
 	case DRM_AMDXDNA_HWCTX_CONFIG_CU:
+	case DRM_AMDXDNA_HWCTX_CONFIG_SCHEDULING:
+	case DRM_AMDXDNA_HWCTX_CONFIG_DPM:
 		/* For those types that param_val is pointer */
 		if (buf_size > PAGE_SIZE) {
-			XDNA_ERR(xdna, "Config CU param buffer too large");
+			XDNA_ERR(xdna, "Config param buffer too large");
 			return -E2BIG;
 		}
 
@@ -224,6 +237,7 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
 	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
+	case DRM_AMDXDNA_HWCTX_CONFIG_PRIORITY_BAND:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;
@@ -308,12 +322,20 @@ put_arg_bos:
 
 void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 {
-	trace_amdxdna_debug_point(job->ctx->name, job->seq, "job release");
+	struct amdxdna_ctx *ctx = job->ctx;
+
+	trace_amdxdna_debug_point(ctx->name, job->seq, "job release");
 	amdxdna_arg_bos_put(job);
 	amdxdna_gem_put_obj(job->cmd_bo);
+	if (job->out_fence)
+		dma_fence_put(job->out_fence);
+	if (job->fence)
+		dma_fence_put(job->fence);
+	kfree(job);
+	atomic64_inc(&ctx->job_free_cnt);
 }
 
-int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+static int amdxdna_lock_job_bos(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = job->ctx->client->xdna;
 	int contended = -1, i, ret;
@@ -373,7 +395,7 @@ retry:
 	return 0;
 }
 
-void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+static void amdxdna_unlock_job_bos(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
 {
 	int i;
 
@@ -386,6 +408,55 @@ void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx
 	}
 
 	ww_acquire_fini(ctx);
+}
+
+int amdxdna_lock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+{
+	struct amdxdna_dev *xdna = job->ctx->client->xdna;
+	struct amdxdna_gem_obj *abo;
+	unsigned long timeout = 0;
+	int ret, i;
+
+retry:
+	ret = amdxdna_lock_job_bos(job, ctx);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to lock job bos, ret %d", ret);
+		return ret;
+	}
+
+	for (i = 0; i < job->bo_cnt; i++) {
+		ret = dma_resv_reserve_fences(job->bos[i].obj->resv, 1);
+		if (ret) {
+			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
+			amdxdna_unlock_job_bos(job, ctx);
+			return ret;
+		}
+	}
+
+	down_read(&xdna->notifier_lock);
+	for (i = 0; i < job->bo_cnt; i++) {
+		abo = to_xdna_obj(job->bos[i].obj);
+		if (!abo->mem.map_invalid)
+			continue;
+
+		amdxdna_unlock_objects(job, ctx);
+		if (!timeout)
+			timeout = jiffies + msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
+		else if (time_after(jiffies, timeout))
+			return -ETIME;
+
+		ret = amdxdna_populate_range(abo);
+		if (ret)
+			return ret;
+		goto retry;
+	}
+	return 0;
+}
+
+void amdxdna_unlock_objects(struct amdxdna_sched_job *job, struct ww_acquire_ctx *ctx)
+{
+	up_read(&job->ctx->client->xdna->notifier_lock);
+	amdxdna_unlock_job_bos(job, ctx);
 }
 
 int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
@@ -404,7 +475,7 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 		return -ENOMEM;
 
 	if (cmd_bo_hdl != AMDXDNA_INVALID_BO_HANDLE) {
-		job->cmd_bo = amdxdna_gem_get_obj(client, cmd_bo_hdl, AMDXDNA_BO_CMD);
+		job->cmd_bo = amdxdna_gem_get_obj(client, cmd_bo_hdl, AMDXDNA_BO_SHARE);
 		if (!job->cmd_bo) {
 			XDNA_ERR(xdna, "Failed to get cmd bo from %d", cmd_bo_hdl);
 			ret = -EINVAL;
@@ -435,16 +506,17 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	job->ctx = ctx;
 	job->mm = current->mm;
 	job->opcode = opcode;
-
+	kref_init(&job->refcnt);
+	INIT_LIST_HEAD(&job->list);
 	job->fence = amdxdna_fence_create(ctx);
 	if (!job->fence) {
 		XDNA_ERR(xdna, "Failed to create fence");
 		ret = -ENOMEM;
 		goto unlock_srcu;
 	}
-	kref_init(&job->refcnt);
+	job->state = JOB_STATE_INIT;
 
-	ret = xdna->dev_info->ops->cmd_submit(ctx, job, syncobj_hdls,
+	ret = xdna->dev_info->ops->cmd_submit(job, syncobj_hdls,
 					      syncobj_points, syncobj_cnt, seq);
 	if (ret) {
 		if (ret != -ERESTARTSYS)
@@ -723,4 +795,42 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 
 	trace_amdxdna_debug_point(current->comm, args->seq, "job returned to user");
 	return ret;
+}
+
+int amdxdna_ctx_syncobj_create(struct amdxdna_ctx *ctx)
+{
+	struct drm_syncobj *syncobj;
+	struct amdxdna_dev *xdna;
+	struct drm_file *filp;
+	u32 hdl;
+	int ret;
+
+	xdna = ctx->client->xdna;
+	filp = ctx->client->filp;
+
+	ret = drm_syncobj_create(&syncobj, 0, NULL);
+	if (ret) {
+		XDNA_ERR(xdna, "Create ctx syncobj failed, ret %d", ret);
+		return ret;
+	}
+	ret = drm_syncobj_get_handle(filp, syncobj, &hdl);
+	if (ret) {
+		drm_syncobj_put(syncobj);
+		XDNA_ERR(xdna, "Create ctx syncobj handle failed, ret %d", ret);
+		return ret;
+	}
+	ctx->syncobj = syncobj;
+	ctx->syncobj_hdl = hdl;
+
+	return 0;
+}
+
+void amdxdna_ctx_syncobj_destroy(struct amdxdna_ctx *ctx)
+{
+	/*
+	 * The syncobj_hdl is owned by user space and will be cleaned up
+	 * separately.
+	 */
+	if (ctx->syncobj)
+		drm_syncobj_put(ctx->syncobj);
 }

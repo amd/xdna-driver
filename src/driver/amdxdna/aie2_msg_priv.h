@@ -9,48 +9,53 @@
 #include <linux/uuid.h>
 
 enum aie2_msg_opcode {
-	MSG_OP_CREATE_CONTEXT              = 0x2,
-	MSG_OP_DESTROY_CONTEXT             = 0x3,
+	MSG_OP_CREATE_CONTEXT			= 0x2,
+	MSG_OP_DESTROY_CONTEXT			= 0x3,
 #ifdef AMDXDNA_DEVEL
-	MSG_OP_GET_TELEMETRY               = 0x4,
+	MSG_OP_GET_TELEMETRY			= 0x4,
 #endif
-	MSG_OP_SYNC_BO			   = 0x7,
-	MSG_OP_EXECUTE_BUFFER_CF           = 0xC,
-	MSG_OP_QUERY_COL_STATUS            = 0xD,
-	MSG_OP_QUERY_AIE_TILE_INFO         = 0xE,
-	MSG_OP_QUERY_AIE_VERSION           = 0xF,
-	MSG_OP_EXEC_DPU                    = 0x10,
-	MSG_OP_CONFIG_CU                   = 0x11,
-	MSG_OP_CHAIN_EXEC_BUFFER_CF        = 0x12,
-	MSG_OP_CHAIN_EXEC_DPU              = 0x13,
-	MSG_OP_CONFIG_DEBUG_BO		   = 0x14,
-	MSG_OP_EXEC_DPU_PREEMPT		   = 0x15,
-	MSG_OP_EXEC_NPU			   = 0x17,
-	MSG_OP_CHAIN_EXEC_NPU		   = 0x18,
+	MSG_OP_SYNC_BO				= 0x7,
+	MSG_OP_EXECUTE_BUFFER_CF		= 0xC,
+	MSG_OP_QUERY_COL_STATUS			= 0xD,
+	MSG_OP_QUERY_AIE_TILE_INFO		= 0xE,
+	MSG_OP_QUERY_AIE_VERSION		= 0xF,
+	MSG_OP_EXEC_DPU				= 0x10,
+	MSG_OP_CONFIG_CU			= 0x11,
+	MSG_OP_CHAIN_EXEC_BUFFER_CF		= 0x12,
+	MSG_OP_CHAIN_EXEC_DPU			= 0x13,
+	MSG_OP_CONFIG_DEBUG_BO			= 0x14,
+	MSG_OP_EXEC_DPU_PREEMPT			= 0x15,
+	MSG_OP_EXEC_NPU				= 0x17,
+	MSG_OP_CHAIN_EXEC_NPU			= 0x18,
 #ifdef AMDXDNA_DEVEL
-	MSG_OP_REGISTER_PDI                = 0x1,
-	MSG_OP_UNREGISTER_PDI              = 0xA,
-	MSG_OP_LEGACY_CONFIG_CU            = 0xB,
+	MSG_OP_REGISTER_PDI			= 0x1,
+	MSG_OP_UNREGISTER_PDI			= 0xA,
+	MSG_OP_LEGACY_CONFIG_CU			= 0xB,
 #endif
 	MSG_OP_MAX_XRT_OPCODE,
-	MSG_OP_SUSPEND                     = 0x101,
-	MSG_OP_RESUME                      = 0x102,
-	MSG_OP_ASSIGN_MGMT_PASID           = 0x103,
-	MSG_OP_INVOKE_SELF_TEST            = 0x104,
-	MSG_OP_MAP_HOST_BUFFER             = 0x106,
-	MSG_OP_GET_FIRMWARE_VERSION        = 0x108,
-	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
-	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
-	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
-	MSG_OP_START_EVENT_TRACE           = 0x10F,
-	MSG_OP_STOP_EVENT_TRACE            = 0x110,
-	MSG_OP_SET_EVENT_TRACE_CATEGORIES  = 0x111,
-	MSG_OP_UPDATE_PROPERTY             = 0x113,
-	MSG_OP_GET_APP_HEALTH              = 0x114,
-	MSG_OP_ADD_HOST_BUFFER             = 0x115,
-	MSG_OP_CONFIG_FW_LOG		   = 0x116,
+	MSG_OP_SUSPEND				= 0x101,
+	MSG_OP_RESUME				= 0x102,
+	MSG_OP_ASSIGN_MGMT_PASID		= 0x103,
+	MSG_OP_INVOKE_SELF_TEST			= 0x104,
+	MSG_OP_MAP_HOST_BUFFER			= 0x106,
+	MSG_OP_GET_FIRMWARE_VERSION		= 0x108,
+	MSG_OP_SET_RUNTIME_CONFIG		= 0x10A,
+	MSG_OP_GET_RUNTIME_CONFIG		= 0x10B,
+	MSG_OP_REGISTER_ASYNC_EVENT_MSG		= 0x10C,
+	MSG_OP_START_FW_TRACE			= 0x10F,
+	MSG_OP_STOP_FW_TRACE			= 0x110,
+	MSG_OP_SET_FW_TRACE_CATEGORIES		= 0x111,
+	MSG_OP_UPDATE_PROPERTY			= 0x113,
+	MSG_OP_GET_APP_HEALTH			= 0x114,
+	MSG_OP_ADD_HOST_BUFFER			= 0x115,
+	MSG_OP_CONFIG_FW_LOG			= 0x116,
+	MSG_OP_GET_DEV_REVISION			= 0x117,
+	MSG_OP_GET_COREDUMP			= 0x119,
+	MSG_OP_CALIBRATE_TIME			= 0x11C,
 	MSG_OP_MAX_DRV_OPCODE,
-	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
+	MSG_OP_AIE_RW_ACCESS			= 0x203,
+	MSG_OP_MAX_ASYNC_OPCODE,
+	MSG_OP_GET_PROTOCOL_VERSION		= 0x301,
 	MSG_OP_MAX_OPCODE
 };
 
@@ -214,6 +219,11 @@ struct exec_dpu_preempt_req {
 	u32	payload[29];
 } __packed;
 
+union exec_req {
+	struct execute_buffer_req ebuf;
+	struct exec_dpu_req dpu_req;
+};
+
 struct execute_buffer_resp {
 	enum aie2_msg_status	status;
 } __packed;
@@ -286,15 +296,6 @@ struct resume_req {
 } __packed;
 
 struct resume_resp {
-	enum aie2_msg_status	status;
-} __packed;
-
-struct check_header_hash_req {
-	u64		hash_high;
-	u64		hash_low;
-} __packed;
-
-struct check_header_hash_resp {
 	enum aie2_msg_status	status;
 } __packed;
 
@@ -400,9 +401,9 @@ enum async_event_type {
 	MAX_ASYNC_EVENT_TYPE
 };
 
-#define ASYNC_BUF_SIZE 0x2000
 struct async_event_msg_req {
 	u64 buf_addr;
+#define ASYNC_BUF_SIZE		SZ_8K
 	u32 buf_size;
 } __packed;
 
@@ -411,51 +412,46 @@ struct async_event_msg_resp {
 	enum async_event_type	type;
 } __packed;
 
-/* Start of event tracing data struct */
-#define MAX_ONE_TIME_LOG_INFO_LEN			16
-#define DEFAULT_EVENT_BUF_SIZE				0x2000
-#define DEFAULT_EVENT_CATEGORY				0xFFFFFFFF
-
-enum event_trace_destination {
-	EVENT_TRACE_DEST_DEBUG_BUS,
-	EVENT_TRACE_DEST_DRAM,
-	EVENT_TRACE_DEST_COUNT
+enum fw_trace_destination {
+	FW_TRACE_DESTINATION_DEBUG_BUS = 0,
+	FW_TRACE_DESTINATION_DRAM,
+	FW_TRACE_DESTINATION_COUNT
 };
 
-enum event_trace_timestamp {
-	EVENT_TRACE_TIMESTAMP_FW_CHRONO,
-	EVENT_TRACE_TIMESTAMP_CPU_CCOUNT,
-	EVENT_TRACE_TIMESTAMP_COUNT
+enum fw_trace_timestamp {
+	FW_TRACE_TIMESTAMP_FW_CHRONO,
+	FW_TRACE_TIMESTAMP_CPU_CCOUNT,
+	FW_TRACE_TIMESTAMP_COUNT
 };
 
-struct start_event_trace_req {
-	u32 event_trace_categories;
-	enum event_trace_destination event_trace_dest;
-	enum event_trace_timestamp event_trace_timestamp;
-	u64 dram_buffer_address;
-	u32 dram_buffer_size;
+struct start_fw_trace_req {
+	u32 categories;
+	enum fw_trace_destination destination;
+	enum fw_trace_timestamp timestamp;
+	u64 buf_addr;
+	u32 buf_size;
 } __packed;
 
-struct start_event_trace_resp {
+struct start_fw_trace_resp {
 	enum aie2_msg_status status;
 	u32 msi_idx;
 	u64 current_timestamp;
 	u32 msi_address;
 } __packed;
 
-struct stop_event_trace_req {
-	u32 place_holder;
+struct stop_fw_trace_req {
+	u32 reserved;
 } __packed;
 
-struct stop_event_trace_resp {
+struct stop_fw_trace_resp {
 	enum aie2_msg_status status;
 } __packed;
 
-struct set_event_trace_categories_req {
-	u32 event_trace_categories;
+struct set_fw_trace_categories_req {
+	u32 fw_trace_categories;
 } __packed;
 
-struct set_event_trace_categories_resp {
+struct set_fw_trace_categories_resp {
 	enum aie2_msg_status status;
 } __packed;
 
@@ -553,6 +549,7 @@ struct exec_npu_req {
 	u32	payload[27];
 } __packed;
 
+#define MAX_NPU_ARGS_SIZE (26 * sizeof(__u32))
 struct cmd_chain_slot_npu {
 	enum exec_npu_type type;
 	u64 inst_buf_addr;
@@ -575,6 +572,11 @@ struct cmd_chain_npu_req {
 	u32 buf_size;
 	u32 count;
 } __packed;
+
+union exec_chain_req {
+	struct cmd_chain_npu_req npu_req;
+	struct cmd_chain_req req;
+};
 
 struct cmd_chain_resp {
 	enum aie2_msg_status	status;
@@ -732,13 +734,94 @@ struct get_app_health_resp {
 
 /* Do NOT put any firmware defined struct, enum etc. start from here */
 struct msg_op_ver {
-	u32			fw_minor;
+	u64			min_fw_version;
 	enum aie2_msg_opcode	op;
 };
 
 struct rt_cfg_ver {
-	u32			fw_minor;
+	u64			min_fw_version;
 	u32			type;
+};
+
+struct buffer_list {
+	u64			buf_addr;
+	u32			buf_size;
+	u32			reserved;
+} __packed;
+
+struct get_coredump_req {
+	u32			context_id;
+	u32			num_bufs;
+	u64			list_addr;
+	u32			list_size;
+} __packed;
+
+struct get_coredump_resp {
+	enum aie2_msg_status	status;
+	u32			required_buffer_size;
+	u32			reserved[7];
+} __packed;
+
+struct calibrate_time_req {
+	u64			timestamp_ns;
+} __packed;
+
+struct calibrate_time_resp {
+	enum aie2_msg_status	status;
+} __packed;
+
+enum aie2_dev_revision {
+	AIE2_DEV_REVISION_STXA = 1,
+	AIE2_DEV_REVISION_STXB,
+	AIE2_DEV_REVISION_KRK1,
+	AIE2_DEV_REVISION_KRK2,
+	AIE2_DEV_REVISION_HALO,
+	AIE2_DEV_REVISION_GPT1,
+	AIE2_DEV_REVISION_GPT2,
+	AIE2_DEV_REVISION_GPT3,
+	AIE2_DEV_REVISION_UNKN,
+};
+
+struct get_dev_revision_req {
+	u32			place_holder;
+} __packed;
+
+struct get_dev_revision_resp {
+	enum aie2_msg_status	status;
+	enum aie2_dev_revision	rev;
+	u32			raw_fuse_data;
+} __packed;
+
+enum aie2_access_type {
+	AIE2_ACCESS_TYPE_MEM_READ,
+	AIE2_ACCESS_TYPE_MEM_WRITE,
+	AIE2_ACCESS_TYPE_REG_READ,
+	AIE2_ACCESS_TYPE_REG_WRITE,
+	AIE2_ACCESS_TYPE_MAX
+};
+
+struct aie_rw_access_req {
+	enum aie2_access_type	type;
+	u8			ctx_id;
+	u8			row;
+	u8			col;
+	u8			reserved;
+	union {
+		struct {
+			u64	dram_addr;
+			u32	aie_offset;
+			u32	size;
+		} __packed mem;
+		struct {
+			u32	aie_offset;
+			u32	write_value;
+		} __packed reg;
+	};
+} __packed;
+
+struct aie_rw_access_resp {
+	enum aie2_msg_status	status;
+	u32			reg_read_value;
 };
 
 #endif /* _AIE2_MSG_PRIV_H_ */

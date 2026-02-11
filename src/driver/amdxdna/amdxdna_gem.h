@@ -1,41 +1,24 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2024-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_GEM_H_
 #define _AMDXDNA_GEM_H_
 
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_file.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <linux/hmm.h>
 
-struct amdxdna_umap {
-	struct vm_area_struct		*vma;
-	struct mmu_interval_notifier	notifier;
-	struct hmm_range		range;
-	struct work_struct		hmm_unreg_work;
-	struct amdxdna_gem_obj		*abo;
-	struct list_head		node;
-	struct kref			refcnt;
-	bool				invalid;
-	bool				unmapped;
-};
-
 struct amdxdna_mem {
-	u64				userptr;
 	void				*kva;
-	u32				kva_use_count;
-	u64				dev_addr;
 	size_t				size;
-	struct page			**pages;
-	u32				nr_pages;
 	struct list_head		umap_list;
 	bool				map_invalid;
 #ifdef AMDXDNA_DEVEL
-	struct sg_table			*sgt;
-	u64				dma_addr; /* IOVA DMA address */
+	u64				dma_addr; /* DMA mapped addr */
 #endif
 };
 
@@ -45,8 +28,13 @@ struct amdxdna_gem_obj {
 	struct amdxdna_client		*client;
 	u8				type;
 	u64				flags;
-	struct mutex			lock; /* Protects: pinned, assigned_ctx */
+	struct mutex			lock; /* Protects: pinned, assigned_ctx, mem.kv_addr */
 	struct amdxdna_mem		mem;
+	/*
+	 * Cache the first mmap uva as PASID addr, which can be accessed by driver
+	 * without taking notifier_lock.
+	 */
+	u64				uva;
 
 	/* Below members are initialized when needed */
 	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */
@@ -54,6 +42,11 @@ struct amdxdna_gem_obj {
 	u32				assigned_ctx; /* For debug bo */
 	struct dma_buf			*dma_buf;
 	struct dma_buf_attachment	*attach;
+
+	/* True, if accounted for internal BO usage */
+	bool				acct_total;
+	/* True, if accounted for total (both internal and external) BO usage */
+	bool				acct_int;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)
@@ -71,8 +64,7 @@ static inline void amdxdna_gem_put_obj(struct amdxdna_gem_obj *abo)
 	drm_gem_object_put(to_gobj(abo));
 }
 
-void amdxdna_umap_put(struct amdxdna_umap *mapp);
-
+int amdxdna_populate_range(struct amdxdna_gem_obj *abo);
 struct drm_gem_object *
 amdxdna_gem_create_shmem_object_cb(struct drm_device *dev, size_t size);
 struct drm_gem_object *
@@ -92,5 +84,9 @@ void amdxdna_gem_clear_assigned_ctx(struct amdxdna_client *client, u32 bo_hdl);
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+
+void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo);
+u64 amdxdna_gem_uva(struct amdxdna_gem_obj *abo);
+u64 amdxdna_gem_dev_addr(struct amdxdna_gem_obj *abo);
 
 #endif /* _AMDXDNA_GEM_H_ */

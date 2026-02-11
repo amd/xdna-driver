@@ -129,6 +129,33 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
 }
 
 xdna_bo::
+xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
+  size_t size, void *uptr)
+  : m_core_device(&device)
+  , m_edev(device.get_edev())
+  , m_aligned_size(size)
+  , m_type(AMDXDNA_BO_SHARE)
+  , m_import(-1)
+  , m_owner_ctx_id(ctx_id)
+  , m_map_offset(0)
+  , m_uptr(uptr)
+{
+  alignas(amdxdna_drm_va_tbl)
+  char buf[sizeof(amdxdna_drm_va_tbl) + sizeof(amdxdna_drm_va_entry)];
+  auto tbl = reinterpret_cast<amdxdna_drm_va_tbl*>(buf);
+  tbl->udma_fd = -1;
+  tbl->num_entries = 1;
+  tbl->va_entries[0].vaddr = reinterpret_cast<uintptr_t>(m_uptr);
+  tbl->va_entries[0].len = m_aligned_size;
+
+  alloc_userptr_bo(buf);
+  m_edev->bo_handle_ref_inc(m_handle);
+
+  shim_debug("Allocated DRM BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
+	     m_ptr, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
+}
+
+xdna_bo::
 xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   : m_edev(device.get_edev())
   , m_import(ehdl)
@@ -194,9 +221,24 @@ munmap_bo()
 
 void
 xdna_bo::
+alloc_userptr_bo(void *buf)
+{
+  amdxdna_drm_create_bo cbo = {
+    .vaddr = reinterpret_cast<uintptr_t>(buf),
+    .size = 0,
+    .type = m_type,
+  };
+  m_edev->ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
+
+  get_drm_bo_info(cbo.handle);
+}
+
+void
+xdna_bo::
 alloc_bo()
 {
   amdxdna_drm_create_bo cbo = {
+    .flags = m_flags,
     .size = m_aligned_size,
     .type = m_type,
   };
@@ -355,7 +397,8 @@ attach_to_ctx(uint32_t flag)
   auto boh = get_drm_bo_handle();
   uint32_t total_cols = get_total_cols(m_core_device, m_owner_ctx_id);
   if(total_cols == 0)
-    throw xrt_core::error(-EINVAL, "attach_to_ctx: partition info not found");
+    throw xrt_core::error(-EINVAL, std::string("attach_to_ctx: partition info not found (err=") +
+                          std::to_string(EINVAL) + ": " + errno_to_str(EINVAL) + ")");
 
   auto buf_size = get_properties().size;
   std::map<uint32_t, size_t> buf_sizes;

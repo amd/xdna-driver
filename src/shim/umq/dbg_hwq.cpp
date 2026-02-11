@@ -17,7 +17,11 @@ dbg_hwq_umq(const device& dev)
 
   shim_debug("dbg umq sz %ld", umq_sz);
 
-  m_dbg_umq_bo = std::make_unique<uc_dbg_buffer>(m_pdev, umq_sz, AMDXDNA_BO_SHARE);
+  auto f = xcl_bo_flags{0};
+  f.use = XRT_BO_USE_DEBUG_QUEUE;
+  f.flags = XRT_BO_FLAGS_CACHEABLE;
+  f.dir = XRT_BO_ACCESS_READ_WRITE;
+  m_dbg_umq_bo = std::make_unique<uc_dbg_buffer>(m_pdev, umq_sz, f.all);
   m_dbg_umq_bo_buf = m_dbg_umq_bo->vaddr();
   m_dbg_umq_hdr =
     reinterpret_cast<volatile struct host_queue_header *>(m_dbg_umq_bo_buf);
@@ -31,10 +35,11 @@ dbg_hwq_umq(const device& dev)
   std::memset(m_dbg_umq_bo_buf, 0, umq_sz);
   m_dbg_umq_pkt->xrt_header.completion_signal = m_dbg_umq_comp;
   
-  m_dbg_umq_pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
+  m_dbg_umq_pkt->xrt_header.common_header.type =
+    HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
   m_dbg_umq_hdr->capacity = 1;
+  m_dbg_umq_hdr->data_address = m_dbg_umq_bo->paddr() + header_sz;
 
-  set_use_flag();
   shim_debug("Created DBG UMQ HW queue");
 }
 
@@ -50,7 +55,6 @@ issue_exit_cmd()
 {
   auto hdr = &m_dbg_umq_pkt->xrt_header;
   // always case 1
-  m_dbg_umq_hdr->write_index++;
   auto ehp = &m_dbg_umq_pkt->xrt_header;
   ehp->common_header.opcode = DBG_CMD_EXIT;
   ehp->common_header.count = 0;
@@ -65,7 +69,6 @@ issue_rw_cmd(struct rw_mem &data, uint16_t opcode)
 { 
   auto hdr = &m_dbg_umq_pkt->xrt_header;
   // always case 1
-  m_dbg_umq_hdr->write_index++;
   auto ehp = &m_dbg_umq_pkt->xrt_header;
   ehp->common_header.opcode = opcode;
   ehp->common_header.count = sizeof (struct rw_mem);
@@ -76,19 +79,6 @@ issue_rw_cmd(struct rw_mem &data, uint16_t opcode)
 
   shim_debug("dbg umq: issue rw cmd");
   return submit();
-}
-
-void
-dbg_hwq_umq::
-set_use_flag() const
-{
-  auto f = xcl_bo_flags{0};
-  f.use = XRT_BO_USE_DEBUG_QUEUE;
-  f.flags = XRT_BO_FLAGS_CACHEABLE;
-  f.access = XRT_BO_ACCESS_LOCAL;
-  f.dir = XRT_BO_ACCESS_READ_WRITE;
-
-  m_dbg_umq_bo->set_flags(f.all);
 }
 
 buffer*
@@ -106,14 +96,19 @@ submit()
 
   /* Issue mfence instruction to make sure all writes to the slot before is done */
   std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
-  m_dbg_umq_pkt->xrt_header.common_header.type =
-    HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+  m_dbg_umq_hdr->write_index++;
 
-  shim_debug("dbg umq: submit cmd");
+  shim_debug("dbg umq: submit cmd widx: %lu ridx: %lu",
+    m_dbg_umq_hdr->write_index,
+    m_dbg_umq_hdr->read_index);
+  shim_debug("dbg umq: cmd opcode: %d count: %d",
+    m_dbg_umq_pkt->xrt_header.common_header.opcode,
+    m_dbg_umq_pkt->xrt_header.common_header.count);
 
   while (1)
   {
-    if (*m_dbg_umq_comp_ptr)
+    if (*m_dbg_umq_comp_ptr &&
+        m_dbg_umq_hdr->write_index == m_dbg_umq_hdr->read_index)
     {
       return (*m_dbg_umq_comp_ptr);
     }

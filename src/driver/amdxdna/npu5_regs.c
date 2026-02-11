@@ -6,14 +6,13 @@
 #include "npu4_family.h"
 
 const struct amdxdna_dev_priv npu5_dev_priv = {
-	.fw_path        = "amdnpu/17f0_11/npu.dev.sbin",
-	.protocol_major = 6,
-	.protocol_minor = 12,
+	.fw_path	= "amdnpu/17f0_11/npu.dev.sbin",
+	.min_fw_version	= AIE2_FW_VERSION(6, 12),
 	NPU4_COMMON_DEV_PRIV,
 };
 
 const struct amdxdna_dev_info dev_npu5_info = {
-	.vbnv              = "NPU Strix Halo",
+	.default_vbnv      = "NPU Strix Halo",
 	.dev_priv          = &npu5_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };

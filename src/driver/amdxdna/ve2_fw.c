@@ -10,9 +10,8 @@
 #include "ve2_mgmt.h"
 #include "ve2_fw.h"
 
-int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *xaie_dev)
+int ve2_store_firmware_version(struct ve2_firmware_version *c_version, struct device *xaie_dev)
 {
-	struct amdxdna_dev *xdna = xdna_hdl->xdna;
 	struct ve2_firmware_version *version;
 	int ret = 0;
 
@@ -23,19 +22,23 @@ int ve2_store_firmware_version(struct amdxdna_dev_hdl *xdna_hdl, struct device *
 	ret = ve2_partition_read(xaie_dev, 0, 0, VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
 				 VE2_CERT_VERSION_SIZE, version);
 	if (ret < 0) {
-		XDNA_ERR(xdna, "aie_partition_read failed with ret %d\n", ret);
+		pr_err("Failed to read firmware version, ret=%d\n", ret);
 		kfree(version);
 		return ret;
 	}
 
-	memcpy(&xdna_hdl->fw_version, version, sizeof(*version));
-	XDNA_INFO(xdna, "CERT major: %u\n", xdna_hdl->fw_version.major);
-	XDNA_INFO(xdna, "CERT minor: %u\n", xdna_hdl->fw_version.minor);
-	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.git_hash);
-	XDNA_INFO(xdna, "CERT git hash date: %s\n", xdna_hdl->fw_version.date);
+	c_version->major = version->major;
+	c_version->minor = version->minor;
+	strscpy(c_version->git_hash, version->git_hash, VE2_FW_HASH_STRING_LENGTH);
+	c_version->git_hash[VE2_FW_HASH_STRING_LENGTH - 1] = '\0';
+	strscpy(c_version->date, version->date, VE2_FW_DATE_STRING_LENGTH);
+	c_version->date[VE2_FW_DATE_STRING_LENGTH - 1] = '\0';
 	kfree(version);
 
-	return ret;
+	pr_debug("Firmware version: %u.%u, hash=%s, date=%s\n",
+		 c_version->major, c_version->minor, c_version->git_hash, c_version->date);
+
+	return 0;
 }
 
 static int get_firmware_status(struct amdxdna_dev *xdna, struct device *aie_dev,
@@ -82,6 +85,9 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret = 0;
+
+	XDNA_DBG(xdna, "Getting firmware status: hwctx=%p, start_col=%u, num_col=%u",
+		 hwctx, priv_ctx->start_col, priv_ctx->num_col);
 
 	if (!priv_ctx->aie_dev) {
 		XDNA_ERR(xdna, "Partition does not have aie device handle\n");

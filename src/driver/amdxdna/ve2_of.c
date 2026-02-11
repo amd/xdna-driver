@@ -6,7 +6,8 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/xlnx-ai-engine.h>
-#include <linux/firmware.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/of_address.h>
 
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
@@ -22,11 +23,15 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	char *buf;
 	int ret;
 
+	XDNA_DBG(xdna, "Loading firmware: %s", xdna_hdl->priv->fw_path);
+
 	ret = request_firmware(&fw, xdna_hdl->priv->fw_path, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "request fw %s failed %d", xdna_hdl->priv->fw_path, ret);
 		return -ENODEV;
 	}
+
+	XDNA_DBG(xdna, "Firmware loaded: size=%zu bytes", fw->size);
 
 	buf = kmalloc(fw->size, GFP_KERNEL);
 	if (!buf) {
@@ -40,7 +45,7 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	/* request all cols */
 	xaie_dev = aie_partition_request(&request);
 	if (IS_ERR(xaie_dev)) {
-		XDNA_ERR(xdna, "aie partition request failed");
+		XDNA_ERR(xdna, "aie partition request failed: %d", ret);
 		ret = -ENODEV;
 		goto out;
 	}
@@ -48,20 +53,32 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 
 	args.locs = NULL;
 	args.num_tiles = 0;
+	args.handshake_cols = 0;
+	args.handshake = NULL;
+	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
+	& ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	ret = ve2_partition_initialize(xaie_dev, &args);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release;
 	}
 
-	ret = aie_load_cert(xaie_dev, buf);
+	ret = aie_load_cert_broadcast(xaie_dev, buf);
 	if (ret) {
-		XDNA_ERR(xdna, "aie load cert failed %d", ret);
+		XDNA_ERR(xdna, "aie load cert broadcast failed %d", ret);
 		goto teardown;
 	}
-	XDNA_INFO(xdna, "aie load cert complete");
+	XDNA_INFO(xdna, "aie load cert broadcast complete");
 
-	ve2_store_firmware_version(xdna_hdl, xaie_dev);
+	ret = ve2_store_firmware_version(&xdna_hdl->fw_version, xaie_dev);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "cert status read failed with err %d", ret);
+		goto teardown;
+	}
+	XDNA_INFO(xdna, "CERT major: %d\n", xdna_hdl->fw_version.major);
+	XDNA_INFO(xdna, "CERT minor: %d\n", xdna_hdl->fw_version.minor);
+	XDNA_INFO(xdna, "CERT git hash: %s\n", xdna_hdl->fw_version.git_hash);
+	XDNA_INFO(xdna, "CERT git hash date: %s\n", xdna_hdl->fw_version.date);
 
 teardown:
 	aie_partition_teardown(xaie_dev);
@@ -69,6 +86,90 @@ release:
 	aie_partition_release(xaie_dev);
 out:
 	kfree(buf);
+	return ret;
+}
+
+static void ve2_cma_device_release(struct device *dev)
+{
+	/*
+	 * This is the device release callback invoked by put_device().
+	 * The caller (ve2_cma_mem_region_remove) must call
+	 * of_reserved_mem_device_release() to release DMA/reserved memory
+	 * resources before calling put_device().
+	 * This callback only frees the device structure allocated by kzalloc().
+	 */
+	kfree(dev);
+}
+
+static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
+{
+	int i;
+
+	for (i = 0; i < MAX_MEM_REGIONS; i++) {
+		struct device *dev = xdna->cma_region_devs[i];
+
+		if (dev) {
+			of_reserved_mem_device_release(dev);
+			put_device(dev);
+			xdna->cma_region_devs[i] = NULL;
+		}
+	}
+}
+
+static int
+ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
+			struct platform_device *pdev)
+{
+	struct device *child_dev;
+	int num_regions;
+	int ret;
+	int i;
+
+	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
+						 "memory-region", NULL);
+	if (num_regions <= 0)
+		return -EINVAL;
+
+	for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
+		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
+		if (!child_dev) {
+			XDNA_ERR(xdna,
+				 "Failed to alloc child_dev for cma region %d",
+				 i);
+			ret = -ENOMEM;
+			goto cleanup;
+		}
+
+		device_initialize(child_dev);
+		child_dev->parent = &pdev->dev;
+		child_dev->of_node = pdev->dev.of_node;
+		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		child_dev->release = ve2_cma_device_release;
+
+		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Failed to set name for cma region %d", i);
+			goto put_dev;
+		}
+
+		ret = of_reserved_mem_device_init_by_idx(child_dev,
+							 pdev->dev.of_node, i);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Failed to init reserved cma region %d", i);
+			goto put_dev;
+		}
+
+		xdna->cma_region_devs[i] = child_dev;
+	}
+
+	return 0;
+
+put_dev:
+	put_device(child_dev);
+cleanup:
+	ve2_cma_mem_region_remove(xdna);
 	return ret;
 }
 
@@ -81,22 +182,15 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	int ret;
 	u32 col;
 
-	xrs_cfg.ddev = &xdna->ddev;
-	xrs_cfg.total_col = XRS_MAX_COL;
+	XDNA_DBG(xdna, "Initializing VE2 device");
+
 	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
 
 	xdna_hdl->xdna = xdna;
 	xdna_hdl->priv = xdna->dev_info->dev_priv;
-
-	xdna->use_cma = true;
 	xdna->dev_handle = xdna_hdl;
-	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
-	if (!xdna->dev_handle->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
-		return -EINVAL;
-	}
 
 	if (ve2_hwctx_limit)
 		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
@@ -105,6 +199,37 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	XDNA_INFO(xdna, "Maximum limit %d hardware context(s)", xdna_hdl->hwctx_limit);
 
+	ret = aie_get_device_info(&xdna_hdl->aie_dev_info);
+	if (ret) {
+		if (ret == -ENODEV) {
+			XDNA_INFO(xdna, "AIE device not ready yet, deferring probe");
+			return -EPROBE_DEFER;
+		}
+		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
+		return ret;
+	}
+	XDNA_INFO(xdna, "AIE device: %d columns, %d rows",
+		  xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows);
+
+	xrs_cfg.ddev = &xdna->ddev;
+
+	/* Support module parameters to override column count if valid */
+	if (max_col > 0 && start_col >= 0 &&
+	    (max_col + start_col) <= xdna_hdl->aie_dev_info.cols) {
+		xrs_cfg.total_col = max_col;
+		XDNA_INFO(xdna, "Using module parameter: max_col=%d, start_col=%d",
+			  max_col, start_col);
+	} else {
+		xrs_cfg.total_col = xdna_hdl->aie_dev_info.cols;
+	}
+
+	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
+	if (!xdna->dev_handle->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
+		return -EINVAL;
+	}
+
+	/* Load firmware */
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
@@ -112,26 +237,50 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	}
 	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 
-	for (col = 0; col < VE2_MAX_COL; col++) {
-		fw_slots = kzalloc(sizeof(*fw_slots), GFP_KERNEL);
+	/* Allocate arrays based on actual column count from device */
+	xdna_hdl->fw_slots = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+					  sizeof(*xdna_hdl->fw_slots), GFP_KERNEL);
+	if (!xdna_hdl->fw_slots) {
+		XDNA_ERR(xdna, "No memory for fw_slots array");
+		return -ENOMEM;
+	}
+
+	xdna_hdl->ve2_mgmtctx = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+					     sizeof(*xdna_hdl->ve2_mgmtctx), GFP_KERNEL);
+	if (!xdna_hdl->ve2_mgmtctx) {
+		XDNA_ERR(xdna, "No memory for ve2_mgmtctx array");
+		return -ENOMEM;
+	}
+
+	for (col = 0; col < xdna_hdl->aie_dev_info.cols; col++) {
+		fw_slots = devm_kzalloc(&pdev->dev, sizeof(*fw_slots), GFP_KERNEL);
 		if (!fw_slots) {
-			ret = -ENOMEM;
-			XDNA_ERR(xdna, "No memory for fw status. ret: %d\n", ret);
-			goto done;
+			XDNA_ERR(xdna, "No memory for fw status");
+			return -ENOMEM;
 		}
 		xdna->dev_handle->fw_slots[col] = fw_slots;
 	}
 
-	return 0;
-done:
-	ve2_free_firmware_slots(xdna_hdl, VE2_MAX_COL);
+	ret = ve2_cma_mem_region_init(xdna, pdev);
+	if (ret < 0) {
+		/* CMA region initialization is optional - system will fall back to default CMA */
+		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+	}
 
-	return ret;
+	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",
+		 xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows,
+		 xdna_hdl->hwctx_limit);
+
+	return 0;
 }
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
-	ve2_free_firmware_slots(xdna->dev_handle, VE2_MAX_COL);
+	XDNA_DBG(xdna, "VE2 device cleanup: releasing resources");
+
+	ve2_cma_mem_region_remove(xdna);
+
+	XDNA_DBG(xdna, "VE2 device cleanup complete");
 }
 
 const struct amdxdna_dev_ops ve2_ops = {
@@ -144,4 +293,5 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.cmd_wait	= ve2_cmd_wait,
 	.get_aie_info	= ve2_get_aie_info,
 	.set_aie_state	= ve2_set_aie_state,
+	.get_aie_array	= ve2_get_array,
 };

@@ -7,15 +7,20 @@
 #define _AMDXDNA_DPT_H_
 
 #include <linux/kernel.h>
+#include <linux/refcount.h>
+#include <linux/mutex.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 
 #include "amdxdna_mgmt.h"
 
 #define AMDXDNA_DPT_FOOTER_SIZE		SZ_4K
+#define AMDXDNA_DPT_POLL_INTERVAL_MS	10
+
 #define AMDXDNA_DPT_FW_LOG_NAME		"xdna_fw_log"
 #define AMDXDNA_DPT_FW_LOG_MSG_ALIGN	8
-#define AMDXDNA_DPT_POLL_INTERVAL_MS	50
+
+#define AMDXDNA_DPT_FW_TRACE_NAME	"xdna_fw_trace"
 
 struct amdxdna_dpt_footer {
 	u8				minor;
@@ -36,9 +41,11 @@ struct amdxdna_dpt {
 	struct amdxdna_dev		*xdna;
 	struct amdxdna_mgmt_dma_hdl	*dma_hdl;
 	struct wait_queue_head		wait;
-	bool				polling;
 	struct work_struct		work;
 	struct timer_list		timer;
+	/* Protects timer_refs and timer delete path. */
+	struct mutex			timer_lock;
+	refcount_t			timer_refs;
 	void			__iomem *io_base;
 	int				irq;
 	u32				msi_idx;
@@ -49,12 +56,24 @@ struct amdxdna_dpt {
 	bool				dump_to_dmesg;
 	u64				head;
 	u8				*local_buffer;
+	u32				size;
+	void (*parse)(struct amdxdna_dev *xdna, char *buffer, size_t size);
 };
 
-int amdxdna_fw_log_init(struct amdxdna_dev *xdna);
-int amdxdna_fw_log_fini(struct amdxdna_dev *xdna);
-int amdxdna_fw_log_resume(struct amdxdna_dev *xdna);
-int amdxdna_fw_log_suspend(struct amdxdna_dev *xdna);
+int amdxdna_dpt_init(struct amdxdna_dev *xdna);
+int amdxdna_dpt_fini(struct amdxdna_dev *xdna);
+
+int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
+int amdxdna_dpt_suspend(struct amdxdna_dev *xdna);
+
 int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
+
+int amdxdna_set_fw_log_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
+int amdxdna_set_fw_trace_state(struct amdxdna_dev *xdna, struct amdxdna_drm_set_state *args);
+
+int amdxdna_get_fw_log(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
+int amdxdna_get_fw_log_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
+int amdxdna_get_fw_trace(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
+int amdxdna_get_fw_trace_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args);
 
 #endif /* _AMDXDNA_DPT_H_ */

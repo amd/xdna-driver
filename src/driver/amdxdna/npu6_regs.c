@@ -6,7 +6,7 @@
 #include "npu4_family.h"
 
 const struct amdxdna_dev_info dev_npu6_info = {
-	.vbnv              = "NPU Krackan",
+	.default_vbnv      = "NPU Krackan",
 	.dev_priv          = &npu4_dev_priv,
 	NPU4_COMMON_DEV_INFO,
 };

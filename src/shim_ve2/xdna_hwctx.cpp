@@ -9,7 +9,9 @@
 #include "core/common/config_reader.h"
 #include "core/common/query_requests.h"
 #include "core/common/api/xclbin_int.h"
+#include "core/common/message.h"
 #include "core/common/xclbin_parser.h"
+
 #include "xdna_bo.h"
 #include "xdna_hwctx.h"
 #include "xdna_hwq.h"
@@ -17,6 +19,9 @@
 namespace shim_xdna_edge {
 
 namespace pt = boost::property_tree;
+
+// Minimum column alignment required by the driver (must be a multiple of this value)
+constexpr uint32_t MIN_COL_SUPPORT = 4;
 
 void read_aie_metadata_hw(const char* data, size_t size, pt::ptree& aie_project)
 {
@@ -44,16 +49,19 @@ get_partition_info_main(const xrt_core::device* device,const pt::ptree& aie_meta
 {
   partition_info info;
   info.start_column = 0;
-  info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address");
+  info.base_address = aie_meta.get<uint64_t>("aie_metadata.driver_config.base_address", 0);
+  auto column_shift = aie_meta.get<uint8_t>("aie_metadata.driver_config.column_shift", 0);
 
   bool partinfo_found = false;
+  pid_t pid = getpid();
   auto data = xrt_core::device_query_default<xrt_core::query::aie_partition_info>(device, {});
   
   for (const auto& entry : data) {
-    if ( std::stoi(entry.metadata.id) == hw_context_id) {
+    if (entry.pid == pid && std::stoi(entry.metadata.id) == hw_context_id) {
       info.num_columns = entry.num_cols;
       info.start_column = entry.start_col;
       info.partition_id = (entry.num_cols << 8U) | (entry.start_col & 0xffU);
+      info.base_address += (info.start_column << column_shift);
       partinfo_found = true;
       break;
     }
@@ -69,24 +77,26 @@ partition_info
 get_partition_info_hw(const xrt_core::device* device, const xrt::uuid xclbin_uuid, uint32_t hw_context_id)
 {
   auto data = device->get_axlf_section(AIE_TRACE_METADATA, xclbin_uuid);
-  if (!data.first || !data.second)
-    return {};
-
   pt::ptree aie_meta;
-  read_aie_metadata_hw(data.first, data.second, aie_meta);
+  if (data.first && data.second)
+    read_aie_metadata_hw(data.first, data.second, aie_meta);
+
   return get_partition_info_main(device,aie_meta, hw_context_id);
 }
 
 xdna_hwctx::
-xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
-  : m_device(dev), 
-    m_doorbell(0), 
-    m_log_buf(nullptr), 
-    m_uuid(xclbin.get_uuid())
+xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos)
+   : m_device(const_cast<device_xdna*>(dev)),
+    m_hwq(std::make_unique<xdna_hwq>(m_device)),
+    m_doorbell(0),
+    m_log_buf(nullptr)
 {
-  m_hwq = std::make_unique<xdna_hwq>(m_device);
+  shim_debug("Creating hwctx with xclbin");
+
+  std::memcpy((&m_uuid), xclbin.get_uuid().get(), sizeof(xuid_t));
   init_qos_info(qos);
   parse_xclbin(xclbin);
+
   amdxdna_drm_create_hwctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
   arg.num_tiles = m_num_cols;
@@ -94,25 +104,61 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
-  // FIXME
-#if 0
-  // Not supported yet
-  arg.umq_bo = m_q->get_queue_bo();
-  arg.max_opc = m_ops_per_cycle;
-  arg.num_tiles = m_num_cols * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows;
-  arg.log_buf_bo = m_log_bo ?
-	  static_cast<bo*>(m_log_bo.get())->get_drm_bo_handle() :
-	  AMDXDNA_INVALID_BO_HANDLE;
-#endif
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  shim_debug("Calling DRM_IOCTL_AMDXDNA_CREATE_HWCTX: num_tiles=%u, qos_p=0x%lx, user_start_col=%u",
+             arg.num_tiles, arg.qos_p, m_qos.user_start_col);
+
+  try {
+    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  } catch (const xrt_core::system_error& ex) {
+    int err_code = ex.get_code();
+    // Provide context-specific error messages based on driver error codes
+    if (err_code == EINVAL && m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: user_start_col=%u is invalid "
+               "(must be a multiple of 4, valid values: 0, 4, 8, ...)", m_qos.user_start_col);
+    } else if (err_code == ERANGE && m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: user_start_col=%u exceeds "
+               "available columns on device", m_qos.user_start_col);
+    } else if (err_code == ENODEV) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: no free partition available "
+               "(num_tiles=%u, user_start_col=%u)", arg.num_tiles, m_qos.user_start_col);
+    } else if (err_code == EBUSY) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: requested partition is busy "
+               "(num_tiles=%u, user_start_col=%u)", arg.num_tiles, m_qos.user_start_col);
+    } else {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: num_tiles=%u, user_start_col=%u",
+               arg.num_tiles, m_qos.user_start_col);
+    }
+  }
 
   set_slotidx(arg.handle);
-  m_info = get_partition_info_hw(&m_device, xclbin.get_uuid(), arg.handle);
+  shim_debug("HW context created with handle=%u", arg.handle);
+
+  try {
+    m_info = get_partition_info_hw(m_device, xclbin.get_uuid(), arg.handle);
+  } catch (const xrt_core::error& ex) {
+    shim_debug("Failed to get partition info: %s", ex.what());
+    // Cleanup the created context before re-throwing
+    struct amdxdna_drm_destroy_hwctx destroy_arg = {};
+    destroy_arg.handle = arg.handle;
+    try {
+      m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_arg);
+    } catch (...) {
+      shim_debug("Failed to cleanup hwctx during error recovery");
+    }
+    throw;
+  }
+
+  std::stringstream ss;
+  ss << "Partition Created with start_col "<<m_info.start_column
+          <<" num_columns "<<m_info.num_columns
+          <<" partition_id "<<m_info.partition_id;
+  xrt_core::message::send( xrt_core::message::severity_level::debug, "xrt_xdna", ss.str());
+
   set_doorbell(arg.umq_doorbell);
 
-  auto data = m_device.get_axlf_section(AIE_TRACE_METADATA, xclbin.get_uuid());
+  auto data = m_device->get_axlf_section(AIE_TRACE_METADATA, xclbin.get_uuid());
   if (data.first && data.second)
-    m_aie_array = std::make_shared<xdna_aie_array>(&m_device, this);
+    m_aie_array = std::make_shared<xdna_aie_array>(m_device, this);
 
   m_hwq->bind_hwctx(this);
 
@@ -123,17 +169,29 @@ xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   adbo.param_val_size = sizeof(u64);
   adbo.param_type = DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT;
 
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  shim_debug("Configuring hwctx opcode timeout: handle=%u, timeout=%u", arg.handle, op_timeout);
+
+  try {
+    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  } catch (const xrt_core::system_error& ex) {
+    shim_debug("DRM_IOCTL_AMDXDNA_CONFIG_HWCTX failed (non-fatal): %s (err=%d: %s)",
+               ex.what(), ex.get_code(), errno_to_str(ex.get_code()));
+    // This is non-fatal, continue with context creation
+  }
+
+  shim_debug("HW context initialization completed: handle=%u", m_handle);
 }
 
 xdna_hwctx::
-xdna_hwctx(const device_xdna& dev, uint32_t partition_size, const xrt::hw_context::qos_type& qos)
-  : m_device(dev)
+xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_context::qos_type& qos)
+  : m_device(const_cast<device_xdna*>(dev))
   , m_hwq{ std::make_unique<xdna_hwq>(m_device) }
   , m_num_cols(partition_size)
   , m_doorbell(0)
   , m_log_buf(nullptr)
 {
+  shim_debug("Creating hwctx with partition_size=%u", partition_size);
+
   init_qos_info(qos);
 
   amdxdna_drm_create_hwctx arg = {};
@@ -143,36 +201,78 @@ xdna_hwctx(const device_xdna& dev, uint32_t partition_size, const xrt::hw_contex
   // making use of umq_bo field for now.
   arg.umq_bo = xrt_core::config::get_privileged_context();
 
-  m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  shim_debug("Calling DRM_IOCTL_AMDXDNA_CREATE_HWCTX: num_tiles=%u, qos_p=0x%lx, user_start_col=%u",
+             arg.num_tiles, arg.qos_p, m_qos.user_start_col);
+
+  try {
+    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &arg);
+  } catch (const xrt_core::system_error& ex) {
+    int err_code = ex.get_code();
+    // Provide context-specific error messages based on driver error codes
+    if (err_code == EINVAL && m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: user_start_col=%u is invalid "
+               "(must be a multiple of 4, valid values: 0, 4, 8, ...)", m_qos.user_start_col);
+    } else if (err_code == ERANGE && m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: user_start_col=%u exceeds "
+               "available columns on device", m_qos.user_start_col);
+    } else if (err_code == ENODEV) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: no free partition available "
+               "(partition_size=%u, user_start_col=%u)", partition_size, m_qos.user_start_col);
+    } else if (err_code == EBUSY) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: requested partition is busy "
+               "(partition_size=%u, user_start_col=%u)", partition_size, m_qos.user_start_col);
+    } else {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: partition_size=%u, user_start_col=%u",
+               partition_size, m_qos.user_start_col);
+    }
+  }
 
   set_slotidx(arg.handle);
   set_doorbell(arg.umq_doorbell);
+  shim_debug("HW context created: handle=%u, doorbell=%u", arg.handle, arg.umq_doorbell);
 
   // TODO : create xdna_aie_array object after ELF has AIE_METADATA, AIE_PARTITION
   // sections added
 
   m_hwq->bind_hwctx(this);
+  shim_debug("HW context initialization completed: handle=%u", m_handle);
 }
 
 xdna_hwctx::
 ~xdna_hwctx()
 {
+  shim_debug("Destroying hwctx: handle=%d", m_handle);
+
   try {
-    if (m_handle == AMDXDNA_INVALID_CTX_HANDLE)
+    if (m_handle == AMDXDNA_INVALID_CTX_HANDLE) {
+      shim_debug("HW context handle is invalid, nothing to destroy");
       return;
+    }
 
     m_hwq->unbind_hwctx();
+
+    // Explicitly destroy the aie_array before destroying the hw context
+    if (m_aie_array) {
+      shim_debug("Releasing AIE array for hwctx %d", m_handle);
+      m_aie_array.reset();
+    }
+
     struct amdxdna_drm_destroy_hwctx arg = {};
     arg.handle = m_handle;
-    m_device.get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
+
+    shim_debug("Calling DRM_IOCTL_AMDXDNA_DESTROY_HWCTX: handle=%u", m_handle);
+    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
+
 #if 0
     // Not supported yet
     fini_log_buf();
 #endif
   } catch (const xrt_core::system_error& e) {
-    shim_debug("Failed to delete context on device: %s", e.what());
+    // Log error but don't re-throw in destructor
+    shim_debug("Failed to destroy hwctx %d: %s (err=%d: %s)",
+               m_handle, e.what(), e.get_code(), errno_to_str(e.get_code()));
   }
-  shim_debug("Destroyed HW context (%d)...", m_handle);
+  shim_debug("Destroyed HW context: handle=%d", m_handle);
 }
 
 std::shared_ptr<xdna_aie_array>
@@ -235,15 +335,15 @@ xdna_hwctx::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
   // const_cast: alloc_bo() is not const yet in device class
-  auto& dev = const_cast<device_xdna&>(get_device());
+  auto dev = const_cast<device_xdna*>(get_device());
 
   // Debug or dtrace buffers are specific to context.
   if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG || xcl_bo_flags{flags}.use == XRT_BO_USE_DTRACE ||
       xcl_bo_flags{flags}.use == XRT_BO_USE_LOG || xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
-    return dev.alloc_bo(userptr, get_slotidx(), size, flags);
+    return dev->alloc_bo(userptr, get_slotidx(), size, flags);
 
   // Other BOs are shared across all contexts.
-  return dev.alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
+  return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
@@ -251,8 +351,8 @@ xdna_hwctx::
 import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
   // const_cast: import_bo() is not const yet in device class
-  auto& dev = const_cast<device_xdna&>(get_device());
-  return dev.import_bo(pid, ehdl);
+  auto dev = const_cast<device_xdna*>(get_device());
+  return dev->import_bo(pid, ehdl);
 }
 
 xrt_core::hwqueue_handle*
@@ -262,7 +362,7 @@ get_hw_queue()
   return m_hwq.get();
 }
 
-void
+int
 xdna_hwctx::
 init_qos_info(const qos_type& qos)
 {
@@ -279,7 +379,15 @@ init_qos_info(const qos_type& qos)
       m_qos.frame_exec_time = value;
     else if (key == "priority")
       m_qos.priority = value;
+    else if (key == "start_col")
+      m_qos.user_start_col = value;
   }
+
+  if (m_qos.user_start_col != USER_START_COL_NOT_REQUESTED) {
+    shim_debug("QoS user_start_col requested: %u", m_qos.user_start_col);
+  }
+
+  return 0;
 }
 
 void
@@ -332,7 +440,7 @@ parse_xclbin(const xrt::xclbin& xclbin)
   print_xclbin_info();
 }
 
-const device_xdna&
+device_xdna*
 xdna_hwctx::
 get_device()
 {

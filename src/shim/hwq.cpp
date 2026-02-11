@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "hwq.h"
 #include "fence.h"
@@ -98,8 +98,7 @@ hwq::
 poll_command(xrt_core::buffer_handle *cmd) const
 {
   auto boh = static_cast<cmd_buffer*>(cmd);
-  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
-
+  auto cmdpkt = reinterpret_cast<volatile ert_packet *>(boh->vaddr());
   if (cmdpkt->state >= ERT_CMD_STATE_COMPLETED) {
     XRT_TRACE_POINT_LOG(poll_command_done);
     return 1;
@@ -111,6 +110,8 @@ int
 hwq::
 wait_command(uint64_t seq, uint32_t timeout_ms) const
 {
+  XRT_TRACE_POINT_SCOPE1(wait_command, seq);
+
   int ret = 1;
 
   shim_debug("Waiting for cmd (%ld)...", seq);
@@ -142,10 +143,8 @@ int
 hwq::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
-  if (poll_command(cmd))
-      return 1;
-
   auto boh = static_cast<cmd_buffer*>(cmd);
+  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
   auto seq = boh->wait_for_submitted();
   return wait_command(seq, timeout_ms);
 }
@@ -172,8 +171,10 @@ void
 hwq::
 submit_command(xrt_core::buffer_handle *cmd)
 {
-  std::unique_lock<std::mutex> lock(m_mutex);
   auto boh = static_cast<cmd_buffer*>(cmd);
+
+  XRT_TRACE_POINT_SCOPE1(submit_command, boh->id().handle);
+  std::unique_lock<std::mutex> lock(m_mutex);
 
   dump_arg_bos(boh);
 
@@ -292,6 +293,20 @@ process_pending_queue()
   }
 
   shim_debug("Pending queue thread stopped!");
+}
+
+uint64_t
+hwq::
+issue_command(const cmd_buffer *cmd_bo)
+{
+  submit_cmd_arg ecmd = {
+    .ctx_handle = m_ctx->get_slotidx(),
+    .cmd_bo = cmd_bo->id(),
+    .arg_bos = cmd_bo->get_arg_bo_ids(),
+  };
+  m_pdev.drv_ioctl(drv_ioctl_cmd::submit_cmd, &ecmd);
+  shim_debug("Submitted command (%ld)", ecmd.seq);
+  return ecmd.seq;
 }
 
 }

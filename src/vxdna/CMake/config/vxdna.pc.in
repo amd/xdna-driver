@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2025 - 2026 Xilinx, Inc. All rights reserved.
+
+prefix=@CMAKE_INSTALL_PREFIX@/@XRT_INSTALL_DIR@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/include
+
+Name: vxdna
+Description: Virtual xdna backend library
+Version: @VXDNA_VERSION@
+Libs: -L${libdir} -lvxdna
+Cflags: -I${includedir}

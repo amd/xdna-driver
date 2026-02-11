@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "io.h"
-#include "hwctx.h"
 #include "io_config.h"
 #include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 #include "xrt/detail/xrt_error_code.h"
@@ -120,14 +119,14 @@ txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
   auto [ pm_ctrlpkt_size, pm_ctrlpkt_buf ] = read_binary_file(pm_ctrlpkt);
 
   if (!instr_size)
-    throw std::runtime_error("Can't open TXN bin file?");
+    throw std::runtime_error("Can't open TXN bin file: " + ml_txn);
 
   std::unique_ptr<aiebu::aiebu_assembler> asp = nullptr;
   if (pm_ctrlpkt_buf.size()) {
     std::vector<char> buffer2 = {};
     std::vector<char> patch_json = {};
-    std::vector<std::string> libs = { "preempt" };
-    std::vector<std::string> libpaths = { get_preemption_libs_path() };
+    std::vector<std::string> libs = {};
+    std::vector<std::string> libpaths = {};
     std::map< uint32_t, std::vector<char> > m_ctrlpkt = {};
     m_ctrlpkt[0] = pm_ctrlpkt_buf;
     m_ctrlpkt[1] = pm_ctrlpkt_buf;
@@ -198,10 +197,59 @@ get_column_size(const xrt::xclbin& xclbin)
 uint32_t
 get_column_size(const xrt::elf& elf)
 {
-  return elf_int::get_partition_size(elf);
+  return elf.get_partition_size();
+}
+
+void
+elf_init_no_arg_cmd(xrt::elf& elf, cuidx_type idx, bool dump, bo& cmd, bo& inst)
+{
+  exec_buf ebuf(cmd, ERT_START_NPU);
+
+  ebuf.set_cu_idx(idx);
+  ebuf.add_arg_64(3);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_32(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+  ebuf.add_arg_64(0);
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(inst);
+  ebuf.patch_ctrl_code(inst, elf_patcher::buf_type::ctrltext, elf, elf_int::no_ctrl_code_id);
 }
 
 } // namespace
+
+void
+io_test_bo_set_base::
+cache_cmd_header()
+{
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  if (cbo)
+    m_cached_header = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map())->header;
+}
+
+void
+io_test_bo_set_base::
+reset_cmd_header()
+{
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  if (cbo && m_cached_header != 0) {
+    auto cmd = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+    cmd->header = m_cached_header;
+  }
+}
+
+void
+io_test_bo_set_base::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  cache_cmd_header();
+}
 
 io_test_bo_set_base::
 io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
@@ -209,7 +257,7 @@ io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
   , m_xclbin_name(xclbin_name)
   , m_local_data_path(get_xclbin_data(dev, xclbin_name.c_str()))
   , m_dev(dev)
-  , m_kernel_index(module_int::no_ctrl_code_id)
+  , m_kernel_index(elf_int::no_ctrl_code_id)
 {
 }
 
@@ -239,12 +287,24 @@ create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags)
 
 void
 io_test_bo_set_base::
-create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::patcher::buf_type type)
+create_ctrl_bo_from_elf(io_test_bo& ibo, xrt_core::elf_patcher::buf_type type)
 {
   auto size = exec_buf::get_ctrl_code_size(m_elf, type, m_kernel_index);
   if (size == 0)
     throw std::runtime_error("instruction size cannot be 0");
   alloc_ctrl_bo(ibo, m_dev, size);
+}
+
+xrt_core::cuidx_type
+io_test_bo_set_base::
+get_cu_idx(hw_ctx& hwctx)
+{
+  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
+  if (kernel.empty())
+    throw std::runtime_error("No kernel found");
+  auto cu_idx = hwctx.get()->open_cu_context(kernel);
+  //std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
+  return cu_idx;
 }
 
 io_test_bo_set::
@@ -312,9 +372,14 @@ elf_io_test_bo_set::
 elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
   io_test_bo_set_base(dev, xclbin_name)
 {
-  std::string file;
+  // Find elf with the same name as xclbin file
+  std::filesystem::path elf_path(get_xclbin_path(dev, xclbin_name.c_str()));
+  elf_path.replace_extension(".elf");
 
-  m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
+  if (std::filesystem::exists(elf_path))
+    m_elf = xrt::elf(elf_path);
+  else
+    m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -326,19 +391,60 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_INPUT:
-      create_data_bo_from_file(ibo, "ifm.bin", 0);
+      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_PARAMETERS:
       create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
       break;
     case IO_TEST_BO_OUTPUT:
-      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL);
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL|m_FLAG_OPT);
       break;
     case IO_TEST_BO_CTRL_PKT_PM:
       create_data_bo_from_file(ibo, "pm_ctrlpkt.bin", m_FLAG_OPT);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+elf_full_io_test_bo_set::
+elf_full_io_test_bo_set(device* dev, const std::string& xclbin_name)
+  : io_test_bo_set_base(dev, xclbin_name)
+{
+  auto elf_path = get_xclbin_path(dev, xclbin_name.c_str());
+  m_elf = xrt::elf(elf_path);
+  auto mod = xrt::module{m_elf};
+  auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+
+  try {
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+  } catch (const std::exception&) {
+    m_kernel_index = elf_int::no_ctrl_code_id;
+  }
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      break;
+    case IO_TEST_BO_INPUT:
+      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
+      break;
+    case IO_TEST_BO_OUTPUT:
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL|m_FLAG_OPT);
       break;
     default:
       break;
@@ -357,10 +463,10 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
   if (m_is_full_elf) {
     m_elf = xrt::elf(get_xclbin_path(dev, xclbin_name.c_str()));
     auto mod = xrt::module{m_elf};
-    m_kernel_index = module_int::get_ctrlcode_id(mod, get_kernel_name(dev, xclbin_name.c_str()));
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(get_kernel_name(dev, xclbin_name.c_str()));
   } else {
     m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
-    m_kernel_index = module_int::no_ctrl_code_id;
+    m_kernel_index = elf_int::no_ctrl_code_id;
   }
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -373,13 +479,13 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_SAVE_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::preempt_save);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::preempt_save);
       break;
     case IO_TEST_BO_RESTORE_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::preempt_restore);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::preempt_restore);
       break;
     case IO_TEST_BO_INPUT:
       create_data_bo_from_file(ibo, "ifm.bin", 0);
@@ -416,25 +522,25 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
   }
 }
 
-elf_io_timeout_test_bo_set::
-elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name,
-                           const std::string& elf_name, uint32_t exp_txn_op_idx)
-  : m_expect_txn_op_idx(exp_txn_op_idx),
-    io_test_bo_set_base(dev, xclbin_name)
+elf_io_negative_test_bo_set::
+elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
+  const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx)
+  : m_expect_txn_op_idx(exp_txn_op_idx)
+  , m_expect_cmd_status(exp_status)
+  , io_test_bo_set_base(dev, xclbin_name)
 {
   m_elf = xrt::elf(m_local_data_path + elf_name);
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
     auto type = static_cast<io_test_bo_type>(i);
-    size_t size;
 
     switch(type) {
     case IO_TEST_BO_CMD:
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, patcher::buf_type::ctrltext);
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     default:
       break;
@@ -442,10 +548,28 @@ elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name,
   }
 }
 
-elf_io_timeout_test_bo_set::
-elf_io_timeout_test_bo_set(device* dev, const std::string& xclbin_name)
-  : elf_io_timeout_test_bo_set(dev, xclbin_name, "timeout.elf", 0x11800)
-{}
+elf_io_gemm_test_bo_set::
+elf_io_gemm_test_bo_set(device* dev, const std::string& xclbin_name, const std::string& elf_name)
+  : io_test_bo_set_base(dev, xclbin_name)
+{
+  m_elf = xrt::elf(m_local_data_path + elf_name);
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      break;
+    default:
+      break;
+    }
+  }
+}
 
 void
 io_test_bo_set_base::
@@ -499,11 +623,11 @@ sync_after_run()
 
 void
 io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_CU);
 
-  ebuf.set_cu_idx(idx);
+  ebuf.set_cu_idx(get_cu_idx(hwctx));
 
   ebuf.add_arg_64(1);
   ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
@@ -516,22 +640,30 @@ init_cmd(cuidx_type idx, bool dump)
 
   if (dump)
     ebuf.dump();
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
 elf_io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
 
-  ebuf.set_cu_idx(idx);
+  ebuf.set_cu_idx(get_cu_idx(hwctx));
 
   ebuf.add_arg_64(3);
   ebuf.add_arg_64(0);
   ebuf.add_arg_32(0);
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
-  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+  if (m_bo_array[IO_TEST_BO_INPUT].tbo.get()) {
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get());
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+  } else {
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+    ebuf.add_arg_64(0);
+  }
   ebuf.add_arg_64(0);
   ebuf.add_arg_64(0);
 
@@ -540,12 +672,40 @@ init_cmd(cuidx_type idx, bool dump)
 
   ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    patcher::buf_type::ctrltext, m_elf, module_int::no_ctrl_code_id);
+    elf_patcher::buf_type::ctrltext, m_elf, elf_int::no_ctrl_code_id);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
+}
+
+void
+elf_full_io_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
+
+  xrt_core::cuidx_type cu_idx{0};
+  ebuf.set_cu_idx(cu_idx);
+
+  if (m_bo_array[IO_TEST_BO_INPUT].tbo.get()) {
+    ebuf.add_arg_64(3);
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "0");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get(), "1");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "2");
+  }
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
 elf_preempt_io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(),
     m_is_full_elf ? ERT_START_NPU_PREEMPT_ELF : ERT_START_NPU_PREEMPT);
@@ -559,7 +719,7 @@ init_cmd(cuidx_type idx, bool dump)
     ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PDI].tbo.get(), ".pdi.0");
     ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
   } else {
-    ebuf.set_cu_idx(idx);
+    ebuf.set_cu_idx(get_cu_idx(hwctx));
 
     ebuf.add_arg_64(3);
     ebuf.add_arg_64(0);
@@ -584,35 +744,46 @@ init_cmd(cuidx_type idx, bool dump)
     ebuf.dump();
 
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
-    patcher::buf_type::preempt_save, m_elf, m_kernel_index);
+    elf_patcher::buf_type::preempt_save, m_elf, m_kernel_index);
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
-    patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
+    elf_patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
-elf_io_timeout_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+elf_io_negative_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
 {
-  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
+  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
+    *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
+    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
 
-  ebuf.set_cu_idx(idx);
-  ebuf.add_arg_64(3);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_32(0);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_64(0);
-  ebuf.add_arg_64(0);
+  io_test_bo_set_base::init_cmd(hwctx, dump);
+}
 
-  if (dump)
-    ebuf.dump();
+void
+elf_io_gemm_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
+    *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
+    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
 
-  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    patcher::buf_type::ctrltext, m_elf, module_int::no_ctrl_code_id);
+  // Get a debug BO
+  auto boflags = XRT_BO_FLAGS_CACHEABLE;
+  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
+  const size_t size = 4096;
+  m_dbo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
+
+  // Initializing debug BO content to -1
+  std::memset(dbo_p, 0xff, size);
+  m_dbo.get()->sync(buffer_handle::direction::host2device, size, 0);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 // For debug only
@@ -638,7 +809,18 @@ void
 io_test_bo_set_base::
 verify_result()
 {
+  // Verify command completion status
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+
+  // If no ofm, skip the rest of validation
   auto bo_ofm = m_bo_array[IO_TEST_BO_OUTPUT].tbo;
+  if (!bo_ofm)
+    return;
+
+  // Compare result with data in ofm.bin
   auto ofm_p = reinterpret_cast<char*>(bo_ofm->map());
   auto sz = bo_ofm->size();
 
@@ -664,6 +846,12 @@ void
 io_test_bo_set::
 verify_result()
 {
+  // Verify command completion status
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+
   auto ofm_bo = m_bo_array[IO_TEST_BO_OUTPUT].tbo.get();
   auto ofm_p = reinterpret_cast<int8_t *>(ofm_bo->map());
 
@@ -674,21 +862,62 @@ verify_result()
 }
 
 void
-elf_io_timeout_test_bo_set::
+elf_io_negative_test_bo_set::
 verify_result()
 {
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
-  auto cdata = reinterpret_cast<ert_ctx_health_data *>(cpkt->data);
-  if (cdata->txn_op_idx != m_expect_txn_op_idx) {
+  if (cpkt->state != m_expect_cmd_status) {
+    throw std::runtime_error(std::string("Command status=") + std::to_string(cpkt->state) +
+      ", expect=" + std::to_string(m_expect_cmd_status));
+  }
+
+  if (m_expect_cmd_status != ERT_CMD_STATE_TIMEOUT)
+    return;
+
+  // In case of timeout, further check context health data
+  auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
+  if (cdata->aie2.txn_op_idx != m_expect_txn_op_idx) {
     std::cerr << "Incorrect app health data:\n";
-    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->txn_op_idx << "\n";
-    std::cerr << "\tContext PC: 0x" << std::hex << cdata->ctx_pc << "\n";
-    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->fatal_error_type << "\n";
-    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->fatal_error_exception_type << "\n";
-    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->fatal_error_exception_pc << "\n";
-    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->fatal_error_app_module << "\n";
-    throw std::runtime_error("Incorrect txn_op_idx in context health data!!!");
+    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
+    std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
+    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
+    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
+    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
+    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
+    throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
+      ", expect=" + std::to_string(m_expect_txn_op_idx));
+  }
+}
+
+void
+elf_io_gemm_test_bo_set::
+verify_result()
+{
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+
+  // Updating debug BO content after execution
+  m_dbo.get()->sync(buffer_handle::direction::device2host, m_dbo->get_properties().size, 0);
+  auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
+
+  // Validating debug BO content.
+  // The first 32 Dwords should be 0xde, the rest should be initial values
+  int i = 0;
+  while (i < 32) {
+    if (dbo_p[i] != 0xde)
+      throw std::runtime_error(std::string("bad debug bo content, expecting 222, got ")
+        + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
+    ++i;
+  }
+  while (i < 1024) {
+    if (dbo_p[i] != -1)
+      throw std::runtime_error(std::string("bad debug bo content, expecting -1, got ")
+        + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
+    ++i;
   }
 }
 
@@ -708,26 +937,20 @@ run(const std::vector<fence_handle*>& wait_fences,
 {
   hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
   auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
-  if (kernel.empty())
-    throw std::runtime_error("No kernel found");
-  auto cu_idx = hwctx.get()->open_cu_context(kernel);
-  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
 
-  init_cmd(cu_idx, false);
+  init_cmd(hwctx, false);
   sync_before_run();
 
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto chdl = cbo->get();
+  reset_cmd_header();
+  cache_cmd_header();
+
   for (const auto& fence : wait_fences)
     hwq->submit_wait(fence);
-  hwq->submit_command(chdl);
+  hwq->submit_command(cbo->get());
   for (const auto& fence : signal_fences)
     hwq->submit_signal(fence);
-  hwq->wait_command(chdl, 5000);
-  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
+  hwq->wait_command(cbo->get(), 0);
 
   sync_after_run();
   if (!no_check_result)
@@ -741,29 +964,6 @@ run()
   const std::vector<fence_handle*> sfences{};
   const std::vector<fence_handle*> wfences{};
   run(wfences, sfences, false);
-}
-
-void
-elf_io_timeout_test_bo_set::
-run()
-{
-  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
-  auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
-  if (kernel.empty())
-    throw std::runtime_error("No kernel found");
-  auto cu_idx = hwctx.get()->open_cu_context(kernel);
-  std::cout << "Found kernel: " << kernel << " with cu index " << cu_idx.index << std::endl;
-
-  init_cmd(cu_idx, false);
-
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto chdl = cbo->get();
-  hwq->submit_command(chdl);
-  hwq->wait_command(chdl, 0); // Wait forever and expect the driver TDR to kick-in
-  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  if (cpkt->state != ERT_CMD_STATE_TIMEOUT) // Command must time out, or we fail
-    throw std::runtime_error(std::string("Command failed, state=") + std::to_string(cpkt->state));
 }
 
 void
@@ -825,8 +1025,7 @@ async_error_io_test_bo_set(device* dev)
     case IO_TEST_BO_CMD:
       alloc_cmd_bo(ibo, m_dev);
       break;
-    case IO_TEST_BO_INSTRUCTION:
-    {
+    case IO_TEST_BO_INSTRUCTION: {
       auto size = 3 * sizeof(uint32_t);
       alloc_ctrl_bo(ibo, m_dev, size);
 
@@ -844,8 +1043,8 @@ async_error_io_test_bo_set(device* dev)
       uint64_t err_module = XRT_ERROR_MODULE_AIE_PL;
       uint64_t err_class = XRT_ERROR_CLASS_AIE;
       m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
-    }
       break;
+    }
     default:
       break;
     }
@@ -854,10 +1053,10 @@ async_error_io_test_bo_set(device* dev)
 
 void
 async_error_io_test_bo_set::
-init_cmd(cuidx_type idx, bool dump)
+init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_CU);
-  ebuf.set_cu_idx(idx);
+  ebuf.set_cu_idx(get_cu_idx(hwctx));
   ebuf.add_arg_64(1);
   ebuf.add_arg_64(0);
   ebuf.add_arg_64(0);
@@ -868,10 +1067,101 @@ init_cmd(cuidx_type idx, bool dump)
 
   if (dump)
     ebuf.dump();
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
 void
 async_error_io_test_bo_set::
+verify_result()
+{
+  // Don't care about command completion status, it may succeed or timeout
+
+  auto buf = device_query<query::xocl_errors>(m_dev);
+  if (buf.empty())
+    throw std::runtime_error("failed to get async errors, return empty information.");
+
+  auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
+  xrtErrorCode err_code;
+  xrtErrorTime err_timestamp;
+  std::tie(err_code, err_timestamp) = ect;
+  if (err_code != m_expect_err_code) {
+    std::stringstream ss;
+    ss << "failed to get async errors, unexpected error code, 0x" << std::hex << err_code
+       << ", 0x" << std::hex << m_expect_err_code << ".";
+    throw std::runtime_error(ss.str());
+  }
+  if (err_timestamp == m_last_err_timestamp) {
+    std::stringstream ss;
+    ss << "failed to get async errors, return old timestamp: " << m_last_err_timestamp << ".";
+    throw std::runtime_error(ss.str());
+  }
+  m_last_err_timestamp = err_timestamp;
+}
+
+async_error_aie4_io_test_bo_set::
+async_error_aie4_io_test_bo_set(device* dev, const std::string& xclbin_name)
+  : m_expect_err_code(0), m_last_err_timestamp(0), io_test_bo_set_base(dev, xclbin_name)
+{
+  auto elf_path = get_xclbin_path(dev, xclbin_name.c_str());
+  m_elf = xrt::elf(elf_path);
+  auto mod = xrt::module{m_elf};
+  auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+
+  try {
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+  } catch (const std::exception&) {
+    m_kernel_index = elf_int::no_ctrl_code_id;
+  }
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      break;
+    default:
+      break;
+    }
+  }
+
+  // bad_ctrl.elf triggers AIE4 context error (UC firmware exception)
+  // error_type = UC_COMPLETION_TIMEOUT (4) or UC_CRITICAL_ERROR (5)
+  // Both map to KDS_EXEC error number
+  uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
+  uint64_t err_drv = XRT_ERROR_DRIVER_AIE;
+  uint64_t err_severity = XRT_ERROR_SEVERITY_CRITICAL;
+  uint64_t err_module = XRT_ERROR_MODULE_AIE_CORE;
+  uint64_t err_class = XRT_ERROR_CLASS_AIE;
+  m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
+}
+
+void
+async_error_aie4_io_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
+
+  xrt_core::cuidx_type cu_idx{0};
+  ebuf.set_cu_idx(cu_idx);
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
+}
+
+void
+async_error_aie4_io_test_bo_set::
 verify_result()
 {
   auto buf = device_query<query::xocl_errors>(m_dev);
@@ -880,45 +1170,41 @@ verify_result()
 
   auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
   xrtErrorCode err_code;
-  xrtErrorTime err_timstamp;
-  std::tie(err_code, err_timstamp) = ect;
+  xrtErrorTime err_timestamp;
+  std::tie(err_code, err_timestamp) = ect;
+
   if (err_code != m_expect_err_code) {
     std::stringstream ss;
     ss << "failed to get async errors, unexpected error code, 0x" << std::hex << err_code
-       << ", 0x" << std::hex << m_expect_err_code << ".";
+       << ", expected 0x" << m_expect_err_code << ".";
     throw std::runtime_error(ss.str());
   }
-  if (err_timstamp == m_last_err_timestamp) {
+
+  if (err_timestamp == m_last_err_timestamp) {
     std::stringstream ss;
     ss << "failed to get async errors, return old timestamp: " << m_last_err_timestamp << ".";
     throw std::runtime_error(ss.str());
   }
-  m_last_err_timestamp = err_timstamp;
-}
+  m_last_err_timestamp = err_timestamp;
 
-void
-async_error_io_test_bo_set::
-run()
-{
-  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
-  auto hwq = hwctx.get()->get_hw_queue();
-  auto kernel_type = get_kernel_type(m_dev, m_xclbin_name.c_str());
-  if (kernel_type != KERNEL_TYPE_DPU_SEQ)
-      throw std::runtime_error("ELF flow can't support async error test");
-
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
-  if (kernel.empty())
-    throw std::runtime_error("No kernel found");
-  auto cu_idx = hwctx.get()->open_cu_context(kernel);
-
-  init_cmd(cu_idx, false);
-  sync_before_run();
-
+  // Verify context health report in command packet (bad_ctrl.elf timeout path)
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto chdl = cbo->get();
-  hwq->submit_command(chdl);
-  // Async errors will be raised, command can return successful or failed
-  // No need to check the wait_command return.
-  hwq->wait_command(chdl, 2000);
-  verify_result();
+  auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_TIMEOUT)
+    return;
+
+  auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
+  if (cdata->version != ERT_CTX_HEALTH_DATA_V1 || cdata->npu_gen != NPU_GEN_AIE4) {
+    std::cerr << "Incorrect AIE4 context health data:\n";
+    std::cerr << "\tversion: 0x" << std::hex << cdata->version
+              << " (expect " << ERT_CTX_HEALTH_DATA_V1 << ")\n";
+    std::cerr << "\tnpu_gen: 0x" << std::hex << cdata->npu_gen
+              << " (expect " << NPU_GEN_AIE4 << ")\n";
+    std::cerr << "\tctx_state: 0x" << std::hex << cdata->aie4.ctx_state << "\n";
+    std::cerr << "\tnum_uc: " << std::dec << cdata->aie4.num_uc << "\n";
+    throw std::runtime_error(std::string("Context health data version=") +
+      std::to_string(cdata->version) + " npu_gen=" + std::to_string(cdata->npu_gen) +
+      ", expect version=" + std::to_string(ERT_CTX_HEALTH_DATA_V1) +
+      " npu_gen=" + std::to_string(NPU_GEN_AIE4));
+  }
 }

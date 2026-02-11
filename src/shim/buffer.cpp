@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 // Disable debug print in this file.
 //#undef XDNA_SHIM_DEBUG
@@ -21,7 +21,8 @@ uint8_t
 use_to_fw_debug_type(uint8_t use)
 {
   switch (use) {
-  case XRT_BO_USE_DEBUG:
+  case XRT_BO_USE_DEBUG: // USE_DEBUG and USE_UC_DEBUG should return same type, 2 different cases for different devices
+  case XRT_BO_USE_UC_DEBUG:
     return AMDXDNA_FW_BUF_DEBUG;
   case XRT_BO_USE_DTRACE:
     return AMDXDNA_FW_BUF_TRACE;
@@ -94,27 +95,58 @@ heap_page_size_roundup(size_t size)
 }
 
 std::string
+use_flag_to_name(uint32_t use)
+{
+  switch (use) {
+  case XRT_BO_USE_DEBUG:
+    return std::string("AMDXDNA_BO_DEBUG");
+  case XRT_BO_USE_KMD:
+    return std::string("AMDXDNA_BO_KMD");
+  case XRT_BO_USE_DTRACE:
+    return std::string("AMDXDNA_BO_DTRACE");
+  case XRT_BO_USE_LOG:
+    return std::string("AMDXDNA_BO_LOG");
+  case XRT_BO_USE_DEBUG_QUEUE:
+    return std::string("AMDXDNA_BO_DEBUG_QUEUE");
+  case XRT_BO_USE_UC_DEBUG:
+    return std::string("AMDXDNA_BO_UC_DEBUG");
+  case XRT_BO_USE_PREEMPTION:
+    return std::string("AMDXDNA_BO_PREEMPTION");
+  case XRT_BO_USE_HOST_ONLY:
+    return std::string("AMDXDNA_BO_HOST_ONLY");
+  case XRT_BO_USE_INSTRUCTION:
+    return std::string("AMDXDNA_BO_INSTRUCTION");
+  case XRT_BO_USE_SCRATCH_PAD:
+    return std::string("AMDXDNA_BO_SCRATCH_PAD");
+  case XRT_BO_USE_PDI:
+    return std::string("AMDXDNA_BO_PDI");
+  case XRT_BO_USE_CTRLPKT:
+    return std::string("AMDXDNA_BO_CTRLPKT");
+  default:
+    return std::string("AMDXDNA_BO_UNKNOWN_USE");
+  }
+}
+
+std::string
 type_to_name(int type, uint64_t flags)
 {
+  auto use = xcl_bo_flags{flags}.use;
+
+  if (use != XRT_BO_USE_UNUSED)
+    return use_flag_to_name(use);
+
   switch (type) {
-  case AMDXDNA_BO_SHARE:
-    if (xcl_bo_flags{flags}.use == XRT_BO_USE_DTRACE)
-      return std::string("AMDXDNA_BO_UC_DTRACE");
-    else if (xcl_bo_flags{flags}.use == XRT_BO_USE_LOG)
-      return std::string("AMDXDNA_BO_UC_LOG");
-    else if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG_QUEUE)
-      return std::string("AMDXDNA_BO_UC_DEBUG_QUEUE");
-    else if (xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
-      return std::string("AMDXDNA_BO_UC_DEBUG_BUF");
-    return std::string("AMDXDNA_BO_SHARE");
+  case AMDXDNA_BO_CMD:
+    return std::string("AMDXDNA_BO_EXEC_BUF");
   case AMDXDNA_BO_DEV_HEAP:
     return std::string("AMDXDNA_BO_DEV_HEAP");
   case AMDXDNA_BO_DEV:
     return std::string("AMDXDNA_BO_DEV");
-  case AMDXDNA_BO_CMD:
-    return std::string("AMDXDNA_BO_CMD");
+  case AMDXDNA_BO_SHARE:
+    return std::string("AMDXDNA_BO_SHARE");
+  default:
+    return std::string("AMDXDNA_BO_UNKNOWN_TYPE");
   }
-  return std::string("BO_UNKNOWN");
 }
 
 std::string
@@ -174,6 +206,25 @@ bo_addr_align(int type)
 {
   // Device mem heap must align at heap_page_size boundary. Others can be byte aligned.
   return (type == AMDXDNA_BO_DEV_HEAP) ? heap_page_size : 1;
+}
+
+int
+bo_flags_to_type(uint64_t bo_flags, bool has_dev_mem)
+{
+  auto flags = xcl_bo_flags{bo_flags};
+  auto boflags = (static_cast<uint32_t>(flags.boflags) << 24);
+  auto bouse = flags.use;
+
+  if (boflags != XCL_BO_FLAGS_HOST_ONLY &&
+      boflags != XCL_BO_FLAGS_CACHEABLE &&
+      boflags != XCL_BO_FLAGS_EXECBUF)
+    return AMDXDNA_BO_INVALID;
+
+  if (has_dev_mem && boflags == XCL_BO_FLAGS_CACHEABLE)
+    return AMDXDNA_BO_DEV;
+  if (boflags == XCL_BO_FLAGS_EXECBUF)
+    return AMDXDNA_BO_CMD;
+  return bouse == XRT_BO_USE_UNUSED ? AMDXDNA_BO_SHARE : AMDXDNA_BO_CMD;
 }
 
 }
@@ -316,7 +367,11 @@ drm_bo::
   destroy_bo_arg arg = {
     .bo = m_id,
   };
-  m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
+  try {
+    m_pdev.drv_ioctl(drv_ioctl_cmd::destroy_bo, &arg);
+  } catch (const xrt_core::system_error& e) {
+    std::cout << "Failed to destroy DRM BO: " << e.what() << std::endl;
+  }
 }
 
 //
@@ -324,9 +379,17 @@ drm_bo::
 //
 
 buffer::
-buffer(const pdev& dev, size_t size, void *uptr)
-  : buffer(dev, size, AMDXDNA_BO_SHARE, uptr)
+buffer(const pdev& dev, size_t size, void *uptr, uint64_t flags)
+  : buffer(dev, size, bo_flags_to_type(flags, !!dev.get_heap_vaddr()), uptr)
 {
+  m_flags = flags;
+}
+
+buffer::
+buffer(const pdev& dev, size_t size, uint64_t flags)
+  : buffer(dev, size, bo_flags_to_type(flags, !!dev.get_heap_vaddr()), nullptr)
+{
+  m_flags = flags;
 }
 
 buffer::
@@ -343,6 +406,8 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   , m_total_size(size)
   , m_cur_size(0)
 {
+  if (m_type == AMDXDNA_BO_INVALID)
+    shim_err(EINVAL, "Bad BO type.");
   // CPU and device can't share cacheline, especially when the BO is output and
   // both CPU and device may write to it.
   // In case the BO is exported to other process, it has to be aligned on page
@@ -539,13 +604,6 @@ unbind_hwctx()
   // Nothing to do.
 }
 
-void
-buffer::
-set_flags(uint64_t flags)
-{
-  m_flags = flags;
-}
-
 uint64_t
 buffer::
 get_flags() const
@@ -557,10 +615,9 @@ std::string
 buffer::
 describe() const
 {
-  std::string desc = bo_sub_type_name() + ": ";
+  std::string desc = type_to_name(m_type, m_flags) + ": ";
 
   desc += "type=";
-  desc += type_to_name(m_type, m_flags);
   desc += " ";
   desc += "hdl=";
   for (int i = 0; i < m_bos.size(); i++) {
@@ -578,6 +635,10 @@ describe() const
   desc += " ";
   desc += "vaddr=";
   desc += to_hex_string(reinterpret_cast<uint64_t>(vaddr()));
+
+  desc += " ";
+  desc += "uptr=";
+  desc += to_hex_string(reinterpret_cast<uint64_t>(m_uptr));
   return desc;
 }
 
@@ -634,16 +695,21 @@ get_arg_bos() const
   return ret;
 }
 
-std::string
-buffer::
-bo_sub_type_name() const
-{
-  return m_uptr ? "USER_PTR BO" : "Non-USER_PTR BO";
-}
-
 //
 // Impl for class cmd_buffer
 //
+cmd_buffer::
+cmd_buffer(const pdev& dev, size_t size, uint64_t flags)
+  : buffer(dev, size, flags)
+{
+  dev.insert_bo_handle(id().handle, this);
+}
+
+cmd_buffer::
+~cmd_buffer()
+{
+  m_pdev.remove_bo_handle(id().handle);
+}
 
 void
 cmd_buffer::
@@ -694,7 +760,7 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   auto s = boh->get_arg_bo_ids();
   for (const auto& bo : s)
     bohs += std::to_string(bo.handle) + " ";
-  shim_debug("Added arg BO %s to cmd BO %d", bohs.c_str(), id().handle);
+  shim_debug("Added arg BO %s to BO %d", bohs.c_str(), id().handle);
 #endif
 }
 
@@ -705,6 +771,8 @@ reset()
   std::lock_guard<std::mutex> lg(m_args_map_lock);
   m_args_map.clear();
   m_arg_bos_map.clear();
+  m_subcmds.clear();
+  m_subcmds.shrink_to_fit();
 }
 
 std::set<bo_id>
@@ -733,11 +801,11 @@ get_arg_bos() const
   return ret;
 }
 
-std::string
+std::vector<const cmd_buffer *>&
 cmd_buffer::
-bo_sub_type_name() const
+get_subcmd_list() const
 {
-  return "EXEC_BUF BO";
+  return m_subcmds;
 }
 
 //
@@ -755,7 +823,7 @@ bind_hwctx(const hwctx& hwctx)
     m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
     throw;
   }
-  shim_debug("Attached DEBUG BO %d to hwctx %d", id().handle, m_ctx_id);
+  shim_debug("Attached BO %d to hwctx %d", id().handle, m_ctx_id);
 }
 
 void
@@ -766,7 +834,7 @@ unbind_hwctx()
     config_debug_bo(true);
     m_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
   } catch (const xrt_core::system_error& e) {
-    std::cout << "Failed to detach DEBUG BO " << std::to_string(id().handle)
+    std::cout << "Failed to detach BO " << std::to_string(id().handle)
       << " from hwctx " << std::to_string(m_ctx_id)
       << ": " << e.what() << std::endl;
   }
@@ -793,17 +861,10 @@ dbg_buffer::
   try {
     config_debug_bo(true);
   } catch (const xrt_core::system_error& e) {
-    std::cout << "Failed to detach DEBUG BO " << std::to_string(id().handle)
+    std::cout << "Failed to detach BO " << std::to_string(id().handle)
       << " from hwctx " << std::to_string(m_ctx_id)
       << ": " << e.what() << std::endl;
   }
-}
-
-std::string
-dbg_buffer::
-bo_sub_type_name() const
-{
-  return "DEBUG BO";
 }
 
 void
@@ -840,7 +901,7 @@ config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& bu
     i++;
   }
 
-  shim_debug("Config CMD BO %d (%s) for %d uC", id().handle,
+  shim_debug("Config BO %d (%s) for %d uC", id().handle,
     type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str(), i);
 
   auto ctx = static_cast<const shim_xdna::hwctx *>(hwctx);
@@ -851,7 +912,7 @@ void
 uc_dbg_buffer::
 unconfig(const xrt_core::hwctx_handle* hwctx)
 {
-  shim_debug("Unconfig CMD BO %d (%s)", id().handle,
+  shim_debug("Unconfig BO %d (%s)", id().handle,
     type_to_name(AMDXDNA_BO_SHARE, get_flags()).c_str());
   m_metadata_bo->unbind_hwctx();
 }

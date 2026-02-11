@@ -171,21 +171,21 @@ public:
   }
 
   static size_t
-  get_ctrl_code_size(const std::string& elf_path, xrt_core::patcher::buf_type type)
+  get_ctrl_code_size(const std::string& elf_path, xrt_core::elf_patcher::buf_type type)
   {
     auto elf = xrt::elf{elf_path};
-    return get_ctrl_code_size(elf, type, xrt_core::module_int::no_ctrl_code_id);
+    return get_ctrl_code_size(elf, type, xrt_core::elf_int::no_ctrl_code_id);
   }
 
   void
-  patch_ctrl_code(bo& bo_ctrl, xrt_core::patcher::buf_type type, const std::string& elf_path)
+  patch_ctrl_code(bo& bo_ctrl, xrt_core::elf_patcher::buf_type type, const std::string& elf_path)
   {
     auto elf = xrt::elf{elf_path};
-    patch_ctrl_code(bo_ctrl, type, elf, xrt_core::module_int::no_ctrl_code_id);
+    patch_ctrl_code(bo_ctrl, type, elf, xrt_core::elf_int::no_ctrl_code_id);
   }
 
   static size_t
-  get_ctrl_code_size(const xrt::elf& elf, xrt_core::patcher::buf_type type, uint32_t group_idx)
+  get_ctrl_code_size(const xrt::elf& elf, xrt_core::elf_patcher::buf_type type, uint32_t group_idx)
   {
     auto mod = xrt::module{elf};
     size_t instr_size = xrt_core::module_int::get_patch_buf_size(mod, type, group_idx);
@@ -193,13 +193,13 @@ public:
   }
 
   void
-  patch_ctrl_code(bo& bo_ctrl, xrt_core::patcher::buf_type type, const xrt::elf& elf, uint32_t group_idx)
+  patch_ctrl_code(bo& bo_ctrl, xrt_core::elf_patcher::buf_type type, const xrt::elf& elf, uint32_t group_idx)
   {
     auto mod = xrt::module{elf};
     size_t instr_size = bo_ctrl.size();
     std::vector< std::pair<std::string, uint64_t> > *arglist = nullptr;
 
-    if (type == xrt_core::patcher::buf_type::ctrltext)
+    if (type == xrt_core::elf_patcher::buf_type::ctrltext)
       arglist = &m_ctrl_text_args;
     else // for patching save/restore instructions
       arglist = &m_save_restore_args;

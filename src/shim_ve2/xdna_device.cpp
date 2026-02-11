@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
-
 #include <boost/format.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -259,21 +258,32 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_query_hwctx* data;
+    amdxdna_drm_hwctx_entry* data;
     const uint32_t output_size = 32 * sizeof(*data);
     std::vector<char> payload(output_size);
-
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
-      .buffer_size = output_size,
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
+      .element_size = sizeof(*data),
+      .num_element = 32,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto edev = get_edgedev(device);
-    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
-
-    uint32_t data_size = arg.buffer_size / sizeof(*data);
-    data = reinterpret_cast<decltype(data)>(payload.data());
+    uint32_t data_size = 0;
+    try {
+      edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+      data_size = arg.num_element;
+      data = reinterpret_cast<decltype(data)>(payload.data());
+    } catch (const xrt_core::system_error& e) {
+      if (e.code().value() == ENOSPC) {
+        const uint32_t updated_output_size = arg.num_element * sizeof(*data);
+        payload.resize(updated_output_size);
+        arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
+        edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+        data_size = arg.num_element;
+        data = reinterpret_cast<decltype(data)>(payload.data());
+      }
+    }
 
     query::aie_partition_info::result_type output;
     for (uint32_t i = 0; i < data_size; i++) {
@@ -289,8 +299,18 @@ struct partition_info
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
       new_entry.errors = entry.errors;
-      new_entry.qos.priority = 0x200;
-      output.push_back(new_entry);
+      new_entry.qos.priority = entry.priority;
+      new_entry.qos.gops = entry.gops;
+      new_entry.qos.fps = entry.fps;
+      new_entry.qos.dma_bandwidth = entry.dma_bandwidth;
+      new_entry.qos.latency = entry.latency;
+      new_entry.qos.frame_exec_time = entry.frame_exec_time;
+      new_entry.pasid = entry.pasid;
+      new_entry.suspensions = entry.suspensions;
+      new_entry.memory_usage = entry.heap_usage;
+      new_entry.is_suspended = entry.state;
+
+      output.push_back(std::move(new_entry));
     }
 
     return output;
@@ -336,41 +356,158 @@ struct firmware_version
     return output;
   }
 };
-struct runner
+
+// Implement aie_read query
+struct aie_read
 {
-    static std::any
-    get(const xrt_core::device* /*device*/, key_type key)
-    {
+  using result_type = std::vector<char>;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
+  {
+    if (key != key_type::aie_read)
       throw xrt_core::query::no_such_key(key, "Not implemented");
-    }
 
-    static std::any
-    get(const xrt_core::device* device, key_type key, const std::any& param)
-    {
-      if (key != key_type::runner)
-        throw xrt_core::query::no_such_key(key, "Not implemented");
+    const auto& args = std::any_cast<const query::aie_read::args&>(args_any);
 
-      std::string file_name;
-      std::string path;
-      const auto runner_type = std::any_cast<xrt_core::query::runner::type>(param);
-      switch (runner_type) {
-      case xrt_core::query::runner::type::latency_path:
-        path = get_shim_data_dir() + std::string("latency/");
-        break;
-      case xrt_core::query::runner::type::latency_recipe:
-        file_name = "latency/recipe_latency.json";
-        break;
-      case xrt_core::query::runner::type::latency_profile:
-        file_name = "latency/profile_latency.json";
-        break;
+    // Initial payload: data buffer + aie_data structure at the end
+    std::vector<char> payload(args.size + sizeof(amdxdna_drm_aie_tile_access));
+    amdxdna_drm_aie_tile_access *aie_data = reinterpret_cast<amdxdna_drm_aie_tile_access *>(payload.data() + args.size);
+    aie_data->pid = static_cast<__u64>(args.pid);
+    aie_data->context_id = static_cast<__u32>(args.context_id);
+    aie_data->col = static_cast<__u32>(args.col);
+    aie_data->row = static_cast<__u32>(args.row);
+    aie_data->addr = args.offset;
+    aie_data->size = args.size;
+
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_AIE_TILE_READ,
+      .element_size = static_cast<__u32>(payload.size()),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+
+    // Resize to only return the data portion (remove footer)
+    payload.resize(args.size);
+
+    return payload;
+  }
+};
+
+// Implement aie_write query
+struct aie_write
+{
+  using result_type = size_t;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
+  {
+    if (key != key_type::aie_write)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& args = std::any_cast<const query::aie_write::args&>(args_any);
+
+    // Initial payload: data buffer + aie_data structure at the end
+    std::vector<char> payload(args.data.size() + sizeof(amdxdna_drm_aie_tile_access));
+
+    // Copy data to payload
+    std::memcpy(payload.data(), args.data.data(), args.data.size());
+
+    // Add metadata at the end
+    amdxdna_drm_aie_tile_access *aie_data = reinterpret_cast<amdxdna_drm_aie_tile_access *>(payload.data() + args.data.size());
+    aie_data->pid = static_cast<__u64>(args.pid);
+    aie_data->context_id = static_cast<__u32>(args.context_id);
+    aie_data->col = static_cast<__u32>(args.col);
+    aie_data->row = static_cast<__u32>(args.row);
+    aie_data->addr = args.offset;
+    aie_data->size = args.data.size();
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_AIE_TILE_WRITE,
+      .buffer_size = static_cast<__u32>(payload.size()),
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+
+    return args.data.size();
+  }
+};
+
+//Implement aie_coredump query
+struct aie_coredump
+{
+  using result_type = std::vector<char>;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& args_any)
+  {
+    if (key != key_type::aie_coredump)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto& aie_coredump_args = std::any_cast<const query::aie_coredump::args&>(args_any);
+    std::vector<char> payload(sizeof(amdxdna_drm_aie_coredump));
+    amdxdna_drm_aie_coredump *dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
+    dump->context_id = aie_coredump_args.context_id;
+    dump->pid = aie_coredump_args.pid;
+
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_AIE_COREDUMP,
+      .element_size = static_cast<u32>(payload.size()),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto edev = get_edgedev(device);
+    try {
+      edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+    } catch (const xrt_core::system_error& e) {
+      if (e.code().value() == ENOBUFS) {
+        payload.resize(arg.element_size + sizeof(amdxdna_drm_aie_coredump));
+        dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data()+arg.element_size);
+        dump->context_id = aie_coredump_args.context_id;
+        dump->pid = aie_coredump_args.pid;
+        arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
+        arg.element_size = payload.size();
+        edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
       }
-
-      if (!path.empty())
-          return get_shim_data_dir() + path;
-
-      return get_shim_data_dir() + boost::str(boost::format("%s")
-        % file_name);
     }
+
+    return payload;
+  }
+};
+
+struct archive_path
+{
+  using result_type = query::archive_path::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_ve2.ar");
+  }
 };
 
 struct total_cols
@@ -392,6 +529,41 @@ struct total_cols
     edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
 
     return aie_metadata.cols;                                                          
+  }
+};
+
+struct clock_topology
+{
+  using result_type = query::clock_freq_topology_raw::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_clock_metadata clock_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+      .buffer_size = sizeof(clock_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    std::vector<clock_freq> clocks;
+    clock_freq aie_clock;
+    strncpy(aie_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name),
+	     sizeof(aie_clock.m_name) - 1);
+    aie_clock.m_type = CT_SYSTEM;
+    aie_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
+    clocks.push_back(aie_clock);
+
+    std::vector<char> payload(sizeof(int16_t) + (clocks.size() * sizeof(struct clock_freq)));
+    auto data = reinterpret_cast<struct clock_freq_topology*>(payload.data());
+    data->m_count = clocks.size();
+    memcpy(data->m_clock_freq, clocks.data(), (clocks.size() * sizeof(struct clock_freq)));
+
+    return payload;
   }
 };
 
@@ -442,6 +614,81 @@ struct xclbin_slots
     //data.uuid = "393ef246-8fca-29b2-2085-ab98489b3c87";
     //xclbin_data.push_back(std::move(data));
     return xclbin_data;
+  }
+};
+
+struct xocl_errors
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::xocl_errors)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    amdxdna_async_error* data;
+    const uint32_t drv_output = sizeof(*data);
+    std::vector<char> payload(drv_output);
+    // Only request last async error
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_HW_LAST_ASYNC_ERR,
+      .element_size = sizeof(*data),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(payload.data())
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+
+    uint32_t data_size = 0;
+    data_size = arg.num_element;
+    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    query::xocl_errors::result_type output(sizeof(xcl_errors));
+    xcl_errors *out_xcl_errors = reinterpret_cast<xcl_errors*>(output.data());
+    if (arg.num_element > 1)
+      throw xrt_core::query::exception("Driver returned more than one async error entry");
+
+    out_xcl_errors->num_err = arg.num_element;
+
+    // Dump errors to stderr if any found
+    if (arg.num_element > 0) {
+      for (uint32_t i = 0; i < arg.num_element; i++) {
+        out_xcl_errors->errors[i].err_code = data[i].err_code;
+        out_xcl_errors->errors[i].ts = data[i].ts_us;
+        out_xcl_errors->errors[i].ex_error_code = data[i].ex_err_code;
+#if 0
+        // Dump detailed error information to stderr
+        std::cerr << "Error[" << i << "]:\n";
+
+        // Decode error code components
+        uint64_t err_code = data[i].err_code;
+        uint16_t err_num = (err_code >> 0) & 0xFFFF;
+        uint8_t err_driver = (err_code >> 16) & 0xF;
+        uint8_t err_severity = (err_code >> 24) & 0xF;
+        uint8_t err_module = (err_code >> 32) & 0xF;
+        uint8_t err_class = (err_code >> 40) & 0xF;
+
+        std::cerr << "  Error Code (combined): 0x" << std::hex << err_code << std::dec << "\n";
+        std::cerr << "    Error Number: " << err_num << "\n";
+        std::cerr << "    Error Driver: " << static_cast<int>(err_driver) << "\n";
+        std::cerr << "    Error Severity: " << static_cast<int>(err_severity) << "\n";
+        std::cerr << "    Error Module: " << static_cast<int>(err_module) << "\n";
+        std::cerr << "    Error Class: " << static_cast<int>(err_class) << "\n";
+        std::cerr << "  Timestamp (us): " << data[i].ts_us << "\n";
+        std::cerr << "  Extra Error Code: 0x" << std::hex << data[i].ex_err_code << std::dec << "\n";
+
+        // Decode extra error code (tile location)
+        uint8_t row = (data[i].ex_err_code >> 8) & 0xF;
+        uint8_t col = data[i].ex_err_code & 0xF;
+        std::cerr << "  Tile Location: Row=" << static_cast<int>(row)
+                   << ", Col=" << static_cast<int>(col) << "\n";
+#endif
+      }
+    }
+
+    return output;
   }
 };
 
@@ -629,8 +876,13 @@ initialize_query_table()
   emplace_func0_request<query::rom_vbnv,                dev_info>();
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();
+  emplace_func0_request<query::archive_path,            archive_path>();
+  emplace_func0_request<query::xocl_errors,             xocl_errors>();
+  emplace_func0_request<query::clock_freq_topology_raw, clock_topology>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
-  emplace_func1_request<query::runner,                  runner>();
+  emplace_func1_request<query::aie_read,                aie_read>();
+  emplace_func1_request<query::aie_write,               aie_write>();
+  emplace_func1_request<query::aie_coredump,            aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
 }
@@ -695,26 +947,28 @@ device_xdna::
 create_hw_context(const xrt::uuid& xclbin_uuid, const xrt::hw_context::qos_type& qos,
 		  xrt::hw_context::access_mode mode) const
 {
-  m_uuid = xclbin_uuid.to_string(); // maintaining uuid in device class
   auto mutable_qos = qos; // Create a local copy
 
   //if qos already has priority parameter, then dont overwrite with access_mode
   if (mutable_qos.find("priority") == mutable_qos.end()) {
-  
     if (mode == xrt::hw_context::access_mode::exclusive)
       mutable_qos["priority"] = AMDXDNA_QOS_REALTIME_PRIORITY;
     else
       mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
-
   }
+  auto xclbin = get_xclbin(xclbin_uuid);
+  std::memcpy((&m_uuid), xclbin.get_uuid().get(), sizeof(xuid_t));
 
-  auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, get_xclbin(xclbin_uuid), mutable_qos);
+  if (mutable_qos.find("start_col") == mutable_qos.end())
+    mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
+
+  auto hwctx_obj = std::make_unique<xdna_hwctx>(this, xclbin, mutable_qos);
 
   auto data = get_axlf_section(AIE_METADATA, xclbin_uuid);
 
   if (data.first && data.second)
   {
-    device_xdna* non_const_this = const_cast<device_xdna*>(this); 
+    device_xdna* non_const_this = const_cast<device_xdna*>(this);
     non_const_this->register_aie_array(hwctx_obj.get());
   }
   return hwctx_obj;
@@ -730,14 +984,16 @@ create_hw_context(uint32_t partition_size,
 
   //if qos already has priority parameter, then dont overwrite with access_mode
   if (mutable_qos.find("priority") == mutable_qos.end()) {
-
     if (mode == xrt::hw_context::access_mode::exclusive)
       mutable_qos["priority"] = AMDXDNA_QOS_REALTIME_PRIORITY;
     else
       mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
-
   }
-  auto hwctx_obj = std::make_unique<xdna_hwctx>(*this, partition_size, mutable_qos);
+  
+  if (mutable_qos.find("start_col") == mutable_qos.end())
+    mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
+
+  auto hwctx_obj = std::make_unique<xdna_hwctx>(this, partition_size, mutable_qos);
   // TODO : Get AIE_METADATA info from ELF and register aie array
 
   return hwctx_obj;
@@ -762,9 +1018,6 @@ device_xdna::
 alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags)
 {
-  if (userptr)
-    shim_not_supported_err("User ptr BO");;
-
   // TODO:
   // For now, debug BO is just a normal device BO. Let's associate all device
   // BO with a HW CTX (if not passed in) since we can't tell if it is a
@@ -772,6 +1025,9 @@ alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   auto f = xcl_bo_flags{flags};
   if ((ctx_id == AMDXDNA_INVALID_CTX_HANDLE) && !!(f.flags & XRT_BO_FLAGS_CACHEABLE))
     ctx_id = f.slot;
+
+  if (userptr)
+    return std::make_unique<xdna_bo>(*this, ctx_id, size, userptr);
 
   return std::make_unique<xdna_bo>(*this, ctx_id, size, flags, flag_to_type(flags));
 }
@@ -792,15 +1048,21 @@ import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
   
 #if defined(SYS_pidfd_open) && defined(SYS_pidfd_getfd)
   auto pidfd = syscall(SYS_pidfd_open, pid, 0);
-  if (pidfd < 0)
-    throw xrt_core::system_error(errno, "pidfd_open failed");
+  if (pidfd < 0) {
+    int saved_errno = errno;
+    throw xrt_core::system_error(saved_errno, std::string("pidfd_open failed (err=") +
+                                 std::to_string(saved_errno) + ": " + errno_to_str(saved_errno) + ")");
+  }
 
   auto bofd = syscall(SYS_pidfd_getfd, pidfd, ehdl, 0);
-  if (bofd < 0)
+  if (bofd < 0) {
+    int saved_errno = errno;
     throw xrt_core::system_error
-      (errno, "pidfd_getfd failed, check that ptrace access mode "
-       "allows PTRACE_MODE_ATTACH_REALCREDS.  For more details please "
+      (saved_errno, std::string("pidfd_getfd failed (err=") + std::to_string(saved_errno) + ": " +
+       errno_to_str(saved_errno) + "). Check that ptrace access mode "
+       "allows PTRACE_MODE_ATTACH_REALCREDS. For more details please "
        "check /etc/sysctl.d/10-ptrace.conf");
+  }
 
   return std::make_unique<xdna_bo>(*this, bofd);
 #else
@@ -809,96 +1071,6 @@ import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
      "Importing buffer object from different process requires XRT "
      " built and installed on a system with 'pidfd' kernel support");
 #endif
-}
-
-std::vector<char>
-device_xdna::
-read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size)
-{
-  std::vector<char> payload(size);
-  amdxdna_drm_aie_mem mem;
-
-  mem.col = col;
-  mem.row = row;
-  mem.addr = offset;
-  mem.size = size;
-  mem.buf_p = reinterpret_cast<uintptr_t>(payload.data());
-
-  amdxdna_drm_get_info arg = {
-    .param = DRM_AMDXDNA_READ_AIE_MEM,
-    .buffer_size = sizeof(mem),
-    .buffer = reinterpret_cast<uintptr_t>(&mem)
-  };
-
-  get_edev()->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
-  return payload;
-}
-
-size_t
-device_xdna::
-write_aie_mem(uint16_t col, uint16_t row, uint32_t offset, const std::vector<char>& buf)
-{
-  amdxdna_drm_aie_mem mem;
-  uint32_t size = static_cast<uint32_t>(buf.size());
-
-  mem.col = col;
-  mem.row = row;
-  mem.addr = offset;
-  mem.size = size;
-  mem.buf_p = reinterpret_cast<uintptr_t>(buf.data());
-
-  amdxdna_drm_get_info arg = {
-    .param = DRM_AMDXDNA_WRITE_AIE_MEM,
-    .buffer_size = sizeof(mem),
-    .buffer = reinterpret_cast<uintptr_t>(&mem)
-  };
-
-  get_edev()->ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
-
-  return size;
-}
-
-uint32_t
-device_xdna::
-read_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr)
-{
-  amdxdna_drm_aie_reg reg;
-
-  reg.col = col;
-  reg.row = row;
-  reg.addr = reg_addr;
-  reg.val = 0;
-
-  amdxdna_drm_get_info arg = {
-    .param = DRM_AMDXDNA_READ_AIE_REG,
-    .buffer_size = sizeof(reg),
-    .buffer = reinterpret_cast<uintptr_t>(&reg)
-  };
-
-  get_edev()->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
-
-  return reg.val;
-}
-
-bool
-device_xdna::
-write_aie_reg(uint16_t col, uint16_t row, uint32_t reg_addr, uint32_t reg_val)
-{
-  amdxdna_drm_aie_reg reg = {};
-
-  reg.col = col;
-  reg.row = row;
-  reg.addr = reg_addr;
-  reg.val = reg_val;
-
-  amdxdna_drm_get_info arg = {
-    .param = DRM_AMDXDNA_WRITE_AIE_REG,
-    .buffer_size = sizeof(reg),
-    .buffer = reinterpret_cast<uintptr_t>(&reg)
-  };
-
-  get_edev()->ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
-  return true;
 }
 
 int

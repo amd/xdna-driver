@@ -449,7 +449,7 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
-	const size_t size = 0x1000;
+	const size_t size = SZ_8K;
 	void *buff;
 	int ret;
 
@@ -530,16 +530,18 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct app_health_report *report;
+	size_t size;
 	int ret;
 
-	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*report), DMA_FROM_DEVICE);
+	size = max_t(size_t, sizeof(*report), SZ_8K);
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl))
 		return PTR_ERR(dma_hdl);
 
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
 	/* Just for debug, always check context id 1 */
-	ret = aie2_get_app_health(ndev, dma_hdl, 1, sizeof(*report));
+	ret = aie2_get_app_health(ndev, dma_hdl, 1, size);
 	mutex_unlock(&ndev->aie2_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed ret %d", ret);
@@ -579,7 +581,7 @@ static ssize_t aie2_dump_fw_log_set(struct file *file, const char __user *ptr,
 		return -EINVAL;
 	}
 
-	ret =  kstrtobool_from_user(ptr, len, &dump);
+	ret = kstrtobool_from_user(ptr, len, &dump);
 	if (ret) {
 		XDNA_ERR(xdna, "Invalid input value, ret %d", ret);
 		return ret;
@@ -610,6 +612,97 @@ static int aie2_dump_fw_log_get(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(dump_fw_log, aie2_dump_fw_log_get, aie2_dump_fw_log_set);
 
+static int aie2_dump_fw_log_buffer_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+
+	if (!ndev->xdna->fw_log || !ndev->xdna->fw_log->enabled) {
+		XDNA_ERR(ndev->xdna, "FW logging is not enabled");
+		return -EINVAL;
+	}
+
+	dma_hdl = ndev->xdna->fw_log->dma_hdl;
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	seq_printf(m, "FW log buffer vaddr: 0x%llx\n",
+		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
+	seq_printf(m, "FW log buffer DMA addr: 0x%llx\n", amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
+	seq_printf(m, "FW log buffer size: 0x%lx\n", dma_hdl->size);
+	seq_hex_dump(m, "[FW LOG BUF]: ", DUMP_PREFIX_OFFSET, 16, 4,
+		     amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), dma_hdl->size, true);
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dump_fw_log_buffer, aie2_dump_fw_log_buffer_get, NULL);
+
+static ssize_t aie2_dump_fw_trace_set(struct file *file, const char __user *ptr,
+				      size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	bool dump;
+	int ret;
+
+	if (!xdna->fw_trace || !xdna->fw_trace->enabled) {
+		XDNA_ERR(xdna, "FW tracing disabled or unsupported");
+		return -EINVAL;
+	}
+
+	ret = kstrtobool_from_user(ptr, len, &dump);
+	if (ret) {
+		XDNA_ERR(xdna, "Invalid input value, ret %d", ret);
+		return ret;
+	}
+
+	ret = amdxdna_dpt_dump_to_dmesg(xdna->fw_trace, dump);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to %s FW trace dump, ret %d",
+			 dump ? "enable" : "disable", ret);
+		return ret;
+	}
+	return len;
+}
+
+static int aie2_dump_fw_trace_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+
+	if (!ndev->xdna->fw_trace || !ndev->xdna->fw_trace->enabled) {
+		XDNA_ERR(ndev->xdna, "FW tracing is not enabled");
+		return -EINVAL;
+	}
+
+	seq_printf(m, "%s\n", ndev->xdna->fw_trace->dump_to_dmesg ? "enabled" : "disabled");
+
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dump_fw_trace, aie2_dump_fw_trace_get, aie2_dump_fw_trace_set);
+
+static int aie2_dump_fw_trace_buffer_get(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+
+	if (!ndev->xdna->fw_trace || !ndev->xdna->fw_trace->enabled) {
+		XDNA_ERR(ndev->xdna, "FW tracing is not enabled");
+		return -EINVAL;
+	}
+
+	dma_hdl = ndev->xdna->fw_trace->dma_hdl;
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	seq_printf(m, "FW trace buffer vaddr: 0x%llx\n",
+		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
+	seq_printf(m, "FW trace buffer DMA addr: 0x%llx\n",
+		   amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
+	seq_printf(m, "FW trace buffer size: 0x%lx\n", dma_hdl->size);
+	seq_hex_dump(m, "[FW TRACE BUF]: ", DUMP_PREFIX_OFFSET, 16, 4,
+		     amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), dma_hdl->size, false);
+	return 0;
+}
+
+AIE2_DBGFS_FOPS(dump_fw_trace_buffer, aie2_dump_fw_trace_buffer_get, NULL);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -630,6 +723,9 @@ const struct {
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
 	AIE2_DBGFS_FILE(dump_fw_log, 0600),
+	AIE2_DBGFS_FILE(dump_fw_log_buffer, 0400),
+	AIE2_DBGFS_FILE(dump_fw_trace, 0600),
+	AIE2_DBGFS_FILE(dump_fw_trace_buffer, 0400),
 };
 
 void aie2_debugfs_init(struct amdxdna_dev *xdna)

@@ -32,7 +32,7 @@ int xdna_msg_cb(void *handle, void __iomem *data, size_t size)
 
 	memcpy_fromio(cb_arg->data, data, cb_arg->size);
 	print_hex_dump_debug("resp data: ", DUMP_PREFIX_OFFSET,
-			     16, 4, cb_arg->data, cb_arg->size, true);
+			     16, 4, cb_arg->data, cb_arg->size, false);
 out:
 	ret = cb_arg->error;
 	complete(&cb_arg->comp);

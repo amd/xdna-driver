@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 execute_process(
   COMMAND awk -F= "$1==\"ID\" {print $2}" /etc/os-release
@@ -28,11 +28,15 @@ execute_process(
   OUTPUT_VARIABLE XDNA_CPACK_LINUX_VERSION
   OUTPUT_STRIP_TRAILING_WHITESPACE
   )
-execute_process(
-  COMMAND bash -c "source /etc/os-release && echo \"\$ID \$ID_LIKE\""
-  OUTPUT_VARIABLE XDNA_CPACK_LINUX_PKG_FLAVOR
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
+if (EXISTS "/etc/arch-release")
+  set(XDNA_CPACK_LINUX_PKG_FLAVOR "arch")
+else()
+  execute_process(
+    COMMAND bash -c "source /etc/os-release && echo \"\$ID \$ID_LIKE\""
+    OUTPUT_VARIABLE XDNA_CPACK_LINUX_PKG_FLAVOR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
 execute_process(
   COMMAND echo ${XRT_VERSION_STRING}
   COMMAND awk -F. "{print $1}"
@@ -61,43 +65,15 @@ math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
 set(XDNA_CPACK_XRT_BASE_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR})
 set(XDNA_CPACK_XRT_BASE_NEXT_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})
 
-install(DIRECTORY ${AMDXDNA_BINS_DIR}/download_raw/xbutil_validate/bins/
+# VTD archives are downloaded by build script based on info.json configuration
+set(VTD_ARCHIVES_DIR "${CMAKE_CURRENT_BINARY_DIR}/../amdxdna_bins/vtd_archives")
+message(STATUS "Using VTD archives from ${VTD_ARCHIVES_DIR}")
+
+install(DIRECTORY ${VTD_ARCHIVES_DIR}/
   DESTINATION ${XDNA_PKG_DATA_DIR}/bins
   COMPONENT ${XDNA_COMPONENT}
   FILES_MATCHING
-  PATTERN "*.xclbin"
-  PATTERN "*.txt"
-  PATTERN "*.elf"
-  PATTERN "*.bin"
-  PATTERN "*.json"
-  PATTERN "*.yaml"
-  )
-
-include(FetchContent)
-
-FetchContent_Declare(
-  vtd_strx_archive
-  URL "https://github.com/Xilinx/VTD/raw/403740c18e709f82b3880fae53d412331ed907b1/runner/strx/xrt_smi_strx.a"
-  DOWNLOAD_NO_EXTRACT ON
-  DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
-)
-
-FetchContent_Declare(
-  vtd_phx_archive
-  URL "https://github.com/Xilinx/VTD/raw/403740c18e709f82b3880fae53d412331ed907b1/runner/phx/xrt_smi_phx.a"
-  DOWNLOAD_NO_EXTRACT ON
-  DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/vtd_downloads"
-)
-
-message(STATUS "Downloading VTD archives from GitHub...")
-FetchContent_MakeAvailable(vtd_strx_archive vtd_phx_archive)
-message(STATUS "VTD archives downloaded successfully")
-
-install(FILES 
-  "${vtd_strx_archive_SOURCE_DIR}/xrt_smi_strx.a"
-  "${vtd_phx_archive_SOURCE_DIR}/xrt_smi_phx.a"
-  DESTINATION ${XDNA_PKG_DATA_DIR}/bins
-  COMPONENT ${XDNA_COMPONENT}
+  PATTERN "*.a"
   )
 
 if(NOT SKIP_KMOD)
@@ -110,11 +86,11 @@ install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
   PATTERN "download_raw" EXCLUDE
   )
 
-if(XDNA_DRV_PF_SRC_DIR)
-  set(PF_RMMOD "rmmod amdxdna_pf > /dev/null 2>&1")
-  set(PF_DBG_INSMOD "modprobe amdxdna_pf dyndbg=+pf")
-  set(PF_INSMOD "modprobe amdxdna_pf")
-endif(XDNA_DRV_PF_SRC_DIR)
+if(XDNA_DRV_INT_SRC_DIR AND XDNA_DRV_INT_NAME)
+  set(INT_RMMOD "rmmod ${XDNA_DRV_INT_NAME} > /dev/null 2>&1")
+  set(INT_DBG_INSMOD "modprobe ${XDNA_DRV_INT_NAME} dyndbg=+pf")
+  set(INT_INSMOD "modprobe ${XDNA_DRV_INT_NAME}")
+endif()
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/postinst.in
@@ -134,7 +110,7 @@ if("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
   set(CPACK_DEB_COMPONENT_INSTALL ON)
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "xrt-base (>= ${XDNA_CPACK_XRT_BASE_VERSION}), xrt-base (<< ${XDNA_CPACK_XRT_BASE_NEXT_VERSION})")
   if(NOT SKIP_KMOD)
-    set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/package/postinst" 
+    set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/package/postinst"
       "${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
   endif()
 elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
@@ -142,11 +118,25 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
   set(CPACK_RPM_COMPONENT_INSTALL ON)
   set(CPACK_RPM_PACKAGE_REQUIRES "xrt-base >= ${XDNA_CPACK_XRT_BASE_VERSION}, xrt-base < ${XDNA_CPACK_XRT_BASE_NEXT_VERSION}")
   if(NOT SKIP_KMOD)
-    set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/postinst") 
-    set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm") 
+    set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
+    set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
   endif()
-else("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
-  message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}")
-endif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "debian")
+elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch")
+  set(CPACK_GENERATOR "TGZ")
+  # For Arch Linux, we generate a tarball that can be repackaged into a proper
+  # Arch package using the provided PKGBUILD. When using the PKGBUILD, install
+  # hooks handle post-install/pre-remove automatically via pacman.
+  set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+  message(STATUS "Arch Linux detected - generating TGZ package")
+  if(NOT SKIP_KMOD)
+    message(STATUS "Post-install script: ${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
+    message(STATUS "Pre-remove script: ${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
+    message(STATUS "Note: Use the provided PKGBUILD to create an Arch package with proper install hooks")
+  endif()
+else()
+  message(FATAL_ERROR "Unknown Linux package flavor: ${XDNA_CPACK_LINUX_PKG_FLAVOR}. "
+    "Supported distributions: Debian/Ubuntu (deb), Fedora/RHEL (rpm), Arch Linux (TGZ). "
+    "To add support for your distribution, please open an issue at https://github.com/amd/xdna-driver/issues")
+endif()
 
 include(CPack)

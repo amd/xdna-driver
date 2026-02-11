@@ -10,6 +10,7 @@
 #include "core/edge/common/aie_parser.h"
 #include "core/edge/user/hwctx_object.h"
 #include "xaiengine/xlnx-ai-engine.h"
+#include "shim_debug.h"
 #include "xdna_aie_array.h"
 #include "xdna_device.h"
 #include "xdna_hwctx.h"
@@ -49,6 +50,24 @@ get_driver_config(const pt::ptree& aie_meta)
   return driver_config;
 }
 
+int
+xdna_aie_array::
+get_aie_partition_fd(const xdna_hwctx* hwctx_obj)
+{
+  int aie_fd = -1;
+  auto dev = const_cast<xdna_hwctx*>(hwctx_obj)->get_device();
+
+  amdxdna_drm_get_array arg = {};
+  arg.param = DRM_AMDXDNA_HWCTX_AIE_PART_FD;
+  arg.element_size = sizeof(aie_fd);
+  arg.num_element = hwctx_obj->get_slotidx();  /* hwctx handle passed via num_element */
+  arg.buffer = reinterpret_cast<uintptr_t>(&aie_fd);
+
+  dev->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+
+  return aie_fd;
+}
+
 xdna_aie_array::
 xdna_aie_array(const xrt_core::device* device)
 {
@@ -72,7 +91,8 @@ xdna_aie_array(const xrt_core::device* device)
   int RC = XAie_GetPartitionFdList(&dev_inst_obj);
 
   if (RC != XAIE_OK) 
-   throw xrt_core::error(RC,"XAie_GetPartitionFdList failed \n");
+    throw xrt_core::error(RC, std::string("XAie_GetPartitionFdList failed (rc=") +
+                          std::to_string(RC) + ")");
 
   XAie_List *NodePtr;
   XAie_PartitionList *ListNode;
@@ -83,17 +103,18 @@ xdna_aie_array(const xrt_core::device* device)
 
   int aie_part_fd = ListNode->PartitionFd;
 
-  //int aie_part_fd = fd;
-
   if (aie_part_fd < 0)
-    throw xrt_core::error(aie_part_fd,"fd is NEGATIVE\n");
+    throw xrt_core::error(aie_part_fd, std::string("AIE partition fd is negative: ") +
+                          std::to_string(aie_part_fd));
 
   fd = aie_part_fd;
   ConfigPtr.PartProp.Handle = fd;
 
   AieRC rc;
   if ((rc = XAie_CfgInitialize(&dev_inst_obj, &ConfigPtr)) != XAIE_OK)
-    throw xrt_core::error(-EINVAL, "Failed to initialize AIE configuration: " + std::to_string(rc));
+    throw xrt_core::error(-EINVAL, std::string("Failed to initialize AIE configuration (rc=") +
+                          std::to_string(rc) + ", err=" + std::to_string(EINVAL) + ": " +
+                          errno_to_str(EINVAL) + ")");
 
   dev_inst = &dev_inst_obj;
 }
@@ -122,32 +143,25 @@ xdna_aie_array(const xrt_core::device* device, const xdna_hwctx* hwctx_obj)
   if (part_info.partition_id != xrt_core::edge::aie::full_array_id) {
     AieRC rc1;
     if ((rc1 = XAie_SetupPartitionConfig(&dev_inst_obj, part_info.base_address, part_info.start_column, part_info.num_columns)) != XAIE_OK)
-      throw xrt_core::error(-EINVAL, "Failed to setup AIE Partition: " + std::to_string(rc1));
+      throw xrt_core::error(-EINVAL, std::string("Failed to setup AIE Partition (rc=") +
+                            std::to_string(rc1) + ", err=" + std::to_string(EINVAL) + ": " +
+                            errno_to_str(EINVAL) + ")");
   }
 
-  int RC = XAie_GetPartitionFdList(&dev_inst_obj);
-
-  if (RC != XAIE_OK) 
-   throw xrt_core::error(RC,"XAie_GetPartitionFdList failed \n");
-
-  XAie_List *NodePtr;
-  XAie_PartitionList *ListNode;
-
-  NodePtr = (XAie_List *)&dev_inst_obj.PartitionList.Next->Next;
-
-  ListNode = (XAie_PartitionList *)XAIE_CONTAINER_OF(NodePtr, XAie_PartitionList, Node);
-
-  int aie_part_fd = ListNode->PartitionFd;
-
+  // Get AIE partition FD from kernel via ioctl
+  int aie_part_fd = get_aie_partition_fd(hwctx_obj);
   if (aie_part_fd < 0)
-    throw xrt_core::error(aie_part_fd,"fd is NEGATIVE\n");
+    throw xrt_core::error(aie_part_fd, std::string("Failed to get AIE partition FD: ") +
+                          std::to_string(aie_part_fd));
 
   fd = aie_part_fd;
   ConfigPtr.PartProp.Handle = fd;
 
   AieRC rc;
   if ((rc = XAie_CfgInitialize(&dev_inst_obj, &ConfigPtr)) != XAIE_OK)
-    throw xrt_core::error(-EINVAL, "Failed to initialize AIE configuration: " + std::to_string(rc));
+    throw xrt_core::error(-EINVAL, std::string("Failed to initialize AIE configuration (rc=") +
+                          std::to_string(rc) + ", err=" + std::to_string(EINVAL) + ": " +
+                          errno_to_str(EINVAL) + ")");
 
   dev_inst = &dev_inst_obj;
 }
@@ -164,7 +178,8 @@ xdna_aie_array::
 get_dev()
 {
   if (!dev_inst)
-    throw xrt_core::error(-EINVAL, "AIE is not initialized");
+    throw xrt_core::error(-EINVAL, std::string("AIE is not initialized (err=") +
+                          std::to_string(EINVAL) + ": " + errno_to_str(EINVAL) + ")");
 
   return dev_inst;
 }

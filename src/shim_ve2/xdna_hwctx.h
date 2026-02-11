@@ -26,9 +26,9 @@ class xdna_hwq; // forward declaration
 class xdna_hwctx : public xrt_core::hwctx_handle
 {
 public:
-  xdna_hwctx(const device_xdna& dev, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos);
+  xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_context::qos_type& qos);
 
-  xdna_hwctx(const device_xdna& dev, uint32_t partition_size, const xrt::hw_context::qos_type& qos);
+  xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_context::qos_type& qos);
 
   ~xdna_hwctx();
 
@@ -88,9 +88,10 @@ public:
   std::shared_ptr<xdna_aie_array>
   get_aie_array();
 
-protected:
-  const device_xdna&
+  device_xdna*
   get_device();
+
+protected:
 
   struct cu_info {
     std::string m_name;
@@ -114,7 +115,7 @@ protected:
   fini_log_buf();
 
 private:
-  const device_xdna& m_device;
+  device_xdna* m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
   amdxdna_qos_info m_qos = {};
   std::vector<cu_info> m_cu_info;
@@ -128,7 +129,7 @@ private:
   xrt::uuid m_uuid;
   partition_info m_info;
 
-  void
+  int
   init_qos_info(const qos_type& qos);
 
   void

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/module.h>
@@ -16,6 +16,13 @@
 #include "amdxdna_carvedout_buf.h"
 #endif
 
+static int amdxdna_sriov_configure(struct pci_dev *pdev, int num_vfs);
+/* common util inline functions */
+static inline int is_pf_dev(const struct pci_dev *pdev)
+{
+	return (pdev->device == 0x17F2 || pdev->device == 0x1B0B);
+}
+
 /*
  *  There are platforms which share the same PCI device ID
  *  but have different PCI revision IDs. So, let the PCI class
@@ -23,14 +30,6 @@
  *  pair as a key to select the devices.
  */
 static const struct pci_device_id pci_ids[] = {
-#ifdef AMDXDNA_NPU3_LEGACY
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1569) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_ATI, 0x1640) },
-#endif
-#ifdef AMDXDNA_NPU3
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f1) },
-	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f3) },
-#endif
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, PCI_ANY_ID),
 		.class = PCI_CLASS_SP_OTHER << 8,  /* Signal Processing */
 		.class_mask = 0xFFFF00,
@@ -42,15 +41,12 @@ MODULE_DEVICE_TABLE(pci, pci_ids);
 
 static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x1502, 0x0,  &dev_npu1_info },
-	{ 0x17f0, 0x0,  &dev_npu2_info },
-#ifdef AMDXDNA_NPU3_LEGACY
-	{ 0x1569, 0x0,  &dev_npu3_info },
-	{ 0x1640, 0x0,  &dev_npu3_info },
-#endif
-#ifdef AMDXDNA_NPU3
 	{ 0x17f1, 0x10,  &dev_npu3_info },
+	{ 0x17f2, 0x10,  &dev_npu3_pf_info },
 	{ 0x17f3, 0x10,  &dev_npu3_info },
-#endif
+	{ 0x1B0A, 0x00,  &dev_npu3_info },
+	{ 0x1B0B, 0x00,  &dev_npu3_pf_info },
+	{ 0x1B0C, 0x00,  &dev_npu3_info },
 	{ 0x17f0, 0x10, &dev_npu4_info },
 	{ 0x17f0, 0x11, &dev_npu5_info },
 	{ 0x17f0, 0x20, &dev_npu6_info },
@@ -68,6 +64,38 @@ amdxdna_get_dev_info(struct pci_dev *pdev)
 			return amdxdna_ids[i].dev_info;
 	}
 	return NULL;
+}
+
+static const char *amdxdna_lookup_vbnv(const struct amdxdna_rev_vbnv *tbl, u32 rev)
+{
+	int i;
+
+	if (!tbl)
+		return NULL;
+
+	for (i = 0; tbl[i].vbnv; i++) {
+		if (tbl[i].revision == rev)
+			return tbl[i].vbnv;
+	}
+	return NULL;
+}
+
+static void amdxdna_vbnv_init(struct amdxdna_dev *xdna)
+{
+	const struct amdxdna_dev_info *info = xdna->dev_info;
+	u32 rev;
+
+	xdna->vbnv = info->default_vbnv;
+
+	if (!info->ops->get_dev_revision)
+		return;
+
+	if (info->ops->get_dev_revision(xdna, &rev))
+		return;
+
+	xdna->vbnv = amdxdna_lookup_vbnv(info->rev_vbnv_tbl, rev);
+	if (!xdna->vbnv)
+		xdna->vbnv = info->default_vbnv;
 }
 
 static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -98,9 +126,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!xdna->dev_info->ops->init || !xdna->dev_info->ops->fini)
 		return -EOPNOTSUPP;
 
+	ret = amdxdna_iommu_init(xdna);
+	if (ret)
+		return ret;
+
 	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", WQ_MEM_RECLAIM);
-	if (!xdna->notifier_wq)
-		return -ENOMEM;
+	if (!xdna->notifier_wq) {
+		ret = -ENOMEM;
+		goto iommu_fini;
+	}
 
 	ret = xdna->dev_info->ops->init(xdna);
 	if (ret) {
@@ -108,13 +142,16 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto destroy_notifier_wq;
 	}
 
+	amdxdna_vbnv_init(xdna);
+
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Create amdxdna attrs failed: %d", ret);
 		goto failed_dev_fini;
 	}
 
-	amdxdna_tdr_start(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_start)
+		xdna->dev_info->ops->tdr_start(xdna);
 
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
@@ -122,13 +159,22 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_tdr_fini;
 	}
 
-	ret = amdxdna_fw_log_init(xdna);
+	ret = amdxdna_dpt_init(xdna);
 	if (ret)
-		XDNA_WARN(xdna, "Failed to enable firmware logging: %d", ret);
+		XDNA_WARN(xdna, "Failed to enable firmware debug/profile/trace: %d", ret);
 
 	/* Debug fs needs to go after register DRM dev */
 	if (xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
+
+	/*
+	 * Enable runtime PM only after all probe-time firmware communication
+	 * is complete. Functions like vbnv_init() and dpt_init() query the
+	 * firmware and must run while the device is guaranteed active.
+	 * Moving rpm_init() here avoids a race where autosuspend could trigger
+	 * before probe finishes.
+	 */
+	is_pf_dev(pdev) ? amdxdna_rpm_fini(xdna) : amdxdna_rpm_init(xdna);
 
 #ifdef AMDXDNA_DEVEL
 	ida_init(&xdna->pdi_ida);
@@ -136,12 +182,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 failed_tdr_fini:
-	amdxdna_tdr_stop(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_stop)
+		xdna->dev_info->ops->tdr_stop(xdna);
 	amdxdna_sysfs_fini(xdna);
 failed_dev_fini:
 	xdna->dev_info->ops->fini(xdna);
 destroy_notifier_wq:
 	destroy_workqueue(xdna->notifier_wq);
+iommu_fini:
+	amdxdna_iommu_fini(xdna);
 	return ret;
 }
 
@@ -150,9 +199,13 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
 
-	amdxdna_fw_log_fini(xdna);
+	if (is_pf_dev(pdev))
+		amdxdna_sriov_configure(pdev, 0);
+
+	amdxdna_dpt_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
-	amdxdna_tdr_stop(&xdna->tdr);
+	if (xdna->dev_info->ops->tdr_stop)
+		xdna->dev_info->ops->tdr_stop(xdna);
 	amdxdna_sysfs_fini(xdna);
 
 #ifdef AMDXDNA_DEVEL
@@ -175,7 +228,13 @@ static void amdxdna_remove(struct pci_dev *pdev)
 	}
 	mutex_unlock(&xdna->dev_lock);
 
+	/*
+	 * Disable runtime PM before tearing down. This must be done before
+	 * fini() since rpm_init() was moved to probe after init().
+	 */
+	amdxdna_rpm_fini(xdna);
 	xdna->dev_info->ops->fini(xdna);
+	amdxdna_iommu_fini(xdna);
 #ifdef AMDXDNA_DEVEL
 	ida_destroy(&xdna->pdi_ida);
 #endif
@@ -222,6 +281,16 @@ static const struct pci_error_handlers amdxdna_err_handler = {
 	.reset_done = amdxdna_reset_done,
 };
 
+static int amdxdna_sriov_configure(struct pci_dev *pdev, int num_vfs)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+
+	if (xdna->dev_info->ops->sriov_configure)
+		return xdna->dev_info->ops->sriov_configure(xdna, num_vfs);
+
+	return -EOPNOTSUPP;
+}
+
 static struct pci_driver amdxdna_pci_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = pci_ids,
@@ -229,6 +298,7 @@ static struct pci_driver amdxdna_pci_driver = {
 	.remove = amdxdna_remove,
 	.driver.pm = &amdxdna_pm_ops,
 	.err_handler = &amdxdna_err_handler,
+	.sriov_configure = amdxdna_sriov_configure,
 };
 
 static int __init amdxdna_mod_init(void)

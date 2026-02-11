@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _HOST_QUEUE_H_
 #define _HOST_QUEUE_H_
@@ -26,6 +26,7 @@ enum hsa_cmd_state
   HSA_CMD_STATE_SKCRASHED = 11,
 };
 #define HSA_COMP_SUCCESS          HSA_CMD_STATE_COMPLETED // Host user code will check this
+#define HSA_PKT_PAGE_CONT         10 // cert internal status
 #define HSA_ERR(e)                (((e) << 4) | HSA_CMD_STATE_ERROR)
 #define HSA_EXIT_PKT              HSA_ERR(0)
 #define HSA_PDI_LOAD_NO_MAPPING   HSA_ERR(self_id * 100 + 1)
@@ -35,6 +36,9 @@ enum hsa_cmd_state
 #define HSA_INVALID_PAGE          HSA_ERR(self_id * 100 + 5)
 #define HSA_PKT_TIMEOUT           HSA_ERR(self_id * 100 + 6)
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES (6)
+
+#define LAST_CMD (0)
+#define NOT_LAST_CMD (1)
 
 enum host_queue_packet_opcode
 {            
@@ -52,11 +56,11 @@ enum host_queue_packet_opcode
  */ 
 struct exec_buf
 {
-  uint32_t reserved0;
+  uint32_t dtrace_buf_host_addr_low;
   uint32_t dpu_control_code_host_addr_low;
   uint32_t dpu_control_code_host_addr_high;
   uint16_t args_len;
-  uint16_t reserved1;
+  uint16_t dtrace_buf_host_addr_high;
   uint32_t args_host_addr_low;
   uint32_t args_host_addr_high;
 };
@@ -105,7 +109,8 @@ struct common_header
     };    
     uint16_t header;
   };
-  uint16_t opcode;
+  uint8_t opcode;
+  uint8_t chain_flag;
   uint16_t count;
   uint8_t distribute;
   uint8_t indirect;
@@ -244,6 +249,11 @@ struct host_queue_packet
 {
   struct xrt_packet_header xrt_header;	
   uint32_t data[12];
+};
+
+struct host_indirect_data {
+  struct common_header header;
+  struct exec_buf  payload;
 };
 
 /*

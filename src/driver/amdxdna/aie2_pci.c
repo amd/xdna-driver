@@ -77,33 +77,33 @@ struct mgmt_mbox_chann_info {
 
 int aie2_check_protocol(struct amdxdna_dev_hdl *ndev, u32 fw_major, u32 fw_minor)
 {
+	u64 min_fw_version = ndev->priv->min_fw_version;
+	const struct aie2_fw_feature_tbl *feature;
 	struct amdxdna_dev *xdna = ndev->xdna;
+	u64 fw_version;
 
-	/*
-	 * The driver supported mailbox behavior is defined by
-	 * ndev->priv->protocol_major and protocol_minor.
-	 *
-	 * When major different, it means incompatible behavior.
-	 * When only minor different, the greater minor means more opcode etc.
-	 *
-	 * Thus,
-	 * 1. driver and fw major must be the same
-	 * 2. driver minor must smaller than or equal to fw minor
-	 */
-	if (ndev->priv->protocol_major != fw_major) {
-		XDNA_ERR(xdna, "Incompatible firmware protocol major %d minor %d",
-			 fw_major, fw_minor);
+	fw_version = AIE2_FW_VERSION(fw_major, fw_minor);
+
+	if (fw_version < min_fw_version) {
+		XDNA_ERR(xdna, "Firmware %d.%d below minimum %d.%d", fw_major, fw_minor,
+			 AIE2_FW_MAJOR(min_fw_version), AIE2_FW_MINOR(min_fw_version));
 		return -EINVAL;
 	}
 
-	/*
-	 * Greater protocol minor version means new messages/status/emun are
-	 * added into the firmware interface protocol.
-	 */
-	if (ndev->priv->protocol_minor > fw_minor) {
-		XDNA_ERR(xdna, "Firmware minor version smaller than supported");
-		return -EINVAL;
+	/* Store unified version for later use */
+	ndev->mgmt_fw_version = fw_version;
+
+	/* Enable features based on unified version comparison */
+	for (feature = ndev->priv->fw_feature_tbl;
+	     feature && feature->min_fw_version; feature++) {
+		if (fw_version < feature->min_fw_version)
+			continue;
+		if (feature->max_fw_version && fw_version > feature->max_fw_version)
+			continue;
+
+		set_bit(feature->feature, &ndev->feature_mask);
 	}
+
 	return 0;
 }
 
@@ -120,14 +120,16 @@ static inline void aie2_dump_chann_info_debug(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(xdna, "x2i ringbuf 0x%x", ndev->mgmt_info.x2i.rb_start_addr);
 	XDNA_DBG(xdna, "x2i rsize   0x%x", ndev->mgmt_info.x2i.rb_size);
 	XDNA_DBG(xdna, "x2i chann index 0x%x", ndev->mgmt_info.msix_id);
-	if (!ndev->mgmt_prot_major)
+
+	if (!ndev->mgmt_fw_version)
 		return;
 
-	XDNA_DBG(xdna, "mailbox protocol major 0x%x", ndev->mgmt_prot_major);
-	XDNA_DBG(xdna, "mailbox protocol minor 0x%x", ndev->mgmt_prot_minor);
+	XDNA_DBG(xdna, "mailbox protocol version %d.%d",
+		 AIE2_FW_MAJOR(ndev->mgmt_fw_version),
+		 AIE2_FW_MINOR(ndev->mgmt_fw_version));
 }
 
-static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
+static int aie2_mgmt_chann_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct mgmt_mbox_chann_info info_regs;
 	struct xdna_mailbox_chann_res *i2x;
@@ -174,9 +176,7 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	}
 
 	ndev->mgmt_info.msix_id  = info_regs.msi_id;
-	ndev->mgmt_prot_major = info_regs.prot_major;
-	ndev->mgmt_prot_minor = info_regs.prot_minor;
-	if (aie2_check_protocol(ndev, ndev->mgmt_prot_major, ndev->mgmt_prot_minor))
+	if (aie2_check_protocol(ndev, info_regs.prot_major, info_regs.prot_minor))
 		ret = -EINVAL;
 
 done:
@@ -243,14 +243,6 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
 
-	if (!ndev->mgmt_prot_major) {
-		ret = aie2_check_protocol_version(ndev);
-		if (ret) {
-			XDNA_ERR(ndev->xdna, "Check protocol version failed");
-			return ret;
-		}
-	}
-
 	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_INIT, NULL);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Runtime config failed");
@@ -284,6 +276,12 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 	ret = aie2_xdna_reset(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "Reset firmware failed");
+		return ret;
+	}
+
+	ret = aie2_calibrate_time(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Calibrate system clock failed");
 		return ret;
 	}
 
@@ -391,9 +389,9 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto fini_smu;
 	}
 
-	ret = aie2_get_mgmt_chann_info(ndev);
+	ret = aie2_mgmt_chann_init(ndev);
 	if (ret) {
-		XDNA_ERR(xdna, "firmware mgmt info ret %d", ret);
+		XDNA_ERR(xdna, "firmware mgmt channel init failed, ret %d", ret);
 		goto stop_psp;
 	}
 
@@ -494,11 +492,12 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 static int aie2_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
 	struct amdxdna_dev_hdl *ndev;
 	struct psp_config psp_conf;
 	const struct firmware *fw;
-	void __iomem * const *tbl;
-	int i, bars, nvec, ret;
+	unsigned long bars = 0;
+	int i, nvec, ret;
 
 	XDNA_DBG(xdna, "Control flags 0x%x", aie2_control_flags);
 	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
@@ -523,28 +522,24 @@ static int aie2_init(struct amdxdna_dev *xdna)
 		goto release_fw;
 	}
 
-	bars = pci_select_bars(pdev, IORESOURCE_MEM);
-	for (i = 0; i < PSP_MAX_REGS; i++) {
-		if (!(BIT(PSP_REG_BAR(ndev, i)) && bars)) {
-			XDNA_ERR(xdna, "does not get pci bar%d",
-				 PSP_REG_BAR(ndev, i));
-			ret = -EINVAL;
+	for (i = 0; i < PSP_MAX_REGS; i++)
+		set_bit(PSP_REG_BAR(ndev, i), &bars);
+
+	set_bit(xdna->dev_info->sram_bar, &bars);
+	set_bit(xdna->dev_info->smu_bar, &bars);
+	set_bit(xdna->dev_info->mbox_bar, &bars);
+
+	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
+		if (!test_bit(i, &bars))
+			continue;
+		tbl[i] = pcim_iomap(pdev, i, 0);
+		if (!tbl[i]) {
+			XDNA_ERR(xdna, "map bar %d failed", i);
+			ret = -ENOMEM;
 			goto release_fw;
 		}
 	}
 
-	ret = pcim_iomap_regions(pdev, bars, "amdxdna-npu");
-	if (ret) {
-		XDNA_ERR(xdna, "map regions failed, ret %d", ret);
-		goto release_fw;
-	}
-
-	tbl = pcim_iomap_table(pdev);
-	if (!tbl) {
-		XDNA_ERR(xdna, "Cannot get iomap table");
-		ret = -ENOMEM;
-		goto release_fw;
-	}
 	ndev->sram_base = tbl[xdna->dev_info->sram_bar];
 	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
@@ -570,15 +565,13 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 #ifdef AMDXDNA_DEVEL
 	ret = amdxdna_iommu_mode_setup(xdna);
-	if (ret) {
-		XDNA_ERR(xdna, "Setup iommu mode %d failed, ret %d", iommu_mode, ret);
+	if (ret)
 		goto free_irq;
-	}
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
 #endif
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	ret = iommu_dev_enable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 	if (ret) {
 		XDNA_ERR(xdna, "Enable PASID failed, ret %d", ret);
@@ -587,9 +580,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 #endif
 #ifdef AMDXDNA_DEVEL
 skip_pasid:
-	XDNA_INFO(xdna, "(Develop) IOMMU mode is %d", iommu_mode);
 #endif
-
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
@@ -601,11 +592,8 @@ skip_pasid:
 		goto disable_sva;
 	}
 
-	ret = aie2_error_async_cache_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "failed to init async error cache, ret %d", ret);
-		goto disable_sva;
-	}
+	mutex_init(&ndev->async_errs_cache.lock);
+
 	xdna->dev_handle = ndev;
 
 	ret = aie2_hw_start(xdna);
@@ -621,13 +609,13 @@ skip_pasid:
 	}
 
 	release_firmware(fw);
-	amdxdna_rpm_init(xdna);
+	aie2_msg_init(ndev);
 	return 0;
 
 stop_hw:
 	aie2_hw_stop(xdna);
 disable_sva:
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 #endif
 free_irq:
@@ -643,15 +631,15 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	amdxdna_rpm_fini(xdna);
 	aie2_rq_fini(&ndev->ctx_rq);
 	aie2_hw_stop(xdna);
+	aie2_psp_destroy(&pdev->dev, ndev->psp_hdl);
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;
 #endif
 
-#if KERNEL_VERSION(6, 16, 0) > LINUX_VERSION_CODE
+#ifdef HAVE_iommu_dev_enable_disable_feature
 	iommu_dev_disable_feature(&pdev->dev, IOMMU_DEV_FEAT_SVA);
 #endif
 
@@ -660,29 +648,6 @@ skip_pasid:
 #endif
 	pci_free_irq_vectors(pdev);
 	mutex_destroy(&ndev->aie2_lock);
-}
-
-/* This function returns recover is needed or not */
-static bool aie2_detect(struct amdxdna_dev *xdna)
-{
-	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
-
-	if (aie2_rq_handle_idle_ctx(rq))
-		return false;
-
-	return aie2_rq_is_all_context_stuck(rq);
-}
-
-static void aie2_recover(struct amdxdna_dev *xdna, bool dump_only)
-{
-	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
-
-	guard(mutex)(&xdna->dev_lock);
-	aie2_rq_dump_all(rq);
-	if (dump_only)
-		return;
-	aie2_rq_stop_all(rq);
-	aie2_rq_restart_all(rq);
 }
 
 static int aie2_query_status(struct amdxdna_client *client,
@@ -982,20 +947,21 @@ out:
 static int aie2_query_telemetry(struct amdxdna_client *client,
 				struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_telemetry_header header, *tmp = NULL;
+	struct amdxdna_drm_query_telemetry_header header = {}, *tmp = NULL;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct aie_version ver;
 	size_t size, offset;
+	int ret, i, min;
 	void *buff;
-	int ret, i;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
 		return -EFAULT;
 	}
 
-	if (copy_from_user(&header, u64_to_user_ptr(args->buffer), sizeof(header))) {
+	min = min(args->buffer_size, sizeof(header));
+	if (copy_from_user(&header, u64_to_user_ptr(args->buffer), min)) {
 		XDNA_ERR(xdna, "Failed to copy telemetry header from user");
 		return -EFAULT;
 	}
@@ -1009,7 +975,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 	 * struct amdxdna_drm_query_telemetry_header sized bytes are reserved for metadata shared
 	 * between the driver and shim. Rest is for the data shared between the firmware and shim
 	 */
-	size = args->buffer_size - offset;
+	size = max_t(size_t, args->buffer_size - offset, SZ_8K);
 
 	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl))
@@ -1058,7 +1024,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 		goto free_kbuf;
 	}
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer + offset), buff, size))
+	if (copy_to_user(u64_to_user_ptr(args->buffer + offset), buff, args->buffer_size - offset))
 		ret = -EFAULT;
 
 free_kbuf:
@@ -1121,7 +1087,6 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 	const struct amdxdna_dev_priv *priv;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
-	u64 tops_max, tops_curr;
 	int min;
 
 	xdna = client->xdna;
@@ -1133,12 +1098,10 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
-	priv->hw_ops.get_tops(ndev, &tops_max, &tops_curr);
-
 	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
-	res_info.npu_tops_max = tops_max;
+	res_info.npu_tops_max = ndev->max_tops;
 	res_info.npu_task_max = priv->hwctx_limit;
-	res_info.npu_tops_curr = tops_curr;
+	res_info.npu_tops_curr = ndev->curr_tops;
 	res_info.npu_task_curr = ndev->hwctx_cnt;
 
 	min = min(args->buffer_size, sizeof(res_info));
@@ -1193,6 +1156,10 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_get_power_mode(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
+		if (!amdxdna_admin_access_allowed(xdna)) {
+			ret = -EPERM;
+			break;
+		}
 		ret = aie2_query_telemetry(client, args);
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
@@ -1228,8 +1195,10 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	unsigned long id;
 	int ret = 0, idx;
 	u32 hw_i = 0;
+	size_t size;
 
-	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, sizeof(*r), DMA_FROM_DEVICE);
+	size = max_t(size_t, sizeof(*r), SZ_8K);
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, size, DMA_FROM_DEVICE);
 	if (IS_ERR(dma_hdl)) {
 		XDNA_ERR(xdna, "Failed to allocate memory for app health");
 		return PTR_ERR(dma_hdl);
@@ -1290,7 +1259,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 
 				mutex_lock(&xdna->dev_handle->aie2_lock);
 				ret = aie2_get_app_health(xdna->dev_handle, dma_hdl,
-							  ctx->priv->id, sizeof(*r));
+							  ctx->priv->id, size);
 				mutex_unlock(&xdna->dev_handle->aie2_lock);
 				if (ret) {
 					aie2_reset_app_health_report(r);
@@ -1329,20 +1298,42 @@ exit:
 	return ret;
 }
 
-static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+static int aie2_get_array_async_error(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args)
 {
-	struct amdxdna_drm_hwctx_entry __user *buf;
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_drm_hwctx_entry *tmp;
-	int ctx_limit, ctx_cnt, min, i, ret;
+	struct amdxdna_async_error tmp;
+	int ret;
+
+	ret = aie2_error_get_last_async(xdna, &xdna->dev_handle->async_errs_cache, 1, &tmp);
+	if (ret < 0)
+		goto exit;
+
+	ret = amdxdna_drm_copy_array_to_user(args, &tmp, sizeof(tmp), ret);
+exit:
+	return ret;
+}
+
+static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_mgmt_dma_hdl **data_hdls = NULL;
+	struct amdxdna_mgmt_dma_hdl *list_hdl = NULL;
+	struct amdxdna_drm_aie_coredump config = {};
+	struct amdxdna_client *ctx_client = NULL;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_dev_hdl *ndev;
+	struct buffer_list *buf_list;
+	struct amdxdna_dev *xdna;
+	int ret = 0, idx = 0, i;
+	unsigned long hwctx_id;
+	size_t list_size;
+	void __user *buf;
+	u32 total_size;
+	u32 offset = 0;
+	u32 num_bufs;
 	u32 buf_size;
 
-	ret = amdxdna_pm_resume_get(xdna);
-	if (ret)
-		return ret;
-
-	mutex_lock(&xdna->dev_lock);
-
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
 	buf_size = args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
@@ -1351,9 +1342,442 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 		return -EFAULT;
 	}
 
+	if (buf_size < sizeof(config)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		return -ENOSPC;
+	}
+
+	ret = amdxdna_drm_copy_array_from_user(args, &config, sizeof(config), 1);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to copy config from user");
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "AIE Coredump request for context_id=%u pid=%llu",
+		 config.context_id, config.pid);
+
+	/* Search and validate if context coredump can be fetched for given PID and context ID */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_ctx *hw_ctx;
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, hw_ctx) {
+			if (config.context_id == hwctx_id && config.pid == hw_ctx->client->pid) {
+				hwctx = hw_ctx;
+				ctx_client = tmp_client;
+				break;
+			}
+		}
+		if (hwctx)
+			break;
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Context %u for pid %llu not found", config.context_id, config.pid);
+		return -EINVAL;
+	}
+
+	/* Check if caller is root or owns the context */
+	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
+		XDNA_ERR(xdna, "Permission denied for context %u", config.context_id);
+		ret = -EPERM;
+		goto unlock_srcu;
+	}
+
+	num_bufs = ndev->metadata.rows * hwctx->priv->orig_num_col;
+	total_size = num_bufs * SZ_1M;
+
+	if (buf_size < total_size) {
+		XDNA_DBG(xdna, "Insufficient buffer size %u, need %u", buf_size, total_size);
+		args->element_size = total_size;
+		ret = -ENOSPC;
+		goto unlock_srcu;
+	}
+
+	list_size = max_t(size_t, num_bufs * sizeof(struct buffer_list), SZ_8K);
+	list_hdl = amdxdna_mgmt_buff_alloc(xdna, list_size, DMA_TO_DEVICE);
+	if (IS_ERR(list_hdl)) {
+		XDNA_ERR(xdna, "Failed to allocate buffer list");
+		ret = PTR_ERR(list_hdl);
+		goto unlock_srcu;
+	}
+
+	buf_list = amdxdna_mgmt_buff_get_cpu_addr(list_hdl, 0);
+	if (IS_ERR(buf_list)) {
+		XDNA_ERR(xdna, "Failed to get CPU address for buffer list");
+		ret = PTR_ERR(buf_list);
+		goto free_list_hdl;
+	}
+	memset(buf_list, 0, list_size);
+
+	/* Allocate array to track data buffer handles */
+	data_hdls = kcalloc(num_bufs, sizeof(*data_hdls), GFP_KERNEL);
+	if (!data_hdls) {
+		ret = -ENOMEM;
+		goto free_list_hdl;
+	}
+
+	for (i = 0; i < num_bufs; i++) {
+		void *buf_addr;
+
+		data_hdls[i] = amdxdna_mgmt_buff_alloc(xdna, SZ_1M, DMA_FROM_DEVICE);
+		if (IS_ERR(data_hdls[i])) {
+			XDNA_ERR(xdna, "Failed to allocate data buffer %d", i);
+			ret = PTR_ERR(data_hdls[i]);
+			data_hdls[i] = NULL;
+			goto free_data_hdls;
+		}
+
+		buf_addr = amdxdna_mgmt_buff_get_cpu_addr(data_hdls[i], 0);
+		if (IS_ERR(buf_addr)) {
+			ret = PTR_ERR(buf_addr);
+			goto free_data_hdls;
+		}
+		memset(buf_addr, 0, SZ_1M);
+		amdxdna_mgmt_buff_clflush(data_hdls[i], 0, 0);
+
+		buf_list[i].buf_addr = amdxdna_mgmt_buff_get_dma_addr(data_hdls[i]);
+		buf_list[i].buf_size = SZ_1M;
+		buf_list[i].reserved = 0;
+	}
+
+	amdxdna_mgmt_buff_clflush(list_hdl, 0, 0);
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_get_aie_coredump(ndev, list_hdl, hwctx->priv->id, num_bufs);
+	mutex_unlock(&ndev->aie2_lock);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to get coredump from firmware, ret=%d", ret);
+		goto free_data_hdls;
+	}
+
+	for (i = 0; i < num_bufs; i++) {
+		void *data = amdxdna_mgmt_buff_get_cpu_addr(data_hdls[i], 0);
+
+		if (IS_ERR(data)) {
+			ret = PTR_ERR(data);
+			goto free_data_hdls;
+		}
+
+		if (copy_to_user(buf + offset, data, SZ_1M)) {
+			ret = -EFAULT;
+			goto free_data_hdls;
+		}
+		offset += SZ_1M;
+	}
+
+free_data_hdls:
+	for (i = 0; i < num_bufs; i++) {
+		if (data_hdls[i])
+			amdxdna_mgmt_buff_free(data_hdls[i]);
+	}
+	kfree(data_hdls);
+free_list_hdl:
+	amdxdna_mgmt_buff_free(list_hdl);
+unlock_srcu:
+	srcu_read_unlock(&ctx_client->ctx_srcu, idx);
+	return ret;
+}
+
+static int aie2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_aie_tile_access access = {};
+	struct amdxdna_mgmt_dma_hdl *dma_hdl = NULL;
+	struct amdxdna_client *ctx_client = NULL;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	unsigned long hwctx_id;
+	dma_addr_t dram_addr;
+	int ret, idx = 0;
+	void *cpu_addr;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+
+	/* Access struct is at the beginning of the buffer */
+	ret = amdxdna_drm_copy_array_from_user(args, &access, sizeof(access), 1);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to copy request from user");
+		return ret;
+	}
+
+	XDNA_DBG(xdna, "AIE tile read: ctx %u pid %llu col %u row %u addr 0x%x size %u",
+		 access.context_id, access.pid, access.col, access.row, access.addr, access.size);
+
+	/* Find the hardware context and hold SRCU lock for the duration */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_ctx *tmp_ctx;
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, tmp_ctx) {
+			if (access.context_id == hwctx_id && access.pid == tmp_ctx->client->pid) {
+				hwctx = tmp_ctx;
+				ctx_client = tmp_client;
+				break;
+			}
+		}
+		if (hwctx)
+			break;
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Context %u for pid %llu not found", access.context_id, access.pid);
+		return -EINVAL;
+	}
+
+	/* Check if caller is root or owns the context */
+	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
+		XDNA_ERR(xdna, "Permission denied for context %u", access.context_id);
+		ret = -EPERM;
+		goto unlock_srcu;
+	}
+
+	if (access.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)",
+			 access.col, hwctx->num_col);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	if (access.row >= ndev->metadata.rows) {
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)", access.row, ndev->metadata.rows);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	/* Register read: size == 4 bytes */
+	if (access.size == sizeof(u32)) {
+		u32 reg_val = 0;
+
+		mutex_lock(&ndev->aie2_lock);
+		ret = aie2_rw_aie_reg(ndev, AIE2_ACCESS_TYPE_REG_READ, hwctx->priv->id,
+				      access.row, access.col, access.addr, &reg_val);
+		mutex_unlock(&ndev->aie2_lock);
+		if (ret) {
+			XDNA_ERR(xdna, "AIE register read failed, ret %d", ret);
+			goto unlock_srcu;
+		}
+
+		ret = amdxdna_drm_copy_array_to_user(args, &reg_val, sizeof(reg_val), 1);
+		if (ret)
+			XDNA_ERR(xdna, "Failed to copy register data to user");
+
+		goto unlock_srcu;
+	}
+
+	/* Memory read: size > 4 bytes, use DMA buffer */
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, max_t(u32, access.size, SZ_8K), DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl)) {
+		ret = PTR_ERR(dma_hdl);
+		XDNA_ERR(xdna, "Failed to allocate DMA buffer, ret %d", ret);
+		goto unlock_srcu;
+	}
+
+	cpu_addr = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(cpu_addr)) {
+		ret = PTR_ERR(cpu_addr);
+		goto free_dma;
+	}
+
+	dram_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!dram_addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		ret = -EINVAL;
+		goto free_dma;
+	}
+
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_rw_aie_mem(ndev, AIE2_ACCESS_TYPE_MEM_READ, hwctx->priv->id,
+			      access.row, access.col, access.addr, dram_addr, access.size);
+	mutex_unlock(&ndev->aie2_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE memory read failed, ret %d", ret);
+		goto free_dma;
+	}
+
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+
+	ret = amdxdna_drm_copy_array_to_user(args, cpu_addr, access.size, 1);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to copy data to user");
+		goto free_dma;
+	}
+
+free_dma:
+	amdxdna_mgmt_buff_free(dma_hdl);
+unlock_srcu:
+	srcu_read_unlock(&ctx_client->ctx_srcu, idx);
+	return ret;
+}
+
+static int aie2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_aie_tile_access access = {};
+	struct amdxdna_mgmt_dma_hdl *dma_hdl = NULL;
+	struct amdxdna_client *ctx_client = NULL;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	unsigned long hwctx_id;
+	dma_addr_t dram_addr;
+	int ret, idx = 0;
+	void *cpu_addr;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+
+	/* Access struct is at the beginning of the buffer, data follows after */
+	if (copy_from_user(&access, u64_to_user_ptr(args->buffer), sizeof(access))) {
+		XDNA_ERR(xdna, "Failed to copy request from user");
+		return -EFAULT;
+	}
+
+	XDNA_DBG(xdna, "AIE tile write: ctx %u pid %llu col %u row %u addr 0x%x size %u",
+		 access.context_id, access.pid, access.col, access.row, access.addr, access.size);
+
+	/* Find the hardware context and hold SRCU lock for the duration */
+	mutex_lock(&xdna->dev_lock);
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_ctx *tmp_ctx;
+
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, hwctx_id, tmp_ctx) {
+			if (access.context_id == hwctx_id && access.pid == tmp_ctx->client->pid) {
+				hwctx = tmp_ctx;
+				ctx_client = tmp_client;
+				break;
+			}
+		}
+		if (hwctx)
+			break;
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+	mutex_unlock(&xdna->dev_lock);
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Context %u for pid %llu not found", access.context_id, access.pid);
+		return -EINVAL;
+	}
+
+	/* Check if caller is root or owns the context */
+	if (!amdxdna_ctx_access_allowed(hwctx, false)) {
+		XDNA_ERR(xdna, "Permission denied for context %u", access.context_id);
+		ret = -EPERM;
+		goto unlock_srcu;
+	}
+
+	if (access.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "Column %u is outside partition range [0, %u)",
+			 access.col, hwctx->num_col);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	if (access.row >= ndev->metadata.rows) {
+		XDNA_ERR(xdna, "Row %u is outside range [0, %u)",
+			 access.row, ndev->metadata.rows);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	/* Register write: size == 4 bytes */
+	if (access.size == sizeof(u32)) {
+		u32 reg_val;
+
+		/* Data is after the access struct */
+		if (copy_from_user(&reg_val,
+				   u64_to_user_ptr(args->buffer) + sizeof(access),
+				   sizeof(reg_val))) {
+			XDNA_ERR(xdna, "Failed to copy register data from user");
+			ret = -EFAULT;
+			goto unlock_srcu;
+		}
+
+		mutex_lock(&ndev->aie2_lock);
+		ret = aie2_rw_aie_reg(ndev, AIE2_ACCESS_TYPE_REG_WRITE, hwctx->priv->id,
+				      access.row, access.col, access.addr, &reg_val);
+		mutex_unlock(&ndev->aie2_lock);
+		if (ret)
+			XDNA_ERR(xdna, "AIE register write failed, ret %d", ret);
+
+		goto unlock_srcu;
+	}
+
+	/* Memory write: size > 4 bytes, use DMA buffer */
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, max_t(u32, access.size, SZ_8K), DMA_TO_DEVICE);
+	if (IS_ERR(dma_hdl)) {
+		ret = PTR_ERR(dma_hdl);
+		XDNA_ERR(xdna, "Failed to allocate DMA buffer, ret %d", ret);
+		goto unlock_srcu;
+	}
+
+	cpu_addr = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(cpu_addr)) {
+		ret = PTR_ERR(cpu_addr);
+		goto free_dma;
+	}
+
+	dram_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
+	if (!dram_addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		ret = -EINVAL;
+		goto free_dma;
+	}
+
+	/* Copy data from user space (data is after the access struct) */
+	if (copy_from_user(cpu_addr, u64_to_user_ptr(args->buffer) + sizeof(access), access.size)) {
+		XDNA_ERR(xdna, "Failed to copy data from user");
+		ret = -EFAULT;
+		goto free_dma;
+	}
+
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_rw_aie_mem(ndev, AIE2_ACCESS_TYPE_MEM_WRITE, hwctx->priv->id,
+			      access.row, access.col, access.addr, dram_addr, access.size);
+	mutex_unlock(&ndev->aie2_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE memory write failed, ret %d", ret);
+		goto free_dma;
+	}
+
+free_dma:
+	amdxdna_mgmt_buff_free(dma_hdl);
+unlock_srcu:
+	srcu_read_unlock(&ctx_client->ctx_srcu, idx);
+	return ret;
+}
+
+static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drm_hwctx_entry input = {};
+	struct amdxdna_drm_hwctx_entry *tmp;
+	int ctx_limit, ctx_cnt, ret;
+	u32 buf_size;
+
+	buf_size = args->num_element * args->element_size;
+
 	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
+
+	mutex_lock(&xdna->dev_lock);
 
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
@@ -1375,12 +1799,9 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
-		struct amdxdna_drm_hwctx_entry input;
-
-		if (copy_from_user(&input, u64_to_user_ptr(args->buffer), sizeof(input))) {
-			ret = -EFAULT;
+		ret = amdxdna_drm_copy_array_from_user(args, &input, sizeof(input), 1);
+		if (ret)
 			goto exit;
-		}
 
 		if (args->num_element > 1U || !input.context_id || !input.pid) {
 			XDNA_ERR(xdna, "Invalid context ID %d, PID %lld or num_elements %d",
@@ -1396,42 +1817,74 @@ static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_
 			goto exit;
 
 		break;
-	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
-		ret = aie2_error_get_last_async(xdna, args->num_element, tmp);
-		if (ret < 0)
-			goto exit;
-		ctx_cnt = ret;
-
-		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 		goto exit;
 	}
 
-	min = min(args->element_size, sizeof(*tmp));
-	for (i = 0; i < ctx_cnt; i++) {
-		if (copy_to_user(&buf[i], &tmp[i], min)) {
-			ret = -EFAULT;
-			goto exit;
-		}
-	}
-	args->num_element = ctx_cnt;
-	args->element_size = min;
-
+	ret = amdxdna_drm_copy_array_to_user(args, tmp, sizeof(*tmp), ctx_cnt);
 exit:
-	kfree(tmp);
 	mutex_unlock(&xdna->dev_lock);
+	kfree(tmp);
+
+	return ret;
+}
+
+static int aie2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret;
+
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		return ret;
+
+	switch (args->param) {
+	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		ret = aie2_get_array_async_error(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_LOG:
+		if (!amdxdna_admin_access_allowed(xdna)) {
+			ret = -EPERM;
+			break;
+		}
+		ret = amdxdna_get_fw_log(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_TRACE:
+		if (!amdxdna_admin_access_allowed(xdna)) {
+			ret = -EPERM;
+			break;
+		}
+		ret = amdxdna_get_fw_trace(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_LOG_CONFIG:
+		ret = amdxdna_get_fw_log_configs(xdna, args);
+		break;
+	case DRM_AMDXDNA_FW_TRACE_CONFIG:
+		ret = amdxdna_get_fw_trace_configs(xdna, args);
+		break;
+	case DRM_AMDXDNA_AIE_COREDUMP:
+		ret = aie2_get_coredump(client, args);
+		break;
+	case DRM_AMDXDNA_AIE_TILE_READ:
+		ret = aie2_aie_tile_read(client, args);
+		break;
+	default:
+		ret = aie2_get_array_hwctx(client, args);
+		break;
+	}
 
 	amdxdna_pm_suspend_put(xdna);
-	XDNA_DBG(xdna, "Got param %d", args->param);
+	if (!ret)
+		XDNA_DBG(xdna, "Got param %d", args->param);
 
 	return ret;
 }
 
 static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_drm_set_power_mode power_state;
+	struct amdxdna_drm_set_power_mode power_state = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	int power_mode, min;
 
@@ -1456,7 +1909,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm
 static int aie2_set_force_preempt_state(struct amdxdna_client *client,
 					struct amdxdna_drm_set_state *args)
 {
-	struct amdxdna_drm_attribute_state force;
+	struct amdxdna_drm_attribute_state force = {};
 	struct amdxdna_dev *xdna = client->xdna;
 	int min;
 
@@ -1485,9 +1938,9 @@ static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 						 struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
-	struct amdxdna_drm_attribute_state preempt;
+	struct amdxdna_drm_attribute_state preempt = {};
 	struct amdxdna_dev *xdna = client->xdna;
-	int ret;
+	int ret, min;
 
 	if (args->buffer_size != sizeof(preempt)) {
 		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %lu.",
@@ -1495,6 +1948,7 @@ static int aie2_set_frame_boundary_preempt_state(struct amdxdna_client *client,
 		return -EINVAL;
 	}
 
+	min = min(args->buffer_size, sizeof(preempt));
 	if (copy_from_user(&preempt, u64_to_user_ptr(args->buffer), sizeof(preempt)))
 		return -EFAULT;
 
@@ -1525,32 +1979,65 @@ static int aie2_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 	if (ret)
 		return ret;
 
-	mutex_lock(&xdna->dev_handle->aie2_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_set_power_mode(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_set_force_preempt_state(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_set_frame_boundary_preempt_state(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
+		break;
+	case DRM_AMDXDNA_SET_FW_LOG_STATE:
+		ret = amdxdna_set_fw_log_state(xdna, args);
+		break;
+	case DRM_AMDXDNA_SET_FW_TRACE_STATE:
+		ret = amdxdna_set_fw_trace_state(xdna, args);
 		break;
 #ifdef AMDXDNA_AIE2_PRIV
 	case DRM_AMDXDNA_WRITE_AIE_MEM:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_write_aie_mem(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 	case DRM_AMDXDNA_WRITE_AIE_REG:
+		mutex_lock(&xdna->dev_handle->aie2_lock);
 		ret = aie2_write_aie_reg(client, args);
+		mutex_unlock(&xdna->dev_handle->aie2_lock);
 		break;
 #endif
+	case DRM_AMDXDNA_AIE_TILE_WRITE:
+		ret = aie2_aie_tile_write(client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
-	mutex_unlock(&xdna->dev_handle->aie2_lock);
 
 	amdxdna_pm_suspend_put(xdna);
+	return ret;
+}
+
+static int aie2_get_dev_rev(struct amdxdna_dev *xdna, u32 *rev)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	enum aie2_dev_revision aie2_rev;
+	int ret;
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_get_dev_revision(ndev, &aie2_rev);
+	mutex_unlock(&ndev->aie2_lock);
+
+	if (!ret)
+		*rev = (u32)aie2_rev;
+
 	return ret;
 }
 
@@ -1558,14 +2045,20 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.mmap			= NULL,
 	.init			= aie2_init,
 	.fini			= aie2_fini,
-	.detect			= aie2_detect,
-	.recover		= aie2_recover,
+	.get_dev_revision	= aie2_get_dev_rev,
+	.tdr_start		= aie2_tdr_start,
+	.tdr_stop		= aie2_tdr_stop,
 	.resume			= aie2_hw_resume,
 	.suspend		= aie2_hw_suspend,
 	.debugfs		= aie2_debugfs_init,
 	.fw_log_init		= aie2_fw_log_init,
+	.fw_log_config		= aie2_fw_log_config,
 	.fw_log_fini		= aie2_fw_log_fini,
 	.fw_log_parse		= aie2_fw_log_parse,
+	.fw_trace_init		= aie2_fw_trace_init,
+	.fw_trace_config	= aie2_fw_trace_config,
+	.fw_trace_fini		= aie2_fw_trace_fini,
+	.fw_trace_parse		= aie2_fw_trace_parse,
 	.get_aie_info		= aie2_get_info,
 	.get_aie_array		= aie2_get_array,
 	.set_aie_state		= aie2_set_state,

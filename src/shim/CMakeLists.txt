@@ -29,11 +29,8 @@ target_compile_definitions(${XDNA_TARGET} PRIVATE
   XRT_ENABLE_AIE
   XRT_AIE_BUILD
   XRT_BUILD
+  $<$<CONFIG:Debug>:XDNA_SHIM_DEBUG>
   )
-
-if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-  add_definitions(-DXDNA_SHIM_DEBUG)
-endif()
 
 if(${UMQ_HELLO_TEST})
   add_definitions(-DUMQ_HELLO_TEST)
@@ -49,6 +46,7 @@ target_include_directories(${XDNA_TARGET} PRIVATE
   ${XRT_SOURCE_DIR}/runtime_src/core/common/gsl/include
   ${XRT_BINARY_DIR}/gen
   ${CMAKE_CURRENT_SOURCE_DIR}/../include/uapi
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vxdna/src
   )
 
 # driver plugin will be loaded while xrt_core is still being

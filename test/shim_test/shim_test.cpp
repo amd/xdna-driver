@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // WARNING: This file contains test cases calling XRT's SHIM layer APIs directly.
 // These APIs are XRT's internal APIs and are not meant for any external XRT
@@ -28,6 +28,11 @@
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+// FIXME
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include "../../src/include/uapi/drm_local/amdxdna_accel.h"
+// enf of FIXME
 
 struct kern_version {
   int major;
@@ -43,15 +48,19 @@ int base_read_speed;
 using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_export_bo_then_close_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_runlist_bad_cmd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_with_ubuf_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_suspend_resume(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -79,7 +88,7 @@ usage(const std::string& prog)
 {
   std::cout << "\nUsage: " << prog << " [options] [test case ID/name separated by spaces]\n";
   std::cout << "Options:\n";
-  std::cout << "\t" << "-h" << ": print this help message\n";
+  std::cout << "\t" << "-h" << ": print this help message and available test cases\n";
   std::cout << "\t" << "-k" << ": evaluate test result based on kernel version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
   std::cout << std::endl;
@@ -199,6 +208,12 @@ dev_filter_is_npu4(device::id_type id, device* dev)
 }
 
 bool
+dev_filter_is_aie4_or_npu4(device::id_type id, device* dev)
+{
+  return dev_filter_is_npu4(id, dev) || dev_filter_is_aie4(id, dev);
+}
+
+bool
 dev_filter_is_xdna_and_amdxdna_drv(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
@@ -216,6 +231,44 @@ dev_filter_is_aie2_and_amdxdna_drv(device::id_type id, device* dev)
   if (!is_amdxdna_drv(dev))
     return false;
   return true;
+}
+
+bool
+dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_npu4(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
+std::tuple<uint64_t, uint64_t, uint64_t>
+get_bo_usage(device* dev, int pid)
+{
+  // FIXME: reimplement this when query key is defined in xrt
+  const char *xdna = "/dev/accel/accel0";
+  int fd = open(xdna, O_RDONLY);
+  if (fd < 0) {
+    std::perror("open");
+    return {0, 0, 0};
+  }
+
+  amdxdna_drm_bo_usage usage = { .pid = pid };
+  amdxdna_drm_get_array arg = {
+    .param = DRM_AMDXDNA_BO_USAGE,
+    .element_size = sizeof(usage),
+    .num_element = 1,
+    .buffer = reinterpret_cast<uintptr_t>(&usage)
+  };
+  int ret = ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+  close(fd);
+  if (ret == -1) {
+    std::perror("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY)");
+    return {0, 0, 0};
+  }
+
+  return {usage.total_usage, usage.internal_usage, usage.heap_usage};
 }
 
 // All test case runners
@@ -277,8 +330,10 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>&
     auto info = get_bdf_info(i);
     auto bdf = bdf_info2str(info);
     std::cout << "device[" << i << "]: " << bdf << std::endl;
-    auto devid = get_device_id(bdf);
-    std::cout << "device[" << bdf << "]: " << devid << std::endl;
+    auto dev = get_userpf_device(i);
+    auto devid = device_query<query::pcie_device>(dev);
+    std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
+
   }
 }
 
@@ -365,7 +420,7 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device>& sdev, arg
 {
   auto dev = sdev.get();
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
-  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
+  auto ext_boflags = dev_filter_is_aie4(id, dev) ? (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
   auto size = static_cast<size_t>(arg[0]);
 
   // Create ctx -> create bo -> destroy bo -> destroy ctx
@@ -418,6 +473,27 @@ TEST_create_free_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 
   for (auto& bo : bos)
     get_and_show_bo_properties(dev, bo->get());
+}
+
+void
+TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto boflags = XRT_BO_FLAGS_HOST_ONLY;
+  auto ext_boflags = XRT_BO_USE_CTRLPKT << 4;
+  auto size = 0x4000;
+  auto bo = dev->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  auto [total, internal, heap] = get_bo_usage(dev, getpid());
+  uint64_t expected_total = size;
+  uint64_t expected_internal = size;
+  uint64_t expected_heap = 0;
+  if (dev_filter_is_aie2(id, dev)) {
+    // Add heap size
+    expected_total += 64 * 1024 * 1024;
+    expected_internal += 64 * 1024 * 1024;
+  }
+  if (total != expected_total || internal != expected_internal || heap != expected_heap)
+    throw std::runtime_error("BO usage mis-match");
 }
 
 void
@@ -643,7 +719,7 @@ std::vector<test_case> test_list {
   // get async error in multi thread before running any other tests
   // there may or may not be async error.
   test_case{ "get async error in multithread - INITIAL", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_async_error_multi, {false}
+    TEST_POSITIVE, dev_filter_xdna, TEST_async_error_multi, {false}
   },
   //test_case{ "non_xdna_userpf: query(rom_vbnv)", {},
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
@@ -673,7 +749,7 @@ std::vector<test_case> test_list {
   },
   test_case{ "create_and_free_input_output_bo huge pages", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_bo,
-    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x20000000}
+    {XCL_BO_FLAGS_HOST_ONLY, 0, 0x140000000}
   },
   test_case{ "sync_bo for dpu sequence bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
@@ -697,38 +773,49 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_open_close_cu_context, {}
   },
   test_case{ "create_destroy_hw_queue", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_hw_queue, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_hw_queue, {}
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_io, {}
   },
+  // Wait for TDR implementation
+  // test_case{ "io test async error (aie4)", {},
+    //TEST_POSITIVE, dev_filter_is_aie4, TEST_async_error_aie4_io, {}
+  //},
   test_case{ "io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "io test with intruction code invalid address access", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
+  },
+  test_case{ "measure no-op kernel latency (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
   },
   test_case{ "measure real kernel latency", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
   },
+  //Skip this test for now until b2b vadd is fixed
+  //test_case{ "measure real kernel latency (aie4)", {},
+    //TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
+  //},
   test_case{ "create and free debug bo", {-1, -1},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x1000 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x1000 }
   },
   test_case{ "create and free large debug bo", {-1, -1},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_free_debug_bo, { 0x100000 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
-  test_case{ "measure no-op kernel throughput chained command", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
+  test_case{ "measure no-op kernel throughput command", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
   },
-  test_case{ "npu3 shim vadd", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_vadd, {}
+  test_case{ "measure no-op kernel throughput (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
   },
   test_case{ "export import BO", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
@@ -737,37 +824,46 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_host, {}
-  },
-  test_case{ "npu3 shim move memory tiles", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_memtiles, {}
-  },
-  test_case{ "npu3 shim move ddr memory tiles", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_ddr_memtile, {}
-  },
-  test_case{ "npu3 shim multi col remote barrier", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_shim_umq_remote_barrier, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_host, {}
   },
   test_case{ "io test no op with duplicated BOs", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
   },
   test_case{ "measure no-op kernel latency chained command", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
   },
-  test_case{ "measure no-op kernel throuput", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
+  test_case{ "measure no-op kernel latency chained command (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
+  },
+  test_case{ "measure no-op kernel throughput chained command", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
+  },
+  test_case{ "measure no-op kernel throughput chained command (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
   },
   test_case{ "measure no-op kernel latency (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
   },
-  test_case{ "measure no-op kernel throuput (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
+  test_case{ "measure no-op kernel latency (polling) (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
+  },
+  test_case{ "measure no-op kernel throughput (polling)", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
+  },
+  test_case{ "measure no-op kernel throughput (polling) (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
   },
   test_case{ "measure no-op kernel latency chained command (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
+  },
+  test_case{ "measure no-op kernel latency chained command (polling) (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
   },
   test_case{ "measure no-op kernel throughput chained command (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
+  },
+  test_case{ "measure no-op kernel throughput chained command (polling) (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
   },
   test_case{ "Cmd fencing (driver side)", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
@@ -799,9 +895,6 @@ std::vector<test_case> test_list {
   test_case{ "Multi context IO test 3 (npu1)", {},
     TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 6 }
   },
-  //test_case{ "Multi context IO test 4 (npu1)", {},
-  //  TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 10 }
-  //},
   test_case{ "Multi context IO test 1 (npu4)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2 }
   },
@@ -818,7 +911,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
     TEST_POSITIVE, dev_filter_is_xdna_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
@@ -836,13 +929,38 @@ std::vector<test_case> test_list {
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
   },
+  test_case{ "gemm and debug BO", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
+  },
+  test_case{ "create and free internal bo", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
+  },
+  test_case{ "export BO then close device", {},
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_bo_then_close_device, {}
+  },
+  test_case{ "failed chained command", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
+  },
+  test_case{ "timed out chained command", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
+  },
 };
+
+void
+print_available_tests()
+{
+  std::cout << "Available Test Cases:\n";
+  for (size_t i = 0; i < test_list.size(); i++) {
+    std::cout << "  #" << i << " - " << test_list[i].name << "\n";
+  }
+  std::cout << std::endl;
+}
 
 // Test case executor implementation
 
@@ -1003,6 +1121,7 @@ main(int argc, char **argv)
     switch (option) {
     case 'h':
       usage(program);
+      print_available_tests();
       return 0;
     case 'x': {
       std::ifstream xclbin(optarg);
@@ -1037,10 +1156,12 @@ main(int argc, char **argv)
   std::vector<int> tests;
   for (int i = optind; i < argc; i++) {
     int idx = get_test_case_index(argv[i]);
-    if (idx >= 0)
+    if (idx >= 0 && idx < test_list.size()) {
       tests.push_back(idx);
-    else
+    } else {
+      std::cout << "Invalid test index : " << idx << std::endl;
       return 1;
+    }
   }
 
   cur_path = dirname(argv[0]);

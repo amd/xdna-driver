@@ -77,7 +77,7 @@ static int aie2_unload_hwctx(struct amdxdna_ctx *ctx)
 int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
-#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
+#ifdef HAVE_6_15_drm_sched_init
 	const struct drm_sched_init_args args = {
 		.ops = &sched_ops,
 		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
@@ -98,7 +98,7 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	heap = ctx->priv->heap;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie2_lock));
-#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
+#ifdef HAVE_6_15_drm_sched_init
 	ret = drm_sched_init(sched, &args);
 #else
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
@@ -127,13 +127,13 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	if (iommu_mode == AMDXDNA_IOMMU_NO_PASID) {
 		ret = aie2_map_host_buf(xdna->dev_handle, ctx->priv->id,
 					heap->mem.dma_addr, heap->mem.size);
-		goto skip;
+	} else {
+		ret = aie2_map_host_buf(xdna->dev_handle, ctx->priv->id,
+					amdxdna_gem_uva(heap), heap->mem.size);
 	}
-#endif
+#else
 	ret = aie2_map_host_buf(xdna->dev_handle, ctx->priv->id,
-				heap->mem.userptr, heap->mem.size);
-#ifdef AMDXDNA_DEVEL
-skip:
+				amdxdna_gem_uva(heap), heap->mem.size);
 #endif
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);

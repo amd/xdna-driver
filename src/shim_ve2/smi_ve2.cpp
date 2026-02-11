@@ -9,7 +9,11 @@ xrt_core::smi::subcommand
 create_validate_subcommand()
 {
   std::vector<xrt_core::smi::basic_option> validate_test_desc = {
-   {"latency", "Run end-to-end latency test", "common"}
+   {"all", "All applicable validate tests will be executed (default)", "common"},
+   {"cmd-chain-latency", "Run end-to-end latency test using command chaining", "hidden"},
+   {"cmd-chain-throughput", "Run end-to-end throughput test using command chaining", "hidden"},
+   {"latency", "Run end-to-end latency test", "common"},
+   {"throughput", "Run end-to-end throughput test", "common"}
   };
 
   std::map<std::string, std::shared_ptr<xrt_core::smi::option>> validate_suboptions;
@@ -38,6 +42,7 @@ create_examine_subcommand()
       {"aieshim", "AIE shim tile status", "common"},
       {"aie-partitions", "AIE partition information", "common"},
       {"host", "Host information", "common"},
+      {"clocks", "Clock frequency information", "hidden"},
       {"platform", "Platforms flashed on the device", "common"}
     };
     

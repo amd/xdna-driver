@@ -14,7 +14,6 @@ Options:
   -clean                  Clean build directory
   -debug                  Debug build and generate .deb package
   -release                Release build and generate .deb package
-  -example                Example build
   -package                Ignored (present for backward compatibility)
   -j <n>                  Compile parallel (default: num of CPUs)
   -nocmake                Do not regenerate cmake files
@@ -23,6 +22,8 @@ Options:
   -hello_umq              Hello UMQ Memory Test
   -dir                    Download directory if apply
   -nokmod                 Don't build or install the kernel module
+  -novxdna                Don't build vxdna library
+  -vxdna_test             Build and run vxdna unit tests (-novxdna disable this option)
 USAGE_END
 }
 
@@ -74,18 +75,6 @@ package_targets()
   cd ..
 }
 
-build_example()
-{
-
-  mkdir -p $EXAMPLE_BUILD_DIR
-  cd $EXAMPLE_BUILD_DIR
-
-  time $CMAKE $BUILD_DIR/../example/
-  time make
-
-  cd ..
-}
-
 download_npufws()
 {
   local firmware_dir=${DOWNLOAD_BINS_DIR}/firmware
@@ -105,13 +94,85 @@ download_npufws()
       fi
 
       echo "Download $device NPUFW version $version:"
-      if [ -d "${firmware_dir}/${pci_dev_id}_${pci_rev_id}" ]; then
+      if [ -f "${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name" ]; then
         rm -r ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
       fi
       mkdir -p ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
       wget -O ${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name $url
 
     done
+}
+
+download_vtd_archives()
+{
+  local vtd_dir=${DOWNLOAD_BINS_DIR}/vtd_archives
+
+  jq -c '.vtd_archives[]' "$INFO_JSON" |
+    while IFS= read -r line; do
+      local device=$(echo $line | jq -r '.device')
+      local filename=$(echo $line | jq -r '.filename')
+      local url=$(echo $line | jq -r '.url')
+
+      if [[ -z "$url" ]]; then
+        echo "Empty URL for $device VTD archive, SKIP."
+        continue
+      fi
+
+      echo "Download $device VTD archive:"
+      if [ -f "${vtd_dir}/$filename" ]; then
+        rm ${vtd_dir}/$filename
+      fi
+      mkdir -p ${vtd_dir}
+      wget -O ${vtd_dir}/$filename $url
+
+    done
+}
+
+run_vxdna_tests_func()
+{
+  BUILD_TYPE=$1
+
+  if [[ $build_vxdna == 0 ]]; then
+    echo "WARNING: -vxdna_test requires vxdna enabled. Skipping tests."
+    return
+  fi
+
+  if [ ! -d $BUILD_TYPE ]; then
+    echo "Build directory $BUILD_TYPE not found. Skipping tests."
+    return
+  fi
+
+  echo ""
+  echo "========================================"
+  echo "Running vxdna unit tests ($BUILD_TYPE)"
+  echo "========================================"
+  echo ""
+
+  TEST_BINARY="$BUILD_TYPE/src/vxdna/tests/vaccel_tests"
+
+  if [ ! -f "$TEST_BINARY" ]; then
+    echo "WARNING: Test binary not found at $TEST_BINARY"
+    echo "Make sure BUILD_VXDNA_TESTING was enabled during CMake configuration"
+    return 1
+  fi
+
+  # Run tests
+  if "$TEST_BINARY"; then
+    echo ""
+    echo "========================================"
+    echo "vxdna unit tests PASSED"
+    echo "========================================"
+    echo ""
+    return 0
+  else
+    RESULT=$?
+    echo ""
+    echo "========================================"
+    echo "vxdna unit tests FAILED"
+    echo "========================================"
+    echo ""
+    return $RESULT
+  fi
 }
 
 do_build()
@@ -123,10 +184,17 @@ do_build()
     if [[ $skip_kmod == 0 ]]; then
       download_npufws
     fi
+    # Download VTD archives
+    download_vtd_archives
     # Prepare xbutil validate related files for packaging
     mkdir -p $XBUTIL_VALIDATE_BINS_DIR
     cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
     package_targets $BUILD_TYPE
+  fi
+
+  # Run tests if requested
+  if [[ $run_vxdna_tests == 1 ]]; then
+    run_vxdna_tests_func $BUILD_TYPE
   fi
 }
 
@@ -136,10 +204,11 @@ distclean=0
 debug=1
 release=0
 package=0
-example=0
 nocmake=0
 verbose=
 skip_kmod=0
+build_vxdna=1
+run_vxdna_tests=0
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
 xrt_install_prefix="/opt/xilinx/xrt"
@@ -166,9 +235,6 @@ while [ $# -gt 0 ]; do
       debug=0
       release=1
       ;;
-    -example)
-      example=1
-      ;;
     -package)
       package=1
       debug=0
@@ -191,6 +257,12 @@ while [ $# -gt 0 ]; do
       ;;
     -nokmod)
       skip_kmod=1
+      ;;
+    -novxdna)
+      build_vxdna=0
+      ;;
+    -vxdna_test)
+      run_vxdna_tests=1
       ;;
     -dir)
       download_dir=$2
@@ -217,7 +289,6 @@ RELEASE_BUILD_TYPE=Release
 CMAKE=cmake
 CMAKE_MAJOR_VERSION=`cmake --version | head -n 1 | awk '{print $3}' |awk -F. '{print $1}'`
 cmake_extra_flags=""
-EXAMPLE_BUILD_DIR=example_build
 INFO_JSON=${BUILD_DIR}/../tools/info.json
 DOWNLOAD_BINS_DIR=./amdxdna_bins
 XBUTIL_VALIDATE_BINS_DIR=$DOWNLOAD_BINS_DIR/download_raw/xbutil_validate/bins
@@ -236,6 +307,12 @@ fi
 
 cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix"
 cmake_extra_flags+=" -DSKIP_KMOD=$skip_kmod"
+cmake_extra_flags+=" -DBUILD_VXDNA=$build_vxdna"
+
+# Enable testing if -vxdna_test flag is provided
+if [[ $run_vxdna_tests == 1 ]]; then
+  cmake_extra_flags+=" -DBUILD_VXDNA_TESTING=ON"
+fi
 
 if [[ ! -z "$download_dir" ]]; then
   echo "Specified download directory is $download_dir"
@@ -244,15 +321,10 @@ fi
 
 if [[ $clean == 1 ]]; then
   echo "Only clean the build directory, will not perform other options if apply"
-  rm -rf $DEBUG_BUILD_TYPE $RELEASE_BUILD_TYPE $EXAMPLE_BUILD_DIR
+  rm -rf $DEBUG_BUILD_TYPE $RELEASE_BUILD_TYPE
   if [[ $distclean == 1 ]]; then
     rm -rf ${DOWNLOAD_BINS_DIR}
   fi
-  exit 0
-fi
-
-if [[ $example == 1 ]]; then
-  build_example
   exit 0
 fi
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef HWQ_UMQ_H
 #define HWQ_UMQ_H
@@ -24,23 +24,20 @@ public:
   bo_id
   get_queue_bo() const override;
 
-private:
-  struct host_indirect_data {
-    struct common_header	header;
-    struct exec_buf		payload;
-  };
+  int
+  wait_command(xrt_core::buffer_handle *, uint32_t timeout_ms) const override;
 
-  std::unique_ptr<cmd_buffer> m_umq_bo;
+private:
+  std::unique_ptr<buffer> m_umq_bo;
   void *m_umq_bo_buf;
   volatile struct host_queue_header *m_umq_hdr = nullptr;
   volatile struct host_queue_packet *m_umq_pkt = nullptr;
   volatile struct host_indirect_data *m_umq_indirect_buf = nullptr;
   uint64_t m_indirect_paddr;
-
   volatile uint32_t *m_mapped_doorbell = nullptr;
 
   uint64_t
-  issue_command(const cmd_buffer *) override;
+  issue_command(const cmd_buffer *cmd_bo) override;
 
   void
   dump() const;
@@ -48,37 +45,23 @@ private:
   void
   dump_raw() const;
 
-  volatile struct host_queue_header *
-  get_header_ptr() const;
-
-  uint64_t
-  reserve_slot();
-
-  int
-  get_pkt_idx(uint64_t index);
+  uint32_t
+  get_next_avail_slot();
 
   volatile struct host_queue_packet *
-  get_pkt(uint64_t index);
+  get_pkt(uint32_t index);
 
   void
-  init_indirect_buf(volatile struct host_indirect_data *indirect_buf, int size);
+  fill_direct_exec_buf(uint32_t idx, ert_dpu_data *dpu);
 
-  size_t
-  fill_direct_exec_buf(volatile struct host_queue_packet *pkt,
-    ert_dpu_data *dpu);
-
-  size_t 
-  fill_indirect_exec_buf(uint64_t idx,
-    volatile struct host_queue_packet *pkt, ert_dpu_data *dpu);
-
-  void
-  fill_slot_and_send(volatile struct host_queue_packet *pkt, size_t size);
+  void 
+  fill_indirect_exec_buf(uint32_t idx, uint32_t total_slots, ert_dpu_data *dpu);
 
   uint64_t
-  issue_exec_buf(ert_dpu_data *dpu_data, uint64_t comp);
+  issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain);
 
-  void
-  map_doorbell(uint32_t doorbell_offset);
+  bool
+  is_driver_cmd_submission() const;
 };
 
 }

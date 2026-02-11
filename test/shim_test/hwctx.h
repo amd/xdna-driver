@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _SHIMTEST_HWCTX_H_
 #define _SHIMTEST_HWCTX_H_
@@ -34,7 +34,9 @@ private:
   {
     xrt::xclbin xclbin;
     xrt::elf elf;
-    auto is_full_elf = (get_kernel_type(dev, xclbin_name) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT);
+    auto kernel_type = get_kernel_type(dev, xclbin_name);
+    auto is_full_elf = (kernel_type == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT ||
+		        kernel_type == KERNEL_TYPE_TXN_FULL_ELF);
     auto path = get_xclbin_path(dev, xclbin_name);
 
     try {
@@ -51,7 +53,7 @@ private:
     xrt::hw_context::qos_type qos{ {"gops", 100}, {"priority", 0x180} };
     xrt::hw_context::access_mode mode = xrt::hw_context::access_mode::shared;
     if (is_full_elf) {
-      m_handle = dev->create_hw_context(elf, qos, mode);
+      m_handle = dev->create_hw_context(elf.get_partition_size(), qos, mode);
     } else {
       dev->record_xclbin(xclbin);
       auto xclbin_uuid = xclbin.get_uuid();

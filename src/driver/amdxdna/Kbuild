@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
 #
 
 ROOT := $(src)
@@ -10,26 +10,29 @@ ccflags-y += -I$(ROOT)/
 ccflags-y += -I$(ROOT)/../../include/uapi
 # version.h
 ccflags-y += -I$(ROOT)/../../include
+# Make every C file in this dir see config-kernel.h
+ccflags-y += -include $(ROOT)/config_kernel.h
 
 # All warning will report as error and debug build
 ccflags-y += -g -Werror
+
+ccflags-${UMQ_HELLO_TEST} += -DUMQ_HELLO_TEST
 
 obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
 	amdxdna_dpt.o \
 	amdxdna_drm.o \
+	amdxdna_iommu.o \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
 	amdxdna_mgmt.o \
-	amdxdna_tdr.o \
 	amdxdna_ubuf.o \
 	amdxdna_carvedout_buf.o \
-	amdxdna_error.o \
 	amdxdna_gem.o \
-	amdxdna_cma.o \
+	amdxdna_cma_buf.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_smu.o \
@@ -38,17 +41,31 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_hwctx.o \
 	aie2_error.o \
 	aie2_debugfs.o \
+	aie2_tdr.o \
 	aie2_dpt.o \
 	aie2_message.o \
 	aie2_ctx_runqueue.o \
 	aie2_pm.o \
 	aie2_pci.o \
+	aie4_smu.o \
+	aie4_psp.o \
+	aie4_hwctx.o \
+	aie4_debugfs.o \
+	aie4_devel.o \
+	aie4_error.o \
+	aie4_pm.o \
+	aie4_dpt.o \
+	aie4_message.o \
+	aie4_pci.o \
+	aie4_solver.o \
+	aie4_sriov.o \
 	npu1_regs.o \
-	npu2_regs.o \
+	npu3_regs.o \
 	npu4_regs.o \
 	npu5_regs.o \
 	npu6_regs.o \
-	amdxdna_pci_drv.o
+	amdxdna_pci_drv.o \
+	amdxdna_xen.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	ve2_of.o \
