@@ -227,11 +227,11 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_d
 {
 	struct dma_buf *dma_buf;
 	bool cacheable;
-	int mem_bitmap;
-	int i;
+	u32 mem_bitmap;
+	unsigned int i;
 
 	cacheable = get_cacheable_flag(flags);
-	mem_bitmap = (int)(flags & 0xFFULL);
+	mem_bitmap = (u32)(flags & 0xFFULL);
 
 	/* Try to allocate from the requested region(s) in bitmap order (bit 0, then 1, ...). */
 	for (i = 0; i < max_regions; i++) {

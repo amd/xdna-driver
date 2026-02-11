@@ -480,16 +480,16 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	int nslots = HOST_QUEUE_ENTRY;
 	struct device *alloc_dev;
 	dma_addr_t dma_handle;
-	int cma_region_idx;
 	size_t alloc_size;
+	unsigned int r;
 
 	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * nslots;
 	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
 
 	/* Allocate from context's CMA region(s); try bitmap order (region 0, 1, ...). */
-	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++) {
-		alloc_dev = xdna->cma_region_devs[cma_region_idx];
-		if ((hwctx->priv->mem_bitmap & (1 << cma_region_idx)) && alloc_dev) {
+	for (r = 0; r < MAX_MEM_REGIONS; r++) {
+		alloc_dev = xdna->cma_region_devs[r];
+		if ((hwctx->priv->mem_bitmap & (1U << r)) && alloc_dev) {
 			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
 								&dma_handle, GFP_KERNEL);
 			if (!queue->hsa_queue_p)
