@@ -133,6 +133,9 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
   set_slotidx(arg.handle);
   shim_debug("HW context created with handle=%u", arg.handle);
 
+  // Query the auto-selected mem_bitmap from the driver
+  query_mem_bitmap();
+
   try {
     m_info = get_partition_info_hw(m_device, xclbin.get_uuid(), arg.handle);
   } catch (const xrt_core::error& ex) {
@@ -231,11 +234,37 @@ xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_contex
   set_doorbell(arg.umq_doorbell);
   shim_debug("HW context created: handle=%u, doorbell=%u", arg.handle, arg.umq_doorbell);
 
+  // Query the auto-selected mem_bitmap from the driver
+  query_mem_bitmap();
+
   // TODO : create xdna_aie_array object after ELF has AIE_METADATA, AIE_PARTITION
   // sections added
 
   m_hwq->bind_hwctx(this);
   shim_debug("HW context initialization completed: handle=%u", m_handle);
+}
+
+void
+xdna_hwctx::
+query_mem_bitmap()
+{
+  uint32_t mem_bitmap = 0;
+
+  amdxdna_drm_get_array array_args = {};
+  array_args.param = DRM_AMDXDNA_HWCTX_MEM_BITMAP;
+  array_args.element_size = m_handle;  // Pass context_id via element_size
+  array_args.num_element = 1;
+  array_args.buffer = reinterpret_cast<uint64_t>(&mem_bitmap);
+
+  try {
+    m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &array_args);
+    m_mem_bitmap = mem_bitmap;
+    shim_debug("Queried mem_bitmap=0x%x for hwctx handle=%u", m_mem_bitmap, m_handle);
+  } catch (const xrt_core::system_error& ex) {
+    m_mem_bitmap = 0;
+    shim_debug("Failed to query mem_bitmap (using default CMA): %s (err=%d: %s)",
+               ex.what(), ex.get_code(), errno_to_str(ex.get_code()));
+  }
 }
 
 xdna_hwctx::
@@ -337,13 +366,27 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   // const_cast: alloc_bo() is not const yet in device class
   auto dev = const_cast<device_xdna*>(get_device());
 
+  /* Inject hwctx mem_bitmap (queried from driver) into BO flags. */
+  xcl_bo_flags xflags{flags};
+  /* When m_mem_bitmap == 0 (no topology), pass 0 so kernel uses default CMA. */
+  if (xflags.use > 0) {
+    /* Internal BO: pass whole bitmap */
+    xflags.bank = m_mem_bitmap;
+  } else {
+    /* External BO: single region from bitmap, or 0 for default CMA */
+    uint32_t bank_index = xflags.bank;
+    xflags.bank = (m_mem_bitmap == 0) ? 0 : (1U << bank_index);
+  }
+
+  uint64_t corrected_flags = xflags.all;
+
   // Debug or dtrace buffers are specific to context.
-  if (xcl_bo_flags{flags}.use == XRT_BO_USE_DEBUG || xcl_bo_flags{flags}.use == XRT_BO_USE_DTRACE ||
-      xcl_bo_flags{flags}.use == XRT_BO_USE_LOG || xcl_bo_flags{flags}.use == XRT_BO_USE_UC_DEBUG)
-    return dev->alloc_bo(userptr, get_slotidx(), size, flags);
+  if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
+      xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
+    return dev->alloc_bo(userptr, get_slotidx(), size, corrected_flags);
 
   // Other BOs are shared across all contexts.
-  return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
+  return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, corrected_flags);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
