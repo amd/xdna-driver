@@ -23,11 +23,11 @@
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/cert.sbin.20251218",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/cert.sbin.20260212",
 			"pci_device_id": "17f1",
 			"pci_revision_id": "10",
-			"version": "20251218",
-			"git_hash": "b031923",
+			"version": "20260212",
+			"git_hash": "768de03",
 			"fw_name": "cert.dev.sbin"
 		},
 		{
@@ -40,11 +40,11 @@
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/cert.sbin.20251218",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/cert.sbin.20260212",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "10",
-			"version": "20251218",
-			"git_hash": "b031923",
+			"version": "20260212",
+			"git_hash": "768de03",
 			"fw_name": "cert.dev.sbin"
 		},
 		{
