@@ -1077,6 +1077,7 @@ struct aie4_msg_selftest_resp {
 #define MAX_NUM_SUPERVISORS_API 4
 #define TOTAL_NUM_UC_API 6
 #define CONFIG_NPUFW_NUM_COLUMNS_API 3
+#define MIN_TELEMETRY_BUFF_SIZE SZ_128K
 
 // Define telemetry_opcodes_t before it's used in aie4_telemetry_t
 struct telemetry_opcodes {

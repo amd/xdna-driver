@@ -281,7 +281,8 @@ int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *m
 	return 0;
 }
 
-int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t addr, u32 size)
+int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, u32 pasid, dma_addr_t addr,
+			     u32 size)
 {
 	DECLARE_AIE4_MSG(aie4_msg_get_telemetry, AIE4_MSG_OP_GET_TELEMETRY);
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -292,9 +293,11 @@ int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, dma_addr_t 
 		return -EINVAL;
 	}
 
-	req.buf_addr = addr;
-	req.buf_size = size;
 	req.type = type;
+	req.buf_addr = addr;
+	req.pasid.raw = pasid;
+	req.buf_size = size;
+	req.hw_context_id = 0; // Fix me for next fw release when per ctx telemetry is supported
 
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {

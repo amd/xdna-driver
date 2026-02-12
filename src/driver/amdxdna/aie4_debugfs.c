@@ -327,7 +327,7 @@ static int aie4_telemetry(struct seq_file *m, u32 type)
 
 	drm_clflush_virt_range(buff, size); /* device can access */
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_query_aie_telemetry(ndev, type, dma_addr, size);
+	ret = aie4_query_aie_telemetry(ndev, type, 0, dma_addr, size);
 	mutex_unlock(&ndev->aie4_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
