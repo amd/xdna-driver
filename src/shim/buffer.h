@@ -170,9 +170,6 @@ public:
   std::set<const buffer *>
   get_arg_bos() const override;
 
-  std::vector<const cmd_buffer *>&
-  get_subcmd_list() const;
-
 private:
   // Valid only when m_submitted is true.
   mutable uint64_t m_cmd_seq = 0;
@@ -187,8 +184,6 @@ private:
   mutable bool m_submitted = false;
   // Changed only once in the life time of cmd BO.
   mutable std::condition_variable m_submission_cv;
-  // For chained cmd, contains submitted sub-cmd pointers.
-  mutable std::vector<const cmd_buffer *> m_subcmds;
 };
 
 class dbg_buffer : public buffer

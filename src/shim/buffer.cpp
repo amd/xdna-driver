@@ -801,13 +801,6 @@ get_arg_bos() const
   return ret;
 }
 
-std::vector<const cmd_buffer *>&
-cmd_buffer::
-get_subcmd_list() const
-{
-  return m_subcmds;
-}
-
 //
 // Impl for class dbg_buffer
 //

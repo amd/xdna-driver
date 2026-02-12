@@ -314,8 +314,6 @@ issue_command(const cmd_buffer *cmd_bo)
     return hwq::issue_command(cmd_bo);
 
   auto cmd = reinterpret_cast<ert_packet *>(cmd_bo->vaddr());
-  auto& subcmds = cmd_bo->get_subcmd_list();
-  subcmds.clear();
 
   // Single command submission.
   if (cmd->opcode != ERT_CMD_CHAIN)
@@ -326,14 +324,10 @@ issue_command(const cmd_buffer *cmd_bo)
   if (payload->command_count == 0 || payload->command_count > 64)
     shim_err(EINVAL, "Runlist exec buf with bad num of subcmds: %zx", payload->command_count);
 
-  if (subcmds.capacity() < payload->command_count)
-    subcmds.reserve(payload->command_count);
-
   uint64_t seq = 0;
   for (size_t i = 0; i < payload->command_count; i++) {
     auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[i]));
     seq = issue_single_exec_buf(subcmd, i == payload->command_count - 1);
-    subcmds.push_back(subcmd);
   }
   return seq;
 }
@@ -379,39 +373,91 @@ int
 hwq_umq::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
-  auto ret = hwq::wait_command(cmd, timeout_ms);
-  // The timeout_ms expired.
-  if (!ret)
-    return ret;
+  int ret;
+
+  // Call into parent's wait() to block and wait in driver.
+  bool retry = false;
+  do {
+    try {
+      ret = hwq::wait_command(cmd, timeout_ms);
+      // The timeout_ms expired.
+      if (!ret)
+        return ret;
+      retry = false;
+    }
+    catch (const xrt_core::system_error& ex) {
+      if (ex.get_code() == EAGAIN) {
+        shim_debug("HW context is not available, retrying");
+        sleep(1);
+        retry = true;
+      } else {
+        throw;
+      }
+    }
+  } while (retry);
+
+  // Command is completed as indicated by driver
 
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
-  auto& subcmds = boh->get_subcmd_list();
-  // Non-chained cmd or kernel mode submission
-  if (!subcmds.size())
+
+  // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
+  // driver (KMS + timeout), or by nobody (UMS + timeout). Just return as is.
+  if (cmdpkt->opcode != ERT_CMD_CHAIN)
     return ret;
 
-  // Chained cmd submitted in user mode
-  auto last_cmd_bo = subcmds.back();
-  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
-  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
-    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
+  // Chained cmd completion
+
+  // When cmd timed out, in KMS mode, driver will update state (either timeout or abort)
+  // and context health data (in case of timing out).
+  if (cmdpkt->state == ERT_CMD_STATE_TIMEOUT || cmdpkt->state == ERT_CMD_STATE_ABORT)
     return ret;
+
+  // When cmd is completed by CERT normally, in both UMS/KMS mode, driver does not
+  // touch exec buf, so the state must stay as NEW.
+  // When cmd timed out in UMS mode, the state must also stay as NEW.
+  if (cmdpkt->state != ERT_CMD_STATE_NEW) {
+    shim_err(EINVAL, "Runlist exec buf completed with unexpected state: %u",
+      static_cast<unsigned int>(cmdpkt->state));
   }
 
-  // One of the sub-cmds has failed, find the first failed one and set the
-  // chained cmd status accordingly.
-  auto chain_data = get_ert_cmd_chain_data(cmdpkt);
-  chain_data->error_index = 0;
-  for (auto subcmd_bo : subcmds) {
-    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd_bo->vaddr());
-    if (subcmd_pkt->state == ERT_CMD_STATE_COMPLETED) {
-      chain_data->error_index++;
-    } else {
-      cmdpkt->state = subcmd_pkt->state;
-      break;
+  // Command is completed by CERT as normal or UMS + timeout, need to udpate state
+  // based on sub-cmd's state.
+	/*
+	 * Command chain result updated by CERT:
+	 * 1. If all sub-cmds are processed successfully, the last sub-cmd state
+	 *    is ERT_CMD_STATE_COMPLETED
+	 * 2. If one sub-cmds failed, the state of the failed one is updated. All
+	 *    sub-cmds after it will be skipped and set to ERT_CMD_STATE_ABORT
+	 * 3. In case CERT hangs or did not start processing, all sub-cmds state
+	 *    should stay as ERT_CMD_STATE_NEW
+	 */
+  auto payload = get_ert_cmd_chain_data(cmdpkt);
+  auto last_cmd_bo = static_cast<const cmd_buffer *>(
+    m_pdev.find_bo_by_handle(payload->data[payload->command_count - 1]));
+  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
+  if (last_cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
+    // In UMS, it means the cmd has timed out. In KMS, it is not expected. 
+    shim_err(EINVAL, "Unexpected state in last exec buf: %u",
+      static_cast<unsigned int>(cmdpkt->state));
+  } else if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
+  } else {
+    // One of the subcmd has failed, discover the failed subcmd index by searching
+    // for the first non-abort subcmd starting from the end of list.
+    for (size_t i = payload->command_count; i > 0; i--) {
+      auto idx = i - 1;
+      auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
+      auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
+      if (subcmd_pkt->state != ERT_CMD_STATE_ABORT) {
+        payload->error_index = idx;
+        cmdpkt->state = subcmd_pkt->state;
+        break;
+      }
     }
   }
+  if (cmdpkt->state == ERT_CMD_STATE_NEW)
+    shim_err(EINVAL, "Failed to detect runlist exec buf state");
   return ret;
 }
 
