@@ -248,7 +248,7 @@ get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pai
   auto cur = get_fine_preemption_counters(dev);
   uint64_t fine_preemption_count;
   int index = -1;
-  
+
   // Find the user task ID for the ctx id
   for (int i = 0; i < cur.size(); i++) {
     auto id = cur[i].first;
@@ -629,8 +629,7 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
 
   // Create and send the chained command, keep the bad one in the middle
   // Command chain: good, bad (error or timeout), good
-  // In case of timeout, the index returned from fw is always 0.
-  const uint32_t bad_index = is_timeout ? 0 : 1;
+  const uint32_t bad_index = 1;
   const uint32_t bad_state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ERROR;
   io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : &error_bo_set;
   std::vector<bo*> tmp_cmd_bos;
@@ -645,7 +644,7 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   auto hwq = hwctx.get()->get_hw_queue();
   auto cmd_hdl = cbo->get();
   auto cmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  
+
   hwq->submit_command(cmd_hdl);
   hwq->wait_command(cmd_hdl, 0);
 
