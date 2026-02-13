@@ -12,6 +12,7 @@
 #include <fstream>
 #include <string>
 #include <regex>
+#include <unistd.h>
 
 using namespace xrt_core;
 using arg_type = const std::vector<uint64_t>;
@@ -671,4 +672,58 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   }
 
   (*bad).verify_result();
+}
+
+void
+TEST_aie2_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  constexpr uint32_t CORE_STATUS_REG_OFFSET = 0x32004;
+  constexpr size_t TILE_ADDRESS_SPACE = 0x100000;
+
+  auto dev = sdev.get();
+  const char* xclbin = "verify_4x4.xclbin";
+  elf_io_coredump_test_bo_set boset{dev, xclbin, "verify_4x4.elf"};
+  hw_ctx hwctx{dev, xclbin};
+
+  boset.init_cmd(hwctx, false);
+  boset.sync_before_run();
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+  boset.sync_after_run();
+  boset.verify_result();
+
+  xrt_core::query::aie_coredump::args coredump_args{};
+  coredump_args.pid = static_cast<uint64_t>(getpid());
+  coredump_args.context_id = static_cast<uint32_t>(hwctx.get()->get_slotidx());
+  std::vector<char> payload = xrt_core::device_query<xrt_core::query::aie_coredump>(dev, coredump_args);
+
+  auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(dev);
+  size_t payload_base = (payload.size() >= 16 + TILE_ADDRESS_SPACE &&
+      (payload.size() - 16) % TILE_ADDRESS_SPACE == 0) ? 16 : 0;
+  size_t num_tiles = (payload.size() - payload_base) / TILE_ADDRESS_SPACE;
+  uint32_t num_rows = (num_tiles % aie_stats.cols == 0)
+      ? static_cast<uint32_t>(num_tiles / aie_stats.cols)
+      : (aie_stats.shim_rows + aie_stats.mem_rows + aie_stats.core_rows);
+
+  const uint8_t* base = reinterpret_cast<const uint8_t*>(payload.data()) + payload_base;
+  uint32_t st = *reinterpret_cast<const uint32_t*>(base + (0 * num_rows + 2) * TILE_ADDRESS_SPACE +
+		  				   CORE_STATUS_REG_OFFSET);
+  uint32_t id_status = *reinterpret_cast<const uint32_t*>(base + (2 * num_rows + 2) *
+		  					  TILE_ADDRESS_SPACE +
+							  CORE_STATUS_REG_OFFSET);
+  const uint32_t* memtile0_data = reinterpret_cast<const uint32_t*>(base + (0 * num_rows + 1) *
+		  						    TILE_ADDRESS_SPACE);
+
+  if ((st & 0x1) == 0 || (st & 0x1E) == 0)
+    throw std::runtime_error("Core (0,2) expected STALL, got 0x");
+
+  if ((id_status & 0x1) != 0)
+    throw std::runtime_error("Core (2,2) expected IDLE");
+
+  for (size_t i = 1; i < 256; ++i)
+    if (memtile0_data[i] != 0xdeadface)
+      throw std::runtime_error("Memtile data expected 0xdeadface, got 0x" +
+		      	       std::to_string(memtile0_data[i]));
 }
