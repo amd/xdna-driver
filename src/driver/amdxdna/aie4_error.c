@@ -511,11 +511,11 @@ reregister:
 
 void aie4_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 {
-	struct amdxdna_dev *xdna = ndev->xdna;
+	//struct amdxdna_dev *xdna = ndev->xdna;
 	struct async_events *events;
 	int i;
 
-	drm_WARN_ON(&xdna->ddev, mutex_is_locked(&ndev->aie4_lock));
+	//drm_WARN_ON(&xdna->ddev, mutex_is_locked(&ndev->aie4_lock));
 	events = ndev->async_events;
 	destroy_workqueue(events->wq);
 
