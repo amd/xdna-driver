@@ -338,5 +338,6 @@ fi
 
 if [[ $package == 1 ]]; then
   echo "Packaging is automatically done as part of build"
+  echo "added code to test PR"
   exit 0
 fi
