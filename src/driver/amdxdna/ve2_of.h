@@ -89,6 +89,9 @@ struct amdxdna_ctx_priv {
 	struct device			*aie_dev;
 	struct aie_partition_init_args	*args;
 	struct ve2_hsa_queue		hwctx_hsa_queue;
+	struct ve2_dbg_queue		hwctx_dbg_queue;
+	struct timer_list		dbg_q_timer;
+	wait_queue_head_t		dbg_q_waitq;
 	struct ve2_config_hwctx		*hwctx_config;
 	wait_queue_head_t		waitq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
