@@ -148,6 +148,8 @@ struct ve2_dbg_queue {
 	// hq_lock protects [read | write]_index and reserved_write_index
 	struct mutex			hq_lock;
 	u64				reserved_write_index;
+		/* Device used for host queue allocation */
+	struct device			*alloc_dev;
 };
 
 /* handshake */
