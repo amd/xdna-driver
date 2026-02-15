@@ -389,7 +389,9 @@ static inline void ve2_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_INVALID;
 }
 
-static void ve2_free_queue(struct amdxdna_dev *xdna, const char *qname, void **queue_p, struct device **alloc_dev, dma_addr_t *dma_addr, struct mutex *hq_lock, size_t alloc_size)
+static void ve2_free_queue(struct amdxdna_dev *xdna, const char *qname, void **queue_p,
+			   struct device **alloc_dev, dma_addr_t *dma_addr, struct mutex *hq_lock,
+			   size_t alloc_size)
 {
 	if (*queue_p) {
 		XDNA_DBG(xdna, "Freeing %s queue: dma_addr=0x%llx", qname, *dma_addr);
@@ -486,24 +488,43 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 	}
 }
 
-static int ve2_create_dbg_queue(struct amdxdna_dev *xdna, struct ve2_dbg_queue *queue)
+static int ve2_create_dbg_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
+				struct ve2_dbg_queue *queue)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	int nslots = HOST_QUEUE_ENTRY;
 	dma_addr_t dma_handle;
 	size_t alloc_size;
+	int r;
+	struct device *alloc_dev;
 
 	alloc_size = sizeof(struct dbg_queue) + sizeof(u64) * nslots;
 	XDNA_DBG(xdna, "Creating dbg queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
 
-	/* Allocate a single contiguous block of memory */
-	queue->dbg_queue_p = dma_alloc_coherent(&pdev->dev,
-						alloc_size,
-						&dma_handle,
-						GFP_KERNEL);
+	/* Allocate from context's CMA region(s); try bitmap order (region 0, 1, ...). */
+	for (r = 0; r < MAX_MEM_REGIONS; r++) {
+		alloc_dev = xdna->cma_region_devs[r];
+		if ((hwctx->priv->mem_bitmap & (1U << r)) && alloc_dev) {
+			queue->dbg_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
+								&dma_handle, GFP_KERNEL);
+			if (!queue->dbg_queue_p)
+				continue;
+			queue->alloc_dev = alloc_dev;
+			break;
+		}
+	}
+
+	/* If no allocation succeeded, use the default device */
 	if (!queue->dbg_queue_p) {
-		XDNA_ERR(xdna, "Failed to allocate dbg queue memory, size=%zu", alloc_size);
-		return -ENOMEM;
+		queue->dbg_queue_p = dma_alloc_coherent(&pdev->dev,
+							alloc_size,
+							&dma_handle,
+							GFP_KERNEL);
+		if (!queue->dbg_queue_p) {
+			XDNA_ERR(xdna, "Failed to allocate dbg queue memory, size=%zu", alloc_size);
+			return -ENOMEM;
+		}
+		queue->alloc_dev = &pdev->dev;
 	}
 	memset(queue->dbg_queue_p, 0, alloc_size);
 	/* Initialize mutex here */
@@ -1447,13 +1468,11 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	if (enable_debug_queue) {
 		/* one dbg_queue entry per hwctx */
-		ret = ve2_create_dbg_queue(xdna, &priv->hwctx_dbg_queue);
+		ret = ve2_create_dbg_queue(xdna, hwctx, &priv->hwctx_dbg_queue);
 		if (ret) {
 			XDNA_ERR(xdna, "Failed to create dbg queue, ret=%d", ret);
 			goto free_hsa_queue;
 		}
-	}
-	if (enable_debug_queue) {
 		init_waitqueue_head(&priv->dbg_q_waitq);
 		timer_setup(&priv->dbg_q_timer, dbg_q_timeout_cb, 0);
 		mod_timer(&priv->dbg_q_timer, jiffies + CTX_TIMER);
@@ -1473,10 +1492,10 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 free_hsa_queue:
 	ve2_free_queue(xdna, "HSA", (void **)&hwctx->priv->hwctx_hsa_queue.hsa_queue_p,
-		 &hwctx->priv->hwctx_hsa_queue.alloc_dev,
-		 &hwctx->priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr,
-		 &hwctx->priv->hwctx_hsa_queue.hq_lock,
-		 sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
+		       &hwctx->priv->hwctx_hsa_queue.alloc_dev,
+		       &hwctx->priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr,
+		       &hwctx->priv->hwctx_hsa_queue.hq_lock,
+		       sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
 cleanup_xrs:
 	/* Releases XRS and partition (ve2_mgmt_destroy_partition calls ve2_xrs_release). */
 	ve2_mgmt_destroy_partition(hwctx);
@@ -1551,13 +1570,13 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_queue(xdna, "HSA", (void **)&hwctx->priv->hwctx_hsa_queue.hsa_queue_p,
-		 &hwctx->priv->hwctx_hsa_queue.alloc_dev,
-		 &hwctx->priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr,
-		 &hwctx->priv->hwctx_hsa_queue.hq_lock,
-		 sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
+		       &hwctx->priv->hwctx_hsa_queue.alloc_dev,
+		       &hwctx->priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr,
+		       &hwctx->priv->hwctx_hsa_queue.hq_lock,
+		       sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
 	if (enable_debug_queue) {
 		ve2_free_queue(xdna, "DBG", (void **)&hwctx->priv->hwctx_dbg_queue.dbg_queue_p,
-		 	       &hwctx->priv->hwctx_dbg_queue.alloc_dev,
+			       &hwctx->priv->hwctx_dbg_queue.alloc_dev,
 			       &hwctx->priv->hwctx_dbg_queue.dbg_queue_mem.dma_addr,
 			       &hwctx->priv->hwctx_dbg_queue.hq_lock,
 			       sizeof(struct dbg_queue) + sizeof(u64) * HOST_QUEUE_ENTRY);
