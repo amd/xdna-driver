@@ -828,7 +828,8 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 		/* Show all non-invalid packets OR packets with unexpected state */
 		if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID ||
 		    (completion != 0 && completion != ERT_CMD_STATE_INVALID)) {
-			XDNA_ERR(xdna, "  slot[%2d]: type=%u opcode=%u count=%u chain=%u dist=%u indir=%u\n",
+			XDNA_ERR(xdna,
+				 "  slot[%2d]: type=%u opcode=%u count=%u chain=%u dist=%u indir=%u\n",
 				 i,
 				 pkt->xrt_header.common_header.type,
 				 pkt->xrt_header.common_header.opcode,
@@ -841,12 +842,14 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 			/* Check for signal mismatch - indicates potential corruption */
 			if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID &&
 			    pkt->xrt_header.completion_signal != expected_signal) {
-				XDNA_ERR(xdna, "  *** SIGNAL MISMATCH! Possible packet corruption ***\n");
+				XDNA_ERR(xdna,
+					 "  *** SIGNAL MISMATCH! Possible packet corruption ***\n");
 			}
 			/* Check for invalid opcode - potential corruption */
 			if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID &&
 			    pkt->xrt_header.common_header.opcode != HOST_QUEUE_PACKET_EXEC_BUF) {
-				XDNA_ERR(xdna, "  *** INVALID OPCODE %u! Expected %u. Possible corruption ***\n",
+				XDNA_ERR(xdna,
+					 "  *** INVALID OPCODE %u! Expected %u. Possible corruption ***\n",
 					 pkt->xrt_header.common_header.opcode,
 					 HOST_QUEUE_PACKET_EXEC_BUF);
 			}
@@ -854,12 +857,15 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 			if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID &&
 			    !pkt->xrt_header.common_header.indirect &&
 			    pkt->xrt_header.common_header.count != sizeof(struct exec_buf)) {
-				XDNA_ERR(xdna, "  *** INVALID COUNT %u! Expected %zu. Possible corruption ***\n",
+				XDNA_ERR(xdna,
+					 "  *** INVALID COUNT %u! Expected %zu. Possible corruption ***\n",
 					 pkt->xrt_header.common_header.count,
 					 sizeof(struct exec_buf));
 			}
 
-			/* Dump exec_buf data (instruction buffer addresses) for non-indirect packets */
+			/* Dump exec_buf data (instruction buffer addresses)
+			 * for non-indirect packets
+			 */
 			if (!pkt->xrt_header.common_header.indirect) {
 				struct exec_buf *ebp = (struct exec_buf *)pkt->data;
 				u64 instr_addr = ((u64)ebp->dpu_control_code_host_addr_high << 32) |
@@ -867,12 +873,14 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 				u64 dtrace_addr = ((u64)ebp->dtrace_buf_host_addr_high << 32) |
 						  ebp->dtrace_buf_host_addr_low;
 
-				XDNA_ERR(xdna, "           instr_addr=0x%llx dtrace=0x%llx args_len=%u\n",
+				XDNA_ERR(xdna,
+					 "           instr_addr=0x%llx dtrace=0x%llx args_len=%u\n",
 					 instr_addr, dtrace_addr, ebp->args_len);
 
 				/* Flag potentially invalid addresses */
 				if (!instr_addr)
-					XDNA_ERR(xdna, "  *** ZERO INSTRUCTION ADDR! Possible corruption ***\n");
+					XDNA_ERR(xdna,
+						 "  *** ZERO INSTRUCTION ADDR! Possible corruption ***\n");
 			}
 		}
 	}
@@ -1057,8 +1065,9 @@ static void ve2_aie_error_cb(void *arg)
 	ve2_dump_debug_state(xdna, mgmtctx);
 
 	/*
-	 * Optional delay for devmem debugging - allows user to dump instruction buffers
-	 * before the application exits. Set via: echo N > /sys/module/amdxdna/parameters/aie_error_delay_sec
+	 * Optional delay for devmem debugging - allows user to dump instruction
+	 * buffers before the application exits.
+	 * Set via: echo N > /sys/module/amdxdna/parameters/aie_error_delay_sec
 	 */
 	if (aie_error_delay_sec > 0) {
 		XDNA_ERR(xdna, "*** WAITING %d SECONDS FOR DEVMEM DUMP ***\n", aie_error_delay_sec);
