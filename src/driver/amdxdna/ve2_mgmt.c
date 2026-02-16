@@ -1084,7 +1084,7 @@ static void ve2_aie_error_cb(void *arg)
 	 * Release ctx_lock before sleeping to avoid blocking other threads.
 	 */
 	if (aie_error_delay_sec > 0) {
-		XDNA_WARN(xdna, "*** WAITING %d SECONDS FOR DEVMEM DUMP ***\n", aie_error_delay_sec);
+		XDNA_WARN(xdna, "*** WAITING %d SECONDS ***\n", aie_error_delay_sec);
 		mutex_unlock(&mgmtctx->ctx_lock);
 		ssleep(aie_error_delay_sec);
 		mutex_lock(&mgmtctx->ctx_lock);
