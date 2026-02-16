@@ -377,17 +377,16 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 
 static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
 {
-	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
-
 	if (queue->hsa_queue_p) {
 		XDNA_DBG(xdna, "Freeing host queue: dma_addr=0x%llx",
 			 queue->hsa_queue_mem.dma_addr);
-		dma_free_coherent(&pdev->dev,
+		dma_free_coherent(queue->alloc_dev,
 				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
 				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
 		queue->hsa_queue_mem.dma_addr = 0;
+		queue->alloc_dev = NULL;
 		mutex_destroy(&queue->hq_lock);
 	}
 }
@@ -480,24 +479,44 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 /*
  * Create hsa queue in kernel and initialize queue slots.
  */
-static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
+static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
+				 struct ve2_hsa_queue *queue)
 {
 	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	int nslots = HOST_QUEUE_ENTRY;
+	struct device *alloc_dev;
 	dma_addr_t dma_handle;
 	size_t alloc_size;
+	unsigned int r;
 
 	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * nslots;
 	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
 
-	/* Allocate a single contiguous block of memory */
-	queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
-						alloc_size,
-						&dma_handle,
-						GFP_KERNEL);
+	/* Allocate from context's CMA region(s); try bitmap order (region 0, 1, ...). */
+	for (r = 0; r < MAX_MEM_REGIONS; r++) {
+		alloc_dev = xdna->cma_region_devs[r];
+		if ((hwctx->priv->mem_bitmap & (1U << r)) && alloc_dev) {
+			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
+								&dma_handle, GFP_KERNEL);
+			if (!queue->hsa_queue_p)
+				continue;
+			queue->alloc_dev = alloc_dev;
+			break;
+		}
+	}
+
+	/* If no allocation succeeded, use the default device */
 	if (!queue->hsa_queue_p) {
-		XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu", alloc_size);
-		return -ENOMEM;
+		queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
+							alloc_size,
+							&dma_handle,
+							GFP_KERNEL);
+		if (!queue->hsa_queue_p) {
+			XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu",
+				 alloc_size);
+			return -ENOMEM;
+		}
+		queue->alloc_dev = &pdev->dev;
 	}
 
 	/* Initialize mutex here */
@@ -1239,17 +1258,20 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	hwctx->priv = priv;
 	init_waitqueue_head(&priv->waitq);
 
-	/* one host_queue entry per hwctx */
-	ret = ve2_create_host_queue(xdna, &priv->hwctx_hsa_queue);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to create host queue, ret=%d", ret);
-		goto free_priv;
-	}
-
 	ret = ve2_xrs_request(xdna, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "XRS resource request failed, ret=%d", ret);
-		goto free_hsa_queue;
+		goto cleanup_priv;
+	}
+
+	/* Auto-select memory bitmap based on start_col */
+	ve2_auto_select_mem_bitmap(xdna, hwctx);
+
+	/* One host_queue entry per hwctx */
+	ret = ve2_create_host_queue(xdna, hwctx, &priv->hwctx_hsa_queue);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to create host queue, ret=%d", ret);
+		goto cleanup_xrs;
 	}
 
 	if (enable_polling) {
@@ -1272,9 +1294,10 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	return 0;
 
-free_hsa_queue:
-	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
-free_priv:
+cleanup_xrs:
+	/* Releases XRS and partition (ve2_mgmt_destroy_partition calls ve2_xrs_release). */
+	ve2_mgmt_destroy_partition(hwctx);
+cleanup_priv:
 	kfree(hwctx->priv);
 
 	return ret;

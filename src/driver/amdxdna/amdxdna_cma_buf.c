@@ -12,6 +12,7 @@ struct amdxdna_cmabuf_priv {
 	dma_addr_t dma_addr;
 	void *cpu_addr;
 	size_t size;
+	bool cacheable;
 };
 
 static struct sg_table *
@@ -69,15 +70,24 @@ static void amdxdna_cmabuf_unmap(struct dma_buf_attachment *attach,
 	kfree(sgt);
 }
 
+static void amdxdna_cmabuf_free(struct device *dev, void *cpu_addr,
+				dma_addr_t dma_addr, size_t size,
+				bool cacheable)
+{
+	if (cacheable)
+		dma_free_wc(dev, size, cpu_addr, dma_addr);
+	else
+		dma_free_coherent(dev, size, cpu_addr, dma_addr);
+}
+
 static void amdxdna_cmabuf_release(struct dma_buf *dbuf)
 {
 	struct amdxdna_cmabuf_priv *cmabuf = dbuf->priv;
 
 	if (!cmabuf)
 		return;
-
-	dma_free_coherent(cmabuf->dev, cmabuf->size,
-			  cmabuf->cpu_addr, cmabuf->dma_addr);
+	amdxdna_cmabuf_free(cmabuf->dev, cmabuf->cpu_addr, cmabuf->dma_addr,
+			    cmabuf->size, cmabuf->cacheable);
 	kfree(cmabuf);
 	dbuf->priv = NULL;
 }
@@ -98,10 +108,16 @@ static int amdxdna_cmabuf_mmap(struct dma_buf *dbuf, struct vm_area_struct *vma)
 
 	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
 
-	ret = dma_mmap_coherent(cmabuf->dev, vma,
-				cmabuf->cpu_addr,
-				cmabuf->dma_addr,
-				cmabuf->size);
+	if (cmabuf->cacheable)
+		ret = dma_mmap_wc(cmabuf->dev, vma,
+				  cmabuf->cpu_addr,
+				  cmabuf->dma_addr,
+				  cmabuf->size);
+	else
+		ret = dma_mmap_coherent(cmabuf->dev, vma,
+					cmabuf->cpu_addr,
+					cmabuf->dma_addr,
+					cmabuf->size);
 
 	vma->vm_pgoff = vm_pgoff;
 
@@ -125,8 +141,8 @@ static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
 	.vmap = amdxdna_cmabuf_vmap,
 };
 
-struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
-				    size_t size)
+static struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
+					   size_t size, bool cacheable)
 {
 	struct amdxdna_cmabuf_priv *cmabuf;
 	struct dma_buf *dbuf;
@@ -141,7 +157,10 @@ struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 
 	size = PAGE_ALIGN(size);
 
-	cpu_addr = dma_alloc_coherent(dev, size, &dma_addr, GFP_KERNEL);
+	if (cacheable)
+		cpu_addr = dma_alloc_wc(dev, size, &dma_addr, GFP_KERNEL);
+	else
+		cpu_addr = dma_alloc_coherent(dev, size, &dma_addr, GFP_KERNEL);
 	if (!cpu_addr) {
 		ret = -ENOMEM;
 		goto free_cmabuf;
@@ -151,6 +170,7 @@ struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 	cmabuf->cpu_addr = cpu_addr;
 	cmabuf->dma_addr = dma_addr;
 	cmabuf->size = size;
+	cmabuf->cacheable = cacheable;
 
 	exp_info.size = size;
 	exp_info.ops = &amdxdna_cmabuf_dmabuf_ops;
@@ -166,7 +186,7 @@ struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 	return dbuf;
 
 free_dma:
-	dma_free_coherent(dev, size, cpu_addr, dma_addr);
+	amdxdna_cmabuf_free(dev, cpu_addr, dma_addr, size, cacheable);
 free_cmabuf:
 	kfree(cmabuf);
 	return ERR_PTR(ret);
@@ -181,14 +201,9 @@ bool amdxdna_use_cma(void)
 #endif
 }
 
-int get_cma_mem_index(u64 flags)
+static bool get_cacheable_flag(u64 flags)
 {
-	/*
-	 * Extract lower 8 bits for memory index (0-255 range).
-	 * Valid indexes: 0-15
-	 * Invalid indexes (16-255): trigger fallback to default CMA region
-	 */
-	return flags & 0xFF;
+	return (flags & AMDXDNA_BO_FLAGS_CACHEABLE) != 0;
 }
 
 /**
@@ -197,12 +212,11 @@ int get_cma_mem_index(u64 flags)
  * @max_regions: Maximum number of regions in the array
  * @fallback_dev: Device to use as final fallback (system default CMA)
  * @size: Size of buffer to allocate
- * @flags: Flags containing region index in bits [7:0]
+ * @flags: Cacheable and region index bitmap
  *
  * Attempts allocation in order:
- * 1. Requested region (extracted from flags)
- * 2. Other available initialized regions
- * 3. System default CMA (fallback_dev)
+ * 1. Requested region/s (extracted from flags)
+ * 2. System default CMA (fallback_dev)
  *
  * Return: dma_buf pointer on success, ERR_PTR on failure
  */
@@ -212,28 +226,22 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_d
 						  size_t size, u64 flags)
 {
 	struct dma_buf *dma_buf;
-	int mem_index;
-	int i;
+	bool cacheable;
+	u32 mem_bitmap;
+	unsigned int i;
 
-	mem_index = get_cma_mem_index(flags);
+	cacheable = get_cacheable_flag(flags);
+	mem_bitmap = (u32)(flags & 0xFFULL);
 
-	/* Try requested region first */
-	if (mem_index < max_regions && region_devs[mem_index]) {
-		dma_buf = amdxdna_get_cma_buf(region_devs[mem_index], size);
-		if (!IS_ERR(dma_buf))
-			return dma_buf;
-	}
-
-	/* Try any other available initialized region */
+	/* Try to allocate from the requested region(s) in bitmap order (bit 0, then 1, ...). */
 	for (i = 0; i < max_regions; i++) {
-		if (i == mem_index || !region_devs[i])
-			continue;
-
-		dma_buf = amdxdna_get_cma_buf(region_devs[i], size);
-		if (!IS_ERR(dma_buf))
-			return dma_buf;
+		if ((mem_bitmap & (1U << i)) && region_devs[i]) {
+			dma_buf = amdxdna_get_cma_buf(region_devs[i], size, cacheable);
+			if (!IS_ERR(dma_buf))
+				return dma_buf;
+		}
 	}
 
 	/* Final fallback to system default CMA */
-	return amdxdna_get_cma_buf(fallback_dev, size);
+	return amdxdna_get_cma_buf(fallback_dev, size, cacheable);
 }
