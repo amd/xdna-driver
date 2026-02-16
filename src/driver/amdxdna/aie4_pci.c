@@ -461,7 +461,6 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 		XDNA_DBG(xdna, "id %d", ndev->partition_id);
 }
 
-
 static int aie4_hw_start(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -743,9 +742,8 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 		set_bit(xdna->dev_info->smu_bar, &bars);
 	}
 
-	if (!is_npu3_pf_dev(pdev)) {
+	if (!is_npu3_pf_dev(pdev))
 		set_bit(xdna->dev_info->doorbell_bar, &bars);
-	}
 
 	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
 		if (!test_bit(i, &bars))
@@ -773,7 +771,7 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 
 	pci_set_master(pdev);
 
-	/*TODO: split this to alloc and attach, simliar to work buffer */
+	/*TODO: split this to alloc and attach, same as work buffer */
 	ret = aie4_alloc_work_buffer(ndev);
 	if (ret)
 		goto clear_master;
@@ -1236,7 +1234,7 @@ static int aie4_hw_resume(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
-	
+
 	/* explicitly enable and set pci */
 	ret = pci_enable_device(pdev);
 	if (ret) {
