@@ -9,15 +9,15 @@
 #include <linux/delay.h>
 
 #include "amdxdna_ctx.h"
+#include "ve2_of.h"
+#include "ve2_mgmt.h"
+#include "ve2_res_solver.h"
+#include "amdxdna_error.h"
 
 /* Module parameter: delay in seconds before waking threads on AIE error (for devmem debug) */
 static int aie_error_delay_sec;
 module_param(aie_error_delay_sec, int, 0644);
 MODULE_PARM_DESC(aie_error_delay_sec, "Delay in seconds on AIE error before waking threads (for devmem debug, default=0)");
-#include "ve2_of.h"
-#include "ve2_mgmt.h"
-#include "ve2_res_solver.h"
-#include "amdxdna_error.h"
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
@@ -777,7 +777,7 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 	struct amdxdna_ctx_priv *priv;
 	struct ve2_hsa_queue *hq;
 	struct hsa_queue *queue;
-	struct handshake hs;
+	struct handshake *hs = NULL;
 	int i;
 	int ret;
 
@@ -893,63 +893,69 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 	mutex_unlock(&hq->hq_lock);
 
 	/* Read and dump handshake data from firmware */
-	memset(&hs, 0, sizeof(hs));
-	ret = ve2_partition_read_privileged_mem(priv->aie_dev, 0, 0, sizeof(hs), &hs);
+	hs = kzalloc(sizeof(*hs), GFP_KERNEL);
+	if (!hs) {
+		XDNA_WARN(xdna, "No memory for handshake; skipping handshake/VM dump\n");
+		return;
+	}
+	ret = ve2_partition_read_privileged_mem(priv->aie_dev, 0, 0, sizeof(*hs), hs);
 	if (ret) {
 		XDNA_WARN(xdna,
 			  "Failed to read firmware handshake data (ret=%d); skipping handshake/VM dump\n",
 			  ret);
+		kfree(hs);
 		return;
 	}
 
 	XDNA_WARN(xdna, "Firmware Handshake Data:\n");
-	XDNA_WARN(xdna, "  mpaie_alive:        0x%x %s\n", hs.mpaie_alive,
-		  (hs.mpaie_alive == ALIVE_MAGIC) ? "(ALIVE)" : "(NOT ALIVE!)");
-	XDNA_WARN(xdna, "  partition_base:     0x%x\n", hs.partition_base_address);
-	XDNA_WARN(xdna, "  partition_size:     %u cols\n", hs.aie_info.partition_size);
-	XDNA_WARN(xdna, "  hsa_addr:           0x%x%08x\n", hs.hsa_addr_high, hs.hsa_addr_low);
-	XDNA_WARN(xdna, "  ctx_switch_req:     0x%x\n", hs.ctx_switch_req);
-	XDNA_WARN(xdna, "  cert_idle_status:   0x%x\n", hs.cert_idle_status);
-	XDNA_WARN(xdna, "  misc_status:        0x%x\n", hs.misc_status);
-	XDNA_WARN(xdna, "  completion_status:  0x%x\n", hs.completion_status);
-	XDNA_WARN(xdna, "  doorbell_pending:   %u\n", hs.doorbell_pending);
+	XDNA_WARN(xdna, "  mpaie_alive:        0x%x %s\n", hs->mpaie_alive,
+		  (hs->mpaie_alive == ALIVE_MAGIC) ? "(ALIVE)" : "(NOT ALIVE!)");
+	XDNA_WARN(xdna, "  partition_base:     0x%x\n", hs->partition_base_address);
+	XDNA_WARN(xdna, "  partition_size:     %u cols\n", hs->aie_info.partition_size);
+	XDNA_WARN(xdna, "  hsa_addr:           0x%x%08x\n", hs->hsa_addr_high, hs->hsa_addr_low);
+	XDNA_WARN(xdna, "  ctx_switch_req:     0x%x\n", hs->ctx_switch_req);
+	XDNA_WARN(xdna, "  cert_idle_status:   0x%x\n", hs->cert_idle_status);
+	XDNA_WARN(xdna, "  misc_status:        0x%x\n", hs->misc_status);
+	XDNA_WARN(xdna, "  completion_status:  0x%x\n", hs->completion_status);
+	XDNA_WARN(xdna, "  doorbell_pending:   %u\n", hs->doorbell_pending);
 
 	/* Dump VM state (firmware execution context) */
 	XDNA_WARN(xdna, "Firmware VM State:\n");
-	XDNA_WARN(xdna, "  fw_state:           0x%x\n", hs.vm.fw_state);
-	XDNA_WARN(xdna, "  abs_page_index:     0x%x\n", hs.vm.abs_page_index);
-	XDNA_WARN(xdna, "  ppc:                0x%x\n", hs.vm.ppc);
+	XDNA_WARN(xdna, "  fw_state:           0x%x\n", hs->vm.fw_state);
+	XDNA_WARN(xdna, "  abs_page_index:     0x%x\n", hs->vm.abs_page_index);
+	XDNA_WARN(xdna, "  ppc:                0x%x\n", hs->vm.ppc);
 
 	/* Dump exception info if any */
-	if (hs.exception.ear || hs.exception.esr || hs.exception.pc) {
+	if (hs->exception.ear || hs->exception.esr || hs->exception.pc) {
 		XDNA_WARN(xdna, "Firmware Exception:\n");
-		XDNA_WARN(xdna, "  EAR (addr):         0x%x\n", hs.exception.ear);
-		XDNA_WARN(xdna, "  ESR (status):       0x%x\n", hs.exception.esr);
-		XDNA_WARN(xdna, "  PC:                 0x%x\n", hs.exception.pc);
+		XDNA_WARN(xdna, "  EAR (addr):         0x%x\n", hs->exception.ear);
+		XDNA_WARN(xdna, "  ESR (status):       0x%x\n", hs->exception.esr);
+		XDNA_WARN(xdna, "  PC:                 0x%x\n", hs->exception.pc);
 	}
 
 	/* Dump firmware counters for insight into workload */
 	XDNA_WARN(xdna, "Firmware Counters:\n");
-	XDNA_WARN(xdna, "  c_job_launched:     %u\n", hs.counter.c_job_launched);
-	XDNA_WARN(xdna, "  c_job_finished:     %u\n", hs.counter.c_job_finished);
-	XDNA_WARN(xdna, "  c_hsa_pkt:          %u\n", hs.counter.c_hsa_pkt);
-	XDNA_WARN(xdna, "  c_opcode:           %u\n", hs.counter.c_opcode);
-	XDNA_WARN(xdna, "  c_doorbell:         %u\n", hs.counter.c_doorbell);
-	XDNA_WARN(xdna, "  c_page:             %u\n", hs.counter.c_page);
+	XDNA_WARN(xdna, "  c_job_launched:     %u\n", hs->counter.c_job_launched);
+	XDNA_WARN(xdna, "  c_job_finished:     %u\n", hs->counter.c_job_finished);
+	XDNA_WARN(xdna, "  c_hsa_pkt:          %u\n", hs->counter.c_hsa_pkt);
+	XDNA_WARN(xdna, "  c_opcode:           %u\n", hs->counter.c_opcode);
+	XDNA_WARN(xdna, "  c_doorbell:         %u\n", hs->counter.c_doorbell);
+	XDNA_WARN(xdna, "  c_page:             %u\n", hs->counter.c_page);
 
 	/* Dump DMA addresses for debugging DMA errors */
 	XDNA_WARN(xdna, "Last DMA Addresses:\n");
 	XDNA_WARN(xdna, "  dm2mm:              0x%x%08x\n",
-		  hs.last_ddr_dm2mm_addr_high, hs.last_ddr_dm2mm_addr_low);
+		  hs->last_ddr_dm2mm_addr_high, hs->last_ddr_dm2mm_addr_low);
 	XDNA_WARN(xdna, "  mm2dm:              0x%x%08x\n",
-		  hs.last_ddr_mm2dm_addr_high, hs.last_ddr_mm2dm_addr_low);
+		  hs->last_ddr_mm2dm_addr_high, hs->last_ddr_mm2dm_addr_low);
 
 	/* Dump context save/restore state */
 	XDNA_WARN(xdna, "Context Save State:\n");
-	XDNA_WARN(xdna, "  restore_page_idx:   %u\n", hs.ctx_save.restore_page.page_index);
-	XDNA_WARN(xdna, "  cmd_chain_failure:  %u\n", hs.ctx_save.restore_page.cmd_chain_failure);
+	XDNA_WARN(xdna, "  restore_page_idx:   %u\n", hs->ctx_save.restore_page.page_index);
+	XDNA_WARN(xdna, "  cmd_chain_failure:  %u\n", hs->ctx_save.restore_page.cmd_chain_failure);
 
 	XDNA_WARN(xdna, "=== VE2 DEBUG DUMP END ===\n");
+	kfree(hs);
 }
 
 static void ve2_aie_error_cb(void *arg)
