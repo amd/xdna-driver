@@ -87,6 +87,15 @@ out:
 	return ret;
 }
 
+/*
+ * Aux driver: no memory topology from DT; always use default CMA (mem_bitmap 0).
+ */
+void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+{
+	if (hwctx->priv)
+		hwctx->priv->mem_bitmap = 0;
+}
+
 static int ve2_init(struct amdxdna_dev *xdna)
 {
 	struct device *dev = xdna->ddev.dev;
