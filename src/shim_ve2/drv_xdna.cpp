@@ -31,14 +31,11 @@ void
 drv_xdna::
 scan_devices(std::vector<std::shared_ptr<xrt_core::edge::dev>>& dev_list)
 {
-  // For Ve2 accel device (xdna driver) we search /sys/class/accel/accel* entries
-  // to find the device node for our accel device
-  // We match device tree entry 'telluride_drm'
-  // Checking for AIARM accel device entry by getting accel name from
-  // paths - /sys/class/accel/accel*/device/of_node/name
-  const std::string of_node_name{"telluride_drm"};
+  // For Ve2 accel device (amdxdna auxiliary driver) we search /sys/class/accel/accel*
+  // and match by driver name: device/driver symlink points to .../drivers/amdxdna
+  const std::string driver_name{"amdxdna"};
   const std::string base_path = "/sys/class/accel";
-  const std::string of_node_path = "/device/of_node/name";
+  const std::string driver_link = "/device/driver";
   const std::regex accel_regex("accel.*");
   std::string accel_dev_name;
 
@@ -52,17 +49,11 @@ scan_devices(std::vector<std::shared_ptr<xrt_core::edge::dev>>& dev_list)
     {
       if (fs::is_directory(entry) && std::regex_match(entry.path().filename().string(), accel_regex)) 
       {
-        const std::string accel_file_path = entry.path().string() + of_node_path;
-        if (fs::exists(accel_file_path)) 
+        const std::string driver_path = entry.path().string() + driver_link;
+        if (fs::exists(driver_path) && fs::is_symlink(driver_path))
         {
-          std::ifstream accel_file(accel_file_path);
-          std::string name;
-          std::getline(accel_file, name);
-          // trim \0 at the end for proper comparision
-          if (!name.empty() && name.back() == '\0')
-            name = name.substr(0, name.size() - 1);
-
-          if (name.compare(of_node_name) == 0) 
+          std::string target = fs::read_symlink(driver_path).string();
+          if (target.find(driver_name) != std::string::npos)
           {
             accel_dev_name = entry.path().filename().string();
             break;

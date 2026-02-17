@@ -8,7 +8,7 @@
 
 #include <linux/timekeeping.h>
 #include "amdxdna_error.h"
-#include "amdxdna_of_drv.h"
+#include "amdxdna_aux_drv.h"
 #include "ve2_host_queue.h"
 #include "ve2_fw.h"
 

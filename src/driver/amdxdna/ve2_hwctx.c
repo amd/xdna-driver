@@ -372,9 +372,7 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
 {
 	if (queue->hsa_queue_p) {
-		XDNA_DBG(xdna, "Freeing host queue: dma_addr=0x%llx",
-			 queue->hsa_queue_mem.dma_addr);
-		dma_free_coherent(queue->alloc_dev,
+		dma_free_coherent(xdna->ddev.dev,
 				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
 				  queue->hsa_queue_p,
 				  queue->hsa_queue_mem.dma_addr);
@@ -476,42 +474,16 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 				 struct ve2_hsa_queue *queue)
 {
-	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	int nslots = HOST_QUEUE_ENTRY;
-	struct device *alloc_dev;
 	dma_addr_t dma_handle;
-	size_t alloc_size;
-	unsigned int r;
 
-	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * nslots;
-	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
-
-	/* Allocate from context's CMA region(s); try bitmap order (region 0, 1, ...). */
-	for (r = 0; r < MAX_MEM_REGIONS; r++) {
-		alloc_dev = xdna->cma_region_devs[r];
-		if ((hwctx->priv->mem_bitmap & (1U << r)) && alloc_dev) {
-			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
-								&dma_handle, GFP_KERNEL);
-			if (!queue->hsa_queue_p)
-				continue;
-			queue->alloc_dev = alloc_dev;
-			break;
-		}
-	}
-
-	/* If no allocation succeeded, use the default device */
-	if (!queue->hsa_queue_p) {
-		queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
-							alloc_size,
-							&dma_handle,
-							GFP_KERNEL);
-		if (!queue->hsa_queue_p) {
-			XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu",
-				 alloc_size);
-			return -ENOMEM;
-		}
-		queue->alloc_dev = &pdev->dev;
-	}
+	/* Allocate a single contiguous block of memory */
+	queue->hsa_queue_p = dma_alloc_coherent(xdna->ddev.dev,
+						sizeof(struct hsa_queue) + sizeof(u64) * nslots,
+						&dma_handle,
+						GFP_KERNEL);
+	if (!queue->hsa_queue_p)
+		return -ENOMEM;
 
 	/* Initialize mutex here */
 	mutex_init(&queue->hq_lock);

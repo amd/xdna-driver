@@ -5,7 +5,7 @@
 
 #include <linux/version.h>
 
-#include "amdxdna_of_drv.h"
+#include "amdxdna_aux_drv.h"
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
 #include "ve2_fw.h"

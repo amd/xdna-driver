@@ -170,8 +170,9 @@ void xdna_edgedev::sysfs_get(const std::string& entry, std::string& err_msg,
 std::string
 xdna_edgedev::get_edge_devname()
 {
-  const std::string of_node_name{"telluride_drm"};
+  const std::string driver_name{"amdxdna"};
   const std::string base_path = "/sys/class/accel";
+  const std::string driver_link = "/device/driver";
   const std::regex accel_regex("accel.*");
   std::string accel_devname;
 
@@ -179,12 +180,10 @@ xdna_edgedev::get_edge_devname()
   try {
     for (const auto& entry : fs::directory_iterator(base_path)) {
       if (fs::is_directory(entry) && std::regex_match(entry.path().filename().string(), accel_regex)) {
-        const std::string accel_file_path = entry.path().string() + "/device/of_node/name";
-        if (fs::exists(accel_file_path)) {
-          std::ifstream accel_file(accel_file_path);
-          std::string name;
-          std::getline(accel_file, name);
-          if (name == of_node_name) {
+        const std::string driver_path = entry.path().string() + driver_link;
+        if (fs::exists(driver_path) && fs::is_symlink(driver_path)) {
+          std::string target = fs::read_symlink(driver_path).string();
+          if (target.find(driver_name) != std::string::npos) {
             return entry.path().filename().string();
           }
         }
@@ -192,7 +191,6 @@ xdna_edgedev::get_edge_devname()
     }
   }
   catch (std::exception &e) {
-    // Choosing default accel
     accel_devname = "accel0";
   }
 
