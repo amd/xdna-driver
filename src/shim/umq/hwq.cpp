@@ -3,6 +3,7 @@
 
 #include "hwq.h"
 #include "core/common/trace.h"
+#include <iostream>
 
 namespace {
 
@@ -24,6 +25,11 @@ map_doorbell(const shim_xdna::pdev& pdev, uint32_t doorbell_offset)
   return reinterpret_cast<volatile uint32_t *>(
     pdev.mmap(0, sizeof(uint32_t), PROT_WRITE, MAP_SHARED, doorbell_offset)
     );
+}
+
+inline bool valid_queue_index(uint64_t read, uint64_t write, uint32_t capacity)
+{
+  return (write >= read) && ((write - read) <= capacity);
 }
 
 }
@@ -154,10 +160,17 @@ get_next_avail_slot()
     uint64_t wi = h->write_index;
     uint64_t ri = h->read_index;
 
-    if (wi < ri) {
-      // Invalid queue.
-      dump();
-      shim_err(EINVAL, "UMQ was read before written! read_index=0x%lx, write_index=0x%lx", ri, wi);
+    // CERT cannot update read index atomically. Host may read half-updated read index.
+    // If read bad value, wait for 100us, then retry once.
+    if (!valid_queue_index(ri, wi, h->capacity)) {
+      usleep(100);
+      wi = h->write_index;
+      ri = h->read_index;
+      if (!valid_queue_index(ri, wi, h->capacity)) {
+        // Invalid queue.
+        dump();
+        shim_err(EINVAL, "Invalid UMQ index! read_index=0x%lx, write_index=0x%lx", ri, wi);
+      }
     } else if ((wi - ri) < h->capacity) {
       // Found a slot.
       cur_slot = wi;
@@ -202,7 +215,7 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   if (get_ert_dpu_data_next(dpu))
     fill_indirect_exec_buf(slot_idx, m_umq_hdr->capacity, dpu);
   else
-    fill_direct_exec_buf(slot_idx, dpu); 
+    fill_direct_exec_buf(slot_idx, dpu);
 
   auto pkt = get_pkt(slot_idx);
   auto hdr = &pkt->xrt_header;
@@ -260,7 +273,7 @@ fill_indirect_exec_buf(uint32_t slot_idx, uint32_t total_slots, ert_dpu_data *dp
     hp->uc_index = uci;
 
     auto cebp = &m_umq_indirect_buf[prefix_idx];
-    // do not zero this buffer, the cebp->header is pre-set 
+    // do not zero this buffer, the cebp->header is pre-set
     // set every cebp->payload field in case of garbage data
     cebp->payload.dpu_control_code_host_addr_low =
       static_cast<uint32_t>(dpu->instruction_buffer);
@@ -289,7 +302,7 @@ fill_direct_exec_buf(uint32_t slot_idx, ert_dpu_data *dpu)
   if (pkt_size > sizeof(pkt->data))
     shim_err(EINVAL, "dpu pkt_size=0x%lx > pkt_data max size=%x%lx",
       pkt_size, sizeof(pkt->data));
-  
+
   // zero this buffer
   auto data = const_cast<uint32_t *>(pkt->data);
   std::memset(data, 0, pkt_size);
@@ -373,49 +386,62 @@ int
 hwq_umq::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
-  int ret;
-
   // Call into parent's wait() to block and wait in driver.
-  bool retry = false;
-  do {
+  for (auto retry = true; retry;) {
     try {
-      ret = hwq::wait_command(cmd, timeout_ms);
+      auto ret = hwq::wait_command(cmd, timeout_ms);
       // The timeout_ms expired.
-      if (!ret)
-        return ret;
+      if (ret == 0)
+        return 0;
+      // The cmd is completed.
       retry = false;
     }
     catch (const xrt_core::system_error& ex) {
       if (ex.get_code() == EAGAIN) {
+        // Ctx is being recovered after timeout.
         shim_debug("HW context is not available, retrying");
         sleep(1);
-        retry = true;
       } else {
+        // Bad things happened, just throw.
         throw;
       }
     }
-  } while (retry);
+  }
+  // Nothing needs to be done, if it's already completed.
+  if (hwq::poll_command(cmd))
+      return 1;
 
-  // Command is completed as indicated by driver
+  // Command is completed as indicated by driver, update result.
 
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
 
   // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
-  // driver (KMS + timeout), or by nobody (UMS + timeout). Just return as is.
-  if (cmdpkt->opcode != ERT_CMD_CHAIN)
-    return ret;
+  // driver (KMS + timeout), or by nobody (UMS + timeout).
+  if (cmdpkt->opcode != ERT_CMD_CHAIN) {
+    if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
+      // CERT failed to set error state properly.
+      if (is_driver_cmd_submission()) {
+        // In KMS, it is not expected.
+        shim_err(EINVAL, "Non-chained cmd completed with unexpected state: %u",
+          static_cast<unsigned int>(cmdpkt->state));
+      } else {
+        // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
+        cmdpkt->state = ERT_CMD_STATE_ABORT;
+      }
+    }
+    return 1;
+  }
 
-  // Chained cmd completion
+  // Chained cmd completion. Let's do some sanity check against the state.
 
   // When cmd timed out, in KMS mode, driver will update state (either timeout or abort)
-  // and context health data (in case of timing out).
+  // and context health data (in case of timing out). Nothing needs to be done here.
   if (cmdpkt->state == ERT_CMD_STATE_TIMEOUT || cmdpkt->state == ERT_CMD_STATE_ABORT)
-    return ret;
-
-  // When cmd is completed by CERT normally, in both UMS/KMS mode, driver does not
-  // touch exec buf, so the state must stay as NEW.
-  // When cmd timed out in UMS mode, the state must also stay as NEW.
+    return 1;
+  // When cmd timed out, in UMS mode, the state must stay as NEW.
+  // Or when cmd is completed by CERT normally, in both UMS/KMS mode, driver does not
+  // touch exec buf, so the state must also stay as NEW.
   if (cmdpkt->state != ERT_CMD_STATE_NEW) {
     shim_err(EINVAL, "Runlist exec buf completed with unexpected state: %u",
       static_cast<unsigned int>(cmdpkt->state));
@@ -436,29 +462,42 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
   auto last_cmd_bo = static_cast<const cmd_buffer *>(
     m_pdev.find_bo_by_handle(payload->data[payload->command_count - 1]));
   auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
-  if (last_cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
-    // In UMS, it means the cmd has timed out. In KMS, it is not expected. 
-    shim_err(EINVAL, "Unexpected state in last exec buf: %u",
-      static_cast<unsigned int>(cmdpkt->state));
-  } else if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+  // Most common case, cmd is cmpleted successfully.
+  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
     cmdpkt->state = ERT_CMD_STATE_COMPLETED;
-  } else {
-    // One of the subcmd has failed, discover the failed subcmd index by searching
-    // for the first non-abort subcmd starting from the end of list.
-    for (size_t i = payload->command_count; i > 0; i--) {
-      auto idx = i - 1;
-      auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
-      auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
-      if (subcmd_pkt->state != ERT_CMD_STATE_ABORT) {
-        payload->error_index = idx;
-        cmdpkt->state = subcmd_pkt->state;
-        break;
-      }
+    return 1;
+  }
+
+  // Error case, needs to walk through entire chain to see what happened.
+  for (size_t i = payload->command_count; i > 0; i--) {
+    auto idx = i - 1;
+    auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
+    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
+    auto st = subcmd_pkt->state;
+    if (st != ERT_CMD_STATE_ABORT) {
+      payload->error_index = idx;
+      cmdpkt->state = st;
+      break;
     }
   }
-  if (cmdpkt->state == ERT_CMD_STATE_NEW)
-    shim_err(EINVAL, "Failed to detect runlist exec buf state");
-  return ret;
+
+  if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
+    // CERT failed to set error state properly.
+    if (is_driver_cmd_submission()) {
+      // In KMS, it is not expected.
+      for (size_t j = 0; j < payload->command_count; j++) {
+        auto sc = static_cast<const cmd_buffer *>(
+          m_pdev.find_bo_by_handle(payload->data[j]));
+        auto pkt = reinterpret_cast<ert_packet *>(sc->vaddr());
+        std::cout << "sub-cmd[" << j << "] state=" << pkt->state << std::endl;
+      }
+      shim_err(EINVAL, "Chained cmd completed with unexpected state in subcmds");
+    } else {
+      // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
+      cmdpkt->state = ERT_CMD_STATE_ABORT;
+    }
+  }
+  return 1;
 }
 
 } // shim_xdna

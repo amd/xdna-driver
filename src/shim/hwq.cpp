@@ -114,7 +114,6 @@ wait_command(uint64_t seq, uint32_t timeout_ms) const
 
   int ret = 1;
 
-  shim_debug("Waiting for cmd (%ld)...", seq);
   try {
     wait_cmd_arg wcmd = {
       .timeout_ms = timeout_ms,
@@ -143,9 +142,15 @@ int
 hwq::
 wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
 {
+  // Check status to avoid calling into driver, if it's already completed
+  if (poll_command(cmd))
+      return 1;
+
   auto boh = static_cast<cmd_buffer*>(cmd);
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
   auto seq = boh->wait_for_submitted();
+
+  shim_debug("Waiting for BO %d@%ld...", boh->id().handle, seq);
   return wait_command(seq, timeout_ms);
 }
 
@@ -305,7 +310,7 @@ issue_command(const cmd_buffer *cmd_bo)
     .arg_bos = cmd_bo->get_arg_bo_ids(),
   };
   m_pdev.drv_ioctl(drv_ioctl_cmd::submit_cmd, &ecmd);
-  shim_debug("Submitted command (%ld)", ecmd.seq);
+  shim_debug("Submitted BO %d@%ld", cmd_bo->id().handle, ecmd.seq);
   return ecmd.seq;
 }
 
