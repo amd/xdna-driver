@@ -1276,6 +1276,7 @@ struct telemetry
 
       auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
 
+      // One full task per supervisor slot (hypervisor + supervisors)
       for (auto i = 0; i < AIE4_MAX_NUM_SUPERVISORS + 1; i++) {
         xrt_core::query::rtos_telemetry::data task;
 
@@ -1294,10 +1295,27 @@ struct telemetry
         task.dtlbs = std::vector<xrt_core::query::rtos_telemetry::dtlb_data>();
         task.preemption_data.slot_index = i;
         task.preemption_data.preemption_checkpoint_event =
-          (i < AIE4_TOTAL_NUM_UC) ? fw_telemetry->preemption_checkpoint_event_counter[i] : 0;
+          fw_telemetry->preemption_checkpoint_event_counter[i];
         task.preemption_data.preemption_frame_boundary_events =
-          (i < AIE4_TOTAL_NUM_UC) ? fw_telemetry->preemption_frame_boundary_counter[i] : 0;
+          fw_telemetry->preemption_frame_boundary_counter[i];
 
+        output.push_back(std::move(task));
+      }
+
+      // Add preemption-only entries for remaining UCs
+      for (auto i = AIE4_MAX_NUM_SUPERVISORS + 1; i < AIE4_TOTAL_NUM_UC; i++) {
+        xrt_core::query::rtos_telemetry::data task;
+        task.context_starts = 0;
+        task.schedules = 0;
+        task.syscalls = 0;
+        task.dma_access = 0;
+        task.resource_acquisition = 0;
+        task.dtlbs = std::vector<xrt_core::query::rtos_telemetry::dtlb_data>();
+        task.preemption_data.slot_index = i;
+        task.preemption_data.preemption_checkpoint_event =
+          fw_telemetry->preemption_checkpoint_event_counter[i];
+        task.preemption_data.preemption_frame_boundary_events =
+          fw_telemetry->preemption_frame_boundary_counter[i];
         output.push_back(std::move(task));
       }
       return output;
