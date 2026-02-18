@@ -655,7 +655,7 @@ TEST_open_close_cu_context(device::id_type id, std::shared_ptr<device>& sdev, ar
   auto dev = sdev.get();
   hw_ctx hwctx{dev};
 
-  for (auto& ip : get_xclbin_ip_name2index(dev)) {
+  for (auto& ip : get_binary_ip_name2index(dev)) {
     auto idx = hwctx.get()->open_cu_context(ip.first);
     hwctx.get()->close_cu_context(idx);
     auto r = idx.index;
@@ -779,10 +779,6 @@ std::vector<test_case> test_list {
   test_case{ "io test async error", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_io, {}
   },
-  // Wait for TDR implementation
-  // test_case{ "io test async error (aie4)", {},
-    //TEST_POSITIVE, dev_filter_is_aie4, TEST_async_error_aie4_io, {}
-  //},
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
@@ -790,18 +786,11 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel latency (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "measure real kernel latency", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  //Skip this test for now until b2b vadd is fixed
-  //test_case{ "measure real kernel latency (aie4)", {},
-    //TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
-  //},
   test_case{ "create and free debug bo", {-1, -1},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x1000 }
   },
@@ -812,10 +801,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "measure no-op kernel throughput command", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel throughput (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "export import BO", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
@@ -830,40 +816,22 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
   },
   test_case{ "measure no-op kernel latency chained command", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel latency chained command (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "measure no-op kernel throughput chained command", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel throughput chained command (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "measure no-op kernel latency (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel latency (polling) (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
   test_case{ "measure no-op kernel throughput (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel throughput (polling) (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
   test_case{ "measure no-op kernel latency chained command (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel latency chained command (polling) (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
   test_case{ "measure no-op kernel throughput chained command (polling)", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 0 }
-  },
-  test_case{ "measure no-op kernel throughput chained command (polling) (aie4)", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000, 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
   test_case{ "Cmd fencing (driver side)", {-1, -1},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}

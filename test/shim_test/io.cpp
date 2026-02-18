@@ -252,11 +252,12 @@ init_cmd(hw_ctx& hwctx, bool dump)
 }
 
 io_test_bo_set_base::
-io_test_bo_set_base(device* dev, const std::string& xclbin_name) :
+io_test_bo_set_base(device* dev, const std::string& tag, const flow_type* flow) :
   m_bo_array{}
-  , m_xclbin_name(xclbin_name)
-  , m_local_data_path(get_xclbin_data(dev, xclbin_name.c_str()))
+  , m_tag(tag)
+  , m_local_data_path(get_binary_data(dev, tag.empty() ? nullptr : tag.c_str(), flow))
   , m_dev(dev)
+  , m_flow(flow)
   , m_kernel_index(elf_int::no_ctrl_code_id)
 {
 }
@@ -265,7 +266,7 @@ void
 io_test_bo_set_base::
 create_data_bo_from_file(io_test_bo& ibo, const std::string filename, int flags)
 {
-  auto file = m_local_data_path + "/" + filename;
+  auto file = m_local_data_path + filename;
   auto size = get_bin_size(file);
   bool ubuf = !!(flags & m_FLAG_USR_BUF);
   bool dbuf = !!(flags & m_FLAG_DEV_BUF);
@@ -299,7 +300,7 @@ xrt_core::cuidx_type
 io_test_bo_set_base::
 get_cu_idx(hw_ctx& hwctx)
 {
-  auto kernel = get_kernel_name(m_dev, m_xclbin_name.c_str());
+  auto kernel = get_kernel_name(m_dev, m_tag.empty() ? nullptr : m_tag.c_str(), m_flow);
   if (kernel.empty())
     throw std::runtime_error("No kernel found");
   auto cu_idx = hwctx.get()->open_cu_context(kernel);
@@ -308,8 +309,8 @@ get_cu_idx(hw_ctx& hwctx)
 }
 
 io_test_bo_set::
-io_test_bo_set(device* dev, const std::string& xclbin_name, bool use_ubuf) :
-  io_test_bo_set_base(dev, xclbin_name)
+io_test_bo_set(device* dev, const std::string& tag, bool use_ubuf, const flow_type* flow) :
+  io_test_bo_set_base(dev, tag, flow)
 {
   std::string file;
   auto tp = parse_config_file(m_local_data_path + config_file);
@@ -359,27 +360,27 @@ io_test_bo_set(device* dev, const std::string& xclbin_name, bool use_ubuf) :
 }
 
 io_test_bo_set::
-io_test_bo_set(device* dev) : io_test_bo_set(dev, get_xclbin_name(dev), false)
+io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow) : io_test_bo_set(dev, tag, false, flow)
 {
 }
 
 io_test_bo_set::
-io_test_bo_set(device* dev, bool use_ubuf) : io_test_bo_set(dev, get_xclbin_name(dev), use_ubuf)
+io_test_bo_set(device* dev, bool use_ubuf) : io_test_bo_set(dev, "", use_ubuf, nullptr)
 {
 }
 
 elf_io_test_bo_set::
-elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
-  io_test_bo_set_base(dev, xclbin_name)
+elf_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow) :
+  io_test_bo_set_base(dev, tag, flow)
 {
   // Find elf with the same name as xclbin file
-  std::filesystem::path elf_path(get_xclbin_path(dev, xclbin_name.c_str()));
+  std::filesystem::path elf_path(get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), m_flow));
   elf_path.replace_extension(".elf");
 
   if (std::filesystem::exists(elf_path))
     m_elf = xrt::elf(elf_path);
   else
-    m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
+    m_elf = txn_file2elf(m_local_data_path + "ml_txn.bin", m_local_data_path + "pm_ctrlpkt.bin");
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -412,13 +413,13 @@ elf_io_test_bo_set(device* dev, const std::string& xclbin_name) :
 }
 
 elf_full_io_test_bo_set::
-elf_full_io_test_bo_set(device* dev, const std::string& xclbin_name)
-  : io_test_bo_set_base(dev, xclbin_name)
+elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow)
+  : io_test_bo_set_base(dev, tag, flow)
 {
-  auto elf_path = get_xclbin_path(dev, xclbin_name.c_str());
+  auto elf_path = get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), m_flow);
   m_elf = xrt::elf(elf_path);
   auto mod = xrt::module{m_elf};
-  auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+  auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), m_flow);
 
   try {
     m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
@@ -453,19 +454,19 @@ elf_full_io_test_bo_set(device* dev, const std::string& xclbin_name)
 }
 
 elf_preempt_io_test_bo_set::
-elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
-  : io_test_bo_set_base(dev, xclbin_name)
-  , m_is_full_elf(get_kernel_type(dev, xclbin_name.c_str()) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT)
-  , m_total_fine_preemption_checkpoints(get_fine_preemption_checkpoints(m_local_data_path + "/ml_txn.bin"))
+elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow)
+  : io_test_bo_set_base(dev, tag, flow)
+  , m_is_full_elf(get_flow_type(dev, tag.empty() ? nullptr : tag.c_str(), m_flow) == PREEMPT_FULL_ELF)
+  , m_total_fine_preemption_checkpoints(get_fine_preemption_checkpoints(m_local_data_path + "ml_txn.bin"))
 {
-  std::string file;
+  const char* tag_c = tag.empty() ? nullptr : tag.c_str();
 
   if (m_is_full_elf) {
-    m_elf = xrt::elf(get_xclbin_path(dev, xclbin_name.c_str()));
+    m_elf = xrt::elf(get_binary_path(dev, tag_c, m_flow));
     auto mod = xrt::module{m_elf};
-    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(get_kernel_name(dev, xclbin_name.c_str()));
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(get_kernel_name(dev, tag_c, m_flow));
   } else {
-    m_elf = txn_file2elf(m_local_data_path + "/ml_txn.bin", m_local_data_path + "/pm_ctrlpkt.bin");
+    m_elf = txn_file2elf(m_local_data_path + "ml_txn.bin", m_local_data_path + "pm_ctrlpkt.bin");
     m_kernel_index = elf_int::no_ctrl_code_id;
   }
 
@@ -506,10 +507,10 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& xclbin_name)
       // Only support mem tile size for NPU4
       const size_t mem_tile_sz = 512 * 1024;
 
-      if (get_kernel_type(dev, xclbin_name.c_str()) == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT)
+      if (get_flow_type(dev, tag_c, m_flow) == PREEMPT_FULL_ELF)
         size = mem_tile_sz * get_column_size(m_elf);
       else
-        size = mem_tile_sz * get_column_size(xrt::xclbin(get_xclbin_path(dev, xclbin_name.c_str())));
+        size = mem_tile_sz * get_column_size(xrt::xclbin(get_binary_path(dev, tag_c, m_flow)));
       alloc_data_bo(ibo, m_dev, size, false);
       break;
     }
@@ -826,9 +827,9 @@ verify_result()
 
   std::vector<char> buf_ofm_golden(sz);
   auto ofm_golden_p = reinterpret_cast<char*>(buf_ofm_golden.data());
-  read_data_from_bin(m_local_data_path + "/ofm.bin", 0, sz, reinterpret_cast<int*>(ofm_golden_p));
+  read_data_from_bin(m_local_data_path + "ofm.bin", 0, sz, reinterpret_cast<int*>(ofm_golden_p));
 
-  auto [ valid_per_sec, sec_size, total_size ] = get_ofm_format(m_local_data_path + "/ofm_format.ini");
+  auto [ valid_per_sec, sec_size, total_size ] = get_ofm_format(m_local_data_path + "ofm_format.ini");
   if (total_size == 0)
     valid_per_sec = sec_size = total_size = sz;
   size_t count = 0;
@@ -935,7 +936,7 @@ io_test_bo_set_base::
 run(const std::vector<fence_handle*>& wait_fences,
   const std::vector<fence_handle*>& signal_fences, bool no_check_result)
 {
-  hw_ctx hwctx{m_dev, m_xclbin_name.c_str()};
+  hw_ctx hwctx{m_dev, m_tag.empty() ? nullptr : m_tag.c_str(), m_flow};
   auto hwq = hwctx.get()->get_hw_queue();
 
   init_cmd(hwctx, false);
@@ -1014,7 +1015,7 @@ m_shim_event_err_num_map = {
 
 async_error_io_test_bo_set::
 async_error_io_test_bo_set(device* dev)
-  : m_last_err_timestamp(0), io_test_bo_set_base(dev, get_xclbin_name(dev))
+  : m_last_err_timestamp(0), io_test_bo_set_base(dev, "", nullptr)
 {
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -1100,13 +1101,13 @@ verify_result()
 }
 
 async_error_aie4_io_test_bo_set::
-async_error_aie4_io_test_bo_set(device* dev, const std::string& xclbin_name)
-  : m_expect_err_code(0), m_last_err_timestamp(0), io_test_bo_set_base(dev, xclbin_name)
+async_error_aie4_io_test_bo_set(device* dev, const std::string& tag)
+  : m_expect_err_code(0), m_last_err_timestamp(0), io_test_bo_set_base(dev, tag, nullptr)
 {
-  auto elf_path = get_xclbin_path(dev, xclbin_name.c_str());
+  auto elf_path = get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), m_flow);
   m_elf = xrt::elf(elf_path);
   auto mod = xrt::module{m_elf};
-  auto kernel_name = get_kernel_name(dev, xclbin_name.c_str());
+  auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), m_flow);
 
   try {
     m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);

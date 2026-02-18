@@ -3,16 +3,25 @@
 
 #include "dev_info.h"
 
-// Test program location, all workspace paths below are relative to it
+// Test program location, all paths below are relative to it
 extern std::string cur_path;
 // Force to use xclbin pointed to by this path
 extern std::string xclbin_path;
 
 namespace {
 
-xclbin_info xclbin_infos[] = {
+static std::string
+dirname_of(const std::string& path)
+{
+  auto pos = path.find_last_of('/');
+  if (pos == std::string::npos)
+    return ".";
+  return path.substr(0, pos);
+}
+
+binary_info binary_infos[] = {
   {
-    .name = "1x4.xclbin",
+    .tag = "good",
     .device = npu1_device_id,
     .revision_id = npu1_revision_id,
     .ip_name2idx = {
@@ -25,11 +34,12 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_6:IPUV1CNN",         {6} },
       { "DPU_PDI_7:IPUV1CNN",         {7} },
     },
-    .workspace = "npu1_workspace",
+    .path = "npu1_workspace/1x4.xclbin",
     .data = "data",
+    .flow = LEGACY,
   },
   {
-    .name = "1x4.xclbin",
+    .tag = "good",
     .device = npu1_device_id1,
     .revision_id = npu1_revision_id1,
     .ip_name2idx = {
@@ -42,77 +52,72 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_6:IPUV1CNN",         {6} },
       { "DPU_PDI_7:IPUV1CNN",         {7} },
     },
-    .workspace = "npu1_workspace",
+    .path = "npu1_workspace/1x4.xclbin",
     .data = "data",
+    .flow = LEGACY,
   },
   {
-    .name = "vadd.elf",
+    .tag = "good",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3/vadd",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF,
+    .path = "local_shim_test_data/npu3/vadd/vadd.elf",
+    .flow = FULL_ELF,
   },
   {
-    .name = "bad_ctrl.elf",
+    .tag = "bad",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3/bad_ctrl",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF,
+    .path = "local_shim_test_data/npu3/bad/bad_timeout.elf",
+    .flow = FULL_ELF,
   },
   {
-    .name = "nop.elf",
+    .tag = "nop",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3/nop",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF,
+    .path = "local_shim_test_data/npu3/nop/nop.elf",
+    .flow = FULL_ELF,
   },
   {
-    .name = "vadd.elf",
+    .tag = "good",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3a/vadd",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF,
+    .path = "local_shim_test_data/npu3a/vadd/vadd.elf",
+    .flow = FULL_ELF,
   },
   {
-    .name = "bad_ctrl.elf",
+    .tag = "bad",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3a/bad_ctrl",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF,
+    .path = "local_shim_test_data/npu3a/bad/bad_timeout.elf",
+    .flow = FULL_ELF,
   },
   {
-    .name = "nop.elf",
+    .tag = "nop",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .workspace = "local_shim_test_data/npu3a/nop",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF,
+    .path = "local_shim_test_data/npu3a/nop/nop.elf",
+    .flow = FULL_ELF,
   },
   {
-    .name = "1x4.xclbin",
+    .tag = "good",
     .device = npu4_device_id,
     .revision_id = npu4_revision_id,
     .ip_name2idx = {
@@ -126,16 +131,17 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_7:IPUV1CNN",         {7} },
       { "DPU_PDI_8:IPUV1CNN",         {8} },
       { "DPU_PDI_9:IPUV1CNN",         {9} },
-      { "DPU_PDI_10:IPUV1CNN",         {10} },
-      { "DPU_PDI_11:IPUV1CNN",         {11} },
-      { "DPU_PDI_12:IPUV1CNN",         {12} },
-      { "DPU_PDI_13:IPUV1CNN",         {13} },
+      { "DPU_PDI_10:IPUV1CNN",        {10} },
+      { "DPU_PDI_11:IPUV1CNN",        {11} },
+      { "DPU_PDI_12:IPUV1CNN",        {12} },
+      { "DPU_PDI_13:IPUV1CNN",        {13} },
     },
-    .workspace = "npu4_workspace",
+    .path = "npu4_workspace/1x4.xclbin",
     .data = "data",
+    .flow = LEGACY,
   },
   {
-    .name = "1x4.xclbin",
+    .tag = "good",
     .device = npu4_device_id,
     .revision_id = npu5_revision_id,
     .ip_name2idx = {
@@ -154,11 +160,12 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_12:IPUV1CNN",        {12} },
       { "DPU_PDI_13:IPUV1CNN",        {13} },
     },
-    .workspace = "npu5_workspace",
+    .path = "npu5_workspace/1x4.xclbin",
     .data = "data",
+    .flow = LEGACY,
   },
   {
-    .name = "1x4.xclbin",
+    .tag = "good",
     .device = npu4_device_id,
     .revision_id = npu6_revision_id,
     .ip_name2idx = {
@@ -177,161 +184,150 @@ xclbin_info xclbin_infos[] = {
       { "DPU_PDI_12:IPUV1CNN",         {12} },
       { "DPU_PDI_13:IPUV1CNN",         {13} },
     },
-    .workspace = "npu6_workspace",
+    .path = "npu6_workspace/1x4.xclbin",
     .data = "data",
+    .flow = LEGACY,
   },
   {
-    .name = "design.xclbin",
+    .tag = "good",
     .device = npu1_device_id,
     .revision_id = npu1_revision_id,
     .ip_name2idx = {
       { "DPU_ELF:IPUV1CNN", {9} },
     },
-    .workspace = "local_shim_test_data/elf_txn_no_cp_npu1",
-    .data = "",
-    .type = KERNEL_TYPE_TXN,
+    .path = "local_shim_test_data/npu1/partial_elf/design.xclbin",
+    .flow = PARTIAL_ELF,
   },
   {
-    .name = "design.xclbin",
+    .tag = "good",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {1} },
     },
-    .workspace = "local_shim_test_data/elf_txn_no_cp_npu4",
-    .data = "",
-    .type = KERNEL_TYPE_TXN,
+    .path = "local_shim_test_data/npu4/partial_elf/design.xclbin",
+    .flow = PARTIAL_ELF,
   },
   {
-    .name = "pm_reload.xclbin",
+    .tag = "good",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {1} },
     },
-    .workspace = "local_shim_test_data/elf_txn_preempt_no_cp_npu4",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_PREEMPT,
+    .path = "local_shim_test_data/npu4/preempt_partial_elf/pm_reload.xclbin",
+    .flow = PREEMPT_PARTIAL_ELF,
   },
   {
-    .name = "yolo_fullelf_aximm.elf",
+    .tag = "good",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} }, // CU index is not needed for full ELF
     },
-    .workspace = "local_shim_test_data/xclbin2elf_preempt_tinyyolo_npu4",
-    .data = "",
-    .type = KERNEL_TYPE_TXN_FULL_ELF_PREEMPT,
+    .path = "local_shim_test_data/npu4/preempt_full_elf/yolo_fullelf_aximm.elf",
+    .flow = PREEMPT_FULL_ELF,
   },
   {
-    .name = "bad_txn.xclbin",
+    .tag = "bad",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {0} },
     },
-    .workspace = "local_shim_test_data/elf_no_cp_bad_txn_npu4",
-    .data = "",
-    .type = KERNEL_TYPE_TXN,
+    .path = "local_shim_test_data/npu4/bad/bad_txn.xclbin",
+    .flow = PARTIAL_ELF,
   },
   {
-    .name = "gemm.xclbin",
+    .tag = "gemm",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {0} },
     },
-    .workspace = "local_shim_test_data/elf_no_cp_gemm_npu4",
-    .data = "",
-    .type = KERNEL_TYPE_TXN,
+    .path = "local_shim_test_data/npu4/gemm/gemm.xclbin",
+    .flow = PARTIAL_ELF,
   },
   {
-    .name = "nop.xclbin",
+    .tag = "nop",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {1} },
     },
-    .workspace = "local_shim_test_data/elf_no_op_npu4",
-    .data = "",
-    .type = KERNEL_TYPE_TXN,
+    .path = "local_shim_test_data/npu4/nop/nop.xclbin",
+    .flow = PARTIAL_ELF,
   },
   {
-    .name = "nop.xclbin",
+    .tag = "nop",
     .device = npu1_device_id,
     .revision_id = npu1_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {1} },
     },
-    .workspace = "local_shim_test_data/elf_no_op_npu1",
-    .data = "",
-    .type = KERNEL_TYPE_TXN,
+    .path = "local_shim_test_data/npu1/nop/nop.xclbin",
+    .flow = PARTIAL_ELF,
   },
 
 };
 
 }
 
-const xclbin_info&
-get_xclbin_info(device* dev, const char *xclbin_name)
+const binary_info&
+get_binary_info(device* dev, const char* tag, const flow_type* flow)
 {
   auto pci_dev_id = device_query<query::pcie_device>(dev);
   auto revision_id = device_query<query::pcie_id>(dev).revision_id;
-  for (auto& xclbin : xclbin_infos) {
-    if ((xclbin.device == pci_dev_id) &&
-        ((xclbin.revision_id == revision_id) || (xclbin.revision_id == npu_any_revision_id)) &&
-        (xclbin_name == nullptr || !strcmp(xclbin.name, xclbin_name)))
-      return xclbin;
+  bool match_tag = (tag == nullptr || tag[0] == '\0');
+  bool match_flow = (flow == nullptr);
+  for (auto& bin : binary_infos) {
+    if ((bin.device == pci_dev_id) &&
+        ((bin.revision_id == revision_id) || (bin.revision_id == npu_any_revision_id)) &&
+        (match_tag || (bin.tag && !strcmp(bin.tag, tag))) &&
+        (match_flow || (bin.flow == *flow)))
+      return bin;
   }
-  throw std::runtime_error("xclbin info not found");
+  throw std::runtime_error("binary info not found");
 }
 
 std::string
-get_xclbin_name(device* dev)
-{
-  return get_xclbin_info(dev).name;
-}
-
-std::string
-get_kernel_name(device* dev, const char *xclbin)
-{
-  return get_xclbin_info(dev, xclbin).ip_name2idx.begin()->first;
-}
-
-kernel_type
-get_kernel_type(device* dev, const char *xclbin)
-{
-  return get_xclbin_info(dev, xclbin).type;
-}
-
-static std::string
-get_xclbin_workspace(device* dev, const char *xclbin_name)
-{
-  return cur_path + "/../" + get_xclbin_info(dev, xclbin_name).workspace + "/";
-}
-
-std::string
-get_xclbin_data(device* dev, const char *xclbin_name)
-{
-  auto wrk = get_xclbin_workspace(dev, xclbin_name);
-  return wrk + get_xclbin_info(dev, xclbin_name).data + "/";
-}
-
-std::string
-get_xclbin_path(device* dev, const char *xclbin_name)
+get_binary_path(device* dev, const char* tag, const flow_type* flow)
 {
   if (!xclbin_path.empty())
     return xclbin_path;
+  return cur_path + "/../" + get_binary_info(dev, tag, flow).path;
+}
 
-  auto wrk = get_xclbin_workspace(dev, xclbin_name);
-  if (!xclbin_name)
-    return wrk + get_xclbin_name(dev);
-  return wrk + std::string(xclbin_name);
+std::string
+get_kernel_name(device* dev, const char* tag, const flow_type* flow)
+{
+  return get_binary_info(dev, tag, flow).ip_name2idx.begin()->first;
+}
+
+flow_type
+get_flow_type(device* dev, const char* tag, const flow_type* flow)
+{
+  return get_binary_info(dev, tag, flow).flow;
+}
+
+static std::string
+get_binary_workspace_dir(device* dev, const char* tag, const flow_type* flow)
+{
+  const auto& info = get_binary_info(dev, tag, flow);
+  return cur_path + "/../" + dirname_of(info.path) + "/";
+}
+
+std::string
+get_binary_data(device* dev, const char* tag, const flow_type* flow)
+{
+  const auto& info = get_binary_info(dev, tag, flow);
+  if (info.data.empty())
+    return get_binary_workspace_dir(dev, tag, flow);
+  return get_binary_workspace_dir(dev, tag, flow) + info.data + "/";
 }
 
 const std::map<const char*, cuidx_type>&
-get_xclbin_ip_name2index(device* dev, const char *xclbin_name)
+get_binary_ip_name2index(device* dev, const char* tag, const flow_type* flow)
 {
-  return get_xclbin_info(dev, xclbin_name).ip_name2idx;
+  return get_binary_info(dev, tag, flow).ip_name2idx;
 }

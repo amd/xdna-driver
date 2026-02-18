@@ -15,9 +15,9 @@ using namespace xrt_core;
 
 class hw_ctx {
 public:
-  hw_ctx(device* dev, const char *xclbin_name=nullptr)
+  hw_ctx(device* dev, const char *tag = nullptr, const flow_type* flow = nullptr)
   {
-    hw_ctx_init(dev, xclbin_name);
+    hw_ctx_init(dev, tag, flow);
   }
 
   hwctx_handle *
@@ -30,14 +30,13 @@ private:
   std::unique_ptr<hwctx_handle> m_handle;
 
   void
-  hw_ctx_init(device* dev, const char *xclbin_name)
+  hw_ctx_init(device* dev, const char *tag, const flow_type* flow)
   {
     xrt::xclbin xclbin;
     xrt::elf elf;
-    auto kernel_type = get_kernel_type(dev, xclbin_name);
-    auto is_full_elf = (kernel_type == KERNEL_TYPE_TXN_FULL_ELF_PREEMPT ||
-		        kernel_type == KERNEL_TYPE_TXN_FULL_ELF);
-    auto path = get_xclbin_path(dev, xclbin_name);
+    auto resolved_flow = get_flow_type(dev, tag, flow);
+    auto is_full_elf = (resolved_flow == PREEMPT_FULL_ELF || resolved_flow == FULL_ELF);
+    auto path = get_binary_path(dev, tag, flow);
 
     try {
       if (is_full_elf)
