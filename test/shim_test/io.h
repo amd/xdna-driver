@@ -38,7 +38,7 @@ struct io_test_bo {
 class io_test_bo_set_base
 {
 public:
-  io_test_bo_set_base(device *dev, const std::string& xclbin_name);
+  io_test_bo_set_base(device *dev, const std::string& tag = "", const flow_type* flow = nullptr);
   virtual ~io_test_bo_set_base()
   {
     // Do nothing, but allow destructor of inherited class to be called when destruction
@@ -84,9 +84,10 @@ public:
 
 protected:
   std::array<io_test_bo, IO_TEST_BO_MAX_TYPES> m_bo_array;
-  const std::string m_xclbin_name;
+  const std::string m_tag;
   const std::string m_local_data_path;
   device *m_dev;
+  const flow_type* m_flow = nullptr;  /* nullptr = lookup by tag/default only; non-null = lookup by tag + flow */
   xrt::elf m_elf = {};
   uint32_t m_kernel_index;
   uint32_t m_cached_header = 0;
@@ -112,8 +113,8 @@ private:
 class io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  io_test_bo_set(device *dev, const std::string& xclbin_name, bool use_ubuf);
-  io_test_bo_set(device *dev);
+  io_test_bo_set(device *dev, const std::string& tag = "", bool use_ubuf = false, const flow_type* flow = nullptr);
+  io_test_bo_set(device *dev, const std::string& tag, const flow_type* flow);
   io_test_bo_set(device *dev, bool use_ubuf);
 
   void
@@ -126,7 +127,7 @@ public:
 class elf_io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_test_bo_set(device *dev, const std::string& xclbin_name);
+  elf_io_test_bo_set(device *dev, const std::string& tag = "", const flow_type* flow = nullptr);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -135,7 +136,7 @@ public:
 class elf_full_io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_full_io_test_bo_set(device *dev, const std::string& xclbin_name);
+  elf_full_io_test_bo_set(device *dev, const std::string& tag = "", const flow_type* flow = nullptr);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -144,7 +145,7 @@ public:
 class elf_preempt_io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_preempt_io_test_bo_set(device *dev, const std::string& xclbin_name);
+  elf_preempt_io_test_bo_set(device *dev, const std::string& tag = "", const flow_type* flow = nullptr);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -160,7 +161,7 @@ private:
 class elf_io_negative_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_negative_test_bo_set(device *dev, const std::string& xclbin_name,
+  elf_io_negative_test_bo_set(device *dev, const std::string& tag,
     const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx);
 
   void
@@ -194,7 +195,7 @@ private:
 class async_error_aie4_io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  async_error_aie4_io_test_bo_set(device *dev, const std::string& xclbin_name);
+  async_error_aie4_io_test_bo_set(device *dev, const std::string& tag);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -210,7 +211,7 @@ private:
 class elf_io_gemm_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_gemm_test_bo_set(device *dev, const std::string& xclbin_name,
+  elf_io_gemm_test_bo_set(device *dev, const std::string& tag,
     const std::string& elf_name);
 
   void
