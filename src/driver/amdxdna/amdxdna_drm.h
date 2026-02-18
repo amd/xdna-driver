@@ -204,6 +204,7 @@ struct amdxdna_client {
 
 	struct iommu_sva		*sva;
 	int				pasid;
+	struct mm_struct		*mm;
 
 	struct amdxdna_stats		stats;
 };

@@ -48,6 +48,8 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 			ret = -ENODEV;
 			goto unbind_sva;
 		}
+		client->mm = current->mm;
+		mmgrab(client->mm);
 	}
 #ifdef AMDXDNA_DEVEL
 skip_sva_bind:
@@ -96,8 +98,10 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_sva_unbind;
 #endif
-	if (!IS_ERR_OR_NULL(client->sva))
+	if (!IS_ERR_OR_NULL(client->sva)) {
 		iommu_sva_unbind_device(client->sva);
+		mmdrop(client->mm);
+	}
 #ifdef AMDXDNA_DEVEL
 skip_sva_unbind:
 #endif
