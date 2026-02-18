@@ -19,8 +19,6 @@ static int aie_error_delay_sec;
 module_param(aie_error_delay_sec, int, 0644);
 MODULE_PARM_DESC(aie_error_delay_sec, "Delay in seconds on AIE error before waking threads (for devmem debug, default=0)");
 
-extern int enable_debug_queue;
-
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 				     struct amdxdna_ctx *hwctx,
 				     struct xrs_action_load *load_act);
