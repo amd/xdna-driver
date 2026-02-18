@@ -123,6 +123,7 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 	umq_va = amdxdna_gem_vmap(umq_bo);
 	qhdr = umq_va;
 	priv->umq_read_index = &qhdr->read_index;
+	priv->umq_write_index = &qhdr->write_index;
 
 	if (kernel_mode_submission == NO_KMS)
 		return 0;
@@ -136,7 +137,6 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 	 * and should not be read and used by driver at any time with below exceptions:
 	 *   - read index: to tell if a command has been completed or not.
 	 */
-	priv->umq_write_index = &qhdr->write_index;
 	priv->umq_pkts = umq_va + sizeof(*qhdr);
 	priv->umq_indirect_pkts = umq_va + sizeof(*qhdr) + pkts_sz;
 	priv->umq_indirect_pkts_dev_addr =
@@ -329,9 +329,9 @@ static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
 
 static inline u64 get_read_index(struct amdxdna_ctx *ctx)
 {
+	u64 wi = READ_ONCE(*ctx->priv->umq_write_index);
 	u64 ri = READ_ONCE(*ctx->priv->umq_read_index);
 	struct amdxdna_dev *xdna = ctx->client->xdna;
-	u64 wi = ctx->priv->write_index;
 
 	/*
 	 * CERT cannot update read index atomically. Driver may read half-updated
@@ -997,6 +997,7 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 	else if (col_entry && col_entry->needs_reset)
 		ret = -EAGAIN;
 
+	trace_amdxdna_debug_point(ctx->name, seq, "command wait done");
 	return ret <= 0 ? ret : 0;
 }
 
