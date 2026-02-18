@@ -67,6 +67,7 @@ int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 		return PTR_ERR(iova);
 	}
 
+	pr_info("MAP SGT NUM ENTRY %d\n", sgt->nents);
 	size = iommu_map_sgtable(xdna->domain, dma_addr, sgt,
 				 IOMMU_READ | IOMMU_WRITE);
 	if (size < abo->mem.size) {
@@ -171,6 +172,7 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 	ret = iommu_attach_group(xdna->domain, xdna->group);
 	if (ret)
 		goto put_iova;
+	pr_info("IOVA DOMAIN ENABLED\n");
 
 	return 0;
 
