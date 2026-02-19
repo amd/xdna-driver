@@ -476,7 +476,6 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 				 struct ve2_hsa_queue *queue)
 {
-	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
 	int nslots = HOST_QUEUE_ENTRY;
 	struct device *alloc_dev;
 	dma_addr_t dma_handle;
@@ -501,7 +500,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 
 	/* If no allocation succeeded, use the default device */
 	if (!queue->hsa_queue_p) {
-		queue->hsa_queue_p = dma_alloc_coherent(&pdev->dev,
+		queue->hsa_queue_p = dma_alloc_coherent(xdna->ddev.dev,
 							alloc_size,
 							&dma_handle,
 							GFP_KERNEL);
@@ -510,7 +509,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 				 alloc_size);
 			return -ENOMEM;
 		}
-		queue->alloc_dev = &pdev->dev;
+		queue->alloc_dev = xdna->ddev.dev;
 	}
 
 	/* Initialize mutex here */

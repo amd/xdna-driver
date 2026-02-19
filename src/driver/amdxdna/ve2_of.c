@@ -7,7 +7,6 @@
 #include <linux/firmware.h>
 #include <linux/xlnx-ai-engine.h>
 #include <linux/of_reserved_mem.h>
-#include <linux/of_address.h>
 
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
@@ -19,7 +18,6 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	struct aie_partition_req request;
 	const struct firmware *fw;
 	struct device *xaie_dev;
-	size_t buf_len;
 	char *buf;
 	int ret;
 
@@ -39,14 +37,13 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 		return -ENOMEM;
 	}
 	memcpy(buf, fw->data, fw->size);
-	buf_len = fw->size;
 	release_firmware(fw);
 
 	/* request all cols */
 	xaie_dev = aie_partition_request(&request);
 	if (IS_ERR(xaie_dev)) {
+		ret = PTR_ERR(xaie_dev);
 		XDNA_ERR(xdna, "aie partition request failed: %d", ret);
-		ret = -ENODEV;
 		goto out;
 	}
 	XDNA_DBG(xdna, "aie partition request succeeded: 0x%x", request.partition_id);
@@ -117,20 +114,19 @@ static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 }
 
 static int
-ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
-			struct platform_device *pdev)
+ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct device_node *aie_np)
 {
+	struct device *parent_dev = xdna->ddev.dev;
 	struct device *child_dev;
 	int num_regions;
 	int ret;
 	int i;
 
-	num_regions = of_count_phandle_with_args(pdev->dev.of_node,
-						 "memory-region", NULL);
-	if (num_regions <= 0)
+	num_regions = of_count_phandle_with_args(aie_np, "memory-region", NULL);
+	if (num_regions <= 0 || num_regions > MAX_MEM_REGIONS)
 		return -EINVAL;
 
-	for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
+	for (i = 0; i < num_regions; i++) {
 		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
 		if (!child_dev) {
 			XDNA_ERR(xdna,
@@ -141,9 +137,10 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 		}
 
 		device_initialize(child_dev);
-		child_dev->parent = &pdev->dev;
-		child_dev->of_node = pdev->dev.of_node;
+		child_dev->parent = parent_dev;
+		child_dev->of_node = aie_np;
 		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		child_dev->dma_mask = &child_dev->coherent_dma_mask;
 		child_dev->release = ve2_cma_device_release;
 
 		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
@@ -153,8 +150,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna,
 			goto put_dev;
 		}
 
-		ret = of_reserved_mem_device_init_by_idx(child_dev,
-							 pdev->dev.of_node, i);
+		ret = of_reserved_mem_device_init_by_idx(child_dev, aie_np, i);
 		if (ret) {
 			XDNA_ERR(xdna,
 				 "Failed to init reserved cma region %d", i);
@@ -176,19 +172,20 @@ cleanup:
 /**
  * ve2_parse_mem_topology - Parse AIE memory topology from device tree
  * @xdna: Pointer to the device structure
- * @pdev: Pointer to the platform device
+ * @aie_np: AI engine device node (parent->of_node; has memory-region)
  *
  * Finds the aie_mem_topology node by compatible. Search starts from the
- * platform device's parent so the topology node is expected as a sibling
- * (same parent as the amdxdna node). Uses standard of_find_compatible_node().
+ * AI engine node's parent so the topology node is expected as a sibling.
+ * Build phandle -> CMA index map from AI engine node's memory-region.
  * Each child defines columns = <start end> and one or more memory-region
  * phandles; phandles are resolved to CMA indices and stored as a bitmap.
  * Topology is stored as regions[0..num_regions-1], cap MAX_MEM_REGIONS.
  */
-static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_device *pdev)
+static int ve2_parse_mem_topology(struct amdxdna_dev *xdna,
+				  struct device_node *aie_np)
 {
 	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
-	struct device_node *pdev_mem_nodes[MAX_MEM_REGIONS];
+	struct device_node *aie_mem_nodes[MAX_MEM_REGIONS];
 	struct device_node *mem_region_np;
 	struct device_node *region_np;
 	struct device_node *topo_np;
@@ -201,8 +198,8 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 	int ret;
 
 	topo_np = NULL;
-	if (pdev->dev.of_node && pdev->dev.of_node->parent)
-		topo_np = of_find_compatible_node(pdev->dev.of_node->parent, NULL,
+	if (aie_np && aie_np->parent)
+		topo_np = of_find_compatible_node(aie_np->parent, NULL,
 						  "xlnx,aie-mem-topology");
 	if (!topo_np) {
 		XDNA_DBG(xdna, "No aie_mem_topology node found, using default CMA");
@@ -210,10 +207,10 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 		return -ENOENT;
 	}
 
-	/* Build phandle -> CMA index map from platform device's memory-region */
+	/* Build phandle -> CMA index map from AI engine node's memory-region */
 	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++)
-		pdev_mem_nodes[cma_region_idx] = of_parse_phandle(pdev->dev.of_node,
-								  "memory-region",
+		aie_mem_nodes[cma_region_idx] = of_parse_phandle(aie_np,
+								 "memory-region",
 								  cma_region_idx);
 
 	xdna_hdl->mem_topology.num_regions = 0;
@@ -253,9 +250,9 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 				continue;
 			for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS;
 			     cma_region_idx++) {
-				if (!pdev_mem_nodes[cma_region_idx])
+				if (!aie_mem_nodes[cma_region_idx])
 					break;
-				if (pdev_mem_nodes[cma_region_idx] == mem_region_np) {
+				if (aie_mem_nodes[cma_region_idx] == mem_region_np) {
 					cma_region_bitmap |= (1U << cma_region_idx);
 					break;
 				}
@@ -280,8 +277,8 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct platform_devi
 	}
 
 	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++) {
-		if (pdev_mem_nodes[cma_region_idx])
-			of_node_put(pdev_mem_nodes[cma_region_idx]);
+		if (aie_mem_nodes[cma_region_idx])
+			of_node_put(aie_mem_nodes[cma_region_idx]);
 	}
 	of_node_put(topo_np);
 	return 0;
@@ -326,7 +323,8 @@ void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_ctx *hw
 
 static int ve2_init(struct amdxdna_dev *xdna)
 {
-	struct platform_device *pdev = to_platform_device(xdna->ddev.dev);
+	struct device *dev = xdna->ddev.dev;
+	struct device_node *aie_np;
 	struct ve2_firmware_status *fw_slots;
 	struct init_config xrs_cfg = { 0 };
 	struct amdxdna_dev_hdl *xdna_hdl;
@@ -335,7 +333,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 	XDNA_DBG(xdna, "Initializing VE2 device");
 
-	xdna_hdl = devm_kzalloc(&pdev->dev, sizeof(*xdna_hdl), GFP_KERNEL);
+	xdna_hdl = devm_kzalloc(dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
 
@@ -389,14 +387,14 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 
 	/* Allocate arrays based on actual column count from device */
-	xdna_hdl->fw_slots = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+	xdna_hdl->fw_slots = devm_kcalloc(dev, xdna_hdl->aie_dev_info.cols,
 					  sizeof(*xdna_hdl->fw_slots), GFP_KERNEL);
 	if (!xdna_hdl->fw_slots) {
 		XDNA_ERR(xdna, "No memory for fw_slots array");
 		return -ENOMEM;
 	}
 
-	xdna_hdl->ve2_mgmtctx = devm_kcalloc(&pdev->dev, xdna_hdl->aie_dev_info.cols,
+	xdna_hdl->ve2_mgmtctx = devm_kcalloc(dev, xdna_hdl->aie_dev_info.cols,
 					     sizeof(*xdna_hdl->ve2_mgmtctx), GFP_KERNEL);
 	if (!xdna_hdl->ve2_mgmtctx) {
 		XDNA_ERR(xdna, "No memory for ve2_mgmtctx array");
@@ -404,7 +402,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	}
 
 	for (col = 0; col < xdna_hdl->aie_dev_info.cols; col++) {
-		fw_slots = devm_kzalloc(&pdev->dev, sizeof(*fw_slots), GFP_KERNEL);
+		fw_slots = devm_kzalloc(dev, sizeof(*fw_slots), GFP_KERNEL);
 		if (!fw_slots) {
 			XDNA_ERR(xdna, "No memory for fw status");
 			return -ENOMEM;
@@ -412,18 +410,21 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		xdna->dev_handle->fw_slots[col] = fw_slots;
 	}
 
-	ret = ve2_cma_mem_region_init(xdna, pdev);
-	if (ret < 0) {
-		/* CMA region initialization is optional - system will fall back to default CMA */
-		XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
-	}
+	aie_np = dev->parent ? dev->parent->of_node : NULL;
+	if (aie_np) {
+		ret = ve2_cma_mem_region_init(xdna, aie_np);
+		if (ret < 0) {
+			/* CMA region init is optional; fall back to default CMA */
+			XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+		}
 
-	/* Parse memory topology to enable automatic CMA region selection */
-	ret = ve2_parse_mem_topology(xdna, pdev);
-	if (ret == -ENOENT)
-		XDNA_DBG(xdna, "Memory topology not present; using default CMA\n");
-	else if (ret < 0)
-		XDNA_DBG(xdna, "Failed to parse memory topology (err=%d)\n", ret);
+		/* Parse memory topology to enable automatic CMA region selection */
+		ret = ve2_parse_mem_topology(xdna, aie_np);
+		if (ret == -ENOENT)
+			XDNA_DBG(xdna, "Memory topology not present; using default CMA\n");
+		else if (ret < 0)
+			XDNA_DBG(xdna, "Failed to parse memory topology (err=%d)\n", ret);
+	}
 
 	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",
 		 xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows,
