@@ -447,7 +447,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
       static_cast<unsigned int>(cmdpkt->state));
   }
 
-  // Command is completed by CERT as normal or UMS + timeout, need to udpate state
+  // Command is completed by CERT as normal or UMS + timeout, need to update state
   // based on sub-cmd's state.
 	/*
 	 * Command chain result updated by CERT:
