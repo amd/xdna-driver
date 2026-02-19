@@ -9,12 +9,14 @@ Build-Depends: debhelper-compat (= 13),
                git,
                jq,
                wget
-Standards-Version: 4.6.1
+Section: utils
+Standards-Version: 4.7.3
 Homepage: https://github.com/amd/xdna-driver
 Vcs-Git: https://github.com/amd/xdna-driver.git
 Vcs-Browser: https://github.com/amd/xdna-driver
 
 Package: amdxdna-dkms
+Section: utils
 Architecture: amd64 arm64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -27,9 +29,3 @@ Description: AMD XDNA NPU kernel driver and firmware via DKMS
  The driver is compiled and installed for your running kernel via DKMS
  (Dynamic Kernel Module Support). This ensures the driver works with
  kernel updates.
- .
- Supported hardware:
-  - AMD NPU1 (PCI ID 1502)
-  - AMD NPU3 (PCI ID 17f1, 17f2)
-  - AMD NPU4 (PCI ID 17f0 Rev 10)
-  - AMD NPU5 (PCI ID 17f0 Rev 11)

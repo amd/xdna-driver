@@ -1,0 +1,185 @@
+name: Build DKMS Source Package
+
+on:
+  push:
+    tags:
+      - '*'
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-source-package:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/${{ github.repository }}/build-deps:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for git metadata
+        fetch-tags: true
+        submodules: recursive  # Initialize and update submodules
+
+    - name: Configure git safe directory
+      run: git config --global --add safe.directory $(pwd)
+
+    - name: Download firmware files
+      run: |
+        echo "Downloading all firmware files..."
+        ./CMake/scripts/download_all_firmware.sh
+
+    - name: Create build directory
+      run: mkdir -p _build
+
+    - name: Configure CMake
+      working-directory: _build
+      run: cmake .. -DCMAKE_BUILD_TYPE=Release -DSKIP_KMOD=0
+
+    - name: Generate DKMS source package
+      working-directory: _build
+      run: make dkms-source
+
+    - name: Extract and build binary package
+      working-directory: _build
+      run: |
+        echo "Extracting source package..."
+        dpkg-source -x amdxdna-dkms_*.dsc extracted-source
+        echo "Building binary package..."
+        cd extracted-source
+        dpkg-buildpackage -b -d -us -uc
+
+    - name: List generated packages
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "=== Files in _build directory ==="
+        ls -lah _build/ || true
+        echo ""
+        echo "=== Source package files ==="
+        find _build -maxdepth 1 \( -name "amdxdna-dkms_*.dsc" -o -name "amdxdna-dkms_*.tar.xz" \) -type f
+        echo ""
+        echo "=== Binary package files ==="
+        find _build -maxdepth 1 -name "amdxdna-dkms_*.deb" -type f
+
+    - name: Collect package artifacts
+      working-directory: ${{ github.workspace }}
+      run: |
+        echo "Collecting package artifacts from _build directory..."
+        mkdir -p artifacts/source
+        mkdir -p artifacts/binary
+
+        # Copy source package files
+        find _build -maxdepth 1 \( -name "amdxdna-dkms_*.dsc" -o -name "amdxdna-dkms_*source.changes" -o -name "amdxdna-dkms_*.tar.xz" \) -type f -exec cp -v {} artifacts/source/ \;
+
+        # Copy binary package files
+        find _build -maxdepth 1 -name "amdxdna-dkms_*.deb" -type f -exec cp -v {} artifacts/binary/ \;
+
+        echo ""
+        echo "=== Source artifacts ==="
+        ls -lah artifacts/source/ 2>/dev/null || echo "No source artifacts found"
+        echo ""
+        echo "=== Binary artifacts ==="
+        ls -lah artifacts/binary/ 2>/dev/null || echo "No binary artifacts found"
+
+    - name: Upload source package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dkms-source-package
+        path: artifacts/source/
+        retention-days: 30
+        if-no-files-found: warn
+
+    - name: Upload binary package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dkms-binary-package
+        path: artifacts/binary/
+        retention-days: 30
+        if-no-files-found: warn
+
+    - name: Display package information
+      if: always()
+      run: |
+        echo "=== Build Summary ==="
+        echo "Source package generated for amdxdna-dkms"
+        echo "Build host: Ubuntu 24.04"
+        if [ -d artifacts ] && [ -n "$(ls -A artifacts)" ]; then
+          echo "Generated files:"
+          ls -1 artifacts/
+        fi
+
+  upload-to-ppa:
+    if: github.ref_type == 'tag'
+    needs: build-source-package
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/${{ github.repository }}/build-deps:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    strategy:
+      matrix:
+        ubuntu_release: [noble, questing]
+
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      id: dkms-source-package
+      with:
+        name: dkms-source-package
+
+    - name: Extract source package
+      run: |
+        echo "Extracting source package..."
+        dpkg-source -x amdxdna-dkms_*.dsc extracted-source
+
+    - name: Update changelog for Ubuntu release
+      working-directory: extracted-source
+      run: |
+        # Get current version from changelog
+        CURRENT_VERSION=$(dpkg-parsechangelog -S Version)
+        # Remove any existing release suffix (e.g., ~noble1, ~questing1)
+        BASE_VERSION=$(echo "$CURRENT_VERSION" | sed 's/~[a-z]*[0-9]*$//')
+        # Append new release suffix
+        NEW_VERSION="${BASE_VERSION}~${{ matrix.ubuntu_release }}1"
+
+        echo "Updating version from $CURRENT_VERSION to $NEW_VERSION"
+        echo "Targeting Ubuntu ${{ matrix.ubuntu_release }}"
+
+        # Update changelog with new version and target release
+        DEBFULLNAME="AMD XDNA Driver Team" \
+        DEBEMAIL="xdna-driver@amd.com" \
+        dch --newversion "$NEW_VERSION" \
+            --distribution "${{ matrix.ubuntu_release }}" \
+            --force-distribution \
+            "Rebuild for Ubuntu ${{ matrix.ubuntu_release }}"
+
+    - name: Rebuild source package
+      working-directory: extracted-source
+      run: |
+        echo "Building source package for ${{ matrix.ubuntu_release }}..."
+        dpkg-buildpackage -S -d -us -uc
+
+    - name: Setup GPG key
+      run: |
+        echo "Setting up GPG key..."
+        echo "${{ secrets.PPA_GPG_PRIVATE_KEY }}" | gpg --import --batch --yes
+
+        # Get the key ID
+        GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+        echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+
+    - name: Sign source package
+      run: |
+        echo "Signing package with GPG key $GPG_KEY_ID..."
+        debsign -k $GPG_KEY_ID amdxdna-dkms_*~${{ matrix.ubuntu_release }}1_source.changes
+
+    - name: Upload to PPA
+      run: |
+        echo "Uploading to ppa:amd-team/xrt for ${{ matrix.ubuntu_release }}..."
+        dput ppa:amd-team/xrt amdxdna-dkms_*~${{ matrix.ubuntu_release }}1_source.changes
