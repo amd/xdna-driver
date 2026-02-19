@@ -441,7 +441,7 @@ void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
 
 	/* Print host_queue_indirect_pkt */
 	for (int i = 0; i < total_entry; i++) {
-		struct host_queue_indirect_pkt *indirect_pkt = &queue->hq_indirect_pkt[slot_id][i];
+		struct host_queue_indirect_pkt *indirect_pkt = &queue->hq_indirect_pkt[i][slot_id];
 
 		/* Print physical address of host_queue_indirect_pkt */
 		u64 indirect_pkt_paddr = queue->hq_header.data_address +
@@ -521,8 +521,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	queue->hsa_queue_mem.dma_addr = dma_handle;
 
 	/* Calculate the address for hqc_mem within the allocated block */
-	queue->hq_complete.hqc_mem =
-		(u64 *)((char *)queue->hsa_queue_p + sizeof(struct hsa_queue));
+	queue->hq_complete.hqc_mem = (u64 *)((char *)queue->hsa_queue_p + sizeof(struct hsa_queue));
 	queue->hq_complete.hqc_dma_addr = queue->hsa_queue_mem.dma_addr + sizeof(struct hsa_queue);
 	queue->hsa_queue_p->hq_header.data_address = queue->hsa_queue_mem.dma_addr +
 		sizeof(struct host_queue_header);
@@ -530,20 +529,20 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	WARN_ON(!is_power_of_2(nslots));
 	queue->hsa_queue_p->hq_header.capacity = nslots;
 
-	/* Set hsa queue slots to invalid */
-	for (int i = 0; i < nslots; i++) {
-		struct host_queue_indirect_hdr *hdr = &queue->hsa_queue_p->hq_indirect_hdr[i];
+	/* Set hsa queue slots to invalid and initialize indirect regions */
+	for (int slot = 0; slot < nslots; slot++) {
+		struct host_queue_indirect_hdr *hdr = &queue->hsa_queue_p->hq_indirect_hdr[slot];
 
-		hsa_queue_pkt_set_invalid(hsa_queue_get_pkt(queue->hsa_queue_p, i));
+		hsa_queue_pkt_set_invalid(hsa_queue_get_pkt(queue->hsa_queue_p, slot));
 		hdr->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 		hdr->header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
 		hdr->header.count = 0;
 		hdr->header.distribute = 1;
 		hdr->header.indirect = 1;
 
-		for (int j = 0; j < HOST_INDIRECT_PKT_NUM; j++) {
+		for (int uc = 0; uc < HOST_INDIRECT_PKT_NUM; uc++) {
 			struct host_queue_indirect_pkt *pkt =
-			       &queue->hsa_queue_p->hq_indirect_pkt[i][j];
+				&queue->hsa_queue_p->hq_indirect_pkt[uc][slot];
 
 			pkt->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 			pkt->header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
@@ -556,6 +555,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	XDNA_DBG(xdna, "Created host queue: dma_addr=0x%llx, capacity=%d, data_addr=0x%llx",
 		 queue->hsa_queue_mem.dma_addr, nslots,
 		 queue->hsa_queue_p->hq_header.data_address);
+
 	return 0;
 }
 
@@ -572,6 +572,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	u64 slot_id = 0;
 
 	dpu = (struct ve2_dpu_data *)cmd_data;
+
 	pkt = hsa_queue_reserve_slot(xdna, ve2_ctx, &slot_id);
 	if (IS_ERR(pkt)) {
 		XDNA_DBG(xdna, "No slot available in Host queue");
@@ -601,7 +602,7 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 	indirect_hdr->header.indirect = 1;
 	indirect_hdr->header.distribute = 1;
 	u64 m_indirect_hdr_paddr = (u64)(queue->hq_header.data_address +
-		((u64)&queue->hq_indirect_hdr[slot_id] - (u64)&queue->hq_entry));
+			((u64)&queue->hq_indirect_hdr[slot_id] - (u64)&queue->hq_entry));
 
 	struct host_indirect_packet_entry *hp = (struct host_indirect_packet_entry *)pkt->data;
 
@@ -613,19 +614,20 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 		(struct host_indirect_packet_entry *)indirect_hdr->data;
 
 	for (int i = 0; dpu && (i < total_cmds); i++, hp_hdr++, dpu = get_ve2_dpu_data_next(dpu)) {
+		u16 uc = dpu->uc_index;
 		struct host_queue_indirect_pkt *indirect_data =
-			(struct host_queue_indirect_pkt *)&queue->hq_indirect_pkt[slot_id][i];
+			(struct host_queue_indirect_pkt *)&queue->hq_indirect_pkt[uc][slot_id];
 		u64 m_indirect_data_paddr = (u64)(queue->hq_header.data_address +
-				((u64)&queue->hq_indirect_pkt[slot_id][i] - (u64)&queue->hq_entry));
+				((u64)&queue->hq_indirect_pkt[uc][slot_id] -
+				 (u64)&queue->hq_entry));
 
 		XDNA_DBG(xdna, "\nIndirect packet id %d\n", i);
-		XDNA_DBG(xdna, "        uc index %d\n", dpu->uc_index);
-		XDNA_DBG(xdna, "        dpu instruction_buffer %llx\n",
-			 (u64)dpu->instruction_buffer);
+		XDNA_DBG(xdna, "\tuc index %d\n", uc);
+		XDNA_DBG(xdna, "\tdpu instruction_buffer %llx\n", (u64)dpu->instruction_buffer);
 
 		hp_hdr->host_addr_low = lower_32_bits((u64)m_indirect_data_paddr);
 		hp_hdr->host_addr_high = upper_32_bits((u64)m_indirect_data_paddr);
-		hp_hdr->uc_index = dpu->uc_index;
+		hp_hdr->uc_index = uc;
 
 		struct host_queue_indirect_pkt *cebp = indirect_data;
 
@@ -633,15 +635,9 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 			lower_32_bits(dpu->instruction_buffer);
 		cebp->payload.dpu_control_code_host_addr_high =
 			upper_32_bits(dpu->instruction_buffer);
-
-		cebp->payload.dtrace_buf_host_addr_high =
-			upper_32_bits(dpu->dtrace_buffer);
-		cebp->payload.dtrace_buf_host_addr_low =
-			lower_32_bits(dpu->dtrace_buffer);
-
-		XDNA_DBG(xdna, "indirect[%d] dtrace addr: 0x%llx", i,
-			 dpu->dtrace_buffer);
-
+		cebp->payload.dtrace_buf_host_addr_high = upper_32_bits(dpu->dtrace_buffer);
+		cebp->payload.dtrace_buf_host_addr_low = lower_32_bits(dpu->dtrace_buffer);
+		XDNA_DBG(xdna, "indirect[%d] dtrace addr: 0x%llx", i, dpu->dtrace_buffer);
 		cebp->payload.args_len = 0;
 		cebp->payload.args_host_addr_low = 0;
 		cebp->payload.args_host_addr_high = 0;

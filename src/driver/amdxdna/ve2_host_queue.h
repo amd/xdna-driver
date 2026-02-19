@@ -99,7 +99,7 @@ struct hsa_queue {
 	struct host_queue_header	hq_header;
 	struct host_queue_packet	hq_entry[HOST_QUEUE_ENTRY];
 	struct host_queue_indirect_hdr	hq_indirect_hdr[HOST_QUEUE_ENTRY];
-	struct host_queue_indirect_pkt	hq_indirect_pkt[HOST_QUEUE_ENTRY][HOST_INDIRECT_PKT_NUM];
+	struct host_queue_indirect_pkt	hq_indirect_pkt[HOST_INDIRECT_PKT_NUM][HOST_QUEUE_ENTRY];
 };
 
 struct ve2_hq_complete {
