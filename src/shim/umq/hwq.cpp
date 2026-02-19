@@ -462,7 +462,7 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
   auto last_cmd_bo = static_cast<const cmd_buffer *>(
     m_pdev.find_bo_by_handle(payload->data[payload->command_count - 1]));
   auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
-  // Most common case, cmd is cmpleted successfully.
+  // Most common case, cmd is completed successfully.
   if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
     cmdpkt->state = ERT_CMD_STATE_COMPLETED;
     return 1;
