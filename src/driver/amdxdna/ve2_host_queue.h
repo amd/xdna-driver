@@ -140,6 +140,7 @@ struct ve2_hsa_queue {
 static inline void hsa_queue_sync_read_index_for_read(struct ve2_hsa_queue *queue)
 {
 	dma_addr_t read_idx_addr = queue->hsa_queue_mem.dma_addr +
+		offsetof(struct hsa_queue, hq_header) +
 		offsetof(struct host_queue_header, read_index);
 
 	dma_sync_single_for_cpu(queue->alloc_dev,
@@ -152,6 +153,7 @@ static inline void hsa_queue_sync_read_index_for_read(struct ve2_hsa_queue *queu
 static inline void hsa_queue_sync_write_index_for_write(struct ve2_hsa_queue *queue)
 {
 	dma_addr_t write_idx_addr = queue->hsa_queue_mem.dma_addr +
+		offsetof(struct hsa_queue, hq_header) +
 		offsetof(struct host_queue_header, write_index);
 
 	dma_sync_single_for_device(queue->alloc_dev,
