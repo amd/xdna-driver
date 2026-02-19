@@ -462,7 +462,7 @@ complete_command(xrt_core::buffer_handle *cmd) const
         auto sc = static_cast<const cmd_buffer *>(
           m_pdev.find_bo_by_handle(payload->data[j]));
         auto pkt = reinterpret_cast<ert_packet *>(sc->vaddr());
-        std::cout << "sub-cmd[" << j << "] state=" << pkt->state << std::endl;
+	shim_debug("sub-cmd[%zu] state=%d", j, static_cast<unsigned int>(pkt->state));
       }
       shim_err(EINVAL, "Chained cmd completed with unexpected state in subcmds");
     } else {
