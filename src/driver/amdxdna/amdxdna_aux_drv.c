@@ -107,6 +107,7 @@ static const struct auxiliary_device_id amdxdna_aux_id_table[] = {
 MODULE_DEVICE_TABLE(auxiliary, amdxdna_aux_id_table);
 
 static struct auxiliary_driver amdxdna_aux_driver = {
+	.name		= "amdxdna",
 	.probe		= amdxdna_aux_probe,
 	.remove		= amdxdna_aux_remove,
 	.id_table	= amdxdna_aux_id_table,
