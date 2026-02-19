@@ -152,7 +152,9 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 
 	/* Init umq content */
 	memset(umq_va, 0, umq_sz);
-	priv->write_index = qhdr->read_index = qhdr->write_index = QUEUE_INDEX_START;
+	priv->write_index = QUEUE_INDEX_START;
+	qhdr->read_index = QUEUE_INDEX_START;
+	qhdr->write_index = QUEUE_INDEX_START;
 	qhdr->capacity = CTX_MAX_CMDS;
 	qhdr->data_address = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
 	for (i = 0; i < CTX_MAX_CMDS; i++)
@@ -340,7 +342,7 @@ static inline u64 get_read_index(struct amdxdna_ctx *ctx)
 	 */
 	if (!valid_queue_index(ri, wi, CTX_MAX_CMDS)) {
 		XDNA_WARN(xdna, "Invalid index, ri %lld, wi %lld", ri, wi);
-		udelay(100);
+		usleep_range(100, 200);
 		ri = READ_ONCE(*ctx->priv->umq_read_index);
 		if (!valid_queue_index(ri, wi, CTX_MAX_CMDS))
 			XDNA_ERR(xdna, "Invalid index after retry, ri %lld, wi %lld", ri, wi);
