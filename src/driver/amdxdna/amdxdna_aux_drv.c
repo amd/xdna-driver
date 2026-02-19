@@ -43,10 +43,7 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
-		mutex_lock(&xdna->dev_lock);
-		xdna->dev_info->ops->fini(xdna);
-		mutex_unlock(&xdna->dev_lock);
-		return ret;
+		goto err_fini;
 	}
 
 	if (!xdna->dev_handle) {
@@ -55,20 +52,23 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 		goto out;
 	}
 
+	/*
+	 * Auxiliary devices do not get dma_mask/coherent_dma_mask set by the
+	 * bus. dma_set_mask_and_coherent() returns -EIO when dev->dma_mask is
+	 * NULL, so initialize it first to use the API.
+	 */
+	if (!dev->dma_mask) {
+		dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		dev->dma_mask = &dev->coherent_dma_mask;
+	}
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
 	if (ret) {
 		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		if (ret) {
-			XDNA_WARN(xdna, "DMA mask set failed (%d), applying mask manually\n", ret);
-			dev->coherent_dma_mask = DMA_BIT_MASK(64);
-			if (!dev->dma_mask)
-				dev->dma_mask = &dev->coherent_dma_mask;
-			else
-				*dev->dma_mask = DMA_BIT_MASK(64);
-			ret = 0;
-		} else {
-			XDNA_WARN(xdna, "DMA configuration downgraded to 32bit Mask\n");
+			XDNA_ERR(xdna, "DMA mask set failed (64 and 32 bit), ret %d", ret);
+			goto out;
 		}
+		XDNA_WARN(xdna, "DMA configuration downgraded to 32bit Mask\n");
 	}
 
 	if (xdna->dev_info->ops->debugfs)
@@ -80,6 +80,7 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 	return 0;
 out:
 	drm_dev_unregister(&xdna->ddev);
+err_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);

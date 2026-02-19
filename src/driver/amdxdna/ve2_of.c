@@ -18,7 +18,6 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	struct aie_partition_req request;
 	const struct firmware *fw;
 	struct device *xaie_dev;
-	size_t buf_len;
 	char *buf;
 	int ret;
 
@@ -38,7 +37,6 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 		return -ENOMEM;
 	}
 	memcpy(buf, fw->data, fw->size);
-	buf_len = fw->size;
 	release_firmware(fw);
 
 	/* request all cols */
@@ -142,6 +140,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct device_node *aie_np)
 		child_dev->parent = parent_dev;
 		child_dev->of_node = aie_np;
 		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		child_dev->dma_mask = &child_dev->coherent_dma_mask;
 		child_dev->release = ve2_cma_device_release;
 
 		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
