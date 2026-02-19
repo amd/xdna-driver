@@ -1,9 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
- *
- * amdxdna auxiliary driver - binds to the "amdxdna" aux device created by
- * the xilinx-aie driver. No OF device; default CMA only.
  */
 
 #include <linux/module.h>
@@ -59,7 +56,6 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		if (ret) {
 			XDNA_WARN(xdna, "DMA mask set failed (%d), applying mask manually\n", ret);
-			/* dma_alloc_* requires coherent_dma_mask set; apply 64-bit so allocations succeed */
 			dev->coherent_dma_mask = DMA_BIT_MASK(64);
 			if (!dev->dma_mask)
 				dev->dma_mask = &dev->coherent_dma_mask;
@@ -99,7 +95,6 @@ static void amdxdna_aux_remove(struct auxiliary_device *auxdev)
 	mutex_unlock(&xdna->dev_lock);
 }
 
-/* Match device name prefix "xilinx_aie.amdxdna" (aux bus compares id->name to dev_name prefix before last '.') */
 static const struct auxiliary_device_id amdxdna_aux_id_table[] = {
 	{ .name = "xilinx_aie.amdxdna" },
 	{ }

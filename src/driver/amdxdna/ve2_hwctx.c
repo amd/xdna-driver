@@ -498,7 +498,7 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 		}
 	}
 
-	/* If no allocation succeeded, use the default device (aux device) */
+	/* If no allocation succeeded, use the default device */
 	if (!queue->hsa_queue_p) {
 		queue->hsa_queue_p = dma_alloc_coherent(xdna->ddev.dev,
 							alloc_size,

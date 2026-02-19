@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
- *
- * Aux driver: multi-CMA uses parent AI engine node (memory-region) and
- * aie_mem_topology sibling for column->region mapping.
  */
 
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/xlnx-ai-engine.h>
-#include <linux/of.h>
-#include <linux/of_address.h>
 #include <linux/of_reserved_mem.h>
-#include <linux/dma-mapping.h>
 
 #include "ve2_of.h"
 #include "ve2_mgmt.h"
@@ -121,11 +115,6 @@ static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
 	}
 }
 
-/*
- * ve2_cma_mem_region_init - Create per-CMA region devices from AI engine node.
- * Aux driver: aie_np is parent->of_node (AI engine node with memory-region).
- * Optional: if no memory-region or init fails, driver falls back to default CMA.
- */
 static int
 ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct device_node *aie_np)
 {
@@ -194,7 +183,7 @@ cleanup:
  * Topology is stored as regions[0..num_regions-1], cap MAX_MEM_REGIONS.
  */
 static int ve2_parse_mem_topology(struct amdxdna_dev *xdna,
-				 struct device_node *aie_np)
+				  struct device_node *aie_np)
 {
 	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
 	struct device_node *aie_mem_nodes[MAX_MEM_REGIONS];
@@ -222,7 +211,7 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna,
 	/* Build phandle -> CMA index map from AI engine node's memory-region */
 	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++)
 		aie_mem_nodes[cma_region_idx] = of_parse_phandle(aie_np,
-								  "memory-region",
+								 "memory-region",
 								  cma_region_idx);
 
 	xdna_hdl->mem_topology.num_regions = 0;
@@ -426,7 +415,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	if (aie_np) {
 		ret = ve2_cma_mem_region_init(xdna, aie_np);
 		if (ret < 0) {
-			/* CMA region initialization is optional - system will fall back to default CMA */
+			/* CMA region init is optional; fall back to default CMA */
 			XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
 		}
 

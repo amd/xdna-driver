@@ -191,6 +191,7 @@ xdna_edgedev::get_edge_devname()
     }
   }
   catch (std::exception &e) {
+    // Choosing default accel
     accel_devname = "accel0";
   }
 
