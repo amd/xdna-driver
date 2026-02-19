@@ -86,6 +86,8 @@ static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
 	u32 slot_idx;
 
 	mutex_lock(&queue->hq_lock);
+	/* Sync read_index before reading (device may have written) */
+	hsa_queue_sync_read_index_for_read(queue);
 	outstanding = queue->reserved_write_index - header->read_index;
 	if (outstanding >= capacity) {
 		mutex_unlock(&queue->hq_lock);
@@ -98,6 +100,8 @@ static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
 	 * after job completion, or zero-initialized for fresh slots).
 	 */
 	slot_idx = queue->reserved_write_index % capacity;
+	/* Sync completion memory before reading (device may have written) */
+	hsa_queue_sync_completion_for_read(queue, slot_idx);
 	state = queue->hq_complete.hqc_mem[slot_idx];
 	available = (state == ERT_CMD_STATE_INVALID);
 	mutex_unlock(&queue->hq_lock);
@@ -151,6 +155,8 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	/*
 	 * Check against reserved_write_index to account for in-flight reservations.
 	 */
+	/* Sync read_index before reading (device may have written) */
+	hsa_queue_sync_read_index_for_read(queue);
 	if (queue->reserved_write_index < header->read_index) {
 		XDNA_ERR(xdna, "HSA Queue: reserved_write_index(%llu) < read_index(%llu)",
 			 queue->reserved_write_index, header->read_index);
@@ -168,6 +174,8 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	}
 
 	slot_idx = queue->reserved_write_index % capacity;
+	/* Sync completion memory before reading (device may have written) */
+	hsa_queue_sync_completion_for_read(queue, slot_idx);
 	enum ert_cmd_state state = queue->hq_complete.hqc_mem[slot_idx];
 
 	/*
@@ -185,6 +193,8 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	/* Reserve this slot by incrementing reserved_write_index. */
 	*slot = queue->reserved_write_index++;
 	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_NEW;
+	/* Sync completion memory after writing (device will read) */
+	hsa_queue_sync_completion_for_write(queue, slot_idx);
 
 	mutex_unlock(&queue->hq_lock);
 
@@ -207,13 +217,19 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 	mutex_lock(&queue->hq_lock);
 	/* Set packet type to valid so CERT can process it */
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+	/* Sync packet after writing (device will read) */
+	hsa_queue_sync_packet_for_write(queue, slot_idx);
 
 	/* Mark this slot as ready in driver tracking */
 	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_SUBMITTED;
+	/* Sync completion memory after writing (device will read) */
+	hsa_queue_sync_completion_for_write(queue, slot_idx);
 
 	/* Advance write_index as far as possible through all ready slots. */
 	while (header->write_index < queue->reserved_write_index) {
 		u32 next_idx = header->write_index % capacity;
+		/* Sync completion memory before reading (device may have written) */
+		hsa_queue_sync_completion_for_read(queue, next_idx);
 		enum ert_cmd_state state = queue->hq_complete.hqc_mem[next_idx];
 
 		if (state != ERT_CMD_STATE_SUBMITTED)
@@ -221,6 +237,8 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 
 		header->write_index++;
 	}
+	/* Sync write_index after writing (device will read) */
+	hsa_queue_sync_write_index_for_write(queue);
 
 	mutex_unlock(&queue->hq_lock);
 }
@@ -320,6 +338,8 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 
 	for (int i = 0; i < cmd_cnt; i++) {
 		priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
+		/* Sync completion memory after writing (device will read) */
+		hsa_queue_sync_completion_for_write(&priv_ctx->hwctx_hsa_queue, slot);
 		slot = (slot == 0) ? (capacity - 1) : (slot - 1);
 	}
 	// Reset the pending list
@@ -551,6 +571,12 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 		}
 	}
 
+	/* Sync entire queue structure after initialization (device will read) */
+	dma_sync_single_for_device(queue->alloc_dev,
+				   queue->hsa_queue_mem.dma_addr,
+				   sizeof(struct hsa_queue),
+				   DMA_TO_DEVICE);
+
 	XDNA_DBG(xdna, "Created host queue: dma_addr=0x%llx, capacity=%d, data_addr=0x%llx",
 		 queue->hsa_queue_mem.dma_addr, nslots,
 		 queue->hsa_queue_p->hq_header.data_address);
@@ -640,7 +666,14 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 		cebp->payload.args_len = 0;
 		cebp->payload.args_host_addr_low = 0;
 		cebp->payload.args_host_addr_high = 0;
+		/* Sync indirect packet after writing (device will read) */
+		hsa_queue_sync_indirect_pkt_for_write(hq_queue, uc, slot_id);
 	}
+
+	/* Sync packet after writing (device will read) */
+	hsa_queue_sync_packet_for_write(hq_queue, slot_id);
+	/* Sync indirect header after writing (device will read) */
+	hsa_queue_sync_indirect_hdr_for_write(hq_queue, slot_id);
 
 	/* Enable for debug purpose */
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
@@ -704,6 +737,9 @@ static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, b
 	ebp->args_host_addr_low = 0;
 	ebp->args_host_addr_high = 0;
 	XDNA_DBG(xdna, "dpu instruction addr: 0x%llx", dpu_cmd->instruction_buffer);
+
+	/* Sync packet after writing (device will read) */
+	hsa_queue_sync_packet_for_write(hq_queue, slot_id);
 
 	/* Commit the slot - this sets hqc_mem to SUBMITTED and advances write_index */
 	hsa_queue_commit_slot(xdna, ve2_ctx, *seq);
@@ -960,6 +996,9 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 	read_index = (u64 *)((char *)priv_ctx->hwctx_hsa_queue.hsa_queue_p +
 			HSA_QUEUE_READ_INDEX_OFFSET);
 
+	/* Sync read_index before reading (device may have written) */
+	hsa_queue_sync_read_index_for_read(&priv_ctx->hwctx_hsa_queue);
+
 	if (counter % print_interval == 0) {
 		struct amdxdna_dev *xdna = hwctx->client->xdna;
 
@@ -1125,6 +1164,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				seq % (priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity);
 			enum ert_cmd_state state;
 
+			/* Sync completion memory before reading (device may have written) */
+			hsa_queue_sync_completion_for_read(&priv_ctx->hwctx_hsa_queue, slot);
 			state = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
 			if (state <= ERT_CMD_STATE_INVALID || state > ERT_CMD_STATE_NORESPONSE) {
 				XDNA_WARN(xdna, "state %u at hqc_mem[%u]", state, slot);
@@ -1164,6 +1205,11 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				for (i = 0; i < cmd_count; i++) {
 					u32 slot = (start_slot + i) % capacity;
 
+					/* Sync completion memory before reading
+					 * (device may have written)
+					 */
+					hsa_queue_sync_completion_for_read
+						(&priv_ctx->hwctx_hsa_queue, slot);
 					slot_state =
 						priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
 					if (slot_state == ERT_CMD_STATE_ERROR) {
