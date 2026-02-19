@@ -9,6 +9,7 @@
 /* Allow at least one runlist cmd and a few single cmds. Must be power of 2. */
 #define CTX_MAX_CMDS			32
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES	6
+#define QUEUE_INDEX_START		0
 
 struct host_queue_header {
 	u64 read_index;

@@ -28,7 +28,7 @@
 namespace {
 
 using arg_type = const std::vector<uint64_t>;
-unsigned c_rounds = 1;
+uint64_t c_rounds = 1;
 unsigned o_cmds = 1;
 unsigned r_cmds = 24;
 unsigned m_rounds = 32;

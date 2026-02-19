@@ -597,7 +597,7 @@ static int amdxdna_drm_submit_execbuf(struct amdxdna_client *client,
 free_cmd_bo_hdls:
 	kfree(arg_bo_hdls);
 	if (!ret)
-		XDNA_DBG(xdna, "Pushed cmd %lld to scheduler", args->seq);
+		XDNA_DBG(xdna, "Pushed job %lld to scheduler", args->seq);
 	return ret;
 }
 

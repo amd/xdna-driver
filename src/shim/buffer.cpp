@@ -617,8 +617,6 @@ describe() const
 {
   std::string desc = type_to_name(m_type, m_flags) + ": ";
 
-  desc += "type=";
-  desc += " ";
   desc += "hdl=";
   for (int i = 0; i < m_bos.size(); i++) {
     desc += std::to_string(id(i).handle);
@@ -760,7 +758,8 @@ bind_at(size_t pos, const buffer_handle* bh, size_t offset, size_t size)
   auto s = boh->get_arg_bo_ids();
   for (const auto& bo : s)
     bohs += std::to_string(bo.handle) + " ";
-  shim_debug("Added arg BO %s to BO %d", bohs.c_str(), id().handle);
+  shim_debug("Added arg BO %s from BO %d to BO %d",
+    bohs.empty() ? "<null>" : bohs.c_str(), boh->id().handle, id().handle);
 #endif
 }
 
@@ -771,8 +770,6 @@ reset()
   std::lock_guard<std::mutex> lg(m_args_map_lock);
   m_args_map.clear();
   m_arg_bos_map.clear();
-  m_subcmds.clear();
-  m_subcmds.shrink_to_fit();
 }
 
 std::set<bo_id>
@@ -799,13 +796,6 @@ get_arg_bos() const
   for (const auto& m : m_arg_bos_map)
     ret.insert(m.second.begin(), m.second.end());
   return ret;
-}
-
-std::vector<const cmd_buffer *>&
-cmd_buffer::
-get_subcmd_list() const
-{
-  return m_subcmds;
 }
 
 //
