@@ -128,7 +128,7 @@ ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct device_node *aie_np)
 	if (num_regions <= 0 || num_regions > MAX_MEM_REGIONS)
 		return -EINVAL;
 
-	for (i = 0; i < num_regions && i < MAX_MEM_REGIONS; i++) {
+	for (i = 0; i < num_regions; i++) {
 		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
 		if (!child_dev) {
 			XDNA_ERR(xdna,

@@ -33,6 +33,7 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 	ret = xdna->dev_info->ops->init(xdna);
 	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
+		/* init never leaves CMA set on error; fini would be a no-op */
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
 		return ret;
 	}
@@ -42,6 +43,9 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 	ret = drm_dev_register(&xdna->ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
+		mutex_lock(&xdna->dev_lock);
+		xdna->dev_info->ops->fini(xdna);
+		mutex_unlock(&xdna->dev_lock);
 		return ret;
 	}
 
