@@ -323,7 +323,7 @@ uint64_t
 hwq_umq::
 issue_command(const cmd_buffer *cmd_bo)
 {
-  if (is_driver_cmd_submission())
+  if (is_kernel_mode_submission())
     return hwq::issue_command(cmd_bo);
 
   auto cmd = reinterpret_cast<ert_packet *>(cmd_bo->vaddr());
@@ -377,9 +377,99 @@ get_queue_bo() const
 
 bool
 hwq_umq::
-is_driver_cmd_submission() const
+is_kernel_mode_submission() const
 {
   return !m_mapped_doorbell;
+}
+
+void
+hwq_umq::
+complete_command(xrt_core::buffer_handle *cmd) const
+{
+  auto boh = static_cast<cmd_buffer*>(cmd);
+  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
+
+  // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
+  // driver (KMS + timeout), or by nobody (UMS + timeout).
+  if (cmdpkt->opcode != ERT_CMD_CHAIN) {
+    if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
+      // CERT failed to set error state properly.
+      if (is_kernel_mode_submission()) {
+        // In KMS, it is not expected.
+        shim_err(EINVAL, "Non-chained cmd completed with unexpected state: %u",
+          static_cast<unsigned int>(cmdpkt->state));
+      } else {
+        // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
+        cmdpkt->state = ERT_CMD_STATE_ABORT;
+      }
+    }
+    return;
+  }
+
+  // Chained cmd completion. Let's do some sanity check against the state.
+
+  // When cmd timed out, in KMS mode, driver will update state (either timeout or abort)
+  // and context health data (in case of timing out). Nothing needs to be done here.
+  if (cmdpkt->state == ERT_CMD_STATE_TIMEOUT || cmdpkt->state == ERT_CMD_STATE_ABORT)
+    return;
+  // When cmd timed out, in UMS mode, the state must stay as NEW.
+  // Or when cmd is completed by CERT normally, in both UMS/KMS mode, driver does not
+  // touch exec buf, so the state must also stay as NEW.
+  if (cmdpkt->state != ERT_CMD_STATE_NEW) {
+    shim_err(EINVAL, "Runlist exec buf completed with unexpected state: %u",
+      static_cast<unsigned int>(cmdpkt->state));
+  }
+
+  // Command is completed by CERT as normal or UMS + timeout, need to update state
+  // based on sub-cmd's state.
+  //
+  // Command chain result updated by CERT:
+  // 1. If all sub-cmds are processed successfully, the last sub-cmd state
+  //    is ERT_CMD_STATE_COMPLETED
+  // 2. If one sub-cmds failed, the state of the failed one is updated. All
+  //    sub-cmds after it will be skipped and set to ERT_CMD_STATE_ABORT
+  // 3. In case CERT hangs or did not start processing, all sub-cmds state
+  //    should stay as ERT_CMD_STATE_NEW
+  //
+  auto payload = get_ert_cmd_chain_data(cmdpkt);
+  auto last_cmd_bo = static_cast<const cmd_buffer *>(
+    m_pdev.find_bo_by_handle(payload->data[payload->command_count - 1]));
+  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
+  // Most common case, cmd is completed successfully.
+  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
+    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
+    return;
+  }
+
+  // Error case, needs to walk through entire chain to see what happened.
+  for (size_t i = payload->command_count; i > 0; i--) {
+    auto idx = i - 1;
+    auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
+    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
+    auto st = subcmd_pkt->state;
+    if (st != ERT_CMD_STATE_ABORT) {
+      payload->error_index = idx;
+      cmdpkt->state = st;
+      break;
+    }
+  }
+
+  if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
+    // CERT failed to set error state properly.
+    if (is_kernel_mode_submission()) {
+      // In KMS, it is not expected.
+      for (size_t j = 0; j < payload->command_count; j++) {
+        auto sc = static_cast<const cmd_buffer *>(
+          m_pdev.find_bo_by_handle(payload->data[j]));
+        auto pkt = reinterpret_cast<ert_packet *>(sc->vaddr());
+        std::cout << "sub-cmd[" << j << "] state=" << pkt->state << std::endl;
+      }
+      shim_err(EINVAL, "Chained cmd completed with unexpected state in subcmds");
+    } else {
+      // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
+      cmdpkt->state = ERT_CMD_STATE_ABORT;
+    }
+  }
 }
 
 int
@@ -412,91 +502,25 @@ wait_command(xrt_core::buffer_handle *cmd, uint32_t timeout_ms) const
       return 1;
 
   // Command is completed as indicated by driver, update result.
+  complete_command(cmd);
+  return 1;
+}
+
+int
+hwq_umq::
+poll_command(xrt_core::buffer_handle *cmd) const
+{
+  // Nothing needs to be done, if it's already completed.
+  if (hwq::poll_command(cmd))
+      return 1;
 
   auto boh = static_cast<cmd_buffer*>(cmd);
-  auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
+  auto seq = boh->wait_for_submitted();
+  if (m_umq_hdr->read_index <= seq)
+    return 0;
 
-  // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
-  // driver (KMS + timeout), or by nobody (UMS + timeout).
-  if (cmdpkt->opcode != ERT_CMD_CHAIN) {
-    if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
-      // CERT failed to set error state properly.
-      if (is_driver_cmd_submission()) {
-        // In KMS, it is not expected.
-        shim_err(EINVAL, "Non-chained cmd completed with unexpected state: %u",
-          static_cast<unsigned int>(cmdpkt->state));
-      } else {
-        // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
-        cmdpkt->state = ERT_CMD_STATE_ABORT;
-      }
-    }
-    return 1;
-  }
-
-  // Chained cmd completion. Let's do some sanity check against the state.
-
-  // When cmd timed out, in KMS mode, driver will update state (either timeout or abort)
-  // and context health data (in case of timing out). Nothing needs to be done here.
-  if (cmdpkt->state == ERT_CMD_STATE_TIMEOUT || cmdpkt->state == ERT_CMD_STATE_ABORT)
-    return 1;
-  // When cmd timed out, in UMS mode, the state must stay as NEW.
-  // Or when cmd is completed by CERT normally, in both UMS/KMS mode, driver does not
-  // touch exec buf, so the state must also stay as NEW.
-  if (cmdpkt->state != ERT_CMD_STATE_NEW) {
-    shim_err(EINVAL, "Runlist exec buf completed with unexpected state: %u",
-      static_cast<unsigned int>(cmdpkt->state));
-  }
-
-  // Command is completed by CERT as normal or UMS + timeout, need to update state
-  // based on sub-cmd's state.
-	/*
-	 * Command chain result updated by CERT:
-	 * 1. If all sub-cmds are processed successfully, the last sub-cmd state
-	 *    is ERT_CMD_STATE_COMPLETED
-	 * 2. If one sub-cmds failed, the state of the failed one is updated. All
-	 *    sub-cmds after it will be skipped and set to ERT_CMD_STATE_ABORT
-	 * 3. In case CERT hangs or did not start processing, all sub-cmds state
-	 *    should stay as ERT_CMD_STATE_NEW
-	 */
-  auto payload = get_ert_cmd_chain_data(cmdpkt);
-  auto last_cmd_bo = static_cast<const cmd_buffer *>(
-    m_pdev.find_bo_by_handle(payload->data[payload->command_count - 1]));
-  auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
-  // Most common case, cmd is completed successfully.
-  if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
-    cmdpkt->state = ERT_CMD_STATE_COMPLETED;
-    return 1;
-  }
-
-  // Error case, needs to walk through entire chain to see what happened.
-  for (size_t i = payload->command_count; i > 0; i--) {
-    auto idx = i - 1;
-    auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
-    auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
-    auto st = subcmd_pkt->state;
-    if (st != ERT_CMD_STATE_ABORT) {
-      payload->error_index = idx;
-      cmdpkt->state = st;
-      break;
-    }
-  }
-
-  if (cmdpkt->state < ERT_CMD_STATE_COMPLETED) {
-    // CERT failed to set error state properly.
-    if (is_driver_cmd_submission()) {
-      // In KMS, it is not expected.
-      for (size_t j = 0; j < payload->command_count; j++) {
-        auto sc = static_cast<const cmd_buffer *>(
-          m_pdev.find_bo_by_handle(payload->data[j]));
-        auto pkt = reinterpret_cast<ert_packet *>(sc->vaddr());
-        std::cout << "sub-cmd[" << j << "] state=" << pkt->state << std::endl;
-      }
-      shim_err(EINVAL, "Chained cmd completed with unexpected state in subcmds");
-    } else {
-      // In UMS, CERT may just timed out. Mark it as abort since no ctx health data.
-      cmdpkt->state = ERT_CMD_STATE_ABORT;
-    }
-  }
+  // Command is completed as indicated by read index, update result.
+  complete_command(cmd);
   return 1;
 }
 
