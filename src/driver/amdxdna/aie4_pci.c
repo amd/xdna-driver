@@ -1908,12 +1908,26 @@ static int aie4_get_ctx_status_array(struct amdxdna_client *client,
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
+	size_t buf_size;
 	int idx, min, i;
 	u32 hw_i = 0;
-	u32 buf_size;
 	int ret = 0;
 
-	buf_size = args->num_element * args->element_size;
+	if (!args->num_element ||
+	    args->num_element > AMDXDNA_MAX_NUM_ELEMENT) {
+		XDNA_ERR(xdna, "Invalid num_element %u (max %u)",
+			 args->num_element, AMDXDNA_MAX_NUM_ELEMENT);
+		return -EINVAL;
+	}
+
+	if (!args->element_size ||
+	    args->element_size > AMDXDNA_MAX_ELEMENT_SIZE) {
+		XDNA_ERR(xdna, "Invalid element_size %u (max %u)",
+			 args->element_size, AMDXDNA_MAX_ELEMENT_SIZE);
+		return -EINVAL;
+	}
+
+	buf_size = (size_t)args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
@@ -2005,16 +2019,30 @@ static int aie4_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	struct amdxdna_dev *xdna;
 	int ret = 0, idx = 0, i;
 	unsigned long hwctx_id;
+	size_t total_size;
 	size_t list_size;
+	size_t buf_size;
 	void __user *buf;
-	u32 total_size;
 	u32 offset = 0;
 	u32 num_bufs;
-	u32 buf_size;
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
-	buf_size = args->num_element * args->element_size;
+
+	if (args->num_element != 1) {
+		XDNA_ERR(xdna, "Invalid num_element %u, expected 1",
+			 args->num_element);
+		return -EINVAL;
+	}
+
+	if (!args->element_size ||
+	    args->element_size > AMDXDNA_MAX_ELEMENT_SIZE) {
+		XDNA_ERR(xdna, "Invalid element_size %u (max %u)",
+			 args->element_size, AMDXDNA_MAX_ELEMENT_SIZE);
+		return -EINVAL;
+	}
+
+	buf_size = (size_t)args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
@@ -2023,7 +2051,7 @@ static int aie4_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	if (buf_size < sizeof(config)) {
-		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
 		return -ENOSPC;
 	}
 
@@ -2068,10 +2096,10 @@ static int aie4_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	num_bufs = ndev->metadata.rows * ndev->metadata.cols;
-	total_size = num_bufs * SZ_1M;
+	total_size = (size_t)num_bufs * SZ_1M;
 
 	if (buf_size < total_size) {
-		XDNA_DBG(xdna, "Insufficient buffer size %u, need %u", buf_size, total_size);
+		XDNA_DBG(xdna, "Insufficient buffer size %zu, need %zu", buf_size, total_size);
 		args->element_size = total_size;
 		ret = -ENOSPC;
 		goto unlock_srcu;
@@ -2180,6 +2208,19 @@ static int aie4_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
+
+	if (args->num_element != 1) {
+		XDNA_ERR(xdna, "Invalid num_element %u, expected 1",
+			 args->num_element);
+		return -EINVAL;
+	}
+
+	if (!args->element_size ||
+	    args->element_size > AMDXDNA_MAX_ELEMENT_SIZE) {
+		XDNA_ERR(xdna, "Invalid element_size %u (max %u)",
+			 args->element_size, AMDXDNA_MAX_ELEMENT_SIZE);
+		return -EINVAL;
+	}
 
 	/* Access struct is at the beginning of the buffer */
 	ret = amdxdna_drm_copy_array_from_user(args, &access, sizeof(access), 1);

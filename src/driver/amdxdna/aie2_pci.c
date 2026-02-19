@@ -1185,7 +1185,8 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 }
 
 static int aie2_query_ctx_status_array(struct amdxdna_client *client,
-				       struct amdxdna_drm_hwctx_entry *tmp, pid_t pid, u32 ctx_id)
+				       struct amdxdna_drm_hwctx_entry *tmp, pid_t pid, u32 ctx_id,
+				       u32 max_entries)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
@@ -1229,6 +1230,21 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 			if (ctx_id && ctx_id != ctx->id)
 				continue;
 
+			/*
+			 * Guard against TOCTOU between the runqueue count
+			 * (used to size the buffer) and the xarray iteration
+			 * (used to fill it). A context that is in the xarray
+			 * with priv set but not yet added to the runqueue is
+			 * invisible to the count but visible here. Without
+			 * this check the loop writes past the allocated buffer,
+			 * corrupting adjacent kernel heap memory.
+			 */
+			if (hw_i >= max_entries) {
+				XDNA_ERR(xdna, "Context count exceeds buffer size %u",
+					 max_entries);
+				ret = -ENOSPC;
+				goto out_unlock;
+			}
 			tmp[hw_i].pid = tmp_client->pid;
 			tmp[hw_i].context_id = ctx->id;
 			tmp[hw_i].hwctx_id = ctx->priv->id;
@@ -1285,7 +1301,10 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 
 			hw_i++;
 		}
+out_unlock:
 		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+		if (ret)
+			goto exit;
 	}
 
 	if (pid && ctx_id && !hw_i) {
@@ -1325,16 +1344,30 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	struct amdxdna_dev *xdna;
 	int ret = 0, idx = 0, i;
 	unsigned long hwctx_id;
+	size_t total_size;
 	size_t list_size;
+	size_t buf_size;
 	void __user *buf;
-	u32 total_size;
 	u32 offset = 0;
 	u32 num_bufs;
-	u32 buf_size;
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
-	buf_size = args->num_element * args->element_size;
+
+	if (args->num_element != 1) {
+		XDNA_ERR(xdna, "Invalid num_element %u, expected 1",
+			 args->num_element);
+		return -EINVAL;
+	}
+
+	if (!args->element_size ||
+	    args->element_size > AMDXDNA_MAX_ELEMENT_SIZE) {
+		XDNA_ERR(xdna, "Invalid element_size %u (max %u)",
+			 args->element_size, AMDXDNA_MAX_ELEMENT_SIZE);
+		return -EINVAL;
+	}
+
+	buf_size = (size_t)args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
@@ -1343,7 +1376,7 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	if (buf_size < sizeof(config)) {
-		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
 		return -ENOSPC;
 	}
 
@@ -1388,10 +1421,10 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	num_bufs = ndev->metadata.rows * hwctx->priv->orig_num_col;
-	total_size = num_bufs * SZ_1M;
+	total_size = (size_t)num_bufs * SZ_1M;
 
 	if (buf_size < total_size) {
-		XDNA_DBG(xdna, "Insufficient buffer size %u, need %u", buf_size, total_size);
+		XDNA_DBG(xdna, "Insufficient buffer size %zu, need %zu", buf_size, total_size);
 		args->element_size = total_size;
 		ret = -ENOSPC;
 		goto unlock_srcu;
@@ -1499,6 +1532,19 @@ static int aie2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
+
+	if (args->num_element != 1) {
+		XDNA_ERR(xdna, "Invalid num_element %u, expected 1",
+			 args->num_element);
+		return -EINVAL;
+	}
+
+	if (!args->element_size ||
+	    args->element_size > AMDXDNA_MAX_ELEMENT_SIZE) {
+		XDNA_ERR(xdna, "Invalid element_size %u (max %u)",
+			 args->element_size, AMDXDNA_MAX_ELEMENT_SIZE);
+		return -EINVAL;
+	}
 
 	/* Access struct is at the beginning of the buffer */
 	ret = amdxdna_drm_copy_array_from_user(args, &access, sizeof(access), 1);
@@ -1769,9 +1815,23 @@ static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_dr
 	struct amdxdna_drm_hwctx_entry input = {};
 	struct amdxdna_drm_hwctx_entry *tmp;
 	int ctx_limit, ctx_cnt, ret;
-	u32 buf_size;
+	size_t buf_size;
 
-	buf_size = args->num_element * args->element_size;
+	if (!args->num_element ||
+	    args->num_element > AMDXDNA_MAX_NUM_ELEMENT) {
+		XDNA_ERR(xdna, "Invalid num_element %u (max %u)",
+			 args->num_element, AMDXDNA_MAX_NUM_ELEMENT);
+		return -EINVAL;
+	}
+
+	if (!args->element_size ||
+	    args->element_size > AMDXDNA_MAX_ELEMENT_SIZE) {
+		XDNA_ERR(xdna, "Invalid element_size %u (max %u)",
+			 args->element_size, AMDXDNA_MAX_ELEMENT_SIZE);
+		return -EINVAL;
+	}
+
+	buf_size = (size_t)args->num_element * args->element_size;
 
 	tmp = kcalloc(args->num_element, sizeof(*tmp), GFP_KERNEL);
 	if (!tmp)
@@ -1793,26 +1853,33 @@ static int aie2_get_array_hwctx(struct amdxdna_client *client, struct amdxdna_dr
 			goto exit;
 		}
 
-		ret = aie2_query_ctx_status_array(client, tmp, 0, 0);
-		if (ret)
+		ret = aie2_query_ctx_status_array(client, tmp, 0, 0, args->num_element);
+		if (ret) {
+			if (ret == -ENOSPC) {
+				ctx_cnt = aie2_rq_active_context(&xdna->dev_handle->ctx_rq);
+				args->num_element = ctx_cnt;
+			}
 			goto exit;
+		}
 
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
-		ret = amdxdna_drm_copy_array_from_user(args, &input, sizeof(input), 1);
+		ctx_cnt = 1;
+
+		ret = amdxdna_drm_copy_array_from_user(args, &input, sizeof(input), ctx_cnt);
 		if (ret)
 			goto exit;
 
-		if (args->num_element > 1U || !input.context_id || !input.pid) {
+		if (args->num_element != ctx_cnt || !input.context_id || !input.pid) {
 			XDNA_ERR(xdna, "Invalid context ID %d, PID %lld or num_elements %d",
 				 input.context_id, input.pid, args->num_element);
+			args->num_element = ctx_cnt;
 			ret = -EINVAL;
 			goto exit;
 		}
 
-		ctx_cnt = 1;
-
-		ret = aie2_query_ctx_status_array(client, tmp, input.pid, input.context_id);
+		ret = aie2_query_ctx_status_array(client, tmp, input.pid, input.context_id,
+						  args->num_element);
 		if (ret)
 			goto exit;
 

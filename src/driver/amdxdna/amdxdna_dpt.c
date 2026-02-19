@@ -480,11 +480,12 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt, struct amdxdna_drm_get_
 {
 	struct amdxdna_dpt_metadata footer = {};
 	struct amdxdna_dev *xdna = dpt->xdna;
-	u32 buf_size, offset;
 	void __user *buf;
+	size_t buf_size;
 	int ret = 0;
+	u32 offset;
 
-	buf_size = args->num_element * args->element_size;
+	buf_size = (size_t)args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
@@ -839,9 +840,9 @@ int amdxdna_get_fw_log_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 {
 	struct amdxdna_drm_get_dpt_state config = {};
 	void __user *buf;
-	u32 buf_size;
+	size_t buf_size;
 
-	buf_size = args->num_element * args->element_size;
+	buf_size = (size_t)args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
@@ -850,7 +851,7 @@ int amdxdna_get_fw_log_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_get_
 	}
 
 	if (buf_size < sizeof(config)) {
-		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
 		return -ENOSPC;
 	}
 
@@ -880,9 +881,9 @@ int amdxdna_get_fw_trace_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_ge
 {
 	struct amdxdna_drm_get_dpt_state config = {};
 	void __user *buf;
-	u32 buf_size;
+	size_t buf_size;
 
-	buf_size = args->num_element * args->element_size;
+	buf_size = (size_t)args->num_element * args->element_size;
 	buf = u64_to_user_ptr(args->buffer);
 	if (!access_ok(buf, buf_size)) {
 		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
@@ -891,7 +892,7 @@ int amdxdna_get_fw_trace_configs(struct amdxdna_dev *xdna, struct amdxdna_drm_ge
 	}
 
 	if (buf_size < sizeof(config)) {
-		XDNA_ERR(xdna, "Insufficient buffer size: 0x%x", buf_size);
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
 		return -ENOSPC;
 	}
 
