@@ -1,0 +1,41 @@
+#!/usr/bin/make -f
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+
+# Source-only package - no compilation needed
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	# No configuration needed for source-only package
+
+override_dh_auto_build:
+	# No build needed for source-only package
+
+override_dh_auto_install:
+	# Install kernel driver sources to /usr/src for DKMS
+	mkdir -p debian/amdxdna-dkms/usr/src
+	
+	# Get version from changelog
+	set -e; \
+	DKMS_PKG_NAME=amdxdna; \
+	DKMS_PKG_VERSION=$$(head -1 debian/changelog | sed 's/.*(\(.*\)).*/\1/'); \
+	DKMS_SRC_DIR=debian/amdxdna-dkms/usr/src/$$DKMS_PKG_NAME-$$DKMS_PKG_VERSION; \
+	mkdir -p $$DKMS_SRC_DIR; \
+	\
+	cp -r amdxdna $$DKMS_SRC_DIR/; \
+	cp -r include $$DKMS_SRC_DIR/; \
+	cp -r tools $$DKMS_SRC_DIR/; \
+	cp LICENSE.amdnpu $$DKMS_SRC_DIR/; \
+	cp README.md $$DKMS_SRC_DIR/; \
+	cp dkms.conf $$DKMS_SRC_DIR/
+
+override_dh_auto_clean:
+	# No cleanup needed
+
+override_dh_shlibdeps:
+	# No shared library dependencies for source package
+	true

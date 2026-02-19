@@ -1,0 +1,12 @@
+PACKAGE_NAME="amdxdna"
+PACKAGE_VERSION="@DEBIAN_PKG_VERSION@"
+AUTOINSTALL="yes"
+REMAKE_INITRD="no"
+
+MODULES_CONF="@DEBIAN_PKG_NAME@"
+MODULES="amdxdna"
+KERNELDIR="/lib/modules/$kernelver/build"
+MAKE="make -C ${kernel_source_dir} M=${dkms_tree}/${PACKAGE_NAME}/${PACKAGE_VERSION}/build/amdxdna"
+CLEAN="make -C ${kernel_source_dir} M=${dkms_tree}/${PACKAGE_NAME}/${PACKAGE_VERSION}/build/amdxdna clean"
+INSTALL_MOD_DIR="kernel/drivers/amdnpu"
+PRE_BUILD="run_prebuild.sh"

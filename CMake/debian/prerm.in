@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+
+set -e
+
+XDNA_DKMS_PKG="xrt-amdxdna"
+# Extract version from installed package metadata
+XDNA_VERSION=$(dpkg-query -W -f='${Version}' amdxdna-dkms 2>/dev/null || echo "unknown")
+
+remove_dkms_module() {
+    if [ -x /usr/sbin/dkms ]; then
+        dkms remove -m $XDNA_DKMS_PKG -v $XDNA_VERSION --all || true
+    fi
+}
+
+unload_module() {
+    rmmod amdxdna 2>/dev/null || true
+}
+
+cleanup_udev() {
+    rm -f /etc/udev/rules.d/99-amdxdna.rules
+}
+
+cleanup_dracut() {
+    rm -f /etc/dracut.conf.d/amdxdna.dracut.conf
+}
+
+case "$1" in
+    remove|deconfigure)
+        unload_module
+        remove_dkms_module
+        cleanup_udev
+        cleanup_dracut
+        ;;
+    upgrade)
+        # On upgrade, DKMS will handle module rebuild
+        ;;
+    failed-upgrade)
+        ;;
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

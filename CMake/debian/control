@@ -1,0 +1,35 @@
+Source: amdxdna-dkms
+Priority: optional
+Maintainer: AMD Inc <max.zhen@amd.com>
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.19),
+               dkms,
+               linux-headers-generic | linux-headers,
+               build-essential,
+               git,
+               jq,
+               wget
+Standards-Version: 4.6.1
+Homepage: https://github.com/amd/xdna-driver
+Vcs-Git: https://github.com/amd/xdna-driver.git
+Vcs-Browser: https://github.com/amd/xdna-driver
+
+Package: amdxdna-dkms
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         dkms,
+         linux-headers-generic | linux-headers,
+Description: AMD XDNA NPU kernel driver and firmware via DKMS
+ This package provides the AMD XDNA NPU kernel driver (amdxdna.ko)
+ and associated firmware for AMD XDNA accelerators.
+ .
+ The driver is compiled and installed for your running kernel via DKMS
+ (Dynamic Kernel Module Support). This ensures the driver works with
+ kernel updates.
+ .
+ Supported hardware:
+  - AMD NPU1 (PCI ID 1502)
+  - AMD NPU3 (PCI ID 17f1, 17f2)
+  - AMD NPU4 (PCI ID 17f0 Rev 10)
+  - AMD NPU5 (PCI ID 17f0 Rev 11)
