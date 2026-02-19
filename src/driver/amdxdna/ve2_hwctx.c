@@ -967,6 +967,12 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 	if (priv_ctx->misc_intrpt_flag)
 		return true;
 
+	dma_sync_single_for_cpu(hwctx->client->xdna->ddev.dev,
+				priv_ctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr +
+				HSA_QUEUE_READ_INDEX_OFFSET,
+				sizeof(u64),
+				DMA_FROM_DEVICE);
+
 	read_index = (u64 *)((char *)priv_ctx->hwctx_hsa_queue.hsa_queue_p +
 			HSA_QUEUE_READ_INDEX_OFFSET);
 
