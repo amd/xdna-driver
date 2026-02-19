@@ -84,6 +84,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "\tFatal error exception PC: 0x%x", r->fatal_info.exception_pc);
 		XDNA_ERR(xdna, "\tFatal error app module: 0x%x", r->fatal_info.app_module);
 		XDNA_ERR(xdna, "\tFatal error task ID: %d", r->fatal_info.task_index);
+		XDNA_ERR(xdna, "\tTimed out sub command ID: %d", r->run_list_id);
 
 		ctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
 		ctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE2;
@@ -93,6 +94,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		ctx->health_data.aie2.fatal_error_type = r->fatal_info.fatal_type;
 		ctx->health_data.aie2.txn_op_idx = r->txn_op_id;
 		ctx->health_data.aie2.ctx_pc = r->ctx_pc;
+		ctx->timeout_run_list_id = r->run_list_id;
 		ctx->health_reported = false;
 	}
 	amdxdna_mgmt_buff_free(dma_hdl);
@@ -312,13 +314,21 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 		if (amdxdna_cmd_get_op(cmd_abo) == ERT_CMD_CHAIN) {
 			struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(cmd_abo, NULL);
 			struct amdxdna_gem_obj *abo;
-			u32 boh = cc->data[0];
+			u32 idx = job->ctx->timeout_run_list_id;
+			u32 boh;
 
 			/*
-			 * In the async callback/timeout case, driver sets the error index to 0,
-			 * state to timeout, and dump the app health in the first subcmd BO.
+			 * Use run_list_id from app health to identify the timed out
+			 * subcmd. If invalid, fall back to the first subcmd.
 			 */
-			cc->error_index = 0;
+			if (idx >= cc->command_count) {
+				XDNA_WARN(xdna, "Invalid run_list_id %d, command count %d",
+					  idx, cc->command_count);
+				idx = 0;
+			}
+			boh = cc->data[idx];
+
+			cc->error_index = idx;
 			amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
 			abo = amdxdna_gem_get_obj(job->ctx->client, boh, AMDXDNA_BO_SHARE);
 			if (!abo) {

@@ -132,11 +132,16 @@ ve2_partition_initialize(struct device *dev,
 static inline int get_ctx_read_index(struct amdxdna_ctx *hwctx, u64 *read_index)
 {
 	u64 *index_ptr;
+	struct ve2_hsa_queue *queue;
 
 	if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p || !read_index)
 		return -EINVAL;
 
-	index_ptr = (u64 *)((char *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p +
+	queue = &hwctx->priv->hwctx_hsa_queue;
+	/* Sync read_index before reading (device may have written) */
+	hsa_queue_sync_read_index_for_read(queue);
+
+	index_ptr = (u64 *)((char *)queue->hsa_queue_p +
 			HSA_QUEUE_READ_INDEX_OFFSET);
 	*read_index = *index_ptr;
 
@@ -146,11 +151,15 @@ static inline int get_ctx_read_index(struct amdxdna_ctx *hwctx, u64 *read_index)
 static inline int get_ctx_write_index(struct amdxdna_ctx *hwctx, u64 *write_index)
 {
 	u64 *index_ptr;
+	struct ve2_hsa_queue *queue;
 
 	if (!hwctx || !hwctx->priv || !hwctx->priv->hwctx_hsa_queue.hsa_queue_p || !write_index)
 		return -EINVAL;
 
-	index_ptr = (u64 *)((char *)hwctx->priv->hwctx_hsa_queue.hsa_queue_p +
+	queue = &hwctx->priv->hwctx_hsa_queue;
+	/* write_index is written by CPU, no sync needed for reading */
+
+	index_ptr = (u64 *)((char *)queue->hsa_queue_p +
 			HSA_QUEUE_WRITE_INDEX_OFFSET);
 	*write_index = *index_ptr;
 

@@ -3,6 +3,8 @@
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
 
+#include <linux/dma-mapping.h>
+
 #define HOST_QUEUE_ENTRY        32
 #define HOST_INDIRECT_PKT_NUM   36
 
@@ -99,7 +101,7 @@ struct hsa_queue {
 	struct host_queue_header	hq_header;
 	struct host_queue_packet	hq_entry[HOST_QUEUE_ENTRY];
 	struct host_queue_indirect_hdr	hq_indirect_hdr[HOST_QUEUE_ENTRY];
-	struct host_queue_indirect_pkt	hq_indirect_pkt[HOST_QUEUE_ENTRY][HOST_INDIRECT_PKT_NUM];
+	struct host_queue_indirect_pkt	hq_indirect_pkt[HOST_INDIRECT_PKT_NUM][HOST_QUEUE_ENTRY];
 };
 
 struct ve2_hq_complete {
@@ -119,7 +121,114 @@ struct ve2_hsa_queue {
 	// hq_lock protects [read | write]_index and reserved_write_index
 	struct mutex			hq_lock;
 	u64				reserved_write_index;
+	/* Device used for host queue allocation */
+	struct device			*alloc_dev;
 };
+
+/*
+ * Queue synchronization helpers for non-cache-coherent device
+ *
+ * Since the device is not cache coherent, we need to sync DMA buffers
+ * whenever the CPU writes data that the device will read, or when
+ * the CPU reads data that the device may have written.
+ *
+ * We sync only specific fields to avoid affecting other fields that
+ * the device may have written.
+ */
+
+/* Sync read_index field before CPU reads (device writes this) */
+static inline void hsa_queue_sync_read_index_for_read(struct ve2_hsa_queue *queue)
+{
+	dma_addr_t read_idx_addr = queue->hsa_queue_mem.dma_addr +
+		offsetof(struct hsa_queue, hq_header) +
+		offsetof(struct host_queue_header, read_index);
+
+	dma_sync_single_for_cpu(queue->alloc_dev,
+				read_idx_addr,
+				sizeof(queue->hsa_queue_p->hq_header.read_index),
+				DMA_FROM_DEVICE);
+}
+
+/* Sync write_index field after CPU writes (device reads this) */
+static inline void hsa_queue_sync_write_index_for_write(struct ve2_hsa_queue *queue)
+{
+	dma_addr_t write_idx_addr = queue->hsa_queue_mem.dma_addr +
+		offsetof(struct hsa_queue, hq_header) +
+		offsetof(struct host_queue_header, write_index);
+
+	dma_sync_single_for_device(queue->alloc_dev,
+				   write_idx_addr,
+				   sizeof(queue->hsa_queue_p->hq_header.write_index),
+				   DMA_TO_DEVICE);
+}
+
+/* Sync packet data after CPU writes (device will read) */
+static inline void hsa_queue_sync_packet_for_write(struct ve2_hsa_queue *queue,
+						   u32 slot_idx)
+{
+	dma_addr_t pkt_dma_addr = queue->hsa_queue_mem.dma_addr +
+		offsetof(struct hsa_queue, hq_entry) +
+		slot_idx * sizeof(struct host_queue_packet);
+
+	dma_sync_single_for_device(queue->alloc_dev,
+				   pkt_dma_addr,
+				   sizeof(struct host_queue_packet),
+				   DMA_TO_DEVICE);
+}
+
+/* Sync indirect header after CPU writes (device will read) */
+static inline void hsa_queue_sync_indirect_hdr_for_write(struct ve2_hsa_queue *queue,
+							 u32 slot_idx)
+{
+	dma_addr_t hdr_dma_addr = queue->hsa_queue_mem.dma_addr +
+		offsetof(struct hsa_queue, hq_indirect_hdr) +
+		slot_idx * sizeof(struct host_queue_indirect_hdr);
+
+	dma_sync_single_for_device(queue->alloc_dev,
+				   hdr_dma_addr,
+				   sizeof(struct host_queue_indirect_hdr),
+				   DMA_TO_DEVICE);
+}
+
+/* Sync indirect packet after CPU writes (device will read) */
+static inline void hsa_queue_sync_indirect_pkt_for_write(struct ve2_hsa_queue *queue,
+							 u32 uc_idx, u32 slot_idx)
+{
+	dma_addr_t pkt_dma_addr = queue->hsa_queue_mem.dma_addr +
+		offsetof(struct hsa_queue, hq_indirect_pkt) +
+		(uc_idx * HOST_QUEUE_ENTRY + slot_idx) * sizeof(struct host_queue_indirect_pkt);
+
+	dma_sync_single_for_device(queue->alloc_dev,
+				   pkt_dma_addr,
+				   sizeof(struct host_queue_indirect_pkt),
+				   DMA_TO_DEVICE);
+}
+
+/* Sync completion memory before CPU reads (device may have written) */
+static inline void hsa_queue_sync_completion_for_read(struct ve2_hsa_queue *queue,
+						      u32 slot_idx)
+{
+	dma_addr_t comp_dma_addr = queue->hq_complete.hqc_dma_addr +
+		slot_idx * sizeof(u64);
+
+	dma_sync_single_for_cpu(queue->alloc_dev,
+				comp_dma_addr,
+				sizeof(u64),
+				DMA_FROM_DEVICE);
+}
+
+/* Sync completion memory after CPU writes (device will read) */
+static inline void hsa_queue_sync_completion_for_write(struct ve2_hsa_queue *queue,
+						       u32 slot_idx)
+{
+	dma_addr_t comp_dma_addr = queue->hq_complete.hqc_dma_addr +
+		slot_idx * sizeof(u64);
+
+	dma_sync_single_for_device(queue->alloc_dev,
+				   comp_dma_addr,
+				   sizeof(u64),
+				   DMA_TO_DEVICE);
+}
 
 /* handshake */
 #define ALIVE_MAGIC 0x404C5645

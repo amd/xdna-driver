@@ -30,33 +30,34 @@ io_test_parameter_init(int perf, int type, int wait, bool debug = false)
 }
 
 std::unique_ptr<io_test_bo_set_base>
-alloc_and_init_bo_set(device* dev, const char *xclbin)
+alloc_and_init_bo_set(device* dev, const char *tag, const flow_type* flow = nullptr)
 {
-  auto kernel_type = get_kernel_type(dev, xclbin);
+  const auto& info = get_binary_info(dev, tag, flow);
+  const std::string tag_str(tag ? tag : "");
 
   std::unique_ptr<io_test_bo_set_base> base;
-  switch (kernel_type) {
-  case KERNEL_TYPE_DPU_SEQ:
+  switch (info.flow) {
+  case LEGACY:
     base = std::make_unique<io_test_bo_set>(dev);
     break;
-  case KERNEL_TYPE_TXN:
-    base = std::make_unique<elf_io_test_bo_set>(dev, std::string(xclbin));
+  case PARTIAL_ELF:
+    base = std::make_unique<elf_io_test_bo_set>(dev, tag_str, flow);
     break;
-  case KERNEL_TYPE_TXN_FULL_ELF:
-    base = std::make_unique<elf_full_io_test_bo_set>(dev, xclbin ? std::string(xclbin) : get_xclbin_name(dev));
+  case FULL_ELF:
+    base = std::make_unique<elf_full_io_test_bo_set>(dev, tag_str, flow);
     break;
-  case KERNEL_TYPE_TXN_PREEMPT:
-  case KERNEL_TYPE_TXN_FULL_ELF_PREEMPT:
-    base = std::make_unique<elf_preempt_io_test_bo_set>(dev, std::string(xclbin));
+  case PREEMPT_PARTIAL_ELF:
+  case PREEMPT_FULL_ELF:
+    base = std::make_unique<elf_preempt_io_test_bo_set>(dev, tag_str, flow);
     break;
   default:
-    throw std::runtime_error("Unknown kernel type");
+    throw std::runtime_error("Unknown flow type");
   }
 
   auto& bos = base->get_bos();
 
   if (io_test_parameters.type == IO_TEST_BAD_RUN) {
-    if (kernel_type != KERNEL_TYPE_DPU_SEQ)
+    if (info.flow != LEGACY)
       throw std::runtime_error("ELF flow can't support bad run");
 
     auto instruction_p = bos[IO_TEST_BO_INSTRUCTION].tbo->map();
@@ -248,7 +249,7 @@ get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pai
   auto cur = get_fine_preemption_counters(dev);
   uint64_t fine_preemption_count;
   int index = -1;
-  
+
   // Find the user task ID for the ctx id
   for (int i = 0; i < cur.size(); i++) {
     auto id = cur[i].first;
@@ -269,14 +270,14 @@ get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pai
 
 void
 io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
-  int cmds_per_list, const char *xclbin)
+  int cmds_per_list, const char *tag, const flow_type* flow = nullptr)
 {
   // Allocate set of BOs for command submission based on num_cmdlist and cmds_per_list
   // Intentionally this is done before context creation to make sure BO and context
   // are totally decoupled.
   std::vector< std::unique_ptr<io_test_bo_set_base> > bo_set;
   for (int i = 0; i < num_cmdlist * cmds_per_list; i++)
-    bo_set.push_back(std::move(alloc_and_init_bo_set(dev, xclbin)));
+    bo_set.push_back(std::move(alloc_and_init_bo_set(dev, tag, flow)));
 
   bool preemption_enabled = false;
   std::vector<std::pair<int, uint64_t>> pre_cntrs;
@@ -287,7 +288,7 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   }
 
   // Creating HW context for cmd submission
-  hw_ctx hwctx{dev, xclbin};
+  hw_ctx hwctx{dev, tag, flow};
   auto hwq = hwctx.get()->get_hw_queue();
 
   // Initialize cmd before submission
@@ -381,10 +382,9 @@ TEST_io_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
-  bool elf = arg[3];
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 1, 1, run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
+  io_test(id, sdev.get(), total, 1, 1, run_type == IO_TEST_NOOP_RUN ? "nop" : nullptr);
 }
 
 void
@@ -393,10 +393,9 @@ TEST_io_throughput(device::id_type id, std::shared_ptr<device>& sdev, arg_type& 
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
-  bool elf = arg[3];
 
   io_test_parameter_init(IO_TEST_THRUPUT_PERF, run_type, wait_type);
-  io_test(id, sdev.get(), total, 8, 1, run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
+  io_test(id, sdev.get(), total, 8, 1, run_type == IO_TEST_NOOP_RUN ? "nop" : nullptr);
 }
 
 void
@@ -405,7 +404,6 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total = static_cast<unsigned int>(arg[2]);
-  bool elf = arg[3];
   const size_t max_cmd_per_list = 24;
 
   io_test_parameter_init(IO_TEST_LATENCY_PERF, run_type, wait_type);
@@ -414,7 +412,7 @@ TEST_io_runlist_latency(device::id_type id, std::shared_ptr<device>& sdev, arg_t
       cmds_per_list = max_cmd_per_list;
     int total_hwq_submit = total / cmds_per_list;
     io_test(id, sdev.get(), total_hwq_submit, 1, cmds_per_list,
-      run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
+      run_type == IO_TEST_NOOP_RUN ? "nop" : nullptr);
   }
 }
 
@@ -424,7 +422,6 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, ar
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
   unsigned int wait_type = static_cast<unsigned int>(arg[1]);
   unsigned int total_commands = static_cast<unsigned int>(arg[2]);
-  bool elf = arg[3];
   int num_bo_set = 256;
   const size_t max_cmd_per_list = 24;
 
@@ -435,7 +432,7 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, ar
     int num_cmdlist = num_bo_set / cmds_per_list;
     int total_hwq_submit = total_commands / cmds_per_list;
     io_test(id, sdev.get(), total_hwq_submit, num_cmdlist, cmds_per_list,
-      run_type == IO_TEST_NOOP_RUN ? (elf ? "nop.elf" : "nop.xclbin") : nullptr);
+      run_type == IO_TEST_NOOP_RUN ? "nop" : nullptr);
   }
 }
 
@@ -453,24 +450,26 @@ TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_
 
 void
 elf_io(device::id_type id, std::shared_ptr<device>& sdev,
-  const std::vector<uint64_t>& arg, const char *xclbin)
+  const std::vector<uint64_t>& arg, const char *tag, const flow_type* flow = nullptr)
 {
   unsigned int run_type = static_cast<unsigned int>(arg[0]);
 
   io_test_parameter_init(IO_TEST_NO_PERF, run_type, IO_TEST_IOCTL_WAIT);
-  io_test(id, sdev.get(), 1, 1, arg[1], xclbin);
+  io_test(id, sdev.get(), 1, 1, arg[1], tag, flow);
 }
 
 void
 TEST_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, sdev, arg, "design.xclbin");
+  static const flow_type flow = PARTIAL_ELF;
+  elf_io(id, sdev, arg, "good", &flow);
 }
 
 void
 TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, sdev, arg, "pm_reload.xclbin");
+  static const flow_type flow = PREEMPT_PARTIAL_ELF;
+  elf_io(id, sdev, arg, "good", &flow);
 }
 
 void
@@ -507,14 +506,15 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
 void
 TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {
-  elf_io(id, sdev, arg, "yolo_fullelf_aximm.elf");
+  static const flow_type flow = PREEMPT_FULL_ELF;
+  elf_io(id, sdev, arg, "good", &flow);
 }
 
 void
 TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   elf_io_negative_test_bo_set boset{sdev.get(),
-    "bad_txn.xclbin", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+    "bad", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
   boset.run();
 }
 
@@ -531,7 +531,7 @@ TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 void
 TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  async_error_aie4_io_test_bo_set async_error_aie4_io_test_bo_set{sdev.get(), "bad_ctrl.elf"};
+  async_error_aie4_io_test_bo_set async_error_aie4_io_test_bo_set{sdev.get(), "bad"};
   // verification is inside run()
   async_error_aie4_io_test_bo_set.run();
 }
@@ -579,17 +579,18 @@ void
 TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   elf_io_negative_test_bo_set bo_set{sdev.get(),
-    "bad_txn.xclbin", "instr_invalid_addr.elf", ERT_CMD_STATE_TIMEOUT, 0xFFFFFFFF};
+    "bad", "instr_invalid_addr.elf", ERT_CMD_STATE_TIMEOUT, 0xFFFFFFFF};
   bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
-  elf_io(id, sdev, params, "design.xclbin");
+  static const flow_type flow = PARTIAL_ELF;
+  elf_io(id, sdev, params, "good", &flow);
 }
 
 void
 TEST_io_gemm(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_gemm_test_bo_set boset{sdev.get(), "gemm.xclbin", "gemm_int8.elf"};
+  elf_io_gemm_test_bo_set boset{sdev.get(), "gemm", "gemm_int8.elf"};
   boset.run();
 }
 
@@ -597,25 +598,26 @@ void
 TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   bool is_timeout = static_cast<bool>(arg[0]);
-  const char *good_xclbin = "design.xclbin";
-  const char *bad_xclbin = "bad_txn.xclbin";
+  const char *good_tag = "good";
+  const char *bad_tag = "bad";
+  static const flow_type good_flow = PARTIAL_ELF;
 
   // Creating commands and BOs
 
   // Two good ones
-  elf_io_test_bo_set good_bo_set1{sdev.get(), good_xclbin};
-  elf_io_test_bo_set good_bo_set2{sdev.get(), good_xclbin};
+  elf_io_test_bo_set good_bo_set1{sdev.get(), good_tag, &good_flow};
+  elf_io_test_bo_set good_bo_set2{sdev.get(), good_tag, &good_flow};
   // A timeout one
-  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), bad_xclbin,
+  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), bad_tag,
     "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
-  // A error one
-  elf_io_negative_test_bo_set error_bo_set{sdev.get(), bad_xclbin,
+  // An error one
+  elf_io_negative_test_bo_set error_bo_set{sdev.get(), bad_tag,
     "instr_invalid_op.elf", ERT_CMD_STATE_ERROR, 0};
 
   // Creating HW context for cmd submission. We use the good xclbin here to
   // make sure good cmd can complete successfully. The bad ones don't really
   // require any specific xclbin to fail.
-  hw_ctx hwctx{sdev.get(), good_xclbin};
+  hw_ctx hwctx{sdev.get(), good_tag, &good_flow};
 
   // Initialize cmd before submission
   good_bo_set1.init_cmd(hwctx, false);
@@ -629,8 +631,7 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
 
   // Create and send the chained command, keep the bad one in the middle
   // Command chain: good, bad (error or timeout), good
-  // In case of timeout, the index returned from fw is always 0.
-  const uint32_t bad_index = is_timeout ? 0 : 1;
+  const uint32_t bad_index = 1;
   const uint32_t bad_state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ERROR;
   io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : &error_bo_set;
   std::vector<bo*> tmp_cmd_bos;
@@ -645,7 +646,7 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   auto hwq = hwctx.get()->get_hw_queue();
   auto cmd_hdl = cbo->get();
   auto cmd_pkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
-  
+
   hwq->submit_command(cmd_hdl);
   hwq->wait_command(cmd_hdl, 0);
 

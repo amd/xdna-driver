@@ -20,7 +20,7 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
 
-#define MAX_MEM_REGIONS	16
+#define MAX_MEM_REGIONS	8
 
 #define XDNA_INFO(xdna, fmt, args...)	dev_info((xdna)->ddev.dev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...) \
@@ -204,6 +204,7 @@ struct amdxdna_client {
 
 	struct iommu_sva		*sva;
 	int				pasid;
+	struct mm_struct		*mm;
 
 	struct amdxdna_stats		stats;
 };

@@ -244,6 +244,7 @@ struct amdxdna_ctx {
 	struct semaphore		io_slot_sem;
 
 	struct amdxdna_ctx_health_data	health_data;
+	u32				timeout_run_list_id;
 	bool				health_reported;
 
 	struct list_head		entry;

@@ -20,6 +20,7 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_pm.h"
 #include "amdxdna_trace.h"
+#include "amdxdna_mgmt.h"
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
 #endif
@@ -406,76 +407,6 @@ stop_smu:
 	return ret;
 }
 
-static int aie4_hw_start(struct amdxdna_dev *xdna)
-{
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	int ret;
-
-	if (ndev->dev_status >= AIE4_DEV_START) {
-		XDNA_INFO(xdna, "device is already started");
-		return 0;
-	}
-
-	ret = pci_enable_device(pdev);
-	if (ret) {
-		XDNA_ERR(xdna, "pcim enable device failed, ret %d", ret);
-		return ret;
-	}
-	pci_set_master(pdev);
-
-	/* This lock will be released in disable_device */
-	mutex_lock(&ndev->aie4_lock);
-
-	ret = aie4_fw_load(ndev);
-	if (ret)
-		goto disable_device;
-
-	ret = aie4_irq_init(xdna);
-	if (ret)
-		goto fw_unload;
-
-	ret = aie4_mailbox_init(xdna);
-	if (ret)
-		goto disable_irq;
-
-	ret = aie4_mgmt_fw_init(ndev);
-	if (ret)
-		goto disable_mailbox;
-
-	ret = aie4_pm_init(ndev);
-	if (ret)
-		goto disable_mailbox;
-
-	ret = aie4_mgmt_fw_query(ndev);
-	if (ret)
-		goto stop_pm;
-
-	ret = aie4_error_async_events_alloc(ndev);
-	if (ret)
-		goto stop_pm;
-
-	mutex_unlock(&ndev->aie4_lock);
-	ndev->dev_status = AIE4_DEV_START;
-
-	return 0;
-
-stop_pm:
-	aie4_pm_fini(ndev);
-disable_mailbox:
-	aie4_mailbox_fini(ndev);
-disable_irq:
-	aie4_irq_fini(ndev);
-fw_unload:
-	aie4_fw_unload(ndev);
-disable_device:
-	mutex_unlock(&ndev->aie4_lock);
-	pci_clear_master(pdev);
-	pci_disable_device(pdev);
-
-	return ret;
-}
-
 static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
@@ -509,23 +440,6 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
-{
-	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
-	int ret;
-
-	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
-		aie4_detach_work_buffer(ndev);
-
-	ret = aie4_suspend_fw(ndev);
-	if (ret) {
-		XDNA_ERR(ndev->xdna, "suspend_fw failed, ret %d", ret);
-		return;
-	}
-
-	XDNA_DBG(ndev->xdna, "npu firmware suspended");
-}
-
 static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
@@ -547,9 +461,91 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 		XDNA_DBG(xdna, "id %d", ndev->partition_id);
 }
 
+static int aie4_hw_start(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	if (ndev->dev_status >= AIE4_DEV_START) {
+		XDNA_INFO(xdna, "device is already started");
+		return 0;
+	}
+
+	/* This lock will be released in disable_device */
+	mutex_lock(&ndev->aie4_lock);
+
+	ret = aie4_fw_load(ndev);
+	if (ret)
+		goto disable_device;
+
+	ret = aie4_irq_init(xdna);
+	if (ret)
+		goto fw_unload;
+
+	ret = aie4_mailbox_init(xdna);
+	if (ret)
+		goto disable_irq;
+
+	ret = aie4_mgmt_fw_init(ndev);
+	if (ret)
+		goto disable_mailbox;
+
+	ret = aie4_pm_init(ndev);
+	if (ret)
+		goto disable_mailbox;
+
+	ret = aie4_mgmt_fw_query(ndev);
+	if (ret)
+		goto stop_pm;
+
+	ret = aie4_partition_init(ndev);
+	if (ret)
+		goto stop_pm;
+
+	ret = aie4_error_async_events_alloc(ndev);
+	if (ret)
+		goto partition_fini;
+
+	mutex_unlock(&ndev->aie4_lock);
+	ndev->dev_status = AIE4_DEV_START;
+
+	return 0;
+
+partition_fini:
+	aie4_partition_fini(ndev);
+stop_pm:
+	aie4_pm_fini(ndev);
+disable_mailbox:
+	aie4_mailbox_fini(ndev);
+disable_irq:
+	aie4_irq_fini(ndev);
+fw_unload:
+	aie4_fw_unload(ndev);
+disable_device:
+	mutex_unlock(&ndev->aie4_lock);
+
+	return ret;
+}
+
+static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
+{
+	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
+	int ret;
+
+	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
+		aie4_detach_work_buffer(ndev);
+
+	ret = aie4_suspend_fw(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "suspend_fw failed, ret %d", ret);
+		return;
+	}
+
+	XDNA_DBG(ndev->xdna, "npu firmware suspended");
+}
+
 static void aie4_hw_stop(struct amdxdna_dev *xdna)
 {
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
@@ -569,8 +565,7 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 
 	aie4_fw_unload(ndev);
 
-	pci_clear_master(pdev);
-	pci_disable_device(pdev);
+	aie4_error_async_events_free(ndev);
 
 	ndev->dev_status = AIE4_DEV_INIT;
 }
@@ -742,9 +737,13 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 	set_bit(xdna->dev_info->sram_bar, &bars);
-	set_bit(xdna->dev_info->psp_bar, &bars);
-	set_bit(xdna->dev_info->smu_bar, &bars);
-	set_bit(xdna->dev_info->doorbell_bar, &bars);
+	if (!is_npu3_vf_dev(pdev)) {
+		set_bit(xdna->dev_info->psp_bar, &bars);
+		set_bit(xdna->dev_info->smu_bar, &bars);
+	}
+
+	if (!is_npu3_pf_dev(pdev))
+		set_bit(xdna->dev_info->doorbell_bar, &bars);
 
 	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
 		if (!test_bit(i, &bars))
@@ -752,8 +751,7 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 		tbl[i] = pcim_iomap(pdev, i, 0);
 		if (!tbl[i]) {
 			XDNA_ERR(xdna, "map bar %d failed", i);
-			ret = -ENOMEM;
-			goto release_fw;
+			return -ENOMEM;
 		}
 	}
 
@@ -767,36 +765,27 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 	ret = aie4_prepare_firmware(ndev, npufw, certfw);
-	if (ret)
-		goto release_fw;
 	aie4_release_firmware(ndev, npufw, certfw);
+	if (ret)
+		return ret;
 
+	pci_set_master(pdev);
+
+	/*TODO: split this to alloc and attach, same as work buffer */
 	ret = aie4_alloc_work_buffer(ndev);
 	if (ret)
-		goto release_fw;
+		goto clear_master;
 
 	ret = aie4_hw_start(xdna);
-	if (ret) {
-		XDNA_ERR(xdna, "aie4 hw start failed, ret %d", ret);
-		goto free_work_buf;
-	}
-
-	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_partition_init(ndev);
-	mutex_unlock(&ndev->aie4_lock);
 	if (ret)
-		goto hw_stop;
+		goto free_work_buf;
 
 	return ret;
 
-hw_stop:
-	mutex_lock(&ndev->aie4_lock);
-	aie4_hw_stop(xdna);
-	mutex_unlock(&ndev->aie4_lock);
 free_work_buf:
 	aie4_free_work_buffer(ndev);
-release_fw:
-	aie4_release_firmware(ndev, npufw, certfw);
+clear_master:
+	pci_clear_master(pdev);
 
 	return ret;
 }
@@ -1228,37 +1217,47 @@ error:
 static void aie4_hw_suspend(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	mutex_lock(&ndev->aie4_lock);
 	aie4_ctx_suspend_all(xdna);
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
+
+	/* explicitly clear and disable pci */
+	pci_clear_master(pdev);
+	pci_disable_device(pdev);
 }
 
 static int aie4_hw_resume(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
+
+	/* explicitly enable and set pci */
+	ret = pci_enable_device(pdev);
+	if (ret) {
+		XDNA_ERR(xdna, "resume pci failed ret %d", ret);
+		return ret;
+	}
+	pci_set_master(pdev);
 
 	ret = aie4_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "resume hw failed ret %d", ret);
-		return ret;
+		goto clear_pci;
 	}
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_partition_init(ndev);
-	if (ret)
-		goto hw_stop;
-
 	aie4_ctx_resume_all(xdna);
 	mutex_unlock(&ndev->aie4_lock);
 
 	return 0;
-hw_stop:
-	aie4_hw_stop(xdna);
-	mutex_unlock(&ndev->aie4_lock);
 
+clear_pci:
+	pci_clear_master(pdev);
+	pci_disable_device(pdev);
 	return ret;
 }
 
@@ -1277,11 +1276,17 @@ static void aie4_iommu_fini(struct amdxdna_dev_hdl *ndev)
 static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	mutex_lock(&ndev->aie4_lock);
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
+
+	/* TODO: (work, async, etc free here) */
 	aie4_free_work_buffer(ndev);
+
+	pci_clear_master(pdev);
+	/* pcim_enable_device will be disabled automatically */
 }
 
 static void aie4_pci_fini(struct amdxdna_dev *xdna)
@@ -1697,6 +1702,7 @@ static int aie4_query_telemetry(struct amdxdna_client *client,
 				struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	struct amdxdna_dev_hdl *ndev;
 	dma_addr_t dma_addr;
 	size_t aligned_sz;
@@ -1715,15 +1721,30 @@ static int aie4_query_telemetry(struct amdxdna_client *client,
 	}
 
 	ndev = xdna->dev_handle;
-	aligned_sz = PAGE_ALIGN(args->buffer_size);
-	buff = dma_alloc_noncoherent(xdna->ddev.dev, aligned_sz, &dma_addr,
-				     DMA_FROM_DEVICE, GFP_KERNEL);
-	if (!buff)
-		return -ENOMEM;
+	aligned_sz = args->buffer_size;
+
+	if (args->buffer_size < MIN_TELEMETRY_BUFF_SIZE) {
+		XDNA_DBG(xdna, "Telemetry: user buffer %u bytes < minimum %u bytes",
+			 args->buffer_size, MIN_TELEMETRY_BUFF_SIZE);
+		return -ENOSPC;
+	}
+
+	dma_hdl = amdxdna_mgmt_buff_alloc(xdna, aligned_sz, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_hdl))
+		return PTR_ERR(dma_hdl);
+
+	buff = amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0);
+	if (IS_ERR(buff)) {
+		XDNA_ERR(xdna, "Failed to get CPU address for telemetry buffer");
+		ret = PTR_ERR(buff);
+		goto free_buf;
+	}
+
+	dma_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
 
 	memset(buff, 0, aligned_sz);
-	drm_clflush_virt_range(buff, aligned_sz); /* device can access */
-	ret = aie4_query_aie_telemetry(ndev, type, dma_addr + sizeof(u64), aligned_sz);
+	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	ret = aie4_query_aie_telemetry(ndev, type, client->pasid, dma_addr, aligned_sz);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
 		goto free_buf;
@@ -1735,7 +1756,7 @@ static int aie4_query_telemetry(struct amdxdna_client *client,
 		ret = -EFAULT;
 
 free_buf:
-	dma_free_noncoherent(xdna->ddev.dev, aligned_sz, buff, dma_addr, DMA_FROM_DEVICE);
+	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
 }
 

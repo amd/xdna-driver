@@ -687,7 +687,7 @@ struct fatal_error_info {
 	u32 exception_pc;       /* Program Counter at the time of the exception */
 	u32 app_module;         /* Error Module name */
 	u32 task_index;         /* Index of the task in which the error occurred */
-	u32 reserved[128];      /* for future use */
+	u32 reserved[127];      /* for future use */
 };
 
 struct app_health_report {
@@ -718,6 +718,8 @@ struct app_health_report {
 	u32				ctx_pc;
 #define AIE2_APP_HEALTH_RESET_FATAL_INFO	0
 	struct fatal_error_info		fatal_info;
+	/* Index of the most recently executed run list entry. Default value is UINT32_MAX */
+	u32				run_list_id;
 };
 
 struct get_app_health_req {

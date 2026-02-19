@@ -201,16 +201,6 @@ bool amdxdna_use_cma(void)
 #endif
 }
 
-static int get_cma_mem_index(u64 flags)
-{
-	/*
-	 * Extract lower 8 bits for memory index (0-255 range).
-	 * Valid indexes: 0-15
-	 * Invalid indexes (16-255): trigger fallback to default CMA region
-	 */
-	return flags & 0xFF;
-}
-
 static bool get_cacheable_flag(u64 flags)
 {
 	return (flags & AMDXDNA_BO_FLAGS_CACHEABLE) != 0;
@@ -222,12 +212,11 @@ static bool get_cacheable_flag(u64 flags)
  * @max_regions: Maximum number of regions in the array
  * @fallback_dev: Device to use as final fallback (system default CMA)
  * @size: Size of buffer to allocate
- * @flags: Flags containing region index in bits [7:0]
+ * @flags: Cacheable and region index bitmap
  *
  * Attempts allocation in order:
- * 1. Requested region (extracted from flags)
- * 2. Other available initialized regions
- * 3. System default CMA (fallback_dev)
+ * 1. Requested region/s (extracted from flags)
+ * 2. System default CMA (fallback_dev)
  *
  * Return: dma_buf pointer on success, ERR_PTR on failure
  */
@@ -237,28 +226,20 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_d
 						  size_t size, u64 flags)
 {
 	struct dma_buf *dma_buf;
-	int mem_index;
 	bool cacheable;
-	int i;
+	u32 mem_bitmap;
+	unsigned int i;
 
-	mem_index = get_cma_mem_index(flags);
 	cacheable = get_cacheable_flag(flags);
+	mem_bitmap = (u32)(flags & 0xFFULL);
 
-	/* Try requested region first */
-	if (mem_index < max_regions && region_devs[mem_index]) {
-		dma_buf = amdxdna_get_cma_buf(region_devs[mem_index], size, cacheable);
-		if (!IS_ERR(dma_buf))
-			return dma_buf;
-	}
-
-	/* Try any other available initialized region */
+	/* Try to allocate from the requested region(s) in bitmap order (bit 0, then 1, ...). */
 	for (i = 0; i < max_regions; i++) {
-		if (i == mem_index || !region_devs[i])
-			continue;
-
-		dma_buf = amdxdna_get_cma_buf(region_devs[i], size, cacheable);
-		if (!IS_ERR(dma_buf))
-			return dma_buf;
+		if ((mem_bitmap & (1U << i)) && region_devs[i]) {
+			dma_buf = amdxdna_get_cma_buf(region_devs[i], size, cacheable);
+			if (!IS_ERR(dma_buf))
+				return dma_buf;
+		}
 	}
 
 	/* Final fallback to system default CMA */
