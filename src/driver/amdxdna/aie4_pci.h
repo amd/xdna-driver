@@ -220,6 +220,7 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
 				 struct amdxdna_mgmt_dma_hdl *dma_hdl, void *handle,
 				 int (*cb)(void*, void __iomem *, size_t));
 int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char *buf, u32 size, u32 *cols_filled);
+int aie4_query_cert_version(struct amdxdna_dev_hdl *ndev);
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, u32 pasid, dma_addr_t addr,
