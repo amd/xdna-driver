@@ -224,4 +224,20 @@ private:
   std::unique_ptr<xrt_core::buffer_handle> m_dbo;
 };
 
+class elf_io_aie_debug_test_bo_set : public io_test_bo_set_base
+{
+public:
+  elf_io_aie_debug_test_bo_set(device *dev, const std::string& tag,
+    const flow_type* flow = nullptr);
+
+  void
+  init_cmd(hw_ctx& hwctx, bool dump) override;
+
+  void
+  verify_result() override;
+
+private:
+  bool m_is_full_elf = false;
+};
+
 #endif // _SHIMTEST_IO_H_

@@ -1209,3 +1209,109 @@ verify_result()
       " npu_gen=" + std::to_string(NPU_GEN_AIE4));
   }
 }
+
+elf_io_aie_debug_test_bo_set::
+elf_io_aie_debug_test_bo_set(device* dev, const std::string& tag, const flow_type* flow)
+  : io_test_bo_set_base(dev, tag, flow)
+{
+  constexpr size_t COREDUMP_IFM_SIZE = 512 * 1024 * 4;
+  constexpr size_t COREDUMP_WTS_SIZE = 20;
+  const char* tag_c = tag.empty() ? nullptr : tag.c_str();
+  m_is_full_elf = (get_flow_type(dev, tag_c, m_flow) == FULL_ELF);
+
+  if (m_is_full_elf) {
+    m_elf = xrt::elf(get_binary_path(dev, tag_c, m_flow));
+    try {
+      auto kernel_name = get_kernel_name(dev, tag_c, m_flow);
+      m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+    } catch (const std::exception&) {
+      m_kernel_index = elf_int::no_ctrl_code_id;
+    }
+  } else {
+    std::filesystem::path elf_path(get_binary_path(dev, tag_c, m_flow));
+    elf_path.replace_extension(".elf");
+    m_elf = xrt::elf(elf_path.string());
+    try {
+      auto kernel_name = get_kernel_name(dev, tag_c, m_flow);
+      m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+    } catch (const std::exception&) {
+      m_kernel_index = elf_int::no_ctrl_code_id;
+    }
+  }
+
+  for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+    auto& ibo = m_bo_array[i];
+    auto type = static_cast<io_test_bo_type>(i);
+
+    switch(type) {
+    case IO_TEST_BO_CMD:
+      alloc_cmd_bo(ibo, m_dev);
+      break;
+    case IO_TEST_BO_INSTRUCTION:
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      break;
+    case IO_TEST_BO_INPUT:
+      alloc_data_bo(ibo, m_dev, COREDUMP_IFM_SIZE, false);
+      {
+        uint32_t* in = reinterpret_cast<uint32_t*>(ibo.tbo->map());
+        for (int j = 0; j < static_cast<int>(COREDUMP_IFM_SIZE / sizeof(uint32_t)); ++j)
+          in[j] = 0xdeadface;
+      }
+      break;
+    case IO_TEST_BO_OUTPUT:
+      alloc_data_bo(ibo, m_dev, COREDUMP_IFM_SIZE, false);
+      break;
+    case IO_TEST_BO_PARAMETERS:
+      alloc_data_bo(ibo, m_dev, COREDUMP_WTS_SIZE, false);
+      break;
+    case IO_TEST_BO_2ND_PARAMETERS:
+      alloc_data_bo(ibo, m_dev, COREDUMP_WTS_SIZE, false);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void
+elf_io_aie_debug_test_bo_set::
+init_cmd(hw_ctx& hwctx, bool dump)
+{
+  exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_NPU);
+
+  ebuf.set_cu_idx(get_cu_idx(hwctx));
+
+  ebuf.add_arg_64(3);
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "3");
+  ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "4");
+
+  if (dump)
+    ebuf.dump();
+
+  ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+    elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
+
+  io_test_bo_set_base::init_cmd(hwctx, dump);
+}
+
+void
+elf_io_aie_debug_test_bo_set::
+verify_result()
+{
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  auto cpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+  if (cpkt->state != ERT_CMD_STATE_COMPLETED)
+    throw std::runtime_error(std::string("Coredump test command failed, state=") + std::to_string(cpkt->state));
+
+  auto bo_ofm = m_bo_array[IO_TEST_BO_OUTPUT].tbo;
+  if (!bo_ofm)
+    return;
+  bo_ofm->get()->sync(buffer_handle::direction::device2host, bo_ofm->size(), 0);
+  auto out = reinterpret_cast<uint32_t *>(bo_ofm->map());
+  auto size = bo_ofm->size();
+  for (auto i = 0; i < static_cast<int>(size / 4); i++) {
+    if (out[i] != 0xdeadface)
+      throw std::runtime_error("Test Failed\n");
+  }
+}
