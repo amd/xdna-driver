@@ -489,6 +489,121 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	return 0;
 }
 
+/*
+ * Tear down the firmware stack: PM, firmware, mailbox, PSP, SMU.
+ * Caller must hold aie2_lock. Sets dev_status to AIE2_DEV_INIT.
+ */
+static void aie2_fw_teardown(struct amdxdna_dev_hdl *ndev)
+{
+	ndev->dev_status = AIE2_DEV_INIT;
+	aie2_pm_fini(ndev);
+	aie2_mgmt_fw_fini(ndev);
+	xdna_mailbox_stop_channel(ndev->mgmt_chann);
+	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
+	ndev->mgmt_chann = NULL;
+	if (ndev->mbox) {
+		xdna_mailbox_destroy(ndev->mbox);
+		ndev->mbox = NULL;
+	}
+	aie2_psp_stop(ndev->psp_hdl);
+	aie2_smu_stop(ndev);
+}
+
+/*
+ * Rebuild the firmware stack: SMU, PSP, mailbox, firmware, PM.
+ * Caller must hold aie2_lock. On success, sets dev_status to
+ * AIE2_DEV_START. On failure, the stack is torn back down.
+ */
+static int aie2_fw_rebuild(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct xdna_mailbox_res mbox_res;
+	int ret;
+
+	ret = aie2_smu_start(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "SMU start failed, ret %d", ret);
+		return ret;
+	}
+
+	ret = aie2_psp_start(ndev->psp_hdl);
+	if (ret) {
+		XDNA_ERR(xdna, "PSP start failed, ret %d", ret);
+		goto fini_smu;
+	}
+
+	ret = aie2_mgmt_chann_init(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "mgmt channel init failed, ret %d", ret);
+		goto stop_psp;
+	}
+
+	mbox_res.ringbuf_base = ndev->sram_base;
+	mbox_res.ringbuf_size = pci_resource_len(pdev,
+						 xdna->dev_info->sram_bar);
+	mbox_res.mbox_base = ndev->mbox_base;
+	mbox_res.mbox_size = MBOX_SIZE(ndev);
+	mbox_res.name = "xdna_mailbox";
+	ndev->mbox = xdna_mailbox_create(&pdev->dev, &mbox_res);
+	if (!ndev->mbox) {
+		XDNA_ERR(xdna, "failed to create mailbox");
+		ret = -ENODEV;
+		goto stop_psp;
+	}
+
+	ndev->mgmt_chann = xdna_mailbox_create_channel(ndev->mbox,
+						       &ndev->mgmt_info,
+						       MB_CHANNEL_MGMT);
+	if (!ndev->mgmt_chann) {
+		XDNA_ERR(xdna, "failed to create mgmt channel");
+		ret = -EINVAL;
+		goto destroy_mbox;
+	}
+
+	ret = aie2_mgmt_fw_init(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "firmware init failed, ret %d", ret);
+		goto destroy_mgmt_chann;
+	}
+
+	ret = aie2_pm_init(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "PM init failed, ret %d", ret);
+		goto destroy_mgmt_chann;
+	}
+
+	ret = aie2_mgmt_fw_query(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "firmware query failed, ret %d", ret);
+		goto pm_fini;
+	}
+
+	ret = aie2_error_async_events_alloc(ndev);
+	if (ret) {
+		XDNA_ERR(xdna, "async events alloc failed, ret %d", ret);
+		goto pm_fini;
+	}
+
+	ndev->dev_status = AIE2_DEV_START;
+	return 0;
+
+pm_fini:
+	aie2_pm_fini(ndev);
+destroy_mgmt_chann:
+	xdna_mailbox_stop_channel(ndev->mgmt_chann);
+	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
+	ndev->mgmt_chann = NULL;
+destroy_mbox:
+	xdna_mailbox_destroy(ndev->mbox);
+	ndev->mbox = NULL;
+stop_psp:
+	aie2_psp_stop(ndev->psp_hdl);
+fini_smu:
+	aie2_smu_stop(ndev);
+	return ret;
+}
+
 static void aie2_reset_prepare(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -505,32 +620,22 @@ static void aie2_reset_prepare(struct amdxdna_dev *xdna)
 	aie2_rq_stop_all(&ndev->ctx_rq);
 
 	mutex_lock(&ndev->aie2_lock);
-	ndev->dev_status = AIE2_DEV_INIT;
-	aie2_pm_fini(ndev);
-	aie2_mgmt_fw_fini(ndev);
-	xdna_mailbox_stop_channel(ndev->mgmt_chann);
-	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
-	ndev->mgmt_chann = NULL;
-	if (ndev->mbox) {
-		xdna_mailbox_destroy(ndev->mbox);
-		ndev->mbox = NULL;
-	}
-	aie2_psp_stop(ndev->psp_hdl);
-	aie2_smu_stop(ndev);
+	aie2_fw_teardown(ndev);
 	mutex_unlock(&ndev->aie2_lock);
 
 	mutex_unlock(&xdna->dev_lock);
 
-	aie2_error_async_events_free(ndev);
+	if (ndev->async_events) {
+		aie2_error_async_events_free(ndev);
+		ndev->async_events = NULL;
+	}
 
 	XDNA_INFO(xdna, "FLR reset prepare finished");
 }
 
 static int aie2_reset_done(struct amdxdna_dev *xdna)
 {
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	struct xdna_mailbox_res mbox_res;
 	int ret;
 
 	XDNA_INFO(xdna, "FLR reset done start");
@@ -538,72 +643,14 @@ static int aie2_reset_done(struct amdxdna_dev *xdna)
 	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&ndev->aie2_lock);
 
-	ret = aie2_smu_start(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "FLR: SMU start failed, ret %d", ret);
-		goto unlock;
-	}
+	ret = aie2_fw_rebuild(ndev);
 
-	ret = aie2_psp_start(ndev->psp_hdl);
-	if (ret) {
-		XDNA_ERR(xdna, "FLR: PSP start failed, ret %d", ret);
-		goto fini_smu;
-	}
-
-	ret = aie2_mgmt_chann_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "FLR: mgmt channel init failed, ret %d", ret);
-		goto stop_psp;
-	}
-
-	mbox_res.ringbuf_base = ndev->sram_base;
-	mbox_res.ringbuf_size = pci_resource_len(pdev,
-						 xdna->dev_info->sram_bar);
-	mbox_res.mbox_base = ndev->mbox_base;
-	mbox_res.mbox_size = MBOX_SIZE(ndev);
-	mbox_res.name = "xdna_mailbox";
-	ndev->mbox = xdna_mailbox_create(&pdev->dev, &mbox_res);
-	if (!ndev->mbox) {
-		XDNA_ERR(xdna, "FLR: failed to create mailbox");
-		ret = -ENODEV;
-		goto stop_psp;
-	}
-
-	ndev->mgmt_chann = xdna_mailbox_create_channel(ndev->mbox,
-						       &ndev->mgmt_info,
-						       MB_CHANNEL_MGMT);
-	if (!ndev->mgmt_chann) {
-		XDNA_ERR(xdna, "FLR: failed to create mgmt channel");
-		ret = -EINVAL;
-		goto destroy_mbox;
-	}
-
-	ret = aie2_mgmt_fw_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "FLR: firmware init failed, ret %d", ret);
-		goto destroy_mgmt_chann;
-	}
-
-	ret = aie2_pm_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "FLR: PM init failed, ret %d", ret);
-		goto destroy_mgmt_chann;
-	}
-
-	ret = aie2_mgmt_fw_query(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "FLR: firmware query failed, ret %d", ret);
-		goto pm_fini;
-	}
-
-	ret = aie2_error_async_events_alloc(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "FLR: async events alloc failed, ret %d", ret);
-		goto pm_fini;
-	}
-
-	ndev->dev_status = AIE2_DEV_START;
 	mutex_unlock(&ndev->aie2_lock);
+
+	if (ret) {
+		mutex_unlock(&xdna->dev_lock);
+		return ret;
+	}
 
 	aie2_rq_restart_all(&ndev->ctx_rq);
 	mutex_unlock(&xdna->dev_lock);
@@ -612,23 +659,43 @@ static int aie2_reset_done(struct amdxdna_dev *xdna)
 
 	XDNA_INFO(xdna, "FLR reset done finished");
 	return 0;
+}
 
-pm_fini:
-	aie2_pm_fini(ndev);
-destroy_mgmt_chann:
-	xdna_mailbox_stop_channel(ndev->mgmt_chann);
-	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
-	ndev->mgmt_chann = NULL;
-destroy_mbox:
-	xdna_mailbox_destroy(ndev->mbox);
-	ndev->mbox = NULL;
-stop_psp:
-	aie2_psp_stop(ndev->psp_hdl);
-fini_smu:
-	aie2_smu_stop(ndev);
-unlock:
+/*
+ * Perform a full FLR cycle: tear down firmware, PCI reset, rebuild.
+ * Must be called WITHOUT dev_lock or aie2_lock held.
+ * Does not manage TDR start/stop or runqueue start/stop.
+ */
+int aie2_flr(struct amdxdna_dev *xdna)
+{
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	mutex_lock(&ndev->aie2_lock);
+	aie2_fw_teardown(ndev);
 	mutex_unlock(&ndev->aie2_lock);
-	mutex_unlock(&xdna->dev_lock);
+
+	if (ndev->async_events) {
+		aie2_error_async_events_free(ndev);
+		ndev->async_events = NULL;
+	}
+
+	pci_save_state(pdev);
+	ret = pcie_reset_flr(pdev, PCI_RESET_DO_RESET);
+	pci_restore_state(pdev);
+	if (ret) {
+		XDNA_ERR(xdna, "pcie_reset_flr failed, ret %d", ret);
+		return ret;
+	}
+
+	mutex_lock(&ndev->aie2_lock);
+	ret = aie2_fw_rebuild(ndev);
+	mutex_unlock(&ndev->aie2_lock);
+
+	if (ret)
+		XDNA_ERR(xdna, "FLR firmware rebuild failed, ret %d", ret);
+
 	return ret;
 }
 

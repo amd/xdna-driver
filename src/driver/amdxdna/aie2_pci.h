@@ -382,6 +382,9 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 #define aie2_pm_del_dpm_level(d, l) aie2_pm_set_dft_dpm_level(d, l, false)
 void aie2_pm_set_dft_dpm_level(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
 
+/* aie2_pci.c */
+int aie2_flr(struct amdxdna_dev *xdna);
+
 /* aie2_tdr.c */
 void aie2_tdr_start(struct amdxdna_dev *xdna);
 void aie2_tdr_stop(struct amdxdna_dev *xdna);
