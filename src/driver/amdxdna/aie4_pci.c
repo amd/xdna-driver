@@ -342,6 +342,12 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	ret = aie4_query_cert_version(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Query CERT version failed");
+		return ret;
+	}
+
 	if (is_npu3_pf_dev(pdev)) {
 		XDNA_DBG(ndev->xdna, "skip aie check on non npu3 pf device");
 		return 0;
@@ -496,6 +502,10 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	if (ret)
 		goto disable_irq;
 
+	ret = aie4_mgmt_fw_query(ndev);
+	if (ret)
+		goto disable_mailbox;
+
 	ret = aie4_mgmt_fw_init(ndev);
 	if (ret)
 		goto disable_mailbox;
@@ -503,10 +513,6 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	ret = aie4_pm_init(ndev);
 	if (ret)
 		goto disable_mailbox;
-
-	ret = aie4_mgmt_fw_query(ndev);
-	if (ret)
-		goto stop_pm;
 
 	ret = aie4_partition_init(ndev);
 	if (ret)

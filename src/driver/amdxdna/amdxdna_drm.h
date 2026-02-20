@@ -134,6 +134,13 @@ struct amdxdna_fw_ver {
 	u32 build;
 };
 
+struct amdxdna_cert_ver {
+	u8 major;
+	u8 minor;
+	char git_hash[41];
+	char date[11];
+};
+
 struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
@@ -146,6 +153,7 @@ struct amdxdna_dev {
 	struct mutex			dev_lock;
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
+	struct amdxdna_cert_ver		cert_ver;
 	struct amdxdna_dpt		*fw_log;
 	struct amdxdna_dpt		*fw_trace;
 #ifdef AMDXDNA_DEVEL
