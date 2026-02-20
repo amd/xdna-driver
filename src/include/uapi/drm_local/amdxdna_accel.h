@@ -871,6 +871,7 @@ struct amdxdna_drm_get_array {
 #define DRM_AMDXDNA_HWCTX_AIE_PART_FD		10
 #define DRM_AMDXDNA_HWCTX_MEM_BITMAP		11
 	__u32 param; /* in */
+#define AMDXDNA_MAX_ELEMENT_SIZE		(100U * 1024 * 1024)
 	__u32 element_size; /* in/out */
 #define AMDXDNA_MAX_NUM_ELEMENT			1024
 	__u32 num_element; /* in/out */
