@@ -545,7 +545,8 @@ static int ve2_create_dbg_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *hw
 	/* Set dbg queue slots to invalid */
 	for (int slot = 0; slot < nslots; slot++) {
 		ve2_queue_pkt_set_invalid(ve2_queue_get_pkt(queue->dbg_queue_p->hq_entry,
-			queue->dbg_queue_p->hq_header.capacity, slot));
+							    queue->dbg_queue_p->hq_header.capacity,
+							    slot));
 	}
 
 	XDNA_DBG(xdna, "Created dbg queue: dma_addr=0x%llx, capacity=%d, data_addr=0x%llx",
@@ -701,7 +702,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 		struct host_queue_indirect_hdr *hdr = &queue->hsa_queue_p->hq_indirect_hdr[slot];
 
 		ve2_queue_pkt_set_invalid(ve2_queue_get_pkt(queue->hsa_queue_p->hq_entry,
-			queue->hsa_queue_p->hq_header.capacity, slot));
+							    queue->hsa_queue_p->hq_header.capacity,
+							    slot));
 		hdr->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 		hdr->header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
 		hdr->header.count = 0;
