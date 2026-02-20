@@ -190,8 +190,7 @@ int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	req.dump_buff_addr = addr;
 	req.dump_buff_size = size;
 	// req.pasid = ; need to implement pasid
-	req.num_cols = hweight32(aie_bitmap);
-	req.aie4_bitmap = aie_bitmap;
+	req.aie4_col_bitmap = aie_bitmap;
 
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	ret = aie4_send_msg_wait(ndev, &msg);
@@ -223,6 +222,29 @@ int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 fail:
 	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
+}
+
+int aie4_query_cert_version(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_get_cert_version, AIE4_MSG_OP_GET_CERT_VERSION);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret)
+		return ret;
+
+	xdna->cert_ver.major = resp.major_version;
+	xdna->cert_ver.minor = resp.minor_version;
+	strscpy(xdna->cert_ver.git_hash, resp.git_hash, sizeof(xdna->cert_ver.git_hash));
+	strscpy(xdna->cert_ver.date, resp.date, sizeof(xdna->cert_ver.date));
+
+	XDNA_DBG(xdna, "CERT version %u.%u", xdna->cert_ver.major,
+		 xdna->cert_ver.minor);
+	XDNA_DBG(xdna, "CERT git hash %s", xdna->cert_ver.git_hash);
+	XDNA_DBG(xdna, "CERT date %s", xdna->cert_ver.date);
+
+	return 0;
 }
 
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version)
