@@ -1,0 +1,10 @@
+amdxdna-dkms (@DEBIAN_PKG_VERSION@) UNRELEASED; urgency=medium
+
+  * Build: @XDNA_DATE@
+  * Branch: @XDNA_BRANCH@
+  * Commit: @XDNA_HASH@
+  * XRT Branch: @XDNA_XRT_BRANCH@
+  * XRT Commit: @XDNA_XRT_HASH@
+  * AMD XDNA kernel driver and firmware via DKMS
+
+ -- AMD Inc <max.zhen@amd.com>  @XDNA_HASH_DATE@
