@@ -615,7 +615,7 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
-	case DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION:
+	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
 		XDNA_DBG(xdna, "Querying firmware version");
 		ret = ve2_get_firmware_version(client, args);
 		break;
