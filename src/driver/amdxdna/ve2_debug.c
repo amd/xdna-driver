@@ -437,12 +437,24 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 	struct amdxdna_drm_query_aie_metadata *meta;
 	int ret = 0;
 
-	meta = kmalloc(sizeof(*meta), GFP_KERNEL);
+	if (args->buffer_size < sizeof(*meta)) {
+		XDNA_ERR(xdna, "Buffer too small. Given: %u, required: %zu",
+			 args->buffer_size, sizeof(*meta));
+		args->buffer_size = sizeof(*meta);
+		return -ENOBUFS;
+	}
+
+	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
 	if (!meta)
 		return -ENOMEM;
 
-	meta->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
-	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, args->buffer_size))
+	meta->cols = xdna->dev_handle->aie_dev_info.cols;
+	meta->rows = xdna->dev_handle->aie_dev_info.rows;
+	meta->core.row_count = xdna->dev_handle->aie_dev_info.core_rows;
+	meta->mem.row_count = xdna->dev_handle->aie_dev_info.mem_rows;
+	meta->shim.row_count = xdna->dev_handle->aie_dev_info.shim_rows;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, sizeof(*meta)))
 		ret = -EFAULT;
 
 	kfree(meta);

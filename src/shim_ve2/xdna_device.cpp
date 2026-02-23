@@ -91,6 +91,25 @@ struct bdf
 
 };
 
+struct pcie_id
+{
+  using result_type = query::pcie_id::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    auto [domain, bus, dev, func] = bdf::get(device, key);
+    std::string bdf_str = boost::str(boost::format("%04x:%02x:%02x.%x") % domain % bus % dev % func);
+    const std::string base = "/sys/bus/pci/devices/" + bdf_str;
+    std::ifstream dev_f(base + "/device");
+    std::ifstream rev_f(base + "/revision");
+    unsigned int dev_val = 0, rev_val = 0;
+    if (!(dev_f >> std::hex >> dev_val) || !(rev_f >> std::hex >> rev_val))
+      throw xrt_core::query::sysfs_error("Failed to read device/revision from " + base);
+    return { static_cast<uint16_t>(dev_val), static_cast<uint8_t>(rev_val) };
+  }
+};
+
 struct board_name
 {
   using result_type = query::board_name::result_type;
@@ -528,7 +547,36 @@ struct total_cols
     auto edev = get_edgedev(device);
     edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
 
-    return aie_metadata.cols;                                                          
+    return aie_metadata.cols;
+  }
+};
+
+struct aie_tile_stats
+{
+  using result_type = query::aie_tiles_stats::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_aie_metadata aie_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+      .buffer_size = sizeof(aie_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    result_type output = {};
+    output.cols = aie_metadata.cols;
+    output.rows = aie_metadata.rows;
+    output.core_rows = aie_metadata.core.row_count;
+    output.mem_rows = aie_metadata.mem.row_count;
+    output.shim_rows = aie_metadata.shim.row_count;
+
+    return output;
   }
 };
 
@@ -873,9 +921,11 @@ initialize_query_table()
   emplace_func0_request<query::aie_partition_info,      partition_info>();
   emplace_func0_request<query::xclbin_slots,            xclbin_slots>();
   emplace_func0_request<query::pcie_bdf,                bdf>();
+  emplace_func0_request<query::pcie_id,                 pcie_id>();
   emplace_func0_request<query::rom_vbnv,                dev_info>();
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();
+  emplace_func0_request<query::aie_tiles_stats,         aie_tile_stats>();
   emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func0_request<query::xocl_errors,             xocl_errors>();
   emplace_func0_request<query::clock_freq_topology_raw, clock_topology>();
