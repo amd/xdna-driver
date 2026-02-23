@@ -143,10 +143,10 @@ jobs:
       run: |
         # Get current version from changelog
         CURRENT_VERSION=$(dpkg-parsechangelog -S Version)
-        # Remove any existing release suffix (e.g., ~noble1, ~questing1)
-        BASE_VERSION=$(echo "$CURRENT_VERSION" | sed 's/~[a-z]*[0-9]*$//')
+        # Remove any existing release suffix (e.g., noble1, questing1)
+        BASE_VERSION=$(echo "$CURRENT_VERSION" | sed 's/[a-z]*[0-9]*$//')
         # Append new release suffix
-        NEW_VERSION="${BASE_VERSION}~${{ matrix.ubuntu_release }}1"
+        NEW_VERSION="${BASE_VERSION}${{ matrix.ubuntu_release }}1"
 
         echo "Updating version from $CURRENT_VERSION to $NEW_VERSION"
         echo "Targeting Ubuntu ${{ matrix.ubuntu_release }}"
@@ -158,6 +158,10 @@ jobs:
             --distribution "${{ matrix.ubuntu_release }}" \
             --force-distribution \
             "Rebuild for Ubuntu ${{ matrix.ubuntu_release }}"
+
+        # Update PACKAGE_VERSION in dkms.conf to match the new version
+        echo "Updating dkms.conf PACKAGE_VERSION to $NEW_VERSION"
+        sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"$NEW_VERSION\"/" dkms.conf
 
     - name: Rebuild source package
       working-directory: extracted-source
@@ -177,9 +181,9 @@ jobs:
     - name: Sign source package
       run: |
         echo "Signing package with GPG key $GPG_KEY_ID..."
-        debsign -k $GPG_KEY_ID amdxdna-dkms_*~${{ matrix.ubuntu_release }}1_source.changes
+        debsign -k $GPG_KEY_ID amdxdna-dkms_*${{ matrix.ubuntu_release }}1_source.changes
 
     - name: Upload to PPA
       run: |
         echo "Uploading to ppa:amd-team/xrt for ${{ matrix.ubuntu_release }}..."
-        dput ppa:amd-team/xrt amdxdna-dkms_*~${{ matrix.ubuntu_release }}1_source.changes
+        dput ppa:amd-team/xrt amdxdna-dkms_*${{ matrix.ubuntu_release }}1_source.changes

@@ -56,7 +56,9 @@ set(DEBIAN_CHANGELOG_FILE ${DEBIAN_BUILD_DIR}/changelog)
 file(MAKE_DIRECTORY ${DEBIAN_BUILD_DIR})
 
 # Set DEBIAN_PKG_VERSION for template substitution
-set(DEBIAN_PKG_VERSION "${XRT_PLUGIN_VERSION_STRING}~${XDNA_DATE}")
+# Note: For dkms-source target, this is the base version without release suffix.
+# The GitHub workflow will append Ubuntu release-specific suffixes (e.g., ~noble1, ~questing1).
+set(DEBIAN_PKG_VERSION "${XRT_PLUGIN_VERSION_STRING}")
 message(STATUS "DEBIAN_PKG_VERSION: ${DEBIAN_PKG_VERSION}")
 
 # Generate debian/changelog with proper version substitution
