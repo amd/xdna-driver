@@ -356,7 +356,7 @@ struct firmware_version
 
     amdxdna_drm_query_ve2_firmware_version fw_version{};
     amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION,
+      .param = DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION,
       .buffer_size = sizeof(fw_version),
       .buffer = reinterpret_cast<uintptr_t>(&fw_version)
     };
