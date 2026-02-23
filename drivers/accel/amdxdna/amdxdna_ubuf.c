@@ -3,7 +3,7 @@
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_print.h>
 #include <linux/dma-buf.h>
@@ -28,7 +28,11 @@ static struct sg_table *amdxdna_ubuf_map(struct dma_buf_attachment *attach,
 	struct sg_table *sg;
 	int ret;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	sg = kzalloc_obj(*sg);
+#else
+	sg = kzalloc(sizeof(*sg), GFP_KERNEL);
+#endif
 	if (!sg)
 		return ERR_PTR(-ENOMEM);
 
@@ -148,7 +152,11 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 	if (!can_do_mlock())
 		return ERR_PTR(-EPERM);
 
+#ifdef HAVE_7_0_kmalloc_ops
 	ubuf = kzalloc_obj(*ubuf);
+#else
+	ubuf = kzalloc(sizeof(*ubuf), GFP_KERNEL);
+#endif
 	if (!ubuf)
 		return ERR_PTR(-ENOMEM);
 
@@ -156,7 +164,11 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 	ubuf->mm = current->mm;
 	mmgrab(ubuf->mm);
 
+#ifdef HAVE_7_0_kmalloc_ops
 	va_ent = kvzalloc_objs(*va_ent, num_entries);
+#else
+	va_ent = kvcalloc(num_entries, sizeof(*va_ent), GFP_KERNEL);
+#endif
 	if (!va_ent) {
 		ret = -ENOMEM;
 		goto free_ubuf;
@@ -193,7 +205,11 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 		goto sub_pin_cnt;
 	}
 
+#ifdef HAVE_7_0_kmalloc_ops
 	ubuf->pages = kvmalloc_objs(*ubuf->pages, ubuf->nr_pages);
+#else
+	ubuf->pages = kvmalloc_array(ubuf->nr_pages, sizeof(*ubuf->pages), GFP_KERNEL);
+#endif
 	if (!ubuf->pages) {
 		ret = -ENOMEM;
 		goto sub_pin_cnt;

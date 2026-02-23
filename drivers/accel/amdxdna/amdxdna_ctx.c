@@ -3,7 +3,7 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_file.h>
@@ -50,7 +50,11 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_fence *fence;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	fence = kzalloc_obj(*fence);
+#else
+	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
+#endif
 	if (!fence)
 		return NULL;
 
@@ -164,7 +168,11 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	hwctx = kzalloc_obj(*hwctx);
+#else
+	hwctx = kzalloc(sizeof(*hwctx), GFP_KERNEL);
+#endif
 	if (!hwctx)
 		return -ENOMEM;
 
@@ -434,7 +442,11 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	int ret, idx;
 
 	XDNA_DBG(xdna, "Command BO hdl %d, Arg BO count %d", cmd_bo_hdl, arg_bo_cnt);
+#ifdef HAVE_7_0_kmalloc_ops
 	job = kzalloc_flex(*job, bos, arg_bo_cnt);
+#else
+	job = kzalloc(struct_size(job, bos, arg_bo_cnt), GFP_KERNEL);
+#endif
 	if (!job)
 		return -ENOMEM;
 

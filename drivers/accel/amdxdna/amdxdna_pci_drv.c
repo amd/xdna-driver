@@ -3,7 +3,7 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_accel.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_gem.h>
@@ -66,7 +66,11 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_client *client;
 	int ret;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	client = kzalloc_obj(*client);
+#else
+	client = kzalloc(sizeof(*client), GFP_KERNEL);
+#endif
 	if (!client)
 		return -ENOMEM;
 
