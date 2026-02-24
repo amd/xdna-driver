@@ -216,6 +216,7 @@ int aie4_get_aie_coredump(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_
 void aie4_reset_prepare(struct amdxdna_dev *xdna);
 int aie4_reset_done(struct amdxdna_dev *xdna);
 int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
+int aie4_set_ctx_timeout(struct amdxdna_dev_hdl *ndev, u32 timeout_ms);
 
 /* aie4_hwctx.c */
 int aie4_ctx_init(struct amdxdna_ctx *ctx);
