@@ -73,40 +73,23 @@ static inline struct ve2_dpu_data *get_ve2_dpu_data_next(struct ve2_dpu_data *dp
  * Returns true if at least one slot is available, false otherwise.
  * This is used as the condition for wait_event_interruptible_timeout.
  *
+ * Runlist optimization: Slot availability is determined by read_index/write_index
+ * only. Host uses read_index to see if slot can be reused (no INVALID check).
  */
 static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
-	u32 capacity = header->capacity;
-	enum ert_cmd_state state;
 	u64 outstanding;
-	bool available;
-	u32 slot_idx;
 
 	mutex_lock(&queue->hq_lock);
 	/* Sync read_index before reading (device may have written) */
 	hsa_queue_sync_read_index_for_read(queue);
 	outstanding = queue->reserved_write_index - header->read_index;
-	if (outstanding >= capacity) {
-		mutex_unlock(&queue->hq_lock);
-		return false;
-	}
-
-	/*
-	 * Also check that the next slot to be reserved is actually available.
-	 * Slot is available when in INVALID state (set by ve2_hwctx_job_release
-	 * after job completion, or zero-initialized for fresh slots).
-	 */
-	slot_idx = queue->reserved_write_index % capacity;
-	/* Sync completion memory before reading (device may have written) */
-	hsa_queue_sync_completion_for_read(queue, slot_idx);
-	state = queue->hq_complete.hqc_mem[slot_idx];
-	available = (state == ERT_CMD_STATE_INVALID);
 	mutex_unlock(&queue->hq_lock);
 
-	return available;
+	return outstanding < header->capacity;
 }
 
 /*
@@ -173,22 +156,24 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 		return ERR_PTR(-EBUSY);
 	}
 
-	slot_idx = queue->reserved_write_index % capacity;
-	/* Sync completion memory before reading (device may have written) */
-	hsa_queue_sync_completion_for_read(queue, slot_idx);
-	enum ert_cmd_state state = queue->hq_complete.hqc_mem[slot_idx];
-
 	/*
-	 * Slot can only be reused when it's in INVALID state, which is set by
-	 * ve2_hwctx_job_release() after the job is fully released from pending array.
-	 * Note: ERT_CMD_STATE_INVALID == 0, so this also covers zero-initialized slots.
-	 * This ensures the pending array slot is free before we reserve the HSA queue slot.
+	 * Runlist optimization: Slot availability is determined by read_index only.
+	 * Host uses read_index; no INVALID state check. Ring buffer math ensures
+	 * we never overwrite when outstanding < capacity.
+	 *
+	 * Additionally, we must ensure the pending slot is free before reusing.
+	 * Pending is cleared in ve2_cmd_wait when the waiting thread runs, which
+	 * can lag behind read_index advance. Without this check, multi-threaded
+	 * submit can hit "No more room" in ve2_hwctx_add_job.
 	 */
-	if (state != ERT_CMD_STATE_INVALID) {
-		XDNA_DBG(xdna, "Slot %u is still in use with state %u", slot_idx, state);
+	slot_idx = queue->reserved_write_index % capacity;
+	mutex_lock(&priv->privctx_lock);
+	if (priv->pending[slot_idx]) {
+		mutex_unlock(&priv->privctx_lock);
 		mutex_unlock(&queue->hq_lock);
 		return ERR_PTR(-EBUSY);
 	}
+	mutex_unlock(&priv->privctx_lock);
 
 	/* Reserve this slot by incrementing reserved_write_index. */
 	*slot = queue->reserved_write_index++;
@@ -308,13 +293,11 @@ static inline struct amdxdna_sched_job *ve2_hwctx_get_job(struct amdxdna_ctx *hw
 static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 						struct amdxdna_sched_job *job)
 {
-	u32 capacity = hwctx->priv->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
 	struct amdxdna_cmd_chain *cmd_chain;
 	u32 cmd_cnt = 1;
-	u32 slot;
 	u32 op;
 
 	op = amdxdna_cmd_get_op(cmd_bo);
@@ -332,16 +315,11 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 	/* Caller already holds hq_lock, just acquire privctx_lock */
 	mutex_lock(&priv_ctx->privctx_lock);
 
-	// In cmd chain job, drivers receives completion for last command.
-	// So, mark all slots of these commands in this job to free.
-	slot = job->seq % capacity;
-
-	for (int i = 0; i < cmd_cnt; i++) {
-		priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
-		/* Sync completion memory after writing (device will read) */
-		hsa_queue_sync_completion_for_write(&priv_ctx->hwctx_hsa_queue, slot);
-		slot = (slot == 0) ? (capacity - 1) : (slot - 1);
-	}
+	/*
+	 * Runlist optimization: Slot reuse is determined by read_index only.
+	 * Host does not write INVALID to mark slots free; CERT advances read_index
+	 * when done. No need to clear hqc_mem here.
+	 */
 	// Reset the pending list
 	priv_ctx->pending[get_job_idx(job->seq)] = NULL;
 	ve2_job_put(job);
@@ -904,15 +882,20 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 					 "Submit chain timeout: no slot available after %ums (%u/%u cmds done)",
 					 VE2_RETRY_TIMEOUT_MS, total_submitted,
 					 cmd_chain->command_count);
-				if (total_submitted > 0) {
-					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+				/*
+				 * Do NOT add job to pending - caller will kfree(job) on -EAGAIN.
+				 * Committed slots are orphaned; they will complete and advance
+				 * read_index, but we have no FIFO entry (never called schedule_cmd).
+				 */
+				if (total_submitted > 0)
 					amdxdna_cmd_set_state(cmd_bo, ERT_CMD_STATE_TIMEOUT);
-				}
 				return -EAGAIN;
 			} else if (ret < 0) {
 				XDNA_ERR(xdna, "Submit chain interrupted while waiting for slot");
-				if (total_submitted > 0)
-					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+				/*
+				 * Do NOT add job to pending - caller will kfree(job) on error.
+				 * Same as -EAGAIN: orphaned committed slots, no FIFO entry.
+				 */
 				return ret;
 			}
 
@@ -922,8 +905,9 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 		} else {
 			XDNA_ERR(xdna, "Submit chain failed with error %d (%u/%u cmds done)",
 				 ret, total_submitted, cmd_chain->command_count);
-			if (total_submitted > 0)
-				ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
+			/*
+			 * Do NOT add job to pending - caller will kfree(job) on error.
+			 */
 			return ret;
 		}
 	}
@@ -972,7 +956,8 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 
 	XDNA_DBG(xdna, "hwctx %p cmd submitted: seq=%llu, total_submitted=%llu",
 		 hwctx, *seq, hwctx->submitted);
-	ve2_mgmt_schedule_cmd(xdna, hwctx);
+	/* command_index = read_index when this job completes (last_slot + 1) */
+	ve2_mgmt_schedule_cmd(xdna, hwctx, *seq + 1);
 
 	return 0;
 }
@@ -1116,8 +1101,19 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			u32 cmd_count = 1;
 			void *cmd_data;
 			u32 data_total;
+			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
+					priv_ctx->num_col * sizeof(struct uc_health_info);
 
-			ve2_dump_ctx(xdna, hwctx);
+			/*
+			 * ve2_dump_ctx reads from device via ve2_partition_read_privileged_mem
+			 * per column and can block indefinitely when the device is hung.
+			 * Only call it when the device responded (misc_intrpt_flag + ret > 0);
+			 * on user timeout (ret == 0) the device likely didn't respond - use memset.
+			 */
+			if (priv_ctx->misc_intrpt_flag && ret > 0)
+				ve2_dump_ctx(xdna, hwctx);
+			else
+				memset(&hwctx->health_data, 0, total_size);
 
 			/* Read command_count BEFORE overwriting command buffer with health data */
 			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
@@ -1134,8 +1130,6 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			}
 
 			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
-			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
-					priv_ctx->num_col * sizeof(struct uc_health_info);
 			if (unlikely(data_total < sizeof(hwctx->health_data)))
 				XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu", __func__,
 					  data_total, total_size);
@@ -1167,13 +1161,12 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			/* Sync completion memory before reading (device may have written) */
 			hsa_queue_sync_completion_for_read(&priv_ctx->hwctx_hsa_queue, slot);
 			state = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
-			if (state <= ERT_CMD_STATE_INVALID || state > ERT_CMD_STATE_NORESPONSE) {
+			/* Reject uninitialized (0) or out-of-range; CERT v0.25 doesn't write INVALID */
+			if (state < ERT_CMD_STATE_NEW || state > ERT_CMD_STATE_NORESPONSE) {
 				XDNA_WARN(xdna, "state %u at hqc_mem[%u]", state, slot);
-				ve2_job_put(job);
-				ret = 0;
-				goto out;
+				goto release_job;
 			}
-			if (state == ERT_CMD_STATE_ERROR &&
+			if ((state == ERT_CMD_STATE_ERROR || state == ERT_CMD_STATE_ABORT) &&
 			    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
 				u32 capacity =
 					priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
@@ -1192,10 +1185,10 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				}
 				cmd_count = cc->command_count;
 				/*
-				 * In the sync callback/command error case, driver determines the
-				 * error index by traversing the command chain slots to find which
-				 * subcmd has ERROR state. The starting slot is calculated by going
-				 * back (command_count - 1) slots from the current seq.
+				 * Runlist optimization: On failure, CERT sets ERROR (5) for the
+				 * failing subcmd and ABORT (6) for following subcmds. FW can abort
+				 * without reporting error first. Search from start for first ERROR
+				 * or ABORT to find the failure.
 				 */
 				start_slot = (seq - cmd_count + 1) % capacity;
 
@@ -1212,7 +1205,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 						(&priv_ctx->hwctx_hsa_queue, slot);
 					slot_state =
 						priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
-					if (slot_state == ERT_CMD_STATE_ERROR) {
+					if (slot_state == ERT_CMD_STATE_ERROR ||
+					    slot_state == ERT_CMD_STATE_ABORT) {
 						fail_cmd_idx = i;
 						break;
 					}
