@@ -18,6 +18,9 @@ static int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
+	if (ndev->num_vfs == 0)
+		return 0;
+
 	ret = pci_sriov_configure_simple(pdev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "configure vfs to 0 failed: %d", ret);
