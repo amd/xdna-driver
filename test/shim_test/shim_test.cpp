@@ -74,6 +74,8 @@ void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_full_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_coredump(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_aie_mem(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
 
 inline void
 set_xrt_path()
@@ -915,6 +917,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "get AIE coredump and check registers", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
+  },
+  test_case{ "AIE MEM read/write", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_mem, {}
+  },
+  test_case{ "AIE REG read/write", {},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
