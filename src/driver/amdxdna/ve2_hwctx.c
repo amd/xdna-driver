@@ -1101,19 +1101,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			u32 cmd_count = 1;
 			void *cmd_data;
 			u32 data_total;
-			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
-					priv_ctx->num_col * sizeof(struct uc_health_info);
 
-			/*
-			 * ve2_dump_ctx reads from device via ve2_partition_read_privileged_mem
-			 * per column and can block indefinitely when the device is hung.
-			 * Only call it when the device responded (misc_intrpt_flag + ret > 0);
-			 * on user timeout (ret == 0) the device likely didn't respond - use memset.
-			 */
-			if (priv_ctx->misc_intrpt_flag && ret > 0)
-				ve2_dump_ctx(xdna, hwctx);
-			else
-				memset(&hwctx->health_data, 0, total_size);
+			ve2_dump_ctx(xdna, hwctx);
 
 			/* Read command_count BEFORE overwriting command buffer with health data */
 			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
@@ -1130,6 +1119,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			}
 
 			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
+			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
+					priv_ctx->num_col * sizeof(struct uc_health_info);
 			if (unlikely(data_total < sizeof(hwctx->health_data)))
 				XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu", __func__,
 					  data_total, total_size);
