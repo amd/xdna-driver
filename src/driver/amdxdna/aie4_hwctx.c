@@ -372,9 +372,9 @@ static inline bool check_cmd_done(struct amdxdna_ctx *ctx, u64 seq)
 static inline int wait_till_seq_completed(struct amdxdna_ctx *ctx, u64 seq)
 {
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
-	struct col_entry *col_entry = nctx->col_entry;
+	struct cert_comp *cert_comp = nctx->cert_comp;
 
-	wait_event(col_entry->col_event,
+	wait_event(cert_comp->waitq,
 		   ctx->priv->status != CTX_STATE_CONNECTED || check_cmd_done(ctx, seq));
 	if (nctx->status != CTX_STATE_CONNECTED)
 		return -EAGAIN; /* Ctx is not ready, come back later. */
@@ -465,7 +465,7 @@ static void job_worker(struct work_struct *work)
 		 * Notify user about aborted/timeout cmds.
 		 * CERT did not get a chance to do so.
 		 */
-		wake_up_all(&priv->col_entry->col_event);
+		wake_up_all(&priv->cert_comp->waitq);
 		/* New job can be submitted. */
 		wake_up_all(&ctx->priv->job_list_wq);
 	}
@@ -492,7 +492,7 @@ static void cert_worker(struct work_struct *work)
 			XDNA_DBG(xdna, "Simulating CERT timeout @%lld", priv->cert_read_index);
 			priv->cert_read_index = *priv->umq_write_index;
 			priv->status = CTX_STATE_DISCONNECTED;
-			wake_up_all(&priv->col_entry->col_event);
+			wake_up_all(&priv->cert_comp->waitq);
 			priv->cert_timeout_seq = ~0UL;
 			break;
 		}
@@ -516,7 +516,7 @@ static void cert_worker(struct work_struct *work)
 				*ebuf_state = ERT_CMD_STATE_COMPLETED;
 			}
 			*priv->umq_read_index = priv->cert_read_index;
-			wake_up_all(&priv->col_entry->col_event);
+			wake_up_all(&priv->cert_comp->waitq);
 		}
 	}
 }
@@ -608,7 +608,7 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	 * by job_worker, so...
 	 */
 	priv->status = CTX_STATE_DISCONNECTED;
-	wake_up_all(&priv->col_entry->col_event);
+	wake_up_all(&priv->cert_comp->waitq);
 	cancel_work_sync(&priv->job_work);
 	destroy_workqueue(priv->job_work_q);
 
@@ -984,20 +984,22 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 {
 	unsigned long wait_jifs = MAX_SCHEDULE_TIMEOUT;
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
-	struct col_entry *col_entry = nctx->col_entry;
+	struct cert_comp *cert_comp = nctx->cert_comp;
 	long ret = 0;
 
 	if (timeout)
 		wait_jifs = msecs_to_jiffies(timeout);
 
-	ret = wait_event_interruptible_timeout(col_entry->col_event,
-					       ((col_entry && col_entry->needs_reset) ||
+	ret = wait_event_interruptible_timeout(cert_comp->waitq,
+					       (/*(col_entry && col_entry->needs_reset) ||*/
 					       check_cmd_done(ctx, seq)),
 					       wait_jifs);
 	if (!ret)
 		ret = -ETIME;
+	/*
 	else if (col_entry && col_entry->needs_reset)
 		ret = -EAGAIN;
+	*/
 
 	trace_amdxdna_debug_point(ctx->name, seq, "command wait done");
 	return ret <= 0 ? ret : 0;
