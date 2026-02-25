@@ -995,8 +995,8 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 					       wait_jifs);
 	if (!ret)
 		ret = -ETIME;
-	if (nctx->status != CTX_STATE_CONNECTED)
-		return -EAGAIN; /* Ctx is not ready, come back later. */
+	else if (nctx->status != CTX_STATE_CONNECTED)
+		ret = -EAGAIN; /* Ctx is not ready, come back later. */
 
 	trace_amdxdna_debug_point(ctx->name, seq, "command wait done");
 	return ret <= 0 ? ret : 0;

@@ -812,6 +812,7 @@ struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_i
 	cert_comp = xa_load(&ndev->cert_comp_xa, msix_idx);
 	if (cert_comp) {
 		kref_get(&cert_comp->kref);
+		mutex_unlock(&ndev->cert_comp_xa_lock);
 		return cert_comp;
 	}
 
@@ -828,7 +829,7 @@ struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_i
 	kref_init(&cert_comp->kref);
 
 	if (enable_aie4_polling)
-		goto done;
+		goto skip;
 
 	ret = pci_irq_vector(pdev, cert_comp->msix_idx);
 	if (ret < 0) {
@@ -844,12 +845,12 @@ struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_i
 		goto done;
 	}
 
+skip:
 	ret = xa_err(xa_store(&ndev->cert_comp_xa, msix_idx, cert_comp, GFP_KERNEL));
 	if (ret) {
 		XDNA_ERR(xdna, "store cert_comp for msix index %d failed %d",
 			 msix_idx, ret);
 	}
-
 done:
 	if (ret && cert_comp) {
 		if (cert_comp->irq >= 0)
@@ -1298,6 +1299,7 @@ static void aie4_pci_fini(struct amdxdna_dev *xdna)
 
 	aie4_pcidev_fini(ndev);
 
+	WARN_ON(!xa_empty(&ndev->cert_comp_xa));
 	xa_destroy(&ndev->cert_comp_xa);
 	mutex_destroy(&ndev->cert_comp_xa_lock);
 	mutex_destroy(&ndev->aie4_lock);
