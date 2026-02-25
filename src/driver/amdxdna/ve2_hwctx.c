@@ -1141,13 +1141,18 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 		} else {
 			u32 slot =
 				seq % (priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity);
+			u64 *hqc_mem = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem;
+			u32 comp;
 			enum ert_cmd_state state;
 
 			/* Sync completion memory before reading (device may have written) */
 			hsa_queue_sync_completion_for_read(&priv_ctx->hwctx_hsa_queue, slot);
-			state = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
+			/* CERT encodes state in bits[3:0], error code in bits[31:4] (HSA_ERR) */
+			comp = (u32)hqc_mem[slot];
+			state = (enum ert_cmd_state)(comp & 0xF);
 			if (state < ERT_CMD_STATE_NEW || state > ERT_CMD_STATE_NORESPONSE) {
-				XDNA_WARN(xdna, "state %u at hqc_mem[%u]", state, slot);
+				XDNA_WARN(xdna, "state %u at hqc_mem[%u] raw 0x%x",
+					  state, slot, comp);
 				goto release_job;
 			}
 			if ((state == ERT_CMD_STATE_ERROR || state == ERT_CMD_STATE_ABORT) &&
@@ -1187,8 +1192,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 					 */
 					hsa_queue_sync_completion_for_read
 						(&priv_ctx->hwctx_hsa_queue, slot);
-					slot_state =
-						priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
+					comp = (u32)hqc_mem[slot];
+					slot_state = (enum ert_cmd_state)(comp & 0xF);
 					if (slot_state != ERT_CMD_STATE_ABORT) {
 						fail_cmd_idx = i - 1;
 						break;
@@ -1199,9 +1204,11 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				if (cc->error_index >= cmd_count)
 					cc->error_index = 0;
 
-				XDNA_ERR(xdna, "Error at index %u (slot %u) slot_state %d",
-					 fail_cmd_idx, (start_slot + fail_cmd_idx) %
-					 capacity, slot_state);
+				XDNA_ERR(xdna,
+					 "Error at index %u (slot %u) slot_state %d err_code 0x%x",
+					 fail_cmd_idx, (start_slot + fail_cmd_idx) % capacity,
+					 slot_state,
+					 slot_state == ERT_CMD_STATE_ERROR ? (comp >> 4) : 0);
 				amdxdna_cmd_set_state(job->cmd_bo, slot_state);
 			} else {
 				amdxdna_cmd_set_state(job->cmd_bo, state);
