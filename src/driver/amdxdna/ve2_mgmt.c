@@ -825,7 +825,7 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 		u64 completion = hq->hq_complete.hqc_mem[i];
 		u64 expected_signal = hq->hq_complete.hqc_dma_addr + i * sizeof(u64);
 
-		/* Show all non-invalid packets OR slots with completion state (CERT v0.25 doesn't write 0) */
+		/* Show all non-invalid packets OR packets with unexpected state */
 		if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID ||
 		    completion != 0) {
 			XDNA_WARN(xdna,

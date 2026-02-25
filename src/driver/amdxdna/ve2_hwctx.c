@@ -882,20 +882,15 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 					 "Submit chain timeout: no slot available after %ums (%u/%u cmds done)",
 					 VE2_RETRY_TIMEOUT_MS, total_submitted,
 					 cmd_chain->command_count);
-				/*
-				 * Do NOT add job to pending - caller will kfree(job) on -EAGAIN.
-				 * Committed slots are orphaned; they will complete and advance
-				 * read_index, but we have no FIFO entry (never called schedule_cmd).
-				 */
-				if (total_submitted > 0)
+				if (total_submitted > 0) {
+					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
 					amdxdna_cmd_set_state(cmd_bo, ERT_CMD_STATE_TIMEOUT);
+				}
 				return -EAGAIN;
 			} else if (ret < 0) {
 				XDNA_ERR(xdna, "Submit chain interrupted while waiting for slot");
-				/*
-				 * Do NOT add job to pending - caller will kfree(job) on error.
-				 * Same as -EAGAIN: orphaned committed slots, no FIFO entry.
-				 */
+				if (total_submitted > 0)
+					ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
 				return ret;
 			}
 
@@ -905,9 +900,8 @@ static int ve2_submit_cmd_chain(struct amdxdna_ctx *hwctx, struct amdxdna_sched_
 		} else {
 			XDNA_ERR(xdna, "Submit chain failed with error %d (%u/%u cmds done)",
 				 ret, total_submitted, cmd_chain->command_count);
-			/*
-			 * Do NOT add job to pending - caller will kfree(job) on error.
-			 */
+			if (total_submitted > 0)
+				ve2_hwctx_add_job(hwctx, job, *seq, total_submitted);
 			return ret;
 		}
 	}
@@ -1152,7 +1146,6 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			/* Sync completion memory before reading (device may have written) */
 			hsa_queue_sync_completion_for_read(&priv_ctx->hwctx_hsa_queue, slot);
 			state = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
-			/* Reject uninitialized (0) or out-of-range; CERT v0.25 doesn't write INVALID */
 			if (state < ERT_CMD_STATE_NEW || state > ERT_CMD_STATE_NORESPONSE) {
 				XDNA_WARN(xdna, "state %u at hqc_mem[%u]", state, slot);
 				goto release_job;
@@ -1177,17 +1170,17 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				cmd_count = cc->command_count;
 				/*
 				 * Runlist optimization: On failure, CERT sets ERROR (5) for the
-				 * failing subcmd and ABORT (6) for following subcmds. FW can abort
-				 * without reporting error first. Search from start for first ERROR
-				 * or ABORT to find the failure.
+				 * failing subcmd and ABORT (6) for all following subcmds. Per cert
+				 * protocol: "searching backwards, the 1st cmd with completion
+				 * status not ABORT is the one that failed".
 				 */
 				start_slot = (seq - cmd_count + 1) % capacity;
 
 				XDNA_DBG(xdna, "seq %llu, start_slot %u, cmd_count %u", seq,
 					 start_slot, cmd_count);
 
-				for (i = 0; i < cmd_count; i++) {
-					u32 slot = (start_slot + i) % capacity;
+				for (i = cmd_count; i > 0; i--) {
+					u32 slot = (start_slot + i - 1) % capacity;
 
 					/* Sync completion memory before reading
 					 * (device may have written)
@@ -1196,9 +1189,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 						(&priv_ctx->hwctx_hsa_queue, slot);
 					slot_state =
 						priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
-					if (slot_state == ERT_CMD_STATE_ERROR ||
-					    slot_state == ERT_CMD_STATE_ABORT) {
-						fail_cmd_idx = i;
+					if (slot_state != ERT_CMD_STATE_ABORT) {
+						fail_cmd_idx = i - 1;
 						break;
 					}
 				}
