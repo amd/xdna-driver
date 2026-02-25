@@ -1177,7 +1177,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 					priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
 				struct amdxdna_cmd_chain *cc =
 					amdxdna_cmd_get_payload(job->cmd_bo, NULL);
-				enum ert_cmd_state slot_state;
+				/* Initialize to state to avoid undefined behavior */
+				enum ert_cmd_state slot_state = state;
 				u32 fail_cmd_idx = 0;
 				u32 start_slot = 0;
 				u32 cmd_count = 0;
