@@ -73,23 +73,39 @@ static inline struct ve2_dpu_data *get_ve2_dpu_data_next(struct ve2_dpu_data *dp
  * Returns true if at least one slot is available, false otherwise.
  * This is used as the condition for wait_event_interruptible_timeout.
  *
- * Runlist optimization: Slot availability is determined by read_index/write_index
- * only. Host uses read_index to see if slot can be reused (no INVALID check).
  */
 static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
 {
 	struct amdxdna_ctx_priv *priv = hwctx->priv;
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
+	u32 capacity = header->capacity;
 	u64 outstanding;
+	bool available;
+	u32 slot_idx;
 
 	mutex_lock(&queue->hq_lock);
 	/* Sync read_index before reading (device may have written) */
 	hsa_queue_sync_read_index_for_read(queue);
 	outstanding = queue->reserved_write_index - header->read_index;
+	if (outstanding >= capacity) {
+		mutex_unlock(&queue->hq_lock);
+		return false;
+	}
+
+	/*
+	 * Also check that the next slot to be reserved is actually available.
+	 * The slot is available when the pending entry is NULL: cleared by
+	 * ve2_hwctx_job_release_locked() after the waiter releases the job,
+	 * or zero-initialized for slots not yet used.
+	 */
+	slot_idx = queue->reserved_write_index % capacity;
+	mutex_lock(&priv->privctx_lock);
+	available = !priv->pending[slot_idx];
+	mutex_unlock(&priv->privctx_lock);
 	mutex_unlock(&queue->hq_lock);
 
-	return outstanding < header->capacity;
+	return available;
 }
 
 /*
