@@ -161,7 +161,7 @@ static void cert_timer(struct timer_list *t)
 #endif
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct cert_comp *cert_comp;
-	long unsigned int msix_idx;
+	unsigned long msix_idx;
 
 	mutex_lock(&ndev->cert_comp_xa_lock);
 	xa_for_each(&ndev->cert_comp_xa, msix_idx, cert_comp) {
