@@ -615,7 +615,6 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	kfree(priv->cached_health_report);
 	priv->cached_health_report = NULL;
 	priv->cached_health_valid = false;
-
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {
 		/* resolver to call unload->aie4_destroy_context */
@@ -991,15 +990,13 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 		wait_jifs = msecs_to_jiffies(timeout);
 
 	ret = wait_event_interruptible_timeout(cert_comp->waitq,
-					       (/*(col_entry && col_entry->needs_reset) ||*/
+					       (nctx->status != CTX_STATE_CONNECTED ||
 					       check_cmd_done(ctx, seq)),
 					       wait_jifs);
 	if (!ret)
 		ret = -ETIME;
-	/*
-	else if (col_entry && col_entry->needs_reset)
-		ret = -EAGAIN;
-	*/
+	if (nctx->status != CTX_STATE_CONNECTED)
+		return -EAGAIN; /* Ctx is not ready, come back later. */
 
 	trace_amdxdna_debug_point(ctx->name, seq, "command wait done");
 	return ret <= 0 ? ret : 0;
