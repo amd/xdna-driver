@@ -832,7 +832,7 @@ struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_i
 
 	ret = pci_irq_vector(pdev, cert_comp->msix_idx);
 	if (ret < 0) {
-		XDNA_ERR(xdna, "MSI-X index %u is invlaid", msix_idx);
+		XDNA_ERR(xdna, "MSI-X index %u is invalid", msix_idx);
 		goto done;
 	}
 	cert_comp->irq = ret;
