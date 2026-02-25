@@ -1146,15 +1146,14 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	struct aie2_partition *part;
 	bool wait_parts = false;
 	u32 num_col;
-	bool was_disconnecting;
-	int i;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
 	down_write(&ctx->priv->io_sem);
 
 	part = ctx->priv->part;
-	was_disconnecting = aie2_is_ctx_disconnecting(ctx);
+	if (part)
+		queue_work(rq->work_q, &part->sched_work);
 
 	ctx->priv->should_block = false;
 	part_ctx_stop_wait(ctx, true);
@@ -1179,19 +1178,6 @@ void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 		list_add_tail(&ctx->parts_work_entry, &rq->parts_work_waitq);
 		queue_work(rq->work_q, &rq->parts_work);
 	}
-
-	if (was_disconnecting && part) {
-		for (i = 0; i < ARRAY_SIZE(part->runqueue); i++) {
-			if (!list_empty(&part->runqueue[i])) {
-				XDNA_DBG(xdna,
-					"re-schedule part [%d, %d], because %s will not yield",
-					part->start_col, part->end_col, ctx->name);
-				queue_work(rq->work_q, &part->sched_work);
-				break;
-			}
-		}
-	}
-
 	mutex_unlock(&xdna->dev_lock);
 
 	if (wait_update_parts && wait_parts)
