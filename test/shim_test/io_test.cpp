@@ -514,8 +514,7 @@ TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, cons
 void
 TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_negative_test_bo_set boset{sdev.get(),
-    "bad", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+  elf_io_negative_test_bo_set boset{sdev.get(), "bad_timeout"};
   boset.run();
 }
 
@@ -532,7 +531,7 @@ TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 void
 TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  async_error_aie4_io_test_bo_set async_error_aie4_io_test_bo_set{sdev.get(), "bad"};
+  async_error_aie4_io_test_bo_set async_error_aie4_io_test_bo_set{sdev.get(), "bad_timeout"};
   // verification is inside run()
   async_error_aie4_io_test_bo_set.run();
 }
@@ -579,8 +578,7 @@ void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, a
 void
 TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_negative_test_bo_set bo_set{sdev.get(),
-    "bad", "instr_invalid_addr.elf", ERT_CMD_STATE_TIMEOUT, 0xFFFFFFFF};
+  elf_io_negative_test_bo_set bo_set{sdev.get(), "bad_addr"};
   bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
@@ -591,7 +589,7 @@ TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, ar
 void
 TEST_io_gemm(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_gemm_test_bo_set boset{sdev.get(), "gemm", "gemm_int8.elf"};
+  elf_io_gemm_test_bo_set boset{sdev.get(), "gemm"};
   boset.run();
 }
 
@@ -600,7 +598,6 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
 {
   bool is_timeout = static_cast<bool>(arg[0]);
   const char *good_tag = "good";
-  const char *bad_tag = "bad";
   static const flow_type good_flow = PARTIAL_ELF;
 
   // Creating commands and BOs
@@ -609,11 +606,9 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   elf_io_test_bo_set good_bo_set1{sdev.get(), good_tag, &good_flow};
   elf_io_test_bo_set good_bo_set2{sdev.get(), good_tag, &good_flow};
   // A timeout one
-  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), bad_tag,
-    "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), "bad_timeout"};
   // An error one
-  elf_io_negative_test_bo_set error_bo_set{sdev.get(), bad_tag,
-    "instr_invalid_op.elf", ERT_CMD_STATE_ERROR, 0};
+  elf_io_negative_test_bo_set error_bo_set{sdev.get(), "bad_op"};
 
   // Creating HW context for cmd submission. We use the good xclbin here to
   // make sure good cmd can complete successfully. The bad ones don't really
@@ -902,7 +897,7 @@ TEST_io_aie_reg(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
       .col = col,
       .row = row,
       .offset = addr,
-      .data = data
+      .data = std::move(data)
     };
     xrt_core::device_query<xrt_core::query::aie_write>(dev, write_args);
   };

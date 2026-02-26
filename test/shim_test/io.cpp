@@ -129,7 +129,7 @@ txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
     std::vector<std::string> libpaths = {};
     std::map< uint32_t, std::vector<char> > m_ctrlpkt = {};
     m_ctrlpkt[0] = pm_ctrlpkt_buf;
-    m_ctrlpkt[1] = pm_ctrlpkt_buf;
+    m_ctrlpkt[1] = std::move(pm_ctrlpkt_buf);
     asp = std::make_unique<aiebu::aiebu_assembler>(
       aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf,
       buffer2, patch_json, libs, libpaths, m_ctrlpkt);
@@ -524,12 +524,14 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
 }
 
 elf_io_negative_test_bo_set::
-elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
-  const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx)
-  : m_expect_txn_op_idx(exp_txn_op_idx)
-  , m_expect_cmd_status(exp_status)
-  , io_test_bo_set_base(dev, xclbin_name)
+elf_io_negative_test_bo_set(device* dev, const std::string& tag)
+  : io_test_bo_set_base(dev, tag, nullptr)
 {
+  const auto& info = get_binary_info(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+  const std::string elf_name = info.extra.at("elf_name");
+  m_expect_cmd_status = static_cast<uint32_t>(std::stoul(info.extra.at("exp_status"), nullptr, 0));
+  m_expect_txn_op_idx = static_cast<uint32_t>(std::stoul(info.extra.at("exp_val"), nullptr, 0));
+
   m_elf = xrt::elf(m_local_data_path + elf_name);
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -550,9 +552,12 @@ elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
 }
 
 elf_io_gemm_test_bo_set::
-elf_io_gemm_test_bo_set(device* dev, const std::string& xclbin_name, const std::string& elf_name)
-  : io_test_bo_set_base(dev, xclbin_name)
+elf_io_gemm_test_bo_set(device* dev, const std::string& tag)
+  : io_test_bo_set_base(dev, tag, nullptr)
 {
+  const auto& info = get_binary_info(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+  const std::string elf_name = info.extra.at("elf_name");
+
   m_elf = xrt::elf(m_local_data_path + elf_name);
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -1131,7 +1136,7 @@ async_error_aie4_io_test_bo_set(device* dev, const std::string& tag)
     }
   }
 
-  // bad_ctrl.elf triggers AIE4 context error (UC firmware exception)
+  // bad_timeout.elf triggers AIE4 context error (UC firmware exception)
   // error_type = UC_COMPLETION_TIMEOUT (4) or UC_CRITICAL_ERROR (5)
   // Both map to KDS_EXEC error number
   uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
@@ -1188,7 +1193,7 @@ verify_result()
   }
   m_last_err_timestamp = err_timestamp;
 
-  // Verify context health report in command packet (bad_ctrl.elf timeout path)
+  // Verify context health report in command packet (bad_timeout.elf timeout path)
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_TIMEOUT)
