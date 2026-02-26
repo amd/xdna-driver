@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef _SHIMTEST_EXEC_BUF_H_
 #define _SHIMTEST_EXEC_BUF_H_
@@ -124,6 +124,15 @@ public:
   }
 
   void
+  add_arg_64_patched(uint64_t val, const std::string& arg_name)
+  {
+    // Add to argument list for control code patching
+    m_ctrl_text_args.emplace_back(arg_name, val);
+    // Add to exec buf
+    add_arg_64(val);
+  }
+
+  void
   add_arg_bo(bo& bo_arg, const std::string arg_name="")
   {
     // Add to argument list for driver
@@ -138,6 +147,13 @@ public:
       // Named arg is for patching only, no need to show in exec_buf.
       m_ctrl_text_args.emplace_back(arg_name, bo_arg.paddr());
     }
+  }
+
+  /** Add an argument for control-code patching only (no regmap write, no bind). */
+  void
+  add_ctrl_arg(const std::string& name, uint64_t addr)
+  {
+    m_ctrl_text_args.emplace_back(name, addr);
   }
 
   void

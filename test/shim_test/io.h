@@ -159,6 +159,7 @@ public:
 
 private:
   bool m_is_full_elf;
+  bool m_is_aie4;
   unsigned long m_total_fine_preemption_checkpoints;
 };
 
