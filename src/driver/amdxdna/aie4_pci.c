@@ -15,6 +15,7 @@
 
 #include "aie4_pci.h"
 #include "aie4_message.h"
+#include "aie2_tdr.h"
 #include "aie4_solver.h"
 #include "aie4_devel.h"
 #include "amdxdna_dpt.h"
@@ -317,7 +318,11 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	return aie4_set_ctx_hysteresis(ndev, AIE4_CTX_HYSTERESIS_US);
+	ret = aie4_set_ctx_hysteresis(ndev, AIE4_CTX_HYSTERESIS_US);
+	if (ret)
+		return ret;
+
+	return aie4_set_ctx_timeout(ndev, timeout_in_sec * 1000);
 }
 
 static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)

@@ -736,3 +736,197 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
   if ((id_status & CORE_ENABLE) != 0)
     throw std::runtime_error("Core (2,2) expected IDLE");
 }
+
+void
+TEST_io_aie_mem(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  constexpr uint32_t MEM_OFFSET = 0x400;
+  constexpr uint32_t MEM_SIZE = 1024;
+  constexpr uint32_t WORDS_PER_READ = MEM_SIZE / sizeof(uint32_t);
+  constexpr uint32_t EXPECTED_READ_VAL = 0xdeadface;
+  constexpr uint32_t WRITE_VAL = 0xdeadbeef;
+
+  auto dev = sdev.get();
+  static const char* tag = "aie_debug";
+  elf_io_aie_debug_test_bo_set boset{dev, tag};
+  hw_ctx hwctx{dev, tag};
+
+  boset.init_cmd(hwctx, false);
+  boset.sync_before_run();
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+  boset.sync_after_run();
+  boset.verify_result();
+
+  auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(dev);
+  if (aie_stats.cols == 0)
+    throw std::runtime_error("AIE tiles stats reports zero columns");
+
+  const uint16_t num_cols = 4; // 4 cols used for verify_4x4.xclbin
+
+  pid_t pid = getpid();
+  uint16_t context_id = static_cast<uint16_t>(hwctx.get()->get_slotidx());
+
+  using aie_read_args = xrt_core::query::aie_read::args;
+  using aie_write_args = xrt_core::query::aie_write::args;
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.mem_rows; ++r) {
+      uint16_t row = aie_stats.mem_row_start + r;
+      aie_read_args read_args = {
+        .type = xrt_core::query::aie_read::access_type::mem,
+        .pid = static_cast<uint64_t>(pid),
+        .context_id = context_id,
+        .col = col,
+        .row = row,
+        .offset = MEM_OFFSET,
+        .size = MEM_SIZE
+      };
+      std::vector<char> buf = xrt_core::device_query<xrt_core::query::aie_read>(dev, read_args);
+      if (buf.size() != MEM_SIZE)
+        throw std::runtime_error("AIE mem read size mismatch");
+      const uint32_t* words = reinterpret_cast<const uint32_t*>(buf.data());
+      for (uint32_t i = 0; i < WORDS_PER_READ; ++i) {
+        if (words[i] != EXPECTED_READ_VAL)
+          throw std::runtime_error("AIE mem read expected 0xdeadface at ("
+            + std::to_string(col) + "," + std::to_string(row) + ") word " + std::to_string(i));
+      }
+    }
+  }
+
+  std::vector<char> write_buf(MEM_SIZE);
+  uint32_t* write_words = reinterpret_cast<uint32_t*>(write_buf.data());
+  for (uint32_t i = 0; i < WORDS_PER_READ; ++i)
+    write_words[i] = WRITE_VAL;
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.mem_rows; ++r) {
+      uint16_t row = aie_stats.mem_row_start + r;
+      aie_write_args write_args = {
+        .type = xrt_core::query::aie_write::access_type::mem,
+        .pid = static_cast<uint64_t>(pid),
+        .context_id = context_id,
+        .col = col,
+        .row = row,
+        .offset = MEM_OFFSET,
+        .data = write_buf
+      };
+      xrt_core::device_query<xrt_core::query::aie_write>(dev, write_args);
+    }
+  }
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.mem_rows; ++r) {
+      uint16_t row = aie_stats.mem_row_start + r;
+      aie_read_args read_args = {
+        .type = xrt_core::query::aie_read::access_type::mem,
+        .pid = static_cast<uint64_t>(pid),
+        .context_id = context_id,
+        .col = col,
+        .row = row,
+        .offset = MEM_OFFSET,
+        .size = MEM_SIZE
+      };
+      std::vector<char> read_back = xrt_core::device_query<xrt_core::query::aie_read>(dev, read_args);
+      if (read_back.size() != MEM_SIZE)
+        throw std::runtime_error("AIE mem read-back size mismatch");
+      const uint32_t* back_words = reinterpret_cast<const uint32_t*>(read_back.data());
+      for (uint32_t i = 0; i < WORDS_PER_READ; ++i) {
+        if (back_words[i] != WRITE_VAL)
+          throw std::runtime_error("AIE mem read-back expected 0xdeadbeef");
+      }
+    }
+  }
+}
+
+void
+TEST_io_aie_reg(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  constexpr uint32_t CORE_STATUS_REG = 0x32004;
+  constexpr uint32_t CORE_CONTROL_REG = 0x32000;
+  constexpr uint32_t EXPECTED_COL0_STATUS = 0x3;   // reset + enabled
+  constexpr uint32_t EXPECTED_OTHER_STATUS = 0x2;  // reset
+  constexpr uint32_t EXPECTED_AFTER_WRITE = 0x1;  // enabled
+
+  auto dev = sdev.get();
+  static const char* tag = "aie_debug";
+  elf_io_aie_debug_test_bo_set boset{dev, tag};
+  hw_ctx hwctx{dev, tag};
+
+  boset.init_cmd(hwctx, false);
+  boset.sync_before_run();
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+  boset.sync_after_run();
+  boset.verify_result();
+
+  auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(dev);
+  if (aie_stats.cols == 0)
+    throw std::runtime_error("AIE tiles stats reports zero columns");
+
+  const uint16_t num_cols = 4; // 4 cols used for verify_4x4.xclbin
+
+  pid_t pid = getpid();
+  uint16_t context_id = static_cast<uint16_t>(hwctx.get()->get_slotidx());
+
+  using aie_read_args = xrt_core::query::aie_read::args;
+  using aie_write_args = xrt_core::query::aie_write::args;
+
+  auto read_reg = [&](uint16_t col, uint16_t row, uint32_t addr) -> uint32_t {
+    aie_read_args read_args = {
+      .type = xrt_core::query::aie_read::access_type::reg,
+      .pid = static_cast<uint64_t>(pid),
+      .context_id = context_id,
+      .col = col,
+      .row = row,
+      .offset = addr,
+      .size = sizeof(uint32_t)
+    };
+    std::vector<char> buf = xrt_core::device_query<xrt_core::query::aie_read>(dev, read_args);
+    if (buf.size() != sizeof(uint32_t))
+      throw std::runtime_error("AIE reg read size mismatch");
+    return *reinterpret_cast<const uint32_t*>(buf.data());
+  };
+
+  auto write_reg = [&](uint16_t col, uint16_t row, uint32_t addr, uint32_t val) {
+    std::vector<char> data(sizeof(uint32_t));
+    *reinterpret_cast<uint32_t*>(data.data()) = val;
+    aie_write_args write_args = {
+      .type = xrt_core::query::aie_write::access_type::reg,
+      .pid = static_cast<uint64_t>(pid),
+      .context_id = context_id,
+      .col = col,
+      .row = row,
+      .offset = addr,
+      .data = data
+    };
+    xrt_core::device_query<xrt_core::query::aie_write>(dev, write_args);
+  };
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.core_rows; ++r) {
+      uint16_t row = aie_stats.core_row_start + r;
+      uint32_t status = read_reg(col, row, CORE_STATUS_REG);
+      uint32_t expected = (col == 0) ? EXPECTED_COL0_STATUS : EXPECTED_OTHER_STATUS;
+      if (status != expected)
+        throw std::runtime_error("Core (" + std::to_string(col) + "," + std::to_string(row)
+          + ") expected status 0x3 or 0x2");
+    }
+  }
+
+  // WRITE 0x1 to core control for Col 1+ (skip col 0)
+  for (uint16_t col = 1; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.core_rows; ++r) {
+      uint16_t row = aie_stats.core_row_start + r;
+      write_reg(col, row, CORE_CONTROL_REG, EXPECTED_AFTER_WRITE);
+      uint32_t status = read_reg(col, row, CORE_STATUS_REG);
+      if (status != EXPECTED_AFTER_WRITE)
+        throw std::runtime_error("Core (" + std::to_string(col) + "," + std::to_string(row)
+          + ") expected status 0x1 after write");
+    }
+  }
+}
