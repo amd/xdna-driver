@@ -246,4 +246,4 @@ cd <workspace of this repo>/
 ./tools/codingsty_check.sh <DIR>
 ```
 
-#test CI
+#test2 CI
