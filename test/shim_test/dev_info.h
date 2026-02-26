@@ -4,6 +4,7 @@
 #ifndef _SHIMTEST_DEV_INFO_H_
 #define _SHIMTEST_DEV_INFO_H_
 
+#include <map>
 #include "core/common/device.h"
 #include "core/common/query_requests.h"
 
@@ -24,6 +25,7 @@ struct binary_info {
   const std::map<const char*, cuidx_type> ip_name2idx;
   const std::string path;
   const std::string data;
+  const std::map<std::string, std::string> extra = {};  /* e.g. elf_name, exp_status, exp_val */
   const flow_type flow;
 };
 

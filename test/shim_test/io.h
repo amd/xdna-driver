@@ -161,8 +161,7 @@ private:
 class elf_io_negative_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_negative_test_bo_set(device *dev, const std::string& tag,
-    const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx);
+  elf_io_negative_test_bo_set(device *dev, const std::string& tag = "");
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -211,8 +210,7 @@ private:
 class elf_io_gemm_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_gemm_test_bo_set(device *dev, const std::string& tag,
-    const std::string& elf_name);
+  elf_io_gemm_test_bo_set(device *dev, const std::string& tag = "");
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
