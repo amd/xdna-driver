@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "io.h"
@@ -108,10 +108,10 @@ private:
     const std::vector<xrt_core::fence_handle*> wfences{fence.get()};
     const std::vector<xrt_core::fence_handle*> sfences{};
 
-    io_test_bo_set boset{dev.get()};
-    boset.run(wfences, sfences, false);
-    boset.run(wfences, sfences, false);
-    boset.run(wfences, sfences, false);
+    auto boset = create_bo_set_for_device(dev.get());
+    boset->run(wfences, sfences, false);
+    boset->run(wfences, sfences, false);
+    boset->run(wfences, sfences, false);
 
     bool success = true;
     send_ipc_data(&success, sizeof(success));
@@ -140,9 +140,9 @@ private:
       throw;
     }
 
-    io_test_bo_set boset{dev.get()};
-    boset.run(wfences, sfences, false);
-    boset.run(wfences, sfences, false);
+    auto boset = create_bo_set_for_device(dev.get());
+    boset->run(wfences, sfences, false);
+    boset->run(wfences, sfences, false);
 
     bool success;
     recv_ipc_data(&success, sizeof(success));

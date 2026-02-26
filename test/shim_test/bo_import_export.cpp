@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
 #include "io.h"
@@ -40,9 +40,9 @@ private:
     auto sdev = get_userpf_device(get_dev_id());
     auto dev = sdev.get();
 
-    io_test_bo_set boset{dev};
-    boset.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev, idata.pid, idata.hdl);
-    boset.run();
+    auto boset = create_bo_set_for_device(dev);
+    boset->get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev, idata.pid, idata.hdl);
+    boset->run();
     send_ipc_data(&success, sizeof(success));
   }
 
@@ -53,8 +53,11 @@ private:
 
     // Create IO test BO set and share input BO with parent
     auto dev = get_userpf_device(get_dev_id());
-    io_test_bo_set boset{dev.get()};
-    auto share = boset.get_bos()[IO_TEST_BO_INPUT].tbo->get()->share();
+    auto boset = create_bo_set_for_device(dev.get());
+    auto& input_bo = boset->get_bos()[IO_TEST_BO_INPUT].tbo;
+    if (!input_bo)
+      throw std::runtime_error("BO set has no input BO, export test requires IO_TEST_BO_INPUT");
+    auto share = input_bo->get()->share();
     ipc_data idata = { getpid(), share->get_export_handle() };
     send_ipc_data(&idata, sizeof(idata));
     bool success;
@@ -80,13 +83,19 @@ TEST_export_import_bo_single_proc(device::id_type id, std::shared_ptr<device>& s
   auto dev = sdev.get();
 
   // Create IO test BO set and share input BO with same process
-  io_test_bo_set boset1{dev};
-  auto share = boset1.get_bos()[IO_TEST_BO_INPUT].tbo->get()->share();
+  auto boset1 = create_bo_set_for_device(dev);
+  auto& input_bo1 = boset1->get_bos()[IO_TEST_BO_INPUT].tbo;
+  if (!input_bo1)
+    throw std::runtime_error("BO set has no input BO, export test requires IO_TEST_BO_INPUT");
+  auto share = input_bo1->get()->share();
 
   // Create IO test BO set and replace input BO with the one from above and execute it
-  io_test_bo_set boset2{dev};
-  boset2.get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev, getpid(), share->get_export_handle());
-  boset2.run();
+  auto boset2 = create_bo_set_for_device(dev);
+  auto& input_bo2 = boset2->get_bos()[IO_TEST_BO_INPUT].tbo;
+  if (!input_bo2)
+    throw std::runtime_error("BO set has no input BO, export test requires IO_TEST_BO_INPUT");
+  boset2->get_bos()[IO_TEST_BO_INPUT].tbo = std::make_shared<bo>(dev, getpid(), share->get_export_handle());
+  boset2->run();
 }
 
 void
@@ -97,8 +106,11 @@ TEST_export_bo_then_close_device(device::id_type id, std::shared_ptr<device>& sd
 
   // Create IO test BO set and export input BO
   {
-    io_test_bo_set boset1{dev};
-    share = boset1.get_bos()[IO_TEST_BO_INPUT].tbo->get()->share();
+    auto boset1 = create_bo_set_for_device(dev);
+    auto& input_bo = boset1->get_bos()[IO_TEST_BO_INPUT].tbo;
+    if (!input_bo)
+      throw std::runtime_error("BO set has no input BO, export test requires IO_TEST_BO_INPUT");
+    share = input_bo->get()->share();
   }
   // Close device fd while holding onto the exported BO
   sdev.reset();

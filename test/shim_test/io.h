@@ -238,4 +238,10 @@ private:
   bool m_is_full_elf = false;
 };
 
+/** Create a BO set appropriate for the device (legacy ddr_range.txt vs ELF).
+ *  AIE4 (NPU3) uses elf_full_io_test_bo_set, others use io_test_bo_set.
+ */
+std::unique_ptr<io_test_bo_set_base> create_bo_set_for_device(device* dev, bool use_ubuf = false,
+                                                               const char* tag = nullptr);
+
 #endif // _SHIMTEST_IO_H_
