@@ -18,12 +18,14 @@
 #include "core/common/system.h"
 #include "core/common/device.h"
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <vector>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <dirent.h>
 
 #include <libgen.h>
 #include <sys/utsname.h>
@@ -246,14 +248,44 @@ dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   return true;
 }
 
+std::string
+get_sysfs_path(device* dev)
+{
+  query::sub_device_path::args query_arg = {std::string(""), 0};
+  std::string sysfs = device_query<query::sub_device_path>(dev, query_arg);
+  return sysfs + "/accel";
+}
+
 std::tuple<uint64_t, uint64_t, uint64_t>
 get_bo_usage(device* dev, int pid)
 {
   // FIXME: reimplement this when query key is defined in xrt
-  const char *xdna = "/dev/accel/accel0";
-  int fd = open(xdna, O_RDONLY);
+  std::string accel_path = get_sysfs_path(dev);
+
+  auto dp = opendir(accel_path.c_str());
+  if (!dp) {
+    std::perror(("opendir: " + accel_path).c_str());
+    return {0, 0, 0};
+  }
+
+  std::string accel_node;
+  while (auto entry = readdir(dp)) {
+    std::string dirname{entry->d_name};
+    if (dirname.find("accel") == 0) {
+      accel_node = "/dev/accel/" + dirname;
+      break;
+    }
+  }
+  closedir(dp);
+
+  if (accel_node.empty()) {
+    std::cerr << "Failed to find accel node under " << accel_path << " for device" << std::endl;
+    return {0, 0, 0};
+  }
+
+  int fd = open(accel_node.c_str(), O_RDONLY);
   if (fd < 0) {
-    std::perror("open");
+    std::perror(("open: " + accel_node).c_str());
     return {0, 0, 0};
   }
 
@@ -389,13 +421,17 @@ TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device>&
   int is_negative = static_cast<unsigned int>(arg[0]);
   int num_virt_ctx;
 
-  // XDNA driver by default supports 6 virtual context on npu1 and 32 virtual context on npu4
+  // XDNA driver by default supports 6 virtual context on npu1, 128 on npu3, and 32 virtual context on npu4
   if (device_id == npu1_device_id)
     num_virt_ctx = 6;
+  else if (device_id == npu3_device_id || device_id == npu3_device_id1)
+    num_virt_ctx = 128;
   else
     num_virt_ctx = 32;
 
-  if (is_negative)
+  if (is_negative && (device_id == npu3_device_id || device_id == npu3_device_id1))
+    num_virt_ctx = 10000;
+  else if (is_negative)
     num_virt_ctx += 1;
 
   std::cout << "Creating " << num_virt_ctx << " contexts" << std::endl;
@@ -412,7 +448,17 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
 {
   auto dev = sdev.get();
   auto device_id = device_query<query::pcie_device>(dev);
-  int num_virt_ctx = static_cast<unsigned int>(arg[0]);
+  int num_virt_ctx;
+
+  const std::array<int, 3> ctx = [&]() {
+    if (device_id == npu1_device_id)
+      return std::array<int, 3>{2, 4, 6};
+    if (device_id == npu3_device_id || device_id == npu3_device_id1)
+      return std::array<int, 3>{4, 8, 32};
+    return std::array<int, 3>{4, 8, 16};
+  }();
+
+  num_virt_ctx = ctx[arg[0]];
 
   multi_thread threads(num_virt_ctx, TEST_io_latency);
   threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
@@ -801,7 +847,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "measure no-op kernel throughput command", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
@@ -852,34 +898,22 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "virtual context test", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 0 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_virtual_context, { 0 }
   },
   test_case{ "virtual context bad test", {},
-    TEST_NEGATIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 1 }
+    TEST_NEGATIVE, dev_filter_is_aie, TEST_create_destroy_virtual_context, { 1 }
   },
-  test_case{ "Multi context IO test 1 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 2 }
+  test_case{ "Multi context IO test 1", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 0 }
   },
-  test_case{ "Multi context IO test 2 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 4 }
+  test_case{ "Multi context IO test 2", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 1 }
   },
-  test_case{ "Multi context IO test 3 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 6 }
-  },
-  test_case{ "Multi context IO test 1 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2 }
-  },
-  test_case{ "Multi context IO test 2 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 4 }
-  },
-  test_case{ "Multi context IO test 3 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 16 }
-  },
-  test_case{ "Multi context IO test 4 (npu4)", {},
-    TEST_POSITIVE, skip_dev_filter, TEST_multi_context_io_test, { 20 }
+  test_case{ "Multi context IO test 3", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 2 }
   },
   test_case{ "Create and destroy devices", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
