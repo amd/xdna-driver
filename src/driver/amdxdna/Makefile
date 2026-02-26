@@ -34,7 +34,6 @@ all: $(BUILD_ROOT_DIR)
 DEFINES := -DAMDXDNA_DEVEL
 
 # Driver version
-XDNA_DRIVER_VERSION ?= 2.21.0
 XDNA_DATE ?= $(shell date +%Y%m%d)
 XDNA_HASH ?= $(shell git rev-parse HEAD)
 # Detect if kernel was built with Clang - check /proc/config.gz first, then /boot/config-*
