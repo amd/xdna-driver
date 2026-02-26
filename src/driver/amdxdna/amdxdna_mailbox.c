@@ -686,7 +686,7 @@ int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,
 
 	ret = mailbox_acquire_msgid(mb_chann, mb_msg);
 	if (unlikely(ret < 0)) {
-		MB_ERR(mb_chann, "mailbox_acquire_msgid failed");
+		MB_ERR(mb_chann, "mailbox_acquire_msgid failed, err: %d", ret);
 		goto msg_id_failed;
 	}
 	header->id = ret;
