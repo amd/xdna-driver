@@ -91,6 +91,16 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
+    .tag = "gemm",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/gemm/gemm.elf",
+    .flow = FULL_ELF,
+  },
+  {
     .tag = "good",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
@@ -118,6 +128,16 @@ binary_info binary_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .path = "local_shim_test_data/npu3a/nop/nop.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "gemm",
+    .device = npu3_device_id1,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3a/gemm/gemm.elf",
     .flow = FULL_ELF,
   },
   {
