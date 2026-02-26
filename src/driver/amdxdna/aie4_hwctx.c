@@ -20,13 +20,9 @@
 #include "aie4_msg_priv.h"
 #include "aie4_host_queue.h"
 
-#define	NO_KMS			0
-#define	KMS_REAL_CERT		1
-#define	KMS_SIMULATING_CERT	2
 int kernel_mode_submission = 1;
 module_param(kernel_mode_submission, int, 0600);
-MODULE_PARM_DESC(kernel_mode_submission,
-		 "I/O submission, 0 - by user, 1 by driver (default), 2 - simulated cert for debugging");
+MODULE_PARM_DESC(kernel_mode_submission, "I/O submission, 0 - by user, 1 by driver (default)");
 
 static int aie4_alloc_resource(struct amdxdna_ctx *ctx)
 {
@@ -125,7 +121,7 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 	priv->umq_read_index = &qhdr->read_index;
 	priv->umq_write_index = &qhdr->write_index;
 
-	if (kernel_mode_submission == NO_KMS)
+	if (!kernel_mode_submission)
 		return 0;
 
 	/*
@@ -471,56 +467,6 @@ static void job_worker(struct work_struct *work)
 	}
 }
 
-/* CERT Simulation for debug only, remove later. */
-static void cert_worker(struct work_struct *work)
-{
-	struct amdxdna_ctx_priv *priv;
-	struct host_queue_packet *pkt;
-	struct amdxdna_dev *xdna;
-	u32 *ebuf_state;
-
-	priv = container_of(work, struct amdxdna_ctx_priv, cert_work);
-	xdna = priv->ctx->client->xdna;
-
-	while (priv->status == CTX_STATE_CONNECTED &&
-	       priv->cert_read_index < *priv->umq_write_index) {
-		pkt = &priv->umq_pkts[priv->cert_read_index & (CTX_MAX_CMDS - 1)];
-		ebuf_state = (u32 *)(uintptr_t)(pkt->pkt_header.completion_signal);
-		XDNA_DBG(xdna, "Simulating CERT processing @%lld", priv->cert_read_index);
-		if (priv->cert_read_index == priv->cert_timeout_seq) {
-			/* Simulating timeout. */
-			XDNA_DBG(xdna, "Simulating CERT timeout @%lld", priv->cert_read_index);
-			priv->cert_read_index = *priv->umq_write_index;
-			priv->status = CTX_STATE_DISCONNECTED;
-			wake_up_all(&priv->cert_comp->waitq);
-			priv->cert_timeout_seq = ~0UL;
-			break;
-		}
-		msleep(300);
-		if (priv->cert_read_index == priv->cert_error_seq) {
-			/* Simulating error. */
-			XDNA_DBG(xdna, "Simulating CERT error @%lld", priv->cert_read_index);
-			*ebuf_state = ERT_CMD_STATE_ERROR;
-		} else if (priv->cert_read_index > priv->cert_error_seq) {
-			/* Simulating abort after error. */
-			XDNA_DBG(xdna, "Simulating CERT abort after error @%lld",
-				 priv->cert_read_index);
-			*ebuf_state = ERT_CMD_STATE_ABORT;
-		}
-		++priv->cert_read_index;
-		if (pkt->pkt_header.common_header.chain_flag == CHAIN_FLG_LAST_CMD) {
-			/* Simulating success. */
-			if (FIELD_GET(AMDXDNA_CMD_STATE, *ebuf_state) == ERT_CMD_STATE_NEW) {
-				XDNA_DBG(xdna, "Simulating CERT success @%lld",
-					 priv->cert_read_index - 1);
-				*ebuf_state = ERT_CMD_STATE_COMPLETED;
-			}
-			*priv->umq_read_index = priv->cert_read_index;
-			wake_up_all(&priv->cert_comp->waitq);
-		}
-	}
-}
-
 int aie4_ctx_init(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
@@ -548,13 +494,6 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 		goto fail;
 	}
 
-	/* CERT Simulation for debugging only, remove later. */
-	INIT_WORK(&priv->cert_work, cert_worker);
-	priv->cert_work_q = create_singlethread_workqueue(ctx->name);
-	priv->cert_timeout_seq = ~0UL;
-	priv->cert_error_seq = ~0UL;
-	priv->cert_read_index = QUEUE_INDEX_START;
-
 	ret = aie4_ctx_umq_init(ctx);
 	if (ret)
 		goto fail;
@@ -575,10 +514,6 @@ int aie4_ctx_init(struct amdxdna_ctx *ctx)
 fail:
 	aie4_ctx_col_list_fini(ctx);
 	aie4_ctx_umq_fini(ctx);
-	if (priv->cert_work_q) {
-		cancel_work_sync(&priv->cert_work);
-		destroy_workqueue(priv->cert_work_q);
-	}
 	if (priv->job_work_q) {
 		cancel_work_sync(&priv->job_work);
 		destroy_workqueue(priv->job_work_q);
@@ -595,9 +530,6 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = ctx->priv;
-
-	cancel_work_sync(&priv->cert_work);
-	destroy_workqueue(priv->cert_work_q);
 
 	/*
 	 * TODO: this is temp hack. The hwctx should be destroyed on device
@@ -771,18 +703,12 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 	pkt->pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
 	pkt->pkt_header.common_header.chain_flag =
 		last_of_chain ? CHAIN_FLG_LAST_CMD : CHAIN_FLG_NOT_LAST_CMD;
-	if (kernel_mode_submission == KMS_REAL_CERT)
-		pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo);
-	else
-		pkt->pkt_header.completion_signal = (uintptr_t)amdxdna_gem_vmap(cmd_abo);
+	pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo);
 	pkt->pkt_header.completion_signal += offsetof(struct amdxdna_cmd, header);
 	pkt->pkt_header.common_header.reserved = 0x0; /* Remove after update CERT. */
 	*seq = publish_cmd(ctx);
 	/*aie4_ctx_umq_dump(ctx);*/
-	if (kernel_mode_submission == KMS_REAL_CERT)
-		ring_doorbell(ctx);
-	else
-		queue_work(priv->cert_work_q, &priv->cert_work);
+	ring_doorbell(ctx);
 	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", ctx->name, *seq);
 	return 0;
 }
