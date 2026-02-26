@@ -1143,12 +1143,18 @@ error:
 void aie2_rq_del(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna;
+	struct aie2_partition *part;
 	bool wait_parts = false;
 	u32 num_col;
 
 	xdna = ctx_rq_to_xdna_dev(rq);
 	mutex_lock(&xdna->dev_lock);
 	down_write(&ctx->priv->io_sem);
+
+	part = ctx->priv->part;
+	if (part)
+		queue_work(rq->work_q, &part->sched_work);
+
 	ctx->priv->should_block = false;
 	part_ctx_stop_wait(ctx, true);
 	up_write(&ctx->priv->io_sem);
