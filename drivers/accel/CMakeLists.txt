@@ -49,3 +49,11 @@ add_custom_command(
 message(STATUS "Build accel amdxdna driver in ${XDNA_DRV_PATH}")
 
 add_custom_target(accel_driver ALL DEPENDS ${XDNA_DRV_TGT})
+
+# Copy accel-built .ko to XDNA_BIN_DIR/driver as amdxdna_legacy.ko (for -build_accel and testing)
+add_custom_target(install_accel_ko ALL
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${XDNA_BIN_DIR}/driver
+  COMMAND ${CMAKE_COMMAND} -E copy ${XDNA_DRV_PATH} ${CMAKE_BINARY_DIR}${XDNA_BIN_DIR}/driver/amdxdna_legacy.ko
+  COMMENT "Copy amdxdna.ko to ${XDNA_BIN_DIR}/driver as amdxdna_legacy.ko"
+  DEPENDS accel_driver
+  )

@@ -342,7 +342,7 @@ if [[ $build_accel_only == 1 ]]; then
     git config --global --add safe.directory '*'
     time $CMAKE $cmake_extra_flags -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
   fi
-  time make -j $njobs $verbose accel_driver
+  time make -j $njobs $verbose install_accel_ko
   cd ..
   exit 0
 fi
