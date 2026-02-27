@@ -3,7 +3,7 @@
  * Copyright (C) 2024, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/sizes.h>

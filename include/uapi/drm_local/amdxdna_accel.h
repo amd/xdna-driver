@@ -6,8 +6,13 @@
 #ifndef _UAPI_AMDXDNA_ACCEL_H_
 #define _UAPI_AMDXDNA_ACCEL_H_
 
+#ifdef __KERNEL__
+#include <drm/drm.h>
+#else
+#include <libdrm/drm.h>
+#endif
+#include <linux/const.h>
 #include <linux/stddef.h>
-#include "drm.h"
 
 #if defined(__cplusplus)
 extern "C" {

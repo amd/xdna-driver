@@ -3,7 +3,7 @@
  * Copyright (C) 2024, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
@@ -380,7 +380,11 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	aie2_hwctx_restart(xdna, hwctx);
 	mutex_unlock(&xdna->dev_lock);
 
+#ifdef HAVE_drm_gpu_sched_stat_reset
 	return DRM_GPU_SCHED_STAT_RESET;
+#else
+	return DRM_GPU_SCHED_STAT_NOMINAL;
+#endif
 }
 
 static const struct drm_sched_backend_ops sched_ops = {
@@ -468,7 +472,11 @@ static int aie2_alloc_resource(struct amdxdna_hwctx *hwctx)
 		return aie2_create_context(xdna->dev_handle, hwctx);
 	}
 
+#ifdef HAVE_7_0_kmalloc_ops
 	xrs_req = kzalloc_obj(*xrs_req);
+#else
+	xrs_req = kzalloc(sizeof(*xrs_req), GFP_KERNEL);
+#endif
 	if (!xrs_req)
 		return -ENOMEM;
 
@@ -563,7 +571,11 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_gem_obj *heap;
 	int i, ret;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	priv = kzalloc_obj(*hwctx->priv);
+#else
+	priv = kzalloc(sizeof(*hwctx->priv), GFP_KERNEL);
+#endif
 	if (!priv)
 		return -ENOMEM;
 	hwctx->priv = priv;
@@ -990,8 +1002,12 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		goto up_sem;
 	}
 
+#ifdef HAVE_6_17_drm_sched_job_init
 	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, hwctx,
 				 hwctx->client->filp->client_id);
+#else
+	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, hwctx);
+#endif
 	if (ret) {
 		XDNA_ERR(xdna, "DRM job init failed, ret %d", ret);
 		goto free_chain;

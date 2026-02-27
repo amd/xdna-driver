@@ -24,6 +24,7 @@ Options:
   -nokmod                 Don't build or install the kernel module
   -novxdna                Don't build vxdna library
   -vxdna_test             Build and run vxdna unit tests (-novxdna disable this option)
+  -build_accel            Only build drivers/accel/amdxdna to .ko (accel_driver target)
 USAGE_END
 }
 
@@ -209,6 +210,7 @@ verbose=
 skip_kmod=0
 build_vxdna=1
 run_vxdna_tests=0
+build_accel_only=0
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
 xrt_install_prefix="/opt/xilinx/xrt"
@@ -263,6 +265,9 @@ while [ $# -gt 0 ]; do
       ;;
     -vxdna_test)
       run_vxdna_tests=1
+      ;;
+    -build_accel)
+      build_accel_only=1
       ;;
     -dir)
       download_dir=$2
@@ -325,6 +330,20 @@ if [[ $clean == 1 ]]; then
   if [[ $distclean == 1 ]]; then
     rm -rf ${DOWNLOAD_BINS_DIR}
   fi
+  exit 0
+fi
+
+if [[ $build_accel_only == 1 ]]; then
+  echo "Building only accel driver (drivers/accel/amdxdna -> amdxdna.ko)"
+  BUILD_TYPE=$DEBUG_BUILD_TYPE
+  mkdir -p $BUILD_TYPE
+  cd $BUILD_TYPE
+  if [[ $nocmake == 0 ]]; then
+    git config --global --add safe.directory '*'
+    time $CMAKE $cmake_extra_flags -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
+  fi
+  time make -j $njobs $verbose accel_driver
+  cd ..
   exit 0
 fi
 

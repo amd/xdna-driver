@@ -475,7 +475,11 @@ xdna_mailbox_create_channel(struct mailbox *mb,
 		return NULL;
 	}
 
+#ifdef HAVE_7_0_kmalloc_ops
 	mb_chann = kzalloc_obj(*mb_chann);
+#else
+	mb_chann = kzalloc(sizeof(*mb_chann), GFP_KERNEL);
+#endif
 	if (!mb_chann)
 		return NULL;
 

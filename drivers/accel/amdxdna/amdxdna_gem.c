@@ -3,7 +3,7 @@
  * Copyright (C) 2024, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_cache.h>
 #include <drm/drm_device.h>
 #include <drm/drm_gem.h>
@@ -203,12 +203,21 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	if (!xdna->dev_info->ops->hmm_invalidate)
 		return 0;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	mapp = kzalloc_obj(*mapp);
+#else
+	mapp = kzalloc(sizeof(*mapp), GFP_KERNEL);
+#endif
 	if (!mapp)
 		return -ENOMEM;
 
 	nr_pages = (PAGE_ALIGN(addr + len) - (addr & PAGE_MASK)) >> PAGE_SHIFT;
+#ifdef HAVE_7_0_kmalloc_ops
 	mapp->range.hmm_pfns = kvzalloc_objs(*mapp->range.hmm_pfns, nr_pages);
+#else
+	mapp->range.hmm_pfns = kvcalloc(nr_pages, sizeof(*mapp->range.hmm_pfns),
+					GFP_KERNEL);
+#endif
 	if (!mapp->range.hmm_pfns) {
 		ret = -ENOMEM;
 		goto free_map;
@@ -398,7 +407,11 @@ static int amdxdna_gem_obj_vmap(struct amdxdna_gem_obj *abo, void **vaddr)
 	if (is_import_bo(abo))
 		ret = dma_buf_vmap_unlocked(abo->dma_buf, &map);
 	else
+#ifdef HAVE_drm_gem_vmap_vunmap
 		ret = drm_gem_vmap(to_gobj(abo), &map);
+#else
+		ret = drm_gem_vmap_unlocked(to_gobj(abo), &map);
+#endif
 
 	*vaddr = map.vaddr;
 	return ret;
@@ -416,7 +429,11 @@ static void amdxdna_gem_obj_vunmap(struct amdxdna_gem_obj *abo)
 	if (is_import_bo(abo))
 		dma_buf_vunmap_unlocked(abo->dma_buf, &map);
 	else
+#ifdef HAVE_drm_gem_vmap_vunmap
 		drm_gem_vunmap(to_gobj(abo), &map);
+#else
+		drm_gem_vunmap_unlocked(to_gobj(abo), &map);
+#endif
 }
 
 static struct dma_buf *amdxdna_gem_prime_export(struct drm_gem_object *gobj, int flags)
@@ -496,7 +513,11 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 {
 	struct amdxdna_gem_obj *abo;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	abo = kzalloc_obj(*abo);
+#else
+	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
+#endif
 	if (!abo)
 		return ERR_PTR(-ENOMEM);
 

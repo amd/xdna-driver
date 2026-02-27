@@ -3,7 +3,7 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/bits.h>
@@ -66,7 +66,11 @@
 const struct rt_config npu4_default_rt_cfg[] = {
 	{ 5, 1, AIE2_RT_CFG_INIT }, /* PDI APP LOAD MODE */
 	{ 10, 1, AIE2_RT_CFG_INIT }, /* DEBUG BUF */
+#ifdef HAVE_bit_u64
 	{ 14, 0, AIE2_RT_CFG_INIT, BIT_U64(AIE2_PREEMPT) }, /* Frame boundary preemption */
+#else
+	{ 14, 0, AIE2_RT_CFG_INIT, BIT_ULL(AIE2_PREEMPT) }, /* Frame boundary preemption */
+#endif
 	{ 1, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
 	{ 2, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
 	{ 3, 1, AIE2_RT_CFG_CLK_GATING }, /* Clock gating on */
@@ -90,9 +94,15 @@ const struct dpm_clk_freq npu4_dpm_clk_table[] = {
 
 const struct aie2_fw_feature_tbl npu4_fw_feature_table[] = {
 	{ .major = 6, .min_minor = 12 },
+#ifdef HAVE_bit_u64
 	{ .features = BIT_U64(AIE2_NPU_COMMAND), .major = 6, .min_minor = 15 },
 	{ .features = BIT_U64(AIE2_PREEMPT), .major = 6, .min_minor = 12 },
 	{ .features = BIT_U64(AIE2_TEMPORAL_ONLY), .major = 6, .min_minor = 12 },
+#else
+	{ .features = BIT_ULL(AIE2_NPU_COMMAND), .major = 6, .min_minor = 15 },
+	{ .features = BIT_ULL(AIE2_PREEMPT), .major = 6, .min_minor = 12 },
+	{ .features = BIT_ULL(AIE2_TEMPORAL_ONLY), .major = 6, .min_minor = 12 },
+#endif
 	{ .features = GENMASK_ULL(AIE2_TEMPORAL_ONLY, AIE2_NPU_COMMAND), .major = 7 },
 	{ 0 }
 };

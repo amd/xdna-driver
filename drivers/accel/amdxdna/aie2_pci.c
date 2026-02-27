@@ -3,7 +3,7 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#include <drm/amdxdna_accel.h>
+#include "drm_local/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_gem_shmem_helper.h>
@@ -671,7 +671,11 @@ static int aie2_get_aie_metadata(struct amdxdna_client *client,
 	int ret = 0;
 
 	ndev = xdna->dev_handle;
+#ifdef HAVE_7_0_kmalloc_ops
 	meta = kzalloc_obj(*meta);
+#else
+	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
+#endif
 	if (!meta)
 		return -ENOMEM;
 
@@ -766,7 +770,11 @@ static int aie2_get_clock_metadata(struct amdxdna_client *client,
 	int ret = 0;
 
 	ndev = xdna->dev_handle;
+#ifdef HAVE_7_0_kmalloc_ops
 	clock = kzalloc_obj(*clock);
+#else
+	clock = kzalloc(sizeof(*clock), GFP_KERNEL);
+#endif
 	if (!clock)
 		return -ENOMEM;
 
@@ -793,7 +801,11 @@ static int aie2_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	if (!array_args->num_element)
 		return -EINVAL;
 
+#ifdef HAVE_7_0_kmalloc_ops
 	tmp = kzalloc_obj(*tmp);
+#else
+	tmp = kzalloc(sizeof(*tmp), GFP_KERNEL);
+#endif
 	if (!tmp)
 		return -ENOMEM;
 
