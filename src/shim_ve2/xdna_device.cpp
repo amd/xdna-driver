@@ -1011,6 +1011,8 @@ initialize_query_table()
   emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func1_request<query::aie_read,                aie_read>();
   emplace_func1_request<query::aie_write,               aie_write>();
+  emplace_func1_request<query::aie_get_freq,            aie_get_freq>();
+  emplace_func2_request<query::aie_set_freq,            aie_set_freq>();
   emplace_func1_request<query::aie_coredump,            aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
