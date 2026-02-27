@@ -440,13 +440,13 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, ar
 void
 TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  io_test_bo_set boset{sdev.get()};
+  auto boset = create_bo_set_for_device(sdev.get(), false, "nop");
 
   // Use same BO for both input and output
-  boset.get_bos()[IO_TEST_BO_OUTPUT].tbo = boset.get_bos()[IO_TEST_BO_INPUT].tbo;
-  auto ibo = boset.get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
+  boset->get_bos()[IO_TEST_BO_OUTPUT].tbo = boset->get_bos()[IO_TEST_BO_INPUT].tbo;
+  auto ibo = boset->get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
   std::memset(ibo->map(), 0, ibo->size());
-  boset.run_no_check_result();
+  boset->run_no_check_result();
 }
 
 void
@@ -476,8 +476,8 @@ TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std
 void
 TEST_io_with_ubuf_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  io_test_bo_set boset{sdev.get(), true};
-  boset.run();
+  auto boset = create_bo_set_for_device(sdev.get(), true);
+  boset->run();
 }
 
 void
@@ -489,19 +489,19 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
    */
 
   const int seconds = 8;
-  io_test_bo_set boset{sdev.get()};
+  auto boset = create_bo_set_for_device(sdev.get());
 
   std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
   sleep(seconds);
 
   std::cout << "Submit command to resume" << std::endl;
-  boset.run();
+  boset->run();
 
   std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
   sleep(seconds);
 
   std::cout << "Submit command to resume" << std::endl;
-  boset.run();
+  boset->run();
 }
 
 void

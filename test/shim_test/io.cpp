@@ -224,6 +224,21 @@ elf_init_no_arg_cmd(xrt::elf& elf, cuidx_type idx, bool dump, bo& cmd, bo& inst)
 
 } // namespace
 
+std::unique_ptr<io_test_bo_set_base>
+create_bo_set_for_device(device* dev, bool use_ubuf, const char* tag)
+{
+  auto device_id = device_query<query::pcie_device>(dev);
+  if (device_id == npu3_device_id || device_id == npu3_device_id1) {
+    if (use_ubuf) {
+      std::string err = "Ubuf not supported on this device";
+      throw std::runtime_error(err);
+    }
+    const char* aie4_tag = (tag && tag[0]) ? tag : "good";
+    return std::make_unique<elf_full_io_test_bo_set>(dev, aie4_tag);
+  }
+  return std::make_unique<io_test_bo_set>(dev, use_ubuf);
+}
+
 void
 io_test_bo_set_base::
 cache_cmd_header()
