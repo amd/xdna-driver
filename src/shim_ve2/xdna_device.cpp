@@ -614,6 +614,85 @@ struct clock_topology
     return payload;
   }
 };
+struct aie_get_freq
+{
+  using result_type = query::aie_get_freq::result_type;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& partition_id)
+  {
+    if (key != key_type::aie_get_freq)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    auto edev = get_edgedev(device);
+    if (!edev)
+      throw xrt_core::error(-EINVAL, "Cannot get edge device");
+
+    amdxdna_drm_query_clock_metadata clock_metadata;
+    memset(&clock_metadata, 0, sizeof(clock_metadata));
+
+    amdxdna_drm_get_info get_info_arg = {
+      .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+      .buffer_size = sizeof(clock_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
+    };
+
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &get_info_arg);
+
+    // Return frequency in Hz
+    return clock_metadata.mp_npu_clock.freq_mhz * 1000000ULL;
+  }
+};
+
+struct aie_set_freq
+{
+  using result_type = query::aie_set_freq::result_type;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& partition_id, const std::any& freq)
+  {
+    if (key != key_type::aie_set_freq)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    auto freq_hz = std::any_cast<uint64_t>(freq);
+
+    auto edev = get_edgedev(device);
+    if (!edev)
+      throw xrt_core::error(-EINVAL, "Cannot get edge device");
+
+    amdxdna_drm_query_clock set_freq_arg;
+    memset(&set_freq_arg, 0, sizeof(set_freq_arg));
+    set_freq_arg.freq_mhz = static_cast<uint32_t>(freq_hz / 1000000);  // Convert Hz to MHz
+    strncpy(reinterpret_cast<char*>(set_freq_arg.name), "AIE Clock", sizeof(set_freq_arg.name) - 1);
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_CLOCK_FREQ,
+      .buffer_size = sizeof(set_freq_arg),
+      .buffer = reinterpret_cast<uintptr_t>(&set_freq_arg)
+    };
+
+    try {
+      edev->ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+    } catch (const xrt_core::system_error& e) {
+      throw xrt_core::error(e.code().value(),
+        boost::str(boost::format("Failed to set AIE clock frequency to %lu Hz (%.2f MHz): %s")
+          % freq_hz % (freq_hz / 1000000.0) % e.what()));
+    }
+    return true;
+  }
+};
 
 struct xclbin_slots
 {
