@@ -94,7 +94,6 @@ struct amdxdna_ctx_priv {
 	u64				umq_indirect_pkts_dev_addr;
 
 	struct work_struct		job_work;
-	bool				job_aborting;
 	struct workqueue_struct		*job_work_q;
 	wait_queue_head_t		job_list_wq;
 	struct list_head		pending_job_list;
@@ -110,7 +109,7 @@ struct amdxdna_ctx_priv {
 	u32                             status;
 
 	bool					cached_health_valid;
-	struct aie4_msg_app_health_report	*cached_health_report;
+	struct aie4_msg_app_health_report	cached_health_report;
 };
 
 enum aie4_dev_status {
@@ -153,9 +152,6 @@ struct amdxdna_dev_hdl {
 
 	u32				dev_status;
 
-	struct xarray			cert_comp_xa;
-	struct mutex			cert_comp_xa_lock; /* protects cert_comp_xa */
-
 	void			__iomem *doorbell_base;
 	void			__iomem *mbox_base;
 	void			__iomem *rbuf_base;
@@ -176,8 +172,9 @@ struct amdxdna_dev_hdl {
 
 	struct amdxdna_mgmt_dma_hdl	*mpnpu_work_buffer;
 
-	/* Protect mgmt_chann */
+	/* Protect mgmt_chann and cert_comp kref in cert_comp_xa */
 	struct mutex			aie4_lock;
+	struct xarray			cert_comp_xa;
 };
 
 /* CERT completion event */
@@ -301,7 +298,7 @@ int aie4_sriov_configure(struct amdxdna_dev *xdna, int num_vfs);
 
 extern const struct amdxdna_dev_ops aie4_ops;
 
-struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx);
-void aie4_put_cert_comp(struct cert_comp *comp);
+void aie4_put_cert_comp_locked(struct cert_comp *comp);
+void aie4_ctx_cleanup_pending_jobs(struct amdxdna_ctx *ctx);
 
 #endif /* _AIE4_PCI_H_ */
