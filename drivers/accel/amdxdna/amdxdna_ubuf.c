@@ -128,6 +128,9 @@ static void amdxdna_ubuf_vunmap(struct dma_buf *dbuf, struct iosys_map *map)
 }
 
 static const struct dma_buf_ops amdxdna_ubuf_dmabuf_ops = {
+#ifdef HAVE_cache_sgt_mapping
+	.cache_sgt_mapping = true,
+#endif
 	.map_dma_buf = amdxdna_ubuf_map,
 	.unmap_dma_buf = amdxdna_ubuf_unmap,
 	.release = amdxdna_ubuf_release,

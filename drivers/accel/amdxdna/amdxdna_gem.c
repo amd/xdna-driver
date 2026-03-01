@@ -21,7 +21,11 @@
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_ubuf.h"
 
+#ifdef HAVE_6_13_MODULE_IMPORT_NS
 MODULE_IMPORT_NS("DMA_BUF");
+#else
+MODULE_IMPORT_NS(DMA_BUF);
+#endif
 
 static int
 amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
@@ -389,6 +393,9 @@ put_obj:
 }
 
 static const struct dma_buf_ops amdxdna_dmabuf_ops = {
+#ifdef HAVE_cache_sgt_mapping
+	.cache_sgt_mapping = true,
+#endif
 	.attach = drm_gem_map_attach,
 	.detach = drm_gem_map_detach,
 	.map_dma_buf = drm_gem_map_dma_buf,
