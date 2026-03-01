@@ -29,7 +29,7 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/pkg.cmake)
 
 add_subdirectory(src)
-#add_subdirectory(drivers)
+add_subdirectory(drivers)
 
 if(NOT SKIP_KMOD)
   add_subdirectory(test)
