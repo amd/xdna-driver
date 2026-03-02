@@ -22,7 +22,7 @@ if [ ! -d "$KERNEL_SRC/include/linux" ]; then
 fi
 
 # ---- Output header path ------------------------------------------------
-OUT="${OUT:-driver/amdxdna/config_kernel.h}"
+OUT="${OUT:-drivers/accel/amdxdna/config_kernel.h}"
 
 # ---- Helper: extract value from $OUT ----------------------------
 get_hdr_val() {

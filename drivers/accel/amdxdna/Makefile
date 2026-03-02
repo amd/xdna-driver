@@ -28,7 +28,7 @@ endif
 .PHONY: all clean modules modules_install copy_ko
 
 all: $(BUILD_ROOT_DIR)
-	$(MAKE) -C $(BUILD_ROOT_DIR)/driver/$(notdir $(SRC_DIR)) modules
+	$(MAKE) -C $(BUILD_ROOT_DIR)/drivers/accel/$(notdir $(SRC_DIR)) modules
 
 # add EXTRA_CFLAGS='-save-temps' to keep intermedia files
 DEFINES := -DAMDXDNA_DEVEL
@@ -74,9 +74,9 @@ $(BUILD_ROOT_DIR): $(SRC_DIR)
 	@echo "[INFO] Re-Generate BUILD_ROOT_DIR: $(BUILD_ROOT_DIR)"
 	@rm -rf $@
 	@$(eval TMP_DIR := $(shell mktemp -d))
-	@mkdir -p $(TMP_DIR)/driver
-	@cp -rs $(SRC_DIR) $(TMP_DIR)/driver
-	@cp -rs $(SRC_DIR)/../../include $(TMP_DIR)
+	@mkdir -p $(TMP_DIR)/drivers/accel
+	@cp -rs $(SRC_DIR) $(TMP_DIR)/drivers/accel
+	@cp -rs $(SRC_DIR)/../../../include $(TMP_DIR)
 	@mv $(TMP_DIR) $(BUILD_ROOT_DIR)
 
 copy_ko:
