@@ -10,21 +10,21 @@ usage()
   cat << USAGE_END
 Usage: build.sh [options]
 Options:
-  -help                   Display this help
-  -clean                  Clean build directory
-  -debug                  Debug build and generate .deb package
-  -release                Release build and generate .deb package
-  -package                Ignored (present for backward compatibility)
-  -j <n>                  Compile parallel (default: num of CPUs)
-  -nocmake                Do not regenerate cmake files
-  -install_prefix <path>  Set CMAKE_INSTALL_PREFIX to path"
-  -verbose                Enable verbose build
-  -hello_umq              Hello UMQ Memory Test
-  -dir                    Download directory if apply
-  -nokmod                 Don't build or install the kernel module
-  -novxdna                Don't build vxdna library
-  -vxdna_test             Build and run vxdna unit tests (-novxdna disable this option)
-  -build_accel            Only build drivers/accel/amdxdna to .ko (accel_driver target)
+  -help                    Display this help
+  -clean                   Clean build directory
+  -debug                   Debug build and generate .deb package
+  -release                 Release build and generate .deb package
+  -j <n>                   Compile parallel (default: num of CPUs)
+  -nocmake                 Do not regenerate cmake files
+  -install_prefix <path>   Set CMAKE_INSTALL_PREFIX to path
+  -verbose                 Enable verbose build
+  -hello_umq               Hello UMQ Memory Test
+  -dir                     Download directory if apply
+  -nokmod                  Don't build or install the kernel module
+  -novxdna                 Don't build vxdna library
+  -vxdna_test              Build and run vxdna unit tests (-novxdna disable this option)
+  -package_legacy_driver   Build package with legacy driver source code (default)
+  -package_upstream_driver Build package with upstream driver source code
 USAGE_END
 }
 
@@ -204,13 +204,12 @@ clean=0
 distclean=0
 debug=1
 release=0
-package=0
 nocmake=0
 verbose=
 skip_kmod=0
 build_vxdna=1
 run_vxdna_tests=0
-build_accel_only=0
+package_legacy_driver=1
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
 xrt_install_prefix="/opt/xilinx/xrt"
@@ -237,11 +236,6 @@ while [ $# -gt 0 ]; do
       debug=0
       release=1
       ;;
-    -package)
-      package=1
-      debug=0
-      release=0
-      ;;
     -j)
       if is_not_option_or_empty $2; then
         njobs=$2
@@ -266,8 +260,11 @@ while [ $# -gt 0 ]; do
     -vxdna_test)
       run_vxdna_tests=1
       ;;
-    -build_accel)
-      build_accel_only=1
+    -package_legacy_driver)
+      package_legacy_driver=1
+      ;;
+    -package_upstream_driver)
+      package_legacy_driver=0
       ;;
     -dir)
       download_dir=$2
@@ -313,7 +310,7 @@ fi
 cmake_extra_flags+=" -DCMAKE_INSTALL_PREFIX=$xrt_install_prefix"
 cmake_extra_flags+=" -DSKIP_KMOD=$skip_kmod"
 cmake_extra_flags+=" -DBUILD_VXDNA=$build_vxdna"
-
+cmake_extra_flags+=" -DPACKAGE_LEGACY_DRIVER=$package_legacy_driver"
 # Enable testing if -vxdna_test flag is provided
 if [[ $run_vxdna_tests == 1 ]]; then
   cmake_extra_flags+=" -DBUILD_VXDNA_TESTING=ON"
@@ -333,29 +330,10 @@ if [[ $clean == 1 ]]; then
   exit 0
 fi
 
-if [[ $build_accel_only == 1 ]]; then
-  echo "Building only accel driver (drivers/accel/amdxdna -> amdxdna.ko)"
-  BUILD_TYPE=$DEBUG_BUILD_TYPE
-  mkdir -p $BUILD_TYPE
-  cd $BUILD_TYPE
-  if [[ $nocmake == 0 ]]; then
-    git config --global --add safe.directory '*'
-    time $CMAKE $cmake_extra_flags -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DUMQ_HELLO_TEST=$hello_umq $BUILD_DIR/../
-  fi
-  time make -j $njobs $verbose install_accel_ko
-  cd ..
-  exit 0
-fi
-
 if [[ $release == 1 ]]; then
   do_build $RELEASE_BUILD_TYPE
 fi
 
 if [[ $debug == 1 ]]; then
   do_build $DEBUG_BUILD_TYPE
-fi
-
-if [[ $package == 1 ]]; then
-  echo "Packaging is automatically done as part of build"
-  exit 0
 fi
