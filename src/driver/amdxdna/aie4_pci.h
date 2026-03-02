@@ -61,18 +61,11 @@ struct amdxdna_ctx_priv {
 	void			__iomem	*doorbell_addr;
 
 	u32				meta_bo_hdl;
-	struct col_entry		*col_entry;
+	struct cert_comp		*cert_comp;
 	u32				hw_ctx_id;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
-
-	/* CERT Simulation for debug only, remove later. */
-	struct workqueue_struct		*cert_work_q;
-	struct work_struct		cert_work;
-	u64				cert_timeout_seq;
-	u64				cert_error_seq;
-	u64				cert_read_index;
 
 	bool					cached_health_valid;
 	struct aie4_msg_app_health_report	*cached_health_report;
@@ -118,8 +111,9 @@ struct amdxdna_dev_hdl {
 
 	u32				dev_status;
 
-	struct list_head		col_entry_list;
-	struct mutex			col_list_lock; // lock for col_entry_list
+	struct xarray			cert_comp_xa;
+	struct mutex			cert_comp_xa_lock; /* protects cert_comp_xa */
+
 	void			__iomem *doorbell_base;
 	void			__iomem *mbox_base;
 	void			__iomem *rbuf_base;
@@ -128,7 +122,7 @@ struct amdxdna_dev_hdl {
 
 	int				pw_mode;
 	enum aie_power_state		power_state;
-	struct timer_list		event_timer;
+	struct timer_list		cert_timer;
 	bool				clk_gate_enabled;
 	u32				dpm_level;
 	bool				force_preempt_enabled;
@@ -144,14 +138,13 @@ struct amdxdna_dev_hdl {
 	struct mutex			aie4_lock;
 };
 
-struct col_entry {
+/* CERT completion event */
+struct cert_comp {
 	struct amdxdna_dev_hdl	*ndev;
 	u32			msix_idx;
-	int			col_irq;
-	struct kref		col_ref_count;
-	wait_queue_head_t	col_event;
-	struct list_head	col_list;
-	bool			needs_reset;
+	int			irq;
+	struct kref		kref;
+	wait_queue_head_t	waitq;
 };
 
 /* common util inline functions */
@@ -262,6 +255,9 @@ void aie4_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
 int aie4_sriov_configure(struct amdxdna_dev *xdna, int num_vfs);
 
 extern const struct amdxdna_dev_ops aie4_ops;
+
+struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx);
+void aie4_put_cert_comp(struct cert_comp *comp);
 
 #endif /* _AIE4_PCI_H_ */
 

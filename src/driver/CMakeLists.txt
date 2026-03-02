@@ -138,8 +138,8 @@ install(FILES ${CMAKE_BINARY_DIR}/driver/${XDNA_TAR_GZ}
   COMPONENT ${XDNA_COMPONENT}
   )
 
-set(MAKE_DRV "cd driver/${XDNA_DRV_DIR}; make ${XDNA_DRV_BLD_FLAGS_DKMS} KERNEL_SRC=\${kernel_source_dir}")
-set(CLEAN_DRV "cd driver/${XDNA_DRV_DIR}; make clean KERNEL_SRC=\${kernel_source_dir}")
+set(MAKE_DRV "make -C driver/${XDNA_DRV_DIR} ${XDNA_DRV_BLD_FLAGS_DKMS} KERNEL_SRC=\${kernel_source_dir}")
+set(CLEAN_DRV "make -C driver/${XDNA_DRV_DIR} clean KERNEL_SRC=\${kernel_source_dir}")
 set(MODULE_DRV "BUILT_MODULE_NAME[0]=${XDNA_DRV}
 BUILT_MODULE_LOCATION[0]=\"driver/${XDNA_DRV_DIR}/build/driver/amdxdna\"
 DEST_MODULE_LOCATION[0]=\"/kernel/extras\"")

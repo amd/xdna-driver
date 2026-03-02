@@ -161,8 +161,7 @@ private:
 class elf_io_negative_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_negative_test_bo_set(device *dev, const std::string& tag,
-    const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx);
+  elf_io_negative_test_bo_set(device *dev, const std::string& tag = "");
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -211,8 +210,7 @@ private:
 class elf_io_gemm_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_gemm_test_bo_set(device *dev, const std::string& tag,
-    const std::string& elf_name);
+  elf_io_gemm_test_bo_set(device *dev, const std::string& tag = "");
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -239,5 +237,11 @@ public:
 private:
   bool m_is_full_elf = false;
 };
+
+/** Create a BO set appropriate for the device (legacy ddr_range.txt vs ELF).
+ *  AIE4 (NPU3) uses elf_full_io_test_bo_set, others use io_test_bo_set.
+ */
+std::unique_ptr<io_test_bo_set_base> create_bo_set_for_device(device* dev, bool use_ubuf = false,
+                                                               const char* tag = nullptr);
 
 #endif // _SHIMTEST_IO_H_

@@ -50,7 +50,7 @@ int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 	struct sg_table *sgt;
 	dma_addr_t dma_addr;
 	struct iova *iova;
-	size_t size;
+	ssize_t size;
 
 	if (abo->mem.dma_addr != AMDXDNA_INVALID_ADDR)
 		return 0;
@@ -69,7 +69,14 @@ int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 
 	size = iommu_map_sgtable(xdna->domain, dma_addr, sgt,
 				 IOMMU_READ | IOMMU_WRITE);
+	if (size < 0) {
+		XDNA_ERR(xdna, "iommu_map_sgtable failed: %zd", size);
+		__free_iova(&xdna->iovad, iova);
+		return size;
+	}
 	if (size < abo->mem.size) {
+		XDNA_ERR(xdna, "iommu_map_sgtable mapped incomplete size: 0x%lx, expected: 0x%lx",
+			 size, abo->mem.size);
 		__free_iova(&xdna->iovad, iova);
 		return -ENXIO;
 	}

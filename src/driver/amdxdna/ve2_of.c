@@ -169,6 +169,21 @@ cleanup:
 	return ret;
 }
 
+static struct device_node *ve2_find_mem_topology_node(struct device_node *aie_np)
+{
+	struct device_node *node;
+
+	if (!aie_np || !aie_np->parent)
+		return NULL;
+
+	for_each_child_of_node(aie_np->parent, node) {
+		if (of_device_is_compatible(node, "xlnx,aie-mem-topology"))
+			return node;
+	}
+
+	return NULL;
+}
+
 /**
  * ve2_parse_mem_topology - Parse AIE memory topology from device tree
  * @xdna: Pointer to the device structure
@@ -197,12 +212,9 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna,
 	int phandle_idx;
 	int ret;
 
-	topo_np = NULL;
-	if (aie_np && aie_np->parent)
-		topo_np = of_find_compatible_node(aie_np->parent, NULL,
-						  "xlnx,aie-mem-topology");
+	topo_np = ve2_find_mem_topology_node(aie_np);
 	if (!topo_np) {
-		XDNA_DBG(xdna, "No aie_mem_topology node found, using default CMA");
+		XDNA_INFO(xdna, "No aie_mem_topology node found, using default CMA");
 		xdna_hdl->mem_topology.num_regions = 0;
 		return -ENOENT;
 	}

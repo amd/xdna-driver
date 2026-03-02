@@ -1,0 +1,9 @@
+# This file defines code ownership
+# Each line is a file pattern followed by one or more owners.
+# Order is important. The last matching pattern has the most precedence.
+#
+# <path>/ matches files under <path> and any of its subdirectories unless later match
+# <path>/* matches files under <path> but *not* further nested files.
+
+drivers/ @houlz0507 @maxzhen @xdavidz
+include/ @houlz0507 @maxzhen @xdavidz

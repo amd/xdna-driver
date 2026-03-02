@@ -153,24 +153,25 @@ static int aie4_mailbox_info(struct amdxdna_dev *xdna,
 	return 0;
 }
 
-static void col_timer(struct timer_list *t)
+static void cert_timer(struct timer_list *t)
 {
 #if defined from_timer
-	struct amdxdna_dev_hdl *ndev = from_timer(ndev, t, event_timer);
+	struct amdxdna_dev_hdl *ndev = from_timer(ndev, t, cert_timer);
 #elif defined timer_container_of
-	struct amdxdna_dev_hdl *ndev = timer_container_of(ndev, t, event_timer);
+	struct amdxdna_dev_hdl *ndev = timer_container_of(ndev, t, cert_timer);
 #endif
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct col_entry *col_entry;
+	struct cert_comp *cert_comp;
+	unsigned long msix_idx;
 
-	mutex_lock(&ndev->col_list_lock);
-	list_for_each_entry(col_entry, &ndev->col_entry_list, col_list) {
-		XDNA_DBG(xdna, "wake up all for idx %d", col_entry->msix_idx);
-		wake_up_all(&col_entry->col_event);
+	mutex_lock(&ndev->cert_comp_xa_lock);
+	xa_for_each(&ndev->cert_comp_xa, msix_idx, cert_comp) {
+		XDNA_DBG(xdna, "wake up all for msix idx %lu", msix_idx);
+		wake_up_all(&cert_comp->waitq);
 	}
-	mutex_unlock(&ndev->col_list_lock);
+	mutex_unlock(&ndev->cert_comp_xa_lock);
 
-	mod_timer(&ndev->event_timer, jiffies + msecs_to_jiffies(1000));
+	mod_timer(&ndev->cert_timer, jiffies + msecs_to_jiffies(1000));
 }
 
 static void aie4_mailbox_fini(struct amdxdna_dev_hdl *ndev)
@@ -187,7 +188,7 @@ static inline void aie4_irq_fini(struct amdxdna_dev_hdl *ndev)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	if (enable_aie4_polling)
-		timer_delete_sync(&ndev->event_timer);
+		timer_delete_sync(&ndev->cert_timer);
 	else
 		pci_free_irq_vectors(pdev);
 }
@@ -200,8 +201,8 @@ static int aie4_irq_init(struct amdxdna_dev *xdna)
 
 	if (enable_aie4_polling) {
 		XDNA_DBG(xdna, "enable_aie4 polling mode");
-		timer_setup(&ndev->event_timer, col_timer, 0);
-		mod_timer(&ndev->event_timer, jiffies + msecs_to_jiffies(1000));
+		timer_setup(&ndev->cert_timer, cert_timer, 0);
+		mod_timer(&ndev->cert_timer, jiffies + msecs_to_jiffies(1000));
 	} else {
 		nvec = pci_msix_vec_count(pdev);
 		XDNA_DBG(xdna, "enable_aie4 interrupt mode, irq vectors:%d", nvec);
@@ -795,99 +796,100 @@ clear_master:
 	return ret;
 }
 
-static irqreturn_t col_irq_handler(int irq, void *p)
+static irqreturn_t cert_comp_isr(int irq, void *p)
 {
-	struct col_entry *col = (struct col_entry *)p;
+	struct cert_comp *cert_comp = (struct cert_comp *)p;
 
-	trace_amdxdna_debug_point("ISR fired", col->col_irq, "command completed");
-	wake_up_all(&col->col_event);
+	trace_amdxdna_debug_point("ISR fired", cert_comp->irq, "command completed");
+	wake_up_all(&cert_comp->waitq);
 	return IRQ_HANDLED;
 }
 
-static struct col_entry *get_col_entry(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
+struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct col_entry *col_entry;
-	struct list_head *pos = NULL, *next = NULL;
-	int ret;
+	struct cert_comp *cert_comp;
+	int ret = 0;
 
-	mutex_lock(&ndev->col_list_lock);
-	list_for_each_safe(pos, next, &ndev->col_entry_list) {
-		col_entry = list_entry(pos, struct col_entry, col_list);
+	mutex_lock(&ndev->cert_comp_xa_lock);
 
-		if (col_entry->msix_idx == msix_idx) {
-			kref_get(&col_entry->col_ref_count);
-			mutex_unlock(&ndev->col_list_lock);
-			return col_entry;
-		}
+	cert_comp = xa_load(&ndev->cert_comp_xa, msix_idx);
+	if (cert_comp) {
+		kref_get(&cert_comp->kref);
+		mutex_unlock(&ndev->cert_comp_xa_lock);
+		return cert_comp;
 	}
 
-	col_entry = kzalloc(sizeof(*col_entry), GFP_KERNEL);
-	if (!col_entry) {
-		XDNA_ERR(xdna, "no memory for col_entry");
+	cert_comp = kzalloc(sizeof(*cert_comp), GFP_KERNEL);
+	if (!cert_comp) {
+		ret = -ENOMEM;
 		goto done;
 	}
-	col_entry->msix_idx = msix_idx;
-	col_entry->ndev = ndev;
+
+	cert_comp->ndev = ndev;
+	cert_comp->msix_idx = msix_idx;
+	cert_comp->irq = -ENOENT;
+	init_waitqueue_head(&cert_comp->waitq);
+	kref_init(&cert_comp->kref);
 
 	if (enable_aie4_polling)
 		goto skip;
 
-	col_entry->col_irq = pci_irq_vector(pdev, col_entry->msix_idx);
-	ret = request_irq(col_entry->col_irq, col_irq_handler, 0, "xdna_hsa", col_entry);
-	if (ret) {
-		XDNA_ERR(xdna, "request irq %d failed %d", col_entry->col_irq, ret);
-		kfree(col_entry);
-		col_entry = NULL;
+	ret = pci_irq_vector(pdev, cert_comp->msix_idx);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "MSI-X index %u is invalid", msix_idx);
 		goto done;
 	}
-skip:
-	init_waitqueue_head(&col_entry->col_event);
-	kref_init(&col_entry->col_ref_count);
-	INIT_LIST_HEAD(&col_entry->col_list);
+	cert_comp->irq = ret;
 
-	list_add_tail(&col_entry->col_list, &ndev->col_entry_list);
-
-done:
-	mutex_unlock(&ndev->col_list_lock);
-	return col_entry;
-}
-
-static void col_release(struct kref *kref)
-{
-	/* all handled in put_col_entry list_del */
-}
-
-static void put_col_entry(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
-{
-	struct col_entry *col_entry;
-	struct list_head *pos = NULL, *next = NULL;
-
-	mutex_lock(&ndev->col_list_lock);
-	list_for_each_safe(pos, next, &ndev->col_entry_list) {
-		col_entry = list_entry(pos, struct col_entry, col_list);
-
-		if (col_entry->msix_idx == msix_idx) {
-			if (kref_put(&col_entry->col_ref_count, col_release)) {
-				/* last refcount, remove from list and free memory */
-				list_del(pos);
-				if (!enable_aie4_polling)
-					free_irq(col_entry->col_irq, col_entry);
-
-				/* safely clean up all pending wait call */
-				col_entry->needs_reset = true;
-				wake_up_all(&col_entry->col_event);
-
-				kfree(col_entry);
-				col_entry = NULL;
-			}
-			mutex_unlock(&ndev->col_list_lock);
-			return;
-		}
+	ret = request_irq(cert_comp->irq, cert_comp_isr, 0, "xdna_hsa", cert_comp);
+	if (ret) {
+		XDNA_ERR(xdna, "request irq %d failed %d", cert_comp->irq, ret);
+		cert_comp->irq = -ENOENT;
+		goto done;
 	}
-	mutex_unlock(&ndev->col_list_lock);
-	XDNA_ERR(ndev->xdna, "no refcount for idx %d!", msix_idx);
+
+skip:
+	ret = xa_err(xa_store(&ndev->cert_comp_xa, msix_idx, cert_comp, GFP_KERNEL));
+	if (ret) {
+		XDNA_ERR(xdna, "store cert_comp for msix index %d failed %d",
+			 msix_idx, ret);
+	}
+done:
+	if (ret && cert_comp) {
+		if (cert_comp->irq >= 0)
+			free_irq(cert_comp->irq, cert_comp);
+		kfree(cert_comp);
+	}
+	mutex_unlock(&ndev->cert_comp_xa_lock);
+	return !ret ? cert_comp : NULL;
+}
+
+static void cert_comp_release(struct kref *kref)
+{
+	struct cert_comp *cert_comp = container_of(kref, struct cert_comp, kref);
+	struct amdxdna_dev_hdl *ndev = cert_comp->ndev;
+
+	drm_WARN_ON(&ndev->xdna->ddev, !mutex_is_locked(&ndev->cert_comp_xa_lock));
+
+	xa_erase(&ndev->cert_comp_xa, cert_comp->msix_idx);
+	if (cert_comp->irq >= 0)
+		free_irq(cert_comp->irq, cert_comp);
+	kfree(cert_comp);
+}
+
+void aie4_put_cert_comp(struct cert_comp *cert_comp)
+{
+	struct amdxdna_dev_hdl *ndev;
+
+	if (!cert_comp)
+		return;
+
+	ndev = cert_comp->ndev;
+	mutex_lock(&ndev->cert_comp_xa_lock);
+	kref_put(&cert_comp->kref, cert_comp_release);
+	mutex_unlock(&ndev->cert_comp_xa_lock);
 }
 
 static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
@@ -974,8 +976,8 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		WARN_ONCE(ret, "Failed to config force preemption");
 	}
 
-	nctx->col_entry = get_col_entry(ndev, resp.job_complete_msix_idx);
-	if (!nctx->col_entry) {
+	nctx->cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
+	if (!nctx->cert_comp) {
 		aie4_msg_destroy_context(ndev, resp.hw_context_id, 0);
 		ret = -EINVAL;
 		goto done;
@@ -1013,7 +1015,7 @@ int aie4_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
-	put_col_entry(ndev, nctx->col_entry->msix_idx);
+	aie4_put_cert_comp(nctx->cert_comp);
 
 	ret = aie4_msg_destroy_context(ndev, ctx->priv->hw_ctx_id, graceful);
 
@@ -1302,6 +1304,9 @@ static void aie4_pci_fini(struct amdxdna_dev *xdna)
 
 	aie4_pcidev_fini(ndev);
 
+	WARN_ON(!xa_empty(&ndev->cert_comp_xa));
+	xa_destroy(&ndev->cert_comp_xa);
+	mutex_destroy(&ndev->cert_comp_xa_lock);
 	mutex_destroy(&ndev->aie4_lock);
 }
 
@@ -1351,18 +1356,13 @@ static int aie4_pci_init(struct amdxdna_dev *xdna)
 	ndev->xdna = xdna;
 	xdna->dev_handle = ndev;
 	mutex_init(&ndev->aie4_lock);
-
-	/*
-	 * irq is dynamic per lead column, which is managed by context create/destroy.
-	 * all live columns are stored in col_entry_list.
-	 */
-	mutex_init(&ndev->col_list_lock);
-	INIT_LIST_HEAD(&ndev->col_entry_list);
+	mutex_init(&ndev->cert_comp_xa_lock);
+	xa_init(&ndev->cert_comp_xa);
 
 	ret = aie4_pcidev_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Setup PCI device failed, ret %d", ret);
-		return ret;
+		goto pci_fini;
 	}
 
 	ret = aie4_iommu_init(ndev);
@@ -1397,7 +1397,10 @@ iommu_fini:
 	aie4_iommu_fini(ndev);
 pcidev_fini:
 	aie4_pcidev_fini(ndev);
-
+pci_fini:
+	xa_destroy(&ndev->cert_comp_xa);
+	mutex_destroy(&ndev->cert_comp_xa_lock);
+	mutex_destroy(&ndev->aie4_lock);
 	return ret;
 }
 

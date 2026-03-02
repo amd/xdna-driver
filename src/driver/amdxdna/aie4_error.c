@@ -264,8 +264,7 @@ static void aie4_ctx_disconnect(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
 		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
 			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
 				ctx->priv->status = CTX_STATE_DISCONNECTED;
-				ctx->priv->col_entry->needs_reset = true;
-				wake_up_all(&ctx->priv->col_entry->col_event);
+				wake_up_all(&ctx->priv->cert_comp->waitq);
 				wakeup_count++;
 				XDNA_DBG(xdna, "Context ctx_id=%lu marked DISCONNECTED", ctx_id);
 			}
