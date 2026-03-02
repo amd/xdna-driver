@@ -12,7 +12,6 @@ if(XDNA_VE2)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/xrt_ve2.cmake)
 add_subdirectory(src)
-add_subdirectory(drivers)
 
 else(XDNA_VE2)
 
