@@ -173,7 +173,7 @@
  *
  */
 #define PROTOCOL_MAJOR  5
-#define PROTOCOL_MINOR  13
+#define PROTOCOL_MINOR  22
 
 /**
  * opcodes between driver and firmware
@@ -1284,15 +1284,15 @@ struct aie4_msg_start_event_trace_resp {
  *          The app_health request was successful
  * @APP_HEALTH_CHECK_INVALID_PARAM:
  *          Either request was not the right size or context id was invalid
- * @APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID:
- *          Indicates buffer size from driver is invalid
+ * @APP_HEALTH_CHECK_DRAM_BUFFER_INVALID:
+ *          Indicates DRAM buffer from driver is invalid
  * @APP_HEALTH_CHECK_NOAVAIL:
  *          TLB failed, or PASID not available
  */
 enum app_health_status {
 	APP_HEALTH_CHECK_SUCCESS = 0,
 	APP_HEALTH_CHECK_INVALID_PARAM,
-	APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID,
+	APP_HEALTH_CHECK_DRAM_BUFFER_INVALID,
 	APP_HEALTH_CHECK_NOAVAIL,
 };
 
@@ -1345,9 +1345,9 @@ struct aie4_msg_app_health_req {
  * @status: enum aie4_msg_status.
  * @app_health_status: enum app_health_status
  * @min_buffer_size: 0 if success, expected buffer size if app_health_status is
- * APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID
+ * APP_HEALTH_CHECK_DRAM_BUFFER_INVALID
  * In case the report_buff_size in request is too small, Firmware should
- * return error code APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID and
+ * return error code APP_HEALTH_CHECK_DRAM_BUFFER_INVALID and
  * put the expected minimum buffer size in error_detail[1]
  */
 struct aie4_msg_app_health_resp {
@@ -1364,20 +1364,33 @@ struct aie4_msg_app_health_resp {
 /**
  * AIE4_MSG_OP_GET_APP_HEALTH_STATUS
  * The struct that will be stored in the provided DRAM buffer.
+ *
+ * The union covers the layout difference between FW 0.0.15 (v2.0) and
+ * FW 0.0.20+ (default). v2.0 used full u32 ctx_status and num_uc fields;
+ * newer versions pack them as 16-bit bitfields and add runlist_read_idx.
+ *
  * @major_version: The major version of the health report structure (16 bits).
  * @minor_version: The minor version of the health report structure (16 bits).
- * @context_id: The context ID copied from the request, used to identify the application context.
- * @ctx_status: The enum hw_ctx_status of the requested context as tracked by the hardware
- *  scheduler.
- * @num_uc: The number of uC included in the health report.
- * @uc_info: Array containing health information for each uC.
+ * @context_id: The context ID copied from the request.
  */
 struct aie4_msg_app_health_report {
 	u32 major_version : 16;
 	u32 minor_version : 16;
 	u32 context_id;
-	u32 ctx_status;
-	u32 num_uc;
+	union {
+		/*
+		 * TODO: Remove legacy struct when upstreaming; only 2.0+ format will be supported
+		 */
+		struct {
+			u32 ctx_status;
+			u32 num_uc;
+		} legacy;
+		struct {
+			u32 ctx_status : 16;
+			u32 num_uc     : 16;
+			u32 runlist_read_idx;
+		};
+	};
 	struct uc_health_info uc_info[AIE4_MPNPUFW_MAX_UC_COUNT];
 };
 
@@ -1421,7 +1434,7 @@ struct aie4_msg_async_event_config_resp {
 enum aie4_msg_async_ctx_error_type {
 	AIE4_ASYNC_EVENT_CTX_ERR_HWSCH_FAILURE,
 	AIE4_ASYNC_EVENT_CTX_ERR_STOP_FAILURE,
-	AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_FAILURE,
+	AIE4_ASYNC_EVENT_CTX_ERR_AIE_FAILURE,
 	AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_TIMEOUT,
 	AIE4_ASYNC_EVENT_CTX_ERR_NEW_PROCESS_FAILURE,
 	AIE4_ASYNC_EVENT_CTX_ERR_UC_CRITICAL_ERROR,
