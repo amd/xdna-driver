@@ -7,6 +7,7 @@
 #include <linux/slab.h>
 #include <linux/iopoll.h>
 #include "aie2_pci.h"
+#include "amdxdna_xen.h"
 
 static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 {
@@ -66,6 +67,13 @@ int aie2_psp_waitmode_poll(struct psp_device *psp)
 	return 0;
 }
 
+void aie2_psp_destroy(struct device *dev, struct psp_device *psp)
+{
+	if (is_xen_initial_pvh_domain())
+		amdxdna_xen_free_buf_phys(dev, psp->fw_buffer, psp->fw_dma_handle,
+					  psp->fw_buf_sz + PSP_FW_ALIGN);
+}
+
 int aie2_psp_start(struct psp_device *psp)
 {
 	u32 reg_vals[PSP_NUM_IN_REGS];
@@ -93,5 +101,4 @@ int aie2_psp_start(struct psp_device *psp)
 
 	return 0;
 }
-
 

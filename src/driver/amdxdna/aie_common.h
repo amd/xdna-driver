@@ -94,7 +94,6 @@ struct psp_device {
 };
 
 struct psp_device *aie_psp_create(struct device *dev, struct psp_config *conf);
-void aie_psp_destroy(struct device *dev, struct psp_device *psp);
 
 #endif /* _AIE_COMMON_H_ */
 

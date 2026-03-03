@@ -633,7 +633,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 
 	aie2_rq_fini(&ndev->ctx_rq);
 	aie2_hw_stop(xdna);
-	aie_psp_destroy(&pdev->dev, ndev->psp_hdl);
+	aie2_psp_destroy(&pdev->dev, ndev->psp_hdl);
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_pasid;

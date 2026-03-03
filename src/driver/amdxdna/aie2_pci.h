@@ -385,6 +385,7 @@ static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
 int aie2_psp_start(struct psp_device *psp);
 void aie2_psp_stop(struct psp_device *psp);
 int aie2_psp_waitmode_poll(struct psp_device *psp);
+void aie2_psp_destroy(struct device *dev, struct psp_device *psp);
 
 /* aie2_debugfs.c */
 void aie2_debugfs_init(struct amdxdna_dev *xdna);

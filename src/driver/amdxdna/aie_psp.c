@@ -68,10 +68,3 @@ done:
 	return psp;
 }
 
-void aie_psp_destroy(struct device *dev, struct psp_device *psp)
-{
-	if (is_xen_initial_pvh_domain())
-		amdxdna_xen_free_buf_phys(dev, psp->fw_buffer, psp->fw_dma_handle,
-					  psp->fw_buf_sz + PSP_FW_ALIGN);
-}
-
