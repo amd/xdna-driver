@@ -67,8 +67,10 @@ int aie2_psp_waitmode_poll(struct psp_device *psp)
 	return 0;
 }
 
-void aie2_psp_destroy(struct device *dev, struct psp_device *psp)
+void aie2_psp_destroy(struct device *dev, void *psp_hdl)
 {
+	struct psp_device *psp = psp_hdl;
+
 	if (is_xen_initial_pvh_domain())
 		amdxdna_xen_free_buf_phys(dev, psp->fw_buffer, psp->fw_dma_handle,
 					  psp->fw_buf_sz + PSP_FW_ALIGN);
