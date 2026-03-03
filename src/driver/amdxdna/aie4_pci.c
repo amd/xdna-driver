@@ -664,7 +664,7 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = ndev->psp_base + PSP_REG_OFF(ndev, i);
 
-	ndev->psp_hdl = aie_psp_create(&pdev->dev, &psp_conf);
+	ndev->psp_hdl = aiem_psp_create(&pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
 		return -ENOMEM;

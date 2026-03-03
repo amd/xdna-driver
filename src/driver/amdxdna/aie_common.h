@@ -93,7 +93,7 @@ struct psp_device {
 #endif
 };
 
-struct psp_device *aie_psp_create(struct device *dev, struct psp_config *conf);
+struct psp_device *aiem_psp_create(struct device *dev, struct psp_config *conf);
 
 #endif /* _AIE_COMMON_H_ */
 
