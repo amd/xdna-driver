@@ -49,6 +49,10 @@ static int skip_work_buffer;
 module_param(skip_work_buffer, int, 0644);
 MODULE_PARM_DESC(skip_work_buffer, "Skip MPNPU work buffer attach");
 
+static uint aie4_ctx_hysteresis_us = 1000;
+module_param(aie4_ctx_hysteresis_us, uint, 0644);
+MODULE_PARM_DESC(aie4_ctx_hysteresis_us, " Context switch hysteresis in microseconds (0 = disabled)");
+
 /*
  * This struct is the register layout.
  */
@@ -319,7 +323,7 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	ret = aie4_set_ctx_hysteresis(ndev, AIE4_CTX_HYSTERESIS_US);
+	ret = aie4_set_ctx_hysteresis(ndev, aie4_ctx_hysteresis_us);
 	if (ret)
 		return ret;
 

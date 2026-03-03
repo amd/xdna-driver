@@ -964,6 +964,9 @@ std::vector<test_case> test_list {
   test_case{ "timed out chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
   },
+  test_case{ "io test aie4 async error", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_async_error_aie4_io, {}
+  },
 };
 
 void
