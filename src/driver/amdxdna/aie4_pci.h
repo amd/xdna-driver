@@ -18,13 +18,50 @@
 #include "amdxdna_mgmt.h"
 #include "aie4_msg_priv.h"
 
+/* Health report legacy version: major 2, minor 0 (FW 0.0.19 and older) */
+#define AIE4_HEALTH_REPORT_LEGACY_MAJOR	2
+#define AIE4_HEALTH_REPORT_LEGACY_MINOR	0
+
+static inline bool
+aie4_health_report_is_legacy(struct aie4_msg_app_health_report *h)
+{
+	return h->major_version == AIE4_HEALTH_REPORT_LEGACY_MAJOR &&
+	       h->minor_version == AIE4_HEALTH_REPORT_LEGACY_MINOR;
+}
+
+static inline u32
+aie4_health_get_ctx_status(struct aie4_msg_app_health_report *h)
+{
+	if (aie4_health_report_is_legacy(h))
+		return h->legacy.ctx_status;
+
+	return h->ctx_status;
+}
+
+static inline u32
+aie4_health_get_num_uc(struct aie4_msg_app_health_report *h)
+{
+	if (aie4_health_report_is_legacy(h))
+		return h->legacy.num_uc;
+
+	return h->num_uc;
+}
+
+static inline u32
+aie4_health_get_runlist_read_idx(struct aie4_msg_app_health_report *h)
+{
+	if (aie4_health_report_is_legacy(h))
+		return 0;
+
+	return h->runlist_read_idx;
+}
+
 #define AIE4_INTERVAL		20000	/* us */
 #ifdef AMDXDNA_DEVEL
 #define AIE4_TIMEOUT		(1000000 * 1000) /* us */
 #else
 #define AIE4_TIMEOUT		1000000	/* us */
 #endif
-#define AIE4_CTX_HYSTERESIS_US	1000	/* us */
 
 #define MAX_NUM_CERTS		6
 

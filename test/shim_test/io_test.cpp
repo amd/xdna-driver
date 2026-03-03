@@ -531,9 +531,49 @@ TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 void
 TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  async_error_aie4_io_test_bo_set async_error_aie4_io_test_bo_set{sdev.get(), "bad_timeout"};
-  // verification is inside run()
-  async_error_aie4_io_test_bo_set.run();
+  {
+    auto good_bo_set = create_bo_set_for_device(sdev.get(), false, "good");
+    async_error_aie4_io_test_bo_set bad_bo_set{sdev.get(), "bad_timeout"};
+
+    hw_ctx hwctx{sdev.get(), "good"};
+
+    good_bo_set->init_cmd(hwctx, false);
+    good_bo_set->sync_before_run();
+    bad_bo_set.init_cmd(hwctx, false);
+    bad_bo_set.sync_before_run();
+
+    // Command chain: good (index 0), bad_timeout (index 1)
+    const uint32_t bad_index = 1;
+    std::vector<bo*> tmp_cmd_bos;
+    tmp_cmd_bos.push_back(good_bo_set->get_bos()[IO_TEST_BO_CMD].tbo.get());
+    tmp_cmd_bos.push_back(bad_bo_set.get_bos()[IO_TEST_BO_CMD].tbo.get());
+
+    auto cbo = std::make_unique<bo>(sdev.get(), 0x1000ul, XCL_BO_FLAGS_EXECBUF);
+    io_test_init_runlist_cmd(cbo.get(), tmp_cmd_bos);
+
+    auto hwq = hwctx.get()->get_hw_queue();
+    hwq->submit_command(cbo->get());
+    hwq->wait_command(cbo->get(), 0);
+
+    auto cmd_packet = reinterpret_cast<ert_packet *>(cbo->map());
+    auto payload = get_ert_cmd_chain_data(cmd_packet);
+    if (cmd_packet->state != ERT_CMD_STATE_TIMEOUT || payload->error_index != bad_index) {
+      throw std::runtime_error(
+        std::string("runlist state=") + std::to_string(cmd_packet->state) +
+        std::string(", error_index=") + std::to_string(payload->error_index) +
+        std::string(", expected state=") + std::to_string(ERT_CMD_STATE_TIMEOUT) +
+        std::string(", expected error_index=") + std::to_string(bad_index)
+      );
+    }
+
+    // Health data is in the subcmd at error_index, copy it to bad_bo_set's cmd BO for verification
+    auto bad_cmd_pkt = reinterpret_cast<ert_packet *>(tmp_cmd_bos[bad_index]->map());
+    bad_cmd_pkt->state = cmd_packet->state;
+
+    bad_bo_set.verify_result();
+  }
+  // TODO: Remove sleep workaround after FW fix to not wait for suspend after timeout is available.
+  sleep(10);
 }
 
 /**
