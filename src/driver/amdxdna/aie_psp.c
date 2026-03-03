@@ -68,21 +68,6 @@ done:
 	return psp;
 }
 
-int aie_psp_waitmode_poll(struct psp_device *psp)
-{
-	int mode_reg = -1, ret;
-
-	ret = readx_poll_timeout(readl, PSP_REG(psp, PSP_PWAITMODE_REG), mode_reg,
-				 (mode_reg & 0x1) == 1,
-				 PSP_POLL_INTERVAL, PSP_POLL_TIMEOUT);
-	if (ret) {
-		dev_err(psp->dev, "fw waitmode reg error, ret 0x%x", ret);
-		return ret;
-	}
-
-	return 0;
-}
-
 void aie_psp_destroy(struct device *dev, struct psp_device *psp)
 {
 	if (is_xen_initial_pvh_domain())
