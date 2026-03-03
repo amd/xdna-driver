@@ -112,7 +112,7 @@ int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	return aie_psp_waitmode_poll(ndev->psp_hdl);
+	return aie2_psp_waitmode_poll(ndev->psp_hdl);
 }
 
 int aie2_resume_fw(struct amdxdna_dev_hdl *ndev)
@@ -1832,4 +1832,5 @@ int aie2_rw_aie_mem(struct amdxdna_dev_hdl *ndev, enum aie2_access_type type,
 
 	return 0;
 }
+
 

@@ -494,7 +494,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
 	struct amdxdna_dev_hdl *ndev;
-	struct psp_config psp_conf = {};
+	struct psp_config psp_conf;
 	const struct firmware *fw;
 	unsigned long bars = 0;
 	int i, nvec, ret;
@@ -2137,4 +2137,5 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.hmm_invalidate		= aie2_hmm_invalidate,
 	.cmd_get_out_fence	= aie2_cmd_get_out_fence,
 };
+
 

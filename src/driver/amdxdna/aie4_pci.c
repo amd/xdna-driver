@@ -651,7 +651,7 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct psp_config psp_conf = {};
+	struct psp_config psp_conf;
 	int i;
 
 	if (!aie4_fw_load_support(ndev))
@@ -2659,4 +2659,5 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.debugfs		= aie4_debugfs_init,
 	.sriov_configure        = aie4_sriov_configure,
 };
+
 
