@@ -26,8 +26,8 @@ struct psp_device *aie_psp_create(struct device *dev, struct psp_config *conf)
 	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN);
 	if (is_xen_initial_pvh_domain()) {
 		psp->fw_buffer = amdxdna_xen_alloc_buf_phys(psp->dev,
-							     psp->fw_buf_sz + PSP_FW_ALIGN,
-							     &psp->fw_dma_handle);
+							    psp->fw_buf_sz + PSP_FW_ALIGN,
+							    &psp->fw_dma_handle);
 		if (!psp->fw_buffer)
 			return NULL;
 		psp->fw_paddr = psp->fw_dma_handle;

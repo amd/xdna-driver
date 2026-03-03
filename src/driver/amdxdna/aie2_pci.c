@@ -2138,4 +2138,3 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.cmd_get_out_fence	= aie2_cmd_get_out_fence,
 };
 
-
