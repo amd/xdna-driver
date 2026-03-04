@@ -15,9 +15,13 @@ SCRIPT_HASH="$(sha256sum "$0" | awk '{print $1}')"
 #   2) $kernelver (DKMS gives this)
 #   3) $(uname -r) (Fall back to current running kernel)
 KERNEL_VER="${KERNEL_VER:-${kernelver:-$(uname -r)}}"
-KERNEL_SRC="${KERNEL_SRC:-/lib/modules/${KERNEL_VER}/build}"
-if [ ! -d "$KERNEL_SRC/include/linux" ]; then
-    echo "ERROR: Cannot find kernel headers under $KERNEL_SRC" >&2
+KERNEL_DIR="/lib/modules/${KERNEL_VER}"
+KERNEL_SRC="${KERNEL_SRC:-${KERNEL_DIR}/build}"
+KERNEL_CMN="${KERNEL_DIR}/source"
+
+if [ ! -d "$KERNEL_SRC/include/linux" ] && \
+   [ ! -d "$KERNEL_CMN/include/linux" ]; then
+    echo "ERROR: Cannot find kernel headers under $KERNEL_SRC or $KERNEL_CMN" >&2
     exit 1
 fi
 
