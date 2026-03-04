@@ -260,22 +260,22 @@ dump_ofm_to_file(TEST_BO& ofm_bo)
 {
   auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
     std::chrono::system_clock::now().time_since_epoch()).count();
-  
+
   std::string filename = "ofm_dump_" + std::to_string(timestamp) + ".txt";
-  
+
   std::ofstream outfile(filename);
   if (!outfile) {
     std::cout << "Failed to create dump file: " << filename << std::endl;
     return;
   }
-  
+
   auto ofm_mapped = ofm_bo.map();
   size_t ofm_size = ofm_bo.size() / sizeof(uint32_t);
-  
+
   for (size_t i = 0; i < ofm_size; i++) {
     outfile << std::hex << "0x" << ofm_mapped[i] << std::endl;
   }
-  
+
   outfile.close();
   std::cout << "OFM data dumped to: " << filename << " (" << ofm_size << " words)" << std::endl;
 }
@@ -355,7 +355,7 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
 
     sync_bo_from_dev(bo_ofm);
 
-    if (state == ERT_CMD_STATE_TIMEOUT) 
+    if (state == ERT_CMD_STATE_TIMEOUT)
     {
       dump_ofm_to_file<xrt_bo>(bo_ofm);
       try {
@@ -492,7 +492,7 @@ TEST_xrt_umq_nop(int device_index, arg_type& arg)
 	    << duration_us * 1.0 / c_rounds << "us\n";
 }
 
-void 
+void
 TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
@@ -553,7 +553,7 @@ TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
     std::cout << "result matched" << std::endl;
 }
 
-void 
+void
 TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
@@ -842,7 +842,7 @@ TEST_xrt_umq_runlist(int device_index, arg_type& arg)
     auto i = completed % runlists.size();
     auto state = runlists[i].wait(timeout_ms * r_cmds * std::chrono::milliseconds{1});
     completed++;
-    if (state == std::cv_status::timeout) 
+    if (state == std::cv_status::timeout)
       throw std::runtime_error(std::string("exec buf timed out."));
     auto ert_state = runlists[i].state();
     if (ert_state != ERT_CMD_STATE_COMPLETED)
@@ -1123,13 +1123,13 @@ main(int argc, char **argv)
   set_xrt_path();
 
   test_list.push_back(test_case{ "npu3 xrt thread test", TEST_xrt_threads, {threads} });
-  
+
   // Resolve 99 to thread test
   if (tests.find(99) != tests.end()) {
     tests.erase(99);
     tests.insert(test_list.size() - 1);
   }
-  
+
   run_all_test(tests);
 
   if (!tests.empty()) {

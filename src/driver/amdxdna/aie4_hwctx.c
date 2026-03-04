@@ -790,7 +790,6 @@ done:
 int aie4_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
-	struct dma_fence_chain *chain = dma_fence_chain_alloc();
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
@@ -799,9 +798,6 @@ int aie4_cmd_submit(struct amdxdna_sched_job *job,
 	int ret;
 
 	XDNA_DBG(xdna, "ctx %s job 0x%llx received", ctx->name, (u64)job);
-
-	if (!chain)
-		return -ENOMEM;
 
 	enqueue_pending_job(job);
 	/*
@@ -866,7 +862,6 @@ fail_mmget:
 fail_wait_till_1st:
 	kref_put(&job->refcnt, job_release);
 	cancel_pending_job(job);
-	dma_fence_chain_free(chain);
 	return ret;
 }
 
@@ -1003,7 +998,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		}
 
 		if (!attach) {
-			XDNA_INFO(xdna, "clear index %d logging", index);
+			XDNA_DBG(xdna, "clear index %d logging", index);
 			req.cert_logging.info[index].paddr = 0;
 			req.cert_logging.info[index].size = 0;
 			continue;
