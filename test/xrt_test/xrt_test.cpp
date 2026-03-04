@@ -11,6 +11,7 @@
 #include "xrt/experimental/xrt_kernel.h"
 #include "resnet50.h"
 
+#include <cstdint>
 #include <fstream>
 #include <algorithm>
 #include <filesystem>
@@ -25,12 +26,14 @@
 #include <unistd.h>
 #include <thread>
 
+#define MAX_RUNLIST_CMDS 24
+
 namespace {
 
 using arg_type = const std::vector<uint64_t>;
 uint64_t c_rounds = 1;
 unsigned o_cmds = 1;
-unsigned r_cmds = 24;
+unsigned r_cmds = 1;
 unsigned m_rounds = 32;
 unsigned device_index = 0;
 unsigned threads = 2;
@@ -84,7 +87,7 @@ usage(const std::string& prog)
   std::cout << "\t" << "-o" << ": max n outstanding cmds within 1 hwctx\n";
   std::cout << "\t" << "-r" << ": n cmds per runlist\n";
   std::cout << "\t" << "-m" << ": n hwctx in parallel\n";
-  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (stress and runlist only)\n";
+  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (nop, stress hwctx, max runlist only)\n";
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
   std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test# -e test# ...]\n";
@@ -92,8 +95,8 @@ usage(const std::string& prog)
   std::cout << "\t" << "-w" << ": timeout in seconds (default 600 sec, some simnow server are slow)\n";
   std::cout << "\t" << "-l" << ": use xclbin flow if available\n";
   std::cout << "\t" << "-h" << ": print this help message and available test cases\n\n";
-  std::cout << "\t" << "Example Usage: ./xrt_test 7 -c 20 -o 2 -x vadd\n";
-  std::cout << "\t" << "               Run stress test with vadd elf for 20 rounds with 2 outstanding commands\n";
+  std::cout << "\t" << "Example Usage: ./xrt_test 0 -c 20 -o 2\n";
+  std::cout << "\t" << "               Run vadd test for 20 rounds with 2 outstanding commands\n";
   std::cout << std::endl;
 }
 
@@ -154,7 +157,7 @@ private:
   int *m_bop;
 };
 
-xrt::run get_xrt_run(
+std::pair<xrt::hw_context, xrt::kernel> get_xrt_hwctx_kernel(
   xrt::device& device,
   const std::string xclbin_path,
   const std::string xclbin_elf,
@@ -162,22 +165,19 @@ xrt::run get_xrt_run(
   const std::string full_elf,
   const std::string full_elf_kernel)
 {
-  xrt::kernel kernel;
-
   if (elf_flow) {
     xrt::elf elf{local_path(path + full_elf)};
     xrt::hw_context hwctx{device, elf};
-    kernel = xrt::ext::kernel{hwctx, full_elf_kernel};
-  } else {
-    xrt::xclbin xclbin = xrt::xclbin(local_path(path + xclbin_path));
-    auto uuid = device.register_xclbin(xclbin);
-    xrt::elf elf{local_path(path + xclbin_elf)};
-    xrt::module mod{elf};
-    xrt::hw_context hwctx{device, uuid};
-    kernel = xrt::ext::kernel{hwctx, mod, xclbin_kernel};
+    xrt::kernel kernel = xrt::ext::kernel{hwctx, full_elf_kernel};
+    return {std::move(hwctx), std::move(kernel)};
   }
-
-  return xrt::run{kernel};
+  xrt::xclbin xclbin = xrt::xclbin(local_path(path + xclbin_path));
+  auto uuid = device.register_xclbin(xclbin);
+  xrt::elf elf{local_path(path + xclbin_elf)};
+  xrt::module mod{elf};
+  xrt::hw_context hwctx{device, uuid};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, xclbin_kernel};
+  return {std::move(hwctx), std::move(kernel)};
 }
 
 template <typename TEST_BO>
@@ -312,12 +312,80 @@ sync_bo_from_dev(xrt_bo& bo)
   bo.get().sync(XCL_BO_SYNC_BO_FROM_DEVICE, bo.size(), 0);
 }
 
+/* Execute c_rounds batches with up to o_cmds outstanding. When r_cmds==1 each
+   batch is one run; when r_cmds>1 each batch is a runlist of r_cmds runs.
+   runs must have size o_cmds * max(r_cmds, 1). Uses global o_cmds, c_rounds,
+   timeout_ms. */
+static void
+execute_batches(xrt::hw_context& hwctx, std::vector<xrt::run>& runs, unsigned r_cmds)
+{
+  if (r_cmds <= 1) {
+    /* runs.size() == o_cmds; submit up to c_rounds total, at most o_cmds outstanding */
+    uint64_t submitted = 0;
+    uint64_t completed = 0;
+    const auto runs_size = runs.size();
+    while (submitted < runs_size && submitted < c_rounds) {
+      runs[static_cast<size_t>(submitted)].start();
+      submitted++;
+    }
+    while (completed < submitted) {
+      const auto i = static_cast<size_t>(completed % runs_size);
+      auto state = runs[i].wait(timeout_ms);
+      completed++;
+      if (state == ERT_CMD_STATE_TIMEOUT)
+        throw std::runtime_error(std::string("exec buf timed out."));
+      if (state != ERT_CMD_STATE_COMPLETED)
+        throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+      if (submitted < c_rounds) {
+        runs[i].start();
+        submitted++;
+      }
+    }
+    return;
+  }
+  std::vector<xrt::runlist> runlists;
+  for (unsigned i = 0; i < o_cmds; i++) {
+    runlists.emplace_back(hwctx);
+    for (unsigned j = 0; j < r_cmds; j++)
+      runlists[i].add(runs[i * r_cmds + j]);
+  }
+  uint64_t submitted = 0;
+  uint64_t completed = 0;
+  const auto runlists_size = runlists.size();
+  auto start = std::chrono::high_resolution_clock::now();
+
+  while (submitted < runlists_size && submitted < c_rounds) {
+    runlists[static_cast<size_t>(submitted)].execute();
+    submitted++;
+  }
+  while (completed < submitted) {
+    const auto i = static_cast<size_t>(completed % runlists_size);
+    auto state = runlists[i].wait(timeout_ms * r_cmds * std::chrono::milliseconds{1});
+    completed++;
+    if (state == std::cv_status::timeout)
+      throw std::runtime_error(std::string("exec buf timed out."));
+    auto ert_state = runlists[i].state();
+    if (ert_state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error(std::string("bad command state: ") + std::to_string(ert_state));
+    if (submitted < c_rounds) {
+      runlists[i].execute();
+      submitted++;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+  std::cout << "Executed total " << c_rounds << " runlists in " << duration_us
+	    << "us with max " << o_cmds << " outstanding runlist (" << r_cmds
+	    << " commands per runlist), average latency: "
+	    << duration_us * 1.0 / (static_cast<uint64_t>(r_cmds) * c_rounds) << "us\n";
+}
+
 void
 TEST_xrt_umq_vadd(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
 
-  // Prepare input/output/weights BOs
   const uint32_t IFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
   const uint32_t WTS_BYTE_SIZE = 4 * 4 * sizeof (uint32_t);
   const uint32_t OFM_BYTE_SIZE = 16 * 16 * sizeof (uint32_t);
@@ -325,293 +393,98 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
   xrt_bo bo_wts{device, WTS_BYTE_SIZE, xrt::bo::flags::host_only};
   xrt_bo bo_ofm{device, OFM_BYTE_SIZE, xrt::bo::flags::host_only};
 
-  // Populate input & weight buffers
   init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
 
-  auto run = get_xrt_run(device,
-		  "vadd/xclbin_vadd.xclbin",
-		  "vadd/xclbin_vadd.elf",
-		  "dpu:{vadd}",
-		  "vadd/vadd.elf",
-		  "DPU:dpu");
-
-  // Setting args for patching control code buffer
-  run.set_arg(0, bo_ifm.get());
-  run.set_arg(1, bo_wts.get());
-  run.set_arg(2, bo_ofm.get());
-
-  // Send the command to device and wait for it to complete
-  for (int i = 0 ; i < c_rounds; i++) {
-    std::cout << "c_rounds: " << i << std::endl;
-    //cleanup ofm on each run
-    init_umq_ofm_bo(bo_ofm);
-
-    sync_bo_to_dev(bo_ifm);
-    sync_bo_to_dev(bo_wts);
-    sync_bo_to_dev(bo_ofm);
-
-    run.start();
-    auto state = run.wait(timeout_ms);
-
-    sync_bo_from_dev(bo_ofm);
-
-    if (state == ERT_CMD_STATE_TIMEOUT) 
-    {
-      dump_ofm_to_file<xrt_bo>(bo_ofm);
-      try {
-        check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
-      } catch (const std::exception& ex) {
-        std::cout << "exec buf timed out ofm comparison " << ex.what() << std::endl;
-      }
-      throw std::runtime_error(std::string("exec buf timed out."));
-    }
-    if (state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-
-    // Check result
-    check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
+  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
+	  "vadd/xclbin_vadd.xclbin",
+	  "vadd/xclbin_vadd.elf",
+	  "dpu:{vadd}",
+	  "vadd/vadd.elf",
+	  "DPU:dpu");
+  unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
+  std::vector<xrt::run> runs;
+  for (unsigned i = 0; i < n; i++)
+    runs.emplace_back(kernel);
+  for (auto& r : runs) {
+    r.set_arg(0, bo_ifm.get());
+    r.set_arg(1, bo_wts.get());
+    r.set_arg(2, bo_ofm.get());
   }
+  sync_bo_to_dev(bo_ifm);
+  sync_bo_to_dev(bo_wts);
+  sync_bo_to_dev(bo_ofm);
+  execute_batches(hwctx, runs, r_cmds);
+  sync_bo_from_dev(bo_ofm);
+  check_umq_vadd_result(bo_ifm.map(), bo_wts.map(), bo_ofm.map());
 }
 
 void
 TEST_xrt_umq_memtiles(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-
   xrt::elf elf{local_path(path + "move_memtiles/move_memtiles.elf")};
-
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
-  xrt::run run{kernel};
-
-  // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(timeout_ms);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
+  std::vector<xrt::run> runs;
+  for (unsigned i = 0; i < n; i++)
+    runs.emplace_back(kernel);
+  execute_batches(hwctx, runs, r_cmds);
 }
 
 void
 TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-
-  /* init input buffer */
   xrt_bo bo_data{device, sizeof(uint32_t), xrt::bo::flags::cacheable};
   auto p = bo_data.map();
   p[0] = 0xabcdabcd;
-
-  auto run = get_xrt_run(device,
-		  "ddr_memtile/xclbin_ddr.xclbin",
-		  "ddr_memtile/xclbin_ddr.elf",
-		  "dpu:{vadd}",
-		  "ddr_memtile/ddr_memtile.elf",
-		  "DPU:dpu");
-
-  // Setting args for patching control code buffer
-  run.set_arg(0, bo_data.get());
   sync_bo_to_dev(bo_data);
 
-  // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(timeout_ms);
-  if (state == ERT_CMD_STATE_TIMEOUT)
-    throw std::runtime_error(std::string("exec buf timed out."));
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
+  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
+	  "ddr_memtile/xclbin_ddr.xclbin",
+	  "ddr_memtile/xclbin_ddr.elf",
+	  "dpu:{vadd}",
+	  "ddr_memtile/ddr_memtile.elf",
+	  "DPU:dpu");
+  unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
+  std::vector<xrt::run> runs;
+  for (unsigned i = 0; i < n; i++)
+    runs.emplace_back(kernel);
+  for (auto& r : runs)
+    r.set_arg(0, bo_data.get());
+  execute_batches(hwctx, runs, r_cmds);
 }
 
 void
 TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-
-  auto run = get_xrt_run(device,
-		  "remote_barrier/xclbin_rmb.xclbin",
-		  "remote_barrier/xclbin_rmb.elf",
-		  "dpu:{vadd}",
-		  "remote_barrier/remote_barrier.elf",
-		  "DPU:dpu");
-
-  // Send the command to device and wait for it to complete
-  for (int i = 0 ; i < c_rounds; i++) {
-    std::cout << "c_rounds: " << i << std::endl;
-    run.start();
-    auto state = run.wait(timeout_ms);
-    if (state == ERT_CMD_STATE_TIMEOUT)
-      throw std::runtime_error(std::string("exec buf timed out."));
-    if (state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-  }
+  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
+	  "remote_barrier/xclbin_rmb.xclbin",
+	  "remote_barrier/xclbin_rmb.elf",
+	  "dpu:{vadd}",
+	  "remote_barrier/remote_barrier.elf",
+	  "DPU:dpu");
+  unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
+  std::vector<xrt::run> runs;
+  for (unsigned i = 0; i < n; i++)
+    runs.emplace_back(kernel);
+  execute_batches(hwctx, runs, r_cmds);
 }
 
 void
 TEST_xrt_umq_nop(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-
-  auto elf = xrt::elf(
-    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
-
+  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
+  unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
   std::vector<xrt::run> runs;
-
-  // Create all runs
-  for (int i = 0; i < o_cmds; i++)
+  for (unsigned i = 0; i < n; i++)
     runs.emplace_back(kernel);
-
-  int submitted = 0;
-  int completed = 0;
-  auto start = std::chrono::high_resolution_clock::now();
-
-  while (submitted < runs.size() && submitted < c_rounds) {
-    runs[submitted].start();
-    submitted++;
-  }
-  while (completed < submitted) {
-    auto i = completed % runs.size();
-    auto state = runs[i].wait(timeout_ms);
-    completed++;
-    if (state == ERT_CMD_STATE_TIMEOUT)
-      throw std::runtime_error(std::string("exec buf timed out."));
-    if (state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-    if (submitted < c_rounds) {
-      runs[i].start();
-      submitted++;
-    }
-  }
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  std::cout << "Executed total " << c_rounds << " NOP commands in " << duration_us
-	    << "us with max outstanding " << o_cmds << " commands, average latency: "
-	    << duration_us * 1.0 / c_rounds << "us\n";
-}
-
-void 
-TEST_xrt_umq_single_col_preemption(int device_index, arg_type& arg)
-{
-  auto device = xrt::device{device_index};
-
-  auto run = get_xrt_run(device,
-		  "single_col_preemption/xclbin_single_preempt.xclbin",
-		  "single_col_preemption/xclbin_single_preempt.elf",
-		  "dpu:{vadd}",
-		  "single_col_preemption/single_col_preemption.elf",
-		  "DPU:dpu");
-
-  /* init input buffer */
-  const uint32_t data = 0x12345678;
-  const uint32_t rw_size = sizeof(uint32_t); // number of shim BD used
-
-  xrt_bo bo_ifm{device, rw_size, xrt::bo::flags::cacheable};
-  xrt_bo bo_ofm{device, rw_size, xrt::bo::flags::cacheable};
-  auto ifm_mapped = bo_ifm.map();
-  ifm_mapped[0] = data;
-
-  // Setting args for patching control code buffer
-  run.set_arg(0, bo_ifm.get());
-  run.set_arg(1, bo_ofm.get());
-
-  sync_bo_to_dev(bo_ifm);
-  sync_bo_to_dev(bo_ofm);
-
-  // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(timeout_ms);
-
-  sync_bo_from_dev(bo_ofm);
-
-  if (state == ERT_CMD_STATE_TIMEOUT)
-  {
-    dump_ofm_to_file<xrt_bo>(bo_ofm);
-    // Check result
-    auto ofm_mapped = bo_ofm.map();
-    if (ofm_mapped[0] != ifm_mapped[0]) {
-      std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
-      std::cout << "exec buf timed out ofm comparison result mis-matched" << std::endl;
-    }
-    else
-      std::cout << "exec buf timed out ofm comparison result matched" << std::endl;
-
-    throw std::runtime_error(std::string("exec buf timed out."));
-  }
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-
-  // Check result
-  auto ofm_mapped = bo_ofm.map();
-  if (ofm_mapped[0] != ifm_mapped[0]) {
-    std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
-    throw std::runtime_error("result mis-match");
-  }
-  else
-    std::cout << "result matched" << std::endl;
-}
-
-void 
-TEST_xrt_umq_multi_col_preemption(int device_index, arg_type& arg)
-{
-  auto device = xrt::device{device_index};
-
-  auto run = get_xrt_run(device,
-		  "multi_col_preemption/xclbin_multi_preempt.xclbin",
-		  "multi_col_preemption/xclbin_multi_preempt.elf",
-		  "dpu:{vadd}",
-		  "multi_col_preemption/multi_col_preemption.elf",
-		  "DPU:dpu");
-
-  /* init input buffer */
-  const uint32_t data = 0x12345678;
-  const uint32_t rw_size = sizeof(uint32_t); // number of shim BD used
-
-  xrt_bo bo_ifm{device, rw_size, xrt::bo::flags::cacheable};
-  xrt_bo bo_ofm{device, rw_size, xrt::bo::flags::cacheable};
-  auto ifm_mapped = bo_ifm.map();
-  ifm_mapped[0] = data;
-
-  // Setting args for patching control code buffer
-  run.set_arg(0, bo_ifm.get());
-  run.set_arg(1, bo_ofm.get());
-
-  sync_bo_to_dev(bo_ifm);
-  sync_bo_to_dev(bo_ofm);
-
-  // Send the command to device and wait for it to complete
-  run.start();
-  auto state = run.wait(timeout_ms);
-
-  sync_bo_from_dev(bo_ofm);
-
-  if (state == ERT_CMD_STATE_TIMEOUT)
-  {
-    dump_ofm_to_file<xrt_bo>(bo_ofm);
-    // Check result
-    auto ofm_mapped = bo_ofm.map();
-    if (ofm_mapped[0] != ifm_mapped[0]) {
-      std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
-      std::cout << "exec buf timed out ofm comparison result mis-matched" << std::endl;
-    }
-    else
-      std::cout << "exec buf timed out result matched" << std::endl;
-
-    throw std::runtime_error(std::string("exec buf timed out."));
-  }
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-
-  // Check result
-  auto ofm_mapped = bo_ofm.map();
-  if (ofm_mapped[0] != ifm_mapped[0]) {
-    std::cout << "error: " << ofm_mapped[0] << ", expecting: " << ifm_mapped[0] << std::endl;
-    throw std::runtime_error("result mis-match");
-  }
-  else
-    std::cout << "result matched" << std::endl;
+  execute_batches(hwctx, runs, r_cmds);
 }
 
 void
@@ -633,232 +506,103 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
-  auto run = get_xrt_run(device,
-		  "resnet50/xclbin_resnet50.xclbin",
-		  "resnet50/xclbin_resnet50.elf",
-		  "dpu:{vadd}",
-		  "resnet50/resnet50.elf",
-		  "DPU:dpu");
-
-  run.set_arg(54, bo_ifm.get());
+  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
+	  "resnet50/xclbin_resnet50.xclbin",
+	  "resnet50/xclbin_resnet50.elf",
+	  "dpu:{vadd}",
+	  "resnet50/resnet50.elf",
+	  "DPU:dpu");
 
   std::ifstream wts_ifs(wts_path);
   if (!wts_ifs.is_open())
     throw std::runtime_error("Unable to open weights file: " + wts_path);
-
   auto p = bo_wts.map();
   uint32_t tmp;
-  int i = 0;
+  int wi = 0;
   while (wts_ifs >> std::hex >> tmp) {
-    p[i] = tmp;
-    i++;
+    p[wi] = tmp;
+    wi++;
   }
   wts_ifs.close();
 
-  for (int i = 0; i < 54; i++) {
-    run.set_arg(i, bo_wts.get().address() + (wts_offset[i] * sizeof(uint32_t)));
+  unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
+  std::vector<xrt::run> runs;
+  for (unsigned i = 0; i < n; i++)
+    runs.emplace_back(kernel);
+  for (auto& r : runs) {
+    r.set_arg(54, bo_ifm.get());
+    for (int i = 0; i < 54; i++)
+      r.set_arg(i, bo_wts.get().address() + (wts_offset[i] * sizeof(uint32_t)));
+    r.set_arg(55, bo_ofm.get());
   }
-
-  run.set_arg(55, bo_ofm.get());
-
   sync_bo_to_dev(bo_ifm);
   sync_bo_to_dev(bo_wts);
   sync_bo_to_dev(bo_ofm);
-
-  // Send the command to device and wait for it to complete
-  run.start();
-
-  // increase this to even 10 hours on simnow env
-  auto state = run.wait(timeout_ms);
-
+  execute_batches(hwctx, runs, r_cmds);
   sync_bo_from_dev(bo_ofm);
 
-  if (state == ERT_CMD_STATE_TIMEOUT)
-  {
-    dump_ofm_to_file<xrt_bo>(bo_ofm);
-    auto ofm = bo_ofm.map();
-    std::ifstream ofm_ifs;
-    ofm_ifs.open(ofm_path);
-    if (!ofm_ifs.is_open()) {
-      std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
-    }
-    int err = 0;
-    for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
-      uint32_t gld;
-      ofm_ifs >> std::hex >> gld;
-      if (gld != ofm[i]) {
-        std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
-        err++;
-      }
-    }
-    ofm_ifs.close();
-
-    if (err)
-      std::cout << "exec buf timed out result mis-matched" << std::endl;
-    else
-      std::cout << "exec buf timed out result matched" << std::endl;
-
-    throw std::runtime_error(std::string("exec buf timed out."));
-  }
-  if (state != ERT_CMD_STATE_COMPLETED)
-    throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-
   auto ofm = bo_ofm.map();
-  std::ifstream ofm_ifs;
-  ofm_ifs.open(ofm_path);
-  if (!ofm_ifs.is_open()) {
+  std::ifstream ofm_ifs(ofm_path);
+  if (!ofm_ifs.is_open())
     std::cout << "[ERROR]: failed to open " << ofm_path << std::endl;
-  }
   int err = 0;
-  for (int i = 0; i < OFM_BYTE_SIZE / sizeof(uint32_t); i++) {
+  for (int i = 0; i < static_cast<int>(OFM_BYTE_SIZE / sizeof(uint32_t)); i++) {
     uint32_t gld;
     ofm_ifs >> std::hex >> gld;
     if (gld != ofm[i]) {
-      std::cout << "[ERROR]: No." << i << std::hex << "   golden = 0x" << gld << ", ofm = 0x" << ofm[i] << std::endl;
-      err++;
+      std::cout << "[ERROR]: No." << i << std::hex << " golden = 0x" << gld << ", ofm = 0x" 
+                << ofm[i] << std::endl; err++;
     }
   }
-  ofm_ifs.close();
-
   if (err)
     throw std::runtime_error("result mis-match");
-  else {
-    std::cout << dolphinPass << std::endl;
-    std::cout << "result matched" << std::endl;
-  }
+  std::cout << dolphinPass << std::endl << "result matched" << std::endl;
 }
 
-/* run.start and run.wait o_cmds commands for c_rounds times */
-void
-TEST_xrt_stress_run(int device_index, arg_type& arg)
-{
-  auto device = xrt::device{device_index};
-
-  auto elf = xrt::elf(
-    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
-
-  xrt::hw_context hwctx{device, elf};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
-
-  std::vector<xrt::run> run_handles;
-
-  for (int i = 0; i < o_cmds; i++)
-    run_handles.emplace_back(kernel);
-
-  int submitted = 0;
-  int completed = 0;
-  auto start = std::chrono::high_resolution_clock::now();
-
-  while (submitted < run_handles.size() && submitted < c_rounds) {
-    run_handles[submitted].start();
-    submitted++;
-  }
-  while (completed < submitted) {
-    auto i = completed % run_handles.size();
-    auto state = run_handles[i].wait(timeout_ms);
-    completed++;
-    if (state == ERT_CMD_STATE_TIMEOUT)
-      throw std::runtime_error(std::string("exec buf timed out."));
-    if (state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-    if (submitted < c_rounds) {
-      run_handles[i].start();
-      submitted++;
-    }
-  }
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  std::cout << "Executed total " << c_rounds << " commands in " << duration_us
-	    << "us with max " << o_cmds << " outstanding commands, average latency: "
-	    << duration_us * 1.0 / c_rounds << "us\n";
-}
-
-/* create n hwctx  */
+/* Create m_rounds hwctx and their runs first, then execute all in parallel.
+   Stress-tests concurrent hwctx allocation and concurrent execution. */
 void
 TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
+  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
 
-  auto elf = xrt::elf(
-    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
-
-  std::vector<xrt::hw_context> run_hwctxs;
-
-  for (int i = 0; i < m_rounds; i++) {
+  using hwctx_runs_t = std::pair<xrt::hw_context, std::vector<xrt::run>>;
+  std::vector<hwctx_runs_t> contexts;
+  contexts.reserve(m_rounds);
+  for (unsigned i = 0; i < m_rounds; i++) {
     xrt::hw_context hwctx{device, elf};
-    run_hwctxs.push_back(std::move(hwctx));
+    xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
+    unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
+    std::vector<xrt::run> runs;
+    for (unsigned j = 0; j < n; j++)
+      runs.emplace_back(kernel);
+    contexts.emplace_back(std::move(hwctx), std::move(runs));
   }
 
-  for (int i = 0; i < m_rounds; i++) {
-    auto hwctx = run_hwctxs[i];
-    auto kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
-
-    auto run = xrt::run(kernel);
-
-    run.start();
-    auto state = run.wait(timeout_ms * m_rounds /* give 2 sec per round, silicon */);
-
-    if (state == ERT_CMD_STATE_TIMEOUT)
-      throw std::runtime_error(std::string("exec buf timed out."));
-    if (state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("bad command state: ") + std::to_string(state));
-  }
+  const unsigned r = r_cmds;
+  std::vector<std::thread> workers;
+  workers.reserve(m_rounds);
+  for (unsigned i = 0; i < m_rounds; i++)
+    workers.emplace_back([&contexts, i, r]() {
+      execute_batches(contexts[i].first, contexts[i].second, r);
+    });
+  for (auto& t : workers)
+    t.join();
 }
 
 void
 TEST_xrt_umq_runlist(int device_index, arg_type& arg)
 {
-  std::vector<xrt::run> runs;
-  std::vector<xrt::runlist> runlists;
   auto device = xrt::device{device_index};
-
-  auto elf = xrt::elf(
-    elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
+  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
-
-  // Create all runs
-  auto num_runs_per_batch = r_cmds * o_cmds;
-  for (int i = 0; i < num_runs_per_batch; i++)
+  unsigned n = o_cmds * MAX_RUNLIST_CMDS;
+  std::vector<xrt::run> runs;
+  for (unsigned i = 0; i < n; i++)
     runs.emplace_back(kernel);
-
-  // Add all runs into runlist
-  for (int i = 0; i < o_cmds; i++) {
-    runlists.emplace_back(hwctx);
-    for (int j = 0; j < r_cmds; j++)
-      runlists[i].add(runs[i * r_cmds + j]);
-  }
-
-  int submitted = 0;
-  int completed = 0;
-  auto start = std::chrono::high_resolution_clock::now();
-
-  while (submitted < runlists.size() && submitted < c_rounds) {
-    runlists[submitted].execute();
-    submitted++;
-  }
-  while (completed < submitted) {
-    auto i = completed % runlists.size();
-    auto state = runlists[i].wait(timeout_ms * r_cmds * std::chrono::milliseconds{1});
-    completed++;
-    if (state == std::cv_status::timeout) 
-      throw std::runtime_error(std::string("exec buf timed out."));
-    auto ert_state = runlists[i].state();
-    if (ert_state != ERT_CMD_STATE_COMPLETED)
-      throw std::runtime_error(std::string("bad command state: ") + std::to_string(ert_state));
-    if (submitted < c_rounds) {
-      runlists[i].execute();
-      submitted++;
-    }
-  }
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-  std::cout << "Executed total " << c_rounds << " runlists in " << duration_us
-	    << "us with max " << o_cmds << " outstanding runlist (" << r_cmds
-	    << " commands per runlist), average latency: "
-	    << duration_us * 1.0 / (r_cmds * c_rounds) << "us\n";
+  execute_batches(hwctx, runs, MAX_RUNLIST_CMDS);
 }
 
 // List of all test cases
@@ -868,12 +612,9 @@ std::vector<test_case> test_list {
   test_case{ "npu3 xrt ddr memtile", TEST_xrt_umq_ddr_memtile, {} },
   test_case{ "npu3 xrt remote barrier", TEST_xrt_umq_remote_barrier, {} },
   test_case{ "npu3 xrt nop/multi nop", TEST_xrt_umq_nop, {} },
-  test_case{ "npu3 xrt single col preemption", TEST_xrt_umq_single_col_preemption, {} },
-  test_case{ "npu3 xrt multi col preemption", TEST_xrt_umq_multi_col_preemption, {} },
-  test_case{ "npu3 xrt stress - run", TEST_xrt_stress_run, {} },
   test_case{ "npu3 xrt stress - hwctx", TEST_xrt_stress_hwctx, {} },
   test_case{ "npu3 xrt single col resnet50 all layer", TEST_xrt_umq_single_col_resnet50_all_layer, {} },
-  test_case{ "npu3 xrt runlist", TEST_xrt_umq_runlist, {} },
+  test_case{ "npu3 xrt max runlist", TEST_xrt_umq_runlist, {} },
 };
 
 void
@@ -1015,6 +756,10 @@ main(int argc, char **argv)
         }
         case 'r': {
           val = std::stoi(optarg);
+          if (val > MAX_RUNLIST_CMDS) {
+            std::cout << "r_cmds max is " << MAX_RUNLIST_CMDS << std::endl;
+            return 1;
+          }
 	  std::cout << "Per runlist cmds: " << val << std::endl;
 	  r_cmds = val;
 	  break;
@@ -1119,13 +864,13 @@ main(int argc, char **argv)
   set_xrt_path();
 
   test_list.push_back(test_case{ "npu3 xrt thread test", TEST_xrt_threads, {threads} });
-  
+
   // Resolve 99 to thread test
   if (tests.find(99) != tests.end()) {
     tests.erase(99);
     tests.insert(test_list.size() - 1);
   }
-  
+
   run_all_test(tests);
 
   if (!tests.empty()) {
