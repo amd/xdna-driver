@@ -258,9 +258,11 @@ static void aie4_ctx_disconnect(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
 	int wakeup_count = 0;
+	int idx;
 
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&client->ctx_srcu);
 		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
 			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
 				ctx->priv->status = CTX_STATE_DISCONNECTED;
@@ -269,6 +271,7 @@ static void aie4_ctx_disconnect(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
 				XDNA_DBG(xdna, "Context ctx_id=%lu marked DISCONNECTED", ctx_id);
 			}
 		}
+		srcu_read_unlock(&client->ctx_srcu, idx);
 	}
 	mutex_unlock(&xdna->dev_lock);
 
@@ -288,9 +291,11 @@ static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev, u32 hw_ct
 	struct amdxdna_client *client;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
+	int idx;
 
 	mutex_lock(&xdna->dev_lock);
 	list_for_each_entry(client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&client->ctx_srcu);
 		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
 			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
 				priv = ctx->priv;
@@ -307,6 +312,7 @@ static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev, u32 hw_ct
 				}
 			}
 		}
+		srcu_read_unlock(&client->ctx_srcu, idx);
 	}
 	mutex_unlock(&xdna->dev_lock);
 }
