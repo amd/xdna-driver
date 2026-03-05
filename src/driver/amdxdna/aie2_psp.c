@@ -9,6 +9,18 @@
 #include "aie2_pci.h"
 #include "amdxdna_xen.h"
 
+static inline char *psp_decode_resp(u32 resp)
+{
+	switch (resp) {
+	case PSP_ERROR_CANCEL:
+		return "Error cancel";
+	case PSP_ERROR_BAD_STATE:
+		return "Error bad state";
+	default:
+		return "Error unknown";
+	};
+}
+
 static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 {
 	u32 resp_code;
@@ -42,16 +54,6 @@ static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 	return 0;
 }
 
-void aie2_psp_stop(struct psp_device *psp)
-{
-	u32 reg_vals[PSP_NUM_IN_REGS] = { PSP_RELEASE_TMR, };
-	int ret;
-
-	ret = psp_exec(psp, reg_vals);
-	if (ret)
-		dev_err(psp->dev, "release tmr failed, ret %d", ret);
-}
-
 int aie2_psp_waitmode_poll(struct psp_device *psp)
 {
 	int mode_reg = -1, ret;
@@ -67,13 +69,14 @@ int aie2_psp_waitmode_poll(struct psp_device *psp)
 	return 0;
 }
 
-void aie2_psp_destroy(struct device *dev, void *psp_hdl)
+void aie2_psp_stop(struct psp_device *psp)
 {
-	struct psp_device *psp = psp_hdl;
+	u32 reg_vals[PSP_NUM_IN_REGS] = { PSP_RELEASE_TMR, };
+	int ret;
 
-	if (is_xen_initial_pvh_domain())
-		amdxdna_xen_free_buf_phys(dev, psp->fw_buffer, psp->fw_dma_handle,
-					  psp->fw_buf_sz + PSP_FW_ALIGN);
+	ret = psp_exec(psp, reg_vals);
+	if (ret)
+		dev_err(psp->dev, "release tmr failed, ret %d", ret);
 }
 
 int aie2_psp_start(struct psp_device *psp)
@@ -104,3 +107,11 @@ int aie2_psp_start(struct psp_device *psp)
 	return 0;
 }
 
+void aie2_psp_destroy(struct device *dev, void *psp_hdl)
+{
+	struct psp_device *psp = psp_hdl;
+
+	if (is_xen_initial_pvh_domain())
+		amdxdna_xen_free_buf_phys(dev, psp->fw_buffer, psp->fw_dma_handle,
+					  psp->fw_buf_sz + PSP_FW_ALIGN);
+}

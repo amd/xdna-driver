@@ -607,7 +607,8 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 		       pdev->device, pdev->revision, ndev->priv->certfw_path);
 	if (ret >= sizeof(fw_name)) {
 		XDNA_ERR(xdna, "fw_name %s is truncated", fw_name);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto release_npufw;
 	}
 
 	XDNA_DBG(xdna, "Request fw %s", fw_name);
@@ -647,10 +648,10 @@ static int aie4_release_firmware(struct amdxdna_dev_hdl *ndev,
 
 static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 				 const struct firmware *npufw,
-				 const struct firmware *certfw)
+				 const struct firmware *certfw,
+				 void __iomem *tbl[PCI_NUM_RESOURCES])
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct psp_config psp_conf;
 	int i;
 
@@ -662,9 +663,8 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	psp_conf.certfw_size = certfw->size;
 	psp_conf.certfw_buf = certfw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
-		psp_conf.psp_regs[i] = ndev->psp_base + PSP_REG_OFF(ndev, i);
-
-	ndev->psp_hdl = aiem_psp_create(&pdev->dev, &psp_conf);
+		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
+	ndev->psp_hdl = aiem_psp_create(xdna->ddev.dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
 		return -ENOMEM;
@@ -741,6 +741,8 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
+	for (i = 0; i < PSP_MAX_REGS; i++)
+		set_bit(PSP_REG_BAR(ndev, i), &bars);
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 	set_bit(xdna->dev_info->sram_bar, &bars);
 	if (!is_npu3_vf_dev(pdev)) {
@@ -767,15 +769,28 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->doorbell_base = tbl[xdna->dev_info->doorbell_bar];
 
-	ret = aie4_request_firmware(ndev, &npufw, &certfw);
-	if (ret)
-		return ret;
-	ret = aie4_prepare_firmware(ndev, npufw, certfw);
-	aie4_release_firmware(ndev, npufw, certfw);
-	if (ret)
-		return ret;
-
+	/* Set PCI master */
 	pci_set_master(pdev);
+
+	/* Request firmware */
+	ret = aie4_request_firmware(ndev, &npufw, &certfw);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to request firmware, ret %d", ret);
+		goto clear_master;
+	}
+
+	/* Prepare firmware */
+	ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to prepare firmware, ret %d", ret);
+		goto clear_master;
+	}
+
+	ret = aie4_release_firmware(ndev, npufw, certfw);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to release firmware, ret %d", ret);
+		goto clear_master;
+	}
 
 	/*TODO: split this to alloc and attach, same as work buffer */
 	ret = aie4_alloc_work_buffer(ndev);
@@ -2659,4 +2674,3 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.debugfs		= aie4_debugfs_init,
 	.sriov_configure        = aie4_sriov_configure,
 };
-

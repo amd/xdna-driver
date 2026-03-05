@@ -65,18 +65,6 @@ struct psp_config {
 	void __iomem	*psp_regs[PSP_MAX_REGS];
 };
 
-static inline char *psp_decode_resp(u32 resp)
-{
-	switch (resp) {
-	case PSP_ERROR_CANCEL:
-		return "Error cancel";
-	case PSP_ERROR_BAD_STATE:
-		return "Error bad state";
-	default:
-		return "Error unknown";
-	};
-}
-
 struct psp_device {
 	struct device	  *dev;
 	struct psp_config conf;
@@ -96,4 +84,3 @@ struct psp_device {
 struct psp_device *aiem_psp_create(struct device *dev, struct psp_config *conf);
 
 #endif /* _AIE_COMMON_H_ */
-

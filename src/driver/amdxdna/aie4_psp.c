@@ -10,6 +10,20 @@
 
 #define PSP_SET_CMD_ARG2(cmd, arg2)	(((cmd) << 24) | (arg2))
 
+static inline char *psp_decode_resp(u32 resp)
+{
+	switch (resp) {
+	case PSP_ERROR_CANCEL:
+		return "Error cancel";
+	case PSP_ERROR_BAD_STATE:
+		return "Error bad state";
+	default:
+		break;
+	}
+
+	return "Error unknown";
+}
+
 static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 {
 	u32 resp_code;
@@ -110,5 +124,3 @@ int aie4_psp_start(struct psp_device *psp)
 	dev_dbg(psp->dev, "successfully download mpnpu and cert fw");
 	return 0;
 }
-
-

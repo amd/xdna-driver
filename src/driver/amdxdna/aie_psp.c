@@ -22,49 +22,57 @@ struct psp_device *aiem_psp_create(struct device *dev, struct psp_config *conf)
 	psp->dev = dev;
 	memcpy(psp->psp_regs, conf->psp_regs, sizeof(psp->psp_regs));
 
-	/* NPU firmware */
-	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN);
-	if (is_xen_initial_pvh_domain()) {
-		psp->fw_buffer = amdxdna_xen_alloc_buf_phys(psp->dev,
-							    psp->fw_buf_sz + PSP_FW_ALIGN,
-							    &psp->fw_dma_handle);
-		if (!psp->fw_buffer)
-			return NULL;
-		psp->fw_paddr = psp->fw_dma_handle;
-	} else {
-		psp->fw_buffer = devm_kmalloc(psp->dev,
-					      psp->fw_buf_sz + PSP_FW_ALIGN,
-					      GFP_KERNEL);
-		if (!psp->fw_buffer)
-			return NULL;
+	/* For aie2 */
+    if (!conf->certfw_size || !conf->certfw_buf) {
+		/* NPU firmware */
+		psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN);
+		if (is_xen_initial_pvh_domain()) {
+			psp->fw_buffer = amdxdna_xen_alloc_buf_phys(psp->dev,
+									psp->fw_buf_sz + PSP_FW_ALIGN,
+									&psp->fw_dma_handle);
+			if (!psp->fw_buffer)
+				return NULL;
+			psp->fw_paddr = psp->fw_dma_handle;
+		} else {
+			psp->fw_buffer = devm_kmalloc(psp->dev,
+							psp->fw_buf_sz + PSP_FW_ALIGN,
+							GFP_KERNEL);
+			if (!psp->fw_buffer)
+				return NULL;
 
-		psp->fw_paddr = virt_to_phys(psp->fw_buffer);
-	}
+			psp->fw_paddr = virt_to_phys(psp->fw_buffer);
+		}
 
 	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
 	psp->fw_paddr += offset;
 	memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
+	} else { /* For aie4 Xen is not supported yet */
+		psp->fw_buf_sz= ALIGN(conf->fw_size, PSP_FW_ALIGN);
+		psp->fw_buffer = devm_kmalloc(psp->dev,
+						psp->fw_buf_sz + PSP_FW_ALIGN,
+						GFP_KERNEL);
+		if (!psp->fw_buffer)
+			return NULL;
 
-	if (!conf->certfw_size) {
-		dev_dbg(dev, "no cert fw");
-		goto done;
+		psp->fw_paddr = virt_to_phys(psp->fw_buffer);
+		offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
+		psp->fw_paddr += offset;
+		memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
+
+		// CERT firmware
+		psp->certfw_buf_sz = ALIGN(conf->certfw_size, PSP_CFW_ALIGN);
+		psp->certfw_buffer = devm_kmalloc(psp->dev,
+						psp->certfw_buf_sz + PSP_CFW_ALIGN,
+						GFP_KERNEL);
+		if (!psp->certfw_buffer) {
+			dev_err(psp->dev, "no memory for cert fw buffer");
+			return NULL;
+		}
+		psp->certfw_paddr = virt_to_phys(psp->certfw_buffer);
+		offset = ALIGN(psp->certfw_paddr, PSP_CFW_ALIGN) - psp->certfw_paddr;
+		psp->certfw_paddr += offset;
+		memcpy(psp->certfw_buffer + offset, conf->certfw_buf, conf->certfw_size);
 	}
 
-	/* CERT firmware */
-	psp->certfw_buf_sz = ALIGN(conf->certfw_size, PSP_CFW_ALIGN);
-	psp->certfw_buffer = devm_kmalloc(dev,
-					  psp->certfw_buf_sz + PSP_CFW_ALIGN,
-					  GFP_KERNEL);
-	if (!psp->certfw_buffer) {
-		dev_err(dev, "no memory for cert fw buffer");
-		return NULL;
-	}
-
-	psp->certfw_paddr = virt_to_phys(psp->certfw_buffer);
-	offset = ALIGN(psp->certfw_paddr, PSP_CFW_ALIGN) - psp->certfw_paddr;
-	psp->certfw_paddr += offset;
-	memcpy(psp->certfw_buffer + offset, conf->certfw_buf, conf->certfw_size);
-done:
 	return psp;
 }
-

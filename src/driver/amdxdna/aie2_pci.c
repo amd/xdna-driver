@@ -583,6 +583,10 @@ skip_pasid:
 #endif
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
+	/* No cert fw for AIE2 */
+	psp_conf.certfw_size = 0;
+	psp_conf.certfw_buf = NULL;
+
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
 	ndev->psp_hdl = aiem_psp_create(&pdev->dev, &psp_conf);
@@ -2137,4 +2141,3 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.hmm_invalidate		= aie2_hmm_invalidate,
 	.cmd_get_out_fence	= aie2_cmd_get_out_fence,
 };
-

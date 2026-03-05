@@ -559,4 +559,3 @@ int aie2_fw_trace_config(struct amdxdna_dev *xdna, u32 categories);
 void aie2_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 #endif /* _AIE2_PCI_H_ */
-
