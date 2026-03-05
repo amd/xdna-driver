@@ -252,13 +252,13 @@ static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo,
 	/* Use health report cached when async context error was raised */
 	if (ctx->priv->cached_health_valid && ctx->priv->cached_health_report) {
 		report = ctx->priv->cached_health_report;
-		health_data->aie4.ctx_state = report->ctx_status;
+		health_data->aie4.ctx_state = aie4_health_get_ctx_status(report);
 		hdr_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
 		num_uc_copy = 0;
 		if (data_total > hdr_size) {
-			num_uc_copy = min(report->num_uc,
-					  (u32)((data_total - hdr_size) /
-					      sizeof(struct uc_health_info)));
+			u32 max_uc = (data_total - hdr_size) / sizeof(struct uc_health_info);
+
+			num_uc_copy = min_t(u32, aie4_health_get_num_uc(report), max_uc);
 			if (num_uc_copy > 0)
 				memcpy(health_data->aie4.uc_info, report->uc_info,
 				       num_uc_copy * sizeof(struct uc_health_info));
@@ -288,8 +288,8 @@ static void job_timeout(struct amdxdna_sched_job *job)
 	}
 
 	/* Chained cmd. */
-	/* TODO: 'i' should come from health data. */
-	i = 0;
+	if (ctx->priv->cached_health_valid && ctx->priv->cached_health_report)
+		i = aie4_health_get_runlist_read_idx(ctx->priv->cached_health_report);
 	payload = amdxdna_cmd_get_chained_payload(cmd_abo, NULL);
 	if (payload) {
 		boh = payload->data[i];
@@ -790,7 +790,6 @@ done:
 int aie4_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
-	struct dma_fence_chain *chain = dma_fence_chain_alloc();
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
@@ -799,9 +798,6 @@ int aie4_cmd_submit(struct amdxdna_sched_job *job,
 	int ret;
 
 	XDNA_DBG(xdna, "ctx %s job 0x%llx received", ctx->name, (u64)job);
-
-	if (!chain)
-		return -ENOMEM;
 
 	enqueue_pending_job(job);
 	/*
@@ -866,7 +862,6 @@ fail_mmget:
 fail_wait_till_1st:
 	kref_put(&job->refcnt, job_release);
 	cancel_pending_job(job);
-	dma_fence_chain_free(chain);
 	return ret;
 }
 
@@ -1003,7 +998,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		}
 
 		if (!attach) {
-			XDNA_INFO(xdna, "clear index %d logging", index);
+			XDNA_DBG(xdna, "clear index %d logging", index);
 			req.cert_logging.info[index].paddr = 0;
 			req.cert_logging.info[index].size = 0;
 			continue;
