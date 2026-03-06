@@ -33,6 +33,7 @@ module_param(aie2_max_col, uint, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
 
 static char *npu_fw[] = {
+	"npu.dev.sbin",
 	"npu_7.sbin",
 	"npu.sbin"
 };
