@@ -19,6 +19,10 @@
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
 
+MODULE_FIRMWARE("amdnpu/1502_00/npu.dev.sbin");
+MODULE_FIRMWARE("amdnpu/17f0_10/npu.dev.sbin");
+MODULE_FIRMWARE("amdnpu/17f0_11/npu.dev.sbin");
+MODULE_FIRMWARE("amdnpu/17f0_20/npu.dev.sbin");
 MODULE_FIRMWARE("amdnpu/1502_00/npu.sbin");
 MODULE_FIRMWARE("amdnpu/17f0_10/npu.sbin");
 MODULE_FIRMWARE("amdnpu/17f0_11/npu.sbin");
@@ -363,4 +367,5 @@ module_pci_driver(amdxdna_pci_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
+MODULE_VERSION("0.1");
 MODULE_DESCRIPTION("amdxdna driver");
