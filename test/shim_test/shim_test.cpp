@@ -28,18 +28,19 @@
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+
 // FIXME
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include "../../src/include/uapi/drm_local/amdxdna_accel.h"
 // enf of FIXME
 
-struct kern_version {
-  int major;
-  int minor;
+struct driver_version {
+  unsigned int major;
+  unsigned int minor;
 };
 
-kern_version current_kern;
+driver_version current_drv;
 std::string cur_path;
 std::string xclbin_path;
 int base_write_speed;
@@ -92,7 +93,7 @@ usage(const std::string& prog)
   std::cout << "\nUsage: " << prog << " [options] [test case ID/name separated by spaces]\n";
   std::cout << "Options:\n";
   std::cout << "\t" << "-h" << ": print this help message and available test cases\n";
-  std::cout << "\t" << "-k" << ": evaluate test result based on kernel version\n";
+  std::cout << "\t" << "-k" << ": evaluate test result based on driver version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
   std::cout << std::endl;
 }
@@ -101,11 +102,10 @@ usage(const std::string& prog)
 struct test_case {
   const std::string name;
   /*
-   * k_ver = { 0, 0 }: test should behave as expected
-   * k_ver = { -1, -1 }: test does not behave as expected for now
-   * k_ver = { m, n }: test does not behave as expected until m.n kenrel
+   * drv_ver = { 0, 0 }: test should behave as expected
+   * drv_ver = { m, n }: test does not behave as expected until m.n driver
    */
-  const kern_version k_ver;
+  const driver_version drv_ver;
   bool is_negative;
   bool (*dev_filter)(device::id_type id, device *dev);
   void (*func)(device::id_type id, std::shared_ptr<device>& dev, arg_type& arg);
@@ -785,7 +785,7 @@ std::vector<test_case> test_list {
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
-  test_case{ "io test with intruction code invalid address access", {},
+  test_case{ "io test with instruction code invalid address access", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
@@ -794,10 +794,10 @@ std::vector<test_case> test_list {
   test_case{ "measure real kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "create and free debug bo", {-1, -1},
+  test_case{ "create and free debug bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x1000 }
   },
-  test_case{ "create and free large debug bo", {-1, -1},
+  test_case{ "create and free large debug bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
@@ -836,7 +836,7 @@ std::vector<test_case> test_list {
   test_case{ "measure no-op kernel throughput chained command (polling)", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "Cmd fencing (driver side)", {-1, -1},
+  test_case{ "Cmd fencing (driver side)", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_device, {}
   },
   test_case{ "sync_bo for input_output 1MiB BO", {},
@@ -851,7 +851,7 @@ std::vector<test_case> test_list {
   test_case{ "multi-command ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
-  test_case{ "virtual context test", {},
+  test_case{ "virtual context test", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 0 }
   },
   test_case{ "virtual context bad test", {},
@@ -893,7 +893,7 @@ std::vector<test_case> test_list {
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_suspend_resume, {}
   },
-  test_case{ "io test timeout run for context health report", {},
+  test_case{ "io test timeout run for context health report", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
   },
   //test_case{ "io test no-op kernel good run", {},
@@ -909,25 +909,25 @@ std::vector<test_case> test_list {
   test_case{ "gemm and debug BO", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
   },
-  test_case{ "create and free internal bo", {},
+  test_case{ "create and free internal bo", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
   },
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
   },
-  test_case{ "get AIE coredump and check registers", {},
+  test_case{ "get AIE coredump and check registers", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
   },
-  test_case{ "AIE MEM read/write", {},
+  test_case{ "AIE MEM read/write", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_mem, {}
   },
-  test_case{ "AIE REG read/write", {},
+  test_case{ "AIE REG read/write", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
   },
-  test_case{ "timed out chained command", {},
+  test_case{ "timed out chained command", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
   },
   test_case{ "io test aie4 async error", {},
@@ -950,15 +950,15 @@ print_available_tests()
 bool
 is_negative_test(const test_case& test)
 {
-  if (current_kern.major == 0)
+  if (current_drv.major == 0 && current_drv.minor == 0)
     return test.is_negative;
-  if (test.k_ver.major == -1)
-    return !test.is_negative;
-  if (current_kern.major < test.k_ver.major)
-    return !test.is_negative;
-  if (current_kern.major == test.k_ver.major && current_kern.minor < test.k_ver.minor)
-    return !test.is_negative;
-  return test.is_negative;
+
+  if (current_drv.major > test.drv_ver.major ||
+      (current_drv.major == test.drv_ver.major &&
+       current_drv.minor >= test.drv_ver.minor))
+    return test.is_negative;
+
+  return true;
 }
 
 void
@@ -1046,22 +1046,41 @@ run_all_test(std::vector<int>& tests)
 }
 
 int
-get_kernel_version(int *major, int *minor)
+get_driver_version(unsigned int *major, unsigned int *minor)
 {
-  struct utsname buffer;
+  const char *xdna = "/dev/accel/accel0";
+  drm_version version = {};
+  char name[128];
+  char date[128];
+  char desc[256];
 
-  if (uname(&buffer) != 0) {
-      perror("uname");
-      return -EFAULT;
+  int fd = open(xdna, O_RDONLY);
+  if (fd < 0) {
+    std::perror("open");
+    return -1;
   }
 
-  std::string version = buffer.release;
-  std::stringstream version_stream(version);
-  char dot;
-  if (!(version_stream >> *major >> dot >> *minor)) {
-      std::cout << "Failed to parse kernel version: " << version << std::endl;
-      return -EINVAL;
+  version.name_len = sizeof(name);
+    version.name = name;
+
+    version.date_len = sizeof(date);
+    version.date = date;
+
+    version.desc_len = sizeof(desc);
+    version.desc = desc;
+
+  int result = ioctl(fd, DRM_IOCTL_VERSION, &version);
+  if (result) {
+    perror("Failed to get DRM version");
+    close(fd);
+    return -EFAULT;
   }
+
+  close(fd);
+
+  *major = version.version_major;
+  *minor = version.version_minor;
+
   return 0;
 }
 
@@ -1118,10 +1137,10 @@ main(int argc, char **argv)
       }
     }
     case 'k': {
-      if (get_kernel_version(&current_kern.major, &current_kern.minor))
+      if (get_driver_version(&current_drv.major, &current_drv.minor))
         return 1;
-      std::cout << "Evaluating test result based on kernel version: "
-        << current_kern.major << "." << current_kern.minor << std::endl;
+      std::cout << "Evaluating test result based on driver version: "
+        << current_drv.major << "." << current_drv.minor << std::endl;
       break;
     }
     case '?':
