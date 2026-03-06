@@ -7,6 +7,8 @@
 #include "xrt/detail/xrt_error_code.h"
 
 #include <climits>
+#include <iostream>
+#include <map>
 #include <string>
 #include <sstream>
 #include <regex>
@@ -571,9 +573,22 @@ elf_io_gemm_test_bo_set(device* dev, const std::string& tag)
   : io_test_bo_set_base(dev, tag, nullptr)
 {
   const auto& info = get_binary_info(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
-  const std::string elf_name = info.extra.at("elf_name");
+  std::string elf_path;
+  if (info.extra.count("elf_name")) {
+    elf_path = m_local_data_path + info.extra.at("elf_name");
+    m_is_full_elf = false;
+  } else {
+    elf_path = get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+    m_is_full_elf = true;
+  }
+  m_elf = xrt::elf(elf_path);
 
-  m_elf = xrt::elf(m_local_data_path + elf_name);
+  try {
+    auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+  } catch (const std::exception&) {
+    m_kernel_index = elf_int::no_ctrl_code_id;
+  }
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -584,7 +599,14 @@ elf_io_gemm_test_bo_set(device* dev, const std::string& tag)
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      if (m_is_full_elf && m_kernel_index == elf_int::no_ctrl_code_id) {
+        auto size = exec_buf::get_ctrl_code_size(m_elf, elf_patcher::buf_type::ctrltext, 0);
+        if (size == 0)
+          throw std::runtime_error("instruction size cannot be 0");
+        alloc_ctrl_bo(ibo, m_dev, size);
+      } else {
+        create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      }
       break;
     default:
       break;
@@ -789,20 +811,38 @@ void
 elf_io_gemm_test_bo_set::
 init_cmd(hw_ctx& hwctx, bool dump)
 {
-  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
-    *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
-    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  if (!m_is_full_elf) {
+    elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
+      *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
+      *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  } else {
+    exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
 
-  // Get a debug BO
+    xrt_core::cuidx_type cu_idx{0};
+    ebuf.set_cu_idx(cu_idx);
+
+    if (dump)
+      ebuf.dump();
+
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+    uint32_t patch_id = (m_kernel_index != elf_int::no_ctrl_code_id) ? m_kernel_index : 0;
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+      elf_patcher::buf_type::ctrltext, m_elf, patch_id);
+  }
+
+  // Get a debug BO (full-ELF: uc_debug with fixed layout; else legacy size)
+  const size_t dbo_size = m_is_full_elf ? m_gemm_uc_debug_size : 4096;
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
-  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
-  const size_t size = 4096;
-  m_dbo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  auto ext_boflags = m_is_full_elf ? (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
+  m_dbo = hwctx.get()->alloc_bo(dbo_size, get_bo_flags(boflags, ext_boflags));
   auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
+  std::memset(dbo_p, 0xff, dbo_size);
+  m_dbo->sync(buffer_handle::direction::host2device, dbo_size, 0);
 
-  // Initializing debug BO content to -1
-  std::memset(dbo_p, 0xff, size);
-  m_dbo.get()->sync(buffer_handle::direction::host2device, size, 0);
+  if (m_is_full_elf) {
+    std::map<uint32_t, size_t> buf_map{{0, m_gemm_uc_debug_size}};
+    m_dbo->config(hwctx.get(), buf_map);
+  }
 
   io_test_bo_set_base::init_cmd(hwctx, dump);
 }
@@ -925,7 +965,22 @@ verify_result()
   m_dbo.get()->sync(buffer_handle::direction::device2host, m_dbo->get_properties().size, 0);
   auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
 
-  // Validating debug BO content.
+  if (m_is_full_elf) {
+    const uint32_t* words = reinterpret_cast<const uint32_t*>(dbo_p);
+    // Avg cycle count should always be 276
+    constexpr uint32_t expected_cycle_count = 276;
+    for (size_t i = 0; i < m_npu3_num_cores; i++) {
+      if (words[i * 2] != static_cast<uint32_t>(i))
+        throw std::runtime_error(std::string("bad debug BO core_idx at slot ") + std::to_string(i)
+          + ", expected " + std::to_string(i) + ", got " + std::to_string(words[i * 2]));
+      if (words[i * 2 + 1] != expected_cycle_count)
+        throw std::runtime_error(std::string("bad debug BO cycle_count at core ") + std::to_string(i)
+          + ", expected " + std::to_string(expected_cycle_count) + ", got " + std::to_string(words[i * 2 + 1]));
+    }
+    return;
+  }
+
+  // Validating debug BO content (AIE2 / non-full-ELF).
   // The first 32 Dwords should be 0xde, the rest should be initial values
   int i = 0;
   while (i < 32) {
@@ -940,6 +995,20 @@ verify_result()
         + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
     ++i;
   }
+}
+
+void
+elf_io_gemm_test_bo_set::
+teardown(hw_ctx& hwctx)
+{
+  if (m_is_full_elf && m_dbo)
+    m_dbo->unconfig(hwctx.get());
+}
+
+void
+io_test_bo_set_base::
+teardown(hw_ctx&)
+{
 }
 
 const char *
@@ -974,8 +1043,14 @@ run(const std::vector<fence_handle*>& wait_fences,
   hwq->wait_command(cbo->get(), 0);
 
   sync_after_run();
-  if (!no_check_result)
-    verify_result();
+  try {
+    if (!no_check_result)
+      verify_result();
+  } catch (...) {
+    teardown(hwctx);
+    throw;
+  }
+  teardown(hwctx);
 }
 
 void

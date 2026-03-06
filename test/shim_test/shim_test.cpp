@@ -907,7 +907,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_gemm, {}
   },
   test_case{ "create and free internal bo", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}

@@ -13,6 +13,7 @@ set(XDNA_DRV_CONFIG_KERNEL_HEADER config_kernel.h)
 set(XDNA_DRV_CONFIG_KERNEL_SCRIPT configure_kernel.sh)
 
 if (DEFINED ENV{XDNA_DRV_BLD_FLAGS})
+  set(XDNA_DRV_BLD_FLAGS_DKMS $ENV{XDNA_DRV_BLD_FLAGS})
   set(XDNA_DRV_BLD_FLAGS_MAKE $ENV{XDNA_DRV_BLD_FLAGS})
   separate_arguments(XDNA_DRV_BLD_FLAGS_MAKE)
 endif(DEFINED ENV{XDNA_DRV_BLD_FLAGS})
@@ -22,9 +23,9 @@ add_custom_command(
   COMMENT "Collect all driver source code"
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${XDNA_DRV_BLD_DIR}
-  COMMAND cp -rf ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers/accel/${XDNA_DRV_DIR}/* ${XDNA_DRV_BLD_DIR}
+  COMMAND cp -rf ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}/* ${XDNA_DRV_BLD_DIR}
   COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/../../include .
-  COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers/tools/${XDNA_DRV_CONFIG_KERNEL_SCRIPT} .
+  COMMAND cp -r ${CMAKE_CURRENT_SOURCE_DIR}/tools/${XDNA_DRV_CONFIG_KERNEL_SCRIPT} .
   )
 
 # Generate XDNA_DRV_CONFIG_KERNEL_HEADER before doing build
@@ -36,7 +37,6 @@ add_custom_command(
   DEPENDS all_driver_source
 )
 
-# Because ${XDNA_DRV_TGT} is generated in ${XDNA_DRV_BLD_TGT}. So this custom command will always run.
 add_custom_command(
   OUTPUT ${XDNA_DRV_TGT}
   COMMENT "Build ${XDNA_DRV_TGT}"
@@ -45,15 +45,24 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
   DEPENDS ${XDNA_DRV_BLD_SRC}/${XDNA_DRV_CONFIG_KERNEL_HEADER}
   )
+# Defines phony target which always run (ALL) to trigger above custom command.
+add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT})
 
-message(STATUS "Build accel amdxdna driver in ${XDNA_DRV_PATH}")
+# Tar and install driver source code for packaging
+if(NOT PACKAGE_LEGACY_DRIVER)
+  message("-- Packaging upstream driver source")
+  set(XDNA_DRV_SRC_DIR
+    drivers
+    include
+    )
+  set(TAR_DRV_SOURCE_TGT driver)
+  include(${CMAKE_SOURCE_DIR}/CMake/pkg_driver_source.cmake)
+endif()
 
-add_custom_target(accel_driver ALL DEPENDS ${XDNA_DRV_TGT})
-
-# Copy accel-built .ko to XDNA_BIN_DIR/driver as amdxdna_legacy.ko (for -build_accel and testing)
-add_custom_target(install_accel_ko ALL
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${XDNA_BIN_DIR}/driver
-  COMMAND ${CMAKE_COMMAND} -E copy ${XDNA_DRV_PATH} ${CMAKE_BINARY_DIR}${XDNA_BIN_DIR}/driver/amdxdna_legacy.ko
-  COMMENT "Copy amdxdna.ko to ${XDNA_BIN_DIR}/driver as amdxdna_legacy.ko"
-  DEPENDS accel_driver
-  )
+# install .ko for testing
+set(TEST_KO_NAME amdxdna.ko)
+if(PACKAGE_LEGACY_DRIVER)
+  # When legacy driver is packaged, we become the "legacy" ko for CI test
+  set(TEST_KO_NAME amdxdna_legacy.ko)
+endif()
+install(FILES ${XDNA_DRV_PATH} DESTINATION ${XDNA_BIN_DIR}/driver RENAME ${TEST_KO_NAME})

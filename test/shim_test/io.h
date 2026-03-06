@@ -70,6 +70,10 @@ public:
   virtual void
   verify_result();
 
+  /** Called after verify_result() while hw_ctx is still valid; override to unconfig BOs. */
+  virtual void
+  teardown(hw_ctx& hwctx);
+
   static const char *
   bo_type2name(int type);
 
@@ -218,8 +222,15 @@ public:
   void
   verify_result() override;
 
+  void
+  teardown(hw_ctx& hwctx) override;
+
 private:
+  static constexpr size_t m_npu3_num_cores = 12;
+  static constexpr size_t m_gemm_uc_debug_size = m_npu3_num_cores * 2 * sizeof(uint32_t);
+
   std::unique_ptr<xrt_core::buffer_handle> m_dbo;
+  bool m_is_full_elf = false;
 };
 
 class elf_io_aie_debug_test_bo_set : public io_test_bo_set_base
