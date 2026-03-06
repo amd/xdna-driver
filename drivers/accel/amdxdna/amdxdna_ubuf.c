@@ -3,7 +3,7 @@
  * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
 
-#include "drm_local/amdxdna_accel.h"
+#include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_print.h>
 #include <linux/dma-buf.h>
