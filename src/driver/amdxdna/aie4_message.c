@@ -126,6 +126,29 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+int aie4_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u32 ctx_id)
+{
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_hws_debug_mode *hws_debug;
+	u32 type = AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE;
+	int ret;
+
+	req.type = type;
+	hws_debug = (struct aie4_msg_runtime_config_hws_debug_mode *)req.data;
+	hws_debug->enable = AIE4_RUNTIME_HWS_DEBUG_MODE_ENABLE;
+	hws_debug->ctx_id = ctx_id;
+
+	msg.send_size = sizeof(req.type) + sizeof(*hws_debug);
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to set HWS debug mode, ret %d", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 int aie4_check_firmware_version(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_identify, AIE4_MSG_OP_IDENTIFY);
