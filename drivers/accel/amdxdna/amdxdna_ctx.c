@@ -12,7 +12,7 @@
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/xarray.h>
-#include <trace/events/amdxdna.h>
+#include "trace/events/amdxdna.h"
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
