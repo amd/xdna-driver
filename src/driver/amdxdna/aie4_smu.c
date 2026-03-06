@@ -134,4 +134,3 @@ void aie4_smu_stop(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		XDNA_WARN(ndev->xdna, "Power off failed, ret %d", ret);
 }
-
