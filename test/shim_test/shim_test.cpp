@@ -262,21 +262,27 @@ get_bo_usage(device* dev, int pid)
   // FIXME: reimplement this when query key is defined in xrt
   std::string accel_path = get_sysfs_path(dev);
 
-  auto dp = opendir(accel_path.c_str());
+  struct dir_guard {
+    DIR* d;
+    explicit dir_guard(DIR* p) : d(p) {}
+    ~dir_guard() { if (d) closedir(d); }
+    DIR* get() const { return d; }
+    explicit operator bool() const { return d != nullptr; }
+  };
+  dir_guard dp(opendir(accel_path.c_str()));
   if (!dp) {
     std::perror(("opendir: " + accel_path).c_str());
     return {0, 0, 0};
   }
 
   std::string accel_node;
-  while (auto entry = readdir(dp)) {
+  while (auto entry = readdir(dp.get())) {
     std::string dirname{entry->d_name};
     if (dirname.find("accel") == 0) {
       accel_node = "/dev/accel/" + dirname;
       break;
     }
   }
-  closedir(dp);
 
   if (accel_node.empty()) {
     std::cerr << "Failed to find accel node under " << accel_path << " for device" << std::endl;
