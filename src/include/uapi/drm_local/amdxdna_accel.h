@@ -904,6 +904,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
 #define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
 #define	DRM_AMDXDNA_AIE_TILE_WRITE		7
+#define	DRM_AMDXDNA_SET_CLOCK_FREQ		8
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

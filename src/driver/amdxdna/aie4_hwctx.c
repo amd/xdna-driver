@@ -224,6 +224,20 @@ static void job_complete(struct amdxdna_sched_job *job)
 	job_done(job);
 }
 
+/*
+ * When CERT does not respond, driver needs to update read index to let waiting
+ * thread know the command is timed out/aborted.
+ * Driver should never update read index when CERT is still alive.
+ */
+static inline void update_read_index(struct amdxdna_ctx *ctx, u64 idx)
+{
+	drm_WARN_ON(&ctx->client->xdna->ddev, ctx->priv->status == CTX_STATE_CONNECTED);
+
+	/* Ensure the writes to the cmd bo are completed before notifying waiting thread. */
+	wmb();
+	WRITE_ONCE(*ctx->priv->umq_read_index, idx);
+}
+
 static void job_abort(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
@@ -233,6 +247,7 @@ static void job_abort(struct amdxdna_sched_job *job)
 	XDNA_ERR(xdna, "aborting %s job %lld", ctx->name, job->seq);
 
 	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
+	update_read_index(ctx, job->seq + 1);
 	job_done(job);
 }
 
@@ -250,20 +265,22 @@ static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo,
 	health_data->npu_gen = AMDXDNA_NPU_GEN_AIE4;
 
 	/* Use health report cached when async context error was raised */
-	if (ctx->priv->cached_health_valid && ctx->priv->cached_health_report) {
-		report = ctx->priv->cached_health_report;
-		health_data->aie4.ctx_state = report->ctx_status;
+	if (ctx->priv->cached_health_valid) {
+		report = &ctx->priv->cached_health_report;
+		health_data->aie4.ctx_state = aie4_health_get_ctx_status(report);
 		hdr_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
 		num_uc_copy = 0;
 		if (data_total > hdr_size) {
-			num_uc_copy = min(report->num_uc,
-					  (u32)((data_total - hdr_size) /
-					      sizeof(struct uc_health_info)));
-			if (num_uc_copy > 0)
+			u32 max_uc = (data_total - hdr_size) / sizeof(struct uc_health_info);
+
+			num_uc_copy = min_t(u32, aie4_health_get_num_uc(report), max_uc);
+			if (num_uc_copy > 0) {
 				memcpy(health_data->aie4.uc_info, report->uc_info,
 				       num_uc_copy * sizeof(struct uc_health_info));
+			}
 		}
 		health_data->aie4.num_uc = num_uc_copy;
+		ctx->priv->cached_health_valid = false;
 	} else {
 		health_data->aie4.ctx_state = 0;
 		health_data->aie4.num_uc = 0;
@@ -288,8 +305,8 @@ static void job_timeout(struct amdxdna_sched_job *job)
 	}
 
 	/* Chained cmd. */
-	/* TODO: 'i' should come from health data. */
-	i = 0;
+	if (ctx->priv->cached_health_valid)
+		i = aie4_health_get_runlist_read_idx(&ctx->priv->cached_health_report);
 	payload = amdxdna_cmd_get_chained_payload(cmd_abo, NULL);
 	if (payload) {
 		boh = payload->data[i];
@@ -312,6 +329,7 @@ done:
 	 */
 	wmb();
 	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+	update_read_index(ctx, job->seq + 1);
 	job_done(job);
 }
 
@@ -359,22 +377,52 @@ static inline u64 publish_cmd(struct amdxdna_ctx *ctx)
 
 static inline bool check_cmd_done(struct amdxdna_ctx *ctx, u64 seq)
 {
-	u64 ri = get_read_index(ctx);
+	u64 ri;
 
+	if (ctx->priv->status != CTX_STATE_CONNECTED)
+		return true;
+
+	ri = get_read_index(ctx);
 	XDNA_DBG(ctx->client->xdna, "checking if read_idx %lld > seq %lld", ri, seq);
 	return ri > seq;
 }
 
+static struct cert_comp *aie4_ctx_get_cert_comp(struct amdxdna_ctx *ctx)
+{
+	struct amdxdna_dev_hdl *ndev = ctx->client->xdna->dev_handle;
+	struct amdxdna_ctx_priv *priv = ctx->priv;
+	struct cert_comp *cert_comp;
+
+	mutex_lock(&ndev->aie4_lock);
+
+	cert_comp = priv->cert_comp;
+	if (cert_comp)
+		kref_get(&cert_comp->kref);
+
+	mutex_unlock(&ndev->aie4_lock);
+
+	return cert_comp;
+}
+
+static void aie4_ctx_put_cert_comp(struct cert_comp *cert_comp)
+{
+	struct amdxdna_dev_hdl *ndev = cert_comp->ndev;
+
+	mutex_lock(&ndev->aie4_lock);
+	aie4_put_cert_comp_locked(cert_comp);
+	mutex_unlock(&ndev->aie4_lock);
+}
+
 static inline int wait_till_seq_completed(struct amdxdna_ctx *ctx, u64 seq)
 {
-	struct amdxdna_ctx_priv *nctx = ctx->priv;
-	struct cert_comp *cert_comp = nctx->cert_comp;
+	struct cert_comp *cert_comp = aie4_ctx_get_cert_comp(ctx);
 
-	wait_event(cert_comp->waitq,
-		   ctx->priv->status != CTX_STATE_CONNECTED || check_cmd_done(ctx, seq));
-	if (nctx->status != CTX_STATE_CONNECTED)
-		return -EAGAIN; /* Ctx is not ready, come back later. */
-	return 0;
+	if (!cert_comp)
+		return -EAGAIN;
+
+	wait_event(cert_comp->waitq, check_cmd_done(ctx, seq));
+	aie4_ctx_put_cert_comp(cert_comp);
+	return (ctx->priv->status != CTX_STATE_CONNECTED) ? -EAGAIN : 0;
 }
 
 static inline int wait_till_hsa_not_full(struct amdxdna_ctx *ctx)
@@ -413,58 +461,41 @@ static inline bool is_first_pending_job_submitting(struct amdxdna_ctx *ctx)
 
 static void job_worker(struct work_struct *work)
 {
-	struct amdxdna_ctx_priv *priv;
+	struct amdxdna_ctx_priv *priv = container_of(work, struct amdxdna_ctx_priv, job_work);
+	struct amdxdna_ctx *ctx = priv->ctx;
 	struct amdxdna_sched_job *job;
-	struct amdxdna_dev *xdna;
-	struct amdxdna_ctx *ctx;
-
-	priv = container_of(work, struct amdxdna_ctx_priv, job_work);
-	ctx = priv->ctx;
-	xdna = ctx->client->xdna;
 
 	while (!!(job = next_running_job(ctx))) {
-		if (!priv->job_aborting)
-			wait_till_job_done(job);
+		wait_till_job_done(job);
 		trace_amdxdna_debug_point(ctx->name, job->seq, "job complete");
 
 		if (get_read_index(ctx) > job->seq) {
 			/* Job is completed (be it success or failure) normally by CERT. */
 			job_complete(job);
-		} else if (priv->job_aborting) {
-			/* Mark job as aborted following a timeout. */
-			job_abort(job);
-		} else {
-			/* Ctx has just failed, timeout this one. */
+		} else if (ctx->priv->cached_health_valid) {
+			/* CERT did not respond, timeout this one. */
 			job_timeout(job);
-			/* Abort the rest. */
-			priv->job_aborting = true;
+		} else {
+			/* Ctx is destroyed or previous cmd has timed out, abort job. */
+			job_abort(job);
 		}
 		ctx->completed++;
 	}
-	if (!priv->job_aborting)
-		return;
+}
 
-	/*
-	 * In case we need to abort jobs, after aborting all jobs in
-	 * running queue, we also need to check if the first pending
-	 * job should be aborted, if it is partially submitted already.
-	 * The abort is completed when running queue is empty and first
-	 * pending job has not started submitting.
-	 */
-	if (!is_first_pending_job_submitting(ctx)) {
-		priv->job_aborting = false;
-
-		/* TODO: we should recover the ctx in the async error handler. */
-		*priv->umq_read_index = *priv->umq_write_index = priv->write_index;
-		priv->status = CTX_STATE_CONNECTED;
-		/*
-		 * Notify user about aborted/timeout cmds.
-		 * CERT did not get a chance to do so.
-		 */
-		wake_up_all(&priv->cert_comp->waitq);
-		/* New job can be submitted. */
-		wake_up_all(&ctx->priv->job_list_wq);
-	}
+/*
+ * Cleanup pending jobs which will also make HSA queue empty.
+ */
+void aie4_ctx_cleanup_pending_jobs(struct amdxdna_ctx *ctx)
+{
+	/* Can't really cleanup if jobs can still be submitted and completed by CERT. */
+	drm_WARN_ON(&ctx->client->xdna->ddev, ctx->priv->status == CTX_STATE_CONNECTED);
+	/* Make sure no job is till being submitted. */
+	wait_event(ctx->priv->job_list_wq, !is_first_pending_job_submitting(ctx));
+	/* Start job work to cleanup all pending jobs. */
+	queue_work(ctx->priv->job_work_q, &ctx->priv->job_work);
+	/* Wait for all pending jobs to be aborted by job_work. */
+	flush_work(&ctx->priv->job_work);
 }
 
 int aie4_ctx_init(struct amdxdna_ctx *ctx)
@@ -531,22 +562,6 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = ctx->priv;
 
-	/*
-	 * TODO: this is temp hack. The hwctx should be destroyed on device
-	 * before job_worker can be stopped. Otherwise, it is not safe to
-	 * start releasing host data structure when it is still shared w/
-	 * device. We have to apply this hack since, today,
-	 * aie4_release_resource(ctx) also releases col_event which is used
-	 * by job_worker, so...
-	 */
-	priv->status = CTX_STATE_DISCONNECTED;
-	wake_up_all(&priv->cert_comp->waitq);
-	cancel_work_sync(&priv->job_work);
-	destroy_workqueue(priv->job_work_q);
-
-	kfree(priv->cached_health_report);
-	priv->cached_health_report = NULL;
-	priv->cached_health_valid = false;
 	/* only access hardware if device is active */
 	if (!amdxdna_pm_resume_get(xdna)) {
 		/* resolver to call unload->aie4_destroy_context */
@@ -554,6 +569,9 @@ void aie4_ctx_fini(struct amdxdna_ctx *ctx)
 		amdxdna_pm_suspend_put(xdna);
 	}
 
+	aie4_ctx_cleanup_pending_jobs(ctx);
+	cancel_work_sync(&priv->job_work);
+	destroy_workqueue(priv->job_work_q);
 	aie4_ctx_col_list_fini(ctx);
 	aie4_ctx_umq_fini(ctx);
 	kfree(ctx->priv);
@@ -790,7 +808,6 @@ done:
 int aie4_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq)
 {
-	struct dma_fence_chain *chain = dma_fence_chain_alloc();
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct ww_acquire_ctx acquire_ctx;
@@ -799,9 +816,6 @@ int aie4_cmd_submit(struct amdxdna_sched_job *job,
 	int ret;
 
 	XDNA_DBG(xdna, "ctx %s job 0x%llx received", ctx->name, (u64)job);
-
-	if (!chain)
-		return -ENOMEM;
 
 	enqueue_pending_job(job);
 	/*
@@ -866,7 +880,6 @@ fail_mmget:
 fail_wait_till_1st:
 	kref_put(&job->refcnt, job_release);
 	cancel_pending_job(job);
-	dma_fence_chain_free(chain);
 	return ret;
 }
 
@@ -876,10 +889,7 @@ void aie4_ctx_suspend(struct amdxdna_ctx *ctx, bool wait)
 	struct amdxdna_dev_hdl *ndev = ctx->client->xdna->dev_handle;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
-
 	aie4_destroy_context(ndev, ctx, 1);
-
-	ctx->priv->status = CTX_STATE_DISCONNECTED;
 }
 
 int aie4_ctx_resume(struct amdxdna_ctx *ctx)
@@ -897,35 +907,33 @@ int aie4_ctx_resume(struct amdxdna_ctx *ctx)
 
 	/* recreate existing ctx */
 	ret = aie4_create_context(xdna->dev_handle, ctx);
-	if (!ret)
-		ctx->priv->status = CTX_STATE_CONNECTED;
-	else
+	if (ret) {
 		XDNA_WARN(xdna, "Failed to resume %s status 0x%x ret %d",
 			  ctx->name, ctx->priv->status, ret);
+	}
 	return ret;
 }
 
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 {
-	unsigned long wait_jifs = MAX_SCHEDULE_TIMEOUT;
-	struct amdxdna_ctx_priv *nctx = ctx->priv;
-	struct cert_comp *cert_comp = nctx->cert_comp;
+	unsigned long wait_jifs = timeout ? msecs_to_jiffies(timeout) : MAX_SCHEDULE_TIMEOUT;
+	struct cert_comp *cert_comp = aie4_ctx_get_cert_comp(ctx);
 	long ret = 0;
 
-	if (timeout)
-		wait_jifs = msecs_to_jiffies(timeout);
+	if (!cert_comp)
+		return -EAGAIN;
 
 	ret = wait_event_interruptible_timeout(cert_comp->waitq,
-					       (nctx->status != CTX_STATE_CONNECTED ||
-					       check_cmd_done(ctx, seq)),
+					       check_cmd_done(ctx, seq),
 					       wait_jifs);
+	aie4_ctx_put_cert_comp(cert_comp);
 	if (!ret)
 		ret = -ETIME;
-	else if (nctx->status != CTX_STATE_CONNECTED)
+	else if (ret > 0 && ctx->priv->status != CTX_STATE_CONNECTED)
 		ret = -EAGAIN; /* Ctx is not ready, come back later. */
 
 	trace_amdxdna_debug_point(ctx->name, seq, "command wait done");
-	return ret <= 0 ? ret : 0;
+	return ret < 0 ? ret : 0;
 }
 
 static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int attach)
@@ -1003,7 +1011,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		}
 
 		if (!attach) {
-			XDNA_INFO(xdna, "clear index %d logging", index);
+			XDNA_DBG(xdna, "clear index %d logging", index);
 			req.cert_logging.info[index].paddr = 0;
 			req.cert_logging.info[index].size = 0;
 			continue;

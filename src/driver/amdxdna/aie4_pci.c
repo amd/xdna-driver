@@ -49,6 +49,10 @@ static int skip_work_buffer;
 module_param(skip_work_buffer, int, 0644);
 MODULE_PARM_DESC(skip_work_buffer, "Skip MPNPU work buffer attach");
 
+static uint aie4_ctx_hysteresis_us = 1000;
+module_param(aie4_ctx_hysteresis_us, uint, 0644);
+MODULE_PARM_DESC(aie4_ctx_hysteresis_us, " Context switch hysteresis in microseconds (0 = disabled)");
+
 /*
  * This struct is the register layout.
  */
@@ -164,12 +168,12 @@ static void cert_timer(struct timer_list *t)
 	struct cert_comp *cert_comp;
 	unsigned long msix_idx;
 
-	mutex_lock(&ndev->cert_comp_xa_lock);
+	xa_lock(&ndev->cert_comp_xa);
 	xa_for_each(&ndev->cert_comp_xa, msix_idx, cert_comp) {
 		XDNA_DBG(xdna, "wake up all for msix idx %lu", msix_idx);
 		wake_up_all(&cert_comp->waitq);
 	}
-	mutex_unlock(&ndev->cert_comp_xa_lock);
+	xa_unlock(&ndev->cert_comp_xa);
 
 	mod_timer(&ndev->cert_timer, jiffies + msecs_to_jiffies(1000));
 }
@@ -319,7 +323,7 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	ret = aie4_set_ctx_hysteresis(ndev, AIE4_CTX_HYSTERESIS_US);
+	ret = aie4_set_ctx_hysteresis(ndev, aie4_ctx_hysteresis_us);
 	if (ret)
 		return ret;
 
@@ -335,6 +339,12 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	ret = aie4_check_firmware_version(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "query firmware version failed");
+		return ret;
+	}
+
+	ret = aie4_query_cert_version(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Query CERT version failed");
 		return ret;
 	}
 
@@ -492,6 +502,10 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	if (ret)
 		goto disable_irq;
 
+	ret = aie4_mgmt_fw_query(ndev);
+	if (ret)
+		goto disable_mailbox;
+
 	ret = aie4_mgmt_fw_init(ndev);
 	if (ret)
 		goto disable_mailbox;
@@ -499,10 +513,6 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	ret = aie4_pm_init(ndev);
 	if (ret)
 		goto disable_mailbox;
-
-	ret = aie4_mgmt_fw_query(ndev);
-	if (ret)
-		goto stop_pm;
 
 	ret = aie4_partition_init(ndev);
 	if (ret)
@@ -820,19 +830,21 @@ static irqreturn_t cert_comp_isr(int irq, void *p)
 	return IRQ_HANDLED;
 }
 
-struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
+static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct cert_comp *cert_comp;
+	unsigned long flags;
 	int ret = 0;
 
-	mutex_lock(&ndev->cert_comp_xa_lock);
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
+	xa_lock_irqsave(&ndev->cert_comp_xa, flags);
 	cert_comp = xa_load(&ndev->cert_comp_xa, msix_idx);
+	xa_unlock_irqrestore(&ndev->cert_comp_xa, flags);
 	if (cert_comp) {
 		kref_get(&cert_comp->kref);
-		mutex_unlock(&ndev->cert_comp_xa_lock);
 		return cert_comp;
 	}
 
@@ -866,18 +878,19 @@ struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_i
 	}
 
 skip:
-	ret = xa_err(xa_store(&ndev->cert_comp_xa, msix_idx, cert_comp, GFP_KERNEL));
+	xa_lock_irqsave(&ndev->cert_comp_xa, flags);
+	ret = xa_err(__xa_store(&ndev->cert_comp_xa, msix_idx, cert_comp, GFP_KERNEL));
 	if (ret) {
 		XDNA_ERR(xdna, "store cert_comp for msix index %d failed %d",
 			 msix_idx, ret);
 	}
+	xa_unlock_irqrestore(&ndev->cert_comp_xa, flags);
 done:
 	if (ret && cert_comp) {
 		if (cert_comp->irq >= 0)
 			free_irq(cert_comp->irq, cert_comp);
 		kfree(cert_comp);
 	}
-	mutex_unlock(&ndev->cert_comp_xa_lock);
 	return !ret ? cert_comp : NULL;
 }
 
@@ -885,16 +898,19 @@ static void cert_comp_release(struct kref *kref)
 {
 	struct cert_comp *cert_comp = container_of(kref, struct cert_comp, kref);
 	struct amdxdna_dev_hdl *ndev = cert_comp->ndev;
+	unsigned long flags;
 
-	drm_WARN_ON(&ndev->xdna->ddev, !mutex_is_locked(&ndev->cert_comp_xa_lock));
+	drm_WARN_ON(&ndev->xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
-	xa_erase(&ndev->cert_comp_xa, cert_comp->msix_idx);
+	xa_lock_irqsave(&ndev->cert_comp_xa, flags);
+	__xa_erase(&ndev->cert_comp_xa, cert_comp->msix_idx);
+	xa_unlock_irqrestore(&ndev->cert_comp_xa, flags);
 	if (cert_comp->irq >= 0)
 		free_irq(cert_comp->irq, cert_comp);
 	kfree(cert_comp);
 }
 
-void aie4_put_cert_comp(struct cert_comp *cert_comp)
+void aie4_put_cert_comp_locked(struct cert_comp *cert_comp)
 {
 	struct amdxdna_dev_hdl *ndev;
 
@@ -902,9 +918,8 @@ void aie4_put_cert_comp(struct cert_comp *cert_comp)
 		return;
 
 	ndev = cert_comp->ndev;
-	mutex_lock(&ndev->cert_comp_xa_lock);
+	drm_WARN_ON(&ndev->xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 	kref_put(&cert_comp->kref, cert_comp_release);
-	mutex_unlock(&ndev->cert_comp_xa_lock);
 }
 
 static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
@@ -924,6 +939,9 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
+
+	if (nctx->status == CTX_STATE_CONNECTED)
+		return 0;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
@@ -1000,7 +1018,6 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 
 	nctx->hw_ctx_id = resp.hw_context_id;
 	nctx->doorbell_addr = ndev->doorbell_base + resp.doorbell_offset;
-	nctx->status = CTX_STATE_CONNECTED;
 	/*
 	 * If user-mode-submission, pass doorbell offset to user via
 	 * ctx->doorbell_offset. Driver will not ring the doorbell.
@@ -1010,11 +1027,11 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	ctx->doorbell_offset = kernel_mode_submission ?
 		AMDXDNA_INVALID_DOORBELL_OFFSET : resp.doorbell_offset;
 
+	nctx->status = CTX_STATE_CONNECTED;
 	XDNA_DBG(xdna, "created hw context id %d", nctx->hw_ctx_id);
 
 	return 0;
 done:
-
 	XDNA_ERR(xdna, "failed %d", ret);
 	return ret;
 }
@@ -1022,18 +1039,27 @@ done:
 int aie4_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			 int graceful)
 {
-	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
+	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	XDNA_DBG(xdna, "hwctx id %d", ctx->priv->hw_ctx_id);
+	if (nctx->status == CTX_STATE_DISCONNECTED)
+		return 0;
 
+	XDNA_DBG(xdna, "hwctx id %d", nctx->hw_ctx_id);
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
-	aie4_put_cert_comp(nctx->cert_comp);
+	ret = aie4_msg_destroy_context(ndev, nctx->hw_ctx_id, graceful);
+	if (ret)
+		return ret;
 
-	ret = aie4_msg_destroy_context(ndev, ctx->priv->hw_ctx_id, graceful);
+	/* Make sure no one is waiting on cert completion from this ctx. */
+	nctx->status = CTX_STATE_DISCONNECTED;
+	wake_up_all(&nctx->cert_comp->waitq);
 
+	/* Release cert comp since we don't need it any more. */
+	aie4_put_cert_comp_locked(nctx->cert_comp);
+	nctx->cert_comp = NULL;
 	return ret;
 }
 
@@ -1321,7 +1347,6 @@ static void aie4_pci_fini(struct amdxdna_dev *xdna)
 
 	WARN_ON(!xa_empty(&ndev->cert_comp_xa));
 	xa_destroy(&ndev->cert_comp_xa);
-	mutex_destroy(&ndev->cert_comp_xa_lock);
 	mutex_destroy(&ndev->aie4_lock);
 }
 
@@ -1371,7 +1396,6 @@ static int aie4_pci_init(struct amdxdna_dev *xdna)
 	ndev->xdna = xdna;
 	xdna->dev_handle = ndev;
 	mutex_init(&ndev->aie4_lock);
-	mutex_init(&ndev->cert_comp_xa_lock);
 	xa_init(&ndev->cert_comp_xa);
 
 	ret = aie4_pcidev_init(ndev);
@@ -1414,7 +1438,6 @@ pcidev_fini:
 	aie4_pcidev_fini(ndev);
 pci_fini:
 	xa_destroy(&ndev->cert_comp_xa);
-	mutex_destroy(&ndev->cert_comp_xa_lock);
 	mutex_destroy(&ndev->aie4_lock);
 	return ret;
 }
