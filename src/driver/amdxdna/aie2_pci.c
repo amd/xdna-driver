@@ -583,9 +583,6 @@ skip_pasid:
 #endif
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
-	/* No cert fw for AIE2 */
-	psp_conf.certfw_size = 0;
-	psp_conf.certfw_buf = NULL;
 
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
