@@ -6,7 +6,7 @@
 #ifndef _AIE2_PCI_H_
 #define _AIE2_PCI_H_
 
-#include "drm_local/amdxdna_accel.h"
+#include "drm/amdxdna_accel.h"
 #include <linux/semaphore.h>
 
 #include "amdxdna_mailbox.h"
