@@ -12,7 +12,7 @@
 #include <linux/hmm.h>
 #include <linux/types.h>
 #include <linux/xarray.h>
-#include <trace/events/amdxdna.h>
+#include "trace/events/amdxdna.h"
 
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
