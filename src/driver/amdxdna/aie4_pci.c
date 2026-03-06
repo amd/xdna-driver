@@ -1830,6 +1830,37 @@ static int aie4_query_firmware_version(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie4_query_cert_firmware_version(struct amdxdna_client *client,
+					    struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_firmware_version version = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	char short_hash[9] = {};
+	u32 y, m, d;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
+	version.major = xdna->cert_ver.major;
+	version.minor = xdna->cert_ver.minor;
+
+	if (sscanf(xdna->cert_ver.date, "%4u-%2u-%2u", &y, &m, &d) == 3)
+		version.patch = y * 10000 + m * 100 + d;
+
+	memcpy(short_hash, xdna->cert_ver.git_hash, 8);
+	if (kstrtou32(short_hash, 16, &version.build))
+		version.build = 0;
+
+	min = min(args->buffer_size, sizeof(version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, min))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie4_get_force_preempt_state(struct amdxdna_client *client,
 					struct amdxdna_drm_get_info *args)
 {
@@ -1906,6 +1937,9 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
 		ret = aie4_query_firmware_version(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
+		ret = aie4_query_cert_firmware_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
 		ret = aie4_query_telemetry(client, args);
