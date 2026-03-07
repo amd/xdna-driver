@@ -322,6 +322,20 @@ int main(void)
 }
 EOF
 
+# Test drm_sched_start() 2-arg signature (latest upstream):
+# void drm_sched_start(struct drm_gpu_scheduler *sched, int errno);
+# Older kernels had a 1-arg version without the errno parameter.
+try_compile HAVE_2_arg_drm_sched_start << 'EOF'
+#include <drm/gpu_scheduler.h>
+int main(void)
+{
+	struct drm_gpu_scheduler *a = NULL;
+
+	drm_sched_start(a, 0);
+	return 0;
+}
+EOF
+
 # Test BIT_U64 exists
 try_compile HAVE_bit_u64 << 'EOF'
 #include <linux/bits.h>
