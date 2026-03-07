@@ -35,6 +35,7 @@ amdxdna-y := \
 	amdxdna_cma_buf.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
+	aie_psp.o \
 	aie2_smu.o \
 	aie2_psp.o \
 	aie2_ctx.o \

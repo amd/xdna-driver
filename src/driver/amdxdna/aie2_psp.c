@@ -1,48 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/bitfield.h>
 #include <linux/slab.h>
 #include <linux/iopoll.h>
 #include "aie2_pci.h"
-
 #include "amdxdna_xen.h"
-
-#define PSP_STATUS_READY	BIT(31)
-
-/* PSP commands */
-#define PSP_VALIDATE		1
-#define PSP_START		2
-#define PSP_RELEASE_TMR		3
-
-/* PSP special arguments */
-#define PSP_START_COPY_FW	1
-
-/* PSP response error code */
-#define PSP_ERROR_CANCEL	0xFFFF0002
-#define PSP_ERROR_BAD_STATE	0xFFFF0007
-
-#define PSP_FW_ALIGN		0x10000
-#define PSP_POLL_INTERVAL	20000	/* us */
-#define PSP_POLL_TIMEOUT	1000000	/* us */
-
-#define PSP_REG(p, reg) \
-	((p)->psp_regs[reg])
-
-struct psp_device {
-	struct device	  *dev;
-	struct psp_config conf;
-	u32		  fw_buf_sz;
-	u64		  fw_paddr;
-	void		  *fw_buffer;
-	dma_addr_t	  fw_dma_handle;
-	void __iomem	  *psp_regs[PSP_MAX_REGS];
-#ifdef HAVE_xen_phy_dma_ops
-	struct device	  xen_dma_dev;
-#endif
-};
 
 static inline char *psp_decode_resp(u32 resp)
 {
@@ -140,40 +105,6 @@ int aie2_psp_start(struct psp_device *psp)
 	}
 
 	return 0;
-}
-
-struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf)
-{
-	struct psp_device *psp;
-	u64 offset;
-
-	psp = devm_kzalloc(dev, sizeof(*psp), GFP_KERNEL);
-	if (!psp)
-		return NULL;
-
-	psp->dev = dev;
-	memcpy(psp->psp_regs, conf->psp_regs, sizeof(psp->psp_regs));
-
-	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN);
-	if (is_xen_initial_pvh_domain()) {
-		psp->fw_buffer = amdxdna_xen_alloc_buf_phys(psp->dev, psp->fw_buf_sz + PSP_FW_ALIGN,
-							    &psp->fw_dma_handle);
-		if (!psp->fw_buffer)
-			return NULL;
-		psp->fw_paddr = psp->fw_dma_handle;
-	} else {
-		psp->fw_buffer = devm_kmalloc(psp->dev, psp->fw_buf_sz + PSP_FW_ALIGN, GFP_KERNEL);
-		if (!psp->fw_buffer)
-			return NULL;
-
-		psp->fw_paddr = virt_to_phys(psp->fw_buffer);
-	}
-
-	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
-	psp->fw_paddr += offset;
-	memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
-
-	return psp;
 }
 
 void aie2_psp_destroy(struct device *dev, void *psp_hdl)

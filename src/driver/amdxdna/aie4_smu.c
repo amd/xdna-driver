@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026, Advanced Micro Devices, Inc.
  */
 
 #include "aie4_pci.h"
@@ -31,10 +31,10 @@ static int aie4_smu_exec(struct amdxdna_dev_hdl *ndev, u32 reg_cmd,
 	writel(0, SMU_REG(ndev, SMU_INTR_REG));
 	writel(1, SMU_REG(ndev, SMU_INTR_REG));
 
-	XDNA_DBG(ndev->xdna, "smu exec timeout %d ns", AIE4_TIMEOUT);
+	XDNA_DBG(ndev->xdna, "smu exec timeout %d ns", AIE_TIMEOUT);
 
 	ret = readx_poll_timeout(readl, SMU_REG(ndev, SMU_RESP_REG), resp,
-				 resp, AIE4_INTERVAL, AIE4_TIMEOUT);
+				 resp, AIE_INTERVAL, AIE_TIMEOUT);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "SMU cmd %d timed out", reg_cmd);
 		return ret;
