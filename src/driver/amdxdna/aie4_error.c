@@ -510,7 +510,7 @@ static void aie4_error_worker(struct work_struct *err_work)
 
 	max_err = (ASYNC_BUF_SIZE - sizeof(*info)) / sizeof(struct aie_error);
 	if (unlikely(info->err_cnt > max_err)) {
-		XDNA_WARN_ONCE(xdna, "Error count too large %d", info->err_cnt);
+		WARN_ONCE(1, "Error count too large %d\n", info->err_cnt);
 		return;
 	}
 	err_col = aie4_error_backtrack(e->ndev, info->payload, info->err_cnt);

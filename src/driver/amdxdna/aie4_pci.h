@@ -137,6 +137,7 @@ struct amdxdna_dev_hdl {
 	const struct amdxdna_dev_priv	*priv;
 	void				*xrs_hdl;
 	struct psp_device		*psp_hdl;
+	struct smu_device		*smu_hdl;
 
 	u32				partition_id;
 
@@ -212,7 +213,6 @@ int aie4_error_get_last_async(struct amdxdna_dev *xdna,
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_resume_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev);
-int aie4_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u32 ctx_id);
 int aie4_check_firmware_version(struct amdxdna_dev_hdl *ndev);
 int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
 				 struct amdxdna_mgmt_dma_hdl *dma_hdl, void *handle,
@@ -303,3 +303,4 @@ void aie4_put_cert_comp_locked(struct cert_comp *comp);
 void aie4_ctx_cleanup_pending_jobs(struct amdxdna_ctx *ctx);
 
 #endif /* _AIE4_PCI_H_ */
+
