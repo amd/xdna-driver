@@ -240,6 +240,7 @@ struct amdxdna_dev_hdl {
 	void			__iomem *smu_base;
 	void			__iomem *mbox_base;
 	struct psp_device		*psp_hdl;
+	struct smu_device		*smu_hdl;
 
 	struct xdna_mailbox_chann_info	mgmt_info;
 	u64				mgmt_fw_version;
@@ -570,3 +571,4 @@ int aie2_fw_trace_config(struct amdxdna_dev *xdna, u32 categories);
 void aie2_fw_trace_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 #endif /* _AIE2_PCI_H_ */
+
