@@ -12,7 +12,7 @@
 #include <linux/xarray.h>
 
 #define CREATE_TRACE_POINTS
-#include <trace/events/amdxdna.h>
+#include "trace/events/amdxdna.h"
 
 #include "amdxdna_mailbox.h"
 

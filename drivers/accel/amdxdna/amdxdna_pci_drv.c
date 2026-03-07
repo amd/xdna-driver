@@ -3,7 +3,7 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#include "drm_local/amdxdna_accel.h"
+#include "drm/amdxdna_accel.h"
 #include <drm/drm_accel.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_gem.h>
@@ -231,7 +231,9 @@ static const struct file_operations amdxdna_fops = {
 	.read		= drm_read,
 	.llseek		= noop_llseek,
 	.mmap		= drm_gem_mmap,
+#ifdef FOP_UNSIGNED_OFFSET
 	.fop_flags	= FOP_UNSIGNED_OFFSET,
+#endif
 };
 
 const struct drm_driver amdxdna_drm_drv = {

@@ -3,7 +3,7 @@
  * Copyright (C) 2024, Advanced Micro Devices, Inc.
  */
 
-#include "drm_local/amdxdna_accel.h"
+#include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
@@ -12,7 +12,7 @@
 #include <linux/hmm.h>
 #include <linux/types.h>
 #include <linux/xarray.h>
-#include <trace/events/amdxdna.h>
+#include "trace/events/amdxdna.h"
 
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
@@ -53,7 +53,11 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 {
 	drm_sched_stop(&hwctx->priv->sched, bad_job);
 	aie2_destroy_context(xdna->dev_handle, hwctx);
+#ifdef HAVE_2_arg_drm_sched_start
 	drm_sched_start(&hwctx->priv->sched, 0);
+#else
+	drm_sched_start(&hwctx->priv->sched);
+#endif
 }
 
 static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
@@ -712,7 +716,11 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	/* Request fw to destroy hwctx and cancel the rest pending requests */
 	drm_sched_stop(&hwctx->priv->sched, NULL);
 	aie2_release_resource(hwctx);
+#ifdef HAVE_2_arg_drm_sched_start
 	drm_sched_start(&hwctx->priv->sched, 0);
+#else
+	drm_sched_start(&hwctx->priv->sched);
+#endif
 
 	mutex_unlock(&xdna->dev_lock);
 	drm_sched_entity_destroy(&hwctx->priv->entity);
