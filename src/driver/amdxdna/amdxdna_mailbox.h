@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2022-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
-#ifndef _AIE2_MAILBOX_H_
-#define _AIE2_MAILBOX_H_
+#ifndef _AIE_MAILBOX_H_
+#define _AIE_MAILBOX_H_
 
 struct mailbox;
 struct mailbox_channel;
@@ -188,4 +188,4 @@ int xdna_mailbox_ringbuf_show(struct mailbox *mailbox,
 			      struct seq_file *m);
 #endif
 
-#endif /* _AIE2_MAILBOX_ */
+#endif /* _AIE_MAILBOX_ */

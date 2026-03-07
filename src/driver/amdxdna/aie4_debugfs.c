@@ -14,7 +14,7 @@
 #include <linux/string.h>
 
 #include "aie4_pci.h"
-#include "aie4_message.h"
+#include "aie_message.h"
 #include "aie4_msg_priv.h"
 #include "amdxdna_dpt.h"
 #include "amdxdna_mgmt.h"
@@ -84,7 +84,7 @@ static int aie4_dbgfs_entry_release(struct inode *inode, struct file *file)
 /* test mpaie echo command via mailbox */
 static int test_msg_echo_impl(struct amdxdna_dev_hdl *ndev, u32 val1, u32 val2)
 {
-	DECLARE_AIE4_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
+	DECLARE_AIE_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -92,7 +92,7 @@ static int test_msg_echo_impl(struct amdxdna_dev_hdl *ndev, u32 val1, u32 val2)
 	req.val2 = val2;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "ping fw msg sent failed, ret: %d", ret);
@@ -177,12 +177,12 @@ static int test_flr(struct amdxdna_dev_hdl *ndev)
 
 static int test_msg_identify(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_identify, AIE4_MSG_OP_IDENTIFY);
+	DECLARE_AIE_MSG(aie4_msg_identify, AIE4_MSG_OP_IDENTIFY);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "identify fw msg sent failed, ret: %d", ret);
@@ -204,12 +204,12 @@ done:
 /* test mpaie tile_info command via mailbox */
 static int test_msg_tile_info(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
+	DECLARE_AIE_MSG(aie4_msg_aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "tile info msg sent failed, ret: %d", ret);
@@ -252,12 +252,12 @@ static int test_msg_tile_info(struct amdxdna_dev_hdl *ndev)
 /* test mpaie version_info command via mailbox */
 static int test_msg_version_info(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_aie4_version_info, AIE4_MSG_OP_AIE_VERSION_INFO);
+	DECLARE_AIE_MSG(aie4_msg_aie4_version_info, AIE4_MSG_OP_AIE_VERSION_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "version info msg sent failed, ret: %d", ret);
@@ -276,7 +276,7 @@ static int test_msg_version_info(struct amdxdna_dev_hdl *ndev)
 /* test mpaie column_info command via mailbox */
 static int test_msg_column_info(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_aie4_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
+	DECLARE_AIE_MSG(aie4_msg_aie4_column_info, AIE4_MSG_OP_AIE_COLUMN_INFO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	dma_addr_t dma_addr;
 	u8 *buff_addr;
@@ -293,7 +293,7 @@ static int test_msg_column_info(struct amdxdna_dev_hdl *ndev)
 	req.aie4_col_bitmap = (u32)0;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "column info msg sent failed, ret: %d", ret);
@@ -357,7 +357,7 @@ DBGFS_FOPS_RW(telemetry_perf, aie4_telemetry_perf_show, NULL);
 /* test mpaie async_event command via mailbox */
 static int test_msg_async_event(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_async_event_config, AIE4_MSG_OP_ASYNC_EVENT_MSG);
+	DECLARE_AIE_MSG(aie4_msg_async_event_config, AIE4_MSG_OP_ASYNC_EVENT_MSG);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	u32 async_buf_size = 8192;
 	int ret;
@@ -366,7 +366,7 @@ static int test_msg_async_event(struct amdxdna_dev_hdl *ndev)
 	req.buff_size = async_buf_size;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "async event msg sent failed, ret: %d", ret);
@@ -625,7 +625,7 @@ DBGFS_FOPS_RW(dump_fw_trace_buffer, aie4_dump_fw_trace_buffer_get, NULL);
 static ssize_t aie4_keep_partition_write(struct file *file, const char __user *ptr,
 					 size_t len, loff_t *off)
 {
-	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	DECLARE_AIE_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
 	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct aie4_msg_runtime_config_keep_partitions *keep_partition;
@@ -644,7 +644,7 @@ static ssize_t aie4_keep_partition_write(struct file *file, const char __user *p
 	req.type = AIE4_RUNTIME_CONFIG_KEEP_PARTITIONS;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 
 	XDNA_INFO(xdna, "request: %d, %s",
@@ -658,7 +658,7 @@ DBGFS_FOPS_RW(keep_partition, NULL, aie4_keep_partition_write);
 static ssize_t aie4_dpm_override_write(struct file *file, const char __user *ptr,
 				       size_t len, loff_t *off)
 {
-	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	DECLARE_AIE_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
 	struct aie4_msg_runtime_config_dpm_override *dpm_override;
 	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
 	int hclk_dpm_level, aieclk_dpm_level, ret, force_dpm;
@@ -695,7 +695,7 @@ static ssize_t aie4_dpm_override_write(struct file *file, const char __user *ptr
 	msg.send_size = sizeof(req.type) + sizeof(*dpm_override);
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 
 	XDNA_INFO(xdna, "request hclk: %d request aieclk: %d, %s", hclk_dpm_level,
