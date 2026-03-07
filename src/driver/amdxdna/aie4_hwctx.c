@@ -15,7 +15,7 @@
 #endif
 
 #include "aie4_pci.h"
-#include "aie4_message.h"
+#include "aie_message.h"
 #include "aie4_solver.h"
 #include "aie4_msg_priv.h"
 #include "aie4_host_queue.h"
@@ -938,7 +938,7 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout)
 
 static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int attach)
 {
-	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	DECLARE_AIE_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
 	struct amdxdna_client *client = ctx->client;
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1037,7 +1037,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 	req.property = config_property;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 
 	XDNA_DBG(xdna, "Attach debug BO %d to %s, ret: %d", bo_hdl, ctx->name, ret);
@@ -1078,7 +1078,7 @@ int aie4_parse_priority(u32 priority)
 
 static int aie4_ctx_config_priority_band(struct amdxdna_ctx *ctx, u32 priority)
 {
-	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	DECLARE_AIE_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	int ret;
@@ -1093,7 +1093,7 @@ static int aie4_ctx_config_priority_band(struct amdxdna_ctx *ctx, u32 priority)
 	req.priority_band = priority;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 
 	return ret;
@@ -1101,7 +1101,7 @@ static int aie4_ctx_config_priority_band(struct amdxdna_ctx *ctx, u32 priority)
 
 static int aie4_ctx_config_scheduling(struct amdxdna_ctx *ctx, void *buf)
 {
-	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	DECLARE_AIE_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
 	struct amdxdna_hwctx_param_config_scheduling *scheduling = buf;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -1119,7 +1119,7 @@ static int aie4_ctx_config_scheduling(struct amdxdna_ctx *ctx, void *buf)
 	req.scheduling.realtime_band_priority_level = scheduling->realtime_band_priority_level;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 
 	return ret;
@@ -1127,7 +1127,7 @@ static int aie4_ctx_config_scheduling(struct amdxdna_ctx *ctx, void *buf)
 
 static int aie4_ctx_config_dpm(struct amdxdna_ctx *ctx, void *buf)
 {
-	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	DECLARE_AIE_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
 	struct amdxdna_hwctx_param_config_dpm *dpm = buf;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -1141,7 +1141,7 @@ static int aie4_ctx_config_dpm(struct amdxdna_ctx *ctx, void *buf)
 	req.dpm.latency_in_us = dpm->latency_in_us;
 
 	mutex_lock(&ndev->aie4_lock);
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	mutex_unlock(&ndev->aie4_lock);
 
 	return ret;

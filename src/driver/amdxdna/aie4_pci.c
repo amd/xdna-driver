@@ -14,7 +14,7 @@
 #include "drm_local/amdxdna_accel.h"
 
 #include "aie4_pci.h"
-#include "aie4_message.h"
+#include "aie_message.h"
 #include "aie2_tdr.h"
 #include "aie4_solver.h"
 #include "aie4_devel.h"
@@ -429,7 +429,7 @@ stop_smu:
 
 static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
+	DECLARE_AIE_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
@@ -448,7 +448,7 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 	req.partition_col_start = 0;
 	req.partition_col_count = 3;
 
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "partition init failed: %d", ret);
 		return ret;
@@ -462,7 +462,7 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 
 static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
+	DECLARE_AIE_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
@@ -474,7 +474,7 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 
 	req.partition_id = ndev->partition_id;
 
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	if (ret)
 		XDNA_ERR(xdna, "id %d fini failed: %d", ndev->partition_id, ret);
 	else
@@ -914,16 +914,16 @@ void aie4_put_cert_comp_locked(struct cert_comp *cert_comp)
 static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id,
 				    int graceful)
 {
-	DECLARE_AIE4_MSG(aie4_msg_destroy_hw_context, AIE4_MSG_OP_DESTROY_HW_CONTEXT);
+	DECLARE_AIE_MSG(aie4_msg_destroy_hw_context, AIE4_MSG_OP_DESTROY_HW_CONTEXT);
 
 	req.hw_context_id = hw_context_id;
 	req.graceful_flag = graceful ? 1 : 0;
-	return aie4_send_msg_wait(ndev, &msg);
+	return aie4_send_mgmt_msg_wait(ndev, &msg);
 }
 
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
-	DECLARE_AIE4_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
+	DECLARE_AIE_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
 	struct amdxdna_client *client = ctx->client;
 	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -981,7 +981,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		goto done;
 	}
 
-	ret = aie4_send_msg_wait(ndev, &msg);
+	ret = aie4_send_mgmt_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "create ctx failed: %d", ret);
 		goto done;
