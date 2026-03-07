@@ -59,8 +59,6 @@ aie4_health_get_runlist_read_idx(struct aie4_msg_app_health_report *h)
 
 #define MAX_NUM_CERTS		6
 
-#define NO_IOHUB		0
-
 #define CERTFW_MAX_SIZE		(SZ_32K + SZ_256)
 
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)

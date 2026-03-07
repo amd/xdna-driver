@@ -35,7 +35,7 @@ static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 				 FIELD_GET(PSP_STATUS_READY, ready),
 				 PSP_POLL_INTERVAL, PSP_POLL_TIMEOUT);
 	if (ret) {
-		dev_err(psp->dev, "PSP is not ready, ret 0x%x", ret);
+		drm_err(psp->ddev, "PSP is not ready, ret 0x%x", ret);
 		return ret;
 	}
 
@@ -52,13 +52,13 @@ static int psp_exec(struct psp_device *psp, u32 *reg_vals)
 				 FIELD_GET(PSP_STATUS_READY, ready),
 				 PSP_POLL_INTERVAL, PSP_POLL_TIMEOUT);
 	if (ret) {
-		dev_err(psp->dev, "PSP is not ready, ret 0x%x", ret);
+		drm_err(psp->ddev, "PSP is not ready, ret 0x%x", ret);
 		return ret;
 	}
 
 	resp_code = readl(PSP_REG(psp, PSP_RESP_REG));
 	if (resp_code) {
-		dev_err(psp->dev, "fw return error 0x%x (%s)", resp_code,
+		drm_err(psp->ddev, "fw return error 0x%x (%s)", resp_code,
 			psp_decode_resp(resp_code));
 		return -EIO;
 	}
@@ -76,9 +76,9 @@ void aie4_psp_stop(struct psp_device *psp)
 
 	ret = psp_exec(psp, reg_vals);
 	if (ret)
-		dev_err(psp->dev, "release tmr failed, ret %d", ret);
+		drm_err(psp->ddev, "release tmr failed, ret %d", ret);
 	else
-		dev_dbg(psp->dev, "release tmr successful");
+		drm_dbg(psp->ddev, "release tmr successful");
 }
 
 int aie4_psp_start(struct psp_device *psp)
@@ -94,7 +94,7 @@ int aie4_psp_start(struct psp_device *psp)
 
 	ret = psp_exec(psp, reg_vals);
 	if (ret) {
-		dev_err(psp->dev, "failed to validate fw, ret %d", ret);
+		drm_err(psp->ddev, "failed to validate fw, ret %d", ret);
 		return ret;
 	}
 
@@ -106,7 +106,7 @@ int aie4_psp_start(struct psp_device *psp)
 
 	ret = psp_exec(psp, reg_vals);
 	if (ret) {
-		dev_err(psp->dev, "failed to validate cert fw, ret %d", ret);
+		drm_err(psp->ddev, "failed to validate cert fw, ret %d", ret);
 		return ret;
 	}
 
@@ -117,10 +117,10 @@ int aie4_psp_start(struct psp_device *psp)
 
 	ret = psp_exec(psp, reg_vals);
 	if (ret) {
-		dev_err(psp->dev, "failed to start cert fw, ret %d", ret);
+		drm_err(psp->ddev, "failed to start cert fw, ret %d", ret);
 		return ret;
 	}
 
-	dev_dbg(psp->dev, "successfully download mpnpu and cert fw");
+	drm_dbg(psp->ddev, "successfully download mpnpu and cert fw");
 	return 0;
 }

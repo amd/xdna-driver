@@ -678,7 +678,7 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	psp_conf.certfw_buf = certfw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
-	ndev->psp_hdl = aiem_psp_create(xdna->ddev.dev, &psp_conf);
+	ndev->psp_hdl = aiem_psp_create(&xdna->ddev, xdna->ddev.dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
 		return -ENOMEM;
@@ -755,12 +755,11 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	for (i = 0; i < PSP_MAX_REGS; i++)
-		set_bit(PSP_REG_BAR(ndev, i), &bars);
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 	set_bit(xdna->dev_info->sram_bar, &bars);
 	if (!is_npu3_vf_dev(pdev)) {
-		set_bit(xdna->dev_info->psp_bar, &bars);
+		for (i = 0; i < PSP_MAX_REGS; i++)
+			set_bit(PSP_REG_BAR(ndev, i), &bars);
 		set_bit(xdna->dev_info->smu_bar, &bars);
 	}
 
@@ -779,32 +778,30 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
 	ndev->rbuf_base = tbl[xdna->dev_info->sram_bar];
-	ndev->psp_base = tbl[xdna->dev_info->psp_bar];
 	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->doorbell_base = tbl[xdna->dev_info->doorbell_bar];
-
-	/* Set PCI master */
-	pci_set_master(pdev);
 
 	/* Request firmware */
 	ret = aie4_request_firmware(ndev, &npufw, &certfw);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to request firmware, ret %d", ret);
-		goto clear_master;
+		return ret;
 	}
 
 	/* Prepare firmware */
 	ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to prepare firmware, ret %d", ret);
-		goto clear_master;
+		return ret;
 	}
 
 	ret = aie4_release_firmware(ndev, npufw, certfw);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to release firmware, ret %d", ret);
-		goto clear_master;
+		return ret;
 	}
+
+	pci_set_master(pdev);
 
 	/*TODO: split this to alloc and attach, same as work buffer */
 	ret = aie4_alloc_work_buffer(ndev);

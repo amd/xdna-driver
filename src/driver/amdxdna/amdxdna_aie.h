@@ -12,6 +12,8 @@
 	((_ndev)->smu_base + (_ndev)->priv->smu_regs_off[(idx)].offset); \
 })
 
+#define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
+	[reg_name] = {bar##_BAR_INDEX, (reg_addr) - bar##_BAR_BASE}
 #define SRAM_REG_OFF(ndev, idx) ((ndev)->priv->sram_offs[(idx)].offset)
 
 enum aie_smu_reg_idx {

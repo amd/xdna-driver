@@ -10,7 +10,8 @@
 #include "aie_common.h"
 #include "amdxdna_xen.h"
 
-struct psp_device *aiem_psp_create(struct device *dev, struct psp_config *conf)
+struct psp_device *aiem_psp_create(struct drm_device *ddev, struct device *dev,
+				   struct psp_config *conf)
 {
 	struct psp_device *psp;
 	u64 offset;
@@ -19,6 +20,7 @@ struct psp_device *aiem_psp_create(struct device *dev, struct psp_config *conf)
 	if (!psp)
 		return NULL;
 
+	psp->ddev = ddev;
 	psp->dev = dev;
 	memcpy(psp->psp_regs, conf->psp_regs, sizeof(psp->psp_regs));
 
