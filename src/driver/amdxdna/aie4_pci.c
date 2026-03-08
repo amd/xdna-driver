@@ -31,27 +31,31 @@
 #define AIE4_MAX_COL 128
 uint aie4_max_col = AIE4_MAX_COL;
 module_param(aie4_max_col, uint, 0600);
-MODULE_PARM_DESC(aie4_max_col, "Maximum column could be used");
+MODULE_PARM_DESC(aie4_max_col, " Maximum column could be used");
 
 int enable_aie4_polling;
 module_param(enable_aie4_polling, int, 0644);
-MODULE_PARM_DESC(enable_aie4_polling, "Enable aie4 polling mode");
+MODULE_PARM_DESC(enable_aie4_polling, " Enable aie4 polling mode");
 
 static int skip_fw_load;
 module_param(skip_fw_load, int, 0644);
-MODULE_PARM_DESC(skip_fw_load, "Skip fw load via psp");
+MODULE_PARM_DESC(skip_fw_load, " Skip fw load via psp");
 
 static int fw_reload;
 module_param(fw_reload, int, 0644);
-MODULE_PARM_DESC(fw_reload, "enforce fw reload during flr");
+MODULE_PARM_DESC(fw_reload, " Enforce fw reload during flr");
 
 static int skip_work_buffer;
 module_param(skip_work_buffer, int, 0644);
-MODULE_PARM_DESC(skip_work_buffer, "Skip MPNPU work buffer attach");
+MODULE_PARM_DESC(skip_work_buffer, " Skip MPNPU work buffer attach");
 
 static uint aie4_ctx_hysteresis_us = 1000;
 module_param(aie4_ctx_hysteresis_us, uint, 0644);
 MODULE_PARM_DESC(aie4_ctx_hysteresis_us, " Context switch hysteresis in microseconds (0 = disabled)");
+
+static int hws_debug_mode;
+module_param(hws_debug_mode, int, 0644);
+MODULE_PARM_DESC(hws_debug_mode, " Enable HWS debug mode (0 = disabled, 1 = enabled)");
 
 /*
  * This struct is the register layout.
@@ -661,7 +665,6 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct smu_config smu_conf;
 	struct aie4_psp_config psp_conf;
 	int i;
 
@@ -678,14 +681,6 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	ndev->psp_hdl = aie4_psp_create(&pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
-		return -ENOMEM;
-	}
-
-	for (i = 0; i < SMU_MAX_REGS; i++)
-		smu_conf.smu_regs[i] = ndev->smu_base + SMU_REG_OFF(ndev, i);
-	ndev->smu_hdl = aiem_smu_create(&xdna->ddev, &smu_conf);
-	if (!ndev->smu_hdl) {
-		XDNA_ERR(xdna, "failed to create smu");
 		return -ENOMEM;
 	}
 
@@ -764,8 +759,7 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	set_bit(xdna->dev_info->sram_bar, &bars);
 	if (!is_npu3_vf_dev(pdev)) {
 		set_bit(xdna->dev_info->psp_bar, &bars);
-		for (i = 0; i < SMU_MAX_REGS; i++)
-			set_bit(SMU_REG_BAR(ndev, i), &bars);
+		set_bit(xdna->dev_info->smu_bar, &bars);
 	}
 
 	if (!is_npu3_pf_dev(pdev))
@@ -1001,7 +995,14 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 
 	if (ndev->force_preempt_enabled) {
 		ret = aie4_force_preemption(ndev);
-		WARN_ONCE(ret, "Failed to config force preemption");
+		if (ret)
+			XDNA_WARN_ONCE(xdna, "Failed to config force preemption");
+	}
+
+	if (hws_debug_mode) {
+		ret = aie4_hws_debug_mode(ndev, resp.hw_context_id);
+		if (ret)
+			XDNA_WARN_ONCE(xdna, "Failed to config HWS debug mode");
 	}
 
 	nctx->cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
@@ -2726,4 +2727,3 @@ const struct amdxdna_dev_ops aie4_ops = {
 	.debugfs		= aie4_debugfs_init,
 	.sriov_configure        = aie4_sriov_configure,
 };
-
