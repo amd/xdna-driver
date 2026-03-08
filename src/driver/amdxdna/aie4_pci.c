@@ -929,9 +929,6 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	if (nctx->status == CTX_STATE_CONNECTED)
-		return 0;
-
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
 	if (ndev->dev_status <= AIE4_DEV_INIT) {
@@ -946,6 +943,9 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		XDNA_WARN(xdna, "cannot create hwctx due to NULL nctx or umq buffer");
 		return -EINVAL;
 	}
+
+	if (nctx->status == CTX_STATE_CONNECTED)
+		return 0;
 
 	req.partition_id = ndev->partition_id;
 	ctx->start_col = 0; // for now partition is always full NPU
