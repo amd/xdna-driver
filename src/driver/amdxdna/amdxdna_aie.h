@@ -1,19 +1,39 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2025-2026, Advanced Micro Devices, Inc.
+ * Copyright (C) 2025, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_AIE_H_
 #define _AMDXDNA_AIE_H_
 
-#include "aie_common.h"
-
 #define PSP_REG_BAR(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].bar_idx)
 #define PSP_REG_OFF(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].offset)
 #define SRAM_REG_OFF(ndev, idx) ((ndev)->priv->sram_offs[(idx)].offset)
 
+#define SMU_REG(ndev, idx) \
+({ \
+	typeof(ndev) _ndev = ndev; \
+	((_ndev)->smu_base + (_ndev)->priv->smu_regs_off[(idx)].offset); \
+})
+
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
 	[reg_name] = {bar##_BAR_INDEX, (reg_addr) - bar##_BAR_BASE}
+
+enum aie_smu_reg_idx {
+	SMU_CMD_REG = 0,
+	SMU_ARG_REG,
+	SMU_INTR_REG,
+	SMU_RESP_REG,
+	SMU_OUT_REG,
+	SMU_MAX_REGS /* Keep this at the end */
+};
+
+enum aie_smu_rev {
+	SMU_REVISION_NONE = 0,
+	SMU_REVISION_NPU1,
+	SMU_REVISION_NPU4,
+	SMU_REVISION_MAX
+};
 
 enum psp_reg_idx {
 	PSP_CMD_REG = 0,
@@ -104,4 +124,3 @@ struct aie_hw_ops {
 };
 
 #endif /* _AMDXDNA_AIE_H_ */
-
