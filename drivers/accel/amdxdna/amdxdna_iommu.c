@@ -45,6 +45,9 @@ int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 	if (abo->type != AMDXDNA_BO_DEV_HEAP && abo->type != AMDXDNA_BO_SHMEM)
 		return 0;
 
+	if (abo->mem.dma_addr != AMDXDNA_INVALID_ADDR)
+		return 0;
+
 	sgt = drm_gem_shmem_get_pages_sgt(&abo->base);
 	if (IS_ERR(sgt)) {
 		XDNA_ERR(xdna, "Get sgt failed, ret %ld", PTR_ERR(sgt));
