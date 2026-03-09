@@ -144,9 +144,14 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 	unsigned long order;
 	int ret;
 
-	xdna->group = iommu_group_get(xdna->ddev.dev);
-	if (!xdna->group || !force_iova)
+	if (!force_iova)
 		return 0;
+
+	xdna->group = iommu_group_get(xdna->ddev.dev);
+	if (!xdna->group) {
+		XDNA_ERR(xdna, "force_iova requested but no IOMMU group found");
+		return -ENODEV;
+	}
 
 	XDNA_WARN(xdna, "Enabled force_iova mode.");
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev,
