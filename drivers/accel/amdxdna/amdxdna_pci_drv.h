@@ -7,6 +7,7 @@
 #define _AMDXDNA_PCI_DRV_H_
 
 #include "drm/amdxdna_accel.h"
+#include <drm/drm_device.h>
 #include <drm/drm_print.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>

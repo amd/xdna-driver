@@ -6,6 +6,13 @@
 #include "drm/amdxdna_accel.h"
 #include <linux/iommu.h>
 #include <linux/iova.h>
+#ifdef HAVE_iommu_paging_domain_alloc_flags
+/* IOMMU_HWPT_ALLOC_PASID is defined in uiommufd.h */
+#include <uapi/linux/iommufd.h>
+#else
+/* used GENMASK() to define iommu iova upper limit */
+#include <linux/bits.h>
+#endif
 
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
@@ -22,7 +29,12 @@ static struct iova *amdxdna_iommu_alloc_iova(struct amdxdna_dev *xdna,
 	unsigned long shift, end;
 	struct iova *iova;
 
+#ifdef HAVE_iommu_paging_domain_alloc_flags
 	end = xdna->domain->geometry.aperture_end;
+#else
+	/* xdna PD_MODE_V2 device uses a 47-bit IOVA address space */
+	end = GENMASK(46, 0);
+#endif
 	shift = iova_shift(&xdna->iovad);
 	size = iova_align(&xdna->iovad, size);
 
@@ -154,11 +166,24 @@ int amdxdna_iommu_init(struct amdxdna_dev *xdna)
 	}
 
 	XDNA_WARN(xdna, "Enabled force_iova mode.");
+#ifdef HAVE_iommu_paging_domain_alloc_flags
 	xdna->domain = iommu_paging_domain_alloc_flags(xdna->ddev.dev,
 						       IOMMU_HWPT_ALLOC_PASID);
-	if (IS_ERR(xdna->domain)) {
+#elif defined(HAVE_iommu_paging_domain_alloc)
+	xdna->domain = iommu_paging_domain_alloc(xdna->ddev.dev);
+#else
+	xdna->domain = iommu_domain_alloc(xdna->ddev.dev->bus);
+#endif
+	/*
+	 * xdna->domain can be NULL for older kernels that don't support
+	 * iommu_paging_domain_alloc_flags
+	 */
+	if (IS_ERR_OR_NULL(xdna->domain)) {
 		XDNA_ERR(xdna, "Failed to alloc iommu domain");
-		ret = PTR_ERR(xdna->domain);
+		if (IS_ERR(xdna->domain))
+			ret = PTR_ERR(xdna->domain);
+		else
+			ret = -EINVAL;
 		goto put_group;
 	}
 
