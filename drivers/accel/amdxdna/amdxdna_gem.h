@@ -7,7 +7,7 @@
 #define _AMDXDNA_GEM_H_
 
 #include <linux/hmm.h>
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 struct amdxdna_umap {
 	struct vm_area_struct		*vma;

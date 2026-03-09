@@ -18,7 +18,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 #include "amdxdna_ubuf.h"
 
 #ifdef HAVE_6_13_MODULE_IMPORT_NS

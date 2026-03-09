@@ -6,7 +6,7 @@
 #ifndef _AMDXDNA_PM_H_
 #define _AMDXDNA_PM_H_
 
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 int amdxdna_pm_suspend(struct device *dev);
 int amdxdna_pm_resume(struct device  *dev);

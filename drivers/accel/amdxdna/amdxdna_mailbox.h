@@ -3,8 +3,8 @@
  * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _AIE2_MAILBOX_H_
-#define _AIE2_MAILBOX_H_
+#ifndef _AMDXDNA_MAILBOX_H_
+#define _AMDXDNA_MAILBOX_H_
 
 struct mailbox;
 struct mailbox_channel;
@@ -124,4 +124,4 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
 			  const struct xdna_mailbox_msg *msg, u64 tx_timeout);
 
-#endif /* _AIE2_MAILBOX_ */
+#endif /* _AMDXDNA_MAILBOX_H_ */

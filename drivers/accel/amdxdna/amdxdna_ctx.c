@@ -16,7 +16,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 #define MAX_HWCTX_ID		255
 #define MAX_ARG_COUNT		4095
@@ -502,7 +502,6 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 		ret = -EINVAL;
 		goto unlock_srcu;
 	}
-
 
 	job->hwctx = hwctx;
 	job->mm = current->mm;
