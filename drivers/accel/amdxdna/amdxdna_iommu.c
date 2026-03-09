@@ -189,8 +189,11 @@ void amdxdna_iommu_fini(struct amdxdna_dev *xdna)
 		put_iova_domain(&xdna->iovad);
 		iova_cache_put();
 		iommu_domain_free(xdna->domain);
+		xdna->domain = NULL;
 	}
 
-	if (xdna->group)
+	if (xdna->group) {
 		iommu_group_put(xdna->group);
+		xdna->group = NULL;
+	}
 }
