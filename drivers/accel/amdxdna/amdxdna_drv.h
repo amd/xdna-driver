@@ -57,10 +57,10 @@ struct amdxdna_sched_job;
 #define AMDXDNA_DRIVER_MAJOR            0
 #define AMDXDNA_DRIVER_MINOR            6
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
-MODULE_VERSION("0.1");
-MODULE_DESCRIPTION("amdxdna driver");
+#define AMDXDNA_MODULE_LICENSE		"GPL"
+#define AMDXDNA_MODULE_AUTHOR		"XRT Team <runtimeca39d@amd.com>"
+#define AMDXDNA_MODULE_VERSION		"0.1"
+#define AMDXDNA_MODULE_DESCRIPTION	"amdxdna driver"
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks

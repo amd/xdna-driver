@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
- *
- * Placeholder for AMD XDNA VE2 AUX/Device Tree based driver.
- * Parallel to amdxdna_pci_drv.c (PCI-based Ryzen/AIE2 driver).
- * Full AUX probe/remove and DRM accel integration to be added later.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/auxiliary_bus.h>
 #include <linux/module.h>
+
+#include "amdxdna_drv.h"
 
 #define AMDXDNA_VE2_AUX_NAME	"amdxdna_ve2"
 
@@ -23,7 +21,7 @@ static int amdxdna_ve2_aux_probe(struct auxiliary_device *auxdev,
 				 const struct auxiliary_device_id *id)
 {
 	/* Placeholder: full VE2 DRM accel device init to be implemented */
-	return 0;
+	return -ENODEV;
 }
 
 static void amdxdna_ve2_aux_remove(struct auxiliary_device *auxdev)
@@ -39,3 +37,8 @@ static struct auxiliary_driver amdxdna_ve2_aux_driver = {
 };
 
 module_auxiliary_driver(amdxdna_ve2_aux_driver);
+
+MODULE_LICENSE(AMDXDNA_MODULE_LICENSE);
+MODULE_AUTHOR(AMDXDNA_MODULE_AUTHOR);
+MODULE_VERSION(AMDXDNA_MODULE_VERSION);
+MODULE_DESCRIPTION(AMDXDNA_MODULE_DESCRIPTION);

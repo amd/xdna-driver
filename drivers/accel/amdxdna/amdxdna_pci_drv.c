@@ -12,6 +12,7 @@
 #include <drm/drm_managed.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/iommu.h>
+#include <linux/module.h>
 #include <linux/pci.h>
 
 #include "amdxdna_ctx.h"
@@ -51,7 +52,6 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x17f0, 0x20, &dev_npu6_info },
 	{0}
 };
-
 
 static const struct amdxdna_dev_info *
 amdxdna_get_dev_info(struct pci_dev *pdev)
@@ -105,3 +105,8 @@ static struct pci_driver amdxdna_pci_driver = {
 };
 
 module_pci_driver(amdxdna_pci_driver);
+
+MODULE_LICENSE(AMDXDNA_MODULE_LICENSE);
+MODULE_AUTHOR(AMDXDNA_MODULE_AUTHOR);
+MODULE_VERSION(AMDXDNA_MODULE_VERSION);
+MODULE_DESCRIPTION(AMDXDNA_MODULE_DESCRIPTION);

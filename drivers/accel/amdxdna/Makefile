@@ -5,7 +5,7 @@
 
 KERNEL_VER ?= $(shell uname -r)
 KERNEL_SRC ?= /lib/modules/$(KERNEL_VER)/build
-XDNA_BUS_TYPE := aux
+XDNA_BUS_TYPE := pci
 
 ifeq ($(XDNA_BUS_TYPE), pci)
 PCI = y
