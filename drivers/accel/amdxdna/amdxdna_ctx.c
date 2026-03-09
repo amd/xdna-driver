@@ -16,7 +16,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
-#include "amdxdna_pci_drv.h"
+#include "amdxdna_drv.h"
 
 #define MAX_HWCTX_ID		255
 #define MAX_ARG_COUNT		4095
