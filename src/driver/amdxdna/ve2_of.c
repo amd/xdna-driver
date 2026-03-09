@@ -21,11 +21,13 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	char *buf;
 	int ret;
 
+	XDNA_DBG(xdna, ">>> ENTER");
 	XDNA_DBG(xdna, "Loading firmware: %s", xdna_hdl->priv->fw_path);
 
 	ret = request_firmware(&fw, xdna_hdl->priv->fw_path, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "request fw %s failed %d", xdna_hdl->priv->fw_path, ret);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENODEV);
 		return -ENODEV;
 	}
 
@@ -34,6 +36,7 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	buf = kmalloc(fw->size, GFP_KERNEL);
 	if (!buf) {
 		release_firmware(fw);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENOMEM);
 		return -ENOMEM;
 	}
 	memcpy(buf, fw->data, fw->size);
@@ -44,6 +47,7 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	if (IS_ERR(xaie_dev)) {
 		ret = PTR_ERR(xaie_dev);
 		XDNA_ERR(xdna, "aie partition request failed: %d", ret);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 		goto out;
 	}
 	XDNA_DBG(xdna, "aie partition request succeeded: 0x%x", request.partition_id);
@@ -57,12 +61,14 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	ret = ve2_partition_initialize(xaie_dev, &args);
 	if (ret) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 		goto release;
 	}
 
 	ret = aie_load_cert_broadcast(xaie_dev, buf);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load cert broadcast failed %d", ret);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 		goto teardown;
 	}
 	XDNA_INFO(xdna, "aie load cert broadcast complete");
@@ -70,6 +76,7 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	ret = ve2_store_firmware_version(&xdna_hdl->fw_version, xaie_dev);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "cert status read failed with err %d", ret);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 		goto teardown;
 	}
 	XDNA_INFO(xdna, "CERT major: %d\n", xdna_hdl->fw_version.major);
@@ -83,6 +90,7 @@ release:
 	aie_partition_release(xaie_dev);
 out:
 	kfree(buf);
+	XDNA_DBG(xdna, "<<< EXIT (ret=%d): fw_path=%s", ret, xdna_hdl->priv->fw_path);
 	return ret;
 }
 
@@ -343,11 +351,14 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	int ret;
 	u32 col;
 
+	XDNA_DBG(xdna, ">>> ENTER");
 	XDNA_DBG(xdna, "Initializing VE2 device");
 
 	xdna_hdl = devm_kzalloc(dev, sizeof(*xdna_hdl), GFP_KERNEL);
-	if (!xdna_hdl)
+	if (!xdna_hdl) {
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENOMEM);
 		return -ENOMEM;
+	}
 
 	xdna_hdl->xdna = xdna;
 	xdna_hdl->priv = xdna->dev_info->dev_priv;
@@ -364,9 +375,11 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	if (ret) {
 		if (ret == -ENODEV) {
 			XDNA_INFO(xdna, "AIE device not ready yet, deferring probe");
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EPROBE_DEFER);
 			return -EPROBE_DEFER;
 		}
 		XDNA_ERR(xdna, "Failed to get AIE device info, ret %d", ret);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 		return ret;
 	}
 	XDNA_INFO(xdna, "AIE device: %d columns, %d rows",
@@ -387,6 +400,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	xdna->dev_handle->xrs_hdl = xrsm_init(&xrs_cfg);
 	if (!xdna->dev_handle->xrs_hdl) {
 		XDNA_ERR(xdna, "Initialization of Resource resolver failed");
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EINVAL);
 		return -EINVAL;
 	}
 
@@ -394,6 +408,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	ret = ve2_load_fw(xdna_hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 		return ret;
 	}
 	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
@@ -403,6 +418,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 					  sizeof(*xdna_hdl->fw_slots), GFP_KERNEL);
 	if (!xdna_hdl->fw_slots) {
 		XDNA_ERR(xdna, "No memory for fw_slots array");
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENOMEM);
 		return -ENOMEM;
 	}
 
@@ -410,6 +426,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 					     sizeof(*xdna_hdl->ve2_mgmtctx), GFP_KERNEL);
 	if (!xdna_hdl->ve2_mgmtctx) {
 		XDNA_ERR(xdna, "No memory for ve2_mgmtctx array");
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENOMEM);
 		return -ENOMEM;
 	}
 
@@ -417,6 +434,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		fw_slots = devm_kzalloc(dev, sizeof(*fw_slots), GFP_KERNEL);
 		if (!fw_slots) {
 			XDNA_ERR(xdna, "No memory for fw status");
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENOMEM);
 			return -ENOMEM;
 		}
 		xdna->dev_handle->fw_slots[col] = fw_slots;
@@ -438,20 +456,21 @@ static int ve2_init(struct amdxdna_dev *xdna)
 			XDNA_DBG(xdna, "Failed to parse memory topology (err=%d)\n", ret);
 	}
 
-	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",
+	XDNA_DBG(xdna, "VE2 init complete: cols=%u, rows=%u, hwctx_limit=%u",
 		 xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows,
 		 xdna_hdl->hwctx_limit);
-
+	XDNA_DBG(xdna, "<<< EXIT (ret=0)");
 	return 0;
 }
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
-	XDNA_DBG(xdna, "VE2 device cleanup: releasing resources");
+	XDNA_DBG(xdna, ">>> ENTER");
+	XDNA_DBG(xdna, "VE2 device cleanup, releasing resources");
 
 	ve2_cma_mem_region_remove(xdna);
 
-	XDNA_DBG(xdna, "VE2 device cleanup complete");
+	XDNA_DBG(xdna, "<<< EXIT: VE2 device cleanup complete");
 }
 
 const struct amdxdna_dev_ops ve2_ops = {
