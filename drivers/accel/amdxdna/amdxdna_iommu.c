@@ -68,7 +68,14 @@ int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 
 	size = iommu_map_sgtable(xdna->domain, dma_addr, sgt,
 				 IOMMU_READ | IOMMU_WRITE);
+	if (size < 0) {
+		XDNA_ERR(xdna, "iommu_map_sgtable failed: %zd", size);
+		__free_iova(&xdna->iovad, iova);
+		return size;
+	}
+
 	if (size < abo->mem.size) {
+		iommu_unmap(xdna->domain, dma_addr, size);
 		__free_iova(&xdna->iovad, iova);
 		return -ENXIO;
 	}
@@ -113,10 +120,12 @@ void *amdxdna_iommu_alloc(struct amdxdna_dev *xdna, size_t size, dma_addr_t *dma
 			iova_align(&xdna->iovad, size),
 			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
 	if (ret)
-		goto free_iova;
+		goto free_pages;
 
 	return cpu_addr;
 
+free_pages:
+	free_pages((unsigned long)cpu_addr, get_order(size));
 free_iova:
 	__free_iova(&xdna->iovad, iova);
 	return ERR_PTR(ret);
