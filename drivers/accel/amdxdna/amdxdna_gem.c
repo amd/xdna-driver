@@ -487,6 +487,9 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	if (abo->type == AMDXDNA_BO_DEV_HEAP)
 		drm_mm_takedown(&abo->mm);
 
+	if (amdxdna_iova_on(xdna))
+		amdxdna_iommu_unmap_bo(xdna, abo);
+
 	amdxdna_gem_obj_vunmap(abo);
 	mutex_destroy(&abo->lock);
 
@@ -522,16 +525,10 @@ static int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *fi
 
 static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
 	guard(mutex)(&abo->lock);
 	abo->ref--;
-	if (abo->ref)
-		return;
-
-	if (amdxdna_iova_on(xdna))
-		amdxdna_iommu_unmap_bo(xdna, abo);
 }
 
 static const struct drm_gem_object_funcs amdxdna_gem_dev_obj_funcs = {
