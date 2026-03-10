@@ -464,11 +464,7 @@ struct mailbox_channel *xdna_mailbox_alloc_channel(struct mailbox *mb)
 {
 	struct mailbox_channel *mb_chann;
 
-#ifdef HAVE_7_0_kmalloc_ops
 	mb_chann = kzalloc_obj(*mb_chann);
-#else
-	mb_chann = kzalloc(sizeof(*mb_chann), GFP_KERNEL);
-#endif
 	if (!mb_chann)
 		return NULL;
 

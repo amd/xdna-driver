@@ -71,11 +71,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_client *client;
 	int ret;
 
-#ifdef HAVE_7_0_kmalloc_ops
 	client = kzalloc_obj(*client);
-#else
-	client = kzalloc(sizeof(*client), GFP_KERNEL);
-#endif
 	if (!client)
 		return -ENOMEM;
 

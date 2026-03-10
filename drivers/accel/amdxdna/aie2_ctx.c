@@ -444,7 +444,7 @@ static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 		return -EINVAL;
 	}
 
-	hwctx->col_list = kmalloc_array(entries, sizeof(*hwctx->col_list), GFP_KERNEL);
+	hwctx->col_list = kmalloc_objs(*hwctx->col_list, entries);
 	if (!hwctx->col_list)
 		return -ENOMEM;
 
@@ -470,11 +470,7 @@ static int aie2_alloc_resource(struct amdxdna_hwctx *hwctx)
 		return aie2_create_context(xdna->dev_handle, hwctx);
 	}
 
-#ifdef HAVE_7_0_kmalloc_ops
 	xrs_req = kzalloc_obj(*xrs_req);
-#else
-	xrs_req = kzalloc(sizeof(*xrs_req), GFP_KERNEL);
-#endif
 	if (!xrs_req)
 		return -ENOMEM;
 
@@ -571,11 +567,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_gem_obj *heap;
 	int i, ret;
 
-#ifdef HAVE_7_0_kmalloc_ops
 	priv = kzalloc_obj(*hwctx->priv);
-#else
-	priv = kzalloc(sizeof(*hwctx->priv), GFP_KERNEL);
-#endif
 	if (!priv)
 		return -ENOMEM;
 	hwctx->priv = priv;
