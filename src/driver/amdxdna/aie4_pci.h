@@ -57,11 +57,7 @@ aie4_health_get_runlist_read_idx(struct aie4_msg_app_health_report *h)
 }
 
 #define AIE4_INTERVAL		20000	/* us */
-#ifdef AMDXDNA_DEVEL
-#define AIE4_TIMEOUT		(1000000 * 1000) /* us */
-#else
 #define AIE4_TIMEOUT		1000000	/* us */
-#endif
 
 #define MAX_NUM_CERTS		6
 
@@ -209,6 +205,7 @@ int aie4_error_get_last_async(struct amdxdna_dev *xdna,
 			      void *errors);
 
 /* aie4_message.c*/
+int aie4_send_mgmt_msg_wait(struct amdxdna_dev_hdl *ndev, struct xdna_mailbox_msg *msg);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_resume_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev);
