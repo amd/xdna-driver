@@ -17,10 +17,10 @@ static int amdxdna_pmops_suspend(struct device *dev)
 	struct amdxdna_dev *xdna = to_xdna_dev(dev_get_drvdata(dev));
 	int ret;
 
-	ret = amdxdna_dpt_suspend(xdna);
 	if (xdna->dev_info->ops->suspend)
 		xdna->dev_info->ops->suspend(xdna);
 
+	ret = amdxdna_dpt_suspend(xdna);
 	XDNA_DBG(xdna, "Runtime suspend done");
 	return ret;
 }
