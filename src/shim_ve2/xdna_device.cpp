@@ -335,26 +335,16 @@ struct partition_info
     return output;
   }
 };
-//Implement uc firmware verison query
-struct firmware_version
-{
-  using result_type = query::firmware_version::result_type;
 
-  static std::any
-  get(const xrt_core::device* /*device*/, key_type key)
-  {
-    throw xrt_core::query::no_such_key(key, "Not implemented");
-  }
+// Implement cert_firmware_version query
+struct cert_firmware_version
+{
+  using result_type = query::cert_firmware_version::result_type;
 
   static result_type
-  get(const xrt_core::device* device, key_type,
-		  const std::any& req_type)
+  get(const xrt_core::device* device, key_type)
   {
-    const auto fw_type = std::any_cast<query::firmware_version::firmware_type>(req_type);
-    if (fw_type != query::firmware_version::firmware_type::uc_firmware)
-       throw std::runtime_error("NPU firmware query not supported in this context");
-
-    amdxdna_drm_query_ve2_firmware_version fw_version{};
+    amdxdna_drm_query_firmware_version fw_version{};
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION,
       .buffer_size = sizeof(fw_version),
@@ -365,12 +355,10 @@ struct firmware_version
     edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
 
     result_type output;
-    output.major = static_cast<int>(fw_version.major);
-    output.minor = static_cast<int>(fw_version.minor);
-    output.patch = 0;
-    output.build = 0;
-    output.git_hash = std::string(reinterpret_cast<char*>(fw_version.git_hash));
-    output.date = std::string(reinterpret_cast<char*>(fw_version.date));
+    output.major = fw_version.major;
+    output.minor = fw_version.minor;
+    output.hotfix = fw_version.patch;
+    output.build = fw_version.build;
 
     return output;
   }
@@ -1008,7 +996,7 @@ initialize_query_table()
   emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func0_request<query::xocl_errors,             xocl_errors>();
   emplace_func0_request<query::clock_freq_topology_raw, clock_topology>();
-  emplace_func1_request<query::firmware_version,        firmware_version>();
+  emplace_func0_request<query::cert_firmware_version,   cert_firmware_version>();
   emplace_func1_request<query::aie_read,                aie_read>();
   emplace_func1_request<query::aie_write,               aie_write>();
   emplace_func1_request<query::aie_get_freq,            aie_get_freq>();

@@ -20,6 +20,8 @@ struct ve2_firmware_version {
 	u8 minor;
 	char git_hash[VE2_FW_HASH_STRING_LENGTH];
 	char date[VE2_FW_DATE_STRING_LENGTH];
+	u8 hotfix;
+	u8 build;
 };
 
 struct ve2_firmware_status {
