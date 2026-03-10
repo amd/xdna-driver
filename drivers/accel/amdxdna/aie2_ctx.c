@@ -183,7 +183,6 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	trace_xdna_job(&job->base, job->hwctx->name, "signaling fence",
 		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
 
-	amdxdna_pm_suspend_put(job->hwctx->client->xdna);
 	aie2_tdr_signal(job->hwctx->client->xdna->dev_handle);
 	job->hwctx->priv->completed++;
 	dma_fence_signal(fence);
@@ -436,19 +435,11 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	trace_xdna_job(sched_job, hwctx->name, "job run",
 		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
 
-	ret = amdxdna_pm_resume_get(hwctx->client->xdna);
-	if (ret)
+	if (!hwctx->priv->mbox_chann)
 		return NULL;
 
-	if (!hwctx->priv->mbox_chann) {
-		amdxdna_pm_suspend_put(hwctx->client->xdna);
-		return NULL;
-	}
-
-	if (!mmget_not_zero(job->mm)) {
-		amdxdna_pm_suspend_put(hwctx->client->xdna);
+	if (!mmget_not_zero(job->mm))
 		return ERR_PTR(-ESRCH);
-	}
 
 	kref_get(&job->refcnt);
 	fence = dma_fence_get(job->fence);
@@ -481,7 +472,6 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 
 out:
 	if (ret) {
-		amdxdna_pm_suspend_put(hwctx->client->xdna);
 		dma_fence_put(job->fence);
 		aie2_job_put(job);
 		mmput(job->mm);
