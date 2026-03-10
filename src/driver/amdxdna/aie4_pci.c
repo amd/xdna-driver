@@ -665,6 +665,7 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct smu_config smu_conf;
 	struct aie4_psp_config psp_conf;
 	int i;
 
@@ -681,6 +682,14 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	ndev->psp_hdl = aie4_psp_create(&pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < SMU_MAX_REGS; i++)
+		smu_conf.smu_regs[i] = ndev->smu_base + SMU_REG_OFF(ndev, i);
+	ndev->smu_hdl = aiem_smu_create(&xdna->ddev, &smu_conf);
+	if (!ndev->smu_hdl) {
+		XDNA_ERR(xdna, "failed to create smu");
 		return -ENOMEM;
 	}
 
@@ -759,7 +768,8 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	set_bit(xdna->dev_info->sram_bar, &bars);
 	if (!is_npu3_vf_dev(pdev)) {
 		set_bit(xdna->dev_info->psp_bar, &bars);
-		set_bit(xdna->dev_info->smu_bar, &bars);
+		for (i = 0; i < SMU_MAX_REGS; i++)
+			set_bit(SMU_REG_BAR(ndev, i), &bars);
 	}
 
 	if (!is_npu3_pf_dev(pdev))
