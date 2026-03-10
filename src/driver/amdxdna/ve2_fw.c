@@ -33,10 +33,13 @@ int ve2_store_firmware_version(struct ve2_firmware_version *c_version, struct de
 	c_version->git_hash[VE2_FW_HASH_STRING_LENGTH - 1] = '\0';
 	strscpy(c_version->date, version->date, VE2_FW_DATE_STRING_LENGTH);
 	c_version->date[VE2_FW_DATE_STRING_LENGTH - 1] = '\0';
+	c_version->hotfix = version->hotfix;
+	c_version->build = version->build;
 	kfree(version);
 
-	pr_debug("Firmware version: %u.%u, hash=%s, date=%s\n",
-		 c_version->major, c_version->minor, c_version->git_hash, c_version->date);
+	pr_debug("Firmware version: %u.%u.%u.%u, hash=%s, date=%s\n",
+		 c_version->major, c_version->minor, c_version->hotfix, c_version->build,
+		 c_version->git_hash, c_version->date);
 
 	return 0;
 }
