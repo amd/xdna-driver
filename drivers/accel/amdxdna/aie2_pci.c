@@ -804,7 +804,7 @@ static int aie2_get_clock_metadata(struct amdxdna_client *client,
 static int aie2_get_sensors(struct amdxdna_client *client,
 			    struct amdxdna_drm_get_info *args)
 {
-#ifdef HAVE_amd_pmf_get_npu_data
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_drm_query_sensor sensor = {};
 	struct amd_pmf_npu_metrics npu_metrics;
