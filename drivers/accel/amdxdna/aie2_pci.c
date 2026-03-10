@@ -808,14 +808,8 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_drm_query_sensor sensor = {};
 	struct amd_pmf_npu_metrics npu_metrics;
-	u32 sensors_count, util_count, i;
+	u32 sensors_count = 0, i;
 	int ret;
-
-	util_count = min_t(u32, ndev->total_col, 8);
-	sensors_count = 1 + util_count;
-
-	if (args->buffer_size < sensors_count * sizeof(sensor))
-		return -EINVAL;
 
 	ret = AIE2_GET_PMF_NPU_METRICS(&npu_metrics);
 	if (ret)
@@ -830,7 +824,11 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &sensor, sizeof(sensor)))
 		return -EFAULT;
 
-	for (i = 0; i < util_count; i++) {
+	sensors_count++;
+	if (args->buffer_size <= sensors_count * sizeof(sensor))
+		goto out;
+
+	for (i = 0; i < min_t(u32, ndev->total_col, 8); i++) {
 		memset(&sensor, 0, sizeof(sensor));
 		sensor.input = npu_metrics.npu_busy[i];
 		sensor.type = AMDXDNA_SENSOR_TYPE_COLUMN_UTILIZATION;
@@ -838,11 +836,16 @@ static int aie2_get_sensors(struct amdxdna_client *client,
 		scnprintf(sensor.label, sizeof(sensor.label), "Column %d Utilization", i);
 		scnprintf(sensor.units, sizeof(sensor.units), "%%");
 
-		if (copy_to_user(u64_to_user_ptr(args->buffer) + (i + 1) * sizeof(sensor),
+		if (copy_to_user(u64_to_user_ptr(args->buffer) + sensors_count * sizeof(sensor),
 				 &sensor, sizeof(sensor)))
 			return -EFAULT;
+
+		sensors_count++;
+		if (args->buffer_size <= sensors_count * sizeof(sensor))
+			goto out;
 	}
 
+out:
 	args->buffer_size = sensors_count * sizeof(sensor);
 
 	return 0;
