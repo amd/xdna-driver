@@ -21,6 +21,9 @@ public:
   hwctx_umq(const device& device, uint32_t partition_size);
   ~hwctx_umq();
 
+  void
+  update_qos(const qos_type& qos) override;
+
 private:
   const pdev& m_pdev;
   uint32_t m_col_cnt = 0;

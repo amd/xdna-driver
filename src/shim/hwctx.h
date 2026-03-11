@@ -96,16 +96,18 @@ public:
   uint32_t
   get_syncobj() const;
 
-private:
+protected:
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
+  amdxdna_qos_info m_qos = {};
+
+private:
   std::vector<std::string> m_cu_names;
   uint32_t m_doorbell = 0;
   uint32_t m_syncobj = AMDXDNA_INVALID_FENCE_HANDLE;
   uint32_t m_col_cnt = 0;
   uint32_t m_ops_per_cycle = 0;
   std::unique_ptr<hwq> m_q;
-  amdxdna_qos_info m_qos = {};
 
   void
   create_ctx_on_device();

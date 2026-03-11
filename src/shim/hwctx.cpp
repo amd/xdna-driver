@@ -248,9 +248,11 @@ init_qos_info(const qos_type& qos)
       m_qos.gops = value;
     else if (key == "fps")
       m_qos.fps = value;
-    else if (key == "dma_bandwidth")
+    else if (key == "dma_bandwidth" || key == "data_movement")
       m_qos.dma_bandwidth = value;
     else if (key == "latency")
+      m_qos.latency = value * 1000u;  /* ms -> us (match Windows) */
+    else if (key == "latency_in_us")
       m_qos.latency = value;
     else if (key == "frame_execution_time")
       m_qos.frame_exec_time = value;
