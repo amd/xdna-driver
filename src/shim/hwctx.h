@@ -96,6 +96,10 @@ public:
   uint32_t
   get_syncobj() const;
 
+protected:
+  const amdxdna_qos_info&
+  get_qos() const { return m_qos; }
+
 private:
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;

@@ -4,6 +4,7 @@
 #include "hwctx.h"
 #include "hwq.h"
 #include "core/common/config_reader.h"
+#include <cerrno>
 #include <filesystem>
 
 namespace shim_xdna {
@@ -16,6 +17,14 @@ hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
   : hwctx(device, qos, xclbin, std::make_unique<hwq_umq>(device, total_queue_slots))
   , m_pdev(device.get_pdev())
 {
+  try {
+    config_ctx_dpm_arg dpm_arg = { .ctx_handle = get_slotidx(), .qos = get_qos() };
+    m_pdev.drv_ioctl(drv_ioctl_cmd::config_ctx_dpm, &dpm_arg);
+  } catch (const xrt_core::system_error& e) {
+    if (e.get_code() != EOPNOTSUPP)
+      throw;
+  }
+
   shim_debug("Created UMQ HW context (%d)", get_slotidx());
   xclbin_parser xp(xclbin);
   m_col_cnt = xp.get_column_cnt();
@@ -34,6 +43,13 @@ hwctx_umq(const device& device, uint32_t partition_size)
   , m_pdev(device.get_pdev())
 {
   m_col_cnt = partition_size;
+  try {
+    config_ctx_dpm_arg dpm_arg = { .ctx_handle = get_slotidx(), .qos = get_qos() };
+    m_pdev.drv_ioctl(drv_ioctl_cmd::config_ctx_dpm, &dpm_arg);
+  } catch (const xrt_core::system_error& e) {
+    if (e.get_code() != EOPNOTSUPP)
+      throw;
+  }
 
   auto path = xrt_core::config::get_dtrace_control_file_path();
   if (std::filesystem::exists(path))

@@ -974,7 +974,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	req.hsa_addr_high = upper_32_bits(amdxdna_gem_dev_addr(nctx->umq_bo));
 	req.hsa_addr_low = lower_32_bits(amdxdna_gem_dev_addr(nctx->umq_bo));
 
-	req.priority_band = ctx->qos.priority;
+	req.priority_band = aie4_parse_priority_to_dev(ctx->qos.priority);
 
 	XDNA_DBG(xdna, "set pasid raw 0x%x", req.pasid.raw);
 
@@ -2055,7 +2055,7 @@ static int aie4_get_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].preemptions = 0;
 			tmp[hw_i].errors = 0;
 			tmp[hw_i].pasid = tmp_client->pasid;
-			tmp[hw_i].priority = aie4_parse_priority(ctx->qos.priority);
+			tmp[hw_i].priority = ctx->qos.priority;
 			tmp[hw_i].gops = ctx->qos.gops;
 			tmp[hw_i].fps = ctx->qos.fps;
 			tmp[hw_i].dma_bandwidth = ctx->qos.dma_bandwidth;
