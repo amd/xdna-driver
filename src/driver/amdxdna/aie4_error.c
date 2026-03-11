@@ -309,8 +309,8 @@ static void aie4_ctx_reset(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
 	mutex_unlock(&xdna->dev_lock);
 }
 
-static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id,
-					 struct aie4_msg_app_health_report *health)
+static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev,
+					 struct aie4_async_ctx_error *ctx_err)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_ctx_priv *priv;
@@ -319,12 +319,14 @@ static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev, u32 hw_ct
 
 	mutex_lock(&xdna->dev_lock);
 
-	ctx = hw_ctx_id2ctx(ndev, hw_ctx_id, &idx);
+	ctx = hw_ctx_id2ctx(ndev, ctx_err->ctx_id, &idx);
 	if (ctx) {
 		priv = ctx->priv;
-		memcpy(&priv->cached_health_report, health,
-		       sizeof(struct aie4_msg_app_health_report));
-		priv->cached_health_valid = true;
+		memcpy(&priv->cached_ctx_error, ctx_err, sizeof(*ctx_err));
+		/* Ensure cached_ctx_error is visible before valid flag; pairs with
+		 * smp_load_acquire in aie4_fill_health_data.
+		 */
+		smp_store_release(&priv->cached_ctx_error_valid, true);
 		srcu_read_unlock(&ctx->client->ctx_srcu, idx);
 	}
 
@@ -369,7 +371,7 @@ static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 	XDNA_ERR(xdna, "Health: ver %u.%u ctx_status=%u num_uc=%u runlist_read_idx=%u",
 		 health->major_version, health->minor_version,
 		 aie4_health_get_ctx_status(health), aie4_health_get_num_uc(health),
-		 aie4_health_get_runlist_read_idx(health));
+		 aie4_health_runlist_read_idx(health));
 
 	/* Log each UC's health information for debugging */
 	for (i = 0;
@@ -410,7 +412,7 @@ static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 	record->ex_err_code = ((u64)aie4_health_get_ctx_status(health) << 32) | ctx_err->ctx_id;
 	mutex_unlock(&ndev->async_errs_cache.lock);
 
-	aie4_ctx_cache_health_report(ndev, ctx_err->ctx_id, health);
+	aie4_ctx_cache_health_report(ndev, ctx_err);
 	aie4_ctx_reset(ndev, ctx_err->ctx_id);
 }
 

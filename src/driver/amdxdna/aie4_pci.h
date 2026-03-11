@@ -49,7 +49,7 @@ aie4_health_get_num_uc(struct aie4_msg_app_health_report *h)
 }
 
 static inline u32
-aie4_health_get_runlist_read_idx(struct aie4_msg_app_health_report *h)
+aie4_health_runlist_read_idx(struct aie4_msg_app_health_report *h)
 {
 	if (aie4_health_report_is_legacy(h))
 		return 0;
@@ -109,8 +109,8 @@ struct amdxdna_ctx_priv {
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
 
-	bool					cached_health_valid;
-	struct aie4_msg_app_health_report	cached_health_report;
+	bool					cached_ctx_error_valid;
+	struct aie4_async_ctx_error		cached_ctx_error;
 };
 
 enum aie4_dev_status {

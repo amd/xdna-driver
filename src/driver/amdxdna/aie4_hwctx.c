@@ -259,15 +259,25 @@ static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo,
 	size_t hdr_size;
 	u32 num_uc_copy;
 	u32 data_total;
+	size_t min_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
 
 	health_data = amdxdna_cmd_get_data(cmd_abo, &data_total);
+	if (!health_data || data_total < min_size) {
+		XDNA_WARN(ctx->client->xdna,
+			  "Health data buffer too small: data_total=%u min=%zu",
+			  data_total, min_size);
+		return;
+	}
+
 	health_data->version = AMDXDNA_CTX_HEALTH_DATA_V1;
 	health_data->npu_gen = AMDXDNA_NPU_GEN_AIE4;
 
-	/* Use health report cached when async context error was raised */
-	if (ctx->priv->cached_health_valid) {
-		report = &ctx->priv->cached_health_report;
+	/* Use async context error cached when async error was raised */
+	/* Pairs with smp_store_release in aie4_ctx_cache_health_report. */
+	if (smp_load_acquire(&ctx->priv->cached_ctx_error_valid)) {
+		report = &ctx->priv->cached_ctx_error.app_health_report;
 		health_data->aie4.ctx_state = aie4_health_get_ctx_status(report);
+		health_data->aie4.ctx_error_type = ctx->priv->cached_ctx_error.error_type;
 		hdr_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
 		num_uc_copy = 0;
 		if (data_total > hdr_size) {
@@ -280,9 +290,13 @@ static void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo,
 			}
 		}
 		health_data->aie4.num_uc = num_uc_copy;
-		ctx->priv->cached_health_valid = false;
+		/* Clear flag after payload write; release orders after our reads of
+		 * cached_ctx_error.
+		 */
+		smp_store_release(&ctx->priv->cached_ctx_error_valid, false);
 	} else {
 		health_data->aie4.ctx_state = 0;
+		health_data->aie4.ctx_error_type = 0;
 		health_data->aie4.num_uc = 0;
 	}
 }
@@ -305,8 +319,9 @@ static void job_timeout(struct amdxdna_sched_job *job)
 	}
 
 	/* Chained cmd. */
-	if (ctx->priv->cached_health_valid)
-		i = aie4_health_get_runlist_read_idx(&ctx->priv->cached_health_report);
+	/* Pairs with smp_store_release in aie4_ctx_cache_health_report. */
+	if (smp_load_acquire(&ctx->priv->cached_ctx_error_valid))
+		i = aie4_health_runlist_read_idx(&ctx->priv->cached_ctx_error.app_health_report);
 	payload = amdxdna_cmd_get_chained_payload(cmd_abo, NULL);
 	if (payload) {
 		boh = payload->data[i];
@@ -472,7 +487,8 @@ static void job_worker(struct work_struct *work)
 		if (get_read_index(ctx) > job->seq) {
 			/* Job is completed (be it success or failure) normally by CERT. */
 			job_complete(job);
-		} else if (ctx->priv->cached_health_valid) {
+		/* Pairs with smp_store_release in aie4_ctx_cache_health_report. */
+		} else if (smp_load_acquire(&ctx->priv->cached_ctx_error_valid)) {
 			/* CERT did not respond, timeout this one. */
 			job_timeout(job);
 		} else {
