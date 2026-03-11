@@ -248,6 +248,16 @@ dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   return true;
 }
 
+static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  if (dev_filter_is_npu4(id, sdev.get()))
+    TEST_async_error_io(id, sdev, arg);
+  else if (dev_filter_is_aie4(id, sdev.get()))
+    TEST_async_error_aie4_io(id, sdev, arg);
+  else
+    throw std::runtime_error("async error io test: device is neither NPU4 nor AIE4");
+}
+
 std::string
 get_sysfs_path(device* dev)
 {
@@ -835,7 +845,7 @@ std::vector<test_case> test_list {
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_io, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_io_any, {}
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
@@ -947,7 +957,7 @@ std::vector<test_case> test_list {
   },
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_gemm, {}
@@ -971,10 +981,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
   },
   test_case{ "timed out chained command", {~0U, ~0U},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
-  },
-  test_case{ "io test aie4 async error", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_async_error_aie4_io, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_runlist_bad_cmd, {true}
   },
 };
 

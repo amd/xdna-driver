@@ -227,18 +227,28 @@ elf_init_no_arg_cmd(xrt::elf& elf, cuidx_type idx, bool dump, bo& cmd, bo& inst)
 } // namespace
 
 std::unique_ptr<io_test_bo_set_base>
-create_bo_set_for_device(device* dev, bool use_ubuf, const char* tag)
+create_bo_set_for_device(device* dev, bool use_ubuf, const char* tag, const flow_type* flow)
 {
-  auto device_id = device_query<query::pcie_device>(dev);
-  if (device_id == npu3_device_id || device_id == npu3_device_id1) {
-    if (use_ubuf) {
-      std::string err = "Ubuf not supported on this device";
-      throw std::runtime_error(err);
-    }
-    const char* aie4_tag = (tag && tag[0]) ? tag : "good";
-    return std::make_unique<elf_full_io_test_bo_set>(dev, aie4_tag);
+  const char* effective_tag = (tag && tag[0]) ? tag : "good";
+  const auto& info = get_binary_info(dev, effective_tag, flow);
+  const std::string tag_str(effective_tag);
+
+  if (info.flow == LEGACY) {
+    return std::make_unique<io_test_bo_set>(dev, use_ubuf);
   }
-  return std::make_unique<io_test_bo_set>(dev, use_ubuf);
+  if (info.flow == PARTIAL_ELF) {
+    if (use_ubuf) {
+      throw std::runtime_error("Ubuf not supported for PARTIAL_ELF flow");
+    }
+    return std::make_unique<elf_io_test_bo_set>(dev, tag_str, &info.flow);
+  }
+  if (info.flow == FULL_ELF) {
+    if (use_ubuf) {
+      throw std::runtime_error("Ubuf not supported on this device");
+    }
+    return std::make_unique<elf_full_io_test_bo_set>(dev, tag_str, &info.flow);
+  }
+  throw std::runtime_error("create_bo_set_for_device: unsupported flow for tag " + tag_str);
 }
 
 void
@@ -543,12 +553,42 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
 elf_io_negative_test_bo_set::
 elf_io_negative_test_bo_set(device* dev, const std::string& tag)
   : io_test_bo_set_base(dev, tag, nullptr)
+  , m_expect_cmd_status(0)
+  , m_expect_ctx_health_val(~0u)
 {
   const auto& info = get_binary_info(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
-  const std::string elf_name = info.extra.at("elf_name");
   m_expect_cmd_status = static_cast<uint32_t>(std::stoul(info.extra.at("exp_status"), nullptr, 0));
-  m_expect_txn_op_idx = static_cast<uint32_t>(std::stoul(info.extra.at("exp_val"), nullptr, 0));
+  if (info.extra.count("exp_val"))
+    m_expect_ctx_health_val = static_cast<uint32_t>(std::stoul(info.extra.at("exp_val"), nullptr, 0));
 
+  if (info.flow == FULL_ELF) {
+    m_is_full_elf = true;
+    m_elf = xrt::elf(get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), nullptr));
+    auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+    try {
+      m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+    } catch (const std::exception&) {
+      m_kernel_index = elf_int::no_ctrl_code_id;
+    }
+
+    for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+      auto& ibo = m_bo_array[i];
+      auto type = static_cast<io_test_bo_type>(i);
+      switch (type) {
+      case IO_TEST_BO_CMD:
+        alloc_cmd_bo(ibo, m_dev);
+        break;
+      case IO_TEST_BO_INSTRUCTION:
+        create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+        break;
+      default:
+        break;
+      }
+    }
+    return;
+  }
+
+  const std::string elf_name = info.extra.at("elf_name");
   m_elf = xrt::elf(m_local_data_path + elf_name);
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -800,10 +840,21 @@ void
 elf_io_negative_test_bo_set::
 init_cmd(hw_ctx& hwctx, bool dump)
 {
-  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
-    *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
-    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
-
+  if (m_is_full_elf) {
+    exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
+    xrt_core::cuidx_type cu_idx{0};
+    ebuf.set_cu_idx(cu_idx);
+    if (dump)
+      ebuf.dump();
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+    uint32_t patch_id = (m_kernel_index != elf_int::no_ctrl_code_id) ? m_kernel_index : 0;
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+      elf_patcher::buf_type::ctrltext, m_elf, patch_id);
+  } else {
+    elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
+      *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
+      *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  }
   io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
@@ -927,7 +978,6 @@ elf_io_negative_test_bo_set::
 verify_result()
 {
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
   if (cpkt->state != m_expect_cmd_status) {
     throw std::runtime_error(std::string("Command status=") + std::to_string(cpkt->state) +
@@ -939,16 +989,33 @@ verify_result()
 
   // In case of timeout, further check context health data
   auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
-  if (cdata->aie2.txn_op_idx != m_expect_txn_op_idx) {
-    std::cerr << "Incorrect app health data:\n";
-    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
-    std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
-    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
-    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
-    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
-    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
-    throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
-      ", expect=" + std::to_string(m_expect_txn_op_idx));
+  if (cdata->npu_gen == NPU_GEN_AIE4) {
+    if (cdata->version != ERT_CTX_HEALTH_DATA_V1 || cdata->aie4.ctx_error_type != m_expect_ctx_health_val) {
+      std::cerr << "Incorrect AIE4 context health data:\n";
+      std::cerr << "\tctx_error_type: 0x" << std::hex << cdata->aie4.ctx_error_type << "\n";
+      std::cerr << "\tversion: 0x" << std::hex << cdata->version
+                << " (expect " << ERT_CTX_HEALTH_DATA_V1 << ")\n";
+      std::cerr << "\tnpu_gen: 0x" << std::hex << cdata->npu_gen
+                << " (expect " << NPU_GEN_AIE4 << ")\n";
+      std::cerr << "\tctx_state: 0x" << std::hex << cdata->aie4.ctx_state << "\n";
+      std::cerr << "\tnum_uc: " << std::dec << cdata->aie4.num_uc << "\n";
+      throw std::runtime_error(std::string("Context health data version=") +
+        std::to_string(cdata->version) + " npu_gen=" + std::to_string(cdata->npu_gen) +
+        ", expect version=" + std::to_string(ERT_CTX_HEALTH_DATA_V1) +
+        " npu_gen=" + std::to_string(NPU_GEN_AIE4));
+    }
+  } else {
+    if (cdata->aie2.txn_op_idx != m_expect_ctx_health_val) {
+      std::cerr << "Incorrect app health data:\n";
+      std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
+      std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
+      std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
+      std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
+      std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
+      std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
+      throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
+        ", expect=" + std::to_string(m_expect_ctx_health_val));
+    }
   }
 }
 
