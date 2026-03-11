@@ -18,28 +18,31 @@
 #include "core/common/system.h"
 #include "core/common/device.h"
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <vector>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <dirent.h>
 
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+
 // FIXME
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include "../../src/include/uapi/drm_local/amdxdna_accel.h"
 // enf of FIXME
 
-struct kern_version {
-  int major;
-  int minor;
+struct driver_version {
+  unsigned int major;
+  unsigned int minor;
 };
 
-kern_version current_kern;
+driver_version current_drv;
 std::string cur_path;
 std::string xclbin_path;
 int base_write_speed;
@@ -74,6 +77,8 @@ void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_full_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_coredump(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_aie_mem(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
 
 inline void
 set_xrt_path()
@@ -90,7 +95,7 @@ usage(const std::string& prog)
   std::cout << "\nUsage: " << prog << " [options] [test case ID/name separated by spaces]\n";
   std::cout << "Options:\n";
   std::cout << "\t" << "-h" << ": print this help message and available test cases\n";
-  std::cout << "\t" << "-k" << ": evaluate test result based on kernel version\n";
+  std::cout << "\t" << "-k" << ": evaluate test result based on driver version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
   std::cout << std::endl;
 }
@@ -99,11 +104,10 @@ usage(const std::string& prog)
 struct test_case {
   const std::string name;
   /*
-   * k_ver = { 0, 0 }: test should behave as expected
-   * k_ver = { -1, -1 }: test does not behave as expected for now
-   * k_ver = { m, n }: test does not behave as expected until m.n kenrel
+   * drv_ver = { 0, 0 }: test should behave as expected
+   * drv_ver = { m, n }: test does not behave as expected until m.n driver
    */
-  const kern_version k_ver;
+  const driver_version drv_ver;
   bool is_negative;
   bool (*dev_filter)(device::id_type id, device *dev);
   void (*func)(device::id_type id, std::shared_ptr<device>& dev, arg_type& arg);
@@ -244,16 +248,59 @@ dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   return true;
 }
 
+std::string
+get_sysfs_path(device* dev)
+{
+  query::sub_device_path::args query_arg = {std::string(""), 0};
+  std::string sysfs = device_query<query::sub_device_path>(dev, query_arg);
+  return sysfs + "/accel";
+}
+
+// Returns an open fd for the accel device node corresponding to dev. Caller must close(fd).
+// Throws std::runtime_error on failure (opendir, missing accel entry, or open).
+int
+open_accel_fd(device* dev)
+{
+  // FIXME: reimplement this when query key is defined in xrt
+  std::string accel_path = get_sysfs_path(dev);
+
+  struct dir_guard {
+    DIR* d;
+    explicit dir_guard(DIR* p) : d(p) {}
+    ~dir_guard() { if (d) closedir(d); }
+    DIR* get() const { return d; }
+    explicit operator bool() const { return d != nullptr; }
+  };
+  dir_guard dp(opendir(accel_path.c_str()));
+  if (!dp) {
+    throw std::runtime_error("opendir failed: " + accel_path);
+  }
+
+  std::string accel_node;
+  while (auto entry = readdir(dp.get())) {
+    std::string dirname{entry->d_name};
+    if (dirname.find("accel") == 0) {
+      accel_node = "/dev/accel/" + dirname;
+      break;
+    }
+  }
+
+  if (accel_node.empty()) {
+    throw std::runtime_error("Failed to find accel node under " + accel_path + " for device");
+  }
+
+  int fd = open(accel_node.c_str(), O_RDONLY);
+  if (fd < 0) {
+    throw std::runtime_error("open failed: " + accel_node);
+  }
+  return fd;
+}
+
 std::tuple<uint64_t, uint64_t, uint64_t>
 get_bo_usage(device* dev, int pid)
 {
   // FIXME: reimplement this when query key is defined in xrt
-  const char *xdna = "/dev/accel/accel0";
-  int fd = open(xdna, O_RDONLY);
-  if (fd < 0) {
-    std::perror("open");
-    return {0, 0, 0};
-  }
+  int fd = open_accel_fd(dev);
 
   amdxdna_drm_bo_usage usage = { .pid = pid };
   amdxdna_drm_get_array arg = {
@@ -265,8 +312,7 @@ get_bo_usage(device* dev, int pid)
   int ret = ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
   close(fd);
   if (ret == -1) {
-    std::perror("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY)");
-    return {0, 0, 0};
+    throw std::runtime_error("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY) failed");
   }
 
   return {usage.total_usage, usage.internal_usage, usage.heap_usage};
@@ -380,27 +426,28 @@ TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device>& sdev
 }
 
 void
-TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+TEST_create_destroy_max_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   auto device_id = device_query<query::pcie_device>(dev);
   int is_negative = static_cast<unsigned int>(arg[0]);
-  int num_virt_ctx;
+  int num_ctx;
 
-  // XDNA driver by default supports 6 virtual context on npu1 and 32 virtual context on npu4
+  // XDNA driver by default supports maximum 6 contexts on npu1, 128 on npu3, and 16 on npu4
   if (device_id == npu1_device_id)
-    num_virt_ctx = 6;
+    num_ctx = 6;
+  else if (device_id == npu3_device_id || device_id == npu3_device_id1)
+    num_ctx = 128;
   else
-    num_virt_ctx = 32;
+    num_ctx = 16;
 
   if (is_negative)
-    num_virt_ctx += 1;
+    num_ctx = 10000;
 
-  std::cout << "Creating " << num_virt_ctx << " contexts" << std::endl;
-  // Try opening device and creating ctx twice
+  std::cout << "Creating " << num_ctx << " contexts" << std::endl;
   {
     std::vector<std::unique_ptr<hw_ctx>> ctxs;
-    for (int i = 0; i < num_virt_ctx; i++)
+    for (int i = 0; i < num_ctx; i++)
       ctxs.push_back(std::make_unique<hw_ctx>(dev));
   }
 }
@@ -410,9 +457,19 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
 {
   auto dev = sdev.get();
   auto device_id = device_query<query::pcie_device>(dev);
-  int num_virt_ctx = static_cast<unsigned int>(arg[0]);
+  int num_ctx;
 
-  multi_thread threads(num_virt_ctx, TEST_io_latency);
+  const std::array<int, 3> ctx = [&]() {
+    if (device_id == npu1_device_id)
+      return std::array<int, 3>{2, 4, 6};
+    if (device_id == npu3_device_id || device_id == npu3_device_id1)
+      return std::array<int, 3>{4, 16, 64};
+    return std::array<int, 3>{4, 8, 16};
+  }();
+
+  num_ctx = ctx[arg[0]];
+
+  multi_thread threads(num_ctx, TEST_io_latency);
   threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
 }
 
@@ -783,7 +840,7 @@ std::vector<test_case> test_list {
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
-  test_case{ "io test with intruction code invalid address access", {},
+  test_case{ "io test with instruction code invalid address access", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
@@ -792,20 +849,20 @@ std::vector<test_case> test_list {
   test_case{ "measure real kernel latency", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
-  test_case{ "create and free debug bo", {-1, -1},
+  test_case{ "create and free debug bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x1000 }
   },
-  test_case{ "create and free large debug bo", {-1, -1},
+  test_case{ "create and free large debug bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
+    TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "measure no-op kernel throughput command", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
   },
   test_case{ "export import BO", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_export_import_bo, {}
   },
   test_case{ "ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
@@ -814,7 +871,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_host, {}
   },
   test_case{ "io test no op with duplicated BOs", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_noop_io_with_dup_bo, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_noop_io_with_dup_bo, {}
   },
   test_case{ "measure no-op kernel latency chained command", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, 32000 }
@@ -834,8 +891,8 @@ std::vector<test_case> test_list {
   test_case{ "measure no-op kernel throughput chained command (polling)", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, 32000 }
   },
-  test_case{ "Cmd fencing (driver side)", {-1, -1},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_cmd_fence_device, {}
+  test_case{ "Cmd fencing (driver side)", {},
+    TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_device, {}
   },
   test_case{ "sync_bo for input_output 1MiB BO", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000}
@@ -844,40 +901,28 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo_off_size, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000, 0x1004, 0x3c}
   },
   test_case{ "export import BO in single process", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_import_bo_single_proc, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_export_import_bo_single_proc, {}
   },
   test_case{ "multi-command ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
-  test_case{ "virtual context test", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 0 }
+  test_case{ "max context test", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_max_context, { 0 }
   },
-  test_case{ "virtual context bad test", {},
-    TEST_NEGATIVE, dev_filter_is_aie2, TEST_create_destroy_virtual_context, { 1 }
+  test_case{ "max context bad test", {},
+    TEST_NEGATIVE, dev_filter_is_aie, TEST_create_destroy_max_context, { 1 }
   },
-  test_case{ "Multi context IO test 1 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 2 }
+  test_case{ "Multi context IO test 1", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 0 }
   },
-  test_case{ "Multi context IO test 2 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 4 }
+  test_case{ "Multi context IO test 2", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 1 }
   },
-  test_case{ "Multi context IO test 3 (npu1)", {},
-    TEST_POSITIVE, dev_filter_is_npu1, TEST_multi_context_io_test, { 6 }
-  },
-  test_case{ "Multi context IO test 1 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 2 }
-  },
-  test_case{ "Multi context IO test 2 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 4 }
-  },
-  test_case{ "Multi context IO test 3 (npu4)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_multi_context_io_test, { 16 }
-  },
-  test_case{ "Multi context IO test 4 (npu4)", {},
-    TEST_POSITIVE, skip_dev_filter, TEST_multi_context_io_test, { 20 }
+  test_case{ "Multi context IO test 3", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 2 }
   },
   test_case{ "Create and destroy devices", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_create_destroy_device, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
@@ -889,9 +934,9 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_suspend_resume, {}
   },
-  test_case{ "io test timeout run for context health report", {},
+  test_case{ "io test timeout run for context health report", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
   },
   //test_case{ "io test no-op kernel good run", {},
@@ -905,22 +950,31 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_gemm, {}
   },
-  test_case{ "create and free internal bo", {},
+  test_case{ "create and free internal bo", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
   },
   test_case{ "export BO then close device", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_export_bo_then_close_device, {}
+    TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
   },
-  test_case{ "get AIE coredump and check registers", {},
+  test_case{ "get AIE coredump and check registers", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
+  },
+  test_case{ "AIE MEM read/write", {~0U, ~0U},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_mem, {}
+  },
+  test_case{ "AIE REG read/write", {~0U, ~0U},
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
   },
-  test_case{ "timed out chained command", {},
+  test_case{ "timed out chained command", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
+  },
+  test_case{ "io test aie4 async error", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_async_error_aie4_io, {}
   },
 };
 
@@ -939,15 +993,15 @@ print_available_tests()
 bool
 is_negative_test(const test_case& test)
 {
-  if (current_kern.major == 0)
+  if (current_drv.major == 0 && current_drv.minor == 0)
     return test.is_negative;
-  if (test.k_ver.major == -1)
-    return !test.is_negative;
-  if (current_kern.major < test.k_ver.major)
-    return !test.is_negative;
-  if (current_kern.major == test.k_ver.major && current_kern.minor < test.k_ver.minor)
-    return !test.is_negative;
-  return test.is_negative;
+
+  if (current_drv.major > test.drv_ver.major ||
+      (current_drv.major == test.drv_ver.major &&
+       current_drv.minor >= test.drv_ver.minor))
+    return test.is_negative;
+
+  return true;
 }
 
 void
@@ -1035,22 +1089,32 @@ run_all_test(std::vector<int>& tests)
 }
 
 int
-get_kernel_version(int *major, int *minor)
+get_driver_version(unsigned int *major, unsigned int *minor, device::id_type device_index = 0)
 {
-  struct utsname buffer;
+  auto sdev = get_userpf_device(device_index);
+  int fd = open_accel_fd(sdev.get());
 
-  if (uname(&buffer) != 0) {
-      perror("uname");
-      return -EFAULT;
+  drm_version version = {};
+  char name[128];
+  char date[128];
+  char desc[256];
+
+  version.name_len = sizeof(name);
+  version.name = name;
+  version.date_len = sizeof(date);
+  version.date = date;
+  version.desc_len = sizeof(desc);
+  version.desc = desc;
+
+  int result = ioctl(fd, DRM_IOCTL_VERSION, &version);
+  close(fd);
+  if (result) {
+    throw std::runtime_error("ioctl(DRM_IOCTL_VERSION) failed");
   }
 
-  std::string version = buffer.release;
-  std::stringstream version_stream(version);
-  char dot;
-  if (!(version_stream >> *major >> dot >> *minor)) {
-      std::cout << "Failed to parse kernel version: " << version << std::endl;
-      return -EINVAL;
-  }
+  *major = version.version_major;
+  *minor = version.version_minor;
+
   return 0;
 }
 
@@ -1107,10 +1171,10 @@ main(int argc, char **argv)
       }
     }
     case 'k': {
-      if (get_kernel_version(&current_kern.major, &current_kern.minor))
+      if (get_driver_version(&current_drv.major, &current_drv.minor))
         return 1;
-      std::cout << "Evaluating test result based on kernel version: "
-        << current_kern.major << "." << current_kern.minor << std::endl;
+      std::cout << "Evaluating test result based on driver version: "
+        << current_drv.major << "." << current_drv.minor << std::endl;
       break;
     }
     case '?':

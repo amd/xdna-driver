@@ -91,6 +91,25 @@ struct bdf
 
 };
 
+struct pcie_id
+{
+  using result_type = query::pcie_id::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    auto [domain, bus, dev, func] = bdf::get(device, key);
+    std::string bdf_str = boost::str(boost::format("%04x:%02x:%02x.%x") % domain % bus % dev % func);
+    const std::string base = "/sys/bus/pci/devices/" + bdf_str;
+    std::ifstream dev_f(base + "/device");
+    std::ifstream rev_f(base + "/revision");
+    unsigned int dev_val = 0, rev_val = 0;
+    if (!(dev_f >> std::hex >> dev_val) || !(rev_f >> std::hex >> rev_val))
+      throw xrt_core::query::sysfs_error("Failed to read device/revision from " + base);
+    return { static_cast<uint16_t>(dev_val), static_cast<uint8_t>(rev_val) };
+  }
+};
+
 struct board_name
 {
   using result_type = query::board_name::result_type;
@@ -337,7 +356,7 @@ struct firmware_version
 
     amdxdna_drm_query_ve2_firmware_version fw_version{};
     amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION,
+      .param = DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION,
       .buffer_size = sizeof(fw_version),
       .buffer = reinterpret_cast<uintptr_t>(&fw_version)
     };
@@ -528,7 +547,36 @@ struct total_cols
     auto edev = get_edgedev(device);
     edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
 
-    return aie_metadata.cols;                                                          
+    return aie_metadata.cols;
+  }
+};
+
+struct aie_tile_stats
+{
+  using result_type = query::aie_tiles_stats::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_aie_metadata aie_metadata = {};
+
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_AIE_METADATA,
+      .buffer_size = sizeof(aie_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&aie_metadata)
+    };
+
+    auto edev = get_edgedev(device);
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+
+    result_type output = {};
+    output.cols = aie_metadata.cols;
+    output.rows = aie_metadata.rows;
+    output.core_rows = aie_metadata.core.row_count;
+    output.mem_rows = aie_metadata.mem.row_count;
+    output.shim_rows = aie_metadata.shim.row_count;
+
+    return output;
   }
 };
 
@@ -564,6 +612,85 @@ struct clock_topology
     memcpy(data->m_clock_freq, clocks.data(), (clocks.size() * sizeof(struct clock_freq)));
 
     return payload;
+  }
+};
+struct aie_get_freq
+{
+  using result_type = query::aie_get_freq::result_type;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& partition_id)
+  {
+    if (key != key_type::aie_get_freq)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    auto edev = get_edgedev(device);
+    if (!edev)
+      throw xrt_core::error(-EINVAL, "Cannot get edge device");
+
+    amdxdna_drm_query_clock_metadata clock_metadata;
+    memset(&clock_metadata, 0, sizeof(clock_metadata));
+
+    amdxdna_drm_get_info get_info_arg = {
+      .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+      .buffer_size = sizeof(clock_metadata),
+      .buffer = reinterpret_cast<uintptr_t>(&clock_metadata)
+    };
+
+    edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &get_info_arg);
+
+    // Return frequency in Hz
+    return clock_metadata.mp_npu_clock.freq_mhz * 1000000ULL;
+  }
+};
+
+struct aie_set_freq
+{
+  using result_type = query::aie_set_freq::result_type;
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static result_type
+  get(const xrt_core::device* device, key_type key, const std::any& partition_id, const std::any& freq)
+  {
+    if (key != key_type::aie_set_freq)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    auto freq_hz = std::any_cast<uint64_t>(freq);
+
+    auto edev = get_edgedev(device);
+    if (!edev)
+      throw xrt_core::error(-EINVAL, "Cannot get edge device");
+
+    amdxdna_drm_query_clock set_freq_arg;
+    memset(&set_freq_arg, 0, sizeof(set_freq_arg));
+    set_freq_arg.freq_mhz = static_cast<uint32_t>(freq_hz / 1000000);  // Convert Hz to MHz
+    strncpy(reinterpret_cast<char*>(set_freq_arg.name), "AIE Clock", sizeof(set_freq_arg.name) - 1);
+
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_CLOCK_FREQ,
+      .buffer_size = sizeof(set_freq_arg),
+      .buffer = reinterpret_cast<uintptr_t>(&set_freq_arg)
+    };
+
+    try {
+      edev->ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+    } catch (const xrt_core::system_error& e) {
+      throw xrt_core::error(e.code().value(),
+        boost::str(boost::format("Failed to set AIE clock frequency to %lu Hz (%.2f MHz): %s")
+          % freq_hz % (freq_hz / 1000000.0) % e.what()));
+    }
+    return true;
   }
 };
 
@@ -873,15 +1000,19 @@ initialize_query_table()
   emplace_func0_request<query::aie_partition_info,      partition_info>();
   emplace_func0_request<query::xclbin_slots,            xclbin_slots>();
   emplace_func0_request<query::pcie_bdf,                bdf>();
+  emplace_func0_request<query::pcie_id,                 pcie_id>();
   emplace_func0_request<query::rom_vbnv,                dev_info>();
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();
+  emplace_func0_request<query::aie_tiles_stats,         aie_tile_stats>();
   emplace_func0_request<query::archive_path,            archive_path>();
   emplace_func0_request<query::xocl_errors,             xocl_errors>();
   emplace_func0_request<query::clock_freq_topology_raw, clock_topology>();
   emplace_func1_request<query::firmware_version,        firmware_version>();
   emplace_func1_request<query::aie_read,                aie_read>();
   emplace_func1_request<query::aie_write,               aie_write>();
+  emplace_func1_request<query::aie_get_freq,            aie_get_freq>();
+  emplace_func2_request<query::aie_set_freq,            aie_set_freq>();
   emplace_func1_request<query::aie_coredump,            aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();

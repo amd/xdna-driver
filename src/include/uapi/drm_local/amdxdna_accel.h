@@ -666,7 +666,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE		11
 #define	DRM_AMDXDNA_QUERY_RESOURCE_INFO			12
 #define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
-#define	DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION		14
+#define	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION		14
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
@@ -904,6 +904,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
 #define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
 #define	DRM_AMDXDNA_AIE_TILE_WRITE		7
+#define	DRM_AMDXDNA_SET_CLOCK_FREQ		8
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

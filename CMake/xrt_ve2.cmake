@@ -19,7 +19,7 @@ set(XRT_EXCLUDE_INCLUDE_FILE
 set(XRT_AIE_BUILD "true")
 set(XDP_VE2_BUILD_CMAKE "yes")
 
-add_compile_options(-DXRT_ENABLE_AIE -DOPENCL_ICD_LOADER)
+add_compile_options(-DXRT_ENABLE_AIE)
 
 # build is for combined shims
 add_compile_definitions(XRT_BUILD XDNA_VE2)

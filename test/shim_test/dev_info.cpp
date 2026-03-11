@@ -2,6 +2,7 @@
 // Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "dev_info.h"
+#include "core/include/ert.h"
 
 // Test program location, all paths below are relative to it
 extern std::string cur_path;
@@ -9,6 +10,9 @@ extern std::string cur_path;
 extern std::string xclbin_path;
 
 namespace {
+
+static const std::string exp_status_timeout = std::to_string(ERT_CMD_STATE_TIMEOUT);
+static const std::string exp_status_error = std::to_string(ERT_CMD_STATE_ERROR);
 
 static std::string
 dirname_of(const std::string& path)
@@ -67,7 +71,7 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
-    .tag = "bad",
+    .tag = "bad_timeout",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
@@ -87,6 +91,16 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
+    .tag = "gemm",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/gemm/gemm.elf",
+    .flow = FULL_ELF,
+  },
+  {
     .tag = "good",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
@@ -97,7 +111,7 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
-    .tag = "bad",
+    .tag = "bad_timeout",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
@@ -114,6 +128,16 @@ binary_info binary_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .path = "local_shim_test_data/npu3a/nop/nop.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "gemm",
+    .device = npu3_device_id1,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3a/gemm/gemm.elf",
     .flow = FULL_ELF,
   },
   {
@@ -229,13 +253,36 @@ binary_info binary_infos[] = {
     .flow = PREEMPT_FULL_ELF,
   },
   {
-    .tag = "bad",
+    .tag = "bad_timeout",
     .device = npu4_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:IPUV1CNN", {0} },
     },
     .path = "local_shim_test_data/npu4/bad/bad_txn.xclbin",
+    .extra = { {"elf_name", "ert_crash.elf"}, {"exp_status", exp_status_timeout}, {"exp_val", "0x11800"} },
+    .flow = PARTIAL_ELF,
+  },
+  {
+    .tag = "bad_addr",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .path = "local_shim_test_data/npu4/bad/bad_txn.xclbin",
+    .extra = { {"elf_name", "instr_invalid_addr.elf"}, {"exp_status", exp_status_timeout}, {"exp_val", "0xFFFFFFFF"} },
+    .flow = PARTIAL_ELF,
+  },
+  {
+    .tag = "bad_op",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .path = "local_shim_test_data/npu4/bad/bad_txn.xclbin",
+    .extra = { {"elf_name", "instr_invalid_op.elf"}, {"exp_status", exp_status_error}, {"exp_val", "0"} },
     .flow = PARTIAL_ELF,
   },
   {
@@ -246,6 +293,7 @@ binary_info binary_infos[] = {
       { "DPU:IPUV1CNN", {0} },
     },
     .path = "local_shim_test_data/npu4/gemm/gemm.xclbin",
+    .extra = { {"elf_name", "gemm_int8.elf"} },
     .flow = PARTIAL_ELF,
   },
   {

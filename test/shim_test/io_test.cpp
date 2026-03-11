@@ -440,13 +440,13 @@ TEST_io_runlist_throughput(device::id_type id, std::shared_ptr<device>& sdev, ar
 void
 TEST_noop_io_with_dup_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  io_test_bo_set boset{sdev.get()};
+  auto boset = create_bo_set_for_device(sdev.get(), false, "nop");
 
   // Use same BO for both input and output
-  boset.get_bos()[IO_TEST_BO_OUTPUT].tbo = boset.get_bos()[IO_TEST_BO_INPUT].tbo;
-  auto ibo = boset.get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
+  boset->get_bos()[IO_TEST_BO_OUTPUT].tbo = boset->get_bos()[IO_TEST_BO_INPUT].tbo;
+  auto ibo = boset->get_bos()[IO_TEST_BO_INSTRUCTION].tbo;
   std::memset(ibo->map(), 0, ibo->size());
-  boset.run_no_check_result();
+  boset->run_no_check_result();
 }
 
 void
@@ -476,8 +476,8 @@ TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std
 void
 TEST_io_with_ubuf_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  io_test_bo_set boset{sdev.get(), true};
-  boset.run();
+  auto boset = create_bo_set_for_device(sdev.get(), true);
+  boset->run();
 }
 
 void
@@ -489,19 +489,19 @@ TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
    */
 
   const int seconds = 8;
-  io_test_bo_set boset{sdev.get()};
+  auto boset = create_bo_set_for_device(sdev.get());
 
   std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
   sleep(seconds);
 
   std::cout << "Submit command to resume" << std::endl;
-  boset.run();
+  boset->run();
 
   std::cout << "Wait " << seconds << " seconds for auto-suspend" << std::endl;
   sleep(seconds);
 
   std::cout << "Submit command to resume" << std::endl;
-  boset.run();
+  boset->run();
 }
 
 void
@@ -514,8 +514,7 @@ TEST_preempt_full_elf_io(device::id_type id, std::shared_ptr<device>& sdev, cons
 void
 TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_negative_test_bo_set boset{sdev.get(),
-    "bad", "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+  elf_io_negative_test_bo_set boset{sdev.get(), "bad_timeout"};
   boset.run();
 }
 
@@ -532,9 +531,49 @@ TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
 void
 TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  async_error_aie4_io_test_bo_set async_error_aie4_io_test_bo_set{sdev.get(), "bad"};
-  // verification is inside run()
-  async_error_aie4_io_test_bo_set.run();
+  {
+    auto good_bo_set = create_bo_set_for_device(sdev.get(), false, "good");
+    async_error_aie4_io_test_bo_set bad_bo_set{sdev.get(), "bad_timeout"};
+
+    hw_ctx hwctx{sdev.get(), "good"};
+
+    good_bo_set->init_cmd(hwctx, false);
+    good_bo_set->sync_before_run();
+    bad_bo_set.init_cmd(hwctx, false);
+    bad_bo_set.sync_before_run();
+
+    // Command chain: good (index 0), bad_timeout (index 1)
+    const uint32_t bad_index = 1;
+    std::vector<bo*> tmp_cmd_bos;
+    tmp_cmd_bos.push_back(good_bo_set->get_bos()[IO_TEST_BO_CMD].tbo.get());
+    tmp_cmd_bos.push_back(bad_bo_set.get_bos()[IO_TEST_BO_CMD].tbo.get());
+
+    auto cbo = std::make_unique<bo>(sdev.get(), 0x1000ul, XCL_BO_FLAGS_EXECBUF);
+    io_test_init_runlist_cmd(cbo.get(), tmp_cmd_bos);
+
+    auto hwq = hwctx.get()->get_hw_queue();
+    hwq->submit_command(cbo->get());
+    hwq->wait_command(cbo->get(), 0);
+
+    auto cmd_packet = reinterpret_cast<ert_packet *>(cbo->map());
+    auto payload = get_ert_cmd_chain_data(cmd_packet);
+    if (cmd_packet->state != ERT_CMD_STATE_TIMEOUT || payload->error_index != bad_index) {
+      throw std::runtime_error(
+        std::string("runlist state=") + std::to_string(cmd_packet->state) +
+        std::string(", error_index=") + std::to_string(payload->error_index) +
+        std::string(", expected state=") + std::to_string(ERT_CMD_STATE_TIMEOUT) +
+        std::string(", expected error_index=") + std::to_string(bad_index)
+      );
+    }
+
+    // Health data is in the subcmd at error_index, copy it to bad_bo_set's cmd BO for verification
+    auto bad_cmd_pkt = reinterpret_cast<ert_packet *>(tmp_cmd_bos[bad_index]->map());
+    bad_cmd_pkt->state = cmd_packet->state;
+
+    bad_bo_set.verify_result();
+  }
+  // TODO: Remove sleep workaround after FW fix to not wait for suspend after timeout is available.
+  sleep(10);
 }
 
 /**
@@ -579,8 +618,7 @@ void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, a
 void
 TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_negative_test_bo_set bo_set{sdev.get(),
-    "bad", "instr_invalid_addr.elf", ERT_CMD_STATE_TIMEOUT, 0xFFFFFFFF};
+  elf_io_negative_test_bo_set bo_set{sdev.get(), "bad_addr"};
   bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
@@ -591,7 +629,7 @@ TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, ar
 void
 TEST_io_gemm(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  elf_io_gemm_test_bo_set boset{sdev.get(), "gemm", "gemm_int8.elf"};
+  elf_io_gemm_test_bo_set boset{sdev.get(), "gemm"};
   boset.run();
 }
 
@@ -600,7 +638,6 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
 {
   bool is_timeout = static_cast<bool>(arg[0]);
   const char *good_tag = "good";
-  const char *bad_tag = "bad";
   static const flow_type good_flow = PARTIAL_ELF;
 
   // Creating commands and BOs
@@ -609,11 +646,9 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   elf_io_test_bo_set good_bo_set1{sdev.get(), good_tag, &good_flow};
   elf_io_test_bo_set good_bo_set2{sdev.get(), good_tag, &good_flow};
   // A timeout one
-  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), bad_tag,
-    "ert_crash.elf", ERT_CMD_STATE_TIMEOUT, 0x11800};
+  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), "bad_timeout"};
   // An error one
-  elf_io_negative_test_bo_set error_bo_set{sdev.get(), bad_tag,
-    "instr_invalid_op.elf", ERT_CMD_STATE_ERROR, 0};
+  elf_io_negative_test_bo_set error_bo_set{sdev.get(), "bad_op"};
 
   // Creating HW context for cmd submission. We use the good xclbin here to
   // make sure good cmd can complete successfully. The bad ones don't really
@@ -735,4 +770,198 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
 
   if ((id_status & CORE_ENABLE) != 0)
     throw std::runtime_error("Core (2,2) expected IDLE");
+}
+
+void
+TEST_io_aie_mem(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  constexpr uint32_t MEM_OFFSET = 0x400;
+  constexpr uint32_t MEM_SIZE = 1024;
+  constexpr uint32_t WORDS_PER_READ = MEM_SIZE / sizeof(uint32_t);
+  constexpr uint32_t EXPECTED_READ_VAL = 0xdeadface;
+  constexpr uint32_t WRITE_VAL = 0xdeadbeef;
+
+  auto dev = sdev.get();
+  static const char* tag = "aie_debug";
+  elf_io_aie_debug_test_bo_set boset{dev, tag};
+  hw_ctx hwctx{dev, tag};
+
+  boset.init_cmd(hwctx, false);
+  boset.sync_before_run();
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+  boset.sync_after_run();
+  boset.verify_result();
+
+  auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(dev);
+  if (aie_stats.cols == 0)
+    throw std::runtime_error("AIE tiles stats reports zero columns");
+
+  const uint16_t num_cols = 4; // 4 cols used for verify_4x4.xclbin
+
+  pid_t pid = getpid();
+  uint16_t context_id = static_cast<uint16_t>(hwctx.get()->get_slotidx());
+
+  using aie_read_args = xrt_core::query::aie_read::args;
+  using aie_write_args = xrt_core::query::aie_write::args;
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.mem_rows; ++r) {
+      uint16_t row = aie_stats.mem_row_start + r;
+      aie_read_args read_args = {
+        .type = xrt_core::query::aie_read::access_type::mem,
+        .pid = static_cast<uint64_t>(pid),
+        .context_id = context_id,
+        .col = col,
+        .row = row,
+        .offset = MEM_OFFSET,
+        .size = MEM_SIZE
+      };
+      std::vector<char> buf = xrt_core::device_query<xrt_core::query::aie_read>(dev, read_args);
+      if (buf.size() != MEM_SIZE)
+        throw std::runtime_error("AIE mem read size mismatch");
+      const uint32_t* words = reinterpret_cast<const uint32_t*>(buf.data());
+      for (uint32_t i = 0; i < WORDS_PER_READ; ++i) {
+        if (words[i] != EXPECTED_READ_VAL)
+          throw std::runtime_error("AIE mem read expected 0xdeadface at ("
+            + std::to_string(col) + "," + std::to_string(row) + ") word " + std::to_string(i));
+      }
+    }
+  }
+
+  std::vector<char> write_buf(MEM_SIZE);
+  uint32_t* write_words = reinterpret_cast<uint32_t*>(write_buf.data());
+  for (uint32_t i = 0; i < WORDS_PER_READ; ++i)
+    write_words[i] = WRITE_VAL;
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.mem_rows; ++r) {
+      uint16_t row = aie_stats.mem_row_start + r;
+      aie_write_args write_args = {
+        .type = xrt_core::query::aie_write::access_type::mem,
+        .pid = static_cast<uint64_t>(pid),
+        .context_id = context_id,
+        .col = col,
+        .row = row,
+        .offset = MEM_OFFSET,
+        .data = write_buf
+      };
+      xrt_core::device_query<xrt_core::query::aie_write>(dev, write_args);
+    }
+  }
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.mem_rows; ++r) {
+      uint16_t row = aie_stats.mem_row_start + r;
+      aie_read_args read_args = {
+        .type = xrt_core::query::aie_read::access_type::mem,
+        .pid = static_cast<uint64_t>(pid),
+        .context_id = context_id,
+        .col = col,
+        .row = row,
+        .offset = MEM_OFFSET,
+        .size = MEM_SIZE
+      };
+      std::vector<char> read_back = xrt_core::device_query<xrt_core::query::aie_read>(dev, read_args);
+      if (read_back.size() != MEM_SIZE)
+        throw std::runtime_error("AIE mem read-back size mismatch");
+      const uint32_t* back_words = reinterpret_cast<const uint32_t*>(read_back.data());
+      for (uint32_t i = 0; i < WORDS_PER_READ; ++i) {
+        if (back_words[i] != WRITE_VAL)
+          throw std::runtime_error("AIE mem read-back expected 0xdeadbeef");
+      }
+    }
+  }
+}
+
+void
+TEST_io_aie_reg(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  constexpr uint32_t CORE_STATUS_REG = 0x32004;
+  constexpr uint32_t CORE_CONTROL_REG = 0x32000;
+  constexpr uint32_t EXPECTED_COL0_STATUS = 0x3;   // reset + enabled
+  constexpr uint32_t EXPECTED_OTHER_STATUS = 0x2;  // reset
+  constexpr uint32_t EXPECTED_AFTER_WRITE = 0x1;  // enabled
+
+  auto dev = sdev.get();
+  static const char* tag = "aie_debug";
+  elf_io_aie_debug_test_bo_set boset{dev, tag};
+  hw_ctx hwctx{dev, tag};
+
+  boset.init_cmd(hwctx, false);
+  boset.sync_before_run();
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+  boset.sync_after_run();
+  boset.verify_result();
+
+  auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(dev);
+  if (aie_stats.cols == 0)
+    throw std::runtime_error("AIE tiles stats reports zero columns");
+
+  const uint16_t num_cols = 4; // 4 cols used for verify_4x4.xclbin
+
+  pid_t pid = getpid();
+  uint16_t context_id = static_cast<uint16_t>(hwctx.get()->get_slotidx());
+
+  using aie_read_args = xrt_core::query::aie_read::args;
+  using aie_write_args = xrt_core::query::aie_write::args;
+
+  auto read_reg = [&](uint16_t col, uint16_t row, uint32_t addr) -> uint32_t {
+    aie_read_args read_args = {
+      .type = xrt_core::query::aie_read::access_type::reg,
+      .pid = static_cast<uint64_t>(pid),
+      .context_id = context_id,
+      .col = col,
+      .row = row,
+      .offset = addr,
+      .size = sizeof(uint32_t)
+    };
+    std::vector<char> buf = xrt_core::device_query<xrt_core::query::aie_read>(dev, read_args);
+    if (buf.size() != sizeof(uint32_t))
+      throw std::runtime_error("AIE reg read size mismatch");
+    return *reinterpret_cast<const uint32_t*>(buf.data());
+  };
+
+  auto write_reg = [&](uint16_t col, uint16_t row, uint32_t addr, uint32_t val) {
+    std::vector<char> data(sizeof(uint32_t));
+    *reinterpret_cast<uint32_t*>(data.data()) = val;
+    aie_write_args write_args = {
+      .type = xrt_core::query::aie_write::access_type::reg,
+      .pid = static_cast<uint64_t>(pid),
+      .context_id = context_id,
+      .col = col,
+      .row = row,
+      .offset = addr,
+      .data = std::move(data)
+    };
+    xrt_core::device_query<xrt_core::query::aie_write>(dev, write_args);
+  };
+
+  for (uint16_t col = 0; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.core_rows; ++r) {
+      uint16_t row = aie_stats.core_row_start + r;
+      uint32_t status = read_reg(col, row, CORE_STATUS_REG);
+      uint32_t expected = (col == 0) ? EXPECTED_COL0_STATUS : EXPECTED_OTHER_STATUS;
+      if (status != expected)
+        throw std::runtime_error("Core (" + std::to_string(col) + "," + std::to_string(row)
+          + ") expected status 0x3 or 0x2");
+    }
+  }
+
+  // WRITE 0x1 to core control for Col 1+ (skip col 0)
+  for (uint16_t col = 1; col < num_cols; ++col) {
+    for (uint16_t r = 0; r < aie_stats.core_rows; ++r) {
+      uint16_t row = aie_stats.core_row_start + r;
+      write_reg(col, row, CORE_CONTROL_REG, EXPECTED_AFTER_WRITE);
+      uint32_t status = read_reg(col, row, CORE_STATUS_REG);
+      if (status != EXPECTED_AFTER_WRITE)
+        throw std::runtime_error("Core (" + std::to_string(col) + "," + std::to_string(row)
+          + ") expected status 0x1 after write");
+    }
+  }
 }

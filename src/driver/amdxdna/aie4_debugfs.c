@@ -290,8 +290,7 @@ static int test_msg_column_info(struct amdxdna_dev_hdl *ndev)
 
 	req.dump_buff_addr = dma_addr;
 	req.dump_buff_size = size;
-	req.num_cols = hweight32(0);
-	req.aie4_bitmap = (u32)0;
+	req.aie4_col_bitmap = (u32)0;
 
 	mutex_lock(&ndev->aie4_lock);
 	ret = aie4_send_msg_wait(ndev, &msg);
