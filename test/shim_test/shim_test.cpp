@@ -426,31 +426,28 @@ TEST_create_destroy_hw_context(device::id_type id, std::shared_ptr<device>& sdev
 }
 
 void
-TEST_create_destroy_virtual_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+TEST_create_destroy_max_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
   auto device_id = device_query<query::pcie_device>(dev);
   int is_negative = static_cast<unsigned int>(arg[0]);
-  int num_virt_ctx;
+  int num_ctx;
 
-  // XDNA driver by default supports 6 virtual context on npu1, 128 on npu3, and 32 virtual context on npu4
+  // XDNA driver by default supports maximum 6 contexts on npu1, 128 on npu3, and 16 on npu4
   if (device_id == npu1_device_id)
-    num_virt_ctx = 6;
+    num_ctx = 6;
   else if (device_id == npu3_device_id || device_id == npu3_device_id1)
-    num_virt_ctx = 128;
+    num_ctx = 128;
   else
-    num_virt_ctx = 32;
+    num_ctx = 16;
 
-  if (is_negative && (device_id == npu3_device_id || device_id == npu3_device_id1))
-    num_virt_ctx = 10000;
-  else if (is_negative)
-    num_virt_ctx += 1;
+  if (is_negative)
+    num_ctx = 10000;
 
-  std::cout << "Creating " << num_virt_ctx << " contexts" << std::endl;
-  // Try opening device and creating ctx twice
+  std::cout << "Creating " << num_ctx << " contexts" << std::endl;
   {
     std::vector<std::unique_ptr<hw_ctx>> ctxs;
-    for (int i = 0; i < num_virt_ctx; i++)
+    for (int i = 0; i < num_ctx; i++)
       ctxs.push_back(std::make_unique<hw_ctx>(dev));
   }
 }
@@ -460,19 +457,19 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
 {
   auto dev = sdev.get();
   auto device_id = device_query<query::pcie_device>(dev);
-  int num_virt_ctx;
+  int num_ctx;
 
   const std::array<int, 3> ctx = [&]() {
     if (device_id == npu1_device_id)
       return std::array<int, 3>{2, 4, 6};
     if (device_id == npu3_device_id || device_id == npu3_device_id1)
-      return std::array<int, 3>{4, 8, 32};
+      return std::array<int, 3>{4, 16, 64};
     return std::array<int, 3>{4, 8, 16};
   }();
 
-  num_virt_ctx = ctx[arg[0]];
+  num_ctx = ctx[arg[0]];
 
-  multi_thread threads(num_virt_ctx, TEST_io_latency);
+  multi_thread threads(num_ctx, TEST_io_latency);
   threads.run_test(id, sdev, {IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, 3000});
 }
 
@@ -909,11 +906,11 @@ std::vector<test_case> test_list {
   test_case{ "multi-command ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
-  test_case{ "virtual context test", {~0U, ~0U},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_virtual_context, { 0 }
+  test_case{ "max context test", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_create_destroy_max_context, { 0 }
   },
-  test_case{ "virtual context bad test", {},
-    TEST_NEGATIVE, dev_filter_is_aie, TEST_create_destroy_virtual_context, { 1 }
+  test_case{ "max context bad test", {},
+    TEST_NEGATIVE, dev_filter_is_aie, TEST_create_destroy_max_context, { 1 }
   },
   test_case{ "Multi context IO test 1", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 0 }

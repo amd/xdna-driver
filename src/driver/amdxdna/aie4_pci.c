@@ -667,6 +667,8 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct psp_config psp_conf;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct smu_config smu_conf;
 	int i;
 
 	if (!aie4_fw_load_support(ndev))
@@ -681,6 +683,14 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	ndev->psp_hdl = aiem_psp_create(&xdna->ddev, xdna->ddev.dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < SMU_MAX_REGS; i++)
+		smu_conf.smu_regs[i] = ndev->smu_base + SMU_REG_OFF(ndev, i);
+	ndev->smu_hdl = aiem_smu_create(&xdna->ddev, &smu_conf);
+	if (!ndev->smu_hdl) {
+		XDNA_ERR(xdna, "failed to create smu");
 		return -ENOMEM;
 	}
 
@@ -760,7 +770,8 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	if (!is_npu3_vf_dev(pdev)) {
 		for (i = 0; i < PSP_MAX_REGS; i++)
 			set_bit(PSP_REG_BAR(ndev, i), &bars);
-		set_bit(xdna->dev_info->smu_bar, &bars);
+		for (i = 0; i < SMU_MAX_REGS; i++)
+			set_bit(SMU_REG_BAR(ndev, i), &bars);
 	}
 
 	if (!is_npu3_pf_dev(pdev))
@@ -941,9 +952,6 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	if (nctx->status == CTX_STATE_CONNECTED)
-		return 0;
-
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
 	if (ndev->dev_status <= AIE4_DEV_INIT) {
@@ -958,6 +966,9 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		XDNA_WARN(xdna, "cannot create hwctx due to NULL nctx or umq buffer");
 		return -EINVAL;
 	}
+
+	if (nctx->status == CTX_STATE_CONNECTED)
+		return 0;
 
 	req.partition_id = ndev->partition_id;
 	ctx->start_col = 0; // for now partition is always full NPU

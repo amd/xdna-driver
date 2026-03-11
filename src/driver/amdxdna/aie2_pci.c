@@ -494,6 +494,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
 	struct amdxdna_dev_hdl *ndev;
+	struct smu_config smu_conf;
 	struct psp_config psp_conf;
 	const struct firmware *fw;
 	unsigned long bars = 0;
@@ -524,9 +525,10 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		set_bit(PSP_REG_BAR(ndev, i), &bars);
+	for (i = 0; i < SMU_MAX_REGS; i++)
+		set_bit(SMU_REG_BAR(ndev, i), &bars);
 
 	set_bit(xdna->dev_info->sram_bar, &bars);
-	set_bit(xdna->dev_info->smu_bar, &bars);
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 
 	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
@@ -541,7 +543,6 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 
 	ndev->sram_base = tbl[xdna->dev_info->sram_bar];
-	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
 
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
@@ -589,6 +590,14 @@ skip_pasid:
 	ndev->psp_hdl = aiem_psp_create(&xdna->ddev, &pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
+		ret = -ENOMEM;
+		goto disable_sva;
+	}
+	for (i = 0; i < SMU_MAX_REGS; i++)
+		smu_conf.smu_regs[i] = tbl[SMU_REG_BAR(ndev, i)] + SMU_REG_OFF(ndev, i);
+	ndev->smu_hdl = aiem_smu_create(&xdna->ddev, &smu_conf);
+	if (!ndev->smu_hdl) {
+		XDNA_ERR(xdna, "failed to create smu");
 		ret = -ENOMEM;
 		goto disable_sva;
 	}

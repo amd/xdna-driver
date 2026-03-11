@@ -294,21 +294,119 @@ int main(void)
 }
 EOF
 
-# Test kmalloc_flex with new signature in 7.0:
-# kmalloc_flex() without GFP_KERNEL
-try_compile HAVE_7_0_kmalloc_ops << 'EOF'
+# Test kzalloc_obj() (7.0+)
+try_compile HAVE_7_0_kzalloc_obj << 'EOF'
 #include <linux/slab.h>
 int main(void)
 {
-	struct my_obj {
-		int c;
-		int data[];
-	};
-
-	kmalloc_flex(struct my_obj, data, 1);
-	kmalloc_obj(struct my_obj);
+	struct my_obj { int c; };
+	struct my_obj *p;
+	p = kzalloc_obj(*p);
 	return 0;
 }
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kzalloc_obj
+#define kzalloc_obj(obj)		kzalloc(sizeof(obj), GFP_KERNEL)
+#endif
+EOF
+
+# Test kzalloc_flex() (7.0+)
+try_compile HAVE_7_0_kzalloc_flex << 'EOF'
+#include <linux/slab.h>
+int main(void)
+{
+	struct my_obj { int c; int data[]; };
+	struct my_obj *p;
+	p = kzalloc_flex(*p, data, 1);
+	return 0;
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kzalloc_flex
+#define kzalloc_flex(obj, member, n)	kzalloc(struct_size(&(obj), member, n), GFP_KERNEL)
+#endif
+EOF
+
+# Test kmalloc_flex() (7.0+)
+try_compile HAVE_7_0_kmalloc_flex << 'EOF'
+#include <linux/slab.h>
+int main(void)
+{
+	struct my_obj { int c; int data[]; };
+	struct my_obj *p;
+	p = kmalloc_flex(*p, data, 1);
+	return 0;
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kmalloc_flex
+#define kmalloc_flex(obj, member, n)	kmalloc(struct_size(&(obj), member, n), GFP_KERNEL)
+#endif
+EOF
+
+# Test kmalloc_objs() (7.0+)
+try_compile HAVE_7_0_kmalloc_objs << 'EOF'
+#include <linux/slab.h>
+int main(void)
+{
+	int *p;
+	p = kmalloc_objs(*p, 4);
+	return 0;
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kmalloc_objs
+#define kmalloc_objs(obj, n)		kmalloc_array(n, sizeof(obj), GFP_KERNEL)
+#endif
+EOF
+
+# Test kzalloc_objs() (7.0+)
+try_compile HAVE_7_0_kzalloc_objs << 'EOF'
+#include <linux/slab.h>
+int main(void)
+{
+	int *p;
+	p = kzalloc_objs(*p, 4);
+	return 0;
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kzalloc_objs
+#define kzalloc_objs(obj, n)		kcalloc(n, sizeof(obj), GFP_KERNEL)
+#endif
+EOF
+
+# Test kvzalloc_objs() (7.0+)
+try_compile HAVE_7_0_kvzalloc_objs << 'EOF'
+#include <linux/slab.h>
+int main(void)
+{
+	int *p;
+	p = kvzalloc_objs(*p, 4);
+	return 0;
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kvzalloc_objs
+#define kvzalloc_objs(obj, n)		kvcalloc(n, sizeof(obj), GFP_KERNEL)
+#endif
+EOF
+
+# Test kvmalloc_objs() (7.0+)
+try_compile HAVE_7_0_kvmalloc_objs << 'EOF'
+#include <linux/slab.h>
+int main(void)
+{
+	int *p;
+	p = kvmalloc_objs(*p, 4);
+	return 0;
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kvmalloc_objs
+#define kvmalloc_objs(obj, n)		kvmalloc_array(n, sizeof(obj), GFP_KERNEL)
+#endif
 EOF
 
 # Test DRM_GPU_SCHED_STAT_NOMINAL name change 
@@ -322,12 +420,40 @@ int main(void)
 }
 EOF
 
+# Test drm_sched_start() 2-arg signature (latest upstream):
+# void drm_sched_start(struct drm_gpu_scheduler *sched, int errno);
+# Older kernels had a 1-arg version without the errno parameter.
+try_compile HAVE_2_arg_drm_sched_start << 'EOF'
+#include <drm/gpu_scheduler.h>
+int main(void)
+{
+	struct drm_gpu_scheduler *a = NULL;
+
+	drm_sched_start(a, 0);
+	return 0;
+}
+EOF
+
 # Test BIT_U64 exists
 try_compile HAVE_bit_u64 << 'EOF'
 #include <linux/bits.h>
 int main(void)
 {
 	uint64_t a = BIT_U64(1);
+	return 0;
+}
+EOF
+
+# Test amd_pmf_get_npu_data exists
+try_compile HAVE_7_0_amd_pmf_get_npu_data << 'EOF'
+#include <linux/module.h>
+#include <linux/amd-pmf-io.h>
+int main(void)
+{
+	MODULE_IMPORT_NS("AMD_PMF");
+
+	struct amd_pmf_npu_metrics info;
+	int ret = amd_pmf_get_npu_data(&info);
 	return 0;
 }
 EOF

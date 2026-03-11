@@ -131,6 +131,7 @@ struct amdxdna_dev_hdl {
 	const struct amdxdna_dev_priv	*priv;
 	void				*xrs_hdl;
 	struct psp_device		*psp_hdl;
+	struct smu_device		*smu_hdl;
 
 	u32				partition_id;
 

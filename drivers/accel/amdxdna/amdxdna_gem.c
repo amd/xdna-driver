@@ -3,7 +3,7 @@
  * Copyright (C) 2024, Advanced Micro Devices, Inc.
  */
 
-#include "drm_local/amdxdna_accel.h"
+#include "drm/amdxdna_accel.h"
 #include <drm/drm_cache.h>
 #include <drm/drm_device.h>
 #include <drm/drm_gem.h>
@@ -207,21 +207,12 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	if (!xdna->dev_info->ops->hmm_invalidate)
 		return 0;
 
-#ifdef HAVE_7_0_kmalloc_ops
 	mapp = kzalloc_obj(*mapp);
-#else
-	mapp = kzalloc(sizeof(*mapp), GFP_KERNEL);
-#endif
 	if (!mapp)
 		return -ENOMEM;
 
 	nr_pages = (PAGE_ALIGN(addr + len) - (addr & PAGE_MASK)) >> PAGE_SHIFT;
-#ifdef HAVE_7_0_kmalloc_ops
 	mapp->range.hmm_pfns = kvzalloc_objs(*mapp->range.hmm_pfns, nr_pages);
-#else
-	mapp->range.hmm_pfns = kvcalloc(nr_pages, sizeof(*mapp->range.hmm_pfns),
-					GFP_KERNEL);
-#endif
 	if (!mapp->range.hmm_pfns) {
 		ret = -ENOMEM;
 		goto free_map;
@@ -487,6 +478,9 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	if (abo->type == AMDXDNA_BO_DEV_HEAP)
 		drm_mm_takedown(&abo->mm);
 
+	if (amdxdna_iova_on(xdna))
+		amdxdna_iommu_unmap_bo(xdna, abo);
+
 	amdxdna_gem_obj_vunmap(abo);
 	mutex_destroy(&abo->lock);
 
@@ -498,12 +492,44 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	drm_gem_shmem_free(&abo->base);
 }
 
+static int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *filp)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
+	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+	int ret;
+
+	guard(mutex)(&abo->lock);
+	if (abo->ref) {
+		abo->ref++;
+		return 0;
+	}
+
+	if (amdxdna_iova_on(xdna)) {
+		ret = amdxdna_iommu_map_bo(xdna, abo);
+		if (ret)
+			return ret;
+	}
+	abo->ref++;
+
+	return 0;
+}
+
+static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp)
+{
+	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
+
+	guard(mutex)(&abo->lock);
+	abo->ref--;
+}
+
 static const struct drm_gem_object_funcs amdxdna_gem_dev_obj_funcs = {
 	.free = amdxdna_gem_dev_obj_free,
 };
 
 static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 	.free = amdxdna_gem_obj_free,
+	.open = amdxdna_gem_obj_open,
+	.close = amdxdna_gem_obj_close,
 	.print_info = drm_gem_shmem_object_print_info,
 	.pin = drm_gem_shmem_object_pin,
 	.unpin = drm_gem_shmem_object_unpin,
@@ -520,11 +546,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 {
 	struct amdxdna_gem_obj *abo;
 
-#ifdef HAVE_7_0_kmalloc_ops
 	abo = kzalloc_obj(*abo);
-#else
-	abo = kzalloc(sizeof(*abo), GFP_KERNEL);
-#endif
 	if (!abo)
 		return ERR_PTR(-ENOMEM);
 
@@ -534,6 +556,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 
 	abo->mem.userptr = AMDXDNA_INVALID_ADDR;
 	abo->mem.dev_addr = AMDXDNA_INVALID_ADDR;
+	abo->mem.dma_addr = AMDXDNA_INVALID_ADDR;
 	abo->mem.size = size;
 	INIT_LIST_HEAD(&abo->mem.umap_list);
 
@@ -649,6 +672,7 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo = to_xdna_obj(gobj);
 	abo->attach = attach;
 	abo->dma_buf = dma_buf;
+	abo->type = AMDXDNA_BO_SHMEM;
 
 	return gobj;
 
@@ -933,7 +957,10 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 
 	abo = to_xdna_obj(gobj);
 	args->vaddr = abo->mem.userptr;
-	args->xdna_addr = abo->mem.dev_addr;
+	if (abo->mem.dev_addr != AMDXDNA_INVALID_ADDR)
+		args->xdna_addr = abo->mem.dev_addr;
+	else
+		args->xdna_addr = abo->mem.dma_addr;
 
 	if (abo->type != AMDXDNA_BO_DEV)
 		args->map_offset = drm_vma_node_offset_addr(&gobj->vma_node);

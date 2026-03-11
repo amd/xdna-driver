@@ -6,7 +6,8 @@
 #ifndef _AIE2_PCI_H_
 #define _AIE2_PCI_H_
 
-#include "drm_local/amdxdna_accel.h"
+#include "drm/amdxdna_accel.h"
+#include <linux/limits.h>
 #include <linux/semaphore.h>
 
 #include "amdxdna_mailbox.h"
@@ -45,6 +46,27 @@
 	((_ndev)->priv->mbox_size) ? (_ndev)->priv->mbox_size : \
 	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
 })
+
+#if IS_ENABLED(CONFIG_AMD_PMF) && defined(HAVE_7_0_amd_pmf_get_npu_data)
+#define AIE2_GET_PMF_NPU_METRICS(metrics) amd_pmf_get_npu_data(metrics)
+#define AIE2_GET_PMF_NPU_DATA(field, val)				\
+({									\
+	struct amd_pmf_npu_metrics _npu_metrics;			\
+	int _ret;							\
+									\
+	_ret = amd_pmf_get_npu_data(&_npu_metrics);			\
+	val = _ret ? U32_MAX : _npu_metrics.field;			\
+	(_ret);								\
+})
+#else
+#define AIE2_GET_PMF_NPU_METRICS(metrics) (-EOPNOTSUPP)
+#define SENSOR_DEFAULT_npu_power	U32_MAX
+#define AIE2_GET_PMF_NPU_DATA(field, val)				\
+({									\
+	val = SENSOR_DEFAULT_##field;					\
+	(-EOPNOTSUPP);							\
+})
+#endif
 
 enum aie2_smu_reg_idx {
 	SMU_CMD_REG = 0,
@@ -338,9 +360,8 @@ int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *
 			 int (*notify_cb)(void *, void __iomem *, size_t));
 void *aie2_alloc_msg_buffer(struct amdxdna_dev_hdl *ndev, u32 *size,
 			    dma_addr_t *dma_addr);
-#define aie2_free_msg_buffer(ndev, size, buff_addr, dma_addr)		\
-	dma_free_noncoherent((ndev)->xdna->ddev.dev, size, buff_addr,	\
-			     dma_addr, DMA_FROM_DEVICE)
+void aie2_free_msg_buffer(struct amdxdna_dev_hdl *ndev, size_t size,
+			  void *cpu_addr, dma_addr_t dma_addr);
 
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);
