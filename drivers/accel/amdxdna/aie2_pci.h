@@ -59,7 +59,13 @@
 	(_ret);								\
 })
 #else
-#define AIE2_GET_PMF_NPU_METRICS(metrics) (-EOPNOTSUPP)
+#define AIE2_GET_PMF_NPU_METRICS(metrics)				\
+({									\
+	typeof(metrics) _m = metrics;					\
+	memset(_m, 0xff, sizeof(*_m));					\
+	(-EOPNOTSUPP);							\
+})
+
 #define SENSOR_DEFAULT_npu_power	U32_MAX
 #define AIE2_GET_PMF_NPU_DATA(field, val)				\
 ({									\
