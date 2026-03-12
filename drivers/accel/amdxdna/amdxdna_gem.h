@@ -42,7 +42,6 @@ struct amdxdna_gem_obj {
 	bool				pinned;
 	struct mutex			lock; /* Protects: pinned */
 	struct amdxdna_mem		mem;
-	u32				ref;
 
 	/* Below members is uninitialized when needed */
 	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */

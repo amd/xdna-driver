@@ -492,44 +492,12 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	drm_gem_shmem_free(&abo->base);
 }
 
-static int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *filp)
-{
-	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
-	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
-	int ret;
-
-	guard(mutex)(&abo->lock);
-	if (abo->ref) {
-		abo->ref++;
-		return 0;
-	}
-
-	if (amdxdna_iova_on(xdna)) {
-		ret = amdxdna_iommu_map_bo(xdna, abo);
-		if (ret)
-			return ret;
-	}
-	abo->ref++;
-
-	return 0;
-}
-
-static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp)
-{
-	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
-
-	guard(mutex)(&abo->lock);
-	abo->ref--;
-}
-
 static const struct drm_gem_object_funcs amdxdna_gem_dev_obj_funcs = {
 	.free = amdxdna_gem_dev_obj_free,
 };
 
 static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
 	.free = amdxdna_gem_obj_free,
-	.open = amdxdna_gem_obj_open,
-	.close = amdxdna_gem_obj_close,
 	.print_info = drm_gem_shmem_object_print_info,
 	.pin = drm_gem_shmem_object_pin,
 	.unpin = drm_gem_shmem_object_unpin,
@@ -582,12 +550,27 @@ static struct amdxdna_gem_obj *
 amdxdna_gem_create_shmem_object(struct drm_device *dev, size_t size)
 {
 	struct drm_gem_shmem_object *shmem = drm_gem_shmem_create(dev, size);
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
+	int ret;
 
 	if (IS_ERR(shmem))
 		return ERR_CAST(shmem);
 
 	shmem->map_wc = false;
-	return to_xdna_obj(&shmem->base);
+	gobj = &shmem->base;
+	abo = to_xdna_obj(gobj);
+
+	if (amdxdna_iova_on(xdna)) {
+		ret = amdxdna_iommu_map_bo(xdna, abo);
+		if (ret) {
+			drm_gem_object_put(gobj);
+			abo = ERR_PTR(ret);
+		}
+	}
+
+	return abo;
 }
 
 static struct amdxdna_gem_obj *
@@ -643,6 +626,7 @@ amdxdna_gem_create_object(struct drm_device *dev,
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 {
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct dma_buf_attachment *attach;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
@@ -673,6 +657,14 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo->attach = attach;
 	abo->dma_buf = dma_buf;
 	abo->type = AMDXDNA_BO_SHMEM;
+
+	if (amdxdna_iova_on(xdna)) {
+		ret = amdxdna_iommu_map_bo(xdna, abo);
+		if (ret) {
+			drm_gem_object_put(gobj);
+			gobj = ERR_PTR(ret);
+		}
+	}
 
 	return gobj;
 
