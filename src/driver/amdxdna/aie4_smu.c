@@ -26,6 +26,8 @@ int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	ndev->mp_npu_clock.freq_mhz = ndev->priv->dpm_clk_tbl[dpm_level].npuclk;
 	ndev->h_clock.freq_mhz = ndev->priv->dpm_clk_tbl[dpm_level].hclk;
 	ndev->dpm_level = dpm_level;
+	ndev->max_tops = AIE4_DPM_TOPS(ndev, ndev->max_dpm_level);
+	ndev->curr_tops = AIE4_DPM_TOPS(ndev, dpm_level);
 
 	XDNA_DBG(ndev->xdna, "MP-NPU clock %d, H clock %d\n",
 		 ndev->mp_npu_clock.freq_mhz, ndev->h_clock.freq_mhz);

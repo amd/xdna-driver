@@ -10,6 +10,7 @@
 #include "aie4_pci.h"
 
 extern const struct amdxdna_dev_priv npu3_dev_priv;
+extern const struct dpm_clk_freq npu3_dpm_clk_table[];
 
 #define NPU3_MBOX_BAR		0
 
@@ -48,6 +49,7 @@ extern const struct amdxdna_dev_priv npu3_dev_priv;
 #define NPU3_COMMON_DEV_PRIV						\
 	.npufw_path		= "npu.dev.sbin",				\
 	.certfw_path		= "cert.dev.sbin",				\
+	.dpm_clk_tbl	= npu3_dpm_clk_table,				\
 	.mbox_info_off		= NPU3_MBOX_INFO_OFF,				\
 	.doorbell_off		= NPU3_DOORBELL_OFF,				\
 	.psp_regs_off   = {						\

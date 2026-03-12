@@ -7,6 +7,18 @@
 #include "aie4_pci.h"
 #include "npu3_family.h"
 
+const struct dpm_clk_freq npu3_dpm_clk_table[] = {
+	{  400,  400},
+	{  960,  576},
+	{ 1108,  576},
+	{ 1200,  847},
+	{ 1200, 1200},
+	{ 1200, 1200},
+	{ 1200, 1200},
+	{ 1200, 1200},
+	{ 0 }
+};
+
 const struct amdxdna_dev_priv npu3_dev_priv = {
 	NPU3_COMMON_DEV_PRIV,
 	.smu_regs_off   = {
