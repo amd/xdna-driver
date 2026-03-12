@@ -1426,7 +1426,7 @@ struct resource_info
     auto& pci_dev_impl = get_pcidev_impl(device);
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
-    std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(5);
+    std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(6);
     info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::npu_clk_max;
     info_items[0].data_uint64 = resource_info.npu_clk_max;
     info_items[1].type = xrt_core::query::xrt_resource_raw::resource_type::npu_tops_max;
@@ -1437,6 +1437,16 @@ struct resource_info
     info_items[3].data_double = resource_info.npu_tops_curr;
     info_items[4].type = xrt_core::query::xrt_resource_raw::resource_type::npu_task_curr;
     info_items[4].data_uint64 = resource_info.npu_task_curr;
+
+    amdxdna_drm_query_clock_metadata clock_metadata = {};
+
+    arg.param = DRM_AMDXDNA_QUERY_CLOCK_METADATA;
+    arg.buffer_size = sizeof(clock_metadata);
+    arg.buffer = reinterpret_cast<uintptr_t>(&clock_metadata);
+
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
+    info_items[5].type = xrt_core::query::xrt_resource_raw::resource_type::npu_curr_clk_max;
+    info_items[5].data_uint64 = clock_metadata.h_clock.freq_mhz;
 
     return info_items;
   }
