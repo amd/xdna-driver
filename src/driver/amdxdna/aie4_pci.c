@@ -2683,9 +2683,11 @@ static int aie4_set_state(struct amdxdna_client *client, struct amdxdna_drm_set_
 
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
+		mutex_lock(&xdna->dev_lock);
 		mutex_lock(&xdna->dev_handle->aie4_lock);
 		ret = aie4_set_power_mode(client, args);
 		mutex_unlock(&xdna->dev_handle->aie4_lock);
+		mutex_unlock(&xdna->dev_lock);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
 		mutex_lock(&xdna->dev_handle->aie4_lock);
