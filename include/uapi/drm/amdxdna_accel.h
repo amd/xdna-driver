@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _UAPI_AMDXDNA_ACCEL_H_
@@ -161,10 +161,11 @@ struct amdxdna_drm_config_hwctx {
 
 enum amdxdna_bo_type {
 	AMDXDNA_BO_INVALID = 0,
-	AMDXDNA_BO_SHMEM,
-	AMDXDNA_BO_DEV_HEAP,
-	AMDXDNA_BO_DEV,
-	AMDXDNA_BO_CMD,
+	AMDXDNA_BO_SHMEM = 1,
+	AMDXDNA_BO_SHARE = 1,
+	AMDXDNA_BO_DEV_HEAP = 2,
+	AMDXDNA_BO_DEV = 3,
+	AMDXDNA_BO_CMD = 4,
 };
 
 /**

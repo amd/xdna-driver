@@ -151,7 +151,10 @@ struct amdxdna_sched_job {
 static inline u32
 amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (!cmd)
+		return ERT_INVALID_CMD;
 
 	return FIELD_GET(AMDXDNA_CMD_OPCODE, cmd->header);
 }
@@ -159,7 +162,10 @@ amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
 static inline void
 amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (!cmd)
+		return;
 
 	cmd->header &= ~AMDXDNA_CMD_STATE;
 	cmd->header |= FIELD_PREP(AMDXDNA_CMD_STATE, s);
@@ -168,7 +174,10 @@ amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 static inline enum ert_cmd_state
 amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (!cmd)
+		return ERT_CMD_STATE_INVALID;
 
 	return FIELD_GET(AMDXDNA_CMD_STATE, cmd->header);
 }

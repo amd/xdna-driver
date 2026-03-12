@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026, Advanced Micro Devices, Inc. All rights reserved.
 
 # Generate driver/amdxdna/config_kernel.h by feature-testing the kernel headers.
 
@@ -228,7 +228,7 @@ EOF
 # Test drm_gem_vmap()/drm_gem_vunmap signature in 6.16+:
 # int drm_gem_vmap(struct drm_gem_object *obj, struct iosys_map *map)
 # void drm_gem_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
-try_compile HAVE_drm_gem_vmap_vunmap << 'EOF'
+try_compile HAVE_6_16_drm_gem_vmap_vunmap << 'EOF'
 #include <drm/drm_gem.h>
 int main(void)
 {
@@ -239,6 +239,12 @@ int main(void)
 	(void)drm_gem_vunmap(a, b);
 	return 0;
 }
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_6_16_drm_gem_vmap_vunmap
+#define drm_gem_vmap(bo, map)	drm_gem_vmap_unlocked(bo, map)
+#define drm_gem_vunmap(bo, map)	drm_gem_vunmap_unlocked(bo, map)
+#endif
 EOF
 
 # Test dma_buf_ops->cache_sgt_mapping in 6.15-:
