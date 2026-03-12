@@ -69,6 +69,13 @@ aie4_health_get_runlist_read_idx(struct aie4_msg_app_health_report *h)
 
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
 
+#define AIE4_DPM_TOPS(ndev, dpm_level) \
+({ \
+	typeof(ndev) _ndev = (ndev); \
+	(4096ULL * (_ndev)->total_col * \
+	 (_ndev)->priv->dpm_clk_tbl[dpm_level].hclk / 1000000); \
+})
+
 extern int kernel_mode_submission;
 
 struct clock_entry {
@@ -146,6 +153,8 @@ struct amdxdna_dev_hdl {
 	struct aie_metadata		metadata;
 	struct clock_entry		mp_npu_clock;
 	struct clock_entry		h_clock;
+	u32				max_tops;
+	u32				curr_tops;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
@@ -164,9 +173,11 @@ struct amdxdna_dev_hdl {
 	struct timer_list		cert_timer;
 	bool				clk_gate_enabled;
 	u32				dpm_level;
+	u32				max_dpm_level;
 	bool				force_preempt_enabled;
 
 	int				num_vfs;
+	u32				hwctx_cnt;
 
 	struct async_events		*async_events;
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
