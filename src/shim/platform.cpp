@@ -186,6 +186,12 @@ drv_ioctl(drv_ioctl_cmd cmd, void* cmd_arg) const
   case drv_ioctl_cmd::config_ctx_debug_bo:
     config_ctx_debug_bo(*static_cast<config_ctx_debug_bo_arg*>(cmd_arg));
     break;
+  case drv_ioctl_cmd::config_ctx_dpm:
+    config_ctx_dpm(*static_cast<config_ctx_dpm_arg*>(cmd_arg));
+    break;
+  case drv_ioctl_cmd::config_ctx_priority_band:
+    config_ctx_priority_band(*static_cast<config_ctx_priority_band_arg*>(cmd_arg));
+    break;
   case drv_ioctl_cmd::create_bo:
     create_bo(*static_cast<bo_info*>(cmd_arg));
     break;

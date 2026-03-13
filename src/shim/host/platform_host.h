@@ -27,6 +27,12 @@ private:
   config_ctx_debug_bo(config_ctx_debug_bo_arg& arg) const override;
 
   void
+  config_ctx_dpm(config_ctx_dpm_arg& arg) const override;
+
+  void
+  config_ctx_priority_band(config_ctx_priority_band_arg& arg) const override;
+
+  void
   create_bo(bo_info& arg) const override;
 
   void

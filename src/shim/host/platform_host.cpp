@@ -158,6 +158,36 @@ config_ctx_debug_bo(config_ctx_debug_bo_arg& ctx_arg) const
   ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
 }
 
+void
+platform_drv_host::
+config_ctx_dpm(config_ctx_dpm_arg& ctx_arg) const
+{
+  amdxdna_hwctx_param_config_dpm dpm = {};
+  dpm.egops = ctx_arg.qos.gops;
+  dpm.fps = ctx_arg.qos.fps;
+  dpm.data_movement = ctx_arg.qos.dma_bandwidth;
+  const uint64_t latency_us = static_cast<uint64_t>(ctx_arg.qos.latency) * 1000ULL;
+  dpm.latency_in_us = (latency_us > UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(latency_us);
+
+  amdxdna_drm_config_hwctx arg = {};
+  arg.handle = ctx_arg.ctx_handle;
+  arg.param_type = DRM_AMDXDNA_HWCTX_CONFIG_DPM;
+  arg.param_val = reinterpret_cast<uintptr_t>(&dpm);
+  arg.param_val_size = sizeof(dpm);
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
+}
+
+void
+platform_drv_host::
+config_ctx_priority_band(config_ctx_priority_band_arg& ctx_arg) const
+{
+  amdxdna_drm_config_hwctx arg = {};
+  arg.handle = ctx_arg.ctx_handle;
+  arg.param_type = DRM_AMDXDNA_HWCTX_CONFIG_PRIORITY_BAND;
+  arg.param_val = ctx_arg.priority_band;
+  ioctl(dev_fd(), DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
+}
+
 std::pair<uint64_t, uint64_t>
 platform_drv_host::
 get_bo_info(uint32_t boh) const
