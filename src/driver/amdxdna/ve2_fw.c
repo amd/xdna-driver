@@ -15,15 +15,19 @@ int ve2_store_firmware_version(struct ve2_firmware_version *c_version, struct de
 	struct ve2_firmware_version *version;
 	int ret = 0;
 
+	dev_dbg(xaie_dev, ">>> %s ENTER: reading CERT version from partition", __func__);
 	version = kzalloc(sizeof(*version), GFP_KERNEL);
-	if (!version)
+	if (!version) {
+		dev_dbg(xaie_dev, "<<< %s EXIT (ret=%d)", __func__, -ENOMEM);
 		return -ENOMEM;
+	}
 
 	ret = ve2_partition_read(xaie_dev, 0, 0, VE2_PROG_DATA_MEMORY_OFF + VE2_CERT_VERSION_OFF,
 				 VE2_CERT_VERSION_SIZE, version);
 	if (ret < 0) {
 		pr_err("Failed to read firmware version, ret=%d\n", ret);
 		kfree(version);
+		dev_dbg(xaie_dev, "<<< %s EXIT (ret=%d)", __func__, ret);
 		return ret;
 	}
 
@@ -41,6 +45,8 @@ int ve2_store_firmware_version(struct ve2_firmware_version *c_version, struct de
 		 c_version->major, c_version->minor, c_version->hotfix, c_version->build,
 		 c_version->git_hash, c_version->date);
 
+	dev_dbg(xaie_dev, "<<< %s EXIT (ret=0): version=%u.%u, hash=%s",
+		__func__, c_version->major, c_version->minor, c_version->git_hash);
 	return 0;
 }
 
@@ -89,11 +95,12 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret = 0;
 
-	XDNA_DBG(xdna, "Getting firmware status: hwctx=%p, start_col=%u, num_col=%u",
+	XDNA_DBG(xdna, ">>> ENTER: hwctx=%p, start_col=%u, num_col=%u",
 		 hwctx, priv_ctx->start_col, priv_ctx->num_col);
 
 	if (!priv_ctx->aie_dev) {
 		XDNA_ERR(xdna, "Partition does not have aie device handle\n");
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENODEV);
 		return -ENODEV;
 	}
 
@@ -103,5 +110,7 @@ int ve2_get_firmware_status(struct amdxdna_ctx *hwctx)
 			XDNA_ERR(xdna, "Failed to get cert status for col %d ret = %d\n", col, ret);
 	}
 
+	XDNA_DBG(xdna, "<<< EXIT (ret=%d): hwctx=%p, num_col=%u",
+		 ret, hwctx, priv_ctx->num_col);
 	return ret;
 }

@@ -166,11 +166,12 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	struct alloc_requests *xrs_req;
 	int ret;
 
-	XDNA_DBG(xdna, "XRS resource request: hwctx=%p, num_tiles=%u, priority=%u",
-		 hwctx, hwctx->num_tiles, hwctx->qos.priority);
+	XDNA_DBG(xdna, ">>> ENTER");
 
-	if (!xrs)
+	if (!xrs) {
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EINVAL);
 		return -EINVAL;
+	}
 
 	mutex_lock(&xrs->xrs_lock);
 	xrs_req = kzalloc(sizeof(*xrs_req), GFP_KERNEL);
@@ -246,11 +247,11 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	}
 	mutex_unlock(&xrs->xrs_lock);
 
-	XDNA_DBG(xdna, "XRS request success: hwctx=%p, start_col=%u, num_col=%u, create_part=%d",
-		 hwctx, nhwctx->start_col, nhwctx->num_col, load_act.create_aie_part);
-
 	kfree(xrs_req->cdo.start_cols);
 	kfree(xrs_req);
+	XDNA_DBG(xdna, "XRS request succeeded: hwctx=%p, start_col=%u, num_col=%u, create_part=%d",
+		 hwctx, nhwctx->start_col, nhwctx->num_col, load_act.create_aie_part);
+	XDNA_DBG(xdna, "<<< EXIT (ret=0)");
 	return 0;
 
 destroy_partition:
@@ -262,6 +263,7 @@ free_start_cols:
 free_xrs_req:
 	kfree(xrs_req);
 	XDNA_ERR(xdna, "XRS Request Failed. Ret %d", ret);
+	XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 	return ret;
 }
 
@@ -342,11 +344,12 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 	u32 num_col;
 	int ret = 0;
 
+	XDNA_DBG(xdna, ">>> ENTER");
+	XDNA_DBG(xdna, "Initializing partition: hwctx=%p, start_col=%u, num_col=%u, hsa_addr=0x%llx",
+		 hwctx, nhwctx->start_col, nhwctx->num_col,
+		 nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr);
 	start_col = nhwctx->start_col;
 	num_col = nhwctx->num_col;
-
-	XDNA_DBG(xdna, "Handshake init: hwctx=%p, start_col=%u, num_col=%u, hsa_addr=0x%llx",
-		 hwctx, start_col, num_col, nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr);
 
 	hs_data = ve2_prepare_hs_data(xdna, nhwctx, true);
 	if (!hs_data) {
@@ -369,6 +372,7 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 
 release_hs_data:
 	ve2_free_hs_data(hs_data, num_col);
+	XDNA_DBG(xdna, "<<< EXIT: hwctx=%p, num_col=%u", hwctx, num_col);
 }
 
 #define RR_SHARING BIT(0)
@@ -1131,7 +1135,8 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		&xdna->dev_handle->ve2_mgmtctx[start_col];
 	int ret = 0;
 
-	XDNA_DBG(xdna, "Create mgmt partition: start_col=%u, ncols=%u, create=%d",
+	XDNA_DBG(xdna, ">>> ENTER");
+	XDNA_DBG(xdna, "Creating mgmt partition: start_col=%u, ncols=%u, create_aie_part=%d",
 		 load_act->part.start_col, load_act->part.ncols, load_act->create_aie_part);
 
 	if (load_act->create_aie_part) {
@@ -1145,6 +1150,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		if (IS_ERR(mgmtctx->mgmt_aiedev)) {
 			XDNA_ERR(xdna, "aie parition request failed for part id %d",
 				 request.partition_id);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENODEV);
 			return -ENODEV;
 		}
 		XDNA_DBG(xdna, "AIE partition created successfully");
@@ -1167,6 +1173,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 		if (!mgmtctx->mgmtctx_workq) {
 			XDNA_ERR(xdna, "Failed to create Workqueue for scheduler");
 			aie_partition_release(mgmtctx->mgmt_aiedev);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENOMEM);
 			return -ENOMEM;
 		}
 		INIT_WORK(&mgmtctx->sched_work, ve2_scheduler_work);
@@ -1180,6 +1187,8 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 
 	nhwctx->start_col = load_act->part.start_col;
 	nhwctx->num_col = load_act->part.ncols;
+	XDNA_DBG(xdna, "<<< EXIT (ret=0): start_col=%u, ncols=%u",
+		 nhwctx->start_col, nhwctx->num_col);
 	return 0;
 }
 
@@ -1254,15 +1263,17 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 	struct amdxdna_ctx_priv *nhwctx = hwctx->priv;
 	struct amdxdna_mgmtctx  *mgmtctx = NULL;
 	u32 start_col = nhwctx->start_col;
-	struct xrs_action_load load_act;
+	struct xrs_action_load load_act = {0};
 	struct solver_state *xrs = xdna->dev_handle->xrs_hdl;
 	int ret;
 
+	XDNA_DBG(xdna, ">>> ENTER");
 	XDNA_DBG(xdna, "Destroy partition: hwctx=%p, start_col=%u, num_col=%u",
 		 hwctx, nhwctx->start_col, nhwctx->num_col);
 
 	if (!nhwctx->aie_dev) {
 		XDNA_ERR(xdna, "Partition does not have aie device handle");
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -ENODEV);
 		return -ENODEV;
 	}
 
@@ -1290,7 +1301,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 		if (wq)
 			destroy_workqueue(wq);
 		aie_unregister_error_notification(nhwctx->aie_dev);
-		XDNA_DBG(xdna, "%s: Un-registered ve2_aie_error_cb() callback\n", __func__);
+		XDNA_DBG(xdna, "Un-registered ve2_aie_error_cb() callback\n");
 		aie_partition_teardown(nhwctx->aie_dev);
 		aie_partition_release(nhwctx->aie_dev);
 	} else {
@@ -1302,6 +1313,8 @@ int ve2_mgmt_destroy_partition(struct amdxdna_ctx *hwctx)
 
 unlock_xrs_lock:
 	mutex_unlock(&xrs->xrs_lock);
+	XDNA_DBG(xdna, "<<< EXIT (ret=%d): hwctx=%p, release_aie_part=%d",
+		 ret, hwctx, load_act.release_aie_part);
 	return ret;
 }
 

@@ -1285,6 +1285,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	struct amdxdna_ctx_priv *priv = NULL;
 	int ret;
 
+	XDNA_DBG(xdna, ">>> ENTER");
 	XDNA_DBG(xdna, "Initializing hwctx for client pid %d, num_tiles=%u, priority=%u",
 		 client->pid, hwctx->num_tiles, hwctx->qos.priority);
 
@@ -1328,7 +1329,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	XDNA_DBG(xdna, "hwctx %p initialized: start_col=%u, num_col=%u, queue_addr=0x%llx",
 		 hwctx, priv->start_col, priv->num_col,
 		 priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr);
-
+	XDNA_DBG(xdna, "<<< EXIT (ret=0)");
 	return 0;
 
 cleanup_xrs:
@@ -1337,6 +1338,7 @@ cleanup_xrs:
 cleanup_priv:
 	kfree(hwctx->priv);
 
+	XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 	return ret;
 }
 
@@ -1349,8 +1351,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	struct amdxdna_sched_job *job;
 	int idx;
 
-	XDNA_DBG(xdna,
-		 "Finalizing hwctx %p: start_col=%u, num_col=%u, submitted=%llu, completed=%llu",
+	XDNA_DBG(xdna, ">>> ENTER");
+	XDNA_DBG(xdna, "Destroying hwctx: hwctx=%p, start_col=%u, num_col=%u, submitted=%llu, completed=%llu",
 		 hwctx, nhwctx->start_col, nhwctx->num_col,
 		 hwctx->submitted, hwctx->completed);
 
@@ -1406,8 +1408,9 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	mutex_destroy(&hwctx->priv->privctx_lock);
 	kfree(hwctx->priv);
 	hwctx->priv = NULL;
-	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
+	XDNA_DBG(xdna, "Destroyed hwctx=%p, submitted=%llu, completed=%llu",
 		 hwctx, hwctx->submitted, hwctx->completed);
+	XDNA_DBG(xdna, "<<< EXIT");
 }
 
 static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 paddr,
@@ -1460,7 +1463,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	u32 buf_sz;
 	int ret = 0;
 
-	XDNA_DBG(xdna, "hwctx %p config: type=%u, mdata_hdl=0x%llx, size=%u",
+	XDNA_DBG(xdna, ">>> ENTER: hwctx=%p, type=%u, mdata_hdl=0x%llx, size=%u",
 		 hwctx, type, mdata_hdl, size);
 
 	/* Update fw's handshake shared memory with debug/trace buffer details */
@@ -1470,6 +1473,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 		if (!mdata_abo || !mdata_abo->dma_buf) {
 			XDNA_ERR(xdna, "%s: Failed to get metadata BO %lld for type %d",
 				 __func__, mdata_hdl, type);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EINVAL);
 			return -EINVAL;
 		}
 		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
@@ -1477,6 +1481,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			XDNA_ERR(xdna, "%s: Failed to vmap metadata BO %lld for type %d",
 				 __func__, mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EINVAL);
 			return -EINVAL;
 		}
 
@@ -1485,6 +1490,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			XDNA_ERR(xdna, "%s: Failed to get BO %lld for type %d",
 				 __func__, mdata->bo_handle, type);
 			amdxdna_gem_put_obj(mdata_abo);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EINVAL);
 			return -EINVAL;
 		}
 
@@ -1500,6 +1506,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 					 __func__, col, mdata->buf_type, ret);
 				amdxdna_gem_put_obj(abo);
 				amdxdna_gem_put_obj(mdata_abo);
+				XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 				return ret;
 			}
 			prev_buf_sz += buf_sz;
@@ -1517,6 +1524,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 		if (!mdata_abo || !mdata_abo->dma_buf) {
 			XDNA_ERR(xdna, "%s: Failed to get metadata BO %lld for type %d",
 				 __func__, mdata_hdl, type);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EINVAL);
 			return -EINVAL;
 		}
 		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
@@ -1524,6 +1532,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			XDNA_ERR(xdna, "%s: Failed to vmap metadata BO %lld for type %d",
 				 __func__, mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EINVAL);
 			return -EINVAL;
 		}
 		for (u32 col = 0; col < hwctx->num_col; col++) {
@@ -1534,6 +1543,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 					 __func__, mdata->buf_type, mdata->bo_handle,
 					 hwctx->name, col, ret);
 				amdxdna_gem_put_obj(mdata_abo);
+				XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 				return ret;
 			}
 		}
@@ -1547,6 +1557,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
 		if (copy_from_user(&op_timeout, (u32 __user *)(uintptr_t)mdata_hdl, sizeof(u32))) {
 			XDNA_ERR(xdna, "%s: Failed to copy opcode timeout from user", __func__);
+			XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EFAULT);
 			return -EFAULT;
 		}
 
@@ -1558,8 +1569,10 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 
 	default:
 		XDNA_ERR(xdna, "%s: Unsupported config type %d", __func__, type);
+		XDNA_DBG(xdna, "<<< EXIT (ret=%d)", -EOPNOTSUPP);
 		return -EOPNOTSUPP;
 	}
 
+	XDNA_DBG(xdna, "<<< EXIT (ret=%d)", ret);
 	return ret;
 }
