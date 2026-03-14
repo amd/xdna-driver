@@ -148,7 +148,7 @@ static int aie2_mgmt_chann_init(struct amdxdna_dev_hdl *ndev)
 	 * is alive.
 	 */
 	ret = readx_poll_timeout(readl, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF),
-				 addr, addr, AIE2_INTERVAL, AIE2_TIMEOUT);
+				 addr, addr, AIE_INTERVAL, AIE_TIMEOUT);
 	if (ret || !addr)
 		return -ETIME;
 
@@ -584,9 +584,10 @@ skip_pasid:
 #endif
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
+
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
-	ndev->psp_hdl = aie2m_psp_create(&pdev->dev, &psp_conf);
+	ndev->psp_hdl = aiem_psp_create(&xdna->ddev, &pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
 		ret = -ENOMEM;
