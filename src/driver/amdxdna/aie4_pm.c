@@ -109,6 +109,17 @@ int aie4_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target)
 
 int aie4_pm_init(struct amdxdna_dev_hdl *ndev)
 {
+	if (ndev->priv->dpm_clk_tbl) {
+		while (ndev->priv->dpm_clk_tbl[ndev->max_dpm_level].hclk)
+			ndev->max_dpm_level++;
+		if (ndev->max_dpm_level > 0)
+			ndev->max_dpm_level--;
+		ndev->dpm_level = 0;
+		ndev->mp_npu_clock.freq_mhz = ndev->priv->dpm_clk_tbl[0].npuclk;
+		ndev->h_clock.freq_mhz = ndev->priv->dpm_clk_tbl[0].hclk;
+		ndev->max_tops = (u32)AIE4_DPM_TOPS(ndev, ndev->max_dpm_level);
+		ndev->curr_tops = (u32)AIE4_DPM_TOPS(ndev, 0);
+	}
 	return aie4_pm_set_mode(ndev, ndev->pw_mode);
 }
 
@@ -123,12 +134,15 @@ void aie4_pm_fini(struct amdxdna_dev_hdl *ndev)
 
 int aie4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr)
 {
-	u64 total_col, hclk_freq;
-
-	total_col = ndev->total_col;
-	hclk_freq = ndev->h_clock.freq_mhz;
-	*max = 2 * total_col;
-	*curr = (*max * hclk_freq) / 1028;
-
+	if (ndev->priv->dpm_clk_tbl) {
+		*max = ndev->max_tops;
+		*curr = ndev->curr_tops;
+		return 0;
+	}
+	if (ndev->h_clock.freq_mhz)
+		*curr = 4096ULL * ndev->total_col * ndev->h_clock.freq_mhz / 1000000;
+	else
+		*curr = 0;
+	*max = ndev->max_tops ? ndev->max_tops : *curr;
 	return 0;
 }

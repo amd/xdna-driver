@@ -38,7 +38,7 @@ add_custom_command(
 )
 
 add_custom_command(
-  OUTPUT ${XDNA_DRV_TGT}
+  OUTPUT in_tree_${XDNA_DRV_TGT}
   COMMENT "Build ${XDNA_DRV_TGT}"
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} ${KERNEL_VER} UMQ_HELLO_TEST=${UMQ_HELLO_TEST} ${XDNA_DRV_BLD_FLAGS_MAKE} XDNA_BUS_TYPE=pci
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} copy_ko
@@ -46,7 +46,7 @@ add_custom_command(
   DEPENDS ${XDNA_DRV_BLD_SRC}/${XDNA_DRV_CONFIG_KERNEL_HEADER}
   )
 # Defines phony target which always run (ALL) to trigger above custom command.
-add_custom_target(driver ALL DEPENDS ${XDNA_DRV_TGT})
+add_custom_target(driver ALL DEPENDS in_tree_${XDNA_DRV_TGT})
 
 # Tar and install driver source code for packaging
 if(NOT PACKAGE_LEGACY_DRIVER)

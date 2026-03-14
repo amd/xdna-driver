@@ -10,6 +10,7 @@
 #include <linux/limits.h>
 #include <linux/semaphore.h>
 
+#include "aie2_msg_priv.h"
 #include "amdxdna_mailbox.h"
 
 #define AIE2_INTERVAL	20000	/* us */
@@ -59,7 +60,13 @@
 	(_ret);								\
 })
 #else
-#define AIE2_GET_PMF_NPU_METRICS(metrics) (-EOPNOTSUPP)
+#define AIE2_GET_PMF_NPU_METRICS(metrics)				\
+({									\
+	typeof(metrics) _m = metrics;					\
+	memset(_m, 0xff, sizeof(*_m));					\
+	(-EOPNOTSUPP);							\
+})
+
 #define SENSOR_DEFAULT_npu_power	U32_MAX
 #define AIE2_GET_PMF_NPU_DATA(field, val)				\
 ({									\
@@ -255,6 +262,7 @@ enum aie2_fw_feature {
 	AIE2_NPU_COMMAND,
 	AIE2_PREEMPT,
 	AIE2_TEMPORAL_ONLY,
+	AIE2_APP_HEALTH,
 	AIE2_FEATURE_MAX
 };
 
@@ -335,6 +343,8 @@ int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *ver
 int aie2_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 				struct amdxdna_fw_ver *fw_ver);
+int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
+			  struct app_health_report *report);
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);

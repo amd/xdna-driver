@@ -407,20 +407,22 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 static int ve2_get_firmware_version(struct amdxdna_client *client,
 				    struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_dev_hdl *hdl = client->xdna->dev_handle;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *hdl = xdna->dev_handle;
 	struct ve2_firmware_version *fver = &hdl->fw_version;
-	struct amdxdna_drm_query_ve2_firmware_version version;
+	struct amdxdna_drm_query_firmware_version version;
 
 	if (!fver)
 		return -EINVAL;
 
-	memset(&version, 0, sizeof(version));
+	XDNA_DBG(xdna, "CERT firmware: git_hash=%s, date=%s",
+		 fver->git_hash, fver->date);
 
+	memset(&version, 0, sizeof(version));
 	version.major = fver->major;
 	version.minor = fver->minor;
-
-	memcpy(version.date, fver->date, VE2_FW_DATE_STRING_LENGTH);
-	memcpy(version.git_hash, fver->git_hash, VE2_FW_HASH_STRING_LENGTH);
+	version.patch = fver->hotfix;
+	version.build = fver->build;
 
 	if (args->buffer_size < sizeof(version))
 		return -EINVAL;

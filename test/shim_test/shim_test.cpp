@@ -936,7 +936,7 @@ std::vector<test_case> test_list {
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_suspend_resume, {}
   },
-  test_case{ "io test timeout run for context health report", {~0U, ~0U},
+  test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
   },
   //test_case{ "io test no-op kernel good run", {},

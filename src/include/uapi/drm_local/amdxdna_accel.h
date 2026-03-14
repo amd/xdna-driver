@@ -580,20 +580,6 @@ struct amdxdna_drm_query_firmware_version {
 };
 
 /**
- * struct amdxdna_drm_query_ve2_firmware_version - Query the git hash and version of the firmware
- * @major:  Major version number
- * @minor:  Minor version number
- * @date:  Build date of the firmware
- * @git_hash:  Git commit ID used to build the firmware version
- */
-struct amdxdna_drm_query_ve2_firmware_version {
-	__u8 major;
-	__u8 minor;
-	__u8 date[14];
-	__u8 git_hash[48];
-};
-
-/**
  * struct amdxdna_drm_get_resource_info - Get info on some resources within NPU
  * @npu_clk_max: max H-Clocks
  * @npu_tops_max: max TOPs

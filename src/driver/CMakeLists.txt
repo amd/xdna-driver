@@ -34,8 +34,8 @@ message("-- Extra driver source dir: ${XDNA_EXTRA_DRV_DIR}")
 message("-- Extra driver tar exclude rules: ${XDNA_EXTRA_DRV_EXCLUDES}")
 
 add_custom_command(
-  OUTPUT all_driver_source
-  COMMENT "Collect all driver source code"
+  OUTPUT all_out_of_tree_driver_source
+  COMMENT "Collect all out of tree driver source code"
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${XDNA_DRV_BLD_DIR}
   COMMAND cp -rf ${CMAKE_CURRENT_SOURCE_DIR}/${XDNA_DRV_DIR}/* ${XDNA_EXTRA_DRV_DIR} ${XDNA_DRV_BLD_DIR}
@@ -46,16 +46,16 @@ add_custom_command(
 # Generate XDNA_DRV_CONFIG_KERNEL_HEADER before doing build
 add_custom_command(
   OUTPUT ${XDNA_DRV_BLD_SRC}/${XDNA_DRV_CONFIG_KERNEL_HEADER}
-  COMMENT "Configuring kernel compatibility header"
+  COMMENT "Configuring out of tree kernel compatibility header"
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMAND ${CMAKE_COMMAND} -E env bash ./${XDNA_DRV_CONFIG_KERNEL_SCRIPT}
-  DEPENDS all_driver_source
+  DEPENDS all_out_of_tree_driver_source
 )
 
 # Because ${XDNA_DRV_TGT} is generated in ${XDNA_DRV_BLD_TGT}. So this custom command will always run.
 add_custom_command(
-  OUTPUT ${XDNA_DRV_TGT}
-  COMMENT "Build ${XDNA_DRV_TGT}"
+  OUTPUT out_of_tree_${XDNA_DRV_TGT}
+  COMMENT "Build out of tree ${XDNA_DRV_TGT}"
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} ${KERNEL_VER} UMQ_HELLO_TEST=${UMQ_HELLO_TEST} ${XDNA_DRV_BLD_FLAGS_MAKE} XDNA_BUS_TYPE=pci
   COMMAND $(MAKE) -f ${XDNA_DRV_BLD_SRC}/Makefile BUILD_ROOT_DIR=${XDNA_DRV_BLD_TGT} copy_ko
   COMMAND ${CMAKE_COMMAND} -E copy ${XDNA_DRV_BLD_TGT}/${XDNA_DRV_TGT} ${XDNA_DRV_PATH}
@@ -71,7 +71,7 @@ if (XDNA_DRV_INT_NAME)
     COMMAND cp -rf ${XDNA_DRV_INT_SRC_DIR} ${XDNA_DRV_INT_BLD_DIR}
     #temporary workaround to grab common code for int driver
     COMMAND cp ${XDNA_DRV_BLD_DIR}/amdxdna_mailbox.* ${XDNA_DRV_BLD_DIR}/amdxdna_trace.h ${XDNA_DRV_INT_BLD_DIR}
-    DEPENDS all_driver_source
+    DEPENDS all_out_of_tree_driver_source
   )
 
   # Build internal driver
@@ -86,14 +86,14 @@ if (XDNA_DRV_INT_NAME)
 endif(XDNA_DRV_INT_NAME)
 
 if(XDNA_DRV_INT_SRC_DIR)
-add_custom_target(legacy_driver ALL DEPENDS ${XDNA_DRV_TGT} ${XDNA_DRV_INT_TGT})
+add_custom_target(legacy_driver ALL DEPENDS out_of_tree_${XDNA_DRV_TGT} ${XDNA_DRV_INT_TGT})
 else()
-add_custom_target(legacy_driver ALL DEPENDS ${XDNA_DRV_TGT})
+add_custom_target(legacy_driver ALL DEPENDS out_of_tree_${XDNA_DRV_TGT})
 endif()
 
 # Tar and install driver source code for packaging
 if(PACKAGE_LEGACY_DRIVER)
-  message("-- Packaging legacy driver source")
+  message("-- Packaging out of tree driver source")
   set(XDNA_DRV_SRC_DIR
     driver
     include
