@@ -1639,6 +1639,33 @@ struct firmware_version
   }
 };
 
+struct cert_firmware_version
+{
+  using result_type = query::cert_firmware_version::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_query_firmware_version fw_version{};
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION,
+      .buffer_size = sizeof(fw_version),
+      .buffer = reinterpret_cast<uintptr_t>(&fw_version)
+    };
+
+    auto& pci_dev_impl = get_pcidev_impl(device);
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
+
+    result_type output;
+    output.major = fw_version.major;
+    output.minor = fw_version.minor;
+    output.hotfix = fw_version.patch;
+    output.build = fw_version.build;
+
+    return output;
+  }
+};
+
 struct default_value
 {
 
@@ -2010,6 +2037,7 @@ initialize_query_table()
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
   emplace_func1_request<query::firmware_version,               firmware_version>();
+  emplace_func0_request<query::cert_firmware_version,          cert_firmware_version>();
   emplace_func1_request<query::sub_device_path,                sub_device_path>();
   emplace_func1_request<query::aie_coredump,                   aie_coredump>();
   emplace_func1_request<query::aie_read,                       aie_read>();

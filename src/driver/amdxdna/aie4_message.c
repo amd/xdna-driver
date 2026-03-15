@@ -247,9 +247,10 @@ fail:
 	return ret;
 }
 
-int aie4_query_cert_version(struct amdxdna_dev_hdl *ndev)
+int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev)
 {
-	DECLARE_AIE4_MSG(aie4_msg_get_cert_version, AIE4_MSG_OP_GET_CERT_VERSION);
+	DECLARE_AIE4_MSG(aie4_msg_query_cert_firmware_version,
+			 AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
@@ -259,13 +260,14 @@ int aie4_query_cert_version(struct amdxdna_dev_hdl *ndev)
 
 	xdna->cert_ver.major = resp.major_version;
 	xdna->cert_ver.minor = resp.minor_version;
-	strscpy(xdna->cert_ver.git_hash, resp.git_hash, sizeof(xdna->cert_ver.git_hash));
-	strscpy(xdna->cert_ver.date, resp.date, sizeof(xdna->cert_ver.date));
+	xdna->cert_ver.hotfix = resp.hotfix;
+	xdna->cert_ver.build = resp.build;
 
-	XDNA_DBG(xdna, "CERT version %u.%u", xdna->cert_ver.major,
-		 xdna->cert_ver.minor);
-	XDNA_DBG(xdna, "CERT git hash %s", xdna->cert_ver.git_hash);
-	XDNA_DBG(xdna, "CERT date %s", xdna->cert_ver.date);
+	XDNA_DBG(xdna, "CERT FW version %u.%u.%u.%u", xdna->cert_ver.major,
+		 xdna->cert_ver.minor, xdna->cert_ver.hotfix,
+		 xdna->cert_ver.build);
+	XDNA_DBG(xdna, "CERT FW git hash %s", resp.git_hash);
+	XDNA_DBG(xdna, "CERT FW date %s", resp.date);
 
 	return 0;
 }

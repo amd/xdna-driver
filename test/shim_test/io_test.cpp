@@ -572,8 +572,6 @@ TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_
 
     bad_bo_set.verify_result();
   }
-  // TODO: Remove sleep workaround after FW fix to not wait for suspend after timeout is available.
-  sleep(10);
 }
 
 /**
