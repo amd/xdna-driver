@@ -199,9 +199,20 @@
  *
  * v5.22:
  * - Add runlist_read_idx to app health report
+ *
+ * v5.23:
+ * - Cleaned up Uc Naming Convention and modified cert/uC
+ *   version query with hotfix and build fields.
+ *
+ * v5.24:
+ * - Add new opcode AIE4_MSG_OP_SETUP_SCHEDULING_PRIORITY_BANDS
+ *   to replace the former AIE4_MSG_OP_SETUP_PRIORITY_BANDS_SCHEDULING
+ *   which was mislabeled as VF-only but is actually a common PF/VF opcode
+ * - Deprecate AIE4_MSG_OP_SETUP_PRIORITY_BANDS_SCHEDULING, keep it
+ *   supported for backward compatibility.
  */
 #define PROTOCOL_MAJOR  5
-#define PROTOCOL_MINOR  22
+#define PROTOCOL_MINOR  24
 
 /**
  * opcodes between driver and firmware
@@ -226,12 +237,13 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_SET_RUNTIME_CONFIG               = 0x10007,
 	AIE4_MSG_OP_GET_RUNTIME_CONFIG               = 0x10008,
 	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x10009,
-	AIE4_MSG_OP_START_EVENT_TRACE                = 0x1000a,
-	AIE4_MSG_OP_STOP_EVENT_TRACE                 = 0x1000b,
-	AIE4_MSG_OP_SET_EVENT_TRACE_CATEGORIES       = 0x1000c,
-	AIE4_MSG_OP_DRAM_WORK_BUFFER                 = 0x1000d,
-	AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER         = 0x1000e,
-	AIE4_MSG_OP_GET_CERT_VERSION                 = 0x1000f,
+	AIE4_MSG_OP_START_EVENT_TRACE                = 0x1000A,
+	AIE4_MSG_OP_STOP_EVENT_TRACE                 = 0x1000B,
+	AIE4_MSG_OP_SET_EVENT_TRACE_CATEGORIES       = 0x1000C,
+	AIE4_MSG_OP_DRAM_WORK_BUFFER                 = 0x1000D,
+	AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER         = 0x1000E,
+	AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION      = 0x1000F,
+	AIE4_MSG_OP_SETUP_SCHEDULING_PRIORITY_BANDS  = 0x10010,
 
 	/* PF-only Opcodes:  0x20000..0x2FFFF */
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
@@ -249,13 +261,15 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_AIE_TILE_INFO                    = 0x30006,
 	AIE4_MSG_OP_AIE_VERSION_INFO                 = 0x30007,
 	AIE4_MSG_OP_AIE_COLUMN_INFO                  = 0x30008,
-	AIE4_MSG_OP_SETUP_PRIORITY_BANDS_SCHEDULING  = 0x30009,
+	AIE4_MSG_OP_SETUP_PRIORITY_BANDS_SCHEDULING  = 0x30009, /* DEPRECATED */
 	AIE4_MSG_OP_POWER_HINT                       = 0x3000A,
 	AIE4_MSG_OP_POWER_OVERRIDE                   = 0x3000B,
 	AIE4_MSG_OP_AIE_DEBUG_ACCESS                 = 0x3000E,
 	AIE4_MSG_OP_GET_APP_HEALTH_STATUS            = 0x3000F,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
 	AIE4_MSG_OP_CONFIGURE_JOB_CMPL_MSIX          = 0x30011,
+	AIE4_MSG_OP_GET_DPM_FREQ_TABLE               = 0x30012,
+	AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL            = 0x30013,
 };
 
 /** The status that is returned with each response message. */
@@ -278,6 +292,9 @@ enum aie4_msg_context_priority_band {
 
 /** Max amount of uCs supported by the system */
 #define AIE4_MPNPUFW_MAX_UC_COUNT    (6)
+
+/** Max amount of DPM levels supported by the system */
+#define AIE4_MPNPUFW_MAX_DPM_LEVEL_COUNT    (10)
 
 /**
  * The 32-bit PASID format
@@ -1109,6 +1126,7 @@ struct aie4_msg_selftest_resp {
 #define MAX_NUM_SUPERVISORS_API 4
 #define TOTAL_NUM_UC_API 6
 #define CONFIG_NPUFW_NUM_COLUMNS_API 3
+#define MAX_NUM_HW_CTX_API 128
 #define MIN_TELEMETRY_BUFF_SIZE SZ_128K
 
 /**
@@ -1180,8 +1198,8 @@ struct aie4_telemetry {
 	struct telemetry_opcodes opcodes;
 
 	/* Preemption counters */
-	u64 preemption_frame_boundary_counter[TOTAL_NUM_UC_API];
-	u64 preemption_checkpoint_event_counter[TOTAL_NUM_UC_API];
+	u64 preemption_frame_boundary_counter[MAX_NUM_HW_CTX_API];
+	u64 preemption_checkpoint_event_counter[MAX_NUM_HW_CTX_API];
 };
 
 /* The telemetry types requestable for CERT PERF counter. */
@@ -1889,35 +1907,96 @@ struct aie4_msg_configure_job_cmpl_msix_resp {
 };
 
 /**
- * AIE4_MSG_OP_GET_CERT_VERSION
- * Get CERT version command
+ * AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION
+ * Get cert firmware version command
  *
  * @resvd: Reserved for alignment.
  */
-struct aie4_msg_get_cert_version_req {
+struct aie4_msg_query_cert_firmware_version_req {
 	u32 resvd;
 };
 
 /**
- * AIE4_MSG_OP_GET_CERT_VERSION
- * Get CERT version response
+ * AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION
+ * Get cert firmware version response
  *
  * @status: enum aie4_msg_status
- * @major_version: Major version of the CERT
- * @minor_version: Minor version of the CERT
- * @git_hash: Git hash of the CERT
- * @date: Date of the CERT
- * @reserved: Reserved for alignment.
+ * @major_version: Major version of the UC
+ * @minor_version: Minor version of the UC
+ * @git_hash: Git hash of the UC
+ * @date: Date of the UC
+ * @hotfix: Hotfix number of the UC
+ * @build: Build number of the UC
  * @note The total size of the response is 64 bytes.
  *     git_hash and date both end with a null character.
  */
-struct aie4_msg_get_cert_version_resp {
+struct aie4_msg_query_cert_firmware_version_resp {
 	enum aie4_msg_status status;
 	u8 major_version;
 	u8 minor_version;
 	char    git_hash[41];
 	char    date[11];
-	u16 reserved;
+	u8 hotfix;
+	u8 build;
+};
+
+/**
+ * AIE4_MSG_OP_GET_DPM_FREQ_TABLE
+ * Message for requesting the DPM frequency tables.
+ *
+ * @resv: Reserved
+ */
+struct aie4_msg_get_dpm_freq_table_req {
+	u32 resv;
+};
+
+/**
+ * @brief DPM frequency table struct.
+ *
+ * @num_levels: The number of valid frequency levels in the table.
+ * @values: Frequency values for each level. Only the first num_levels entries are valid.
+ */
+struct dpm_table_t {
+	u32 num_levels;
+	u32 values[AIE4_MPNPUFW_MAX_DPM_LEVEL_COUNT];
+};
+
+/**
+ * AIE4_MSG_OP_GET_DPM_FREQ_TABLE
+ * Response message for the DPM frequency tables request.
+ *
+ * @status: enum aie4_msg_status.
+ * @aieclk_table: The DPM frequency table for the AIE clock domain.
+ * @npuhclk_table: The DPM frequency table for the NPUH clock domain.
+ */
+struct aie4_msg_get_dpm_freq_table_resp {
+	enum aie4_msg_status status;
+	struct dpm_table_t aieclk_table;
+	struct dpm_table_t npuhclk_table;
+};
+
+/**
+ * AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL
+ * Message for requesting the most recent DPM levels.
+ *
+ * @resv: Reserved
+ */
+struct aie4_msg_get_dpm_level_req {
+	u32 resv;
+};
+
+/**
+ * AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL
+ * Response message for the DPM levels request.
+ *
+ * @status: enum aie4_msg_status.
+ * @aieclk_dpm_level: The most recent DPM level for the AIE clock domain.
+ * @npuhclk_dpm_level: The most recent DPM level for the NPUH clock domain.
+ */
+struct aie4_msg_get_dpm_level_resp {
+	enum aie4_msg_status status;
+	u32 aieclk_dpm_level;
+	u32 npuhclk_dpm_level;
 };
 
 #pragma pack(pop)
