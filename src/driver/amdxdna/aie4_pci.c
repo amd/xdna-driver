@@ -665,6 +665,7 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct smu_config smu_conf;
 	struct aie4_psp_config psp_conf;
 	int i;
 
@@ -681,6 +682,14 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	ndev->psp_hdl = aie4_psp_create(&pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < SMU_MAX_REGS; i++)
+		smu_conf.smu_regs[i] = ndev->smu_base + SMU_REG_OFF(ndev, i);
+	ndev->smu_hdl = aiem_smu_create(&xdna->ddev, &smu_conf);
+	if (!ndev->smu_hdl) {
+		XDNA_ERR(xdna, "failed to create smu");
 		return -ENOMEM;
 	}
 
@@ -759,7 +768,8 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	set_bit(xdna->dev_info->sram_bar, &bars);
 	if (!is_npu3_vf_dev(pdev)) {
 		set_bit(xdna->dev_info->psp_bar, &bars);
-		set_bit(xdna->dev_info->smu_bar, &bars);
+		for (i = 0; i < SMU_MAX_REGS; i++)
+			set_bit(SMU_REG_BAR(ndev, i), &bars);
 	}
 
 	if (!is_npu3_pf_dev(pdev))
@@ -1024,6 +1034,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		AMDXDNA_INVALID_DOORBELL_OFFSET : resp.doorbell_offset;
 
 	nctx->status = CTX_STATE_CONNECTED;
+	ndev->hwctx_cnt++;
 	XDNA_DBG(xdna, "created hw context id %d", nctx->hw_ctx_id);
 
 	return 0;
@@ -1049,6 +1060,7 @@ int aie4_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	if (ret)
 		return ret;
 
+	ndev->hwctx_cnt--;
 	/* Make sure no one is waiting on cert completion from this ctx. */
 	nctx->status = CTX_STATE_DISCONNECTED;
 	wake_up_all(&nctx->cert_comp->waitq);
@@ -1880,6 +1892,37 @@ static int aie4_get_force_preempt_state(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie4_query_resource_info(struct amdxdna_client *client,
+				    struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_get_resource_info res_info;
+	const struct amdxdna_dev_priv *priv;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	int min;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+	priv = ndev->priv;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
+	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
+	res_info.npu_tops_max = ndev->max_tops;
+	res_info.npu_tops_curr = ndev->curr_tops;
+	res_info.npu_task_max = ndev->total_col;
+	res_info.npu_task_curr = ndev->hwctx_cnt;
+
+	min = min(args->buffer_size, sizeof(res_info));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, min))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie4_get_frame_boundary_preempt_state(struct amdxdna_client *client,
 						 struct amdxdna_drm_get_info *args)
 {
@@ -1945,6 +1988,9 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
 		ret = aie4_get_force_preempt_state(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
+		ret = aie4_query_resource_info(client, args);
 		break;
 	case DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE:
 		ret = aie4_get_frame_boundary_preempt_state(client, args);

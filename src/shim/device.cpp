@@ -1426,7 +1426,7 @@ struct resource_info
     auto& pci_dev_impl = get_pcidev_impl(device);
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
 
-    std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(5);
+    std::vector<xrt_core::query::xrt_resource_raw::xrt_resource_query> info_items(6);
     info_items[0].type = xrt_core::query::xrt_resource_raw::resource_type::npu_clk_max;
     info_items[0].data_uint64 = resource_info.npu_clk_max;
     info_items[1].type = xrt_core::query::xrt_resource_raw::resource_type::npu_tops_max;
@@ -1437,6 +1437,16 @@ struct resource_info
     info_items[3].data_double = resource_info.npu_tops_curr;
     info_items[4].type = xrt_core::query::xrt_resource_raw::resource_type::npu_task_curr;
     info_items[4].data_uint64 = resource_info.npu_task_curr;
+
+    amdxdna_drm_query_clock_metadata clock_metadata = {};
+
+    arg.param = DRM_AMDXDNA_QUERY_CLOCK_METADATA;
+    arg.buffer_size = sizeof(clock_metadata);
+    arg.buffer = reinterpret_cast<uintptr_t>(&clock_metadata);
+
+    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
+    info_items[5].type = xrt_core::query::xrt_resource_raw::resource_type::npu_curr_clk_max;
+    info_items[5].data_uint64 = clock_metadata.h_clock.freq_mhz;
 
     return info_items;
   }
@@ -1625,54 +1635,6 @@ struct firmware_version
     output.build = fw_version.build;
     output.git_hash = "N/A";
     output.date = "N/A";
-    return output;
-  }
-};
-
-struct cert_firmware_version
-{
-  using result_type = query::cert_firmware_version::result_type;
-
-  static constexpr uint16_t aie4_device_ids[] = {
-    0x17f1, 0x17f2, 0x1b0a, 0x1b0b
-  };
-
-  static bool
-  is_aie4(uint16_t device_id)
-  {
-    for (auto id : aie4_device_ids)
-      if (device_id == id)
-        return true;
-    return false;
-  }
-
-  static result_type
-  get(const xrt_core::device* device, key_type key)
-  {
-    auto pcie_id = xrt_core::device_query<query::pcie_id>(device);
-    if (!is_aie4(pcie_id.device_id))
-      return result_type{ "N/A", "N/A" };
-
-    amdxdna_drm_query_firmware_version fw_ver{};
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION,
-      .buffer_size = sizeof(fw_ver),
-      .buffer = reinterpret_cast<uintptr_t>(&fw_ver)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
-
-    char hash_buf[9];
-    std::snprintf(hash_buf, sizeof(hash_buf), "%08x", fw_ver.build);
-
-    char date_buf[16];
-    std::snprintf(date_buf, sizeof(date_buf), "%04u-%02u-%02u",
-                  fw_ver.patch / 10000, (fw_ver.patch / 100) % 100, fw_ver.patch % 100);
-
-    result_type output;
-    output.date = std::string(date_buf);
-    output.git_hash = std::string(hash_buf);
     return output;
   }
 };
@@ -2048,7 +2010,6 @@ initialize_query_table()
   emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
   emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
   emplace_func1_request<query::firmware_version,               firmware_version>();
-  emplace_func0_request<query::cert_firmware_version,          cert_firmware_version>();
   emplace_func1_request<query::sub_device_path,                sub_device_path>();
   emplace_func1_request<query::aie_coredump,                   aie_coredump>();
   emplace_func1_request<query::aie_read,                       aie_read>();

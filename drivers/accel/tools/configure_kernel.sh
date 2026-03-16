@@ -294,21 +294,38 @@ int main(void)
 }
 EOF
 
-# Test kmalloc_flex with new signature in 7.0:
-# kmalloc_flex() without GFP_KERNEL
+# Test kmalloc wrapper APIs (all introduced in 7.0):
+#   kzalloc_obj, kzalloc_flex, kmalloc_flex,
+#   kmalloc_objs, kzalloc_objs, kvzalloc_objs, kvmalloc_objs
+# One compilation test is sufficient since they were all added together.
 try_compile HAVE_7_0_kmalloc_ops << 'EOF'
 #include <linux/slab.h>
 int main(void)
 {
-	struct my_obj {
-		int c;
-		int data[];
-	};
+	struct my_obj { int c; int data[]; };
+	struct my_obj *p;
+	int *q;
 
-	kmalloc_flex(struct my_obj, data, 1);
-	kmalloc_obj(struct my_obj);
+	p = kzalloc_obj(*p);
+	p = kzalloc_flex(*p, data, 1);
+	p = kmalloc_flex(*p, data, 1);
+	q = kmalloc_objs(*q, 4);
+	q = kzalloc_objs(*q, 4);
+	q = kvzalloc_objs(*q, 4);
+	q = kvmalloc_objs(*q, 4);
 	return 0;
 }
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_7_0_kmalloc_ops
+#define kzalloc_obj(obj)		kzalloc(sizeof(obj), GFP_KERNEL)
+#define kzalloc_flex(obj, member, n)	kzalloc(struct_size(&(obj), member, n), GFP_KERNEL)
+#define kmalloc_flex(obj, member, n)	kmalloc(struct_size(&(obj), member, n), GFP_KERNEL)
+#define kmalloc_objs(obj, n)		kmalloc_array(n, sizeof(obj), GFP_KERNEL)
+#define kzalloc_objs(obj, n)		kcalloc(n, sizeof(obj), GFP_KERNEL)
+#define kvzalloc_objs(obj, n)		kvcalloc(n, sizeof(obj), GFP_KERNEL)
+#define kvmalloc_objs(obj, n)		kvmalloc_array(n, sizeof(obj), GFP_KERNEL)
+#endif
 EOF
 
 # Test DRM_GPU_SCHED_STAT_NOMINAL name change 
@@ -342,6 +359,20 @@ try_compile HAVE_bit_u64 << 'EOF'
 int main(void)
 {
 	uint64_t a = BIT_U64(1);
+	return 0;
+}
+EOF
+
+# Test amd_pmf_get_npu_data exists
+try_compile HAVE_7_0_amd_pmf_get_npu_data << 'EOF'
+#include <linux/module.h>
+#include <linux/amd-pmf-io.h>
+int main(void)
+{
+	MODULE_IMPORT_NS("AMD_PMF");
+
+	struct amd_pmf_npu_metrics info;
+	int ret = amd_pmf_get_npu_data(&info);
 	return 0;
 }
 EOF
