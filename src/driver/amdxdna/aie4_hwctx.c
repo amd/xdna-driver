@@ -1060,19 +1060,19 @@ static int aie4_ctx_detach_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl)
 	return aie4_ctx_config_debug_bo(ctx, bo_hdl, 0);
 }
 
-int aie4_parse_priority(u32 priority)
+u32 aie4_parse_priority_to_dev(u32 priority)
 {
 	switch (priority) {
-	case AIE4_CONTEXT_PRIORITY_BAND_IDLE:
-		return AMDXDNA_QOS_LOW_PRIORITY;
-	case AIE4_CONTEXT_PRIORITY_BAND_NORMAL:
-		return AMDXDNA_QOS_NORMAL_PRIORITY;
-	case AIE4_CONTEXT_PRIORITY_BAND_FOCUS:
-		return AMDXDNA_QOS_HIGH_PRIORITY;
-	case AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME:
-		return AMDXDNA_QOS_REALTIME_PRIORITY;
+	case AMDXDNA_QOS_LOW_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_IDLE;
+	case AMDXDNA_QOS_NORMAL_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	case AMDXDNA_QOS_HIGH_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_FOCUS;
+	case AMDXDNA_QOS_REALTIME_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME;
 	default:
-		return 0;
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
 	}
 }
 
@@ -1081,16 +1081,18 @@ static int aie4_ctx_config_priority_band(struct amdxdna_ctx *ctx, u32 priority)
 	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	u32 band;
 	int ret;
 
-	if (priority >= AIE4_CONTEXT_PRIORITY_BAND_COUNT) {
-		XDNA_ERR(xdna, "Invalid priority band %d", priority);
+	band = aie4_parse_priority_to_dev(priority);
+	if (band >= AIE4_CONTEXT_PRIORITY_BAND_COUNT) {
+		XDNA_ERR(xdna, "Invalid priority %u", priority);
 		return -EINVAL;
 	}
 
 	req.hw_context_id = ctx->priv->hw_ctx_id;
 	req.property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_PRIORITY_BAND;
-	req.priority_band = priority;
+	req.priority_band = band;
 
 	mutex_lock(&ndev->aie4_lock);
 	ret = aie4_send_msg_wait(ndev, &msg);
