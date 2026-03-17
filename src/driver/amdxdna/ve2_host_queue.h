@@ -296,7 +296,7 @@ struct handshake {
 	trace_save; // 68 This needs to be saved/restored during ctx switch to support preemption
 	u32 doorbell_pending; // 6c  this is to solve the race condition.
 			      //MPNPU will set it to 1 when it receives doorbell from host.
-	u32 completion_status;
+	u32 runlist_read_idx; // 70 relative read index in the runlist
 	u32 reserved1[7]; //make sure vm (below) starts at offset 0xa0
 	u32 last_ddr_dm2mm_addr_high; // 90
 	u32 last_ddr_dm2mm_addr_low; // 94
