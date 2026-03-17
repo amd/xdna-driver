@@ -1148,10 +1148,33 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 				if (!cc) {
 					XDNA_WARN(xdna, "cmd_chain timeout: failed to get payload");
 				} else {
-					/* In the async callback/timeout case,
-					 * driver sets error index to 0
+					u32 fail_cmd_idx = 0;
+					u32 rl_read_idx = 0;
+					int rd_ret;
+
+					/*
+					 * CERT tracks progress via runlist_read_idx in
+					 * the handshake (offset 0x70). Read it from the
+					 * lead CERT (col 0) to find which sub-command
+					 * was being processed when the timeout fired.
 					 */
-					cc->error_index = 0;
+					rd_ret = ve2_partition_read_privileged_mem(
+						    priv_ctx->aie_dev, 0,
+						    offsetof(struct handshake, runlist_read_idx),
+						    sizeof(rl_read_idx),
+						    &rl_read_idx);
+					if (rd_ret >= 0)
+						fail_cmd_idx = rl_read_idx;
+
+					if (fail_cmd_idx >= cmd_count)
+						fail_cmd_idx = 0;
+
+					cc->error_index = fail_cmd_idx;
+					XDNA_ERR(xdna,
+						  "Timeout at cmd chain index %u (slot %u), runlist_read_idx %u",
+						  fail_cmd_idx,
+						  (start_slot + fail_cmd_idx) % capacity,
+						  rl_read_idx);
 				}
 			}
 		} else {
