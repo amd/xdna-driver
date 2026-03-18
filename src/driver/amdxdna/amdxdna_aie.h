@@ -8,39 +8,9 @@
 
 #include "aie_common.h"
 
-#define PSP_REG_BAR(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].bar_idx)
-#define PSP_REG_OFF(ndev, idx) ((ndev)->priv->psp_regs_off[(idx)].offset)
-#define SRAM_REG_OFF(ndev, idx) ((ndev)->priv->sram_offs[(idx)].offset)
-
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
 	[reg_name] = {bar##_BAR_INDEX, (reg_addr) - bar##_BAR_BASE}
-
-enum psp_reg_idx {
-	PSP_CMD_REG = 0,
-	PSP_ARG0_REG,
-	PSP_ARG1_REG,
-	PSP_ARG2_REG,
-	PSP_NUM_IN_REGS, /* number of input registers */
-	PSP_INTR_REG = PSP_NUM_IN_REGS,
-	PSP_STATUS_REG,
-	PSP_RESP_REG,
-	PSP_PWAITMODE_REG,
-	PSP_MAX_REGS /* Keep this at the end */
-};
-
-struct psp_config {
-	const void	*fw_buf;
-	u32		fw_size;
-	void __iomem	*psp_regs[PSP_MAX_REGS];
-};
-
-struct aie4_psp_config {
-	const void      *fw_buf;
-	u32             fw_size;
-	const void      *certfw_buf;
-	u32             certfw_size;
-	void __iomem    *psp_regs[PSP_MAX_REGS];
-};
+#define SRAM_REG_OFF(ndev, idx) ((ndev)->priv->sram_offs[(idx)].offset)
 
 enum dpm_level {
 	DPM_LEVEL_0 = 0,
@@ -90,11 +60,6 @@ struct dpm_clk_freq {
 enum aie_power_state {
 	SMU_POWER_OFF,
 	SMU_POWER_ON,
-};
-
-struct aie_bar_off_pair {
-	int	bar_idx;
-	u32	offset;
 };
 
 struct amdxdna_dev_hdl;
