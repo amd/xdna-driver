@@ -1217,10 +1217,29 @@ void aie4_reset_prepare(struct amdxdna_dev *xdna)
 	XDNA_INFO(xdna, "reset prepare finished");
 }
 
+static int aie4_restore_services(struct amdxdna_dev *xdna)
+{
+	DECLARE_AIE4_MSG(aie4_msg_create_vfs, AIE4_MSG_OP_CREATE_VFS);
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	int ret;
+
+	if (is_npu3_pf_dev(pdev) && ndev->num_vfs) {
+		req.vf_cnt = ndev->num_vfs;
+		ret = aie4_send_msg_wait(ndev, &msg);
+		if (ret)
+			XDNA_ERR(xdna, "create vfs op failed: %d", ret);
+	} else {
+		aie4_ctx_resume_all(xdna);
+		ret = 0;
+	}
+
+	return ret;
+}
+
 int aie4_reset_done(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	XDNA_INFO(xdna, "reset done start");
@@ -1235,27 +1254,12 @@ int aie4_reset_done(struct amdxdna_dev *xdna)
 		goto error;
 
 	ret = aie4_partition_init(ndev);
-	if (ret) {
-		aie4_mailbox_fini(ndev);
-		goto error;
-	}
+	if (ret)
+		goto mailbox_fini;
 
-	if (is_npu3_pf_dev(pdev)) {
-		int numvfs;
-
-		mutex_unlock(&ndev->aie4_lock);
-		numvfs = aie4_sriov_configure(xdna, ndev->num_vfs);
-		mutex_lock(&ndev->aie4_lock);
-
-		if (numvfs != ndev->num_vfs) {
-			XDNA_ERR(xdna, "reconfigure %d num_vfs but configured %d",
-				 ndev->num_vfs, numvfs);
-			ret = -EINVAL;
-			goto error;
-		}
-	} else {
-		aie4_ctx_resume_all(xdna);
-	}
+	ret = aie4_restore_services(xdna);
+	if (ret)
+		goto mailbox_fini;
 
 	/* mark dev status to allow new incoming requests */
 	ndev->dev_status = AIE4_DEV_START;
@@ -1265,6 +1269,8 @@ int aie4_reset_done(struct amdxdna_dev *xdna)
 	XDNA_INFO(xdna, "reset done finished");
 	return 0;
 
+mailbox_fini:
+	aie4_mailbox_fini(ndev);
 error:
 	mutex_unlock(&ndev->aie4_lock);
 	return ret;
@@ -1306,10 +1312,10 @@ static int aie4_hw_resume(struct amdxdna_dev *xdna)
 	}
 
 	mutex_lock(&ndev->aie4_lock);
-	aie4_ctx_resume_all(xdna);
+	ret = aie4_restore_services(xdna);
 	mutex_unlock(&ndev->aie4_lock);
 
-	return 0;
+	return ret;
 
 clear_pci:
 	pci_clear_master(pdev);
