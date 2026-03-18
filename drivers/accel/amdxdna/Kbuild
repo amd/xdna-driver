@@ -34,6 +34,7 @@ amdxdna-y := \
 	amdxdna_ubuf.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
+	aie.o \
 	aie2_ctx.o \
 	aie2_error.o \
 	aie2_message.o \
