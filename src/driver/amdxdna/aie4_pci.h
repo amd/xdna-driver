@@ -15,6 +15,7 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_error.h"
 #include "amdxdna_aie.h"
+#include "aie_common.h"
 #include "amdxdna_mgmt.h"
 #include "aie4_msg_priv.h"
 
@@ -55,13 +56,6 @@ aie4_health_get_runlist_read_idx(struct aie4_msg_app_health_report *h)
 
 	return h->runlist_read_idx;
 }
-
-#define AIE4_INTERVAL		20000	/* us */
-#ifdef AMDXDNA_DEVEL
-#define AIE4_TIMEOUT		(1000000 * 1000) /* us */
-#else
-#define AIE4_TIMEOUT		1000000	/* us */
-#endif
 
 #define MAX_NUM_CERTS		6
 
@@ -286,10 +280,8 @@ int aie4_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 int aie4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 
 /* aie4_psp.c */
-struct psp_device *aie4_psp_create(struct device *dev, struct aie4_psp_config *conf);
 int aie4_psp_start(struct psp_device *psp);
 void aie4_psp_stop(struct psp_device *psp);
-int aie4_psp_waitmode_poll(struct psp_device *psp);
 
 /* aie4_pci.c */
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
