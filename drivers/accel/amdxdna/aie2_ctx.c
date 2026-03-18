@@ -182,6 +182,7 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
 
 	amdxdna_pm_suspend_put(job->hwctx->client->xdna);
+	aie2_tdr_signal(job->hwctx->client->xdna->dev_handle);
 	job->hwctx->priv->completed++;
 	dma_fence_signal(fence);
 
@@ -427,10 +428,14 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	int ret;
 
 	xdna = hwctx->client->xdna;
+
+	guard(mutex)(&xdna->dev_lock);
+	if (!aie2_tdr_detect(xdna))
+		return DRM_GPU_SCHED_STAT_NO_HANG;
+
 	trace_xdna_job(sched_job, hwctx->name, "job timedout", job->seq);
 	job->job_timeout = true;
 
-	mutex_lock(&xdna->dev_lock);
 	report = kzalloc_obj(*report);
 	if (!report)
 		goto reset_hwctx;
@@ -445,7 +450,6 @@ reset_hwctx:
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
 
 	aie2_hwctx_restart(xdna, hwctx);
-	mutex_unlock(&xdna->dev_lock);
 
 #ifdef HAVE_drm_gpu_sched_stat_reset
 	return DRM_GPU_SCHED_STAT_RESET;
@@ -622,11 +626,15 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 #ifdef HAVE_6_15_drm_sched_init
+	unsigned long timeout_jiffies = MAX_SCHEDULE_TIMEOUT;
+
+	if (tdr_timeout_ms > 0)
+		timeout_jiffies = msecs_to_jiffies(tdr_timeout_ms);
 	const struct drm_sched_init_args args = {
 		.ops = &sched_ops,
 		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
 		.credit_limit = HWCTX_MAX_CMDS,
-		.timeout = msecs_to_jiffies(HWCTX_MAX_TIMEOUT),
+		.timeout = timeout_jiffies,
 		.name = "amdxdna_js",
 		.dev = xdna->ddev.dev,
 	};
@@ -1138,6 +1146,7 @@ retry:
 	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 
 	aie2_job_put(job);
+	aie2_tdr_signal(xdna->dev_handle);
 	atomic64_inc(&hwctx->job_submit_cnt);
 
 	return 0;

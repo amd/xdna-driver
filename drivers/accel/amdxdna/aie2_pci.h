@@ -7,6 +7,8 @@
 #define _AIE2_PCI_H_
 
 #include "drm/amdxdna_accel.h"
+#include <drm/drm_device.h>
+#include <drm/gpu_scheduler.h>
 #include <linux/bits.h>
 #include <linux/limits.h>
 #include <linux/semaphore.h>
@@ -166,6 +168,18 @@ struct aie2_exec_msg_ops {
 	u32 (*get_chain_msg_op)(u32 cmd_op);
 };
 
+enum aie2_tdr_status {
+	AIE2_TDR_WAIT,
+	AIE2_TDR_SIGNALED,
+};
+
+struct aie2_tdr {
+	enum aie2_tdr_status status; /* status of TDR */
+	/* TDR progress tracker, used to detect if device is making progress */
+	enum aie2_tdr_status progress;
+	unsigned long last_jiffies;
+};
+
 struct amdxdna_dev_hdl {
 	struct aie_device		aie;
 	const struct amdxdna_dev_priv	*priv;
@@ -198,6 +212,7 @@ struct amdxdna_dev_hdl {
 	u32				hwctx_num;
 
 	struct amdxdna_async_error	last_async_err;
+	struct aie2_tdr			tdr; /* TDR for device recovery */
 };
 
 struct aie2_hw_ops {
@@ -309,5 +324,14 @@ void aie2_hwctx_suspend(struct amdxdna_client *client);
 int aie2_hwctx_resume(struct amdxdna_client *client);
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
+
+/* TDR APIs */
+extern int tdr_timeout_ms;
+static inline void aie2_tdr_signal(struct amdxdna_dev_hdl *ndev)
+{
+	WRITE_ONCE(ndev->tdr.status, AIE2_TDR_SIGNALED);
+}
+
+bool aie2_tdr_detect(struct amdxdna_dev *xdna);
 
 #endif /* _AIE2_PCI_H_ */
