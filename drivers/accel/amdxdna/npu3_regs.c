@@ -64,6 +64,14 @@ static const struct amdxdna_dev_priv npu3_dev_priv = {
 	},
 };
 
+static const struct amdxdna_dev_priv npu3_dev_vf_priv = {
+	/* vf device does not load firmware */
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.mbox_rbuf_bar		= NPU3_MBOX_BUFFER_BAR,
+	.mbox_info_off		= NPU3_MBOX_INFO_OFF,
+	/* vf device does not have smu and psp */
+};
+
 const struct amdxdna_dev_info dev_npu3_pf_info = {
 	.mbox_bar		= NPU3_MBOX_BAR,
 	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
@@ -73,5 +81,15 @@ const struct amdxdna_dev_info dev_npu3_pf_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_PF,
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
-	.ops			= &aie4_ops,
+	.ops			= &aie4_pf_ops,
+};
+
+const struct amdxdna_dev_info dev_npu3_vf_info = {
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
+	.default_vbnv		= "RyzenAI-npu3-vf",
+	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
+	.dev_priv		= &npu3_dev_vf_priv,
+	.fw_feature_tbl		= npu3_fw_feature_table,
+	.ops			= &aie4_vf_ops,
 };

@@ -48,6 +48,7 @@ static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 }
 #endif
 
-extern const struct amdxdna_dev_ops aie4_ops;
+extern const struct amdxdna_dev_ops aie4_pf_ops;
+extern const struct amdxdna_dev_ops aie4_vf_ops;
 
 #endif /* _AIE4_PCI_H_ */
