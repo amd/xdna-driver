@@ -7,6 +7,7 @@
 #define _AIE2_PCI_H_
 
 #include "drm/amdxdna_accel.h"
+#include <linux/bits.h>
 #include <linux/limits.h>
 #include <linux/semaphore.h>
 
