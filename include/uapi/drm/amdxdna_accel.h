@@ -35,6 +35,7 @@ extern "C" {
 enum amdxdna_device_type {
 	AMDXDNA_DEV_TYPE_UNKNOWN = -1,
 	AMDXDNA_DEV_TYPE_KMQ = 0,
+	AMDXDNA_DEV_TYPE_UMQ = 1,
 	AMDXDNA_DEV_TYPE_PF = 2,
 };
 

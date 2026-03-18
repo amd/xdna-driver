@@ -197,8 +197,9 @@ free_channel:
 	return ret;
 }
 
-static int aie4_mailbox_init(struct amdxdna_dev *xdna)
+static int aie4_mailbox_init(struct amdxdna_dev_hdl *ndev)
 {
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct mailbox_info mbox_info;
 	int ret;
 
@@ -234,16 +235,15 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-static int aie4_hw_start(struct amdxdna_dev *xdna)
+static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	int ret;
 
 	ret = aie4_fw_load(ndev);
 	if (ret)
 		return ret;
 
-	ret = aie4_mailbox_init(xdna);
+	ret = aie4_mailbox_init(ndev);
 	if (ret)
 		goto fw_unload;
 
@@ -255,28 +255,29 @@ fw_unload:
 	return ret;
 }
 
-static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
+static void aie4_pf_hw_stop(struct amdxdna_dev_hdl *ndev)
 {
-	int ret;
-
-	/* No paired resume needed, fw is stateless */
-	ret = aie4_suspend_fw(ndev);
-	if (ret)
-		XDNA_ERR(ndev->aie.xdna, "suspend_fw failed, ret %d", ret);
-	else
-		XDNA_DBG(ndev->aie.xdna, "npu firmware suspended");
-}
-
-static void aie4_hw_stop(struct amdxdna_dev *xdna)
-{
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	aie4_mgmt_fw_fini(ndev);
+	aie4_suspend_fw(ndev);
 	aie4_mailbox_fini(ndev);
-
 	aie4_fw_unload(ndev);
+}
+
+static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
+{
+	return aie4_mailbox_init(ndev);
+}
+
+static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	aie4_mailbox_fini(ndev);
 }
 
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
@@ -374,14 +375,21 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
+static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev;
 	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
-	const struct firmware *npufw, *certfw;
 	unsigned long bars = 0;
 	int ret, i;
+
+	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	if (!ndev)
+		return -ENOMEM;
+
+	ndev->priv = xdna->dev_info->dev_priv;
+	ndev->aie.xdna = xdna;
+	xdna->dev_handle = ndev;
 
 	/* Enable managed PCI device */
 	ret = pcim_enable_device(pdev);
@@ -418,75 +426,68 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 
 	pci_set_master(pdev);
 
-	ret = aie4_request_firmware(ndev, &npufw, &certfw);
-	if (ret)
-		goto clear_master;
+	if (ndev->priv->npufw_path && ndev->priv->certfw_path) {
+		const struct firmware *npufw = NULL, *certfw = NULL;
 
-	ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
-	aie4_release_firmware(ndev, npufw, certfw);
-	if (ret)
-		goto clear_master;
+		ret = aie4_request_firmware(ndev, &npufw, &certfw);
+		if (ret)
+			return ret;
+		ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
+		aie4_release_firmware(ndev, npufw, certfw);
+		if (ret)
+			return ret;
+	}
 
 	ret = aie4_irq_init(xdna);
 	if (ret)
-		goto clear_master;
-
-	ret = aie4_hw_start(xdna);
-	if (ret)
-		goto clear_master;
-
-	return 0;
-
-clear_master:
-	pci_clear_master(pdev);
-
-	return ret;
-}
-
-static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-
-	aie4_hw_stop(xdna);
-
-	pci_clear_master(pdev);
-}
-
-static void aie4_fini(struct amdxdna_dev *xdna)
-{
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-
-	aie4_sriov_stop(ndev);
-	aie4_pcidev_fini(ndev);
-}
-
-static int aie4_init(struct amdxdna_dev *xdna)
-{
-	struct amdxdna_dev_hdl *ndev;
-	int ret;
-
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
-	if (!ndev)
-		return -ENOMEM;
-
-	ndev->priv = xdna->dev_info->dev_priv;
-	ndev->aie.xdna = xdna;
-	xdna->dev_handle = ndev;
-
-	ret = aie4_pcidev_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "Setup PCI device failed, ret %d", ret);
 		return ret;
-	}
 
 	amdxdna_vbnv_init(xdna);
-	XDNA_DBG(xdna, "aie4 init finished");
+	XDNA_DBG(xdna, "init finished");
+
 	return 0;
 }
 
-const struct amdxdna_dev_ops aie4_ops = {
-	.init			= aie4_init,
-	.fini			= aie4_fini,
+static int aie4_pf_init(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = aie4m_pcidev_init(xdna);
+	if (ret)
+		return ret;
+
+	return aie4_pf_hw_start(xdna->dev_handle);
+}
+
+static int aie4_vf_init(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = aie4m_pcidev_init(xdna);
+	if (ret)
+		return ret;
+
+	return aie4_vf_hw_start(xdna->dev_handle);
+}
+
+static void aie4_pf_fini(struct amdxdna_dev *xdna)
+{
+	aie4_sriov_stop(xdna->dev_handle);
+	aie4_pf_hw_stop(xdna->dev_handle);
+}
+
+static void aie4_vf_fini(struct amdxdna_dev *xdna)
+{
+	aie4_vf_hw_stop(xdna->dev_handle);
+}
+
+const struct amdxdna_dev_ops aie4_pf_ops = {
+	.init			= aie4_pf_init,
+	.fini			= aie4_pf_fini,
 	.sriov_configure        = aie4_sriov_configure,
+};
+
+const struct amdxdna_dev_ops aie4_vf_ops = {
+	.init			= aie4_vf_init,
+	.fini			= aie4_vf_fini,
 };
