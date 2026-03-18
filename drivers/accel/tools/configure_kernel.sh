@@ -345,6 +345,17 @@ int main(void)
 }
 EOF
 
+# Test DRM_GPU_SCHED_STAT_NO_HANG availability (kernel >= 6.17)
+# Allows timedout_job to report "not hung" without triggering recovery
+try_compile HAVE_6_17_drm_gpu_sched_stat_no_hang << 'EOF'
+#include <drm/gpu_scheduler.h>
+int main(void)
+{
+	int a = DRM_GPU_SCHED_STAT_NO_HANG;
+	return 0;
+}
+EOF
+
 # Test drm_sched_start() 2-arg signature (latest upstream):
 # void drm_sched_start(struct drm_gpu_scheduler *sched, int errno);
 # Older kernels had a 1-arg version without the errno parameter.
