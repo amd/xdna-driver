@@ -441,6 +441,9 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 	ndev->aie.xdna = xdna;
 	xdna->dev_handle = ndev;
 
+	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
+	mutex_init(&ndev->cert_comp_lock);
+
 	/* Enable managed PCI device */
 	ret = pcim_enable_device(pdev);
 	if (ret) {
@@ -540,4 +543,6 @@ const struct amdxdna_dev_ops aie4_pf_ops = {
 const struct amdxdna_dev_ops aie4_vf_ops = {
 	.init			= aie4_vf_init,
 	.fini			= aie4_vf_fini,
+	.hwctx_init		= aie4_hwctx_init,
+	.hwctx_fini		= aie4_hwctx_fini,
 };

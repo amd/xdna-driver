@@ -69,7 +69,8 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 	synchronize_srcu(ss);
 
 	/* At this point, user is not able to submit new commands */
-	xdna->dev_info->ops->hwctx_fini(hwctx);
+	if (xdna->dev_info->ops->hwctx_fini)
+		xdna->dev_info->ops->hwctx_fini(hwctx);
 
 	kfree(hwctx->name);
 	kfree(hwctx);
@@ -207,6 +208,9 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+	if (!xdna->dev_info->ops->hwctx_init)
+		return -EOPNOTSUPP;
+
 	hwctx = kzalloc_obj(*hwctx);
 	if (!hwctx)
 		return -ENOMEM;
@@ -220,6 +224,8 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	hwctx->client = client;
 	hwctx->fw_ctx_id = -1;
 	hwctx->num_tiles = args->num_tiles;
+	hwctx->umq_bo_hdl = args->umq_bo;
+	hwctx->doorbell_offset = AMDXDNA_INVALID_DOORBELL_OFFSET;
 	hwctx->mem_size = args->mem_size;
 	hwctx->max_opc = args->max_opc;
 
@@ -252,6 +258,7 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	args->handle = hwctx->id;
 	args->syncobj_handle = hwctx->syncobj_hdl;
+	args->umq_doorbell = hwctx->doorbell_offset;
 
 	atomic64_set(&hwctx->job_submit_cnt, 0);
 	atomic64_set(&hwctx->job_free_cnt, 0);

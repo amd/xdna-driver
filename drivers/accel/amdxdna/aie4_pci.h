@@ -13,6 +13,23 @@
 #include "aie.h"
 #include "amdxdna_mailbox.h"
 
+struct cert_comp {
+	struct amdxdna_dev_hdl          *ndev;
+	u32                             msix_idx;
+	int                             irq;
+	struct kref                     kref;
+	wait_queue_head_t               waitq;
+};
+
+struct amdxdna_hwctx_priv {
+	struct amdxdna_gem_obj          *umq_bo;
+	u64                             *umq_read_index;
+	u64                             *umq_write_index;
+
+	struct cert_comp                *cert_comp;
+	u32                             hw_ctx_id;
+};
+
 struct amdxdna_dev_priv {
 	const char              *npufw_path;
 	const char              *certfw_path;
@@ -32,10 +49,17 @@ struct amdxdna_dev_hdl {
 
 	struct mailbox			*mbox;
 	u32				partition_id;
+
+	struct xarray                   cert_comp_xa; /* device level indexed by msix id */
+	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
 };
 
 /* aie4_message.c */
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
+
+/* aie4_ctx.c */
+int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
+void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx);
 
 /* aie4_sriov.c */
 #if IS_ENABLED(CONFIG_PCI_IOV)
