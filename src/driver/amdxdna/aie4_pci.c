@@ -943,6 +943,41 @@ static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context
 	return aie4_send_msg_wait(ndev, &msg);
 }
 
+static u32 aie4_parse_priority_to_dev(u32 priority)
+{
+	switch (priority) {
+	case AMDXDNA_QOS_LOW_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_IDLE;
+	case AMDXDNA_QOS_NORMAL_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	case AMDXDNA_QOS_HIGH_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_FOCUS;
+	case AMDXDNA_QOS_REALTIME_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME;
+	default:
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	}
+}
+
+static int aie4_ctx_init_dpm(struct amdxdna_ctx *ctx)
+{
+	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	req.hw_context_id = ctx->priv->hw_ctx_id;
+	req.property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_DPM;
+	req.dpm.egops = ctx->qos.gops;
+	req.dpm.fps = ctx->qos.fps;
+	req.dpm.data_movement = ctx->qos.dma_bandwidth;
+	req.dpm.latency_in_us = ctx->qos.latency;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+
+	return ret;
+}
+
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
@@ -1049,6 +1084,10 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	ndev->hwctx_cnt++;
 	XDNA_DBG(xdna, "created hw context id %d", nctx->hw_ctx_id);
 
+	ret = aie4_ctx_init_dpm(ctx);
+	if (ret)
+		XDNA_WARN_ONCE(xdna, "Failed to init ctx dpm");
+
 	return 0;
 done:
 	XDNA_ERR(xdna, "failed %d", ret);
@@ -1083,18 +1122,6 @@ int aie4_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	return ret;
 }
 
-static int aie4_ctx_init_dpm(struct amdxdna_ctx *ctx)
-{
-	struct amdxdna_hwctx_param_config_dpm dpm = {
-		.egops = ctx->qos.gops,
-		.fps = ctx->qos.fps,
-		.data_movement = ctx->qos.dma_bandwidth,
-		.latency_in_us = ctx->qos.latency,
-	};
-
-	return aie4_ctx_config(ctx, DRM_AMDXDNA_HWCTX_CONFIG_DPM, 0, &dpm, sizeof(dpm));
-}
-
 static int aie4_xrs_load(void *cb_arg, struct xrs_action_load *action)
 {
 	struct amdxdna_ctx *ctx = cb_arg;
@@ -1114,10 +1141,6 @@ static int aie4_xrs_load(void *cb_arg, struct xrs_action_load *action)
 		XDNA_ERR(xdna, "create context failed, ret %d", ret);
 		return ret;
 	}
-
-	ret = aie4_ctx_init_dpm(ctx);
-	if (ret)
-		XDNA_WARN_ONCE(xdna, "Failed to init ctx dpm");
 
 	return 0;
 }
