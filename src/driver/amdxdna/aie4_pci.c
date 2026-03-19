@@ -1249,12 +1249,13 @@ void aie4_reset_prepare(struct amdxdna_dev *xdna)
 
 static int aie4_restore_services(struct amdxdna_dev *xdna)
 {
-	DECLARE_AIE4_MSG(aie4_msg_create_vfs, AIE4_MSG_OP_CREATE_VFS);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	if (is_npu3_pf_dev(pdev) && ndev->num_vfs) {
+		DECLARE_AIE4_MSG(aie4_msg_create_vfs, AIE4_MSG_OP_CREATE_VFS);
+
 		req.vf_cnt = ndev->num_vfs;
 		ret = aie4_send_msg_wait(ndev, &msg);
 		if (ret)
