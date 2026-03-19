@@ -14,6 +14,7 @@ struct amdxdna_hwctx_priv;
 
 enum ert_cmd_opcode {
 	ERT_START_CU = 0,
+	ERT_START_DPU = 18,
 	ERT_CMD_CHAIN = 19,
 	ERT_START_NPU = 20,
 	ERT_START_NPU_PREEMPT = 21,
@@ -105,6 +106,8 @@ struct amdxdna_hwctx {
 	u32				*col_list;
 	u32				start_col;
 	u32				num_col;
+	u32				umq_bo_hdl;
+	u32                             doorbell_offset;
 	u32				num_unused_col;
 
 	struct amdxdna_qos_info		     qos;

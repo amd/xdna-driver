@@ -16,6 +16,8 @@ enum aie4_msg_opcode {
 
 	AIE4_MSG_OP_CREATE_PARTITION                 = 0x30001,
 	AIE4_MSG_OP_DESTROY_PARTITION                = 0x30002,
+	AIE4_MSG_OP_CREATE_HW_CONTEXT                = 0x30003,
+	AIE4_MSG_OP_DESTROY_HW_CONTEXT               = 0x30004,
 };
 
 enum aie4_msg_status {
@@ -64,6 +66,33 @@ struct aie4_msg_destroy_partition_req {
 } __packed;
 
 struct aie4_msg_destroy_partition_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_create_hw_context_req {
+	__u32 partition_id;
+	__u32 request_num_tiles;
+	__u32 hsa_addr_high;
+	__u32 hsa_addr_low;
+#define AIE4_MSG_PASID GENMASK(19, 0)
+#define AIE4_MSG_PASID_VLD GENMASK(31, 31)
+	__u32 pasid;
+	__u32 priority_band;
+} __packed;
+
+struct aie4_msg_create_hw_context_resp {
+	enum aie4_msg_status status;
+	__u32 hw_context_id;
+	__u32 doorbell_offset;
+	__u32 job_complete_msix_idx;
+} __packed;
+
+struct aie4_msg_destroy_hw_context_req {
+	__u32 hw_context_id;
+	__u32 resvd1;
+} __packed;
+
+struct aie4_msg_destroy_hw_context_resp {
 	enum aie4_msg_status status;
 } __packed;
 

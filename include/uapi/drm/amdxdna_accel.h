@@ -23,6 +23,7 @@ extern "C" {
 #define AMDXDNA_INVALID_CTX_HANDLE	0
 #define AMDXDNA_INVALID_BO_HANDLE	0
 #define AMDXDNA_INVALID_FENCE_HANDLE	0
+#define AMDXDNA_INVALID_DOORBELL_OFFSET	(~0U)
 
 /*
  * Define hardware context priority
