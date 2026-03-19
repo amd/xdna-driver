@@ -13,6 +13,9 @@ enum aie4_msg_opcode {
 
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
 	AIE4_MSG_OP_DESTROY_VFS                      = 0x20002,
+
+	AIE4_MSG_OP_CREATE_PARTITION                 = 0x30001,
+	AIE4_MSG_OP_DESTROY_PARTITION                = 0x30002,
 };
 
 enum aie4_msg_status {
@@ -43,6 +46,24 @@ struct aie4_msg_destroy_vfs_req {
 } __packed;
 
 struct aie4_msg_destroy_vfs_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_create_partition_req {
+	__u32 partition_col_start;
+	__u32 partition_col_count;
+} __packed;
+
+struct aie4_msg_create_partition_resp {
+	enum aie4_msg_status status;
+	__u32 partition_id;
+} __packed;
+
+struct aie4_msg_destroy_partition_req {
+	__u32 partition_id;
+} __packed;
+
+struct aie4_msg_destroy_partition_resp {
 	enum aie4_msg_status status;
 } __packed;
 

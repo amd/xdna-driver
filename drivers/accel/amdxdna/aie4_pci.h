@@ -31,6 +31,7 @@ struct amdxdna_dev_hdl {
 	void			__iomem *rbuf_base;
 
 	struct mailbox			*mbox;
+	u32				partition_id;
 };
 
 /* aie4_message.c */

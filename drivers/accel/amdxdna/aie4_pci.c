@@ -9,12 +9,17 @@
 #include <linux/firmware.h>
 #include <linux/sizes.h>
 
+#include "aie.h"
 #include "aie4_pci.h"
+#include "aie4_msg_priv.h"
+#include "amdxdna_mailbox.h"
+#include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
 
 #define NO_IOHUB		0
 #define CERTFW_MAX_SIZE         (SZ_32K + SZ_256)
 #define PSP_NOTIFY_INTR		0xD007BE11
+#define AIE4_TOTAL_COLUMN	3
 
 /*
  * The management mailbox channel is allocated by firmware.
@@ -235,6 +240,36 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
+static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	req.partition_col_start = 0;
+	req.partition_col_count = AIE4_TOTAL_COLUMN;
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "partition init failed: %d", ret);
+		return ret;
+	}
+
+	ndev->partition_id = resp.partition_id;
+	return 0;
+}
+
+static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	req.partition_id = ndev->partition_id;
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "partition fini failed: %d", ret);
+}
+
 static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -268,7 +303,21 @@ static void aie4_pf_hw_stop(struct amdxdna_dev_hdl *ndev)
 
 static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 {
-	return aie4_mailbox_init(ndev);
+	int ret;
+
+	ret = aie4_mailbox_init(ndev);
+	if (ret)
+		return ret;
+
+	ret = aie4_partition_init(ndev);
+	if (ret)
+		goto mailbox_fini;
+
+	return 0;
+
+mailbox_fini:
+	aie4_mailbox_fini(ndev);
+	return ret;
 }
 
 static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
@@ -277,6 +326,7 @@ static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
+	aie4_partition_fini(ndev);
 	aie4_mailbox_fini(ndev);
 }
 
