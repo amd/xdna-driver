@@ -30,6 +30,7 @@
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 // FIXME
 #include <fcntl.h>
@@ -554,6 +555,77 @@ TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, 
     throw std::runtime_error("BO usage mis-match");
 }
 
+class mmapped_file {
+public:
+  mmapped_file(size_t size, bool readonly)
+  {
+    char tmpl[] = "/tmp/xrt_bo_mmap_XXXXXX";
+    auto fd = ::mkstemp(tmpl);
+    if (fd < 0)
+      throw std::runtime_error("mkstemp failed");
+    ::unlink(tmpl);
+
+    if (::ftruncate(fd, static_cast<off_t>(size)) != 0) {
+      ::close(fd);
+      throw std::runtime_error("ftruncate failed");
+    }
+
+    auto mapped = ::mmap(nullptr, size,
+      readonly ? PROT_READ : PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mapped == MAP_FAILED) {
+      ::close(fd);
+      throw std::runtime_error("mmap failed");
+    }
+
+    m_fd = fd;
+    m_ptr = mapped;
+    m_size = size;
+  }
+
+  ~mmapped_file()
+  {
+    ::munmap(m_ptr, m_size);
+    ::close(m_fd);
+  }
+
+  void *get()
+  {
+    return m_ptr;
+  }
+
+private:
+  int m_fd = -1;
+  size_t m_size = 0;
+  void *m_ptr = nullptr;
+};
+
+void
+TEST_create_free_mmaped_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  size_t size = 1ul * 1024 * 1024 * 1024;
+
+  // Expect to pass
+  try {
+    mmapped_file f(size, true);
+    auto buf = std::make_unique<bo>(sdev.get(), f.get(), size, XCL_BO_FLAGS_HOST_ONLY, 0);
+  } catch (const std::system_error& e) {
+    std::cout << e.what() << std::endl;
+    throw std::runtime_error("mmaped user ptr BO test has failed");
+  }
+
+  // Expect to fail
+  auto failed = true;
+  try {
+    mmapped_file f(size, false);
+    auto buf = std::make_unique<bo>(sdev.get(), f.get(), size, XCL_BO_FLAGS_HOST_ONLY, 0);
+  } catch (const std::system_error& e) {
+    std::cout << e.what() << std::endl;
+    failed = false;
+  }
+  if (failed)
+    throw std::runtime_error("mmaped user ptr BO should not be created successfully");
+}
+
 void
 TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
@@ -975,6 +1047,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "io test aie4 async error", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_async_error_aie4_io, {}
+  },
+  test_case{ "create and free user ptr BO with mmapped ptr", {~0U, ~0U},
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_mmaped_uptr_bo, {}
   },
 };
 
