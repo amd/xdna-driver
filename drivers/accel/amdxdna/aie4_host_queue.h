@@ -8,6 +8,8 @@
 
 #include <linux/types.h>
 
+#define CTX_MAX_CMDS                    32
+
 struct host_queue_header {
 	__u64 read_index;
 	struct {

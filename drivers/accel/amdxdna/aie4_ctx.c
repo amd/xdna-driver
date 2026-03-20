@@ -256,3 +256,81 @@ void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	aie4_hwctx_umq_fini(hwctx);
 	kfree(hwctx->priv);
 }
+
+static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
+{
+	return (write >= read) && ((write - read) <= capacity);
+}
+
+static u64 get_read_index(struct amdxdna_hwctx *hwctx)
+{
+	u64 wi = READ_ONCE(*hwctx->priv->umq_write_index);
+	u64 ri = READ_ONCE(*hwctx->priv->umq_read_index);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+	/*
+	 * CERT cannot update read index as uint64 atomically. Driver may read
+	 * half-updated read index when it has bits in high 32bit. In case read
+	 * index is not valid, wait for some time and retry once. It should
+	 * allow CERT to complete the read index update.
+	 */
+	if (!valid_queue_index(ri, wi, CTX_MAX_CMDS)) {
+		XDNA_WARN(xdna, "Invalid index, ri %llu, wi %llu", ri, wi);
+		usleep_range(100, 200);
+		ri = READ_ONCE(*hwctx->priv->umq_read_index);
+		if (!valid_queue_index(ri, wi, CTX_MAX_CMDS)) {
+			XDNA_ERR(xdna, "Invalid index after retry, ri %llu, wi %llu", ri, wi);
+			ri = 0;
+		}
+	}
+
+	return ri;
+}
+
+static inline bool check_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq)
+{
+	u64 read_idx = get_read_index(hwctx);
+
+	return read_idx > seq;
+}
+
+int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
+{
+	unsigned long wait_jifs = MAX_SCHEDULE_TIMEOUT;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct cert_comp *cert_comp = priv->cert_comp;
+	long ret;
+
+	if (timeout)
+		wait_jifs = msecs_to_jiffies(timeout);
+
+	ret = wait_event_interruptible_timeout(cert_comp->waitq,
+					       (check_cmd_done(hwctx, seq)),
+					       wait_jifs);
+
+	if (!ret)
+		ret = -ETIME;
+
+	return ret <= 0 ? ret : 0;
+}
+
+int aie4_hwctx_valid_doorbell(struct amdxdna_client *client, u32 vm_pgoff)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+	int idx;
+
+	guard(mutex)(&xdna->dev_lock);
+
+	idx = srcu_read_lock(&client->hwctx_srcu);
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		if (vm_pgoff == (hwctx->doorbell_offset >> PAGE_SHIFT)) {
+			srcu_read_unlock(&client->hwctx_srcu, idx);
+			return 1;
+		}
+	}
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+
+	return 0;
+}

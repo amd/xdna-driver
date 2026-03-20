@@ -14,6 +14,9 @@
 #define NPU3_MBOX_BUFFER_BAR	2
 #define NPU3_MBOX_INFO_OFF	0x0
 
+#define NPU3_DOORBELL_BAR       2
+#define NPU3_DOORBELL_OFF       0x0
+
 /* PCIe BAR Index for NPU3 */
 #define NPU3_REG_BAR_INDEX	0
 #define NPU3_PSP_BAR_INDEX      4
@@ -45,6 +48,7 @@ static const struct amdxdna_dev_priv npu3_dev_priv = {
 	.mbox_bar		= NPU3_MBOX_BAR,
 	.mbox_rbuf_bar		= NPU3_MBOX_BUFFER_BAR,
 	.mbox_info_off		= NPU3_MBOX_INFO_OFF,
+	.doorbell_off		= NPU3_DOORBELL_OFF,
 	.psp_regs_off   = {
 		DEFINE_BAR_OFFSET(PSP_CMD_REG,    NPU3_PSP, MPASP_C2PMSG_123_ALT_1),
 		DEFINE_BAR_OFFSET(PSP_ARG0_REG,   NPU3_PSP, MPASP_C2PMSG_156_ALT_1),
@@ -87,6 +91,7 @@ const struct amdxdna_dev_info dev_npu3_pf_info = {
 const struct amdxdna_dev_info dev_npu3_vf_info = {
 	.mbox_bar		= NPU3_MBOX_BAR,
 	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
+	.doorbell_bar		= NPU3_DOORBELL_BAR,
 	.default_vbnv		= "RyzenAI-npu3-vf",
 	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.dev_priv		= &npu3_dev_vf_priv,

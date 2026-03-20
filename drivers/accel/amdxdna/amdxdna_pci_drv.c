@@ -238,6 +238,21 @@ static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struc
 	return ret;
 }
 
+static int amdxdna_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	struct drm_file *drm_filp = filp->private_data;
+	struct amdxdna_client *client = drm_filp->driver_priv;
+	struct amdxdna_dev *xdna = client->xdna;
+
+	if (likely(vma->vm_pgoff >= DRM_FILE_PAGE_OFFSET_START))
+		return drm_gem_mmap(filp, vma);
+
+	if (!xdna->dev_info->ops->mmap)
+		return -EOPNOTSUPP;
+
+	return xdna->dev_info->ops->mmap(client, vma);
+}
+
 static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	/* Context */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_CREATE_HWCTX, amdxdna_drm_create_hwctx_ioctl, 0),
@@ -249,6 +264,7 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SYNC_BO, amdxdna_drm_sync_bo_ioctl, 0),
 	/* Execution */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_EXEC_CMD, amdxdna_drm_submit_cmd_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(AMDXDNA_WAIT_CMD, amdxdna_drm_wait_cmd_ioctl, 0),
 	/* AIE hardware */
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_INFO, amdxdna_drm_get_info_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_ARRAY, amdxdna_drm_get_array_ioctl, 0),
@@ -298,7 +314,7 @@ static const struct file_operations amdxdna_fops = {
 	.poll		= drm_poll,
 	.read		= drm_read,
 	.llseek		= noop_llseek,
-	.mmap		= drm_gem_mmap,
+	.mmap		= amdxdna_drm_gem_mmap,
 	.show_fdinfo	= drm_show_fdinfo,
 #ifdef FOP_UNSIGNED_OFFSET
 	.fop_flags	= FOP_UNSIGNED_OFFSET,
