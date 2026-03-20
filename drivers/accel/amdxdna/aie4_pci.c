@@ -501,6 +501,38 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 	return 0;
 }
 
+static int aie4_doorbell_mmap(struct amdxdna_client *client, struct vm_area_struct *vma)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
+	phys_addr_t res_start;
+	unsigned long pfn;
+	int ret;
+
+	if (!aie4_hwctx_valid_doorbell(client, vma->vm_pgoff)) {
+		XDNA_ERR(xdna, "Invalid doorbell page offset 0x%lx", vma->vm_pgoff);
+		return -EINVAL;
+	}
+
+	if (vma_pages(vma) != 1) {
+		XDNA_ERR(xdna, "can only map one page, got %ld", vma_pages(vma));
+		return -EINVAL;
+	}
+
+	res_start = pci_resource_start(pdev, xdna->dev_info->doorbell_bar) + npriv->doorbell_off;
+	pfn = PHYS_PFN(res_start) + vma->vm_pgoff;
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
+	ret = io_remap_pfn_range(vma, vma->vm_start,
+				 pfn,
+				 PAGE_SIZE,
+				 vma->vm_page_prot);
+
+	XDNA_DBG(xdna, "doorbell ret %d", ret);
+	return ret;
+}
+
 static int aie4_pf_init(struct amdxdna_dev *xdna)
 {
 	int ret;
@@ -545,4 +577,6 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.fini			= aie4_vf_fini,
 	.hwctx_init		= aie4_hwctx_init,
 	.hwctx_fini		= aie4_hwctx_fini,
+	.mmap			= aie4_doorbell_mmap,
+	.cmd_wait		= aie4_cmd_wait,
 };

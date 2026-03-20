@@ -107,7 +107,7 @@ struct amdxdna_hwctx {
 	u32				start_col;
 	u32				num_col;
 	u32				umq_bo_hdl;
-	u32                             doorbell_offset;
+	u32				doorbell_offset;
 	u32				num_unused_col;
 
 	struct amdxdna_qos_info		     qos;
@@ -218,5 +218,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
+int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 
 #endif /* _AMDXDNA_CTX_H_ */

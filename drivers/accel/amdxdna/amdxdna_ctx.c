@@ -610,6 +610,33 @@ free_cmd_bo_hdls:
 	return ret;
 }
 
+int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
+		     u64 seq, u32 timeout)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx;
+	int ret, idx;
+
+	if (!xdna->dev_info->ops->cmd_wait)
+		return -EOPNOTSUPP;
+
+	/* For locking concerns, see amdxdna_drm_exec_cmd_ioctl. */
+	idx = srcu_read_lock(&client->hwctx_srcu);
+	hwctx = xa_load(&client->hwctx_xa, ctx_hdl);
+	if (!hwctx) {
+		XDNA_DBG(xdna, "PID %d failed to get ctx %d",
+			 client->pid, ctx_hdl);
+		ret = -EINVAL;
+		goto unlock_ctx_srcu;
+	}
+
+	ret = xdna->dev_info->ops->cmd_wait(hwctx, seq, timeout);
+
+unlock_ctx_srcu:
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+	return ret;
+}
+
 int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
@@ -627,4 +654,23 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 
 	XDNA_ERR(client->xdna, "Invalid command type %d", args->type);
 	return -EINVAL;
+}
+
+int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_drm_wait_cmd *args = data;
+	int ret;
+
+	XDNA_DBG(xdna, "PID %d ctx %d timeout set %d ms for cmd %llu",
+		 client->pid, args->hwctx, args->timeout, args->seq);
+
+	ret = amdxdna_cmd_wait(client, args->hwctx, args->seq, args->timeout);
+
+	XDNA_DBG(xdna, "PID %d ctx %d cmd %lld wait finished, ret %d",
+		 client->pid, args->hwctx, args->seq, ret);
+
+	trace_amdxdna_debug_point(current->comm, args->seq, "job returned to user");
+	return ret;
 }
