@@ -116,6 +116,27 @@ static const struct dma_buf_ops amdxdna_ubuf_dmabuf_ops = {
 	.vunmap = amdxdna_ubuf_vunmap,
 };
 
+static int readonly_va_entry(struct amdxdna_drm_va_entry *va_ent)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+	int ret;
+
+	mmap_read_lock(mm);
+
+	vma = find_vma(mm, va_ent->vaddr);
+	if (!vma ||
+	    vma->vm_start > va_ent->vaddr ||
+	    vma->vm_end < va_ent->vaddr ||
+	    vma->vm_end - va_ent->vaddr < va_ent->len)
+		ret = -ENOENT;
+	else
+		ret = vma->vm_flags & VM_WRITE ? 0 : 1;
+
+	mmap_read_unlock(mm);
+	return ret;
+}
+
 struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 				 u32 num_entries, void __user *va_entries)
 {
@@ -125,6 +146,7 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 	struct amdxdna_ubuf_priv *ubuf;
 	u32 npages, start = 0;
 	struct dma_buf *dbuf;
+	bool readonly = true;
 	int i, ret;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
@@ -163,6 +185,10 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 			ret = -EINVAL;
 			goto free_ent;
 		}
+
+		/* Pin pages as writable as long as not all entries are read-only. */
+		if (readonly && readonly_va_entry(&va_ent[i]) != 1)
+			readonly = false;
 	}
 
 	ubuf->nr_pages = exp_info.size >> PAGE_SHIFT;
@@ -185,7 +211,7 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 		npages = va_ent[i].len >> PAGE_SHIFT;
 
 		ret = pin_user_pages_fast(va_ent[i].vaddr, npages,
-					  FOLL_WRITE | FOLL_LONGTERM,
+					  (readonly ? 0 : FOLL_WRITE) | FOLL_LONGTERM,
 					  &ubuf->pages[start]);
 		if (ret < 0 || ret != npages) {
 			ret = -ENOMEM;
