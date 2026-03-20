@@ -1134,7 +1134,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
      /* Internal BO: pass 0 for default CMA  */
     xflags.bank = 0;
   } else {
-    /* External BO: single region from bitmap, or 0 for default CMA */
+    /* External BO: single region from bitmap */
     uint32_t bank_index = xflags.bank;
     xflags.bank = (1U << bank_index);
   }
