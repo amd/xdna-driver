@@ -1129,7 +1129,17 @@ std::unique_ptr<xrt_core::buffer_handle>
 device_xdna::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
-  return alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags);
+  xcl_bo_flags xflags{flags};
+  if (xflags.use > 0) {
+     /* Internal BO: pass 0 for default CMA  */
+    xflags.bank = 0;
+  } else {
+    /* External BO: single region from bitmap, or 0 for default CMA */
+    uint32_t bank_index = xflags.bank;
+    xflags.bank = (1U << bank_index);
+  }
+
+  return alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, xflags.all);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
@@ -1137,10 +1147,6 @@ device_xdna::
 alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   size_t size, uint64_t flags)
 {
-  // TODO:
-  // For now, debug BO is just a normal device BO. Let's associate all device
-  // BO with a HW CTX (if not passed in) since we can't tell if it is a
-  // debug BO or not.
   auto f = xcl_bo_flags{flags};
   if ((ctx_id == AMDXDNA_INVALID_CTX_HANDLE) && !!(f.flags & XRT_BO_FLAGS_CACHEABLE))
     ctx_id = f.slot;
