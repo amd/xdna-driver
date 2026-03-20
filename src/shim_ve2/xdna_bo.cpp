@@ -165,19 +165,6 @@ xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   shim_xdna_edge::xdna_bo::get_drm_bo_info(boh);
 }
 
-// SAIF TODO FIXME
-#if 0
-xdna_bo::
-xdna_bo(const device_xdna& device, const amdxdna_drm_get_bo_info& bo_info)
-	: m_edev(device.get_edev())
-	, m_handle(bo_info.handle)
-	, m_map_offset(bo_info.map_offset)
-	, m_vaddr(bo_info.vaddr)
-	, m_xdna_addr(bo_info.xdna_addr)
-{
-}
-#endif
-
 xdna_bo::
 ~xdna_bo()
 {
@@ -370,11 +357,16 @@ void
 xdna_bo::
 config(const xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_sizes)
 {
-  auto ctx_id = ctx ? ctx->get_slotidx() : m_owner_ctx_id;
-  if (ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
-    return;
-
   xcl_bo_flags xflags{ m_flags };
+  auto ctx_id = ctx ? ctx->get_slotidx() : m_owner_ctx_id;
+  if (ctx_id == AMDXDNA_INVALID_CTX_HANDLE && (xflags.flags & XRT_BO_FLAGS_CACHEABLE))
+    ctx_id = xflags.slot;
+  if (ctx_id == AMDXDNA_INVALID_CTX_HANDLE) {
+    shim_debug("Skipping BO config for drm_bo %d: no valid hwctx (owner=%d, slot=%d)",
+               get_drm_bo_handle(), m_owner_ctx_id, xflags.slot);
+    return;
+  }
+
   auto boh = get_drm_bo_handle();
   auto total_cols = get_total_cols(m_core_device, ctx_id);
   auto mdata_size = sizeof(struct fw_buffer_metadata) + total_cols * sizeof(struct uc_info_entry);
