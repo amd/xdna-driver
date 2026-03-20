@@ -1136,7 +1136,8 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   } else {
     /* External BO: single region from bitmap */
     uint32_t bank_index = xflags.bank;
-    xflags.bank = (1U << bank_index);
+    if (bank_index < 32)
+      xflags.bank = (1U << bank_index);
   }
 
   return alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, xflags.all);
