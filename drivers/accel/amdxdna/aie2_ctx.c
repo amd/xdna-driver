@@ -49,7 +49,7 @@ static void aie2_job_release(struct kref *ref)
 	wake_up(&job->hwctx->priv->job_free_wq);
 	if (job->out_fence)
 		dma_fence_put(job->out_fence);
-	kfree(job->priv);
+	kfree(job->aie2_job_health);
 	kfree(job);
 }
 
@@ -196,7 +196,7 @@ static void aie2_set_cmd_timeout(struct amdxdna_sched_job *job)
 	struct aie2_ctx_health *aie2_health __free(kfree) = NULL;
 	struct amdxdna_dev *xdna = job->hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
-	struct app_health_report *report = job->priv;
+	struct app_health_report *report = job->aie2_job_health;
 	u32 fail_cmd_idx = 0;
 
 	if (!report)
@@ -439,7 +439,7 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	if (ret)
 		kfree(report);
 	else
-		job->priv = report;
+		job->aie2_job_health = report;
 
 reset_hwctx:
 	aie2_hwctx_stop(xdna, hwctx, sched_job);

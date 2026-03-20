@@ -753,7 +753,7 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo = to_xdna_obj(gobj);
 	abo->attach = attach;
 	abo->dma_buf = dma_buf;
-	abo->type = AMDXDNA_BO_SHMEM;
+	abo->type = AMDXDNA_BO_SHARE;
 	gobj->resv = dma_buf->resv;
 
 	return gobj;

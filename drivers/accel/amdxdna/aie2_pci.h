@@ -273,6 +273,7 @@ struct aie2_fw_feature_tbl {
 	u32 min_minor;
 };
 
+#define AIE2_ALL_FEATURES	GENMASK_ULL(AIE2_FEATURE_MAX - 1, AIE2_NPU_COMMAND)
 #define AIE2_FEATURE_ON(ndev, feature)	test_bit(feature, &(ndev)->feature_mask)
 
 struct amdxdna_dev_priv {
