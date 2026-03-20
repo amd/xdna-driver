@@ -213,18 +213,19 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 		ret = pin_user_pages_fast(va_ent[i].vaddr, npages,
 					  (readonly ? 0 : FOLL_WRITE) | FOLL_LONGTERM,
 					  &ubuf->pages[start]);
+		if (ret >= 0)
+			start += ret;
+
 		if (ret < 0 || ret != npages) {
 			ret = -ENOMEM;
 			XDNA_ERR(xdna, "Failed to pin pages ret %d", ret);
 			goto destroy_pages;
 		}
-
-		start += ret;
 	}
 
 	exp_info.ops = &amdxdna_ubuf_dmabuf_ops;
 	exp_info.priv = ubuf;
-	exp_info.flags = O_RDWR | O_CLOEXEC;
+	exp_info.flags = (readonly ? O_RDONLY : O_RDWR) | O_CLOEXEC;
 
 	dbuf = dma_buf_export(&exp_info);
 	if (IS_ERR(dbuf)) {
