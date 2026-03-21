@@ -107,7 +107,7 @@ describe() const
 
 xdna_bo::
 xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags, uint32_t type)
+  size_t size, uint64_t flags, uint32_t type, uint32_t mem_bitmap)
   : m_core_device(&device)
   , m_edev(device.get_edev())
   , m_aligned_size(size)
@@ -117,7 +117,7 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_owner_ctx_id(ctx_id)
   , m_map_offset(0)
 {
-  alloc_bo();
+  alloc_bo(mem_bitmap);
   m_edev->bo_handle_ref_inc(m_handle);
   xcl_bo_flags xflags{ m_flags };
   if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
@@ -222,10 +222,21 @@ alloc_userptr_bo(void *buf)
 
 void
 xdna_bo::
-alloc_bo()
+alloc_bo(uint32_t mem_bitmap)
 {
+  xcl_bo_flags xflags{m_flags};
+  if (xflags.use > 0) {
+     /* Internal BO: pass mem_bitmap for proper bank  */
+     xflags.bank = mem_bitmap;
+   } else {
+     /* External BO: single region from bitmap */
+     uint32_t bank_index = xflags.bank;
+     if (bank_index < 32)
+       xflags.bank = (1U << bank_index);
+   }
+
   amdxdna_drm_create_bo cbo = {
-    .flags = m_flags,
+    .flags = xflags.all,
     .size = m_aligned_size,
     .type = m_type,
   };
