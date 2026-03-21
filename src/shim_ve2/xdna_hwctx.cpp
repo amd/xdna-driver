@@ -366,17 +366,7 @@ alloc_bo(void* userptr, size_t size, uint64_t flags)
   auto dev = const_cast<device_xdna*>(get_device());
 
   /* Inject hwctx mem_bitmap (queried from driver) into BO flags. */
-  xcl_bo_flags xflags{flags};
-  if (xflags.use > 0) {
-    /* Internal BO: pass whole bitmap */
-    xflags.bank = m_mem_bitmap;
-  } else {
-    /* External BO: single region from bitmap */
-    uint32_t bank_index = xflags.bank;
-    xflags.bank = (1U << bank_index);
-  }
-
-  return dev->alloc_bo(userptr, get_slotidx(), size, xflags.all);
+  return dev->alloc_bo(userptr, get_slotidx(), size, flags, m_mem_bitmap);
 
 }
 

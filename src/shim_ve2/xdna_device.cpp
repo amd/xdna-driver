@@ -1129,24 +1129,13 @@ std::unique_ptr<xrt_core::buffer_handle>
 device_xdna::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
-  xcl_bo_flags xflags{flags};
-  if (xflags.use > 0) {
-     /* Internal BO: pass 0 for default CMA  */
-    xflags.bank = 0;
-  } else {
-    /* External BO: single region from bitmap */
-    uint32_t bank_index = xflags.bank;
-    if (bank_index < 32)
-      xflags.bank = (1U << bank_index);
-  }
-
-  return alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, xflags.all);
+  return alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, flags, 0 /*Default CMA*/);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
 device_xdna::
 alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags)
+  size_t size, uint64_t flags, uint32_t mem_bitmap)
 {
   auto f = xcl_bo_flags{flags};
   if ((ctx_id == AMDXDNA_INVALID_CTX_HANDLE) && !!(f.flags & XRT_BO_FLAGS_CACHEABLE))
@@ -1155,7 +1144,7 @@ alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
   if (userptr)
     return std::make_unique<xdna_bo>(*this, ctx_id, size, userptr);
 
-  return std::make_unique<xdna_bo>(*this, ctx_id, size, flags, flag_to_type(flags));
+  return std::make_unique<xdna_bo>(*this, ctx_id, size, flags, flag_to_type(flags), mem_bitmap);
 }
 
 std::shared_ptr<xdna_edgedev>

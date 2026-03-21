@@ -66,7 +66,7 @@ public:
   import_drm_bo(const shim_xdna_edge::shared&, uint32_t*, size_t*) const;
 public:
   xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
-     size_t size, uint64_t flags, uint32_t type);
+     size_t size, uint64_t flags, uint32_t type, uint32_t mem_bitmap=0);
 
   xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
      size_t size, void *uptr);
@@ -80,7 +80,7 @@ public:
 
   // Alloc BO from driver
   void
-  alloc_bo();
+  alloc_bo(uint32_t mem_bitmap);
 
   // Alloc user ptr BO from driver
   void
