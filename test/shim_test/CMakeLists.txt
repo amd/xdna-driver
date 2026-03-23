@@ -23,7 +23,7 @@ target_link_libraries(${XDNA_SHIM_TEST} PRIVATE
 
 set_target_properties(${XDNA_SHIM_TEST} PROPERTIES
   BUILD_WITH_INSTALL_RPATH FALSE
-  # --diable-new-dtags is needed to make sure linker to use RPATH instead of RUNPATH.
+  # --disable-new-dtags is needed to make sure linker to use RPATH instead of RUNPATH.
   # RPATH   is searched *before* LD_LIBRARY_PATH
   # RUNPATH is searched *after*  LD_LIBRARY_PATH
   # We want RPATH behavior for XDNA_SHIM_TEST
@@ -40,34 +40,6 @@ target_include_directories(${XDNA_SHIM_TEST} PRIVATE
 target_compile_options(${XDNA_SHIM_TEST} PRIVATE -O3)
 
 install(TARGETS ${XDNA_SHIM_TEST} DESTINATION ${XDNA_BIN_DIR}/bin)
-
-install(CODE "execute_process( \
-  COMMAND ${CMAKE_COMMAND} -E create_symlink \
-  ${AMDXDNA_BINS_DIR}/workspaces/NPU1_1x4_TESTCASES \
-  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu1_workspace \
-  )"
-  )
-
-install(CODE "execute_process( \
-  COMMAND ${CMAKE_COMMAND} -E create_symlink \
-  ${AMDXDNA_BINS_DIR}/workspaces/NPU4_1x4_TESTCASES \
-  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu4_workspace \
-  )"
-  )
-
-install(CODE "execute_process( \
-  COMMAND ${CMAKE_COMMAND} -E create_symlink \
-  ${AMDXDNA_BINS_DIR}/workspaces/NPU5_1x4_TESTCASES \
-  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu5_workspace \
-  )"
-  )
-
-install(CODE "execute_process( \
-  COMMAND ${CMAKE_COMMAND} -E create_symlink \
-  ${AMDXDNA_BINS_DIR}/workspaces/NPU6_1x4_TESTCASES \
-  ${CMAKE_BINARY_DIR}/${XDNA_BIN_DIR}/npu6_workspace \
-  )"
-  )
 
 # Set up symlink for local shim test case data
 set(XDNA_SHIM_TEST_DATA_DIR local_shim_test_data)
