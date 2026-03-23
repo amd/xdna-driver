@@ -321,7 +321,7 @@ get_bo_usage(device* dev, int pid)
     .num_element = 1,
     .buffer = reinterpret_cast<uintptr_t>(&usage)
   };
-  int ret = ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
   close(fd);
   if (ret == -1) {
     throw std::runtime_error("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY) failed");
