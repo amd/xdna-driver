@@ -26,15 +26,17 @@
 #include <sstream>
 #include <string>
 #include <dirent.h>
+#include <sys/stat.h>
 
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <sys/mman.h>
-
-// FIXME
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+
+// FIXME
 #include "../../src/include/uapi/drm_local/amdxdna_accel.h"
 // enf of FIXME
 
@@ -570,7 +572,9 @@ public:
   mmapped_file(size_t size, bool readonly)
   {
     char tmpl[] = "/tmp/xrt_bo_mmap_XXXXXX";
+    mode_t old_umask = umask(0077);  // ensure only owner can access
     auto fd = ::mkstemp(tmpl);
+    umask(old_umask);
     if (fd < 0)
       throw std::runtime_error("mkstemp failed");
     ::unlink(tmpl);
@@ -1188,7 +1192,7 @@ get_driver_version(unsigned int *major, unsigned int *minor, device::id_type dev
   version.desc_len = sizeof(desc);
   version.desc = desc;
 
-  int result = ioctl(fd, DRM_IOCTL_VERSION, &version);
+  int result = ::ioctl(fd, DRM_IOCTL_VERSION, &version);
   close(fd);
   if (result) {
     throw std::runtime_error("ioctl(DRM_IOCTL_VERSION) failed");
@@ -1253,8 +1257,16 @@ main(int argc, char **argv)
       }
     }
     case 'k': {
-      if (get_driver_version(&current_drv.major, &current_drv.minor))
+      try {
+        if (get_driver_version(&current_drv.major, &current_drv.minor))
+          return 1;
+      } catch (const std::exception& e) {
+        std::cerr << "Caught std::exception: " << e.what() << std::endl;
         return 1;
+      } catch (...) {
+        std::cerr << "Caught unknown exception" << std::endl;
+        return 1;
+      }
       std::cout << "Evaluating test result based on driver version: "
         << current_drv.major << "." << current_drv.minor << std::endl;
       break;
