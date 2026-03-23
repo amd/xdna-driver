@@ -139,8 +139,8 @@ struct amdxdna_fw_ver {
 struct amdxdna_cert_ver {
 	u8 major;
 	u8 minor;
-	char git_hash[41];
-	char date[11];
+	u8 hotfix;
+	u8 build;
 };
 
 struct amdxdna_dev {

@@ -15,6 +15,7 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_error.h"
 #include "amdxdna_aie.h"
+#include "aie_common.h"
 #include "amdxdna_mgmt.h"
 #include "aie4_msg_priv.h"
 
@@ -48,20 +49,13 @@ aie4_health_get_num_uc(struct aie4_msg_app_health_report *h)
 }
 
 static inline u32
-aie4_health_get_runlist_read_idx(struct aie4_msg_app_health_report *h)
+aie4_health_runlist_read_idx(struct aie4_msg_app_health_report *h)
 {
 	if (aie4_health_report_is_legacy(h))
 		return 0;
 
 	return h->runlist_read_idx;
 }
-
-#define AIE4_INTERVAL		20000	/* us */
-#ifdef AMDXDNA_DEVEL
-#define AIE4_TIMEOUT		(1000000 * 1000) /* us */
-#else
-#define AIE4_TIMEOUT		1000000	/* us */
-#endif
 
 #define MAX_NUM_CERTS		6
 
@@ -115,8 +109,8 @@ struct amdxdna_ctx_priv {
 #define CTX_STATE_CONNECTED		0x1
 	u32                             status;
 
-	bool					cached_health_valid;
-	struct aie4_msg_app_health_report	cached_health_report;
+	bool					cached_ctx_error_valid;
+	struct aie4_async_ctx_error		cached_ctx_error;
 };
 
 enum aie4_dev_status {
@@ -230,7 +224,7 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
 				 struct amdxdna_mgmt_dma_hdl *dma_hdl, void *handle,
 				 int (*cb)(void*, void __iomem *, size_t));
 int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char *buf, u32 size, u32 *cols_filled);
-int aie4_query_cert_version(struct amdxdna_dev_hdl *ndev);
+int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev);
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version);
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie4_query_aie_telemetry(struct amdxdna_dev_hdl *ndev, u32 type, u32 pasid, dma_addr_t addr,
@@ -268,7 +262,6 @@ int aie4_cmd_submit(struct amdxdna_sched_job *job,
 		    u32 *syncobj_hdls, u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
-int aie4_parse_priority(u32 priority);
 
 /* aie4_smu.c */
 int aie4_smu_start(struct amdxdna_dev_hdl *ndev);
@@ -286,10 +279,8 @@ int aie4_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 int aie4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 
 /* aie4_psp.c */
-struct psp_device *aie4_psp_create(struct device *dev, struct aie4_psp_config *conf);
 int aie4_psp_start(struct psp_device *psp);
 void aie4_psp_stop(struct psp_device *psp);
-int aie4_psp_waitmode_poll(struct psp_device *psp);
 
 /* aie4_pci.c */
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);

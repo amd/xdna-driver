@@ -29,9 +29,7 @@
 #include "amdxdna_devel.h"
 #endif
 #include "amdxdna_aie.h"
-
-#define AIE2_INTERVAL	20000	/* us */
-#define AIE2_TIMEOUT	1000000	/* us */
+#include "aie_common.h"
 
 /* Firmware version encoding: major in high 32 bits, minor in low 32 bits */
 #define AIE2_FW_VERSION(major, minor)	(((u64)(major) << 32) | (minor))
@@ -294,14 +292,6 @@ struct amdxdna_dev_hdl {
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
 };
 
-#define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
-	[reg_name] = {bar##_BAR_INDEX, (reg_addr) - bar##_BAR_BASE}
-
-struct aie2_bar_off_pair {
-	int	bar_idx;
-	u32	offset;
-};
-
 struct aie2_hw_ops {
 	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 };
@@ -393,11 +383,10 @@ static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
 }
 
 /* aie2_psp.c */
-struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
-void aie2_psp_destroy(struct device *dev, void *psp_hdl);
 int aie2_psp_start(struct psp_device *psp);
 void aie2_psp_stop(struct psp_device *psp);
 int aie2_psp_waitmode_poll(struct psp_device *psp);
+void aie2_psp_destroy(struct device *dev, void *psp_hdl);
 
 /* aie2_debugfs.c */
 void aie2_debugfs_init(struct amdxdna_dev *xdna);

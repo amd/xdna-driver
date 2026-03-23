@@ -67,7 +67,7 @@ public:
 
   std::unique_ptr<xrt_core::buffer_handle>
   alloc_bo(void* userptr, xrt_core::hwctx_handle::slot_id ctx_id,
-	   size_t size, uint64_t flags);
+	   size_t size, uint64_t flags, uint32_t mem_bitmap);
 
   std::unique_ptr<xrt_core::buffer_handle>
   import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl) override;

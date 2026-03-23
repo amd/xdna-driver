@@ -572,8 +572,6 @@ TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_
 
     bad_bo_set.verify_result();
   }
-  // TODO: Remove sleep workaround after FW fix to not wait for suspend after timeout is available.
-  sleep(10);
 }
 
 /**
@@ -637,43 +635,55 @@ void
 TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   bool is_timeout = static_cast<bool>(arg[0]);
+  device* dev = sdev.get();
   const char *good_tag = "good";
-  static const flow_type good_flow = PARTIAL_ELF;
 
-  // Creating commands and BOs
+  /* NPU4-class: prefer partial-ELF, NPU3: FULL_ELF */
+  static const flow_type flow_partial = PARTIAL_ELF;
+  static const flow_type flow_full = FULL_ELF;
+  const binary_info& good_info = [&]() -> const binary_info& {
+    try {
+      return get_binary_info(dev, good_tag, &flow_partial);
+    } catch (const std::runtime_error&) {
+      return get_binary_info(dev, good_tag, &flow_full);
+    }
+  }();
+  flow_type good_flow = good_info.flow;
 
   // Two good ones
-  elf_io_test_bo_set good_bo_set1{sdev.get(), good_tag, &good_flow};
-  elf_io_test_bo_set good_bo_set2{sdev.get(), good_tag, &good_flow};
+  auto good_bo_set1 = create_bo_set_for_device(dev, false, good_tag, &good_flow);
+  auto good_bo_set2 = create_bo_set_for_device(dev, false, good_tag, &good_flow);
   // A timeout one
-  elf_io_negative_test_bo_set timeout_bo_set{sdev.get(), "bad_timeout"};
+  elf_io_negative_test_bo_set timeout_bo_set{dev, "bad_timeout"};
+  std::unique_ptr<elf_io_negative_test_bo_set> error_bo_set;
   // An error one
-  elf_io_negative_test_bo_set error_bo_set{sdev.get(), "bad_op"};
+  if (!is_timeout) 
+    error_bo_set = std::make_unique<elf_io_negative_test_bo_set>(dev, "bad_op");
 
   // Creating HW context for cmd submission. We use the good xclbin here to
   // make sure good cmd can complete successfully. The bad ones don't really
   // require any specific xclbin to fail.
-  hw_ctx hwctx{sdev.get(), good_tag, &good_flow};
+  hw_ctx hwctx{dev, good_tag, &good_flow};
 
   // Initialize cmd before submission
-  good_bo_set1.init_cmd(hwctx, false);
-  good_bo_set1.sync_before_run();
-  good_bo_set2.init_cmd(hwctx, false);
-  good_bo_set2.sync_before_run();
+  good_bo_set1->init_cmd(hwctx, false);
+  good_bo_set1->sync_before_run();
+  good_bo_set2->init_cmd(hwctx, false);
+  good_bo_set2->sync_before_run();
   timeout_bo_set.init_cmd(hwctx, false);
   timeout_bo_set.sync_before_run();
-  error_bo_set.init_cmd(hwctx, false);
-  error_bo_set.sync_before_run();
+  if (error_bo_set) {
+    error_bo_set->init_cmd(hwctx, false);
+    error_bo_set->sync_before_run();
+  }
 
-  // Create and send the chained command, keep the bad one in the middle
-  // Command chain: good, bad (error or timeout), good
   const uint32_t bad_index = 1;
   const uint32_t bad_state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ERROR;
-  io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : &error_bo_set;
+  io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : error_bo_set.get();
   std::vector<bo*> tmp_cmd_bos;
-  tmp_cmd_bos.push_back(good_bo_set1.get_bos()[IO_TEST_BO_CMD].tbo.get());
+  tmp_cmd_bos.push_back(good_bo_set1->get_bos()[IO_TEST_BO_CMD].tbo.get());
   tmp_cmd_bos.push_back((*bad).get_bos()[IO_TEST_BO_CMD].tbo.get());
-  tmp_cmd_bos.push_back(good_bo_set2.get_bos()[IO_TEST_BO_CMD].tbo.get());
+  tmp_cmd_bos.push_back(good_bo_set2->get_bos()[IO_TEST_BO_CMD].tbo.get());
 
   auto cbo = std::make_unique<bo>(sdev.get(), 0x1000ul, XCL_BO_FLAGS_EXECBUF);
   io_test_init_runlist_cmd(cbo.get(), tmp_cmd_bos);

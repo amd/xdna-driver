@@ -121,10 +121,10 @@ static int aie4_fw_is_alive(struct amdxdna_dev *xdna)
 
 	ret = readx_poll_timeout(readl, src + offsetof(struct mailbox_info, valid),
 				 fw_is_ready, (fw_is_ready == 0x1),
-				 AIE4_INTERVAL, AIE4_TIMEOUT);
+				 AIE_INTERVAL, AIE_TIMEOUT);
 	if (ret) {
 		XDNA_ERR(xdna, "firmware is not ready (%d) after %d ms",
-			 fw_is_ready, DIV_ROUND_CLOSEST(AIE4_TIMEOUT, 1000000));
+			 fw_is_ready, DIV_ROUND_CLOSEST(AIE_TIMEOUT, 1000000));
 	}
 
 	XDNA_DBG(xdna, "firmware is ready (%d)", fw_is_ready);
@@ -346,9 +346,9 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	ret = aie4_query_cert_version(ndev);
+	ret = aie4_query_cert_firmware_version(ndev);
 	if (ret) {
-		XDNA_ERR(ndev->xdna, "Query CERT version failed");
+		XDNA_ERR(ndev->xdna, "Query CERT FW version failed");
 		return ret;
 	}
 
@@ -621,7 +621,8 @@ static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 		       pdev->device, pdev->revision, ndev->priv->certfw_path);
 	if (ret >= sizeof(fw_name)) {
 		XDNA_ERR(xdna, "fw_name %s is truncated", fw_name);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto release_npufw;
 	}
 
 	XDNA_DBG(xdna, "Request fw %s", fw_name);
@@ -661,12 +662,12 @@ static int aie4_release_firmware(struct amdxdna_dev_hdl *ndev,
 
 static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 				 const struct firmware *npufw,
-				 const struct firmware *certfw)
+				 const struct firmware *certfw,
+				 void __iomem *tbl[PCI_NUM_RESOURCES])
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct psp_config psp_conf;
 	struct smu_config smu_conf;
-	struct aie4_psp_config psp_conf;
 	int i;
 
 	if (!aie4_fw_load_support(ndev))
@@ -677,9 +678,8 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	psp_conf.certfw_size = certfw->size;
 	psp_conf.certfw_buf = certfw->data;
 	for (i = 0; i < PSP_MAX_REGS; i++)
-		psp_conf.psp_regs[i] = ndev->psp_base + PSP_REG_OFF(ndev, i);
-
-	ndev->psp_hdl = aie4_psp_create(&pdev->dev, &psp_conf);
+		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
+	ndev->psp_hdl = aiem_psp_create(&xdna->ddev, xdna->ddev.dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
 		return -ENOMEM;
@@ -767,7 +767,8 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 	set_bit(xdna->dev_info->sram_bar, &bars);
 	if (!is_npu3_vf_dev(pdev)) {
-		set_bit(xdna->dev_info->psp_bar, &bars);
+		for (i = 0; i < PSP_MAX_REGS; i++)
+			set_bit(PSP_REG_BAR(ndev, i), &bars);
 		for (i = 0; i < SMU_MAX_REGS; i++)
 			set_bit(SMU_REG_BAR(ndev, i), &bars);
 	}
@@ -787,17 +788,28 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
 	ndev->rbuf_base = tbl[xdna->dev_info->sram_bar];
-	ndev->psp_base = tbl[xdna->dev_info->psp_bar];
 	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->doorbell_base = tbl[xdna->dev_info->doorbell_bar];
 
+	/* Request firmware */
 	ret = aie4_request_firmware(ndev, &npufw, &certfw);
-	if (ret)
+	if (ret) {
+		XDNA_ERR(xdna, "failed to request firmware, ret %d", ret);
 		return ret;
-	ret = aie4_prepare_firmware(ndev, npufw, certfw);
-	aie4_release_firmware(ndev, npufw, certfw);
-	if (ret)
+	}
+
+	/* Prepare firmware */
+	ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to prepare firmware, ret %d", ret);
 		return ret;
+	}
+
+	ret = aie4_release_firmware(ndev, npufw, certfw);
+	if (ret) {
+		XDNA_ERR(xdna, "failed to release firmware, ret %d", ret);
+		return ret;
+	}
 
 	pci_set_master(pdev);
 
@@ -931,6 +943,41 @@ static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context
 	return aie4_send_msg_wait(ndev, &msg);
 }
 
+static u32 aie4_parse_priority_to_dev(u32 priority)
+{
+	switch (priority) {
+	case AMDXDNA_QOS_LOW_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_IDLE;
+	case AMDXDNA_QOS_NORMAL_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	case AMDXDNA_QOS_HIGH_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_FOCUS;
+	case AMDXDNA_QOS_REALTIME_PRIORITY:
+		return AIE4_CONTEXT_PRIORITY_BAND_REAL_TIME;
+	default:
+		return AIE4_CONTEXT_PRIORITY_BAND_NORMAL;
+	}
+}
+
+static int aie4_ctx_init_dpm(struct amdxdna_ctx *ctx)
+{
+	DECLARE_AIE4_MSG(aie4_msg_configure_hw_context, AIE4_MSG_OP_CONFIGURE_HW_CONTEXT);
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	req.hw_context_id = ctx->priv->hw_ctx_id;
+	req.property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_DPM;
+	req.dpm.egops = ctx->qos.gops;
+	req.dpm.fps = ctx->qos.fps;
+	req.dpm.data_movement = ctx->qos.dma_bandwidth;
+	req.dpm.latency_in_us = ctx->qos.latency;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+
+	return ret;
+}
+
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
@@ -974,7 +1021,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	req.hsa_addr_high = upper_32_bits(amdxdna_gem_dev_addr(nctx->umq_bo));
 	req.hsa_addr_low = lower_32_bits(amdxdna_gem_dev_addr(nctx->umq_bo));
 
-	req.priority_band = ctx->qos.priority;
+	req.priority_band = aie4_parse_priority_to_dev(ctx->qos.priority);
 
 	XDNA_DBG(xdna, "set pasid raw 0x%x", req.pasid.raw);
 
@@ -1037,6 +1084,10 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	ndev->hwctx_cnt++;
 	XDNA_DBG(xdna, "created hw context id %d", nctx->hw_ctx_id);
 
+	ret = aie4_ctx_init_dpm(ctx);
+	if (ret)
+		XDNA_WARN_ONCE(xdna, "Failed to init ctx dpm");
+
 	return 0;
 done:
 	XDNA_ERR(xdna, "failed %d", ret);
@@ -1086,10 +1137,12 @@ static int aie4_xrs_load(void *cb_arg, struct xrs_action_load *action)
 	ret = aie4_create_context(xdna->dev_handle, ctx);
 	mutex_unlock(&xdna->dev_handle->aie4_lock);
 
-	if (ret)
+	if (ret) {
 		XDNA_ERR(xdna, "create context failed, ret %d", ret);
+		return ret;
+	}
 
-	return ret;
+	return 0;
 }
 
 static int aie4_xrs_unload(void *cb_arg)
@@ -1217,10 +1270,30 @@ void aie4_reset_prepare(struct amdxdna_dev *xdna)
 	XDNA_INFO(xdna, "reset prepare finished");
 }
 
-int aie4_reset_done(struct amdxdna_dev *xdna)
+static int aie4_restore_services(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	int ret;
+
+	if (is_npu3_pf_dev(pdev) && ndev->num_vfs) {
+		DECLARE_AIE4_MSG(aie4_msg_create_vfs, AIE4_MSG_OP_CREATE_VFS);
+
+		req.vf_cnt = ndev->num_vfs;
+		ret = aie4_send_msg_wait(ndev, &msg);
+		if (ret)
+			XDNA_ERR(xdna, "create vfs op failed: %d", ret);
+	} else {
+		aie4_ctx_resume_all(xdna);
+		ret = 0;
+	}
+
+	return ret;
+}
+
+int aie4_reset_done(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	int ret;
 
 	XDNA_INFO(xdna, "reset done start");
@@ -1235,27 +1308,12 @@ int aie4_reset_done(struct amdxdna_dev *xdna)
 		goto error;
 
 	ret = aie4_partition_init(ndev);
-	if (ret) {
-		aie4_mailbox_fini(ndev);
-		goto error;
-	}
+	if (ret)
+		goto mailbox_fini;
 
-	if (is_npu3_pf_dev(pdev)) {
-		int numvfs;
-
-		mutex_unlock(&ndev->aie4_lock);
-		numvfs = aie4_sriov_configure(xdna, ndev->num_vfs);
-		mutex_lock(&ndev->aie4_lock);
-
-		if (numvfs != ndev->num_vfs) {
-			XDNA_ERR(xdna, "reconfigure %d num_vfs but configured %d",
-				 ndev->num_vfs, numvfs);
-			ret = -EINVAL;
-			goto error;
-		}
-	} else {
-		aie4_ctx_resume_all(xdna);
-	}
+	ret = aie4_restore_services(xdna);
+	if (ret)
+		goto mailbox_fini;
 
 	/* mark dev status to allow new incoming requests */
 	ndev->dev_status = AIE4_DEV_START;
@@ -1265,6 +1323,8 @@ int aie4_reset_done(struct amdxdna_dev *xdna)
 	XDNA_INFO(xdna, "reset done finished");
 	return 0;
 
+mailbox_fini:
+	aie4_mailbox_fini(ndev);
 error:
 	mutex_unlock(&ndev->aie4_lock);
 	return ret;
@@ -1306,10 +1366,10 @@ static int aie4_hw_resume(struct amdxdna_dev *xdna)
 	}
 
 	mutex_lock(&ndev->aie4_lock);
-	aie4_ctx_resume_all(xdna);
+	ret = aie4_restore_services(xdna);
 	mutex_unlock(&ndev->aie4_lock);
 
-	return 0;
+	return ret;
 
 clear_pci:
 	pci_clear_master(pdev);
@@ -1838,13 +1898,11 @@ static int aie4_query_firmware_version(struct amdxdna_client *client,
 	return 0;
 }
 
-static int aie4_query_cert_firmware_version(struct amdxdna_client *client,
-					    struct amdxdna_drm_get_info *args)
+static int aie4_get_cert_firmware_version(struct amdxdna_client *client,
+					  struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_query_firmware_version version = {};
 	struct amdxdna_dev *xdna = client->xdna;
-	char short_hash[9] = {};
-	u32 y, m, d;
 	int min;
 
 	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
@@ -1854,13 +1912,8 @@ static int aie4_query_cert_firmware_version(struct amdxdna_client *client,
 
 	version.major = xdna->cert_ver.major;
 	version.minor = xdna->cert_ver.minor;
-
-	if (sscanf(xdna->cert_ver.date, "%4u-%2u-%2u", &y, &m, &d) == 3)
-		version.patch = y * 10000 + m * 100 + d;
-
-	memcpy(short_hash, xdna->cert_ver.git_hash, 8);
-	if (kstrtou32(short_hash, 16, &version.build))
-		version.build = 0;
+	version.patch = xdna->cert_ver.hotfix;
+	version.build = xdna->cert_ver.build;
 
 	min = min(args->buffer_size, sizeof(version));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, min))
@@ -1978,7 +2031,7 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie4_query_firmware_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
-		ret = aie4_query_cert_firmware_version(client, args);
+		ret = aie4_get_cert_firmware_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
 		ret = aie4_query_telemetry(client, args);
@@ -2091,7 +2144,7 @@ static int aie4_get_ctx_status_array(struct amdxdna_client *client,
 			tmp[hw_i].preemptions = 0;
 			tmp[hw_i].errors = 0;
 			tmp[hw_i].pasid = tmp_client->pasid;
-			tmp[hw_i].priority = aie4_parse_priority(ctx->qos.priority);
+			tmp[hw_i].priority = ctx->qos.priority;
 			tmp[hw_i].gops = ctx->qos.gops;
 			tmp[hw_i].fps = ctx->qos.fps;
 			tmp[hw_i].dma_bandwidth = ctx->qos.dma_bandwidth;

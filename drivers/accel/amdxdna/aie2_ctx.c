@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  */
 
 #include "drm/amdxdna_accel.h"
@@ -49,7 +49,7 @@ static void aie2_job_release(struct kref *ref)
 	wake_up(&job->hwctx->priv->job_free_wq);
 	if (job->out_fence)
 		dma_fence_put(job->out_fence);
-	kfree(job->priv);
+	kfree(job->aie2_job_health);
 	kfree(job);
 }
 
@@ -83,7 +83,7 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 	}
 
 	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(hwctx->client, heap),
+				amdxdna_obj_dma_addr(heap),
 				heap->mem.size);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buf failed, ret %d", ret);
@@ -196,7 +196,7 @@ static void aie2_set_cmd_timeout(struct amdxdna_sched_job *job)
 	struct aie2_ctx_health *aie2_health __free(kfree) = NULL;
 	struct amdxdna_dev *xdna = job->hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
-	struct app_health_report *report = job->priv;
+	struct app_health_report *report = job->aie2_job_health;
 	u32 fail_cmd_idx = 0;
 
 	if (!report)
@@ -439,7 +439,7 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	if (ret)
 		kfree(report);
 	else
-		job->priv = report;
+		job->aie2_job_health = report;
 
 reset_hwctx:
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
@@ -669,14 +669,14 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 			.size = MAX_CHAIN_CMDBUF_SIZE,
 		};
 
-		abo = amdxdna_drm_alloc_dev_bo(&xdna->ddev, &args, client->filp);
+		abo = amdxdna_drm_create_dev_bo(&xdna->ddev, &args, client->filp);
 		if (IS_ERR(abo)) {
 			ret = PTR_ERR(abo);
 			goto free_cmd_bufs;
 		}
 
 		XDNA_DBG(xdna, "Command buf %d addr 0x%llx size 0x%lx",
-			 i, abo->mem.dev_addr, abo->mem.size);
+			 i, amdxdna_gem_dev_addr(abo), abo->mem.size);
 		priv->cmd_buf[i] = abo;
 	}
 
@@ -722,7 +722,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	}
 
 	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(hwctx->client, heap),
+				amdxdna_obj_dma_addr(heap),
 				heap->mem.size);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);

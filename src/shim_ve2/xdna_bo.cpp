@@ -107,7 +107,7 @@ describe() const
 
 xdna_bo::
 xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
-  size_t size, uint64_t flags, uint32_t type)
+  size_t size, uint64_t flags, uint32_t type, uint32_t mem_bitmap)
   : m_core_device(&device)
   , m_edev(device.get_edev())
   , m_aligned_size(size)
@@ -117,7 +117,7 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_owner_ctx_id(ctx_id)
   , m_map_offset(0)
 {
-  alloc_bo();
+  alloc_bo(mem_bitmap);
   m_edev->bo_handle_ref_inc(m_handle);
   xcl_bo_flags xflags{ m_flags };
   if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
@@ -164,19 +164,6 @@ xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   m_edev->bo_handle_ref_inc(boh);
   shim_xdna_edge::xdna_bo::get_drm_bo_info(boh);
 }
-
-// SAIF TODO FIXME
-#if 0
-xdna_bo::
-xdna_bo(const device_xdna& device, const amdxdna_drm_get_bo_info& bo_info)
-	: m_edev(device.get_edev())
-	, m_handle(bo_info.handle)
-	, m_map_offset(bo_info.map_offset)
-	, m_vaddr(bo_info.vaddr)
-	, m_xdna_addr(bo_info.xdna_addr)
-{
-}
-#endif
 
 xdna_bo::
 ~xdna_bo()
@@ -235,10 +222,21 @@ alloc_userptr_bo(void *buf)
 
 void
 xdna_bo::
-alloc_bo()
+alloc_bo(uint32_t mem_bitmap)
 {
+  xcl_bo_flags xflags{m_flags};
+  if (xflags.use > 0) {
+     /* Internal BO: pass mem_bitmap for proper bank  */
+     xflags.bank = mem_bitmap;
+   } else {
+     /* External BO: single region from bitmap */
+     uint32_t bank_index = xflags.bank;
+     if (bank_index < 32)
+       xflags.bank = (1U << bank_index);
+   }
+
   amdxdna_drm_create_bo cbo = {
-    .flags = m_flags,
+    .flags = xflags.all,
     .size = m_aligned_size,
     .type = m_type,
   };
@@ -370,11 +368,16 @@ void
 xdna_bo::
 config(const xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_sizes)
 {
-  auto ctx_id = ctx ? ctx->get_slotidx() : m_owner_ctx_id;
-  if (ctx_id == AMDXDNA_INVALID_CTX_HANDLE)
-    return;
-
   xcl_bo_flags xflags{ m_flags };
+  auto ctx_id = ctx ? ctx->get_slotidx() : m_owner_ctx_id;
+  if (ctx_id == AMDXDNA_INVALID_CTX_HANDLE && (xflags.flags & XRT_BO_FLAGS_CACHEABLE))
+    ctx_id = xflags.slot;
+  if (ctx_id == AMDXDNA_INVALID_CTX_HANDLE) {
+    shim_debug("Skipping BO config for drm_bo %d: no valid hwctx (owner=%d, slot=%d)",
+               get_drm_bo_handle(), m_owner_ctx_id, xflags.slot);
+    return;
+  }
+
   auto boh = get_drm_bo_handle();
   auto total_cols = get_total_cols(m_core_device, ctx_id);
   auto mdata_size = sizeof(struct fw_buffer_metadata) + total_cols * sizeof(struct uc_info_entry);

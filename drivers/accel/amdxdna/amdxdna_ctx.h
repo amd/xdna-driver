@@ -129,6 +129,11 @@ struct amdxdna_drv_cmd {
 	u32			result;
 };
 
+struct app_health_report;
+union amdxdna_job_priv {
+	struct app_health_report *aie2_health;
+};
+
 struct amdxdna_sched_job {
 	struct drm_sched_job	base;
 	struct kref		refcnt;
@@ -143,15 +148,20 @@ struct amdxdna_sched_job {
 	u64			seq;
 	struct amdxdna_drv_cmd	*drv_cmd;
 	struct amdxdna_gem_obj	*cmd_bo;
-	void			*priv;
+	union amdxdna_job_priv	priv;
 	size_t			bo_cnt;
 	struct drm_gem_object	*bos[] __counted_by(bo_cnt);
 };
 
+#define aie2_job_health priv.aie2_health
+
 static inline u32
 amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (!cmd)
+		return ERT_INVALID_CMD;
 
 	return FIELD_GET(AMDXDNA_CMD_OPCODE, cmd->header);
 }
@@ -159,7 +169,10 @@ amdxdna_cmd_get_op(struct amdxdna_gem_obj *abo)
 static inline void
 amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (!cmd)
+		return;
 
 	cmd->header &= ~AMDXDNA_CMD_STATE;
 	cmd->header |= FIELD_PREP(AMDXDNA_CMD_STATE, s);
@@ -168,7 +181,10 @@ amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 static inline enum ert_cmd_state
 amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_cmd *cmd = abo->mem.kva;
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (!cmd)
+		return ERT_CMD_STATE_INVALID;
 
 	return FIELD_GET(AMDXDNA_CMD_STATE, cmd->header);
 }

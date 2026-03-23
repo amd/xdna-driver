@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <drm/drm_device.h>
@@ -220,6 +220,9 @@ check_again:
 		if (tail >= head)
 			goto check_again;
 	}
+
+	print_hex_dump_debug("req data: ", DUMP_PREFIX_OFFSET, 16, 4, &mb_msg->pkg,
+			     mb_msg->pkg_size, false);
 
 	write_addr = mb_chann->mb->res.ringbuf_base + start_addr + tail;
 	memcpy_toio(write_addr, &mb_msg->pkg, mb_msg->pkg_size);

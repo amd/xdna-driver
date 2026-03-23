@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _UAPI_AMDXDNA_ACCEL_H_
@@ -161,10 +161,11 @@ struct amdxdna_drm_config_hwctx {
 
 enum amdxdna_bo_type {
 	AMDXDNA_BO_INVALID = 0,
-	AMDXDNA_BO_SHMEM,
-	AMDXDNA_BO_DEV_HEAP,
-	AMDXDNA_BO_DEV,
-	AMDXDNA_BO_CMD,
+	AMDXDNA_BO_SHMEM = 1,
+	AMDXDNA_BO_SHARE = 1,
+	AMDXDNA_BO_DEV_HEAP = 2,
+	AMDXDNA_BO_DEV = 3,
+	AMDXDNA_BO_CMD = 4,
 };
 
 /**
@@ -595,8 +596,37 @@ struct amdxdna_async_error {
 	__u64 ex_err_code;
 };
 
+/**
+ * struct amdxdna_drm_bo_usage - all types of BO usage
+ * BOs managed by XRT/SHIM/driver is counted as internal.
+ * Others are counted as external which are managed by applications.
+ *
+ * Among all types of BOs:
+ *   AMDXDNA_BO_DEV_HEAP - is counted for internal.
+ *   AMDXDNA_BO_SHARE    - is counted for external.
+ *   AMDXDNA_BO_CMD      - is counted for internal.
+ *   AMDXDNA_BO_DEV      - is counted by heap_usage only, not internal
+ *                         or external. It does not add to the total memory
+ *                         footprint since its mem comes from heap which is
+ *                         already counted as internal.
+ */
+struct amdxdna_drm_bo_usage {
+	/** @pid: The ID of the process to query from. */
+	__s64 pid;
+	/** @total_usage: Total BO size used by process. */
+	__u64 total_usage;
+	/** @internal_usage: Total internal BO size used by process. */
+	__u64 internal_usage;
+	/** @heap_usage: Total device BO size used by process. */
+	__u64 heap_usage;
+};
+
+/*
+ * Supported params in struct amdxdna_drm_get_array
+ */
 #define DRM_AMDXDNA_HW_CONTEXT_ALL	0
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
+#define DRM_AMDXDNA_BO_USAGE		6
 
 /**
  * struct amdxdna_drm_get_array - Get information array.
@@ -609,6 +639,12 @@ struct amdxdna_drm_get_array {
 	 *
 	 * %DRM_AMDXDNA_HW_CONTEXT_ALL:
 	 * Returns all created hardware contexts.
+	 *
+	 * %DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+	 * Returns last async error.
+	 *
+	 * %DRM_AMDXDNA_BO_USAGE:
+	 * Returns usage of heap/internal/external BOs.
 	 */
 	__u32 param;
 	/**

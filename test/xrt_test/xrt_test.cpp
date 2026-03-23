@@ -966,10 +966,6 @@ run_test(int id, const test_case& test, int device_index)
     test_failed++;
   else
     test_passed++;
-
-  /* TODO: Remove sleep workaround after FW fix for suspend after timeout is available. */
-  std::cout << "Sleeping for 10 seconds..." << std::endl;
-  std::this_thread::sleep_for(std::chrono::seconds(10));
 }
 
 void

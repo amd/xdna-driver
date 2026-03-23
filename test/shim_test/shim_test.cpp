@@ -30,6 +30,7 @@
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 // FIXME
 #include <fcntl.h>
@@ -246,6 +247,16 @@ dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   if (!is_amdxdna_drv(dev))
     return false;
   return true;
+}
+
+static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  if (dev_filter_is_npu4(id, sdev.get()))
+    TEST_async_error_io(id, sdev, arg);
+  else if (dev_filter_is_aie4(id, sdev.get()))
+    TEST_async_error_aie4_io(id, sdev, arg);
+  else
+    throw std::runtime_error("async error io test: device is neither NPU4 nor AIE4");
 }
 
 std::string
@@ -554,6 +565,77 @@ TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, 
     throw std::runtime_error("BO usage mis-match");
 }
 
+class mmapped_file {
+public:
+  mmapped_file(size_t size, bool readonly)
+  {
+    char tmpl[] = "/tmp/xrt_bo_mmap_XXXXXX";
+    auto fd = ::mkstemp(tmpl);
+    if (fd < 0)
+      throw std::runtime_error("mkstemp failed");
+    ::unlink(tmpl);
+
+    if (::ftruncate(fd, static_cast<off_t>(size)) != 0) {
+      ::close(fd);
+      throw std::runtime_error("ftruncate failed");
+    }
+
+    auto mapped = ::mmap(nullptr, size,
+      readonly ? PROT_READ : PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mapped == MAP_FAILED) {
+      ::close(fd);
+      throw std::runtime_error("mmap failed");
+    }
+
+    m_fd = fd;
+    m_ptr = mapped;
+    m_size = size;
+  }
+
+  ~mmapped_file()
+  {
+    ::munmap(m_ptr, m_size);
+    ::close(m_fd);
+  }
+
+  void *get()
+  {
+    return m_ptr;
+  }
+
+private:
+  int m_fd = -1;
+  size_t m_size = 0;
+  void *m_ptr = nullptr;
+};
+
+void
+TEST_create_free_mmaped_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  size_t size = 1ul * 1024 * 1024 * 1024;
+
+  // Expect to pass
+  try {
+    mmapped_file f(size, true);
+    auto buf = std::make_unique<bo>(sdev.get(), f.get(), size, XCL_BO_FLAGS_HOST_ONLY, 0);
+  } catch (const std::system_error& e) {
+    std::cout << e.what() << std::endl;
+    throw std::runtime_error("mmaped user ptr BO test has failed");
+  }
+
+  // Expect to fail
+  auto failed = true;
+  try {
+    mmapped_file f(size, false);
+    auto buf = std::make_unique<bo>(sdev.get(), f.get(), size, XCL_BO_FLAGS_HOST_ONLY, 0);
+  } catch (const std::system_error& e) {
+    std::cout << e.what() << std::endl;
+    failed = false;
+  }
+  if (failed)
+    throw std::runtime_error("mmaped user ptr BO should not be created successfully");
+}
+
 void
 TEST_create_free_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
@@ -835,7 +917,7 @@ std::vector<test_case> test_list {
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_io, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_io_any, {}
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
@@ -933,6 +1015,9 @@ std::vector<test_case> test_list {
   test_case{ "io test with user pointer BOs", {},
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
+   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+  },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_suspend_resume, {}
   },
@@ -942,17 +1027,14 @@ std::vector<test_case> test_list {
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
-  test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
-  },
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_gemm, {}
   },
-  test_case{ "create and free internal bo", {~0U, ~0U},
+  test_case{ "create and free internal bo", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
   },
   test_case{ "export BO then close device", {},
@@ -971,10 +1053,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
   },
   test_case{ "timed out chained command", {~0U, ~0U},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_runlist_bad_cmd, {true}
   },
-  test_case{ "io test aie4 async error", {},
-    TEST_POSITIVE, dev_filter_is_aie4, TEST_async_error_aie4_io, {}
+  test_case{ "create and free user ptr BO with mmapped ptr", {~0U, ~0U},
+    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_mmaped_uptr_bo, {}
   },
 };
 

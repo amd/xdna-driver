@@ -78,6 +78,7 @@ binary_info binary_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .path = "local_shim_test_data/npu3/bad/bad_timeout.elf",
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
     .flow = FULL_ELF,
   },
   {
@@ -102,6 +103,16 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "good",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/resnet50/resnet50.elf",
+    .flow = PREEMPT_FULL_ELF,
+  },
+  {
+    .tag = "good",
     .device = npu3_device_id1,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
@@ -118,6 +129,7 @@ binary_info binary_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .path = "local_shim_test_data/npu3a/bad/bad_timeout.elf",
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
     .flow = FULL_ELF,
   },
   {
@@ -139,6 +151,16 @@ binary_info binary_infos[] = {
     },
     .path = "local_shim_test_data/npu3a/gemm/gemm.elf",
     .flow = FULL_ELF,
+  },
+  {
+    .tag = "good",
+    .device = npu3_device_id1,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3a/resnet50/resnet50.elf",
+    .flow = PREEMPT_FULL_ELF,
   },
   {
     .tag = "good",
