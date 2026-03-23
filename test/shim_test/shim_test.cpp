@@ -37,7 +37,7 @@
 
 // FIXME
 #include "../../src/include/uapi/drm_local/amdxdna_accel.h"
-// enf of FIXME
+// end of FIXME
 
 struct driver_version {
   unsigned int major;
