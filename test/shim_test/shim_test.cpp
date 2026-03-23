@@ -571,11 +571,16 @@ public:
   mmapped_file(size_t size, bool readonly)
   {
     char tmpl[] = "/tmp/xrt_bo_mmap_XXXXXX";
-    mode_t old_umask = umask(0077);  // ensure only owner can access
     auto fd = ::mkstemp(tmpl);
-    umask(old_umask);
     if (fd < 0)
       throw std::runtime_error("mkstemp failed");
+
+    // Ensure only the owner can access the file, without changing process umask
+    if (::fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
+      ::close(fd);
+      ::unlink(tmpl);
+      throw std::runtime_error("fchmod failed");
+    }
     ::unlink(tmpl);
 
     if (::ftruncate(fd, static_cast<off_t>(size)) != 0) {
