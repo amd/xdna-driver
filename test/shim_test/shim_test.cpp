@@ -34,7 +34,6 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
-#include <sys/stat.h>
 
 // FIXME
 #include "../../src/include/uapi/drm_local/amdxdna_accel.h"
