@@ -1063,7 +1063,7 @@ std::vector<test_case> test_list {
   test_case{ "timed out chained command", {~0U, ~0U},
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_runlist_bad_cmd, {true}
   },
-  test_case{ "create and free user ptr BO with mmapped ptr", {~0U, ~0U},
+  test_case{ "create and free user ptr BO with mmapped ptr", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_mmaped_uptr_bo, {}
   },
 };
