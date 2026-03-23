@@ -1,0 +1,32 @@
+From 8d8c7fad1e5fe0ff817b2be1317b4b47cab5186f Mon Sep 17 00:00:00 2001
+From: Gregory Williams <gregory.williams@amd.com>
+Date: Wed, 7 Jan 2026 11:23:12 -0800
+Subject: [PATCH] misc: xilinx-ai-engine: Correct number of performance
+ counters
+
+Corrects the number of available performance counters for aie2ps shim
+tiles.
+
+Signed-off-by: Gregory Williams <gregory.williams@amd.com>
+Acked-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+Message-ID: <20260107192312.4171538-1-gregory.williams@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+index 1209a8db69b5..564afd4b6044 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+@@ -58,7 +58,7 @@
+ #define AIE2PS_NUM_COMBOEVENT_MEM_MOD		4U
+ #define AIE2PS_NUM_GROUPEVENTS_MEM_MOD		9U
+ 
+-#define AIE2PS_NUM_PERF_PL_MOD			2U
++#define AIE2PS_NUM_PERF_PL_MOD			6U
+ #define AIE2PS_NUM_USEREVENT_PL_MOD		2U
+ #define AIE2PS_NUM_TRACECONTROL_PL_MOD		1U
+ #define AIE2PS_NUM_PCEVENT_PL_MOD		0U
+-- 
+2.25.1
+

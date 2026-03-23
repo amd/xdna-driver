@@ -1,0 +1,58 @@
+From 1663d35270bca05e465f7c81cfc3abf3a5e37d94 Mon Sep 17 00:00:00 2001
+From: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+Date: Mon, 15 Dec 2025 19:59:59 -0800
+Subject: [LINUX PATCH 3/3] xilinx-ai-engine: Fix type width for event-related
+ variables
+
+Change mod_num_events from u8 to u16 in aie_part_set_event_bitmap()
+and aie_check_error_bitmap() functions to prevent potential overflow
+when calculating event bitmap offsets.
+
+Num of event in shim tile for aie2ps is set as 256. This will become 0
+for u8.
+
+Change eevent from u8 to u16 in aie_tile_backtrack() function to
+match the expected width for event values.
+
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index 6af7a4c11a546..9d1f972852cc2 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -438,7 +438,8 @@ static void aie_part_set_event_bitmap(struct aie_partition *apart,
+ 				      struct aie_location loc,
+ 				      enum aie_module_type module, u8 event)
+ {
+-	u8 row, col, mod_num_events;
++	u8 row, col;
++	u16 mod_num_events;
+ 	struct aie_resource *event_sts;
+ 	u32 offset;
+ 
+@@ -476,7 +477,8 @@ bool aie_check_error_bitmap(struct aie_partition *apart,
+ {
+ 	struct aie_resource *event_sts;
+ 	u32 offset;
+-	u8 row, col, mod_num_events;
++	u8 row, col;
++	u16 mod_num_events;
+ 
+ 	if (module == AIE_CORE_MOD) {
+ 		event_sts = &apart->core_event_status;
+@@ -518,7 +520,8 @@ static bool aie_tile_backtrack(struct aie_partition *apart,
+ 			       u32 *status)
+ {
+ 	unsigned long grenabled;
+-	u8 n, grevent, eevent;
++	u8 n, grevent;
++	u16 eevent;
+ 	bool ret = false;
+ 
+ 	trace_aie_tile_backtrack(apart, loc, module, sw, bc_id);
+-- 
+2.52.0
+

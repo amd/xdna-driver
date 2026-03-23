@@ -1,0 +1,56 @@
+From f900360af73759fefe67ee45fdb7be61fa8cb5ec Mon Sep 17 00:00:00 2001
+From: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+Date: Wed, 10 Dec 2025 15:50:29 -0800
+Subject: [LINUX PATCH 2/3] xilinx-ai-engine: Unlock mutex before error
+ callback in aie2ps_partition_backtrack
+
+Move mutex_unlock(&apart->mlock) to occur before invoking the error
+callback to prevent potential deadlocks if the callback attempts to
+acquire the same mutex.
+
+This ensures proper cleanup order: unlock the mutex before invoking
+user callbacks.
+
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index 683bb608c1aea..6af7a4c11a546 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -977,8 +977,10 @@ static void aie2ps_partition_backtrack(struct aie_partition *apart)
+ 	 * to backtrack this error interrupt when partition is
+ 	 * requested.
+ 	 */
+-	if (!apart->status)
+-		goto out;
++	if (!apart->status) {
++		mutex_unlock(&apart->mlock);
++		return;
++	}
+ 
+ 	_aie2ps_interrupt_user_event1(apart);
+ 	for (col = apart->range.start.col; col < apart->range.size.col; col++) {
+@@ -1000,6 +1002,8 @@ static void aie2ps_partition_backtrack(struct aie_partition *apart)
+ 			aie_aperture_enable_l2_ctrl(aperture, &loc, l2_mask);
+ 	}
+ 
++	mutex_unlock(&apart->mlock);
++
+ 	/*
+ 	 * If error was asserted or there are errors pending to be reported to
+ 	 * the application, then invoke callback.
+@@ -1008,8 +1012,6 @@ static void aie2ps_partition_backtrack(struct aie_partition *apart)
+ 		apart->error_to_report = 0;
+ 		apart->error_cb.cb(apart->error_cb.priv);
+ 	}
+-out:
+-	mutex_unlock(&apart->mlock);
+ }
+ 
+ /**
+-- 
+2.52.0
+
