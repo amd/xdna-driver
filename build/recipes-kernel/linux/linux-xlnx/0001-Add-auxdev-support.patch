@@ -1,0 +1,113 @@
+From 2b64c56ef7f04b84ee35776d93a3e5e744fcd086 Mon Sep 17 00:00:00 2001
+From: Gregory Williams <gregory.williams@amd.com>
+Date: Fri, 6 Feb 2026 09:11:18 -0800
+Subject: [PATCH] misc: xilinx-ai-engine: Add auxdev support
+
+Adds support for registering auxillary devices.
+
+Signed-off-by: Gregory Williams <gregory.williams@amd.com>
+---
+ drivers/misc/Kconfig                          |  1 +
+ drivers/misc/xilinx-ai-engine/ai-engine-dev.c | 31 +++++++++++++++++++
+ .../xilinx-ai-engine/ai-engine-internal.h     |  3 ++
+ 3 files changed, 35 insertions(+)
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index c58532cb9289..876a32173981 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -504,6 +504,7 @@ config XILINX_AIE
+ 	tristate "Xilinx AI engine"
+ 	depends on ARM64 || COMPILE_TEST
+ 	depends on ZYNQMP_FIRMWARE
++	select AUXILIARY_BUS
+ 	help
+ 	  This option enables support for the Xilinx AI engine driver.
+ 	  One Xilinx AI engine device can have multiple partitions (groups of
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-dev.c b/drivers/misc/xilinx-ai-engine/ai-engine-dev.c
+index 998a87e5a484..3c419c00c770 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-dev.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-dev.c
+@@ -543,6 +543,28 @@ int xilinx_ai_engine_add_dev(struct aie_device *adev,
+ 	return 0;
+ }
+ 
++static void xilinx_ai_engine_release_auxdev(struct device *dev) {}
++
++static int xilinx_ai_engine_add_auxdev(struct aie_device *adev)
++{
++	struct auxiliary_device *auxdev = &adev->auxdev;
++	int ret;
++
++	auxdev->name = "amdxdna";
++	auxdev->dev.parent = &adev->dev;
++	auxdev->dev.release = xilinx_ai_engine_release_auxdev;
++
++	ret = auxiliary_device_init(auxdev);
++	if (ret)
++		return ret;
++
++	ret = auxiliary_device_add(auxdev);
++	if (ret)
++		auxiliary_device_uninit(auxdev);
++
++	return ret;
++}
++
+ static int xilinx_ai_engine_probe(struct platform_device *pdev)
+ {
+ 	struct aie_device *adev;
+@@ -635,6 +657,13 @@ static int xilinx_ai_engine_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	of_xilinx_ai_engine_aperture_probe(adev);
++
++	ret = xilinx_ai_engine_add_auxdev(adev);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to register auxiliary device.");
++		return ret;
++	}
++
+ 	dev_info(&pdev->dev,
+ 		 "Xilinx AI Engine device %s probed. Device generation: %u. Clock frequency: %ldHz.\n",
+ 		 dev_name(&pdev->dev), aie_gen, clk_get_rate(adev->clk));
+@@ -657,6 +686,8 @@ static void xilinx_ai_engine_remove(struct platform_device *pdev)
+ 			return;
+ 	}
+ 
++	auxiliary_device_delete(&adev->auxdev);
++	auxiliary_device_uninit(&adev->auxdev);
+ 	device_del(&adev->dev);
+ 	put_device(&adev->dev);
+ }
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+index 7d49af1f4db6..ffdc86a662f4 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+@@ -9,6 +9,7 @@
+ #ifndef AIE_INTERNAL_H
+ #define AIE_INTERNAL_H
+ 
++#include <linux/auxiliary_bus.h>
+ #include <linux/bitfield.h>
+ #include <linux/bitmap.h>
+ #include <linux/bits.h>
+@@ -1152,6 +1153,7 @@ struct aie_addrlen {
+  * @apertures: list of apertures
+  * @cdev: cdev for the AI engine
+  * @dev: device for the AI engine device
++ * @auxdev: AI engine auxiliary device
+  * @mlock: protection for AI engine device operations
+  * @clk: AI enigne device clock
+  * @kernel_regs: array of kernel only registers
+@@ -1206,6 +1208,7 @@ struct aie_device {
+ 	struct list_head apertures;
+ 	struct cdev cdev;
+ 	struct device dev;
++	struct auxiliary_device auxdev;
+ 	struct mutex mlock; /* protection for AI engine apertures */
+ 	struct clk *clk;
+ 	const struct aie_tile_regs *kernel_regs;
+-- 
+2.44.4
+

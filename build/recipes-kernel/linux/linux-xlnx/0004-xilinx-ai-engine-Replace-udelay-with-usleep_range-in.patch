@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: AMD <noreply@amd.com>
+Date: Mon, 24 Mar 2026 02:00:00 +0000
+Subject: [PATCH] xilinx-ai-engine: Replace udelay with usleep_range in
+ aie_part_maskpoll_register
+
+Replace udelay() with usleep_range() in the aie_part_maskpoll_register
+polling loop to avoid CPU busy-waiting. This fixes performance issues
+where busy-spinning with udelay() creates contention that prevents UC
+DMA operations from completing, which is what the poll is waiting for.
+
+By yielding the CPU with usleep_range(), the UC firmware can complete
+its DMA transactions to DDR, allowing the outstanding transaction
+counters to clear much faster.
+
+This resolves the slow initialization times observed on columns 1 and 2
+during AI Engine partition initialization.
+
+Signed-off-by: AMD <noreply@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-part.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+index 000000000000..111111111111 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -203,7 +203,7 @@ int aie_part_maskpoll_register(struct aie_partition *apart, u32 offset, u32 dat
+ 		value = aie_part_ioread32(apart, apart->aperture->base + offset);
+ 		if ((value & mask) == data)
+ 			return 0;
+-		udelay(usleep_time);
++		usleep_range(usleep_time, usleep_time + 5);
+ 	}
+
+ 	value = aie_part_ioread32(apart, apart->aperture->base + offset);
+--
+2.34.1

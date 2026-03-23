@@ -1,0 +1,177 @@
+From 4fe55dec08eece2fc5cdff9bdddc5cff00c2c981 Mon Sep 17 00:00:00 2001
+From: Keerthanna Mohan <keerthanna.mohan@amd.com>
+Date: Sat, 13 Dec 2025 13:37:38 -0800
+Subject: [LINUX PATCH 2/2] driver: xilinx-ai-engine: Added support to disable
+ axi slave error and register 			 dump
+
+Added support to disable axi slave error from contributing to the
+group 0  error of the core tiles. Since the error halt event is set
+to group 0 error the axi slave error caused when reading register
+holes during register dump causes the core to halt.
+
+Added support to dump the registers of the tiles in the partition.
+
+Signed-off-by: Keerthanna Mohan <keerthanna.mohan@amd.com>
+---
+ .../misc/xilinx-ai-engine/ai-engine-part.c    | 136 ++++++++++++++++++
+ include/linux/xlnx-ai-engine.h                |   1 +
+ 2 files changed, 137 insertions(+)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+index c2749b4c4b30..f1bba103b886 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -1909,3 +1909,139 @@ static int aie_part_disable_interrupt (struct aie_partition *apart) {
+ 
+ 	return -EINVAL;
+ }
++
++static int aie_part_disable_axi_err_halt(struct aie_partition *apart) {
++	struct aie_aperture *aperture = apart->aperture;
++	const struct aie_event_attr *attr;
++	u32 regoff, mask, val, offset;
++	struct aie_location loc;
++	void __iomem *va;
++
++	if (!apart)
++		return -EINVAL;
++
++	attr = apart->adev->core_events;
++	if (!attr) {
++		dev_err(&apart->dev, "%s: %d: attr not found for [%d, %d]",
++			__func__, __LINE__, loc.col, loc.row);
++		return -ENODEV;
++	}
++
++	offset = attr->event_group_error0_enable.regoff;
++	mask = BIT(10);
++
++	for (loc.col = 0; loc.col < apart->range.size.col; loc.col++) {
++		for (loc.row = 3; loc.row < apart->range.size.row; loc.row++) {
++			regoff = aie_aperture_cal_regoff(apart->aperture, loc, offset);
++			va = aperture->base + regoff;
++
++			val = ioread32(va);
++			val &= ~mask;
++			iowrite32(val, va);
++		}
++	}
++
++	return 0;
++}
++
++int aie_partition_coredump(struct device *dev, size_t len, void *data) {
++	size_t expected_len, offset, dump_len;
++	struct aie_partition *apart;
++	struct aie_location loc;
++	u32 ttype;
++	int ret = 0;
++
++	if (!dev || !data)
++		return -EINVAL;
++
++	apart = dev_to_aiepart(dev);
++	if (!apart) {
++		pr_err("failed to find aie partition");
++		return -ENODEV;
++	}
++	
++	expected_len = apart->range.size.col * apart->range.size.row
++			   * (1 << apart->adev->row_shift);
++	
++	if (len < expected_len) {
++		dev_err(dev, "coredump buffer too small: expected %zu, got %zu", expected_len, len);
++		return -EINVAL;
++	}
++
++	ret = aie_part_disable_interrupt (apart);
++	if (ret) {
++		dev_err(&apart->dev, "failed to disable interrupt");
++		return ret;
++	}
++
++	ret = aie_part_disable_axi_err_halt(apart);
++	if (ret) {
++		dev_err(&apart->dev, "failed to disable AXI error halt");
++		return ret;
++	}
++
++	for (loc.col = 0; loc.col < apart->range.size.col; loc.col++) {
++		for (loc.row = 0; loc.row < apart->range.size.row; loc.row++) {
++			size_t tile_base_offset = (loc.col * apart->range.size.row + loc.row) 
++						  * (1 << apart->adev->row_shift);
++
++			ttype = apart->adev->ops->get_tile_type(apart->adev, &loc);
++			if (ttype == AIE_TILE_TYPE_SHIMNOC) {
++				offset = 0;
++				dump_len = 1 << apart->adev->row_shift;
++				ret = aie_partition_read(dev, loc, offset, dump_len, 
++							(char*)data + tile_base_offset);
++				if (ret < 0) {
++					dev_err(dev, "failed to read shim tile at %d,%d", loc.col, loc.row);
++					return ret;
++				}
++			} else if (ttype == AIE_TILE_TYPE_TILE) {
++				/* Read first 64KB region */
++				offset = 0x0;
++				dump_len = KBYTES(64);
++				ret = aie_partition_read(dev, loc, offset, dump_len, 
++							(char*)data + tile_base_offset + offset);
++				if (ret < 0) {
++					dev_err(dev, "failed to read tile at %d,%d", loc.col, loc.row);
++					return ret;
++				}
++
++				/* Read remaining region */
++				offset = KBYTES(64);
++				dump_len = (1 << apart->adev->row_shift) - offset;
++				ret = aie_partition_read(dev, loc, offset, dump_len, 
++							(char*)data + tile_base_offset + offset);
++				if (ret < 0) {
++					dev_err(dev, "failed to read tile at %d,%d", loc.col, loc.row);
++					return ret;
++				}
++
++			} else if (ttype == AIE_TILE_TYPE_MEMORY) {
++				/* Read first 512KB */
++				offset = 0x0;
++				dump_len = KBYTES(512);
++				ret = aie_partition_read(dev, loc, offset, dump_len, 
++							(char*)data + tile_base_offset + offset);
++				if (ret < 0) {
++					dev_err(dev, "failed to read memory tile at %d,%d", loc.col, loc.row);
++					return ret;
++				}
++
++				/* Read remaining region */
++				offset = KBYTES(512);
++				dump_len = (1 << apart->adev->row_shift) - offset;
++				ret = aie_partition_read(dev, loc, offset, dump_len, 
++							(char*)data + tile_base_offset + offset);
++				if (ret < 0) {
++					dev_err(dev, "failed to read memory tile at %d,%d", loc.col, loc.row);
++					return ret;
++				}
++			}
++		}
++	}
++
++	return expected_len;
++}
++EXPORT_SYMBOL_GPL(aie_partition_coredump);
++
++
+diff --git a/include/linux/xlnx-ai-engine.h b/include/linux/xlnx-ai-engine.h
+index 652a2eab7bc7..fea391ce1bb5 100644
+--- a/include/linux/xlnx-ai-engine.h
++++ b/include/linux/xlnx-ai-engine.h
+@@ -187,5 +187,6 @@ int aie_partition_check_uc_aximm(struct device *dev, struct aie_location *loc);
+ int aie_partition_uc_zeroize_mem(struct device *dev, struct aie_location *loc, u32 regval);
+ int aie_load_cert(struct device *dev, unsigned char *elf_addr);
+ int aie_load_cert_broadcast(struct device *dev, void *elf_addr);
++int aie_partition_coredump(struct device *dev, size_t len, void *data);
+ 
+ #endif
+-- 
+2.34.1
+
