@@ -1262,8 +1262,7 @@ main(int argc, char **argv)
     }
     case 'k': {
       try {
-        if (get_driver_version(&current_drv.major, &current_drv.minor))
-          return 1;
+        get_driver_version(&current_drv.major, &current_drv.minor);
       } catch (const std::exception& e) {
         std::cerr << "Caught std::exception: " << e.what() << std::endl;
         return 1;
