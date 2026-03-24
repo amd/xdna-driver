@@ -91,7 +91,7 @@ static void aie2_tdr_work_func(struct work_struct *work)
 {
 	struct aie2_tdr *tdr = container_of(work, struct aie2_tdr, work.work);
 	struct amdxdna_dev_hdl *ndev = container_of(tdr, struct amdxdna_dev_hdl, tdr);
-	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
 
 	guard(mutex)(&xdna->dev_lock);
 
