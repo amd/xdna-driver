@@ -33,6 +33,10 @@ module_param(tdr_timeout_ms, int, 0400);
 MODULE_PARM_DESC(tdr_timeout_ms, "TDR (Timeout Detection and Recovery) timeout in milliseconds (0 or negative = disable)");
 #define TDR_TIMEOUT_JIFF msecs_to_jiffies(tdr_timeout_ms)
 
+bool tdr_dump_only;
+module_param(tdr_dump_only, bool, 0600);
+MODULE_PARM_DESC(tdr_dump_only, "Only dump health info on timeout, skip recovery (default: false)");
+
 bool aie2_tdr_detect(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;

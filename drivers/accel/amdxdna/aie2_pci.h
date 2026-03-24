@@ -327,6 +327,7 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 
 /* TDR APIs */
 extern int tdr_timeout_ms;
+extern bool tdr_dump_only;
 static inline void aie2_tdr_signal(struct amdxdna_dev_hdl *ndev)
 {
 	WRITE_ONCE(ndev->tdr.status, AIE2_TDR_SIGNALED);
