@@ -406,7 +406,7 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	u8 *buff_addr;
 	int ret;
 
-	buf_sz = ndev->metadata.cols * ndev->metadata.size;
+	buf_sz = ndev->aie.metadata.cols * ndev->aie.metadata.size;
 	buff_addr = aie2_alloc_msg_buffer(ndev, &buf_sz, &dma_addr);
 	if (IS_ERR(buff_addr))
 		return PTR_ERR(buff_addr);
