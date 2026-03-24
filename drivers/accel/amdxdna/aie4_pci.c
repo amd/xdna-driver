@@ -4,6 +4,7 @@
  */
 
 #include "drm/amdxdna_accel.h"
+#include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
 #include <linux/firmware.h>
@@ -15,6 +16,7 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
+#include "amdxdna_pm.h"
 
 #define NO_IOHUB		0
 #define CERTFW_MAX_SIZE         (SZ_32K + SZ_256)
@@ -270,6 +272,11 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(xdna, "partition fini failed: %d", ret);
 }
 
+static int aie4_query(struct amdxdna_dev_hdl *ndev)
+{
+	return aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+}
+
 static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -308,6 +315,10 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 	ret = aie4_mailbox_init(ndev);
 	if (ret)
 		return ret;
+
+	ret = aie4_query(ndev);
+	if (ret)
+		goto mailbox_fini;
 
 	ret = aie4_partition_init(ndev);
 	if (ret)
@@ -533,6 +544,26 @@ static int aie4_doorbell_mmap(struct amdxdna_client *client, struct vm_area_stru
 	return ret;
 }
 
+static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	switch (args->param) {
+	case DRM_AMDXDNA_QUERY_AIE_METADATA:
+		ret = amdxdna_get_metadata(&ndev->aie, client, args);
+		break;
+	default:
+		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
+		ret = -EOPNOTSUPP;
+	}
+
+	XDNA_DBG(xdna, "Got param %d", args->param);
+
+	return ret;
+}
+
 static int aie4_pf_init(struct amdxdna_dev *xdna)
 {
 	int ret;
@@ -579,4 +610,5 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.hwctx_fini		= aie4_hwctx_fini,
 	.mmap			= aie4_doorbell_mmap,
 	.cmd_wait		= aie4_cmd_wait,
+	.get_aie_info		= aie4_get_info,
 };

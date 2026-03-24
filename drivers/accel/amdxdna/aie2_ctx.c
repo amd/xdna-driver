@@ -590,12 +590,12 @@ static int aie2_hwctx_col_list(struct amdxdna_hwctx *hwctx)
 	}
 
 	ndev = xdna->dev_handle;
-	if (unlikely(!ndev->metadata.core.row_count)) {
+	if (unlikely(!ndev->aie.metadata.core.row_count)) {
 		XDNA_WARN(xdna, "Core tile row count is zero");
 		return -EINVAL;
 	}
 
-	hwctx->num_col = hwctx->num_tiles / ndev->metadata.core.row_count;
+	hwctx->num_col = hwctx->num_tiles / ndev->aie.metadata.core.row_count;
 	if (!hwctx->num_col || hwctx->num_col > ndev->total_col) {
 		XDNA_ERR(xdna, "Invalid num_col %d", hwctx->num_col);
 		return -EINVAL;

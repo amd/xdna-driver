@@ -18,6 +18,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_DESTROY_PARTITION                = 0x30002,
 	AIE4_MSG_OP_CREATE_HW_CONTEXT                = 0x30003,
 	AIE4_MSG_OP_DESTROY_HW_CONTEXT               = 0x30004,
+	AIE4_MSG_OP_AIE_TILE_INFO                    = 0x30006,
 };
 
 enum aie4_msg_status {
@@ -94,6 +95,39 @@ struct aie4_msg_destroy_hw_context_req {
 
 struct aie4_msg_destroy_hw_context_resp {
 	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_tile_info {
+	__u32 size;
+	__u16 major;
+	__u16 minor;
+	__u16 cols;
+	__u16 rows;
+	__u16 core_rows;
+	__u16 mem_rows;
+	__u16 shim_rows;
+	__u16 core_row_start;
+	__u16 mem_row_start;
+	__u16 shim_row_start;
+	__u16 core_dma_channels;
+	__u16 mem_dma_channels;
+	__u16 shim_dma_channels;
+	__u16 core_locks;
+	__u16 mem_locks;
+	__u16 shim_locks;
+	__u16 core_events;
+	__u16 mem_events;
+	__u16 shim_events;
+	__u16 resvd;
+} __packed;
+
+struct aie4_msg_aie4_tile_info_req {
+	__u32 resvd;
+} __packed;
+
+struct aie4_msg_aie4_tile_info_resp {
+	enum aie4_msg_status status;
+	struct aie4_tile_info info;
 } __packed;
 
 #endif /* _AIE4_MSG_PRIV_H_ */

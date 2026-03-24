@@ -56,6 +56,7 @@ struct amdxdna_dev_hdl {
 };
 
 /* aie4_message.c */
+int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 
 /* aie4_ctx.c */

@@ -14,6 +14,29 @@
 struct psp_device;
 struct smu_device;
 
+struct aie_version {
+	u16 major;
+	u16 minor;
+};
+
+struct aie_tile_metadata {
+	u16 row_count;
+	u16 row_start;
+	u16 dma_channel_count;
+	u16 lock_count;
+	u16 event_reg_count;
+};
+
+struct aie_metadata {
+	u32 size;
+	u16 cols;
+	u16 rows;
+	struct aie_version version;
+	struct aie_tile_metadata core;
+	struct aie_tile_metadata mem;
+	struct aie_tile_metadata shim;
+};
+
 struct aie_device {
 	struct amdxdna_dev *xdna;
 	struct mailbox_channel *mgmt_chann;
@@ -26,6 +49,8 @@ struct aie_device {
 
 	struct psp_device *psp_hdl;
 	struct smu_device *smu_hdl;
+
+	struct aie_metadata metadata;
 };
 
 #define DECLARE_AIE_MSG(name, op) \
@@ -94,6 +119,8 @@ void aie_destroy_chann(struct aie_device *aie, struct mailbox_channel **chann);
 int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg);
 int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor);
 void amdxdna_vbnv_init(struct amdxdna_dev *xdna);
+int amdxdna_get_metadata(struct aie_device *aie, struct amdxdna_client *client,
+			 struct amdxdna_drm_get_info *args);
 
 /* aie_psp.c */
 struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *conf);

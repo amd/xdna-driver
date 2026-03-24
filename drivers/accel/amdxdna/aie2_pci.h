@@ -83,29 +83,6 @@ struct amdxdna_fw_ver;
 struct amdxdna_hwctx;
 struct amdxdna_sched_job;
 
-struct aie_version {
-	u16 major;
-	u16 minor;
-};
-
-struct aie_tile_metadata {
-	u16 row_count;
-	u16 row_start;
-	u16 dma_channel_count;
-	u16 lock_count;
-	u16 event_reg_count;
-};
-
-struct aie_metadata {
-	u32 size;
-	u16 cols;
-	u16 rows;
-	struct aie_version version;
-	struct aie_tile_metadata core;
-	struct aie_tile_metadata mem;
-	struct aie_tile_metadata shim;
-};
-
 enum rt_config_category {
 	AIE2_RT_CFG_INIT,
 	AIE2_RT_CFG_CLK_GATING,
@@ -196,7 +173,6 @@ struct amdxdna_dev_hdl {
 
 	u32				total_col;
 	struct aie_version		version;
-	struct aie_metadata		metadata;
 	struct aie2_exec_msg_ops	*exec_msg_ops;
 
 	/* power management and clock*/
