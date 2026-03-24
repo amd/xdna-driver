@@ -602,6 +602,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	release_firmware(fw);
 	aie2_msg_init(ndev);
 	amdxdna_pm_init(xdna);
+	aie2_tdr_start(xdna);
 	return 0;
 
 stop_hw:
@@ -614,6 +615,7 @@ release_fw:
 
 static void aie2_fini(struct amdxdna_dev *xdna)
 {
+	aie2_tdr_stop(xdna);
 	amdxdna_pm_fini(xdna);
 	aie2_hw_stop(xdna);
 }
