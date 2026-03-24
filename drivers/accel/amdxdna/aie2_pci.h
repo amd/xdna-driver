@@ -178,6 +178,9 @@ struct aie2_tdr {
 	/* TDR progress tracker, used to detect if device is making progress */
 	enum aie2_tdr_status progress;
 	unsigned long last_jiffies;
+#ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
+	struct delayed_work work;
+#endif
 };
 
 struct amdxdna_dev_hdl {
@@ -334,5 +337,14 @@ static inline void aie2_tdr_signal(struct amdxdna_dev_hdl *ndev)
 }
 
 bool aie2_tdr_detect(struct amdxdna_dev *xdna);
+
+#ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
+void aie2_tdr_start(struct amdxdna_dev *xdna);
+void aie2_tdr_stop(struct amdxdna_dev *xdna);
+void aie2_tdr_recover_all(struct amdxdna_dev *xdna);
+#else
+static inline void aie2_tdr_start(struct amdxdna_dev *xdna) {}
+static inline void aie2_tdr_stop(struct amdxdna_dev *xdna) {}
+#endif
 
 #endif /* _AIE2_PCI_H_ */

@@ -27,8 +27,6 @@ static bool force_cmdlist = true;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default true)");
 
-#define HWCTX_MAX_TIMEOUT	60000 /* milliseconds */
-
 struct aie2_ctx_health {
 	struct amdxdna_ctx_health header;
 	u32 txn_op_idx;
@@ -209,6 +207,81 @@ static void aie2_log_health_report(struct amdxdna_dev *xdna,
 	XDNA_ERR(xdna, "\tFatal error task ID: %d", report->fatal_info.task_index);
 	XDNA_ERR(xdna, "\tTimed out sub command ID: %d", report->run_list_id);
 }
+
+#ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
+void aie2_tdr_recover_all(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_client *client;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	amdxdna_for_each_client(xdna, client) {
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+			struct app_health_report *report = NULL;
+			struct drm_gpu_scheduler *sched;
+			struct drm_sched_job *s_job;
+			u64 submitted;
+			int ret;
+
+			submitted = atomic64_read(&hwctx->job_submit_cnt);
+			if (submitted <= hwctx->priv->completed)
+				continue;
+
+			report = kzalloc_obj(*report);
+			if (report) {
+				ret = aie2_query_app_health(xdna->dev_handle,
+							    hwctx->fw_ctx_id, report);
+				if (ret) {
+					kfree(report);
+					report = NULL;
+				} else {
+					aie2_log_health_report(xdna, report);
+				}
+			}
+
+			if (tdr_dump_only) {
+				kfree(report);
+				continue;
+			}
+
+			sched = &hwctx->priv->sched;
+			drm_sched_stop(sched, NULL);
+			/*
+			 * On older kernels (before 6.17), drm_sched_entity
+			 * exposes the pending_list directly for each scheduler.
+			 * It is safe to access sched->pending_list here as the
+			 * list remains available and visible outside the DRM core.
+			 * Newer kernels may encapsulate or change this, but for
+			 * legacy compatibility, this direct access is intentional.
+			 */
+			s_job = list_first_entry_or_null(&sched->pending_list,
+							 struct drm_sched_job,
+							 list);
+			if (s_job && report) {
+				struct amdxdna_sched_job *job;
+
+				job = drm_job_to_xdna_job(s_job);
+				job->job_timeout = true;
+				job->aie2_job_health = report;
+				report = NULL;
+			}
+
+			aie2_destroy_context(xdna->dev_handle, hwctx);
+#ifdef HAVE_6_15_drm_sched_init
+			drm_sched_start(sched, 0);
+#elif defined(HAVE_2_arg_drm_sched_start)
+			drm_sched_start(sched, true);
+#else
+			drm_sched_start(sched);
+#endif
+			kfree(report);
+			aie2_hwctx_restart(xdna, hwctx);
+		}
+	}
+}
+#endif
 
 static void aie2_set_cmd_timeout(struct amdxdna_sched_job *job)
 {
@@ -429,13 +502,17 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 {
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_hwctx *hwctx = job->hwctx;
-	struct app_health_report *report;
 	struct amdxdna_dev *xdna;
+#ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
+	struct app_health_report *report = NULL;
 	int ret;
+#endif
 
 	xdna = hwctx->client->xdna;
 
 	guard(mutex)(&xdna->dev_lock);
+
+#ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
 	if (!aie2_tdr_detect(xdna))
 		return DRM_GPU_SCHED_STAT_NO_HANG;
 
@@ -460,6 +537,7 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 
 	job->job_timeout = true;
 	job->aie2_job_health = report;
+#endif
 
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
 
@@ -642,8 +720,10 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 #ifdef HAVE_6_15_drm_sched_init
 	unsigned long timeout_jiffies = MAX_SCHEDULE_TIMEOUT;
 
+#ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
 	if (tdr_timeout_ms > 0)
 		timeout_jiffies = msecs_to_jiffies(tdr_timeout_ms);
+#endif
 	const struct drm_sched_init_args args = {
 		.ops = &sched_ops,
 		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
@@ -712,7 +792,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	ret = drm_sched_init(sched, &args);
 #else
 	ret = drm_sched_init(sched, &sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
-			     HWCTX_MAX_CMDS, 0, HWCTX_MAX_TIMEOUT,
+			     HWCTX_MAX_CMDS, 0, MAX_SCHEDULE_TIMEOUT,
 			     NULL, NULL, "amdxdna_js", xdna->ddev.dev);
 #endif
 	if (ret) {
@@ -801,8 +881,10 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	/* Request fw to destroy hwctx and cancel the rest pending requests */
 	drm_sched_stop(&hwctx->priv->sched, NULL);
 	aie2_release_resource(hwctx);
-#ifdef HAVE_2_arg_drm_sched_start
+#ifdef HAVE_6_15_drm_sched_init
 	drm_sched_start(&hwctx->priv->sched, 0);
+#elif defined(HAVE_2_arg_drm_sched_start)
+	drm_sched_start(&hwctx->priv->sched, true);
 #else
 	drm_sched_start(&hwctx->priv->sched);
 #endif
