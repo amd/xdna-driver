@@ -551,14 +551,15 @@ TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, 
   auto dev = sdev.get();
   auto boflags = XRT_BO_FLAGS_HOST_ONLY;
   auto ext_boflags = XRT_BO_USE_CTRLPKT << 4;
-  auto size = 0x4000;
-  auto bo = dev->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  size_t size = 0x4000;
+  auto int_bo = std::make_unique<bo>(dev, size, boflags, ext_boflags);
+  auto ext_bo = std::make_unique<bo>(dev, size, boflags, 0);
   auto [total, internal, heap] = get_bo_usage(dev, getpid());
-  uint64_t expected_total = size;
-  uint64_t expected_internal = size;
+  uint64_t expected_total = int_bo->size() + ext_bo->size();
+  uint64_t expected_internal = int_bo->size();
   uint64_t expected_heap = 0;
   if (dev_filter_is_aie2(id, dev)) {
-    // Add heap size
+    // Add default heap size
     expected_total += 64 * 1024 * 1024;
     expected_internal += 64 * 1024 * 1024;
   }
