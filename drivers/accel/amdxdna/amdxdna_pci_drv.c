@@ -230,6 +230,34 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
 
+static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	size_t heap_usage, external_usage, internal_usage;
+
+	mutex_lock(&client->mm_lock);
+
+	heap_usage = client->heap_usage;
+	internal_usage = client->total_int_bo_usage;
+	external_usage = client->total_bo_usage - internal_usage;
+
+	mutex_unlock(&client->mm_lock);
+
+	/*
+	 * Note for driver specific BO memory usage stat.
+	 * Total memory alloc = amdxdna-internal-alloc + amdxdna-external-alloc
+	 */
+	drm_printf(p, "amdxdna-heap-alloc:\t%lu KiB\n", heap_usage / 1024);
+	drm_printf(p, "amdxdna-internal-alloc:\t%lu KiB\n", internal_usage / 1024);
+	drm_printf(p, "amdxdna-external-alloc:\t%lu KiB\n", external_usage / 1024);
+	/*
+	 * Note for DRM standard BO memory stat.
+	 * drm-total-memory counts both DEV BO and HEAP BO
+	 * drm-shared-memory counts BO imported
+	 */
+	drm_show_memory_stats(p, filp);
+}
+
 static const struct file_operations amdxdna_fops = {
 	.owner		= THIS_MODULE,
 	.open		= accel_open,
@@ -240,6 +268,7 @@ static const struct file_operations amdxdna_fops = {
 	.read		= drm_read,
 	.llseek		= noop_llseek,
 	.mmap		= drm_gem_mmap,
+	.show_fdinfo	= drm_show_fdinfo,
 #ifdef FOP_UNSIGNED_OFFSET
 	.fop_flags	= FOP_UNSIGNED_OFFSET,
 #endif
@@ -257,7 +286,7 @@ const struct drm_driver amdxdna_drm_drv = {
 	.postclose = amdxdna_drm_close,
 	.ioctls = amdxdna_drm_ioctls,
 	.num_ioctls = ARRAY_SIZE(amdxdna_drm_ioctls),
-
+	.show_fdinfo = amdxdna_show_fdinfo,
 	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
 	.gem_prime_import = amdxdna_gem_prime_import,
 };
