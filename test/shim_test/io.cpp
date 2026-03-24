@@ -242,12 +242,8 @@ create_bo_set_for_device(device* dev, bool use_ubuf, const char* tag, const flow
     }
     return std::make_unique<elf_io_test_bo_set>(dev, tag_str, &info.flow);
   }
-  if (info.flow == FULL_ELF) {
-    if (use_ubuf) {
-      throw std::runtime_error("Ubuf not supported on this device");
-    }
-    return std::make_unique<elf_full_io_test_bo_set>(dev, tag_str, &info.flow);
-  }
+  if (info.flow == FULL_ELF)
+    return std::make_unique<elf_full_io_test_bo_set>(dev, tag_str, &info.flow, use_ubuf);
   throw std::runtime_error("create_bo_set_for_device: unsupported flow for tag " + tag_str);
 }
 
@@ -440,7 +436,7 @@ elf_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow) :
 }
 
 elf_full_io_test_bo_set::
-elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow)
+elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow, bool use_ubuf)
   : io_test_bo_set_base(dev, tag, flow)
 {
   auto elf_path = get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), m_flow);
@@ -452,6 +448,8 @@ elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* fl
   } catch (const std::exception&) {
     m_kernel_index = elf_int::no_ctrl_code_id;
   }
+
+  const int ubuf_flag = use_ubuf ? m_FLAG_USR_BUF : 0;
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -465,13 +463,13 @@ elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* fl
       create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_INPUT:
-      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
+      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT | ubuf_flag);
       break;
     case IO_TEST_BO_PARAMETERS:
-      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
+      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT | ubuf_flag);
       break;
     case IO_TEST_BO_OUTPUT:
-      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL|m_FLAG_OPT);
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL | m_FLAG_OPT | ubuf_flag);
       break;
     default:
       break;

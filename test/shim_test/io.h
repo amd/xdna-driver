@@ -140,7 +140,8 @@ public:
 class elf_full_io_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_full_io_test_bo_set(device *dev, const std::string& tag = "", const flow_type* flow = nullptr);
+  elf_full_io_test_bo_set(device *dev, const std::string& tag = "", const flow_type* flow = nullptr,
+                          bool use_ubuf = false);
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
