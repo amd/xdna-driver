@@ -42,6 +42,7 @@ static void aie2_job_release(struct kref *ref)
 	struct amdxdna_sched_job *job;
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
+
 	amdxdna_sched_job_cleanup(job);
 	atomic64_inc(&job->hwctx->job_free_cnt);
 	wake_up(&job->hwctx->priv->job_free_wq);
@@ -177,7 +178,8 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 {
 	struct dma_fence *fence = job->fence;
 
-	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence", job->seq);
+	trace_xdna_job(&job->base, job->hwctx->name, "signaled fence",
+		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
 
 	amdxdna_pm_suspend_put(job->hwctx->client->xdna);
 	aie2_tdr_signal(job->hwctx->client->xdna->dev_handle);
@@ -430,6 +432,9 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 	struct dma_fence *fence;
 	int ret;
 
+	trace_xdna_job(sched_job, hwctx->name, "job run",
+		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
+
 	ret = amdxdna_pm_resume_get(hwctx->client->xdna);
 	if (ret)
 		return NULL;
@@ -479,7 +484,8 @@ out:
 		mmput(job->mm);
 		fence = ERR_PTR(ret);
 	}
-	trace_xdna_job(sched_job, hwctx->name, "sent to device", job->seq);
+	trace_xdna_job(sched_job, hwctx->name, "sent to device",
+		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
 
 	return fence;
 }
@@ -489,7 +495,8 @@ static void aie2_sched_job_free(struct drm_sched_job *sched_job)
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_hwctx *hwctx = job->hwctx;
 
-	trace_xdna_job(sched_job, hwctx->name, "job free", job->seq);
+	trace_xdna_job(sched_job, hwctx->name, "job free",
+		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
 	if (!job->job_done)
 		up(&hwctx->priv->job_sem);
 
@@ -515,8 +522,6 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 #ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
 	if (!aie2_tdr_detect(xdna))
 		return DRM_GPU_SCHED_STAT_NO_HANG;
-
-	trace_xdna_job(sched_job, hwctx->name, "job timedout", job->seq);
 
 	report = kzalloc_obj(*report);
 	if (report) {

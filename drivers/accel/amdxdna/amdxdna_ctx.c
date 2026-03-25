@@ -602,6 +602,8 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+	trace_amdxdna_debug_point(current->comm, args->type, "job received");
+
 	switch (args->type) {
 	case AMDXDNA_CMD_SUBMIT_EXEC_BUF:
 		return amdxdna_drm_submit_execbuf(client, args);
