@@ -356,18 +356,26 @@ int main(void)
 }
 EOF
 
-# Test drm_sched_start() 2-arg signature (latest upstream):
+# Test drm_sched_start() with int errno parameter (6.13+ or backports):
 # void drm_sched_start(struct drm_gpu_scheduler *sched, int errno);
-# Older kernels had a 1-arg version without the errno parameter.
-try_compile HAVE_2_arg_drm_sched_start << 'EOF'
+# Use __builtin_types_compatible_p to force a hard error on type mismatch,
+# even when the kernel build does not enable -Werror.
+try_compile HAVE_6_13_drm_sched_start_errno << 'EOF'
 #include <drm/gpu_scheduler.h>
-int main(void)
-{
-	struct drm_gpu_scheduler *a = NULL;
+typedef void (*expected_t)(struct drm_gpu_scheduler *, int);
+_Static_assert(__builtin_types_compatible_p(typeof(&drm_sched_start), expected_t),
+	       "drm_sched_start does not match (sched, int) signature");
+int main(void) { return 0; }
+EOF
 
-	drm_sched_start(a, 0);
-	return 0;
-}
+# Test drm_sched_start() with bool full_recovery parameter (pre-6.12):
+# void drm_sched_start(struct drm_gpu_scheduler *sched, bool full_recovery);
+try_compile HAVE_drm_6_10_sched_start_full_recovery << 'EOF'
+#include <drm/gpu_scheduler.h>
+typedef void (*expected_t)(struct drm_gpu_scheduler *, _Bool);
+_Static_assert(__builtin_types_compatible_p(typeof(&drm_sched_start), expected_t),
+	       "drm_sched_start does not match (sched, bool) signature");
+int main(void) { return 0; }
 EOF
 
 # Test BIT_U64 exists
