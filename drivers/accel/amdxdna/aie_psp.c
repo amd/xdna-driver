@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 
 #include "aie.h"
+#include "amdxdna_xen.h"
 
 #define PSP_STATUS_READY	BIT(31)
 
@@ -46,6 +47,7 @@
 struct psp_device {
 	struct drm_device	*ddev;
 	struct psp_config	conf;
+	struct amdxdna_xen_bufs_mgr xen_mgr;
 	u32			fw_buf_sz;
 	u64			fw_paddr;
 	void			*fw_buffer;
@@ -186,11 +188,18 @@ static void *psp_alloc_fw_buf(struct psp_device *psp, const void *fw_data,
 	*buf_sz = ALIGN(fw_size, align);
 	alloc_sz = *buf_sz + align;
 
-	buffer = drmm_kmalloc(psp->ddev, alloc_sz, GFP_KERNEL);
-	if (!buffer)
-		return NULL;
+	if (amdxdna_is_xen_initial_pvh_domain()) {
+		buffer = amdxdna_xen_bufs_alloc(&psp->xen_mgr, alloc_sz,
+						paddr);
+		if (!buffer)
+			return NULL;
+	} else {
+		buffer = drmm_kmalloc(psp->ddev, alloc_sz, GFP_KERNEL);
+		if (!buffer)
+			return NULL;
+		*paddr = virt_to_phys(buffer);
+	}
 
-	*paddr = virt_to_phys(buffer);
 	offset = ALIGN(*paddr, align) - *paddr;
 	*paddr += offset;
 	memcpy(buffer + offset, fw_data, fw_size);
@@ -207,6 +216,11 @@ struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *c
 		return NULL;
 
 	psp->ddev = ddev;
+	amdxdna_xen_bufs_init(&psp->xen_mgr, ddev->dev);
+	if (drmm_add_action_or_reset(ddev, amdxdna_xen_bufs_drmm_release,
+				     &psp->xen_mgr))
+		return NULL;
+
 	psp->fw_buffer = psp_alloc_fw_buf(psp, conf->fw_buf, conf->fw_size,
 					  PSP_FW_ALIGN, &psp->fw_buf_sz,
 					  &psp->fw_paddr);
