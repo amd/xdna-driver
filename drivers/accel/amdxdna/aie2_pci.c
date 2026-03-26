@@ -477,10 +477,12 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	char *fw_full_path;
 	int i, nvec, ret;
 
+#ifndef HAVE_xen_phy_dma_ops
 	if (!hypervisor_is_type(X86_HYPER_NATIVE)) {
 		XDNA_ERR(xdna, "Running under hypervisor not supported");
 		return -EINVAL;
 	}
+#endif
 
 	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
 	if (!ndev)
