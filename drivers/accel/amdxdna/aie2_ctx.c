@@ -63,8 +63,10 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 {
 	drm_sched_stop(&hwctx->priv->sched, bad_job);
 	aie2_destroy_context(xdna->dev_handle, hwctx);
-#ifdef HAVE_2_arg_drm_sched_start
+#ifdef HAVE_6_13_drm_sched_start_errno
 	drm_sched_start(&hwctx->priv->sched, 0);
+#elif defined(HAVE_6_10_drm_sched_start_full_recovery)
+	drm_sched_start(&hwctx->priv->sched, true);
 #else
 	drm_sched_start(&hwctx->priv->sched);
 #endif
@@ -271,9 +273,9 @@ void aie2_tdr_recover_all(struct amdxdna_dev *xdna)
 			}
 
 			aie2_destroy_context(xdna->dev_handle, hwctx);
-#ifdef HAVE_6_15_drm_sched_init
+#ifdef HAVE_6_13_drm_sched_start_errno
 			drm_sched_start(sched, 0);
-#elif defined(HAVE_2_arg_drm_sched_start)
+#elif defined(HAVE_6_10_drm_sched_start_full_recovery)
 			drm_sched_start(sched, true);
 #else
 			drm_sched_start(sched);
@@ -888,9 +890,9 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	/* Request fw to destroy hwctx and cancel the rest pending requests */
 	drm_sched_stop(&hwctx->priv->sched, NULL);
 	aie2_release_resource(hwctx);
-#ifdef HAVE_6_15_drm_sched_init
+#ifdef HAVE_6_13_drm_sched_start_errno
 	drm_sched_start(&hwctx->priv->sched, 0);
-#elif defined(HAVE_2_arg_drm_sched_start)
+#elif defined(HAVE_6_10_drm_sched_start_full_recovery)
 	drm_sched_start(&hwctx->priv->sched, true);
 #else
 	drm_sched_start(&hwctx->priv->sched);
