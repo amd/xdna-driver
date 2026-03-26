@@ -171,31 +171,47 @@ psp_start:
 	return psp_start(psp);
 }
 
+/*
+ * PSP requires host physical address to load firmware.
+ * Allocate a buffer, obtain its physical address, align, and copy data in.
+ */
+static void *psp_alloc_fw_buf(struct psp_device *psp, const void *fw_data,
+			      u32 fw_size, u32 align, u32 *buf_sz,
+			      u64 *paddr)
+{
+	u32 alloc_sz;
+	void *buffer;
+	u64 offset;
+
+	*buf_sz = ALIGN(fw_size, align);
+	alloc_sz = *buf_sz + align;
+
+	buffer = drmm_kmalloc(psp->ddev, alloc_sz, GFP_KERNEL);
+	if (!buffer)
+		return NULL;
+
+	*paddr = virt_to_phys(buffer);
+	offset = ALIGN(*paddr, align) - *paddr;
+	*paddr += offset;
+	memcpy(buffer + offset, fw_data, fw_size);
+
+	return buffer;
+}
+
 struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *conf)
 {
 	struct psp_device *psp;
-	u64 offset;
 
 	psp = drmm_kzalloc(ddev, sizeof(*psp), GFP_KERNEL);
 	if (!psp)
 		return NULL;
 
 	psp->ddev = ddev;
-	psp->fw_buf_sz = ALIGN(conf->fw_size, PSP_FW_ALIGN);
-	psp->fw_buffer = drmm_kmalloc(ddev, psp->fw_buf_sz + PSP_FW_ALIGN, GFP_KERNEL);
-	if (!psp->fw_buffer) {
-		drm_err(ddev, "no memory for fw buffer");
+	psp->fw_buffer = psp_alloc_fw_buf(psp, conf->fw_buf, conf->fw_size,
+					  PSP_FW_ALIGN, &psp->fw_buf_sz,
+					  &psp->fw_paddr);
+	if (!psp->fw_buffer)
 		return NULL;
-	}
-
-	/*
-	 * AMD Platform Security Processor(PSP) requires host physical
-	 * address to load NPU firmware.
-	 */
-	psp->fw_paddr = virt_to_phys(psp->fw_buffer);
-	offset = ALIGN(psp->fw_paddr, PSP_FW_ALIGN) - psp->fw_paddr;
-	psp->fw_paddr += offset;
-	memcpy(psp->fw_buffer + offset, conf->fw_buf, conf->fw_size);
 
 	if (!conf->certfw_size) {
 		drm_dbg(ddev, "no cert fw");
@@ -203,17 +219,14 @@ struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *c
 	}
 
 	/* CERT firmware */
-	psp->certfw_buf_sz = ALIGN(conf->certfw_size, PSP_CFW_ALIGN);
-	psp->certfw_buffer = drmm_kmalloc(ddev, psp->certfw_buf_sz + PSP_CFW_ALIGN, GFP_KERNEL);
+	psp->certfw_buffer = psp_alloc_fw_buf(psp, conf->certfw_buf,
+					      conf->certfw_size, PSP_CFW_ALIGN,
+					      &psp->certfw_buf_sz,
+					      &psp->certfw_paddr);
 	if (!psp->certfw_buffer) {
 		drm_err(ddev, "no memory for cert fw buffer");
 		return NULL;
 	}
-
-	psp->certfw_paddr = virt_to_phys(psp->certfw_buffer);
-	offset = ALIGN(psp->certfw_paddr, PSP_CFW_ALIGN) - psp->certfw_paddr;
-	psp->certfw_paddr += offset;
-	memcpy(psp->certfw_buffer + offset, conf->certfw_buf, conf->certfw_size);
 
 done:
 	memcpy(&psp->conf, conf, sizeof(psp->conf));
