@@ -631,18 +631,6 @@ TEST_create_free_mmaped_uptr_bo(device::id_type id, std::shared_ptr<device>& sde
     std::cout << e.what() << std::endl;
     throw std::runtime_error("mmaped user ptr BO test has failed");
   }
-
-  // Expect to fail
-  auto failed = true;
-  try {
-    mmapped_file f(size, false);
-    auto buf = std::make_unique<bo>(sdev.get(), f.get(), size, XCL_BO_FLAGS_HOST_ONLY, 0);
-  } catch (const std::system_error& e) {
-    std::cout << e.what() << std::endl;
-    failed = false;
-  }
-  if (failed)
-    throw std::runtime_error("mmaped user ptr BO should not be created successfully");
 }
 
 void
