@@ -240,15 +240,14 @@ void aie2_tdr_recover_all(struct amdxdna_dev *xdna)
 				if (ret) {
 					kfree(report);
 					report = NULL;
-				} else {
+				} else if (tdr_dump_only) {
 					aie2_log_health_report(xdna, report);
+					kfree(report);
 				}
 			}
 
-			if (tdr_dump_only) {
-				kfree(report);
+			if (tdr_dump_only)
 				continue;
-			}
 
 			sched = &hwctx->priv->sched;
 			drm_sched_stop(sched, NULL);
