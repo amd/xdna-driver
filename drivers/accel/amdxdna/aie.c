@@ -9,6 +9,7 @@
 #include <linux/errno.h>
 
 #include "aie.h"
+#include "amdxdna_gem.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pci_drv.h"
@@ -204,4 +205,19 @@ int amdxdna_get_metadata(struct aie_device *aie,
 
 	kfree(meta);
 	return ret;
+}
+
+void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo,
+			    unsigned long cur_seq)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct drm_gem_object *gobj = to_gobj(abo);
+	long ret;
+
+	ret = dma_resv_wait_timeout(gobj->resv, DMA_RESV_USAGE_BOOKKEEP,
+				    true, MAX_SCHEDULE_TIMEOUT);
+	if (!ret)
+		XDNA_ERR(xdna, "Failed to wait for bo, ret %ld", ret);
+	else if (ret == -ERESTARTSYS)
+		XDNA_DBG(xdna, "Wait for bo interrupted by signal");
 }
