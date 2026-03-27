@@ -677,7 +677,12 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
     error_bo_set->sync_before_run();
   }
 
-  const uint32_t bad_index = 1;
+  // When runlist cmd times out, the index returned from FW depends on device type.
+  // AIE4 runlist timeouts report error_index == 1, while NPU4 may still return 0
+  // for legacy firmware and 1 for newer firmware with the fix applied.
+  // When runlist cmd fails (non-timeout), the index returned from FW is accurate (1).
+  const bool is_npu4 = (good_info.device == npu4_device_id);
+  const uint32_t bad_index = is_timeout ? (is_npu4 ? 0 : 1) : 1;
   const uint32_t bad_state = is_timeout ? ERT_CMD_STATE_TIMEOUT : ERT_CMD_STATE_ERROR;
   io_test_bo_set_base *bad = is_timeout ? &timeout_bo_set : error_bo_set.get();
   std::vector<bo*> tmp_cmd_bos;
