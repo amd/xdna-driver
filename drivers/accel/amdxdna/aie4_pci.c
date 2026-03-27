@@ -611,4 +611,5 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.mmap			= aie4_doorbell_mmap,
 	.cmd_wait		= aie4_cmd_wait,
 	.get_aie_info		= aie4_get_info,
+	.hmm_invalidate		= amdxdna_hmm_invalidate,
 };

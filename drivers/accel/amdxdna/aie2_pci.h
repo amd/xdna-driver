@@ -332,7 +332,6 @@ void aie2_hwctx_suspend(struct amdxdna_client *client);
 int aie2_hwctx_resume(struct amdxdna_client *client);
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx);
-void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 
 /* TDR APIs */
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
