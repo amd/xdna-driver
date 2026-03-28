@@ -379,13 +379,19 @@ int main(void) { return 0; }
 EOF
 
 # Test BIT_U64 exists
-try_compile HAVE_bit_u64 << 'EOF'
+try_compile HAVE_6_16_bit_u64 << 'EOF'
 #include <linux/bits.h>
 int main(void)
 {
 	uint64_t a = BIT_U64(1);
 	return 0;
 }
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_6_16_bit_u64
+#define BIT_U64(n)		BIT_ULL(n)
+#define GENMASK_U64(m, n)	GENMASK_ULL(m, n)
+#endif
 EOF
 
 # Test amd_pmf_get_npu_data exists

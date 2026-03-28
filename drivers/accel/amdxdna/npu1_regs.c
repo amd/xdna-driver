@@ -67,11 +67,7 @@ const struct dpm_clk_freq npu1_dpm_clk_table[] = {
 
 static const struct amdxdna_fw_feature_tbl npu1_fw_feature_table[] = {
 	{ .major = 5, .min_minor = 7 },
-#ifdef HAVE_bit_u64
 	{ .features = BIT_U64(AIE2_NPU_COMMAND), .major = 5, .min_minor = 8 },
-#else
-	{ .features = BIT_ULL(AIE2_NPU_COMMAND), .major = 5, .min_minor = 8 },
-#endif
 	{ 0 }
 };
 
