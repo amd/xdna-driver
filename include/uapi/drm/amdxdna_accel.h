@@ -162,7 +162,7 @@ struct amdxdna_drm_config_hwctx {
 
 enum amdxdna_bo_type {
 	AMDXDNA_BO_INVALID = 0,
-	AMDXDNA_BO_SHMEM = 1,
+	AMDXDNA_BO_SHMEM = 1, /* Be compatible with legacy application code. */
 	AMDXDNA_BO_SHARE = 1,
 	AMDXDNA_BO_DEV_HEAP = 2,
 	AMDXDNA_BO_DEV = 3,
