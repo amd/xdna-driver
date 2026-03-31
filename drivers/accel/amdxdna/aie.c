@@ -87,3 +87,35 @@ int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor)
 
 	return found ? 0 : -EOPNOTSUPP;
 }
+
+static const char *amdxdna_lookup_vbnv(const struct amdxdna_rev_vbnv *tbl, u32 rev)
+{
+	int i;
+
+	if (!tbl)
+		return NULL;
+
+	for (i = 0; tbl[i].vbnv; i++) {
+		if (tbl[i].revision == rev)
+			return tbl[i].vbnv;
+	}
+	return NULL;
+}
+
+void amdxdna_vbnv_init(struct amdxdna_dev *xdna)
+{
+	const struct amdxdna_dev_info *info = xdna->dev_info;
+	u32 rev;
+
+	xdna->vbnv = info->default_vbnv;
+
+	if (!info->ops->get_dev_revision)
+		return;
+
+	if (info->ops->get_dev_revision(xdna, &rev))
+		return;
+
+	xdna->vbnv = amdxdna_lookup_vbnv(info->rev_vbnv_tbl, rev);
+	if (!xdna->vbnv)
+		xdna->vbnv = info->default_vbnv;
+}
