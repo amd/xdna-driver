@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026, Advanced Micro Devices, Inc.
  */
 
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
+#include <drm/drm_managed.h>
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 
@@ -43,6 +44,44 @@ int aie2_pm_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	return ret;
 }
 
+void aie2_pm_update_dpm_ref(struct amdxdna_dev_hdl *ndev, u32 level, bool add)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int i;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (drm_WARN_ON(&xdna->ddev, level > ndev->max_dpm_level))
+		level = ndev->max_dpm_level;
+
+	if (add) {
+		ndev->dpm_refcnt[level]++;
+	} else {
+		if (drm_WARN_ON(&xdna->ddev, !ndev->dpm_refcnt[level]))
+			return;
+		ndev->dpm_refcnt[level]--;
+	}
+
+	/* Find highest DPM level in use */
+	level = 0;
+	for (i = ndev->max_dpm_level; i >= 0; i--) {
+		if (ndev->dpm_refcnt[i]) {
+			level = i;
+			break;
+		}
+	}
+
+	ndev->dft_dpm_level = level;
+
+	if (ndev->pw_mode != POWER_MODE_DEFAULT || ndev->dev_status != AIE2_DEV_START)
+		return;
+
+	if (ndev->priv->hw_ops->set_dpm(ndev, level))
+		XDNA_ERR(xdna, "Set DPM level %d failed", level);
+	else
+		ndev->dpm_level = level;
+}
+
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -62,6 +101,13 @@ int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 
 	while (ndev->priv->dpm_clk_tbl[ndev->max_dpm_level].hclk)
 		ndev->max_dpm_level++;
+
+	ndev->dpm_refcnt = drmm_kcalloc(&ndev->aie.xdna->ddev,
+					ndev->max_dpm_level, sizeof(u32),
+					GFP_KERNEL);
+	if (!ndev->dpm_refcnt)
+		return -ENOMEM;
+
 	ndev->max_dpm_level--;
 
 	ret = ndev->priv->hw_ops->set_dpm(ndev, ndev->max_dpm_level);
@@ -74,7 +120,7 @@ int aie2_pm_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
-	ndev->dft_dpm_level = ndev->max_dpm_level;
+	ndev->dft_dpm_level = 0;
 
 	return 0;
 }

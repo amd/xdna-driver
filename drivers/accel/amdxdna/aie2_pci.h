@@ -199,6 +199,8 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
+	/* Per-DPM-level context reference counts */
+	u32				*dpm_refcnt;
 	u32				clk_gating;
 	u32				npuclk_freq;
 	u32				hclk_freq;
@@ -279,6 +281,9 @@ extern const struct aie2_hw_ops npu4_hw_ops;
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
 int aie2_pm_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+void aie2_pm_update_dpm_ref(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
+#define aie2_pm_request_dpm_level(ndev, level) aie2_pm_update_dpm_ref(ndev, level, true)
+#define aie2_pm_release_dpm_level(ndev, level) aie2_pm_update_dpm_ref(ndev, level, false)
 
 /* aie2_error.c */
 int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
