@@ -5,14 +5,14 @@
 
 KERNEL_VER ?= $(shell uname -r)
 KERNEL_SRC ?= /lib/modules/$(KERNEL_VER)/build
-XDNA_BUS_TYPE := pci
+XDNA_BUS_TYPE ?= pci
 
 ifeq ($(XDNA_BUS_TYPE), pci)
 PCI = y
-OF = n
-else ifeq ($(XDNA_BUS_TYPE), of)
+AUX = n
+else ifeq ($(XDNA_BUS_TYPE), aux)
 PCI = n
-OF = y
+AUX = y
 else
 $(error Unknown XDNA_BUS_TYPE $(XDNA_BUS_TYPE))!!
 endif
@@ -51,19 +51,19 @@ endif
 
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
-ifeq ($(XDNA_BUS_TYPE), of)
-DEFINES += -DAMDXDNA_OF
+ifeq ($(XDNA_BUS_TYPE), aux)
+DEFINES += -DAMDXDNA_AUX
 # Generate config_kernel.h when building directly (Yocto/DKMS flow)
 modules: $(SRC_DIR)/config_kernel.h
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) $(USE_LLVM) modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_AUX=$(AUX) $(USE_LLVM) modules
 
 $(SRC_DIR)/config_kernel.h:
-	@echo "[INFO] Generating config_kernel.h for OF build..."
-	@KERNEL_SRC=$(KERNEL_SRC) OUT="$(SRC_DIR)/config_kernel.h" bash $(SRC_DIR)/../../../../tools/configure_kernel.sh
+	@echo "[INFO] Generating config_kernel.h for AUX build..."
+	@KERNEL_SRC=$(KERNEL_SRC) OUT="$(SRC_DIR)/config_kernel.h" bash $(SRC_DIR)/../tools/configure_kernel.sh
 else
 # PCI builds: CMake generates config_kernel.h
 modules:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) $(USE_LLVM) modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_AUX=$(AUX) $(USE_LLVM) modules
 endif
 
 modules_install:

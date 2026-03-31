@@ -3,8 +3,8 @@
  * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
  */
 
-#ifndef _AIE2_SOLVER_H
-#define _AIE2_SOLVER_H
+#ifndef _AMDXDNA_SOLVER_H
+#define _AMDXDNA_SOLVER_H
 
 #define XRS_MAX_COL 128
 
@@ -152,4 +152,4 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
  * @rid:	The Request ID to identify the requesting context
  */
 int xrs_release_resource(void *hdl, u64 rid);
-#endif /* _AIE2_SOLVER_H */
+#endif /* _AMDXDNA_SOLVER_H */

@@ -23,12 +23,12 @@ ccflags-${UMQ_HELLO_TEST} += -DUMQ_HELLO_TEST
 obj-m	+= amdxdna.o
 # Only objects that have corresponding .c sources in this directory
 amdxdna-y := \
+	amdxdna_solver.o \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
 	amdxdna_iommu.o \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
-	amdxdna_pci_drv.o \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_ubuf.o \
@@ -44,9 +44,9 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_message.o \
 	aie2_pci.o \
 	aie2_pm.o \
-	aie2_solver.o \
 	aie2_tdr.o \
 	aie4_message.o \
+	amdxdna_pci_drv.o \
 	aie4_pci.o \
 	npu1_regs.o \
 	npu3_regs.o \
@@ -56,3 +56,6 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 
 amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
+
+amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
+	amdxdna_aux_drv.o
