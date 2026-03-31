@@ -767,6 +767,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
 		goto free_entity;
 	}
+	hwctx->max_opc = xdna->dev_handle->priv->col_opc * hwctx->num_col;
 
 	ret = amdxdna_pm_resume_get_locked(xdna);
 	if (ret)
@@ -778,18 +779,28 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto suspend_put;
 	}
 
+	hwctx->priv->req_dpm_level = aie2_pm_calc_dpm_level(xdna->dev_handle,
+							    hwctx->max_opc,
+							    &hwctx->qos);
+	ret = aie2_pm_request_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
+	if (ret) {
+		XDNA_ERR(xdna, "Request DPM level %d failed, ret %d",
+			 hwctx->priv->req_dpm_level, ret);
+		goto release_resource;
+	}
+
 	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
 				amdxdna_obj_dma_addr(heap),
 				heap->mem.size);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
-		goto release_resource;
+		goto release_dpm;
 	}
 
 	ret = aie2_ctx_syncobj_create(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
-		goto release_resource;
+		goto release_dpm;
 	}
 	amdxdna_pm_suspend_put(xdna);
 
@@ -799,6 +810,8 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	return 0;
 
+release_dpm:
+	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 release_resource:
 	aie2_release_resource(hwctx);
 suspend_put:
@@ -835,6 +848,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	/* Request fw to destroy hwctx and cancel the rest pending requests */
 	drm_sched_stop(&hwctx->priv->sched, NULL);
+	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 	aie2_release_resource(hwctx);
 #ifdef HAVE_6_13_drm_sched_start_errno
 	drm_sched_start(&hwctx->priv->sched, 0);
