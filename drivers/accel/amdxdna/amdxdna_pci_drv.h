@@ -66,6 +66,7 @@ struct amdxdna_dev_ops {
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
+	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 };
 
 struct amdxdna_fw_feature_tbl {
@@ -90,7 +91,8 @@ struct amdxdna_dev_info {
 	u32				dev_mem_buf_shift;
 	u64				dev_mem_base;
 	size_t				dev_mem_size;
-	char				*vbnv;
+	const char			*default_vbnv;
+	const struct amdxdna_rev_vbnv	*rev_vbnv_tbl;
 	const struct amdxdna_dev_priv	*dev_priv;
 	const struct amdxdna_fw_feature_tbl *fw_feature_tbl;
 	const struct amdxdna_dev_ops	*ops;
@@ -118,6 +120,8 @@ struct amdxdna_dev {
 	struct iommu_group		*group;
 	struct iommu_domain		*domain;
 	struct iova_domain		iovad;
+	/* Accurate board name queried from firmware, or default_vbnv as fallback */
+	const char			*vbnv;
 };
 
 /*
