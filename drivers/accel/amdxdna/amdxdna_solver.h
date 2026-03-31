@@ -152,4 +152,26 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
  * @rid:	The Request ID to identify the requesting context
  */
 int xrs_release_resource(void *hdl, u64 rid);
+
+/*
+ * Hardware context resource management helpers
+ */
+struct amdxdna_hwctx;
+
+/*
+ * amdxdna_alloc_resource() - Allocate AIE resources for a hardware context
+ *
+ * @hwctx:	Hardware context pointer
+ *
+ * Return:	0 when successful, or standard error number when failing
+ */
+int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx);
+
+/*
+ * amdxdna_release_resource() - Release AIE resources for a hardware context
+ *
+ * @hwctx:	Hardware context pointer
+ */
+void amdxdna_release_resource(struct amdxdna_hwctx *hwctx);
+
 #endif /* _AMDXDNA_SOLVER_H */
