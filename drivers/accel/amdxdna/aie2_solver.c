@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <drm/drm_device.h>
@@ -52,7 +52,7 @@ static u32 calculate_gops(struct aie_qos *rqos)
 	u32 service_rate = 0;
 
 	if (rqos->latency)
-		service_rate = (1000 / rqos->latency);
+		service_rate = max_t(u32, 1000 / rqos->latency, 1);
 
 	if (rqos->fps > service_rate)
 		return rqos->fps * rqos->gops;
@@ -107,6 +107,14 @@ static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
 		return true;
 
 	return false;
+}
+
+u32 xrs_get_gops(struct aie_qos *rqos)
+{
+	if (!is_valid_qos_dpm_params(rqos))
+		return 0;
+
+	return calculate_gops(rqos) * DEFAULT_SYS_EFF_FACTOR;
 }
 
 static int set_dpm_level(struct solver_state *xrs, struct alloc_requests *req, u32 *dpm_level)
