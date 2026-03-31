@@ -10,6 +10,7 @@
 #include <drm/gpu_scheduler.h>
 
 #include "aie2_pci.h"
+#include "aie2_solver.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
 
@@ -80,6 +81,28 @@ void aie2_pm_update_dpm_ref(struct amdxdna_dev_hdl *ndev, u32 level, bool add)
 		XDNA_ERR(xdna, "Set DPM level %d failed", level);
 	else
 		ndev->dpm_level = level;
+}
+
+u32 aie2_pm_calc_dpm_level(struct amdxdna_dev_hdl *ndev, u32 opc,
+			   struct amdxdna_qos_info *qos)
+{
+	struct aie_qos rqos = { .gops = qos->gops, .fps = qos->fps,
+				.latency = qos->latency };
+	u32 req_gops, level;
+
+	if (!xrs_is_valid_dpm_qos(&rqos))
+		return ndev->max_dpm_level;
+
+	req_gops = xrs_calculate_gops(&rqos);
+	if (!req_gops)
+		return ndev->max_dpm_level;
+
+	for (level = 0; level <= ndev->max_dpm_level; level++) {
+		if (req_gops <= opc * ndev->priv->dpm_clk_tbl[level].hclk / 1000)
+			return level;
+	}
+
+	return ndev->max_dpm_level;
 }
 
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev)

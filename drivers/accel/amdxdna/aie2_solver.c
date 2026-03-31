@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
  */
 
 #include <drm/drm_device.h>
@@ -47,7 +47,7 @@ struct solver_state {
 	struct xrs_action_ops		*actions;
 };
 
-static u32 calculate_gops(struct aie_qos *rqos)
+u32 xrs_calculate_gops(struct aie_qos *rqos)
 {
 	u32 service_rate = 0;
 
@@ -65,7 +65,7 @@ static u32 calculate_gops(struct aie_qos *rqos)
  */
 static int qos_meet(struct solver_state *xrs, struct aie_qos *rqos, u32 cgops)
 {
-	u32 request_gops = calculate_gops(rqos) * xrs->cfg.sys_eff_factor;
+	u32 request_gops = xrs_calculate_gops(rqos) * xrs->cfg.sys_eff_factor;
 
 	if (request_gops <= cgops)
 		return 0;
@@ -97,7 +97,7 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 	return 0;
 }
 
-static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
+bool xrs_is_valid_dpm_qos(struct aie_qos *rqos)
 {
 	/*
 	 * gops is retrieved from the xmodel, so it's always set
@@ -119,7 +119,7 @@ static int set_dpm_level(struct solver_state *xrs, struct alloc_requests *req, u
 
 	max_dpm_level = xrs->cfg.clk_list.num_levels - 1;
 	/* If no QoS parameters are passed, set it to the max DPM level */
-	if (!is_valid_qos_dpm_params(rqos)) {
+	if (!xrs_is_valid_dpm_qos(rqos)) {
 		level = max_dpm_level;
 		goto set_dpm;
 	}

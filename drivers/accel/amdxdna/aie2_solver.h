@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AIE2_SOLVER_H
@@ -125,6 +125,10 @@ struct init_config {
  * Note: We should only create one handle per AIE array to be managed.
  */
 void *xrsm_init(struct init_config *cfg);
+
+/* QoS helper functions shared with power management */
+u32 xrs_calculate_gops(struct aie_qos *rqos);
+bool xrs_is_valid_dpm_qos(struct aie_qos *rqos);
 
 /*
  * xrs_allocate_resource() - Request to allocate resources for a given context
