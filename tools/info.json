@@ -1,7 +1,7 @@
 {
 	"copyright": "Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
-		"version": "202610.2.23.178",
+		"version": "202610.2.23.188",
 		"os_rel": ["22.04", "24.04"]
 	},
 	"firmwares": [
@@ -68,17 +68,17 @@
 	"vtd_archives": [
 		{
 			"device": "strx",
-			"url": "https://github.com/Xilinx/VTD/raw/5f5ad4f7b929428d28fe6808895a09125af011ac/archive/strx/xrt_smi_strx.a",
+			"url": "https://github.com/Xilinx/VTD/raw/0b65e6c61ca5505bac0b0b7d6c500806e53b0ad1/archive/strx/xrt_smi_strx.a",
 			"filename": "xrt_smi_strx.a"
 		},
 		{
 			"device": "phx",
-			"url": "https://github.com/Xilinx/VTD/raw/5f5ad4f7b929428d28fe6808895a09125af011ac/archive/phx/xrt_smi_phx.a",
+			"url": "https://github.com/Xilinx/VTD/raw/0b65e6c61ca5505bac0b0b7d6c500806e53b0ad1/archive/phx/xrt_smi_phx.a",
 			"filename": "xrt_smi_phx.a"
 		},
 		{
 			"device": "npu3",
-			"url": "https://github.com/Xilinx/VTD/raw/5f5ad4f7b929428d28fe6808895a09125af011ac/archive/npu3/xrt_smi_npu3.a",
+			"url": "https://github.com/Xilinx/VTD/raw/0b65e6c61ca5505bac0b0b7d6c500806e53b0ad1/archive/npu3/xrt_smi_npu3.a",
 			"filename": "xrt_smi_npu3.a"
 		}
 	]
