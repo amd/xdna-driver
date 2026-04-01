@@ -28,8 +28,6 @@ static int ve2_query_ctx_status_array(struct amdxdna_client *client,
 	int ret = 0, idx;
 	u32 hw_i = 0;
 
-	XDNA_DBG(xdna, "Query context status: pid=%d, ctx_id=%u", pid, ctx_id);
-
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		size_t total_bo_usage;
 		u32 pid, pasid;
@@ -618,11 +616,9 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
-		XDNA_DBG(xdna, "Querying firmware version");
 		ret = ve2_get_firmware_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		XDNA_DBG(xdna, "Querying AIE metadata");
 		ret = ve2_get_total_col(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
@@ -634,7 +630,6 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		break;
 	}
 
-	XDNA_DBG(xdna, "Get AIE info result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
@@ -797,19 +792,15 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_COREDUMP:
-		XDNA_DBG(xdna, "Reading AIE coredump");
 		ret = ve2_coredump_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
-		XDNA_DBG(xdna, "Getting all hardware contexts");
 		ret = ve2_get_array_hwctx(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_READ:
-		XDNA_DBG(xdna, "Reading AIE tile");
 		ret = ve2_aie_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
-		XDNA_DBG(xdna, "Getting last async error");
 		ret = ve2_get_array_async_error(xdna, args);
 		break;
 	case DRM_AMDXDNA_HWCTX_AIE_PART_FD:
@@ -825,7 +816,6 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 		break;
 	}
 
-	XDNA_DBG(xdna, "Get array result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
@@ -950,7 +940,6 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
-		XDNA_DBG(xdna, "Writing AIE tile");
 		ret = ve2_aie_write(client, args);
 		break;
 	case DRM_AMDXDNA_SET_CLOCK_FREQ:
@@ -963,7 +952,6 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 		break;
 	}
 
-	XDNA_DBG(xdna, "Set AIE state result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
