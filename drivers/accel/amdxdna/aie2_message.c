@@ -27,43 +27,6 @@
 
 #define EXEC_MSG_OPS(xdna)	((xdna)->dev_handle->exec_msg_ops)
 
-void *aie2_alloc_msg_buffer(struct amdxdna_dev_hdl *ndev, u32 *size,
-			    dma_addr_t *dma_addr)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	void *vaddr;
-	int order;
-
-	*size = max(*size, SZ_8K);
-	order = get_order(*size);
-	if (order > MAX_PAGE_ORDER)
-		return ERR_PTR(-EINVAL);
-	*size = PAGE_SIZE << order;
-
-	if (amdxdna_iova_on(xdna))
-		return amdxdna_iommu_alloc(xdna, *size, dma_addr);
-
-	vaddr = dma_alloc_noncoherent(xdna->ddev.dev, *size, dma_addr,
-				      DMA_FROM_DEVICE, GFP_KERNEL);
-	if (!vaddr)
-		return ERR_PTR(-ENOMEM);
-
-	return vaddr;
-}
-
-void aie2_free_msg_buffer(struct amdxdna_dev_hdl *ndev, size_t size,
-			  void *cpu_addr, dma_addr_t dma_addr)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-
-	if (amdxdna_iova_on(xdna)) {
-		amdxdna_iommu_free(xdna, size, cpu_addr, dma_addr);
-		return;
-	}
-
-	dma_free_noncoherent(xdna->ddev.dev, size, cpu_addr, dma_addr, DMA_FROM_DEVICE);
-}
-
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE_MSG(suspend, MSG_OP_SUSPEND);
@@ -369,27 +332,26 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 {
 	DECLARE_AIE_MSG(aie_column_info, MSG_OP_QUERY_COL_STATUS);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	u32 buf_sz = size, aie_bitmap = 0;
 	struct amdxdna_client *client;
-	dma_addr_t dma_addr;
-	u8 *buff_addr;
+	struct aie_dma_hdl *dma_buf;
+	u32 aie_bitmap = 0;
 	int ret;
 
-	buff_addr = aie2_alloc_msg_buffer(ndev, &buf_sz, &dma_addr);
-	if (IS_ERR(buff_addr))
-		return PTR_ERR(buff_addr);
+	dma_buf = aie_dma_buf_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_buf))
+		return PTR_ERR(dma_buf);
 
 	/* Go through each hardware context and mark the AIE columns that are active */
 	list_for_each_entry(client, &xdna->client_list, node)
 		amdxdna_hwctx_walk(client, &aie_bitmap, amdxdna_hwctx_col_map);
 
 	*cols_filled = 0;
-	req.dump_buff_addr = dma_addr;
-	req.dump_buff_size = buf_sz;
+	req.dump_buff_addr = to_dma_addr(dma_buf, 0);
+	req.dump_buff_size = to_buf_size(dma_buf);
 	req.num_cols = hweight32(aie_bitmap);
 	req.aie_bitmap = aie_bitmap;
 
-	drm_clflush_virt_range(buff_addr, size); /* device can access */
+	aie_dma_buf_clflush(dma_buf, 0, size);
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
@@ -404,7 +366,7 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 		goto fail;
 	}
 
-	if (copy_to_user(buf, buff_addr, resp.size)) {
+	if (copy_to_user(buf, to_cpu_addr(dma_buf, 0), resp.size)) {
 		ret = -EFAULT;
 		XDNA_ERR(xdna, "Failed to copy NPU status to user space");
 		goto fail;
@@ -413,7 +375,7 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	*cols_filled = aie_bitmap;
 
 fail:
-	aie2_free_msg_buffer(ndev, buf_sz, buff_addr, dma_addr);
+	aie_dma_buf_free(dma_buf);
 	return ret;
 }
 
@@ -423,23 +385,21 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 {
 	DECLARE_AIE_MSG(get_telemetry, MSG_OP_GET_TELEMETRY);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	dma_addr_t dma_addr;
-	u32 buf_sz = size;
-	u8 *addr;
+	struct aie_dma_hdl *dma_buf;
 	int ret;
 
 	if (header->type >= MAX_TELEMETRY_TYPE)
 		return -EINVAL;
 
-	addr = aie2_alloc_msg_buffer(ndev, &buf_sz, &dma_addr);
-	if (IS_ERR(addr))
-		return PTR_ERR(addr);
+	dma_buf = aie_dma_buf_alloc(xdna, size, DMA_FROM_DEVICE);
+	if (IS_ERR(dma_buf))
+		return PTR_ERR(dma_buf);
 
-	req.buf_addr = dma_addr;
-	req.buf_size = buf_sz;
+	req.buf_addr = to_dma_addr(dma_buf, 0);
+	req.buf_size = to_buf_size(dma_buf);
 	req.type = header->type;
 
-	drm_clflush_virt_range(addr, size); /* device can access */
+	aie_dma_buf_clflush(dma_buf, 0, size);
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Query telemetry failed, status %d", ret);
@@ -452,7 +412,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 		goto free_buf;
 	}
 
-	if (copy_to_user(buf, addr, resp.size)) {
+	if (copy_to_user(buf, to_cpu_addr(dma_buf, 0), resp.size)) {
 		ret = -EFAULT;
 		XDNA_ERR(xdna, "Failed to copy telemetry to user space");
 		goto free_buf;
@@ -462,7 +422,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 	header->minor = resp.minor;
 
 free_buf:
-	aie2_free_msg_buffer(ndev, buf_sz, addr, dma_addr);
+	aie_dma_buf_free(dma_buf);
 	return ret;
 }
 
@@ -1161,9 +1121,7 @@ int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 {
 	DECLARE_AIE_MSG(get_app_health, MSG_OP_GET_APP_HEALTH);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	struct app_health_report *buf;
-	dma_addr_t dma_addr;
-	u32 buf_size;
+	struct aie_dma_hdl *dma_buf;
 	int ret;
 
 	if (!AIE_FEATURE_ON(&ndev->aie, AIE2_APP_HEALTH)) {
@@ -1171,29 +1129,27 @@ int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 		return -EOPNOTSUPP;
 	}
 
-	buf_size = sizeof(*report);
-	buf = aie2_alloc_msg_buffer(ndev, &buf_size, &dma_addr);
-	if (IS_ERR(buf)) {
+	dma_buf = aie_dma_buf_alloc(xdna, sizeof(*report), DMA_FROM_DEVICE);
+	if (IS_ERR(dma_buf)) {
 		XDNA_ERR(xdna, "Failed to allocate buffer for app health");
-		return PTR_ERR(buf);
+		return PTR_ERR(dma_buf);
 	}
 
-	req.buf_addr = dma_addr;
+	req.buf_addr = to_dma_addr(dma_buf, 0);
 	req.context_id = context_id;
-	req.buf_size = buf_size;
+	req.buf_size = to_buf_size(dma_buf);
 
-	drm_clflush_virt_range(buf, sizeof(*report));
+	aie_dma_buf_clflush(dma_buf, 0, sizeof(*report));
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed, ret %d status 0x%x", ret, resp.status);
 		goto free_buf;
 	}
 
-	/* Copy the report to caller's buffer */
-	memcpy(report, buf, sizeof(*report));
+	memcpy(report, to_cpu_addr(dma_buf, 0), sizeof(*report));
 
 free_buf:
-	aie2_free_msg_buffer(ndev, buf_size, buf, dma_addr);
+	aie_dma_buf_free(dma_buf);
 	return ret;
 }
 

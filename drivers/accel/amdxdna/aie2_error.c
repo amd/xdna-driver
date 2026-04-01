@@ -11,6 +11,7 @@
 #include <linux/kthread.h>
 #include <linux/kernel.h>
 
+#include "aie.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "amdxdna_error.h"
@@ -29,9 +30,7 @@ struct async_event {
 
 struct async_events {
 	struct workqueue_struct		*wq;
-	u8				*buf;
-	dma_addr_t			addr;
-	u32				size;
+	struct aie_dma_hdl		*dma_buf;
 	u32				event_cnt;
 	struct async_event		event[] __counted_by(event_cnt);
 };
@@ -338,7 +337,7 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 	destroy_workqueue(events->wq);
 	mutex_lock(&xdna->dev_lock);
 
-	aie2_free_msg_buffer(ndev, events->size, events->buf, events->addr);
+	aie_dma_buf_free(events->dma_buf);
 	kfree(events);
 }
 
@@ -354,12 +353,11 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	if (!events)
 		return -ENOMEM;
 
-	events->buf = aie2_alloc_msg_buffer(ndev, &total_size, &events->addr);
-	if (IS_ERR(events->buf)) {
-		ret = PTR_ERR(events->buf);
+	events->dma_buf = aie_dma_buf_alloc(xdna, total_size, DMA_FROM_DEVICE);
+	if (IS_ERR(events->dma_buf)) {
+		ret = PTR_ERR(events->dma_buf);
 		goto free_events;
 	}
-	events->size = total_size;
 	events->event_cnt = total_col;
 
 	events->wq = alloc_ordered_workqueue("async_wq", 0);
@@ -374,8 +372,8 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 
 		e->ndev = ndev;
 		e->wq = events->wq;
-		e->buf = &events->buf[offset];
-		e->addr = events->addr + offset;
+		e->buf = to_cpu_addr(events->dma_buf, offset);
+		e->addr = to_dma_addr(events->dma_buf, offset);
 		e->size = ASYNC_BUF_SIZE;
 		e->resp.status = MAX_AIE2_STATUS_CODE;
 		INIT_WORK(&e->work, aie2_error_worker);
@@ -387,14 +385,14 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 
 	ndev->async_events = events;
 
-	XDNA_DBG(xdna, "Async event count %d, buf total size 0x%x",
-		 events->event_cnt, events->size);
+	XDNA_DBG(xdna, "Async event count %d, buf total size 0x%zx",
+		 events->event_cnt, to_buf_size(events->dma_buf));
 	return 0;
 
 free_wq:
 	destroy_workqueue(events->wq);
 free_buf:
-	aie2_free_msg_buffer(ndev, events->size, events->buf, events->addr);
+	aie_dma_buf_free(events->dma_buf);
 free_events:
 	kfree(events);
 	return ret;
