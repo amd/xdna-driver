@@ -6,9 +6,11 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
+#include <linux/dma-mapping.h>
 #include <linux/firmware.h>
 #include <linux/sizes.h>
 
+#include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
 
@@ -234,9 +236,40 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
+static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct aie_dma_hdl *buf;
+
+	if (pdev->is_virtfn)
+		return 0;
+
+	buf = aie_dma_buf_alloc(xdna, AIE4_WORK_BUFFER_MIN_SIZE,
+				DMA_FROM_DEVICE);
+	if (IS_ERR(buf)) {
+		XDNA_ERR(xdna, "Failed to alloc work buffer, size 0x%x",
+			 AIE4_WORK_BUFFER_MIN_SIZE);
+		return PTR_ERR(buf);
+	}
+
+	ndev->work_buf = buf;
+	XDNA_DBG(xdna, "Work buffer allocated: size 0x%lx",
+		 to_buf_size(buf));
+
+	return 0;
+}
+
+static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	aie_dma_buf_free(ndev->work_buf);
+	ndev->work_buf = NULL;
+}
+
 static int aie4_hw_start(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	dma_addr_t dma_addr;
 	int ret;
 
 	ret = aie4_fw_load(ndev);
@@ -247,8 +280,18 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	if (ret)
 		goto fw_unload;
 
+	if (ndev->work_buf) {
+		dma_addr = to_dma_addr(ndev->work_buf, 0);
+		ret = aie4_attach_work_buffer(ndev, 0, dma_addr,
+					      to_buf_size(ndev->work_buf));
+		if (ret)
+			goto mbox_fini;
+	}
+
 	return 0;
 
+mbox_fini:
+	aie4_mailbox_fini(ndev);
 fw_unload:
 	aie4_fw_unload(ndev);
 
@@ -260,6 +303,7 @@ static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 	int ret;
 
 	/* No paired resume needed, fw is stateless */
+	/* Firmware releases the DRAM work buffer internally during suspend */
 	ret = aie4_suspend_fw(ndev);
 	if (ret)
 		XDNA_ERR(ndev->aie.xdna, "suspend_fw failed, ret %d", ret);
@@ -459,6 +503,7 @@ static void aie4_fini(struct amdxdna_dev *xdna)
 
 	aie4_sriov_stop(ndev);
 	aie4_pcidev_fini(ndev);
+	aie4_free_work_buffer(ndev);
 }
 
 static int aie4_init(struct amdxdna_dev *xdna)
@@ -474,15 +519,23 @@ static int aie4_init(struct amdxdna_dev *xdna)
 	ndev->aie.xdna = xdna;
 	xdna->dev_handle = ndev;
 
+	ret = aie4_alloc_work_buffer(ndev);
+	if (ret)
+		return ret;
+
 	ret = aie4_pcidev_init(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "Setup PCI device failed, ret %d", ret);
-		return ret;
+		goto free_work_buf;
 	}
 
 	amdxdna_vbnv_init(xdna);
 	XDNA_DBG(xdna, "aie4 init finished");
 	return 0;
+
+free_work_buf:
+	aie4_free_work_buffer(ndev);
+	return ret;
 }
 
 const struct amdxdna_dev_ops aie4_ops = {

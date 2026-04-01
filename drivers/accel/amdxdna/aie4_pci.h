@@ -31,10 +31,13 @@ struct amdxdna_dev_hdl {
 	void			__iomem *rbuf_base;
 
 	struct mailbox			*mbox;
+	struct aie_dma_hdl		*work_buf;
 };
 
 /* aie4_message.c */
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
+int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, u32 pasid,
+			    dma_addr_t addr, u32 size);
 
 /* aie4_sriov.c */
 #if IS_ENABLED(CONFIG_PCI_IOV)

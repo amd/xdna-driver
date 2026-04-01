@@ -10,7 +10,7 @@
 
 enum aie4_msg_opcode {
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
-
+	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
 	AIE4_MSG_OP_DESTROY_VFS                      = 0x20002,
 };
@@ -43,6 +43,27 @@ struct aie4_msg_destroy_vfs_req {
 } __packed;
 
 struct aie4_msg_destroy_vfs_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+union aie4_msg_pasid {
+	__u32 raw;
+	struct {
+		__u32 pasid     : 20;
+		__u32 rsvd      : 11;
+		__u32 pasid_vld : 1;
+	} f;
+} __packed;
+
+#define AIE4_WORK_BUFFER_MIN_SIZE	(4 * 1024 * 1024) /* 4 MB */
+
+struct aie4_msg_attach_work_buffer_req {
+	__u64 buff_addr;
+	union aie4_msg_pasid pasid;
+	__u32 buff_size;
+} __packed;
+
+struct aie4_msg_attach_work_buffer_resp {
 	enum aie4_msg_status status;
 } __packed;
 
