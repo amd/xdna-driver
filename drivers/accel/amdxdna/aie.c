@@ -3,7 +3,12 @@
  * Copyright (C) 2026, Advanced Micro Devices, Inc.
  */
 
+#include <drm/drm_cache.h>
+#include <linux/dma-mapping.h>
 #include <linux/errno.h>
+#include <linux/log2.h>
+#include <linux/sizes.h>
+#include <linux/slab.h>
 
 #include "aie.h"
 #include "amdxdna_mailbox_helper.h"
@@ -118,4 +123,75 @@ void amdxdna_vbnv_init(struct amdxdna_dev *xdna)
 	xdna->vbnv = amdxdna_lookup_vbnv(info->rev_vbnv_tbl, rev);
 	if (!xdna->vbnv)
 		xdna->vbnv = info->default_vbnv;
+}
+
+struct aie_dma_hdl *aie_dma_buf_alloc(struct amdxdna_dev *xdna, u32 size,
+				      enum dma_data_direction dir)
+{
+	struct aie_dma_hdl *hdl;
+	int order;
+
+	size = max_t(u32, size, SZ_8K);
+	order = get_order(size);
+	if (order > MAX_PAGE_ORDER)
+		return ERR_PTR(-EINVAL);
+
+	hdl = kzalloc(sizeof(*hdl), GFP_KERNEL);
+	if (!hdl)
+		return ERR_PTR(-ENOMEM);
+
+	hdl->aligned_size = PAGE_SIZE << order;
+
+	if (amdxdna_iova_on(xdna)) {
+		hdl->vaddr = amdxdna_iommu_alloc(xdna, hdl->aligned_size, &hdl->dma_addr);
+		if (IS_ERR(hdl->vaddr)) {
+			int ret = PTR_ERR(hdl->vaddr);
+
+			kfree(hdl);
+			return ERR_PTR(ret);
+		}
+	} else {
+		hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev,
+						   hdl->aligned_size,
+						   &hdl->dma_addr, dir,
+						   GFP_KERNEL);
+		if (!hdl->vaddr) {
+			kfree(hdl);
+			return ERR_PTR(-ENOMEM);
+		}
+	}
+
+	hdl->size = size;
+	hdl->xdna = xdna;
+	hdl->dir = dir;
+
+	return hdl;
+}
+
+void aie_dma_buf_free(struct aie_dma_hdl *hdl)
+{
+	if (!hdl)
+		return;
+
+	if (amdxdna_iova_on(hdl->xdna)) {
+		amdxdna_iommu_free(hdl->xdna, hdl->aligned_size, hdl->vaddr, hdl->dma_addr);
+	} else {
+		dma_free_noncoherent(hdl->xdna->ddev.dev, hdl->aligned_size,
+				     hdl->vaddr, hdl->dma_addr, hdl->dir);
+	}
+
+	memset(hdl, 0, sizeof(*hdl));
+	kfree(hdl);
+}
+
+int aie_dma_buf_clflush(struct aie_dma_hdl *hdl, u32 offset, size_t size)
+{
+	if (!hdl)
+		return -EINVAL;
+
+	if (offset + size > hdl->size)
+		return -EINVAL;
+
+	drm_clflush_virt_range(hdl->vaddr + offset, size ? size : hdl->size);
+	return 0;
 }

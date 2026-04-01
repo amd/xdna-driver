@@ -5,6 +5,8 @@
 #ifndef _AIE_H_
 #define _AIE_H_
 
+#include <linux/dma-mapping.h>
+
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_mailbox.h"
 
@@ -88,12 +90,39 @@ struct amdxdna_rev_vbnv {
 	const char	*vbnv;
 };
 
+/*
+ * struct aie_dma_hdl - DMA buffer handle for firmware communication
+ * @xdna: back-pointer to the device
+ * @dir: DMA data direction
+ * @vaddr: kernel virtual address
+ * @dma_addr: device DMA address
+ * @size: requested buffer size
+ * @aligned_size: actual allocation size (power-of-2 aligned for FW)
+ */
+struct aie_dma_hdl {
+	struct amdxdna_dev		*xdna;
+	enum dma_data_direction		dir;
+	void				*vaddr;
+	dma_addr_t			dma_addr;
+	size_t				size;
+	size_t				aligned_size;
+};
+
+#define to_dma_addr(hdl, off)		((hdl)->dma_addr + (off))
+#define to_cpu_addr(hdl, off)		((hdl)->vaddr + (off))
+#define to_buf_size(hdl)		((hdl)->aligned_size)
+
 /* aie.c */
 void aie_dump_mgmt_chann_debug(struct aie_device *aie);
 void aie_destroy_chann(struct aie_device *aie, struct mailbox_channel **chann);
 int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg);
 int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor);
 void amdxdna_vbnv_init(struct amdxdna_dev *xdna);
+
+struct aie_dma_hdl *aie_dma_buf_alloc(struct amdxdna_dev *xdna, u32 size,
+				      enum dma_data_direction dir);
+void aie_dma_buf_free(struct aie_dma_hdl *hdl);
+int aie_dma_buf_clflush(struct aie_dma_hdl *hdl, u32 offset, size_t size);
 
 /* aie_psp.c */
 struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *conf);
