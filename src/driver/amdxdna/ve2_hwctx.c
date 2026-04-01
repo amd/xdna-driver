@@ -1060,6 +1060,177 @@ static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	kfree(r);
 }
 
+/*
+ * Check whether CERT already wrote a terminal completion state to the
+ * HQC slot for the last sub-command (or single command) at @seq.
+ * Returns true for COMPLETED, ERROR, or ABORT.
+ */
+static bool ve2_hqc_has_terminal_state(struct amdxdna_ctx_priv *priv_ctx,
+				       u64 seq)
+{
+	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
+	u32 capacity = queue->hsa_queue_p->hq_header.capacity;
+	u32 slot = seq % capacity;
+	u64 *hqc_mem = queue->hq_complete.hqc_mem;
+	enum ert_cmd_state state;
+
+	hsa_queue_sync_completion_for_read(queue, slot);
+	state = (enum ert_cmd_state)((u32)hqc_mem[slot] & 0xF);
+
+	return state == ERT_CMD_STATE_COMPLETED ||
+	       state == ERT_CMD_STATE_ERROR ||
+	       state == ERT_CMD_STATE_ABORT;
+}
+
+/*
+ * Read the HQC completion slot for the last sub-command in the chain (or
+ * single command) and propagate the CERT-reported state.  For command
+ * chains with ERROR/ABORT, scan backwards to find the first failing
+ * sub-command and populate error_index.
+ */
+static void ve2_process_hqc_completion(struct amdxdna_dev *xdna,
+				       struct amdxdna_ctx *hwctx,
+				       struct amdxdna_sched_job *job,
+				       u64 seq)
+{
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
+	u32 capacity = queue->hsa_queue_p->hq_header.capacity;
+	u32 slot = seq % capacity;
+	u64 *hqc_mem = queue->hq_complete.hqc_mem;
+	u32 comp;
+	enum ert_cmd_state state;
+
+	hsa_queue_sync_completion_for_read(queue, slot);
+	comp = (u32)hqc_mem[slot];
+	state = (enum ert_cmd_state)(comp & 0xF);
+
+	if (state < ERT_CMD_STATE_NEW || state > ERT_CMD_STATE_NORESPONSE) {
+		XDNA_WARN(xdna, "state %u at hqc_mem[%u] raw 0x%x",
+			  state, slot, comp);
+		return;
+	}
+
+	if ((state == ERT_CMD_STATE_ERROR || state == ERT_CMD_STATE_ABORT) &&
+	    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+		struct amdxdna_cmd_chain *cc =
+			amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+		enum ert_cmd_state slot_state = state;
+		u32 fail_cmd_idx = 0;
+		u32 start_slot;
+		u32 cmd_count;
+		int i;
+
+		if (!cc) {
+			XDNA_WARN(xdna, "Failed to get payload, seq %llu", seq);
+			amdxdna_cmd_set_state(job->cmd_bo, state);
+			return;
+		}
+
+		cmd_count = cc->command_count;
+		start_slot = (seq - cmd_count + 1) % capacity;
+
+		XDNA_DBG(xdna, "seq %llu, start_slot %u, cmd_count %u", seq,
+			 start_slot, cmd_count);
+
+		for (i = cmd_count; i > 0; i--) {
+			u32 idx = (start_slot + i - 1) % capacity;
+
+			hsa_queue_sync_completion_for_read(queue, idx);
+			comp = (u32)hqc_mem[idx];
+			slot_state = (enum ert_cmd_state)(comp & 0xF);
+			if (slot_state != ERT_CMD_STATE_ABORT) {
+				fail_cmd_idx = i - 1;
+				break;
+			}
+		}
+
+		cc->error_index = fail_cmd_idx;
+		if (cc->error_index >= cmd_count)
+			cc->error_index = 0;
+
+		XDNA_ERR(xdna,
+			 "Error at index %u (slot %u) slot_state %d err_code 0x%x",
+			 fail_cmd_idx, (start_slot + fail_cmd_idx) % capacity,
+			 slot_state,
+			 slot_state == ERT_CMD_STATE_ERROR ? (comp >> 4) : 0);
+		amdxdna_cmd_set_state(job->cmd_bo, slot_state);
+	} else {
+		amdxdna_cmd_set_state(job->cmd_bo, state);
+	}
+}
+
+/*
+ * Handle timeout / MISC-interrupt path: collect health data from firmware,
+ * set ERT_CMD_STATE_TIMEOUT, and for command chains read runlist_read_idx
+ * from the lead CERT handshake to determine timeout_index.
+ */
+static void ve2_handle_timeout(struct amdxdna_dev *xdna,
+			       struct amdxdna_ctx *hwctx,
+			       struct amdxdna_sched_job *job,
+			       u64 seq)
+{
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	u32 capacity = priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
+	struct amdxdna_cmd_chain *cc = NULL;
+	u32 cmd_count = 1;
+	u32 start_slot = 0;
+	void *cmd_data;
+	u32 data_total;
+	size_t total_size;
+
+	ve2_dump_ctx(xdna, hwctx);
+
+	if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+		cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+		if (!cc) {
+			XDNA_WARN(xdna, "cmd_chain timeout: failed to get payload");
+			return;
+		}
+		cmd_count = cc->command_count;
+		start_slot = (seq - cmd_count + 1) % capacity;
+	}
+
+	cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
+	total_size = sizeof(struct amdxdna_ctx_health_data) +
+		     priv_ctx->num_col * sizeof(struct uc_health_info);
+	if (unlikely(data_total < sizeof(hwctx->health_data)))
+		XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu",
+			  __func__, data_total, total_size);
+
+	data_total = min(data_total, total_size);
+	memcpy(cmd_data, &hwctx->health_data, total_size);
+	hwctx->health_reported = true;
+	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
+
+	if (cc) {
+		u32 fail_cmd_idx = 0;
+		u32 rl_read_idx = 0;
+		int ret;
+
+		XDNA_INFO(xdna, "start_slot %u, num_col %u, cmd_count %u",
+			  start_slot, priv_ctx->num_col, cmd_count);
+
+		ret = ve2_partition_read_privileged_mem(priv_ctx->aie_dev, 0,
+							offsetof(struct handshake,
+								 runlist_read_idx),
+							sizeof(rl_read_idx),
+							&rl_read_idx);
+		if (ret >= 0)
+			fail_cmd_idx = rl_read_idx;
+
+		if (fail_cmd_idx >= cmd_count)
+			fail_cmd_idx = 0;
+
+		cc->error_index = fail_cmd_idx;
+		XDNA_ERR(xdna,
+			 "Timeout at cmd chain index %u (slot %u), runlist_read_idx %u",
+			 fail_cmd_idx,
+			 (start_slot + fail_cmd_idx) % capacity,
+			 rl_read_idx);
+	}
+}
+
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
@@ -1099,162 +1270,21 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			goto out;
 		}
 
-		/*
-		 * below check need to be removed once we have a clean solution
-		 * to use completion signal
-		 */
-
 		if (priv_ctx->misc_intrpt_flag || (wait_jifs && !ret)) {
-			u32 capacity =
-				priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
-			u32 start_slot = 0;
-			u32 cmd_count = 1;
-			void *cmd_data;
-			u32 data_total;
-
-			ve2_dump_ctx(xdna, hwctx);
-
-			/* Read command_count BEFORE overwriting command buffer with health data */
-			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
-				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
-										       NULL);
-				if (cc) {
-					cmd_count = cc->command_count;
-					/*
-					 * seq is the LAST sequence number of the command chain.
-					 * Calculate start_slot by going back (cmd_count - 1) slots.
-					 */
-					start_slot = (seq - cmd_count + 1) % capacity;
-				}
-			}
-
-			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
-			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
-					priv_ctx->num_col * sizeof(struct uc_health_info);
-			if (unlikely(data_total < sizeof(hwctx->health_data)))
-				XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu", __func__,
-					  data_total, total_size);
-
-			data_total = min(data_total, total_size);
-			memcpy(cmd_data, &hwctx->health_data, total_size);
-			hwctx->health_reported = true;
-			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
-
-			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
-				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
-										       NULL);
-				XDNA_INFO(xdna, "start_slot %u, num_col %u, cmd_count %u",
-					  start_slot, priv_ctx->num_col, cmd_count);
-				if (!cc) {
-					XDNA_WARN(xdna, "cmd_chain timeout: failed to get payload");
-				} else {
-					u32 fail_cmd_idx = 0;
-					u32 rl_read_idx = 0;
-					int rd_ret;
-
-					/*
-					 * CERT tracks progress via runlist_read_idx in
-					 * the handshake (offset 0x70). Read it from the
-					 * lead CERT (col 0) to find which sub-command
-					 * was being processed when the timeout fired.
-					 */
-					rd_ret = ve2_partition_read_privileged_mem(
-						    priv_ctx->aie_dev, 0,
-						    offsetof(struct handshake, runlist_read_idx),
-						    sizeof(rl_read_idx),
-						    &rl_read_idx);
-					if (rd_ret >= 0)
-						fail_cmd_idx = rl_read_idx;
-
-					if (fail_cmd_idx >= cmd_count)
-						fail_cmd_idx = 0;
-
-					cc->error_index = fail_cmd_idx;
-					XDNA_ERR(xdna,
-						  "Timeout at cmd chain index %u (slot %u), runlist_read_idx %u",
-						  fail_cmd_idx,
-						  (start_slot + fail_cmd_idx) % capacity,
-						  rl_read_idx);
-				}
-			}
+			/*
+			 * MISC interrupt may race with CERT writing completion.
+			 * If CERT already wrote a terminal state, use the normal
+			 * completion path; otherwise handle as timeout.
+			 */
+			if (priv_ctx->misc_intrpt_flag &&
+			    ve2_hqc_has_terminal_state(priv_ctx, seq))
+				ve2_process_hqc_completion(xdna, hwctx, job, seq);
+			else
+				ve2_handle_timeout(xdna, hwctx, job, seq);
 		} else {
-			u32 slot =
-				seq % (priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity);
-			u64 *hqc_mem = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem;
-			u32 comp;
-			enum ert_cmd_state state;
-
-			/* Sync completion memory before reading (device may have written) */
-			hsa_queue_sync_completion_for_read(&priv_ctx->hwctx_hsa_queue, slot);
-			/* CERT encodes state in bits[3:0], error code in bits[31:4] (HSA_ERR) */
-			comp = (u32)hqc_mem[slot];
-			state = (enum ert_cmd_state)(comp & 0xF);
-			if (state < ERT_CMD_STATE_NEW || state > ERT_CMD_STATE_NORESPONSE) {
-				XDNA_WARN(xdna, "state %u at hqc_mem[%u] raw 0x%x",
-					  state, slot, comp);
-				goto release_job;
-			}
-			if ((state == ERT_CMD_STATE_ERROR || state == ERT_CMD_STATE_ABORT) &&
-			    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
-				u32 capacity =
-					priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
-				struct amdxdna_cmd_chain *cc =
-					amdxdna_cmd_get_payload(job->cmd_bo, NULL);
-				/* Initialize to state to avoid undefined behavior */
-				enum ert_cmd_state slot_state = state;
-				u32 fail_cmd_idx = 0;
-				u32 start_slot = 0;
-				u32 cmd_count = 0;
-				int i;
-
-				if (!cc) {
-					XDNA_WARN(xdna, "Failed to get payload, seq %llu", seq);
-					amdxdna_cmd_set_state(job->cmd_bo, state);
-					goto release_job;
-				}
-				cmd_count = cc->command_count;
-				/*
-				 * Runlist optimization: On failure, CERT sets ERROR (5) for the
-				 * failing subcmd and ABORT (6) for all following subcmds. Per cert
-				 * protocol: "searching backwards, the 1st cmd with completion
-				 * status not ABORT is the one that failed".
-				 */
-				start_slot = (seq - cmd_count + 1) % capacity;
-
-				XDNA_DBG(xdna, "seq %llu, start_slot %u, cmd_count %u", seq,
-					 start_slot, cmd_count);
-
-				for (i = cmd_count; i > 0; i--) {
-					u32 slot = (start_slot + i - 1) % capacity;
-
-					/* Sync completion memory before reading
-					 * (device may have written)
-					 */
-					hsa_queue_sync_completion_for_read
-						(&priv_ctx->hwctx_hsa_queue, slot);
-					comp = (u32)hqc_mem[slot];
-					slot_state = (enum ert_cmd_state)(comp & 0xF);
-					if (slot_state != ERT_CMD_STATE_ABORT) {
-						fail_cmd_idx = i - 1;
-						break;
-					}
-				}
-
-				cc->error_index = fail_cmd_idx;
-				if (cc->error_index >= cmd_count)
-					cc->error_index = 0;
-
-				XDNA_ERR(xdna,
-					 "Error at index %u (slot %u) slot_state %d err_code 0x%x",
-					 fail_cmd_idx, (start_slot + fail_cmd_idx) % capacity,
-					 slot_state,
-					 slot_state == ERT_CMD_STATE_ERROR ? (comp >> 4) : 0);
-				amdxdna_cmd_set_state(job->cmd_bo, slot_state);
-			} else {
-				amdxdna_cmd_set_state(job->cmd_bo, state);
-			}
+			ve2_process_hqc_completion(xdna, hwctx, job, seq);
 		}
-release_job:
+
 		ve2_hwctx_job_release_locked(hwctx, job);
 		ve2_job_put(job);
 
