@@ -216,25 +216,14 @@ int amdxdna_dev_init(struct amdxdna_dev *xdna)
 	int ret;
 
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
-	init_rwsem(&xdna->notifier_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
-
-	if (IS_ENABLED(CONFIG_LOCKDEP)) {
-		fs_reclaim_acquire(GFP_KERNEL);
-		might_lock(&xdna->notifier_lock);
-		fs_reclaim_release(GFP_KERNEL);
-	}
-
-	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", WQ_MEM_RECLAIM);
-	if (!xdna->notifier_wq)
-		return -ENOMEM;
 
 	mutex_lock(&xdna->dev_lock);
 	ret = xdna->dev_info->ops->init(xdna);
 	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
-		goto destroy_notifier_wq;
+		return ret;
 	}
 
 	ret = amdxdna_sysfs_init(xdna);
@@ -257,8 +246,6 @@ failed_dev_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
-destroy_notifier_wq:
-	destroy_workqueue(xdna->notifier_wq);
 	return ret;
 }
 
@@ -266,13 +253,11 @@ destroy_notifier_wq:
  * amdxdna_dev_cleanup - amdxdna device cleanup
  * @xdna: Pointer to amdxdna device
  *
- * Cleans up all clients, finalizes hardware, and destroys workqueue.
+ * Cleans up all clients and finalizes hardware.
  */
 void amdxdna_dev_cleanup(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_client *client;
-
-	destroy_workqueue(xdna->notifier_wq);
 
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
