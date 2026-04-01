@@ -1990,7 +1990,7 @@ static int aie4_get_frame_boundary_preempt_state(struct amdxdna_client *client,
 
 	preempt.state = 1;
 
-	min = min(args->buffer, sizeof(preempt));
+	min = min(args->buffer_size, sizeof(preempt));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, min))
 		return -EFAULT;
 

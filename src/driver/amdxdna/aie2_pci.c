@@ -1086,7 +1086,7 @@ static int aie2_query_frame_boundary_preempt_state(struct amdxdna_client *client
 	ndev = xdna->dev_handle;
 	preempt.state = ndev->frame_boundary_preempt ? 1 : 0;
 
-	min = min(args->buffer, sizeof(preempt));
+	min = min(args->buffer_size, sizeof(preempt));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, min))
 		return -EFAULT;
 
