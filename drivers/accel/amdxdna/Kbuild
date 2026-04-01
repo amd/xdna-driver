@@ -59,4 +59,5 @@ amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
-	amdxdna_aux_drv.o
+	amdxdna_aux_drv.o \
+	ve2_aux.o
