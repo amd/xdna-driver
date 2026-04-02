@@ -71,7 +71,8 @@ vxdna_bo(int ctx_fd_in, const struct amdxdna_ccmd_create_bo_req *req)
     vxdna_dbg("Create bo: ctx_fd=%d, type=%d, size=%lu", m_ctx_fd, m_bo_type, m_size);
     ret = ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_CREATE_BO, &args);
     if (ret)
-        VACCEL_THROW_MSG(-errno, "Create bo failed ret %d", ret);
+        VACCEL_THROW_MSG(-errno, "Create bo failed ret %d, errno %d, %s",
+                         ret, errno, strerror(errno));
 
     m_bo_handle = args.handle;
     bo_info.handle = m_bo_handle;
@@ -90,7 +91,8 @@ vxdna_bo(int ctx_fd_in, const struct amdxdna_ccmd_create_bo_req *req)
 
 vxdna_bo::
 vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
-         const struct amdxdna_ccmd_create_bo_req *req)
+         const struct amdxdna_ccmd_create_bo_req *req,
+         void *mmap_target)
          : m_opaque_handle(res->get_opaque_handle())
 {
     struct amdxdna_drm_get_bo_info bo_info = {};
@@ -171,18 +173,25 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
 
     vxdna_dbg("mmap is required for handle: res_id=%u, handle=%u, opaque_handle=%d, vaddr=%lx, xdna_addr=%lx",
               res->get_res_id(), m_bo_handle, res->get_opaque_handle(), m_vaddr, m_xdna_addr);
-    // mmap is required for non-dev BOs
     uint64_t resv_vaddr = 0, resv_size = 0, va_to_map = 0;
     void *resv_va = nullptr;
     int flags = MAP_SHARED | MAP_LOCKED;
-    if (req->map_align) {
+    if (mmap_target) {
+        va_to_map = reinterpret_cast<uint64_t>(mmap_target);
+        if (req->map_align && (va_to_map & (req->map_align - 1))) {
+            if (has_created_bo)
+                close_gem_handle(m_ctx_fd, m_bo_handle);
+            VACCEL_THROW_MSG(-EINVAL,
+                             "mmap_target %p not aligned to 0x%lx",
+                             mmap_target, (unsigned long)req->map_align);
+        }
+        flags |= MAP_FIXED;
+    } else if (req->map_align) {
         resv_va = ::mmap(0, m_map_size + req->map_align, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (resv_va == MAP_FAILED) {
-            // Clean up if we created the BO
-            if (has_created_bo) {
+            if (has_created_bo)
                 close_gem_handle(m_ctx_fd, m_bo_handle);
-            }
             VACCEL_THROW_MSG(-ENOMEM, "Reserve vaddr range failed, map_align=%zu", req->map_align);
         }
 
@@ -198,22 +207,21 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
         int saved_errno = errno;
         if (resv_va && resv_va != MAP_FAILED)
             ::munmap(resv_va, resv_size);
-        // Clean up if we created the BO
-        if (has_created_bo) {
+        if (has_created_bo)
             close_gem_handle(m_ctx_fd, m_bo_handle);
-        }
         VACCEL_THROW_MSG(-saved_errno,
                          "Map bo failed, errno %d, %s, to map startaddr 0x%lx, map_offset 0x%lx, map_size 0x%lx",
                          saved_errno, strerror(saved_errno), va_to_map, m_map_offset, m_map_size);
     }
     m_vaddr = reinterpret_cast<uint64_t>(va);
 
-    if (req->map_align && m_vaddr > resv_vaddr)
+    if (!mmap_target && req->map_align && m_vaddr > resv_vaddr)
         ::munmap(resv_va, static_cast<size_t>(m_vaddr - resv_vaddr));
-    if (resv_vaddr + resv_size > m_vaddr + m_map_size)
+    if (!mmap_target && resv_vaddr + resv_size > m_vaddr + m_map_size)
         munmap(reinterpret_cast<void *>(m_vaddr + m_map_size),
                static_cast<size_t>(resv_vaddr + resv_size - m_vaddr - m_map_size));
-    vxdna_dbg("Created BO with resource: type=%u, res_id=%u", req->bo_type, req->res_id);
+    vxdna_dbg("Created BO with resource: type=%u, res_id=%u, vaddr=0x%lx",
+              req->bo_type, req->res_id, m_vaddr);
 }
 
 vxdna_bo::
@@ -420,12 +428,50 @@ void
 vxdna_context::
 create_bo(const struct amdxdna_ccmd_create_bo_req *req)
 {
+    if (m_heap_destroyed &&
+        (req->bo_type == AMDXDNA_BO_DEV || req->bo_type == AMDXDNA_BO_DEV_HEAP))
+        VACCEL_THROW_MSG(-EINVAL, "Heap destroyed, cannot allocate type %u", req->bo_type);
+
     std::shared_ptr<vxdna_bo> xdna_bo;
     if (req->bo_type != AMDXDNA_BO_DEV) {
         auto res = get_device().get_resource(req->res_id);
         if (!res)
             VACCEL_THROW_MSG(-EINVAL, "Res: %u not found", req->res_id);
-        xdna_bo = std::make_shared<vxdna_bo>(res, get_fd(), req);
+
+        void *mmap_target = nullptr;
+        if (req->bo_type == AMDXDNA_BO_DEV_HEAP) {
+            if (!m_heap_base) {
+                size_t align = req->map_align ? req->map_align : 1;
+                size_t resv_sz = HEAP_MAX_SIZE + align;
+                void *p = ::mmap(0, resv_sz, PROT_NONE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                if (p == MAP_FAILED) {
+                    VACCEL_THROW_MSG(-ENOMEM,
+                                     "Failed to reserve heap VA range (%zu bytes)",
+                                     resv_sz);
+                }
+                auto base = reinterpret_cast<uintptr_t>(p);
+                auto aligned = (base + align - 1) & ~(align - 1);
+
+                if (aligned > base)
+                    ::munmap(p, aligned - base);
+                size_t tail = (base + resv_sz) - (aligned + HEAP_MAX_SIZE);
+                if (tail > 0)
+                    ::munmap(reinterpret_cast<void *>(aligned + HEAP_MAX_SIZE), tail);
+
+                m_heap_base = reinterpret_cast<void *>(aligned);
+                vxdna_dbg("Reserved heap VA range: base=%p, size=0x%zx, align=0x%zx",
+                          m_heap_base, HEAP_MAX_SIZE, align);
+            }
+            if (!req->size || req->size > HEAP_MAX_SIZE - m_heap_cur_offset)
+                VACCEL_THROW_MSG(-ENOSPC,
+                                 "Heap expansion rejected: size 0x%lx, remaining 0x%zx",
+                                 (unsigned long)req->size,
+                                 HEAP_MAX_SIZE - m_heap_cur_offset);
+            mmap_target = static_cast<char *>(m_heap_base) + m_heap_cur_offset;
+        }
+
+        xdna_bo = std::make_shared<vxdna_bo>(res, get_fd(), req, mmap_target);
     } else {
         xdna_bo = std::make_shared<vxdna_bo>(get_fd(), req);
     }
@@ -440,6 +486,9 @@ create_bo(const struct amdxdna_ccmd_create_bo_req *req)
         VACCEL_THROW_MSG(-EINVAL, "Resp resource not found for context %u", get_id());
     (void)resp_res->write(req->hdr.rsp_off, &rsp, sizeof(rsp));
     add_bo(std::move(xdna_bo));
+
+    if (req->bo_type == AMDXDNA_BO_DEV_HEAP)
+        m_heap_cur_offset += req->size;
     vxdna_dbg("Created bo: handle=%u, xdna_addr=%lu", rsp.handle, rsp.xdna_addr);
 }
 
@@ -454,6 +503,9 @@ void
 vxdna_context::
 remove_bo(uint32_t handle)
 {
+    auto bo = m_bo_table.lookup(handle);
+    if (bo && bo->get_type() == AMDXDNA_BO_DEV_HEAP)
+        m_heap_destroyed = true;
     vxdna_dbg("Removing bo: handle=%u", handle);
     m_bo_table.erase(handle);
 }
@@ -674,8 +726,11 @@ vxdna_context::
 write_err_rsp(int err)
 {
     auto resp_res = get_resp_res();
-    if (!resp_res)
-        VACCEL_THROW_MSG(-EINVAL, "Resp resource not found for context %u", get_id());
+    if (!resp_res) {
+        vxdna_err("write_err_rsp: no resp resource for ctx %u, err %d dropped",
+                  get_id(), err);
+        return;
+    }
     struct amdxdna_ccmd_rsp rsp = {};
     rsp.ret = err;
     rsp.base.len = sizeof(rsp);
