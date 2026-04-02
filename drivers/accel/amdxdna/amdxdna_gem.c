@@ -160,7 +160,9 @@ void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
 	if (!abo->mem.kva) {
 		ret = drm_gem_vmap(to_gobj(abo), &map);
 		if (ret)
-			XDNA_ERR(abo->client->xdna, "Vmap bo failed, ret %d", ret);
+			XDNA_ERR(abo->client->xdna,
+				 "Vmap bo failed, ret %d, type %d",
+				 ret, abo->type);
 		else
 			abo->mem.kva = map.vaddr;
 	}
@@ -674,7 +676,8 @@ static int amdxdna_gem_dev_obj_vmap(struct drm_gem_object *obj, struct iosys_map
 {
 	struct amdxdna_gem_obj *abo = to_xdna_obj(obj);
 	struct amdxdna_client *client = abo->client;
-	u64 dev_base = client->xdna->dev_info->dev_mem_base;
+	struct amdxdna_dev *xdna = client->xdna;
+	u64 dev_base = xdna->dev_info->dev_mem_base;
 	u64 bo_start = abo->mm_node.start - dev_base;
 	u64 bo_end = bo_start + abo->mm_node.size;
 	unsigned long nr_pages = abo->mm_node.size >> PAGE_SHIFT;
@@ -703,20 +706,37 @@ static int amdxdna_gem_dev_obj_vmap(struct drm_gem_object *obj, struct iosys_map
 			first_pg = overlap_start >> PAGE_SHIFT;
 			last_pg = overlap_end >> PAGE_SHIFT;
 
-			if (!chunk->base.pages) {
+			if (chunk->base.pages) {
+				for (i = first_pg; i < last_pg; i++)
+					pages[pg_idx++] = chunk->base.pages[i];
+			} else if (chunk->base.sgt) {
+				struct sg_page_iter piter;
+				unsigned long cnt = 0;
+
+				for_each_sgtable_page(chunk->base.sgt,
+						      &piter, first_pg) {
+					if (cnt >= last_pg - first_pg)
+						break;
+					pages[pg_idx++] =
+						sg_page_iter_page(&piter);
+					cnt++;
+				}
+			} else {
+				XDNA_ERR(xdna,
+					 "Heap chunk (offset 0x%llx size 0x%lx) no backing pages",
+					 chunk_start, chunk->mem.size);
 				mutex_unlock(&client->mm_lock);
 				kvfree(pages);
 				return -EINVAL;
 			}
-
-			for (i = first_pg; i < last_pg; i++)
-				pages[pg_idx++] = chunk->base.pages[i];
 		}
 		chunk_start = chunk_end;
 	}
 	mutex_unlock(&client->mm_lock);
 
 	if (pg_idx != nr_pages) {
+		XDNA_ERR(xdna, "DEV BO vmap gathered %d pages, expected %lu (bo 0x%llx-0x%llx)",
+			 pg_idx, nr_pages, bo_start, bo_end);
 		kvfree(pages);
 		return -EINVAL;
 	}
@@ -939,6 +959,18 @@ amdxdna_drm_expand_dev_heap(struct amdxdna_client *client,
 		mutex_unlock(&client->mm_lock);
 		ret = -ENOSPC;
 		goto pm_put;
+	}
+
+	/*
+	 * Pre-set the expected UVA so that GET_BO_INFO returns the address
+	 * where this chunk must be mmapped for contiguous heap layout.
+	 * The mmap callback will update this to the actual mmap address.
+	 */
+	if (amdxdna_pasid_on(client)) {
+		u64 heap_uva = amdxdna_gem_uva(client->dev_heap);
+
+		if (heap_uva != AMDXDNA_INVALID_ADDR)
+			abo->mem.uva = heap_uva + client->total_heap_size;
 	}
 
 	drm_gem_object_get(to_gobj(abo));
