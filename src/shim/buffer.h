@@ -35,7 +35,7 @@ private:
 
 class drm_bo {
 public:
-  drm_bo(const pdev& pdev, size_t size, uint32_t type);
+  drm_bo(const pdev& pdev, size_t size, uint32_t type, size_t alignment = 1);
   drm_bo(const pdev& pdev, size_t size, void *uptr);
   drm_bo(const pdev& pdev, xrt_core::shared_handle::export_handle ehdl);
   ~drm_bo();
@@ -54,6 +54,8 @@ class buffer : public xrt_core::buffer_handle
 {
 public:
   buffer(const pdev& dev, size_t size, int type);
+  buffer(const pdev& dev, size_t initial_size, size_t max_size,
+         int type, size_t alignment);
   buffer(const pdev& dev, size_t size, uint64_t flags);
   buffer(const pdev& dev, size_t size, void *uptr, uint64_t flags);
   buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl);
@@ -137,6 +139,7 @@ private:
   std::vector< std::unique_ptr<drm_bo> > m_bos;
   void *m_uptr = nullptr;
   int m_type = AMDXDNA_BO_INVALID;
+  size_t m_alignment = 1;
   size_t m_total_size = 0;
   size_t m_cur_size = 0;
 };
