@@ -67,6 +67,8 @@ struct amdxdna_dev_ops {
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
+	int (*notify_heap_expand)(struct amdxdna_client *client,
+				  struct amdxdna_gem_obj *new_chunk);
 };
 
 struct amdxdna_fw_feature_tbl {
@@ -93,6 +95,7 @@ struct amdxdna_dev_info {
 	size_t				dev_mem_size;
 	const char			*default_vbnv;
 	const struct amdxdna_rev_vbnv	*rev_vbnv_tbl;
+	size_t				dev_heap_max_size;
 	const struct amdxdna_dev_priv	*dev_priv;
 	const struct amdxdna_fw_feature_tbl *fw_feature_tbl;
 	const struct amdxdna_dev_ops	*ops;
@@ -148,6 +151,8 @@ struct amdxdna_client {
 
 	struct mutex			mm_lock; /* protect memory related */
 	struct amdxdna_gem_obj		*dev_heap;
+	struct list_head		dev_heap_chunks;
+	size_t				total_heap_size;
 
 	struct iommu_sva		*sva;
 	int				pasid;

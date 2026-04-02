@@ -19,6 +19,7 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
+#include "amdxdna_pm.h"
 #include "amdxdna_ubuf.h"
 
 #ifdef HAVE_6_13_MODULE_IMPORT_NS
@@ -51,19 +52,35 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 		goto unlock_out;
 	}
 
-	if (mem->size == 0 || mem->size > heap->mem.size) {
-		XDNA_ERR(xdna, "Invalid dev bo size 0x%lx, limit 0x%lx",
-			 mem->size, heap->mem.size);
+	if (!mem->size || mem->size > xdna->dev_info->dev_heap_max_size) {
+		XDNA_ERR(xdna, "Invalid dev bo size 0x%lx, max heap 0x%lx",
+			 mem->size, xdna->dev_info->dev_heap_max_size);
 		ret = -EINVAL;
 		goto unlock_out;
 	}
-
 	align = 1 << max(PAGE_SHIFT, xdna->dev_info->dev_mem_buf_shift);
-	ret = drm_mm_insert_node_generic(&heap->mm, &abo->mm_node,
-					 mem->size, align,
-					 0, DRM_MM_INSERT_BEST);
+	ret = drm_mm_insert_node_in_range(&heap->mm, &abo->mm_node,
+					  mem->size, align, 0,
+					  xdna->dev_info->dev_mem_base,
+					  xdna->dev_info->dev_mem_base +
+					  client->total_heap_size,
+					  DRM_MM_INSERT_BEST);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
+		if (client->total_heap_size < xdna->dev_info->dev_heap_max_size) {
+			/*
+			 * Heap can still grow. Return -EAGAIN so userspace
+			 * shim expands the heap and retries the allocation.
+			 * Use XDNA_INFO intentionally — heap expansion is
+			 * infrequent and worth logging for diagnostics.
+			 */
+			XDNA_INFO(xdna, "No space in committed heap 0x%lx for bo 0x%lx",
+				  client->total_heap_size, mem->size);
+			ret = -EAGAIN;
+		} else {
+			XDNA_ERR(xdna, "Failed to alloc dev bo 0x%lx, heap at max 0x%lx",
+				 mem->size, client->total_heap_size);
+			ret = -ENOSPC;
+		}
 		goto unlock_out;
 	}
 
@@ -112,6 +129,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	abo->open_ref = 0;
 	abo->internal = false;
 	INIT_LIST_HEAD(&abo->mem.umap_list);
+	INIT_LIST_HEAD(&abo->heap_chunk_node);
 
 	return abo;
 }
@@ -335,13 +353,31 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 		mapping_set_unevictable(vma->vm_file->f_mapping);
 
 	down_write(&xdna->notifier_lock);
-	if (list_empty(&abo->mem.umap_list))
+	if (list_empty(&abo->mem.umap_list)) {
+		/*
+		 * Heap expansion chunks have mem.uva pre-set to the
+		 * address firmware was told. Reject mmap at a different
+		 * address to prevent firmware/kernel address divergence.
+		 */
+		if (abo->mem.uva != AMDXDNA_INVALID_ADDR &&
+		    abo->mem.uva != addr) {
+			up_write(&xdna->notifier_lock);
+			XDNA_ERR(xdna, "BO mmap at %lx, expected %llx",
+				 addr, abo->mem.uva);
+			ret = -EINVAL;
+			goto remove_notifier;
+		}
 		abo->mem.uva = addr;
+	}
 	list_add_tail(&mapp->node, &abo->mem.umap_list);
 	up_write(&xdna->notifier_lock);
 
 	return 0;
 
+remove_notifier:
+	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
+		mapping_clear_unevictable(vma->vm_file->f_mapping);
+	mmu_interval_notifier_remove(&mapp->notifier);
 free_pfns:
 	kvfree(mapp->range.hmm_pfns);
 free_map:
@@ -575,7 +611,14 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	if (abo->pinned)
 		amdxdna_gem_unpin(abo);
 
-	if (abo->type == AMDXDNA_BO_DEV_HEAP)
+	/*
+	 * DEV_HEAP chunks are always removed from client->dev_heap_chunks
+	 * by amdxdna_client_cleanup() before this free callback runs.
+	 * DRM core calls drm_gem_release() before postclose, so abo->client
+	 * is already NULL here. No list removal needed.
+	 */
+	if (abo->type == AMDXDNA_BO_DEV_HEAP &&
+	    drm_mm_initialized(&abo->mm))
 		drm_mm_takedown(&abo->mm);
 
 	if (amdxdna_iova_on(xdna))
@@ -630,18 +673,73 @@ static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *
 static int amdxdna_gem_dev_obj_vmap(struct drm_gem_object *obj, struct iosys_map *map)
 {
 	struct amdxdna_gem_obj *abo = to_xdna_obj(obj);
-	void *base = amdxdna_gem_vmap(abo->client->dev_heap);
-	u64 offset = amdxdna_dev_bo_offset(abo);
+	struct amdxdna_client *client = abo->client;
+	u64 dev_base = client->xdna->dev_info->dev_mem_base;
+	u64 bo_start = abo->mm_node.start - dev_base;
+	u64 bo_end = bo_start + abo->mm_node.size;
+	unsigned long nr_pages = abo->mm_node.size >> PAGE_SHIFT;
+	struct amdxdna_gem_obj *chunk;
+	struct page **pages;
+	u64 chunk_start = 0;
+	int pg_idx = 0;
+	void *vaddr;
 
-	if (!base)
+	pages = kvmalloc_objs(*pages, nr_pages);
+	if (!pages)
 		return -ENOMEM;
-	iosys_map_set_vaddr(map, base + offset);
+
+	mutex_lock(&client->mm_lock);
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
+		u64 chunk_end = chunk_start + chunk->mem.size;
+		u64 overlap_start, overlap_end;
+		unsigned long first_pg, last_pg, i;
+
+		if (chunk_start >= bo_end)
+			break;
+
+		if (chunk_end > bo_start) {
+			overlap_start = max(bo_start, chunk_start) - chunk_start;
+			overlap_end = min(bo_end, chunk_end) - chunk_start;
+			first_pg = overlap_start >> PAGE_SHIFT;
+			last_pg = overlap_end >> PAGE_SHIFT;
+
+			if (!chunk->base.pages) {
+				mutex_unlock(&client->mm_lock);
+				kvfree(pages);
+				return -EINVAL;
+			}
+
+			for (i = first_pg; i < last_pg; i++)
+				pages[pg_idx++] = chunk->base.pages[i];
+		}
+		chunk_start = chunk_end;
+	}
+	mutex_unlock(&client->mm_lock);
+
+	if (pg_idx != nr_pages) {
+		kvfree(pages);
+		return -EINVAL;
+	}
+
+	vaddr = vmap(pages, nr_pages, VM_MAP, PAGE_KERNEL);
+	kvfree(pages);
+	if (!vaddr)
+		return -ENOMEM;
+
+	iosys_map_set_vaddr(map, vaddr);
 	return 0;
+}
+
+static void amdxdna_gem_dev_obj_vunmap(struct drm_gem_object *obj, struct iosys_map *map)
+{
+	vunmap(map->vaddr);
+	iosys_map_clear(map);
 }
 
 static const struct drm_gem_object_funcs amdxdna_gem_dev_obj_funcs = {
 	.free = amdxdna_gem_dev_obj_free,
 	.vmap = amdxdna_gem_dev_obj_vmap,
+	.vunmap = amdxdna_gem_dev_obj_vunmap,
 };
 
 static const struct drm_gem_object_funcs amdxdna_gem_shmem_funcs = {
@@ -792,6 +890,89 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 	return abo;
 }
 
+/*
+ * Expand existing dev heap by adding a new chunk.
+ * Caller must hold xdna->dev_lock. mm_lock is acquired briefly for
+ * heap state update only, not held during firmware notification.
+ */
+static int
+amdxdna_drm_expand_dev_heap(struct amdxdna_client *client,
+			    struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	u64 new_total;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (!xdna->dev_info->ops->notify_heap_expand) {
+		XDNA_ERR(xdna, "Heap expansion not supported");
+		return -EOPNOTSUPP;
+	}
+
+	if (amdxdna_iova_on(xdna)) {
+		ret = amdxdna_iommu_map_bo(xdna, abo);
+		if (ret) {
+			XDNA_ERR(xdna, "IOMMU map expansion chunk failed, ret %d", ret);
+			return ret;
+		}
+	}
+
+	/*
+	 * Resume device so all hwctxs have valid firmware contexts.
+	 * This temporarily drops dev_lock but re-acquires it before
+	 * proceeding, so commit+notify below runs atomically.
+	 */
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unmap_iommu;
+
+	/* Commit chunk under mm_lock to serialize with DEV BO allocation */
+	mutex_lock(&client->mm_lock);
+
+	new_total = client->total_heap_size + abo->mem.size;
+	if (new_total > xdna->dev_info->dev_heap_max_size) {
+		XDNA_ERR(xdna, "Heap expansion 0x%lx would make total 0x%llx exceed max 0x%lx",
+			 abo->mem.size, new_total,
+			 xdna->dev_info->dev_heap_max_size);
+		mutex_unlock(&client->mm_lock);
+		ret = -ENOSPC;
+		goto pm_put;
+	}
+
+	drm_gem_object_get(to_gobj(abo));
+	list_add_tail(&abo->heap_chunk_node, &client->dev_heap_chunks);
+	client->total_heap_size = new_total;
+
+	XDNA_DBG(xdna, "Dev heap expanded by 0x%lx, total 0x%llx",
+		 abo->mem.size, new_total);
+
+	mutex_unlock(&client->mm_lock);
+
+	/* Notify firmware — dev_lock is held, mm_lock not needed */
+	ret = xdna->dev_info->ops->notify_heap_expand(client, abo);
+	if (ret) {
+		XDNA_ERR(xdna, "Notify heap expand failed, ret %d", ret);
+		goto rollback;
+	}
+
+	amdxdna_pm_suspend_put(xdna);
+	return 0;
+
+rollback:
+	mutex_lock(&client->mm_lock);
+	list_del_init(&abo->heap_chunk_node);
+	client->total_heap_size -= abo->mem.size;
+	drm_gem_object_put(to_gobj(abo));
+	mutex_unlock(&client->mm_lock);
+pm_put:
+	amdxdna_pm_suspend_put(xdna);
+unmap_iommu:
+	if (amdxdna_iova_on(xdna))
+		amdxdna_iommu_unmap_bo(xdna, abo);
+	return ret;
+}
+
 static struct amdxdna_gem_obj *
 amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 			       struct amdxdna_drm_create_bo *args, struct drm_file *filp)
@@ -803,38 +984,48 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 
 	WARN_ON(!is_power_of_2(xdna->dev_info->dev_mem_size));
 	XDNA_DBG(xdna, "Requested dev heap size 0x%llx", args->size);
-	if (!args->size || !IS_ALIGNED(args->size, xdna->dev_info->dev_mem_size)) {
-		XDNA_ERR(xdna, "The dev heap size 0x%llx is not multiple of 0x%lx",
-			 args->size, xdna->dev_info->dev_mem_size);
+	if (!args->size || !IS_ALIGNED(args->size, xdna->dev_info->dev_mem_size) ||
+	    args->size > xdna->dev_info->dev_heap_max_size) {
+		XDNA_ERR(xdna, "Invalid dev heap size 0x%llx, chunk 0x%lx, max 0x%lx",
+			 args->size, xdna->dev_info->dev_mem_size,
+			 xdna->dev_info->dev_heap_max_size);
 		return ERR_PTR(-EINVAL);
 	}
 
-	/* HEAP BO is a special case of SHARE BO. */
 	abo = amdxdna_drm_create_share_bo(dev, args, filp);
 	if (IS_ERR(abo))
 		return ERR_CAST(abo);
 
-	/* Set up heap for this client. */
+	mutex_lock(&xdna->dev_lock);
 	mutex_lock(&client->mm_lock);
 
 	if (client->dev_heap) {
-		XDNA_DBG(client->xdna, "dev heap is already created");
-		ret = -EBUSY;
-		goto mm_unlock;
+		mutex_unlock(&client->mm_lock);
+		ret = amdxdna_drm_expand_dev_heap(client, abo);
+		mutex_unlock(&xdna->dev_lock);
+		if (ret) {
+			drm_gem_object_put(to_gobj(abo));
+			return ERR_PTR(ret);
+		}
+		return abo;
 	}
+
+	/* Initial heap creation — no firmware notification needed */
 	client->dev_heap = abo;
-	drm_gem_object_get(to_gobj(abo));
 
-	drm_mm_init(&abo->mm, xdna->dev_info->dev_mem_base, abo->mem.size);
+	drm_mm_init(&abo->mm, xdna->dev_info->dev_mem_base,
+		    xdna->dev_info->dev_heap_max_size);
+
+	drm_gem_object_get(to_gobj(abo)); /* ref for chunk list */
+	list_add_tail(&abo->heap_chunk_node, &client->dev_heap_chunks);
+	client->total_heap_size = abo->mem.size;
+
+	XDNA_DBG(xdna, "Initial dev heap created, size 0x%lx",
+		 abo->mem.size);
 
 	mutex_unlock(&client->mm_lock);
-
+	mutex_unlock(&xdna->dev_lock);
 	return abo;
-
-mm_unlock:
-	mutex_unlock(&client->mm_lock);
-	drm_gem_object_put(to_gobj(abo));
-	return ERR_PTR(ret);
 }
 
 struct amdxdna_gem_obj *
@@ -868,7 +1059,8 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev,
 
 	ret = amdxdna_gem_heap_alloc(abo);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
+		if (ret != -EAGAIN)
+			XDNA_ERR(xdna, "Failed to alloc dev bo memory, ret %d", ret);
 		amdxdna_gem_destroy_obj(abo);
 		return ERR_PTR(ret);
 	}
@@ -929,7 +1121,7 @@ int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo)
 	int ret;
 
 	if (abo->type == AMDXDNA_BO_DEV)
-		abo = abo->client->dev_heap;
+		return 0; /* Heap chunks are pinned at expansion time */
 
 	if (is_import_bo(abo))
 		return 0;
@@ -954,7 +1146,7 @@ int amdxdna_gem_pin(struct amdxdna_gem_obj *abo)
 void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo)
 {
 	if (abo->type == AMDXDNA_BO_DEV)
-		abo = abo->client->dev_heap;
+		return; /* Heap chunks are unpinned at client cleanup */
 
 	if (is_import_bo(abo))
 		return;

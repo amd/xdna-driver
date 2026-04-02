@@ -336,23 +336,56 @@ int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwc
 	return ret;
 }
 
-int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size)
+static int aie2_send_host_buf_msgs(struct amdxdna_dev_hdl *ndev, u32 context_id,
+				   u64 addr, u64 size, u32 initial_opcode)
 {
 	DECLARE_AIE_MSG(map_host_buffer, MSG_OP_MAP_HOST_BUFFER);
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	size_t chunk_size;
 	int ret;
 
-	req.context_id = context_id;
-	req.buf_addr = addr;
-	req.buf_size = size;
-	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
-	if (ret)
-		return ret;
+	chunk_size = xdna->dev_info->dev_mem_size;
+	if (WARN_ON(!is_power_of_2(chunk_size)))
+		return -EINVAL;
+	if (!size || !IS_ALIGNED(size, chunk_size)) {
+		XDNA_ERR(xdna, "Invalid size 0x%llx for chunk 0x%lx",
+			 size, chunk_size);
+		return -EINVAL;
+	}
 
-	XDNA_DBG(xdna, "fw ctx %d map host buf addr 0x%llx size 0x%llx",
-		 context_id, addr, size);
+	msg.opcode = initial_opcode;
+	do {
+		req.context_id = context_id;
+		req.buf_addr = addr;
+		req.buf_size = chunk_size;
+		ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+		if (ret) {
+			XDNA_ERR(xdna, "fw ctx %d addr 0x%llx size 0x%lx",
+				 context_id, addr, chunk_size);
+			return ret;
+		}
+
+		XDNA_DBG(xdna, "fw ctx %d host buf op 0x%x addr 0x%llx size 0x%lx",
+			 context_id, msg.opcode, addr, chunk_size);
+
+		addr += chunk_size;
+		size -= chunk_size;
+		msg.opcode = MSG_OP_ADD_HOST_BUFFER;
+	} while (size);
 
 	return 0;
+}
+
+int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size)
+{
+	return aie2_send_host_buf_msgs(ndev, context_id, addr, size,
+				       MSG_OP_MAP_HOST_BUFFER);
+}
+
+int aie2_add_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size)
+{
+	return aie2_send_host_buf_msgs(ndev, context_id, addr, size,
+				       MSG_OP_ADD_HOST_BUFFER);
 }
 
 static int amdxdna_hwctx_col_map(struct amdxdna_hwctx *hwctx, void *arg)
