@@ -1006,58 +1006,74 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 	return (*read_index > seq);
 }
 
-static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+/*
+ * Fill health data directly into the command BO buffer.  Writing straight
+ * to cmd_data avoids the flexible-array-member overflow that occurred when
+ * the old code wrote through the zero-length uc_info[] embedded inside
+ * hwctx->health_data.
+ */
+static void ve2_fill_health_data(struct amdxdna_dev *xdna,
+				 struct amdxdna_ctx *hwctx,
+				 void *cmd_data, u32 data_total)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct device *aie_dev = priv_ctx->aie_dev;
-	struct amdxdna_ctx_health_data_aie4 *r;
-	struct handshake *hs = NULL;
-	int ret = 0;
+	struct amdxdna_ctx_health_data *health;
+	size_t hdr_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
+	struct handshake *hs;
+	u32 max_uc;
+	u32 num_uc;
+	int ret;
 
-	r = kzalloc(sizeof(*r) + priv_ctx->num_col * sizeof(struct uc_health_info), GFP_KERNEL);
-	if (!r) {
-		XDNA_ERR(xdna, "No memory for struct amdxdna_ctx_health_data_aie4\n");
+	if (!cmd_data || data_total < hdr_size) {
+		XDNA_WARN(xdna, "Health data buffer too small: %u < %zu",
+			  data_total, hdr_size);
 		return;
 	}
 
-	for (u32 col = 0; col < priv_ctx->num_col; col++) {
+	memset(cmd_data, 0, data_total);
+	health = (struct amdxdna_ctx_health_data *)cmd_data;
+	health->version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	health->npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	health->aie4.ctx_state = priv_ctx->state;
+	health->aie4.ctx_error_type = 0;
+
+	max_uc = (data_total - hdr_size) / sizeof(struct uc_health_info);
+	num_uc = min(priv_ctx->num_col, max_uc);
+
+	for (u32 col = 0; col < num_uc; col++) {
 		hs = kzalloc(sizeof(*hs), GFP_KERNEL);
 		if (!hs) {
-			XDNA_ERR(xdna, "No memory for handshake.\n");
-			kfree(r);
+			XDNA_ERR(xdna, "No memory for handshake\n");
 			return;
 		}
+
 		ret = ve2_partition_read_privileged_mem(aie_dev, col,
-							offsetof(struct handshake, mpaie_alive),
-							sizeof(struct handshake), (void *)hs);
-
+							offsetof(struct handshake,
+								 mpaie_alive),
+							sizeof(struct handshake),
+							(void *)hs);
 		if (ret < 0) {
-			XDNA_ERR(xdna, "aie_partition_read failed with ret=%d\n", ret);
+			XDNA_ERR(xdna, "aie_partition_read failed col %u ret=%d\n", col, ret);
 			kfree(hs);
-			kfree(r);
 			return;
 		}
 
-		r->uc_info[col].uc_idx = hwctx->start_col + col;
-		r->uc_info[col].page_idx = hs->vm.abs_page_index;
-		r->uc_info[col].offset = hs->vm.ppc;
-		r->uc_info[col].uc_idle_status = hs->cert_idle_status;
-		r->uc_info[col].misc_status = hs->misc_status;
-		r->uc_info[col].uc_pc = hs->exception.pc;
-		r->uc_info[col].uc_ear = hs->exception.ear;
-		r->uc_info[col].uc_esr = hs->exception.esr;
-		r->uc_info[col].fw_state = hs->vm.fw_state;
+		health->aie4.uc_info[col].uc_idx = hwctx->start_col + col;
+		health->aie4.uc_info[col].uc_idle_status = hs->cert_idle_status;
+		health->aie4.uc_info[col].misc_status = hs->misc_status;
+		health->aie4.uc_info[col].fw_state = hs->vm.fw_state;
+		health->aie4.uc_info[col].page_idx = hs->vm.abs_page_index;
+		health->aie4.uc_info[col].offset = hs->vm.ppc;
+		health->aie4.uc_info[col].restore_page = hs->ctx_save.restore_page.page_index;
+		health->aie4.uc_info[col].restore_offset = hs->ctx_save.restore_page.page_offset;
+		health->aie4.uc_info[col].uc_ear = hs->exception.ear;
+		health->aie4.uc_info[col].uc_esr = hs->exception.esr;
+		health->aie4.uc_info[col].uc_pc = hs->exception.pc;
 		kfree(hs);
 	}
 
-	hwctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
-	hwctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE4;
-	hwctx->health_data.aie4.ctx_state = priv_ctx->state;
-	hwctx->health_data.aie4.num_uc = priv_ctx->num_col;
-	memcpy(hwctx->health_data.aie4.uc_info, r->uc_info, priv_ctx->num_col *
-	       sizeof(struct uc_health_info));
-
-	kfree(r);
+	health->aie4.num_uc = num_uc;
 }
 
 /*
@@ -1173,13 +1189,11 @@ static void ve2_handle_timeout(struct amdxdna_dev *xdna,
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	u32 capacity = priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
 	struct amdxdna_cmd_chain *cc = NULL;
+	struct amdxdna_gem_obj *target_bo;
 	u32 cmd_count = 1;
 	u32 start_slot = 0;
 	void *cmd_data;
 	u32 data_total;
-	size_t total_size;
-
-	ve2_dump_ctx(xdna, hwctx);
 
 	if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
 		cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
@@ -1190,18 +1204,6 @@ static void ve2_handle_timeout(struct amdxdna_dev *xdna,
 		cmd_count = cc->command_count;
 		start_slot = (seq - cmd_count + 1) % capacity;
 	}
-
-	cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
-	total_size = sizeof(struct amdxdna_ctx_health_data) +
-		     priv_ctx->num_col * sizeof(struct uc_health_info);
-	if (unlikely(data_total < sizeof(hwctx->health_data)))
-		XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu",
-			  __func__, data_total, total_size);
-
-	data_total = min(data_total, total_size);
-	memcpy(cmd_data, &hwctx->health_data, total_size);
-	hwctx->health_reported = true;
-	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 
 	if (cc) {
 		u32 fail_cmd_idx = 0;
@@ -1228,7 +1230,31 @@ static void ve2_handle_timeout(struct amdxdna_dev *xdna,
 			 fail_cmd_idx,
 			 (start_slot + fail_cmd_idx) % capacity,
 			 rl_read_idx);
+
+		/*
+		 * Write health data into the failing sub-command BO so that
+		 * XRT can read it via run.get_ert_packet() on the individual
+		 * run object it exposes in the aie_error exception.
+		 */
+		target_bo = amdxdna_gem_get_obj(hwctx->client,
+						(u32)cc->data[fail_cmd_idx],
+						AMDXDNA_BO_SHARE);
+		if (target_bo) {
+			cmd_data = amdxdna_cmd_get_data(target_bo, &data_total);
+			ve2_fill_health_data(xdna, hwctx, cmd_data, data_total);
+			amdxdna_cmd_set_state(target_bo, ERT_CMD_STATE_TIMEOUT);
+			amdxdna_gem_put_obj(target_bo);
+		} else {
+			XDNA_ERR(xdna, "Failed to find sub-cmd BO %u at chain index %u",
+				 (u32)cc->data[fail_cmd_idx], fail_cmd_idx);
+		}
+	} else {
+		cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
+		ve2_fill_health_data(xdna, hwctx, cmd_data, data_total);
 	}
+
+	hwctx->health_reported = true;
+	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 }
 
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
