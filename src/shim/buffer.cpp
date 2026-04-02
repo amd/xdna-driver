@@ -15,8 +15,6 @@
 
 namespace {
 
-const auto heap_page_size = 64ul * 1024 * 1024;
-
 uint8_t
 use_to_fw_debug_type(uint8_t use)
 {
@@ -88,11 +86,6 @@ page_size_roundup(size_t size)
   return (size + page_size - 1) & ~(page_size - 1);
 }
 
-size_t
-heap_page_size_roundup(size_t size)
-{
-  return (size + heap_page_size - 1) & ~(heap_page_size - 1);
-}
 
 std::string
 use_flag_to_name(uint32_t use)
@@ -201,12 +194,7 @@ is_driver_pin_arg_bo()
   return drv_pin;
 }
 
-uint64_t
-bo_addr_align(int type)
-{
-  // Device mem heap must align at heap_page_size boundary. Others can be byte aligned.
-  return (type == AMDXDNA_BO_DEV_HEAP) ? heap_page_size : 1;
-}
+
 
 int
 bo_flags_to_type(uint64_t bo_flags, bool has_dev_mem)
@@ -317,12 +305,11 @@ alloc(const pdev *dev, uint64_t dev_offset, size_t size)
 //
 
 drm_bo::
-drm_bo(const pdev& pdev, size_t size, uint32_t type)
+drm_bo(const pdev& pdev, size_t size, uint32_t type, size_t alignment)
   : m_pdev(pdev), m_size(size)
 {
-  auto align = bo_addr_align(type);
   bo_info arg = {
-    .xdna_addr_align = (align == 1 ? 0 : align), 
+    .xdna_addr_align = (alignment == 1 ? 0 : alignment), 
     .size = m_size,
     .type = type,
   };
@@ -399,6 +386,23 @@ buffer(const pdev& dev, size_t size, int type)
 }
 
 buffer::
+buffer(const pdev& dev, size_t initial_size, size_t max_size,
+       int type, size_t alignment)
+  : m_pdev(dev)
+  , m_type(type)
+  , m_alignment(alignment)
+  , m_total_size(max_size)
+  , m_cur_size(0)
+{
+  if (m_type == AMDXDNA_BO_INVALID)
+    shim_err(EINVAL, "Bad BO type.");
+
+  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, m_alignment);
+  expand(initial_size);
+  shim_debug("Created expandable %s", describe().c_str());
+}
+
+buffer::
 buffer(const pdev& dev, size_t size, int type, void *uptr)
   : m_pdev(dev)
   , m_uptr(uptr)
@@ -420,7 +424,7 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
     shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
 
   // Prepare the mmap range for the entire buffer
-  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, bo_addr_align(m_type));
+  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, m_alignment);
 
   // Obtain the buffer
   expand(m_total_size);
@@ -436,7 +440,7 @@ buffer(const pdev& dev, xrt_core::shared_handle::export_handle ehdl)
 
   m_total_size = m_cur_size = bo->m_size;
   // Prepare the mmap range for the entire buffer
-  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, bo_addr_align(m_type));
+  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, m_alignment);
 
   mmap_drm_bo(bo.get());
   m_bos.push_back(std::move(bo));
@@ -447,19 +451,23 @@ void
 buffer::
 expand(size_t size)
 {
-  size = (m_type == AMDXDNA_BO_DEV_HEAP) ? heap_page_size_roundup(size) : size;
+  size = (size + m_alignment - 1) & ~(m_alignment - 1);
+
+  if (m_cur_size >= m_total_size)
+    shim_err(ENOSPC, "Heap at max size %zu, can't expand further", m_total_size);
+
+  if (size > m_total_size - m_cur_size)
+    size = m_total_size - m_cur_size;
+
   auto cur_sz = m_cur_size;
   auto new_sz = size + m_cur_size;
-  shim_debug("Expanding BO from %ld to %ld", cur_sz, new_sz);
-
-  if (new_sz > m_total_size)
-    shim_err(EINVAL, "Can't expand BO beyond total size %ld", m_total_size);
+  shim_debug("Expanding BO from %zu to %zu", cur_sz, new_sz);
 
   std::unique_ptr<drm_bo> bo;
   if (m_uptr)
     bo = std::make_unique<drm_bo>(m_pdev, size, m_uptr);
   else
-    bo = std::make_unique<drm_bo>(m_pdev, size, m_type);
+    bo = std::make_unique<drm_bo>(m_pdev, size, m_type, m_alignment);
   mmap_drm_bo(bo.get());
 
   m_bos.push_back(std::move(bo));
