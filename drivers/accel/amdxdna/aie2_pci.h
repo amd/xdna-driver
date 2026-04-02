@@ -17,6 +17,8 @@
 #include "aie2_msg_priv.h"
 #include "amdxdna_mailbox.h"
 
+struct amdxdna_qos_info;
+
 /* Firmware determines device memory base address and size */
 #define AIE2_DEVM_BASE	0x4000000
 #define AIE2_DEVM_SIZE	SZ_64M
@@ -145,6 +147,9 @@ struct amdxdna_hwctx_priv {
 	/* Completed job counter */
 	u64				completed;
 
+	/* DPM level computed for this context */
+	u32				req_dpm_level;
+
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 	struct drm_syncobj		*syncobj;
 };
@@ -199,6 +204,8 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
+	/* Per-DPM-level context reference counts */
+	u32				*dpm_refcnt;
 	u32				clk_gating;
 	u32				npuclk_freq;
 	u32				hclk_freq;
@@ -279,6 +286,10 @@ extern const struct aie2_hw_ops npu4_hw_ops;
 int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
 int aie2_pm_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+void aie2_pm_update_dpm_ref(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
+#define aie2_pm_request_dpm_level(ndev, level) aie2_pm_update_dpm_ref(ndev, level, true)
+#define aie2_pm_release_dpm_level(ndev, level) aie2_pm_update_dpm_ref(ndev, level, false)
+u32 aie2_pm_calc_dpm_level(struct amdxdna_dev_hdl *ndev, u32 opc, struct amdxdna_qos_info *qos);
 
 /* aie2_error.c */
 int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);

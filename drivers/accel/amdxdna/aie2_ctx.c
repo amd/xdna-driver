@@ -821,6 +821,11 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto suspend_put;
 	}
 
+	hwctx->priv->req_dpm_level = aie2_pm_calc_dpm_level(xdna->dev_handle,
+							    hwctx->max_opc,
+							    &hwctx->qos);
+	aie2_pm_request_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
+
 	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
 				amdxdna_obj_dma_addr(heap),
 				heap->mem.size);
@@ -843,6 +848,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	return 0;
 
 release_resource:
+	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 	aie2_release_resource(hwctx);
 suspend_put:
 	amdxdna_pm_suspend_put(xdna);
@@ -878,6 +884,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	/* Request fw to destroy hwctx and cancel the rest pending requests */
 	drm_sched_stop(&hwctx->priv->sched, NULL);
+	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 	aie2_release_resource(hwctx);
 #ifdef HAVE_6_13_drm_sched_start_errno
 	drm_sched_start(&hwctx->priv->sched, 0);
