@@ -65,6 +65,20 @@ get_pcidev_impl(const xrt_core::device* device)
   return device_impl->get_pdev();
 }
 
+static constexpr uint16_t NPU3_DEVICE_IDS[] = {
+  0x17f1, 0x17f2, 0x17f3, 0x1b0a, 0x1b0b, 0x1b0c
+};
+static constexpr uint16_t NPU4_DEVICE_ID = 0x17f0;
+
+static bool
+is_aie4(uint16_t device_id)
+{
+  for (uint16_t id : NPU3_DEVICE_IDS)
+    if (device_id == id)
+      return true;
+  return false;
+}
+
 template <typename ValueType>
 struct sysfs_fcn
 {
@@ -965,20 +979,6 @@ struct telemetry
   static constexpr uint32_t NPU_MAX_SLEEP_COUNT = 9;
   static constexpr uint32_t NPU_MAX_OPCODE_COUNT = 30;
   static constexpr uint32_t NPU_MAX_DTLB_COUNT = 12;
-  static constexpr uint16_t NPU3_DEVICE_IDS[] = {
-    0x17f1, 0x17f2, 0x1b0a, 0x1b0b  // NPU3 VF/PF variants
-  };
-  static constexpr uint16_t NPU4_DEVICE_ID = 0x17f0;
-
-  static bool
-  is_aie4(uint16_t device_id)
-  {
-    for (uint16_t id : NPU3_DEVICE_IDS)
-      if (device_id == id)
-        return true;
-    return false;
-  }
-
   // AIE4 firmware telemetry constants and structs
   static constexpr uint32_t AIE4_MAX_NUM_SUPERVISORS = 4;
   static constexpr uint32_t AIE4_TOTAL_NUM_UC = 6;
@@ -1646,6 +1646,10 @@ struct cert_firmware_version
   static result_type
   get(const xrt_core::device* device, key_type)
   {
+    auto device_id = xrt_core::device_query<query::pcie_id>(device).device_id;
+    if (!is_aie4(device_id))
+      return {};
+
     amdxdna_drm_query_firmware_version fw_version{};
     amdxdna_drm_get_info arg = {
       .param = DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION,
