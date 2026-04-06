@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdexcept>
 #include <memory>
+#include <sys/mman.h>
 
 #include "drm_hw.h" // from xdna shim virtio
 
@@ -23,6 +24,7 @@
 #include "amdxdna_proto.h"
 #include "vaccel.h"
 #include "vaccel_internal.h"
+#include "../util/vxdna_debug.h"
 
 /**
  * @brief AMDXDNA Buffer Object wrapper
@@ -50,7 +52,9 @@ public:
      * @param req BO creation request with type, size, and alignment
      * @throws vaccel_error on DRM ioctl failure
      */
-    vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in, const struct amdxdna_ccmd_create_bo_req *req);
+    vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
+             const struct amdxdna_ccmd_create_bo_req *req,
+             void *mmap_target = nullptr);
 
     /**
      * @brief Construct device-local BO
@@ -98,6 +102,15 @@ public:
     uint32_t get_handle() const noexcept
     {
         return m_bo_handle;
+    }
+
+    /**
+     * @brief Get the BO type
+     * @return BO type (AMDXDNA_BO_DEV, AMDXDNA_BO_DEV_HEAP, etc.)
+     */
+    uint32_t get_type() const noexcept
+    {
+        return m_bo_type;
     }
 
 private:
@@ -156,6 +169,11 @@ public:
      */
     ~vxdna_context() {
         vxdna_dbg("Context destroying: ctx_id=%u, fd=%d", get_id(), get_fd());
+        if (m_heap_base) {
+            ::munmap(m_heap_base, HEAP_MAX_SIZE);
+            m_heap_base = nullptr;
+        }
+        m_bo_table.clear();
         close(get_fd());
     }
 
@@ -493,6 +511,11 @@ private:
     std::shared_ptr<vaccel_resource> m_resp_res;
     vaccel_map<uint32_t, std::shared_ptr<vxdna_bo>> m_bo_table;
     vaccel_map<uint32_t, std::shared_ptr<vxdna_hwctx>> m_hwctx_table;
+
+    static constexpr size_t HEAP_MAX_SIZE = 512UL << 20;
+    void *m_heap_base = nullptr;
+    size_t m_heap_cur_offset = 0;
+    bool m_heap_destroyed = false;
 };
 
 /**
@@ -711,26 +734,21 @@ int vxdna_device_process_ccmd(void *cookie, const void *cmd_buf, size_t buf_size
  * @brief Exception wrapper for ccmd handlers
  *
  * Wraps a ccmd handler function to catch exceptions and write
- * appropriate error responses to the context's response buffer
- * before re-throwing.
- *
- * Usage:
- * @code
- * vxdna_ccmd_error_wrap(ctx, [&]() {
- *     ctx->create_bo(req);
- * });
- * @endcode
+ * appropriate error responses to the context's response buffer.
+ * Exceptions are NOT re-thrown so that QEMU receives a zero return
+ * from vaccel_submit_ccmd and signals the fence normally. Re-throwing
+ * would cause QEMU to send 0x1200 error responses which cascades
+ * into resource lookup failures for subsequent commands.
  *
  * Error handling:
- * - vaccel_error: Writes e.code() to response, re-throws
- * - std::exception: Writes -EIO to response, re-throws
- * - Unknown: Writes -EIO to response, throws std::runtime_error
+ * - vaccel_error: Logs error, writes e.code() to response
+ * - std::exception: Logs error, writes -EIO to response
+ * - Unknown: Logs error, writes -EIO to response
  *
  * @tparam ContextType Context type (must have write_err_rsp method)
  * @tparam F Callable type (lambda, function, etc.)
  * @param ctx Context to write error response to
  * @param f Handler function to execute
- * @throws Re-throws caught exceptions after writing response
  */
 template<typename ContextType, typename F> void
 vxdna_ccmd_error_wrap(const std::shared_ptr<ContextType> &ctx, F &&f)
@@ -738,14 +756,14 @@ vxdna_ccmd_error_wrap(const std::shared_ptr<ContextType> &ctx, F &&f)
     try {
         f();
     } catch (const vaccel_error& e) {
+        vxdna_err("ccmd failed: %s", e.what());
         ctx->write_err_rsp(e.code());
-        throw e;
     } catch (const std::exception& e) {
+        vxdna_err("ccmd failed (unexpected): %s", e.what());
         ctx->write_err_rsp(-EIO);
-        throw e;
     } catch (...) {
+        vxdna_err("ccmd failed (unknown exception)");
         ctx->write_err_rsp(-EIO);
-        throw std::runtime_error("Unknown exception");
     }
 }
 
