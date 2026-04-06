@@ -46,7 +46,8 @@ struct amdxdna_gem_obj {
 	int				open_ref;
 
 	/* Below members are initialized when needed */
-	struct drm_mm			mm; /* For AMDXDNA_BO_DEV_HEAP */
+	struct drm_mm			mm; /* For first AMDXDNA_BO_DEV_HEAP */
+	struct list_head		heap_chunk_node; /* Link in client chunk list */
 	struct drm_mm_node		mm_node; /* For AMDXDNA_BO_DEV */
 	u32				assigned_hwctx;
 	struct dma_buf			*dma_buf;

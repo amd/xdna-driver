@@ -72,9 +72,98 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 #endif
 }
 
+/* Unpin all heap chunks. Caller must hold client->mm_lock. */
+static void aie2_unpin_heap_chunks_locked(struct amdxdna_client *client)
+{
+	struct amdxdna_gem_obj *chunk;
+
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node)
+		amdxdna_gem_unpin(chunk);
+}
+
+static void aie2_unpin_heap_chunks(struct amdxdna_client *client)
+{
+	mutex_lock(&client->mm_lock);
+	aie2_unpin_heap_chunks_locked(client);
+	mutex_unlock(&client->mm_lock);
+}
+
+/*
+ * Pin all current heap chunks.
+ * On failure, previously pinned chunks in this call are unpinned.
+ */
+static int aie2_pin_heap_chunks(struct amdxdna_client *client)
+{
+	struct amdxdna_gem_obj *chunk;
+	int ret;
+
+	mutex_lock(&client->mm_lock);
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
+		ret = amdxdna_gem_pin(chunk);
+		if (ret) {
+			struct amdxdna_gem_obj *c;
+
+			list_for_each_entry(c, &client->dev_heap_chunks,
+					    heap_chunk_node) {
+				if (c == chunk)
+					break;
+				amdxdna_gem_unpin(c);
+			}
+			mutex_unlock(&client->mm_lock);
+			return ret;
+		}
+	}
+	mutex_unlock(&client->mm_lock);
+	return 0;
+}
+
+static int aie2_hwctx_map_heap_chunks(struct amdxdna_dev *xdna,
+				      struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_client *client = hwctx->client;
+	u64 heap_uva = amdxdna_gem_uva(client->dev_heap);
+	struct amdxdna_gem_obj *chunk;
+	u64 offset = 0;
+	u64 addr;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	chunk = list_first_entry(&client->dev_heap_chunks,
+				 struct amdxdna_gem_obj, heap_chunk_node);
+	addr = amdxdna_pasid_on(client) ? heap_uva : chunk->mem.dma_addr;
+	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
+				addr, chunk->mem.size);
+	if (ret) {
+		XDNA_ERR(xdna, "Map host buf failed, ret %d", ret);
+		return ret;
+	}
+	offset = chunk->mem.size;
+
+	list_for_each_entry_continue(chunk, &client->dev_heap_chunks,
+				     heap_chunk_node) {
+		if (!AIE_FEATURE_ON(&xdna->dev_handle->aie,
+				    AIE2_ADD_HOST_BUFFER)) {
+			XDNA_ERR(xdna, "Add host buffer feature not supported");
+			return -EOPNOTSUPP;
+		}
+
+		addr = amdxdna_pasid_on(client) ?
+		       heap_uva + offset : chunk->mem.dma_addr;
+		ret = aie2_add_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
+					addr, chunk->mem.size);
+		if (ret) {
+			XDNA_ERR(xdna, "Add host buf failed, ret %d", ret);
+			return ret;
+		}
+		offset += chunk->mem.size;
+	}
+
+	return 0;
+}
+
 static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_gem_obj *heap = hwctx->priv->heap;
 	int ret;
 
 	ret = aie2_create_context(xdna->dev_handle, hwctx);
@@ -83,9 +172,7 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
-	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(heap),
-				heap->mem.size);
+	ret = aie2_hwctx_map_heap_chunks(xdna, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buf failed, ret %d", ret);
 		goto out;
@@ -754,9 +841,9 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	priv->heap = heap;
 	sema_init(&priv->job_sem, HWCTX_MAX_CMDS);
 
-	ret = amdxdna_gem_pin(heap);
+	ret = aie2_pin_heap_chunks(client);
 	if (ret) {
-		XDNA_ERR(xdna, "Dev heap pin failed, ret %d", ret);
+		XDNA_ERR(xdna, "Dev heap chunk pin failed, ret %d", ret);
 		goto put_heap;
 	}
 
@@ -821,9 +908,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto suspend_put;
 	}
 
-	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(heap),
-				heap->mem.size);
+	ret = aie2_hwctx_map_heap_chunks(xdna, hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
 		goto release_resource;
@@ -858,7 +943,7 @@ free_cmd_bufs:
 			continue;
 		drm_gem_object_put(to_gobj(priv->cmd_buf[i]));
 	}
-	amdxdna_gem_unpin(heap);
+	aie2_unpin_heap_chunks(client);
 put_heap:
 	drm_gem_object_put(to_gobj(heap));
 free_priv:
@@ -901,7 +986,8 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
 		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[idx]));
-	amdxdna_gem_unpin(hwctx->priv->heap);
+
+	aie2_unpin_heap_chunks(hwctx->client);
 	drm_gem_object_put(to_gobj(hwctx->priv->heap));
 
 	mutex_destroy(&hwctx->priv->io_lock);
@@ -1252,6 +1338,88 @@ free_chain:
 up_sem:
 	up(&hwctx->priv->job_sem);
 	job->job_done = true;
+	return ret;
+}
+
+int aie2_notify_heap_expand(struct amdxdna_client *client,
+			    struct amdxdna_gem_obj *new_chunk)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+	int hwctx_count = 0;
+	u64 addr;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (!AIE_FEATURE_ON(&xdna->dev_handle->aie, AIE2_ADD_HOST_BUFFER)) {
+		XDNA_ERR(xdna, "Add host buffer feature not supported");
+		return -EOPNOTSUPP;
+	}
+
+	/* Pin to set up pages and DMA mapping for address computation */
+	ret = amdxdna_gem_pin(new_chunk);
+	if (ret) {
+		XDNA_ERR(xdna, "Pin expansion chunk failed, ret %d", ret);
+		return ret;
+	}
+
+	if (amdxdna_pasid_on(client)) {
+		u64 heap_uva = amdxdna_gem_uva(client->dev_heap);
+		u64 chunk_offset = client->total_heap_size - new_chunk->mem.size;
+
+		addr = heap_uva + chunk_offset;
+	} else {
+		addr = new_chunk->mem.dma_addr;
+	}
+
+	/*
+	 * Phase 1: Pin once per hwctx before sending any firmware messages.
+	 * Pin failures can be safely rolled back since no FW state changed.
+	 *
+	 * Caller ensures device is resumed before notification, so all
+	 * hwctxs in the xarray have valid firmware contexts.
+	 */
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		ret = amdxdna_gem_pin(new_chunk);
+		if (ret) {
+			XDNA_ERR(xdna, "Pin chunk for hwctx %d failed, ret %d",
+				 hwctx->fw_ctx_id, ret);
+			goto rollback_pins;
+		}
+		hwctx_count++;
+	}
+
+	/*
+	 * Phase 2: Notify firmware for each hwctx. Retry once on failure.
+	 * Firmware has no REMOVE_HOST_BUFFER, so once any ADD succeeds the
+	 * device address cursor cannot be rolled back. Commit the chunk
+	 * regardless — a failed hwctx is degraded and may need reset.
+	 */
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		ret = aie2_add_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
+					addr, new_chunk->mem.size);
+		if (ret) {
+			XDNA_WARN(xdna, "Add host buf hwctx %d failed, retrying",
+				  hwctx->fw_ctx_id);
+			ret = aie2_add_host_buf(xdna->dev_handle,
+						hwctx->fw_ctx_id,
+						addr, new_chunk->mem.size);
+		}
+		if (ret)
+			XDNA_ERR(xdna, "Add host buf hwctx %d failed after retry, ret %d",
+				 hwctx->fw_ctx_id, ret);
+	}
+
+	/* Drop the setup pin; per-hwctx pins keep it alive */
+	amdxdna_gem_unpin(new_chunk);
+	return 0;
+
+rollback_pins:
+	while (hwctx_count-- > 0)
+		amdxdna_gem_unpin(new_chunk);
+	amdxdna_gem_unpin(new_chunk); /* drop setup pin */
 	return ret;
 }
 
