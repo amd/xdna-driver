@@ -1321,4 +1321,5 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.hmm_invalidate = aie2_hmm_invalidate,
 	.get_array = aie2_get_array,
 	.get_dev_revision = aie2_get_dev_rev,
+	.hwctx_heap_expand = aie2_hwctx_heap_expand,
 };

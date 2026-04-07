@@ -139,6 +139,7 @@ const struct amdxdna_dev_info dev_npu1_info = {
 	.dev_mem_base      = AIE2_DEVM_BASE,
 	.dev_mem_size      = AIE2_DEVM_SIZE,
 	.default_vbnv      = "RyzenAI-npu1",
+	.dev_heap_max_size = AIE2_DEVM_SIZE,
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
 	.dev_priv          = &npu1_dev_priv,
 	.fw_feature_tbl    = npu1_fw_feature_table,
