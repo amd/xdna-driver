@@ -101,9 +101,76 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 #endif
 }
 
+static void aie2_hwctx_release_heap(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_gem_obj *last = hwctx->priv->last_pinned_chunk;
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_gem_obj *chunk;
+
+	if (!last)
+		return;
+
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
+		amdxdna_gem_unpin(chunk);
+		drm_gem_object_put(to_gobj(chunk));
+		if (chunk == last)
+			break;
+	}
+	hwctx->priv->last_pinned_chunk = NULL;
+}
+
+static int aie2_hwctx_map_heap(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	bool need_pin = !hwctx->priv->last_pinned_chunk;
+	struct amdxdna_gem_obj *chunk;
+	u64 offset = 0;
+	u64 addr;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
+		if (need_pin) {
+			ret = amdxdna_gem_pin(chunk);
+			if (ret)
+				goto release;
+			drm_gem_object_get(to_gobj(chunk));
+			hwctx->priv->last_pinned_chunk = chunk;
+		}
+
+		addr = amdxdna_obj_dma_addr(chunk);
+		if (!offset)
+			ret = aie2_map_host_buf(xdna->dev_handle,
+						hwctx->fw_ctx_id,
+						addr, chunk->mem.size);
+		else
+			ret = aie2_add_host_buf(xdna->dev_handle,
+						hwctx->fw_ctx_id,
+						addr, chunk->mem.size);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Notify FW hwctx %d chunk offset 0x%llx failed, ret %d",
+				 hwctx->fw_ctx_id, offset, ret);
+			goto release;
+		}
+
+		if (!need_pin && chunk == hwctx->priv->last_pinned_chunk)
+			need_pin = true;
+
+		offset += chunk->mem.size;
+	}
+
+	return 0;
+
+release:
+	aie2_hwctx_release_heap(hwctx);
+	return ret;
+}
+
 static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_gem_obj *heap = hwctx->priv->heap;
 	int ret;
 
 	ret = aie2_create_context(xdna->dev_handle, hwctx);
@@ -112,9 +179,7 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
-	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(heap),
-				heap->mem.size);
+	ret = aie2_hwctx_map_heap(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buf failed, ret %d", ret);
 		goto out;
@@ -690,7 +755,6 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 #endif
 	struct drm_gpu_scheduler *sched;
 	struct amdxdna_hwctx_priv *priv;
-	struct amdxdna_gem_obj *heap;
 	int i, ret;
 
 	priv = kzalloc_obj(*hwctx->priv);
@@ -698,24 +762,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		return -ENOMEM;
 	hwctx->priv = priv;
 
-	mutex_lock(&client->mm_lock);
-	heap = client->dev_heap;
-	if (!heap) {
-		XDNA_ERR(xdna, "The client dev heap object not exist");
-		mutex_unlock(&client->mm_lock);
-		ret = -ENOENT;
-		goto free_priv;
-	}
-	drm_gem_object_get(to_gobj(heap));
-	mutex_unlock(&client->mm_lock);
-	priv->heap = heap;
 	sema_init(&priv->job_sem, HWCTX_MAX_CMDS);
-
-	ret = amdxdna_gem_pin(heap);
-	if (ret) {
-		XDNA_ERR(xdna, "Dev heap pin failed, ret %d", ret);
-		goto put_heap;
-	}
 
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
 		struct amdxdna_gem_obj *abo;
@@ -728,6 +775,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 		abo = amdxdna_drm_create_dev_bo(&xdna->ddev, &args, client->filp);
 		if (IS_ERR(abo)) {
+			XDNA_ERR(xdna, "Create dev bo failed, ret %ld", PTR_ERR(abo));
 			ret = PTR_ERR(abo);
 			goto free_cmd_bufs;
 		}
@@ -789,9 +837,7 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto release_resource;
 	}
 
-	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(heap),
-				heap->mem.size);
+	ret = aie2_hwctx_map_heap(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
 		goto release_dpm;
@@ -814,6 +860,7 @@ release_dpm:
 	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 release_resource:
 	aie2_release_resource(hwctx);
+	aie2_hwctx_release_heap(hwctx);
 suspend_put:
 	amdxdna_pm_suspend_put(xdna);
 free_col_list:
@@ -828,10 +875,7 @@ free_cmd_bufs:
 			continue;
 		drm_gem_object_put(to_gobj(priv->cmd_buf[i]));
 	}
-	amdxdna_gem_unpin(heap);
-put_heap:
-	drm_gem_object_put(to_gobj(heap));
-free_priv:
+
 	kfree(priv);
 	return ret;
 }
@@ -850,6 +894,8 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	drm_sched_stop(&hwctx->priv->sched, NULL);
 	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 	aie2_release_resource(hwctx);
+
+	aie2_hwctx_release_heap(hwctx);
 #ifdef HAVE_6_13_drm_sched_start_errno
 	drm_sched_start(&hwctx->priv->sched, 0);
 #elif defined(HAVE_6_10_drm_sched_start_full_recovery)
@@ -872,8 +918,6 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	for (idx = 0; idx < ARRAY_SIZE(hwctx->priv->cmd_buf); idx++)
 		drm_gem_object_put(to_gobj(hwctx->priv->cmd_buf[idx]));
-	amdxdna_gem_unpin(hwctx->priv->heap);
-	drm_gem_object_put(to_gobj(hwctx->priv->heap));
 
 	mutex_destroy(&hwctx->priv->io_lock);
 	kfree(hwctx->col_list);
@@ -1223,6 +1267,45 @@ up_sem:
 	up(&hwctx->priv->job_sem);
 	job->job_done = true;
 	return ret;
+}
+
+int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_gem_obj *new_chunk;
+	u64 addr;
+	int ret;
+
+	new_chunk = list_last_entry(&client->dev_heap_chunks,
+				    struct amdxdna_gem_obj,
+				    heap_chunk_node);
+
+	if (hwctx->priv->last_pinned_chunk !=
+	    list_prev_entry(new_chunk, heap_chunk_node))
+		return -EIO;
+
+	ret = amdxdna_gem_pin(new_chunk);
+	if (ret) {
+		XDNA_ERR(xdna, "Pin chunk for hwctx %s failed, ret %d",
+			 hwctx->name, ret);
+		return ret;
+	}
+	drm_gem_object_get(to_gobj(new_chunk));
+
+	addr = amdxdna_obj_dma_addr(new_chunk);
+	ret = aie2_add_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
+				addr, new_chunk->mem.size);
+	if (ret) {
+		XDNA_ERR(xdna, "Add host buf for hwctx %s failed, ret %d",
+			 hwctx->name, ret);
+		amdxdna_gem_unpin(new_chunk);
+		drm_gem_object_put(to_gobj(new_chunk));
+		return ret;
+	}
+
+	hwctx->priv->last_pinned_chunk = new_chunk;
+	return 0;
 }
 
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
