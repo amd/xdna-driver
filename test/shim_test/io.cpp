@@ -7,6 +7,7 @@
 #include "xrt/detail/xrt_error_code.h"
 
 #include <climits>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <string>
@@ -113,6 +114,48 @@ read_binary_file(const std::string& filename)
     read_data_from_bin(filename, 0, size, reinterpret_cast<int*>(bin_buf.data()));
   return { size, bin_buf };
 }
+
+} // namespace
+
+/*
+ * Build a DPU instruction sequence containing OP_WRITE32 to EVENT_GENERATE
+ * (triggering an async error) followed by OP_READ32_POLL on shim_event_status0
+ * with an impossible condition to stall until the firmware catches the error.
+ * Package it as an ELF via aiebu_assembler with blob_instr_dpu type.
+ *
+ * DPU opcodes (bits [31:24] of word 0):
+ *   OP_WRITE32     = 0x02  (3 words: opcode, addr, value)
+ *   OP_READ32_POLL = 0x0F  (4 words: opcode, addr, expected, mask)
+ */
+xrt::elf
+create_async_error_txn_elf()
+{
+  constexpr uint32_t OP_WRITE32     = 0x02;
+  constexpr uint32_t OP_READ32_POLL = 0x0F;
+
+  std::vector<uint32_t> dpu_instr = {
+    (OP_WRITE32 << 24),       // OP_WRITE32
+    0x00034008,                // EVENT_GENERATE register
+    0x00000040,                // event_id 64 -> AIE_BUS error
+
+    (OP_READ32_POLL << 24),   // OP_READ32_POLL
+    0x00034200,                // shim_event_status0 (readable)
+    0xFFFFFFFF,                // expected value (impossible condition)
+    0xFFFFFFFF,                // mask
+  };
+
+  std::vector<char> dpu_buf(dpu_instr.size() * sizeof(uint32_t));
+  std::memcpy(dpu_buf.data(), dpu_instr.data(), dpu_buf.size());
+
+  aiebu::aiebu_assembler asp(
+    aiebu::aiebu_assembler::buffer_type::blob_instr_dpu, dpu_buf);
+  auto elf_buf = asp.get_elf();
+  std::istringstream elf_stream;
+  elf_stream.rdbuf()->pubsetbuf(elf_buf.data(), elf_buf.size());
+  return xrt::elf{elf_stream};
+}
+
+namespace {
 
 const xrt::elf
 txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
@@ -1241,39 +1284,46 @@ async_error_io_test_bo_set::
 async_error_io_test_bo_set(device* dev)
   : m_last_err_timestamp(0), io_test_bo_set_base(dev, "", nullptr)
 {
+  m_elf = create_async_error_txn_elf();
+
+  try {
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id("");
+  } catch (const std::exception&) {
+    m_kernel_index = elf_int::no_ctrl_code_id;
+  }
+
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
     auto type = static_cast<io_test_bo_type>(i);
-    size_t size;
 
     switch(type) {
     case IO_TEST_BO_CMD:
       alloc_cmd_bo(ibo, m_dev);
       break;
-    case IO_TEST_BO_INSTRUCTION: {
-      auto size = 3 * sizeof(uint32_t);
-      alloc_ctrl_bo(ibo, m_dev, size);
-
-      auto instruction_p = ibo.tbo->map();
-      // Error Event ID: 64
-      // Expect "Row: 0, Col: 1, module 2, event ID 64, category 4" in dmesg
-      uint32_t event_id = 0x00000040;
-      instruction_p[0] = 0x02000000;
-      instruction_p[1] = 0x00034008;
-      instruction_p[2] = event_id;
-
-      uint64_t err_num = m_shim_event_err_num_map.at(event_id);
-      uint64_t err_drv = XRT_ERROR_DRIVER_AIE;
-      uint64_t err_severity = XRT_ERROR_SEVERITY_CRITICAL;
-      uint64_t err_module = XRT_ERROR_MODULE_AIE_PL;
-      uint64_t err_class = XRT_ERROR_CLASS_AIE;
-      m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
+    case IO_TEST_BO_INSTRUCTION:
+    {
+      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      auto mod = xrt::module{m_elf};
+      auto ibuf = reinterpret_cast<uint8_t *>(ibo.tbo->map());
+      auto sz = ibo.tbo->size();
+      std::memset(ibuf, 0, sz);
+      xrt_core::module_int::patch(mod, ibuf, sz, nullptr,
+        elf_patcher::buf_type::ctrltext, m_kernel_index);
+      ibo.tbo->get()->sync(buffer_handle::direction::host2device, sz, 0);
       break;
     }
     default:
       break;
     }
   }
+
+  // Event ID 64 triggers AIE_BUS error
+  uint64_t err_num = m_shim_event_err_num_map.at(0x40);
+  uint64_t err_drv = XRT_ERROR_DRIVER_AIE;
+  uint64_t err_severity = XRT_ERROR_SEVERITY_CRITICAL;
+  uint64_t err_module = XRT_ERROR_MODULE_AIE_PL;
+  uint64_t err_class = XRT_ERROR_CLASS_AIE;
+  m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
 }
 
 void

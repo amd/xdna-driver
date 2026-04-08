@@ -267,4 +267,11 @@ std::unique_ptr<io_test_bo_set_base> create_bo_set_for_device(device* dev, bool 
                                                                const char* tag = nullptr,
                                                                const flow_type* flow = nullptr);
 
+/*
+ * Build an ELF from an in-memory transaction binary that writes event_id 64
+ * to EVENT_GENERATE and then mask-polls shim_event_status0 with an impossible
+ * condition, triggering an async AIE_BUS error and forcing a TDR timeout.
+ */
+xrt::elf create_async_error_txn_elf();
+
 #endif // _SHIMTEST_IO_H_

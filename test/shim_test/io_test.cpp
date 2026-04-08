@@ -74,14 +74,13 @@ alloc_and_init_bo_set(device* dev, const char *tag, const flow_type* flow = null
     if (info.flow != LEGACY)
       throw std::runtime_error("ELF flow can't support bad run");
 
-    auto instruction_p = bos[IO_TEST_BO_INSTRUCTION].tbo->map();
+    auto elf = create_async_error_txn_elf();
+    auto mod = xrt::module{elf};
+    auto ibuf = reinterpret_cast<uint8_t *>(bos[IO_TEST_BO_INSTRUCTION].tbo->map());
     auto sz = bos[IO_TEST_BO_INSTRUCTION].tbo->size();
-    std::memset(instruction_p, 0, sz);
-    // Error Event ID: 64
-    // Expect "Row: 0, Col: 1, module 2, event ID 64, category 4" in dmesg
-    instruction_p[0] = 0x02000000;
-    instruction_p[1] = 0x00034008;
-    instruction_p[2] = 0x00000040;
+    std::memset(ibuf, 0, sz);
+    xrt_core::module_int::patch(mod, ibuf, sz, nullptr,
+      elf_patcher::buf_type::ctrltext, elf_int::no_ctrl_code_id);
   }
 
   if (io_test_parameters.debug) {

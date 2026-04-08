@@ -12,6 +12,7 @@
 #include "hwctx.h"
 #include "speed.h"
 #include "bo.h"
+#include "io.h"
 
 #include "core/common/query_requests.h"
 #include "core/common/sysinfo.h"
@@ -975,6 +976,177 @@ TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device>& sdev, 
   auto hwq2 = hwctx.get()->get_hw_queue();
 }
 
+/*
+ * Stress test for dev heap expansion and dev BO access across chunks.
+ *
+ * Allocates many CACHEABLE BOs (which become AMDXDNA_BO_DEV on KMQ) to force
+ * the heap to expand across multiple 64MB chunks. Then creates a hardware
+ * context and submits real commands that exercise the firmware's access to
+ * dev BOs allocated from different chunks, including BOs near chunk boundaries.
+ *
+ * arg[0]: number of io_test runs to perform after heap is stressed (default 4)
+ */
+void
+TEST_heap_stress(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  constexpr size_t chunk_size = 64ul * 1024 * 1024; /* 64 MiB */
+  int num_runs = arg.empty() ? 4 : static_cast<int>(arg[0]);
+
+  /*
+   * Phase 1: Fill up the first chunk and force expansion into a second chunk.
+   * Allocate CACHEABLE BOs of varying sizes. The shim handles EAGAIN retries
+   * and calls expand() internally, so this exercises the full expansion path.
+   */
+  std::cout << "Phase 1: Allocating dev BOs to force heap expansion..." << std::endl;
+  std::vector<std::unique_ptr<bo>> dev_bos;
+  size_t total_allocated = 0;
+
+  /* Sizes chosen to stress different scenarios:
+   * - Large BOs to fill chunks quickly
+   * - Small BOs near expected chunk boundaries
+   * - Varying sizes to fragment the drm_mm allocator
+   */
+  const std::vector<size_t> sizes = {
+    8 * 1024 * 1024,     /* 8 MiB */
+    16 * 1024 * 1024,    /* 16 MiB */
+    32 * 1024 * 1024,    /* 32 MiB */
+    4096,                /* 4 KiB - small, near boundary */
+    8 * 1024 * 1024,     /* 8 MiB */
+    32768,               /* 32 KiB - aligned to dev_mem_buf_shift */
+    16 * 1024 * 1024,    /* 16 MiB - should trigger expansion */
+    4096,                /* 4 KiB */
+    8 * 1024 * 1024,     /* 8 MiB */
+    4 * 1024 * 1024,     /* 4 MiB */
+    16 * 1024 * 1024,    /* 16 MiB */
+    4096,                /* 4 KiB */
+    32 * 1024 * 1024,    /* 32 MiB - second chunk */
+    8 * 1024 * 1024,     /* 8 MiB */
+    4096,                /* 4 KiB - small in second chunk */
+    16 * 1024 * 1024,    /* 16 MiB */
+  };
+
+  for (auto sz : sizes) {
+    try {
+      auto b = std::make_unique<bo>(dev, sz, XCL_BO_FLAGS_CACHEABLE);
+      total_allocated += b->size();
+      /* Write a pattern and verify it's accessible via the mapped pointer */
+      auto p = reinterpret_cast<uint8_t *>(b->map());
+      std::memset(p, 0xAB, std::min(sz, (size_t)4096));
+      dev_bos.push_back(std::move(b));
+    } catch (const std::exception& e) {
+      std::cout << "  BO alloc of " << sz << " bytes stopped: " << e.what() << std::endl;
+      break;
+    }
+  }
+
+  size_t num_chunks = (total_allocated + chunk_size - 1) / chunk_size;
+  std::cout << "  Allocated " << dev_bos.size() << " dev BOs, total "
+            << (total_allocated / (1024 * 1024)) << " MiB across ~"
+            << num_chunks << " chunk(s)" << std::endl;
+
+  if (num_chunks < 2)
+    std::cout << "  WARNING: Did not expand to multiple chunks" << std::endl;
+
+  /*
+   * Phase 2: Run real IO tests with the heap expanded. This exercises firmware
+   * access to cmd_buf dev BOs while the heap spans multiple chunks.
+   */
+  std::cout << "Phase 2: Running " << num_runs << " IO test(s) with expanded heap..." << std::endl;
+  for (int i = 0; i < num_runs; i++) {
+    hw_ctx hwctx{dev};
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto boset = create_bo_set_for_device(dev);
+
+    boset->init_cmd(hwctx, false);
+    boset->sync_before_run();
+
+    auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo.get();
+    auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+    hwq->submit_command(cbo->get());
+    hwq->wait_command(cbo->get(), 0);
+
+    if (cmdpkt->state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error("IO test run " + std::to_string(i) +
+                               " failed with state " + std::to_string(cmdpkt->state));
+    boset->sync_after_run();
+    boset->verify_result();
+    std::cout << "  Run " << i << " passed" << std::endl;
+  }
+
+  /*
+   * Phase 3: Free some BOs from the first chunk, allocate new ones that may
+   * land in freed slots, then run IO again. This tests allocator reuse.
+   */
+  std::cout << "Phase 3: Free/realloc pattern test..." << std::endl;
+  size_t freed = 0;
+  for (size_t i = 0; i < dev_bos.size() && freed < 3; i += 2) {
+    dev_bos[i].reset();
+    freed++;
+  }
+
+  /* Allocate new BOs into the freed space */
+  std::vector<std::unique_ptr<bo>> realloc_bos;
+  for (size_t i = 0; i < freed; i++) {
+    try {
+      auto b = std::make_unique<bo>(dev, (size_t)4096, XCL_BO_FLAGS_CACHEABLE);
+      auto p = reinterpret_cast<uint8_t *>(b->map());
+      std::memset(p, 0xCD, 4096);
+      realloc_bos.push_back(std::move(b));
+    } catch (const std::exception& e) {
+      std::cout << "  Realloc stopped: " << e.what() << std::endl;
+      break;
+    }
+  }
+
+  /* Run IO test again after reallocation */
+  {
+    hw_ctx hwctx{dev};
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto boset = create_bo_set_for_device(dev);
+    boset->init_cmd(hwctx, false);
+    boset->sync_before_run();
+
+    auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo.get();
+    auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+    hwq->submit_command(cbo->get());
+    hwq->wait_command(cbo->get(), 0);
+
+    if (cmdpkt->state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error("Post-realloc IO test failed");
+    boset->sync_after_run();
+    boset->verify_result();
+  }
+
+  /*
+   * Phase 4: Cleanup all dev BOs, then run IO one more time to ensure
+   * the heap is still functional after contraction.
+   */
+  std::cout << "Phase 4: Cleanup and final IO test..." << std::endl;
+  dev_bos.clear();
+  realloc_bos.clear();
+
+  {
+    hw_ctx hwctx{dev};
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto boset = create_bo_set_for_device(dev);
+    boset->init_cmd(hwctx, false);
+    boset->sync_before_run();
+
+    auto cbo = boset->get_bos()[IO_TEST_BO_CMD].tbo.get();
+    auto cmdpkt = reinterpret_cast<ert_start_kernel_cmd *>(cbo->map());
+    hwq->submit_command(cbo->get());
+    hwq->wait_command(cbo->get(), 0);
+
+    if (cmdpkt->state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error("Final IO test after cleanup failed");
+    boset->sync_after_run();
+    boset->verify_result();
+  }
+
+  std::cout << "All phases passed" << std::endl;
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1226,6 +1398,8 @@ std::vector<test_case> test_list {
   },
   test_case{ "DPM power modes", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_power_modes, {}
+  test_case{ "heap expansion stress test", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_heap_stress, { 4 }
   },
 };
 
