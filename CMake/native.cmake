@@ -4,6 +4,9 @@
 # For native xdna-driver builds, XRT headers and link library
 # comes from xdna-driver's XRT submodule.
 
+# User can choose to package either legacy driver or upstream driver source
+option(PACKAGE_LEGACY_DRIVER "Package legacy driver source" ON)
+
 # By default, build/build.sh downloads binaries to build/amdxdna_bins/
 # Absolute path, cannot be used in install command as destination.
 set(AMDXDNA_BINS_DIR ${CMAKE_BINARY_DIR}/../amdxdna_bins)
@@ -30,6 +33,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/CMake/pkg.cmake)
 add_subdirectory(src)
 
 if(NOT SKIP_KMOD)
+  add_subdirectory(drivers)
   add_subdirectory(test)
 endif()
 

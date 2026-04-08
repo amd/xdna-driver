@@ -171,9 +171,37 @@
  * v5.13:
  * - Change context switch hysteresis timeout to microseconds
  *
+ * v5.14:
+ * - Deprecate num_cols in aie4_msg_aie4_column_info_req (now derived from aie4_col_bitmap)
+ * - Rename aie4_bitmap to aie4_col_bitmap in aie4_msg_aie4_column_info_req
+ *
+ * v5.15:
+ * - Rename AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_FAILURE to AIE4_ASYNC_EVENT_CTX_ERR_AIE_FAILURE
+ *
+ * v5.16:
+ * - Restore context handle to be 64b
+ *
+ * v5.17:
+ * - rename APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID to APP_HEALTH_CHECK_DRAM_BUFFER_INVALID
+ *
+ * v5.18:
+ * - Add job completion MSI-X configuration message
+ *
+ * v5.19:
+ * - Update telemetry struct to change preemption counters to per-context basis
+ *
+ * v5.20:
+ * - Add CERT version query message
+ *
+ * v5.21:
+ * - Add dpm freq table message
+ * - Add current dpm level messages
+ *
+ * v5.22:
+ * - Add runlist_read_idx to app health report
  */
 #define PROTOCOL_MAJOR  5
-#define PROTOCOL_MINOR  13
+#define PROTOCOL_MINOR  22
 
 /**
  * opcodes between driver and firmware
@@ -203,6 +231,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_SET_EVENT_TRACE_CATEGORIES       = 0x1000c,
 	AIE4_MSG_OP_DRAM_WORK_BUFFER                 = 0x1000d,
 	AIE4_MSG_OP_RELEASE_DRAM_WORK_BUFFER         = 0x1000e,
+	AIE4_MSG_OP_GET_CERT_VERSION                 = 0x1000f,
 
 	/* PF-only Opcodes:  0x20000..0x2FFFF */
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
@@ -226,6 +255,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_AIE_DEBUG_ACCESS                 = 0x3000E,
 	AIE4_MSG_OP_GET_APP_HEALTH_STATUS            = 0x3000F,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
+	AIE4_MSG_OP_CONFIGURE_JOB_CMPL_MSIX          = 0x30011,
 };
 
 /** The status that is returned with each response message. */
@@ -260,7 +290,7 @@ union aie4_msg_pasid {
 	u32 raw;
 	struct {
 		u32 pasid     : 20;
-		u32 revd      : 11;
+		u32 rsvd      : 11;
 		u32 pasid_vld : 1;
 	} f;
 };
@@ -371,8 +401,7 @@ struct aie4_msg_dram_logging_stop_req {
 };
 
 /**
- * AIE4_MSG_OP_DRAM_LOGGING_START and
- * AIE4_MSG_OP_DRAM_LOGGING_STOP response
+ * AIE4_MSG_OP_DRAM_LOGGING_START response
  *
  * @status: enum aie4_msg_status.
  */
@@ -380,6 +409,11 @@ struct aie4_msg_dram_logging_start_resp {
 	enum aie4_msg_status status;
 };
 
+/**
+ * AIE4_MSG_OP_DRAM_LOGGING_STOP response
+ *
+ * @status: enum aie4_msg_status.
+ */
 struct aie4_msg_dram_logging_stop_resp {
 	enum aie4_msg_status status;
 };
@@ -656,8 +690,7 @@ struct aie4_msg_context_config_cert_logging {
 
 /** Handle information */
 struct aie4_msg_context_config_handle {
-	u64 handle     : 16;
-	u64 reserved   : 48;
+	u64 handle;
 };
 
 /**
@@ -684,10 +717,7 @@ struct aie4_msg_configure_hw_context_req {
 		/** Data for AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_DPM property. */
 		struct aie4_msg_context_config_dpm dpm;
 
-		/*
-		 * Data for the AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_
-		 * {LOG, DEBUG, TRACE}_BUFFER properties.
-		 */
+		/** Data for CERT_{LOG, DEBUG, TRACE}_BUFFER properties. */
 		struct aie4_msg_context_config_cert_logging cert_logging;
 
 		/** Data for the AIE4_CONFIGURE_HW_CONTEXT_HANDLE property */
@@ -776,18 +806,20 @@ struct aie4_msg_aie4_version_info_resp {
  * AIE4_MSG_OP_AIE_COLUMN_INFO
  * AIE column info request.
  *
- * @dump_buff_addr: dump buffer address.
- * @dump_buff_size: dump buffer size.
- * @pasid:          The PASID.
- * @num_cols:       number of columns.
- * @aie4_bitmap:    bitmap of aie4.
+ * @dump_buff_addr:     dump buffer address.
+ * @dump_buff_size:     dump buffer size.
+ * @pasid:              The PASID.
+ * @aie4_col_bitmap:    bitmap of aie4 columns.
+ *
+ * Note: unnamed u32 field is deprecated num_cols, kept for ABI compatibility.
+ *       num_cols is now derived from aie4_col_bitmap.
  */
 struct aie4_msg_aie4_column_info_req {
 	u64 dump_buff_addr;
 	u32 dump_buff_size;
 	union aie4_msg_pasid pasid;
-	u32 num_cols;
-	u32 aie4_bitmap;
+	u32 deprecated_num_cols : 32; /* deprecated - do not use */
+	u32 aie4_col_bitmap;
 };
 
 /**
@@ -896,13 +928,13 @@ struct coredump_buffer_list_entry {
  * @reserved:       reserved for future use.
  * @buffer_list_addr: address of the buffer list in DRAM.
  * Driver will allocate a buffer list to avoid allocating one large contiguous buffer
- * The buffer for storing the buffer list should adhere to the same limitations as struct
- * coredump_buffer_list_entry above:
+ * The buffer for storing the buffer list should adhere to the same
+ * limitations as struct coredump_buffer_list_entry above:
  *      1. Buffer size >= 8kB and <= 64MB
  *      2. Buffer size a power of two
  *      3. Buffer aligned to its size
- * The buffer list size should be equal to NEXT_POWER_OF_TWO
- * (num_buffers * sizeof(struct coredump_buffer_list_entry))
+ * The buffer list size should be equal to
+ * NEXT_POWER_OF_TWO(num_buffers * sizeof(struct coredump_buffer_list_entry))
  */
 struct aie4_msg_aie4_coredump_req {
 	u32 context_id;
@@ -1079,64 +1111,75 @@ struct aie4_msg_selftest_resp {
 #define CONFIG_NPUFW_NUM_COLUMNS_API 3
 #define MIN_TELEMETRY_BUFF_SIZE SZ_128K
 
-// Define telemetry_opcodes_t before it's used in aie4_telemetry_t
+/**
+ * MSI-X Reserved Vector Counts
+ *
+ * Defines how many MSI-X vectors are reserved (not available for job completion).
+ * Job completion MSI-X vectors are allocated starting after these reserved vectors.
+ *
+ */
+#define AIE4_MSIX_RESERVED_NON_SRIOV  (1u)  /* Reserved MSI-X in non-SR-IOV mode */
+#define AIE4_MSIX_RESERVED_SRIOV_PF   (1u)  /* Reserved MSI-X for PF in SR-IOV mode */
+#define AIE4_MSIX_RESERVED_SRIOV_VF   (1u)  /* Reserved MSI-X per VF in SR-IOV mode */
+
+/* Define telemetry_opcodes_t before it's used in aie4_telemetry_t */
 struct telemetry_opcodes {
-	// Updated by hypervisor in hyp_handle_command().
+	/* Updated by hypervisor in hyp_handle_command(). */
 	u32 hyp_opcode[TRACE_COUNT_API];
-	// Updated by syscall from supervisor in sup_handle_command().
+	/* Updated by syscall from supervisor in sup_handle_command(). */
 	u32 sup_opcode[MAX_NUM_SUPERVISORS_API][TRACE_COUNT_API];
 
-	// opcode counters (16-bit to minimize SRAM usage, wraps safely at UINT16_MAX)
+	/* opcode counters (16-bit to minimize SRAM usage, wraps safely at UINT16_MAX) */
 	struct {
 		u16 hyp_at;
 		u16 sup_at[MAX_NUM_SUPERVISORS_API];
 #if ((MAX_NUM_SUPERVISORS_API + 1) % 2) != 0
-		u16 reserved; // Padding to make size multiple of 32 bits
+		u16 reserved; /* Padding to make size multiple of 32 bits */
 #endif
 	} counters;
 
 };
 
-// Clock mode info for different domains
+/* Clock mode info for different domains */
 struct clk_deep_slp {
 	u8 ipuaie;
 	u8 ipuhclk;
 	u8 nbif;
 	u8 axi2sdp;
 	u8 mpipu;
-	u8 reserved[3]; // Padding to make size multiple of 32 bits
+	u8 reserved[3]; /* Padding to make size multiple of 32 bits */
 };
 
 struct aie4_telemetry {
-	// Control counter
+	/* Control counter */
 	u8    enabled;
 
-	u8 reserved[3]; // Padding to make size multiple of 32 bits
+	u8 reserved[3]; /* Padding to make size multiple of 32 bits */
 
 	struct clk_deep_slp deep_slp;
 
-	// Interrupts updated from mpfw_comm_isr().
+	/* Interrupts updated from mpfw_comm_isr(). */
 	u64 l1_interrupt;
 
-	// The number of times a thread was started when returning from an
-	// interrupt/exception. called from yield_manager_handle_context_execution_start()
-	// recorded per Supervisor + (1) Hypervisor
+	/* The number of times a thread was started when returning from an */
+	/* interrupt/exception. called from yield_manager_handle_context_execution_start() */
+	/* recorded per Supervisor + (1) Hypervisor */
 	u64 context_starting[MAX_NUM_SUPERVISORS_API + 1];
 
-	// The number of times a thread was scheduled by in schedule_next in HW Scheduler.
-	// recorded per Supervisor + (1) Hypervisor
+	/* The number of times a thread was scheduled by in schedule_next in HW Scheduler. */
+	/* recorded per Supervisor + (1) Hypervisor */
 	u64 scheduler_scheduled[MAX_NUM_SUPERVISORS_API + 1];
 
-	// The number of DMA requests made. Currently only hypervisor can make DMA requests.
+	/* The number of DMA requests made. Currently only hypervisor can make DMA requests. */
 	u64 did_dma;
 
-	// The number of times a partition was acquired by a supervisor context.
+	/* The number of times a partition was acquired by a supervisor context. */
 	u64 resource_acquired[MAX_NUM_SUPERVISORS_API];
 
-	// Telemetry opcodes.
+	/* Telemetry opcodes. */
 	struct telemetry_opcodes opcodes;
 
-	// Preemption counters
+	/* Preemption counters */
 	u64 preemption_frame_boundary_counter[TOTAL_NUM_UC_API];
 	u64 preemption_checkpoint_event_counter[TOTAL_NUM_UC_API];
 };
@@ -1253,11 +1296,11 @@ enum aie4_msg_event_trace_timestamp {
  *     data in the buffer, which is probably the most relevant.
  *   - Discard everything in the buffer by setting tail_offset = head_offset.
  *
- * @event_trace_categories: Specify the traces to be included. EVENT_TRACE_CATEGORY_* bits
- *  that are set will be traced.
+ * @event_trace_categories: Specify the traces to be included.
+ *     EVENT_TRACE_CATEGORY_* bits that are set will be traced.
  * @event_trace_dest: Specify the trace destination (enum aie4_msg_event_trace_destination).
  * @event_trace_timestamp: Specify the timestamp source to use
- *  (enum aie4_msg_event_trace_timestamp).
+ *     (enum aie4_msg_event_trace_timestamp).
  * @dram_buffer_address: Address of the DRAM buffer used as a ring buffer for trace data.
  * @dram_buffer_size: Size of the DRAM buffer. Must be a power of 2 between 128KB and 64MB.
  * @pasid: The PASID needed to access the DRAM buffer.
@@ -1284,15 +1327,15 @@ struct aie4_msg_start_event_trace_resp {
  *          The app_health request was successful
  * @APP_HEALTH_CHECK_INVALID_PARAM:
  *          Either request was not the right size or context id was invalid
- * @APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID:
- *          Indicates buffer size from driver is invalid
+ * @APP_HEALTH_CHECK_DRAM_BUFFER_INVALID:
+ *          Indicates DRAM buffer from driver is invalid
  * @APP_HEALTH_CHECK_NOAVAIL:
  *          TLB failed, or PASID not available
  */
 enum app_health_status {
 	APP_HEALTH_CHECK_SUCCESS = 0,
 	APP_HEALTH_CHECK_INVALID_PARAM,
-	APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID,
+	APP_HEALTH_CHECK_DRAM_BUFFER_INVALID,
 	APP_HEALTH_CHECK_NOAVAIL,
 };
 
@@ -1344,10 +1387,10 @@ struct aie4_msg_app_health_req {
  * AIE4_MSG_OP_GET_APP_HEALTH_STATUS
  * @status: enum aie4_msg_status.
  * @app_health_status: enum app_health_status
- * @min_buffer_size: 0 if success, expected buffer size if app_health_status is
- * APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID
+ * @min_buffer_size: 0 if success, expected buffer size if
+ *     app_health_status is APP_HEALTH_CHECK_DRAM_BUFFER_INVALID
  * In case the report_buff_size in request is too small, Firmware should
- * return error code APP_HEALTH_CHECK_DRAM_BUFFER_SIZE_INVALID and
+ * return error code APP_HEALTH_CHECK_DRAM_BUFFER_INVALID and
  * put the expected minimum buffer size in error_detail[1]
  */
 struct aie4_msg_app_health_resp {
@@ -1364,11 +1407,16 @@ struct aie4_msg_app_health_resp {
 /**
  * AIE4_MSG_OP_GET_APP_HEALTH_STATUS
  * The struct that will be stored in the provided DRAM buffer.
+ *
+ * The union covers the layout difference between FW 0.0.15 (v2.0) and
+ * FW 0.0.20+ (default). v2.0 used full u32 ctx_status and num_uc fields;
+ * newer versions pack them as 16-bit bitfields and add runlist_read_idx.
+ *
  * @major_version: The major version of the health report structure (16 bits).
  * @minor_version: The minor version of the health report structure (16 bits).
  * @context_id: The context ID copied from the request, used to identify the application context.
- * @ctx_status: The enum hw_ctx_status of the requested context as tracked by the hardware
- *  scheduler.
+ * @ctx_status: The enum hw_ctx_status of the requested context
+ *     as tracked by the hardware scheduler.
  * @num_uc: The number of uC included in the health report.
  * @uc_info: Array containing health information for each uC.
  */
@@ -1376,8 +1424,20 @@ struct aie4_msg_app_health_report {
 	u32 major_version : 16;
 	u32 minor_version : 16;
 	u32 context_id;
-	u32 ctx_status;
-	u32 num_uc;
+	union {
+		/*
+		 * TODO: Remove legacy struct when upstreaming; only 2.0+ format will be supported
+		 */
+		struct {
+			u32 ctx_status;
+			u32 num_uc;
+		} legacy;
+		struct {
+			u32 ctx_status : 16;
+			u32 num_uc     : 16;
+			u32 runlist_read_idx;
+		};
+	};
 	struct uc_health_info uc_info[AIE4_MPNPUFW_MAX_UC_COUNT];
 };
 
@@ -1421,7 +1481,7 @@ struct aie4_msg_async_event_config_resp {
 enum aie4_msg_async_ctx_error_type {
 	AIE4_ASYNC_EVENT_CTX_ERR_HWSCH_FAILURE,
 	AIE4_ASYNC_EVENT_CTX_ERR_STOP_FAILURE,
-	AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_FAILURE,
+	AIE4_ASYNC_EVENT_CTX_ERR_AIE_FAILURE,
 	AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_TIMEOUT,
 	AIE4_ASYNC_EVENT_CTX_ERR_NEW_PROCESS_FAILURE,
 	AIE4_ASYNC_EVENT_CTX_ERR_UC_CRITICAL_ERROR,
@@ -1519,10 +1579,10 @@ struct aie4_msg_runtime_config_l1mmu_prefetch_range {
  *   - 1: Override the DPM levels for IPUHCLK and IPUAIECLK.
  *   - 0: Do not override; use default DPM behavior.
  *
- * @forced_ipuhclk_dpm_level: DPM level to force for the IPUHCLK clock domain if override is
- *  enabled.
- * @forced_ipuaieclk_dpm_level:  DPM level to force for the IPUAIECLK clock domain if override
- *  is enabled.
+ * @forced_ipuhclk_dpm_level: DPM level to force for the IPUHCLK
+ *     clock domain if override is enabled.
+ * @forced_ipuaieclk_dpm_level: DPM level to force for the IPUAIECLK
+ *     clock domain if override is enabled.
  *
  * @note The struct is padded out to be a multiple of 4 bytes.
  */
@@ -1718,7 +1778,7 @@ enum aie4_msg_runtime_config_type {
  */
 struct aie4_msg_set_runtime_cfg_req {
 	u32 type;
-	u8 data[4]; // Additional data here.
+	u8 data[4]; /* Additional data here. */
 };
 
 /**
@@ -1752,7 +1812,7 @@ struct aie4_msg_get_runtime_cfg_req {
  */
 struct aie4_msg_get_runtime_cfg_resp {
 	enum aie4_msg_status status;
-	// Additional data here.
+	/* Additional data here. */
 };
 
 #define AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE    (4 * 1024 * 1024)  /* 4 MB */
@@ -1806,6 +1866,60 @@ struct aie4_msg_release_dram_work_buffer_resp {
 	enum aie4_msg_status status;
 };
 
+/**
+ * AIE4_MSG_OP_CONFIGURE_JOB_CMPL_MSIX
+ * Optional command to configure the number of MSI-Xs available for job completion interrupts.
+ * Must only be sent when there are no created hardware contexts. Firmware will default to the
+ * maximum values accordingly.
+ *
+ * @job_completion_msix_count: Number of MSI-Xs for job completion.
+ */
+struct aie4_msg_configure_job_cmpl_msix_req {
+	u32 job_completion_msix_count;
+};
+
+/**
+ * AIE4_MSG_OP_CONFIGURE_JOB_CMPL_MSIX
+ * Job completion MSI-X configuration response.
+ *
+ * @status: enum aie4_msg_status
+ */
+struct aie4_msg_configure_job_cmpl_msix_resp {
+	enum aie4_msg_status status;
+};
+
+/**
+ * AIE4_MSG_OP_GET_CERT_VERSION
+ * Get CERT version command
+ *
+ * @resvd: Reserved for alignment.
+ */
+struct aie4_msg_get_cert_version_req {
+	u32 resvd;
+};
+
+/**
+ * AIE4_MSG_OP_GET_CERT_VERSION
+ * Get CERT version response
+ *
+ * @status: enum aie4_msg_status
+ * @major_version: Major version of the CERT
+ * @minor_version: Minor version of the CERT
+ * @git_hash: Git hash of the CERT
+ * @date: Date of the CERT
+ * @reserved: Reserved for alignment.
+ * @note The total size of the response is 64 bytes.
+ *     git_hash and date both end with a null character.
+ */
+struct aie4_msg_get_cert_version_resp {
+	enum aie4_msg_status status;
+	u8 major_version;
+	u8 minor_version;
+	char    git_hash[41];
+	char    date[11];
+	u16 reserved;
+};
+
 #pragma pack(pop)
 
-#endif /* _AIE4_AIE4_MSG_PRIV_H_ */
+#endif /* _AIE4_MSG_PRIV_H_ */

@@ -19,4 +19,6 @@ struct aie2_tdr {
 	u32			progress;
 };
 
+extern uint timeout_in_sec;
+
 #endif /* _AIE2_TDR_H_ */

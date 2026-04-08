@@ -429,29 +429,18 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 	return hwctx;
 }
 
-int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
+			  u64 command_index)
 {
 	struct amdxdna_mgmtctx  *mgmtctx =
 		&xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
-	u64 write_index = 0;
 	int ret;
 
-	XDNA_DBG(xdna, "Schedule cmd: hwctx=%p, start_col=%u, active_ctx=%p",
-		 hwctx, hwctx->start_col, mgmtctx->active_ctx);
+	XDNA_DBG(xdna, "Schedule cmd: hwctx=%p, start_col=%u, active_ctx=%p, cmd_idx=%llu",
+		 hwctx, hwctx->start_col, mgmtctx->active_ctx, command_index);
 
 	mutex_lock(&mgmtctx->ctx_lock);
-	//enqueue ctx and command in ctx_command_fifo
-	if (get_ctx_write_index(hwctx, &write_index)) {
-		XDNA_ERR(xdna, "Failed to get write index");
-		mutex_unlock(&mgmtctx->ctx_lock);
-		return -EINVAL;
-	}
-
-	XDNA_DBG(xdna, "Schedule cmd: write_index=%llu, is_idle=%d, is_idle_ctx=%d",
-		 write_index, mgmtctx->is_partition_idle, mgmtctx->is_idle_due_to_context);
-
-	/* Only enqueue if write_index is valid */
-	ret = ve2_fifo_enqueue(mgmtctx, hwctx, write_index);
+	ret = ve2_fifo_enqueue(mgmtctx, hwctx, command_index);
 	if (ret) {
 		mutex_unlock(&mgmtctx->ctx_lock);
 		return ret;
@@ -825,7 +814,7 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 		hsa_queue_sync_completion_for_read(hq, i);
 		u64 completion = hq->hq_complete.hqc_mem[i];
 
-		if (completion != 0 && completion != ERT_CMD_STATE_INVALID)
+		if (completion != 0)
 			XDNA_WARN(xdna, "  slot[%2d]: state=%llu\n", i, completion);
 	}
 
@@ -838,7 +827,7 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 
 		/* Show all non-invalid packets OR packets with unexpected state */
 		if (pkt->xrt_header.common_header.type != HOST_QUEUE_PACKET_TYPE_INVALID ||
-		    (completion != 0 && completion != ERT_CMD_STATE_INVALID)) {
+		    completion != 0) {
 			XDNA_WARN(xdna,
 				  "  slot[%2d]: type=%u opcode=%u count=%u chain=%u dist=%u indir=%u\n",
 				  i,

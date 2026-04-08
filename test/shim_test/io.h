@@ -70,6 +70,10 @@ public:
   virtual void
   verify_result();
 
+  /** Called after verify_result() while hw_ctx is still valid; override to unconfig BOs. */
+  virtual void
+  teardown(hw_ctx& hwctx);
+
   static const char *
   bo_type2name(int type);
 
@@ -161,8 +165,7 @@ private:
 class elf_io_negative_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_negative_test_bo_set(device *dev, const std::string& tag,
-    const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx);
+  elf_io_negative_test_bo_set(device *dev, const std::string& tag = "");
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -211,8 +214,7 @@ private:
 class elf_io_gemm_test_bo_set : public io_test_bo_set_base
 {
 public:
-  elf_io_gemm_test_bo_set(device *dev, const std::string& tag,
-    const std::string& elf_name);
+  elf_io_gemm_test_bo_set(device *dev, const std::string& tag = "");
 
   void
   init_cmd(hw_ctx& hwctx, bool dump) override;
@@ -220,8 +222,15 @@ public:
   void
   verify_result() override;
 
+  void
+  teardown(hw_ctx& hwctx) override;
+
 private:
+  static constexpr size_t m_npu3_num_cores = 12;
+  static constexpr size_t m_gemm_uc_debug_size = m_npu3_num_cores * 2 * sizeof(uint32_t);
+
   std::unique_ptr<xrt_core::buffer_handle> m_dbo;
+  bool m_is_full_elf = false;
 };
 
 class elf_io_aie_debug_test_bo_set : public io_test_bo_set_base
@@ -239,5 +248,11 @@ public:
 private:
   bool m_is_full_elf = false;
 };
+
+/** Create a BO set appropriate for the device (legacy ddr_range.txt vs ELF).
+ *  AIE4 (NPU3) uses elf_full_io_test_bo_set, others use io_test_bo_set.
+ */
+std::unique_ptr<io_test_bo_set_base> create_bo_set_for_device(device* dev, bool use_ubuf = false,
+                                                               const char* tag = nullptr);
 
 #endif // _SHIMTEST_IO_H_
