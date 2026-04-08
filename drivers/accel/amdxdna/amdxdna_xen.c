@@ -59,7 +59,7 @@ void *amdxdna_xen_bufs_alloc(struct amdxdna_xen_bufs_mgr *mgr, u32 size,
 	if (!vaddr)
 		return NULL;
 
-	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
+	buf = kzalloc_obj(*buf);
 	if (!buf) {
 		xen_free_buf(mgr->dev, vaddr, dma_addr, size);
 		return NULL;
