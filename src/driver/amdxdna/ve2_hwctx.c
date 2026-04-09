@@ -245,7 +245,7 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 
 	XDNA_DBG(xdna, "commit_slot slot=%llu write_index=%llu capacity=%u",
 		 (u64)slot, (u64)header->write_index, capacity);
-	XDNA_INFO(xdna,
+	XDNA_DBG(xdna,
 		  "HSA queue write_index updated: slot=%llu write_index=%llu",
 		  (u64)slot, (u64)header->write_index);
 }
@@ -931,7 +931,7 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 	int ret;
 	u32 op;
 
-	XDNA_INFO(xdna, "cmd_submit: enter hwctx=%p start_col=%u pid=%d",
+	XDNA_DBG(xdna, "cmd_submit: enter hwctx=%p start_col=%u pid=%d",
 		  hwctx, hwctx->priv->start_col, hwctx->client->pid);
 	op = amdxdna_cmd_get_op(cmd_bo);
 	XDNA_DBG(xdna, "cmd_submit op=%u hwctx=%p", op, hwctx);
@@ -971,7 +971,7 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 	/* command_index = read_index when this job completes (last_slot + 1) */
 	ve2_mgmt_schedule_cmd(xdna, hwctx, *seq + 1);
 
-	XDNA_INFO(xdna, "cmd_submit: exit hwctx=%p seq=%llu start_col=%u pid=%d",
+	XDNA_DBG(xdna, "cmd_submit: exit hwctx=%p seq=%llu start_col=%u pid=%d",
 		  hwctx, *seq, hwctx->priv->start_col, hwctx->client->pid);
 
 	return 0;
@@ -1011,7 +1011,7 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 	if (*read_index > seq) {
 		struct amdxdna_dev *xdna = hwctx->client->xdna;
 
-		XDNA_INFO(xdna,
+		XDNA_DBG(xdna,
 			  "HSA queue read_index past seq: seq=%llu read_index=%llu hwctx=%p pid=%d",
 			  (u64)seq, (u64)*read_index, hwctx, hwctx->client->pid);
 
@@ -1225,7 +1225,7 @@ static void ve2_handle_timeout(struct amdxdna_dev *xdna,
 		u32 rl_read_idx = 0;
 		int ret;
 
-		XDNA_INFO(xdna, "start_slot %u, num_col %u, cmd_count %u",
+		XDNA_DBG(xdna, "start_slot %u, num_col %u, cmd_count %u",
 			  start_slot, priv_ctx->num_col, cmd_count);
 
 		ret = ve2_partition_read_privileged_mem(priv_ctx->aie_dev, 0,
@@ -1281,7 +1281,7 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	unsigned long wait_jifs;
 	int ret = 0;
 
-	XDNA_INFO(xdna, "cmd_wait: enter seq=%llu hwctx=%p start_col=%u pid=%d timeout_ms=%u",
+	XDNA_DBG(xdna, "cmd_wait: enter seq=%llu hwctx=%p start_col=%u pid=%d timeout_ms=%u",
 		  (u64)seq, hwctx, hwctx->priv->start_col, hwctx->client->pid, timeout);
 	/*
 	 * NOTE: this is simplified hwctx which has no col_entry list for different ctx
@@ -1344,7 +1344,7 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 
 out:
 	mutex_unlock(&priv_ctx->hwctx_hsa_queue.hq_lock);
-	XDNA_INFO(xdna, "cmd_wait: exit seq=%llu hwctx=%p ret=%d pid=%d",
+	XDNA_DBG(xdna, "cmd_wait: exit seq=%llu hwctx=%p ret=%d pid=%d",
 		  (u64)seq, hwctx, ret, hwctx->client->pid);
 	XDNA_DBG(xdna, "wait_cmd ret:%d", ret);
 	/* 0 is success, others are timeout */
@@ -1387,7 +1387,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	hwctx->priv = priv;
 
-	XDNA_INFO(xdna, "hwctx init: enter hwctx=%p pid=%d", hwctx, client->pid);
+	XDNA_DBG(xdna, "hwctx init: enter hwctx=%p pid=%d", hwctx, client->pid);
 	init_waitqueue_head(&priv->waitq);
 
 	ret = ve2_xrs_request(xdna, hwctx);
@@ -1420,7 +1420,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	mutex_init(&priv->privctx_lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
 
-	XDNA_INFO(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
+	XDNA_DBG(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
 		  hwctx, priv->start_col, hwctx->client->pid);
 
 	return 0;
@@ -1444,7 +1444,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	struct amdxdna_sched_job *job;
 	int idx;
 
-	XDNA_INFO(xdna, "hwctx fini: enter hwctx=%p start_col=%u pid=%d",
+	XDNA_DBG(xdna, "hwctx fini: enter hwctx=%p start_col=%u pid=%d",
 		  hwctx, nhwctx->start_col, hwctx->client->pid);
 
 	if (enable_polling)
@@ -1498,7 +1498,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	kfree(hwctx->priv->hwctx_config);
 	mutex_destroy(&hwctx->priv->privctx_lock);
 
-	XDNA_INFO(xdna,
+	XDNA_DBG(xdna,
 		  "hwctx fini: hwctx=%p submitted=%llu completed=%llu pid=%d",
 		  hwctx, hwctx->submitted, hwctx->completed, hwctx->client->pid);
 

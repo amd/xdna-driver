@@ -394,7 +394,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
 		return ret;
 	}
-	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
+	XDNA_INFO(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 
 	/* Allocate arrays based on actual column count from device */
 	xdna_hdl->fw_slots = devm_kcalloc(dev, xdna_hdl->aie_dev_info.cols,
@@ -425,15 +425,15 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		ret = ve2_cma_mem_region_init(xdna, aie_np);
 		if (ret < 0) {
 			/* CMA region init is optional; fall back to default CMA */
-			XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+			XDNA_INFO(xdna, "Failed to initialize the cma memories\n");
 		}
 
 		/* Parse memory topology to enable automatic CMA region selection */
 		ret = ve2_parse_mem_topology(xdna, aie_np);
 		if (ret == -ENOENT)
-			XDNA_DBG(xdna, "Memory topology not present; using default CMA\n");
+			XDNA_INFO(xdna, "Memory topology not present; using default CMA\n");
 		else if (ret < 0)
-			XDNA_DBG(xdna, "Failed to parse memory topology (err=%d)\n", ret);
+			XDNA_INFO(xdna, "Failed to parse memory topology (err=%d)\n", ret);
 	}
 
 	return 0;
