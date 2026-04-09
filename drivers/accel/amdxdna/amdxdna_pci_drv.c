@@ -234,6 +234,7 @@ static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
 	size_t heap_usage, external_usage, internal_usage;
+	char *drv_name = filp->minor->dev->driver->name;
 
 	mutex_lock(&client->mm_lock);
 
@@ -247,9 +248,9 @@ static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 	 * Note for driver specific BO memory usage stat.
 	 * Total memory alloc = amdxdna-internal-alloc + amdxdna-external-alloc
 	 */
-	drm_printf(p, "amdxdna-heap-alloc:\t%lu KiB\n", heap_usage / 1024);
-	drm_printf(p, "amdxdna-internal-alloc:\t%lu KiB\n", internal_usage / 1024);
-	drm_printf(p, "amdxdna-external-alloc:\t%lu KiB\n", external_usage / 1024);
+	drm_fdinfo_print_size(p, drv_name, "heap", "alloc", heap_usage);
+	drm_fdinfo_print_size(p, drv_name, "internal", "alloc", internal_usage);
+	drm_fdinfo_print_size(p, drv_name, "external", "alloc", external_usage);
 	/*
 	 * Note for DRM standard BO memory stat.
 	 * drm-total-memory counts both DEV BO and HEAP BO
