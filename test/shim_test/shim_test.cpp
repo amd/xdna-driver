@@ -551,20 +551,36 @@ TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, 
   auto dev = sdev.get();
   auto boflags = XRT_BO_FLAGS_HOST_ONLY;
   auto ext_boflags = XRT_BO_USE_CTRLPKT << 4;
+  auto dev_boflags = XCL_BO_FLAGS_CACHEABLE;
   size_t size = 0x4000;
-  auto int_bo = std::make_unique<bo>(dev, size, boflags, ext_boflags);
-  auto ext_bo = std::make_unique<bo>(dev, size, boflags, 0);
+  auto ext_bo = std::make_unique<bo>(dev, size * 5, boflags, 0);
+  auto int_bo = std::make_unique<bo>(dev, size * 3, boflags, ext_boflags);
+  auto dev_bo = std::make_unique<bo>(dev, size, dev_boflags, 0);
   auto [total, internal, heap] = get_bo_usage(dev, getpid());
-  uint64_t expected_total = int_bo->size() + ext_bo->size();
-  uint64_t expected_internal = int_bo->size();
-  uint64_t expected_heap = 0;
+
+  uint64_t expected_total, expected_internal, expected_heap;
+
   if (dev_filter_is_aie2(id, dev)) {
-    // Add default heap size
+    expected_total = int_bo->size() + ext_bo->size();
+    expected_internal = int_bo->size();
+    // Add default heap size and don't count dev bo
     expected_total += 64 * 1024 * 1024;
     expected_internal += 64 * 1024 * 1024;
+    // Dev bo goes to heap usage
+    expected_heap = size;
+  } else {
+    expected_total = int_bo->size() + ext_bo->size() + dev_bo->size();
+    expected_internal = int_bo->size() + dev_bo->size();
+    // No heap at all
+    expected_heap = 0;
   }
-  if (total != expected_total || internal != expected_internal || heap != expected_heap)
+  if (total != expected_total || internal != expected_internal || heap != expected_heap) {
+    std::cout << "expected total: " << expected_total << ", real: " << total << "\n"
+              << "expected internal: " << expected_internal << ", real: " << internal << "\n"
+              << "expected heap: " << expected_heap << ", real: " << heap << "\n"
+              << std::endl;
     throw std::runtime_error("BO usage mis-match");
+  }
 }
 
 class mmapped_file {
