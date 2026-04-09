@@ -32,6 +32,7 @@ amdxdna-y := \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_ubuf.o \
+	amdxdna_cbuf.o \
 	amdxdna_xen.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
