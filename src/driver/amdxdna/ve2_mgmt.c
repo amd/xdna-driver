@@ -27,15 +27,17 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,
 				 struct amdxdna_ctx_priv *nhwctx,
 				 u32 col, struct handshake *cert_hs)
 {
+	struct ve2_config_hwctx *hwctx_cfg = &nhwctx->hwctx_config[col];
+	u64 host_time_ns = ktime_get_ns();
+	u64 hsa_addr = 0xFFFFFFFFFFFFFFFF;
 	u32 start_col = nhwctx->start_col;
 	u32 num_col = nhwctx->num_col;
-	u64 hsa_addr = 0xFFFFFFFFFFFFFFFF;
-	struct ve2_config_hwctx *hwctx_cfg = &nhwctx->hwctx_config[col];
+	u32 lead_col_addr;
 
 	if (col == 0)
 		hsa_addr = nhwctx->hwctx_hsa_queue.hsa_queue_mem.dma_addr;
 
-	u32 lead_col_addr = VE2_ADDR(start_col, 0, 0);
+	lead_col_addr = VE2_ADDR(start_col, 0, 0);
 
 	cert_hs->partition_base_address = lead_col_addr;
 	cert_hs->aie_info.partition_size = num_col;
@@ -54,6 +56,10 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,
 
 	/* Opcode Timeout */
 	cert_hs->opcode_timeout_config = hwctx_cfg->opcode_timeout_config;
+
+	/* Store current host time */
+	cert_hs->host_time_low  = (u32)(host_time_ns & 0xFFFFFFFF);
+	cert_hs->host_time_high = (u32)(host_time_ns >> 32);
 
 	cert_hs->ctx_switch_req = 0;
 	cert_hs->hsa_location = 0;
