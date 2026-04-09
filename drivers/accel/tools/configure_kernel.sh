@@ -370,7 +370,7 @@ EOF
 
 # Test drm_sched_start() with bool full_recovery parameter (pre-6.12):
 # void drm_sched_start(struct drm_gpu_scheduler *sched, bool full_recovery);
-try_compile HAVE_drm_6_10_sched_start_full_recovery << 'EOF'
+try_compile HAVE_6_10_drm_sched_start_full_recovery << 'EOF'
 #include <drm/gpu_scheduler.h>
 typedef void (*expected_t)(struct drm_gpu_scheduler *, _Bool);
 _Static_assert(__builtin_types_compatible_p(typeof(&drm_sched_start), expected_t),
