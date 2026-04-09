@@ -408,6 +408,23 @@ int main(void)
 }
 EOF
 
+#Test drm_fdinfo_print_size exists
+try_compile HAVE_6_14_drm_fdinfo_print_size << 'EOF'
+#include <drm/drm_file.h>
+int main(void)
+{
+	struct drm_printer *p = NULL;
+	drm_fdinfo_print_size(p, NULL, NULL, NULL, 0);
+}
+EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_6_14_drm_fdinfo_print_size
+#define drm_fdinfo_print_size(p, prefix, stat, region, sz)		\
+	drm_printf(p, "%s-%s-%s:\t%llu KiB\n", prefix, stat, region,	\
+	(u64)(sz) / 1024)
+#endif
+EOF
+
 # ---- Header trailer ----------------------------------------------------
 
 cat >> "$OUT" <<EOF
