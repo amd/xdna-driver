@@ -72,6 +72,26 @@ int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	return 0;
 }
 
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
+int npu4_update_counters(struct amdxdna_dev_hdl *ndev)
+{
+	struct amd_pmf_npu_metrics npu_metrics;
+	int ret;
+
+	ret = AIE2_GET_PMF_NPU_METRICS(&npu_metrics);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "PMF get npu data failed, ret %d", ret);
+		return ret;
+	}
+
+	ndev->npuclk_freq = npu_metrics.mpnpuclk_freq;
+	ndev->hclk_freq = npu_metrics.npuclk_freq;
+	ndev->curr_tops = 4096 * ndev->total_col * ndev->hclk_freq / 1000000;
+
+	return 0;
+}
+#endif
+
 int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev)
 {
 	return ndev->npuclk_freq;

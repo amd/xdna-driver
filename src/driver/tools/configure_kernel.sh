@@ -294,6 +294,20 @@ int main(void)
 }
 EOF
 
+# Test amd_pmf_get_npu_data exists
+try_compile HAVE_7_0_amd_pmf_get_npu_data << 'EOF'
+#include <linux/module.h>
+#include <linux/amd-pmf-io.h>
+int main(void)
+{
+	MODULE_IMPORT_NS("AMD_PMF");
+
+	struct amd_pmf_npu_metrics info;
+	int ret = amd_pmf_get_npu_data(&info);
+	return 0;
+}
+EOF
+
 # ---- Header trailer ----------------------------------------------------
 
 cat >> "$OUT" <<EOF

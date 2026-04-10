@@ -332,3 +332,11 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
 MODULE_VERSION("0.1");
 MODULE_DESCRIPTION("amdxdna driver");
+
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
+#ifdef HAVE_6_13_MODULE_IMPORT_NS
+MODULE_IMPORT_NS("AMD_PMF");
+#else
+MODULE_IMPORT_NS(AMD_PMF);
+#endif
+#endif
