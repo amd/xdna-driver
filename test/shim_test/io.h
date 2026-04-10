@@ -252,6 +252,14 @@ private:
   bool m_is_full_elf = false;
 };
 
+class dpm_test_bo_set : public elf_io_test_bo_set
+{
+public:
+  using elf_io_test_bo_set::elf_io_test_bo_set;
+
+  void run_with_ctx(hw_ctx& hwctx);
+};
+
 /** Create a BO set appropriate for the device and tag.
  *  LEGACY -> io_test_bo_set; PARTIAL_ELF -> elf_io_test_bo_set; FULL_ELF -> elf_full_io_test_bo_set.
  */

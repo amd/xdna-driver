@@ -12,10 +12,19 @@
 #include <fstream>
 #include <string>
 #include <regex>
+#include <chrono>
+#include <thread>
 #include <unistd.h>
+#include <sys/ioctl.h>
+
+// FIXME
+#include "../../src/include/uapi/drm_local/amdxdna_accel.h"
+// end of FIXME
 
 using namespace xrt_core;
 using arg_type = const std::vector<uint64_t>;
+
+extern int open_accel_fd(device* dev);
 
 namespace {
 
@@ -366,6 +375,102 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   }
 }
 
+struct dpm_clk_entry {
+  uint32_t npuclk;
+  uint32_t hclk;
+};
+
+const dpm_clk_entry npu4_dpm_table[] = {
+  {396, 792},
+  {600, 1056},
+  {792, 1152},
+  {975, 1267},
+  {975, 1267},
+  {1056, 1408},
+  {1152, 1584},
+  {1267, 1800},
+};
+
+constexpr int DPM_NUM_LEVELS = 8;
+constexpr uint32_t HCLK_MARGIN_PCT = 2;
+constexpr uint32_t DPM_COL_OPC = 4096;
+constexpr uint32_t DPM_NOP_NUM_COL = 4;
+constexpr uint32_t DPM_MAX_OPC = DPM_COL_OPC * DPM_NOP_NUM_COL;
+
+constexpr uint32_t SYS_EFF_FACTOR = 2;
+
+uint32_t
+query_hclk(device* dev)
+{
+  int fd = open_accel_fd(dev);
+  amdxdna_drm_query_clock_metadata clock = {};
+  amdxdna_drm_get_info arg = {
+    .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
+    .buffer_size = sizeof(clock),
+    .buffer = reinterpret_cast<uintptr_t>(&clock),
+  };
+
+  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+  close(fd);
+  if (ret == -1)
+    throw std::runtime_error("ioctl(QUERY_CLOCK_METADATA) failed");
+
+  return clock.h_clock.freq_mhz;
+}
+
+void
+set_power_mode(device* dev, int mode)
+{
+  int fd = open_accel_fd(dev);
+  amdxdna_drm_set_power_mode pm = {};
+  pm.power_mode = static_cast<uint8_t>(mode);
+
+  amdxdna_drm_set_state arg = {
+    .param = DRM_AMDXDNA_SET_POWER_MODE,
+    .buffer_size = sizeof(pm),
+    .buffer = reinterpret_cast<uintptr_t>(&pm),
+  };
+
+  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
+  close(fd);
+  if (ret == -1)
+    throw std::runtime_error("ioctl(SET_POWER_MODE) failed for mode " + std::to_string(mode));
+}
+
+bool
+hclk_within_margin(uint32_t actual, uint32_t expected)
+{
+  uint32_t margin = expected * HCLK_MARGIN_PCT / 100;
+  if (margin == 0)
+    margin = 1;
+  return actual >= expected - margin && actual <= expected + margin;
+}
+
+void
+verify_hclk(device* dev, uint32_t expected, const std::string& ctx)
+{
+  constexpr int timeout_ms = 20000;
+  constexpr int poll_interval_ms = 10;
+  uint32_t actual = 0;
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  do {
+    actual = query_hclk(dev);
+    if (hclk_within_margin(actual, expected))
+      break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+  } while (std::chrono::steady_clock::now() < deadline);
+
+  if (!hclk_within_margin(actual, expected)) {
+    throw std::runtime_error(ctx + ": expected H-clock ~" + std::to_string(expected) +
+                             " MHz (±" + std::to_string(HCLK_MARGIN_PCT) + "%), got " +
+                             std::to_string(actual) + " MHz (after " +
+                             std::to_string(timeout_ms) + "ms polling)");
+  }
+  std::cout << "  " << ctx << ": H-clock " << actual << " MHz (expected ~"
+            << expected << ") [OK]" << std::endl;
+}
+
 }
 
 void
@@ -657,7 +762,7 @@ TEST_io_runlist_bad_cmd(device::id_type id, std::shared_ptr<device>& sdev, arg_t
   elf_io_negative_test_bo_set timeout_bo_set{dev, "bad_timeout"};
   std::unique_ptr<elf_io_negative_test_bo_set> error_bo_set;
   // An error one
-  if (!is_timeout) 
+  if (!is_timeout)
     error_bo_set = std::make_unique<elf_io_negative_test_bo_set>(dev, "bad_op");
 
   // Creating HW context for cmd submission. We use the good xclbin here to
@@ -978,5 +1083,146 @@ TEST_io_aie_reg(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
         throw std::runtime_error("Core (" + std::to_string(col) + "," + std::to_string(row)
           + ") expected status 0x1 after write");
     }
+  }
+}
+
+void
+TEST_dpm_noop_no_qos(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  uint32_t max_hclk = npu4_dpm_table[DPM_NUM_LEVELS - 1].hclk;
+
+  set_power_mode(dev, POWER_MODE_DEFAULT);
+
+  {
+    hw_ctx hwctx{dev, "nop"};
+    dpm_test_bo_set nop{dev, "nop"};
+    nop.run_with_ctx(hwctx);
+    verify_hclk(dev, max_hclk, "noop context (no fps/latency QoS)");
+  }
+}
+
+void
+TEST_dpm_power_modes(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  uint32_t max_hclk = npu4_dpm_table[DPM_NUM_LEVELS - 1].hclk;
+  uint32_t low_hclk = npu4_dpm_table[0].hclk;
+  uint32_t med_hclk = npu4_dpm_table[DPM_NUM_LEVELS / 2].hclk;
+
+  set_power_mode(dev, POWER_MODE_TURBO);
+  verify_hclk(dev, max_hclk, "POWER_MODE_TURBO");
+
+  set_power_mode(dev, POWER_MODE_LOW);
+  verify_hclk(dev, low_hclk, "POWER_MODE_LOW");
+
+  set_power_mode(dev, POWER_MODE_MEDIUM);
+  verify_hclk(dev, med_hclk, "POWER_MODE_MEDIUM");
+
+  set_power_mode(dev, POWER_MODE_HIGH);
+  verify_hclk(dev, max_hclk, "POWER_MODE_HIGH");
+
+  set_power_mode(dev, POWER_MODE_LOW);
+  verify_hclk(dev, low_hclk, "POWER_MODE_LOW");
+
+  set_power_mode(dev, POWER_MODE_DEFAULT);
+}
+
+void
+TEST_dpm_refcount_scaling(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  const auto* tbl = npu4_dpm_table;
+  uint32_t factor = SYS_EFF_FACTOR;
+
+  std::cout << "  Platform info: col_opc=" << DPM_COL_OPC
+            << " num_col=" << DPM_NOP_NUM_COL
+            << " max_opc=" << DPM_MAX_OPC
+            << " sys_eff_factor=" << factor << std::endl;
+
+  /*
+   * Compute per-level GOPs thresholds to target each DPM level.
+   * The driver computes: req_gops = gops * fps * sys_eff_factor
+   * and picks the lowest level where req_gops <= max_opc * hclk / 1000.
+   * We divide capacities by the factor so the gops param we pass
+   * results in the correct req_gops after the driver's multiplication.
+   */
+  struct level_qos {
+    uint32_t gops;
+    uint32_t fps;
+    uint32_t expected_hclk;
+  };
+
+  std::vector<level_qos> levels;
+  for (int i = 0; i < DPM_NUM_LEVELS; i++) {
+    uint32_t raw_capacity = DPM_MAX_OPC * tbl[i].hclk / 1000;
+    uint32_t capacity = raw_capacity / factor;
+    uint32_t prev_raw = (i > 0) ? DPM_MAX_OPC * tbl[i - 1].hclk / 1000 : 0;
+    uint32_t prev_capacity = prev_raw / factor;
+
+    uint32_t target = (prev_capacity > 0) ? prev_capacity + 1 : 1;
+    if (target > capacity)
+      target = capacity;
+
+    levels.push_back({target, 1, tbl[i].hclk});
+
+    std::cout << "  Level " << i
+              << ": hclk=" << tbl[i].hclk
+              << " raw_cap=" << raw_capacity
+              << " eff_cap=" << capacity
+              << " target_gops=" << target << std::endl;
+  }
+
+  set_power_mode(dev, POWER_MODE_DEFAULT);
+
+  std::vector<std::unique_ptr<hw_ctx>> ctxs;
+
+  std::cout << "  Phase 1: Creating " << DPM_NUM_LEVELS << " contexts (DPM scaling up)" << std::endl;
+  for (int i = 0; i < DPM_NUM_LEVELS; i++) {
+    xrt::hw_context::qos_type qos{
+      {"gops", levels[i].gops},
+      {"fps",  levels[i].fps},
+      {"priority", 0x180},
+    };
+
+    uint32_t drv_req_gops = levels[i].fps * levels[i].gops * factor;
+    std::cout << "  Creating context " << i
+              << ": qos{gops=" << levels[i].gops
+              << ", fps=" << levels[i].fps
+              << ", priority=0x180}"
+              << " drv_req_gops=" << drv_req_gops << std::endl;
+
+    ctxs.push_back(std::make_unique<hw_ctx>(dev, qos, "nop"));
+    dpm_test_bo_set nop{dev, "nop"};
+    nop.run_with_ctx(*ctxs.back());
+    std::cout << "  Context " << i << " created successfully" << std::endl;
+
+    uint32_t expected = levels[i].expected_hclk;
+    for (int j = 0; j < i; j++) {
+      if (levels[j].expected_hclk > expected)
+        expected = levels[j].expected_hclk;
+    }
+
+    verify_hclk(dev, expected, "after context " + std::to_string(i) +
+                " (target level " + std::to_string(i) + ")");
+  }
+
+  std::cout << "  Phase 2: Destroying " << DPM_NUM_LEVELS << " contexts (DPM scaling down)" << std::endl;
+  for (int i = DPM_NUM_LEVELS - 1; i >= 0; i--) {
+    ctxs.pop_back();
+    std::cout << "  Destroyed context " << i << std::endl;
+
+    if (i == 0) {
+      verify_hclk(dev, tbl[0].hclk, "after destroying last context (all refs gone)");
+      break;
+    }
+
+    uint32_t expected = 0;
+    for (int j = 0; j < i; j++) {
+      if (levels[j].expected_hclk > expected)
+        expected = levels[j].expected_hclk;
+    }
+
+    verify_hclk(dev, expected, "after destroying context " + std::to_string(i));
   }
 }
