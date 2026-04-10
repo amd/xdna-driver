@@ -17,7 +17,13 @@ class hw_ctx {
 public:
   hw_ctx(device* dev, const char *tag = nullptr, const flow_type* flow = nullptr)
   {
-    hw_ctx_init(dev, tag, flow);
+    hw_ctx_init(dev, tag, flow, { {"gops", 100}, {"priority", 0x180} });
+  }
+
+  hw_ctx(device* dev, const xrt::hw_context::qos_type& qos,
+         const char *tag = nullptr, const flow_type* flow = nullptr)
+  {
+    hw_ctx_init(dev, tag, flow, qos);
   }
 
   hwctx_handle *
@@ -30,7 +36,8 @@ private:
   std::unique_ptr<hwctx_handle> m_handle;
 
   void
-  hw_ctx_init(device* dev, const char *tag, const flow_type* flow)
+  hw_ctx_init(device* dev, const char *tag, const flow_type* flow,
+              const xrt::hw_context::qos_type& qos)
   {
     xrt::xclbin xclbin;
     xrt::elf elf;
@@ -49,7 +56,6 @@ private:
         "specify xclbin path or run \"build.sh -xclbin_only\" to download them");
     }
 
-    xrt::hw_context::qos_type qos{ {"gops", 100}, {"priority", 0x180} };
     xrt::hw_context::access_mode mode = xrt::hw_context::access_mode::shared;
     if (is_full_elf) {
       m_handle = dev->create_hw_context(elf.get_partition_size(), qos, mode);

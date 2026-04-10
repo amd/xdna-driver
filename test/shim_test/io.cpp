@@ -1181,6 +1181,25 @@ run_no_check_result()
   run(wfences, sfences, true);
 }
 
+void
+dpm_test_bo_set::
+run_with_ctx(hw_ctx& hwctx)
+{
+  auto hwq = hwctx.get()->get_hw_queue();
+
+  init_cmd(hwctx, false);
+  sync_before_run();
+
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  reset_cmd_header();
+
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+
+  sync_after_run();
+  verify_result();
+}
+
 std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
 io_test_bo_set_base::
 get_bos()
