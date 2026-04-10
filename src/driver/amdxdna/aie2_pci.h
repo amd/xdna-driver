@@ -62,6 +62,41 @@
 	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
 })
 
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
+#include <linux/amd-pmf-io.h>
+#define AIE2_GET_PMF_NPU_METRICS(metrics) amd_pmf_get_npu_data(metrics)
+#define AIE2_GET_PMF_NPU_DATA(field, val)				\
+({									\
+	struct amd_pmf_npu_metrics _npu_metrics;			\
+	int _ret;							\
+									\
+	_ret = amd_pmf_get_npu_data(&_npu_metrics);			\
+	val = _ret ? U32_MAX : _npu_metrics.field;			\
+	(_ret);								\
+})
+#else
+#define AIE2_GET_PMF_NPU_METRICS(metrics)				\
+({									\
+	typeof(metrics) _m = metrics;					\
+	memset(_m, 0xff, sizeof(*_m));					\
+	(-EOPNOTSUPP);							\
+})
+
+#define SENSOR_DEFAULT_npu_power	U32_MAX
+#define AIE2_GET_PMF_NPU_DATA(field, val)				\
+({									\
+	val = SENSOR_DEFAULT_##field;					\
+	(-EOPNOTSUPP);							\
+})
+#endif
+
+#define aie2_update_counters(ndev)					\
+({									\
+	typeof(ndev) _ndev = ndev;					\
+	if (_ndev->priv->hw_ops.update_counters)			\
+		_ndev->priv->hw_ops.update_counters(_ndev);		\
+})
+
 #define SMU_DPM_INVALID		0xffffffff
 #define SMU_DPM_MAX(ndev) \
 	((ndev)->smu.num_dpm_levels - 1)
@@ -359,6 +394,11 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
 int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
+int npu4_update_counters(struct amdxdna_dev_hdl *ndev);
+#else
+#define npu4_update_counters NULL
+#endif
 int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);

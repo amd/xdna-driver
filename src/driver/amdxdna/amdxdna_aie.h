@@ -65,6 +65,7 @@ enum aie_power_state {
 struct amdxdna_dev_hdl;
 struct aie_hw_ops {
 	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+	int (*update_counters)(struct amdxdna_dev_hdl *ndev);
 	int (*get_tops)(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 };
 
