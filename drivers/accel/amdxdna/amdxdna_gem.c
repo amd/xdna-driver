@@ -1239,11 +1239,18 @@ static int amdxdna_gem_dev_bo_clflush(struct amdxdna_gem_obj *abo,
 	struct amdxdna_client *client = abo->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	u64 dev_base = xdna->dev_info->dev_mem_base;
-	u64 flush_start = abo->mm_node.start - dev_base + offset;
-	u64 flush_end = flush_start + len;
+	u64 flush_start, flush_end;
 	struct amdxdna_gem_obj *chunk;
 	u64 chunk_start = 0;
 	int ret = 0;
+
+	if (!len)
+		return 0;
+	if (offset > abo->mm_node.size || len > abo->mm_node.size - offset)
+		return -EINVAL;
+
+	flush_start = abo->mm_node.start - dev_base + offset;
+	flush_end = flush_start + len;
 
 	mutex_lock(&client->mm_lock);
 	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
