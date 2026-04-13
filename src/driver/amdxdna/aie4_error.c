@@ -246,69 +246,90 @@ static void aie4_async_errors_cache(struct amdxdna_dev_hdl *ndev, void *err_info
 	mutex_unlock(&ndev->async_errs_cache.lock);
 }
 
-/*
- * When a critical context error occurs, find the matching context and mark it
- * as DISCONNECTED. This wakes up both the job_worker thread and any waiting
- * user-space threads, allowing them to return with an error instead of hanging.
- */
-static void aie4_ctx_disconnect(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
+static inline struct amdxdna_ctx *hw_ctx_id2ctx(struct amdxdna_dev_hdl *ndev,
+						u32 hw_ctx_id, int *srcu_idx)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_client *client;
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
-	int wakeup_count = 0;
+	int idx;
 
-	mutex_lock(&xdna->dev_lock);
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 	list_for_each_entry(client, &xdna->client_list, node) {
-		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
+		idx = srcu_read_lock(&client->ctx_srcu);
+		amdxdna_for_each_ctx(client, ctx_id, ctx) {
 			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
-				ctx->priv->status = CTX_STATE_DISCONNECTED;
-				ctx->priv->col_entry->needs_reset = true;
-				wake_up_all(&ctx->priv->col_entry->col_event);
-				wakeup_count++;
-				XDNA_DBG(xdna, "Context ctx_id=%lu marked DISCONNECTED", ctx_id);
+				/* For releasing srcu lock by caller. */
+				*srcu_idx = idx;
+				return ctx;
 			}
 		}
+		srcu_read_unlock(&client->ctx_srcu, idx);
 	}
-	mutex_unlock(&xdna->dev_lock);
-
-	/* Delayed/stale fw notification after ctx destroy can reference unknown hw_ctx_id */
-	if (wakeup_count == 0)
-		XDNA_DBG(xdna, "Could not find context for hw_ctx_id=%u", hw_ctx_id);
-	else
-		XDNA_DBG(xdna, "Woke up %d contexts after hw_ctx_id=%u",
-			 wakeup_count, hw_ctx_id);
+	XDNA_WARN(xdna, "Could not find context for hw_ctx_id=%u", hw_ctx_id);
+	return NULL;
 }
 
-static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id,
-					 struct aie4_msg_app_health_report *health)
+/*
+ * When a critical context error occurs, find the matching context and reset it
+ * This wakes up both the job_worker thread and any waiting user-space threads,
+ * allowing them to return with an error instead of hanging.
+ */
+static void aie4_ctx_reset(struct amdxdna_dev_hdl *ndev, u32 hw_ctx_id)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct amdxdna_ctx *ctx;
+	int ret, idx;
+
+	mutex_lock(&xdna->dev_lock);
+
+	ctx = hw_ctx_id2ctx(ndev, hw_ctx_id, &idx);
+	if (ctx) {
+		/* Reset context by destroy then recreate it. */
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_destroy_context(ndev, ctx, 0);
+		if (!ret) {
+			mutex_unlock(&ndev->aie4_lock);
+			aie4_ctx_cleanup_pending_jobs(ctx);
+			mutex_lock(&ndev->aie4_lock);
+			ret = aie4_create_context(ndev, ctx);
+		}
+		mutex_unlock(&ndev->aie4_lock);
+
+		if (ret) {
+			XDNA_ERR(xdna, "Reset hw_ctx_id=%u ctx failed, ret %d", hw_ctx_id, ret);
+		} else {
+			/* New job can be submitted since we're connected again. */
+			wake_up_all(&ctx->priv->job_list_wq);
+		}
+		srcu_read_unlock(&ctx->client->ctx_srcu, idx);
+	}
+
+	mutex_unlock(&xdna->dev_lock);
+}
+
+static void aie4_ctx_cache_health_report(struct amdxdna_dev_hdl *ndev,
+					 struct aie4_async_ctx_error *ctx_err)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct amdxdna_ctx_priv *priv;
-	struct amdxdna_client *client;
 	struct amdxdna_ctx *ctx;
-	unsigned long ctx_id;
+	int idx;
 
 	mutex_lock(&xdna->dev_lock);
-	list_for_each_entry(client, &xdna->client_list, node) {
-		xa_for_each(&client->ctx_xa, ctx_id, ctx) {
-			if (ctx->priv && ctx->priv->hw_ctx_id == hw_ctx_id) {
-				priv = ctx->priv;
 
-				if (!priv->cached_health_report) {
-					priv->cached_health_report =
-						kmalloc(sizeof(struct aie4_msg_app_health_report),
-							GFP_KERNEL);
-				}
-				if (priv->cached_health_report) {
-					memcpy(priv->cached_health_report, health,
-					       sizeof(struct aie4_msg_app_health_report));
-					priv->cached_health_valid = true;
-				}
-			}
-		}
+	ctx = hw_ctx_id2ctx(ndev, ctx_err->ctx_id, &idx);
+	if (ctx) {
+		priv = ctx->priv;
+		memcpy(&priv->cached_ctx_error, ctx_err, sizeof(*ctx_err));
+		/* Ensure cached_ctx_error is visible before valid flag; pairs with
+		 * smp_load_acquire in aie4_fill_health_data.
+		 */
+		smp_store_release(&priv->cached_ctx_error_valid, true);
+		srcu_read_unlock(&ctx->client->ctx_srcu, idx);
 	}
+
 	mutex_unlock(&xdna->dev_lock);
 }
 
@@ -332,7 +353,7 @@ static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 		err_num = AMDXDNA_ERROR_NUM_KDS_CU;
 		break;
 	case AIE4_ASYNC_EVENT_CTX_ERR_NEW_PROCESS_FAILURE:
-	case AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_FAILURE:
+	case AIE4_ASYNC_EVENT_CTX_ERR_AIE_FAILURE:
 	case AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_TIMEOUT:
 	case AIE4_ASYNC_EVENT_CTX_ERR_UC_COMPLETION_TIMEOUT:
 	case AIE4_ASYNC_EVENT_CTX_ERR_UC_CRITICAL_ERROR:
@@ -347,12 +368,14 @@ static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 
 	/* Log additional health report information if available */
 	health = &ctx_err->app_health_report;
-	XDNA_ERR(xdna, "Health report: version %u.%u, ctx_status=%u, num_uc=%u",
+	XDNA_ERR(xdna, "Health: ver %u.%u ctx_status=%u num_uc=%u runlist_read_idx=%u",
 		 health->major_version, health->minor_version,
-		 health->ctx_status, health->num_uc);
+		 aie4_health_get_ctx_status(health), aie4_health_get_num_uc(health),
+		 aie4_health_runlist_read_idx(health));
 
 	/* Log each UC's health information for debugging */
-	for (i = 0; i < min(health->num_uc, AIE4_MPNPUFW_MAX_UC_COUNT); i++) {
+	for (i = 0;
+	     i < min_t(u32, aie4_health_get_num_uc(health), AIE4_MPNPUFW_MAX_UC_COUNT); i++) {
 		uc = &health->uc_info[i];
 		XDNA_ERR(xdna, "  UC[%u]: idx=%u fw_state=%u page=%u offset=0x%x",
 			 i, uc->uc_idx, uc->fw_state, uc->page_idx, uc->offset);
@@ -386,12 +409,11 @@ static void aie4_async_ctx_error_cache(struct amdxdna_dev_hdl *ndev,
 	mutex_lock(&ndev->async_errs_cache.lock);
 	record->ts_us = current_time_us;
 	record->err_code = err_code;
-	record->ex_err_code = ((u64)health->ctx_status << 32) | ctx_err->ctx_id;
+	record->ex_err_code = ((u64)aie4_health_get_ctx_status(health) << 32) | ctx_err->ctx_id;
 	mutex_unlock(&ndev->async_errs_cache.lock);
 
-	aie4_ctx_cache_health_report(ndev, ctx_err->ctx_id, health);
-	/* Disconnect the errored context to unblock any waiting threads */
-	aie4_ctx_disconnect(ndev, ctx_err->ctx_id);
+	aie4_ctx_cache_health_report(ndev, ctx_err);
+	aie4_ctx_reset(ndev, ctx_err->ctx_id);
 }
 
 static u32 aie4_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u32 num_err)
@@ -490,7 +512,7 @@ static void aie4_error_worker(struct work_struct *err_work)
 
 	max_err = (ASYNC_BUF_SIZE - sizeof(*info)) / sizeof(struct aie_error);
 	if (unlikely(info->err_cnt > max_err)) {
-		WARN_ONCE(1, "Error count too large %d\n", info->err_cnt);
+		XDNA_WARN_ONCE(xdna, "Error count too large %d", info->err_cnt);
 		return;
 	}
 	err_col = aie4_error_backtrack(e->ndev, info->payload, info->err_cnt);

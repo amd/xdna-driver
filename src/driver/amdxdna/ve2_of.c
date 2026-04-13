@@ -21,15 +21,11 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	char *buf;
 	int ret;
 
-	XDNA_DBG(xdna, "Loading firmware: %s", xdna_hdl->priv->fw_path);
-
 	ret = request_firmware(&fw, xdna_hdl->priv->fw_path, xdna->ddev.dev);
 	if (ret) {
 		XDNA_ERR(xdna, "request fw %s failed %d", xdna_hdl->priv->fw_path, ret);
 		return -ENODEV;
 	}
-
-	XDNA_DBG(xdna, "Firmware loaded: size=%zu bytes", fw->size);
 
 	buf = kmalloc(fw->size, GFP_KERNEL);
 	if (!buf) {
@@ -54,11 +50,15 @@ static int ve2_load_fw(struct amdxdna_dev_hdl *xdna_hdl)
 	args.handshake = NULL;
 	args.init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
 	& ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+	XDNA_DBG(xdna, "fw_load: ve2_partition_initialize (broadcast path) partition_id=0x%x",
+		 request.partition_id);
 	ret = ve2_partition_initialize(xaie_dev, &args);
 	if (ret) {
+		XDNA_DBG(xdna, "fw_load: ve2_partition_initialize failed ret=%d", ret);
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release;
 	}
+	XDNA_DBG(xdna, "fw_load: ve2_partition_initialize ok, loading cert broadcast");
 
 	ret = aie_load_cert_broadcast(xaie_dev, buf);
 	if (ret) {
@@ -169,6 +169,21 @@ cleanup:
 	return ret;
 }
 
+static struct device_node *ve2_find_mem_topology_node(struct device_node *aie_np)
+{
+	struct device_node *node;
+
+	if (!aie_np || !aie_np->parent)
+		return NULL;
+
+	for_each_child_of_node(aie_np->parent, node) {
+		if (of_device_is_compatible(node, "xlnx,aie-mem-topology"))
+			return node;
+	}
+
+	return NULL;
+}
+
 /**
  * ve2_parse_mem_topology - Parse AIE memory topology from device tree
  * @xdna: Pointer to the device structure
@@ -197,12 +212,9 @@ static int ve2_parse_mem_topology(struct amdxdna_dev *xdna,
 	int phandle_idx;
 	int ret;
 
-	topo_np = NULL;
-	if (aie_np && aie_np->parent)
-		topo_np = of_find_compatible_node(aie_np->parent, NULL,
-						  "xlnx,aie-mem-topology");
+	topo_np = ve2_find_mem_topology_node(aie_np);
 	if (!topo_np) {
-		XDNA_DBG(xdna, "No aie_mem_topology node found, using default CMA");
+		XDNA_INFO(xdna, "No aie_mem_topology node found, using default CMA");
 		xdna_hdl->mem_topology.num_regions = 0;
 		return -ENOENT;
 	}
@@ -331,8 +343,6 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	int ret;
 	u32 col;
 
-	XDNA_DBG(xdna, "Initializing VE2 device");
-
 	xdna_hdl = devm_kzalloc(dev, sizeof(*xdna_hdl), GFP_KERNEL);
 	if (!xdna_hdl)
 		return -ENOMEM;
@@ -384,7 +394,7 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "aie load %s failed with err %d", xdna_hdl->priv->fw_path, ret);
 		return ret;
 	}
-	XDNA_DBG(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
+	XDNA_INFO(xdna, "aie fw load %s completed", xdna_hdl->priv->fw_path);
 
 	/* Allocate arrays based on actual column count from device */
 	xdna_hdl->fw_slots = devm_kcalloc(dev, xdna_hdl->aie_dev_info.cols,
@@ -415,31 +425,26 @@ static int ve2_init(struct amdxdna_dev *xdna)
 		ret = ve2_cma_mem_region_init(xdna, aie_np);
 		if (ret < 0) {
 			/* CMA region init is optional; fall back to default CMA */
-			XDNA_DBG(xdna, "Failed to initialize the cma memories\n");
+			XDNA_INFO(xdna, "Failed to initialize the cma memories\n");
 		}
 
 		/* Parse memory topology to enable automatic CMA region selection */
 		ret = ve2_parse_mem_topology(xdna, aie_np);
 		if (ret == -ENOENT)
-			XDNA_DBG(xdna, "Memory topology not present; using default CMA\n");
+			XDNA_INFO(xdna, "Memory topology not present; using default CMA\n");
 		else if (ret < 0)
-			XDNA_DBG(xdna, "Failed to parse memory topology (err=%d)\n", ret);
+			XDNA_INFO(xdna, "Failed to parse memory topology (err=%d)\n", ret);
 	}
-
-	XDNA_DBG(xdna, "VE2 device initialized: cols=%u, rows=%u, hwctx_limit=%u",
-		 xdna_hdl->aie_dev_info.cols, xdna_hdl->aie_dev_info.rows,
-		 xdna_hdl->hwctx_limit);
 
 	return 0;
 }
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
+	/* All resources are managed by devm_/drmm_ */
 	XDNA_DBG(xdna, "VE2 device cleanup: releasing resources");
 
 	ve2_cma_mem_region_remove(xdna);
-
-	XDNA_DBG(xdna, "VE2 device cleanup complete");
 }
 
 const struct amdxdna_dev_ops ve2_ops = {

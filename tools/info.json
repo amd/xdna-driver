@@ -1,7 +1,7 @@
 {
 	"copyright": "Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
-		"version": "202610.2.23.125",
+		"version": "202610.2.23.194",
 		"os_rel": ["22.04", "24.04"]
 	},
 	"firmwares": [
@@ -15,52 +15,50 @@
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/npu.sbin.0.0.15.112",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/npu.sbin.1.1.0.206",
 			"pci_device_id": "17f1",
 			"pci_revision_id": "10",
-			"version": "0.0.15.112",
+			"version": "1.1.0.206",
 			"fw_name": "npu.dev.sbin"
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/cert.sbin.20260217",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/cert.sbin.1.0.0.28",
 			"pci_device_id": "17f1",
 			"pci_revision_id": "10",
-			"version": "20260217",
-			"git_hash": "6782225",
+			"version": "1.0.0.28",
 			"fw_name": "cert.dev.sbin"
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/npu.sbin.0.0.15.112",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/npu.sbin.1.1.0.206",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "10",
-			"version": "0.0.15.112",
+			"version": "1.1.0.206",
 			"fw_name": "npu.dev.sbin"
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/cert.sbin.20260217",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/cert.sbin.1.0.0.28",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "10",
-			"version": "20260217",
-			"git_hash": "6782225",
+			"version": "1.0.0.28",
 			"fw_name": "cert.dev.sbin"
 		},
 		{
 			"device": "npu4",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/npu.sbin.255.0.11.69",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_10/1.7_npu.sbin.1.1.2.64",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "10",
-			"version": "255.0.11.69",
+			"version": "1.1.2.64",
 			"fw_name": "npu.dev.sbin"
 		},
 		{
 			"device": "npu5",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/npu.sbin.255.0.11.71",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f0_11/1.7_npu.sbin.1.1.2.65",
 			"pci_device_id": "17f0",
 			"pci_revision_id": "11",
-			"version": "255.0.11.71",
+			"version": "1.1.2.65",
 			"fw_name": "npu.dev.sbin"
 		}
 	],
@@ -70,17 +68,17 @@
 	"vtd_archives": [
 		{
 			"device": "strx",
-			"url": "https://github.com/Xilinx/VTD/raw/c79b5d21568a4ffa5b0612a8279b352fc4e1109a/archive/strx/xrt_smi_strx.a",
+			"url": "https://github.com/Xilinx/VTD/raw/0b65e6c61ca5505bac0b0b7d6c500806e53b0ad1/archive/strx/xrt_smi_strx.a",
 			"filename": "xrt_smi_strx.a"
 		},
 		{
 			"device": "phx",
-			"url": "https://github.com/Xilinx/VTD/raw/c79b5d21568a4ffa5b0612a8279b352fc4e1109a/archive/phx/xrt_smi_phx.a",
+			"url": "https://github.com/Xilinx/VTD/raw/0b65e6c61ca5505bac0b0b7d6c500806e53b0ad1/archive/phx/xrt_smi_phx.a",
 			"filename": "xrt_smi_phx.a"
 		},
 		{
 			"device": "npu3",
-			"url": "https://github.com/Xilinx/VTD/raw/c79b5d21568a4ffa5b0612a8279b352fc4e1109a/archive/npu3/xrt_smi_npu3.a",
+			"url": "https://github.com/Xilinx/VTD/raw/0b65e6c61ca5505bac0b0b7d6c500806e53b0ad1/archive/npu3/xrt_smi_npu3.a",
 			"filename": "xrt_smi_npu3.a"
 		}
 	]

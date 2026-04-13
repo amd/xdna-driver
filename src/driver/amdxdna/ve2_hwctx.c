@@ -80,7 +80,6 @@ static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
 	struct ve2_hsa_queue *queue = &priv->hwctx_hsa_queue;
 	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
 	u32 capacity = header->capacity;
-	enum ert_cmd_state state;
 	u64 outstanding;
 	bool available;
 	u32 slot_idx;
@@ -96,14 +95,14 @@ static bool ve2_check_slot_available(struct amdxdna_ctx *hwctx)
 
 	/*
 	 * Also check that the next slot to be reserved is actually available.
-	 * Slot is available when in INVALID state (set by ve2_hwctx_job_release
-	 * after job completion, or zero-initialized for fresh slots).
+	 * The slot is available when the pending entry is NULL: cleared by
+	 * ve2_hwctx_job_release_locked() after the waiter releases the job,
+	 * or zero-initialized for slots not yet used.
 	 */
 	slot_idx = queue->reserved_write_index % capacity;
-	/* Sync completion memory before reading (device may have written) */
-	hsa_queue_sync_completion_for_read(queue, slot_idx);
-	state = queue->hq_complete.hqc_mem[slot_idx];
-	available = (state == ERT_CMD_STATE_INVALID);
+	mutex_lock(&priv->privctx_lock);
+	available = !priv->pending[slot_idx];
+	mutex_unlock(&priv->privctx_lock);
 	mutex_unlock(&queue->hq_lock);
 
 	return available;
@@ -173,22 +172,24 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 		return ERR_PTR(-EBUSY);
 	}
 
-	slot_idx = queue->reserved_write_index % capacity;
-	/* Sync completion memory before reading (device may have written) */
-	hsa_queue_sync_completion_for_read(queue, slot_idx);
-	enum ert_cmd_state state = queue->hq_complete.hqc_mem[slot_idx];
-
 	/*
-	 * Slot can only be reused when it's in INVALID state, which is set by
-	 * ve2_hwctx_job_release() after the job is fully released from pending array.
-	 * Note: ERT_CMD_STATE_INVALID == 0, so this also covers zero-initialized slots.
-	 * This ensures the pending array slot is free before we reserve the HSA queue slot.
+	 * Runlist optimization: Slot availability is determined by read_index only.
+	 * Host uses read_index; no INVALID state check. Ring buffer math ensures
+	 * we never overwrite when outstanding < capacity.
+	 *
+	 * Additionally, we must ensure the pending slot is free before reusing.
+	 * Pending is cleared in ve2_cmd_wait when the waiting thread runs, which
+	 * can lag behind read_index advance. Without this check, multi-threaded
+	 * submit can hit "No more room" in ve2_hwctx_add_job.
 	 */
-	if (state != ERT_CMD_STATE_INVALID) {
-		XDNA_DBG(xdna, "Slot %u is still in use with state %u", slot_idx, state);
+	slot_idx = queue->reserved_write_index % capacity;
+	mutex_lock(&priv->privctx_lock);
+	if (priv->pending[slot_idx]) {
+		mutex_unlock(&priv->privctx_lock);
 		mutex_unlock(&queue->hq_lock);
 		return ERR_PTR(-EBUSY);
 	}
+	mutex_unlock(&priv->privctx_lock);
 
 	/* Reserve this slot by incrementing reserved_write_index. */
 	*slot = queue->reserved_write_index++;
@@ -241,6 +242,12 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_p
 	hsa_queue_sync_write_index_for_write(queue);
 
 	mutex_unlock(&queue->hq_lock);
+
+	XDNA_DBG(xdna, "commit_slot slot=%llu write_index=%llu capacity=%u",
+		 (u64)slot, (u64)header->write_index, capacity);
+	XDNA_DBG(xdna,
+		  "HSA queue write_index updated: slot=%llu write_index=%llu",
+		  (u64)slot, (u64)header->write_index);
 }
 
 static void ve2_job_release(struct kref *ref)
@@ -287,9 +294,6 @@ static inline int ve2_hwctx_add_job(struct amdxdna_ctx *hwctx, struct amdxdna_sc
 	priv->state = AMDXDNA_HWCTX_STATE_ACTIVE;
 	mutex_unlock(&priv->privctx_lock);
 
-	XDNA_DBG(xdna, "hwctx %p job added: seq=%llu, idx=%d, cmd_cnt=%u, total_submitted=%llu",
-		 hwctx, seq, idx, cmd_cnt, hwctx->submitted);
-
 	return 0;
 }
 
@@ -308,13 +312,10 @@ static inline struct amdxdna_sched_job *ve2_hwctx_get_job(struct amdxdna_ctx *hw
 static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 						struct amdxdna_sched_job *job)
 {
-	u32 capacity = hwctx->priv->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
 	struct amdxdna_cmd_chain *cmd_chain;
 	u32 cmd_cnt = 1;
-	u32 slot;
 	u32 op;
 
 	op = amdxdna_cmd_get_op(cmd_bo);
@@ -324,24 +325,17 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 	}
 	hwctx->completed += cmd_cnt;
 
-	XDNA_DBG(xdna, "hwctx %p job release: seq=%llu, cmd_cnt=%u, completed=%llu",
-		 hwctx, job->seq, cmd_cnt, hwctx->completed);
 	if (hwctx->completed == hwctx->submitted)
 		priv_ctx->state = AMDXDNA_HWCTX_STATE_IDLE;
 
 	/* Caller already holds hq_lock, just acquire privctx_lock */
 	mutex_lock(&priv_ctx->privctx_lock);
 
-	// In cmd chain job, drivers receives completion for last command.
-	// So, mark all slots of these commands in this job to free.
-	slot = job->seq % capacity;
-
-	for (int i = 0; i < cmd_cnt; i++) {
-		priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot] = ERT_CMD_STATE_INVALID;
-		/* Sync completion memory after writing (device will read) */
-		hsa_queue_sync_completion_for_write(&priv_ctx->hwctx_hsa_queue, slot);
-		slot = (slot == 0) ? (capacity - 1) : (slot - 1);
-	}
+	/*
+	 * Runlist optimization: Slot reuse is determined by read_index only.
+	 * Host does not write INVALID to mark slots free; CERT advances read_index
+	 * when done. No need to clear hqc_mem here.
+	 */
 	// Reset the pending list
 	priv_ctx->pending[get_job_idx(job->seq)] = NULL;
 	ve2_job_put(job);
@@ -392,8 +386,6 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
 {
 	if (queue->hsa_queue_p) {
-		XDNA_DBG(xdna, "Freeing host queue: dma_addr=0x%llx",
-			 queue->hsa_queue_mem.dma_addr);
 		dma_free_coherent(queue->alloc_dev,
 				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
 				  queue->hsa_queue_p,
@@ -503,7 +495,6 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	unsigned int r;
 
 	alloc_size = sizeof(struct hsa_queue) + sizeof(u64) * nslots;
-	XDNA_DBG(xdna, "Creating host queue: nslots=%d, alloc_size=%zu", nslots, alloc_size);
 
 	/* Allocate from context's CMA region(s); try bitmap order (region 0, 1, ...). */
 	for (r = 0; r < MAX_MEM_REGIONS; r++) {
@@ -940,16 +931,19 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 	int ret;
 	u32 op;
 
+	XDNA_DBG(xdna, "cmd_submit: enter hwctx=%p start_col=%u pid=%d",
+		  hwctx, hwctx->priv->start_col, hwctx->client->pid);
 	op = amdxdna_cmd_get_op(cmd_bo);
-	XDNA_DBG(xdna, "hwctx %p cmd_submit: op=%u (%s), syncobj_cnt=%u",
-		 hwctx, op, op == ERT_CMD_CHAIN ? "CHAIN" : "SINGLE", syncobj_cnt);
+	XDNA_DBG(xdna, "cmd_submit op=%u hwctx=%p", op, hwctx);
 
 	if (hwctx->priv->misc_intrpt_flag) {
+		XDNA_DBG(xdna, "cmd_submit abort misc_intrpt hwctx=%p", hwctx);
 		XDNA_ERR(xdna, "Failed to submit a command, because of misc interrupt\n");
 		return -EINVAL;
 	}
 
 	if (op != ERT_START_DPU && op != ERT_CMD_CHAIN) {
+		XDNA_DBG(xdna, "cmd_submit abort bad op=%u hwctx=%p", op, hwctx);
 		XDNA_WARN(xdna, "Unsupported ERT cmd: %d received", op);
 		return -EINVAL;
 	}
@@ -962,17 +956,23 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 	if (ret) {
 		/* Return -ERESTARTSYS for -EAGAIN so userspace can retry */
 		if (ret == -EAGAIN) {
+			XDNA_DBG(xdna, "cmd_submit EAGAIN hwctx=%p op=%u", hwctx, op);
 			XDNA_ERR(xdna, "Failed to submit a command (retry expected)\n");
 			return -ERESTARTSYS;
 		}
 
+		XDNA_DBG(xdna, "cmd_submit failed ret=%d hwctx=%p op=%u", ret, hwctx, op);
 		XDNA_ERR(xdna, "Failed to submit a command. ret %d\n", ret);
 		return ret;
 	}
 
 	XDNA_DBG(xdna, "hwctx %p cmd submitted: seq=%llu, total_submitted=%llu",
 		 hwctx, *seq, hwctx->submitted);
-	ve2_mgmt_schedule_cmd(xdna, hwctx);
+	/* command_index = read_index when this job completes (last_slot + 1) */
+	ve2_mgmt_schedule_cmd(xdna, hwctx, *seq + 1);
+
+	XDNA_DBG(xdna, "cmd_submit: exit hwctx=%p seq=%llu start_col=%u pid=%d",
+		  hwctx, *seq, hwctx->priv->start_col, hwctx->client->pid);
 
 	return 0;
 }
@@ -1008,61 +1008,268 @@ static inline bool check_read_index(struct amdxdna_ctx *hwctx,
 	}
 
 	counter++;
-	return (*read_index > seq);
+	if (*read_index > seq) {
+		struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+		XDNA_DBG(xdna,
+			  "HSA queue read_index past seq: seq=%llu read_index=%llu hwctx=%p pid=%d",
+			  (u64)seq, (u64)*read_index, hwctx, hwctx->client->pid);
+
+		return true;
+	}
+
+	return false;
 }
 
-static void ve2_dump_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
+/*
+ * Fill health data directly into the command BO buffer.  Writing straight
+ * to cmd_data avoids the flexible-array-member overflow that occurred when
+ * the old code wrote through the zero-length uc_info[] embedded inside
+ * hwctx->health_data.
+ */
+static void ve2_fill_health_data(struct amdxdna_dev *xdna,
+				 struct amdxdna_ctx *hwctx,
+				 void *cmd_data, u32 data_total)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct device *aie_dev = priv_ctx->aie_dev;
-	struct amdxdna_ctx_health_data_aie4 *r;
-	struct handshake *hs = NULL;
-	int ret = 0;
+	struct amdxdna_ctx_health_data *health;
+	size_t hdr_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
+	struct handshake *hs;
+	u32 max_uc;
+	u32 num_uc;
+	int ret;
 
-	r = kzalloc(sizeof(*r) + priv_ctx->num_col * sizeof(struct uc_health_info), GFP_KERNEL);
-	if (!r) {
-		XDNA_ERR(xdna, "No memory for struct amdxdna_ctx_health_data_aie4\n");
+	if (!cmd_data || data_total < hdr_size) {
+		XDNA_WARN(xdna, "Health data buffer too small: %u < %zu",
+			  data_total, hdr_size);
 		return;
 	}
 
-	for (u32 col = 0; col < priv_ctx->num_col; col++) {
+	memset(cmd_data, 0, data_total);
+	health = (struct amdxdna_ctx_health_data *)cmd_data;
+	health->version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	health->npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	health->aie4.ctx_state = priv_ctx->state;
+	health->aie4.ctx_error_type = 0;
+
+	max_uc = (data_total - hdr_size) / sizeof(struct uc_health_info);
+	num_uc = min(priv_ctx->num_col, max_uc);
+
+	for (u32 col = 0; col < num_uc; col++) {
 		hs = kzalloc(sizeof(*hs), GFP_KERNEL);
 		if (!hs) {
-			XDNA_ERR(xdna, "No memory for handshake.\n");
-			kfree(r);
+			XDNA_ERR(xdna, "No memory for handshake\n");
 			return;
 		}
+
 		ret = ve2_partition_read_privileged_mem(aie_dev, col,
-							offsetof(struct handshake, mpaie_alive),
-							sizeof(struct handshake), (void *)hs);
-
+							offsetof(struct handshake,
+								 mpaie_alive),
+							sizeof(struct handshake),
+							(void *)hs);
 		if (ret < 0) {
-			XDNA_ERR(xdna, "aie_partition_read failed with ret=%d\n", ret);
+			XDNA_ERR(xdna, "aie_partition_read failed col %u ret=%d\n", col, ret);
 			kfree(hs);
-			kfree(r);
 			return;
 		}
 
-		r->uc_info[col].uc_idx = hwctx->start_col + col;
-		r->uc_info[col].page_idx = hs->vm.abs_page_index;
-		r->uc_info[col].offset = hs->vm.ppc;
-		r->uc_info[col].uc_idle_status = hs->cert_idle_status;
-		r->uc_info[col].misc_status = hs->misc_status;
-		r->uc_info[col].uc_pc = hs->exception.pc;
-		r->uc_info[col].uc_ear = hs->exception.ear;
-		r->uc_info[col].uc_esr = hs->exception.esr;
-		r->uc_info[col].fw_state = hs->vm.fw_state;
+		health->aie4.uc_info[col].uc_idx = hwctx->start_col + col;
+		health->aie4.uc_info[col].uc_idle_status = hs->cert_idle_status;
+		health->aie4.uc_info[col].misc_status = hs->misc_status;
+		health->aie4.uc_info[col].fw_state = hs->vm.fw_state;
+		health->aie4.uc_info[col].page_idx = hs->vm.abs_page_index;
+		health->aie4.uc_info[col].offset = hs->vm.ppc;
+		health->aie4.uc_info[col].restore_page = hs->ctx_save.restore_page.page_index;
+		health->aie4.uc_info[col].restore_offset = hs->ctx_save.restore_page.page_offset;
+		health->aie4.uc_info[col].uc_ear = hs->exception.ear;
+		health->aie4.uc_info[col].uc_esr = hs->exception.esr;
+		health->aie4.uc_info[col].uc_pc = hs->exception.pc;
 		kfree(hs);
 	}
 
-	hwctx->health_data.version = AMDXDNA_CTX_HEALTH_DATA_V1;
-	hwctx->health_data.npu_gen = AMDXDNA_NPU_GEN_AIE4;
-	hwctx->health_data.aie4.ctx_state = priv_ctx->state;
-	hwctx->health_data.aie4.num_uc = priv_ctx->num_col;
-	memcpy(hwctx->health_data.aie4.uc_info, r->uc_info, priv_ctx->num_col *
-	       sizeof(struct uc_health_info));
+	health->aie4.num_uc = num_uc;
+}
 
-	kfree(r);
+/*
+ * Check whether CERT already wrote a terminal completion state to the
+ * HQC slot for the last sub-command (or single command) at @seq.
+ * Returns true for COMPLETED, ERROR, or ABORT.
+ */
+static bool ve2_hqc_has_terminal_state(struct amdxdna_ctx_priv *priv_ctx,
+				       u64 seq)
+{
+	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
+	u32 capacity = queue->hsa_queue_p->hq_header.capacity;
+	u32 slot = seq % capacity;
+	u64 *hqc_mem = queue->hq_complete.hqc_mem;
+	enum ert_cmd_state state;
+
+	hsa_queue_sync_completion_for_read(queue, slot);
+	state = (enum ert_cmd_state)((u32)hqc_mem[slot] & 0xF);
+
+	return state == ERT_CMD_STATE_COMPLETED ||
+	       state == ERT_CMD_STATE_ERROR ||
+	       state == ERT_CMD_STATE_ABORT;
+}
+
+/*
+ * Read the HQC completion slot for the last sub-command in the chain (or
+ * single command) and propagate the CERT-reported state.  For command
+ * chains with ERROR/ABORT, scan backwards to find the first failing
+ * sub-command and populate error_index.
+ */
+static void ve2_process_hqc_completion(struct amdxdna_dev *xdna,
+				       struct amdxdna_ctx *hwctx,
+				       struct amdxdna_sched_job *job,
+				       u64 seq)
+{
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
+	u32 capacity = queue->hsa_queue_p->hq_header.capacity;
+	u32 slot = seq % capacity;
+	u64 *hqc_mem = queue->hq_complete.hqc_mem;
+	u32 comp;
+	enum ert_cmd_state state;
+
+	hsa_queue_sync_completion_for_read(queue, slot);
+	comp = (u32)hqc_mem[slot];
+	state = (enum ert_cmd_state)(comp & 0xF);
+
+	if (state < ERT_CMD_STATE_NEW || state > ERT_CMD_STATE_NORESPONSE) {
+		XDNA_WARN(xdna, "state %u at hqc_mem[%u] raw 0x%x",
+			  state, slot, comp);
+		return;
+	}
+
+	if ((state == ERT_CMD_STATE_ERROR || state == ERT_CMD_STATE_ABORT) &&
+	    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+		struct amdxdna_cmd_chain *cc =
+			amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+		enum ert_cmd_state slot_state = state;
+		u32 fail_cmd_idx = 0;
+		u32 start_slot;
+		u32 cmd_count;
+		int i;
+
+		if (!cc) {
+			XDNA_WARN(xdna, "Failed to get payload, seq %llu", seq);
+			amdxdna_cmd_set_state(job->cmd_bo, state);
+			return;
+		}
+
+		cmd_count = cc->command_count;
+		start_slot = (seq - cmd_count + 1) % capacity;
+
+		XDNA_DBG(xdna, "seq %llu, start_slot %u, cmd_count %u", seq,
+			 start_slot, cmd_count);
+
+		for (i = cmd_count; i > 0; i--) {
+			u32 idx = (start_slot + i - 1) % capacity;
+
+			hsa_queue_sync_completion_for_read(queue, idx);
+			comp = (u32)hqc_mem[idx];
+			slot_state = (enum ert_cmd_state)(comp & 0xF);
+			if (slot_state != ERT_CMD_STATE_ABORT) {
+				fail_cmd_idx = i - 1;
+				break;
+			}
+		}
+
+		cc->error_index = fail_cmd_idx;
+		if (cc->error_index >= cmd_count)
+			cc->error_index = 0;
+
+		XDNA_ERR(xdna,
+			 "Error at index %u (slot %u) slot_state %d err_code 0x%x",
+			 fail_cmd_idx, (start_slot + fail_cmd_idx) % capacity,
+			 slot_state,
+			 slot_state == ERT_CMD_STATE_ERROR ? (comp >> 4) : 0);
+		amdxdna_cmd_set_state(job->cmd_bo, slot_state);
+	} else {
+		amdxdna_cmd_set_state(job->cmd_bo, state);
+	}
+}
+
+/*
+ * Handle timeout / MISC-interrupt path: collect health data from firmware,
+ * set ERT_CMD_STATE_TIMEOUT, and for command chains read runlist_read_idx
+ * from the lead CERT handshake to determine timeout_index.
+ */
+static void ve2_handle_timeout(struct amdxdna_dev *xdna,
+			       struct amdxdna_ctx *hwctx,
+			       struct amdxdna_sched_job *job,
+			       u64 seq)
+{
+	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
+	u32 capacity = priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
+	struct amdxdna_cmd_chain *cc = NULL;
+	struct amdxdna_gem_obj *target_bo;
+	u32 cmd_count = 1;
+	u32 start_slot = 0;
+	void *cmd_data;
+	u32 data_total;
+
+	if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+		cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+		if (!cc) {
+			XDNA_WARN(xdna, "cmd_chain timeout: failed to get payload");
+			return;
+		}
+		cmd_count = cc->command_count;
+		start_slot = (seq - cmd_count + 1) % capacity;
+	}
+
+	if (cc) {
+		u32 fail_cmd_idx = 0;
+		u32 rl_read_idx = 0;
+		int ret;
+
+		XDNA_DBG(xdna, "start_slot %u, num_col %u, cmd_count %u",
+			  start_slot, priv_ctx->num_col, cmd_count);
+
+		ret = ve2_partition_read_privileged_mem(priv_ctx->aie_dev, 0,
+							offsetof(struct handshake,
+								 runlist_read_idx),
+							sizeof(rl_read_idx),
+							&rl_read_idx);
+		if (ret >= 0)
+			fail_cmd_idx = rl_read_idx;
+
+		if (fail_cmd_idx >= cmd_count)
+			fail_cmd_idx = 0;
+
+		cc->error_index = fail_cmd_idx;
+		XDNA_ERR(xdna,
+			 "Timeout at cmd chain index %u (slot %u), runlist_read_idx %u",
+			 fail_cmd_idx,
+			 (start_slot + fail_cmd_idx) % capacity,
+			 rl_read_idx);
+
+		/*
+		 * Write health data into the failing sub-command BO so that
+		 * XRT can read it via run.get_ert_packet() on the individual
+		 * run object it exposes in the aie_error exception.
+		 */
+		target_bo = amdxdna_gem_get_obj(hwctx->client,
+						(u32)cc->data[fail_cmd_idx],
+						AMDXDNA_BO_SHARE);
+		if (target_bo) {
+			cmd_data = amdxdna_cmd_get_data(target_bo, &data_total);
+			ve2_fill_health_data(xdna, hwctx, cmd_data, data_total);
+			amdxdna_cmd_set_state(target_bo, ERT_CMD_STATE_TIMEOUT);
+			amdxdna_gem_put_obj(target_bo);
+		} else {
+			XDNA_ERR(xdna, "Failed to find sub-cmd BO %u at chain index %u",
+				 (u32)cc->data[fail_cmd_idx], fail_cmd_idx);
+		}
+	} else {
+		cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
+		ve2_fill_health_data(xdna, hwctx, cmd_data, data_total);
+	}
+
+	hwctx->health_reported = true;
+	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 }
 
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
@@ -1074,8 +1281,8 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	unsigned long wait_jifs;
 	int ret = 0;
 
-	XDNA_DBG(xdna, "hwctx %p cmd_wait: seq=%llu, timeout=%u ms", hwctx, seq, timeout);
-
+	XDNA_DBG(xdna, "cmd_wait: enter seq=%llu hwctx=%p start_col=%u pid=%d timeout_ms=%u",
+		  (u64)seq, hwctx, hwctx->priv->start_col, hwctx->client->pid, timeout);
 	/*
 	 * NOTE: this is simplified hwctx which has no col_entry list for different ctx
 	 * sharing the same lead col.
@@ -1104,133 +1311,21 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 			goto out;
 		}
 
-		/*
-		 * below check need to be removed once we have a clean solution
-		 * to use completion signal
-		 */
-
 		if (priv_ctx->misc_intrpt_flag || (wait_jifs && !ret)) {
-			u32 capacity =
-				priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
-			u32 start_slot = 0;
-			u32 cmd_count = 1;
-			void *cmd_data;
-			u32 data_total;
-
-			ve2_dump_ctx(xdna, hwctx);
-
-			/* Read command_count BEFORE overwriting command buffer with health data */
-			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
-				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
-										       NULL);
-				if (cc) {
-					cmd_count = cc->command_count;
-					/*
-					 * seq is the LAST sequence number of the command chain.
-					 * Calculate start_slot by going back (cmd_count - 1) slots.
-					 */
-					start_slot = (seq - cmd_count + 1) % capacity;
-				}
-			}
-
-			cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
-			size_t total_size = sizeof(struct amdxdna_ctx_health_data) +
-					priv_ctx->num_col * sizeof(struct uc_health_info);
-			if (unlikely(data_total < sizeof(hwctx->health_data)))
-				XDNA_WARN(xdna, "%s: data_total: %u, sizeof(health): %lu", __func__,
-					  data_total, total_size);
-
-			data_total = min(data_total, total_size);
-			memcpy(cmd_data, &hwctx->health_data, total_size);
-			hwctx->health_reported = true;
-			amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
-
-			if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
-				struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo,
-										       NULL);
-				XDNA_INFO(xdna, "start_slot %u, num_col %u, cmd_count %u",
-					  start_slot, priv_ctx->num_col, cmd_count);
-				if (!cc) {
-					XDNA_WARN(xdna, "cmd_chain timeout: failed to get payload");
-				} else {
-					/* In the async callback/timeout case,
-					 * driver sets error index to 0
-					 */
-					cc->error_index = 0;
-				}
-			}
+			/*
+			 * MISC interrupt may race with CERT writing completion.
+			 * If CERT already wrote a terminal state, use the normal
+			 * completion path; otherwise handle as timeout.
+			 */
+			if (priv_ctx->misc_intrpt_flag &&
+			    ve2_hqc_has_terminal_state(priv_ctx, seq))
+				ve2_process_hqc_completion(xdna, hwctx, job, seq);
+			else
+				ve2_handle_timeout(xdna, hwctx, job, seq);
 		} else {
-			u32 slot =
-				seq % (priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity);
-			enum ert_cmd_state state;
-
-			/* Sync completion memory before reading (device may have written) */
-			hsa_queue_sync_completion_for_read(&priv_ctx->hwctx_hsa_queue, slot);
-			state = priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
-			if (state <= ERT_CMD_STATE_INVALID || state > ERT_CMD_STATE_NORESPONSE) {
-				XDNA_WARN(xdna, "state %u at hqc_mem[%u]", state, slot);
-				ve2_job_put(job);
-				ret = 0;
-				goto out;
-			}
-			if (state == ERT_CMD_STATE_ERROR &&
-			    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
-				u32 capacity =
-					priv_ctx->hwctx_hsa_queue.hsa_queue_p->hq_header.capacity;
-				struct amdxdna_cmd_chain *cc =
-					amdxdna_cmd_get_payload(job->cmd_bo, NULL);
-				enum ert_cmd_state slot_state;
-				u32 fail_cmd_idx = 0;
-				u32 start_slot = 0;
-				u32 cmd_count = 0;
-				int i;
-
-				if (!cc) {
-					XDNA_WARN(xdna, "Failed to get payload, seq %llu", seq);
-					amdxdna_cmd_set_state(job->cmd_bo, state);
-					goto release_job;
-				}
-				cmd_count = cc->command_count;
-				/*
-				 * In the sync callback/command error case, driver determines the
-				 * error index by traversing the command chain slots to find which
-				 * subcmd has ERROR state. The starting slot is calculated by going
-				 * back (command_count - 1) slots from the current seq.
-				 */
-				start_slot = (seq - cmd_count + 1) % capacity;
-
-				XDNA_DBG(xdna, "seq %llu, start_slot %u, cmd_count %u", seq,
-					 start_slot, cmd_count);
-
-				for (i = 0; i < cmd_count; i++) {
-					u32 slot = (start_slot + i) % capacity;
-
-					/* Sync completion memory before reading
-					 * (device may have written)
-					 */
-					hsa_queue_sync_completion_for_read
-						(&priv_ctx->hwctx_hsa_queue, slot);
-					slot_state =
-						priv_ctx->hwctx_hsa_queue.hq_complete.hqc_mem[slot];
-					if (slot_state == ERT_CMD_STATE_ERROR) {
-						fail_cmd_idx = i;
-						break;
-					}
-				}
-
-				cc->error_index = fail_cmd_idx;
-				if (cc->error_index >= cmd_count)
-					cc->error_index = 0;
-
-				XDNA_ERR(xdna, "Error at index %u (slot %u) slot_state %d",
-					 fail_cmd_idx, (start_slot + fail_cmd_idx) %
-					 capacity, slot_state);
-				amdxdna_cmd_set_state(job->cmd_bo, slot_state);
-			} else {
-				amdxdna_cmd_set_state(job->cmd_bo, state);
-			}
+			ve2_process_hqc_completion(xdna, hwctx, job, seq);
 		}
-release_job:
+
 		ve2_hwctx_job_release_locked(hwctx, job);
 		ve2_job_put(job);
 
@@ -1249,6 +1344,8 @@ release_job:
 
 out:
 	mutex_unlock(&priv_ctx->hwctx_hsa_queue.hq_lock);
+	XDNA_DBG(xdna, "cmd_wait: exit seq=%llu hwctx=%p ret=%d pid=%d",
+		  (u64)seq, hwctx, ret, hwctx->client->pid);
 	XDNA_DBG(xdna, "wait_cmd ret:%d", ret);
 	/* 0 is success, others are timeout */
 	return ret > 0 ? 0 : ret;
@@ -1284,14 +1381,13 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	struct amdxdna_ctx_priv *priv = NULL;
 	int ret;
 
-	XDNA_DBG(xdna, "Initializing hwctx for client pid %d, num_tiles=%u, priority=%u",
-		 client->pid, hwctx->num_tiles, hwctx->qos.priority);
-
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	hwctx->priv = priv;
+
+	XDNA_DBG(xdna, "hwctx init: enter hwctx=%p pid=%d", hwctx, client->pid);
 	init_waitqueue_head(&priv->waitq);
 
 	ret = ve2_xrs_request(xdna, hwctx);
@@ -1324,9 +1420,8 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	mutex_init(&priv->privctx_lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
 
-	XDNA_DBG(xdna, "hwctx %p initialized: start_col=%u, num_col=%u, queue_addr=0x%llx",
-		 hwctx, priv->start_col, priv->num_col,
-		 priv->hwctx_hsa_queue.hsa_queue_mem.dma_addr);
+	XDNA_DBG(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
+		  hwctx, priv->start_col, hwctx->client->pid);
 
 	return 0;
 
@@ -1335,6 +1430,7 @@ cleanup_xrs:
 	ve2_mgmt_destroy_partition(hwctx);
 cleanup_priv:
 	kfree(hwctx->priv);
+	hwctx->priv = NULL;
 
 	return ret;
 }
@@ -1348,10 +1444,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	struct amdxdna_sched_job *job;
 	int idx;
 
-	XDNA_DBG(xdna,
-		 "Finalizing hwctx %p: start_col=%u, num_col=%u, submitted=%llu, completed=%llu",
-		 hwctx, nhwctx->start_col, nhwctx->num_col,
-		 hwctx->submitted, hwctx->completed);
+	XDNA_DBG(xdna, "hwctx fini: enter hwctx=%p start_col=%u pid=%d",
+		  hwctx, nhwctx->start_col, hwctx->client->pid);
 
 	if (enable_polling)
 		del_timer_sync(&hwctx->priv->event_timer);
@@ -1403,10 +1497,16 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv->hwctx_config);
 	mutex_destroy(&hwctx->priv->privctx_lock);
-	kfree(hwctx->priv);
-	hwctx->priv = NULL;
+
+	XDNA_DBG(xdna,
+		  "hwctx fini: hwctx=%p submitted=%llu completed=%llu pid=%d",
+		  hwctx, hwctx->submitted, hwctx->completed, hwctx->client->pid);
+
 	XDNA_DBG(xdna, "Destroyed hwctx %p, total cmds submitted (%llu), completed(%llu)",
 		 hwctx, hwctx->submitted, hwctx->completed);
+
+	kfree(hwctx->priv);
+	hwctx->priv = NULL;
 }
 
 static int ve2_update_handshake_pkt(struct amdxdna_ctx *hwctx, u8 buf_type, u64 paddr,
@@ -1458,9 +1558,6 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	u64 buf_paddr;
 	u32 buf_sz;
 	int ret = 0;
-
-	XDNA_DBG(xdna, "hwctx %p config: type=%u, mdata_hdl=0x%llx, size=%u",
-		 hwctx, type, mdata_hdl, size);
 
 	/* Update fw's handshake shared memory with debug/trace buffer details */
 	switch (type) {

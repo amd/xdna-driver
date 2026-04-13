@@ -105,6 +105,7 @@ extern const struct amdxdna_dev_priv npu4_dev_priv;
 	},											\
 	.hw_ops		= {									\
 		.set_dpm = npu4_set_dpm,							\
+		.update_counters = npu4_update_counters,					\
 	}
 
 #define NPU4_COMMON_DEV_INFO \

@@ -1,0 +1,378 @@
+From f7babb1495ffa3f793b370d0d9259115ef1244be Mon Sep 17 00:00:00 2001
+From: Himanshu Choudhary <Himanshu.Choudhary@amd.com>
+Date: Wed, 28 Jan 2026 12:44:49 +0530
+Subject: [PATCH] range based coredump
+
+Signed-off-by: Himanshu Choudhary <Himanshu.Choudhary@amd.com>
+---
+ .../misc/xilinx-ai-engine/ai-engine-part.c    | 335 +++++++++++++++---
+ 1 file changed, 290 insertions(+), 45 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+index 9db5a8cc37e4..9ac8357afe29 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -1949,7 +1949,7 @@ int aie_partition_coredump(struct device *dev, size_t len, void *data) {
+ 	struct aie_partition *apart;
+ 	struct aie_location loc;
+ 	u32 ttype;
+-	int ret = 0;
++	int i, ret = 0;
+ 
+ 	if (!dev || !data)
+ 		return -EINVAL;
+@@ -1982,62 +1982,307 @@ int aie_partition_coredump(struct device *dev, size_t len, void *data) {
+ 
+ 	for (loc.col = 0; loc.col < apart->range.size.col; loc.col++) {
+ 		for (loc.row = 0; loc.row < apart->range.size.row; loc.row++) {
+-			size_t tile_base_offset = (loc.col * apart->range.size.row + loc.row) 
+-						  * (1 << apart->adev->row_shift);
+-
+-			ttype = apart->adev->ops->get_tile_type(apart->adev, &loc);
+-			if (ttype == AIE_TILE_TYPE_SHIMNOC) {
+-				offset = 0;
+-				dump_len = 1 << apart->adev->row_shift;
+-				ret = aie_partition_read(dev, loc, offset, dump_len, 
+-							(char*)data + tile_base_offset);
+-				if (ret < 0) {
+-					dev_err(dev, "failed to read shim tile at %d,%d", loc.col, loc.row);
+-					return ret;
+-				}
+-			} else if (ttype == AIE_TILE_TYPE_TILE) {
+-				/* Read first 64KB region */
+-				offset = 0x0;
+-				dump_len = KBYTES(64);
+-				ret = aie_partition_read(dev, loc, offset, dump_len, 
+-							(char*)data + tile_base_offset + offset);
+-				if (ret < 0) {
+-					dev_err(dev, "failed to read tile at %d,%d", loc.col, loc.row);
+-					return ret;
+-				}
++		size_t tile_base_offset = (loc.col * apart->range.size.row + loc.row)
++					  * (1 << apart->adev->row_shift);
++
++		/* Common structure for register range definitions */
++		struct aie_reg_range {
++			u32 offset;
++			u32 len;
++		};
+ 
+-				/* Read remaining region */
+-				offset = KBYTES(64);
+-				dump_len = (1 << apart->adev->row_shift) - offset;
+-				ret = aie_partition_read(dev, loc, offset, dump_len, 
+-							(char*)data + tile_base_offset + offset);
++		ttype = apart->adev->ops->get_tile_type(apart->adev, &loc);
++
++		/* Initialize the tile region to zero first */
++		memset((char *)data + tile_base_offset, 0, 1 << apart->adev->row_shift);
++
++		if (ttype == AIE_TILE_TYPE_SHIMNOC) {
++			/* SHIM NOC tile register ranges */
++			static const struct aie_reg_range shim_noc_ranges[] = {
++				// Lock registers + Locks Event Selection 0x00000-0x00128
++				{0x00000, 0x128},
++				{0x00128, 0x04},
++				// Interrupt controller 2nd level 0x01000-0x01010
++				{0x01000, 0x10},
++				{0x01010, 0x04},
++				// Config register 0x02000
++				{0x02000, 0x04},
++				// Config registers 0x02100-0x02108
++				{0x02100, 0x08},
++				{0x02108, 0x04},
++				// Config register 0x02120
++				{0x02120, 0x04},
++				// Config register 0x03000
++				{0x03000, 0x04},
++				// DMA BD + Control/Status 0x09000-0x09348
++				{0x09000, 0x348},
++				{0x09348, 0x04},
++				// PL Interface 0x30000-0x3000C
++				{0x30000, 0x10},
++				// Performance counters 0x31000-0x31034
++				{0x31000, 0x38},
++				// Performance counters 0x31080-0x31084
++				{0x31080, 0x08},
++				// Timer/Event 0x34000-0x340FC
++				{0x34000, 0x100},
++				// Event Status 0x34200-0x3421C
++				{0x34200, 0x20},
++				// Combo/Edge events 0x34400-0x34408
++				{0x34400, 0x08},
++				{0x34408, 0x04},
++				// Event Groups 0x34500-0x3452C
++				{0x34500, 0x30},
++				// Event register 0x34600
++				{0x34600, 0x04},
++				// Interrupt controller 1st level 0x35000-0x35050
++				{0x35000, 0x50},
++				{0x35050, 0x04},
++				// BISR 0x36000-0x3604C
++				{0x36000, 0x50},
++				// Stream Switch Master Config 0x3F000-0x3F058
++				{0x3F000, 0x58},
++				{0x3F058, 0x04},
++				// Stream Switch Slave Config 0x3F100-0x3F15C
++				{0x3F100, 0x60},
++				// Stream Switch Slave Slots 0x3F200-0x3F37C
++				{0x3F200, 0x180},
++				// Stream Switch Deterministic Merge 0x3F800-0x3F818
++				{0x3F800, 0x18},
++				{0x3F818, 0x04},
++				// Stream Switch Event/Status 0x3FF00-0x3FF38
++				{0x3FF00, 0x38},
++				{0x3FF38, 0x4},
++				// Module Clock/Reset Control 0x7FF00-0x7FF58
++				{0x7FF00, 0x58},
++				{0x7FF58, 0x04},
++				// Core Program Memory + Core Private Data Memory 0x80000-0x8BFFC
++				{0x80000, 0x8000},
++				{0x88000, 0x4000},
++				// MDM Debug 0xB0010-0xB0018
++				{0xB0010, 0x08},
++				{0xB0018, 0x04},
++				// MDM Debug 0xB5440
++				{0xB5440, 0x04},
++				// MDM Debug 0xB5480
++				{0xB5480, 0x04},
++				// MDM Debug 0xB54C0
++				{0xB54C0, 0x04},
++				// MDM Debug 0xB5580
++				{0xB5580, 0x04},
++				// MDM Debug 0xB55C0
++				{0xB55C0, 0x04},
++				// Core registers 0xC0000-0xC0008
++				{0xC0000, 0x08},
++				{0xC0008, 0x04},
++				// Core registers 0xC0020-0xC003C
++				{0xC0020, 0x20},
++				// Core registers 0xC0100-0xC0120
++				{0xC0100, 0x20},
++				{0xC0120, 0x04},
++				// Module Data Memory 0xD0000-0xD7FFC
++				{0xD0000, 0x8000}
++			};
++
++			/* Read SHIM NOC register ranges */
++			for (i = 0; i < ARRAY_SIZE(shim_noc_ranges); i++) {
++				offset = shim_noc_ranges[i].offset;
++				dump_len = shim_noc_ranges[i].len;
++				ret = aie_partition_read(dev, loc, offset, dump_len,
++							(char *)data + tile_base_offset + offset);
+ 				if (ret < 0) {
+-					dev_err(dev, "failed to read tile at %d,%d", loc.col, loc.row);
++					dev_err(dev, "failed to read shim range 0x%x at %d,%d",
++						offset, loc.col, loc.row);
+ 					return ret;
+ 				}
+-
+-			} else if (ttype == AIE_TILE_TYPE_MEMORY) {
+-				/* Read first 512KB */
+-				offset = 0x0;
+-				dump_len = KBYTES(512);
+-				ret = aie_partition_read(dev, loc, offset, dump_len, 
+-							(char*)data + tile_base_offset + offset);
++			}
++		} else if (ttype == AIE_TILE_TYPE_TILE) {
++			/* Core tile register ranges */
++			static const struct aie_reg_range core_tile_ranges[] = {
++				/* DataMemory 0x00000-0x0FFFC */
++				{0x00000, 0x10000},
++				/* Memory Performance counters 0x11000-0x1102C */
++				{0x11000, 0x30},
++				/* Memory Performance counters 0x11080-0x11084 */
++				{0x11080, 0x08},
++				/* ECC 0x12000 */
++				{0x12000, 0x04},
++				/* ECC 0x12110-0x12124 */
++				{0x12110, 0x18},
++				// Memory Timer/Event 0x14000-0x14088
++				{0x14000, 0x88},
++				{0x14088, 0x04},
++				// Memory Timer/Event 0x140D0-0x14104
++				{0x140D0, 0x38},
++				// Event Status 0x14200-0x1420C
++				{0x14200, 0x10},
++				// Event 0x14400-0x14408
++				{0x14400, 0x08},
++				{0x14408, 0x04},
++				// Event Groups 0x14500-0x1451C
++				{0x14500, 0x20},
++				// Spare/Memory Control 0x16000-0x16010
++				{0x16000, 0x10},
++				{0x16010, 0x04},
++				// DMA BD registers 0x1D000-0x1D1F4
++				{0x1D000, 0x1F8},
++				// DMA Control/Status 0x1DE00-0x1DE1C
++				{0x1DE00, 0x20},
++				// DMA Control/Status 0x1DF00-0x1DF1C
++				{0x1DF00, 0x20},
++				// Lock registers + Locks Event Selection 0x1F000-0x1F128
++				{0x1F000, 0x128},
++				{0x1F128, 0x04},
++				// Program Memory 0x20000-0x27FFC
++				{0x20000, 0x8000},
++				// Core BM registers 0x30000-0x307FC
++				{0x30000, 0x800},
++				// Core X registers 0x31800-0x31AFC
++				{0x31800, 0x300},
++				// Core LDFIFO/STFIFO/FIFOXTRA 0x32400-0x325BC
++				{0x32400, 0x1C0},
++				// Core EG registers 0x32600-0x326BC
++				{0x32600, 0xC0},
++				// Core F registers 0x32700-0x327BC
++				{0x32700, 0xC0},
++				// Core R + M/DN/DJ/DC + P/S registers 0x32800-0x32CB0
++				{0x32800, 0x4B0},
++				{0x32CB0, 0x04},
++				// Core PC/FC/SP/LR/LS/LE/LC/LCI/CR/SR 0x32D00-0x32DA0
++				{0x32D00, 0xA0},
++				{0x32DA0, 0x04},
++				// Core PC/FC/SP/LR/LS/LE/LC/LCI/CR/SR 0x32DC0-0x32DD0
++				{0x32DC0, 0x10},
++				{0x32DD0, 0x04},
++				// Core Timer/Event 0x34000-0x34088
++				{0x34000, 0x88},
++				{0x34088, 0x04},
++				// Core Timer/Event 0x340D0-0x340FC
++				{0x340D0, 0x30},
++				// Event Status 0x34200-0x3420C
++				{0x34200, 0x10},
++				// Event 0x34400-0x34408
++				{0x34400, 0x08},
++				{0x34408, 0x04},
++				// Event Groups 0x34500-0x34520
++				{0x34500, 0x20},
++				{0x34520, 0x04},
++				// CSSD/Accumulator/Memory Control 0x36040
++				{0x36040, 0x04},
++				// CSSD/Accumulator/Memory Control 0x36060-0x36070
++				{0x36060, 0x10},
++				{0x36070, 0x04},
++				// Core Performance counters 0x37500-0x37508
++				{0x37500, 0x08},
++				{0x37508, 0x04},
++				// Core Performance counters 0x37520-0x3752C
++				{0x37520, 0x10},
++				// Core Performance counters 0x37580-0x3758C
++				{0x37580, 0x10},
++				// Core Control/Status/Debug 0x38000-0x38038
++				{0x38000, 0x38},
++				{0x38038, 0x04},
++				// Core Control/Status/Debug 0x38100-0x38120
++				{0x38100, 0x20},
++				{0x38120, 0x04},
++				// Stream Switch Master Config 0x3F000-0x3F058
++				{0x3F000, 0x58},
++				{0x3F058, 0x04},
++				// Stream Switch Slave Config 0x3F100-0x3F160
++				{0x3F100, 0x60},
++				{0x3F160, 0x04},
++				// Stream Switch Slave Slots 0x3F200-0x3F38C
++				{0x3F200, 0x190},
++				// Stream Switch Deterministic Merge 0x3F800-0x3F818
++				{0x3F800, 0x18},
++				{0x3F818, 0x04},
++				// Stream Switch Event/Status 0x3FF00-0x3FF38
++				{0x3FF00, 0x38},
++				{0x3FF38, 0x04},
++				// Module Clock/Reset/Tile Control 0x60000-0x60030
++				{0x60000, 0x30},
++				{0x60030, 0x04},
++				// Module Clock/Reset/Tile Control 0x60100-0x60104
++				{0x60100, 0x08}
++			};
++
++			/* Read Core tile register ranges */
++			for (i = 0; i < ARRAY_SIZE(core_tile_ranges); i++) {
++				offset = core_tile_ranges[i].offset;
++				dump_len = core_tile_ranges[i].len;
++				ret = aie_partition_read(dev, loc, offset, dump_len,
++							(char *)data + tile_base_offset + offset);
+ 				if (ret < 0) {
+-					dev_err(dev, "failed to read memory tile at %d,%d", loc.col, loc.row);
++					dev_err(dev, "failed to read core tile range 0x%x at %d,%d",
++						offset, loc.col, loc.row);
+ 					return ret;
+ 				}
+-
+-				/* Read remaining region */
+-				offset = KBYTES(512);
+-				dump_len = (1 << apart->adev->row_shift) - offset;
+-				ret = aie_partition_read(dev, loc, offset, dump_len, 
+-							(char*)data + tile_base_offset + offset);
++			}
++		} else if (ttype == AIE_TILE_TYPE_MEMORY) {
++			/* Memory tile register ranges */
++			static const struct aie_reg_range mem_tile_ranges[] = {
++				// DataMemory 0x00000-0x7FFFC
++				{0x00000, 0x80000},
++				// Performance counters 0x91000-0x91034
++				{0x91000, 0x38},
++				// Performance counters 0x91080-0x9108C
++				{0x91080, 0x10},
++				// ECC 0x92000
++				{0x92000, 0x04},
++				// ECC 0x92110-0x92120
++				{0x92110, 0x10},
++				{0x92120, 0x04},
++				// Timer/Event 0x94000-0x9410C
++				{0x94000, 0x110},
++				// Event Status 0x94200-0x94214
++				{0x94200, 0x18},
++				// Combo/Edge events 0x94400-0x94408
++				{0x94400, 0x08},
++				{0x94408, 0x04},
++				// Event Groups 0x94500-0x94520
++				{0x94500, 0x20},
++				{0x94520, 0x04},
++				// CSSD/Memory Control 0x96040-0x96048
++				{0x96040, 0x08},
++				{0x96048, 0x04},
++				// DMA BD + Control/Status 0xA0000-0xA06C4
++				{0xA0000, 0x6C8},
++				// DMA Control/Status 0xA06E0-0xA06F4
++				{0xA06E0, 0x18},
++				// Stream Switch Master Config 0xB0000-0xB0040
++				{0xB0000, 0x40},
++				{0xB0040, 0x04},
++				// Stream Switch Slave Config 0xB0100-0xB0144
++				{0xB0100, 0x48},
++				// Stream Switch Slave Slots 0xB0200-0xB031C
++				{0xB0200, 0x120},
++				// Stream Switch Deterministic Merge 0xB0800-0xB0818
++				{0xB0800, 0x18},
++				{0xB0818, 0x04},
++				// Stream Switch Event/Status 0xB0F00-0xB0F38
++				{0xB0F00, 0x38},
++				{0xB0F38, 0x04},
++				// Lock registers + Locks Event Selection 0xC0000-0xC042C
++				{0xC0000, 0x430},
++				// Module Clock/Reset/Tile Control 0xFFF00-0xFFF20
++				{0xFFF00, 0x20},
++				{0xFFF20, 0x04},
++				// Module Clock/Reset/Tile Control 0xFFFF0-0xFFFF4
++				{0xFFFF0, 0x08}
++			};
++			/* Read Memory tile register ranges */
++			for (i = 0; i < ARRAY_SIZE(mem_tile_ranges); i++) {
++				offset = mem_tile_ranges[i].offset;
++				dump_len = mem_tile_ranges[i].len;
++				ret = aie_partition_read(dev, loc, offset, dump_len,
++							(char *)data + tile_base_offset + offset);
+ 				if (ret < 0) {
+-					dev_err(dev, "failed to read memory tile at %d,%d", loc.col, loc.row);
++					dev_err(dev, "failed to read mem tile range 0x%x at %d,%d",
++						offset, loc.col, loc.row);
+ 					return ret;
+ 				}
+ 			}
+ 		}
++		}
+ 	}
+ 
+ 	return expected_len;
+-- 
+2.43.0
+

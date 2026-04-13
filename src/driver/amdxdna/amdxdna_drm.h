@@ -30,6 +30,8 @@
 #define XDNA_DBG(xdna, fmt, args...)	dev_dbg((xdna)->ddev.dev, fmt, ##args)
 
 #define XDNA_INFO_ONCE(xdna, fmt, args...)	dev_info_once((xdna)->ddev.dev, fmt, ##args)
+#define XDNA_WARN_ONCE(xdna, fmt, args...) \
+	dev_warn_once((xdna)->ddev.dev, "%s: " fmt, __func__, ##args)
 
 #define to_xdna_dev(drm_dev) \
 	((struct amdxdna_dev *)container_of(drm_dev, struct amdxdna_dev, ddev))
@@ -134,6 +136,13 @@ struct amdxdna_fw_ver {
 	u32 build;
 };
 
+struct amdxdna_cert_ver {
+	u8 major;
+	u8 minor;
+	u8 hotfix;
+	u8 build;
+};
+
 struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
@@ -146,6 +155,7 @@ struct amdxdna_dev {
 	struct mutex			dev_lock;
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
+	struct amdxdna_cert_ver		cert_ver;
 	struct amdxdna_dpt		*fw_log;
 	struct amdxdna_dpt		*fw_trace;
 #ifdef AMDXDNA_DEVEL

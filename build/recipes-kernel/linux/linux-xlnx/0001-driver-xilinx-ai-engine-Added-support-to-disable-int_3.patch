@@ -1,0 +1,115 @@
+From 52a6a5f9d4dfd84a3951a0845282654de5e40f29 Mon Sep 17 00:00:00 2001
+From: Keerthanna Mohan <keerthanna.mohan@amd.com>
+Date: Mon, 8 Dec 2025 13:53:10 -0800
+Subject: [LINUX PATCH 1/2] driver: xilinx-ai-engine: Added support to disable
+ interrupts
+
+Reading and writing of the entire 1MB tile address space causes infinite
+errors being propagated to the PS due to the reading of register holes.
+Hence interrupts are disabled before the 1MB read/write.
+
+Signed-off-by: Keerthanna Mohan <keerthanna.mohan@amd.com>
+---
+ .../misc/xilinx-ai-engine/ai-engine-aie2ps.c  | 26 +++++++++++++++++++
+ .../xilinx-ai-engine/ai-engine-internal.h     |  3 +++
+ .../xilinx-ai-engine/ai-engine-interrupt.c    |  2 +-
+ .../misc/xilinx-ai-engine/ai-engine-part.c    | 10 +++++++
+ 4 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+index 1209a8db69b5..e03c8399bd43 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+@@ -3860,6 +3860,31 @@ static int aie2ps_map_uc_mem(struct aie_partition *apart, u64 addr,
+ 	return AIE_UC_MEM_MAX;
+ }
+ 
++static int aie2ps_disable_interrupt (struct aie_partition* apart) {
++	const struct aie_l2_intr_ctrl_attr *intr_ctrl = apart->adev->l2_ctrl;
++	u32 l2_enable_mask = intr_ctrl->disable.mask;
++	int ret = 0, start_col, num_cols;
++	struct aie_location loc;
++	u16 data =  0;
++
++	start_col = aie_part_id_get_start_col(apart->partition_id);
++	num_cols = aie_part_id_get_num_cols(apart->partition_id);
++	for (loc.col = start_col; loc.col < start_col + num_cols; loc.col++) {
++		aie_aperture_disable_l2_ctrl(apart->aperture, &loc, l2_enable_mask);
++	}
++
++	data = 0x7;
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_MASK, apart->range, 1);
++	if (ret) {
++		dev_err(&apart->dev,
++			"failed to disable hardware error interrupts in col: %u\n",
++			loc.col);
++		return ret;
++	}
++
++       return 0;
++}
++
+ /**
+  * aie2ps_tile_port_verify() - verifies stream switch ports can connect in AIE tile
+  * @ttype: type of AI Engine tile
+@@ -4071,6 +4096,7 @@ static const struct aie_tile_operations aie2ps_ops = {
+ 	.part_clean = aie2ps_part_clean,
+ 	.part_reset = aie2ps_part_reset,
+ 	.strmsw_port_verify = aie2ps_port_verify,
++	.disable_interrupt = aie2ps_disable_interrupt,
+ };
+ 
+ /**
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+index 362bfb68c4cc..215b5bc62354 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+@@ -741,6 +741,7 @@ struct aie_tile_operations {
+ 	int (*strmsw_port_verify)(u8 ttype,
+ 				  enum aie_strmsw_port_type slv, u8 slv_port_num,
+ 				  enum aie_strmsw_port_type mstr, u8 mstr_port_num);
++	int (*disable_interrupt)(struct aie_partition *apart);
+ };
+ 
+ /**
+@@ -1912,4 +1913,6 @@ int aie_part_enable_noc_to_aie(struct aie_partition *apart,
+ 			       struct aie_location *loc, u8 port_num);
+ int aie_part_enable_aie_to_noc(struct aie_partition *apart,
+ 			       struct aie_location *loc, u8 port_num);
++void aie_aperture_disable_l2_ctrl(struct aie_aperture *aperture,
++				  struct aie_location *loc, u32 bit_map);
+ #endif /* AIE_INTERNAL_H */
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index 8f32fcf8d752..0ea5bad3f57e 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -415,7 +415,7 @@ static void aie_aperture_enable_l2_ctrl(struct aie_aperture *aperture,
+  * @loc: pointer to tile location.
+  * @bit_map: bitmap of broadcast lines to disable.
+  */
+-static void aie_aperture_disable_l2_ctrl(struct aie_aperture *aperture,
++void aie_aperture_disable_l2_ctrl(struct aie_aperture *aperture,
+ 					 struct aie_location *loc, u32 bit_map)
+ {
+ 	const struct aie_l2_intr_ctrl_attr *intr_ctrl = aperture->adev->l2_ctrl;
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+index 2dfa7dbbc462..c2749b4c4b30 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -1899,3 +1899,13 @@ int aie_load_cert_broadcast(struct device *dev, void *elf_addr)
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(aie_load_cert_broadcast);
++
++static int aie_part_disable_interrupt (struct aie_partition *apart) {
++	if (!apart)
++		return -EINVAL;
++
++	if (apart->adev->ops->disable_interrupt)
++		return apart->adev->ops->disable_interrupt(apart);
++
++	return -EINVAL;
++}
+-- 
+2.34.1
+

@@ -28,8 +28,6 @@ static int ve2_query_ctx_status_array(struct amdxdna_client *client,
 	int ret = 0, idx;
 	u32 hw_i = 0;
 
-	XDNA_DBG(xdna, "Query context status: pid=%d, ctx_id=%u", pid, ctx_id);
-
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		size_t total_bo_usage;
 		u32 pid, pasid;
@@ -407,20 +405,22 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 static int ve2_get_firmware_version(struct amdxdna_client *client,
 				    struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_dev_hdl *hdl = client->xdna->dev_handle;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *hdl = xdna->dev_handle;
 	struct ve2_firmware_version *fver = &hdl->fw_version;
-	struct amdxdna_drm_query_ve2_firmware_version version;
+	struct amdxdna_drm_query_firmware_version version;
 
 	if (!fver)
 		return -EINVAL;
 
-	memset(&version, 0, sizeof(version));
+	XDNA_DBG(xdna, "CERT firmware: git_hash=%s, date=%s",
+		 fver->git_hash, fver->date);
 
+	memset(&version, 0, sizeof(version));
 	version.major = fver->major;
 	version.minor = fver->minor;
-
-	memcpy(version.date, fver->date, VE2_FW_DATE_STRING_LENGTH);
-	memcpy(version.git_hash, fver->git_hash, VE2_FW_HASH_STRING_LENGTH);
+	version.patch = fver->hotfix;
+	version.build = fver->build;
 
 	if (args->buffer_size < sizeof(version))
 		return -EINVAL;
@@ -437,12 +437,24 @@ static int ve2_get_total_col(struct amdxdna_client *client, struct amdxdna_drm_g
 	struct amdxdna_drm_query_aie_metadata *meta;
 	int ret = 0;
 
-	meta = kmalloc(sizeof(*meta), GFP_KERNEL);
+	if (args->buffer_size < sizeof(*meta)) {
+		XDNA_ERR(xdna, "Buffer too small. Given: %u, required: %zu",
+			 args->buffer_size, sizeof(*meta));
+		args->buffer_size = sizeof(*meta);
+		return -ENOBUFS;
+	}
+
+	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
 	if (!meta)
 		return -ENOMEM;
 
-	meta->cols = xrs_get_total_cols(xdna->dev_handle->xrs_hdl);
-	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, args->buffer_size))
+	meta->cols = xdna->dev_handle->aie_dev_info.cols;
+	meta->rows = xdna->dev_handle->aie_dev_info.rows;
+	meta->core.row_count = xdna->dev_handle->aie_dev_info.core_rows;
+	meta->mem.row_count = xdna->dev_handle->aie_dev_info.mem_rows;
+	meta->shim.row_count = xdna->dev_handle->aie_dev_info.shim_rows;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, sizeof(*meta)))
 		ret = -EFAULT;
 
 	kfree(meta);
@@ -603,12 +615,10 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
-	case DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION:
-		XDNA_DBG(xdna, "Querying firmware version");
+	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
 		ret = ve2_get_firmware_version(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
-		XDNA_DBG(xdna, "Querying AIE metadata");
 		ret = ve2_get_total_col(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
@@ -620,7 +630,6 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		break;
 	}
 
-	XDNA_DBG(xdna, "Get AIE info result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 
@@ -783,19 +792,15 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_COREDUMP:
-		XDNA_DBG(xdna, "Reading AIE coredump");
 		ret = ve2_coredump_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
-		XDNA_DBG(xdna, "Getting all hardware contexts");
 		ret = ve2_get_array_hwctx(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_READ:
-		XDNA_DBG(xdna, "Reading AIE tile");
 		ret = ve2_aie_read(client, args);
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
-		XDNA_DBG(xdna, "Getting last async error");
 		ret = ve2_get_array_async_error(xdna, args);
 		break;
 	case DRM_AMDXDNA_HWCTX_AIE_PART_FD:
@@ -811,9 +816,113 @@ int ve2_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *a
 		break;
 	}
 
-	XDNA_DBG(xdna, "Get array result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
+
+	return ret;
+}
+
+static int ve2_set_clock_freq(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_query_clock set_freq;
+	struct aie_partition_req part_req = { 0 };
+	struct xrs_action_load action = {};
+	struct alloc_requests req = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_ctx *hwctx = NULL;
+	struct device *aie_dev = NULL;
+	struct solver_state *xrs = NULL;
+	unsigned long ctx_id;
+	u32 partition_id;
+	u32 num_cols = MIN_COL_SUPPORT;
+	u64 freq_hz;
+	int ret, idx;
+	bool temp_partition = false;
+
+	if (args->buffer_size != sizeof(set_freq)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u, Expected: %lu",
+			 args->buffer_size, sizeof(set_freq));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&set_freq, u64_to_user_ptr(args->buffer), sizeof(set_freq))) {
+		XDNA_ERR(xdna, "Failed to copy set_clock_freq from user");
+		return -EFAULT;
+	}
+
+	/* Convert MHz to Hz */
+	freq_hz = (u64)set_freq.freq_mhz * 1000000;
+	XDNA_DBG(xdna, "Set AIE clock freq: %llu Hz (%u MHz)",
+		 freq_hz, set_freq.freq_mhz);
+
+	/* Search for existing context with AIE partition across all clients */
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		idx = srcu_read_lock(&tmp_client->ctx_srcu);
+		amdxdna_for_each_ctx(tmp_client, ctx_id, hwctx) {
+			if (hwctx && hwctx->priv && hwctx->priv->aie_dev) {
+				aie_dev = hwctx->priv->aie_dev;
+				srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+				goto set_freq;
+			}
+		}
+		srcu_read_unlock(&tmp_client->ctx_srcu, idx);
+	}
+
+	XDNA_DBG(xdna, "No active partition found, allocating temporary partition");
+
+	req.cdo.ncols = num_cols;
+	ret = ve2_xrs_col_list(xdna, &req, num_cols);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to build column list: %d", ret);
+		return ret;
+	}
+	req.rid = (u64)client;
+	req.rqos.user_start_col = USER_START_COL_NOT_REQUESTED;
+
+	xrs = (struct solver_state *)xdna->dev_handle->xrs_hdl;
+	mutex_lock(&xrs->xrs_lock);
+	ret = xrs_allocate_resource(xdna->dev_handle->xrs_hdl, &req, &action);
+	mutex_unlock(&xrs->xrs_lock);
+
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to allocate temporary partition: %d", ret);
+		kfree(req.cdo.start_cols);
+		return ret;
+	}
+
+	partition_id = aie_calc_part_id(action.part.start_col, action.part.ncols);
+	part_req.partition_id = partition_id;
+	aie_dev = aie_partition_request(&part_req);
+	if (IS_ERR(aie_dev)) {
+		ret = PTR_ERR(aie_dev);
+		mutex_lock(&xrs->xrs_lock);
+		xrs_release_resource(xdna->dev_handle->xrs_hdl, req.rid, &action);
+		mutex_unlock(&xrs->xrs_lock);
+		kfree(req.cdo.start_cols);
+		XDNA_ERR(xdna, "Failed to request AIE partition %u: %d", partition_id, ret);
+		return ret;
+	}
+	temp_partition = true;
+
+set_freq:
+	ret = aie_partition_set_freq_req(aie_dev, freq_hz);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to set AIE frequency to %llu Hz: %d",
+			 freq_hz, ret);
+	} else {
+		XDNA_DBG(xdna, "Successfully set AIE frequency to %llu Hz (%u MHz)",
+			 freq_hz, set_freq.freq_mhz);
+	}
+
+	/* Cleanup temporary partition */
+	if (temp_partition) {
+		aie_partition_release(aie_dev);
+		mutex_lock(&xrs->xrs_lock);
+		xrs_release_resource(xdna->dev_handle->xrs_hdl, req.rid, &action);
+		mutex_unlock(&xrs->xrs_lock);
+		kfree(req.cdo.start_cols);
+	}
 
 	return ret;
 }
@@ -831,8 +940,11 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 	mutex_lock(&xdna->dev_lock);
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
-		XDNA_DBG(xdna, "Writing AIE tile");
 		ret = ve2_aie_write(client, args);
+		break;
+	case DRM_AMDXDNA_SET_CLOCK_FREQ:
+		XDNA_DBG(xdna, "Setting AIE clock frequency");
+		ret = ve2_set_clock_freq(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -840,7 +952,6 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 		break;
 	}
 
-	XDNA_DBG(xdna, "Set AIE state result: ret=%d", ret);
 	mutex_unlock(&xdna->dev_lock);
 	drm_dev_exit(idx);
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2025, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #include <linux/errno.h>
@@ -148,7 +148,7 @@ static int aie2_mgmt_chann_init(struct amdxdna_dev_hdl *ndev)
 	 * is alive.
 	 */
 	ret = readx_poll_timeout(readl, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF),
-				 addr, addr, AIE2_INTERVAL, AIE2_TIMEOUT);
+				 addr, addr, AIE_INTERVAL, AIE_TIMEOUT);
 	if (ret || !addr)
 		return -ETIME;
 
@@ -494,6 +494,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
 	struct amdxdna_dev_hdl *ndev;
+	struct smu_config smu_conf;
 	struct psp_config psp_conf;
 	const struct firmware *fw;
 	unsigned long bars = 0;
@@ -524,9 +525,10 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		set_bit(PSP_REG_BAR(ndev, i), &bars);
+	for (i = 0; i < SMU_MAX_REGS; i++)
+		set_bit(SMU_REG_BAR(ndev, i), &bars);
 
 	set_bit(xdna->dev_info->sram_bar, &bars);
-	set_bit(xdna->dev_info->smu_bar, &bars);
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 
 	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
@@ -541,7 +543,6 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 
 	ndev->sram_base = tbl[xdna->dev_info->sram_bar];
-	ndev->smu_base = tbl[xdna->dev_info->smu_bar];
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
 
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
@@ -583,11 +584,23 @@ skip_pasid:
 #endif
 	psp_conf.fw_size = fw->size;
 	psp_conf.fw_buf = fw->data;
+	/* Reset cert FW related parameters */
+	psp_conf.certfw_size = 0;
+	psp_conf.certfw_buf = NULL;
+
 	for (i = 0; i < PSP_MAX_REGS; i++)
 		psp_conf.psp_regs[i] = tbl[PSP_REG_BAR(ndev, i)] + PSP_REG_OFF(ndev, i);
-	ndev->psp_hdl = aie2m_psp_create(&pdev->dev, &psp_conf);
+	ndev->psp_hdl = aiem_psp_create(&xdna->ddev, &pdev->dev, &psp_conf);
 	if (!ndev->psp_hdl) {
 		XDNA_ERR(xdna, "failed to create psp");
+		ret = -ENOMEM;
+		goto disable_sva;
+	}
+	for (i = 0; i < SMU_MAX_REGS; i++)
+		smu_conf.smu_regs[i] = tbl[SMU_REG_BAR(ndev, i)] + SMU_REG_OFF(ndev, i);
+	ndev->smu_hdl = aiem_smu_create(&xdna->ddev, &smu_conf);
+	if (!ndev->smu_hdl) {
+		XDNA_ERR(xdna, "failed to create smu");
 		ret = -ENOMEM;
 		goto disable_sva;
 	}
@@ -830,6 +843,7 @@ static int aie2_query_clock_metadata(struct amdxdna_client *client,
 
 	ndev = xdna->dev_handle;
 
+	aie2_update_counters(ndev);
 	snprintf(clock.mp_npu_clock.name, sizeof(clock.mp_npu_clock.name),
 		 "MP-NPU Clock");
 	clock.mp_npu_clock.freq_mhz = ndev->npuclk_freq;
@@ -846,32 +860,62 @@ static int aie2_query_clock_metadata(struct amdxdna_client *client,
 static int aie2_query_sensors(struct amdxdna_client *client,
 			      struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_sensor *sensor;
-	struct amdxdna_dev *xdna = client->xdna;
-	int ret = 0;
-	int min;
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
+	struct amdxdna_drm_query_sensor sensor = {};
+	struct amd_pmf_npu_metrics npu_metrics;
+	u32 sensors_count = 0, i;
+	int ret;
 
-	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
-		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
-		return -EFAULT;
+	ret = AIE2_GET_PMF_NPU_METRICS(&npu_metrics);
+	if (ret) {
+		XDNA_ERR(client->xdna, "PMF get npu data failed, ret %d", ret);
+		return ret;
 	}
 
-	min = min(args->buffer_size, sizeof(*sensor));
-	sensor = kzalloc(sizeof(*sensor), GFP_KERNEL);
-	if (!sensor)
-		return -ENOMEM;
+	sensor.type = AMDXDNA_SENSOR_TYPE_POWER;
+	sensor.input = npu_metrics.npu_power;
+	sensor.unitm = -3;
+	snprintf(sensor.label, sizeof(sensor.label), "Total Power");
+	snprintf(sensor.units, sizeof(sensor.units), "mW");
 
-	sensor->type = AMDXDNA_SENSOR_TYPE_POWER;
-	sensor->input = __UINT32_MAX__; /* TODO: query the device and get the power data */
-	sensor->unitm = -3; /* in milliwatts */
-	snprintf(sensor->label, sizeof(sensor->label), "Total Power");
-	snprintf(sensor->units, sizeof(sensor->units), "mW");
+	if (args->buffer_size < sizeof(sensor))
+		goto out;
 
-	if (copy_to_user(u64_to_user_ptr(args->buffer), sensor, min))
-		ret = -EFAULT;
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &sensor, sizeof(sensor)))
+		return -EFAULT;
 
-	kfree(sensor);
-	return ret;
+	args->buffer_size -= sizeof(sensor);
+	sensors_count++;
+
+	for (i = 0; i < min_t(u32, ndev->total_col, 8); i++) {
+		memset(&sensor, 0, sizeof(sensor));
+		sensor.input = npu_metrics.npu_busy[i];
+		sensor.type = AMDXDNA_SENSOR_TYPE_COLUMN_UTILIZATION;
+		sensor.unitm = 0;
+		snprintf(sensor.label, sizeof(sensor.label),
+			 "Column %d Utilization", i);
+		snprintf(sensor.units, sizeof(sensor.units), "%%");
+
+		if (args->buffer_size < sizeof(sensor))
+			goto out;
+
+		if (copy_to_user(u64_to_user_ptr(args->buffer) +
+				 sensors_count * sizeof(sensor),
+				 &sensor, sizeof(sensor)))
+			return -EFAULT;
+
+		args->buffer_size -= sizeof(sensor);
+		sensors_count++;
+	}
+
+out:
+	args->buffer_size = sensors_count * sizeof(sensor);
+
+	return 0;
+#else
+	return -EOPNOTSUPP;
+#endif
 }
 
 static int aie2_query_ctx_status(struct amdxdna_client *client,
@@ -1073,7 +1117,7 @@ static int aie2_query_frame_boundary_preempt_state(struct amdxdna_client *client
 	ndev = xdna->dev_handle;
 	preempt.state = ndev->frame_boundary_preempt ? 1 : 0;
 
-	min = min(args->buffer, sizeof(preempt));
+	min = min(args->buffer_size, sizeof(preempt));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &preempt, min))
 		return -EFAULT;
 
@@ -1098,6 +1142,7 @@ static int aie2_query_resource_info(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
+	aie2_update_counters(ndev);
 	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
 	res_info.npu_tops_max = ndev->max_tops;
 	res_info.npu_task_max = priv->hwctx_limit;

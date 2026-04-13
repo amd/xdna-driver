@@ -1,0 +1,94 @@
+#! /usr/bin/python3
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2024, Advanced Micro Devices, Inc.
+#
+
+# This parser is to parse the flags in AMD-Vi Event log for IO_PAGE_FAULT, for example
+#   AMD-Vi: Event logged [IO_PAGE_FAULT domain=0x001a address=0xfffc8000 flags=0x0050]
+
+# Ref:
+# 1. [AMD I/O Virtualization Technology(IOMMU) Specification, 48882.pdf](https://www.amd.com/content/dam/amd/en/documents/processor-tech-docs/specifications/48882_IOMMU.pdf)
+#   - Section 2.5.3 IO_PAGE_FAULT Event
+
+import argparse
+from enum import IntFlag
+
+class PageFaultFlagParser:
+    class Flags(IntFlag):
+        GN = 0x001
+        NX = 0x002
+        US = 0x004
+        I  = 0x008
+        PR = 0x010
+        RW = 0x020
+        PE = 0x040
+        RZ = 0x080
+        TR = 0x100
+
+    # Flags lookup table
+    lut = {
+        Flags.GN: {
+            'name': "GN: guest/nested",
+            'set':   "1 = Transaction used a guess address (GVA)",
+            'unset': "0 = Transaction used a nested address (GPA)",
+        },
+        Flags.NX: {
+            'name': "NX: no execute",
+            'set':   "1 = when the upstream transaction has a PASID TLP prefix",
+            'unset': "0 = when the upstream transaction lacks a PASID TLP prefix",
+        },
+        Flags.US: {
+            'name': "US: user-supervisor",
+            'set':   "1 = User privileges were asserted",
+            'unset': "0 = Supervisor privileges were asserted",
+        },
+        Flags.I: {
+            'name': "I: interrupt",
+            'set':   "1 = transaction was an interrupt request",
+            'unset': "0 = transaction was a memory request",
+        },
+        Flags.PR: {
+            'name': "PR: present",
+            'set':   "1 = transaction was to a page marked as present or (including V=1b in DTE) or interrupt marked as remapped (RemapEn=1)",
+            'unset': "0 = transaction was to a page marked not present or interrupt marked as blocked (RemapEn=0)",
+        },
+        Flags.RW: {
+            'name': "RW: read-write (only meaningful when PR=1, TR=0, I=0)",
+            'set':   "1 = transaction was a write",
+            'unset': "0 = transaction was a read",
+        },
+        Flags.PE: {
+            'name': "PE: permission indicator (only meaningful when PR=1)",
+            'set':   "1 = peripheral did not have the permissions required to perform the transaction",
+            'unset': "0 = peripheral had the necessary permissions",
+        },
+        Flags.RZ: {
+            'name': "RZ: reserved bit not zero or invalid level encoding (only meaningful when PR=1)",
+            'set':   "1 = I/O page fault was caused by a non-zero reserved bit in the entry",
+            'unset': "0 = I/O page fault was caused by an invalid level encoding",
+        },
+        Flags.TR: {
+            'name': "TR: translation",
+            'set':   "1 = transaction that caused the Device Table lookup was a translation request",
+            'unset': "0 = transaction that caused the Device Table lookup was a transaction request",
+        },
+    }
+
+    @classmethod
+    def parse_flag(cls, flags):
+        for flag in cls.Flags:
+            if flags & flag:
+                print(f"{cls.lut[flag]['name']}:\n\t{cls.lut[flag]['set']}")
+            else:
+                print(f"{cls.lut[flag]['name']}:\n\t{cls.lut[flag]['unset']}")
+
+def main():
+    parser = argparse.ArgumentParser(description="IO_PAGE_FAULT flag Parser")
+    parser.add_argument("flags", type=lambda x: int(x, 16), help="IO page fault flag to parse")
+
+    args = parser.parse_args()
+    PageFaultFlagParser.parse_flag(args.flags)
+
+if __name__ == "__main__":
+    main()

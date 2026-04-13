@@ -29,16 +29,15 @@ enum ert_cmd_opcode {
 };
 
 enum ert_cmd_state {
-	ERT_CMD_STATE_INVALID,
-	ERT_CMD_STATE_NEW,
-	ERT_CMD_STATE_QUEUED,
-	ERT_CMD_STATE_RUNNING,
-	ERT_CMD_STATE_COMPLETED,
-	ERT_CMD_STATE_ERROR,
-	ERT_CMD_STATE_ABORT,
-	ERT_CMD_STATE_SUBMITTED,
-	ERT_CMD_STATE_TIMEOUT,
-	ERT_CMD_STATE_NORESPONSE,
+	ERT_CMD_STATE_NEW = 1,
+	ERT_CMD_STATE_QUEUED = 2,
+	ERT_CMD_STATE_RUNNING = 3,
+	ERT_CMD_STATE_COMPLETED = 4,
+	ERT_CMD_STATE_ERROR = 5,
+	ERT_CMD_STATE_ABORT = 6,
+	ERT_CMD_STATE_SUBMITTED = 7,
+	ERT_CMD_STATE_TIMEOUT = 8,
+	ERT_CMD_STATE_NORESPONSE = 9,
 };
 
 /*
@@ -162,9 +161,20 @@ struct uc_health_info {
  * Interpretation of payload for an amdxdna_cmd which has context health data for AIE2PS and AIE4
  *
  * @ctx_state:             context state
- * @num_ucs:               number of uC reported
+ * @num_uc:                number of uC reported
+ * @ctx_error_type:        context error type. Error types:
+ *                         AIE4_ASYNC_EVENT_CTX_ERR_HWSCH_FAILURE: HWS error moving a context from
+ *			   one state to another
+ *                         AIE4_ASYNC_EVENT_CTX_ERR_STOP_FAILURE: HWS error stopping a context
+ *                         AIE4_ASYNC_EVENT_CTX_ERR_AIE_FAILURE: NPI error interrupt
+ *                         AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_TIMEOUT: preemption took too long
+ *                         AIE4_ASYNC_EVENT_CTX_ERR_NEW_PROCESS_FAILURE:HWS error - unable to
+ *			   create a process for a context
+ *                         AIE4_ASYNC_EVENT_CTX_ERR_UC_CRITICAL_ERROR: CERT critical error interrupt
+ *                         AIE4_ASYNC_EVENT_CTX_ERR_UC_COMPLETION_TIMEOUT: Context TDR - CERT is
+ *			   stuck / control code hang
  * @uc_info:               array for health data for each uC in the context.
- *                         the array size is based on num_certs.
+ *                         the array size is based on num_uc.
  *
  * Once an amdxdna_cmd completes with state ERT_CMD_STATE_TIMEOUT, the
  * amdxdna_cmd starting from payload will have the following information for aie2ps/aie4 generation.
@@ -172,6 +182,7 @@ struct uc_health_info {
 struct amdxdna_ctx_health_data_aie4 {
 	u32 ctx_state;
 	u32 num_uc;
+	u32 ctx_error_type;
 	struct uc_health_info uc_info[];
 };
 

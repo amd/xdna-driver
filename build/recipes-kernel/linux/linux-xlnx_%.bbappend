@@ -1,0 +1,13 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+SRC_URI:append = " file://bsp_vaiml.cfg"
+KERNEL_FEATURES:append = " bsp_vaiml.cfg"
+
+SRC_URI:append = " file://0001-driver-xilinx-ai-engine-Added-support-to-disable-int_3.patch"
+SRC_URI:append = " file://0002-driver-xilinx-ai-engine-Added-support-to-disable-axi_1.patch"
+SRC_URI:append = " file://0001-xilinx-ai-engine-Fix-error-reporting-in-aie2ps_l1_ba.patch"
+SRC_URI:append = " file://0002-xilinx-ai-engine-Unlock-mutex-before-error-callback-.patch"
+SRC_URI:append = " file://0003-xilinx-ai-engine-Fix-type-width-for-event-related-va.patch"
+SRC_URI:append = " file://0001-range-based-coredump.patch"
+SRC_URI:append = " file://0001-Add-auxdev-support.patch"
+SRC_URI:append = " file://0001-misc-xilinx-ai-engine-Correct-number-of-performance-.patch"
+SRC_URI:append = " file://0004-xilinx-ai-engine-Replace-udelay-with-usleep_range-in.patch"

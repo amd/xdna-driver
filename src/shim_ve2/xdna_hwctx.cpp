@@ -363,30 +363,11 @@ std::unique_ptr<xrt_core::buffer_handle>
 xdna_hwctx::
 alloc_bo(void* userptr, size_t size, uint64_t flags)
 {
-  // const_cast: alloc_bo() is not const yet in device class
   auto dev = const_cast<device_xdna*>(get_device());
 
   /* Inject hwctx mem_bitmap (queried from driver) into BO flags. */
-  xcl_bo_flags xflags{flags};
-  /* When m_mem_bitmap == 0 (no topology), pass 0 so kernel uses default CMA. */
-  if (xflags.use > 0) {
-    /* Internal BO: pass whole bitmap */
-    xflags.bank = m_mem_bitmap;
-  } else {
-    /* External BO: single region from bitmap, or 0 for default CMA */
-    uint32_t bank_index = xflags.bank;
-    xflags.bank = (m_mem_bitmap == 0) ? 0 : (1U << bank_index);
-  }
+  return dev->alloc_bo(userptr, get_slotidx(), size, flags, m_mem_bitmap);
 
-  uint64_t corrected_flags = xflags.all;
-
-  // Debug or dtrace buffers are specific to context.
-  if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
-      xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
-    return dev->alloc_bo(userptr, get_slotidx(), size, corrected_flags);
-
-  // Other BOs are shared across all contexts.
-  return dev->alloc_bo(userptr, AMDXDNA_INVALID_CTX_HANDLE, size, corrected_flags);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

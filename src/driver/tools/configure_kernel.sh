@@ -15,9 +15,13 @@ SCRIPT_HASH="$(sha256sum "$0" | awk '{print $1}')"
 #   2) $kernelver (DKMS gives this)
 #   3) $(uname -r) (Fall back to current running kernel)
 KERNEL_VER="${KERNEL_VER:-${kernelver:-$(uname -r)}}"
-KERNEL_SRC="${KERNEL_SRC:-/lib/modules/${KERNEL_VER}/build}"
-if [ ! -d "$KERNEL_SRC/include/linux" ]; then
-    echo "ERROR: Cannot find kernel headers under $KERNEL_SRC" >&2
+KERNEL_DIR="/lib/modules/${KERNEL_VER}"
+KERNEL_SRC="${KERNEL_SRC:-${KERNEL_DIR}/build}"
+KERNEL_CMN="${KERNEL_DIR}/source"
+
+if [ ! -d "$KERNEL_SRC/include/linux" ] && \
+   [ ! -d "$KERNEL_CMN/include/linux" ]; then
+    echo "ERROR: Cannot find kernel headers under $KERNEL_SRC or $KERNEL_CMN" >&2
     exit 1
 fi
 
@@ -286,6 +290,20 @@ try_compile HAVE_xen_phy_dma_ops << 'EOF'
 int main(void)
 {
 	const struct dma_map_ops *a = &xen_phy_dma_ops;
+	return 0;
+}
+EOF
+
+# Test amd_pmf_get_npu_data exists
+try_compile HAVE_7_0_amd_pmf_get_npu_data << 'EOF'
+#include <linux/module.h>
+#include <linux/amd-pmf-io.h>
+int main(void)
+{
+	MODULE_IMPORT_NS("AMD_PMF");
+
+	struct amd_pmf_npu_metrics info;
+	int ret = amd_pmf_get_npu_data(&info);
 	return 0;
 }
 EOF

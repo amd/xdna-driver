@@ -205,32 +205,6 @@ struct fw_buffer_metadata {
 };
 
 /**
- * struct amdxdna_hwctx_param_config_scheduling - Scheduling configuration
- * @quantum: Context quantum in 100ns units (defaults to 5ms = 50000)
- * @in_process_priority: Priority relative to other contexts in same process (-7 to +7, default 0)
- * @realtime_band_priority_level: Priority level within realtime band (0-31, ignore for other bands)
- */
-struct amdxdna_hwctx_param_config_scheduling {
-	__u32 quantum;
-	__s32 in_process_priority;
-	__u32 realtime_band_priority_level;
-};
-
-/**
- * struct amdxdna_hwctx_param_config_dpm - DPM configuration
- * @egops: Effective giga-operations per workload
- * @fps: Workloads per second that this hardware context will run at
- * @data_movement: Total bytes transferred for 1 workload
- * @latency_in_us: Maximum time within which workload must be completed
- */
-struct amdxdna_hwctx_param_config_dpm {
-	__u32 egops;
-	__u32 fps;
-	__u32 data_movement;
-	__u32 latency_in_us;
-};
-
-/**
  * struct amdxdna_drm_config_hwctx - Configure context.
  * @handle: Context handle.
  * @param_type: Specifies the structure passed in via param_val.
@@ -248,9 +222,6 @@ struct amdxdna_drm_config_hwctx {
 #define DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF	1
 #define DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF	2
 #define DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT	3
-#define DRM_AMDXDNA_HWCTX_CONFIG_PRIORITY_BAND	4
-#define DRM_AMDXDNA_HWCTX_CONFIG_SCHEDULING	5
-#define DRM_AMDXDNA_HWCTX_CONFIG_DPM		6
 	__u32 param_type;
 	__u64 param_val;
 	__u32 param_val_size;
@@ -485,7 +456,8 @@ struct amdxdna_drm_query_sensor {
 	__u8  status[64];
 	__u8  units[16];
 	__s8  unitm;
-#define AMDXDNA_SENSOR_TYPE_POWER 0
+#define AMDXDNA_SENSOR_TYPE_POWER		0
+#define AMDXDNA_SENSOR_TYPE_COLUMN_UTILIZATION	1
 	__u8  type;
 	__u8  pad[6];
 };
@@ -580,20 +552,6 @@ struct amdxdna_drm_query_firmware_version {
 };
 
 /**
- * struct amdxdna_drm_query_ve2_firmware_version - Query the git hash and version of the firmware
- * @major:  Major version number
- * @minor:  Minor version number
- * @date:  Build date of the firmware
- * @git_hash:  Git commit ID used to build the firmware version
- */
-struct amdxdna_drm_query_ve2_firmware_version {
-	__u8 major;
-	__u8 minor;
-	__u8 date[14];
-	__u8 git_hash[48];
-};
-
-/**
  * struct amdxdna_drm_get_resource_info - Get info on some resources within NPU
  * @npu_clk_max: max H-Clocks
  * @npu_tops_max: max TOPs
@@ -666,7 +624,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE		11
 #define	DRM_AMDXDNA_QUERY_RESOURCE_INFO			12
 #define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
-#define	DRM_AMDXDNA_QUERY_VE2_FIRMWARE_VERSION		14
+#define	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION		14
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
@@ -904,6 +862,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FW_LOG_STATE		5
 #define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
 #define	DRM_AMDXDNA_AIE_TILE_WRITE		7
+#define	DRM_AMDXDNA_SET_CLOCK_FREQ		8
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */

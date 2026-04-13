@@ -29,9 +29,7 @@
 #include "amdxdna_devel.h"
 #endif
 #include "amdxdna_aie.h"
-
-#define AIE2_INTERVAL	20000	/* us */
-#define AIE2_TIMEOUT	1000000	/* us */
+#include "aie_common.h"
 
 /* Firmware version encoding: major in high 32 bits, minor in low 32 bits */
 #define AIE2_FW_VERSION(major, minor)	(((u64)(major) << 32) | (minor))
@@ -62,6 +60,41 @@
 	typeof(ndev) _ndev = (ndev); \
 	((_ndev)->priv->mbox_size) ? (_ndev)->priv->mbox_size : \
 	pci_resource_len(NDEV2PDEV(_ndev), (_ndev)->xdna->dev_info->mbox_bar); \
+})
+
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
+#include <linux/amd-pmf-io.h>
+#define AIE2_GET_PMF_NPU_METRICS(metrics) amd_pmf_get_npu_data(metrics)
+#define AIE2_GET_PMF_NPU_DATA(field, val)				\
+({									\
+	struct amd_pmf_npu_metrics _npu_metrics;			\
+	int _ret;							\
+									\
+	_ret = amd_pmf_get_npu_data(&_npu_metrics);			\
+	val = _ret ? U32_MAX : _npu_metrics.field;			\
+	(_ret);								\
+})
+#else
+#define AIE2_GET_PMF_NPU_METRICS(metrics)				\
+({									\
+	typeof(metrics) _m = metrics;					\
+	memset(_m, 0xff, sizeof(*_m));					\
+	(-EOPNOTSUPP);							\
+})
+
+#define SENSOR_DEFAULT_npu_power	U32_MAX
+#define AIE2_GET_PMF_NPU_DATA(field, val)				\
+({									\
+	val = SENSOR_DEFAULT_##field;					\
+	(-EOPNOTSUPP);							\
+})
+#endif
+
+#define aie2_update_counters(ndev)					\
+({									\
+	typeof(ndev) _ndev = ndev;					\
+	if (_ndev->priv->hw_ops.update_counters)			\
+		_ndev->priv->hw_ops.update_counters(_ndev);		\
 })
 
 #define SMU_DPM_INVALID		0xffffffff
@@ -240,6 +273,7 @@ struct amdxdna_dev_hdl {
 	void			__iomem *smu_base;
 	void			__iomem *mbox_base;
 	struct psp_device		*psp_hdl;
+	struct smu_device		*smu_hdl;
 
 	struct xdna_mailbox_chann_info	mgmt_info;
 	u64				mgmt_fw_version;
@@ -291,14 +325,6 @@ struct amdxdna_dev_hdl {
 	struct aie2_tdr			tdr;
 
 	struct amdxdna_async_err_cache	async_errs_cache; // For async error event cache
-};
-
-#define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
-	[reg_name] = {bar##_BAR_INDEX, (reg_addr) - bar##_BAR_BASE}
-
-struct aie2_bar_off_pair {
-	int	bar_idx;
-	u32	offset;
 };
 
 struct aie2_hw_ops {
@@ -368,6 +394,11 @@ int aie2_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie2_smu_stop(struct amdxdna_dev_hdl *ndev);
 int npu1_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
+#ifdef HAVE_7_0_amd_pmf_get_npu_data
+int npu4_update_counters(struct amdxdna_dev_hdl *ndev);
+#else
+#define npu4_update_counters NULL
+#endif
 int aie2_smu_get_mpnpu_clock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_get_hclock_freq(struct amdxdna_dev_hdl *ndev);
 int aie2_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
@@ -392,11 +423,10 @@ static inline bool aie2_pm_is_turbo(struct amdxdna_dev_hdl *ndev)
 }
 
 /* aie2_psp.c */
-struct psp_device *aie2m_psp_create(struct device *dev, struct psp_config *conf);
-void aie2_psp_destroy(struct device *dev, void *psp_hdl);
 int aie2_psp_start(struct psp_device *psp);
 void aie2_psp_stop(struct psp_device *psp);
 int aie2_psp_waitmode_poll(struct psp_device *psp);
+void aie2_psp_destroy(struct device *dev, void *psp_hdl);
 
 /* aie2_debugfs.c */
 void aie2_debugfs_init(struct amdxdna_dev *xdna);

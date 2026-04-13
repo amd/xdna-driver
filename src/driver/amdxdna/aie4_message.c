@@ -126,6 +126,29 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
+int aie4_hws_debug_mode(struct amdxdna_dev_hdl *ndev, u32 ctx_id)
+{
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_hws_debug_mode *hws_debug;
+	u32 type = AIE4_RUNTIME_CONFIG_HWS_DEBUG_MODE;
+	int ret;
+
+	req.type = type;
+	hws_debug = (struct aie4_msg_runtime_config_hws_debug_mode *)req.data;
+	hws_debug->enable = AIE4_RUNTIME_HWS_DEBUG_MODE_ENABLE;
+	hws_debug->ctx_id = ctx_id;
+
+	msg.send_size = sizeof(req.type) + sizeof(*hws_debug);
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to set HWS debug mode, ret %d", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 int aie4_check_firmware_version(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_identify, AIE4_MSG_OP_IDENTIFY);
@@ -190,8 +213,7 @@ int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	req.dump_buff_addr = addr;
 	req.dump_buff_size = size;
 	// req.pasid = ; need to implement pasid
-	req.num_cols = hweight32(aie_bitmap);
-	req.aie4_bitmap = aie_bitmap;
+	req.aie4_col_bitmap = aie_bitmap;
 
 	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
 	ret = aie4_send_msg_wait(ndev, &msg);
@@ -223,6 +245,31 @@ int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 fail:
 	amdxdna_mgmt_buff_free(dma_hdl);
 	return ret;
+}
+
+int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_query_cert_firmware_version,
+			 AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int ret;
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret)
+		return ret;
+
+	xdna->cert_ver.major = resp.major_version;
+	xdna->cert_ver.minor = resp.minor_version;
+	xdna->cert_ver.hotfix = resp.hotfix;
+	xdna->cert_ver.build = resp.build;
+
+	XDNA_DBG(xdna, "CERT FW version %u.%u.%u.%u", xdna->cert_ver.major,
+		 xdna->cert_ver.minor, xdna->cert_ver.hotfix,
+		 xdna->cert_ver.build);
+	XDNA_DBG(xdna, "CERT FW git hash %s", resp.git_hash);
+	XDNA_DBG(xdna, "CERT FW date %s", resp.date);
+
+	return 0;
 }
 
 int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev, struct aie_version *version)
@@ -419,6 +466,29 @@ int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
 	}
 
 	XDNA_DBG(ndev->xdna, "Context hysteresis set to %dus", timeout_us);
+
+	return 0;
+}
+
+int aie4_set_ctx_timeout(struct amdxdna_dev_hdl *ndev, u32 timeout_ms)
+{
+	DECLARE_AIE4_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_context_timeout *ctx_timeout;
+	int ret;
+
+	req.type = AIE4_RUNTIME_CONFIG_CONTEXT_TIMEOUT;
+	ctx_timeout = (struct aie4_msg_runtime_config_context_timeout *)req.data;
+	ctx_timeout->timeout_ms = timeout_ms;
+
+	msg.send_size = sizeof(req.type) + sizeof(*ctx_timeout);
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->xdna, "Failed to set runtime config, ret %d", ret);
+		return ret;
+	}
+
+	XDNA_DBG(ndev->xdna, "Context timeout set to %dms", timeout_ms);
 
 	return 0;
 }

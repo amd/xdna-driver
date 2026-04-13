@@ -7,6 +7,8 @@
 #include "xrt/detail/xrt_error_code.h"
 
 #include <climits>
+#include <iostream>
+#include <map>
 #include <string>
 #include <sstream>
 #include <regex>
@@ -129,7 +131,7 @@ txn_file2elf(const std::string& ml_txn, const std::string& pm_ctrlpkt)
     std::vector<std::string> libpaths = {};
     std::map< uint32_t, std::vector<char> > m_ctrlpkt = {};
     m_ctrlpkt[0] = pm_ctrlpkt_buf;
-    m_ctrlpkt[1] = pm_ctrlpkt_buf;
+    m_ctrlpkt[1] = std::move(pm_ctrlpkt_buf);
     asp = std::make_unique<aiebu::aiebu_assembler>(
       aiebu::aiebu_assembler::buffer_type::blob_instr_transaction, txn_buf,
       buffer2, patch_json, libs, libpaths, m_ctrlpkt);
@@ -223,6 +225,27 @@ elf_init_no_arg_cmd(xrt::elf& elf, cuidx_type idx, bool dump, bo& cmd, bo& inst)
 }
 
 } // namespace
+
+std::unique_ptr<io_test_bo_set_base>
+create_bo_set_for_device(device* dev, bool use_ubuf, const char* tag, const flow_type* flow)
+{
+  const char* effective_tag = (tag && tag[0]) ? tag : "good";
+  const auto& info = get_binary_info(dev, effective_tag, flow);
+  const std::string tag_str(effective_tag);
+
+  if (info.flow == LEGACY) {
+    return std::make_unique<io_test_bo_set>(dev, use_ubuf);
+  }
+  if (info.flow == PARTIAL_ELF) {
+    if (use_ubuf) {
+      throw std::runtime_error("Ubuf not supported for PARTIAL_ELF flow");
+    }
+    return std::make_unique<elf_io_test_bo_set>(dev, tag_str, &info.flow);
+  }
+  if (info.flow == FULL_ELF)
+    return std::make_unique<elf_full_io_test_bo_set>(dev, tag_str, &info.flow, use_ubuf);
+  throw std::runtime_error("create_bo_set_for_device: unsupported flow for tag " + tag_str);
+}
 
 void
 io_test_bo_set_base::
@@ -413,12 +436,11 @@ elf_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow) :
 }
 
 elf_full_io_test_bo_set::
-elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow)
+elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow, bool use_ubuf)
   : io_test_bo_set_base(dev, tag, flow)
 {
   auto elf_path = get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), m_flow);
   m_elf = xrt::elf(elf_path);
-  auto mod = xrt::module{m_elf};
   auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), m_flow);
 
   try {
@@ -426,6 +448,8 @@ elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* fl
   } catch (const std::exception&) {
     m_kernel_index = elf_int::no_ctrl_code_id;
   }
+
+  const int ubuf_flag = use_ubuf ? m_FLAG_USR_BUF : 0;
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -439,13 +463,13 @@ elf_full_io_test_bo_set(device* dev, const std::string& tag, const flow_type* fl
       create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_INPUT:
-      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT);
+      create_data_bo_from_file(ibo, "ifm.bin", m_FLAG_OPT | ubuf_flag);
       break;
     case IO_TEST_BO_PARAMETERS:
-      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT);
+      create_data_bo_from_file(ibo, "wts.bin", m_FLAG_OPT | ubuf_flag);
       break;
     case IO_TEST_BO_OUTPUT:
-      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL|m_FLAG_OPT);
+      create_data_bo_from_file(ibo, "ofm.bin", m_FLAG_NO_FILL | m_FLAG_OPT | ubuf_flag);
       break;
     default:
       break;
@@ -457,18 +481,27 @@ elf_preempt_io_test_bo_set::
 elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type* flow)
   : io_test_bo_set_base(dev, tag, flow)
   , m_is_full_elf(get_flow_type(dev, tag.empty() ? nullptr : tag.c_str(), m_flow) == PREEMPT_FULL_ELF)
-  , m_total_fine_preemption_checkpoints(get_fine_preemption_checkpoints(m_local_data_path + "ml_txn.bin"))
+  , m_is_aie4(false)
+  , m_total_fine_preemption_checkpoints(0)
 {
   const char* tag_c = tag.empty() ? nullptr : tag.c_str();
+  const auto& info = get_binary_info(dev, tag_c, m_flow);
+  m_is_aie4 = (info.device == npu3_device_id || info.device == npu3_device_id1);
 
   if (m_is_full_elf) {
     m_elf = xrt::elf(get_binary_path(dev, tag_c, m_flow));
-    auto mod = xrt::module{m_elf};
-    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(get_kernel_name(dev, tag_c, m_flow));
+    try {
+      m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(get_kernel_name(dev, tag_c, m_flow));
+    } catch (const std::exception&) {
+      m_kernel_index = elf_int::no_ctrl_code_id;
+    }
   } else {
     m_elf = txn_file2elf(m_local_data_path + "ml_txn.bin", m_local_data_path + "pm_ctrlpkt.bin");
     m_kernel_index = elf_int::no_ctrl_code_id;
   }
+
+  if (!m_is_aie4)
+    m_total_fine_preemption_checkpoints = get_fine_preemption_checkpoints(m_local_data_path + "ml_txn.bin");
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -483,9 +516,13 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
       create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
       break;
     case IO_TEST_BO_SAVE_INSTRUCTION:
+      if (m_is_aie4)
+        break;
       create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::preempt_save);
       break;
     case IO_TEST_BO_RESTORE_INSTRUCTION:
+      if (m_is_aie4)
+        break;
       create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::preempt_restore);
       break;
     case IO_TEST_BO_INPUT:
@@ -503,19 +540,20 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
     case IO_TEST_BO_CTRL_PKT_PM:
       create_data_bo_from_file(ibo, "pm_ctrlpkt.bin", m_FLAG_OPT);
       break;
-    case IO_TEST_BO_SCRATCH_PAD: {
-      // Only support mem tile size for NPU4
-      const size_t mem_tile_sz = 512 * 1024;
-
-      if (get_flow_type(dev, tag_c, m_flow) == PREEMPT_FULL_ELF)
-        size = mem_tile_sz * get_column_size(m_elf);
-      else
-        size = mem_tile_sz * get_column_size(xrt::xclbin(get_binary_path(dev, tag_c, m_flow)));
-      alloc_data_bo(ibo, m_dev, size, false);
-      break;
-    }
     case IO_TEST_BO_PDI:
       create_data_bo_from_file(ibo, "pdi.bin", m_FLAG_OPT | m_FLAG_DEV_BUF);
+      break;
+    case IO_TEST_BO_SCRATCH_PAD:
+      if (m_is_aie4)
+        break;
+      {
+        const size_t mem_tile_sz = 512 * 1024;
+        if (get_flow_type(dev, tag_c, m_flow) == PREEMPT_FULL_ELF)
+          size = mem_tile_sz * get_column_size(m_elf);
+        else
+          size = mem_tile_sz * get_column_size(xrt::xclbin(get_binary_path(dev, tag_c, m_flow)));
+        alloc_data_bo(ibo, m_dev, size, false);
+      }
       break;
     default:
       break;
@@ -524,12 +562,44 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
 }
 
 elf_io_negative_test_bo_set::
-elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
-  const std::string& elf_name, uint32_t exp_status, uint32_t exp_txn_op_idx)
-  : m_expect_txn_op_idx(exp_txn_op_idx)
-  , m_expect_cmd_status(exp_status)
-  , io_test_bo_set_base(dev, xclbin_name)
+elf_io_negative_test_bo_set(device* dev, const std::string& tag)
+  : io_test_bo_set_base(dev, tag, nullptr)
+  , m_expect_cmd_status(0)
+  , m_expect_ctx_health_val(~0u)
 {
+  const auto& info = get_binary_info(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+  m_expect_cmd_status = static_cast<uint32_t>(std::stoul(info.extra.at("exp_status"), nullptr, 0));
+  if (info.extra.count("exp_val"))
+    m_expect_ctx_health_val = static_cast<uint32_t>(std::stoul(info.extra.at("exp_val"), nullptr, 0));
+
+  if (info.flow == FULL_ELF) {
+    m_is_full_elf = true;
+    m_elf = xrt::elf(get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), nullptr));
+    auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+    try {
+      m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+    } catch (const std::exception&) {
+      m_kernel_index = elf_int::no_ctrl_code_id;
+    }
+
+    for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
+      auto& ibo = m_bo_array[i];
+      auto type = static_cast<io_test_bo_type>(i);
+      switch (type) {
+      case IO_TEST_BO_CMD:
+        alloc_cmd_bo(ibo, m_dev);
+        break;
+      case IO_TEST_BO_INSTRUCTION:
+        create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+        break;
+      default:
+        break;
+      }
+    }
+    return;
+  }
+
+  const std::string elf_name = info.extra.at("elf_name");
   m_elf = xrt::elf(m_local_data_path + elf_name);
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
@@ -550,10 +620,26 @@ elf_io_negative_test_bo_set(device* dev, const std::string& xclbin_name,
 }
 
 elf_io_gemm_test_bo_set::
-elf_io_gemm_test_bo_set(device* dev, const std::string& xclbin_name, const std::string& elf_name)
-  : io_test_bo_set_base(dev, xclbin_name)
+elf_io_gemm_test_bo_set(device* dev, const std::string& tag)
+  : io_test_bo_set_base(dev, tag, nullptr)
 {
-  m_elf = xrt::elf(m_local_data_path + elf_name);
+  const auto& info = get_binary_info(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+  std::string elf_path;
+  if (info.extra.count("elf_name")) {
+    elf_path = m_local_data_path + info.extra.at("elf_name");
+    m_is_full_elf = false;
+  } else {
+    elf_path = get_binary_path(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+    m_is_full_elf = true;
+  }
+  m_elf = xrt::elf(elf_path);
+
+  try {
+    auto kernel_name = get_kernel_name(dev, tag.empty() ? nullptr : tag.c_str(), nullptr);
+    m_kernel_index = m_elf.get_handle()->get_ctrlcode_id(kernel_name);
+  } catch (const std::exception&) {
+    m_kernel_index = elf_int::no_ctrl_code_id;
+  }
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
@@ -564,7 +650,14 @@ elf_io_gemm_test_bo_set(device* dev, const std::string& xclbin_name, const std::
       alloc_cmd_bo(ibo, m_dev);
       break;
     case IO_TEST_BO_INSTRUCTION:
-      create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      if (m_is_full_elf && m_kernel_index == elf_int::no_ctrl_code_id) {
+        auto size = exec_buf::get_ctrl_code_size(m_elf, elf_patcher::buf_type::ctrltext, 0);
+        if (size == 0)
+          throw std::runtime_error("instruction size cannot be 0");
+        alloc_ctrl_bo(ibo, m_dev, size);
+      } else {
+        create_ctrl_bo_from_elf(ibo, elf_patcher::buf_type::ctrltext);
+      }
       break;
     default:
       break;
@@ -709,47 +802,79 @@ elf_preempt_io_test_bo_set::
 init_cmd(hw_ctx& hwctx, bool dump)
 {
   exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(),
-    m_is_full_elf ? ERT_START_NPU_PREEMPT_ELF : ERT_START_NPU_PREEMPT);
+    m_is_full_elf ? (m_is_aie4 ? ERT_START_DPU : ERT_START_NPU_PREEMPT_ELF) : ERT_START_NPU_PREEMPT);
 
-  if (m_is_full_elf) {
-    ebuf.add_arg_64(3);
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get(), "0");
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_2ND_PARAMETERS].tbo.get(), "1");
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "2");
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "3");
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PDI].tbo.get(), ".pdi.0");
-    ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+  if (m_is_aie4) {
+    std::vector<uint32_t> wts_offsets;
+
+    xrt_core::cuidx_type cu_idx{0};
+    ebuf.set_cu_idx(cu_idx);
+
+    std::string wts_offset_file = m_local_data_path + "wts_offsets.txt";
+    std::ifstream ifs(wts_offset_file);
+    if (!ifs.is_open())
+      throw std::runtime_error("cannot open weight offsets file: " + wts_offset_file);
+
+    for (uint32_t offset; ifs >> offset;)
+      wts_offsets.push_back(offset);
+    ifs.close();
+
+    if (wts_offsets.empty())
+      throw std::runtime_error("no weight offsets found in: " + wts_offset_file);
+
+    ebuf.add_arg_64(57);
+    auto wts_bo = m_bo_array[IO_TEST_BO_PARAMETERS].tbo;
+    auto wts_paddr = wts_bo->paddr();
+    for (size_t i = 0; i < wts_offsets.size(); i++)
+      ebuf.add_arg_64_patched(wts_paddr + (wts_offsets[i] * sizeof(uint32_t)), std::to_string(i));
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "54");
+    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "55");
+    ebuf.add_ctrl_arg("control-code-0", m_bo_array[IO_TEST_BO_INSTRUCTION].tbo->paddr());
+
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
   } else {
-    ebuf.set_cu_idx(get_cu_idx(hwctx));
+    if (m_is_full_elf) {
+      ebuf.add_arg_64(3);
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PARAMETERS].tbo.get(), "0");
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_2ND_PARAMETERS].tbo.get(), "1");
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get(), "2");
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get(), "3");
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_PDI].tbo.get(), ".pdi.0");
+      ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+    } else {
+      ebuf.set_cu_idx(get_cu_idx(hwctx));
 
-    ebuf.add_arg_64(3);
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_32(0);
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_64(0);
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-0");
-    ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-1");
-    ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+      ebuf.add_arg_64(3);
+      ebuf.add_arg_64(0);
+      ebuf.add_arg_32(0);
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_INPUT].tbo.get());
+      ebuf.add_arg_64(0);
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_OUTPUT].tbo.get());
+      ebuf.add_arg_64(0);
+      ebuf.add_arg_64(0);
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-0");
+      ebuf.add_arg_bo(*m_bo_array[IO_TEST_BO_CTRL_PKT_PM].tbo.get(), "ctrlpkt-pm-1");
+      ebuf.add_scratchpad_bo(*m_bo_array[IO_TEST_BO_SCRATCH_PAD].tbo.get());
+    }
+
+    ebuf.add_ctrl_bo(
+      *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+      *m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
+      *m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get()
+    );
   }
-
-  ebuf.add_ctrl_bo(
-    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
-    *m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
-    *m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get()
-  );
 
   if (dump)
     ebuf.dump();
 
   ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
     elf_patcher::buf_type::ctrltext, m_elf, m_kernel_index);
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
-    elf_patcher::buf_type::preempt_save, m_elf, m_kernel_index);
-  ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
-    elf_patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
+  if (!m_is_aie4) {
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_SAVE_INSTRUCTION].tbo.get(),
+      elf_patcher::buf_type::preempt_save, m_elf, m_kernel_index);
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_RESTORE_INSTRUCTION].tbo.get(),
+      elf_patcher::buf_type::preempt_restore, m_elf, m_kernel_index);
+  }
 
   io_test_bo_set_base::init_cmd(hwctx, dump);
 }
@@ -758,10 +883,21 @@ void
 elf_io_negative_test_bo_set::
 init_cmd(hw_ctx& hwctx, bool dump)
 {
-  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
-    *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
-    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
-
+  if (m_is_full_elf) {
+    exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
+    xrt_core::cuidx_type cu_idx{0};
+    ebuf.set_cu_idx(cu_idx);
+    if (dump)
+      ebuf.dump();
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+    uint32_t patch_id = (m_kernel_index != elf_int::no_ctrl_code_id) ? m_kernel_index : 0;
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+      elf_patcher::buf_type::ctrltext, m_elf, patch_id);
+  } else {
+    elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
+      *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
+      *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  }
   io_test_bo_set_base::init_cmd(hwctx, dump);
 }
 
@@ -769,20 +905,38 @@ void
 elf_io_gemm_test_bo_set::
 init_cmd(hw_ctx& hwctx, bool dump)
 {
-  elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
-    *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
-    *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  if (!m_is_full_elf) {
+    elf_init_no_arg_cmd(m_elf, get_cu_idx(hwctx), dump,
+      *m_bo_array[IO_TEST_BO_CMD].tbo.get(),
+      *m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+  } else {
+    exec_buf ebuf(*m_bo_array[IO_TEST_BO_CMD].tbo.get(), ERT_START_DPU);
 
-  // Get a debug BO
+    xrt_core::cuidx_type cu_idx{0};
+    ebuf.set_cu_idx(cu_idx);
+
+    if (dump)
+      ebuf.dump();
+
+    ebuf.add_ctrl_bo(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get());
+    uint32_t patch_id = (m_kernel_index != elf_int::no_ctrl_code_id) ? m_kernel_index : 0;
+    ebuf.patch_ctrl_code(*m_bo_array[IO_TEST_BO_INSTRUCTION].tbo.get(),
+      elf_patcher::buf_type::ctrltext, m_elf, patch_id);
+  }
+
+  // Get a debug BO (full-ELF: uc_debug with fixed layout; else legacy size)
+  const size_t dbo_size = m_is_full_elf ? m_gemm_uc_debug_size : 4096;
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
-  auto ext_boflags = XRT_BO_USE_DEBUG << 4;
-  const size_t size = 4096;
-  m_dbo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+  auto ext_boflags = m_is_full_elf ? (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
+  m_dbo = hwctx.get()->alloc_bo(dbo_size, get_bo_flags(boflags, ext_boflags));
   auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
+  std::memset(dbo_p, 0xff, dbo_size);
+  m_dbo->sync(buffer_handle::direction::host2device, dbo_size, 0);
 
-  // Initializing debug BO content to -1
-  std::memset(dbo_p, 0xff, size);
-  m_dbo.get()->sync(buffer_handle::direction::host2device, size, 0);
+  if (m_is_full_elf) {
+    std::map<uint32_t, size_t> buf_map{{0, m_gemm_uc_debug_size}};
+    m_dbo->config(hwctx.get(), buf_map);
+  }
 
   io_test_bo_set_base::init_cmd(hwctx, dump);
 }
@@ -867,7 +1021,6 @@ elf_io_negative_test_bo_set::
 verify_result()
 {
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
   if (cpkt->state != m_expect_cmd_status) {
     throw std::runtime_error(std::string("Command status=") + std::to_string(cpkt->state) +
@@ -879,16 +1032,33 @@ verify_result()
 
   // In case of timeout, further check context health data
   auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
-  if (cdata->aie2.txn_op_idx != m_expect_txn_op_idx) {
-    std::cerr << "Incorrect app health data:\n";
-    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
-    std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
-    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
-    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
-    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
-    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
-    throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
-      ", expect=" + std::to_string(m_expect_txn_op_idx));
+  if (cdata->npu_gen == NPU_GEN_AIE4) {
+    if (cdata->version != ERT_CTX_HEALTH_DATA_V1 || cdata->aie4.ctx_error_type != m_expect_ctx_health_val) {
+      std::cerr << "Incorrect AIE4 context health data:\n";
+      std::cerr << "\tctx_error_type: 0x" << std::hex << cdata->aie4.ctx_error_type << "\n";
+      std::cerr << "\tversion: 0x" << std::hex << cdata->version
+                << " (expect " << ERT_CTX_HEALTH_DATA_V1 << ")\n";
+      std::cerr << "\tnpu_gen: 0x" << std::hex << cdata->npu_gen
+                << " (expect " << NPU_GEN_AIE4 << ")\n";
+      std::cerr << "\tctx_state: 0x" << std::hex << cdata->aie4.ctx_state << "\n";
+      std::cerr << "\tnum_uc: " << std::dec << cdata->aie4.num_uc << "\n";
+      throw std::runtime_error(std::string("Context health data version=") +
+        std::to_string(cdata->version) + " npu_gen=" + std::to_string(cdata->npu_gen) +
+        ", expect version=" + std::to_string(ERT_CTX_HEALTH_DATA_V1) +
+        " npu_gen=" + std::to_string(NPU_GEN_AIE4));
+    }
+  } else {
+    if (cdata->aie2.txn_op_idx != m_expect_ctx_health_val) {
+      std::cerr << "Incorrect app health data:\n";
+      std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
+      std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
+      std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
+      std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
+      std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
+      std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
+      throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
+        ", expect=" + std::to_string(m_expect_ctx_health_val));
+    }
   }
 }
 
@@ -905,7 +1075,22 @@ verify_result()
   m_dbo.get()->sync(buffer_handle::direction::device2host, m_dbo->get_properties().size, 0);
   auto dbo_p = static_cast<int32_t *>(m_dbo->map(buffer_handle::map_type::write));
 
-  // Validating debug BO content.
+  if (m_is_full_elf) {
+    const uint32_t* words = reinterpret_cast<const uint32_t*>(dbo_p);
+    // Avg cycle count should always be 276
+    constexpr uint32_t expected_cycle_count = 276;
+    for (size_t i = 0; i < m_npu3_num_cores; i++) {
+      if (words[i * 2] != static_cast<uint32_t>(i))
+        throw std::runtime_error(std::string("bad debug BO core_idx at slot ") + std::to_string(i)
+          + ", expected " + std::to_string(i) + ", got " + std::to_string(words[i * 2]));
+      if (words[i * 2 + 1] != expected_cycle_count)
+        throw std::runtime_error(std::string("bad debug BO cycle_count at core ") + std::to_string(i)
+          + ", expected " + std::to_string(expected_cycle_count) + ", got " + std::to_string(words[i * 2 + 1]));
+    }
+    return;
+  }
+
+  // Validating debug BO content (AIE2 / non-full-ELF).
   // The first 32 Dwords should be 0xde, the rest should be initial values
   int i = 0;
   while (i < 32) {
@@ -920,6 +1105,20 @@ verify_result()
         + std::to_string(dbo_p[i]) + "@" + std::to_string(i));
     ++i;
   }
+}
+
+void
+elf_io_gemm_test_bo_set::
+teardown(hw_ctx& hwctx)
+{
+  if (m_is_full_elf && m_dbo)
+    m_dbo->unconfig(hwctx.get());
+}
+
+void
+io_test_bo_set_base::
+teardown(hw_ctx&)
+{
 }
 
 const char *
@@ -954,8 +1153,14 @@ run(const std::vector<fence_handle*>& wait_fences,
   hwq->wait_command(cbo->get(), 0);
 
   sync_after_run();
-  if (!no_check_result)
-    verify_result();
+  try {
+    if (!no_check_result)
+      verify_result();
+  } catch (...) {
+    teardown(hwctx);
+    throw;
+  }
+  teardown(hwctx);
 }
 
 void
@@ -974,6 +1179,25 @@ run_no_check_result()
   const std::vector<fence_handle*> sfences{};
   const std::vector<fence_handle*> wfences{};
   run(wfences, sfences, true);
+}
+
+void
+dpm_test_bo_set::
+run_with_ctx(hw_ctx& hwctx)
+{
+  auto hwq = hwctx.get()->get_hw_queue();
+
+  init_cmd(hwctx, false);
+  sync_before_run();
+
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+  reset_cmd_header();
+
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), 0);
+
+  sync_after_run();
+  verify_result();
 }
 
 std::array<io_test_bo, IO_TEST_BO_MAX_TYPES>&
@@ -1131,7 +1355,7 @@ async_error_aie4_io_test_bo_set(device* dev, const std::string& tag)
     }
   }
 
-  // bad_ctrl.elf triggers AIE4 context error (UC firmware exception)
+  // bad_timeout.elf triggers AIE4 context error (UC firmware exception)
   // error_type = UC_COMPLETION_TIMEOUT (4) or UC_CRITICAL_ERROR (5)
   // Both map to KDS_EXEC error number
   uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
@@ -1188,7 +1412,7 @@ verify_result()
   }
   m_last_err_timestamp = err_timestamp;
 
-  // Verify context health report in command packet (bad_ctrl.elf timeout path)
+  // Verify context health report in command packet (bad_timeout.elf timeout path)
   auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
   if (cpkt->state != ERT_CMD_STATE_TIMEOUT)
