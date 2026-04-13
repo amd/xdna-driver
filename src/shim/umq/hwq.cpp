@@ -214,10 +214,11 @@ issue_single_exec_buf(const cmd_buffer *cmd_bo, bool last_of_chain)
   hdr->common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 
   // Issue mfence instruction to make sure all writes to the slot before is done.
-  std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
+  std::atomic_thread_fence(std::memory_order_seq_cst);
   // Indicates the slot is ready for processing by uC.
   // Must be the last step after pkt is filled up.
-  uint64_t wi = m_umq_hdr->write_index++;
+  uint64_t wi = m_umq_hdr->write_index;
+  m_umq_hdr->write_index = wi + 1;
 
   // Wake up uC in case it is sleeping and waiting.
   *m_mapped_doorbell = 0;
