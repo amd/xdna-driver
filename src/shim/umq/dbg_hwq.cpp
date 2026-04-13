@@ -95,8 +95,8 @@ submit()
   *m_dbg_umq_comp_ptr = 0;
 
   /* Issue mfence instruction to make sure all writes to the slot before is done */
-  std::atomic_thread_fence(std::memory_order::memory_order_seq_cst);
-  m_dbg_umq_hdr->write_index++;
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  m_dbg_umq_hdr->write_index = m_dbg_umq_hdr->write_index + 1;
 
   shim_debug("dbg umq: submit cmd widx: %lu ridx: %lu",
     m_dbg_umq_hdr->write_index,
