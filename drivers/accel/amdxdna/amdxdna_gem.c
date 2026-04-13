@@ -641,8 +641,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	/*
 	 * DEV_HEAP chunks are always removed from client->dev_heap_chunks
 	 * by amdxdna_client_cleanup() before this free callback runs.
-	 * DRM core calls drm_gem_release() before postclose, so abo->client
-	 * is already NULL here. No list removal needed.
+	 * No list removal needed.
 	 */
 	if (abo->type == AMDXDNA_BO_DEV_HEAP &&
 	    drm_mm_initialized(&abo->mm))
@@ -694,8 +693,16 @@ static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *
 
 	if (abo->open_ref == 0) {
 		amdxdna_gem_del_bo_usage(abo);
-		/* Detach from the client when last closed by it. */
-		abo->client = NULL;
+		/*
+		 * DEV_HEAP BOs are kept on client->dev_heap_chunks and
+		 * accessed by the driver (e.g. TDR restart) after .close
+		 * but before .postclose tears down hwctxs. Keep abo->client
+		 * valid to avoid a NULL-pointer dereference in that window.
+		 * DEV_HEAP BOs cannot outlive the client, so no dangling
+		 * pointer risk.
+		 */
+		if (abo->type != AMDXDNA_BO_DEV_HEAP)
+			abo->client = NULL;
 	}
 }
 
