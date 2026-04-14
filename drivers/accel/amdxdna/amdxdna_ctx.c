@@ -616,6 +616,68 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 	return -EINVAL;
 }
 
+/**
+ * amdxdna_cmd_wait - Wait for a submitted command to complete.
+ * @client:    The amdxdna client that submitted the command.
+ * @hwctx_hdl: Hardware context handle.
+ * @seq:       Command sequence number returned by amdxdna_cmd_submit().
+ * @timeout_ms: Timeout in milliseconds (0 = wait indefinitely).
+ *
+ * Looks up the hardware context under SRCU read lock to prevent it from
+ * being destroyed concurrently, then dispatches to the backend's
+ * ops->cmd_wait() implementation.
+ *
+ * The SRCU lock protects the hwctx pointer from being freed while the
+ * wait is in progress.  The backend is responsible for blocking on the
+ * fence and releasing any internal resources before returning.
+ *
+ * Returns 0 on success, -ETIME on timeout, or a negative error code.
+ */
+int amdxdna_cmd_wait(struct amdxdna_client *client, u32 hwctx_hdl,
+		     u64 seq, u32 timeout_ms)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx;
+	int ret, idx;
+
+	if (!xdna->dev_info->ops->cmd_wait)
+		return -EOPNOTSUPP;
+
+	idx = srcu_read_lock(&client->hwctx_srcu);
+	hwctx = xa_load(&client->hwctx_xa, hwctx_hdl);
+	if (!hwctx) {
+		XDNA_DBG(xdna, "PID %d failed to get hwctx %d",
+			 client->pid, hwctx_hdl);
+		ret = -EINVAL;
+		goto unlock_srcu;
+	}
+
+	ret = xdna->dev_info->ops->cmd_wait(hwctx, seq, timeout_ms);
+
+unlock_srcu:
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+	return ret;
+}
+
+int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct amdxdna_drm_wait_cmd *args = data;
+	int ret;
+
+	XDNA_DBG(xdna, "PID %d hwctx %d timeout %d ms for cmd seq %lld",
+		 client->pid, args->hwctx, args->timeout, args->seq);
+
+	ret = amdxdna_cmd_wait(client, args->hwctx, args->seq, args->timeout);
+
+	XDNA_DBG(xdna, "PID %d hwctx %d cmd %lld wait finished, ret %d",
+		 client->pid, args->hwctx, args->seq, ret);
+
+	trace_amdxdna_debug_point(current->comm, args->seq, "job returned to user");
+	return ret;
+}
+
 int amdxdna_hwctx_col_list(struct amdxdna_hwctx *hwctx, u32 row_count,
 			   u32 total_col, bool natural_align)
 {

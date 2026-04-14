@@ -61,6 +61,15 @@ static int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job 
 	return -EOPNOTSUPP;
 }
 
+static int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
+{
+	/*
+	 * VE2 cmd_wait will be implemented in a later patch when the DRM
+	 * scheduler and hardware context submit path are functional.
+	 */
+	return -EOPNOTSUPP;
+}
+
 static int ve2_get_array(struct amdxdna_client *client,
 			 struct amdxdna_drm_get_array *args)
 {
@@ -78,5 +87,6 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.hwctx_sync_debug_bo	= ve2_hwctx_sync_debug_bo,
 	.hmm_invalidate		= ve2_hmm_invalidate,
 	.cmd_submit		= ve2_cmd_submit,
+	.cmd_wait		= ve2_cmd_wait,
 	.get_array		= ve2_get_array,
 };

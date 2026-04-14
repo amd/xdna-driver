@@ -47,8 +47,9 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_SYNC_BO,
 	DRM_AMDXDNA_EXEC_CMD,
 	DRM_AMDXDNA_GET_INFO,
-	DRM_AMDXDNA_SET_STATE,
-	DRM_AMDXDNA_GET_ARRAY = 10,
+	DRM_AMDXDNA_SET_STATE,		/* 8 */
+	DRM_AMDXDNA_WAIT_CMD,		/* 9 */
+	DRM_AMDXDNA_GET_ARRAY = 10,	/* explicit to preserve numbering */
 };
 
 /**
@@ -274,6 +275,25 @@ struct amdxdna_drm_exec_cmd {
 	__u64 args;
 	__u32 cmd_count;
 	__u32 arg_count;
+	__u64 seq;
+};
+
+/**
+ * struct amdxdna_drm_wait_cmd - Wait for an execution command to complete.
+ *
+ * @hwctx: Hardware context handle returned by DRM_AMDXDNA_CREATE_HWCTX.
+ * @timeout: Timeout in milliseconds. 0 means wait indefinitely.
+ * @seq: Command sequence number returned by DRM_AMDXDNA_EXEC_CMD.
+ *
+ * Block until the command identified by @seq completes in hardware context
+ * @hwctx, or until @timeout milliseconds elapse.
+ *
+ * Returns 0 on success, -ETIME if the timeout expires, -EINVAL if the
+ * context or sequence number is invalid.
+ */
+struct amdxdna_drm_wait_cmd {
+	__u32 hwctx;
+	__u32 timeout;
 	__u64 seq;
 };
 
@@ -729,6 +749,10 @@ struct amdxdna_drm_set_power_mode {
 #define DRM_IOCTL_AMDXDNA_EXEC_CMD \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_EXEC_CMD, \
 		 struct amdxdna_drm_exec_cmd)
+
+#define DRM_IOCTL_AMDXDNA_WAIT_CMD \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_WAIT_CMD, \
+		 struct amdxdna_drm_wait_cmd)
 
 #define DRM_IOCTL_AMDXDNA_GET_INFO \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDXDNA_GET_INFO, \
