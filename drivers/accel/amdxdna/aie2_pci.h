@@ -318,10 +318,6 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 			 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev, u32 us);
-void *aie2_alloc_msg_buffer(struct amdxdna_dev_hdl *ndev, u32 *size,
-			    dma_addr_t *dma_addr);
-void aie2_free_msg_buffer(struct amdxdna_dev_hdl *ndev, size_t size,
-			  void *cpu_addr, dma_addr_t dma_addr);
 
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);

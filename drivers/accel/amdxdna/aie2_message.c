@@ -27,43 +27,6 @@
 
 #define EXEC_MSG_OPS(xdna)	((xdna)->dev_handle->exec_msg_ops)
 
-void *aie2_alloc_msg_buffer(struct amdxdna_dev_hdl *ndev, u32 *size,
-			    dma_addr_t *dma_addr)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	void *vaddr;
-	int order;
-
-	*size = max(*size, SZ_8K);
-	order = get_order(*size);
-	if (order > MAX_PAGE_ORDER)
-		return ERR_PTR(-EINVAL);
-	*size = PAGE_SIZE << order;
-
-	if (amdxdna_iova_on(xdna))
-		return amdxdna_iommu_alloc(xdna, *size, dma_addr);
-
-	vaddr = dma_alloc_noncoherent(xdna->ddev.dev, *size, dma_addr,
-				      DMA_FROM_DEVICE, GFP_KERNEL);
-	if (!vaddr)
-		return ERR_PTR(-ENOMEM);
-
-	return vaddr;
-}
-
-void aie2_free_msg_buffer(struct amdxdna_dev_hdl *ndev, size_t size,
-			  void *cpu_addr, dma_addr_t dma_addr)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-
-	if (amdxdna_iova_on(xdna)) {
-		amdxdna_iommu_free(xdna, size, cpu_addr, dma_addr);
-		return;
-	}
-
-	dma_free_noncoherent(xdna->ddev.dev, size, cpu_addr, dma_addr, DMA_FROM_DEVICE);
-}
-
 int aie2_suspend_fw(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE_MSG(suspend, MSG_OP_SUSPEND);
@@ -407,7 +370,7 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	int ret;
 
 	buf_sz = ndev->aie.metadata.cols * ndev->aie.metadata.size;
-	buff_addr = aie2_alloc_msg_buffer(ndev, &buf_sz, &dma_addr);
+	buff_addr = amdxdna_alloc_msg_buffer(xdna, &buf_sz, &dma_addr);
 	if (IS_ERR(buff_addr))
 		return PTR_ERR(buff_addr);
 
@@ -446,7 +409,7 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	*cols_filled = aie_bitmap;
 
 fail:
-	aie2_free_msg_buffer(ndev, buf_sz, buff_addr, dma_addr);
+	amdxdna_free_msg_buffer(xdna, buf_sz, buff_addr, dma_addr);
 	return ret;
 }
 
@@ -465,7 +428,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 		return -EINVAL;
 
 	buf_sz = min(size, SZ_4M);
-	addr = aie2_alloc_msg_buffer(ndev, &buf_sz, &dma_addr);
+	addr = amdxdna_alloc_msg_buffer(xdna, &buf_sz, &dma_addr);
 	if (IS_ERR(addr))
 		return PTR_ERR(addr);
 
@@ -497,7 +460,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 	header->minor = resp.minor;
 
 free_buf:
-	aie2_free_msg_buffer(ndev, buf_sz, addr, dma_addr);
+	amdxdna_free_msg_buffer(xdna, buf_sz, addr, dma_addr);
 	return ret;
 }
 
@@ -1206,7 +1169,7 @@ int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 	}
 
 	buf_size = sizeof(*report);
-	buf = aie2_alloc_msg_buffer(ndev, &buf_size, &dma_addr);
+	buf = amdxdna_alloc_msg_buffer(xdna, &buf_size, &dma_addr);
 	if (IS_ERR(buf)) {
 		XDNA_ERR(xdna, "Failed to allocate buffer for app health");
 		return PTR_ERR(buf);
@@ -1227,7 +1190,7 @@ int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 	memcpy(report, buf, sizeof(*report));
 
 free_buf:
-	aie2_free_msg_buffer(ndev, buf_size, buf, dma_addr);
+	amdxdna_free_msg_buffer(xdna, buf_size, buf, dma_addr);
 	return ret;
 }
 

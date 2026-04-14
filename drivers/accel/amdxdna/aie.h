@@ -122,6 +122,10 @@ void amdxdna_vbnv_init(struct amdxdna_dev *xdna);
 int amdxdna_get_metadata(struct aie_device *aie, struct amdxdna_client *client,
 			 struct amdxdna_drm_get_info *args);
 void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
+void *amdxdna_alloc_msg_buffer(struct amdxdna_dev *xdna, u32 *size,
+			       dma_addr_t *dma_addr);
+void amdxdna_free_msg_buffer(struct amdxdna_dev *xdna, size_t size,
+			     void *cpu_addr, dma_addr_t dma_addr);
 
 /* aie_psp.c */
 struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *conf);
