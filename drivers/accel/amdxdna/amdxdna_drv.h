@@ -173,6 +173,8 @@ void amdxdna_iommu_unmap_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *ab
 void *amdxdna_iommu_alloc(struct amdxdna_dev *xdna, size_t size, dma_addr_t *dma_addr);
 void amdxdna_iommu_free(struct amdxdna_dev *xdna, size_t size,
 			void *cpu_addr, dma_addr_t dma_addr);
+int amdxdna_dma_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
+void amdxdna_dma_unmap_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
 
 static inline bool amdxdna_iova_on(struct amdxdna_dev *xdna)
 {

@@ -860,6 +860,8 @@ void amdxdna_hwctx_fini(struct amdxdna_hwctx *hwctx,
 	release_resource(hwctx);
 #ifdef HAVE_6_13_drm_sched_start_errno
 	drm_sched_start(&hwctx->priv->sched, 0);
+#elif defined(HAVE_6_10_drm_sched_start_full_recovery)
+	drm_sched_start(&hwctx->priv->sched, true);
 #else
 	drm_sched_start(&hwctx->priv->sched);
 #endif
