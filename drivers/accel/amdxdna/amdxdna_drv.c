@@ -183,7 +183,9 @@ static const struct file_operations amdxdna_fops = {
 	.read		= drm_read,
 	.llseek		= noop_llseek,
 	.mmap		= drm_gem_mmap,
+#ifdef FOP_UNSIGNED_OFFSET
 	.fop_flags	= FOP_UNSIGNED_OFFSET,
+#endif
 };
 
 const struct drm_driver amdxdna_drm_drv = {
