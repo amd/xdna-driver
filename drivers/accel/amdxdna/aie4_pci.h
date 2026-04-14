@@ -53,11 +53,16 @@ struct amdxdna_dev_hdl {
 
 	struct xarray                   cert_comp_xa; /* device level indexed by msix id */
 	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
+
+	void				*work_buf;
+	dma_addr_t			work_buf_addr;
+	u32				work_buf_size;
 };
 
 /* aie4_message.c */
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
+int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 
 /* aie4_ctx.c */
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
