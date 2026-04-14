@@ -6,9 +6,11 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
+#include <linux/dma-mapping.h>
 #include <linux/firmware.h>
 #include <linux/sizes.h>
 
+#include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
 
@@ -234,6 +236,40 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
+static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	u32 buf_size = AIE4_WORK_BUFFER_MIN_SIZE;
+
+	ndev->work_buf = amdxdna_alloc_msg_buffer(xdna, &buf_size,
+						  &ndev->work_buf_addr);
+	if (IS_ERR(ndev->work_buf)) {
+		int ret = PTR_ERR(ndev->work_buf);
+
+		XDNA_ERR(xdna, "Failed to alloc work buffer, size 0x%x",
+			 AIE4_WORK_BUFFER_MIN_SIZE);
+		ndev->work_buf = NULL;
+		return ret;
+	}
+
+	ndev->work_buf_size = buf_size;
+	XDNA_DBG(xdna, "Work buffer allocated: size 0x%x", buf_size);
+
+	return 0;
+}
+
+static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+
+	if (!ndev->work_buf)
+		return;
+
+	amdxdna_free_msg_buffer(xdna, ndev->work_buf_size,
+				ndev->work_buf, ndev->work_buf_addr);
+	ndev->work_buf = NULL;
+}
+
 static int aie4_hw_start(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -247,8 +283,18 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	if (ret)
 		goto fw_unload;
 
+	if (ndev->work_buf) {
+		/* Firmware releases the DRAM work buffer internally during suspend */
+		ret = aie4_attach_work_buffer(ndev, 0, ndev->work_buf_addr,
+					      ndev->work_buf_size);
+		if (ret)
+			goto mbox_fini;
+	}
+
 	return 0;
 
+mbox_fini:
+	aie4_mailbox_fini(ndev);
 fw_unload:
 	aie4_fw_unload(ndev);
 
@@ -427,16 +473,22 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto clear_master;
 
-	ret = aie4_irq_init(xdna);
+	ret = aie4_alloc_work_buffer(ndev);
 	if (ret)
 		goto clear_master;
+
+	ret = aie4_irq_init(xdna);
+	if (ret)
+		goto free_work_buf;
 
 	ret = aie4_hw_start(xdna);
 	if (ret)
-		goto clear_master;
+		goto free_work_buf;
 
 	return 0;
 
+free_work_buf:
+	aie4_free_work_buffer(ndev);
 clear_master:
 	pci_clear_master(pdev);
 
@@ -449,6 +501,7 @@ static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	aie4_hw_stop(xdna);
+	aie4_free_work_buffer(ndev);
 
 	pci_clear_master(pdev);
 }
