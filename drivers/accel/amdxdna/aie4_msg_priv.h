@@ -6,10 +6,13 @@
 #ifndef _AIE4_MSG_PRIV_H_
 #define _AIE4_MSG_PRIV_H_
 
+#include <linux/bitfield.h>
+#include <linux/sizes.h>
 #include <linux/types.h>
 
 enum aie4_msg_opcode {
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
+	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
 
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
 	AIE4_MSG_OP_DESTROY_VFS                      = 0x20002,
@@ -128,6 +131,18 @@ struct aie4_msg_aie4_tile_info_req {
 struct aie4_msg_aie4_tile_info_resp {
 	enum aie4_msg_status status;
 	struct aie4_tile_info info;
+} __packed;
+
+#define AIE4_WORK_BUFFER_MIN_SIZE      SZ_4M
+
+struct aie4_msg_attach_work_buffer_req {
+	__u64 buff_addr;
+	__u32 pasid;
+	__u32 buff_size;
+} __packed;
+
+struct aie4_msg_attach_work_buffer_resp {
+	enum aie4_msg_status status;
 } __packed;
 
 #endif /* _AIE4_MSG_PRIV_H_ */
