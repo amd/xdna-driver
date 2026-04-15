@@ -331,7 +331,7 @@ module_exit(amdxdna_mod_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
 MODULE_VERSION("0.1");
-MODULE_DESCRIPTION("amdxdna driver");
+MODULE_DESCRIPTION("amdxdna OOT driver");
 
 #ifdef HAVE_7_0_amd_pmf_get_npu_data
 #ifdef HAVE_6_13_MODULE_IMPORT_NS

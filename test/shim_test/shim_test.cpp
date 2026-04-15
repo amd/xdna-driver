@@ -19,6 +19,7 @@
 #include "core/common/device.h"
 
 #include <array>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -152,6 +153,25 @@ is_amdxdna_drv(device* dev)
 }
 
 bool
+is_oot_amdxdna_drv(device* dev)
+{
+  if (!is_amdxdna_drv(dev))
+    return false;
+  FILE *fp = popen("modinfo amdxdna 2>/dev/null | grep -F 'amdxdna OOT driver'", "r");
+  if (!fp)
+    return false;
+  const bool found = fgetc(fp) != EOF;
+  pclose(fp);
+  return found;
+}
+
+bool
+is_staging_amdxdna_drv(device* dev)
+{
+  return is_amdxdna_drv(dev) && !is_oot_amdxdna_drv(dev);
+}
+
+bool
 no_dev_filter(device::id_type id, device* dev)
 {
   return true;
@@ -215,6 +235,14 @@ dev_filter_is_npu4(device::id_type id, device* dev)
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
   return device_id == npu4_device_id;
+}
+
+bool
+dev_filter_is_npu4_oot_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_npu4(id, dev))
+    return false;
+  return is_oot_amdxdna_drv(dev);
 }
 
 bool
@@ -1057,13 +1085,13 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
   },
   test_case{ "get AIE coredump and check registers", {~0U, ~0U},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
+    TEST_POSITIVE, dev_filter_is_npu4_oot_amdxdna_drv, TEST_io_coredump, {}
   },
   test_case{ "AIE MEM read/write", {~0U, ~0U},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_mem, {}
+    TEST_POSITIVE, dev_filter_is_npu4_oot_amdxdna_drv, TEST_io_aie_mem, {}
   },
   test_case{ "AIE REG read/write", {~0U, ~0U},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_reg, {}
+    TEST_POSITIVE, dev_filter_is_npu4_oot_amdxdna_drv, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
