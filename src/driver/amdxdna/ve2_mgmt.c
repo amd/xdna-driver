@@ -355,20 +355,25 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 		AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 	XDNA_DBG(xdna, "Handshake init hwctx : %p\n", hwctx);
 	XDNA_DBG(xdna,
-		  "partition init: start_col=%u num_col=%u hwctx=%p pid=%d",
-		  start_col, num_col, hwctx, hwctx->client->pid);
+		 "partition init: start_col=%u num_col=%u hwctx=%p pid=%d",
+		 start_col, num_col, hwctx, hwctx->client->pid);
 	XDNA_DBG(xdna,
 		 "handshake: ve2_partition_initialize enter start_col=%u num_col=%u hwctx=%p",
 		 start_col, num_col, hwctx);
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_PARTITION_INIT",
+				  hwctx->client->pid, start_col, hwctx->priv->id, num_col);
 	ret = ve2_partition_initialize(nhwctx->aie_dev, nhwctx->args);
 	XDNA_DBG(xdna,
-		  "partition init: aie_partition_initialize returned %d (start_col=%u num_col=%u hwctx=%p)",
-		  ret, start_col, num_col, hwctx);
+		 "partition init: aie_partition_initialize returned %d (start_col=%u num_col=%u hwctx=%p)",
+		 ret, start_col, num_col, hwctx);
 	if (ret < 0) {
 		XDNA_DBG(xdna, "handshake: ve2_partition_initialize failed ret=%d", ret);
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release_hs_data;
 	}
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_PARTITION_DONE",
+				  hwctx->client->pid, start_col, hwctx->priv->id, num_col);
+
 	XDNA_DBG(xdna, "handshake: ve2_partition_initialize ok hwctx=%p", hwctx);
 
 	for (int col = num_col - 1; col >= 0; col--)
@@ -446,9 +451,12 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 	int ret;
 
 	XDNA_DBG(xdna,
-		  "schedule_cmd: enter command_index=%llu start_col=%u hwctx=%p pid=%d",
-		  (unsigned long long)command_index, mgmtctx->start_col, hwctx,
-		  hwctx->client->pid);
+		 "schedule_cmd: enter command_index=%llu start_col=%u hwctx=%p pid=%d",
+		 (unsigned long long)command_index, mgmtctx->start_col, hwctx,
+		 hwctx->client->pid);
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
+				  hwctx->client->pid, mgmtctx->start_col,
+				  hwctx->priv->id, command_index);
 	mutex_lock(&mgmtctx->ctx_lock);
 	ret = ve2_fifo_enqueue(mgmtctx, hwctx, command_index);
 	if (ret) {
@@ -487,11 +495,13 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 	notify_fw_cmd_ready(mgmtctx->active_ctx);
-
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+				  hwctx->client->pid, mgmtctx->start_col,
+				  hwctx->priv->id, (int)command_index);
 	XDNA_DBG(xdna,
-		  "schedule_cmd: exit command_index=%llu start_col=%u hwctx=%p pid=%d",
-		  (unsigned long long)command_index, mgmtctx->start_col, hwctx,
-		  hwctx->client->pid);
+		 "schedule_cmd: exit command_index=%llu start_col=%u hwctx=%p pid=%d",
+		 (unsigned long long)command_index, mgmtctx->start_col, hwctx,
+		 hwctx->client->pid);
 
 	return 0;
 }
@@ -605,8 +615,14 @@ static void ve2_scheduler_work(struct work_struct *work)
 {
 	struct amdxdna_mgmtctx *mgmtctx =
 		container_of(work, struct amdxdna_mgmtctx, sched_work);
+	struct amdxdna_ctx *hwctx = NULL;
 
 	mutex_lock(&mgmtctx->ctx_lock);
+	hwctx = mgmtctx->active_ctx;
+	if (!hwctx) {
+		mutex_unlock(&mgmtctx->ctx_lock);
+		return;
+	}
 
 	/* Check if context is being destroyed */
 	if (!mgmtctx->active_ctx || !mgmtctx->active_ctx->priv) {
@@ -614,10 +630,14 @@ static void ve2_scheduler_work(struct work_struct *work)
 		return;
 	}
 
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->priv->id,
+				  0);
+
 	XDNA_DBG(mgmtctx->xdna,
-		  "scheduler: enter start_col=%u hwctx=%p pid=%d",
-		  mgmtctx->start_col, mgmtctx->active_ctx,
-		  mgmtctx->active_ctx->client->pid);
+		 "scheduler: enter start_col=%u hwctx=%p pid=%d",
+		 mgmtctx->start_col, mgmtctx->active_ctx,
+		 mgmtctx->active_ctx->client->pid);
 
 	/*
 	 * 3 case possible:
@@ -661,10 +681,15 @@ static void ve2_scheduler_work(struct work_struct *work)
 		XDNA_DBG(mgmtctx->xdna, "Scheduler: no action needed, active_ctx=%p",
 			 mgmtctx->active_ctx);
 	}
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+				  hwctx->client->pid,
+				  hwctx->priv->start_col,
+				  hwctx->priv->id, 0);
+
 	XDNA_DBG(mgmtctx->xdna,
-		  "scheduler: exit start_col=%u hwctx=%p pid=%d",
-		  mgmtctx->start_col, mgmtctx->active_ctx,
-		  mgmtctx->active_ctx->client->pid);
+		 "scheduler: exit start_col=%u hwctx=%p pid=%d",
+		 mgmtctx->start_col, hwctx,
+		 hwctx->client->pid);
 	mutex_unlock(&mgmtctx->ctx_lock);
 }
 
@@ -738,9 +763,12 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	}
 
 	XDNA_DBG(xdna,
-		  "completion IRQ: enter start_col=%u hwctx=%p pid=%d",
-		  mgmtctx->start_col, hwctx, hwctx->client->pid);
+		 "completion IRQ: enter start_col=%u hwctx=%p pid=%d",
+		 mgmtctx->start_col, hwctx, hwctx->client->pid);
 
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
+				  hwctx->client->pid,
+				  mgmtctx->start_col, hwctx->priv->id, 0);
 	if (get_ctx_read_index(hwctx, &read_index)) {
 		XDNA_ERR(xdna, "Failed to get read index");
 		mutex_unlock(&mgmtctx->ctx_lock);
@@ -767,6 +795,11 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 
 	wake_up_interruptible_all(&hwctx->priv->waitq);
 
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+				  hwctx->client->pid,
+				  hwctx->priv->id, write_index,
+				  read_index);
+
 	mutex_unlock(&mgmtctx->ctx_lock);
 
 	if (mgmtctx->mgmtctx_workq && (ve2_check_idle_or_queue_not_empty(mgmtctx) ||
@@ -779,9 +812,9 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 	}
 
 	XDNA_DBG(xdna,
-		  "completion IRQ: exit read_index=%llu write_index=%llu hwctx=%p pid=%d",
-		  (unsigned long long)read_index, (unsigned long long)write_index,
-		  hwctx, hwctx->client->pid);
+		 "completion IRQ: exit read_index=%llu write_index=%llu hwctx=%p pid=%d",
+		 (unsigned long long)read_index, (unsigned long long)write_index,
+		 hwctx, hwctx->client->pid);
 }
 
 /**
@@ -1099,11 +1132,11 @@ static void ve2_aie_error_cb(void *arg)
 	for (i = 0; i < aie_errs->num_err; i++) {
 		XDNA_DBG(xdna, "Display AIE asynchronous Error data:\n");
 		XDNA_DBG(xdna, "error_id %d Mod %d, category %d, Col %d, Row %d\n",
-			  aie_errs->errors[i].error_id,
-			  aie_errs->errors[i].module,
-			  aie_errs->errors[i].category,
-			  aie_errs->errors[i].loc.col,
-			  aie_errs->errors[i].loc.row);
+			 aie_errs->errors[i].error_id,
+			 aie_errs->errors[i].module,
+			 aie_errs->errors[i].category,
+			 aie_errs->errors[i].loc.col,
+			 aie_errs->errors[i].loc.row);
 	}
 
 	aie_free_errors(aie_errs);
