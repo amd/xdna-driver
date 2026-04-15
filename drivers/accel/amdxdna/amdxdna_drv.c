@@ -125,6 +125,37 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	drm_dev_exit(idx);
 }
 
+static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
+{
+	struct amdxdna_client *client = filp->driver_priv;
+	size_t heap_usage, external_usage, internal_usage;
+	char *drv_name = filp->minor->dev->driver->name;
+
+	mutex_lock(&client->mm_lock);
+
+	heap_usage = client->heap_usage;
+	internal_usage = client->total_int_bo_usage;
+	external_usage = client->total_bo_usage - internal_usage;
+
+	mutex_unlock(&client->mm_lock);
+
+	/*
+	 * Note for driver specific BO memory usage stat.
+	 * Total memory in use = amdxdna-internal-alloc + amdxdna-external-alloc, which
+	 * includes both imported and created BOs. To avoid double counts, it includes
+	 * HEAP BO, but not DEV BO. DEV BO is counted by amdxdna-heap-alloc.
+	 */
+	drm_fdinfo_print_size(p, drv_name, "heap", "alloc", heap_usage);
+	drm_fdinfo_print_size(p, drv_name, "internal", "alloc", internal_usage);
+	drm_fdinfo_print_size(p, drv_name, "external", "alloc", external_usage);
+	/*
+	 * Note for DRM standard BO memory stat.
+	 * drm-total-memory counts both DEV BO and HEAP BO. The DEV BO size is double counted.
+	 * drm-shared-memory counts BO shared with other processes/devices.
+	 */
+	drm_show_memory_stats(p, filp);
+}
+
 static int amdxdna_drm_get_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
@@ -222,7 +253,7 @@ const struct drm_driver amdxdna_drm_drv = {
 	.postclose = amdxdna_drm_close,
 	.ioctls = amdxdna_drm_ioctls,
 	.num_ioctls = ARRAY_SIZE(amdxdna_drm_ioctls),
-
+	.show_fdinfo = amdxdna_show_fdinfo,
 	.gem_create_object = amdxdna_gem_create_shmem_object_cb,
 	.gem_prime_import = amdxdna_gem_prime_import,
 };
