@@ -21,7 +21,6 @@
 #define MAX_CHAIN_CMDBUF_SIZE	SZ_4K
 
 struct amdxdna_hwctx_priv {
-	struct amdxdna_gem_obj		*heap;
 	void				*mbox_chann;
 
 	struct drm_gpu_scheduler	sched;
@@ -37,8 +36,13 @@ struct amdxdna_hwctx_priv {
 	/* Completed job counter */
 	u64				completed;
 
+	/* DPM level computed for this context */
+	u32				req_dpm_level;
+
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 	struct drm_syncobj		*syncobj;
+
+	struct amdxdna_gem_obj		*last_pinned_chunk;
 };
 
 enum ert_cmd_opcode {

@@ -791,37 +791,17 @@ free_cus:
 	return ret;
 }
 
-/**
- * aie2_cmd_wait_op - Wait for an AIE2 command to complete.
- * @hwctx:      Hardware context that submitted the command.
- * @seq:        Command sequence number to wait on.
- * @timeout_ms: Timeout in milliseconds; 0 means wait indefinitely.
- *
- * Retrieves the dma_fence associated with @seq from the hwctx syncobj
- * and blocks until it signals or @timeout_ms elapses.
- *
- * Returns 0 on success, -ETIME if the timeout expires, -ENOENT if the
- * fence for @seq cannot be found (sequence number too old or never submitted).
- */
-int aie2_cmd_wait_op(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
+static void aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq)
 {
-	unsigned long timeout = timeout_ms ?
-		msecs_to_jiffies(timeout_ms) : MAX_SCHEDULE_TIMEOUT;
-	struct dma_fence *out_fence;
-	long lret;
+	struct dma_fence *out_fence = aie2_cmd_get_out_fence(hwctx, seq);
 
-	out_fence = aie2_cmd_get_out_fence(hwctx, seq);
-	if (!out_fence)
-		return -ENOENT;
+	if (!out_fence) {
+		XDNA_ERR(hwctx->client->xdna, "Failed to get fence");
+		return;
+	}
 
-	lret = dma_fence_wait_timeout(out_fence, true, timeout);
+	dma_fence_wait_timeout(out_fence, false, MAX_SCHEDULE_TIMEOUT);
 	dma_fence_put(out_fence);
-
-	if (lret == 0)
-		return -ETIME;
-	if (lret < 0)
-		return lret;
-	return 0;
 }
 
 static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
@@ -861,7 +841,7 @@ static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 		goto put_obj;
 	}
 
-	aie2_cmd_wait_op(hwctx, seq, 3000 /* ms */);
+	aie2_cmd_wait(hwctx, seq);
 	if (cmd.result) {
 		XDNA_ERR(xdna, "Response failure 0x%x", cmd.result);
 		goto put_obj;
@@ -913,7 +893,7 @@ int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl)
 		return ret;
 	}
 
-	aie2_cmd_wait_op(hwctx, seq, 3000 /* ms */);
+	aie2_cmd_wait(hwctx, seq);
 	if (cmd.result) {
 		XDNA_ERR(xdna, "Response failure 0x%x", cmd.result);
 		return -EINVAL;
@@ -1092,6 +1072,45 @@ up_sem:
 	up(&hwctx->priv->job_sem);
 	job->job_done = true;
 	return ret;
+}
+
+int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_gem_obj *new_chunk;
+	u64 addr;
+	int ret;
+
+	new_chunk = list_last_entry(&client->dev_heap_chunks,
+				    struct amdxdna_gem_obj,
+				    heap_chunk_node);
+
+	if (hwctx->priv->last_pinned_chunk !=
+	    list_prev_entry(new_chunk, heap_chunk_node))
+		return -EIO;
+
+	ret = amdxdna_gem_pin(new_chunk);
+	if (ret) {
+		XDNA_ERR(xdna, "Pin chunk for hwctx %s failed, ret %d",
+			 hwctx->name, ret);
+		return ret;
+	}
+	drm_gem_object_get(to_gobj(new_chunk));
+
+	addr = amdxdna_obj_dma_addr(new_chunk);
+	ret = aie2_add_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
+				addr, new_chunk->mem.size);
+	if (ret) {
+		XDNA_ERR(xdna, "Add host buf for hwctx %s failed, ret %d",
+			 hwctx->name, ret);
+		amdxdna_gem_unpin(new_chunk);
+		drm_gem_object_put(to_gobj(new_chunk));
+		return ret;
+	}
+
+	hwctx->priv->last_pinned_chunk = new_chunk;
+	return 0;
 }
 
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo,
