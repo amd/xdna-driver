@@ -44,7 +44,7 @@ jobs:
           libncurses-dev uuid-dev libelf-dev libdw-dev \
           jq wget \
           libprotobuf-dev protobuf-compiler libsystemd-dev \
-          libyaml-dev libssl-dev
+          libyaml-dev libssl-dev rapidjson-dev
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4
