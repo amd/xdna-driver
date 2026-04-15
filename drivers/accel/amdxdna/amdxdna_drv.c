@@ -53,7 +53,6 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
 	struct amdxdna_client *client;
-	int ret;
 
 	client = kzalloc_obj(*client);
 	if (!client)
@@ -73,6 +72,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	init_srcu_struct(&client->hwctx_srcu);
 	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
 	mutex_init(&client->mm_lock);
+	INIT_LIST_HEAD(&client->dev_heap_chunks);
 
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
@@ -92,8 +92,14 @@ static void amdxdna_client_cleanup(struct amdxdna_client *client)
 	xa_destroy(&client->hwctx_xa);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 
-	if (client->dev_heap)
-		drm_gem_object_put(to_gobj(client->dev_heap));
+	while (!list_empty(&client->dev_heap_chunks)) {
+		struct amdxdna_gem_obj *chunk;
+
+		chunk = list_last_entry(&client->dev_heap_chunks,
+					struct amdxdna_gem_obj, heap_chunk_node);
+		list_del_init(&chunk->heap_chunk_node);
+		drm_gem_object_put(to_gobj(chunk)); /* drop creation ref */
+	}
 
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
