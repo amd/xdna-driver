@@ -13,7 +13,7 @@
 
 /*
  * Structure used to describe a partition. A partition is column based
- * allocation unit described by its start column and number of columns.
+ * allocation unit described by its start column and number of columns..
  */
 struct aie_part {
 	u32	start_col;
