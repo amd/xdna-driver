@@ -19,6 +19,36 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 
+static int amdxdna_sva_init(struct amdxdna_client *client)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+
+	client->sva = iommu_sva_bind_device(xdna->ddev.dev, client->mm);
+	if (IS_ERR(client->sva)) {
+		XDNA_ERR(xdna, "SVA bind device failed, ret %ld", PTR_ERR(client->sva));
+		return PTR_ERR(client->sva);
+	}
+
+	client->pasid = iommu_sva_get_pasid(client->sva);
+	if (client->pasid == IOMMU_PASID_INVALID) {
+		iommu_sva_unbind_device(client->sva);
+		XDNA_ERR(xdna, "SVA get pasid failed");
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+static void amdxdna_sva_fini(struct amdxdna_client *client)
+{
+	if (IS_ERR_OR_NULL(client->sva))
+		return;
+
+	iommu_sva_unbind_device(client->sva);
+	client->sva = NULL;
+	client->pasid = IOMMU_PASID_INVALID;
+}
+
 static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
@@ -31,20 +61,14 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 	client->pid = pid_nr(rcu_access_pointer(filp->pid));
 	client->xdna = xdna;
-
-	client->sva = iommu_sva_bind_device(xdna->ddev.dev, current->mm);
-	if (IS_ERR(client->sva)) {
-		ret = PTR_ERR(client->sva);
-		XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
-		goto failed;
-	}
-	client->pasid = iommu_sva_get_pasid(client->sva);
-	if (client->pasid == IOMMU_PASID_INVALID) {
-		XDNA_ERR(xdna, "SVA get pasid failed");
-		ret = -ENODEV;
-		goto unbind_sva;
-	}
+	client->pasid = IOMMU_PASID_INVALID;
 	client->mm = current->mm;
+
+	if (!amdxdna_iova_on(xdna)) {
+		/* No need to fail open since user may use pa + carveout later. */
+		if (amdxdna_sva_init(client))
+			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
+	}
 	mmgrab(client->mm);
 	init_srcu_struct(&client->hwctx_srcu);
 	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
@@ -59,13 +83,6 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 	XDNA_DBG(xdna, "pid %d opened", client->pid);
 	return 0;
-
-unbind_sva:
-	iommu_sva_unbind_device(client->sva);
-failed:
-	kfree(client);
-
-	return ret;
 }
 
 static void amdxdna_client_cleanup(struct amdxdna_client *client)
@@ -74,14 +91,13 @@ static void amdxdna_client_cleanup(struct amdxdna_client *client)
 	amdxdna_hwctx_remove_all(client);
 	xa_destroy(&client->hwctx_xa);
 	cleanup_srcu_struct(&client->hwctx_srcu);
-	mutex_destroy(&client->mm_lock);
 
 	if (client->dev_heap)
 		drm_gem_object_put(to_gobj(client->dev_heap));
 
-	iommu_sva_unbind_device(client->sva);
+	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
-
+	amdxdna_sva_fini(client);
 	kfree(client);
 }
 
