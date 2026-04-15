@@ -113,6 +113,14 @@ static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
 	return false;
 }
 
+u32 xrs_get_gops(struct aie_qos *rqos)
+{
+	if (!is_valid_qos_dpm_params(rqos))
+		return 0;
+
+	return calculate_gops(rqos) * DEFAULT_SYS_EFF_FACTOR;
+}
+
 static int set_dpm_level(struct solver_state *xrs, struct alloc_requests *req, u32 *dpm_level)
 {
 	struct solver_rgroup *rgp = &xrs->rgp;

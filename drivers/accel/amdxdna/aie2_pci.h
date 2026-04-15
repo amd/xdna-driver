@@ -125,37 +125,6 @@ struct dpm_clk_freq {
 	u32	hclk;
 };
 
-/*
- * Define the maximum number of pending commands in a hardware context.
- * Must be power of 2!
- */
-#define HWCTX_MAX_CMDS		4
-#define get_job_idx(seq) ((seq) & (HWCTX_MAX_CMDS - 1))
-struct amdxdna_hwctx_priv {
-	void				*mbox_chann;
-
-	struct drm_gpu_scheduler	sched;
-	struct drm_sched_entity		entity;
-
-	struct mutex			io_lock; /* protect seq and cmd order */
-	struct wait_queue_head		job_free_wq;
-	u32				num_pending;
-	u64				seq;
-	struct semaphore		job_sem;
-	bool				job_done;
-
-	/* Completed job counter */
-	u64				completed;
-
-	/* DPM level computed for this context */
-	u32				req_dpm_level;
-
-	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
-	struct drm_syncobj		*syncobj;
-
-	struct amdxdna_gem_obj		*last_pinned_chunk;
-};
-
 enum aie2_dev_status {
 	AIE2_DEV_UNINIT,
 	AIE2_DEV_INIT,
