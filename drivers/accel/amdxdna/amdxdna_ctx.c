@@ -514,7 +514,6 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 		goto unlock_srcu;
 	}
 
-
 	job->hwctx = hwctx;
 	job->mm = current->mm;
 

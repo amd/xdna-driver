@@ -10,7 +10,6 @@
 
 #define DEFAULT_SYS_EFF_FACTOR	2
 
-
 /*
  * Structure used to describe a partition. A partition is column based
  * allocation unit described by its start column and number of columns.
