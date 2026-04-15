@@ -350,6 +350,14 @@ done:
 
 static inline void ring_doorbell(struct amdxdna_ctx *ctx)
 {
+	struct amdxdna_dev_hdl *ndev = ctx->client->xdna->dev_handle;
+
+	if (ndev->xcomm_ops) {
+		ndev->xcomm_ops->ring_doorbell(ndev->xcomm_hdl,
+					       ctx->priv->hw_ctx_id);
+		return;
+	}
+
 	writel(0, ctx->priv->doorbell_addr);
 }
 

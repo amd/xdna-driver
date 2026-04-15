@@ -313,6 +313,7 @@ static struct pci_driver amdxdna_pci_driver = {
 	.sriov_configure = amdxdna_sriov_configure,
 };
 
+#ifndef CONFIG_AMDXDNA_RPMSG
 static int __init amdxdna_mod_init(void)
 {
 	amdxdna_carvedout_init();
@@ -327,6 +328,7 @@ static void __exit amdxdna_mod_exit(void)
 
 module_init(amdxdna_mod_init);
 module_exit(amdxdna_mod_exit);
+#endif
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");

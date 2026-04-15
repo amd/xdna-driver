@@ -144,6 +144,23 @@ struct amdxdna_dev_priv {
 };
 
 struct async_events;
+struct amdxdna_dev_hdl;
+
+/*
+ * Generic transport operations for non-PCI communication paths.
+ *
+ * Implementations:
+ *   - RPMsg over VirtIO (CONFIG_AMDXDNA_RPMSG)
+ *   - Shared memory + IPI via device tree (future)
+ *
+ * When xcomm_ops is NULL, the driver falls back to PCI MMIO mailbox.
+ */
+struct amdxdna_xcomm_ops {
+	int (*send_msg)(void *xcomm_hdl,
+			const struct xdna_mailbox_msg *msg);
+	int (*ring_doorbell)(void *xcomm_hdl, u32 hw_ctx_id);
+	void (*fini)(void *xcomm_hdl);
+};
 
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
@@ -193,6 +210,13 @@ struct amdxdna_dev_hdl {
 	/* Protect mgmt_chann and cert_comp kref in cert_comp_xa */
 	struct mutex			aie4_lock;
 	struct xarray			cert_comp_xa;
+
+	/*
+	 * Generic transport layer.  NULL when using PCI mailbox (MMIO).
+	 * Set by RPMsg, shared-memory+IPI, or other non-PCI transports.
+	 */
+	const struct amdxdna_xcomm_ops	*xcomm_ops;
+	void				*xcomm_hdl;
 };
 
 /* CERT completion event */

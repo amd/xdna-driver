@@ -10,9 +10,15 @@ XDNA_BUS_TYPE := pci
 ifeq ($(XDNA_BUS_TYPE), pci)
 PCI = y
 OF = n
+RPMSG = n
 else ifeq ($(XDNA_BUS_TYPE), of)
 PCI = n
 OF = y
+RPMSG = n
+else ifeq ($(XDNA_BUS_TYPE), rpmsg)
+PCI = n
+OF = n
+RPMSG = y
 else
 $(error Unknown XDNA_BUS_TYPE $(XDNA_BUS_TYPE))!!
 endif
@@ -50,13 +56,19 @@ endif
 
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
+ifeq ($(XDNA_BUS_TYPE), rpmsg)
+DEFINES += -DCONFIG_AMDXDNA_RPMSG
+endif
+
+KBUILD_ARGS := OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) OFT_CONFIG_AMDXDNA_RPMSG=$(RPMSG)
+
 ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF
 endif
 
 # Generate config_kernel.h if not already present (CMake or direct build)
 modules: $(SRC_DIR)/config_kernel.h
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) $(USE_LLVM) modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" $(KBUILD_ARGS) $(USE_LLVM) modules
 
 $(SRC_DIR)/config_kernel.h:
 	@echo "[INFO] Generating config_kernel.h..."

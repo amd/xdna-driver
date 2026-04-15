@@ -298,6 +298,9 @@ static int aie4_mailbox_init(struct amdxdna_dev *xdna)
 
 static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
+#ifdef CONFIG_AMDXDNA_RPMSG
+	return 0;
+#else
 	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	dma_addr_t dma_addr;
@@ -332,12 +335,11 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 
 	return aie4_set_ctx_timeout(ndev, timeout_in_sec * 1000);
+#endif
 }
 
 static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 {
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	ret = aie4_check_firmware_version(ndev);
@@ -352,10 +354,16 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	if (is_npu3_pf_dev(pdev)) {
-		XDNA_DBG(ndev->xdna, "skip aie check on non npu3 pf device");
-		return 0;
+#ifndef CONFIG_AMDXDNA_RPMSG
+	{
+		struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
+
+		if (is_npu3_pf_dev(pdev)) {
+			XDNA_DBG(ndev->xdna, "skip aie check on non npu3 pf device");
+			return 0;
+		}
 	}
+#endif
 
 	ret = aie4_query_aie_version(ndev, &ndev->version);
 	if (ret) {
@@ -373,6 +381,18 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 
 	return 0;
 }
+
+#ifdef CONFIG_AMDXDNA_RPMSG
+
+static inline int aie4_fw_load_support(struct amdxdna_dev_hdl *ndev)
+{
+	return 0;
+}
+
+static void aie4_fw_unload(struct amdxdna_dev_hdl *ndev) {}
+static int aie4_fw_load(struct amdxdna_dev_hdl *ndev) { return 0; }
+
+#else /* !CONFIG_AMDXDNA_RPMSG */
 
 static inline int aie4_fw_load_support(struct amdxdna_dev_hdl *ndev)
 {
@@ -426,6 +446,8 @@ stop_smu:
 	aie4_smu_stop(ndev);
 	return ret;
 }
+
+#endif /* CONFIG_AMDXDNA_RPMSG */
 
 static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
@@ -590,6 +612,32 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 	ndev->dev_status = AIE4_DEV_INIT;
 }
 
+#ifdef CONFIG_AMDXDNA_RPMSG
+
+static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
+				 const struct firmware **npufw,
+				 const struct firmware **certfw)
+{
+	return 0;
+}
+
+static int aie4_release_firmware(struct amdxdna_dev_hdl *ndev,
+				 const struct firmware *npufw,
+				 const struct firmware *certfw)
+{
+	return 0;
+}
+
+static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
+				 const struct firmware *npufw,
+				 const struct firmware *certfw,
+				 void __iomem *tbl[PCI_NUM_RESOURCES])
+{
+	return 0;
+}
+
+#else /* !CONFIG_AMDXDNA_RPMSG */
+
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 				 const struct firmware **npufw,
 				 const struct firmware **certfw)
@@ -695,6 +743,8 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 
 	return 0;
 }
+
+#endif /* CONFIG_AMDXDNA_RPMSG */
 
 static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
@@ -844,7 +894,6 @@ static irqreturn_t cert_comp_isr(int irq, void *p)
 static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct cert_comp *cert_comp;
 	unsigned long flags;
 	int ret = 0;
@@ -871,21 +920,28 @@ static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32
 	init_waitqueue_head(&cert_comp->waitq);
 	kref_init(&cert_comp->kref);
 
-	if (enable_aie4_polling)
+	/* Non-PCI transports handle notifications via their own RX path */
+	if (ndev->xcomm_ops || enable_aie4_polling)
 		goto skip;
 
-	ret = pci_irq_vector(pdev, cert_comp->msix_idx);
-	if (ret < 0) {
-		XDNA_ERR(xdna, "MSI-X index %u is invalid", msix_idx);
-		goto done;
-	}
-	cert_comp->irq = ret;
+	{
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	ret = request_irq(cert_comp->irq, cert_comp_isr, 0, "xdna_hsa", cert_comp);
-	if (ret) {
-		XDNA_ERR(xdna, "request irq %d failed %d", cert_comp->irq, ret);
-		cert_comp->irq = -ENOENT;
-		goto done;
+		ret = pci_irq_vector(pdev, cert_comp->msix_idx);
+		if (ret < 0) {
+			XDNA_ERR(xdna, "MSI-X index %u is invalid", msix_idx);
+			goto done;
+		}
+		cert_comp->irq = ret;
+
+		ret = request_irq(cert_comp->irq, cert_comp_isr, 0,
+				  "xdna_hsa", cert_comp);
+		if (ret) {
+			XDNA_ERR(xdna, "request irq %d failed %d",
+				 cert_comp->irq, ret);
+			cert_comp->irq = -ENOENT;
+			goto done;
+		}
 	}
 
 skip:

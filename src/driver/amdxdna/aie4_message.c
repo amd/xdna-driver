@@ -74,10 +74,28 @@ int aie4_send_msg_wait(struct amdxdna_dev_hdl *ndev,
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
-	if (!ndev->mgmt_chann)
-		return -ENODEV;
+	if (ndev->xcomm_ops) {
+		ret = ndev->xcomm_ops->send_msg(ndev->xcomm_hdl, msg);
+		if (ret) {
+			XDNA_ERR(xdna, "Send message failed, ret %d", ret);
+			return ret;
+		}
 
-	ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
+		ret = wait_for_completion_timeout(&hdl->comp,
+						  msecs_to_jiffies(RX_TIMEOUT));
+		if (!ret) {
+			XDNA_ERR(xdna, "Wait for completion timeout");
+			return -ETIME;
+		}
+
+		ret = hdl->error;
+	} else {
+		if (!ndev->mgmt_chann)
+			return -ENODEV;
+
+		ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
+	}
+
 	if (ret)
 		return ret;
 

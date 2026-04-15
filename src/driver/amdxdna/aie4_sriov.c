@@ -3,11 +3,13 @@
  * Copyright (C) 2026, Advanced Micro Devices, Inc.
  */
 
-#include <linux/pci.h>
-
 #include "aie4_pci.h"
 #include "aie4_message.h"
 #include "aie4_msg_priv.h"
+
+#ifndef CONFIG_AMDXDNA_RPMSG
+#include <linux/pci.h>
+#endif
 
 #define NUM_VF 4
 
@@ -15,17 +17,22 @@ static int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_destroy_vfs, AIE4_MSG_OP_DESTROY_VFS);
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	if (ndev->num_vfs == 0)
 		return 0;
 
-	ret = pci_sriov_configure_simple(pdev, 0);
-	if (ret) {
-		XDNA_ERR(xdna, "configure vfs to 0 failed: %d", ret);
-		return ret;
+#ifndef CONFIG_AMDXDNA_RPMSG
+	{
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+
+		ret = pci_sriov_configure_simple(pdev, 0);
+		if (ret) {
+			XDNA_ERR(xdna, "configure vfs to 0 failed: %d", ret);
+			return ret;
+		}
 	}
+#endif
 
 	ndev->num_vfs = 0;
 	req.rsvd = 0;
@@ -42,8 +49,6 @@ static int aie4_sriov_start(struct amdxdna_dev_hdl *ndev, int num_vfs)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_vfs, AIE4_MSG_OP_CREATE_VFS);
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-
 	int ret;
 
 	if (num_vfs > NUM_VF) {
@@ -61,7 +66,15 @@ static int aie4_sriov_start(struct amdxdna_dev_hdl *ndev, int num_vfs)
 		return ret;
 	}
 
-	return pci_sriov_configure_simple(pdev, ndev->num_vfs);
+#ifndef CONFIG_AMDXDNA_RPMSG
+	{
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+
+		return pci_sriov_configure_simple(pdev, ndev->num_vfs);
+	}
+#endif
+
+	return 0;
 }
 
 int aie4_sriov_configure(struct amdxdna_dev *xdna, int num_vfs)
