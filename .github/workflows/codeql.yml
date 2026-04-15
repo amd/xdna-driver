@@ -74,30 +74,3 @@ jobs:
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y g++ cmake jq wget libdrm-dev
-
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
-        queries: security-extended
-
-    - name: Build Project
-      if: matrix.build-mode == 'manual'
-      run: |
-        mkdir -p build_codeql && cd build_codeql
-        cmake .. -DSKIP_KMOD=1 -DCMAKE_BUILD_TYPE=Release
-        make -j $(nproc)
-
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
-      with:
-        category: "/language:${{matrix.language}}"
