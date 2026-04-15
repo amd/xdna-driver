@@ -8,6 +8,7 @@
 
 #include <linux/timekeeping.h>
 #include "amdxdna_error.h"
+#include "amdxdna_trace.h"
 #include "amdxdna_aux_drv.h"
 #include "ve2_host_queue.h"
 #include "ve2_fw.h"
@@ -82,6 +83,7 @@ struct amdxdna_ctx_command_fifo {
 };
 
 struct amdxdna_ctx_priv {
+	u64				id; /* Unique incrementing hwctx ID */
 	u32				start_col;
 	u32				num_col;
 	u32				mem_bitmap;
@@ -144,6 +146,8 @@ struct amdxdna_dev_hdl {
 	struct ve2_firmware_status	**fw_slots;
 	struct amdxdna_mgmtctx          *ve2_mgmtctx;
 	struct ve2_mem_topology		mem_topology;
+	struct xarray			hwctx_ids; /* XArray for hwctx ID allocation */
+	u32				next_hwctx_id; /* Next ID hint for xa_alloc_cyclic */
 };
 
 /* ve2_of.c */

@@ -351,6 +351,10 @@ static int ve2_init(struct amdxdna_dev *xdna)
 	xdna_hdl->priv = xdna->dev_info->dev_priv;
 	xdna->dev_handle = xdna_hdl;
 
+	/* Initialize XArray for hwctx ID allocation */
+	xa_init_flags(&xdna_hdl->hwctx_ids, XA_FLAGS_ALLOC);
+	xdna_hdl->next_hwctx_id = 1; /* Start IDs from 1 */
+
 	if (ve2_hwctx_limit)
 		xdna_hdl->hwctx_limit = ve2_hwctx_limit;
 	else
@@ -441,10 +445,16 @@ static int ve2_init(struct amdxdna_dev *xdna)
 
 static void ve2_fini(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
 	/* All resources are managed by devm_/drmm_ */
 	XDNA_DBG(xdna, "VE2 device cleanup: releasing resources");
 
 	ve2_cma_mem_region_remove(xdna);
+
+	/* Cleanup hwctx ID XArray */
+	xa_destroy(&xdna_hdl->hwctx_ids);
+
+	XDNA_DBG(xdna, "VE2 device cleanup complete");
 }
 
 const struct amdxdna_dev_ops ve2_ops = {
