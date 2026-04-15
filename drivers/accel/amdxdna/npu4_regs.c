@@ -98,6 +98,7 @@ const struct amdxdna_fw_feature_tbl npu4_fw_feature_table[] = {
 	{ .features = BIT_U64(AIE2_NPU_COMMAND), .major = 6, .min_minor = 15 },
 	{ .features = BIT_U64(AIE2_UPDATE_PROPERTY), .major = 6, .min_minor = 15 },
 	{ .features = BIT_U64(AIE2_APP_HEALTH), .major = 6, .min_minor = 18 },
+	{ .features = BIT_U64(AIE2_ADD_HOST_BUFFER), .major = 6, .min_minor = 18 },
 	{ .features = BIT_U64(AIE2_GET_DEV_REVISION), .major = 6, .min_minor = 24 },
 	{ .features = AIE2_ALL_FEATURES, .major = 7 },
 	{ 0 }
@@ -164,6 +165,7 @@ static const struct amdxdna_dev_priv npu4_dev_priv = {
 	.rt_config	= npu4_default_rt_cfg,
 	.dpm_clk_tbl	= npu4_dpm_clk_table,
 	.col_align	= COL_ALIGN_NATURE,
+	.col_opc	= 4096,
 	.mbox_dev_addr  = NPU4_MBOX_BAR_BASE,
 	.mbox_size      = 0, /* Use BAR size */
 	.sram_dev_addr  = NPU4_SRAM_BAR_BASE,
@@ -203,6 +205,7 @@ const struct amdxdna_dev_info dev_npu4_info = {
 	.dev_mem_base      = AIE2_DEVM_BASE,
 	.dev_mem_size      = AIE2_DEVM_SIZE,
 	.default_vbnv      = "RyzenAI-npu4",
+	.dev_heap_max_size = AIE2_DEVM_MAX_SIZE,
 	.device_type       = AMDXDNA_DEV_TYPE_KMQ,
 	.rev_vbnv_tbl      = npu4_rev_vbnv_tbl,
 	.dev_priv          = &npu4_dev_priv,
