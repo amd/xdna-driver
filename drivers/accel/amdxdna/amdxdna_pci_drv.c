@@ -14,6 +14,7 @@
 #include <linux/iommu.h>
 #include <linux/pci.h>
 
+#include "amdxdna_cbuf.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_drv.h"
 #include "amdxdna_gem.h"
@@ -151,7 +152,26 @@ static struct pci_driver amdxdna_pci_driver = {
 	.sriov_configure = amdxdna_sriov_configure,
 };
 
-module_pci_driver(amdxdna_pci_driver);
+static int __init amdxdna_mod_init(void)
+{
+	int ret;
+
+	amdxdna_carveout_init();
+	ret = pci_register_driver(&amdxdna_pci_driver);
+	if (ret)
+		amdxdna_carveout_fini();
+
+	return ret;
+}
+
+static void __exit amdxdna_mod_exit(void)
+{
+	pci_unregister_driver(&amdxdna_pci_driver);
+	amdxdna_carveout_fini();
+}
+
+module_init(amdxdna_mod_init);
+module_exit(amdxdna_mod_exit);
 
 MODULE_LICENSE(AMDXDNA_MODULE_LICENSE);
 MODULE_IMPORT_NS("AMD_PMF");
