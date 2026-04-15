@@ -101,9 +101,76 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 #endif
 }
 
+static void aie2_hwctx_release_heap(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_gem_obj *last = hwctx->priv->last_pinned_chunk;
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_gem_obj *chunk;
+
+	if (!last)
+		return;
+
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
+		amdxdna_gem_unpin(chunk);
+		drm_gem_object_put(to_gobj(chunk));
+		if (chunk == last)
+			break;
+	}
+	hwctx->priv->last_pinned_chunk = NULL;
+}
+
+static int aie2_hwctx_map_heap(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	bool need_pin = !hwctx->priv->last_pinned_chunk;
+	struct amdxdna_gem_obj *chunk;
+	u64 offset = 0;
+	u64 addr;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
+		if (need_pin) {
+			ret = amdxdna_gem_pin(chunk);
+			if (ret)
+				goto release;
+			drm_gem_object_get(to_gobj(chunk));
+			hwctx->priv->last_pinned_chunk = chunk;
+		}
+
+		addr = amdxdna_obj_dma_addr(chunk);
+		if (!offset)
+			ret = aie2_map_host_buf(xdna->dev_handle,
+						hwctx->fw_ctx_id,
+						addr, chunk->mem.size);
+		else
+			ret = aie2_add_host_buf(xdna->dev_handle,
+						hwctx->fw_ctx_id,
+						addr, chunk->mem.size);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Notify FW hwctx %d chunk offset 0x%llx failed, ret %d",
+				 hwctx->fw_ctx_id, offset, ret);
+			goto release;
+		}
+
+		if (!need_pin && chunk == hwctx->priv->last_pinned_chunk)
+			need_pin = true;
+
+		offset += chunk->mem.size;
+	}
+
+	return 0;
+
+release:
+	aie2_hwctx_release_heap(hwctx);
+	return ret;
+}
+
 static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_gem_obj *heap = hwctx->priv->heap;
 	int ret;
 
 	ret = aie2_create_context(xdna->dev_handle, hwctx);
@@ -112,9 +179,7 @@ static int aie2_hwctx_restart(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hw
 		goto out;
 	}
 
-	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(heap),
-				heap->mem.size);
+	ret = aie2_hwctx_map_heap(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buf failed, ret %d", ret);
 		goto out;
@@ -559,40 +624,23 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx_priv *priv;
-	struct amdxdna_gem_obj *heap;
 	int ret;
-
-	mutex_lock(&client->mm_lock);
-	heap = client->dev_heap;
-	if (!heap) {
-		XDNA_ERR(xdna, "The client dev heap object not exist");
-		mutex_unlock(&client->mm_lock);
-		return -ENOENT;
-	}
-	drm_gem_object_get(to_gobj(heap));
-	mutex_unlock(&client->mm_lock);
-
-	ret = amdxdna_gem_pin(heap);
-	if (ret) {
-		XDNA_ERR(xdna, "Dev heap pin failed, ret %d", ret);
-		goto put_heap;
-	}
 
 	ret = amdxdna_hwctx_priv_init(hwctx, &sched_ops,
 				      tdr_timeout_ms > 0 ? tdr_timeout_ms : 0);
 	if (ret) {
 		XDNA_ERR(xdna, "Initialize hwctx priv failed, ret %d", ret);
-		goto unpin_heap;
+		return ret;
 	}
 
 	priv = hwctx->priv;
-	priv->heap = heap;
 
 	ret = aie2_hwctx_col_list(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
 		goto fini_priv;
 	}
+	hwctx->max_opc = xdna->dev_handle->priv->col_opc * hwctx->num_col;
 
 	ret = amdxdna_pm_resume_get_locked(xdna);
 	if (ret)
@@ -604,18 +652,26 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto suspend_put;
 	}
 
-	ret = aie2_map_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				amdxdna_obj_dma_addr(heap),
-				heap->mem.size);
+	hwctx->priv->req_dpm_level = aie2_pm_calc_dpm_level(xdna->dev_handle,
+							    hwctx->max_opc,
+							    &hwctx->qos);
+	ret = aie2_pm_request_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
+	if (ret) {
+		XDNA_ERR(xdna, "Request DPM level %d failed, ret %d",
+			 hwctx->priv->req_dpm_level, ret);
+		goto release_resource;
+	}
+
+	ret = aie2_hwctx_map_heap(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
-		goto release_resource;
+		goto release_dpm;
 	}
 
 	ret = aie2_ctx_syncobj_create(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
-		goto release_resource;
+		goto release_dpm;
 	}
 	amdxdna_pm_suspend_put(xdna);
 
@@ -625,18 +681,17 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	return 0;
 
+release_dpm:
+	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 release_resource:
 	aie2_release_resource(hwctx);
+	aie2_hwctx_release_heap(hwctx);
 suspend_put:
 	amdxdna_pm_suspend_put(xdna);
 free_col_list:
 	kfree(hwctx->col_list);
 fini_priv:
 	amdxdna_hwctx_priv_fini(hwctx);
-unpin_heap:
-	amdxdna_gem_unpin(heap);
-put_heap:
-	drm_gem_object_put(to_gobj(heap));
 	return ret;
 }
 
@@ -647,10 +702,31 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	XDNA_DBG(xdna, "%s sequence number %lld", hwctx->name, hwctx->priv->seq);
 	aie2_hwctx_wait_for_idle(hwctx);
 
-	amdxdna_hwctx_fini(hwctx, aie2_release_resource);
+	/* Request fw to destroy hwctx and cancel the rest pending requests */
+	drm_sched_stop(&hwctx->priv->sched, NULL);
+	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
+	aie2_release_resource(hwctx);
 
-	amdxdna_gem_unpin(hwctx->priv->heap);
-	drm_gem_object_put(to_gobj(hwctx->priv->heap));
+	aie2_hwctx_release_heap(hwctx);
+#ifdef HAVE_6_13_drm_sched_start_errno
+	drm_sched_start(&hwctx->priv->sched, 0);
+#elif defined(HAVE_6_10_drm_sched_start_full_recovery)
+	drm_sched_start(&hwctx->priv->sched, true);
+#else
+	drm_sched_start(&hwctx->priv->sched);
+#endif
+
+	mutex_unlock(&xdna->dev_lock);
+	drm_sched_entity_destroy(&hwctx->priv->entity);
+
+	/* Wait for all submitted jobs to be completed or canceled */
+	wait_event(hwctx->priv->job_free_wq,
+		   atomic64_read(&hwctx->job_submit_cnt) ==
+		   atomic64_read(&hwctx->job_free_cnt));
+	mutex_lock(&xdna->dev_lock);
+
+	amdxdna_ctx_syncobj_destroy(hwctx);
+	amdxdna_hwctx_priv_fini(hwctx);
 	kfree(hwctx->cus);
 }
 
