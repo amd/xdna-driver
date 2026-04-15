@@ -44,7 +44,8 @@ jobs:
           libncurses-dev uuid-dev libelf-dev libdw-dev \
           jq wget \
           libprotobuf-dev protobuf-compiler libsystemd-dev \
-          libyaml-dev libssl-dev rapidjson-dev
+          libyaml-dev libssl-dev rapidjson-dev \
+          pybind11-dev python3-dev
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4
