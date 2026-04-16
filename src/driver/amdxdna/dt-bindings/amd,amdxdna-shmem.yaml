@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/accel/amd,amdxdna-shmem.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: AMD XDNA AIE4 Shared-Memory + IPI Transport
+
+maintainers:
+  - XRT Team <runtimeca39d@amd.com>
+
+description: |
+  The amdxdna-shmem driver provides a transport layer for the AMD XDNA
+  AIE4 accelerator on ARM SoC platforms (e.g. ZynqMP / Versal).
+
+  Communication with the remote AIE4 firmware uses:
+    - Two shared memory regions from reserved-memory:
+        "mgmt"     — management mailbox for command/response messages
+        "doorbell" — doorbell region for hardware context notifications
+    - ZynqMP IPI mailbox channels (TX + RX) via the Linux mailbox
+      framework for interrupt notification only.  The IPI itself
+      carries no data (bufferless IPI); the actual message payload
+      is written to/read from the shared memory regions.
+
+  The ZynqMP IPI mailbox controller (drivers/mailbox/zynqmp-ipi-mailbox.c)
+  handles the underlying IPI hardware.  This device node is a mailbox
+  client that references the IPI controller's TX and RX channels.
+
+  This binding is for AIE4 only, not VE2.
+
+properties:
+  compatible:
+    const: amd,amdxdna-shmem
+
+  mboxes:
+    minItems: 2
+    maxItems: 2
+    description: |
+      Phandle + channel specifier to the ZynqMP IPI mailbox controller.
+      Two channels are required:
+        - TX channel (index 0) for sending IPI notifications to firmware
+        - RX channel (index 1) for receiving IPI notifications from firmware
+
+  mbox-names:
+    items:
+      - const: tx
+      - const: rx
+
+  memory-region:
+    minItems: 2
+    maxItems: 2
+    description: |
+      Phandles to reserved-memory nodes.  Order must match
+      memory-region-names.  Each region is mapped as device memory
+      (non-cacheable).
+
+  memory-region-names:
+    items:
+      - const: mgmt
+      - const: doorbell
+
+required:
+  - compatible
+  - mboxes
+  - mbox-names
+  - memory-region
+  - memory-region-names
+
+additionalProperties: false
+
+examples:
+  - |
+    /*
+     * Example device tree snippet for ZynqMP / Versal platform.
+     *
+     * The IPI mailbox controller is the existing xlnx,zynqmp-ipi-mailbox
+     * (or xlnx,versal-ipi-mailbox) driver.  We use bufferless IPI —
+     * no "msg" reg-names are provided in the IPI child node.
+     */
+
+    / {
+        reserved-memory {
+            #address-cells = <2>;
+            #size-cells = <2>;
+            ranges;
+
+            mgmt_shmem: mgmt-shmem@3e000000 {
+                reg = <0x0 0x3e000000 0x0 0x100000>;
+                no-map;
+            };
+
+            doorbell_shmem: doorbell-shmem@3e100000 {
+                reg = <0x0 0x3e100000 0x0 0x10000>;
+                no-map;
+            };
+        };
+    };
+
+    /* IPI mailbox controller (already present in platform DTS) */
+    ipi_mailbox: mailbox@ff340000 {
+        compatible = "xlnx,versal-ipi-mailbox";
+        #address-cells = <2>;
+        #size-cells = <2>;
+        xlnx,ipi-id = <4>;
+        ranges;
+        interrupts = <0 72 4>;
+
+        ipi_aie: mailbox@ff370000 {
+            compatible = "xlnx,versal-ipi-dest-mailbox";
+            xlnx,ipi-id = <1>;
+            #mbox-cells = <1>;
+            /* No reg / reg-names — bufferless IPI */
+        };
+    };
+
+    /* amdxdna shared-memory transport node */
+    amdxdna_shmem: amdxdna-shmem {
+        compatible = "amd,amdxdna-shmem";
+        mboxes = <&ipi_aie 0>, <&ipi_aie 1>;
+        mbox-names = "tx", "rx";
+        memory-region = <&mgmt_shmem>, <&doorbell_shmem>;
+        memory-region-names = "mgmt", "doorbell";
+    };

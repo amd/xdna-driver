@@ -151,7 +151,7 @@ struct amdxdna_dev_hdl;
  *
  * Implementations:
  *   - RPMsg over VirtIO (CONFIG_AMDXDNA_RPMSG)
- *   - Shared memory + IPI via device tree (future)
+ *   - Shared memory + ZynqMP IPI (CONFIG_AMDXDNA_SHMEM)
  *
  * When xcomm_ops is NULL, the driver falls back to PCI MMIO mailbox.
  */

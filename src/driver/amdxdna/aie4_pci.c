@@ -298,7 +298,7 @@ static int aie4_mailbox_init(struct amdxdna_dev *xdna)
 
 static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
-#ifdef CONFIG_AMDXDNA_RPMSG
+#ifdef CONFIG_AMDXDNA_NO_PCI
 	return 0;
 #else
 	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
@@ -354,7 +354,7 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-#ifndef CONFIG_AMDXDNA_RPMSG
+#ifndef CONFIG_AMDXDNA_NO_PCI
 	{
 		struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 
@@ -382,7 +382,7 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-#ifdef CONFIG_AMDXDNA_RPMSG
+#ifdef CONFIG_AMDXDNA_NO_PCI
 
 static inline int aie4_fw_load_support(struct amdxdna_dev_hdl *ndev)
 {
@@ -447,7 +447,7 @@ stop_smu:
 	return ret;
 }
 
-#endif /* CONFIG_AMDXDNA_RPMSG */
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 
 static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
@@ -612,7 +612,7 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 	ndev->dev_status = AIE4_DEV_INIT;
 }
 
-#ifdef CONFIG_AMDXDNA_RPMSG
+#ifdef CONFIG_AMDXDNA_NO_PCI
 
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 				 const struct firmware **npufw,
@@ -744,7 +744,7 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-#endif /* CONFIG_AMDXDNA_RPMSG */
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 
 static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {

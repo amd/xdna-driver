@@ -7,7 +7,7 @@
 #include "aie4_message.h"
 #include "aie4_msg_priv.h"
 
-#ifndef CONFIG_AMDXDNA_RPMSG
+#ifndef CONFIG_AMDXDNA_NO_PCI
 #include <linux/pci.h>
 #endif
 
@@ -22,7 +22,7 @@ static int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 	if (ndev->num_vfs == 0)
 		return 0;
 
-#ifndef CONFIG_AMDXDNA_RPMSG
+#ifndef CONFIG_AMDXDNA_NO_PCI
 	{
 		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
@@ -66,7 +66,7 @@ static int aie4_sriov_start(struct amdxdna_dev_hdl *ndev, int num_vfs)
 		return ret;
 	}
 
-#ifndef CONFIG_AMDXDNA_RPMSG
+#ifndef CONFIG_AMDXDNA_NO_PCI
 	{
 		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 

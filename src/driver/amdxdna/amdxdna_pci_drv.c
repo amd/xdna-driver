@@ -313,7 +313,7 @@ static struct pci_driver amdxdna_pci_driver = {
 	.sriov_configure = amdxdna_sriov_configure,
 };
 
-#ifndef CONFIG_AMDXDNA_RPMSG
+#ifndef CONFIG_AMDXDNA_NO_PCI
 static int __init amdxdna_mod_init(void)
 {
 	amdxdna_carvedout_init();
