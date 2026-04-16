@@ -52,7 +52,6 @@ config_gen_xdna::create_validate_subcommand()
   validate_suboptions.emplace("help", std::make_shared<option>("help", "h", "Help to use this sub-command", "common", "", "none"));
   validate_suboptions.emplace("run", std::make_shared<listable_description_option>("run", "r", "Run a subset of the test suite. Valid options are:\n",
                               "common", "",  "array", get_validate_test_desc()));
-  validate_suboptions.emplace("path", std::make_shared<option>("path", "p", "Path to the directory containing validate xclbins", "hidden", "", "string"));
   validate_suboptions.emplace("param", std::make_shared<option>("param", "", "Extended parameter for a given test. Format: <test-name>:<key>:<value>", "param", "", "string"));
   validate_suboptions.emplace("pmode", std::make_shared<option>("pmode", "", "Specify which power mode to run the benchmarks in. Note: Some tests might be unavailable for some modes", "hidden", "", "string")); 
   validate_suboptions.emplace("iter", std::make_shared<option>("iter", "", "Number of iterations to run the test", "hidden", "", "string"));
@@ -67,12 +66,11 @@ config_gen_xdna::create_examine_subcommand()
   std::vector<basic_option> examine_report_desc = {
     {"aie-partitions", "AIE partition information", "common"},
     {"all", "All known reports are produced", "common"},
-    {"host", "Host information", "common"},
+    {"host", "Host information (default)", "common"},
     {"platform", "Platforms flashed on the device", "common"},
     {"telemetry", "Telemetry data for the device", "hidden"},
     {"preemption", "Preemption telemetry data for the device", "hidden"},
-    {"clocks", "Clock frequency information", "hidden"},
-    {"context-health", "Log to console context health information", "hidden"}
+    {"clocks", "Clock frequency information", "hidden"}
   };
 
   std::map<std::string, std::shared_ptr<option>> examine_suboptions; 
@@ -82,10 +80,11 @@ config_gen_xdna::create_examine_subcommand()
                                 "\tJSON-2020.2 - JSON 2020.2 schema", "common", "JSON", "string"));
   examine_suboptions.emplace("output", std::make_shared<option>("output", "o", "Direct the output to the given file", "common", "", "string"));
   examine_suboptions.emplace("help", std::make_shared<option>("help", "h", "Help to use this sub-command", "common", "", "none"));
+  examine_suboptions.emplace("watch", std::make_shared<option>("watch", "", "Refresh interval in seconds between examine updates. Exit with Ctrl+C.", "hidden", "0", "string"));
   examine_suboptions.emplace("report", std::make_shared<listable_description_option>("report", "r", "The type of report to be produced. Reports currently available are:\n", "common", "", "array", examine_report_desc));
-  examine_suboptions.emplace("element", std::make_shared<option>("element", "e", "Filters individual elements(s) from the report. Format: '/<key>/<key>/...'", "hidden", "", "array"));
   examine_suboptions.emplace("firmware-log", std::make_shared<option>("firmware-log", "", "Show status|watch firmware log data", "hidden", "", "string", true));
   examine_suboptions.emplace("event-trace", std::make_shared<option>("event-trace", "", "Show status|watch event trace data", "hidden", "", "string", true));
+  examine_suboptions.emplace("context-health", std::make_shared<option>("context-health", "", "Show status|watch context health data", "hidden", "", "string", true));
 
   return {"examine", "This command will 'examine' the state of the system/device and will generate a report of interest in a text or JSON format.", "common", std::move(examine_suboptions)};
 }
