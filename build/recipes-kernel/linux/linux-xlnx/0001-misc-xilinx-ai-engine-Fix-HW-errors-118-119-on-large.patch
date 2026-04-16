@@ -1,0 +1,28 @@
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+index 61b14737c00f..fd934f30e2c4 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -327,6 +327,7 @@ static int aie_part_read_register(struct aie_partition *apart, size_t offset,
+ {
+ 	struct aie_aperture *aperture = apart->aperture;
+ 	void __iomem *va;
++	size_t bytes_read;
+ 	int ret;
+ 
+ 	/* offset is expected to be relative to the start of the partition */
+@@ -339,10 +340,12 @@ static int aie_part_read_register(struct aie_partition *apart, size_t offset,
+ 
+ 	offset += aie_aperture_cal_regoff(aperture, apart->range.start, 0);
+ 	va = aperture->base + offset;
+-	if (len == 4)
++	if (len == sizeof(u32)) {
+ 		*((u32 *)data) = ioread32(va);
+-	else
+-		memcpy_fromio(data, va, len);
++	} else {
++		for (bytes_read = 0; bytes_read < len; bytes_read += sizeof(u32))
++			*((u32 *)(data + bytes_read)) = ioread32(va + bytes_read);
++	}
+ 
+ 	return (int)len;
+ }

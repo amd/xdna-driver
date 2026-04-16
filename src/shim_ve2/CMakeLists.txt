@@ -36,13 +36,37 @@ install (TARGETS ${XDNA_VE2_TARGET}
   LIBRARY DESTINATION ${XRT_INSTALL_LIB_DIR}
   )
 
-set(vtd_file "${CMAKE_CURRENT_BINARY_DIR}/xrt_smi_ve2.ar")
+# VTD pin: https://github.com/Xilinx/VTD/tree/4517a16b2aa1ecb8de235b11e9ba7666553bfc34/archive/ve2
+set(vtd_ve2_rev "4517a16b2aa1ecb8de235b11e9ba7666553bfc34")
+set(vtd_ve2_base "https://github.com/Xilinx/VTD/raw/${vtd_ve2_rev}/archive/ve2")
 
-file(DOWNLOAD
-  "https://github.com/Xilinx/VTD/raw/66cd853d8c2002e9059a749fbbd34b58cc8674da/archive/ve2/xrt_smi_ve2.a"
-  "${vtd_file}"
-)
+set(vtd_file "${CMAKE_CURRENT_BINARY_DIR}/xrt_smi_ve2.ar")
+file(DOWNLOAD "${vtd_ve2_base}/xrt_smi_ve2.a" "${vtd_file}")
+
+# Same layout as VTD: .../amdxdna/bins/xrt_smi_ve2.ar and .../amdxdna/bins/aie_ddr_connections/*
+set(vtd_aie_ddr_dir "${CMAKE_CURRENT_BINARY_DIR}/aie_ddr_connections")
+file(MAKE_DIRECTORY "${vtd_aie_ddr_dir}")
+set(vtd_aie_ddr_files
+  nop.elf
+  runner.json
+  recipe_latency.json
+  validate.xclbin
+  profile_start0.json
+  profile_start4.json
+  profile_start8.json
+  profile_start12.json
+  profile_start16.json
+  profile_start20.json
+  profile_start24.json
+  profile_start32.json
+  )
+foreach(_f IN LISTS vtd_aie_ddr_files)
+  file(DOWNLOAD "${vtd_ve2_base}/aie_ddr_connections/${_f}" "${vtd_aie_ddr_dir}/${_f}")
+endforeach()
 
 install(FILES "${vtd_file}"
   DESTINATION ${CMAKE_INSTALL_DATADIR}/amdxdna/bins/
-)
+  )
+install(DIRECTORY "${vtd_aie_ddr_dir}/"
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/amdxdna/bins/aie_ddr_connections
+  )

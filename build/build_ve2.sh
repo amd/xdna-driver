@@ -46,8 +46,21 @@ build_configuration()
     cp -rf $ABS_PATH/recipes-hip/* $yocto_path/sources/meta-xilinx/meta-xilinx-core/recipes-xrt/
     cp -rf $ABS_PATH/recipes-kernel/linux/linux-xlnx/* $yocto_path/sources/meta-xilinx/meta-xilinx-core/recipes-kernel/linux/linux-xlnx/
     cp -rf $ABS_PATH/recipes-kernel/linux/linux-xlnx_%.bbappend $yocto_path/sources/meta-xilinx/meta-xilinx-core/recipes-kernel/linux/
-    echo 'TOOLCHAIN_TARGET_TASK:append = "hip-dev"' >> $yocto_path/build/conf/local.conf
-    echo 'IMAGE_INSTALL:append = " amdxdna"' >> $yocto_path/build/conf/local.conf
+    if [ -d "$ABS_PATH/recipes-protobuf" ]; then
+        mkdir -p "$yocto_path/sources/meta-xilinx/meta-xilinx-core/recipes-devtools/protobuf"
+        cp -rf "$ABS_PATH/recipes-protobuf"/* "$yocto_path/sources/meta-xilinx/meta-xilinx-core/recipes-devtools/protobuf/"
+        echo "Copied protobuf recipes to meta-xilinx-core/recipes-devtools/protobuf/"
+    else
+        echo "WARNING: $ABS_PATH/recipes-protobuf not found; protobuf 3.21.12 will not be added."
+    fi
+    {
+      echo 'TOOLCHAIN_TARGET_TASK:append = " hip-dev"'
+      echo 'IMAGE_INSTALL:append = " amdxdna"'
+      echo 'BBFILE_PRIORITY_xilinx = "7"'
+      echo 'PREFERRED_VERSION_protobuf = "3.21.12"'
+      echo 'PREFERRED_VERSION_protobuf-native = "3.21.12"'
+      echo 'PREFERRED_VERSION_protobuf-c = "1.4.1"'
+    } >> "$yocto_path/build/conf/local.conf"
 }
 
 install_recipes()
