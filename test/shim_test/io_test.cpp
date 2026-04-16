@@ -10,12 +10,16 @@
 
 #include "core/common/device.h"
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <regex>
 #include <chrono>
+#include <cstdint>
 #include <thread>
+#include <dirent.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 
 // FIXME
 #include "../../src/include/uapi/drm_local/amdxdna_accel.h"
@@ -123,7 +127,7 @@ void io_test_cmd_wait(hwqueue_handle *hwq, std::shared_ptr<bo> bo)
     }
 }
 
-static void
+void
 reset_cmd_headers_before_submit(
   std::vector<std::unique_ptr<io_test_bo_set_base>>& bo_set,
   size_t list_idx, int cmds_per_list, ert_start_kernel_cmd* cmd_pkt)
@@ -278,6 +282,46 @@ get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pai
   return fine_preemption_count - pre.at(index).second;
 }
 
+uint64_t
+get_npu_busy_time_ns()
+{
+  std::ostringstream dir_path;
+  dir_path << "/proc/" << getpid() << "/fdinfo";
+
+  DIR *dir = ::opendir(dir_path.str().c_str());
+  if (!dir)
+    throw std::runtime_error("Failed to open fdinfo directory!");
+
+  struct dirent *de;
+  static const std::regex re(R"(drm-engine-[^:]+:\s*([0-9]+)\s+ns)");
+
+  while ((de = ::readdir(dir)) != nullptr) {
+    if (de->d_name[0] == '.')
+      continue;
+
+    std::ostringstream fdinfo_path;
+    fdinfo_path << dir_path.str() << "/" << de->d_name;
+
+    std::ifstream ifs(fdinfo_path.str());
+    if (!ifs)
+      continue;
+
+    std::string line;
+    std::smatch match;
+    while (std::getline(ifs, line)) {
+      if (std::regex_search(line, match, re)) {
+        ::closedir(dir);
+        return std::stoull(match[1].str());
+      }
+    }
+  }
+
+  ::closedir(dir);
+  // TODO: Throw when aie4 also support the same io stat
+  //throw std::runtime_error("Failed to find drm-engine entry!");
+  return 0;
+}
+
 void
 io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   int cmds_per_list, const char *tag, const flow_type* flow = nullptr)
@@ -333,12 +377,14 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   }
 
   // Submit commands and wait for results
+  auto start_busy = get_npu_busy_time_ns();
   auto start = clk::now();
   if (io_test_parameters.perf == IO_TEST_THRUPUT_PERF)
     io_test_cmd_submit_and_wait_thruput(hwq, total_hwq_submit, cmdlist_bos, bo_set, cmds_per_list);
   else
     io_test_cmd_submit_and_wait_latency(hwq, total_hwq_submit, cmdlist_bos, bo_set, cmds_per_list);
   auto end = clk::now();
+  auto end_busy = get_npu_busy_time_ns();
 
   // Verify preemption counters
   if (preemption_enabled) {
@@ -366,12 +412,15 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   // Report the performance numbers
   if (io_test_parameters.perf != IO_TEST_NO_PERF) {
     auto duration_us = std::chrono::duration_cast<us_t>(end - start).count();
+    auto busy_us = (end_busy - start_busy) / 1000;
     auto cps = (total_hwq_submit * cmds_per_list * 1000000.0) / duration_us;
     auto latency_us = 1000000.0 / cps;
     std::cout << total_hwq_submit * cmds_per_list << " commands finished in "
               << duration_us << " us, " << cmds_per_list << " commands per list, "
               << cps << " Command/sec,"
-              << " Average latency " << latency_us << " us" << std::endl;
+              << " Average latency " << latency_us << " us,"
+              << " Device was " << busy_us * 100.0 / duration_us << "% busy"
+              << std::endl;
   }
 }
 
