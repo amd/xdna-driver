@@ -54,7 +54,7 @@ config_gen_xdna::create_validate_subcommand()
                               "common", "",  "array", get_validate_test_desc()));
   validate_suboptions.emplace("param", std::make_shared<option>("param", "", "Extended parameter for a given test. Format: <test-name>:<key>:<value>", "param", "", "string"));
   validate_suboptions.emplace("pmode", std::make_shared<option>("pmode", "", "Specify which power mode to run the benchmarks in. Note: Some tests might be unavailable for some modes", "hidden", "", "string")); 
-  validate_suboptions.emplace("iter", std::make_shared<option>("iter", "", "Number of iterations to run the test", "hidden", "", "string"));
+  validate_suboptions.emplace("loop", std::make_shared<option>("loop", "", "Number of iterations to run the test", "hidden", "", "string"));
 
   return {"validate", "Validates the given device by executing the platform's validate executable", "common", std::move(validate_suboptions)};
 }
