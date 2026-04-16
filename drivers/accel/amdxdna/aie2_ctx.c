@@ -345,6 +345,7 @@ aie2_sched_resp_handler(void *handle, void __iomem *data, size_t size)
 	int ret = 0;
 	u32 status;
 
+	amdxdna_io_stats_job_done(job->hwctx->client);
 	cmd_abo = job->cmd_bo;
 
 	if (unlikely(job->job_timeout)) {
@@ -403,6 +404,7 @@ aie2_sched_cmdlist_resp_handler(void *handle, void __iomem *data, size_t size)
 	u32 cmd_status;
 	int ret = 0;
 
+	amdxdna_io_stats_job_done(job->hwctx->client);
 	cmd_abo = job->cmd_bo;
 
 	if (unlikely(job->job_timeout)) {
@@ -498,6 +500,7 @@ out:
 		fence = ERR_PTR(ret);
 	} else {
 		aie2_tdr_signal(hwctx->client->xdna);
+		amdxdna_io_stats_job_start(job->hwctx->client);
 	}
 	trace_xdna_job(sched_job, hwctx->name, "sent to device",
 		       job->seq, job->drv_cmd ? job->drv_cmd->opcode : DEFAULT_IO);
