@@ -31,7 +31,7 @@ To run AI applications, your system needs
   - Refer to https://github.com/Xilinx/XRT for more detailed information.
 
 ## Linux compilation and installation
-
+## test Build
 ### Ubuntu 25.04
 
 Ubuntu 25.04 includes [Linux kernel 6.14](https://kernelnewbies.org/Linux_6.14) that incorporates the amdxdna driver for AMD NPUs :partying_face:. 
