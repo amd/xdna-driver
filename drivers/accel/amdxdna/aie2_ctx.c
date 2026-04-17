@@ -27,10 +27,9 @@ static bool force_cmdlist = true;
 module_param(force_cmdlist, bool, 0600);
 MODULE_PARM_DESC(force_cmdlist, "Force use command list (Default true)");
 
-#define TDR_TIMEOUT_MS 2000
-int tdr_timeout_ms = TDR_TIMEOUT_MS;
-module_param(tdr_timeout_ms, int, 0400);
-MODULE_PARM_DESC(tdr_timeout_ms, "TDR (Timeout Detection and Recovery) timeout in milliseconds (0 or negative = disable)");
+uint tdr_timeout_ms = 2000;
+module_param(tdr_timeout_ms, uint, 0400);
+MODULE_PARM_DESC(tdr_timeout_ms, "TDR (Timeout Detection and Recovery) timeout in milliseconds (0 = disable)");
 
 bool tdr_dump_only;
 module_param(tdr_dump_only, bool, 0600);
@@ -48,7 +47,7 @@ struct aie2_ctx_health {
 
 static inline void aie2_tdr_signal(struct amdxdna_dev *xdna)
 {
-	WRITE_ONCE(xdna->dev_handle->tdr.status, AIE2_TDR_SIGNALED);
+	WRITE_ONCE(xdna->dev_handle->tdr_status, AIE2_TDR_SIGNALED);
 }
 
 #ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
@@ -56,12 +55,12 @@ static bool aie2_tdr_detect(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	if (READ_ONCE(ndev->tdr.status) == AIE2_TDR_WAIT) {
+	if (READ_ONCE(ndev->tdr_status) == AIE2_TDR_WAIT) {
 		XDNA_ERR(xdna, "TDR timeout detected");
 		return true;
 	}
 
-	WRITE_ONCE(ndev->tdr.status, AIE2_TDR_WAIT);
+	WRITE_ONCE(ndev->tdr_status, AIE2_TDR_WAIT);
 	return false;
 }
 #endif
@@ -71,7 +70,6 @@ static void aie2_job_release(struct kref *ref)
 	struct amdxdna_sched_job *job;
 
 	job = container_of(ref, struct amdxdna_sched_job, refcnt);
-
 	amdxdna_sched_job_cleanup(job);
 	atomic64_inc(&job->hwctx->job_free_cnt);
 	wake_up(&job->hwctx->priv->job_free_wq);
@@ -470,7 +468,6 @@ aie2_sched_job_run(struct drm_sched_job *sched_job)
 			ret = aie2_sync_bo(hwctx, job, aie2_sched_drvcmd_resp_handler);
 			break;
 		case ATTACH_DEBUG_BO:
-			fallthrough;
 		case DETACH_DEBUG_BO:
 			ret = aie2_config_debug_bo(hwctx, job, aie2_sched_drvcmd_resp_handler);
 			break;
@@ -524,8 +521,8 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 {
 	struct amdxdna_sched_job *job = drm_job_to_xdna_job(sched_job);
 	struct amdxdna_hwctx *hwctx = job->hwctx;
+	struct app_health_report *report;
 	struct amdxdna_dev *xdna;
-	struct app_health_report *report = NULL;
 	int ret;
 
 	xdna = hwctx->client->xdna;

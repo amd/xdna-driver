@@ -514,7 +514,7 @@ struct update_property_req {
 	__u8 context_id;
 	__u8 reserved[7];
 	__u32 time_quota_us;
-	__u32 resv;
+	__u32 reserved1;
 } __packed;
 
 struct update_property_resp {

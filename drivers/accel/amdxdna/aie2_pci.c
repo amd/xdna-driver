@@ -33,10 +33,7 @@ static int aie2_max_col = XRS_MAX_COL;
 module_param(aie2_max_col, uint, 0600);
 MODULE_PARM_DESC(aie2_max_col, "Maximum column could be used");
 
-#define MAX_TIME_QUANTUM_MS 2000 /* milliseconds */
-static uint time_quantum_ms = 30; /* milliseconds */
-module_param(time_quantum_ms, uint, 0400);
-MODULE_PARM_DESC(time_quantum_ms, "Execution time quantum. Default 30 ms, MAX 2000 ms");
+#define DEFAULT_TIME_QUANTUM 30000 /* microseconds */
 
 static char *npu_fw[] = {
 	"npu.dev.sbin",
@@ -192,12 +189,7 @@ static int aie2_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 	}
 
-	if (time_quantum_ms > MAX_TIME_QUANTUM_MS) {
-		XDNA_ERR(ndev->aie.xdna, "Bad time quantum %u", time_quantum_ms);
-		return -EINVAL;
-	}
-
-	ret = aie2_update_prop_time_quota(ndev, time_quantum_ms * 1000);
+	ret = aie2_update_prop_time_quota(ndev, DEFAULT_TIME_QUANTUM);
 	if (ret) {
 		XDNA_ERR(ndev->aie.xdna, "Failed to update execution time quantum");
 		return ret;
