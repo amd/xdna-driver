@@ -181,7 +181,6 @@ enum aie2_tdr_status {
 };
 
 struct aie2_tdr {
-	enum aie2_tdr_status status; /* status of TDR */
 	/* TDR progress tracker, used to detect if device is making progress */
 	enum aie2_tdr_status progress;
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
@@ -223,6 +222,7 @@ struct amdxdna_dev_hdl {
 	u32				hwctx_num;
 
 	struct amdxdna_async_error	last_async_err;
+	enum aie2_tdr_status		tdr_status;
 	struct aie2_tdr			tdr; /* TDR for device recovery */
 };
 
@@ -360,7 +360,7 @@ void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 
 /* TDR APIs */
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
-extern int tdr_timeout_ms;
+extern uint tdr_timeout_ms;
 extern bool tdr_dump_only;
 
 void aie2_tdr_start(struct amdxdna_dev *xdna);

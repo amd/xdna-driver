@@ -53,14 +53,14 @@ static bool aie2_legacy_tdr_detect(struct amdxdna_dev *xdna)
 			break;
 	}
 
-	tdr = READ_ONCE(ndev->tdr.status);
+	tdr = READ_ONCE(ndev->tdr_status);
 	if (pending && tdr == AIE2_TDR_WAIT && ndev->tdr.progress == tdr) {
 		XDNA_ERR(xdna, "TDR timeout detected");
 		return true;
 	}
 
 	if (tdr != AIE2_TDR_WAIT)
-		WRITE_ONCE(ndev->tdr.status, AIE2_TDR_WAIT);
+		WRITE_ONCE(ndev->tdr_status, AIE2_TDR_WAIT);
 	else if (!pending)
 		/*
 		 * this is to avoid false positives. In submission, the counter is increased after
