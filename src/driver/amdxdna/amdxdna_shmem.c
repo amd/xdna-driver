@@ -39,7 +39,10 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
+#include "drm_local/amdxdna_accel.h"
 #include "aie4_pci.h"
+#include "amdxdna_pci_drv.h"
+#include "npu3_family.h"
 #include "aie4_message.h"
 #include "amdxdna_sysfs.h"
 
@@ -207,23 +210,28 @@ static int amdxdna_shmem_mbox_init(struct amdxdna_shmem_hdl *shdl)
 	return 0;
 }
 
-static const struct amdxdna_dev_info amdxdna_shmem_dev_info = {
-};
-
 static int amdxdna_shmem_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	const struct amdxdna_dev_info *dev_info;
 	struct amdxdna_shmem_hdl *shdl;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
 	int ret;
+
+	dev_info = of_device_get_match_data(dev);
+	if (!dev_info) {
+		dev_err(dev, "No device info for compatible\n");
+		return -ENODEV;
+	}
 
 	xdna = devm_drm_dev_alloc(dev, &amdxdna_drm_drv,
 				  typeof(*xdna), ddev);
 	if (IS_ERR(xdna))
 		return PTR_ERR(xdna);
 
-	xdna->dev_info = &amdxdna_shmem_dev_info;
+	xdna->dev_info = dev_info;
+	xdna->vbnv = dev_info->default_vbnv;
 
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
 	init_rwsem(&xdna->notifier_lock);
@@ -256,6 +264,7 @@ static int amdxdna_shmem_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
 	ndev->xcomm_ops = &amdxdna_shmem_xcomm_ops;
 	ndev->xcomm_hdl = shdl;
@@ -306,7 +315,7 @@ static void amdxdna_shmem_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id amdxdna_shmem_of_match[] = {
-	{ .compatible = "amd,amdxdna-shmem" },
+	{ .compatible = "amd,amdxdna-npu3", .data = &dev_npu3_info },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, amdxdna_shmem_of_match);
@@ -315,7 +324,7 @@ static struct platform_driver amdxdna_shmem_driver = {
 	.probe	= amdxdna_shmem_probe,
 	.remove	= amdxdna_shmem_remove,
 	.driver	= {
-		.name		= "amdxdna_shmem",
+		.name		= AMDXDNA_DRIVER_NAME,
 		.of_match_table	= amdxdna_shmem_of_match,
 	},
 };
