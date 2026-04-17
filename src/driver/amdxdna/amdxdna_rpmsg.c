@@ -21,8 +21,12 @@
 #include <linux/slab.h>
 #include <linux/xarray.h>
 
+#include "drm_local/amdxdna_accel.h"
 #include "aie4_pci.h"
+#include "amdxdna_pci_drv.h"
+#include "npu3_family.h"
 #include "aie4_message.h"
+#include "amdxdna_pm.h"
 #include "amdxdna_sysfs.h"
 
 enum rpmsg_msg_type {
@@ -217,23 +221,28 @@ static const struct amdxdna_xcomm_ops amdxdna_rpmsg_xcomm_ops = {
 	.fini		= amdxdna_rpmsg_fini,
 };
 
-static const struct amdxdna_dev_info amdxdna_rpmsg_dev_info = {
-};
-
 static int amdxdna_rpmsg_probe(struct rpmsg_device *rpdev)
 {
 	struct device *dev = &rpdev->dev;
+	const struct amdxdna_dev_info *dev_info;
 	struct amdxdna_rpmsg_hdl *rhdl;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
 	int ret;
+
+	dev_info = (const struct amdxdna_dev_info *)rpdev->id.driver_data;
+	if (!dev_info) {
+		dev_err(dev, "No device info for RPMsg channel %s\n", rpdev->id.name);
+		return -ENODEV;
+	}
 
 	xdna = devm_drm_dev_alloc(dev, &amdxdna_drm_drv,
 				  typeof(*xdna), ddev);
 	if (IS_ERR(xdna))
 		return PTR_ERR(xdna);
 
-	xdna->dev_info = &amdxdna_rpmsg_dev_info;
+	xdna->dev_info = dev_info;
+	xdna->vbnv = dev_info->default_vbnv;
 
 	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
 	init_rwsem(&xdna->notifier_lock);
@@ -258,6 +267,7 @@ static int amdxdna_rpmsg_probe(struct rpmsg_device *rpdev)
 	xa_init(&rhdl->msg_xa);
 	mutex_init(&rhdl->msg_lock);
 
+	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
 	ndev->xcomm_ops = &amdxdna_rpmsg_xcomm_ops;
 	ndev->xcomm_hdl = rhdl;
@@ -304,13 +314,14 @@ static void amdxdna_rpmsg_remove(struct rpmsg_device *rpdev)
 }
 
 static const struct rpmsg_device_id amdxdna_rpmsg_id_table[] = {
-	{ .name = "rpmsg-aie-mgmt" },
+	{ .name = "rpmsg-aie-mgmt",
+	  .driver_data = (kernel_ulong_t)&dev_npu3_info },
 	{ },
 };
 MODULE_DEVICE_TABLE(rpmsg, amdxdna_rpmsg_id_table);
 
 static struct rpmsg_driver amdxdna_rpmsg_driver = {
-	.drv.name	= "amdxdna_rpmsg",
+	.drv.name	= AMDXDNA_DRIVER_NAME,
 	.id_table	= amdxdna_rpmsg_id_table,
 	.probe		= amdxdna_rpmsg_probe,
 	.remove		= amdxdna_rpmsg_remove,

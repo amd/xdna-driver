@@ -94,6 +94,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_RPMSG) += \
 	aie4_message.o \
 	aie4_solver.o \
 	aie4_sriov.o \
+	npu3_regs.o \
 	amdxdna_rpmsg.o
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_SHMEM) += \
