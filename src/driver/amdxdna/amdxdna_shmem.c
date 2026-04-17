@@ -34,72 +34,274 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
+#include <linux/xarray.h>
 
 #include "aie4_pci.h"
+#include "aie4_message.h"
 #include "amdxdna_shmem.h"
+#include "amdxdna_sysfs.h"
+
+struct shmem_inflight_msg {
+	u32			id;
+	void			*handle;
+	int			(*notify_cb)(void *handle, void __iomem *data,
+					     size_t size);
+};
 
 struct amdxdna_shmem_hdl {
 	struct amdxdna_dev_hdl	*ndev;
 	struct platform_device	*pdev;
 
 	/* Shared memory regions mapped from device tree reserved-memory */
-	void __iomem		*mgmt_shmem;
+	void			*mgmt_shmem;
 	resource_size_t		mgmt_shmem_size;
-	void __iomem		*db_shmem;
+	void			*db_shmem;
 	resource_size_t		db_shmem_size;
+
+	/* Mgmt TX ring (host is producer) */
+	struct shmem_ring_hdr	*tx_hdr;
+	void			*tx_ring;
+
+	/* Mgmt RX ring (host is consumer) */
+	struct shmem_ring_hdr	*rx_hdr;
+	void			*rx_ring;
+
+	/* Doorbell ring (host is producer) */
+	struct shmem_db_ring	*db_ring;
+
+	/* Cached indices to minimise shared memory reads */
+	u32			tx_local_head;
+	u32			tx_cached_tail;
+	u32			rx_local_tail;
+	u32			rx_cached_head;
+	u32			db_local_head;
+	u32			db_cached_tail;
+
+	/* Inflight management message tracking */
+	struct xarray		msg_xa;
+	struct mutex		msg_lock; /* serialise next_msg_id + xa_insert */
+	u32			next_msg_id;
 
 	/* Linux mailbox client for ZynqMP IPI (notification only) */
 	struct mbox_client	tx_cl;
 	struct mbox_client	rx_cl;
 	struct mbox_chan	*tx_chan;
 	struct mbox_chan	*rx_chan;
+
+	/* Deferred mgmt RX processing (doorbell runs in IRQ context) */
+	struct work_struct	rx_work;
 };
+
+/* Maximum response payload we expect from firmware (fits on kernel stack) */
+#define SHMEM_MAX_RESP_SIZE	512
+
+static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
+{
+	struct cert_comp *cert_comp;
+	unsigned long idx;
+
+	xa_for_each(&ndev->cert_comp_xa, idx, cert_comp)
+		wake_up_all(&cert_comp->waitq);
+}
+
+static void amdxdna_shmem_rx_work(struct work_struct *work)
+{
+	struct amdxdna_shmem_hdl *shdl =
+		container_of(work, struct amdxdna_shmem_hdl, rx_work);
+	u8 buf[SHMEM_MAX_RESP_SIZE];
+	struct shmem_msg_hdr msg_hdr;
+	struct shmem_inflight_msg *ifm;
+	int payload_size;
+
+	/* Drain all available management responses */
+	while (shdl->rx_hdr) {
+		payload_size = shmem_mgmt_consume(shdl->rx_hdr, shdl->rx_ring,
+						  &shdl->rx_local_tail,
+						  &shdl->rx_cached_head,
+						  &msg_hdr, buf, sizeof(buf));
+		if (payload_size < 0)
+			break;
+
+		ifm = xa_erase(&shdl->msg_xa, msg_hdr.id);
+
+		if (!ifm) {
+			dev_warn(&shdl->pdev->dev,
+				 "unexpected response id %u\n", msg_hdr.id);
+			continue;
+		}
+
+		/* Cast for xdna_mailbox_msg callback signature compatibility */
+		if (ifm->notify_cb)
+			ifm->notify_cb(ifm->handle, (void __iomem *)buf,
+				       payload_size);
+
+		kfree(ifm);
+	}
+}
 
 /*
  * Called by the mailbox framework when the remote processor sends an
- * IPI to us (RX channel callback).  The IPI itself carries no data;
- * actual message content resides in the shared memory regions.
+ * IPI to us (RX channel callback).  This runs in IRQ context.
+ *
+ * Doorbell completion is handled directly here (fast path -- just
+ * wake_up_all which is IRQ-safe).  Management response draining is
+ * deferred to a workqueue since it involves xarray + kfree.
  */
 static void amdxdna_shmem_rx_callback(struct mbox_client *cl, void *data)
 {
 	struct amdxdna_shmem_hdl *shdl =
 		container_of(cl, struct amdxdna_shmem_hdl, rx_cl);
 
-	/*
-	 * TODO: read shared memory to determine which message completed
-	 * or which doorbell was rung, then dispatch accordingly via
-	 * ndev->xcomm_ops callbacks.
-	 */
-	dev_dbg(&shdl->pdev->dev, "IPI RX notification received\n");
+	amdxdna_shmem_doorbell_notify(shdl->ndev);
+	schedule_work(&shdl->rx_work);
 }
 
 static int amdxdna_shmem_send_msg(void *xcomm_hdl,
 				  const struct xdna_mailbox_msg *msg)
 {
-	/*
-	 * TODO: write message to mgmt shared memory region, then
-	 * trigger IPI via mbox_send_message(shdl->tx_chan, ...).
-	 */
-	return -ENOSYS;
+	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
+	struct shmem_inflight_msg *ifm;
+	struct shmem_msg_hdr hdr;
+	u32 id;
+	int ret;
+
+	ifm = kzalloc(sizeof(*ifm), GFP_KERNEL);
+	if (!ifm)
+		return -ENOMEM;
+
+	mutex_lock(&shdl->msg_lock);
+	id = shdl->next_msg_id++;
+	ifm->id = id;
+	ifm->handle = msg->handle;
+	ifm->notify_cb = msg->notify_cb;
+
+	ret = xa_insert(&shdl->msg_xa, id, ifm, GFP_KERNEL);
+	if (ret) {
+		mutex_unlock(&shdl->msg_lock);
+		kfree(ifm);
+		return ret;
+	}
+	mutex_unlock(&shdl->msg_lock);
+
+	hdr.total_size = sizeof(hdr) + msg->send_size;
+	hdr.id = id;
+	hdr.opcode = msg->opcode;
+	hdr.status = 0;
+
+	ret = shmem_mgmt_produce(shdl->tx_hdr, shdl->tx_ring,
+				 &shdl->tx_local_head,
+				 &shdl->tx_cached_tail,
+				 &hdr, msg->send_data, msg->send_size);
+	if (ret) {
+		xa_erase(&shdl->msg_xa, id);
+		kfree(ifm);
+		return ret;
+	}
+
+	/* Trigger IPI to notify firmware (bufferless) */
+	ret = mbox_send_message(shdl->tx_chan, NULL);
+	if (ret < 0) {
+		xa_erase(&shdl->msg_xa, id);
+		kfree(ifm);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 {
-	/*
-	 * TODO: write doorbell to doorbell shared memory region, then
-	 * trigger IPI via mbox_send_message(shdl->tx_chan, ...).
-	 */
-	return -ENOSYS;
+	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
+	int ret;
+
+	ret = shmem_db_produce(shdl->db_ring,
+			       &shdl->db_local_head,
+			       &shdl->db_cached_tail,
+			       hw_ctx_id);
+	if (ret)
+		return ret;
+
+	ret = mbox_send_message(shdl->tx_chan, NULL);
+	if (ret < 0)
+		return ret;
+
+	return 0;
 }
 
 static void amdxdna_shmem_xcomm_fini(void *xcomm_hdl)
 {
 	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
+	struct shmem_inflight_msg *ifm;
+	unsigned long idx;
 
-	if (shdl->tx_chan)
-		mbox_free_channel(shdl->tx_chan);
 	if (shdl->rx_chan)
 		mbox_free_channel(shdl->rx_chan);
+	if (shdl->tx_chan)
+		mbox_free_channel(shdl->tx_chan);
+
+	/* Ensure deferred RX work is complete before tearing down */
+	cancel_work_sync(&shdl->rx_work);
+
+	xa_for_each(&shdl->msg_xa, idx, ifm) {
+		xa_erase(&shdl->msg_xa, idx);
+		kfree(ifm);
+	}
+	xa_destroy(&shdl->msg_xa);
+	mutex_destroy(&shdl->msg_lock);
+}
+
+static void amdxdna_shmem_rings_init(struct amdxdna_shmem_hdl *shdl)
+{
+	resource_size_t half = shdl->mgmt_shmem_size / 2;
+	resource_size_t ring_data;
+
+	/* Split mgmt region: first half is TX, second half is RX */
+	shdl->tx_hdr = (struct shmem_ring_hdr *)shdl->mgmt_shmem;
+	shdl->tx_ring = shdl->mgmt_shmem + sizeof(struct shmem_ring_hdr);
+
+	shdl->rx_hdr = (struct shmem_ring_hdr *)(shdl->mgmt_shmem + half);
+	shdl->rx_ring = shdl->mgmt_shmem + half +
+			sizeof(struct shmem_ring_hdr);
+
+	/*
+	 * Ring data area is the half minus the header.  Round down to the
+	 * largest power-of-2 so the mask has all lower bits set.
+	 */
+	ring_data = rounddown_pow_of_two(half - sizeof(struct shmem_ring_hdr));
+	WRITE_ONCE(shdl->tx_hdr->head, 0);
+	WRITE_ONCE(shdl->tx_hdr->tail, 0);
+	WRITE_ONCE(shdl->tx_hdr->ring_mask, ring_data - 1);
+	WRITE_ONCE(shdl->tx_hdr->rsvd, 0);
+
+	WRITE_ONCE(shdl->rx_hdr->head, 0);
+	WRITE_ONCE(shdl->rx_hdr->tail, 0);
+	WRITE_ONCE(shdl->rx_hdr->ring_mask, ring_data - 1);
+	WRITE_ONCE(shdl->rx_hdr->rsvd, 0);
+
+	/* Doorbell ring uses the entire doorbell region (slot-indexed) */
+	shdl->db_ring = (struct shmem_db_ring *)shdl->db_shmem;
+	ring_data = (shdl->db_shmem_size - offsetof(struct shmem_db_ring, data))
+		    / sizeof(u32);
+	ring_data = rounddown_pow_of_two(ring_data);
+	WRITE_ONCE(shdl->db_ring->head, 0);
+	WRITE_ONCE(shdl->db_ring->tail, 0);
+	WRITE_ONCE(shdl->db_ring->ring_mask, ring_data - 1);
+	WRITE_ONCE(shdl->db_ring->rsvd, 0);
+
+	/* Reset local cached indices */
+	shdl->tx_local_head = 0;
+	shdl->tx_cached_tail = 0;
+	shdl->rx_local_tail = 0;
+	shdl->rx_cached_head = 0;
+	shdl->db_local_head = 0;
+	shdl->db_cached_tail = 0;
+
+	xa_init(&shdl->msg_xa);
+	mutex_init(&shdl->msg_lock);
+	shdl->next_msg_id = 0;
+
+	INIT_WORK(&shdl->rx_work, amdxdna_shmem_rx_work);
 }
 
 static const struct amdxdna_xcomm_ops amdxdna_shmem_xcomm_ops = {
@@ -132,8 +334,8 @@ static int amdxdna_shmem_map_regions(struct amdxdna_shmem_hdl *shdl)
 		return ret;
 
 	shdl->mgmt_shmem_size = resource_size(&res);
-	shdl->mgmt_shmem = devm_ioremap(&pdev->dev, res.start,
-					 shdl->mgmt_shmem_size);
+	shdl->mgmt_shmem =
+		devm_ioremap_wc(&pdev->dev, res.start, shdl->mgmt_shmem_size);
 	if (!shdl->mgmt_shmem)
 		return -ENOMEM;
 
@@ -156,8 +358,8 @@ static int amdxdna_shmem_map_regions(struct amdxdna_shmem_hdl *shdl)
 		return ret;
 
 	shdl->db_shmem_size = resource_size(&res);
-	shdl->db_shmem = devm_ioremap(&pdev->dev, res.start,
-				       shdl->db_shmem_size);
+	shdl->db_shmem =
+		devm_ioremap_wc(&pdev->dev, res.start, shdl->db_shmem_size);
 	if (!shdl->db_shmem)
 		return -ENOMEM;
 
@@ -235,9 +437,12 @@ int amdxdna_shmem_init(struct amdxdna_dev *xdna, struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	amdxdna_shmem_rings_init(shdl);
+
 	ndev->xcomm_ops = &amdxdna_shmem_xcomm_ops;
 	ndev->xcomm_hdl = shdl;
 
+	dev_info(dev, "amdxdna shmem+IPI driver probed\n");
 	return 0;
 }
 
