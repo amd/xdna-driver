@@ -58,8 +58,13 @@ drv_open(const std::string& sysfs_name) const
   if (m_dev_fd != -1)
     shim_err(EBUSY, "Platform driver is already opened");
 
-  m_sysfs_root += "/sys/bus/pci/devices/";
-  m_sysfs_root += sysfs_name;
+  if (sysfs_name.front() == '/') {
+    // Non-PCI: sysfs_name is already a full sysfs device path
+    m_sysfs_root = sysfs_name;
+  } else {
+    m_sysfs_root += "/sys/bus/pci/devices/";
+    m_sysfs_root += sysfs_name;
+  }
 
   auto dev_node = m_driver->get_dev_node(sysfs_name);
   m_dev_fd = open(dev_node.c_str(), O_RDWR);

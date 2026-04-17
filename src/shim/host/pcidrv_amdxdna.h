@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifndef PCIDRV_AMDXDNA_H
 #define PCIDRV_AMDXDNA_H
@@ -27,7 +27,7 @@ public:
   std::string
   sysfs_dev_node_dir() const override;
 
-private:  
+private:
   std::shared_ptr<xrt_core::pci::dev>
   create_pcidev(const std::string& sysfs) const override;
 };

@@ -18,8 +18,13 @@ std::string
 drv::
 get_dev_node(const std::string& sysfs_name) const
 {
-  const std::string sysfs_root{"/sys/bus/pci/devices/"};
-  const std::string dev_path_dir = sysfs_root + sysfs_name + "/" + sysfs_dev_node_dir();
+  // For non-PCI devices, the sysfs_name starts with '/' and the
+  // corresponding accel dev node can be found under /sys/class/accel/.
+  const std::string sysfs_root = (sysfs_name.front() == '/')
+    ? sysfs_name + "/"
+    : std::string("/sys/bus/pci/devices/") + sysfs_name + "/";
+
+  const std::string dev_path_dir = sysfs_root + sysfs_dev_node_dir();
   const auto prefix = dev_node_prefix();
 
   auto dp = opendir(dev_path_dir.c_str());

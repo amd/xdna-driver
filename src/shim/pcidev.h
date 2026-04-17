@@ -14,6 +14,7 @@ class pdev : public xrt_core::pci::dev
 {
 public:
   pdev(std::shared_ptr<const platform_drv>& driver, const std::string& sysfs_name);
+
   ~pdev();
 
   xrt_core::device::handle_type

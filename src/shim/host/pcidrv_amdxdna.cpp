@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "../shim_debug.h"
 #include "../kmq/pcidev.h"
@@ -19,8 +19,13 @@ struct X
 int
 get_dev_type(const std::string& sysfs)
 {
-  const std::string sysfs_root{"/sys/bus/pci/devices/"};
-  const std::string dev_type_path = sysfs_root + sysfs + "/device_type";
+  // For non-PCI devices (sysfs_name starts with '/'), the device_type
+  // sysfs attribute lives directly under the device sysfs directory.
+  std::string dev_type_path;
+  if (!sysfs.empty() && sysfs.front() == '/')
+    dev_type_path = sysfs + "/device_type";
+  else
+    dev_type_path = "/sys/bus/pci/devices/" + sysfs + "/device_type";
 
   std::ifstream ifs(dev_type_path);
   if (!ifs.is_open())

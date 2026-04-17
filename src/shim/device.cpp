@@ -533,6 +533,25 @@ struct bdf
   }
 };
 
+static query::pcie_id::result_type
+vbnv_to_pcie_id(const std::string& vbnv)
+{
+  using data = query::pcie_id::result_type;
+  static const std::map<std::string, data> vbnv_map = {
+    {"RyzenAI-npu3",  {0xb052, 0x01}},
+    {"RyzenAI-npu7",  {0x17f1, 0x10}},
+    {"RyzenAI-npu8",  {0x17f1, 0x10}},
+    {"RyzenAI-npu9",  {0x17f1, 0x10}},
+    {"RyzenAI-npu10", {0x17f1, 0x10}},
+    {"NPU Phoenix",   {0x1502, 0x00}},
+    {"NPU Strix",     {0x17f0, 0x10}},
+    {"NPU Strix Halo",{0x17f0, 0x10}},
+    {"NPU Krackan",   {0x17f0, 0x10}},
+  };
+  auto it = vbnv_map.find(vbnv);
+  return (it != vbnv_map.end()) ? it->second : data{0, 0};
+}
+
 struct pcie_id
 {
   using result_type = query::pcie_id::result_type;
@@ -543,6 +562,15 @@ struct pcie_id
     result_type pcie_id;
 
     const auto pdev = get_pcidev(device);
+
+    if (pdev->m_domain == INVALID_ID) {
+      try {
+        auto vbnv = sysfs_fcn<std::string>::get(pdev, "", "vbnv");
+        return vbnv_to_pcie_id(vbnv);
+      } catch (...) {
+        return pcie_id;
+      }
+    }
 
     pcie_id.device_id = sysfs_fcn<uint16_t>::get(pdev, "", "device");
     pcie_id.revision_id = sysfs_fcn<uint8_t>::get(pdev, "", "revision");
@@ -1907,17 +1935,31 @@ struct sysfs_get : virtual QueryRequestType
   std::any
   get(const xrt_core::device* device) const
   {
-    return sysfs_fcn<typename QueryRequestType::result_type>
-      ::get(get_pcidev(device), subdev, entry);
+    auto pdev = get_pcidev(device);
+    try {
+      return sysfs_fcn<typename QueryRequestType::result_type>
+        ::get(pdev, subdev, entry);
+    } catch (const xrt_core::query::sysfs_error&) {
+      if (pdev->m_domain == INVALID_ID)
+        return typename QueryRequestType::result_type{};
+      throw;
+    }
   }
 
   std::any
   get(const xrt_core::device* device, query::request::modifier m, const std::string& v) const
   {
+    auto pdev = get_pcidev(device);
     auto ms = (m == query::request::modifier::subdev) ? v.c_str() : subdev;
     auto me = (m == query::request::modifier::entry) ? v.c_str() : entry;
-    return sysfs_fcn<typename QueryRequestType::result_type>
-      ::get(get_pcidev(device), ms, me);
+    try {
+      return sysfs_fcn<typename QueryRequestType::result_type>
+        ::get(pdev, ms, me);
+    } catch (const xrt_core::query::sysfs_error&) {
+      if (pdev->m_domain == INVALID_ID)
+        return typename QueryRequestType::result_type{};
+      throw;
+    }
   }
 };
 
