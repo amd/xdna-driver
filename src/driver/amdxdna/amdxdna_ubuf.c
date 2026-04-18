@@ -17,6 +17,13 @@ struct amdxdna_ubuf_priv {
 	struct mm_struct *mm;
 };
 
+/* Enable stronger local optimizations when building with GCC (not Clang).
+ * This is guarded so cross-compilation and Clang builds aren't affected.
+ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("Ofast","unroll-loops")
+#endif
 static struct sg_table *amdxdna_ubuf_map(struct dma_buf_attachment *attach,
 					 enum dma_data_direction direction)
 {
@@ -38,6 +45,9 @@ static struct sg_table *amdxdna_ubuf_map(struct dma_buf_attachment *attach,
 		return ERR_PTR(ret);
 
 	return sg;
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
 }
 
 static void amdxdna_ubuf_unmap(struct dma_buf_attachment *attach,
@@ -137,6 +147,13 @@ static int readonly_va_entry(struct amdxdna_drm_va_entry *va_ent)
 	return ret;
 }
 
+/* Optimize the user-buffer export function when using GCC.
+ * Keep this guarded to avoid interfering with cross/Clang builds.
+ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("Ofast","unroll-loops")
+#endif
 struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 				 u32 num_entries, void __user *va_entries)
 {
@@ -249,3 +266,6 @@ free_ubuf:
 	kfree(ubuf);
 	return ERR_PTR(ret);
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
