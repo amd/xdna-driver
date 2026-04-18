@@ -1005,6 +1005,8 @@ static struct amdxdna_gem_obj *
 amdxdna_drm_create_share_bo(struct drm_device *dev,
 			    struct amdxdna_drm_create_bo *args, struct drm_file *filp)
 {
+	struct amdxdna_client *client = filp->driver_priv;
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_gem_obj *abo;
 
 	if (args->vaddr)
@@ -1015,7 +1017,10 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 	else if (amdxdna_use_carvedout())
 		abo = amdxdna_gem_create_carvedout_object(dev, args);
 #endif
-	else
+	else if (!amdxdna_iova_enabled(xdna) && !client->sva) {
+		XDNA_ERR(xdna, "No IOMMU/SVA, BO must be provided via dma-buf");
+		return ERR_PTR(-EOPNOTSUPP);
+	} else
 		abo = amdxdna_gem_create_shmem_object(dev, args);
 	if (IS_ERR(abo))
 		return ERR_CAST(abo);

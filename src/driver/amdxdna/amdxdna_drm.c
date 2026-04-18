@@ -38,9 +38,10 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	if (!amdxdna_iova_enabled(xdna)) {
 		client->sva = iommu_sva_bind_device(xdna->ddev.dev, current->mm);
 		if (IS_ERR(client->sva)) {
-			ret = PTR_ERR(client->sva);
-			XDNA_ERR(xdna, "SVA bind device failed, ret %d", ret);
-			goto failed;
+			XDNA_INFO(xdna, "SVA bind failed (ret %ld), no PASID",
+				  PTR_ERR(client->sva));
+			client->sva = NULL;
+			goto skip_sva_pasid;
 		}
 		client->pasid = iommu_sva_get_pasid(client->sva);
 		if (client->pasid == IOMMU_PASID_INVALID) {
@@ -51,6 +52,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		client->mm = current->mm;
 		mmgrab(client->mm);
 	}
+skip_sva_pasid:
 #ifdef AMDXDNA_DEVEL
 skip_sva_bind:
 #endif
@@ -76,7 +78,6 @@ skip_sva_bind:
 unbind_sva:
 	if (!IS_ERR_OR_NULL(client->sva))
 		iommu_sva_unbind_device(client->sva);
-failed:
 	kfree(client);
 	return ret;
 }
