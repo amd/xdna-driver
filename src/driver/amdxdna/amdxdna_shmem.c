@@ -354,4 +354,5 @@ module_exit(amdxdna_shmem_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
+MODULE_VERSION(MODULE_VER_STR);
 MODULE_DESCRIPTION("amdxdna shared-memory + IPI transport driver for AIE4");
