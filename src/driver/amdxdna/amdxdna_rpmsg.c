@@ -290,6 +290,14 @@ static int amdxdna_rpmsg_probe(struct rpmsg_device *rpdev)
 	if (ret)
 		goto sysfs_fini;
 
+	/*
+	 * PCI core initializes runtime PM usage count to 1 via pci_pm_init().
+	 * For non-PCI buses, do it here so amdxdna_rpm_init()'s final
+	 * pm_runtime_put_autosuspend() brings it to 0 instead of underflowing.
+	 */
+	pm_runtime_get_noresume(xdna->ddev.dev);
+	amdxdna_rpm_init(xdna);
+
 	XDNA_INFO(xdna, "RPMsg driver probed (rpmsg-aie-mgmt)");
 	return 0;
 
@@ -305,6 +313,7 @@ static void amdxdna_rpmsg_remove(struct rpmsg_device *rpdev)
 	struct amdxdna_dev *xdna = dev_get_drvdata(&rpdev->dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
+	amdxdna_rpm_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
