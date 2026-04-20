@@ -44,6 +44,7 @@
 #include "amdxdna_pci_drv.h"
 #include "npu3_family.h"
 #include "aie4_message.h"
+#include "amdxdna_pm.h"
 #include "amdxdna_sysfs.h"
 
 struct amdxdna_shmem_hdl {
@@ -289,6 +290,14 @@ static int amdxdna_shmem_probe(struct platform_device *pdev)
 	if (ret)
 		goto sysfs_fini;
 
+	/*
+	 * PCI core initializes runtime PM usage count to 1 via pci_pm_init().
+	 * For non-PCI buses, do it here so amdxdna_rpm_init()'s final
+	 * pm_runtime_put_autosuspend() brings it to 0 instead of underflowing.
+	 */
+	pm_runtime_get_noresume(dev);
+	amdxdna_rpm_init(xdna);
+
 	dev_info(dev, "amdxdna shmem+IPI driver probed\n");
 	return 0;
 
@@ -306,6 +315,7 @@ static void amdxdna_shmem_remove(struct platform_device *pdev)
 	struct amdxdna_dev *xdna = platform_get_drvdata(pdev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
+	amdxdna_rpm_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
