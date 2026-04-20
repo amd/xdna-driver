@@ -331,6 +331,7 @@ MODULE_DEVICE_TABLE(rpmsg, amdxdna_rpmsg_id_table);
 
 static struct rpmsg_driver amdxdna_rpmsg_driver = {
 	.drv.name	= AMDXDNA_DRIVER_NAME,
+	.drv.pm		= &amdxdna_pm_ops,
 	.id_table	= amdxdna_rpmsg_id_table,
 	.probe		= amdxdna_rpmsg_probe,
 	.remove		= amdxdna_rpmsg_remove,
@@ -353,4 +354,5 @@ module_exit(amdxdna_rpmsg_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
+MODULE_VERSION(MODULE_VER_STR);
 MODULE_DESCRIPTION("amdxdna RPMsg driver");
