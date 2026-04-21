@@ -17,6 +17,7 @@
 #include "aie.h"
 #include "amdxdna_cbuf.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_debugfs.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
@@ -351,24 +352,37 @@ amdxdna_get_dev_info(struct pci_dev *pdev)
 	return NULL;
 }
 
+static void amdxdna_xdna_drm_release(struct drm_device *drm, void *res)
+{
+	struct amdxdna_dev *xdna = res;
+
+	amdxdna_carveout_fini(xdna);
+}
+
 static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
 	struct amdxdna_dev *xdna;
+	struct drm_device *ddev;
 	int ret;
 
 	xdna = devm_drm_dev_alloc(dev, &amdxdna_drm_drv, typeof(*xdna), ddev);
 	if (IS_ERR(xdna))
 		return PTR_ERR(xdna);
+	ddev = &xdna->ddev;
 
 	xdna->dev_info = amdxdna_get_dev_info(pdev);
 	if (!xdna->dev_info)
 		return -ENODEV;
 
-	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
+	drmm_mutex_init(ddev, &xdna->dev_lock);
 	init_rwsem(&xdna->notifier_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
 	pci_set_drvdata(pdev, xdna);
+
+	ret = drmm_add_action(ddev, amdxdna_xdna_drm_release, xdna);
+	if (ret)
+		return ret;
 
 	if (IS_ENABLED(CONFIG_LOCKDEP)) {
 		fs_reclaim_acquire(GFP_KERNEL);
@@ -400,12 +414,13 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto failed_dev_fini;
 	}
 
-	ret = drm_dev_register(&xdna->ddev, 0);
+	ret = drm_dev_register(ddev, 0);
 	if (ret) {
 		XDNA_ERR(xdna, "DRM register failed, ret %d", ret);
 		goto failed_sysfs_fini;
 	}
 
+	amdxdna_debugfs_init(xdna);
 	return 0;
 
 failed_sysfs_fini:
@@ -472,26 +487,7 @@ static struct pci_driver amdxdna_pci_driver = {
 	.sriov_configure = amdxdna_sriov_configure,
 };
 
-static int __init amdxdna_mod_init(void)
-{
-	int ret;
-
-	amdxdna_carveout_init();
-	ret = pci_register_driver(&amdxdna_pci_driver);
-	if (ret)
-		amdxdna_carveout_fini();
-
-	return ret;
-}
-
-static void __exit amdxdna_mod_exit(void)
-{
-	pci_unregister_driver(&amdxdna_pci_driver);
-	amdxdna_carveout_fini();
-}
-
-module_init(amdxdna_mod_init);
-module_exit(amdxdna_mod_exit);
+module_pci_driver(amdxdna_pci_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_IMPORT_NS("AMD_PMF");
