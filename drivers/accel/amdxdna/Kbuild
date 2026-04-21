@@ -57,3 +57,6 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 
 amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
+
+amdxdna-$(CONFIG_DEBUG_FS) += \
+	amdxdna_debugfs.o \
