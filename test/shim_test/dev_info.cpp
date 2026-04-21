@@ -164,6 +164,26 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "good",
+    .device = npu3_nopci_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/vadd/vadd.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "nop",
+    .device = npu3_nopci_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/nop/nop.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "good",
     .device = npu4_device_id,
     .revision_id = npu4_revision_id,
     .ip_name2idx = {
@@ -366,7 +386,7 @@ get_binary_info(device* dev, const char* tag, const flow_type* flow)
         (match_flow || (bin.flow == *flow)))
       return bin;
   }
-  throw std::runtime_error("binary info not found");
+  throw std::runtime_error("binary info not found - 0x" + std::to_string(pci_dev_id) + ", 0x" + std::to_string(revision_id) + ", " + (tag ? tag : "") + ", " + (flow ? std::to_string(*flow) : ""));
 }
 
 std::string

@@ -199,7 +199,7 @@ dev_filter_is_aie4(device::id_type id, device* dev)
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu3_device_id || device_id == npu3_device_id1;
+  return device_id == npu3_device_id || device_id == npu3_device_id1 || device_id == npu3_nopci_device_id;
 }
 
 bool
@@ -1398,6 +1398,7 @@ std::vector<test_case> test_list {
   },
   test_case{ "DPM power modes", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_power_modes, {}
+  },
   test_case{ "heap expansion stress test", {},
     TEST_POSITIVE, dev_filter_is_aie, TEST_heap_stress, { 4 }
   },
