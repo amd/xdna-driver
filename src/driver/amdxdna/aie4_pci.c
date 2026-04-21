@@ -15,7 +15,9 @@
 
 #include "aie4_pci.h"
 #include "aie4_message.h"
+#ifndef CONFIG_AMDXDNA_NO_PCI
 #include "aie2_tdr.h"
+#endif
 #include "aie4_solver.h"
 #include "aie4_devel.h"
 #include "amdxdna_dpt.h"
@@ -56,6 +58,12 @@ MODULE_PARM_DESC(aie4_ctx_hysteresis_us, " Context switch hysteresis in microsec
 static int hws_debug_mode;
 module_param(hws_debug_mode, int, 0644);
 MODULE_PARM_DESC(hws_debug_mode, " Enable HWS debug mode (0 = disabled, 1 = enabled)");
+
+#ifdef CONFIG_AMDXDNA_NO_PCI
+uint timeout_in_sec = 2;
+module_param(timeout_in_sec, uint, 0644);
+MODULE_PARM_DESC(timeout_in_sec, "Seconds to timeout and recovery, default 2; 0 - No TDR");
+#endif
 
 /*
  * This struct is the register layout.
@@ -184,6 +192,9 @@ static void cert_timer(struct timer_list *t)
 
 static void aie4_mailbox_fini(struct amdxdna_dev_hdl *ndev)
 {
+	if (ndev->xcomm_ops)
+		return;
+
 	xdna_mailbox_stop_channel(ndev->mgmt_chann);
 	xdna_mailbox_destroy_channel(ndev->mgmt_chann);
 	ndev->mgmt_chann = NULL;
@@ -197,6 +208,8 @@ static inline void aie4_irq_fini(struct amdxdna_dev_hdl *ndev)
 
 	if (enable_aie4_polling)
 		timer_delete_sync(&ndev->cert_timer);
+	else if (ndev->xcomm_ops)
+		return;
 	else
 		pci_free_irq_vectors(pdev);
 }
@@ -211,6 +224,8 @@ static int aie4_irq_init(struct amdxdna_dev *xdna)
 		XDNA_DBG(xdna, "enable_aie4 polling mode");
 		timer_setup(&ndev->cert_timer, cert_timer, 0);
 		mod_timer(&ndev->cert_timer, jiffies + msecs_to_jiffies(1000));
+	} else if (ndev->xcomm_ops) {
+		return 0;
 	} else {
 		nvec = pci_msix_vec_count(pdev);
 		XDNA_DBG(xdna, "enable_aie4 interrupt mode, irq vectors:%d", nvec);
@@ -286,8 +301,13 @@ create_channel_failed:
 
 static int aie4_mailbox_init(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct mailbox_info mbox_info = { 0 };
 	int ret = 0;
+
+	/* If customized communication is provided skip this mailbox initialization */
+	if (ndev->xcomm_ops)
+		return 0;
 
 	ret = aie4_mailbox_info(xdna, &mbox_info);
 	if (ret)
@@ -298,10 +318,6 @@ static int aie4_mailbox_init(struct amdxdna_dev *xdna)
 
 static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 {
-#ifdef CONFIG_AMDXDNA_NO_PCI
-	return 0;
-#else
-	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	dma_addr_t dma_addr;
 	int ret;
@@ -335,7 +351,6 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 		return ret;
 
 	return aie4_set_ctx_timeout(ndev, timeout_in_sec * 1000);
-#endif
 }
 
 static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
@@ -382,22 +397,9 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-#ifdef CONFIG_AMDXDNA_NO_PCI
-
-static inline int aie4_fw_load_support(struct amdxdna_dev_hdl *ndev)
-{
-	return 0;
-}
-
-static void aie4_fw_unload(struct amdxdna_dev_hdl *ndev) {}
-static int aie4_fw_load(struct amdxdna_dev_hdl *ndev) { return 0; }
-
-#else /* !CONFIG_AMDXDNA_RPMSG */
-
 static inline int aie4_fw_load_support(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	if (is_npu3_vf_dev(xdna)) {
 		XDNA_DBG(xdna, "skip loading fw on vf device");
@@ -447,13 +449,10 @@ stop_smu:
 	return ret;
 }
 
-#endif /* CONFIG_AMDXDNA_NO_PCI */
-
 static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	if (is_npu3_pf_dev(xdna)) {
@@ -486,7 +485,6 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	if (is_npu3_pf_dev(xdna)) {
@@ -571,7 +569,6 @@ disable_device:
 
 static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 {
-	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 	int ret;
 
 	if (!is_npu3_vf_dev(ndev->xdna) && !skip_work_buffer)
@@ -612,32 +609,7 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 	ndev->dev_status = AIE4_DEV_INIT;
 }
 
-#ifdef CONFIG_AMDXDNA_NO_PCI
-
-static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
-				 const struct firmware **npufw,
-				 const struct firmware **certfw)
-{
-	return 0;
-}
-
-static int aie4_release_firmware(struct amdxdna_dev_hdl *ndev,
-				 const struct firmware *npufw,
-				 const struct firmware *certfw)
-{
-	return 0;
-}
-
-static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
-				 const struct firmware *npufw,
-				 const struct firmware *certfw,
-				 void __iomem *tbl[PCI_NUM_RESOURCES])
-{
-	return 0;
-}
-
-#else /* !CONFIG_AMDXDNA_RPMSG */
-
+#ifndef CONFIG_AMDXDNA_NO_PCI
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
 				 const struct firmware **npufw,
 				 const struct firmware **certfw)
@@ -744,8 +716,6 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-#endif /* CONFIG_AMDXDNA_NO_PCI */
-
 static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -777,11 +747,11 @@ static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 
 	return 0;
 }
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 
 static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	if (is_npu3_vf_dev(xdna) || skip_work_buffer) {
 		XDNA_DBG(xdna, "skip free work buffer");
@@ -792,6 +762,7 @@ static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
 		amdxdna_mgmt_buff_free(ndev->mpnpu_work_buffer);
 }
 
+#ifndef CONFIG_AMDXDNA_NO_PCI
 static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -890,6 +861,19 @@ static irqreturn_t cert_comp_isr(int irq, void *p)
 	wake_up_all(&cert_comp->waitq);
 	return IRQ_HANDLED;
 }
+#else
+static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+
+	if (!is_npu3_vf_dev(xdna)) {
+		XDNA_ERR(xdna, "device initialization failed, pf device is not supported");
+		return -EINVAL;
+	}
+
+	return aie4_hw_start(xdna);
+}
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 
 static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
 {
@@ -924,6 +908,7 @@ static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32
 	if (ndev->xcomm_ops || enable_aie4_polling)
 		goto skip;
 
+#ifndef CONFIG_AMDXDNA_NO_PCI
 	{
 		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
@@ -943,6 +928,7 @@ static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32
 			goto done;
 		}
 	}
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 
 skip:
 	xa_lock_irqsave(&ndev->cert_comp_xa, flags);
@@ -1303,7 +1289,6 @@ static int aie4_fw_reload(struct amdxdna_dev_hdl *ndev)
 void aie4_reset_prepare(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	XDNA_INFO(xdna, "reset prepare start");
 
@@ -1329,7 +1314,6 @@ void aie4_reset_prepare(struct amdxdna_dev *xdna)
 static int aie4_restore_services(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	if (is_npu3_pf_dev(xdna) && ndev->num_vfs) {
@@ -1389,20 +1373,25 @@ error:
 static void aie4_hw_suspend(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	mutex_lock(&ndev->aie4_lock);
 	aie4_ctx_suspend_all(xdna);
 	aie4_hw_stop(xdna);
 	mutex_unlock(&ndev->aie4_lock);
 
-	/* explicitly clear and disable pci */
-	pci_clear_master(pdev);
-	pci_disable_device(pdev);
+#ifndef CONFIG_AMDXDNA_NO_PCI
+	{
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+
+		pci_clear_master(pdev);
+		pci_disable_device(pdev);
+	}
+#endif
 }
 
 static int aie4_hw_resume(struct amdxdna_dev *xdna)
 {
+#ifndef CONFIG_AMDXDNA_NO_PCI
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
@@ -1431,6 +1420,22 @@ clear_pci:
 	pci_clear_master(pdev);
 	pci_disable_device(pdev);
 	return ret;
+#else
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
+
+	ret = aie4_hw_start(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "resume hw failed ret %d", ret);
+		return ret;
+	}
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_restore_services(xdna);
+	mutex_unlock(&ndev->aie4_lock);
+	return ret;
+
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 }
 
 static void aie4_iommu_fini(struct amdxdna_dev_hdl *ndev)
@@ -1448,7 +1453,6 @@ static void aie4_iommu_fini(struct amdxdna_dev_hdl *ndev)
 static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
 	mutex_lock(&ndev->aie4_lock);
 	aie4_hw_stop(xdna);
@@ -1457,8 +1461,13 @@ static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 	/* TODO: (work, async, etc free here) */
 	aie4_free_work_buffer(ndev);
 
-	pci_clear_master(pdev);
-	/* pcim_enable_device will be disabled automatically */
+#ifndef CONFIG_AMDXDNA_NO_PCI
+	{
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+
+		pci_clear_master(pdev);
+	}
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 }
 
 static void aie4_pci_fini(struct amdxdna_dev *xdna)
@@ -1568,6 +1577,7 @@ pci_fini:
 
 static int aie4_doorbell_mmap(struct amdxdna_dev *xdna, struct vm_area_struct *vma)
 {
+#ifndef CONFIG_AMDXDNA_NO_PCI
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
 	phys_addr_t res_start, res_end;
@@ -1594,6 +1604,10 @@ static int aie4_doorbell_mmap(struct amdxdna_dev *xdna, struct vm_area_struct *v
 
 	XDNA_DBG(xdna, "mmap of pfn 0x%lx ret: %d", pfn, ret);
 	return ret;
+#else
+	XDNA_ERR(xdna, "mmap of doorbell is not supported");
+	return -EINVAL;
+#endif /* CONFIG_AMDXDNA_NO_PCI */
 }
 
 static int aie4_query_status(struct amdxdna_client *client,

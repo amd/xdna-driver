@@ -34,7 +34,6 @@ void aie4_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
 int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl = xdna->fw_log->dma_hdl;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	u32 msi_idx, msi_address;
 	int ret;
 
@@ -61,7 +60,6 @@ int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 
 int aie4_fw_log_config(struct amdxdna_dev *xdna, u8 level)
 {
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	if (is_npu3_vf_dev(xdna)) {
@@ -85,7 +83,6 @@ int aie4_fw_log_config(struct amdxdna_dev *xdna, u8 level)
 
 int aie4_fw_log_fini(struct amdxdna_dev *xdna)
 {
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
 	if (is_npu3_vf_dev(xdna)) {

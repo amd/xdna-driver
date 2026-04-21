@@ -18,6 +18,10 @@ ccflags-y += -g -Werror
 
 ccflags-${UMQ_HELLO_TEST} += -DUMQ_HELLO_TEST
 
+ifneq ($(OFT_CONFIG_AMDXDNA_PCI),y)
+ccflags-y += -DCONFIG_AMDXDNA_NO_PSP -DCONFIG_AMDXDNA_NO_SMU
+endif
+
 obj-m	+= amdxdna.o
 amdxdna-y := \
 	amdxdna_ctx.o \
