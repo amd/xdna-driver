@@ -815,7 +815,7 @@ int amdxdna_hwctx_priv_init(struct amdxdna_hwctx *hwctx,
 #else
 	ret = drm_sched_init(sched, sched_ops, NULL, DRM_SCHED_PRIORITY_COUNT,
 			     HWCTX_MAX_CMDS, 0,
-			     timeout_ms ? timeout_ms : MAX_SCHEDULE_TIMEOUT,
+			     timeout_ms ? msecs_to_jiffies(timeout_ms) : MAX_SCHEDULE_TIMEOUT,
 			     NULL, NULL, "amdxdna_js", xdna->ddev.dev);
 #endif
 	if (ret) {
