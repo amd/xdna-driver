@@ -300,21 +300,21 @@ int aie4_cmd_wait(struct amdxdna_ctx *ctx, u64 seq, u32 timeout);
 int aie4_ctx_config(struct amdxdna_ctx *ctx, u32 type, u64 value, void *buf, u32 size);
 
 /* aie4_smu.c */
-#ifdef CONFIG_AMDXDNA_NO_PCI
-static inline int aie4_smu_start(struct amdxdna_dev_hdl *ndev) { return 0; }
-static inline void aie4_smu_stop(struct amdxdna_dev_hdl *ndev) {}
-static inline int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level) { return 0; }
-static inline int aie4_smu_set_power_on(struct amdxdna_dev_hdl *ndev) { return 0; }
-static inline int aie4_smu_set_power_off(struct amdxdna_dev_hdl *ndev) { return 0; }
-static inline int aie4_smu_get_power_state(struct amdxdna_dev_hdl *ndev) { return 0; }
-#else
+#ifndef CONFIG_AMDXDNA_NO_SMU
 int aie4_smu_start(struct amdxdna_dev_hdl *ndev);
 void aie4_smu_stop(struct amdxdna_dev_hdl *ndev);
 int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 int aie4_smu_set_power_on(struct amdxdna_dev_hdl *ndev);
 int aie4_smu_set_power_off(struct amdxdna_dev_hdl *ndev);
 int aie4_smu_get_power_state(struct amdxdna_dev_hdl *ndev);
-#endif
+#else
+static inline int aie4_smu_start(struct amdxdna_dev_hdl *ndev) { return -ENOTSUPP; }
+static inline void aie4_smu_stop(struct amdxdna_dev_hdl *ndev) {}
+static inline int aie4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level) { return -ENOTSUPP; }
+static inline int aie4_smu_set_power_on(struct amdxdna_dev_hdl *ndev) { return -ENOTSUPP; }
+static inline int aie4_smu_set_power_off(struct amdxdna_dev_hdl *ndev) { return -ENOTSUPP; }
+static inline int aie4_smu_get_power_state(struct amdxdna_dev_hdl *ndev) { return -ENOTSUPP; }
+#endif /* CONFIG_AMDXDNA_NO_SMU */
 
 /* aie4_pm.c */
 int aie4_pm_init(struct amdxdna_dev_hdl *ndev);
@@ -324,8 +324,13 @@ int aie4_pm_set_mode(struct amdxdna_dev_hdl *ndev, int target);
 int aie4_get_tops(struct amdxdna_dev_hdl *ndev, u64 *max, u64 *curr);
 
 /* aie4_psp.c */
+#ifndef CONFIG_AMDXDNA_NO_PSP
 int aie4_psp_start(struct psp_device *psp);
 void aie4_psp_stop(struct psp_device *psp);
+#else
+static inline int aie4_psp_start(struct psp_device *psp) { return -ENOTSUPP; }
+static inline void aie4_psp_stop(struct psp_device *psp) {}
+#endif /* CONFIG_AMDXDNA_NO_PSP */
 
 /* aie4_pci.c */
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
