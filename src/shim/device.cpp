@@ -579,6 +579,28 @@ struct pcie_id
   }
 };
 
+struct pcie_device_id
+{
+  using result_type = query::pcie_device::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    const auto pdev = get_pcidev(device);
+
+    if (pdev->m_domain == INVALID_ID) {
+      try {
+        auto vbnv = sysfs_fcn<std::string>::get(pdev, "", "vbnv");
+        return vbnv_to_pcie_id(vbnv).device_id;
+      } catch (...) {
+        return 0;
+      }
+    }
+
+    return sysfs_fcn<result_type>::get(pdev, "", "device");
+  }
+};
+
 struct total_cols
 {
   using result_type = query::total_cols::result_type;
@@ -2059,7 +2081,7 @@ initialize_query_table()
   emplace_func0_request<query::pcie_bdf,                       bdf>();
   emplace_func0_request<query::pcie_id,                        pcie_id>();
   emplace_func0_request<query::total_cols,                     total_cols>();
-  emplace_sysfs_get<query::pcie_device>                        ("", "device");
+  emplace_func0_request<query::pcie_device,                     pcie_device_id>();
   emplace_sysfs_get<query::pcie_express_lane_width>            ("", "link_width");
   emplace_sysfs_get<query::pcie_express_lane_width_max>        ("", "link_width_max");
   emplace_sysfs_get<query::pcie_link_speed>                    ("", "link_speed");
