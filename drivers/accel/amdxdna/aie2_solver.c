@@ -109,14 +109,6 @@ static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
 	return false;
 }
 
-u32 xrs_get_gops(struct aie_qos *rqos)
-{
-	if (!is_valid_qos_dpm_params(rqos))
-		return 0;
-
-	return calculate_gops(rqos) * DEFAULT_SYS_EFF_FACTOR;
-}
-
 static int set_dpm_level(struct solver_state *xrs, struct alloc_requests *req, u32 *dpm_level)
 {
 	struct solver_rgroup *rgp = &xrs->rgp;
@@ -356,6 +348,7 @@ int xrs_release_resource(void *hdl, u64 rid)
 {
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
+	u32 level = 0;
 
 	node = rg_search_node(&xrs->rgp, rid);
 	if (!node) {
@@ -365,6 +358,13 @@ int xrs_release_resource(void *hdl, u64 rid)
 
 	xrs->cfg.actions->unload(node->cb_arg);
 	remove_solver_node(&xrs->rgp, node);
+
+	/* set the dpm level which fits all the sessions */
+	list_for_each_entry(node, &xrs->rgp.node_list, list) {
+		if (node->dpm_level > level)
+			level = node->dpm_level;
+	}
+	xrs->cfg.actions->set_dft_dpm_level(xrs->cfg.ddev, level);
 
 	return 0;
 }

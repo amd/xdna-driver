@@ -247,6 +247,7 @@ static int aie2_xrs_load(void *cb_arg, struct xrs_action_load *action)
 	xdna = hwctx->client->xdna;
 
 	hwctx->start_col = action->part.start_col;
+	hwctx->num_unused_col = action->part.ncols - hwctx->num_col;
 	hwctx->num_col = action->part.ncols;
 	ret = aie2_create_context(xdna->dev_handle, hwctx);
 	if (ret)
@@ -402,7 +403,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto stop_fw;
 	}
 
-	ret = aie2_pm_init(ndev);
+	ret = aie2_pm_start(ndev);
 	if (ret) {
 		XDNA_ERR(xdna, "failed to init pm, ret %d", ret);
 		goto stop_fw;
@@ -460,12 +461,6 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "Start hardware failed, %d", ret);
-		return ret;
-	}
-
-	ret = aie2_pm_resume(xdna->dev_handle);
-	if (ret) {
-		XDNA_ERR(xdna, "Restore PM state failed, %d", ret);
 		return ret;
 	}
 
@@ -594,18 +589,6 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	}
 	xdna->dev_handle = ndev;
 
-	while (ndev->priv->dpm_clk_tbl[ndev->max_dpm_level].hclk)
-		ndev->max_dpm_level++;
-
-	if (ndev->max_dpm_level > DPM_MAX_LEVELS) {
-		XDNA_ERR(xdna, "DPM levels %d exceeds max %d",
-			 ndev->max_dpm_level, DPM_MAX_LEVELS);
-		ret = -EINVAL;
-		goto release_fw;
-	}
-
-	ndev->max_dpm_level--;
-
 	ret = aie2_hw_start(xdna);
 	if (ret) {
 		XDNA_ERR(xdna, "start npu failed, ret %d", ret);
@@ -615,7 +598,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 	xrs_cfg.clk_list.num_levels = ndev->max_dpm_level + 1;
 	for (i = 0; i < xrs_cfg.clk_list.num_levels; i++)
 		xrs_cfg.clk_list.cu_clk_list[i] = ndev->priv->dpm_clk_tbl[i].hclk;
-	xrs_cfg.sys_eff_factor = DEFAULT_SYS_EFF_FACTOR;
+	xrs_cfg.sys_eff_factor = 2;
 	xrs_cfg.ddev = &xdna->ddev;
 	xrs_cfg.actions = &aie2_xrs_actions;
 	xrs_cfg.total_col = ndev->total_col;

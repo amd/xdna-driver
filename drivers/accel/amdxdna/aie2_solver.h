@@ -6,9 +6,7 @@
 #ifndef _AIE2_SOLVER_H
 #define _AIE2_SOLVER_H
 
-#define XRS_MAX_COL		128
-
-#define DEFAULT_SYS_EFF_FACTOR	2
+#define XRS_MAX_COL 128
 
 /*
  * Structure used to describe a partition. A partition is column based
@@ -127,9 +125,6 @@ struct init_config {
  * Note: We should only create one handle per AIE array to be managed.
  */
 void *xrsm_init(struct init_config *cfg);
-
-/* QoS helper functions shared with power management */
-u32 xrs_get_gops(struct aie_qos *rqos);
 
 /*
  * xrs_allocate_resource() - Request to allocate resources for a given context

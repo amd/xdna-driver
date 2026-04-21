@@ -647,22 +647,24 @@ static int aie2_alloc_resource(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct alloc_requests *xrs_req;
+	u32 temporal_only_col = 0;
 	int ret;
-
-	if (AIE_FEATURE_ON(&xdna->dev_handle->aie, AIE2_TEMPORAL_ONLY)) {
-		hwctx->num_unused_col = xdna->dev_handle->total_col - hwctx->num_col;
-		hwctx->num_col = xdna->dev_handle->total_col;
-		return aie2_create_context(xdna->dev_handle, hwctx);
-	}
 
 	xrs_req = kzalloc_obj(*xrs_req);
 	if (!xrs_req)
 		return -ENOMEM;
 
-	xrs_req->cdo.start_cols = hwctx->col_list;
-	xrs_req->cdo.cols_len = hwctx->col_list_len;
-	xrs_req->cdo.ncols = hwctx->num_col;
-	xrs_req->cdo.qos_cap.opc = hwctx->max_opc;
+	if (AIE_FEATURE_ON(&xdna->dev_handle->aie, AIE2_TEMPORAL_ONLY)) {
+		xrs_req->cdo.start_cols = &temporal_only_col;
+		xrs_req->cdo.cols_len = 1;
+		xrs_req->cdo.ncols = xdna->dev_handle->total_col;
+	} else {
+		xrs_req->cdo.start_cols = hwctx->col_list;
+		xrs_req->cdo.cols_len = hwctx->col_list_len;
+		xrs_req->cdo.ncols = hwctx->num_col;
+	}
+	/* Use platform opc */
+	xrs_req->cdo.qos_cap.opc = xdna->dev_handle->priv->col_opc * hwctx->num_col;
 
 	xrs_req->rqos.gops = hwctx->qos.gops;
 	xrs_req->rqos.fps = hwctx->qos.fps;
@@ -686,15 +688,9 @@ static void aie2_release_resource(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	int ret;
 
-	if (AIE_FEATURE_ON(&xdna->dev_handle->aie, AIE2_TEMPORAL_ONLY)) {
-		ret = aie2_destroy_context(xdna->dev_handle, hwctx);
-		if (ret && ret != -ENODEV)
-			XDNA_ERR(xdna, "Destroy temporal only context failed, ret %d", ret);
-	} else {
-		ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)hwctx);
-		if (ret)
-			XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
-	}
+	ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)hwctx);
+	if (ret)
+		XDNA_ERR(xdna, "Release AIE resource failed, ret %d", ret);
 }
 
 static int aie2_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
@@ -815,7 +811,6 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		XDNA_ERR(xdna, "Create col list failed, ret %d", ret);
 		goto free_entity;
 	}
-	hwctx->max_opc = xdna->dev_handle->priv->col_opc * hwctx->num_col;
 
 	ret = amdxdna_pm_resume_get_locked(xdna);
 	if (ret)
@@ -827,26 +822,16 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		goto suspend_put;
 	}
 
-	hwctx->priv->req_dpm_level = aie2_pm_calc_dpm_level(xdna->dev_handle,
-							    hwctx->max_opc,
-							    &hwctx->qos);
-	ret = aie2_pm_request_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
-	if (ret) {
-		XDNA_ERR(xdna, "Request DPM level %d failed, ret %d",
-			 hwctx->priv->req_dpm_level, ret);
-		goto release_resource;
-	}
-
 	ret = aie2_hwctx_map_heap(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Map host buffer failed, ret %d", ret);
-		goto release_dpm;
+		goto release_resource;
 	}
 
 	ret = aie2_ctx_syncobj_create(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Create syncobj failed, ret %d", ret);
-		goto release_dpm;
+		goto release_resource;
 	}
 	amdxdna_pm_suspend_put(xdna);
 
@@ -856,8 +841,6 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	return 0;
 
-release_dpm:
-	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 release_resource:
 	aie2_release_resource(hwctx);
 	aie2_hwctx_release_heap(hwctx);
@@ -892,7 +875,6 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	/* Request fw to destroy hwctx and cancel the rest pending requests */
 	drm_sched_stop(&hwctx->priv->sched, NULL);
-	aie2_pm_release_dpm_level(xdna->dev_handle, hwctx->priv->req_dpm_level);
 	aie2_release_resource(hwctx);
 
 	aie2_hwctx_release_heap(hwctx);
