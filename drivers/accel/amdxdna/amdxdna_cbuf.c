@@ -10,49 +10,74 @@
 #include "amdxdna_pci_drv.h"
 
 /*
- * This is a platform debug/bringup feature.
- *
  * Carveout memory is a chunk of memory which is physically contiguous and
  * is reserved during early boot time. There is only one chunk of such memory
- * per system. Once available, all BOs accessible from device should be
- * allocated from this memory.
+ * per device. Once available, all BOs accessible from device should be
+ * allocated from this memory. This is a platform debug/bringup feature.
  */
-u64 carveout_addr;
-module_param(carveout_addr, ullong, 0400);
-MODULE_PARM_DESC(carveout_addr, "Physical memory address for reserved memory chunk");
-
-u64 carveout_size;
-module_param(carveout_size, ullong, 0400);
-MODULE_PARM_DESC(carveout_size, "Physical memory size for reserved memory chunk");
-
 struct amdxdna_carveout {
+	u64		addr;
+	u64		size;
 	struct drm_mm	mm;
 	struct mutex	lock; /* protect mm */
-} carveout;
+};
 
-bool amdxdna_use_carveout(void)
+bool amdxdna_use_carveout(struct amdxdna_dev *xdna)
 {
-	return !!carveout_size;
+	return !!xdna->carveout;
 }
 
-void amdxdna_carveout_init(void)
+void amdxdna_get_carveout_conf(struct amdxdna_dev *xdna, u64 *addr, u64 *size)
 {
-	if (!amdxdna_use_carveout())
-		return;
-	mutex_init(&carveout.lock);
-	drm_mm_init(&carveout.mm, carveout_addr, carveout_size);
-	pr_info("Use carveout mem, addr=0x%llx, size=0x%llx\n", carveout_addr, carveout_size);
+	if (amdxdna_use_carveout(xdna)) {
+		*addr = xdna->carveout->addr;
+		*size = xdna->carveout->size;
+	} else {
+		*addr = 0;
+		*size = 0;
+	}
 }
 
-void amdxdna_carveout_fini(void)
+int amdxdna_carveout_init(struct amdxdna_dev *xdna, u64 carveout_addr, u64 carveout_size)
 {
-	if (!amdxdna_use_carveout())
+	struct amdxdna_carveout *carveout;
+
+	/* Only allow carveout memory to be set up once. */
+	if (amdxdna_use_carveout(xdna)) {
+		XDNA_ERR(xdna, "Carveout memory has already been set up.");
+		return -EBUSY;
+	}
+
+	carveout = kzalloc_obj(*carveout);
+	if (!carveout)
+		return -ENOMEM;
+
+	carveout->addr = carveout_addr;
+	carveout->size = carveout_size;
+	mutex_init(&carveout->lock);
+	drm_mm_init(&carveout->mm, carveout->addr, carveout->size);
+
+	xdna->carveout = carveout;
+	XDNA_INFO(xdna, "Use carveout mem: 0x%llx@0x%llx\n", carveout->size, carveout->addr);
+	return 0;
+}
+
+void amdxdna_carveout_fini(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_carveout *carveout = xdna->carveout;
+
+	if (!amdxdna_use_carveout(xdna))
 		return;
-	mutex_destroy(&carveout.lock);
-	drm_mm_takedown(&carveout.mm);
+
+	XDNA_INFO(xdna, "Cleanup carveout mem: 0x%llx@0x%llx\n", carveout->size, carveout->addr);
+	mutex_destroy(&carveout->lock);
+	drm_mm_takedown(&carveout->mm);
+	kfree(carveout);
+	xdna->carveout = NULL;
 }
 
 struct amdxdna_cbuf_priv {
+	struct amdxdna_dev *xdna;
 	struct drm_mm_node node;
 };
 
@@ -125,10 +150,12 @@ static void amdxdna_cbuf_unmap(struct dma_buf_attachment *attach,
 static void amdxdna_cbuf_release(struct dma_buf *dbuf)
 {
 	struct amdxdna_cbuf_priv *cbuf = dbuf->priv;
+	struct amdxdna_carveout *carveout;
 
-	mutex_lock(&carveout.lock);
+	carveout = cbuf->xdna->carveout;
+	mutex_lock(&carveout->lock);
 	drm_mm_remove_node(&cbuf->node);
-	mutex_unlock(&carveout.lock);
+	mutex_unlock(&carveout->lock);
 
 	kfree(cbuf);
 }
@@ -205,7 +232,9 @@ static void amdxdna_cbuf_clear(struct dma_buf *dbuf)
 
 struct dma_buf *amdxdna_get_cbuf(struct drm_device *dev, size_t size, u64 alignment)
 {
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+	struct amdxdna_carveout *carveout;
 	struct amdxdna_cbuf_priv *cbuf;
 	struct dma_buf *dbuf;
 	int ret;
@@ -213,11 +242,13 @@ struct dma_buf *amdxdna_get_cbuf(struct drm_device *dev, size_t size, u64 alignm
 	cbuf = kzalloc_obj(*cbuf);
 	if (!cbuf)
 		return ERR_PTR(-ENOMEM);
+	cbuf->xdna = xdna;
 
-	mutex_lock(&carveout.lock);
-	ret = drm_mm_insert_node_generic(&carveout.mm, &cbuf->node, size,
+	carveout = xdna->carveout;
+	mutex_lock(&carveout->lock);
+	ret = drm_mm_insert_node_generic(&carveout->mm, &cbuf->node, size,
 					 alignment, 0, DRM_MM_INSERT_BEST);
-	mutex_unlock(&carveout.lock);
+	mutex_unlock(&carveout->lock);
 	if (ret)
 		goto free_cbuf;
 

@@ -107,6 +107,8 @@ struct amdxdna_fw_ver {
 	u32 build;
 };
 
+struct amdxdna_carveout;
+
 struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
@@ -124,6 +126,8 @@ struct amdxdna_dev {
 	struct iova_domain		iovad;
 	/* Accurate board name queried from firmware, or default_vbnv as fallback */
 	const char			*vbnv;
+
+	struct amdxdna_carveout		*carveout;
 };
 
 /*
