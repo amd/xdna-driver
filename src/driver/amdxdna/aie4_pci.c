@@ -306,7 +306,7 @@ static int aie4_mgmt_fw_init(struct amdxdna_dev_hdl *ndev)
 	dma_addr_t dma_addr;
 	int ret;
 
-	if (is_npu3_vf_dev(pdev))
+	if (is_npu3_vf_dev(ndev->xdna))
 		return 0;
 
 	ret = aie4_calibrate_clock(ndev);
@@ -358,7 +358,7 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	{
 		struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 
-		if (is_npu3_pf_dev(pdev)) {
+		if (is_npu3_pf_dev(ndev->xdna)) {
 			XDNA_DBG(ndev->xdna, "skip aie check on non npu3 pf device");
 			return 0;
 		}
@@ -399,7 +399,7 @@ static inline int aie4_fw_load_support(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	if (is_npu3_vf_dev(pdev)) {
+	if (is_npu3_vf_dev(xdna)) {
 		XDNA_DBG(xdna, "skip loading fw on vf device");
 		return 0;
 	}
@@ -456,7 +456,7 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
-	if (is_npu3_pf_dev(pdev)) {
+	if (is_npu3_pf_dev(xdna)) {
 		XDNA_DBG(xdna, "skip on pf device");
 		return 0;
 	}
@@ -489,7 +489,7 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
-	if (is_npu3_pf_dev(pdev)) {
+	if (is_npu3_pf_dev(xdna)) {
 		XDNA_DBG(xdna, "skip on pf device");
 		return;
 	}
@@ -574,7 +574,7 @@ static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 	struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
 	int ret;
 
-	if (!is_npu3_vf_dev(pdev) && !skip_work_buffer)
+	if (!is_npu3_vf_dev(ndev->xdna) && !skip_work_buffer)
 		aie4_detach_work_buffer(ndev);
 
 	ret = aie4_suspend_fw(ndev);
@@ -753,7 +753,7 @@ static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	char print_size[32];
 
-	if (is_npu3_vf_dev(pdev) || skip_work_buffer) {
+	if (is_npu3_vf_dev(xdna) || skip_work_buffer) {
 		XDNA_DBG(xdna, "skip alloc work buffer");
 		return 0;
 	}
@@ -783,7 +783,7 @@ static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	if (is_npu3_vf_dev(pdev) || skip_work_buffer) {
+	if (is_npu3_vf_dev(xdna) || skip_work_buffer) {
 		XDNA_DBG(xdna, "skip free work buffer");
 		return;
 	}
@@ -816,14 +816,14 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 	set_bit(xdna->dev_info->sram_bar, &bars);
-	if (!is_npu3_vf_dev(pdev)) {
+	if (!is_npu3_vf_dev(xdna)) {
 		for (i = 0; i < PSP_MAX_REGS; i++)
 			set_bit(PSP_REG_BAR(ndev, i), &bars);
 		for (i = 0; i < SMU_MAX_REGS; i++)
 			set_bit(SMU_REG_BAR(ndev, i), &bars);
 	}
 
-	if (!is_npu3_pf_dev(pdev))
+	if (!is_npu3_pf_dev(xdna))
 		set_bit(xdna->dev_info->doorbell_bar, &bars);
 
 	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
@@ -1312,7 +1312,7 @@ void aie4_reset_prepare(struct amdxdna_dev *xdna)
 	/* mark dev status to avoid new incoming requests */
 	ndev->dev_status = AIE4_DEV_INIT;
 
-	if (!is_npu3_pf_dev(pdev))
+	if (!is_npu3_pf_dev(xdna))
 		aie4_ctx_suspend_all(xdna);
 
 	/* fini mailbox service */
@@ -1332,7 +1332,7 @@ static int aie4_restore_services(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
-	if (is_npu3_pf_dev(pdev) && ndev->num_vfs) {
+	if (is_npu3_pf_dev(xdna) && ndev->num_vfs) {
 		DECLARE_AIE4_MSG(aie4_msg_create_vfs, AIE4_MSG_OP_CREATE_VFS);
 
 		req.vf_cnt = ndev->num_vfs;

@@ -229,14 +229,26 @@ struct cert_comp {
 };
 
 /* common util inline functions */
-static inline int is_npu3_pf_dev(const struct pci_dev *pdev)
+static inline int is_npu3_pf_dev(struct amdxdna_dev *xdna)
 {
+#ifdef CONFIG_AMDXDNA_NO_PCI
+	return xdna->dev_info->device_type == AMDXDNA_DEV_TYPE_PF;
+#else
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+
 	return (pdev->device == 0x17F2 || pdev->device == 0x1B0B);
+#endif
 }
 
-static inline int is_npu3_vf_dev(const struct pci_dev *pdev)
+static inline int is_npu3_vf_dev(struct amdxdna_dev *xdna)
 {
+#ifdef CONFIG_AMDXDNA_NO_PCI
+	return xdna->dev_info->device_type != AMDXDNA_DEV_TYPE_PF;
+#else
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+
 	return (pdev->device == 0x17F3 || pdev->device == 0x1B0C);
+#endif
 }
 
 /* aie4_debugfs.c */

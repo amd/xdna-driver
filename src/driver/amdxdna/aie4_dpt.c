@@ -38,7 +38,7 @@ int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 	u32 msi_idx, msi_address;
 	int ret;
 
-	if (is_npu3_vf_dev(pdev)) {
+	if (is_npu3_vf_dev(xdna)) {
 		XDNA_DBG(xdna, "not supported on npu3 vf device");
 		return -EOPNOTSUPP;
 	}
@@ -64,7 +64,7 @@ int aie4_fw_log_config(struct amdxdna_dev *xdna, u8 level)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
-	if (is_npu3_vf_dev(pdev)) {
+	if (is_npu3_vf_dev(xdna)) {
 		XDNA_DBG(xdna, "not supported on npu3 vf device");
 		return -EOPNOTSUPP;
 	}
@@ -88,7 +88,7 @@ int aie4_fw_log_fini(struct amdxdna_dev *xdna)
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
 
-	if (is_npu3_vf_dev(pdev)) {
+	if (is_npu3_vf_dev(xdna)) {
 		XDNA_DBG(xdna, "not supported on npu3 vf device");
 		return -EOPNOTSUPP;
 	}
