@@ -49,6 +49,16 @@ struct shmem_msg_hdr {
 };
 
 /*
+ * Tombstone sentinel for ring wrap.  Written at the current offset when a
+ * message does not fit before the ring-end boundary; consumer skips past it.
+ *
+ * The first u32 of every real message is total_size (sizeof(shmem_msg_hdr) +
+ * payload), which is at most ~100 bytes for current opcodes and can never
+ * collide with 0xDEADFACE.
+ */
+#define SHMEM_TOMBSTONE	0xDEADFACE
+
+/*
  * Doorbell ring -- the entire doorbell memory-region is one of these.
  * Each data[] slot carries a hw_ctx_id.
  */
@@ -73,10 +83,9 @@ struct shmem_db_ring {
  *
  * Returns 0 on success, -ENOSPC if ring is full.
  *
- * TODO: If a message straddles the ring-end boundary, a split copy is
- * needed.  Currently messages are small relative to the ring so wrap
- * does not occur in practice.  Add aligned head advancement (with
- * matching firmware change) to eliminate wrap entirely.
+ * If the message does not fit between the current offset and the ring-end
+ * boundary, a TOMBSTONE sentinel is written and the offset resets to 0.
+ * The consumer detects the tombstone and skips past it.
  */
 static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 				     void *ring_base,
@@ -88,7 +97,7 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 	u32 size = mask + 1;
 	u32 head = *local_head;
 	u32 total = sizeof(*msg_hdr) + payload_size;
-	u32 off;
+	u32 off, gap;
 
 	if (head - *cached_tail + total > size) {
 		*cached_tail = hdr->tail;
@@ -97,6 +106,19 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 	}
 
 	off = head & mask;
+
+	if (off + total > size) {
+		gap = size - off;
+		*(u32 *)(ring_base + off) = SHMEM_TOMBSTONE;
+		head += gap;
+
+		if (head - *cached_tail + total > size) {
+			*cached_tail = hdr->tail;
+			if (head - *cached_tail + total > size)
+				return -ENOSPC;
+		}
+		off = head & mask;
+	}
 
 	memcpy_toio(ring_base + off, msg_hdr, sizeof(*msg_hdr));
 	if (payload_size)
@@ -126,7 +148,8 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
  * Returns payload size on success, -EAGAIN if ring is empty, -EOVERFLOW
  * if the message payload exceeds payload_max.
  *
- * TODO: Handle ring wrap (see shmem_mgmt_produce TODO).
+ * If a TOMBSTONE sentinel is found at the current offset, the consumer
+ * skips past the remaining ring-end gap and retries from offset 0.
  */
 static inline int shmem_mgmt_consume(struct shmem_ring_hdr *hdr,
 				     void *ring_base,
@@ -135,6 +158,7 @@ static inline int shmem_mgmt_consume(struct shmem_ring_hdr *hdr,
 				     void *payload, size_t payload_max)
 {
 	u32 mask = hdr->ring_mask;
+	u32 size = mask + 1;
 	u32 tail = *local_tail;
 	u32 off, payload_size;
 
@@ -147,6 +171,17 @@ static inline int shmem_mgmt_consume(struct shmem_ring_hdr *hdr,
 	dma_rmb();
 
 	off = tail & mask;
+
+	if (*(u32 *)(ring_base + off) == SHMEM_TOMBSTONE) {
+		tail += size - off;
+		off = tail & mask;
+
+		*cached_head = hdr->head;
+		if (*cached_head == tail)
+			return -EAGAIN;
+
+		dma_rmb();
+	}
 
 	memcpy_fromio(msg_hdr, ring_base + off, sizeof(*msg_hdr));
 
