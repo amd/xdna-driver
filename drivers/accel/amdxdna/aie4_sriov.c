@@ -26,7 +26,7 @@ static int aie4_destroy_vfs(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-static int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs)
+int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_vfs, AIE4_MSG_OP_CREATE_VFS);
 	int ret;
@@ -55,7 +55,12 @@ int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 	}
 
 	pci_disable_sriov(pdev);
-	return aie4_destroy_vfs(ndev);
+	ret = aie4_destroy_vfs(ndev);
+	if (ret)
+		return ret;
+
+	ndev->num_vfs = 0;
+	return 0;
 }
 
 static int aie4_sriov_start(struct amdxdna_dev_hdl *ndev, int num_vfs)
@@ -75,6 +80,7 @@ static int aie4_sriov_start(struct amdxdna_dev_hdl *ndev, int num_vfs)
 		return ret;
 	}
 
+	ndev->num_vfs = num_vfs;
 	return num_vfs;
 }
 

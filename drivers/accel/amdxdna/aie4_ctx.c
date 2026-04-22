@@ -116,7 +116,7 @@ static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context
 	return aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 }
 
-static int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
+int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 {
 	DECLARE_AIE_MSG(aie4_msg_create_hw_context, AIE4_MSG_OP_CREATE_HW_CONTEXT);
 	struct amdxdna_client *client = hwctx->client;
@@ -132,6 +132,9 @@ static int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 			 ndev->partition_id, hwctx->num_tiles);
 		return -EINVAL;
 	}
+
+	if (priv->state == CTX_STATE_CONNECTED)
+		return 0;
 
 	req.partition_id = ndev->partition_id;
 	req.request_num_tiles = hwctx->num_tiles;
@@ -165,21 +168,37 @@ static int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 
 	priv->hw_ctx_id = resp.hw_context_id;
 	hwctx->doorbell_offset = resp.doorbell_offset;
+	priv->state = CTX_STATE_CONNECTED;
 
 	return 0;
 }
 
-static void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
+int aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
+	if (priv->state == CTX_STATE_DISCONNECTED)
+		return 0;
+
+	ret = aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
+	if (ret)
+		return ret;
+
+	/* wake up if there are still pending hwctx(s) */
+	priv->state = CTX_STATE_DISCONNECTED;
+	wake_up_all(&priv->cert_comp->waitq);
+
+	/* release cert comp */
 	aie4_put_cert_comp(priv->cert_comp);
+	priv->cert_comp = NULL;
+
+	return ret;
 }
 
 static void aie4_hwctx_umq_fini(struct amdxdna_hwctx *hwctx)
