@@ -32,6 +32,8 @@ static int amdxdna_pmops_resume(struct device *dev)
 
 	if (xdna->dev_info->ops->resume)
 		ret = xdna->dev_info->ops->resume(xdna);
+	if (ret)
+		return ret;
 
 	ret = amdxdna_dpt_resume(xdna);
 	XDNA_DBG(xdna, "Runtime resume done ret: %d", ret);
