@@ -345,6 +345,7 @@ static inline void aie4_psp_stop(struct psp_device *psp) {}
 #endif /* CONFIG_AMDXDNA_NO_PSP */
 
 /* aie4_pci.c */
+int aie4_xrs_solver_init(struct amdxdna_dev *xdna);
 int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx);
 int aie4_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 			 int graceful);

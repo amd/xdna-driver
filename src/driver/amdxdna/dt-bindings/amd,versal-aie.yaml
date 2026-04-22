@@ -1,0 +1,140 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/accel/amd,versal-aie.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: AMD XDNA AIE Accelerator (RPMsg Transport)
+
+maintainers:
+  - XRT Team <runtimeca39d@amd.com>
+
+description: |
+  The amd,versal-aie node describes an AMD XDNA AI Engine accelerator
+  on ARM SoC platforms (e.g. AMD Versal VEK385) where communication
+  with the NPU firmware runs over RPMsg (VirtIO) through a remoteproc.
+
+  The platform driver probes on this node and creates a DRM/accel
+  device (/dev/accel/accelN).  Probe is deferred (-EPROBE_DEFER)
+  until both the remoteproc referenced by "amd,remoteproc" is
+  registered and the firmware has announced the "rpmsg-aie-mgmt"
+  RPMsg service.  The driver also verifies at runtime that incoming
+  RPMsg channels belong to the expected remoteproc.
+
+  No MMIO BARs, PSP, SMU, or IRQ vectors are needed — the remote
+  processor owns the hardware.  The host only sends management and
+  doorbell messages over the RPMsg channel.
+
+  Optional CMA memory banks may be listed via the standard
+  memory-region property.  Userspace selects a bank by index
+  (0-based, matching phandle order) in BO allocation flags.
+  If no banks are listed, the system default CMA pool is used.
+
+properties:
+  compatible:
+    const: amd,versal-aie
+
+  amd,remoteproc:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: |
+      Phandle to the remoteproc node that hosts the NPU firmware.
+      The driver resolves this at probe time to:
+        1. Defer probe until the remoteproc is registered.
+        2. Verify that RPMsg channels originate from this remoteproc
+           (reject channels from other remoteprocs).
+
+  memory-region:
+    minItems: 1
+    maxItems: 8
+    description: |
+      Phandles to reserved-memory nodes used as CMA banks for
+      buffer allocation.  Each entry becomes a selectable memory
+      bank (index 0 .. N-1).  Userspace chooses a bank via the
+      bank field in BO flags.
+
+      These must point to "shared-dma-pool" regions with the
+      "reusable" property so the CMA allocator can manage them.
+
+      This property is optional.  When absent, all allocations
+      use the system default CMA pool.
+
+additionalProperties: false
+
+required:
+  - compatible
+  - amd,remoteproc
+
+examples:
+  - |
+    /*
+     * Minimal example — remoteproc binding only, no dedicated CMA banks.
+     * All buffer allocations use the system default CMA pool.
+     *
+     * The driver defers probe until the remoteproc is registered and
+     * the firmware announces the "rpmsg-aie-mgmt" service.
+     */
+    amdxdna {
+        compatible = "amd,versal-aie";
+        amd,remoteproc = <&r5f_0>;
+    };
+
+  - |
+    /*
+     * Full example with CMA banks and remoteproc binding.
+     *
+     * Bank 0 (buffer@40000000): 1 GiB at 0x4000_0000
+     */
+    / {
+        reserved-memory {
+            #address-cells = <2>;
+            #size-cells = <2>;
+            ranges;
+
+            xdna_bank0: buffer@40000000 {
+                compatible = "shared-dma-pool";
+                reg = <0x0 0x40000000 0x0 0x40000000>;
+                reusable;
+            };
+        };
+    };
+
+    amdxdna {
+        compatible = "amd,versal-aie";
+        amd,remoteproc = <&r5f_0>;
+        memory-region = <&xdna_bank0>;
+    };
+
+  - |
+    /*
+     * Example with multiple CMA banks.
+     *
+     * Bank 0: 512 MiB at 0x2000_0000
+     * Bank 1: 1 GiB at 0x4000_0000
+     *
+     * Userspace selects bank 1 by setting bank=1 in BO flags.
+     */
+    / {
+        reserved-memory {
+            #address-cells = <2>;
+            #size-cells = <2>;
+            ranges;
+
+            xdna_bank0: buffer@20000000 {
+                compatible = "shared-dma-pool";
+                reg = <0x0 0x20000000 0x0 0x20000000>;
+                reusable;
+            };
+
+            xdna_bank1: buffer@40000000 {
+                compatible = "shared-dma-pool";
+                reg = <0x0 0x40000000 0x0 0x40000000>;
+                reusable;
+            };
+        };
+    };
+
+    amdxdna {
+        compatible = "amd,versal-aie";
+        amd,remoteproc = <&r5f_0>;
+        memory-region = <&xdna_bank0>, <&xdna_bank1>;
+    };

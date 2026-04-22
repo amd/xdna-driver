@@ -364,21 +364,17 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	}
 
 	ret = aie4_query_cert_firmware_version(ndev);
-	if (ret) {
+	if (ret && !ndev->xcomm_ops) {
 		XDNA_ERR(ndev->xdna, "Query CERT FW version failed");
 		return ret;
+	} else if (ret) {
+		XDNA_DBG(ndev->xdna, "CERT FW version not available (ret %d)", ret);
 	}
 
-#ifndef CONFIG_AMDXDNA_NO_PCI
-	{
-		struct pci_dev *pdev = to_pci_dev(ndev->xdna->ddev.dev);
-
-		if (is_npu3_pf_dev(ndev->xdna)) {
-			XDNA_DBG(ndev->xdna, "skip aie check on non npu3 pf device");
-			return 0;
-		}
+	if (is_npu3_pf_dev(ndev->xdna)) {
+		XDNA_DBG(ndev->xdna, "skip aie check on non npu3 pf device");
+		return 0;
 	}
-#endif
 
 	ret = aie4_query_aie_version(ndev, &ndev->version);
 	if (ret) {
@@ -719,7 +715,6 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
 	char print_size[32];
 
@@ -1514,10 +1509,33 @@ skip_pasid:
 	return ret;
 }
 
+int aie4_xrs_solver_init(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct init_config xrs_cfg = { 0 };
+
+	xrs_cfg.clk_list.num_levels = 3;
+	xrs_cfg.clk_list.cu_clk_list[0] = 0;
+	xrs_cfg.clk_list.cu_clk_list[1] = 800;
+	xrs_cfg.clk_list.cu_clk_list[2] = 1000;
+	xrs_cfg.sys_eff_factor = 1;
+	xrs_cfg.dev = xdna->ddev.dev;
+	xrs_cfg.mode = XRS_MODE_SPATIAL_STATIC;
+	xrs_cfg.total_col = 10;
+	xrs_cfg.actions = &aie4_xrs_actions;
+
+	ndev->xrs_hdl = aie4_xrsm_init(&xrs_cfg);
+	if (!ndev->xrs_hdl) {
+		XDNA_ERR(xdna, "Initialize resolver failed");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int aie4_pci_init(struct amdxdna_dev *xdna)
 {
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
-	struct init_config xrs_cfg = { 0 };
 	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
@@ -1543,24 +1561,9 @@ static int aie4_pci_init(struct amdxdna_dev *xdna)
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
 
-	/* the metadata.cols should be get via ipu_msg_mailbox */
-	xrs_cfg.clk_list.num_levels = 3;
-	xrs_cfg.clk_list.cu_clk_list[0] = 0;
-	xrs_cfg.clk_list.cu_clk_list[1] = 800;
-	xrs_cfg.clk_list.cu_clk_list[2] = 1000;
-	xrs_cfg.sys_eff_factor = 1;
-	xrs_cfg.dev = xdna->ddev.dev;
-	xrs_cfg.mode = XRS_MODE_SPATIAL_STATIC;
-	xrs_cfg.total_col = 10;
-
-	xrs_cfg.actions = &aie4_xrs_actions;
-
-	ndev->xrs_hdl = aie4_xrsm_init(&xrs_cfg);
-	if (!ndev->xrs_hdl) {
-		XDNA_ERR(xdna, "Initialize resolver failed");
-		ret = -EINVAL;
+	ret = aie4_xrs_solver_init(xdna);
+	if (ret)
 		goto iommu_fini;
-	}
 
 	XDNA_DBG(xdna, "aie4 init finished");
 	return 0;

@@ -8,6 +8,9 @@
 
 #include <drm/drm_device.h>
 #include <linux/bitops.h>
+#include <linux/of.h>
+
+struct amdxdna_dev;
 
 #define AMDXDNA_BO_FLAGS_CACHEABLE	BIT(24)
 
@@ -16,5 +19,7 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_d
 						  int max_regions,
 						  struct device *fallback_dev,
 						  size_t size, u64 flags);
+int amdxdna_cma_region_init(struct amdxdna_dev *xdna, struct device_node *mem_np);
+void amdxdna_cma_region_fini(struct amdxdna_dev *xdna);
 
 #endif /* _AMDXDNA_CMA_BUF_H */

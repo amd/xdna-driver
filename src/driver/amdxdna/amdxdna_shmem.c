@@ -2,11 +2,12 @@
 /*
  * Copyright (C) 2026, Advanced Micro Devices, Inc.
  *
- * Shared-memory + ZynqMP IPI transport driver for amdxdna (AIE4).
+ * Shared-memory + ZynqMP IPI transport layer for amdxdna (AIE4).
  *
- * When CONFIG_AMDXDNA_SHMEM is enabled, this file is the main driver
- * entry point.  The module registers a platform driver that binds via
- * device tree compatible string "amd,amdxdna-shmem".
+ * Provides the xcomm_ops implementation that sends management messages and
+ * doorbell notifications via shared memory regions with ZynqMP IPI for
+ * interrupt notification.  The platform driver (amdxdna_plat.c) calls
+ * amdxdna_shmem_init() to set up the transport.
  *
  * Communication with the remote firmware uses:
  *   - Two shared memory regions (mgmt mailbox + doorbell) from
@@ -22,30 +23,20 @@
  * mbox_request_channel_byname() and uses mbox_send_message() to
  * trigger an IPI to the remote, and receives rx_callback() when the
  * remote triggers an IPI to us.
- *
- * See dt-bindings/amd,amdxdna-shmem.yaml for the device tree binding.
  */
 
-#include <drm/drm_accel.h>
-#include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/mailbox_client.h>
-#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
-#include "drm_local/amdxdna_accel.h"
 #include "aie4_pci.h"
-#include "amdxdna_pci_drv.h"
-#include "npu3_family.h"
-#include "aie4_message.h"
-#include "amdxdna_pm.h"
-#include "amdxdna_sysfs.h"
+#include "amdxdna_shmem.h"
 
 struct amdxdna_shmem_hdl {
 	struct amdxdna_dev_hdl	*ndev;
@@ -101,7 +92,7 @@ static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 	return -ENOSYS;
 }
 
-static void amdxdna_shmem_fini(void *xcomm_hdl)
+static void amdxdna_shmem_xcomm_fini(void *xcomm_hdl)
 {
 	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
 
@@ -114,7 +105,7 @@ static void amdxdna_shmem_fini(void *xcomm_hdl)
 static const struct amdxdna_xcomm_ops amdxdna_shmem_xcomm_ops = {
 	.send_msg	= amdxdna_shmem_send_msg,
 	.ring_doorbell	= amdxdna_shmem_ring_doorbell,
-	.fini		= amdxdna_shmem_fini,
+	.fini		= amdxdna_shmem_xcomm_fini,
 };
 
 static int amdxdna_shmem_map_regions(struct amdxdna_shmem_hdl *shdl)
@@ -211,42 +202,21 @@ static int amdxdna_shmem_mbox_init(struct amdxdna_shmem_hdl *shdl)
 	return 0;
 }
 
-static int amdxdna_shmem_probe(struct platform_device *pdev)
+/**
+ * amdxdna_shmem_init - Set up shared-memory + IPI transport
+ * @xdna: the amdxdna device
+ * @pdev: platform device with DT properties for shmem regions and IPI mboxes
+ *
+ * Maps the mgmt and doorbell shared memory regions, acquires IPI mailbox
+ * channels, and wires up xcomm_ops.
+ *
+ * Return: 0 on success, negative errno on failure
+ */
+int amdxdna_shmem_init(struct amdxdna_dev *xdna, struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	const struct amdxdna_dev_info *dev_info;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_shmem_hdl *shdl;
-	struct amdxdna_dev_hdl *ndev;
-	struct amdxdna_dev *xdna;
 	int ret;
-
-	dev_info = of_device_get_match_data(dev);
-	if (!dev_info) {
-		dev_err(dev, "No device info for compatible\n");
-		return -ENODEV;
-	}
-
-	xdna = devm_drm_dev_alloc(dev, &amdxdna_drm_drv,
-				  typeof(*xdna), ddev);
-	if (IS_ERR(xdna))
-		return PTR_ERR(xdna);
-
-	xdna->dev_info = dev_info;
-	xdna->vbnv = dev_info->default_vbnv;
-
-	drmm_mutex_init(&xdna->ddev, &xdna->dev_lock);
-	init_rwsem(&xdna->notifier_lock);
-	INIT_LIST_HEAD(&xdna->client_list);
-
-	if (IS_ENABLED(CONFIG_LOCKDEP)) {
-		fs_reclaim_acquire(GFP_KERNEL);
-		might_lock(&xdna->notifier_lock);
-		fs_reclaim_release(GFP_KERNEL);
-	}
-
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
-	if (!ndev)
-		return -ENOMEM;
 
 	shdl = drmm_kzalloc(&xdna->ddev, sizeof(*shdl), GFP_KERNEL);
 	if (!shdl)
@@ -257,7 +227,7 @@ static int amdxdna_shmem_probe(struct platform_device *pdev)
 
 	ret = amdxdna_shmem_map_regions(shdl);
 	if (ret) {
-		dev_err(dev, "failed to map shared memory regions: %d\n", ret);
+		dev_err(&pdev->dev, "failed to map shared memory regions: %d\n", ret);
 		return ret;
 	}
 
@@ -265,96 +235,19 @@ static int amdxdna_shmem_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ndev->priv = xdna->dev_info->dev_priv;
-	ndev->xdna = xdna;
 	ndev->xcomm_ops = &amdxdna_shmem_xcomm_ops;
 	ndev->xcomm_hdl = shdl;
-	xa_init(&ndev->cert_comp_xa);
-	mutex_init(&ndev->aie4_lock);
 
-	xdna->dev_handle = ndev;
-	platform_set_drvdata(pdev, xdna);
-
-	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq",
-						     WQ_MEM_RECLAIM);
-	if (!xdna->notifier_wq) {
-		ret = -ENOMEM;
-		goto mbox_fini;
-	}
-
-	ret = amdxdna_sysfs_init(xdna);
-	if (ret)
-		goto destroy_wq;
-
-	ret = drm_dev_register(&xdna->ddev, 0);
-	if (ret)
-		goto sysfs_fini;
-
-	/*
-	 * PCI core calls pm_runtime_enable() and sets usage count to 1 in
-	 * pci_pm_init(). For non-PCI buses, do both here so runtime PM works
-	 * and amdxdna_rpm_init()'s pm_runtime_put_autosuspend() doesn't underflow.
-	 */
-	pm_runtime_enable(dev);
-	pm_runtime_get_noresume(dev);
-	amdxdna_rpm_init(xdna);
-
-	dev_info(dev, "amdxdna shmem+IPI driver probed\n");
 	return 0;
-
-sysfs_fini:
-	amdxdna_sysfs_fini(xdna);
-destroy_wq:
-	destroy_workqueue(xdna->notifier_wq);
-mbox_fini:
-	amdxdna_shmem_fini(shdl);
-	return ret;
 }
 
-static void amdxdna_shmem_remove(struct platform_device *pdev)
+void amdxdna_shmem_fini(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev *xdna = platform_get_drvdata(pdev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-
-	amdxdna_rpm_fini(xdna);
-	pm_runtime_disable(xdna->ddev.dev);
-	destroy_workqueue(xdna->notifier_wq);
-	drm_dev_unplug(&xdna->ddev);
-	amdxdna_sysfs_fini(xdna);
 
 	if (ndev->xcomm_ops && ndev->xcomm_ops->fini)
 		ndev->xcomm_ops->fini(ndev->xcomm_hdl);
+
+	ndev->xcomm_ops = NULL;
+	ndev->xcomm_hdl = NULL;
 }
-
-static const struct of_device_id amdxdna_shmem_of_match[] = {
-	{ .compatible = "amd,amdxdna-npu3", .data = &dev_npu3_info },
-	{ },
-};
-MODULE_DEVICE_TABLE(of, amdxdna_shmem_of_match);
-
-static struct platform_driver amdxdna_shmem_driver = {
-	.probe	= amdxdna_shmem_probe,
-	.remove	= amdxdna_shmem_remove,
-	.driver	= {
-		.name		= AMDXDNA_DRIVER_NAME,
-		.of_match_table	= amdxdna_shmem_of_match,
-	},
-};
-
-static int __init amdxdna_shmem_init(void)
-{
-	return platform_driver_register(&amdxdna_shmem_driver);
-}
-
-static void __exit amdxdna_shmem_exit(void)
-{
-	platform_driver_unregister(&amdxdna_shmem_driver);
-}
-
-module_init(amdxdna_shmem_init);
-module_exit(amdxdna_shmem_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
-MODULE_VERSION(MODULE_VER_STR);
-MODULE_DESCRIPTION("amdxdna shared-memory + IPI transport driver for AIE4");
