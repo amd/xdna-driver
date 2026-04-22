@@ -9,6 +9,7 @@
 #include <linux/debugfs.h>
 #include <linux/completion.h>
 #include <linux/kernel.h>
+#include <linux/ktime.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 #include <linux/string.h>
@@ -28,25 +29,31 @@ static int aie4_dbgfs_entry_open(struct inode *inode, struct file *file,
 	struct amdxdna_dev_hdl *ndev = inode->i_private;
 	int ret;
 
+#ifndef CONFIG_AMDXDNA_SHMEM
 	ret = pm_runtime_resume_and_get(ndev->xdna->ddev.dev);
 	if (ret)
 		return ret;
+#endif
 
 	ret = single_open(file, show, ndev);
+#ifndef CONFIG_AMDXDNA_SHMEM
 	if (ret) {
 		pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
 		pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
 	}
+#endif
 
 	return ret;
 }
 
 static int aie4_dbgfs_entry_release(struct inode *inode, struct file *file)
 {
+#ifndef CONFIG_AMDXDNA_SHMEM
 	struct amdxdna_dev_hdl *ndev = inode->i_private;
 
 	pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
 	pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
+#endif
 	return single_release(inode, file);
 }
 
@@ -383,6 +390,54 @@ static int test_msg_async_event(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
+#define LATENCY_ITERATIONS 100
+
+static int test_echo_latency(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	ktime_t start, end;
+	s64 elapsed_ns, min_ns = S64_MAX, max_ns = 0, total_ns = 0;
+	int ret, i;
+
+	req.val1 = 0xbaddcafe;
+	req.val2 = 0xdeedbeef;
+
+	for (i = 0; i < LATENCY_ITERATIONS; i++) {
+		start = ktime_get();
+
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_send_msg_wait(ndev, &msg);
+		mutex_unlock(&ndev->aie4_lock);
+
+		end = ktime_get();
+
+		if (ret) {
+			XDNA_ERR(xdna, "echo failed at iteration %d, ret: %d", i, ret);
+			return ret;
+		}
+
+		if (resp.val1 != req.val1 || resp.val2 != req.val2) {
+			XDNA_ERR(xdna, "echo mismatch at iteration %d", i);
+			return -EIO;
+		}
+
+		elapsed_ns = ktime_to_ns(ktime_sub(end, start));
+		total_ns += elapsed_ns;
+		if (elapsed_ns < min_ns)
+			min_ns = elapsed_ns;
+		if (elapsed_ns > max_ns)
+			max_ns = elapsed_ns;
+	}
+
+	XDNA_INFO(xdna, "echo latency (%d iterations):", LATENCY_ITERATIONS);
+	XDNA_INFO(xdna, "  min: %lld us", min_ns / 1000);
+	XDNA_INFO(xdna, "  max: %lld us", max_ns / 1000);
+	XDNA_INFO(xdna, "  avg: %lld us", total_ns / LATENCY_ITERATIONS / 1000);
+	XDNA_INFO(xdna, ">>TEST PASS<<");
+	return 0;
+}
+
 struct test_case {
 	char	*test_name;
 	int	(*test_func)(struct amdxdna_dev_hdl *ndev);
@@ -397,6 +452,7 @@ static const struct test_case test_case_array[] = {
 	{"async event msg", test_msg_async_event},
 	{"echo re-enumlate special msg to lx7 firmware", test_msg_enum},
 	{"trigger FLR", test_flr},
+	{"echo latency benchmark (100 iterations)", test_echo_latency},
 };
 
 static ssize_t aie4_test_write(struct file *file, const char __user *ptr,

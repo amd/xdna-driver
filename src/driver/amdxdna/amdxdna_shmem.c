@@ -14,7 +14,9 @@
  *     reserved-memory, for the actual message data.
  *   - ZynqMP IPI mailbox channels (TX + RX) via the Linux mailbox
  *     framework for interrupt notification only — no IPI message
- *     buffers are used (bufferless IPI).
+ *     buffers are used.  Currently uses bufferless (nobuf) IPIs
+ *     (agents 0x0a/0x0b) because PLM does not route buffered
+ *     ipi0/ipi1 (agents 0x02/0x03) notifications correctly.
  *
  * The ZynqMP IPI mailbox controller (drivers/mailbox/zynqmp-ipi-mailbox.c)
  * handles the underlying IPI hardware (SMC/HVC calls to ATF for
@@ -91,10 +93,12 @@ struct amdxdna_shmem_hdl {
 
 	/* Deferred mgmt RX processing (doorbell runs in IRQ context) */
 	struct work_struct	rx_work;
+
 };
 
 /* Maximum response payload we expect from firmware (fits on kernel stack) */
 #define SHMEM_MAX_RESP_SIZE	512
+
 
 static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
 {
@@ -155,6 +159,15 @@ static void amdxdna_shmem_rx_callback(struct mbox_client *cl, void *data)
 
 	amdxdna_shmem_doorbell_notify(shdl->ndev);
 	schedule_work(&shdl->rx_work);
+
+	/*
+	 * ACK the IPI to re-enable the notification interrupt.
+	 * The zynqmp-ipi ISR disables the IRQ via SMC STATUS_ENQUIRY
+	 * with DIRQ_MASK; sending on the RX channel triggers
+	 * SMC_IPI_MAILBOX_ACK with EIRQ_MASK to re-enable it.
+	 */
+	mbox_send_message(shdl->rx_chan, NULL);
+	mbox_client_txdone(shdl->rx_chan, 0);
 }
 
 static int amdxdna_shmem_send_msg(void *xcomm_hdl,
@@ -199,13 +212,14 @@ static int amdxdna_shmem_send_msg(void *xcomm_hdl,
 		return ret;
 	}
 
-	/* Trigger IPI to notify firmware (bufferless) */
+	/* Trigger IPI to notify firmware */
 	ret = mbox_send_message(shdl->tx_chan, NULL);
 	if (ret < 0) {
 		xa_erase(&shdl->msg_xa, id);
 		kfree(ifm);
 		return ret;
 	}
+	mbox_client_txdone(shdl->tx_chan, 0);
 
 	return 0;
 }
@@ -225,6 +239,7 @@ static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 	ret = mbox_send_message(shdl->tx_chan, NULL);
 	if (ret < 0)
 		return ret;
+	mbox_client_txdone(shdl->tx_chan, 0);
 
 	return 0;
 }
@@ -240,7 +255,6 @@ static void amdxdna_shmem_xcomm_fini(void *xcomm_hdl)
 	if (shdl->tx_chan)
 		mbox_free_channel(shdl->tx_chan);
 
-	/* Ensure deferred RX work is complete before tearing down */
 	cancel_work_sync(&shdl->rx_work);
 
 	xa_for_each(&shdl->msg_xa, idx, ifm) {
@@ -375,10 +389,13 @@ static int amdxdna_shmem_mbox_init(struct amdxdna_shmem_hdl *shdl)
 
 	shdl->tx_cl.dev = dev;
 	shdl->tx_cl.tx_block = false;
-	shdl->tx_cl.knows_txdone = false;
+	shdl->tx_cl.knows_txdone = true;
+	shdl->tx_cl.tx_done = NULL;
 
 	shdl->rx_cl.dev = dev;
 	shdl->rx_cl.rx_callback = amdxdna_shmem_rx_callback;
+	shdl->rx_cl.knows_txdone = true;
+	shdl->rx_cl.tx_done = NULL;
 
 	shdl->tx_chan = mbox_request_channel_byname(&shdl->tx_cl, "tx");
 	if (IS_ERR(shdl->tx_chan)) {
@@ -400,7 +417,6 @@ static int amdxdna_shmem_mbox_init(struct amdxdna_shmem_hdl *shdl)
 		return ret;
 	}
 
-	dev_info(dev, "IPI mailbox TX/RX channels acquired\n");
 	return 0;
 }
 
@@ -441,6 +457,12 @@ int amdxdna_shmem_init(struct amdxdna_dev *xdna, struct platform_device *pdev)
 
 	ndev->xcomm_ops = &amdxdna_shmem_xcomm_ops;
 	ndev->xcomm_hdl = shdl;
+
+	/*
+	* TODO: Using existing debugfs interface for now
+	* remove this once its no longer needed
+	*/
+	aie4_debugfs_init(xdna);
 
 	dev_info(dev, "amdxdna shmem+IPI driver probed\n");
 	return 0;
