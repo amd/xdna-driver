@@ -23,6 +23,15 @@
 #if defined(CONFIG_DEBUG_FS)
 #define SIZE            31
 
+/*
+*TODO: This is a temporary parameter for latency benchmark.
+* It will be removed after the latency benchmark is implemented.
+*/
+static int latency_iter = 100;
+module_param(latency_iter, int, 0644);
+MODULE_PARM_DESC(latency_iter,
+		 "Number of echo iterations for latency benchmark (default: 100)");
+
 static int aie4_dbgfs_entry_open(struct inode *inode, struct file *file,
 				 int (*show)(struct seq_file *, void *))
 {
@@ -390,20 +399,28 @@ static int test_msg_async_event(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-#define LATENCY_ITERATIONS 100
-
+/*
+* TODO: This is a temporary test for echo latency benchmark.
+* It will be removed after the latency benchmark is implemented.
+*/
 static int test_echo_latency(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
 	struct amdxdna_dev *xdna = ndev->xdna;
+	int iter = latency_iter;
 	ktime_t start, end;
 	s64 elapsed_ns, min_ns = S64_MAX, max_ns = 0, total_ns = 0;
 	int ret, i;
 
+	if (iter <= 0) {
+		XDNA_ERR(xdna, "latency_iter must be > 0 (current: %d)", iter);
+		return -EINVAL;
+	}
+
 	req.val1 = 0xbaddcafe;
 	req.val2 = 0xdeedbeef;
 
-	for (i = 0; i < LATENCY_ITERATIONS; i++) {
+	for (i = 0; i < iter; i++) {
 		start = ktime_get();
 
 		mutex_lock(&ndev->aie4_lock);
@@ -430,10 +447,10 @@ static int test_echo_latency(struct amdxdna_dev_hdl *ndev)
 			max_ns = elapsed_ns;
 	}
 
-	XDNA_INFO(xdna, "echo latency (%d iterations):", LATENCY_ITERATIONS);
+	XDNA_INFO(xdna, "echo latency (%d iterations):", iter);
 	XDNA_INFO(xdna, "  min: %lld us", min_ns / 1000);
 	XDNA_INFO(xdna, "  max: %lld us", max_ns / 1000);
-	XDNA_INFO(xdna, "  avg: %lld us", total_ns / LATENCY_ITERATIONS / 1000);
+	XDNA_INFO(xdna, "  avg: %lld us", total_ns / iter / 1000);
 	XDNA_INFO(xdna, ">>TEST PASS<<");
 	return 0;
 }
@@ -452,7 +469,7 @@ static const struct test_case test_case_array[] = {
 	{"async event msg", test_msg_async_event},
 	{"echo re-enumlate special msg to lx7 firmware", test_msg_enum},
 	{"trigger FLR", test_flr},
-	{"echo latency benchmark (100 iterations)", test_echo_latency},
+	{"echo latency benchmark", test_echo_latency},
 };
 
 static ssize_t aie4_test_write(struct file *file, const char __user *ptr,
