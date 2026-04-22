@@ -1,28 +1,25 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2026, Advanced Micro Devices, Inc.
-<<<<<<< HEAD
-=======
  *
  * Shared-memory ring layout and SPSC helpers for the amdxdna shmem+IPI
  * transport.
  *
- * Shared memory is mapped via devm_ioremap_wc() (write-combining, Normal
- * Non-Cacheable on ARM64) so normal loads/stores work directly.  We use
- * READ_ONCE/WRITE_ONCE to prevent compiler tearing/reordering, and
- * dma_wmb()/dma_rmb() to order data vs. index updates across the
- * non-coherent boundary.
+ * Shared memory is mapped via devm_ioremap_wc() (Normal Non-Cacheable
+ * on ARM64).  Bulk data copies use memcpy_toio/memcpy_fromio (the
+ * kernel-sanctioned accessors for IO-mapped memory); single u32 index
+ * updates use plain stores.  dma_wmb()/dma_rmb() order data vs. index
+ * updates across the non-coherent boundary.
  * Both sides are little-endian, so no byte-swap is needed.
->>>>>>> cf2da81 (amdxdna: shmem: implement shared-memory ring transport)
  */
 
 #ifndef _AMDXDNA_SHMEM_H_
 #define _AMDXDNA_SHMEM_H_
 
-#include <linux/platform_device.h>
-
-#include <linux/compiler.h>
 #include <asm/barrier.h>
+#include <linux/compiler.h>
+#include <linux/io.h>
+#include <linux/platform_device.h>
 #include <linux/types.h>
 
 struct amdxdna_dev;
@@ -63,16 +60,6 @@ struct shmem_db_ring {
 	u32 data[];
 };
 
-static inline u32 shmem_ring_used(u32 head, u32 tail, u32 mask)
-{
-	return (head - tail) & mask;
-}
-
-static inline u32 shmem_ring_free(u32 head, u32 tail, u32 mask)
-{
-	return mask - shmem_ring_used(head, tail, mask);
-}
-
 /*
  * Management ring -- produce (host writes to TX ring).
  *
@@ -85,6 +72,11 @@ static inline u32 shmem_ring_free(u32 head, u32 tail, u32 mask)
  * @payload_size: payload size in bytes
  *
  * Returns 0 on success, -ENOSPC if ring is full.
+ *
+ * TODO: If a message straddles the ring-end boundary, a split copy is
+ * needed.  Currently messages are small relative to the ring so wrap
+ * does not occur in practice.  Add aligned head advancement (with
+ * matching firmware change) to eliminate wrap entirely.
  */
 static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 				     void *ring_base,
@@ -92,41 +84,30 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 				     const struct shmem_msg_hdr *msg_hdr,
 				     const void *payload, size_t payload_size)
 {
-	u32 mask = READ_ONCE(hdr->ring_mask);
+	u32 mask = hdr->ring_mask;
+	u32 size = mask + 1;
 	u32 head = *local_head;
 	u32 total = sizeof(*msg_hdr) + payload_size;
-	u32 off, i;
-	const u32 *src;
+	u32 off;
 
-	if (shmem_ring_free(head, *cached_tail, mask) < total) {
-		*cached_tail = READ_ONCE(hdr->tail);
-		if (shmem_ring_free(head, *cached_tail, mask) < total)
+	if (head - *cached_tail + total > size) {
+		*cached_tail = hdr->tail;
+		if (head - *cached_tail + total > size)
 			return -ENOSPC;
 	}
 
 	off = head & mask;
 
-	WRITE_ONCE(*(u32 *)(ring_base + off), msg_hdr->total_size);
-	off = (off + sizeof(u32)) & mask;
-	WRITE_ONCE(*(u32 *)(ring_base + off), msg_hdr->id);
-	off = (off + sizeof(u32)) & mask;
-	WRITE_ONCE(*(u32 *)(ring_base + off), msg_hdr->opcode);
-	off = (off + sizeof(u32)) & mask;
-	WRITE_ONCE(*(u32 *)(ring_base + off), msg_hdr->status);
-	off = (off + sizeof(u32)) & mask;
+	memcpy_toio(ring_base + off, msg_hdr, sizeof(*msg_hdr));
+	if (payload_size)
+		memcpy_toio(ring_base + off + sizeof(*msg_hdr),
+			    payload, payload_size);
 
-	src = payload;
-	for (i = 0; i < payload_size / sizeof(u32); i++) {
-		WRITE_ONCE(*(u32 *)(ring_base + off), src[i]);
-		off = (off + sizeof(u32)) & mask;
-	}
-
-	/* Ensure message data is visible before consumer sees new head. */
 	dma_wmb();
 
 	head += total;
+	hdr->head = head;
 	*local_head = head;
-	WRITE_ONCE(hdr->head, head);
 
 	return 0;
 }
@@ -144,6 +125,8 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
  *
  * Returns payload size on success, -EAGAIN if ring is empty, -EOVERFLOW
  * if the message payload exceeds payload_max.
+ *
+ * TODO: Handle ring wrap (see shmem_mgmt_produce TODO).
  */
 static inline int shmem_mgmt_consume(struct shmem_ring_hdr *hdr,
 				     void *ring_base,
@@ -151,47 +134,35 @@ static inline int shmem_mgmt_consume(struct shmem_ring_hdr *hdr,
 				     struct shmem_msg_hdr *msg_hdr,
 				     void *payload, size_t payload_max)
 {
-	u32 mask = READ_ONCE(hdr->ring_mask);
+	u32 mask = hdr->ring_mask;
 	u32 tail = *local_tail;
-	u32 off, i, payload_size;
-	u32 *dst;
+	u32 off, payload_size;
 
-	if (shmem_ring_used(*cached_head, tail, mask) < sizeof(*msg_hdr)) {
-		*cached_head = READ_ONCE(hdr->head);
-		if (shmem_ring_used(*cached_head, tail, mask) < sizeof(*msg_hdr))
+	if (*cached_head == tail) {
+		*cached_head = hdr->head;
+		if (*cached_head == tail)
 			return -EAGAIN;
 	}
 
-	/* Ensure we see data written before the head we just read. */
 	dma_rmb();
 
 	off = tail & mask;
 
-	msg_hdr->total_size = READ_ONCE(*(u32 *)(ring_base + off));
-	off = (off + sizeof(u32)) & mask;
-	msg_hdr->id = READ_ONCE(*(u32 *)(ring_base + off));
-	off = (off + sizeof(u32)) & mask;
-	msg_hdr->opcode = READ_ONCE(*(u32 *)(ring_base + off));
-	off = (off + sizeof(u32)) & mask;
-	msg_hdr->status = READ_ONCE(*(u32 *)(ring_base + off));
-	off = (off + sizeof(u32)) & mask;
+	memcpy_fromio(msg_hdr, ring_base + off, sizeof(*msg_hdr));
 
 	payload_size = msg_hdr->total_size - sizeof(*msg_hdr);
 	if (payload_size > payload_max)
 		return -EOVERFLOW;
 
-	dst = payload;
-	for (i = 0; i < payload_size / sizeof(u32); i++) {
-		dst[i] = READ_ONCE(*(u32 *)(ring_base + off));
-		off = (off + sizeof(u32)) & mask;
-	}
+	if (payload_size)
+		memcpy_fromio(payload, ring_base + off + sizeof(*msg_hdr),
+			      payload_size);
 
-	/* Ensure all data is read before producer sees new tail. */
 	dma_wmb();
 
 	tail += msg_hdr->total_size;
+	hdr->tail = tail;
 	*local_tail = tail;
-	WRITE_ONCE(hdr->tail, tail);
 
 	return payload_size;
 }
@@ -210,23 +181,23 @@ static inline int shmem_db_produce(struct shmem_db_ring *ring,
 				   u32 *local_head, u32 *cached_tail,
 				   u32 hw_ctx_id)
 {
-	u32 mask = READ_ONCE(ring->ring_mask);
+	u32 mask = ring->ring_mask;
+	u32 size = mask + 1;
 	u32 head = *local_head;
 
-	if (shmem_ring_free(head, *cached_tail, mask) < 1) {
-		*cached_tail = READ_ONCE(ring->tail);
-		if (shmem_ring_free(head, *cached_tail, mask) < 1)
+	if (head - *cached_tail >= size) {
+		*cached_tail = ring->tail;
+		if (head - *cached_tail >= size)
 			return -ENOSPC;
 	}
 
-	WRITE_ONCE(ring->data[head & mask], hw_ctx_id);
+	ring->data[head & mask] = hw_ctx_id;
 
-	/* Ensure hw_ctx_id is visible before consumer sees new head. */
 	dma_wmb();
 
 	head++;
+	ring->head = head;
 	*local_head = head;
-	WRITE_ONCE(ring->head, head);
 
 	return 0;
 }
