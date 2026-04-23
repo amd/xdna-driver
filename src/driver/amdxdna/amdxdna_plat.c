@@ -30,6 +30,7 @@
 #include <drm/drm_accel.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
+#include <linux/iommu.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -44,6 +45,9 @@
 #include "amdxdna_pm.h"
 #include "amdxdna_sysfs.h"
 #include "amdxdna_cma_buf.h"
+#ifdef AMDXDNA_DEVEL
+#include "amdxdna_devel.h"
+#endif
 
 #ifdef CONFIG_AMDXDNA_RPMSG
 #include "amdxdna_rpmsg.h"
@@ -142,6 +146,13 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	xdna->dev_handle = ndev;
 	ndev->pw_mode = POWER_MODE_DEFAULT;
 	platform_set_drvdata(pdev, xdna);
+
+#ifdef AMDXDNA_DEVEL
+	if (!iommu_get_domain_for_dev(dev)) {
+		iommu_mode = AMDXDNA_IOMMU_NO_PASID;
+		dev_dbg(dev, "No IOMMU detected, disabling PASID\n");
+	}
+#endif
 
 	ret = aie4_xrs_solver_init(xdna);
 	if (ret)
