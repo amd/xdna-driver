@@ -42,14 +42,30 @@ out:
 	return ret;
 }
 
-static int xdna_send_msg_wait(struct amdxdna_dev *xdna,
-			      struct mailbox_channel *chann,
+static int aie4_mgmt_send_msg(struct amdxdna_dev_hdl *ndev,
 			      struct xdna_mailbox_msg *msg)
 {
+	if (ndev->xcomm_ops)
+		return ndev->xcomm_ops->send_msg(ndev->xcomm_hdl, msg);
+
+	if (!ndev->mgmt_chann) {
+		XDNA_ERR(ndev->xdna, "No mailbox channel available");
+		return -ENODEV;
+	}
+
+	return xdna_mailbox_send_msg(ndev->mgmt_chann, msg, TX_TIMEOUT);
+}
+
+int aie4_send_msg_wait(struct amdxdna_dev_hdl *ndev,
+		       struct xdna_mailbox_msg *msg)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
 	struct xdna_notify *hdl = msg->handle;
 	int ret;
 
-	ret = xdna_mailbox_send_msg(chann, msg, TX_TIMEOUT);
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
+
+	ret = aie4_mgmt_send_msg(ndev, msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Send message failed, ret %d", ret);
 		return ret;
@@ -62,39 +78,7 @@ static int xdna_send_msg_wait(struct amdxdna_dev *xdna,
 		return -ETIME;
 	}
 
-	return hdl->error;
-}
-
-int aie4_send_msg_wait(struct amdxdna_dev_hdl *ndev,
-		       struct xdna_mailbox_msg *msg)
-{
-	struct amdxdna_dev *xdna = ndev->xdna;
-	struct xdna_notify *hdl = msg->handle;
-	int ret;
-
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
-
-	if (ndev->xcomm_ops) {
-		ret = ndev->xcomm_ops->send_msg(ndev->xcomm_hdl, msg);
-		if (ret) {
-			XDNA_ERR(xdna, "Send message failed, ret %d", ret);
-			return ret;
-		}
-
-		ret = wait_for_completion_timeout(&hdl->comp,
-						  msecs_to_jiffies(RX_TIMEOUT));
-		if (!ret) {
-			XDNA_ERR(xdna, "Wait for completion timeout");
-			return -ETIME;
-		}
-
-		ret = hdl->error;
-	} else {
-		if (!ndev->mgmt_chann)
-			return -ENODEV;
-
-		ret = xdna_send_msg_wait(xdna, ndev->mgmt_chann, msg);
-	}
+	ret = hdl->error;
 
 	if (ret)
 		return ret;
@@ -428,7 +412,7 @@ int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev,
 	req.buff_size = ASYNC_BUF_SIZE;
 
 	XDNA_DBG(ndev->xdna, "Register addr 0x%llx size 0x%x", req.buff_addr, req.buff_size);
-	return xdna_mailbox_send_msg(ndev->mgmt_chann, &msg, TX_TIMEOUT);
+	return aie4_mgmt_send_msg(ndev, &msg);
 }
 
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl *dma_hdl, u8 level,
