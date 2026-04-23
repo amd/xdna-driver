@@ -4,6 +4,7 @@
  */
 
 #include <drm/drm_cache.h>
+#include <linux/dma-mapping.h>
 #include <linux/log2.h>
 #include <linux/string_helpers.h>
 
@@ -116,18 +117,30 @@ free_buf:
 
 int amdxdna_mgmt_buff_clflush(struct amdxdna_mgmt_dma_hdl *dma_hdl, u32 offset, size_t size)
 {
+	size_t len;
+
 	if (!dma_hdl)
 		return -EINVAL;
 
-	if (offset + size > dma_hdl->size)
+	len = size ? size : dma_hdl->size;
+
+	if (offset + len > dma_hdl->size)
 		return -EINVAL;
 
 	/*
-	 * After flushing the buffer and handing it over to the device,
-	 * the user must wait for the device to complete its operations and return
-	 * control before attempting to write to the buffer again.
+	 * Clean and invalidate caches so that:
+	 *  - the device sees the latest CPU writes, and
+	 *  - the CPU sees the latest device writes.
+	 *
+	 * Use DMA_BIDIRECTIONAL because callers use this for both
+	 * directions (pre-send flush and post-receive invalidate).
 	 */
-	drm_clflush_virt_range(dma_hdl->vaddr + offset, size ? size : dma_hdl->size);
+	if (amdxdna_iova_enabled(dma_hdl->xdna))
+		drm_clflush_virt_range(dma_hdl->vaddr + offset, len);
+	else
+		dma_sync_single_for_device(dma_hdl->xdna->ddev.dev,
+					   dma_hdl->dma_hdl + offset, len,
+					   DMA_BIDIRECTIONAL);
 	return 0;
 }
 
