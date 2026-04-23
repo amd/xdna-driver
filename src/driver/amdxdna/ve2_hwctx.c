@@ -5,6 +5,8 @@
 #include <drm/drm_cache.h>
 #include <linux/dma-mapping.h>
 #include <linux/dma-buf.h>
+#include <linux/timer.h>
+#include <linux/version.h>
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -1374,7 +1376,8 @@ out:
 
 static void timeout_cb(struct timer_list *t)
 {
-	struct amdxdna_ctx_priv *priv = from_timer(priv, t, event_timer);
+	struct amdxdna_ctx_priv *priv =
+		container_of(t, struct amdxdna_ctx_priv, event_timer);
 
 	wake_up_interruptible_all(&priv->waitq);
 	mod_timer(&priv->event_timer, jiffies + CTX_TIMER);
@@ -1488,8 +1491,13 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	XDNA_DBG(xdna, "hwctx fini: enter hwctx=%p start_col=%u pid=%d",
 		 hwctx, nhwctx->start_col, hwctx->client->pid);
 
-	if (enable_polling)
+	if (enable_polling) {
+#if KERNEL_VERSION(6, 15, 0) <= LINUX_VERSION_CODE
+		timer_shutdown_sync(&hwctx->priv->event_timer);
+#else
 		del_timer_sync(&hwctx->priv->event_timer);
+#endif
+	}
 
 	/*
 	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work,
