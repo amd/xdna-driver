@@ -8,7 +8,14 @@
 
 #include "amdxdna_drv.h"
 
-struct amdxdna_dev_priv;
+/*
+ * VE2 Device private data
+ */
+struct amdxdna_dev_priv {
+	const char	*fw_path;
+	u32		hwctx_limit;
+	u32		ctx_limit;
+};
 
 extern const struct amdxdna_dev_ops ve2_ops;
 

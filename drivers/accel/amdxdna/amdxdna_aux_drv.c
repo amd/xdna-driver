@@ -10,11 +10,18 @@
 #include <linux/module.h>
 
 #include "amdxdna_drv.h"
+#include "amdxdna_aux_drv.h"
 #include "ve2_aux.h"
 
+const struct amdxdna_dev_priv ve2_dev_priv = {
+	.fw_path	= "amdnpu/release_cert_ve2.elf",
+	.hwctx_limit	= 255,
+	.ctx_limit	= 255,
+};
+
 const struct amdxdna_dev_info dev_ve2_info = {
-	.device_type	= 0,
-	.dev_priv	= NULL,
+	.device_type	= AMDXDNA_DEV_TYPE_KMQ,
+	.dev_priv	= &ve2_dev_priv,
 	.ops		= &ve2_ops,
 };
 
