@@ -254,23 +254,29 @@ static void amdxdna_cma_device_release(struct device *dev)
 }
 
 /**
- * amdxdna_cma_region_init - Populate cma_region_devs[] from a DT node
+ * amdxdna_cma_region_init - Populate CMA regions from a DT node
  * @xdna: XDNA device
- * @mem_np: Device tree node with memory-region phandles listing CMA banks
+ * @mem_np: Device tree node with memory-region phandles
  *
- * Each phandle in the memory-region property becomes a child device bound
- * to that reserved-memory region.  User selects a bank via the bank index
- * in BO flags; the index corresponds to the phandle position (0-based).
- * If no banks match or none are defined, allocation falls back to the
- * system default CMA pool.
+ * Iterates through memory-region phandles and only binds those marked
+ * "reusable" (CMA pools), skipping non-CMA carveouts (e.g. mailbox or
+ * doorbell shared memory regions with "no-map").
  *
- * Return: 0 on success, negative errno on failure
+ * The first CMA region is bound to the parent device (xdna->ddev.dev)
+ * so that dma_alloc_coherent() and friends use it by default.
+ * Subsequent CMA regions become child devices stored in
+ * cma_region_devs[] for bank-based BO allocation.
+ *
+ * Return: 0 on success (including when no CMA regions found),
+ *         negative errno on failure
  */
 int amdxdna_cma_region_init(struct amdxdna_dev *xdna, struct device_node *mem_np)
 {
 	struct device *parent_dev = xdna->ddev.dev;
+	struct device_node *rmem_np;
 	struct device *child_dev;
 	int num_regions;
+	int bank = 0;
 	int ret;
 	int i;
 
@@ -278,13 +284,37 @@ int amdxdna_cma_region_init(struct amdxdna_dev *xdna, struct device_node *mem_np
 	if (num_regions <= 0)
 		return 0;
 
-	if (num_regions > MAX_MEM_REGIONS) {
-		XDNA_ERR(xdna, "Too many CMA regions (%d), max %d",
-			 num_regions, MAX_MEM_REGIONS);
-		return -EINVAL;
-	}
-
 	for (i = 0; i < num_regions; i++) {
+		rmem_np = of_parse_phandle(mem_np, "memory-region", i);
+		if (!rmem_np)
+			break;
+
+		if (!of_property_read_bool(rmem_np, "reusable")) {
+			of_node_put(rmem_np);
+			continue;
+		}
+		of_node_put(rmem_np);
+
+		if (bank == 0) {
+			ret = of_reserved_mem_device_init_by_idx(parent_dev,
+								 mem_np, i);
+			if (ret) {
+				XDNA_ERR(xdna,
+					 "Failed to bind default CMA (idx %d): %d",
+					 i, ret);
+				return ret;
+			}
+			XDNA_INFO(xdna, "Default CMA region bound (idx %d)", i);
+			bank++;
+			continue;
+		}
+
+		if (bank > MAX_MEM_REGIONS) {
+			XDNA_WARN(xdna, "Too many CMA banks, skipping idx %d",
+				  i);
+			continue;
+		}
+
 		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
 		if (!child_dev) {
 			ret = -ENOMEM;
@@ -298,18 +328,20 @@ int amdxdna_cma_region_init(struct amdxdna_dev *xdna, struct device_node *mem_np
 		child_dev->dma_mask = &child_dev->coherent_dma_mask;
 		child_dev->release = amdxdna_cma_device_release;
 
-		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
+		ret = dev_set_name(child_dev, "amdxdna-mem%d", bank - 1);
 		if (ret)
 			goto put_dev;
 
 		ret = of_reserved_mem_device_init_by_idx(child_dev, mem_np, i);
 		if (ret) {
-			XDNA_ERR(xdna, "Failed to init CMA bank %d: %d", i, ret);
+			XDNA_ERR(xdna, "Failed to init CMA bank %d (idx %d): %d",
+				 bank - 1, i, ret);
 			goto put_dev;
 		}
 
-		xdna->cma_region_devs[i] = child_dev;
-		XDNA_INFO(xdna, "CMA bank %d initialized", i);
+		xdna->cma_region_devs[bank - 1] = child_dev;
+		XDNA_INFO(xdna, "CMA bank %d initialized (idx %d)", bank - 1, i);
+		bank++;
 	}
 
 	return 0;
@@ -334,4 +366,7 @@ void amdxdna_cma_region_fini(struct amdxdna_dev *xdna)
 			xdna->cma_region_devs[i] = NULL;
 		}
 	}
+
+	/* Release the default CMA region bound to the parent device */
+	of_reserved_mem_device_release(xdna->ddev.dev);
 }
