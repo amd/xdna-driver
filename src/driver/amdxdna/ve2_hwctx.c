@@ -263,7 +263,7 @@ static void ve2_job_release(struct kref *ref)
 	amdxdna_sched_job_cleanup(job);
 }
 
-static void ve2_job_put(struct amdxdna_sched_job *job)
+void ve2_job_put(struct amdxdna_sched_job *job)
 {
 	kref_put(&job->refcnt, ve2_job_release);
 }
@@ -343,7 +343,11 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 	 */
 	// Reset the pending list
 	priv_ctx->pending[get_job_idx(job->seq)] = NULL;
-	ve2_job_put(job);
+
+	/* Signal DRM scheduler fence */
+	if (job->fence)
+		dma_fence_signal(job->fence);
+
 	mutex_unlock(&priv_ctx->privctx_lock);
 }
 
@@ -975,8 +979,21 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 
 	XDNA_DBG(xdna, "hwctx %p cmd submitted: seq=%llu, total_submitted=%llu",
 		 hwctx, *seq, hwctx->submitted);
-	/* command_index = read_index when this job completes (last_slot + 1) */
-	ve2_mgmt_schedule_cmd(xdna, hwctx, *seq + 1);
+
+	/* DRM scheduler - initialize and push job */
+	ret = drm_sched_job_init(&job->base, &hwctx->priv->entity, 1, NULL);
+	if (ret) {
+		return ret;
+	}
+
+	/* Arm job - this creates the scheduler fence */
+	drm_sched_job_arm(&job->base);
+
+	/* Set out_fence to the scheduler's finished fence */
+	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
+
+	/* Push to DRM scheduler - run_job callback will handle scheduling */
+	drm_sched_entity_push_job(&job->base);
 
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
 				  hwctx->client->pid, hwctx->priv->start_col,
@@ -1403,6 +1420,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx_priv *priv = NULL;
+        u32 hwctx_id;
 	int ret;
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
@@ -1411,19 +1429,15 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	hwctx->priv = priv;
 
-	/* Allocate unique ID using XArray (thread-safe, supports ID recycling) */
-	{
-		u32 hwctx_id;
-
-		ret = xa_alloc_cyclic(&xdna->dev_handle->hwctx_ids, &hwctx_id, priv,
-				      XA_LIMIT(1, U32_MAX),
-				      &xdna->dev_handle->next_hwctx_id, GFP_KERNEL);
-		if (ret < 0) {
-			XDNA_ERR(xdna, "Failed to allocate hwctx ID, ret=%d", ret);
-			goto cleanup_priv;
-		}
-		priv->id = hwctx_id;
-	}
+        /* Allocate unique ID using XArray (thread-safe, supports ID recycling) */
+        ret = xa_alloc_cyclic(&xdna->dev_handle->hwctx_ids, &hwctx_id, priv,
+                        XA_LIMIT(1, U32_MAX),
+                        &xdna->dev_handle->next_hwctx_id, GFP_KERNEL);
+        if (ret < 0) {
+                XDNA_ERR(xdna, "Failed to allocate hwctx ID, ret=%d", ret);
+                goto cleanup_priv;
+        }
+        priv->id = hwctx_id;
 
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
 				  client->pid, 0, priv->id, 0);
@@ -1459,6 +1473,26 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	mutex_init(&priv->privctx_lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
+
+	/* Initialize DRM scheduler entity */
+	{
+		struct amdxdna_mgmtctx *mgmtctx = &xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
+
+                if (!mgmtctx)
+                        goto cleanup_xrs;
+
+		priv->sched = &mgmtctx->sched;
+		ret = drm_sched_entity_init(&priv->entity,
+					    DRM_SCHED_PRIORITY_NORMAL,
+					    &priv->sched, 1,	/* One scheduler */
+					    NULL);		/* No guilty context */
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to init sched entity: %d", ret);
+			goto cleanup_xrs;
+		}
+
+		priv->seq = 0;	/* Initialize sequence counter */
+	}
 
 	XDNA_DBG(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
 		 hwctx, priv->start_col, hwctx->client->pid);
@@ -1508,13 +1542,7 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx == hwctx)
 		mgmtctx->active_ctx = NULL;
-	/* Remove all FIFO entries for this context before freeing it */
-	ve2_fifo_remove_ctx(mgmtctx, hwctx);
 	mutex_unlock(&mgmtctx->ctx_lock);
-
-	/* Now cancel any pending work - it will see active_ctx as NULL and bail out */
-	if (mgmtctx->mgmtctx_workq)
-		cancel_work_sync(&mgmtctx->sched_work);
 
 	/*
 	 * Release jobs first to decrement BO refcounts, but they may not
@@ -1541,6 +1569,9 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_get_firmware_status(hwctx);
+
+	/* Destroy DRM scheduler entity */
+	drm_sched_entity_destroy(&hwctx->priv->entity);
 
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
