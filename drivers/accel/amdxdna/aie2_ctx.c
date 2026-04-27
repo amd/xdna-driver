@@ -99,12 +99,23 @@ static void aie2_hwctx_stop(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwct
 #endif
 }
 
+/*
+ * Drop pin + ref on every heap chunk this hwctx previously pinned via
+ * aie2_hwctx_heap_expand(). Acquires client->mm_lock internally to
+ * serialize the walk against concurrent chunk additions; callers must
+ * NOT hold mm_lock. Unlike aie2_hwctx_{renotify,heap_expand}_heap()
+ * (which are paired under a single mm_lock acquisition in
+ * aie2_hwctx_map_heap()), release_heap is always called standalone.
+ */
 static void aie2_hwctx_release_heap(struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_gem_obj *last = hwctx->priv->last_pinned_chunk;
 	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_gem_obj *last;
 	struct amdxdna_gem_obj *chunk;
 
+	guard(mutex)(&client->mm_lock);
+
+	last = hwctx->priv->last_pinned_chunk;
 	if (!last)
 		return;
 
@@ -117,29 +128,24 @@ static void aie2_hwctx_release_heap(struct amdxdna_hwctx *hwctx)
 	hwctx->priv->last_pinned_chunk = NULL;
 }
 
-static int aie2_hwctx_map_heap(struct amdxdna_hwctx *hwctx)
+static int aie2_hwctx_renotify_heap(struct amdxdna_hwctx *hwctx)
 {
+	struct amdxdna_gem_obj *last = hwctx->priv->last_pinned_chunk;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
-	bool need_pin = !hwctx->priv->last_pinned_chunk;
 	struct amdxdna_gem_obj *chunk;
-	u64 offset = 0;
+	bool first = true;
 	u64 addr;
 	int ret;
 
-	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&client->mm_lock));
+
+	if (!last)
+		return 0;
 
 	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
-		if (need_pin) {
-			ret = amdxdna_gem_pin(chunk);
-			if (ret)
-				goto release;
-			drm_gem_object_get(to_gobj(chunk));
-			hwctx->priv->last_pinned_chunk = chunk;
-		}
-
 		addr = amdxdna_obj_dma_addr(chunk);
-		if (!offset)
+		if (first)
 			ret = aie2_map_host_buf(xdna->dev_handle,
 						hwctx->fw_ctx_id,
 						addr, chunk->mem.size);
@@ -149,21 +155,47 @@ static int aie2_hwctx_map_heap(struct amdxdna_hwctx *hwctx)
 						addr, chunk->mem.size);
 		if (ret) {
 			XDNA_ERR(xdna,
-				 "Notify FW hwctx %d chunk offset 0x%llx failed, ret %d",
-				 hwctx->fw_ctx_id, offset, ret);
-			goto release;
+				 "Renotify FW hwctx %s for chunk size 0x%lx failed, ret %d",
+				 hwctx->name, chunk->mem.size, ret);
+			return ret;
 		}
-
-		if (!need_pin && chunk == hwctx->priv->last_pinned_chunk)
-			need_pin = true;
-
-		offset += chunk->mem.size;
+		first = false;
+		if (chunk == last)
+			break;
 	}
 
 	return 0;
+}
 
-release:
-	aie2_hwctx_release_heap(hwctx);
+static int aie2_hwctx_map_heap(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/*
+	 * Called from hwctx create and from restart (suspend/resume and TDR).
+	 * The per-hwctx FW context is brand-new on both paths and has no
+	 * host_buf state, so on restart we must first re-notify FW for every
+	 * chunk that this hwctx previously pinned (kernel pins/refs are
+	 * preserved across restart). aie2_hwctx_heap_expand() then continues
+	 * from list_prepare_entry(last_pinned_chunk), pinning + notifying any
+	 * chunks added since.
+	 *
+	 * On hwctx create last_pinned_chunk is NULL: renotify is a no-op and
+	 * expand walks from the list head with first_pin = true, issuing
+	 * aie2_map_host_buf() for chunk 0 and aie2_add_host_buf() afterward.
+	 */
+	mutex_lock(&client->mm_lock);
+	ret = aie2_hwctx_renotify_heap(hwctx);
+	if (ret)
+		goto unlock;
+	ret = aie2_hwctx_heap_expand(hwctx);
+unlock:
+	mutex_unlock(&client->mm_lock);
+
 	return ret;
 }
 
@@ -1255,37 +1287,74 @@ int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_gem_obj *new_chunk;
+	struct amdxdna_gem_obj *last = hwctx->priv->last_pinned_chunk;
+	bool first_pin = !last;
+	struct amdxdna_gem_obj *chunk;
 	u64 addr;
 	int ret;
 
-	new_chunk = list_last_entry(&client->dev_heap_chunks,
-				    struct amdxdna_gem_obj,
-				    heap_chunk_node);
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&client->mm_lock));
 
-	if (hwctx->priv->last_pinned_chunk !=
-	    list_prev_entry(new_chunk, heap_chunk_node))
-		return -EIO;
+	/*
+	 * Start at the chunk just after last_pinned_chunk, or at the head
+	 * of the list when nothing has been pinned yet for this hwctx.
+	 * list_prepare_entry() yields a cursor whose .next points to the
+	 * desired starting element, so list_for_each_entry_continue() then
+	 * iterates correctly without a duplicate-entry hazard.
+	 */
+	chunk = list_prepare_entry(last, &client->dev_heap_chunks, heap_chunk_node);
 
-	ret = amdxdna_gem_pin(new_chunk);
-	if (ret) {
-		XDNA_ERR(xdna, "Pin chunk for hwctx %s failed, ret %d",
-			 hwctx->name, ret);
-		return ret;
+	list_for_each_entry_continue(chunk, &client->dev_heap_chunks,
+				     heap_chunk_node) {
+		/*
+		 * In PASID mode the device address comes from the chunk UVA
+		 * (see amdxdna_obj_dma_addr()), so an un-mmapped chunk has
+		 * no valid address yet and must be skipped; it will be
+		 * picked up by a later expand() once userspace mmaps it.
+		 *
+		 * In non-PASID mode (IOVA / carved-out) the device address
+		 * comes from abo->mem.dma_addr, which is set at chunk open
+		 * time independently of mmap, so FW notification can
+		 * proceed regardless of UVA state.
+		 */
+		if (amdxdna_pasid_on(client) &&
+		    chunk->mem.uva == AMDXDNA_INVALID_ADDR) {
+			XDNA_DBG(xdna,
+				 "hwctx %s: chunk not yet mmapped, deferring FW notify",
+				 hwctx->name);
+			break;
+		}
+
+		ret = amdxdna_gem_pin(chunk);
+		if (ret) {
+			XDNA_ERR(xdna, "Pin chunk for hwctx %s failed, ret %d",
+				 hwctx->name, ret);
+			return ret;
+		}
+		drm_gem_object_get(to_gobj(chunk));
+
+		addr = amdxdna_obj_dma_addr(chunk);
+		if (first_pin)
+			ret = aie2_map_host_buf(xdna->dev_handle,
+						hwctx->fw_ctx_id,
+						addr, chunk->mem.size);
+		else
+			ret = aie2_add_host_buf(xdna->dev_handle,
+						hwctx->fw_ctx_id,
+						addr, chunk->mem.size);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Notify FW hwctx %s for chunk size 0x%lx failed, ret %d",
+				 hwctx->name, chunk->mem.size, ret);
+			amdxdna_gem_unpin(chunk);
+			drm_gem_object_put(to_gobj(chunk));
+			return ret;
+		}
+
+		hwctx->priv->last_pinned_chunk = chunk;
+		first_pin = false;
 	}
-	drm_gem_object_get(to_gobj(new_chunk));
 
-	addr = amdxdna_obj_dma_addr(new_chunk);
-	ret = aie2_add_host_buf(xdna->dev_handle, hwctx->fw_ctx_id,
-				addr, new_chunk->mem.size);
-	if (ret) {
-		XDNA_ERR(xdna, "Add host buf for hwctx %s failed, ret %d",
-			 hwctx->name, ret);
-		amdxdna_gem_unpin(new_chunk);
-		drm_gem_object_put(to_gobj(new_chunk));
-		return ret;
-	}
-
-	hwctx->priv->last_pinned_chunk = new_chunk;
 	return 0;
 }
