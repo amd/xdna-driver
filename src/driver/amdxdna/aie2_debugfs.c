@@ -550,7 +550,7 @@ static int aie2_tdr_control_show(struct seq_file *m, void *unused)
 	seq_printf(m, "status         %s (%u)\n", aie2_tdr_status_name(status), status);
 	seq_printf(m, "progress       %u\n", progress);
 	seq_printf(m, "timeout_sec    %u\n", timeout_in_sec);
-	seq_printf(m, "dump_only      %u\n", tdr_dump_ctx);
+	seq_printf(m, "dump_only      %d\n", tdr_dump_ctx);
 	seq_puts(m, "actions        dump recover\n");
 
 	return 0;
