@@ -53,7 +53,7 @@ static void aie2_tdr_work(struct work_struct *work)
 
 	if (aie2_tdr_detect(tdr)) {
 		XDNA_WARN(tdr_to_xdna(tdr),
-			  "Device isn't making progress... Count %d timeout %u dump_only %u",
+			  "Device isn't making progress... Count %d timeout %u dump_only %d",
 			  ++tdr->counter, timeout_in_sec, tdr_dump_ctx);
 		aie2_tdr_force_recover(tdr_to_xdna(tdr), tdr_dump_ctx);
 	}
