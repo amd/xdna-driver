@@ -541,11 +541,14 @@ static int aie2_tdr_control_show(struct seq_file *m, void *unused)
 	struct amdxdna_dev_hdl *ndev = m->private;
 	struct aie2_tdr *tdr = &ndev->tdr;
 	u32 status = READ_ONCE(tdr->status);
+	int started = READ_ONCE(tdr->started);
+	int counter = READ_ONCE(tdr->counter);
+	u32 progress = READ_ONCE(tdr->progress);
 
-	seq_printf(m, "started        %d\n", tdr->started);
-	seq_printf(m, "counter        %d\n", tdr->counter);
+	seq_printf(m, "started        %d\n", started);
+	seq_printf(m, "counter        %d\n", counter);
 	seq_printf(m, "status         %s (%u)\n", aie2_tdr_status_name(status), status);
-	seq_printf(m, "progress       %u\n", tdr->progress);
+	seq_printf(m, "progress       %u\n", progress);
 	seq_printf(m, "timeout_sec    %u\n", timeout_in_sec);
 	seq_printf(m, "dump_only      %u\n", tdr_dump_ctx);
 	seq_puts(m, "actions        dump recover\n");
