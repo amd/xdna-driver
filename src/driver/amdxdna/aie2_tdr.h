@@ -10,6 +10,8 @@
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 
+struct amdxdna_dev;
+
 struct aie2_tdr {
 	struct timer_list	timer;
 	struct work_struct	work;
@@ -20,5 +22,8 @@ struct aie2_tdr {
 };
 
 extern uint timeout_in_sec;
+extern bool tdr_dump_ctx;
+
+void aie2_tdr_force_recover(struct amdxdna_dev *xdna, bool dump_only);
 
 #endif /* _AIE2_TDR_H_ */
