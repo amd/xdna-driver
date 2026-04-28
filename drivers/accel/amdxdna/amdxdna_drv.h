@@ -41,7 +41,6 @@ extern const struct drm_driver amdxdna_drm_drv;
 
 struct amdxdna_client;
 struct amdxdna_dev;
-struct amdxdna_dev_info;
 struct amdxdna_drm_get_info;
 struct amdxdna_drm_set_state;
 struct amdxdna_drm_get_array;
@@ -88,6 +87,41 @@ struct amdxdna_dev_ops {
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 	int (*hwctx_heap_expand)(struct amdxdna_hwctx *hwctx);
+};
+
+struct amdxdna_rev_vbnv;
+struct amdxdna_dev_priv;
+
+struct amdxdna_fw_feature_tbl {
+	u64 features;
+	u32 major;
+	u32 max_minor;
+	u32 min_minor;
+};
+
+/*
+ * struct amdxdna_dev_info - Device hardware information
+ * Record device static information, like reg, mbox, PSP, SMU bar index.
+ * PCI devices populate all fields; auxiliary-bus devices use a subset and
+ * leave BAR/memory fields at zero when unused.
+ */
+struct amdxdna_dev_info {
+	int				reg_bar;
+	int				mbox_bar;
+	int				sram_bar;
+	int				psp_bar;
+	int				smu_bar;
+	int				device_type;
+	int				first_col;
+	u32				dev_mem_buf_shift;
+	u64				dev_mem_base;
+	size_t				dev_mem_size;
+	const char			*default_vbnv;
+	const struct amdxdna_rev_vbnv	*rev_vbnv_tbl;
+	size_t				dev_heap_max_size;
+	const struct amdxdna_dev_priv	*dev_priv;
+	const struct amdxdna_fw_feature_tbl *fw_feature_tbl;
+	const struct amdxdna_dev_ops	*ops;
 };
 
 struct amdxdna_fw_ver {
