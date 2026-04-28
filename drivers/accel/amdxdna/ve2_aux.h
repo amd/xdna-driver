@@ -7,16 +7,12 @@
 #define _VE2_AUX_H_
 
 #include <linux/device.h>
-#include <linux/mutex.h>
 #include <linux/types.h>
-#include <linux/workqueue.h>
-
 #include <linux/xlnx-ai-engine.h>
 
 #include "amdxdna_drv.h"
 
 struct amdxdna_dev_priv;
-#define VE2_MAX_MEM_REGIONS		8
 
 #define VE2_PROG_DATA_MEMORY_OFF	0x80000
 #define VE2_CERT_VERSION_OFF		0x50
