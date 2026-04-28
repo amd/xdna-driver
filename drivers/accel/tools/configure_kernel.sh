@@ -167,6 +167,20 @@ int main(void)
 }
 EOF
 
+# Test drm_sched_init() new signature in 7.1+:
+# num_reqs was removed from this kernel
+try_compile HAVE_drm_sched_init_args_num_rqs << 'EOF'
+#include <drm/gpu_scheduler.h>
+int main(void)
+{
+	struct drm_sched_init_args b = {
+		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
+	};
+
+	return 0;
+}
+EOF
+
 # Test iommu_dev_enable_feature()/iommu_dev_disable_feature() signature in 6.15-:
 # int iommu_dev_disable_feature(struct device *dev, enum iommu_dev_features f)
 # int iommu_dev_enable_feature(struct device *dev, enum iommu_dev_features f)

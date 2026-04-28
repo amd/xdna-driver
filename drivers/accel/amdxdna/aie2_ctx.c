@@ -774,7 +774,9 @@ int aie2_hwctx_init(struct amdxdna_hwctx *hwctx)
 #endif
 	const struct drm_sched_init_args args = {
 		.ops = &sched_ops,
+#ifdef HAVE_drm_sched_init_args_num_rqs
 		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
+#endif
 		.credit_limit = HWCTX_MAX_CMDS,
 		.timeout = timeout_jiffies,
 		.name = "amdxdna_js",
