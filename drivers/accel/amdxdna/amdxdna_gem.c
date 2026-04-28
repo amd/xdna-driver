@@ -29,6 +29,89 @@ MODULE_IMPORT_NS("DMA_BUF");
 MODULE_IMPORT_NS(DMA_BUF);
 #endif
 
+/*
+ * Userspace contract for heap chunk mappings:
+ *   - Chunks are appended to client->dev_heap_chunks in creation order
+ *     and occupy contiguous device-address ranges starting at
+ *     dev_mem_base.
+ *   - Userspace MUST mmap every chunk such that its UVA equals
+ *         heap_base_uva + (chunk_dev_start - dev_mem_base)
+ *     where heap_base_uva is chunk 0's UVA. The order of mmap()
+ *     system calls is irrelevant; only the resulting addresses
+ *     matter. The typical pattern is reserve a contiguous VA range
+ *     once, then MAP_FIXED each chunk into its slot.
+ *
+ * This invariant is required because amdxdna_gem_uva() derives every
+ * DEV BO's UVA as amdxdna_gem_uva(client->dev_heap) + dev_offset, and
+ * that derived UVA is returned to userspace via GET_BO_INFO->vaddr
+ * for ALL operating modes (PASID, force_iova, carved-out). Userspace
+ * uses it to memcpy() into the DEV BO on the host side, so a wrong
+ * chunk UVA silently corrupts userspace data accesses regardless of
+ * how the device itself addresses the BO (UVA in PASID mode,
+ * abo->mem.dma_addr in IOVA / carved-out modes).
+ *
+ * Walk the heap chunks that intersect [dev_start, dev_end) and verify
+ * each covered chunk is mmapped at the expected offset from chunk 0.
+ * This catches both un-mmapped chunks AND chunks mmapped at the wrong
+ * UVA, including the case where the BO is fully contained in chunk
+ * N>0 (i.e. no preceding covered chunk to validate against).
+ *
+ * Caller must hold client->mm_lock.
+ */
+static int
+amdxdna_dev_bo_check_chunks(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_client *client = abo->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	u64 dev_mem_base = xdna->dev_info->dev_mem_base;
+	u64 dev_start = abo->mm_node.start;
+	u64 dev_end = dev_start + abo->mm_node.size;
+	u64 chunk_start = dev_mem_base;
+	struct amdxdna_gem_obj *chunk;
+	u64 base_uva;
+
+	base_uva = amdxdna_gem_uva(client->dev_heap);
+	if (base_uva == AMDXDNA_INVALID_ADDR) {
+		XDNA_ERR(xdna,
+			 "Heap base chunk un-mmapped, cannot place dev bo 0x%llx-0x%llx",
+			 dev_start, dev_end);
+		return -EAGAIN;
+	}
+
+	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
+		u64 chunk_end = chunk_start + chunk->mem.size;
+		u64 chunk_uva = amdxdna_gem_uva(chunk);
+		u64 expected_uva;
+
+		if (chunk_end <= dev_start) {
+			chunk_start = chunk_end;
+			continue;
+		}
+
+		if (chunk_uva == AMDXDNA_INVALID_ADDR) {
+			XDNA_ERR(xdna,
+				 "Dev bo 0x%llx-0x%llx covers un-mmapped chunk 0x%llx-0x%llx",
+				 dev_start, dev_end, chunk_start, chunk_end);
+			return -EAGAIN;
+		}
+		expected_uva = base_uva + (chunk_start - dev_mem_base);
+		if (chunk_uva != expected_uva) {
+			XDNA_ERR(xdna,
+				 "Dev bo 0x%llx-0x%llx: chunk 0x%llx-0x%llx mmapped at wrong UVA",
+				 dev_start, dev_end, chunk_start, chunk_end);
+			return -EFAULT;
+		}
+		if (chunk_end >= dev_end)
+			return 0;
+		chunk_start = chunk_end;
+	}
+
+	XDNA_ERR(xdna,
+		 "Dev bo 0x%llx-0x%llx not covered by heap chunks",
+		 dev_start, dev_end);
+	return -EFAULT;
+}
+
 static int
 amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 {
@@ -43,12 +126,6 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 
 	heap = client->dev_heap;
 	if (!heap) {
-		ret = -EINVAL;
-		goto unlock_out;
-	}
-
-	if (amdxdna_gem_uva(heap) == AMDXDNA_INVALID_ADDR) {
-		XDNA_ERR(xdna, "Invalid dev heap userptr");
 		ret = -EINVAL;
 		goto unlock_out;
 	}
@@ -82,6 +159,12 @@ amdxdna_gem_heap_alloc(struct amdxdna_gem_obj *abo)
 				 mem->size, client->total_heap_size);
 			ret = -ENOSPC;
 		}
+		goto unlock_out;
+	}
+
+	ret = amdxdna_dev_bo_check_chunks(abo);
+	if (ret) {
+		drm_mm_remove_node(&abo->mm_node);
 		goto unlock_out;
 	}
 
@@ -184,34 +267,18 @@ static void amdxdna_gem_vunmap(struct amdxdna_gem_obj *abo)
 }
 
 /*
- * Compute the expected UVA for a DEV_HEAP chunk.  The shim reserves a
- * contiguous VA range for the entire heap, so once the first chunk is
- * mmapped every subsequent chunk's UVA is deterministic:
- *   base_uva + sum-of-preceding-chunk-sizes.
- * Returns AMDXDNA_INVALID_ADDR if the base UVA is not yet known.
- */
-static u64 amdxdna_dev_heap_uva(struct amdxdna_gem_obj *abo)
-{
-	struct amdxdna_gem_obj *heap = abo->client->dev_heap;
-	struct amdxdna_gem_obj *chunk;
-	u64 offset = 0;
-
-	if (heap->mem.uva == AMDXDNA_INVALID_ADDR)
-		return AMDXDNA_INVALID_ADDR;
-
-	list_for_each_entry(chunk, &abo->client->dev_heap_chunks,
-			    heap_chunk_node) {
-		if (chunk == abo)
-			return heap->mem.uva + offset;
-		offset += chunk->mem.size;
-	}
-
-	return AMDXDNA_INVALID_ADDR;
-}
-
-/*
- * Obtain the user virtual address for accessing the BO.
- * It can be used for device to access the BO when PASID is enabled.
+ * Obtain the user virtual address that the device should use to access
+ * the BO (relevant when PASID is enabled).
+ *
+ * abo->mem.uva caches the userspace mapping address for the BO and is
+ * set on first vma install (amdxdna_gem_mmap path) and reset to
+ * AMDXDNA_INVALID_ADDR by amdxdna_umap_release() when the last vma
+ * goes away. This applies to all BO types including DEV_HEAP, so the
+ * returned UVA is only valid while the BO has at least one live
+ * userspace mapping. DEV BOs do not store their own uva and instead
+ * inherit it from the containing heap chunk's current UVA plus the
+ * BO's device offset; if the heap chunk is currently un-mmapped, the
+ * inherited UVA is AMDXDNA_INVALID_ADDR.
  */
 u64 amdxdna_gem_uva(struct amdxdna_gem_obj *abo)
 {
@@ -223,10 +290,6 @@ u64 amdxdna_gem_uva(struct amdxdna_gem_obj *abo)
 			return amdxdna_gem_uva(heap) + off;
 		return AMDXDNA_INVALID_ADDR;
 	}
-
-	if (abo->type == AMDXDNA_BO_DEV_HEAP &&
-	    abo->mem.uva == AMDXDNA_INVALID_ADDR && abo->client)
-		return amdxdna_dev_heap_uva(abo);
 
 	return abo->mem.uva;
 }
@@ -383,22 +446,6 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
 		mapping_set_unevictable(vma->vm_file->f_mapping);
 
-	if (abo->type == AMDXDNA_BO_DEV_HEAP && abo->client) {
-		u64 expected;
-
-		mutex_lock(&abo->client->mm_lock);
-		expected = amdxdna_dev_heap_uva(abo);
-		mutex_unlock(&abo->client->mm_lock);
-
-		if (expected != AMDXDNA_INVALID_ADDR &&
-		    expected != addr) {
-			XDNA_ERR(xdna, "Dev heap mmap addr 0x%lx != expected 0x%llx",
-				 addr, expected);
-			ret = -EINVAL;
-			goto unreg_notifier;
-		}
-	}
-
 	down_write(&xdna->notifier_lock);
 	if (list_empty(&abo->mem.umap_list))
 		abo->mem.uva = addr;
@@ -407,8 +454,6 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 
 	return 0;
 
-unreg_notifier:
-	mmu_interval_notifier_remove(&mapp->notifier);
 free_pfns:
 	kvfree(mapp->range.hmm_pfns);
 free_map:
@@ -639,9 +684,12 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		amdxdna_gem_unpin(abo);
 
 	/*
-	 * DEV_HEAP chunks are always removed from client->dev_heap_chunks
-	 * by amdxdna_client_cleanup() before this free callback runs.
-	 * No list removal needed.
+	 * DEV_HEAP chunks are unlinked from client->dev_heap_chunks by
+	 * amdxdna_client_cleanup() at client teardown before this free
+	 * callback runs. The first chunk of the heap owns drm_mm; tear it
+	 * down if so. (DEV_HEAP creation paths that fail before publishing
+	 * heap state never call drm_mm_init(), so drm_mm_initialized() is
+	 * false and the takedown is correctly skipped.)
 	 */
 	if (abo->type == AMDXDNA_BO_DEV_HEAP &&
 	    drm_mm_initialized(&abo->mm))
@@ -975,8 +1023,6 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_gem_obj *abo;
-	struct amdxdna_hwctx *hwctx;
-	unsigned long hwctx_id;
 	int ret;
 
 	WARN_ON(!is_power_of_2(xdna->dev_info->dev_mem_size));
@@ -991,25 +1037,11 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 	if (IS_ERR(abo))
 		return ERR_CAST(abo);
 
-	/* Create handle early so abo->client is set before expansion. */
 	ret = drm_gem_handle_create(filp, to_gobj(abo), &args->handle);
 	if (ret) {
-		XDNA_ERR(xdna, "Create handle failed");
+		XDNA_ERR(xdna, "Create handle failed, ret %d", ret);
 		drm_gem_object_put(to_gobj(abo));
 		return ERR_PTR(ret);
-	}
-
-	/*
-	 * Hold dev_lock across add + notify so that hwctx_init (map_heap)
-	 * and heap_expand never both run for the same chunk.
-	 */
-	guard(mutex)(&xdna->dev_lock);
-
-	ret = amdxdna_pm_resume_get_locked(xdna);
-	if (ret) {
-		XDNA_ERR(xdna, "PM resume failed, cannot notify FW, ret %d",
-			 ret);
-		goto del_handle;
 	}
 
 	mutex_lock(&client->mm_lock);
@@ -1020,41 +1052,55 @@ amdxdna_drm_create_dev_heap_bo(struct drm_device *dev,
 			 client->total_heap_size, abo->mem.size,
 			 xdna->dev_info->dev_heap_max_size);
 		mutex_unlock(&client->mm_lock);
-		ret = -ENOSPC;
-		goto suspend_put;
+		drm_gem_handle_delete(filp, args->handle);
+		drm_gem_object_put(to_gobj(abo));
+		return ERR_PTR(-ENOSPC);
 	}
 
-	if (!client->dev_heap) {
+	if (list_empty(&client->dev_heap_chunks)) {
 		client->dev_heap = abo;
 		drm_mm_init(&abo->mm, xdna->dev_info->dev_mem_base,
 			    xdna->dev_info->dev_heap_max_size);
 	}
+	drm_gem_object_get(to_gobj(abo));
 	list_add_tail(&abo->heap_chunk_node, &client->dev_heap_chunks);
 	client->total_heap_size += abo->mem.size;
 
 	mutex_unlock(&client->mm_lock);
 
-	if (xdna->dev_info->ops->hwctx_heap_expand) {
-		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-			ret = xdna->dev_info->ops->hwctx_heap_expand(hwctx);
-			if (ret)
-				XDNA_ERR(xdna, "hwctx %s heap expand failed, ret %d",
-					 hwctx->name, ret);
-		}
-	}
-	amdxdna_pm_suspend_put(xdna);
-
-	XDNA_DBG(xdna, "Dev heap chunk hdl %d created, size 0x%lx",
-		 args->handle, abo->mem.size);
-
+	XDNA_DBG(xdna, "Dev heap chunk hdl %d created, size 0x%lx, total 0x%lx",
+		 args->handle, abo->mem.size, client->total_heap_size);
 	return abo;
+}
 
-suspend_put:
+static void amdxdna_dev_heap_notify_fw(struct amdxdna_client *client)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+	int ret;
+
+	if (!xdna->dev_info->ops->hwctx_heap_expand)
+		return;
+
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "PM resume failed, skip FW notify, ret %d", ret);
+		return;
+	}
+
+	mutex_lock(&xdna->dev_lock);
+	mutex_lock(&client->mm_lock);
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		int err = xdna->dev_info->ops->hwctx_heap_expand(hwctx);
+
+		if (err)
+			XDNA_ERR(xdna, "hwctx %s heap expand failed, ret %d",
+				 hwctx->name, err);
+	}
+	mutex_unlock(&client->mm_lock);
+	mutex_unlock(&xdna->dev_lock);
 	amdxdna_pm_suspend_put(xdna);
-del_handle:
-	drm_gem_handle_delete(filp, args->handle);
-	drm_gem_object_put(to_gobj(abo));
-	return ERR_PTR(ret);
 }
 
 struct amdxdna_gem_obj *
@@ -1095,6 +1141,20 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev,
 	}
 	drm_gem_private_object_init(dev, gobj, aligned_sz);
 
+	/*
+	 * NOTE: FW heap-chunk notification is intentionally NOT issued
+	 * here. amdxdna_dev_heap_notify_fw() acquires xdna->dev_lock and
+	 * this helper is also called from aie2_hwctx_init() (for cmd_buf
+	 * allocations) which already holds dev_lock -> would self-deadlock.
+	 *
+	 * - User-facing CREATE_BO(DEV_BO) path triggers notify_fw from
+	 *   amdxdna_drm_create_bo_ioctl() after the helper returns.
+	 * - Internal cmd_buf allocations from aie2_hwctx_init() do not need
+	 *   notify_fw: the new hwctx is not yet in client->hwctx_xa (so it
+	 *   would be skipped by the walk anyway), and aie2_hwctx_map_heap()
+	 *   runs shortly after to register every existing chunk with the
+	 *   new hwctx.
+	 */
 	return abo;
 }
 
@@ -1103,7 +1163,7 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_create_bo *args = data;
 	struct amdxdna_gem_obj *abo;
-	int ret;
+	int ret = 0;
 
 	if (args->flags)
 		return -EINVAL;
@@ -1127,19 +1187,38 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	if (IS_ERR(abo))
 		return PTR_ERR(abo);
 
-	if (args->type == AMDXDNA_BO_DEV_HEAP)
-		return 0; /* Handle already created, creation ref is chunk list ref */
-
-	/* Ready to publish object to userspace and count for BO usage. */
-	ret = drm_gem_handle_create(filp, to_gobj(abo), &args->handle);
-	if (ret) {
-		XDNA_ERR(xdna, "Create handle failed");
-		goto put_obj;
+	/*
+	 * DEV_HEAP chunks publish their userspace handle inside
+	 * amdxdna_drm_create_dev_heap_bo() (it is created before the
+	 * mm_lock-protected heap publishing block, so the heap-list /
+	 * drm_mm / total_heap_size update is atomic and never escapes a
+	 * partially-handle-less state to a concurrent CREATE_BO(DEV_BO)).
+	 * For all other types, publish the handle here.
+	 */
+	if (args->type != AMDXDNA_BO_DEV_HEAP) {
+		ret = drm_gem_handle_create(filp, to_gobj(abo), &args->handle);
+		if (ret) {
+			XDNA_ERR(xdna, "Create handle failed");
+			goto put_obj;
+		}
 	}
 
 	XDNA_DBG(xdna, "BO hdl %d type %d userptr 0x%llx xdna_addr 0x%llx size 0x%lx",
 		 args->handle, args->type, amdxdna_gem_uva(abo),
 		 amdxdna_gem_dev_addr(abo), abo->mem.size);
+
+	/*
+	 * Best-effort FW notification on the user-facing DEV BO create
+	 * path: pin and register any heap chunks that have been mmapped
+	 * since the last expand for every existing hwctx on this client,
+	 * so a job submitted shortly after can safely touch this BO. Done
+	 * here (not inside amdxdna_drm_create_dev_bo()) because the helper
+	 * is also called from aie2_hwctx_init() under xdna->dev_lock, and
+	 * notify_fw acquires dev_lock too.
+	 */
+	if (args->type == AMDXDNA_BO_DEV)
+		amdxdna_dev_heap_notify_fw(filp->driver_priv);
+
 put_obj:
 	/* Dereference object reference. Handle holds it now. */
 	drm_gem_object_put(to_gobj(abo));
