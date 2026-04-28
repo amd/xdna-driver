@@ -9,6 +9,7 @@
 #include <linux/bitfield.h>
 
 #include "amdxdna_gem.h"
+#include <drm/gpu_scheduler.h>
 
 /*
  * Define the maximum number of pending commands in a hardware context.
