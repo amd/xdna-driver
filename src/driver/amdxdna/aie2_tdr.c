@@ -35,9 +35,8 @@ static bool aie2_tdr_detect(struct aie2_tdr *tdr)
 	return aie2_rq_is_all_context_stuck(rq);
 }
 
-static void aie2_tdr_recover(struct aie2_tdr *tdr, bool dump_only)
+void aie2_tdr_force_recover(struct amdxdna_dev *xdna, bool dump_only)
 {
-	struct amdxdna_dev *xdna = tdr_to_xdna(tdr);
 	struct aie2_ctx_rq *rq = &xdna->dev_handle->ctx_rq;
 
 	guard(mutex)(&xdna->dev_lock);
@@ -54,8 +53,9 @@ static void aie2_tdr_work(struct work_struct *work)
 
 	if (aie2_tdr_detect(tdr)) {
 		XDNA_WARN(tdr_to_xdna(tdr),
-			  "Device isn't making progress... Count %d", ++tdr->counter);
-		aie2_tdr_recover(tdr, tdr_dump_ctx);
+			  "Device isn't making progress... Count %d timeout %u dump_only %d",
+			  ++tdr->counter, timeout_in_sec, tdr_dump_ctx);
+		aie2_tdr_force_recover(tdr_to_xdna(tdr), tdr_dump_ctx);
 	}
 }
 

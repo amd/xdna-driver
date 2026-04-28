@@ -524,6 +524,72 @@ static int aie2_ctx_rq_show(struct seq_file *m, void *unused)
 
 AIE2_DBGFS_FOPS(ctx_rq, aie2_ctx_rq_show, NULL);
 
+static const char *aie2_tdr_status_name(u32 status)
+{
+	switch (status) {
+	case AIE2_TDR_WAIT:
+		return "wait";
+	case AIE2_TDR_SIGNALED:
+		return "signaled";
+	default:
+		return "unknown";
+	}
+}
+
+static int aie2_tdr_control_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct aie2_tdr *tdr = &ndev->tdr;
+	u32 status = READ_ONCE(tdr->status);
+	int started = READ_ONCE(tdr->started);
+	int counter = READ_ONCE(tdr->counter);
+	u32 progress = READ_ONCE(tdr->progress);
+
+	seq_printf(m, "started        %d\n", started);
+	seq_printf(m, "counter        %d\n", counter);
+	seq_printf(m, "status         %s (%u)\n", aie2_tdr_status_name(status), status);
+	seq_printf(m, "progress       %u\n", progress);
+	seq_printf(m, "timeout_sec    %u\n", timeout_in_sec);
+	seq_printf(m, "dump_only      %d\n", tdr_dump_ctx);
+	seq_puts(m, "actions        dump recover\n");
+
+	return 0;
+}
+
+static ssize_t aie2_tdr_control_write(struct file *file, const char __user *ptr,
+				      size_t len, loff_t *off)
+{
+	struct amdxdna_dev_hdl *ndev = file_to_ndev_rw(file);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	char input[SIZE + 1];
+
+	if (len > SIZE) {
+		XDNA_ERR(xdna, "Length %zu of the buffer exceeds size %d", len, SIZE);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(input, ptr, len))
+		return -EFAULT;
+	input[len] = '\0';
+
+	if (sysfs_streq(input, "dump")) {
+		XDNA_WARN(xdna, "Manual TDR context dump requested via debugfs");
+		aie2_tdr_force_recover(xdna, true);
+		return len;
+	}
+
+	if (sysfs_streq(input, "recover")) {
+		XDNA_WARN(xdna, "Manual TDR recovery requested via debugfs");
+		aie2_tdr_force_recover(xdna, false);
+		return len;
+	}
+
+	XDNA_ERR(xdna, "Invalid TDR action: %s", input);
+	return -EINVAL;
+}
+
+AIE2_DBGFS_FOPS(tdr_control, aie2_tdr_control_show, aie2_tdr_control_write);
+
 static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 {
 	struct amdxdna_dev_hdl *ndev = m->private;
@@ -721,6 +787,7 @@ const struct {
 	AIE2_DBGFS_FILE(telemetry_profiling, 0400),
 	AIE2_DBGFS_FILE(telemetry_debug, 0400),
 	AIE2_DBGFS_FILE(ctx_rq, 0400),
+	AIE2_DBGFS_FILE(tdr_control, 0600),
 	AIE2_DBGFS_FILE(get_app_health, 0400),
 	AIE2_DBGFS_FILE(dump_fw_log, 0600),
 	AIE2_DBGFS_FILE(dump_fw_log_buffer, 0400),
