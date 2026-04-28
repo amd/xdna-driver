@@ -583,12 +583,14 @@ int aie4_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 
 	ndev->async_events = events;
 
+	#if 0
 	for (i = 0; i < ndev->async_events->event_cnt; i++) {
 		e = &ndev->async_events->event[i];
 		ret = aie4_error_event_send(e);
 		if (ret)
 			goto free_buf;
 	}
+	#endif
 
 	/* Just to make sure firmware handled async events */
 	ret = aie4_check_firmware_version(ndev);

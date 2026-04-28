@@ -1539,15 +1539,28 @@ static int aie4_pci_init(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
-	ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
-	if (!ndev)
-		return -ENOMEM;
+	/*
+	 * On the platform/rpmsg path, amdxdna_plat_probe() has already
+	 * allocated ndev, initialised the mutex/xarray and set
+	 * xdna->dev_handle; amdxdna_rpmsg_init() has installed
+	 * ndev->xcomm_ops so the irq/mailbox layer can take the rpmsg
+	 * fast path instead of pci_msix_vec_count(pdev).  Reuse that
+	 * ndev rather than devm_kzalloc()'ing a fresh one — otherwise
+	 * the new ndev would have xcomm_ops==NULL and aie4_irq_init()
+	 * would fall through to the PCI MSI-X branch and fail.
+	 */
+	ndev = xdna->dev_handle;
+	if (!ndev) {
+		ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
+		if (!ndev)
+			return -ENOMEM;
 
-	ndev->priv = xdna->dev_info->dev_priv;
-	ndev->xdna = xdna;
-	xdna->dev_handle = ndev;
-	mutex_init(&ndev->aie4_lock);
-	xa_init(&ndev->cert_comp_xa);
+		ndev->priv = xdna->dev_info->dev_priv;
+		ndev->xdna = xdna;
+		xdna->dev_handle = ndev;
+		mutex_init(&ndev->aie4_lock);
+		xa_init(&ndev->cert_comp_xa);
+	}
 
 	ret = aie4_pcidev_init(ndev);
 	if (ret) {
@@ -1561,9 +1574,11 @@ static int aie4_pci_init(struct amdxdna_dev *xdna)
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
 
-	ret = aie4_xrs_solver_init(xdna);
-	if (ret)
-		goto iommu_fini;
+	if (!ndev->xrs_hdl) {
+		ret = aie4_xrs_solver_init(xdna);
+		if (ret)
+			goto iommu_fini;
+	}
 
 	XDNA_DBG(xdna, "aie4 init finished");
 	return 0;

@@ -4,22 +4,51 @@
  *
  * RPMsg transport layer for amdxdna.
  *
- * Provides the xcomm_ops implementation that sends management messages and
- * doorbell notifications over an RPMsg channel.  The platform driver
- * (amdxdna_plat.c) calls amdxdna_rpmsg_init() to set up the transport and
- * register an internal RPMsg endpoint driver.  The RPMsg endpoint connects
- * asynchronously when the remoteproc boots and firmware announces the
- * "rpmsg-aie-mgmt" service.
+ * Provides the xcomm_ops implementation that sends management messages
+ * and doorbell notifications over an RPMsg channel.
  *
- * The rpmsg_device pointer is RCU-protected so the hot send path is
- * lock-free while the rare channel-up/down events use synchronize_rcu().
+ * Lifecycle (inverted control flow)
+ * ---------------------------------
+ * amdxdna_plat_probe() runs only the channel-independent setup
+ * (drm_dev_alloc, ndev alloc, drvdata, xrs, CMA, transport_init) and
+ * returns success without waiting for the RPU.  The firmware-dependent
+ * second half — ops->init(), notifier_wq, sysfs_init, drm_dev_register,
+ * runtime PM — is captured in amdxdna_plat_register_device() (in
+ * amdxdna_plat.c) and is invoked from drv_probe() below, after the
+ * RPMsg channel is hot.  drv_remove() correspondingly calls
+ * amdxdna_plat_unregister_device() before tearing the channel down.
+ *
+ * The rpmsg endpoint driver itself is registered exactly once per
+ * module load (amdxdna_rpmsg_drv_register, called from amdxdna_plat.c's
+ * module_init *after* platform_driver_register()).  This ordering
+ * guarantees that when the rpmsg core's bus walk fires drv_probe(),
+ * at least one plat_probe has already set drvdata so
+ * amdxdna_plat_find_by_rproc() succeeds first try.
+ *
+ * If a channel is somehow announced before any plat_probe completed,
+ * drv_probe() returns -EPROBE_DEFER and resets rpdev->src back to
+ * RPMSG_ADDR_ANY (the kernel rpmsg core mutates rpdev->src to a
+ * concrete address before calling drv_probe and never resets it on
+ * probe failure; without our reset, a sibling channel could grab our
+ * freed idr slot and break the deferred-probe retry).  drv_remove()
+ * does the same reset for symmetry, so rmmod+insmod cycles work too.
+ *
+ * Discovery (no globals)
+ * ----------------------
+ * drv_probe() walks up from the rpdev to its owning remoteproc via
+ * rproc_get_by_child(), then asks amdxdna_plat.c for the xdna whose
+ * ``amd,remoteproc`` phandle resolves there (amdxdna_plat_find_by_rproc()).
+ *
+ * Channel hot-path
+ * ----------------
+ * The rpmsg_device pointer is RCU-protected: senders rcu_dereference()
+ * on every call so the send path is lock-free; channel-up/-down events
+ * use synchronize_rcu() to fence senders out before mutating state.
  */
 
 #include <drm/drm_managed.h>
 #include <linux/bitfield.h>
 #include <linux/kernel.h>
-#include <linux/of.h>
-#include <linux/of_platform.h>
 #include <linux/rcupdate.h>
 #include <linux/remoteproc.h>
 #include <linux/rpmsg.h>
@@ -27,15 +56,8 @@
 #include <linux/xarray.h>
 
 #include "aie4_pci.h"
+#include "amdxdna_plat.h"
 #include "amdxdna_rpmsg.h"
-
-/*
- * Module-scoped xdna device pointer.  Set by amdxdna_rpmsg_init() and
- * read by the internal RPMsg driver probe to wire the channel into the
- * platform device.  Only one AIE platform device is supported per module
- * instance.
- */
-static struct amdxdna_dev *rpmsg_xdna_dev;
 
 /*
  * Wire header — must match firmware's npu_mbox_msg_header exactly:
@@ -66,7 +88,6 @@ struct rpmsg_inflight_msg {
 struct amdxdna_rpmsg_hdl {
 	struct amdxdna_dev_hdl	*ndev;
 	struct rpmsg_device __rcu *rpdev;
-	struct rproc		*rproc;
 	struct xarray		msg_xa;
 	struct mutex		msg_lock;
 	u32			next_msg_id;
@@ -124,6 +145,7 @@ static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
 				  const struct xdna_mailbox_msg *msg)
 {
 	struct amdxdna_rpmsg_hdl *rhdl = xcomm_hdl;
+	struct amdxdna_dev *xdna = rhdl->ndev->xdna;
 	struct rpmsg_device *rpdev;
 	struct rpmsg_inflight_msg *ifm;
 	struct rpmsg_msg_header *hdr;
@@ -180,6 +202,7 @@ static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
 		kfree(ifm);
 		return -ENODEV;
 	}
+	XDNA_DBG(xdna, "Sending RPMsg message, id: %u, opcode: 0x%x", id, msg->opcode);
 	ret = rpmsg_send(rpdev->ept, buf, total);
 	rcu_read_unlock();
 
@@ -190,6 +213,7 @@ static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
 		xa_erase(&rhdl->msg_xa, id);
 		mutex_unlock(&rhdl->msg_lock);
 		kfree(ifm);
+		XDNA_ERR(xdna, "Failed to send RPMsg message, id: %u, opcode: %u, ret: %d", id, msg->opcode, ret);
 	}
 
 	return ret;
@@ -221,17 +245,21 @@ static int amdxdna_rpmsg_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 	return ret;
 }
 
+/*
+ * Final per-device cleanup.  By the time we get here, amdxdna_rpmsg_fini()
+ * has detached us from any live rpmsg endpoint via device_release_driver(),
+ * which fired drv_remove() and therefore:
+ *   - cleared rhdl->rpdev under RCU and synchronize_rcu()-ed,
+ *   - drained msg_xa via amdxdna_rpmsg_abort_inflight().
+ *
+ * If no rpdev was ever connected, msg_xa is empty by construction.  Either
+ * way there's nothing left to do but free bookkeeping.
+ */
 static void amdxdna_rpmsg_xcomm_fini(void *xcomm_hdl)
 {
 	struct amdxdna_rpmsg_hdl *rhdl = xcomm_hdl;
-	struct rpmsg_inflight_msg *ifm;
-	unsigned long idx;
 
-	rcu_assign_pointer(rhdl->rpdev, NULL);
-	synchronize_rcu();
-
-	xa_for_each(&rhdl->msg_xa, idx, ifm)
-		kfree(ifm);
+	WARN_ON(!xa_empty(&rhdl->msg_xa));
 	xa_destroy(&rhdl->msg_xa);
 	mutex_destroy(&rhdl->msg_lock);
 }
@@ -243,40 +271,106 @@ static const struct amdxdna_xcomm_ops amdxdna_rpmsg_xcomm_ops = {
 };
 
 /*
- * Internal RPMsg endpoint driver.  Registered by amdxdna_rpmsg_init() to
- * catch the "rpmsg-aie-mgmt" service announcement from the remoteproc
- * firmware.  Probe wires the RPMsg endpoint into the platform device's
- * transport layer; remove nullifies the pointer so in-flight senders
- * get -ENODEV.
+ * Internal RPMsg endpoint driver.
+ *
+ * Bind side: catches the "rpmsg-aie-mgmt" channel announcement from the
+ * remoteproc firmware.  Resolves the matching amdxdna platform device by
+ * walking up to the owning rproc and asking amdxdna_plat.c for the
+ * &amdxdna_dev whose ``amd,remoteproc`` phandle resolves there.  If no
+ * platform device has been probed yet (drvdata not set), the bind is
+ * deferred — the rpmsg core's deferred-probe machinery will retry once
+ * the platform driver finishes binding.  Before deferring we restore
+ * rpdev->src to RPMSG_ADDR_ANY because the rpmsg core mutated it to
+ * a concrete address before calling us and never resets it on probe
+ * failure (a stale value would collide with a sibling channel's idr
+ * slot on the retry; same kernel bug also handled in drv_remove).
+ *
+ * On a successful bind, the channel is now usable and management
+ * messages can flow.  We then call amdxdna_plat_register_device() to
+ * run the firmware-dependent setup (ops->init, sysfs, drm_dev_register,
+ * runtime PM); from this point on userspace can open /dev/accel/accelN.
  */
 static int amdxdna_rpmsg_drv_probe(struct rpmsg_device *rpdev)
 {
-	struct amdxdna_dev *xdna = rpmsg_xdna_dev;
 	struct amdxdna_rpmsg_hdl *rhdl;
+	struct amdxdna_dev *xdna;
 	struct rproc *rproc;
+	int ret;
 
-	if (!xdna) {
-		dev_err(&rpdev->dev, "no xdna platform device\n");
+	rproc = rproc_get_by_child(&rpdev->dev);
+	if (!rproc) {
+		dev_dbg(&rpdev->dev, "RPMsg has no owning remoteproc\n");
 		return -ENODEV;
+	}
+
+	xdna = amdxdna_plat_find_by_rproc(rproc);
+	rproc_put(rproc);
+	if (!xdna) {
+		dev_dbg(&rpdev->dev, "platform device not probed yet, deferring\n");
+		rpdev->src = RPMSG_ADDR_ANY;
+		return -EPROBE_DEFER;
 	}
 
 	rhdl = to_rpmsg_hdl(xdna->dev_handle);
 
-	/* Verify this channel belongs to the expected remoteproc */
-	if (rhdl->rproc) {
-		rproc = rproc_get_by_child(&rpdev->dev);
-		if (rproc != rhdl->rproc) {
-			dev_dbg(&rpdev->dev,
-				"RPMsg from unexpected rproc, ignoring\n");
-			return -ENODEV;
-		}
-	}
+	/*
+	 * Start fresh on every (re)connect so the message-id space is
+	 * per-connection.  drv_remove drained any leftover msg_xa entries
+	 * before this probe ran, and rhdl->rpdev was NULL until just below,
+	 * so no concurrent sender can be observing next_msg_id here.
+	 */
+	rhdl->next_msg_id = 0;
 
 	rcu_assign_pointer(rhdl->rpdev, rpdev);
 	dev_set_drvdata(&rpdev->dev, xdna);
 
 	XDNA_INFO(xdna, "RPMsg channel %s connected", rpdev->id.name);
+
+	/*
+	 * Channel is hot — finish device bring-up: ops->init() (firmware
+	 * version / metadata queries), sysfs, drm_dev_register, runtime PM.
+	 * On failure, undo the channel wire-up so a retry has a clean slate.
+	 */
+	ret = amdxdna_plat_register_device(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "Late device register failed: %d", ret);
+		rcu_assign_pointer(rhdl->rpdev, NULL);
+		synchronize_rcu();
+		dev_set_drvdata(&rpdev->dev, NULL);
+		rpdev->src = RPMSG_ADDR_ANY;
+		return ret;
+	}
+
 	return 0;
+}
+
+/*
+ * Walk msg_xa and abort every in-flight message by invoking its notify_cb
+ * with (handle, NULL, 0).  This mirrors the abort convention used by the
+ * legacy mailbox layer (see mailbox_release_msg() in amdxdna_mailbox.c)
+ * and is recognized by xdna_msg_cb / aie4_xdna_msg_cb, which both treat
+ * !data as "complete the waiter without copying a payload".  Without this
+ * drain, channel-down events leave waiters blocked on their completion
+ * forever.
+ *
+ * Caller must guarantee that no new sender can populate msg_xa for the
+ * lifetime of the drain — drv_remove satisfies this because it has just
+ * cleared rhdl->rpdev under RCU and synchronize_rcu()-ed all senders out
+ * of the read-side critical section.
+ */
+static void amdxdna_rpmsg_abort_inflight(struct amdxdna_rpmsg_hdl *rhdl)
+{
+	struct rpmsg_inflight_msg *ifm;
+	unsigned long idx;
+
+	mutex_lock(&rhdl->msg_lock);
+	xa_for_each(&rhdl->msg_xa, idx, ifm) {
+		xa_erase(&rhdl->msg_xa, idx);
+		if (ifm->notify_cb)
+			ifm->notify_cb(ifm->handle, NULL, 0);
+		kfree(ifm);
+	}
+	mutex_unlock(&rhdl->msg_lock);
 }
 
 static void amdxdna_rpmsg_drv_remove(struct rpmsg_device *rpdev)
@@ -288,8 +382,42 @@ static void amdxdna_rpmsg_drv_remove(struct rpmsg_device *rpdev)
 		return;
 
 	rhdl = to_rpmsg_hdl(xdna->dev_handle);
+
+	/*
+	 * Roll back the firmware-dependent state first, while the channel
+	 * is still alive.  amdxdna_plat_unregister_device() will (in order):
+	 *   - drm_dev_unplug      (open fds get clean -ENODEV semantics)
+	 *   - sysfs_fini
+	 *   - rpm_fini + pm_runtime_disable  (no more autosuspend)
+	 *   - ops->fini           (firmware tear-down messages may still
+	 *                          go through; that's intentional)
+	 *   - destroy notifier_wq
+	 * No-op if plat_remove already ran the same sequence (idempotent
+	 * on xdna->notifier_wq).
+	 */
+	amdxdna_plat_unregister_device(xdna);
+
 	rcu_assign_pointer(rhdl->rpdev, NULL);
 	synchronize_rcu();
+
+	/* Fail any waiters that were left holding the bag. */
+	amdxdna_rpmsg_abort_inflight(rhdl);
+
+	/*
+	 * Workaround for a kernel rpmsg-core deficiency: rpmsg_dev_probe()
+	 * mutates rpdev->src to the concrete address that idr_alloc()
+	 * returned for our endpoint, but neither the probe-failure path
+	 * nor rpmsg_dev_remove() restores it to RPMSG_ADDR_ANY.  As a
+	 * result, after this rpdev is unbound the next rpmsg_dev_probe()
+	 * (e.g. from rmmod+insmod amdxdna in this boot, or from any later
+	 * registration of a driver matching this channel) will pass our
+	 * stale src as a fixed idr_alloc() request.  If a sibling channel
+	 * (rpmsg-tty etc.) grabbed that idr slot in the meantime, the
+	 * call returns -ENOSPC and the bind permanently fails until the
+	 * remoteproc is restarted.  Resetting src here closes that gap.
+	 */
+	rpdev->src = RPMSG_ADDR_ANY;
+	dev_set_drvdata(&rpdev->dev, NULL);
 
 	XDNA_INFO(xdna, "RPMsg channel %s disconnected", rpdev->id.name);
 }
@@ -307,52 +435,63 @@ static struct rpmsg_driver amdxdna_rpmsg_driver = {
 	.callback	= amdxdna_rpmsg_rx_cb,
 };
 
-/**
- * amdxdna_rpmsg_init - Set up RPMsg transport for an amdxdna device
- * @xdna: the amdxdna device
- * @np: device tree node with required "amd,remoteproc" phandle
+/*
+ * Module-level (un)registration of the rpmsg endpoint driver.
  *
- * Resolves the remoteproc from the "amd,remoteproc" phandle, registers
- * the internal RPMsg driver, and verifies the "rpmsg-aie-mgmt" channel
- * is connected.  Returns -EPROBE_DEFER if either the remoteproc is not
- * registered or the RPMsg channel has not been announced yet.
+ * Called from amdxdna_plat.c's module_init/module_exit.  See
+ * amdxdna_rpmsg.h for the ordering contract: the platform_driver must
+ * already be registered (and its plat_probe() may have run) before
+ * amdxdna_rpmsg_drv_register() runs, so the rpmsg core's synchronous
+ * bus walk inside register_rpmsg_driver() can find a probed xdna via
+ * amdxdna_plat_find_by_rproc().
  *
- * When register_rpmsg_driver() is called, the driver core tries to
- * match against already-existing RPMsg devices.  If the remoteproc is
- * running and firmware has announced "rpmsg-aie-mgmt", the internal
- * RPMsg probe fires synchronously and sets rhdl->rpdev.
- *
- * Return: 0 on success, -EPROBE_DEFER if not ready, negative errno
+ * If a channel is somehow announced before any plat_probe completes,
+ * drv_probe() returns -EPROBE_DEFER (with rpdev->src reset back to
+ * RPMSG_ADDR_ANY) and the kernel's deferred-probe machinery retries
+ * once the plat device is bound.  Resetting src is critical: the
+ * rpmsg core mutates rpdev->src to a concrete address before calling
+ * drv_probe and never restores it on probe failure, so without the
+ * reset a sibling channel could grab our freed idr slot and break
+ * the retry permanently.
  */
-int amdxdna_rpmsg_init(struct amdxdna_dev *xdna, struct device_node *np)
+int amdxdna_rpmsg_drv_register(void)
+{
+	return register_rpmsg_driver(&amdxdna_rpmsg_driver);
+}
+
+void amdxdna_rpmsg_drv_unregister(void)
+{
+	unregister_rpmsg_driver(&amdxdna_rpmsg_driver);
+}
+
+/**
+ * amdxdna_rpmsg_init - Set up per-device rpmsg transport state.
+ * @xdna: the amdxdna device
+ *
+ * Allocates the per-device rpmsg handle (rhdl) and installs xcomm_ops/
+ * xcomm_hdl on ndev so management code can route messages over the
+ * channel.  Does NOT touch the global rpmsg driver registration (that
+ * happens once at module_init) and does NOT block on rproc readiness
+ * or channel announcement: rhdl->rpdev may still be NULL on return.
+ * In that window:
+ *
+ *   - send_msg / ring_doorbell return -ENODEV (callers retry / wait).
+ *   - When the rpmsg core dispatches the channel announcement,
+ *     drv_probe() discovers this xdna via amdxdna_plat_find_by_rproc()
+ *     and installs rhdl->rpdev under RCU.
+ *
+ * Return: 0 on success, negative errno otherwise.
+ */
+int amdxdna_rpmsg_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_rpmsg_hdl *rhdl;
-	struct rproc *rproc;
-	phandle ph;
-	int ret;
-
-	ret = of_property_read_u32(np, "amd,remoteproc", &ph);
-	if (ret) {
-		XDNA_ERR(xdna, "Missing amd,remoteproc phandle: %d", ret);
-		return ret;
-	}
-
-	rproc = rproc_get_by_phandle(ph);
-	if (!rproc) {
-		XDNA_DBG(xdna, "Remoteproc not ready, deferring");
-		return -EPROBE_DEFER;
-	}
-	XDNA_INFO(xdna, "Bound to remoteproc %s", rproc->name);
 
 	rhdl = drmm_kzalloc(&xdna->ddev, sizeof(*rhdl), GFP_KERNEL);
-	if (!rhdl) {
-		rproc_put(rproc);
+	if (!rhdl)
 		return -ENOMEM;
-	}
 
 	rhdl->ndev = ndev;
-	rhdl->rproc = rproc;
 	RCU_INIT_POINTER(rhdl->rpdev, NULL);
 	xa_init(&rhdl->msg_xa);
 	mutex_init(&rhdl->msg_lock);
@@ -360,48 +499,44 @@ int amdxdna_rpmsg_init(struct amdxdna_dev *xdna, struct device_node *np)
 	ndev->xcomm_ops = &amdxdna_rpmsg_xcomm_ops;
 	ndev->xcomm_hdl = rhdl;
 
-	rpmsg_xdna_dev = xdna;
-
-	/*
-	 * If the remoteproc is running and firmware has already announced
-	 * "rpmsg-aie-mgmt", amdxdna_rpmsg_drv_probe() fires synchronously
-	 * inside register_rpmsg_driver() and sets rhdl->rpdev.
-	 */
-	ret = register_rpmsg_driver(&amdxdna_rpmsg_driver);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to register RPMsg driver: %d", ret);
-		goto fail;
-	}
-
-	if (!rcu_access_pointer(rhdl->rpdev)) {
-		XDNA_DBG(xdna, "RPMsg channel not available, deferring");
-		unregister_rpmsg_driver(&amdxdna_rpmsg_driver);
-		ret = -EPROBE_DEFER;
-		goto fail;
-	}
-
 	return 0;
-
-fail:
-	rpmsg_xdna_dev = NULL;
-	rproc_put(rproc);
-	return ret;
 }
 
 void amdxdna_rpmsg_fini(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_rpmsg_hdl *rhdl = to_rpmsg_hdl(ndev);
+	struct rpmsg_device *rpdev;
 
-	unregister_rpmsg_driver(&amdxdna_rpmsg_driver);
+	/*
+	 * Detach this xdna's specific rpdev (if any), so a peer AIE
+	 * device's binding is undisturbed.  device_release_driver()
+	 * synchronously fires drv_remove(), which:
+	 *   - calls amdxdna_plat_unregister_device() (drm_dev_unplug,
+	 *     sysfs_fini, ops->fini, rpm_fini, destroy notifier_wq);
+	 *   - RCU-clears rhdl->rpdev + drains msg_xa;
+	 *   - resets rpdev->src to RPMSG_ADDR_ANY.
+	 * Holding a device ref across the call keeps the rpdev struct
+	 * alive even if remoteproc subdev teardown races with us.
+	 *
+	 * If the rpdev is already gone (e.g. `echo stop` on the
+	 * remoteproc before unbinding), rhdl->rpdev is NULL — nothing
+	 * to detach from.
+	 */
+	rcu_read_lock();
+	rpdev = rcu_dereference(rhdl->rpdev);
+	if (rpdev)
+		get_device(&rpdev->dev);
+	rcu_read_unlock();
+
+	if (rpdev) {
+		device_release_driver(&rpdev->dev);
+		put_device(&rpdev->dev);
+	}
 
 	if (ndev->xcomm_ops && ndev->xcomm_ops->fini)
 		ndev->xcomm_ops->fini(ndev->xcomm_hdl);
 
-	if (rhdl->rproc)
-		rproc_put(rhdl->rproc);
-
 	ndev->xcomm_ops = NULL;
 	ndev->xcomm_hdl = NULL;
-	rpmsg_xdna_dev = NULL;
 }

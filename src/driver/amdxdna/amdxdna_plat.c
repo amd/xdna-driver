@@ -37,12 +37,14 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/remoteproc.h>
 
 #include "drm_local/amdxdna_accel.h"
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
 #include "npu3_family.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_plat.h"
 #include "amdxdna_sysfs.h"
 #include "amdxdna_cma_buf.h"
 #ifdef AMDXDNA_DEVEL
@@ -74,7 +76,7 @@ static int amdxdna_plat_transport_init(struct amdxdna_dev *xdna,
 	switch (pdata->transport) {
 #ifdef CONFIG_AMDXDNA_RPMSG
 	case XDNA_TRANSPORT_RPMSG:
-		return amdxdna_rpmsg_init(xdna, pdev->dev.of_node);
+		return amdxdna_rpmsg_init(xdna);
 #endif
 #ifdef CONFIG_AMDXDNA_SHMEM
 	case XDNA_TRANSPORT_SHMEM:
@@ -104,6 +106,175 @@ static void amdxdna_plat_transport_fini(struct amdxdna_dev *xdna,
 	}
 }
 
+static const struct of_device_id amdxdna_plat_of_match[];
+
+struct amdxdna_dev *amdxdna_plat_find_by_rproc(struct rproc *rp)
+{
+	struct amdxdna_dev *xdna = NULL;
+	struct platform_device *pdev;
+	struct device_node *np;
+	struct rproc *cand;
+	phandle ph;
+	bool match;
+
+	if (!rp)
+		return NULL;
+
+	for_each_matching_node(np, amdxdna_plat_of_match) {
+		if (of_property_read_u32(np, "amd,remoteproc", &ph))
+			continue;
+
+		cand = rproc_get_by_phandle(ph);
+		if (!cand)
+			continue;
+		/*
+		 * Snapshot the match decision before dropping the rproc ref;
+		 * after rproc_put() the underlying object may be freed and
+		 * pointer-comparing the same address could spuriously alias
+		 * a newly-allocated rproc.
+		 */
+		match = (cand == rp);
+		rproc_put(cand);
+		if (!match)
+			continue;
+
+		pdev = of_find_device_by_node(np);
+		if (!pdev)
+			continue;
+
+		/*
+		 * Only return platform devices whose plat_probe() has reached
+		 * platform_set_drvdata(). This lets callers running from
+		 * either a nested probe (e.g. the RPMsg endpoint probe fired
+		 * by register_rpmsg_driver()) or an asynchronous bus event
+		 * (RPMsg channel announcement after plat_probe completes)
+		 * find the xdna without poking driver-core internals.
+		 */
+		xdna = platform_get_drvdata(pdev);
+		put_device(&pdev->dev);
+		if (xdna) {
+			of_node_put(np);
+			return xdna;
+		}
+	}
+
+	return NULL;
+}
+
+/**
+ * amdxdna_plat_register_device - Run the firmware-dependent setup for an
+ *                                already-probed amdxdna platform device.
+ *
+ * Called from the transport's drv_probe (e.g. amdxdna_rpmsg_drv_probe)
+ * once the management channel has been wired up so that ops->init() can
+ * issue firmware queries.  See amdxdna_plat.h for the contract.
+ *
+ * Idempotency: xdna->notifier_wq doubles as the "registered" sentinel.
+ * It is the first thing allocated here and the last thing freed in
+ * amdxdna_plat_unregister_device(), so a non-NULL value indicates the
+ * full sequence has already run.
+ */
+int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
+{
+	struct device *dev = xdna->ddev.dev;
+	int ret;
+
+	if (xdna->notifier_wq)
+		return 0;
+
+	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq",
+						    WQ_MEM_RECLAIM);
+	if (!xdna->notifier_wq) {
+		XDNA_ERR(xdna, "alloc notifier_wq failed");
+		return -ENOMEM;
+	}
+
+	if (xdna->dev_info->ops && xdna->dev_info->ops->init) {
+		ret = xdna->dev_info->ops->init(xdna);
+		if (ret) {
+			XDNA_ERR(xdna, "ops->init failed: %d", ret);
+			goto destroy_wq;
+		}
+	}
+
+	ret = amdxdna_sysfs_init(xdna);
+	if (ret) {
+		XDNA_ERR(xdna, "sysfs_init failed: %d", ret);
+		goto fini_dev;
+	}
+
+	ret = drm_dev_register(&xdna->ddev, 0);
+	if (ret) {
+		XDNA_ERR(xdna, "drm_dev_register failed: %d", ret);
+		goto sysfs_fini;
+	}
+
+	pm_runtime_enable(dev);
+	pm_runtime_get_noresume(dev);
+	amdxdna_rpm_init(xdna);
+
+	XDNA_INFO(xdna, "Device registered (channel up)");
+	return 0;
+
+sysfs_fini:
+	amdxdna_sysfs_fini(xdna);
+fini_dev:
+	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
+		xdna->dev_info->ops->fini(xdna);
+destroy_wq:
+	destroy_workqueue(xdna->notifier_wq);
+	xdna->notifier_wq = NULL;
+	return ret;
+}
+
+void amdxdna_plat_unregister_device(struct amdxdna_dev *xdna)
+{
+	struct device *dev = xdna->ddev.dev;
+
+	if (!xdna->notifier_wq)
+		return;
+
+	/*
+	 * Tear-down ordering follows the PCI variant (see amdxdna_remove):
+	 *   - drm_dev_unplug() first so new userspace ioctls/opens get
+	 *     -ENODEV and in-flight ones drain on a known-stopping device.
+	 *   - sysfs attrs removed before runtime PM goes away.
+	 *   - rpm_fini() pins the device active and forbids autosuspend so
+	 *     ops->fini() can issue firmware messages without racing a
+	 *     runtime suspend.
+	 *   - pm_runtime_disable() then closes the runtime PM machinery
+	 *     entirely.
+	 *   - ops->fini() runs while the management channel is still alive
+	 *     (drv_remove will tear it down right after we return).
+	 *   - destroy_workqueue() last; the HMM notifier path in amdxdna_gem
+	 *     queues onto it, so it must outlive any DRM activity above.
+	 */
+	drm_dev_unplug(&xdna->ddev);
+	amdxdna_sysfs_fini(xdna);
+	amdxdna_rpm_fini(xdna);
+	pm_runtime_disable(dev);
+	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
+		xdna->dev_info->ops->fini(xdna);
+	destroy_workqueue(xdna->notifier_wq);
+	xdna->notifier_wq = NULL;
+
+	XDNA_INFO(xdna, "Device unregistered (channel down)");
+}
+
+/*
+ * Lightweight platform probe.
+ *
+ * Does only the work that is independent of the management transport
+ * channel: allocates the drm/xdna/ndev objects, sets drvdata so
+ * amdxdna_plat_find_by_rproc() can find us, initialises the resource
+ * resolver and CMA banks, then registers the transport (which
+ * synchronously fires the rpmsg endpoint driver's probe if the
+ * channel is already announced).  All firmware-dependent setup —
+ * ops->init(), sysfs, drm_dev_register, runtime PM — is deferred to
+ * amdxdna_plat_register_device(), called from the transport's
+ * drv_probe once the channel is up.  Until then, the rpmsg drv_probe
+ * returns -EPROBE_DEFER if it cannot yet find a probed plat device.
+ */
 static int amdxdna_plat_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -165,44 +336,24 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	/*
+	 * Bring up the management transport.  For RPMsg this allocates
+	 * rhdl, installs xcomm_ops, and registers the rpmsg endpoint
+	 * driver.  If the rpdev is already announced, the rpmsg core
+	 * will dispatch drv_probe synchronously here, which calls
+	 * amdxdna_plat_register_device() before this returns.  If not,
+	 * drv_probe will fire later (asynchronously) when the channel
+	 * is announced.
+	 */
 	ret = amdxdna_plat_transport_init(xdna, pdev, pdata);
-	if (ret == -EPROBE_DEFER) {
-		dev_dbg(dev, "Transport not ready, deferring probe\n");
-		goto cma_fini;
-	}
 	if (ret) {
 		dev_err(dev, "Transport init failed: %d\n", ret);
 		goto cma_fini;
 	}
 
-	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq",
-						     WQ_MEM_RECLAIM);
-	if (!xdna->notifier_wq) {
-		ret = -ENOMEM;
-		goto transport_fini;
-	}
-
-	ret = amdxdna_sysfs_init(xdna);
-	if (ret)
-		goto destroy_wq;
-
-	ret = drm_dev_register(&xdna->ddev, 0);
-	if (ret)
-		goto sysfs_fini;
-
-	pm_runtime_enable(dev);
-	pm_runtime_get_noresume(dev);
-	amdxdna_rpm_init(xdna);
-
 	XDNA_INFO(xdna, "Platform driver probed");
 	return 0;
 
-sysfs_fini:
-	amdxdna_sysfs_fini(xdna);
-destroy_wq:
-	destroy_workqueue(xdna->notifier_wq);
-transport_fini:
-	amdxdna_plat_transport_fini(xdna, pdata);
 cma_fini:
 	amdxdna_cma_region_fini(xdna);
 	return ret;
@@ -215,11 +366,18 @@ static void amdxdna_plat_remove(struct platform_device *pdev)
 
 	pdata = of_device_get_match_data(&pdev->dev);
 
-	amdxdna_rpm_fini(xdna);
-	pm_runtime_disable(&pdev->dev);
-	drm_dev_unplug(&xdna->ddev);
-	amdxdna_sysfs_fini(xdna);
-	destroy_workqueue(xdna->notifier_wq);
+	/*
+	 * Tear down the firmware-dependent state first.  In the typical
+	 * case drv_remove() has already done this for us when the channel
+	 * went down, so this is a no-op (gated on xdna->notifier_wq).  In
+	 * the unbind-while-channel-up case it runs here.
+	 *
+	 * Then drop the transport: amdxdna_plat_transport_fini() detaches
+	 * our specific rpdev (if still bound) via device_release_driver(),
+	 * which would *also* fire drv_remove() and try to unregister us —
+	 * but we already did, so that path becomes the no-op.
+	 */
+	amdxdna_plat_unregister_device(xdna);
 	amdxdna_plat_transport_fini(xdna, pdata);
 	amdxdna_cma_region_fini(xdna);
 }
@@ -259,7 +417,63 @@ static struct platform_driver amdxdna_plat_driver = {
 	},
 };
 
-module_platform_driver(amdxdna_plat_driver);
+/*
+ * Custom module_init/module_exit (instead of module_platform_driver())
+ * so we can also register the internal rpmsg endpoint driver, with a
+ * specific ordering:
+ *
+ *   init :  platform_driver_register()  ──►  amdxdna_rpmsg_drv_register()
+ *   exit :  amdxdna_rpmsg_drv_unregister() ──►  platform_driver_unregister()
+ *
+ * Why this order at init?  platform_driver_register() synchronously
+ * probes any matching platform devices, so by the time the rpmsg core's
+ * bus walk inside amdxdna_rpmsg_drv_register() runs, plat_probe() has
+ * already executed and amdxdna_plat_find_by_rproc() can resolve the
+ * owning rproc to a probed xdna on the very first try.  In the
+ * unfortunate case where the channel is announced before any plat_probe
+ * completed (out-of-order rproc start), drv_probe() returns
+ * -EPROBE_DEFER (resetting rpdev->src so the rpmsg core's failure
+ * cleanup leaves it in a fresh state) and the deferred-probe machinery
+ * retries when the platform device finishes binding.
+ *
+ * Why this order at exit?  We want to tear down all rpmsg bindings
+ * before the platform driver goes away, so each plat_remove() finds the
+ * device already in the "channel down" state and runs its idempotent
+ * unregister path as a no-op.  unregister_rpmsg_driver() iterates all
+ * bound rpdevs and fires drv_remove() (which calls
+ * amdxdna_plat_unregister_device() + tears down the channel) for each.
+ * Then platform_driver_unregister() can run plat_remove() to clean up
+ * the remaining platform-side state.
+ */
+static int __init amdxdna_plat_mod_init(void)
+{
+	int ret;
+
+	ret = platform_driver_register(&amdxdna_plat_driver);
+	if (ret)
+		return ret;
+
+#ifdef CONFIG_AMDXDNA_RPMSG
+	ret = amdxdna_rpmsg_drv_register();
+	if (ret) {
+		platform_driver_unregister(&amdxdna_plat_driver);
+		return ret;
+	}
+#endif
+
+	return 0;
+}
+
+static void __exit amdxdna_plat_mod_exit(void)
+{
+#ifdef CONFIG_AMDXDNA_RPMSG
+	amdxdna_rpmsg_drv_unregister();
+#endif
+	platform_driver_unregister(&amdxdna_plat_driver);
+}
+
+module_init(amdxdna_plat_mod_init);
+module_exit(amdxdna_plat_mod_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
