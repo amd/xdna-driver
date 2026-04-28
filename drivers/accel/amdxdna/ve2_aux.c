@@ -3,9 +3,7 @@
  * Copyright (C) 2026, Advanced Micro Devices, Inc.
  */
 
-#include "drm/amdxdna_accel.h"
 #include <linux/firmware.h>
-#include <linux/slab.h>
 #include <linux/string.h>
 
 #include "amdxdna_aux_drv.h"
