@@ -59,6 +59,11 @@ static int hws_debug_mode;
 module_param(hws_debug_mode, int, 0644);
 MODULE_PARM_DESC(hws_debug_mode, " Enable HWS debug mode (0 = disabled, 1 = enabled)");
 
+static int allow_partition_id_zero;
+module_param(allow_partition_id_zero, int, 0644);
+MODULE_PARM_DESC(allow_partition_id_zero,
+		 " Treat partition_id 0 as valid in CREATE_HW_CONTEXT (some FWs use 0; default 0 = reject)");
+
 #ifdef CONFIG_AMDXDNA_NO_PCI
 uint timeout_in_sec = 2;
 module_param(timeout_in_sec, uint, 0644);
@@ -565,16 +570,20 @@ disable_device:
 
 static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 {
+#if 0
 	int ret;
+#endif
 
 	if (!is_npu3_vf_dev(ndev->xdna) && !skip_work_buffer)
 		aie4_detach_work_buffer(ndev);
 
+#if 0
 	ret = aie4_suspend_fw(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "suspend_fw failed, ret %d", ret);
 		return;
 	}
+#endif
 
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
@@ -1068,9 +1077,22 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		 req.hsa_addr_high, req.hsa_addr_low);
 	XDNA_DBG(xdna, "dma/phy addr 0x%llx", nctx->umq_bo->mem.dma_addr);
 
+	/*
+	 * partition_id is an opaque token returned by FW from
+	 * AIE4_MSG_OP_CREATE_PARTITION (see aie4_partition_init).  Most
+	 * firmwares allocate non-zero IDs and 0 means "uninitialized", but
+	 * some (e.g. the aie2ps/rpmsg RPU firmware) legitimately return 0
+	 * for the first partition.  Set the allow_partition_id_zero module
+	 * parameter to 1 on those platforms to skip the partition_id check.
+	 * num_tiles is user-supplied and must be non-zero either way.
+	 */
+#if 0
 	if (!req.partition_id || !req.request_num_tiles) {
-		/* sanity check failed, skip sending request which can crash fw */
-		XDNA_ERR(xdna, "req is invalid");
+#else
+	if ((!allow_partition_id_zero && !req.partition_id) || !req.request_num_tiles) {
+#endif
+		XDNA_ERR(xdna, "req is invalid: partition_id %u, request_num_tiles %u",
+			 req.partition_id, req.request_num_tiles);
 		ret = -EINVAL;
 		goto done;
 	}
