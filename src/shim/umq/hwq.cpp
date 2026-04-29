@@ -97,7 +97,7 @@ dump() const
   shim_debug("Dumping UMQ queue slot @%p:", m_umq_pkt);
   for (uint32_t i = 0; i < h->capacity; i++) {
     auto pkt = &m_umq_pkt[i];
-    shim_debug("==========slot %d==========", i);
+    shim_debug("==========slot %u==========", i);
     shim_debug("\ttype:\t\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.type));
     shim_debug("\tbarrier:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.barrier));
     shim_debug("\tacquire:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.acquire_fence_scope));
@@ -142,7 +142,7 @@ dump_raw() const
 {
   auto d = reinterpret_cast<volatile uint32_t *>(m_umq_pkt);
   auto sz = m_umq_hdr->capacity * sizeof(struct host_queue_packet) / sizeof(uint32_t);
-  shim_debug("Dumping raw UMQ queue slot data @%p, len=%ld WORDs:", m_umq_pkt, sz);
+  shim_debug("Dumping raw UMQ queue slot data @%p, len=%zu WORDs:", m_umq_pkt, sz);
   for (long unsigned int i = 0; i < sz; i++)
     shim_debug("0x%08x", d[i]);
   shim_debug("Finished dumping raw UMQ queue slot data\r\n");
