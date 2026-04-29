@@ -11,8 +11,8 @@ namespace shim_xdna {
 
 pdev::
 pdev(std::shared_ptr<const platform_drv>& driver, const std::string& sysfs_name)
-  : m_driver(driver)
-  , xrt_core::pci::dev(driver->get_pdrv(), sysfs_name)
+  : xrt_core::pci::dev(driver->get_pdrv(), sysfs_name)
+  , m_driver(driver)
 {
   m_is_ready = true; // We're always ready
   shim_debug("Created pcidev (%s)", m_sysfs_name.c_str());

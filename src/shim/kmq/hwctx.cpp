@@ -7,7 +7,7 @@
 namespace {
 
 // For debug only
-void
+[[maybe_unused]] void
 print_cu_config(amdxdna_hwctx_param_config_cu *config)
 {
   auto n = config->num_cus;

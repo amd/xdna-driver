@@ -65,7 +65,7 @@ hwq_umq(const device& dev, size_t nslots) : hwq(dev)
     (reinterpret_cast<uintptr_t>(m_umq_bo_buf) + header_sz + queue_sz);
 
   // init slots and indirect buf
-  for (int i = 0; i < nslots; i++)
+  for (size_t i = 0; i < nslots; i++)
     init_indirect_buf(&m_umq_indirect_buf[i * HSA_MAX_LEVEL1_INDIRECT_ENTRIES], HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 
   m_umq_hdr->capacity = nslots;
@@ -95,7 +95,7 @@ dump() const
   shim_debug("\tData Addr:\t%p", h->data_address);
 
   shim_debug("Dumping UMQ queue slot @%p:", m_umq_pkt);
-  for (int i = 0; i < h->capacity; i++) {
+  for (uint32_t i = 0; i < h->capacity; i++) {
     auto pkt = &m_umq_pkt[i];
     shim_debug("==========slot %d==========", i);
     shim_debug("\ttype:\t\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.type));
@@ -143,7 +143,7 @@ dump_raw() const
   auto d = reinterpret_cast<volatile uint32_t *>(m_umq_pkt);
   auto sz = m_umq_hdr->capacity * sizeof(struct host_queue_packet) / sizeof(uint32_t);
   shim_debug("Dumping raw UMQ queue slot data @%p, len=%ld WORDs:", m_umq_pkt, sz);
-  for (int i = 0; i < sz; i++)
+  for (long unsigned int i = 0; i < sz; i++)
     shim_debug("0x%08x", d[i]);
   shim_debug("Finished dumping raw UMQ queue slot data\r\n");
 }

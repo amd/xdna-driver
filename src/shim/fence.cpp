@@ -96,8 +96,8 @@ fence(const fence& f)
   : m_pdev(f.m_pdev)
   , m_import(f.share())
   , m_syncobj_hdl(import_syncobj(m_pdev, m_import->get_export_handle()))
-  , m_state{f.m_state}
   , m_signaled{f.m_signaled}
+  , m_state{f.m_state}
 {
   shim_debug("Fence cloned: %d@%ld", m_syncobj_hdl, m_state);
 }

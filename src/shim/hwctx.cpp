@@ -74,7 +74,7 @@ print_info() const
     return;
   }
 
-  for (int idx = 0; idx < m_cus.size(); idx++) {
+  for (long unsigned int idx = 0; idx < m_cus.size(); idx++) {
     auto& e = m_cus[idx];
     shim_debug("index=%d, name=%s, func=%d, pdi(p=%p, sz=%ld)",
       idx, e.m_name.c_str(), e.m_func, e.m_pdi.data(), e.m_pdi.size());

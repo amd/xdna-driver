@@ -51,33 +51,9 @@ next_aligned_addr(void *p, size_t align)
 }
 
 bool
-is_cacheline_aligned(void *ptr)
-{
-  return (ptr == next_aligned_addr(ptr, cacheline_size));
-}
-
-bool
 is_page_aligned(void *ptr)
 {
   return (ptr == next_aligned_addr(ptr, page_size));
-}
-
-void *
-page_align(void *ptr)
-{
-  auto ap = reinterpret_cast<uintptr_t>(ptr);
-  ap &= ~(page_size - 1);
-  return reinterpret_cast<void*>(ap);
-}
-
-uint64_t
-page_offset(void *ptr)
-{
-  if (!ptr)
-    return 0;
-
-  auto ap = reinterpret_cast<uintptr_t>(ptr);
-  return ap & (page_size - 1);
 }
 
 size_t
@@ -297,7 +273,7 @@ alloc(const pdev *dev, uint64_t dev_offset, size_t size)
     m_ptr = nullptr;
   else
     m_ptr = reinterpret_cast<void*>(reinterpret_cast<char*>(m_ptr) + sz);
-  return std::move(new_mmap);
+  return new_mmap;
 }
 
 //
@@ -306,7 +282,7 @@ alloc(const pdev *dev, uint64_t dev_offset, size_t size)
 
 drm_bo::
 drm_bo(const pdev& pdev, size_t size, uint32_t type, size_t alignment)
-  : m_pdev(pdev), m_size(size)
+  : m_size(size), m_pdev(pdev)
 {
   bo_info arg = {
     .xdna_addr_align = (alignment == 1 ? 0 : alignment), 
@@ -321,7 +297,7 @@ drm_bo(const pdev& pdev, size_t size, uint32_t type, size_t alignment)
 
 drm_bo::
 drm_bo(const pdev& pdev, size_t size, void *uptr)
-  : m_pdev(pdev), m_size(size)
+  : m_size(size), m_pdev(pdev)
 {
   bo_info arg = {
     .size = m_size,
@@ -626,7 +602,7 @@ describe() const
   std::string desc = type_to_name(m_type, m_flags) + ": ";
 
   desc += "hdl=";
-  for (int i = 0; i < m_bos.size(); i++) {
+  for (long unsigned int i = 0; i < m_bos.size(); i++) {
     desc += std::to_string(id(i).handle);
     desc += " ";
   }
