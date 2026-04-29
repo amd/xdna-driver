@@ -67,6 +67,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie4_sriov.o \
 	npu1_regs.o \
 	npu3_regs.o \
+	npu3_aie2ps_regs.o \
 	npu7_regs.o \
 	npu4_regs.o \
 	npu5_regs.o \
@@ -99,6 +100,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_RPMSG) += \
 	aie4_solver.o \
 	aie4_sriov.o \
 	npu3_regs.o \
+	npu3_aie2ps_regs.o \
 	amdxdna_rpmsg.o \
 	amdxdna_plat.o
 
@@ -114,6 +116,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_SHMEM) += \
 	aie4_solver.o \
 	aie4_sriov.o \
 	npu3_regs.o \
+	npu3_aie2ps_regs.o \
 	amdxdna_shmem.o \
 	amdxdna_plat.o
 

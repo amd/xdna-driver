@@ -383,25 +383,38 @@ static void amdxdna_plat_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_AMDXDNA_RPMSG
-static const struct amdxdna_plat_data plat_rpmsg_npu3 = {
-	.dev_info	= &dev_npu3_info,
+/*
+ * T20: npu3/aie4 firmware over rpmsg, but the underlying AIE silicon is
+ * aie2ps ("ve2").  Use the dedicated dev_npu3_aie2ps_info so XRT sees
+ * vbnv "RyzenAI-npu3-aie2ps" and dispatches to the npu3_aie2ps
+ * hardware_type (ve2 ELFs / xrt_smi_ve2.a) rather than the generic PCI
+ * npu3 path.
+ */
+static const struct amdxdna_plat_data plat_rpmsg_npu3_aie2ps = {
+	.dev_info	= &dev_npu3_aie2ps_info,
 	.transport	= XDNA_TRANSPORT_RPMSG,
 };
 #endif
 
 #ifdef CONFIG_AMDXDNA_SHMEM
-static const struct amdxdna_plat_data plat_shmem_npu3 = {
-	.dev_info	= &dev_npu3_info,
+/*
+ * Same T20 SoC as the rpmsg variant above, just a different management
+ * transport (shared memory mailbox instead of rpmsg).  Underlying AIE
+ * silicon is still aie2ps ("ve2"), so use dev_npu3_aie2ps_info to get
+ * the "RyzenAI-npu3-aie2ps" vbnv and the npu3_aie2ps XRT dispatch.
+ */
+static const struct amdxdna_plat_data plat_shmem_npu3_aie2ps = {
+	.dev_info	= &dev_npu3_aie2ps_info,
 	.transport	= XDNA_TRANSPORT_SHMEM,
 };
 #endif
 
 static const struct of_device_id amdxdna_plat_of_match[] = {
 #ifdef CONFIG_AMDXDNA_RPMSG
-	{ .compatible = "amd,versal-aie", .data = &plat_rpmsg_npu3 },
+	{ .compatible = "amd,versal-aie", .data = &plat_rpmsg_npu3_aie2ps },
 #endif
 #ifdef CONFIG_AMDXDNA_SHMEM
-	{ .compatible = "amd,amdxdna-npu3", .data = &plat_shmem_npu3 },
+	{ .compatible = "amd,amdxdna-npu3", .data = &plat_shmem_npu3_aie2ps },
 #endif
 	{ },
 };
