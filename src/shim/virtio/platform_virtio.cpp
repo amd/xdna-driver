@@ -640,15 +640,14 @@ platform_drv_virtio::
 submit_cmd(submit_cmd_arg& arg) const
 {
   // Assuming 512 max args per cmd bo
-  const size_t max_args = 512;
+  constexpr size_t max_args = 512;
   const auto nargs = arg.arg_bos.size();
   if (nargs > max_args)
     shim_err(EINVAL, "Max arg %zu, received %zu", max_args, nargs);
 
-  auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req);
-  req_sz += sizeof(uint64_t); // One cmd handle
-  auto max_req_sz_in_u64 = req_sz + max_args * sizeof(uint32_t);
-  max_req_sz_in_u64 = max_req_sz_in_u64 / sizeof(uint64_t) + 1;
+  // Request + one cmd handle
+  constexpr size_t req_sz = sizeof(amdxdna_ccmd_exec_cmd_req) + sizeof(uint64_t);
+  constexpr size_t max_req_sz_in_u64 = (req_sz + max_args * sizeof(uint32_t)) / sizeof(uint64_t) + 1;
   auto req_sz_in_u64 = req_sz + nargs * sizeof(uint32_t);
   req_sz_in_u64 = req_sz_in_u64 / sizeof(uint64_t) + 1;
 

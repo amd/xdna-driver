@@ -76,7 +76,7 @@ print_info() const
 
   for (long unsigned int idx = 0; idx < m_cus.size(); idx++) {
     auto& e = m_cus[idx];
-    shim_debug("index=%d, name=%s, func=%d, pdi(p=%p, sz=%ld)",
+    shim_debug("index=%u, name=%s, func=%d, pdi(p=%p, sz=%zu)",
       idx, e.m_name.c_str(), e.m_func, e.m_pdi.data(), e.m_pdi.size());
   }
   shim_debug("col cnt: %d", m_column_cnt);
