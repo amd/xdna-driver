@@ -54,9 +54,7 @@ struct amdxdna_dev_hdl {
 	struct xarray                   cert_comp_xa; /* device level indexed by msix id */
 	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
 
-	void				*work_buf;
-	dma_addr_t			work_buf_addr;
-	u32				work_buf_size;
+	struct amdxdna_msg_buf_hdl	*work_buf_hdl;
 };
 
 /* aie4_message.c */

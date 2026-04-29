@@ -290,7 +290,9 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 		goto fw_unload;
 
 	/* Firmware releases the DRAM work buffer internally during suspend_fw */
-	ret = aie4_attach_work_buffer(ndev, ndev->work_buf_addr, ndev->work_buf_size);
+	ret = aie4_attach_work_buffer(ndev,
+				      to_dma_addr(ndev->work_buf_hdl, 0),
+				      to_buf_size(ndev->work_buf_hdl));
 	if (ret)
 		goto mbox_fini;
 
@@ -574,35 +576,30 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	u32 buf_size = AIE4_WORK_BUFFER_MIN_SIZE;
 
-	ndev->work_buf = amdxdna_alloc_msg_buffer(xdna, &buf_size,
-						  &ndev->work_buf_addr);
-	if (IS_ERR(ndev->work_buf)) {
-		int ret = PTR_ERR(ndev->work_buf);
+	ndev->work_buf_hdl = amdxdna_alloc_msg_buff(xdna, AIE4_WORK_BUFFER_MIN_SIZE);
+	if (IS_ERR(ndev->work_buf_hdl)) {
+		int ret = PTR_ERR(ndev->work_buf_hdl);
 
 		XDNA_ERR(xdna, "Failed to alloc work buffer, size 0x%x",
 			 AIE4_WORK_BUFFER_MIN_SIZE);
-		ndev->work_buf = NULL;
+		ndev->work_buf_hdl = NULL;
 		return ret;
 	}
 
-	ndev->work_buf_size = buf_size;
-	XDNA_DBG(xdna, "Work buffer allocated: size 0x%x", buf_size);
+	XDNA_DBG(xdna, "Work buffer allocated: size 0x%x",
+		 to_buf_size(ndev->work_buf_hdl));
 
 	return 0;
 }
 
 static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-
-	if (!ndev->work_buf)
+	if (!ndev->work_buf_hdl)
 		return;
 
-	amdxdna_free_msg_buffer(xdna, ndev->work_buf_size, ndev->work_buf,
-				ndev->work_buf_addr);
-	ndev->work_buf = NULL;
+	amdxdna_free_msg_buff(ndev->work_buf_hdl);
+	ndev->work_buf_hdl = NULL;
 }
 
 static int aie4_pf_init(struct amdxdna_dev *xdna)
