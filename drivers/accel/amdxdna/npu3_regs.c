@@ -39,6 +39,7 @@
 
 static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
 	{ .major = 5, .min_minor = 10 },
+	{ .features = BIT_U64(AIE4_GET_COREDUMP), .major = 5, .min_minor = 24 },
 	{ 0 }
 };
 

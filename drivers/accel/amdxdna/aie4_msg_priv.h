@@ -13,6 +13,7 @@
 enum aie4_msg_opcode {
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
+	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
 
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
 	AIE4_MSG_OP_DESTROY_VFS                      = 0x20002,
@@ -142,6 +143,18 @@ struct aie4_msg_attach_work_buffer_req {
 } __packed;
 
 struct aie4_msg_attach_work_buffer_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_aie4_coredump_req {
+	__u32 context_id;
+	__u32 pasid;
+	__u32 num_buffers;
+	__u32 resvd;
+	__u64 buffer_list_addr;
+} __packed;
+
+struct aie4_msg_aie4_coredump_resp {
 	enum aie4_msg_status status;
 } __packed;
 
