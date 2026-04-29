@@ -12,19 +12,29 @@
 
 namespace {
 
+template <typename T>
+decltype(auto) convert(T&& arg)
+{
+  if constexpr (std::is_same_v<std::decay_t<T>, std::string>) {
+      return arg.c_str();
+  } else {
+      return std::forward<T>(arg);
+  }
+}
+
 template <typename ...Args>
 [[ noreturn ]] void
 shim_err(int err, const char* fmt, Args&&... args)
 {
   std::string format = std::string(fmt);
   format += " (err=%d)";
-  int sz = std::snprintf(nullptr, 0, format.c_str(), args ..., err) + 1;
+  int sz = std::snprintf(nullptr, 0, format.c_str(), convert(std::forward<Args>(args)) ..., err) + 1;
   if(sz <= 0)
     throw xrt_core::system_error(sz, "could not format error string");
 
   auto size = static_cast<size_t>(sz);
   std::unique_ptr<char[]> buf(new char[size]);
-  std::snprintf(buf.get(), size, format.c_str(), args ..., err);
+  std::snprintf(buf.get(), size, format.c_str(), convert(std::forward<Args>(args)) ..., err);
   throw xrt_core::system_error(err, std::string(buf.get()));
 }
 
