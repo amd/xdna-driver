@@ -543,6 +543,7 @@ vbnv_to_pcie_id(const std::string& vbnv)
     {"RyzenAI-npu8",  {0x17f1, 0x10}},
     {"RyzenAI-npu9",  {0x17f1, 0x10}},
     {"RyzenAI-npu10", {0x17f1, 0x10}},
+    {"RyzenAI-ve2",   {0xfe02, 0x00}},
     {"NPU Phoenix",   {0x1502, 0x00}},
     {"NPU Strix",     {0x17f0, 0x10}},
     {"NPU Strix Halo",{0x17f0, 0x10}},
@@ -974,6 +975,16 @@ struct archive_path
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
       case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
         return std::string("amdxdna/bins/xrt_smi_npu3.a");
+      /*
+       * aie2ps is the same Versal AIE2 silicon as ve2; the rpmsg variant
+       * routes management through RPU firmware (npu3/aie4 protocol) but
+       * runs the same AIE ELFs as ve2.  Install xrt_smi_ve2.a from VTD
+       * (e.g. via xrt/src/runtime_src/core/tools/xbutil2/smi_install_archive.sh
+       * xrt_smi_ve2.a <xrt-version>) into <prefix>/share/amdxdna/bins/.
+       */
+      case xrt_core::smi::smi_hardware_config::hardware_type::aie2ps:
+      case xrt_core::smi::smi_hardware_config::hardware_type::ve2:
+        return std::string("amdxdna/bins/xrt_smi_ve2.a");
       default:
         throw xrt_core::generic_error(ENOTSUP, "Unsupported hardware type");
       }
