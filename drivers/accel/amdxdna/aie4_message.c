@@ -5,11 +5,14 @@
 
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_print.h>
+#include <drm/gpu_scheduler.h>
+#include <linux/bitfield.h>
 #include <linux/mutex.h>
 
 #include "aie.h"
 #include "aie4_msg_priv.h"
 #include "aie4_pci.h"
+#include "amdxdna_ctx.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
@@ -77,6 +80,32 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 s
 		XDNA_ERR(xdna, "Failed to attach work buffer, ret %d", ret);
 	else
 		XDNA_DBG(xdna, "Attached work buffer, size %d", size);
+
+	return ret;
+}
+
+int aie4_get_aie_coredump(struct amdxdna_dev *xdna,
+			  struct amdxdna_msg_buf_hdl *list_hdl,
+			  struct amdxdna_hwctx *hwctx, u32 num_bufs)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	DECLARE_AIE_MSG(aie4_msg_aie4_coredump, AIE4_MSG_OP_AIE_COREDUMP);
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP)) {
+		XDNA_DBG(xdna, "Get coredump unsupported for the device or firmware version");
+		return -EOPNOTSUPP;
+	}
+
+	req.context_id = hwctx->fw_ctx_id;
+	req.pasid = FIELD_PREP(AIE4_MSG_PASID, hwctx->client->pasid) |
+		    FIELD_PREP(AIE4_MSG_PASID_VLD, 1);
+	req.num_buffers = num_bufs;
+	req.buffer_list_addr = to_dma_addr(list_hdl, 0);
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "Get coredump got status 0x%x", resp.status);
 
 	return ret;
 }

@@ -80,6 +80,15 @@ static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 }
 #endif
 
+enum aie4_fw_feature {
+	AIE4_GET_COREDUMP,
+	AIE4_FEATURE_MAX
+};
+
+int aie4_get_aie_coredump(struct amdxdna_dev *xdna,
+			  struct amdxdna_msg_buf_hdl *list_hdl,
+			  struct amdxdna_hwctx *hwctx, u32 num_bufs);
+
 extern const struct amdxdna_dev_ops aie4_pf_ops;
 extern const struct amdxdna_dev_ops aie4_vf_ops;
 
