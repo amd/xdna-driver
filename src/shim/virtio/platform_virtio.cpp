@@ -651,7 +651,7 @@ submit_cmd(submit_cmd_arg& arg) const
   req_sz += nargs * sizeof(uint32_t); // For args handle
   // Get a 64 bit aligned buffer for req
   auto req_sz_in_u64 = req_sz / sizeof(uint64_t) + 1;
-  uint64_t req_buf[req_sz_in_u64] = {};
+  uint64_t req_buf[req_sz_in_u64];
   auto req = reinterpret_cast<amdxdna_ccmd_exec_cmd_req*>(req_buf);
   amdxdna_ccmd_exec_cmd_rsp rsp = {};
 
