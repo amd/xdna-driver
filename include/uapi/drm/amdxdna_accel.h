@@ -473,10 +473,10 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_AIE_VERSION,
 	DRM_AMDXDNA_QUERY_CLOCK_METADATA,
 	DRM_AMDXDNA_QUERY_SENSORS,
-	DRM_AMDXDNA_QUERY_HW_CONTEXTS,
+	DRM_AMDXDNA_QUERY_HW_CONTEXTS,		/* CAP_SYS_ADMIN required */
 	DRM_AMDXDNA_QUERY_FIRMWARE_VERSION = 8,
 	DRM_AMDXDNA_GET_POWER_MODE,
-	DRM_AMDXDNA_QUERY_TELEMETRY,
+	DRM_AMDXDNA_QUERY_TELEMETRY,		/* CAP_SYS_ADMIN required */
 	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
 	DRM_AMDXDNA_QUERY_RESOURCE_INFO,
 	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
@@ -640,11 +640,24 @@ struct amdxdna_drm_bo_usage {
 	__u64 heap_usage;
 };
 
+/**
+ * struct amdxdna_drm_aie_coredump - The data for AIE coredump
+ * @pid: The Process ID of the process that created this context.
+ * @context_id: The ID for this context.
+ * @pad: MBZ.
+ */
+struct amdxdna_drm_aie_coredump {
+	__u64 pid;
+	__u32 context_id;
+	__u32 pad;
+};
+
 /*
  * Supported params in struct amdxdna_drm_get_array
  */
 #define DRM_AMDXDNA_HW_CONTEXT_ALL	0
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
+#define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
 
 /**
@@ -661,6 +674,19 @@ struct amdxdna_drm_get_array {
 	 *
 	 * %DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 	 * Returns last async error.
+	 *
+	 * %DRM_AMDXDNA_AIE_COREDUMP:
+	 * Returns AIE tile memory dump for a hardware context.
+	 *
+	 * Input: num_element must be 1. buffer points to a user buffer whose
+	 * size is element_size bytes. The first sizeof(struct
+	 * amdxdna_drm_aie_coredump) bytes of buffer carry the request
+	 * (pid + context_id). On success the driver writes rows * cols * 1 MB
+	 * of tile dump data into buffer. If the buffer is too small the
+	 * driver sets element_size to the required size and returns -ENOSPC.
+	 *
+	 * Access: context owners may coredump their own contexts;
+	 * CAP_SYS_ADMIN may coredump any context.
 	 *
 	 * %DRM_AMDXDNA_BO_USAGE:
 	 * Returns usage of heap/internal/external BOs.

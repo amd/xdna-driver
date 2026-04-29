@@ -20,6 +20,7 @@
 #include <linux/xarray.h>
 #include <asm/hypervisor.h>
 
+#include "aie.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "aie2_solver.h"
@@ -869,6 +870,9 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 	struct amdxdna_client *tmp_client;
 	int ret;
 
+	if (!amdxdna_is_admin())
+		return -EPERM;
+
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	array_args.element_size = sizeof(struct amdxdna_drm_query_hwctx);
@@ -935,6 +939,9 @@ static int aie2_get_telemetry(struct amdxdna_client *client,
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
 	int ret;
+
+	if (!amdxdna_is_admin())
+		return -EPERM;
 
 	elem_num = xdna->dev_handle->priv->hwctx_limit;
 	header_sz = struct_size(header, map, elem_num);
@@ -1097,6 +1104,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 static int aie2_get_array(struct amdxdna_client *client,
 			  struct amdxdna_drm_get_array *args)
 {
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret, idx;
 
@@ -1113,6 +1121,9 @@ static int aie2_get_array(struct amdxdna_client *client,
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = aie2_get_array_async_error(xdna->dev_handle, args);
+		break;
+	case DRM_AMDXDNA_AIE_COREDUMP:
+		ret = amdxdna_get_coredump(&ndev->aie, client, args);
 		break;
 	case DRM_AMDXDNA_BO_USAGE:
 		ret = amdxdna_drm_get_bo_usage(&xdna->ddev, args);
@@ -1249,6 +1260,7 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.cmd_submit = aie2_cmd_submit,
 	.hmm_invalidate = amdxdna_hmm_invalidate,
 	.get_array = aie2_get_array,
+	.get_coredump = aie2_get_aie_coredump,
 	.get_dev_revision = aie2_get_dev_rev,
 	.hwctx_heap_expand = aie2_hwctx_heap_expand,
 };

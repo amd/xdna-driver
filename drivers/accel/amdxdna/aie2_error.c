@@ -30,9 +30,7 @@ struct async_event {
 
 struct async_events {
 	struct workqueue_struct		*wq;
-	u8				*buf;
-	dma_addr_t			addr;
-	u32				size;
+	struct amdxdna_msg_buf_hdl	*hdl;
 	u32				event_cnt;
 	struct async_event		event[] __counted_by(event_cnt);
 };
@@ -339,7 +337,7 @@ void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
 	destroy_workqueue(events->wq);
 	mutex_lock(&xdna->dev_lock);
 
-	amdxdna_free_msg_buffer(xdna, events->size, events->buf, events->addr);
+	amdxdna_free_msg_buff(events->hdl);
 	kfree(events);
 }
 
@@ -347,7 +345,6 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	u32 total_col = ndev->total_col;
-	u32 total_size = ASYNC_BUF_SIZE * total_col;
 	struct async_events *events;
 	int i, ret;
 
@@ -355,12 +352,11 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	if (!events)
 		return -ENOMEM;
 
-	events->buf = amdxdna_alloc_msg_buffer(xdna, &total_size, &events->addr);
-	if (IS_ERR(events->buf)) {
-		ret = PTR_ERR(events->buf);
+	events->hdl = amdxdna_alloc_msg_buff(xdna, ASYNC_BUF_SIZE * total_col);
+	if (IS_ERR(events->hdl)) {
+		ret = PTR_ERR(events->hdl);
 		goto free_events;
 	}
-	events->size = total_size;
 	events->event_cnt = total_col;
 
 	events->wq = alloc_ordered_workqueue("async_wq", 0);
@@ -375,8 +371,8 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 
 		e->ndev = ndev;
 		e->wq = events->wq;
-		e->buf = &events->buf[offset];
-		e->addr = events->addr + offset;
+		e->buf = to_cpu_addr(events->hdl, offset);
+		e->addr = to_dma_addr(events->hdl, offset);
 		e->size = ASYNC_BUF_SIZE;
 		e->resp.status = MAX_AIE2_STATUS_CODE;
 		INIT_WORK(&e->work, aie2_error_worker);
@@ -389,13 +385,13 @@ int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
 	ndev->async_events = events;
 
 	XDNA_DBG(xdna, "Async event count %d, buf total size 0x%x",
-		 events->event_cnt, events->size);
+		 events->event_cnt, to_buf_size(events->hdl));
 	return 0;
 
 free_wq:
 	destroy_workqueue(events->wq);
 free_buf:
-	amdxdna_free_msg_buffer(xdna, events->size, events->buf, events->addr);
+	amdxdna_free_msg_buff(events->hdl);
 free_events:
 	kfree(events);
 	return ret;

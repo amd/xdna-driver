@@ -35,6 +35,7 @@ enum aie2_msg_opcode {
 	MSG_OP_GET_APP_HEALTH              = 0x114,
 	MSG_OP_ADD_HOST_BUFFER             = 0x115,
 	MSG_OP_GET_DEV_REVISION            = 0x117,
+	MSG_OP_GET_COREDUMP                = 0x119,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
@@ -64,6 +65,7 @@ enum aie2_msg_status {
 	AIE2_STATUS_MGMT_ERT_ENTER_SUSPEND_FAILURE,
 	AIE2_STATUS_MGMT_ERT_BUSY,
 	AIE2_STATUS_MGMT_ERT_APPLICATION_ACTIVE,
+	AIE2_STATUS_MGMT_ERT_DRAM_BUFFER_SIZE_INVALID,
 	MAX_MGMT_ERT_STATUS_CODE,
 	/* APP ERT Error codes */
 	AIE2_STATUS_APP_ERT_FIRST_ERROR			= 0x3000001,
@@ -541,6 +543,19 @@ struct get_dev_revision_resp {
 	enum aie2_msg_status	status;
 	enum aie2_dev_revision	rev;
 	__u32			raw_fuse_data;
+} __packed;
+
+struct get_coredump_req {
+	__u32		context_id;
+	__u32		num_bufs;
+	__u64		list_addr;
+	__u32		list_size;
+} __packed;
+
+struct get_coredump_resp {
+	enum aie2_msg_status	status;
+	__u32			required_buffer_size;
+	__u32			reserved[7];
 } __packed;
 
 #endif /* _AIE2_MSG_PRIV_H_ */
