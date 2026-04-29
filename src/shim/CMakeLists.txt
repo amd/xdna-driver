@@ -38,6 +38,8 @@ endif()
 
 target_compile_options(${XDNA_TARGET} PRIVATE
   "-fPIC"
+  "-Wall"
+  "-Werror"
   )
 
 target_include_directories(${XDNA_TARGET} PRIVATE
