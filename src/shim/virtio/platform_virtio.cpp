@@ -291,15 +291,6 @@ drm_bo_get_info(int fd, uint32_t boh)
   return {args.res_handle, args.size};
 }
 
-inline size_t
-get_exec_cmd_req_size_in_u64(size_t n_args)
-{
-  auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req);
-  req_sz += sizeof(uint64_t); // One cmd handle
-  req_sz += n_args * sizeof(uint32_t); // For args handle
-  return req_sz / sizeof(uint64_t) + 1;
-}
-
 }
 
 namespace shim_xdna {
@@ -652,15 +643,22 @@ submit_cmd(submit_cmd_arg& arg) const
   const size_t max_args = 512;
   const auto nargs = arg.arg_bos.size();
   if (nargs > max_args)
-    shim_err(EINVAL, "Max arg %ld, received %ld", max_args, nargs);
+    shim_err(EINVAL, "Max arg %zu, received %zu", max_args, nargs);
+
+  auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req);
+  req_sz += sizeof(uint64_t); // One cmd handle
+  auto max_req_sz_in_u64 = req_sz + max_args * sizeof(uint32_t);
+  max_req_sz_in_u64 = max_req_sz_in_u64 / sizeof(uint64_t) + 1;
+  auto req_sz_in_u64 = req_sz + nargs * sizeof(uint32_t);
+  req_sz_in_u64 = req_sz_in_u64 / sizeof(uint64_t) + 1;
 
   // Get a 64 bit aligned buffer for req
-  uint64_t req_buf[get_exec_cmd_req_size_in_u64(max_args)] = {};
+  uint64_t req_buf[max_req_sz_in_u64] = {};
   auto req = reinterpret_cast<amdxdna_ccmd_exec_cmd_req*>(req_buf);
   amdxdna_ccmd_exec_cmd_rsp rsp = {};
 
   req->hdr.cmd = AMDXDNA_CCMD_EXEC_CMD;
-  req->hdr.len = get_exec_cmd_req_size_in_u64(nargs) * sizeof(uint64_t);
+  req->hdr.len = req_sz_in_u64 * sizeof(uint64_t);
   req->ctx_handle = arg.ctx_handle;
   req->type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   req->cmd_count = 1;
