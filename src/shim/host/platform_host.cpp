@@ -76,21 +76,6 @@ ioctl(int dev_fd, unsigned long cmd, void* arg)
     shim_err(-errno, "%s IOCTL failed", ioctl_cmd2name(cmd).c_str());
 }
 
-void
-wait_syncobj_available(int dev_fd, uint32_t sobj_hdl, uint64_t timepoint)
-{
-  drm_syncobj_timeline_wait wsobj = {
-    .handles = reinterpret_cast<uintptr_t>(&sobj_hdl),
-    .points = reinterpret_cast<uintptr_t>(&timepoint),
-    .timeout_nsec = shim_xdna::platform_drv::timeout_ms2abs_ns(0), /* wait forever */
-    .count_handles = 1,
-    .flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL |
-             DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
-             DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE,
-  };
-  ioctl(dev_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wsobj);
-}
-
 void *
 to_ptr(uint64_t drv_ptr)
 {

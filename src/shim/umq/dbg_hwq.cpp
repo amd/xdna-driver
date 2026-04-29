@@ -53,7 +53,6 @@ uint32_t
 dbg_hwq_umq::
 issue_exit_cmd()
 {
-  auto hdr = &m_dbg_umq_pkt->xrt_header;
   // always case 1
   auto ehp = &m_dbg_umq_pkt->xrt_header;
   ehp->common_header.opcode = DBG_CMD_EXIT;
@@ -67,7 +66,6 @@ uint32_t
 dbg_hwq_umq::
 issue_rw_cmd(struct rw_mem &data, uint16_t opcode)
 { 
-  auto hdr = &m_dbg_umq_pkt->xrt_header;
   // always case 1
   auto ehp = &m_dbg_umq_pkt->xrt_header;
   ehp->common_header.opcode = opcode;

@@ -45,6 +45,7 @@ public:
   uint64_t
   next_signal_state() const;
 
+  using xrt_core::fence_handle::wait;
   void
   wait(uint64_t state) const;
 

@@ -291,6 +291,15 @@ drm_bo_get_info(int fd, uint32_t boh)
   return {args.res_handle, args.size};
 }
 
+inline size_t
+get_exec_cmd_req_size_in_u64(size_t n_args)
+{
+  auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req);
+  req_sz += sizeof(uint64_t); // One cmd handle
+  req_sz += n_args * sizeof(uint32_t); // For args handle
+  return req_sz / sizeof(uint64_t) + 1;
+}
+
 }
 
 namespace shim_xdna {
@@ -598,8 +607,8 @@ get_sysfs(get_sysfs_arg& arg) const
   std::strcpy(req->node_name, arg.sysfs_node.c_str());
   hcall(req, rsp, response_size);
 
-  if (rsp->val_len > arg.data.size())
-    shim_err(EINVAL, "sysfs content is too long: %dB", rsp->val_len);
+  if (rsp->val_len < 0 || static_cast<size_t>(rsp->val_len) > arg.data.size())
+    shim_err(EINVAL, "bad sysfs content len or content is too long: %dB", rsp->val_len);
   std::memcpy(arg.data.data(), rsp->val, rsp->val_len);
   arg.real_size = rsp->val_len;
 }
@@ -610,7 +619,6 @@ config_ctx_cu_config(config_ctx_cu_config_arg& arg) const
 {
   std::vector<char> cu_conf_param_buf(sizeof(amdxdna_ccmd_config_ctx_req) + roundup_64bit(arg.conf_buf.size()));
   auto cu_conf_req = reinterpret_cast<amdxdna_ccmd_config_ctx_req *>(cu_conf_param_buf.data());
-  auto cu_conf_param = reinterpret_cast<amdxdna_hwctx_param_config_cu *>(cu_conf_req->param_val);
 
   cu_conf_req->hdr.cmd = AMDXDNA_CCMD_CONFIG_CTX;
   cu_conf_req->hdr.len = cu_conf_param_buf.size();
@@ -646,17 +654,13 @@ submit_cmd(submit_cmd_arg& arg) const
   if (nargs > max_args)
     shim_err(EINVAL, "Max arg %ld, received %ld", max_args, nargs);
 
-  auto req_sz = sizeof(amdxdna_ccmd_exec_cmd_req);
-  req_sz += sizeof(uint64_t); // One cmd handle
-  req_sz += nargs * sizeof(uint32_t); // For args handle
   // Get a 64 bit aligned buffer for req
-  auto req_sz_in_u64 = req_sz / sizeof(uint64_t) + 1;
-  uint64_t req_buf[req_sz_in_u64];
+  uint64_t req_buf[get_exec_cmd_req_size_in_u64(max_args)] = {};
   auto req = reinterpret_cast<amdxdna_ccmd_exec_cmd_req*>(req_buf);
   amdxdna_ccmd_exec_cmd_rsp rsp = {};
 
   req->hdr.cmd = AMDXDNA_CCMD_EXEC_CMD;
-  req->hdr.len = req_sz_in_u64 * sizeof(uint64_t);
+  req->hdr.len = get_exec_cmd_req_size_in_u64(nargs) * sizeof(uint64_t);
   req->ctx_handle = arg.ctx_handle;
   req->type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   req->cmd_count = 1;

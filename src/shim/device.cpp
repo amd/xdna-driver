@@ -500,9 +500,7 @@ struct xocl_errors
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    uint32_t data_size = 0;
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-    data_size = arg.num_element;
     data = reinterpret_cast<decltype(data)>(payload.data());
 
     query::xocl_errors::result_type output(sizeof(xcl_errors));
@@ -1062,7 +1060,7 @@ struct telemetry
 
       pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (auto i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
+      for (uint32_t i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
         xrt_core::query::aie_telemetry::data task;
         task.deep_sleep_count = telemetry.deep_sleep_count[i];
         output.push_back(std::move(task));
@@ -1099,7 +1097,7 @@ struct telemetry
 
       pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (auto i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
+      for (uint32_t i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
         xrt_core::query::opcode_telemetry::data task;
         task.count = telemetry.trace_opcode[i];
         output.push_back(std::move(task));
@@ -1120,7 +1118,7 @@ struct telemetry
 
       pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (auto i = 0; i < telemetry.ctx_map_num_elements; i++) {
+      for (uint32_t i = 0; i < telemetry.ctx_map_num_elements; i++) {
         xrt_core::query::rtos_telemetry::data task;
 
         task.context_starts = telemetry.context_started_count[i];
@@ -1130,7 +1128,7 @@ struct telemetry
         task.resource_acquisition = telemetry.resource_acquisition_count[i];
 
         std::vector<xrt_core::query::rtos_telemetry::dtlb_data> dtlbs;
-        for (auto j = 0; j < NPU_MAX_DTLB_COUNT; j++) {
+        for (uint32_t j = 0; j < NPU_MAX_DTLB_COUNT; j++) {
           xrt_core::query::rtos_telemetry::dtlb_data dtlb = {
             .misses = telemetry.dtlb_misses[i][j]
           };
@@ -1159,7 +1157,7 @@ struct telemetry
 
       pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (auto i = 0; i < NPU_MAX_STREAM_BUFFER_COUNT; i++) {
+      for (uint32_t i = 0; i < NPU_MAX_STREAM_BUFFER_COUNT; i++) {
         xrt_core::query::stream_buffer_telemetry::data task;
         task.tokens = telemetry.sb_tokens[i];
         output.push_back(std::move(task));
@@ -1246,15 +1244,15 @@ struct telemetry
       auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
 
       // Flatten hypervisor + supervisor opcode arrays
-      for (auto i = 0; i < AIE4_TRACE_COUNT; i++) {
+      for (uint32_t i = 0; i < AIE4_TRACE_COUNT; i++) {
         xrt_core::query::opcode_telemetry::data task;
         task.count = static_cast<uint64_t>(fw_telemetry->opcodes.hyp_opcode[i]);
         output.push_back(std::move(task));
       }
 
       // Add each supervisor's opcodes
-      for (auto sup = 0; sup < AIE4_MAX_NUM_SUPERVISORS; sup++) {
-        for (auto i = 0; i < AIE4_TRACE_COUNT; i++) {
+      for (uint32_t sup = 0; sup < AIE4_MAX_NUM_SUPERVISORS; sup++) {
+        for (uint32_t i = 0; i < AIE4_TRACE_COUNT; i++) {
           xrt_core::query::opcode_telemetry::data task;
           task.count = static_cast<uint64_t>(fw_telemetry->opcodes.sup_opcode[sup][i]);
           output.push_back(std::move(task));
@@ -1279,7 +1277,7 @@ struct telemetry
       auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
 
       // One full task per supervisor slot (hypervisor + supervisors)
-      for (auto i = 0; i < AIE4_MAX_NUM_SUPERVISORS + 1; i++) {
+      for (uint32_t i = 0; i < AIE4_MAX_NUM_SUPERVISORS + 1; i++) {
         xrt_core::query::rtos_telemetry::data task;
 
         task.context_starts = fw_telemetry->context_starting[i];
@@ -1820,8 +1818,6 @@ struct xrt_smi_config
     if (key != key_type::xrt_smi_config)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-
     std::string xrt_smi_config;
     const auto xrt_smi_config_type = std::any_cast<xrt_core::query::xrt_smi_config::type>(param);
     switch (xrt_smi_config_type) {
@@ -1915,6 +1911,7 @@ struct sysfs_get : virtual QueryRequestType
 template <typename QueryRequestType, typename Getter>
 struct function0_get : virtual QueryRequestType
 {
+  using QueryRequestType::get;
   std::any
   get(const xrt_core::device* device) const
   {
@@ -1926,6 +1923,7 @@ struct function0_get : virtual QueryRequestType
 template <typename QueryRequestType, typename Getter>
 struct function1_get : function0_get<QueryRequestType, Getter>
 {
+  using function0_get<QueryRequestType, Getter>::get;
   std::any
   get(const xrt_core::device* device, const std::any& param) const
   {

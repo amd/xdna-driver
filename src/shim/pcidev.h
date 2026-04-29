@@ -51,15 +51,19 @@ public:
     const unsigned int& buf) override;
 
 public:
+  using xrt_core::pci::dev::mmap;
   void*
   mmap(void *addr, size_t len, int prot, int flags, off_t offset) const;
 
+  using xrt_core::pci::dev::munmap;
   void
   munmap(void* addr, size_t len) const;
 
+  using xrt_core::pci::dev::open;
   void
   open() const;
 
+  using xrt_core::pci::dev::close;
   void
   close() const;
 
@@ -98,10 +102,10 @@ private:
   virtual void
   on_last_close() const = 0;
 
+  std::shared_ptr<const platform_drv> m_driver;
+
   mutable int m_dev_users = 0;
   mutable std::mutex m_open_close_lock;
-
-  std::shared_ptr<const platform_drv> m_driver;
 
   mutable std::shared_mutex m_bo_map_lock;
   mutable std::unordered_map<uint64_t, xrt_core::buffer_handle *> m_bo_map;

@@ -25,7 +25,7 @@ dump_buf_to_file(void *buf, size_t size, const std::string& dumpfile)
   if (!ofs.is_open())
     shim_err(errno, "Failed to open dump file: %s", dumpfile);
 
-  for (int i = 0; i < size; i++)
+  for (size_t i = 0; i < size; i++)
     ofs.write(reinterpret_cast<char *>(buf) + i, 1);
 }
 
@@ -245,7 +245,7 @@ void
 hwq::
 process_pending_queue()
 {
-  uint64_t seq;
+  uint64_t seq = 0;
   shim_debug("Pending queue thread started!");
 
   std::unique_lock<std::mutex> lock(m_mutex);
