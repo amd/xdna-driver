@@ -14,9 +14,8 @@
  *     reserved-memory, for the actual message data.
  *   - ZynqMP IPI mailbox channels (TX + RX) via the Linux mailbox
  *     framework for interrupt notification only — no IPI message
- *     buffers are used.  Currently uses bufferless (nobuf) IPIs
- *     (agents 0x0a/0x0b) because PLM does not route buffered
- *     ipi0/ipi1 (agents 0x02/0x03) notifications correctly.
+ *     buffers are used.  Uses buffered IPI5 (APU, agent 0x07) and
+ *     IPI1 (RPU, agent 0x03).
  *
  * The ZynqMP IPI mailbox controller (drivers/mailbox/zynqmp-ipi-mailbox.c)
  * handles the underlying IPI hardware (SMC/HVC calls to ATF for
@@ -203,9 +202,10 @@ static int amdxdna_shmem_send_msg(void *xcomm_hdl,
 	}
 
 	hdr.total_size = sizeof(hdr) + msg->send_size;
+	hdr.sz_ver = FIELD_PREP(SHMEM_MSG_BODY_SZ, msg->send_size) |
+		     FIELD_PREP(SHMEM_MSG_PROTO_VER, SHMEM_PROTOCOL_VER);
 	hdr.id = id;
 	hdr.opcode = msg->opcode;
-	hdr.status = 0;
 
 	spin_lock(&shdl->tx_lock);
 	ret = shmem_mgmt_produce(shdl->tx_hdr, shdl->tx_ring,
@@ -241,14 +241,15 @@ static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 			       &shdl->db_cached_tail,
 			       hw_ctx_id);
 	if (ret)
-		goto unlock_db;
+		goto unlock;
 
 	ret = mbox_send_message(shdl->tx_chan, NULL);
 	if (ret < 0)
-		goto unlock_db;
+		goto unlock;
 	mbox_client_txdone(shdl->tx_chan, 0);
+	ret = 0;
 
-unlock_db:
+unlock:
 	spin_unlock(&shdl->db_lock);
 	return ret;
 }
@@ -468,13 +469,7 @@ int amdxdna_shmem_init(struct amdxdna_dev *xdna, struct platform_device *pdev)
 	ndev->xcomm_ops = &amdxdna_shmem_xcomm_ops;
 	ndev->xcomm_hdl = shdl;
 
-	/*
-	* TODO: Using existing debugfs interface for now
-	* remove this once its no longer needed
-	*/
-	aie4_debugfs_init(xdna);
-
-	dev_info(dev, "amdxdna shmem+IPI driver probed\n");
+	dev_info(&pdev->dev, "amdxdna shmem+IPI driver probed\n");
 	return 0;
 }
 

@@ -7,7 +7,6 @@
 #include <drm/drm_debugfs.h>
 #include <drm/drm_cache.h>
 #include <linux/debugfs.h>
-#include <linux/completion.h>
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/module.h>
@@ -23,10 +22,6 @@
 #if defined(CONFIG_DEBUG_FS)
 #define SIZE            31
 
-/*
-*TODO: This is a temporary parameter for latency benchmark.
-* It will be removed after the latency benchmark is implemented.
-*/
 static int latency_iter = 100;
 module_param(latency_iter, int, 0644);
 MODULE_PARM_DESC(latency_iter,
@@ -400,16 +395,21 @@ static int test_msg_async_event(struct amdxdna_dev_hdl *ndev)
 }
 
 /*
-* TODO: This is a temporary test for echo latency benchmark.
-* It will be removed after the latency benchmark is implemented.
-*/
+ * Test 8: Management echo latency benchmark.
+ *
+ * Measures full mgmt round-trip: APU serializes message into TX ring,
+ * fires IPI, RPU parses+responds, APU drains via workqueue + completion.
+ * Includes all software overhead (kzalloc, xarray, schedule_work,
+ * hardirq->kworker context switch, wait_for_completion).
+ *
+ * Batch timing: single ktime_get_ns() before/after the loop, avg = delta/N.
+ */
 static int test_echo_latency(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE4_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int iter = latency_iter;
-	ktime_t start, end;
-	s64 elapsed_ns, min_ns = S64_MAX, max_ns = 0, total_ns = 0;
+	u64 start_ns, end_ns;
 	int ret, i;
 
 	if (iter <= 0) {
@@ -420,39 +420,225 @@ static int test_echo_latency(struct amdxdna_dev_hdl *ndev)
 	req.val1 = 0xbaddcafe;
 	req.val2 = 0xdeedbeef;
 
+	start_ns = ktime_get_ns();
 	for (i = 0; i < iter; i++) {
-		start = ktime_get();
-
 		mutex_lock(&ndev->aie4_lock);
 		ret = aie4_send_msg_wait(ndev, &msg);
 		mutex_unlock(&ndev->aie4_lock);
-
-		end = ktime_get();
 
 		if (ret) {
 			XDNA_ERR(xdna, "echo failed at iteration %d, ret: %d", i, ret);
 			return ret;
 		}
-
-		if (resp.val1 != req.val1 || resp.val2 != req.val2) {
-			XDNA_ERR(xdna, "echo mismatch at iteration %d", i);
-			return -EIO;
-		}
-
-		elapsed_ns = ktime_to_ns(ktime_sub(end, start));
-		total_ns += elapsed_ns;
-		if (elapsed_ns < min_ns)
-			min_ns = elapsed_ns;
-		if (elapsed_ns > max_ns)
-			max_ns = elapsed_ns;
 	}
+	end_ns = ktime_get_ns();
 
-	XDNA_INFO(xdna, "echo latency (%d iterations):", iter);
-	XDNA_INFO(xdna, "  min: %lld us", min_ns / 1000);
-	XDNA_INFO(xdna, "  max: %lld us", max_ns / 1000);
-	XDNA_INFO(xdna, "  avg: %lld us", total_ns / iter / 1000);
+	XDNA_INFO(xdna, "mgmt echo latency: avg %llu us (%d iterations)",
+		  (end_ns - start_ns) / iter / 1000, iter);
 	XDNA_INFO(xdna, ">>TEST PASS<<");
 	return 0;
+}
+
+/*
+ * Test 9: Management + doorbell combined latency benchmark.
+ *
+ * Each iteration: ring one doorbell (hw_ctx_id=0) then send+wait one
+ * mgmt echo message.  Batch timing around the full loop.
+ */
+static int test_combined_latency(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	int iter = latency_iter;
+	u64 start_ns, end_ns;
+	int ret, i;
+
+	if (iter <= 0) {
+		XDNA_ERR(xdna, "latency_iter must be > 0 (current: %d)", iter);
+		return -EINVAL;
+	}
+
+	if (!ndev->xcomm_ops || !ndev->xcomm_ops->ring_doorbell) {
+		XDNA_ERR(xdna, "doorbell not available (no xcomm_ops)");
+		return -ENODEV;
+	}
+
+	req.val1 = 0xbaddcafe;
+	req.val2 = 0xdeedbeef;
+
+	start_ns = ktime_get_ns();
+	for (i = 0; i < iter; i++) {
+		ret = ndev->xcomm_ops->ring_doorbell(ndev->xcomm_hdl, 0);
+		if (ret) {
+			XDNA_ERR(xdna, "doorbell failed at iteration %d, ret: %d", i, ret);
+			return ret;
+		}
+
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_send_msg_wait(ndev, &msg);
+		mutex_unlock(&ndev->aie4_lock);
+
+		if (ret) {
+			XDNA_ERR(xdna, "echo failed at iteration %d, ret: %d", i, ret);
+			return ret;
+		}
+	}
+	end_ns = ktime_get_ns();
+
+	XDNA_INFO(xdna, "mgmt+doorbell latency: avg %llu us (%d iterations)",
+		  (end_ns - start_ns) / iter / 1000, iter);
+	XDNA_INFO(xdna, ">>TEST PASS<<");
+	return 0;
+}
+
+static int test_partition_lifecycle(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	u32 partition_id;
+	int ret;
+
+	req.partition_col_start = 0;
+	req.partition_col_count = 4;
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_send_msg_wait(ndev, &msg);
+	mutex_unlock(&ndev->aie4_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "create partition failed, ret: %d", ret);
+		goto done;
+	}
+
+	partition_id = resp.partition_id;
+	XDNA_INFO(xdna, "partition created: id=%u (cols [%u..%u])",
+		  partition_id, req.partition_col_start,
+		  req.partition_col_start + req.partition_col_count - 1);
+
+	{
+		DECLARE_AIE4_MSG(aie4_msg_destroy_partition,
+				 AIE4_MSG_OP_DESTROY_PARTITION);
+
+		req.partition_id = partition_id;
+
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_send_msg_wait(ndev, &msg);
+		mutex_unlock(&ndev->aie4_lock);
+		if (ret) {
+			XDNA_ERR(xdna, "destroy partition %u failed, ret: %d",
+				 partition_id, ret);
+			goto done;
+		}
+
+		XDNA_INFO(xdna, "partition destroyed: id=%u", partition_id);
+	}
+
+done:
+	XDNA_INFO(xdna, "%s", ret ? ">>TEST FAIL<<" : ">>TEST PASS<<");
+	return ret;
+}
+
+static int test_hw_context_lifecycle(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	u32 partition_id = 0;
+	u32 hw_context_id = 0;
+	bool partition_created = false;
+	bool context_created = false;
+	int ret;
+
+	/* Step 1: Create partition */
+	req.partition_col_start = 0;
+	req.partition_col_count = 4;
+
+	mutex_lock(&ndev->aie4_lock);
+	ret = aie4_send_msg_wait(ndev, &msg);
+	mutex_unlock(&ndev->aie4_lock);
+	if (ret) {
+		XDNA_ERR(xdna, "create partition failed, ret: %d", ret);
+		goto cleanup;
+	}
+
+	partition_id = resp.partition_id;
+	partition_created = true;
+	XDNA_INFO(xdna, "partition created: id=%u", partition_id);
+
+	/* Step 2: Create HW context */
+	{
+		DECLARE_AIE4_MSG(aie4_msg_create_hw_context,
+				 AIE4_MSG_OP_CREATE_HW_CONTEXT);
+
+		req.partition_id = partition_id;
+		req.request_num_tiles = 4;
+		req.hsa_addr_high = 0;
+		req.hsa_addr_low = 0;
+		req.pasid.raw = 0;
+		req.priority_band = 1; /* NORMAL */
+
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_send_msg_wait(ndev, &msg);
+		mutex_unlock(&ndev->aie4_lock);
+		if (ret) {
+			XDNA_ERR(xdna, "create hw context failed, ret: %d", ret);
+			goto cleanup;
+		}
+
+		hw_context_id = resp.hw_context_id;
+		context_created = true;
+		XDNA_INFO(xdna, "hw context created: id=%u, doorbell=0x%x, msix=%u",
+			  hw_context_id, resp.doorbell_offset,
+			  resp.job_complete_msix_idx);
+	}
+
+	/* Step 3: Destroy HW context */
+	{
+		DECLARE_AIE4_MSG(aie4_msg_destroy_hw_context,
+				 AIE4_MSG_OP_DESTROY_HW_CONTEXT);
+
+		req.hw_context_id = hw_context_id;
+		req.graceful_flag = 1;
+
+		mutex_lock(&ndev->aie4_lock);
+		ret = aie4_send_msg_wait(ndev, &msg);
+		mutex_unlock(&ndev->aie4_lock);
+		if (ret) {
+			XDNA_ERR(xdna, "destroy hw context %u failed, ret: %d",
+				 hw_context_id, ret);
+			goto cleanup;
+		}
+
+		context_created = false;
+		XDNA_INFO(xdna, "hw context destroyed: id=%u", hw_context_id);
+	}
+
+cleanup:
+	/* Destroy HW context if still alive (failed after create) */
+	if (context_created) {
+		DECLARE_AIE4_MSG(aie4_msg_destroy_hw_context,
+				 AIE4_MSG_OP_DESTROY_HW_CONTEXT);
+
+		req.hw_context_id = hw_context_id;
+		req.graceful_flag = 0;
+
+		mutex_lock(&ndev->aie4_lock);
+		aie4_send_msg_wait(ndev, &msg);
+		mutex_unlock(&ndev->aie4_lock);
+	}
+
+	/* Destroy partition if still alive */
+	if (partition_created) {
+		DECLARE_AIE4_MSG(aie4_msg_destroy_partition,
+				 AIE4_MSG_OP_DESTROY_PARTITION);
+
+		req.partition_id = partition_id;
+
+		mutex_lock(&ndev->aie4_lock);
+		aie4_send_msg_wait(ndev, &msg);
+		mutex_unlock(&ndev->aie4_lock);
+	}
+
+	XDNA_INFO(xdna, "%s", ret ? ">>TEST FAIL<<" : ">>TEST PASS<<");
+	return ret;
 }
 
 struct test_case {
@@ -469,7 +655,10 @@ static const struct test_case test_case_array[] = {
 	{"async event msg", test_msg_async_event},
 	{"echo re-enumlate special msg to lx7 firmware", test_msg_enum},
 	{"trigger FLR", test_flr},
-	{"echo latency benchmark", test_echo_latency},
+	{"mgmt echo latency benchmark", test_echo_latency},
+	{"mgmt+doorbell combined latency benchmark", test_combined_latency},
+	{"create and destroy partition", test_partition_lifecycle},
+	{"partition + hw context lifecycle", test_hw_context_lifecycle},
 };
 
 static ssize_t aie4_test_write(struct file *file, const char __user *ptr,

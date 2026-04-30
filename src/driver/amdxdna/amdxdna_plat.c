@@ -135,6 +135,7 @@ static void amdxdna_plat_transport_fini(struct amdxdna_dev *xdna,
 
 static const struct of_device_id amdxdna_plat_of_match[];
 
+#ifdef CONFIG_AMDXDNA_RPMSG
 struct amdxdna_dev *amdxdna_plat_find_by_rproc(struct rproc *rp)
 {
 	struct amdxdna_dev *xdna = NULL;
@@ -187,6 +188,7 @@ struct amdxdna_dev *amdxdna_plat_find_by_rproc(struct rproc *rp)
 
 	return NULL;
 }
+#endif
 
 /**
  * amdxdna_plat_register_device - Run the firmware-dependent setup for an
@@ -216,6 +218,7 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 		return -ENOMEM;
 	}
 
+#ifndef CONFIG_AMDXDNA_SHMEM
 	if (xdna->dev_info->ops && xdna->dev_info->ops->init) {
 		ret = xdna->dev_info->ops->init(xdna);
 		if (ret) {
@@ -223,6 +226,7 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 			goto destroy_wq;
 		}
 	}
+#endif
 
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
@@ -236,6 +240,11 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 		goto sysfs_fini;
 	}
 
+#ifdef CONFIG_AMDXDNA_SHMEM
+	if (xdna->dev_info->ops && xdna->dev_info->ops->debugfs)
+		xdna->dev_info->ops->debugfs(xdna);
+#endif
+
 	pm_runtime_enable(dev);
 	pm_runtime_get_noresume(dev);
 	amdxdna_rpm_init(xdna);
@@ -246,9 +255,11 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
 fini_dev:
+#ifndef CONFIG_AMDXDNA_SHMEM
 	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
 		xdna->dev_info->ops->fini(xdna);
 destroy_wq:
+#endif
 	destroy_workqueue(xdna->notifier_wq);
 	xdna->notifier_wq = NULL;
 	return ret;
@@ -280,8 +291,10 @@ void amdxdna_plat_unregister_device(struct amdxdna_dev *xdna)
 	amdxdna_sysfs_fini(xdna);
 	amdxdna_rpm_fini(xdna);
 	pm_runtime_disable(dev);
+#ifndef CONFIG_AMDXDNA_SHMEM
 	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
 		xdna->dev_info->ops->fini(xdna);
+#endif
 	destroy_workqueue(xdna->notifier_wq);
 	xdna->notifier_wq = NULL;
 
@@ -400,11 +413,27 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 		goto cma_fini;
 	}
 
+	/*
+	 * For shmem the transport is ready immediately -- call
+	 * register_device inline (RPMsg does this from its drv_probe
+	 * callback once the channel is announced).
+	 */
+#ifdef CONFIG_AMDXDNA_SHMEM
+	ret = amdxdna_plat_register_device(xdna);
+	if (ret) {
+		dev_err(dev, "Device registration failed: %d\n", ret);
+		goto transport_fini;
+	}
+#endif
+
 	XDNA_INFO(xdna, "Platform driver probed");
 	return 0;
 
+transport_fini:
+	amdxdna_plat_transport_fini(xdna, pdata);
 cma_fini:
 	amdxdna_cma_region_fini(xdna);
+
 	return ret;
 }
 

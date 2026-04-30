@@ -17,6 +17,7 @@
 #define _AMDXDNA_SHMEM_H_
 
 #include <asm/barrier.h>
+#include <linux/bitfield.h>
 #include <linux/compiler.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
@@ -40,12 +41,20 @@ struct shmem_ring_hdr {
 /*
  * Per-message header inside the management ring data area.
  * Followed by payload of total_size - sizeof(shmem_msg_hdr) bytes.
+ *
+ * Wire format must match npu_mbox_msg_header (FW) and xdna_msg_header
+ * (PCI mailbox) exactly so npu_msg_process() can consume ring data
+ * directly without adaptation.
  */
+#define SHMEM_MSG_BODY_SZ	GENMASK(10, 0)
+#define SHMEM_MSG_PROTO_VER	GENMASK(23, 16)
+#define SHMEM_PROTOCOL_VER	0x1
+
 struct shmem_msg_hdr {
 	u32 total_size;
+	u32 sz_ver;
 	u32 id;
 	u32 opcode;
-	u32 status;
 };
 
 /*
@@ -77,7 +86,7 @@ struct shmem_db_ring {
  * @ring_base:   ring data area (right after the header)
  * @local_head:  caller's cached head (updated on return)
  * @cached_tail: caller's cached copy of firmware's tail (re-read if ring full)
- * @msg_hdr:     message header values (caller fills total_size, id, opcode, status)
+ * @msg_hdr:     message header values (caller fills total_size, sz_ver, id, opcode)
  * @payload:     message payload (kernel memory)
  * @payload_size: payload size in bytes
  *
