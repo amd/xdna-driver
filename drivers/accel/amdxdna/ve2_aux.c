@@ -12,7 +12,6 @@
 #include "amdxdna_aux_drv.h"
 #include "amdxdna_ctx.h"
 #include "ve2_aux.h"
-#include "ve2_ctx.h"
 #include "ve2_hw.h"
 
 const struct amdxdna_dev_priv ve2_aux_priv = {
@@ -83,6 +82,20 @@ static int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_ge
 }
 
 static int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	return -EOPNOTSUPP;
+}
+
+static int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
+{
+	return -EOPNOTSUPP;
+}
+
+static void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
+{
+}
+
+static int ve2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size)
 {
 	return -EOPNOTSUPP;
 }
