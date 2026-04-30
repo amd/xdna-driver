@@ -232,6 +232,7 @@ static inline void hsa_queue_sync_completion_for_write(struct ve2_hsa_queue *que
 
 /* handshake */
 #define ALIVE_MAGIC 0x404C5645
+#define NUM_PDI_SAVE 2 //we can save one ss and one elf
 struct handshake {
 	u32 mpaie_alive; //0
 	u32 partition_base_address; //4
@@ -258,20 +259,24 @@ struct handshake {
 		u32 dtrace_addr_low; //3c
 	}
 	trace;
-	struct {
-#define NUM_PDI_SAVE 2 //we can save one ss and one elf
+	union {
 		struct {
-			u16 page_index:15;
-			u16 cmd_chain_failure:1;
-			u16 page_offset;
+			struct {
+				u16 page_index:15;
+				u16 cmd_chain_failure:1;
+				u16 page_offset;
+			}
+			restore_page;
+			struct {
+				u32 id; //44 4c
+				u16 page_index; //48 50
+				u16 page_offset:15; // pdi job offset within the page
+				u16 core_elf_type:1; //axi-mm or control packet
+			}
+			pdi[NUM_PDI_SAVE];
 		}
-		restore_page;
-		struct {
-			u32 id; //44 4c
-			u16 page_index; //48 50
-			u16 page_len;
-		}
-		pdi[NUM_PDI_SAVE];
+		contents;
+		u32 raw[NUM_PDI_SAVE * 2 + 1];
 	}
 	ctx_save;
 	struct {

@@ -1012,8 +1012,10 @@ static void ve2_dump_debug_state(struct amdxdna_dev *xdna,
 
 	/* Dump context save/restore state */
 	XDNA_WARN(xdna, "Context Save State:\n");
-	XDNA_WARN(xdna, "  restore_page_idx:   %u\n", hs->ctx_save.restore_page.page_index);
-	XDNA_WARN(xdna, "  cmd_chain_failure:  %u\n", hs->ctx_save.restore_page.cmd_chain_failure);
+	XDNA_WARN(xdna, "  restore_page_idx:   %u\n",
+		  hs->ctx_save.contents.restore_page.page_index);
+	XDNA_WARN(xdna, "  cmd_chain_failure:  %u\n",
+		  hs->ctx_save.contents.restore_page.cmd_chain_failure);
 
 	XDNA_WARN(xdna, "=== VE2 DEBUG DUMP END ===\n");
 	kfree(hs);
