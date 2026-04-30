@@ -4,9 +4,26 @@
  *
  * Platform driver for AMDXDNA on non-PCI systems (e.g. Versal AIE).
  *
- * The device tree describes the AIE device with memory-region phandles for
- * CMA banks and either an RPMsg or shared-memory+IPI transport.  The
- * compatible string selects which transport to use:
+ * The device tree describes the AIE device with named CMA regions and
+ * either an RPMsg or shared-memory+IPI transport.  Memory regions are
+ * identified by name in memory-region-names rather than by phandle
+ * position; two roles are recognized:
+ *
+ *   "rpu-cma"     - Bound to the platform device itself.  Backs
+ *                   dma_alloc_coherent() on the device and is used for
+ *                   kernel-side firmware-visible mgmt buffers (async
+ *                   event ring, FW DRAM log, FW event-trace ring,
+ *                   mpnpufw work buffer).  Must live in a window the
+ *                   remote firmware can address (e.g. < 4 GB on a
+ *                   32-bit RPU).  The driver pins this device to a
+ *                   32-bit DMA mask.
+ *
+ *   "app-bank<N>" - 0-indexed AIE-visible CMA banks.  Bound to child
+ *                   devices with a 64-bit DMA mask and selected by
+ *                   userspace via the low 8 bits of the BO flags
+ *                   field.  User-mode BO ioctls default to bank 0.
+ *
+ * The compatible string selects which transport to use:
  *
  *   "amd,versal-aie"      — RPMsg over VirtIO (remoteproc)
  *   "amd,amdxdna-npu3"    — Shared memory + ZynqMP IPI
@@ -14,22 +31,32 @@
  * Device tree example (RPMsg):
  *
  *   reserved-memory {
- *       xdna_bank1: buffer@40000000 {
+ *       rpu_cma: rpu-cma@70000000 {
  *           compatible = "shared-dma-pool";
- *           reg = <0x0 0x40000000 0x0 0x40000000>;
+ *           reg = <0x0 0x70000000 0x0 0x04000000>;     // 64 MB, < 4 GB
+ *           reusable;
+ *       };
+ *
+ *       aie_cma0: aie-cma@8_00000000 {
+ *           compatible = "shared-dma-pool";
+ *           size = <0x1 0x00000000>;                   // 4 GB, > 4 GB
+ *           alignment = <0x0 0x00100000>;
  *           reusable;
  *       };
  *   };
  *
  *   amdxdna {
  *       compatible = "amd,versal-aie";
- *       memory-region = <&xdna_bank1>;
+ *       amd,remoteproc = <&r5f_0>;
+ *       memory-region       = <&rpu_cma>, <&aie_cma0>;
+ *       memory-region-names = "rpu-cma", "app-bank0";
  *   };
  */
 
 #include <drm/drm_accel.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
+#include <linux/dma-mapping.h>
 #include <linux/iommu.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -329,7 +356,22 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	/* Init CMA banks from memory-region phandles on this node */
+	/*
+	 * Pin the platform device to a 32-bit DMA mask before binding
+	 * the "rpu-cma" reserved-memory region to it.  The mgmt buffers
+	 * allocated against this device are read/written by the remote
+	 * firmware (e.g. RPU on T20), which on these SoCs can only
+	 * address the lower 4 GB of physical memory.  AIE-visible
+	 * "app-bank<N>" regions are bound to separate child devices
+	 * with their own 64-bit mask in amdxdna_cma_region_init().
+	 */
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+	if (ret) {
+		dev_err(dev, "Failed to set 32-bit DMA mask: %d\n", ret);
+		return ret;
+	}
+
+	/* Bind named CMA regions ("rpu-cma" + "app-bank<N>"). */
 	ret = amdxdna_cma_region_init(xdna, dev->of_node);
 	if (ret) {
 		dev_err(dev, "CMA region init failed: %d\n", ret);

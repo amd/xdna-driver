@@ -5,7 +5,9 @@
 
 #include <linux/kernel.h>
 #include <linux/dma-buf.h>
+#include <linux/kstrtox.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/string.h>
 #include "amdxdna_drm.h"
 #include "amdxdna_cma_buf.h"
 
@@ -143,7 +145,8 @@ static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
 	.vmap = amdxdna_cmabuf_vmap,
 };
 
-static struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
+static struct dma_buf *amdxdna_get_cma_buf(struct amdxdna_dev *xdna,
+					   struct device *dev,
 					   size_t size, bool cacheable)
 {
 	struct amdxdna_cmabuf_priv *cmabuf;
@@ -164,6 +167,9 @@ static struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 	else
 		cpu_addr = dma_alloc_coherent(dev, size, &dma_addr, GFP_KERNEL);
 	if (!cpu_addr) {
+		XDNA_DBG(xdna,
+			 "CMA alloc failed on %s: size 0x%zx cacheable %d",
+			 dev_name(dev), size, cacheable);
 		ret = -ENOMEM;
 		goto free_cmabuf;
 	}
@@ -184,6 +190,10 @@ static struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 		ret = PTR_ERR(dbuf);
 		goto free_dma;
 	}
+
+	XDNA_DBG(xdna,
+		 "CMA alloc on %s: dma_addr 0x%llx size 0x%zx cacheable %d",
+		 dev_name(dev), (u64)dma_addr, size, cacheable);
 
 	return dbuf;
 
@@ -210,19 +220,38 @@ static bool get_cacheable_flag(u64 flags)
 
 /**
  * amdxdna_get_cma_buf_with_fallback - Allocate CMA buffer with region fallback
- * @region_devs: Array of device pointers for CMA regions (NULL = not initialized)
- * @max_regions: Maximum number of regions in the array
- * @fallback_dev: Device to use as final fallback (system default CMA)
- * @size: Size of buffer to allocate
- * @flags: Cacheable and region index bitmap
+ * @region_devs: Array of device pointers for "app-bank<N>" CMA regions
+ *               (NULL = not initialized).  Bit N in the @flags low byte
+ *               selects @region_devs[N].
+ * @max_regions: Maximum number of entries in @region_devs.
+ * @fallback_dev: Device to use when @flags requests no banks, or when
+ *                every requested bank is unavailable.  This is the
+ *                platform device itself, bound to the "rpu-cma" region
+ *                (or to the system default CMA when no "rpu-cma" is
+ *                configured).  Allocations from this device land in
+ *                the lower 4 GB on T20-style platforms where the
+ *                parent has a 32-bit DMA mask.
+ * @size: Size of buffer to allocate.
+ * @flags: Cacheable bit (BIT(24)) and region bitmap (low 8 bits).
  *
- * Attempts allocation in order:
- * 1. Requested region/s (extracted from flags)
- * 2. System default CMA (fallback_dev)
+ * Honors the bank bitmap exactly:
  *
- * Return: dma_buf pointer on success, ERR_PTR on failure
+ *   • Each bit set in the low 8 bits is tried, in ascending bit order,
+ *     against the matching @region_devs[] entry.  First success wins.
+ *   • If no bit is set in the low byte, or every requested bank is
+ *     unavailable / OOM, fall back to @fallback_dev.
+ *
+ * Note: callers that want user-mode BOs to default to an AIE bank
+ * should set the appropriate bit in @flags before calling.  The
+ * AMDXDNA_CREATE_BO ioctl handler does this in
+ * amdxdna_drm_create_bo_ioctl(): if userspace did not request any
+ * bank, the kernel sets BIT(0) so the BO lands in app-bank0 and the
+ * fallback is taken only when no app-bank0 is declared.
+ *
+ * Return: dma_buf pointer on success, ERR_PTR on failure.
  */
-struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_devs,
+struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct amdxdna_dev *xdna,
+						  struct device *const *region_devs,
 						  int max_regions,
 						  struct device *fallback_dev,
 						  size_t size, u64 flags)
@@ -235,17 +264,22 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_d
 	cacheable = get_cacheable_flag(flags);
 	mem_bitmap = (u32)(flags & 0xFFULL);
 
-	/* Try to allocate from the requested region(s) in bitmap order (bit 0, then 1, ...). */
 	for (i = 0; i < max_regions; i++) {
 		if ((mem_bitmap & (1U << i)) && region_devs[i]) {
-			dma_buf = amdxdna_get_cma_buf(region_devs[i], size, cacheable);
+			dma_buf = amdxdna_get_cma_buf(xdna, region_devs[i],
+						      size, cacheable);
 			if (!IS_ERR(dma_buf))
 				return dma_buf;
 		}
 	}
 
-	/* Final fallback to system default CMA */
-	return amdxdna_get_cma_buf(fallback_dev, size, cacheable);
+	/*
+	 * No bank requested, or every requested bank failed.
+	 * Fall back to the parent device (rpu-cma / system default CMA).
+	 */
+	XDNA_DBG(xdna, "Falling back to parent dev %s (flags 0x%llx, size 0x%zx)",
+		 dev_name(fallback_dev), flags, size);
+	return amdxdna_get_cma_buf(xdna, fallback_dev, size, cacheable);
 }
 
 static void amdxdna_cma_device_release(struct device *dev)
@@ -253,101 +287,179 @@ static void amdxdna_cma_device_release(struct device *dev)
 	kfree(dev);
 }
 
-/**
- * amdxdna_cma_region_init - Populate CMA regions from a DT node
- * @xdna: XDNA device
- * @mem_np: Device tree node with memory-region phandles
- *
- * Iterates through memory-region phandles and only binds those marked
- * "reusable" (CMA pools), skipping non-CMA carveouts (e.g. mailbox or
- * doorbell shared memory regions with "no-map").
- *
- * The first CMA region is bound to the parent device (xdna->ddev.dev)
- * so that dma_alloc_coherent() and friends use it by default.
- * Subsequent CMA regions become child devices stored in
- * cma_region_devs[] for bank-based BO allocation.
- *
- * Return: 0 on success (including when no CMA regions found),
- *         negative errno on failure
+#define AMDXDNA_RPU_CMA_NAME		"rpu-cma"
+#define AMDXDNA_APP_BANK_PREFIX		"app-bank"
+#define AMDXDNA_APP_BANK_PREFIX_LEN	(sizeof(AMDXDNA_APP_BANK_PREFIX) - 1)
+
+/*
+ * Parse "app-bank<N>" -> N.  Returns >= 0 on success, -1 if @name is not
+ * an app-bank entry or the index is out of range.  The trailing digits
+ * must form a complete unsigned decimal with no leading sign or
+ * whitespace.
  */
-int amdxdna_cma_region_init(struct amdxdna_dev *xdna, struct device_node *mem_np)
+static int amdxdna_parse_app_bank_index(const char *name)
+{
+	unsigned int idx;
+
+	if (strncmp(name, AMDXDNA_APP_BANK_PREFIX,
+		    AMDXDNA_APP_BANK_PREFIX_LEN))
+		return -1;
+
+	if (kstrtouint(name + AMDXDNA_APP_BANK_PREFIX_LEN, 10, &idx))
+		return -1;
+
+	if (idx >= MAX_MEM_REGIONS)
+		return -1;
+
+	return (int)idx;
+}
+
+static int amdxdna_bind_app_bank(struct amdxdna_dev *xdna,
+				 struct device_node *mem_np, int phandle_idx,
+				 int bank)
 {
 	struct device *parent_dev = xdna->ddev.dev;
-	struct device_node *rmem_np;
 	struct device *child_dev;
-	int num_regions;
-	int bank = 0;
 	int ret;
-	int i;
 
-	num_regions = of_count_phandle_with_args(mem_np, "memory-region", NULL);
-	if (num_regions <= 0)
-		return 0;
-
-	for (i = 0; i < num_regions; i++) {
-		rmem_np = of_parse_phandle(mem_np, "memory-region", i);
-		if (!rmem_np)
-			break;
-
-		if (!of_property_read_bool(rmem_np, "reusable")) {
-			of_node_put(rmem_np);
-			continue;
-		}
-		of_node_put(rmem_np);
-
-		if (bank == 0) {
-			ret = of_reserved_mem_device_init_by_idx(parent_dev,
-								 mem_np, i);
-			if (ret) {
-				XDNA_ERR(xdna,
-					 "Failed to bind default CMA (idx %d): %d",
-					 i, ret);
-				return ret;
-			}
-			XDNA_INFO(xdna, "Default CMA region bound (idx %d)", i);
-			bank++;
-			continue;
-		}
-
-		if (bank > MAX_MEM_REGIONS) {
-			XDNA_WARN(xdna, "Too many CMA banks, skipping idx %d",
-				  i);
-			continue;
-		}
-
-		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
-		if (!child_dev) {
-			ret = -ENOMEM;
-			goto cleanup;
-		}
-
-		device_initialize(child_dev);
-		child_dev->parent = parent_dev;
-		child_dev->of_node = mem_np;
-		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
-		child_dev->dma_mask = &child_dev->coherent_dma_mask;
-		child_dev->release = amdxdna_cma_device_release;
-
-		ret = dev_set_name(child_dev, "amdxdna-mem%d", bank - 1);
-		if (ret)
-			goto put_dev;
-
-		ret = of_reserved_mem_device_init_by_idx(child_dev, mem_np, i);
-		if (ret) {
-			XDNA_ERR(xdna, "Failed to init CMA bank %d (idx %d): %d",
-				 bank - 1, i, ret);
-			goto put_dev;
-		}
-
-		xdna->cma_region_devs[bank - 1] = child_dev;
-		XDNA_INFO(xdna, "CMA bank %d initialized (idx %d)", bank - 1, i);
-		bank++;
+	if (xdna->cma_region_devs[bank]) {
+		XDNA_ERR(xdna,
+			 "Duplicate " AMDXDNA_APP_BANK_PREFIX "%d entry (idx %d)",
+			 bank, phandle_idx);
+		return -EINVAL;
 	}
 
+	child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
+	if (!child_dev)
+		return -ENOMEM;
+
+	device_initialize(child_dev);
+	child_dev->parent = parent_dev;
+	child_dev->of_node = mem_np;
+	child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+	child_dev->dma_mask = &child_dev->coherent_dma_mask;
+	child_dev->release = amdxdna_cma_device_release;
+
+	ret = dev_set_name(child_dev, "amdxdna-app-bank%d", bank);
+	if (ret)
+		goto put_dev;
+
+	ret = of_reserved_mem_device_init_by_idx(child_dev, mem_np, phandle_idx);
+	if (ret) {
+		XDNA_ERR(xdna,
+			 "Failed to init " AMDXDNA_APP_BANK_PREFIX "%d (idx %d): %d",
+			 bank, phandle_idx, ret);
+		goto put_dev;
+	}
+
+	xdna->cma_region_devs[bank] = child_dev;
+	XDNA_INFO(xdna, AMDXDNA_APP_BANK_PREFIX "%d bound (idx %d)",
+		  bank, phandle_idx);
 	return 0;
 
 put_dev:
 	put_device(child_dev);
+	return ret;
+}
+
+/**
+ * amdxdna_cma_region_init - Bind named CMA regions for the xdna device
+ * @xdna: XDNA device
+ * @mem_np: DT node carrying "memory-region" / "memory-region-names"
+ *
+ * The DT node identifies its CMA pools by name.  Two roles are defined:
+ *
+ *   "rpu-cma"     - bound directly to xdna->ddev.dev (the platform
+ *                   device) so that dma_alloc_coherent() on the device
+ *                   pulls from this pool.  Used by kernel-side
+ *                   firmware-visible mgmt buffers (async event ring,
+ *                   FW DRAM log, FW event-trace ring, mpnpufw work
+ *                   buffer) and as the last-resort fallback for BO
+ *                   allocations.  On platforms where the remote
+ *                   firmware (e.g. RPU) can only address the lower
+ *                   4 GB of physical memory, this region MUST live in
+ *                   that window.  Optional — if absent, the parent
+ *                   device retains its DT-/system-default CMA pool
+ *                   (and management buffers come from there).
+ *
+ *   "app-bank<N>" - 0-indexed, bound to a child device with a 64-bit
+ *                   DMA mask and stored in cma_region_devs[N].  These
+ *                   are the user-visible AIE banks and are addressed
+ *                   via the low 8 bits of the BO `flags` field
+ *                   (bit N -> bank N).  User-mode BO ioctls default to
+ *                   bank 0 when no bit is set.
+ *
+ * Return: 0 on success (including when no recognized regions are
+ *         present), negative errno on failure.  Bank indices must be
+ *         unique and < MAX_MEM_REGIONS; "rpu-cma" must appear at most
+ *         once.  Any unknown name in memory-region-names is silently
+ *         ignored so the binding can be extended later without
+ *         breaking older drivers.
+ */
+int amdxdna_cma_region_init(struct amdxdna_dev *xdna, struct device_node *mem_np)
+{
+	struct device *parent_dev = xdna->ddev.dev;
+	bool rpu_bound = false;
+	int num_regions;
+	int ret;
+	int i;
+
+	num_regions = of_property_count_strings(mem_np, "memory-region-names");
+	if (num_regions <= 0)
+		return 0;
+
+	for (i = 0; i < num_regions; i++) {
+		const char *name;
+		int bank;
+
+		ret = of_property_read_string_index(mem_np,
+						    "memory-region-names",
+						    i, &name);
+		if (ret) {
+			XDNA_ERR(xdna,
+				 "Failed to read memory-region-names[%d]: %d",
+				 i, ret);
+			goto cleanup;
+		}
+
+		if (!strcmp(name, AMDXDNA_RPU_CMA_NAME)) {
+			if (rpu_bound) {
+				XDNA_ERR(xdna,
+					 "Duplicate \"" AMDXDNA_RPU_CMA_NAME
+					 "\" entry (idx %d)", i);
+				ret = -EINVAL;
+				goto cleanup;
+			}
+
+			ret = of_reserved_mem_device_init_by_idx(parent_dev,
+								 mem_np, i);
+			if (ret) {
+				XDNA_ERR(xdna,
+					 "Failed to bind \"" AMDXDNA_RPU_CMA_NAME
+					 "\" (idx %d): %d", i, ret);
+				goto cleanup;
+			}
+			XDNA_INFO(xdna, "\"" AMDXDNA_RPU_CMA_NAME
+				  "\" bound to parent (idx %d)", i);
+			rpu_bound = true;
+			continue;
+		}
+
+		bank = amdxdna_parse_app_bank_index(name);
+		if (bank < 0) {
+			XDNA_DBG(xdna,
+				 "Skipping unknown memory-region-name \"%s\" (idx %d)",
+				 name, i);
+			continue;
+		}
+
+		ret = amdxdna_bind_app_bank(xdna, mem_np, i, bank);
+		if (ret)
+			goto cleanup;
+	}
+
+	return 0;
+
 cleanup:
 	amdxdna_cma_region_fini(xdna);
 	return ret;
@@ -367,6 +479,10 @@ void amdxdna_cma_region_fini(struct amdxdna_dev *xdna)
 		}
 	}
 
-	/* Release the default CMA region bound to the parent device */
+	/*
+	 * Release the "rpu-cma" region bound to the parent device.
+	 * Safe to call unconditionally: if no rpu-cma was bound this is
+	 * a no-op on a device with no reserved-memory binding.
+	 */
 	of_reserved_mem_device_release(xdna->ddev.dev);
 }

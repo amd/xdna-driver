@@ -893,7 +893,8 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 		return ERR_PTR(-EINVAL);
 	}
 
-	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna->cma_region_devs,
+	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna,
+						    xdna->cma_region_devs,
 						    MAX_MEM_REGIONS,
 						    dev->dev, size,
 						    args->flags);
@@ -1130,6 +1131,21 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
+
+	/*
+	 * Bits [7:0] of flags select the AIE-visible CMA bank to allocate
+	 * from (bit N -> "app-bank<N>" in DT).  If userspace did not
+	 * request any bank, default to bank 0 ("app-bank0") so user-mode
+	 * BOs land in a 64-bit AIE-reachable region instead of the
+	 * platform device's "rpu-cma" pool.  When no app-bank0 is
+	 * declared (or it is exhausted), the helper falls back to the
+	 * parent device's region anyway, so the default is safe even on
+	 * configurations without AIE banks.  The resolved bank is
+	 * reflected back to userspace via args->flags.
+	 */
+	if (!(args->flags & 0xFFULL))
+		args->flags |= BIT(0);
+
 	switch (args->type) {
 	case AMDXDNA_BO_SHARE:
 		fallthrough;

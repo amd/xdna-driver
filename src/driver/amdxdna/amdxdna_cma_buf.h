@@ -15,7 +15,8 @@ struct amdxdna_dev;
 #define AMDXDNA_BO_FLAGS_CACHEABLE	BIT(24)
 
 bool amdxdna_use_cma(void);
-struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_devs,
+struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct amdxdna_dev *xdna,
+						  struct device *const *region_devs,
 						  int max_regions,
 						  struct device *fallback_dev,
 						  size_t size, u64 flags);

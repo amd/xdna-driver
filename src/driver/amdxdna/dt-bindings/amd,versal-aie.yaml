@@ -21,14 +21,42 @@ description: |
   RPMsg service.  The driver also verifies at runtime that incoming
   RPMsg channels belong to the expected remoteproc.
 
-  No MMIO BARs, PSP, SMU, or IRQ vectors are needed — the remote
+  No MMIO BARs, PSP, SMU, or IRQ vectors are needed - the remote
   processor owns the hardware.  The host only sends management and
   doorbell messages over the RPMsg channel.
 
-  Optional CMA memory banks may be listed via the standard
-  memory-region property.  Userspace selects a bank by index
-  (0-based, matching phandle order) in BO allocation flags.
-  If no banks are listed, the system default CMA pool is used.
+  CMA pools are described by name in memory-region-names.  Two roles
+  are recognized:
+
+    "rpu-cma"     Bound to the platform device itself, so that
+                  dma_alloc_coherent() on /dev/accel/accelN's parent
+                  pulls from this pool.  Used for kernel-side
+                  firmware-visible mgmt buffers (async event ring,
+                  FW DRAM log, FW event-trace ring, mpnpufw work
+                  buffer) and as the last-resort fallback for BO
+                  allocations.  On platforms whose remote firmware
+                  can only address the lower 4 GB of physical memory
+                  (e.g. 32-bit RPU), this region MUST live in that
+                  window.  The driver pins the platform device to a
+                  32-bit DMA mask.  Optional - if absent, the parent
+                  device retains its DT-/system-default CMA pool.
+
+    "app-bank<N>" 0-indexed AIE-visible CMA banks (N = 0..7).  Each
+                  is bound to a child device with a 64-bit DMA mask
+                  and addressed by userspace as bank N via the low 8
+                  bits of the BO `flags` field.  Intended for buffers
+                  consumed by CERT and the AIE shim DMA only (HSA
+                  queue, instruction BOs, args/IFM/OFM, CERT log /
+                  debug / trace).  When userspace omits the bank bits
+                  in BO flags, the AMDXDNA_CREATE_BO ioctl defaults
+                  to bank 0, so "app-bank0" is the recommended name
+                  for the first AIE region.  If "app-bank0" is not
+                  declared (or its pool is exhausted), the BO falls
+                  back to the "rpu-cma" / system default pool.
+
+  All listed regions must be "shared-dma-pool" with the "reusable"
+  property so the CMA allocator can manage them.  Unknown names are
+  silently ignored to allow forward-compatible additions.
 
 properties:
   compatible:
@@ -45,18 +73,27 @@ properties:
 
   memory-region:
     minItems: 1
-    maxItems: 8
+    maxItems: 9
     description: |
-      Phandles to reserved-memory nodes used as CMA banks for
-      buffer allocation.  Each entry becomes a selectable memory
-      bank (index 0 .. N-1).  Userspace chooses a bank via the
-      bank field in BO flags.
+      Phandles to reserved-memory nodes.  The role of each entry is
+      determined by the matching name in memory-region-names, not by
+      its position.  See memory-region-names below.
 
-      These must point to "shared-dma-pool" regions with the
-      "reusable" property so the CMA allocator can manage them.
+  memory-region-names:
+    minItems: 1
+    maxItems: 9
+    description: |
+      One name per entry in memory-region.  Allowed values:
+        "rpu-cma"     - default region bound to the platform device
+                        (must appear at most once).
+        "app-bank0".."app-bank7"
+                      - AIE-visible 64-bit CMA banks (each index must
+                        be unique).
 
-      This property is optional.  When absent, all allocations
-      use the system default CMA pool.
+      At least one of these must be present.  Names that do not match
+      the patterns above are ignored by the driver.
+    items:
+      pattern: "^(rpu-cma|app-bank[0-7])$"
 
 additionalProperties: false
 
@@ -67,11 +104,11 @@ required:
 examples:
   - |
     /*
-     * Minimal example — remoteproc binding only, no dedicated CMA banks.
-     * All buffer allocations use the system default CMA pool.
-     *
-     * The driver defers probe until the remoteproc is registered and
-     * the firmware announces the "rpmsg-aie-mgmt" service.
+     * Minimal example - remoteproc binding only, no dedicated CMA
+     * regions.  All buffer allocations use the system default CMA
+     * pool.  Fine for bring-up but not recommended for production:
+     * mgmt buffers may end up above 4 GB (unreachable by a 32-bit
+     * RPU), and AIE banks fall back to the same default pool.
      */
     amdxdna {
         compatible = "amd,versal-aie";
@@ -80,9 +117,16 @@ examples:
 
   - |
     /*
-     * Full example with CMA banks and remoteproc binding.
+     * Recommended layout for T20-class platforms.
      *
-     * Bank 0 (buffer@40000000): 1 GiB at 0x4000_0000
+     *   "rpu-cma"   : 64 MB at 0x70000000 (< 4 GB, RPU-reachable),
+     *                 used for FW log/trace/work/async-event buffers
+     *                 allocated by amdxdna_mgmt_buff_alloc().
+     *
+     *   "app-bank0" : 4 GB at 0x800000000 (> 4 GB, 64-bit only),
+     *                 used for HSA queue, instruction BOs,
+     *                 args/IFM/OFM BOs, CERT log/debug/trace BOs.
+     *                 Selected by default for user-mode BO ioctls.
      */
     / {
         reserved-memory {
@@ -90,9 +134,16 @@ examples:
             #size-cells = <2>;
             ranges;
 
-            xdna_bank0: buffer@40000000 {
+            rpu_cma: rpu-cma@70000000 {
                 compatible = "shared-dma-pool";
-                reg = <0x0 0x40000000 0x0 0x40000000>;
+                reg = <0x0 0x70000000 0x0 0x04000000>;
+                reusable;
+            };
+
+            aie_cma0: aie-cma@8_00000000 {
+                compatible = "shared-dma-pool";
+                size      = <0x1 0x00000000>;
+                alignment = <0x0 0x00100000>;
                 reusable;
             };
         };
@@ -101,17 +152,20 @@ examples:
     amdxdna {
         compatible = "amd,versal-aie";
         amd,remoteproc = <&r5f_0>;
-        memory-region = <&xdna_bank0>;
+        memory-region       = <&rpu_cma>, <&aie_cma0>;
+        memory-region-names = "rpu-cma", "app-bank0";
     };
 
   - |
     /*
-     * Example with multiple CMA banks.
+     * Example with multiple AIE banks.  The order in memory-region
+     * does not matter; the role/index is determined by name.
      *
-     * Bank 0: 512 MiB at 0x2000_0000
-     * Bank 1: 1 GiB at 0x4000_0000
+     *   "app-bank0" : 1 GB at 0x800000000
+     *   "app-bank1" : 1 GB at 0x840000000
+     *   "rpu-cma"   : 64 MB at 0x70000000
      *
-     * Userspace selects bank 1 by setting bank=1 in BO flags.
+     * Userspace selects "app-bank1" with flags bit 1 set.
      */
     / {
         reserved-memory {
@@ -119,15 +173,21 @@ examples:
             #size-cells = <2>;
             ranges;
 
-            xdna_bank0: buffer@20000000 {
+            rpu_cma: rpu-cma@70000000 {
                 compatible = "shared-dma-pool";
-                reg = <0x0 0x20000000 0x0 0x20000000>;
+                reg = <0x0 0x70000000 0x0 0x04000000>;
                 reusable;
             };
 
-            xdna_bank1: buffer@40000000 {
+            aie_cma0: aie-cma@8_00000000 {
                 compatible = "shared-dma-pool";
-                reg = <0x0 0x40000000 0x0 0x40000000>;
+                reg = <0x8 0x00000000 0x0 0x40000000>;
+                reusable;
+            };
+
+            aie_cma1: aie-cma@8_40000000 {
+                compatible = "shared-dma-pool";
+                reg = <0x8 0x40000000 0x0 0x40000000>;
                 reusable;
             };
         };
@@ -136,5 +196,6 @@ examples:
     amdxdna {
         compatible = "amd,versal-aie";
         amd,remoteproc = <&r5f_0>;
-        memory-region = <&xdna_bank0>, <&xdna_bank1>;
+        memory-region       = <&aie_cma0>, <&rpu_cma>, <&aie_cma1>;
+        memory-region-names = "app-bank0", "rpu-cma", "app-bank1";
     };

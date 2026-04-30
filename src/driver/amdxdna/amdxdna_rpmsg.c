@@ -49,6 +49,7 @@
 #include <drm/drm_managed.h>
 #include <linux/bitfield.h>
 #include <linux/kernel.h>
+#include <linux/moduleparam.h>
 #include <linux/rcupdate.h>
 #include <linux/remoteproc.h>
 #include <linux/rpmsg.h>
@@ -58,6 +59,18 @@
 #include "aie4_pci.h"
 #include "amdxdna_plat.h"
 #include "amdxdna_rpmsg.h"
+
+/*
+ * mailbox_verbose: when set, every outgoing RPMsg request is logged with
+ * its header sizes and the on-wire frame is hex-dumped at KERN_INFO so
+ * it shows up regardless of the dynamic-debug state of this file.  Off
+ * by default so production traffic stays quiet.  Toggle at runtime via:
+ *   echo 1 > /sys/module/amdxdna/parameters/mailbox_verbose
+ */
+static int mailbox_verbose;
+module_param(mailbox_verbose, int, 0644);
+MODULE_PARM_DESC(mailbox_verbose,
+		 " Dump RPMsg request header+payload on every send (0=off, 1=on)");
 
 /*
  * Wire header — must match firmware's npu_mbox_msg_header exactly:
@@ -227,6 +240,23 @@ static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
 		return -ENODEV;
 	}
 	XDNA_DBG(xdna, "Sending RPMsg message, id: %u, opcode: 0x%x", id, msg->opcode);
+	if (mailbox_verbose) {
+		/*
+		 * Dump the full on-wire frame: 16-byte rpmsg_msg_header
+		 * followed by msg->send_size bytes of opcode-specific
+		 * payload.  KERN_DEBUG so the dump joins the rest of the
+		 * driver's debug output; mailbox_verbose is the runtime
+		 * gate.
+		 */
+		print_hex_dump(KERN_DEBUG, "rpmsg req hdr: ",
+			       DUMP_PREFIX_OFFSET, 16, 4,
+			       buf, sizeof(*hdr), false);
+		if (msg->send_size)
+			print_hex_dump(KERN_DEBUG, "rpmsg req payload: ",
+				       DUMP_PREFIX_OFFSET, 16, 4,
+				       buf + sizeof(*hdr), msg->send_size,
+				       false);
+	}
 	ret = rpmsg_send(rpdev->ept, buf, total);
 	rcu_read_unlock();
 
