@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2025-2026, Advanced Micro Devices, Inc.
+ *
  */
 
 #ifndef _VE2_AUX_H_
@@ -11,32 +12,7 @@
 #include <linux/xlnx-ai-engine.h>
 
 #include "amdxdna_drv.h"
-
-struct amdxdna_dev_priv;
-
-#define VE2_PROG_DATA_MEMORY_OFF	0x80000
-#define VE2_CERT_VERSION_OFF		0x50
-#define VE2_CERT_VERSION_SIZE		0x40
-
-#define VE2_FW_HASH_STRING_LENGTH	41
-#define VE2_FW_DATE_STRING_LENGTH	11
-
-struct ve2_firmware_version {
-	u8 major;
-	u8 minor;
-	char git_hash[VE2_FW_HASH_STRING_LENGTH];
-	char date[VE2_FW_DATE_STRING_LENGTH];
-	u8 hotfix;
-	u8 build;
-};
-
-struct ve2_firmware_status {
-	u32 state;
-	u32 abs_page_index;
-	u32 ppc;
-	u32 idle_status;
-	u32 misc_status;
-};
+#include "ve2_hw.h"
 
 struct amdxdna_dev_priv {
 	const char *fw_path;
