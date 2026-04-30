@@ -682,6 +682,9 @@ static int aie4_get_array(struct amdxdna_client *client,
 	case DRM_AMDXDNA_AIE_COREDUMP:
 		ret = amdxdna_get_coredump(&ndev->aie, client, args);
 		break;
+	case DRM_AMDXDNA_AIE_TILE_READ:
+		ret = amdxdna_aie_tile_read(&ndev->aie, client, args);
+		break;
 	default:
 		ret = -EOPNOTSUPP;
 		break;
@@ -781,6 +784,37 @@ const struct amdxdna_dev_ops aie4_pf_ops = {
 	.sriov_configure        = aie4_sriov_configure,
 };
 
+static int aie4_set_state(struct amdxdna_client *client,
+			  struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret, idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto dev_exit;
+
+	switch (args->param) {
+	case DRM_AMDXDNA_AIE_TILE_WRITE:
+		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
+		break;
+	default:
+		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
+		ret = -EOPNOTSUPP;
+		break;
+	}
+
+	amdxdna_pm_suspend_put(xdna);
+
+dev_exit:
+	drm_dev_exit(idx);
+	return ret;
+}
+
 const struct amdxdna_dev_ops aie4_vf_ops = {
 	.init			= aie4_vf_init,
 	.fini			= aie4_vf_fini,
@@ -789,6 +823,7 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.mmap			= aie4_doorbell_mmap,
 	.cmd_wait		= aie4_cmd_wait,
 	.get_aie_info		= aie4_get_info,
+	.set_aie_state		= aie4_set_state,
 	.get_array		= aie4_get_array,
 };
 
@@ -800,5 +835,6 @@ const struct amdxdna_dev_ops aie4_classic_ops = {
 	.mmap			= aie4_doorbell_mmap,
 	.cmd_wait		= aie4_cmd_wait,
 	.get_aie_info		= aie4_get_info,
+	.set_aie_state		= aie4_set_state,
 	.get_array		= aie4_get_array,
 };

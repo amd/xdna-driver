@@ -83,12 +83,18 @@ static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 
 enum aie4_fw_feature {
 	AIE4_GET_COREDUMP,
+	AIE4_RW_ACCESS,
 	AIE4_FEATURE_MAX
 };
 
 int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_msg_buf_hdl *list_hdl,
 			  u32 num_bufs);
+int aie4_rw_aie_reg(struct amdxdna_hwctx *hwctx, bool is_read,
+		    u8 row, u8 col, u32 addr, u32 *value);
+int aie4_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
+		    u8 row, u8 col, u32 aie_addr,
+		    dma_addr_t dram_addr, u32 size);
 
 extern const struct amdxdna_dev_ops aie4_pf_ops;
 extern const struct amdxdna_dev_ops aie4_vf_ops;

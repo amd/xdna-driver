@@ -13,6 +13,7 @@
 enum aie4_msg_opcode {
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
+	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
 
 	AIE4_MSG_OP_CREATE_VFS                       = 0x20001,
@@ -156,6 +157,39 @@ struct aie4_msg_aie4_coredump_req {
 
 struct aie4_msg_aie4_coredump_resp {
 	enum aie4_msg_status status;
+} __packed;
+
+enum aie4_access_type {
+	AIE4_ACCESS_TYPE_MEM_READ,
+	AIE4_ACCESS_TYPE_MEM_WRITE,
+	AIE4_ACCESS_TYPE_REG_READ,
+	AIE4_ACCESS_TYPE_REG_WRITE,
+	AIE4_ACCESS_TYPE_MAX
+};
+
+struct aie4_msg_aie4_debug_access_req {
+	__u8 opcode;
+	__u8 context_id;
+	__u8 row;
+	__u8 col;
+	union {
+		struct {
+			__u64 buffer_addr;
+			__u32 buffer_size;
+			__u32 mem_addr;
+			__u32 mem_size;
+			__u32 pasid;
+		} __packed mem_access;
+		struct {
+			__u32 reg_addr;
+			__u32 reg_wval;
+		} __packed reg_access;
+	};
+} __packed;
+
+struct aie4_msg_aie4_debug_access_resp {
+	enum aie4_msg_status status;
+	__u32 reg_rval;
 } __packed;
 
 #endif /* _AIE4_MSG_PRIV_H_ */
