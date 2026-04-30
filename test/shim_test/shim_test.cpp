@@ -199,7 +199,8 @@ dev_filter_is_aie4(device::id_type id, device* dev)
   if (!is_xdna_dev(dev))
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu3_device_id || device_id == npu3_device_id1 || device_id == npu3_nopci_device_id;
+  return device_id == npu3_device_id || device_id == npu3_device_id1 ||
+         device_id == npu3_nopci_device_id || device_id == npu3_aie2ps_device_id;
 }
 
 bool
@@ -559,7 +560,8 @@ TEST_create_destroy_max_context(device::id_type id, std::shared_ptr<device>& sde
   // XDNA driver by default supports maximum 6 contexts on npu1, 128 on npu3, and 16 on npu4
   if (device_id == npu1_device_id)
     num_ctx = 6;
-  else if (device_id == npu3_device_id || device_id == npu3_device_id1)
+  else if (device_id == npu3_device_id || device_id == npu3_device_id1 ||
+           device_id == npu3_aie2ps_device_id)
     num_ctx = 128;
   else
     num_ctx = 16;
@@ -585,7 +587,8 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
   const std::array<int, 3> ctx = [&]() {
     if (device_id == npu1_device_id)
       return std::array<int, 3>{2, 4, 6};
-    if (device_id == npu3_device_id || device_id == npu3_device_id1)
+    if (device_id == npu3_device_id || device_id == npu3_device_id1 ||
+        device_id == npu3_aie2ps_device_id)
       return std::array<int, 3>{4, 16, 64};
     return std::array<int, 3>{4, 8, 16};
   }();

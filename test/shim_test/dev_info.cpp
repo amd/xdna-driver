@@ -182,6 +182,41 @@ binary_info binary_infos[] = {
     .path = "local_shim_test_data/npu3/nop/nop.elf",
     .flow = FULL_ELF,
   },
+  /*
+   * T20 (npu3 firmware over rpmsg, aie2ps silicon).  Reuses the npu3
+   * ELFs since the firmware/protocol is identical.
+   */
+  {
+    .tag = "good",
+    .device = npu3_aie2ps_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/vadd/vadd.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "bad_timeout",
+    .device = npu3_aie2ps_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/bad/bad_timeout.elf",
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "nop",
+    .device = npu3_aie2ps_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/nop/nop.elf",
+    .flow = FULL_ELF,
+  },
   {
     .tag = "good",
     .device = npu4_device_id,

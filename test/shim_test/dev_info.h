@@ -34,6 +34,14 @@ const uint16_t npu1_device_id1 = 0x1050;
 const uint16_t npu3_device_id = 0x17f1;
 const uint16_t npu3_device_id1 = 0x17f3;
 const uint16_t npu3_nopci_device_id = 0xb052;
+/*
+ * T20: npu3/aie4 firmware over rpmsg on aie2ps silicon.  The "device
+ * id" is synthesized by the platform shim (see vbnv_to_pcie_id mapping
+ * for "RyzenAI-npu3-aie2ps" in src/shim/device.cpp) since there is no
+ * real PCI function backing it.  Treated as aie4 for protocol/binary
+ * purposes — uses the same npu3 ELFs.
+ */
+const uint16_t npu3_aie2ps_device_id = 0xfe02;
 const uint16_t npu4_device_id = 0x17f0;
 const uint16_t npu_any_revision_id = 0xffff;
 const uint16_t npu1_revision_id = 0x0;
