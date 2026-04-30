@@ -1096,8 +1096,10 @@ static void ve2_fill_health_data(struct amdxdna_dev *xdna,
 		health->aie4.uc_info[col].fw_state = hs->vm.fw_state;
 		health->aie4.uc_info[col].page_idx = hs->vm.abs_page_index;
 		health->aie4.uc_info[col].offset = hs->vm.ppc;
-		health->aie4.uc_info[col].restore_page = hs->ctx_save.restore_page.page_index;
-		health->aie4.uc_info[col].restore_offset = hs->ctx_save.restore_page.page_offset;
+		health->aie4.uc_info[col].restore_page =
+			hs->ctx_save.contents.restore_page.page_index;
+		health->aie4.uc_info[col].restore_offset =
+			hs->ctx_save.contents.restore_page.page_offset;
 		health->aie4.uc_info[col].uc_ear = hs->exception.ear;
 		health->aie4.uc_info[col].uc_esr = hs->exception.esr;
 		health->aie4.uc_info[col].uc_pc = hs->exception.pc;
