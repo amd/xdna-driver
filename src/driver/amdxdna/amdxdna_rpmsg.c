@@ -71,6 +71,30 @@
 #define RPMSG_MSG_PROTO_VER	GENMASK(23, 16)
 #define RPMSG_PROTOCOL_VERSION	0x1
 
+/*
+ * Data-plane "doorbell" opcode.
+ *
+ * Unlike PCI aie4 (which uses a BAR doorbell write to kick CERT), the rpmsg
+ * transport carries the doorbell as a regular RPMsg.  The RPU firmware
+ * dispatches it through the NPU mgmt switch like any other request and
+ * sends back a small ack.  The wire form must match
+ * rpu-fw/app/include/aie_mgmt/npu_msg_handler.h:NPU_MSG_OP_EXEC_HW_CONTEXT
+ * (opcode 0x30010, payload = { __le32 hw_context_id }).
+ *
+ * Kept scoped to this file because it is not part of the upstream aie4
+ * firmware protocol (PCI parts have no equivalent), so it does not belong
+ * in aie4_msg_priv.h.
+ */
+#define AMDXDNA_RPMSG_OP_DOORBELL	0x30010
+
+struct amdxdna_rpmsg_doorbell_req {
+	__le32 hw_context_id;
+} __packed;
+
+struct amdxdna_rpmsg_doorbell_resp {
+	__le32 status;
+} __packed;
+
 struct rpmsg_msg_header {
 	__le32 total_size;
 	__le32 sz_ver;
@@ -219,30 +243,34 @@ static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
 	return ret;
 }
 
+/*
+ * Send the data-plane "doorbell" to the RPU firmware.
+ *
+ * The RPU FW (handle_exec_hw_context) does the actual ring read and AIE
+ * dispatch.  We piggy-back on amdxdna_rpmsg_send_msg() so the msg_id
+ * bookkeeping works (the FW always replies with a 4-byte status); a NULL
+ * notify_cb means amdxdna_rpmsg_rx_cb() will erase the xa entry and drop
+ * the response without invoking any callback.
+ *
+ * Returns 0 on successful enqueue.  Note: this only acknowledges that the
+ * RPMsg was handed to the rpmsg core -- the actual command completion is
+ * tracked separately via the UMQ host_queue_header.read_index advancing
+ * (see ve2_cmd_wait / aie4 wait paths).
+ */
 static int amdxdna_rpmsg_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 {
-	struct amdxdna_rpmsg_hdl *rhdl = xcomm_hdl;
-	struct rpmsg_device *rpdev;
-	/* TODO: define a proper doorbell opcode in the firmware */
-	struct rpmsg_msg_header hdr = {
-		.total_size = cpu_to_le32(sizeof(hdr)),
-		.sz_ver = cpu_to_le32(
-			FIELD_PREP(RPMSG_MSG_PROTO_VER, RPMSG_PROTOCOL_VERSION)),
-		.id = cpu_to_le32(hw_ctx_id),
-		.opcode = 0,
+	struct amdxdna_rpmsg_doorbell_req req = {
+		.hw_context_id = cpu_to_le32(hw_ctx_id),
 	};
-	int ret;
+	struct xdna_mailbox_msg msg = {
+		.opcode    = AMDXDNA_RPMSG_OP_DOORBELL,
+		.handle    = NULL,
+		.notify_cb = NULL,
+		.send_data = (u8 *)&req,
+		.send_size = sizeof(req),
+	};
 
-	rcu_read_lock();
-	rpdev = rcu_dereference(rhdl->rpdev);
-	if (!rpdev) {
-		rcu_read_unlock();
-		return -ENODEV;
-	}
-	ret = rpmsg_send(rpdev->ept, &hdr, sizeof(hdr));
-	rcu_read_unlock();
-
-	return ret;
+	return amdxdna_rpmsg_send_msg(xcomm_hdl, &msg);
 }
 
 /*
