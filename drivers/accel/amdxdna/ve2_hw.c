@@ -15,7 +15,6 @@
 #include <linux/xlnx-ai-engine.h>
 
 #include "amdxdna_drv.h"
-#include "amdxdna_ctx.h"
 #include "ve2_aux.h"
 #include "ve2_hw.h"
 
@@ -147,7 +146,7 @@ int ve2_hw_init_fw_status_slots(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl
 		return 0;
 
 	hdl->fw_slots = devm_kcalloc(dev, hdl->aie_dev_info.cols, sizeof(*hdl->fw_slots),
-				    GFP_KERNEL);
+				     GFP_KERNEL);
 	if (!hdl->fw_slots) {
 		XDNA_ERR(xdna, "No memory for fw_slots array");
 		return -ENOMEM;
