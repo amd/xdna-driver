@@ -1057,7 +1057,7 @@ std::vector<test_case> test_list {
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
   },
-  test_case{ "get AIE coredump and check registers", {~0U, ~0U},
+  test_case{ "get AIE coredump and check registers", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
   },
   test_case{ "AIE MEM read/write", {~0U, ~0U},
