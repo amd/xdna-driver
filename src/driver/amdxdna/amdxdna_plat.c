@@ -364,6 +364,13 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	 * address the lower 4 GB of physical memory.  AIE-visible
 	 * "app-bank<N>" regions are bound to separate child devices
 	 * with their own 64-bit mask in amdxdna_cma_region_init().
+	 *
+	 * Note: dma_buf imports done by gem_prime_import() use this
+	 * platform device as the importer (drm_dev->dev), so a 64-bit
+	 * "app-bank<N>" allocation would normally fail the 32-bit mask
+	 * check inside dma_buf_map_attachment().  amdxdna_cmabuf_map()
+	 * works around that by mapping against cbuf->dev (the producer
+	 * device the BO was allocated on) instead of attach->dev.
 	 */
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (ret) {

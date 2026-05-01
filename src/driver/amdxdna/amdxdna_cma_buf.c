@@ -39,10 +39,26 @@ amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
 	}
 
 	sg_init_table(sg, 1);
-	sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->dma_addr,
+	/*
+	 * Map against cbuf->dev (the producer that allocated this CMA
+	 * region), not attach->dev (the importer).  The bus address
+	 * lives in the producer's DMA address space and its mask matches
+	 * the region that backed it: e.g. an "app-bank<N>" child has a
+	 * 64-bit mask while the parent xdna platform device is pinned
+	 * to 32-bit so future "rpu-cma" allocations stay below 4 GB.
+	 *
+	 * On the dma-buf import path used by amdxdna_drm_create_share_bo()
+	 * the importer is drm_dev->dev = the parent xdna platform device,
+	 * which would (correctly) reject a 64-bit app-bank address
+	 * against its 32-bit mask.  Mapping against the producer is the
+	 * tightest invariant: it asserts that the device which actually
+	 * owns the page can reach it, which is also what the AIE shim
+	 * DMA ultimately uses on no-IOMMU platforms.
+	 */
+	sg_dma_address(sg) = dma_map_resource(cbuf->dev, cbuf->dma_addr,
 					      cbuf->size, dir,
 					      DMA_ATTR_SKIP_CPU_SYNC);
-	ret = dma_mapping_error(attach->dev, sg->dma_address);
+	ret = dma_mapping_error(cbuf->dev, sg->dma_address);
 	if (ret)
 		goto free_sg;
 
@@ -66,9 +82,11 @@ static void amdxdna_cmabuf_unmap(struct dma_buf_attachment *attach,
 				 struct sg_table *sgt,
 				 enum dma_data_direction dir)
 {
+	struct amdxdna_cmabuf_priv *cbuf = attach->dmabuf->priv;
 	struct scatterlist *sg = sgt->sgl;
 
-	dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg),
+	/* Pair with cbuf->dev used in amdxdna_cmabuf_map() above. */
+	dma_unmap_resource(cbuf->dev, sg_dma_address(sg), sg_dma_len(sg),
 			   dir, DMA_ATTR_SKIP_CPU_SYNC);
 	kfree(sg);
 	kfree(sgt);
