@@ -6,7 +6,6 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/gpu_scheduler.h>
-#include <linux/amd-pmf-io.h>
 #include <linux/bits.h>
 #include <linux/sizes.h>
 
@@ -123,13 +122,13 @@ static int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	return 0;
 }
 
-#ifdef HAVE_7_0_amd_pmf_get_npu_data
+#if IS_ENABLED(CONFIG_AMD_PMF) && defined(HAVE_7_0_amd_pmf_get_npu_data)
 static int npu4_update_counters(struct amdxdna_dev_hdl *ndev)
 {
 	struct amd_pmf_npu_metrics npu_metrics;
 	int ret;
 
-	ret = AIE2_GET_PMF_NPU_METRICS(&npu_metrics);
+	ret = AIE_GET_PMF_NPU_METRICS(&npu_metrics);
 	if (ret)
 		return ret;
 
