@@ -1538,6 +1538,8 @@ struct aie_read
     access->row = static_cast<uint32_t>(args.row);
     access->addr = args.offset;
     access->size = args.size;
+    access->type = (args.type == xrt_core::query::aie_read::access_type::reg) ?
+                   AMDXDNA_AIE_TILE_ACCESS_REG : AMDXDNA_AIE_TILE_ACCESS_MEM;
 
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_AIE_TILE_READ,
@@ -1582,6 +1584,8 @@ struct aie_write
     access->row = static_cast<uint32_t>(args.row);
     access->addr = args.offset;
     access->size = args.data.size();
+    access->type = (args.type == xrt_core::query::aie_write::access_type::reg) ?
+                   AMDXDNA_AIE_TILE_ACCESS_REG : AMDXDNA_AIE_TILE_ACCESS_MEM;
 
     std::memcpy(payload.data() + sizeof(amdxdna_drm_aie_tile_access), args.data.data(), args.data.size());
 

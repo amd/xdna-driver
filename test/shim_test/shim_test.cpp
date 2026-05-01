@@ -1060,10 +1060,10 @@ std::vector<test_case> test_list {
   test_case{ "get AIE coredump and check registers", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
   },
-  test_case{ "AIE MEM read/write", {~0U, ~0U},
+  test_case{ "AIE MEM read/write", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_mem, {}
   },
-  test_case{ "AIE REG read/write", {~0U, ~0U},
+  test_case{ "AIE REG read/write", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
