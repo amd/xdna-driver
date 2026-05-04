@@ -704,5 +704,4 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.get_aie_info		= aie4_get_info,
 	.get_array		= aie4_get_array,
 	.get_coredump		= aie4_get_aie_coredump,
-	.hmm_invalidate		= amdxdna_hmm_invalidate,
 };
