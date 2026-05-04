@@ -514,7 +514,7 @@ struct archive_path
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
-        return std::string(get_shim_data_dir() + "bins/xrt_smi_ve2.ar");
+        return std::string(get_shim_data_dir() + "bins/xrt_smi_ve2.a");
   }
 };
 
