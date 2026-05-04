@@ -1720,10 +1720,11 @@ struct sensor_info
     switch (std::any_cast<xrt_core::query::sdm_sensor_info::sdr_req_type>(param)) {
     case xrt_core::query::sdm_sensor_info::sdr_req_type::power:
       return sensor.type == AMDXDNA_SENSOR_TYPE_POWER;
-    // At the moment no sensors are expected for NPU other than power
+    case xrt_core::query::sdm_sensor_info::sdr_req_type::thermal:
+      return sensor.type == AMDXDNA_SENSOR_TYPE_TEMPERATURE;
+    // No other NPU sensor types supported at the moment
     case xrt_core::query::sdm_sensor_info::sdr_req_type::current:
     case xrt_core::query::sdm_sensor_info::sdr_req_type::mechanical:
-    case xrt_core::query::sdm_sensor_info::sdr_req_type::thermal:
     case xrt_core::query::sdm_sensor_info::sdr_req_type::voltage:
       return false;
     }
@@ -1735,9 +1736,12 @@ struct sensor_info
   {
     static std::map<const xrt_core::device*, std::vector<char>> data_map;
 
-    // If an entry does not exist for the current device, query the driver for sensor data
+    // If an entry does not exist for the current device, query the driver for sensor data.
+    // The driver may return multiple entries (power, temperature, per-column utilization),
+    // so size the request with enough headroom to receive all entries in one IOCTL.
     if (data_map.find(device) == data_map.end()) {
-      const uint32_t output_size = sizeof(amdxdna_drm_query_sensor);
+      constexpr uint32_t max_sensor_entries = 32;
+      const uint32_t output_size = max_sensor_entries * sizeof(amdxdna_drm_query_sensor);
 
       std::vector<char> payload(output_size);
       amdxdna_drm_get_info arg = {
