@@ -84,18 +84,14 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 s
 	return ret;
 }
 
-int aie4_get_aie_coredump(struct amdxdna_dev *xdna,
+int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_msg_buf_hdl *list_hdl,
-			  struct amdxdna_hwctx *hwctx, u32 num_bufs)
+			  u32 num_bufs)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	DECLARE_AIE_MSG(aie4_msg_aie4_coredump, AIE4_MSG_OP_AIE_COREDUMP);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	int ret;
-
-	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP)) {
-		XDNA_DBG(xdna, "Get coredump unsupported for the device or firmware version");
-		return -EOPNOTSUPP;
-	}
 
 	req.context_id = hwctx->fw_ctx_id;
 	req.pasid = FIELD_PREP(AIE4_MSG_PASID, hwctx->client->pasid) |
@@ -108,4 +104,10 @@ int aie4_get_aie_coredump(struct amdxdna_dev *xdna,
 		XDNA_ERR(xdna, "Get coredump got status 0x%x", resp.status);
 
 	return ret;
+}
+
+void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
+{
+	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))
+		ndev->aie.msg_ops.get_coredump = aie4_get_aie_coredump;
 }

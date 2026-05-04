@@ -61,6 +61,7 @@ struct amdxdna_dev_hdl {
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
 
 /* aie4_ctx.c */
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
@@ -85,9 +86,9 @@ enum aie4_fw_feature {
 	AIE4_FEATURE_MAX
 };
 
-int aie4_get_aie_coredump(struct amdxdna_dev *xdna,
+int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_msg_buf_hdl *list_hdl,
-			  struct amdxdna_hwctx *hwctx, u32 num_bufs);
+			  u32 num_bufs);
 
 extern const struct amdxdna_dev_ops aie4_pf_ops;
 extern const struct amdxdna_dev_ops aie4_vf_ops;

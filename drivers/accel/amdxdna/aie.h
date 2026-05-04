@@ -49,6 +49,15 @@ struct aie_metadata {
 	struct aie_tile_metadata shim;
 };
 
+struct amdxdna_hwctx;
+struct amdxdna_msg_buf_hdl;
+
+struct aie_msg_ops {
+	int (*get_coredump)(struct amdxdna_hwctx *hwctx,
+			    struct amdxdna_msg_buf_hdl *list_hdl,
+			    u32 num_bufs);
+};
+
 struct aie_device {
 	struct amdxdna_dev *xdna;
 	struct mailbox_channel *mgmt_chann;
@@ -63,6 +72,7 @@ struct aie_device {
 	struct smu_device *smu_hdl;
 
 	struct aie_metadata metadata;
+	struct aie_msg_ops msg_ops;
 };
 
 #define DECLARE_AIE_MSG(name, op) \
@@ -136,7 +146,6 @@ int amdxdna_get_metadata(struct aie_device *aie, struct amdxdna_client *client,
 int amdxdna_query_sensors(struct amdxdna_client *client,
 			  struct amdxdna_drm_get_info *args, u32 total_col);
 void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-bool amdxdna_hwctx_access_allowed(struct amdxdna_hwctx *hwctx, bool root_only);
 
 struct amdxdna_msg_buf_hdl {
 	struct amdxdna_dev	*xdna;
@@ -151,7 +160,6 @@ struct amdxdna_msg_buf_hdl {
 
 struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size);
 void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl);
-void amdxdna_clflush_msg_buff(struct amdxdna_msg_buf_hdl *hdl, u32 offset, u32 size);
 
 /*
  * struct amdxdna_coredump_buf_entry - __packed to match firmware buffer_list

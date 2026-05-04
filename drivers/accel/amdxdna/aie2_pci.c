@@ -812,15 +812,14 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 	struct amdxdna_client *tmp_client;
 	int ret;
 
-	if (!amdxdna_is_admin())
-		return -EPERM;
-
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	array_args.element_size = sizeof(struct amdxdna_drm_query_hwctx);
 	array_args.buffer = args->buffer;
 	array_args.num_element = args->buffer_size / array_args.element_size;
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		if (!amdxdna_client_visible(tmp_client))
+			continue;
 		ret = amdxdna_hwctx_walk(tmp_client, &array_args,
 					 aie2_hwctx_status_cb);
 		if (ret)
@@ -882,9 +881,6 @@ static int aie2_get_telemetry(struct amdxdna_client *client,
 	struct amdxdna_client *tmp_client;
 	int ret;
 
-	if (!amdxdna_is_admin())
-		return -EPERM;
-
 	elem_num = xdna->dev_handle->priv->hwctx_limit;
 	header_sz = struct_size(header, map, elem_num);
 	if (args->buffer_size <= header_sz) {
@@ -904,6 +900,8 @@ static int aie2_get_telemetry(struct amdxdna_client *client,
 
 	header->map_num_elements = elem_num;
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		if (!amdxdna_client_visible(tmp_client))
+			continue;
 		ret = amdxdna_hwctx_walk(tmp_client, &header->map,
 					 aie2_fill_hwctx_map);
 		if (ret)
@@ -1202,7 +1200,6 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.cmd_submit = aie2_cmd_submit,
 	.hmm_invalidate = aie2_hmm_invalidate,
 	.get_array = aie2_get_array,
-	.get_coredump = aie2_get_aie_coredump,
 	.get_dev_revision = aie2_get_dev_rev,
 	.hwctx_heap_expand = aie2_hwctx_heap_expand,
 };

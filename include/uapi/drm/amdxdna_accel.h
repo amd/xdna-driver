@@ -474,10 +474,10 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_AIE_VERSION,
 	DRM_AMDXDNA_QUERY_CLOCK_METADATA,
 	DRM_AMDXDNA_QUERY_SENSORS,
-	DRM_AMDXDNA_QUERY_HW_CONTEXTS,		/* CAP_SYS_ADMIN required */
+	DRM_AMDXDNA_QUERY_HW_CONTEXTS,		/* admin or matching EUID */
 	DRM_AMDXDNA_QUERY_FIRMWARE_VERSION = 8,
 	DRM_AMDXDNA_GET_POWER_MODE,
-	DRM_AMDXDNA_QUERY_TELEMETRY,		/* CAP_SYS_ADMIN required */
+	DRM_AMDXDNA_QUERY_TELEMETRY,		/* admin or matching EUID */
 	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
 	DRM_AMDXDNA_QUERY_RESOURCE_INFO,
 	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
@@ -643,13 +643,13 @@ struct amdxdna_drm_bo_usage {
 
 /**
  * struct amdxdna_drm_aie_coredump - The data for AIE coredump
- * @pid: The Process ID of the process that created this context.
- * @context_id: The ID for this context.
- * @pad: MBZ.
  */
 struct amdxdna_drm_aie_coredump {
+	/** @pid: The Process ID of the process that created this context. */
 	__u64 pid;
+	/** @context_id: Context ID. */
 	__u32 context_id;
+	/** @pad: MBZ. */
 	__u32 pad;
 };
 

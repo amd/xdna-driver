@@ -311,17 +311,6 @@ void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo,
 		XDNA_DBG(xdna, "Wait for bo interrupted by signal");
 }
 
-bool amdxdna_hwctx_access_allowed(struct amdxdna_hwctx *hwctx, bool root_only)
-{
-	if (amdxdna_is_admin())
-		return true;
-
-	if (root_only)
-		return false;
-
-	return task_tgid_nr(current) == hwctx->client->pid;
-}
-
 struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size)
 {
 	struct amdxdna_msg_buf_hdl *hdl;
@@ -334,30 +323,27 @@ struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32
 	hdl->xdna = xdna;
 	hdl->size = max_t(u32, size, SZ_8K);
 	order = get_order(hdl->size);
-	if (order > MAX_PAGE_ORDER) {
-		kfree(hdl);
-		return ERR_PTR(-EINVAL);
-	}
+	if (order > MAX_PAGE_ORDER)
+		goto free_hdl;
 	hdl->size = PAGE_SIZE << order;
 
 	if (amdxdna_iova_on(xdna)) {
 		hdl->vaddr = amdxdna_iommu_alloc(xdna, hdl->size, &hdl->dma_addr);
+		if (IS_ERR(hdl->vaddr))
+			goto free_hdl;
 	} else {
 		hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, hdl->size,
 						   &hdl->dma_addr,
 						   DMA_FROM_DEVICE, GFP_KERNEL);
 		if (!hdl->vaddr)
-			hdl->vaddr = ERR_PTR(-ENOMEM);
-	}
-
-	if (IS_ERR(hdl->vaddr)) {
-		int ret = PTR_ERR(hdl->vaddr);
-
-		kfree(hdl);
-		return ERR_PTR(ret);
+			goto free_hdl;
 	}
 
 	return hdl;
+
+free_hdl:
+	kfree(hdl);
+	return ERR_PTR(-ENOMEM);
 }
 
 void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl)
@@ -377,18 +363,6 @@ void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl)
 	kfree(hdl);
 }
 
-void amdxdna_clflush_msg_buff(struct amdxdna_msg_buf_hdl *hdl, u32 offset, u32 size)
-{
-	if (!hdl || offset > hdl->size)
-		return;
-	if (!size)
-		size = hdl->size - offset;
-	else if (size > hdl->size - offset)
-		return;
-
-	drm_clflush_virt_range(to_cpu_addr(hdl, offset), size);
-}
-
 int amdxdna_get_coredump(struct aie_device *aie,
 			 struct amdxdna_client *client,
 			 struct amdxdna_drm_get_array *args)
@@ -401,7 +375,7 @@ int amdxdna_get_coredump(struct aie_device *aie,
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx = NULL;
 	struct amdxdna_client *tmp_client;
-	u32 data_buf_size = SZ_1M;
+	size_t data_buf_size = SZ_1M;
 	int ret = 0, idx = 0, i;
 	unsigned long hwctx_id;
 	size_t offset = 0;
@@ -411,10 +385,10 @@ int amdxdna_get_coredump(struct aie_device *aie,
 	u32 num_bufs;
 	u32 orig_col;
 
-	if (!xdna->dev_info->ops->get_coredump)
-		return -EOPNOTSUPP;
-
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (!aie->msg_ops.get_coredump)
+		return -EOPNOTSUPP;
 
 	if (args->num_element != 1) {
 		XDNA_ERR(xdna, "Invalid num_element %u, expected 1",
@@ -470,7 +444,8 @@ int amdxdna_get_coredump(struct aie_device *aie,
 		return -EINVAL;
 	}
 
-	if (!amdxdna_hwctx_access_allowed(hwctx, false)) {
+	if (!capable(CAP_SYS_ADMIN) &&
+	    task_tgid_nr(current) != hwctx->client->pid) {
 		XDNA_ERR(xdna, "Permission denied for context %u",
 			 config.context_id);
 		ret = -EPERM;
@@ -489,8 +464,7 @@ int amdxdna_get_coredump(struct aie_device *aie,
 		goto unlock_srcu;
 	}
 
-	list_hdl = amdxdna_alloc_msg_buff(xdna,
-					  max_t(u32, num_bufs * sizeof(*buf_list), SZ_8K));
+	list_hdl = amdxdna_alloc_msg_buff(xdna, num_bufs * sizeof(*buf_list));
 	if (IS_ERR(list_hdl)) {
 		XDNA_ERR(xdna, "Failed to allocate buffer list");
 		ret = PTR_ERR(list_hdl);
@@ -516,16 +490,15 @@ int amdxdna_get_coredump(struct aie_device *aie,
 		}
 
 		memset(to_cpu_addr(data_hdls[i], 0), 0, data_buf_size);
-		amdxdna_clflush_msg_buff(data_hdls[i], 0, 0);
+		drm_clflush_virt_range(to_cpu_addr(data_hdls[i], 0), data_buf_size);
 
 		buf_list[i].buf_addr = to_dma_addr(data_hdls[i], 0);
 		buf_list[i].buf_size = data_buf_size;
 	}
 
-	amdxdna_clflush_msg_buff(list_hdl, 0, 0);
+	drm_clflush_virt_range(buf_list, to_buf_size(list_hdl));
 
-	ret = xdna->dev_info->ops->get_coredump(xdna, list_hdl,
-					       hwctx, num_bufs);
+	ret = aie->msg_ops.get_coredump(hwctx, list_hdl, num_bufs);
 	if (ret) {
 		XDNA_ERR(xdna, "Failed to get coredump from firmware, ret=%d",
 			 ret);

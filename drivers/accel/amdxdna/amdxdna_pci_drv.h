@@ -8,8 +8,10 @@
 
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
+#include <drm/drm_file.h>
 #include <drm/drm_print.h>
 #include <linux/capability.h>
+#include <linux/cred.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
 #include <linux/workqueue.h>
@@ -41,11 +43,6 @@
 
 extern const struct drm_driver amdxdna_drm_drv;
 
-static inline bool amdxdna_is_admin(void)
-{
-	return capable(CAP_SYS_ADMIN);
-}
-
 struct amdxdna_client;
 struct amdxdna_dev;
 struct amdxdna_drm_get_info;
@@ -75,9 +72,6 @@ struct amdxdna_dev_ops {
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
-	int (*get_coredump)(struct amdxdna_dev *xdna,
-			    struct amdxdna_msg_buf_hdl *list_hdl,
-			    struct amdxdna_hwctx *hwctx, u32 num_bufs);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 	int (*hwctx_heap_expand)(struct amdxdna_hwctx *hwctx);
 };
@@ -222,5 +216,12 @@ static inline bool amdxdna_iova_on(struct amdxdna_dev *xdna)
 static inline bool amdxdna_pasid_on(struct amdxdna_client *client)
 {
 	return client->pasid != IOMMU_PASID_INVALID;
+}
+
+/* True if the current task may examine @client's contexts. */
+static inline bool amdxdna_client_visible(struct amdxdna_client *client)
+{
+	return capable(CAP_SYS_ADMIN) ||
+	       uid_eq(current_euid(), client->filp->filp->f_cred->euid);
 }
 #endif /* _AMDXDNA_PCI_DRV_H_ */

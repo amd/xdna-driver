@@ -382,7 +382,7 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	req.num_cols = hweight32(aie_bitmap);
 	req.aie_bitmap = aie_bitmap;
 
-	amdxdna_clflush_msg_buff(buf_hdl, 0, 0);
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);
@@ -432,7 +432,7 @@ int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 	req.buf_size = to_buf_size(buf_hdl);
 	req.type = header->type;
 
-	amdxdna_clflush_msg_buff(buf_hdl, 0, 0);
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Query telemetry failed, status %d", ret);
@@ -908,6 +908,9 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->exec_msg_ops = &npu_exec_message_ops;
 	else
 		ndev->exec_msg_ops = &legacy_exec_message_ops;
+
+	if (AIE_FEATURE_ON(&ndev->aie, AIE2_GET_COREDUMP))
+		ndev->aie.msg_ops.get_coredump = aie2_get_aie_coredump;
 }
 
 static inline struct amdxdna_gem_obj *
@@ -1173,7 +1176,7 @@ int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 	req.context_id = context_id;
 	req.buf_size = to_buf_size(buf_hdl);
 
-	amdxdna_clflush_msg_buff(buf_hdl, 0, 0);
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), sizeof(*report));
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Get app health failed, ret %d status 0x%x", ret, resp.status);
@@ -1257,18 +1260,14 @@ int aie2_get_dev_revision(struct amdxdna_dev_hdl *ndev, enum aie2_dev_revision *
 	return 0;
 }
 
-int aie2_get_aie_coredump(struct amdxdna_dev *xdna,
+int aie2_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_msg_buf_hdl *list_hdl,
-			  struct amdxdna_hwctx *hwctx, u32 num_bufs)
+			  u32 num_bufs)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	DECLARE_AIE_MSG(get_coredump, MSG_OP_GET_COREDUMP);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	int ret;
-
-	if (!AIE_FEATURE_ON(&ndev->aie, AIE2_GET_COREDUMP)) {
-		XDNA_DBG(xdna, "Get coredump unsupported for the device or firmware version");
-		return -EOPNOTSUPP;
-	}
 
 	req.context_id = hwctx->fw_ctx_id;
 	req.num_bufs = num_bufs;
