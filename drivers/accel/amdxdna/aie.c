@@ -223,6 +223,10 @@ int amdxdna_query_sensors(struct amdxdna_client *client,
 	u32 sensors_count = 0, i;
 	int ret;
 
+#ifdef HAVE_7_2_amd_pmf_npu_metrics_npu_temp
+	npu_metrics.npu_temp = U16_MAX;
+#endif
+
 	ret = AIE_GET_PMF_NPU_METRICS(&npu_metrics);
 	if (ret)
 		return ret;
@@ -241,6 +245,27 @@ int amdxdna_query_sensors(struct amdxdna_client *client,
 
 	args->buffer_size -= sizeof(sensor);
 	sensors_count++;
+
+#ifdef HAVE_7_2_amd_pmf_npu_metrics_npu_temp
+	if (npu_metrics.npu_temp != U16_MAX) {
+		memset(&sensor, 0, sizeof(sensor));
+		sensor.type = AMDXDNA_SENSOR_TYPE_TEMPERATURE;
+		sensor.input = npu_metrics.npu_temp;
+		sensor.unitm = 0;
+		scnprintf(sensor.label, sizeof(sensor.label), "Temperature");
+		scnprintf(sensor.units, sizeof(sensor.units), "C");
+
+		if (args->buffer_size < sizeof(sensor))
+			goto out;
+
+		if (copy_to_user(u64_to_user_ptr(args->buffer) + sensors_count * sizeof(sensor),
+				 &sensor, sizeof(sensor)))
+			return -EFAULT;
+
+		args->buffer_size -= sizeof(sensor);
+		sensors_count++;
+	}
+#endif
 
 	for (i = 0; i < min_t(u32, total_col, 8); i++) {
 		memset(&sensor, 0, sizeof(sensor));

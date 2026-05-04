@@ -426,6 +426,20 @@ int main(void)
 }
 EOF
 
+# Test struct amd_pmf_npu_metrics has npu_temp field (7.2+ M80H series)
+try_compile HAVE_7_2_amd_pmf_npu_metrics_npu_temp << 'EOF'
+#include <linux/module.h>
+#include <linux/amd-pmf-io.h>
+int main(void)
+{
+	MODULE_IMPORT_NS("AMD_PMF");
+
+	struct amd_pmf_npu_metrics info;
+	info.npu_temp = 0;
+	return 0;
+}
+EOF
+
 #Test drm_fdinfo_print_size exists
 try_compile HAVE_6_14_drm_fdinfo_print_size << 'EOF'
 #include <drm/drm_file.h>
