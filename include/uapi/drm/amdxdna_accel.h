@@ -653,6 +653,38 @@ struct amdxdna_drm_aie_coredump {
 	__u32 pad;
 };
 
+/**
+ * enum amdxdna_aie_tile_access_type - AIE tile access path selector
+ * @AMDXDNA_AIE_TILE_ACCESS_REG: Single 32-bit tile-local register access.
+ * @AMDXDNA_AIE_TILE_ACCESS_MEM: DMA block transfer through firmware buffer.
+ */
+enum amdxdna_aie_tile_access_type {
+	AMDXDNA_AIE_TILE_ACCESS_REG,
+	AMDXDNA_AIE_TILE_ACCESS_MEM,
+};
+
+/**
+ * struct amdxdna_drm_aie_tile_access - The data for AIE tile read/write
+ */
+struct amdxdna_drm_aie_tile_access {
+	/** @pid: The Process ID of the process that created this context. */
+	__u64 pid;
+	/** @context_id: Context ID. */
+	__u32 context_id;
+	/** @col: The AIE column index. */
+	__u32 col;
+	/** @row: The AIE row index. */
+	__u32 row;
+	/** @addr: The AIE tile address to read/write. */
+	__u32 addr;
+	/** @size: The size of bytes to read/write. */
+	__u32 size;
+	/** @type: Access path, one of enum amdxdna_aie_tile_access_type. */
+	__u8  type;
+	/** @pad: MBZ. */
+	__u8  pad[3];
+};
+
 /*
  * Supported params in struct amdxdna_drm_get_array
  */
@@ -660,6 +692,7 @@ struct amdxdna_drm_aie_coredump {
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
+#define DRM_AMDXDNA_AIE_TILE_READ	9
 
 /**
  * struct amdxdna_drm_get_array - Get information array.
@@ -686,11 +719,31 @@ struct amdxdna_drm_get_array {
 	 * of tile dump data into buffer. If the buffer is too small the
 	 * driver sets element_size to the required size and returns -ENOSPC.
 	 *
-	 * Access: context owners may coredump their own contexts;
-	 * CAP_SYS_ADMIN may coredump any context.
+	 * Access: any process running as the same Linux user as the
+	 * context creator may coredump that context; CAP_SYS_ADMIN may
+	 * coredump any context.
 	 *
 	 * %DRM_AMDXDNA_BO_USAGE:
 	 * Returns usage of heap/internal/external BOs.
+	 *
+	 * %DRM_AMDXDNA_AIE_TILE_READ:
+	 * Read an AIE tile register or memory block.
+	 *
+	 * num_element must be 1. The first sizeof(struct
+	 * amdxdna_drm_aie_tile_access) bytes of buffer carry the request
+	 * (pid, context_id, col, row, addr, size, type). On success the
+	 * driver overwrites the first size bytes of buffer with the data
+	 * read back. If element_size is too small the driver sets it to the
+	 * required size and returns -ENOSPC.
+	 *
+	 * @type selects the access path and must be set explicitly to one
+	 * of enum amdxdna_aie_tile_access_type. REG is a single 32-bit
+	 * tile-local register access (requires size == 4); MEM is a DMA
+	 * block transfer through firmware.
+	 *
+	 * Access: any process running as the same Linux user as the
+	 * context creator may read that context; CAP_SYS_ADMIN may read
+	 * any context.
 	 */
 	__u32 param;
 	/**
@@ -723,18 +776,63 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_WRITE_AIE_REG,
 	DRM_AMDXDNA_SET_FORCE_PREEMPT,
 	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
+	DRM_AMDXDNA_AIE_TILE_WRITE = 7,
 };
 
 /**
  * struct amdxdna_drm_set_state - Set the state of the AIE hardware.
- * @param: Value in enum amdxdna_drm_set_param.
- * @buffer_size: Size of the input param.
- * @buffer: Pointer to the input param.
  */
 struct amdxdna_drm_set_state {
-	__u32 param; /* in */
-	__u32 buffer_size; /* in */
-	__u64 buffer; /* in */
+	/**
+	 * @param:
+	 *
+	 * Supported params:
+	 *
+	 * %DRM_AMDXDNA_SET_POWER_MODE:
+	 * Sets the power mode.
+	 *
+	 * %DRM_AMDXDNA_WRITE_AIE_MEM:
+	 * Writes AIE memory (legacy).
+	 *
+	 * %DRM_AMDXDNA_WRITE_AIE_REG:
+	 * Writes AIE register (legacy).
+	 *
+	 * %DRM_AMDXDNA_SET_FORCE_PREEMPT:
+	 * Sets force preempt state.
+	 *
+	 * %DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
+	 * Sets frame boundary preempt state.
+	 *
+	 * %DRM_AMDXDNA_AIE_TILE_WRITE:
+	 * Write an AIE tile register or memory block.
+	 *
+	 * The first sizeof(struct amdxdna_drm_aie_tile_access) bytes of
+	 * buffer carry the request (pid, context_id, col, row, addr, size,
+	 * type). The next size bytes contain the data to write. If
+	 * buffer_size is too small the driver sets it to the required size
+	 * and returns -ENOSPC.
+	 *
+	 * @type selects the access path and must be set explicitly to one
+	 * of enum amdxdna_aie_tile_access_type. REG is a single 32-bit
+	 * tile-local register access (requires size == 4); MEM is a DMA
+	 * block transfer through firmware.
+	 *
+	 * Access: requires CAP_SYS_ADMIN (the carrier SET_STATE ioctl is
+	 * DRM_ROOT_ONLY).
+	 */
+	__u32 param;
+	/**
+	 * @buffer_size:
+	 *
+	 * Size of the input buffer in bytes.
+	 */
+	__u32 buffer_size;
+	/**
+	 * @buffer:
+	 *
+	 * Pointer to the input buffer.
+	 */
+	__u64 buffer;
 };
 
 /**

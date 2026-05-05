@@ -76,16 +76,27 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 	kfree(hwctx);
 }
 
+/*
+ * Walks @client's hwctxs invoking @walk. If @filter is set, @walk runs
+ * only on the matching hwctx; returns -ENOENT if none matched.
+ * Otherwise @walk runs on every hwctx; halts on the first non-zero return.
+ */
 int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
+		       bool (*filter)(struct amdxdna_hwctx *hwctx, void *arg),
 		       int (*walk)(struct amdxdna_hwctx *hwctx, void *arg))
 {
+	int ret = filter ? -ENOENT : 0;
 	struct amdxdna_hwctx *hwctx;
 	unsigned long hwctx_id;
-	int ret = 0, idx;
+	int idx;
 
 	idx = srcu_read_lock(&client->hwctx_srcu);
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		if (filter && !filter(hwctx, arg))
+			continue;
 		ret = walk(hwctx, arg);
+		if (filter)
+			break;
 		if (ret)
 			break;
 	}

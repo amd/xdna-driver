@@ -56,9 +56,10 @@ MODULE_FIRMWARE("amdnpu/1B0B_10/cert.dev.sbin");
  * 0.10: Add new device type AMDXDNA_DEV_TYPE_UMQ
  * 0.11: Support AIE coredump
  * 0.12: Add classic device type of NPU3
+ * 0.13: Support AIE tile register/memory read/write
  */
 #define AMDXDNA_DRIVER_MAJOR		0
-#define AMDXDNA_DRIVER_MINOR		12
+#define AMDXDNA_DRIVER_MINOR		13
 
 /*
  * Bind the driver base on (vendor_id, device_id) pair and later use the

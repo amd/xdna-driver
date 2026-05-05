@@ -374,7 +374,8 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 
 	/* Go through each hardware context and mark the AIE columns that are active */
 	list_for_each_entry(client, &xdna->client_list, node)
-		amdxdna_hwctx_walk(client, &aie_bitmap, amdxdna_hwctx_col_map);
+		amdxdna_hwctx_walk(client, &aie_bitmap, NULL,
+				   amdxdna_hwctx_col_map);
 
 	*cols_filled = 0;
 	req.dump_buff_addr = to_dma_addr(buf_hdl, 0);
@@ -911,6 +912,11 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 
 	if (AIE_FEATURE_ON(&ndev->aie, AIE2_GET_COREDUMP))
 		ndev->aie.msg_ops.get_coredump = aie2_get_aie_coredump;
+
+	if (AIE_FEATURE_ON(&ndev->aie, AIE2_RW_ACCESS)) {
+		ndev->aie.msg_ops.rw_reg = aie2_rw_aie_reg;
+		ndev->aie.msg_ops.rw_mem = aie2_rw_aie_mem;
+	}
 }
 
 static inline struct amdxdna_gem_obj *
@@ -1265,8 +1271,8 @@ int aie2_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  u32 num_bufs)
 {
 	DECLARE_AIE_MSG(get_coredump, MSG_OP_GET_COREDUMP);
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	int ret;
 
 	req.context_id = hwctx->fw_ctx_id;
@@ -1284,4 +1290,66 @@ int aie2_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 	}
 
 	return ret;
+}
+
+int aie2_rw_aie_reg(struct amdxdna_hwctx *hwctx, bool is_read,
+		    u8 row, u8 col, u32 addr, u32 *value)
+{
+	DECLARE_AIE_MSG(aie_rw_access, MSG_OP_AIE_RW_ACCESS);
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	enum aie2_access_type type;
+	int ret;
+
+	type = is_read ? AIE2_ACCESS_TYPE_REG_READ : AIE2_ACCESS_TYPE_REG_WRITE;
+
+	req.type = type;
+	req.ctx_id = hwctx->fw_ctx_id;
+	req.row = row;
+	req.col = col;
+	req.reg.aie_offset = addr;
+	if (!is_read)
+		req.reg.write_value = *value;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE reg %s failed, ret %d",
+			 is_read ? "read" : "write", ret);
+		return ret;
+	}
+
+	if (is_read)
+		*value = resp.reg_read_value;
+
+	return 0;
+}
+
+int aie2_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
+		    u8 row, u8 col, u32 aie_addr,
+		    dma_addr_t dram_addr, u32 size)
+{
+	DECLARE_AIE_MSG(aie_rw_access, MSG_OP_AIE_RW_ACCESS);
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	enum aie2_access_type type;
+	int ret;
+
+	type = is_read ? AIE2_ACCESS_TYPE_MEM_READ : AIE2_ACCESS_TYPE_MEM_WRITE;
+
+	req.type = type;
+	req.ctx_id = hwctx->fw_ctx_id;
+	req.row = row;
+	req.col = col;
+	req.mem.aie_offset = aie_addr;
+	req.mem.dram_addr = dram_addr;
+	req.mem.size = size;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "AIE mem %s failed, ret %d",
+			 is_read ? "read" : "write", ret);
+		return ret;
+	}
+
+	return 0;
 }

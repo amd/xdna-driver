@@ -48,7 +48,8 @@ static bool aie2_legacy_tdr_detect(struct amdxdna_dev *xdna)
 
 	/* Check if there are any pending jobs */
 	amdxdna_for_each_client(xdna, client) {
-		pending = amdxdna_hwctx_walk(client, NULL, aie2_legacy_tdr_hwctx_pending);
+		pending = amdxdna_hwctx_walk(client, NULL, NULL,
+					     aie2_legacy_tdr_hwctx_pending);
 		if (pending)
 			break;
 	}
@@ -153,7 +154,7 @@ static void aie2_tdr_recover_all(struct amdxdna_dev *xdna)
 	struct amdxdna_client *client;
 
 	amdxdna_for_each_client(xdna, client) {
-		amdxdna_hwctx_walk(client, NULL, aie2_tdr_stop_hwctx);
+		amdxdna_hwctx_walk(client, NULL, NULL, aie2_tdr_stop_hwctx);
 		aie2_hwctx_resume(client);
 	}
 }

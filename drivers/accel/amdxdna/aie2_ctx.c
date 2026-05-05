@@ -279,7 +279,7 @@ void aie2_hwctx_suspend(struct amdxdna_client *client)
 	 * and abort all commands.
 	 */
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-	amdxdna_hwctx_walk(client, NULL, aie2_hwctx_suspend_cb);
+	amdxdna_hwctx_walk(client, NULL, NULL, aie2_hwctx_suspend_cb);
 }
 
 static int aie2_hwctx_resume_cb(struct amdxdna_hwctx *hwctx, void *arg)
@@ -296,7 +296,7 @@ int aie2_hwctx_resume(struct amdxdna_client *client)
 	 * regenerated. If this happen, when submit message to this
 	 * mailbox channel, error will return.
 	 */
-	return amdxdna_hwctx_walk(client, NULL, aie2_hwctx_resume_cb);
+	return amdxdna_hwctx_walk(client, NULL, NULL, aie2_hwctx_resume_cb);
 }
 
 static void

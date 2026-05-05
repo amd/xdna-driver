@@ -746,6 +746,16 @@ struct amdxdna_drm_get_dpt_state {
 };
 
 /**
+ * enum amdxdna_aie_tile_access_type - AIE tile access path selector
+ * @AMDXDNA_AIE_TILE_ACCESS_REG: Single 32-bit tile-local register access.
+ * @AMDXDNA_AIE_TILE_ACCESS_MEM: DMA block transfer through firmware buffer.
+ */
+enum amdxdna_aie_tile_access_type {
+	AMDXDNA_AIE_TILE_ACCESS_REG,
+	AMDXDNA_AIE_TILE_ACCESS_MEM,
+};
+
+/**
  * struct amdxdna_drm_aie_tile_access - The data for AIE memory/register read/write
  * @pid: The Process ID of the process that created this context.
  * @context_id: The hw context id.
@@ -753,6 +763,9 @@ struct amdxdna_drm_get_dpt_state {
  * @row:   The AIE row index
  * @addr:  The AIE memory address to read/write
  * @size:  The size of bytes to read/write
+ * @type:  Access path, one of enum amdxdna_aie_tile_access_type. REG
+ *         requires size == 4; MEM is a DMA block transfer.
+ * @pad:   MBZ.
  *
  * This is used for DRM_AMDXDNA_AIE_TILE_READ and DRM_AMDXDNA_AIE_TILE_WRITE
  * parameters.
@@ -764,7 +777,8 @@ struct amdxdna_drm_aie_tile_access {
 	__u32 row;
 	__u32 addr;
 	__u32 size;
-	__u32 pad;
+	__u8  type;
+	__u8  pad[3];
 };
 
 /**

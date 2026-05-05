@@ -56,6 +56,11 @@ struct aie_msg_ops {
 	int (*get_coredump)(struct amdxdna_hwctx *hwctx,
 			    struct amdxdna_msg_buf_hdl *list_hdl,
 			    u32 num_bufs);
+	int (*rw_reg)(struct amdxdna_hwctx *hwctx, bool is_read,
+		      u8 row, u8 col, u32 addr, u32 *value);
+	int (*rw_mem)(struct amdxdna_hwctx *hwctx, bool is_read,
+		      u8 row, u8 col, u32 aie_addr,
+		      dma_addr_t dram_addr, u32 size);
 };
 
 struct aie_device {
@@ -173,6 +178,12 @@ struct amdxdna_coredump_buf_entry {
 int amdxdna_get_coredump(struct aie_device *aie,
 			 struct amdxdna_client *client,
 			 struct amdxdna_drm_get_array *args);
+int amdxdna_aie_tile_read(struct aie_device *aie,
+			  struct amdxdna_client *client,
+			  struct amdxdna_drm_get_array *args);
+int amdxdna_aie_tile_write(struct aie_device *aie,
+			   struct amdxdna_client *client,
+			   struct amdxdna_drm_set_state *args);
 
 /* aie_psp.c */
 struct psp_device *aiem_psp_create(struct drm_device *ddev, struct psp_config *conf);

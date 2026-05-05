@@ -204,6 +204,7 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job);
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
+		       bool (*filter)(struct amdxdna_hwctx *hwctx, void *arg),
 		       int (*walk)(struct amdxdna_hwctx *hwctx, void *arg));
 int amdxdna_hwctx_sync_debug_bo(struct amdxdna_client *client, u32 debug_bo_hdl);
 

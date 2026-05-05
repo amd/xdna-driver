@@ -37,6 +37,8 @@ enum aie2_msg_opcode {
 	MSG_OP_GET_DEV_REVISION            = 0x117,
 	MSG_OP_GET_COREDUMP                = 0x119,
 	MSG_OP_MAX_DRV_OPCODE,
+	MSG_OP_AIE_RW_ACCESS               = 0x203,
+	MSG_OP_MAX_ASYNC_OPCODE,
 	MSG_OP_GET_PROTOCOL_VERSION        = 0x301,
 	MSG_OP_MAX_OPCODE
 };
@@ -556,6 +558,38 @@ struct get_coredump_resp {
 	enum aie2_msg_status	status;
 	__u32			required_buffer_size;
 	__u32			reserved[7];
+} __packed;
+
+enum aie2_access_type {
+	AIE2_ACCESS_TYPE_MEM_READ,
+	AIE2_ACCESS_TYPE_MEM_WRITE,
+	AIE2_ACCESS_TYPE_REG_READ,
+	AIE2_ACCESS_TYPE_REG_WRITE,
+	AIE2_ACCESS_TYPE_MAX
+};
+
+struct aie_rw_access_req {
+	enum aie2_access_type	type;
+	__u8			ctx_id;
+	__u8			row;
+	__u8			col;
+	__u8			reserved;
+	union {
+		struct {
+			__u64	dram_addr;
+			__u32	aie_offset;
+			__u32	size;
+		} __packed mem;
+		struct {
+			__u32	aie_offset;
+			__u32	write_value;
+		} __packed reg;
+	};
+} __packed;
+
+struct aie_rw_access_resp {
+	enum aie2_msg_status	status;
+	__u32			reg_read_value;
 } __packed;
 
 #endif /* _AIE2_MSG_PRIV_H_ */

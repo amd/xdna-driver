@@ -820,7 +820,7 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		if (!amdxdna_client_visible(tmp_client))
 			continue;
-		ret = amdxdna_hwctx_walk(tmp_client, &array_args,
+		ret = amdxdna_hwctx_walk(tmp_client, &array_args, NULL,
 					 aie2_hwctx_status_cb);
 		if (ret)
 			break;
@@ -902,7 +902,7 @@ static int aie2_get_telemetry(struct amdxdna_client *client,
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
 		if (!amdxdna_client_visible(tmp_client))
 			continue;
-		ret = amdxdna_hwctx_walk(tmp_client, &header->map,
+		ret = amdxdna_hwctx_walk(tmp_client, &header->map, NULL,
 					 aie2_fill_hwctx_map);
 		if (ret)
 			return ret;
@@ -1028,7 +1028,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	array_args.num_element = args->num_element * args->element_size /
 				array_args.element_size;
 	list_for_each_entry(tmp_client, &xdna->client_list, node) {
-		ret = amdxdna_hwctx_walk(tmp_client, &array_args,
+		ret = amdxdna_hwctx_walk(tmp_client, &array_args, NULL,
 					 aie2_hwctx_status_cb);
 		if (ret)
 			break;
@@ -1067,6 +1067,9 @@ static int aie2_get_array(struct amdxdna_client *client,
 		break;
 	case DRM_AMDXDNA_BO_USAGE:
 		ret = amdxdna_drm_get_bo_usage(&xdna->ddev, args);
+		break;
+	case DRM_AMDXDNA_AIE_TILE_READ:
+		ret = amdxdna_aie_tile_read(&ndev->aie, client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -1141,6 +1144,7 @@ static int aie2_set_preempt_state(struct amdxdna_client *client,
 static int aie2_set_state(struct amdxdna_client *client,
 			  struct amdxdna_drm_set_state *args)
 {
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_dev *xdna = client->xdna;
 	int ret, idx;
 
@@ -1158,6 +1162,9 @@ static int aie2_set_state(struct amdxdna_client *client,
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
 		ret = aie2_set_preempt_state(client, args);
+		break;
+	case DRM_AMDXDNA_AIE_TILE_WRITE:
+		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
