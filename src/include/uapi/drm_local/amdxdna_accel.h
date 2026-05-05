@@ -458,6 +458,7 @@ struct amdxdna_drm_query_sensor {
 	__s8  unitm;
 #define AMDXDNA_SENSOR_TYPE_POWER		0
 #define AMDXDNA_SENSOR_TYPE_COLUMN_UTILIZATION	1
+#define AMDXDNA_SENSOR_TYPE_TEMPERATURE		2
 	__u8  type;
 	__u8  pad[6];
 };
