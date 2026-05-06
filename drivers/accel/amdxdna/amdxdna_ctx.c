@@ -754,6 +754,7 @@ int amdxdna_hwctx_col_list(struct amdxdna_hwctx *hwctx, u32 row_count,
 }
 
 int amdxdna_hwctx_priv_init(struct amdxdna_hwctx *hwctx,
+			    struct amdxdna_hwctx_priv *priv,
 			    const struct drm_sched_backend_ops *sched_ops,
 			    u32 timeout_ms)
 {
@@ -769,19 +770,15 @@ int amdxdna_hwctx_priv_init(struct amdxdna_hwctx *hwctx,
 		.dev = xdna->ddev.dev,
 	};
 #endif
-	struct amdxdna_hwctx_priv *priv;
 	struct drm_gpu_scheduler *sched;
 	int i, ret;
 
-#ifdef HAVE_7_0_kmalloc_ops
-	priv = kzalloc_obj(*hwctx->priv);
-#else
-	priv = kzalloc(sizeof(*hwctx->priv), GFP_KERNEL);
-#endif
-	if (!priv)
-		return -ENOMEM;
-	hwctx->priv = priv;
+        if (!priv) {
+                XDNA_ERR(xdna, "Invalid hwctx priv");
+                return -EINVAL;
+        }
 
+	hwctx->priv = priv;
 	sema_init(&priv->job_sem, HWCTX_MAX_CMDS);
 
 	for (i = 0; i < ARRAY_SIZE(priv->cmd_buf); i++) {
@@ -840,13 +837,12 @@ free_cmd_bufs:
 			break;
 		drm_gem_object_put(to_gobj(priv->cmd_buf[i]));
 	}
-	kfree(priv);
 	return ret;
 }
 
-void amdxdna_hwctx_priv_fini(struct amdxdna_hwctx *hwctx)
+void amdxdna_hwctx_priv_fini(struct amdxdna_hwctx *hwctx,
+			     struct amdxdna_hwctx_priv *priv)
 {
-	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	int idx;
 
 	drm_sched_fini(&priv->sched);
@@ -856,13 +852,13 @@ void amdxdna_hwctx_priv_fini(struct amdxdna_hwctx *hwctx)
 
 	mutex_destroy(&priv->io_lock);
 	kfree(hwctx->col_list);
-	kfree(priv);
 }
 
 void amdxdna_hwctx_fini(struct amdxdna_hwctx *hwctx,
 			void (*release_resource)(struct amdxdna_hwctx *hwctx))
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 
 	/* Stop scheduler, release hw resource, restart to drain pending jobs */
 	drm_sched_stop(&hwctx->priv->sched, NULL);
@@ -885,7 +881,7 @@ void amdxdna_hwctx_fini(struct amdxdna_hwctx *hwctx,
 	mutex_lock(&xdna->dev_lock);
 
 	amdxdna_ctx_syncobj_destroy(hwctx);
-	amdxdna_hwctx_priv_fini(hwctx);
+	amdxdna_hwctx_priv_fini(hwctx, priv);
 }
 
 int amdxdna_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)

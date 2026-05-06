@@ -42,7 +42,9 @@ static const struct pci_device_id pci_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1502) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f0) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f2) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x17f3) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1B0B) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_AMD, 0x1B0C) },
 	{0}
 };
 
@@ -54,7 +56,9 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x17f0, 0x11, &dev_npu5_info },
 	{ 0x17f0, 0x20, &dev_npu6_info },
 	{ 0x17f2, 0x10, &dev_npu3_pf_info },
+	{ 0x17f3, 0x10, &dev_npu3_vf_info },
 	{ 0x1B0B, 0x10, &dev_npu3_pf_info },
+	{ 0x1B0C, 0x10, &dev_npu3_vf_info },
 	{0}
 };
 
@@ -156,10 +160,7 @@ static int __init amdxdna_mod_init(void)
 {
 	int ret;
 
-	amdxdna_carveout_init();
 	ret = pci_register_driver(&amdxdna_pci_driver);
-	if (ret)
-		amdxdna_carveout_fini();
 
 	return ret;
 }
@@ -167,7 +168,6 @@ static int __init amdxdna_mod_init(void)
 static void __exit amdxdna_mod_exit(void)
 {
 	pci_unregister_driver(&amdxdna_pci_driver);
-	amdxdna_carveout_fini();
 }
 
 module_init(amdxdna_mod_init);

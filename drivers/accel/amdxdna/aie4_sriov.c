@@ -7,7 +7,7 @@
 #include <drm/drm_print.h>
 #include <linux/pci.h>
 
-#include "aie.h"
+#include "amdxdna_aie.h"
 #include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "amdxdna_mailbox.h"
@@ -44,6 +44,9 @@ int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	int ret;
+
+	if (!pci_num_vf(pdev))
+		return 0;
 
 	ret = pci_vfs_assigned(pdev);
 	if (ret) {

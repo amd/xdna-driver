@@ -10,7 +10,7 @@
 #include <drm/gpu_scheduler.h>
 #include <linux/iopoll.h>
 
-#include "aie.h"
+#include "amdxdna_aie.h"
 
 #define SMU_RESULT_OK   1
 

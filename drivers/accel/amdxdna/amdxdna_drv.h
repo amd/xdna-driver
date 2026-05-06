@@ -6,8 +6,10 @@
 #ifndef _AMDXDNA_DRV_H_
 #define _AMDXDNA_DRV_H_
 
+#include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_print.h>
+#include <linux/capability.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
 #include <linux/workqueue.h>
@@ -39,14 +41,19 @@
 
 extern const struct drm_driver amdxdna_drm_drv;
 
+static inline bool amdxdna_is_admin(void)
+{
+	return capable(CAP_SYS_ADMIN);
+}
+
 struct amdxdna_client;
 struct amdxdna_dev;
 struct amdxdna_drm_get_info;
 struct amdxdna_drm_set_state;
-struct amdxdna_drm_get_array;
 struct amdxdna_gem_obj;
 struct amdxdna_hwctx;
 struct amdxdna_sched_job;
+struct amdxdna_msg_buf_hdl;
 
 /*
  * 0.0: Initial version
@@ -74,17 +81,20 @@ struct amdxdna_dev_ops {
 	int (*resume)(struct amdxdna_dev *xdna);
 	int (*suspend)(struct amdxdna_dev *xdna);
 	int (*sriov_configure)(struct amdxdna_dev *xdna, int num_vfs);
-	const struct drm_sched_backend_ops *sched_ops;
+	int (*mmap)(struct amdxdna_client *client, struct vm_area_struct *vma);
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
 	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 	int (*hwctx_sync_debug_bo)(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl);
 	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
-	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms);
+	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
+	int (*get_coredump)(struct amdxdna_dev *xdna,
+			    struct amdxdna_msg_buf_hdl *list_hdl,
+			    struct amdxdna_hwctx *hwctx, u32 num_bufs);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 	int (*hwctx_heap_expand)(struct amdxdna_hwctx *hwctx);
 };
@@ -101,9 +111,7 @@ struct amdxdna_fw_feature_tbl {
 
 /*
  * struct amdxdna_dev_info - Device hardware information
- * Record device static information, like reg, mbox, PSP, SMU bar index.
- * PCI devices populate all fields; auxiliary-bus devices use a subset and
- * leave BAR/memory fields at zero when unused.
+ * Record device static information, like reg, mbox, PSP, SMU bar index
  */
 struct amdxdna_dev_info {
 	int				reg_bar;
@@ -111,6 +119,7 @@ struct amdxdna_dev_info {
 	int				sram_bar;
 	int				psp_bar;
 	int				smu_bar;
+	int				doorbell_bar;
 	int				device_type;
 	int				first_col;
 	u32				dev_mem_buf_shift;
@@ -131,6 +140,8 @@ struct amdxdna_fw_ver {
 	u32 build;
 };
 
+struct amdxdna_carveout;
+
 struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
@@ -148,6 +159,8 @@ struct amdxdna_dev {
 	struct iova_domain		iovad;
 	/* Accurate board name queried from firmware, or default_vbnv as fallback */
 	const char			*vbnv;
+
+	struct amdxdna_carveout		*carveout;
 };
 
 /*
@@ -157,6 +170,13 @@ struct amdxdna_device_id {
 	unsigned short device;
 	u8 revision;
 	const struct amdxdna_dev_info *dev_info;
+};
+
+struct amdxdna_io_stats {
+	spinlock_t			lock; /* protect io stats */
+	int				job_depth;
+	u64				start_time;
+	u64				busy_time;
 };
 
 /*
@@ -184,6 +204,8 @@ struct amdxdna_client {
 	size_t				heap_usage;
 	size_t				total_bo_usage;
 	size_t				total_int_bo_usage;
+
+	struct amdxdna_io_stats		io_stats;
 };
 
 #define amdxdna_for_each_hwctx(client, hwctx_id, entry)		\
@@ -191,6 +213,14 @@ struct amdxdna_client {
 
 #define amdxdna_for_each_client(xdna, client)			\
 	list_for_each_entry(client, &(xdna)->client_list, node)
+
+/* Add device info below */
+extern const struct amdxdna_dev_info dev_npu1_info;
+extern const struct amdxdna_dev_info dev_npu3_pf_info;
+extern const struct amdxdna_dev_info dev_npu3_vf_info;
+extern const struct amdxdna_dev_info dev_npu4_info;
+extern const struct amdxdna_dev_info dev_npu5_info;
+extern const struct amdxdna_dev_info dev_npu6_info;
 
 int amdxdna_sysfs_init(struct amdxdna_dev *xdna);
 void amdxdna_sysfs_fini(struct amdxdna_dev *xdna);

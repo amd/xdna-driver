@@ -13,11 +13,10 @@
 #include <linux/limits.h>
 #include <linux/semaphore.h>
 
-#include "aie.h"
+#include "amdxdna_aie.h"
+#include "amdxdna_ctx.h"
 #include "aie2_msg_priv.h"
 #include "amdxdna_mailbox.h"
-
-struct amdxdna_qos_info;
 
 /* Firmware determines device memory base address and size */
 #define AIE2_DEVM_BASE		0x4000000
@@ -83,29 +82,6 @@ struct amdxdna_fw_ver;
 struct amdxdna_hwctx;
 struct amdxdna_sched_job;
 
-struct aie_version {
-	u16 major;
-	u16 minor;
-};
-
-struct aie_tile_metadata {
-	u16 row_count;
-	u16 row_start;
-	u16 dma_channel_count;
-	u16 lock_count;
-	u16 event_reg_count;
-};
-
-struct aie_metadata {
-	u32 size;
-	u16 cols;
-	u16 rows;
-	struct aie_version version;
-	struct aie_tile_metadata core;
-	struct aie_tile_metadata mem;
-	struct aie_tile_metadata shim;
-};
-
 enum rt_config_category {
 	AIE2_RT_CFG_INIT,
 	AIE2_RT_CFG_CLK_GATING,
@@ -123,6 +99,11 @@ struct rt_config {
 struct dpm_clk_freq {
 	u32	npuclk;
 	u32	hclk;
+};
+
+/* AIE2-specific hardware context private data */
+struct aie2_hwctx_priv {
+	u32	req_dpm_level;
 };
 
 enum aie2_dev_status {
@@ -150,7 +131,6 @@ enum aie2_tdr_status {
 };
 
 struct aie2_tdr {
-	enum aie2_tdr_status status; /* status of TDR */
 	/* TDR progress tracker, used to detect if device is making progress */
 	enum aie2_tdr_status progress;
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
@@ -166,7 +146,6 @@ struct amdxdna_dev_hdl {
 
 	u32				total_col;
 	struct aie_version		version;
-	struct aie_metadata		metadata;
 	struct aie2_exec_msg_ops	*exec_msg_ops;
 
 	/* power management and clock*/
@@ -174,8 +153,6 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
-#define DPM_MAX_LEVELS			8
-	u32				dpm_refcnt[DPM_MAX_LEVELS];
 	u32				clk_gating;
 	u32				npuclk_freq;
 	u32				hclk_freq;
@@ -192,6 +169,7 @@ struct amdxdna_dev_hdl {
 	u32				hwctx_num;
 
 	struct amdxdna_async_error	last_async_err;
+	enum aie2_tdr_status		tdr_status;
 	struct aie2_tdr			tdr; /* TDR for device recovery */
 };
 
@@ -215,6 +193,7 @@ enum aie2_fw_feature {
 	AIE2_ADD_HOST_BUFFER,
 	AIE2_UPDATE_PROPERTY,
 	AIE2_GET_DEV_REVISION,
+	AIE2_GET_COREDUMP,
 	AIE2_FEATURE_MAX
 };
 
@@ -255,14 +234,9 @@ extern const struct amdxdna_rev_vbnv npu4_rev_vbnv_tbl[];
 extern const struct aie2_hw_ops npu4_hw_ops;
 
 /* aie2_pm.c */
-int aie2_pm_init(struct amdxdna_dev_hdl *ndev);
-int aie2_pm_resume(struct amdxdna_dev_hdl *ndev);
+int aie2_pm_start(struct amdxdna_dev_hdl *ndev);
 int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
 int aie2_pm_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-int aie2_pm_update_dpm_ref(struct amdxdna_dev_hdl *ndev, u32 level, bool add);
-#define aie2_pm_request_dpm_level(ndev, level)	aie2_pm_update_dpm_ref(ndev, level, true)
-#define aie2_pm_release_dpm_level(ndev, level)	aie2_pm_update_dpm_ref(ndev, level, false)
-u32 aie2_pm_calc_dpm_level(struct amdxdna_dev_hdl *ndev, u32 opc, struct amdxdna_qos_info *qos);
 
 /* aie2_error.c */
 int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
@@ -286,6 +260,9 @@ int aie2_query_firmware_version(struct amdxdna_dev_hdl *ndev,
 int aie2_query_app_health(struct amdxdna_dev_hdl *ndev, u32 context_id,
 			  struct app_health_report *report);
 int aie2_get_dev_revision(struct amdxdna_dev_hdl *ndev, enum aie2_dev_revision *rev);
+int aie2_get_aie_coredump(struct amdxdna_dev *xdna,
+			  struct amdxdna_msg_buf_hdl *list_hdl,
+			  struct amdxdna_hwctx *hwctx, u32 num_bufs);
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
@@ -311,10 +288,6 @@ int aie2_sync_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 int aie2_config_debug_bo(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 			 int (*notify_cb)(void *, void __iomem *, size_t));
 int aie2_update_prop_time_quota(struct amdxdna_dev_hdl *ndev, u32 us);
-void *aie2_alloc_msg_buffer(struct amdxdna_dev_hdl *ndev, u32 *size,
-			    dma_addr_t *dma_addr);
-void aie2_free_msg_buffer(struct amdxdna_dev_hdl *ndev, size_t size,
-			  void *cpu_addr, dma_addr_t dma_addr);
 
 /* aie2_hwctx.c */
 int aie2_hwctx_init(struct amdxdna_hwctx *hwctx);
@@ -325,11 +298,10 @@ void aie2_hwctx_suspend(struct amdxdna_client *client);
 int aie2_hwctx_resume(struct amdxdna_client *client);
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx);
-void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 
 /* TDR APIs */
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
-extern int tdr_timeout_ms;
+extern uint tdr_timeout_ms;
 extern bool tdr_dump_only;
 
 void aie2_tdr_start(struct amdxdna_dev *xdna);

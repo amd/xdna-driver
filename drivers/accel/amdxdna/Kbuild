@@ -35,17 +35,18 @@ amdxdna-y := \
 	amdxdna_ubuf.o \
 	amdxdna_cbuf.o \
 	amdxdna_xen.o \
+	amdxdna_aie.o \
+	amdxdna_aie_psp.o \
+	amdxdna_aie_smu.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
-	aie.o \
-	aie_psp.o \
-	aie_smu.o \
 	aie2_ctx.o \
 	aie2_error.o \
 	aie2_message.o \
 	aie2_pci.o \
 	aie2_pm.o \
 	aie2_tdr.o \
+	aie4_ctx.o \
 	aie4_message.o \
 	amdxdna_pci_drv.o \
 	aie4_pci.o \
@@ -57,6 +58,9 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 
 amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
+
+amdxdna-$(CONFIG_DEBUG_FS) += \
+	amdxdna_debugfs.o \
 
 amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
 	amdxdna_aux_drv.o \
