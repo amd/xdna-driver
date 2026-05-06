@@ -10,7 +10,7 @@
 #include <linux/iopoll.h>
 #include <linux/slab.h>
 
-#include "aie.h"
+#include "amdxdna_aie.h"
 #include "amdxdna_xen.h"
 
 #define PSP_STATUS_READY	BIT(31)

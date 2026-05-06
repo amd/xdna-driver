@@ -18,6 +18,7 @@
 #include "amdxdna_gem.h"
 #include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_aie.h"
 
 static int amdxdna_sva_init(struct amdxdna_client *client)
 {

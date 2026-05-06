@@ -139,7 +139,6 @@ static int readonly_va_entry(struct amdxdna_drm_va_entry *va_ent)
 	vma = find_vma(mm, va_ent->vaddr);
 	if (!vma ||
 	    vma->vm_start > va_ent->vaddr ||
-	    vma->vm_end < va_ent->vaddr ||
 	    vma->vm_end - va_ent->vaddr < va_ent->len)
 		ret = -ENOENT;
 	else

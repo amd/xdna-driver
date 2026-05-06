@@ -4,17 +4,24 @@
  */
 
 #include "drm/amdxdna_accel.h"
+#include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
 #include <linux/firmware.h>
 #include <linux/sizes.h>
 
+#include "amdxdna_aie.h"
 #include "aie4_pci.h"
+#include "aie4_msg_priv.h"
+#include "amdxdna_mailbox.h"
+#include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
+#include "amdxdna_pm.h"
 
 #define NO_IOHUB		0
 #define CERTFW_MAX_SIZE         (SZ_32K + SZ_256)
 #define PSP_NOTIFY_INTR		0xD007BE11
+#define AIE4_TOTAL_COLUMN	3
 
 /*
  * The management mailbox channel is allocated by firmware.
@@ -197,8 +204,9 @@ free_channel:
 	return ret;
 }
 
-static int aie4_mailbox_init(struct amdxdna_dev *xdna)
+static int aie4_mailbox_init(struct amdxdna_dev_hdl *ndev)
 {
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct mailbox_info mbox_info;
 	int ret;
 
@@ -234,49 +242,112 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-static int aie4_hw_start(struct amdxdna_dev *xdna)
+static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	DECLARE_AIE_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	req.partition_col_start = 0;
+	req.partition_col_count = AIE4_TOTAL_COLUMN;
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "partition init failed: %d", ret);
+		return ret;
+	}
+
+	ndev->partition_id = resp.partition_id;
+	return 0;
+}
+
+static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	req.partition_id = ndev->partition_id;
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "partition fini failed: %d", ret);
+}
+
+static int aie4_query(struct amdxdna_dev_hdl *ndev)
+{
+	return aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+}
+
+static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
+{
 	int ret;
 
 	ret = aie4_fw_load(ndev);
 	if (ret)
 		return ret;
 
-	ret = aie4_mailbox_init(xdna);
+	ret = aie4_mailbox_init(ndev);
 	if (ret)
 		goto fw_unload;
 
+	/* Firmware releases the DRAM work buffer internally during suspend_fw */
+	ret = aie4_attach_work_buffer(ndev,
+				      to_dma_addr(ndev->work_buf_hdl, 0),
+				      to_buf_size(ndev->work_buf_hdl));
+	if (ret)
+		goto mbox_fini;
+
 	return 0;
 
+mbox_fini:
+	aie4_mailbox_fini(ndev);
 fw_unload:
 	aie4_fw_unload(ndev);
 
 	return ret;
 }
 
-static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
+static void aie4_pf_hw_stop(struct amdxdna_dev_hdl *ndev)
 {
-	int ret;
-
-	/* No paired resume needed, fw is stateless */
-	ret = aie4_suspend_fw(ndev);
-	if (ret)
-		XDNA_ERR(ndev->aie.xdna, "suspend_fw failed, ret %d", ret);
-	else
-		XDNA_DBG(ndev->aie.xdna, "npu firmware suspended");
-}
-
-static void aie4_hw_stop(struct amdxdna_dev *xdna)
-{
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	aie4_mgmt_fw_fini(ndev);
+	aie4_suspend_fw(ndev);
 	aie4_mailbox_fini(ndev);
-
 	aie4_fw_unload(ndev);
+}
+
+static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_mailbox_init(ndev);
+	if (ret)
+		return ret;
+
+	ret = aie4_query(ndev);
+	if (ret)
+		goto mailbox_fini;
+
+	ret = aie4_partition_init(ndev);
+	if (ret)
+		goto mailbox_fini;
+
+	return 0;
+
+mailbox_fini:
+	aie4_mailbox_fini(ndev);
+	return ret;
+}
+
+static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	aie4_partition_fini(ndev);
+	aie4_mailbox_fini(ndev);
 }
 
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
@@ -374,14 +445,24 @@ static int aie4_prepare_firmware(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
-static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
+static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct amdxdna_dev_hdl *ndev;
 	void __iomem *tbl[PCI_NUM_RESOURCES] = {0};
-	const struct firmware *npufw, *certfw;
 	unsigned long bars = 0;
 	int ret, i;
+
+	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
+	if (!ndev)
+		return -ENOMEM;
+
+	ndev->priv = xdna->dev_info->dev_priv;
+	ndev->aie.xdna = xdna;
+	xdna->dev_handle = ndev;
+
+	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
+	mutex_init(&ndev->cert_comp_lock);
 
 	/* Enable managed PCI device */
 	ret = pcim_enable_device(pdev);
@@ -418,75 +499,210 @@ static int aie4_pcidev_init(struct amdxdna_dev_hdl *ndev)
 
 	pci_set_master(pdev);
 
-	ret = aie4_request_firmware(ndev, &npufw, &certfw);
-	if (ret)
-		goto clear_master;
+	if (ndev->priv->npufw_path && ndev->priv->certfw_path) {
+		const struct firmware *npufw = NULL, *certfw = NULL;
 
-	ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
-	aie4_release_firmware(ndev, npufw, certfw);
-	if (ret)
-		goto clear_master;
+		ret = aie4_request_firmware(ndev, &npufw, &certfw);
+		if (ret)
+			return ret;
+		ret = aie4_prepare_firmware(ndev, npufw, certfw, tbl);
+		aie4_release_firmware(ndev, npufw, certfw);
+		if (ret)
+			return ret;
+	}
 
 	ret = aie4_irq_init(xdna);
 	if (ret)
-		goto clear_master;
+		return ret;
 
-	ret = aie4_hw_start(xdna);
-	if (ret)
-		goto clear_master;
+	amdxdna_vbnv_init(xdna);
+	XDNA_DBG(xdna, "init finished");
 
 	return 0;
+}
 
-clear_master:
-	pci_clear_master(pdev);
+static int aie4_doorbell_mmap(struct amdxdna_client *client, struct vm_area_struct *vma)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
+	phys_addr_t res_start;
+	unsigned long pfn;
+	int ret;
 
+	if (!aie4_hwctx_valid_doorbell(client, vma->vm_pgoff)) {
+		XDNA_ERR(xdna, "Invalid doorbell page offset 0x%lx", vma->vm_pgoff);
+		return -EINVAL;
+	}
+
+	if (vma_pages(vma) != 1) {
+		XDNA_ERR(xdna, "can only map one page, got %ld", vma_pages(vma));
+		return -EINVAL;
+	}
+
+	res_start = pci_resource_start(pdev, xdna->dev_info->doorbell_bar) + npriv->doorbell_off;
+	pfn = PHYS_PFN(res_start) + vma->vm_pgoff;
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
+	ret = io_remap_pfn_range(vma, vma->vm_start,
+				 pfn,
+				 PAGE_SIZE,
+				 vma->vm_page_prot);
+
+	XDNA_DBG(xdna, "doorbell ret %d", ret);
 	return ret;
 }
 
-static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
+static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret, idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto dev_exit;
+
+	switch (args->param) {
+	case DRM_AMDXDNA_QUERY_AIE_METADATA:
+		ret = amdxdna_get_metadata(&ndev->aie, client, args);
+		break;
+	default:
+		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
+		ret = -EOPNOTSUPP;
+	}
+
+	amdxdna_pm_suspend_put(xdna);
+	XDNA_DBG(xdna, "Got param %d", args->param);
+
+dev_exit:
+	drm_dev_exit(idx);
+	return ret;
+}
+
+static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	aie4_hw_stop(xdna);
+	ndev->work_buf_hdl = amdxdna_alloc_msg_buff(xdna, AIE4_WORK_BUFFER_MIN_SIZE);
+	if (IS_ERR(ndev->work_buf_hdl)) {
+		int ret = PTR_ERR(ndev->work_buf_hdl);
 
-	pci_clear_master(pdev);
-}
-
-static void aie4_fini(struct amdxdna_dev *xdna)
-{
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-
-	aie4_sriov_stop(ndev);
-	aie4_pcidev_fini(ndev);
-}
-
-static int aie4_init(struct amdxdna_dev *xdna)
-{
-	struct amdxdna_dev_hdl *ndev;
-	int ret;
-
-	ndev = drmm_kzalloc(&xdna->ddev, sizeof(*ndev), GFP_KERNEL);
-	if (!ndev)
-		return -ENOMEM;
-
-	ndev->priv = xdna->dev_info->dev_priv;
-	ndev->aie.xdna = xdna;
-	xdna->dev_handle = ndev;
-
-	ret = aie4_pcidev_init(ndev);
-	if (ret) {
-		XDNA_ERR(xdna, "Setup PCI device failed, ret %d", ret);
+		XDNA_ERR(xdna, "Failed to alloc work buffer, size 0x%x",
+			 AIE4_WORK_BUFFER_MIN_SIZE);
+		ndev->work_buf_hdl = NULL;
 		return ret;
 	}
 
-	amdxdna_vbnv_init(xdna);
-	XDNA_DBG(xdna, "aie4 init finished");
+	XDNA_DBG(xdna, "Work buffer allocated: size 0x%x",
+		 to_buf_size(ndev->work_buf_hdl));
+
 	return 0;
 }
 
-const struct amdxdna_dev_ops aie4_ops = {
-	.init			= aie4_init,
-	.fini			= aie4_fini,
+static void aie4_free_work_buffer(struct amdxdna_dev_hdl *ndev)
+{
+	if (!ndev->work_buf_hdl)
+		return;
+
+	amdxdna_free_msg_buff(ndev->work_buf_hdl);
+	ndev->work_buf_hdl = NULL;
+}
+
+static int aie4_pf_init(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = aie4m_pcidev_init(xdna);
+	if (ret)
+		return ret;
+
+	ret = aie4_alloc_work_buffer(xdna->dev_handle);
+	if (ret)
+		return ret;
+
+	ret = aie4_pf_hw_start(xdna->dev_handle);
+	if (ret)
+		goto free_work_buf;
+
+	return 0;
+
+free_work_buf:
+	aie4_free_work_buffer(xdna->dev_handle);
+	return ret;
+}
+
+static int aie4_vf_init(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = aie4m_pcidev_init(xdna);
+	if (ret)
+		return ret;
+
+	return aie4_vf_hw_start(xdna->dev_handle);
+}
+
+static void aie4_pf_fini(struct amdxdna_dev *xdna)
+{
+	aie4_sriov_stop(xdna->dev_handle);
+	aie4_pf_hw_stop(xdna->dev_handle);
+	aie4_free_work_buffer(xdna->dev_handle);
+}
+
+static void aie4_vf_fini(struct amdxdna_dev *xdna)
+{
+	aie4_vf_hw_stop(xdna->dev_handle);
+}
+
+const struct amdxdna_dev_ops aie4_pf_ops = {
+	.init			= aie4_pf_init,
+	.fini			= aie4_pf_fini,
 	.sriov_configure        = aie4_sriov_configure,
+};
+
+static int aie4_get_array(struct amdxdna_client *client,
+			  struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret, idx;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto dev_exit;
+
+	switch (args->param) {
+	case DRM_AMDXDNA_AIE_COREDUMP:
+		ret = amdxdna_get_coredump(&ndev->aie, client, args);
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+		break;
+	}
+
+	amdxdna_pm_suspend_put(xdna);
+
+dev_exit:
+	drm_dev_exit(idx);
+	return ret;
+}
+
+const struct amdxdna_dev_ops aie4_vf_ops = {
+	.init			= aie4_vf_init,
+	.fini			= aie4_vf_fini,
+	.hwctx_init		= aie4_hwctx_init,
+	.hwctx_fini		= aie4_hwctx_fini,
+	.mmap			= aie4_doorbell_mmap,
+	.cmd_wait		= aie4_cmd_wait,
+	.get_aie_info		= aie4_get_info,
+	.get_array		= aie4_get_array,
+	.get_coredump		= aie4_get_aie_coredump,
+	.hmm_invalidate		= amdxdna_hmm_invalidate,
 };
