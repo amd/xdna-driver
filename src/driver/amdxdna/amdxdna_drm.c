@@ -70,7 +70,7 @@ skip_sva_bind:
 	filp->driver_priv = client;
 	client->filp = filp;
 
-	XDNA_DBG(xdna, "PID %d opened", client->pid);
+	XDNA_INFO(xdna, "DRM device OPENED by PID %d", client->pid);
 	return 0;
 
 unbind_sva:
@@ -86,7 +86,7 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
 
-	XDNA_DBG(xdna, "Closing PID %d", client->pid);
+	XDNA_INFO(xdna, "DRM device CLOSING for PID %d", client->pid);
 
 	xa_destroy(&client->ctx_xa);
 	cleanup_srcu_struct(&client->ctx_srcu);
@@ -126,21 +126,26 @@ static int amdxdna_flush(struct file *f, fl_owner_t id)
 	if (pid != client->pid)
 		return 0;
 
-	XDNA_DBG(xdna, "PID %d flushing...", client->pid);
+	XDNA_INFO(xdna, "PID %d flushing (destroying all contexts)...", client->pid);
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return 0;
 
 	mutex_lock(&xdna->dev_lock);
 	if (list_empty(&client->node)) {
 		mutex_unlock(&xdna->dev_lock);
+		XDNA_INFO(xdna, "PID %d already flushed", client->pid);
 		goto out;
 	}
 	list_del_init(&client->node);
 	mutex_unlock(&xdna->dev_lock);
+
+	XDNA_INFO(xdna, "PID %d calling amdxdna_ctx_remove_all", client->pid);
 	amdxdna_ctx_remove_all(client);
+	XDNA_INFO(xdna, "PID %d amdxdna_ctx_remove_all completed", client->pid);
 
 out:
 	drm_dev_exit(idx);
+	XDNA_INFO(xdna, "PID %d flush complete", client->pid);
 	return 0;
 }
 

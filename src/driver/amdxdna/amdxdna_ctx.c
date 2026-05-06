@@ -61,9 +61,11 @@ static void amdxdna_ctx_destroy_rcu(struct amdxdna_ctx *ctx, struct srcu_struct 
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 
+	XDNA_INFO(xdna, "Destroying context %d (hwctx=%p) for PID %d", ctx->id, ctx, ctx->client->pid);
 	synchronize_srcu(ss);
 
 	xdna->dev_info->ops->ctx_fini(ctx);
+	XDNA_INFO(xdna, "Context %d destroyed, freeing memory", ctx->id);
 	mutex_destroy(&ctx->io_lock);
 	kfree(ctx->name);
 	kfree(ctx);
@@ -79,12 +81,14 @@ void amdxdna_ctx_remove_all(struct amdxdna_client *client)
 	struct amdxdna_ctx *ctx;
 	unsigned long ctx_id;
 
+	XDNA_INFO(client->xdna, "PID %d removing all contexts", client->pid);
 	amdxdna_for_each_ctx(client, ctx_id, ctx) {
-		XDNA_DBG(client->xdna, "PID %d close context %d",
-			 client->pid, ctx->id);
+		XDNA_INFO(client->xdna, "PID %d closing context %d",
+			  client->pid, ctx->id);
 		xa_erase(&client->ctx_xa, ctx->id);
 		amdxdna_ctx_destroy_rcu(ctx, &client->ctx_srcu);
 	}
+	XDNA_INFO(client->xdna, "PID %d all contexts removed", client->pid);
 }
 
 int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
@@ -513,8 +517,12 @@ int amdxdna_cmd_submit(struct amdxdna_client *client, u32 opcode,
 	}
 	job->state = JOB_STATE_INIT;
 
+	XDNA_DBG(xdna, "amdxdna_cmd_submit: calling ops->cmd_submit for pid=%d ctx=%d",
+		  client->pid, ctx_hdl);
 	ret = xdna->dev_info->ops->cmd_submit(job, syncobj_hdls,
 					      syncobj_points, syncobj_cnt, seq);
+	XDNA_DBG(xdna, "amdxdna_cmd_submit: ops->cmd_submit returned ret=%d seq=%llu",
+		  ret, seq ? *seq : 0);
 	if (ret) {
 		if (ret != -ERESTARTSYS)
 			XDNA_ERR(xdna, "Submit cmds failed, ret %d", ret);

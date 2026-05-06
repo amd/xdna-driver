@@ -79,6 +79,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	amdxdna_aux_drv.o \
 	ve2_res_solver.o \
 	ve2_mgmt.o \
+	ve2_drm_sched.o \
 	ve2_hwctx.o \
 	ve2_fw.o \
 	ve2_debug.o
