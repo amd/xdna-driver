@@ -2,7 +2,7 @@
 // Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 #include <string>
-#include "core/common/smi.h"
+#include "core/common/smi/smi.h"
 
 namespace shim_telluride::smi {
 

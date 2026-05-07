@@ -6,7 +6,7 @@
 #include "kmq/hwctx.h"
 #include "umq/hwctx.h"
 #include "fence.h"
-#include "smi_xdna.h"
+#include "core/common/smi/smi_ryzen.h"
 
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
@@ -1826,7 +1826,7 @@ struct xrt_smi_config
     const auto xrt_smi_config_type = std::any_cast<xrt_core::query::xrt_smi_config::type>(param);
     switch (xrt_smi_config_type) {
     case xrt_core::query::xrt_smi_config::type::options_config:
-      return shim_xdna::smi::get_smi_config(device);
+      return xrt_core::smi::ryzen::get_smi_config(device);
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
