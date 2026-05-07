@@ -11,6 +11,7 @@
 #include <linux/types.h>
 
 enum aie4_msg_opcode {
+	AIE4_MSG_OP_ECHO                             = 0x10001,
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
@@ -31,6 +32,17 @@ enum aie4_msg_status {
 	AIE4_MSG_STATUS_NOTSUPP = 0x2,
 	MAX_AIE4_MSG_STATUS_CODE = 0x4,
 };
+
+struct aie4_msg_echo_req {
+	__u32 val1;
+	__u32 val2;
+} __packed;
+
+struct aie4_msg_echo_resp {
+	enum aie4_msg_status status;
+	__u32 val1;
+	__u32 val2;
+} __packed;
 
 struct aie4_msg_suspend_req {
 	__u32 rsvd;

@@ -80,6 +80,7 @@ struct amdxdna_dev_ops {
 			    struct amdxdna_hwctx *hwctx, u32 num_bufs);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 	int (*hwctx_heap_expand)(struct amdxdna_hwctx *hwctx);
+	void (*debugfs)(struct amdxdna_dev *xdna);
 };
 
 struct amdxdna_fw_feature_tbl {

@@ -80,6 +80,9 @@ static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 }
 #endif
 
+/* aie4_debugfs.c */
+void aie4_debugfs_init(struct amdxdna_dev *xdna);
+
 enum aie4_fw_feature {
 	AIE4_GET_COREDUMP,
 	AIE4_FEATURE_MAX

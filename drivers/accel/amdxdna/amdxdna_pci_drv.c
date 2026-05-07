@@ -435,6 +435,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	amdxdna_debugfs_init(xdna);
+
 	return 0;
 
 failed_sysfs_fini:

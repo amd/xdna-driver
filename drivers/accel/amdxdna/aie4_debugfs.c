@@ -3,15 +3,19 @@
  * Copyright (C) 2026, Advanced Micro Devices, Inc.
  */
 
-#include "amdxdna_cbuf.h"
-#include "amdxdna_debugfs.h"
-
 #include <drm/drm_file.h>
 #include <linux/debugfs.h>
 #include <linux/pm_runtime.h>
 #include <linux/seq_file.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
+
+#include "amdxdna_cbuf.h"
+#include "amdxdna_debugfs.h"
+#include "aie4_pci.h"
+#include "aie4_msg_priv.h"
+#include "amdxdna_mailbox.h"
+#include "amdxdna_mailbox_helper.h"
 
 #define _DBGFS_FOPS(_open, _release, _write) \
 { \
@@ -39,13 +43,19 @@
 
 #define file_to_xdna(file) (((struct seq_file *)(file)->private_data)->private)
 
-static ssize_t amdxdna_carveout_write(struct file *file, const char __user *buf,
-				      size_t count, loff_t *ppos)
+static int amdxdna_iommu_bypass_show(struct seq_file *m, void *unused)
 {
+	return 0;
+}
+
+static ssize_t amdxdna_iommu_bypass_write(struct file *file, const char __user *buf,
+					  size_t count, loff_t *ppos)
+{
+	DECLARE_AIE_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
 	struct amdxdna_dev *xdna = file_to_xdna(file);
-	char kbuf[128];
-	u64 size, addr;
-	char *sep;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	char kbuf[32];
+	u8 val;
 	int ret;
 
 	if (count == 0 || count >= sizeof(kbuf))
@@ -55,78 +65,60 @@ static ssize_t amdxdna_carveout_write(struct file *file, const char __user *buf,
 		return -EFAULT;
 	kbuf[count] = '\0';
 	strim(kbuf);
-	XDNA_DBG(xdna, "Trying to set carveout to %s", kbuf);
 
-	sep = strchr(kbuf, '@');
-	if (!sep)
-		return -EINVAL;
-	*sep = '\0';
-	sep++;
+	XDNA_DBG(xdna, "Trying to set iommu_bypass mode to %s", kbuf);
 
-	ret = kstrtou64(kbuf, 0, &size);
+	ret = kstrtou8(kbuf, 0, &val);
 	if (ret)
 		return ret;
 
-	ret = kstrtou64(sep, 0, &addr);
-	if (ret)
-		return ret;
+	if (!val)
+		return count;
 
-	/* Sanity check the addr and size. */
-	if (!size)
-		return -EINVAL;
-	if (!IS_ALIGNED(addr, PAGE_SIZE) || !IS_ALIGNED(size, PAGE_SIZE))
-		return -EINVAL;
+	XDNA_DBG(xdna, "Setting iommu_bypass mode to %d", val);
+
+#define MAKE_MAGIC(a, b, c, d)  ((u32)((a) << 24 | (b) << 16 | (c) << 8 | (d)))
+	req.val1 = MAKE_MAGIC('B', 'Y', 'P', 'A');
+	req.val2 = MAKE_MAGIC('M', 'A', 'G', 'C');
 
 	guard(mutex)(&xdna->dev_lock);
-
-	ret = amdxdna_carveout_init(xdna, addr, size);
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
-		return ret;
+		XDNA_ERR(xdna, "echo failed: %d", ret);
+
+	if (req.val1 == resp.val1 &&
+	    req.val2 == resp.val2)
+		XDNA_INFO(xdna, "echo finished, response correct value.");
+	else
+		XDNA_WARN(xdna, "echo finished, expect: 0x%x,0x%x, got: 0x%x,0x%x",
+			  req.val1, req.val1, resp.val1, resp.val2);
 
 	return count;
-}
-
-static int amdxdna_carveout_show(struct seq_file *m, void *unused)
-{
-	struct amdxdna_dev *xdna = m->private;
-	u64 addr, size;
-
-	guard(mutex)(&xdna->dev_lock);
-	amdxdna_get_carveout_conf(xdna, &addr, &size);
-	seq_printf(m, "0x%llx@0x%llx\n", size, addr);
-	return 0;
 }
 
 /*
  * Input/output format: <carveout_size>@<carveout_address>
  */
-AMDXDNA_DBGFS_FOPS(carveout, amdxdna_carveout_show, amdxdna_carveout_write);
+AMDXDNA_DBGFS_FOPS(iommu_bypass, amdxdna_iommu_bypass_show, amdxdna_iommu_bypass_write);
 
 static const struct {
 	const char *name;
 	const struct file_operations *fops;
 	umode_t mode;
-} amdxdna_dbgfs_files[] = {
-	AMDXDNA_DBGFS_FILE(carveout, 0600),
+} aie4_dbgfs_files[] = {
+	AMDXDNA_DBGFS_FILE(iommu_bypass, 0200),
 };
 
-void amdxdna_debugfs_init(struct amdxdna_dev *xdna)
+void aie4_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct drm_minor *minor = xdna->ddev.accel;
 	int i;
 
-	/*
-	 * It should be okay that debugfs fails to init.
-	 * We rely on DRM framework to finish debugfs.
-	 */
-	for (i = 0; i < ARRAY_SIZE(amdxdna_dbgfs_files); i++) {
-		debugfs_create_file(amdxdna_dbgfs_files[i].name,
-				    amdxdna_dbgfs_files[i].mode,
+	for (i = 0; i < ARRAY_SIZE(aie4_dbgfs_files); i++) {
+		debugfs_create_file(aie4_dbgfs_files[i].name,
+				    aie4_dbgfs_files[i].mode,
 				    minor->debugfs_root,
 				    xdna,
-				    amdxdna_dbgfs_files[i].fops);
+				    aie4_dbgfs_files[i].fops);
 	}
-
-	if (xdna->dev_info->ops->debugfs)
-		xdna->dev_info->ops->debugfs(xdna);
 }
