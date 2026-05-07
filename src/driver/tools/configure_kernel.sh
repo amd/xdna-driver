@@ -171,6 +171,14 @@ int main(void)
 }
 EOF
 
+# Test struct drm_sched_init_args has num_rqs in 6.15+
+try_compile HAVE_drm_sched_init_args_num_rqs << 'EOF'
+#include <drm/gpu_scheduler.h>
+_Static_assert(__builtin_offsetof(struct drm_sched_init_args, num_rqs) >= 0,
+	       "drm_sched_init_args has no num_rqs");
+int main(void) { return 0; }
+EOF
+
 # Test iommu_dev_enable_feature()/iommu_dev_disable_feature() signature in 6.15-:
 # int iommu_dev_disable_feature(struct device *dev, enum iommu_dev_features f)
 # int iommu_dev_enable_feature(struct device *dev, enum iommu_dev_features f)
@@ -308,6 +316,20 @@ int main(void)
 
 	struct amd_pmf_npu_metrics info;
 	int ret = amd_pmf_get_npu_data(&info);
+	return 0;
+}
+EOF
+
+# Test struct amd_pmf_npu_metrics has npu_temp field (7.2+ M80H series)
+try_compile HAVE_7_2_amd_pmf_npu_metrics_npu_temp << 'EOF'
+#include <linux/module.h>
+#include <linux/amd-pmf-io.h>
+int main(void)
+{
+	MODULE_IMPORT_NS("AMD_PMF");
+
+	struct amd_pmf_npu_metrics info;
+	info.npu_temp = 0;
 	return 0;
 }
 EOF

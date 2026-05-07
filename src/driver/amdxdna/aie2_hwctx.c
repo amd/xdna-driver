@@ -80,7 +80,9 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 #ifdef HAVE_6_15_drm_sched_init
 	const struct drm_sched_init_args args = {
 		.ops = &sched_ops,
+#ifdef HAVE_drm_sched_init_args_num_rqs
 		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
+#endif
 		.credit_limit = CTX_MAX_CMDS,
 		.timeout = MAX_SCHEDULE_TIMEOUT,
 		.name = ctx->name,

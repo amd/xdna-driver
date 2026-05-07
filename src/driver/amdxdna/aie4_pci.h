@@ -70,6 +70,18 @@ aie4_health_runlist_read_idx(struct aie4_msg_app_health_report *h)
 	 (_ndev)->priv->dpm_clk_tbl[dpm_level].hclk / 1000000); \
 })
 
+#ifdef HAVE_7_2_amd_pmf_npu_metrics_npu_temp
+#include <linux/amd-pmf-io.h>
+#define AIE4_GET_PMF_NPU_METRICS(metrics) amd_pmf_get_npu_data(metrics)
+#else
+#define AIE4_GET_PMF_NPU_METRICS(metrics)				\
+({									\
+	typeof(metrics) _m = metrics;					\
+	memset(_m, 0xff, sizeof(*_m));					\
+	(-EOPNOTSUPP);							\
+})
+#endif
+
 extern int kernel_mode_submission;
 
 struct clock_entry {
