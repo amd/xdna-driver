@@ -28,6 +28,7 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_sensors.h"
 
 static int aie2_max_col = XRS_MAX_COL;
 module_param(aie2_max_col, uint, 0600);
@@ -972,7 +973,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_get_clock_metadata(client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
-		ret = amdxdna_query_sensors(client, args, ndev->total_col);
+		ret = amdxdna_query_sensors(args, ndev->total_col);
 		break;
 	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
 		ret = aie2_get_hwctx_status(client, args);
