@@ -52,7 +52,15 @@ config_drm_bo(std::shared_ptr<xdna_edgedev> m_edev,
   else
     adbo.param_type = DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF;
 
-  m_edev->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  try {
+    m_edev->ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &adbo);
+  } catch (const xrt_core::system_error& e) {
+    std::string op = attach ? "attach" : "detach";
+    throw std::runtime_error(
+      "Failed to " + op + " BO " + std::to_string(mdata_boh) +
+      " " + (attach ? "to" : "from") + " hwctx " + std::to_string(ctx_id) +
+      ": " + std::string(e.what()));
+  }
 }
 
 static uint32_t
@@ -215,7 +223,23 @@ alloc_userptr_bo(void *buf)
     .size = 0,
     .type = m_type,
   };
-  m_edev->ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
+
+  try {
+    m_edev->ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
+  } catch (const xrt_core::system_error& e) {
+    int err_code = e.code().value();
+    if (err_code == EINVAL) {
+      throw std::runtime_error("Failed to create userptr BO: Invalid userptr address " +
+                               std::to_string(reinterpret_cast<uintptr_t>(buf)) +
+                               ". Check address alignment and accessibility.");
+    } else if (err_code == ENOMEM) {
+      throw std::runtime_error("Failed to create userptr BO: Out of memory");
+    } else {
+      throw std::runtime_error("Failed to create userptr BO at address " +
+                               std::to_string(reinterpret_cast<uintptr_t>(buf)) +
+                               ": " + std::string(e.what()));
+    }
+  }
 
   get_drm_bo_info(cbo.handle);
 }
@@ -240,7 +264,27 @@ alloc_bo(uint32_t mem_bitmap)
     .size = m_aligned_size,
     .type = m_type,
   };
-  m_edev->ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
+
+  try {
+    m_edev->ioctl(DRM_IOCTL_AMDXDNA_CREATE_BO, &cbo);
+  } catch (const xrt_core::system_error& e) {
+    int err_code = e.code().value();
+    if (err_code == EINVAL) {
+      throw std::runtime_error("Failed to create BO: Invalid size (" +
+                               std::to_string(m_aligned_size) + " bytes) or flags (0x" +
+                               std::to_string(xflags.all) + ")");
+    } else if (err_code == ENOMEM) {
+      throw std::runtime_error("Failed to create BO: Out of memory (requested " +
+                               std::to_string(m_aligned_size) + " bytes)");
+    } else if (err_code == ENOSPC) {
+      throw std::runtime_error("Failed to create BO: No space in device memory (requested " +
+                               std::to_string(m_aligned_size) + " bytes)");
+    } else {
+      throw std::runtime_error("Failed to create BO (size=" + std::to_string(m_aligned_size) +
+                               " flags=0x" + std::to_string(xflags.all) + "): " +
+                               std::string(e.what()));
+    }
+  }
 
   // Cache the BO info here
   get_drm_bo_info(cbo.handle);
@@ -301,7 +345,22 @@ get_drm_bo_info(uint32_t boh)
 {
   amdxdna_drm_get_bo_info bo_info = {};
   bo_info.handle = boh;
-  m_edev->ioctl(DRM_IOCTL_AMDXDNA_GET_BO_INFO, &bo_info);
+
+  try {
+    m_edev->ioctl(DRM_IOCTL_AMDXDNA_GET_BO_INFO, &bo_info);
+  } catch (const xrt_core::system_error& e) {
+    int err_code = e.code().value();
+    if (err_code == EINVAL) {
+      throw std::runtime_error("Failed to get BO info: Invalid BO handle " +
+                               std::to_string(boh));
+    } else if (err_code == ENOENT) {
+      throw std::runtime_error("Failed to get BO info: BO handle " +
+                               std::to_string(boh) + " not found. BO may have been freed.");
+    } else {
+      throw std::runtime_error("Failed to get BO info for handle " +
+                               std::to_string(boh) + ": " + std::string(e.what()));
+    }
+  }
 
   m_handle = bo_info.handle;
   m_map_offset = bo_info.map_offset;
@@ -472,7 +531,25 @@ sync(direction dir, size_t size, size_t offset)
   auto boh = get_drm_bo_handle();
   __u32 direction = static_cast<__u32>(dir);
   amdxdna_drm_sync_bo sync_bo = {boh, direction, offset, size};
-  m_edev->ioctl(DRM_IOCTL_AMDXDNA_SYNC_BO, &sync_bo);
+
+  try {
+    m_edev->ioctl(DRM_IOCTL_AMDXDNA_SYNC_BO, &sync_bo);
+  } catch (const xrt_core::system_error& e) {
+    int err_code = e.code().value();
+    std::string dir_str = (dir == direction::host2device) ? "HOST2DEVICE" : "DEVICE2HOST";
+
+    if (err_code == EINVAL) {
+      throw std::runtime_error("Failed to sync BO " + std::to_string(m_handle) +
+                               ": Invalid parameters (offset=" + std::to_string(offset) +
+                               ", size=" + std::to_string(size) + ", direction=" + dir_str + ")");
+    } else if (err_code == EFAULT) {
+      throw std::runtime_error("Failed to sync BO " + std::to_string(m_handle) +
+                               ": Memory access error. Buffer may have been unmapped.");
+    } else {
+      throw std::runtime_error("Failed to sync BO " + std::to_string(m_handle) +
+                               " (direction=" + dir_str + "): " + std::string(e.what()));
+    }
+  }
 }
 
 int

@@ -134,10 +134,18 @@ static int ve2_wait_for_retry_slot(struct amdxdna_ctx *hwctx, u32 timeout_ms)
 					       ve2_check_slot_available(hwctx),
 					       timeout_jiffies);
 
-	if (ret == 0)
+	if (ret == 0) {
+		XDNA_ERR(hwctx->client->xdna,
+			 "Wait for command slot timeout: hwctx_id=%u pid=%u timeout=%u ms. No slots became available.",
+			 hwctx->id, hwctx->client->pid, timeout_ms);
 		return -ETIMEDOUT;
-	if (ret < 0)
+	}
+	if (ret < 0) {
+		XDNA_WARN(hwctx->client->xdna,
+			  "Wait for command slot interrupted: hwctx_id=%u pid=%u ret=%d",
+			  hwctx->id, hwctx->client->pid, ret);
 		return ret;  /* Interrupted */
+	}
 
 	return 0;
 }
@@ -290,9 +298,11 @@ static inline int ve2_hwctx_add_job(struct amdxdna_ctx *hwctx, struct amdxdna_sc
 
 	idx = get_job_idx(job->seq);
 	if (priv->pending[idx]) {
-		XDNA_ERR(xdna, "No more room for new command!!!");
+		XDNA_ERR(xdna,
+			 "Command queue full for hwctx_id=%u (pid=%u). Job slot %d already occupied (max_cmds=%d). Wait for pending commands to complete.",
+			 hwctx->id, hwctx->client->pid, idx, HWCTX_MAX_CMDS);
 		mutex_unlock(&priv->privctx_lock);
-		return -EINVAL;
+		return -EBUSY;
 	}
 
 	priv->pending[idx] = job;
@@ -969,7 +979,8 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 			return -ERESTARTSYS;
 		}
 
-		XDNA_ERR(xdna, "Failed to submit a command. ret=%d hwctx=%p op=%u", ret, hwctx, op);
+		XDNA_ERR(xdna, "Failed to submit command: hwctx_id=%u pid=%u op=%u ret=%d",
+			 hwctx->id, hwctx->client->pid, op, ret);
 		return ret;
 	}
 

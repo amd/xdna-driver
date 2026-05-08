@@ -78,8 +78,32 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
   try {
     m_hwctx->get_device()->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_EXEC_CMD, &ecmd);
   } catch (const xrt_core::system_error& ex) {
-    shim_err(ex.get_code(), "DRM_IOCTL_AMDXDNA_EXEC_CMD failed: hwctx=%u, cmd_bo_hdl=%u",
-             hwctx_id, cmd_bo_hdl);
+    int err_code = ex.get_code();
+
+    if (err_code == EINVAL) {
+      shim_err(err_code, "Command submission failed: Invalid command or arguments. "
+               "hwctx=%u, cmd_bo=%u. Check command buffer format and arguments.",
+               hwctx_id, cmd_bo_hdl);
+    } else if (err_code == EBUSY) {
+      shim_err(err_code, "Command submission failed: Command queue full or context busy. "
+               "hwctx=%u, cmd_bo=%u. Wait for pending commands to complete.",
+               hwctx_id, cmd_bo_hdl);
+    } else if (err_code == ENODEV) {
+      shim_err(err_code, "Command submission failed: Context destroyed or device unavailable. "
+               "hwctx=%u, cmd_bo=%u",
+               hwctx_id, cmd_bo_hdl);
+    } else if (err_code == ETIME || err_code == ETIMEDOUT) {
+      shim_err(err_code, "Command submission failed: Timeout waiting for submission. "
+               "hwctx=%u, cmd_bo=%u",
+               hwctx_id, cmd_bo_hdl);
+    } else if (err_code == ENOSPC) {
+      shim_err(err_code, "Command submission failed: No space in queue. "
+               "hwctx=%u, cmd_bo=%u. Reduce command submission rate.",
+               hwctx_id, cmd_bo_hdl);
+    } else {
+      shim_err(err_code, "Command submission failed: hwctx=%u, cmd_bo=%u - %s",
+               hwctx_id, cmd_bo_hdl, ex.what());
+    }
   }
 
   auto id = ecmd.seq;

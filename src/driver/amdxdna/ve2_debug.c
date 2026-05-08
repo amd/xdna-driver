@@ -364,8 +364,9 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	}
 
 	if (!hwctx) {
-		XDNA_ERR(xdna, "hw context :%u pid:%llu not found\n", footer.context_id,
-			 footer.pid);
+		XDNA_ERR(xdna,
+			 "Cannot get coredump: Hardware context %u with pid %llu not found. Please verify the context ID and PID are correct.\n",
+			 footer.context_id, footer.pid);
 		return -EINVAL;
 	}
 
@@ -754,7 +755,8 @@ static int ve2_get_aie_part_fd(struct amdxdna_client *client,
 
 	nhwctx = ctx->priv;
 	if (!nhwctx || !nhwctx->aie_dev) {
-		XDNA_ERR(xdna, "AIE partition not available for hwctx %p", ctx);
+		XDNA_ERR(xdna, "AIE partition not available for hwctx_id=%u (pid=%u)",
+			 ctx->id, ctx->client->pid);
 		ret = -ENODEV;
 		goto unlock;
 	}

@@ -151,8 +151,10 @@ int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req,
 	xrs_req->cdo.start_cols = kmalloc_array(entries,
 						sizeof(*xrs_req->cdo.start_cols),
 						GFP_KERNEL);
-	if (!xrs_req->cdo.start_cols)
+	if (!xrs_req->cdo.start_cols) {
+		XDNA_ERR(xdna, "Failed to allocate start_cols array (entries=%u)", entries);
 		return -ENOMEM;
+	}
 
 	xrs_req->cdo.cols_len = entries;
 	for (i = 0, start = (start_col > 0 ? start_col : 0); start <= max_start;
@@ -179,6 +181,8 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx)
 	mutex_lock(&xrs->xrs_lock);
 	xrs_req = kzalloc(sizeof(*xrs_req), GFP_KERNEL);
 	if (!xrs_req) {
+		XDNA_ERR(xdna, "Failed to allocate xrs request for hwctx_id=%u (pid=%u)",
+			 hwctx->id, hwctx->client->pid);
 		mutex_unlock(&xrs->xrs_lock);
 		return -ENOMEM;
 	}
@@ -770,13 +774,15 @@ static void ve2_irq_handler(u32 partition_id, void *cb_arg)
 				  hwctx->client->pid,
 				  mgmtctx->start_col, hwctx->priv->id, 0);
 	if (get_ctx_read_index(hwctx, &read_index)) {
-		XDNA_ERR(xdna, "Failed to get read index");
+		XDNA_ERR(xdna, "Failed to get read index for hwctx_id=%u (pid=%u)",
+			 hwctx->id, hwctx->client->pid);
 		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
 
 	if (get_ctx_write_index(hwctx, &write_index)) {
-		XDNA_ERR(xdna, "Failed to get write index");
+		XDNA_ERR(xdna, "Failed to get write index for hwctx_id=%u (pid=%u)",
+			 hwctx->id, hwctx->client->pid);
 		mutex_unlock(&mgmtctx->ctx_lock);
 		return;
 	}
@@ -1260,10 +1266,16 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 	int rel_size = 0;
 
 	if (mgmtctx->active_ctx != hwctx) {
-		XDNA_ERR(xdna,
-			 "hwctx %p is not the last scheduled. The last scheduled was %p.\n",
-			 hwctx, mgmtctx->active_ctx);
-		return -1;
+		if (mgmtctx->active_ctx) {
+			XDNA_ERR(xdna,
+				 "Cannot get coredump: hwctx %u (pid %u) is not the last scheduled. The last scheduled hwctx was %u (pid %u).\n",
+				 hwctx->id, hwctx->client->pid,
+				 mgmtctx->active_ctx->id, mgmtctx->active_ctx->client->pid);
+		} else {
+			XDNA_ERR(xdna,
+				 "Cannot get coredump: No context has been scheduled yet. Please run a workload before requesting coredump.\n");
+		}
+		return -EPERM;
 	}
 
 	XDNA_DBG(xdna, "Reading coredump for hwctx num_col:%d\n", nhwctx->num_col);

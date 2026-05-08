@@ -500,6 +500,20 @@ struct aie_coredump
         arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
         arg.element_size = payload.size();
         edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
+      } else if (e.code().value() == EPERM) {
+        throw std::runtime_error(
+          "Cannot get AIE coredump: Coredump is only available for the last scheduled "
+          "hardware context, or no workload has been executed yet. "
+          "Please request a coredump for the last scheduled context after running a job. "
+          "Check kernel log (dmesg) for more details.");
+      } else if (e.code().value() == EINVAL) {
+        throw std::runtime_error(
+          "Cannot get AIE coredump: Invalid hardware context (context_id=" +
+          std::to_string(aie_coredump_args.context_id) + ", pid=" +
+          std::to_string(aie_coredump_args.pid) + "). "
+          "Check kernel log (dmesg) for more details.");
+      } else {
+        throw;
       }
     }
 

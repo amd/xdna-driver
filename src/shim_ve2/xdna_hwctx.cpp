@@ -124,6 +124,18 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
     } else if (err_code == EBUSY) {
       shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: requested partition is busy "
                "(num_tiles=%u, user_start_col=%u)", arg.num_tiles, m_qos.user_start_col);
+    } else if (err_code == EACCES) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Permission denied. "
+               "Check device permissions or access rights.");
+    } else if (err_code == ENOMEM) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Out of memory. "
+               "System may be low on resources.");
+    } else if (err_code == EMFILE) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Too many contexts open. "
+               "Close unused contexts and try again.");
+    } else if (err_code == EIO) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Hardware I/O error. "
+               "Device may be in bad state. Check dmesg for details.");
     } else {
       shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: num_tiles=%u, user_start_col=%u",
                arg.num_tiles, m_qos.user_start_col);
@@ -145,8 +157,12 @@ xdna_hwctx(const device_xdna* dev, const xrt::xclbin& xclbin, const xrt::hw_cont
     destroy_arg.handle = arg.handle;
     try {
       m_device->get_edev()->ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_arg);
-    } catch (...) {
-      shim_debug("Failed to cleanup hwctx during error recovery");
+    } catch (const xrt_core::system_error& e) {
+      shim_debug("Failed to cleanup hwctx_id=%u during error recovery: %s (err=%d)",
+                 arg.handle, e.what(), e.get_code());
+    } catch (const std::exception& e) {
+      shim_debug("Failed to cleanup hwctx_id=%u during error recovery: %s",
+                 arg.handle, e.what());
     }
     throw;
   }
@@ -224,6 +240,18 @@ xdna_hwctx(const device_xdna* dev, uint32_t partition_size, const xrt::hw_contex
     } else if (err_code == EBUSY) {
       shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: requested partition is busy "
                "(partition_size=%u, user_start_col=%u)", partition_size, m_qos.user_start_col);
+    } else if (err_code == EACCES) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Permission denied. "
+               "Check device permissions or access rights.");
+    } else if (err_code == ENOMEM) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Out of memory. "
+               "System may be low on resources.");
+    } else if (err_code == EMFILE) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Too many contexts open. "
+               "Close unused contexts and try again.");
+    } else if (err_code == EIO) {
+      shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: Hardware I/O error. "
+               "Device may be in bad state. Check dmesg for details.");
     } else {
       shim_err(err_code, "DRM_IOCTL_AMDXDNA_CREATE_HWCTX failed: partition_size=%u, user_start_col=%u",
                partition_size, m_qos.user_start_col);
