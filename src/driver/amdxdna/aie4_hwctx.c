@@ -749,7 +749,7 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 	pkt->pkt_header.completion_signal += offsetof(struct amdxdna_cmd, header);
 	pkt->pkt_header.common_header.reserved = 0x0; /* Remove after update CERT. */
 	*seq = publish_cmd(ctx);
-	/*aie4_ctx_umq_dump(ctx);*/
+	aie4_ctx_umq_dump(ctx);
 	ring_doorbell(ctx);
 	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", ctx->name, *seq);
 	return 0;
