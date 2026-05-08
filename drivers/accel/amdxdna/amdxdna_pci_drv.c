@@ -21,6 +21,7 @@
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_sensors.h"
 
 MODULE_FIRMWARE("amdnpu/1502_00/npu.dev.sbin");
 MODULE_FIRMWARE("amdnpu/17f0_10/npu.dev.sbin");
@@ -436,6 +437,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	amdxdna_debugfs_init(xdna);
+	amdxdna_hwmon_init(xdna);
 	return 0;
 
 failed_sysfs_fini:

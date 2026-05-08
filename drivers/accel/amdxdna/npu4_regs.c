@@ -12,6 +12,7 @@
 #include "aie2_pci.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pci_drv.h"
+#include "amdxdna_sensors.h"
 
 /* NPU Public Registers on MpNPUAxiXbar (refer to Diag npu_registers.h) */
 #define MPNPU_PWAITMODE                0x301003C
@@ -123,13 +124,12 @@ static int npu4_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_AMD_PMF) && defined(HAVE_7_0_amd_pmf_get_npu_data)
 static int npu4_update_counters(struct amdxdna_dev_hdl *ndev)
 {
-	struct amd_pmf_npu_metrics npu_metrics;
+	struct amdxdna_sensors npu_metrics;
 	int ret;
 
-	ret = AIE_GET_PMF_NPU_METRICS(&npu_metrics);
+	ret = amdxdna_get_sensors(&npu_metrics);
 	if (ret)
 		return ret;
 
@@ -139,9 +139,6 @@ static int npu4_update_counters(struct amdxdna_dev_hdl *ndev)
 
 	return 0;
 }
-#else
-#define npu4_update_counters NULL
-#endif
 
 const struct aie2_hw_ops npu4_hw_ops = {
 	.set_dpm = npu4_set_dpm,
