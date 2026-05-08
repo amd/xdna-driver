@@ -619,6 +619,18 @@ TEST_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector
   elf_io(id, sdev, arg, "good", &flow);
 }
 
+/*
+ * Full-ELF nop (local_shim_test_data/npu3/nop/nop.elf) — one submission.
+ * Shim case name: "elf_full_nop".  For NPU3 / AIE2PS (FULL_ELF); distinct from
+ * TEST_elf_io (PARTIAL_ELF "good" on NPU1/NPU4).
+ */
+void
+TEST_elf_nop_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
+{
+  static const flow_type flow = FULL_ELF;
+  elf_io(id, sdev, arg, "nop", &flow);
+}
+
 void
 TEST_preempt_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector<uint64_t>& arg)
 {

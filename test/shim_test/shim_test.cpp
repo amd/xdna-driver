@@ -81,6 +81,7 @@ void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>&, arg_type&
 void TEST_shim_umq_ddr_memtile(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_remote_barrier(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_elf_nop_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -1283,6 +1284,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
+  },
+  test_case{ "elf_full_nop", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_elf_nop_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_host, {}
