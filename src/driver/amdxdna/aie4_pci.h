@@ -194,6 +194,8 @@ struct amdxdna_dev_hdl {
 	int				pw_mode;
 	enum aie_power_state		power_state;
 	struct timer_list		cert_timer;
+	/* Rate-limit HSA poll (RPMsg) timer-tick debug (see cert_timer). */
+	u32				cert_hsa_poll_dbg_left;
 	bool				clk_gate_enabled;
 	u32				dpm_level;
 	u32				max_dpm_level;

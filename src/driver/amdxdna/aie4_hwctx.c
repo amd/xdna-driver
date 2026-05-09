@@ -400,13 +400,22 @@ static inline u64 publish_cmd(struct amdxdna_ctx *ctx)
 
 static inline bool check_cmd_done(struct amdxdna_ctx *ctx, u64 seq)
 {
+	struct amdxdna_dev *xdna = ctx->client->xdna;
 	u64 ri;
+	u64 wi;
 
 	if (ctx->priv->status != CTX_STATE_CONNECTED)
 		return true;
 
 	ri = get_read_index(ctx);
-	XDNA_DBG(ctx->client->xdna, "checking if read_idx %lld > seq %lld", ri, seq);
+
+	if (ri > seq) {
+		wi = READ_ONCE(*ctx->priv->umq_write_index);
+		XDNA_DBG(xdna,
+			 "HSA completion: ctx=%s read_index=%llu > seq=%llu write_index=%llu",
+			 ctx->name, ri, seq, wi);
+	}
+
 	return ri > seq;
 }
 

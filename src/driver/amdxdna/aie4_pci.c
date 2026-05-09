@@ -185,6 +185,12 @@ static void cert_timer(struct timer_list *t)
 	struct cert_comp *cert_comp;
 	unsigned long msix_idx;
 
+	if (enable_aie4_polling && ndev->xcomm_ops && ndev->cert_hsa_poll_dbg_left) {
+		ndev->cert_hsa_poll_dbg_left--;
+		XDNA_DBG(xdna,
+			 "HSA poll (RPMsg): timer tick, waking cert_comp waiters to re-check read_index");
+	}
+
 	xa_lock(&ndev->cert_comp_xa);
 	xa_for_each(&ndev->cert_comp_xa, msix_idx, cert_comp) {
 		XDNA_DBG(xdna, "wake up all for msix idx %lu", msix_idx);
@@ -227,6 +233,7 @@ static int aie4_irq_init(struct amdxdna_dev *xdna)
 
 	if (enable_aie4_polling) {
 		XDNA_DBG(xdna, "enable_aie4 polling mode");
+		ndev->cert_hsa_poll_dbg_left = 8;
 		timer_setup(&ndev->cert_timer, cert_timer, 0);
 		mod_timer(&ndev->cert_timer, jiffies + msecs_to_jiffies(1000));
 	} else if (ndev->xcomm_ops) {
