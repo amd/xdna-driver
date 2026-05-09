@@ -773,6 +773,7 @@ const struct amdxdna_dev_ops aie4_pf_ops = {
 	.init			= aie4_pf_init,
 	.fini			= aie4_pf_fini,
 	.sriov_configure        = aie4_sriov_configure,
+	.debugfs		= aie4_debugfs_init,
 };
 
 const struct amdxdna_dev_ops aie4_vf_ops = {
@@ -797,4 +798,5 @@ const struct amdxdna_dev_ops aie4_classic_ops = {
 	.get_aie_info		= aie4_get_info,
 	.get_array		= aie4_get_array,
 	.get_coredump		= aie4_get_aie_coredump,
+	.debugfs		= aie4_debugfs_init,
 };
