@@ -1255,7 +1255,7 @@ struct aie4_msg_calibrate_clock_trace_resp {
 	enum aie4_msg_status status;
 };
 
-/** * Event trace destination options.  */
+/** Event trace destination options. */
 enum aie4_msg_event_trace_destination {
 	AIE4_MSG_EVENT_TRACE_DEST_DRAM,
 	AIE4_MSG_EVENT_TRACE_DEST_COUNT

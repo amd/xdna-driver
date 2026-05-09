@@ -385,7 +385,7 @@ static int aie2_dbgfs_nputest_show(struct seq_file *m, void *unused)
 	seq_puts(m, "\n");
 	seq_puts(m, "test case 2 usage:\n");
 	seq_puts(m, "\techo 2 msg_len resp_len pattern [cnt] > <nputest file>\n");
-	seq_puts(m, "\t\tmsg_len - messge length in words (>= 2)\n");
+	seq_puts(m, "\t\tmsg_len - message length in words (>= 2)\n");
 	seq_puts(m, "\t\tresp_len - response length in words (1 - 28)\n");
 	seq_puts(m, "\t\tpattern - data to fill message and response\n");
 	seq_puts(m, "\t\tcnt - send cnt messages without wait, optional (default 1)\n");

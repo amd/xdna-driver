@@ -712,7 +712,7 @@ static void rq_parts_work(struct work_struct *work)
 	/* Partition expanding or trimming is needed */
 	rq->paused = true;
 	if (handle_busy_ctxs(rq)) {
-		XDNA_DBG(xdna, "Wait for disconneting active contexts");
+		XDNA_DBG(xdna, "Wait for disconnecting active contexts");
 		goto out;
 	}
 
@@ -1008,7 +1008,7 @@ aie2_enable_special_case(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 	 * 1. The first column of the device is non-zero.
 	 * 2. The columns of context and device are the same.
 	 *
-	 * After spacial case support is enabled,
+	 * After special case support is enabled,
 	 * 1. Other context doesn't use all columns will fail to create.
 	 */
 	if (!xdna->dev_info->first_col) {
@@ -1112,7 +1112,7 @@ int aie2_rq_add(struct aie2_ctx_rq *rq, struct amdxdna_ctx *ctx)
 
 	/* Expand partition is needed*/
 	if (num_col > rq->max_cols) {
-		XDNA_DBG(xdna, "%s request %d colomns, rq max_cols %d",
+		XDNA_DBG(xdna, "%s request %d columns, rq max_cols %d",
 			 ctx->name, num_col, rq->max_cols);
 		wait_parts = true;
 	}

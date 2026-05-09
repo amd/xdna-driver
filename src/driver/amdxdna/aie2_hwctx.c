@@ -115,7 +115,7 @@ int aie2_hwctx_start(struct amdxdna_ctx *ctx)
 	ret = drm_sched_entity_init(&ctx->priv->entity, DRM_SCHED_PRIORITY_NORMAL,
 				    &sched, 1, NULL);
 	if (ret) {
-		XDNA_ERR(xdna, "Failed to initial sched entiry. ret %d", ret);
+		XDNA_ERR(xdna, "Failed to initial sched entity. ret %d", ret);
 		goto fini_sched;
 	}
 

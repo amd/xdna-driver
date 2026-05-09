@@ -230,7 +230,7 @@ private:
   // points to the same bo instance in driver. If we have multiple bo
   // instances in shim pointing to the same bo in driver, any one of
   // the bo is destroyed will cause the driver bo to be freed while
-  // other bo intances may still be in-use in shim.
+  // other bo instances may still be in-use in shim.
   mutable std::mutex m_drm_bo_map_lock;
   mutable std::map< uint32_t, std::pair<int, bo_info> > m_drm_bo_map;
 

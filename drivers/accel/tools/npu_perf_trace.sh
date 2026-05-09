@@ -35,7 +35,7 @@ add_sdt_xrt()
 	perf list | grep sdt_xrt > /dev/null && sdt_pre_enabled=1
 	if [[ $sdt_pre_enabled == 1 ]]; then
 		remove_sdt_xrt
-		#trace_warn "XRT SDT had beed added. Skip..."
+		#trace_warn "XRT SDT had been added. Skip..."
 		#return
 	fi
 

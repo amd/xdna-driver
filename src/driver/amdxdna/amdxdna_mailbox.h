@@ -120,7 +120,7 @@ xdna_mailbox_create_channel(struct mailbox *mailbox,
  *
  * Release all resources, including messages, list entries, interrupt etc.
  * After this function all, the channel is not functional at all.
- * This is added for more complex synchronization secnario.
+ * This is added for more complex synchronization scenario.
  */
 void xdna_mailbox_release_channel(struct mailbox_channel *mailbox_chann);
 

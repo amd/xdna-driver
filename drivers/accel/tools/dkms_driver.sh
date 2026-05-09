@@ -61,7 +61,7 @@ if [[ $1 == "--install" ]]; then
 		echo "Failed to enable DKMS for ${DKMS_DRV_MODULE_NAME}"
 		exit 1
 	fi
-	echo "Successfully intalled and enabled DKMS for ${DKMS_DRV_MODULE_NAME}"
+	echo "Successfully installed and enabled DKMS for ${DKMS_DRV_MODULE_NAME}"
 else
 # Remove source code from DKMS and clean up
 	echo "Removing driver source: ${DKMS_DRV_MODULE_NAME}..."

@@ -151,7 +151,7 @@ int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	ret = aie2_config_fw_log(xdna->dev_handle, dma_hdl, size, &msi_idx, &msi_address);
 	if (ret) {
-		/* Sliently fail for device generation that don't support FW logging */
+		/* Silently fail for device generation that don't support FW logging */
 		if (ret != -EOPNOTSUPP)
 			XDNA_ERR(xdna, "Failed to init fw log buffer: %d", ret);
 		mutex_unlock(&xdna->dev_handle->aie2_lock);
@@ -213,7 +213,7 @@ int aie2_fw_log_fini(struct amdxdna_dev *xdna)
 	mutex_lock(&xdna->dev_handle->aie2_lock);
 	ret = aie2_set_log_destination(xdna->dev_handle, FW_LOG_DESTINATION_FIXED);
 	if (ret) {
-		/* Sliently fail for device generation that don't support FW logging */
+		/* Silently fail for device generation that don't support FW logging */
 		if (ret != -EOPNOTSUPP)
 			XDNA_ERR(xdna, "Failed to reset fw log destination: %d", ret);
 		mutex_unlock(&xdna->dev_handle->aie2_lock);
@@ -253,7 +253,7 @@ int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
 	ret = aie2_start_fw_trace(xdna->dev_handle, dma_hdl, size, categories, &msi_idx,
 				  &msi_address);
 	if (ret) {
-		/* Sliently fail for device generation that don't support FW tracing */
+		/* Silently fail for device generation that don't support FW tracing */
 		if (ret != -EOPNOTSUPP)
 			XDNA_ERR(xdna, "Failed to init fw trace buffer: %d", ret);
 		mutex_unlock(&xdna->dev_handle->aie2_lock);

@@ -338,7 +338,7 @@ struct amdxdna_drm_exec_cmd {
 };
 
 /**
- * struct amdxdna_drm_wait_cmd - Wait exectuion command.
+ * struct amdxdna_drm_wait_cmd - Wait execution command.
  *
  * @ctx: Context handle.
  * @timeout: timeout in ms, 0 implies infinite wait.
@@ -709,7 +709,7 @@ struct amdxdna_async_error {
 
 /**
  * struct amdxdna_dpt_metadata - DPT metadata shared between shim and driver
- * @offset: ever increamenting DPT read pointer
+ * @offset: ever incrementing DPT read pointer
  * @size: size of the buffer
  * @watch: boolean value to indicate if this request can wait in the kernel until new data is
  *	   available

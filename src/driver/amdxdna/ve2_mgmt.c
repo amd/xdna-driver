@@ -1213,7 +1213,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna,
 
 		mgmtctx->mgmt_aiedev = aie_partition_request(&request);
 		if (IS_ERR(mgmtctx->mgmt_aiedev)) {
-			XDNA_ERR(xdna, "aie parition request failed for part id %d",
+			XDNA_ERR(xdna, "aie partition request failed for part id %d",
 				 request.partition_id);
 			return -ENODEV;
 		}

@@ -392,7 +392,7 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   // both CPU and device may write to it.
   // In case the BO is exported to other process, it has to be aligned on page
   // boundary so that we don't implicitly share more than we need. Page size
-  // alignement is also required on Windows platform.
+  // alignment is also required on Windows platform.
   // Based on the above reasons, we'll enforce the pointer to be page aligned.
   if (!is_page_aligned(m_uptr))
     shim_err(EINVAL, "User pointer %p must be page aligned.", m_uptr);

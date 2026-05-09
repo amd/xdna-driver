@@ -429,7 +429,7 @@ hcall(void *req, void *out_buf, size_t out_size) const
   hcall(req);
   if (rsp_hdr->ret) {
     auto r = reinterpret_cast<vdrm_ccmd_req*>(req);
-    shim_err(rsp_hdr->ret, "%s HCALL received bad reponse", hcall_cmd2name(r->cmd).c_str());
+    shim_err(rsp_hdr->ret, "%s HCALL received bad response", hcall_cmd2name(r->cmd).c_str());
   }
   std::memcpy(out_buf, m_resp_buf->get(), sz);
 }

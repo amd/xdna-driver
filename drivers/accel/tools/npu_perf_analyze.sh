@@ -97,7 +97,7 @@ if [ ${event2_ts_num} -eq 0 ]; then
 fi
 echo "${event2_ts_num} events for: '${event2}'"
 
-# Caculate time difference between two events
+# Calculate time difference between two events
 diffs_event1=()
 diffs_event2=()
 diffs=()
