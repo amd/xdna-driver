@@ -36,6 +36,7 @@ enum aie2_msg_opcode {
 	MSG_OP_ADD_HOST_BUFFER             = 0x115,
 	MSG_OP_GET_DEV_REVISION            = 0x117,
 	MSG_OP_GET_COREDUMP                = 0x119,
+	MSG_OP_CALIBRATE_CLOCK             = 0x11C,
 	MSG_OP_MAX_DRV_OPCODE,
 	MSG_OP_AIE_RW_ACCESS               = 0x203,
 	MSG_OP_MAX_ASYNC_OPCODE,
@@ -590,6 +591,14 @@ struct aie_rw_access_req {
 struct aie_rw_access_resp {
 	enum aie2_msg_status	status;
 	__u32			reg_read_value;
+} __packed;
+
+struct calibrate_clock_req {
+	__u64			time_base_ns;
+} __packed;
+
+struct calibrate_clock_resp {
+	enum aie2_msg_status	status;
 } __packed;
 
 #endif /* _AIE2_MSG_PRIV_H_ */

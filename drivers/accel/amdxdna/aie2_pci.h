@@ -190,6 +190,7 @@ enum aie2_fw_feature {
 	AIE2_GET_DEV_REVISION,
 	AIE2_GET_COREDUMP,
 	AIE2_RW_ACCESS,
+	AIE2_CALIBRATE_CLOCK,
 	AIE2_FEATURE_MAX
 };
 
@@ -266,6 +267,7 @@ int aie2_rw_aie_reg(struct amdxdna_hwctx *hwctx, bool is_read,
 int aie2_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
 		    u8 row, u8 col, u32 aie_addr,
 		    dma_addr_t dram_addr, u32 size);
+int aie2_calibrate_clock(struct amdxdna_dev_hdl *ndev);
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
