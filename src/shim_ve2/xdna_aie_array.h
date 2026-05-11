@@ -35,9 +35,9 @@ private:
   // XAie_InstDeclare(DevInst, &ConfigPtr) is the interface
   // to initialize DevInst by the AIE driver. But it does not
   // work here because we can not make it as a member of Aie
-  // class to maintain its life cycle. So we declair it here.
+  // class to maintain its life cycle. So we declare it here.
   //
-  // Note: need to evolve when XAie_InstDecalare() evolves.
+  // Note: need to evolve when XAie_InstDeclare() evolves.
   XAie_DevInst dev_inst_obj;
 };
 
