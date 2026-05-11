@@ -429,8 +429,10 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	XDNA_INFO(xdna, "Platform driver probed");
 	return 0;
 
+#ifdef CONFIG_AMDXDNA_SHMEM
 transport_fini:
 	amdxdna_plat_transport_fini(xdna, pdata);
+#endif
 cma_fini:
 	amdxdna_cma_region_fini(xdna);
 
