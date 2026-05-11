@@ -12,6 +12,7 @@
 
 enum aie4_msg_opcode {
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
+	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x10009,
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
 	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
@@ -190,6 +191,14 @@ struct aie4_msg_aie4_debug_access_req {
 struct aie4_msg_aie4_debug_access_resp {
 	enum aie4_msg_status status;
 	__u32 reg_rval;
+} __packed;
+
+struct aie4_msg_calibrate_clock_req {
+	__u64 time_base_ns;
+} __packed;
+
+struct aie4_msg_calibrate_clock_resp {
+	enum aie4_msg_status status;
 } __packed;
 
 #endif /* _AIE4_MSG_PRIV_H_ */

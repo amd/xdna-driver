@@ -12,6 +12,7 @@
 #include <drm/gpu_scheduler.h>
 #include <linux/bitfield.h>
 #include <linux/errno.h>
+#include <linux/ktime.h>
 #include <linux/pci.h>
 #include <linux/types.h>
 #include <linux/xarray.h>
@@ -200,6 +201,27 @@ static u32 aie2_get_context_priority(struct amdxdna_dev_hdl *ndev,
 	default:
 		return PRIORITY_HIGH;
 	}
+}
+
+int aie2_calibrate_clock(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(calibrate_clock, MSG_OP_CALIBRATE_CLOCK);
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE2_CALIBRATE_CLOCK)) {
+		XDNA_DBG(ndev->aie.xdna, "Calibrate clock not supported, skipped");
+		return 0;
+	}
+
+	req.time_base_ns = ktime_get_real_ns();
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Calibrate clock failed, ret %d", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx)

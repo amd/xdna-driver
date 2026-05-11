@@ -290,6 +290,12 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto fw_unload;
 
+	ret = aie4_calibrate_clock(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Calibrate system clock failed");
+		goto mbox_fini;
+	}
+
 	/* Firmware releases the DRAM work buffer internally during suspend_fw */
 	ret = aie4_attach_work_buffer(ndev,
 				      to_dma_addr(ndev->work_buf_hdl, 0),
@@ -362,6 +368,12 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 	ret = aie4_mailbox_init(ndev);
 	if (ret)
 		goto fw_unload;
+
+	ret = aie4_calibrate_clock(ndev);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Calibrate system clock failed");
+		goto mbox_fini;
+	}
 
 	/* Firmware releases the DRAM work buffer internally during suspend_fw */
 	ret = aie4_attach_work_buffer(ndev,

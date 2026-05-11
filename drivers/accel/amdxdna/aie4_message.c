@@ -7,6 +7,7 @@
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/bitfield.h>
+#include <linux/ktime.h>
 #include <linux/mutex.h>
 
 #include "aie.h"
@@ -27,6 +28,27 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->aie.xdna, "Failed to suspend fw, ret %d", ret);
 
 	return ret;
+}
+
+int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_calibrate_clock, AIE4_MSG_OP_CALIBRATE_CLOCK);
+	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_CALIBRATE_CLOCK)) {
+		XDNA_DBG(ndev->aie.xdna, "Calibrate clock not supported, skipped");
+		return 0;
+	}
+
+	req.time_base_ns = ktime_get_real_ns();
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Calibrate clock failed, ret %d", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
