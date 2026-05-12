@@ -609,14 +609,28 @@ public:
       throw std::runtime_error("ftruncate failed");
     }
 
+    // Create fd for mmap
+    // Open it again as readonly if needed
+    int mmap_fd;
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+
+    mmap_fd = ::open(path, (readonly ? O_RDONLY : O_RDWR) | O_CLOEXEC);
+    if (mmap_fd < 0) {
+      ::close(fd);
+      throw std::runtime_error("open mmap fd failed");
+    }
+
     auto mapped = ::mmap(nullptr, size,
-      readonly ? PROT_READ : PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+      readonly ? PROT_READ : PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0);
     if (mapped == MAP_FAILED) {
+      ::close(mmap_fd);
       ::close(fd);
       throw std::runtime_error("mmap failed");
     }
 
     m_fd = fd;
+    m_mmap_fd = mmap_fd;
     m_ptr = mapped;
     m_size = size;
   }
@@ -624,6 +638,7 @@ public:
   ~mmapped_file()
   {
     ::munmap(m_ptr, m_size);
+    ::close(m_mmap_fd);
     ::close(m_fd);
   }
 
@@ -634,6 +649,7 @@ public:
 
 private:
   int m_fd = -1;
+  int m_mmap_fd = -1;
   size_t m_size = 0;
   void *m_ptr = nullptr;
 };
