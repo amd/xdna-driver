@@ -129,10 +129,10 @@ static int test_msg_enum(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
 	/*
-	 * Using magic echo to let sideloaded mpnpu enforce some steps which suppose to
-	 * be done after pcie device is emulated. Sending this ECHO before run any
-	 * tests. This would not affect released version because this step won't not
-	 * be run after released.
+	 * Using magic echo to let sideloaded mpnpu enforce some steps that are
+	 * supposed to be done after the PCIe device is emulated. Send this ECHO
+	 * before running any tests. This does not affect released versions because
+	 * this step will not be run in released versions.
 	 *
 	 * Note: only send this special echo once on classic EP setup
 	 */
