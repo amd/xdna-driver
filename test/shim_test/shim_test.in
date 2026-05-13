@@ -10,4 +10,4 @@ unset LD_LIBRARY_PATH
 # Guarantee libxrt_coreutil.so dlopens libxrt_core.so in bins/lib/ folder
 export XILINX_XRT="${SCRIPT_DIR}/../"
 
-exec ${SCRIPT_DIR}/@XDNA_SHIM_TEST@ "$@"
+exec "${SCRIPT_DIR}/@XDNA_SHIM_TEST@" "$@"
