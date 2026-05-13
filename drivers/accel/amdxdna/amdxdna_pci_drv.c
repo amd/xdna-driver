@@ -373,6 +373,7 @@ static void amdxdna_xdna_drm_release(struct drm_device *drm, void *res)
 	struct amdxdna_dev *xdna = res;
 
 	amdxdna_carveout_fini(xdna);
+	cleanup_srcu_struct(&xdna->dpt_srcu);
 }
 
 static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -396,9 +397,15 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	INIT_LIST_HEAD(&xdna->client_list);
 	pci_set_drvdata(pdev, xdna);
 
-	ret = drmm_add_action(ddev, amdxdna_xdna_drm_release, xdna);
+	ret = init_srcu_struct(&xdna->dpt_srcu);
 	if (ret)
 		return ret;
+
+	ret = drmm_add_action(ddev, amdxdna_xdna_drm_release, xdna);
+	if (ret) {
+		cleanup_srcu_struct(&xdna->dpt_srcu);
+		return ret;
+	}
 
 	if (IS_ENABLED(CONFIG_LOCKDEP)) {
 		fs_reclaim_acquire(GFP_KERNEL);
