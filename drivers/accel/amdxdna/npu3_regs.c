@@ -46,6 +46,7 @@ static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
 	{ .features = BIT_U64(AIE4_GET_COREDUMP), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_RW_ACCESS), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_FW_LOG), .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_FW_TRACE), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_CALIBRATE_CLOCK), .major = 6, .min_minor = 0 },
 	{ 0 }
 };
