@@ -191,10 +191,14 @@ enum aie2_fw_feature {
 	AIE2_GET_COREDUMP,
 	AIE2_RW_ACCESS,
 	AIE2_CALIBRATE_CLOCK,
+	AIE2_FW_LOG,
 	AIE2_FEATURE_MAX
 };
 
 #define AIE2_ALL_FEATURES	GENMASK_ULL(AIE2_FEATURE_MAX - 1, AIE2_NPU_COMMAND)
+
+/* Mailbox MSI address mask used for the DPT (FW log) IRQ. */
+#define AIE2_DPT_MSI_ADDR_MASK		GENMASK(23, 0)
 
 struct amdxdna_dev_priv {
 	const char			*fw_path;
@@ -268,6 +272,19 @@ int aie2_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
 		    u8 row, u8 col, u32 aie_addr,
 		    dma_addr_t dram_addr, u32 size);
 int aie2_calibrate_clock(struct amdxdna_dev_hdl *ndev);
+int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, enum aie2_fw_log_level level);
+int aie2_set_log_format(struct amdxdna_dev_hdl *ndev, enum aie2_fw_log_format format);
+int aie2_set_log_destination(struct amdxdna_dev_hdl *ndev,
+			     enum aie2_fw_log_destination destination);
+int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev,
+		       struct amdxdna_msg_buf_hdl *buf_hdl,
+		       size_t size, u32 *msi_idx, u32 *msi_address);
+
+/* aie2_pci.c */
+int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level);
+int aie2_fw_log_config(struct amdxdna_dev *xdna, u32 level);
+int aie2_fw_log_fini(struct amdxdna_dev *xdna);
+
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size);
