@@ -91,6 +91,56 @@ int aie2_assign_mgmt_pasid(struct amdxdna_dev_hdl *ndev, u16 pasid)
 	return aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 }
 
+int aie2_set_log_level(struct amdxdna_dev_hdl *ndev, enum aie2_fw_log_level level)
+{
+	return aie2_set_runtime_cfg(ndev, NPU4_RT_TYPE_LOG_LEVEL, level);
+}
+
+int aie2_set_log_format(struct amdxdna_dev_hdl *ndev, enum aie2_fw_log_format format)
+{
+	return aie2_set_runtime_cfg(ndev, NPU4_RT_TYPE_LOG_FORMAT, format);
+}
+
+int aie2_set_log_destination(struct amdxdna_dev_hdl *ndev,
+			     enum aie2_fw_log_destination destination)
+{
+	return aie2_set_runtime_cfg(ndev, NPU4_RT_TYPE_LOG_DESTINATION, destination);
+}
+
+int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev,
+		       struct amdxdna_msg_buf_hdl *buf_hdl,
+		       size_t size, u32 *msi_idx, u32 *msi_address)
+{
+	DECLARE_AIE_MSG(config_fw_log, MSG_OP_CONFIG_FW_LOG);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	dma_addr_t addr;
+	int ret;
+
+	addr = to_dma_addr(buf_hdl, 0);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		return -EINVAL;
+	}
+
+	/* Cmd with buf_size == 0 detaches the log buffer from FW. */
+	req.buf_size = size;
+	req.buf_addr = addr;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Config fw log failed, ret %d status 0x%x",
+			 ret, resp.status);
+		return ret;
+	}
+
+	if (size && msi_idx && msi_address) {
+		*msi_idx = resp.msi_idx;
+		*msi_address = resp.msi_address;
+	}
+
+	return 0;
+}
+
 int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev,
 			   struct amdxdna_drm_query_aie_version *version)
 {
@@ -941,6 +991,12 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 	if (AIE_FEATURE_ON(&ndev->aie, AIE2_RW_ACCESS)) {
 		ndev->aie.msg_ops.rw_reg = aie2_rw_aie_reg;
 		ndev->aie.msg_ops.rw_mem = aie2_rw_aie_mem;
+	}
+
+	if (AIE_FEATURE_ON(&ndev->aie, AIE2_FW_LOG)) {
+		ndev->aie.msg_ops.fw_log_init   = aie2_fw_log_init;
+		ndev->aie.msg_ops.fw_log_config = aie2_fw_log_config;
+		ndev->aie.msg_ops.fw_log_fini   = aie2_fw_log_fini;
 	}
 }
 

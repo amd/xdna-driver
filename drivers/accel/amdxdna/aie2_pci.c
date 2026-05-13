@@ -4,6 +4,7 @@
  */
 
 #include "drm/amdxdna_accel.h"
+#include <drm/drm_cache.h>
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_gem_shmem_helper.h>
@@ -16,6 +17,7 @@
 #include <linux/iommu.h>
 #include <linux/iopoll.h>
 #include <linux/pci.h>
+#include <linux/rcupdate.h>
 #include <linux/xarray.h>
 #include <asm/hypervisor.h>
 
@@ -456,6 +458,7 @@ static int aie2_hw_suspend(struct amdxdna_dev *xdna)
 		aie2_hwctx_suspend(client);
 
 	aie2_hw_stop(xdna);
+	amdxdna_dpt_suspend(&xdna->dev_handle->aie);
 
 	return 0;
 }
@@ -470,6 +473,8 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Start hardware failed, %d", ret);
 		return ret;
 	}
+
+	amdxdna_dpt_resume(&xdna->dev_handle->aie);
 
 	list_for_each_entry(client, &xdna->client_list, node) {
 		ret = aie2_hwctx_resume(client);
@@ -619,6 +624,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 	release_firmware(fw);
 	aie2_msg_init(ndev);
+	amdxdna_dpt_init(&ndev->aie);
 	amdxdna_vbnv_init(xdna);
 	amdxdna_pm_init(xdna);
 	aie2_tdr_start(xdna);
@@ -636,6 +642,7 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 {
 	aie2_tdr_stop(xdna);
 	amdxdna_pm_fini(xdna);
+	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 	aie2_hw_stop(xdna);
 }
 
@@ -1198,6 +1205,97 @@ static int aie2_get_dev_rev(struct amdxdna_dev *xdna, u32 *rev)
 		*rev = (u32)aie2_rev;
 
 	return ret;
+}
+
+int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_dpt *dpt;
+	u32 msi_idx, msi_address;
+	int ret;
+
+	if (level >= AIE2_FW_LOG_LEVEL_MAX) {
+		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
+		return -EINVAL;
+	}
+
+	dpt = rcu_dereference_protected(xdna->fw_log,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt) {
+		XDNA_ERR(xdna, "FW log handle not allocated");
+		return -ENXIO;
+	}
+
+	ret = aie2_config_fw_log(ndev, dpt->buf, size, &msi_idx, &msi_address);
+	if (ret) {
+		if (ret != -EOPNOTSUPP)
+			XDNA_ERR(xdna, "Failed to init fw log buffer: %d", ret);
+		return ret;
+	}
+
+	ret = aie2_set_log_level(ndev, level);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to init fw log level: %d", ret);
+		goto detach;
+	}
+
+	ret = aie2_set_log_format(ndev, AIE2_FW_LOG_FORMAT_FULL);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to init fw log format: %d", ret);
+		goto detach;
+	}
+
+	ret = aie2_set_log_destination(ndev, AIE2_FW_LOG_DESTINATION_DRAM);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to init fw log destination: %d", ret);
+		goto detach;
+	}
+
+	dpt->io_base = ndev->mbox_base;
+	dpt->msi_address = msi_address & AIE2_DPT_MSI_ADDR_MASK;
+	dpt->msi_idx = msi_idx;
+
+	return 0;
+
+detach:
+	aie2_config_fw_log(ndev, dpt->buf, 0, NULL, NULL);
+	return ret;
+}
+
+int aie2_fw_log_config(struct amdxdna_dev *xdna, u32 level)
+{
+	if (level == AIE2_FW_LOG_LEVEL_OFF || level >= AIE2_FW_LOG_LEVEL_MAX) {
+		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
+		return -EINVAL;
+	}
+
+	return aie2_set_log_level(xdna->dev_handle, level);
+}
+
+int aie2_fw_log_fini(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_dpt *dpt;
+	int ret;
+
+	dpt = rcu_dereference_protected(xdna->fw_log,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt)
+		return 0;
+
+	ret = aie2_set_log_destination(ndev, AIE2_FW_LOG_DESTINATION_NULL);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to reset fw log destination: %d", ret);
+		return ret;
+	}
+
+	ret = aie2_config_fw_log(ndev, dpt->buf, 0, NULL, NULL);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to reset fw log buffer: %d", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 const struct amdxdna_dev_ops aie2_ops = {

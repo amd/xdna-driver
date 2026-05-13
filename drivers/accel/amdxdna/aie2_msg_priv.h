@@ -34,6 +34,7 @@ enum aie2_msg_opcode {
 	MSG_OP_UPDATE_PROPERTY             = 0x113,
 	MSG_OP_GET_APP_HEALTH              = 0x114,
 	MSG_OP_ADD_HOST_BUFFER             = 0x115,
+	MSG_OP_CONFIG_FW_LOG               = 0x116,
 	MSG_OP_GET_DEV_REVISION            = 0x117,
 	MSG_OP_GET_COREDUMP                = 0x119,
 	MSG_OP_CALIBRATE_CLOCK             = 0x11C,
@@ -599,6 +600,45 @@ struct calibrate_clock_req {
 
 struct calibrate_clock_resp {
 	enum aie2_msg_status	status;
+} __packed;
+
+/*
+ * Firmware logging runtime-config type IDs (FW 6.19+). Used as the @type
+ * argument to aie2_set_runtime_cfg().
+ */
+#define NPU4_RT_TYPE_LOG_LEVEL		6
+#define NPU4_RT_TYPE_LOG_FORMAT		7
+#define NPU4_RT_TYPE_LOG_DESTINATION	8
+
+enum aie2_fw_log_level {
+	AIE2_FW_LOG_LEVEL_OFF,
+	AIE2_FW_LOG_LEVEL_ERR,
+	AIE2_FW_LOG_LEVEL_WRN,
+	AIE2_FW_LOG_LEVEL_INF,
+	AIE2_FW_LOG_LEVEL_DBG,
+	AIE2_FW_LOG_LEVEL_MAX
+};
+
+enum aie2_fw_log_format {
+	AIE2_FW_LOG_FORMAT_FULL,
+};
+
+enum aie2_fw_log_destination {
+	AIE2_FW_LOG_DESTINATION_NULL,
+	AIE2_FW_LOG_DESTINATION_DRAM   = 4,
+};
+
+struct config_fw_log_req {
+	__u64	buf_addr;
+	__u32	buf_size;
+	__u32	reserved[5];
+} __packed;
+
+struct config_fw_log_resp {
+	enum aie2_msg_status	status;
+	__u32			msi_idx;
+	__u32			msi_address;
+	__u32			reserved[5];
 } __packed;
 
 #endif /* _AIE2_MSG_PRIV_H_ */
