@@ -109,13 +109,6 @@ struct amdxdna_dev_info {
 	const struct amdxdna_dev_ops	*ops;
 };
 
-struct amdxdna_fw_ver {
-	u32 major;
-	u32 minor;
-	u32 sub;
-	u32 build;
-};
-
 struct amdxdna_carveout;
 struct amdxdna_dpt;
 
@@ -127,7 +120,7 @@ struct amdxdna_dev {
 
 	struct mutex			dev_lock; /* per device lock */
 	struct list_head		client_list;
-	struct amdxdna_fw_ver		fw_ver;
+	struct amdxdna_drm_query_firmware_version fw_ver;
 	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
 	struct workqueue_struct		*notifier_wq;
 

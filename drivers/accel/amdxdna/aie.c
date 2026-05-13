@@ -170,6 +170,34 @@ u64 amdxdna_io_stats_busy_time_ns(struct amdxdna_client *client)
 	return busy_ns;
 }
 
+int amdxdna_get_aie_version(struct amdxdna_client *client,
+			    struct amdxdna_drm_get_info *args,
+			    struct amdxdna_drm_query_aie_version *version)
+{
+	int ret = 0;
+	u32 buf_sz;
+
+	buf_sz = min(args->buffer_size, sizeof(*version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), version, buf_sz))
+		ret = -EFAULT;
+
+	return ret;
+}
+
+int amdxdna_get_firmware_version(struct amdxdna_client *client,
+				 struct amdxdna_drm_get_info *args,
+				 struct amdxdna_drm_query_firmware_version *version)
+{
+	int ret = 0;
+	u32 buf_sz;
+
+	buf_sz = min(args->buffer_size, sizeof(*version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), version, buf_sz))
+		ret = -EFAULT;
+
+	return ret;
+}
+
 int amdxdna_get_metadata(struct aie_device *aie,
 			 struct amdxdna_client *client,
 			 struct amdxdna_drm_get_info *args)
