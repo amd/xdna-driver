@@ -714,7 +714,11 @@ struct amdxdna_dpt_metadata {
 struct amdxdna_drm_set_dpt_state {
 	/** @action: 1 to enable, 0 to disable. */
 	__u32 action;
-	/** @config: For firmware logging this value indicates log level. */
+	/**
+	 * @config: For firmware logging this value indicates log level.
+	 * For DRM_AMDXDNA_SET_FW_TRACE_STATE on enable, a non-zero category
+	 * bitmask is mandatory; passing 0 returns -EINVAL.
+	 */
 	__u32 config;
 	/** @pad: MBZ. */
 	__u64 pad;
@@ -749,9 +753,11 @@ struct amdxdna_drm_get_dpt_state {
 #define DRM_AMDXDNA_HW_CONTEXT_ALL	0
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
 #define DRM_AMDXDNA_FW_LOG		3
+#define DRM_AMDXDNA_FW_TRACE		4
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
 #define DRM_AMDXDNA_FW_LOG_CONFIG	7
+#define DRM_AMDXDNA_FW_TRACE_CONFIG	8
 #define DRM_AMDXDNA_AIE_TILE_READ	9
 
 /**
@@ -826,6 +832,28 @@ struct amdxdna_drm_get_array {
 	 *
 	 * Access: unprivileged. Returns -EOPNOTSUPP if firmware doesn't
 	 * support this feature.
+	 *
+	 * %DRM_AMDXDNA_FW_TRACE:
+	 * Returns firmware event trace payload plus metadata.
+	 *
+	 * num_element must be 1. buffer points to a user buffer whose size
+	 * is element_size bytes. The last sizeof(struct amdxdna_dpt_metadata)
+	 * bytes of buffer carry the request/reply metadata (offset, size,
+	 * watch); the remainder receives the payload. When @watch is set the
+	 * call sleeps in the kernel until new data is available, tracing is
+	 * disabled, or a signal arrives.
+	 *
+	 * Access: requires CAP_SYS_ADMIN.
+	 *
+	 * %DRM_AMDXDNA_FW_TRACE_CONFIG:
+	 * Returns the current firmware trace configuration as
+	 * struct amdxdna_drm_get_dpt_state.
+	 *
+	 * num_element must be 1. element_size must be at least
+	 * sizeof(struct amdxdna_drm_get_dpt_state).
+	 *
+	 * Access: unprivileged. Returns -EOPNOTSUPP if firmware doesn't
+	 * support this feature.
 	 */
 	__u32 param;
 	/**
@@ -859,7 +887,8 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_SET_FORCE_PREEMPT,
 	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
 	DRM_AMDXDNA_SET_FW_LOG_STATE,
-	DRM_AMDXDNA_AIE_TILE_WRITE = 7,
+	DRM_AMDXDNA_SET_FW_TRACE_STATE,
+	DRM_AMDXDNA_AIE_TILE_WRITE,
 };
 
 /**
@@ -910,6 +939,18 @@ struct amdxdna_drm_set_state {
 	 * disables logging; action=1 enables it (or, if already enabled,
 	 * changes the level to @config). @config must be in
 	 * [1, AMDXDNA_DPT_FW_LOG_LEVEL_MAX).
+	 *
+	 * Access: requires CAP_SYS_ADMIN (the SET_STATE ioctl is
+	 * DRM_ROOT_ONLY).
+	 *
+	 * %DRM_AMDXDNA_SET_FW_TRACE_STATE:
+	 * Enable, disable, or change the category bitmask of firmware
+	 * event tracing.
+	 *
+	 * buffer points to struct amdxdna_drm_set_dpt_state. action=0
+	 * disables tracing; action=1 enables it (or, if already enabled,
+	 * replaces the category bitmask). @config must be a non-zero
+	 * bitmask; passing 0 returns -EINVAL.
 	 *
 	 * Access: requires CAP_SYS_ADMIN (the SET_STATE ioctl is
 	 * DRM_ROOT_ONLY).

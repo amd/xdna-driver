@@ -145,6 +145,7 @@ struct amdxdna_dev {
 	 */
 	struct srcu_struct		dpt_srcu;
 	struct amdxdna_dpt __rcu	*fw_log;
+	struct amdxdna_dpt __rcu	*fw_trace;
 };
 
 /*
