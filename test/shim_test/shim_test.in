@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026, Advanced Micro Devices, Inc. All rights reserved.
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Guarantee shim_test.elf links to libxrt_coreutil.so in bins/lib/ folder
+unset LD_LIBRARY_PATH
+# Guarantee libxrt_coreutil.so dlopens libxrt_core.so in bins/lib/ folder
+export XILINX_XRT="${SCRIPT_DIR}/../"
+
+exec ${SCRIPT_DIR}/@XDNA_SHIM_TEST@ "$@"

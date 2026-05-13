@@ -399,8 +399,11 @@ buffer(const pdev& dev, size_t size, int type, void *uptr)
   if (m_uptr && type != AMDXDNA_BO_SHARE)
     shim_err(EINVAL, "User pointer BO must be AMDXDNA_BO_SHARE type.");
 
-  // Prepare the mmap range for the entire buffer
-  m_range_addr = std::make_unique<mmap_ptr>(m_total_size, m_alignment);
+  // User ptr BO does not support mmap any more.
+  if (!m_uptr) {
+    // Prepare the mmap range for the entire buffer
+    m_range_addr = std::make_unique<mmap_ptr>(m_total_size, m_alignment);
+  }
 
   // Obtain the buffer
   expand(m_total_size);
@@ -467,6 +470,9 @@ void
 buffer::
 mmap_drm_bo(drm_bo *bo)
 {
+  if (!m_range_addr)
+    return;
+
   if (bo->m_map_offset == AMDXDNA_INVALID_ADDR) {
     if (m_type != AMDXDNA_BO_DEV)
       shim_err(EINVAL, "Non-DEV BO without mmap offset!");
@@ -570,8 +576,11 @@ buffer::
 paddr() const
 {
   auto xdna_addr = m_bos[0]->m_xdna_addr;
-  return (xdna_addr != AMDXDNA_INVALID_ADDR) ?
-    xdna_addr : reinterpret_cast<uintptr_t>(m_bos[0]->m_vaddr->get());
+  if (xdna_addr != AMDXDNA_INVALID_ADDR)
+    return xdna_addr;
+  if (m_uptr)
+    return reinterpret_cast<uint64_t>(m_uptr);
+  return reinterpret_cast<uint64_t>(m_bos[0]->m_vaddr->get());
 }
 
 void

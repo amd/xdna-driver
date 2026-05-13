@@ -41,6 +41,13 @@ target_compile_options(${XDNA_SHIM_TEST} PRIVATE -O3)
 
 install(TARGETS ${XDNA_SHIM_TEST} DESTINATION ${XDNA_BIN_DIR}/bin)
 
+configure_file(
+  shim_test.in
+  shim_test.sh
+  @ONLY
+  )
+install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/shim_test.sh DESTINATION ${XDNA_BIN_DIR}/bin)
+
 # Set up symlink for local shim test case data
 set(XDNA_SHIM_TEST_DATA_DIR local_shim_test_data)
 install(CODE "execute_process( \
