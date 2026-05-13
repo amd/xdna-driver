@@ -25,6 +25,10 @@ struct aie_msg_ops {
 	int (*rw_mem)(struct amdxdna_hwctx *hwctx, bool is_read,
 		      u8 row, u8 col, u32 aie_addr,
 		      dma_addr_t dram_addr, u32 size);
+
+	int  (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u32 level);
+	int  (*fw_log_config)(struct amdxdna_dev *xdna, u32 level);
+	int  (*fw_log_fini)(struct amdxdna_dev *xdna);
 };
 
 struct aie_device {

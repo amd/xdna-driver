@@ -1,0 +1,691 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2026, Advanced Micro Devices, Inc.
+ */
+
+#include "drm/amdxdna_accel.h"
+#include <drm/drm_cache.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_print.h>
+#include <linux/errno.h>
+#include <linux/interrupt.h>
+#include <linux/jiffies.h>
+#include <linux/pci.h>
+#include <linux/rcupdate.h>
+#include <linux/sizes.h>
+#include <linux/slab.h>
+#include <linux/srcu.h>
+#include <linux/timer.h>
+#include <linux/uaccess.h>
+#include <linux/workqueue.h>
+
+#include "aie.h"
+#include "amdxdna_dpt.h"
+#include "amdxdna_pci_drv.h"
+
+const char * const amdxdna_dpt_irq_name[AMDXDNA_DPT_KIND_MAX] = {
+	[AMDXDNA_DPT_FW_LOG] = "xdna_fw_log",
+};
+
+const char *amdxdna_dpt_kind_str(enum amdxdna_dpt_kind kind)
+{
+	static const char * const names[AMDXDNA_DPT_KIND_MAX] = {
+		[AMDXDNA_DPT_FW_LOG] = "fw_log",
+	};
+
+	return (kind < AMDXDNA_DPT_KIND_MAX) ? names[kind] : "fw_???";
+}
+
+static struct amdxdna_dpt __rcu **
+amdxdna_dpt_slot(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind)
+{
+	switch (kind) {
+	case AMDXDNA_DPT_FW_LOG:
+		return &xdna->fw_log;
+	case AMDXDNA_DPT_KIND_MAX:
+		break;
+	}
+	return NULL;
+}
+
+struct amdxdna_dpt *
+amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind,
+		       int *idx)
+{
+	struct amdxdna_dpt __rcu **slot;
+	struct amdxdna_dpt *dpt;
+
+	slot = amdxdna_dpt_slot(xdna, kind);
+	if (!slot)
+		return NULL;
+
+	*idx = srcu_read_lock(&xdna->dpt_srcu);
+	dpt = srcu_dereference(*slot, &xdna->dpt_srcu);
+	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE) {
+		srcu_read_unlock(&xdna->dpt_srcu, *idx);
+		return NULL;
+	}
+	return dpt;
+}
+
+/*
+ * Fetch up to *size bytes from the ring buffer starting at *offset. Returns
+ * the actual bytes copied via *size and advances *offset to the new read
+ * point.
+ */
+static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buf,
+				     u64 *offset, u32 *size,
+				     int (*cpy)(void *to, const void *from, size_t n))
+{
+	struct amdxdna_msg_buf_hdl *hdl = dpt->buf;
+	size_t req_size, log_size;
+	u32 start, end;
+	u64 tail;
+
+	log_size = to_buf_size(hdl) - AMDXDNA_DPT_FOOTER_SIZE;
+
+	tail = READ_ONCE(dpt->tail);
+
+	if (tail < *offset) {
+		XDNA_DPT_ERR(dpt, "Invalid fetch offset: 0x%llx", *offset);
+		return -EINVAL;
+	}
+
+	if (tail == *offset) {
+		req_size = 0;
+		goto exit;
+	}
+
+	start = *offset % log_size;
+	end = tail % log_size;
+
+	/*
+	 * When the firmware has wrapped past our slot by more than one full
+	 * buffer, re-anchor at the start of the buffer to deliver the most
+	 * recent entries.
+	 */
+	if (tail - *offset >= log_size + start)
+		start = 0;
+
+	if (end > start) {
+		req_size = end - start;
+		if (req_size > *size) {
+			XDNA_DPT_DBG(dpt, "Insufficient buffer size: 0x%zx", req_size);
+			end = start + *size;
+			req_size = *size;
+		}
+	} else {
+		req_size = log_size - start + end;
+		if (req_size > *size) {
+			XDNA_DPT_DBG(dpt, "Insufficient buffer size: 0x%zx", req_size);
+			if (start + *size <= log_size)
+				end = start + *size;
+			else
+				end = *size - (log_size - start);
+			req_size = *size;
+		}
+	}
+
+	if (start > end) {
+		/* First chunk: from start to end of log buffer */
+		drm_clflush_virt_range(to_cpu_addr(hdl, start), log_size - start);
+		if (cpy(buf, to_cpu_addr(hdl, start), log_size - start))
+			return -EFAULT;
+
+		/* Wrap-around chunk: from 0 to end */
+		drm_clflush_virt_range(to_cpu_addr(hdl, 0), end);
+		if (cpy(buf + (log_size - start), to_cpu_addr(hdl, 0), end))
+			return -EFAULT;
+	} else {
+		drm_clflush_virt_range(to_cpu_addr(hdl, start), end - start);
+		if (cpy(buf, to_cpu_addr(hdl, start), end - start))
+			return -EFAULT;
+	}
+exit:
+	*size = req_size;
+	*offset += req_size;
+	return 0;
+}
+
+static bool amdxdna_dpt_update_tail(struct amdxdna_dpt *dpt)
+{
+	struct amdxdna_dpt_footer *footer;
+	u32 offset;
+	u64 tail;
+
+	offset = to_buf_size(dpt->buf) - AMDXDNA_DPT_FOOTER_SIZE;
+	footer = to_cpu_addr(dpt->buf, offset);
+
+	drm_clflush_virt_range(footer, sizeof(*footer));
+
+	/* Extend 32-bit firmware pointer to a 64-bit value to handle wrap. */
+	tail = (dpt->tail & ~GENMASK_ULL(31, 0)) | footer->tail;
+	if (tail < dpt->tail)
+		tail += BIT_ULL(32);
+
+	drm_WARN_ONCE(&dpt->xdna->ddev, tail - dpt->tail > BIT_ULL(31),
+		      "Unexpected jump in tail pointer. Missed IRQ or bug");
+
+	if (dpt->tail != tail) {
+		WRITE_ONCE(dpt->tail, tail);
+		XDNA_DPT_DBG(dpt, "Tail updated: 0x%llx", tail);
+		wake_up(&dpt->wait);
+		return true;
+	}
+	return false;
+}
+
+static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
+{
+	struct amdxdna_dpt_footer *footer;
+	u32 offset;
+
+	offset = to_buf_size(dpt->buf) - AMDXDNA_DPT_FOOTER_SIZE;
+	footer = to_cpu_addr(dpt->buf, offset);
+
+	drm_clflush_virt_range(footer, sizeof(*footer));
+
+	dpt->payload_version = footer->payload_version;
+	dpt->minor = footer->minor;
+	dpt->major = footer->major;
+
+	XDNA_DPT_DBG(dpt, "Version: %d.%d payload: 0x%x",
+		     dpt->major, dpt->minor, dpt->payload_version);
+}
+
+static irqreturn_t amdxdna_dpt_irq_handler(int irq, void *data)
+{
+	struct amdxdna_dpt *dpt = data;
+
+	if (dpt->io_base)
+		writel(0, dpt->io_base + dpt->msi_address);
+
+	queue_work(system_wq, &dpt->work);
+	return IRQ_HANDLED;
+}
+
+static int amdxdna_dpt_irq_init(struct amdxdna_dpt *dpt)
+{
+	struct amdxdna_dev *xdna = dpt->xdna;
+	int ret;
+
+	if (!dpt->msi_idx || !dpt->msi_address)
+		return -EINVAL;
+
+	ret = pci_irq_vector(to_pci_dev(xdna->ddev.dev), dpt->msi_idx);
+	if (ret < 0) {
+		dpt->irq = 0;
+		return ret;
+	}
+	dpt->irq = ret;
+
+	ret = request_irq(dpt->irq, amdxdna_dpt_irq_handler, 0,
+			  amdxdna_dpt_irq_name[dpt->kind], dpt);
+	if (ret) {
+		dpt->irq = 0;
+		return ret;
+	}
+
+	return 0;
+}
+
+static void amdxdna_dpt_irq_fini(struct amdxdna_dpt *dpt)
+{
+	if (dpt->irq) {
+		free_irq(dpt->irq, dpt);
+		dpt->irq = 0;
+	}
+	dpt->msi_address = 0;
+	dpt->msi_idx = 0;
+}
+
+/*
+ * Timer refcount. 0 -> 1 starts the polling timer; N -> 0 stops it.
+ * timer_lock serializes the transition decisions. The mod_timer arm
+ * and inner timer_delete_sync are gated on status == ACTIVE so the
+ * suspend path's timer_delete_sync wins exclusively while readers
+ * admitted before SUSPENDING continue to balance their refcount.
+ */
+static void amdxdna_dpt_timer_get(struct amdxdna_dpt *dpt)
+{
+	mutex_lock(&dpt->timer_lock);
+	if (!refcount_read(&dpt->timer_refs)) {
+		refcount_set(&dpt->timer_refs, 1);
+		if (READ_ONCE(dpt->status) == AMDXDNA_DPT_ACTIVE)
+			mod_timer(&dpt->timer,
+				  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
+	} else {
+		refcount_inc(&dpt->timer_refs);
+	}
+	mutex_unlock(&dpt->timer_lock);
+}
+
+static void amdxdna_dpt_timer_put(struct amdxdna_dpt *dpt)
+{
+	mutex_lock(&dpt->timer_lock);
+	if (WARN_ON(!refcount_read(&dpt->timer_refs))) {
+		mutex_unlock(&dpt->timer_lock);
+		return;
+	}
+	if (refcount_dec_and_test(&dpt->timer_refs) &&
+	    READ_ONCE(dpt->status) == AMDXDNA_DPT_ACTIVE)
+		timer_delete_sync(&dpt->timer);
+	mutex_unlock(&dpt->timer_lock);
+}
+
+static void amdxdna_dpt_worker(struct work_struct *w)
+{
+	struct amdxdna_dpt *dpt = container_of(w, struct amdxdna_dpt, work);
+
+	amdxdna_dpt_update_tail(dpt);
+}
+
+static void amdxdna_dpt_timer(struct timer_list *t)
+{
+	struct amdxdna_dpt *dpt = container_of(t, struct amdxdna_dpt, timer);
+
+	queue_work(system_wq, &dpt->work);
+	mod_timer(&dpt->timer,
+		  jiffies + msecs_to_jiffies(AMDXDNA_DPT_POLL_INTERVAL_MS));
+}
+
+/*
+ * Tell the firmware to start emitting entries into the @dpt buffer
+ * for the consumer of @dpt->kind. Returns -EOPNOTSUPP when the backend
+ * does not implement this kind so the caller can decide whether that is
+ * fatal.
+ */
+static int amdxdna_dpt_msg_init(struct amdxdna_dpt *dpt)
+{
+	struct aie_device *aie = dpt->aie;
+
+	switch (dpt->kind) {
+	case AMDXDNA_DPT_FW_LOG:
+		if (!aie->msg_ops.fw_log_init)
+			return -EOPNOTSUPP;
+		return aie->msg_ops.fw_log_init(dpt->xdna,
+						to_buf_size(dpt->buf),
+						dpt->config);
+	case AMDXDNA_DPT_KIND_MAX:
+		break;
+	}
+	return -EINVAL;
+}
+
+/*
+ * Drain any in-flight reader that briefly observed @dpt in INACTIVE state,
+ * unpublish, then free buffer + handle. Used by amdxdna_dpt_publish() when
+ * the backend msg_ops init fails after the handle has already been planted.
+ */
+static void amdxdna_dpt_unpublish(struct amdxdna_dpt *dpt)
+{
+	struct amdxdna_dev *xdna = dpt->xdna;
+	struct amdxdna_dpt __rcu **slot;
+
+	slot = amdxdna_dpt_slot(xdna, dpt->kind);
+	if (slot)
+		rcu_assign_pointer(*slot, NULL);
+	synchronize_srcu(&xdna->dpt_srcu);
+
+	mutex_destroy(&dpt->timer_lock);
+	amdxdna_free_msg_buff(dpt->buf);
+	kfree(dpt);
+}
+
+/*
+ * Allocate a fresh dpt handle, plant it in the slot for @kind in INACTIVE
+ * state, DMA-alloc its ring buffer, then ask the backend to start emitting
+ * via amdxdna_dpt_msg_init. On success the handle is fully active: IRQ has
+ * been wired (best-effort), metadata has been read, and status is ACTIVE.
+ * On failure the handle has already been unpublished and an ERR_PTR is
+ * returned.
+ */
+static struct amdxdna_dpt *
+amdxdna_dpt_publish(struct aie_device *aie, enum amdxdna_dpt_kind kind,
+		    size_t buf_size, u32 config)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_msg_buf_hdl *hdl;
+	struct amdxdna_dpt __rcu **slot;
+	struct amdxdna_dpt *dpt;
+	int ret;
+
+	slot = amdxdna_dpt_slot(xdna, kind);
+	if (!slot)
+		return ERR_PTR(-EINVAL);
+
+	if (rcu_access_pointer(*slot))
+		return ERR_PTR(-EBUSY);
+
+	dpt = kzalloc(sizeof(*dpt), GFP_KERNEL);
+	if (!dpt)
+		return ERR_PTR(-ENOMEM);
+
+	dpt->xdna = xdna;
+	dpt->aie = aie;
+	dpt->kind = kind;
+	dpt->status = AMDXDNA_DPT_INACTIVE;
+	dpt->config = config;
+
+	hdl = amdxdna_alloc_msg_buff(xdna, buf_size);
+	if (IS_ERR(hdl)) {
+		ret = PTR_ERR(hdl);
+		XDNA_DPT_ERR(dpt, "Failed to allocate buffer: %d", ret);
+		kfree(dpt);
+		return ERR_PTR(ret);
+	}
+	dpt->buf = hdl;
+
+	memset(to_cpu_addr(hdl, 0), 0, to_buf_size(hdl));
+	drm_clflush_virt_range(to_cpu_addr(hdl, 0), to_buf_size(hdl));
+
+	mutex_init(&dpt->timer_lock);
+	refcount_set(&dpt->timer_refs, 0);
+	init_waitqueue_head(&dpt->wait);
+	INIT_WORK(&dpt->work, amdxdna_dpt_worker);
+	timer_setup(&dpt->timer, amdxdna_dpt_timer, 0);
+
+	/* Plant the handle in INACTIVE state so the backend's msg_ops init
+	 * can reach the DMA buffer + msi-info slots through xdna->fw_*.
+	 * Readers see status != ACTIVE in amdxdna_dpt_enter_kind and bail out.
+	 */
+	rcu_assign_pointer(*slot, dpt);
+
+	ret = amdxdna_dpt_msg_init(dpt);
+	if (ret) {
+		amdxdna_dpt_unpublish(dpt);
+		return ERR_PTR(ret);
+	}
+
+	/*
+	 * IRQ is best-effort. On failure, on-demand polling driven by
+	 * amdxdna_dpt_timer_get in the watcher and dmesg paths still works.
+	 */
+	if (amdxdna_dpt_irq_init(dpt))
+		XDNA_DPT_WARN(dpt, "IRQ unavailable; tail updates on demand only");
+
+	amdxdna_dpt_read_metadata(dpt);
+
+	WRITE_ONCE(dpt->status, AMDXDNA_DPT_ACTIVE);
+	return dpt;
+}
+
+static int amdxdna_fw_log_init(struct aie_device *aie, u32 level)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	dpt = amdxdna_dpt_publish(aie, AMDXDNA_DPT_FW_LOG,
+				  AMDXDNA_DPT_FW_LOG_SIZE, level);
+	if (IS_ERR(dpt)) {
+		ret = PTR_ERR(dpt);
+		return ret == -EOPNOTSUPP ? 0 : ret;
+	}
+	return 0;
+}
+
+/*
+ * Tell the firmware to stop emitting entries into the @dpt buffer
+ * for the consumer of @dpt->kind. Best-effort: returns the backend
+ * error but it is the caller's responsibility to continue tearing the
+ * handle down regardless.
+ */
+static int amdxdna_dpt_msg_fini(struct amdxdna_dpt *dpt)
+{
+	struct aie_device *aie = dpt->aie;
+
+	switch (dpt->kind) {
+	case AMDXDNA_DPT_FW_LOG:
+		if (aie->msg_ops.fw_log_fini)
+			return aie->msg_ops.fw_log_fini(dpt->xdna);
+		return 0;
+	case AMDXDNA_DPT_KIND_MAX:
+		break;
+	}
+	return -EINVAL;
+}
+
+/*
+ * Tear-down path that delivers -ESHUTDOWN to every sleeping watcher,
+ * waits for them to exit via synchronize_srcu, and only then frees the
+ * handle.
+ */
+static int amdxdna_dpt_fini_kind(struct aie_device *aie, enum amdxdna_dpt_kind kind)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt __rcu **slot;
+	struct amdxdna_dpt *dpt;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	slot = amdxdna_dpt_slot(xdna, kind);
+	if (!slot)
+		return -EINVAL;
+
+	dpt = rcu_dereference_protected(*slot,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt)
+		return 0;
+
+	/*
+	 * Close the publish gate first (mirrors enter_kind's ptr-then-
+	 * status read order), then mark in-flight readers to bail. After
+	 * this no new srcu_dereference can return this handle, and any
+	 * reader that already loaded the pointer will observe
+	 * SHUTTING_DOWN on its post-wait status check.
+	 */
+	rcu_assign_pointer(*slot, NULL);
+	WRITE_ONCE(dpt->status, AMDXDNA_DPT_SHUTTING_DOWN);
+
+	/*
+	 * Stop the producer first so the firmware stops emitting IRQs
+	 * and tail updates against the soon-to-be-freed ring, then drain
+	 * the host-side pipeline (IRQ -> timer -> worker). After
+	 * cancel_work_sync no path is left that could call
+	 * amdxdna_dpt_update_tail on the detached firmware.
+	 */
+	amdxdna_dpt_msg_fini(dpt);
+	amdxdna_dpt_irq_fini(dpt);
+	timer_shutdown_sync(&dpt->timer);
+	cancel_work_sync(&dpt->work);
+
+	/*
+	 * Release any watcher still parked. Required for the steady-state
+	 * "FW idle, no tail advance" case where amdxdna_dpt_update_tail's
+	 * conditional wake_up did not fire; otherwise the watcher would
+	 * never observe SHUTTING_DOWN and synchronize_srcu would deadlock.
+	 * The flip-before-wake invariant is preserved: status is already
+	 * SHUTTING_DOWN here, so any watcher woken now re-evaluates
+	 * watch_ready, returns true, and exits with -ESHUTDOWN.
+	 */
+	wake_up_all(&dpt->wait);
+
+	/*
+	 * Wait for every reader currently inside a dpt_* helper
+	 * (including any one we just woke) to drop the SRCU read lock
+	 * before freeing the handle.
+	 */
+	synchronize_srcu(&xdna->dpt_srcu);
+
+	mutex_destroy(&dpt->timer_lock);
+	amdxdna_free_msg_buff(dpt->buf);
+	XDNA_DPT_DBG(dpt, "Disabled");
+	kfree(dpt);
+	return 0;
+}
+
+static int amdxdna_dpt_suspend_kind(struct aie_device *aie,
+				    enum amdxdna_dpt_kind kind)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt __rcu **slot;
+	struct amdxdna_dpt *dpt;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	slot = amdxdna_dpt_slot(xdna, kind);
+	if (!slot)
+		return -EINVAL;
+
+	dpt = rcu_dereference_protected(*slot,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE)
+		return 0;
+
+	/*
+	 * Do NOT call the msg_ops fini hook here. On firmware suspend the
+	 * firmware persists its ring state (head, tail, seq_number,
+	 * write_count) into a reserved region of the host-allocated
+	 * buffer's footer; on the next attach with the same buffer it
+	 * validates the footer signature and resumes from the saved
+	 * offsets. Detaching the buffer (size=0 attach) makes the firmware
+	 * start a fresh ring with head = tail = 0 on the next attach,
+	 * discarding any saved state.
+	 */
+
+	/*
+	 * Block new entrants and new mod_timer arms before tearing the
+	 * timer down so amdxdna_dpt_timer_get cannot race with us.
+	 * Readers admitted before this transition observe SUSPENDING in
+	 * the post-wait check and are still allowed to drain the final
+	 * batch via fetch_payload.
+	 */
+	WRITE_ONCE(dpt->status, AMDXDNA_DPT_SUSPENDING);
+
+	amdxdna_dpt_irq_fini(dpt);
+
+	/* timer_delete_sync (not _shutdown_sync) so resume can re-arm. */
+	timer_delete_sync(&dpt->timer);
+	cancel_work_sync(&dpt->work);
+
+	/*
+	 * Capture FW's final tail and wake sleeping watchers. They wake
+	 * under the SRCU read lock with status SUSPENDING, exit
+	 * wait_event, and run fetch_payload to copy the final batch to
+	 * user space; synchronize_srcu below waits for those reads to
+	 * finish before we flip status to SUSPENDED.
+	 */
+	amdxdna_dpt_update_tail(dpt);
+	wake_up_all(&dpt->wait);
+
+	synchronize_srcu(&xdna->dpt_srcu);
+
+	WRITE_ONCE(dpt->status, AMDXDNA_DPT_SUSPENDED);
+
+	XDNA_DPT_DBG(dpt, "Suspended");
+	return 0;
+}
+
+static int amdxdna_dpt_resume_kind(struct aie_device *aie,
+				   enum amdxdna_dpt_kind kind)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt __rcu **slot;
+	struct amdxdna_dpt *dpt;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	slot = amdxdna_dpt_slot(xdna, kind);
+	if (!slot)
+		return -EINVAL;
+
+	dpt = rcu_dereference_protected(*slot,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_SUSPENDED)
+		return 0;
+
+	/*
+	 * timer_setup re-init must happen under timer_lock so it cannot
+	 * race with a parallel amdxdna_dpt_timer_get observing the
+	 * pre-suspend timer state. Status flips to ACTIVE only after
+	 * the backend re-arm + IRQ wiring succeeds.
+	 */
+	mutex_lock(&dpt->timer_lock);
+	timer_setup(&dpt->timer, amdxdna_dpt_timer, 0);
+	mutex_unlock(&dpt->timer_lock);
+
+	/*
+	 * Resubmit the same buffer without clearing it. The handle is
+	 * already reachable through xdna->fw_*, so the backend's init
+	 * hook can reach it for msi/io_base storage.
+	 */
+	ret = amdxdna_dpt_msg_init(dpt);
+	if (ret) {
+		if (ret != -EOPNOTSUPP)
+			XDNA_DPT_ERR(dpt, "Failed to resume: %d", ret);
+		return ret;
+	}
+
+	if (amdxdna_dpt_irq_init(dpt))
+		XDNA_DPT_WARN(dpt, "IRQ unavailable post-resume; polling on demand");
+
+	WRITE_ONCE(dpt->status, AMDXDNA_DPT_ACTIVE);
+
+	XDNA_DPT_DBG(dpt, "Resumed");
+	return 0;
+}
+
+int amdxdna_fw_log_set_level(struct aie_device *aie, u32 level)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	dpt = rcu_dereference_protected(xdna->fw_log,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE)
+		return -EINVAL;
+
+	if (!aie->msg_ops.fw_log_config)
+		return -EOPNOTSUPP;
+
+	ret = aie->msg_ops.fw_log_config(xdna, level);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to change FW log level to %d: %d",
+			 level, ret);
+		return ret;
+	}
+
+	WRITE_ONCE(dpt->config, level);
+	XDNA_DBG(xdna, "FW log level changed to %d", level);
+	return 0;
+}
+
+/*
+ * Probe-time entry: auto-starts FW_LOG only. FW_TRACE is opt-in via
+ * DRM_AMDXDNA_SET_FW_TRACE_STATE to avoid generating large trace payloads
+ * unconditionally. Best-effort: per-kind failures surface via XDNA_WARN
+ * but the wrapper always returns 0 so callers (per-generation probe paths)
+ * cannot abort device bring-up on a logging failure.
+ */
+int amdxdna_dpt_init(struct aie_device *aie)
+{
+	int ret;
+
+	ret = amdxdna_fw_log_init(aie, AMDXDNA_DPT_FW_LOG_LEVEL_DEFAULT);
+	if (ret)
+		XDNA_WARN(aie->xdna, "Failed to enable FW logging: %d", ret);
+
+	return 0;
+}
+
+int amdxdna_dpt_fini(struct aie_device *aie)
+{
+	return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_LOG);
+}
+
+int amdxdna_dpt_suspend(struct aie_device *aie)
+{
+	return amdxdna_dpt_suspend_kind(aie, AMDXDNA_DPT_FW_LOG);
+}
+
+int amdxdna_dpt_resume(struct aie_device *aie)
+{
+	return amdxdna_dpt_resume_kind(aie, AMDXDNA_DPT_FW_LOG);
+}

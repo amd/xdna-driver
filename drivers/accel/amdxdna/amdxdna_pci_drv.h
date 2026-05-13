@@ -14,6 +14,7 @@
 #include <linux/cred.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
+#include <linux/srcu.h>
 #include <linux/workqueue.h>
 #include <linux/xarray.h>
 
@@ -115,6 +116,7 @@ struct amdxdna_fw_ver {
 };
 
 struct amdxdna_carveout;
+struct amdxdna_dpt;
 
 struct amdxdna_dev {
 	struct drm_device		ddev;
@@ -135,6 +137,14 @@ struct amdxdna_dev {
 	const char			*vbnv;
 
 	struct amdxdna_carveout		*carveout;
+
+	/* Firmware Debug/Profile/Trace (DPT) framework. dpt_srcu guards the
+	 * lifetime of every dpt handle hung off this device; on disable we
+	 * synchronize_srcu so kfree of the handle is provably ordered after
+	 * any watcher's srcu_read_unlock.
+	 */
+	struct srcu_struct		dpt_srcu;
+	struct amdxdna_dpt __rcu	*fw_log;
 };
 
 /*
