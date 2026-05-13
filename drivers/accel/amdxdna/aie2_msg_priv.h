@@ -31,6 +31,9 @@ enum aie2_msg_opcode {
 	MSG_OP_SET_RUNTIME_CONFIG          = 0x10A,
 	MSG_OP_GET_RUNTIME_CONFIG          = 0x10B,
 	MSG_OP_REGISTER_ASYNC_EVENT_MSG    = 0x10C,
+	MSG_OP_START_FW_TRACE              = 0x10F,
+	MSG_OP_STOP_FW_TRACE               = 0x110,
+	MSG_OP_SET_FW_TRACE_CATEGORIES     = 0x111,
 	MSG_OP_UPDATE_PROPERTY             = 0x113,
 	MSG_OP_GET_APP_HEALTH              = 0x114,
 	MSG_OP_ADD_HOST_BUFFER             = 0x115,
@@ -639,6 +642,52 @@ struct config_fw_log_resp {
 	__u32			msi_idx;
 	__u32			msi_address;
 	__u32			reserved[5];
+} __packed;
+
+/*
+ * Firmware event tracing. Categories are a free-form bitmask negotiated
+ * between firmware and xrt-smi (no kernel-side semantic knowledge); the
+ * driver simply forwards the u32 the user provided.
+ */
+enum aie2_fw_trace_destination {
+	AIE2_FW_TRACE_DESTINATION_NULL,
+	AIE2_FW_TRACE_DESTINATION_DRAM,
+};
+
+enum aie2_fw_trace_timestamp {
+	AIE2_FW_TRACE_TIMESTAMP_FW_CHRONO,
+	AIE2_FW_TRACE_TIMESTAMP_CPU_CCOUNT,
+};
+
+struct start_fw_trace_req {
+	__u32	categories;
+	__u32	destination;
+	__u32	timestamp;
+	__u64	buf_addr;
+	__u32	buf_size;
+} __packed;
+
+struct start_fw_trace_resp {
+	enum aie2_msg_status	status;
+	__u32			msi_idx;
+	__u64			current_timestamp;
+	__u32			msi_address;
+} __packed;
+
+struct stop_fw_trace_req {
+	__u32	reserved;
+} __packed;
+
+struct stop_fw_trace_resp {
+	enum aie2_msg_status	status;
+} __packed;
+
+struct set_fw_trace_categories_req {
+	__u32	categories;
+} __packed;
+
+struct set_fw_trace_categories_resp {
+	enum aie2_msg_status	status;
 } __packed;
 
 #endif /* _AIE2_MSG_PRIV_H_ */

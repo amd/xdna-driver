@@ -141,6 +141,42 @@ int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+int aie2_start_fw_trace(struct amdxdna_dev_hdl *ndev,
+			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size,
+			u32 categories, u32 *msi_idx, u32 *msi_address)
+{
+	DECLARE_AIE_MSG(start_fw_trace, MSG_OP_START_FW_TRACE);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	dma_addr_t addr;
+	int ret;
+
+	addr = to_dma_addr(buf_hdl, 0);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		return -EINVAL;
+	}
+
+	req.destination = AIE2_FW_TRACE_DESTINATION_DRAM;
+	req.timestamp = AIE2_FW_TRACE_TIMESTAMP_FW_CHRONO;
+	req.categories = categories;
+	req.buf_addr = addr;
+	req.buf_size = size;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Start FW trace failed, ret %d status 0x%x",
+			 ret, resp.status);
+		return ret;
+	}
+
+	if (size && msi_idx && msi_address) {
+		*msi_idx = resp.msi_idx;
+		*msi_address = resp.msi_address;
+	}
+
+	return 0;
+}
+
 int aie2_query_aie_version(struct amdxdna_dev_hdl *ndev,
 			   struct amdxdna_drm_query_aie_version *version)
 {
@@ -997,6 +1033,12 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->aie.msg_ops.fw_log_init   = aie2_fw_log_init;
 		ndev->aie.msg_ops.fw_log_config = aie2_fw_log_config;
 		ndev->aie.msg_ops.fw_log_fini   = aie2_fw_log_fini;
+	}
+
+	if (AIE_FEATURE_ON(&ndev->aie, AIE2_FW_TRACE)) {
+		ndev->aie.msg_ops.fw_trace_init   = aie2_fw_trace_init;
+		ndev->aie.msg_ops.fw_trace_config = aie2_fw_trace_config;
+		ndev->aie.msg_ops.fw_trace_fini   = aie2_fw_trace_fini;
 	}
 }
 

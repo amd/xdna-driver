@@ -192,6 +192,7 @@ enum aie2_fw_feature {
 	AIE2_RW_ACCESS,
 	AIE2_CALIBRATE_CLOCK,
 	AIE2_FW_LOG,
+	AIE2_FW_TRACE,
 	AIE2_FEATURE_MAX
 };
 
@@ -279,11 +280,18 @@ int aie2_set_log_destination(struct amdxdna_dev_hdl *ndev,
 int aie2_config_fw_log(struct amdxdna_dev_hdl *ndev,
 		       struct amdxdna_msg_buf_hdl *buf_hdl,
 		       size_t size, u32 *msi_idx, u32 *msi_address);
+int aie2_start_fw_trace(struct amdxdna_dev_hdl *ndev,
+			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size,
+			u32 categories, u32 *msi_idx, u32 *msi_address);
 
 /* aie2_pci.c */
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level);
 int aie2_fw_log_config(struct amdxdna_dev *xdna, u32 level);
 int aie2_fw_log_fini(struct amdxdna_dev *xdna);
+
+int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories);
+int aie2_fw_trace_config(struct amdxdna_dev *xdna, u32 categories);
+int aie2_fw_trace_fini(struct amdxdna_dev *xdna);
 
 int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
 int aie2_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwctx);
