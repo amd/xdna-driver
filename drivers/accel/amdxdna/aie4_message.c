@@ -464,6 +464,47 @@ int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
+			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size,
+			u32 categories, u32 *msi_idx, u32 *msi_address)
+{
+	DECLARE_AIE_MSG(aie4_msg_start_fw_trace, AIE4_MSG_OP_START_FW_TRACE);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	dma_addr_t addr;
+	int ret;
+
+	addr = to_dma_addr(buf_hdl, 0);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		return -EINVAL;
+	}
+
+	req.destination = AIE4_FW_TRACE_DESTINATION_DRAM;
+	req.timestamp = AIE4_FW_TRACE_TIMESTAMP_NS_OFFSET;
+	req.categories = categories;
+	req.buff_addr = addr;
+	req.buff_size = size;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Start FW trace failed, ret %d status 0x%x",
+			 ret, resp.status);
+		return ret;
+	}
+
+	/*
+	 * AIE4 firmware does not yet return MSI info in the trace response.
+	 * Fall back to no-IRQ mode; on-demand polling driven by
+	 * amdxdna_dpt_timer_get keeps watcher / dmesg paths working.
+	 */
+	if (msi_address)
+		*msi_address = 0;
+	if (msi_idx)
+		*msi_idx = 0;
+
+	return 0;
+}
+
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))
@@ -488,5 +529,11 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->aie.msg_ops.fw_log_init   = aie4_fw_log_init;
 		ndev->aie.msg_ops.fw_log_config = aie4_fw_log_config;
 		ndev->aie.msg_ops.fw_log_fini   = aie4_fw_log_fini;
+	}
+
+	if (AIE_FEATURE_ON(&ndev->aie, AIE4_FW_TRACE)) {
+		ndev->aie.msg_ops.fw_trace_init   = aie4_fw_trace_init;
+		ndev->aie.msg_ops.fw_trace_config = aie4_fw_trace_config;
+		ndev->aie.msg_ops.fw_trace_fini   = aie4_fw_trace_fini;
 	}
 }

@@ -189,6 +189,7 @@ enum aie4_fw_feature {
 	AIE4_GET_COREDUMP,
 	AIE4_RW_ACCESS,
 	AIE4_FW_LOG,
+	AIE4_FW_TRACE,
 	AIE4_CALIBRATE_CLOCK,
 	AIE4_HSA_COMMAND,
 	AIE4_FEATURE_MAX
@@ -208,11 +209,18 @@ int aie4_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type,
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
 		      size_t size, u32 *msi_idx, u32 *msi_address);
+int aie4_start_fw_trace(struct amdxdna_dev_hdl *ndev,
+			struct amdxdna_msg_buf_hdl *buf_hdl, size_t size,
+			u32 categories, u32 *msi_idx, u32 *msi_address);
 
 /* aie4_pci.c */
 int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level);
 int aie4_fw_log_config(struct amdxdna_dev *xdna, u32 level);
 int aie4_fw_log_fini(struct amdxdna_dev *xdna);
+
+int aie4_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories);
+int aie4_fw_trace_config(struct amdxdna_dev *xdna, u32 categories);
+int aie4_fw_trace_fini(struct amdxdna_dev *xdna);
 
 extern const struct amdxdna_dev_ops aie4_pf_ops;
 extern const struct amdxdna_dev_ops aie4_vf_ops;
