@@ -284,6 +284,7 @@ struct partition_info
     const uint32_t output_size = 32 * sizeof(*data);
 
     std::vector<char> payload(output_size);
+    std::vector<char> updated_payload;  // outer scope for ENOSPC retry; data may point here
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
       .element_size = sizeof(*data),
@@ -342,7 +343,7 @@ struct partition_info
         // Retry ioctl with driver-returned number of elements.
         const uint32_t updated_output_size = arg.num_element * sizeof(*data);
 
-        std::vector<char> updated_payload(updated_output_size);
+        updated_payload.resize(updated_output_size);
         arg.buffer = reinterpret_cast<uintptr_t>(updated_payload.data());
 
         pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
