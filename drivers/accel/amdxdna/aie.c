@@ -170,6 +170,61 @@ u64 amdxdna_io_stats_busy_time_ns(struct amdxdna_client *client)
 	return busy_ns;
 }
 
+int amdxdna_get_aie_version(struct aie_device *aie,
+			    struct amdxdna_client *client,
+			    struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_aie_version version;
+	u32 buf_sz;
+
+	version.major = aie->version.major;
+	version.minor = aie->version.minor;
+
+	buf_sz = min(args->buffer_size, sizeof(version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, buf_sz))
+		return -EFAULT;
+
+	return 0;
+}
+
+int amdxdna_get_firmware_version(struct amdxdna_client *client,
+				 struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_firmware_version version;
+	struct amdxdna_dev *xdna = client->xdna;
+	u32 buf_sz;
+
+	version.major = xdna->fw_ver.major;
+	version.minor = xdna->fw_ver.minor;
+	version.patch = xdna->fw_ver.sub;
+	version.build = xdna->fw_ver.build;
+
+	buf_sz = min(args->buffer_size, sizeof(version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, buf_sz))
+		return -EFAULT;
+
+	return 0;
+}
+
+int amdxdna_get_cert_firmware_version(struct amdxdna_client *client,
+				      struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_firmware_version version;
+	struct amdxdna_dev *xdna = client->xdna;
+	u32 buf_sz;
+
+	version.major = xdna->cert_ver.major;
+	version.minor = xdna->cert_ver.minor;
+	version.patch = xdna->cert_ver.hotfix;
+	version.build = xdna->cert_ver.build;
+
+	buf_sz = min(args->buffer_size, sizeof(version));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, buf_sz))
+		return -EFAULT;
+
+	return 0;
+}
+
 int amdxdna_get_metadata(struct aie_device *aie,
 			 struct amdxdna_client *client,
 			 struct amdxdna_drm_get_info *args)

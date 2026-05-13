@@ -61,13 +61,6 @@ struct amdxdna_dev_hdl {
 	struct amdxdna_msg_buf_hdl	*work_buf_hdl;
 };
 
-/* aie4_message.c */
-int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
-			    struct amdxdna_drm_query_aie_metadata *metadata);
-int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
-int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
-void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
-
 /* aie4_ctx.c */
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx);
@@ -88,6 +81,17 @@ static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 #endif
+
+/* aie4_message.c */
+int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev,
+			   struct amdxdna_drm_query_aie_version *version);
+int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
+			    struct amdxdna_drm_query_aie_metadata *metadata);
+int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev);
+int aie4_query_npu_firmware_version(struct amdxdna_dev_hdl *ndev);
+int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
+int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
 
 enum aie4_fw_feature {
 	AIE4_GET_COREDUMP,

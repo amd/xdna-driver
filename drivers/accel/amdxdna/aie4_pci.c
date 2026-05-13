@@ -273,9 +273,34 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(xdna, "partition fini failed: %d", ret);
 }
 
-static int aie4_query(struct amdxdna_dev_hdl *ndev)
+static int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 {
-	return aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+	int ret;
+
+	ret = aie4_query_npu_firmware_version(ndev);
+	if (ret)
+		return ret;
+
+	ret = aie4_query_cert_firmware_version(ndev);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_query_aie_version(ndev, &ndev->aie.version);
+	if (ret)
+		return ret;
+
+	ret = aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
@@ -294,6 +319,10 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	ret = aie4_attach_work_buffer(ndev,
 				      to_dma_addr(ndev->work_buf_hdl, 0),
 				      to_buf_size(ndev->work_buf_hdl));
+	if (ret)
+		goto mbox_fini;
+
+	ret = aie4_query_fw(ndev);
 	if (ret)
 		goto mbox_fini;
 
@@ -326,7 +355,11 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	ret = aie4_query(ndev);
+	ret = aie4_query_fw(ndev);
+	if (ret)
+		goto mailbox_fini;
+
+	ret = aie4_query_aie(ndev);
 	if (ret)
 		goto mailbox_fini;
 
@@ -370,7 +403,11 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
-	ret = aie4_query(ndev);
+	ret = aie4_query_fw(ndev);
+	if (ret)
+		goto mbox_fini;
+
+	ret = aie4_query_aie(ndev);
 	if (ret)
 		goto mbox_fini;
 
@@ -620,8 +657,17 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = amdxdna_get_metadata(&ndev->aie, client, args);
 		break;
+	case DRM_AMDXDNA_QUERY_AIE_VERSION:
+		ret = amdxdna_get_aie_version(&ndev->aie, client, args);
+		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
 		ret = amdxdna_query_sensors(args, AIE4_TOTAL_COLUMN);
+		break;
+	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
+		ret = amdxdna_get_firmware_version(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
+		ret = amdxdna_get_cert_firmware_version(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
