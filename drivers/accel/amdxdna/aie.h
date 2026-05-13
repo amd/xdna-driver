@@ -29,6 +29,10 @@ struct aie_msg_ops {
 	int  (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u32 level);
 	int  (*fw_log_config)(struct amdxdna_dev *xdna, u32 level);
 	int  (*fw_log_fini)(struct amdxdna_dev *xdna);
+
+	int  (*fw_trace_init)(struct amdxdna_dev *xdna, size_t size, u32 categories);
+	int  (*fw_trace_config)(struct amdxdna_dev *xdna, u32 categories);
+	int  (*fw_trace_fini)(struct amdxdna_dev *xdna);
 };
 
 struct aie_device {

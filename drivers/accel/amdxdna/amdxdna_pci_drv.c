@@ -60,9 +60,10 @@ MODULE_FIRMWARE("amdnpu/1B0B_10/cert.dev.sbin");
  * 0.13: Support AIE tile register/memory read/write
  * 0.14: Expose firmware log GET/GET_CONFIG/SET_STATE ioctls and
  *       struct amdxdna_dpt_metadata, _set_dpt_state, _get_dpt_state
+ * 0.15: Expose firmware trace GET/GET_CONFIG/SET_STATE ioctls
  */
 #define AMDXDNA_DRIVER_MAJOR		0
-#define AMDXDNA_DRIVER_MINOR		14
+#define AMDXDNA_DRIVER_MINOR		15
 
 /*
  * Bind the driver base on (vendor_id, device_id) pair and later use the

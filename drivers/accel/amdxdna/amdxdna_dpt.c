@@ -24,13 +24,15 @@
 #include "amdxdna_pci_drv.h"
 
 const char * const amdxdna_dpt_irq_name[AMDXDNA_DPT_KIND_MAX] = {
-	[AMDXDNA_DPT_FW_LOG] = "xdna_fw_log",
+	[AMDXDNA_DPT_FW_LOG]   = "xdna_fw_log",
+	[AMDXDNA_DPT_FW_TRACE] = "xdna_fw_trace",
 };
 
 const char *amdxdna_dpt_kind_str(enum amdxdna_dpt_kind kind)
 {
 	static const char * const names[AMDXDNA_DPT_KIND_MAX] = {
-		[AMDXDNA_DPT_FW_LOG] = "fw_log",
+		[AMDXDNA_DPT_FW_LOG]   = "fw_log",
+		[AMDXDNA_DPT_FW_TRACE] = "fw_trace",
 	};
 
 	return (kind < AMDXDNA_DPT_KIND_MAX) ? names[kind] : "fw_???";
@@ -42,6 +44,8 @@ amdxdna_dpt_slot(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind)
 	switch (kind) {
 	case AMDXDNA_DPT_FW_LOG:
 		return &xdna->fw_log;
+	case AMDXDNA_DPT_FW_TRACE:
+		return &xdna->fw_trace;
 	case AMDXDNA_DPT_KIND_MAX:
 		break;
 	}
@@ -323,6 +327,12 @@ static int amdxdna_dpt_msg_init(struct amdxdna_dpt *dpt)
 		return aie->msg_ops.fw_log_init(dpt->xdna,
 						to_buf_size(dpt->buf),
 						dpt->config);
+	case AMDXDNA_DPT_FW_TRACE:
+		if (!aie->msg_ops.fw_trace_init)
+			return -EOPNOTSUPP;
+		return aie->msg_ops.fw_trace_init(dpt->xdna,
+						  to_buf_size(dpt->buf),
+						  dpt->config);
 	case AMDXDNA_DPT_KIND_MAX:
 		break;
 	}
@@ -558,6 +568,10 @@ static int amdxdna_dpt_msg_fini(struct amdxdna_dpt *dpt)
 		if (aie->msg_ops.fw_log_fini)
 			return aie->msg_ops.fw_log_fini(dpt->xdna);
 		return 0;
+	case AMDXDNA_DPT_FW_TRACE:
+		if (aie->msg_ops.fw_trace_fini)
+			return aie->msg_ops.fw_trace_fini(dpt->xdna);
+		return 0;
 	case AMDXDNA_DPT_KIND_MAX:
 		break;
 	}
@@ -773,6 +787,48 @@ static int amdxdna_fw_log_set_level(struct aie_device *aie, u32 level)
 	return 0;
 }
 
+static int amdxdna_fw_trace_init(struct aie_device *aie, u32 categories)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	dpt = amdxdna_dpt_publish(aie, AMDXDNA_DPT_FW_TRACE,
+				  AMDXDNA_DPT_FW_TRACE_SIZE, categories);
+	if (IS_ERR(dpt))
+		return PTR_ERR(dpt);
+	return 0;
+}
+
+static int amdxdna_fw_trace_set_categories(struct aie_device *aie, u32 categories)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+	int ret;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	dpt = rcu_dereference_protected(xdna->fw_trace,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE)
+		return -EINVAL;
+
+	if (!aie->msg_ops.fw_trace_config)
+		return -EOPNOTSUPP;
+
+	ret = aie->msg_ops.fw_trace_config(xdna, categories);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to change FW trace categories to 0x%x: %d",
+			 categories, ret);
+		return ret;
+	}
+
+	WRITE_ONCE(dpt->config, categories);
+	XDNA_DBG(xdna, "FW trace categories changed to 0x%x", categories);
+	return 0;
+}
+
 /*
  * Probe-time entry: auto-starts FW_LOG only. FW_TRACE is opt-in via
  * DRM_AMDXDNA_SET_FW_TRACE_STATE to avoid generating large trace payloads
@@ -793,17 +849,35 @@ int amdxdna_dpt_init(struct aie_device *aie)
 
 int amdxdna_dpt_fini(struct aie_device *aie)
 {
-	return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_LOG);
+	int ret;
+
+	ret = amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_LOG);
+	if (ret)
+		return ret;
+
+	return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_TRACE);
 }
 
 int amdxdna_dpt_suspend(struct aie_device *aie)
 {
-	return amdxdna_dpt_suspend_kind(aie, AMDXDNA_DPT_FW_LOG);
+	int ret;
+
+	ret = amdxdna_dpt_suspend_kind(aie, AMDXDNA_DPT_FW_LOG);
+	if (ret)
+		return ret;
+
+	return amdxdna_dpt_suspend_kind(aie, AMDXDNA_DPT_FW_TRACE);
 }
 
 int amdxdna_dpt_resume(struct aie_device *aie)
 {
-	return amdxdna_dpt_resume_kind(aie, AMDXDNA_DPT_FW_LOG);
+	int ret;
+
+	ret = amdxdna_dpt_resume_kind(aie, AMDXDNA_DPT_FW_LOG);
+	if (ret)
+		return ret;
+
+	return amdxdna_dpt_resume_kind(aie, AMDXDNA_DPT_FW_TRACE);
 }
 
 int amdxdna_get_fw_log(struct aie_device *aie,
@@ -910,4 +984,111 @@ int amdxdna_set_fw_log_state(struct aie_device *aie,
 		return amdxdna_fw_log_init(aie, fw_log.config);
 
 	return amdxdna_fw_log_set_level(aie, fw_log.config);
+}
+
+int amdxdna_get_fw_trace(struct aie_device *aie,
+			 struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+	int ret, idx;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_TRACE, &idx);
+	if (!dpt)
+		return -ESHUTDOWN;
+
+	ret = amdxdna_dpt_get_data(dpt, args);
+	srcu_read_unlock(&xdna->dpt_srcu, idx);
+	return ret;
+}
+
+/*
+ * No CAP_SYS_ADMIN check: the (version, status, categories) triple
+ * is unprivileged-readable so non-root xrt-smi can detect feature
+ * presence and current state. The payload (amdxdna_get_fw_trace)
+ * requires CAP_SYS_ADMIN.
+ *
+ * Returns -EOPNOTSUPP if the firmware doesn't support this feature.
+ * Returns success with status == 0 when the firmware supports it but
+ * it is currently disabled.
+ */
+int amdxdna_get_fw_trace_configs(struct aie_device *aie,
+				 struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_get_dpt_state config = {};
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+	void __user *buf;
+	size_t buf_size;
+	int idx;
+
+	if (args->num_element != 1)
+		return -EINVAL;
+
+	if (!aie->msg_ops.fw_trace_init)
+		return -EOPNOTSUPP;
+
+	buf_size = args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	if (buf_size < sizeof(config)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
+		return -ENOSPC;
+	}
+
+	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_TRACE, &idx);
+	if (dpt) {
+		config.version = dpt->payload_version;
+		config.status = 1;
+		config.config = READ_ONCE(dpt->config);
+		srcu_read_unlock(&xdna->dpt_srcu, idx);
+	}
+
+	if (copy_to_user(buf, &config, sizeof(config)))
+		return -EFAULT;
+	return 0;
+}
+
+int amdxdna_set_fw_trace_state(struct aie_device *aie,
+			       struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_set_dpt_state fw_trace;
+	struct amdxdna_dev *xdna = aie->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (!aie->msg_ops.fw_trace_init)
+		return -EOPNOTSUPP;
+
+	if (args->buffer_size != sizeof(fw_trace)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %zu.",
+			 args->buffer_size, sizeof(fw_trace));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&fw_trace, u64_to_user_ptr(args->buffer),
+			   sizeof(fw_trace)))
+		return -EFAULT;
+
+	if (XDNA_MBZ_DBG(xdna, &fw_trace.pad, sizeof(fw_trace.pad)))
+		return -EINVAL;
+
+	if (!fw_trace.action)
+		return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_TRACE);
+
+	if (!fw_trace.config)
+		return -EINVAL;
+
+	if (!rcu_access_pointer(xdna->fw_trace))
+		return amdxdna_fw_trace_init(aie, fw_trace.config);
+
+	return amdxdna_fw_trace_set_categories(aie, fw_trace.config);
 }

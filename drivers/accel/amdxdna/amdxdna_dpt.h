@@ -20,15 +20,17 @@
  * Firmware Debug/Profile/Trace (DPT) framework.
  *
  * A single struct amdxdna_dpt and one set of amdxdna_dpt_* helpers serve
- * firmware logging (xdna->fw_log). The handle's lifetime is guarded by
- * xdna->dpt_srcu so that disabling logging while N watchers are sleeping
- * inside amdxdna_dpt_get_data delivers -ESHUTDOWN to every one of them
- * and tears down the handle without UAF.
+ * firmware logging (xdna->fw_log) and firmware tracing (xdna->fw_trace).
+ * Each handle's lifetime is guarded by xdna->dpt_srcu so that disabling
+ * a kind while N watchers are sleeping inside amdxdna_dpt_get_data
+ * delivers -ESHUTDOWN to every one of them and tears down the handle
+ * without UAF.
  */
 
 #define AMDXDNA_DPT_FOOTER_SIZE		SZ_4K
 #define AMDXDNA_DPT_POLL_INTERVAL_MS	10
 #define AMDXDNA_DPT_FW_LOG_SIZE		SZ_4M
+#define AMDXDNA_DPT_FW_TRACE_SIZE	SZ_4M
 
 /* Common firmware log level scale used by user space (ioctl).
  * AIE2 and AIE4 firmwares both follow this numeric mapping internally.
@@ -55,6 +57,7 @@ enum amdxdna_dpt_status {
 
 enum amdxdna_dpt_kind {
 	AMDXDNA_DPT_FW_LOG,
+	AMDXDNA_DPT_FW_TRACE,
 	AMDXDNA_DPT_KIND_MAX,
 };
 
@@ -142,5 +145,12 @@ int amdxdna_get_fw_log_configs(struct aie_device *aie,
 			       struct amdxdna_drm_get_array *args);
 int amdxdna_set_fw_log_state(struct aie_device *aie,
 			     struct amdxdna_drm_set_state *args);
+
+int amdxdna_get_fw_trace(struct aie_device *aie,
+			 struct amdxdna_drm_get_array *args);
+int amdxdna_get_fw_trace_configs(struct aie_device *aie,
+				 struct amdxdna_drm_get_array *args);
+int amdxdna_set_fw_trace_state(struct aie_device *aie,
+			       struct amdxdna_drm_set_state *args);
 
 #endif /* _AMDXDNA_DPT_H_ */
