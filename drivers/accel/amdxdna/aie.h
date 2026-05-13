@@ -25,30 +25,6 @@
 
 struct psp_device;
 struct smu_device;
-
-struct aie_version {
-	u16 major;
-	u16 minor;
-};
-
-struct aie_tile_metadata {
-	u16 row_count;
-	u16 row_start;
-	u16 dma_channel_count;
-	u16 lock_count;
-	u16 event_reg_count;
-};
-
-struct aie_metadata {
-	u32 size;
-	u16 cols;
-	u16 rows;
-	struct aie_version version;
-	struct aie_tile_metadata core;
-	struct aie_tile_metadata mem;
-	struct aie_tile_metadata shim;
-};
-
 struct amdxdna_hwctx;
 struct amdxdna_msg_buf_hdl;
 
@@ -76,7 +52,7 @@ struct aie_device {
 	struct psp_device *psp_hdl;
 	struct smu_device *smu_hdl;
 
-	struct aie_metadata metadata;
+	struct amdxdna_drm_query_aie_metadata metadata;
 	struct aie_msg_ops msg_ops;
 };
 

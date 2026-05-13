@@ -29,7 +29,8 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev)
 	return ret;
 }
 
-int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata)
+int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
+			    struct amdxdna_drm_query_aie_metadata *metadata)
 {
 	DECLARE_AIE_MSG(aie4_msg_aie4_tile_info, AIE4_MSG_OP_AIE_TILE_INFO);
 	int ret;
@@ -38,7 +39,7 @@ int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *m
 	if (ret)
 		return ret;
 
-	metadata->size = resp.info.size;
+	metadata->col_size = resp.info.size;
 	metadata->cols = resp.info.cols;
 	metadata->rows = resp.info.rows;
 

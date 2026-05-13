@@ -174,44 +174,13 @@ int amdxdna_get_metadata(struct aie_device *aie,
 			 struct amdxdna_client *client,
 			 struct amdxdna_drm_get_info *args)
 {
-	struct amdxdna_drm_query_aie_metadata *meta;
 	int ret = 0;
 	u32 buf_sz;
 
-	meta = kzalloc_obj(*meta);
-	if (!meta)
-		return -ENOMEM;
-
-	meta->col_size = aie->metadata.size;
-	meta->cols = aie->metadata.cols;
-	meta->rows = aie->metadata.rows;
-
-	meta->version.major = aie->metadata.version.major;
-	meta->version.minor = aie->metadata.version.minor;
-
-	meta->core.row_count = aie->metadata.core.row_count;
-	meta->core.row_start = aie->metadata.core.row_start;
-	meta->core.dma_channel_count = aie->metadata.core.dma_channel_count;
-	meta->core.lock_count = aie->metadata.core.lock_count;
-	meta->core.event_reg_count = aie->metadata.core.event_reg_count;
-
-	meta->mem.row_count = aie->metadata.mem.row_count;
-	meta->mem.row_start = aie->metadata.mem.row_start;
-	meta->mem.dma_channel_count = aie->metadata.mem.dma_channel_count;
-	meta->mem.lock_count = aie->metadata.mem.lock_count;
-	meta->mem.event_reg_count = aie->metadata.mem.event_reg_count;
-
-	meta->shim.row_count = aie->metadata.shim.row_count;
-	meta->shim.row_start = aie->metadata.shim.row_start;
-	meta->shim.dma_channel_count = aie->metadata.shim.dma_channel_count;
-	meta->shim.lock_count = aie->metadata.shim.lock_count;
-	meta->shim.event_reg_count = aie->metadata.shim.event_reg_count;
-
-	buf_sz = min(args->buffer_size, sizeof(*meta));
-	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, buf_sz))
+	buf_sz = min(args->buffer_size, sizeof(aie->metadata));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &aie->metadata, buf_sz))
 		ret = -EFAULT;
 
-	kfree(meta);
 	return ret;
 }
 

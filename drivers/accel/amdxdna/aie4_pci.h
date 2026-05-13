@@ -58,7 +58,8 @@ struct amdxdna_dev_hdl {
 };
 
 /* aie4_message.c */
-int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev, struct aie_metadata *metadata);
+int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
+			    struct amdxdna_drm_query_aie_metadata *metadata);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
