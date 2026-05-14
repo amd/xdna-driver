@@ -48,7 +48,7 @@ amdxdna_dpt_slot(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind)
 	return NULL;
 }
 
-struct amdxdna_dpt *
+static struct amdxdna_dpt *
 amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind,
 		       int *idx)
 {
@@ -66,6 +66,23 @@ amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind,
 		return NULL;
 	}
 	return dpt;
+}
+
+/*
+ * Wake the watcher when either (a) new log data has been written to
+ * the ring (tail has advanced past the caller's last read offset)
+ * or (b) the session is no longer ACTIVE so the watcher can return
+ * -ESHUTDOWN promptly instead of sleeping forever.
+ */
+static bool amdxdna_dpt_watch_ready(const struct amdxdna_dpt *dpt, u64 offset)
+{
+	return READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE ||
+	       offset != READ_ONCE(dpt->tail);
+}
+
+static int amdxdna_dpt_copy_to_user(void *to, const void *from, size_t n)
+{
+	return copy_to_user((__force void __user *)to, from, n) ? -EFAULT : 0;
 }
 
 /*
@@ -410,6 +427,105 @@ amdxdna_dpt_publish(struct aie_device *aie, enum amdxdna_dpt_kind kind,
 	return dpt;
 }
 
+/*
+ * Watch + fetch path used by amdxdna_get_fw_log. Format matches the
+ * firmware ABI so the xrt-smi consumer in shim works unchanged.
+ */
+static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt,
+				struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dpt_metadata footer = {};
+	void __user *buf;
+	size_t buf_size;
+	int ret = 0;
+	u32 offset;
+
+	if (args->num_element != 1)
+		return -EINVAL;
+
+	buf_size = args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_DPT_ERR(dpt, "Failed to access buffer, element num %d size 0x%x",
+			     args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	if (buf_size < sizeof(footer))
+		return -ENOSPC;
+
+	offset = buf_size - sizeof(footer);
+	if (copy_from_user(&footer, buf + offset, sizeof(footer)))
+		return -EFAULT;
+
+	if (XDNA_DPT_MBZ_DBG(dpt, &footer.pad, sizeof(footer.pad)))
+		return -EINVAL;
+
+	XDNA_DPT_DBG(dpt, "Requested at offset 0x%llx with watch %s",
+		     footer.offset, footer.watch ? "on" : "off");
+
+	if (footer.offset == READ_ONCE(dpt->tail)) {
+		if (footer.watch) {
+			amdxdna_dpt_timer_get(dpt);
+			ret = wait_event_interruptible(dpt->wait,
+						       amdxdna_dpt_watch_ready(dpt, footer.offset));
+			amdxdna_dpt_timer_put(dpt);
+
+			/*
+			 * Woken because we are tearing down or PM-suspending.
+			 * SUSPENDING is permitted so admitted watchers can drain
+			 * the final batch fetch_payload before status flips to
+			 * SUSPENDED.
+			 */
+			if (READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE &&
+			    READ_ONCE(dpt->status) != AMDXDNA_DPT_SUSPENDING) {
+				footer.size = 0;
+				ret = -ESHUTDOWN;
+				goto exit;
+			}
+
+			if (ret) {
+				XDNA_DPT_DBG(dpt, "Wait interrupted by signal: %d", ret);
+				footer.size = 0;
+				goto exit;
+			}
+		} else {
+			footer.size = 0;
+			goto exit;
+		}
+	}
+
+	footer.size = offset;
+	ret = amdxdna_dpt_fetch_payload(dpt, buf, &footer.offset, &footer.size,
+					amdxdna_dpt_copy_to_user);
+	if (ret) {
+		XDNA_DPT_ERR(dpt, "Failed to fetch FW buffer: %d", ret);
+		footer.offset = 0;
+		footer.size = 0;
+		ret = -EINVAL;
+	}
+
+exit:
+	if (ret == 0 || ret == -ESHUTDOWN) {
+		if (copy_to_user(buf + offset, &footer, sizeof(footer))) {
+			/*
+			 * On -ESHUTDOWN preserve the original error: user
+			 * space still gets the zero-size sentinel via the
+			 * footer.size = 0 already set on the shutdown
+			 * branch above, and even if the writeback fails
+			 * the disabled-kind status code must reach the
+			 * caller intact.
+			 */
+			if (ret == 0)
+				ret = -EFAULT;
+		}
+	}
+
+	XDNA_DPT_DBG(dpt, "Returned size 0x%x offset 0x%llx", footer.size,
+		     footer.offset);
+	return ret;
+}
+
 static int amdxdna_fw_log_init(struct aie_device *aie, u32 level)
 {
 	struct amdxdna_dev *xdna = aie->xdna;
@@ -629,7 +745,7 @@ static int amdxdna_dpt_resume_kind(struct aie_device *aie,
 	return 0;
 }
 
-int amdxdna_fw_log_set_level(struct aie_device *aie, u32 level)
+static int amdxdna_fw_log_set_level(struct aie_device *aie, u32 level)
 {
 	struct amdxdna_dev *xdna = aie->xdna;
 	struct amdxdna_dpt *dpt;
@@ -688,4 +804,110 @@ int amdxdna_dpt_suspend(struct aie_device *aie)
 int amdxdna_dpt_resume(struct aie_device *aie)
 {
 	return amdxdna_dpt_resume_kind(aie, AMDXDNA_DPT_FW_LOG);
+}
+
+int amdxdna_get_fw_log(struct aie_device *aie,
+		       struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+	int ret, idx;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_LOG, &idx);
+	if (!dpt)
+		return -ESHUTDOWN;
+
+	ret = amdxdna_dpt_get_data(dpt, args);
+	srcu_read_unlock(&xdna->dpt_srcu, idx);
+	return ret;
+}
+
+/*
+ * No CAP_SYS_ADMIN check: the (version, status, level) triple is
+ * unprivileged-readable so non-root xrt-smi can detect feature
+ * presence and current state. The payload (amdxdna_get_fw_log)
+ * requires CAP_SYS_ADMIN.
+ *
+ * Returns -EOPNOTSUPP if the firmware doesn't support this feature.
+ * Returns success with status == 0 when the firmware supports it but
+ * it is currently disabled.
+ */
+int amdxdna_get_fw_log_configs(struct aie_device *aie,
+			       struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_get_dpt_state config = {};
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_dpt *dpt;
+	void __user *buf;
+	size_t buf_size;
+	int idx;
+
+	if (args->num_element != 1)
+		return -EINVAL;
+
+	if (!aie->msg_ops.fw_log_init)
+		return -EOPNOTSUPP;
+
+	buf_size = args->element_size;
+	buf = u64_to_user_ptr(args->buffer);
+	if (!access_ok(buf, buf_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer, element num %d size 0x%x",
+			 args->num_element, args->element_size);
+		return -EFAULT;
+	}
+
+	if (buf_size < sizeof(config)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
+		return -ENOSPC;
+	}
+
+	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_LOG, &idx);
+	if (dpt) {
+		config.version = dpt->payload_version;
+		config.status = 1;
+		config.config = READ_ONCE(dpt->config);
+		srcu_read_unlock(&xdna->dpt_srcu, idx);
+	}
+
+	if (copy_to_user(buf, &config, sizeof(config)))
+		return -EFAULT;
+	return 0;
+}
+
+int amdxdna_set_fw_log_state(struct aie_device *aie,
+			     struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_set_dpt_state fw_log;
+	struct amdxdna_dev *xdna = aie->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (!aie->msg_ops.fw_log_init)
+		return -EOPNOTSUPP;
+
+	if (args->buffer_size != sizeof(fw_log)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u Need: %zu.",
+			 args->buffer_size, sizeof(fw_log));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&fw_log, u64_to_user_ptr(args->buffer), sizeof(fw_log)))
+		return -EFAULT;
+
+	if (XDNA_MBZ_DBG(xdna, &fw_log.pad, sizeof(fw_log.pad)))
+		return -EINVAL;
+
+	if (!fw_log.action)
+		return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_LOG);
+
+	if (!fw_log.config || fw_log.config >= AMDXDNA_DPT_FW_LOG_LEVEL_MAX)
+		return -EINVAL;
+
+	if (!rcu_access_pointer(xdna->fw_log))
+		return amdxdna_fw_log_init(aie, fw_log.config);
+
+	return amdxdna_fw_log_set_level(aie, fw_log.config);
 }

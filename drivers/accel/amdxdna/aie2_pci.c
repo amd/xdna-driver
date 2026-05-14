@@ -26,6 +26,7 @@
 #include "aie2_pci.h"
 #include "aie2_solver.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_dpt.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_pci_drv.h"
@@ -1060,14 +1061,32 @@ static int aie2_get_array(struct amdxdna_client *client,
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_dev *xdna = client->xdna;
+	bool needs_dev_lock;
 	int ret, idx;
 
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	ret = amdxdna_pm_resume_get_locked(xdna);
+	/* FW_LOG paths use SRCU instead of dev_lock so multiple xrt-smi
+	 * watchers can sleep in wait_event_interruptible concurrently while
+	 * an admin can still disable logging via SET_FW_LOG_STATE.
+	 */
+	switch (args->param) {
+	case DRM_AMDXDNA_FW_LOG:
+	case DRM_AMDXDNA_FW_LOG_CONFIG:
+		needs_dev_lock = false;
+		break;
+	default:
+		needs_dev_lock = true;
+		break;
+	}
+
+	ret = amdxdna_pm_resume_get(xdna);
 	if (ret)
 		goto dev_exit;
+
+	if (needs_dev_lock)
+		mutex_lock(&xdna->dev_lock);
 
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
@@ -1085,10 +1104,19 @@ static int aie2_get_array(struct amdxdna_client *client,
 	case DRM_AMDXDNA_AIE_TILE_READ:
 		ret = amdxdna_aie_tile_read(&ndev->aie, client, args);
 		break;
+	case DRM_AMDXDNA_FW_LOG:
+		ret = amdxdna_get_fw_log(&ndev->aie, args);
+		break;
+	case DRM_AMDXDNA_FW_LOG_CONFIG:
+		ret = amdxdna_get_fw_log_configs(&ndev->aie, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
 	}
+
+	if (needs_dev_lock)
+		mutex_unlock(&xdna->dev_lock);
 
 	amdxdna_pm_suspend_put(xdna);
 	XDNA_DBG(xdna, "Got param %d", args->param);
@@ -1179,6 +1207,9 @@ static int aie2_set_state(struct amdxdna_client *client,
 		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
+		break;
+	case DRM_AMDXDNA_SET_FW_LOG_STATE:
+		ret = amdxdna_set_fw_log_state(&ndev->aie, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);

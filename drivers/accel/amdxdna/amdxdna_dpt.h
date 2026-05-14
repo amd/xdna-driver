@@ -8,6 +8,7 @@
 #include <linux/mutex.h>
 #include <linux/refcount.h>
 #include <linux/sizes.h>
+#include <linux/string.h>
 #include <linux/timer.h>
 #include <linux/types.h>
 #include <linux/wait.h>
@@ -71,6 +72,8 @@ extern const char * const amdxdna_dpt_irq_name[AMDXDNA_DPT_KIND_MAX];
 #define XDNA_DPT_INFO(dpt, fmt, args...) XDNA_DPT_PRINTK(INFO, dpt, fmt, ##args)
 #define XDNA_DPT_DBG(dpt,  fmt, args...) XDNA_DPT_PRINTK(DBG,  dpt, fmt, ##args)
 
+#define XDNA_DPT_MBZ_DBG(dpt, ptr, sz)	XDNA_MBZ_DBG((dpt)->xdna, ptr, sz)
+
 /*
  * Layout matches the firmware ABI exactly so the on-the-wire format stays
  * compatible with what shim/xrt-smi already expects.
@@ -133,18 +136,11 @@ int amdxdna_dpt_fini(struct aie_device *aie);
 int amdxdna_dpt_suspend(struct aie_device *aie);
 int amdxdna_dpt_resume(struct aie_device *aie);
 
-/*
- * Look up the live handle for @kind under SRCU. On success returns the
- * handle with the SRCU read-lock held in *idx; the caller must pair with
- * srcu_read_unlock(&xdna->dpt_srcu, idx) once it is done with the handle.
- * Returns NULL with the lock already released when the kind is not
- * currently ACTIVE.
- */
-struct amdxdna_dpt *
-amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind,
-		       int *idx);
-
-/* Change the FW log level on a live dpt (requires status == ACTIVE). */
-int amdxdna_fw_log_set_level(struct aie_device *aie, u32 level);
+int amdxdna_get_fw_log(struct aie_device *aie,
+		       struct amdxdna_drm_get_array *args);
+int amdxdna_get_fw_log_configs(struct aie_device *aie,
+			       struct amdxdna_drm_get_array *args);
+int amdxdna_set_fw_log_state(struct aie_device *aie,
+			     struct amdxdna_drm_set_state *args);
 
 #endif /* _AMDXDNA_DPT_H_ */
