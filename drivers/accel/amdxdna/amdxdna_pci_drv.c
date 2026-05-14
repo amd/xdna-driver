@@ -58,9 +58,11 @@ MODULE_FIRMWARE("amdnpu/1B0B_10/cert.dev.sbin");
  * 0.11: Support AIE coredump
  * 0.12: Add classic device type of NPU3
  * 0.13: Support AIE tile register/memory read/write
+ * 0.14: Expose firmware log GET/GET_CONFIG/SET_STATE ioctls and
+ *       struct amdxdna_dpt_metadata, _set_dpt_state, _get_dpt_state
  */
 #define AMDXDNA_DRIVER_MAJOR		0
-#define AMDXDNA_DRIVER_MINOR		13
+#define AMDXDNA_DRIVER_MINOR		14
 
 /*
  * Bind the driver base on (vendor_id, device_id) pair and later use the
@@ -233,7 +235,11 @@ static int amdxdna_drm_get_array_ioctl(struct drm_device *dev, void *data,
 	if (args->pad || !args->num_element || !args->element_size)
 		return -EINVAL;
 
-	guard(mutex)(&xdna->dev_lock);
+	/* dev_lock is NOT held across this call. Cases that need it take
+	 * it themselves; the FW_LOG watch path uses SRCU instead so that
+	 * multiple xrt-smi watchers can sleep concurrently inside
+	 * wait_event_interruptible.
+	 */
 	return xdna->dev_info->ops->get_array(client, args);
 }
 

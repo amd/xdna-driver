@@ -685,13 +685,73 @@ struct amdxdna_drm_aie_tile_access {
 	__u8  pad[3];
 };
 
+/**
+ * struct amdxdna_dpt_metadata - DPT metadata shared between shim and driver.
+ */
+struct amdxdna_dpt_metadata {
+	/**
+	 * @offset: [in/out] DPT read pointer. In: where in the FW ring to
+	 * start reading. Out: updated to the next read position.
+	 */
+	__u64 offset;
+	/**
+	 * @size: [out] Number of bytes the kernel wrote into the payload
+	 * area. The input value is ignored.
+	 */
+	__u32 size;
+	/**
+	 * @watch: [in] If non-zero, the request may wait in the kernel
+	 * until new data is available.
+	 */
+	__u8  watch;
+	/** @pad: MBZ. */
+	__u8  pad[3];
+};
+
+/**
+ * struct amdxdna_drm_set_dpt_state - Structure to configure DPT.
+ */
+struct amdxdna_drm_set_dpt_state {
+	/** @action: 1 to enable, 0 to disable. */
+	__u32 action;
+	/** @config: For firmware logging this value indicates log level. */
+	__u32 config;
+	/** @pad: MBZ. */
+	__u64 pad;
+};
+
+/**
+ * struct amdxdna_drm_get_dpt_state - Structure to get current DPT state.
+ *
+ * Convention used by the corresponding DRM_AMDXDNA_FW_*_CONFIG GET ioctl:
+ *   Ioctl returns -EOPNOTSUPP: firmware doesn't support this feature.
+ *   @status == 1: feature is enabled; @version and @config are valid.
+ *   @status == 0: feature is supported but currently disabled;
+ *                 @version and @config are zero-filled and MUST NOT be
+ *                 interpreted by user space.
+ */
+struct amdxdna_drm_get_dpt_state {
+	/** @version: Payload version. Valid only when @status == 1. */
+	__u32 version;
+	/** @status: 1 implies enabled, 0 implies disabled. */
+	__u32 status;
+	/** @config: Kind-specific configuration (log level for FW_LOG,
+	 *  category bitmask for FW_TRACE). Valid only when @status == 1.
+	 */
+	__u32 config;
+	/** @pad: MBZ. */
+	__u32 pad;
+};
+
 /*
  * Supported params in struct amdxdna_drm_get_array
  */
 #define DRM_AMDXDNA_HW_CONTEXT_ALL	0
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
+#define DRM_AMDXDNA_FW_LOG		3
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
+#define DRM_AMDXDNA_FW_LOG_CONFIG	7
 #define DRM_AMDXDNA_AIE_TILE_READ	9
 
 /**
@@ -744,6 +804,28 @@ struct amdxdna_drm_get_array {
 	 * Access: any process running as the same Linux user as the
 	 * context creator may read that context; CAP_SYS_ADMIN may read
 	 * any context.
+	 *
+	 * %DRM_AMDXDNA_FW_LOG:
+	 * Returns firmware log payload plus metadata.
+	 *
+	 * num_element must be 1. buffer points to a user buffer whose size
+	 * is element_size bytes. The last sizeof(struct amdxdna_dpt_metadata)
+	 * bytes of buffer carry the request/reply metadata (offset, size,
+	 * watch); the remainder receives the payload. When @watch is set the
+	 * call sleeps in the kernel until new data is available, logging is
+	 * disabled, or a signal arrives.
+	 *
+	 * Access: requires CAP_SYS_ADMIN.
+	 *
+	 * %DRM_AMDXDNA_FW_LOG_CONFIG:
+	 * Returns the current firmware log configuration as
+	 * struct amdxdna_drm_get_dpt_state.
+	 *
+	 * num_element must be 1. element_size must be at least
+	 * sizeof(struct amdxdna_drm_get_dpt_state).
+	 *
+	 * Access: unprivileged. Returns -EOPNOTSUPP if firmware doesn't
+	 * support this feature.
 	 */
 	__u32 param;
 	/**
@@ -776,6 +858,7 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_WRITE_AIE_REG,
 	DRM_AMDXDNA_SET_FORCE_PREEMPT,
 	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
+	DRM_AMDXDNA_SET_FW_LOG_STATE,
 	DRM_AMDXDNA_AIE_TILE_WRITE = 7,
 };
 
@@ -818,6 +901,17 @@ struct amdxdna_drm_set_state {
 	 * block transfer through firmware.
 	 *
 	 * Access: requires CAP_SYS_ADMIN (the carrier SET_STATE ioctl is
+	 * DRM_ROOT_ONLY).
+	 *
+	 * %DRM_AMDXDNA_SET_FW_LOG_STATE:
+	 * Enable, disable, or change the level of firmware logging.
+	 *
+	 * buffer points to struct amdxdna_drm_set_dpt_state. action=0
+	 * disables logging; action=1 enables it (or, if already enabled,
+	 * changes the level to @config). @config must be in
+	 * [1, AMDXDNA_DPT_FW_LOG_LEVEL_MAX).
+	 *
+	 * Access: requires CAP_SYS_ADMIN (the SET_STATE ioctl is
 	 * DRM_ROOT_ONLY).
 	 */
 	__u32 param;

@@ -687,9 +687,11 @@ static int aie4_get_array(struct amdxdna_client *client,
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
-	ret = amdxdna_pm_resume_get_locked(xdna);
+	ret = amdxdna_pm_resume_get(xdna);
 	if (ret)
 		goto dev_exit;
+
+	mutex_lock(&xdna->dev_lock);
 
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_COREDUMP:
@@ -702,6 +704,8 @@ static int aie4_get_array(struct amdxdna_client *client,
 		ret = -EOPNOTSUPP;
 		break;
 	}
+
+	mutex_unlock(&xdna->dev_lock);
 
 	amdxdna_pm_suspend_put(xdna);
 
