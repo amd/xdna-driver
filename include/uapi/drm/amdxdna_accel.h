@@ -642,11 +642,30 @@ struct amdxdna_drm_bo_usage {
 	__u64 heap_usage;
 };
 
+/**
+ * struct amdxdna_drm_aie_coredump - Input for AIE coredump via %DRM_AMDXDNA_AIE_COREDUMP
+ * @pid: The process ID of the process that created the context.
+ * @context_id: The hardware context id.
+ * @pad: MBZ.
+ *
+ * Used as the element type for &struct amdxdna_drm_get_array when @param is
+ * %DRM_AMDXDNA_AIE_COREDUMP.
+ */
+struct amdxdna_drm_aie_coredump {
+	/** @pid: The process ID of the process that created the context. */
+	__u64 pid;
+	/** @context_id: The hardware context id. */
+	__u32 context_id;
+	/** @pad: MBZ. */
+	__u32 pad;
+};
+
 /*
  * Supported params in struct amdxdna_drm_get_array
  */
 #define DRM_AMDXDNA_HW_CONTEXT_ALL	0
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
+#define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
 
 /**
@@ -666,6 +685,10 @@ struct amdxdna_drm_get_array {
 	 *
 	 * %DRM_AMDXDNA_BO_USAGE:
 	 * Returns usage of heap/internal/external BOs.
+	 *
+	 * %DRM_AMDXDNA_AIE_COREDUMP:
+	 * Returns AIE tile memory dump for the context described by
+	 * &struct amdxdna_drm_aie_coredump in the first element.
 	 */
 	__u32 param;
 	/**
