@@ -22,6 +22,10 @@ int verbosity;
 module_param(verbosity, int, 0644);
 MODULE_PARM_DESC(verbosity, "[Debug] Enabling verbosity. default is 0");
 
+int drm_sched = 1;
+module_param(drm_sched, int, 0644);
+MODULE_PARM_DESC(drm_sched, "Enable DRM scheduler (1) or use local FIFO scheduler (0, default)");
+
 int partition_size = 4;
 module_param(partition_size, int, 0644);
 MODULE_PARM_DESC(partition_size, "Test only option: default partition size");
@@ -176,8 +180,8 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	outstanding = queue->reserved_write_index - header->read_index;
 	if (outstanding >= capacity) {
 		/* Use DBG level - expected during high queue utilization */
-		XDNA_DBG(xdna, "HSA Queue full: outstanding=%llu >= capacity=%u",
-			 outstanding, capacity);
+		XDNA_ERR(xdna, "[RESERVE_SLOT] HSA Queue full: reserved_wr=%llu read_idx=%llu outstanding=%llu >= capacity=%u",
+			 queue->reserved_write_index, header->read_index, outstanding, capacity);
 		mutex_unlock(&queue->hq_lock);
 		return ERR_PTR(-EBUSY);
 	}
@@ -195,11 +199,17 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 	slot_idx = queue->reserved_write_index % capacity;
 	mutex_lock(&priv->privctx_lock);
 	if (priv->pending[slot_idx]) {
+		/* Slot already has a job - queue is full, retry */
+		XDNA_ERR(xdna, "[RESERVE_SLOT] Pending slot busy: reserved_wr=%llu read_idx=%llu slot_idx=%u capacity=%u pending=%p",
+			 queue->reserved_write_index, header->read_index, slot_idx, capacity, priv->pending[slot_idx]);
 		mutex_unlock(&priv->privctx_lock);
 		mutex_unlock(&queue->hq_lock);
 		return ERR_PTR(-EBUSY);
 	}
 	mutex_unlock(&priv->privctx_lock);
+
+	XDNA_INFO(xdna, "[RESERVE_SLOT] SUCCESS: reserved_wr=%llu read_idx=%llu slot_idx=%u capacity=%u",
+		  queue->reserved_write_index, header->read_index, slot_idx, capacity);
 
 	/* Reserve this slot by incrementing reserved_write_index. */
 	*slot = queue->reserved_write_index++;
@@ -271,7 +281,7 @@ static void ve2_job_release(struct kref *ref)
 	amdxdna_sched_job_cleanup(job);
 }
 
-static void ve2_job_put(struct amdxdna_sched_job *job)
+void ve2_job_put(struct amdxdna_sched_job *job)
 {
 	kref_put(&job->refcnt, ve2_job_release);
 }
@@ -306,6 +316,8 @@ static inline int ve2_hwctx_add_job(struct amdxdna_ctx *hwctx, struct amdxdna_sc
 	}
 
 	priv->pending[idx] = job;
+	XDNA_INFO(xdna, "[PENDING_ADD] Stored job at pending[%d] for seq=%llu hwctx=%p job=%p",
+		  idx, seq, hwctx, job);
 	priv->state = AMDXDNA_HWCTX_STATE_ACTIVE;
 	mutex_unlock(&priv->privctx_lock);
 
@@ -324,8 +336,8 @@ static inline struct amdxdna_sched_job *ve2_hwctx_get_job(struct amdxdna_ctx *hw
  *
  * Caller MUST hold hq_lock. This function will acquire privctx_lock internally.
  */
-static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
-						struct amdxdna_sched_job *job)
+void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
+				   struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
@@ -351,9 +363,23 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 	 * Host does not write INVALID to mark slots free; CERT advances read_index
 	 * when done. No need to clear hqc_mem here.
 	 */
-	// Reset the pending list
-	priv_ctx->pending[get_job_idx(job->seq)] = NULL;
-	ve2_job_put(job);
+
+	if (drm_sched) {
+		/*
+		 * DRM scheduler mode: DO NOT signal fence here!
+		 * The fence MUST be signaled only in IRQ handler (ve2_drm_signal_fences).
+		 * Signaling it here causes race: cmd_wait signals fence -> DRM scheduler
+		 * calls free_job -> IRQ fires and tries to use freed job -> CRASH.
+		 *
+		 * In DRM sched mode, cmd_wait is only used for blocking wait semantics.
+		 * Fence signaling and job lifecycle are controlled by IRQ handler.
+		 */
+	} else {
+		/* FIFO mode: Clear pending array and release job */
+		priv_ctx->pending[get_job_idx(job->seq)] = NULL;
+		ve2_job_put(job);
+	}
+
 	mutex_unlock(&priv_ctx->privctx_lock);
 }
 
@@ -947,7 +973,7 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 	u32 op;
 
 	op = amdxdna_cmd_get_op(cmd_bo);
-	XDNA_DBG(xdna, "cmd_submit: enter op=%u hwctx=%p start_col=%u pid=%d",
+	XDNA_INFO(xdna, "cmd_submit: enter op=%u hwctx=%p start_col=%u pid=%d",
 		 op, hwctx, hwctx->priv->start_col, hwctx->client->pid);
 	if (op != ERT_START_DPU && op != ERT_CMD_CHAIN) {
 		XDNA_WARN(xdna, "cmd_submit abort unsupported ERT cmd: %d received", op);
@@ -965,12 +991,26 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 		return -EINVAL;
 	}
 
+	/*
+	 * CRITICAL: For DRM scheduler, lock BEFORE slot reservation to ensure
+	 * strict FIFO ordering. Without this, concurrent threads can reserve slots
+	 * out-of-order, causing firmware to receive jobs in wrong sequence.
+	 */
+	if (drm_sched)
+		mutex_lock(&hwctx->priv->drm_submit_lock);
+
+	XDNA_INFO(xdna, "*************** cmd_submit: drm_submit_lock hwctx %p\n", hwctx);
+	/* Submit command to hardware queue (common for both schedulers) */
 	if (op == ERT_CMD_CHAIN)
 		ret = ve2_submit_cmd_chain(hwctx, job, seq);
 	else
 		ret = ve2_submit_cmd_single(hwctx, job, seq);
 
+	XDNA_INFO(xdna, "*************** After cmd cmd_submit: drm_submit_lock hwctx %p\n", hwctx);
 	if (ret) {
+		if (drm_sched)
+			mutex_unlock(&hwctx->priv->drm_submit_lock);
+
 		/* Return -ERESTARTSYS for -EAGAIN so userspace can retry */
 		if (ret == -EAGAIN) {
 			XDNA_ERR(xdna,
@@ -984,10 +1024,32 @@ int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 		return ret;
 	}
 
+	/*
+	 * Log sequence assignment BEFORE scheduler split to detect out-of-order issues.
+	 * This logs the order in which sequences are assigned (not when RUN_JOB executes).
+	 * Compare with RUN_JOB logs to detect DRM scheduler reordering.
+	 */
+	XDNA_INFO(xdna, "[SEQ_ASSIGN] hwctx=%p seq=%llu thread=%d (before scheduler path)",
+		  hwctx, *seq, current->pid);
+
 	XDNA_DBG(xdna, "hwctx %p cmd submitted: seq=%llu, total_submitted=%llu",
 		 hwctx, *seq, hwctx->submitted);
-	/* command_index = read_index when this job completes (last_slot + 1) */
-	ve2_mgmt_schedule_cmd(xdna, hwctx, *seq + 1);
+
+	/* Scheduler-specific handling */
+	if (drm_sched) {
+		/* DRM scheduler path - push job to scheduler, run_job will notify firmware */
+		ret = ve2_drm_cmd_submit(job, *seq + 1);
+		mutex_unlock(&hwctx->priv->drm_submit_lock);
+		if (ret)
+			return ret;
+	} else {
+		/* Schedule command using local FIFO queue */
+		ret = ve2_mgmt_schedule_cmd(xdna, hwctx, *seq + 1);
+		if (ret < 0) {
+			XDNA_ERR(xdna, "FIFO schedule_cmd failed: ret=%d", ret);
+			return ret;
+		}
+	}
 
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
 				  hwctx->client->pid, hwctx->priv->start_col,
@@ -1148,10 +1210,10 @@ static bool ve2_hqc_has_terminal_state(struct amdxdna_ctx_priv *priv_ctx,
  * chains with ERROR/ABORT, scan backwards to find the first failing
  * sub-command and populate error_index.
  */
-static void ve2_process_hqc_completion(struct amdxdna_dev *xdna,
-				       struct amdxdna_ctx *hwctx,
-				       struct amdxdna_sched_job *job,
-				       u64 seq)
+void ve2_process_hqc_completion(struct amdxdna_dev *xdna,
+				struct amdxdna_ctx *hwctx,
+				struct amdxdna_sched_job *job,
+				u64 seq)
 {
 	struct amdxdna_ctx_priv *priv_ctx = hwctx->priv;
 	struct ve2_hsa_queue *queue = &priv_ctx->hwctx_hsa_queue;
@@ -1160,6 +1222,12 @@ static void ve2_process_hqc_completion(struct amdxdna_dev *xdna,
 	u64 *hqc_mem = queue->hq_complete.hqc_mem;
 	u32 comp;
 	enum ert_cmd_state state;
+
+	/* Safety check: job->cmd_bo must be valid */
+	if (!job || !job->cmd_bo) {
+		XDNA_WARN(xdna, "NULL job or cmd_bo in hqc_completion, seq %llu", seq);
+		return;
+	}
 
 	hsa_queue_sync_completion_for_read(queue, slot);
 	comp = (u32)hqc_mem[slot];
@@ -1313,9 +1381,6 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
 				  hwctx->client->pid, hwctx->priv->start_col,
 				  hwctx->priv->id, seq);
-	XDNA_DBG(xdna,
-		 "cmd_wait: enter seq=%llu hwctx=%p start_col=%u pid=%d timeout_ms=%u",
-		 (u64)seq, hwctx, hwctx->priv->start_col, hwctx->client->pid, timeout);
 	/*
 	 * NOTE: this is simplified hwctx which has no col_entry list for different ctx
 	 * sharing the same lead col.
@@ -1329,8 +1394,6 @@ int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout)
 	else
 		ret = wait_event_interruptible(priv_ctx->waitq,
 					       check_read_index(hwctx, seq, print_interval));
-
-	XDNA_DBG(xdna, "wait_event returned %d (timeout_jiffies=%lu)", ret, wait_jifs);
 
 	mutex_lock(&priv_ctx->hwctx_hsa_queue.hq_lock);
 	if ((!wait_jifs && !ret) || ret > 0) {
@@ -1380,9 +1443,6 @@ out:
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
 				  hwctx->client->pid, hwctx->priv->start_col,
 				  hwctx->priv->id, seq);
-	XDNA_DBG(xdna, "cmd_wait: exit seq=%llu hwctx=%p ret=%d pid=%d",
-		 (u64)seq, hwctx, ret, hwctx->client->pid);
-	XDNA_DBG(xdna, "wait_cmd ret:%d", ret);
 	/* 0 is success, others are timeout */
 	return ret > 0 ? 0 : ret;
 }
@@ -1416,6 +1476,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_ctx_priv *priv = NULL;
+        u32 hwctx_id;
 	int ret;
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
@@ -1424,19 +1485,15 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	hwctx->priv = priv;
 
-	/* Allocate unique ID using XArray (thread-safe, supports ID recycling) */
-	{
-		u32 hwctx_id;
-
-		ret = xa_alloc_cyclic(&xdna->dev_handle->hwctx_ids, &hwctx_id, priv,
-				      XA_LIMIT(1, U32_MAX),
-				      &xdna->dev_handle->next_hwctx_id, GFP_KERNEL);
-		if (ret < 0) {
-			XDNA_ERR(xdna, "Failed to allocate hwctx ID, ret=%d", ret);
-			goto cleanup_priv;
-		}
-		priv->id = hwctx_id;
-	}
+        /* Allocate unique ID using XArray (thread-safe, supports ID recycling) */
+        ret = xa_alloc_cyclic(&xdna->dev_handle->hwctx_ids, &hwctx_id, priv,
+                        XA_LIMIT(1, U32_MAX),
+                        &xdna->dev_handle->next_hwctx_id, GFP_KERNEL);
+        if (ret < 0) {
+                XDNA_ERR(xdna, "Failed to allocate hwctx ID, ret=%d", ret);
+                goto cleanup_priv;
+        }
+        priv->id = hwctx_id;
 
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
 				  client->pid, 0, priv->id, 0);
@@ -1472,6 +1529,20 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 
 	mutex_init(&priv->privctx_lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
+
+	/* Initialize scheduler entity based on drm_sched parameter */
+	if (drm_sched) {
+		ret = ve2_drm_hwctx_init(hwctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to initialize DRM scheduler entity: ret=%d", ret);
+			mutex_destroy(&priv->privctx_lock);
+			goto cleanup_xrs;
+		}
+		XDNA_INFO(xdna, "Using DRM scheduler for hwctx=%p", hwctx);
+	} else {
+		XDNA_INFO(xdna, "Using local FIFO scheduler for hwctx=%p", hwctx);
+		priv->sched = NULL;
+	}
 
 	XDNA_DBG(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
 		 hwctx, priv->start_col, hwctx->client->pid);
@@ -1513,25 +1584,28 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	}
 
 	/*
-	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work,
-	 * remove all FIFO entries for this context to prevent use-after-free,
-	 * then cancel any pending work to ensure no work is accessing this context
+	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work.
+	 * For FIFO mode: remove all FIFO entries to prevent use-after-free.
 	 */
 	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[nhwctx->start_col];
 	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx == hwctx)
 		mgmtctx->active_ctx = NULL;
-	/* Remove all FIFO entries for this context before freeing it */
-	ve2_fifo_remove_ctx(mgmtctx, hwctx);
 	mutex_unlock(&mgmtctx->ctx_lock);
 
-	/* Now cancel any pending work - it will see active_ctx as NULL and bail out */
-	if (mgmtctx->mgmtctx_workq)
-		cancel_work_sync(&mgmtctx->sched_work);
+	if (!drm_sched) {
+		ve2_fifo_remove_ctx(mgmtctx, hwctx);
+
+		/* Cancel pending work for FIFO scheduler */
+		if (mgmtctx->mgmtctx_workq)
+			cancel_work_sync(&mgmtctx->sched_work);
+	}
 
 	/*
-	 * Release jobs first to decrement BO refcounts, but they may not
-	 * be freed immediately if the application still holds references
+	 * Force-complete all pending jobs to allow cleanup.
+	 * For DRM scheduler: signal fences to unblock the scheduler.
+	 *                    DRM scheduler's FREE_JOB callback will handle cleanup.
+	 * For FIFO scheduler: manually release the jobs.
 	 */
 	mutex_lock(&nhwctx->privctx_lock);
 	for (idx = 0; idx < HWCTX_MAX_CMDS; idx++) {
@@ -1539,18 +1613,25 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 		if (!job)
 			continue;
 
-		/*
-		 * Release privctx_lock before calling ve2_hwctx_job_release
-		 * as it will acquire the same lock internally.
-		 * Take a reference to the job to ensure it's not freed.
-		 */
-		kref_get(&job->refcnt);
-		mutex_unlock(&nhwctx->privctx_lock);
-		ve2_hwctx_job_release(hwctx, job);
-		ve2_job_put(job);
-		mutex_lock(&nhwctx->privctx_lock);
+		if (drm_sched) {
+			/* Signal fence as error - DRM scheduler will call FREE_JOB */
+			if (job->fence && !dma_fence_is_signaled(job->fence))
+				dma_fence_signal(job->fence);
+			/* Don't manually release - let DRM scheduler's FREE_JOB do it */
+		} else {
+			/* FIFO mode: manually release jobs */
+			kref_get(&job->refcnt);
+			mutex_unlock(&nhwctx->privctx_lock);
+			ve2_hwctx_job_release(hwctx, job);
+			ve2_job_put(job);
+			mutex_lock(&nhwctx->privctx_lock);
+		}
 	}
 	mutex_unlock(&nhwctx->privctx_lock);
+
+	/* Destroy DRM scheduler entity */
+	if (drm_sched)
+		ve2_drm_hwctx_fini(hwctx);
 
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_get_firmware_status(hwctx);
@@ -1559,6 +1640,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv->hwctx_config);
 	mutex_destroy(&hwctx->priv->privctx_lock);
+	if (drm_sched)
+		mutex_destroy(&hwctx->priv->drm_submit_lock);
 
 	XDNA_DBG(xdna,
 		 "hwctx fini: hwctx=%p submitted=%llu completed=%llu pid=%d",

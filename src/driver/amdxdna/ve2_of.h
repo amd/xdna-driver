@@ -34,6 +34,7 @@
 
 extern int enable_polling;
 extern int verbosity;
+extern int drm_sched;
 extern int start_col;
 extern int partition_size;
 extern u32 ve2_hwctx_limit;
@@ -75,11 +76,11 @@ struct ve2_config_hwctx {
 	u32	opcode_timeout_config;
 };
 
-// Define the node struct for the FIFO queue
+/* FIFO queue node for local scheduler */
 struct amdxdna_ctx_command_fifo {
-	struct amdxdna_ctx              *ctx;
-	u64                             command_index;
-	struct list_head                list;
+	struct amdxdna_ctx	*ctx;
+	u64			command_index;
+	struct list_head	list;
 };
 
 struct amdxdna_ctx_priv {
@@ -92,11 +93,20 @@ struct amdxdna_ctx_priv {
 	struct aie_partition_init_args	*args;
 	struct ve2_hsa_queue		hwctx_hsa_queue;
 	struct ve2_config_hwctx		*hwctx_config;
+
+	/* DRM scheduler components */
+	struct drm_sched_entity		entity;		/* Scheduling entity for this hwctx */
+	struct drm_gpu_scheduler	*sched;		/* Pointer to mgmtctx scheduler */
+	u64				seq;		/* Job sequence counter */
+	struct mutex			drm_submit_lock; /* Serialize DRM sched job submission */
+
+	/* Job tracking */
 	wait_queue_head_t		waitq;
 	struct amdxdna_sched_job	*pending[HWCTX_MAX_CMDS];
 	struct timer_list		event_timer;
 	bool			misc_intrpt_flag; /* Hardware sync required */
 	struct mutex			privctx_lock; /* protect private ctx */
+	u64				last_fence_signaled; /* Last seq for which fence was signaled (DRM sched) */
 };
 
 struct amdxdna_dev_priv {
@@ -116,12 +126,21 @@ struct amdxdna_mgmtctx {
 	struct mutex			ctx_lock; /* protect ctx add/remove/update */
 	struct work_struct		sched_work;
 	struct workqueue_struct		*mgmtctx_workq;
+
+	/* DRM scheduler components (drm_sched=1) */
+	struct drm_gpu_scheduler	sched;		/* DRM scheduler for this partition */
+
 	u32			is_partition_idle; /* Hardware sync required */
 	u32			is_context_req; /* Hardware sync required */
 	u32			is_idle_due_to_context; /* Hardware sync required */
 	struct amdxdna_async_err_cache	async_errs_cache; /* cache for async errors */
 	struct completion	error_cb_completion; /* completion for error callback */
 	atomic_t		error_cb_in_progress; /* track if error callback is running */
+
+	/* Context switch fence - signaled when partition becomes available for new context */
+	spinlock_t		ctx_switch_lock; /* Protects context switch fence */
+	struct dma_fence	*ctx_switch_fence; /* Fence signaled when context switch allowed */
+	u64			ctx_switch_seqno; /* Sequence number for context switch fences */
 };
 
 struct ve2_mem_region {
@@ -161,6 +180,26 @@ void ve2_free_firmware_slots(struct amdxdna_dev_hdl *xdna_hdl, u32 max_cols);
 int ve2_cmd_submit(struct amdxdna_sched_job *job, u32 *syncobj_hdls,
 		   u64 *syncobj_points, u32 syncobj_cnt, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_ctx *hwctx, u64 seq, u32 timeout);
+void ve2_job_put(struct amdxdna_sched_job *job);
+void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx, struct amdxdna_sched_job *job);
+void ve2_process_hqc_completion(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
+				struct amdxdna_sched_job *job, u64 seq);
+
+/* ve2_mgmt.c - FIFO scheduler */
+int notify_fw_cmd_ready(struct amdxdna_ctx *hwctx);
+int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
+			  u64 command_index);
+
+/* ve2_drm_sched.c */
+int ve2_drm_init_scheduler(struct amdxdna_mgmtctx *mgmtctx);
+void ve2_drm_fini_scheduler(struct amdxdna_mgmtctx *mgmtctx);
+int ve2_drm_hwctx_init(struct amdxdna_ctx *hwctx);
+void ve2_drm_hwctx_fini(struct amdxdna_ctx *hwctx);
+int ve2_drm_cmd_submit(struct amdxdna_sched_job *job, u64 seq);
+void ve2_drm_signal_fences(struct amdxdna_ctx *hwctx, u64 read_index);
+void ve2_drm_kick_scheduler(struct amdxdna_mgmtctx *mgmtctx);
+struct dma_fence *ve2_create_context_switch_fence(struct amdxdna_mgmtctx *mgmtctx);
+void ve2_signal_context_switch_fence(struct amdxdna_mgmtctx *mgmtctx);
 
 /* ve2_debug.c */
 int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);

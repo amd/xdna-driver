@@ -249,4 +249,15 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx
  */
 void ve2_fifo_remove_ctx(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_ctx *ctx);
 
+/**
+ * Context switching and firmware state functions (used by both schedulers)
+ */
+int ve2_request_context_switch(struct amdxdna_dev *xdna,
+				struct amdxdna_mgmtctx *mgmtctx);
+bool ve2_check_context_req(struct amdxdna_mgmtctx *mgmtctx);
+bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx);
+u32 get_cert_idle_status(struct amdxdna_mgmtctx *mgmtctx);
+void ve2_dump_debug_state(struct amdxdna_dev *xdna,
+			  struct amdxdna_mgmtctx *mgmtctx);
+
 #endif /* _VE2_MGMT_H_ */
