@@ -657,7 +657,7 @@ struct event_trace
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
     auto config = std::any_cast<xrt_core::query::event_trace_state::value_type>(any);
-    amdxdna_drm_set_dpt_state fw_trace;
+    amdxdna_drm_set_dpt_state fw_trace = {};
     fw_trace.action = !!config.action;
     fw_trace.config = config.categories;
 
@@ -780,7 +780,7 @@ struct firmware_log
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
     auto config = std::any_cast<xrt_core::query::firmware_log_state::value_type>(any);
-    amdxdna_drm_set_dpt_state fw_log;
+    amdxdna_drm_set_dpt_state fw_log = {};
     fw_log.action = !!config.action;
     fw_log.config = config.log_level;
 
