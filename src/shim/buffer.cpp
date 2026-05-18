@@ -181,13 +181,16 @@ bo_flags_to_type(uint64_t bo_flags, bool has_dev_mem)
 
   if (boflags != XCL_BO_FLAGS_HOST_ONLY &&
       boflags != XCL_BO_FLAGS_CACHEABLE &&
-      boflags != XCL_BO_FLAGS_EXECBUF)
+      boflags != XCL_BO_FLAGS_EXECBUF   &&
+      boflags != XCL_BO_FLAGS_KERNBUF)
     return AMDXDNA_BO_INVALID;
 
   if (has_dev_mem && boflags == XCL_BO_FLAGS_CACHEABLE)
     return AMDXDNA_BO_DEV;
   if (boflags == XCL_BO_FLAGS_EXECBUF || boflags == XCL_BO_FLAGS_CACHEABLE)
     return AMDXDNA_BO_CMD;
+  if (boflags == XCL_BO_FLAGS_KERNBUF)
+    return AMDXDNA_BO_SHARE;
   return bouse == XRT_BO_USE_UNUSED ? AMDXDNA_BO_SHARE : AMDXDNA_BO_CMD;
 }
 
