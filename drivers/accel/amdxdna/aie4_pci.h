@@ -59,6 +59,8 @@ struct amdxdna_dev_hdl {
 	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
 
 	struct amdxdna_msg_buf_hdl	*work_buf_hdl;
+
+	u8				pw_mode;
 };
 
 /* aie4_ctx.c */
@@ -91,6 +93,7 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev);
 int aie4_query_npu_firmware_version(struct amdxdna_dev_hdl *ndev);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
 
 enum aie4_fw_feature {
