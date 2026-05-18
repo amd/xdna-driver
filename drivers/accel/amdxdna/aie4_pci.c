@@ -273,9 +273,34 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(xdna, "partition fini failed: %d", ret);
 }
 
-static int aie4_query(struct amdxdna_dev_hdl *ndev)
+static int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
 {
-	return aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+	int ret;
+
+	ret = aie4_query_npu_firmware_version(ndev);
+	if (ret)
+		return ret;
+
+	ret = aie4_query_cert_firmware_version(ndev);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_query_aie_version(ndev, &ndev->aie.version);
+	if (ret)
+		return ret;
+
+	ret = aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
@@ -294,6 +319,10 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	ret = aie4_attach_work_buffer(ndev,
 				      to_dma_addr(ndev->work_buf_hdl, 0),
 				      to_buf_size(ndev->work_buf_hdl));
+	if (ret)
+		goto mbox_fini;
+
+	ret = aie4_query_fw(ndev);
 	if (ret)
 		goto mbox_fini;
 
@@ -326,7 +355,11 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	ret = aie4_query(ndev);
+	ret = aie4_query_fw(ndev);
+	if (ret)
+		goto mailbox_fini;
+
+	ret = aie4_query_aie(ndev);
 	if (ret)
 		goto mailbox_fini;
 
@@ -370,7 +403,11 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
-	ret = aie4_query(ndev);
+	ret = aie4_query_fw(ndev);
+	if (ret)
+		goto mbox_fini;
+
+	ret = aie4_query_aie(ndev);
 	if (ret)
 		goto mbox_fini;
 
@@ -603,6 +640,29 @@ static int aie4_doorbell_mmap(struct amdxdna_client *client, struct vm_area_stru
 	return ret;
 }
 
+static int aie4_get_power_mode(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_get_power_mode mode = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
+	int min;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
+	ndev = xdna->dev_handle;
+	mode.power_mode = ndev->pw_mode;
+
+	min = min(args->buffer_size, sizeof(mode));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &mode, min))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -620,8 +680,20 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = amdxdna_get_metadata(&ndev->aie, client, args);
 		break;
+	case DRM_AMDXDNA_QUERY_AIE_VERSION:
+		ret = amdxdna_get_aie_version(&ndev->aie, client, args);
+		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
 		ret = amdxdna_query_sensors(args, AIE4_TOTAL_COLUMN);
+		break;
+	case DRM_AMDXDNA_QUERY_FIRMWARE_VERSION:
+		ret = amdxdna_get_firmware_version(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
+		ret = amdxdna_get_cert_firmware_version(client, args);
+		break;
+	case DRM_AMDXDNA_GET_POWER_MODE:
+		ret = aie4_get_power_mode(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -696,6 +768,39 @@ static int aie4_get_array(struct amdxdna_client *client,
 dev_exit:
 	drm_dev_exit(idx);
 	return ret;
+}
+
+static int aie4_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_set_power_mode power_state;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int min, ret;
+	u8 power_mode;
+
+	if (!access_ok(u64_to_user_ptr(args->buffer), args->buffer_size)) {
+		XDNA_ERR(xdna, "Failed to access buffer size %d", args->buffer_size);
+		return -EFAULT;
+	}
+
+	min = min(args->buffer_size, sizeof(power_state));
+	if (copy_from_user(&power_state, u64_to_user_ptr(args->buffer), min)) {
+		XDNA_ERR(xdna, "Failed to copy power mode request into kernel");
+		return -EFAULT;
+	}
+
+	power_mode = power_state.power_mode;
+	if (power_mode > POWER_MODE_TURBO) {
+		XDNA_ERR(xdna, "Invalid power mode %d", power_mode);
+		return -EINVAL;
+	}
+
+	ret = aie4_msg_set_power_mode(xdna->dev_handle, power_mode);
+	if (ret)
+		return ret;
+
+	ndev->pw_mode = power_mode;
+	return 0;
 }
 
 static void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev)
@@ -995,6 +1100,9 @@ static int aie4_set_state(struct amdxdna_client *client,
 		goto dev_exit;
 
 	switch (args->param) {
+	case DRM_AMDXDNA_SET_POWER_MODE:
+		ret = aie4_set_power_mode(client, args);
+		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
 		break;

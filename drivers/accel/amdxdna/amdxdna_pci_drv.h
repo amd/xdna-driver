@@ -114,6 +114,13 @@ struct amdxdna_fw_ver {
 	u32 build;
 };
 
+struct amdxdna_cert_ver {
+	u8 major;
+	u8 minor;
+	u8 hotfix;
+	u8 build;
+};
+
 struct amdxdna_carveout;
 
 struct amdxdna_dev {
@@ -125,6 +132,7 @@ struct amdxdna_dev {
 	struct mutex			dev_lock; /* per device lock */
 	struct list_head		client_list;
 	struct amdxdna_fw_ver		fw_ver;
+	struct amdxdna_cert_ver		cert_ver;
 	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
 	struct workqueue_struct		*notifier_wq;
 
