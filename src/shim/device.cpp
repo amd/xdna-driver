@@ -1853,7 +1853,7 @@ struct xrt_smi_lists
   }
 
   static result_type
-  get(const xrt_core::device* /*device*/, key_type key, const std::any& reqType)
+  get(const xrt_core::device* device, key_type key, const std::any& reqType)
   {
     if (key != key_type::xrt_smi_lists)
       throw xrt_core::query::no_such_key(key, "Not implemented");
@@ -1866,6 +1866,8 @@ struct xrt_smi_lists
       return xrt_core::smi::get_list("examine", "report");
     case xrt_core::query::xrt_smi_lists::type::configure_option_options:
       return xrt_core::smi::get_option_options("configure");
+    case xrt_core::query::xrt_smi_lists::type::subcommands:
+      return xrt_core::smi::ryzen::get_subcommands_list(device);
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
