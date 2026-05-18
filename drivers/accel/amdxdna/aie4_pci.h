@@ -60,6 +60,8 @@ struct amdxdna_dev_hdl {
 
 	struct amdxdna_msg_buf_hdl	*work_buf_hdl;
 
+	u8				pw_mode;
+
 	struct amdxdna_drm_query_firmware_version cert_version;
 };
 
@@ -95,6 +97,7 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 				     struct amdxdna_drm_query_firmware_version *cert_version);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
+int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev);
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
 

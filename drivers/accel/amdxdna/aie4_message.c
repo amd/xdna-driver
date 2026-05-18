@@ -164,6 +164,20 @@ int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 s
 	return ret;
 }
 
+int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
+{
+	DECLARE_AIE_MSG(aie4_msg_power_override, AIE4_MSG_OP_POWER_OVERRIDE);
+	int ret;
+
+	req.power_mode = power_mode;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_msg_buf_hdl *list_hdl,
 			  u32 num_bufs)
