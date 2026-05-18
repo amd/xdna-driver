@@ -1015,20 +1015,45 @@ static void aie2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq)
 	dma_fence_put(out_fence);
 }
 
+static int aie2_drv_cmd_submit_wait(struct amdxdna_hwctx *hwctx,
+				    struct amdxdna_client *client,
+				    struct amdxdna_drv_cmd *cmd,
+				    u32 *bo_hdls, u32 bo_cnt)
+{
+	u64 seq;
+	int ret;
+
+	ret = amdxdna_cmd_submit(client, cmd, AMDXDNA_INVALID_BO_HANDLE,
+				 bo_hdls, bo_cnt, hwctx->id, &seq);
+	if (ret)
+		return ret;
+
+	aie2_cmd_wait(hwctx, seq);
+	wait_event(hwctx->priv->job_free_wq,
+		   atomic64_read(&hwctx->job_submit_cnt) ==
+		   atomic64_read(&hwctx->job_free_cnt));
+
+	return 0;
+}
+
 static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 				   bool attach)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_drv_cmd cmd = { 0 };
+	struct amdxdna_drv_cmd *cmd;
 	struct amdxdna_gem_obj *abo;
-	u64 seq;
 	int ret;
+
+	cmd = kzalloc_obj(*cmd);
+	if (!cmd)
+		return -ENOMEM;
 
 	abo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_DEV);
 	if (!abo) {
 		XDNA_ERR(xdna, "Get bo %d failed", bo_hdl);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto free_cmd;
 	}
 
 	if (attach) {
@@ -1036,25 +1061,24 @@ static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 			ret = -EBUSY;
 			goto put_obj;
 		}
-		cmd.opcode = ATTACH_DEBUG_BO;
+		cmd->opcode = ATTACH_DEBUG_BO;
 	} else {
 		if (abo->assigned_hwctx != hwctx->id) {
 			ret = -EINVAL;
 			goto put_obj;
 		}
-		cmd.opcode = DETACH_DEBUG_BO;
+		cmd->opcode = DETACH_DEBUG_BO;
 	}
 
-	ret = amdxdna_cmd_submit(client, &cmd, AMDXDNA_INVALID_BO_HANDLE,
-				 &bo_hdl, 1, hwctx->id, &seq);
+	ret = aie2_drv_cmd_submit_wait(hwctx, client, cmd, &bo_hdl, 1);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit command failed");
 		goto put_obj;
 	}
 
-	aie2_cmd_wait(hwctx, seq);
-	if (cmd.result) {
-		XDNA_ERR(xdna, "Response failure 0x%x", cmd.result);
+	if (cmd->result) {
+		XDNA_ERR(xdna, "Response failure 0x%x", cmd->result);
+		ret = -EINVAL;
 		goto put_obj;
 	}
 
@@ -1067,6 +1091,8 @@ static int aie2_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 bo_hdl,
 
 put_obj:
 	amdxdna_gem_put_obj(abo);
+free_cmd:
+	kfree(cmd);
 	return ret;
 }
 
@@ -1092,25 +1118,29 @@ int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_drv_cmd cmd = { 0 };
-	u64 seq;
+	struct amdxdna_drv_cmd *cmd;
 	int ret;
 
-	cmd.opcode = SYNC_DEBUG_BO;
-	ret = amdxdna_cmd_submit(client, &cmd, AMDXDNA_INVALID_BO_HANDLE,
-				 &debug_bo_hdl, 1, hwctx->id, &seq);
+	cmd = kzalloc_obj(*cmd);
+	if (!cmd)
+		return -ENOMEM;
+
+	cmd->opcode = SYNC_DEBUG_BO;
+	ret = aie2_drv_cmd_submit_wait(hwctx, client, cmd, &debug_bo_hdl, 1);
 	if (ret) {
 		XDNA_ERR(xdna, "Submit command failed");
-		return ret;
+		goto free_cmd;
 	}
 
-	aie2_cmd_wait(hwctx, seq);
-	if (cmd.result) {
-		XDNA_ERR(xdna, "Response failure 0x%x", cmd.result);
-		return -EINVAL;
+	if (cmd->result) {
+		XDNA_ERR(xdna, "Response failure 0x%x", cmd->result);
+		ret = -EINVAL;
+		goto free_cmd;
 	}
 
-	return 0;
+free_cmd:
+	kfree(cmd);
+	return ret;
 }
 
 static int aie2_populate_range(struct amdxdna_gem_obj *abo)
