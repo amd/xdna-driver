@@ -7,6 +7,8 @@
 #include <drm/drm_device.h>
 #include <drm/drm_print.h>
 #include <linux/dma-buf.h>
+#include <linux/iosys-map.h>
+#include <linux/limits.h>
 #include <linux/overflow.h>
 #include <linux/pagemap.h>
 #include <linux/vmalloc.h>
@@ -87,6 +89,29 @@ static const struct vm_operations_struct amdxdna_ubuf_vm_ops = {
 	.fault = amdxdna_ubuf_vm_fault,
 };
 
+static int amdxdna_ubuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
+{
+	struct amdxdna_ubuf_priv *ubuf = dbuf->priv;
+	void *kva;
+
+	if (ubuf->nr_pages > UINT_MAX)
+		return -EINVAL;
+
+	kva = vmap(ubuf->pages, (unsigned int)ubuf->nr_pages, VM_MAP, PAGE_KERNEL);
+	if (!kva)
+		return -ENOMEM;
+
+	iosys_map_set_vaddr(map, kva);
+	return 0;
+}
+
+static void amdxdna_ubuf_vunmap(struct dma_buf *dbuf, struct iosys_map *map)
+{
+	if (map->vaddr)
+		vunmap(map->vaddr);
+	iosys_map_clear(map);
+}
+
 static const struct dma_buf_ops amdxdna_ubuf_dmabuf_ops = {
 #ifdef HAVE_cache_sgt_mapping
 	.cache_sgt_mapping = true,
@@ -94,6 +119,8 @@ static const struct dma_buf_ops amdxdna_ubuf_dmabuf_ops = {
 	.map_dma_buf = amdxdna_ubuf_map,
 	.unmap_dma_buf = amdxdna_ubuf_unmap,
 	.release = amdxdna_ubuf_release,
+	.vmap = amdxdna_ubuf_vmap,
+	.vunmap = amdxdna_ubuf_vunmap,
 };
 
 static int readonly_va_entry(struct amdxdna_drm_va_entry *va_ent)
