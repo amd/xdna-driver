@@ -19,8 +19,12 @@
 #include "core/common/device.h"
 
 #include <array>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <vector>
 #include <iostream>
 #include <sstream>
@@ -103,6 +107,10 @@ usage(const std::string& prog)
   std::cout << "\t" << "-h" << ": print this help message and available test cases\n";
   std::cout << "\t" << "-k" << ": evaluate test result based on driver version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
+  std::cout << "Environment:\n";
+  std::cout << "\t" << "SHIM_TEST_ACCEL_NODE=<path>"
+            << ": device node for direct amdxdna ioctls (overrides discovery)\n";
+  std::cout << "\t" << "Default: <pci>/accel (bare metal) or <pci>/drm/renderD* (KVM virtio-gpu)\n";
   std::cout << std::endl;
 }
 
@@ -265,12 +273,92 @@ static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>&
 }
 
 std::string
-get_sysfs_path(device* dev)
+get_pci_sysfs(device* dev)
 {
   query::sub_device_path::args query_arg = {std::string(""), 0};
-  std::string sysfs = device_query<query::sub_device_path>(dev, query_arg);
-  return sysfs + "/accel";
+  return device_query<query::sub_device_path>(dev, query_arg);
 }
+
+std::string
+get_sysfs_path(device* dev)
+{
+  return get_pci_sysfs(dev) + "/accel";
+}
+
+namespace {
+
+std::string
+env_nonempty(const char* name)
+{
+  const char* v = std::getenv(name);
+  return (v && v[0]) ? std::string(v) : std::string{};
+}
+
+/*
+ * First sysfs child under <pci>/<subsys> whose name starts with @prefix.
+ * @dev_root is prepended to that name (/dev/accel/ or /dev/dri/).
+ * When @numeric_suffix is true, the part after @prefix must be digits (renderD128).
+ */
+static std::optional<std::string>
+pci_subsys_devnode(const std::string& pci_sysfs, const char* subsys,
+                   const char* prefix, const char* dev_root,
+                   bool numeric_suffix)
+{
+  const std::string dir = pci_sysfs + "/" + subsys;
+  DIR* raw = opendir(dir.c_str());
+  if (!raw)
+    return std::nullopt;
+  struct dir_guard {
+    DIR* d;
+    explicit dir_guard(DIR* p) : d(p) {}
+    ~dir_guard() { if (d) closedir(d); }
+  } guard(raw);
+  const size_t psz = strlen(prefix);
+
+  while (auto entry = readdir(guard.d)) {
+    const std::string name{entry->d_name};
+    if (name == "." || name == "..")
+      continue;
+    if (name.size() <= psz || name.compare(0, psz, prefix) != 0)
+      continue;
+    if (numeric_suffix) {
+      try {
+        (void)std::stoi(name.substr(psz));
+      } catch (const std::logic_error&) {
+        continue;
+      }
+    }
+    return std::string(dev_root) + name;
+  }
+  return std::nullopt;
+}
+
+/* Bare-metal fallback when <pci>/accel is absent but exactly one /sys/class/accel node exists. */
+static std::optional<std::string>
+accel_class_single_devnode()
+{
+  DIR* raw = opendir("/sys/class/accel");
+  if (!raw)
+    return std::nullopt;
+  struct dir_guard {
+    DIR* d;
+    explicit dir_guard(DIR* p) : d(p) {}
+    ~dir_guard() { if (d) closedir(d); }
+  } guard(raw);
+
+  std::optional<std::string> only;
+  while (auto entry = readdir(guard.d)) {
+    const std::string name{entry->d_name};
+    if (name.rfind("accel", 0) != 0)
+      continue;
+    if (only)
+      return std::nullopt;
+    only = std::string("/dev/accel/") + name;
+  }
+  return only;
+}
+
+} // namespace
 
 // Returns an open fd for the accel device node corresponding to dev. Caller must close(fd).
 // Throws std::runtime_error on failure (opendir, missing accel entry, or open).
@@ -278,36 +366,39 @@ int
 open_accel_fd(device* dev)
 {
   // FIXME: reimplement this when query key is defined in xrt
-  std::string accel_path = get_sysfs_path(dev);
-
-  struct dir_guard {
-    DIR* d;
-    explicit dir_guard(DIR* p) : d(p) {}
-    ~dir_guard() { if (d) closedir(d); }
-    DIR* get() const { return d; }
-    explicit operator bool() const { return d != nullptr; }
-  };
-  dir_guard dp(opendir(accel_path.c_str()));
-  if (!dp) {
-    throw std::runtime_error("opendir failed: " + accel_path);
+  const std::string from_env = env_nonempty("SHIM_TEST_ACCEL_NODE");
+  if (!from_env.empty()) {
+    int fd = open(from_env.c_str(), O_RDWR);
+    if (fd < 0)
+      fd = open(from_env.c_str(), O_RDONLY);
+    if (fd >= 0)
+      return fd;
+    throw std::runtime_error("open failed (SHIM_TEST_ACCEL_NODE=" + from_env + "): " +
+                             std::string(std::strerror(errno)));
   }
 
-  std::string accel_node;
-  while (auto entry = readdir(dp.get())) {
-    std::string dirname{entry->d_name};
-    if (dirname.find("accel") == 0) {
-      accel_node = "/dev/accel/" + dirname;
-      break;
-    }
-  }
+  const std::string pci = get_pci_sysfs(dev);
+  /* Bare metal amdxdna: .../pci/.../accel/accel* -> /dev/accel/accel* */
+  std::optional<std::string> node =
+    pci_subsys_devnode(pci, "accel", "accel", "/dev/accel/", false);
+  /* KVM virtio-gpu (NPU or GPU): .../pci/.../drm/renderD* -> /dev/dri/renderD* */
+  if (!node)
+    node = pci_subsys_devnode(pci, "drm", "renderD", "/dev/dri/", true);
+  if (!node)
+    node = accel_class_single_devnode();
 
-  if (accel_node.empty()) {
-    throw std::runtime_error("Failed to find accel node under " + accel_path + " for device");
+  if (!node) {
+    throw std::runtime_error(
+      "Failed to resolve device node for " + pci +
+      " (tried " + pci + "/accel, " + pci + "/drm/renderD*, one /sys/class/accel entry). "
+      "Set SHIM_TEST_ACCEL_NODE, e.g. /dev/accel/accel0 or /dev/dri/renderD128");
   }
+  const std::string& accel_node = *node;
 
-  int fd = open(accel_node.c_str(), O_RDONLY);
+  const int flags = (accel_node.rfind("/dev/dri/", 0) == 0) ? O_RDWR : O_RDONLY;
+  int fd = open(accel_node.c_str(), flags);
   if (fd < 0) {
-    throw std::runtime_error("open failed: " + accel_node);
+    throw std::runtime_error("open failed: " + accel_node + ": " + std::string(std::strerror(errno)));
   }
   return fd;
 }
