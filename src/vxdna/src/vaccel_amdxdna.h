@@ -26,6 +26,8 @@
 #include "vaccel_internal.h"
 #include "../util/vxdna_debug.h"
 
+class vxdna_context;
+
 /**
  * @brief AMDXDNA Buffer Object wrapper
  *
@@ -54,7 +56,7 @@ public:
      * resources may supply a pre-created GEM handle (opaque).  CPU access
      * uses GET_BO_INFO vaddr; this path does not mmap the DRM device node.
      */
-    vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
+    vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
              const struct amdxdna_ccmd_create_bo_req *req);
 
     /**
@@ -153,7 +155,11 @@ class vxdna;
  * @note Non-copyable and non-movable.
  */
 class vxdna_context : public vaccel_context<vxdna_context, vxdna> {
+    friend class vxdna_bo;
+
 public:
+    static constexpr uint64_t HEAP_MAX_SIZE = 512ULL << 20;
+
     using base_type = vaccel_context<vxdna_context, vxdna>;
 
     /**
@@ -173,8 +179,13 @@ public:
     ~vxdna_context() {
         vxdna_dbg("Context destroying: ctx_id=%u, fd=%d", get_id(), get_fd());
         m_bo_table.clear();
+        release_heap_arena();
         close(get_fd());
     }
+
+    /** One 64 MiB-aligned arena for all DEV_HEAP chunks (contiguous UVAs). */
+    void *ensure_heap_arena();
+    void release_heap_arena() noexcept;
 
     /**
      * @brief Set the response resource for ccmd responses
@@ -511,10 +522,11 @@ private:
     vaccel_map<uint32_t, std::shared_ptr<vxdna_bo>> m_bo_table;
     vaccel_map<uint32_t, std::shared_ptr<vxdna_hwctx>> m_hwctx_table;
 
-    static constexpr size_t HEAP_MAX_SIZE = 512UL << 20;
     /** Cumulative DEV_HEAP size committed on this context (bytes). */
-    size_t m_heap_committed = 0;
+    uint64_t m_heap_committed = 0;
     bool m_heap_destroyed = false;
+    void *m_heap_arena_va = nullptr;
+    size_t m_heap_arena_cap = 0;
 };
 
 /**
