@@ -918,6 +918,20 @@ amdxdna_gem_create_ubuf_object(struct drm_device *dev, struct amdxdna_drm_create
 	abo = to_xdna_obj(gobj);
 	abo->pri = true;
 
+	/*
+	 * Userptr imports do not use drm_gem_mmap(); record the first va_tbl
+	 * entry so GET_BO_INFO and PASID dev-heap checks see the CPU UVA
+	 * (e.g. vxdna guest coalesce path).
+	 */
+	if (va_tbl.num_entries) {
+		struct amdxdna_drm_va_entry ent;
+
+		if (!copy_from_user(&ent,
+				    u64_to_user_ptr(args->vaddr + sizeof(va_tbl)),
+				    sizeof(ent)) && ent.vaddr)
+			abo->mem.uva = ent.vaddr;
+	}
+
 	return abo;
 }
 
