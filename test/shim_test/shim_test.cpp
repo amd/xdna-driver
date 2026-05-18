@@ -19,8 +19,14 @@
 #include "core/common/device.h"
 
 #include <array>
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <vector>
 #include <iostream>
 #include <sstream>
@@ -103,6 +109,7 @@ usage(const std::string& prog)
   std::cout << "\t" << "-h" << ": print this help message and available test cases\n";
   std::cout << "\t" << "-k" << ": evaluate test result based on driver version\n";
   std::cout << "\t" << "-x <xclbin_path>" << ": run test cases with specified xclbin file\n";
+  std::cout << "Device node: <bus>/devices/<dev>/accel; PCI also drm/renderD* (virtio guest)\n";
   std::cout << std::endl;
 }
 
@@ -265,49 +272,148 @@ static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>&
 }
 
 std::string
-get_sysfs_path(device* dev)
+get_device_sysfs(device* dev)
 {
   query::sub_device_path::args query_arg = {std::string(""), 0};
-  std::string sysfs = device_query<query::sub_device_path>(dev, query_arg);
-  return sysfs + "/accel";
+  return device_query<query::sub_device_path>(dev, query_arg);
 }
+
+std::string
+get_sysfs_path(device* dev)
+{
+  return get_device_sysfs(dev) + "/accel";
+}
+
+namespace {
+
+namespace fs = std::filesystem;
+
+static std::string
+sysfs_device_basename(const std::string& device_sysfs)
+{
+  const auto pos = device_sysfs.find_last_of('/');
+  return (pos == std::string::npos) ? device_sysfs : device_sysfs.substr(pos + 1);
+}
+
+static bool
+sysfs_dir_exists(const std::string& path)
+{
+  std::error_code ec;
+  return fs::is_directory(fs::path(path), ec);
+}
+
+/*
+ * Resolve .../sys/bus/<bus>/devices/<name> for the NPU device.
+ * Prefer the path from sub_device_path when it exists; otherwise probe pci,
+ * platform, and rpmsg buses using the same device name.
+ */
+static std::optional<std::string>
+resolve_device_sysfs(device* dev)
+{
+  static const char* const bus_roots[] = {
+    "/sys/bus/pci/devices/",
+    "/sys/bus/platform/devices/",
+    "/sys/bus/rpmsg/devices/",
+  };
+
+  const std::string from_query = get_device_sysfs(dev);
+  if (sysfs_dir_exists(from_query))
+    return from_query;
+
+  const std::string name = sysfs_device_basename(from_query);
+  if (name.empty())
+    return std::nullopt;
+
+  for (const char* root : bus_roots) {
+    const std::string candidate = std::string(root) + name;
+    if (sysfs_dir_exists(candidate))
+      return candidate;
+  }
+  return std::nullopt;
+}
+
+/*
+ * First sysfs child under <device_sysfs>/<subsys> whose name starts with @prefix.
+ * @dev_root is prepended to that name (/dev/accel/ or /dev/dri/).
+ * When @numeric_suffix is true, the part after @prefix must be digits (renderD128).
+ */
+static std::optional<std::string>
+bus_subsys_devnode(const std::string& device_sysfs, const char* subsys,
+                   const char* prefix, const char* dev_root,
+                   bool numeric_suffix)
+{
+  const std::string dir = device_sysfs + "/" + subsys;
+  DIR* raw = opendir(dir.c_str());
+  if (!raw)
+    return std::nullopt;
+  struct dir_guard {
+    DIR* d;
+    explicit dir_guard(DIR* p) : d(p) {}
+    ~dir_guard() { if (d) closedir(d); }
+  } guard(raw);
+  const size_t psz = strlen(prefix);
+
+  while (auto entry = readdir(guard.d)) {
+    const std::string name{entry->d_name};
+    if (name == "." || name == "..")
+      continue;
+    if (name.size() <= psz || name.compare(0, psz, prefix) != 0)
+      continue;
+    if (numeric_suffix) {
+      const std::string suffix = name.substr(psz);
+      if (suffix.empty() ||
+          !std::all_of(suffix.begin(), suffix.end(),
+                       [](unsigned char c) { return std::isdigit(c); }))
+        continue;
+    }
+    return std::string(dev_root) + name;
+  }
+  return std::nullopt;
+}
+
+static bool
+is_pci_sysfs_device(const std::string& device_sysfs)
+{
+  static constexpr char k_pci_prefix[] = "/sys/bus/pci/devices/";
+  return device_sysfs.compare(0, sizeof(k_pci_prefix) - 1, k_pci_prefix) == 0;
+}
+
+} // namespace
 
 // Returns an open fd for the accel device node corresponding to dev. Caller must close(fd).
 // Throws std::runtime_error on failure (opendir, missing accel entry, or open).
 int
 open_accel_fd(device* dev)
 {
-  // FIXME: reimplement this when query key is defined in xrt
-  std::string accel_path = get_sysfs_path(dev);
-
-  struct dir_guard {
-    DIR* d;
-    explicit dir_guard(DIR* p) : d(p) {}
-    ~dir_guard() { if (d) closedir(d); }
-    DIR* get() const { return d; }
-    explicit operator bool() const { return d != nullptr; }
-  };
-  dir_guard dp(opendir(accel_path.c_str()));
-  if (!dp) {
-    throw std::runtime_error("opendir failed: " + accel_path);
+  const auto device_sysfs = resolve_device_sysfs(dev);
+  if (!device_sysfs) {
+    throw std::runtime_error(
+      "Failed to resolve device sysfs (tried sub_device_path and "
+      "/sys/bus/pci|platform|rpmsg/devices/<name>)");
   }
 
-  std::string accel_node;
-  while (auto entry = readdir(dp.get())) {
-    std::string dirname{entry->d_name};
-    if (dirname.find("accel") == 0) {
-      accel_node = "/dev/accel/" + dirname;
-      break;
-    }
-  }
+  const std::string& sysfs = *device_sysfs;
+  const bool pci = is_pci_sysfs_device(sysfs);
 
-  if (accel_node.empty()) {
-    throw std::runtime_error("Failed to find accel node under " + accel_path + " for device");
-  }
+  /* platform/rpmsg and bare-metal PCI amdxdna: .../accel/accel* -> /dev/accel/accel* */
+  std::optional<std::string> node =
+    bus_subsys_devnode(sysfs, "accel", "accel", "/dev/accel/", false);
+  /* PCI only: KVM virtio-gpu NPU exposes .../drm/renderD* -> /dev/dri/renderD* */
+  if (!node && pci)
+    node = bus_subsys_devnode(sysfs, "drm", "renderD", "/dev/dri/", true);
 
-  int fd = open(accel_node.c_str(), O_RDONLY);
+  if (!node) {
+    std::string tried = sysfs + "/accel";
+    if (pci)
+      tried += ", " + sysfs + "/drm/renderD*";
+    throw std::runtime_error("Failed to resolve device node for " + sysfs + " (tried " + tried + ")");
+  }
+  const std::string& accel_node = *node;
+
+  const int flags = (accel_node.rfind("/dev/dri/", 0) == 0) ? O_RDWR : O_RDONLY;
+  int fd = open(accel_node.c_str(), flags);
   if (fd < 0) {
-    throw std::runtime_error("open failed: " + accel_node);
+    throw std::runtime_error("open failed: " + accel_node + ": " + std::string(std::strerror(errno)));
   }
   return fd;
 }
