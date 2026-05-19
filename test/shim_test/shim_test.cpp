@@ -1028,13 +1028,13 @@ std::vector<test_case> test_list {
     TEST_NEGATIVE, dev_filter_is_aie, TEST_create_destroy_max_context, { 1 }
   },
   test_case{ "Multi context IO test 1", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 0 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 0 }
   },
   test_case{ "Multi context IO test 2", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 1 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 1 }
   },
   test_case{ "Multi context IO test 3", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 2 }
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 2 }
   },
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
@@ -1043,16 +1043,16 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
-    TEST_POSITIVE, dev_filter_is_xdna_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "io test with user pointer BOs", {},
-    TEST_POSITIVE, dev_filter_is_xdna_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
    test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_io_suspend_resume, {}
+    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
   },
   test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
@@ -1065,10 +1065,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
-    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_gemm, {}
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
   },
   test_case{ "create and free internal bo", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_create_free_internal_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_internal_bo, {}
   },
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
@@ -1086,10 +1086,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
   },
   test_case{ "timed out chained command", {},
-    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_runlist_bad_cmd, {true}
+    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
   },
   test_case{ "create and free user ptr BO with mmapped ptr", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_mmaped_uptr_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_mmaped_uptr_bo, {}
   },
   test_case{ "DPM noop (no QoS)", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_noop_no_qos, {}
