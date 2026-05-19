@@ -234,7 +234,7 @@ void amdxdna_hwmon_init(struct amdxdna_dev *xdna)
 
 	ret = amdxdna_get_sensors(&npu_metrics);
 	if (ret) {
-		XDNA_ERR(xdna, "No HWMON support due to missing PMF sensor support.");
+		XDNA_WARN(xdna, "No HWMON support due to missing PMF sensor support.");
 		return;
 	}
 
