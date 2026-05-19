@@ -1,7 +1,7 @@
 #! /bin/bash -
 
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2024-2025 AMD, Inc. All rights reserved.
+# Copyright (C) 2024-2026 AMD, Inc. All rights reserved.
 
 set -euo pipefail
 
@@ -23,8 +23,8 @@ Options:
   -nokmod                  Don't build or install the kernel module
   -novxdna                 Don't build vxdna library
   -vxdna_test              Build and run vxdna unit tests (-novxdna disable this option)
-  -package_legacy_driver   Build package with legacy driver source code (default)
-  -package_upstream_driver Build package with upstream driver source code
+  -package_legacy_driver   Build package with legacy driver source code
+  -package_upstream_driver Build package with upstream driver source code (default)
 USAGE_END
 }
 
@@ -209,7 +209,7 @@ verbose=
 skip_kmod=0
 build_vxdna=1
 run_vxdna_tests=0
-package_legacy_driver=1
+package_legacy_driver=0
 njobs=`grep -c ^processor /proc/cpuinfo`
 download_dir=
 xrt_install_prefix="/opt/xilinx/xrt"
