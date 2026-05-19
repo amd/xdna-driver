@@ -523,6 +523,21 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device>& sdev, arg
 }
 
 void
+TEST_create_free_uc_log_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto boflags = XRT_BO_FLAGS_CARVEOUT;
+  auto ext_boflags = XRT_BO_USE_LOG << 4;
+  auto size = static_cast<size_t>(arg[0]);
+
+  hw_ctx hwctx{dev};
+  auto bo = hwctx.get()->alloc_bo(size, get_bo_flags(boflags, ext_boflags));
+
+  auto buf = static_cast<uint8_t *>(bo->map(buffer_handle::map_type::write));
+  std::memset(buf, 0, size);
+}
+
+void
 get_and_show_bo_properties(device* dev, buffer_handle *boh)
 {
   buffer_handle::properties properties = boh->get_properties();
@@ -969,6 +984,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "create and free large debug bo", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x100000 }
+  },
+  test_case{ "create and free uc_log bo", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_create_free_uc_log_bo, { 0x10000 }
+  },
+  test_case{ "create and free large uc_log bo", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_create_free_uc_log_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
