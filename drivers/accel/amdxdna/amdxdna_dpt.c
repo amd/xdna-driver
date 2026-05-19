@@ -384,7 +384,7 @@ amdxdna_dpt_publish(struct aie_device *aie, enum amdxdna_dpt_kind kind,
 	if (rcu_access_pointer(*slot))
 		return ERR_PTR(-EBUSY);
 
-	dpt = kzalloc(sizeof(*dpt), GFP_KERNEL);
+	dpt = kzalloc_obj(*dpt);
 	if (!dpt)
 		return ERR_PTR(-ENOMEM);
 
