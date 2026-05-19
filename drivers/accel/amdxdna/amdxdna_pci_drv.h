@@ -9,6 +9,7 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
 #include <drm/drm_file.h>
+#include <drm/drm_mm.h>
 #include <drm/drm_print.h>
 #include <linux/capability.h>
 #include <linux/cred.h>
@@ -67,6 +68,7 @@ struct amdxdna_dev_ops {
 	void (*hwctx_fini)(struct amdxdna_hwctx *hwctx);
 	int (*hwctx_config)(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size);
 	int (*hwctx_sync_debug_bo)(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl);
+	int (*hwctx_heap_expand)(struct amdxdna_hwctx *hwctx, struct amdxdna_gem_obj *heap);
 	void (*hmm_invalidate)(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
@@ -74,7 +76,6 @@ struct amdxdna_dev_ops {
 	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
-	int (*hwctx_heap_expand)(struct amdxdna_hwctx *hwctx);
 };
 
 struct amdxdna_fw_feature_tbl {
@@ -178,8 +179,9 @@ struct amdxdna_client {
 	struct drm_file			*filp;
 
 	struct mutex			mm_lock; /* protect memory related */
-	struct amdxdna_gem_obj		*dev_heap;
-	struct list_head		dev_heap_chunks;
+	struct xarray			dev_heap_xa;
+	struct drm_mm			dev_heap_mm;
+	u32				dev_heap_nid;
 	size_t				total_heap_size;
 
 	struct iommu_sva		*sva;

@@ -110,6 +110,7 @@ struct amdxdna_hwctx {
 	u32				umq_bo_hdl;
 	u32				doorbell_offset;
 	u32				num_unused_col;
+	u32				last_attached_heap;
 
 	struct amdxdna_qos_info		     qos;
 	struct amdxdna_hwctx_param_config_cu *cus;
@@ -207,6 +208,7 @@ int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
 		       bool (*filter)(struct amdxdna_hwctx *hwctx, void *arg),
 		       int (*walk)(struct amdxdna_hwctx *hwctx, void *arg));
 int amdxdna_hwctx_sync_debug_bo(struct amdxdna_client *client, u32 debug_bo_hdl);
+int amdxdna_update_heap(struct amdxdna_client *client, struct amdxdna_hwctx *hwctx);
 
 int amdxdna_cmd_submit(struct amdxdna_client *client,
 		       struct amdxdna_drv_cmd *drv_cmd, u32 cmd_bo_hdls,
