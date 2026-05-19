@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2025 - 2026, Advanced Micro Devices, Inc. All rights reserved.
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 /*
  * AMDXDNA Device Management
  * Provides device initialization, buffer object management, context handling,
@@ -17,6 +21,8 @@
 #include <filesystem>
 #include <fstream>
 #include <climits>
+#include <limits>
+#include <unistd.h>
 #include <sstream>
 #include <sys/stat.h>
 #include <thread>
@@ -38,10 +44,230 @@
 #include "vaccel_amdxdna.h"
 #include "../util/vxdna_debug.h"
 
-/**
- * @brief Helper to close a DRM GEM handle (used for cleanup on exception)
+namespace {
+
+/* Host driver notifies FW in dev_mem_size chunks (typically 64 MiB). UVA must align. */
+constexpr size_t k_dev_heap_uva_align = 64UL << 20;
+
+size_t
+page_size()
+{
+    static size_t ps = 0;
+
+    if (!ps) {
+        long r = sysconf(_SC_PAGESIZE);
+
+        ps = (r > 0) ? static_cast<size_t>(r) : 4096;
+    }
+    return ps;
+}
+
+size_t
+page_roundup(size_t size)
+{
+    const size_t ps = page_size();
+
+    return (size + ps - 1) & ~(ps - 1);
+}
+
+/*
+ * Helpers for iov_table_overlaps(): detect whether the coalesce destination
+ * [base, base+len) intersects any guest iovec before mremap(old_size=0).  Overlap
+ * would make dest and source the same VA range; mremap would fail (typically
+ * EINVAL) — we fail early with a clear error instead of inside mremap_dup_to_fixed.
  */
-static void
+bool
+uintptr_range_end(uintptr_t base, size_t len, uintptr_t *end_out)
+{
+    if (len > std::numeric_limits<uintptr_t>::max() || base > std::numeric_limits<uintptr_t>::max() - len)
+        return false;
+    *end_out = base + len;
+    return true;
+}
+
+bool
+uintptr_ranges_overlap(uintptr_t a0, uintptr_t a1, uintptr_t b0, uintptr_t b1)
+{
+    return a0 < b1 && b0 < a1;
+}
+
+/*
+ * True if coalesce destination [base, base+len) intersects any iovec (mremap source).
+ * Called from mmap_coalesce_backing() / mmap_aligned_coalesce_backing() immediately
+ * after reserving the arena and before mremap_iovs_into_coalesce().  On arithmetic
+ * overflow, returns true so callers fail closed.
+ */
+bool
+iov_table_overlaps(uintptr_t base, size_t len, const struct iovec *iov, uint32_t n)
+{
+    uintptr_t end;
+
+    if (!uintptr_range_end(base, len, &end))
+        return true;
+
+    for (uint32_t i = 0; i < n; i++) {
+        uintptr_t a = reinterpret_cast<uintptr_t>(iov[i].iov_base);
+        uintptr_t b;
+
+        if (!uintptr_range_end(a, iov[i].iov_len, &b))
+            return true;
+        if (uintptr_ranges_overlap(base, end, a, b))
+            return true;
+    }
+    return false;
+}
+
+void *
+mmap_coalesce_backing(size_t total, const struct iovec *iov, uint32_t n)
+{
+    for (int attempt = 0; attempt < 24; attempt++) {
+        void *p = mmap(nullptr, total, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+        if (p == MAP_FAILED)
+            VACCEL_THROW_MSG(-errno, "mmap for coalesced userptr BO failed");
+
+        /* Pre-mremap: coalesce VA must not overlap any iov_base slice. */
+        if (!iov_table_overlaps(reinterpret_cast<uintptr_t>(p), total, iov, n))
+            return p;
+        munmap(p, total);
+    }
+    VACCEL_THROW_MSG(-ENOMEM,
+                     "Could not reserve VA for coalesced userptr BO without overlapping iovecs");
+}
+
+/*
+ * Like mmap_coalesce_backing(), but after mmap trims to a @uva_align-aligned
+ * subrange of length @total (head/tail munmap). Required for AMDXDNA_BO_DEV_HEAP
+ * so MAP_HOST_BUFFER sees a 64 MiB-aligned user VA (matches kernel dev_mem_size).
+ */
+void *
+mmap_aligned_coalesce_backing(size_t total, const struct iovec *iov, uint32_t n,
+                               size_t uva_align)
+{
+    const size_t ps = page_size();
+
+    if (uva_align < ps || (uva_align % ps) != 0)
+        VACCEL_THROW_MSG(-EINVAL, "UVA alignment %zu must be a multiple of page size %zu",
+                         uva_align, ps);
+
+    const size_t slack = uva_align - 1;
+    size_t map_sz = total + slack;
+
+    if (map_sz < total)
+        VACCEL_THROW_MSG(-EINVAL, "aligned coalesce map size overflow");
+
+    map_sz = (map_sz + ps - 1) / ps * ps;
+
+    void *p = mmap(nullptr, map_sz, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    if (p == MAP_FAILED)
+        VACCEL_THROW_MSG(-errno, "mmap for aligned coalesced userptr BO failed");
+
+    const uintptr_t pb = reinterpret_cast<uintptr_t>(p);
+    const uintptr_t aligned = (pb + uva_align - 1) & ~(uva_align - 1);
+
+    if (aligned < pb || aligned + total < aligned ||
+        aligned + total > pb + map_sz) {
+        munmap(p, map_sz);
+        VACCEL_THROW_MSG(-EINVAL, "aligned coalesce internal size error");
+    }
+
+    /* Pre-mremap: aligned coalesce window must not overlap any iov slice. */
+    if (n && iov_table_overlaps(aligned, total, iov, n)) {
+        munmap(p, map_sz);
+        VACCEL_THROW_MSG(-ENOMEM,
+                         "64MiB-aligned coalesce VA overlaps guest iovec mappings; retry BO create");
+    }
+
+    if (aligned > pb) {
+        if (munmap(p, aligned - pb) != 0) {
+            munmap(reinterpret_cast<void *>(aligned), pb + map_sz - aligned);
+            VACCEL_THROW_MSG(-errno, "munmap head trim for aligned coalesce failed");
+        }
+    }
+    const uintptr_t tail = aligned + total;
+    const uintptr_t end = pb + map_sz;
+
+    if (tail < end) {
+        if (munmap(reinterpret_cast<void *>(tail), end - tail) != 0) {
+            munmap(reinterpret_cast<void *>(aligned), total);
+            VACCEL_THROW_MSG(-errno, "munmap tail trim for aligned coalesce failed");
+        }
+    }
+
+    return reinterpret_cast<void *>(aligned);
+}
+
+void
+mremap_dup_to_fixed(void *old_base, size_t len, void *new_base)
+{
+    /*
+     * Only MAP_SHARED (or other shareable) sources are supported: old_size==0
+     * duplicates the same physical pages at new_base while keeping the original
+     * mapping. Private anonymous / bounce buffers fail with EINVAL (no fallback).
+     */
+    void *ret = mremap(old_base, 0, len, MREMAP_MAYMOVE | MREMAP_FIXED, new_base);
+
+    if (ret == MAP_FAILED)
+        VACCEL_THROW_MSG(-errno,
+                         "mremap coalesce failed (need shareable mapping, old_size=0): "
+                         "old=%p len=%zu new=%p",
+                         old_base, len, new_base);
+}
+
+struct coalesce_backing {
+    void *va;
+    size_t len;
+};
+
+/*
+ * Guest-backed userptr BOs (SHARE, CMD, …): one iovec uses backing UVA directly;
+ * multiple iovs reserve one coalesced VMA and duplicate slices with mremap.
+ * DEV_HEAP chunks use a slice of the context's 64 MiB-aligned arena instead.
+ */
+coalesce_backing
+reserve_coalesce_backing(const struct iovec *iov, uint32_t n)
+{
+    if (!n)
+        VACCEL_THROW_MSG(-EINVAL, "Resource has no iovecs for user-pointer BO create");
+
+    const size_t ps = page_size();
+    size_t total = 0;
+
+    for (uint32_t i = 0; i < n; i++) {
+        const uintptr_t base = reinterpret_cast<uintptr_t>(iov[i].iov_base);
+        const size_t len = iov[i].iov_len;
+
+        if ((base % ps) != 0 || (len % ps) != 0)
+            VACCEL_THROW_MSG(-EINVAL,
+                             "iovec %u must be page-aligned for userptr BO (base=0x%lx len=%zu)",
+                             i, static_cast<unsigned long>(base), len);
+        total += len;
+    }
+
+    void *va = mmap_coalesce_backing(total, iov, n);
+
+    return { va, total };
+}
+
+void
+mremap_iovs_into_coalesce(void *coalesce, const struct iovec *iov, uint32_t n)
+{
+    size_t off = 0;
+
+    for (uint32_t i = 0; i < n; i++) {
+        void *oldb = iov[i].iov_base;
+        size_t len = iov[i].iov_len;
+        void *newb = static_cast<char *>(coalesce) + off;
+
+        mremap_dup_to_fixed(oldb, len, newb);
+        off += len;
+    }
+}
+
+void
 close_gem_handle(int fd, uint32_t handle)
 {
     if (handle != AMDXDNA_INVALID_BO_HANDLE) {
@@ -50,6 +276,8 @@ close_gem_handle(int fd, uint32_t handle)
         ioctl(fd, DRM_IOCTL_GEM_CLOSE, &arg);
     }
 }
+
+} // namespace
 
 vxdna_bo::
 vxdna_bo(int ctx_fd_in, const struct amdxdna_ccmd_create_bo_req *req)
@@ -62,10 +290,16 @@ vxdna_bo(int ctx_fd_in, const struct amdxdna_ccmd_create_bo_req *req)
     m_ctx_fd = ctx_fd_in;
     m_bo_type = req->bo_type;
     m_size = req->size;
-    m_map_size = 0;
+    m_iov_bytes = 0;
     m_map_offset = 0;
     m_vaddr = AMDXDNA_INVALID_ADDR;
     m_xdna_addr = AMDXDNA_INVALID_ADDR;
+
+    if (m_bo_type != AMDXDNA_BO_DEV)
+        VACCEL_THROW_MSG(-EINVAL,
+                         "Device-local create supports AMDXDNA_BO_DEV only, not type %u",
+                         m_bo_type);
+
     args.size = m_size;
     args.type = m_bo_type;
     vxdna_dbg("Create bo: ctx_fd=%d, type=%d, size=%lu", m_ctx_fd, m_bo_type, m_size);
@@ -89,148 +323,182 @@ vxdna_bo(int ctx_fd_in, const struct amdxdna_ccmd_create_bo_req *req)
     vxdna_dbg("Created bo: ctx_fd=%d, handle=%u, xdna_addr=%lu", m_ctx_fd, m_bo_handle, m_xdna_addr);
 }
 
+void *
+vxdna_context::
+ensure_heap_arena()
+{
+    if (m_heap_arena_va)
+        return m_heap_arena_va;
+
+    m_heap_arena_va = mmap_aligned_coalesce_backing(HEAP_MAX_SIZE, nullptr, 0,
+                                                    k_dev_heap_uva_align);
+    m_heap_arena_cap = HEAP_MAX_SIZE;
+    vxdna_dbg("Context %u: heap arena at %p size 0x%zx", get_id(), m_heap_arena_va,
+              m_heap_arena_cap);
+    return m_heap_arena_va;
+}
+
+void
+vxdna_context::
+release_heap_arena() noexcept
+{
+    if (!m_heap_arena_va || !m_heap_arena_cap)
+        return;
+    if (munmap(m_heap_arena_va, m_heap_arena_cap) != 0)
+        vxdna_err("munmap heap arena failed errno %d", errno);
+    m_heap_arena_va = nullptr;
+    m_heap_arena_cap = 0;
+}
+
 vxdna_bo::
-vxdna_bo(const std::shared_ptr<vaccel_resource> &res, int ctx_fd_in,
-         const struct amdxdna_ccmd_create_bo_req *req,
-         void *mmap_target)
+vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
+         const struct amdxdna_ccmd_create_bo_req *req)
          : m_opaque_handle(res->get_opaque_handle())
 {
     struct amdxdna_drm_get_bo_info bo_info = {};
     int ret;
 
-    m_ctx_fd = ctx_fd_in;
+    m_ctx_fd = ctx.get_fd();
     m_bo_type = req->bo_type;
     m_size = req->size;
-    m_map_size = 0;
-    const struct iovec *iovecs;
+    m_iov_bytes = 0;
+    m_map_offset = 0;
+    m_vaddr = AMDXDNA_INVALID_ADDR;
+    m_xdna_addr = AMDXDNA_INVALID_ADDR;
+
+    if (m_bo_type == AMDXDNA_BO_DEV)
+        VACCEL_THROW_MSG(-EINVAL,
+                         "AMDXDNA_BO_DEV must use device-local create (no resource/iovec)");
+
+    const struct iovec *iovecs = nullptr;
     auto num_iovs = res->get_iovecs(&iovecs);
 
-    // Use vector to avoid VLA and potential stack overflow
-    if (num_iovs > ((UINT32_MAX - sizeof(amdxdna_drm_va_tbl)) / sizeof(amdxdna_drm_va_entry)))
-        VACCEL_THROW_MSG(-EINVAL, "Too many iovecs: %u", num_iovs);
-    size_t buf_size = sizeof(amdxdna_drm_va_tbl) + sizeof(amdxdna_drm_va_entry) * num_iovs;
-    std::vector<uint8_t> buf_vec(buf_size);
-    auto tbl = reinterpret_cast<amdxdna_drm_va_tbl*>(buf_vec.data());
-    tbl->udma_fd = -1;
-    tbl->num_entries = num_iovs;
-    for (uint32_t i = 0; i < num_iovs; i++) {
-        tbl->va_entries[i].vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iovecs[i].iov_base));
-        tbl->va_entries[i].len = static_cast<uint64_t>(iovecs[i].iov_len);
-        m_map_size += tbl->va_entries[i].len;
-    }
-
-    // Track whether we created the BO (for cleanup on exception)
-    bool has_created_bo = false;
+    bool created_here = false;
     if (m_opaque_handle == AMDXDNA_INVALID_BO_HANDLE) {
+        const bool heap_chunk = (m_bo_type == AMDXDNA_BO_DEV_HEAP);
+        void *coalesce = nullptr;
+        size_t total = 0;
+
+        for (uint32_t i = 0; i < num_iovs; i++)
+            total += iovecs[i].iov_len;
+
+        if (heap_chunk) {
+            void *arena = ctx.ensure_heap_arena();
+            const size_t off = ctx.m_heap_committed;
+
+            if (off + m_size > vxdna_context::HEAP_MAX_SIZE)
+                VACCEL_THROW_MSG(-ENOSPC,
+                                 "heap chunk at 0x%zx + 0x%lx exceeds arena 0x%zx",
+                                 off, static_cast<unsigned long>(m_size),
+                                 vxdna_context::HEAP_MAX_SIZE);
+            coalesce = static_cast<char *>(arena) + off;
+        } else if (num_iovs == 1) {
+            const uintptr_t base = reinterpret_cast<uintptr_t>(iovecs[0].iov_base);
+            const size_t len = iovecs[0].iov_len;
+            const size_t ps = page_size();
+
+            if ((base % ps) != 0 || (len % ps) != 0)
+                VACCEL_THROW_MSG(-EINVAL,
+                                 "single iovec must be page-aligned (base=0x%lx len=%zu)",
+                                 static_cast<unsigned long>(base), len);
+            coalesce = iovecs[0].iov_base;
+            total = len;
+        } else {
+            auto backing = reserve_coalesce_backing(iovecs, num_iovs);
+            coalesce = backing.va;
+            total = backing.len;
+            m_coalesce_va = coalesce;
+            m_coalesce_len = total;
+        }
+
+        const size_t pin_len = page_roundup(m_size);
+
+        if (pin_len > total)
+            VACCEL_THROW_MSG(-EINVAL,
+                             "create_bo pin size 0x%zx exceeds resource backing 0x%zx "
+                             "(bo size 0x%lx)",
+                             pin_len, total, static_cast<unsigned long>(m_size));
+
+        if (heap_chunk || num_iovs > 1) {
+            try {
+                mremap_iovs_into_coalesce(coalesce, iovecs, num_iovs);
+            } catch (...) {
+                if (m_coalesce_va && m_coalesce_len) {
+                    munmap(m_coalesce_va, m_coalesce_len);
+                    m_coalesce_va = nullptr;
+                    m_coalesce_len = 0;
+                }
+                throw;
+            }
+        }
+        m_iov_bytes = total;
+        m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
+
+        size_t buf_size = sizeof(amdxdna_drm_va_tbl) + sizeof(amdxdna_drm_va_entry);
+        std::vector<uint8_t> buf_vec(buf_size);
+        auto tbl = reinterpret_cast<amdxdna_drm_va_tbl *>(buf_vec.data());
+
+        tbl->udma_fd = -1;
+        tbl->num_entries = 1;
+        tbl->va_entries[0].vaddr =
+            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
+        tbl->va_entries[0].len = static_cast<uint64_t>(pin_len);
+
         struct amdxdna_drm_create_bo args = {};
         args.vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(buf_vec.data()));
         args.size = m_size;
         args.type = m_bo_type;
         ret = ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_CREATE_BO, &args);
-        if (ret)
-            VACCEL_THROW_MSG(-errno, "Create bo failed ret %d, errno %d, %s", ret, -errno, strerror(errno));
+        if (ret) {
+            if (m_coalesce_va && m_coalesce_len) {
+                munmap(m_coalesce_va, m_coalesce_len);
+                m_coalesce_va = nullptr;
+                m_coalesce_len = 0;
+            }
+            VACCEL_THROW_MSG(-errno, "Create bo failed ret %d, errno %d, %s", ret, errno, strerror(errno));
+        }
         m_bo_handle = args.handle;
-        has_created_bo = true;
+        created_here = true;
     } else {
-        m_bo_handle = m_opaque_handle;
+        m_bo_handle = static_cast<uint32_t>(m_opaque_handle);
     }
 
     bo_info.handle = m_bo_handle;
     ret = ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &bo_info);
     if (ret) {
-        // Clean up the handle we created before throwing (only if we created it)
-        if (has_created_bo) {
+        if (created_here) {
             close_gem_handle(m_ctx_fd, m_bo_handle);
+            if (m_coalesce_va && m_coalesce_len) {
+                munmap(m_coalesce_va, m_coalesce_len);
+                m_coalesce_va = nullptr;
+                m_coalesce_len = 0;
+            }
         }
         VACCEL_THROW_MSG(-errno, "Get bo info failed ret %d", ret);
     }
 
     m_map_offset = bo_info.map_offset;
     m_xdna_addr = bo_info.xdna_addr;
-    m_vaddr = bo_info.vaddr;
 
-    if (m_map_offset == AMDXDNA_INVALID_ADDR) {
-        // TODO: In case of HOST memory, there is no iovecs; however, the current amdxdna driver
-        // requires BOs to be backed by a user pointer. As a result, we still need to mmap the BO
-        // here to provide a user pointer to the driver. See the AMDXDNA BO creation ABI
-        // (struct amdxdna_drm_create_bo and DRM_IOCTL_AMDXDNA_CREATE_BO) in
-        // drm_local/amdxdna_accel.h. Once the driver supports HOST BOs without a user pointer,
-        // this mmap requirement and the associated workaround can be removed.
-        if (m_bo_type != AMDXDNA_BO_DEV) {
-            // Clean up if we created the BO
-            if (has_created_bo) {
-                close_gem_handle(m_ctx_fd, m_bo_handle);
-            }
-            VACCEL_THROW_MSG(-EINVAL, "Non-DEV BO without map offset! handle=%u, type=%u", m_bo_handle, m_bo_type);
-        }
-        vxdna_dbg("No need to mmap for memory type, no map offset: handle=%u, xdna_addr=%lx, vaddr=%lx",
-                  m_bo_handle, m_xdna_addr, m_vaddr);
-        return;
-    }
-
-    if (!m_map_size)
-        m_map_size = m_size;
-
-    vxdna_dbg("mmap is required for handle: res_id=%u, handle=%u, opaque_handle=%d, vaddr=%lx, xdna_addr=%lx",
-              res->get_res_id(), m_bo_handle, res->get_opaque_handle(), m_vaddr, m_xdna_addr);
-    uint64_t resv_vaddr = 0, resv_size = 0, va_to_map = 0;
-    void *resv_va = nullptr;
-    int flags = MAP_SHARED | MAP_LOCKED;
-    if (mmap_target) {
-        va_to_map = reinterpret_cast<uint64_t>(mmap_target);
-        if (req->map_align && (va_to_map & (req->map_align - 1))) {
-            if (has_created_bo)
-                close_gem_handle(m_ctx_fd, m_bo_handle);
+    /* Opaque import: CPU UVA from GET_BO_INFO. Created userptr BOs keep coalesce UVA. */
+    if (!created_here) {
+        m_vaddr = bo_info.vaddr;
+        if (m_vaddr == AMDXDNA_INVALID_ADDR || m_vaddr == 0)
             VACCEL_THROW_MSG(-EINVAL,
-                             "mmap_target %p not aligned to 0x%lx",
-                             mmap_target, (unsigned long)req->map_align);
-        }
-        flags |= MAP_FIXED;
-    } else if (req->map_align) {
-        resv_va = ::mmap(0, m_map_size + req->map_align, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (resv_va == MAP_FAILED) {
-            if (has_created_bo)
-                close_gem_handle(m_ctx_fd, m_bo_handle);
-            VACCEL_THROW_MSG(-ENOMEM, "Reserve vaddr range failed, map_align=%zu", req->map_align);
-        }
-
-        resv_size = m_map_size + req->map_align;
-        resv_vaddr = reinterpret_cast<uint64_t>(resv_va);
-        va_to_map = (resv_vaddr + req->map_align - 1) & ~(req->map_align - 1);
-        flags |= MAP_FIXED;
+                             "Pre-imported BO without CPU UVA from GET_BO_INFO: handle=%u, type=%u",
+                             m_bo_handle, m_bo_type);
     }
-    void *va = ::mmap(reinterpret_cast<void *>(va_to_map), m_map_size, PROT_READ | PROT_WRITE,
-                           flags, m_ctx_fd, m_map_offset);
 
-    if (va == MAP_FAILED) {
-        int saved_errno = errno;
-        if (resv_va && resv_va != MAP_FAILED)
-            ::munmap(resv_va, resv_size);
-        if (has_created_bo)
-            close_gem_handle(m_ctx_fd, m_bo_handle);
-        VACCEL_THROW_MSG(-saved_errno,
-                         "Map bo failed, errno %d, %s, to map startaddr 0x%lx, map_offset 0x%lx, map_size 0x%lx",
-                         saved_errno, strerror(saved_errno), va_to_map, m_map_offset, m_map_size);
-    }
-    m_vaddr = reinterpret_cast<uint64_t>(va);
-
-    if (!mmap_target && req->map_align && m_vaddr > resv_vaddr)
-        ::munmap(resv_va, static_cast<size_t>(m_vaddr - resv_vaddr));
-    if (!mmap_target && resv_vaddr + resv_size > m_vaddr + m_map_size)
-        munmap(reinterpret_cast<void *>(m_vaddr + m_map_size),
-               static_cast<size_t>(resv_vaddr + resv_size - m_vaddr - m_map_size));
-    vxdna_dbg("Created BO with resource: type=%u, res_id=%u, vaddr=0x%lx",
-              req->bo_type, req->res_id, m_vaddr);
+    vxdna_dbg("Resource BO: res_id=%u, handle=%u, vaddr=0x%lx, xdna_addr=0x%lx, iov_bytes=%lu (coalesced UVA)",
+              res->get_res_id(), m_bo_handle, m_vaddr, m_xdna_addr,
+              static_cast<unsigned long>(m_iov_bytes));
 }
 
 vxdna_bo::
 ~vxdna_bo() noexcept
 {
-    vxdna_dbg("vxdna Destroying bo: ctx_fd=%d, handle=%u, vaddr=%lx, map_size=%lu",
-               m_ctx_fd, m_bo_handle, m_vaddr, m_map_size);
-    if (m_vaddr != AMDXDNA_INVALID_ADDR)
-        munmap(reinterpret_cast<void *>(m_vaddr), static_cast<size_t>(m_map_size));
+    vxdna_dbg("vxdna Destroying bo: ctx_fd=%d, handle=%u, vaddr=%lx, iov_bytes=%lu",
+              m_ctx_fd, m_bo_handle, m_vaddr, static_cast<unsigned long>(m_iov_bytes));
     if (m_bo_handle != AMDXDNA_INVALID_BO_HANDLE) {
         struct drm_gem_close arg = {};
         arg.handle = m_bo_handle;
@@ -238,6 +506,12 @@ vxdna_bo::
         auto ret = ioctl(m_ctx_fd, DRM_IOCTL_GEM_CLOSE, &arg);
         if (ret)
             vxdna_err("Close vxdna bo failed ret %d", ret);
+    }
+    if (m_coalesce_va && m_coalesce_len > 0) {
+        if (munmap(m_coalesce_va, m_coalesce_len) != 0)
+            vxdna_err("munmap coalesce va failed errno %d", errno);
+        m_coalesce_va = nullptr;
+        m_coalesce_len = 0;
     }
 }
 
@@ -432,46 +706,21 @@ create_bo(const struct amdxdna_ccmd_create_bo_req *req)
         (req->bo_type == AMDXDNA_BO_DEV || req->bo_type == AMDXDNA_BO_DEV_HEAP))
         VACCEL_THROW_MSG(-EINVAL, "Heap destroyed, cannot allocate type %u", req->bo_type);
 
+    if (req->bo_type == AMDXDNA_BO_DEV_HEAP) {
+        if (!req->size || req->size > HEAP_MAX_SIZE - m_heap_committed)
+            VACCEL_THROW_MSG(-ENOSPC,
+                             "Heap expansion rejected: size 0x%lx, remaining 0x%zx",
+                             (unsigned long)req->size,
+                             static_cast<size_t>(HEAP_MAX_SIZE - m_heap_committed));
+    }
+
     std::shared_ptr<vxdna_bo> xdna_bo;
     if (req->bo_type != AMDXDNA_BO_DEV) {
         auto res = get_device().get_resource(req->res_id);
         if (!res)
             VACCEL_THROW_MSG(-EINVAL, "Res: %u not found", req->res_id);
 
-        void *mmap_target = nullptr;
-        if (req->bo_type == AMDXDNA_BO_DEV_HEAP) {
-            if (!m_heap_base) {
-                size_t align = req->map_align ? req->map_align : 1;
-                size_t resv_sz = HEAP_MAX_SIZE + align;
-                void *p = ::mmap(0, resv_sz, PROT_NONE,
-                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-                if (p == MAP_FAILED) {
-                    VACCEL_THROW_MSG(-ENOMEM,
-                                     "Failed to reserve heap VA range (%zu bytes)",
-                                     resv_sz);
-                }
-                auto base = reinterpret_cast<uintptr_t>(p);
-                auto aligned = (base + align - 1) & ~(align - 1);
-
-                if (aligned > base)
-                    ::munmap(p, aligned - base);
-                size_t tail = (base + resv_sz) - (aligned + HEAP_MAX_SIZE);
-                if (tail > 0)
-                    ::munmap(reinterpret_cast<void *>(aligned + HEAP_MAX_SIZE), tail);
-
-                m_heap_base = reinterpret_cast<void *>(aligned);
-                vxdna_dbg("Reserved heap VA range: base=%p, size=0x%zx, align=0x%zx",
-                          m_heap_base, HEAP_MAX_SIZE, align);
-            }
-            if (!req->size || req->size > HEAP_MAX_SIZE - m_heap_cur_offset)
-                VACCEL_THROW_MSG(-ENOSPC,
-                                 "Heap expansion rejected: size 0x%lx, remaining 0x%zx",
-                                 (unsigned long)req->size,
-                                 HEAP_MAX_SIZE - m_heap_cur_offset);
-            mmap_target = static_cast<char *>(m_heap_base) + m_heap_cur_offset;
-        }
-
-        xdna_bo = std::make_shared<vxdna_bo>(res, get_fd(), req, mmap_target);
+        xdna_bo = std::make_shared<vxdna_bo>(res, *this, req);
     } else {
         xdna_bo = std::make_shared<vxdna_bo>(get_fd(), req);
     }
@@ -488,7 +737,7 @@ create_bo(const struct amdxdna_ccmd_create_bo_req *req)
     add_bo(std::move(xdna_bo));
 
     if (req->bo_type == AMDXDNA_BO_DEV_HEAP)
-        m_heap_cur_offset += req->size;
+        m_heap_committed += req->size;
     vxdna_dbg("Created bo: handle=%u, xdna_addr=%lu", rsp.handle, rsp.xdna_addr);
 }
 
