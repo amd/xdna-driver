@@ -143,6 +143,56 @@ enum amdxdna_drm_config_hwctx_param {
 };
 
 /**
+ * enum amdxdna_fw_buf_type - CERT firmware buffer type.
+ * @AMDXDNA_FW_BUF_DEBUG: CERT debug buffer.
+ * @AMDXDNA_FW_BUF_TRACE: CERT trace buffer.
+ * @AMDXDNA_FW_BUF_DBG_Q: CERT debug queue.
+ * @AMDXDNA_FW_BUF_LOG:   CERT log buffer.
+ */
+enum amdxdna_fw_buf_type {
+	AMDXDNA_FW_BUF_DEBUG,
+	AMDXDNA_FW_BUF_TRACE,
+	AMDXDNA_FW_BUF_DBG_Q,
+	AMDXDNA_FW_BUF_LOG,
+};
+
+/**
+ * struct amdxdna_uc_info_entry - per-uC slice descriptor in
+ *                                struct amdxdna_fw_buffer_metadata.
+ * @index: uC index. The payload BO is sliced per-uC; @index must be unique
+ *         within an array and stay below the device's CERT uC count.
+ * @size:  Per-uC slice size in bytes. Entries with size == 0 are ignored.
+ */
+struct amdxdna_uc_info_entry {
+	__u32 index;
+	__u32 size;
+};
+
+/**
+ * struct amdxdna_fw_buffer_metadata - per-hwctx CERT buffer description.
+ * @buf_type:   One of enum amdxdna_fw_buf_type.
+ * @num_ucs:    Number of valid entries in @uc_info.
+ * @pad:        MBZ. Reserved for ABI growth.
+ * @bo_handle:  Handle of the payload BO (AMDXDNA_BO_SHARE) holding the
+ *              concatenated per-uC slices.
+ * @command_id: User tag for trace correlation.
+ * @uc_info:    Per-uC slice descriptors, in payload BO layout order.
+ *
+ * The metadata is carried in a SHARE BO whose handle user space passes via
+ * struct amdxdna_drm_config_hwctx.param_val for
+ * %DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF and %DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF.
+ * AIE4-only.
+ */
+struct amdxdna_fw_buffer_metadata {
+	__u8 buf_type;
+	__u8 num_ucs;
+	__u8 pad[2];
+	__u32 bo_handle;
+	__u64 command_id;
+	struct amdxdna_uc_info_entry uc_info[];
+};
+
+/**
  * struct amdxdna_drm_config_hwctx - Configure hardware context.
  * @handle: hardware context handle.
  * @param_type: Value in enum amdxdna_drm_config_hwctx_param. Specifies the
