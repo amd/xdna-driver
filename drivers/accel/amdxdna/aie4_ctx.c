@@ -353,3 +353,134 @@ int aie4_hwctx_valid_doorbell(struct amdxdna_client *client, u32 vm_pgoff)
 
 	return 0;
 }
+
+static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,
+				   bool attach)
+{
+	struct aie4_msg_context_config_cert_logging cl;
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct fw_buffer_metadata *meta;
+	struct amdxdna_gem_obj *meta_bo;
+	struct amdxdna_gem_obj *log_bo;
+	u32 prev_size = 0;
+	u32 property;
+	u64 base_addr;
+	u32 index;
+	int ret;
+	int i;
+
+	meta_bo = amdxdna_gem_get_obj(client, meta_bo_hdl, AMDXDNA_BO_SHARE);
+	if (!meta_bo) {
+		XDNA_ERR(xdna, "Get meta bo %u failed", meta_bo_hdl);
+		return -EINVAL;
+	}
+
+	if (meta_bo->mem.size < sizeof(*meta)) {
+		XDNA_ERR(xdna, "meta bo size %lu is too small", meta_bo->mem.size);
+		ret = -EINVAL;
+		goto put_meta_bo;
+	}
+
+	meta = amdxdna_gem_vmap(meta_bo);
+	if (!meta) {
+		ret = -ENOMEM;
+		goto put_meta_bo;
+	}
+
+	switch (meta->buf_type) {
+	case AMDXDNA_FW_BUF_LOG:
+		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_LOG_BUFFER;
+		break;
+	case AMDXDNA_FW_BUF_DEBUG:
+		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_BUFFER;
+		break;
+	case AMDXDNA_FW_BUF_TRACE:
+		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_TRACE_BUFFER;
+		break;
+	case AMDXDNA_FW_BUF_DBG_Q:
+		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_QUEUE;
+		break;
+	default:
+		XDNA_ERR(xdna, "Unsupported buf_type %u", meta->buf_type);
+		ret = -EOPNOTSUPP;
+		goto put_meta_bo;
+	}
+
+	if (meta->num_ucs > AIE4_MAX_NUM_CERTS) {
+		XDNA_ERR(xdna, "num_ucs %u exceeds %d",
+			 meta->num_ucs, AIE4_MAX_NUM_CERTS);
+		ret = -EINVAL;
+		goto put_meta_bo;
+	}
+
+	if (meta_bo->mem.size < struct_size(meta, uc_info, meta->num_ucs)) {
+		XDNA_ERR(xdna, "meta bo size %lu too small for %u ucs",
+			 meta_bo->mem.size, meta->num_ucs);
+		ret = -EINVAL;
+		goto put_meta_bo;
+	}
+
+	log_bo = amdxdna_gem_get_obj(client, meta->bo_handle, AMDXDNA_BO_SHARE);
+	if (!log_bo) {
+		XDNA_ERR(xdna, "Get payload bo %llu failed", meta->bo_handle);
+		ret = -EINVAL;
+		goto put_meta_bo;
+	}
+
+	base_addr = amdxdna_gem_dev_addr(log_bo);
+
+	for (i = 0; i < meta->num_ucs; i++) {
+		index = meta->uc_info[i].index;
+		if (index >= AIE4_MAX_NUM_CERTS) {
+			XDNA_ERR(xdna, "Invalid uc index %u", index);
+			ret = -EINVAL;
+			goto put_log_bo;
+		}
+
+		if (!attach) {
+			cl.info[index].paddr = 0;
+			cl.info[index].size = 0;
+			continue;
+		}
+
+		if (!meta->uc_info[i].size)
+			continue;
+
+		cl.info[index].paddr = base_addr + prev_size;
+		cl.info[index].size = meta->uc_info[i].size;
+		prev_size += meta->uc_info[i].size;
+	}
+
+	cl.num = FIELD_PREP(AIE4_MSG_CERT_LOG_NUM, attach ? meta->num_ucs : 0);
+
+	ret = aie4_configure_hw_context_cert_log(ndev, hwctx->priv->hw_ctx_id,
+						 property, &cl);
+	XDNA_DBG(xdna, "%s CERT bo %u on %s, property %u, ret %d",
+		 attach ? "attach" : "detach", meta_bo_hdl,
+		 hwctx->name, property, ret);
+
+put_log_bo:
+	amdxdna_gem_put_obj(log_bo);
+put_meta_bo:
+	amdxdna_gem_put_obj(meta_bo);
+	return ret;
+}
+
+int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
+		      void *buf, u32 size)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	switch (type) {
+	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
+		return aie4_hwctx_cfg_debug_bo(hwctx, (u32)value, true);
+	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+		return aie4_hwctx_cfg_debug_bo(hwctx, (u32)value, false);
+	default:
+		XDNA_DBG(xdna, "Not supported type %d", type);
+		return -EOPNOTSUPP;
+	}
+}
