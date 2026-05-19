@@ -24,6 +24,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_DESTROY_PARTITION                = 0x30002,
 	AIE4_MSG_OP_CREATE_HW_CONTEXT                = 0x30003,
 	AIE4_MSG_OP_DESTROY_HW_CONTEXT               = 0x30004,
+	AIE4_MSG_OP_CONFIGURE_HW_CONTEXT             = 0x30005,
 	AIE4_MSG_OP_AIE_TILE_INFO                    = 0x30006,
 };
 
@@ -102,6 +103,44 @@ struct aie4_msg_destroy_hw_context_req {
 struct aie4_msg_destroy_hw_context_resp {
 	enum aie4_msg_status status;
 } __packed;
+
+enum aie4_msg_configure_hw_context_property {
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_PRIORITY_BAND,
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_SCHEDULING,
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_DPM,
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_LOG_BUFFER,
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_BUFFER,
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_TRACE_BUFFER,
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_DEBUG_QUEUE,
+	AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_HANDLE,
+};
+
+#define AIE4_MAX_NUM_CERTS	6
+
+struct aie4_msg_context_config_cert_logging_info {
+	__u64 paddr;
+	__u32 size;
+} __packed;
+
+struct aie4_msg_context_config_cert_logging {
+#define AIE4_MSG_CERT_LOG_NUM	GENMASK(7, 0)
+	__u32 num;
+	struct aie4_msg_context_config_cert_logging_info info[AIE4_MAX_NUM_CERTS];
+} __packed;
+
+struct aie4_msg_configure_hw_context_req {
+	__u32 hw_context_id;
+	__u32 property;
+	struct aie4_msg_context_config_cert_logging cert_logging;
+} __packed;
+
+struct aie4_msg_configure_hw_context_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+static_assert(sizeof(struct aie4_msg_context_config_cert_logging_info) == 12);
+static_assert(sizeof(struct aie4_msg_context_config_cert_logging) == 76);
+static_assert(sizeof(struct aie4_msg_configure_hw_context_req) == 84);
 
 struct aie4_tile_info {
 	__u32 size;
