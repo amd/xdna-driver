@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 # For native xdna-driver builds, XRT headers and link library
 # comes from xdna-driver's XRT submodule.
 
-# User can choose to package either legacy driver or upstream driver source
-option(PACKAGE_LEGACY_DRIVER "Package legacy driver source" ON)
+# User can choose to package either legacy driver or upstream driver source.
+# By default the upstream (staging) driver is packaged as the primary
+# amdxdna.ko, and the out-of-tree/legacy driver is packaged alongside it
+# as amdxdna_legacy.ko.
+option(PACKAGE_LEGACY_DRIVER "Package legacy driver source" OFF)
 
 # By default, build/build.sh downloads binaries to build/amdxdna_bins/
 # Absolute path, cannot be used in install command as destination.
