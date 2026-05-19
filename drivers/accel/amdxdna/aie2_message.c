@@ -455,6 +455,9 @@ int aie2_map_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u6
 
 int aie2_add_host_buf(struct amdxdna_dev_hdl *ndev, u32 context_id, u64 addr, u64 size)
 {
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE2_ADD_HOST_BUFFER))
+		return -EOPNOTSUPP;
+
 	return aie2_send_host_buf_msgs(ndev, context_id, addr, size,
 				       MSG_OP_ADD_HOST_BUFFER);
 }

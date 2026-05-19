@@ -80,6 +80,7 @@ struct dpm_clk_freq {
 #define HWCTX_MAX_CMDS		4
 #define get_job_idx(seq) ((seq) & (HWCTX_MAX_CMDS - 1))
 struct amdxdna_hwctx_priv {
+	struct amdxdna_gem_obj		*heap;
 	void				*mbox_chann;
 
 	struct drm_gpu_scheduler	sched;
@@ -97,8 +98,6 @@ struct amdxdna_hwctx_priv {
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 	struct drm_syncobj		*syncobj;
-
-	struct amdxdna_gem_obj		*last_pinned_chunk;
 };
 
 enum aie2_dev_status {
@@ -327,8 +326,8 @@ int aie2_hwctx_sync_debug_bo(struct amdxdna_hwctx *hwctx, u32 debug_bo_hdl);
 void aie2_hwctx_suspend(struct amdxdna_client *client);
 int aie2_hwctx_resume(struct amdxdna_client *client);
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
-int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx);
 void aie2_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
+int aie2_hwctx_heap_expand(struct amdxdna_hwctx *hwctx, struct amdxdna_gem_obj *heap);
 
 /* TDR APIs */
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang

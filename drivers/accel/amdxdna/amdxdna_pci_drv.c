@@ -150,8 +150,10 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	mmgrab(client->mm);
 	init_srcu_struct(&client->hwctx_srcu);
 	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
+	xa_init_flags(&client->dev_heap_xa, XA_FLAGS_ALLOC);
+	drm_mm_init(&client->dev_heap_mm, xdna->dev_info->dev_mem_base,
+		    xdna->dev_info->dev_heap_max_size);
 	mutex_init(&client->mm_lock);
-	INIT_LIST_HEAD(&client->dev_heap_chunks);
 
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
@@ -168,19 +170,18 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 static void amdxdna_client_cleanup(struct amdxdna_client *client)
 {
+	struct amdxdna_gem_obj *heap;
+	unsigned long heap_id;
+
 	list_del(&client->node);
 	amdxdna_hwctx_remove_all(client);
 	xa_destroy(&client->hwctx_xa);
 	cleanup_srcu_struct(&client->hwctx_srcu);
 
-	while (!list_empty(&client->dev_heap_chunks)) {
-		struct amdxdna_gem_obj *chunk;
-
-		chunk = list_last_entry(&client->dev_heap_chunks,
-					struct amdxdna_gem_obj, heap_chunk_node);
-		list_del_init(&chunk->heap_chunk_node);
-		drm_gem_object_put(to_gobj(chunk)); /* drop creation ref */
-	}
+	xa_for_each(&client->dev_heap_xa, heap_id, heap)
+		drm_gem_object_put(to_gobj(heap));
+	xa_destroy(&client->dev_heap_xa);
+	drm_mm_takedown(&client->dev_heap_mm);
 
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
