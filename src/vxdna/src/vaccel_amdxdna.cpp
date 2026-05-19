@@ -62,6 +62,14 @@ page_size()
     return ps;
 }
 
+size_t
+page_roundup(size_t size)
+{
+    const size_t ps = page_size();
+
+    return (size + ps - 1) & ~(ps - 1);
+}
+
 /*
  * Helpers for iov_table_overlaps(): detect whether the coalesce destination
  * [base, base+len) intersects any guest iovec before mremap(old_size=0).  Overlap
@@ -215,8 +223,8 @@ struct coalesce_backing {
 };
 
 /*
- * Guest-backed userptr BOs (SHARE, CMD, …): sum iovec lengths, reserve one
- * coalesced VMA, and duplicate every slice into it with mremap(old_size=0).
+ * Guest-backed userptr BOs (SHARE, CMD, …): one iovec uses backing UVA directly;
+ * multiple iovs reserve one coalesced VMA and duplicate slices with mremap.
  * DEV_HEAP chunks use a slice of the context's 64 MiB-aligned arena instead.
  */
 coalesce_backing
@@ -384,6 +392,17 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
                                  off, static_cast<unsigned long>(m_size),
                                  vxdna_context::HEAP_MAX_SIZE);
             coalesce = static_cast<char *>(arena) + off;
+        } else if (num_iovs == 1) {
+            const uintptr_t base = reinterpret_cast<uintptr_t>(iovecs[0].iov_base);
+            const size_t len = iovecs[0].iov_len;
+            const size_t ps = page_size();
+
+            if ((base % ps) != 0 || (len % ps) != 0)
+                VACCEL_THROW_MSG(-EINVAL,
+                                 "single iovec must be page-aligned (base=0x%lx len=%zu)",
+                                 static_cast<unsigned long>(base), len);
+            coalesce = iovecs[0].iov_base;
+            total = len;
         } else {
             auto backing = reserve_coalesce_backing(iovecs, num_iovs);
             coalesce = backing.va;
@@ -392,20 +411,25 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
             m_coalesce_len = total;
         }
 
-        if (m_size > total)
-            VACCEL_THROW_MSG(-EINVAL,
-                             "create_bo size 0x%lx exceeds resource backing 0x%zx",
-                             static_cast<unsigned long>(m_size), total);
+        const size_t pin_len = page_roundup(m_size);
 
-        try {
-            mremap_iovs_into_coalesce(coalesce, iovecs, num_iovs);
-        } catch (...) {
-            if (m_coalesce_va && m_coalesce_len) {
-                munmap(m_coalesce_va, m_coalesce_len);
-                m_coalesce_va = nullptr;
-                m_coalesce_len = 0;
+        if (pin_len > total)
+            VACCEL_THROW_MSG(-EINVAL,
+                             "create_bo pin size 0x%zx exceeds resource backing 0x%zx "
+                             "(bo size 0x%lx)",
+                             pin_len, total, static_cast<unsigned long>(m_size));
+
+        if (heap_chunk || num_iovs > 1) {
+            try {
+                mremap_iovs_into_coalesce(coalesce, iovecs, num_iovs);
+            } catch (...) {
+                if (m_coalesce_va && m_coalesce_len) {
+                    munmap(m_coalesce_va, m_coalesce_len);
+                    m_coalesce_va = nullptr;
+                    m_coalesce_len = 0;
+                }
+                throw;
             }
-            throw;
         }
         m_iov_bytes = total;
         m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
@@ -418,7 +442,7 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
         tbl->num_entries = 1;
         tbl->va_entries[0].vaddr =
             static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
-        tbl->va_entries[0].len = static_cast<uint64_t>(m_size);
+        tbl->va_entries[0].len = static_cast<uint64_t>(pin_len);
 
         struct amdxdna_drm_create_bo args = {};
         args.vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(buf_vec.data()));
