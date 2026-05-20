@@ -194,9 +194,11 @@ int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 	req.buffer_list_addr = to_dma_addr(list_hdl, 0);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
-	if (ret)
+	if (ret) {
 		XDNA_ERR(xdna, "Get coredump got status 0x%x", resp.status);
-
+		for (int i = 0; i < ARRAY_SIZE(resp.error_detail); i++)
+			XDNA_ERR(xdna, "Error detail %d: 0x%08x", i, resp.error_detail[i]);
+	}
 	return ret;
 }
 
