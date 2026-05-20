@@ -601,23 +601,28 @@ static int amdxdna_dpt_fini_kind(struct aie_device *aie, enum amdxdna_dpt_kind k
 		return 0;
 
 	/*
-	 * Close the publish gate first (mirrors enter_kind's ptr-then-
-	 * status read order), then mark in-flight readers to bail. After
-	 * this no new srcu_dereference can return this handle, and any
-	 * reader that already loaded the pointer will observe
-	 * SHUTTING_DOWN on its post-wait status check.
+	 * Stop the firmware producer while the RCU slot is still
+	 * published so msg_ops fini hooks (e.g. fw_log_fini) can look up
+	 * xdna->fw_log / fw_trace. Detach must complete before the buffer
+	 * is unmapped below.
+	 */
+	amdxdna_dpt_msg_fini(dpt);
+
+	/*
+	 * Close the publish gate (mirrors enter_kind's ptr-then-status read
+	 * order), then mark in-flight readers to bail. After this no new
+	 * srcu_dereference can return this handle, and any reader that
+	 * already loaded the pointer will observe SHUTTING_DOWN on its
+	 * post-wait status check.
 	 */
 	rcu_assign_pointer(*slot, NULL);
 	WRITE_ONCE(dpt->status, AMDXDNA_DPT_SHUTTING_DOWN);
 
 	/*
-	 * Stop the producer first so the firmware stops emitting IRQs
-	 * and tail updates against the soon-to-be-freed ring, then drain
-	 * the host-side pipeline (IRQ -> timer -> worker). After
+	 * Drain the host-side pipeline (IRQ -> timer -> worker). After
 	 * cancel_work_sync no path is left that could call
 	 * amdxdna_dpt_update_tail on the detached firmware.
 	 */
-	amdxdna_dpt_msg_fini(dpt);
 	amdxdna_dpt_irq_fini(dpt);
 	timer_shutdown_sync(&dpt->timer);
 	cancel_work_sync(&dpt->work);
