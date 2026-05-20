@@ -1236,7 +1236,7 @@ get_info(xclDeviceInfo2 *info) const
   info->mNumCDMA = 0;
 #endif
 
-  std::string deviceName("Telluride");
+  std::string deviceName("VE2");
   std::size_t length = deviceName.copy(info->mName, deviceName.length(),0);
   info->mName[length] = '\0';
   return 0;
