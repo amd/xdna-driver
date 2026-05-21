@@ -149,6 +149,26 @@ exit:
 	return ret;
 }
 
+static int ve2_check_active_ctx(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
+				struct amdxdna_mgmtctx *mgmtctx)
+{
+	if (mgmtctx->active_ctx != hwctx) {
+		if (mgmtctx->active_ctx) {
+			XDNA_ERR(xdna,
+				 "hwctx %u (pid %u) is not active. The active hwctx is %u (pid %u). Please retry when this context is scheduled.\n",
+				 hwctx->id, hwctx->client->pid,
+				 mgmtctx->active_ctx->id, mgmtctx->active_ctx->client->pid);
+		} else {
+			XDNA_ERR(xdna,
+				 "No context is currently active on partition starting at col %u. Please submit a command first.\n",
+				 hwctx->start_col);
+		}
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
 static int ve2_aie_write(struct amdxdna_client *client,
 			 struct amdxdna_drm_set_state *args)
 {
@@ -156,6 +176,7 @@ static int ve2_aie_write(struct amdxdna_client *client,
 	struct amdxdna_drm_aie_tile_access footer = {};
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_mgmtctx *mgmtctx = NULL;
 	struct device *aie_dev;
 	unsigned long hwctx_id;
 	void *local_buf = NULL;
@@ -226,9 +247,22 @@ static int ve2_aie_write(struct amdxdna_client *client,
 		return -EFAULT;
 	}
 
-	/* Write to AIE memory */
+	/* Acquire lock and check if this hwctx is active */
+	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
+	mutex_lock(&mgmtctx->ctx_lock);
+
+	ret = ve2_check_active_ctx(xdna, hwctx, mgmtctx);
+	if (ret) {
+		mutex_unlock(&mgmtctx->ctx_lock);
+		kfree(local_buf);
+		return ret;
+	}
+
+	/* Write to AIE memory while holding the lock to prevent context switch */
 	ret = ve2_partition_write(aie_dev, footer.col, footer.row, footer.addr,
 				  footer.size, local_buf);
+	mutex_unlock(&mgmtctx->ctx_lock);
+
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Error in AIE memory write operation, err: %d\n", ret);
 		kfree(local_buf);
@@ -245,6 +279,7 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	struct amdxdna_drm_aie_tile_access footer = {};
 	struct amdxdna_client *tmp_client;
 	struct amdxdna_ctx *hwctx = NULL;
+	struct amdxdna_mgmtctx *mgmtctx = NULL;
 	struct device *aie_dev;
 	unsigned long hwctx_id;
 	void *local_buf = NULL;
@@ -309,9 +344,22 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	if (!local_buf)
 		return -ENOMEM;
 
-	/* Read from AIE memory */
+	/* Acquire lock and check if this hwctx is active */
+	mgmtctx = &xdna->dev_handle->ve2_mgmtctx[hwctx->start_col];
+	mutex_lock(&mgmtctx->ctx_lock);
+
+	ret = ve2_check_active_ctx(xdna, hwctx, mgmtctx);
+	if (ret) {
+		mutex_unlock(&mgmtctx->ctx_lock);
+		kfree(local_buf);
+		return ret;
+	}
+
+	/* Read from AIE memory while holding the lock to prevent context switch */
 	ret = ve2_partition_read(aie_dev, footer.col, footer.row, footer.addr,
 				 footer.size, local_buf);
+	mutex_unlock(&mgmtctx->ctx_lock);
+
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Error in AIE memory read operation, err: %d\n", ret);
 		kfree(local_buf);
