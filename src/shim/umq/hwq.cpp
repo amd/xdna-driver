@@ -98,10 +98,7 @@ dump() const
   for (uint32_t i = 0; i < h->capacity; i++) {
     auto pkt = &m_umq_pkt[i];
     shim_debug("==========slot %u==========", i);
-    shim_debug("\ttype:\t\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.type));
-    shim_debug("\tbarrier:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.barrier));
-    shim_debug("\tacquire:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.acquire_fence_scope));
-    shim_debug("\trelease:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.release_fence_scope));
+    shim_debug("\ttype:\t\t%u", pkt->xrt_header.common_header.type);
     shim_debug("\topcode:\t\t%u", pkt->xrt_header.common_header.opcode);
     shim_debug("\tcount:\t\t%u", pkt->xrt_header.common_header.count);
     shim_debug("\tdistribute:\t%u", pkt->xrt_header.common_header.distribute);
