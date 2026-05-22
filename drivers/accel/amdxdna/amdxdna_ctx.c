@@ -12,7 +12,9 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_print.h>
 #include <drm/drm_syncobj.h>
+#ifndef AMDXDNA_AUX
 #include <drm/gpu_scheduler.h>
+#endif
 #include <linux/xarray.h>
 #include "trace/events/amdxdna.h"
 
@@ -753,6 +755,7 @@ int amdxdna_hwctx_col_list(struct amdxdna_hwctx *hwctx, u32 row_count,
 	return 0;
 }
 
+#ifndef AMDXDNA_AUX
 int amdxdna_hwctx_priv_init(struct amdxdna_hwctx *hwctx,
 			    struct amdxdna_hwctx_priv *priv,
 			    const struct drm_sched_backend_ops *sched_ops,
@@ -773,10 +776,10 @@ int amdxdna_hwctx_priv_init(struct amdxdna_hwctx *hwctx,
 	struct drm_gpu_scheduler *sched;
 	int i, ret;
 
-        if (!priv) {
-                XDNA_ERR(xdna, "Invalid hwctx priv");
-                return -EINVAL;
-        }
+	if (!priv) {
+		XDNA_ERR(xdna, "Invalid hwctx priv");
+		return -EINVAL;
+	}
 
 	hwctx->priv = priv;
 	sema_init(&priv->job_sem, HWCTX_MAX_CMDS);
@@ -883,6 +886,7 @@ void amdxdna_hwctx_fini(struct amdxdna_hwctx *hwctx,
 	amdxdna_ctx_syncobj_destroy(hwctx);
 	amdxdna_hwctx_priv_fini(hwctx, priv);
 }
+#endif /* !AMDXDNA_AUX */
 
 int amdxdna_ctx_syncobj_create(struct amdxdna_hwctx *hwctx)
 {
