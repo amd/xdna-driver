@@ -1,6 +1,6 @@
 # Maintainer: Your Name <your@email.com>
 pkgname=amdxdna-driver
-pkgver=2.23.0
+pkgver=2.25.0
 pkgrel=1
 pkgdesc="AMD XDNA(tm) Driver (amdxdna.ko) for Linux"
 arch=('x86_64')
