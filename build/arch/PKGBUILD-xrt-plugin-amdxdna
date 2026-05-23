@@ -1,0 +1,24 @@
+# Maintainer: Your Name <your@email.com>
+pkgname=xrt-plugin-amdxdna
+pkgver=2.23.0
+pkgrel=1
+pkgdesc="AMD XDNA plugin for Xilinx Runtime (XRT)"
+arch=('x86_64')
+url="https://github.com/amd/xdna-driver/"
+license=('Apache-2.0')
+depends=('xrt-base' 'xrt-npu' "amdxdna-driver>=${pkgver}")
+conflicts=('amdxdna-driver-bin')
+provides=("${pkgname}=${pkgver}")
+options=('!debug' '!strip')
+
+package() {
+  local xdna_build_dir="${XDNA_BUILD_DIR:-../Release}"
+  cd "$srcdir"
+  local tarball=$(find "${xdna_build_dir}" -maxdepth 1 -type f -name "xrt_plugin.${pkgver}_-${CARCH}-amdxdna.tar.gz" -print -quit 2>/dev/null)
+  if [ -z "$tarball" ]; then
+    error "XDNA plugin tarball not found"
+    return 1
+  fi
+  msg2 "Extracting $tarball"
+  tar -xzf "$tarball" -C "$pkgdir"
+}
