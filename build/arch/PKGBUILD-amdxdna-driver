@@ -1,0 +1,39 @@
+# Maintainer: Your Name <your@email.com>
+pkgname=amdxdna-driver
+pkgver=2.23.0
+pkgrel=1
+pkgdesc="AMD XDNA(tm) Driver (amdxdna.ko) for Linux"
+arch=('x86_64')
+url="https://github.com/amd/xdna-driver/"
+license=('custom')
+depends=('dkms')
+makedepends=('bash' 'git')
+provides=("${pkgname}=${pkgver}")
+conflicts=("${pkgname}" "amdxdna-driver-bin")
+options=('!debug' '!strip')
+
+package() {
+  local xdna_build_dir="${XDNA_BUILD_DIR:-../Release}"
+  local tarball="${xdna_build_dir}/driver/amdxdna.tar.gz"
+  if [ ! -f "$tarball" ]; then
+    error "Driver tarball amdxdna.tar.gz not found in ${xdna_build_dir}"
+    return 1
+  fi
+
+  local dkms_conf_src="${xdna_build_dir}/opt/xilinx/xrt/share/amdxdna/dkms.conf"
+  if [ ! -f "$dkms_conf_src" ]; then
+    error "dkms.conf not found"
+    return 1
+  fi
+
+  local drv_name=$(basename "$tarball" .tar.gz)
+  local drv_src_dir="/usr/src/${drv_name}-${pkgver}"
+
+  install -Dm644 "$dkms_conf_src" "$pkgdir/${drv_src_dir}/dkms.conf"
+  install -Dm755 "${xdna_build_dir}/package/postinst" "$pkgdir${drv_src_dir}/postinst"
+  install -Dm755 "${xdna_build_dir}/package/prerm" "$pkgdir${drv_src_dir}/prerm"
+
+  tar -xzf "$tarball" -C "$pkgdir/${drv_src_dir}"
+
+  install -Dm644 /dev/stdin "$pkgdir/etc/modules-load.d/amdxdna.conf" <<< "amdxdna"
+}

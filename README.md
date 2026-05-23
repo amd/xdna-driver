@@ -152,8 +152,12 @@ cd ../../../build
 
 # Build and install XDNA plugin package
 cd arch
-makepkg -p PKGBUILD-xrt-plugin
+makepkg -p PKGBUILD-xrt-plugin-amdxdna
 sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
+
+# Build and install AMDXDNA driver (separate package for DKMS-based kernel module)
+makepkg -p PKGBUILD-amdxdna-driver
+sudo pacman -U amdxdna-driver-*.pkg.tar.zst
 
 # Configure memory limits (required for NPU access)
 # Using limits.d drop-in file (survives package upgrades)
@@ -168,7 +172,8 @@ EOF
 
 **Note for Arch Linux users**: The build system generates `.tar.gz` packages which are repackaged into proper Arch packages (`.pkg.tar.zst`) using the provided PKGBUILDs:
 - XRT packages: `xrt/build/arch/` (PKGBUILD-xrt-base, PKGBUILD-xrt-npu)
-- XDNA driver: `build/arch/` directory (PKGBUILD-xrt-plugin)
+- AMDXDNA driver: `build/arch/` (PKGBUILD-amdxdna-driver)
+- XDNA plugin: `build/arch/` (PKGBUILD-xrt-plugin-amdxdna)
 
 This ensures proper integration with pacman for installation, upgrades, and removal.
 

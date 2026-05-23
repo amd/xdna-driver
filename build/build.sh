@@ -76,6 +76,21 @@ package_targets()
   cd ..
 }
 
+download_url()
+{
+  local output=$1
+  local url=$2
+
+  if [ -x "$(command -v wget)" ]; then
+    wget -O "$output" "$url"
+  elif [ -x "$(command -v curl)" ]; then
+    curl -fL -o "$output" "$url"
+  else
+    echo "Neither wget nor curl is installed; cannot download $url" >&2
+    return 1
+  fi
+}
+
 download_npufws()
 {
   local firmware_dir=${DOWNLOAD_BINS_DIR}/firmware
@@ -99,7 +114,7 @@ download_npufws()
         rm -r ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
       fi
       mkdir -p ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
-      wget -O ${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name $url
+      download_url "${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name" "$url"
 
     done
 }
@@ -124,7 +139,7 @@ download_vtd_archives()
         rm ${vtd_dir}/$filename
       fi
       mkdir -p ${vtd_dir}
-      wget -O ${vtd_dir}/$filename $url
+      download_url "${vtd_dir}/$filename" "$url"
 
     done
 }
