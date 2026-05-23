@@ -30,8 +30,8 @@ package() {
   local drv_src_dir="/usr/src/${drv_name}-${pkgver}"
 
   install -Dm644 "$dkms_conf_src" "$pkgdir/${drv_src_dir}/dkms.conf"
-  install -Dm755 "${xdna_build_dir}/package/postinst" "$pkgdir${drv_src_dir}/postinst"
-  install -Dm755 "${xdna_build_dir}/package/prerm" "$pkgdir${drv_src_dir}/prerm"
+  install -Dm755 "${xdna_build_dir}/package/postinst" "$pkgdir/${drv_src_dir}/postinst"
+  install -Dm755 "${xdna_build_dir}/package/prerm" "$pkgdir/${drv_src_dir}/prerm"
 
   tar -xzf "$tarball" -C "$pkgdir/${drv_src_dir}"
 
