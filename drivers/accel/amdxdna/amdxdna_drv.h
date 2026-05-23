@@ -142,6 +142,8 @@ struct amdxdna_fw_ver {
 
 struct amdxdna_carveout;
 
+#define AMDXDNA_MAX_MEM_REGIONS	8
+
 struct amdxdna_dev {
 	struct drm_device		ddev;
 	struct amdxdna_dev_hdl		*dev_handle;
@@ -161,6 +163,9 @@ struct amdxdna_dev {
 	const char			*vbnv;
 
 	struct amdxdna_carveout		*carveout;
+
+	/* VE2: OF reserved-memory region devices (see ve2_aux.c). */
+	struct device			*cma_region_devs[AMDXDNA_MAX_MEM_REGIONS];
 };
 
 /*

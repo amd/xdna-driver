@@ -23,6 +23,9 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 #include "amdxdna_solver.h"
+#ifdef AMDXDNA_AUX
+#include "ve2_trace.h"
+#endif
 
 #define MAX_HWCTX_ID		255
 #define MAX_ARG_COUNT		4095
@@ -212,6 +215,11 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "ioctl CREATE_HWCTX enter pid=%d num_tiles=%u",
+		  client->pid, args->num_tiles);
+#endif
+
 	hwctx = kzalloc_obj(*hwctx);
 	if (!hwctx)
 		return -ENOMEM;
@@ -228,6 +236,9 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	hwctx->mem_size = args->mem_size;
 	hwctx->max_opc = args->max_opc;
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "CREATE_HWCTX acquiring dev_lock pid=%d", client->pid);
+#endif
 	guard(mutex)(&xdna->dev_lock);
 
 	if (!drm_dev_enter(dev, &idx)) {
@@ -235,6 +246,9 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto free_hwctx;
 	}
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "CREATE_HWCTX calling hwctx_init pid=%d", client->pid);
+#endif
 	ret = xdna->dev_info->ops->hwctx_init(hwctx);
 	if (ret) {
 		XDNA_ERR(xdna, "Init hwctx failed, ret %d", ret);
@@ -260,6 +274,10 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 
 	atomic64_set(&hwctx->job_submit_cnt, 0);
 	atomic64_set(&hwctx->job_free_cnt, 0);
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "ioctl CREATE_HWCTX done pid=%d handle=%u ret=%d start_col=%u",
+		  client->pid, args->handle, ret, hwctx->start_col);
+#endif
 	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
 	return 0;
@@ -289,6 +307,9 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "ioctl DESTROY_HWCTX pid=%d handle=%u", client->pid, args->handle);
+#endif
 	mutex_lock(&xdna->dev_lock);
 	hwctx = xa_erase(&client->hwctx_xa, args->handle);
 	if (!hwctx) {
@@ -352,6 +373,7 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		break;
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;
@@ -616,6 +638,10 @@ int amdxdna_drm_submit_cmd_ioctl(struct drm_device *dev, void *data, struct drm_
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(client->xdna, "ioctl EXEC_CMD pid=%d hwctx=%u type=%u",
+		  client->pid, args->hwctx, args->type);
+#endif
 	trace_amdxdna_debug_point(current->comm, args->type, "job received");
 
 	switch (args->type) {
@@ -677,6 +703,10 @@ int amdxdna_drm_wait_cmd_ioctl(struct drm_device *dev, void *data, struct drm_fi
 	struct amdxdna_drm_wait_cmd *args = data;
 	int ret;
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "ioctl WAIT_CMD pid=%d hwctx=%u seq=%llu timeout=%u",
+		  client->pid, args->hwctx, args->seq, args->timeout);
+#endif
 	XDNA_DBG(xdna, "PID %d hwctx %d timeout %d ms for cmd seq %lld",
 		 client->pid, args->hwctx, args->timeout, args->seq);
 

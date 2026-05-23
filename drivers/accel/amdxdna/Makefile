@@ -5,7 +5,17 @@
 
 KERNEL_VER ?= $(shell uname -r)
 KERNEL_SRC ?= /lib/modules/$(KERNEL_VER)/build
+# Yocto: kernel-source + kernel-build-artifacts (set KERNEL_OUT to the latter)
+KERNEL_OUT ?=
 XDNA_BUS_TYPE ?= pci
+
+mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
+SRC_DIR := $(patsubst %/,%,$(dir $(mkfile_path)))
+
+# Out-of-tree kbuild: -C source tree, optional separate object tree (O=)
+KBUILD_DIR := $(KERNEL_SRC)
+KBUILD_O   := $(if $(KERNEL_OUT),O=$(KERNEL_OUT))
+KBUILD_INV := $(MAKE) -C $(KBUILD_DIR) $(KBUILD_O) M=$(SRC_DIR)
 
 ifeq ($(XDNA_BUS_TYPE), pci)
 PCI = y
@@ -17,8 +27,6 @@ else
 $(error Unknown XDNA_BUS_TYPE $(XDNA_BUS_TYPE))!!
 endif
 
-mkfile_path = $(abspath $(lastword $(MAKEFILE_LIST)))
-SRC_DIR = $(patsubst %/,%,$(dir $(mkfile_path)))
 BUILD_ROOT_DIR := $(SRC_DIR)/build
 
 ifeq ($(BUILD_ROOT_DIR),$(SRC_DIR))
@@ -55,19 +63,21 @@ ifeq ($(XDNA_BUS_TYPE), aux)
 DEFINES += -DAMDXDNA_AUX
 # Generate config_kernel.h when building directly (Yocto/DKMS flow)
 modules: $(SRC_DIR)/config_kernel.h
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_AUX=$(AUX) $(USE_LLVM) modules
+	$(KBUILD_INV) $(if $(KBUILD_EXTRA_SYMBOLS),KBUILD_EXTRA_SYMBOLS="$(KBUILD_EXTRA_SYMBOLS)") \
+		CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_AUX=$(AUX) $(USE_LLVM) modules
 
 $(SRC_DIR)/config_kernel.h:
 	@echo "[INFO] Generating config_kernel.h for AUX build..."
-	@KERNEL_SRC=$(KERNEL_SRC) OUT="$(SRC_DIR)/config_kernel.h" bash $(SRC_DIR)/../tools/configure_kernel.sh
+	@KERNEL_SRC=$(KERNEL_SRC) KERNEL_OUT=$(KERNEL_OUT) OUT="$(SRC_DIR)/config_kernel.h" \
+		bash $(SRC_DIR)/../tools/configure_kernel.sh
 else
 # PCI builds: CMake generates config_kernel.h
 modules:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_AUX=$(AUX) $(USE_LLVM) modules
+	$(KBUILD_INV) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_AUX=$(AUX) $(USE_LLVM) modules
 endif
 
 modules_install:
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) modules_install
+	$(KBUILD_INV) modules_install
 
 $(BUILD_ROOT_DIR): $(SRC_DIR)
 	@echo "[INFO] BUILD Directory not exist or SRC Directory is newer"

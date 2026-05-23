@@ -19,6 +19,9 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_pm.h"
 #include "amdxdna_aie.h"
+#ifdef AMDXDNA_AUX
+#include "ve2_trace.h"
+#endif
 
 static int amdxdna_sva_init(struct amdxdna_client *client)
 {
@@ -82,6 +85,9 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	filp->driver_priv = client;
 	client->filp = filp;
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "drm_open DONE pid=%d pasid=%u", client->pid, client->pasid);
+#endif
 	XDNA_DBG(xdna, "pid %d opened", client->pid);
 	return 0;
 }
@@ -114,6 +120,9 @@ static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
 	int idx;
 
+#ifdef AMDXDNA_AUX
+	VE2_TRACE(xdna, "drm_close ENTER pid=%d", client->pid);
+#endif
 	XDNA_DBG(xdna, "closing pid %d", client->pid);
 
 	if (!drm_dev_enter(&xdna->ddev, &idx))
@@ -153,9 +162,24 @@ static int amdxdna_drm_get_array_ioctl(struct drm_device *dev, void *data,
 	if (!xdna->dev_info->ops->get_array)
 		return -EOPNOTSUPP;
 
+#ifdef AMDXDNA_AUX
+	if (args->pad) {
+		VE2_TRACE(xdna, "GET_ARRAY REJECT pid=%d param=%u pad=0x%x (expected 0)",
+			  client->pid, args->param, args->pad);
+		return -EINVAL;
+	}
+	if (!args->num_element || !args->element_size) {
+		VE2_TRACE(xdna, "GET_ARRAY REJECT pid=%d param=%u num_element=%u element_size=%u",
+			  client->pid, args->param, args->num_element, args->element_size);
+		return -EINVAL;
+	}
+	VE2_TRACE(xdna, "ioctl GET_ARRAY pid=%d param=%u ele_size=%u num_element=%u buffer=0x%llx",
+		  client->pid, args->param, args->element_size, args->num_element,
+		  args->buffer);
+#else
 	if (args->pad || !args->num_element || !args->element_size)
 		return -EINVAL;
-
+#endif
 	guard(mutex)(&xdna->dev_lock);
 	return xdna->dev_info->ops->get_array(client, args);
 }

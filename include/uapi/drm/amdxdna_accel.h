@@ -52,6 +52,9 @@ enum amdxdna_drm_ioctl_id {
 	DRM_AMDXDNA_GET_ARRAY = 10,	/* explicit to preserve numbering */
 };
 
+/* No user-preferred start column (matches XRT shim). */
+#define USER_START_COL_NOT_REQUESTED	0xFF
+
 /**
  * struct qos_info - QoS information for driver.
  * @gops: Giga operations per second.
@@ -60,6 +63,8 @@ enum amdxdna_drm_ioctl_id {
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @user_start_col: Preferred start column, or %USER_START_COL_NOT_REQUESTED.
+ * @reserved: MBZ (keeps 64-bit alignment).
  *
  * User program can provide QoS hints to driver.
  */
@@ -70,6 +75,8 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 user_start_col;
+	__u32 reserved;
 };
 
 /**
@@ -134,10 +141,43 @@ struct amdxdna_hwctx_param_config_cu {
 	struct amdxdna_cu_config cu_configs[] __counted_by(num_cus);
 };
 
+/**
+ * struct uc_info_entry - uC index and size mapping
+ * @index: uC index
+ * @size: buffer size in bytes for this uC
+ */
+struct uc_info_entry {
+	__u32 index;
+	__u32 size;
+};
+
+/**
+ * struct fw_buffer_metadata - Metadata for debug/trace/log buffer assignment.
+ * @buf_type: One of AMDXDNA_FW_BUF_*.
+ * @num_ucs: Number of uC entries in @uc_info.
+ * @pad: MBZ.
+ * @command_id: Optional command identifier for trace correlation.
+ * @bo_handle: BO handle carrying the actual buffer payload.
+ * @uc_info: Per-uC metadata entries.
+ */
+struct fw_buffer_metadata {
+#define AMDXDNA_FW_BUF_DEBUG	0
+#define AMDXDNA_FW_BUF_TRACE	1
+#define AMDXDNA_FW_BUF_DBG_Q	2
+#define AMDXDNA_FW_BUF_LOG	3
+	__u8 buf_type;
+	__u8 num_ucs;
+	__u8 pad[48];
+	__u64 command_id;
+	__u64 bo_handle;
+	struct uc_info_entry uc_info[] __counted_by(num_ucs);
+};
+
 enum amdxdna_drm_config_hwctx_param {
 	DRM_AMDXDNA_HWCTX_CONFIG_CU,
 	DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
 	DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
+	DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT,
 };
 
 /**
@@ -181,24 +221,24 @@ struct amdxdna_drm_va_entry {
 };
 
 /**
- * struct amdxdna_drm_va_tbl
- * @dmabuf_fd: The fd of dmabuf.
- * @num_entries: Number of va entries.
- * @va_entries: Array of va entries.
- *
- * The input can be either a dmabuf fd or a virtual address entry table.
- * When dmabuf_fd is used, num_entries must be zero.
+ * struct amdxdna_drm_va_tbl - Userptr / dmabuf import table (XRT shim layout).
+ * @udma_fd: UDMABUF or dmabuf fd when @num_entries is zero.
+ * @num_entries: Number of @va_entries (zero when using @udma_fd only).
+ * @va_entries: Array of VA entries.
  */
 struct amdxdna_drm_va_tbl {
-	__s32 dmabuf_fd;
+	__s32 udma_fd;
 	__u32 num_entries;
 	struct amdxdna_drm_va_entry va_entries[];
 };
 
+/* Low 8 bits of CREATE_BO flags: CMA region / bank index (VE2 shim). */
+#define AMDXDNA_BO_FLAGS_CACHEABLE	BIT(24)
+
 /**
  * struct amdxdna_drm_create_bo - Create a buffer object.
- * @flags: Buffer flags. MBZ.
- * @vaddr: User VA of buffer if applied. MBZ.
+ * @flags: Bits [7:0] CMA bank/mem_bitmap; bit 24 cacheable (see AMDXDNA_BO_FLAGS_CACHEABLE).
+ * @vaddr: Userptr: pointer to &struct amdxdna_drm_va_tbl.
  * @size: Size in bytes.
  * @type: Buffer type.
  * @handle: Returned DRM buffer object handle.
@@ -207,6 +247,11 @@ struct amdxdna_drm_create_bo {
 	__u64	flags;
 	__u64	vaddr;
 	__u64	size;
+#define	AMDXDNA_BO_INVALID	0
+#define	AMDXDNA_BO_SHARE	1
+#define	AMDXDNA_BO_DEV_HEAP	2
+#define	AMDXDNA_BO_DEV		3
+#define	AMDXDNA_BO_CMD		4
 	__u32	type;
 	__u32	handle;
 };
@@ -270,6 +315,9 @@ struct amdxdna_drm_exec_cmd {
 	__u64 ext;
 	__u64 ext_flags;
 	__u32 hwctx;
+#define	AMDXDNA_CMD_SUBMIT_EXEC_BUF	0
+#define	AMDXDNA_CMD_SUBMIT_DEPENDENCY	1
+#define	AMDXDNA_CMD_SUBMIT_SIGNAL	2
 	__u32 type;
 	__u64 cmd_handles;
 	__u64 args;
@@ -601,8 +649,6 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 fatal_error_exception_pc;
 	/** @fatal_error_app_module: Exception module name. */
 	__u32 fatal_error_app_module;
-	/** @pad: Structure pad. */
-	__u32 pad;
 };
 
 /**
@@ -667,6 +713,8 @@ struct amdxdna_drm_aie_coredump {
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
+#define DRM_AMDXDNA_HWCTX_AIE_PART_FD	10
+#define DRM_AMDXDNA_HWCTX_MEM_BITMAP	11
 
 /**
  * struct amdxdna_drm_get_array - Get information array.
@@ -685,6 +733,10 @@ struct amdxdna_drm_get_array {
 	 *
 	 * %DRM_AMDXDNA_BO_USAGE:
 	 * Returns usage of heap/internal/external BOs.
+	 *
+	 * %DRM_AMDXDNA_HWCTX_MEM_BITMAP:
+	 * Returns auto-selected CMA mem_bitmap for a hwctx. Context ID is passed
+	 * via element_size; result is a single u32 written to buffer.
 	 *
 	 * %DRM_AMDXDNA_AIE_COREDUMP:
 	 * Returns AIE tile memory dump for the context described by

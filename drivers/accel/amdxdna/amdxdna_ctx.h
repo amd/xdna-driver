@@ -156,6 +156,12 @@ struct amdxdna_hwctx {
 
 	atomic64_t			job_submit_cnt;
 	atomic64_t			job_free_cnt ____cacheline_aligned_in_smp;
+
+	/*
+	 * Opaque per-hwctx state for auxiliary/backend paths (non-mailbox).
+	 * e.g. VE2; see ve2_aie.c.
+	 */
+	void				*aux_ctx_priv;
 };
 
 #ifndef AMDXDNA_AUX
@@ -187,7 +193,6 @@ struct amdxdna_sched_job {
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;
-	/* The fence to notice DRM scheduler that job is done by hardware */
 	struct dma_fence	*fence;
 	/* user can wait on this fence */
 	struct dma_fence	*out_fence;

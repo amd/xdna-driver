@@ -93,7 +93,11 @@ EOF
     cat >> "$conftest_c"
 
     # Now build it like your real driver ($USE_LLVM intentionally unquoted to avoid empty arg)
-    if make -s -C "$KERNEL_SRC" M="$tmpdir" modules $USE_LLVM >/dev/null 2>&1; then
+    kbuild_o=""
+    if [ -n "${KERNEL_OUT}" ] && [ -f "${KERNEL_OUT}/include/generated/autoconf.h" ]; then
+        kbuild_o="O=${KERNEL_OUT}"
+    fi
+    if make -s -C "$KERNEL_SRC" $kbuild_o M="$tmpdir" modules $USE_LLVM >/dev/null 2>&1; then
         echo "#define $macro 1" >> "$OUT"
         echo ">>>  + $macro: yes" >&2
     else

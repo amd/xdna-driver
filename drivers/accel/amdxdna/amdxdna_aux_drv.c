@@ -15,7 +15,6 @@
 
 #include "amdxdna_drv.h"
 #include "amdxdna_aux_drv.h"
-#include "ve2_aux.h"
 
 /*
  * amdxdna_aux_id_table: each struct auxiliary_device_id row binds an
@@ -26,7 +25,7 @@
 static const struct auxiliary_device_id amdxdna_aux_id_table[] = {
 	{
 		.name = "xilinx_aie.amdxdna",
-		.driver_data = (kernel_ulong_t)&dev_ve2_info,
+		.driver_data = (kernel_ulong_t)&dev_ve2_info_aie,
 	},
 	{}
 };
@@ -52,6 +51,11 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 
 	auxiliary_set_drvdata(auxdev, xdna);
 
+	/*
+	 * Auxiliary devices do not get dma_mask/coherent_dma_mask set by the
+	 * bus. dma_set_mask_and_coherent() returns -EIO when dev->dma_mask is
+	 * NULL, so initialize it first to use the API.
+	 */
 	if (!dev->dma_mask) {
 		dev->coherent_dma_mask = DMA_BIT_MASK(64);
 		dev->dma_mask = &dev->coherent_dma_mask;
