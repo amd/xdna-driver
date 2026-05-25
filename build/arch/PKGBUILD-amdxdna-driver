@@ -20,9 +20,18 @@ package() {
     return 1
   fi
 
-  local dkms_conf_src="${xdna_build_dir}/opt/xilinx/xrt/share/amdxdna/dkms.conf"
+  local share_dir="${xdna_build_dir}/opt/xilinx/xrt/share/amdxdna"
+  local dkms_conf_src="${share_dir}/dkms.conf"
   if [ ! -f "$dkms_conf_src" ]; then
     error "dkms.conf not found"
+    return 1
+  fi
+
+  # dkms.conf declares PRE_BUILD="./configure_kernel.sh", which generates
+  # config_kernel.h; the module won't build without it.
+  local configure_kernel_src="${share_dir}/configure_kernel.sh"
+  if [ ! -f "$configure_kernel_src" ]; then
+    error "configure_kernel.sh not found"
     return 1
   fi
 
@@ -30,6 +39,7 @@ package() {
   local drv_src_dir="/usr/src/${drv_name}-${pkgver}"
 
   install -Dm644 "$dkms_conf_src" "$pkgdir/${drv_src_dir}/dkms.conf"
+  install -Dm755 "$configure_kernel_src" "$pkgdir/${drv_src_dir}/configure_kernel.sh"
   install -Dm755 "${xdna_build_dir}/package/postinst" "$pkgdir/${drv_src_dir}/postinst"
   install -Dm755 "${xdna_build_dir}/package/prerm" "$pkgdir/${drv_src_dir}/prerm"
 
