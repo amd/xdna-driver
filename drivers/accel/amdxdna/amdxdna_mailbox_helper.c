@@ -21,6 +21,21 @@ int xdna_msg_cb(void *handle, void __iomem *data, size_t size)
 	struct xdna_notify *cb_arg = handle;
 	int ret;
 
+	/*
+	 * A NULL handle means no sender is waiting on this message -- there is
+	 * nothing to complete and nowhere to store a response. Under the
+	 * current design every sender path either holds a valid handle or
+	 * sends fire-and-forget with handle == NULL by construction; this
+	 * guard catches the second case on channel teardown. Log loudly if a
+	 * response actually arrived (data != NULL): that would mean a synchronous
+	 * sender bookkeeping invariant has broken.
+	 */
+	if (unlikely(!cb_arg)) {
+		if (data)
+			pr_err_ratelimited("Mailbox response dropped: no waiter for message\n");
+		return 0;
+	}
+
 	if (unlikely(!data))
 		goto out;
 
