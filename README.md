@@ -150,14 +150,16 @@ sudo pacman -U xrt-npu-*.pkg.tar.zst
 cd ../../../build
 ./build.sh -release
 
-# Build and install XDNA plugin package
+# Build and install the AMDXDNA driver first (separate package for the
+# DKMS-based kernel module). The plugin depends on this package, so it
+# must be installed before the plugin.
 cd arch
-makepkg -p PKGBUILD-xrt-plugin-amdxdna
-sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
-
-# Build and install AMDXDNA driver (separate package for DKMS-based kernel module)
 makepkg -p PKGBUILD-amdxdna-driver
 sudo pacman -U amdxdna-driver-*.pkg.tar.zst
+
+# Build and install the XDNA plugin package
+makepkg -p PKGBUILD-xrt-plugin-amdxdna
+sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
 
 # Configure memory limits (required for NPU access)
 # Using limits.d drop-in file (survives package upgrades)

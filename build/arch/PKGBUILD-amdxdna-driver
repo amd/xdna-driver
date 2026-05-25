@@ -5,11 +5,11 @@ pkgrel=1
 pkgdesc="AMD XDNA(tm) Driver (amdxdna.ko) for Linux"
 arch=('x86_64')
 url="https://github.com/amd/xdna-driver/"
-license=('custom')
-depends=('dkms')
+license=('Apache-2.0')
+depends=('dkms' 'linux-headers')
 makedepends=('bash' 'git')
 provides=("${pkgname}=${pkgver}")
-conflicts=("${pkgname}" "amdxdna-driver-bin")
+conflicts=('amdxdna-driver-bin')
 options=('!debug' '!strip')
 
 package() {
