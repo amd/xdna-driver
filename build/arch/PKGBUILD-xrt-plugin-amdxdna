@@ -10,10 +10,10 @@ depends=('xrt-base' 'xrt-npu' "amdxdna-driver>=${pkgver}")
 conflicts=('amdxdna-driver-bin')
 provides=("${pkgname}=${pkgver}")
 options=('!debug' '!strip')
+install=xrt-plugin-amdxdna.install
 
 package() {
-  local xdna_build_dir="${XDNA_BUILD_DIR:-../Release}"
-  cd "$srcdir"
+  local xdna_build_dir="${XDNA_BUILD_DIR:-$startdir/../Release}"
   local tarball=$(find "${xdna_build_dir}" -maxdepth 1 -type f -name "xrt_plugin.${pkgver}_-${CARCH}-amdxdna.tar.gz" -print -quit 2>/dev/null)
   if [ -z "$tarball" ]; then
     error "XDNA plugin tarball not found"

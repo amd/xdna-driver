@@ -46,7 +46,11 @@ pre_remove() {
     rm -f ${udev_rules_d}/${amdxdna_rules_file}
   fi
 
-  $install_datadir/dkms_driver.sh --remove
+  if [ ! -x "$install_datadir/dkms_driver.sh" ]; then
+    echo "Error: $install_datadir/dkms_driver.sh not found or not executable." >&2
+    return 1
+  fi
+  "$install_datadir/dkms_driver.sh" --remove
 
   echo "AMD XDNA driver removed!"
 }

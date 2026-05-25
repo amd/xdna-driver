@@ -81,9 +81,9 @@ download_url()
   local output=$1
   local url=$2
 
-  if [ -x "$(command -v wget)" ]; then
+  if command -v wget >/dev/null 2>&1; then
     wget -O "$output" "$url"
-  elif [ -x "$(command -v curl)" ]; then
+  elif command -v curl >/dev/null 2>&1; then
     curl -fL -o "$output" "$url"
   else
     echo "Neither wget nor curl is installed; cannot download $url" >&2
