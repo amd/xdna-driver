@@ -19,6 +19,7 @@
 #include "amdxdna_gem.h"
 #include "amdxdna_ubuf.h"
 #include "amdxdna_cma_buf.h"
+#include "amdxdna_trace.h"
 
 #ifdef AMDXDNA_DEVEL
 #include "amdxdna_devel.h"
@@ -1123,6 +1124,8 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_gem_obj *abo;
 	int ret;
 
+	trace_amdxdna_debug_point(current->comm, args->type, "create bo");
+
 	XDNA_DBG(xdna, "BO arg type %d va_tbl 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
 	switch (args->type) {
@@ -1233,6 +1236,8 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	struct drm_gem_object *gobj;
 	int ret = 0;
 
+	trace_amdxdna_debug_point(current->comm, args->handle, "get bo info");
+
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
@@ -1326,6 +1331,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	dma_addr_t bo_phyaddr;
 	u32 ctx_hdl;
 	int ret;
+
+	trace_amdxdna_debug_point(current->comm, args->handle, "sync bo");
 
 	gobj = drm_gem_object_lookup(filp, args->handle);
 	if (!gobj) {
