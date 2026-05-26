@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <libgen.h>
+#include <fstream>
 #include <limits.h>
 #include <map>
 #include <memory>
@@ -267,6 +268,48 @@ struct xrt_smi_lists
     }
   }
 };
+
+struct sensor_info
+{
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key)
+  {
+    throw xrt_core::query::no_such_key(key, "Not implemented");
+  }
+
+  static std::any
+  get(const xrt_core::device* /*device*/, key_type key, const std::any& param)
+  {
+    if (key != key_type::sdm_sensor_info)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    const auto req_type = std::any_cast<xrt_core::query::sdm_sensor_info::sdr_req_type>(param);
+    if (req_type != xrt_core::query::sdm_sensor_info::sdr_req_type::thermal)
+      return xrt_core::query::sdm_sensor_info::result_type{};
+
+    static constexpr const char* thermal_sysfs_path = "/sys/class/thermal/thermal_zone1/temp";
+    std::ifstream file(thermal_sysfs_path);
+    if (!file.is_open())
+      return xrt_core::query::sdm_sensor_info::result_type{};
+
+    int millidc = 0;
+    file >> millidc;
+    if (file.fail())
+      return xrt_core::query::sdm_sensor_info::result_type{};
+
+    xrt_core::query::sdm_sensor_info::data_type sensor{};
+    sensor.label = "Device Temperature";
+    sensor.input = static_cast<uint32_t>(millidc);
+    sensor.unitm = -3;
+    sensor.units = "degrees C";
+    sensor.status = "ok";
+
+    xrt_core::query::sdm_sensor_info::result_type sensors;
+    sensors.push_back(std::move(sensor));
+    return sensors;
+  }
+};
+
 //Implement aie_partition_info query
 struct partition_info
 {
@@ -1036,6 +1079,7 @@ initialize_query_table()
   emplace_func1_request<query::aie_coredump,            aie_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
+  emplace_func1_request<query::sdm_sensor_info,         sensor_info>();
 }
 
 struct X { X() { initialize_query_table(); } };
