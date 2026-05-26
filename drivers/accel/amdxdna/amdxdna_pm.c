@@ -42,6 +42,9 @@ int amdxdna_pm_resume_get(struct amdxdna_dev *xdna)
 	struct device *dev = xdna->ddev.dev;
 	int ret;
 
+	if (!pm_runtime_enabled(dev))
+		return 0;
+
 	ret = pm_runtime_resume_and_get(dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Resume failed: %d", ret);
@@ -54,6 +57,9 @@ int amdxdna_pm_resume_get(struct amdxdna_dev *xdna)
 void amdxdna_pm_suspend_put(struct amdxdna_dev *xdna)
 {
 	struct device *dev = xdna->ddev.dev;
+
+	if (!pm_runtime_enabled(dev))
+		return;
 
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
