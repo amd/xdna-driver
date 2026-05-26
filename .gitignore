@@ -2,3 +2,9 @@
 build/
 version.h
 .gradle/
+*.o
+*.o.*
+*.ko
+*.cmd
+*.mod
+*.mod.c
