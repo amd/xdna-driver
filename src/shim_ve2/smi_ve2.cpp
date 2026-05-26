@@ -43,7 +43,8 @@ create_examine_subcommand()
       {"aie-partitions", "AIE partition information", "common"},
       {"host", "Host information", "common"},
       {"clocks", "Clock frequency information", "hidden"},
-      {"platform", "Platforms flashed on the device", "common"}
+      {"platform", "Platforms flashed on the device", "common"},
+      {"thermal", "Thermal sensors present on the device", "common"}
     };
     
     std::map<std::string, std::shared_ptr<xrt_core::smi::option>> examine_suboptions;
