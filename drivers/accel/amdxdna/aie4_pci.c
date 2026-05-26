@@ -9,6 +9,7 @@
 #include <drm/drm_print.h>
 #include <linux/firmware.h>
 #include <linux/sizes.h>
+#include <linux/pm_runtime.h>
 
 #include "aie.h"
 #include "aie4_pci.h"
@@ -618,6 +619,8 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 		return ret;
 
 	amdxdna_vbnv_init(xdna);
+
+	pm_runtime_disable(&pdev->dev);
 	XDNA_DBG(xdna, "init finished");
 
 	return 0;
