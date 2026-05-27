@@ -1927,6 +1927,8 @@ struct aie4_msg_query_cert_firmware_version_req {
  * @date: Date of the UC
  * @hotfix: Hotfix number of the UC
  * @build: Build number of the UC
+ * @rsvd: Reserved, pads the response to the wire-format size of 64 bytes
+ *        (matches the firmware's BUILD_ASSERT on the same struct).
  * @note The total size of the response is 64 bytes.
  *     git_hash and date both end with a null character.
  */
@@ -1938,7 +1940,11 @@ struct aie4_msg_query_cert_firmware_version_resp {
 	char    date[11];
 	u8 hotfix;
 	u8 build;
+	u8 rsvd[4];
 };
+
+static_assert(sizeof(struct aie4_msg_query_cert_firmware_version_resp) == 64,
+	      "aie4_msg_query_cert_firmware_version_resp must be 64 bytes on the wire");
 
 /**
  * AIE4_MSG_OP_GET_DPM_FREQ_TABLE
