@@ -202,6 +202,12 @@ extern const struct amdxdna_dev_info dev_npu3_vf_info;
 extern const struct amdxdna_dev_info dev_npu4_info;
 extern const struct amdxdna_dev_info dev_npu5_info;
 extern const struct amdxdna_dev_info dev_npu6_info;
+extern const struct amdxdna_dev_info dev_npu9_classic_info;
+extern const struct amdxdna_dev_info dev_npu9_pf_info;
+extern const struct amdxdna_dev_info dev_npu9_vf_info;
+extern const struct amdxdna_dev_info dev_npu11_classic_info;
+extern const struct amdxdna_dev_info dev_npu11_pf_info;
+extern const struct amdxdna_dev_info dev_npu11_vf_info;
 
 int amdxdna_sysfs_init(struct amdxdna_dev *xdna);
 void amdxdna_sysfs_fini(struct amdxdna_dev *xdna);
