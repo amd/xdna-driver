@@ -1620,7 +1620,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_gem_obj *abo, *mdata_abo = NULL;
-	struct fw_buffer_metadata *mdata;
+	struct amdxdna_fw_buffer_metadata *mdata;
 	u32 prev_buf_sz = 0;
 	u32 op_timeout;
 	u64 buf_paddr;
@@ -1636,17 +1636,23 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 				 __func__, mdata_hdl, type);
 			return -EINVAL;
 		}
-		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
+		mdata = (struct amdxdna_fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
 		if (!mdata) {
 			XDNA_ERR(xdna, "%s: Failed to vmap metadata BO %lld for type %d",
 				 __func__, mdata_hdl, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
 		}
-
+		if (struct_size(mdata, uc_info, hwctx->num_col) > mdata_abo->mem.size) {
+			XDNA_ERR(xdna,
+				 "%s: metadata BO too small for %u uc entries (BO size %zu)",
+				 __func__, hwctx->num_col, mdata_abo->mem.size);
+			amdxdna_gem_put_obj(mdata_abo);
+			return -EINVAL;
+		}
 		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_SHARE);
 		if (!abo) {
-			XDNA_ERR(xdna, "%s: Failed to get BO %lld for type %d",
+			XDNA_ERR(xdna, "%s: Failed to get BO %u for type %d",
 				 __func__, mdata->bo_handle, type);
 			amdxdna_gem_put_obj(mdata_abo);
 			return -EINVAL;
@@ -1668,7 +1674,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			}
 			prev_buf_sz += buf_sz;
 		}
-		XDNA_DBG(xdna, "Attached buf_type %d BO %lld to hwctx %s",
+		XDNA_DBG(xdna, "Attached buf_type %d BO %u to hwctx %s",
 			 mdata->buf_type, mdata->bo_handle, hwctx->name);
 
 		amdxdna_gem_put_obj(abo);
@@ -1683,7 +1689,7 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 				 __func__, mdata_hdl, type);
 			return -EINVAL;
 		}
-		mdata = (struct fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
+		mdata = (struct amdxdna_fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
 		if (!mdata) {
 			XDNA_ERR(xdna, "%s: Failed to vmap metadata BO %lld for type %d",
 				 __func__, mdata_hdl, type);
@@ -1694,14 +1700,14 @@ int ve2_hwctx_config(struct amdxdna_ctx *hwctx, u32 type, u64 mdata_hdl, void *b
 			ret = ve2_update_handshake_pkt(hwctx, mdata->buf_type, 0, 0, col, false);
 			if (ret) {
 				XDNA_ERR(xdna,
-					 "%s: detach fail type=%d BO=%lld ctx=%s col=%u ret=%d",
+					 "%s: detach fail type=%d BO=%u ctx=%s col=%u ret=%d",
 					 __func__, mdata->buf_type, mdata->bo_handle,
 					 hwctx->name, col, ret);
 				amdxdna_gem_put_obj(mdata_abo);
 				return ret;
 			}
 		}
-		XDNA_DBG(xdna, "Detached buf_type %d BO %lld from hwctx %s",
+		XDNA_DBG(xdna, "Detached buf_type %d BO %u from hwctx %s",
 			 mdata->buf_type, mdata->bo_handle, hwctx->name);
 
 		amdxdna_gem_put_obj(mdata_abo);
