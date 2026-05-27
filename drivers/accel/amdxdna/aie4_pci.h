@@ -28,9 +28,6 @@ struct amdxdna_hwctx_priv {
 
 	struct cert_comp                *cert_comp;
 	u32                             hw_ctx_id;
-#define CTX_STATE_DISCONNECTED		0x0
-#define CTX_STATE_CONNECTED		0x1
-	u32				state;
 };
 
 struct amdxdna_dev_priv {
@@ -71,7 +68,7 @@ void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx);
 int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 int aie4_hwctx_valid_doorbell(struct amdxdna_client *client, u32 vm_pgoff);
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
-int aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx);
+void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx);
 
 /* aie4_sriov.c */
 #if IS_ENABLED(CONFIG_PCI_IOV)
