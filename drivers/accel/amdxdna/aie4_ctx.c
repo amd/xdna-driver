@@ -30,8 +30,10 @@ static irqreturn_t cert_comp_isr(int irq, void *p)
 	return IRQ_HANDLED;
 }
 
-static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32 msix_idx)
+static int aie4_link_cert_comp(struct amdxdna_hwctx *hwctx, u32 msix_idx)
 {
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct cert_comp *cert_comp;
@@ -42,12 +44,13 @@ static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32
 	cert_comp = xa_load(&ndev->cert_comp_xa, msix_idx);
 	if (cert_comp) {
 		kref_get(&cert_comp->kref);
-		return cert_comp;
+		priv->cert_comp = cert_comp;
+		return 0;
 	}
 
 	cert_comp = kzalloc_obj(*cert_comp);
 	if (!cert_comp)
-		return NULL;
+		return -ENOMEM;
 
 	cert_comp->ndev = ndev;
 	cert_comp->msix_idx = msix_idx;
@@ -75,21 +78,20 @@ static struct cert_comp *aie4_lookup_cert_comp(struct amdxdna_dev_hdl *ndev, u32
 		goto free_irq;
 	}
 
-	return cert_comp;
+	priv->cert_comp = cert_comp;
+	return 0;
 
 free_irq:
 	free_irq(cert_comp->irq, cert_comp);
 free_cert_comp:
 	kfree(cert_comp);
-	return NULL;
+	return -ENODEV;
 }
 
 static void cert_comp_release(struct kref *kref)
 {
 	struct cert_comp *cert_comp = container_of(kref, struct cert_comp, kref);
 	struct amdxdna_dev_hdl *ndev = cert_comp->ndev;
-
-	drm_WARN_ON(&ndev->aie.xdna->ddev, !mutex_is_locked(&ndev->cert_comp_lock));
 
 	xa_erase(&ndev->cert_comp_xa, cert_comp->msix_idx);
 	if (cert_comp->irq >= 0)
@@ -99,14 +101,43 @@ static void cert_comp_release(struct kref *kref)
 
 static void aie4_put_cert_comp(struct cert_comp *cert_comp)
 {
-	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev_hdl *ndev = cert_comp->ndev;
 
-	if (!cert_comp)
-		return;
-
-	ndev = cert_comp->ndev;
 	guard(mutex)(&ndev->cert_comp_lock);
+
 	kref_put(&cert_comp->kref, cert_comp_release);
+}
+
+static struct cert_comp *aie4_get_cert_comp(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	guard(mutex)(&ndev->cert_comp_lock);
+
+	if (!priv->cert_comp)
+		return NULL;
+
+	kref_get(&priv->cert_comp->kref);
+	return priv->cert_comp;
+}
+
+static void aie4_unlink_cert_comp(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct cert_comp *cert_comp;
+
+	guard(mutex)(&ndev->cert_comp_lock);
+
+	cert_comp = priv->cert_comp;
+	/* unlink hwctx_priv link with cert_comp */
+	priv->cert_comp = NULL;
+
+	if (cert_comp) {
+		wake_up_all(&cert_comp->waitq);
+		kref_put(&cert_comp->kref, cert_comp_release);
+	}
 }
 
 static int aie4_msg_destroy_context(struct amdxdna_dev_hdl *ndev, u32 hw_context_id)
@@ -150,9 +181,6 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		return -EINVAL;
 	}
 
-	if (priv->state == CTX_STATE_CONNECTED)
-		return 0;
-
 	req.partition_id = ndev->partition_id;
 	req.request_num_tiles = hwctx->num_tiles;
 	req.pasid = FIELD_PREP(AIE4_MSG_PASID, client->pasid) |
@@ -177,20 +205,19 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 resp.doorbell_offset);
 
 	/* setup interrupt completion per msix index */
-	priv->cert_comp = aie4_lookup_cert_comp(ndev, resp.job_complete_msix_idx);
-	if (!priv->cert_comp) {
+	ret = aie4_link_cert_comp(hwctx, resp.job_complete_msix_idx);
+	if (ret) {
 		aie4_msg_destroy_context(ndev, resp.hw_context_id);
-		return -EINVAL;
+		return ret;
 	}
 
 	priv->hw_ctx_id = resp.hw_context_id;
 	hwctx->doorbell_offset = resp.doorbell_offset;
-	priv->state = CTX_STATE_CONNECTED;
 
 	return 0;
 }
 
-int aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
+void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
@@ -200,22 +227,15 @@ int aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	if (priv->state == CTX_STATE_DISCONNECTED)
-		return 0;
-
 	ret = aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
 	if (ret)
-		return ret;
+		XDNA_WARN(xdna, "destroy ctx id %d failed %d", priv->hw_ctx_id, ret);
 
-	/* wake up if there are still pending hwctx(s) */
-	priv->state = CTX_STATE_DISCONNECTED;
-	wake_up_all(&priv->cert_comp->waitq);
-
-	/* release cert comp */
-	aie4_put_cert_comp(priv->cert_comp);
-	priv->cert_comp = NULL;
-
-	return ret;
+#define CTX_INVALID_ID			(~0U)
+#define CTX_INVALID_DOORBELL		(~0U)
+	priv->hw_ctx_id = CTX_INVALID_ID;
+	hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
+	aie4_unlink_cert_comp(hwctx);
 }
 
 static void aie4_hwctx_umq_fini(struct amdxdna_hwctx *hwctx)
@@ -323,29 +343,50 @@ static u64 get_read_index(struct amdxdna_hwctx *hwctx)
 	return ri;
 }
 
-static inline bool check_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq)
+static int check_cert_comp_linked(struct amdxdna_hwctx *hwctx, struct cert_comp *comp)
 {
-	u64 read_idx = get_read_index(hwctx);
+	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
 
+	guard(mutex)(&ndev->cert_comp_lock);
+
+	/* any changed comp indicates that EAGAIN is needed */
+	return comp == hwctx->priv->cert_comp;
+}
+
+static bool check_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq, struct cert_comp *comp)
+{
+	u64 read_idx;
+
+	if (!check_cert_comp_linked(hwctx, comp))
+		return true;
+
+	read_idx = get_read_index(hwctx);
+	XDNA_DBG(hwctx->client->xdna, "check read idx %lld > seq %lld", read_idx, seq);
 	return read_idx > seq;
 }
 
 int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 {
 	unsigned long wait_jifs = MAX_SCHEDULE_TIMEOUT;
-	struct amdxdna_hwctx_priv *priv = hwctx->priv;
-	struct cert_comp *cert_comp = priv->cert_comp;
+	struct cert_comp *cert_comp = aie4_get_cert_comp(hwctx);
 	long ret;
+
+	if (!cert_comp)
+		return -EAGAIN;
 
 	if (timeout)
 		wait_jifs = msecs_to_jiffies(timeout);
 
 	ret = wait_event_interruptible_timeout(cert_comp->waitq,
-					       (check_cmd_done(hwctx, seq)),
+					       (check_cmd_done(hwctx, seq, cert_comp)),
 					       wait_jifs);
 
 	if (!ret)
 		ret = -ETIME;
+	else if (ret > 0 && !check_cert_comp_linked(hwctx, cert_comp))
+		ret = -EAGAIN;
+
+	aie4_put_cert_comp(cert_comp);
 
 	return ret <= 0 ? ret : 0;
 }
