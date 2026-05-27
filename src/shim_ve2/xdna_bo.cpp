@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
+#include <cstring>
 #include <unistd.h>
 
 #include "core/common/query_requests.h"
@@ -15,9 +16,12 @@ init_metadata_buffer(xdna_bo& mdata_base_bo,
 		     std::map<uint32_t, size_t> buf_sizes,
 		     bool attach)
 {
-  struct fw_buffer_metadata *mdata =
-      reinterpret_cast<struct fw_buffer_metadata*>(mdata_base_bo.map(xrt_core::buffer_handle::map_type::write));
+  struct amdxdna_fw_buffer_metadata *mdata =
+      reinterpret_cast<struct amdxdna_fw_buffer_metadata*>(mdata_base_bo.map(xrt_core::buffer_handle::map_type::write));
 
+  auto mdata_size = sizeof(struct amdxdna_fw_buffer_metadata)
+                    + total_cols * sizeof(struct amdxdna_uc_info_entry);
+  std::memset(mdata, 0, mdata_size);
   if (flag == XRT_BO_USE_DEBUG || flag == XRT_BO_USE_UC_DEBUG)
     mdata->buf_type = AMDXDNA_FW_BUF_DEBUG;
   if (flag == XRT_BO_USE_DTRACE)
@@ -439,7 +443,7 @@ config(const xrt_core::hwctx_handle* ctx, const std::map<uint32_t, size_t>& buf_
 
   auto boh = get_drm_bo_handle();
   auto total_cols = get_total_cols(m_core_device, ctx_id);
-  auto mdata_size = sizeof(struct fw_buffer_metadata) + total_cols * sizeof(struct uc_info_entry);
+  auto mdata_size = sizeof(struct amdxdna_fw_buffer_metadata) + total_cols * sizeof(struct amdxdna_uc_info_entry);
 
   auto xdev = static_cast<const device_xdna*>(m_core_device);
   xdna_bo mdata_bo = xdna_bo(*xdev, ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_SHARE);
@@ -467,7 +471,7 @@ attach_to_ctx(uint32_t flag)
   for (int i = 0; i < total_cols; ++i)
     buf_sizes[i] = buf_size / total_cols;
 
-  auto mdata_size = sizeof(struct fw_buffer_metadata) + total_cols * sizeof(struct uc_info_entry);
+  auto mdata_size = sizeof(struct amdxdna_fw_buffer_metadata) + total_cols * sizeof(struct amdxdna_uc_info_entry);
   auto xdev = static_cast<const device_xdna*>(m_core_device);
   xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_SHARE);
   init_metadata_buffer(mdata_bo, boh, total_cols, flag, buf_sizes, true);
@@ -483,7 +487,7 @@ detach_from_ctx(uint32_t flag)
     return;
 
   auto boh = get_drm_bo_handle();
-  auto mdata_size = sizeof(struct fw_buffer_metadata);
+  auto mdata_size = sizeof(struct amdxdna_fw_buffer_metadata);
   auto xdev = static_cast<const device_xdna*>(m_core_device);
   xdna_bo mdata_bo = xdna_bo(*xdev, m_owner_ctx_id, mdata_size, XCL_BO_FLAGS_CACHEABLE, AMDXDNA_BO_SHARE);
   init_metadata_buffer(mdata_bo, 0, 0, flag, std::map<uint32_t, size_t>{}, false);
