@@ -85,20 +85,32 @@ MODULE_PARM_DESC(mailbox_verbose,
 #define RPMSG_PROTOCOL_VERSION	0x1
 
 /*
- * Data-plane "doorbell" opcode.
+ * RPU platform opcodes (0x40000..0x4FFFF range).
  *
  * Unlike PCI aie4 (which uses a BAR doorbell write to kick CERT), the rpmsg
  * transport carries the doorbell as a regular RPMsg.  The RPU firmware
  * dispatches it through the NPU mgmt switch like any other request and
  * sends back a small ack.  The wire form must match
- * rpu-fw/app/include/aie_mgmt/npu_msg_handler.h:NPU_MSG_OP_EXEC_HW_CONTEXT
- * (opcode 0x30010, payload = { __le32 hw_context_id }).
+ * rpu-fw/app/include/aie_mgmt/npu_msg_handler.h:
  *
- * Kept scoped to this file because it is not part of the upstream aie4
- * firmware protocol (PCI parts have no equivalent), so it does not belong
- * in aie4_msg_priv.h.
+ *   NPU_MSG_OP_EXEC_HW_CONTEXT (0x40001) — driver→RPU software doorbell.
+ *     Payload: __le32 hw_context_id.  RPU replies with a 4-byte status.
+ *
+ *   NPU_MSG_OP_CMD_COMPLETION  (0x40002) — unsolicited RPU→driver async
+ *     notification fired when a command finishes on an HW context.
+ *     Payload: struct { __le32 partition_id; __le32 context_id; }.
+ *     With polling disabled (no MSI-X is wired over RPMsg), this is the
+ *     only wake source for cmd_wait()->check_cmd_done() to re-check the
+ *     UMQ host_queue read_index.
+ *
+ * Kept scoped to this file because these are not part of the upstream
+ * aie4 firmware protocol (PCI parts have no equivalent), so they do not
+ * belong in aie4_msg_priv.h.  Opcode 0x30010 (the historical value of
+ * the doorbell) collides with AIE4_MSG_OP_AIE_COREDUMP on the wire and
+ * must not be reused for this purpose.
  */
-#define AMDXDNA_RPMSG_OP_DOORBELL	0x30010
+#define AMDXDNA_RPMSG_OP_EXEC_HW_CONTEXT	0x40001
+#define AMDXDNA_RPMSG_OP_CMD_COMPLETION		0x40002
 
 struct amdxdna_rpmsg_doorbell_req {
 	__le32 hw_context_id;
@@ -106,6 +118,12 @@ struct amdxdna_rpmsg_doorbell_req {
 
 struct amdxdna_rpmsg_doorbell_resp {
 	__le32 status;
+} __packed;
+
+/* Mirrors rpu-fw npu_msg_handler.h:struct npu_msg_cmd_completion. */
+struct amdxdna_rpmsg_cmd_completion {
+	__le32 partition_id;
+	__le32 context_id;
 } __packed;
 
 struct rpmsg_msg_header {
@@ -135,6 +153,46 @@ static struct amdxdna_rpmsg_hdl *to_rpmsg_hdl(struct amdxdna_dev_hdl *ndev)
 	return ndev->xcomm_hdl;
 }
 
+/*
+ * Handle an unsolicited NPU_MSG_OP_CMD_COMPLETION async notification.
+ *
+ * The RPU sends this when a command on an HW context has finished and the
+ * UMQ host_queue read_index has been advanced.  With polling disabled the
+ * driver has no MSI-X over RPMsg, so this message is the sole wake source
+ * for any sleeper in aie4_cmd_wait() / wait_till_seq_completed().  The
+ * waiter's predicate (check_cmd_done) re-reads read_index from the UMQ
+ * shared memory and confirms its own seq, so a broadcast wake is safe:
+ * a false wake just re-runs the predicate and goes back to sleep.
+ *
+ * Mirrors amdxdna_shmem_doorbell_notify() in amdxdna_shmem.c for the
+ * shared-memory + IPI transport.
+ */
+static void
+amdxdna_rpmsg_cmd_completion(struct amdxdna_dev_hdl *ndev,
+			     const void *payload, size_t payload_len)
+{
+	const struct amdxdna_rpmsg_cmd_completion *cc = payload;
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct cert_comp *cert_comp;
+	unsigned long idx;
+
+	if (payload_len < sizeof(*cc)) {
+		XDNA_WARN(xdna,
+			  "CMD_COMPLETION payload too small (%zu < %zu)",
+			  payload_len, sizeof(*cc));
+		return;
+	}
+
+	XDNA_DBG(xdna, "CMD_COMPLETION partition=%u context=%u",
+		 le32_to_cpu(cc->partition_id),
+		 le32_to_cpu(cc->context_id));
+
+	xa_lock(&ndev->cert_comp_xa);
+	xa_for_each(&ndev->cert_comp_xa, idx, cert_comp)
+		wake_up_all(&cert_comp->waitq);
+	xa_unlock(&ndev->cert_comp_xa);
+}
+
 static int amdxdna_rpmsg_rx_cb(struct rpmsg_device *rpdev, void *data,
 			       int len, void *priv, u32 src)
 {
@@ -145,6 +203,7 @@ static int amdxdna_rpmsg_rx_cb(struct rpmsg_device *rpdev, void *data,
 	struct rpmsg_inflight_msg *ifm;
 	void *payload;
 	size_t payload_len;
+	u32 opcode;
 	u32 id;
 
 	if (len < sizeof(*hdr)) {
@@ -153,8 +212,21 @@ static int amdxdna_rpmsg_rx_cb(struct rpmsg_device *rpdev, void *data,
 	}
 
 	id = le32_to_cpu(hdr->id);
+	opcode = le32_to_cpu(hdr->opcode);
 	payload = hdr + 1;
 	payload_len = len - sizeof(*hdr);
+
+	/*
+	 * Unsolicited messages carry an opcode we route on directly; they
+	 * have no entry in msg_xa because the driver never registered an
+	 * inflight request for them.  Dispatch before the id lookup so the
+	 * RPU's own msg_id sequence is not confused with our driver-side
+	 * sequence.
+	 */
+	if (opcode == AMDXDNA_RPMSG_OP_CMD_COMPLETION) {
+		amdxdna_rpmsg_cmd_completion(ndev, payload, payload_len);
+		return 0;
+	}
 
 	mutex_lock(&rhdl->msg_lock);
 	ifm = xa_erase(&rhdl->msg_xa, id);
@@ -293,7 +365,7 @@ static int amdxdna_rpmsg_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 		.hw_context_id = cpu_to_le32(hw_ctx_id),
 	};
 	struct xdna_mailbox_msg msg = {
-		.opcode    = AMDXDNA_RPMSG_OP_DOORBELL,
+		.opcode    = AMDXDNA_RPMSG_OP_EXEC_HW_CONTEXT,
 		.handle    = NULL,
 		.notify_cb = NULL,
 		.send_data = (u8 *)&req,
