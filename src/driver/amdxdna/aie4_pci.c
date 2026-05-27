@@ -376,11 +376,9 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	}
 
 	ret = aie4_query_cert_firmware_version(ndev);
-	if (ret && !ndev->xcomm_ops) {
+	if (ret) {
 		XDNA_ERR(ndev->xdna, "Query CERT FW version failed");
 		return ret;
-	} else if (ret) {
-		XDNA_DBG(ndev->xdna, "CERT FW version not available (ret %d)", ret);
 	}
 
 	if (is_npu3_pf_dev(ndev->xdna)) {
