@@ -575,20 +575,16 @@ disable_device:
 
 static void aie4_mgmt_fw_fini(struct amdxdna_dev_hdl *ndev)
 {
-#if 0
 	int ret;
-#endif
 
 	if (!is_npu3_vf_dev(ndev->xdna) && !skip_work_buffer)
 		aie4_detach_work_buffer(ndev);
 
-#if 0
 	ret = aie4_suspend_fw(ndev);
 	if (ret) {
 		XDNA_ERR(ndev->xdna, "suspend_fw failed, ret %d", ret);
 		return;
 	}
-#endif
 
 	XDNA_DBG(ndev->xdna, "npu firmware suspended");
 }
