@@ -121,7 +121,7 @@ install_recipes()
         echo 'PACKAGE_CLASSES = "package_rpm"' >> "$AMDXDNA_BB"
         echo '' >> "$AMDXDNA_BB"
         echo '# Driver version of XDNA. Update this manually when the XRT submodule is updated.' >> "$AMDXDNA_BB"
-        echo 'XDNA_DRIVER_VERSION = "2.23.0"' >> "$AMDXDNA_BB"
+        echo 'XDNA_DRIVER_VERSION = "2.24.0"' >> "$AMDXDNA_BB"
         echo 'PV = "${XDNA_DRIVER_VERSION}"' >> "$AMDXDNA_BB"
         echo 'EXTRA_OEMAKE += "XDNA_DRIVER_VERSION=${XDNA_DRIVER_VERSION}"' >> "$AMDXDNA_BB"
         echo "TARGET_CXXFLAGS:append = \"\${@bb.utils.contains('PACKAGECONFIG', 'opencl-icd-loader', ' -DOPENCL_ICD_LOADER=on', '', d)}\"" >> "$AMDXDNA_BB"
