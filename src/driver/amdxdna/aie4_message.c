@@ -433,6 +433,17 @@ int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev, struct amdxdna_mgmt_dma_hdl 
 	req.buff_addr = addr;
 	req.log_level = level;
 
+	/*
+	 * Firmware mirrors this struct as __packed (20 bytes: buff_addr(8) +
+	 * buff_size(4) + log_level(4) + pasid(4)) and rejects any other
+	 * req_len.  Our driver-side struct is unpacked, so the leading u64
+	 * forces struct alignment of 8 and adds a 4-byte trailing pad after
+	 * pasid, making sizeof(req) == 24 on x86_64.  Trim the on-wire payload
+	 * to the actual field span via offsetofend() so the rpu-fw size check
+	 * (req_len != sizeof(*req)) passes.
+	 */
+	msg.send_size = offsetofend(struct aie4_msg_dram_logging_start_req, pasid);
+
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Start fw log failed, ret 0x%x", resp.status);
