@@ -961,7 +961,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_gem_obj *meta_bo;
 	struct amdxdna_gem_obj *log_bo;
-	struct fw_buffer_metadata *meta_buffer;
+	struct amdxdna_fw_buffer_metadata *meta_buffer;
 	u32 config_property;
 	u32 prev_size;
 	int ret;
@@ -975,7 +975,19 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 
 	nctx->meta_bo_hdl = attach ? bo_hdl : AMDXDNA_INVALID_BO_HANDLE;
 
-	meta_buffer = (struct fw_buffer_metadata *)amdxdna_gem_vmap(meta_bo);
+	meta_buffer = (struct amdxdna_fw_buffer_metadata *)amdxdna_gem_vmap(meta_bo);
+	if (!meta_buffer) {
+		XDNA_ERR(xdna, "Vmap meta_bo %d failed", bo_hdl);
+		ret = -ENOMEM;
+		goto put_meta_bo;
+	}
+	if (meta_buffer->num_ucs > MAX_NUM_CERTS ||
+	    struct_size(meta_buffer, uc_info, meta_buffer->num_ucs) > meta_bo->mem.size) {
+		XDNA_ERR(xdna, "Invalid num_ucs %u (max %d, meta_bo size %zu)",
+			 meta_buffer->num_ucs, MAX_NUM_CERTS, meta_bo->mem.size);
+		ret = -EINVAL;
+		goto put_meta_bo;
+	}
 
 	switch (meta_buffer->buf_type) {
 	case AMDXDNA_FW_BUF_LOG:
@@ -1000,23 +1012,23 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		log_bo = amdxdna_gem_get_obj(client, meta_buffer->bo_handle, AMDXDNA_BO_SHARE);
 		break;
 	default:
-		XDNA_ERR(xdna, "unsupported buffer type %d bo %lld",
+		XDNA_ERR(xdna, "unsupported buffer type %d bo %u",
 			 meta_buffer->buf_type, meta_buffer->bo_handle);
 		ret = -EOPNOTSUPP;
 		goto put_meta_bo;
 	}
 
 	if (!log_bo) {
-		XDNA_ERR(xdna, "Get log_bo %lld failed", meta_buffer->bo_handle);
+		XDNA_ERR(xdna, "Get log_bo %u failed", meta_buffer->bo_handle);
 		ret = -EINVAL;
 		goto put_meta_bo;
 	}
-	XDNA_DBG(xdna, "Found bo %lld", meta_buffer->bo_handle);
+	XDNA_DBG(xdna, "Found bo %u", meta_buffer->bo_handle);
 
 	/* assign dev_addr + offse to firmware */
 	prev_size = 0;
 	for (int i = 0; i < meta_buffer->num_ucs; i++) {
-		struct uc_info_entry *entry = &meta_buffer->uc_info[i];
+		struct amdxdna_uc_info_entry *entry = &meta_buffer->uc_info[i];
 		u32 index = entry->index;
 		u64 off_addr;
 

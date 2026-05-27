@@ -4,6 +4,7 @@
 // Disable debug print in this file.
 //#undef XDNA_SHIM_DEBUG
 
+#include <cstring>
 #include <iostream>
 
 #include "buffer.h"
@@ -870,10 +871,11 @@ void
 uc_dbg_buffer::
 config(const xrt_core::hwctx_handle* hwctx, const std::map<uint32_t, size_t>& buf_sizes)
 {
-  auto meta_buf_size = offsetof(struct fw_buffer_metadata, uc_info)
-     + buf_sizes.size() * sizeof(struct uc_info_entry);
+  auto meta_buf_size = offsetof(amdxdna_fw_buffer_metadata, uc_info)
+     + buf_sizes.size() * sizeof(amdxdna_uc_info_entry);
   m_metadata_bo = std::make_unique<dbg_buffer>(m_pdev, meta_buf_size, AMDXDNA_BO_CMD);
-  auto metadata = reinterpret_cast<fw_buffer_metadata *>(m_metadata_bo->vaddr());
+  auto metadata = reinterpret_cast<amdxdna_fw_buffer_metadata *>(m_metadata_bo->vaddr());
+  std::memset(metadata, 0, meta_buf_size);
   metadata->bo_handle = id().handle;
   metadata->command_id = 0; //support this later
   auto f = xcl_bo_flags{get_flags()};
