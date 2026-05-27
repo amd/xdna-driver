@@ -11,6 +11,18 @@
 #include <linux/io.h>
 #include <linux/wait.h>
 
+/*
+ * Pull in both pci.h and platform_device.h unconditionally so that
+ * dev_is_pci(), to_pci_dev(), to_platform_device() and the pci_irq_*
+ * helpers are always declared.  Call sites discriminate between the
+ * two transports at runtime via dev_is_pci(xdna->ddev.dev); on a
+ * CONFIG_AMDXDNA_NO_PCI build the underlying device is always a
+ * platform_device, so dev_is_pci() returns false and the PCI-only
+ * branches are dead-stripped by the compiler.
+ */
+#include <linux/pci.h>
+#include <linux/platform_device.h>
+
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_error.h"

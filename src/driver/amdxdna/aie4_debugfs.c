@@ -157,8 +157,21 @@ static int test_msg_enum(struct amdxdna_dev_hdl *ndev)
 static int test_flr(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	struct pci_dev *pdev;
 	int ret;
+
+	/*
+	 * FLR is a PCIe function-level operation; on the RPMsg / shared-
+	 * memory transports the underlying device is a platform_device
+	 * with no PCI config space, so skip cleanly when the "trigger
+	 * FLR" debugfs case fires (e.g. via aie4_test "test all" mode).
+	 */
+	if (!dev_is_pci(xdna->ddev.dev)) {
+		XDNA_INFO(xdna, "FLR not supported on non-PCI transport");
+		return -EOPNOTSUPP;
+	}
+
+	pdev = to_pci_dev(xdna->ddev.dev);
 
 	XDNA_INFO(xdna, "trigger flr");
 

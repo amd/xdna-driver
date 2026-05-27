@@ -194,14 +194,28 @@ static irqreturn_t dpt_irq_handler(int irq, void *data)
 static int amdxdna_dpt_irq_init(struct amdxdna_dpt *dpt)
 {
 	struct amdxdna_dev *xdna = dpt->xdna;
+	struct pci_dev *pdev;
 	int ret;
+
+	/*
+	 * MSI-based DPT delivery is a PCIe-only path.  On the RPMsg /
+	 * shared-memory transports the underlying device is a
+	 * platform_device and the firmware has no doorbell into the APU's
+	 * MSI table — the generic DPT framework falls back to the 10 ms
+	 * polling timer in amdxdna_fw_log_init() in that case.
+	 */
+	if (!dev_is_pci(xdna->ddev.dev)) {
+		XDNA_DBG(xdna, "%s: MSI not supported on non-PCI transport", dpt->name);
+		return -EOPNOTSUPP;
+	}
 
 	if (!dpt->msi_idx || !dpt->msi_address) {
 		XDNA_ERR(xdna, "MSI ID or address undefined");
 		return -EINVAL;
 	}
 
-	ret = pci_irq_vector(to_pci_dev(xdna->ddev.dev), dpt->msi_idx);
+	pdev = to_pci_dev(xdna->ddev.dev);
+	ret = pci_irq_vector(pdev, dpt->msi_idx);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Failed to get IRQ number, %d", ret);
 		return ret;

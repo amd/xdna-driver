@@ -215,42 +215,53 @@ static void aie4_mailbox_fini(struct amdxdna_dev_hdl *ndev)
 static inline void aie4_irq_fini(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	if (enable_aie4_polling)
+	if (enable_aie4_polling) {
 		timer_delete_sync(&ndev->cert_timer);
-	else if (ndev->xcomm_ops)
 		return;
-	else
-		pci_free_irq_vectors(pdev);
+	}
+
+	/* MSI-X teardown only applies on real PCIe NPUs */
+	if (!dev_is_pci(xdna->ddev.dev))
+		return;
+
+	pci_free_irq_vectors(to_pci_dev(xdna->ddev.dev));
 }
 
 static int aie4_irq_init(struct amdxdna_dev *xdna)
 {
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
-	int ret = 0, nvec;
+	struct pci_dev *pdev;
+	int ret, nvec;
 
 	if (enable_aie4_polling) {
 		XDNA_DBG(xdna, "enable_aie4 polling mode");
 		ndev->cert_hsa_poll_dbg_left = 8;
 		timer_setup(&ndev->cert_timer, cert_timer, 0);
 		mod_timer(&ndev->cert_timer, jiffies + msecs_to_jiffies(1000));
-	} else if (ndev->xcomm_ops) {
 		return 0;
-	} else {
-		nvec = pci_msix_vec_count(pdev);
-		XDNA_DBG(xdna, "enable_aie4 interrupt mode, irq vectors:%d", nvec);
-		if (nvec <= 0) {
-			XDNA_ERR(xdna, "does not get number of interrupt vector");
-			return -EINVAL;
-		}
+	}
 
-		ret = pci_alloc_irq_vectors(pdev, nvec, nvec, PCI_IRQ_MSIX);
-		if (ret < 0) {
-			XDNA_ERR(xdna, "failed to alloc irq vector, ret: %d", ret);
-			return ret;
-		}
+	/*
+	 * Platform/RPMsg transports have no PCIe MSI-X table and rely on
+	 * the xcomm_ops fast path (or polling timers) for completion
+	 * notification, so there is no host-side irq to allocate here.
+	 */
+	if (!dev_is_pci(xdna->ddev.dev))
+		return 0;
+
+	pdev = to_pci_dev(xdna->ddev.dev);
+	nvec = pci_msix_vec_count(pdev);
+	XDNA_DBG(xdna, "enable_aie4 interrupt mode, irq vectors:%d", nvec);
+	if (nvec <= 0) {
+		XDNA_ERR(xdna, "does not get number of interrupt vector");
+		return -EINVAL;
+	}
+
+	ret = pci_alloc_irq_vectors(pdev, nvec, nvec, PCI_IRQ_MSIX);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "failed to alloc irq vector, ret: %d", ret);
+		return ret;
 	}
 
 	return 0;
@@ -1558,23 +1569,25 @@ int aie4_xrs_solver_init(struct amdxdna_dev *xdna)
 
 static int aie4_pci_init(struct amdxdna_dev *xdna)
 {
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	struct amdxdna_dev_hdl *ndev;
 	int ret;
 
 	/*
 	 * On the platform/rpmsg path, amdxdna_plat_probe() has already
 	 * allocated ndev, initialised the mutex/xarray and set
-	 * xdna->dev_handle; amdxdna_rpmsg_init() has installed
-	 * ndev->xcomm_ops so the irq/mailbox layer can take the rpmsg
-	 * fast path instead of pci_msix_vec_count(pdev).  Reuse that
-	 * ndev rather than devm_kzalloc()'ing a fresh one — otherwise
-	 * the new ndev would have xcomm_ops==NULL and aie4_irq_init()
-	 * would fall through to the PCI MSI-X branch and fail.
+	 * xdna->dev_handle, and amdxdna_rpmsg_init() has installed
+	 * ndev->xcomm_ops so the irq/mailbox layer takes the rpmsg fast
+	 * path instead of pci_msix_vec_count().  Reuse that ndev rather
+	 * than devm_kzalloc()'ing a fresh one — otherwise the new ndev
+	 * would have xcomm_ops==NULL and lose the bind.
+	 *
+	 * xdna->ddev.dev is the underlying struct device * (PCIe function
+	 * on the PCI path, platform_device on RPMsg/shmem), so devm_*
+	 * works against it directly regardless of transport.
 	 */
 	ndev = xdna->dev_handle;
 	if (!ndev) {
-		ndev = devm_kzalloc(&pdev->dev, sizeof(*ndev), GFP_KERNEL);
+		ndev = devm_kzalloc(xdna->ddev.dev, sizeof(*ndev), GFP_KERNEL);
 		if (!ndev)
 			return -ENOMEM;
 
