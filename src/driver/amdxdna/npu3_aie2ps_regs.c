@@ -25,4 +25,9 @@ const struct amdxdna_dev_info dev_npu3_aie2ps_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.dev_priv		= &npu3_dev_priv,
 	NPU3_COMMON_DEV_INFO,
+	/*
+	 * Override NPU3_COMMON_DEV_INFO default (2). Versal AIE2 silicon has
+	 * one CERT uC per column - matches aie2ps::shim_num_uc=1 in XRT.
+	 */
+	.uc_per_col		= 1,
 };

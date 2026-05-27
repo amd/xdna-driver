@@ -478,13 +478,17 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 	}
 
 	/*
-	 * There is only single partition for the entire 3*4 aie hardware for now.
-	 * In the future, we may have multiple partitions start from different
-	 * start_cols, different num_tiles, mem_size, and application_mode can
-	 * be SINGLE|DUAL_A|DUAL_B.
+	 * There is only a single partition spanning the entire NPU for now.
+	 * The number of columns is reported by firmware via
+	 * AIE4_MSG_OP_AIE_TILE_INFO and cached in ndev->total_col by
+	 * aie4_mgmt_fw_query(), which runs before this function.
+	 *
+	 * In the future, we may have multiple partitions starting from
+	 * different start_cols, different num_tiles, mem_size, and
+	 * application_mode can be SINGLE|DUAL_A|DUAL_B.
 	 */
 	req.partition_col_start = 0;
-	req.partition_col_count = 3;
+	req.partition_col_count = ndev->total_col;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
@@ -1063,8 +1067,9 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		return 0;
 
 	req.partition_id = ndev->partition_id;
-	ctx->start_col = 0; // for now partition is always full NPU
-	ctx->num_col = 3;
+	/* For now the partition spans the full NPU; size comes from firmware. */
+	ctx->start_col = 0;
+	ctx->num_col = ndev->total_col;
 	req.request_num_tiles = ctx->num_tiles;
 
 	req.pasid.raw = 0;

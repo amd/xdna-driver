@@ -123,6 +123,17 @@ struct amdxdna_dev_info {
 	u32				dev_mem_buf_shift;
 	u64				dev_mem_base;
 	size_t				dev_mem_size;
+	/*
+	 * Number of CERT microcontrollers per AIE column. Firmware does not
+	 * expose this in AIE4_MSG_OP_AIE_TILE_INFO, so it is an
+	 * architecture-defined constant per device variant (e.g. 2 for the
+	 * legacy npu3/aie4 family, 1 for npu3_aie2ps/Versal AIE2). The
+	 * runtime CERT count for a full-NPU context is
+	 *     ndev->total_col * uc_per_col
+	 * and is bounded by the firmware ABI array size in
+	 * struct aie4_msg_context_config_cert_logging::info[].
+	 */
+	u8				uc_per_col;
 	char				*default_vbnv;
 	const struct amdxdna_rev_vbnv	*rev_vbnv_tbl;
 	const struct amdxdna_dev_priv	*dev_priv;

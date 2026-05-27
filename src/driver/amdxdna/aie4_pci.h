@@ -69,7 +69,18 @@ aie4_health_runlist_read_idx(struct aie4_msg_app_health_report *h)
 	return h->runlist_read_idx;
 }
 
-#define MAX_NUM_CERTS		6
+/*
+ * The number of CERT microcontrollers per hardware context is computed
+ * at runtime as:
+ *
+ *	ndev->total_col			(firmware AIE4_MSG_OP_AIE_TILE_INFO)
+ *		*
+ *	xdna->dev_info->uc_per_col	(arch constant per npuX_regs.c)
+ *
+ * and is additionally bounded by the firmware ABI array size in
+ * struct aie4_msg_context_config_cert_logging::info[]. See callers in
+ * aie4_hwctx.c.
+ */
 
 #define CERTFW_MAX_SIZE		(SZ_32K + SZ_256)
 
