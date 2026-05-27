@@ -95,6 +95,8 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	struct amdxdna_ctx *ctx;
 	int ret, idx;
 
+	trace_amdxdna_debug_point(current->comm, client->pid, "create hwctx");
+
 	if (args->ext || args->ext_flags)
 		return -EINVAL;
 
@@ -178,6 +180,8 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	struct amdxdna_ctx *ctx;
 	int ret = 0, idx;
 
+	trace_amdxdna_debug_point(current->comm, client->pid, "destroy hwctx");
+
 	if (!drm_dev_enter(dev, &idx))
 		return -ENODEV;
 
@@ -207,6 +211,8 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	u32 buf_size;
 	void *buf;
 	u64 val;
+
+	trace_amdxdna_debug_point(current->comm, client->pid, "config hwctx");
 
 	if (!xdna->dev_info->ops->ctx_config)
 		return -EOPNOTSUPP;
