@@ -285,6 +285,33 @@ static void amdxdna_dpt_timer_put(struct amdxdna_dpt *dpt)
 	mutex_unlock(&dpt->timer_lock);
 }
 
+/*
+ * Wire @dpt up to either an MSI vector or, when MSI isn't available
+ * (notably on the non-PCI RPMsg transport), the AMDXDNA_DPT_POLL_INTERVAL_MS
+ * polling timer.  -EOPNOTSUPP from amdxdna_dpt_irq_init() is the
+ * documented "no doorbell on this transport, fall back to polling" path
+ * and must not be logged as an error -- only genuine IRQ-setup failures
+ * are.  In both fallback cases the timer keeps the DPT consumable.
+ */
+static void amdxdna_dpt_irq_or_poll(struct amdxdna_dpt *dpt, const char *what)
+{
+	struct amdxdna_dev *xdna = dpt->xdna;
+	int ret;
+
+	ret = amdxdna_dpt_irq_init(dpt);
+	if (ret == -EOPNOTSUPP)
+		XDNA_DBG(xdna,
+			 "%s IRQ unavailable on this transport; using %u ms polling fallback",
+			 what, AMDXDNA_DPT_POLL_INTERVAL_MS);
+	else if (ret)
+		XDNA_ERR(xdna,
+			 "%s IRQ init failed (%d); falling back to %u ms polling",
+			 what, ret, AMDXDNA_DPT_POLL_INTERVAL_MS);
+
+	if (ret)
+		amdxdna_dpt_timer_get(dpt);
+}
+
 static void amdxdna_dpt_worker(struct work_struct *w)
 {
 	struct amdxdna_dpt *dpt = container_of(w, struct amdxdna_dpt, work);
@@ -376,13 +403,7 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
 		goto mfree;
 	}
 
-	ret = amdxdna_dpt_irq_init(log_hdl);
-	if (ret)
-		XDNA_ERR(xdna, "Failed to init FW logging IRQ: %d", ret);
-
-	/* Enable continuous polling if IRQ initialization fails */
-	if (ret)
-		amdxdna_dpt_timer_get(log_hdl);
+	amdxdna_dpt_irq_or_poll(log_hdl, "FW logging");
 
 	amdxdna_dpt_read_metadata(log_hdl);
 
@@ -476,13 +497,7 @@ static int amdxdna_fw_log_resume(struct amdxdna_dev *xdna)
 		return ret;
 	}
 
-	ret = amdxdna_dpt_irq_init(log_hdl);
-	if (ret)
-		XDNA_ERR(xdna, "Failed to reinit FW logging IRQ: %d", ret);
-
-	/* Enable continuous polling if IRQ initialization fails */
-	if (ret)
-		amdxdna_dpt_timer_get(log_hdl);
+	amdxdna_dpt_irq_or_poll(log_hdl, "FW logging (resume)");
 
 	log_hdl->enabled = true;
 
@@ -629,13 +644,7 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna, u32 categories)
 		goto mfree;
 	}
 
-	ret = amdxdna_dpt_irq_init(trace_hdl);
-	if (ret)
-		XDNA_ERR(xdna, "Failed to init FW trace IRQ: %d", ret);
-
-	/* Enable continuous polling if IRQ initialization fails */
-	if (ret)
-		amdxdna_dpt_timer_get(trace_hdl);
+	amdxdna_dpt_irq_or_poll(trace_hdl, "FW trace");
 
 	amdxdna_dpt_read_metadata(trace_hdl);
 
@@ -729,13 +738,7 @@ static int amdxdna_fw_trace_resume(struct amdxdna_dev *xdna)
 		return ret;
 	}
 
-	ret = amdxdna_dpt_irq_init(trace_hdl);
-	if (ret)
-		XDNA_ERR(xdna, "Failed to reinit FW trace IRQ: %d", ret);
-
-	/* Enable continuous polling if IRQ initialization fails */
-	if (ret)
-		amdxdna_dpt_timer_get(trace_hdl);
+	amdxdna_dpt_irq_or_poll(trace_hdl, "FW trace (resume)");
 
 	trace_hdl->enabled = true;
 
