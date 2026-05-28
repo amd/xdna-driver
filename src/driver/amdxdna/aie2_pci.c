@@ -1033,7 +1033,7 @@ static int aie2_query_telemetry(struct amdxdna_client *client,
 	}
 
 	memset(buff, 0, size);
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 	ret = aie2_query_aie_telemetry(xdna->dev_handle, dma_hdl, header.type, size, &ver);
 	if (ret) {
@@ -1316,7 +1316,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 				tmp[hw_i].state = AMDXDNA_HWCTX_STATE_IDLE;
 
 			if (aie2_is_ctx_connected(ctx)) {
-				amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+				amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 				mutex_lock(&xdna->dev_handle->aie2_lock);
 				ret = aie2_get_app_health(xdna->dev_handle, dma_hdl,
@@ -1515,14 +1515,14 @@ static int aie2_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 			goto free_data_hdls;
 		}
 		memset(buf_addr, 0, SZ_1M);
-		amdxdna_mgmt_buff_clflush(data_hdls[i], 0, 0);
+		amdxdna_mgmt_buff_sync_for_device(data_hdls[i], 0, 0);
 
 		buf_list[i].buf_addr = amdxdna_mgmt_buff_get_dma_addr(data_hdls[i]);
 		buf_list[i].buf_size = SZ_1M;
 		buf_list[i].reserved = 0;
 	}
 
-	amdxdna_mgmt_buff_clflush(list_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(list_hdl, 0, 0);
 
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_get_aie_coredump(ndev, list_hdl, hwctx->priv->id, num_bufs);
@@ -1687,7 +1687,7 @@ static int aie2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 		goto free_dma;
 	}
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_rw_aie_mem(ndev, AIE2_ACCESS_TYPE_MEM_READ, hwctx->priv->id,
@@ -1698,7 +1698,11 @@ static int aie2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 		goto free_dma;
 	}
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/*
+	 * FW has just written the requested AIE-tile bytes into the DMA
+	 * buffer; invalidate CPU caches before copying out to userspace.
+	 */
+	amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, 0, access.size);
 
 	ret = amdxdna_drm_copy_array_to_user(args, cpu_addr, access.size, 1);
 	if (ret) {
@@ -1836,7 +1840,7 @@ static int aie2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm
 		goto free_dma;
 	}
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_rw_aie_mem(ndev, AIE2_ACCESS_TYPE_MEM_WRITE, hwctx->priv->id,

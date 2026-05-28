@@ -790,7 +790,7 @@ static int aie4_alloc_work_buffer(struct amdxdna_dev_hdl *ndev)
 
 	memset(amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), 0,
 	       AIE4_MPNPUFW_DRAM_WORK_BUFFER_MIN_SIZE);
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 	string_get_size(dma_hdl->size, 1, STRING_UNITS_2, print_size, sizeof(print_size));
 	XDNA_DBG(xdna, "Allocated %s MPNPU work buffer at 0x%llx with DMA addr: 0x%llx",
 		 print_size, (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0),
@@ -2065,7 +2065,7 @@ static int aie4_query_telemetry(struct amdxdna_client *client,
 	dma_addr = amdxdna_mgmt_buff_get_dma_addr(dma_hdl);
 
 	memset(buff, 0, aligned_sz);
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 	ret = aie4_query_aie_telemetry(ndev, type, client->pasid, dma_addr, aligned_sz);
 	if (ret) {
 		XDNA_ERR(xdna, "Get telemetry failed ret %d", ret);
@@ -2528,14 +2528,14 @@ static int aie4_get_coredump(struct amdxdna_client *client, struct amdxdna_drm_g
 			goto free_data_hdls;
 		}
 		memset(buf_addr, 0, SZ_1M);
-		amdxdna_mgmt_buff_clflush(data_hdls[i], 0, 0);
+		amdxdna_mgmt_buff_sync_for_device(data_hdls[i], 0, 0);
 
 		buf_list[i].buffer_address = amdxdna_mgmt_buff_get_dma_addr(data_hdls[i]);
 		buf_list[i].buffer_size = SZ_1M;
 		buf_list[i].reserved = 0;
 	}
 
-	amdxdna_mgmt_buff_clflush(list_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(list_hdl, 0, 0);
 
 	mutex_lock(&ndev->aie4_lock);
 	ret = aie4_get_aie_coredump(ndev, list_hdl, hwctx->priv->hw_ctx_id, hwctx->client->pasid,
@@ -2701,7 +2701,7 @@ static int aie4_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 		goto free_dma;
 	}
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 	mutex_lock(&ndev->aie4_lock);
 	ret = aie4_rw_aie_mem(ndev, AIE4_AIE_DBG_OP_BLOCK_READ, hwctx->priv->hw_ctx_id,
@@ -2713,7 +2713,11 @@ static int aie4_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_
 		goto free_dma;
 	}
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/*
+	 * FW has just written the requested AIE-tile bytes into the DMA
+	 * buffer; invalidate CPU caches before copying out to userspace.
+	 */
+	amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, 0, access.size);
 
 	ret = amdxdna_drm_copy_array_to_user(args, cpu_addr, access.size, 1);
 	if (ret) {
@@ -2851,7 +2855,7 @@ static int aie4_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm
 		goto free_dma;
 	}
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 	mutex_lock(&ndev->aie4_lock);
 	ret = aie4_rw_aie_mem(ndev, AIE4_AIE_DBG_OP_BLOCK_WRITE, hwctx->priv->hw_ctx_id,

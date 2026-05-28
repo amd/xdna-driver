@@ -227,18 +227,6 @@ int amdxdna_mgmt_buff_sync_for_cpu(struct amdxdna_mgmt_dma_hdl *dma_hdl,
 	return 0;
 }
 
-/*
- * Backwards-compatible flush that brackets both directions in a single call.
- * Most legacy call sites use this immediately before sending a buffer to the
- * firmware; preserving the existing for_device semantics keeps those paths
- * working. New code should prefer the directional helpers above and call
- * _for_device before the send and _for_cpu after the response.
- */
-int amdxdna_mgmt_buff_clflush(struct amdxdna_mgmt_dma_hdl *dma_hdl, u32 offset, size_t size)
-{
-	return amdxdna_mgmt_buff_sync_for_device(dma_hdl, offset, size);
-}
-
 dma_addr_t amdxdna_mgmt_buff_get_dma_addr(struct amdxdna_mgmt_dma_hdl *dma_hdl)
 {
 	if (!dma_hdl)

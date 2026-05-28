@@ -462,7 +462,7 @@ static int aie4_error_async_cb(void *handle, void __iomem *data, size_t size)
 
 static int aie4_error_event_send(struct async_event *e)
 {
-	amdxdna_mgmt_buff_clflush(e->dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(e->dma_hdl, 0, 0);
 	return aie4_register_asyn_event_msg(e->ndev, e->dma_hdl, e, aie4_error_async_cb);
 }
 

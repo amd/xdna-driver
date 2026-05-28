@@ -63,7 +63,7 @@ void aie2_dump_ctx(struct amdxdna_ctx *ctx)
 		return;
 	}
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_get_app_health(ndev, dma_hdl, ctx->priv->id, size);
 	mutex_unlock(&ndev->aie2_lock);

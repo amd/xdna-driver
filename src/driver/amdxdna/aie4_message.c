@@ -217,7 +217,7 @@ int aie4_query_aie_status(struct amdxdna_dev_hdl *ndev, char __user *buf,
 	// req.pasid = ; need to implement pasid
 	req.aie4_col_bitmap = aie_bitmap;
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "Error during NPU query, status %d", ret);

@@ -457,7 +457,7 @@ static int aie2_telemetry(struct seq_file *m, u32 type)
 	if (IS_ERR(dma_hdl))
 		return PTR_ERR(dma_hdl);
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
 	ret = aie2_query_aie_telemetry(ndev, dma_hdl, type, size, NULL);
 	mutex_unlock(&ndev->aie2_lock);
@@ -604,7 +604,7 @@ static int aie2_get_app_health_show(struct seq_file *m, void *unused)
 	if (IS_ERR(dma_hdl))
 		return PTR_ERR(dma_hdl);
 
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 	mutex_lock(&ndev->aie2_lock);
 	/* Just for debug, always check context id 1 */
 	ret = aie2_get_app_health(ndev, dma_hdl, 1, size);
@@ -689,7 +689,8 @@ static int aie2_dump_fw_log_buffer_get(struct seq_file *m, void *unused)
 	}
 
 	dma_hdl = ndev->xdna->fw_log->dma_hdl;
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/* FW is producer of the log ring; invalidate CPU caches before reading. */
+	amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, 0, 0);
 	seq_printf(m, "FW log buffer vaddr: 0x%llx\n",
 		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
 	seq_printf(m, "FW log buffer DMA addr: 0x%llx\n", amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
@@ -756,7 +757,8 @@ static int aie2_dump_fw_trace_buffer_get(struct seq_file *m, void *unused)
 	}
 
 	dma_hdl = ndev->xdna->fw_trace->dma_hdl;
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/* FW is producer of the trace ring; invalidate CPU caches before reading. */
+	amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, 0, 0);
 	seq_printf(m, "FW trace buffer vaddr: 0x%llx\n",
 		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
 	seq_printf(m, "FW trace buffer DMA addr: 0x%llx\n",
