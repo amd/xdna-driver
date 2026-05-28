@@ -124,12 +124,23 @@ struct amdxdna_dev_info {
 	u64				dev_mem_base;
 	size_t				dev_mem_size;
 	/*
+	 * Number of AIE columns in the (full-NPU) partition this driver
+	 * creates. This is intentionally a per-device static value rather
+	 * than the firmware-reported metadata.cols, because the aie4
+	 * AIE_TILE_INFO opcode on some rpu-fw builds returns total tile
+	 * count (rows*cols) in the cols field, which can't be fed back into
+	 * AIE4_MSG_OP_CREATE_PARTITION. Set it to the actual silicon column
+	 * count for each device (e.g. 3 for legacy 3x4 npu3/aie4, 4 for the
+	 * 4x4 npu3_aie2ps target).
+	 */
+	u8				num_col;
+	/*
 	 * Number of CERT microcontrollers per AIE column. Firmware does not
-	 * expose this in AIE4_MSG_OP_AIE_TILE_INFO, so it is an
+	 * expose this in AIE4_MSG_OP_AIE_TILE_INFO either, so it is an
 	 * architecture-defined constant per device variant (e.g. 2 for the
 	 * legacy npu3/aie4 family, 1 for npu3_aie2ps/Versal AIE2). The
 	 * runtime CERT count for a full-NPU context is
-	 *     ndev->total_col * uc_per_col
+	 *     dev_info->num_col * dev_info->uc_per_col
 	 * and is bounded by the firmware ABI array size in
 	 * struct aie4_msg_context_config_cert_logging::info[].
 	 */

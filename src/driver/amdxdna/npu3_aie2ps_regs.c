@@ -26,8 +26,10 @@ const struct amdxdna_dev_info dev_npu3_aie2ps_info = {
 	.dev_priv		= &npu3_dev_priv,
 	NPU3_COMMON_DEV_INFO,
 	/*
-	 * Override NPU3_COMMON_DEV_INFO default (2). Versal AIE2 silicon has
-	 * one CERT uC per column - matches aie2ps::shim_num_uc=1 in XRT.
+	 * Override NPU3_COMMON_DEV_INFO defaults for 4x4 Versal AIE2 silicon:
+	 *   - 4 AIE columns (full-NPU partition)
+	 *   - 1 CERT uC per column (matches aie2ps::shim_num_uc=1 in XRT)
 	 */
+	.num_col		= 4,
 	.uc_per_col		= 1,
 };

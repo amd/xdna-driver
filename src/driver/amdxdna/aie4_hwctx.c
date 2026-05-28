@@ -1032,14 +1032,13 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 
 	/*
 	 * The maximum number of CERT uCs in a full-NPU context is
-	 *   ndev->total_col  (firmware-queried, AIE4_MSG_OP_AIE_TILE_INFO)
-	 *     *
-	 *   xdna->dev_info->uc_per_col  (per-device-arch constant)
+	 *   dev_info->num_col * dev_info->uc_per_col
+	 * (both per-device-arch constants; see struct amdxdna_dev_info),
 	 * and is additionally bounded by the firmware ABI array size in
 	 * req.cert_logging.info[] (see struct
 	 * aie4_msg_context_config_cert_logging). Use the tighter of the two.
 	 */
-	u32 max_certs = (u32)ndev->total_col * xdna->dev_info->uc_per_col;
+	u32 max_certs = (u32)xdna->dev_info->num_col * xdna->dev_info->uc_per_col;
 
 	if (max_certs > ARRAY_SIZE(req.cert_logging.info))
 		max_certs = ARRAY_SIZE(req.cert_logging.info);
@@ -1053,9 +1052,10 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 
 		if (index >= max_certs) {
 			XDNA_ERR(xdna,
-				 "invalid CERT index %u for buf_type %u (num_ucs=%u, total_col=%u, uc_per_col=%u, max=%u)",
+				 "invalid CERT index %u for buf_type %u (num_ucs=%u, num_col=%u, uc_per_col=%u, max=%u)",
 				 index, meta_buffer->buf_type,
-				 meta_buffer->num_ucs, ndev->total_col,
+				 meta_buffer->num_ucs,
+				 xdna->dev_info->num_col,
 				 xdna->dev_info->uc_per_col, max_certs);
 			ret = -EINVAL;
 			goto put_log_bo;

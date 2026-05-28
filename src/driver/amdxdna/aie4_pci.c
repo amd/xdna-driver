@@ -411,6 +411,19 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 
 	ndev->total_col = min(aie4_max_col, ndev->metadata.cols);
 
+	/*
+	 * Diagnostic: some rpu-fw builds populate AIE_TILE_INFO::cols with
+	 * total tile count (rows*cols) rather than column count, which
+	 * cannot be fed back into AIE4_MSG_OP_CREATE_PARTITION. The
+	 * authoritative per-device value used by aie4_partition_init() and
+	 * aie4_create_context() is xdna->dev_info->num_col; log both so any
+	 * future fw mismatch is obvious.
+	 */
+	XDNA_DBG(ndev->xdna,
+		 "AIE metadata: cols=%u rows=%u (fw); partition num_col=%u (dev_info)",
+		 ndev->metadata.cols, ndev->metadata.rows,
+		 ndev->xdna->dev_info->num_col);
+
 	return 0;
 }
 
@@ -479,16 +492,17 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 
 	/*
 	 * There is only a single partition spanning the entire NPU for now.
-	 * The number of columns is reported by firmware via
-	 * AIE4_MSG_OP_AIE_TILE_INFO and cached in ndev->total_col by
-	 * aie4_mgmt_fw_query(), which runs before this function.
+	 * The column count is a per-device static value (see
+	 * struct amdxdna_dev_info::num_col); we deliberately do not use
+	 * the firmware-reported metadata.cols here because some rpu-fw
+	 * builds put total tile count in that field.
 	 *
 	 * In the future, we may have multiple partitions starting from
 	 * different start_cols, different num_tiles, mem_size, and
 	 * application_mode can be SINGLE|DUAL_A|DUAL_B.
 	 */
 	req.partition_col_start = 0;
-	req.partition_col_count = ndev->total_col;
+	req.partition_col_count = xdna->dev_info->num_col;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
@@ -1067,9 +1081,9 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		return 0;
 
 	req.partition_id = ndev->partition_id;
-	/* For now the partition spans the full NPU; size comes from firmware. */
+	/* For now the partition spans the full NPU; size is per-device. */
 	ctx->start_col = 0;
-	ctx->num_col = ndev->total_col;
+	ctx->num_col = xdna->dev_info->num_col;
 	req.request_num_tiles = ctx->num_tiles;
 
 	req.pasid.raw = 0;

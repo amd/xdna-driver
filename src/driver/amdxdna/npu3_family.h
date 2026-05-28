@@ -67,9 +67,13 @@ extern const struct dpm_clk_freq npu3_dpm_clk_table[];
 	}
 
 /*
- * Default for the npu3/aie4 family is 2 CERT uCs per AIE column. The
- * npu3_aie2ps variant uses Versal AIE2 silicon (1 uC per column) and
- * therefore overrides .uc_per_col in its own dev_info initializer.
+ * Defaults for the legacy 3x4 npu3/aie4 PCI family:
+ *   - 3 AIE columns in the full-NPU partition
+ *   - 2 CERT uCs per column (so MAX_NUM_CERTS == 6)
+ *
+ * The npu3_aie2ps variant uses 4x4 Versal AIE2 silicon (4 columns,
+ * 1 uC per column) and therefore overrides both .num_col and
+ * .uc_per_col in its own dev_info initializer.
  */
 #define NPU3_COMMON_DEV_INFO	\
 	.mbox_bar		= NPU3_MBOX_BAR,				\
@@ -77,6 +81,7 @@ extern const struct dpm_clk_freq npu3_dpm_clk_table[];
 	.psp_bar		= NPU3_PSP_BAR_INDEX,		\
 	.smu_bar		= NPU3_SMU_BAR_INDEX,		\
 	.doorbell_bar		= NPU3_DOORBELL_BAR,		\
+	.num_col		= 3,				\
 	.uc_per_col		= 2,				\
 	.ops			= &aie4_ops
 
