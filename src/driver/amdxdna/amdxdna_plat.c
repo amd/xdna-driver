@@ -240,10 +240,19 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 		goto sysfs_fini;
 	}
 
-#ifdef CONFIG_AMDXDNA_SHMEM
+	/*
+	 * Register the per-device debugfs files (dump_fw_log,
+	 * dump_fw_log_buffer, dump_fw_trace, ...) for every transport that
+	 * goes through amdxdna_plat. The actual files are CONFIG_DEBUG_FS
+	 * guarded inside *_debugfs.c; calling the op when CONFIG_DEBUG_FS
+	 * is off resolves to a stub no-op. The historic
+	 * "#ifdef CONFIG_AMDXDNA_SHMEM" wrapper around this call was wrong:
+	 * debugfs is independent of the management transport, and gating
+	 * it on the SHMEM bus type left RPMsg / OF builds with no
+	 * /sys/kernel/debug/accel/<dev>/dump_fw_log* files at all.
+	 */
 	if (xdna->dev_info->ops && xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
-#endif
 
 	pm_runtime_enable(dev);
 	pm_runtime_get_noresume(dev);
