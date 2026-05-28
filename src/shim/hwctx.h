@@ -103,6 +103,16 @@ private:
   uint32_t m_doorbell = 0;
   uint32_t m_syncobj = AMDXDNA_INVALID_FENCE_HANDLE;
   uint32_t m_col_cnt = 0;
+  /*
+   * Number of CERT microcontrollers per AIE column for the device this
+   * hwctx is bound to. Per-arch constant; mirrors the kernel-side
+   * struct amdxdna_dev_info::uc_per_col. Cached at construction time
+   * so get_num_uc() does not have to re-query the device on each call.
+   *
+   * 2 for the legacy npu3/aie4 PCI family (Strix/Phoenix derivatives);
+   * 1 for the 4x4 Versal AIE2 / npu3_aie2ps target.
+   */
+  uint32_t m_uc_per_col = 2;
   uint32_t m_ops_per_cycle = 0;
   std::unique_ptr<hwq> m_q;
   amdxdna_qos_info m_qos = {};

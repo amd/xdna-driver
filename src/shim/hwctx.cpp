@@ -129,6 +129,41 @@ get_cu_pdi(int idx) const
 // Implementation of hwctx
 //
 
+namespace {
+
+/*
+ * Number of CERT microcontrollers per AIE column for `dev`.
+ * Mirrors struct amdxdna_dev_info::uc_per_col on the kernel side -
+ * keep in sync when adding new device ids.
+ *
+ *   - 0xfe02 -> RyzenAI-npu3-aie2ps (4x4 Versal AIE2 / T20): 1 uC/col
+ *   - everything else (legacy npu3/aie4 PCI family): 2 uCs/col
+ *
+ * If the PCIe id can't be read for any reason, fall back to the
+ * legacy 2-per-col layout; the kernel CERT-index check (see
+ * aie4_ctx_config_debug_bo) is the source of truth and will still
+ * reject anything out of range.
+ */
+static uint32_t
+uc_per_col_for_device(const xrt_core::device* dev)
+{
+  uint16_t device_id = 0;
+  try {
+    device_id = xrt_core::device_query<xrt_core::query::pcie_id>(dev).device_id;
+  } catch (...) {
+    return 2;
+  }
+
+  switch (device_id) {
+  case 0xfe02: /* RyzenAI-npu3-aie2ps */
+    return 1;
+  default:
+    return 2;
+  }
+}
+
+} // anonymous namespace
+
 hwctx::
 hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
   std::unique_ptr<hwq> queue)
@@ -138,6 +173,7 @@ hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
   xclbin_parser xp(xclbin);
 
   m_col_cnt = xp.get_column_cnt();
+  m_uc_per_col = uc_per_col_for_device(&m_device);
   m_ops_per_cycle = xp.get_ops_per_cycle();
   auto n_cu = xp.get_num_cus();
   for (int i = 0; i < n_cu; i++)
@@ -154,6 +190,7 @@ hwctx(const device& dev, uint32_t partition_size, std::unique_ptr<hwq> queue)
   , m_q(std::move(queue))
 {
   m_col_cnt = partition_size;
+  m_uc_per_col = uc_per_col_for_device(&m_device);
   m_ops_per_cycle = 0;
 
   create_ctx_on_device();
@@ -180,7 +217,12 @@ size_t
 hwctx::
 get_num_uc() const
 {
-  return m_col_cnt * 2;
+  /*
+   * uCs-per-column is a per-arch constant (see uc_per_col_for_device()
+   * and the kernel-side struct amdxdna_dev_info::uc_per_col), cached in
+   * m_uc_per_col at construction. Do NOT assume the legacy 2/col value.
+   */
+  return m_col_cnt * m_uc_per_col;
 }
 
 xrt_core::cuidx_type
