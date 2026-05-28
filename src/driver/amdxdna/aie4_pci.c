@@ -71,6 +71,24 @@ MODULE_PARM_DESC(timeout_in_sec, "Seconds to timeout and recovery, default 2; 0 
 #endif
 
 /*
+ * RPU FW lifecycle ownership for the platform/RPMsg transport.
+ *
+ * On PCI the role is fixed by the SR-IOV topology (PF vs VF) and is detected
+ * from the PCI device id, so this param is ignored. On a platform/RPMsg device
+ * the kernel has no analogous signal: the same DT/rpmsg node can either be
+ *   (a) standalone, the only entity talking to the RPU FW (default), or
+ *   (b) passed through to a guest VM, with FW owned elsewhere.
+ *
+ * Default 1 (owner) keeps standalone npu3-RPMsg dev boards working out of the
+ * box. Pass 0 from modprobe in the guest when the host already drives FW
+ * lifecycle (DRAM_LOGGING_START, fw load, ...).
+ */
+bool fw_lifecycle_owner = true;
+module_param(fw_lifecycle_owner, bool, 0444);
+MODULE_PARM_DESC(fw_lifecycle_owner,
+		 "Platform/RPMsg only: this driver instance owns RPU FW lifecycle (default 1). Set to 0 for guest/passthrough deployments where FW is managed externally.");
+
+/*
  * This struct is the register layout.
  */
 struct mailbox_info {

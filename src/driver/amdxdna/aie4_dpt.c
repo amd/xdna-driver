@@ -37,8 +37,8 @@ int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u8 level)
 	u32 msi_idx, msi_address;
 	int ret;
 
-	if (is_npu3_vf_dev(xdna)) {
-		XDNA_DBG(xdna, "not supported on npu3 vf device");
+	if (!aie4_owns_fw_lifecycle(xdna)) {
+		XDNA_DBG(xdna, "fw log init skipped: FW lifecycle not owned by this driver instance");
 		return -EOPNOTSUPP;
 	}
 
@@ -62,8 +62,8 @@ int aie4_fw_log_config(struct amdxdna_dev *xdna, u8 level)
 {
 	int ret;
 
-	if (is_npu3_vf_dev(xdna)) {
-		XDNA_DBG(xdna, "not supported on npu3 vf device");
+	if (!aie4_owns_fw_lifecycle(xdna)) {
+		XDNA_DBG(xdna, "fw log config skipped: FW lifecycle not owned by this driver instance");
 		return -EOPNOTSUPP;
 	}
 
@@ -85,8 +85,8 @@ int aie4_fw_log_fini(struct amdxdna_dev *xdna)
 {
 	int ret;
 
-	if (is_npu3_vf_dev(xdna)) {
-		XDNA_DBG(xdna, "not supported on npu3 vf device");
+	if (!aie4_owns_fw_lifecycle(xdna)) {
+		XDNA_DBG(xdna, "fw log fini skipped: FW lifecycle not owned by this driver instance");
 		return -EOPNOTSUPP;
 	}
 

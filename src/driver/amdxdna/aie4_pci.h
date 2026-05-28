@@ -257,27 +257,56 @@ struct cert_comp {
 	wait_queue_head_t	waitq;
 };
 
+/*
+ * Admin-tunable role for the platform/RPMsg transport. See aie4_pci.c for the
+ * module_param definition. Always declared so callers can compile regardless
+ * of CONFIG_PCI; on a CONFIG_PCI=y build dev_is_pci() short-circuits before
+ * the variable is consulted.
+ */
+extern bool fw_lifecycle_owner;
+
 /* common util inline functions */
 static inline int is_npu3_pf_dev(struct amdxdna_dev *xdna)
 {
-#ifdef CONFIG_AMDXDNA_NO_PCI
-	return xdna->dev_info->device_type == AMDXDNA_DEV_TYPE_PF;
-#else
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	if (dev_is_pci(xdna->ddev.dev)) {
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	return (pdev->device == 0x17F2 || pdev->device == 0x1B0B);
-#endif
+		return (pdev->device == 0x17F2 || pdev->device == 0x1B0B);
+	}
+
+	return xdna->dev_info->device_type == AMDXDNA_DEV_TYPE_PF;
 }
 
 static inline int is_npu3_vf_dev(struct amdxdna_dev *xdna)
 {
-#ifdef CONFIG_AMDXDNA_NO_PCI
-	return xdna->dev_info->device_type != AMDXDNA_DEV_TYPE_PF;
-#else
-	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+	if (dev_is_pci(xdna->ddev.dev)) {
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 
-	return (pdev->device == 0x17F3 || pdev->device == 0x1B0C);
-#endif
+		return (pdev->device == 0x17F3 || pdev->device == 0x1B0C);
+	}
+
+	return xdna->dev_info->device_type != AMDXDNA_DEV_TYPE_PF;
+}
+
+/*
+ * Whether this driver instance owns the RPU FW lifecycle (load, fw_log /
+ * fw_trace start-stop, work-buffer alloc, ...).
+ *
+ *   - PCI: only the SR-IOV PF owns FW; VFs must defer to it.
+ *   - Platform/RPMsg: by default the platform device is the sole owner. Admin
+ *     can flip it via the fw_lifecycle_owner module param when the device is
+ *     passed through to a guest VM (vfio-platform, paravirtualised rpmsg, ...)
+ *     and another entity already manages the FW.
+ *
+ * Detection is runtime via dev_is_pci(); a single binary therefore copes with
+ * both transports if a future build links them together.
+ */
+static inline bool aie4_owns_fw_lifecycle(struct amdxdna_dev *xdna)
+{
+	if (dev_is_pci(xdna->ddev.dev))
+		return is_npu3_pf_dev(xdna);
+
+	return fw_lifecycle_owner;
 }
 
 /* aie4_debugfs.c */
