@@ -51,6 +51,9 @@ struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, s
 						     enum dma_data_direction dir)
 {
 	struct amdxdna_mgmt_dma_hdl *dma_hdl;
+	size_t pow2_size, raw_size, offset;
+	dma_addr_t raw_dma, aligned_dma;
+	void *raw_vaddr;
 
 	if (!size || size < SZ_8K)
 		return ERR_PTR(-EINVAL);
@@ -76,57 +79,70 @@ struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, s
 		return ERR_PTR(-ENODEV);
 	}
 
+	/*
+	 * Firmware requires the buffer base address to be aligned to its
+	 * power-of-two size and to fit in a single MGMT_BUF_REGION_SIZE
+	 * region (see amdxdna_mgmt_buff_validate()). Linux CMA only honours
+	 * CONFIG_CMA_ALIGNMENT (~1 MB) for large allocations, so we over-
+	 * allocate by 2x and carve out a naturally-aligned sub-window.
+	 *
+	 * On the non-IOMMU path dma_alloc_noncoherent() is backed by
+	 * __alloc_frozen_pages_noprof() which is constrained by
+	 * MAX_PAGE_ORDER to 4 MB per allocation. That caps the largest
+	 * exposed sub-window (pow2_size) at 2 MB on this transport.
+	 */
+	pow2_size = roundup_pow_of_two(PAGE_ALIGN(size));
+	raw_size  = pow2_size * 2;
+	if (raw_size > SZ_4M) {
+		XDNA_ERR(xdna,
+			 "mgmt buffer alloc refused: requested 0x%zx exceeds 2 MB (raw alloc capped at 4 MB by MAX_PAGE_ORDER); lower fw_log_size",
+			 size);
+		return ERR_PTR(-ENOMEM);
+	}
+
 	dma_hdl = kzalloc(sizeof(*dma_hdl), GFP_KERNEL);
 	if (!dma_hdl)
 		return ERR_PTR(-ENOMEM);
 
 	/*
-	 * The aligned size calculation is implemented to work around a known firmware issue that
-	 * can cause the system to hang. By aligning the size to the nearest power of two and then
-	 * doubling it, we ensure that the memory allocation is compatible with the firmware's
-	 * requirements, thus preventing potential system instability.
+	 * Populate identity fields *before* the underlying alloc so the
+	 * cleanup path (amdxdna_mgmt_buff_free) can safely dereference
+	 * dma_hdl->xdna if we have to bail out below.
 	 */
-	dma_hdl->aligned_size = PAGE_ALIGN(size);
-	dma_hdl->aligned_size = roundup_pow_of_two(dma_hdl->aligned_size);
-	dma_hdl->aligned_size *= 2;
-
-	/*
-	 * The behavior of dma_alloc_noncoherent() was tested on the 6.13 kernel.
-	 * 1. This function eventually calls __alloc_frozen_pages_noprof().
-	 * 2. The maximum allocatable size is 4MB, constrained by MAX_PAGE_ORDER 10.
-	 *    Exceeding this limit results in a NULL pointer return.
-	 * 3. For valid sizes, this function provides physically contiguous memory.
-	 *
-	 * If there is a requirement for physical contiguous memory larger than 4MB,
-	 * consider allocating the buffer from carved-out memory.
-	 */
-	if (dma_hdl->aligned_size > SZ_4M)
-		dma_hdl->aligned_size = SZ_4M;
+	dma_hdl->xdna         = xdna;
+	dma_hdl->dir          = dir;
+	dma_hdl->size         = size;
+	dma_hdl->aligned_size = pow2_size;
+	dma_hdl->raw_size     = raw_size;
 
 	if (amdxdna_iova_enabled(xdna)) {
-		dma_hdl->vaddr = amdxdna_iommu_alloc(xdna, dma_hdl->aligned_size,
-						     &dma_hdl->dma_hdl);
-		if (IS_ERR(dma_hdl->vaddr)) {
-			int ret = PTR_ERR(dma_hdl->vaddr);
+		raw_vaddr = amdxdna_iommu_alloc(xdna, raw_size, &raw_dma);
+		if (IS_ERR(raw_vaddr)) {
+			int ret = PTR_ERR(raw_vaddr);
 
 			kfree(dma_hdl);
 			return ERR_PTR(ret);
 		}
 	} else {
-		dma_hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, dma_hdl->aligned_size,
-						       &dma_hdl->dma_hdl, dir, GFP_KERNEL);
-		if (!dma_hdl->vaddr) {
+		raw_vaddr = dma_alloc_noncoherent(xdna->ddev.dev, raw_size,
+						  &raw_dma, dir, GFP_KERNEL);
+		if (!raw_vaddr) {
 			kfree(dma_hdl);
 			return ERR_PTR(-ENOMEM);
 		}
 	}
 
+	dma_hdl->raw_vaddr    = raw_vaddr;
+	dma_hdl->raw_dma_addr = raw_dma;
+
+	/* Carve a naturally-aligned pow2_size sub-window out of the raw alloc. */
+	aligned_dma      = ALIGN(raw_dma, pow2_size);
+	offset           = aligned_dma - raw_dma;
+	dma_hdl->dma_hdl = aligned_dma;
+	dma_hdl->vaddr   = (u8 *)raw_vaddr + offset;
+
 	if (amdxdna_mgmt_buff_validate(xdna, dma_hdl->dma_hdl, dma_hdl->aligned_size))
 		goto free_buf;
-
-	dma_hdl->size = size;
-	dma_hdl->xdna = xdna;
-	dma_hdl->dir = dir;
 
 	return dma_hdl;
 
@@ -254,19 +270,24 @@ void amdxdna_mgmt_buff_free(struct amdxdna_mgmt_dma_hdl *dma_hdl)
 	if (!dma_hdl)
 		return;
 
-	if (amdxdna_iova_enabled(dma_hdl->xdna)) {
-		amdxdna_iommu_free(dma_hdl->xdna, dma_hdl->aligned_size,
-				   dma_hdl->vaddr, dma_hdl->dma_hdl);
-	} else {
-		dma_free_noncoherent(dma_hdl->xdna->ddev.dev,
-				     dma_hdl->aligned_size, dma_hdl->vaddr,
-				     dma_hdl->dma_hdl, dma_hdl->dir);
+	/*
+	 * Be tolerant of partially-constructed handles: amdxdna_mgmt_buff_alloc()
+	 * may bail out and call us before the underlying DMA allocation succeeded.
+	 * The underlying free APIs all need the raw_* triplet that was returned by
+	 * the allocator, plus xdna (for the device pointer / IOMMU dispatch).
+	 */
+	if (dma_hdl->xdna && dma_hdl->raw_vaddr) {
+		if (amdxdna_iova_enabled(dma_hdl->xdna))
+			amdxdna_iommu_free(dma_hdl->xdna, dma_hdl->raw_size,
+					   dma_hdl->raw_vaddr,
+					   dma_hdl->raw_dma_addr);
+		else
+			dma_free_noncoherent(dma_hdl->xdna->ddev.dev,
+					     dma_hdl->raw_size,
+					     dma_hdl->raw_vaddr,
+					     dma_hdl->raw_dma_addr,
+					     dma_hdl->dir);
 	}
 
-	dma_hdl->vaddr = NULL;
-	dma_hdl->size = 0;
-	dma_hdl->dma_hdl = 0;
-	dma_hdl->aligned_size = 0;
 	kfree(dma_hdl);
-	dma_hdl = NULL;
 }
