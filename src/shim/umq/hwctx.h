@@ -4,13 +4,10 @@
 #ifndef HWCTX_UMQ_H
 #define HWCTX_UMQ_H
 
-#include <thread>
-#include <signal.h>
 #include <functional>
 #include <map>
 #include "../hwctx.h"
 #include "../buffer.h"
-#include "tcp_server.h"
 #include "drm_local/amdxdna_accel.h"
 
 namespace shim_xdna {
@@ -24,12 +21,6 @@ public:
 private:
   const pdev& m_pdev;
   uint32_t m_col_cnt = 0;
-  bool tcp_server_running = false;
-  std::unique_ptr<tcp_server> m_tcp_server;
-  std::thread m_thread_;
-
-  void init_tcp_server(const device& dev);
-  void fini_tcp_server();
 };
 
 }
