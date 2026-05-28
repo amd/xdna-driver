@@ -815,7 +815,8 @@ static int aie4_dump_fw_log_buffer_get(struct seq_file *m, void *unused)
 	}
 
 	dma_hdl = ndev->xdna->fw_log->dma_hdl;
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/* About to CPU-read FW-written log data: invalidate caches first. */
+	amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, 0, 0);
 	seq_printf(m, "FW log buffer vaddr: 0x%llx\n",
 		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
 	seq_printf(m, "FW log buffer DMA addr: 0x%llx\n", amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
@@ -883,7 +884,8 @@ static int aie4_dump_fw_trace_buffer_get(struct seq_file *m, void *unused)
 	}
 
 	dma_hdl = ndev->xdna->fw_trace->dma_hdl;
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/* About to CPU-read FW-written trace data: invalidate caches first. */
+	amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, 0, 0);
 	seq_printf(m, "FW trace buffer vaddr: 0x%llx\n",
 		   (u64)amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0));
 	seq_printf(m, "FW trace buffer DMA addr: 0x%llx\n",

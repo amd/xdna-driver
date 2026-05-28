@@ -107,19 +107,19 @@ static int amdxdna_dpt_fetch_payload(struct amdxdna_dpt *dpt, u8 *buffer, u64 *o
 	}
 
 	if (start > end) {
-		/* First chuck: Copy from start point until the end of log buffer */
-		amdxdna_mgmt_buff_clflush(dma_hdl, start, log_size - start);
+		/* First chunk: copy from start point until the end of log buffer */
+		amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, start, log_size - start);
 		if (amdxnda_dpt_cpy(buffer, amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, start),
 				    log_size - start, user))
 			return -EFAULT;
 
-		/* Last chuck: Wrap around and copy from the start of log buffer to end */
-		amdxdna_mgmt_buff_clflush(dma_hdl, 0, end);
+		/* Last chunk: wrap around and copy from the start of log buffer to end */
+		amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, 0, end);
 		if (amdxnda_dpt_cpy(buffer + (log_size - start),
 				    amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), end, user))
 			return -EFAULT;
 	} else {
-		amdxdna_mgmt_buff_clflush(dma_hdl, start, end - start);
+		amdxdna_mgmt_buff_sync_for_cpu(dma_hdl, start, end - start);
 		if (amdxnda_dpt_cpy(buffer, amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, start),
 				    end - start, user))
 			return -EFAULT;
@@ -139,7 +139,7 @@ static bool amdxdna_update_tail(struct amdxdna_dpt *dpt)
 	offset = dpt->dma_hdl->size - AMDXDNA_DPT_FOOTER_SIZE;
 	footer = amdxdna_mgmt_buff_get_cpu_addr(dpt->dma_hdl, offset);
 
-	amdxdna_mgmt_buff_clflush(dpt->dma_hdl, offset, sizeof(*footer));
+	amdxdna_mgmt_buff_sync_for_cpu(dpt->dma_hdl, offset, sizeof(*footer));
 
 	/* Extend 32-bit firmware pointer to a 64-bit value */
 	tail = (dpt->tail & ~GENMASK_ULL(31, 0)) | footer->tail;
@@ -166,7 +166,7 @@ static void amdxdna_dpt_read_metadata(struct amdxdna_dpt *dpt)
 	offset = dpt->dma_hdl->size - AMDXDNA_DPT_FOOTER_SIZE;
 	footer = amdxdna_mgmt_buff_get_cpu_addr(dpt->dma_hdl, offset);
 
-	amdxdna_mgmt_buff_clflush(dpt->dma_hdl, offset, sizeof(*footer));
+	amdxdna_mgmt_buff_sync_for_cpu(dpt->dma_hdl, offset, sizeof(*footer));
 
 	dpt->payload_version = footer->payload_version;
 	dpt->minor = footer->minor;
@@ -345,7 +345,12 @@ static int amdxdna_fw_log_init(struct amdxdna_dev *xdna, u8 log_level)
 		 amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
 
 	memset(amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), 0, fw_log_size);
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/*
+	 * Hand the freshly-zeroed buffer to the firmware: flush CPU-side
+	 * writes (the memset above) and invalidate any stale cache lines
+	 * covering the FROM_DEVICE range so the FW sees a clean slate.
+	 */
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 	strscpy(log_hdl->name, AMDXDNA_DPT_FW_LOG_NAME, sizeof(log_hdl->name));
 	log_hdl->parse = xdna->dev_info->ops->fw_log_parse;
@@ -597,7 +602,8 @@ static int amdxdna_fw_trace_init(struct amdxdna_dev *xdna, u32 categories)
 		 amdxdna_mgmt_buff_get_dma_addr(dma_hdl));
 
 	memset(amdxdna_mgmt_buff_get_cpu_addr(dma_hdl, 0), 0, fw_trace_size);
-	amdxdna_mgmt_buff_clflush(dma_hdl, 0, 0);
+	/* Flush CPU writes / invalidate stale cache lines before FW writes. */
+	amdxdna_mgmt_buff_sync_for_device(dma_hdl, 0, 0);
 
 	strscpy(trace_hdl->name, AMDXDNA_DPT_FW_TRACE_NAME, sizeof(trace_hdl->name));
 	trace_hdl->parse = xdna->dev_info->ops->fw_trace_parse;

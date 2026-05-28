@@ -188,6 +188,17 @@ struct amdxdna_dev {
 
 	struct device			*cma_region_devs[MAX_MEM_REGIONS];
 
+	/*
+	 * True once the DT-declared "rpu-cma" reserved-memory region has
+	 * been bound to ddev.dev (see amdxdna_cma_region_init). When the
+	 * device sits on a non-PCI bus (platform/RPMsg) every FW-visible
+	 * mgmt buffer MUST come from this pool, otherwise the address
+	 * returned by dma_alloc_noncoherent() is not reachable by the
+	 * remote firmware. amdxdna_mgmt_buff_alloc() consults this flag
+	 * and refuses to allocate when it is false.
+	 */
+	bool				rpu_cma_bound;
+
 	struct iommu_group		*group;
 	struct iommu_domain		*domain;
 	struct iova_domain		iovad;

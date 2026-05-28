@@ -21,6 +21,10 @@ struct amdxdna_mgmt_dma_hdl {
 struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, size_t size,
 						     enum dma_data_direction dir);
 int amdxdna_mgmt_buff_clflush(struct amdxdna_mgmt_dma_hdl *dma_hdl, u32 offset, size_t size);
+int amdxdna_mgmt_buff_sync_for_device(struct amdxdna_mgmt_dma_hdl *dma_hdl,
+				      u32 offset, size_t size);
+int amdxdna_mgmt_buff_sync_for_cpu(struct amdxdna_mgmt_dma_hdl *dma_hdl,
+				   u32 offset, size_t size);
 dma_addr_t amdxdna_mgmt_buff_get_dma_addr(struct amdxdna_mgmt_dma_hdl *dma_hdl);
 void *amdxdna_mgmt_buff_get_cpu_addr(struct amdxdna_mgmt_dma_hdl *dma_hdl, u32 offset);
 void amdxdna_mgmt_buff_free(struct amdxdna_mgmt_dma_hdl *dma_hdl);

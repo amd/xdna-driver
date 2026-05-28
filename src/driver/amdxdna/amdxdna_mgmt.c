@@ -4,8 +4,10 @@
  */
 
 #include <drm/drm_cache.h>
+#include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/log2.h>
+#include <linux/pci.h>
 #include <linux/string_helpers.h>
 
 #include "amdxdna_mgmt.h"
@@ -55,6 +57,24 @@ struct amdxdna_mgmt_dma_hdl *amdxdna_mgmt_buff_alloc(struct amdxdna_dev *xdna, s
 
 	if (size > SZ_4M)
 		return ERR_PTR(-ENOMEM);
+
+	/*
+	 * On the platform/RPMsg transport the parent device's DMA pool is the
+	 * only memory the remote firmware can address. That pool is supplied
+	 * by the DT-declared "rpu-cma" reserved-memory region (bound in
+	 * amdxdna_cma_region_init). Refuse to allocate from the system
+	 * default DMA pool here -- those addresses are not in the RPU's bus
+	 * map and DRAM_LOGGING_START / IDENTIFY-style buffers handed off to
+	 * the firmware will be silently rejected (or worse, race with other
+	 * Linux users of the same memory). PCI keeps its existing behaviour:
+	 * the device's own BAR / IOMMU mapping makes any DMA-direct address
+	 * reachable.
+	 */
+	if (!dev_is_pci(xdna->ddev.dev) && !xdna->rpu_cma_bound) {
+		XDNA_ERR(xdna,
+			 "mgmt buffer alloc refused: 'rpu-cma' reserved-memory region not bound (add memory-region-names=\"rpu-cma\" in the amd,versal-aie DT node)");
+		return ERR_PTR(-ENODEV);
+	}
 
 	dma_hdl = kzalloc(sizeof(*dma_hdl), GFP_KERNEL);
 	if (!dma_hdl)
@@ -115,33 +135,108 @@ free_buf:
 	return ERR_PTR(-EINVAL);
 }
 
-int amdxdna_mgmt_buff_clflush(struct amdxdna_mgmt_dma_hdl *dma_hdl, u32 offset, size_t size)
+/*
+ * Resolve effective length: callers pass size=0 to mean "from offset to end
+ * of buffer". Returns 0 and *len_out on success, -EINVAL on out-of-range.
+ */
+static int amdxdna_mgmt_buff_resolve_len(struct amdxdna_mgmt_dma_hdl *dma_hdl,
+					 u32 offset, size_t size, size_t *len_out)
 {
 	size_t len;
 
 	if (!dma_hdl)
 		return -EINVAL;
 
-	len = size ? size : dma_hdl->size;
+	if (offset > dma_hdl->size)
+		return -EINVAL;
+
+	len = size ? size : dma_hdl->size - offset;
 
 	if (offset + len > dma_hdl->size)
 		return -EINVAL;
 
-	/*
-	 * Clean and invalidate caches so that:
-	 *  - the device sees the latest CPU writes, and
-	 *  - the CPU sees the latest device writes.
-	 *
-	 * Use DMA_BIDIRECTIONAL because callers use this for both
-	 * directions (pre-send flush and post-receive invalidate).
-	 */
+	*len_out = len;
+	return 0;
+}
+
+/**
+ * amdxdna_mgmt_buff_sync_for_device - hand a sub-range to the firmware
+ * @dma_hdl: handle returned by amdxdna_mgmt_buff_alloc()
+ * @offset:  byte offset within the buffer
+ * @size:    sub-range length in bytes; 0 means "to end of buffer"
+ *
+ * Call this immediately before passing the buffer's DMA address to the
+ * remote firmware so that any CPU-side writes are visible in DRAM and any
+ * stale CPU cache lines covering the device-writable range are evicted.
+ *
+ * Uses the streaming direction recorded on the handle at alloc time
+ * (DMA_TO_DEVICE / DMA_FROM_DEVICE / DMA_BIDIRECTIONAL), so the underlying
+ * dma_sync_single_for_device() does the minimum work required for that
+ * direction (clean only for TO_DEVICE, invalidate only for FROM_DEVICE).
+ */
+int amdxdna_mgmt_buff_sync_for_device(struct amdxdna_mgmt_dma_hdl *dma_hdl,
+				      u32 offset, size_t size)
+{
+	size_t len;
+	int ret;
+
+	ret = amdxdna_mgmt_buff_resolve_len(dma_hdl, offset, size, &len);
+	if (ret)
+		return ret;
+
 	if (amdxdna_iova_enabled(dma_hdl->xdna))
 		drm_clflush_virt_range(dma_hdl->vaddr + offset, len);
 	else
 		dma_sync_single_for_device(dma_hdl->xdna->ddev.dev,
 					   dma_hdl->dma_hdl + offset, len,
-					   DMA_BIDIRECTIONAL);
+					   dma_hdl->dir);
 	return 0;
+}
+
+/**
+ * amdxdna_mgmt_buff_sync_for_cpu - reclaim a sub-range from the firmware
+ * @dma_hdl: handle returned by amdxdna_mgmt_buff_alloc()
+ * @offset:  byte offset within the buffer
+ * @size:    sub-range length in bytes; 0 means "to end of buffer"
+ *
+ * Call this after the remote firmware has finished writing into the
+ * buffer and before the CPU reads the new contents. Invalidates any CPU
+ * cache lines covering the range so subsequent loads pull fresh data
+ * from DRAM.
+ *
+ * On a buffer allocated DMA_TO_DEVICE the underlying
+ * dma_sync_single_for_cpu() is effectively a no-op, which is the correct
+ * thing: the CPU should never read back a TO_DEVICE buffer.
+ */
+int amdxdna_mgmt_buff_sync_for_cpu(struct amdxdna_mgmt_dma_hdl *dma_hdl,
+				   u32 offset, size_t size)
+{
+	size_t len;
+	int ret;
+
+	ret = amdxdna_mgmt_buff_resolve_len(dma_hdl, offset, size, &len);
+	if (ret)
+		return ret;
+
+	if (amdxdna_iova_enabled(dma_hdl->xdna))
+		drm_clflush_virt_range(dma_hdl->vaddr + offset, len);
+	else
+		dma_sync_single_for_cpu(dma_hdl->xdna->ddev.dev,
+					dma_hdl->dma_hdl + offset, len,
+					dma_hdl->dir);
+	return 0;
+}
+
+/*
+ * Backwards-compatible flush that brackets both directions in a single call.
+ * Most legacy call sites use this immediately before sending a buffer to the
+ * firmware; preserving the existing for_device semantics keeps those paths
+ * working. New code should prefer the directional helpers above and call
+ * _for_device before the send and _for_cpu after the response.
+ */
+int amdxdna_mgmt_buff_clflush(struct amdxdna_mgmt_dma_hdl *dma_hdl, u32 offset, size_t size)
+{
+	return amdxdna_mgmt_buff_sync_for_device(dma_hdl, offset, size);
 }
 
 dma_addr_t amdxdna_mgmt_buff_get_dma_addr(struct amdxdna_mgmt_dma_hdl *dma_hdl)

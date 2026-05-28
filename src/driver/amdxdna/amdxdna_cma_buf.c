@@ -460,6 +460,7 @@ int amdxdna_cma_region_init(struct amdxdna_dev *xdna, struct device_node *mem_np
 			XDNA_INFO(xdna, "\"" AMDXDNA_RPU_CMA_NAME
 				  "\" bound to parent (idx %d)", i);
 			rpu_bound = true;
+			xdna->rpu_cma_bound = true;
 			continue;
 		}
 
@@ -503,4 +504,5 @@ void amdxdna_cma_region_fini(struct amdxdna_dev *xdna)
 	 * a no-op on a device with no reserved-memory binding.
 	 */
 	of_reserved_mem_device_release(xdna->ddev.dev);
+	xdna->rpu_cma_bound = false;
 }
