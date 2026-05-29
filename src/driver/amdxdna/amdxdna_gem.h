@@ -10,6 +10,7 @@
 #include <drm/drm_file.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
+#include <linux/dma-direction.h>
 #include <linux/hmm.h>
 
 struct amdxdna_mem {
@@ -88,5 +89,8 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev, void *data, struct drm_fil
 void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo);
 u64 amdxdna_gem_uva(struct amdxdna_gem_obj *abo);
 u64 amdxdna_gem_dev_addr(struct amdxdna_gem_obj *abo);
+
+int amdxdna_gem_sync_range(struct amdxdna_gem_obj *abo, u64 offset, u64 size,
+			   enum dma_data_direction dir);
 
 #endif /* _AMDXDNA_GEM_H_ */

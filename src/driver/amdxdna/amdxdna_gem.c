@@ -1421,6 +1421,95 @@ amdxdna_drm_clflush(struct amdxdna_gem_obj *abo, u32 start, u32 size)
 		drm_clflush_pages(&pages[end_page], 1);
 }
 
+/**
+ * amdxdna_gem_sync_range - cache-sync [offset, offset+size) of a BO
+ * @abo:    BO to sync.
+ * @offset: byte offset within the BO.
+ * @size:   number of bytes to sync.
+ * @dir:    DMA_TO_DEVICE (CPU just wrote, device will read),
+ *          DMA_FROM_DEVICE (device just wrote, CPU will read), or
+ *          DMA_BIDIRECTIONAL (treat as clean+invalidate).
+ *
+ * Picks the correct cache-maintenance mechanism for the BO's backing:
+ *
+ *   - CMA-exported BO:        dma_sync_single_for_*() against the
+ *                             producer device (partial range).
+ *   - vmap'd kernel BO:       drm_clflush_virt_range() over the
+ *                             requested sub-window (clean+invalidate).
+ *   - shmem BO with pages:    per-page drm_clflush over the range.
+ *   - sg-backed BO w/ pages:  drm_clflush walking the sg range.
+ *   - pageless imported BO:   dma_buf_begin/end_cpu_access() — only
+ *                             the exporter can sync IO memory or
+ *                             foreign DMA backings safely.  This path
+ *                             is whole-buffer (no partial API), but
+ *                             the alternative (sg_miter on NULL pages)
+ *                             would corrupt random kernel memory.
+ *
+ * Skips the work entirely when the BO's owning device is reported by
+ * the DMA layer as cache-coherent: on those systems CPU and device
+ * agree without explicit maintenance and any sync would be wasted
+ * cycles in the submit fast path.
+ *
+ * Returns 0 on success; on caller error (out-of-range, no recognized
+ * backing) returns a negative errno.  A WARN_ONCE is raised if a BO
+ * has no recognized backing at all so the omission is loud.
+ */
+int amdxdna_gem_sync_range(struct amdxdna_gem_obj *abo, u64 offset, u64 size,
+			   enum dma_data_direction dir)
+{
+	struct drm_gem_object *gobj = to_gobj(abo);
+	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
+	int ret;
+
+	if (!size)
+		return 0;
+
+	if (offset > gobj->size || size > gobj->size ||
+	    offset > gobj->size - size)
+		return -EINVAL;
+
+	/*
+	 * On a cache-coherent device the CPU and the firmware-side agent
+	 * observe the same memory without help, so skip every backing
+	 * path's cache op.  This makes the submit fast path free on
+	 * platforms that don't need PR2's noncoherent treatment.
+	 */
+	if (dev_is_dma_coherent(xdna->ddev.dev))
+		return 0;
+
+	/*
+	 * Prefer the CMA-specific helper, which uses the producer device
+	 * that actually owns the underlying CMA region for the cache sync.
+	 * It returns -ENODEV for BOs that didn't come from our exporter,
+	 * in which case we fall back to the generic drm_clflush_* paths
+	 * (inherently clean+invalidate, so they ignore @dir).  All
+	 * fallback branches honour the caller's [offset, offset+size).
+	 */
+	ret = amdxdna_cma_sync_bo(abo, offset, size, dir);
+	if (ret != -ENODEV)
+		return ret;
+
+	if (amdxdna_gem_vmap(abo)) {
+		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + offset, size);
+		return 0;
+	}
+	if (abo->base.pages) {
+		amdxdna_drm_clflush(abo, offset, size);
+		return 0;
+	}
+	if (abo->base.sgt && abo->dma_buf && !sg_page(abo->base.sgt->sgl)) {
+		amdxdna_sync_imported_bo(abo, dir);
+		return 0;
+	}
+	if (abo->base.sgt) {
+		amdxdna_clflush_sg_range(abo->base.sgt, offset, size);
+		return 0;
+	}
+
+	WARN_ONCE(1, "Can not find memory to sync");
+	return -ENODEV;
+}
+
 /*
  * The sync bo ioctl is to make sure the CPU cache is in sync with memory.
  * This is required because NPU is not cache coherent device. CPU cache
@@ -1461,30 +1550,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	}
 
 	dma_dir = amdxdna_to_dma_dir(args->direction);
-
-	/*
-	 * Prefer the CMA-specific helper, which uses the producer device
-	 * that actually owns the underlying CMA region for the cache sync.
-	 * It returns -ENODEV for BOs that didn't come from our exporter,
-	 * in which case we fall back to the generic drm_clflush_* paths
-	 * (inherently clean+invalidate, so they ignore @dma_dir).  All
-	 * fallback branches honour the caller's [offset, offset+size).
-	 */
-	if (amdxdna_cma_sync_bo(abo, args->offset, args->size, dma_dir) == -ENODEV) {
-		if (amdxdna_gem_vmap(abo))
-			drm_clflush_virt_range(amdxdna_gem_vmap(abo) + args->offset,
-					       args->size);
-		else if (abo->base.pages)
-			amdxdna_drm_clflush(abo, args->offset, args->size);
-		else if (abo->base.sgt && abo->dma_buf &&
-			 !sg_page(abo->base.sgt->sgl))
-			amdxdna_sync_imported_bo(abo, dma_dir);
-		else if (abo->base.sgt)
-			amdxdna_clflush_sg_range(abo->base.sgt, args->offset,
-						 args->size);
-		else
-			WARN_ONCE(1, "Can not find memory to sync");
-	}
+	amdxdna_gem_sync_range(abo, args->offset, args->size, dma_dir);
 
 	amdxdna_gem_unpin(abo);
 
