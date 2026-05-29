@@ -9,6 +9,7 @@
 #include <linux/iosys-map.h>
 #include <linux/pagemap.h>
 #include <linux/pfn.h>
+#include <linux/scatterlist.h>
 #include <linux/version.h>
 #include <linux/vmalloc.h>
 #include <drm/drm_cache.h>
@@ -1279,6 +1280,43 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 	return ret;
 }
 
+/*
+ * Clean + invalidate the cache lines covering [offset, offset+size) of an
+ * imported BO that is described by an sg_table (no kernel virtual mapping
+ * and no abo->base.pages array).  Replaces the previous drm_clflush_sg()
+ * full-buffer flush, which violated the sync_bo contract by ignoring the
+ * caller's offset/size.
+ *
+ * Uses sg_miter so it works regardless of how the underlying pages are
+ * stitched together by the importer.
+ */
+static void amdxdna_clflush_sg_range(struct sg_table *sgt, size_t offset, size_t size)
+{
+	struct sg_mapping_iter iter;
+	size_t skip = offset;
+	size_t remaining = size;
+
+	if (!size)
+		return;
+
+	sg_miter_start(&iter, sgt->sgl, sgt->orig_nents, SG_MITER_FROM_SG);
+	while (remaining && sg_miter_next(&iter)) {
+		size_t chunk_off, chunk_len;
+
+		if (skip >= iter.length) {
+			skip -= iter.length;
+			continue;
+		}
+
+		chunk_off = skip;
+		chunk_len = min_t(size_t, iter.length - chunk_off, remaining);
+		drm_clflush_virt_range((u8 *)iter.addr + chunk_off, chunk_len);
+		remaining -= chunk_len;
+		skip = 0;
+	}
+	sg_miter_stop(&iter);
+}
+
 static void
 amdxdna_drm_clflush(struct amdxdna_gem_obj *abo, u32 start, u32 size)
 {
@@ -1380,13 +1418,19 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 			ret = -EINVAL;
 		}
 	}
-	/* For import bo, still sync whole BO */
+	/*
+	 * The remaining paths flush via drm_clflush_*, which is inherently
+	 * clean+invalidate so it ignores direction.  All three branches now
+	 * honour the caller's [offset, offset+size) window -- the previous
+	 * drm_clflush_sg() branch flushed the whole BO, violating the
+	 * sync_bo contract.
+	 */
 	else if (amdxdna_gem_vmap(abo))
 		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + args->offset, args->size);
 	else if (abo->base.pages)
 		amdxdna_drm_clflush(abo, args->offset, args->size);
 	else if (abo->base.sgt)
-		drm_clflush_sg(abo->base.sgt);
+		amdxdna_clflush_sg_range(abo->base.sgt, args->offset, args->size);
 	else
 		WARN_ONCE(1, "Can not find memory to sync");
 
