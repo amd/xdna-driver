@@ -13,7 +13,8 @@ create_validate_subcommand()
    {"runlist-latency", "Run end-to-end latency test using command chaining", "hidden"},
    {"runlist-throughput", "Run end-to-end throughput test using command chaining", "hidden"},
    {"latency", "Run end-to-end latency test", "common"},
-   {"throughput", "Run end-to-end throughput test", "common"}
+   {"throughput", "Run end-to-end throughput test", "common"},
+   {"df-bw", "Run bandwidth test on data fabric", "hidden"}
   };
 
   std::map<std::string, std::shared_ptr<xrt_core::smi::option>> validate_suboptions;
