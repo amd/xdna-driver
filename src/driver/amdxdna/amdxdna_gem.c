@@ -1307,6 +1307,32 @@ static enum dma_data_direction amdxdna_to_dma_dir(u32 wire_dir)
 }
 
 /*
+ * Sync a foreign-imported BO whose sg_table has no kernel-mappable
+ * pages (sg_page(sg) == NULL) via the dma-buf protocol.  The exporter
+ * is the only party that knows how to synchronize such a buffer (IO
+ * memory, dma_get_sgtable() of dma_alloc_coherent() memory, etc.); a
+ * sg_miter-based fallback would feed kmap_local_page() a NULL page and
+ * end up issuing cache ops on whatever address page_address(NULL)
+ * resolves to (typically the kernel image base) -- silent corruption,
+ * not a no-op.
+ *
+ * begin/end_cpu_access is whole-buffer (the dma-buf API has no partial
+ * variant); we accept the over-sync because pageless-sg imports are
+ * usually large unit-of-work buffers (camera frames, codec surfaces).
+ */
+static void amdxdna_sync_imported_bo(struct amdxdna_gem_obj *abo,
+				     enum dma_data_direction dir)
+{
+	struct dma_buf *dbuf = abo->dma_buf;
+	int ret;
+
+	ret = dma_buf_begin_cpu_access(dbuf, dir);
+	if (ret)
+		return;
+	dma_buf_end_cpu_access(dbuf, dir);
+}
+
+/*
  * Clean + invalidate the cache lines covering [offset, offset+size) of an
  * imported BO that is described by an sg_table (no kernel virtual mapping
  * and no abo->base.pages array).  Replaces the previous drm_clflush_sg()
@@ -1314,7 +1340,9 @@ static enum dma_data_direction amdxdna_to_dma_dir(u32 wire_dir)
  * caller's offset/size.
  *
  * Uses sg_miter so it works regardless of how the underlying pages are
- * stitched together by the importer.
+ * stitched together by the importer.  The caller MUST ensure the sg has
+ * backing pages (sg_page(sgt->sgl) != NULL); pageless sgs go through
+ * amdxdna_sync_imported_bo() instead.
  */
 static void amdxdna_clflush_sg_range(struct sg_table *sgt, size_t offset, size_t size)
 {
@@ -1448,6 +1476,9 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 					       args->size);
 		else if (abo->base.pages)
 			amdxdna_drm_clflush(abo, args->offset, args->size);
+		else if (abo->base.sgt && abo->dma_buf &&
+			 !sg_page(abo->base.sgt->sgl))
+			amdxdna_sync_imported_bo(abo, dma_dir);
 		else if (abo->base.sgt)
 			amdxdna_clflush_sg_range(abo->base.sgt, args->offset,
 						 args->size);
