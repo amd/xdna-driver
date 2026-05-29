@@ -69,15 +69,32 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
 
   /*
    * Flush the SHIM-internal command BO before handing it to the kernel.
-   * Mirror of src/shim/hwq.cpp::issue_command() — see that commit for
-   * the full rationale: the cmd BO (AMDXDNA_BO_CMD) is XRT-owned (from
-   * bo_cache + xrt_kernel.cpp) and is mmaped *cached* into userspace by
-   * the driver (amdxdna_cmabuf_mmap()), so the ert_packet bytes XRT
-   * just wrote sit in CPU cache.  Without this sync_bo(host2device),
-   * CERT reads stale DDR via DMA and the cmd never executes, surfacing
-   * as state==ERT_CMD_STATE_NEW (1) in the wait completion path.
+   *
+   * Rationale: the cmd BO (AMDXDNA_BO_CMD) is XRT-owned (from bo_cache
+   * + xrt_kernel.cpp) and is mmaped *cached* into userspace by the
+   * driver (amdxdna_cmabuf_mmap()), so the ert_packet bytes XRT just
+   * wrote sit in CPU cache.  Without this sync_bo(host2device), CERT
+   * reads stale DDR via DMA and the cmd never executes, surfacing as
+   * state==ERT_CMD_STATE_NEW (1) in the wait completion path.
+   *
+   * NOTE — split of responsibility vs the modern (src/shim) path:
+   *   For aie4-class devices the equivalent cmd-BO flush has been
+   *   pushed into the kernel driver itself (see commit 160ae98:
+   *   "driver/amdxdna: aie4_hwctx: take ownership of cmd BO cache sync
+   *   in KMS", which adds dma_sync_*(DMA_TO_DEVICE) inside
+   *   aie4_submit_one_cmd() / aie4_submit_job()).  The shim half was
+   *   correspondingly dropped in commit bea37cf ("shim: hand cmd-BO
+   *   cache sync to the driver in KMS; aie2ps-only coherency").
+   *
+   *   src/shim_ve2 keeps the sync here because the VE2 kernel ops
+   *   (ve2_cmd_submit / ve2_cmd_wait in src/driver/amdxdna/ve2_hwctx.c)
+   *   do NOT yet mirror that kernel-side flush.  Until they do, the
+   *   shim must continue to own this side of the cache maintenance.
+   *
    * The driver's DRM_IOCTL_AMDXDNA_SYNC_BO short-circuits on
-   * cache-coherent devices, so this call is free where it is not needed.
+   * cache-coherent devices (dev_is_dma_coherent() in
+   * amdxdna_gem_sync_range()), so this call is effectively free on
+   * platforms that do not need it.
    */
   try {
     boh->sync(xrt_core::buffer_handle::direction::host2device,
@@ -179,14 +196,31 @@ wait_command(xrt_core::buffer_handle *cmd_bo, uint32_t timeout_ms) const
    * observes the value placed by CERT (success path) or the driver
    * (timeout / abort path) rather than the stale ERT_CMD_STATE_NEW that
    * still sits in this process's cached mapping from the pre-submit
-   * write.  Mirror of src/shim/umq/hwq.cpp::complete_command() — see
-   * that commit for the rationale and for the paired kernel-side flush
-   * in amdxdna_cmd_set_state() that protects the timeout / abort path.
+   * write.
    *
-   * Skip on timeout (ret==0) since the kernel-side flush in
-   * amdxdna_cmd_set_state() has already drained the TIMEOUT update on
-   * any path that does set state; if the driver took no action, there
-   * is nothing fresh in DDR to fetch.
+   * NOTE — split of responsibility vs the modern (src/shim) path:
+   *   For aie4-class devices, the equivalent invalidate has been moved
+   *   into the kernel driver (commit 160ae98 adds
+   *   aie4_cmd_bo_sync_for_cpu() in aie4_job_done(), which performs
+   *   dma_sync_*(DMA_FROM_DEVICE) on the cmd BO and any chained
+   *   sub-cmds *before* the completion fence is signaled).  The
+   *   matching shim sync was correspondingly removed in commit
+   *   bea37cf, with the device2host invalidate now gated on the
+   *   user-mode-submission (UMS) path only.
+   *
+   *   src/shim_ve2 keeps the sync here because the VE2 kernel ops
+   *   (ve2_cmd_wait / its job-done equivalent in
+   *   src/driver/amdxdna/ve2_hwctx.c) do NOT yet mirror that
+   *   kernel-side invalidate.  Until they do, the shim must continue
+   *   to own this side of the cache maintenance.
+   *
+   *   The kernel-side flush in amdxdna_cmd_set_state() (PR4) already
+   *   protects the timeout / abort path on both shims since both share
+   *   the same DRM driver.
+   *
+   * Skip on timeout (ret==0): amdxdna_cmd_set_state() has already
+   * drained any state update the driver wrote on its way out; if the
+   * driver took no action, there is nothing fresh in DDR to fetch.
    */
   if (ret) {
     try {
