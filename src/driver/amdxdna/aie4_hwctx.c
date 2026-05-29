@@ -277,10 +277,70 @@ static void job_release(struct kref *ref)
 	amdxdna_sched_job_cleanup(job);
 }
 
+/*
+ * Invalidate the CPU-cached mappings of the cmd BO(s) that firmware/CERT
+ * has just written completion state into via DMA, so the next userspace
+ * read through the cached mmap returns the firmware-written value
+ * instead of a stale line.
+ *
+ * In KMS submission mode the shim never calls SYNC_BO on cmd BOs - the
+ * driver owns this responsibility because the driver also owns submit
+ * and wait.  amdxdna_gem_sync_range() is a no-op on cache-coherent
+ * platforms, so this work is free where it is not needed (e.g. Medusa
+ * AIE4 PCIe).
+ *
+ * For chained cmds, firmware writes per-sub-cmd completion state into
+ * each sub-cmd BO's header (the parent runlist holder's state is
+ * computed by userspace from the sub-cmd results), so the chain
+ * payload must be walked and each sub-cmd BO invalidated too.  In the
+ * timeout / abort paths amdxdna_cmd_set_state() has already flushed the
+ * kernel-written state for the parent cmd BO back to DDR before
+ * job_done() is reached, so the invalidate here is safe (no dirty
+ * lines to lose).
+ */
+static void aie4_cmd_bo_sync_for_cpu(struct amdxdna_ctx *ctx,
+				     struct amdxdna_gem_obj *cmd_abo)
+{
+	struct amdxdna_cmd_chain *payload;
+	u32 ccnt;
+	u32 i;
+
+	if (!cmd_abo)
+		return;
+
+	amdxdna_gem_sync_range(cmd_abo, 0, cmd_abo->mem.size, DMA_FROM_DEVICE);
+
+	if (amdxdna_cmd_get_op(cmd_abo) != ERT_CMD_CHAIN)
+		return;
+
+	payload = amdxdna_cmd_get_chained_payload(cmd_abo, &ccnt);
+	if (!payload)
+		return;
+
+	for (i = 0; i < ccnt; i++) {
+		u32 boh = (u32)payload->data[i];
+		struct amdxdna_gem_obj *sub_abo;
+
+		sub_abo = amdxdna_gem_get_obj(ctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!sub_abo)
+			continue;
+		amdxdna_gem_sync_range(sub_abo, 0, sub_abo->mem.size,
+				       DMA_FROM_DEVICE);
+		amdxdna_gem_put_obj(sub_abo);
+	}
+}
+
 static void job_done(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
+
+	/*
+	 * Make firmware-written completion state observable to the next
+	 * userspace read of the cmd BO header before we wake any waiter
+	 * via dma_fence_signal() below.
+	 */
+	aie4_cmd_bo_sync_for_cpu(ctx, job->cmd_bo);
 
 	XDNA_DBG(xdna, "%s job 0x%llx@%lld done, state %d",
 		 ctx->name, (u64)job, job->seq, amdxdna_cmd_get_state(job->cmd_bo));
@@ -815,7 +875,23 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 	 * never be trusted. Driver should cache key data and validate them after
 	 * they are cached in local variable. Driver should only use the cached
 	 * version and make sure it will not cause out-of-boundary access.
+	 *
+	 * Cache-maintenance: cmd_abo was last written by userspace (XRT) via
+	 * its cached mmap, so dirty bytes still live in the user process's
+	 * CPU cache.  Two consumers about to read from DDR need them
+	 * published first: (a) our kernel vmap (amdxdna_cmd_get_op /
+	 * get_payload below) - on a non-coherent platform the SHARE BO is
+	 * backed by dma_alloc_noncoherent() and the kernel vmap is
+	 * non-cached, so the read bypasses the CPU cache and goes straight
+	 * to DDR; (b) CERT in the UMS-with-EXEC_CMD path, which DMAs the
+	 * packet out of DDR.  DMA_TO_DEVICE expresses the access pattern
+	 * (CPU wrote, something will read from DDR) regardless of whether
+	 * that something is hardware DMA or a non-cached CPU mapping.
+	 * amdxdna_gem_sync_range() is a no-op on cache-coherent platforms,
+	 * so this is free where it is not needed.
 	 */
+	amdxdna_gem_sync_range(cmd_abo, 0, cmd_abo->mem.size, DMA_TO_DEVICE);
+
 	op = amdxdna_cmd_get_op(cmd_abo);
 	if (op != ERT_START_DPU) {
 		XDNA_ERR(xdna, "Invalid exec buf op, %d", op);
@@ -865,12 +941,12 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 static int submit_job(struct amdxdna_sched_job *job)
 {
 	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
-	u32 op = amdxdna_cmd_get_op(cmd_abo);
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_cmd_chain *payload;
 	u32 ccnt;
 	int ret;
+	u32 op;
 	u32 i;
 
 	mutex_lock(&ctx->io_lock);
@@ -880,6 +956,19 @@ static int submit_job(struct amdxdna_sched_job *job)
 		ret = -EINVAL;
 		goto done;
 	}
+
+	/*
+	 * Flush user writes to the parent cmd BO before reading its op /
+	 * chained payload via our kernel vmap below.  On a non-coherent
+	 * platform that vmap is non-cached (dma_alloc_noncoherent() backing)
+	 * and reads bypass the CPU cache, so the user's dirty lines must
+	 * be in DDR first.  The per-cmd sync inside submit_one_cmd() covers
+	 * the single-cmd parent and each sub-cmd in the chained path; this
+	 * one covers the parent cmd BO whose chain header is consumed here
+	 * in submit_job() itself.  A no-op on cache-coherent platforms.
+	 */
+	amdxdna_gem_sync_range(cmd_abo, 0, cmd_abo->mem.size, DMA_TO_DEVICE);
+	op = amdxdna_cmd_get_op(cmd_abo);
 
 	/* Single cmd. */
 	if (op == ERT_START_DPU) {
@@ -1089,6 +1178,21 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 	}
 
 	nctx->meta_bo_hdl = attach ? bo_hdl : AMDXDNA_INVALID_BO_HANDLE;
+
+	/*
+	 * meta_bo was populated by userspace through its cached mmap to
+	 * describe the firmware-side log/debug/trace buffer layout.  Flush
+	 * those user writes back to DDR before we read the descriptor via
+	 * our kernel vmap below: on a non-coherent platform the SHARE BO
+	 * is backed by dma_alloc_noncoherent() and the kernel vmap is
+	 * non-cached, so the load bypasses the CPU cache and would return
+	 * stale fw_buffer_metadata without this clean.  DMA_TO_DEVICE is
+	 * the right primitive because the access pattern (CPU wrote,
+	 * something will read from DDR) is the same as a device DMA read,
+	 * even though the actual reader here is the kernel's non-cached
+	 * vmap.  No-op on cache-coherent platforms.
+	 */
+	amdxdna_gem_sync_range(meta_bo, 0, meta_bo->mem.size, DMA_TO_DEVICE);
 
 	meta_buffer = (struct fw_buffer_metadata *)amdxdna_gem_vmap(meta_bo);
 
