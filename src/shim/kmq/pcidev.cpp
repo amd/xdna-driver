@@ -45,7 +45,19 @@ bool
 pdev_kmq::
 is_cache_coherent() const
 {
-  return false;
+  // All KMQ devices today (NPU1, NPU4 family, VE2) are PCIe-attached
+  // (or AXI-attached on VE2) parts that sit on coherent fabrics.  No
+  // KMQ device-type assignment is currently known to be non-coherent;
+  // if a future non-coherent KMQ part appears, mirror the npu3_aie2ps
+  // check from pdev_umq.
+  //
+  // Even on a coherent device the kernel side still does its own cmd
+  // BO cache maintenance unconditionally - amdxdna_gem_sync_range()
+  // early-returns on dev_is_dma_coherent(), so the kernel work
+  // collapses to a single branch.  This shim-side short-circuit
+  // additionally saves the SYNC_BO ioctl entry/exit cost on user BO
+  // sync calls.
+  return true;
 }
 
 uint64_t

@@ -24,6 +24,18 @@ pdev::
   shim_debug("Destroying pcidev (%s)", m_sysfs_name.c_str());
 }
 
+bool
+pdev::
+is_npu3_aie2ps() const
+{
+  // PCIe NPUs are represented by their BDF (e.g. "0000:c4:00.1"), never
+  // by an absolute /sys/... path.  Platform/rpmsg attachments resolve
+  // to /sys/devices/... (see resolve_sysfs() in host/pcidrv_amdxdna.cpp).
+  // Today the only platform-attached AMDXDNA part is npu3_aie2ps on the
+  // VEK385 / T20 class SoC, and it is the only known non-coherent NPU.
+  return !m_sysfs_name.empty() && m_sysfs_name.front() == '/';
+}
+
 xrt_core::device::handle_type
 pdev::
 create_shim(xrt_core::device::id_type id) const

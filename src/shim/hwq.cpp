@@ -304,28 +304,17 @@ hwq::
 issue_command(const cmd_buffer *cmd_bo)
 {
   /*
-   * Flush the SHIM-internal command BO before the driver consumes it.
+   * No shim-side cmd BO cache sync needed here.  This is the
+   * kernel-mode submission path (DRM_IOCTL_AMDXDNA_EXEC_CMD): the
+   * driver itself flushes the cmd BO for the kernel/CERT in
+   * submit_one_cmd() / submit_job() before reading the packet, and
+   * invalidates it in job_done() before waking the wait_cmd waiter.
+   * See driver/amdxdna/aie4_hwctx.c (commit e9a037e).
    *
-   * The exec command BO (AMDXDNA_BO_CMD) is owned by XRT (allocated by
-   * core/common/bo_cache.h and populated by core/common/api/xrt_kernel.cpp
-   * with the ert_packet header, opcode, CU masks and ert_dpu_data
-   * payload).  The user application never sees this BO, so user-side
-   * sync_bo() calls do not cover it.
-   *
-   * On a non-coherent device the amdxdna driver reads the packet via
-   * its cached kernel vmap (amdxdna_cmd_get_op() / amdxdna_cmd_get_payload())
-   * when processing the submit_cmd ioctl.  Without an explicit
-   * host->device sync the driver can observe stale cache lines from a
-   * previous submission and miss XRT's most recent writes.  buffer::sync()
-   * already short-circuits on cache-coherent platforms
-   * (see is_cache_coherent()), so this is free where it is not needed.
+   * In user-mode submission the kernel is bypassed - that sync stays
+   * in hwq_umq::issue_command() / complete_command() where the shim
+   * directly drives the HSA queue.
    */
-  auto cmd_size = cmd_bo->size();
-  if (cmd_size) {
-    const_cast<cmd_buffer *>(cmd_bo)->sync(
-        xrt_core::buffer_handle::direction::host2device, cmd_size, 0);
-  }
-
   submit_cmd_arg ecmd = {
     .ctx_handle = m_ctx->get_slotidx(),
     .cmd_bo = cmd_bo->id(),

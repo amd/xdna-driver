@@ -74,6 +74,18 @@ public:
   virtual bool
   is_cache_coherent() const = 0;
 
+  // Returns true if this device is the npu3_aie2ps SoC variant - the
+  // only currently-known NPU that is not cache-coherent with the CPU.
+  // Detected by sysfs-path prefix: aie2ps is the only non-PCI NPU
+  // attachment today (platform/rpmsg, absolute path under
+  // /sys/devices/...), every other NPU is a PCIe device represented
+  // by a BDF string.  See get_dev_type() in host/pcidrv_amdxdna.cpp
+  // for the same heuristic, used there to locate device_type sysfs.
+  // If a future aie2ps PCIe variant appears, switch this to a
+  // DRM_IOCTL_AMDXDNA_QUERY_AIE_VERSION lookup instead.
+  bool
+  is_npu3_aie2ps() const;
+
   virtual uint64_t
   get_heap_paddr() const = 0;
 
