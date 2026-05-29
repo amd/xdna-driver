@@ -5,10 +5,12 @@
 
 #include <linux/kernel.h>
 #include <linux/dma-buf.h>
+#include <linux/dma-mapping.h>
 #include <linux/kstrtox.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/string.h>
 #include "amdxdna_drm.h"
+#include "amdxdna_gem.h"
 #include "amdxdna_cma_buf.h"
 
 struct amdxdna_cmabuf_priv {
@@ -229,6 +231,66 @@ bool amdxdna_use_cma(void)
 #else
 	return false;
 #endif
+}
+
+int amdxdna_cma_sync_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size,
+			enum dma_data_direction dir)
+{
+	struct amdxdna_cmabuf_priv *cbuf;
+	struct dma_buf *dbuf = abo->dma_buf;
+	dma_addr_t bus_addr;
+
+	/*
+	 * Only operate on BOs that came from our own CMA exporter.  For
+	 * everything else (foreign dma_buf imports, shmem, etc.) the
+	 * caller must fall back to whatever generic flush path applies.
+	 */
+	if (!dbuf || dbuf->ops != &amdxdna_cmabuf_dmabuf_ops)
+		return -ENODEV;
+
+	cbuf = dbuf->priv;
+	if (!cbuf)
+		return -ENODEV;
+
+	if (!size)
+		return 0;
+
+	bus_addr = cbuf->dma_addr + offset;
+
+	/*
+	 * Sync against cbuf->dev (the producer that allocated this CMA
+	 * region), not the importer.  The bus address lives in the
+	 * producer's DMA address space and only the producer's
+	 * dma-ranges yield the correct phys for arch_sync_dma_for_*().
+	 * This mirrors what amdxdna_cmabuf_map() does for
+	 * dma_map_resource() for the same reason.
+	 */
+	switch (dir) {
+	case DMA_TO_DEVICE:
+		/* CPU is producer; clean dirty lines so FW sees writes. */
+		dma_sync_single_for_device(cbuf->dev, bus_addr, size,
+					   DMA_TO_DEVICE);
+		break;
+	case DMA_FROM_DEVICE:
+		/* FW is producer; invalidate stale CPU lines before read. */
+		dma_sync_single_for_cpu(cbuf->dev, bus_addr, size,
+					DMA_FROM_DEVICE);
+		break;
+	case DMA_BIDIRECTIONAL:
+	default:
+		/*
+		 * Direction unspecified / both: a single
+		 * _for_device(BIDIRECTIONAL) does clean + invalidate on
+		 * arm64 (__dma_flush_area), which satisfies both
+		 * "CPU just wrote, FW will read" and "FW will write,
+		 * CPU will read" over [offset, offset+size).
+		 */
+		dma_sync_single_for_device(cbuf->dev, bus_addr, size,
+					   DMA_BIDIRECTIONAL);
+		break;
+	}
+
+	return 0;
 }
 
 static bool get_cacheable_flag(u64 flags)

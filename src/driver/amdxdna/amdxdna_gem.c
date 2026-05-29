@@ -6,6 +6,7 @@
 #include "drm_local/amdxdna_accel.h"
 #include <linux/dma-buf.h>
 #include <linux/dma-direct.h>
+#include <linux/dma-mapping.h>
 #include <linux/iosys-map.h>
 #include <linux/pagemap.h>
 #include <linux/pfn.h>
@@ -1281,6 +1282,31 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 }
 
 /*
+ * Map the wire-level sync_bo direction value to enum dma_data_direction.
+ *
+ * The uAPI today defines only SYNC_DIRECT_TO_DEVICE (0) and
+ * SYNC_DIRECT_FROM_DEVICE (1).  Both continue to behave exactly as
+ * before; *any* other value is treated as DMA_BIDIRECTIONAL so that a
+ * caller that doesn't (or can't) name a direction gets a safe
+ * clean+invalidate over the requested sub-window instead of -EINVAL.
+ *
+ * No uAPI / XRT header change is required: existing 0/1 call sites are
+ * bit-for-bit identical, and a new BIDIR consumer just needs to pass
+ * any value that isn't 0 or 1.
+ */
+static enum dma_data_direction amdxdna_to_dma_dir(u32 wire_dir)
+{
+	switch (wire_dir) {
+	case SYNC_DIRECT_TO_DEVICE:
+		return DMA_TO_DEVICE;
+	case SYNC_DIRECT_FROM_DEVICE:
+		return DMA_FROM_DEVICE;
+	default:
+		return DMA_BIDIRECTIONAL;
+	}
+}
+
+/*
  * Clean + invalidate the cache lines covering [offset, offset+size) of an
  * imported BO that is described by an sg_table (no kernel virtual mapping
  * and no abo->base.pages array).  Replaces the previous drm_clflush_sg()
@@ -1382,7 +1408,7 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 	struct amdxdna_drm_sync_bo *args = data;
 	struct amdxdna_gem_obj *abo;
 	struct drm_gem_object *gobj;
-	dma_addr_t bo_phyaddr;
+	enum dma_data_direction dma_dir;
 	u32 ctx_hdl;
 	int ret;
 
@@ -1406,38 +1432,38 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		goto put_obj;
 	}
 
-	if (amdxdna_use_cma()) {
-		bo_phyaddr = abo->mem.dma_addr;
-		bo_phyaddr += args->offset;
-		if (args->direction == SYNC_DIRECT_TO_DEVICE) {
-			dma_sync_single_for_device(dev->dev, bo_phyaddr, args->size, DMA_TO_DEVICE);
-		} else if (args->direction == SYNC_DIRECT_FROM_DEVICE) {
-			dma_sync_single_for_cpu(dev->dev, bo_phyaddr, args->size, DMA_FROM_DEVICE);
-		} else {
-			XDNA_ERR(xdna, "Invalid direction %d requested", args->direction);
-			ret = -EINVAL;
-		}
-	}
+	dma_dir = amdxdna_to_dma_dir(args->direction);
+
 	/*
-	 * The remaining paths flush via drm_clflush_*, which is inherently
-	 * clean+invalidate so it ignores direction.  All three branches now
-	 * honour the caller's [offset, offset+size) window -- the previous
-	 * drm_clflush_sg() branch flushed the whole BO, violating the
-	 * sync_bo contract.
+	 * Prefer the CMA-specific helper, which uses the producer device
+	 * that actually owns the underlying CMA region for the cache sync.
+	 * It returns -ENODEV for BOs that didn't come from our exporter,
+	 * in which case we fall back to the generic drm_clflush_* paths
+	 * (inherently clean+invalidate, so they ignore @dma_dir).  All
+	 * fallback branches honour the caller's [offset, offset+size).
 	 */
-	else if (amdxdna_gem_vmap(abo))
-		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + args->offset, args->size);
-	else if (abo->base.pages)
-		amdxdna_drm_clflush(abo, args->offset, args->size);
-	else if (abo->base.sgt)
-		amdxdna_clflush_sg_range(abo->base.sgt, args->offset, args->size);
-	else
-		WARN_ONCE(1, "Can not find memory to sync");
+	if (amdxdna_cma_sync_bo(abo, args->offset, args->size, dma_dir) == -ENODEV) {
+		if (amdxdna_gem_vmap(abo))
+			drm_clflush_virt_range(amdxdna_gem_vmap(abo) + args->offset,
+					       args->size);
+		else if (abo->base.pages)
+			amdxdna_drm_clflush(abo, args->offset, args->size);
+		else if (abo->base.sgt)
+			amdxdna_clflush_sg_range(abo->base.sgt, args->offset,
+						 args->size);
+		else
+			WARN_ONCE(1, "Can not find memory to sync");
+	}
 
 	amdxdna_gem_unpin(abo);
 
+	/*
+	 * Notify the firmware-side cache whenever the CPU intends to read
+	 * what the device produced.  FROM_DEVICE and BIDIRECTIONAL both
+	 * include that; TO_DEVICE does not.
+	 */
 	if (abo->assigned_ctx != AMDXDNA_INVALID_CTX_HANDLE &&
-	    args->direction == SYNC_DIRECT_FROM_DEVICE) {
+	    dma_dir != DMA_TO_DEVICE) {
 		u64 seq;
 
 		ctx_hdl = amdxdna_gem_get_assigned_ctx(client, args->handle);
