@@ -67,6 +67,26 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
   shim_debug("Submitting command: hwctx=%u, cmd_bo_hdl=%u, arg_count=%u",
              hwctx_id, cmd_bo_hdl, arg_count);
 
+  /*
+   * Flush the SHIM-internal command BO before handing it to the kernel.
+   * Mirror of src/shim/hwq.cpp::issue_command() — see that commit for
+   * the full rationale: the cmd BO (AMDXDNA_BO_CMD) is XRT-owned (from
+   * bo_cache + xrt_kernel.cpp) and is mmaped *cached* into userspace by
+   * the driver (amdxdna_cmabuf_mmap()), so the ert_packet bytes XRT
+   * just wrote sit in CPU cache.  Without this sync_bo(host2device),
+   * CERT reads stale DDR via DMA and the cmd never executes, surfacing
+   * as state==ERT_CMD_STATE_NEW (1) in the wait completion path.
+   * The driver's DRM_IOCTL_AMDXDNA_SYNC_BO short-circuits on
+   * cache-coherent devices, so this call is free where it is not needed.
+   */
+  try {
+    boh->sync(xrt_core::buffer_handle::direction::host2device,
+              boh->get_properties().size, 0);
+  } catch (const std::exception& e) {
+    shim_debug("submit_command: cmd_bo sync to device failed: %s", e.what());
+    throw;
+  }
+
   amdxdna_drm_exec_cmd ecmd = {
     .hwctx = hwctx_id,
     .cmd_handles = cmd_bo_hdl,
@@ -150,6 +170,30 @@ wait_command(xrt_core::buffer_handle *cmd_bo, uint32_t timeout_ms) const
     } else {
       shim_debug("Command wait failed: hwctx=%u, seq=%ld, err=%d: %s (%s)",
                  hwctx_id, id, err_code, errno_to_str(err_code), ex.what());
+      throw;
+    }
+  }
+
+  /*
+   * Invalidate the SHIM-internal command BO so XRT's get_state_raw()
+   * observes the value placed by CERT (success path) or the driver
+   * (timeout / abort path) rather than the stale ERT_CMD_STATE_NEW that
+   * still sits in this process's cached mapping from the pre-submit
+   * write.  Mirror of src/shim/umq/hwq.cpp::complete_command() — see
+   * that commit for the rationale and for the paired kernel-side flush
+   * in amdxdna_cmd_set_state() that protects the timeout / abort path.
+   *
+   * Skip on timeout (ret==0) since the kernel-side flush in
+   * amdxdna_cmd_set_state() has already drained the TIMEOUT update on
+   * any path that does set state; if the driver took no action, there
+   * is nothing fresh in DDR to fetch.
+   */
+  if (ret) {
+    try {
+      boh->sync(xrt_core::buffer_handle::direction::device2host,
+                boh->get_properties().size, 0);
+    } catch (const std::exception& e) {
+      shim_debug("wait_command: cmd_bo sync from device failed: %s", e.what());
       throw;
     }
   }
