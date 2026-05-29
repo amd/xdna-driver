@@ -7,6 +7,7 @@
 #define _AMDXDNA_CTX_H_
 
 #include <linux/bitfield.h>
+#include <linux/dma-mapping.h>
 #include <linux/kref.h>
 #include <linux/list.h>
 #include <linux/workqueue.h>
@@ -317,6 +318,21 @@ amdxdna_cmd_set_state(struct amdxdna_gem_obj *abo, enum ert_cmd_state s)
 
 	cmd->header &= ~AMDXDNA_CMD_STATE;
 	cmd->header |= FIELD_PREP(AMDXDNA_CMD_STATE, s);
+
+	/*
+	 * The driver writes the cmd header via its *cached* kernel vmap
+	 * (dma_alloc_noncoherent() returns cached lowmem on ARM64).
+	 * The shim invalidates the userspace cache before reading state
+	 * (buffer::sync(device2host) on the cmd BO), which on a
+	 * noncoherent device drops any dirty lines we just produced.
+	 * Clean the header word back to DDR so userspace's read after the
+	 * shim's invalidate observes the COMPLETED / ERROR / ABORT /
+	 * TIMEOUT value placed here on the timeout / abort completion
+	 * path.  amdxdna_gem_sync_range() is a no-op on cache-coherent
+	 * platforms, so this is free where it is not needed.
+	 */
+	amdxdna_gem_sync_range(abo, offsetof(struct amdxdna_cmd, header),
+			       sizeof(cmd->header), DMA_TO_DEVICE);
 }
 
 static inline enum ert_cmd_state

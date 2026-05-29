@@ -303,6 +303,29 @@ uint64_t
 hwq::
 issue_command(const cmd_buffer *cmd_bo)
 {
+  /*
+   * Flush the SHIM-internal command BO before the driver consumes it.
+   *
+   * The exec command BO (AMDXDNA_BO_CMD) is owned by XRT (allocated by
+   * core/common/bo_cache.h and populated by core/common/api/xrt_kernel.cpp
+   * with the ert_packet header, opcode, CU masks and ert_dpu_data
+   * payload).  The user application never sees this BO, so user-side
+   * sync_bo() calls do not cover it.
+   *
+   * On a non-coherent device the amdxdna driver reads the packet via
+   * its cached kernel vmap (amdxdna_cmd_get_op() / amdxdna_cmd_get_payload())
+   * when processing the submit_cmd ioctl.  Without an explicit
+   * host->device sync the driver can observe stale cache lines from a
+   * previous submission and miss XRT's most recent writes.  buffer::sync()
+   * already short-circuits on cache-coherent platforms
+   * (see is_cache_coherent()), so this is free where it is not needed.
+   */
+  auto cmd_size = cmd_bo->size();
+  if (cmd_size) {
+    const_cast<cmd_buffer *>(cmd_bo)->sync(
+        xrt_core::buffer_handle::direction::host2device, cmd_size, 0);
+  }
+
   submit_cmd_arg ecmd = {
     .ctx_handle = m_ctx->get_slotidx(),
     .cmd_bo = cmd_bo->id(),

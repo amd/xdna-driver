@@ -388,6 +388,31 @@ hwq_umq::
 complete_command(xrt_core::buffer_handle *cmd) const
 {
   auto boh = static_cast<cmd_buffer*>(cmd);
+
+  /*
+   * Invalidate the SHIM-internal command BO before reading its state.
+   *
+   * The cmd packet (ert_packet) lives in an AMDXDNA_BO_CMD buffer that is
+   * mmaped *cached* into userspace (see amdxdna_cmabuf_mmap() in the
+   * driver: "We want a *cached* userspace mapping too so user code
+   * benefits from L1/L2 hits ...").  On a non-coherent device the
+   * completion signal written by CERT lands directly in DDR via DMA;
+   * the stale cache lines from this process's earlier writes to the
+   * packet (state = ERT_CMD_STATE_NEW, opcode, payload) are still
+   * present in the CPU cache.  Reading cmdpkt->state through vaddr()
+   * without a CPU-side invalidate would therefore return the old NEW
+   * value instead of the COMPLETED / ERROR / ABORT value placed by CERT,
+   * surfacing as "Non-chained cmd completed with unexpected state: 1".
+   *
+   * buffer::sync() short-circuits on cache-coherent platforms
+   * (is_cache_coherent()), so this is free where it is not needed.
+   */
+  auto cmd_size = boh->size();
+  if (cmd_size) {
+    const_cast<cmd_buffer *>(boh)->sync(
+        xrt_core::buffer_handle::direction::device2host, cmd_size, 0);
+  }
+
   auto cmdpkt = reinterpret_cast<ert_packet *>(boh->vaddr());
 
   // Single cmd completion, cmd state maybe updated by CERT (normal case), or by
@@ -435,6 +460,14 @@ complete_command(xrt_core::buffer_handle *cmd) const
   auto payload = get_ert_cmd_chain_data(cmdpkt);
   auto last_cmd_bo = static_cast<const cmd_buffer *>(
     m_pdev.find_bo_by_handle(payload->data[payload->command_count - 1]));
+  /* Same cache-invalidate rationale as above; the last sub-cmd's state
+   * is updated by CERT via DMA and our cached userspace mapping needs
+   * an invalidate before reading it.
+   */
+  if (auto last_sz = last_cmd_bo->size()) {
+    const_cast<cmd_buffer *>(last_cmd_bo)->sync(
+        xrt_core::buffer_handle::direction::device2host, last_sz, 0);
+  }
   auto last_cmdpkt = reinterpret_cast<ert_packet *>(last_cmd_bo->vaddr());
   // Most common case, cmd is completed successfully.
   if (last_cmdpkt->state == ERT_CMD_STATE_COMPLETED) {
@@ -446,6 +479,11 @@ complete_command(xrt_core::buffer_handle *cmd) const
   for (size_t i = payload->command_count; i > 0; i--) {
     auto idx = i - 1;
     auto subcmd = static_cast<const cmd_buffer *>(m_pdev.find_bo_by_handle(payload->data[idx]));
+    /* Invalidate before reading - same rationale as the single-cmd path. */
+    if (auto subsz = subcmd->size()) {
+      const_cast<cmd_buffer *>(subcmd)->sync(
+          xrt_core::buffer_handle::direction::device2host, subsz, 0);
+    }
     auto subcmd_pkt = reinterpret_cast<ert_packet *>(subcmd->vaddr());
     auto st = subcmd_pkt->state;
     if (st != ERT_CMD_STATE_ABORT) {
