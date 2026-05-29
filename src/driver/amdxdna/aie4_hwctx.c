@@ -20,6 +20,78 @@
 #include "aie4_msg_priv.h"
 #include "aie4_host_queue.h"
 
+/*
+ * UMQ cache-maintenance helpers.
+ *
+ * The UMQ BO is a userspace-supplied dma_buf shared with CERT.  It
+ * can be backed by the amdxdna CMA exporter (cached, requires
+ * dma_sync_single_for_*), by shmem pages, or by a foreign import.
+ * amdxdna_gem_sync_range() picks the right mechanism per backing and
+ * is a no-op on cache-coherent platforms, so these wrappers just
+ * compute the right [offset, size) sub-window and let it route.
+ */
+static inline u64 umq_pkt_offset(u32 slot_idx)
+{
+	return sizeof(struct host_queue_header) +
+	       slot_idx * sizeof(struct host_queue_packet);
+}
+
+static inline u64 umq_indirect_pkt_offset(u32 idx)
+{
+	return sizeof(struct host_queue_header) +
+	       CTX_MAX_CMDS * sizeof(struct host_queue_packet) +
+	       idx * sizeof(struct host_indirect_packet_data);
+}
+
+static inline void aie4_umq_sync_for_device(struct amdxdna_ctx_priv *priv,
+					    u64 offset, u64 size)
+{
+	WARN_ON_ONCE(amdxdna_gem_sync_range(priv->umq_bo, offset, size,
+					    DMA_TO_DEVICE));
+}
+
+static inline void aie4_umq_sync_for_cpu(struct amdxdna_ctx_priv *priv,
+					 u64 offset, u64 size)
+{
+	WARN_ON_ONCE(amdxdna_gem_sync_range(priv->umq_bo, offset, size,
+					    DMA_FROM_DEVICE));
+}
+
+static inline void aie4_umq_sync_read_index_for_cpu(struct amdxdna_ctx_priv *priv)
+{
+	aie4_umq_sync_for_cpu(priv,
+			      offsetof(struct host_queue_header, read_index),
+			      sizeof(*priv->umq_read_index));
+}
+
+static inline void aie4_umq_sync_read_index_for_device(struct amdxdna_ctx_priv *priv)
+{
+	aie4_umq_sync_for_device(priv,
+				 offsetof(struct host_queue_header, read_index),
+				 sizeof(*priv->umq_read_index));
+}
+
+static inline void aie4_umq_sync_write_index_for_device(struct amdxdna_ctx_priv *priv)
+{
+	aie4_umq_sync_for_device(priv,
+				 offsetof(struct host_queue_header, write_index),
+				 sizeof(*priv->umq_write_index));
+}
+
+static inline void aie4_umq_sync_pkt_for_device(struct amdxdna_ctx_priv *priv,
+						u32 slot_idx)
+{
+	aie4_umq_sync_for_device(priv, umq_pkt_offset(slot_idx),
+				 sizeof(struct host_queue_packet));
+}
+
+static inline void aie4_umq_sync_indirect_pkt_for_device(struct amdxdna_ctx_priv *priv,
+							 u32 idx)
+{
+	aie4_umq_sync_for_device(priv, umq_indirect_pkt_offset(idx),
+				 sizeof(struct host_indirect_packet_data));
+}
+
 int kernel_mode_submission = 1;
 module_param(kernel_mode_submission, int, 0600);
 MODULE_PARM_DESC(kernel_mode_submission, "I/O submission, 0 - by user, 1 by driver (default)");
@@ -160,6 +232,11 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 		priv->umq_indirect_pkts[i].header.count = sizeof(struct exec_buf);
 		priv->umq_indirect_pkts[i].header.distribute = 1;
 	}
+	/*
+	 * Publish the freshly-initialized header, packet ring and indirect
+	 * packet ring to CERT before any submit / doorbell.
+	 */
+	aie4_umq_sync_for_device(priv, 0, umq_sz);
 	return 0;
 }
 
@@ -236,6 +313,11 @@ static inline void update_read_index(struct amdxdna_ctx *ctx, u64 idx)
 	/* Ensure the writes to the cmd bo are completed before notifying waiting thread. */
 	wmb();
 	WRITE_ONCE(*ctx->priv->umq_read_index, idx);
+	/*
+	 * On timeout/abort the CPU forges a read_index update that CERT (or a
+	 * future reconnect of it) may observe; flush the cache line out.
+	 */
+	aie4_umq_sync_read_index_for_device(ctx->priv);
 }
 
 static void job_abort(struct amdxdna_sched_job *job)
@@ -368,9 +450,13 @@ static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
 
 static inline u64 get_read_index(struct amdxdna_ctx *ctx)
 {
-	u64 wi = READ_ONCE(*ctx->priv->umq_write_index);
-	u64 ri = READ_ONCE(*ctx->priv->umq_read_index);
 	struct amdxdna_dev *xdna = ctx->client->xdna;
+	u64 wi = READ_ONCE(*ctx->priv->umq_write_index);
+	u64 ri;
+
+	/* Invalidate the cached read_index line before reading what CERT wrote. */
+	aie4_umq_sync_read_index_for_cpu(ctx->priv);
+	ri = READ_ONCE(*ctx->priv->umq_read_index);
 
 	/*
 	 * CERT cannot update read index atomically. Driver may read half-updated
@@ -380,6 +466,7 @@ static inline u64 get_read_index(struct amdxdna_ctx *ctx)
 	if (!valid_queue_index(ri, wi, CTX_MAX_CMDS)) {
 		XDNA_WARN(xdna, "Invalid index, ri %lld, wi %lld", ri, wi);
 		usleep_range(100, 200);
+		aie4_umq_sync_read_index_for_cpu(ctx->priv);
 		ri = READ_ONCE(*ctx->priv->umq_read_index);
 		if (!valid_queue_index(ri, wi, CTX_MAX_CMDS))
 			XDNA_ERR(xdna, "Invalid index after retry, ri %lld, wi %lld", ri, wi);
@@ -395,6 +482,8 @@ static inline u64 publish_cmd(struct amdxdna_ctx *ctx)
 	/* Ensure the writes to the cmd slot are completed before notifying CERT. */
 	wmb();
 	WRITE_ONCE(*ctx->priv->umq_write_index, ctx->priv->write_index);
+	/* Flush the new write_index to memory before the doorbell wakes CERT. */
+	aie4_umq_sync_write_index_for_device(ctx->priv);
 	return wi;
 }
 
@@ -683,6 +772,8 @@ fill_indirect_pkt(struct amdxdna_ctx_priv *priv, u64 slot_idx, u32 total_slots,
 			lower_32_bits(dpu->dtrace_buffer);
 		hipd->payload.dtrace_buf_host_addr_high =
 			lower_16_bits(upper_32_bits(dpu->dtrace_buffer));
+		/* Publish this indirect pkt slot before CERT can chase it. */
+		aie4_umq_sync_indirect_pkt_for_device(priv, idx);
 	}
 	pkt->pkt_header.common_header.distribute = 1;
 	pkt->pkt_header.common_header.indirect = 1;
@@ -757,6 +848,13 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 	pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo);
 	pkt->pkt_header.completion_signal += offsetof(struct amdxdna_cmd, header);
 	pkt->pkt_header.common_header.reserved = 0x0; /* Remove after update CERT. */
+	/*
+	 * Flush this packet slot before publish_cmd() bumps write_index.  Pair
+	 * with the indirect-pkt flushes in fill_indirect_pkt() (chained path)
+	 * so CERT sees a fully-formed packet when it follows the new
+	 * write_index past this slot.
+	 */
+	aie4_umq_sync_pkt_for_device(priv, slot_idx);
 	*seq = publish_cmd(ctx);
 	aie4_ctx_umq_dump(ctx);
 	ring_doorbell(ctx);
