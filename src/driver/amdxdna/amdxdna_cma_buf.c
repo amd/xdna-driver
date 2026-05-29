@@ -18,7 +18,6 @@ struct amdxdna_cmabuf_priv {
 	dma_addr_t dma_addr;
 	void *cpu_addr;
 	size_t size;
-	bool cacheable;
 };
 
 static struct sg_table *
@@ -95,13 +94,9 @@ static void amdxdna_cmabuf_unmap(struct dma_buf_attachment *attach,
 }
 
 static void amdxdna_cmabuf_free(struct device *dev, void *cpu_addr,
-				dma_addr_t dma_addr, size_t size,
-				bool cacheable)
+				dma_addr_t dma_addr, size_t size)
 {
-	if (cacheable)
-		dma_free_wc(dev, size, cpu_addr, dma_addr);
-	else
-		dma_free_coherent(dev, size, cpu_addr, dma_addr);
+	dma_free_noncoherent(dev, size, cpu_addr, dma_addr, DMA_BIDIRECTIONAL);
 }
 
 static void amdxdna_cmabuf_release(struct dma_buf *dbuf)
@@ -111,7 +106,7 @@ static void amdxdna_cmabuf_release(struct dma_buf *dbuf)
 	if (!cmabuf)
 		return;
 	amdxdna_cmabuf_free(cmabuf->dev, cmabuf->cpu_addr, cmabuf->dma_addr,
-			    cmabuf->size, cmabuf->cacheable);
+			    cmabuf->size);
 	kfree(cmabuf);
 	dbuf->priv = NULL;
 }
@@ -120,32 +115,32 @@ static int amdxdna_cmabuf_mmap(struct dma_buf *dbuf, struct vm_area_struct *vma)
 {
 	struct amdxdna_cmabuf_priv *cmabuf = dbuf->priv;
 	size_t size = vma->vm_end - vma->vm_start;
-	unsigned long vm_pgoff;
-	int ret;
 
 	if (size > cmabuf->size)
 		return -EINVAL;
 
-	vm_pgoff = vma->vm_pgoff;
-	/* clear the vm_pgoff to avoid dma_buf_ops.mmap failure */
-	vma->vm_pgoff = 0;
+	/*
+	 * dma_alloc_noncoherent() returns cached lowmem pages from CMA.
+	 * We want a *cached* userspace mapping too so user code benefits
+	 * from L1/L2 hits when touching HSA queues, mgmt fields, command
+	 * payloads, etc.  CPU/device coherency is managed explicitly via
+	 * the sync_bo ioctl -> amdxdna_cma_sync_bo() -> dma_sync_single_*().
+	 *
+	 * Deliberately do NOT route through dma_mmap_attrs() /
+	 * dma_mmap_{wc,coherent}(): on a noncoherent device the framework's
+	 * dma_pgprot() helper picks Normal-NC (uncached, write-combine on
+	 * arm64), which would defeat the whole point of switching to
+	 * dma_alloc_noncoherent().
+	 *
+	 * Do NOT set VM_IO either -- the underlying memory is normal
+	 * cached RAM, not MMIO.  vma->vm_page_prot is left at its default
+	 * (cached) by the dma_buf framework.
+	 */
+	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 
-	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
-
-	if (cmabuf->cacheable)
-		ret = dma_mmap_wc(cmabuf->dev, vma,
-				  cmabuf->cpu_addr,
-				  cmabuf->dma_addr,
-				  cmabuf->size);
-	else
-		ret = dma_mmap_coherent(cmabuf->dev, vma,
-					cmabuf->cpu_addr,
-					cmabuf->dma_addr,
-					cmabuf->size);
-
-	vma->vm_pgoff = vm_pgoff;
-
-	return ret;
+	return remap_pfn_range(vma, vma->vm_start,
+			       virt_to_pfn(cmabuf->cpu_addr),
+			       size, vma->vm_page_prot);
 }
 
 static int amdxdna_cmabuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
@@ -167,7 +162,7 @@ static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
 
 static struct dma_buf *amdxdna_get_cma_buf(struct amdxdna_dev *xdna,
 					   struct device *dev,
-					   size_t size, bool cacheable)
+					   size_t size)
 {
 	struct amdxdna_cmabuf_priv *cmabuf;
 	struct dma_buf *dbuf;
@@ -182,14 +177,18 @@ static struct dma_buf *amdxdna_get_cma_buf(struct amdxdna_dev *xdna,
 
 	size = PAGE_ALIGN(size);
 
-	if (cacheable)
-		cpu_addr = dma_alloc_wc(dev, size, &dma_addr, GFP_KERNEL);
-	else
-		cpu_addr = dma_alloc_coherent(dev, size, &dma_addr, GFP_KERNEL);
+	/*
+	 * Always allocate as cached noncoherent: gives the CPU full L1/L2
+	 * benefit; coherency with the AIE/RPU side is software-managed via
+	 * sync_bo (-> amdxdna_cma_sync_bo -> dma_sync_single_for_*).
+	 * DMA_BIDIRECTIONAL is the safe lifetime hint since user BOs may
+	 * be both produced and consumed by either side.
+	 */
+	cpu_addr = dma_alloc_noncoherent(dev, size, &dma_addr,
+					 DMA_BIDIRECTIONAL, GFP_KERNEL);
 	if (!cpu_addr) {
-		XDNA_DBG(xdna,
-			 "CMA alloc failed on %s: size 0x%zx cacheable %d",
-			 dev_name(dev), size, cacheable);
+		XDNA_DBG(xdna, "CMA alloc failed on %s: size 0x%zx",
+			 dev_name(dev), size);
 		ret = -ENOMEM;
 		goto free_cmabuf;
 	}
@@ -198,7 +197,6 @@ static struct dma_buf *amdxdna_get_cma_buf(struct amdxdna_dev *xdna,
 	cmabuf->cpu_addr = cpu_addr;
 	cmabuf->dma_addr = dma_addr;
 	cmabuf->size = size;
-	cmabuf->cacheable = cacheable;
 
 	exp_info.size = size;
 	exp_info.ops = &amdxdna_cmabuf_dmabuf_ops;
@@ -211,14 +209,13 @@ static struct dma_buf *amdxdna_get_cma_buf(struct amdxdna_dev *xdna,
 		goto free_dma;
 	}
 
-	XDNA_DBG(xdna,
-		 "CMA alloc on %s: dma_addr 0x%llx size 0x%zx cacheable %d",
-		 dev_name(dev), (u64)dma_addr, size, cacheable);
+	XDNA_DBG(xdna, "CMA alloc on %s: dma_addr 0x%llx size 0x%zx",
+		 dev_name(dev), (u64)dma_addr, size);
 
 	return dbuf;
 
 free_dma:
-	amdxdna_cmabuf_free(dev, cpu_addr, dma_addr, size, cacheable);
+	amdxdna_cmabuf_free(dev, cpu_addr, dma_addr, size);
 free_cmabuf:
 	kfree(cmabuf);
 	return ERR_PTR(ret);
@@ -293,11 +290,6 @@ int amdxdna_cma_sync_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size,
 	return 0;
 }
 
-static bool get_cacheable_flag(u64 flags)
-{
-	return (flags & AMDXDNA_BO_FLAGS_CACHEABLE) != 0;
-}
-
 /**
  * amdxdna_get_cma_buf_with_fallback - Allocate CMA buffer with region fallback
  * @region_devs: Array of device pointers for "app-bank<N>" CMA regions
@@ -312,7 +304,11 @@ static bool get_cacheable_flag(u64 flags)
  *                the lower 4 GB on T20-style platforms where the
  *                parent has a 32-bit DMA mask.
  * @size: Size of buffer to allocate.
- * @flags: Cacheable bit (BIT(24)) and region bitmap (low 8 bits).
+ * @flags: Region bitmap (low 8 bits).  AMDXDNA_BO_FLAGS_CACHEABLE
+ *         (BIT(24)) is accepted for ABI compatibility but ignored:
+ *         all CMA-backed BOs are now allocated as cached noncoherent
+ *         memory regardless of the bit, with coherency managed by
+ *         sync_bo / dma_sync_*.
  *
  * Honors the bank bitmap exactly:
  *
@@ -337,17 +333,15 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct amdxdna_dev *xdna,
 						  size_t size, u64 flags)
 {
 	struct dma_buf *dma_buf;
-	bool cacheable;
 	u32 mem_bitmap;
 	unsigned int i;
 
-	cacheable = get_cacheable_flag(flags);
 	mem_bitmap = (u32)(flags & 0xFFULL);
 
 	for (i = 0; i < max_regions; i++) {
 		if ((mem_bitmap & (1U << i)) && region_devs[i]) {
 			dma_buf = amdxdna_get_cma_buf(xdna, region_devs[i],
-						      size, cacheable);
+						      size);
 			if (!IS_ERR(dma_buf))
 				return dma_buf;
 		}
@@ -359,7 +353,7 @@ struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct amdxdna_dev *xdna,
 	 */
 	XDNA_DBG(xdna, "Falling back to parent dev %s (flags 0x%llx, size 0x%zx)",
 		 dev_name(fallback_dev), flags, size);
-	return amdxdna_get_cma_buf(xdna, fallback_dev, size, cacheable);
+	return amdxdna_get_cma_buf(xdna, fallback_dev, size);
 }
 
 static void amdxdna_cma_device_release(struct device *dev)
@@ -450,8 +444,8 @@ put_dev:
  * The DT node identifies its CMA pools by name.  Two roles are defined:
  *
  *   "rpu-cma"     - bound directly to xdna->ddev.dev (the platform
- *                   device) so that dma_alloc_coherent() on the device
- *                   pulls from this pool.  Used by kernel-side
+ *                   device) so that dma_alloc_noncoherent() on the
+ *                   device pulls from this pool.  Used by kernel-side
  *                   firmware-visible mgmt buffers (async event ring,
  *                   FW DRAM log, FW event-trace ring, mpnpufw work
  *                   buffer) and as the last-resort fallback for BO

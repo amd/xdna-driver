@@ -10,8 +10,8 @@
  * position; two roles are recognized:
  *
  *   "rpu-cma"     - Bound to the platform device itself.  Backs
- *                   dma_alloc_coherent() on the device and is used for
- *                   kernel-side firmware-visible mgmt buffers (async
+ *                   dma_alloc_noncoherent() on the device and is used
+ *                   for kernel-side firmware-visible mgmt buffers (async
  *                   event ring, FW DRAM log, FW event-trace ring,
  *                   mpnpufw work buffer).  Must live in a window the
  *                   remote firmware can address (e.g. < 4 GB on a
