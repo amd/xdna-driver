@@ -11,6 +11,12 @@
 
 #define AMDXDNA_AUTOSUSPEND_DELAY	5000 /* milliseconds */
 
+/* AUX has no PCI runtime PM; ops->resume is NULL. */
+static bool amdxdna_pm_runtime_needed(struct amdxdna_dev *xdna)
+{
+	return xdna->dev_info->ops && xdna->dev_info->ops->resume;
+}
+
 int amdxdna_pm_suspend(struct device *dev)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(dev_get_drvdata(dev));
@@ -42,6 +48,9 @@ int amdxdna_pm_resume_get(struct amdxdna_dev *xdna)
 	struct device *dev = xdna->ddev.dev;
 	int ret;
 
+	if (!amdxdna_pm_runtime_needed(xdna))
+		return 0;
+
 	ret = pm_runtime_resume_and_get(dev);
 	if (ret) {
 		XDNA_ERR(xdna, "Resume failed: %d", ret);
@@ -55,6 +64,9 @@ void amdxdna_pm_suspend_put(struct amdxdna_dev *xdna)
 {
 	struct device *dev = xdna->ddev.dev;
 
+	if (!amdxdna_pm_runtime_needed(xdna))
+		return;
+
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 }
@@ -62,6 +74,9 @@ void amdxdna_pm_suspend_put(struct amdxdna_dev *xdna)
 void amdxdna_pm_init(struct amdxdna_dev *xdna)
 {
 	struct device *dev = xdna->ddev.dev;
+
+	if (!amdxdna_pm_runtime_needed(xdna))
+		return;
 
 	pm_runtime_set_active(dev);
 	pm_runtime_set_autosuspend_delay(dev, AMDXDNA_AUTOSUSPEND_DELAY);
@@ -74,6 +89,9 @@ void amdxdna_pm_init(struct amdxdna_dev *xdna)
 void amdxdna_pm_fini(struct amdxdna_dev *xdna)
 {
 	struct device *dev = xdna->ddev.dev;
+
+	if (!amdxdna_pm_runtime_needed(xdna))
+		return;
 
 	pm_runtime_get_noresume(dev);
 	pm_runtime_forbid(dev);

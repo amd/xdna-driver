@@ -195,9 +195,12 @@ struct amdxdna_drm_va_tbl {
 	struct amdxdna_drm_va_entry va_entries[];
 };
 
+/* Low 8 bits of CREATE_BO flags: CMA region / bank index (VE2 shim). */
+#define AMDXDNA_BO_FLAGS_CACHEABLE	BIT(24)
+
 /**
  * struct amdxdna_drm_create_bo - Create a buffer object.
- * @flags: Buffer flags. MBZ.
+ * @flags: Bits [7:0] CMA bank/mem_bitmap; bit 24 cacheable (see AMDXDNA_BO_FLAGS_CACHEABLE).
  * @vaddr: User VA of buffer if applied. MBZ.
  * @size: Size in bytes.
  * @type: Buffer type.
@@ -482,6 +485,7 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
 	DRM_AMDXDNA_QUERY_RESOURCE_INFO,
 	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
+	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION,
 };
 
 /**
@@ -667,6 +671,7 @@ struct amdxdna_drm_aie_coredump {
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
+#define DRM_AMDXDNA_HWCTX_MEM_BITMAP	11
 
 /**
  * struct amdxdna_drm_get_array - Get information array.

@@ -9,4 +9,6 @@
 #include "amdxdna_drv.h"
 #include "drm/amdxdna_accel.h"
 
+extern const struct amdxdna_dev_info dev_ve2_info;
+
 #endif /* _AMDXDNA_AUX_DRV_H_ */

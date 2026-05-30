@@ -29,6 +29,12 @@ MODULE_IMPORT_NS("DMA_BUF");
 MODULE_IMPORT_NS(DMA_BUF);
 #endif
 
+static struct amdxdna_gem_obj *
+amdxdna_dma_buf_to_gem_obj(struct drm_device *dev, struct dma_buf *dma_buf);
+static bool amdxdna_use_cma(void);
+static struct amdxdna_gem_obj *
+amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args);
+
 /*
  * Userspace contract for heap chunk mappings:
  *   - Chunks are appended to client->dev_heap_chunks in creation order
@@ -182,16 +188,12 @@ static void
 amdxdna_gem_heap_free(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_client *client = abo->client;
-	struct amdxdna_gem_obj *heap;
 
-	mutex_lock(&client->mm_lock);
+	guard(mutex)(&client->mm_lock);
 
 	drm_mm_remove_node(&abo->mm_node);
 	client->heap_usage -= abo->mem.size;
-	heap = client->dev_heap;
-	drm_gem_object_put(to_gobj(heap));
-
-	mutex_unlock(&client->mm_lock);
+	drm_gem_object_put(to_gobj(client->dev_heap));
 }
 
 static struct amdxdna_gem_obj *
@@ -327,7 +329,8 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 	mmu_interval_set_seq(&mapp->notifier, cur_seq);
 	up_write(&xdna->notifier_lock);
 
-	xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
+	if (xdna->dev_info->ops->hmm_invalidate)
+		xdna->dev_info->ops->hmm_invalidate(abo, cur_seq);
 
 	if (range->event == MMU_NOTIFY_UNMAP) {
 		down_write(&xdna->notifier_lock);
@@ -512,19 +515,21 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 		return ret;
 	}
 
-	do {
-		vm_fault_t fault_ret;
+	if (xdna->notifier_wq) {
+		do {
+			vm_fault_t fault_ret;
 
-		fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
-					    FAULT_FLAG_WRITE, NULL);
-		if (fault_ret & VM_FAULT_ERROR) {
-			vma->vm_ops->close(vma);
-			XDNA_ERR(xdna, "Fault in page failed");
-			return -EFAULT;
-		}
+			fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
+						    FAULT_FLAG_WRITE, NULL);
+			if (fault_ret & VM_FAULT_ERROR) {
+				vma->vm_ops->close(vma);
+				XDNA_ERR(xdna, "Fault in page failed");
+				return -EFAULT;
+			}
 
-		offset += PAGE_SIZE;
-	} while (--num_pages);
+			offset += PAGE_SIZE;
+		} while (--num_pages);
+	}
 
 	/* Drop the reference drm_gem_mmap_obj() acquired.*/
 	drm_gem_object_put(to_gobj(abo));
@@ -678,7 +683,8 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
 	amdxdna_hmm_unregister(abo, NULL);
-	flush_workqueue(xdna->notifier_wq);
+	if (xdna->notifier_wq)
+		flush_workqueue(xdna->notifier_wq);
 
 	if (abo->pinned)
 		amdxdna_gem_unpin(abo);
@@ -802,7 +808,7 @@ static int amdxdna_gem_dev_obj_vmap(struct drm_gem_object *obj, struct iosys_map
 	struct amdxdna_gem_obj *chunk;
 	u64 chunk_start = 0;
 
-	mutex_lock(&client->mm_lock);
+	guard(mutex)(&client->mm_lock);
 	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
 		u64 chunk_end = chunk_start + chunk->mem.size;
 
@@ -823,7 +829,6 @@ static int amdxdna_gem_dev_obj_vmap(struct drm_gem_object *obj, struct iosys_map
 		}
 		chunk_start = chunk_end;
 	}
-	mutex_unlock(&client->mm_lock);
 
 	drm_WARN(&client->xdna->ddev, 1,
 		 "DEV BO [0x%llx, 0x%llx) not contained in a single heap chunk",
@@ -928,7 +933,7 @@ amdxdna_gem_create_cbuf_object(struct drm_device *dev, struct amdxdna_drm_create
 		return ERR_PTR(-EINVAL);
 	}
 
-	align = (args->type == AMDXDNA_BO_DEV_HEAP) ?  xdna->dev_info->dev_mem_size : 0;
+	align = (args->type == AMDXDNA_BO_DEV_HEAP) ? xdna->dev_info->dev_mem_size : 0;
 	dma_buf = amdxdna_get_cbuf(dev, size, align);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
@@ -978,6 +983,9 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo->type = AMDXDNA_BO_SHARE;
 	gobj->resv = dma_buf->resv;
 
+	if (amdxdna_use_cma() && sgt->sgl)
+		abo->mem.dma_addr = sg_dma_address(sgt->sgl);
+
 	return gobj;
 
 fail_unmap:
@@ -998,6 +1006,8 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 
 	if (args->vaddr)
 		abo = amdxdna_gem_create_ubuf_object(dev, args);
+	else if (amdxdna_use_cma())
+		abo = amdxdna_gem_create_cma_object(dev, args);
 	else if (amdxdna_use_carveout(to_xdna_dev(dev)))
 		abo = amdxdna_gem_create_cbuf_object(dev, args);
 	else
@@ -1165,8 +1175,14 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_gem_obj *abo;
 	int ret = 0;
 
+	/*
+	 * XRT shim passes full xcl_bo_flags.all (bank, slot, boflags, use, …).
+	 * CMA path only consumes low 8 bits (mem_bitmap) and bit 24 (cacheable).
+	 */
+#ifndef AMDXDNA_AUX
 	if (args->flags)
 		return -EINVAL;
+#endif
 
 	XDNA_DBG(xdna, "BO arg type %d vaddr 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
@@ -1338,7 +1354,7 @@ static int amdxdna_gem_dev_bo_clflush(struct amdxdna_gem_obj *abo,
 	flush_start = abo->mm_node.start - dev_base + offset;
 	flush_end = flush_start + len;
 
-	mutex_lock(&client->mm_lock);
+	guard(mutex)(&client->mm_lock);
 	list_for_each_entry(chunk, &client->dev_heap_chunks, heap_chunk_node) {
 		u64 chunk_end = chunk_start + chunk->mem.size;
 
@@ -1361,7 +1377,6 @@ static int amdxdna_gem_dev_bo_clflush(struct amdxdna_gem_obj *abo,
 		}
 		chunk_start = chunk_end;
 	}
-	mutex_unlock(&client->mm_lock);
 
 	return ret;
 }
@@ -1395,24 +1410,40 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		goto put_obj;
 	}
 
-	if (abo->type == AMDXDNA_BO_DEV)
+	if (amdxdna_use_cma()) {
+		struct device *dma_dev = dev->dev;
+		dma_addr_t bo_phyaddr;
+
+		bo_phyaddr = abo->mem.dma_addr;
+		bo_phyaddr += args->offset;
+		if (args->direction == SYNC_DIRECT_TO_DEVICE)
+			dma_sync_single_for_device(dma_dev, bo_phyaddr, args->size, DMA_TO_DEVICE);
+		else if (args->direction == SYNC_DIRECT_FROM_DEVICE)
+			dma_sync_single_for_cpu(dma_dev, bo_phyaddr, args->size, DMA_FROM_DEVICE);
+		else
+			ret = -EINVAL;
+	} else if (abo->type == AMDXDNA_BO_DEV) {
 		ret = amdxdna_gem_dev_bo_clflush(abo, args->offset, args->size);
-	else if (is_import_bo(abo))
+	} else if (is_import_bo(abo)) {
 		drm_clflush_sg(abo->base.sgt);
-	else if (amdxdna_gem_vmap(abo))
+	} else if (amdxdna_gem_vmap(abo)) {
 		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + args->offset, args->size);
-	else if (abo->base.pages)
-		drm_clflush_pages(abo->base.pages, gobj->size >> PAGE_SHIFT);
-	else
+    } else if (abo->base.pages) {
+	    drm_clflush_pages(abo->base.pages, gobj->size >> PAGE_SHIFT);
+	} else {
 		drm_WARN(&xdna->ddev, 1, "Can not get flush memory");
+		ret = -EINVAL;
+	}
 
 	amdxdna_gem_unpin(abo);
 
-	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx\n",
-		 args->handle, args->offset, args->size);
-
+#ifndef AMDXDNA_AUX
 	if (args->direction == SYNC_DIRECT_FROM_DEVICE)
 		ret = amdxdna_hwctx_sync_debug_bo(abo->client, args->handle);
+#endif
+
+	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx, size 0x%llx dir %u",
+		 args->handle, args->offset, args->size, args->direction);
 
 put_obj:
 	drm_gem_object_put(gobj);
@@ -1446,15 +1477,227 @@ int amdxdna_drm_get_bo_usage(struct drm_device *dev, struct amdxdna_drm_get_arra
 		if (tmp.pid != tmp_client->pid)
 			continue;
 
-		mutex_lock(&tmp_client->mm_lock);
+		guard(mutex)(&tmp_client->mm_lock);
 		tmp.total_usage += tmp_client->total_bo_usage;
 		tmp.internal_usage += tmp_client->total_int_bo_usage;
 		tmp.heap_usage += tmp_client->heap_usage;
-		mutex_unlock(&tmp_client->mm_lock);
 	}
 
 	if (copy_to_user(buf, &tmp, min_sz))
 		return -EFAULT;
 
 	return 0;
+}
+
+static bool amdxdna_use_cma(void)
+{
+#if defined(CONFIG_CMA) && !defined(CONFIG_X86_64) && !defined(CONFIG_X86)
+	return true;
+#else
+	return false;
+#endif
+}
+
+static struct amdxdna_gem_obj *
+amdxdna_dma_buf_to_gem_obj(struct drm_device *dev, struct dma_buf *dma_buf)
+{
+	struct drm_gem_object *gobj;
+
+	gobj = amdxdna_gem_prime_import(dev, dma_buf);
+	dma_buf_put(dma_buf);
+	return IS_ERR(gobj) ? ERR_CAST(gobj) : to_xdna_obj(gobj);
+}
+
+static struct sg_table *amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
+					   enum dma_data_direction dir)
+{
+	struct amdxdna_cmabuf_priv *cbuf = attach->dmabuf->priv;
+	struct scatterlist *sg;
+	struct sg_table *sgt;
+	int ret;
+
+	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
+	if (!sgt)
+		return ERR_PTR(-ENOMEM);
+
+	sg = kzalloc(sizeof(*sg), GFP_KERNEL);
+	if (!sg) {
+		ret = -ENOMEM;
+		goto free_sgt;
+	}
+
+	sg_init_table(sg, 1);
+	sg_dma_address(sg) = dma_map_resource(attach->dev, cbuf->dma_addr, cbuf->size, dir,
+					      DMA_ATTR_SKIP_CPU_SYNC);
+	ret = dma_mapping_error(attach->dev, sg->dma_address);
+	if (ret)
+		goto free_sg;
+
+	sg_assign_page(sg, NULL);
+	sg->offset = 0;
+	sg_dma_len(sg) = cbuf->size;
+	sgt->orig_nents = 1;
+	sgt->nents = sgt->orig_nents;
+	sgt->sgl = sg;
+
+	return sgt;
+
+free_sg:
+	kfree(sg);
+free_sgt:
+	kfree(sgt);
+	return ERR_PTR(ret);
+}
+
+static void amdxdna_cmabuf_unmap(struct dma_buf_attachment *attach, struct sg_table *sgt,
+				 enum dma_data_direction dir)
+{
+	struct scatterlist *sg = sgt->sgl;
+
+	dma_unmap_resource(attach->dev, sg_dma_address(sg), sg_dma_len(sg), dir,
+			   DMA_ATTR_SKIP_CPU_SYNC);
+	kfree(sg);
+	kfree(sgt);
+}
+
+static void amdxdna_cmabuf_free(struct device *dev, void *cpu_addr, dma_addr_t dma_addr,
+				size_t size, bool cacheable)
+{
+	if (cacheable)
+		dma_free_wc(dev, size, cpu_addr, dma_addr);
+	else
+		dma_free_coherent(dev, size, cpu_addr, dma_addr);
+}
+
+static void amdxdna_cmabuf_release(struct dma_buf *dbuf)
+{
+	struct amdxdna_cmabuf_priv *cmabuf = dbuf->priv;
+
+	if (!cmabuf)
+		return;
+
+	amdxdna_cmabuf_free(cmabuf->dev, cmabuf->cpu_addr, cmabuf->dma_addr, cmabuf->size,
+			    cmabuf->cacheable);
+	kfree(cmabuf);
+	dbuf->priv = NULL;
+}
+
+static int amdxdna_cmabuf_mmap(struct dma_buf *dbuf, struct vm_area_struct *vma)
+{
+	struct amdxdna_cmabuf_priv *cmabuf = dbuf->priv;
+	size_t size = vma->vm_end - vma->vm_start;
+	unsigned long vm_pgoff;
+	int ret;
+
+	if (size > cmabuf->size)
+		return -EINVAL;
+
+	vm_pgoff = vma->vm_pgoff;
+	vma->vm_pgoff = 0;
+
+	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
+
+	if (cmabuf->cacheable)
+		ret = dma_mmap_wc(cmabuf->dev, vma, cmabuf->cpu_addr, cmabuf->dma_addr,
+				  cmabuf->size);
+	else
+		ret = dma_mmap_coherent(cmabuf->dev, vma, cmabuf->cpu_addr, cmabuf->dma_addr,
+					cmabuf->size);
+
+	vma->vm_pgoff = vm_pgoff;
+
+	return ret;
+}
+
+static int amdxdna_cmabuf_vmap(struct dma_buf *dbuf, struct iosys_map *map)
+{
+	struct amdxdna_cmabuf_priv *cmabuf = dbuf->priv;
+
+	iosys_map_set_vaddr(map, cmabuf->cpu_addr);
+
+	return 0;
+}
+
+static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
+	.map_dma_buf = amdxdna_cmabuf_map,
+	.unmap_dma_buf = amdxdna_cmabuf_unmap,
+	.release = amdxdna_cmabuf_release,
+	.mmap = amdxdna_cmabuf_mmap,
+	.vmap = amdxdna_cmabuf_vmap,
+};
+
+static struct dma_buf *amdxdna_get_coherent_dma_buf(struct device *dev, size_t size,
+						    bool cacheable)
+{
+	struct amdxdna_cmabuf_priv *cmabuf;
+	struct dma_buf *dbuf;
+	dma_addr_t dma_addr;
+	void *cpu_addr;
+	int ret;
+	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+
+	cmabuf = kzalloc(sizeof(*cmabuf), GFP_KERNEL);
+	if (!cmabuf)
+		return ERR_PTR(-ENOMEM);
+
+	size = PAGE_ALIGN(size);
+
+	if (cacheable)
+		cpu_addr = dma_alloc_wc(dev, size, &dma_addr, GFP_KERNEL);
+	else
+		cpu_addr = dma_alloc_coherent(dev, size, &dma_addr, GFP_KERNEL);
+	if (!cpu_addr) {
+		ret = -ENOMEM;
+		goto free_cmabuf;
+	}
+
+	cmabuf->dev = dev;
+	cmabuf->cpu_addr = cpu_addr;
+	cmabuf->dma_addr = dma_addr;
+	cmabuf->size = size;
+	cmabuf->cacheable = cacheable;
+
+	exp_info.size = size;
+	exp_info.ops = &amdxdna_cmabuf_dmabuf_ops;
+	exp_info.priv = cmabuf;
+	exp_info.flags = O_RDWR;
+
+	dbuf = dma_buf_export(&exp_info);
+	if (IS_ERR(dbuf)) {
+		ret = PTR_ERR(dbuf);
+		goto free_dma;
+	}
+
+	return dbuf;
+
+free_dma:
+	amdxdna_cmabuf_free(dev, cpu_addr, dma_addr, size, cacheable);
+free_cmabuf:
+	kfree(cmabuf);
+	return ERR_PTR(ret);
+}
+
+static struct amdxdna_gem_obj *
+amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	size_t size = PAGE_ALIGN(args->size);
+	struct dma_buf *dma_buf;
+
+	if (args->type == AMDXDNA_BO_DEV_HEAP) {
+		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
+		return ERR_PTR(-EINVAL);
+	}
+
+	if (!size) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
+
+	dma_buf = amdxdna_get_coherent_dma_buf(dev->dev, size,
+					       (args->flags & AMDXDNA_BO_FLAGS_CACHEABLE) != 0);
+	if (IS_ERR(dma_buf))
+		return ERR_CAST(dma_buf);
+
+	return amdxdna_dma_buf_to_gem_obj(dev, dma_buf);
 }

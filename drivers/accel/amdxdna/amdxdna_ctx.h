@@ -9,9 +9,7 @@
 #include <linux/bitfield.h>
 
 #include "amdxdna_gem.h"
-#ifndef AMDXDNA_AUX
 #include <drm/gpu_scheduler.h>
-#endif
 
 /*
  * Define the maximum number of pending commands in a hardware context.
@@ -27,10 +25,8 @@
 struct amdxdna_hwctx_priv {
 	void				*mbox_chann;
 
-#ifndef AMDXDNA_AUX
 	struct drm_gpu_scheduler	sched;
 	struct drm_sched_entity		entity;
-#endif
 
 	struct mutex			io_lock; /* protect seq and cmd order */
 	struct wait_queue_head		job_free_wq;
@@ -158,10 +154,8 @@ struct amdxdna_hwctx {
 	atomic64_t			job_free_cnt ____cacheline_aligned_in_smp;
 };
 
-#ifndef AMDXDNA_AUX
 #define drm_job_to_xdna_job(j) \
 	container_of(j, struct amdxdna_sched_job, base)
-#endif
 
 enum amdxdna_job_opcode {
 	DEFAULT_IO,
@@ -181,9 +175,7 @@ union amdxdna_job_priv {
 };
 
 struct amdxdna_sched_job {
-#ifndef AMDXDNA_AUX
 	struct drm_sched_job	base;
-#endif
 	struct kref		refcnt;
 	struct amdxdna_hwctx	*hwctx;
 	struct mm_struct	*mm;

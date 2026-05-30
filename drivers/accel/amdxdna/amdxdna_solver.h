@@ -1,13 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
 #ifndef _AMDXDNA_SOLVER_H
 #define _AMDXDNA_SOLVER_H
 
-#define XRS_MAX_COL 128
-#define DEFAULT_SYS_EFF_FACTOR  2
+#include <linux/mutex.h>
+#include <linux/types.h>
+
+#define XRS_MAX_COL		(128)
+#define DEFAULT_SYS_EFF_FACTOR	(2)
 
 /*
  * Structure used to describe a partition. A partition is column based
@@ -22,8 +25,8 @@ struct aie_part {
  * The QoS capabilities of a given AIE partition.
  */
 struct aie_qos_cap {
-	u32     opc;            /* operations per cycle */
-	u32     dma_bw;         /* DMA bandwidth */
+	u32	opc;		/* operations per cycle */
+	u32	dma_bw;		/* DMA bandwidth */
 };
 
 /*
@@ -36,6 +39,7 @@ struct aie_qos {
 	u32	latency;	/* Frame response latency */
 	u32	exec_time;	/* Frame execution time */
 	u32	priority;	/* Request priority */
+	u32	exclusive;	/* Exclusive partition */
 };
 
 /*
@@ -61,8 +65,8 @@ struct alloc_requests {
  * Load callback argument
  */
 struct xrs_action_load {
-	u32                     rid;
-	struct aie_part         part;
+	u32			rid;
+	struct aie_part		part;
 };
 
 /*
@@ -93,8 +97,8 @@ enum power_level {
  * to meet the QOS requirements.
  */
 struct clk_list_info {
-	u32        num_levels;                     /* available power levels */
-	u32        cu_clk_list[POWER_LEVEL_NUM];   /* available aie clock frequencies in Mhz*/
+	u32	num_levels;	/* available power levels */
+	u32	cu_clk_list[POWER_LEVEL_NUM];	/* available aie clock frequencies in Mhz*/
 };
 
 struct xrs_action_ops {
@@ -117,7 +121,7 @@ struct init_config {
 
 /*
  * xrsm_init() - Register resource solver. Resource solver client needs
- *              to call this function to register itself.
+ *               to call this function to register itself.
  *
  * @cfg:	The system metrics for resource solver to use
  *
@@ -132,12 +136,16 @@ u32 xrs_get_gops(struct aie_qos *rqos);
 
 /*
  * xrs_allocate_resource() - Request to allocate resources for a given context
- *                           and a partition metadata. (See struct part_meta)
+ *                           and a partition metadata.
  *
  * @hdl:	Resource solver handle obtained from xrs_init()
  * @req:	Input to the Resource solver including request id
  *		and partition metadata.
  * @cb_arg:	callback argument pointer
+ * @action:	Action to perform
+ *
+ * PCI: pass @cb_arg (hwctx), @action NULL — runs load callback and DPM.
+ * VE2: pass @action, @cb_arg NULL — column pick only (partition in ve2_aie).
  *
  * Return:	0 when successful.
  *		Or standard error number when failing
@@ -147,25 +155,27 @@ u32 xrs_get_gops(struct aie_qos *rqos);
  *      the caller's responsibility to lock down XCLBINs and grab
  *      necessary lock.
  */
-int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg);
+int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
+			  struct xrs_action_load *action);
 
 /*
  * xrs_release_resource() - Request to free resources for a given context.
  *
  * @hdl:	Resource solver handle obtained from xrs_init()
  * @rid:	The Request ID to identify the requesting context
+ * @action:	Action to perform
+ *
+ * PCI: runs unload callback. VE2: bitmap/node teardown only (@action unused).
  */
-int xrs_release_resource(void *hdl, u64 rid);
-
-/*
- * Hardware context resource management helpers
- */
-struct amdxdna_hwctx;
+int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action);
 
 /*
  * amdxdna_alloc_resource() - Allocate AIE resources for a hardware context
  *
  * @hwctx:	Hardware context pointer
+ *
+ * PCI: uses col_list, QoS, mailbox load callback, and DPM.
+ * VE2: uses num_tiles; column placement only (partition in ve2_aie).
  *
  * Return:	0 when successful, or standard error number when failing
  */
@@ -179,3 +189,4 @@ int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx);
 void amdxdna_release_resource(struct amdxdna_hwctx *hwctx);
 
 #endif /* _AMDXDNA_SOLVER_H */
+
