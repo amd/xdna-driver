@@ -283,23 +283,19 @@ static void job_release(struct kref *ref)
  * read through the cached mmap returns the firmware-written value
  * instead of a stale line.
  *
- * In KMS submission mode the shim never calls SYNC_BO on cmd BOs - the
- * driver owns this responsibility because the driver also owns submit
- * and wait.  amdxdna_gem_sync_range() is a no-op on cache-coherent
- * platforms, so this work is free where it is not needed (e.g. Medusa
- * AIE4 PCIe).
+ * The shim also invalidates cmd BOs in complete_command() before reading
+ * completion state (KMS and UMS).  This path remains as defense in depth
+ * on the success path and pairs with aie4_cmd_set_state_for_user() on
+ * driver-initiated timeout/abort.
  *
  * For chained cmds, firmware writes per-sub-cmd completion state into
  * each sub-cmd BO's header (the parent runlist holder's state is
  * computed by userspace from the sub-cmd results), so the chain
- * payload must be walked and each sub-cmd BO invalidated too.  In the
- * timeout / abort paths amdxdna_cmd_set_state() has already flushed the
- * kernel-written state for the parent cmd BO back to DDR before
- * job_done() is reached, so the invalidate here is safe (no dirty
- * lines to lose).
+ * payload must be walked and each sub-cmd BO synced too.
  */
-static void aie4_cmd_bo_sync_for_cpu(struct amdxdna_ctx *ctx,
-				     struct amdxdna_gem_obj *cmd_abo)
+static void aie4_cmd_bo_sync(struct amdxdna_ctx *ctx,
+			     struct amdxdna_gem_obj *cmd_abo,
+			     enum dma_data_direction dir)
 {
 	struct amdxdna_cmd_chain *payload;
 	u32 ccnt;
@@ -308,7 +304,7 @@ static void aie4_cmd_bo_sync_for_cpu(struct amdxdna_ctx *ctx,
 	if (!cmd_abo)
 		return;
 
-	amdxdna_gem_sync_range(cmd_abo, 0, cmd_abo->mem.size, DMA_FROM_DEVICE);
+	amdxdna_gem_sync_range(cmd_abo, 0, cmd_abo->mem.size, dir);
 
 	if (amdxdna_cmd_get_op(cmd_abo) != ERT_CMD_CHAIN)
 		return;
@@ -324,10 +320,36 @@ static void aie4_cmd_bo_sync_for_cpu(struct amdxdna_ctx *ctx,
 		sub_abo = amdxdna_gem_get_obj(ctx->client, boh, AMDXDNA_BO_SHARE);
 		if (!sub_abo)
 			continue;
-		amdxdna_gem_sync_range(sub_abo, 0, sub_abo->mem.size,
-				       DMA_FROM_DEVICE);
+		amdxdna_gem_sync_range(sub_abo, 0, sub_abo->mem.size, dir);
 		amdxdna_gem_put_obj(sub_abo);
 	}
+}
+
+static inline void aie4_cmd_bo_sync_for_cpu(struct amdxdna_ctx *ctx,
+					    struct amdxdna_gem_obj *cmd_abo)
+{
+	aie4_cmd_bo_sync(ctx, cmd_abo, DMA_FROM_DEVICE);
+}
+
+static inline void aie4_cmd_bo_sync_for_device(struct amdxdna_ctx *ctx,
+					       struct amdxdna_gem_obj *cmd_abo)
+{
+	aie4_cmd_bo_sync(ctx, cmd_abo, DMA_TO_DEVICE);
+}
+
+/*
+ * Publish a driver-written completion state (timeout/abort) so userspace
+ * sees it after its own cache invalidate: drop stale CPU lines, write
+ * state via the kernel vmap, then flush the cmd BO (and health payload)
+ * back to DDR.
+ */
+static void aie4_cmd_set_state_for_user(struct amdxdna_ctx *ctx,
+					struct amdxdna_gem_obj *cmd_abo,
+					enum ert_cmd_state state)
+{
+	aie4_cmd_bo_sync_for_cpu(ctx, cmd_abo);
+	amdxdna_cmd_set_state(cmd_abo, state);
+	aie4_cmd_bo_sync_for_device(ctx, cmd_abo);
 }
 
 static void job_done(struct amdxdna_sched_job *job)
@@ -335,11 +357,7 @@ static void job_done(struct amdxdna_sched_job *job)
 	struct amdxdna_ctx *ctx = job->ctx;
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 
-	/*
-	 * Make firmware-written completion state observable to the next
-	 * userspace read of the cmd BO header before we wake any waiter
-	 * via dma_fence_signal() below.
-	 */
+	/* Defense in depth before waking aie4_cmd_wait(); shim also syncs. */
 	aie4_cmd_bo_sync_for_cpu(ctx, job->cmd_bo);
 
 	XDNA_DBG(xdna, "%s job 0x%llx@%lld done, state %d",
@@ -388,7 +406,7 @@ static void job_abort(struct amdxdna_sched_job *job)
 
 	XDNA_ERR(xdna, "aborting %s job %lld", ctx->name, job->seq);
 
-	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_ABORT);
+	aie4_cmd_set_state_for_user(ctx, cmd_abo, ERT_CMD_STATE_ABORT);
 	update_read_index(ctx, job->seq + 1);
 	job_done(job);
 }
@@ -456,6 +474,7 @@ static void job_timeout(struct amdxdna_sched_job *job)
 
 	/* Single cmd. */
 	if (job->state == JOB_STATE_SUBMITTED) {
+		aie4_cmd_bo_sync_for_cpu(ctx, cmd_abo);
 		aie4_fill_health_data(cmd_abo, job->ctx);
 		goto done;
 	}
@@ -472,7 +491,9 @@ static void job_timeout(struct amdxdna_sched_job *job)
 		if (!sub_cmd_abo) {
 			XDNA_ERR(xdna, "Failed to find cmd BO %d", boh);
 		} else {
+			aie4_cmd_bo_sync_for_cpu(ctx, sub_cmd_abo);
 			aie4_fill_health_data(sub_cmd_abo, job->ctx);
+			aie4_cmd_bo_sync_for_device(ctx, sub_cmd_abo);
 			amdxdna_gem_put_obj(sub_cmd_abo);
 		}
 	} else {
@@ -485,7 +506,7 @@ done:
 	 * is updated, user space may treat cmd is completed.
 	 */
 	wmb();
-	amdxdna_cmd_set_state(cmd_abo, ERT_CMD_STATE_TIMEOUT);
+	aie4_cmd_set_state_for_user(ctx, cmd_abo, ERT_CMD_STATE_TIMEOUT);
 	update_read_index(ctx, job->seq + 1);
 	job_done(job);
 }
