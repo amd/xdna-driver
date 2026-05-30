@@ -57,6 +57,14 @@ struct amdxdna_gem_obj {
 	bool				internal;
 };
 
+struct amdxdna_cmabuf_priv {
+	struct device			*dev;
+	dma_addr_t			dma_addr;
+	void*				cpu_addr;
+	size_t				size;
+	bool				cacheable;
+};
+
 #define to_gobj(obj)    (&(obj)->base.base)
 #define is_import_bo(obj) ((obj)->attach)
 

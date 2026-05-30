@@ -12,9 +12,7 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_print.h>
 #include <drm/drm_syncobj.h>
-#ifndef AMDXDNA_AUX
 #include <drm/gpu_scheduler.h>
-#endif
 #include <linux/xarray.h>
 #include "trace/events/amdxdna.h"
 
