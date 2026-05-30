@@ -264,6 +264,7 @@ struct cert_comp {
  * the variable is consulted.
  */
 extern bool fw_lifecycle_owner;
+extern int enable_async_events;
 
 /* common util inline functions */
 static inline int is_npu3_pf_dev(struct amdxdna_dev *xdna)

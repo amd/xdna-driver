@@ -64,6 +64,11 @@ module_param(allow_partition_id_zero, int, 0644);
 MODULE_PARM_DESC(allow_partition_id_zero,
 		 " Treat partition_id 0 as valid in CREATE_HW_CONTEXT (some FWs use 0; default 0 = reject)");
 
+int enable_async_events;
+module_param(enable_async_events, int, 0644);
+MODULE_PARM_DESC(enable_async_events,
+		 " Register AIE4 async error event buffers with firmware (0=disabled, default)");
+
 #ifdef CONFIG_AMDXDNA_NO_PCI
 uint timeout_in_sec = 2;
 module_param(timeout_in_sec, uint, 0644);
