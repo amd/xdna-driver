@@ -304,16 +304,10 @@ hwq::
 issue_command(const cmd_buffer *cmd_bo)
 {
   /*
-   * No shim-side cmd BO cache sync needed here.  This is the
-   * kernel-mode submission path (DRM_IOCTL_AMDXDNA_EXEC_CMD): the
-   * driver itself flushes the cmd BO for the kernel/CERT in
-   * submit_one_cmd() / submit_job() before reading the packet, and
-   * invalidates it in job_done() before waking the wait_cmd waiter.
-   * See driver/amdxdna/aie4_hwctx.c (commit e9a037e).
-   *
-   * In user-mode submission the kernel is bypassed - that sync stays
-   * in hwq_umq::issue_command() / complete_command() where the shim
-   * directly drives the HSA queue.
+   * No shim-side cmd BO flush needed here.  KMS submit goes through
+   * EXEC_CMD; the driver flushes the cmd BO before reading it in
+   * submit_one_cmd().  After wait, complete_command() invalidates the
+   * cmd BO before reading completion state (KMS and UMS).
    */
   submit_cmd_arg ecmd = {
     .ctx_handle = m_ctx->get_slotidx(),
