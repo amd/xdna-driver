@@ -33,31 +33,25 @@ static int aie4_dbgfs_entry_open(struct inode *inode, struct file *file,
 	struct amdxdna_dev_hdl *ndev = inode->i_private;
 	int ret;
 
-#ifndef CONFIG_AMDXDNA_SHMEM
 	ret = pm_runtime_resume_and_get(ndev->xdna->ddev.dev);
 	if (ret)
 		return ret;
-#endif
 
 	ret = single_open(file, show, ndev);
-#ifndef CONFIG_AMDXDNA_SHMEM
 	if (ret) {
 		pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
 		pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
 	}
-#endif
 
 	return ret;
 }
 
 static int aie4_dbgfs_entry_release(struct inode *inode, struct file *file)
 {
-#ifndef CONFIG_AMDXDNA_SHMEM
 	struct amdxdna_dev_hdl *ndev = inode->i_private;
 
 	pm_runtime_mark_last_busy(ndev->xdna->ddev.dev);
 	pm_runtime_put_autosuspend(ndev->xdna->ddev.dev);
-#endif
 	return single_release(inode, file);
 }
 

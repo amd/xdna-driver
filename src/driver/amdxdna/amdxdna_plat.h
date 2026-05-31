@@ -9,6 +9,12 @@
 struct amdxdna_dev;
 struct rproc;
 
+enum amdxdna_plat_transport {
+	AMDXDNA_TRANSPORT_NONE = 0,
+	AMDXDNA_TRANSPORT_RPMSG,
+	AMDXDNA_TRANSPORT_SHMEM,
+};
+
 /**
  * amdxdna_plat_find_by_rproc - Look up a probed amdxdna platform device
  *                              by its owning remoteproc.

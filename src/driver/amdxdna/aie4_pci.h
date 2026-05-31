@@ -25,6 +25,7 @@
 
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_mailbox.h"
+#include "amdxdna_plat.h"
 #include "amdxdna_error.h"
 #include "amdxdna_aie.h"
 #include "aie_common.h"
@@ -176,9 +177,9 @@ struct amdxdna_dev_hdl;
 /*
  * Generic transport operations for non-PCI communication paths.
  *
- * Implementations:
- *   - RPMsg over VirtIO (CONFIG_AMDXDNA_RPMSG)
- *   - Shared memory + ZynqMP IPI (CONFIG_AMDXDNA_SHMEM)
+ * Implementations (CONFIG_AMDXDNA_NPU_OF, selected at runtime via DT):
+ *   - RPMsg over VirtIO (amd,versal-aie-rpmsg)
+ *   - Shared memory + ZynqMP IPI (amd,versal-aie)
  *
  * When xcomm_ops is NULL, the driver falls back to PCI MMIO mailbox.
  */
@@ -246,6 +247,9 @@ struct amdxdna_dev_hdl {
 	 */
 	const struct amdxdna_xcomm_ops	*xcomm_ops;
 	void				*xcomm_hdl;
+
+	/* Platform-only: selected from the device-tree compatible string. */
+	enum amdxdna_plat_transport	plat_transport;
 };
 
 /* CERT completion event */

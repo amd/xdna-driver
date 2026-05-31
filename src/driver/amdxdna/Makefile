@@ -10,23 +10,30 @@ XDNA_BUS_TYPE := pci
 ifeq ($(XDNA_BUS_TYPE), pci)
 PCI = y
 OF = n
-RPMSG = n
-SHMEM = n
+NPU_OF = n
 else ifeq ($(XDNA_BUS_TYPE), of)
 PCI = n
 OF = y
-RPMSG = n
-SHMEM = n
+NPU_OF = n
+else ifeq ($(XDNA_BUS_TYPE), npu_of)
+PCI = n
+OF = n
+NPU_OF = y
 else ifeq ($(XDNA_BUS_TYPE), rpmsg)
 PCI = n
 OF = n
-RPMSG = y
-SHMEM = n
+NPU_OF = y
+$(warning XDNA_BUS_TYPE=rpmsg is deprecated, use npu_of)
 else ifeq ($(XDNA_BUS_TYPE), shmem)
 PCI = n
 OF = n
-RPMSG = n
-SHMEM = y
+NPU_OF = y
+$(warning XDNA_BUS_TYPE=shmem is deprecated, use npu_of)
+else ifeq ($(XDNA_BUS_TYPE), platform)
+PCI = n
+OF = n
+NPU_OF = y
+$(warning XDNA_BUS_TYPE=platform is deprecated, use npu_of)
 else
 $(error Unknown XDNA_BUS_TYPE $(XDNA_BUS_TYPE))!!
 endif
@@ -64,15 +71,11 @@ endif
 
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
-ifeq ($(XDNA_BUS_TYPE), rpmsg)
-DEFINES += -DCONFIG_AMDXDNA_RPMSG -DCONFIG_AMDXDNA_NO_PCI
+ifeq ($(NPU_OF), y)
+DEFINES += -DCONFIG_AMDXDNA_NPU_OF -DCONFIG_AMDXDNA_NO_PCI
 endif
 
-ifeq ($(XDNA_BUS_TYPE), shmem)
-DEFINES += -DCONFIG_AMDXDNA_SHMEM -DCONFIG_AMDXDNA_NO_PCI
-endif
-
-KBUILD_ARGS := OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) OFT_CONFIG_AMDXDNA_RPMSG=$(RPMSG) OFT_CONFIG_AMDXDNA_SHMEM=$(SHMEM)
+KBUILD_ARGS := OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) OFT_CONFIG_AMDXDNA_NPU_OF=$(NPU_OF)
 
 ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF

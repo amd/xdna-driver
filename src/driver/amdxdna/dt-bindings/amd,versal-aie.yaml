@@ -4,26 +4,21 @@
 $id: http://devicetree.org/schemas/accel/amd,versal-aie.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: AMD XDNA AIE Accelerator (RPMsg Transport)
+title: AMD XDNA AIE Accelerator (Versal Platform)
 
 maintainers:
   - XRT Team <runtimeca39d@amd.com>
 
 description: |
-  The amd,versal-aie node describes an AMD XDNA AI Engine accelerator
-  on ARM SoC platforms (e.g. AMD Versal VEK385) where communication
-  with the NPU firmware runs over RPMsg (VirtIO) through a remoteproc.
+  AMD XDNA AI Engine accelerator nodes on ARM SoC platforms (e.g. Versal
+  VEK385).  The compatible string selects the management transport at
+  runtime:
 
-  The platform driver probes on this node and creates a DRM/accel
-  device (/dev/accel/accelN).  Probe is deferred (-EPROBE_DEFER)
-  until both the remoteproc referenced by "amd,remoteproc" is
-  registered and the firmware has announced the "rpmsg-aie-mgmt"
-  RPMsg service.  The driver also verifies at runtime that incoming
-  RPMsg channels belong to the expected remoteproc.
+    amd,versal-aie-rpmsg — RPMsg over VirtIO through a remoteproc
+    amd,versal-aie       — Shared memory mailbox + ZynqMP IPI
 
-  No MMIO BARs, PSP, SMU, or IRQ vectors are needed - the remote
-  processor owns the hardware.  The host only sends management and
-  doorbell messages over the RPMsg channel.
+  The platform driver probes on this node and creates a DRM/accel device
+  (/dev/accel/accelN).
 
   CMA pools are described by name in memory-region-names.  Two roles
   are recognized:
@@ -60,7 +55,11 @@ description: |
 
 properties:
   compatible:
-    const: amd,versal-aie
+    oneOf:
+      - description: RPMsg over VirtIO (remoteproc management channel)
+        const: amd,versal-aie-rpmsg
+      - description: Shared memory mailbox + ZynqMP IPI
+        const: amd,versal-aie
 
   amd,remoteproc:
     $ref: /schemas/types.yaml#/definitions/phandle
@@ -99,12 +98,18 @@ additionalProperties: false
 
 required:
   - compatible
-  - amd,remoteproc
 
 examples:
   - |
+    /* RPMsg transport (requires remoteproc + rpmsg-aie-mgmt channel) */
+    amdxdna {
+        compatible = "amd,versal-aie-rpmsg";
+        amd,remoteproc = <&r5f_0>;
+    };
+
+  - |
     /*
-     * Minimal example - remoteproc binding only, no dedicated CMA
+     * Minimal shmem example - remoteproc binding only, no dedicated CMA
      * regions.  All buffer allocations use the system default CMA
      * pool.  Fine for bring-up but not recommended for production:
      * mgmt buffers may end up above 4 GB (unreachable by a 32-bit

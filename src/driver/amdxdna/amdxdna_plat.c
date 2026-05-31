@@ -23,10 +23,10 @@
  *                   userspace via the low 8 bits of the BO flags
  *                   field.  User-mode BO ioctls default to bank 0.
  *
- * The compatible string selects which transport to use:
+ * The compatible string selects which transport to use at runtime:
  *
- *   "amd,versal-aie"      — RPMsg over VirtIO (remoteproc)
- *   "amd,amdxdna-npu3"    — Shared memory + ZynqMP IPI
+ *   "amd,versal-aie-rpmsg" — RPMsg over VirtIO (remoteproc)
+ *   "amd,versal-aie"       — Shared memory + ZynqMP IPI
  *
  * Device tree example (RPMsg):
  *
@@ -46,7 +46,7 @@
  *   };
  *
  *   amdxdna {
- *       compatible = "amd,versal-aie";
+ *       compatible = "amd,versal-aie-rpmsg";
  *       amd,remoteproc = <&r5f_0>;
  *       memory-region       = <&rpu_cma>, <&aie_cma0>;
  *       memory-region-names = "rpu-cma", "app-bank0";
@@ -78,37 +78,33 @@
 #include "amdxdna_devel.h"
 #endif
 
-#ifdef CONFIG_AMDXDNA_RPMSG
 #include "amdxdna_rpmsg.h"
-#endif
-
-#ifdef CONFIG_AMDXDNA_SHMEM
 #include "amdxdna_shmem.h"
-#endif
-
-enum amdxdna_plat_transport {
-	XDNA_TRANSPORT_RPMSG,
-	XDNA_TRANSPORT_SHMEM,
-};
 
 struct amdxdna_plat_data {
 	const struct amdxdna_dev_info	*dev_info;
 	enum amdxdna_plat_transport	transport;
 };
 
+static bool amdxdna_plat_transport_is_rpmsg(enum amdxdna_plat_transport transport)
+{
+	return transport == AMDXDNA_TRANSPORT_RPMSG;
+}
+
+static bool amdxdna_plat_transport_is_shmem(enum amdxdna_plat_transport transport)
+{
+	return transport == AMDXDNA_TRANSPORT_SHMEM;
+}
+
 static int amdxdna_plat_transport_init(struct amdxdna_dev *xdna,
 				       struct platform_device *pdev,
 				       const struct amdxdna_plat_data *pdata)
 {
 	switch (pdata->transport) {
-#ifdef CONFIG_AMDXDNA_RPMSG
-	case XDNA_TRANSPORT_RPMSG:
+	case AMDXDNA_TRANSPORT_RPMSG:
 		return amdxdna_rpmsg_init(xdna);
-#endif
-#ifdef CONFIG_AMDXDNA_SHMEM
-	case XDNA_TRANSPORT_SHMEM:
+	case AMDXDNA_TRANSPORT_SHMEM:
 		return amdxdna_shmem_init(xdna, pdev);
-#endif
 	default:
 		return -EINVAL;
 	}
@@ -118,16 +114,12 @@ static void amdxdna_plat_transport_fini(struct amdxdna_dev *xdna,
 					const struct amdxdna_plat_data *pdata)
 {
 	switch (pdata->transport) {
-#ifdef CONFIG_AMDXDNA_RPMSG
-	case XDNA_TRANSPORT_RPMSG:
+	case AMDXDNA_TRANSPORT_RPMSG:
 		amdxdna_rpmsg_fini(xdna);
 		break;
-#endif
-#ifdef CONFIG_AMDXDNA_SHMEM
-	case XDNA_TRANSPORT_SHMEM:
+	case AMDXDNA_TRANSPORT_SHMEM:
 		amdxdna_shmem_fini(xdna);
 		break;
-#endif
 	default:
 		break;
 	}
@@ -135,7 +127,6 @@ static void amdxdna_plat_transport_fini(struct amdxdna_dev *xdna,
 
 static const struct of_device_id amdxdna_plat_of_match[];
 
-#ifdef CONFIG_AMDXDNA_RPMSG
 struct amdxdna_dev *amdxdna_plat_find_by_rproc(struct rproc *rp)
 {
 	struct amdxdna_dev *xdna = NULL;
@@ -188,7 +179,6 @@ struct amdxdna_dev *amdxdna_plat_find_by_rproc(struct rproc *rp)
 
 	return NULL;
 }
-#endif
 
 /**
  * amdxdna_plat_register_device - Run the firmware-dependent setup for an
@@ -205,6 +195,7 @@ struct amdxdna_dev *amdxdna_plat_find_by_rproc(struct rproc *rp)
  */
 int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct device *dev = xdna->ddev.dev;
 	int ret;
 
@@ -218,15 +209,15 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 		return -ENOMEM;
 	}
 
-#ifndef CONFIG_AMDXDNA_SHMEM
-	if (xdna->dev_info->ops && xdna->dev_info->ops->init) {
-		ret = xdna->dev_info->ops->init(xdna);
-		if (ret) {
-			XDNA_ERR(xdna, "ops->init failed: %d", ret);
-			goto destroy_wq;
+	if (amdxdna_plat_transport_is_rpmsg(ndev->plat_transport)) {
+		if (xdna->dev_info->ops && xdna->dev_info->ops->init) {
+			ret = xdna->dev_info->ops->init(xdna);
+			if (ret) {
+				XDNA_ERR(xdna, "ops->init failed: %d", ret);
+				goto destroy_wq;
+			}
 		}
 	}
-#endif
 
 	ret = amdxdna_sysfs_init(xdna);
 	if (ret) {
@@ -264,11 +255,11 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
 fini_dev:
-#ifndef CONFIG_AMDXDNA_SHMEM
-	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
-		xdna->dev_info->ops->fini(xdna);
+	if (amdxdna_plat_transport_is_rpmsg(ndev->plat_transport)) {
+		if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
+			xdna->dev_info->ops->fini(xdna);
+	}
 destroy_wq:
-#endif
 	destroy_workqueue(xdna->notifier_wq);
 	xdna->notifier_wq = NULL;
 	return ret;
@@ -276,6 +267,7 @@ destroy_wq:
 
 void amdxdna_plat_unregister_device(struct amdxdna_dev *xdna)
 {
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct device *dev = xdna->ddev.dev;
 
 	if (!xdna->notifier_wq)
@@ -300,10 +292,10 @@ void amdxdna_plat_unregister_device(struct amdxdna_dev *xdna)
 	amdxdna_sysfs_fini(xdna);
 	amdxdna_rpm_fini(xdna);
 	pm_runtime_disable(dev);
-#ifndef CONFIG_AMDXDNA_SHMEM
-	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
-		xdna->dev_info->ops->fini(xdna);
-#endif
+	if (amdxdna_plat_transport_is_rpmsg(ndev->plat_transport)) {
+		if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
+			xdna->dev_info->ops->fini(xdna);
+	}
 	destroy_workqueue(xdna->notifier_wq);
 	xdna->notifier_wq = NULL;
 
@@ -365,6 +357,7 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 
 	xdna->dev_handle = ndev;
 	ndev->pw_mode = POWER_MODE_DEFAULT;
+	ndev->plat_transport = pdata->transport;
 	platform_set_drvdata(pdev, xdna);
 
 #ifdef AMDXDNA_DEVEL
@@ -427,21 +420,19 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	 * register_device inline (RPMsg does this from its drv_probe
 	 * callback once the channel is announced).
 	 */
-#ifdef CONFIG_AMDXDNA_SHMEM
-	ret = amdxdna_plat_register_device(xdna);
-	if (ret) {
-		dev_err(dev, "Device registration failed: %d\n", ret);
-		goto transport_fini;
+	if (amdxdna_plat_transport_is_shmem(pdata->transport)) {
+		ret = amdxdna_plat_register_device(xdna);
+		if (ret) {
+			dev_err(dev, "Device registration failed: %d\n", ret);
+			goto transport_fini;
+		}
 	}
-#endif
 
 	XDNA_INFO(xdna, "Platform driver probed");
 	return 0;
 
-#ifdef CONFIG_AMDXDNA_SHMEM
 transport_fini:
 	amdxdna_plat_transport_fini(xdna, pdata);
-#endif
 cma_fini:
 	amdxdna_cma_region_fini(xdna);
 
@@ -471,7 +462,6 @@ static void amdxdna_plat_remove(struct platform_device *pdev)
 	amdxdna_cma_region_fini(xdna);
 }
 
-#ifdef CONFIG_AMDXDNA_RPMSG
 /*
  * T20: npu3/aie4 firmware over rpmsg, but the underlying AIE silicon is
  * aie2ps ("ve2").  Use the dedicated dev_npu3_aie2ps_info so XRT sees
@@ -481,11 +471,9 @@ static void amdxdna_plat_remove(struct platform_device *pdev)
  */
 static const struct amdxdna_plat_data plat_rpmsg_npu3_aie2ps = {
 	.dev_info	= &dev_npu3_aie2ps_info,
-	.transport	= XDNA_TRANSPORT_RPMSG,
+	.transport	= AMDXDNA_TRANSPORT_RPMSG,
 };
-#endif
 
-#ifdef CONFIG_AMDXDNA_SHMEM
 /*
  * Same T20 SoC as the rpmsg variant above, just a different management
  * transport (shared memory mailbox instead of rpmsg).  Underlying AIE
@@ -494,17 +482,12 @@ static const struct amdxdna_plat_data plat_rpmsg_npu3_aie2ps = {
  */
 static const struct amdxdna_plat_data plat_shmem_npu3_aie2ps = {
 	.dev_info	= &dev_npu3_aie2ps_info,
-	.transport	= XDNA_TRANSPORT_SHMEM,
+	.transport	= AMDXDNA_TRANSPORT_SHMEM,
 };
-#endif
 
 static const struct of_device_id amdxdna_plat_of_match[] = {
-#ifdef CONFIG_AMDXDNA_RPMSG
-	{ .compatible = "amd,versal-aie", .data = &plat_rpmsg_npu3_aie2ps },
-#endif
-#ifdef CONFIG_AMDXDNA_SHMEM
-	{ .compatible = "amd,amdxdna-npu3", .data = &plat_shmem_npu3_aie2ps },
-#endif
+	{ .compatible = "amd,versal-aie-rpmsg", .data = &plat_rpmsg_npu3_aie2ps },
+	{ .compatible = "amd,versal-aie", .data = &plat_shmem_npu3_aie2ps },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, amdxdna_plat_of_match);
@@ -555,22 +538,18 @@ static int __init amdxdna_plat_mod_init(void)
 	if (ret)
 		return ret;
 
-#ifdef CONFIG_AMDXDNA_RPMSG
 	ret = amdxdna_rpmsg_drv_register();
 	if (ret) {
 		platform_driver_unregister(&amdxdna_plat_driver);
 		return ret;
 	}
-#endif
 
 	return 0;
 }
 
 static void __exit amdxdna_plat_mod_exit(void)
 {
-#ifdef CONFIG_AMDXDNA_RPMSG
 	amdxdna_rpmsg_drv_unregister();
-#endif
 	platform_driver_unregister(&amdxdna_plat_driver);
 }
 

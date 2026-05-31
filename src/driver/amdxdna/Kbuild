@@ -88,7 +88,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_OF) += \
 	ve2_fw.o \
 	ve2_debug.o
 
-amdxdna-$(OFT_CONFIG_AMDXDNA_RPMSG) += \
+amdxdna-$(OFT_CONFIG_AMDXDNA_NPU_OF) += \
 	aie4_pci.o \
 	aie4_hwctx.o \
 	aie4_debugfs.o \
@@ -101,24 +101,9 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_RPMSG) += \
 	aie4_sriov.o \
 	npu3_regs.o \
 	npu3_aie2ps_regs.o \
+	amdxdna_plat.o \
 	amdxdna_rpmsg.o \
-	amdxdna_plat.o
-
-amdxdna-$(OFT_CONFIG_AMDXDNA_SHMEM) += \
-	aie4_pci.o \
-	aie4_hwctx.o \
-	aie4_debugfs.o \
-	aie4_devel.o \
-	aie4_error.o \
-	aie4_pm.o \
-	aie4_dpt.o \
-	aie4_message.o \
-	aie4_solver.o \
-	aie4_sriov.o \
-	npu3_regs.o \
-	npu3_aie2ps_regs.o \
-	amdxdna_shmem.o \
-	amdxdna_plat.o
+	amdxdna_shmem.o
 
 # Helper functions for amdxdna development, but not for upstreaming
 amdxdna-y += amdxdna_devel.o
