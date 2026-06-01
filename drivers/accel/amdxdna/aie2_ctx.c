@@ -32,10 +32,6 @@ uint tdr_timeout_ms = 2000;
 module_param(tdr_timeout_ms, uint, 0400);
 MODULE_PARM_DESC(tdr_timeout_ms, "TDR (Timeout Detection and Recovery) timeout in milliseconds (0 = disable)");
 
-bool tdr_dump_only;
-module_param(tdr_dump_only, bool, 0600);
-MODULE_PARM_DESC(tdr_dump_only, "Only dump health info on timeout, skip recovery (default: false)");
-
 struct aie2_ctx_health {
 	struct amdxdna_ctx_health header;
 	u32 txn_op_idx;
@@ -233,9 +229,17 @@ aie2_sched_notify(struct amdxdna_sched_job *job)
 	aie2_job_put(job);
 }
 
-static void aie2_log_health_report(struct amdxdna_dev *xdna,
-				   struct app_health_report *report)
+static void aie2_set_cmd_timeout(struct amdxdna_sched_job *job)
 {
+	struct aie2_ctx_health *aie2_health __free(kfree) = NULL;
+	struct amdxdna_dev *xdna = job->hwctx->client->xdna;
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct app_health_report *report = job->aie2_job_health;
+	u32 fail_cmd_idx = 0;
+
+	if (!report)
+		goto set_timeout;
+
 	XDNA_ERR(xdna, "Firmware timeout state capture:");
 	XDNA_ERR(xdna, "\tVersion: %d.%d", report->major, report->minor);
 	XDNA_ERR(xdna, "\tReport size: 0x%x", report->size);
@@ -249,20 +253,6 @@ static void aie2_log_health_report(struct amdxdna_dev *xdna,
 	XDNA_ERR(xdna, "\tFatal error app module: 0x%x", report->fatal_info.app_module);
 	XDNA_ERR(xdna, "\tFatal error task ID: %d", report->fatal_info.task_index);
 	XDNA_ERR(xdna, "\tTimed out sub command ID: %d", report->run_list_id);
-}
-
-static void aie2_set_cmd_timeout(struct amdxdna_sched_job *job)
-{
-	struct aie2_ctx_health *aie2_health __free(kfree) = NULL;
-	struct amdxdna_dev *xdna = job->hwctx->client->xdna;
-	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
-	struct app_health_report *report = job->aie2_job_health;
-	u32 fail_cmd_idx = 0;
-
-	if (!report)
-		goto set_timeout;
-
-	aie2_log_health_report(xdna, report);
 
 	fail_cmd_idx = report->run_list_id;
 	aie2_health = kzalloc_obj(*aie2_health);
@@ -324,21 +314,12 @@ aie2_sched_drvcmd_resp_handler(void *handle, void __iomem *data, size_t size)
 	struct amdxdna_sched_job *job = handle;
 	int ret = 0;
 
-	if (unlikely(!data)) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (unlikely(size != sizeof(u32))) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	job->drv_cmd->result = readl(data);
-
-out:
-	if (ret)
+	if (unlikely(!data || size != sizeof(u32))) {
 		job->drv_cmd->result = U32_MAX;
+		ret = -EINVAL;
+	} else {
+		job->drv_cmd->result = readl(data);
+	}
 
 	aie2_sched_notify(job);
 	return ret;
@@ -492,27 +473,17 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 #endif
 
 	report = kzalloc_obj(*report);
-	if (report) {
-		ret = aie2_query_app_health(xdna->dev_handle, hwctx->fw_ctx_id, report);
-		if (ret) {
-			kfree(report);
-			report = NULL;
-		}
-	}
+	if (!report)
+		goto reset_hwctx;
 
-#ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
-	if (tdr_dump_only) {
-		if (report) {
-			aie2_log_health_report(xdna, report);
-			kfree(report);
-		}
-		return DRM_GPU_SCHED_STAT_NO_HANG;
-	}
-#endif
+	ret = aie2_query_app_health(xdna->dev_handle, hwctx->fw_ctx_id, report);
+	if (ret)
+		kfree(report);
+	else
+		job->aie2_job_health = report;
 
+reset_hwctx:
 	job->job_timeout = true;
-	job->aie2_job_health = report;
-
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
 
 	aie2_hwctx_restart(xdna, hwctx);
