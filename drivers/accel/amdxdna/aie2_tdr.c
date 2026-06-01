@@ -74,24 +74,6 @@ static bool aie2_legacy_tdr_detect(struct amdxdna_dev *xdna)
 	return false;
 }
 
-static void aie2_tdr_dump_health_report(struct amdxdna_dev *xdna,
-					struct app_health_report *report)
-{
-	XDNA_ERR(xdna, "Firmware timeout state capture:");
-	XDNA_ERR(xdna, "\tVersion: %d.%d", report->major, report->minor);
-	XDNA_ERR(xdna, "\tReport size: 0x%x", report->size);
-	XDNA_ERR(xdna, "\tContext ID: %d", report->context_id);
-	XDNA_ERR(xdna, "\tDPU PC: 0x%x", report->dpu_pc);
-	XDNA_ERR(xdna, "\tTXN OP ID: 0x%x", report->txn_op_id);
-	XDNA_ERR(xdna, "\tContext PC: 0x%x", report->ctx_pc);
-	XDNA_ERR(xdna, "\tFatal error type: 0x%x", report->fatal_info.fatal_type);
-	XDNA_ERR(xdna, "\tFatal error exception type: 0x%x", report->fatal_info.exception_type);
-	XDNA_ERR(xdna, "\tFatal error exception PC: 0x%x", report->fatal_info.exception_pc);
-	XDNA_ERR(xdna, "\tFatal error app module: 0x%x", report->fatal_info.app_module);
-	XDNA_ERR(xdna, "\tFatal error task ID: %d", report->fatal_info.task_index);
-	XDNA_ERR(xdna, "\tTimed out sub command ID: %d", report->run_list_id);
-}
-
 static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -106,14 +88,8 @@ static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 		if (ret) {
 			kfree(report);
 			report = NULL;
-		} else if (tdr_dump_only) {
-			aie2_tdr_dump_health_report(xdna, report);
-			kfree(report);
 		}
 	}
-
-	if (tdr_dump_only)
-		return 0;
 
 	sched = &hwctx->priv->sched;
 	drm_sched_stop(sched, NULL);
