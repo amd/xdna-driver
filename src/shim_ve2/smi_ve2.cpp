@@ -38,9 +38,6 @@ create_examine_subcommand()
 {
     std::vector<xrt_core::smi::basic_option> examine_report_desc = {
       {"all", "All known reports are produced", "common"},
-      {"aie", "AIE metadata in xclbin", "common"},
-      {"aiemem", "AIE memory tile information", "common"},
-      {"aieshim", "AIE shim tile status", "common"},
       {"aie-partitions", "AIE partition information", "common"},
       {"host", "Host information", "common"},
       {"clocks", "Clock frequency information", "hidden"},
