@@ -122,6 +122,32 @@ validate_exec_cmd_inline_payload(const struct amdxdna_ccmd_exec_cmd_req *req)
 }
 
 /*
+ * The node_name flexible-array member has no built-in NUL guarantee.  When
+ * hdr.len > sizeof(request), the dispatch copy fills the whole buffer with
+ * guest bytes (no trailing zero pad), so streaming req->node_name into an
+ * ostringstream would read past the request copy until it hit a stray 0 in
+ * adjacent host heap.  Require an explicit terminator inside hdr.len.
+ */
+void
+validate_read_sysfs_inline_payload(const struct amdxdna_ccmd_read_sysfs_req *req)
+{
+    constexpr size_t inline_off =
+        offsetof(struct amdxdna_ccmd_read_sysfs_req, node_name);
+    const uint32_t hdr_len = req->hdr.len;
+    const size_t max_name = hdr_len - inline_off;
+
+    if (max_name == 0)
+        VACCEL_THROW_MSG(-EINVAL,
+                         "read_sysfs node_name is empty (hdr.len %u)", hdr_len);
+
+    if (::strnlen(req->node_name, max_name) == max_name)
+        VACCEL_THROW_MSG(-EINVAL,
+                         "read_sysfs node_name not NUL-terminated within %zu bytes "
+                         "(hdr.len %u)",
+                         max_name, hdr_len);
+}
+
+/*
  * Helpers for iov_table_overlaps(): detect whether the coalesce destination
  * [base, base+len) intersects any guest iovec before mremap(old_size=0).  Overlap
  * would make dest and source the same VA range; mremap would fail (typically
@@ -986,6 +1012,8 @@ void
 vxdna_context::
 read_sysfs(const struct amdxdna_ccmd_read_sysfs_req *req)
 {
+    validate_read_sysfs_inline_payload(req);
+
     struct amdxdna_ccmd_read_sysfs_rsp rsp = {};
     struct stat st = {};
     int ret;
