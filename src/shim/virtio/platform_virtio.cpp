@@ -554,6 +554,9 @@ get_info(amdxdna_drm_get_info& arg) const
   };
   amdxdna_ccmd_get_info_rsp rsp = {};
   hcall(&req, &rsp, sizeof(rsp));
+  if (rsp.size > arg.buffer_size)
+    shim_err(EINVAL, "Host returns more data than requested?");
+
   std::memcpy(reinterpret_cast<char*>(arg.buffer), resp_buf->get(), rsp.size);
   arg.buffer_size = rsp.size;
 }

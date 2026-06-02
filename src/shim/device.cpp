@@ -1389,13 +1389,17 @@ struct clock_topology
 
     std::vector<clock_freq> clocks;
     clock_freq mp_npu_clock;
-    strcpy(mp_npu_clock.m_name, reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name));
+    strlcpy(mp_npu_clock.m_name,
+      reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name),
+      sizeof(mp_npu_clock.m_name));
     mp_npu_clock.m_type = CT_SYSTEM;
     mp_npu_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
     clocks.push_back(mp_npu_clock);
 
     clock_freq h_clock;
-    strcpy(h_clock.m_name, reinterpret_cast<const char*>(clock_metadata.h_clock.name));
+    strlcpy(h_clock.m_name,
+      reinterpret_cast<const char*>(clock_metadata.h_clock.name),
+      sizeof(h_clock.m_name));
     h_clock.m_type = CT_SYSTEM;
     h_clock.m_freq_Mhz = clock_metadata.h_clock.freq_mhz;
     clocks.push_back(h_clock);
