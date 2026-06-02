@@ -123,14 +123,24 @@ validate_exec_cmd_inline_payload(const struct amdxdna_ccmd_exec_cmd_req *req)
 }
 
 /*
+ * VirtGPU registers device-wide blobs (response buffer, guest iovec backing for
+ * userptr CREATE_BO, etc.) under ctx 0 at open / RESOURCE_CREATE_BLOB on the
+ * platform DRM fd.  App CCMDs run on ring_idx >= 1.  Allow those platform
+ * resources to be used from any execution context on the same device, but still
+ * reject ids registered by another app context (ctx >= 1).
+ */
+static constexpr uint32_t k_platform_ctx_id = 0;
+
+/*
  * Resources live in a single per-device table addressable by any context that
  * shares the cookie (e.g. multiple guest user processes inside the same VM).
  * Each resource records its registering ctx_id on creation; guest-controlled
- * lookups must reject ids owned by a different context so one context cannot
- * install another context's iovec-backed buffer as its response buffer,
- * source/sink for GET_INFO, or backing for CREATE_BO.  On mismatch we throw
- * -EACCES; the ccmd error wrapper (or the C-API boundary for INIT) turns that
- * into a logged error response.
+ * lookups must reject ids owned by a different app context so one context
+ * cannot install another context's iovec-backed buffer as its response buffer,
+ * source/sink for GET_INFO, or backing for CREATE_BO.  Platform (ctx 0)
+ * resources are shared by design.  On mismatch we throw -EACCES; the ccmd
+ * error wrapper (or the C-API boundary for INIT) turns that into a logged
+ * error response.
  */
 std::shared_ptr<vaccel_resource>
 lookup_resource_for_ctx(vxdna &device, uint32_t res_id, uint32_t caller_ctx_id,
@@ -140,10 +150,13 @@ lookup_resource_for_ctx(vxdna &device, uint32_t res_id, uint32_t caller_ctx_id,
     if (!res)
         VACCEL_THROW_MSG(-ENOENT, "%s: resource %u not found (ctx %u)",
                          purpose, res_id, caller_ctx_id);
-    if (res->get_ctx_id() != caller_ctx_id)
+
+    const uint32_t owner_ctx_id = res->get_ctx_id();
+    if (owner_ctx_id != caller_ctx_id &&
+        owner_ctx_id != k_platform_ctx_id)
         VACCEL_THROW_MSG(-EACCES,
                          "%s: resource %u not owned by ctx %u (owner ctx %u)",
-                         purpose, res_id, caller_ctx_id, res->get_ctx_id());
+                         purpose, res_id, caller_ctx_id, owner_ctx_id);
     return res;
 }
 
@@ -1325,8 +1338,6 @@ vxdna_ccmd_init(vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
 
     auto res = lookup_resource_for_ctx(device, req->rsp_res_id, ctx->get_id(),
                                        "init");
-
-    // Set the response resource for the context for the following ccmds to use
     ctx->set_resp_res(std::move(res));
 }
 
