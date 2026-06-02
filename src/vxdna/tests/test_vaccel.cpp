@@ -881,6 +881,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdGetInfoInvalidResource) {
     resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     resp_res_args.iovecs = &resp_iov;
     resp_res_args.num_iovs = 1;
+    resp_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
     ASSERT_EQ(ret, 0);
@@ -934,6 +935,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdGetInfoSingleValue) {
     resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     resp_res_args.iovecs = &resp_iov;
     resp_res_args.num_iovs = 1;
+    resp_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
     ASSERT_EQ(ret, 0);
@@ -951,6 +953,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdGetInfoSingleValue) {
     info_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     info_res_args.iovecs = &info_iov;
     info_res_args.num_iovs = 1;
+    info_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &info_res_args);
     ASSERT_EQ(ret, 0);
@@ -1012,6 +1015,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdGetInfoArray) {
     resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     resp_res_args.iovecs = &resp_iov;
     resp_res_args.num_iovs = 1;
+    resp_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
     ASSERT_EQ(ret, 0);
@@ -1029,6 +1033,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdGetInfoArray) {
     info_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     info_res_args.iovecs = &info_iov;
     info_res_args.num_iovs = 1;
+    info_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &info_res_args);
     ASSERT_EQ(ret, 0);
@@ -1136,6 +1141,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdReadSysfsValidNode) {
     resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     resp_res_args.iovecs = &resp_iov;
     resp_res_args.num_iovs = 1;
+    resp_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
     ASSERT_EQ(ret, 0);
@@ -1196,6 +1202,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdReadSysfsInvalidNode) {
     resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     resp_res_args.iovecs = &resp_iov;
     resp_res_args.num_iovs = 1;
+    resp_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
     ASSERT_EQ(ret, 0);
@@ -1248,6 +1255,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdReadSysfsEmptyNodeName) {
     resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     resp_res_args.iovecs = &resp_iov;
     resp_res_args.num_iovs = 1;
+    resp_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
     ASSERT_EQ(ret, 0);
@@ -1299,6 +1307,7 @@ TEST_F(VaccelRendererTest, SubmitCcmdReadSysfsPathTraversal) {
     resp_res_args.blob_mem = VIRTGPU_BLOB_MEM_GUEST;
     resp_res_args.iovecs = &resp_iov;
     resp_res_args.num_iovs = 1;
+    resp_res_args.ctx_id = ctx_id;
 
     ret = vaccel_create_resource_blob(cookie_, &resp_res_args);
     ASSERT_EQ(ret, 0);
