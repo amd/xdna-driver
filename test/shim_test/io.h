@@ -10,7 +10,11 @@
 #include "exec_buf.h"
 
 #include "core/common/device.h"
+#include <cstdint>
 #include <memory>
+
+/* Timeout (ms) for hwqueue_handle::wait_command(); 0 means wait indefinitely. */
+constexpr uint32_t WAIT_CMD_NO_TIMEOUT = 0;
 
 enum io_test_bo_type {
   IO_TEST_BO_CMD = 0,
@@ -54,6 +58,15 @@ public:
   void
   run(const std::vector<xrt_core::fence_handle*>& wait_fences,
     const std::vector<xrt_core::fence_handle*>& signal_fences, bool no_check_result);
+
+  /**
+   * Submit the (already initialized) command once on an existing hw context and
+   * verify completion. Caller must have called init_cmd()/sync_before_run() on
+   * @hwctx beforehand; this lets a persistent context be kept "warm" by calling
+   * run_on_ctx() in a loop without re-creating the context each time.
+   */
+  void
+  run_on_ctx(hw_ctx& hwctx);
 
   void
   sync_before_run();
