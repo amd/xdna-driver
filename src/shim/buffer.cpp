@@ -665,7 +665,7 @@ sync(direction dir, size_t sz, size_t offset)
     return;
   }
 
-  if (offset + sz > size())
+  if (offset > size() || sz > size() - offset)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
   clflush_data(vaddr(), offset, sz); 
   shim_debug("Sync'ed BO %d: offset=%ld, size=%ld", id().handle, offset, sz);
