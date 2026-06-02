@@ -801,6 +801,25 @@ submit_fence(uint64_t fence_id)
             // Fence is not submitted yet, invoke callback outside lock
             immediate_callback = true;
         } else {
+            /*
+             * Refuse to grow the pending queue past MAX_PENDING_FENCES.
+             * The polling thread can only block on one syncobj_wait at a
+             * time, so a guest that submits a fence with a never-reached
+             * sync point pins the head and lets the queue grow on every
+             * subsequent submit.  Throwing surfaces -ENOSPC up through
+             * vaccel_error_wrap("vaccel_submit_fence") so QEMU can fail
+             * the virtio command; m_has_sync_point stays asserted so the
+             * next submit_fence retries cleanly once the queue drains.
+             */
+            if (m_pending_fences.size() >= MAX_PENDING_FENCES)
+                VACCEL_THROW_MSG(-ENOSPC,
+                                 "submit_fence: ctx %u hwctx %u pending queue full "
+                                 "(%zu/%zu); fence_id=%lu rejected",
+                                 m_ctx_id, m_hwctx_handle,
+                                 m_pending_fences.size(),
+                                 MAX_PENDING_FENCES,
+                                 static_cast<unsigned long>(fence_id));
+
             auto fence = std::make_shared<vaccel_fence>(fence_id, m_sync_point, m_syncobj_handle, m_hwctx_handle, m_timeout_nsec);
             m_pending_fences.push_back(std::move(fence));
             m_has_sync_point = false;

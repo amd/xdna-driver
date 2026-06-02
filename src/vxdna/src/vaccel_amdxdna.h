@@ -476,6 +476,21 @@ private:
 
     private:
         /**
+         * Per-hwctx ceiling for the @m_pending_fences vector.
+         *
+         * The polling thread drains fences one at a time via a blocking
+         * DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, so a single fence whose
+         * sync point will never be produced (guest-controlled timeline
+         * value with @flags = WAIT_FOR_SUBMIT) parks the polling thread
+         * indefinitely and lets the queue grow with every subsequent
+         * submit_fence on this hwctx.  Cap the queue so a misbehaving
+         * guest can't drive the host heap unbounded; legitimate
+         * workloads stay far below this depth because in-flight fence
+         * counts track NPU command parallelism (tens at most).
+         */
+        static constexpr size_t MAX_PENDING_FENCES = 1024;
+
+        /**
          * @brief Poll and retire pending fences
          *
          * Waits on DRM syncobj timeline for each pending fence.
