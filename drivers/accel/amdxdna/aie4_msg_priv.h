@@ -14,6 +14,7 @@ enum aie4_msg_opcode {
 	/* Classic/PF/VF common */
 	AIE4_MSG_OP_IDENTIFY                         = 0x10002,
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
+	AIE4_MSG_OP_GET_TELEMETRY                    = 0x10006,
 	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x10009,
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
 	AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION      = 0x1000F,
@@ -235,6 +236,28 @@ struct aie4_msg_power_override_resp {
 } __packed;
 
 #define AIE4_WORK_BUFFER_MIN_SIZE      SZ_4M
+
+/* Telemetry type for AIE4_MSG_OP_GET_TELEMETRY. */
+enum aie4_msg_telemetry_type {
+	AIE4_TELEMETRY_TYPE_DISABLED = 0,
+	AIE4_TELEMETRY_TYPE_PERF_COUNTER,
+	AIE4_TELEMETRY_TYPE_MAX,
+};
+
+#define AIE4_MIN_TELEMETRY_BUFF_SIZE	SZ_128K
+
+/* AIE4_MSG_OP_GET_TELEMETRY */
+struct aie4_msg_get_telemetry_req {
+	__u32 type;
+	__u64 buf_addr;
+	__u32 pasid;
+	__u32 buf_size;
+	__u32 hw_context_id;
+} __packed;
+
+struct aie4_msg_get_telemetry_resp {
+	enum aie4_msg_status status;
+} __packed;
 
 struct aie4_msg_attach_work_buffer_req {
 	__u64 buff_addr;

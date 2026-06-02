@@ -1017,12 +1017,24 @@ aie2_cmdlist_fill_slot(void *slot, struct amdxdna_gem_obj *cmd_abo,
 	return ret;
 }
 
+static int aie2_query_telemetry_cb(struct aie_device *aie, char __user *buf, u32 size,
+				   struct amdxdna_drm_query_telemetry_header *header)
+{
+	return aie2_query_telemetry(container_of(aie, struct amdxdna_dev_hdl, aie),
+				    buf, size, header);
+}
+
 void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE2_NPU_COMMAND))
 		ndev->exec_msg_ops = &npu_exec_message_ops;
 	else
 		ndev->exec_msg_ops = &legacy_exec_message_ops;
+
+	ndev->aie.hwctx_limit = ndev->priv->hwctx_limit;
+	ndev->aie.msg_ops.query_telemetry = aie2_query_telemetry_cb;
+	ndev->aie.msg_ops.fill_hwctx_map = aie2_fill_hwctx_map;
+	ndev->aie.msg_ops.fill_hwctx_health = aie2_fill_hwctx_health;
 
 	if (AIE_FEATURE_ON(&ndev->aie, AIE2_GET_COREDUMP))
 		ndev->aie.msg_ops.get_coredump = aie2_get_aie_coredump;

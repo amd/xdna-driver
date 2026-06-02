@@ -212,6 +212,303 @@ int amdxdna_get_metadata(struct aie_device *aie,
 	return ret;
 }
 
+int amdxdna_get_telemetry(struct aie_device *aie,
+			  struct amdxdna_client *client,
+			  struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_telemetry_header *header __free(kfree) = NULL;
+	u32 telemetry_data_sz, header_sz, elem_num;
+	struct amdxdna_dev *xdna = client->xdna;
+	int ret;
+
+	if (!aie->msg_ops.query_telemetry)
+		return -EOPNOTSUPP;
+
+	/* Device-wide telemetry: admin or matching EUID only (see uAPI). */
+	if (!amdxdna_client_visible(client))
+		return -EPERM;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	elem_num = aie->hwctx_limit;
+	header_sz = struct_size(header, map, elem_num);
+	if (args->buffer_size <= header_sz) {
+		XDNA_DBG(xdna, "Invalid buffer size");
+		return -EINVAL;
+	}
+	telemetry_data_sz = args->buffer_size - header_sz;
+
+	header = kzalloc(header_sz, GFP_KERNEL);
+	if (!header)
+		return -ENOMEM;
+
+	if (copy_from_user(header, u64_to_user_ptr(args->buffer), sizeof(*header))) {
+		XDNA_ERR(xdna, "Failed to copy telemetry header from user");
+		return -EFAULT;
+	}
+
+	header->map_num_elements = elem_num;
+	if (elem_num && aie->msg_ops.fill_hwctx_map) {
+		ret = aie->msg_ops.fill_hwctx_map(aie, header->map);
+		if (ret)
+			return ret;
+	}
+
+	ret = aie->msg_ops.query_telemetry(aie,
+					   u64_to_user_ptr(args->buffer + header_sz),
+					   telemetry_data_sz, header);
+	if (ret) {
+		XDNA_ERR(xdna, "Query telemetry failed ret %d", ret);
+		return ret;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), header, header_sz)) {
+		XDNA_ERR(xdna, "Copy telemetry header to user failed");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+struct amdxdna_hwctx_status_ctx {
+	struct amdxdna_hwctx_key	key;
+
+	struct aie_device		*aie;
+	struct amdxdna_drm_get_array	*array_args;
+};
+
+/* amdxdna_hwctx_match() casts the walk arg to struct amdxdna_hwctx_key. */
+static_assert(offsetof(struct amdxdna_hwctx_status_ctx, key) == 0,
+	      "key must be the first member for amdxdna_hwctx_match()");
+
+static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
+					   struct amdxdna_hwctx *hwctx,
+					   struct amdxdna_drm_get_array *array_args)
+{
+	struct amdxdna_drm_hwctx_entry *tmp __free(kfree) = NULL;
+	struct amdxdna_drm_hwctx_entry __user *buf;
+	u32 size;
+
+	/*
+	 * Out of output slots. This is a benign "buffer full" condition (the
+	 * caller reports the entries that fit), distinct from a real failure
+	 * like -EFAULT below, so the walk caller can tell them apart.
+	 */
+	if (!array_args->num_element)
+		return -ENOSPC;
+
+	tmp = kzalloc_obj(*tmp);
+	if (!tmp)
+		return -ENOMEM;
+
+	tmp->pid = hwctx->client->pid;
+	tmp->context_id = hwctx->id;
+	tmp->start_col = hwctx->start_col;
+	tmp->num_col = hwctx->num_col;
+	tmp->command_submissions = atomic64_read(&hwctx->job_submit_cnt);
+	tmp->command_completions = atomic64_read(&hwctx->job_free_cnt);
+	tmp->pasid = hwctx->client->pasid;
+	tmp->heap_usage = hwctx->client->heap_usage;
+	tmp->priority = hwctx->qos.priority;
+	tmp->gops = hwctx->qos.gops;
+	tmp->fps = hwctx->qos.fps;
+	tmp->dma_bandwidth = hwctx->qos.dma_bandwidth;
+	tmp->latency = hwctx->qos.latency;
+	tmp->frame_exec_time = hwctx->qos.frame_exec_time;
+	tmp->state = AMDXDNA_HWCTX_STATE_ACTIVE;
+
+	/* Optional FW health is best-effort; ignore errors. */
+	if (aie->msg_ops.fill_hwctx_health)
+		aie->msg_ops.fill_hwctx_health(aie, hwctx, tmp);
+
+	buf = u64_to_user_ptr(array_args->buffer);
+	size = min(sizeof(*tmp), array_args->element_size);
+
+	if (copy_to_user(buf, tmp, size))
+		return -EFAULT;
+
+	array_args->buffer += size;
+	array_args->num_element--;
+
+	return 0;
+}
+
+/*
+ * Visibility-gated emitter shared by the HW_CONTEXTS / HW_CONTEXT_ALL /
+ * HW_CONTEXT_BY_ID walks: a context the caller may not see (different Linux
+ * user without CAP_SYS_ADMIN) is silently skipped so its existence is not
+ * disclosed.
+ */
+static int amdxdna_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
+{
+	struct amdxdna_hwctx_status_ctx *ctx = arg;
+
+	if (!amdxdna_client_visible(hwctx->client))
+		return 0;
+
+	return amdxdna_fill_hwctx_status_entry(ctx->aie, hwctx, ctx->array_args);
+}
+
+int amdxdna_get_hwctx_status(struct aie_device *aie,
+			     struct amdxdna_client *client,
+			     struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_get_array array_args = {};
+	struct amdxdna_hwctx_status_ctx ctx = { .aie = aie };
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	int ret = 0;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	array_args.element_size = sizeof(struct amdxdna_drm_query_hwctx);
+	array_args.buffer = args->buffer;
+	array_args.num_element = args->buffer_size / array_args.element_size;
+	ctx.array_args = &array_args;
+	amdxdna_for_each_client(xdna, tmp_client) {
+		ret = amdxdna_hwctx_walk(tmp_client, &ctx, NULL,
+					 amdxdna_hwctx_status_cb);
+		if (ret)
+			break;
+	}
+
+	/*
+	 * -ENOSPC means the output buffer filled up; report the entries
+	 * that fit. Any other error (e.g. -EFAULT from copy_to_user) is a real
+	 * failure and must be propagated instead of a partial success.
+	 */
+	if (ret && ret != -ENOSPC)
+		return ret;
+
+	args->buffer_size -= (u32)(array_args.buffer - args->buffer);
+	return 0;
+}
+
+int amdxdna_query_ctx_status_array(struct aie_device *aie,
+				   struct amdxdna_client *client,
+				   struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_get_array array_args = {};
+	struct amdxdna_hwctx_status_ctx ctx = { .aie = aie };
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	int ret = 0;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (args->element_size > SZ_4K || args->num_element > SZ_1K) {
+		XDNA_DBG(xdna, "Invalid element size %d or number of element %d",
+			 args->element_size, args->num_element);
+		return -EINVAL;
+	}
+
+	array_args.element_size = min(args->element_size,
+				      sizeof(struct amdxdna_drm_hwctx_entry));
+	array_args.buffer = args->buffer;
+	array_args.num_element = args->num_element * args->element_size /
+				 array_args.element_size;
+	ctx.array_args = &array_args;
+	amdxdna_for_each_client(xdna, tmp_client) {
+		ret = amdxdna_hwctx_walk(tmp_client, &ctx, NULL,
+					 amdxdna_hwctx_status_cb);
+		if (ret)
+			break;
+	}
+
+	/*
+	 * -ENOSPC just means the output buffer filled up; report the entries
+	 * that fit. Any other error (e.g. -EFAULT from copy_to_user) is a real
+	 * failure and must be propagated instead of a partial success.
+	 */
+	if (ret && ret != -ENOSPC)
+		return ret;
+
+	args->element_size = array_args.element_size;
+	args->num_element = (u32)((array_args.buffer - args->buffer) /
+				  args->element_size);
+
+	return 0;
+}
+
+int amdxdna_query_ctx_status_by_id(struct aie_device *aie,
+				   struct amdxdna_client *client,
+				   struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_hwctx_entry input = {};
+	struct amdxdna_drm_get_array array_args = {};
+	struct amdxdna_hwctx_status_ctx ctx = { .aie = aie };
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	int ret = -ENOENT;
+	size_t buf_size;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (args->num_element != 1) {
+		XDNA_ERR(xdna, "Invalid num_element %u, expected 1",
+			 args->num_element);
+		return -EINVAL;
+	}
+
+	if (args->element_size > SZ_4K) {
+		XDNA_DBG(xdna, "Invalid element size %u", args->element_size);
+		return -EINVAL;
+	}
+
+	buf_size = (size_t)args->num_element * args->element_size;
+	if (buf_size < sizeof(input)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&input, u64_to_user_ptr(args->buffer), sizeof(input))) {
+		XDNA_ERR(xdna, "Failed to copy hwctx entry from user");
+		return -EFAULT;
+	}
+
+	if (!input.context_id || !input.pid) {
+		XDNA_ERR(xdna, "Invalid context ID %u or PID %lld",
+			 input.context_id, input.pid);
+		return -EINVAL;
+	}
+
+	array_args.element_size = min_t(size_t, args->element_size,
+					sizeof(struct amdxdna_drm_hwctx_entry));
+	array_args.buffer = args->buffer;
+	array_args.num_element = 1;
+
+	ctx.array_args = &array_args;
+	ctx.key.ctx_id = input.context_id;
+	ctx.key.pid = input.pid;
+
+	amdxdna_for_each_client(xdna, tmp_client) {
+		ret = amdxdna_hwctx_walk(tmp_client, &ctx,
+					 amdxdna_hwctx_match,
+					 amdxdna_hwctx_status_cb);
+		if (ret != -ENOENT)
+			break;
+	}
+
+	/*
+	 * A matched context that the caller may not see is skipped by the gated
+	 * emitter (nothing emitted, num_element stays 1). Do not disclose its
+	 * existence: report it as not found, same as a genuinely missing context.
+	 */
+	if (!ret && array_args.num_element)
+		ret = -ENOENT;
+
+	if (ret == -ENOENT)
+		XDNA_DBG(xdna, "Context %u for pid %lld not found",
+			 input.context_id, input.pid);
+	if (ret)
+		return ret;
+
+	args->element_size = array_args.element_size;
+	args->num_element = 1;
+
+	return 0;
+}
+
 void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo,
 			    unsigned long cur_seq)
 {
