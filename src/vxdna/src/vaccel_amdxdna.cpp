@@ -1025,6 +1025,35 @@ get_info(const struct amdxdna_ccmd_get_info_req *req)
         info_size = args.buffer_size;
     }
 
+    /*
+     * num_element / element_size / buffer_size are all kernel-mutable on
+     * return (UAPI marks them in/out and on -ENOSPC the kernel reports the
+     * size *needed*, not the size *written*).  Clamp to the host scratch
+     * buffer we actually filled so a kernel-reported overshoot can't make
+     * us copy uninitialised heap into the guest info resource.  Mirror the
+     * clamp on rsp.{num_element,size} so the guest sees a self-consistent
+     * "bytes written" tuple instead of a possibly larger "bytes needed".
+     */
+    if (info_size > info_buf.size()) {
+        vxdna_err("get_info: kernel reported size %u exceeds host buffer %zu "
+                  "(cmd %s); clamping",
+                  info_size, info_buf.size(),
+                  cmd == DRM_IOCTL_AMDXDNA_GET_ARRAY ? "GET_ARRAY" : "GET_INFO");
+        info_size = static_cast<uint32_t>(info_buf.size());
+        if (cmd == DRM_IOCTL_AMDXDNA_GET_ARRAY) {
+            /* keep rsp.size (per-element) intact; clamp count and bytes written */
+            if (rsp.size > 0) {
+                rsp.num_element = info_size / rsp.size;
+                info_size = rsp.num_element * rsp.size;
+            } else {
+                rsp.num_element = 0;
+                info_size = 0;
+            }
+        } else {
+            rsp.size = info_size;
+        }
+    }
+
     res->write(0, info_buf.data(), info_size);
     rsp.hdr.base.len = sizeof(rsp);
     write_rsp(&rsp, sizeof(rsp), req->hdr.rsp_off);
