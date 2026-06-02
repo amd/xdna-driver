@@ -4,6 +4,7 @@
  */
 
 #include "drm/amdxdna_accel.h"
+#include <drm/drm_cache.h>
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/bitfield.h>
@@ -300,6 +301,56 @@ int aie4_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
 	return 0;
 }
 
+static int aie4_query_telemetry(struct aie_device *aie, char __user *buf, u32 size,
+				struct amdxdna_drm_query_telemetry_header *header)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_telemetry, AIE4_MSG_OP_GET_TELEMETRY);
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_msg_buf_hdl *buf_hdl;
+	int ret;
+
+	if (header->type >= AIE4_TELEMETRY_TYPE_MAX)
+		return -EINVAL;
+
+	buf_hdl = amdxdna_alloc_msg_buff(xdna,
+					 clamp_t(u32, size,
+						 AIE4_MIN_TELEMETRY_BUFF_SIZE, SZ_4M));
+	if (IS_ERR(buf_hdl))
+		return PTR_ERR(buf_hdl);
+
+	req.type = header->type;
+	req.buf_addr = to_dma_addr(buf_hdl, 0);
+	req.buf_size = to_buf_size(buf_hdl);
+	/* Kernel DMA buffer in the default domain: leave the PASID valid bit clear. */
+	req.pasid = 0;
+	req.hw_context_id = 0;
+
+	memset(to_cpu_addr(buf_hdl, 0), 0, to_buf_size(buf_hdl));
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+
+	ret = aie_send_mgmt_msg_wait(aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Get telemetry failed, ret %d", ret);
+		goto free_buf;
+	}
+
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+
+	size = min(size, to_buf_size(buf_hdl));
+	if (copy_to_user(buf, to_cpu_addr(buf_hdl, 0), size)) {
+		XDNA_ERR(xdna, "Failed to copy telemetry to user space");
+		ret = -EFAULT;
+		goto free_buf;
+	}
+
+	header->major = 0;
+	header->minor = 0;
+
+free_buf:
+	amdxdna_free_msg_buff(buf_hdl);
+	return ret;
+}
+
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))
@@ -309,4 +360,8 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->aie.msg_ops.rw_reg = aie4_rw_aie_reg;
 		ndev->aie.msg_ops.rw_mem = aie4_rw_aie_mem;
 	}
+
+	ndev->aie.msg_ops.query_telemetry = aie4_query_telemetry;
+	/* aie4 has no fw_ctx_id <-> hwctx_id map and no per-ctx FW health. */
+	ndev->aie.hwctx_limit = 0;
 }

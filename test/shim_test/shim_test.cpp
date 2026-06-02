@@ -82,6 +82,10 @@ void TEST_preempt_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_full_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_hw_contexts(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_hw_context_all(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_telemetry(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_telemetry_short_buf(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_coredump(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_mem(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -935,6 +939,178 @@ TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device>& sdev, 
   auto hwq2 = hwctx.get()->get_hw_queue();
 }
 
+constexpr uint32_t HWCTX_QUERY_CAPACITY = 64;
+
+struct hwctx_info_probe {
+  int ret;
+  int err;
+  uint32_t bytes_written;
+  bool found_self;
+};
+
+struct hwctx_array_probe {
+  int ret;
+  int err;
+  uint32_t num_element;
+  uint32_t element_size;
+  bool found_self;
+};
+
+void
+TEST_query_hw_contexts(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Create a context so the query returns an entry to validate.
+  hw_ctx hwctx{sdev.get()};
+
+  auto probe = fork_query<hwctx_info_probe>(sdev.get(), [](int fd) {
+    std::array<amdxdna_drm_query_hwctx, HWCTX_QUERY_CAPACITY> entries{};
+    const uint32_t in_size = entries.size() * sizeof(entries[0]);
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
+      .buffer_size = in_size,
+      .buffer = reinterpret_cast<uintptr_t>(entries.data()),
+    };
+
+    hwctx_info_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+    r.err = errno;
+    if (r.ret == 0) {
+      // QUERY_HW_CONTEXTS reports the leftover capacity in buffer_size.
+      r.bytes_written = in_size - info.buffer_size;
+      const uint32_t n = r.bytes_written / sizeof(entries[0]);
+      const __s64 self_pid = getppid();
+      for (uint32_t i = 0; i < n && i < entries.size(); i++) {
+        if (entries[i].pid == self_pid) {
+          r.found_self = true;
+          break;
+        }
+      }
+    }
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(QUERY_HW_CONTEXTS) failed: " + std::string(std::strerror(probe.err)));
+  if (probe.bytes_written > HWCTX_QUERY_CAPACITY * sizeof(amdxdna_drm_query_hwctx))
+    throw std::runtime_error("QUERY_HW_CONTEXTS wrote more than the input buffer");
+  if (probe.bytes_written % sizeof(amdxdna_drm_query_hwctx))
+    throw std::runtime_error("QUERY_HW_CONTEXTS byte count not element-aligned");
+  if (!probe.found_self)
+    throw std::runtime_error("QUERY_HW_CONTEXTS did not report the created context");
+}
+
+void
+TEST_hw_context_all(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Create a context so the query returns an entry to validate.
+  hw_ctx hwctx{sdev.get()};
+
+  auto probe = fork_query<hwctx_array_probe>(sdev.get(), [](int fd) {
+    std::array<amdxdna_drm_hwctx_entry, HWCTX_QUERY_CAPACITY> entries{};
+    amdxdna_drm_get_array array = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
+      .element_size = sizeof(entries[0]),
+      .num_element = static_cast<uint32_t>(entries.size()),
+      .buffer = reinterpret_cast<uintptr_t>(entries.data()),
+    };
+
+    hwctx_array_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &array);
+    r.err = errno;
+    if (r.ret == 0) {
+      r.num_element = array.num_element;
+      r.element_size = array.element_size;
+      const __s64 self_pid = getppid();
+      for (uint32_t i = 0; i < array.num_element && i < entries.size(); i++) {
+        if (entries[i].pid == self_pid) {
+          r.found_self = true;
+          break;
+        }
+      }
+    }
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(HW_CONTEXT_ALL) failed: " + std::string(std::strerror(probe.err)));
+  if (probe.num_element > HWCTX_QUERY_CAPACITY)
+    throw std::runtime_error("HW_CONTEXT_ALL num_element exceeds input");
+  if (probe.element_size == 0 || probe.element_size > sizeof(amdxdna_drm_hwctx_entry))
+    throw std::runtime_error("HW_CONTEXT_ALL element_size out of range");
+  if (!probe.found_self)
+    throw std::runtime_error("HW_CONTEXT_ALL did not report the created context");
+}
+
+constexpr uint32_t TELEMETRY_DATA_SIZE = 256 * 1024;
+constexpr uint32_t TELEMETRY_MAP_CAPACITY = 256;
+// aie4 selects a telemetry category via the type field; older NPUs require 0.
+constexpr uint32_t AIE4_TELEMETRY_PERF_COUNTER = 1;
+
+struct telemetry_probe {
+  int ret;
+  int err;
+  uint32_t map_num_elements;
+};
+
+void
+TEST_query_telemetry(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  uint32_t type = dev_filter_is_aie4(id, sdev.get()) ? AIE4_TELEMETRY_PERF_COUNTER : 0;
+
+  auto probe = fork_query<telemetry_probe>(sdev.get(), [type](int fd) {
+    const uint32_t buf_sz = sizeof(amdxdna_drm_query_telemetry_header) +
+                            TELEMETRY_MAP_CAPACITY * sizeof(uint32_t) +
+                            TELEMETRY_DATA_SIZE;
+    // uint32_t storage guarantees alignment for the telemetry header.
+    std::vector<uint32_t> buf(buf_sz / sizeof(uint32_t), 0);
+    auto *hdr = reinterpret_cast<amdxdna_drm_query_telemetry_header *>(buf.data());
+    hdr->type = type;
+
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+      .buffer_size = buf_sz,
+      .buffer = reinterpret_cast<uintptr_t>(buf.data()),
+    };
+
+    telemetry_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+    r.err = errno;
+    r.map_num_elements = hdr->map_num_elements;
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(QUERY_TELEMETRY) failed: " + std::string(std::strerror(probe.err)));
+
+  if (probe.map_num_elements > TELEMETRY_MAP_CAPACITY)
+    throw std::runtime_error("QUERY_TELEMETRY: map_num_elements > capacity");
+}
+
+void
+TEST_query_telemetry_short_buf(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Negative case: a header-only buffer must fail EINVAL.
+  int err = fork_query<int>(sdev.get(), [](int fd) {
+    amdxdna_drm_query_telemetry_header hdr{};
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+      .buffer_size = sizeof(hdr),
+      .buffer = reinterpret_cast<uintptr_t>(&hdr),
+    };
+    if (::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info) == -1)
+      return errno;
+    return 0;
+  });
+
+  if (err != EINVAL)
+    throw std::runtime_error(
+      "QUERY_TELEMETRY with header-only buffer should fail EINVAL, got "
+      + std::to_string(err));
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1137,6 +1313,18 @@ std::vector<test_case> test_list {
   },
   test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
+  },
+  test_case{ "query hw_contexts (get_info)", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_query_hw_contexts, {}
+  },
+  test_case{ "hw_context_all (get_array)", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_hw_context_all, {}
+  },
+  test_case{ "query telemetry", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_query_telemetry, {}
+  },
+  test_case{ "query telemetry header-only buffer fails", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_query_telemetry_short_buf, {}
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
