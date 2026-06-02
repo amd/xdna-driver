@@ -198,6 +198,9 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 			return -ENOMEM;
 	}
 
+	if (abo->mem.size <= sizeof(*cmd))
+		return -EINVAL;
+
 	memset(cmd->data, 0xff, abo->mem.size - sizeof(*cmd));
 	if (err_data)
 		memcpy(cmd->data, err_data, min(size, abo->mem.size - sizeof(*cmd)));
