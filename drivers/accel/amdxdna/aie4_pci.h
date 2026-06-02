@@ -62,9 +62,13 @@ struct amdxdna_dev_hdl {
 	struct amdxdna_drm_query_firmware_version cert_version;
 };
 
+struct aie4_msg_context_config_cert_logging;
+
 /* aie4_ctx.c */
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx);
+int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
+		      void *buf, u32 size);
 int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 int aie4_hwctx_valid_doorbell(struct amdxdna_client *client, u32 vm_pgoff);
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
@@ -95,6 +99,9 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
+int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
+				       u32 hw_context_id, u32 property,
+				       const struct aie4_msg_context_config_cert_logging *cl);
 int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev);
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
 
