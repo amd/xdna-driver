@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <sstream>
 #include <sys/stat.h>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -685,6 +686,23 @@ vxdna_hwctx(const vxdna_context &ctx,
 
     // Start polling thread to retire fences
     m_stop_polling.store(false, std::memory_order_relaxed);
+    auto rollback_created_hwctx = [&]() {
+        /*
+         * Roll back the kernel hwctx + syncobj acquired above before we
+         * hand the failure back to the guest.  Member subobjects unwind
+         * on their own when this constructor throws (the dtor itself is
+         * not invoked on a partially-constructed object), but the DRM
+         * handles are external state and must be released here.
+         */
+        struct drm_syncobj_destroy sync_arg = {};
+        sync_arg.handle = m_syncobj_handle;
+        ioctl(m_ctx_fd, DRM_IOCTL_SYNCOBJ_DESTROY, &sync_arg);
+
+        struct amdxdna_drm_destroy_hwctx hwctx_arg = {};
+        hwctx_arg.handle = m_hwctx_handle;
+        ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &hwctx_arg);
+    };
+
     try {
         m_polling_thread = std::thread([this]() {
             while (!m_stop_polling.load(std::memory_order_relaxed)) {
@@ -701,17 +719,35 @@ vxdna_hwctx(const vxdna_context &ctx,
                 poll_and_retire_pending(std::move(tmp_pending_fences));
             }
         });
+    } catch (const std::system_error &e) {
+        rollback_created_hwctx();
+        /*
+         * pthread_create failure is reported as std::system_error; map the
+         * errno (typically EAGAIN under RLIMIT_NPROC / pids.max) so the guest
+         * can back off and retry instead of getting a generic -EIO.
+         */
+        int err = EAGAIN;
+        if (e.code().category() == std::system_category())
+            err = e.code().value();
+        if (err <= 0)
+            err = EAGAIN;
+        VACCEL_THROW_MSG(-err,
+                         "vxdna_hwctx ctor: failed to start polling thread: %s",
+                         e.what());
+    } catch (const std::bad_alloc &) {
+        rollback_created_hwctx();
+        VACCEL_THROW_MSG(-ENOMEM,
+                         "vxdna_hwctx ctor: failed to start polling thread");
+    } catch (const std::exception &e) {
+        rollback_created_hwctx();
+        VACCEL_THROW_MSG(-EIO,
+                         "vxdna_hwctx ctor: failed to start polling thread: %s",
+                         e.what());
     } catch (...) {
-        vxdna_err("vxdna_hwctx ctor: failed to start polling thread.");
-        // Clean up hwctx and syncobj
-        struct drm_syncobj_destroy sync_arg = {};
-        sync_arg.handle = m_syncobj_handle;
-        ioctl(m_ctx_fd, DRM_IOCTL_SYNCOBJ_DESTROY, &sync_arg);
-
-        struct amdxdna_drm_destroy_hwctx hwctx_arg = {};
-        hwctx_arg.handle = m_hwctx_handle;
-        ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &hwctx_arg);
-        throw;
+        rollback_created_hwctx();
+        VACCEL_THROW_MSG(-EIO,
+                         "vxdna_hwctx ctor: failed to start polling thread "
+                         "(unknown exception)");
     }
 }
 
