@@ -122,6 +122,31 @@ validate_exec_cmd_inline_payload(const struct amdxdna_ccmd_exec_cmd_req *req)
 }
 
 /*
+ * Resources live in a single per-device table addressable by any context that
+ * shares the cookie (e.g. multiple guest user processes inside the same VM).
+ * Each resource records its registering ctx_id on creation; guest-controlled
+ * lookups must reject ids owned by a different context so one context cannot
+ * install another context's iovec-backed buffer as its response buffer,
+ * source/sink for GET_INFO, or backing for CREATE_BO.  On mismatch we throw
+ * -EACCES; the ccmd error wrapper (or the C-API boundary for INIT) turns that
+ * into a logged error response.
+ */
+std::shared_ptr<vaccel_resource>
+lookup_resource_for_ctx(vxdna &device, uint32_t res_id, uint32_t caller_ctx_id,
+                        const char *purpose)
+{
+    auto res = device.get_resource(res_id);
+    if (!res)
+        VACCEL_THROW_MSG(-ENOENT, "%s: resource %u not found (ctx %u)",
+                         purpose, res_id, caller_ctx_id);
+    if (res->get_ctx_id() != caller_ctx_id)
+        VACCEL_THROW_MSG(-EACCES,
+                         "%s: resource %u not owned by ctx %u (owner ctx %u)",
+                         purpose, res_id, caller_ctx_id, res->get_ctx_id());
+    return res;
+}
+
+/*
  * The node_name flexible-array member has no built-in NUL guarantee.  When
  * hdr.len > sizeof(request), the dispatch copy fills the whole buffer with
  * guest bytes (no trailing zero pad), so streaming req->node_name into an
@@ -812,10 +837,8 @@ create_bo(const struct amdxdna_ccmd_create_bo_req *req)
 
     std::shared_ptr<vxdna_bo> xdna_bo;
     if (req->bo_type != AMDXDNA_BO_DEV) {
-        auto res = get_device().get_resource(req->res_id);
-        if (!res)
-            VACCEL_THROW_MSG(-EINVAL, "Res: %u not found", req->res_id);
-
+        auto res = lookup_resource_for_ctx(get_device(), req->res_id, get_id(),
+                                           "create_bo");
         xdna_bo = std::make_shared<vxdna_bo>(res, *this, req);
     } else {
         xdna_bo = std::make_shared<vxdna_bo>(get_fd(), req);
@@ -946,9 +969,8 @@ void
 vxdna_context::
 get_info(const struct amdxdna_ccmd_get_info_req *req)
 {
-    auto res = get_device().get_resource(req->info_res);
-    if (!res)
-        VACCEL_THROW_MSG(-EINVAL, "%s, Did not find info resource, res_id %u", __func__, req->info_res);
+    auto res = lookup_resource_for_ctx(get_device(), req->info_res, get_id(),
+                                       "get_info");
 
     struct amdxdna_drm_get_array array_args = {};
     struct amdxdna_ccmd_get_info_rsp rsp = {};
@@ -1217,9 +1239,8 @@ vxdna_ccmd_init(vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
 {
     auto *req = static_cast<const struct amdxdna_ccmd_init_req *>(hdr);
 
-    auto res = device.get_resource(req->rsp_res_id);
-    if (!res)
-        VACCEL_THROW_MSG(-EINVAL, "Resp resource not found");
+    auto res = lookup_resource_for_ctx(device, req->rsp_res_id, ctx->get_id(),
+                                       "init");
 
     // Set the response resource for the context for the following ccmds to use
     ctx->set_resp_res(std::move(res));
