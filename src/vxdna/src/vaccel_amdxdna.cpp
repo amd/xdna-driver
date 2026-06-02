@@ -71,6 +71,57 @@ page_roundup(size_t size)
 }
 
 /*
+ * Guest CCMD requests may carry inline payload after the fixed header.  The
+ * dispatch path copies hdr.len bytes into host memory; param_val_size and
+ * arg_offset/arg_count must stay within that snapshot or ioctl handlers would
+ * copy_from_user() past the end of the request buffer.
+ */
+void
+validate_config_ctx_inline_payload(const struct amdxdna_ccmd_config_ctx_req *req)
+{
+    constexpr size_t inline_off =
+        offsetof(struct amdxdna_ccmd_config_ctx_req, param_val);
+    const uint32_t hdr_len = req->hdr.len;
+    const size_t avail = hdr_len - inline_off;
+
+    if (req->param_val_size > avail)
+        VACCEL_THROW_MSG(-EINVAL,
+                         "config_ctx param_val_size %u exceeds inline payload %zu bytes "
+                         "(hdr.len %u)",
+                         req->param_val_size, avail, hdr_len);
+}
+
+void
+validate_exec_cmd_inline_payload(const struct amdxdna_ccmd_exec_cmd_req *req)
+{
+    constexpr size_t inline_off =
+        offsetof(struct amdxdna_ccmd_exec_cmd_req, cmds_n_args);
+    const uint32_t hdr_len = req->hdr.len;
+    const size_t ndwords = (hdr_len - inline_off) / sizeof(uint32_t);
+
+    if (!req->cmd_count)
+        VACCEL_THROW_MSG(-EINVAL, "exec_cmd cmd_count is zero (hdr.len %u)", hdr_len);
+
+    if (req->cmd_count > ndwords)
+        VACCEL_THROW_MSG(-EINVAL,
+                         "exec_cmd cmd_count %u exceeds inline cmds_n_args dwords %zu "
+                         "(hdr.len %u)",
+                         req->cmd_count, ndwords, hdr_len);
+
+    if (!req->arg_count)
+        return;
+
+    const uint64_t args_end = static_cast<uint64_t>(req->arg_offset) +
+                              static_cast<uint64_t>(req->arg_count);
+
+    if (args_end > ndwords)
+        VACCEL_THROW_MSG(-EINVAL,
+                         "exec_cmd arg_offset %u + arg_count %u exceeds inline dwords "
+                         "%zu (hdr.len %u)",
+                         req->arg_offset, req->arg_count, ndwords, hdr_len);
+}
+
+/*
  * Helpers for iov_table_overlaps(): detect whether the coalesce destination
  * [base, base+len) intersects any guest iovec before mremap(old_size=0).  Overlap
  * would make dest and source the same VA range; mremap would fail (typically
@@ -650,6 +701,8 @@ void
 vxdna_context::vxdna_hwctx::
 config(const struct amdxdna_ccmd_config_ctx_req *req)
 {
+    validate_config_ctx_inline_payload(req);
+
     struct amdxdna_drm_config_hwctx args = {};
     args.handle = m_hwctx_handle;
     args.param_type = req->param_type;
@@ -667,6 +720,8 @@ uint64_t
 vxdna_context::vxdna_hwctx::
 exec_cmd(const struct amdxdna_ccmd_exec_cmd_req *req)
 {
+    validate_exec_cmd_inline_payload(req);
+
     struct amdxdna_drm_exec_cmd args = {};
     args.hwctx = m_hwctx_handle;
     args.type = req->type;
