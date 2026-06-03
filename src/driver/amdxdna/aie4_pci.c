@@ -648,7 +648,12 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
 
 	if (ndev->dev_status <= AIE4_DEV_INIT) {
-		XDNA_ERR(xdna, "device is already stopped");
+		/*
+		 * Unregister may call suspend (hw_stop + irq_fini) and then
+		 * fini (hw_stop again).  Still stop polling in case status was
+		 * forced to INIT without irq_fini (e.g. reset_prepare).
+		 */
+		aie4_irq_fini(ndev);
 		return;
 	}
 
@@ -1541,6 +1546,14 @@ static void aie4_pcidev_fini(struct amdxdna_dev_hdl *ndev)
 #endif /* CONFIG_AMDXDNA_NO_PCI */
 }
 
+void aie4_ndev_init_base(struct amdxdna_dev_hdl *ndev, struct amdxdna_dev *xdna)
+{
+	ndev->priv = xdna->dev_info->dev_priv;
+	ndev->xdna = xdna;
+	mutex_init(&ndev->aie4_lock);
+	xa_init(&ndev->cert_comp_xa);
+}
+
 static void aie4_pci_fini(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -1548,6 +1561,14 @@ static void aie4_pci_fini(struct amdxdna_dev *xdna)
 	aie4_iommu_fini(ndev);
 
 	aie4_pcidev_fini(ndev);
+
+	/*
+	 * cert_comp_xa is used on all transports (PCI MSI-X, shmem/rpmsg with
+	 * enable_aie4_polling, etc.).  pcidev_fini() -> hw_stop() already
+	 * calls irq_fini() (timer_delete_sync); invoke it again so polling
+	 * cannot touch cert_comp_xa after a prior early hw_stop return.
+	 */
+	aie4_irq_fini(ndev);
 
 	WARN_ON(!xa_empty(&ndev->cert_comp_xa));
 	xa_destroy(&ndev->cert_comp_xa);
@@ -1612,32 +1633,25 @@ int aie4_xrs_solver_init(struct amdxdna_dev *xdna)
 static int aie4_pci_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev;
+	bool ndev_inited_here;
 	int ret;
 
 	/*
-	 * On the platform/rpmsg path, amdxdna_plat_probe() has already
-	 * allocated ndev, initialised the mutex/xarray and set
-	 * xdna->dev_handle, and amdxdna_rpmsg_init() has installed
-	 * ndev->xcomm_ops so the irq/mailbox layer takes the rpmsg fast
-	 * path instead of pci_msix_vec_count().  Reuse that ndev rather
-	 * than devm_kzalloc()'ing a fresh one — otherwise the new ndev
-	 * would have xcomm_ops==NULL and lose the bind.
-	 *
-	 * xdna->ddev.dev is the underlying struct device * (PCIe function
-	 * on the PCI path, platform_device on RPMsg/shmem), so devm_*
-	 * works against it directly regardless of transport.
+	 * Platform (shmem/rpmsg): plat_probe() already allocated ndev,
+	 * called aie4_ndev_init_base(), set dev_handle, and ran transport
+	 * init (xcomm_ops).  Reuse that ndev — a fresh one would drop the
+	 * transport bind.  PCI: dev_handle is NULL; allocate ndev here.
 	 */
 	ndev = xdna->dev_handle;
+	ndev_inited_here = false;
 	if (!ndev) {
 		ndev = devm_kzalloc(xdna->ddev.dev, sizeof(*ndev), GFP_KERNEL);
 		if (!ndev)
 			return -ENOMEM;
 
-		ndev->priv = xdna->dev_info->dev_priv;
-		ndev->xdna = xdna;
 		xdna->dev_handle = ndev;
-		mutex_init(&ndev->aie4_lock);
-		xa_init(&ndev->cert_comp_xa);
+		aie4_ndev_init_base(ndev, xdna);
+		ndev_inited_here = true;
 	}
 
 	ret = aie4_pcidev_init(ndev);
@@ -1666,8 +1680,10 @@ iommu_fini:
 pcidev_fini:
 	aie4_pcidev_fini(ndev);
 pci_fini:
-	xa_destroy(&ndev->cert_comp_xa);
-	mutex_destroy(&ndev->aie4_lock);
+	if (ndev_inited_here) {
+		xa_destroy(&ndev->cert_comp_xa);
+		mutex_destroy(&ndev->aie4_lock);
+	}
 	return ret;
 }
 

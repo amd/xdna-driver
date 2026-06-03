@@ -71,6 +71,7 @@
 #include "amdxdna_pci_drv.h"
 #include "npu3_family.h"
 #include "amdxdna_pm.h"
+#include "amdxdna_dpt.h"
 #include "amdxdna_plat.h"
 #include "amdxdna_sysfs.h"
 #include "amdxdna_cma_buf.h"
@@ -85,11 +86,6 @@ struct amdxdna_plat_data {
 	const struct amdxdna_dev_info	*dev_info;
 	enum amdxdna_plat_transport	transport;
 };
-
-static bool amdxdna_plat_transport_is_rpmsg(enum amdxdna_plat_transport transport)
-{
-	return transport == AMDXDNA_TRANSPORT_RPMSG;
-}
 
 static bool amdxdna_plat_transport_is_shmem(enum amdxdna_plat_transport transport)
 {
@@ -195,7 +191,6 @@ struct amdxdna_dev *amdxdna_plat_find_by_rproc(struct rproc *rp)
  */
 int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct device *dev = xdna->ddev.dev;
 	int ret;
 
@@ -209,13 +204,16 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 		return -ENOMEM;
 	}
 
-	if (amdxdna_plat_transport_is_rpmsg(ndev->plat_transport)) {
-		if (xdna->dev_info->ops && xdna->dev_info->ops->init) {
-			ret = xdna->dev_info->ops->init(xdna);
-			if (ret) {
-				XDNA_ERR(xdna, "ops->init failed: %d", ret);
-				goto destroy_wq;
-			}
+	/*
+	 * aie4_pci_init() reuses the plat_probe() ndev and xcomm_ops installed
+	 * by amdxdna_shmem_init() / amdxdna_rpmsg_init().  It must run after
+	 * transport init (FW mgmt uses xcomm) and before userspace open.
+	 */
+	if (xdna->dev_info->ops && xdna->dev_info->ops->init) {
+		ret = xdna->dev_info->ops->init(xdna);
+		if (ret) {
+			XDNA_ERR(xdna, "ops->init failed: %d", ret);
+			goto destroy_wq;
 		}
 	}
 
@@ -245,6 +243,10 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 	if (xdna->dev_info->ops && xdna->dev_info->ops->debugfs)
 		xdna->dev_info->ops->debugfs(xdna);
 
+	ret = amdxdna_dpt_init(xdna);
+	if (ret)
+		XDNA_WARN(xdna, "Failed to enable firmware debug/profile/trace: %d", ret);
+
 	pm_runtime_enable(dev);
 	pm_runtime_get_noresume(dev);
 	amdxdna_rpm_init(xdna);
@@ -255,10 +257,9 @@ int amdxdna_plat_register_device(struct amdxdna_dev *xdna)
 sysfs_fini:
 	amdxdna_sysfs_fini(xdna);
 fini_dev:
-	if (amdxdna_plat_transport_is_rpmsg(ndev->plat_transport)) {
-		if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
-			xdna->dev_info->ops->fini(xdna);
-	}
+	amdxdna_dpt_fini(xdna);
+	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
+		xdna->dev_info->ops->fini(xdna);
 destroy_wq:
 	destroy_workqueue(xdna->notifier_wq);
 	xdna->notifier_wq = NULL;
@@ -267,7 +268,6 @@ destroy_wq:
 
 void amdxdna_plat_unregister_device(struct amdxdna_dev *xdna)
 {
-	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct device *dev = xdna->ddev.dev;
 
 	if (!xdna->notifier_wq)
@@ -277,25 +277,27 @@ void amdxdna_plat_unregister_device(struct amdxdna_dev *xdna)
 	 * Tear-down ordering follows the PCI variant (see amdxdna_remove):
 	 *   - drm_dev_unplug() first so new userspace ioctls/opens get
 	 *     -ENODEV and in-flight ones drain on a known-stopping device.
-	 *   - sysfs attrs removed before runtime PM goes away.
-	 *   - rpm_fini() pins the device active and forbids autosuspend so
-	 *     ops->fini() can issue firmware messages without racing a
-	 *     runtime suspend.
-	 *   - pm_runtime_disable() then closes the runtime PM machinery
-	 *     entirely.
-	 *   - ops->fini() runs while the management channel is still alive
-	 *     (drv_remove will tear it down right after we return).
+	 *   - sysfs attrs removed, then stop HW and DPT timers before
+	 *     touching runtime PM (rpm_fini() would otherwise resume the
+	 *     device via pm_runtime_get_noresume()).
+	 *   - ops->fini() and dpt_fini() while the management channel is
+	 *     still alive (plat_remove tears down shmem/rpmsg right after).
 	 *   - destroy_workqueue() last; the HMM notifier path in amdxdna_gem
 	 *     queues onto it, so it must outlive any DRM activity above.
 	 */
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
-	amdxdna_rpm_fini(xdna);
+
+	if (xdna->dev_info->ops && xdna->dev_info->ops->suspend)
+		xdna->dev_info->ops->suspend(xdna);
+	amdxdna_dpt_suspend(xdna);
+
+	amdxdna_dpt_fini(xdna);
+	if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
+		xdna->dev_info->ops->fini(xdna);
+
 	pm_runtime_disable(dev);
-	if (amdxdna_plat_transport_is_rpmsg(ndev->plat_transport)) {
-		if (xdna->dev_info->ops && xdna->dev_info->ops->fini)
-			xdna->dev_info->ops->fini(xdna);
-	}
+	amdxdna_rpm_fini(xdna);
 	destroy_workqueue(xdna->notifier_wq);
 	xdna->notifier_wq = NULL;
 
@@ -350,11 +352,12 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	if (!ndev)
 		return -ENOMEM;
 
-	ndev->priv = xdna->dev_info->dev_priv;
-	ndev->xdna = xdna;
-	xa_init(&ndev->cert_comp_xa);
-	mutex_init(&ndev->aie4_lock);
-
+	/*
+	 * cert_comp_xa must be live before transport_init(): shmem IPI and
+	 * rpmsg CMD_COMPLETION walk it from IRQ/callback context as soon as
+	 * the channel is up, which can be before ops->init().
+	 */
+	aie4_ndev_init_base(ndev, xdna);
 	xdna->dev_handle = ndev;
 	ndev->pw_mode = POWER_MODE_DEFAULT;
 	ndev->plat_transport = pdata->transport;

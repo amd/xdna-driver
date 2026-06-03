@@ -423,6 +423,16 @@ int amdxdna_shmem_init(struct amdxdna_dev *xdna, struct platform_device *pdev)
 	struct amdxdna_shmem_hdl *shdl;
 	int ret;
 
+	/*
+	 * Transport must be up before dev_info->ops->init(): aie4_hw_start()
+	 * issues firmware traffic via ndev->xcomm_ops.  plat_probe() calls
+	 * shmem_init, then amdxdna_plat_register_device() -> ops->init().
+	 */
+	if (ndev->xcomm_ops) {
+		dev_err(&pdev->dev, "management transport already initialized\n");
+		return -EBUSY;
+	}
+
 	shdl = drmm_kzalloc(&xdna->ddev, sizeof(*shdl), GFP_KERNEL);
 	if (!shdl)
 		return -ENOMEM;
@@ -453,9 +463,15 @@ void amdxdna_shmem_fini(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	if (ndev->xcomm_ops && ndev->xcomm_ops->fini)
-		ndev->xcomm_ops->fini(ndev->xcomm_hdl);
+	/*
+	 * HW teardown (cert_timer, FW suspend, etc.) is done in
+	 * amdxdna_plat_unregister_device() via ops->fini/suspend while
+	 * xcomm_ops is still valid.  We only release shmem/IPI here.
+	 */
+	if (ndev->xcomm_ops != &amdxdna_shmem_xcomm_ops)
+		return;
 
+	ndev->xcomm_ops->fini(ndev->xcomm_hdl);
 	ndev->xcomm_ops = NULL;
 	ndev->xcomm_hdl = NULL;
 }
