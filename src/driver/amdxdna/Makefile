@@ -36,13 +36,6 @@ DEFINES := -DAMDXDNA_DEVEL
 # Driver version
 XDNA_DATE ?= $(shell date +%Y%m%d)
 XDNA_HASH ?= $(shell git rev-parse HEAD)
-# Detect if kernel was built with Clang - check /proc/config.gz first, then /boot/config-*
-USE_LLVM ?= $(shell \
-    if [ -e /proc/config.gz ]; then \
-        zgrep -q "CONFIG_CC_IS_CLANG=y" /proc/config.gz 2>/dev/null && echo -n "LLVM=1"; \
-    elif [ -e /boot/config-$(KERNEL_VER) ]; then \
-        grep -q "CONFIG_CC_IS_CLANG=y" /boot/config-$(KERNEL_VER) 2>/dev/null && echo -n "LLVM=1"; \
-    fi)
 
 ifndef MODULE_VER_STR
 MODULE_VER_STR := $(XDNA_DRIVER_VERSION)_$(XDNA_DATE),$(XDNA_HASH)
@@ -50,13 +43,14 @@ endif
 
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
+# Compiler (gcc/clang) comes from the LLVM= kbuild var set by DKMS/caller, not probed here (#1377)
 ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF
 endif
 
 # Generate config_kernel.h if not already present (CMake or direct build)
 modules: $(SRC_DIR)/config_kernel.h
-	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) $(USE_LLVM) modules
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC_DIR) CFLAGS_MODULE="$(DEFINES)" OFT_CONFIG_AMDXDNA_PCI=$(PCI) OFT_CONFIG_AMDXDNA_OF=$(OF) modules
 
 $(SRC_DIR)/config_kernel.h:
 	@echo "[INFO] Generating config_kernel.h..."
