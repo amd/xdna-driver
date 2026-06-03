@@ -224,6 +224,9 @@ static int amdxdna_rpmsg_rx_cb(struct rpmsg_device *rpdev, void *data,
 	 * sequence.
 	 */
 	if (opcode == AMDXDNA_RPMSG_OP_CMD_COMPLETION) {
+		XDNA_DBG(xdna,
+			 "rpmsg RX: CMD_COMPLETION interrupt (len=%d payload=%zu)",
+			 len, payload_len);
 		amdxdna_rpmsg_cmd_completion(ndev, payload, payload_len);
 		return 0;
 	}
@@ -361,6 +364,8 @@ static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
  */
 static int amdxdna_rpmsg_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 {
+	struct amdxdna_rpmsg_hdl *rhdl = xcomm_hdl;
+	struct amdxdna_dev *xdna = rhdl->ndev->xdna;
 	struct amdxdna_rpmsg_doorbell_req req = {
 		.hw_context_id = cpu_to_le32(hw_ctx_id),
 	};
@@ -371,8 +376,15 @@ static int amdxdna_rpmsg_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 		.send_data = (u8 *)&req,
 		.send_size = sizeof(req),
 	};
+	int ret;
 
-	return amdxdna_rpmsg_send_msg(xcomm_hdl, &msg);
+	ret = amdxdna_rpmsg_send_msg(xcomm_hdl, &msg);
+	XDNA_DBG(xdna, "rpmsg doorbell TX: hw_ctx_id=%u EXEC_HW_CONTEXT ret=%d",
+		 hw_ctx_id, ret);
+	if (ret)
+		XDNA_WARN(xdna, "rpmsg doorbell TX failed: hw_ctx_id=%u ret=%d",
+			  hw_ctx_id, ret);
+	return ret;
 }
 
 /*

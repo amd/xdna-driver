@@ -41,6 +41,7 @@
 
 #include "aie4_pci.h"
 #include "aie4_message.h"
+#include "amdxdna_drm.h"
 #include "amdxdna_shmem.h"
 #include "amdxdna_sysfs.h"
 
@@ -97,11 +98,17 @@ struct amdxdna_shmem_hdl {
 
 static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
 {
+	struct amdxdna_dev *xdna = ndev->xdna;
 	struct cert_comp *cert_comp;
 	unsigned long idx;
+	u32 n = 0;
 
-	xa_for_each(&ndev->cert_comp_xa, idx, cert_comp)
+	xa_for_each(&ndev->cert_comp_xa, idx, cert_comp) {
 		wake_up_all(&cert_comp->waitq);
+		n++;
+	}
+
+	XDNA_DBG(xdna, "shmem doorbell IPI RX: woke %u cert_comp waitq(s)", n);
 }
 
 static void amdxdna_shmem_rx_work(struct work_struct *work)
@@ -149,7 +156,9 @@ static void amdxdna_shmem_rx_callback(struct mbox_client *cl, void *data)
 {
 	struct amdxdna_shmem_hdl *shdl =
 		container_of(cl, struct amdxdna_shmem_hdl, rx_cl);
+	struct amdxdna_dev *xdna = shdl->ndev->xdna;
 
+	XDNA_DBG(xdna, "shmem IPI RX callback (doorbell/completion interrupt)");
 	amdxdna_shmem_doorbell_notify(shdl->ndev);
 	schedule_work(&shdl->rx_work);
 
@@ -220,17 +229,34 @@ unlock_tx:
 static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 {
 	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
+	struct amdxdna_dev *xdna = shdl->ndev->xdna;
+	struct shmem_db_ring *ring = shdl->db_ring;
+	u64 head, tail;
 	int ret;
 
 	spin_lock(&shdl->db_lock);
-	ret = shmem_db_produce(shdl->db_ring, hw_ctx_id);
-	if (ret)
+	head = ring->head;
+	tail = ring->tail;
+
+	ret = shmem_db_produce(ring, hw_ctx_id);
+	if (ret) {
+		XDNA_DBG(xdna,
+			 "shmem doorbell TX db_produce failed: hw_ctx_id=%u head=%llu tail=%llu ret=%d",
+			 hw_ctx_id, head, tail, ret);
 		goto unlock;
+	}
 
 	ret = mbox_send_message(shdl->tx_chan, NULL);
-	if (ret < 0)
+	if (ret < 0) {
+		XDNA_DBG(xdna,
+			 "shmem doorbell TX IPI failed: hw_ctx_id=%u head=%llu tail=%llu ret=%d",
+			 hw_ctx_id, ring->head, ring->tail, ret);
 		goto unlock;
+	}
 	mbox_client_txdone(shdl->tx_chan, 0);
+	XDNA_DBG(xdna,
+		 "shmem doorbell TX: hw_ctx_id=%u slot=%llu head=%llu tail=%llu (IPI sent)",
+		 hw_ctx_id, (ring->head - 1) & ring->ring_mask, ring->head, ring->tail);
 	ret = 0;
 
 unlock:

@@ -513,15 +513,25 @@ done:
 
 static inline void ring_doorbell(struct amdxdna_ctx *ctx)
 {
-	struct amdxdna_dev_hdl *ndev = ctx->client->xdna->dev_handle;
+	struct amdxdna_dev *xdna = ctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	int ret;
 
 	if (ndev->xcomm_ops) {
-		ndev->xcomm_ops->ring_doorbell(ndev->xcomm_hdl,
-					       ctx->priv->hw_ctx_id);
+		ret = ndev->xcomm_ops->ring_doorbell(ndev->xcomm_hdl,
+						     ctx->priv->hw_ctx_id);
+		XDNA_DBG(xdna, "ring_doorbell: ctx=%s hw_ctx_id=%u xcomm ret=%d",
+			 ctx->name, ctx->priv->hw_ctx_id, ret);
+		if (ret)
+			XDNA_WARN(xdna,
+				  "ring_doorbell failed: ctx=%s hw_ctx_id=%u ret=%d",
+				  ctx->name, ctx->priv->hw_ctx_id, ret);
 		return;
 	}
 
 	writel(0, ctx->priv->doorbell_addr);
+	XDNA_DBG(xdna, "ring_doorbell: ctx=%s hw_ctx_id=%u MMIO %p",
+		 ctx->name, ctx->priv->hw_ctx_id, ctx->priv->doorbell_addr);
 }
 
 static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
