@@ -43,6 +43,12 @@
 	dev_warn_once((_chann)->mb->dev, "xdna_mailbox.%d: "fmt, \
 		      (_chann)->msix_irq, ##args); \
 })
+#define MB_WARN_RATELIMITED(chann, fmt, args...) \
+({ \
+	typeof(chann) _chann = chann; \
+	dev_warn_ratelimited((_chann)->mb->dev, "xdna_mailbox.%d: "fmt, \
+			     (_chann)->msix_irq, ##args); \
+})
 
 #define MAGIC_VAL			0x1D000000U
 #define MAGIC_VAL_MASK			0xFF000000
@@ -342,8 +348,19 @@ mailbox_get_resp(struct mailbox_channel *mb_chann, struct xdna_msg_header *heade
 	msg_id = MSG_ID2ENTRY(msg_id);
 	mb_msg = xa_erase_irq(&mb_chann->chan_xa, msg_id);
 	if (!mb_msg) {
-		MB_ERR(mb_chann, "Cannot find msg 0x%x", msg_id);
-		return -EINVAL;
+		/*
+		 * No matching inflight: most likely the waiter timed out and
+		 * neutralised the inflight via xdna_mailbox_abort_msg().  The
+		 * magic-value check above already vetted the id, so dropping
+		 * this response is safe -- keep the channel healthy instead
+		 * of escalating to bad_state.  Rate-limited so a stuck
+		 * firmware that produces repeated late responses does not
+		 * flood the log.
+		 */
+		MB_WARN_RATELIMITED(mb_chann,
+				    "dropping resp for aborted/unknown id 0x%x opcode 0x%x",
+				    msg_id, header->opcode);
+		return 0;
 	}
 
 	MB_DBG(mb_chann, "resp opcode 0x%x size %d id 0x%x",
@@ -638,6 +655,50 @@ static int mailbox_polld(void *data)
 	dev_dbg(mb->dev, "polld stop");
 
 	return 0;
+}
+
+/*
+ * xdna_mailbox_abort_msg() - cancel an inflight whose waiter has timed out
+ *
+ * Atomically remove the bookkeeping for @msg_id (as returned in msg->id by
+ * a successful xdna_mailbox_send_msg()) so a late firmware response cannot
+ * dispatch the now-stale notify_cb on a freed waiter.  Return values:
+ *
+ *   0       : the inflight was erased here; rx_worker will hit the "Cannot
+ *             find msg" branch instead of calling notify_cb.  Caller is
+ *             free to release any on-stack state bound to msg->handle.
+ *   -EAGAIN : the rx_worker already grabbed the mb_msg.  We have flushed
+ *             the rx work queue so any in-flight notify_cb has returned
+ *             before this function does, and the caller's bound state is
+ *             no longer referenced.  The associated completion has fired.
+ *   -EINVAL : @mb_chann is NULL.
+ */
+int xdna_mailbox_abort_msg(struct mailbox_channel *mb_chann, int msg_id)
+{
+	struct mailbox_msg *mb_msg;
+	int entry;
+
+	if (!mb_chann)
+		return -EINVAL;
+
+	entry = MSG_ID2ENTRY(msg_id);
+	mb_msg = xa_erase_irq(&mb_chann->chan_xa, entry);
+	if (mb_msg) {
+		MB_DBG(mb_chann, "aborted inflight msg id 0x%x opcode 0x%x",
+		       msg_id, mb_msg->pkg.header.opcode);
+		kfree(mb_msg);
+		return 0;
+	}
+
+	/*
+	 * rx_worker owns the mb_msg.  Wait until the queued rx work has
+	 * finished invoking notify_cb so the caller's bound state can be
+	 * safely released.  flush_work() is safe from process context here
+	 * (the timeout-side caller is sleeping/waiting, not running on the
+	 * mailbox rx workqueue).
+	 */
+	flush_work(&mb_chann->rx_work);
+	return -EAGAIN;
 }
 
 int xdna_mailbox_send_msg(struct mailbox_channel *mb_chann,

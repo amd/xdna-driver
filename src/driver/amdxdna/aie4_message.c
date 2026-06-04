@@ -74,10 +74,26 @@ int aie4_send_msg_wait(struct amdxdna_dev_hdl *ndev,
 	ret = wait_for_completion_timeout(&hdl->comp,
 					  msecs_to_jiffies(RX_TIMEOUT));
 	if (!ret) {
-		XDNA_ERR(xdna, "Wait for completion timeout");
+		int abort;
+
+		/*
+		 * Atomically neutralise the inflight so that a late firmware
+		 * response cannot dispatch the now-stale notify_cb on the
+		 * caller's about-to-be-freed on-stack &xdna_notify.  See the
+		 * xdna_msg_abort() contract.  -EAGAIN means rx already ran
+		 * the callback and the response is sitting in @hdl; recover
+		 * it via try_wait_for_completion().
+		 */
+		abort = xdna_msg_abort(ndev->mgmt_chann, ndev->xcomm_ops,
+				       ndev->xcomm_hdl, msg->id);
+		if (abort == -EAGAIN && try_wait_for_completion(&hdl->comp))
+			goto got_resp;
+		XDNA_ERR(xdna, "Wait for completion timeout opcode 0x%x",
+			 msg->opcode);
 		return -ETIME;
 	}
 
+got_resp:
 	ret = hdl->error;
 
 	if (ret)

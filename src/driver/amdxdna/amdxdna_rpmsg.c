@@ -220,11 +220,20 @@ static int amdxdna_rpmsg_rx_cb(struct rpmsg_device *rpdev, void *data,
 		return 0;
 	}
 
+	/*
+	 * Hold msg_lock across the entire xa_erase + notify_cb invocation.
+	 * This serialises against amdxdna_rpmsg_abort_msg(): once the abort
+	 * path observes xa_erase() == NULL it knows that this rx path must
+	 * already own the ifm and is going to (or is already) calling
+	 * notify_cb.  By taking the same mutex, the abort path waits here
+	 * until notify_cb has returned, so the caller's on-stack
+	 * &xdna_notify cannot be released while we're still dereferencing
+	 * it via ifm->handle.
+	 */
 	mutex_lock(&rhdl->msg_lock);
 	ifm = xa_erase(&rhdl->msg_xa, id);
-	mutex_unlock(&rhdl->msg_lock);
-
 	if (!ifm) {
+		mutex_unlock(&rhdl->msg_lock);
 		XDNA_WARN(xdna, "unexpected RPMsg id %u", id);
 		return -ENOENT;
 	}
@@ -237,13 +246,14 @@ static int amdxdna_rpmsg_rx_cb(struct rpmsg_device *rpdev, void *data,
 	if (ifm->notify_cb)
 		ifm->notify_cb(ifm->handle, (void __iomem *)payload,
 			       payload_len);
+	mutex_unlock(&rhdl->msg_lock);
 
 	kfree(ifm);
 	return 0;
 }
 
 static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
-				  const struct xdna_mailbox_msg *msg)
+				  struct xdna_mailbox_msg *msg)
 {
 	struct amdxdna_rpmsg_hdl *rhdl = xcomm_hdl;
 	struct amdxdna_dev *xdna = rhdl->ndev->xdna;
@@ -272,6 +282,8 @@ static int amdxdna_rpmsg_send_msg(void *xcomm_hdl,
 		return ret;
 	}
 	mutex_unlock(&rhdl->msg_lock);
+
+	msg->id = id;
 
 	total = sizeof(*hdr) + msg->send_size;
 	buf = kzalloc(total, GFP_KERNEL);
@@ -377,6 +389,32 @@ static int amdxdna_rpmsg_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 }
 
 /*
+ * Atomically remove an inflight management message that the caller has
+ * given up on.  See &amdxdna_xcomm_ops::abort_msg for return semantics.
+ *
+ * Race with amdxdna_rpmsg_rx_cb(): both sides take rhdl->msg_lock around
+ * the xa_erase().  The rx path keeps msg_lock held across the
+ * notify_cb() invocation, so when the abort path manages to take the
+ * lock and observes !ifm, any in-flight callback has already returned
+ * and the caller's bound &xdna_notify is no longer referenced.
+ */
+static int amdxdna_rpmsg_abort_msg(void *xcomm_hdl, int msg_id)
+{
+	struct amdxdna_rpmsg_hdl *rhdl = xcomm_hdl;
+	struct rpmsg_inflight_msg *ifm;
+
+	mutex_lock(&rhdl->msg_lock);
+	ifm = xa_erase(&rhdl->msg_xa, msg_id);
+	mutex_unlock(&rhdl->msg_lock);
+
+	if (!ifm)
+		return -EAGAIN;
+
+	kfree(ifm);
+	return 0;
+}
+
+/*
  * Final per-device cleanup.  By the time we get here, amdxdna_rpmsg_fini()
  * has detached us from any live rpmsg endpoint via device_release_driver(),
  * which fired drv_remove() and therefore:
@@ -398,6 +436,7 @@ static void amdxdna_rpmsg_xcomm_fini(void *xcomm_hdl)
 static const struct amdxdna_xcomm_ops amdxdna_rpmsg_xcomm_ops = {
 	.send_msg	= amdxdna_rpmsg_send_msg,
 	.ring_doorbell	= amdxdna_rpmsg_ring_doorbell,
+	.abort_msg	= amdxdna_rpmsg_abort_msg,
 	.fini		= amdxdna_rpmsg_xcomm_fini,
 };
 

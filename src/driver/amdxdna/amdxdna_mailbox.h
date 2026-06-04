@@ -164,6 +164,75 @@ void xdna_mailbox_stop_channel(struct mailbox_channel *mailbox_chann);
 int xdna_mailbox_send_msg(struct mailbox_channel *mailbox_chann,
 			  struct xdna_mailbox_msg *msg, u64 tx_timeout);
 
+/*
+ * xdna_mailbox_abort_msg() -- cancel an inflight registered by
+ * xdna_mailbox_send_msg() whose waiter has timed out, so a late firmware
+ * response cannot dispatch the now-stale notify_cb on freed waiter state.
+ *
+ * @mailbox_chann: Mailbox channel handle
+ * @msg_id:        wire id as returned in msg->id from xdna_mailbox_send_msg()
+ *
+ * Return: 0 if the inflight was erased here (notify_cb will not fire);
+ *         -EAGAIN if rx_worker already grabbed it (this function flushed
+ *         the rx work so any in-flight notify_cb has returned before
+ *         returning);
+ *         -EINVAL on bad @mailbox_chann.
+ */
+int xdna_mailbox_abort_msg(struct mailbox_channel *mailbox_chann, int msg_id);
+
+/*
+ * Generic transport operations for non-PCI communication paths
+ * (CONFIG_AMDXDNA_NPU_OF; selected at runtime via DT):
+ *   - RPMsg over VirtIO (amd,versal-aie-rpmsg)
+ *   - Shared memory + ZynqMP IPI (amd,versal-aie)
+ *
+ * When an &amdxdna_dev_hdl has no xcomm_ops set, the driver falls back to
+ * PCI MMIO mailbox via xdna_mailbox_*().
+ *
+ * @send_msg writes the assigned wire-id back into msg->id on success so
+ * the caller can later use it to abort the inflight if its waiter times
+ * out (see xdna_msg_abort()).
+ *
+ * @abort_msg neutralises an inflight registered by an earlier successful
+ * @send_msg.  Required semantics, matching xdna_mailbox_abort_msg():
+ *   - 0       : the inflight was atomically erased; the bound notify_cb
+ *               will NOT be invoked.  Caller is free to release any
+ *               on-stack state referenced by msg->handle.
+ *   - -EAGAIN : the rx side already grabbed the inflight; on return any
+ *               in-flight callback has run to completion (the
+ *               implementation has flushed the rx work / serialised
+ *               against the rx callback).  Caller may re-check the
+ *               associated completion before unwinding.
+ *   - other   : not aborted, no synchronization performed.
+ */
+struct amdxdna_xcomm_ops {
+	int (*send_msg)(void *xcomm_hdl,
+			struct xdna_mailbox_msg *msg);
+	int (*ring_doorbell)(void *xcomm_hdl, u32 hw_ctx_id);
+	int (*abort_msg)(void *xcomm_hdl, int msg_id);
+	void (*fini)(void *xcomm_hdl);
+};
+
+/*
+ * xdna_msg_abort() - single dispatch point to neutralise an inflight
+ *
+ * Picks the right transport-specific abort:
+ *   - if @xcomm_ops is non-NULL, calls @xcomm_ops->abort_msg(@xcomm_hdl, ...)
+ *     (shmem / rpmsg);
+ *   - else, calls xdna_mailbox_abort_msg(@chann, ...) (PCI mailbox).
+ *
+ * Both backends honour the same return contract:
+ *   - 0       : inflight atomically erased here; notify_cb will not fire.
+ *   - -EAGAIN : rx side already owns the inflight; on return any in-flight
+ *               callback has finished referencing the caller's bound state.
+ *               Caller may try_wait_for_completion() to recover the response
+ *               that just slipped in.
+ *   - other   : not aborted, no synchronisation performed.
+ */
+int xdna_msg_abort(struct mailbox_channel *chann,
+		   const struct amdxdna_xcomm_ops *xcomm_ops, void *xcomm_hdl,
+		   int msg_id);
+
 #if defined(CONFIG_DEBUG_FS)
 /*
  * xdna_mailbox_info_show() -- Show mailbox info for debug

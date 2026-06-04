@@ -39,6 +39,19 @@ out:
 	return ret;
 }
 
+int xdna_msg_abort(struct mailbox_channel *chann,
+		   const struct amdxdna_xcomm_ops *xcomm_ops, void *xcomm_hdl,
+		   int msg_id)
+{
+	if (xcomm_ops) {
+		if (!xcomm_ops->abort_msg)
+			return -ENOTSUPP;
+		return xcomm_ops->abort_msg(xcomm_hdl, msg_id);
+	}
+
+	return xdna_mailbox_abort_msg(chann, msg_id);
+}
+
 int xdna_send_msg_wait(struct amdxdna_dev *xdna, struct mailbox_channel *chann,
 		       struct xdna_mailbox_msg *msg)
 {
@@ -54,7 +67,21 @@ int xdna_send_msg_wait(struct amdxdna_dev *xdna, struct mailbox_channel *chann,
 	ret = wait_for_completion_timeout(&hdl->comp,
 					  msecs_to_jiffies(RX_TIMEOUT));
 	if (!ret) {
-		XDNA_ERR(xdna, "Wait for completion timeout");
+		int abort;
+
+		/*
+		 * Atomically neutralise the inflight so that a late firmware
+		 * response cannot dispatch the now-stale notify_cb on the
+		 * caller's about-to-be-freed on-stack &xdna_notify.  See the
+		 * xdna_msg_abort() contract.  -EAGAIN means rx already ran
+		 * the callback and the response is sitting in @hdl; recover
+		 * it via try_wait_for_completion().
+		 */
+		abort = xdna_msg_abort(chann, NULL, NULL, msg->id);
+		if (abort == -EAGAIN && try_wait_for_completion(&hdl->comp))
+			return hdl->error;
+		XDNA_ERR(xdna, "Wait for completion timeout opcode 0x%x",
+			 msg->opcode);
 		return -ETIME;
 	}
 

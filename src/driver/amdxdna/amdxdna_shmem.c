@@ -207,7 +207,7 @@ static void amdxdna_shmem_rx_callback(struct mbox_client *cl, void *data)
 }
 
 static int amdxdna_shmem_send_msg(void *xcomm_hdl,
-				  const struct xdna_mailbox_msg *msg)
+				  struct xdna_mailbox_msg *msg)
 {
 	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
 	struct shmem_inflight_msg *ifm;
@@ -232,6 +232,8 @@ static int amdxdna_shmem_send_msg(void *xcomm_hdl,
 		kfree(ifm);
 		return ret;
 	}
+
+	msg->id = id;
 
 	hdr.total_size = sizeof(hdr) + msg->send_size;
 	hdr.sz_ver = FIELD_PREP(SHMEM_MSG_BODY_SZ, msg->send_size) |
@@ -309,6 +311,39 @@ unlock:
 	return ret;
 }
 
+/*
+ * Atomically remove an inflight management message that the caller has
+ * given up on.  Return values follow the @abort_msg contract in
+ * &amdxdna_xcomm_ops:
+ *
+ *   0       : we won the race, the rx_work will not invoke the callback
+ *             for this id (it will hit the !ifm branch instead).
+ *   -EAGAIN : rx_work already grabbed the ifm; flush_work() has waited
+ *             for the callback to return so the caller's bound state
+ *             (typically an on-stack &xdna_notify) is no longer
+ *             referenced and may be freed.  The completion bound to the
+ *             callback has already fired.
+ */
+static int amdxdna_shmem_abort_msg(void *xcomm_hdl, int msg_id)
+{
+	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
+	struct shmem_inflight_msg *ifm;
+
+	ifm = xa_erase(&shdl->msg_xa, msg_id);
+	if (!ifm) {
+		/*
+		 * rx_work owns the ifm.  Wait until any in-flight callback
+		 * has finished referencing the caller's &xdna_notify before
+		 * letting the caller unwind.
+		 */
+		flush_work(&shdl->rx_work);
+		return -EAGAIN;
+	}
+
+	kfree(ifm);
+	return 0;
+}
+
 static void amdxdna_shmem_xcomm_fini(void *xcomm_hdl)
 {
 	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
@@ -379,6 +414,7 @@ static void amdxdna_shmem_rings_init(struct amdxdna_shmem_hdl *shdl)
 static const struct amdxdna_xcomm_ops amdxdna_shmem_xcomm_ops = {
 	.send_msg	= amdxdna_shmem_send_msg,
 	.ring_doorbell	= amdxdna_shmem_ring_doorbell,
+	.abort_msg	= amdxdna_shmem_abort_msg,
 	.fini		= amdxdna_shmem_xcomm_fini,
 };
 

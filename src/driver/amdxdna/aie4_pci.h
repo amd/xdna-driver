@@ -174,22 +174,6 @@ struct amdxdna_dev_priv {
 struct async_events;
 struct amdxdna_dev_hdl;
 
-/*
- * Generic transport operations for non-PCI communication paths.
- *
- * Implementations (CONFIG_AMDXDNA_NPU_OF, selected at runtime via DT):
- *   - RPMsg over VirtIO (amd,versal-aie-rpmsg)
- *   - Shared memory + ZynqMP IPI (amd,versal-aie)
- *
- * When xcomm_ops is NULL, the driver falls back to PCI MMIO mailbox.
- */
-struct amdxdna_xcomm_ops {
-	int (*send_msg)(void *xcomm_hdl,
-			const struct xdna_mailbox_msg *msg);
-	int (*ring_doorbell)(void *xcomm_hdl, u32 hw_ctx_id);
-	void (*fini)(void *xcomm_hdl);
-};
-
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
