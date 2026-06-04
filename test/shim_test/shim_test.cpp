@@ -90,6 +90,11 @@ void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_noop_no_qos(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_power_modes(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_refcount_scaling(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_certlog_attach_detach(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_certlog_multi_uc(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_certlog_num_ucs_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_certlog_invalid_uc_index(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_certlog_payload_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
 
 inline void
 set_xrt_path()
@@ -1226,6 +1231,21 @@ std::vector<test_case> test_list {
   },
   test_case{ "DPM power modes", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_power_modes, {}
+  },
+  test_case{ "CERT log: attach/detach", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_attach_detach, {}
+  },
+  test_case{ "CERT log: max num_ucs", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_multi_uc, {}
+  },
+  test_case{ "CERT log: num_ucs > AIE4_MAX_NUM_CERTS rejected", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_num_ucs_overflow, {}
+  },
+  test_case{ "CERT log: out-of-range uc index rejected", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_invalid_uc_index, {}
+  },
+  test_case{ "CERT log: payload overflow rejected", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_payload_overflow, {}
   },
 };
 
