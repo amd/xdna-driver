@@ -40,6 +40,9 @@ struct amdxdna_dev_priv {
 
 	struct aie_bar_off_pair	psp_regs_off[PSP_MAX_REGS];
 	struct aie_bar_off_pair	smu_regs_off[SMU_MAX_REGS];
+
+	const struct dpm_clk_freq	*dpm_clk_tbl;
+	const struct aie_hw_ops		*hw_ops;
 };
 
 struct amdxdna_dev_hdl {
@@ -51,6 +54,8 @@ struct amdxdna_dev_hdl {
 	struct mailbox			*mbox;
 	u32				partition_id;
 	u32				num_vfs;
+	u32				total_col;
+	u32				max_dpm_level;
 
 	struct xarray                   cert_comp_xa; /* device level indexed by msix id */
 	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
