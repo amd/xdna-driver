@@ -590,6 +590,7 @@ static inline bool check_cmd_done(struct amdxdna_ctx *ctx, u64 seq)
 	ri = get_read_index(ctx);
 
 	if (ri > seq) {
+		trace_amdxdna_debug_point(ctx->name, seq, "HSA poll completion");
 		wi = READ_ONCE(*ctx->priv->umq_write_index);
 		XDNA_DBG(xdna,
 			 "HSA completion: ctx=%s read_index=%llu > seq=%llu write_index=%llu",
