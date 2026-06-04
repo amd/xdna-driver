@@ -151,6 +151,107 @@ DEFINE_EVENT(xdna_mbox_name_id, mbox_poll_handle,
 	     TP_ARGS(name, irq)
 );
 
+/*
+ * shmem+IPI transport tracepoints (npu3 aie2ps over device-tree shmem).
+ * Mirror the mbox_set_tail / mbox_set_head / mbox_irq_handle PCI events
+ * but with shmem-relevant ring head/tail indices and no msix_irq, since
+ * the shmem path uses a single IPI mailbox channel for all traffic.
+ */
+TRACE_EVENT(shmem_mgmt_tx,
+	    TP_PROTO(u32 opcode, u32 msg_id, u32 send_size, u64 ring_head,
+		     u64 ring_tail),
+
+	    TP_ARGS(opcode, msg_id, send_size, ring_head, ring_tail),
+
+	    TP_STRUCT__entry(__field(u32, opcode)
+			     __field(u32, msg_id)
+			     __field(u32, send_size)
+			     __field(u64, ring_head)
+			     __field(u64, ring_tail)),
+
+	    TP_fast_assign(__entry->opcode = opcode;
+			   __entry->msg_id = msg_id;
+			   __entry->send_size = send_size;
+			   __entry->ring_head = ring_head;
+			   __entry->ring_tail = ring_tail;),
+
+	    TP_printk("opcode=0x%x id=%u size=%u head=%llu tail=%llu",
+		      __entry->opcode, __entry->msg_id, __entry->send_size,
+		      __entry->ring_head, __entry->ring_tail)
+);
+
+TRACE_EVENT(shmem_mgmt_rx,
+	    TP_PROTO(u32 opcode, u32 msg_id, u32 total_size),
+
+	    TP_ARGS(opcode, msg_id, total_size),
+
+	    TP_STRUCT__entry(__field(u32, opcode)
+			     __field(u32, msg_id)
+			     __field(u32, total_size)),
+
+	    TP_fast_assign(__entry->opcode = opcode;
+			   __entry->msg_id = msg_id;
+			   __entry->total_size = total_size;),
+
+	    TP_printk("opcode=0x%x id=%u total_size=%u",
+		      __entry->opcode, __entry->msg_id, __entry->total_size)
+);
+
+TRACE_EVENT(shmem_db_tx,
+	    TP_PROTO(u32 hw_ctx_id, u64 slot, u64 ring_head, u64 ring_tail),
+
+	    TP_ARGS(hw_ctx_id, slot, ring_head, ring_tail),
+
+	    TP_STRUCT__entry(__field(u32, hw_ctx_id)
+			     __field(u64, slot)
+			     __field(u64, ring_head)
+			     __field(u64, ring_tail)),
+
+	    TP_fast_assign(__entry->hw_ctx_id = hw_ctx_id;
+			   __entry->slot = slot;
+			   __entry->ring_head = ring_head;
+			   __entry->ring_tail = ring_tail;),
+
+	    TP_printk("hw_ctx_id=%u slot=%llu head=%llu tail=%llu",
+		      __entry->hw_ctx_id, __entry->slot,
+		      __entry->ring_head, __entry->ring_tail)
+);
+
+TRACE_EVENT(shmem_ipi_rx,
+	    TP_PROTO(u64 rx_head, u64 rx_tail, u64 db_head, u64 db_tail),
+
+	    TP_ARGS(rx_head, rx_tail, db_head, db_tail),
+
+	    TP_STRUCT__entry(__field(u64, rx_head)
+			     __field(u64, rx_tail)
+			     __field(u64, db_head)
+			     __field(u64, db_tail)),
+
+	    TP_fast_assign(__entry->rx_head = rx_head;
+			   __entry->rx_tail = rx_tail;
+			   __entry->db_head = db_head;
+			   __entry->db_tail = db_tail;),
+
+	    TP_printk("rx=[%llu,%llu] db=[%llu,%llu]",
+		      __entry->rx_head, __entry->rx_tail,
+		      __entry->db_head, __entry->db_tail)
+);
+
+TRACE_EVENT(shmem_db_wake,
+	    TP_PROTO(u32 msix_idx, int irq),
+
+	    TP_ARGS(msix_idx, irq),
+
+	    TP_STRUCT__entry(__field(u32, msix_idx)
+			     __field(int, irq)),
+
+	    TP_fast_assign(__entry->msix_idx = msix_idx;
+			   __entry->irq = irq;),
+
+	    TP_printk("msix_idx=%u irq=%d",
+		      __entry->msix_idx, __entry->irq)
+);
+
 /* Macro wrapper that automatically captures the function name */
 #define trace_amdxdna_trace_point(msg, pid, arg1, arg2, arg3) \
 	trace___amdxdna_trace_point(msg, __func__, pid, arg1, arg2, arg3)

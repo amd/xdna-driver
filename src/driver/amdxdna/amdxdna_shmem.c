@@ -46,6 +46,7 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_shmem.h"
 #include "amdxdna_sysfs.h"
+#include "amdxdna_trace.h"
 
 struct shmem_inflight_msg {
 	u32			id;
@@ -126,6 +127,7 @@ static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
 	u32 n = 0;
 
 	xa_for_each(&ndev->cert_comp_xa, idx, cert_comp) {
+		trace_shmem_db_wake(cert_comp->msix_idx, cert_comp->irq);
 		wake_up_all(&cert_comp->waitq);
 		n++;
 	}
@@ -152,6 +154,9 @@ static void amdxdna_shmem_rx_work(struct work_struct *work)
 		if (mailbox_verbose)
 			shmem_dump_mgmt_msg(&shdl->pdev->dev, "RX", &msg_hdr,
 					    shdl->rx_ring, buf, payload_size);
+
+		trace_shmem_mgmt_rx(msg_hdr.opcode, msg_hdr.id,
+				    msg_hdr.total_size);
 
 		ifm = xa_erase(&shdl->msg_xa, msg_hdr.id);
 
@@ -186,6 +191,8 @@ static void amdxdna_shmem_rx_callback(struct mbox_client *cl, void *data)
 	struct amdxdna_dev *xdna = shdl->ndev->xdna;
 
 	XDNA_DBG(xdna, "shmem IPI RX callback (doorbell/completion interrupt)");
+	trace_shmem_ipi_rx(shdl->rx_hdr->head, shdl->rx_hdr->tail,
+			   shdl->db_ring->head, shdl->db_ring->tail);
 	amdxdna_shmem_doorbell_notify(shdl->ndev);
 	schedule_work(&shdl->rx_work);
 
@@ -243,6 +250,9 @@ static int amdxdna_shmem_send_msg(void *xcomm_hdl,
 	if (ret)
 		goto unlock_tx;
 
+	trace_shmem_mgmt_tx(hdr.opcode, hdr.id, msg->send_size,
+			    shdl->tx_hdr->head, shdl->tx_hdr->tail);
+
 	ret = mbox_send_message(shdl->tx_chan, NULL);
 	if (ret < 0)
 		goto unlock_tx;
@@ -277,6 +287,9 @@ static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 			 hw_ctx_id, head, tail, ret);
 		goto unlock;
 	}
+
+	trace_shmem_db_tx(hw_ctx_id, (ring->head - 1) & ring->ring_mask,
+			  ring->head, ring->tail);
 
 	ret = mbox_send_message(shdl->tx_chan, NULL);
 	if (ret < 0) {
