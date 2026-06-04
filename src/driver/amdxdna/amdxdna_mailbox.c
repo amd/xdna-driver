@@ -50,6 +50,11 @@
 #define MAILBOX_NAME			"xdna_mailbox"
 #define MSG_ID2ENTRY(msg_id)		((msg_id) & ~MAGIC_VAL_MASK)
 
+int mailbox_verbose;
+module_param(mailbox_verbose, int, 0644);
+MODULE_PARM_DESC(mailbox_verbose,
+		 "Dump xcomm mgmt request/response header+payload (0=off, 1=on)");
+
 #ifdef AMDXDNA_DEVEL
 int mailbox_polling;
 module_param(mailbox_polling, int, 0444);

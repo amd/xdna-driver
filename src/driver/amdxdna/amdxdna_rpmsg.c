@@ -57,20 +57,9 @@
 #include <linux/xarray.h>
 
 #include "aie4_pci.h"
+#include "amdxdna_mailbox.h"
 #include "amdxdna_plat.h"
 #include "amdxdna_rpmsg.h"
-
-/*
- * mailbox_verbose: when set, every outgoing RPMsg request is logged with
- * its header sizes and the on-wire frame is hex-dumped at KERN_INFO so
- * it shows up regardless of the dynamic-debug state of this file.  Off
- * by default so production traffic stays quiet.  Toggle at runtime via:
- *   echo 1 > /sys/module/amdxdna/parameters/mailbox_verbose
- */
-static int mailbox_verbose;
-module_param(mailbox_verbose, int, 0644);
-MODULE_PARM_DESC(mailbox_verbose,
-		 " Dump RPMsg request header+payload on every send (0=off, 1=on)");
 
 /*
  * Wire header — must match firmware's npu_mbox_msg_header exactly:

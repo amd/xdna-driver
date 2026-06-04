@@ -188,4 +188,10 @@ int xdna_mailbox_ringbuf_show(struct mailbox *mailbox,
 			      struct seq_file *m);
 #endif
 
+/*
+ * When non-zero, RPMsg and SHMEM xcomm paths hex-dump management messages.
+ * Toggle at runtime: echo 1 > /sys/module/amdxdna/parameters/mailbox_verbose
+ */
+extern int mailbox_verbose;
+
 #endif /* _AIE2_MAILBOX_ */

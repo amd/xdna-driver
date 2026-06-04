@@ -27,6 +27,7 @@
  */
 
 #include <drm/drm_managed.h>
+#include <linux/bitfield.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/mailbox_client.h>
@@ -42,6 +43,7 @@
 #include "aie4_pci.h"
 #include "aie4_message.h"
 #include "amdxdna_drm.h"
+#include "amdxdna_mailbox.h"
 #include "amdxdna_shmem.h"
 #include "amdxdna_sysfs.h"
 
@@ -96,6 +98,26 @@ struct amdxdna_shmem_hdl {
 /* Maximum response payload we expect from firmware (fits on kernel stack) */
 #define SHMEM_MAX_RESP_SIZE	512
 
+static void shmem_dump_mgmt_msg(struct device *dev, const char *dir,
+				const struct shmem_msg_hdr *hdr,
+				const void *ring_buf, const void *payload,
+				int payload_size)
+{
+	u32 body_sz = FIELD_GET(SHMEM_MSG_BODY_SZ, hdr->sz_ver);
+	u32 proto = FIELD_GET(SHMEM_MSG_PROTO_VER, hdr->sz_ver);
+
+	dev_info(dev,
+		 "shmem mgmt %s: total_size=%u id=%u opcode=0x%x body_sz=%u proto=0x%x len=%d\n",
+		 dir, hdr->total_size, hdr->id,
+		 hdr->opcode, body_sz, proto, payload_size);
+	print_hex_dump(KERN_INFO, "shmem mgmt hdr: ", DUMP_PREFIX_OFFSET,
+		       16, 4, hdr, sizeof(*hdr), false);
+	if (payload_size > 0)
+		print_hex_dump(KERN_INFO, "shmem mgmt payload: ",
+			       DUMP_PREFIX_OFFSET, 16, 4, payload,
+			       payload_size, false);
+}
+
 static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->xdna;
@@ -127,11 +149,16 @@ static void amdxdna_shmem_rx_work(struct work_struct *work)
 		if (payload_size < 0)
 			break;
 
+		if (mailbox_verbose)
+			shmem_dump_mgmt_msg(&shdl->pdev->dev, "RX", &msg_hdr,
+					    shdl->rx_ring, buf, payload_size);
+
 		ifm = xa_erase(&shdl->msg_xa, msg_hdr.id);
 
 		if (!ifm) {
 			dev_warn(&shdl->pdev->dev,
-				 "unexpected response id %u\n", msg_hdr.id);
+				 "unexpected response id %u opcode 0x%x\n",
+				 msg_hdr.id, msg_hdr.opcode);
 			continue;
 		}
 
@@ -204,6 +231,11 @@ static int amdxdna_shmem_send_msg(void *xcomm_hdl,
 		     FIELD_PREP(SHMEM_MSG_PROTO_VER, SHMEM_PROTOCOL_VER);
 	hdr.id = id;
 	hdr.opcode = msg->opcode;
+
+	if (mailbox_verbose)
+		shmem_dump_mgmt_msg(&shdl->pdev->dev, "TX", &hdr,
+				    shdl->tx_ring, msg->send_data,
+				    msg->send_size);
 
 	spin_lock(&shdl->tx_lock);
 	ret = shmem_mgmt_produce(shdl->tx_hdr, shdl->tx_ring,
