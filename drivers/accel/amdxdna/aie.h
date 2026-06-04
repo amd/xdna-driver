@@ -11,6 +11,7 @@
 #define AIE_INTERVAL	20000	/* us */
 #define AIE_TIMEOUT	1000000	/* us */
 
+struct aie_device;
 struct psp_device;
 struct smu_device;
 struct amdxdna_hwctx;
@@ -51,7 +52,25 @@ struct aie_device {
 	struct amdxdna_drm_query_aie_version version;
 	struct amdxdna_drm_query_aie_metadata metadata;
 	struct aie_msg_ops msg_ops;
+
+	u32 clk_gating;
+	u32 npuclk_freq;
+	u32 hclk_freq;
+	u32 max_tops;
+	u32 curr_tops;
 };
+
+struct aie_hw_ops {
+	int (*set_dpm)(struct aie_device *aie, u32 dpm_level);
+	int (*update_counters)(struct aie_device *aie);
+};
+
+#define aie_update_counters(ndev)					\
+({									\
+	typeof(ndev) _ndev = ndev;					\
+	if ((_ndev)->priv->hw_ops->update_counters)			\
+		(_ndev)->priv->hw_ops->update_counters(&_ndev->aie);	\
+})
 
 #define DECLARE_AIE_MSG(name, op) \
 	DECLARE_XDNA_MSG_COMMON(name, op, -1)
@@ -65,6 +84,11 @@ struct aie_device {
 
 #define DEFINE_BAR_OFFSET(reg_name, bar, reg_addr) \
 	[reg_name] = {bar##_BAR_INDEX, (reg_addr) - bar##_BAR_BASE}
+
+struct dpm_clk_freq {
+	u32	npuclk;
+	u32	hclk;
+};
 
 enum smu_reg_idx {
 	SMU_CMD_REG = 0,
