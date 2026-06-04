@@ -9,9 +9,19 @@
 #include <linux/kstrtox.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/string.h>
+#include <drm/drm_prime.h>
+
 #include "amdxdna_drm.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_cma_buf.h"
+
+/*
+ * Scatterlist entries cannot describe more than 4 GiB per node on some
+ * platforms; use 2 GiB per entry (same as carvedout).  Split the table while
+ * keeping bus addresses contiguous (one dma_map_resource() over the whole
+ * CMA allocation).
+ */
+#define AMDXDNA_CMA_MAX_SG_LEN	(2UL * 1024 * 1024 * 1024)
 
 struct amdxdna_cmabuf_priv {
 	struct device *dev;
@@ -25,21 +35,28 @@ amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
 		   enum dma_data_direction dir)
 {
 	struct amdxdna_cmabuf_priv *cbuf = attach->dmabuf->priv;
-	struct scatterlist *sg;
+	struct scatterlist *sgl, *sg;
+	int ret, n_entries, i;
 	struct sg_table *sgt;
-	int ret;
+	dma_addr_t dma_addr;
+	size_t dma_size;
 
 	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
 	if (!sgt)
 		return ERR_PTR(-ENOMEM);
 
-	sg = kzalloc(sizeof(*sg), GFP_KERNEL);
-	if (!sg) {
+	n_entries = (cbuf->size + AMDXDNA_CMA_MAX_SG_LEN - 1) / AMDXDNA_CMA_MAX_SG_LEN;
+	sgl = kcalloc(n_entries, sizeof(*sg), GFP_KERNEL);
+	if (!sgl) {
 		ret = -ENOMEM;
 		goto free_sgt;
 	}
+	sg_init_table(sgl, n_entries);
+	sgt->orig_nents = n_entries;
+	sgt->nents = n_entries;
+	sgt->sgl = sgl;
 
-	sg_init_table(sg, 1);
+	dma_size = cbuf->size;
 	/*
 	 * Map against cbuf->dev (the producer that allocated this CMA
 	 * region), not attach->dev (the importer).  The bus address
@@ -55,25 +72,33 @@ amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
 	 * tightest invariant: it asserts that the device which actually
 	 * owns the page can reach it, which is also what the AIE shim
 	 * DMA ultimately uses on no-IOMMU platforms.
+	 *
+	 * Map the full contiguous CMA block once, then describe it with
+	 * multiple SG nodes (<= 2 GiB each) whose DMA addresses increase
+	 * linearly.  That satisfies drm_prime_get_contiguous_size() in
+	 * amdxdna_bo_dma_map() while respecting per-entry length limits.
 	 */
-	sg_dma_address(sg) = dma_map_resource(cbuf->dev, cbuf->dma_addr,
-					      cbuf->size, dir,
-					      DMA_ATTR_SKIP_CPU_SYNC);
-	ret = dma_mapping_error(cbuf->dev, sg->dma_address);
+	dma_addr = dma_map_resource(cbuf->dev, cbuf->dma_addr, dma_size, dir,
+				    DMA_ATTR_SKIP_CPU_SYNC);
+	ret = dma_mapping_error(cbuf->dev, dma_addr);
 	if (ret)
-		goto free_sg;
+		goto free_sgl;
 
-	sg_assign_page(sg, NULL);
-	sg->offset = 0;
-	sg_dma_len(sg) = cbuf->size;
-	sgt->orig_nents = 1;
-	sgt->nents = sgt->orig_nents;
-	sgt->sgl = sg;
+	for_each_sgtable_dma_sg(sgt, sg, i) {
+		unsigned int len = min_t(size_t, AMDXDNA_CMA_MAX_SG_LEN, dma_size);
+
+		sg_assign_page(sg, NULL);
+		sg->offset = 0;
+		sg_dma_address(sg) = dma_addr;
+		sg_dma_len(sg) = len;
+		dma_addr += len;
+		dma_size -= len;
+	}
 
 	return sgt;
 
-free_sg:
-	kfree(sg);
+free_sgl:
+	kfree(sgl);
 free_sgt:
 	kfree(sgt);
 	return ERR_PTR(ret);
@@ -87,9 +112,10 @@ static void amdxdna_cmabuf_unmap(struct dma_buf_attachment *attach,
 	struct scatterlist *sg = sgt->sgl;
 
 	/* Pair with cbuf->dev used in amdxdna_cmabuf_map() above. */
-	dma_unmap_resource(cbuf->dev, sg_dma_address(sg), sg_dma_len(sg),
+	dma_unmap_resource(cbuf->dev, sg_dma_address(sg),
+			   drm_prime_get_contiguous_size(sgt),
 			   dir, DMA_ATTR_SKIP_CPU_SYNC);
-	kfree(sg);
+	kfree(sgt->sgl);
 	kfree(sgt);
 }
 
