@@ -241,8 +241,6 @@ static int aie4_fw_load(struct amdxdna_dev_hdl *ndev)
 		aie_smu_fini(ndev->aie.smu_hdl);
 	}
 
-	ndev->pw_mode = POWER_MODE_DEFAULT;
-
 	return ret;
 }
 
@@ -301,6 +299,12 @@ static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
 		return ret;
 
 	ret = aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+	if (ret)
+		return ret;
+
+	ndev->pw_mode = POWER_MODE_DEFAULT;
+	ndev->total_col = min(AIE4_TOTAL_COLUMN, ndev->aie.metadata.cols);
+	ret = ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
 	if (ret)
 		return ret;
 
@@ -676,6 +680,60 @@ static int aie4_get_power_mode(struct amdxdna_client *client,
 	return 0;
 }
 
+static int aie4_query_clock_metadata(struct amdxdna_client *client,
+				     struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_clock_metadata *clock;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev;
+	int ret = 0;
+	u32 buf_sz;
+
+	ndev = xdna->dev_handle;
+	clock = kzalloc_obj(*clock);
+	if (!clock)
+		return -ENOMEM;
+
+	aie_update_counters(ndev);
+	snprintf(clock->mp_npu_clock.name, sizeof(clock->mp_npu_clock.name),
+		 "MP-NPU Clock");
+	clock->mp_npu_clock.freq_mhz = ndev->aie.npuclk_freq;
+	snprintf(clock->h_clock.name, sizeof(clock->h_clock.name), "H Clock");
+	clock->h_clock.freq_mhz = ndev->aie.hclk_freq;
+
+	buf_sz = min(args->buffer_size, sizeof(*clock));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), clock, buf_sz))
+		ret = -EFAULT;
+
+	kfree(clock);
+	return ret;
+}
+
+static int aie4_query_resource_info(struct amdxdna_client *client,
+				    struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_get_resource_info res_info = {};
+	const struct amdxdna_dev_priv *priv;
+	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev *xdna;
+	u32 buf_sz;
+
+	xdna = client->xdna;
+	ndev = xdna->dev_handle;
+	priv = ndev->priv;
+
+	aie_update_counters(ndev);
+	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
+	res_info.npu_tops_max = ndev->aie.max_tops;
+	res_info.npu_tops_curr = ndev->aie.curr_tops;
+
+	buf_sz = min(args->buffer_size, sizeof(res_info));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &res_info, buf_sz))
+		return -EFAULT;
+
+	return 0;
+}
+
 static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -696,6 +754,9 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	case DRM_AMDXDNA_QUERY_AIE_VERSION:
 		ret = amdxdna_get_aie_version(client, args, &ndev->aie.version);
 		break;
+	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
+		ret = aie4_query_clock_metadata(client, args);
+		break;
 	case DRM_AMDXDNA_QUERY_SENSORS:
 		ret = amdxdna_query_sensors(args, AIE4_TOTAL_COLUMN);
 		break;
@@ -707,6 +768,9 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_GET_POWER_MODE:
 		ret = aie4_get_power_mode(client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
+		ret = aie4_query_resource_info(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
