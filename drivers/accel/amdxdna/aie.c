@@ -280,8 +280,7 @@ void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl)
 }
 
 struct amdxdna_coredump_walk_arg {
-	u64				pid;
-	u32				ctx_id;
+	struct amdxdna_hwctx_key	key;
 
 	struct aie_device		*aie;
 	struct amdxdna_drm_get_array	*args;
@@ -289,18 +288,21 @@ struct amdxdna_coredump_walk_arg {
 	size_t				buf_size;
 };
 
+/* amdxdna_hwctx_match() casts the walk arg to struct amdxdna_hwctx_key. */
+static_assert(offsetof(struct amdxdna_coredump_walk_arg, key) == 0,
+	      "key must be the first member for amdxdna_hwctx_match()");
+
 struct amdxdna_tile_rw_walk_arg {
+	struct amdxdna_hwctx_key			key;
+
 	struct aie_device				*aie;
 	const struct amdxdna_drm_aie_tile_access	*access;
 	u8 __user					*buf;
 };
 
-static bool amdxdna_get_coredump_filter(struct amdxdna_hwctx *hwctx, void *arg)
-{
-	struct amdxdna_coredump_walk_arg *wa = arg;
-
-	return hwctx->client->pid == wa->pid && hwctx->id == wa->ctx_id;
-}
+/* amdxdna_hwctx_match() casts the walk arg to struct amdxdna_hwctx_key. */
+static_assert(offsetof(struct amdxdna_tile_rw_walk_arg, key) == 0,
+	      "key must be the first member for amdxdna_hwctx_match()");
 
 static int amdxdna_get_coredump_cb(struct amdxdna_hwctx *hwctx, void *arg)
 {
@@ -317,7 +319,7 @@ static int amdxdna_get_coredump_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	u32 orig_col;
 
 	if (!amdxdna_client_visible(hwctx->client)) {
-		XDNA_ERR(xdna, "Permission denied for context %u", wa->ctx_id);
+		XDNA_ERR(xdna, "Permission denied for context %u", wa->key.ctx_id);
 		return -EPERM;
 	}
 
@@ -442,16 +444,16 @@ int amdxdna_get_coredump(struct aie_device *aie,
 	XDNA_DBG(xdna, "AIE Coredump request for context_id=%u pid=%llu",
 		 config.context_id, config.pid);
 
-	wa.ctx_id = config.context_id;
+	wa.key.ctx_id = config.context_id;
+	wa.key.pid = config.pid;
 	wa.buf_size = buf_size;
-	wa.pid = config.pid;
 	wa.args = args;
 	wa.aie = aie;
 	wa.buf = buf;
 
 	amdxdna_for_each_client(xdna, tmp_client) {
 		ret = amdxdna_hwctx_walk(tmp_client, &wa,
-					 amdxdna_get_coredump_filter,
+					 amdxdna_hwctx_match,
 					 amdxdna_get_coredump_cb);
 		if (ret != -ENOENT)
 			break;
@@ -460,13 +462,6 @@ int amdxdna_get_coredump(struct aie_device *aie,
 		XDNA_ERR(xdna, "Context %u for pid %llu not found",
 			 config.context_id, config.pid);
 	return ret;
-}
-
-static bool amdxdna_tile_rw_filter(struct amdxdna_hwctx *hwctx, void *arg)
-{
-	struct amdxdna_tile_rw_walk_arg *wa = arg;
-
-	return hwctx->client->pid == wa->access->pid && hwctx->id == wa->access->context_id;
 }
 
 static int amdxdna_aie_tile_read_reg(struct amdxdna_hwctx *hwctx,
@@ -634,13 +629,15 @@ int amdxdna_aie_tile_read(struct aie_device *aie,
 		return -EINVAL;
 	}
 
+	wa.key.ctx_id = access.context_id;
+	wa.key.pid = access.pid;
 	wa.access = &access;
 	wa.aie = aie;
 	wa.buf = buf;
 
 	amdxdna_for_each_client(xdna, tmp_client) {
 		ret = amdxdna_hwctx_walk(tmp_client, &wa,
-					 amdxdna_tile_rw_filter,
+					 amdxdna_hwctx_match,
 					 amdxdna_aie_tile_read_cb);
 		if (ret != -ENOENT)
 			break;
@@ -806,13 +803,15 @@ int amdxdna_aie_tile_write(struct aie_device *aie,
 		return -EINVAL;
 	}
 
+	wa.key.ctx_id = access.context_id;
+	wa.key.pid = access.pid;
 	wa.access = &access;
 	wa.aie = aie;
 	wa.buf = buf;
 
 	amdxdna_for_each_client(xdna, tmp_client) {
 		ret = amdxdna_hwctx_walk(tmp_client, &wa,
-					 amdxdna_tile_rw_filter,
+					 amdxdna_hwctx_match,
 					 amdxdna_aie_tile_write_cb);
 		if (ret != -ENOENT)
 			break;

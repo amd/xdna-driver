@@ -207,6 +207,17 @@ void amdxdna_hwctx_remove_all(struct amdxdna_client *client);
 int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
 		       bool (*filter)(struct amdxdna_hwctx *hwctx, void *arg),
 		       int (*walk)(struct amdxdna_hwctx *hwctx, void *arg));
+
+/*
+ * Key for matching a hwctx by (pid, ctx_id). Embed it as the first member
+ * of an amdxdna_hwctx_walk() arg struct to reuse amdxdna_hwctx_match().
+ */
+struct amdxdna_hwctx_key {
+	s64	pid;
+	u32	ctx_id;
+};
+
+bool amdxdna_hwctx_match(struct amdxdna_hwctx *hwctx, void *arg);
 int amdxdna_hwctx_sync_debug_bo(struct amdxdna_client *client, u32 debug_bo_hdl);
 int amdxdna_update_heap(struct amdxdna_client *client, struct amdxdna_hwctx *hwctx);
 

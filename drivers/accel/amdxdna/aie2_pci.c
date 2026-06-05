@@ -727,7 +727,7 @@ static int aie2_get_clock_metadata(struct amdxdna_client *client,
 	return ret;
 }
 
-static int aie2_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
+static int aie2_fill_hwctx_status_entry(struct amdxdna_hwctx *hwctx, void *arg)
 {
 	struct amdxdna_drm_hwctx_entry *tmp __free(kfree) = NULL;
 	struct amdxdna_drm_get_array *array_args = arg;
@@ -737,8 +737,13 @@ static int aie2_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	u32 size;
 	int ret;
 
+	/*
+	 * Out of output slots. This is a benign "buffer full" condition (the
+	 * caller reports the entries that fit), distinct from a real failure
+	 * like -EFAULT below, so the walk caller can tell them apart.
+	 */
 	if (!array_args->num_element)
-		return -EINVAL;
+		return -ENOSPC;
 
 	tmp = kzalloc_obj(*tmp);
 	if (!tmp)
@@ -783,6 +788,19 @@ static int aie2_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
 	return 0;
 }
 
+/*
+ * Visibility-gated emitter shared by the HW_CONTEXT_ALL and HW_CONTEXT_BY_ID
+ * walks: a context the caller may not see (different Linux user without
+ * CAP_SYS_ADMIN) is silently skipped so its existence is not disclosed.
+ */
+static int aie2_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
+{
+	if (!amdxdna_client_visible(hwctx->client))
+		return 0;
+
+	return aie2_fill_hwctx_status_entry(hwctx, arg);
+}
+
 static int aie2_get_hwctx_status(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args)
 {
@@ -796,9 +814,7 @@ static int aie2_get_hwctx_status(struct amdxdna_client *client,
 	array_args.element_size = sizeof(struct amdxdna_drm_query_hwctx);
 	array_args.buffer = args->buffer;
 	array_args.num_element = args->buffer_size / array_args.element_size;
-	list_for_each_entry(tmp_client, &xdna->client_list, node) {
-		if (!amdxdna_client_visible(tmp_client))
-			continue;
+	amdxdna_for_each_client(xdna, tmp_client) {
 		ret = amdxdna_hwctx_walk(tmp_client, &array_args, NULL,
 					 aie2_hwctx_status_cb);
 		if (ret)
@@ -878,7 +894,7 @@ static int aie2_get_telemetry(struct amdxdna_client *client,
 	}
 
 	header->map_num_elements = elem_num;
-	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+	amdxdna_for_each_client(xdna, tmp_client) {
 		if (!amdxdna_client_visible(tmp_client))
 			continue;
 		ret = amdxdna_hwctx_walk(tmp_client, &header->map, NULL,
@@ -991,7 +1007,7 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	struct amdxdna_drm_get_array array_args;
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
-	int ret;
+	int ret = 0;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -1006,16 +1022,123 @@ static int aie2_query_ctx_status_array(struct amdxdna_client *client,
 	array_args.buffer = args->buffer;
 	array_args.num_element = args->num_element * args->element_size /
 				array_args.element_size;
-	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+	amdxdna_for_each_client(xdna, tmp_client) {
 		ret = amdxdna_hwctx_walk(tmp_client, &array_args, NULL,
 					 aie2_hwctx_status_cb);
 		if (ret)
 			break;
 	}
 
+	/*
+	 * -ENOSPC just means the output buffer filled up; report the entries
+	 * that fit. Any other error (e.g. -EFAULT from copy_to_user) is a real
+	 * failure and must be propagated instead of a partial success.
+	 */
+	if (ret && ret != -ENOSPC)
+		return ret;
+
 	args->element_size = array_args.element_size;
 	args->num_element = (u32)((array_args.buffer - args->buffer) /
 				  args->element_size);
+
+	return 0;
+}
+
+struct aie2_hwctx_status_walk_arg {
+	struct amdxdna_hwctx_key	key;
+	struct amdxdna_drm_get_array	*array_args;
+};
+
+/* amdxdna_hwctx_match() casts the walk arg to struct amdxdna_hwctx_key. */
+static_assert(offsetof(struct aie2_hwctx_status_walk_arg, key) == 0,
+	      "key must be the first member for amdxdna_hwctx_match()");
+
+/*
+ * BY_ID adapter: amdxdna_hwctx_match() has already selected the (pid, ctx_id)
+ * target, so just forward to the shared gated emitter, which skips the entry
+ * when the caller may not see it.
+ */
+static int aie2_hwctx_by_id_cb(struct amdxdna_hwctx *hwctx, void *arg)
+{
+	struct aie2_hwctx_status_walk_arg *wa = arg;
+
+	return aie2_hwctx_status_cb(hwctx, wa->array_args);
+}
+
+static int aie2_query_ctx_status_by_id(struct amdxdna_client *client,
+				       struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_hwctx_entry input = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_drm_get_array array_args;
+	struct aie2_hwctx_status_walk_arg wa;
+	struct amdxdna_client *tmp_client;
+	int ret = -ENOENT;
+	size_t buf_size;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	if (args->num_element != 1) {
+		XDNA_ERR(xdna, "Invalid num_element %u, expected 1",
+			 args->num_element);
+		return -EINVAL;
+	}
+
+	if (args->element_size > SZ_4K) {
+		XDNA_DBG(xdna, "Invalid element size %u", args->element_size);
+		return -EINVAL;
+	}
+
+	buf_size = (size_t)args->num_element * args->element_size;
+	if (buf_size < sizeof(input)) {
+		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&input, u64_to_user_ptr(args->buffer), sizeof(input))) {
+		XDNA_ERR(xdna, "Failed to copy hwctx entry from user");
+		return -EFAULT;
+	}
+
+	if (!input.context_id || !input.pid) {
+		XDNA_ERR(xdna, "Invalid context ID %u or PID %lld",
+			 input.context_id, input.pid);
+		return -EINVAL;
+	}
+
+	array_args.element_size = min_t(size_t, args->element_size,
+					sizeof(struct amdxdna_drm_hwctx_entry));
+	array_args.buffer = args->buffer;
+	array_args.num_element = 1;
+
+	wa.array_args = &array_args;
+	wa.key.ctx_id = input.context_id;
+	wa.key.pid = input.pid;
+
+	amdxdna_for_each_client(xdna, tmp_client) {
+		ret = amdxdna_hwctx_walk(tmp_client, &wa,
+					 amdxdna_hwctx_match,
+					 aie2_hwctx_by_id_cb);
+		if (ret != -ENOENT)
+			break;
+	}
+
+	/*
+	 * A matched context that the caller may not see is skipped by the gated
+	 * emitter (nothing emitted, num_element stays 1). Do not disclose its
+	 * existence: report it as not found, same as a genuinely missing context.
+	 */
+	if (!ret && array_args.num_element)
+		ret = -ENOENT;
+
+	if (ret == -ENOENT)
+		XDNA_DBG(xdna, "Context %u for pid %lld not found",
+			 input.context_id, input.pid);
+	if (ret)
+		return ret;
+
+	args->element_size = array_args.element_size;
+	args->num_element = 1;
 
 	return 0;
 }
@@ -1058,6 +1181,9 @@ static int aie2_get_array(struct amdxdna_client *client,
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
 		ret = aie2_query_ctx_status_array(client, args);
+		break;
+	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
+		ret = aie2_query_ctx_status_by_id(client, args);
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = aie2_get_array_async_error(xdna->dev_handle, args);
