@@ -160,9 +160,9 @@ static void amdxdna_shmem_rx_work(struct work_struct *work)
 		ifm = xa_erase(&shdl->msg_xa, msg_hdr.id);
 
 		if (!ifm) {
-			dev_warn(&shdl->pdev->dev,
-				 "unexpected response id %u opcode 0x%x\n",
-				 msg_hdr.id, msg_hdr.opcode);
+			dev_dbg(&shdl->pdev->dev,
+				"unexpected response id %u opcode 0x%x\n",
+				msg_hdr.id, msg_hdr.opcode);
 			continue;
 		}
 
