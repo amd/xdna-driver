@@ -122,6 +122,13 @@ int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
 	return ret;
 }
 
+bool amdxdna_hwctx_match(struct amdxdna_hwctx *hwctx, void *arg)
+{
+	struct amdxdna_hwctx_key *key = arg;
+
+	return hwctx->client->pid == key->pid && hwctx->id == key->ctx_id;
+}
+
 void *amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 {
 	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
