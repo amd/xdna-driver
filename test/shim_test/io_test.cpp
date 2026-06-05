@@ -12,6 +12,7 @@
 #include "core/common/system.h"
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
+#include "xrt/detail/xclbin.h"
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -457,39 +458,36 @@ constexpr uint32_t SYS_EFF_FACTOR = 2;
 uint32_t
 query_hclk(device* dev)
 {
-  int fd = open_accel_fd(dev);
-  amdxdna_drm_query_clock_metadata clock = {};
-  amdxdna_drm_get_info arg = {
-    .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
-    .buffer_size = sizeof(clock),
-    .buffer = reinterpret_cast<uintptr_t>(&clock),
-  };
+  // Use the in-process shim device query (no second open of the node).
+  auto raw = device_query<query::clock_freq_topology_raw>(dev);
 
-  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
-  close(fd);
-  if (ret == -1)
-    throw std::runtime_error("ioctl(QUERY_CLOCK_METADATA) failed");
+  // Validate the raw payload before trusting m_count and indexing the
+  // flexible m_clock_freq[] array. sizeof(clock_freq_topology) already
+  // accounts for one clock_freq entry.
+  if (raw.size() < sizeof(clock_freq_topology))
+    throw std::runtime_error("clock_freq_topology payload too small: " +
+      std::to_string(raw.size()) + " bytes");
+  auto topology = reinterpret_cast<const clock_freq_topology*>(raw.data());
+  const int count = topology->m_count;
+  const size_t needed = (count <= 0) ? sizeof(clock_freq_topology) :
+    sizeof(clock_freq_topology) + static_cast<size_t>(count - 1) * sizeof(clock_freq);
+  if (count < 0 || raw.size() < needed)
+    throw std::runtime_error("clock_freq_topology payload truncated for " +
+      std::to_string(count) + " entries");
 
-  return clock.h_clock.freq_mhz;
+  for (int i = 0; i < count; i++) {
+    if (std::string(topology->m_clock_freq[i].m_name) == "H Clock")
+      return topology->m_clock_freq[i].m_freq_Mhz;
+  }
+  throw std::runtime_error("H Clock not found in clock frequency topology");
 }
 
 void
 set_power_mode(device* dev, int mode)
 {
-  int fd = open_accel_fd(dev);
-  amdxdna_drm_set_power_mode pm = {};
-  pm.power_mode = static_cast<uint8_t>(mode);
-
-  amdxdna_drm_set_state arg = {
-    .param = DRM_AMDXDNA_SET_POWER_MODE,
-    .buffer_size = sizeof(pm),
-    .buffer = reinterpret_cast<uintptr_t>(&pm),
-  };
-
-  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
-  close(fd);
-  if (ret == -1)
-    throw std::runtime_error("ioctl(SET_POWER_MODE) failed for mode " + std::to_string(mode));
+  // POWER_MODE_* values map 1:1 to query::performance_mode::power_type.
+  device_update<query::performance_mode>(dev,
+    static_cast<query::performance_mode::power_type>(mode));
 }
 
 bool
