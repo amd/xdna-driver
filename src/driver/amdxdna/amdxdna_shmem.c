@@ -127,7 +127,6 @@ static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
 	u32 n = 0;
 
 	xa_for_each(&ndev->cert_comp_xa, idx, cert_comp) {
-		trace_shmem_db_wake(cert_comp->msix_idx, cert_comp->irq);
 		wake_up_all(&cert_comp->waitq);
 		n++;
 	}

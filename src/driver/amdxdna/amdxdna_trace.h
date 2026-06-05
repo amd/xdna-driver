@@ -237,21 +237,6 @@ TRACE_EVENT(shmem_ipi_rx,
 		      __entry->db_head, __entry->db_tail)
 );
 
-TRACE_EVENT(shmem_db_wake,
-	    TP_PROTO(u32 msix_idx, int irq),
-
-	    TP_ARGS(msix_idx, irq),
-
-	    TP_STRUCT__entry(__field(u32, msix_idx)
-			     __field(int, irq)),
-
-	    TP_fast_assign(__entry->msix_idx = msix_idx;
-			   __entry->irq = irq;),
-
-	    TP_printk("msix_idx=%u irq=%d",
-		      __entry->msix_idx, __entry->irq)
-);
-
 /* Macro wrapper that automatically captures the function name */
 #define trace_amdxdna_trace_point(msg, pid, arg1, arg2, arg3) \
 	trace___amdxdna_trace_point(msg, __func__, pid, arg1, arg2, arg3)
