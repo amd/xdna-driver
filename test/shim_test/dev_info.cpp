@@ -183,8 +183,10 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   /*
-   * T20 (npu3 firmware over rpmsg, aie2ps silicon).  Reuses the npu3
-   * ELFs since the firmware/protocol is identical.
+   * T20 (npu3 firmware over rpmsg, aie2ps silicon).  Firmware/protocol
+   * is identical to npu3, but uses its own ELFs under npu3_aie2ps/ for
+   * "good" and "nop" (4-column partition).  bad_timeout still reuses
+   * the npu3 ELF.
    */
   {
     .tag = "good",
@@ -193,7 +195,7 @@ binary_info binary_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .path = "local_shim_test_data/npu3/vadd/vadd.elf",
+    .path = "local_shim_test_data/npu3_aie2ps/vadd/vadd.elf",
     .flow = FULL_ELF,
   },
   {
@@ -214,7 +216,7 @@ binary_info binary_infos[] = {
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .path = "local_shim_test_data/npu3/nop/nop.elf",
+    .path = "local_shim_test_data/npu3_aie2ps/nop/nop.elf",
     .flow = FULL_ELF,
   },
   {
