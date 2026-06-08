@@ -497,6 +497,7 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt,
 			if (ret) {
 				XDNA_DPT_DBG(dpt, "Wait interrupted by signal: %d", ret);
 				footer.size = 0;
+				ret = -EINTR;
 				goto exit;
 			}
 		} else {
@@ -516,10 +517,10 @@ static int amdxdna_dpt_get_data(struct amdxdna_dpt *dpt,
 	}
 
 exit:
-	if (ret == 0 || ret == -ESHUTDOWN) {
+	if (ret == 0 || ret == -ESHUTDOWN || ret == -EINTR) {
 		if (copy_to_user(buf + offset, &footer, sizeof(footer))) {
 			/*
-			 * On -ESHUTDOWN preserve the original error: user
+			 * On -ESHUTDOWN / -EINTR preserve the original error: user
 			 * space still gets the zero-size sentinel via the
 			 * footer.size = 0 already set on the shutdown
 			 * branch above, and even if the writeback fails
