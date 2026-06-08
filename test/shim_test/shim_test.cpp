@@ -201,7 +201,7 @@ dev_filter_is_aie4(device::id_type id, device* dev)
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
   return device_id == npu3_device_id || device_id == npu3_device_id1 ||
-         device_id == npu3_nopci_device_id || device_id == npu3_aie2ps_device_id;
+         device_id == npu3_nopci_device_id || device_id == npu3b_device_id;
 }
 
 bool
@@ -588,7 +588,7 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
     if (device_id == npu1_device_id)
       return std::array<int, 3>{2, 4, 6};
     if (device_id == npu3_device_id || device_id == npu3_device_id1 ||
-        device_id == npu3_aie2ps_device_id)
+        device_id == npu3b_device_id)
       return std::array<int, 3>{4, 16, 64};
     return std::array<int, 3>{4, 8, 16};
   }();

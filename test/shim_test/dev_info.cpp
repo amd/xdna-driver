@@ -184,39 +184,38 @@ binary_info binary_infos[] = {
   },
   /*
    * T20 (npu3 firmware over rpmsg, aie2ps silicon).  Firmware/protocol
-   * is identical to npu3, but uses its own ELFs under npu3_aie2ps/ for
-   * "good" and "nop" (4-column partition).  bad_timeout still reuses
-   * the npu3 ELF.
+   * is identical to npu3, but uses its own ELFs under npu3b/ for
+   * "good", "nop", and "bad_timeout" (4-column partition)
    */
   {
     .tag = "good",
-    .device = npu3_aie2ps_device_id,
+    .device = npu3b_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .path = "local_shim_test_data/npu3_aie2ps/vadd/vadd.elf",
+    .path = "local_shim_test_data/npu3b/vadd/vadd.elf",
     .flow = FULL_ELF,
   },
   {
     .tag = "bad_timeout",
-    .device = npu3_aie2ps_device_id,
+    .device = npu3b_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .path = "local_shim_test_data/npu3/bad/bad_timeout.elf",
+    .path = "local_shim_test_data/npu3b/bad/bad_timeout.elf",
     .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
     .flow = FULL_ELF,
   },
   {
     .tag = "nop",
-    .device = npu3_aie2ps_device_id,
+    .device = npu3b_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
     },
-    .path = "local_shim_test_data/npu3_aie2ps/nop/nop.elf",
+    .path = "local_shim_test_data/npu3b/nop/nop.elf",
     .flow = FULL_ELF,
   },
   {

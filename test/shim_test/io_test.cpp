@@ -621,7 +621,7 @@ TEST_elf_io(device::id_type id, std::shared_ptr<device>& sdev, const std::vector
 
 /*
  * Full-ELF nop — one submission.  Per-device ELF path lookup in dev_info.cpp
- * (npu3/nop/nop.elf for NPU3 / NPU3A; npu3_aie2ps/nop/nop.elf for AIE2PS).
+ * (npu3/nop/nop.elf for NPU3 / NPU3A; npu3b/nop/nop.elf for AIE2PS).
  * Shim case name: "elf_full_nop".  For NPU3 / AIE2PS (FULL_ELF); distinct from
  * TEST_elf_io (PARTIAL_ELF "good" on NPU1/NPU4).
  */

@@ -41,7 +41,7 @@ const uint16_t npu3_nopci_device_id = 0xb052;
  * real PCI function backing it.  Treated as aie4 for protocol/binary
  * purposes — uses the same npu3 ELFs.
  */
-const uint16_t npu3_aie2ps_device_id = 0xfe02;
+const uint16_t npu3b_device_id = 0xfe02;
 const uint16_t npu4_device_id = 0x17f0;
 const uint16_t npu_any_revision_id = 0xffff;
 const uint16_t npu1_revision_id = 0x0;
