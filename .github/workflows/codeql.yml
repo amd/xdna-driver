@@ -1,0 +1,70 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "main", "1.*", "[Vv][Aa][Ii]_*" ]
+  pull_request:
+    branches: [ "main", "1.*", "[Vv][Aa][Ii]_*" ]
+  schedule:
+    - cron: '30 9 * * 2'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            build-mode: manual
+          - language: python
+            build-mode: none
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Dependencies
+      if: matrix.build-mode == 'manual'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake g++ gcc make git pkg-config \
+          libdrm-dev libboost-dev libboost-filesystem-dev libboost-program-options-dev \
+          ocl-icd-opencl-dev opencl-headers \
+          libncurses-dev uuid-dev libelf-dev libdw-dev \
+          jq wget \
+          libprotobuf-dev protobuf-compiler libsystemd-dev \
+          libyaml-dev libssl-dev rapidjson-dev \
+          pybind11-dev python3-dev
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        queries: security-extended
+
+    - name: Build Project
+      if: matrix.build-mode == 'manual'
+      run: |
+        git config --global --add safe.directory '*'
+        cmake --version
+        mkdir -p build_codeql && cd build_codeql
+        cmake .. -DSKIP_KMOD=1 -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/opt/xilinx/xrt
+        make -j $(nproc)
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:${{matrix.language}}"
