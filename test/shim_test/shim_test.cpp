@@ -561,11 +561,10 @@ TEST_create_destroy_max_context(device::id_type id, std::shared_ptr<device>& sde
   // XDNA driver by default supports maximum 6 contexts on npu1, 128 on npu3, and 16 on npu4
   if (device_id == npu1_device_id)
     num_ctx = 6;
-  else if (device_id == npu3_device_id || device_id == npu3_device_id1 ||
-           device_id == npu3_aie2ps_device_id)
+  else if (device_id == npu3_device_id || device_id == npu3_device_id1)
     num_ctx = 128;
   else
-    num_ctx = 16;
+    num_ctx = 16; // npu3_aie2ps_device_id supports max 16 contexts
 
   if (is_negative)
     num_ctx = 10000;
