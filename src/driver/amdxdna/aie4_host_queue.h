@@ -11,6 +11,20 @@
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES	6
 #define QUEUE_INDEX_START		0
 
+/*
+ * Host queue version. Must match HOST_QUEUE_MAJOR/MINOR_VERSION in CERT
+ * api/host_queue.h. CERT checks the major version on the first queue read and
+ * raises FW_STATE_HOSTQ_VER_ERROR if it does not match.
+ */
+#define HOST_QUEUE_MAJOR_VERSION	1
+#define HOST_QUEUE_MINOR_VERSION	0
+
+/*
+ * Must match struct host_queue_header in CERT api/host_queue.h.  write_index
+ * is deliberately on a different 64-byte cacheline from read_index (CERT
+ * writes read_index, host writes write_index) to avoid false sharing; the
+ * padding fields and 64-byte alignment reproduce that layout exactly.
+ */
 struct host_queue_header {
 	u64 read_index;
 	struct {
@@ -18,9 +32,11 @@ struct host_queue_header {
 		u16 minor;
 	} version;
 	u32 capacity; /* Queue capacity, must be power of two. */
+	u64 padding0[6];
 	u64 write_index;
+	u64 padding1[6];
 	u64 data_address; /* The xdna dev addr for payload. */
-};
+} __aligned(64);
 
 struct exec_buf {
 	u32 dtrace_buf_host_addr_low;

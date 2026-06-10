@@ -223,6 +223,9 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 	priv->write_index = QUEUE_INDEX_START;
 	qhdr->read_index = QUEUE_INDEX_START;
 	qhdr->write_index = QUEUE_INDEX_START;
+	/* CERT rejects the queue (FW_STATE_HOSTQ_VER_ERROR) if major != expected. */
+	qhdr->version.major = HOST_QUEUE_MAJOR_VERSION;
+	qhdr->version.minor = HOST_QUEUE_MINOR_VERSION;
 	qhdr->capacity = CTX_MAX_CMDS;
 	qhdr->data_address = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
 	for (i = 0; i < CTX_MAX_CMDS; i++)
