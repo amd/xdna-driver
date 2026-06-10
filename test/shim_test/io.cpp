@@ -1182,6 +1182,21 @@ run_no_check_result()
 }
 
 void
+io_test_bo_set_base::
+run_on_ctx(hw_ctx& hwctx)
+{
+  auto hwq = hwctx.get()->get_hw_queue();
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
+
+  reset_cmd_header();
+  hwq->submit_command(cbo->get());
+  hwq->wait_command(cbo->get(), WAIT_CMD_NO_TIMEOUT);
+
+  sync_after_run();
+  verify_result();
+}
+
+void
 dpm_test_bo_set::
 run_with_ctx(hw_ctx& hwctx)
 {

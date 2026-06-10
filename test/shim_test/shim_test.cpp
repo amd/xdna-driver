@@ -26,7 +26,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
+#include <type_traits>
 #include <vector>
 #include <iostream>
 #include <sstream>
@@ -37,6 +39,7 @@
 #include <libgen.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -84,6 +87,7 @@ void TEST_preempt_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_full_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_app_health_query_multi_ctx(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_coredump(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_mem(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -385,10 +389,10 @@ is_pci_sysfs_device(const std::string& device_sysfs)
 
 } // namespace
 
-// Returns an open fd for the accel device node corresponding to dev. Caller must close(fd).
-// Throws std::runtime_error on failure (opendir, missing accel entry, or open).
-int
-open_accel_fd(device* dev)
+// Resolves the device-node path (e.g. /dev/accel/accel0) for dev.
+// Throws std::runtime_error on failure (missing sysfs or accel entry).
+std::string
+resolve_accel_node_path(device* dev)
 {
   const auto device_sysfs = resolve_device_sysfs(dev);
   if (!device_sysfs) {
@@ -413,34 +417,124 @@ open_accel_fd(device* dev)
       tried += ", " + sysfs + "/drm/renderD*";
     throw std::runtime_error("Failed to resolve device node for " + sysfs + " (tried " + tried + ")");
   }
-  const std::string& accel_node = *node;
+  return *node;
+}
 
-  const int flags = (accel_node.rfind("/dev/dri/", 0) == 0) ? O_RDWR : O_RDONLY;
-  int fd = open(accel_node.c_str(), flags);
+// open() flags for an accel/render node path.
+int
+accel_node_open_flags(const std::string& accel_node)
+{
+  return (accel_node.rfind("/dev/dri/", 0) == 0) ? O_RDWR : O_RDONLY;
+}
+
+// Returns an open fd for the accel device node corresponding to dev. Caller must close(fd).
+// Throws std::runtime_error on failure (opendir, missing accel entry, or open).
+//
+// NOTE: single-open-per-process means this MUST NOT be called from a process
+// that already holds the device open via the shim - the driver rejects the
+// second open with EBUSY. The bo_usage / driver_version helpers below call it
+// only from a short-lived forked child (distinct pid), so the open succeeds.
+int
+open_accel_fd(device* dev)
+{
+  const std::string accel_node = resolve_accel_node_path(dev);
+  int fd = open(accel_node.c_str(), accel_node_open_flags(accel_node));
   if (fd < 0) {
     throw std::runtime_error("open failed: " + accel_node + ": " + std::string(std::strerror(errno)));
   }
   return fd;
 }
 
+// Run op(fd) in a short-lived forked child and return its POD result.
+//
+// Some helpers need a raw ioctl, but the shim already holds the device open and
+// the driver allows only one open per process, so a second open() from this
+// process is rejected with EBUSY. The child has a distinct pid, so its open()
+// of the node is allowed. The child opens a fresh fd via open_accel_fd(),
+// touches nothing else of the inherited shim state, computes the result, and
+// pipes it back to the parent as raw bytes (hence the trivially-copyable
+// requirement). Per-pid/per-fd ioctls (BO_USAGE filters by the pid argument,
+// drm_version is generic) return the same data from the child as the parent.
+template <typename T>
+T
+fork_query(device* dev, const std::function<T(int fd)>& op)
+{
+  static_assert(std::is_trivially_copyable<T>::value,
+    "fork_query<T>: T crosses a pipe as raw bytes and must be trivially copyable");
+
+  int pipefd[2];
+  if (pipe(pipefd) == -1)
+    throw std::runtime_error(std::string("pipe() failed: ") + std::strerror(errno));
+
+  pid_t child = fork();
+  if (child == -1) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    throw std::runtime_error(std::string("fork() failed: ") + std::strerror(errno));
+  }
+
+  if (child == 0) {
+    // Child: do not touch any inherited shim state beyond a fresh fd.
+    close(pipefd[0]);
+    int rc = 1;
+    try {
+      int fd = open_accel_fd(dev);
+      T result = op(fd);
+      close(fd);
+      if (write(pipefd[1], &result, sizeof(result)) == static_cast<ssize_t>(sizeof(result)))
+        rc = 0;
+    } catch (...) {
+      rc = 1;
+    }
+    close(pipefd[1]);
+    _exit(rc);
+  }
+
+  // Parent: read the full result (EINTR/short-read safe), then reap the child
+  // on every path so there is no fd leak or unreaped child even on error.
+  close(pipefd[1]);
+  T result{};
+  auto buf = reinterpret_cast<char*>(&result);
+  size_t got = 0;
+  while (got < sizeof(result)) {
+    ssize_t n = read(pipefd[0], buf + got, sizeof(result) - got);
+    if (n < 0) {
+      if (errno == EINTR)
+        continue;
+      break;            // real read error
+    }
+    if (n == 0)
+      break;            // premature EOF: child exited before writing all
+    got += static_cast<size_t>(n);
+  }
+  close(pipefd[0]);
+
+  int status = 0;
+  while (waitpid(child, &status, 0) == -1 && errno == EINTR)
+    ;
+
+  if (got != sizeof(result) || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    throw std::runtime_error("forked query child failed");
+
+  return result;
+}
+
+// Query BO usage for the given pid via a forked child (see fork_query).
 std::tuple<uint64_t, uint64_t, uint64_t>
 get_bo_usage(device* dev, int pid)
 {
-  // FIXME: reimplement this when query key is defined in xrt
-  int fd = open_accel_fd(dev);
-
-  amdxdna_drm_bo_usage usage = { .pid = pid };
-  amdxdna_drm_get_array arg = {
-    .param = DRM_AMDXDNA_BO_USAGE,
-    .element_size = sizeof(usage),
-    .num_element = 1,
-    .buffer = reinterpret_cast<uintptr_t>(&usage)
-  };
-  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
-  close(fd);
-  if (ret == -1) {
-    throw std::runtime_error("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY) failed");
-  }
+  auto usage = fork_query<amdxdna_drm_bo_usage>(dev, [pid](int fd) {
+    amdxdna_drm_bo_usage u = { .pid = pid };
+    amdxdna_drm_get_array arg = {
+      .param = DRM_AMDXDNA_BO_USAGE,
+      .element_size = sizeof(u),
+      .num_element = 1,
+      .buffer = reinterpret_cast<uintptr_t>(&u)
+    };
+    if (::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg) == -1)
+      throw std::runtime_error("ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY) failed");
+    return u;
+  });
 
   return {usage.total_usage, usage.internal_usage, usage.heap_usage};
 }
@@ -711,6 +805,33 @@ TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, 
               << std::endl;
     throw std::runtime_error("BO usage mis-match");
   }
+}
+
+// Verify the driver allows only one open per process: with the shim device
+// already open (sdev), a second open() of the same node from this process must
+// be rejected with EBUSY, and the existing device must keep working afterwards.
+void
+TEST_reject_second_open(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  const std::string accel_node = resolve_accel_node_path(dev);
+
+  errno = 0;
+  int fd = ::open(accel_node.c_str(), accel_node_open_flags(accel_node));
+  if (fd >= 0) {
+    ::close(fd);
+    throw std::runtime_error("second open() of " + accel_node + " unexpectedly succeeded");
+  }
+  if (errno != EBUSY) {
+    throw std::runtime_error("second open() of " + accel_node + " failed with errno " +
+      std::to_string(errno) + " (" + std::strerror(errno) + "), expected EBUSY");
+  }
+  std::cout << "second open() correctly rejected with EBUSY" << std::endl;
+
+  // The already-open shim device must still be usable after the rejected open.
+  auto raw = device_query<query::clock_freq_topology_raw>(dev);
+  if (raw.empty())
+    throw std::runtime_error("existing device query failed after rejected second open");
 }
 
 class mmapped_file {
@@ -1189,6 +1310,9 @@ std::vector<test_case> test_list {
   test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
   },
+  test_case{ "app health query multi-context with and without ctx-id filter", {},
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_app_health_query_multi_ctx, {}
+  },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
@@ -1201,6 +1325,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "create and free internal bo", {},
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_internal_bo, {}
+  },
+  test_case{ "reject second device open from same process", {},
+    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_reject_second_open, {}
   },
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
@@ -1359,32 +1486,37 @@ run_all_test(std::vector<int>& tests)
   }
 }
 
+struct drv_version { unsigned int major; unsigned int minor; };
+
 int
 get_driver_version(unsigned int *major, unsigned int *minor, device::id_type device_index = 0)
 {
+  // Resolve the node via a shim device, then read drm_version from a forked
+  // child (distinct pid -> open() allowed under single-open). drm_version is a
+  // generic per-fd ioctl, so any fd to the node returns the same KMD version.
   auto sdev = get_userpf_device(device_index);
-  int fd = open_accel_fd(sdev.get());
 
-  drm_version version = {};
-  char name[128];
-  char date[128];
-  char desc[256];
+  auto ver = fork_query<drv_version>(sdev.get(), [](int fd) {
+    drm_version version = {};
+    char name[128];
+    char date[128];
+    char desc[256];
+    version.name_len = sizeof(name);
+    version.name = name;
+    version.date_len = sizeof(date);
+    version.date = date;
+    version.desc_len = sizeof(desc);
+    version.desc = desc;
+    if (::ioctl(fd, DRM_IOCTL_VERSION, &version) == -1)
+      throw std::runtime_error("ioctl(DRM_IOCTL_VERSION) failed");
+    return drv_version{
+      static_cast<unsigned int>(version.version_major),
+      static_cast<unsigned int>(version.version_minor)
+    };
+  });
 
-  version.name_len = sizeof(name);
-  version.name = name;
-  version.date_len = sizeof(date);
-  version.date = date;
-  version.desc_len = sizeof(desc);
-  version.desc = desc;
-
-  int result = ::ioctl(fd, DRM_IOCTL_VERSION, &version);
-  close(fd);
-  if (result) {
-    throw std::runtime_error("ioctl(DRM_IOCTL_VERSION) failed");
-  }
-
-  *major = version.version_major;
-  *minor = version.version_minor;
+  *major = ver.major;
+  *minor = ver.minor;
 
   return 0;
 }

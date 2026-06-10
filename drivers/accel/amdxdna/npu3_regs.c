@@ -8,6 +8,7 @@
 
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
+#include "amdxdna_sensors.h"
 
 #define NPU3_MBOX_BAR		0
 
@@ -37,6 +38,8 @@
 #define MP1_C2PMSG_61_ALT_1     0x3B109F4
 #define MP1_C2PMSG_60_ALT_1     0x3B109F0
 
+#define NPU3_DPM_TOPS(ndev, hclk) (4096 * (ndev)->total_col * (hclk) / 1000000)
+
 static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
 	{ .major = 5, .min_minor = 10 },
 	{ .features = BIT_U64(AIE4_GET_COREDUMP), .major = 5, .min_minor = 24 },
@@ -45,9 +48,71 @@ static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
 	{ 0 }
 };
 
+const struct dpm_clk_freq npu3_dpm_clk_table[] = {
+	{  400,  400},
+	{  960,  576},
+	{ 1108,  576},
+	{ 1200,  847},
+	{ 1200, 1200},
+	{ 1200, 1200},
+	{ 1200, 1200},
+	{ 1200, 1200},
+	{ 0 }
+};
+
+static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
+{
+	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
+	int max_dpm_level = 0;
+
+	while (ndev->priv->dpm_clk_tbl[max_dpm_level].hclk)
+		max_dpm_level++;
+	max_dpm_level--;
+
+	if (max_dpm_level < 0 || dpm_level > max_dpm_level) {
+		XDNA_ERR(aie->xdna, "Invalid dpm level, max:%d, request:%d",
+			 max_dpm_level, dpm_level);
+		return -EINVAL;
+	}
+
+	aie->npuclk_freq = ndev->priv->dpm_clk_tbl[dpm_level].npuclk;
+	aie->hclk_freq = ndev->priv->dpm_clk_tbl[dpm_level].hclk;
+	aie->max_tops = NPU3_DPM_TOPS(ndev, ndev->priv->dpm_clk_tbl[max_dpm_level].hclk);
+	aie->curr_tops = NPU3_DPM_TOPS(ndev, aie->hclk_freq);
+
+	XDNA_DBG(aie->xdna, "MP-NPU clock %d, H clock %d\n",
+		 aie->npuclk_freq, aie->hclk_freq);
+
+	ndev->max_dpm_level = max_dpm_level;
+	return 0;
+}
+
+static int npu3_update_counters(struct aie_device *aie)
+{
+	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
+	struct amdxdna_sensors npu_metrics = {};
+	int ret;
+
+	ret = amdxdna_get_sensors(&npu_metrics);
+	if (ret)
+		return ret;
+
+	aie->npuclk_freq = npu_metrics.mpnpuclk_freq;
+	aie->hclk_freq = npu_metrics.npuclk_freq;
+	aie->curr_tops = NPU3_DPM_TOPS(ndev, aie->hclk_freq);
+
+	return 0;
+}
+
+const struct aie_hw_ops npu3_hw_ops = {
+	.set_dpm = npu3_set_dpm,
+	.update_counters = npu3_update_counters,
+};
+
 static const struct amdxdna_dev_priv npu3_dev_priv = {
 	.npufw_path             = "npu.dev.sbin",
 	.certfw_path            = "cert.dev.sbin",
+	.dpm_clk_tbl		= npu3_dpm_clk_table,
 	.mbox_bar		= NPU3_MBOX_BAR,
 	.mbox_rbuf_bar		= NPU3_MBOX_BUFFER_BAR,
 	.mbox_info_off		= NPU3_MBOX_INFO_OFF,
@@ -69,14 +134,17 @@ static const struct amdxdna_dev_priv npu3_dev_priv = {
 		DEFINE_BAR_OFFSET(SMU_RESP_REG, NPU3_SMU, MP1_C2PMSG_60_ALT_1),
 		DEFINE_BAR_OFFSET(SMU_OUT_REG,  NPU3_SMU, MP1_C2PMSG_61_ALT_1),
 	},
+	.hw_ops = &npu3_hw_ops,
 };
 
 static const struct amdxdna_dev_priv npu3_dev_vf_priv = {
 	/* vf device does not load firmware */
+	.dpm_clk_tbl		= npu3_dpm_clk_table,
 	.mbox_bar		= NPU3_MBOX_BAR,
 	.mbox_rbuf_bar		= NPU3_MBOX_BUFFER_BAR,
 	.mbox_info_off		= NPU3_MBOX_INFO_OFF,
 	/* vf device does not have smu and psp */
+	.hw_ops = &npu3_hw_ops,
 };
 
 const struct amdxdna_dev_info dev_npu3_pf_info = {

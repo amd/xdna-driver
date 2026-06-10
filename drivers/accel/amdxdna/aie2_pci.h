@@ -68,11 +68,6 @@ struct rt_config {
 	unsigned long feature_mask;
 };
 
-struct dpm_clk_freq {
-	u32	npuclk;
-	u32	hclk;
-};
-
 /*
  * Define the maximum number of pending commands in a hardware context.
  * Must be power of 2!
@@ -146,11 +141,6 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
-	u32				clk_gating;
-	u32				npuclk_freq;
-	u32				hclk_freq;
-	u32				max_tops;
-	u32				curr_tops;
 	u32				force_preempt_enabled;
 	u32				frame_boundary_preempt;
 
@@ -165,18 +155,6 @@ struct amdxdna_dev_hdl {
 	enum aie2_tdr_status		tdr_status;
 	struct aie2_tdr			tdr; /* TDR for device recovery */
 };
-
-struct aie2_hw_ops {
-	int (*set_dpm)(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
-	int (*update_counters)(struct amdxdna_dev_hdl *ndev);
-};
-
-#define aie2_update_counters(ndev)				\
-({								\
-	typeof(ndev) _ndev = ndev;				\
-	if (_ndev->priv->hw_ops->update_counters)		\
-		_ndev->priv->hw_ops->update_counters(_ndev);	\
-})
 
 enum aie2_fw_feature {
 	AIE2_NPU_COMMAND,
@@ -216,7 +194,7 @@ struct amdxdna_dev_priv {
 	struct aie_bar_off_pair		sram_offs[SRAM_MAX_INDEX];
 	struct aie_bar_off_pair		psp_regs_off[PSP_MAX_REGS];
 	struct aie_bar_off_pair		smu_regs_off[SMU_MAX_REGS];
-	const struct aie2_hw_ops	*hw_ops;
+	const struct aie_hw_ops		*hw_ops;
 };
 
 extern const struct amdxdna_dev_ops aie2_ops;
@@ -231,7 +209,7 @@ extern const struct rt_config npu1_default_rt_cfg[];
 extern const struct rt_config npu4_default_rt_cfg[];
 extern const struct amdxdna_fw_feature_tbl npu4_fw_feature_table[];
 extern const struct amdxdna_rev_vbnv npu4_rev_vbnv_tbl[];
-extern const struct aie2_hw_ops npu4_hw_ops;
+extern const struct aie_hw_ops npu4_hw_ops;
 
 /* aie2_pm.c */
 int aie2_pm_start(struct amdxdna_dev_hdl *ndev);

@@ -9,13 +9,20 @@
 #include "io_param.h"
 
 #include "core/common/device.h"
+#include "core/common/system.h"
+#include "core/common/query_requests.h"
+#include "core/include/ert.h"
+#include "xrt/detail/xclbin.h"
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <regex>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
+#include <cerrno>
 #include <thread>
+#include <vector>
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -451,39 +458,36 @@ constexpr uint32_t SYS_EFF_FACTOR = 2;
 uint32_t
 query_hclk(device* dev)
 {
-  int fd = open_accel_fd(dev);
-  amdxdna_drm_query_clock_metadata clock = {};
-  amdxdna_drm_get_info arg = {
-    .param = DRM_AMDXDNA_QUERY_CLOCK_METADATA,
-    .buffer_size = sizeof(clock),
-    .buffer = reinterpret_cast<uintptr_t>(&clock),
-  };
+  // Use the in-process shim device query (no second open of the node).
+  auto raw = device_query<query::clock_freq_topology_raw>(dev);
 
-  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
-  close(fd);
-  if (ret == -1)
-    throw std::runtime_error("ioctl(QUERY_CLOCK_METADATA) failed");
+  // Validate the raw payload before trusting m_count and indexing the
+  // flexible m_clock_freq[] array. sizeof(clock_freq_topology) already
+  // accounts for one clock_freq entry.
+  if (raw.size() < sizeof(clock_freq_topology))
+    throw std::runtime_error("clock_freq_topology payload too small: " +
+      std::to_string(raw.size()) + " bytes");
+  auto topology = reinterpret_cast<const clock_freq_topology*>(raw.data());
+  const int count = topology->m_count;
+  const size_t needed = (count <= 0) ? sizeof(clock_freq_topology) :
+    sizeof(clock_freq_topology) + static_cast<size_t>(count - 1) * sizeof(clock_freq);
+  if (count < 0 || raw.size() < needed)
+    throw std::runtime_error("clock_freq_topology payload truncated for " +
+      std::to_string(count) + " entries");
 
-  return clock.h_clock.freq_mhz;
+  for (int i = 0; i < count; i++) {
+    if (std::string(topology->m_clock_freq[i].m_name) == "H Clock")
+      return topology->m_clock_freq[i].m_freq_Mhz;
+  }
+  throw std::runtime_error("H Clock not found in clock frequency topology");
 }
 
 void
 set_power_mode(device* dev, int mode)
 {
-  int fd = open_accel_fd(dev);
-  amdxdna_drm_set_power_mode pm = {};
-  pm.power_mode = static_cast<uint8_t>(mode);
-
-  amdxdna_drm_set_state arg = {
-    .param = DRM_AMDXDNA_SET_POWER_MODE,
-    .buffer_size = sizeof(pm),
-    .buffer = reinterpret_cast<uintptr_t>(&pm),
-  };
-
-  int ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
-  close(fd);
-  if (ret == -1)
-    throw std::runtime_error("ioctl(SET_POWER_MODE) failed for mode " + std::to_string(mode));
+  // POWER_MODE_* values map 1:1 to query::performance_mode::power_type.
+  device_update<query::performance_mode>(dev,
+    static_cast<query::performance_mode::power_type>(mode));
 }
 
 bool
@@ -519,6 +523,42 @@ verify_hclk(device* dev, uint32_t expected, const std::string& ctx)
   std::cout << "  " << ctx << ": H-clock " << actual << " MHz (expected ~"
             << expected << ") [OK]" << std::endl;
 }
+
+/*
+ * Runtime app-health query test (NPU4 only), single process.
+ *
+ * The test process creates APP_HEALTH_NUM_CTX preemptible "good run" contexts
+ * (sharing its own pid, each with a distinct context_id), runs the workload
+ * many times on each to accumulate runtime so firmware reports app-health,
+ * then queries the firmware-reported health (ctx_pc) for every context via the
+ * XRT core context_health_info query (the same path xrt-smi uses) both without
+ * a filter (all contexts) and per (ctx_id, pid) pair.
+ */
+constexpr int APP_HEALTH_NUM_CTX = 2;          /* contexts created in this process */
+constexpr int APP_HEALTH_WARMUP_ITERS = 1000;  /* workload replays per context */
+constexpr int APP_HEALTH_QUERY_RETRIES = 10;   /* bounded query retries if ctx_pc == 0 */
+
+/* Read the firmware context program counter from a context_health_info entry. */
+uint32_t
+app_health_ctx_pc(const xrt_core::query::context_health_info::smi_context_health& e)
+{
+  ert_ctx_health_data_v1 health{};
+
+  if (e.health_data_raw.size() < sizeof(health))
+    return 0;
+
+  /* Copy into a properly-aligned local; health_data_raw is a byte buffer that
+   * is not guaranteed to be aligned for ert_ctx_health_data_v1, so a direct
+   * reinterpret_cast would be unaligned access / strict-aliasing UB. */
+  std::memcpy(&health, e.health_data_raw.data(), sizeof(health));
+  return health.aie2.ctx_pc;
+}
+
+/* One persistent context plus its preemptible "good run" workload BO set. */
+struct app_health_ctx_unit {
+  std::unique_ptr<hw_ctx> ctx;
+  std::unique_ptr<elf_preempt_io_test_bo_set> boset;
+};
 
 }
 
@@ -670,6 +710,141 @@ TEST_io_timeout(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg
 {
   elf_io_negative_test_bo_set boset{sdev.get(), "bad_timeout"};
   boset.run();
+}
+
+/*
+ * Verify runtime app-health querying for multiple live contexts in a single
+ * process via the XRT core context_health_info query (the same path xrt-smi
+ * uses), both unfiltered (all contexts) and per (ctx_id, pid) pair.
+ *
+ * Design: the test process creates APP_HEALTH_NUM_CTX preemptible "good run"
+ * contexts (the same workload TEST_preempt_elf_io uses, via the hw_ctx /
+ * elf_preempt_io_test_bo_set helpers). All contexts share the test's own pid
+ * and get distinct context_ids. The workload is replayed on each context
+ * (io_test_bo_set_base::run_on_ctx()) until firmware reports app-health for
+ * every context, bounded by APP_HEALTH_WARMUP_ITERS rounds. It then asserts
+ * that, for each context, the unfiltered query lists it and the by-(ctx_id,
+ * pid) query returns exactly one matching entry, both with a non-zero ctx_pc
+ * (read from the entry's ert_ctx_health_data_v1). A small bounded retry replays
+ * one more round before re-querying in case the context has gone idle (ctx_pc
+ * reads 0). The contexts stay alive (RAII) until after the queries.
+ */
+void
+TEST_app_health_query_multi_ctx(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  static const flow_type flow = PREEMPT_PARTIAL_ELF;
+  auto dev = sdev.get();
+  const int64_t pid = static_cast<int64_t>(::getpid());
+
+  /* Create the contexts (RAII: torn down when units goes out of scope). */
+  std::vector<app_health_ctx_unit> units;
+  std::vector<uint32_t> ctx_ids;
+  for (int i = 0; i < APP_HEALTH_NUM_CTX; i++) {
+    app_health_ctx_unit u;
+    u.ctx = std::make_unique<hw_ctx>(dev, "good", &flow);
+    u.boset = std::make_unique<elf_preempt_io_test_bo_set>(dev, "good", &flow);
+    u.boset->init_cmd(*u.ctx, false);
+    u.boset->sync_before_run();
+    ctx_ids.push_back(static_cast<uint32_t>(u.ctx->get()->get_slotidx()));
+    std::cout << "  created pid=" << pid << " ctx_id=" << ctx_ids.back() << std::endl;
+    units.push_back(std::move(u));
+  }
+
+  const uint64_t upid = static_cast<uint64_t>(pid);
+
+  /* Replay the workload once on every context. */
+  auto run_round = [&]() {
+    for (auto& u : units)
+      u.boset->run_on_ctx(*u.ctx);
+  };
+
+  /*
+   * Warm up so firmware accumulates runtime and starts reporting app-health.
+   * Adaptive: stop as soon as every context reports a non-zero ctx_pc, bounded
+   * by APP_HEALTH_WARMUP_ITERS rounds so it never spins indefinitely (and stays
+   * fast on quick systems instead of always replaying the full count).
+   */
+  for (int it = 0; it < APP_HEALTH_WARMUP_ITERS; it++) {
+    run_round();
+
+    auto all = xrt_core::device_query<xrt_core::query::context_health_info>(dev);
+    bool warm = true;
+    for (uint32_t ctx_id : ctx_ids) {
+      bool ready = false;
+      for (const auto& e : all) {
+        if (e.pid == upid && e.ctx_id == ctx_id && app_health_ctx_pc(e) != 0) {
+          ready = true;
+          break;
+        }
+      }
+      if (!ready) {
+        warm = false;
+        break;
+      }
+    }
+    if (warm)
+      break;
+  }
+
+  /*
+   * (a) No filter: query all contexts (same path as `xrt-smi`); each of our
+   * contexts must be present (matching pid) and active (ctx_pc != 0).
+   */
+  for (uint32_t ctx_id : ctx_ids) {
+    bool found = false;
+    for (int attempt = 0; attempt < APP_HEALTH_QUERY_RETRIES && !found; attempt++) {
+      run_round(); /* keep the context hot right before querying */
+      auto all = xrt_core::device_query<xrt_core::query::context_health_info>(dev);
+      for (const auto& e : all) {
+        if (e.pid != upid || e.ctx_id != ctx_id)
+          continue;
+        uint32_t pc = app_health_ctx_pc(e);
+        if (pc != 0) {
+          found = true;
+          std::cout << "  [ALL]   pid=" << pid << " ctx_id=" << ctx_id
+                    << " ctx_pc=0x" << std::hex << pc << std::dec << " [OK]" << std::endl;
+        }
+        break;
+      }
+    }
+    if (!found)
+      throw std::runtime_error("context_health_info (all): context pid=" + std::to_string(pid)
+        + " ctx_id=" + std::to_string(ctx_id)
+        + " missing or app-health (ctx_pc) never became non-zero");
+  }
+
+  /*
+   * (b) Per (ctx_id, pid): query just that pair; must return exactly that ctx
+   * with matching context_id and ctx_pc != 0.
+   */
+  for (uint32_t ctx_id : ctx_ids) {
+    bool ok = false;
+    for (int attempt = 0; attempt < APP_HEALTH_QUERY_RETRIES && !ok; attempt++) {
+      run_round(); /* keep the context hot right before querying */
+      std::vector<std::pair<uint64_t, uint64_t>> pairs{ { static_cast<uint64_t>(ctx_id), upid } };
+      auto res = xrt_core::device_query<xrt_core::query::context_health_info>(dev, pairs);
+      /* by-(ctx_id, pid) is a single-target query: it returns exactly one entry
+       * per requested pair (or throws on failure), never an empty vector. */
+      if (res.size() != 1)
+        throw std::runtime_error("context_health_info (by id) returned "
+          + std::to_string(res.size()) + " entries, expected exactly 1 for ctx_id="
+          + std::to_string(ctx_id) + " pid=" + std::to_string(pid));
+      const auto& e = res.front();
+      if (e.ctx_id != ctx_id)
+        throw std::runtime_error("context_health_info (by id) returned ctx_id="
+          + std::to_string(e.ctx_id) + ", expected " + std::to_string(ctx_id)
+          + " (pid=" + std::to_string(pid) + ")");
+      uint32_t pc = app_health_ctx_pc(e);
+      if (pc != 0) {
+        ok = true;
+        std::cout << "  [BY_ID] pid=" << pid << " ctx_id=" << ctx_id
+                  << " ctx_pc=0x" << std::hex << pc << std::dec << " [OK]" << std::endl;
+      }
+    }
+    if (!ok)
+      throw std::runtime_error("context_health_info (by id): context pid=" + std::to_string(pid)
+        + " ctx_id=" + std::to_string(ctx_id) + " app-health (ctx_pc) never became non-zero");
+  }
 }
 
 void
