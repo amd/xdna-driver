@@ -10,6 +10,7 @@
 #include <linux/bitmap.h>
 #include <linux/slab.h>
 
+#include "drm/amdxdna_accel.h"
 #include "aie2_solver.h"
 
 struct partition_node {
@@ -111,35 +112,45 @@ static bool is_valid_qos_dpm_params(struct aie_qos *rqos)
 
 static int set_dpm_level(struct solver_state *xrs, struct alloc_requests *req, u32 *dpm_level)
 {
+	u32 freq, max_dpm_level, level, dev_level;
 	struct solver_rgroup *rgp = &xrs->rgp;
 	struct cdo_parts *cdop = &req->cdo;
 	struct aie_qos *rqos = &req->rqos;
-	u32 freq, max_dpm_level, level;
 	struct solver_node *node;
 
 	max_dpm_level = xrs->cfg.clk_list.num_levels - 1;
-	/* If no QoS parameters are passed, set it to the max DPM level */
-	if (!is_valid_qos_dpm_params(rqos)) {
+
+	if (rqos->priority == AMDXDNA_QOS_LOW_PRIORITY) {
+		/*
+		 * Idle clients run at the lowest DPM level, ignoring the
+		 * gops/fps/latency hints.
+		 */
+		level = 0;
+	} else if (!is_valid_qos_dpm_params(rqos)) {
+		/* If no QoS parameters are passed, set it to the max DPM level */
 		level = max_dpm_level;
-		goto set_dpm;
+	} else {
+		/* Find one CDO group that meets the GOPs requirement. */
+		for (level = 0; level < max_dpm_level; level++) {
+			freq = xrs->cfg.clk_list.cu_clk_list[level];
+			if (!qos_meet(xrs, rqos, cdop->qos_cap.opc * freq / 1000))
+				break;
+		}
 	}
 
-	/* Find one CDO group that meet the GOPs requirement. */
-	for (level = 0; level < max_dpm_level; level++) {
-		freq = xrs->cfg.clk_list.cu_clk_list[level];
-		if (!qos_meet(xrs, rqos, cdop->qos_cap.opc * freq / 1000))
-			break;
-	}
-
-	/* set the dpm level which fits all the sessions */
+	/* Device runs at the highest DPM level requested across active sessions. */
+	dev_level = level;
 	list_for_each_entry(node, &rgp->node_list, list) {
-		if (node->dpm_level > level)
-			level = node->dpm_level;
+		if (node->dpm_level > dev_level)
+			dev_level = node->dpm_level;
 	}
 
-set_dpm:
+	drm_dbg(xrs->cfg.ddev, "priority 0x%x level %u dev_level %u\n",
+		rqos->priority, level, dev_level);
+
+	/* Store this request's own level; program the aggregated device level. */
 	*dpm_level = level;
-	return xrs->cfg.actions->set_dft_dpm_level(xrs->cfg.ddev, level);
+	return xrs->cfg.actions->set_dft_dpm_level(xrs->cfg.ddev, dev_level);
 }
 
 static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
