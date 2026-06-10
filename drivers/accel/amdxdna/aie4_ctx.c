@@ -279,8 +279,12 @@ int aie4_hwctx_init(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_client *client = hwctx->client;
 	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct amdxdna_hwctx_priv *priv;
 	int ret;
+
+	if (!AIE_FEATURE_ON(&ndev->aie, AIE4_HSA_COMMAND))
+		return -EOPNOTSUPP;
 
 	priv = kzalloc_obj(*priv);
 	if (!priv)
