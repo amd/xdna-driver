@@ -64,10 +64,11 @@ int aie2_pm_start(struct amdxdna_dev_hdl *ndev)
 		ndev->max_dpm_level++;
 	ndev->max_dpm_level--;
 
-	ret = ndev->priv->hw_ops->set_dpm(&ndev->aie, ndev->max_dpm_level);
+	/* Boot at the lowest DPM level. The first context raises it. */
+	ret = ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
 	if (ret)
 		return ret;
-	ndev->dpm_level = ndev->max_dpm_level;
+	ndev->dpm_level = 0;
 
 	ret = aie2_pm_set_clk_gating(ndev, AIE2_CLK_GATING_ENABLE);
 	if (ret)
