@@ -26,7 +26,6 @@ enum hsa_cmd_state
   HSA_CMD_STATE_SKCRASHED = 11,
 };
 #define HSA_COMP_SUCCESS          HSA_CMD_STATE_COMPLETED // Host user code will check this
-#define HSA_PKT_PAGE_CONT         10 // cert internal status
 #define HSA_ERR(e)                (((e) << 4) | HSA_CMD_STATE_ERROR)
 #define HSA_EXIT_PKT              HSA_ERR(0)
 #define HSA_PDI_LOAD_NO_MAPPING   HSA_ERR(self_id * 100 + 1)
@@ -65,6 +64,9 @@ struct exec_buf
   uint32_t args_host_addr_high;
 };
 
+#define HOST_QUEUE_MAJOR_VERSION 1
+#define HOST_QUEUE_MINOR_VERSION 0
+
 struct host_queue_header
 {
   uint64_t read_index;
@@ -75,7 +77,9 @@ struct host_queue_header
   }
   version;
   uint32_t capacity; //Queue capacity, must be a power of two.
-  uint64_t write_index;
+  uint64_t padding0[6];
+  uint64_t write_index; // this should be on different cacheline from read_index to avoid false sharing
+  uint64_t padding1[6];
   uint64_t data_address;
 };
 
@@ -100,15 +104,8 @@ enum host_queue_packet_type
  */ 
 struct common_header
 {
-  union {
-    struct {
-      uint16_t type: 8;
-      uint16_t barrier: 1;
-      uint16_t acquire_fence_scope: 2;    
-      uint16_t release_fence_scope: 2;
-    };    
-    uint16_t header;
-  };
+  uint8_t type;
+  uint8_t reserved;
   uint8_t opcode;
   uint8_t chain_flag;
   uint16_t count;
@@ -254,20 +251,6 @@ struct host_queue_packet
 struct host_indirect_data {
   struct common_header header;
   struct exec_buf  payload;
-};
-
-/*
- * xrt pkt with random length.
- */ 
-struct xrt_packet
-{
-  struct xrt_packet_header xrt_header;	
-  uint64_t xrt_payload_host_addr;
-};
-
-struct host_queue
-{
-  uint64_t address;
 };
 
 #endif
