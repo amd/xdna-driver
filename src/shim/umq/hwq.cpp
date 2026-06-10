@@ -68,6 +68,8 @@ hwq_umq(const device& dev, size_t nslots) : hwq(dev)
   for (size_t i = 0; i < nslots; i++)
     init_indirect_buf(&m_umq_indirect_buf[i * HSA_MAX_LEVEL1_INDIRECT_ENTRIES], HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
 
+  m_umq_hdr->version.major = HOST_QUEUE_MAJOR_VERSION;
+  m_umq_hdr->version.minor = HOST_QUEUE_MINOR_VERSION;
   m_umq_hdr->capacity = nslots;
   // data_address starts after header
   m_umq_hdr->data_address = m_umq_bo->get_properties().paddr + header_sz;
@@ -98,11 +100,9 @@ dump() const
   for (uint32_t i = 0; i < h->capacity; i++) {
     auto pkt = &m_umq_pkt[i];
     shim_debug("==========slot %u==========", i);
-    shim_debug("\ttype:\t\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.type));
-    shim_debug("\tbarrier:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.barrier));
-    shim_debug("\tacquire:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.acquire_fence_scope));
-    shim_debug("\trelease:\t%u", static_cast<uint16_t>(pkt->xrt_header.common_header.release_fence_scope));
+    shim_debug("\ttype:\t\t%u", static_cast<uint8_t>(pkt->xrt_header.common_header.type));
     shim_debug("\topcode:\t\t%u", pkt->xrt_header.common_header.opcode);
+    shim_debug("\tchain_flag:\t\t%u", pkt->xrt_header.common_header.chain_flag);
     shim_debug("\tcount:\t\t%u", pkt->xrt_header.common_header.count);
     shim_debug("\tdistribute:\t%u", pkt->xrt_header.common_header.distribute);
     shim_debug("\tindirect:\t%u", pkt->xrt_header.common_header.indirect);
