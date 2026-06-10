@@ -78,13 +78,12 @@ int aie_send_mgmt_msg_wait(struct aie_device *aie, struct xdna_mailbox_msg *msg)
 	return ret;
 }
 
-int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor)
+static int aie_check_protocol_impl(struct aie_device *aie, u32 fw_major, u32 fw_minor,
+				   const struct amdxdna_fw_feature_tbl *feature)
 {
-	const struct amdxdna_fw_feature_tbl *feature;
 	bool found = false;
 
-	for (feature = aie->xdna->dev_info->fw_feature_tbl;
-	     feature->major; feature++) {
+	for (; feature && feature->major; feature++) {
 		if (feature->major != fw_major)
 			continue;
 		if (fw_minor < feature->min_minor)
@@ -99,6 +98,18 @@ int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor)
 	}
 
 	return found ? 0 : -EOPNOTSUPP;
+}
+
+int aie_check_protocol(struct aie_device *aie, u32 fw_major, u32 fw_minor)
+{
+	return aie_check_protocol_impl(aie, fw_major, fw_minor,
+				       aie->xdna->dev_info->fw_feature_tbl);
+}
+
+int aie_check_cert_protocol(struct aie_device *aie, u32 cert_major, u32 cert_minor)
+{
+	return aie_check_protocol_impl(aie, cert_major, cert_minor,
+				       aie->xdna->dev_info->cert_feature_tbl);
 }
 
 static void amdxdna_update_vbnv(struct amdxdna_dev *xdna,

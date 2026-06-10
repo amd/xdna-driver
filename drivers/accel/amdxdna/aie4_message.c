@@ -100,6 +100,14 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 	if (ret)
 		return ret;
 
+	ret = aie_check_cert_protocol(&ndev->aie,
+				      resp.host_queue_major, resp.host_queue_minor);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "host queue %d.%d is not supported",
+			 resp.host_queue_major, resp.host_queue_minor);
+		return ret;
+	}
+
 	cert_version->major = resp.major_version;
 	cert_version->minor = resp.minor_version;
 	cert_version->patch = resp.hotfix;
