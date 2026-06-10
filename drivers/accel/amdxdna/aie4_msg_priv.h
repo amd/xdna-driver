@@ -14,8 +14,6 @@ enum aie4_msg_opcode {
 	/* Classic/PF/VF common */
 	AIE4_MSG_OP_IDENTIFY                         = 0x10002,
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
-	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x10009,
-	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x1000D,
 	AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION      = 0x1000F,
 
 	/* PF only */
@@ -33,6 +31,10 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_POWER_OVERRIDE                   = 0x3000B,
 	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
+
+	/* System control */
+	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x40001,
+	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x40006,
 };
 
 enum aie4_msg_status {
@@ -112,7 +114,9 @@ struct aie4_msg_create_hw_context_req {
 #define AIE4_MSG_PASID GENMASK(19, 0)
 #define AIE4_MSG_PASID_VLD GENMASK(31, 31)
 	__u32 pasid;
-	__u32 priority_band;
+	__u8 priority_band;
+	__u8 priority_level;
+	__u16 restore_id;
 } __packed;
 
 struct aie4_msg_create_hw_context_resp {
@@ -124,11 +128,14 @@ struct aie4_msg_create_hw_context_resp {
 
 struct aie4_msg_destroy_hw_context_req {
 	__u32 hw_context_id;
-	__u32 resvd1;
+#define AIE4_MSG_GRACEFUL_FLAG GENMASK(0, 0)
+	__u32 graceful_flag;
 } __packed;
 
 struct aie4_msg_destroy_hw_context_resp {
 	enum aie4_msg_status status;
+	__u16 restore_id;
+	__u16 resvd;
 } __packed;
 
 enum aie4_msg_configure_hw_context_property {
@@ -164,10 +171,6 @@ struct aie4_msg_configure_hw_context_req {
 struct aie4_msg_configure_hw_context_resp {
 	enum aie4_msg_status status;
 } __packed;
-
-static_assert(sizeof(struct aie4_msg_context_config_cert_logging_info) == 12);
-static_assert(sizeof(struct aie4_msg_context_config_cert_logging) == 76);
-static_assert(sizeof(struct aie4_msg_configure_hw_context_req) == 84);
 
 struct aie4_tile_info {
 	__u32 size;
@@ -224,6 +227,8 @@ struct aie4_msg_query_cert_firmware_version_resp {
 	__u8 date[11];
 	__u8 hotfix;
 	__u8 build;
+	__u16 host_queue_major;
+	__u16 host_queue_minor;
 } __packed;
 
 struct aie4_msg_power_override_req {
@@ -256,6 +261,7 @@ struct aie4_msg_aie4_coredump_req {
 
 struct aie4_msg_aie4_coredump_resp {
 	enum aie4_msg_status status;
+	__u32 error_detail[8];
 } __packed;
 
 enum aie4_access_type {
@@ -268,9 +274,11 @@ enum aie4_access_type {
 
 struct aie4_msg_aie4_debug_access_req {
 	__u8 opcode;
-	__u8 context_id;
+	__u8 resvd0;
+	__u16 context_id;
 	__u8 row;
 	__u8 col;
+	__u16 resvd1;
 	union {
 		struct {
 			__u64 buffer_addr;

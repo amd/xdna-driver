@@ -41,10 +41,10 @@
 #define NPU3_DPM_TOPS(ndev, hclk) (4096 * (ndev)->total_col * (hclk) / 1000000)
 
 static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
-	{ .major = 5, .min_minor = 10 },
-	{ .features = BIT_U64(AIE4_GET_COREDUMP), .major = 5, .min_minor = 24 },
-	{ .features = BIT_U64(AIE4_RW_ACCESS), .major = 5, .min_minor = 24 },
-	{ .features = BIT_U64(AIE4_CALIBRATE_CLOCK), .major = 5, .min_minor = 24 },
+	{ .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_GET_COREDUMP), .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_RW_ACCESS), .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_CALIBRATE_CLOCK), .major = 6, .min_minor = 0 },
 	{ 0 }
 };
 
