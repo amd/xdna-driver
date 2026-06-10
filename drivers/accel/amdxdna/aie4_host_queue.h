@@ -17,7 +17,9 @@ struct host_queue_header {
 		__u16 minor;
 	} version;
 	__u32 capacity; /* Queue capacity, must be power of two. */
+	__u64 padding0[6];
 	__u64 write_index;
+	__u64 padding1[6];
 	__u64 data_address; /* The xdna dev addr for payload. */
 };
 
