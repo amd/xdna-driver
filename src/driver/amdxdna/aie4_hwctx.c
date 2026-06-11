@@ -641,10 +641,16 @@ static inline int wait_till_seq_completed(struct amdxdna_ctx *ctx, u64 seq)
 static inline int wait_till_hsa_not_full(struct amdxdna_ctx *ctx)
 {
 	u64 wi = ctx->priv->write_index;
+	u64 seq;
 
 	if (wi < CTX_MAX_CMDS)
 		return 0;
-	return wait_till_seq_completed(ctx, wi - CTX_MAX_CMDS);
+
+	seq = wi - CTX_MAX_CMDS;
+	if (check_cmd_done(ctx, seq))
+		return (ctx->priv->status != CTX_STATE_CONNECTED) ? -EAGAIN : 0;
+
+	return wait_till_seq_completed(ctx, seq);
 }
 
 static inline void wait_till_job_done(struct amdxdna_sched_job *job)
