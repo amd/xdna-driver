@@ -233,6 +233,7 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.fini			= ve2_aux_fini,
 	.hwctx_init		= ve2_hwctx_init,
 	.hwctx_fini		= ve2_hwctx_fini,
+	.hwctx_config		= ve2_hwctx_config,
 	.cmd_submit		= ve2_cmd_submit,
 	.cmd_wait		= ve2_cmd_wait,
 	.get_array		= ve2_debug_get_array,

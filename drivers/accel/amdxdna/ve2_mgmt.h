@@ -11,6 +11,7 @@
 
 #include <linux/list.h>
 #include <linux/mutex.h>
+#include <linux/xlnx-ai-engine.h>
 
 struct amdxdna_dev;
 struct amdxdna_hwctx;
@@ -27,6 +28,9 @@ struct amdxdna_hwctx;
 /* VE2 AIE partition column granularity (partitions are 4-column aligned). */
 #define VE2_MIN_COL_SUPPORT		4
 
+/* Size of one AIE tile's address space used for coredump reads. */
+#define TILE_ADDRESS_SPACE		0x100000
+
 struct ve2_ctx_fifo_entry {
 	struct amdxdna_hwctx		*ctx;
 	u64				command_index;
@@ -42,6 +46,7 @@ struct amdxdna_mgmtctx {
 	struct mutex			ctx_lock;/* protects active_ctx, scheduler, fifo */
 	u32				start_col;
 	u32				num_col;
+	u32				num_rows;
 	struct amdxdna_dev		*xdna;
 };
 

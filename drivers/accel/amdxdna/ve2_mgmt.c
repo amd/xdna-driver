@@ -28,15 +28,31 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 				 struct handshake *cert_hs)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_config_hwctx *cfg = NULL;
 	u64 hsa_addr = U64_MAX;
 
 	if (col == 0 && vp && vp->hsa_queue.hsa_queue_dma_addr)
 		hsa_addr = vp->hsa_queue.hsa_queue_dma_addr;
 
+	if (vp && vp->hwctx_config && col < hwctx->num_col)
+		cfg = &vp->hwctx_config[col];
+
 	cert_hs->partition_base_address = VE2_ADDR(mgmtctx->start_col, 0, 0);
 	cert_hs->aie_info.partition_size = mgmtctx->num_col;
 	cert_hs->hsa_addr_high = upper_32_bits(hsa_addr);
 	cert_hs->hsa_addr_low = lower_32_bits(hsa_addr);
+
+	if (cfg) {
+		cert_hs->log_addr_high = upper_32_bits(cfg->log_buf_addr);
+		cert_hs->log_addr_low = lower_32_bits(cfg->log_buf_addr);
+		cert_hs->log_buf_size = cfg->log_buf_size;
+		cert_hs->dbg_buf.dbg_buf_addr_high = upper_32_bits(cfg->debug_buf_addr);
+		cert_hs->dbg_buf.dbg_buf_addr_low = lower_32_bits(cfg->debug_buf_addr);
+		cert_hs->dbg_buf.size = cfg->debug_buf_size;
+		cert_hs->trace.dtrace_addr_high = upper_32_bits(cfg->dtrace_addr);
+		cert_hs->trace.dtrace_addr_low = lower_32_bits(cfg->dtrace_addr);
+		cert_hs->opcode_timeout_config = cfg->opcode_timeout_config;
+	}
 
 	cert_hs->ctx_switch_req = 0;
 	cert_hs->hsa_location = 0;
@@ -131,10 +147,11 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev_hdl *hdl = ve2_dev_hdl(xdna);
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct solver_state *xrs = xdna->xrs_hdl;
 	u32 partition_id = 0;
 	int ret;
 
-	if (!vp || !hdl)
+	if (!vp || !hdl || !xrs)
 		return -EINVAL;
 
 	/* Build the candidate start-column list, then let XRS place the partition. */
@@ -142,9 +159,10 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 	if (ret)
 		return ret;
 
-	/* default to num_tiles for now, can be overridden by XRS load action callback */
 	hwctx->num_col = hwctx->num_tiles;
+	mutex_lock(&xrs->xrs_lock);
 	ret = amdxdna_alloc_resource(hwctx);
+	mutex_unlock(&xrs->xrs_lock);
 	kfree(hwctx->col_list);
 	hwctx->col_list = NULL;
 	if (ret) {
@@ -156,7 +174,9 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 					&partition_id);
 	if (ret) {
 		XDNA_ERR(xdna, "Creating AIE partition failed, ret %d", ret);
+		mutex_lock(&xrs->xrs_lock);
 		amdxdna_release_resource(hwctx);
+		mutex_unlock(&xrs->xrs_lock);
 		return ret;
 	}
 
@@ -428,6 +448,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 	mgmtctx->xdna = xdna;
 	mgmtctx->start_col = start_col;
 	mgmtctx->num_col = num_col;
+	mgmtctx->num_rows = xdna_hdl->aie_dev_info.rows;
 	mgmtctx->active_ctx = NULL;
 	INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 	mutex_init(&mgmtctx->ctx_lock);
@@ -473,8 +494,15 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 	mgmtctx = vp ? vp->mgmtctx : NULL;
 	if (!mgmtctx) {
 		/* No partition was created; still release any XRS reservation. */
-		if (hwctx)
-			amdxdna_release_resource(hwctx);
+		if (hwctx) {
+			struct solver_state *xrs = hwctx->client->xdna->xrs_hdl;
+
+			if (xrs) {
+				mutex_lock(&xrs->xrs_lock);
+				amdxdna_release_resource(hwctx);
+				mutex_unlock(&xrs->xrs_lock);
+			}
+		}
 		return -EINVAL;
 	}
 
@@ -504,7 +532,15 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 	kfree(mgmtctx);
 	vp->mgmtctx = NULL;
 
-	amdxdna_release_resource(hwctx);
+	{
+		struct solver_state *xrs = hwctx->client->xdna->xrs_hdl;
+
+		if (xrs) {
+			mutex_lock(&xrs->xrs_lock);
+			amdxdna_release_resource(hwctx);
+			mutex_unlock(&xrs->xrs_lock);
+		}
+	}
 
 	return 0;
 }

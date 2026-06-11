@@ -8,6 +8,7 @@
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
 #include <linux/bitmap.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>
 
 #include "amdxdna_ctx.h"
@@ -38,7 +39,7 @@ struct solver_rgroup {
 	u32				nnode;
 	u32				npartition_node;
 
-	DECLARE_BITMAP(resbit, XRS_MAX_COL);
+	unsigned long			*resbit;	/* dynamic bitmap, size = total_col */
 	struct list_head		node_list;
 	struct list_head		pt_node_list;
 };
@@ -47,6 +48,7 @@ struct solver_state {
 	struct solver_rgroup		rgp;
 	struct init_config		cfg;
 	struct xrs_action_ops		*actions;
+	struct mutex			xrs_lock;	/* serialise alloc/release */
 };
 
 static u32 calculate_gops(struct aie_qos *rqos)
@@ -168,27 +170,35 @@ static struct solver_node *rg_search_node(struct solver_rgroup *rgp, u64 rid)
 }
 
 static void remove_partition_node(struct solver_rgroup *rgp,
-				  struct partition_node *pt_node)
+				  struct partition_node *pt_node,
+				  struct xrs_action_load *action)
 {
 	pt_node->nshared--;
-	if (pt_node->nshared > 0)
+	if (pt_node->nshared > 0) {
+		if (action)
+			action->release_aie_part = false;
 		return;
+	}
 
 	list_del(&pt_node->list);
 	rgp->npartition_node--;
 
 	bitmap_clear(rgp->resbit, pt_node->start_col, pt_node->ncols);
 	kfree(pt_node);
+
+	if (action)
+		action->release_aie_part = true;
 }
 
 static void remove_solver_node(struct solver_rgroup *rgp,
-			       struct solver_node *node)
+			       struct solver_node *node,
+			       struct xrs_action_load *action)
 {
 	list_del(&node->list);
 	rgp->nnode--;
 
 	if (node->pt_node)
-		remove_partition_node(rgp, node->pt_node);
+		remove_partition_node(rgp, node->pt_node, action);
 
 	kfree(node);
 }
@@ -197,13 +207,14 @@ static int get_free_partition(struct solver_state *xrs,
 			      struct solver_node *snode,
 			      struct alloc_requests *req)
 {
+	u32 total_col = xrs->cfg.total_col;
 	struct partition_node *pt_node;
 	u32 ncols = req->cdo.ncols;
 	u32 col, i;
 
 	for (i = 0; i < snode->cols_len; i++) {
 		col = snode->start_cols[i];
-		if (find_next_bit(xrs->rgp.resbit, XRS_MAX_COL, col) >= col + ncols)
+		if (find_next_bit(xrs->rgp.resbit, total_col, col) >= col + ncols)
 			break;
 	}
 
@@ -217,11 +228,7 @@ static int get_free_partition(struct solver_state *xrs,
 	pt_node->nshared = 1;
 	pt_node->start_col = col;
 	pt_node->ncols = ncols;
-
-	/*
-	 * Always set exclusive to false for now.
-	 */
-	pt_node->exclusive = false;
+	pt_node->exclusive = req->rqos.exclusive;
 
 	list_add_tail(&pt_node->list, &xrs->rgp.pt_node_list);
 	xrs->rgp.npartition_node++;
@@ -242,6 +249,10 @@ static int allocate_partition(struct solver_state *xrs,
 	ret = get_free_partition(xrs, snode, req);
 	if (!ret)
 		return ret;
+
+	/* Exclusive requests must get a free partition; never share. */
+	if (req->rqos.exclusive)
+		return -ENODEV;
 
 	/* try to get a share-able partition */
 	list_for_each_entry(pt_node, &xrs->rgp.pt_node_list, list) {
@@ -309,6 +320,7 @@ static void fill_load_action(struct solver_node *snode,
 	action->rid = snode->rid;
 	action->part.start_col = snode->pt_node->start_col;
 	action->part.ncols = snode->pt_node->ncols;
+	action->create_aie_part = (snode->pt_node->nshared == 1);
 }
 
 int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
@@ -332,6 +344,10 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
 		drm_err(xrs->cfg.ddev, "rid %lld is in-use", req->rid);
 		return -EEXIST;
 	}
+
+	/* Real-time priority requires an exclusive partition. */
+	if (req->rqos.priority == AMDXDNA_QOS_REALTIME_PRIORITY)
+		req->rqos.exclusive = true;
 
 	snode = create_solver_node(xrs, req);
 	if (IS_ERR(snode))
@@ -360,7 +376,7 @@ int xrs_allocate_resource(void *hdl, struct alloc_requests *req, void *cb_arg,
 	return 0;
 
 free_node:
-	remove_solver_node(&xrs->rgp, snode);
+	remove_solver_node(&xrs->rgp, snode, NULL);
 
 	return ret;
 }
@@ -370,7 +386,7 @@ int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action)
 	struct solver_state *xrs = hdl;
 	struct solver_node *node;
 
-	if (!xrs || action)
+	if (!xrs)
 		return -EINVAL;
 
 	node = rg_search_node(&xrs->rgp, rid);
@@ -383,7 +399,7 @@ int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action)
 	if (xrs->cfg.actions)
 		xrs->cfg.actions->unload(node->cb_arg);
 
-	remove_solver_node(&xrs->rgp, node);
+	remove_solver_node(&xrs->rgp, node, action);
 	return 0;
 }
 
@@ -391,16 +407,20 @@ void *xrsm_init(struct init_config *cfg)
 {
 	struct solver_rgroup *rgp;
 	struct solver_state *xrs;
+	size_t bitmap_size;
 
-	xrs = drmm_kzalloc(cfg->ddev, sizeof(*xrs), GFP_KERNEL);
+	bitmap_size = BITS_TO_LONGS(cfg->total_col) * sizeof(unsigned long);
+	xrs = drmm_kzalloc(cfg->ddev, sizeof(*xrs) + bitmap_size, GFP_KERNEL);
 	if (!xrs)
 		return NULL;
 
 	memcpy(&xrs->cfg, cfg, sizeof(*cfg));
 
 	rgp = &xrs->rgp;
+	rgp->resbit = (unsigned long *)(xrs + 1);
 	INIT_LIST_HEAD(&rgp->node_list);
 	INIT_LIST_HEAD(&rgp->pt_node_list);
+	mutex_init(&xrs->xrs_lock);
 
 	return xrs;
 }
@@ -427,6 +447,7 @@ int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx)
 	xrs_req->rqos.latency = hwctx->qos.latency;
 	xrs_req->rqos.exec_time = hwctx->qos.frame_exec_time;
 	xrs_req->rqos.priority = hwctx->qos.priority;
+	xrs_req->rqos.exclusive = (hwctx->qos.priority == AMDXDNA_QOS_REALTIME_PRIORITY);
 
 	xrs_req->rid = (uintptr_t)hwctx;
 
