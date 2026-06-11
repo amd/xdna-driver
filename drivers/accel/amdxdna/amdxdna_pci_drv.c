@@ -111,6 +111,7 @@ static int amdxdna_sva_init(struct amdxdna_client *client)
 	client->pasid = iommu_sva_get_pasid(client->sva);
 	if (client->pasid == IOMMU_PASID_INVALID) {
 		iommu_sva_unbind_device(client->sva);
+		client->sva = NULL;
 		XDNA_ERR(xdna, "SVA get pasid failed");
 		return -ENODEV;
 	}
