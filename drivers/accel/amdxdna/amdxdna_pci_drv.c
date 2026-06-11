@@ -138,6 +138,10 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	if (!client)
 		return -ENOMEM;
 
+	ret = init_srcu_struct(&client->hwctx_srcu);
+	if (ret)
+		goto free_client;
+
 	client->pid = pid_nr(rcu_access_pointer(filp->pid));
 	client->xdna = xdna;
 	client->pasid = IOMMU_PASID_INVALID;
@@ -145,11 +149,16 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 	if (!amdxdna_iova_on(xdna)) {
 		/* No need to fail open since user may use pa + carveout later. */
-		if (amdxdna_sva_init(client))
+		if (amdxdna_sva_init(client)) {
 			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
+			if (!amdxdna_use_carveout(xdna)) {
+				XDNA_ERR(xdna, "PASID unavailable and carveout not configured");
+				ret = -EINVAL;
+				goto cleanup_srcu;
+			}
+		}
 	}
 	mmgrab(client->mm);
-	init_srcu_struct(&client->hwctx_srcu);
 	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
 	xa_init_flags(&client->dev_heap_xa, XA_FLAGS_ALLOC);
 	drm_mm_init(&client->dev_heap_mm, xdna->dev_info->dev_mem_base,
@@ -180,10 +189,12 @@ fail:
 	drm_mm_takedown(&client->dev_heap_mm);
 	xa_destroy(&client->dev_heap_xa);
 	xa_destroy(&client->hwctx_xa);
-	cleanup_srcu_struct(&client->hwctx_srcu);
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
 	amdxdna_sva_fini(client);
+cleanup_srcu:
+	cleanup_srcu_struct(&client->hwctx_srcu);
+free_client:
 	kfree(client);
 	return ret;
 }
