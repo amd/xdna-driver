@@ -88,6 +88,8 @@ void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_full_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_app_health_query_multi_ctx(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_telemetry(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_telemetry_short_buf(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_coredump(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_mem(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -1101,6 +1103,72 @@ TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device>& sdev, 
   auto hwq2 = hwctx.get()->get_hw_queue();
 }
 
+constexpr uint32_t TELEMETRY_DATA_SIZE = 256 * 1024;
+constexpr uint32_t TELEMETRY_MAP_CAPACITY = 256;
+// aie4 selects a telemetry category via the type field; older NPUs require 0.
+constexpr uint32_t AIE4_TELEMETRY_PERF_COUNTER = 1;
+
+struct telemetry_probe {
+  int ret;
+  int err;
+  uint32_t map_num_elements;
+};
+
+void
+TEST_query_telemetry(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  uint32_t type = dev_filter_is_aie4(id, sdev.get()) ? AIE4_TELEMETRY_PERF_COUNTER : 0;
+
+  auto probe = fork_query<telemetry_probe>(sdev.get(), [type](int fd) {
+    const uint32_t header_sz = sizeof(amdxdna_drm_query_telemetry_header) +
+                               TELEMETRY_MAP_CAPACITY * sizeof(uint32_t);
+    std::vector<char> buf(header_sz + TELEMETRY_DATA_SIZE, 0);
+    auto *hdr = reinterpret_cast<amdxdna_drm_query_telemetry_header *>(buf.data());
+    hdr->type = type;
+
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+      .buffer_size = static_cast<uint32_t>(buf.size()),
+      .buffer = reinterpret_cast<uintptr_t>(buf.data()),
+    };
+
+    telemetry_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+    r.err = errno;
+    r.map_num_elements = hdr->map_num_elements;
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(QUERY_TELEMETRY) failed: " + std::string(std::strerror(probe.err)));
+
+  if (probe.map_num_elements > TELEMETRY_MAP_CAPACITY)
+    throw std::runtime_error("QUERY_TELEMETRY: map_num_elements > capacity");
+}
+
+void
+TEST_query_telemetry_short_buf(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Negative case: a header-only buffer must fail EINVAL.
+  int err = fork_query<int>(sdev.get(), [](int fd) {
+    amdxdna_drm_query_telemetry_header hdr{};
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+      .buffer_size = sizeof(hdr),
+      .buffer = reinterpret_cast<uintptr_t>(&hdr),
+    };
+    if (::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info) == -1)
+      return errno;
+    return 0;
+  });
+
+  if (err != EINVAL)
+    throw std::runtime_error(
+      "QUERY_TELEMETRY with header-only buffer should fail EINVAL, got "
+      + std::to_string(err));
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1312,6 +1380,12 @@ std::vector<test_case> test_list {
   },
   test_case{ "app health query multi-context with and without ctx-id filter", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_app_health_query_multi_ctx, {}
+  },
+  test_case{ "query telemetry", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_query_telemetry, {}
+  },
+  test_case{ "query telemetry header-only buffer fails", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_query_telemetry_short_buf, {}
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
