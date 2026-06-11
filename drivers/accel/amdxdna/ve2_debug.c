@@ -12,6 +12,7 @@
 #include <linux/minmax.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/vmalloc.h>
 
 #include "drm/amdxdna_accel.h"
 
@@ -19,6 +20,7 @@
 #include "amdxdna_drv.h"
 #include "ve2_debug.h"
 #include "ve2_hwctx.h"
+#include "ve2_mgmt.h"
 
 static int ve2_hwctx_status_cb(struct amdxdna_hwctx *hwctx, void *arg)
 {
@@ -129,6 +131,104 @@ static int ve2_get_hwctx_mem_bitmap(struct amdxdna_client *client,
 	return 0;
 }
 
+static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_aie_coredump footer = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx = NULL;
+	struct amdxdna_client *tmp_client;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_ctx_priv *vp;
+	u32 buf_size, rel_size;
+	void *local_buf;
+	u32 offset;
+	int ret;
+
+	buf_size = (u32)args->num_element * args->element_size;
+	if (buf_size < sizeof(footer))
+		return -EINVAL;
+
+	/* Footer is at the tail of the user buffer — contains context_id + pid. */
+	offset = buf_size - sizeof(footer);
+	if (copy_from_user(&footer, u64_to_user_ptr(args->buffer) + offset, sizeof(footer))) {
+		XDNA_ERR(xdna, "Failed to copy coredump request from user");
+		return -EFAULT;
+	}
+
+	XDNA_DBG(xdna, "Coredump read: ctx_id=%u, pid=%llu, buf_size=%u", footer.context_id,
+		 footer.pid, buf_size);
+
+	/* Find the hwctx matching the requested context_id and pid. */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_hwctx *hx;
+		unsigned long hx_id;
+		int srcu_idx;
+
+		srcu_idx = srcu_read_lock(&tmp_client->hwctx_srcu);
+		xa_for_each(&tmp_client->hwctx_xa, hx_id, hx) {
+			if (hx->id == footer.context_id && (u64)hx->client->pid == footer.pid) {
+				hwctx = hx;
+				break;
+			}
+		}
+		srcu_read_unlock(&tmp_client->hwctx_srcu, srcu_idx);
+		if (hwctx)
+			break;
+	}
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Cannot get coredump: Hardware context %u with pid %llu not found",
+			 footer.context_id, footer.pid);
+		return -EINVAL;
+	}
+
+	XDNA_DBG(xdna, "cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n", hwctx->client->pid,
+		 hwctx->id, hwctx->start_col, hwctx->num_col);
+
+	vp = ve2_hw_priv(hwctx);
+	if (!vp || !vp->mgmtctx) {
+		XDNA_ERR(xdna, "Coredump: hwctx %u has no management partition", hwctx->id);
+		return -EINVAL;
+	}
+
+	mgmtctx = vp->mgmtctx;
+
+	if (mgmtctx->active_ctx != hwctx) {
+		XDNA_ERR(xdna, "Coredump: hwctx %u is not the active context", hwctx->id);
+		return -EPERM;
+	}
+
+	/* Required buffer: num_col * num_rows * tile_size */
+	rel_size = hwctx->num_col * mgmtctx->num_rows * TILE_ADDRESS_SPACE;
+	if (rel_size > buf_size) {
+		XDNA_DBG(xdna, "Coredump buffer too small: need %u got %u", rel_size, buf_size);
+		args->element_size = rel_size;
+		return -ENOBUFS;
+	}
+
+	local_buf = vmalloc(rel_size);
+	if (!local_buf)
+		return -ENOMEM;
+
+	ret = aie_partition_coredump(mgmtctx->aie_dev, rel_size, local_buf);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "aie_partition_coredump failed: %d", ret);
+		vfree(local_buf);
+		return ret;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), local_buf, ret)) {
+		XDNA_ERR(xdna, "Coredump copy_to_user failed");
+		vfree(local_buf);
+		return -EFAULT;
+	}
+
+	XDNA_DBG(xdna, "Coredump: copied %d bytes for hwctx %u", ret, hwctx->id);
+	vfree(local_buf);
+	return 0;
+}
+
 int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -149,6 +249,9 @@ int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 		break;
 	case DRM_AMDXDNA_HWCTX_MEM_BITMAP:
 		ret = ve2_get_hwctx_mem_bitmap(client, args);
+		break;
+	case DRM_AMDXDNA_AIE_COREDUMP:
+		ret = ve2_coredump_read(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported GET_ARRAY param %u", args->param);

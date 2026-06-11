@@ -67,6 +67,8 @@ struct alloc_requests {
 struct xrs_action_load {
 	u32			rid;
 	struct aie_part		part;
+	bool			create_aie_part;
+	bool			release_aie_part;
 };
 
 /*
