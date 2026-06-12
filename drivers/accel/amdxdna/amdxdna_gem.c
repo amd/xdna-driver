@@ -682,8 +682,11 @@ static int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *fi
 	/* No need to set up dma addr mapping in PASID mode. */
 	if (!amdxdna_pasid_on(abo->client)) {
 		ret = amdxdna_dma_map_bo(xdna, abo);
-		if (ret)
+		if (ret) {
+			abo->open_ref--;
+			abo->client = NULL;
 			return ret;
+		}
 	}
 
 	amdxdna_gem_add_bo_usage(abo);
