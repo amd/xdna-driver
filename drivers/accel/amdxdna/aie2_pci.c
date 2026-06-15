@@ -596,6 +596,7 @@ static int aie2_init(struct amdxdna_dev *xdna)
 
 	for (i = 0; i < SMU_MAX_REGS; i++)
 		smu_conf.smu_regs[i] = tbl[SMU_REG_BAR(ndev, i)] + SMU_REG_OFF(ndev, i);
+	smu_conf.intr_enabled = ndev->priv->smu_intr_enabled;
 	ndev->aie.smu_hdl = aiem_smu_create(&xdna->ddev, &smu_conf);
 	if (!ndev->aie.smu_hdl) {
 		XDNA_ERR(xdna, "failed to create smu");

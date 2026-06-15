@@ -26,22 +26,31 @@
 
 struct smu_device {
 	struct drm_device	*ddev;
-	struct smu_config	conf;
 	void __iomem		*smu_regs[SMU_MAX_REGS];
+	bool			intr_enabled;
 };
 
 static int aie_smu_exec(struct smu_device *smu, u32 reg_cmd, u32 reg_arg, u32 *out)
 {
-	u32 resp;
+	u32 resp, intr;
 	int ret;
+
+	if (smu->intr_enabled) {
+		ret = readx_poll_timeout(readl, SMU_REG(smu, SMU_INTR_REG), intr,
+					 !(intr & 0x2), AIE_INTERVAL, AIE_TIMEOUT);
+		if (ret) {
+			drm_err(smu->ddev, "wait for smu intr idle timed out: %d", intr);
+			return ret;
+		}
+	}
 
 	writel(0, SMU_REG(smu, SMU_RESP_REG));
 	writel(reg_arg, SMU_REG(smu, SMU_ARG_REG));
 	writel(reg_cmd, SMU_REG(smu, SMU_CMD_REG));
 
-	/* Clear and set SMU_INTR_REG to kick off */
-	writel(0, SMU_REG(smu, SMU_INTR_REG));
-	writel(1, SMU_REG(smu, SMU_INTR_REG));
+	/* Set SMU_INTR_REG to kick off */
+	if (smu->intr_enabled)
+		writel(1, SMU_REG(smu, SMU_INTR_REG));
 
 	ret = readx_poll_timeout(readl, SMU_REG(smu, SMU_RESP_REG), resp,
 				 resp, AIE_INTERVAL, AIE_TIMEOUT);
@@ -148,6 +157,7 @@ struct smu_device *aiem_smu_create(struct drm_device *ddev, struct smu_config *c
 
 	smu->ddev = ddev;
 	memcpy(smu->smu_regs, conf->smu_regs, sizeof(smu->smu_regs));
+	smu->intr_enabled = conf->intr_enabled;
 
 	return smu;
 }
