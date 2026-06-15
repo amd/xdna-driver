@@ -336,7 +336,8 @@ static inline void ve2_hwctx_job_release_locked(struct amdxdna_ctx *hwctx,
 	op = amdxdna_cmd_get_op(cmd_bo);
 	if (op == ERT_CMD_CHAIN) {
 		cmd_chain = amdxdna_cmd_get_payload(cmd_bo, NULL);
-		cmd_cnt = cmd_chain->command_count;
+		if (cmd_chain)
+			cmd_cnt = cmd_chain->command_count;
 	}
 	hwctx->completed += cmd_cnt;
 
