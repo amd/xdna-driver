@@ -281,6 +281,83 @@ enum aie4_msg_status {
 	MAX_AIE4_MSG_STATUS_CODE = 0x4,
 };
 
+/*
+ * Selftest group IDs
+ */
+enum selftest_group {
+	SELFTEST_GROUP_LIFECYCLE = 0,		/* NPU lifecycle tests */
+	SELFTEST_GROUP_SCHEDULER = 1,		/* Scheduler/partition/context tests */
+	SELFTEST_GROUP_AIE2PS = 2,		/* AIE2PS low-level tests */
+	SELFTEST_GROUP_SUPERVISOR = 3,		/* Supervisor tests */
+	SELFTEST_GROUP_HYPERVISOR = 4,		/* Hypervisor tests */
+	SELFTEST_GROUP_PRE_HYPERVISOR = 5,	/* Pre-hypervisor tests */
+	SELFTEST_GROUP_CERT = 6,		/* CERT firmware HAL interface */
+	SELFTEST_GROUP_DRAM_LOGGING = 7,	/* DRAM logging tests */
+	SELFTEST_GROUP_ALL = 0xFF,		/* Run all test groups */
+};
+
+/*
+ * RUN_SELFTEST group wire (CONFIG_RPUFW_ENABLE_SELFTEST_FRAMEWORK on RPU FW)..
+ */
+struct aie4_msg_selftest_group_req {
+	u8 group_id;
+	u8 reserved[3];
+};
+
+struct aie4_msg_selftest_group_resp {
+	enum aie4_msg_status status;
+	u32 tests_run;
+	u32 tests_passed;
+	u32 tests_failed;
+	u32 results_addr;	/* 32-bit physical addr of selftest_results_t in RPU BSS */
+};
+
+/*
+ * Detailed self-test results layout written by RPU FW into RPU BSS, pointed to
+ * by aie4_msg_selftest_group_resp.results_addr. Validate @magic before parsing.
+ */
+#define SELFTEST_RESULTS_MAGIC		0x49545354 /* "ITST" */
+#define SELFTEST_RESULTS_VERSION	1
+#define SELFTEST_MAX_RECORDS		300
+#define SELFTEST_MAX_FAILURE_RECORDS	64
+
+enum selftest_record_result {
+	SELFTEST_RECORD_PASS = 0,
+	SELFTEST_RECORD_FAIL = 1,
+	SELFTEST_RECORD_SKIP = 2,
+};
+
+struct selftest_record_t {
+	u8 test_name[24];
+	u8 result;				/* enum selftest_record_result */
+	u8 group_prefix;			/* 'L','S','A','U','H','B','C','D' */
+	u8 test_num;				/* 1-based within group */
+	u8 reserved;
+};
+
+struct selftest_failure_record_t {
+	u8 test_name[24];
+	u32 step_id;				/* which step failed (0x01, 0x02, ...) */
+	s32 error_code;				/* return code (e.g. -22 = -EINVAL) */
+	u32 timestamp;				/* cycle counter at failure */
+};
+
+struct selftest_results_t {
+	u32 magic;				/* must be SELFTEST_RESULTS_MAGIC */
+	u32 version;				/* must be SELFTEST_RESULTS_VERSION */
+	u32 test_count;				/* total test records (max 300) */
+	u32 pass_count;
+	u32 fail_count;
+	u32 skip_count;
+	u32 failure_detail_count;		/* max 64 */
+	u32 last_timestamp;
+	u8 last_group_run;
+	u8 current_group_prefix;
+	u8 reserved[2];
+	struct selftest_record_t tests[SELFTEST_MAX_RECORDS];
+	struct selftest_failure_record_t failures[SELFTEST_MAX_FAILURE_RECORDS];
+};
+
 /** Context priority band names */
 enum aie4_msg_context_priority_band {
 	AIE4_CONTEXT_PRIORITY_BAND_IDLE = 0,

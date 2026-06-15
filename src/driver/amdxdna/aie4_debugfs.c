@@ -10,7 +10,9 @@
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/module.h>
+#include <linux/io.h>
 #include <linux/pm_runtime.h>
+#include <linux/slab.h>
 #include <linux/string.h>
 
 #include "aie4_pci.h"
@@ -977,6 +979,178 @@ static ssize_t aie4_dpm_override_write(struct file *file, const char __user *ptr
 
 DBGFS_FOPS_RW(dpm_override, NULL, aie4_dpm_override_write);
 
+static const char *selftest_result_str(u8 result)
+{
+	switch (result) {
+	case SELFTEST_RECORD_PASS:
+		return "PASS";
+	case SELFTEST_RECORD_FAIL:
+		return "FAIL";
+	case SELFTEST_RECORD_SKIP:
+		return "SKIP";
+	default:
+		return "????";
+	}
+}
+
+/*
+ * Copy the detailed self-test results out of RPU BSS (physical addr in
+ * @results_addr) into @results, then validate the magic/version header.
+ */
+static int aie4_selftest_fetch_results(struct amdxdna_dev_hdl *ndev, u64 results_addr,
+				       struct selftest_results_t *results)
+{
+	struct amdxdna_dev *xdna = ndev->xdna;
+	void *mem;
+
+	if (!results_addr) {
+		XDNA_ERR(xdna, "selftest results_addr is NULL, no detailed results");
+		return -EINVAL;
+	}
+
+	/* Map RPU BSS RAM mem as WC so APU doesn't serve stale cached data. */
+	mem = memremap(results_addr, sizeof(*results), MEMREMAP_WC);
+	if (!mem) {
+		XDNA_ERR(xdna, "Failed to memremap selftest results_addr 0x%llx",
+			 results_addr);
+		return -ENOMEM;
+	}
+
+	memcpy(results, mem, sizeof(*results));
+	memunmap(mem);
+
+	if (results->magic != SELFTEST_RESULTS_MAGIC) {
+		XDNA_ERR(xdna, "Invalid selftest results magic 0x%08x (expected 0x%08x)",
+			 results->magic, SELFTEST_RESULTS_MAGIC);
+		return -EINVAL;
+	}
+
+	if (results->version != SELFTEST_RESULTS_VERSION) {
+		XDNA_ERR(xdna, "Unsupported selftest results version %u (expected %u)",
+			 results->version, SELFTEST_RESULTS_VERSION);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int aie4_selftest_group_show(struct seq_file *m, void *unused)
+{
+	struct amdxdna_dev_hdl *ndev = m->private;
+	struct selftest_results_t *r;
+	u32 test_count, fail_count, i;
+
+	mutex_lock(&ndev->aie4_lock);
+
+	r = ndev->selftest_results;
+	if (!r) {
+		mutex_unlock(&ndev->aie4_lock);
+		seq_puts(m,
+			 "No selftest results. Write a group id (0-7) to run a selftest group.\n");
+		return 0;
+	}
+
+	seq_printf(m,
+		   "SUMMARY\n-------\ngroup=%u prefix='%c' total=%u pass=%u fail=%u skip=%u\n",
+		   r->last_group_run,
+		   r->current_group_prefix ? r->current_group_prefix : '?',
+		   r->test_count, r->pass_count, r->fail_count, r->skip_count);
+
+	test_count = min_t(u32, r->test_count, SELFTEST_MAX_RECORDS);
+	seq_puts(m, "\nPER-TEST RESULTS\n----------------\n");
+	for (i = 0; i < test_count; i++) {
+		struct selftest_record_t *rec = &r->tests[i];
+
+		seq_printf(m, "  [%c%u] %.24s: %s (0x%02x)\n",
+			   rec->group_prefix ? rec->group_prefix : '?',
+			   rec->test_num, rec->test_name,
+			   selftest_result_str(rec->result), rec->result);
+	}
+
+	fail_count = min_t(u32, r->failure_detail_count, SELFTEST_MAX_FAILURE_RECORDS);
+	if (fail_count) {
+		seq_puts(m, "\nFAILURE DETAILS\n---------------\n");
+		for (i = 0; i < fail_count; i++) {
+			struct selftest_failure_record_t *f = &r->failures[i];
+
+			seq_printf(m, "  %.24s: step=0x%02x error=%d timestamp=%u\n",
+				   f->test_name, f->step_id, f->error_code,
+				   f->timestamp);
+		}
+	}
+
+	mutex_unlock(&ndev->aie4_lock);
+	return 0;
+}
+
+static ssize_t aie4_selftest_group_write(struct file *file, const char __user *ptr,
+					 size_t len, loff_t *off)
+{
+	DECLARE_AIE4_MSG(aie4_msg_selftest_group, AIE4_MSG_OP_RUN_SELFTEST);
+	struct amdxdna_dev_hdl *ndev = write_file_to_args(file);
+	struct amdxdna_dev *xdna = ndev->xdna;
+	struct selftest_results_t *results;
+	unsigned long group_id;
+	int ret;
+
+	ret = kstrtoul_from_user(ptr, len, 10, &group_id);
+	if (ret) {
+		XDNA_ERR(xdna, "Invalid selftest group input, ret %d", ret);
+		return ret;
+	}
+
+	if (group_id > SELFTEST_GROUP_DRAM_LOGGING &&
+	    group_id != SELFTEST_GROUP_ALL) {
+		XDNA_ERR(xdna, "Invalid selftest group id %lu (valid 0-%d or 0x%x for ALL)",
+			 group_id, SELFTEST_GROUP_DRAM_LOGGING, SELFTEST_GROUP_ALL);
+		return -EINVAL;
+	}
+
+	results = kvzalloc(sizeof(*results), GFP_KERNEL);
+	if (!results)
+		return -ENOMEM;
+
+	req.group_id = (u8)group_id;
+
+	mutex_lock(&ndev->aie4_lock);
+
+	ret = aie4_send_msg_wait(ndev, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "run selftest group %lu failed, ret %d", group_id, ret);
+		goto err_unlock;
+	}
+
+	if (resp.status != AIE4_MSG_STATUS_SUCCESS) {
+		XDNA_ERR(xdna, "selftest group %lu returned status %d",
+			 group_id, resp.status);
+		ret = -EIO;
+		goto err_unlock;
+	}
+
+	XDNA_INFO(xdna,
+		  "selftest group %lu: run=%u passed=%u failed=%u results_addr=0x%x",
+		  group_id, resp.tests_run, resp.tests_passed, resp.tests_failed,
+		  resp.results_addr);
+
+	ret = aie4_selftest_fetch_results(ndev, resp.results_addr, results);
+	if (ret)
+		goto err_unlock;
+
+	/* Stash for readback via cat; replace any previous results. */
+	kvfree(ndev->selftest_results);
+	ndev->selftest_results = results;
+
+	mutex_unlock(&ndev->aie4_lock);
+	return len;
+
+err_unlock:
+	mutex_unlock(&ndev->aie4_lock);
+	kvfree(results);
+	return ret;
+}
+
+DBGFS_FOPS_RW(selftest_group, aie4_selftest_group_show, aie4_selftest_group_write);
+
 const struct {
 	const char *name;
 	const struct file_operations *fops;
@@ -992,6 +1166,7 @@ const struct {
 	DBGFS_FILE(dump_fw_trace_buffer, 0400),
 	DBGFS_FILE(keep_partition, 0600),
 	DBGFS_FILE(dpm_override, 0600),
+	DBGFS_FILE(selftest_group, 0600),
 };
 
 void aie4_debugfs_init(struct amdxdna_dev *xdna)

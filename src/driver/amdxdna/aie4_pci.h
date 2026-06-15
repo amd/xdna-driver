@@ -221,6 +221,9 @@ struct amdxdna_dev_hdl {
 
 	struct amdxdna_mgmt_dma_hdl	*mpnpu_work_buffer;
 
+	/* Last RUN_SELFTEST detailed results, for debugfs read. NULL if none. */
+	struct selftest_results_t	*selftest_results;
+
 	/* Protect mgmt_chann and cert_comp kref in cert_comp_xa */
 	struct mutex			aie4_lock;
 	struct xarray			cert_comp_xa;

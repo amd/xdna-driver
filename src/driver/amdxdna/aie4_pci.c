@@ -9,6 +9,7 @@
 #include <linux/iommu.h>
 #include <linux/firmware.h>
 #include <linux/string_helpers.h>
+#include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <drm/drm_cache.h>
 #include "drm_local/amdxdna_accel.h"
@@ -646,6 +647,9 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&ndev->aie4_lock));
+
+	kvfree(ndev->selftest_results);
+	ndev->selftest_results = NULL;
 
 	if (ndev->dev_status <= AIE4_DEV_INIT) {
 		/*
