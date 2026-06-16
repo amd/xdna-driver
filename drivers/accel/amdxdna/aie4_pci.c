@@ -1166,7 +1166,7 @@ static void aie4_classic_fini(struct amdxdna_dev *xdna)
 }
 
 static int aie4_set_state(struct amdxdna_client *client,
-			  struct amdxdna_drm_set_state *args)
+			  struct amdxdna_drm_set_state *args, u32 *settle_ms)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_dev *xdna = client->xdna;
