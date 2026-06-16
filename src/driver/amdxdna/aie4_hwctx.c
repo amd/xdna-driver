@@ -511,7 +511,7 @@ done:
 	job_done(job);
 }
 
-static inline void ring_doorbell(struct amdxdna_ctx *ctx)
+static inline int ring_doorbell(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -523,15 +523,16 @@ static inline void ring_doorbell(struct amdxdna_ctx *ctx)
 		XDNA_DBG(xdna, "ring_doorbell: ctx=%s hw_ctx_id=%u xcomm ret=%d",
 			 ctx->name, ctx->priv->hw_ctx_id, ret);
 		if (ret)
-			XDNA_WARN(xdna,
-				  "ring_doorbell failed: ctx=%s hw_ctx_id=%u ret=%d",
-				  ctx->name, ctx->priv->hw_ctx_id, ret);
-		return;
+			XDNA_ERR(xdna,
+				 "doorbell failed: ctx=%s hw_ctx_id=%u ret=%d",
+				 ctx->name, ctx->priv->hw_ctx_id, ret);
+		return ret;
 	}
 
 	writel(0, ctx->priv->doorbell_addr);
 	XDNA_DBG(xdna, "ring_doorbell: ctx=%s hw_ctx_id=%u MMIO %p",
 		 ctx->name, ctx->priv->hw_ctx_id, ctx->priv->doorbell_addr);
+	return 0;
 }
 
 static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
@@ -971,7 +972,12 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 	aie4_umq_sync_pkt_for_device(priv, slot_idx);
 	*seq = publish_cmd(ctx);
 	aie4_ctx_umq_dump(ctx);
-	ring_doorbell(ctx);
+	ret = ring_doorbell(ctx);
+	if (ret) {
+		XDNA_ERR(xdna, "ring doorbell failed for %s seq %lld, ret %d",
+			 ctx->name, *seq, ret);
+		return ret;
+	}
 	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", ctx->name, *seq);
 	return 0;
 }

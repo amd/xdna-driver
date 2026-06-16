@@ -37,6 +37,7 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/xarray.h>
 
@@ -108,6 +109,12 @@ struct amdxdna_shmem_hdl {
 	/* Deferred mgmt RX processing (doorbell runs in IRQ context) */
 	struct work_struct	rx_work;
 
+	/*
+	 * Woken on every RX IPI (completion interrupt).  Doorbell producers
+	 * wait here for the remote to drain the doorbell ring when it is full.
+	 */
+	wait_queue_head_t	db_waitq;
+
 };
 
 /* Maximum response payload we expect from firmware (fits on kernel stack) */
@@ -133,8 +140,9 @@ static void shmem_dump_mgmt_msg(struct device *dev, const char *dir,
 			       payload_size, false);
 }
 
-static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
+static void amdxdna_shmem_doorbell_notify(struct amdxdna_shmem_hdl *shdl)
 {
+	struct amdxdna_dev_hdl *ndev = shdl->ndev;
 	struct amdxdna_dev *xdna = ndev->xdna;
 	struct cert_comp *cert_comp;
 	unsigned long idx;
@@ -146,6 +154,9 @@ static void amdxdna_shmem_doorbell_notify(struct amdxdna_dev_hdl *ndev)
 	}
 
 	XDNA_DBG(xdna, "shmem doorbell IPI RX: woke %u cert_comp waitq(s)", n);
+
+	/* Remote drained the doorbell ring; wake any backpressured producer. */
+	wake_up_all(&shdl->db_waitq);
 }
 
 static void amdxdna_shmem_rx_work(struct work_struct *work)
@@ -208,7 +219,8 @@ static void amdxdna_shmem_rx_callback(struct mbox_client *cl, void *data)
 	XDNA_DBG(xdna, "shmem IPI RX callback (doorbell/completion interrupt)");
 	trace_shmem_ipi_rx(shdl->rx_hdr->head, shdl->rx_hdr->tail,
 			   shdl->db_ring->head, shdl->db_ring->tail);
-	amdxdna_shmem_doorbell_notify(shdl->ndev);
+
+	amdxdna_shmem_doorbell_notify(shdl);
 
 	/*
 	 * Only drain the management ring when the RPU has actually queued a
@@ -297,24 +309,62 @@ unlock_tx:
 	return ret;
 }
 
+/* Max time to wait for the remote to drain a full doorbell ring. */
+#define SHMEM_DB_RING_FULL_TIMEOUT_MS	1000
+
+/*
+ * The host is the only producer (advances head under db_lock); the remote
+ * advances tail as it consumes doorbells.  There is room when fewer than
+ * ring_mask + 1 entries are outstanding.
+ */
+static inline bool shmem_db_ring_has_space(struct shmem_db_ring *ring)
+{
+	return (READ_ONCE(ring->head) - READ_ONCE(ring->tail)) <= ring->ring_mask;
+}
+
 static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 {
 	struct amdxdna_shmem_hdl *shdl = xcomm_hdl;
 	struct amdxdna_dev *xdna = shdl->ndev->xdna;
 	struct shmem_db_ring *ring = shdl->db_ring;
 	u64 head, tail;
+	long wret;
 	int ret;
 
 	spin_lock(&shdl->db_lock);
 
-	ret = shmem_db_produce(ring, shdl->db_ring_mask, hw_ctx_id,
-			       &shdl->db_head_cached);
-	if (ret) {
+	/*
+	 * If the doorbell ring is full, back off and wait for a completion
+	 * interrupt (the RX IPI advances the remote's tail and wakes db_waitq)
+	 * to make room, up to a bounded timeout, instead of dropping the
+	 * doorbell.  db_lock must be released while sleeping.
+	 */
+	while ((ret = shmem_db_produce(ring, shdl->db_ring_mask,
+		hw_ctx_id, &shdl->db_head_cached)) == -ENOSPC) {
 		head = ring->head;
 		tail = ring->tail;
+		spin_unlock(&shdl->db_lock);
+
 		XDNA_DBG(xdna,
-			 "shmem doorbell TX db_produce failed: hw_ctx_id=%u head=%llu tail=%llu ret=%d",
-			 hw_ctx_id, head, tail, ret);
+			 "shmem doorbell ring full: hw_ctx_id=%u head=%llu tail=%llu, waiting",
+			 hw_ctx_id, head, tail);
+
+		wret = wait_event_timeout(shdl->db_waitq,
+					  shmem_db_ring_has_space(ring),
+					  msecs_to_jiffies(SHMEM_DB_RING_FULL_TIMEOUT_MS));
+		if (!wret) {
+			XDNA_ERR(xdna,
+				 "shmem doorbell ring full: hw_ctx_id=%u head=%llu tail=%llu, timed out",
+				 hw_ctx_id, head, tail);
+			return -ETIMEDOUT;
+		}
+
+		spin_lock(&shdl->db_lock);
+	}
+	if (ret) {
+		XDNA_ERR(xdna,
+			 "shmem doorbell TX db_produce failed: hw_ctx_id=%u ret=%d",
+			 hw_ctx_id, ret);
 		goto unlock;
 	}
 
@@ -440,6 +490,7 @@ static void amdxdna_shmem_rings_init(struct amdxdna_shmem_hdl *shdl)
 	spin_lock_init(&shdl->msg_id_lock);
 	spin_lock_init(&shdl->tx_lock);
 	spin_lock_init(&shdl->db_lock);
+	init_waitqueue_head(&shdl->db_waitq);
 	shdl->next_msg_id = 0;
 
 	INIT_WORK(&shdl->rx_work, amdxdna_shmem_rx_work);
