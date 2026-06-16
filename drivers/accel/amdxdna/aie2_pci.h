@@ -141,7 +141,6 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
-	u32				force_preempt_enabled;
 	u32				frame_boundary_preempt;
 
 	/* Mailbox and the management channel */

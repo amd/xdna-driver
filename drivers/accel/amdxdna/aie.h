@@ -60,6 +60,7 @@ struct aie_device {
 	struct amdxdna_drm_query_aie_version version;
 	struct amdxdna_drm_query_aie_metadata metadata;
 	struct aie_msg_ops msg_ops;
+	u32	force_preempt_enabled;
 
 	/* FW hwctx slot count for the telemetry map; 0 if arch has no map. */
 	u32 hwctx_limit;
@@ -172,6 +173,9 @@ int amdxdna_query_ctx_status_array(struct aie_device *aie, struct amdxdna_client
 				   struct amdxdna_drm_get_array *args);
 int amdxdna_query_ctx_status_by_id(struct aie_device *aie, struct amdxdna_client *client,
 				   struct amdxdna_drm_get_array *args);
+int amdxdna_get_force_preempt_state(struct aie_device *aie, struct amdxdna_drm_get_info *args);
+int amdxdna_set_force_preempt_state(struct aie_device *aie, struct amdxdna_client *client,
+				    struct amdxdna_drm_set_state *args);
 void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 
 struct amdxdna_msg_buf_hdl {

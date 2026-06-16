@@ -201,6 +201,15 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 resp.job_complete_msix_idx, resp.hw_context_id,
 		 resp.doorbell_offset);
 
+	if (ndev->aie.force_preempt_enabled) {
+		ret = aie4_force_preemption(ndev);
+		if (ret) {
+			XDNA_ERR(xdna, "failed to enable force preempt: %d", ret);
+			aie4_msg_destroy_context(ndev, resp.hw_context_id);
+			return ret;
+		}
+	}
+
 	/* setup interrupt completion per msix index */
 	ret = aie4_link_cert_comp(hwctx, resp.job_complete_msix_idx);
 	if (ret) {
