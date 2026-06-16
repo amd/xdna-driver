@@ -1226,7 +1226,7 @@ dev_exit:
 }
 
 static int aie2_set_power_mode(struct amdxdna_client *client,
-			       struct amdxdna_drm_set_state *args)
+			       struct amdxdna_drm_set_state *args, u32 *settle_ms)
 {
 	struct amdxdna_drm_set_power_mode power_state;
 	enum amdxdna_power_mode_type power_mode;
@@ -1247,7 +1247,7 @@ static int aie2_set_power_mode(struct amdxdna_client *client,
 		return -EINVAL;
 	}
 
-	return aie2_pm_set_mode(xdna->dev_handle, power_mode);
+	return aie2_pm_set_mode(xdna->dev_handle, power_mode, settle_ms);
 }
 
 static int aie2_set_preempt_state(struct amdxdna_client *client,
@@ -1283,7 +1283,7 @@ static int aie2_set_preempt_state(struct amdxdna_client *client,
 }
 
 static int aie2_set_state(struct amdxdna_client *client,
-			  struct amdxdna_drm_set_state *args)
+			  struct amdxdna_drm_set_state *args, u32 *settle_ms)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_dev *xdna = client->xdna;
@@ -1298,7 +1298,7 @@ static int aie2_set_state(struct amdxdna_client *client,
 
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
-		ret = aie2_set_power_mode(client, args);
+		ret = aie2_set_power_mode(client, args, settle_ms);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:

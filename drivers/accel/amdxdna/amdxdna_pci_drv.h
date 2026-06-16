@@ -73,7 +73,8 @@ struct amdxdna_dev_ops {
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
-	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
+	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args,
+			     u32 *settle_ms);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
 };
