@@ -6,12 +6,18 @@
  * transport.
  *
  * Shared memory is mapped via devm_ioremap_wc() (Normal Non-Cacheable
- * on ARM64).  Bulk data copies use memcpy_toio/memcpy_fromio (the
- * kernel-sanctioned accessors for IO-mapped memory); single u64 index
- * updates use plain stores with natural 8-byte alignment guaranteeing
- * atomicity on AArch64.  dma_wmb()/dma_rmb() order data vs. index
- * updates across the non-coherent boundary.
- * Both sides are little-endian, so no byte-swap is needed.
+ * on ARM64) and accessed as plain memory: header and payload copies use
+ * plain memcpy (kernel-optimized LDP/STP), not the memcpy_toio/fromio IO
+ * accessors which carry Device-MMIO semantics we do not need here.
+ * Single u64 index updates use plain stores with natural 8-byte
+ * alignment guaranteeing atomicity on AArch64.  dma_wmb()/dma_rmb()
+ * order data vs. index updates across the non-coherent boundary.  Both
+ * sides are little-endian, so no byte-swap is needed.
+ *
+ * Host-owned indices are cached driver-side (the host is the sole
+ * writer): the doorbell producer caches its head and the mgmt-RX
+ * consumer caches its tail, so the hot paths never pay a WC read for an
+ * index they already know.  The remote-owned index is always read fresh.
  */
 
 #ifndef _AMDXDNA_SHMEM_H_
@@ -23,6 +29,7 @@
 #include <linux/compiler.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
+#include <linux/string.h>
 #include <linux/types.h>
 
 struct amdxdna_dev;
@@ -108,18 +115,19 @@ static_assert(offsetof(struct shmem_db_ring, data) == 128);
 /*
  * Management ring -- produce (host writes to TX ring).
  *
- * Stateless: head and tail are read fresh from shared memory on every
- * call.  No caller-side cached indices required.
+ * Caller passes the cached ring_mask (constant after init) to avoid a
+ * WC read on every call.  head and tail are read fresh from shared
+ * memory each time (stateless indices).
  *
  * Returns 0 on success, -ENOSPC if ring is full.
  */
 static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
-				     void *ring_base,
-				     const struct shmem_msg_hdr *msg_hdr,
-				     const void *payload, size_t payload_size)
+					      void *ring_base, u64 ring_mask,
+					      const struct shmem_msg_hdr *msg_hdr,
+					      const void *payload,
+					      size_t payload_size)
 {
-	u64 mask = hdr->ring_mask;
-	u64 size = mask + 1;
+	u64 size = ring_mask + 1;
 	u64 head = hdr->head;
 	u64 tail = hdr->tail;
 	u32 total = sizeof(*msg_hdr) + payload_size;
@@ -128,7 +136,7 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 	if (head - tail + total > size)
 		return -ENOSPC;
 
-	off = head & mask;
+	off = head & ring_mask;
 
 	if (off + total > size) {
 		gap = size - off;
@@ -137,13 +145,13 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 
 		if (head - tail + total > size)
 			return -ENOSPC;
-		off = head & mask;
+		off = head & ring_mask;
 	}
 
-	memcpy_toio(ring_base + off, msg_hdr, sizeof(*msg_hdr));
+	memcpy(ring_base + off, msg_hdr, sizeof(*msg_hdr));
 	if (payload_size)
-		memcpy_toio(ring_base + off + sizeof(*msg_hdr),
-			    payload, payload_size);
+		memcpy(ring_base + off + sizeof(*msg_hdr),
+		       payload, payload_size);
 
 	dma_wmb();
 
@@ -156,57 +164,61 @@ static inline int shmem_mgmt_produce(struct shmem_ring_hdr *hdr,
 /*
  * Management ring -- consume (host reads from RX ring).
  *
- * Stateless: head and tail are read fresh from shared memory on every
- * call.  No caller-side cached indices required.
+ * Caller passes the cached ring_mask (constant after init) and a pointer
+ * to the cached tail.  The host owns tail (sole consumer), so it is read
+ * from the cache and only ever written to shared memory -- never read
+ * back from WC.  head is owned by the RPU and read fresh each call.
  *
  * Returns payload size on success, -EAGAIN if ring is empty, -EOVERFLOW
  * if the message payload exceeds payload_max.
  */
 static inline int shmem_mgmt_consume(struct shmem_ring_hdr *hdr,
-				     void *ring_base,
-				     struct shmem_msg_hdr *msg_hdr,
-				     void *payload, size_t payload_max)
+					      void *ring_base, u64 ring_mask,
+					      struct shmem_msg_hdr *msg_hdr,
+					      void *payload, size_t payload_max,
+					      u64 *tail_cached)
 {
-	u64 mask = hdr->ring_mask;
-	u64 size = mask + 1;
+	u64 size = ring_mask + 1;
 	u64 head, tail;
 	u64 off;
 	u32 payload_size;
 
 	dma_rmb();
 	head = hdr->head;
-	tail = hdr->tail;
+	tail = *tail_cached;
 
 	if (head == tail)
 		return -EAGAIN;
 
-	off = tail & mask;
+	off = tail & ring_mask;
 
 	if (*(u32 *)(ring_base + off) == SHMEM_TOMBSTONE) {
 		tail += size - off;
 		if (tail == head) {
 			hdr->tail = tail;
+			*tail_cached = tail;
 			dma_wmb();
 			return -EAGAIN;
 		}
-		off = tail & mask;
+		off = tail & ring_mask;
 		dma_rmb();
 	}
 
-	memcpy_fromio(msg_hdr, ring_base + off, sizeof(*msg_hdr));
+	memcpy(msg_hdr, ring_base + off, sizeof(*msg_hdr));
 
 	payload_size = msg_hdr->total_size - sizeof(*msg_hdr);
 	if (payload_size > payload_max)
 		return -EOVERFLOW;
 
 	if (payload_size)
-		memcpy_fromio(payload, ring_base + off + sizeof(*msg_hdr),
-			      payload_size);
+		memcpy(payload, ring_base + off + sizeof(*msg_hdr),
+		       payload_size);
 
 	dma_wmb();
 
 	tail += msg_hdr->total_size;
 	hdr->tail = tail;
+	*tail_cached = tail;
 
 	return payload_size;
 }
@@ -214,27 +226,31 @@ static inline int shmem_mgmt_consume(struct shmem_ring_hdr *hdr,
 /*
  * Doorbell ring -- produce (host writes hw_ctx_id).
  *
- * Stateless: head and tail are read fresh from shared memory on every
- * call.  No caller-side cached indices required.
+ * Caller passes the cached ring_mask (constant after init) and a pointer
+ * to the cached head.  The host owns head (sole producer), so it is read
+ * from the cache and only ever written to shared memory -- never read
+ * back from WC.  tail is owned by the RPU and read fresh to check space.
  *
  * Returns 0 on success, -ENOSPC if ring is full.
  */
-static inline int shmem_db_produce(struct shmem_db_ring *ring, u32 hw_ctx_id)
+static inline int shmem_db_produce(struct shmem_db_ring *ring,
+					    u64 ring_mask, u32 hw_ctx_id,
+					    u64 *head_cached)
 {
-	u64 mask = ring->ring_mask;
-	u64 size = mask + 1;
-	u64 head = ring->head;
+	u64 size = ring_mask + 1;
+	u64 head = *head_cached;
 	u64 tail = ring->tail;
 
 	if (head - tail >= size)
 		return -ENOSPC;
 
-	ring->data[head & mask] = hw_ctx_id;
+	ring->data[head & ring_mask] = hw_ctx_id;
 
 	dma_wmb();
 
 	head++;
 	ring->head = head;
+	*head_cached = head;
 
 	return 0;
 }

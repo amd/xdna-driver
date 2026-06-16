@@ -76,6 +76,20 @@ struct amdxdna_shmem_hdl {
 	/* Doorbell ring (host is producer) */
 	struct shmem_db_ring	*db_ring;
 
+	/* Cached ring_mask -- constant after init, avoids NC read on hot path */
+	u64			mgmt_ring_mask;
+	u64			db_ring_mask;
+
+	/*
+	 * Cached host-owned indices -- the host is the sole writer of each,
+	 * so these mirror shared memory and avoid a WC read on the hot path.
+	 * db_head_cached is serialized by db_lock; rx_tail_cached is written
+	 * only by rx_work (single-threaded) and read locklessly by the IPI
+	 * gating (aligned u64, atomic on AArch64).
+	 */
+	u64			db_head_cached;
+	u64			rx_tail_cached;
+
 	/* Inflight management message tracking */
 	struct xarray		msg_xa;
 	spinlock_t		msg_id_lock; /* protects next_msg_id + xa_insert */
@@ -146,7 +160,9 @@ static void amdxdna_shmem_rx_work(struct work_struct *work)
 	/* Drain all available management responses */
 	while (shdl->rx_hdr) {
 		payload_size = shmem_mgmt_consume(shdl->rx_hdr, shdl->rx_ring,
-						  &msg_hdr, buf, sizeof(buf));
+						  shdl->mgmt_ring_mask,
+						  &msg_hdr, buf, sizeof(buf),
+						  &shdl->rx_tail_cached);
 		if (payload_size < 0)
 			break;
 
@@ -193,7 +209,18 @@ static void amdxdna_shmem_rx_callback(struct mbox_client *cl, void *data)
 	trace_shmem_ipi_rx(shdl->rx_hdr->head, shdl->rx_hdr->tail,
 			   shdl->db_ring->head, shdl->db_ring->tail);
 	amdxdna_shmem_doorbell_notify(shdl->ndev);
-	schedule_work(&shdl->rx_work);
+
+	/*
+	 * Only drain the management ring when the RPU has actually queued a
+	 * response (head != tail).  Pure doorbell-completion IPIs leave the
+	 * mgmt ring empty, so scheduling rx_work for them just adds a needless
+	 * workqueue wakeup on the completion fast path.  SPSC-safe: the RPU
+	 * publishes head (with a write barrier) before sending the IPI.
+	 * tail is host-owned, so compare against the cached copy and read
+	 * only the RPU-owned head fresh from WC.
+	 */
+	if (shdl->rx_hdr->head != shdl->rx_tail_cached)
+		schedule_work(&shdl->rx_work);
 
 	/*
 	 * ACK the IPI to re-enable the notification interrupt.
@@ -247,6 +274,7 @@ static int amdxdna_shmem_send_msg(void *xcomm_hdl,
 
 	spin_lock(&shdl->tx_lock);
 	ret = shmem_mgmt_produce(shdl->tx_hdr, shdl->tx_ring,
+				 shdl->mgmt_ring_mask,
 				 &hdr, msg->send_data, msg->send_size);
 	if (ret)
 		goto unlock_tx;
@@ -278,11 +306,12 @@ static int amdxdna_shmem_ring_doorbell(void *xcomm_hdl, u32 hw_ctx_id)
 	int ret;
 
 	spin_lock(&shdl->db_lock);
-	head = ring->head;
-	tail = ring->tail;
 
-	ret = shmem_db_produce(ring, hw_ctx_id);
+	ret = shmem_db_produce(ring, shdl->db_ring_mask, hw_ctx_id,
+			       &shdl->db_head_cached);
 	if (ret) {
+		head = ring->head;
+		tail = ring->tail;
 		XDNA_DBG(xdna,
 			 "shmem doorbell TX db_produce failed: hw_ctx_id=%u head=%llu tail=%llu ret=%d",
 			 hw_ctx_id, head, tail, ret);
@@ -391,6 +420,9 @@ static void amdxdna_shmem_rings_init(struct amdxdna_shmem_hdl *shdl)
 	shdl->rx_hdr->ring_mask = ring_data - 1;
 	shdl->rx_hdr->rsvd = 0;
 
+	shdl->mgmt_ring_mask = ring_data - 1;
+	shdl->rx_tail_cached = 0;
+
 	/* Doorbell ring uses the entire doorbell region (slot-indexed) */
 	shdl->db_ring = (struct shmem_db_ring *)shdl->db_shmem;
 	ring_data = (shdl->db_shmem_size - offsetof(struct shmem_db_ring, data))
@@ -400,6 +432,9 @@ static void amdxdna_shmem_rings_init(struct amdxdna_shmem_hdl *shdl)
 	shdl->db_ring->tail = 0;
 	shdl->db_ring->ring_mask = ring_data - 1;
 	shdl->db_ring->rsvd = 0;
+
+	shdl->db_ring_mask = ring_data - 1;
+	shdl->db_head_cached = 0;
 
 	xa_init(&shdl->msg_xa);
 	spin_lock_init(&shdl->msg_id_lock);
