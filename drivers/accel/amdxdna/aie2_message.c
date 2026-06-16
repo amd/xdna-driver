@@ -336,7 +336,7 @@ int aie2_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_hwctx *hwct
 	if (WARN_ON_ONCE(hwctx->fw_ctx_id == -1))
 		return -EINVAL;
 
-	if (ndev->force_preempt_enabled) {
+	if (ndev->aie.force_preempt_enabled) {
 		ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FORCE_PREEMPT, &hwctx->fw_ctx_id);
 		if (ret) {
 			XDNA_ERR(xdna, "failed to enable force preempt %d", ret);

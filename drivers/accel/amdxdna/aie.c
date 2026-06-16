@@ -524,6 +524,39 @@ int amdxdna_query_ctx_status_by_id(struct aie_device *aie,
 	return 0;
 }
 
+int amdxdna_get_force_preempt_state(struct aie_device *aie, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_attribute_state state = {};
+	u32 buf_sz;
+
+	state.state = aie->force_preempt_enabled;
+
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &state, buf_sz))
+		return -EFAULT;
+
+	return 0;
+}
+
+int amdxdna_set_force_preempt_state(struct aie_device *aie, struct amdxdna_client *client,
+				    struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_attribute_state state;
+
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+		return -EFAULT;
+
+	if (state.state > 1)
+		return -EINVAL;
+
+	if (XDNA_MBZ_DBG(client->xdna, state.pad, sizeof(state.pad)))
+		return -EINVAL;
+
+	aie->force_preempt_enabled = state.state;
+
+	return 0;
+}
+
 void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo,
 			    unsigned long cur_seq)
 {

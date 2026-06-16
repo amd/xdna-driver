@@ -778,6 +778,9 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	case DRM_AMDXDNA_QUERY_TELEMETRY:
 		ret = amdxdna_get_telemetry(&ndev->aie, client, args);
 		break;
+	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
+		ret = amdxdna_get_force_preempt_state(&ndev->aie, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -1195,6 +1198,9 @@ static int aie4_set_state(struct amdxdna_client *client,
 	switch (args->param) {
 	case DRM_AMDXDNA_SET_POWER_MODE:
 		ret = aie4_set_power_mode(client, args);
+		break;
+	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
+		ret = amdxdna_set_force_preempt_state(&ndev->aie, client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
