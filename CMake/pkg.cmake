@@ -121,13 +121,13 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
     set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
     set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
   endif()
-elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch")
+elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch|void")
   set(CPACK_GENERATOR "TGZ")
-  # For Arch Linux, we generate a tarball that can be repackaged into a proper
-  # Arch package using the provided PKGBUILD. When using the PKGBUILD, install
-  # hooks handle post-install/pre-remove automatically via pacman.
+  # Source-based distros (Arch, Void) have no native deb/rpm in this flow, so we
+  # generate a tarball that can be repackaged into a native package (e.g. the
+  # provided Arch PKGBUILD, whose install hooks handle post-install/pre-remove).
   set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-  message(STATUS "Arch Linux detected - generating TGZ package")
+  message(STATUS "Arch/Void Linux detected - generating TGZ package")
   if(NOT SKIP_KMOD)
     message(STATUS "Post-install script: ${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
     message(STATUS "Pre-remove script: ${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
