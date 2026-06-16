@@ -15,6 +15,9 @@
 #define AIE2_CLK_GATING_ENABLE	1
 #define AIE2_CLK_GATING_DISABLE	0
 
+/* Time for the NPU clock to ramp to a power-override DPM level. */
+#define AIE2_DPM_SETTLE_DELAY_MS	3500
+
 static int aie2_pm_set_clk_gating(struct amdxdna_dev_hdl *ndev, u32 val)
 {
 	int ret;
@@ -80,16 +83,19 @@ int aie2_pm_start(struct amdxdna_dev_hdl *ndev)
 	return 0;
 }
 
-int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target)
+int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target,
+		     u32 *settle_ms)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	u32 clk_gating, dpm_level;
+	u32 clk_gating, dpm_level, prev_dpm_level;
 	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	if (ndev->pw_mode == target)
 		return 0;
+
+	prev_dpm_level = ndev->dpm_level;
 
 	switch (target) {
 	case POWER_MODE_TURBO:
@@ -125,6 +131,16 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 		return ret;
 
 	ndev->pw_mode = target;
+
+	/*
+	 * Setting a DPM level only defines the allowed clock range; the NPU
+	 * clock then ramps to it over time. When a mode change raises the DPM
+	 * level, report how long the clock needs to settle so the caller can
+	 * wait after releasing dev_lock, instead of running the next workload
+	 * during the ramp. Downclocking has nothing to settle, so it is skipped.
+	 */
+	if (dpm_level > prev_dpm_level)
+		*settle_ms = AIE2_DPM_SETTLE_DELAY_MS;
 
 	return 0;
 }

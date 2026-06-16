@@ -11,6 +11,7 @@
 #include <drm/drm_ioctl.h>
 #include <drm/drm_managed.h>
 #include <drm/gpu_scheduler.h>
+#include <linux/delay.h>
 #include <linux/iommu.h>
 #include <linux/pci.h>
 
@@ -296,6 +297,7 @@ static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struc
 	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_set_state *args = data;
+	u32 settle_ms = 0;
 	int ret;
 
 	if (!xdna->dev_info->ops->set_aie_state)
@@ -303,8 +305,16 @@ static int amdxdna_drm_set_state_ioctl(struct drm_device *dev, void *data, struc
 
 	XDNA_DBG(xdna, "Request parameter %u", args->param);
 	mutex_lock(&xdna->dev_lock);
-	ret = xdna->dev_info->ops->set_aie_state(client, args);
+	ret = xdna->dev_info->ops->set_aie_state(client, args, &settle_ms);
 	mutex_unlock(&xdna->dev_lock);
+
+	/*
+	 * Some state changes (e.g. a power-mode override that raises the DPM
+	 * level) need time for the NPU clock to ramp. Wait here, after dev_lock
+	 * is released, so the settle does not stall other dev_lock operations.
+	 */
+	if (!ret && settle_ms)
+		msleep(settle_ms);
 
 	return ret;
 }

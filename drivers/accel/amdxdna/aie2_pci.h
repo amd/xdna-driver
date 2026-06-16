@@ -213,7 +213,8 @@ extern const struct aie_hw_ops npu4_hw_ops;
 
 /* aie2_pm.c */
 int aie2_pm_start(struct amdxdna_dev_hdl *ndev);
-int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
+int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target,
+		     u32 *settle_ms);
 int aie2_pm_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 
 /* aie2_error.c */
