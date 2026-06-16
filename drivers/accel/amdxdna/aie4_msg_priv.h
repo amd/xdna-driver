@@ -15,6 +15,7 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_IDENTIFY                         = 0x10002,
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
 	AIE4_MSG_OP_GET_TELEMETRY                    = 0x10006,
+	AIE4_MSG_OP_SET_RUNTIME_CONFIG               = 0x10007,
 	AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION      = 0x1000F,
 
 	/* PF only */
@@ -75,6 +76,25 @@ struct aie4_msg_suspend_resp {
 
 struct aie4_msg_create_vfs_req {
 	__u32 vf_cnt;
+} __packed;
+
+struct aie4_msg_runtime_config_force_preemption {
+	__u8 enabled;
+	__u8 padding[3];
+} __packed;
+
+enum aie4_msg_runtime_config_type {
+	AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION = 1,
+	AIE4_MAX_RUNTIME_CONFIG
+};
+
+struct aie4_msg_set_runtime_cfg_req {
+	__u32 type;
+	__u8 data[4];
+} __packed;
+
+struct aie4_msg_set_runtime_cfg_resp {
+	enum aie4_msg_status status;
 } __packed;
 
 struct aie4_msg_create_vfs_resp {

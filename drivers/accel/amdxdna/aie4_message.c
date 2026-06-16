@@ -196,6 +196,28 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 	return 0;
 }
 
+int aie4_force_preemption(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	struct aie4_msg_runtime_config_force_preemption *force_preempt;
+	u32 type = AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION;
+	int ret;
+
+	req.type = type;
+	force_preempt = (struct aie4_msg_runtime_config_force_preemption *)req.data;
+	force_preempt->enabled = 1;
+
+	msg.send_size = sizeof(req);
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Failed to set runtime config, ret %d", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 				       u32 hw_context_id, u32 property,
 				       const struct aie4_msg_context_config_cert_logging *cl)
