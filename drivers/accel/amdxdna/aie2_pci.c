@@ -808,19 +808,14 @@ int aie2_fill_hwctx_map(struct aie_device *aie, u32 *map)
 	return 0;
 }
 
-static int aie2_get_preempt_state(struct amdxdna_client *client,
-				  struct amdxdna_drm_get_info *args)
+static int aie2_get_frame_boundary_preempt_state(struct amdxdna_client *client,
+						 struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_attribute_state state = {};
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev;
+	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	u32 buf_sz;
 
-	ndev = xdna->dev_handle;
-	if (args->param == DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE)
-		state.state = ndev->force_preempt_enabled;
-	else if (args->param == DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE)
-		state.state = ndev->frame_boundary_preempt;
+	state.state = ndev->frame_boundary_preempt;
 
 	buf_sz = min(args->buffer_size, sizeof(state));
 	if (copy_to_user(u64_to_user_ptr(args->buffer), &state, buf_sz))
@@ -874,8 +869,10 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = aie2_query_resource_info(client, args);
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
+		ret = amdxdna_get_force_preempt_state(&ndev->aie, args);
+		break;
 	case DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE:
-		ret = aie2_get_preempt_state(client, args);
+		ret = aie2_get_frame_boundary_preempt_state(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
@@ -997,8 +994,8 @@ static int aie2_set_power_mode(struct amdxdna_client *client,
 	return aie2_pm_set_mode(xdna->dev_handle, power_mode, settle_ms);
 }
 
-static int aie2_set_preempt_state(struct amdxdna_client *client,
-				  struct amdxdna_drm_set_state *args)
+static int aie2_set_frame_boundary_preempt(struct amdxdna_client *client,
+					   struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_drm_attribute_state state;
@@ -1014,17 +1011,12 @@ static int aie2_set_preempt_state(struct amdxdna_client *client,
 	if (XDNA_MBZ_DBG(client->xdna, state.pad, sizeof(state.pad)))
 		return -EINVAL;
 
-	if (args->param == DRM_AMDXDNA_SET_FORCE_PREEMPT) {
-		ndev->force_preempt_enabled = state.state;
-	} else if (args->param == DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT) {
-		val = state.state;
-		ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT,
-				       &val);
-		if (ret)
-			return ret;
+	val = state.state;
+	ret = aie2_runtime_cfg(ndev, AIE2_RT_CFG_FRAME_BOUNDARY_PREEMPT, &val);
+	if (ret)
+		return ret;
 
-		ndev->frame_boundary_preempt = state.state;
-	}
+	ndev->frame_boundary_preempt = state.state;
 
 	return 0;
 }
@@ -1048,8 +1040,10 @@ static int aie2_set_state(struct amdxdna_client *client,
 		ret = aie2_set_power_mode(client, args, settle_ms);
 		break;
 	case DRM_AMDXDNA_SET_FORCE_PREEMPT:
+		ret = amdxdna_set_force_preempt_state(&ndev->aie, client, args);
+		break;
 	case DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT:
-		ret = aie2_set_preempt_state(client, args);
+		ret = aie2_set_frame_boundary_preempt(client, args);
 		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
