@@ -1149,7 +1149,20 @@ free_work_buf:
 
 static void aie4_pf_fini(struct amdxdna_dev *xdna)
 {
-	aie4_sriov_stop(xdna->dev_handle);
+	int ret;
+
+	/* Block new traffic from amdxdna-managed VFs */
+	aie4_unplug_vfs(xdna->dev_handle);
+
+	ret = aie4_sriov_stop(xdna->dev_handle);
+	if (ret == -EPERM) {
+		/*
+		 * The -EPERM indicates that there are VFs set to passthrough via VFIO driver.
+		 * The firmware teardown will disrupt those VMs.
+		 */
+		XDNA_WARN(xdna, "Removing PF with VFs in passthrough - VM disruption expected");
+	}
+
 	aie4_pf_hw_stop(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
 }
