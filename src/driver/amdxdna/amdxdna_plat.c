@@ -50,7 +50,18 @@
  *       amd,remoteproc = <&r5f_0>;
  *       memory-region       = <&rpu_cma>, <&aie_cma0>;
  *       memory-region-names = "rpu-cma", "app-bank0";
+ *
+ *       part@0 {
+ *           amd,start-col = <0>;   // optional partition start column
+ *           amd,num-cols  = <4>;   // optional partition column count
+ *       };
  *   };
+ *
+ * The optional "part@0" child describes the AIE partition geometry told to
+ * firmware at AIE4_MSG_OP_CREATE_PARTITION time.  Only a single partition is
+ * supported today.  When the node or its "amd,start-col" /
+ * "amd,num-cols" properties are absent the driver defaults to a full-NPU
+ * partition (start column 0, dev_info->num_col columns).
  */
 
 #include <drm/drm_accel.h>
@@ -323,6 +334,7 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	const struct amdxdna_plat_data *pdata;
 	struct amdxdna_dev_hdl *ndev;
+	struct device_node *part_np;
 	struct amdxdna_dev *xdna;
 	int ret;
 
@@ -361,6 +373,26 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	xdna->dev_handle = ndev;
 	ndev->pw_mode = POWER_MODE_DEFAULT;
 	ndev->plat_transport = pdata->transport;
+
+	/*
+	 * Optional per-partition geometry told to firmware at
+	 * AIE4_MSG_OP_CREATE_PARTITION time. Only a single partition is
+	 * supported today, described by the "part@0" child node. A missing
+	 * node or properties leave the aie4_ndev_init_base() defaults
+	 * (start_col=0, num_col=dev_info->num_col, i.e. a full-NPU partition)
+	 * in place.
+	 */
+	part_np = of_get_child_by_name(dev->of_node, "part");
+	if (part_np) {
+		of_property_read_u32(part_np, "amd,start-col",
+				     &ndev->part_start_col);
+		of_property_read_u32(part_np, "amd,num-cols",
+				     &ndev->part_num_col);
+		of_node_put(part_np);
+	}
+	XDNA_INFO(xdna, "AIE partition geometry: start_col=%u num_cols=%u",
+		  ndev->part_start_col, ndev->part_num_col);
+
 	platform_set_drvdata(pdev, xdna);
 
 #ifdef AMDXDNA_DEVEL

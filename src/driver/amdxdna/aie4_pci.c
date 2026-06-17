@@ -515,18 +515,20 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 	}
 
 	/*
-	 * There is only a single partition spanning the entire NPU for now.
-	 * The column count is a per-device static value (see
-	 * struct amdxdna_dev_info::num_col); we deliberately do not use
-	 * the firmware-reported metadata.cols here because some rpu-fw
-	 * builds put total tile count in that field.
+	 * Partition geometry comes from ndev->part_start_col /
+	 * ndev->part_num_col. These default to start_col=0 /
+	 * dev_info->num_col (full-NPU partition) and are overridden on the
+	 * platform path from the device-tree "amd,start-col" /
+	 * "amd,num-cols" properties. We deliberately do not use the
+	 * firmware-reported metadata.cols here because some rpu-fw builds put
+	 * total tile count in that field.
 	 *
 	 * In the future, we may have multiple partitions starting from
 	 * different start_cols, different num_tiles, mem_size, and
 	 * application_mode can be SINGLE|DUAL_A|DUAL_B.
 	 */
-	req.partition_col_start = 0;
-	req.partition_col_count = xdna->dev_info->num_col;
+	req.partition_col_start = ndev->part_start_col;
+	req.partition_col_count = ndev->part_num_col;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
@@ -1113,9 +1115,9 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		return 0;
 
 	req.partition_id = ndev->partition_id;
-	/* For now the partition spans the full NPU; size is per-device. */
-	ctx->start_col = 0;
-	ctx->num_col = xdna->dev_info->num_col;
+	/* Match the partition geometry created in aie4_partition_init(). */
+	ctx->start_col = ndev->part_start_col;
+	ctx->num_col = ndev->part_num_col;
 	req.request_num_tiles = ctx->num_tiles;
 
 	req.pasid.raw = 0;
@@ -1554,6 +1556,8 @@ void aie4_ndev_init_base(struct amdxdna_dev_hdl *ndev, struct amdxdna_dev *xdna)
 {
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
+	ndev->part_start_col = 0;
+	ndev->part_num_col = xdna->dev_info->num_col;
 	mutex_init(&ndev->aie4_lock);
 	xa_init(&ndev->cert_comp_xa);
 }

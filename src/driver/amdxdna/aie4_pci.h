@@ -183,6 +183,16 @@ struct amdxdna_dev_hdl {
 
 	u32				partition_id;
 
+	/*
+	 * Partition geometry used for AIE4_MSG_OP_CREATE_PARTITION and the
+	 * per-context AIE4_MSG_OP_CREATE_HW_CONTEXT. Defaulted in
+	 * aie4_ndev_init_base() to start_col=0 / dev_info->num_col; the
+	 * platform (device-tree) path overrides them from the
+	 * "amd,start-col" / "amd,num-cols" properties.
+	 */
+	u32				part_start_col;
+	u32				part_num_col;
+
 	u32				total_col;
 	struct aie_version		version;
 	struct aie_metadata		metadata;
