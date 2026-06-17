@@ -84,12 +84,11 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx);
 int aie4_sriov_configure(struct amdxdna_dev *xdna, int num_vfs);
 int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs);
 int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev);
+void aie4_unplug_vfs(struct amdxdna_dev_hdl *ndev);
 #else
 #define aie4_sriov_configure NULL
-static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
-{
-	return 0;
-}
+static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev) { return 0; }
+static inline void aie4_unplug_vfs(struct amdxdna_dev_hdl *ndev) {}
 #endif
 
 /* aie4_message.c */
