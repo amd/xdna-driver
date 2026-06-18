@@ -484,9 +484,9 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret)
 		return ret;
 
-	xdna->notifier_wq = alloc_ordered_workqueue("notifier_wq", WQ_MEM_RECLAIM);
-	if (!xdna->notifier_wq) {
-		ret = -ENOMEM;
+	xdna->notifier_wq = drmm_alloc_ordered_workqueue(ddev, "notifier_wq", WQ_MEM_RECLAIM);
+	if (IS_ERR(xdna->notifier_wq)) {
+		ret = PTR_ERR(xdna->notifier_wq);
 		goto iommu_fini;
 	}
 
@@ -495,7 +495,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	mutex_unlock(&xdna->dev_lock);
 	if (ret) {
 		XDNA_ERR(xdna, "Hardware init failed, ret %d", ret);
-		goto destroy_notifier_wq;
+		goto iommu_fini;
 	}
 
 	ret = amdxdna_sysfs_init(xdna);
@@ -520,8 +520,6 @@ failed_dev_fini:
 	mutex_lock(&xdna->dev_lock);
 	xdna->dev_info->ops->fini(xdna);
 	mutex_unlock(&xdna->dev_lock);
-destroy_notifier_wq:
-	destroy_workqueue(xdna->notifier_wq);
 iommu_fini:
 	amdxdna_iommu_fini(xdna);
 	return ret;
@@ -531,8 +529,6 @@ static void amdxdna_remove(struct pci_dev *pdev)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
 	struct amdxdna_client *client;
-
-	destroy_workqueue(xdna->notifier_wq);
 
 	drm_dev_unplug(&xdna->ddev);
 	amdxdna_sysfs_fini(xdna);
