@@ -15,42 +15,6 @@
 #include "amdxdna_drv.h"
 #include "amdxdna_solver.h"
 
-struct partition_node {
-	struct list_head	list;
-	u32			nshared;	/* # shared requests */
-	u32			start_col;	/* start column */
-	u32			ncols;		/* # columns */
-	bool			exclusive;	/* can not be shared if set */
-};
-
-struct solver_node {
-	struct list_head	list;
-	u64			rid;		/* Request ID from consumer */
-
-	struct partition_node	*pt_node;
-	void			*cb_arg;
-	u32			dpm_level;
-	u32			cols_len;
-	u32			start_cols[] __counted_by(cols_len);
-};
-
-struct solver_rgroup {
-	u32				rgid;
-	u32				nnode;
-	u32				npartition_node;
-
-	unsigned long			*resbit;	/* dynamic bitmap, size = total_col */
-	struct list_head		node_list;
-	struct list_head		pt_node_list;
-};
-
-struct solver_state {
-	struct solver_rgroup		rgp;
-	struct init_config		cfg;
-	struct xrs_action_ops		*actions;
-	struct mutex			xrs_lock;	/* serialise alloc/release */
-};
-
 static u32 calculate_gops(struct aie_qos *rqos)
 {
 	u32 service_rate = 0;
@@ -207,19 +171,26 @@ static int get_free_partition(struct solver_state *xrs,
 			      struct solver_node *snode,
 			      struct alloc_requests *req)
 {
+	u32 user_col = req->rqos.user_start_col;
 	u32 total_col = xrs->cfg.total_col;
 	struct partition_node *pt_node;
 	u32 ncols = req->cdo.ncols;
 	u32 col, i;
 
-	for (i = 0; i < snode->cols_len; i++) {
-		col = snode->start_cols[i];
-		if (find_next_bit(xrs->rgp.resbit, total_col, col) >= col + ncols)
-			break;
+	if (user_col != USER_START_COL_NOT_REQUESTED) {
+		/* User pinned a specific start column — validate and use it directly. */
+		col = user_col;
+		if (find_next_bit(xrs->rgp.resbit, total_col, col) < col + ncols)
+			return -ENODEV;
+	} else {
+		for (i = 0; i < snode->cols_len; i++) {
+			col = snode->start_cols[i];
+			if (find_next_bit(xrs->rgp.resbit, total_col, col) >= col + ncols)
+				break;
+		}
+		if (i == snode->cols_len)
+			return -ENODEV;
 	}
-
-	if (i == snode->cols_len)
-		return -ENODEV;
 
 	pt_node = kzalloc_obj(*pt_node);
 	if (!pt_node)
@@ -448,6 +419,7 @@ int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx)
 	xrs_req->rqos.exec_time = hwctx->qos.frame_exec_time;
 	xrs_req->rqos.priority = hwctx->qos.priority;
 	xrs_req->rqos.exclusive = (hwctx->qos.priority == AMDXDNA_QOS_REALTIME_PRIORITY);
+	xrs_req->rqos.user_start_col = hwctx->qos.user_start_col;
 
 	xrs_req->rid = (uintptr_t)hwctx;
 

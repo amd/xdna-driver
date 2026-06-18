@@ -32,6 +32,8 @@ struct aie_qos_cap {
 /*
  * QoS requirement of a resource allocation.
  */
+#define USER_START_COL_NOT_REQUESTED	0xFF
+
 struct aie_qos {
 	u32	gops;		/* Giga operations */
 	u32	fps;		/* Frames per second */
@@ -40,6 +42,7 @@ struct aie_qos {
 	u32	exec_time;	/* Frame execution time */
 	u32	priority;	/* Request priority */
 	u32	exclusive;	/* Exclusive partition */
+	u32	user_start_col;	/* Preferred start column, or USER_START_COL_NOT_REQUESTED */
 };
 
 /*
@@ -119,6 +122,42 @@ struct init_config {
 	struct clk_list_info	clk_list;       /* List of frequencies available in system */
 	struct drm_device	*ddev;
 	struct xrs_action_ops	*actions;
+};
+
+struct partition_node {
+	struct list_head	list;
+	u32			nshared;	/* # shared requests */
+	u32			start_col;	/* start column */
+	u32			ncols;		/* # columns */
+	bool			exclusive;	/* can not be shared if set */
+};
+
+struct solver_node {
+	struct list_head	list;
+	u64			rid;		/* Request ID from consumer */
+
+	struct partition_node	*pt_node;
+	void			*cb_arg;
+	u32			dpm_level;
+	u32			cols_len;
+	u32			start_cols[] __counted_by(cols_len);
+};
+
+struct solver_rgroup {
+	u32				rgid;
+	u32				nnode;
+	u32				npartition_node;
+
+	unsigned long			*resbit;	/* dynamic bitmap, size = total_col */
+	struct list_head		node_list;
+	struct list_head		pt_node_list;
+};
+
+struct solver_state {
+	struct solver_rgroup		rgp;
+	struct init_config		cfg;
+	struct xrs_action_ops		*actions;
+	struct mutex			xrs_lock;	/* serialise alloc/release */
 };
 
 /*

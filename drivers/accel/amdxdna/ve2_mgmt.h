@@ -54,7 +54,7 @@ struct amdxdna_mgmtctx {
 static inline int ve2_partition_read_privileged_mem(struct amdxdna_mgmtctx *mgmtctx,
 						    size_t field_off, size_t size, void *buf)
 {
-	u32 offset = CERT_HANDSHAKE_OFF(mgmtctx->start_col) + field_off;
+	u32 offset = CERT_HANDSHAKE_OFF(0) + field_off;
 
 	return aie_partition_read_privileged_mem(mgmtctx->aie_dev, offset, size, buf);
 }

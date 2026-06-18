@@ -18,6 +18,7 @@
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_drv.h"
+#include "ve2_aux.h"
 #include "ve2_debug.h"
 #include "ve2_hwctx.h"
 #include "ve2_mgmt.h"
@@ -128,6 +129,118 @@ static int ve2_get_hwctx_mem_bitmap(struct amdxdna_client *client,
 		return -EFAULT;
 
 	args->num_element = 1;
+	return 0;
+}
+
+static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_drm_aie_tile_access footer = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx = NULL;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_ctx_priv *vp;
+	struct amdxdna_client *tmp;
+	struct aie_location loc;
+	void *local_buf = NULL;
+	u32 buf_size, offset;
+	unsigned long hx_id;
+	int ret;
+
+	buf_size = (u32)args->num_element * args->element_size;
+	if (buf_size < sizeof(footer) + 1) {
+		XDNA_ERR(xdna, "buffer_size %u too small", buf_size);
+		return -EINVAL;
+	}
+
+	/* Footer is at the tail of the buffer; data area precedes it */
+	offset = buf_size - sizeof(footer);
+	if (copy_from_user(&footer, u64_to_user_ptr(args->buffer) + offset, sizeof(footer))) {
+		XDNA_ERR(xdna, "Failed to copy tile_access footer from user");
+		return -EFAULT;
+	}
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	/* Find the hwctx matching context_id + pid */
+
+	list_for_each_entry(tmp, &xdna->client_list, node) {
+		struct amdxdna_hwctx *hx;
+		int sidx;
+
+		sidx = srcu_read_lock(&tmp->hwctx_srcu);
+		xa_for_each(&tmp->hwctx_xa, hx_id, hx) {
+			if (hx->id == footer.context_id &&
+			    (u64)hx->client->pid == footer.pid) {
+				hwctx = hx;
+				break;
+			}
+		}
+		srcu_read_unlock(&tmp->hwctx_srcu, sidx);
+		if (hwctx)
+			break;
+	}
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "hwctx %u pid %llu not found",
+			 footer.context_id, footer.pid);
+		return -EINVAL;
+	}
+
+	if (footer.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "col %u out of partition range [0, %u)",
+			 footer.col, hwctx->num_col);
+		return -EINVAL;
+	}
+
+	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
+		XDNA_ERR(xdna, "row %u out of range [0, %u)",
+			 footer.row, xdna->dev_handle->aie_dev_info.rows);
+		return -EINVAL;
+	}
+
+	vp = ve2_hw_priv(hwctx);
+	if (!vp || !vp->mgmtctx) {
+		XDNA_ERR(xdna, "hwctx %u has no AIE partition", hwctx->id);
+		return -EINVAL;
+	}
+	mgmtctx = vp->mgmtctx;
+
+	local_buf = kzalloc(footer.size, GFP_KERNEL);
+	if (!local_buf)
+		return -ENOMEM;
+
+	/* Drop dev_lock — aie_partition_read can block on hardware I/O */
+	mutex_unlock(&xdna->dev_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
+
+	if (mgmtctx->active_ctx != hwctx) {
+		XDNA_ERR(xdna, "hwctx %u is not the active context", hwctx->id);
+		mutex_unlock(&mgmtctx->ctx_lock);
+		mutex_lock(&xdna->dev_lock);
+		kfree(local_buf);
+		return -EPERM;
+	}
+
+	loc.col = footer.col;
+	loc.row = footer.row;
+	ret = aie_partition_read(mgmtctx->aie_dev, loc, footer.addr, footer.size, local_buf);
+	mutex_unlock(&mgmtctx->ctx_lock);
+	mutex_lock(&xdna->dev_lock);
+
+	if (ret < 0) {
+		XDNA_ERR(xdna, "aie_partition_read failed: %d", ret);
+		kfree(local_buf);
+		return ret;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), local_buf, footer.size)) {
+		XDNA_ERR(xdna, "Failed to copy read data to user");
+		kfree(local_buf);
+		return -EFAULT;
+	}
+
+	kfree(local_buf);
+
 	return 0;
 }
 
@@ -253,6 +366,9 @@ int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	case DRM_AMDXDNA_AIE_COREDUMP:
 		ret = ve2_coredump_read(client, args);
 		break;
+	case DRM_AMDXDNA_AIE_TILE_READ:
+		ret = ve2_aie_tile_read(client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported GET_ARRAY param %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -260,4 +376,138 @@ int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 
 	drm_dev_exit(idx);
 	return ret;
+}
+
+static int ve2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_aie_tile_access footer = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_hwctx *hwctx = NULL;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_ctx_priv *vp;
+	struct amdxdna_client *tmp;
+	struct aie_location loc;
+	void *local_buf = NULL;
+	unsigned long hx_id;
+	u32 offset;
+	int ret;
+
+	if (args->buffer_size < sizeof(footer)) {
+		XDNA_ERR(xdna, "buffer_size %u too small (need %zu)",
+			 args->buffer_size, sizeof(footer));
+		return -EINVAL;
+	}
+
+	/* Footer is at the tail of the buffer */
+	offset = args->buffer_size - sizeof(footer);
+	if (copy_from_user(&footer, u64_to_user_ptr(args->buffer) + offset, sizeof(footer))) {
+		XDNA_ERR(xdna, "Failed to copy tile_access footer from user");
+		return -EFAULT;
+	}
+
+	/* Find the hwctx matching context_id + pid */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	list_for_each_entry(tmp, &xdna->client_list, node) {
+		struct amdxdna_hwctx *hx;
+		int sidx;
+
+		sidx = srcu_read_lock(&tmp->hwctx_srcu);
+		xa_for_each(&tmp->hwctx_xa, hx_id, hx) {
+			if (hx->id == footer.context_id &&
+			    (u64)hx->client->pid == footer.pid) {
+				hwctx = hx;
+				break;
+			}
+		}
+		srcu_read_unlock(&tmp->hwctx_srcu, sidx);
+		if (hwctx)
+			break;
+	}
+
+	if (!hwctx) {
+		XDNA_ERR(xdna, "hwctx %u pid %llu not found", footer.context_id, footer.pid);
+		return -EINVAL;
+	}
+
+	if (footer.col >= hwctx->num_col) {
+		XDNA_ERR(xdna, "col %u out of partition range [0, %u)",
+			 footer.col, hwctx->num_col);
+		return -EINVAL;
+	}
+
+	if (footer.row >= xdna->dev_handle->aie_dev_info.rows) {
+		XDNA_ERR(xdna, "row %u out of range [0, %u)",
+			 footer.row, xdna->dev_handle->aie_dev_info.rows);
+		return -EINVAL;
+	}
+
+	vp = ve2_hw_priv(hwctx);
+	if (!vp || !vp->mgmtctx) {
+		XDNA_ERR(xdna, "hwctx %u has no AIE partition", hwctx->id);
+		return -EINVAL;
+	}
+	mgmtctx = vp->mgmtctx;
+
+	local_buf = kzalloc(footer.size, GFP_KERNEL);
+	if (!local_buf)
+		return -ENOMEM;
+
+	if (copy_from_user(local_buf, u64_to_user_ptr(args->buffer), footer.size)) {
+		XDNA_ERR(xdna, "Failed to copy write data from user");
+		kfree(local_buf);
+		return -EFAULT;
+	}
+
+	/*
+	 * aie_partition_write can block on hardware I/O. Release dev_lock
+	 * before calling it to avoid stalling all other IOCTLs. Use
+	 * mgmtctx->ctx_lock to serialize against context switches.
+	 */
+	mutex_unlock(&xdna->dev_lock);
+	mutex_lock(&mgmtctx->ctx_lock);
+
+	if (mgmtctx->active_ctx != hwctx) {
+		XDNA_ERR(xdna, "hwctx %u is not the active context", hwctx->id);
+		mutex_unlock(&mgmtctx->ctx_lock);
+		mutex_lock(&xdna->dev_lock);
+		kfree(local_buf);
+		return -EPERM;
+	}
+
+	loc.col = footer.col;
+	loc.row = footer.row;
+	ret = aie_partition_write(mgmtctx->aie_dev, loc, footer.addr, footer.size, local_buf, 0);
+	mutex_unlock(&mgmtctx->ctx_lock);
+	mutex_lock(&xdna->dev_lock);
+
+	if (ret < 0)
+		XDNA_ERR(xdna, "aie_partition_write failed: %d", ret);
+	else
+		ret = 0;
+
+	kfree(local_buf);
+	return ret;
+}
+
+int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+
+	/*
+	 * dev_lock is already held by amdxdna_drm_set_state_ioctl().
+	 * Taking it again here would deadlock (non-recursive mutex).
+	 */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	XDNA_DBG(xdna, "Set AIE state: param=%u buffer_size=%u",
+		 args->param, args->buffer_size);
+
+	switch (args->param) {
+	case DRM_AMDXDNA_AIE_TILE_WRITE:
+		return ve2_aie_tile_write(client, args);
+	default:
+		XDNA_ERR(xdna, "Unsupported set_state param %u", args->param);
+		return -EOPNOTSUPP;
+	}
 }
