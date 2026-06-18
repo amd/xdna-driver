@@ -21,7 +21,7 @@
 #include "ve2_mgmt.h"
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
-				     u32 start_col, u32 num_col, u32 *partition_id);
+				     u32 part_start_col, u32 num_col, u32 *partition_id);
 
 static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 				 struct amdxdna_hwctx *hwctx, u32 col,
@@ -111,22 +111,37 @@ ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx
 static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 user_col = hwctx->qos.user_start_col;
 	u32 num_col = hwctx->num_tiles;
+	u32 first_col = 0;
 	u32 entries = 0;
-	u32 start;
-	u32 i;
+	u32 s, i;
 
 	if (!num_col || num_col > total_col) {
 		XDNA_ERR(xdna, "Invalid num_col %u (total_col %u)", num_col, total_col);
 		return -EINVAL;
 	}
 
-	for (start = 0; start + num_col <= total_col; start += VE2_MIN_COL_SUPPORT)
+	if (user_col != USER_START_COL_NOT_REQUESTED) {
+		if (user_col % VE2_MIN_COL_SUPPORT != 0) {
+			XDNA_ERR(xdna, "user_start_col %u not aligned to %u", user_col,
+				 VE2_MIN_COL_SUPPORT);
+			return -EINVAL;
+		}
+		if (user_col + num_col > total_col) {
+			XDNA_ERR(xdna, "user_start_col %u + num_col %u exceeds total_col %u",
+				 user_col, num_col, total_col);
+			return -ERANGE;
+		}
+		first_col = user_col;
+	}
+
+	for (s = first_col; s + num_col <= total_col; s += VE2_MIN_COL_SUPPORT)
 		entries++;
 
 	if (!entries) {
-		XDNA_ERR(xdna, "No valid start col for num_col %u in total_col %u",
-			 num_col, total_col);
+		XDNA_ERR(xdna, "No valid start col for num_col %u (first_col %u total_col %u)",
+			 num_col, first_col, total_col);
 		return -EINVAL;
 	}
 
@@ -135,8 +150,8 @@ static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 		return -ENOMEM;
 
 	hwctx->col_list_len = entries;
-	for (i = 0, start = 0; i < entries; i++, start += VE2_MIN_COL_SUPPORT)
-		hwctx->col_list[i] = start;
+	for (i = 0, s = first_col; i < entries; i++, s += VE2_MIN_COL_SUPPORT)
+		hwctx->col_list[i] = s;
 
 	print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4, hwctx->col_list,
 			     entries * sizeof(*hwctx->col_list), false);
@@ -324,8 +339,7 @@ static bool ve2_check_idle_or_queue_not_empty(struct amdxdna_mgmtctx *mgmtctx)
 
 static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 {
-	u32 off = CERT_HANDSHAKE_OFF(mgmtctx->start_col) +
-		  offsetof(struct handshake, misc_status);
+	u32 off = CERT_HANDSHAKE_OFF(0) + offsetof(struct handshake, misc_status);
 	u32 misc_status = 0;
 	struct amdxdna_ctx_priv *vp;
 	int ret;
@@ -426,7 +440,7 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 }
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
-				     u32 start_col, u32 num_col, u32 *partition_id)
+				     u32 part_start_col, u32 num_col, u32 *partition_id)
 {
 	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
@@ -435,7 +449,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 	struct device *aie_dev;
 	int ret;
 
-	if (!vp || start_col >= xdna_hdl->aie_dev_info.cols)
+	if (!vp || part_start_col >= xdna_hdl->aie_dev_info.cols)
 		return -EINVAL;
 
 	if (vp->mgmtctx)
@@ -446,7 +460,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 		return -ENOMEM;
 
 	mgmtctx->xdna = xdna;
-	mgmtctx->start_col = start_col;
+	mgmtctx->start_col = part_start_col;
 	mgmtctx->num_col = num_col;
 	mgmtctx->num_rows = xdna_hdl->aie_dev_info.rows;
 	mgmtctx->active_ctx = NULL;
@@ -461,7 +475,7 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 
 	INIT_WORK(&mgmtctx->scheduler_work, ve2_scheduler_work);
 
-	req.partition_id = (start_col << AIE_PART_ID_START_COL_SHIFT) |
+	req.partition_id = (part_start_col << AIE_PART_ID_START_COL_SHIFT) |
 			   (num_col << AIE_PART_ID_NUM_COLS_SHIFT);
 	req.user_event1_complete = ve2_irq_handler;
 	req.user_event1_priv = mgmtctx;

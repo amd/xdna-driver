@@ -60,6 +60,7 @@ enum amdxdna_drm_ioctl_id {
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @user_start_col: User preferred start column, or USER_START_COL_NOT_REQUESTED if not specified.
  *
  * User program can provide QoS hints to driver.
  */
@@ -70,6 +71,7 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 user_start_col;
 };
 
 /**
@@ -721,6 +723,7 @@ struct amdxdna_drm_aie_coredump {
 #define DRM_AMDXDNA_HW_LAST_ASYNC_ERR	2
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
+#define DRM_AMDXDNA_AIE_TILE_READ	9
 #define DRM_AMDXDNA_HWCTX_MEM_BITMAP	11
 
 /**
@@ -776,6 +779,34 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_WRITE_AIE_REG,
 	DRM_AMDXDNA_SET_FORCE_PREEMPT,
 	DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
+	DRM_AMDXDNA_SET_FW_LOG_STATE,
+	DRM_AMDXDNA_SET_FW_TRACE_STATE,
+	DRM_AMDXDNA_AIE_TILE_WRITE,
+};
+
+/**
+ * struct amdxdna_drm_aie_tile_access - Data for an AIE tile read/write.
+ * @pid:        PID of the process that owns the context.
+ * @context_id: Hardware context ID.
+ * @col:        AIE column index (partition-relative, 0-based).
+ * @row:        AIE row index.
+ * @addr:       Tile-local register or memory address to access.
+ * @size:       Number of bytes to write.
+ * @type:       Access path — one of enum amdxdna_aie_tile_access_type.
+ * @pad:        MBZ.
+ *
+ * Used as the footer at the end of the buffer for %DRM_AMDXDNA_AIE_TILE_WRITE.
+ * The data to write occupies the first @size bytes of the buffer.
+ */
+struct amdxdna_drm_aie_tile_access {
+	__u64 pid;
+	__u32 context_id;
+	__u32 col;
+	__u32 row;
+	__u32 addr;
+	__u32 size;
+	__u8  type;
+	__u8  pad[3];
 };
 
 /**
