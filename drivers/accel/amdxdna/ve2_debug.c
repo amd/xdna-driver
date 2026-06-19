@@ -342,6 +342,87 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	return 0;
 }
 
+static int ve2_get_firmware_version(struct amdxdna_client *client,
+				    struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct ve2_firmware_version *fver = &ve2_dev_hdl(xdna)->fw_version;
+	struct amdxdna_drm_query_firmware_version version = {};
+
+	if (args->buffer_size < sizeof(version)) {
+		XDNA_ERR(xdna, "Buffer too small. Given: %u, required: %zu",
+			 args->buffer_size, sizeof(version));
+		args->buffer_size = sizeof(version);
+		return -ENOBUFS;
+	}
+
+	XDNA_DBG(xdna, "CERT firmware: git_hash=%s, date=%s", fver->git_hash, fver->date);
+
+	version.major = fver->major;
+	version.minor = fver->minor;
+	version.patch = fver->hotfix;
+	version.build = fver->build;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &version, sizeof(version)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int ve2_get_aie_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct aie_device_info *info = &ve2_dev_hdl(xdna)->aie_dev_info;
+	struct amdxdna_drm_query_aie_metadata *meta;
+	int ret = 0;
+
+	if (args->buffer_size < sizeof(*meta)) {
+		XDNA_ERR(xdna, "Buffer too small. Given: %u, required: %zu",
+			 args->buffer_size, sizeof(*meta));
+		args->buffer_size = sizeof(*meta);
+		return -ENOBUFS;
+	}
+
+	meta = kzalloc(sizeof(*meta), GFP_KERNEL);
+	if (!meta)
+		return -ENOMEM;
+
+	meta->cols = info->cols;
+	meta->rows = info->rows;
+	meta->core.row_count = info->core_rows;
+	meta->mem.row_count = info->mem_rows;
+	meta->shim.row_count = info->shim_rows;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), meta, sizeof(*meta)))
+		ret = -EFAULT;
+
+	kfree(meta);
+	return ret;
+}
+
+int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+
+	/*
+	 * dev_lock is already held by amdxdna_drm_get_info_ioctl().
+	 * Do not lock again (non-recursive mutex -> deadlock).
+	 */
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+
+	XDNA_DBG(xdna, "Get AIE info: param=%u buffer_size=%u", args->param, args->buffer_size);
+
+	switch (args->param) {
+	case DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION:
+		return ve2_get_firmware_version(client, args);
+	case DRM_AMDXDNA_QUERY_AIE_METADATA:
+		return ve2_get_aie_metadata(client, args);
+	default:
+		XDNA_ERR(xdna, "Not supported GET_INFO param %u", args->param);
+		return -EOPNOTSUPP;
+	}
+}
+
 int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;

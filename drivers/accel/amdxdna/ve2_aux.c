@@ -236,6 +236,7 @@ const struct amdxdna_dev_ops ve2_ops = {
 	.hwctx_config		= ve2_hwctx_config,
 	.cmd_submit		= ve2_cmd_submit,
 	.cmd_wait		= ve2_cmd_wait,
+	.get_aie_info		= ve2_get_aie_info,
 	.get_array		= ve2_debug_get_array,
 	.set_aie_state		= ve2_set_aie_state,
 };
