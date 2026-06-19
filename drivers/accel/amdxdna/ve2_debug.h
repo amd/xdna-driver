@@ -5,9 +5,11 @@
 #define _VE2_DEBUG_H_
 
 struct amdxdna_client;
+struct amdxdna_drm_get_info;
 struct amdxdna_drm_get_array;
 struct amdxdna_drm_set_state;
 
+int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
 int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
 
