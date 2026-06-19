@@ -119,6 +119,7 @@ struct aie_bar_off_pair {
 
 struct smu_config {
 	void __iomem    *smu_regs[SMU_MAX_REGS];
+	bool		intr_enabled;
 };
 
 struct psp_config {
