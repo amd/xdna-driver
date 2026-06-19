@@ -107,6 +107,7 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 				       const struct aie4_msg_context_config_cert_logging *cl);
 int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev);
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
+u32 aie4_msg_pasid(struct amdxdna_client *client);
 
 enum aie4_fw_feature {
 	AIE4_GET_COREDUMP,
