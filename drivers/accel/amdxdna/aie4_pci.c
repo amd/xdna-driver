@@ -1149,7 +1149,14 @@ free_work_buf:
 
 static void aie4_pf_fini(struct amdxdna_dev *xdna)
 {
-	aie4_sriov_stop(xdna->dev_handle);
+	int ret;
+
+	ret = aie4_sriov_stop(xdna->dev_handle);
+	if (ret == -EPERM)
+		XDNA_ERR(xdna, "VFs in passthrough - VM disruption expected");
+	else if (ret)
+		XDNA_ERR(xdna, "Unconfig sriov failed: %d", ret);
+
 	aie4_pf_hw_stop(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
 }
