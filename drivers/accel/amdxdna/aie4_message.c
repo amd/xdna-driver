@@ -18,6 +18,15 @@
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
 
+u32 aie4_msg_pasid(struct amdxdna_client *client)
+{
+	if (!amdxdna_pasid_on(client))
+		return 0;
+
+	return FIELD_PREP(AIE4_MSG_PASID, client->pasid) |
+	       FIELD_PREP(AIE4_MSG_PASID_VLD, 1);
+}
+
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev)
 {
 	DECLARE_AIE_MSG(aie4_msg_suspend, AIE4_MSG_OP_SUSPEND);
@@ -216,8 +225,7 @@ int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 	int ret;
 
 	req.context_id = hwctx->fw_ctx_id;
-	req.pasid = FIELD_PREP(AIE4_MSG_PASID, hwctx->client->pasid) |
-		    FIELD_PREP(AIE4_MSG_PASID_VLD, 1);
+	req.pasid = aie4_msg_pasid(hwctx->client);
 	req.num_buffers = num_bufs;
 	req.buffer_list_addr = to_dma_addr(list_hdl, 0);
 
@@ -280,8 +288,7 @@ int aie4_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
 	req.mem_access.buffer_size = size;
 	req.mem_access.mem_addr = aie_addr;
 	req.mem_access.mem_size = size;
-	req.mem_access.pasid = FIELD_PREP(AIE4_MSG_PASID, hwctx->client->pasid) |
-			       FIELD_PREP(AIE4_MSG_PASID_VLD, 1);
+	req.mem_access.pasid = aie4_msg_pasid(hwctx->client);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret) {
