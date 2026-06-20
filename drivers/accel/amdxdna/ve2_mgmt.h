@@ -9,9 +9,12 @@
 #ifndef _VE2_MGMT_H_
 #define _VE2_MGMT_H_
 
+#include <linux/completion.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/xlnx-ai-engine.h>
+
+#include "amdxdna_error.h"
 
 struct amdxdna_dev;
 struct amdxdna_hwctx;
@@ -48,6 +51,9 @@ struct amdxdna_mgmtctx {
 	u32				num_col;
 	u32				num_rows;
 	struct amdxdna_dev		*xdna;
+	struct amdxdna_async_err_cache	async_errs_cache;/* cache for last async error */
+	struct completion		error_cb_completion;/* signalled when error cb finishes */
+	atomic_t			error_cb_in_progress;/* set while error cb is running */
 };
 
 /* Helper functions for reading privileged memory. */
