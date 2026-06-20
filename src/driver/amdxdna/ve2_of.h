@@ -33,6 +33,7 @@
 	 ((num_col) << AIE_PART_ID_NUM_COLS_SHIFT))
 
 extern int enable_polling;
+extern int ve2_perf_optimization;
 extern int verbosity;
 extern int start_col;
 extern int partition_size;
