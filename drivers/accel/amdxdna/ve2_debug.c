@@ -8,8 +8,11 @@
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
 #include <linux/cleanup.h>
+#include <linux/completion.h>
 #include <linux/errno.h>
+#include <linux/jiffies.h>
 #include <linux/minmax.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
@@ -423,6 +426,107 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 	}
 }
 
+/*
+ * Return the most recent cached AIE asynchronous error across all active
+ * contexts. The error is captured by ve2_aie_error_cb() and cached per
+ * partition (mgmtctx). num_element is set to 0 when no error is cached.
+ *
+ * Caller holds xdna->dev_lock (protects client_list).
+ */
+static int ve2_get_array_async_error(struct amdxdna_client *client,
+				     struct amdxdna_drm_get_array *args)
+{
+	/* 50ms to observe the callback starting; 100ms cap once it has. */
+	unsigned long poll_timeout = msecs_to_jiffies(50);
+	unsigned long wait_timeout = msecs_to_jiffies(100);
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_async_error tmp = {};
+	struct amdxdna_client *tmp_client;
+	bool found = false;
+
+	args->num_element = 0;
+
+	/* Wait for any pending error callbacks to complete before reading cached errors.
+	 * This ensures async errors are cached before we query for them.
+	 * The error callback may start after command completion, so we poll briefly
+	 * to catch cases where it starts shortly after the query.
+	 */
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_hwctx *hwctx;
+		unsigned long hx_id;
+		int idx;
+
+		idx = srcu_read_lock(&tmp_client->hwctx_srcu);
+		xa_for_each(&tmp_client->hwctx_xa, hx_id, hwctx) {
+			struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+			struct amdxdna_mgmtctx *mgmtctx;
+			unsigned long poll_start = jiffies;
+			bool callback_started = false;
+
+			if (!vp || !vp->mgmtctx)
+				continue;
+
+			mgmtctx = vp->mgmtctx;
+			while (time_before(jiffies, poll_start + poll_timeout)) {
+				if (atomic_read(&mgmtctx->error_cb_in_progress)) {
+					callback_started = true;
+					break;
+				}
+				schedule_timeout_uninterruptible(msecs_to_jiffies(1));
+			}
+
+			if (callback_started ||
+			    atomic_read(&mgmtctx->error_cb_in_progress)) {
+				if (wait_for_completion_timeout(&mgmtctx->error_cb_completion,
+								wait_timeout) == 0)
+					XDNA_WARN(xdna,
+						  "Timeout waiting for error callback completion");
+			}
+		}
+		srcu_read_unlock(&tmp_client->hwctx_srcu, idx);
+	}
+
+	/* Find the first mgmtctx with a cached error */
+	list_for_each_entry(tmp_client, &xdna->client_list, node) {
+		struct amdxdna_hwctx *hwctx;
+		unsigned long hx_id;
+		int idx;
+
+		idx = srcu_read_lock(&tmp_client->hwctx_srcu);
+		xa_for_each(&tmp_client->hwctx_xa, hx_id, hwctx) {
+			struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+			struct amdxdna_async_err_cache *cache;
+
+			if (!vp || !vp->mgmtctx)
+				continue;
+
+			cache = &vp->mgmtctx->async_errs_cache;
+			mutex_lock(&cache->lock);
+			if (cache->err.err_code) {
+				memcpy(&tmp, &cache->err, sizeof(tmp));
+				found = true;
+			}
+			mutex_unlock(&cache->lock);
+
+			if (found)
+				break;
+		}
+		srcu_read_unlock(&tmp_client->hwctx_srcu, idx);
+
+		if (found)
+			break;
+	}
+
+	if (!found)
+		return 0;
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &tmp, sizeof(tmp)))
+		return -EFAULT;
+
+	args->num_element = 1;
+	return 0;
+}
+
 int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -449,6 +553,9 @@ int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 		break;
 	case DRM_AMDXDNA_AIE_TILE_READ:
 		ret = ve2_aie_tile_read(client, args);
+		break;
+	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		ret = ve2_get_array_async_error(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported GET_ARRAY param %u", args->param);

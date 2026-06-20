@@ -8,7 +8,9 @@
 
 #include <linux/device.h>
 #include <linux/errno.h>
+#include <linux/ktime.h>
 #include <linux/slab.h>
+#include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/xlnx-ai-engine.h>
 
@@ -439,6 +441,161 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 		 read_index, active_ctx, active_ctx->client->pid);
 }
 
+/*
+ * AIE asynchronous error notification callback.
+ *
+ * Invoked by the xlnx-aie engine driver when the partition reports
+ * asynchronous (AIE tile) errors. We cache the most recent error in the
+ * mgmtctx so userspace can later query it via GET_ARRAY HW_LAST_ASYNC_ERR,
+ * and wake any threads waiting on the active context so a stuck command can
+ * unblock and report a timeout/error rather than hang forever.
+ */
+static void ve2_aie_error_cb(void *arg)
+{
+	struct amdxdna_mgmtctx *mgmtctx = arg;
+	struct amdxdna_async_err_cache *cache;
+	struct aie_errors *aie_errs;
+	struct amdxdna_dev *xdna;
+	int i;
+
+	if (!mgmtctx) {
+		pr_err("%s: mgmtctx is not initialized\n", __func__);
+		return;
+	}
+
+	xdna = mgmtctx->xdna;
+
+	/*
+	 * Mark the callback as in progress so a concurrent
+	 * GET_ARRAY HW_LAST_ASYNC_ERR query can wait for it to finish caching
+	 * the error before reading the cache.
+	 */
+	atomic_set(&mgmtctx->error_cb_in_progress, 1);
+	reinit_completion(&mgmtctx->error_cb_completion);
+
+	mutex_lock(&mgmtctx->ctx_lock);
+
+	if (!mgmtctx->aie_dev) {
+		XDNA_ERR(xdna, "%s: AIE partition is not loaded\n", __func__);
+		mutex_unlock(&mgmtctx->ctx_lock);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
+		complete(&mgmtctx->error_cb_completion);
+		return;
+	}
+
+	aie_errs = aie_get_errors(mgmtctx->aie_dev);
+	if (IS_ERR_OR_NULL(aie_errs)) {
+		XDNA_ERR(xdna, "%s: aie_get_errors returned NULL\n", __func__);
+		mutex_unlock(&mgmtctx->ctx_lock);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
+		complete(&mgmtctx->error_cb_completion);
+		return;
+	}
+
+	/*
+	 * Cache the last async error so userspace queries can find it. The
+	 * error category/module values come from the AIE engine driver; map
+	 * them onto the amdxdna error encoding consumed by userspace.
+	 */
+	if (aie_errs->num_err > 0) {
+		struct aie_error *last_err = &aie_errs->errors[aie_errs->num_err - 1];
+		enum amdxdna_error_num err_num;
+		enum amdxdna_error_module err_mod;
+
+		switch (last_err->category) {
+		case 0: /* AIE_ERROR_SATURATION */
+			err_num = AMDXDNA_ERROR_NUM_AIE_SATURATION;
+			break;
+		case 1: /* AIE_ERROR_FP */
+			err_num = AMDXDNA_ERROR_NUM_AIE_FP;
+			break;
+		case 2: /* AIE_ERROR_STREAM */
+			err_num = AMDXDNA_ERROR_NUM_AIE_STREAM;
+			break;
+		case 3: /* AIE_ERROR_ACCESS */
+			err_num = AMDXDNA_ERROR_NUM_AIE_ACCESS;
+			break;
+		case 4: /* AIE_ERROR_BUS */
+			err_num = AMDXDNA_ERROR_NUM_AIE_BUS;
+			break;
+		case 5: /* AIE_ERROR_INSTRUCTION */
+			err_num = AMDXDNA_ERROR_NUM_AIE_INSTRUCTION;
+			break;
+		case 6: /* AIE_ERROR_ECC */
+			err_num = AMDXDNA_ERROR_NUM_AIE_ECC;
+			break;
+		case 7: /* AIE_ERROR_LOCK */
+			err_num = AMDXDNA_ERROR_NUM_AIE_LOCK;
+			break;
+		case 8: /* AIE_ERROR_DMA */
+			err_num = AMDXDNA_ERROR_NUM_AIE_DMA;
+			break;
+		case 9: /* AIE_ERROR_MEM_PARITY */
+			err_num = AMDXDNA_ERROR_NUM_AIE_MEM_PARITY;
+			break;
+		default:
+			err_num = AMDXDNA_ERROR_NUM_UNKNOWN;
+			break;
+		}
+
+		switch (last_err->module) {
+		case 0: /* AIE_MEM_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_MEMORY;
+			break;
+		case 1: /* AIE_CORE_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_CORE;
+			break;
+		case 2: /* AIE_PL_MOD */
+			err_mod = AMDXDNA_ERROR_MODULE_AIE_PL;
+			break;
+		default:
+			err_mod = AMDXDNA_ERROR_MODULE_UNKNOWN;
+			break;
+		}
+
+		cache = &mgmtctx->async_errs_cache;
+		mutex_lock(&cache->lock);
+		cache->err.ts_us = ktime_to_us(ktime_get_real());
+		cache->err.err_code = AMDXDNA_ERROR_ENCODE(err_num, err_mod);
+		cache->err.ex_err_code = AMDXDNA_EXTRA_ERR_ENCODE(last_err->loc.row,
+								  last_err->loc.col);
+		mutex_unlock(&cache->lock);
+	}
+
+	for (i = 0; i < aie_errs->num_err; i++) {
+		XDNA_DBG(xdna,
+			 "AIE async error: id %d mod %d category %d col %d row %d\n",
+			 aie_errs->errors[i].error_id,
+			 aie_errs->errors[i].module,
+			 aie_errs->errors[i].category,
+			 aie_errs->errors[i].loc.col,
+			 aie_errs->errors[i].loc.row);
+	}
+
+	aie_free_errors(aie_errs);
+
+	/*
+	 * Wake up any thread waiting on the active context so a command stuck
+	 * waiting on the faulting partition can detect the error and return
+	 * instead of hanging indefinitely.
+	 */
+	if (mgmtctx->active_ctx) {
+		struct amdxdna_ctx_priv *vp = ve2_hw_priv(mgmtctx->active_ctx);
+
+		if (vp) {
+			vp->misc_intrpt_flag = true;
+			wake_up_interruptible_all(&vp->waitq);
+			XDNA_ERR(xdna, "AIE error detected, waking up waiting threads\n");
+		}
+	}
+
+	mutex_unlock(&mgmtctx->ctx_lock);
+
+	/* Error cached and threads woken: let any waiting query proceed. */
+	atomic_set(&mgmtctx->error_cb_in_progress, 0);
+	complete(&mgmtctx->error_cb_completion);
+}
+
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 				     u32 part_start_col, u32 num_col, u32 *partition_id)
 {
@@ -466,6 +623,9 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 	mgmtctx->active_ctx = NULL;
 	INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
 	mutex_init(&mgmtctx->ctx_lock);
+	mutex_init(&mgmtctx->async_errs_cache.lock);
+	init_completion(&mgmtctx->error_cb_completion);
+	atomic_set(&mgmtctx->error_cb_in_progress, 0);
 
 	mgmtctx->work_queue = create_singlethread_workqueue("ve2_aie_sched");
 	if (!mgmtctx->work_queue) {
@@ -487,14 +647,24 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 
 	mgmtctx->aie_dev = aie_dev;
 
+	ret = aie_register_error_notification(aie_dev, ve2_aie_error_cb, mgmtctx);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to register AIE error notification: %d", ret);
+		goto release_part;
+	}
+
 	*partition_id = req.partition_id;
 	vp->mgmtctx = mgmtctx;
 
 	return 0;
 
+release_part:
+	aie_partition_teardown(aie_dev);
+	aie_partition_release(aie_dev);
 destroy_wq:
 	destroy_workqueue(mgmtctx->work_queue);
 free_mgmtctx:
+	mutex_destroy(&mgmtctx->async_errs_cache.lock);
 	kfree(mgmtctx);
 	return ret;
 }
@@ -526,6 +696,12 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 	mutex_unlock(&mgmtctx->ctx_lock);
 
 	/*
+	 * Stop async error callbacks before tearing the partition down so the
+	 * callback cannot run against a partially-released mgmtctx.
+	 */
+	aie_unregister_error_notification(mgmtctx->aie_dev);
+
+	/*
 	 * Tear down the AIE partition before draining the workqueue so that no
 	 * new IRQs can be raised (and thus no new work items queued) after this
 	 * point.  destroy_workqueue() then drains any work that was already
@@ -543,6 +719,7 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 	}
 	mutex_unlock(&mgmtctx->ctx_lock);
 
+	mutex_destroy(&mgmtctx->async_errs_cache.lock);
 	kfree(mgmtctx);
 	vp->mgmtctx = NULL;
 

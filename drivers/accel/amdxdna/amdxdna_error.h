@@ -8,6 +8,15 @@
 
 #include <linux/bitfield.h>
 #include <linux/bits.h>
+#include <linux/mutex.h>
+
+#include "drm/amdxdna_accel.h"
+
+/* Cache for the last async error so it can be queried from userspace. */
+struct amdxdna_async_err_cache {
+	struct amdxdna_async_error	err; /* last async error */
+	struct mutex			lock; /* protects access to the error cache */
+};
 
 #define AMDXDNA_ERR_DRV_AIE		4
 #define AMDXDNA_ERR_SEV_CRITICAL	3
