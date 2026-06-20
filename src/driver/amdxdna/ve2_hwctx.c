@@ -38,6 +38,10 @@ int max_col;
 module_param(max_col, int, 0644);
 MODULE_PARM_DESC(max_col, "Max column supported by this driver");
 
+int ve2_perf_optimization;;
+module_param(ve2_perf_optimization, int, 0644);
+MODULE_PARM_DESC(ve2_perf_optimization, "Enable perf mode. disabled by default.");
+
 #define CTX_TIMER	(nsecs_to_jiffies(1))
 
 /*

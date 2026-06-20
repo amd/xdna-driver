@@ -355,10 +355,16 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 	}
 	nhwctx->args->handshake_cols = num_col;
 	nhwctx->args->handshake = (struct aie_op_handshake_data *)hs_data;
-	nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_ERR_SHIM_INIT |
+
+	if (!ve2_perf_optimization)
+		nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_HANDSHAKE |
+				AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+
+	else 
+		nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_ERR_SHIM_INIT |
                                   AIE_PART_INIT_OPT_HANDSHAKE | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
-                                  & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV
-                                  & ~AIE_PART_INIT_ERROR_HANDLING;
+                                  & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV & ~AIE_PART_INIT_ERROR_HANDLING;
+
 	XDNA_DBG(xdna, "Handshake init hwctx : %p\n", hwctx);
 	XDNA_DBG(xdna,
 		 "partition init: start_col=%u num_col=%u hwctx=%p pid=%d",
