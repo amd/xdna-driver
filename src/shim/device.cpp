@@ -2258,9 +2258,9 @@ create_hw_context(uint32_t partition_size, const xrt::hw_context::qos_type& qos,
                   xrt::hw_context::access_mode mode) const
 {
   if (m_pdev.is_umq())
-    return std::make_unique<hwctx_umq>(*this, partition_size);
+    return std::make_unique<hwctx_umq>(*this, partition_size, qos);
   else
-    return std::make_unique<hwctx_kmq>(*this, partition_size);
+    return std::make_unique<hwctx_kmq>(*this, partition_size, qos);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

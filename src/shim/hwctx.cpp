@@ -185,13 +185,16 @@ hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
 }
 
 hwctx::
-hwctx(const device& dev, uint32_t partition_size, std::unique_ptr<hwq> queue)
+hwctx(const device& dev, uint32_t partition_size, const qos_type& qos,
+      std::unique_ptr<hwq> queue)
   : m_device(dev)
   , m_q(std::move(queue))
 {
   m_col_cnt = partition_size;
   m_uc_per_col = uc_per_col_for_device(&m_device);
   m_ops_per_cycle = 0;
+
+  init_qos_info(qos);
 
   create_ctx_on_device();
 }
@@ -283,6 +286,9 @@ void
 hwctx::
 init_qos_info(const qos_type& qos)
 {
+  /* Default: let the driver pick the partition start column. */
+  m_qos.user_start_col = USER_START_COL_NOT_REQUESTED;
+
   for (auto& [key, value] : qos) {
     if (key == "gops" && value && !m_qos.gops)
       m_qos.gops = value;
@@ -298,6 +304,8 @@ init_qos_info(const qos_type& qos)
       m_qos.frame_exec_time = value;
     else if (key == "priority")
       m_qos.priority = value;
+    else if (key == "start_col")
+      m_qos.user_start_col = value;
   }
 }
 
