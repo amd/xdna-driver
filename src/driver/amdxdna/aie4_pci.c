@@ -439,9 +439,8 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	 * Diagnostic: some rpu-fw builds populate AIE_TILE_INFO::cols with
 	 * total tile count (rows*cols) rather than column count, which
 	 * cannot be fed back into AIE4_MSG_OP_CREATE_PARTITION. The
-	 * authoritative per-device value used by aie4_partition_init() and
-	 * aie4_create_context() is xdna->dev_info->num_col; log both so any
-	 * future fw mismatch is obvious.
+	 * authoritative per-device value is xdna->dev_info->num_col; log both so
+	 * any future fw mismatch is obvious.
 	 */
 	XDNA_DBG(ndev->xdna,
 		 "AIE metadata: cols=%u rows=%u (fw); partition num_col=%u (dev_info)",
@@ -503,10 +502,21 @@ stop_smu:
 	return ret;
 }
 
-static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
+/*
+ * Create a firmware partition for this hardware context and record the
+ * firmware-assigned id on the context. The start column comes from the QoS hint
+ * (or 0); the driver does not allocate columns — the firmware pins this client
+ * to its slot and places the partition there. An identical request from the
+ * same client returns the existing id, so contexts with the same geometry share
+ * one firmware partition.
+ */
+static int aie4_partition_create(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE4_MSG(aie4_msg_create_partition, AIE4_MSG_OP_CREATE_PARTITION);
+	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_dev *xdna = ndev->xdna;
+	u32 rows_per_col = ndev->metadata.core.row_count;
+	u32 start_col, ncols;
 	int ret;
 
 	if (is_npu3_pf_dev(xdna)) {
@@ -514,52 +524,55 @@ static int aie4_partition_init(struct amdxdna_dev_hdl *ndev)
 		return 0;
 	}
 
-	/*
-	 * Partition geometry comes from ndev->part_start_col /
-	 * ndev->part_num_col. These default to start_col=0 /
-	 * dev_info->num_col (full-NPU partition) and are overridden on the
-	 * platform path from the device-tree "amd,start-col" /
-	 * "amd,num-cols" properties. We deliberately do not use the
-	 * firmware-reported metadata.cols here because some rpu-fw builds put
-	 * total tile count in that field.
-	 *
-	 * In the future, we may have multiple partitions starting from
-	 * different start_cols, different num_tiles, mem_size, and
-	 * application_mode can be SINGLE|DUAL_A|DUAL_B.
-	 */
-	req.partition_col_start = ndev->part_start_col;
-	req.partition_col_count = ndev->part_num_col;
+	if (ctx->qos.user_start_col == USER_START_COL_NOT_REQUESTED)
+		start_col = 0;
+	else
+		start_col = ctx->qos.user_start_col;
+
+	/* ctx->num_tiles is in compute-tile units; convert to columns. */
+	ncols = rows_per_col ? DIV_ROUND_UP(ctx->num_tiles, rows_per_col) : ctx->num_tiles;
+	if (ncols < AIE4_MIN_PART_COLS)
+		ncols = AIE4_MIN_PART_COLS;
+
+	req.partition_col_start = start_col;
+	req.partition_col_count = ncols;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
-		XDNA_ERR(xdna, "partition init failed: %d", ret);
+		XDNA_ERR(xdna, "partition create (col %u ncols %u) failed: %d",
+			 start_col, ncols, ret);
 		return ret;
 	}
 
-	XDNA_DBG(xdna, "partition_id %d", resp.partition_id);
-	ndev->partition_id = resp.partition_id;
+	nctx->partition_id = resp.partition_id;
+	ctx->start_col = start_col;
+	ctx->num_col = ncols;
+	XDNA_DBG(xdna, "partition_id %u (col %u ncols %u)",
+		 nctx->partition_id, start_col, ncols);
 
 	return 0;
 }
 
-static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
+static void aie4_partition_destroy(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 {
 	DECLARE_AIE4_MSG(aie4_msg_destroy_partition, AIE4_MSG_OP_DESTROY_PARTITION);
+	struct amdxdna_ctx_priv *nctx = ctx->priv;
 	struct amdxdna_dev *xdna = ndev->xdna;
 	int ret;
 
-	if (is_npu3_pf_dev(xdna)) {
-		XDNA_DBG(xdna, "skip on pf device");
+	if (is_npu3_pf_dev(xdna))
 		return;
-	}
 
-	req.partition_id = ndev->partition_id;
+	req.partition_id = nctx->partition_id;
 
 	ret = aie4_send_msg_wait(ndev, &msg);
+	/*
+	 * The firmware rejects this while another context still uses the
+	 * partition; that is expected for a shared partition and harmless — the
+	 * last context to leave destroys it.
+	 */
 	if (ret)
-		XDNA_ERR(xdna, "id %d fini failed: %d", ndev->partition_id, ret);
-	else
-		XDNA_DBG(xdna, "id %d", ndev->partition_id);
+		XDNA_DBG(xdna, "partition %u destroy deferred: %d", nctx->partition_id, ret);
 }
 
 static int aie4_hw_start(struct amdxdna_dev *xdna)
@@ -599,21 +612,15 @@ static int aie4_hw_start(struct amdxdna_dev *xdna)
 	if (ret)
 		goto disable_mailbox;
 
-	ret = aie4_partition_init(ndev);
-	if (ret)
-		goto stop_pm;
-
 	ret = aie4_error_async_events_alloc(ndev);
 	if (ret)
-		goto partition_fini;
+		goto stop_pm;
 
 	mutex_unlock(&ndev->aie4_lock);
 	ndev->dev_status = AIE4_DEV_START;
 
 	return 0;
 
-partition_fini:
-	aie4_partition_fini(ndev);
 stop_pm:
 	aie4_pm_fini(ndev);
 disable_mailbox:
@@ -663,7 +670,6 @@ static void aie4_hw_stop(struct amdxdna_dev *xdna)
 		return;
 	}
 
-	aie4_partition_fini(ndev);
 	aie4_pm_fini(ndev);
 	aie4_mgmt_fw_fini(ndev);
 	aie4_mailbox_fini(ndev);
@@ -1114,10 +1120,12 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	if (nctx->status == CTX_STATE_CONNECTED)
 		return 0;
 
-	req.partition_id = ndev->partition_id;
-	/* Match the partition geometry created in aie4_partition_init(). */
-	ctx->start_col = ndev->part_start_col;
-	ctx->num_col = ndev->part_num_col;
+	/* Always (re)create the firmware partition for this context. */
+	ret = aie4_partition_create(ndev, ctx);
+	if (ret)
+		return ret;
+
+	req.partition_id = nctx->partition_id;
 	req.request_num_tiles = ctx->num_tiles;
 
 	req.pasid.raw = 0;
@@ -1144,7 +1152,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 
 	/*
 	 * partition_id is an opaque token returned by FW from
-	 * AIE4_MSG_OP_CREATE_PARTITION (see aie4_partition_init).  Most
+	 * AIE4_MSG_OP_CREATE_PARTITION (see aie4_partition_create).  Most
 	 * firmwares allocate non-zero IDs and 0 means "uninitialized", but
 	 * some (e.g. the aie2ps/rpmsg RPU firmware) legitimately return 0
 	 * for the first partition.  Set the allow_partition_id_zero module
@@ -1159,13 +1167,13 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		XDNA_ERR(xdna, "req is invalid: partition_id %u, request_num_tiles %u",
 			 req.partition_id, req.request_num_tiles);
 		ret = -EINVAL;
-		goto done;
+		goto destroy_part;
 	}
 
 	ret = aie4_send_msg_wait(ndev, &msg);
 	if (ret) {
 		XDNA_ERR(xdna, "create ctx failed: %d", ret);
-		goto done;
+		goto destroy_part;
 	}
 
 	XDNA_DBG(xdna, "resp msix %d, ctx %d, doorbell %d, irq %d",
@@ -1190,7 +1198,7 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 	if (!nctx->cert_comp) {
 		aie4_msg_destroy_context(ndev, resp.hw_context_id, 0);
 		ret = -EINVAL;
-		goto done;
+		goto destroy_part;
 	}
 
 	nctx->hw_ctx_id = resp.hw_context_id;
@@ -1213,7 +1221,8 @@ int aie4_create_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx)
 		XDNA_WARN_ONCE(xdna, "Failed to init ctx dpm");
 
 	return 0;
-done:
+destroy_part:
+	aie4_partition_destroy(ndev, ctx);
 	XDNA_ERR(xdna, "failed %d", ret);
 	return ret;
 }
@@ -1243,6 +1252,12 @@ int aie4_destroy_context(struct amdxdna_dev_hdl *ndev, struct amdxdna_ctx *ctx,
 	/* Release cert comp since we don't need it any more. */
 	aie4_put_cert_comp_locked(nctx->cert_comp);
 	nctx->cert_comp = NULL;
+
+	/*
+	 * Drop our reference to the firmware partition. The firmware keeps it
+	 * alive while another context still uses it.
+	 */
+	aie4_partition_destroy(ndev, ctx);
 	return ret;
 }
 
@@ -1429,10 +1444,7 @@ int aie4_reset_done(struct amdxdna_dev *xdna)
 	if (ret)
 		goto error;
 
-	ret = aie4_partition_init(ndev);
-	if (ret)
-		goto mailbox_fini;
-
+	/* Contexts recreate their own partitions when resumed below. */
 	ret = aie4_restore_services(xdna);
 	if (ret)
 		goto mailbox_fini;
@@ -1556,8 +1568,6 @@ void aie4_ndev_init_base(struct amdxdna_dev_hdl *ndev, struct amdxdna_dev *xdna)
 {
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->xdna = xdna;
-	ndev->part_start_col = 0;
-	ndev->part_num_col = xdna->dev_info->num_col;
 	mutex_init(&ndev->aie4_lock);
 	xa_init(&ndev->cert_comp_xa);
 }

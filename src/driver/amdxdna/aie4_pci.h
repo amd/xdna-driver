@@ -89,6 +89,9 @@ aie4_health_runlist_read_idx(struct aie4_msg_app_health_report *h)
 
 #define CERTFW_MAX_SIZE		(SZ_32K + SZ_256)
 
+/* Partitions are 4-column aligned/sized. */
+#define AIE4_MIN_PART_COLS	4
+
 #define AIE4_DPT_MSI_ADDR_MASK  GENMASK(23, 0)
 
 #define AIE4_DPM_TOPS(ndev, dpm_level) \
@@ -144,6 +147,7 @@ struct amdxdna_ctx_priv {
 
 	u32				meta_bo_hdl;
 	struct cert_comp		*cert_comp;
+	u32				partition_id;	/* FW partition for this ctx */
 	u32				hw_ctx_id;
 #define CTX_STATE_DISCONNECTED		0x0
 #define CTX_STATE_CONNECTED		0x1
@@ -180,18 +184,6 @@ struct amdxdna_dev_hdl {
 	void				*xrs_hdl;
 	struct psp_device		*psp_hdl;
 	struct smu_device		*smu_hdl;
-
-	u32				partition_id;
-
-	/*
-	 * Partition geometry used for AIE4_MSG_OP_CREATE_PARTITION and the
-	 * per-context AIE4_MSG_OP_CREATE_HW_CONTEXT. Defaulted in
-	 * aie4_ndev_init_base() to start_col=0 / dev_info->num_col; the
-	 * platform (device-tree) path overrides them from the
-	 * "amd,start-col" / "amd,num-cols" properties.
-	 */
-	u32				part_start_col;
-	u32				part_num_col;
 
 	u32				total_col;
 	struct aie_version		version;
