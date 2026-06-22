@@ -125,6 +125,13 @@ struct amdxdna_dpt {
 
 	/* xrt-smi watchers park here */
 	struct wait_queue_head		 wait;
+
+	/* dmesg-dump consumer (head / local_buffer valid only while dump_to_dmesg) */
+	bool				 dump_to_dmesg;
+	u64				 head;
+	u8				*local_buffer;
+	/* ring payload size, set at publish time; valid regardless of dump_to_dmesg */
+	u32				 size;
 };
 
 /*
@@ -140,6 +147,12 @@ int amdxdna_dpt_init(struct aie_device *aie);
 int amdxdna_dpt_fini(struct aie_device *aie);
 int amdxdna_dpt_suspend(struct amdxdna_dev *xdna);
 int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
+
+/* dmesg-dump consumer control (debugfs). */
+int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
+int amdxdna_fw_log_set_state(struct amdxdna_dev *xdna, u32 level);
+struct amdxdna_dpt *amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna,
+					   enum amdxdna_dpt_kind kind, int *idx);
 
 int amdxdna_get_fw_log(struct aie_device *aie,
 		       struct amdxdna_drm_get_array *args);
