@@ -1548,6 +1548,32 @@ int aie4_fw_log_fini(struct amdxdna_dev *xdna)
 	return ret;
 }
 
+/* Max bytes printed per dmesg line; firmware entries are newline-delimited
+ * text, so split on '\n' and cap overly long lines at this chunk size.
+ */
+#define AIE4_FW_LOG_CHUNK	800
+
+void aie4_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+{
+	size_t offset = 0;
+
+	if (!buffer || size == 0)
+		return;
+
+	while (offset < size) {
+		const char *p = buffer + offset;
+		size_t remaining = size - offset;
+		size_t n = remaining < AIE4_FW_LOG_CHUNK ? remaining : AIE4_FW_LOG_CHUNK;
+		const char *nl = memchr(p, '\n', n);
+
+		if (nl)
+			n = (size_t)(nl - p) + 1;
+
+		XDNA_INFO(xdna, "[FW LOG] %.*s", (int)n, p);
+		offset += n;
+	}
+}
+
 int aie4_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;

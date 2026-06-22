@@ -267,6 +267,7 @@ int aie2_start_fw_trace(struct amdxdna_dev_hdl *ndev,
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level);
 int aie2_fw_log_config(struct amdxdna_dev *xdna, u32 level);
 int aie2_fw_log_fini(struct amdxdna_dev *xdna);
+void aie2_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size);
 
 int aie2_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories);
 int aie2_fw_trace_config(struct amdxdna_dev *xdna, u32 categories);
