@@ -19,6 +19,8 @@ On a machine with XDNA device, with both XRT and XRT plugin packages installed, 
 To run AI applications, your system needs
 * Processor:
   - To run AI applications (test machine): RyzenAI processor
+    - Supported platforms are determined by the PCI IDs compiled into the
+      driver and the matching firmware metadata included with this repository.
   - To build this repository (build machine): Any x86 processors, but recommend AMD processor :wink:
 * Operating System:
   - Ubuntu >= 22.04
