@@ -401,10 +401,11 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
 {
 	if (queue->hsa_queue_p) {
-		dma_free_coherent(queue->alloc_dev,
-				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
-				  queue->hsa_queue_p,
-				  queue->hsa_queue_mem.dma_addr);
+		dma_free_noncoherent(queue->alloc_dev,
+				     sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
+				     queue->hsa_queue_p,
+				     queue->hsa_queue_mem.dma_addr,
+				     DMA_BIDIRECTIONAL);
 		queue->hsa_queue_p = NULL;
 		queue->hsa_queue_mem.dma_addr = 0;
 		queue->alloc_dev = NULL;
@@ -515,8 +516,9 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	for (r = 0; r < MAX_MEM_REGIONS; r++) {
 		alloc_dev = xdna->cma_region_devs[r];
 		if ((hwctx->priv->mem_bitmap & (1U << r)) && alloc_dev) {
-			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
-								&dma_handle, GFP_KERNEL);
+			queue->hsa_queue_p = dma_alloc_noncoherent(alloc_dev, alloc_size,
+								   &dma_handle, DMA_BIDIRECTIONAL,
+								   GFP_KERNEL);
 			if (!queue->hsa_queue_p)
 				continue;
 			queue->alloc_dev = alloc_dev;
@@ -526,10 +528,11 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 
 	/* If no allocation succeeded, use the default device */
 	if (!queue->hsa_queue_p) {
-		queue->hsa_queue_p = dma_alloc_coherent(xdna->ddev.dev,
-							alloc_size,
-							&dma_handle,
-							GFP_KERNEL);
+		queue->hsa_queue_p = dma_alloc_noncoherent(xdna->ddev.dev,
+							   alloc_size,
+							   &dma_handle,
+							   DMA_BIDIRECTIONAL,
+							   GFP_KERNEL);
 		if (!queue->hsa_queue_p) {
 			XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu",
 				 alloc_size);
