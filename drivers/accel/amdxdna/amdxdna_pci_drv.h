@@ -134,6 +134,7 @@ struct amdxdna_dev_info {
 
 struct amdxdna_carveout;
 struct amdxdna_dpt;
+struct aie_device;
 
 struct amdxdna_dev {
 	struct drm_device		ddev;
@@ -175,6 +176,12 @@ struct amdxdna_dev {
 
 	/* Allow auto core dump for hardware contexts, if true. */
 	bool				auto_coredump;
+
+	/* Back-pointer to the per-generation aie_device, set at DPT init so
+	 * common code (e.g. debugfs) can reach msg_ops without knowing the
+	 * generation-specific struct amdxdna_dev_hdl layout.
+	 */
+	struct aie_device		*dpt_aie;
 };
 
 /*
