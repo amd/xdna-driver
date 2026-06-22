@@ -136,6 +136,14 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
     attach_to_ctx(xflags.use);
 
+  // Freshly allocated pages may carry stale dirty cache lines. If this BO is
+  // used as an output, those lines could later write back over the device's
+  // DMA results and corrupt them. Flush once right after allocation so the
+  // BO starts clean; subsequent coherency is the app's responsibility via
+  // explicit sync().
+  if (m_type == AMDXDNA_BO_SHARE)
+    sync(direction::host2device, m_aligned_size, 0);
+
   shim_debug("Allocated DRM BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
 	     m_ptr, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
 }
