@@ -11,6 +11,7 @@
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
+#include <linux/bitfield.h>
 #include <linux/cleanup.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
@@ -1085,6 +1086,182 @@ static int aie2_get_dev_rev(struct amdxdna_dev *xdna, u32 *rev)
 		*rev = (u32)aie2_rev;
 
 	return ret;
+}
+
+#define AIE2_MGMT_APP_ID		0xFF
+
+static const char * const aie2_fw_log_level_str[] = {
+	"OFF",
+	"ERR",
+	"WRN",
+	"INF",
+	"DBG",
+	"MAX"
+};
+
+/*
+ * AIE2 firmware log entries are structured (unlike the plain newline-
+ * delimited AIE4 stream): each record is a header, a u64-aligned payload,
+ * and a footer. The header and footer carry a magic byte and a matching
+ * sequence number / word length so a torn or overwritten record in the
+ * wrapping DRAM ring can be detected and skipped.
+ */
+struct aie2_fw_log_header {
+#define AIE2_DPT_ENTRY_MAGIC_HEAD	0xCA
+	u8	magic;
+	u8	data_word_len;
+	__le16	seq_num;
+	u32	reserved;
+} __packed;
+
+/*
+ * The two 32-bit words following the timestamp pack the record metadata.
+ * The kernel avoids C bitfields for wire/DRAM layouts (their bit ordering
+ * and padding are implementation-defined), so the fields are decoded with
+ * explicit masks via FIELD_GET on this little-endian target. Only @level
+ * and @appn (word0) are consumed today; the remaining masks document the
+ * firmware layout.
+ */
+struct aie2_fw_log_data {
+	u64	timestamp;
+	u32	word0;
+	u32	word1;
+} __packed;
+
+/* word0 */
+#define AIE2_FW_LOG_FORMAT	GENMASK(0, 0)
+#define AIE2_FW_LOG_LEVEL	GENMASK(10, 8)
+#define AIE2_FW_LOG_APPN	GENMASK(23, 16)
+#define AIE2_FW_LOG_ARGC	GENMASK(31, 24)
+/* word1 */
+#define AIE2_FW_LOG_LINE	GENMASK(15, 0)
+#define AIE2_FW_LOG_MODULE	GENMASK(31, 16)
+
+struct aie2_fw_log_footer {
+	u32	reserved;
+	__le16	seq_num;
+	u8	data_word_len;
+#define AIE2_DPT_ENTRY_MAGIC_FOOTER	0xBA
+	u8	magic;
+} __packed;
+
+static void aie2_fw_log_print(struct amdxdna_dev *xdna, const char *payload,
+			      size_t size)
+{
+	u32 level, appn, word0;
+	const char *level_str;
+	__le64 raw_timestamp;
+	__le32 raw_word0;
+	char appid[20];
+	u64 timestamp;
+
+	if (size < sizeof(struct aie2_fw_log_data))
+		return;
+
+	/*
+	 * The resync path (aie2_fw_log_parse) advances in 4-byte steps, so a
+	 * valid-looking header can be found at 4-byte alignment and @payload
+	 * may not be 8-byte aligned. Copy the little-endian wire fields into
+	 * aligned locals before converting, instead of dereferencing a
+	 * possibly misaligned struct. This also makes the DRAM layout
+	 * endianness explicit rather than baking in host endianness, and
+	 * avoids depending on <linux/unaligned.h>, which does not exist on
+	 * kernels older than 6.12.
+	 */
+	memcpy(&raw_timestamp, payload, sizeof(raw_timestamp));
+	memcpy(&raw_word0, payload + offsetof(struct aie2_fw_log_data, word0),
+	       sizeof(raw_word0));
+	timestamp = le64_to_cpu(raw_timestamp);
+	word0 = le32_to_cpu(raw_word0);
+
+	level = FIELD_GET(AIE2_FW_LOG_LEVEL, word0);
+	appn = FIELD_GET(AIE2_FW_LOG_APPN, word0);
+
+	if (level < ARRAY_SIZE(aie2_fw_log_level_str))
+		level_str = aie2_fw_log_level_str[level];
+	else
+		level_str = "UNK";
+
+	if (appn == AIE2_MGMT_APP_ID)
+		scnprintf(appid, sizeof(appid), "MGMNT");
+	else
+		scnprintf(appid, sizeof(appid), "APP%2d", appn);
+
+	XDNA_INFO(xdna, "[FW LOG] [%llu] [%s] [%s]: %.*s", timestamp,
+		  level_str, appid, (int)(size - sizeof(struct aie2_fw_log_data)),
+		  payload + sizeof(struct aie2_fw_log_data));
+}
+
+/*
+ * Walk the fetched ring payload record by record, validating each entry's
+ * header/footer magic, sequence continuity and length before emitting it.
+ * On any inconsistency, advance by the minimum alignment (4 bytes) and
+ * resynchronize on the next valid header rather than trusting a possibly
+ * corrupted length.
+ */
+void aie2_fw_log_parse(struct amdxdna_dev *xdna, char *buffer, size_t size)
+{
+	char *end = buffer + size;
+	bool has_prev_seq = false;
+	char *p = buffer;
+	u16 prev_seq = 0;
+
+	if (!buffer || size == 0)
+		return;
+
+	while ((size_t)(end - p) >= sizeof(struct aie2_fw_log_header)) {
+		const struct aie2_fw_log_header *hdr = (const struct aie2_fw_log_header *)p;
+		unsigned int increment_bytes = 4; /* default resync step */
+		bool corrupted = true;
+
+		if (likely(hdr->magic == AIE2_DPT_ENTRY_MAGIC_HEAD)) {
+			size_t payload_bytes = hdr->data_word_len * sizeof(u64);
+			size_t total_entry_size = sizeof(struct aie2_fw_log_header) +
+						  payload_bytes +
+						  sizeof(struct aie2_fw_log_footer);
+			const char *payload = p + sizeof(struct aie2_fw_log_header);
+			const struct aie2_fw_log_footer *ftr;
+			u16 seq = le16_to_cpu(hdr->seq_num);
+			bool valid;
+
+			/* Partial entry at the ring end: stop to avoid overread. */
+			if ((size_t)(end - p) < total_entry_size)
+				break;
+
+			ftr = (const struct aie2_fw_log_footer *)(payload + payload_bytes);
+			valid = (ftr->magic == AIE2_DPT_ENTRY_MAGIC_FOOTER) &&
+				(seq > 0) && (seq == le16_to_cpu(ftr->seq_num)) &&
+				(hdr->data_word_len == ftr->data_word_len);
+
+			if (likely(valid) &&
+			    likely(!has_prev_seq || seq == (u16)(prev_seq + 1))) {
+				has_prev_seq = true;
+				prev_seq = seq;
+				aie2_fw_log_print(xdna, payload, payload_bytes);
+				corrupted = false;
+				increment_bytes = (unsigned int)total_entry_size;
+			}
+
+			if (unlikely(corrupted)) {
+				/*
+				 * Torn/overwritten records are expected at the
+				 * wrap boundary of a continuously overwritten
+				 * ring and the poll worker runs every
+				 * AMDXDNA_DPT_POLL_INTERVAL_MS, so ratelimit to
+				 * avoid drowning the log in the resync path.
+				 */
+				dev_warn_ratelimited(xdna->ddev.dev,
+						     "FW log entry overwritten/corrupted\n");
+				has_prev_seq = false;
+			}
+		}
+
+		if (unlikely(increment_bytes == 0) ||
+		    (size_t)(end - p) < increment_bytes)
+			break;
+
+		p += increment_bytes;
+	}
 }
 
 int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)

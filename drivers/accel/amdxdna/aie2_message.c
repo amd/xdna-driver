@@ -1048,6 +1048,7 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 		ndev->aie.msg_ops.fw_log_init   = aie2_fw_log_init;
 		ndev->aie.msg_ops.fw_log_config = aie2_fw_log_config;
 		ndev->aie.msg_ops.fw_log_fini   = aie2_fw_log_fini;
+		ndev->aie.msg_ops.fw_log_parse  = aie2_fw_log_parse;
 	}
 
 	if (AIE_FEATURE_ON(&ndev->aie, AIE2_FW_TRACE)) {
