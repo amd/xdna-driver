@@ -600,6 +600,9 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 	struct amdxdna_hwctx *hwctx;
 	int ret, idx;
 
+	if (!xdna->dev_info->ops->cmd_submit)
+		return -EOPNOTSUPP;
+
 	XDNA_DBG(xdna, "Command BO hdl %d, Arg BO count %d", cmd_bo_hdl, arg_bo_cnt);
 	job = kzalloc_flex(*job, bos, arg_bo_cnt);
 	if (!job)
