@@ -463,7 +463,6 @@ static int aie2_hw_suspend(struct amdxdna_dev *xdna)
 		aie2_hwctx_suspend(client);
 
 	aie2_hw_stop(xdna);
-	amdxdna_dpt_suspend(&xdna->dev_handle->aie);
 
 	return 0;
 }
@@ -478,8 +477,6 @@ static int aie2_hw_resume(struct amdxdna_dev *xdna)
 		XDNA_ERR(xdna, "Start hardware failed, %d", ret);
 		return ret;
 	}
-
-	amdxdna_dpt_resume(&xdna->dev_handle->aie);
 
 	list_for_each_entry(client, &xdna->client_list, node) {
 		ret = aie2_hwctx_resume(client);
