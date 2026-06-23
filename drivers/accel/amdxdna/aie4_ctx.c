@@ -10,6 +10,7 @@
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/overflow.h>
+#include <linux/sched/mm.h>
 #include <linux/types.h>
 
 #include "aie.h"
@@ -21,6 +22,13 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
+#include "trace/events/amdxdna.h"
+
+#define CTX_INVALID_ID			(~0U)
+#define CTX_INVALID_DOORBELL		AMDXDNA_INVALID_DOORBELL_OFFSET
+
+static void job_worker(struct work_struct *work);
+static void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx);
 
 static irqreturn_t cert_comp_isr(int irq, void *p)
 {
@@ -201,6 +209,25 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		 resp.job_complete_msix_idx, resp.hw_context_id,
 		 resp.doorbell_offset);
 
+	if (priv->kernel_submit) {
+		struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
+		u64 db_off = (u64)ndev->priv->doorbell_off + resp.doorbell_offset;
+
+		/*
+		 * doorbell_base is a pcim_iomap() of the whole doorbell BAR.  The
+		 * doorbell offset comes from firmware (or, on a VF, the PF/hypervisor);
+		 * reject one that would place the u32 doorbell write past the mapped
+		 * BAR before ring_doorbell() ever dereferences priv->doorbell_addr.
+		 * Mirrors the bounds check on the user mmap path (aie4_doorbell_mmap).
+		 */
+		if (db_off + sizeof(u32) >
+		    pci_resource_len(pdev, xdna->dev_info->doorbell_bar)) {
+			XDNA_ERR(xdna, "doorbell offset 0x%llx out of BAR", db_off);
+			aie4_msg_destroy_context(ndev, resp.hw_context_id);
+			return -EINVAL;
+		}
+	}
+
 	if (ndev->aie.force_preempt_enabled) {
 		ret = aie4_force_preemption(ndev);
 		if (ret) {
@@ -218,7 +245,23 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 	}
 
 	priv->hw_ctx_id = resp.hw_context_id;
-	hwctx->doorbell_offset = resp.doorbell_offset;
+
+	if (priv->kernel_submit) {
+		/*
+		 * Kernel-mode submission: point at this context's doorbell within
+		 * the device-level doorbell BAR mapping (fixed for the device's
+		 * lifetime) so the driver can ring it, and keep it out of user
+		 * space (hand back an invalid offset so the doorbell cannot be
+		 * mmap'd/rung by the user).
+		 */
+		priv->doorbell_addr = ndev->doorbell_base +
+				      ndev->priv->doorbell_off + resp.doorbell_offset;
+		hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
+	} else {
+		/* User-mode submission: hand the doorbell to user space to ring. */
+		hwctx->doorbell_offset = resp.doorbell_offset;
+	}
+	WRITE_ONCE(priv->status, CTX_STATE_CONNECTED);
 
 	return 0;
 }
@@ -233,14 +276,20 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
+	/*
+	 * Mark disconnected before waking waiters in aie4_unlink_cert_comp() so
+	 * the job worker observes the teardown and stops waiting on read_index.
+	 */
+	WRITE_ONCE(priv->status, CTX_STATE_DISCONNECTED);
+
 	ret = aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
 	if (ret)
 		XDNA_WARN(xdna, "destroy ctx id %d failed %d", priv->hw_ctx_id, ret);
 
-#define CTX_INVALID_ID			(~0U)
-#define CTX_INVALID_DOORBELL		(~0U)
 	priv->hw_ctx_id = CTX_INVALID_ID;
 	hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
+	/* doorbell_base is a device-level managed mapping; just drop the pointer. */
+	priv->doorbell_addr = NULL;
 	aie4_unlink_cert_comp(hwctx);
 }
 
@@ -252,33 +301,102 @@ static void aie4_hwctx_umq_fini(struct amdxdna_hwctx *hwctx)
 
 static int aie4_hwctx_umq_init(struct amdxdna_hwctx *hwctx)
 {
+	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
+				     sizeof(struct host_indirect_packet_data);
+	const size_t pkts_sz = CTX_MAX_CMDS * sizeof(struct host_queue_packet);
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct amdxdna_gem_obj *umq_bo;
 	struct host_queue_header *qhdr;
+	u64 data_dev_addr;
+	void *umq_va;
+	int ret;
+	int i;
 
+	/*
+	 * The HSA queue lives in a user-allocated BO (umq_bo_hdl) in both user- and
+	 * kernel-mode submission; the driver does not allocate it privately.  Under
+	 * PASID/SVA the device reaches the queue through the submitting process's
+	 * own page tables, so it must have a user virtual address - a kernel-private
+	 * buffer would be unreachable by the device.  This is also safe: a forged
+	 * read_index in this shared BO can only make the owning process complete its
+	 * own command early and harm itself, never another context (NO_PASID/IOVA is
+	 * a single-trust bring-up mode with no inter-process isolation).
+	 */
 	umq_bo = amdxdna_gem_get_obj(hwctx->client, hwctx->umq_bo_hdl, AMDXDNA_BO_SHARE);
 	if (!umq_bo) {
 		XDNA_ERR(xdna, "cannot find umq_bo handle %d", hwctx->umq_bo_hdl);
 		return -ENOENT;
 	}
-	if (umq_bo->mem.size < sizeof(*qhdr)) {
-		XDNA_ERR(xdna, "umq_bo size is too small");
-		return -EINVAL;
+	priv->umq_bo = umq_bo;
+
+	/*
+	 * Kernel-mode submission: the driver fills the host queue and rings the
+	 * doorbell, so the user umq_bo must hold the header plus the direct and
+	 * level-1 indirect packet arrays.  User-mode submission only needs the
+	 * header (the user owns the queue content).
+	 */
+	if (umq_bo->mem.size < sizeof(*qhdr) ||
+	    (priv->kernel_submit &&
+	     umq_bo->mem.size < sizeof(*qhdr) + pkts_sz + indir_pkts_sz)) {
+		XDNA_ERR(xdna, "umq_bo size %zu is too small",
+			 (size_t)umq_bo->mem.size);
+		ret = -EINVAL;
+		goto err_fini;
 	}
 
-	priv->umq_bo = umq_bo;
-	/* get kva address for host queue read index and write index */
-	qhdr = amdxdna_gem_vmap(umq_bo);
-	if (!qhdr) {
-		aie4_hwctx_umq_fini(hwctx);
-		return -ENOMEM;
+	umq_va = amdxdna_gem_vmap(umq_bo);
+	if (!umq_va) {
+		ret = -ENOMEM;
+		goto err_fini;
 	}
+	qhdr = umq_va;
 
 	priv->umq_read_index = &qhdr->read_index;
 	priv->umq_write_index = &qhdr->write_index;
 
+	/* User-mode submission: user owns the queue content and the doorbell. */
+	if (!priv->kernel_submit)
+		return 0;
+
+	/*
+	 * The queue content is driver-owned and never trusted from user space
+	 * (only read_index is read back to detect completion).  Lay out the
+	 * direct packets right after the header and the indirect packets after
+	 * them, and publish the same base via data_address for CERT.
+	 */
+	data_dev_addr = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
+	priv->umq_pkts = umq_va + sizeof(*qhdr);
+	priv->umq_indirect_pkts = umq_va + sizeof(*qhdr) + pkts_sz;
+	priv->umq_indirect_pkts_dev_addr = data_dev_addr + pkts_sz;
+
+	/*
+	 * Only the header + direct/indirect packet regions are driver-owned and
+	 * used for kernel submission; the size check above guarantees they fit.
+	 * Clear just that range, not the whole user-sized BO, so an oversized
+	 * umq_bo cannot force a huge memset (and page faults) under dev_lock.
+	 */
+	memset(umq_va, 0, sizeof(*qhdr) + pkts_sz + indir_pkts_sz);
+	priv->write_index = QUEUE_INDEX_START;
+	qhdr->read_index = QUEUE_INDEX_START;
+	qhdr->write_index = QUEUE_INDEX_START;
+	qhdr->version.major = HOST_QUEUE_MAJOR_VERSION;
+	qhdr->version.minor = HOST_QUEUE_MINOR_VERSION;
+	qhdr->capacity = CTX_MAX_CMDS;
+	qhdr->data_address = data_dev_addr;
+	for (i = 0; i < CTX_MAX_CMDS; i++)
+		priv->umq_pkts[i].pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
+	for (i = 0; i < CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES; i++) {
+		priv->umq_indirect_pkts[i].header.opcode = OPCODE_EXEC_BUF;
+		priv->umq_indirect_pkts[i].header.count = sizeof(struct exec_buf);
+		priv->umq_indirect_pkts[i].header.distribute = 1;
+	}
+
 	return 0;
+
+err_fini:
+	aie4_hwctx_umq_fini(hwctx);
+	return ret;
 }
 
 int aie4_hwctx_init(struct amdxdna_hwctx *hwctx)
@@ -296,21 +414,52 @@ int aie4_hwctx_init(struct amdxdna_hwctx *hwctx)
 	if (!priv)
 		return -ENOMEM;
 	hwctx->priv = priv;
+	priv->hwctx = hwctx;
+	/*
+	 * Snapshot the device's kernel-mode submission setting (debugfs-tunable)
+	 * so it is stable for this ctx's lifetime.
+	 */
+	priv->kernel_submit = ndev->kernel_submit;
+
+	/*
+	 * Kernel-mode submission: the driver fills the queue and rings the
+	 * doorbell, so it needs the job machinery.  User-mode submission leaves
+	 * the queue and doorbell to user space (no job machinery here).
+	 */
+	if (priv->kernel_submit) {
+		mutex_init(&priv->io_lock);
+		INIT_LIST_HEAD(&priv->pending_job_list);
+		INIT_LIST_HEAD(&priv->running_job_list);
+		init_waitqueue_head(&priv->job_list_wq);
+		INIT_WORK(&priv->job_work, job_worker);
+		priv->job_work_q = alloc_ordered_workqueue("%s", 0, hwctx->name);
+		if (!priv->job_work_q) {
+			XDNA_ERR(xdna, "Create job_work_q failed");
+			ret = -ENOMEM;
+			goto destroy_lock;
+		}
+	}
 
 	ret = aie4_hwctx_umq_init(hwctx);
 	if (ret)
-		goto free_priv;
+		goto destroy_wq;
 
 	ret = aie4_hwctx_create(hwctx);
 	if (ret)
 		goto umq_fini;
 
-	XDNA_DBG(xdna, "hwctx %s init completed", hwctx->name);
+	XDNA_DBG(xdna, "hwctx %s init completed (%s submission)", hwctx->name,
+		 priv->kernel_submit ? "kernel" : "user");
 	return 0;
 
 umq_fini:
 	aie4_hwctx_umq_fini(hwctx);
-free_priv:
+destroy_wq:
+	if (priv->kernel_submit)
+		destroy_workqueue(priv->job_work_q);
+destroy_lock:
+	if (priv->kernel_submit)
+		mutex_destroy(&priv->io_lock);
 	kfree(priv);
 	hwctx->priv = NULL;
 	return ret;
@@ -318,9 +467,19 @@ free_priv:
 
 void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	/* Disconnects the ctx and wakes the job worker (status DISCONNECTED). */
 	aie4_hwctx_destroy(hwctx);
+	if (priv->kernel_submit) {
+		/* Drain/abort any in-flight jobs before tearing down the queue. */
+		aie4_hwctx_cleanup_running_jobs(hwctx);
+		destroy_workqueue(priv->job_work_q);
+	}
 	aie4_hwctx_umq_fini(hwctx);
-	kfree(hwctx->priv);
+	if (priv->kernel_submit)
+		mutex_destroy(&priv->io_lock);
+	kfree(priv);
 }
 
 static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
@@ -330,49 +489,76 @@ static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
 
 static u64 get_read_index(struct amdxdna_hwctx *hwctx)
 {
-	u64 wi = READ_ONCE(*hwctx->priv->umq_write_index);
-	u64 ri = READ_ONCE(*hwctx->priv->umq_read_index);
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u64 ri, wi;
+
+	/*
+	 * Sample read_index (written by CERT) before write_index. CERT can
+	 * never complete more than has been published, so a write_index sampled
+	 * after read_index always satisfies wi >= ri; sampling write_index
+	 * first races the submit path / CERT and yields a bogus ri > wi.
+	 *
+	 * In kernel-mode submission write_index is the driver's host-owned copy
+	 * in coherent kernel memory (always >= the value mirrored into the UMQ,
+	 * and the device never writes it).  In user-mode submission the user
+	 * owns the queue, so fall back to the shared UMQ copy.
+	 *
+	 * Security: read_index lives in the umq_bo, which the owning process can
+	 * map.  Under PASID/SVA the device reaches the queue through that process's
+	 * own page tables, so a forged read_index only completes the process's own
+	 * command early and corrupts or hangs itself - it cannot reach another
+	 * context.
+	 */
+	ri = READ_ONCE(*priv->umq_read_index);
+	/* Order the read_index sample before the write_index sample. */
+	smp_rmb();
+	wi = priv->kernel_submit ? READ_ONCE(priv->write_index)
+				 : READ_ONCE(*priv->umq_write_index);
 
 	/*
 	 * CERT cannot update read index as uint64 atomically. Driver may read
-	 * half-updated read index when it has bits in high 32bit. In case read
-	 * index is not valid, wait for some time and retry once. It should
-	 * allow CERT to complete the read index update.
+	 * a half-updated read index when it has bits in the high 32 bits. If it
+	 * looks invalid, re-sample once -- WITHOUT sleeping, since this can run as
+	 * a wait_event() condition. If still invalid, report not-advanced; the
+	 * waiter re-checks on the next completion wake or timeout.
 	 */
 	if (!valid_queue_index(ri, wi, CTX_MAX_CMDS)) {
-		XDNA_WARN(xdna, "Invalid index, ri %llu, wi %llu", ri, wi);
-		usleep_range(100, 200);
-		ri = READ_ONCE(*hwctx->priv->umq_read_index);
+		ri = READ_ONCE(*priv->umq_read_index);
+		/* Order the read_index sample before the write_index sample. */
+		smp_rmb();
+		wi = priv->kernel_submit ? READ_ONCE(priv->write_index)
+					 : READ_ONCE(*priv->umq_write_index);
 		if (!valid_queue_index(ri, wi, CTX_MAX_CMDS)) {
-			XDNA_ERR(xdna, "Invalid index after retry, ri %llu, wi %llu", ri, wi);
-			ri = 0;
+			/*
+			 * Still invalid (torn 64-bit read, or a transient
+			 * accounting skew).  Return the last valid read_index
+			 * instead of 0: read_index only advances, so the cached
+			 * value is a safe lower bound -- it never reports a
+			 * command complete that isn't, and never regresses the
+			 * worker into falsely timing out a finished job.
+			 */
+			XDNA_DBG(xdna, "Invalid index, ri %llu, wi %llu", ri, wi);
+			return READ_ONCE(priv->last_read_index);
 		}
 	}
 
+	WRITE_ONCE(priv->last_read_index, ri);
 	return ri;
 }
 
-static int check_cert_comp_linked(struct amdxdna_hwctx *hwctx, struct cert_comp *comp)
+static bool check_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq)
 {
-	struct amdxdna_dev_hdl *ndev = hwctx->client->xdna->dev_handle;
-
-	guard(mutex)(&ndev->cert_comp_lock);
-
-	/* any changed comp indicates that EAGAIN is needed */
-	return comp == hwctx->priv->cert_comp;
-}
-
-static bool check_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq, struct cert_comp *comp)
-{
-	u64 read_idx;
-
-	if (!check_cert_comp_linked(hwctx, comp))
+	/*
+	 * Runs as a wait_event() condition, so it must not sleep: use only
+	 * lockless reads.  A disconnect (teardown/reset) also breaks the wait via
+	 * the status check; the caller then confirms real completion by re-reading
+	 * read_index, so a disconnect wake is not mistaken for success.
+	 */
+	if (READ_ONCE(hwctx->priv->status) != CTX_STATE_CONNECTED)
 		return true;
 
-	read_idx = get_read_index(hwctx);
-	XDNA_DBG(hwctx->client->xdna, "check read idx %lld > seq %lld", read_idx, seq);
-	return read_idx > seq;
+	return get_read_index(hwctx) > seq;
 }
 
 int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
@@ -388,12 +574,13 @@ int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 		wait_jifs = msecs_to_jiffies(timeout);
 
 	ret = wait_event_interruptible_timeout(cert_comp->waitq,
-					       (check_cmd_done(hwctx, seq, cert_comp)),
+					       check_cmd_done(hwctx, seq),
 					       wait_jifs);
 
 	if (!ret)
 		ret = -ETIME;
-	else if (ret > 0 && !check_cert_comp_linked(hwctx, cert_comp))
+	else if (ret > 0 && get_read_index(hwctx) <= seq)
+		/* Woke on disconnect/reset, not on real completion. */
 		ret = -EAGAIN;
 
 	aie4_put_cert_comp(cert_comp);
@@ -401,24 +588,375 @@ int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 	return ret <= 0 ? ret : 0;
 }
 
-int aie4_hwctx_valid_doorbell(struct amdxdna_client *client, u32 vm_pgoff)
+/* ---- kernel-mode submission (driver fills the queue and rings doorbell) ---- */
+
+static inline void ring_doorbell(struct amdxdna_hwctx *hwctx)
 {
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_hwctx *hwctx;
-	unsigned long hwctx_id;
-	int idx;
+	writel(0, hwctx->priv->doorbell_addr);
+}
 
-	guard(mutex)(&xdna->dev_lock);
+/* Publish a command to CERT and return the assigned command sequence (slot). */
+static u64 publish_cmd(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	u64 wi = priv->write_index;
 
-	idx = srcu_read_lock(&client->hwctx_srcu);
-	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-		if (vm_pgoff == (hwctx->doorbell_offset >> PAGE_SHIFT)) {
-			srcu_read_unlock(&client->hwctx_srcu, idx);
-			return 1;
+	/* Paired with the lockless READ_ONCE() readers of write_index. */
+	WRITE_ONCE(priv->write_index, wi + 1);
+	/* Order the packet-slot writes before CERT sees the new write_index. */
+	wmb();
+	WRITE_ONCE(*priv->umq_write_index, wi + 1);
+	return wi;
+}
+
+static int wait_till_seq_completed(struct amdxdna_hwctx *hwctx, u64 seq)
+{
+	struct cert_comp *cert_comp = aie4_get_cert_comp(hwctx);
+	int ret;
+
+	if (!cert_comp)
+		return -EAGAIN;
+
+	/*
+	 * Killable: the submit path (wait_till_hsa_not_full) reaches here while
+	 * holding hwctx_srcu, and ctx teardown blocks on synchronize_srcu(), so a
+	 * fatal signal (e.g. the app being killed) must be able to unwind the wait
+	 * - otherwise a full queue with a silent CERT would hang the submitter in
+	 * D state and stall teardown forever.  Harmless for the job worker kthread
+	 * (a kthread never has a fatal signal pending).
+	 */
+	ret = wait_event_killable(cert_comp->waitq, check_cmd_done(hwctx, seq));
+	aie4_put_cert_comp(cert_comp);
+
+	if (ret)
+		return ret;	/* -ERESTARTSYS: fatal signal on the submit path */
+	return (hwctx->priv->status != CTX_STATE_CONNECTED) ? -EAGAIN : 0;
+}
+
+static int wait_till_hsa_not_full(struct amdxdna_hwctx *hwctx)
+{
+	u64 wi = READ_ONCE(hwctx->priv->write_index);
+
+	if (wi < CTX_MAX_CMDS)
+		return 0;
+
+	return wait_till_seq_completed(hwctx, wi - CTX_MAX_CMDS);
+}
+
+static int fill_indirect_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
+			     u32 total_slots, struct amdxdna_cmd_start_dpu *dpu,
+			     u16 entries)
+{
+	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
+	struct host_indirect_packet_entry *hipe =
+		(struct host_indirect_packet_entry *)(pkt->data);
+	u16 i;
+
+	for (i = 0; i < entries; i++, dpu++, hipe++) {
+		struct host_indirect_packet_data *hipd;
+		u64 indirect_pkt_dev_addr;
+		u32 uci = dpu->uc_index;
+		u32 idx;
+
+		/*
+		 * dpu is the user-shared cmd_abo payload, so uc_index is read at
+		 * use time here and indexes priv->umq_indirect_pkts[].  Reject an
+		 * out-of-range value: the slot is reused, so skipping the entry
+		 * would leave a stale one that count still advertises to CERT.
+		 * Abort before the packet is published.
+		 */
+		if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
+			XDNA_ERR(priv->hwctx->client->xdna, "Invalid uc index %d", uci);
+			return -EINVAL;
 		}
-	}
-	srcu_read_unlock(&client->hwctx_srcu, idx);
+		idx = uci * total_slots + slot_idx;
+		hipd = &priv->umq_indirect_pkts[idx];
+		indirect_pkt_dev_addr = priv->umq_indirect_pkts_dev_addr +
+			sizeof(struct host_indirect_packet_data) * idx;
 
+		/* Point the indirect entry at the indirect packet. */
+		hipe->host_addr_low = lower_32_bits(indirect_pkt_dev_addr);
+		hipe_set_host_addr_high(&hipe->host_addr_high_uc_index,
+					upper_32_bits(indirect_pkt_dev_addr));
+		hipe_set_uc_index(&hipe->host_addr_high_uc_index, uci);
+
+		/* Fill in the indirect packet. */
+		hipd->payload.dpu_control_code_host_addr_low =
+			lower_32_bits(dpu->instruction_buffer);
+		hipd->payload.dpu_control_code_host_addr_high =
+			upper_32_bits(dpu->instruction_buffer);
+		hipd->payload.dtrace_buf_host_addr_low =
+			lower_32_bits(dpu->dtrace_buffer);
+		hipd->payload.dtrace_buf_host_addr_high =
+			lower_16_bits(upper_32_bits(dpu->dtrace_buffer));
+	}
+	pkt->pkt_header.common_header.distribute = 1;
+	pkt->pkt_header.common_header.indirect = 1;
+	pkt->pkt_header.common_header.count = entries * sizeof(*hipe);
+	return 0;
+}
+
+static void fill_direct_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
+			    struct amdxdna_cmd_start_dpu *dpu)
+{
+	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
+	struct exec_buf *ebuf = (struct exec_buf *)(pkt->data);
+
+	memset(pkt->data, 0, sizeof(pkt->data));
+	ebuf->dpu_control_code_host_addr_low = lower_32_bits(dpu->instruction_buffer);
+	ebuf->dpu_control_code_host_addr_high = upper_32_bits(dpu->instruction_buffer);
+	ebuf->dtrace_buf_host_addr_low = lower_32_bits(dpu->dtrace_buffer);
+	ebuf->dtrace_buf_host_addr_high = lower_16_bits(upper_32_bits(dpu->dtrace_buffer));
+	pkt->pkt_header.common_header.distribute = 0;
+	pkt->pkt_header.common_header.indirect = 0;
+	pkt->pkt_header.common_header.count = sizeof(*ebuf);
+}
+
+/*
+ * Build and submit one HSA command for @cmd_abo into the user host queue and
+ * ring the doorbell.  Called with io_lock held.
+ *
+ * Security: cmd_abo is shared with user space; cache and validate its fields
+ * before use and never trust the queue content (only read_index is read back).
+ */
+static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
+			  struct amdxdna_gem_obj *cmd_abo, u64 *seq)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_cmd_start_dpu *dpu;
+	struct host_queue_packet *pkt;
+	u32 payload_size;
+	u64 slot_idx;
+	u16 chained;
+	int ret;
+	u32 op;
+
+	op = amdxdna_cmd_get_op(cmd_abo);
+	if (op != ERT_START_DPU) {
+		XDNA_ERR(xdna, "Invalid exec buf op, %d", op);
+		return -EINVAL;
+	}
+
+	dpu = amdxdna_cmd_get_payload(cmd_abo, &payload_size);
+	if (!dpu) {
+		XDNA_ERR(xdna, "Invalid DPU payload");
+		return -EINVAL;
+	}
+	/*
+	 * cmd_abo is shared with user space; validate the cached chained count
+	 * against the actual payload size before dereferencing chained+1 DPU
+	 * entries, so a bogus count cannot drive an out-of-bounds read.
+	 */
+	chained = dpu->chained;
+	if (chained >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
+		XDNA_ERR(xdna, "Invalid DPU data");
+		return -EINVAL;
+	}
+	if (payload_size < (u32)(chained + 1) * sizeof(*dpu)) {
+		XDNA_ERR(xdna, "DPU payload %u too small for %u entries",
+			 payload_size, chained + 1);
+		return -EINVAL;
+	}
+
+	/*
+	 * The queue may be full; the wait sleeps until CERT drains it.  Drop
+	 * io_lock across the sleep so the job worker (and other submitters) can
+	 * make progress, then re-acquire and re-check the ctx is still live.
+	 */
+	mutex_unlock(&priv->io_lock);
+	ret = wait_till_hsa_not_full(hwctx);
+	mutex_lock(&priv->io_lock);
+	if (ret)
+		return ret;
+	if (priv->status != CTX_STATE_CONNECTED)
+		return -EIO;
+
+	slot_idx = priv->write_index & (CTX_MAX_CMDS - 1);
+	if (chained) {
+		ret = fill_indirect_pkt(priv, slot_idx, CTX_MAX_CMDS, dpu, chained + 1);
+		if (ret)
+			return ret;
+	} else {
+		fill_direct_pkt(priv, slot_idx, dpu);
+	}
+
+	pkt = &priv->umq_pkts[slot_idx];
+	pkt->pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
+	pkt->pkt_header.common_header.chain_flag = CHAIN_FLG_LAST_CMD;
+	pkt->pkt_header.common_header.reserved = 0x0;
+	pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo) +
+					    offsetof(struct amdxdna_cmd, header);
+	*seq = publish_cmd(hwctx);
+	ring_doorbell(hwctx);
+	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", hwctx->name, *seq);
+	return 0;
+}
+
+static struct amdxdna_sched_job *next_running_job(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_sched_job *job;
+
+	mutex_lock(&priv->io_lock);
+	job = list_first_entry_or_null(&priv->running_job_list,
+				       struct amdxdna_sched_job, aie4_job_list);
+	if (job)
+		list_del(&job->aie4_job_list);
+	mutex_unlock(&priv->io_lock);
+	return job;
+}
+
+static void aie4_job_release(struct kref *ref)
+{
+	struct amdxdna_sched_job *job =
+		container_of(ref, struct amdxdna_sched_job, refcnt);
+
+	amdxdna_sched_job_cleanup(job);
+	atomic64_inc(&job->hwctx->job_free_cnt);
+	if (job->out_fence)
+		dma_fence_put(job->out_fence);
+	kfree(job);
+}
+
+static void job_done(struct amdxdna_sched_job *job)
+{
+	job->aie4_job_state = AIE4_JOB_STATE_DONE;
+	dma_fence_signal(job->fence);
+	/*
+	 * Release the address-space reference taken at submit.  On SVA/IOMMU
+	 * platforms the device walks the submitter's page tables while the job
+	 * runs, so its mm must stay alive until completion.
+	 */
+	mmput_async(job->mm);
+	kref_put(&job->refcnt, aie4_job_release);
+}
+
+static void job_complete(struct amdxdna_sched_job *job)
+{
+	job_done(job);
+}
+
+/*
+ * When CERT cannot complete a command (context teardown), the driver advances
+ * read_index so any waiter observes the command as finished.  Only valid while
+ * the context is disconnected -- never race CERT's own read_index updates.
+ */
+static void update_read_index(struct amdxdna_hwctx *hwctx, u64 idx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	drm_WARN_ON(&hwctx->client->xdna->ddev, priv->status == CTX_STATE_CONNECTED);
+
+	/* Order cmd-bo state write before the waiter observes completion. */
+	wmb();
+	WRITE_ONCE(*priv->umq_read_index, idx);
+}
+
+static void job_abort(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_hwctx *hwctx = job->hwctx;
+
+	XDNA_ERR(hwctx->client->xdna, "aborting %s job %lld", hwctx->name, job->seq);
+	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
+	update_read_index(hwctx, job->seq + 1);
+	job_done(job);
+}
+
+static void job_worker(struct work_struct *work)
+{
+	struct amdxdna_hwctx_priv *priv =
+		container_of(work, struct amdxdna_hwctx_priv, job_work);
+	struct amdxdna_hwctx *hwctx = priv->hwctx;
+	struct amdxdna_sched_job *job;
+
+	while ((job = next_running_job(hwctx))) {
+		wait_till_seq_completed(hwctx, job->seq);
+		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
+
+		if (get_read_index(hwctx) > job->seq)
+			job_complete(job);
+		else
+			job_abort(job);
+	}
+}
+
+static void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	/* Must be disconnected so CERT can no longer complete jobs. */
+	drm_WARN_ON(&hwctx->client->xdna->ddev, priv->status == CTX_STATE_CONNECTED);
+	queue_work(priv->job_work_q, &priv->job_work);
+	flush_work(&priv->job_work);
+}
+
+int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 op;
+	int ret;
+
+	XDNA_DBG(xdna, "ctx %s job 0x%llx received", hwctx->name, (u64)job);
+
+	if (!priv->kernel_submit) {
+		/* User-mode submission rings its own doorbell; no kernel submit. */
+		XDNA_ERR(xdna, "cmd submit ioctl not supported in user-mode submission");
+		return -EOPNOTSUPP;
+	}
+
+	if (!job->cmd_bo) {
+		XDNA_ERR(xdna, "No command BO in job");
+		return -EINVAL;
+	}
+
+	op = amdxdna_cmd_get_op(job->cmd_bo);
+	if (op == ERT_CMD_CHAIN) {
+		/* Command chains are not supported on the aie4 kernel path yet. */
+		XDNA_ERR(xdna, "Command chain not supported");
+		return -EOPNOTSUPP;
+	}
+	if (op != ERT_START_DPU) {
+		XDNA_ERR(xdna, "Invalid cmd opcode %d", op);
+		return -EINVAL;
+	}
+
+	INIT_LIST_HEAD(&job->aie4_job_list);
+	job->aie4_job_state = AIE4_JOB_STATE_PENDING;
+
+	/*
+	 * Hold a reference on the submitter's address space until the job
+	 * completes (job_done): on SVA/IOMMU platforms the device walks the
+	 * submitter's page tables while the command runs.  Balanced with the
+	 * mmput_async() in job_done() and the mmput() on the failure paths below.
+	 */
+	if (!mmget_not_zero(job->mm)) {
+		XDNA_ERR(xdna, "Failed to get mm reference");
+		return -ESRCH;
+	}
+
+	mutex_lock(&priv->io_lock);
+	if (priv->status != CTX_STATE_CONNECTED) {
+		mutex_unlock(&priv->io_lock);
+		mmput(job->mm);
+		return -EIO;
+	}
+
+	ret = submit_one_cmd(hwctx, job->cmd_bo, &job->seq);
+	if (ret) {
+		mutex_unlock(&priv->io_lock);
+		mmput(job->mm);
+		return ret;
+	}
+
+	job->aie4_job_state = AIE4_JOB_STATE_SUBMITTED;
+	list_add_tail(&job->aie4_job_list, &priv->running_job_list);
+	*seq = job->seq;
+	mutex_unlock(&priv->io_lock);
+
+	atomic64_inc(&hwctx->job_submit_cnt);
+	queue_work(priv->job_work_q, &priv->job_work);
 	return 0;
 }
 
