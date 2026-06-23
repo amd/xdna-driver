@@ -128,16 +128,18 @@ struct amdxdna_dpt {
 };
 
 /*
- * Top-level DPT lifecycle. Entry points called from per-generation
- * init/fini/suspend/resume after aie->msg_ops has been populated.
+ * Top-level DPT lifecycle. amdxdna_dpt_init/fini are called from
+ * per-generation init/fini after aie->msg_ops has been populated;
+ * amdxdna_dpt_suspend/resume are driven from the common PM layer
+ * (amdxdna_pm.c) and take struct amdxdna_dev *.
  * amdxdna_dpt_init auto-starts FW_LOG only; FW_TRACE remains inactive
  * at probe and is opt-in via the DRM_AMDXDNA_SET_FW_TRACE_STATE ioctl
  * to avoid generating large trace payloads unconditionally.
  */
 int amdxdna_dpt_init(struct aie_device *aie);
 int amdxdna_dpt_fini(struct aie_device *aie);
-int amdxdna_dpt_suspend(struct aie_device *aie);
-int amdxdna_dpt_resume(struct aie_device *aie);
+int amdxdna_dpt_suspend(struct amdxdna_dev *xdna);
+int amdxdna_dpt_resume(struct amdxdna_dev *xdna);
 
 int amdxdna_get_fw_log(struct aie_device *aie,
 		       struct amdxdna_drm_get_array *args);

@@ -7,6 +7,7 @@
 #include <drm/drm_drv.h>
 #include <linux/pm_runtime.h>
 
+#include "amdxdna_dpt.h"
 #include "amdxdna_pm.h"
 
 #define AMDXDNA_AUTOSUSPEND_DELAY	5000 /* milliseconds */
@@ -20,6 +21,20 @@ int amdxdna_pm_suspend(struct device *dev)
 	if (xdna->dev_info->ops->suspend)
 		ret = xdna->dev_info->ops->suspend(xdna);
 
+	/*
+	 * Drain and pause firmware DPT (log/trace) after the device has
+	 * quiesced. Common to every generation/config; a safe no-op when no
+	 * DPT kind is active. A drain/pause failure must not change the
+	 * device suspend result (logging/tracing is auxiliary), but surface
+	 * it so it is visible rather than silently swallowed.
+	 */
+	if (!ret) {
+		int dpt_ret = amdxdna_dpt_suspend(xdna);
+
+		if (dpt_ret)
+			XDNA_WARN(xdna, "DPT drain/pause on suspend failed: %d", dpt_ret);
+	}
+
 	XDNA_DBG(xdna, "Suspend done ret %d", ret);
 	return ret;
 }
@@ -32,6 +47,19 @@ int amdxdna_pm_resume(struct device *dev)
 	guard(mutex)(&xdna->dev_lock);
 	if (xdna->dev_info->ops->resume)
 		ret = xdna->dev_info->ops->resume(xdna);
+
+	/*
+	 * Re-arm firmware DPT only after a successful device resume. A DPT
+	 * re-arm failure must not fail the device resume (logging/tracing is
+	 * auxiliary), but surface it so it is visible in the resume logs
+	 * rather than silently leaving DPT paused.
+	 */
+	if (!ret) {
+		int dpt_ret = amdxdna_dpt_resume(xdna);
+
+		if (dpt_ret)
+			XDNA_WARN(xdna, "DPT re-arm on resume failed: %d", dpt_ret);
+	}
 
 	XDNA_DBG(xdna, "Resume done ret %d", ret);
 	return ret;
