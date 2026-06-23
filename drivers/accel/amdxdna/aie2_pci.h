@@ -279,6 +279,9 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf, u32 size, 
 int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 			 char __user *buf, u32 size,
 			 struct amdxdna_drm_query_telemetry_header *header);
+int aie2_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
+			   struct amdxdna_drm_hwctx_entry *entry);
+int aie2_fill_hwctx_map(struct aie_device *aie, u32 *map);
 int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void*, void __iomem *, size_t));
 int aie2_config_cu(struct amdxdna_hwctx *hwctx,

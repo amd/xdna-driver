@@ -86,10 +86,8 @@ int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs);
 int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev);
 #else
 #define aie4_sriov_configure NULL
-static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev)
-{
-	return 0;
-}
+static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev) { return 0; }
+static inline int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs) { return 0; }
 #endif
 
 /* aie4_message.c */

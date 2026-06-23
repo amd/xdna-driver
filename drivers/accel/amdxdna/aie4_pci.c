@@ -772,6 +772,12 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 	case DRM_AMDXDNA_QUERY_RESOURCE_INFO:
 		ret = aie4_query_resource_info(client, args);
 		break;
+	case DRM_AMDXDNA_QUERY_HW_CONTEXTS:
+		ret = amdxdna_get_hwctx_status(&ndev->aie, client, args);
+		break;
+	case DRM_AMDXDNA_QUERY_TELEMETRY:
+		ret = amdxdna_get_telemetry(&ndev->aie, client, args);
+		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
 		ret = -EOPNOTSUPP;
@@ -831,6 +837,12 @@ static int aie4_get_array(struct amdxdna_client *client,
 	mutex_lock(&xdna->dev_lock);
 
 	switch (args->param) {
+	case DRM_AMDXDNA_HW_CONTEXT_ALL:
+		ret = amdxdna_query_ctx_status_array(&ndev->aie, client, args);
+		break;
+	case DRM_AMDXDNA_HW_CONTEXT_BY_ID:
+		ret = amdxdna_query_ctx_status_by_id(&ndev->aie, client, args);
+		break;
 	case DRM_AMDXDNA_AIE_COREDUMP:
 		ret = amdxdna_get_coredump(&ndev->aie, client, args);
 		break;
@@ -1140,6 +1152,7 @@ static int aie4_classic_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto free_work_buf;
 
+	aie4_msg_init(xdna->dev_handle);
 	return 0;
 
 free_work_buf:
@@ -1149,7 +1162,14 @@ free_work_buf:
 
 static void aie4_pf_fini(struct amdxdna_dev *xdna)
 {
-	aie4_sriov_stop(xdna->dev_handle);
+	int ret;
+
+	ret = aie4_sriov_stop(xdna->dev_handle);
+	if (ret == -EPERM)
+		XDNA_ERR(xdna, "VFs in passthrough - VM disruption expected");
+	else if (ret)
+		XDNA_ERR(xdna, "Unconfig sriov failed: %d", ret);
+
 	aie4_pf_hw_stop(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
 }
