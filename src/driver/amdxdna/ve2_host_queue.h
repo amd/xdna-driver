@@ -8,6 +8,9 @@
 #define HOST_QUEUE_ENTRY        32
 #define HOST_INDIRECT_PKT_NUM   36
 
+#define HOST_QUEUE_MAJOR_VERSION 1
+#define HOST_QUEUE_MINOR_VERSION 0
+
 #define LAST_CMD (0)
 #define NOT_LAST_CMD (1)
 

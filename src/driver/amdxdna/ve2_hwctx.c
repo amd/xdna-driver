@@ -556,6 +556,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 
 	WARN_ON(!is_power_of_2(nslots));
 	queue->hsa_queue_p->hq_header.capacity = nslots;
+	queue->hsa_queue_p->hq_header.version.major = HOST_QUEUE_MAJOR_VERSION;
+	queue->hsa_queue_p->hq_header.version.minor = HOST_QUEUE_MINOR_VERSION;
 
 	/* Set hsa queue slots to invalid and initialize indirect regions */
 	for (int slot = 0; slot < nslots; slot++) {
