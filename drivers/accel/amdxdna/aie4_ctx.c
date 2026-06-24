@@ -27,6 +27,9 @@
 #define CTX_INVALID_ID			(~0U)
 #define CTX_INVALID_DOORBELL		AMDXDNA_INVALID_DOORBELL_OFFSET
 
+/* Max sub-commands in one ERT_CMD_CHAIN, matching the user-mode shim cap. */
+#define MAX_CHAINED_SUB_CMD		64
+
 static void job_worker(struct work_struct *work);
 static void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx);
 
@@ -720,7 +723,8 @@ static void fill_direct_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
  * before use and never trust the queue content (only read_index is read back).
  */
 static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
-			  struct amdxdna_gem_obj *cmd_abo, u64 *seq)
+			  struct amdxdna_gem_obj *cmd_abo, bool last_of_chain,
+			  u64 *seq)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
@@ -783,7 +787,8 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 
 	pkt = &priv->umq_pkts[slot_idx];
 	pkt->pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
-	pkt->pkt_header.common_header.chain_flag = CHAIN_FLG_LAST_CMD;
+	pkt->pkt_header.common_header.chain_flag =
+		last_of_chain ? CHAIN_FLG_LAST_CMD : CHAIN_FLG_NOT_LAST_CMD;
 	pkt->pkt_header.common_header.reserved = 0x0;
 	pkt->pkt_header.completion_signal = amdxdna_gem_dev_addr(cmd_abo) +
 					    offsetof(struct amdxdna_cmd, header);
@@ -874,10 +879,19 @@ static void job_worker(struct work_struct *work)
 		wait_till_seq_completed(hwctx, job->seq);
 		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
 
-		if (get_read_index(hwctx) > job->seq)
+		if (get_read_index(hwctx) > job->seq) {
+			/*
+			 * The published commands drained.  A chain that was only
+			 * partially published (a later sub-command failed to
+			 * enqueue) still drains its prefix here, but must be
+			 * reported as failed rather than mistaken for success.
+			 */
+			if (job->aie4_job_state != AIE4_JOB_STATE_SUBMITTED)
+				amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
 			job_complete(job);
-		else
+		} else {
 			job_abort(job);
+		}
 	}
 }
 
@@ -889,6 +903,119 @@ static void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx)
 	drm_WARN_ON(&hwctx->client->xdna->ddev, priv->status == CTX_STATE_CONNECTED);
 	queue_work(priv->job_work_q, &priv->job_work);
 	flush_work(&priv->job_work);
+}
+
+/*
+ * Submit the command(s) carried by @job into the host queue.  Called with
+ * io_lock held.  A single ERT_START_DPU maps to one queue entry; an
+ * ERT_CMD_CHAIN expands to one entry per sub-command, only the last of which
+ * carries CHAIN_FLG_LAST_CMD so CERT runs the whole chain back to back.
+ *
+ * job->seq tracks the last published sequence; the worker waits on it to reap
+ * the entire chain.  job->aie4_job_state advances past PENDING as soon as any
+ * sub-command is published, so the caller knows whether in-flight commands must
+ * still be reaped even when a later sub-command fails to enqueue.
+ *
+ * Security: the chain payload and its BO handles come from user space; cache
+ * command_count and validate it against the payload size before walking the
+ * handle array so a bogus count cannot drive an out-of-bounds read.
+ */
+static int submit_job_cmds(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
+{
+	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_cmd_chain *payload;
+	u32 op = amdxdna_cmd_get_op(cmd_abo);
+	u32 payload_len, ccnt;
+	int ret;
+	u32 i;
+
+	/* Single cmd. */
+	if (op == ERT_START_DPU) {
+		ret = submit_one_cmd(hwctx, cmd_abo, true, &job->seq);
+		if (!ret)
+			job->aie4_job_state = AIE4_JOB_STATE_SUBMITTED;
+		return ret;
+	}
+
+	/* Cmd chain. */
+	payload = amdxdna_cmd_get_payload(cmd_abo, &payload_len);
+	if (!payload) {
+		XDNA_ERR(xdna, "Invalid cmd payload for chained cmd");
+		return -EINVAL;
+	}
+	ccnt = payload->command_count;
+	if (!ccnt || ccnt > MAX_CHAINED_SUB_CMD ||
+	    payload_len < struct_size(payload, data, ccnt)) {
+		XDNA_ERR(xdna, "Invalid command count %u", ccnt);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ccnt; i++) {
+		u32 boh = (u32)(payload->data[i]);
+		struct amdxdna_gem_obj *abo;
+
+		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!abo) {
+			XDNA_ERR(xdna, "Failed to find cmd BO %u", boh);
+			ret = -ENOENT;
+			break;
+		}
+		ret = submit_one_cmd(hwctx, abo, i + 1 == ccnt, &job->seq);
+		amdxdna_gem_put_obj(abo);
+		if (ret)
+			break;
+		job->aie4_job_state = AIE4_JOB_STATE_SUBMITTING;
+	}
+	if (i == ccnt)
+		job->aie4_job_state = AIE4_JOB_STATE_SUBMITTED;
+
+	return ret;
+}
+
+/*
+ * Whole-job submission is serialized across submitters that share a ctx via the
+ * pending list: a job is appended on entry and only the head of the list is
+ * allowed to publish its command(s).  Because the head stays on the list for the
+ * entire duration of submit_job_cmds() -- which may drop io_lock to wait for
+ * free queue slots -- no other submitter can interleave its commands into the
+ * middle of the head job's command chain.  io_lock protects the lists; the
+ * job_list_wq waitqueue notifies parked submitters when the head changes.
+ */
+/* Publish the current pending-list head for the lockless submit wait condition.
+ * Caller holds io_lock.
+ */
+static void update_pending_head(struct amdxdna_hwctx_priv *priv)
+{
+	WRITE_ONCE(priv->pending_head,
+		   list_first_entry_or_null(&priv->pending_job_list,
+					    struct amdxdna_sched_job, aie4_job_list));
+}
+
+static void enqueue_pending_job(struct amdxdna_hwctx *hwctx,
+				struct amdxdna_sched_job *job)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	mutex_lock(&priv->io_lock);
+	list_add_tail(&job->aie4_job_list, &priv->pending_job_list);
+	job->aie4_job_state = AIE4_JOB_STATE_PENDING;
+	update_pending_head(priv);
+	mutex_unlock(&priv->io_lock);
+}
+
+static void cancel_pending_job(struct amdxdna_hwctx *hwctx,
+			       struct amdxdna_sched_job *job)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	mutex_lock(&priv->io_lock);
+	list_del(&job->aie4_job_list);
+	job->aie4_job_state = AIE4_JOB_STATE_INIT;
+	update_pending_head(priv);
+	mutex_unlock(&priv->io_lock);
+	/* Let the next pending submitter re-check whether it is now first. */
+	wake_up_all(&priv->job_list_wq);
 }
 
 int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
@@ -912,18 +1039,12 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	}
 
 	op = amdxdna_cmd_get_op(job->cmd_bo);
-	if (op == ERT_CMD_CHAIN) {
-		/* Command chains are not supported on the aie4 kernel path yet. */
-		XDNA_ERR(xdna, "Command chain not supported");
-		return -EOPNOTSUPP;
-	}
-	if (op != ERT_START_DPU) {
+	if (op != ERT_START_DPU && op != ERT_CMD_CHAIN) {
 		XDNA_ERR(xdna, "Invalid cmd opcode %d", op);
 		return -EINVAL;
 	}
 
 	INIT_LIST_HEAD(&job->aie4_job_list);
-	job->aie4_job_state = AIE4_JOB_STATE_PENDING;
 
 	/*
 	 * Hold a reference on the submitter's address space until the job
@@ -936,25 +1057,56 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		return -ESRCH;
 	}
 
-	mutex_lock(&priv->io_lock);
-	if (priv->status != CTX_STATE_CONNECTED) {
-		mutex_unlock(&priv->io_lock);
-		mmput(job->mm);
-		return -EIO;
-	}
-
-	ret = submit_one_cmd(hwctx, job->cmd_bo, &job->seq);
+	/*
+	 * Wait until this job is at the head of the pending list before touching
+	 * the queue (see enqueue_pending_job).  The wait is killable so a parked
+	 * submitter cannot keep ctx teardown (synchronize_srcu) blocked forever;
+	 * it also breaks out if the ctx is being disconnected.
+	 */
+	enqueue_pending_job(hwctx, job);
+	ret = wait_event_killable(priv->job_list_wq,
+				  READ_ONCE(priv->status) != CTX_STATE_CONNECTED ||
+				  READ_ONCE(priv->pending_head) == job);
 	if (ret) {
-		mutex_unlock(&priv->io_lock);
+		cancel_pending_job(hwctx, job);
 		mmput(job->mm);
 		return ret;
 	}
 
-	job->aie4_job_state = AIE4_JOB_STATE_SUBMITTED;
-	list_add_tail(&job->aie4_job_list, &priv->running_job_list);
+	mutex_lock(&priv->io_lock);
+	if (priv->status != CTX_STATE_CONNECTED) {
+		mutex_unlock(&priv->io_lock);
+		cancel_pending_job(hwctx, job);
+		mmput(job->mm);
+		return -EIO;
+	}
+
+	ret = submit_job_cmds(hwctx, job);
+	if (job->aie4_job_state == AIE4_JOB_STATE_PENDING) {
+		/* No command was published; nothing for the worker to reap. */
+		list_del(&job->aie4_job_list);
+		update_pending_head(priv);
+		mutex_unlock(&priv->io_lock);
+		/* Release the next pending submitter. */
+		wake_up_all(&priv->job_list_wq);
+		mmput(job->mm);
+		return ret;
+	}
+
+	/*
+	 * At least one command is in flight (a chain may have published some
+	 * before failing); move the job to the running list so the worker waits
+	 * on the last published seq and reaps it.  A partially-submitted chain
+	 * stays at AIE4_JOB_STATE_SUBMITTING so the worker reports it as failed
+	 * after draining its published prefix.
+	 */
+	list_move_tail(&job->aie4_job_list, &priv->running_job_list);
+	update_pending_head(priv);
 	*seq = job->seq;
 	mutex_unlock(&priv->io_lock);
 
+	/* Release the next pending submitter and kick the reaper. */
+	wake_up_all(&priv->job_list_wq);
 	atomic64_inc(&hwctx->job_submit_cnt);
 	queue_work(priv->job_work_q, &priv->job_work);
 	return 0;
