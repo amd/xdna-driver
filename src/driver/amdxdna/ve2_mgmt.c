@@ -54,6 +54,7 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,
 	cert_hs->dbg_buf.dbg_buf_addr_high = upper_32_bits(hwctx_cfg->debug_buf_addr);
 	cert_hs->dbg_buf.dbg_buf_addr_low = lower_32_bits(hwctx_cfg->debug_buf_addr);
 	cert_hs->dbg_buf.size = hwctx_cfg->debug_buf_size;
+	cert_hs->save_dbg_buf_offset = hwctx_cfg->dbg_buf_ddr_offset;
 
 	/* Dtrace Buffer */
 	cert_hs->trace.dtrace_addr_high = upper_32_bits(hwctx_cfg->dtrace_addr);
@@ -347,6 +348,30 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 
 	start_col = nhwctx->start_col;
 	num_col = nhwctx->num_col;
+
+	struct amdxdna_mgmtctx *mgmtctx = &xdna->dev_handle->ve2_mgmtctx[start_col];
+
+	if (mgmtctx->active_ctx && mgmtctx->active_ctx != hwctx &&
+	    mgmtctx->active_ctx->priv && mgmtctx->active_ctx->priv->hwctx_config) {
+		struct amdxdna_ctx_priv *active_priv = mgmtctx->active_ctx->priv;
+
+		/* Save active context's per-column dbg_buf_ddr_offset */
+		for (u32 col = 0; col < active_priv->num_col; col++) {
+			u32 dbg_buf_offset = 0;
+
+			ret = ve2_partition_read_privileged_mem(active_priv->aie_dev, col,
+								offsetof(struct handshake,
+									 save_dbg_buf_offset),
+								sizeof(u32), &dbg_buf_offset);
+
+			if (ret >= 0) {
+				active_priv->hwctx_config[col].dbg_buf_ddr_offset = dbg_buf_offset;
+			} else {
+				XDNA_ERR(xdna, "Col%u: FAIL to read offset, ret=%d for ctx=%p",
+					 col, ret, mgmtctx->active_ctx);
+			}
+		}
+	}
 
 	hs_data = ve2_prepare_hs_data(xdna, nhwctx, true);
 	if (!hs_data) {
