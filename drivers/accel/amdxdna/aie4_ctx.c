@@ -30,6 +30,9 @@
 /* Max sub-commands in one ERT_CMD_CHAIN, matching the user-mode shim cap. */
 #define MAX_CHAINED_SUB_CMD		64
 
+/* Per-job completion timeout backstop for kernel-mode submission. */
+#define KERNEL_SUBMIT_TIMEOUT_MS	2000
+
 static void job_worker(struct work_struct *work);
 static void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx);
 
@@ -612,17 +615,37 @@ static u64 publish_cmd(struct amdxdna_hwctx *hwctx)
 	return wi;
 }
 
-static int wait_till_seq_completed(struct amdxdna_hwctx *hwctx, u64 seq)
+static int wait_till_seq_completed_killable(struct amdxdna_hwctx *hwctx, u64 seq)
 {
 	struct cert_comp *cert_comp = aie4_get_cert_comp(hwctx);
+	long ret;
 
 	if (!cert_comp)
 		return -EAGAIN;
 
-	wait_event(cert_comp->waitq, check_cmd_done(hwctx, seq));
+	/*
+	 * Always bound the wait so an unresponsive CERT cannot park the job
+	 * worker in an uninterruptible sleep forever (which would also block ctx
+	 * teardown and module unload).  A timeout re-checks read_index, so a
+	 * completion whose MSI-X was lost is still observed.
+	 *
+	 * Killable: harmless for the job worker (a kthread never has a fatal
+	 * signal pending) and lets a submitter blocked here on a full queue in
+	 * the ioctl path be killed promptly instead of sitting in D state.
+	 */
+	ret = wait_event_killable_timeout(cert_comp->waitq, check_cmd_done(hwctx, seq),
+					  msecs_to_jiffies(KERNEL_SUBMIT_TIMEOUT_MS));
 	aie4_put_cert_comp(cert_comp);
 
-	return (hwctx->priv->status != CTX_STATE_CONNECTED) ? -EAGAIN : 0;
+	/* Lockless read; status is written under io_lock by destroy. */
+	if (READ_ONCE(hwctx->priv->status) != CTX_STATE_CONNECTED)
+		return -EAGAIN;
+
+	if (ret < 0)
+		return ret;	/* -ERESTARTSYS: fatal signal on the submit path */
+
+	/* Condition stayed false until the deadline: CERT did not complete. */
+	return ret ? 0 : -ETIME;
 }
 
 static int wait_till_hsa_not_full(struct amdxdna_hwctx *hwctx)
@@ -632,7 +655,7 @@ static int wait_till_hsa_not_full(struct amdxdna_hwctx *hwctx)
 	if (wi < CTX_MAX_CMDS)
 		return 0;
 
-	return wait_till_seq_completed(hwctx, wi - CTX_MAX_CMDS);
+	return wait_till_seq_completed_killable(hwctx, wi - CTX_MAX_CMDS);
 }
 
 static int fill_indirect_pkt(struct amdxdna_hwctx_priv *priv, u64 slot_idx,
@@ -865,8 +888,10 @@ static void job_worker(struct work_struct *work)
 	struct amdxdna_sched_job *job;
 
 	while ((job = next_running_job(hwctx))) {
-		wait_till_seq_completed(hwctx, job->seq);
-		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
+		int ret = wait_till_seq_completed_killable(hwctx, job->seq);
+
+		trace_amdxdna_debug_point(hwctx->name, job->seq,
+					  ret ? "job wait done" : "job complete");
 
 		if (get_read_index(hwctx) > job->seq) {
 			/*
@@ -878,8 +903,25 @@ static void job_worker(struct work_struct *work)
 			if (job->aie4_job_state != AIE4_JOB_STATE_SUBMITTED)
 				amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
 			job_complete(job);
-		} else {
+		} else if (ret != -ETIME) {
+			/*
+			 * Disconnected (firmware quiesced by destroy on the
+			 * teardown path) - safe to reap.
+			 */
 			job_abort(job);
+		} else {
+			/*
+			 * Software-timeout backstop: CERT is silent but the context is
+			 * still connected and may merely be slow.  Do not reclaim a
+			 * possibly-live job - that would drop the mm pin and BO refs
+			 * while the device might still DMA into them.  Requeue and
+			 * re-wait; a later pass completes it if CERT was just slow,
+			 * otherwise ctx teardown reaps it.
+			 */
+			mutex_lock(&priv->io_lock);
+			list_add(&job->aie4_job_list, &priv->running_job_list);
+			mutex_unlock(&priv->io_lock);
+			continue;
 		}
 	}
 }
