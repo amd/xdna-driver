@@ -71,6 +71,10 @@ struct amdxdna_hwctx_priv {
 
 	struct mutex                    io_lock; /* serialize submit, protect job lists */
 	struct list_head                pending_job_list;
+	/* Head of pending_job_list, updated under io_lock; read locklessly by the
+	 * submit wait condition so it never takes a lock inside wait_event().
+	 */
+	struct amdxdna_sched_job        *pending_head;
 	struct list_head                running_job_list;
 	wait_queue_head_t               job_list_wq;
 	struct work_struct              job_work;
