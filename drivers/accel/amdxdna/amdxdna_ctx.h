@@ -15,7 +15,11 @@
  * Define the maximum number of pending commands in a hardware context.
  * Must be power of 2!
  */
+#ifdef AMDXDNA_AUX
+#define HWCTX_MAX_CMDS		32
+#else
 #define HWCTX_MAX_CMDS		4
+#endif
 #define get_job_idx(seq) ((seq) & (HWCTX_MAX_CMDS - 1))
 
 #define HWCTX_MAX_TIMEOUT	60000 /* milliseconds */

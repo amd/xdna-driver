@@ -9,6 +9,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/module.h>
+#include <linux/overflow.h>
 #include <linux/slab.h>
 #include <linux/timer.h>
 #include <linux/wait.h>
@@ -82,9 +83,17 @@ static struct amdxdna_sched_job *ve2_hwctx_get_job(struct amdxdna_hwctx *hwctx, 
 static void ve2_hwctx_job_release(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	u32 cmd_cnt = 1;
+
+	if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+		struct amdxdna_cmd_chain *cmd_chain = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+
+		if (cmd_chain)
+			cmd_cnt = cmd_chain->command_count;
+	}
 
 	guard(mutex)(&vp->privctx_lock);
-	vp->completed++;
+	vp->completed += cmd_cnt;
 	if (vp->completed == vp->submitted)
 		vp->state = AMDXDNA_HWCTX_STATE_IDLE;
 	vp->pending[get_job_idx(job->seq)] = NULL;
@@ -433,6 +442,62 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	hwctx->priv = NULL;
 }
 
+/*
+ * ve2_submit_cmd_chain - Submit an ERT_CMD_CHAIN (runlist) job.
+ */
+static int ve2_submit_cmd_chain(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
+				u64 *seq)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_gem_obj *cmd_bo = job->cmd_bo;
+	struct amdxdna_cmd_chain *cmd_chain;
+	u32 cmd_chain_len;
+	int ret;
+
+	cmd_chain = amdxdna_cmd_get_payload(cmd_bo, &cmd_chain_len);
+	if (!cmd_chain ||
+	    cmd_chain_len < struct_size(cmd_chain, data, cmd_chain->command_count)) {
+		XDNA_ERR(xdna, "Invalid command chain payload");
+		return -EINVAL;
+	}
+
+	if (!cmd_chain->command_count) {
+		XDNA_ERR(xdna, "Empty command chain");
+		return -EINVAL;
+	}
+
+	for (u32 i = 0; i < cmd_chain->command_count; i++) {
+		u32 boh = (u32)cmd_chain->data[i];
+		bool last_cmd = (i == cmd_chain->command_count - 1);
+		struct amdxdna_gem_obj *abo;
+		u32 cmd_data_len;
+		void *cmd_data;
+
+		abo = amdxdna_gem_get_obj(hwctx->client, boh, AMDXDNA_BO_SHARE);
+		if (!abo) {
+			XDNA_ERR(xdna, "Failed to find cmd BO %u in chain", boh);
+			return -ENOENT;
+		}
+
+		cmd_data = amdxdna_cmd_get_payload(abo, &cmd_data_len);
+		if (!cmd_data) {
+			XDNA_ERR(xdna, "Invalid command data in chain");
+			amdxdna_gem_put_obj(abo);
+			return -EINVAL;
+		}
+
+		ret = submit_command(hwctx, cmd_data, seq, last_cmd);
+		amdxdna_gem_put_obj(abo);
+		if (ret) {
+			XDNA_ERR(xdna, "Submit chain cmd %u/%u failed: %d", i,
+				 cmd_chain->command_count, ret);
+			return ret;
+		}
+	}
+
+	return ve2_hwctx_add_job(hwctx, job, *seq, cmd_chain->command_count);
+}
+
 int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
@@ -442,12 +507,15 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 	u32 op;
 
 	op = amdxdna_cmd_get_op(cmd_bo);
-	if (op != ERT_START_DPU) {
+	if (op != ERT_START_DPU && op != ERT_CMD_CHAIN) {
 		XDNA_WARN(xdna, "Unsupported ERT opcode %u", op);
 		return -EINVAL;
 	}
 
-	ret = ve2_submit_cmd_single(hwctx, job, seq);
+	if (op == ERT_CMD_CHAIN)
+		ret = ve2_submit_cmd_chain(hwctx, job, seq);
+	else
+		ret = ve2_submit_cmd_single(hwctx, job, seq);
 	if (ret) {
 		if (ret == -EAGAIN)
 			return -ERESTARTSYS;
@@ -503,18 +571,41 @@ static bool check_read_index(struct amdxdna_hwctx *hwctx, u64 seq)
 	return read_index > seq;
 }
 
+/*
+ * Check whether CERT already wrote a terminal completion state to the HQC slot
+ * for the last sub-command (or single command) at @seq. Used to tell a real
+ * completion (incl. an errored one) apart from a stall/timeout when a MISC
+ * interrupt wakes the waiter.
+ */
+static bool ve2_hqc_has_terminal_state(struct amdxdna_ctx_priv *vp, u64 seq)
+{
+	struct ve2_hsa_queue *queue = &vp->hsa_queue;
+	u32 capacity = queue->hsa_queue_p->hq_header.capacity;
+	u32 slot = seq % capacity;
+	u64 *hqc_mem = queue->hq_complete.hqc_mem;
+	enum ert_cmd_state state;
+
+	hsa_queue_sync_completion_for_read(queue, slot);
+	state = (enum ert_cmd_state)((u32)hqc_mem[slot] & 0xF);
+
+	return state == ERT_CMD_STATE_COMPLETED ||
+	       state == ERT_CMD_STATE_ERROR ||
+	       state == ERT_CMD_STATE_ABORT;
+}
+
 static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 				       u64 seq)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	u32 capacity = vp->hsa_queue.hsa_queue_p->hq_header.capacity;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u64 *hqc_mem = vp->hsa_queue.hq_complete.hqc_mem;
 	u32 slot = seq % capacity;
 	enum ert_cmd_state state;
 	u32 comp;
 
 	hsa_queue_sync_completion_for_read(&vp->hsa_queue, slot);
-	comp = (u32)vp->hsa_queue.hq_complete.hqc_mem[slot];
+	comp = (u32)hqc_mem[slot];
 	state = (enum ert_cmd_state)(comp & 0xF);
 
 	if (state < ERT_CMD_STATE_NEW || state > ERT_CMD_STATE_NORESPONSE) {
@@ -522,7 +613,84 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 		return;
 	}
 
+	/*
+	 * For a failed command chain, the last sub-command's slot reflects the
+	 * chain result but not where it failed. When a runlist fails at command
+	 * K, the firmware aborts the commands after K and marks K itself
+	 * ERROR/ABORT, so scan the per-sub-command completion slots backwards
+	 * and report the first non-ABORT command as the failing index.
+	 */
+	if ((state == ERT_CMD_STATE_ERROR || state == ERT_CMD_STATE_ABORT) &&
+	    amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+		enum ert_cmd_state slot_state = state;
+		u32 fail_cmd_idx = 0;
+		u32 cmd_count;
+		u32 start_slot;
+		int i;
+
+		if (!cc) {
+			XDNA_WARN(xdna, "Failed to get chain payload, seq %llu", seq);
+			amdxdna_cmd_set_state(job->cmd_bo, state);
+			return;
+		}
+
+		cmd_count = cc->command_count;
+		start_slot = (seq - cmd_count + 1) % capacity;
+
+		for (i = cmd_count; i > 0; i--) {
+			u32 idx = (start_slot + i - 1) % capacity;
+
+			hsa_queue_sync_completion_for_read(&vp->hsa_queue, idx);
+			comp = (u32)hqc_mem[idx];
+			slot_state = (enum ert_cmd_state)(comp & 0xF);
+			if (slot_state != ERT_CMD_STATE_ABORT) {
+				fail_cmd_idx = i - 1;
+				break;
+			}
+		}
+
+		if (fail_cmd_idx >= cmd_count)
+			fail_cmd_idx = 0;
+		cc->error_index = fail_cmd_idx;
+
+		XDNA_ERR(xdna, "Chain error at index %u (slot %u) state %d err_code 0x%x",
+			 fail_cmd_idx, (start_slot + fail_cmd_idx) % capacity, slot_state,
+			 slot_state == ERT_CMD_STATE_ERROR ? (comp >> 4) : 0);
+		amdxdna_cmd_set_state(job->cmd_bo, slot_state);
+		return;
+	}
+
 	amdxdna_cmd_set_state(job->cmd_bo, state);
+}
+
+static void ve2_handle_timeout(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 seq)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+
+	if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
+		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+		u32 fail_cmd_idx = 0;
+		u32 rl_read_idx = 0;
+		int ret;
+
+		if (cc && vp->mgmtctx) {
+			ret = ve2_partition_read_privileged_mem(vp->mgmtctx,
+								offsetof(struct handshake,
+									 runlist_read_idx),
+								sizeof(rl_read_idx), &rl_read_idx);
+			if (ret >= 0)
+				fail_cmd_idx = rl_read_idx;
+			if (fail_cmd_idx >= cc->command_count)
+				fail_cmd_idx = 0;
+			cc->error_index = fail_cmd_idx;
+			XDNA_ERR(xdna, "Chain timeout at index %u, runlist_read_idx %u",
+				 fail_cmd_idx, rl_read_idx);
+		}
+	}
+
+	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 }
 
 int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
@@ -530,6 +698,7 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct amdxdna_sched_job *job;
 	unsigned long wait_jifs = msecs_to_jiffies(timeout_ms);
+	bool timed_out;
 	long ret = 0;
 
 	if (wait_jifs)
@@ -539,43 +708,44 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	else
 		ret = wait_event_interruptible(vp->waitq,
 					       check_read_index(hwctx, seq));
+
+	/* Interrupted by a signal; the command stays in flight for retry. */
+	if (ret < 0)
+		return ret;
+
+	/* Timed wait expired with the completion condition still unmet. */
+	timed_out = wait_jifs && ret == 0;
+
 	mutex_lock(&vp->hsa_queue.hq_lock);
-	if ((!wait_jifs && !ret) || ret > 0) {
-		mutex_lock(&vp->privctx_lock);
-		job = ve2_hwctx_get_job(hwctx, seq);
-		if (job)
-			kref_get(&job->refcnt);
-		mutex_unlock(&vp->privctx_lock);
 
-		if (!job) {
-			ret = 0;
-			goto out;
-		}
+	mutex_lock(&vp->privctx_lock);
+	job = ve2_hwctx_get_job(hwctx, seq);
+	if (job)
+		kref_get(&job->refcnt);
+	mutex_unlock(&vp->privctx_lock);
 
-		if (vp->misc_intrpt_flag || (wait_jifs && !ret)) {
-			if (vp->misc_intrpt_flag)
-				ve2_process_hqc_completion(hwctx, job, seq);
-			else
-				amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
-		} else {
-			ve2_process_hqc_completion(hwctx, job, seq);
-		}
-
-		ve2_hwctx_job_release(hwctx, job);
-		ve2_job_put(job);
-
-		if (!wait_jifs) {
-			mutex_unlock(&vp->hsa_queue.hq_lock);
-			return 0;
-		}
+	/* Already completed and released by another waiter. */
+	if (!job) {
+		mutex_unlock(&vp->hsa_queue.hq_lock);
+		return 0;
 	}
 
-	if (!ret)
-		ret = -ETIME;
+	/*
+	 * Treat as a timeout when the timed wait expired, or when a MISC
+	 * interrupt woke us but CERT has not written a terminal completion
+	 * state (a stall). Otherwise process the (possibly errored) completion.
+	 */
+	if (timed_out || (vp->misc_intrpt_flag && !ve2_hqc_has_terminal_state(vp, seq)))
+		ve2_handle_timeout(hwctx, job, seq);
+	else
+		ve2_process_hqc_completion(hwctx, job, seq);
 
-out:
+	ve2_hwctx_job_release(hwctx, job);
+	ve2_job_put(job);
+
 	mutex_unlock(&vp->hsa_queue.hq_lock);
-	return ret > 0 ? 0 : ret;
+
+	return 0;
 }
 
 /* ---- ctx_config ---------------------------------------------------------- */

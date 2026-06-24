@@ -10,6 +10,7 @@
 #include <linux/cleanup.h>
 #include <linux/completion.h>
 #include <linux/errno.h>
+#include <linux/fdtable.h>
 #include <linux/jiffies.h>
 #include <linux/minmax.h>
 #include <linux/sched.h>
@@ -527,6 +528,63 @@ static int ve2_get_array_async_error(struct amdxdna_client *client,
 	return 0;
 }
 
+/*
+ * Export a file descriptor for the AIE partition backing a hardware context.
+ *
+ * The hwctx handle is passed in @num_element. The returned fd lets userspace
+ * (e.g. the XRT shim) operate directly on the underlying AIE partition.
+ *
+ * Caller holds xdna->dev_lock.
+ */
+static int ve2_get_aie_part_fd(struct amdxdna_client *client,
+			       struct amdxdna_drm_get_array *args)
+{
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct amdxdna_hwctx *hwctx;
+	struct amdxdna_ctx_priv *vp;
+	u32 hwctx_handle;
+	int srcu_idx;
+	int ret = 0;
+	int aie_fd;
+
+	hwctx_handle = args->num_element;
+	srcu_idx = srcu_read_lock(&client->hwctx_srcu);
+	hwctx = xa_load(&client->hwctx_xa, hwctx_handle);
+	if (!hwctx) {
+		XDNA_ERR(xdna, "Failed to get hwctx %u", hwctx_handle);
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	vp = ve2_hw_priv(hwctx);
+	mgmtctx = vp ? vp->mgmtctx : NULL;
+	if (!mgmtctx || !mgmtctx->aie_dev) {
+		XDNA_ERR(xdna, "AIE partition not available for hwctx_id=%u (pid=%d)",
+			 hwctx->id, client->pid);
+		ret = -ENODEV;
+		goto unlock;
+	}
+
+	aie_fd = aie_partition_get_fd(mgmtctx->aie_dev);
+	if (aie_fd < 0) {
+		XDNA_ERR(xdna, "Failed to get AIE partition FD: %d", aie_fd);
+		ret = aie_fd;
+		goto unlock;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &aie_fd, sizeof(aie_fd))) {
+		XDNA_ERR(xdna, "Failed to copy AIE partition FD to user");
+		close_fd(aie_fd);
+		ret = -EFAULT;
+		goto unlock;
+	}
+
+unlock:
+	srcu_read_unlock(&client->hwctx_srcu, srcu_idx);
+	return ret;
+}
+
 int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -556,6 +614,9 @@ int ve2_debug_get_array(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = ve2_get_array_async_error(client, args);
+		break;
+	case DRM_AMDXDNA_HWCTX_AIE_PART_FD:
+		ret = ve2_get_aie_part_fd(client, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported GET_ARRAY param %u", args->param);
