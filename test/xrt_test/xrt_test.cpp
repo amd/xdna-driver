@@ -7,7 +7,6 @@
 #include "xrt/xrt_bo.h"
 #include "xrt/experimental/xrt_elf.h"
 #include "xrt/experimental/xrt_ext.h"
-#include "xrt/experimental/xrt_module.h"
 #include "xrt/experimental/xrt_kernel.h"
 #include "resnet50.h"
 
@@ -53,7 +52,6 @@ std::string path = "local_shim_test_data/npu3a/";
 std::string path = "local_shim_test_data/npu3/";
 #endif
 bool printing_on;
-bool elf_flow = true;
 
 std::string dolphinPass = R"(
                                          .--.
@@ -87,13 +85,12 @@ usage(const std::string& prog)
   std::cout << "\t" << "-o" << ": max n outstanding cmds within 1 hwctx\n";
   std::cout << "\t" << "-r" << ": n cmds per runlist\n";
   std::cout << "\t" << "-m" << ": n hwctx in parallel\n";
-  std::cout << "\t" << "-x" << ": specify xclbin and elf to use (nop, stress hwctx, max runlist only)\n";
+  std::cout << "\t" << "-x" << ": specify elf file to use (resolved to <name>/<name>.elf; used by nop, stress hwctx, max runlist only)\n";
   std::cout << "\t" << "-i" << ": specify device index (0 for non-sriov or VF0, 1, 2, 3 for VFs)\n";
   std::cout << "\t" << "-t" << ": n thread to be created in thread test (default 2)\n";
   std::cout << "\t" << "-e" << ": specify tests to add to thread test (default vadd) [-e test# -e test# ...]\n";
   std::cout << "\t" << "-v" << ": apply each thread to corresponding vf, max 4\n";
   std::cout << "\t" << "-w" << ": timeout in seconds (default 600 sec, some simnow server are slow)\n";
-  std::cout << "\t" << "-l" << ": use xclbin flow if available\n";
   std::cout << "\t" << "-h" << ": print this help message and available test cases\n\n";
   std::cout << "\t" << "Example Usage: ./xrt_test 0 -c 20 -o 2\n";
   std::cout << "\t" << "               Run vadd test for 20 rounds with 2 outstanding commands\n";
@@ -156,29 +153,6 @@ private:
   xrt::bo m_boh;
   int *m_bop;
 };
-
-std::pair<xrt::hw_context, xrt::kernel> get_xrt_hwctx_kernel(
-  xrt::device& device,
-  const std::string xclbin_path,
-  const std::string xclbin_elf,
-  const std::string xclbin_kernel,
-  const std::string full_elf,
-  const std::string full_elf_kernel)
-{
-  if (elf_flow) {
-    xrt::elf elf{local_path(path + full_elf)};
-    xrt::hw_context hwctx{device, elf};
-    xrt::kernel kernel = xrt::ext::kernel{hwctx, full_elf_kernel};
-    return {std::move(hwctx), std::move(kernel)};
-  }
-  xrt::xclbin xclbin = xrt::xclbin(local_path(path + xclbin_path));
-  auto uuid = device.register_xclbin(xclbin);
-  xrt::elf elf{local_path(path + xclbin_elf)};
-  xrt::module mod{elf};
-  xrt::hw_context hwctx{device, uuid};
-  xrt::kernel kernel = xrt::ext::kernel{hwctx, mod, xclbin_kernel};
-  return {std::move(hwctx), std::move(kernel)};
-}
 
 template <typename TEST_BO>
 void init_umq_ifm_bo(TEST_BO& ifm)
@@ -395,12 +369,9 @@ TEST_xrt_umq_vadd(int device_index, arg_type& arg)
 
   init_umq_vadd_buffers<xrt_bo>(bo_ifm, bo_wts, bo_ofm);
 
-  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
-	  "vadd/xclbin_vadd.xclbin",
-	  "vadd/xclbin_vadd.elf",
-	  "dpu:{vadd}",
-	  "vadd/vadd.elf",
-	  "DPU:dpu");
+  xrt::elf elf{local_path(path + "vadd/vadd.elf")};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
   unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
   std::vector<xrt::run> runs;
   for (unsigned i = 0; i < n; i++)
@@ -441,12 +412,9 @@ TEST_xrt_umq_ddr_memtile(int device_index, arg_type& arg)
   p[0] = 0xabcdabcd;
   sync_bo_to_dev(bo_data);
 
-  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
-	  "ddr_memtile/xclbin_ddr.xclbin",
-	  "ddr_memtile/xclbin_ddr.elf",
-	  "dpu:{vadd}",
-	  "ddr_memtile/ddr_memtile.elf",
-	  "DPU:dpu");
+  xrt::elf elf{local_path(path + "ddr_memtile/ddr_memtile.elf")};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
   unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
   std::vector<xrt::run> runs;
   for (unsigned i = 0; i < n; i++)
@@ -460,12 +428,9 @@ void
 TEST_xrt_umq_remote_barrier(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
-	  "remote_barrier/xclbin_rmb.xclbin",
-	  "remote_barrier/xclbin_rmb.elf",
-	  "dpu:{vadd}",
-	  "remote_barrier/remote_barrier.elf",
-	  "DPU:dpu");
+  xrt::elf elf{local_path(path + "remote_barrier/remote_barrier.elf")};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
   unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
   std::vector<xrt::run> runs;
   for (unsigned i = 0; i < n; i++)
@@ -507,12 +472,9 @@ TEST_xrt_umq_single_col_resnet50_all_layer(int device_index, arg_type& arg)
 
   read_txt_file<xrt_bo>(ifm_path, bo_ifm);
 
-  auto [hwctx, kernel] = get_xrt_hwctx_kernel(device,
-	  "resnet50/xclbin_resnet50.xclbin",
-	  "resnet50/xclbin_resnet50.elf",
-	  "dpu:{vadd}",
-	  "resnet50/resnet50.elf",
-	  "DPU:dpu");
+  xrt::elf elf{local_path(path + "resnet50/resnet50.elf")};
+  xrt::hw_context hwctx{device, elf};
+  xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
 
   std::ifstream wts_ifs(wts_path);
   if (!wts_ifs.is_open())
@@ -742,7 +704,7 @@ main(int argc, char **argv)
 
   try {
     int option, val;
-    while ((option = getopt(argc, argv, ":c:o:r:m:x:i:t:e:v:w:lh")) != -1) {
+    while ((option = getopt(argc, argv, ":c:o:r:m:x:i:t:e:v:w:h")) != -1) {
       switch (option) {
         case 'c': {
           val = std::stoi(optarg);
@@ -810,17 +772,11 @@ main(int argc, char **argv)
         }
         case 'x': {
           elfpath = local_path(path + optarg + "/" + optarg + ".elf");
-          if (!elfpath.empty()) {
-            std::cout << "Using elf file: " << elfpath << std::endl;
-            break;
-          } else {
-            std::cout << "Failed to open elf file: " << elfpath << std::endl;
+          if (!std::filesystem::exists(elfpath)) {
+            std::cout << "ELF file not found: " << elfpath << std::endl;
             return 1;
           }
-        }
-        case 'l': {
-          std::cout << "swtiching to xclbin flow" << std::endl;
-          elf_flow = false;
+          std::cout << "Using elf file: " << elfpath << std::endl;
           break;
         }
         case 'v': {
