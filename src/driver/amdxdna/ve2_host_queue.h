@@ -33,7 +33,7 @@ struct host_queue_header {
 	u64	write_index;		/* 0x40 — host updates this */
 	u64	padding1[6];		/* 0x48 — pad to next 64-byte boundary */
 	u64	data_address;		/* 0x78 — DMA address of packet ring */
-} __attribute__((aligned(64)));
+} __aligned(64);
 
 struct host_indirect_packet_entry {
 	u32	host_addr_low;
