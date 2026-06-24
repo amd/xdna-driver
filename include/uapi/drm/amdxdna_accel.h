@@ -724,6 +724,7 @@ struct amdxdna_drm_aie_coredump {
 #define DRM_AMDXDNA_AIE_COREDUMP	5
 #define DRM_AMDXDNA_BO_USAGE		6
 #define DRM_AMDXDNA_AIE_TILE_READ	9
+#define DRM_AMDXDNA_HWCTX_AIE_PART_FD	10
 #define DRM_AMDXDNA_HWCTX_MEM_BITMAP	11
 
 /**
@@ -747,6 +748,10 @@ struct amdxdna_drm_get_array {
 	 * %DRM_AMDXDNA_AIE_COREDUMP:
 	 * Returns AIE tile memory dump for the context described by
 	 * &struct amdxdna_drm_aie_coredump in the first element.
+	 *
+	 * %DRM_AMDXDNA_HWCTX_AIE_PART_FD:
+	 * Returns a file descriptor for the AIE partition backing the
+	 * hardware context whose handle is passed in @num_element.
 	 */
 	__u32 param;
 	/**
