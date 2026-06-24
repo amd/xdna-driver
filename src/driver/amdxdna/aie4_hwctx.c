@@ -546,12 +546,22 @@ static inline bool valid_queue_index(u64 read, u64 write, u32 capacity)
 static inline u64 get_read_index(struct amdxdna_ctx *ctx)
 {
 	struct amdxdna_dev *xdna = ctx->client->xdna;
-	u64 wi = READ_ONCE(*ctx->priv->umq_write_index);
-	u64 ri;
+	u64 ri, wi;
 
-	/* Invalidate the cached read_index line before reading what CERT wrote. */
+	/*
+	 * Sample read_index (written by CERT) before write_index. CERT can never
+	 * complete more than the driver has published, so a write_index sampled
+	 * after read_index always satisfies wi >= ri. Sampling write_index first
+	 * races the submit path / CERT and yields a bogus ri > wi.
+	 *
+	 * write_index is host-owned and lives in coherent kernel memory, so read
+	 * the driver's private copy directly: no UMQ round-trip and no for_cpu
+	 * sync (the device never writes it).
+	 */
 	aie4_umq_sync_read_index_for_cpu(ctx->priv);
 	ri = READ_ONCE(*ctx->priv->umq_read_index);
+	smp_rmb();
+	wi = READ_ONCE(ctx->priv->write_index);
 
 	/*
 	 * CERT cannot update read index atomically. Driver may read half-updated
@@ -563,6 +573,8 @@ static inline u64 get_read_index(struct amdxdna_ctx *ctx)
 		usleep_range(100, 200);
 		aie4_umq_sync_read_index_for_cpu(ctx->priv);
 		ri = READ_ONCE(*ctx->priv->umq_read_index);
+		smp_rmb();
+		wi = READ_ONCE(ctx->priv->write_index);
 		if (!valid_queue_index(ri, wi, CTX_MAX_CMDS))
 			XDNA_ERR(xdna, "Invalid index after retry, ri %lld, wi %lld", ri, wi);
 	}
@@ -595,7 +607,7 @@ static inline bool check_cmd_done(struct amdxdna_ctx *ctx, u64 seq)
 
 	if (ri > seq) {
 		trace_amdxdna_debug_point(ctx->name, seq, "HSA poll completion");
-		wi = READ_ONCE(*ctx->priv->umq_write_index);
+		wi = READ_ONCE(ctx->priv->write_index);
 		XDNA_DBG(xdna,
 			 "HSA completion: ctx=%s read_index=%llu > seq=%llu write_index=%llu",
 			 ctx->name, ri, seq, wi);
