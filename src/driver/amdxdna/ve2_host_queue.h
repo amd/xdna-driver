@@ -53,15 +53,8 @@ enum host_queue_packet_opcode {
 };
 
 struct common_header {
-	union {
-		struct {
-			u16 type: 8;
-			u16 barrier: 1;
-			u16 acquire_fence_scope: 2;
-			u16 release_fence_scope: 2;
-		};
-		u16	header;
-	};
+	u8	type;
+	u8	reserved;
 	u8	opcode;
 	u8	chain_flag;
 	u16	count;

@@ -73,6 +73,7 @@ struct ve2_config_hwctx {
 	u32	debug_buf_size;
 	u64	dtrace_addr;
 	u32	opcode_timeout_config;
+	u32	dbg_buf_ddr_offset;
 };
 
 // Define the node struct for the FIFO queue
