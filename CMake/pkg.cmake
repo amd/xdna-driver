@@ -123,9 +123,10 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
   endif()
 elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch|void")
   set(CPACK_GENERATOR "TGZ")
-  # Source-based distros (Arch, Void) have no native deb/rpm in this flow, so we
-  # generate a tarball that can be repackaged into a native package (e.g. the
-  # provided Arch PKGBUILD, whose install hooks handle post-install/pre-remove).
+  # Arch and Void are binary distros, but this packaging flow has no native
+  # deb/rpm generator for them, so we emit a tarball that can be repackaged into
+  # a native package (e.g. the provided Arch PKGBUILD, whose install hooks handle
+  # post-install/pre-remove).
   set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
   message(STATUS "Arch/Void Linux detected - generating TGZ package")
   if(NOT SKIP_KMOD)
