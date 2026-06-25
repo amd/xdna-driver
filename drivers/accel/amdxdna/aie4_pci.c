@@ -25,6 +25,49 @@
 #define PSP_NOTIFY_INTR		0xD007BE11
 #define AIE4_TOTAL_COLUMN	3
 
+/* Not upstreamed: echo a bypass magic to FW right after work-buffer attach. */
+#ifdef AMDXDNA_IOMMU_BYPASS
+#define AIE4_MSG_OP_ECHO	0x10001
+#define MAKE_MAGIC(a, b, c, d)	((u32)((a) << 24 | (b) << 16 | (c) << 8 | (d)))
+
+struct aie4_msg_echo_req {
+	u32 val1;
+	u32 val2;
+};
+
+struct aie4_msg_echo_resp {
+	enum aie4_msg_status status;
+	u32 val1;
+	u32 val2;
+};
+
+static int aie4_iommu_bypass_echo(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_echo, AIE4_MSG_OP_ECHO);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	req.val1 = MAKE_MAGIC('B', 'Y', 'P', 'A');
+	req.val2 = MAKE_MAGIC('M', 'A', 'G', 'C');
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "iommu bypass echo failed, ret %d", ret);
+		return ret;
+	}
+
+	if (resp.val1 != req.val1 || resp.val2 != req.val2) {
+		XDNA_ERR(xdna, "iommu bypass echo bad value 0x%x 0x%x",
+			 resp.val1, resp.val2);
+		return -EIO;
+	}
+
+	XDNA_INFO(xdna, "iommu bypass echo ok");
+
+	return 0;
+}
+#endif /* AMDXDNA_IOMMU_BYPASS */
+
 /*
  * The management mailbox channel is allocated by firmware.
  * The related register and ring buffer information is on SRAM BAR.
@@ -336,6 +379,12 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
+#ifdef AMDXDNA_IOMMU_BYPASS
+	ret = aie4_iommu_bypass_echo(ndev);
+	if (ret)
+		goto mbox_fini;
+#endif
+
 	ret = aie4_query_fw(ndev);
 	if (ret)
 		goto mbox_fini;
@@ -422,6 +471,12 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 				      to_buf_size(ndev->work_buf_hdl));
 	if (ret)
 		goto mbox_fini;
+
+#ifdef AMDXDNA_IOMMU_BYPASS
+	ret = aie4_iommu_bypass_echo(ndev);
+	if (ret)
+		goto mbox_fini;
+#endif
 
 	ret = aie4_query_fw(ndev);
 	if (ret)
