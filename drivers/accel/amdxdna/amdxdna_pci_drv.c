@@ -47,10 +47,10 @@ MODULE_FIRMWARE("amdnpu/17f2_13/npu.dev.sbin");
 MODULE_FIRMWARE("amdnpu/17f2_13/cert.dev.sbin");
 MODULE_FIRMWARE("amdnpu/17f2_15/npu.dev.sbin");
 MODULE_FIRMWARE("amdnpu/17f2_15/cert.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0A_10/npu.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0A_10/cert.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0B_10/npu.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0B_10/cert.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0A_00/npu.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0A_00/cert.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0B_00/npu.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0B_00/cert.dev.sbin");
 
 /*
  * 0.0: Initial version
@@ -101,9 +101,9 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x17f1, 0x10, &dev_npu3_classic_info },
 	{ 0x17f2, 0x10, &dev_npu3_pf_info },
 	{ 0x17f3, 0x10, &dev_npu3_vf_info },
-	{ 0x1B0A, 0x10, &dev_npu3_classic_info },
-	{ 0x1B0B, 0x10, &dev_npu3_pf_info },
-	{ 0x1B0C, 0x10, &dev_npu3_vf_info },
+	{ 0x1B0A, 0x00, &dev_npu3_classic_info },
+	{ 0x1B0B, 0x00, &dev_npu3_pf_info },
+	{ 0x1B0C, 0x00, &dev_npu3_vf_info },
 	{ 0x17f1, 0x13, &dev_npu9_classic_info },
 	{ 0x17f2, 0x13, &dev_npu9_pf_info },
 	{ 0x17f3, 0x13, &dev_npu9_vf_info },
