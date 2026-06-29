@@ -28,11 +28,35 @@ module_param(enable_polling, int, 0644);
 MODULE_PARM_DESC(enable_polling, "Enables host-queue polling timer mode. Polling mode disabled by default.");
 
 #define CTX_TIMER		(msecs_to_jiffies(1))	/* 1ms */
+#define VE2_RETRY_TIMEOUT_MS	5000	/* max wait for a free host-queue slot */
 
+/*
+ * struct ve2_dpu_data - payload interpretation for ERT_START_DPU.
+ * @dtrace_buffer:		dtrace buffer address
+ * @instruction_buffer:		control-code (instruction) buffer address
+ * @instruction_buffer_size:	size of the instruction buffer in bytes
+ * @uc_index:			target micro-controller index
+ * @chained:			number of ve2_dpu_data elements that follow
+ *
+ * A command targeting a single UC carries one ve2_dpu_data. A command spanning
+ * multiple UCs carries @chained additional contiguous ve2_dpu_data entries and
+ * is submitted via the indirect/distributed host-queue packet path.
+ */
 struct ve2_dpu_data {
 	u64 dtrace_buffer;
 	u64 instruction_buffer;
+	u32 instruction_buffer_size;
+	u16 uc_index;
+	u16 chained;
 };
+
+static inline struct ve2_dpu_data *get_ve2_dpu_data_next(struct ve2_dpu_data *dpu_data)
+{
+	if (dpu_data->chained == 0)
+		return NULL;
+
+	return dpu_data + 1;
+}
 
 static void ve2_job_release(struct kref *ref)
 {
@@ -125,6 +149,24 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *vp, u6
 
 	slot_idx = queue->reserved_write_index % capacity;
 
+	/*
+	 * Runlist optimization: Slot availability is determined by read_index only.
+	 * Host uses read_index; no INVALID state check. Ring buffer math ensures
+	 * we never overwrite when outstanding < capacity.
+	 *
+	 * Additionally, we must ensure the pending slot is free before reusing.
+	 * Pending is cleared in ve2_cmd_wait when the waiting thread runs, which
+	 * can lag behind read_index advance. Without this check, multi-threaded
+	 * submit can hit "No more room" in ve2_hwctx_add_job.
+	 */
+	mutex_lock(&vp->privctx_lock);
+	if (vp->pending[get_job_idx(queue->reserved_write_index)]) {
+		mutex_unlock(&vp->privctx_lock);
+		mutex_unlock(&queue->hq_lock);
+		return ERR_PTR(-EBUSY);
+	}
+	mutex_unlock(&vp->privctx_lock);
+
 	*slot = queue->reserved_write_index++;
 	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_NEW;
 	hsa_queue_sync_completion_for_write(queue, slot_idx);
@@ -165,6 +207,77 @@ static void hsa_queue_commit_slot(struct amdxdna_hwctx *hwctx, u64 seq)
 	}
 	hsa_queue_sync_write_index_for_write(queue);
 	mutex_unlock(&queue->hq_lock);
+}
+
+/*
+ * ve2_check_slot_available - Check if a queue slot is available
+ * @hwctx: Hardware context
+ *
+ * Returns true if at least one slot is available, false otherwise.
+ * This is used as the condition for wait_event_interruptible_timeout.
+ *
+ */
+static bool ve2_check_slot_available(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_hsa_queue *queue = &vp->hsa_queue;
+	struct host_queue_header *header = &queue->hsa_queue_p->hq_header;
+	u32 capacity = header->capacity;
+	u64 outstanding;
+	bool available;
+
+	mutex_lock(&queue->hq_lock);
+	hsa_queue_sync_read_index_for_read(queue);
+	outstanding = queue->reserved_write_index - header->read_index;
+	if (outstanding >= capacity) {
+		mutex_unlock(&queue->hq_lock);
+		return false;
+	}
+
+	mutex_lock(&vp->privctx_lock);
+	available = !vp->pending[get_job_idx(queue->reserved_write_index)];
+	mutex_unlock(&vp->privctx_lock);
+	mutex_unlock(&queue->hq_lock);
+
+	return available;
+}
+
+/*
+ * ve2_wait_for_retry_slot - Wait for a queue slot to become available
+ * @hwctx: Hardware context
+ * @timeout_ms: Maximum time to wait in milliseconds
+ *
+ * This function uses wait_event_interruptible_timeout to sleep until
+ * a slot becomes available. The IRQ handler will wake us up when
+ * commands complete and slots are freed.
+ *
+ * Returns:
+ *   0 on success (slot available)
+ *   -ETIMEDOUT if timeout expired
+ *   negative error code if interrupted
+ */
+
+static int ve2_wait_for_retry_slot(struct amdxdna_hwctx *hwctx, u32 timeout_ms)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	long ret;
+
+	ret = wait_event_interruptible_timeout(vp->waitq, ve2_check_slot_available(hwctx),
+					       msecs_to_jiffies(timeout_ms));
+	if (ret == 0) {
+		XDNA_ERR(hwctx->client->xdna,
+			 "Timeout error in waiting for cmd slots, hwctx_id=%u pid=%u timeout=%u ms",
+			 hwctx->id, hwctx->client->pid, timeout_ms);
+		return -ETIMEDOUT;
+	}
+	if (ret < 0) {
+		XDNA_WARN(hwctx->client->xdna,
+			  "Wait for command slot interrupted: hwctx_id=%u pid=%u ret=%d",
+			  hwctx->id, hwctx->client->pid, ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int submit_command(struct amdxdna_hwctx *hwctx, void *cmd_data, u64 *seq, bool last_cmd)
@@ -208,6 +321,139 @@ static int submit_command(struct amdxdna_hwctx *hwctx, void *cmd_data, u64 *seq,
 	return 0;
 }
 
+static int submit_command_indirect(struct amdxdna_hwctx *hwctx, void *cmd_data, u64 *seq,
+				   bool last_cmd)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct ve2_dpu_data *dpu = cmd_data;
+	struct host_queue_indirect_hdr *indirect_hdr;
+	struct host_indirect_packet_entry *hp;
+	struct host_indirect_packet_entry *hp_hdr;
+	struct host_queue_packet *pkt;
+	struct xrt_packet_header *hdr;
+	struct ve2_dpu_data *d;
+	struct hsa_queue *queue;
+	u64 hdr_paddr;
+	u32 total_cmds;
+	u64 slot_id = 0;
+	u32 slot_idx;
+	int i;
+
+	/* Validate the whole UC list up-front so a bad command never leaks a slot. */
+	total_cmds = dpu->chained + 1;
+	if (total_cmds > HOST_INDIRECT_PKT_NUM) {
+		XDNA_ERR(xdna, "Too many chained UC entries %u (max %u)",
+			 total_cmds, HOST_INDIRECT_PKT_NUM);
+		return -EINVAL;
+	}
+	for (i = 0, d = dpu; d && i < total_cmds; i++, d = get_ve2_dpu_data_next(d)) {
+		if (d->uc_index >= HOST_INDIRECT_PKT_NUM) {
+			XDNA_ERR(xdna, "Invalid UC index %u (max %u)", d->uc_index,
+				 HOST_INDIRECT_PKT_NUM);
+			return -EINVAL;
+		}
+	}
+
+	pkt = hsa_queue_reserve_slot(xdna, vp, &slot_id);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	queue = vp->hsa_queue.hsa_queue_p;
+	*seq = slot_id;
+	slot_idx = slot_id & (queue->hq_header.capacity - 1);
+
+	hdr = &pkt->xrt_header;
+	hdr->common_header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+	hdr->common_header.chain_flag = last_cmd ? LAST_CMD : NOT_LAST_CMD;
+	hdr->common_header.count = sizeof(struct host_indirect_packet_entry);
+	hdr->common_header.distribute = 1;
+	hdr->common_header.indirect = 1;
+	hdr->completion_signal = (u64)(vp->hsa_queue.hq_complete.hqc_dma_addr +
+				       slot_idx * sizeof(u64));
+
+	indirect_hdr = &queue->hq_indirect_hdr[slot_idx];
+	indirect_hdr->header.count = total_cmds * sizeof(struct host_indirect_packet_entry);
+	indirect_hdr->header.indirect = 1;
+	indirect_hdr->header.distribute = 1;
+
+	hdr_paddr = (u64)queue->hq_header.data_address +
+		    ((u64)&queue->hq_indirect_hdr[slot_idx] - (u64)&queue->hq_entry);
+
+	/* The top-level entry in the host-queue packet points at the indirect header. */
+	hp = (struct host_indirect_packet_entry *)pkt->data;
+	hp->host_addr_low = lower_32_bits(hdr_paddr);
+	hp->host_addr_high = upper_32_bits(hdr_paddr);
+	hp->uc_index = 0;
+
+	hp_hdr = (struct host_indirect_packet_entry *)indirect_hdr->data;
+
+	for (i = 0; dpu && i < total_cmds;
+	     i++, hp_hdr++, dpu = get_ve2_dpu_data_next(dpu)) {
+		u16 uc = dpu->uc_index;
+		struct host_queue_indirect_pkt *ipkt;
+		struct exec_buf *ebp;
+		u64 pkt_paddr;
+
+		ipkt = &queue->hq_indirect_pkt[uc][slot_idx];
+		pkt_paddr = (u64)queue->hq_header.data_address +
+			    ((u64)&queue->hq_indirect_pkt[uc][slot_idx] - (u64)&queue->hq_entry);
+
+		hp_hdr->host_addr_low = lower_32_bits(pkt_paddr);
+		hp_hdr->host_addr_high = upper_32_bits(pkt_paddr);
+		hp_hdr->uc_index = uc;
+
+		ebp = &ipkt->payload;
+		ebp->dpu_control_code_host_addr_high = upper_32_bits(dpu->instruction_buffer);
+		ebp->dpu_control_code_host_addr_low = lower_32_bits(dpu->instruction_buffer);
+		ebp->dtrace_buf_host_addr_high = upper_32_bits(dpu->dtrace_buffer);
+		ebp->dtrace_buf_host_addr_low = lower_32_bits(dpu->dtrace_buffer);
+		ebp->args_len = 0;
+		ebp->args_host_addr_low = 0;
+		ebp->args_host_addr_high = 0;
+
+		hsa_queue_sync_indirect_pkt_for_write(&vp->hsa_queue, uc, slot_idx);
+	}
+
+	hsa_queue_sync_packet_for_write(&vp->hsa_queue, slot_idx);
+	hsa_queue_sync_indirect_hdr_for_write(&vp->hsa_queue, slot_idx);
+	hsa_queue_commit_slot(hwctx, *seq);
+
+	return 0;
+}
+
+/*
+ * Reserve and commit a single command into the host queue. When the queue is
+ * momentarily full (-EBUSY), block until the completion IRQ frees a slot and
+ * retry, rather than failing the submission back to user space.
+ */
+static int submit_command_retry(struct amdxdna_hwctx *hwctx, void *cmd_data, u64 *seq,
+				bool last_cmd)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	int ret;
+
+	while (true) {
+		if (get_ve2_dpu_data_next(cmd_data))
+			ret = submit_command_indirect(hwctx, cmd_data, seq, last_cmd);
+		else
+			ret = submit_command(hwctx, cmd_data, seq, last_cmd);
+		if (ret != -EBUSY)
+			return ret;
+
+		ret = ve2_wait_for_retry_slot(hwctx, VE2_RETRY_TIMEOUT_MS);
+		if (ret == -ETIMEDOUT) {
+			XDNA_DBG(xdna, "Submit timeout: no slot available after %ums",
+				 VE2_RETRY_TIMEOUT_MS);
+			return -EAGAIN;
+		}
+		if (ret < 0) {
+			XDNA_ERR(xdna, "Submit interrupted while waiting for slot");
+			return ret;
+		}
+	}
+}
+
 static int ve2_submit_cmd_single(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job,
 				 u64 *seq)
 {
@@ -222,7 +468,7 @@ static int ve2_submit_cmd_single(struct amdxdna_hwctx *hwctx, struct amdxdna_sch
 		return -EINVAL;
 	}
 
-	ret = submit_command(hwctx, cmd_data, seq, true);
+	ret = submit_command_retry(hwctx, cmd_data, seq, true);
 	if (ret < 0)
 		return ret;
 
@@ -260,9 +506,31 @@ static int ve2_create_host_queue(struct amdxdna_hwctx *hwctx)
 		dma_handle + sizeof(struct host_queue_header);
 	queue->hsa_queue_p->hq_header.capacity = HOST_QUEUE_ENTRY;
 
-	/* Basic tests use direct ERT_START_DPU packets only; mark all slots invalid. */
-	for (slot = 0; slot < HOST_QUEUE_ENTRY; slot++)
+	/* Set hsa queue slots to invalid and initialize indirect regions */
+	for (slot = 0; slot < HOST_QUEUE_ENTRY; slot++) {
+		struct host_queue_indirect_hdr *ihdr =
+			&queue->hsa_queue_p->hq_indirect_hdr[slot];
+		int uc;
+
 		hsa_queue_pkt_set_invalid(hsa_queue_get_pkt(queue->hsa_queue_p, slot));
+
+		ihdr->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+		ihdr->header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+		ihdr->header.count = 0;
+		ihdr->header.distribute = 1;
+		ihdr->header.indirect = 1;
+
+		for (uc = 0; uc < HOST_INDIRECT_PKT_NUM; uc++) {
+			struct host_queue_indirect_pkt *ipkt =
+				&queue->hsa_queue_p->hq_indirect_pkt[uc][slot];
+
+			ipkt->header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+			ipkt->header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+			ipkt->header.count = sizeof(struct exec_buf);
+			ipkt->header.distribute = 1;
+			ipkt->header.indirect = 0;
+		}
+	}
 
 	dma_sync_single_for_device(queue->alloc_dev, dma_handle, sizeof(struct hsa_queue),
 				   DMA_TO_DEVICE);
@@ -486,7 +754,7 @@ static int ve2_submit_cmd_chain(struct amdxdna_hwctx *hwctx, struct amdxdna_sche
 			return -EINVAL;
 		}
 
-		ret = submit_command(hwctx, cmd_data, seq, last_cmd);
+		ret = submit_command_retry(hwctx, cmd_data, seq, last_cmd);
 		amdxdna_gem_put_obj(abo);
 		if (ret) {
 			XDNA_ERR(xdna, "Submit chain cmd %u/%u failed: %d", i,
@@ -786,28 +1054,37 @@ static int ve2_config_assign_dbg_buf(struct amdxdna_hwctx *hwctx, u64 mdata_hdl,
 	u64 base_paddr = 0;
 	int ret = 0;
 
-	/*
-	 * The metadata BO is allocated by the shim as AMDXDNA_BO_CMD, so use
-	 * AMDXDNA_BO_INVALID to accept any type when looking it up.
-	 */
-	mdata_abo = amdxdna_gem_get_obj(client, (u32)mdata_hdl, AMDXDNA_BO_INVALID);
+	mdata_abo = amdxdna_gem_get_obj(client, mdata_hdl, AMDXDNA_BO_SHARE);
 	if (!mdata_abo) {
 		XDNA_ERR(xdna, "Failed to get metadata BO %llu", mdata_hdl);
 		return -EINVAL;
 	}
 
-	mdata = amdxdna_gem_vmap(mdata_abo);
+	mdata = (struct amdxdna_fw_buffer_metadata *)(amdxdna_gem_vmap(mdata_abo));
 	if (!mdata) {
 		XDNA_ERR(xdna, "Failed to vmap metadata BO %llu", mdata_hdl);
 		ret = -EINVAL;
 		goto put_mdata;
 	}
 
+	if (struct_size(mdata, uc_info, hwctx->num_col) > mdata_abo->mem.size) {
+		XDNA_ERR(xdna, "%s: metadata BO too small for %u uc entries (BO size %zu)",
+			 __func__, hwctx->num_col, mdata_abo->mem.size);
+		ret = -EINVAL;
+		goto put_mdata;
+	}
+
 	abo = NULL;
 	if (attach) {
-		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_SHARE);
+		if (!mdata->bo_handle) {
+			XDNA_DBG(xdna, "No payload BO to attach (buf_type=%u)",
+				 mdata->buf_type);
+			goto put_mdata;
+		}
+
+		abo = amdxdna_gem_get_obj(client, (u32)mdata->bo_handle, AMDXDNA_BO_SHARE);
 		if (!abo) {
-			XDNA_ERR(xdna, "Failed to get payload BO %u", mdata->bo_handle);
+			XDNA_ERR(xdna, "Failed to get payload BO %llu", mdata->bo_handle);
 			ret = -EINVAL;
 			goto put_mdata;
 		}

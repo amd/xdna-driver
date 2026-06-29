@@ -36,11 +36,14 @@ struct ve2_firmware_version {
 	u8 build;
 };
 
+struct amdxdna_mgmtctx;
+
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
 	struct aie_device_info		aie_dev_info;
 	struct ve2_firmware_version	fw_version;
+	struct amdxdna_mgmtctx		*ve2_mgmtctx;
 };
 
 extern const struct amdxdna_dev_ops ve2_ops;

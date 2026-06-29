@@ -163,6 +163,12 @@ int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl)
 		return -EINVAL;
 	}
 
+	ret = ve2_mgmtctx_registry_init(hdl);
+	if (ret) {
+		XDNA_ERR(xdna, "mgmtctx registry init failed %d", ret);
+		return ret;
+	}
+
 	ret = ve2_load_fw(hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", hdl->priv->fw_path, ret);

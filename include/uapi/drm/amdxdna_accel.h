@@ -174,10 +174,10 @@ struct amdxdna_uc_info_entry {
  * struct amdxdna_fw_buffer_metadata - per-hwctx CERT buffer description.
  * @buf_type:   One of enum amdxdna_fw_buf_type.
  * @num_ucs:    Number of valid entries in @uc_info.
- * @pad:        MBZ. Reserved for ABI growth.
+ * @pad:        Reserved. Reserved for ABI growth.
+ * @command_id: User tag for trace correlation.
  * @bo_handle:  Handle of the payload BO (AMDXDNA_BO_SHARE) holding the
  *              concatenated per-uC slices.
- * @command_id: User tag for trace correlation.
  * @uc_info:    Per-uC slice descriptors in payload BO layout order.
  *
  * Passed via struct amdxdna_drm_config_hwctx.param_val (as a BO handle) for
@@ -186,9 +186,9 @@ struct amdxdna_uc_info_entry {
 struct amdxdna_fw_buffer_metadata {
 	__u8  buf_type;
 	__u8  num_ucs;
-	__u8  pad[2];
-	__u32 bo_handle;
+	__u8  pad[48];
 	__u64 command_id;
+	__u64 bo_handle;
 	struct amdxdna_uc_info_entry uc_info[];
 };
 

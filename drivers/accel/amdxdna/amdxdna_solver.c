@@ -396,7 +396,7 @@ void *xrsm_init(struct init_config *cfg)
 	return xrs;
 }
 
-int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx)
+int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx, bool *create_aie_part)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	struct xrs_action_load load_act = { };
@@ -430,16 +430,32 @@ int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx)
 	hwctx->start_col = load_act.part.start_col;
 	hwctx->num_col = load_act.part.ncols;
 
+	/*
+	 * Report whether this allocation created a fresh AIE partition (first
+	 * sharer) or attached to one already in use (subsequent sharer). VE2
+	 * uses this to decide whether to request the partition / register IRQ.
+	 */
+	if (!ret && create_aie_part)
+		*create_aie_part = load_act.create_aie_part;
+
 	kfree(xrs_req);
 	return ret;
 }
 
-void amdxdna_release_resource(struct amdxdna_hwctx *hwctx)
+void amdxdna_release_resource(struct amdxdna_hwctx *hwctx, bool *release_aie_part)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct xrs_action_load release_act = { };
 	int ret;
 
-	ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)hwctx, NULL);
+	ret = xrs_release_resource(xdna->xrs_hdl, (uintptr_t)hwctx, &release_act);
 	if (ret)
 		drm_err(&xdna->ddev, "Release AIE resource failed, ret %d", ret);
+
+	/*
+	 * Report whether this was the last sharer (the AIE partition can now be
+	 * torn down) or whether other contexts still reference the partition.
+	 */
+	if (!ret && release_aie_part)
+		*release_aie_part = release_act.release_aie_part;
 }

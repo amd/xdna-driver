@@ -320,9 +320,6 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	int ret;
 	u64 val;
 
-	if (XDNA_MBZ_DBG(xdna, &args->pad, sizeof(args->pad)))
-		return -EINVAL;
-
 	if (!xdna->dev_info->ops->hwctx_config)
 		return -EOPNOTSUPP;
 
