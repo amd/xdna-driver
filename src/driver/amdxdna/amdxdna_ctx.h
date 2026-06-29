@@ -347,6 +347,9 @@ amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size)
 	else
 		num_masks = 1 + FIELD_GET(AMDXDNA_CMD_EXTRA_CU_MASK, cmd->header);
 
+	if (abo->mem.size < offsetof(struct amdxdna_cmd, data[num_masks]))
+		return NULL;
+
 	if (size) {
 		count = FIELD_GET(AMDXDNA_CMD_COUNT, cmd->header);
 		if (unlikely(count <= num_masks ||

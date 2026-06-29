@@ -715,6 +715,8 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 	}
 
 	dpu = amdxdna_cmd_get_payload(cmd_abo, NULL);
+	if (!dpu)
+		return -ENOMEM;
 	chained = dpu->chained;
 	if (chained >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
 		XDNA_ERR(xdna, "Invalid DPU data");
