@@ -19,7 +19,7 @@
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
 
-#define MAX_HWCTX_ID		255
+#define MAX_HWCTX_ID		1024
 #define MAX_ARG_COUNT		4095
 
 struct amdxdna_fence {
