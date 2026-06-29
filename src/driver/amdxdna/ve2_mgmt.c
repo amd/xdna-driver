@@ -439,14 +439,13 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 			hwctx = c_ctx->ctx;
 			XDNA_DBG(xdna, "NEW context to be schedule next: %p\n", hwctx);
 			mgmtctx->is_partition_idle = 0;
+			mgmtctx->is_idle_due_to_context = 0;
 			ve2_mgmt_handshake_init(mgmtctx->xdna, hwctx);
-			if (mgmtctx->active_ctx == hwctx)
-				break;
-
 			mgmtctx->active_ctx = hwctx;
+			break;
 		}
 
-		if (t_ctx && c_ctx->ctx != t_ctx->ctx)
+		if (c_ctx->ctx != mgmtctx->active_ctx)
 			ve2_request_context_switch(mgmtctx->xdna, mgmtctx);
 
 		break;
@@ -522,8 +521,17 @@ static bool ve2_check_context_req(struct amdxdna_mgmtctx  *mgmtctx)
 {
 	if (mgmtctx->is_context_req == 1) {
 		mgmtctx->is_context_req = 0;
-		mgmtctx->is_idle_due_to_context = 1;
-		return true;
+		/*
+		 * Only promote to is_idle_due_to_context if the FIFO head is
+		 * actually a different context.
+		 */
+		struct amdxdna_ctx_command_fifo *head =
+			list_first_entry_or_null(&mgmtctx->ctx_command_fifo_head,
+						 struct amdxdna_ctx_command_fifo, list);
+		if (head && head->ctx != mgmtctx->active_ctx) {
+			mgmtctx->is_idle_due_to_context = 1;
+			return true;
+		}
 	}
 
 	return false;
