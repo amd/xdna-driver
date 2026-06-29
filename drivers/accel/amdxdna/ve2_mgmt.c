@@ -23,7 +23,43 @@
 #include "ve2_mgmt.h"
 
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
-				     u32 part_start_col, u32 num_col, u32 *partition_id);
+				     bool create_aie_part);
+static void ve2_scheduler_work(struct work_struct *work);
+static void ve2_irq_handler(u32 partition_id, void *priv);
+static void ve2_aie_error_cb(void *arg);
+static struct amdxdna_hwctx *ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx);
+static int ve2_request_context_switch(struct amdxdna_mgmtctx *mgmtctx);
+
+int ve2_mgmtctx_registry_init(struct amdxdna_dev_hdl *hdl)
+{
+	struct amdxdna_dev *xdna = hdl->xdna;
+	u32 cols = hdl->aie_dev_info.cols;
+	u32 i;
+
+	hdl->ve2_mgmtctx = devm_kcalloc(xdna->ddev.dev, cols,
+					sizeof(*hdl->ve2_mgmtctx), GFP_KERNEL);
+	if (!hdl->ve2_mgmtctx)
+		return -ENOMEM;
+
+	/*
+	 * Initialise per-partition locks/state once. The entry indexed by a
+	 * lead column is (re)populated with an AIE partition when the first
+	 * sharer is created and torn down when the last sharer is destroyed.
+	 */
+	for (i = 0; i < cols; i++) {
+		struct amdxdna_mgmtctx *mgmtctx = &hdl->ve2_mgmtctx[i];
+
+		mgmtctx->xdna = xdna;
+		mgmtctx->start_col = i;
+		INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
+		mutex_init(&mgmtctx->ctx_lock);
+		mutex_init(&mgmtctx->async_errs_cache.lock);
+		init_completion(&mgmtctx->error_cb_completion);
+		atomic_set(&mgmtctx->error_cb_in_progress, 0);
+	}
+
+	return 0;
+}
 
 static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 				 struct amdxdna_hwctx *hwctx, u32 col,
@@ -165,7 +201,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 	struct amdxdna_dev_hdl *hdl = ve2_dev_hdl(xdna);
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct solver_state *xrs = xdna->xrs_hdl;
-	u32 partition_id = 0;
+	bool create_aie_part = false;
 	int ret;
 
 	if (!vp || !hdl || !xrs)
@@ -178,7 +214,7 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 
 	hwctx->num_col = hwctx->num_tiles;
 	mutex_lock(&xrs->xrs_lock);
-	ret = amdxdna_alloc_resource(hwctx);
+	ret = amdxdna_alloc_resource(hwctx, &create_aie_part);
 	mutex_unlock(&xrs->xrs_lock);
 	kfree(hwctx->col_list);
 	hwctx->col_list = NULL;
@@ -187,17 +223,15 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 		return ret;
 	}
 
-	ret = ve2_create_mgmt_partition(xdna, hwctx, hwctx->start_col, hwctx->num_col,
-					&partition_id);
+	ret = ve2_create_mgmt_partition(xdna, hwctx, create_aie_part);
 	if (ret) {
 		XDNA_ERR(xdna, "Creating AIE partition failed, ret %d", ret);
 		mutex_lock(&xrs->xrs_lock);
-		amdxdna_release_resource(hwctx);
+		amdxdna_release_resource(hwctx, NULL);
 		mutex_unlock(&xrs->xrs_lock);
 		return ret;
 	}
 
-	vp->partition_id = partition_id;
 	vp->handshake_initialized = false;
 
 	return 0;
@@ -269,6 +303,60 @@ release_hs_data:
 	return ret;
 }
 
+/*
+ * Ask the firmware to save the currently-running context and yield the
+ * partition. The CERT acknowledges by going idle, which the scheduler/IRQ
+ * path detects to bring in the next context.
+ */
+#define RR_SHARING BIT(0)
+static int ve2_request_context_switch(struct amdxdna_mgmtctx *mgmtctx)
+{
+	u32 val = 0;
+
+	ve2_partition_read_privileged_mem(mgmtctx, offsetof(struct handshake, ctx_switch_req),
+					  sizeof(val), &val);
+	val |= RR_SHARING;
+	ve2_partition_write_privileged_mem(mgmtctx, offsetof(struct handshake, ctx_switch_req),
+					   sizeof(val), &val);
+	mgmtctx->is_context_req = 1;
+
+	return 0;
+}
+
+/*
+ * Bring in the context at the head of the command FIFO once the firmware has
+ * acknowledged a switch request (is_idle_due_to_context). Reprograms the
+ * handshake to point at the incoming context's host queue and, if the entry
+ * after the head belongs to yet another context, arms the next switch.
+ * Returns the newly scheduled context, or NULL if the FIFO is empty.
+ */
+static struct amdxdna_hwctx *ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
+{
+	struct ve2_ctx_fifo_entry *c_ctx, *t_ctx;
+	struct amdxdna_hwctx *hwctx = NULL;
+
+	lockdep_assert_held(&mgmtctx->ctx_lock);
+
+	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
+		if (mgmtctx->is_idle_due_to_context) {
+			hwctx = c_ctx->ctx;
+			mgmtctx->is_partition_idle = 0;
+			ve2_mgmt_handshake_init(mgmtctx, hwctx);
+			if (mgmtctx->active_ctx == hwctx)
+				break;
+			mgmtctx->active_ctx = hwctx;
+		}
+
+		if (!list_is_last(&c_ctx->list, &mgmtctx->ctx_command_fifo_head) &&
+		    c_ctx->ctx != t_ctx->ctx)
+			ve2_request_context_switch(mgmtctx);
+
+		break;
+	}
+
+	return hwctx;
+}
+
 int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 			  u64 command_index)
 {
@@ -281,23 +369,44 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 
 	mgmtctx = vp->mgmtctx;
 
-	guard(mutex)(&mgmtctx->ctx_lock);
-
-	if (!mgmtctx->active_ctx) {
-		mgmtctx->active_ctx = hwctx;
-		if (!vp->handshake_initialized) {
-			ret = ve2_mgmt_handshake_init(mgmtctx, hwctx);
-			if (ret) {
-				mgmtctx->active_ctx = NULL;
-				return ret;
-			}
-		}
-	}
+	mutex_lock(&mgmtctx->ctx_lock);
 
 	ret = ve2_fifo_enqueue(mgmtctx, hwctx, command_index);
-	if (ret)
+	if (ret) {
+		mutex_unlock(&mgmtctx->ctx_lock);
 		return ret;
+	}
 
+	if (!mgmtctx->active_ctx) {
+		/* First command on this partition: program and activate it. */
+		mgmtctx->is_partition_idle = 0;
+		ret = ve2_mgmt_handshake_init(mgmtctx, hwctx);
+		if (ret) {
+			mutex_unlock(&mgmtctx->ctx_lock);
+			return ret;
+		}
+		mgmtctx->active_ctx = hwctx;
+	} else if (mgmtctx->active_ctx != hwctx) {
+		/*
+		 * Another context owns the partition. Switch immediately if it
+		 * is idle; otherwise leave the command queued and let the
+		 * IRQ/scheduler switch us in once the active context yields.
+		 */
+		if (mgmtctx->is_partition_idle) {
+			mgmtctx->is_partition_idle = 0;
+			ve2_response_ctx_switch_req(mgmtctx);
+		}
+	} else if (mgmtctx->is_idle_due_to_context) {
+		/* We are active again after a firmware-side save; reprogram. */
+		mgmtctx->is_idle_due_to_context = 0;
+		mgmtctx->is_partition_idle = 0;
+		ve2_mgmt_handshake_init(mgmtctx, hwctx);
+		mgmtctx->active_ctx = hwctx;
+	}
+
+	mutex_unlock(&mgmtctx->ctx_lock);
+
+	/* Ring the doorbell on the (now) active context's partition. */
 	return notify_fw_cmd_ready(mgmtctx);
 }
 
@@ -360,6 +469,32 @@ static bool ve2_check_misc_interrupt(struct amdxdna_mgmtctx *mgmtctx)
 	return true;
 }
 
+static bool ve2_check_queue_not_empty(struct amdxdna_mgmtctx *mgmtctx)
+{
+	u32 cert_idle_status = 0;
+
+	ve2_partition_read_privileged_mem(mgmtctx, offsetof(struct handshake, cert_idle_status),
+					  sizeof(cert_idle_status), &cert_idle_status);
+
+	return !!(cert_idle_status & HSA_QUEUE_NOT_EMPTY);
+}
+
+/*
+ * Acknowledge a pending switch request: once the firmware has gone idle in
+ * response to ctx_switch_req it is safe to reprogram the handshake for the
+ * next context, which ve2_response_ctx_switch_req() then does.
+ */
+static bool ve2_check_context_req(struct amdxdna_mgmtctx *mgmtctx)
+{
+	if (mgmtctx->is_context_req) {
+		mgmtctx->is_context_req = 0;
+		mgmtctx->is_idle_due_to_context = 1;
+		return true;
+	}
+
+	return false;
+}
+
 static void ve2_scheduler_work(struct work_struct *work)
 {
 	struct amdxdna_mgmtctx *mgmtctx = container_of(work, struct amdxdna_mgmtctx,
@@ -375,17 +510,26 @@ static void ve2_scheduler_work(struct work_struct *work)
 	if (!vp)
 		return;
 
+	/* If a switch was requested, mark the firmware ready to be reprogrammed. */
+	ve2_check_context_req(mgmtctx);
+
 	if (vp->misc_intrpt_flag) {
 		XDNA_ERR(mgmtctx->xdna, "MISC interrupt from firmware");
+	} else if (ve2_check_queue_not_empty(mgmtctx)) {
+		/*
+		 * The firmware acked the switch but the active context still has
+		 * queued work; bring in the next context, or mark idle if none.
+		 */
+		if (!ve2_response_ctx_switch_req(mgmtctx))
+			mgmtctx->is_partition_idle = 1;
 	} else if (ve2_check_idle(mgmtctx)) {
-		XDNA_DBG(mgmtctx->xdna, "Partition now idle, no pending contexts");
+		/* Partition idle: schedule the next pending context, if any. */
+		if (!ve2_response_ctx_switch_req(mgmtctx))
+			mgmtctx->is_partition_idle = 1;
 	} else {
 		XDNA_DBG(mgmtctx->xdna, "Scheduler: no action needed, active_ctx=%p",
 			 mgmtctx->active_ctx);
 	}
-	XDNA_DBG(mgmtctx->xdna, "scheduler: exit start_col=%u hwctx=%p pid=%d",
-		 mgmtctx->start_col, mgmtctx->active_ctx,
-		 mgmtctx->active_ctx->client->pid);
 }
 
 static void pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx,
@@ -395,8 +539,14 @@ static void pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx,
 	struct ve2_ctx_fifo_entry *c_ctx, *t_ctx;
 
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
-		if (c_ctx->ctx != active_ctx)
+		if (c_ctx->ctx != active_ctx) {
+			/*
+			 * The next queued command belongs to a different context;
+			 * ask the firmware to yield so it can be scheduled.
+			 */
+			ve2_request_context_switch(mgmtctx);
 			break;
+		}
 
 		if (c_ctx->command_index > read_index)
 			break;
@@ -596,142 +746,166 @@ static void ve2_aie_error_cb(void *arg)
 	complete(&mgmtctx->error_cb_completion);
 }
 
+/**
+ * ve2_create_mgmt_partition - Create and initialize a management partition for VE2 device
+ * @xdna: Pointer to the AMD XDNA device structure
+ * @hwctx: Pointer to the hardware context structure
+ * @load_act: Pointer to the XRS action load structure containing partition info
+ *
+ * This function sets up the management context, requests the AIE partition if needed,
+ * initializes workqueues for command scheduling, and updates context pointers.
+ * Returns 0 on success or a negative error code on failure.
+ */
 static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
-				     u32 part_start_col, u32 num_col, u32 *partition_id)
+				     bool create_aie_part)
 {
 	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	u32 start_col = hwctx->start_col;
+	u32 num_col = hwctx->num_col;
 	struct amdxdna_mgmtctx *mgmtctx;
 	struct aie_partition_req req = { };
 	struct device *aie_dev;
 	int ret;
 
-	if (!vp || part_start_col >= xdna_hdl->aie_dev_info.cols)
+	if (!vp || start_col >= xdna_hdl->aie_dev_info.cols)
 		return -EINVAL;
 
-	if (vp->mgmtctx)
-		return -EBUSY;
+	mgmtctx = &xdna_hdl->ve2_mgmtctx[start_col];
 
-	mgmtctx = kzalloc(sizeof(*mgmtctx), GFP_KERNEL);
-	if (!mgmtctx)
-		return -ENOMEM;
+	if (create_aie_part) {
+		mgmtctx->num_col = num_col;
+		mgmtctx->num_rows = xdna_hdl->aie_dev_info.rows;
+		mgmtctx->active_ctx = NULL;
+		mgmtctx->is_partition_idle = 0;
+		mgmtctx->is_context_req = 0;
+		mgmtctx->is_idle_due_to_context = 0;
+		memset(&mgmtctx->async_errs_cache.err, 0,
+		       sizeof(mgmtctx->async_errs_cache.err));
 
-	mgmtctx->xdna = xdna;
-	mgmtctx->start_col = part_start_col;
-	mgmtctx->num_col = num_col;
-	mgmtctx->num_rows = xdna_hdl->aie_dev_info.rows;
-	mgmtctx->active_ctx = NULL;
-	INIT_LIST_HEAD(&mgmtctx->ctx_command_fifo_head);
-	mutex_init(&mgmtctx->ctx_lock);
-	mutex_init(&mgmtctx->async_errs_cache.lock);
-	init_completion(&mgmtctx->error_cb_completion);
-	atomic_set(&mgmtctx->error_cb_in_progress, 0);
+		mgmtctx->work_queue = create_singlethread_workqueue("ve2_aie_sched");
+		if (!mgmtctx->work_queue)
+			return -ENOMEM;
 
-	mgmtctx->work_queue = create_singlethread_workqueue("ve2_aie_sched");
-	if (!mgmtctx->work_queue) {
-		ret = -ENOMEM;
-		goto free_mgmtctx;
+		INIT_WORK(&mgmtctx->scheduler_work, ve2_scheduler_work);
+
+		req.partition_id = (start_col << AIE_PART_ID_START_COL_SHIFT) |
+				   (num_col << AIE_PART_ID_NUM_COLS_SHIFT);
+		req.user_event1_complete = ve2_irq_handler;
+		req.user_event1_priv = mgmtctx;
+		aie_dev = aie_partition_request(&req);
+		if (IS_ERR(aie_dev)) {
+			ret = PTR_ERR(aie_dev);
+			goto destroy_wq;
+		}
+
+		mgmtctx->aie_dev = aie_dev;
+		mgmtctx->partition_id = req.partition_id;
+
+		ret = aie_register_error_notification(aie_dev, ve2_aie_error_cb, mgmtctx);
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to register AIE error notification: %d", ret);
+			goto release_part;
+		}
+	} else if (!mgmtctx->aie_dev) {
+		XDNA_ERR(xdna, "No AIE partition to share at start_col %u", start_col);
+		return -ENODEV;
 	}
 
-	INIT_WORK(&mgmtctx->scheduler_work, ve2_scheduler_work);
-
-	req.partition_id = (part_start_col << AIE_PART_ID_START_COL_SHIFT) |
-			   (num_col << AIE_PART_ID_NUM_COLS_SHIFT);
-	req.user_event1_complete = ve2_irq_handler;
-	req.user_event1_priv = mgmtctx;
-	aie_dev = aie_partition_request(&req);
-	if (IS_ERR(aie_dev)) {
-		ret = PTR_ERR(aie_dev);
-		goto destroy_wq;
-	}
-
-	mgmtctx->aie_dev = aie_dev;
-
-	ret = aie_register_error_notification(aie_dev, ve2_aie_error_cb, mgmtctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to register AIE error notification: %d", ret);
-		goto release_part;
-	}
-
-	*partition_id = req.partition_id;
 	vp->mgmtctx = mgmtctx;
+	vp->partition_id = mgmtctx->partition_id;
 
 	return 0;
 
 release_part:
-	aie_partition_teardown(aie_dev);
-	aie_partition_release(aie_dev);
+	aie_partition_teardown(mgmtctx->aie_dev);
+	aie_partition_release(mgmtctx->aie_dev);
+	mgmtctx->aie_dev = NULL;
 destroy_wq:
 	destroy_workqueue(mgmtctx->work_queue);
-free_mgmtctx:
-	mutex_destroy(&mgmtctx->async_errs_cache.lock);
-	kfree(mgmtctx);
+	mgmtctx->work_queue = NULL;
 	return ret;
+}
+
+static void ve2_fifo_remove_ctx(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx)
+{
+	struct ve2_ctx_fifo_entry *c_ctx, *t_ctx;
+
+	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
+		if (!hwctx || c_ctx->ctx == hwctx) {
+			list_del(&c_ctx->list);
+			kfree(c_ctx);
+		}
+	}
 }
 
 int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_ctx_priv *vp = hwctx ? ve2_hw_priv(hwctx) : NULL;
-	struct ve2_ctx_fifo_entry *c_ctx, *t_ctx;
+	bool release_aie_part = false;
 	struct amdxdna_mgmtctx *mgmtctx;
+	struct solver_state *xrs;
 
 	mgmtctx = vp ? vp->mgmtctx : NULL;
 	if (!mgmtctx) {
 		/* No partition was created; still release any XRS reservation. */
 		if (hwctx) {
-			struct solver_state *xrs = hwctx->client->xdna->xrs_hdl;
-
+			xrs = hwctx->client->xdna->xrs_hdl;
 			if (xrs) {
 				mutex_lock(&xrs->xrs_lock);
-				amdxdna_release_resource(hwctx);
+				amdxdna_release_resource(hwctx, NULL);
 				mutex_unlock(&xrs->xrs_lock);
 			}
 		}
 		return -EINVAL;
 	}
 
+	xrs = hwctx->client->xdna->xrs_hdl;
+
+	/*
+	 * Clear active_ctx FIRST to prevent IRQ handler from queueing new work,
+	 * remove all FIFO entries for this context to prevent use-after-free,
+	 * then cancel any pending work to ensure no work is accessing this context
+	 */
 	mutex_lock(&mgmtctx->ctx_lock);
 	if (mgmtctx->active_ctx == hwctx)
 		mgmtctx->active_ctx = NULL;
+	/* Remove all FIFO entries for this context before freeing it */
+	ve2_fifo_remove_ctx(mgmtctx, hwctx);
 	mutex_unlock(&mgmtctx->ctx_lock);
 
-	/*
-	 * Stop async error callbacks before tearing the partition down so the
-	 * callback cannot run against a partially-released mgmtctx.
-	 */
-	aie_unregister_error_notification(mgmtctx->aie_dev);
-
-	/*
-	 * Tear down the AIE partition before draining the workqueue so that no
-	 * new IRQs can be raised (and thus no new work items queued) after this
-	 * point.  destroy_workqueue() then drains any work that was already
-	 * in-flight at teardown time.
-	 */
-	aie_partition_teardown(mgmtctx->aie_dev);
-	aie_partition_release(mgmtctx->aie_dev);
-
-	destroy_workqueue(mgmtctx->work_queue);
-
-	mutex_lock(&mgmtctx->ctx_lock);
-	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
-		list_del(&c_ctx->list);
-		kfree(c_ctx);
+	/* Release the XRS reservation; learn whether we were the last sharer. */
+	if (xrs) {
+		mutex_lock(&xrs->xrs_lock);
+		amdxdna_release_resource(hwctx, &release_aie_part);
+		mutex_unlock(&xrs->xrs_lock);
 	}
-	mutex_unlock(&mgmtctx->ctx_lock);
 
-	mutex_destroy(&mgmtctx->async_errs_cache.lock);
-	kfree(mgmtctx);
+	if (release_aie_part) {
+		struct workqueue_struct *wq;
+
+		aie_unregister_error_notification(mgmtctx->aie_dev);
+
+		mutex_lock(&mgmtctx->ctx_lock);
+		/* Update the active context as partition doesn't exists any more */
+		mgmtctx->active_ctx = NULL;
+		wq = mgmtctx->work_queue;
+		mgmtctx->work_queue = NULL;
+		mutex_unlock(&mgmtctx->ctx_lock);
+
+		aie_partition_teardown(mgmtctx->aie_dev);
+		aie_partition_release(mgmtctx->aie_dev);
+		mgmtctx->aie_dev = NULL;
+
+		if (wq)
+			destroy_workqueue(wq);
+
+		mutex_lock(&mgmtctx->ctx_lock);
+		ve2_fifo_remove_ctx(mgmtctx, NULL);
+		mutex_unlock(&mgmtctx->ctx_lock);
+	}
+
 	vp->mgmtctx = NULL;
-
-	{
-		struct solver_state *xrs = hwctx->client->xdna->xrs_hdl;
-
-		if (xrs) {
-			mutex_lock(&xrs->xrs_lock);
-			amdxdna_release_resource(hwctx);
-			mutex_unlock(&xrs->xrs_lock);
-		}
-	}
 
 	return 0;
 }

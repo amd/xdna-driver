@@ -220,14 +220,14 @@ int xrs_release_resource(void *hdl, u64 rid, struct xrs_action_load *action);
  *
  * Return:	0 when successful, or standard error number when failing
  */
-int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx);
+int amdxdna_alloc_resource(struct amdxdna_hwctx *hwctx, bool *create_aie_part);
 
 /*
  * amdxdna_release_resource() - Release AIE resources for a hardware context
  *
  * @hwctx:	Hardware context pointer
  */
-void amdxdna_release_resource(struct amdxdna_hwctx *hwctx);
+void amdxdna_release_resource(struct amdxdna_hwctx *hwctx, bool *release_aie_part);
 
 #endif /* _AMDXDNA_SOLVER_H */
 

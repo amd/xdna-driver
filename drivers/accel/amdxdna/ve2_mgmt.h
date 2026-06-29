@@ -17,6 +17,7 @@
 #include "amdxdna_error.h"
 
 struct amdxdna_dev;
+struct amdxdna_dev_hdl;
 struct amdxdna_hwctx;
 
 #define VE2_COL_SHIFT			25
@@ -50,10 +51,14 @@ struct amdxdna_mgmtctx {
 	u32				start_col;
 	u32				num_col;
 	u32				num_rows;
+	u32				partition_id;
 	struct amdxdna_dev		*xdna;
 	struct amdxdna_async_err_cache	async_errs_cache;/* cache for last async error */
 	struct completion		error_cb_completion;/* signalled when error cb finishes */
 	atomic_t			error_cb_in_progress;/* set while error cb is running */
+	u32				is_partition_idle;/* fw idle, ready to switch */
+	u32				is_context_req;/* ctx_switch_req asserted to fw */
+	u32				is_idle_due_to_context;/* fw acked the switch req */
 };
 
 /* Helper functions for reading privileged memory. */
@@ -63,6 +68,14 @@ static inline int ve2_partition_read_privileged_mem(struct amdxdna_mgmtctx *mgmt
 	u32 offset = CERT_HANDSHAKE_OFF(0) + field_off;
 
 	return aie_partition_read_privileged_mem(mgmtctx->aie_dev, offset, size, buf);
+}
+
+static inline int ve2_partition_write_privileged_mem(struct amdxdna_mgmtctx *mgmtctx,
+						     size_t field_off, size_t size, void *buf)
+{
+	u32 offset = CERT_HANDSHAKE_OFF(0) + field_off;
+
+	return aie_partition_write_privileged_mem(mgmtctx->aie_dev, offset, size, buf);
 }
 
 static inline int ve2_aie_read_idle(struct amdxdna_mgmtctx *mgmtctx, u32 *idle)
@@ -103,6 +116,9 @@ static inline int get_ctx_read_index(struct amdxdna_hwctx *hwctx, u64 *read_inde
 
 	return 0;
 }
+
+/* Allocate and initialise the per-partition mgmtctx registry (one per column). */
+int ve2_mgmtctx_registry_init(struct amdxdna_dev_hdl *hdl);
 
 /* Request XRS resources and create the AIE management partition for @hwctx. */
 int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx);

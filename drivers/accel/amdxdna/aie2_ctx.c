@@ -629,7 +629,7 @@ static int aie2_alloc_resource(struct amdxdna_hwctx *hwctx)
 		return aie2_create_context(xdna->dev_handle, hwctx);
 	}
 
-	return amdxdna_alloc_resource(hwctx);
+	return amdxdna_alloc_resource(hwctx, NULL);
 }
 
 static void aie2_release_resource(struct amdxdna_hwctx *hwctx)
@@ -642,7 +642,7 @@ static void aie2_release_resource(struct amdxdna_hwctx *hwctx)
 		if (ret && ret != -ENODEV)
 			XDNA_ERR(xdna, "Destroy temporal only context failed, ret %d", ret);
 	} else {
-		amdxdna_release_resource(hwctx);
+		amdxdna_release_resource(hwctx, NULL);
 	}
 }
 
