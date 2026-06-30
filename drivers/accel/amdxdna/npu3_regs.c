@@ -9,7 +9,6 @@
 #include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
-#include "amdxdna_sensors.h"
 
 #define NPU3_MBOX_BAR		0
 
@@ -76,7 +75,7 @@ static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
 
 	while (ndev->priv->dpm_clk_tbl[max_dpm_level].hclk)
 		max_dpm_level++;
-	max_dpm_level--;
+	max_dpm_level--; /* last element is 0 */
 
 	if (max_dpm_level < 0 || dpm_level > max_dpm_level) {
 		XDNA_ERR(aie->xdna, "Invalid dpm level, max:%d, request:%d",
@@ -99,15 +98,20 @@ static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
 static int npu3_update_counters(struct aie_device *aie)
 {
 	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
-	struct amdxdna_sensors npu_metrics = {};
+	u32 aieclk_level, npuhclk_level;
 	int ret;
 
-	ret = amdxdna_get_sensors(&npu_metrics);
-	if (ret)
-		return ret;
+	ret = aie4_query_dpm_level(ndev, &aieclk_level, &npuhclk_level);
+	if (!ret) {
+		aie->npuclk_freq = ndev->dpm_clk_tbl[aieclk_level].npuclk;
+		aie->hclk_freq = ndev->dpm_clk_tbl[npuhclk_level].hclk;
+		aie->max_tops = NPU3_DPM_TOPS(ndev, ndev->dpm_clk_tbl[ndev->max_dpm_level].hclk);
+		if (!aie->hclk_freq)
+			XDNA_WARN(aie->xdna, "dpm freq table not populated, clk is 0");
+	} else {
+		XDNA_WARN(aie->xdna, "cannot get dpm level from fw, using default");
+	}
 
-	aie->npuclk_freq = npu_metrics.mpnpuclk_freq;
-	aie->hclk_freq = npu_metrics.npuclk_freq;
 	aie->curr_tops = NPU3_DPM_TOPS(ndev, aie->hclk_freq);
 
 	return 0;

@@ -351,9 +351,11 @@ static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
 
 	ndev->pw_mode = POWER_MODE_DEFAULT;
 	ndev->total_col = min(AIE4_TOTAL_COLUMN, ndev->aie.metadata.cols);
-	ret = ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
+
+	ret = aie4_init_dpm_freq_table(ndev);
 	if (ret)
-		return ret;
+		/* if query dpm from fw failed, using default value */
+		(void)ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
 
 	return 0;
 }
@@ -841,17 +843,15 @@ static int aie4_query_resource_info(struct amdxdna_client *client,
 				    struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_drm_get_resource_info res_info = {};
-	const struct amdxdna_dev_priv *priv;
 	struct amdxdna_dev_hdl *ndev;
 	struct amdxdna_dev *xdna;
 	u32 buf_sz;
 
 	xdna = client->xdna;
 	ndev = xdna->dev_handle;
-	priv = ndev->priv;
 
 	aie_update_counters(ndev);
-	res_info.npu_clk_max = priv->dpm_clk_tbl[ndev->max_dpm_level].hclk;
+	res_info.npu_clk_max = ndev->dpm_clk_tbl[ndev->max_dpm_level].hclk;
 	res_info.npu_tops_max = ndev->aie.max_tops;
 	res_info.npu_tops_curr = ndev->aie.curr_tops;
 

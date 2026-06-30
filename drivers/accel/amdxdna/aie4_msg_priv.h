@@ -39,6 +39,8 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_POWER_OVERRIDE                   = 0x3000B,
 	AIE4_MSG_OP_AIE_RW_ACCESS                    = 0x3000E,
 	AIE4_MSG_OP_AIE_COREDUMP                     = 0x30010,
+	AIE4_MSG_OP_GET_DPM_FREQ_TABLE               = 0x30012,
+	AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL            = 0x30013,
 
 	/* System control */
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x40001,
@@ -266,6 +268,35 @@ struct aie4_msg_power_override_req {
 
 struct aie4_msg_power_override_resp {
 	enum aie4_msg_status status;
+} __packed;
+
+#define AIE4_MAX_DPM_LEVEL_COUNT	10
+
+struct aie4_dpm_table {
+	__u32 num_levels;
+	__u32 values[AIE4_MAX_DPM_LEVEL_COUNT];
+} __packed;
+
+/* AIE4_MSG_OP_GET_DPM_FREQ_TABLE */
+struct aie4_msg_get_dpm_freq_table_req {
+	__u32 rsvd;
+} __packed;
+
+struct aie4_msg_get_dpm_freq_table_resp {
+	enum aie4_msg_status status;
+	struct aie4_dpm_table aieclk_table;
+	struct aie4_dpm_table npuhclk_table;
+} __packed;
+
+/* AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL */
+struct aie4_msg_get_dpm_level_req {
+	__u32 rsvd;
+} __packed;
+
+struct aie4_msg_get_dpm_level_resp {
+	enum aie4_msg_status status;
+	__u32 aieclk_dpm_level;
+	__u32 npuhclk_dpm_level;
 } __packed;
 
 #define AIE4_WORK_BUFFER_MIN_SIZE      SZ_4M
