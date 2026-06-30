@@ -18,10 +18,14 @@
 #include <sys/syscall.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <system_error>
 
 namespace {
 
@@ -1055,6 +1059,32 @@ struct telemetry
   public:
     virtual ~telemetry_handler() = default;
 
+    // Telemetry is an OPTIONAL diagnostic query. An older in-tree amdxdna driver may not
+    // implement DRM_AMDXDNA_QUERY_TELEMETRY and returns EOPNOTSUPP/EINVAL. In that case
+    // degrade gracefully (skip + warn once) instead of throwing and aborting the whole
+    // xrt-smi report, so basic device use still works on older drivers. See amd/xdna-driver#1447.
+    // Returns true if the query succeeded; false if telemetry is unsupported (caller returns
+    // an empty result). Any other (real) error is rethrown.
+    static bool
+    telemetry_query(const shim_xdna::pdev& pci_dev, amdxdna_drm_get_info& query)
+    {
+      try {
+        pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query);
+        return true;
+      } catch (const std::system_error& e) {
+        const int code = std::abs(e.code().value());
+        if (code == EOPNOTSUPP || code == ENOTSUP || code == EINVAL || code == ENOTTY) {
+          static std::once_flag warned;
+          std::call_once(warned, [] {
+            shim_debug("telemetry not supported by this driver version; skipping "
+                       "(update amdxdna; see amd/xdna-driver#1447)");
+          });
+          return false;
+        }
+        throw;
+      }
+    }
+
     virtual xrt_core::query::aie_telemetry::result_type
     query_aie_telemetry(const shim_xdna::pdev& pci_dev) const {
 
@@ -1067,7 +1097,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       for (uint32_t i = 0; i < NPU_MAX_SLEEP_COUNT; i++) {
         xrt_core::query::aie_telemetry::data task;
@@ -1079,7 +1110,7 @@ struct telemetry
 
     virtual xrt_core::query::misc_telemetry::result_type
     query_misc_telemetry(const shim_xdna::pdev& pci_dev) const {
-      xrt_core::query::misc_telemetry::result_type output;
+      xrt_core::query::misc_telemetry::result_type output{};
       amdxdna_drm_query_telemetry telemetry{};
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1088,7 +1119,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
       output.l1_interrupts = telemetry.l1_interrupts;
       return output;
     }
@@ -1104,7 +1136,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       for (uint32_t i = 0; i < NPU_MAX_OPCODE_COUNT; i++) {
         xrt_core::query::opcode_telemetry::data task;
@@ -1125,7 +1158,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       for (uint32_t i = 0; i < telemetry.ctx_map_num_elements; i++) {
         xrt_core::query::rtos_telemetry::data task;
@@ -1164,7 +1198,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(&telemetry)
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       for (uint32_t i = 0; i < NPU_MAX_STREAM_BUFFER_COUNT; i++) {
         xrt_core::query::stream_buffer_telemetry::data task;
@@ -1198,7 +1233,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
 
@@ -1221,7 +1257,7 @@ struct telemetry
 
     xrt_core::query::misc_telemetry::result_type
     query_misc_telemetry(const shim_xdna::pdev& pci_dev) const override {
-      xrt_core::query::misc_telemetry::result_type output;
+      xrt_core::query::misc_telemetry::result_type output{};
       std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
 
       amdxdna_drm_get_info query_telemetry = {
@@ -1230,7 +1266,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
       output.l1_interrupts = fw_telemetry->l1_interrupt;
@@ -1248,7 +1285,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
 
@@ -1281,7 +1319,8 @@ struct telemetry
         .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
       };
 
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      if (!telemetry_query(pci_dev, query_telemetry))
+        return output;
 
       auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
 
