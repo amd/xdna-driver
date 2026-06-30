@@ -308,6 +308,8 @@ static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
+	aie4_init_dpm_freq_table(ndev);
+
 	return 0;
 }
 
