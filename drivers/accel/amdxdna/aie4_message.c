@@ -126,6 +126,60 @@ int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 	return 0;
 }
 
+int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_dpm_freq_table, AIE4_MSG_OP_GET_DPM_FREQ_TABLE);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	u32 i, aie_n, npuh_n;
+	int ret;
+
+	ndev->dpm_aie_levels = 0;
+	ndev->dpm_npuh_levels = 0;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		if (resp.status == AIE4_MSG_STATUS_NOTSUPP) {
+			XDNA_DBG(xdna, "DPM freq table not supported, using static table");
+			return 0;
+		}
+		XDNA_WARN(xdna, "Get DPM freq table failed, ret %d status 0x%x",
+			  ret, resp.status);
+		return ret;
+	}
+
+	aie_n = min_t(u32, resp.aieclk_table.num_levels, AIE4_MAX_DPM_LEVEL_COUNT);
+	npuh_n = min_t(u32, resp.npuhclk_table.num_levels, AIE4_MAX_DPM_LEVEL_COUNT);
+
+	for (i = 0; i < aie_n; i++)
+		ndev->dpm_aieclk[i] = resp.aieclk_table.values[i];
+	for (i = 0; i < npuh_n; i++)
+		ndev->dpm_npuhclk[i] = resp.npuhclk_table.values[i];
+
+	ndev->dpm_aie_levels = aie_n;
+	ndev->dpm_npuh_levels = npuh_n;
+
+	return 0;
+}
+
+int aie4_query_dpm_level(struct amdxdna_dev_hdl *ndev,
+			 u32 *aieclk_dpm_level, u32 *npuhclk_dpm_level)
+{
+	DECLARE_AIE_MSG(aie4_msg_get_dpm_level, AIE4_MSG_OP_GET_CURRENT_DPM_LEVEL);
+	int ret;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		return ret;
+
+	*aieclk_dpm_level = resp.aieclk_dpm_level;
+	*npuhclk_dpm_level = resp.npuhclk_dpm_level;
+
+	XDNA_DBG(ndev->aie.xdna, "Current DPM level - aieclk: %u npuhclk: %u",
+		 resp.aieclk_dpm_level, resp.npuhclk_dpm_level);
+
+	return 0;
+}
+
 int aie4_query_aie_metadata(struct amdxdna_dev_hdl *ndev,
 			    struct amdxdna_drm_query_aie_metadata *metadata)
 {

@@ -11,6 +11,7 @@
 #include <linux/pci.h>
 
 #include "aie.h"
+#include "aie4_msg_priv.h"
 #include "amdxdna_mailbox.h"
 
 struct cert_comp {
@@ -57,6 +58,12 @@ struct amdxdna_dev_hdl {
 	u32				total_col;
 	u32				max_dpm_level;
 
+	/* FW-provided DPM frequency tables (MHz); *_levels == 0 if unavailable */
+	u32				dpm_aie_levels;
+	u32				dpm_npuh_levels;
+	u32				dpm_aieclk[AIE4_MAX_DPM_LEVEL_COUNT];
+	u32				dpm_npuhclk[AIE4_MAX_DPM_LEVEL_COUNT];
+
 	struct xarray                   cert_comp_xa; /* device level indexed by msix id */
 	struct mutex                    cert_comp_lock; /* protects cert_comp operations*/
 
@@ -97,6 +104,9 @@ int aie4_query_aie_version(struct amdxdna_dev_hdl *ndev,
 			   struct amdxdna_drm_query_aie_version *version);
 int aie4_query_npu_firmware_version(struct amdxdna_dev_hdl *ndev,
 				    struct amdxdna_drm_query_firmware_version *fw_version);
+int aie4_query_dpm_level(struct amdxdna_dev_hdl *ndev,
+			 u32 *aieclk_dpm_level, u32 *npuhclk_dpm_level);
+int aie4_init_dpm_freq_table(struct amdxdna_dev_hdl *ndev);
 int aie4_query_cert_firmware_version(struct amdxdna_dev_hdl *ndev,
 				     struct amdxdna_drm_query_firmware_version *cert_version);
 int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);

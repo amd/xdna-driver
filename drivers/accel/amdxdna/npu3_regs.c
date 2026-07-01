@@ -97,14 +97,28 @@ static int npu3_update_counters(struct aie_device *aie)
 {
 	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
 	struct amdxdna_sensors npu_metrics = {};
+	u32 aieclk_level, npuhclk_level;
 	int ret;
 
 	ret = amdxdna_get_sensors(&npu_metrics);
-	if (ret)
-		return ret;
+	if (!ret) {
+		aie->npuclk_freq = npu_metrics.mpnpuclk_freq;
+		aie->hclk_freq = npu_metrics.npuclk_freq;
+	} else if (!aie4_query_dpm_level(ndev, &aieclk_level, &npuhclk_level)) {
+		if (ndev->dpm_aie_levels && ndev->dpm_npuh_levels) {
+			aieclk_level = min(aieclk_level, ndev->dpm_aie_levels - 1);
+			npuhclk_level = min(npuhclk_level, ndev->dpm_npuh_levels - 1);
+			aie->npuclk_freq = ndev->dpm_aieclk[aieclk_level];
+			aie->hclk_freq = ndev->dpm_npuhclk[npuhclk_level];
+		} else {
+			aieclk_level = min_t(u32, aieclk_level, ndev->max_dpm_level);
+			npuhclk_level = min_t(u32, npuhclk_level, ndev->max_dpm_level);
+			aie->npuclk_freq = ndev->priv->dpm_clk_tbl[aieclk_level].npuclk;
+			aie->hclk_freq = ndev->priv->dpm_clk_tbl[npuhclk_level].hclk;
+		}
+	}
 
-	aie->npuclk_freq = npu_metrics.mpnpuclk_freq;
-	aie->hclk_freq = npu_metrics.npuclk_freq;
+	/* Without fresh telemetry the cached clocks are reused. */
 	aie->curr_tops = NPU3_DPM_TOPS(ndev, aie->hclk_freq);
 
 	return 0;
