@@ -1277,6 +1277,26 @@ TEST_query_telemetry_short_buf(device::id_type id, std::shared_ptr<device>& sdev
       + std::to_string(err));
 }
 
+void
+TEST_cmd_submit_unsupported(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Negative case: AIE4 has no cmd_submit op, EXEC_CMD must be rejected with EOPNOTSUPP.
+  int err = fork_query<int>(sdev.get(), [](int fd) {
+    amdxdna_drm_exec_cmd exec = {
+      .type = AMDXDNA_CMD_SUBMIT_EXEC_BUF,
+      .cmd_count = 1,
+    };
+    if (::ioctl(fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec) == -1)
+      return errno;
+    return 0;
+  });
+
+  if (err != EOPNOTSUPP)
+    throw std::runtime_error(
+      "EXEC_CMD on AIE4 should fail EOPNOTSUPP (cmd_submit unimplemented), got "
+      + std::to_string(err));
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1561,6 +1581,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "CERT log: payload overflow rejected", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_payload_overflow, {}
+  },
+  test_case{ "cmd_submit on AIE4 rejected with EOPNOTSUPP", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_cmd_submit_unsupported, {}
   },
 };
 
