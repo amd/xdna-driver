@@ -44,6 +44,12 @@ endif
 
 DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
+# Not upstreamed: enabled via build.sh -iommu_bypass (XDNA_DRV_BLD_FLAGS), forwarded
+# to both the native build and the DKMS rebuild so the macro survives packaging.
+ifeq ($(AMDXDNA_IOMMU_BYPASS),1)
+DEFINES += -DAMDXDNA_IOMMU_BYPASS
+endif
+
 # Compiler (gcc/clang) comes from the LLVM= kbuild var set by DKMS/caller, not probed here (#1377)
 ifeq ($(XDNA_BUS_TYPE), of)
 DEFINES += -DAMDXDNA_OF

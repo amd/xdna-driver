@@ -8,6 +8,7 @@
 #include <drm/drm_device.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
+#include <drm/drm_prime.h>
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/dma-buf.h>
@@ -17,6 +18,7 @@
 #include <linux/vmalloc.h>
 
 #include "amdxdna_cbuf.h"
+#include "amdxdna_cma_buf.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
@@ -907,6 +909,39 @@ amdxdna_gem_create_cbuf_object(struct drm_device *dev, struct amdxdna_drm_create
 	return ret;
 }
 
+static struct amdxdna_gem_obj *
+amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	size_t size = PAGE_ALIGN(args->size);
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *ret;
+	struct dma_buf *dma_buf;
+
+	if (args->type == AMDXDNA_BO_DEV_HEAP) {
+		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
+		return ERR_PTR(-EINVAL);
+	}
+
+	if (!size) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
+
+	dma_buf = amdxdna_get_cma_buf(dev, size);
+	if (IS_ERR(dma_buf))
+		return ERR_CAST(dma_buf);
+
+	gobj = amdxdna_gem_prime_import(dev, dma_buf);
+	if (IS_ERR(gobj))
+		ret = ERR_CAST(gobj);
+	else
+		ret = to_xdna_obj(gobj);
+
+	dma_buf_put(dma_buf);
+	return ret;
+}
+
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 {
@@ -942,6 +977,17 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo->type = AMDXDNA_BO_SHARE;
 	gobj->resv = dma_buf->resv;
 
+	/*
+	 * Without PASID/SVA the device accesses BOs by physical/DMA address
+	 * (carveout or CMA backed) and cannot scatter/gather. Cache the base
+	 * DMA address only when the import is physically contiguous; in PASID
+	 * mode the device uses UVA, so a non-contiguous import is fine and
+	 * dma_addr stays invalid.
+	 */
+	abo->mem.dma_addr = AMDXDNA_INVALID_ADDR;
+	if (drm_prime_get_contiguous_size(sgt) >= gobj->size)
+		abo->mem.dma_addr = sg_dma_address(sgt->sgl);
+
 	return gobj;
 
 fail_unmap:
@@ -964,6 +1010,8 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 		abo = amdxdna_gem_create_ubuf_object(dev, args);
 	else if (amdxdna_use_carveout(to_xdna_dev(dev)))
 		abo = amdxdna_gem_create_cbuf_object(dev, args);
+	else if (amdxdna_use_cma())
+		abo = amdxdna_gem_create_cma_object(dev, args);
 	else
 		abo = amdxdna_gem_create_shmem_object(dev, args);
 	if (IS_ERR(abo))

@@ -17,6 +17,7 @@
 
 #include "aie.h"
 #include "amdxdna_cbuf.h"
+#include "amdxdna_cma_buf.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_debugfs.h"
 #include "amdxdna_gem.h"
@@ -47,10 +48,10 @@ MODULE_FIRMWARE("amdnpu/17f2_13/npu.dev.sbin");
 MODULE_FIRMWARE("amdnpu/17f2_13/cert.dev.sbin");
 MODULE_FIRMWARE("amdnpu/17f2_15/npu.dev.sbin");
 MODULE_FIRMWARE("amdnpu/17f2_15/cert.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0A_10/npu.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0A_10/cert.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0B_10/npu.dev.sbin");
-MODULE_FIRMWARE("amdnpu/1B0B_10/cert.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0A_00/npu.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0A_00/cert.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0B_00/npu.dev.sbin");
+MODULE_FIRMWARE("amdnpu/1B0B_00/cert.dev.sbin");
 
 /*
  * 0.0: Initial version
@@ -101,9 +102,9 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 	{ 0x17f1, 0x10, &dev_npu3_classic_info },
 	{ 0x17f2, 0x10, &dev_npu3_pf_info },
 	{ 0x17f3, 0x10, &dev_npu3_vf_info },
-	{ 0x1B0A, 0x10, &dev_npu3_classic_info },
-	{ 0x1B0B, 0x10, &dev_npu3_pf_info },
-	{ 0x1B0C, 0x10, &dev_npu3_vf_info },
+	{ 0x1B0A, 0x00, &dev_npu3_classic_info },
+	{ 0x1B0B, 0x00, &dev_npu3_pf_info },
+	{ 0x1B0C, 0x00, &dev_npu3_vf_info },
 	{ 0x17f1, 0x13, &dev_npu9_classic_info },
 	{ 0x17f2, 0x13, &dev_npu9_pf_info },
 	{ 0x17f3, 0x13, &dev_npu9_vf_info },
@@ -163,7 +164,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	client->pasid = IOMMU_PASID_INVALID;
 	client->mm = current->mm;
 
-	if (!amdxdna_iova_on(xdna)) {
+	if (!amdxdna_iova_on(xdna) && !amdxdna_use_cma()) {
 		/* No need to fail open since user may use pa + carveout later. */
 		if (amdxdna_sva_init(client)) {
 			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
@@ -177,8 +178,12 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	mmgrab(client->mm);
 	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
 	xa_init_flags(&client->dev_heap_xa, XA_FLAGS_ALLOC);
-	drm_mm_init(&client->dev_heap_mm, xdna->dev_info->dev_mem_base,
-		    xdna->dev_info->dev_heap_max_size);
+	/* Devices without a managed dev-heap aperture (e.g. PA-mode aie4) leave
+	 * dev_heap_max_size at 0; drm_mm_init() BUGs on a zero-sized range.
+	 */
+	if (xdna->dev_info->dev_heap_max_size)
+		drm_mm_init(&client->dev_heap_mm, xdna->dev_info->dev_mem_base,
+			    xdna->dev_info->dev_heap_max_size);
 	mutex_init(&client->mm_lock);
 
 	mutex_lock(&xdna->client_lock);
@@ -205,7 +210,8 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	return 0;
 
 fail:
-	drm_mm_takedown(&client->dev_heap_mm);
+	if (xdna->dev_info->dev_heap_max_size)
+		drm_mm_takedown(&client->dev_heap_mm);
 	xa_destroy(&client->dev_heap_xa);
 	xa_destroy(&client->hwctx_xa);
 	mutex_destroy(&client->mm_lock);
@@ -231,7 +237,8 @@ static void amdxdna_client_cleanup(struct amdxdna_client *client)
 	xa_for_each(&client->dev_heap_xa, heap_id, heap)
 		drm_gem_object_put(to_gobj(heap));
 	xa_destroy(&client->dev_heap_xa);
-	drm_mm_takedown(&client->dev_heap_mm);
+	if (client->xdna->dev_info->dev_heap_max_size)
+		drm_mm_takedown(&client->dev_heap_mm);
 
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
