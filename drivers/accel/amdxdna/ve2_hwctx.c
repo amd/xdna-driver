@@ -272,7 +272,7 @@ static int ve2_wait_for_retry_slot(struct amdxdna_hwctx *hwctx, u32 timeout_ms)
 	}
 	if (ret < 0) {
 		XDNA_WARN(hwctx->client->xdna,
-			  "Wait for command slot interrupted: hwctx_id=%u pid=%u ret=%d",
+			  "Wait for command slot interrupted: hwctx_id=%u pid=%u ret=%ld",
 			  hwctx->id, hwctx->client->pid, ret);
 		return ret;
 	}
