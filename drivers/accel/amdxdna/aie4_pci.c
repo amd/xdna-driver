@@ -7,6 +7,7 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
+#include <linux/debugfs.h>
 #include <linux/firmware.h>
 #include <linux/sizes.h>
 #include <linux/pm_runtime.h>
@@ -14,6 +15,7 @@
 #include "aie.h"
 #include "aie4_pci.h"
 #include "aie4_msg_priv.h"
+#include "amdxdna_ctx.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
@@ -566,6 +568,7 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->aie.xdna = xdna;
+	ndev->kernel_submit = true;
 	xdna->dev_handle = ndev;
 
 	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
@@ -590,6 +593,7 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 		set_bit(SMU_REG_BAR(ndev, i), &bars);
 	set_bit(xdna->dev_info->mbox_bar, &bars);
 	set_bit(xdna->dev_info->sram_bar, &bars);
+	set_bit(xdna->dev_info->doorbell_bar, &bars);
 
 	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
 		if (!test_bit(i, &bars))
@@ -603,6 +607,7 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 
 	ndev->mbox_base = tbl[xdna->dev_info->mbox_bar];
 	ndev->rbuf_base = tbl[xdna->dev_info->sram_bar];
+	ndev->doorbell_base = tbl[xdna->dev_info->doorbell_bar];
 
 	pci_set_master(pdev);
 
@@ -630,33 +635,71 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 	return 0;
 }
 
-static int aie4_doorbell_mmap(struct amdxdna_client *client, struct vm_area_struct *vma)
+/*
+ * Validate a doorbell mmap request and return the pfn to map.  The page offset
+ * must belong to one of the caller's own user-mode contexts (kernel-mode
+ * contexts carry the AMDXDNA_INVALID_DOORBELL_OFFSET sentinel and are never
+ * mappable), and the resulting page must lie fully within the doorbell BAR - a
+ * BAR whose length is not page-aligned must not leak the MMIO that follows it
+ * into the last mapped page.
+ */
+static int aie4_doorbell_mmap_pfn(struct amdxdna_client *client,
+				  unsigned long vm_pgoff, unsigned long *pfnp)
 {
 	struct amdxdna_dev *xdna = client->xdna;
 	struct pci_dev *pdev = to_pci_dev(xdna->ddev.dev);
 	const struct amdxdna_dev_priv *npriv = xdna->dev_info->dev_priv;
-	phys_addr_t res_start;
+	phys_addr_t res_start, res_end;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id, pfn;
+	bool owned = false;
+	int idx;
+
+	mutex_lock(&xdna->dev_lock);
+	idx = srcu_read_lock(&client->hwctx_srcu);
+	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+		if (hwctx->doorbell_offset == AMDXDNA_INVALID_DOORBELL_OFFSET)
+			continue;
+		if (vm_pgoff == (hwctx->doorbell_offset >> PAGE_SHIFT)) {
+			owned = true;
+			break;
+		}
+	}
+	srcu_read_unlock(&client->hwctx_srcu, idx);
+	mutex_unlock(&xdna->dev_lock);
+	if (!owned)
+		return -EINVAL;
+
+	res_start = pci_resource_start(pdev, xdna->dev_info->doorbell_bar) + npriv->doorbell_off;
+	res_end = pci_resource_end(pdev, xdna->dev_info->doorbell_bar);
+	pfn = PHYS_PFN(res_start) + vm_pgoff;
+	if (((phys_addr_t)pfn << PAGE_SHIFT) + PAGE_SIZE - 1 > res_end)
+		return -EINVAL;
+
+	*pfnp = pfn;
+	return 0;
+}
+
+static int aie4_doorbell_mmap(struct amdxdna_client *client, struct vm_area_struct *vma)
+{
+	struct amdxdna_dev *xdna = client->xdna;
 	unsigned long pfn;
 	int ret;
-
-	if (!aie4_hwctx_valid_doorbell(client, vma->vm_pgoff)) {
-		XDNA_ERR(xdna, "Invalid doorbell page offset 0x%lx", vma->vm_pgoff);
-		return -EINVAL;
-	}
 
 	if (vma_pages(vma) != 1) {
 		XDNA_ERR(xdna, "can only map one page, got %ld", vma_pages(vma));
 		return -EINVAL;
 	}
 
-	res_start = pci_resource_start(pdev, xdna->dev_info->doorbell_bar) + npriv->doorbell_off;
-	pfn = PHYS_PFN(res_start) + vma->vm_pgoff;
+	ret = aie4_doorbell_mmap_pfn(client, vma->vm_pgoff, &pfn);
+	if (ret) {
+		XDNA_ERR(xdna, "Invalid doorbell page offset 0x%lx", vma->vm_pgoff);
+		return ret;
+	}
+
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
-	ret = io_remap_pfn_range(vma, vma->vm_start,
-				 pfn,
-				 PAGE_SIZE,
-				 vma->vm_page_prot);
+	ret = io_remap_pfn_range(vma, vma->vm_start, pfn, PAGE_SIZE, vma->vm_page_prot);
 
 	XDNA_DBG(xdna, "doorbell ret %d", ret);
 	return ret;
@@ -1225,6 +1268,15 @@ dev_exit:
 	return ret;
 }
 
+static void aie4_debugfs_init(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+
+	/* 0 - submit by user space, 1 - submit by driver (default). */
+	debugfs_create_bool("kernel_mode_submission", 0600,
+			    xdna->ddev.accel->debugfs_root, &ndev->kernel_submit);
+}
+
 const struct amdxdna_dev_ops aie4_pf_ops = {
 	.init			= aie4_pf_init,
 	.fini			= aie4_pf_fini,
@@ -1236,10 +1288,12 @@ const struct amdxdna_dev_ops aie4_pf_ops = {
 const struct amdxdna_dev_ops aie4_vf_ops = {
 	.init			= aie4_vf_init,
 	.fini			= aie4_vf_fini,
+	.debugfs_init		= aie4_debugfs_init,
 	.hwctx_init		= aie4_hwctx_init,
 	.hwctx_fini		= aie4_hwctx_fini,
 	.hwctx_config		= aie4_hwctx_config,
 	.mmap			= aie4_doorbell_mmap,
+	.cmd_submit		= aie4_cmd_submit,
 	.cmd_wait		= aie4_cmd_wait,
 	.get_aie_info		= aie4_get_info,
 	.set_aie_state		= aie4_set_state,
@@ -1251,10 +1305,12 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 const struct amdxdna_dev_ops aie4_classic_ops = {
 	.init			= aie4_classic_init,
 	.fini			= aie4_classic_fini,
+	.debugfs_init		= aie4_debugfs_init,
 	.hwctx_init		= aie4_hwctx_init,
 	.hwctx_fini		= aie4_hwctx_fini,
 	.hwctx_config		= aie4_hwctx_config,
 	.mmap			= aie4_doorbell_mmap,
+	.cmd_submit		= aie4_cmd_submit,
 	.cmd_wait		= aie4_cmd_wait,
 	.get_aie_info		= aie4_get_info,
 	.set_aie_state		= aie4_set_state,
