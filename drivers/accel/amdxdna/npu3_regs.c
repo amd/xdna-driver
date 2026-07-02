@@ -255,6 +255,8 @@ const struct amdxdna_dev_info dev_npu10_pf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu10_vf_info = {
@@ -267,6 +269,8 @@ const struct amdxdna_dev_info dev_npu10_vf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu10_classic_info = {
@@ -281,6 +285,8 @@ const struct amdxdna_dev_info dev_npu10_classic_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu11_pf_info = {
