@@ -203,9 +203,7 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *priv, 
 
 	/* Reserve this slot by incrementing reserved_write_index. */
 	*slot = queue->reserved_write_index++;
-	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_NEW;
-	/* Sync completion memory after writing (device will read) */
-	hsa_queue_sync_completion_for_write(queue, slot_idx);
+	clear_bit(slot_idx, queue->slot_ready);
 
 	mutex_unlock(&queue->hq_lock);
 
@@ -232,19 +230,14 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx *
 	/* Sync packet after writing (device will read) */
 	hsa_queue_sync_packet_for_write(queue, slot_idx);
 
-	/* Mark this seq as ready in driver tracking */
-	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_SUBMITTED;
-	/* Sync completion memory after writing (device will read) */
-	hsa_queue_sync_completion_for_write(queue, slot_idx);
+	/* Mark slot ready in driver-local tracking (cert owns hqc_mem) */
+	set_bit(slot_idx, queue->slot_ready);
 
 	/* Advance write_index as far as possible through all ready slots. */
 	while (header->write_index < queue->reserved_write_index) {
 		u32 next_idx = header->write_index % capacity;
-		/* Sync completion memory before reading (device may have written) */
-		hsa_queue_sync_completion_for_read(queue, next_idx);
-		enum ert_cmd_state state = queue->hq_complete.hqc_mem[next_idx];
 
-		if (state != ERT_CMD_STATE_SUBMITTED)
+		if (!test_bit(next_idx, queue->slot_ready))
 			break;
 
 		header->write_index++;
@@ -515,8 +508,9 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	for (r = 0; r < MAX_MEM_REGIONS; r++) {
 		alloc_dev = xdna->cma_region_devs[r];
 		if ((hwctx->priv->mem_bitmap & (1U << r)) && alloc_dev) {
-			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
-								&dma_handle, GFP_KERNEL);
+			queue->hsa_queue_p = dma_alloc_noncoherent(alloc_dev, alloc_size,
+								   &dma_handle, DMA_BIDIRECTIONAL,
+								   GFP_KERNEL);
 			if (!queue->hsa_queue_p)
 				continue;
 			queue->alloc_dev = alloc_dev;
@@ -526,10 +520,11 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 
 	/* If no allocation succeeded, use the default device */
 	if (!queue->hsa_queue_p) {
-		queue->hsa_queue_p = dma_alloc_coherent(xdna->ddev.dev,
-							alloc_size,
-							&dma_handle,
-							GFP_KERNEL);
+		queue->hsa_queue_p = dma_alloc_noncoherent(xdna->ddev.dev,
+							   alloc_size,
+							   &dma_handle,
+							   DMA_BIDIRECTIONAL,
+							   GFP_KERNEL);
 		if (!queue->hsa_queue_p) {
 			XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu",
 				 alloc_size);
