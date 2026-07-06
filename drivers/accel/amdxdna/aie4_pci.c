@@ -959,6 +959,32 @@ static void aie4_hwctx_suspend_all(struct amdxdna_dev_hdl *ndev)
 	XDNA_DBG(xdna, "Finished hwctx suspend");
 }
 
+/*
+ * Abort and reap the jobs that aie4_hwctx_destroy() preserved on the running
+ * list.  Used on the resume-failure fallback: after aie4_hwctx_suspend_all()
+ * has disconnected every context, the preserved kernel-mode jobs would
+ * otherwise sit unreaped (fences unsignaled, mm/BO refs held) until context
+ * teardown.  Reap them here so fences are signaled and refs released promptly.
+ * All contexts must already be disconnected.
+ */
+static void aie4_hwctx_cleanup_all(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	struct amdxdna_client *client;
+	struct amdxdna_hwctx *hwctx;
+	unsigned long hwctx_id;
+	int idx;
+
+	amdxdna_for_each_client(xdna, client) {
+		idx = srcu_read_lock(&client->hwctx_srcu);
+		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
+			if (hwctx->priv->kernel_submit)
+				aie4_hwctx_cleanup_running_jobs(hwctx);
+		}
+		srcu_read_unlock(&client->hwctx_srcu, idx);
+	}
+}
+
 static int aie4_hwctx_resume_all(struct amdxdna_dev_hdl *ndev)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
@@ -973,6 +999,7 @@ static int aie4_hwctx_resume_all(struct amdxdna_dev_hdl *ndev)
 			ret = aie4_hwctx_create(hwctx);
 			if (ret)
 				goto error;
+			aie4_hwctx_resume_jobs(hwctx);
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}
@@ -1099,6 +1126,7 @@ static int aie4_vf_resume(struct amdxdna_dev *xdna)
 
 hw_clear:
 	aie4_hwctx_suspend_all(ndev);
+	aie4_hwctx_cleanup_all(ndev);
 	aie4_vf_hw_stop(ndev);
 pci_disable:
 	pci_disable_device(pdev);
@@ -1136,6 +1164,7 @@ static int aie4_classic_resume(struct amdxdna_dev *xdna)
 	return 0;
 hw_clear:
 	aie4_hwctx_suspend_all(ndev);
+	aie4_hwctx_cleanup_all(ndev);
 	aie4_classic_hw_stop(ndev);
 pci_disable:
 	pci_disable_device(pdev);
