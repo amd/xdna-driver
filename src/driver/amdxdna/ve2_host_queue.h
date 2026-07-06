@@ -121,6 +121,8 @@ struct ve2_hsa_queue {
 	u64				reserved_write_index;
 	/* Device used for host queue allocation */
 	struct device			*alloc_dev;
+	/* Driver-local slot readiness tracking; avoids writing to hqc_mem (cert-owned) */
+	DECLARE_BITMAP(slot_ready, HOST_QUEUE_ENTRY);
 };
 
 /*
