@@ -938,13 +938,87 @@ static void ve2_process_hqc_completion(struct amdxdna_hwctx *hwctx, struct amdxd
 	amdxdna_cmd_set_state(job->cmd_bo, state);
 }
 
+/*
+ * Capture CERT firmware health telemetry for each column of the context and
+ * write it into the timed-out command BO payload, so XRT can surface per-uC
+ * state (idle/misc status, FW state, fault PC/EAR/ESR, ...) via the timed-out
+ * run object. The layout matches struct amdxdna_ctx_health_data, which is an
+ * ABI shared with the XRT shim.
+ */
+static void ve2_fill_health_data(struct amdxdna_hwctx *hwctx, void *cmd_data, u32 data_total)
+{
+	size_t hdr_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_ctx_health_data *health;
+	struct amdxdna_mgmtctx *mgmtctx;
+	struct handshake *hs;
+	u32 max_uc, num_uc;
+	u32 col;
+	int ret;
+
+	if (!vp || !vp->mgmtctx || !vp->mgmtctx->aie_dev)
+		return;
+	mgmtctx = vp->mgmtctx;
+
+	if (!cmd_data || data_total < hdr_size) {
+		XDNA_WARN(xdna, "Health data buffer too small: %u < %zu", data_total, hdr_size);
+		return;
+	}
+
+	memset(cmd_data, 0, data_total);
+	health = cmd_data;
+	health->version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	health->npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	health->aie4.ctx_state = vp->state;
+	health->aie4.ctx_error_type = 0;
+
+	max_uc = (data_total - hdr_size) / sizeof(struct uc_health_info);
+	num_uc = min(hwctx->num_col, max_uc);
+
+	hs = kzalloc(sizeof(*hs), GFP_KERNEL);
+	if (!hs)
+		return;
+
+	for (col = 0; col < num_uc; col++) {
+		ret = aie_partition_read_privileged_mem(mgmtctx->aie_dev,
+							CERT_HANDSHAKE_OFF(col) +
+							offsetof(struct handshake, mpaie_alive),
+							sizeof(*hs), hs);
+		if (ret < 0) {
+			XDNA_ERR(xdna, "handshake read failed col %u ret %d", col, ret);
+			break;
+		}
+
+		health->aie4.uc_info[col].uc_idx = hwctx->start_col + col;
+		health->aie4.uc_info[col].uc_idle_status = hs->cert_idle_status;
+		health->aie4.uc_info[col].misc_status = hs->misc_status;
+		health->aie4.uc_info[col].fw_state = hs->vm.fw_state;
+		health->aie4.uc_info[col].page_idx = hs->vm.abs_page_index;
+		health->aie4.uc_info[col].offset = hs->vm.ppc;
+		health->aie4.uc_info[col].restore_page =
+			hs->ctx_save.contents.restore_page.page_index;
+		health->aie4.uc_info[col].restore_offset =
+			hs->ctx_save.contents.restore_page.page_offset;
+		health->aie4.uc_info[col].uc_ear = hs->exception.ear;
+		health->aie4.uc_info[col].uc_esr = hs->exception.esr;
+		health->aie4.uc_info[col].uc_pc = hs->exception.pc;
+	}
+
+	health->aie4.num_uc = col;
+	kfree(hs);
+}
+
 static void ve2_handle_timeout(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 seq)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	void *cmd_data;
+	u32 data_total;
 
 	if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN) {
 		struct amdxdna_cmd_chain *cc = amdxdna_cmd_get_payload(job->cmd_bo, NULL);
+		struct amdxdna_gem_obj *target_bo;
 		u32 fail_cmd_idx = 0;
 		u32 rl_read_idx = 0;
 		int ret;
@@ -961,7 +1035,26 @@ static void ve2_handle_timeout(struct amdxdna_hwctx *hwctx, struct amdxdna_sched
 			cc->error_index = fail_cmd_idx;
 			XDNA_ERR(xdna, "Chain timeout at index %u, runlist_read_idx %u",
 				 fail_cmd_idx, rl_read_idx);
+
+			/*
+			 * Write health telemetry into the failing sub-command BO so XRT
+			 * can read it back from the individual timed-out run object.
+			 */
+			target_bo = amdxdna_gem_get_obj(hwctx->client, (u32)cc->data[fail_cmd_idx],
+							AMDXDNA_BO_SHARE);
+			if (target_bo) {
+				cmd_data = amdxdna_cmd_get_data(target_bo, &data_total);
+				ve2_fill_health_data(hwctx, cmd_data, data_total);
+				amdxdna_cmd_set_state(target_bo, ERT_CMD_STATE_TIMEOUT);
+				amdxdna_gem_put_obj(target_bo);
+			} else {
+				XDNA_ERR(xdna, "Failed to find sub-cmd BO %u at chain index %u",
+					 (u32)cc->data[fail_cmd_idx], fail_cmd_idx);
+			}
 		}
+	} else {
+		cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
+		ve2_fill_health_data(hwctx, cmd_data, data_total);
 	}
 
 	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
