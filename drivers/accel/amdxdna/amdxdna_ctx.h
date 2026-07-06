@@ -129,6 +129,55 @@ struct amdxdna_cmd {
 	u32 data[];
 };
 
+/*
+ * Context health data written into a command BO payload when a command
+ * completes with ERT_CMD_STATE_TIMEOUT. Userspace (XRT) parses the payload
+ * starting at @version and selects the per-generation union member from
+ * @npu_gen. This layout is an ABI shared with the XRT shim.
+ */
+struct uc_health_info {
+	u32 uc_idx;
+	u32 uc_idle_status;
+	u32 misc_status;
+	u32 fw_state;
+	u32 page_idx;
+	u32 offset;
+	u32 restore_page;
+	u32 restore_offset;
+	u32 uc_ear;
+	u32 uc_esr;
+	u32 uc_pc;
+};
+
+struct amdxdna_ctx_health_data_aie2 {
+	u32 txn_op_idx;
+	u32 ctx_pc;
+	u32 fatal_error_type;
+	u32 fatal_error_exception_type;
+	u32 fatal_error_exception_pc;
+	u32 fatal_error_app_module;
+};
+
+struct amdxdna_ctx_health_data_aie4 {
+	u32 ctx_state;
+	u32 num_uc;
+	u32 ctx_error_type;
+	struct uc_health_info uc_info[];
+};
+
+struct amdxdna_ctx_health_data {
+#define AMDXDNA_CTX_HEALTH_DATA_V0	0
+#define AMDXDNA_CTX_HEALTH_DATA_V1	1
+	u32 version;
+#define AMDXDNA_NPU_GEN_AIE2		0
+#define AMDXDNA_NPU_GEN_AIE4		1
+	u32 npu_gen;
+	union {
+		struct amdxdna_ctx_health_data_aie2 aie2;
+		struct amdxdna_ctx_health_data_aie4 aie4;
+	};
+};
+
 #define INVALID_CU_IDX		(~0U)
 #define AMDXDNA_INVALID_DOORBELL_OFFSET	(~0U)
 
@@ -231,6 +280,20 @@ amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 		return ERT_CMD_STATE_INVALID;
 
 	return FIELD_GET(AMDXDNA_CMD_STATE, cmd->header);
+}
+
+static inline void *
+amdxdna_cmd_get_data(struct amdxdna_gem_obj *abo, u32 *size)
+{
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (!cmd) {
+		*size = 0;
+		return NULL;
+	}
+
+	*size = abo->mem.size - offsetof(struct amdxdna_cmd, data);
+	return cmd->data;
 }
 
 void *amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size);
