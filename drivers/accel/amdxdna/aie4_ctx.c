@@ -31,7 +31,6 @@
 #define MAX_CHAINED_SUB_CMD		64
 
 static void job_worker(struct work_struct *work);
-static void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx);
 
 static irqreturn_t cert_comp_isr(int irq, void *p)
 {
@@ -294,6 +293,19 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 	/* doorbell_base is a device-level managed mapping; just drop the pointer. */
 	priv->doorbell_addr = NULL;
 	aie4_unlink_cert_comp(hwctx);
+
+	/*
+	 * Quiesce the job worker now that the ctx is disconnected and the waitq
+	 * has been woken.  The worker observes the disconnect, re-parks its
+	 * in-flight job at the head of running_job_list, and returns, so
+	 * cancel_work_sync() completes rather than blocking.  This is required on
+	 * the suspend path (which does not call aie4_hwctx_cleanup_running_jobs):
+	 * it makes running_job_list stable before aie4_hwctx_resume_jobs() samples
+	 * it, and guarantees the worker is never left sleeping on this (now
+	 * unlinked) cert_comp waitq while resume allocates a fresh one.
+	 */
+	if (priv->kernel_submit)
+		cancel_work_sync(&priv->job_work);
 }
 
 static void aie4_hwctx_umq_fini(struct amdxdna_hwctx *hwctx)
@@ -621,18 +633,20 @@ static int wait_till_seq_completed(struct amdxdna_hwctx *hwctx, u64 seq)
 		return -EAGAIN;
 
 	/*
-	 * Killable: the submit path (wait_till_hsa_not_full) reaches here while
-	 * holding hwctx_srcu, and ctx teardown blocks on synchronize_srcu(), so a
-	 * fatal signal (e.g. the app being killed) must be able to unwind the wait
-	 * - otherwise a full queue with a silent CERT would hang the submitter in
-	 * D state and stall teardown forever.  Harmless for the job worker kthread
-	 * (a kthread never has a fatal signal pending).
+	 * Freezable + interruptible: the submit path (wait_till_hsa_not_full)
+	 * reaches here while holding hwctx_srcu, and ctx teardown blocks on
+	 * synchronize_srcu(), so a signal (e.g. the app being killed) must be
+	 * able to unwind the wait - otherwise a full queue with a silent CERT
+	 * would hang the submitter in D state and stall teardown forever.
+	 * TASK_FREEZABLE lets the freezer suspend this wait in place during
+	 * S3/S4 instead of aborting the suspend.  Harmless for the job worker
+	 * kthread (never gets a signal; simply freezes/thaws around it).
 	 */
-	ret = wait_event_killable(cert_comp->waitq, check_cmd_done(hwctx, seq));
+	ret = wait_event_freezable(cert_comp->waitq, check_cmd_done(hwctx, seq));
 	aie4_put_cert_comp(cert_comp);
 
 	if (ret)
-		return ret;	/* -ERESTARTSYS: fatal signal on the submit path */
+		return ret;	/* -ERESTARTSYS: signal on the submit path */
 	return (hwctx->priv->status != CTX_STATE_CONNECTED) ? -EAGAIN : 0;
 }
 
@@ -812,6 +826,34 @@ static struct amdxdna_sched_job *next_running_job(struct amdxdna_hwctx *hwctx)
 	return job;
 }
 
+/*
+ * Return the head running job without removing it.  The job worker keeps the
+ * in-flight job on the list while it waits so that a disconnect (suspend) can
+ * just leave it there for resume - no dequeue/requeue - and running_job_list is
+ * never transiently empty while a job is in flight.
+ */
+static struct amdxdna_sched_job *peek_running_job(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_sched_job *job;
+
+	mutex_lock(&priv->io_lock);
+	job = list_first_entry_or_null(&priv->running_job_list,
+				       struct amdxdna_sched_job, aie4_job_list);
+	mutex_unlock(&priv->io_lock);
+	return job;
+}
+
+/* Remove a job from the running list once it is completed or reaped. */
+static void dequeue_running_job(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	mutex_lock(&priv->io_lock);
+	list_del(&job->aie4_job_list);
+	mutex_unlock(&priv->io_lock);
+}
+
 static void aie4_job_release(struct kref *ref)
 {
 	struct amdxdna_sched_job *job =
@@ -875,7 +917,7 @@ static void job_worker(struct work_struct *work)
 	struct amdxdna_hwctx *hwctx = priv->hwctx;
 	struct amdxdna_sched_job *job;
 
-	while ((job = next_running_job(hwctx))) {
+	while ((job = peek_running_job(hwctx))) {
 		wait_till_seq_completed(hwctx, job->seq);
 		trace_amdxdna_debug_point(hwctx->name, job->seq, "job complete");
 
@@ -885,24 +927,65 @@ static void job_worker(struct work_struct *work)
 			 * partially published (a later sub-command failed to
 			 * enqueue) still drains its prefix here, but must be
 			 * reported as failed rather than mistaken for success.
+			 * Remove from the running list before job_complete() frees it.
 			 */
+			dequeue_running_job(hwctx, job);
 			if (job->aie4_job_state != AIE4_JOB_STATE_SUBMITTED)
 				amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_ABORT);
 			job_complete(job);
 		} else {
-			job_abort(job);
+			/*
+			 * Ctx disconnected before completion (suspend): leave the job
+			 * on the running list and stop.  It stays at the head (submission
+			 * order preserved) so resume re-drives it; ctx teardown and TDR
+			 * reset reap it via aie4_hwctx_cleanup_running_jobs().
+			 */
+			break;
 		}
 	}
 }
 
-static void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx)
+void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_sched_job *job;
 
 	/* Must be disconnected so CERT can no longer complete jobs. */
 	drm_WARN_ON(&hwctx->client->xdna->ddev, priv->status == CTX_STATE_CONNECTED);
+
+	/*
+	 * The worker parks (preserves) in-flight jobs on disconnect instead of
+	 * reaping them, so on teardown/reset stop it and abort the preserved jobs
+	 * here.  cancel_work_sync() ensures the worker is not touching the list.
+	 */
+	cancel_work_sync(&priv->job_work);
+	while ((job = next_running_job(hwctx)))
+		job_abort(job);
+}
+
+/*
+ * Resume kernel-mode submission after the ctx was recreated (S3/S4 resume).  Any
+ * jobs the worker preserved on suspend are still queued on running_job_list, and
+ * the HSA queue (a host-resident BO) kept its packets and write/read indices
+ * across suspend.  Ring the doorbell so the fresh firmware ctx re-consumes the
+ * un-drained packets, then restart the worker to reap them as they complete.
+ */
+void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	if (!priv->kernel_submit)
+		return;
+
+	mutex_lock(&priv->io_lock);
+	if (list_empty(&priv->running_job_list)) {
+		mutex_unlock(&priv->io_lock);
+		return;
+	}
+	ring_doorbell(hwctx);
+	mutex_unlock(&priv->io_lock);
+
 	queue_work(priv->job_work_q, &priv->job_work);
-	flush_work(&priv->job_work);
 }
 
 /*
@@ -1059,14 +1142,16 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 
 	/*
 	 * Wait until this job is at the head of the pending list before touching
-	 * the queue (see enqueue_pending_job).  The wait is killable so a parked
-	 * submitter cannot keep ctx teardown (synchronize_srcu) blocked forever;
-	 * it also breaks out if the ctx is being disconnected.
+	 * the queue (see enqueue_pending_job).  Freezable so the freezer can
+	 * suspend a parked submitter in place across S3/S4 rather than aborting
+	 * the suspend; still interruptible so it cannot keep ctx teardown
+	 * (synchronize_srcu) blocked forever, and it breaks out if the ctx is
+	 * being disconnected.
 	 */
 	enqueue_pending_job(hwctx, job);
-	ret = wait_event_killable(priv->job_list_wq,
-				  READ_ONCE(priv->status) != CTX_STATE_CONNECTED ||
-				  READ_ONCE(priv->pending_head) == job);
+	ret = wait_event_freezable(priv->job_list_wq,
+				   READ_ONCE(priv->status) != CTX_STATE_CONNECTED ||
+				   READ_ONCE(priv->pending_head) == job);
 	if (ret) {
 		cancel_pending_job(hwctx, job);
 		mmput(job->mm);
