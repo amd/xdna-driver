@@ -394,10 +394,11 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
 {
 	if (queue->hsa_queue_p) {
-		dma_free_coherent(queue->alloc_dev,
-				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
-				  queue->hsa_queue_p,
-				  queue->hsa_queue_mem.dma_addr);
+		dma_free_noncoherent(queue->alloc_dev,
+				     sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
+				     queue->hsa_queue_p,
+				     queue->hsa_queue_mem.dma_addr,
+				     DMA_BIDIRECTIONAL);
 		queue->hsa_queue_p = NULL;
 		queue->hsa_queue_mem.dma_addr = 0;
 		queue->alloc_dev = NULL;
