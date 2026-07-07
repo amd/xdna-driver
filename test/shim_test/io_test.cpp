@@ -499,29 +499,61 @@ hclk_within_margin(uint32_t actual, uint32_t expected)
   return actual >= expected - margin && actual <= expected + margin;
 }
 
-void
-verify_hclk(device* dev, uint32_t expected, const std::string& ctx)
+// Poll query_hclk() until clock_ok() is satisfied or the timeout expires, and
+// return the last measured H-clock. Callers decide what to make of the result.
+template <typename ClockOk>
+uint32_t
+poll_hclk(device* dev, ClockOk clock_ok)
 {
   constexpr int timeout_ms = 20000;
   constexpr int poll_interval_ms = 10;
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   uint32_t actual = 0;
 
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   do {
     actual = query_hclk(dev);
-    if (hclk_within_margin(actual, expected))
+    if (clock_ok(actual))
       break;
     std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
   } while (std::chrono::steady_clock::now() < deadline);
 
-  if (!hclk_within_margin(actual, expected)) {
+  return actual;
+}
+
+// Verify the H-clock is within ±HCLK_MARGIN_PCT of the expected value.
+void
+verify_hclk(device* dev, uint32_t expected, const std::string& ctx)
+{
+  uint32_t actual = poll_hclk(dev, [expected](uint32_t v) { return hclk_within_margin(v, expected); });
+
+  if (!hclk_within_margin(actual, expected))
     throw std::runtime_error(ctx + ": expected H-clock ~" + std::to_string(expected) +
                              " MHz (±" + std::to_string(HCLK_MARGIN_PCT) + "%), got " +
-                             std::to_string(actual) + " MHz (after " +
-                             std::to_string(timeout_ms) + "ms polling)");
-  }
+                             std::to_string(actual) + " MHz");
+
   std::cout << "  " << ctx << ": H-clock " << actual << " MHz (expected ~"
             << expected << ") [OK]" << std::endl;
+}
+
+// Verify the H-clock for the higher power modes, where newer device revisions
+// run higher DPM7 clocks that can exceed the nominal DPM table maximum. Accept
+// any value at or above the expected value, or still within the original
+// ±tolerance band (covering values slightly below). The DPM tests that use this
+// are gated to NPU4, so no separate device-family check is needed here.
+void
+verify_hclk_atleast(device* dev, uint32_t expected, const std::string& ctx)
+{
+  auto clock_ok = [expected](uint32_t v) { return v >= expected || hclk_within_margin(v, expected); };
+  uint32_t actual = poll_hclk(dev, clock_ok);
+
+  if (!clock_ok(actual))
+    throw std::runtime_error(ctx + ": expected H-clock >= " + std::to_string(expected) +
+                             " MHz or within ±" + std::to_string(HCLK_MARGIN_PCT) +
+                             "% of " + std::to_string(expected) + " MHz, got " +
+                             std::to_string(actual) + " MHz");
+
+  std::cout << "  " << ctx << ": H-clock " << actual << " MHz (expected >= "
+            << expected << " or within ±" << HCLK_MARGIN_PCT << "%) [OK]" << std::endl;
 }
 
 /*
@@ -1322,7 +1354,11 @@ TEST_dpm_noop_no_qos(device::id_type id, std::shared_ptr<device>& sdev, arg_type
     hw_ctx hwctx{dev, "nop"};
     dpm_test_bo_set nop{dev, "nop"};
     nop.run_with_ctx(hwctx);
-    verify_hclk(dev, max_hclk, "noop context (no fps/latency QoS)");
+    // With no fps/latency QoS the driver requests the maximum DPM level, which
+    // on real hardware may run above the nominal DPM table maximum (same
+    // behavior as TURBO/HIGH in TEST_dpm_power_modes), so accept anything at or
+    // above max_hclk.
+    verify_hclk_atleast(dev, max_hclk, "noop context (no fps/latency QoS)");
   }
 }
 
@@ -1335,7 +1371,10 @@ TEST_dpm_power_modes(device::id_type id, std::shared_ptr<device>& sdev, arg_type
   uint32_t med_hclk = npu4_dpm_table[DPM_NUM_LEVELS / 2].hclk;
 
   set_power_mode(dev, POWER_MODE_TURBO);
-  verify_hclk(dev, max_hclk, "POWER_MODE_TURBO");
+  // The turbo H-clock legitimately runs above the DPM table maximum on real
+  // hardware, so accept anything at or above max_hclk, while still accepting the
+  // original ±tolerance band for values slightly below it.
+  verify_hclk_atleast(dev, max_hclk, "POWER_MODE_TURBO");
 
   set_power_mode(dev, POWER_MODE_LOW);
   verify_hclk(dev, low_hclk, "POWER_MODE_LOW");
@@ -1344,7 +1383,9 @@ TEST_dpm_power_modes(device::id_type id, std::shared_ptr<device>& sdev, arg_type
   verify_hclk(dev, med_hclk, "POWER_MODE_MEDIUM");
 
   set_power_mode(dev, POWER_MODE_HIGH);
-  verify_hclk(dev, max_hclk, "POWER_MODE_HIGH");
+  // Like TURBO, HIGH may run above the DPM table maximum, so accept anything at
+  // or above max_hclk (or within the original ±tolerance band).
+  verify_hclk_atleast(dev, max_hclk, "POWER_MODE_HIGH");
 
   set_power_mode(dev, POWER_MODE_LOW);
   verify_hclk(dev, low_hclk, "POWER_MODE_LOW");
