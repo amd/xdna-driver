@@ -240,6 +240,7 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx *
 		if (!test_bit(next_idx, queue->slot_ready))
 			break;
 
+		clear_bit(next_idx, queue->slot_ready);
 		header->write_index++;
 	}
 	/* Sync write_index after writing (device will read) */
@@ -574,10 +575,19 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 		}
 	}
 
+	/* Zero hqc_mem so physical memory starts clean for cert's completion writes */
+	memset(queue->hq_complete.hqc_mem, 0, sizeof(u64) * HOST_QUEUE_ENTRY);
+
 	/* Sync entire queue structure after initialization (device will read) */
 	dma_sync_single_for_device(queue->alloc_dev,
 				   queue->hsa_queue_mem.dma_addr,
 				   sizeof(struct hsa_queue),
+				   DMA_TO_DEVICE);
+
+	/* Sync hqc_mem to device so physical memory is clean before cert writes */
+	dma_sync_single_for_device(queue->alloc_dev,
+				   queue->hq_complete.hqc_dma_addr,
+				   sizeof(u64) * HOST_QUEUE_ENTRY,
 				   DMA_TO_DEVICE);
 
 	XDNA_DBG(xdna, "Created host queue: dma_addr=0x%llx, capacity=%d, data_addr=0x%llx",
