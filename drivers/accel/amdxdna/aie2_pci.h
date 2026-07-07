@@ -124,6 +124,9 @@ struct aie2_tdr {
 	enum aie2_tdr_status progress;
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
 	struct delayed_work work;
+#else
+	/* jiffies of the last progress signal (job completion or submission) */
+	unsigned long last_signal;
 #endif
 };
 
