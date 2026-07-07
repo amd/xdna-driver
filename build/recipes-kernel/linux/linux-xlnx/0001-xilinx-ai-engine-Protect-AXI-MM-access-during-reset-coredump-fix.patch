@@ -1,0 +1,44 @@
+From 31626ef92ff11f9d3dee01926720572666fcc65a Mon Sep 17 00:00:00 2001
+From: Jaydip Pate <jaydpate@amd.com>
+Date: Wed, 3 Jun 2026 00:00:00 +0000
+Subject: [PATCH] xilinx-ai-engine: Protect AXI-MM access (coredump tree fixups)
+
+Follow-up for 0001-xilinx-ai-engine-Protect-AXI-MM-access-during-reset-.patch
+when ai-engine-part.c hunk #3 is rejected (range-based-coredump changed
+aie_part_read_register). Also initializes reset_lock and wraps MMIO in
+aie_part_disable_axi_err_halt from the disable-axi patch.
+
+Signed-off-by: Jaydip Pate <jaydpate@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-aperture.c | 1 +
+ drivers/misc/xilinx-ai-engine/ai-engine-part.c     |  6 +++---
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c b/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c
+@@ -401,6 +401,7 @@ of_aie_aperture_probe(struct aie_device *adev, struct device_node *nc)
+ 	aperture->adev = adev;
+ 	INIT_LIST_HEAD(&aperture->partitions);
+ 	mutex_init(&aperture->mlock);
++	rwlock_init(&aperture->reset_lock);
+ 
+ 	range = &aperture->range;
+ 	ret = of_property_read_u32_array(nc, "xlnx,columns", regs,
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -1938,9 +1938,9 @@ static int aie_part_disable_axi_err_halt(struct aie_partition *apart) {
+ 			regoff = aie_aperture_cal_regoff(apart->aperture, loc, offset);
+ 			va = aperture->base + regoff;
+ 
+-			val = ioread32(va);
++			val = aie_aperture_ioread32(aperture, va);
+ 			val &= ~mask;
+-			iowrite32(val, va);
++			aie_aperture_iowrite32(aperture, val, va);
+ 		}
+ 	}
+ 
+-- 
+2.51.1
