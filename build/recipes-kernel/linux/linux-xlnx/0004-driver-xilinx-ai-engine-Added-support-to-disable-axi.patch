@@ -1,0 +1,87 @@
+From e90af754820f644e27c70097c2c07b95fdf09d0a Mon Sep 17 00:00:00 2001
+From: Keerthanna Mohan <keerthanna.mohan@amd.com>
+Date: Sat, 13 Dec 2025 13:37:38 -0800
+Subject: [LINUX PATCH 4/6] driver: xilinx-ai-engine: Added support to disable
+ axi slave error during coredump
+
+Added support to disable axi slave error from contributing to the group 0
+error of the core tiles. Disable interrupts and AXI error halt before
+range-based coredump on AIE2PS partitions.
+
+Signed-off-by: Keerthanna Mohan <keerthanna.mohan@amd.com>
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+---
+ .../misc/xilinx-ai-engine/ai-engine-part.c    | 43 +++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+index 8f19180a24a9..61fdc3089303 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -2199,6 +2199,36 @@ static int aie_part_disable_interrupt(struct aie_partition *apart)
+ 	return -EINVAL;
+ }
+ 
++static int aie_part_disable_axi_err_halt(struct aie_partition *apart)
++{
++	const struct aie_event_attr *attr;
++	u32 regoff, mask, val, offset;
++	struct aie_location loc;
++
++	if (!apart)
++		return -EINVAL;
++
++	attr = apart->adev->core_events;
++	if (!attr) {
++		dev_err(&apart->dev, "%s: core_events not found\n", __func__);
++		return -ENODEV;
++	}
++
++	offset = attr->event_group_error0_enable.regoff;
++	mask = BIT(10);
++
++	for (loc.col = 0; loc.col < apart->range.size.col; loc.col++) {
++		for (loc.row = 3; loc.row < apart->range.size.row; loc.row++) {
++			regoff = aie_aperture_cal_regoff(apart->aperture, loc, offset);
++			val = aie_part_ioread32(apart, apart->aperture->base + regoff);
++			val &= ~mask;
++			aie_part_iowrite32(apart, val, apart->aperture->base + regoff);
++		}
++	}
++
++	return 0;
++}
++
+ /**
+  * aie_partition_coredump() - Read from all valid AXI registers and place into
+  *			      data buffer (AIE2PS only). The data buffer should
+@@ -2216,6 +2246,7 @@ int aie_partition_coredump(struct device *dev, size_t len, void *data)
+ 	struct aie_location loc;
+ 	struct aie_device *adev;
+ 	size_t expected_len;
++	int ret;
+ 
+ 	if (!dev || !data)
+ 		return -EINVAL;
+@@ -2240,6 +2271,18 @@ int aie_partition_coredump(struct device *dev, size_t len, void *data)
+ 		return -EINVAL;
+ 	}
+ 
++	ret = aie_part_disable_interrupt(apart);
++	if (ret) {
++		dev_err(&apart->dev, "failed to disable interrupt\n");
++		return ret;
++	}
++
++	ret = aie_part_disable_axi_err_halt(apart);
++	if (ret) {
++		dev_err(&apart->dev, "failed to disable AXI error halt\n");
++		return ret;
++	}
++
+ 	for (loc.col = 0; loc.col < apart->range.size.col; loc.col++) {
+ 		for (loc.row = 0; loc.row < apart->range.size.row; loc.row++) {
+ 			const struct aie_reg_range *reg_range;
+-- 
+2.54.0
+

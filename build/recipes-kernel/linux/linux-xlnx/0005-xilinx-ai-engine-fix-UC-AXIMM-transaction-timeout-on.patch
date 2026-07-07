@@ -1,0 +1,58 @@
+From 21d2eea175959149d723a2a203933cb9707b5105 Mon Sep 17 00:00:00 2001
+From: AMD <noreply@amd.com>
+Date: Tue, 24 Mar 2026 02:00:00 +0000
+Subject: [LINUX PATCH 5/6] xilinx-ai-engine: fix UC AXIMM transaction timeout
+ on partition init
+
+Reorder partition initialization so column/shim reset PM ops complete
+before polling outstanding AXI-MM transactions.
+
+Signed-off-by: AMD <noreply@amd.com>
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-reset.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index 00cdc47f4781..9eb06a50aea7 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -864,6 +864,17 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 	if (ret)
+ 		goto out;
+ 
++	opts = 0;
++	opts |= (args->init_opts & AIE_PART_INIT_OPT_COLUMN_RST);
++	opts |= (args->init_opts & AIE_PART_INIT_OPT_SHIM_RST);
++	/* push opts to pm and flush, these ops needs to complete before we perform next ones*/
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++	if (ret) {
++		dev_err(&apart->dev, "pm ops: 0x%x failed: %d", opts, ret);
++		goto out;
++	}
++
++	/* Poll for cleared outstanding transactions */
+ 	ret = aie_part_maskpoll_noc_outstanding_aximm_txn(apart);
+ 	if (ret)
+ 		goto out;
+@@ -880,9 +891,6 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 
+ 	/* First lets send non-data aie_op_type_len ops */
+ 	opts = 0;
+-	/* This operation will do first 4 steps of sequence */
+-	opts |= (args->init_opts & AIE_PART_INIT_OPT_COLUMN_RST);
+-	opts |= (args->init_opts & AIE_PART_INIT_OPT_SHIM_RST);
+ 	opts |= (args->init_opts & AIE_PART_INIT_OPT_BLOCK_NOCAXIMMERR);
+ 	opts |= (args->init_opts & AIE_PART_INIT_OPT_ENB_COLCLK_BUFF);
+ 	/* push opts to pm and flush, these ops needs to complete before we perform next ones*/
+@@ -892,6 +900,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		goto out;
+ 	}
+ 
++	opts |= (args->init_opts & (AIE_PART_INIT_OPT_COLUMN_RST | AIE_PART_INIT_OPT_SHIM_RST));
+ 	if (args->init_opts & AIE_PART_INIT_OPT_ISOLATE) {
+ 		opts |= AIE_PART_INIT_OPT_ISOLATE;
+ 		ret = aie_part_init_isolation(apart);
+-- 
+2.54.0
+

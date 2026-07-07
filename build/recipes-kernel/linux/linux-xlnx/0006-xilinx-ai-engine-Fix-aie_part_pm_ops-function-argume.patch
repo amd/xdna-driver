@@ -1,0 +1,44 @@
+From 1c0a2bd6a2ac1b607599e63a4f8177ae048dda1f Mon Sep 17 00:00:00 2001
+From: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+Date: Mon, 29 Jun 2026 09:06:50 -0700
+Subject: [LINUX PATCH 6/6] xilinx-ai-engine: Fix aie_part_pm_ops function
+ arguments
+
+Fix aie_part_pm_ops() function arguments with latest changes.
+
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c | 3 ++-
+ drivers/misc/xilinx-ai-engine/ai-engine-reset.c  | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+index a1e2e4f6f008..12d22879c2f1 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+@@ -4201,7 +4201,8 @@ static int aie2ps_disable_interrupt(struct aie_partition *apart)
+ 		aie_aperture_disable_l2_ctrl(apart->aperture, &loc, l2_enable_mask);
+ 
+ 	data = 0x7;
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_MASK, apart->range, 1);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_MASK, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret) {
+ 		dev_err(&apart->dev,
+ 			"failed to disable hardware error interrupts in col: %u\n",
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index 9eb06a50aea7..8445f5135b49 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -868,7 +868,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 	opts |= (args->init_opts & AIE_PART_INIT_OPT_COLUMN_RST);
+ 	opts |= (args->init_opts & AIE_PART_INIT_OPT_SHIM_RST);
+ 	/* push opts to pm and flush, these ops needs to complete before we perform next ones*/
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_WRITE_RESET_LOCK);
+ 	if (ret) {
+ 		dev_err(&apart->dev, "pm ops: 0x%x failed: %d", opts, ret);
+ 		goto out;
+-- 
+2.54.0
+
