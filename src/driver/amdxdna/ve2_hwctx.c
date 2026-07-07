@@ -240,7 +240,6 @@ static void hsa_queue_commit_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx *
 		if (!test_bit(next_idx, queue->slot_ready))
 			break;
 
-		clear_bit(next_idx, queue->slot_ready);
 		header->write_index++;
 	}
 	/* Sync write_index after writing (device will read) */
