@@ -1,0 +1,169 @@
+From b4bf9c8a94aa3a172b57eb5f39dfcc416bbd048e Mon Sep 17 00:00:00 2001
+From: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+Date: Fri, 26 Jun 2026 21:34:49 -0700
+Subject: [LINUX PATCH 2/6] xilinx-ai-engine: Make AXI-MM reset lock
+ conditional on single NSU design
+
+Add CONFIG_XILINX_AIE_SINGLE_NSU_LOCK Kconfig option (default n) to
+guard the rwlock acquisition/release around AXI-MM register access
+during AI engine partition reset. The rwlock protection is only needed
+on designs with a single NSU (Network Switch Unit) where concurrent
+AXI-MM access during reset can cause issues.
+
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+---
+ drivers/misc/Kconfig                                | 12 ++++++++++++
+ drivers/misc/xilinx-ai-engine/ai-engine-internal.h  | 12 ++++++++++++
+ drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c |  4 ++++
+ drivers/misc/xilinx-ai-engine/ai-engine-pm.c        |  4 ++++
+ drivers/misc/xilinx-ai-engine/ai-engine-reset.c     |  8 ++++++++
+ 5 files changed, 40 insertions(+)
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 876a32173981..50ce12dab182 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -514,6 +514,18 @@ config XILINX_AIE
+ 
+ 	  If unsure, say N
+ 
++config XILINX_AIE_SINGLE_NSU_LOCK
++	bool "Protect AXI-MM access during AI engine reset"
++	depends on XILINX_AIE
++	default n
++	help
++	  Enable this option to protect AXI-MM register access with a rwlock
++	  during AI engine partition reset. This is only needed on designs with
++	  a single NSU (Network Switch Unit) where concurrent AXI-MM access
++	  during reset can cause issues.
++
++	  If unsure, say N.
++
+ config XILINX_PUF
+ 	tristate "Xilinx PUF driver"
+ 	depends on ZYNQMP_FIRMWARE
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+index be5d18710716..420487189fa5 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+@@ -1547,9 +1547,13 @@ static inline unsigned int aie_aperture_ioread32(struct aie_aperture *aperture,
+ {
+ 	unsigned int val;
+ 
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_lock(&aperture->reset_lock);
++#endif
+ 	val = ioread32(addr);
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_unlock(&aperture->reset_lock);
++#endif
+ 	return val;
+ }
+ 
+@@ -1560,9 +1564,13 @@ static inline unsigned int aie_part_ioread32(struct aie_partition *apart, const
+ 
+ static inline void aie_aperture_iowrite64(struct aie_aperture *aperture, u64 val, void __iomem *addr)
+ {
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_lock(&aperture->reset_lock);
++#endif
+ 	iowrite64(val, addr);
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_unlock(&aperture->reset_lock);
++#endif
+ }
+ 
+ static inline void aie_part_iowrite64(struct aie_partition *apart, u64 val, void __iomem *addr)
+@@ -1572,9 +1580,13 @@ static inline void aie_part_iowrite64(struct aie_partition *apart, u64 val, void
+ 
+ static inline void aie_aperture_iowrite32(struct aie_aperture *aperture, u32 val, void __iomem *addr)
+ {
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_lock(&aperture->reset_lock);
++#endif
+ 	iowrite32(val, addr);
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_unlock(&aperture->reset_lock);
++#endif
+ }
+ 
+ static inline void aie_part_iowrite32(struct aie_partition *apart, u32 val, void __iomem *addr)
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index f6855dde61b6..add747d30d51 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -1119,11 +1119,15 @@ static int aie_aperture_clr_hw_err(struct aie_aperture *aperture, struct aie_loc
+ 	hw_err->val = status;
+ 
+ 	trace_aie_pm_ops(aperture->node_id, pkt_va, size, pkt_dma);
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_lock(&aperture->reset_lock);
++#endif
+ 	ret = versal2_pm_aie2ps_operation(aperture->node_id, size,
+ 					  upper_32_bits(pkt_dma),
+ 					  lower_32_bits(pkt_dma));
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	read_unlock(&aperture->reset_lock);
++#endif
+ 
+ 	dmam_free_coherent(&aperture->dev, size, pkt_va, pkt_dma);
+ 
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-pm.c b/drivers/misc/xilinx-ai-engine/ai-engine-pm.c
+index 04ec96d6f940..e073b6d07a80 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-pm.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-pm.c
+@@ -45,15 +45,19 @@ int aie_part_pm_ops_flush(struct aie_partition *apart, enum aie_reset_lock reset
+ 	if ((pm_ops->pkt_va + pm_ops->offset) == (pm_ops->op_range + sizeof(*pm_ops->op_range)))
+ 		pm_ops->offset -= sizeof(*pm_ops->op_range);
+ 
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	reset_type == AIE_READ_RESET_LOCK ? read_lock(&apart->aperture->reset_lock) :
+ 					    write_lock(&apart->aperture->reset_lock);
++#endif
+ 	trace_aie_pm_ops(apart->aperture->node_id, pm_ops->pkt_va, pm_ops->offset, pm_ops->pkt_dma);
+ 
+ 	ret = versal2_pm_aie2ps_operation(apart->aperture->node_id, pm_ops->offset,
+ 					  upper_32_bits(pm_ops->pkt_dma),
+ 					  lower_32_bits(pm_ops->pkt_dma));
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 	reset_type == AIE_READ_RESET_LOCK ? read_unlock(&apart->aperture->reset_lock) :
+ 					    write_unlock(&apart->aperture->reset_lock);
++#endif
+ 
+ 	pm_ops->offset = 0;
+ 	pm_ops->op_range = NULL;
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index a2e0aa08d768..00cdc47f4781 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -94,9 +94,13 @@ static void aie_part_core_regs_clr_memset_io(struct aie_partition *apart,
+ 			ttype = get_tile_type(apart->adev, &loc);
+ 			if (ttype == AIE_TILE_TYPE_TILE &&
+ 			    aie_part_check_clk_enable_loc(apart, &loc)) {
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 				read_lock(&apart->aperture->reset_lock);
++#endif
+ 				memset_io(base + (addr_col | addr_row), 0, size);
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 				read_unlock(&apart->aperture->reset_lock);
++#endif
+ 			}
+ 		}
+ 	}
+@@ -160,9 +164,13 @@ static int aie_part_clear_data_mem(struct aie_partition *apart)
+ 			loc.col = c;
+ 			loc.row = r;
+ 			memoff = aie_cal_regoff(adev, loc, mem->offset);
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 			read_lock(&apart->aperture->reset_lock);
++#endif
+ 			memset_io(apart->aperture->base + memoff, 0, mem->size);
++#ifdef CONFIG_XILINX_AIE_SINGLE_NSU_LOCK
+ 			read_unlock(&apart->aperture->reset_lock);
++#endif
+ 		}
+ 	}
+ 
+-- 
+2.54.0
+
