@@ -132,6 +132,13 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
     attach_to_ctx(xflags.use);
 
+  // Cacheable buffers are not zero-initialized and a freshly allocated page
+  // may hold dirty cachelines. If used as an output buffer, those lines can
+  // later be evicted to memory and pollute the device's output. Flush right
+  // after allocation to avoid this.
+  if ((static_cast<uint32_t>(xflags.boflags) << 24) == XCL_BO_FLAGS_CACHEABLE)
+    sync(xrt_core::buffer_handle::direction::host2device, m_aligned_size, 0);
+
   shim_debug("Allocated DRM BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
 	     m_ptr, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
 }
