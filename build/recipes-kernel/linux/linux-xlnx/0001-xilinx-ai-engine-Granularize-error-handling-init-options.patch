@@ -1,0 +1,290 @@
+From b0bb60428ad11782294649 Mon Sep 17 00:00:00 2001
+From: Saif <saifuddin.kaijar@amd.com>
+Date: Wed, 24 Jun 2026 15:20:49 +0530
+Subject: [PATCH] xilinx-ai-engine: Granularize error handling init options
+
+Split AIE_PART_INIT_ERROR_HANDLING into three fine-grained init options
+to allow callers to independently control each phase of error-handling
+initialization:
+
+  AIE_PART_INIT_OPT_ERR_HALT_EVENT  (BIT 23) – configure error-halt
+                                               event routing
+  AIE_PART_INIT_OPT_ERR_SHIM_INIT   (BIT 24) – initialize shim tile
+                                               error handling
+  AIE_PART_INIT_OPT_ERR_MEM_AIE_INIT(BIT 25) – initialize mem/AIE tile
+                                               error handling
+
+Backward compatibility is preserved: if a caller still passes
+AIE_PART_INIT_ERROR_HANDLING the driver automatically maps it to all
+three new bits and clears the legacy flag.
+
+Two new exported entry points are introduced so that the shim and
+mem/AIE tile error-init paths can be invoked independently:
+  aie2ps_error_handling_init_shim()
+  aie2ps_error_handling_init_mem_aie()
+
+The UC/NOC DMA pause PM operation is now only performed when a column
+or shim reset is actually requested, preventing an unnecessary PM
+operation when the caller only wants to (re-)configure error handling
+without a full reset.
+
+aie_config_error_halt_event() is promoted from file-static to an
+exported symbol so that it can be called from ai-engine-reset.c.
+
+Signed-off-by: Saif <saifuddin.kaijar@amd.com>
+---
+  drivers/misc/xilinx-ai-engine/ai-engine-internal.h |   4 +
+ .../misc/xilinx-ai-engine/ai-engine-interrupt.c    | 147 ++++++++++++++++++++-
+ drivers/misc/xilinx-ai-engine/ai-engine-reset.c    |  38 +++++-
+ include/uapi/linux/xlnx-ai-engine.h                |   3 +
+ 4 files changed, 184 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+index 8be61588b0f8..3fcf9b1afc7d 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+@@ -1953,6 +1953,10 @@ int aie_part_maskpoll_register(struct aie_partition *apart, u32 offset, u32 data
+ 			       u32 timeout);
+ int aie_partition_uc_zeroize_mem(struct device *dev, struct aie_location *loc, u32 regval);
+ int aie_error_handling_init(struct aie_partition *apart);
++int aie_config_error_halt_event(struct aie_partition *apart);
++int aie2ps_error_handling_init_shim(struct aie_partition *apart);
++int aie2ps_error_handling_init_mem_aie(struct aie_partition *apart);
++
+ int aie2ps_part_write_handshake(struct aie_partition *apart,
+ 				struct aie_op_handshake_data *data,
+ 				uint32_t handshake_cols);
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index a281ff4af719..771ed80721e5 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -2408,7 +2408,7 @@ static int aie2ps_init_mem_tile(struct aie_partition *apart, struct aie_location
+ 	return 0;
+ }
+ 
+-static int aie_config_error_halt_event(struct aie_partition *apart)
++int aie_config_error_halt_event(struct aie_partition *apart)
+ {
+ 	u32 ttype;
+ 	struct aie_location loc;
+@@ -2721,3 +2721,148 @@ int aie_error_handling_init(struct aie_partition *apart)
+ 
+ 	return ret;
+ }
++
++static int aie_group_error_init_shim(struct aie_partition *apart,
++				     struct aie_location loc)
++{
++	const struct aie_event_attr *attr = apart->adev->pl_events;
++	int ret;
++
++	ret = aie_event_group_error0_enable(apart, loc, attr);
++	if (ret)
++		return ret;
++	ret = aie_set_broadcast_event(apart, loc, attr,
++				      attr->base_error_group,
++				      AIE_ARRAY_TILE_ERROR_BC_ID);
++	if (ret)
++		return ret;
++	if (loc.col != (apart->range.start.col + 1)) {
++		ret = aie_set_broadcast_event(apart, loc, attr,
++					      attr->user_event1,
++					      AIE_SHIM_USER_EVENT1_BC_ID);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++static int aie_group_error_init_aie(struct aie_partition *apart,
++				    struct aie_location loc)
++{
++	const struct aie_event_attr *attr;
++	int ret;
++
++	attr = apart->adev->mem_events;
++	ret = aie_event_group_error0_enable(apart, loc, attr);
++	if (ret)
++		return ret;
++	ret = aie_set_broadcast_event(apart, loc, attr,
++				      attr->base_error_group,
++				      AIE_ARRAY_TILE_ERROR_BC_ID);
++	if (ret)
++		return ret;
++
++	attr = apart->adev->core_events;
++	ret = aie_event_group_error0_enable(apart, loc, attr);
++	if (ret)
++		return ret;
++	ret = aie_set_broadcast_event(apart, loc, attr,
++				      attr->base_error_group,
++				      AIE_ARRAY_TILE_ERROR_BC_ID);
++	if (ret)
++		return ret;
++	return 0;
++}
++
++static int aie_group_error_init_mem(struct aie_partition *apart,
++				    struct aie_location loc)
++{
++	const struct aie_event_attr *attr = apart->adev->memtile_events;
++	int ret;
++
++	ret = aie_event_group_error0_enable(apart, loc, attr);
++	if (ret)
++		return ret;
++	ret = aie_set_broadcast_event(apart, loc, attr,
++				      attr->base_error_group,
++				      AIE_ARRAY_TILE_ERROR_BC_ID);
++	if (ret)
++		return ret;
++	return 0;
++}
++
++int aie2ps_error_handling_init_shim(struct aie_partition *apart)
++{
++	u32 start_col = apart->range.start.col;
++	u32 end_col = start_col + apart->range.size.col;
++	struct aie_location loc = { .row = 0 };
++	u32 l2_enable;
++	int ret;
++
++	for (loc.col = start_col; loc.col < end_col; loc.col++) {
++		if (!aie_part_check_clk_enable_loc(apart, &loc))
++			continue;
++		ret = aie2ps_init_l1_ctrl(apart, loc);
++		if (ret)
++			return ret;
++		if (loc.col == (start_col + 1))
++			l2_enable = BIT(AIE_SHIM_USER_EVENT1_L1_IRQ_EVENT_ID);
++		else
++			l2_enable = BIT(AIE_ARRAY_TILE_ERROR_BC_ID);
++		aie_aperture_enable_l2_ctrl(apart->aperture, &loc, l2_enable);
++		if (loc.col == (start_col + 1)) {
++			ret = aie2ps_init_shim_tile_lead_col(apart, loc);
++			if (ret)
++				return ret;
++		} else if (loc.col == start_col) {
++			ret = aie2ps_init_shim_tile_col0(apart, loc);
++			if (ret)
++				return ret;
++		} else {
++			ret = aie2ps_init_shim_tile(apart, loc);
++			if (ret)
++				return ret;
++		}
++		ret = aie_group_error_init_shim(apart, loc);
++		if (ret)
++			return ret;
++	}
++	return 0;
++}
++
++int aie2ps_error_handling_init_mem_aie(struct aie_partition *apart)
++{
++	u32 mem_start = apart->adev->ttype_attr[AIE_TILE_TYPE_MEMORY].start_row;
++	u32 mem_end = mem_start + apart->adev->ttype_attr[AIE_TILE_TYPE_MEMORY].num_rows;
++	u32 aie_start = apart->adev->ttype_attr[AIE_TILE_TYPE_TILE].start_row;
++	u32 aie_end = aie_start + apart->adev->ttype_attr[AIE_TILE_TYPE_TILE].num_rows;
++	u32 start_col = apart->range.start.col;
++	u32 end_col = start_col + apart->range.size.col;
++	struct aie_location loc;
++	int ret;
++
++	for (loc.col = start_col; loc.col < end_col; loc.col++) {
++		for (loc.row = mem_start; loc.row < mem_end; loc.row++) {
++			if (!aie_part_check_clk_enable_loc(apart, &loc))
++				continue;
++			ret = aie2ps_init_mem_tile(apart, loc);
++			if (ret)
++				return ret;
++			ret = aie_group_error_init_mem(apart, loc);
++			if (ret)
++				return ret;
++		}
++		for (loc.row = aie_start; loc.row < aie_end; loc.row++) {
++			if (!aie_part_check_clk_enable_loc(apart, &loc))
++				continue;
++			ret = aie_group_error_init_aie(apart, loc);
++			if (ret)
++				return ret;
++			ret = aie2ps_init_aie_tile(apart, loc);
++			if (ret)
++				return ret;
++		}
++	}
++
++	return 0;
++}
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index 524e9390f115..9dddc3a6a855 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -838,10 +838,21 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 	}
+ 	trace_aie_part_initialize(apart, args->init_opts, args->num_tiles);
+ 
+-	opts = AIE_PART_INIT_OPT_ENB_UC_DMA_PAUSE | AIE_PART_INIT_OPT_ENB_NOC_DMA_PAUSE;
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
+-	if (ret)
+-		goto out;
++	/* backward compatibility for error handling */
++	if (args->init_opts & AIE_PART_INIT_ERROR_HANDLING) {
++		args->init_opts |= AIE_PART_INIT_OPT_ERR_HALT_EVENT |
++				   AIE_PART_INIT_OPT_ERR_SHIM_INIT |
++				   AIE_PART_INIT_OPT_ERR_MEM_AIE_INIT;
++		args->init_opts &= ~AIE_PART_INIT_ERROR_HANDLING;
++	}
++
++	if ((args->init_opts & AIE_PART_INIT_OPT_COLUMN_RST) ||
++	    (args->init_opts & AIE_PART_INIT_OPT_SHIM_RST)) {
++		opts = AIE_PART_INIT_OPT_ENB_UC_DMA_PAUSE | AIE_PART_INIT_OPT_ENB_NOC_DMA_PAUSE;
++		ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++		if (ret)
++			goto out;
++	}
+ 
+ 	opts = 0;
+ 	opts |= (args->init_opts & AIE_PART_INIT_OPT_COLUMN_RST);
+@@ -984,9 +995,22 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 			goto out;
+ 	}
+ 
+-	if (args->init_opts & AIE_PART_INIT_ERROR_HANDLING) {
+-		opts |= AIE_PART_INIT_ERROR_HANDLING;
+-		ret = aie_error_handling_init(apart);
++	if (args->init_opts & AIE_PART_INIT_OPT_ERR_SHIM_INIT) {
++		opts |= AIE_PART_INIT_OPT_ERR_SHIM_INIT;
++		ret = aie2ps_error_handling_init_shim(apart);
++		if (ret)
++			goto out;
++	}
++
++	if (args->init_opts & AIE_PART_INIT_OPT_ERR_MEM_AIE_INIT) {
++		opts |= AIE_PART_INIT_OPT_ERR_MEM_AIE_INIT;
++		ret = aie2ps_error_handling_init_mem_aie(apart);
++		if (ret)
++			goto out;
++	}
++	if (args->init_opts & AIE_PART_INIT_OPT_ERR_HALT_EVENT) {
++		opts |= AIE_PART_INIT_OPT_ERR_HALT_EVENT;
++		ret = aie_config_error_halt_event(apart);
+ 		if (ret)
+ 			goto out;
+ 	}
+diff --git a/include/uapi/linux/xlnx-ai-engine.h b/include/uapi/linux/xlnx-ai-engine.h
+index 4f6d7ceeaffe..dd0d4a417252 100644
+--- a/include/uapi/linux/xlnx-ai-engine.h
++++ b/include/uapi/linux/xlnx-ai-engine.h
+@@ -313,6 +313,9 @@ struct aie_partition_init_args {
+ #define AIE_PART_INIT_OPT_HANDSHAKE		BIT(20)
+ #define AIE_PART_INIT_OPT_DIS_TLAST_ERROR	BIT(21)
+ #define AIE_PART_INIT_OPT_EN_TLAST_ERROR	BIT(22)
++#define AIE_PART_INIT_OPT_ERR_HALT_EVENT	BIT(23)
++#define AIE_PART_INIT_OPT_ERR_SHIM_INIT		BIT(24)
++#define AIE_PART_INIT_OPT_ERR_MEM_AIE_INIT	BIT(25)
+ 
+ #define AIE_PART_INIT_OPT_DEFAULT	(AIE_PART_INIT_OPT_COLUMN_RST		|	\
+ 					 AIE_PART_INIT_OPT_SHIM_RST		|	\
+--
+2.39.0

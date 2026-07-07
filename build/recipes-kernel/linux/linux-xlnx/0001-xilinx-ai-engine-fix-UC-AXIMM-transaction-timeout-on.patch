@@ -1,21 +1,5 @@
-From 98e5bdf39d9f82d1a4b7f9f2befbfb1371ca3bd5 Mon Sep 17 00:00:00 2001
-From: Saif <saifuddin.kaijar@amd.com>
-Date: Tue, 12 May 2026 14:14:29 +0530
-Subject: [PATCH] xilinx-ai-engine: fix UC AXIMM transaction timeout on
- reinitialization
-
-During reinitialization, UC firmware continues running in infinite loop.
-Must halt UC via column reset before polling for cleared transactions.
-
-Reorder sequence: pause DMA, reset columns/shim, then poll.
-
-Signed-off-by: Saif <saif@amd.com>
----
- drivers/misc/xilinx-ai-engine/ai-engine-reset.c | 14 +++++++++++---
- 1 file changed, 11 insertions(+), 3 deletions(-)
-
 diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
-index 502787eb9397..0bf16bf99a95 100644
+index 502787eb9397..5eccbac0c10f 100644
 --- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
 +++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
 @@ -839,6 +839,17 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
@@ -46,6 +30,11 @@ index 502787eb9397..0bf16bf99a95 100644
  	opts |= (args->init_opts & AIE_PART_INIT_OPT_BLOCK_NOCAXIMMERR);
  	opts |= (args->init_opts & AIE_PART_INIT_OPT_ENB_COLCLK_BUFF);
  	/* push opts to pm and flush, these ops needs to complete before we perform next ones*/
--- 
-2.43.0
-
+@@ -867,6 +875,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		goto out;
+ 	}
+ 
++        opts |= (args->init_opts & (AIE_PART_INIT_OPT_COLUMN_RST | AIE_PART_INIT_OPT_SHIM_RST));
+ 	if (args->init_opts & AIE_PART_INIT_OPT_ISOLATE) {
+ 		opts |= AIE_PART_INIT_OPT_ISOLATE;
+ 		ret = aie_part_init_isolation(apart);
