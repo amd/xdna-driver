@@ -44,21 +44,33 @@ struct aie2_ctx_health {
 
 static inline void aie2_tdr_signal(struct amdxdna_dev *xdna)
 {
-	WRITE_ONCE(xdna->dev_handle->tdr_status, AIE2_TDR_SIGNALED);
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+
+#ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
+	WRITE_ONCE(ndev->tdr.last_signal, jiffies);
+#else
+	WRITE_ONCE(ndev->tdr_status, AIE2_TDR_SIGNALED);
+#endif
 }
 
 #ifdef HAVE_6_17_drm_gpu_sched_stat_no_hang
 static bool aie2_tdr_detect(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	unsigned long last = READ_ONCE(ndev->tdr.last_signal);
 
-	if (READ_ONCE(ndev->tdr_status) == AIE2_TDR_WAIT) {
-		XDNA_ERR(xdna, "TDR timeout detected");
-		return true;
-	}
+	/*
+	 * The scheduler fires this tdr_timeout_ms after the job started. If
+	 * we observed progress (a job completed or a new submission) within
+	 * the last tdr_timeout_ms, the context is not hung - the job was
+	 * merely preempted or starved - so keep waiting instead of
+	 * resetting the context.
+	 */
+	if (time_before(jiffies, last + msecs_to_jiffies(tdr_timeout_ms)))
+		return false;
 
-	WRITE_ONCE(ndev->tdr_status, AIE2_TDR_WAIT);
-	return false;
+	XDNA_ERR(xdna, "TDR timeout detected");
+	return true;
 }
 #endif
 
