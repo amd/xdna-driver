@@ -19,6 +19,7 @@ Options:
   -install_prefix <path>   Set CMAKE_INSTALL_PREFIX to path
   -verbose                 Enable verbose build
   -hello_umq               Hello UMQ Memory Test
+  -npu3a                   Use iommu bypass magic to FW on npu3a attach
   -dir                     Download directory if apply
   -nokmod                  Don't build or install the kernel module
   -novxdna                 Don't build vxdna library
@@ -262,6 +263,9 @@ while [ $# -gt 0 ]; do
       ;;
     -hello_umq)
       hello_umq=y
+      ;;
+    -npu3a)
+      export XDNA_DRV_BLD_FLAGS="${XDNA_DRV_BLD_FLAGS:+$XDNA_DRV_BLD_FLAGS }NPU3A=1"
       ;;
     -verbose)
       verbose=VERBOSE=1
