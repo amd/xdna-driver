@@ -51,7 +51,7 @@ amdxdna_init_dev_bo(struct amdxdna_gem_obj *dev_bo)
 		return -EAGAIN;
 	}
 
-	for (heap_id = 0; heap_id < client->dev_heap_nid; heap_id++) {
+	for (heap_id = 1; heap_id < client->dev_heap_nid; heap_id++) {
 		heap = xa_load(&client->dev_heap_xa, heap_id);
 		if (!heap) {
 			XDNA_ERR(xdna, "Failed to load heap %d", heap_id);
