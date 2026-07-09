@@ -28,10 +28,6 @@ struct cert_comp {
 	wait_queue_head_t               waitq;
 };
 
-/* aie4 hwctx connection state (kernel-submission lifecycle). */
-#define CTX_STATE_DISCONNECTED		0x0
-#define CTX_STATE_CONNECTED		0x1
-
 /*
  * aie4 kernel-submission job states (stored in amdxdna_sched_job priv.aie4.state).
  * Anonymous enum - the aie4_job_state identifier is already a field-access macro.
@@ -54,7 +50,6 @@ struct amdxdna_hwctx_priv {
 
 	struct cert_comp                *cert_comp;
 	u32                             hw_ctx_id;
-	u32                             status;
 	/* Snapshot of kernel_mode_submission for this ctx's lifetime. */
 	bool                            kernel_submit;
 

@@ -54,7 +54,7 @@ static int aie4_link_cert_comp(struct amdxdna_hwctx *hwctx, u32 msix_idx)
 	cert_comp = xa_load(&ndev->cert_comp_xa, msix_idx);
 	if (cert_comp) {
 		kref_get(&cert_comp->kref);
-		priv->cert_comp = cert_comp;
+		WRITE_ONCE(priv->cert_comp, cert_comp);
 		return 0;
 	}
 
@@ -88,7 +88,7 @@ static int aie4_link_cert_comp(struct amdxdna_hwctx *hwctx, u32 msix_idx)
 		goto free_irq;
 	}
 
-	priv->cert_comp = cert_comp;
+	WRITE_ONCE(priv->cert_comp, cert_comp);
 	return 0;
 
 free_irq:
@@ -142,7 +142,7 @@ static void aie4_unlink_cert_comp(struct amdxdna_hwctx *hwctx)
 
 	cert_comp = priv->cert_comp;
 	/* unlink hwctx_priv link with cert_comp */
-	priv->cert_comp = NULL;
+	WRITE_ONCE(priv->cert_comp, NULL);
 
 	if (cert_comp) {
 		wake_up_all(&cert_comp->waitq);
@@ -263,7 +263,6 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 		/* User-mode submission: hand the doorbell to user space to ring. */
 		hwctx->doorbell_offset = resp.doorbell_offset;
 	}
-	WRITE_ONCE(priv->status, CTX_STATE_CONNECTED);
 
 	return 0;
 }
@@ -277,12 +276,6 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-
-	/*
-	 * Mark disconnected before waking waiters in aie4_unlink_cert_comp() so
-	 * the job worker observes the teardown and stops waiting on read_index.
-	 */
-	WRITE_ONCE(priv->status, CTX_STATE_DISCONNECTED);
 
 	ret = aie4_msg_destroy_context(ndev, priv->hw_ctx_id);
 	if (ret)
@@ -562,15 +555,32 @@ static u64 get_read_index(struct amdxdna_hwctx *hwctx)
 	return ri;
 }
 
-static bool check_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq)
+/*
+ * The ctx is "connected" as long as @comp is still the cert_comp linked to it.
+ * A disconnect (teardown/reset) unlinks (and may re-link a fresh) cert_comp, so
+ * a changed pointer means the caller must retry (-EAGAIN).  This runs as a
+ * wait_event() condition on the completion hot path (cert_comp->waitq is shared
+ * per MSI-X), so keep it lockless: the caller pins @comp with a kref, making
+ * this a pure pointer-identity compare - never a dereference, ABA-safe - and
+ * READ_ONCE pairs with the WRITE_ONCE in aie4_link_cert_comp()/
+ * aie4_unlink_cert_comp().
+ */
+static bool check_cert_comp_linked(struct amdxdna_hwctx *hwctx, struct cert_comp *comp)
+{
+	/* READ_ONCE pairs with the link/unlink WRITE_ONCE. */
+	return comp == READ_ONCE(hwctx->priv->cert_comp);
+}
+
+static bool check_cmd_done(struct amdxdna_hwctx *hwctx, u64 seq, struct cert_comp *comp)
 {
 	/*
-	 * Runs as a wait_event() condition, so it must not sleep: use only
-	 * lockless reads.  A disconnect (teardown/reset) also breaks the wait via
-	 * the status check; the caller then confirms real completion by re-reading
-	 * read_index, so a disconnect wake is not mistaken for success.
+	 * Runs as a wait_event() condition, so it must not sleep.
+	 * check_cert_comp_linked() is lockless (a READ_ONCE pointer compare); a
+	 * disconnect (teardown/reset) unlinks @comp and breaks the wait, and the
+	 * caller then confirms real completion by re-reading read_index, so a
+	 * disconnect wake is not mistaken for success.
 	 */
-	if (READ_ONCE(hwctx->priv->status) != CTX_STATE_CONNECTED)
+	if (!check_cert_comp_linked(hwctx, comp))
 		return true;
 
 	return get_read_index(hwctx) > seq;
@@ -589,7 +599,7 @@ int aie4_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout)
 		wait_jifs = msecs_to_jiffies(timeout);
 
 	ret = wait_event_interruptible_timeout(cert_comp->waitq,
-					       check_cmd_done(hwctx, seq),
+					       check_cmd_done(hwctx, seq, cert_comp),
 					       wait_jifs);
 
 	if (!ret)
@@ -642,12 +652,15 @@ static int wait_till_seq_completed(struct amdxdna_hwctx *hwctx, u64 seq)
 	 * S3/S4 instead of aborting the suspend.  Harmless for the job worker
 	 * kthread (never gets a signal; simply freezes/thaws around it).
 	 */
-	ret = wait_event_freezable(cert_comp->waitq, check_cmd_done(hwctx, seq));
-	aie4_put_cert_comp(cert_comp);
+	ret = wait_event_freezable(cert_comp->waitq, check_cmd_done(hwctx, seq, cert_comp));
 
-	if (ret)
+	if (ret) {
+		aie4_put_cert_comp(cert_comp);
 		return ret;	/* -ERESTARTSYS: signal on the submit path */
-	return (hwctx->priv->status != CTX_STATE_CONNECTED) ? -EAGAIN : 0;
+	}
+	ret = check_cert_comp_linked(hwctx, cert_comp) ? 0 : -EAGAIN;
+	aie4_put_cert_comp(cert_comp);
+	return ret;
 }
 
 static int wait_till_hsa_not_full(struct amdxdna_hwctx *hwctx)
@@ -787,7 +800,8 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 	mutex_lock(&priv->io_lock);
 	if (ret)
 		return ret;
-	if (priv->status != CTX_STATE_CONNECTED)
+	/* doorbell_addr is dropped under io_lock on teardown; NULL => disconnected. */
+	if (!priv->doorbell_addr)
 		return -EIO;
 
 	slot_idx = priv->write_index & (CTX_MAX_CMDS - 1);
@@ -893,8 +907,6 @@ static void update_read_index(struct amdxdna_hwctx *hwctx, u64 idx)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 
-	drm_WARN_ON(&hwctx->client->xdna->ddev, priv->status == CTX_STATE_CONNECTED);
-
 	/* Order cmd-bo state write before the waiter observes completion. */
 	wmb();
 	WRITE_ONCE(*priv->umq_read_index, idx);
@@ -949,9 +961,6 @@ void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_sched_job *job;
-
-	/* Must be disconnected so CERT can no longer complete jobs. */
-	drm_WARN_ON(&hwctx->client->xdna->ddev, priv->status == CTX_STATE_CONNECTED);
 
 	/*
 	 * The worker parks (preserves) in-flight jobs on disconnect instead of
@@ -1144,13 +1153,15 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	 * Wait until this job is at the head of the pending list before touching
 	 * the queue (see enqueue_pending_job).  Freezable so the freezer can
 	 * suspend a parked submitter in place across S3/S4 rather than aborting
-	 * the suspend; still interruptible so it cannot keep ctx teardown
-	 * (synchronize_srcu) blocked forever, and it breaks out if the ctx is
-	 * being disconnected.
+	 * the suspend; still interruptible so a signal (app exit/kill/^C) unwinds
+	 * it and does not keep ctx teardown (synchronize_srcu) blocked.  No
+	 * disconnect check is needed here: submit_one_cmd() gates on doorbell_addr
+	 * under io_lock, so a submit onto a torn-down ctx fails with -EIO without
+	 * publishing, and a TDR reset drains parked submitters via that gate plus
+	 * the head-of-list wake.
 	 */
 	enqueue_pending_job(hwctx, job);
 	ret = wait_event_freezable(priv->job_list_wq,
-				   READ_ONCE(priv->status) != CTX_STATE_CONNECTED ||
 				   READ_ONCE(priv->pending_head) == job);
 	if (ret) {
 		cancel_pending_job(hwctx, job);
@@ -1159,13 +1170,6 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	}
 
 	mutex_lock(&priv->io_lock);
-	if (priv->status != CTX_STATE_CONNECTED) {
-		mutex_unlock(&priv->io_lock);
-		cancel_pending_job(hwctx, job);
-		mmput(job->mm);
-		return -EIO;
-	}
-
 	ret = submit_job_cmds(hwctx, job);
 	if (job->aie4_job_state == AIE4_JOB_STATE_PENDING) {
 		/* No command was published; nothing for the worker to reap. */
