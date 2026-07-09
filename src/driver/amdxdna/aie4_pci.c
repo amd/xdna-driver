@@ -524,10 +524,7 @@ static int aie4_partition_create(struct amdxdna_dev_hdl *ndev, struct amdxdna_ct
 		return 0;
 	}
 
-	if (ctx->qos.user_start_col == USER_START_COL_NOT_REQUESTED)
-		start_col = 0;
-	else
-		start_col = ctx->qos.user_start_col;
+	start_col = ctx->qos.user_start_col;
 
 	/* ctx->num_tiles is in compute-tile units; convert to columns. */
 	ncols = rows_per_col ? DIV_ROUND_UP(ctx->num_tiles, rows_per_col) : ctx->num_tiles;
