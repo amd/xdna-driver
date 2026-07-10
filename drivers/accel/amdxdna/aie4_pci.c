@@ -28,7 +28,7 @@
 #define AIE4_TOTAL_COLUMN	3
 
 /* Not upstreamed: echo a bypass magic to FW right after work-buffer attach for npu3a. */
-#ifdef NPU3A
+#ifdef AMDXDNA_NPU3A
 #define AIE4_MSG_OP_ECHO	0x10001
 #define MAKE_MAGIC(a, b, c, d)	((u32)((a) << 24 | (b) << 16 | (c) << 8 | (d)))
 
@@ -68,7 +68,7 @@ static int aie4_iommu_bypass_echo(struct amdxdna_dev_hdl *ndev)
 
 	return 0;
 }
-#endif /* NPU3A */
+#endif /* AMDXDNA_NPU3A */
 
 /*
  * The management mailbox channel is allocated by firmware.
@@ -381,7 +381,7 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
-#ifdef NPU3A
+#ifdef AMDXDNA_NPU3A
 	ret = aie4_iommu_bypass_echo(ndev);
 	if (ret)
 		goto mbox_fini;
@@ -474,7 +474,7 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
-#ifdef NPU3A
+#ifdef AMDXDNA_NPU3A
 	ret = aie4_iommu_bypass_echo(ndev);
 	if (ret)
 		goto mbox_fini;

@@ -113,6 +113,7 @@ static const struct amdxdna_device_id amdxdna_ids[] = {
 	{0}
 };
 
+#ifndef AMDXDNA_NPU3A
 static int amdxdna_sva_init(struct amdxdna_client *client)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -133,6 +134,7 @@ static int amdxdna_sva_init(struct amdxdna_client *client)
 
 	return 0;
 }
+#endif
 
 static void amdxdna_sva_fini(struct amdxdna_client *client)
 {
@@ -163,6 +165,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	client->pasid = IOMMU_PASID_INVALID;
 	client->mm = current->mm;
 
+#ifndef AMDXDNA_NPU3A
 	if (!amdxdna_iova_on(xdna)) {
 		/* No need to fail open since user may use pa + carveout later. */
 		if (amdxdna_sva_init(client)) {
@@ -174,6 +177,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 			}
 		}
 	}
+#endif
 	mmgrab(client->mm);
 	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
 	xa_init_flags(&client->dev_heap_xa, XA_FLAGS_ALLOC);
@@ -211,7 +215,9 @@ fail:
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
 	amdxdna_sva_fini(client);
+#ifndef AMDXDNA_NPU3A
 cleanup_srcu:
+#endif
 	cleanup_srcu_struct(&client->hwctx_srcu);
 free_client:
 	kfree(client);

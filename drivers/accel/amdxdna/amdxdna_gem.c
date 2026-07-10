@@ -17,6 +17,9 @@
 #include <linux/vmalloc.h>
 
 #include "amdxdna_cbuf.h"
+#ifdef AMDXDNA_NPU3A
+#include "amdxdna_cma_buf.h"
+#endif
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
 #include "amdxdna_pci_drv.h"
@@ -812,6 +815,7 @@ amdxdna_gem_create_shmem_object_cb(struct drm_device *dev, size_t size)
 	return to_gobj(abo);
 }
 
+#ifndef AMDXDNA_NPU3A
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_shmem_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
@@ -824,6 +828,7 @@ amdxdna_gem_create_shmem_object(struct drm_device *dev, struct amdxdna_drm_creat
 	shmem->map_wc = false;
 	return to_xdna_obj(&shmem->base);
 }
+#endif
 
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_ubuf_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
@@ -907,6 +912,41 @@ amdxdna_gem_create_cbuf_object(struct drm_device *dev, struct amdxdna_drm_create
 	return ret;
 }
 
+#ifdef AMDXDNA_NPU3A
+static struct amdxdna_gem_obj *
+amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	size_t size = PAGE_ALIGN(args->size);
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *ret;
+	struct dma_buf *dma_buf;
+
+	if (args->type == AMDXDNA_BO_DEV_HEAP) {
+		XDNA_ERR(xdna, "Heap BO is not supported on CMA platform");
+		return ERR_PTR(-EINVAL);
+	}
+
+	if (!size) {
+		XDNA_ERR(xdna, "Invalid BO size 0x%llx", args->size);
+		return ERR_PTR(-EINVAL);
+	}
+
+	dma_buf = amdxdna_get_cma_buf(dev, size);
+	if (IS_ERR(dma_buf))
+		return ERR_CAST(dma_buf);
+
+	gobj = amdxdna_gem_prime_import(dev, dma_buf);
+	if (IS_ERR(gobj))
+		ret = ERR_CAST(gobj);
+	else
+		ret = to_xdna_obj(gobj);
+
+	dma_buf_put(dma_buf);
+	return ret;
+}
+#endif /* AMDXDNA_NPU3A */
+
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 {
@@ -965,7 +1005,11 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 	else if (amdxdna_use_carveout(to_xdna_dev(dev)))
 		abo = amdxdna_gem_create_cbuf_object(dev, args);
 	else
+#ifdef AMDXDNA_NPU3A
+		abo = amdxdna_gem_create_cma_object(dev, args);
+#else
 		abo = amdxdna_gem_create_shmem_object(dev, args);
+#endif
 	if (IS_ERR(abo))
 		return ERR_CAST(abo);
 
