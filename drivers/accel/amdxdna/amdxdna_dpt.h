@@ -44,6 +44,8 @@
 
 #define AMDXDNA_DPT_FW_LOG_LEVEL_DEFAULT	AMDXDNA_DPT_FW_LOG_LEVEL_WARN
 
+int fw_log_level_check(u32 level);
+
 enum amdxdna_dpt_status {
 	AMDXDNA_DPT_INACTIVE,		/* kzalloc default */
 	AMDXDNA_DPT_ACTIVE,		/* logging is on; watchers may sleep */
