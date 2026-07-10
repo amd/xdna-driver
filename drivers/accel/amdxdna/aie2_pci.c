@@ -327,7 +327,7 @@ static void aie2_hw_stop(struct amdxdna_dev *xdna)
 	ndev->mbox = NULL;
 	aie_psp_stop(ndev->aie.psp_hdl);
 	aie2_smu_fini(ndev);
-	aie2_error_async_events_free(ndev);
+	amdxdna_async_events_free(&ndev->aie);
 	pci_disable_device(pdev);
 
 	ndev->dev_status = AIE2_DEV_INIT;
@@ -427,7 +427,7 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 		goto stop_fw;
 	}
 
-	ret = aie2_error_async_events_alloc(ndev);
+	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
 	if (ret) {
 		XDNA_ERR(xdna, "Allocate async events failed, ret %d", ret);
 		goto stop_fw;
@@ -440,6 +440,8 @@ static int aie2_hw_start(struct amdxdna_dev *xdna)
 stop_fw:
 	aie2_suspend_fw(ndev);
 	xdna_mailbox_stop_channel(ndev->aie.mgmt_chann);
+	/* Reclaim a partially-armed async pool now that the channel is stopped. */
+	amdxdna_async_events_free(&ndev->aie);
 stop_psp:
 	aie_psp_stop(ndev->aie.psp_hdl);
 fini_smu:
@@ -1248,4 +1250,5 @@ const struct amdxdna_dev_ops aie2_ops = {
 	.get_array = aie2_get_array,
 	.get_dev_revision = aie2_get_dev_rev,
 	.hwctx_heap_expand = aie2_hwctx_heap_expand,
+	.register_async_event = aie2_async_event_register,
 };

@@ -15,6 +15,7 @@
 
 #include "aie.h"
 #include "aie2_msg_priv.h"
+#include "amdxdna_error.h"
 #include "amdxdna_mailbox.h"
 
 /* Firmware determines device memory base address and size */
@@ -148,12 +149,10 @@ struct amdxdna_dev_hdl {
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
-	struct async_events		*async_events;
 
 	enum aie2_dev_status		dev_status;
 	u32				hwctx_num;
 
-	struct amdxdna_async_error	last_async_err;
 	enum aie2_tdr_status		tdr_status;
 	struct aie2_tdr			tdr; /* TDR for device recovery */
 };
@@ -221,9 +220,9 @@ int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type 
 int aie2_pm_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 
 /* aie2_error.c */
-int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
-void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
-int aie2_error_async_msg_thread(void *data);
+extern const struct aie_error_lut_set aie2_error_luts;
+int aie2_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
+			      void *handle, int (*cb)(void *, void __iomem *, size_t));
 int aie2_get_array_async_error(struct amdxdna_dev_hdl *ndev,
 			       struct amdxdna_drm_get_array *args);
 

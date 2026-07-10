@@ -16,6 +16,7 @@ struct psp_device;
 struct smu_device;
 struct amdxdna_hwctx;
 struct amdxdna_msg_buf_hdl;
+struct amdxdna_async_events;
 
 struct aie_msg_ops {
 	int (*get_coredump)(struct amdxdna_hwctx *hwctx,
@@ -70,6 +71,10 @@ struct aie_device {
 	u32 hclk_freq;
 	u32 max_tops;
 	u32 curr_tops;
+
+	/* Async error reporting state, shared by aie2 and aie4. */
+	struct amdxdna_async_events	*async_events;
+	struct amdxdna_async_error	last_async_err;
 };
 
 struct aie_hw_ops {
