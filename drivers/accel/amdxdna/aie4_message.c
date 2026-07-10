@@ -238,6 +238,27 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 	return ret;
 }
 
+int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
+				 void *handle, int (*cb)(void *, void __iomem *, size_t))
+{
+	struct aie4_msg_async_event_config_req req = { 0 };
+	struct xdna_mailbox_msg msg = {
+		.send_data = (u8 *)&req,
+		.send_size = sizeof(req),
+		.handle = handle,
+		.opcode = AIE4_MSG_OP_ASYNC_EVENT_MSG,
+		.notify_cb = cb,
+	};
+
+	req.buff_addr = addr;
+	req.buff_size = size;
+	/* Management channel buffer in the default domain: no PASID. */
+	req.pasid = 0;
+
+	XDNA_DBG(ndev->aie.xdna, "Register addr 0x%llx size 0x%x", addr, size);
+	return xdna_mailbox_send_msg(ndev->aie.mgmt_chann, &msg, TX_TIMEOUT);
+}
+
 int aie4_get_aie_coredump(struct amdxdna_hwctx *hwctx,
 			  struct amdxdna_msg_buf_hdl *list_hdl,
 			  u32 num_bufs)

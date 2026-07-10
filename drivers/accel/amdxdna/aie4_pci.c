@@ -432,10 +432,20 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mailbox_fini;
 
+	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
+		goto partition_fini;
+	}
+
 	return 0;
 
+partition_fini:
+	aie4_partition_fini(ndev);
 mailbox_fini:
 	aie4_mailbox_fini(ndev);
+	/* Reclaim a partially-armed async pool after the mailbox is stopped. */
+	amdxdna_async_events_free(&ndev->aie);
 	return ret;
 }
 
@@ -447,6 +457,11 @@ static void aie4_vf_hw_stop(struct amdxdna_dev_hdl *ndev)
 
 	aie4_partition_fini(ndev);
 	aie4_mailbox_fini(ndev);
+	/*
+	 * Free the async pool after the mailbox is torn down so channel teardown
+	 * cannot fire the async callback on freed event slots.
+	 */
+	amdxdna_async_events_free(&ndev->aie);
 }
 
 static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
@@ -492,10 +507,20 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
+	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
+		goto partition_fini;
+	}
+
 	return 0;
 
+partition_fini:
+	aie4_partition_fini(ndev);
 mbox_fini:
 	aie4_mailbox_fini(ndev);
+	/* Reclaim a partially-armed async pool after the mailbox is stopped. */
+	amdxdna_async_events_free(&ndev->aie);
 fw_unload:
 	aie4_fw_unload(ndev);
 
@@ -511,6 +536,11 @@ static void aie4_classic_hw_stop(struct amdxdna_dev_hdl *ndev)
 	aie4_partition_fini(ndev);
 	aie4_suspend_fw(ndev);
 	aie4_mailbox_fini(ndev);
+	/*
+	 * Free the async pool after the mailbox is torn down so channel teardown
+	 * cannot fire the async callback on freed event slots.
+	 */
+	amdxdna_async_events_free(&ndev->aie);
 	aie4_fw_unload(ndev);
 }
 
@@ -950,6 +980,9 @@ static int aie4_get_array(struct amdxdna_client *client,
 	case DRM_AMDXDNA_AIE_TILE_READ:
 		ret = amdxdna_aie_tile_read(&ndev->aie, client, args);
 		break;
+	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
+		ret = aie4_get_array_async_error(ndev, args);
+		break;
 	default:
 		ret = -EOPNOTSUPP;
 		break;
@@ -1087,6 +1120,12 @@ static int aie4_vf_suspend(struct amdxdna_dev *xdna)
 	aie4_hwctx_suspend_all(ndev);
 	/* when PF and VF both present, PF suspend will do cleanup for all VFs */
 	aie4_mailbox_fini(ndev);
+	/*
+	 * Mirror the stop path: free the async pool after the mailbox is torn
+	 * down (resume re-allocates it) to avoid leaking the workqueue and the
+	 * per-column DMA buffers across suspend/resume.
+	 */
+	amdxdna_async_events_free(&ndev->aie);
 
 	XDNA_DBG(xdna, "vf suspend done");
 	return 0;
@@ -1367,6 +1406,8 @@ const struct amdxdna_dev_ops aie4_pf_ops = {
 	.sriov_configure        = aie4_sriov_configure,
 	.resume			= aie4_pf_resume,
 	.suspend		= aie4_pf_suspend,
+	.register_async_event	= aie4_async_event_register,
+	.handle_dev_async_event	= aie4_handle_dev_event,
 };
 
 const struct amdxdna_dev_ops aie4_vf_ops = {
@@ -1384,6 +1425,8 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.get_array		= aie4_get_array,
 	.resume			= aie4_vf_resume,
 	.suspend		= aie4_vf_suspend,
+	.register_async_event	= aie4_async_event_register,
+	.handle_dev_async_event	= aie4_handle_dev_event,
 };
 
 const struct amdxdna_dev_ops aie4_classic_ops = {
@@ -1401,4 +1444,6 @@ const struct amdxdna_dev_ops aie4_classic_ops = {
 	.get_array		= aie4_get_array,
 	.resume			= aie4_classic_resume,
 	.suspend		= aie4_classic_suspend,
+	.register_async_event	= aie4_async_event_register,
+	.handle_dev_async_event	= aie4_handle_dev_event,
 };

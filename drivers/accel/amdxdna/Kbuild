@@ -49,6 +49,7 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_solver.o \
 	aie2_tdr.o \
 	aie4_ctx.o \
+	aie4_error.o \
 	aie4_message.o \
 	aie4_pci.o \
 	amdxdna_dpt.o \
