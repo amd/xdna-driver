@@ -394,6 +394,76 @@ free_buf:
 	return ret;
 }
 
+int aie4_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type,
+			 const void *data, size_t size)
+{
+	DECLARE_AIE_MSG(aie4_msg_set_runtime_cfg, AIE4_MSG_OP_SET_RUNTIME_CONFIG);
+	u8 buf[sizeof(req.type) + AIE4_RUNTIME_CFG_MAX_DATA_SIZE] = { 0 };
+	int ret;
+
+	if (size > AIE4_RUNTIME_CFG_MAX_DATA_SIZE)
+		return -EINVAL;
+
+	/*
+	 * Firmware expects a 4-byte @type immediately followed by the
+	 * per-type payload (size validated against the struct npu_msg_-
+	 * runtime_config_* picked by @type). The shared request struct
+	 * carries an inline @data[4] slot, so stage only the 4-byte @type
+	 * header plus the variable payload contiguously and send exactly
+	 * that many bytes on the wire.
+	 */
+	req.type = type;
+	memcpy(buf, &req.type, sizeof(req.type));
+	memcpy(buf + sizeof(req.type), data, size);
+
+	msg.send_data = buf;
+	msg.send_size = sizeof(req.type) + size;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(ndev->aie.xdna, "Failed to set runtime cfg %u: %d", type, ret);
+	return ret;
+}
+
+int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
+		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
+		      size_t size, u32 *msi_idx, u32 *msi_address)
+{
+	DECLARE_AIE_MSG(aie4_msg_start_fw_log, AIE4_MSG_OP_START_FW_LOG);
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	dma_addr_t addr;
+	int ret;
+
+	addr = to_dma_addr(buf_hdl, 0);
+	if (!addr) {
+		XDNA_ERR(xdna, "Invalid DMA address");
+		return -EINVAL;
+	}
+
+	req.buff_addr = addr;
+	req.buff_size = size;
+	req.log_level = level;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret) {
+		XDNA_ERR(xdna, "Start fw log failed, ret %d status 0x%x",
+			 ret, resp.status);
+		return ret;
+	}
+
+	/*
+	 * Unlike AIE2, the AIE4 firmware does not yet return MSI info in the
+	 * response. Fall back to no-IRQ mode -- on-demand polling driven by
+	 * amdxdna_dpt_timer_get keeps the watcher/dmesg paths working.
+	 */
+	if (msi_address)
+		*msi_address = 0;
+	if (msi_idx)
+		*msi_idx = 0;
+
+	return 0;
+}
+
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 {
 	if (AIE_FEATURE_ON(&ndev->aie, AIE4_GET_COREDUMP))
@@ -407,4 +477,16 @@ void aie4_msg_init(struct amdxdna_dev_hdl *ndev)
 	ndev->aie.msg_ops.query_telemetry = aie4_query_telemetry;
 	/* aie4 has no fw_ctx_id <-> hwctx_id map and no per-ctx FW health. */
 	ndev->aie.hwctx_limit = 0;
+
+	/*
+	 * FW logging is owned by the PF; a VF must not start its own log
+	 * channel. Leaving msg_ops.fw_log_* NULL on VF is enough to keep
+	 * amdxdna_dpt_init and the FW-log ioctls dormant on that path.
+	 */
+	if (AIE_FEATURE_ON(&ndev->aie, AIE4_FW_LOG) &&
+	    ndev->aie.xdna->dev_info->ops != &aie4_vf_ops) {
+		ndev->aie.msg_ops.fw_log_init   = aie4_fw_log_init;
+		ndev->aie.msg_ops.fw_log_config = aie4_fw_log_config;
+		ndev->aie.msg_ops.fw_log_fini   = aie4_fw_log_fini;
+	}
 }
