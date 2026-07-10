@@ -188,6 +188,7 @@ int aie4_get_array_async_error(struct amdxdna_dev_hdl *ndev,
 enum aie4_fw_feature {
 	AIE4_GET_COREDUMP,
 	AIE4_RW_ACCESS,
+	AIE4_FW_LOG,
 	AIE4_CALIBRATE_CLOCK,
 	AIE4_HSA_COMMAND,
 	AIE4_FEATURE_MAX
@@ -201,6 +202,17 @@ int aie4_rw_aie_reg(struct amdxdna_hwctx *hwctx, bool is_read,
 int aie4_rw_aie_mem(struct amdxdna_hwctx *hwctx, bool is_read,
 		    u8 row, u8 col, u32 aie_addr,
 		    dma_addr_t dram_addr, u32 size);
+
+int aie4_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type,
+			 const void *data, size_t size);
+int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
+		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
+		      size_t size, u32 *msi_idx, u32 *msi_address);
+
+/* aie4_pci.c */
+int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level);
+int aie4_fw_log_config(struct amdxdna_dev *xdna, u32 level);
+int aie4_fw_log_fini(struct amdxdna_dev *xdna);
 
 extern const struct amdxdna_dev_ops aie4_pf_ops;
 extern const struct amdxdna_dev_ops aie4_vf_ops;
