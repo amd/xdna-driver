@@ -85,8 +85,18 @@ static void aie4_ctx_reset(struct aie_device *aie, u32 hw_ctx_id)
 
 	hwctx = hw_ctx_id2hwctx(aie, hw_ctx_id, &idx);
 	if (hwctx) {
-		/* Reset the context by destroy then recreate it. */
+		/*
+		 * Reset the context by destroy then recreate it. Destroy marks the
+		 * context DISCONNECTED; complete any parked in-flight jobs (as timed
+		 * out) before recreating so their fences are signaled and the read
+		 * index advances, releasing waiters in aie4_cmd_wait() with an
+		 * error. Otherwise the recreate flips the context back to CONNECTED
+		 * and the waiter can never observe completion, hanging the
+		 * submitter.
+		 */
 		aie4_hwctx_destroy(hwctx);
+		if (hwctx->priv->kernel_submit)
+			aie4_hwctx_cleanup_running_jobs(hwctx, true);
 		ret = aie4_hwctx_create(hwctx);
 		if (ret)
 			XDNA_ERR(xdna, "Reset hw_ctx_id=%u ctx failed, ret %d",

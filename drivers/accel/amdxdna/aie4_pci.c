@@ -1067,7 +1067,7 @@ static void aie4_hwctx_cleanup_all(struct amdxdna_dev_hdl *ndev)
 		idx = srcu_read_lock(&client->hwctx_srcu);
 		amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 			if (hwctx->priv->kernel_submit)
-				aie4_hwctx_cleanup_running_jobs(hwctx);
+				aie4_hwctx_cleanup_running_jobs(hwctx, false);
 		}
 		srcu_read_unlock(&client->hwctx_srcu, idx);
 	}

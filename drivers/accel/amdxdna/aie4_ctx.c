@@ -306,9 +306,12 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
  * Fill @cmd_abo's data region with the cached aie4 context health report as a
  * struct amdxdna_ctx_health_data (version 1) so user space can read it after
  * the command is marked timed out. If no report was cached for this context,
- * the per-generation fields are zeroed. The cached report is consumed (cleared)
- * on use. Caller must hold io_lock, which serializes this multi-word read
- * against the async error worker overwriting the cache concurrently.
+ * the per-generation fields are zeroed. The cached report is not consumed here:
+ * every job completed by a single context reset must observe the same report,
+ * so the reset cleanup (aie4_hwctx_cleanup_running_jobs) clears it exactly once
+ * after all parked jobs have been served. Caller must hold io_lock, which
+ * serializes this multi-word read against the async error worker overwriting
+ * the cache concurrently.
  */
 static void aie4_fill_health_data_locked(struct amdxdna_gem_obj *cmd_abo,
 					 struct amdxdna_hwctx *hwctx)
@@ -365,9 +368,6 @@ static void aie4_fill_health_data_locked(struct amdxdna_gem_obj *cmd_abo,
 			       num_uc * sizeof(struct uc_health_info));
 		health->aie4.num_uc = num_uc;
 	}
-
-	/* Consumed; later reads report zeros until a new error is cached. */
-	priv->cached_ctx_error_valid = false;
 }
 
 /*
@@ -564,7 +564,7 @@ void aie4_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	aie4_hwctx_destroy(hwctx);
 	if (priv->kernel_submit) {
 		/* Drain/abort any in-flight jobs before tearing down the queue. */
-		aie4_hwctx_cleanup_running_jobs(hwctx);
+		aie4_hwctx_cleanup_running_jobs(hwctx, false);
 		destroy_workqueue(priv->job_work_q);
 	}
 	aie4_hwctx_umq_fini(hwctx);
@@ -1005,6 +1005,71 @@ static void job_abort(struct amdxdna_sched_job *job)
 	job_done(job);
 }
 
+/*
+ * For a timed-out command chain, identify the failing sub-command from the
+ * cached health report's runlist index, record it in the chain's error_index,
+ * and fill that sub-command's data region with the health report. The runlist
+ * index and the report body are read under a single io_lock hold so they cannot
+ * be taken from two different cached reports.
+ */
+static void aie4_fill_chain_health_data(struct amdxdna_hwctx *hwctx,
+					struct amdxdna_gem_obj *cmd_abo)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_cmd_chain *payload;
+	struct amdxdna_gem_obj *sub_abo;
+	u32 payload_len, ccnt, i = 0;
+
+	payload = amdxdna_cmd_get_payload(cmd_abo, &payload_len);
+	if (!payload) {
+		XDNA_ERR(xdna, "No chain payload for timed-out command");
+		return;
+	}
+	ccnt = payload->command_count;
+	if (!ccnt || payload_len < struct_size(payload, data, ccnt))
+		return;
+
+	mutex_lock(&priv->io_lock);
+	if (priv->cached_ctx_error_valid)
+		i = priv->cached_ctx_error.app_health_report.runlist_read_idx;
+	if (i >= ccnt)
+		i = 0;
+	payload->error_index = i;
+	sub_abo = amdxdna_gem_get_obj(hwctx->client, (u32)payload->data[i], AMDXDNA_BO_SHARE);
+	if (sub_abo)
+		aie4_fill_health_data_locked(sub_abo, hwctx);
+	mutex_unlock(&priv->io_lock);
+
+	if (sub_abo)
+		amdxdna_gem_put_obj(sub_abo);
+	else
+		XDNA_ERR(xdna, "Failed to find sub cmd BO %u", (u32)payload->data[i]);
+}
+
+/*
+ * Complete an in-flight job that could not finish because the context hit a
+ * critical firmware error and is being reset. Attach the cached health report
+ * (into the failing sub-command for a chain), mark the command TIMEOUT, advance
+ * read_index so waiters observe completion, and signal the fence. Runs with the
+ * context DISCONNECTED (firmware quiesced by aie4_hwctx_destroy).
+ */
+static void job_timeout(struct amdxdna_sched_job *job)
+{
+	struct amdxdna_hwctx *hwctx = job->hwctx;
+
+	XDNA_ERR(hwctx->client->xdna, "timing out %s job %lld", hwctx->name, job->seq);
+
+	if (amdxdna_cmd_get_op(job->cmd_bo) == ERT_CMD_CHAIN)
+		aie4_fill_chain_health_data(hwctx, job->cmd_bo);
+	else
+		aie4_fill_health_data(job->cmd_bo, hwctx);
+
+	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
+	update_read_index(hwctx, job->seq + 1);
+	job_done(job);
+}
+
 static void job_worker(struct work_struct *work)
 {
 	struct amdxdna_hwctx_priv *priv =
@@ -1040,19 +1105,43 @@ static void job_worker(struct work_struct *work)
 	}
 }
 
-void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx)
+/*
+ * Reap the in-flight jobs parked by the worker on disconnect. On a plain
+ * teardown (@errored false) they are aborted. On the critical-error reset path
+ * (@errored true) they are completed as TIMEOUT with the cached firmware health
+ * report attached, so waiters observe the timeout (and its per-command health
+ * data) instead of a bare abort.
+ */
+void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_sched_job *job;
 
 	/*
 	 * The worker parks (preserves) in-flight jobs on disconnect instead of
-	 * reaping them, so on teardown/reset stop it and abort the preserved jobs
-	 * here.  cancel_work_sync() ensures the worker is not touching the list.
+	 * reaping them, so on teardown/reset stop it and complete the preserved
+	 * jobs here.  cancel_work_sync() ensures the worker is not touching the
+	 * list.
 	 */
 	cancel_work_sync(&priv->job_work);
-	while ((job = next_running_job(hwctx)))
-		job_abort(job);
+	while ((job = next_running_job(hwctx))) {
+		if (errored)
+			job_timeout(job);
+		else
+			job_abort(job);
+	}
+
+	if (errored) {
+		/*
+		 * Every job above was filled from the same cached health report;
+		 * consume it exactly once now that all parked jobs for this reset
+		 * have been served, so a later unrelated reset cannot observe a
+		 * stale report.
+		 */
+		mutex_lock(&priv->io_lock);
+		priv->cached_ctx_error_valid = false;
+		mutex_unlock(&priv->io_lock);
+	}
 }
 
 /*
