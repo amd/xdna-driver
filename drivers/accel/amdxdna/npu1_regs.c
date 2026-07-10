@@ -146,4 +146,6 @@ const struct amdxdna_dev_info dev_npu1_info = {
 	.dev_priv          = &npu1_dev_priv,
 	.fw_feature_tbl    = npu1_fw_feature_table,
 	.ops               = &aie2_ops,
+	.luts              = &aie2_error_luts,
+	.async_max_status_code = MAX_AIE2_STATUS_CODE,
 };

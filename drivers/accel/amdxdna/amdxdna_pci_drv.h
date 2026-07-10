@@ -53,6 +53,8 @@ struct amdxdna_gem_obj;
 struct amdxdna_hwctx;
 struct amdxdna_sched_job;
 struct amdxdna_msg_buf_hdl;
+struct aie_device;
+struct aie_error_lut_set;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
@@ -78,6 +80,17 @@ struct amdxdna_dev_ops {
 			     u32 *settle_ms);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
+
+	/* Asynchronous error reporting callbacks. */
+	int (*register_async_event)(struct aie_device *aie, dma_addr_t addr, u32 size,
+				    void *handle, int (*cb)(void *, void __iomem *, size_t));
+	/*
+	 * Handle a device/architecture-specific async event type (beyond the
+	 * generic AIE tile error). Returns true when it consumed the event, so
+	 * the shared AIE tile error decode is skipped; false to let the caller
+	 * run the shared tile decode.
+	 */
+	bool (*handle_dev_async_event)(struct aie_device *aie, u32 type, void *vaddr);
 };
 
 struct amdxdna_fw_feature_tbl {
@@ -110,6 +123,10 @@ struct amdxdna_dev_info {
 	const struct amdxdna_fw_feature_tbl *fw_feature_tbl;
 	const struct amdxdna_fw_feature_tbl *cert_feature_tbl;
 	const struct amdxdna_dev_ops	*ops;
+
+	/* Asynchronous error reporting data (per AIE generation). */
+	const struct aie_error_lut_set	*luts;
+	u32				async_max_status_code;
 };
 
 struct amdxdna_carveout;
