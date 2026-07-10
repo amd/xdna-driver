@@ -141,7 +141,7 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx);
-void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx);
+void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored);
 void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx);
 
 /* aie4_sriov.c */
