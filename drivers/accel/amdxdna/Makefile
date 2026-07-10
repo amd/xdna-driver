@@ -46,8 +46,8 @@ DEFINES += -DMODULE_VER_STR='\"$(MODULE_VER_STR)\"'
 
 # Not upstreamed: enabled via build.sh -npu3a (XDNA_DRV_BLD_FLAGS), forwarded
 # to both the native build and the DKMS rebuild so the macro survives packaging.
-ifeq ($(NPU3A),1)
-DEFINES += -DNPU3A
+ifeq ($(AMDXDNA_NPU3A),1)
+DEFINES += -DAMDXDNA_NPU3A
 endif
 
 # Compiler (gcc/clang) comes from the LLVM= kbuild var set by DKMS/caller, not probed here (#1377)

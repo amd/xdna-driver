@@ -33,6 +33,7 @@ amdxdna-y := \
 	amdxdna_sysfs.o \
 	amdxdna_ubuf.o \
 	amdxdna_cbuf.o \
+	amdxdna_cma_buf.o \
 	amdxdna_xen.o \
 	amdxdna_sensors.o
 

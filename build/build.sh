@@ -265,7 +265,7 @@ while [ $# -gt 0 ]; do
       hello_umq=y
       ;;
     -npu3a)
-      export XDNA_DRV_BLD_FLAGS="${XDNA_DRV_BLD_FLAGS:+$XDNA_DRV_BLD_FLAGS }NPU3A=1"
+      export XDNA_DRV_BLD_FLAGS="${XDNA_DRV_BLD_FLAGS:+$XDNA_DRV_BLD_FLAGS }AMDXDNA_NPU3A=1"
       ;;
     -verbose)
       verbose=VERBOSE=1
