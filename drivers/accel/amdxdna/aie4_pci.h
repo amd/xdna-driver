@@ -14,6 +14,7 @@
 #include <linux/workqueue.h>
 
 #include "aie.h"
+#include "aie4_msg_priv.h"	/* struct aie4_async_ctx_error */
 #include "amdxdna_error.h"
 #include "amdxdna_mailbox.h"
 
@@ -53,6 +54,16 @@ struct amdxdna_hwctx_priv {
 	u32                             hw_ctx_id;
 	/* Snapshot of kernel_mode_submission for this ctx's lifetime. */
 	bool                            kernel_submit;
+
+	/*
+	 * Last CERT async context-error report for this ctx, cached by the async
+	 * error worker and consumed by the kernel-mode timeout/recovery path.
+	 * Both the flag and the multi-word report body are protected by io_lock
+	 * (cached only for kernel-mode contexts); the flag alone is insufficient
+	 * because the worker can overwrite the body while a reader consumes it.
+	 */
+	bool                            cached_ctx_error_valid;
+	struct aie4_async_ctx_error     cached_ctx_error;
 
 	/* Kernel-mode submission: driver fills the user HSA queue and rings
 	 * the doorbell.  umq_pkts/umq_indirect_pkts alias the user umq_bo;
@@ -131,6 +142,7 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_resume_jobs(struct amdxdna_hwctx *hwctx);
 void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx);
+void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx);
 
 /* aie4_sriov.c */
 #if IS_ENABLED(CONFIG_PCI_IOV)

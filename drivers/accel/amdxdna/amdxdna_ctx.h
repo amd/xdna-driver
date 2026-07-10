@@ -93,6 +93,69 @@ struct amdxdna_ctx_health {
 	u32 npu_gen;
 };
 
+/*
+ * Per-uC health entry. Layout matches the XRT ert_uc_health_info ABI
+ * (drm/detail/ert.h) and the aie4 firmware report; shared by the aie4 firmware
+ * app-health report (struct aie4_msg_app_health_report) and the command-data
+ * health structure below.
+ */
+struct uc_health_info {
+	u32 uc_idx;
+	u32 uc_idle_status;
+	u32 misc_status;
+	u32 fw_state;
+	u32 page_idx;
+	u32 offset;
+	u32 restore_page;
+	u32 restore_offset;
+	u32 uc_ear;
+	u32 uc_esr;
+	u32 uc_pc;
+};
+
+/* Context health data payload for aie2/aie2p (matches XRT ert_ctx_health_data_aie2). */
+struct amdxdna_ctx_health_data_aie2 {
+	u32 txn_op_idx;
+	u32 ctx_pc;
+	u32 fatal_error_type;
+	u32 fatal_error_exception_type;
+	u32 fatal_error_exception_pc;
+	u32 fatal_error_app_module;
+};
+
+/*
+ * Max per-uC health entries in amdxdna_ctx_health_data_aie4. A fixed size (not
+ * a flexible array) is required because this struct is a union member; matches
+ * the firmware AIE4_MPNPUFW_MAX_UC_COUNT.
+ */
+#define AMDXDNA_CTX_HEALTH_MAX_UC	6
+
+/* Context health data payload for aie2ps/aie4 (matches XRT ert_ctx_health_data_aie4). */
+struct amdxdna_ctx_health_data_aie4 {
+	u32 ctx_state;
+	u32 num_uc;
+	u32 ctx_error_type;
+	struct uc_health_info uc_info[AMDXDNA_CTX_HEALTH_MAX_UC];
+};
+
+/*
+ * Interpretation of the amdxdna_cmd payload when a command completes with
+ * ERT_CMD_STATE_TIMEOUT; @npu_gen selects the per-generation union member.
+ * Layout matches the XRT struct ert_ctx_health_data_v1 (drm/detail/ert.h).
+ * Only version 1 is produced/supported by this driver.
+ */
+struct amdxdna_ctx_health_data {
+#define AMDXDNA_CTX_HEALTH_DATA_V1	1
+	u32 version;
+#define AMDXDNA_NPU_GEN_AIE2		0
+#define AMDXDNA_NPU_GEN_AIE4		1
+	u32 npu_gen;
+	union {
+		struct amdxdna_ctx_health_data_aie2 aie2;
+		struct amdxdna_ctx_health_data_aie4 aie4;
+	};
+};
+
 /* Exec buffer command header format */
 #define AMDXDNA_CMD_STATE		GENMASK(3, 0)
 #define AMDXDNA_CMD_EXTRA_CU_MASK	GENMASK(11, 10)
@@ -214,6 +277,27 @@ amdxdna_cmd_get_state(struct amdxdna_gem_obj *abo)
 		return ERT_CMD_STATE_INVALID;
 
 	return FIELD_GET(AMDXDNA_CMD_STATE, cmd->header);
+}
+
+/* Return the whole writable data region of a cmd BO (e.g. for health data). */
+static inline void *
+amdxdna_cmd_get_data(struct amdxdna_gem_obj *abo, u32 *size)
+{
+	struct amdxdna_cmd *cmd = amdxdna_gem_vmap(abo);
+
+	if (size)
+		*size = 0;
+
+	if (!cmd)
+		return NULL;
+
+	/* Guard against a BO too small to hold the command header. */
+	if (abo->mem.size <= offsetof(struct amdxdna_cmd, data))
+		return NULL;
+
+	if (size)
+		*size = abo->mem.size - offsetof(struct amdxdna_cmd, data);
+	return cmd->data;
 }
 
 void *amdxdna_cmd_get_payload(struct amdxdna_gem_obj *abo, u32 *size);
