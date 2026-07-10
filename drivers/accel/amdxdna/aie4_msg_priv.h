@@ -14,6 +14,7 @@ enum aie4_msg_opcode {
 	/* Classic/PF/VF common */
 	AIE4_MSG_OP_IDENTIFY                         = 0x10002,
 	AIE4_MSG_OP_SUSPEND                          = 0x10003,
+	AIE4_MSG_OP_ASYNC_EVENT_MSG                  = 0x10004,
 	AIE4_MSG_OP_GET_TELEMETRY                    = 0x10006,
 	AIE4_MSG_OP_SET_RUNTIME_CONFIG               = 0x10007,
 	AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION      = 0x1000F,
@@ -349,5 +350,115 @@ struct aie4_msg_calibrate_clock_req {
 struct aie4_msg_calibrate_clock_resp {
 	enum aie4_msg_status status;
 } __packed;
+
+/*
+ * Asynchronous error reporting definitions.
+ *
+ * These mirror the documented external mailbox API (see the mpnpu-api
+ * npu_msg_priv.h npu_async_* and npu_msg_app_health_report definitions). They
+ * must stay in sync with that header; do not include npu_msg_priv.h directly.
+ */
+
+/* Maximum number of uCs reported in an app health report. */
+#define AIE4_MPNPUFW_MAX_UC_COUNT	6
+
+/* AIE4_MSG_OP_ASYNC_EVENT_MSG: register one async event report buffer. */
+struct aie4_msg_async_event_config_req {
+	__u64 buff_addr;
+	__u32 pasid;
+	__u32 buff_size;
+} __packed;
+
+/*
+ * Async event report header written by firmware into the mailbox response.
+ * @status: enum aie4_msg_status.
+ * @type: enum aie4_msg_async_event_type.
+ */
+struct aie4_msg_async_event_msg_event {
+	__u32 status;
+	__u32 type;
+} __packed;
+
+/* The async event types returned in each async response message. */
+enum aie4_msg_async_event_type {
+	AIE4_ASYNC_EVENT_TYPE_AIE_ERROR,
+	AIE4_ASYNC_EVENT_TYPE_EXCEPTION,
+	AIE4_ASYNC_EVENT_TYPE_CTX_ERROR,
+	AIE4_ASYNC_EVENT_TYPE_PWR_ERROR,
+	MAX_AIE4_ASYNC_EVENT_TYPE,
+};
+
+/* The async context error types. */
+enum aie4_msg_async_ctx_error_type {
+	AIE4_ASYNC_EVENT_CTX_ERR_HWSCH_FAILURE,
+	AIE4_ASYNC_EVENT_CTX_ERR_STOP_FAILURE,
+	AIE4_ASYNC_EVENT_CTX_ERR_AIE_FAILURE,
+	AIE4_ASYNC_EVENT_CTX_ERR_PREEMPTION_TIMEOUT,
+	AIE4_ASYNC_EVENT_CTX_ERR_NEW_PROCESS_FAILURE,
+	AIE4_ASYNC_EVENT_CTX_ERR_UC_CRITICAL_ERROR,
+	AIE4_ASYNC_EVENT_CTX_ERR_UC_COMPLETION_TIMEOUT,
+};
+
+/*
+ * Per-uC health information included in an app health report.
+ * @uc_idx: uC index in this context, 0 is the lead.
+ * @uc_idle_status: valid when uC is idle, reason the uC is idle.
+ * @misc_status: valid on context error, reason the uC hangs.
+ * @fw_state: current uC firmware state.
+ * @page_idx: page index of the current control code being executed.
+ * @offset: byte offset inside the page for the current control code.
+ * @restore_page: page index to execute on resume after preemption.
+ * @restore_offset: byte offset inside restore_page to execute on resume.
+ * @uc_ear: exception address register on a uC crash.
+ * @uc_esr: exception status register on a uC crash.
+ * @uc_pc: program counter on a uC crash.
+ */
+struct uc_health_info {
+	__u32 uc_idx;
+	__u32 uc_idle_status;
+	__u32 misc_status;
+	__u32 fw_state;
+	__u32 page_idx;
+	__u32 offset;
+	__u32 restore_page;
+	__u32 restore_offset;
+	__u32 uc_ear;
+	__u32 uc_esr;
+	__u32 uc_pc;
+};
+
+/* Field masks for the packed @version and @ctx_num_uc words below. */
+#define AIE4_APP_HEALTH_MAJOR_VER	GENMASK(15, 0)
+#define AIE4_APP_HEALTH_MINOR_VER	GENMASK(31, 16)
+#define AIE4_APP_HEALTH_CTX_STATUS	GENMASK(15, 0)
+#define AIE4_APP_HEALTH_NUM_UC		GENMASK(31, 16)
+
+/*
+ * App health report stored in the async report buffer on a context error.
+ * @version: health report structure version, packed as
+ *           AIE4_APP_HEALTH_MAJOR_VER | AIE4_APP_HEALTH_MINOR_VER.
+ * @context_id: context ID copied from the request.
+ * @ctx_num_uc: context status and uC count, packed as
+ *              AIE4_APP_HEALTH_CTX_STATUS | AIE4_APP_HEALTH_NUM_UC. The status
+ *              is the enum hw_ctx_status tracked by the scheduler.
+ * @runlist_read_idx: index of the most recently executed run list entry.
+ * @uc_info: per-uC health information.
+ */
+struct aie4_msg_app_health_report {
+	__u32 version;
+	__u32 context_id;
+	__u32 ctx_num_uc;
+	__u32 runlist_read_idx;
+	struct uc_health_info uc_info[AIE4_MPNPUFW_MAX_UC_COUNT];
+};
+
+/* The data shared in the async report buffer after a context error. */
+struct aie4_async_ctx_error {
+	__u32 ctx_id;
+	__u32 error_type;
+	union {
+		struct aie4_msg_app_health_report app_health_report;
+	};
+};
 
 #endif /* _AIE4_MSG_PRIV_H_ */

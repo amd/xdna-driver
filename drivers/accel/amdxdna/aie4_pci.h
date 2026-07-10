@@ -14,6 +14,7 @@
 #include <linux/workqueue.h>
 
 #include "aie.h"
+#include "amdxdna_error.h"
 #include "amdxdna_mailbox.h"
 
 struct host_queue_packet;
@@ -161,6 +162,16 @@ int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 int aie4_calibrate_clock(struct amdxdna_dev_hdl *ndev);
 void aie4_msg_init(struct amdxdna_dev_hdl *ndev);
 u32 aie4_msg_pasid(struct amdxdna_client *client);
+int aie4_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
+				 void *handle, int (*cb)(void *, void __iomem *, size_t));
+
+/* aie4_error.c */
+extern const struct aie_error_lut_set aie4_error_luts;
+int aie4_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
+			      void *handle, int (*cb)(void *, void __iomem *, size_t));
+bool aie4_handle_dev_event(struct aie_device *aie, u32 type, void *vaddr);
+int aie4_get_array_async_error(struct amdxdna_dev_hdl *ndev,
+			       struct amdxdna_drm_get_array *args);
 
 enum aie4_fw_feature {
 	AIE4_GET_COREDUMP,
