@@ -10,6 +10,8 @@
 #include <linux/sizes.h>
 #include <linux/types.h>
 
+#include "amdxdna_ctx.h"	/* struct uc_health_info */
+
 enum aie4_msg_opcode {
 	/* Classic/PF/VF common */
 	AIE4_MSG_OP_IDENTIFY                         = 0x10002,
@@ -399,33 +401,7 @@ enum aie4_msg_async_ctx_error_type {
 	AIE4_ASYNC_EVENT_CTX_ERR_UC_COMPLETION_TIMEOUT,
 };
 
-/*
- * Per-uC health information included in an app health report.
- * @uc_idx: uC index in this context, 0 is the lead.
- * @uc_idle_status: valid when uC is idle, reason the uC is idle.
- * @misc_status: valid on context error, reason the uC hangs.
- * @fw_state: current uC firmware state.
- * @page_idx: page index of the current control code being executed.
- * @offset: byte offset inside the page for the current control code.
- * @restore_page: page index to execute on resume after preemption.
- * @restore_offset: byte offset inside restore_page to execute on resume.
- * @uc_ear: exception address register on a uC crash.
- * @uc_esr: exception status register on a uC crash.
- * @uc_pc: program counter on a uC crash.
- */
-struct uc_health_info {
-	__u32 uc_idx;
-	__u32 uc_idle_status;
-	__u32 misc_status;
-	__u32 fw_state;
-	__u32 page_idx;
-	__u32 offset;
-	__u32 restore_page;
-	__u32 restore_offset;
-	__u32 uc_ear;
-	__u32 uc_esr;
-	__u32 uc_pc;
-};
+/* struct uc_health_info (per-uC health entry) is defined in amdxdna_ctx.h. */
 
 /* Field masks for the packed @version and @ctx_num_uc words below. */
 #define AIE4_APP_HEALTH_MAJOR_VER	GENMASK(15, 0)

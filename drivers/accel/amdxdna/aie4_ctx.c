@@ -9,6 +9,7 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
+#include <linux/minmax.h>
 #include <linux/overflow.h>
 #include <linux/sched/mm.h>
 #include <linux/types.h>
@@ -299,6 +300,88 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 	 */
 	if (priv->kernel_submit)
 		cancel_work_sync(&priv->job_work);
+}
+
+/*
+ * Fill @cmd_abo's data region with the cached aie4 context health report as a
+ * struct amdxdna_ctx_health_data (version 1) so user space can read it after
+ * the command is marked timed out. If no report was cached for this context,
+ * the per-generation fields are zeroed. The cached report is consumed (cleared)
+ * on use. Caller must hold io_lock, which serializes this multi-word read
+ * against the async error worker overwriting the cache concurrently.
+ */
+static void aie4_fill_health_data_locked(struct amdxdna_gem_obj *cmd_abo,
+					 struct amdxdna_hwctx *hwctx)
+{
+	const size_t min_size = offsetof(struct amdxdna_ctx_health_data, aie4.uc_info);
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct aie4_msg_app_health_report *report;
+	struct amdxdna_ctx_health_data *health;
+	u32 data_total;
+
+	health = amdxdna_cmd_get_data(cmd_abo, &data_total);
+	if (!health || data_total < min_size) {
+		XDNA_WARN(xdna, "Health data buffer too small: %u min %zu",
+			  data_total, min_size);
+		return;
+	}
+
+	health->version = AMDXDNA_CTX_HEALTH_DATA_V1;
+	health->npu_gen = AMDXDNA_NPU_GEN_AIE4;
+	health->aie4.ctx_state = 0;
+	health->aie4.num_uc = 0;
+	health->aie4.ctx_error_type = 0;
+	/*
+	 * Zero the uc_info tail up front so an empty (no cached report) or
+	 * partial (num_uc < capacity) result never exposes stale bytes from the
+	 * caller's command BO. Bounded by both the BO's available room and the
+	 * field size.
+	 */
+	memset(health->aie4.uc_info, 0,
+	       min_t(u32, data_total - min_size, sizeof(health->aie4.uc_info)));
+
+	if (!priv->cached_ctx_error_valid)
+		return;
+
+	report = &priv->cached_ctx_error.app_health_report;
+	health->aie4.ctx_state = FIELD_GET(AIE4_APP_HEALTH_CTX_STATUS, report->ctx_num_uc);
+	health->aie4.ctx_error_type = priv->cached_ctx_error.error_type;
+
+	if (data_total > min_size) {
+		u32 max_uc = (data_total - min_size) / sizeof(struct uc_health_info);
+		u32 num_uc = FIELD_GET(AIE4_APP_HEALTH_NUM_UC, report->ctx_num_uc);
+
+		/*
+		 * Bound by the fixed firmware source array (report->uc_info has
+		 * AIE4_MPNPUFW_MAX_UC_COUNT entries) as well as the user buffer
+		 * capacity, so a firmware-reported count cannot drive an
+		 * out-of-bounds read of the source or write of the destination.
+		 */
+		num_uc = min_t(u32, num_uc, AIE4_MPNPUFW_MAX_UC_COUNT);
+		num_uc = min_t(u32, num_uc, max_uc);
+		if (num_uc)
+			memcpy(health->aie4.uc_info, report->uc_info,
+			       num_uc * sizeof(struct uc_health_info));
+		health->aie4.num_uc = num_uc;
+	}
+
+	/* Consumed; later reads report zeros until a new error is cached. */
+	priv->cached_ctx_error_valid = false;
+}
+
+/*
+ * Fill a command's data region with this context's cached health report. Helper
+ * for the kernel-mode timeout/recovery (TDR) path to call on a failing command;
+ * the TDR detection and recovery mechanism itself is not implemented here.
+ */
+void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+	mutex_lock(&priv->io_lock);
+	aie4_fill_health_data_locked(cmd_abo, hwctx);
+	mutex_unlock(&priv->io_lock);
 }
 
 static void aie4_hwctx_umq_fini(struct amdxdna_hwctx *hwctx)

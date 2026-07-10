@@ -104,9 +104,11 @@ static void aie4_async_ctx_error_cache(struct aie_device *aie,
 	struct aie4_msg_app_health_report *health = &ctx_err->app_health_report;
 	struct amdxdna_async_error *record = &aie->last_async_err;
 	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_hwctx *hwctx;
 	struct uc_health_info *uc;
 	u32 ctx_status;
 	u32 num_uc;
+	int idx;
 	int i;
 
 	ctx_status = FIELD_GET(AIE4_APP_HEALTH_CTX_STATUS, health->ctx_num_uc);
@@ -162,6 +164,27 @@ static void aie4_async_ctx_error_cache(struct aie_device *aie,
 	 * encodings are disambiguated by the KDS category in err_code.
 	 */
 	record->ex_err_code = AMDXDNA_EXTRA_ERR_CTX_ENCODE(ctx_status, ctx_err->ctx_id);
+
+	/*
+	 * Cache the full report on the owning kernel-mode context so the
+	 * timeout/recovery path can attach it to the failing command. Only
+	 * kernel-mode contexts consume it and have an initialized io_lock, which
+	 * serializes this multi-word write against that reader. The device-level
+	 * last_async_err above stays unconditional so GET_ARRAY works for all
+	 * contexts.
+	 */
+	hwctx = hw_ctx_id2hwctx(aie, ctx_err->ctx_id, &idx);
+	if (hwctx) {
+		struct amdxdna_hwctx_priv *priv = hwctx->priv;
+
+		if (priv->kernel_submit) {
+			mutex_lock(&priv->io_lock);
+			memcpy(&priv->cached_ctx_error, ctx_err, sizeof(*ctx_err));
+			priv->cached_ctx_error_valid = true;
+			mutex_unlock(&priv->io_lock);
+		}
+		srcu_read_unlock(&hwctx->client->hwctx_srcu, idx);
+	}
 	mutex_unlock(&xdna->dev_lock);
 }
 
