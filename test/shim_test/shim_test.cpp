@@ -811,6 +811,168 @@ TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, 
   }
 }
 
+// Dev heap chunk granularity (see get_heap_num_pages()/heap_page_size in the
+// shim). A dev BO larger than one chunk necessarily spans multiple heap chunks.
+// npu4 additionally caps the total heap at dev_heap_max_size, so a BO larger
+// than that can never be allocated there; aie4 has no such cap, and npu1 has a
+// single fixed chunk so no cross-chunk BO can be allocated at all.
+constexpr size_t dev_heap_chunk_size = 64ul * 1024 * 1024;
+constexpr size_t dev_heap_max_size = 512ul * 1024 * 1024;
+
+// Fill the whole dev BO with an index-derived pattern, round-trip it through
+// sync (which drives the kernel's per-chunk pin/vmap walk), then verify every
+// qword. Any error in the cross-chunk contiguous mapping shows up as a
+// mismatch or SIGBUS.
+static void
+dev_bo_fill_and_verify(bo& b, size_t size)
+{
+  auto p = reinterpret_cast<volatile uint64_t *>(b.map());
+  size_t n = size / sizeof(uint64_t);
+  const uint64_t seed = 0x5a5a5a5a5a5a5a5aull;
+
+  for (size_t i = 0; i < n; i++)
+    p[i] = i ^ seed;
+  b.get()->sync(buffer_handle::direction::host2device, size, 0);
+  b.get()->sync(buffer_handle::direction::device2host, size, 0);
+  for (size_t i = 0; i < n; i++) {
+    if (p[i] != (i ^ seed))
+      throw std::runtime_error("dev BO content mismatch at qword " + std::to_string(i));
+  }
+}
+
+// Cheaper verification for the stress loop: only touch the qwords straddling
+// every chunk boundary (last qword of a chunk and first qword of the next)
+// plus the last qword of the BO. This is where a broken cross-chunk mapping
+// would surface without paying to write the whole BO on every iteration.
+static void
+dev_bo_verify_boundaries(bo& b, size_t size)
+{
+  auto base = reinterpret_cast<volatile uint8_t *>(b.map());
+  std::vector<size_t> offs;
+
+  for (size_t o = dev_heap_chunk_size; o < size; o += dev_heap_chunk_size) {
+    offs.push_back(o - sizeof(uint64_t));
+    offs.push_back(o);
+  }
+  offs.push_back(size - sizeof(uint64_t));
+
+  for (auto o : offs)
+    *reinterpret_cast<volatile uint64_t *>(base + o) = o ^ 0xdeadbeefull;
+  b.get()->sync(buffer_handle::direction::host2device, size, 0);
+  b.get()->sync(buffer_handle::direction::device2host, size, 0);
+  for (auto o : offs) {
+    auto v = *reinterpret_cast<volatile uint64_t *>(base + o);
+    if (v != (o ^ 0xdeadbeefull))
+      throw std::runtime_error("dev BO boundary mismatch at offset " + std::to_string(o));
+  }
+}
+
+// npu1 (birman) has a single fixed dev heap chunk and cannot back a dev BO
+// that spans more than one chunk. It has no cross-chunk dev heap support.
+static bool
+dev_heap_supports_cross_chunk(device::id_type id, device* dev)
+{
+  return !dev_filter_is_npu1(id, dev);
+}
+
+// On platforms without cross-chunk support (npu1), allocating a cross-chunk
+// dev BO must fail. Treat that failure as the expected, passing outcome and
+// flag an unexpected success. Only the allocation is attempted here -- the
+// BO's contents are never touched, so there is no SIGBUS risk on a partially
+// backed heap.
+static void
+dev_bo_expect_cross_chunk_rejected(device* dev, size_t size)
+{
+  try {
+    bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+  } catch (const std::exception& ex) {
+    std::cout << "cross-chunk dev BO rejected as expected: " << ex.what() << std::endl;
+    return;
+  }
+  throw std::runtime_error("cross-chunk dev BO unexpectedly allocated");
+}
+
+// Allocate a single dev BO larger than one heap chunk so it spans multiple
+// chunks, then verify its contents end to end. arg[0] is the BO size; use
+// size > dev_heap_chunk_size (e.g. 128MB to cross two chunks, 512MB to span the
+// whole npu4 heap, >512MB to exceed the npu4 cap on aie4). On npu1 the same
+// allocation is expected to be rejected.
+void
+TEST_dev_bo_cross_heap(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto size = static_cast<size_t>(arg[0]);
+
+  if (size <= dev_heap_chunk_size)
+    throw std::runtime_error("cross-heap dev BO size must exceed one chunk");
+
+  if (!dev_heap_supports_cross_chunk(id, dev)) {
+    dev_bo_expect_cross_chunk_rejected(dev, size);
+    return;
+  }
+
+  bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+
+  // dev_mem_base is chunk aligned, so the number of chunk boundaries the BO's
+  // device address range crosses is a direct division. A size larger than one
+  // chunk guarantees at least one crossing.
+  auto start = dev_bo.paddr();
+  auto crossed = (start + size - 1) / dev_heap_chunk_size - start / dev_heap_chunk_size;
+  std::cout << "dev BO size 0x" << std::hex << size << " at 0x" << start << std::dec
+            << " spans " << (crossed + 1) << " heap chunks" << std::endl;
+  if (crossed < 1)
+    throw std::runtime_error("dev BO did not cross a heap chunk boundary");
+
+  dev_bo_fill_and_verify(dev_bo, size);
+}
+
+// Negative test (npu4): a dev BO larger than npu4's max heap size can never be
+// backed and must fail to allocate. arg[0] is the (too large) size.
+void
+TEST_dev_bo_over_max(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto size = static_cast<size_t>(arg[0]);
+
+  bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+}
+
+// Stress: repeatedly allocate and free cross-heap dev BOs, verifying the
+// chunk boundaries each time. Exercises heap expansion, drm_mm reuse after
+// free, and the kernel's find-heap-chunk walk under churn. arg[0] is the BO
+// size, arg[1] the iteration count.
+void
+TEST_dev_bo_cross_heap_stress(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto size = static_cast<size_t>(arg[0]);
+  auto iters = static_cast<size_t>(arg[1]);
+
+  if (size <= dev_heap_chunk_size)
+    throw std::runtime_error("cross-heap dev BO size must exceed one chunk");
+
+  if (!dev_heap_supports_cross_chunk(id, dev)) {
+    dev_bo_expect_cross_chunk_rejected(dev, size);
+    return;
+  }
+
+  for (size_t i = 0; i < iters; i++) {
+    bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+    dev_bo_verify_boundaries(dev_bo, size);
+  }
+
+  // Also hold several cross-heap dev BOs live at once, then verify each, to
+  // exercise multiple large BOs coexisting in the expanded heap.
+  size_t live = dev_heap_max_size / size;
+  if (live > 1) {
+    std::vector<std::unique_ptr<bo>> bos;
+    for (size_t i = 0; i < live; i++)
+      bos.push_back(std::make_unique<bo>(dev, size, XCL_BO_FLAGS_CACHEABLE, 0));
+    for (auto& b : bos)
+      dev_bo_verify_boundaries(*b, size);
+  }
+}
+
 // Verify the driver allows only one open per process: with the shim device
 // already open (sdev), a second open() of the same node from this process must
 // be rejected with EBUSY, and the existing device must keep working afterwards.
@@ -1513,6 +1675,29 @@ std::vector<test_case> test_list {
   },
   test_case{ "create and free internal bo", {},
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_internal_bo, {}
+  },
+  // npu4 and aie4 back the dev heap with multiple, expandable chunks, so
+  // cross-chunk dev BOs work. npu1 has a single fixed chunk, so the same
+  // allocation is expected to be rejected -- the test handles that internally
+  // and still passes. Filter on device type only (not the amdxdna driver) so
+  // these also run on the QEMU guest where the NPU is a virtio-gpu device.
+  test_case{ "dev BO crossing two heap chunks (128MB)", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_dev_bo_cross_heap, { 128ul * 1024 * 1024 }
+  },
+  test_case{ "dev BO spanning the whole heap (512MB)", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_dev_bo_cross_heap, { 512ul * 1024 * 1024 }
+  },
+  test_case{ "dev BO cross-heap alloc/free stress", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_dev_bo_cross_heap_stress,
+    { 128ul * 1024 * 1024, 100 }
+  },
+  // npu4 caps the dev heap at 512MB, so a larger BO must be rejected.
+  test_case{ "dev BO larger than max heap rejected (npu4)", {},
+    TEST_NEGATIVE, dev_filter_is_npu4, TEST_dev_bo_over_max, { 576ul * 1024 * 1024 }
+  },
+  // aie4 has no 512MB heap cap, so the same over-512MB BO must allocate fine.
+  test_case{ "dev BO larger than 512MB accepted (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_dev_bo_cross_heap, { 576ul * 1024 * 1024 }
   },
   test_case{ "reject second device open from same process", {},
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_reject_second_open, {}
