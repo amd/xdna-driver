@@ -181,8 +181,12 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	mmgrab(client->mm);
 	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
 	xa_init_flags(&client->dev_heap_xa, XA_FLAGS_ALLOC);
-	drm_mm_init(&client->dev_heap_mm, xdna->dev_info->dev_mem_base,
-		    xdna->dev_info->dev_heap_max_size);
+	/* Devices without a managed dev-heap aperture (e.g. PA-mode aie4) leave
+	 * dev_heap_max_size at 0; drm_mm_init() BUGs on a zero-sized range.
+	 */
+	if (xdna->dev_info->dev_heap_max_size)
+		drm_mm_init(&client->dev_heap_mm, xdna->dev_info->dev_mem_base,
+			    xdna->dev_info->dev_heap_max_size);
 	mutex_init(&client->mm_lock);
 
 	mutex_lock(&xdna->client_lock);
@@ -209,7 +213,8 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	return 0;
 
 fail:
-	drm_mm_takedown(&client->dev_heap_mm);
+	if (xdna->dev_info->dev_heap_max_size)
+		drm_mm_takedown(&client->dev_heap_mm);
 	xa_destroy(&client->dev_heap_xa);
 	xa_destroy(&client->hwctx_xa);
 	mutex_destroy(&client->mm_lock);
@@ -237,8 +242,8 @@ static void amdxdna_client_cleanup(struct amdxdna_client *client)
 	xa_for_each(&client->dev_heap_xa, heap_id, heap)
 		drm_gem_object_put(to_gobj(heap));
 	xa_destroy(&client->dev_heap_xa);
-	drm_mm_takedown(&client->dev_heap_mm);
-
+	if (client->xdna->dev_info->dev_heap_max_size)
+		drm_mm_takedown(&client->dev_heap_mm);
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
 	amdxdna_sva_fini(client);
