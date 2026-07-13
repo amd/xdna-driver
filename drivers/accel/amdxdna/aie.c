@@ -1006,7 +1006,7 @@ static int amdxdna_aie_tile_write_reg(struct amdxdna_hwctx *hwctx,
 		return -EINVAL;
 	}
 
-	if (copy_from_user(&reg_val, wa->buf + sizeof(wa->access),
+	if (copy_from_user(&reg_val, wa->buf + sizeof(*wa->access),
 			   sizeof(reg_val))) {
 		XDNA_ERR(xdna, "Failed to copy register data from user");
 		return -EFAULT;
