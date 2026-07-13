@@ -1373,7 +1373,7 @@ int amdxdna_drm_get_bo_usage(struct drm_device *dev, struct amdxdna_drm_get_arra
 	char __user *buf = u64_to_user_ptr(args->buffer);
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_client *tmp_client;
-	struct amdxdna_drm_bo_usage tmp;
+	struct amdxdna_drm_bo_usage tmp = {};
 
 	drm_WARN_ON(dev, !mutex_is_locked(&xdna->dev_lock));
 
