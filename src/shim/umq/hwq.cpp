@@ -262,7 +262,8 @@ fill_indirect_exec_buf(uint32_t slot_idx, uint32_t total_slots, ert_dpu_data *dp
   volatile struct host_indirect_packet_entry *hp =
     reinterpret_cast<volatile struct host_indirect_packet_entry *>(pkt->data);
 
-  for (; dpu; hp++, dpu = get_ert_dpu_data_next(dpu)) {
+  uint32_t max_entries = dpu->chained + 1;
+  for (uint32_t i = 0; dpu && i < max_entries; hp++, dpu = get_ert_dpu_data_next(dpu), i++) {
     auto uci = dpu->uc_index;
     if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES)
       shim_err(EINVAL, "dpu uc_index %d is invalid", uci);
