@@ -124,6 +124,70 @@ out:
 	return ret;
 }
 
+static int ve2_capture_col_firmware_status(struct amdxdna_dev *xdna,
+					   struct amdxdna_mgmtctx *mgmtctx,
+					   u32 lead_col, u32 col)
+{
+	struct amdxdna_dev_hdl *hdl = ve2_dev_hdl(xdna);
+	struct ve2_firmware_status *cs;
+	struct handshake *hs;
+	u32 offset;
+	int ret;
+
+	if (!hdl->fw_slots || !hdl->fw_slots[lead_col + col])
+		return -EINVAL;
+
+	cs = hdl->fw_slots[lead_col + col];
+
+	hs = kzalloc(sizeof(*hs), GFP_KERNEL);
+	if (!hs)
+		return -ENOMEM;
+
+	offset = CERT_HANDSHAKE_OFF(col) + offsetof(struct handshake, mpaie_alive);
+	ret = aie_partition_read_privileged_mem(mgmtctx->aie_dev, offset,
+						sizeof(*hs), hs);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "read fw status col %u failed: %d", col, ret);
+		goto done;
+	}
+
+	cs->state = hs->vm.fw_state;
+	cs->abs_page_index = hs->vm.abs_page_index;
+	cs->ppc = hs->vm.ppc;
+	cs->idle_status = hs->cert_idle_status;
+	cs->misc_status = hs->misc_status;
+
+	XDNA_DBG(xdna,
+		 "FW status col %u: state=%u abs_page=%u ppc=%u idle=%u misc=%u",
+		 lead_col + col, cs->state, cs->abs_page_index, cs->ppc,
+		 cs->idle_status, cs->misc_status);
+done:
+	kfree(hs);
+	return ret;
+}
+
+int ve2_get_firmware_status(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct amdxdna_mgmtctx *mgmtctx;
+	int ret = 0;
+
+	if (!vp || !vp->mgmtctx || !vp->mgmtctx->aie_dev)
+		return -ENODEV;
+
+	mgmtctx = vp->mgmtctx;
+
+	for (u32 col = 0; col < mgmtctx->num_col; col++) {
+		int r = ve2_capture_col_firmware_status(xdna, mgmtctx,
+							mgmtctx->start_col, col);
+		if (r < 0)
+			ret = r;
+	}
+
+	return ret;
+}
+
 void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
@@ -169,6 +233,20 @@ int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl)
 		return ret;
 	}
 
+	/* Per-column firmware status slots, filled on hwctx teardown. */
+	hdl->fw_slots = devm_kcalloc(xdna->ddev.dev, hdl->aie_dev_info.cols,
+				     sizeof(*hdl->fw_slots), GFP_KERNEL);
+	if (!hdl->fw_slots)
+		return -ENOMEM;
+
+	for (u32 col = 0; col < hdl->aie_dev_info.cols; col++) {
+		hdl->fw_slots[col] = devm_kzalloc(xdna->ddev.dev,
+						  sizeof(*hdl->fw_slots[col]),
+						  GFP_KERNEL);
+		if (!hdl->fw_slots[col])
+			return -ENOMEM;
+	}
+
 	ret = ve2_load_fw(hdl);
 	if (ret) {
 		XDNA_ERR(xdna, "aie load %s failed with err %d", hdl->priv->fw_path, ret);
@@ -184,6 +262,8 @@ int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl)
 
 static const struct amdxdna_dev_priv ve2_aux_priv = {
 	.fw_path		= "amdnpu/release_cert_ve2.elf",
+	.hwctx_limit		= 255,
+	.ctx_limit		= 255,
 };
 
 const struct amdxdna_dev_info dev_ve2_info = {

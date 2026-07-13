@@ -16,6 +16,12 @@
 
 struct amdxdna_dev_priv {
 	const char			*fw_path;
+	/*
+	 * Max hardware/scheduling contexts. Advertised for parity with the
+	 * other backends; VE2 does not yet enforce these limits (TODO).
+	 */
+	u32				hwctx_limit;
+	u32				ctx_limit;
 };
 
 struct amdxdna_dev;
@@ -36,7 +42,17 @@ struct ve2_firmware_version {
 	u8 build;
 };
 
+/* Per-column CERT firmware status snapshot, captured on hwctx teardown. */
+struct ve2_firmware_status {
+	u32 state;
+	u32 abs_page_index;
+	u32 ppc;
+	u32 idle_status;
+	u32 misc_status;
+};
+
 struct amdxdna_mgmtctx;
+struct amdxdna_hwctx;
 
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
@@ -44,6 +60,7 @@ struct amdxdna_dev_hdl {
 	struct aie_device_info		aie_dev_info;
 	struct ve2_firmware_version	fw_version;
 	struct amdxdna_mgmtctx		*ve2_mgmtctx;
+	struct ve2_firmware_status	**fw_slots;	/* [cols] per-column FW status */
 };
 
 extern const struct amdxdna_dev_ops ve2_ops;
@@ -55,5 +72,8 @@ static inline struct amdxdna_dev_hdl *ve2_dev_hdl(struct amdxdna_dev *xdna)
 
 int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl);
 void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx);
+
+/* Capture the per-column CERT firmware status for @hwctx's partition. */
+int ve2_get_firmware_status(struct amdxdna_hwctx *hwctx);
 
 #endif /* _VE2_AUX_H_ */
