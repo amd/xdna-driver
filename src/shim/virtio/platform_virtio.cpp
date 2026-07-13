@@ -601,7 +601,8 @@ get_sysfs(get_sysfs_arg& arg) const
   std::strcpy(req->node_name, arg.sysfs_node.c_str());
   hcall(req, rsp, response_size);
 
-  if (rsp->val_len < 0 || static_cast<size_t>(rsp->val_len) > arg.data.size())
+  const size_t max_val_len = response_size - offsetof(amdxdna_ccmd_read_sysfs_rsp, val);
+  if (rsp->val_len < 0 || static_cast<size_t>(rsp->val_len) > std::min(max_val_len, arg.data.size()))
     shim_err(EINVAL, "bad sysfs content len or content is too long: %dB", rsp->val_len);
   std::memcpy(arg.data.data(), rsp->val, rsp->val_len);
   arg.real_size = rsp->val_len;
