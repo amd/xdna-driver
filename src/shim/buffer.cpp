@@ -641,7 +641,7 @@ void
 buffer::
 sync_by_driver(direction dir, size_t sz, size_t offset)
 {
-  if (offset + sz > size())
+  if (offset > size() || sz > size() - offset)
     shim_err(EINVAL, "Invalid BO offset and size for sync'ing: %ld, %ld", offset, sz);
 
   sync_bo_arg arg = {
