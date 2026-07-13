@@ -12,6 +12,9 @@
 #define HOST_QUEUE_ENTRY        32
 #define HOST_INDIRECT_PKT_NUM   36
 
+#define HOST_QUEUE_MAJOR_VERSION 1
+#define HOST_QUEUE_MINOR_VERSION 0
+
 #define LAST_CMD (0)
 #define NOT_LAST_CMD (1)
 
@@ -29,15 +32,17 @@ struct exec_buf {
 };
 
 struct host_queue_header {
-	u64	read_index;
+	u64	read_index;		/* 0x00 — device updates this */
 	struct {
 		u16 major;
 		u16 minor;
-	} version;
-	u32	capacity;
-	u64	write_index;
-	u64	data_address;
-};
+	} version;			/* 0x08 */
+	u32	capacity;		/* 0x0c — must be a power of two */
+	u64	padding0[6];		/* 0x10 — pad to 64-byte boundary */
+	u64	write_index;		/* 0x40 — host updates this */
+	u64	padding1[6];		/* 0x48 — pad to next 64-byte boundary */
+	u64	data_address;		/* 0x78 — DMA address of packet ring */
+} __aligned(64);
 
 struct host_indirect_packet_entry {
 	u32	host_addr_low;

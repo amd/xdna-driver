@@ -505,6 +505,8 @@ static int ve2_create_host_queue(struct amdxdna_hwctx *hwctx)
 	queue->hsa_queue_p->hq_header.data_address =
 		dma_handle + sizeof(struct host_queue_header);
 	queue->hsa_queue_p->hq_header.capacity = HOST_QUEUE_ENTRY;
+	queue->hsa_queue_p->hq_header.version.major = HOST_QUEUE_MAJOR_VERSION;
+	queue->hsa_queue_p->hq_header.version.minor = HOST_QUEUE_MINOR_VERSION;
 
 	/* Set hsa queue slots to invalid and initialize indirect regions */
 	for (slot = 0; slot < HOST_QUEUE_ENTRY; slot++) {
@@ -588,7 +590,7 @@ static void ve2_free_hsa_queue(struct amdxdna_hwctx *hwctx)
 
 static void ve2_hwctx_poll_timer(struct timer_list *t)
 {
-	struct amdxdna_ctx_priv *vp = from_timer(vp, t, event_timer);
+	struct amdxdna_ctx_priv *vp = timer_container_of(vp, t, event_timer);
 
 	wake_up_interruptible_all(&vp->waitq);
 	mod_timer(&vp->event_timer, jiffies + CTX_TIMER);
@@ -693,12 +695,16 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	vp = priv->hw_priv;
 
+	/* Snapshot per-column CERT firmware status before tearing the partition down. */
+	if (vp && vp->mgmtctx)
+		ve2_get_firmware_status(hwctx);
+
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(hwctx);
 
 	if (vp) {
 		if (enable_polling)
-			del_timer_sync(&vp->event_timer);
+			timer_delete_sync(&vp->event_timer);
 		kfree(vp->hwctx_config);
 		vp->hwctx_config = NULL;
 		mutex_destroy(&vp->privctx_lock);

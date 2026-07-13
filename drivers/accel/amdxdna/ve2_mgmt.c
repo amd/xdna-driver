@@ -68,6 +68,7 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct ve2_config_hwctx *cfg = NULL;
 	u64 hsa_addr = U64_MAX;
+	u64 host_time;
 
 	if (col == 0 && vp && vp->hsa_queue.hsa_queue_dma_addr)
 		hsa_addr = vp->hsa_queue.hsa_queue_dma_addr;
@@ -79,6 +80,15 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	cert_hs->aie_info.partition_size = mgmtctx->num_col;
 	cert_hs->hsa_addr_high = upper_32_bits(hsa_addr);
 	cert_hs->hsa_addr_low = lower_32_bits(hsa_addr);
+
+	/* Provide the host wall-clock time so firmware can correlate/telemetry. */
+	host_time = ktime_get_ns();
+	cert_hs->host_time_high = upper_32_bits(host_time);
+	cert_hs->host_time_low = lower_32_bits(host_time);
+
+	/* No debug HSA queue: mark the debug HSA address explicitly invalid. */
+	cert_hs->dbg.hsa_addr_high = 0xFFFFFFFF;
+	cert_hs->dbg.hsa_addr_low = 0xFFFFFFFF;
 
 	if (cfg) {
 		cert_hs->log_addr_high = upper_32_bits(cfg->log_buf_addr);
