@@ -1212,8 +1212,9 @@ static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,
 	struct amdxdna_gem_obj *meta_bo;
 	struct amdxdna_gem_obj *log_bo;
 	u32 prev_size = 0;
-	u32 property;
 	u64 base_addr;
+	u32 property;
+	u32 num_ucs;
 	u32 index;
 	int ret;
 	int i;
@@ -1236,6 +1237,15 @@ static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,
 		goto put_meta_bo;
 	}
 
+	/*
+	 * meta lives in a user-shared BO that a second user thread can mutate
+	 * concurrently.  Snapshot num_ucs once so the bound check, struct_size()
+	 * check, loop bound, and value sent to firmware all agree; otherwise a
+	 * racing writer could pass the checks with a small value and drive the
+	 * loop past the vmapped BO with a large one (out-of-bounds read).
+	 */
+	num_ucs = READ_ONCE(meta->num_ucs);
+
 	switch (meta->buf_type) {
 	case AMDXDNA_FW_BUF_LOG:
 		property = AIE4_CONFIGURE_HW_CONTEXT_PROPERTY_CERT_LOG_BUFFER;
@@ -1255,16 +1265,15 @@ static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,
 		goto put_meta_bo;
 	}
 
-	if (meta->num_ucs > AIE4_MAX_NUM_CERTS) {
-		XDNA_ERR(xdna, "num_ucs %u exceeds %d",
-			 meta->num_ucs, AIE4_MAX_NUM_CERTS);
+	if (num_ucs > AIE4_MAX_NUM_CERTS) {
+		XDNA_ERR(xdna, "num_ucs %u exceeds %d", num_ucs, AIE4_MAX_NUM_CERTS);
 		ret = -EINVAL;
 		goto put_meta_bo;
 	}
 
-	if (meta_bo->mem.size < struct_size(meta, uc_info, meta->num_ucs)) {
+	if (meta_bo->mem.size < struct_size(meta, uc_info, num_ucs)) {
 		XDNA_ERR(xdna, "meta bo size %lu too small for %u ucs",
-			 meta_bo->mem.size, meta->num_ucs);
+			 meta_bo->mem.size, num_ucs);
 		ret = -EINVAL;
 		goto put_meta_bo;
 	}
@@ -1278,7 +1287,7 @@ static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,
 
 	base_addr = amdxdna_gem_dev_addr(log_bo);
 
-	for (i = 0; i < meta->num_ucs; i++) {
+	for (i = 0; i < num_ucs; i++) {
 		u32 slice_size = meta->uc_info[i].size;
 		u32 next_size;
 
@@ -1318,7 +1327,7 @@ static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,
 		prev_size = next_size;
 	}
 
-	cl.num = FIELD_PREP(AIE4_MSG_CERT_LOG_NUM, attach ? meta->num_ucs : 0);
+	cl.num = FIELD_PREP(AIE4_MSG_CERT_LOG_NUM, attach ? num_ucs : 0);
 
 	ret = aie4_configure_hw_context_cert_log(ndev, hwctx->priv->hw_ctx_id,
 						 property, &cl);
