@@ -660,6 +660,8 @@ struct amdxdna_drm_get_info {
  * @fatal_error_exception_type: LX7 exception type
  * @fatal_error_exception_pc: LX7 program counter at the time of the exception
  * @fatal_error_app_module: module name where the exception occurred
+ * @pad: Structure padding.
+ * @name: name of the process which created this context
  */
 struct amdxdna_drm_hwctx_entry {
 	__u32 context_id;
@@ -690,6 +692,9 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 fatal_error_exception_type;
 	__u32 fatal_error_exception_pc;
 	__u32 fatal_error_app_module;
+	__u32 pad;
+#define AMDXDNA_HWCTX_PROC_NAME_LEN	16
+	char name[AMDXDNA_HWCTX_PROC_NAME_LEN];
 };
 
 /**
