@@ -33,6 +33,8 @@ const uint16_t npu1_device_id = 0x1502;
 const uint16_t npu1_device_id1 = 0x1050;
 const uint16_t npu3_device_id = 0x17f1;
 const uint16_t npu3_device_id1 = 0x17f3;
+const uint16_t npu3a_device_id = 0x1b0a;
+const uint16_t npu3a_device_id1 = 0x1b0c;
 const uint16_t npu4_device_id = 0x17f0;
 const uint16_t npu_any_revision_id = 0xffff;
 const uint16_t npu1_revision_id = 0x0;
@@ -40,6 +42,22 @@ const uint16_t npu1_revision_id1 = 0x1;
 const uint16_t npu4_revision_id = 0x10;
 const uint16_t npu5_revision_id = 0x11;
 const uint16_t npu6_revision_id = 0x20;
+
+// Some NPUs expose more than one PCIe device id across silicon revisions.
+// Fold the alternate ids onto their canonical id so callers only need to
+// compare against a single value per NPU.
+inline uint16_t
+canonical_device_id(uint16_t device_id)
+{
+  switch (device_id) {
+    case npu3_device_id1:
+      return npu3_device_id;
+    case npu3a_device_id1:
+      return npu3a_device_id;
+    default:
+      return device_id;
+  }
+}
 
 const binary_info& get_binary_info(device* dev, const char* tag = nullptr, const flow_type* flow = nullptr);
 std::string get_binary_path(device* dev, const char* tag = nullptr, const flow_type* flow = nullptr);
