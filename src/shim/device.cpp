@@ -20,10 +20,13 @@
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace {
@@ -325,6 +328,36 @@ get_preemption_events(const xrt_core::device* device)
   return events;
 }
 
+// Query the device BO memory footprint for a given process via
+// DRM_AMDXDNA_BO_USAGE. Best-effort: returns 0 both for a genuine
+// zero-footprint process and when the query is unsupported or fails - the two
+// cannot be distinguished here. Callers use 0 as a numeric value (a per-context
+// memory_usage of 0 renders as "N/A"; total_mem_usage sums it in), so a failed
+// lookup degrades to 0 rather than failing the whole query.
+static uint64_t
+get_bo_total_usage(const shim_xdna::pdev& pdev, int64_t pid)
+{
+  if (pid < 0)
+    return 0;
+
+  amdxdna_drm_bo_usage usage = {};
+  usage.pid = pid;
+  amdxdna_drm_get_array arg = {
+    .param = DRM_AMDXDNA_BO_USAGE,
+    .element_size = sizeof(usage),
+    .num_element = 1,
+    .buffer = reinterpret_cast<uintptr_t>(&usage)
+  };
+
+  try {
+    pdev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+  }
+  catch (const xrt_core::system_error&) {
+    return 0;
+  }
+  return usage.total_usage;
+}
+
 struct partition_info
 {
   using result_type = std::any;
@@ -355,15 +388,16 @@ struct partition_info
       shim_debug("preemption enrichment skipped, device generation unknown: %s", e.what());
     }
 
-    amdxdna_drm_hwctx_entry* data;
     const uint32_t output_entries = 1024;
-    const uint32_t output_size = output_entries * sizeof(*data);
+    const uint32_t output_size = output_entries * sizeof(amdxdna_drm_hwctx_entry);
+    const char* raw = nullptr;  // base of the returned entry array
+    size_t buf_bytes = 0;       // size of the buffer 'raw' points into
 
     std::vector<char> payload(output_size);
-    std::vector<char> updated_payload;  // outer scope for ENOSPC retry; data may point here
+    std::vector<char> updated_payload;  // outer scope for ENOSPC retry; raw may point here
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
-      .element_size = sizeof(*data),
+      .element_size = sizeof(amdxdna_drm_hwctx_entry),
       .num_element = output_entries,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
@@ -372,8 +406,8 @@ struct partition_info
     uint32_t data_size = 0;
     try {
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-      data_size = std::min(arg.num_element, static_cast<uint32_t>(output_size / sizeof(*data)));
-      data = reinterpret_cast<decltype(data)>(payload.data());
+      raw = payload.data();
+      buf_bytes = output_size;
     } catch (const xrt_core::system_error& e) {
       if (e.get_code() == EINVAL) {
         // If ioctl not supported, use legacy ioctl.
@@ -399,6 +433,9 @@ struct partition_info
         const auto legacy_preemption_event_map = get_preemption_events(device);
 
         query::aie_partition_info::result_type output;
+        // The legacy hwctx struct carries no process name; leave it empty so
+        // the report shows "N/A". Memory usage is still resolved per process.
+        std::unordered_map<int64_t, uint64_t> mem_usage_cache;
         for (uint32_t i = 0; i < data_size; i++) {
           const auto& entry = legacy_data[i];
 
@@ -429,26 +466,38 @@ struct partition_info
             }
           }
           new_entry.errors = entry.errors;
+
+          auto mit = mem_usage_cache.find(entry.pid);
+          if (mit == mem_usage_cache.end())
+            mit = mem_usage_cache.emplace(entry.pid, get_bo_total_usage(pci_dev_impl, entry.pid)).first;
+          new_entry.memory_usage = mit->second;
+
           output.push_back(std::move(new_entry));
         }
         return output;
       }
       if (e.get_code() == ENOSPC) {
-        // Retry ioctl with driver-returned number of elements.
-        const uint32_t updated_output_size = arg.num_element * sizeof(*data);
+        // Retry ioctl with driver-returned number of elements. element_size and
+        // num_element are each __u32, so their product can exceed UINT32_MAX;
+        // compute all byte counts in size_t so a large driver-reported
+        // num_element cannot overflow and yield an undersized allocation.
+        const size_t updated_output_size =
+          static_cast<size_t>(arg.num_element) * sizeof(amdxdna_drm_hwctx_entry);
 
         updated_payload.resize(updated_output_size);
         arg.buffer = reinterpret_cast<uintptr_t>(updated_payload.data());
 
         pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
 
-        if (updated_output_size < arg.element_size * arg.num_element) {
+        const size_t required_bytes =
+          static_cast<size_t>(arg.element_size) * arg.num_element;
+        if (updated_output_size < required_bytes) {
           throw xrt_core::query::exception(
-            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ALL - Insufficient buffer size. Need: %u") % arg.element_size));
+            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ALL - Insufficient buffer size. Need: %zu bytes") % required_bytes));
         }
 
-        data_size = std::min(arg.num_element, static_cast<uint32_t>(updated_payload.size() / sizeof(*data)));
-        data = reinterpret_cast<decltype(data)>(updated_payload.data());
+        raw = updated_payload.data();
+        buf_bytes = updated_payload.size();
       } else {
         throw;
       }
@@ -456,9 +505,23 @@ struct partition_info
 
     const auto preemption_event_map = get_preemption_events(device);
 
+    // The driver negotiates the element size (the min of what the shim asked for
+    // and the struct the running driver knows about) and packs entries at that
+    // stride. Copy each element into a zero-initialized struct so that fields a
+    // newer shim knows about but an older driver did not fill (e.g. name) read
+    // as empty. This keeps a new shim working with an old staging driver.
+    const uint32_t elem_sz = arg.element_size ? arg.element_size
+      : static_cast<uint32_t>(sizeof(amdxdna_drm_hwctx_entry));
+    data_size = std::min(arg.num_element, static_cast<uint32_t>(buf_bytes / elem_sz));
+
     query::aie_partition_info::result_type output;
+    // Cache per-process BO usage so multiple contexts owned by the same process
+    // only issue a single DRM_AMDXDNA_BO_USAGE ioctl.
+    std::unordered_map<int64_t, uint64_t> mem_usage_cache;
     for (uint32_t i = 0; i < data_size; i++) {
-      const auto& entry = data[i];
+      amdxdna_drm_hwctx_entry entry{};
+      std::memcpy(&entry, raw + static_cast<size_t>(i) * elem_sz,
+                  std::min<size_t>(elem_sz, sizeof(entry)));
 
       xrt_core::query::aie_partition_info::data new_entry{};
       new_entry.metadata.id = std::to_string(entry.context_id);
@@ -491,9 +554,43 @@ struct partition_info
       new_entry.pasid = entry.pasid;
       new_entry.suspensions = entry.suspensions;
       new_entry.is_suspended = entry.state == AMDXDNA_HWCTX_STATE_IDLE;
+      new_entry.process_name = std::string(entry.name, ::strnlen(entry.name, sizeof(entry.name)));
+
+      auto mit = mem_usage_cache.find(entry.pid);
+      if (mit == mem_usage_cache.end())
+        mit = mem_usage_cache.emplace(entry.pid, get_bo_total_usage(pci_dev_impl, entry.pid)).first;
+      new_entry.memory_usage = mit->second;
+
       output.push_back(std::move(new_entry));
     }
     return output;
+  }
+};
+
+struct total_mem_usage
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::total_mem_usage)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // Reuse the aie_partition_info query, which already resolves per-process
+    // memory usage, and aggregate over the set of unique PIDs so a process
+    // owning several contexts is only counted once.
+    auto data = xrt_core::device_query<query::aie_partition_info>(device);
+
+    std::unordered_set<int64_t> seen_pids;
+    uint64_t total = 0;
+    for (const auto& entry : data) {
+      if (entry.pid < 0)
+        continue;
+      if (seen_pids.insert(entry.pid).second)
+        total += entry.memory_usage;
+    }
+    return static_cast<query::total_mem_usage::result_type>(total);
   }
 };
 
@@ -526,26 +623,36 @@ struct context_health_info {
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     // Query all contexts
-    amdxdna_drm_hwctx_entry* data;
     const uint32_t output_entries = 1024;
-    const uint32_t output_size = output_entries * sizeof(*data);
+    const uint32_t output_size = output_entries * sizeof(amdxdna_drm_hwctx_entry);
     std::vector<char> payload(output_size);
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
-      .element_size = sizeof(*data),
+      .element_size = sizeof(amdxdna_drm_hwctx_entry),
       .num_element = output_entries,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    uint32_t data_size = 0;
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-    data_size = std::min(arg.num_element, static_cast<uint32_t>(output_size / sizeof(*data)));
-    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    // The driver negotiates element_size down to the struct the running driver
+    // knows about and packs entries at that stride. Stride by the negotiated
+    // size and copy each entry into a zero-initialized struct (matching the
+    // aie_partition_info walk) so a newer shim still parses an older driver's
+    // packed entries correctly instead of assuming a fixed sizeof() stride.
+    const uint32_t elem_sz = arg.element_size ? arg.element_size
+      : static_cast<uint32_t>(sizeof(amdxdna_drm_hwctx_entry));
+    const uint32_t data_size = std::min(arg.num_element,
+                                        static_cast<uint32_t>(output_size / elem_sz));
+    const char* raw = payload.data();
 
     query::context_health_info::result_type output;
     for (uint32_t i = 0; i < data_size; i++) {
-      output.push_back(fill_health_entry(data[i]));
+      amdxdna_drm_hwctx_entry entry{};
+      std::memcpy(&entry, raw + static_cast<size_t>(i) * elem_sz,
+                  std::min<size_t>(elem_sz, sizeof(entry)));
+      output.push_back(fill_health_entry(entry));
     }
     return output;
   }
@@ -2123,6 +2230,7 @@ static void
 initialize_query_table()
 {
   emplace_func0_request<query::aie_partition_info,             partition_info>();
+  emplace_func0_request<query::total_mem_usage,               total_mem_usage>();
   emplace_func0_request<query::xocl_errors,                    xocl_errors>();
   emplace_func1_request<query::context_health_info,            context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
