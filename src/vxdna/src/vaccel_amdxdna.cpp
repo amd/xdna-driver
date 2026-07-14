@@ -361,6 +361,8 @@ reserve_coalesce_backing(const struct iovec *iov, uint32_t n)
             VACCEL_THROW_MSG(-EINVAL,
                              "iovec %u must be page-aligned for userptr BO (base=0x%lx len=%zu)",
                              i, static_cast<unsigned long>(base), len);
+        if (total + len < total)
+            VACCEL_THROW_MSG(-EINVAL, "iovec total size overflows size_t");
         total += len;
     }
 
@@ -498,8 +500,11 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
         void *coalesce = nullptr;
         size_t total = 0;
 
-        for (uint32_t i = 0; i < num_iovs; i++)
+        for (uint32_t i = 0; i < num_iovs; i++) {
+            if (total + iovecs[i].iov_len < total)
+                VACCEL_THROW_MSG(-EINVAL, "iovec total size overflows size_t");
             total += iovecs[i].iov_len;
+        }
 
         if (heap_chunk) {
             if (m_size != static_cast<uint64_t>(total))

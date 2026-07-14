@@ -88,6 +88,8 @@ _vaccel_get_iovec_size(const struct iovec *iovecs, uint32_t num_iovs)
     if (!iovecs || num_iovs == 0)
         return 0;
     for (uint32_t i = 0; i < num_iovs; ++i) {
+        if (total + iovecs[i].iov_len < total)
+            VACCEL_THROW_MSG(-EINVAL, "iovec total size overflows size_t");
         total += iovecs[i].iov_len;
     }
     return total;
