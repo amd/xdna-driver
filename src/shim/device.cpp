@@ -1129,7 +1129,7 @@ struct telemetry
 
       pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (uint32_t i = 0; i < telemetry.ctx_map_num_elements; i++) {
+      for (uint32_t i = 0; i < std::min(telemetry.ctx_map_num_elements, NPU_RTOS_MAX_USER_ID_COUNT); i++) {
         xrt_core::query::rtos_telemetry::data task;
 
         task.context_starts = telemetry.context_started_count[i];
