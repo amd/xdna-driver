@@ -316,6 +316,7 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 		return -ENOMEM;
 
 	tmp->pid = hwctx->client->pid;
+	strscpy(tmp->name, hwctx->client->name, sizeof(tmp->name));
 	tmp->context_id = hwctx->id;
 	tmp->start_col = hwctx->start_col;
 	tmp->num_col = hwctx->num_col;
@@ -455,7 +456,9 @@ int amdxdna_query_ctx_status_by_id(struct aie_device *aie,
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_client *tmp_client;
 	int ret = -ENOENT;
+	size_t min_input_sz;
 	size_t buf_size;
+	size_t min_sz;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -470,13 +473,36 @@ int amdxdna_query_ctx_status_by_id(struct aie_device *aie,
 		return -EINVAL;
 	}
 
+	/*
+	 * BY_ID is an input query: the caller must supply at least @context_id
+	 * and @pid so the target context can be looked up. Reject an
+	 * element_size too small to cover them (including 0), otherwise the
+	 * missing bytes would read back as zero and fail later with a
+	 * misleading "Invalid context ID or PID".
+	 */
+	min_input_sz = offsetofend(struct amdxdna_drm_hwctx_entry, pid);
+	if (args->element_size < min_input_sz) {
+		XDNA_ERR(xdna, "Invalid element size %u, need at least %zu",
+			 args->element_size, min_input_sz);
+		return -EINVAL;
+	}
+
+	/*
+	 * Negotiate the element size against the caller's struct the same way
+	 * the HW_CONTEXT_ALL walk does, so user space built against an older
+	 * (smaller) amdxdna_drm_hwctx_entry still works after the struct grows.
+	 * Only the negotiated number of bytes are read from and written back to
+	 * the user buffer; @input is zero-initialized so any field the caller
+	 * did not provide reads as zero.
+	 */
+	min_sz = min_t(size_t, args->element_size, sizeof(input));
 	buf_size = (size_t)args->num_element * args->element_size;
-	if (buf_size < sizeof(input)) {
+	if (buf_size < min_sz) {
 		XDNA_ERR(xdna, "Insufficient buffer size: 0x%zx", buf_size);
 		return -EINVAL;
 	}
 
-	if (copy_from_user(&input, u64_to_user_ptr(args->buffer), sizeof(input))) {
+	if (copy_from_user(&input, u64_to_user_ptr(args->buffer), min_sz)) {
 		XDNA_ERR(xdna, "Failed to copy hwctx entry from user");
 		return -EFAULT;
 	}

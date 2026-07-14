@@ -591,6 +591,9 @@ struct amdxdna_drm_get_info {
 #define AMDXDNA_HWCTX_STATE_IDLE	0
 #define AMDXDNA_HWCTX_STATE_ACTIVE	1
 
+/* Length of the process name reported per hardware context (matches TASK_COMM_LEN). */
+#define AMDXDNA_HWCTX_PROC_NAME_LEN	16
+
 /**
  * struct amdxdna_drm_hwctx_entry - The hardware context array entry
  */
@@ -653,6 +656,8 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 fatal_error_app_module;
 	/** @pad: Structure pad. */
 	__u32 pad;
+	/** @name: Name of the process which created this context. */
+	char name[AMDXDNA_HWCTX_PROC_NAME_LEN];
 };
 
 /**
