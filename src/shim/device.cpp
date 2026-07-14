@@ -281,14 +281,15 @@ struct partition_info
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     amdxdna_drm_hwctx_entry* data;
-    const uint32_t output_size = 32 * sizeof(*data);
+    const uint32_t output_entries = 1024;
+    const uint32_t output_size = output_entries * sizeof(*data);
 
     std::vector<char> payload(output_size);
     std::vector<char> updated_payload;  // outer scope for ENOSPC retry; data may point here
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
       .element_size = sizeof(*data),
-      .num_element = 32,
+      .num_element = output_entries,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
@@ -296,7 +297,7 @@ struct partition_info
     uint32_t data_size = 0;
     try {
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-      data_size = arg.num_element;
+      data_size = std::min(arg.num_element, static_cast<uint32_t>(output_size / sizeof(*data)));
       data = reinterpret_cast<decltype(data)>(payload.data());
     } catch (const xrt_core::system_error& e) {
       if (e.get_code() == EINVAL) {
@@ -353,7 +354,7 @@ struct partition_info
             boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ALL - Insufficient buffer size. Need: %u") % arg.element_size));
         }
 
-        data_size = arg.num_element;
+        data_size = std::min(arg.num_element, static_cast<uint32_t>(updated_payload.size() / sizeof(*data)));
         data = reinterpret_cast<decltype(data)>(updated_payload.data());
       } else {
         throw;
@@ -421,19 +422,20 @@ struct context_health_info {
 
     // Query all contexts
     amdxdna_drm_hwctx_entry* data;
-    const uint32_t output_size = 32 * sizeof(*data);
+    const uint32_t output_entries = 1024;
+    const uint32_t output_size = output_entries * sizeof(*data);
     std::vector<char> payload(output_size);
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
       .element_size = sizeof(*data),
-      .num_element = 32,
+      .num_element = output_entries,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
     uint32_t data_size = 0;
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-    data_size = arg.num_element;
+    data_size = std::min(arg.num_element, static_cast<uint32_t>(output_size / sizeof(*data)));
     data = reinterpret_cast<decltype(data)>(payload.data());
 
     query::context_health_info::result_type output;
