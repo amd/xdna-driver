@@ -41,7 +41,7 @@ const char *amdxdna_dpt_kind_str(enum amdxdna_dpt_kind kind)
 int fw_log_level_check(u32 level)
 {
 	if (!level || level >= AMDXDNA_DPT_FW_LOG_LEVEL_MAX)
-		return -ERANGE;
+		return -EINVAL;
 
 	return 0;
 }
@@ -991,7 +991,7 @@ int amdxdna_set_fw_log_state(struct aie_device *aie,
 		return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_LOG);
 
 	if (fw_log_level_check(fw_log.config))
-		return -ERANGE;
+		return -EINVAL;
 
 	if (!rcu_access_pointer(xdna->fw_log))
 		return amdxdna_fw_log_init(aie, fw_log.config);

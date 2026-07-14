@@ -794,8 +794,8 @@ struct firmware_log
       auto& pci_dev_impl = get_pcidev_impl(device);
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
     } catch (const xrt_core::system_error& e) {
-      if (e.get_code() == ERANGE)
-        throw xrt_core::system_error(ERANGE, "Invalid firmware log level");
+      if (e.get_code() == EINVAL)
+        throw xrt_core::system_error(EINVAL, "Invalid firmware log level");
       throw;
     }
   }
