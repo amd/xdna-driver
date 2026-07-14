@@ -1093,7 +1093,7 @@ int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
 
 	if (fw_log_level_check(level)) {
 		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
-		return -ERANGE;
+		return -EINVAL;
 	}
 
 	dpt = rcu_dereference_protected(xdna->fw_log,
@@ -1143,7 +1143,7 @@ int aie2_fw_log_config(struct amdxdna_dev *xdna, u32 level)
 {
 	if (fw_log_level_check(level)) {
 		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
-		return -ERANGE;
+		return -EINVAL;
 	}
 
 	return aie2_set_log_level(xdna->dev_handle, level);
