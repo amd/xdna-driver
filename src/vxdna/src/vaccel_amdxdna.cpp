@@ -1040,41 +1040,89 @@ export_resource_fd(const std::shared_ptr<vaccel_resource> &res)
     return args.fd;
 }
 
+std::shared_ptr<vxdna_context::vxdna_hwctx>
+vxdna_context::
+find_hwctx(uint32_t ring_idx) const
+{
+    if (ring_idx == 0 || ring_idx > MAX_HWCTX_PER_CTX)
+        return nullptr;
+    std::lock_guard<std::mutex> lock(m_hwctx_lock);
+    return m_hwctx_slots[ring_idx];
+}
+
+std::shared_ptr<vxdna_context::vxdna_hwctx>
+vxdna_context::
+find_hwctx_by_handle(uint32_t ctx_handle) const
+{
+    // hwctx_ring_idx() is not injective, so a stale or forged handle can be
+    // congruent to a live one under the modulus (or be AMDXDNA_INVALID_CTX_HANDLE
+    // -> reserved ring 0). Verify the stored handle matches so a guest can only
+    // reach the context it actually named. get_handle() is immutable, so it is
+    // safe to compare on the returned keep-alive copy.
+    auto hwctx = find_hwctx(hwctx_ring_idx(ctx_handle));
+    if (hwctx && hwctx->get_handle() == ctx_handle)
+        return hwctx;
+    return nullptr;
+}
+
 void
 vxdna_context::
 create_hwctx(const struct amdxdna_ccmd_create_ctx_req *req)
 {
-    if (m_hwctx_table.size() >= MAX_HWCTX_PER_CTX)
-        VACCEL_THROW_MSG(-EBUSY, "Max %u hw contexts per context reached",
-                         MAX_HWCTX_PER_CTX);
-
-    struct amdxdna_ccmd_create_ctx_rsp rsp = {};
+    // Construct outside the lock (CREATE_HWCTX ioctl and polling-thread start
+    // can block). The slot index is the virtio ring index derived from the
+    // driver ctx id and doubles as the allocator: a taken slot means either the
+    // cap is reached or two ctx ids collide under hwctx_ring_idx().
     auto hwctx = std::make_shared<vxdna_hwctx>(*this, req);
-    // Key the table by the virtio ring index (the guest addresses the hwctx by
-    // this on WAIT). rsp.handle stays the driver ctx id so guest-side
-    // correlation (telemetry ctx_map, coredump, HW_CONTEXT_BY_ID) is unchanged.
     uint32_t ring_idx = hwctx_ring_idx(hwctx->get_handle());
-    if (!m_hwctx_table.insert(ring_idx, hwctx))
-        VACCEL_THROW_MSG(-EBUSY,
-                         "virtio ring index %u already in use (ctx id %u)",
-                         ring_idx, hwctx->get_handle());
+    {
+        std::lock_guard<std::mutex> lock(m_hwctx_lock);
+        if (m_hwctx_slots[ring_idx])
+            VACCEL_THROW_MSG(-EBUSY,
+                             "virtio ring index %u unavailable (ctx id %u, max %u hw contexts)",
+                             ring_idx, hwctx->get_handle(), MAX_HWCTX_PER_CTX);
+        m_hwctx_slots[ring_idx] = hwctx;
+    }
+
+    // rsp.handle stays the driver ctx id so guest-side correlation (telemetry
+    // ctx_map, coredump, HW_CONTEXT_BY_ID) is unchanged.
+    struct amdxdna_ccmd_create_ctx_rsp rsp = {};
     rsp.hdr.base.len = sizeof(rsp);
     rsp.handle = hwctx->get_handle();
-    write_rsp(&rsp, sizeof(rsp), req->hdr.rsp_off);
+    try {
+        write_rsp(&rsp, sizeof(rsp), req->hdr.rsp_off);
+    } catch (...) {
+        std::lock_guard<std::mutex> lock(m_hwctx_lock);
+        m_hwctx_slots[ring_idx].reset();
+        throw;
+    }
 }
 
 void
 vxdna_context::
 remove_hwctx(uint32_t handle)
 {
-    m_hwctx_table.erase(hwctx_ring_idx(handle));
+    uint32_t ring_idx = hwctx_ring_idx(handle);
+    // Move the entry out under the lock, then let it destruct outside the lock
+    // (~vxdna_hwctx joins the polling thread).
+    std::shared_ptr<vxdna_hwctx> old;
+    {
+        std::lock_guard<std::mutex> lock(m_hwctx_lock);
+        auto &slot = m_hwctx_slots[ring_idx];
+        // Only evict when the slot actually holds this handle. hwctx_ring_idx()
+        // is not injective, so a stale or invalid handle can be congruent to a
+        // live one (or be AMDXDNA_INVALID_CTX_HANDLE -> reserved ring 0); such a
+        // handle must not tear down the context occupying that ring.
+        if (slot && slot->get_handle() == handle)
+            old = std::move(slot);
+    }
 }
 
 void
 vxdna_context::
 config_hwctx(const struct amdxdna_ccmd_config_ctx_req *req)
 {
-    auto hwctx = m_hwctx_table.lookup(hwctx_ring_idx(req->handle));
+    auto hwctx = find_hwctx_by_handle(req->handle);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found handle %u", req->handle);
     hwctx->config(req);
@@ -1092,7 +1140,7 @@ submit_fence(uint32_t ring_idx, uint64_t fence_id)
         get_callbacks()->write_context_fence(get_cookie(), get_id(), ring_idx, fence_id);
         return;
     }
-    auto hwctx = m_hwctx_table.lookup(ring_idx);
+    auto hwctx = find_hwctx(ring_idx);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found ring_idx %u", ring_idx);
     hwctx->submit_fence(fence_id);
@@ -1102,7 +1150,7 @@ void
 vxdna_context::
 exec_cmd(const struct amdxdna_ccmd_exec_cmd_req *req)
 {
-    auto hwctx = m_hwctx_table.lookup(hwctx_ring_idx(req->ctx_handle));
+    auto hwctx = find_hwctx_by_handle(req->ctx_handle);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found handle %u", req->ctx_handle);
     struct amdxdna_ccmd_exec_cmd_rsp rsp = {};
@@ -1115,7 +1163,7 @@ void
 vxdna_context::
 wait_cmd(const struct amdxdna_ccmd_wait_cmd_req *req)
 {
-    auto hwctx = m_hwctx_table.lookup(hwctx_ring_idx(req->ctx_handle));
+    auto hwctx = find_hwctx_by_handle(req->ctx_handle);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found handle %u", req->ctx_handle);
     hwctx->set_sync_point(req->seq, req->timeout_nsec);
