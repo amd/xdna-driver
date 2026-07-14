@@ -170,6 +170,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	}
 
 	client->pid = pid_nr(rcu_access_pointer(filp->pid));
+	get_task_comm(client->name, current);
 	client->xdna = xdna;
 	client->pasid = IOMMU_PASID_INVALID;
 	client->mm = current->mm;

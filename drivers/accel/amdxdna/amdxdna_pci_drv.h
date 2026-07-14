@@ -16,6 +16,7 @@
 #include <linux/idr.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
+#include <linux/sched.h>
 #include <linux/srcu.h>
 #include <linux/workqueue.h>
 #include <linux/xarray.h>
@@ -197,6 +198,7 @@ struct amdxdna_io_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
+	char				name[TASK_COMM_LEN];
 	/*
 	 * Guards hwctx lifetime against this client's own blocking submit/wait.
 	 * A lookup only ever returns this client's own hwctx (per-client xa), so a
