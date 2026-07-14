@@ -173,10 +173,16 @@ hcall_wait(int dev_fd, void *buf, size_t size)
 
   XRT_TRACE_POINT_SCOPE1(hcall, req->cmd);
 
-  // For now, only AMDXDNA_CCMD_WAIT_CMD requires non-zero ring index
+  // For now, only AMDXDNA_CCMD_WAIT_CMD requires non-zero ring index.
+  // The ctx handle is the driver ctx id (up to MAX_CTX_ID), but virtio-gpu only
+  // accepts ring indices in [0, num_rings). Fold it into [1, AMDXDNA_MAX_HWCTX_PER_CTX]
+  // (ring 0 stays reserved); the host keys its hwctx table by the same function.
+  // A handle of AMDXDNA_INVALID_CTX_HANDLE (0) is not a hwctx: leave ring_idx 0
+  // (the reserved platform ring) instead of letting (ctx_handle - 1) underflow.
   if (req->cmd == AMDXDNA_CCMD_WAIT_CMD) {
     auto wcmd = reinterpret_cast<amdxdna_ccmd_wait_cmd_req*>(req);
-    ring_idx = wcmd->ctx_handle;
+    if (wcmd->ctx_handle != AMDXDNA_INVALID_CTX_HANDLE)
+      ring_idx = ((wcmd->ctx_handle - 1) % AMDXDNA_MAX_HWCTX_PER_CTX) + 1;
   }
 
   drm_virtgpu_execbuffer exec = {
