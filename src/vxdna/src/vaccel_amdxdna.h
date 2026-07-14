@@ -160,6 +160,9 @@ class vxdna_context : public vaccel_context<vxdna_context, vxdna> {
 public:
     static constexpr uint64_t HEAP_MAX_SIZE = 512ULL << 20;
 
+    /** Max concurrent hw contexts allowed per context (see amdxdna_proto.h). */
+    static constexpr uint32_t MAX_HWCTX_PER_CTX = AMDXDNA_MAX_HWCTX_PER_CTX;
+
     using base_type = vaccel_context<vxdna_context, vxdna>;
 
     /**

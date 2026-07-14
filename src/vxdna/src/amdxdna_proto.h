@@ -8,6 +8,21 @@
 
 #define AMDXDNA_MAX_RING_NUM 64
 
+/*
+ * Max hw contexts per guest context, and the modulus that maps a driver ctx
+ * handle (1..MAX_CTX_ID) to a virtio ring index. The guest and host must agree
+ * on this value: the guest routes a WAIT on ring ((ctx_handle - 1) % N) + 1,
+ * and the host keys its hwctx table by the same function. Range is [1, N], so
+ * ring 0 (AMDXDNA_INVALID_CTX_HANDLE / platform ring) is never used.
+ *
+ * Note the ring index is only a routing key: create_ctx_rsp.handle still
+ * carries the raw driver ctx handle (not the ring index), so guest-side
+ * correlation (telemetry ctx_map, coredump, HW_CONTEXT_BY_ID) is unchanged.
+ * handle != ring_idx; the ring index is derived from the handle by the modulo
+ * above.
+ */
+#define AMDXDNA_MAX_HWCTX_PER_CTX 32
+
 enum amdxdna_ccmd {
     AMDXDNA_CCMD_NOP = 1,
     AMDXDNA_CCMD_INIT,
