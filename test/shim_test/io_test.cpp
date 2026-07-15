@@ -229,17 +229,22 @@ io_test_cmd_submit_and_wait_thruput(
   }
 }
 
-std::vector<std::pair<int, uint64_t>>
+std::vector<std::pair<uint32_t, uint64_t>>
 get_fine_preemption_counters(device *dev)
 {
-  std::vector<std::pair<int, uint64_t>> counters;
+  std::vector<std::pair<uint32_t, uint64_t>> counters;
 
-  const auto telemetry = device_query<query::rtos_telemetry>(dev);
-  for (auto& task : telemetry) {
-    auto user_tid = task.preemption_data.slot_index;
-    auto value = task.preemption_data.preemption_checkpoint_event;
+  // Per hardware context preemption layer (checkpoint) counters are now
+  // exported through the aie-partitions report, so query aie_partition_info
+  // instead of the raw RTOS telemetry. The counters are keyed by context id,
+  // which matches hw_ctx::get_slotidx(). The context id is an unsigned 32-bit
+  // uAPI value, so parse it as such to avoid signed narrowing/overflow.
+  const auto partitions = device_query<query::aie_partition_info>(dev);
+  for (const auto& partition : partitions) {
+    auto ctx_id = static_cast<uint32_t>(std::stoul(partition.metadata.id));
+    auto value = partition.preemption_layer_event;
 
-    counters.emplace_back(user_tid, value);
+    counters.emplace_back(ctx_id, value);
   }
   return counters;
 }
@@ -264,29 +269,31 @@ force_fine_preemption(device *dev, bool control)
 }
 
 uint64_t
-get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pair<int, uint64_t>>& pre)
+get_fine_preemption_counter_delta(device *dev, hw_ctx& ctx, std::vector<std::pair<uint32_t, uint64_t>>& pre)
 {
   auto ctx_id = ctx.get()->get_slotidx();
   auto cur = get_fine_preemption_counters(dev);
-  uint64_t fine_preemption_count;
-  int index = -1;
 
-  // Find the user task ID for the ctx id
-  for (int i = 0; i < cur.size(); i++) {
-    auto id = cur[i].first;
-    if (id == ctx_id) {
-      fine_preemption_count = cur[i].second;
-      index = i;
-      break;
+  // Look up the layer preemption counter for a context by its id. The
+  // aie-partitions report only lists active hardware contexts, so unlike the
+  // old fixed-slot telemetry the counters must be matched by context id rather
+  // than vector index. Both snapshots are taken while the context is alive, so
+  // the entry must exist in each.
+  auto counter_for = [](const std::vector<std::pair<uint32_t, uint64_t>>& counters,
+                        uint32_t id) -> uint64_t {
+    for (const auto& counter : counters) {
+      if (counter.first == id)
+        return counter.second;
     }
-  }
+    throw std::runtime_error("Can't determine preemption counter for ctx!");
+  };
 
-  if (index == -1)
-    throw std::runtime_error("Can't determine user task ID for ctx!");
-  if (fine_preemption_count < pre.at(index).second)
-    throw std::runtime_error("Find preemption counter is smaller after the run!");
+  auto cur_count = counter_for(cur, ctx_id);
+  auto pre_count = counter_for(pre, ctx_id);
+  if (cur_count < pre_count)
+    throw std::runtime_error("Fine preemption counter is smaller after the run!");
 
-  return fine_preemption_count - pre.at(index).second;
+  return cur_count - pre_count;
 }
 
 uint64_t
@@ -341,16 +348,21 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
     bo_set.push_back(std::move(alloc_and_init_bo_set(dev, tag, flow)));
 
   bool preemption_enabled = false;
-  std::vector<std::pair<int, uint64_t>> pre_cntrs;
-  if (io_test_parameters.type == IO_TEST_FORCE_PREEMPTION) {
-    // Enable force preemption and take snapshot of current fw counters before running any cmd.
+  if (io_test_parameters.type == IO_TEST_FORCE_PREEMPTION)
     preemption_enabled = !force_fine_preemption(dev, true);
-    pre_cntrs = get_fine_preemption_counters(dev);
-  }
 
   // Creating HW context for cmd submission
   hw_ctx hwctx{dev, tag, flow};
   auto hwq = hwctx.get()->get_hw_queue();
+
+  // Snapshot the preemption counters after the context exists but before any
+  // command runs. The counters are now sourced from the aie-partitions report,
+  // which only lists active hardware contexts, so the baseline must be read
+  // once this context is present. The firmware counter is cumulative per slot,
+  // so this captures the correct starting value for the delta below.
+  std::vector<std::pair<uint32_t, uint64_t>> pre_cntrs;
+  if (preemption_enabled)
+    pre_cntrs = get_fine_preemption_counters(dev);
 
   // Initialize cmd before submission
   for (auto& boset : bo_set) {
