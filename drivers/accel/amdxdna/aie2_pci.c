@@ -1089,7 +1089,7 @@ int aie2_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
 	u32 msi_idx, msi_address;
 	int ret;
 
-	if (fw_log_level_check(level)) {
+	if (level >= AIE2_FW_LOG_LEVEL_MAX) {
 		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
 		return -EINVAL;
 	}
@@ -1139,7 +1139,7 @@ detach:
 
 int aie2_fw_log_config(struct amdxdna_dev *xdna, u32 level)
 {
-	if (fw_log_level_check(level)) {
+	if (level == AIE2_FW_LOG_LEVEL_OFF || level >= AIE2_FW_LOG_LEVEL_MAX) {
 		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
 		return -EINVAL;
 	}
