@@ -274,6 +274,20 @@ dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   return true;
 }
 
+// set_state()-based tests (force preemption, DPM/power mode) mutate device-wide
+// firmware state via DRM_AMDXDNA_SET_STATE, which the virtio-gpu guest shim does
+// not forward. Require the native amdxdna driver so these tests are skipped on
+// the QEMU guest.
+bool
+dev_filter_is_aie4_or_npu4_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_aie4_or_npu4(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
 static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   if (dev_filter_is_npu4(id, sdev.get()))
@@ -1613,7 +1627,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
    test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
@@ -1676,13 +1690,13 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
   },
   test_case{ "get AIE coredump and check registers", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_io_coredump, {}
   },
   test_case{ "AIE MEM read/write", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_mem, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_io_aie_mem, {}
   },
   test_case{ "AIE REG read/write", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_reg, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
@@ -1694,13 +1708,13 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_mmaped_uptr_bo, {}
   },
   test_case{ "DPM noop (no QoS)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_noop_no_qos, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_noop_no_qos, {}
   },
   test_case{ "DPM refcount scaling", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_refcount_scaling, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_refcount_scaling, {}
   },
   test_case{ "DPM power modes", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_power_modes, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_power_modes, {}
   },
   test_case{ "CERT log: attach/detach", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_attach_detach, {}
