@@ -274,6 +274,19 @@ dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   return true;
 }
 
+// Tests that bypass the shim and issue DRM_IOCTL_AMDXDNA_* directly on the accel
+// fd only work against the native amdxdna driver. On the virtio-gpu guest that fd
+// is virtio-gpu and does not implement those ioctls, so require the native driver.
+bool
+dev_filter_is_aie_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_aie(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
 // set_state()-based tests (force preemption, DPM/power mode) mutate device-wide
 // firmware state via DRM_AMDXDNA_SET_STATE, which the virtio-gpu guest shim does
 // not forward. Require the native amdxdna driver so these tests are skipped on
@@ -1639,16 +1652,16 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_app_health_query_multi_ctx, {}
   },
   test_case{ "query hw_contexts (get_info)", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_query_hw_contexts, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_hw_contexts, {}
   },
   test_case{ "hw_context_all (get_array)", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_hw_context_all, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_hw_context_all, {}
   },
   test_case{ "query telemetry", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_query_telemetry, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_telemetry, {}
   },
   test_case{ "query telemetry header-only buffer fails", {},
-    TEST_POSITIVE, dev_filter_is_aie, TEST_query_telemetry_short_buf, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_telemetry_short_buf, {}
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
