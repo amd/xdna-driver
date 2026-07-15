@@ -149,10 +149,12 @@ void aie4_fill_health_data(struct amdxdna_gem_obj *cmd_abo, struct amdxdna_hwctx
 int aie4_sriov_configure(struct amdxdna_dev *xdna, int num_vfs);
 int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs);
 int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev);
+int aie4_vfs_alive(struct amdxdna_dev *xdna);
 #else
 #define aie4_sriov_configure NULL
 static inline int aie4_sriov_stop(struct amdxdna_dev_hdl *ndev) { return 0; }
 static inline int aie4_create_vfs(struct amdxdna_dev_hdl *ndev, int num_vfs) { return 0; }
+static inline int aie4_vfs_alive(struct amdxdna_dev *xdna) { return 0; }
 #endif
 
 /* aie4_message.c */

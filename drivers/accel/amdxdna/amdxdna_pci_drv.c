@@ -540,18 +540,27 @@ static void amdxdna_remove(struct pci_dev *pdev)
 
 static const struct dev_pm_ops amdxdna_pm_ops = {
 	SYSTEM_SLEEP_PM_OPS(amdxdna_pm_suspend, amdxdna_pm_resume)
-	RUNTIME_PM_OPS(amdxdna_pm_suspend, amdxdna_pm_resume, NULL)
+	RUNTIME_PM_OPS(amdxdna_pm_runtime_suspend, amdxdna_pm_runtime_resume, NULL)
 };
 
 static int amdxdna_sriov_configure(struct pci_dev *pdev, int num_vfs)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+	int ret;
 
 	guard(mutex)(&xdna->dev_lock);
-	if (xdna->dev_info->ops->sriov_configure)
-		return xdna->dev_info->ops->sriov_configure(xdna, num_vfs);
 
-	return -ENOENT;
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		return ret;
+
+	if (xdna->dev_info->ops->sriov_configure)
+		ret = xdna->dev_info->ops->sriov_configure(xdna, num_vfs);
+	else
+		ret = -EOPNOTSUPP;
+
+	amdxdna_pm_suspend_put(xdna);
+	return ret;
 }
 
 static struct pci_driver amdxdna_pci_driver = {

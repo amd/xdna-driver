@@ -716,9 +716,7 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 
 	amdxdna_vbnv_init(xdna);
 
-	pm_runtime_disable(&pdev->dev);
 	XDNA_DBG(xdna, "init finished");
-
 	return 0;
 }
 
@@ -1146,6 +1144,17 @@ static int aie4_pf_suspend(struct amdxdna_dev *xdna)
 	return 0;
 }
 
+static int aie4_pf_runtime_suspend(struct amdxdna_dev *xdna)
+{
+	int ret;
+
+	ret = aie4_vfs_alive(xdna);
+	if (ret)
+		return ret;
+
+	return aie4_pf_suspend(xdna);
+}
+
 static int aie4_vf_suspend(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
@@ -1162,6 +1171,18 @@ static int aie4_vf_suspend(struct amdxdna_dev *xdna)
 	amdxdna_async_events_free(&ndev->aie);
 
 	XDNA_DBG(xdna, "vf suspend done");
+	return 0;
+}
+
+static int aie4_vf_runtime_suspend(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+
+	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
+	aie4_hwctx_suspend_all(ndev);
+	aie4_vf_hw_stop(ndev);
+
+	XDNA_DBG(xdna, "vf runtime suspend done");
 	return 0;
 }
 
@@ -1317,6 +1338,7 @@ static int aie4_pf_init(struct amdxdna_dev *xdna)
 
 	aie4_msg_init(xdna->dev_handle);
 	amdxdna_dpt_init(&xdna->dev_handle->aie);
+	amdxdna_pm_init(xdna);
 	return 0;
 
 free_work_buf:
@@ -1338,6 +1360,7 @@ static int aie4_vf_init(struct amdxdna_dev *xdna)
 
 	aie4_msg_init(xdna->dev_handle);
 	amdxdna_dpt_init(&xdna->dev_handle->aie);
+	amdxdna_pm_init(xdna);
 	return 0;
 }
 
@@ -1359,6 +1382,7 @@ static int aie4_classic_init(struct amdxdna_dev *xdna)
 
 	aie4_msg_init(xdna->dev_handle);
 	amdxdna_dpt_init(&xdna->dev_handle->aie);
+	amdxdna_pm_init(xdna);
 	return 0;
 
 free_work_buf:
@@ -1370,6 +1394,7 @@ static void aie4_pf_fini(struct amdxdna_dev *xdna)
 {
 	int ret;
 
+	amdxdna_pm_fini(xdna);
 	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 
 	ret = aie4_sriov_stop(xdna->dev_handle);
@@ -1384,12 +1409,14 @@ static void aie4_pf_fini(struct amdxdna_dev *xdna)
 
 static void aie4_vf_fini(struct amdxdna_dev *xdna)
 {
+	amdxdna_pm_fini(xdna);
 	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 	aie4_vf_hw_stop(xdna->dev_handle);
 }
 
 static void aie4_classic_fini(struct amdxdna_dev *xdna)
 {
+	amdxdna_pm_fini(xdna);
 	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 	aie4_classic_hw_stop(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
@@ -1571,6 +1598,8 @@ const struct amdxdna_dev_ops aie4_pf_ops = {
 	.sriov_configure        = aie4_sriov_configure,
 	.resume			= aie4_pf_resume,
 	.suspend		= aie4_pf_suspend,
+	.runtime_resume		= aie4_pf_resume,
+	.runtime_suspend	= aie4_pf_runtime_suspend, /* additional check on VM passthrough */
 	.register_async_event	= aie4_async_event_register,
 	.handle_dev_async_event	= aie4_handle_dev_event,
 };
@@ -1590,6 +1619,8 @@ const struct amdxdna_dev_ops aie4_vf_ops = {
 	.get_array		= aie4_get_array,
 	.resume			= aie4_vf_resume,
 	.suspend		= aie4_vf_suspend,
+	.runtime_resume		= aie4_vf_resume,
+	.runtime_suspend	= aie4_vf_runtime_suspend, /* each VF needs to clean up itself */
 	.register_async_event	= aie4_async_event_register,
 	.handle_dev_async_event	= aie4_handle_dev_event,
 };
@@ -1609,6 +1640,8 @@ const struct amdxdna_dev_ops aie4_classic_ops = {
 	.get_array		= aie4_get_array,
 	.resume			= aie4_classic_resume,
 	.suspend		= aie4_classic_suspend,
+	.runtime_resume		= aie4_classic_resume,
+	.runtime_suspend	= aie4_classic_suspend,
 	.register_async_event	= aie4_async_event_register,
 	.handle_dev_async_event	= aie4_handle_dev_event,
 };
