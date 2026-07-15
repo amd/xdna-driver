@@ -92,6 +92,8 @@ hcall_cmd2name(unsigned long cmd)
     return "AMDXDNA_CCMD_GET_INFO";
   case AMDXDNA_CCMD_READ_SYSFS:
     return "AMDXDNA_CCMD_READ_SYSFS";
+  case AMDXDNA_CCMD_SYNC_BO:
+    return "AMDXDNA_CCMD_SYNC_BO";
   }
 
   return "UNKNOWN(" + std::to_string(cmd) + ")";
@@ -749,6 +751,22 @@ import_bo(import_bo_arg& bo_arg) const
   bo_arg.boinfo.size = size;
 
   save_bo_info(gboh, bo_arg.boinfo);
+}
+
+void
+platform_drv_virtio::
+sync_bo(sync_bo_arg& arg) const
+{
+  amdxdna_ccmd_sync_bo_req req = {
+    .hdr = { AMDXDNA_CCMD_SYNC_BO, sizeof(req) },
+    .handle = arg.bo.handle,
+    .direction = arg.direction == xrt_core::buffer_handle::direction::host2device ?
+      SYNC_DIRECT_TO_DEVICE : SYNC_DIRECT_FROM_DEVICE,
+    .offset = arg.offset,
+    .size = arg.size,
+  };
+  amdxdna_ccmd_sync_bo_rsp rsp = {};
+  hcall(&req, &rsp, sizeof(rsp));
 }
 
 }

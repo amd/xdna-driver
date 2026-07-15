@@ -101,6 +101,9 @@ private:
 
   void
   import_bo(import_bo_arg& arg) const override;
+
+  void
+  sync_bo(sync_bo_arg& arg) const override;
 };
 
 }
