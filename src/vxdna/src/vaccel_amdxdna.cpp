@@ -1172,6 +1172,30 @@ wait_cmd(const struct amdxdna_ccmd_wait_cmd_req *req)
 
 void
 vxdna_context::
+sync_bo(const struct amdxdna_ccmd_sync_bo_req *req)
+{
+    // The guest BO handle is the host GEM handle, but all guest contexts share
+    // the native client's GEM namespace (single client per QEMU). Validate the
+    // BO is owned by this context before issuing the driver ioctl.
+    auto bo = m_bo_table.lookup(req->handle);
+    if (!bo)
+        VACCEL_THROW_MSG(-EINVAL, "sync_bo: BO %u not found in ctx %u",
+                         req->handle, get_id());
+
+    struct amdxdna_drm_sync_bo arg = {};
+    arg.handle = req->handle;
+    arg.direction = req->direction;
+    arg.offset = req->offset;
+    arg.size = req->size;
+    if (ioctl(get_fd(), DRM_IOCTL_AMDXDNA_SYNC_BO, &arg))
+        VACCEL_THROW_MSG(-errno, "sync_bo ioctl failed for BO %u, errno %d",
+                         req->handle, errno);
+
+    write_err_rsp(0); // Success
+}
+
+void
+vxdna_context::
 get_info(const struct amdxdna_ccmd_get_info_req *req)
 {
     auto res = lookup_resource_for_ctx(get_device(), req->info_res, get_id(),
@@ -1574,6 +1598,16 @@ vxdna_ccmd_read_sysfs([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdn
     });
 }
 
+static void
+vxdna_ccmd_sync_bo([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                   const void *hdr)
+{
+    auto *req = static_cast<const struct amdxdna_ccmd_sync_bo_req *>(hdr);
+    vxdna_ccmd_error_wrap(ctx, [&]() {
+        ctx->sync_bo(req);
+    });
+}
+
 // Definition of the CCMD handler type for AMDXDNA
 using amdxdna_ccmd_handler_t = void(*)(vxdna &device,
     const std::shared_ptr<vxdna_context>& ctx,
@@ -1592,7 +1626,7 @@ struct amdxdna_ccmd_dispatch_entry {
 #define AMD_CCMD_DISPATCH_ENTRY(name) \
     { #name, vxdna_ccmd_##name, sizeof(struct amdxdna_ccmd_##name##_req) }
 
-constexpr size_t AMDXDNA_CCMD_COUNT = 11;
+constexpr size_t AMDXDNA_CCMD_COUNT = 12;
 constexpr std::array<amdxdna_ccmd_dispatch_entry, AMDXDNA_CCMD_COUNT> amdxdna_ccmd_dispatch_table = {{
     AMD_CCMD_DISPATCH_ENTRY(nop),
     AMD_CCMD_DISPATCH_ENTRY(init),
@@ -1605,6 +1639,7 @@ constexpr std::array<amdxdna_ccmd_dispatch_entry, AMDXDNA_CCMD_COUNT> amdxdna_cc
     AMD_CCMD_DISPATCH_ENTRY(wait_cmd),
     AMD_CCMD_DISPATCH_ENTRY(get_info),
     AMD_CCMD_DISPATCH_ENTRY(read_sysfs),
+    AMD_CCMD_DISPATCH_ENTRY(sync_bo),
 }};
 
 void

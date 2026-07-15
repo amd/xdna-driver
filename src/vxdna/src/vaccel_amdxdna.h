@@ -354,6 +354,18 @@ public:
      */
     void read_sysfs(const struct amdxdna_ccmd_read_sysfs_req *req);
 
+    /**
+     * @brief Sync a BO's cache/DMA state via the driver (DRM_IOCTL_AMDXDNA_SYNC_BO)
+     *
+     * Validates the BO belongs to this context, then forwards to the host
+     * driver. Needed for BOs whose sync can't be done by a guest CPU cache
+     * flush (e.g. firmware-written debug/uc_debug BOs read back device->host).
+     *
+     * @param req Sync request (BO handle, direction, offset, size)
+     * @throws vaccel_error if the BO isn't owned by this ctx or the ioctl fails
+     */
+    void sync_bo(const struct amdxdna_ccmd_sync_bo_req *req);
+
     /** @} */
 
     /**

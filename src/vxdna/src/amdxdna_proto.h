@@ -35,6 +35,7 @@ enum amdxdna_ccmd {
     AMDXDNA_CCMD_WAIT_CMD,
     AMDXDNA_CCMD_GET_INFO,
     AMDXDNA_CCMD_READ_SYSFS,
+    AMDXDNA_CCMD_SYNC_BO,
 };
 
 #ifdef __cplusplus
@@ -201,6 +202,25 @@ struct amdxdna_ccmd_get_info_rsp {
 struct amdxdna_ccmd_read_sysfs_req {
     struct vdrm_ccmd_req hdr;
     char node_name[];
+};
+
+/*
+ * AMDXDNA_CCMD_SYNC_BO
+ *
+ * direction carries the driver SYNC_DIRECT_TO_DEVICE / SYNC_DIRECT_FROM_DEVICE
+ * value; handle is the guest BO handle (== host GEM handle).
+ */
+struct amdxdna_ccmd_sync_bo_req {
+    struct vdrm_ccmd_req hdr;
+    uint32_t handle;
+    uint32_t direction;
+    uint64_t offset;
+    uint64_t size;
+};
+DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_sync_bo_req)
+
+struct amdxdna_ccmd_sync_bo_rsp {
+    struct amdxdna_ccmd_rsp hdr;
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_read_sysfs_req)
 
