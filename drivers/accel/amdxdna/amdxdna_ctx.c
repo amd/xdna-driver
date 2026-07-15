@@ -214,6 +214,45 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
 	return 0;
 }
 
+#define AMDXDNA_MIN_HWCTX_ID	(AMDXDNA_INVALID_CTX_HANDLE + 1)
+
+/*
+ * Allocate a device-wide-unique hwctx ID cyclically.
+ *
+ * The ID must be unique across the whole device (not just per client) so a
+ * context is identified unambiguously even when one process opens the device
+ * more than once. Allocation is therefore done from a device-wide IDA, while
+ * the id->hwctx map stays per-client (amdxdna_client.hwctx_xa) so lookups only
+ * ever see the caller's own contexts.
+ *
+ * The allocation must be cyclic. IDA has no cyclic variant (only xa_alloc_cyclic
+ * does), so keep an explicit @next_hwctxid cursor and search [cursor, MAX] then
+ * wrap to [MIN, MAX]. Cyclic (rather than IDA's default lowest-free) is required
+ * because the virtio-gpu guest shim derives its ring index from this ID by
+ * modulo and virtio-gpu exposes only 64 rings: not reusing a just-freed ID keeps
+ * a new context off a ring slot whose previous owner may not be fully torn down
+ * yet. The IDA has its own internal lock; @next_hwctxid is serialized by
+ * dev_lock, which the only caller (create) holds.
+ */
+static int amdxdna_hwctx_id_alloc(struct amdxdna_dev *xdna)
+{
+	int id;
+
+	if (xdna->next_hwctxid < AMDXDNA_MIN_HWCTX_ID)
+		xdna->next_hwctxid = AMDXDNA_MIN_HWCTX_ID;
+
+	id = ida_alloc_range(&xdna->hwctx_ida, xdna->next_hwctxid,
+			     MAX_HWCTX_ID, GFP_KERNEL);
+	if (id == -ENOSPC)
+		id = ida_alloc_range(&xdna->hwctx_ida, AMDXDNA_MIN_HWCTX_ID,
+				     MAX_HWCTX_ID, GFP_KERNEL);
+	if (id >= 0)
+		xdna->next_hwctxid = (id >= MAX_HWCTX_ID) ?
+			AMDXDNA_MIN_HWCTX_ID : id + 1;
+
+	return id;
+}
+
 /*
  * This should be called in close() and remove(). DO NOT call in other syscalls.
  * This guarantee that when hwctx and resources will be released, if user
@@ -221,14 +260,17 @@ int amdxdna_cmd_set_error(struct amdxdna_gem_obj *abo,
  */
 void amdxdna_hwctx_remove_all(struct amdxdna_client *client)
 {
+	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_hwctx *hwctx;
 	unsigned long hwctx_id;
 
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
-		XDNA_DBG(client->xdna, "PID %d close HW context %d",
-			 client->pid, hwctx->id);
-		xa_erase(&client->hwctx_xa, hwctx->id);
+		u32 id = hwctx->id;
+
+		XDNA_DBG(xdna, "PID %d close HW context %d", client->pid, id);
+		xa_erase(&client->hwctx_xa, id);
 		amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
+		ida_free(&xdna->hwctx_ida, id);
 	}
 }
 
@@ -283,12 +325,18 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		goto fini_hwctx;
 	}
 
-	ret = xa_alloc_cyclic(&client->hwctx_xa, &hwctx->id, hwctx,
-			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_HWCTX_ID),
-			      &client->next_hwctxid, GFP_KERNEL);
+	ret = amdxdna_hwctx_id_alloc(xdna);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "Allocate hwctx ID failed, ret %d", ret);
 		goto free_name;
+	}
+	hwctx->id = ret;
+
+	/* Publish into the per-client map; submit/wait/etc. look up here. */
+	ret = xa_err(xa_store(&client->hwctx_xa, hwctx->id, hwctx, GFP_KERNEL));
+	if (ret) {
+		XDNA_ERR(xdna, "Store hwctx %d failed, ret %d", hwctx->id, ret);
+		goto free_id;
 	}
 
 	args->handle = hwctx->id;
@@ -301,6 +349,8 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	drm_dev_exit(idx);
 	return 0;
 
+free_id:
+	ida_free(&xdna->hwctx_ida, hwctx->id);
 free_name:
 	kfree(hwctx->name);
 fini_hwctx:
@@ -342,6 +392,7 @@ int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct d
 	 * SRCU to synchronize with exec command ioctls.
 	 */
 	amdxdna_hwctx_destroy_rcu(hwctx, &client->hwctx_srcu);
+	ida_free(&xdna->hwctx_ida, args->handle);
 
 	XDNA_DBG(xdna, "PID %d destroyed HW context %d", client->pid, args->handle);
 out:
@@ -641,6 +692,11 @@ int amdxdna_cmd_submit(struct amdxdna_client *client,
 		goto put_bos;
 	}
 
+	/*
+	 * The lookup is in the caller's own hwctx_xa, so it can only ever return
+	 * this client's context; the per-client hwctx_srcu keeps it alive across
+	 * the blocking submit (drained by amdxdna_hwctx_destroy_rcu()).
+	 */
 	idx = srcu_read_lock(&client->hwctx_srcu);
 	hwctx = xa_load(&client->hwctx_xa, hwctx_hdl);
 	if (!hwctx) {
@@ -749,12 +805,15 @@ int amdxdna_cmd_wait(struct amdxdna_client *client, u32 ctx_hdl,
 	if (!xdna->dev_info->ops->cmd_wait)
 		return -EOPNOTSUPP;
 
-	/* For locking concerns, see amdxdna_drm_exec_cmd_ioctl. */
+	/*
+	 * Per-client lookup + per-client srcu: the wait (possibly unbounded) holds
+	 * only this client's srcu, so a parked waiter stalls only its own client's
+	 * teardown. See amdxdna_drm_exec_cmd_ioctl for the broader locking rationale.
+	 */
 	idx = srcu_read_lock(&client->hwctx_srcu);
 	hwctx = xa_load(&client->hwctx_xa, ctx_hdl);
 	if (!hwctx) {
-		XDNA_DBG(xdna, "PID %d failed to get ctx %d",
-			 client->pid, ctx_hdl);
+		XDNA_DBG(xdna, "PID %d failed to get ctx %d", client->pid, ctx_hdl);
 		ret = -EINVAL;
 		goto unlock_ctx_srcu;
 	}
