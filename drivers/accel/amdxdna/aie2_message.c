@@ -981,9 +981,31 @@ static int
 aie2_cmdlist_fill_slot(void *slot, struct amdxdna_gem_obj *cmd_abo,
 		       size_t *size, u32 *cmd_op)
 {
-	struct amdxdna_dev *xdna = cmd_abo->client->xdna;
+	struct amdxdna_dev *xdna;
+	const struct aie2_exec_msg_ops *ops;
 	int ret;
 	u32 op;
+
+	/* Reject invalid args early; never deref NULL on the cmdlist path. */
+	if (!slot || !cmd_abo || !size || !cmd_op)
+		return -EINVAL;
+	if (!cmd_abo->client)
+		return -EINVAL;
+
+	xdna = cmd_abo->client->xdna;
+	if (!xdna || !xdna->dev_handle)
+		return -ENODEV;
+
+	ops = EXEC_MSG_OPS(xdna);
+	if (!ops)
+		return -EOPNOTSUPP;
+
+	/*
+	 * amdxdna_cmd_get_op() vmaps without a NULL check. Fail closed if the
+	 * command BO cannot be mapped (full fix belongs in the helper).
+	 */
+	if (!amdxdna_gem_vmap(cmd_abo))
+		return -ENOMEM;
 
 	op = amdxdna_cmd_get_op(cmd_abo);
 	if (*cmd_op == ERT_INVALID_CMD)
@@ -993,20 +1015,20 @@ aie2_cmdlist_fill_slot(void *slot, struct amdxdna_gem_obj *cmd_abo,
 
 	switch (op) {
 	case ERT_START_CU:
-		ret = EXEC_MSG_OPS(xdna)->fill_cf_slot(cmd_abo, slot, size);
+		ret = ops->fill_cf_slot(cmd_abo, slot, size);
 		break;
 	case ERT_START_NPU:
-		ret = EXEC_MSG_OPS(xdna)->fill_dpu_slot(cmd_abo, slot, size);
+		ret = ops->fill_dpu_slot(cmd_abo, slot, size);
 		break;
 	case ERT_START_NPU_PREEMPT:
 		if (!AIE_FEATURE_ON(&xdna->dev_handle->aie, AIE2_PREEMPT))
 			return -EOPNOTSUPP;
-		ret = EXEC_MSG_OPS(xdna)->fill_preempt_slot(cmd_abo, slot, size);
+		ret = ops->fill_preempt_slot(cmd_abo, slot, size);
 		break;
 	case ERT_START_NPU_PREEMPT_ELF:
 		if (!AIE_FEATURE_ON(&xdna->dev_handle->aie, AIE2_PREEMPT))
 			return -EOPNOTSUPP;
-		ret = EXEC_MSG_OPS(xdna)->fill_elf_slot(cmd_abo, slot, size);
+		ret = ops->fill_elf_slot(cmd_abo, slot, size);
 		break;
 	default:
 		XDNA_INFO(xdna, "Unsupported op %d", op);
@@ -1101,15 +1123,16 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 			       struct amdxdna_sched_job *job,
 			       int (*notify_cb)(void *, void __iomem *, size_t))
 {
-	struct amdxdna_gem_obj *cmdbuf_abo = aie2_cmdlist_get_cmd_buf(job);
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
-	struct amdxdna_client *client = hwctx->client;
-	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
-	void *cmd_buf = amdxdna_gem_vmap(cmdbuf_abo);
-	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_gem_obj *cmdbuf_abo;
+	struct mailbox_channel *chann;
+	struct amdxdna_gem_obj *cmd_abo;
+	const struct aie2_exec_msg_ops *ops;
+	struct amdxdna_client *client;
+	struct amdxdna_dev *xdna;
 	struct amdxdna_cmd_chain *payload;
 	struct xdna_mailbox_msg msg;
 	union exec_chain_req req;
+	void *cmd_buf;
 	u32 payload_len, ccnt;
 	u32 offset = 0;
 	size_t size;
@@ -1117,6 +1140,32 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 	u32 op;
 	u32 i;
 
+	if (!hwctx || !hwctx->priv || !hwctx->client || !job)
+		return -EINVAL;
+
+	client = hwctx->client;
+	xdna = client->xdna;
+	if (!xdna || !xdna->dev_handle)
+		return -ENODEV;
+
+	chann = hwctx->priv->mbox_chann;
+	if (!chann)
+		return -ENODEV;
+
+	ops = EXEC_MSG_OPS(xdna);
+	if (!ops)
+		return -EOPNOTSUPP;
+
+	/* get_cmd_buf does job->hwctx->priv->cmd_buf[idx] without checks. */
+	if (!job->hwctx || !job->hwctx->priv)
+		return -EINVAL;
+
+	cmdbuf_abo = aie2_cmdlist_get_cmd_buf(job);
+	cmd_abo = job->cmd_bo;
+	if (!cmdbuf_abo || !cmd_abo)
+		return -EINVAL;
+
+	cmd_buf = amdxdna_gem_vmap(cmdbuf_abo);
 	if (!cmd_buf)
 		return -ENOMEM;
 
@@ -1162,12 +1211,12 @@ int aie2_cmdlist_multi_execbuf(struct amdxdna_hwctx *hwctx,
 	print_hex_dump_debug("cmdbufs: ", DUMP_PREFIX_OFFSET, 16, 4,
 			     cmd_buf, offset, false);
 
-	msg.opcode = EXEC_MSG_OPS(xdna)->get_chain_msg_op(op);
+	msg.opcode = ops->get_chain_msg_op(op);
 	if (msg.opcode == MSG_OP_MAX_OPCODE)
 		return -EOPNOTSUPP;
 
-	EXEC_MSG_OPS(xdna)->init_chain_req(&req, amdxdna_gem_dev_addr(cmdbuf_abo),
-					   offset, ccnt);
+	ops->init_chain_req(&req, amdxdna_gem_dev_addr(cmdbuf_abo),
+			    offset, ccnt);
 	drm_clflush_virt_range(cmd_buf, offset);
 
 	msg.handle = job;
@@ -1189,17 +1238,43 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 				struct amdxdna_sched_job *job,
 				int (*notify_cb)(void *, void __iomem *, size_t))
 {
-	struct amdxdna_gem_obj *cmdbuf_abo = aie2_cmdlist_get_cmd_buf(job);
-	struct mailbox_channel *chann = hwctx->priv->mbox_chann;
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct amdxdna_gem_obj *cmd_abo = job->cmd_bo;
-	void *cmd_buf = amdxdna_gem_vmap(cmdbuf_abo);
+	struct amdxdna_gem_obj *cmdbuf_abo;
+	struct mailbox_channel *chann;
+	const struct aie2_exec_msg_ops *ops;
+	struct amdxdna_gem_obj *cmd_abo;
+	struct amdxdna_dev *xdna;
 	struct xdna_mailbox_msg msg;
 	union exec_chain_req req;
+	void *cmd_buf;
 	u32 op = ERT_INVALID_CMD;
 	size_t size;
 	int ret;
 
+	if (!hwctx || !hwctx->priv || !hwctx->client || !job)
+		return -EINVAL;
+
+	xdna = hwctx->client->xdna;
+	if (!xdna || !xdna->dev_handle)
+		return -ENODEV;
+
+	chann = hwctx->priv->mbox_chann;
+	if (!chann)
+		return -ENODEV;
+
+	ops = EXEC_MSG_OPS(xdna);
+	if (!ops)
+		return -EOPNOTSUPP;
+
+	/* get_cmd_buf does job->hwctx->priv->cmd_buf[idx] without checks. */
+	if (!job->hwctx || !job->hwctx->priv)
+		return -EINVAL;
+
+	cmdbuf_abo = aie2_cmdlist_get_cmd_buf(job);
+	cmd_abo = job->cmd_bo;
+	if (!cmdbuf_abo || !cmd_abo)
+		return -EINVAL;
+
+	cmd_buf = amdxdna_gem_vmap(cmdbuf_abo);
 	if (!cmd_buf)
 		return -ENOMEM;
 
@@ -1210,11 +1285,11 @@ int aie2_cmdlist_single_execbuf(struct amdxdna_hwctx *hwctx,
 
 	print_hex_dump_debug("cmdbuf: ", DUMP_PREFIX_OFFSET, 16, 4, cmd_buf, size, false);
 
-	msg.opcode = EXEC_MSG_OPS(xdna)->get_chain_msg_op(op);
+	msg.opcode = ops->get_chain_msg_op(op);
 	if (msg.opcode == MSG_OP_MAX_OPCODE)
 		return -EOPNOTSUPP;
 
-	EXEC_MSG_OPS(xdna)->init_chain_req(&req, amdxdna_gem_dev_addr(cmdbuf_abo), size, 1);
+	ops->init_chain_req(&req, amdxdna_gem_dev_addr(cmdbuf_abo), size, 1);
 	drm_clflush_virt_range(cmd_buf, size);
 
 	msg.handle = job;
