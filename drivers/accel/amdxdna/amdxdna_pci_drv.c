@@ -149,7 +149,7 @@ static void amdxdna_sva_fini(struct amdxdna_client *client)
 static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
-	struct amdxdna_client *tmp, *client;
+	struct amdxdna_client *client;
 	int ret;
 
 	client = kzalloc_obj(*client);
@@ -157,8 +157,10 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		return -ENOMEM;
 
 	ret = init_srcu_struct(&client->hwctx_srcu);
-	if (ret)
-		goto free_client;
+	if (ret) {
+		kfree(client);
+		return ret;
+	}
 
 	client->pid = pid_nr(rcu_access_pointer(filp->pid));
 	client->xdna = xdna;
@@ -172,8 +174,9 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
 			if (!amdxdna_use_carveout(xdna)) {
 				XDNA_ERR(xdna, "PASID unavailable and carveout not configured");
-				ret = -EINVAL;
-				goto cleanup_srcu;
+				cleanup_srcu_struct(&client->hwctx_srcu);
+				kfree(client);
+				return -EINVAL;
 			}
 		}
 	}
@@ -191,15 +194,6 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 	mutex_lock(&xdna->client_lock);
 	mutex_lock(&xdna->dev_lock);
-	amdxdna_for_each_client(xdna, tmp) {
-		if (tmp->pid == client->pid) {
-			mutex_unlock(&xdna->dev_lock);
-			mutex_unlock(&xdna->client_lock);
-			XDNA_WARN(xdna, "pid %d already opened the device", client->pid);
-			ret = -EBUSY;
-			goto fail;
-		}
-	}
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
 	mutex_unlock(&xdna->client_lock);
@@ -211,22 +205,6 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 
 	XDNA_DBG(xdna, "pid %d opened", client->pid);
 	return 0;
-
-fail:
-	if (xdna->dev_info->dev_heap_max_size)
-		drm_mm_takedown(&client->dev_heap_mm);
-	xa_destroy(&client->dev_heap_xa);
-	xa_destroy(&client->hwctx_xa);
-	mutex_destroy(&client->mm_lock);
-	mmdrop(client->mm);
-	amdxdna_sva_fini(client);
-#ifndef AMDXDNA_NPU3A
-cleanup_srcu:
-#endif
-	cleanup_srcu_struct(&client->hwctx_srcu);
-free_client:
-	kfree(client);
-	return ret;
 }
 
 static void amdxdna_client_cleanup(struct amdxdna_client *client)
