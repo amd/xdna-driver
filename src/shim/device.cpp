@@ -20,8 +20,11 @@
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <map>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -270,6 +273,58 @@ struct aie_info
   }
 };
 
+// Preemption frame and layer boundary event counters for a single
+// hardware context, extracted from RTOS telemetry.
+struct preemption_events
+{
+  uint64_t frame_events = 0;  // Preemptions taken at a frame boundary.
+  uint64_t layer_events = 0;  // Preemptions taken at a layer checkpoint.
+};
+
+// Build a map of hardware context id to its preemption frame and layer
+// boundary event counters.
+//
+// The counters live in the RTOS telemetry payload (already parsed by the
+// rtos_telemetry query handler) and are keyed there by slot_index. On AIE2
+// the driver populates slot_index with the hardware context id from the
+// amdxdna ctx_map, which matches amdxdna_drm_hwctx_entry::context_id. On AIE4
+// there is no such mapping and slot_index is the firmware micro-controller
+// slot, which lines up with amdxdna_drm_hwctx_entry::hwctx_id instead. Callers
+// therefore select the lookup key by device generation (hwctx_id on AIE4,
+// context_id otherwise); probing context_id unconditionally could false-match
+// an unrelated AIE4 telemetry slot since context_id is allocated cyclically
+// from a small value.
+//
+// Reusing the rtos_telemetry query keeps the telemetry parsing in a single
+// place so both the aie-partitions report and the preemption report share the
+// same source of frame and layer event data.
+//
+// @param device Device to query.
+// @return Map of hardware context id to its preemption event counters. Empty
+//         when RTOS telemetry is not supported on the device.
+static std::map<uint32_t, preemption_events>
+get_preemption_events(const xrt_core::device* device)
+{
+  std::map<uint32_t, preemption_events> events;
+  try {
+    const auto telemetry = xrt_core::device_query<xrt_core::query::rtos_telemetry>(device);
+    for (const auto& task : telemetry) {
+      const auto& preempt = task.preemption_data;
+      events[static_cast<uint32_t>(preempt.slot_index)] =
+        preemption_events{preempt.preemption_frame_boundary_events,
+                          preempt.preemption_checkpoint_event};
+    }
+  }
+  catch (const std::exception& e) {
+    // RTOS telemetry is optional. It may be unsupported on this device or the
+    // query may fail; enriching with preemption events is best effort, so
+    // report zero events rather than failing the aie_partition_info query.
+    // Log at debug level to aid diagnosis without spamming the normal path.
+    shim_debug("preemption event enrichment skipped: %s", e.what());
+  }
+  return events;
+}
+
 struct partition_info
 {
   using result_type = std::any;
@@ -279,6 +334,26 @@ struct partition_info
   {
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // The RTOS telemetry preemption counters are keyed differently per
+    // device generation: on AIE4 by the firmware micro-controller slot
+    // (amdxdna_drm_hwctx_entry::hwctx_id) and on AIE2 by the hardware context
+    // id (amdxdna_drm_hwctx_entry::context_id). Select the join key by
+    // generation rather than probing both, because context_id is allocated
+    // cyclically from a small value and could otherwise false-match an
+    // unrelated telemetry slot on AIE4.
+    //
+    // Reading the PCI device id can throw. Preemption enrichment is best
+    // effort, so if the generation cannot be determined leave the optional
+    // unset and skip enrichment (counters stay zero) rather than guessing a
+    // key that could attach wrong counts, or failing the whole query.
+    std::optional<bool> is_aie4_dev;
+    try {
+      is_aie4_dev = is_aie4(xrt_core::device_query<query::pcie_id>(device).device_id);
+    }
+    catch (const std::exception& e) {
+      shim_debug("preemption enrichment skipped, device generation unknown: %s", e.what());
+    }
 
     amdxdna_drm_hwctx_entry* data;
     const uint32_t output_entries = 1024;
@@ -321,6 +396,8 @@ struct partition_info
         data_size = legacy_arg.buffer_size / sizeof(*legacy_data);
         legacy_data = reinterpret_cast<decltype(legacy_data)>(legacy_payload.data());
 
+        const auto legacy_preemption_event_map = get_preemption_events(device);
+
         query::aie_partition_info::result_type output;
         for (uint32_t i = 0; i < data_size; i++) {
           const auto& entry = legacy_data[i];
@@ -335,6 +412,22 @@ struct partition_info
           new_entry.command_completions = entry.command_completions;
           new_entry.migrations = entry.migrations;
           new_entry.preemptions = entry.preemptions;
+          // The legacy amdxdna_drm_query_hwctx struct only exposes context_id,
+          // not hwctx_id, so the generation-based key selection used on the
+          // modern path is not possible here. This legacy ioctl is the AIE2-era
+          // path where the telemetry slot_index is the hardware context id, so
+          // the join by context_id is correct; AIE4 (keyed by hwctx_id) always
+          // supports the modern DRM_AMDXDNA_HW_CONTEXT_ALL ioctl below, so it
+          // never reaches this path. Only enrich when the device is known to be
+          // non-AIE4 so an unknown generation does not attach a context_id keyed
+          // count that could be wrong; otherwise the counters stay at zero.
+          if (is_aie4_dev && !*is_aie4_dev) {
+            const auto preempt_it = legacy_preemption_event_map.find(entry.context_id);
+            if (preempt_it != legacy_preemption_event_map.end()) {
+              new_entry.preemption_frame_event = preempt_it->second.frame_events;
+              new_entry.preemption_layer_event = preempt_it->second.layer_events;
+            }
+          }
           new_entry.errors = entry.errors;
           output.push_back(std::move(new_entry));
         }
@@ -361,6 +454,8 @@ struct partition_info
       }
     }
 
+    const auto preemption_event_map = get_preemption_events(device);
+
     query::aie_partition_info::result_type output;
     for (uint32_t i = 0; i < data_size; i++) {
       const auto& entry = data[i];
@@ -375,6 +470,16 @@ struct partition_info
       new_entry.command_completions = entry.command_completions;
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
+      // Only enrich when the device generation is known; guessing a key could
+      // attach wrong counters (see is_aie4_dev above).
+      if (is_aie4_dev) {
+        const auto preempt_key = *is_aie4_dev ? entry.hwctx_id : entry.context_id;
+        const auto preempt_it = preemption_event_map.find(preempt_key);
+        if (preempt_it != preemption_event_map.end()) {
+          new_entry.preemption_frame_event = preempt_it->second.frame_events;
+          new_entry.preemption_layer_event = preempt_it->second.layer_events;
+        }
+      }
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
       new_entry.qos.gops = entry.gops;
