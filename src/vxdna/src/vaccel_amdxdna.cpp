@@ -223,7 +223,7 @@ validate_read_sysfs_inline_payload(const struct amdxdna_ccmd_read_sysfs_req *req
 bool
 uintptr_range_end(uintptr_t base, size_t len, uintptr_t *end_out)
 {
-    if (len > std::numeric_limits<uintptr_t>::max() || base > std::numeric_limits<uintptr_t>::max() - len)
+    if (base > std::numeric_limits<uintptr_t>::max() - len)
         return false;
     *end_out = base + len;
     return true;
