@@ -38,14 +38,6 @@ const char *amdxdna_dpt_kind_str(enum amdxdna_dpt_kind kind)
 	return (kind < AMDXDNA_DPT_KIND_MAX) ? names[kind] : "fw_???";
 }
 
-int fw_log_level_check(u32 level)
-{
-	if (!level || level >= AMDXDNA_DPT_FW_LOG_LEVEL_MAX)
-		return -EINVAL;
-
-	return 0;
-}
-
 static struct amdxdna_dpt __rcu **
 amdxdna_dpt_slot(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind)
 {
@@ -990,7 +982,7 @@ int amdxdna_set_fw_log_state(struct aie_device *aie,
 	if (!fw_log.action)
 		return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_LOG);
 
-	if (fw_log_level_check(fw_log.config))
+	if (!fw_log.config || fw_log.config >= AMDXDNA_DPT_FW_LOG_LEVEL_MAX)
 		return -EINVAL;
 
 	if (!rcu_access_pointer(xdna->fw_log))
