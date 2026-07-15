@@ -13,6 +13,7 @@
 #include <drm/drm_print.h>
 #include <linux/capability.h>
 #include <linux/cred.h>
+#include <linux/idr.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
 #include <linux/srcu.h>
@@ -141,6 +142,14 @@ struct amdxdna_dev {
 	struct mutex			dev_lock; /* per device lock */
 	struct list_head		client_list;
 	struct mutex			client_lock; /* client_list */
+	/*
+	 * Device-wide cyclic allocator for hwctx IDs. Only the ID space is shared
+	 * so a context ID is unique across the whole device; the id->hwctx map and
+	 * its lifetime srcu live per-client (see struct amdxdna_client). next_hwctxid
+	 * is the cyclic cursor. Both are serialized by dev_lock.
+	 */
+	struct ida			hwctx_ida;
+	u32				next_hwctxid;
 	struct amdxdna_drm_query_firmware_version fw_ver;
 	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
 	struct workqueue_struct		*notifier_wq;
@@ -186,9 +195,15 @@ struct amdxdna_io_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
+	/*
+	 * Guards hwctx lifetime against this client's own blocking submit/wait.
+	 * A lookup only ever returns this client's own hwctx (per-client xa), so a
+	 * single per-client srcu is sufficient and a parked waiter can only stall
+	 * its own client's teardown.
+	 */
 	struct srcu_struct		hwctx_srcu;
+	/* id->hwctx map for this client; IDs come from xdna->hwctx_ida. */
 	struct xarray			hwctx_xa;
-	u32				next_hwctxid;
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
 

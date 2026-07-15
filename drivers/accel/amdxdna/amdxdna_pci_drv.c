@@ -179,7 +179,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	}
 #endif
 	mmgrab(client->mm);
-	xa_init_flags(&client->hwctx_xa, XA_FLAGS_ALLOC);
+	xa_init(&client->hwctx_xa);
 	xa_init_flags(&client->dev_heap_xa, XA_FLAGS_ALLOC);
 	/* Devices without a managed dev-heap aperture (e.g. PA-mode aie4) leave
 	 * dev_heap_max_size at 0; drm_mm_init() BUGs on a zero-sized range.
@@ -448,6 +448,7 @@ static void amdxdna_xdna_drm_release(struct drm_device *drm, void *res)
 
 	amdxdna_carveout_fini(xdna);
 	cleanup_srcu_struct(&xdna->dpt_srcu);
+	ida_destroy(&xdna->hwctx_ida);
 }
 
 static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -473,6 +474,7 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	drmm_mutex_init(ddev, &xdna->dev_lock);
 	init_rwsem(&xdna->notifier_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
+	ida_init(&xdna->hwctx_ida);
 	pci_set_drvdata(pdev, xdna);
 
 	ret = init_srcu_struct(&xdna->dpt_srcu);
