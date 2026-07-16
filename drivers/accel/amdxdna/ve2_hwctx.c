@@ -1277,9 +1277,9 @@ static int ve2_config_assign_dbg_buf(struct amdxdna_hwctx *hwctx, u64 mdata_hdl,
 			goto put_mdata;
 		}
 
-		abo = amdxdna_gem_get_obj(client, (u32)mdata->bo_handle, AMDXDNA_BO_SHARE);
+		abo = amdxdna_gem_get_obj(client, mdata->bo_handle, AMDXDNA_BO_SHARE);
 		if (!abo) {
-			XDNA_ERR(xdna, "Failed to get payload BO %llu", mdata->bo_handle);
+			XDNA_ERR(xdna, "Failed to get payload BO %u", mdata->bo_handle);
 			ret = -EINVAL;
 			goto put_mdata;
 		}
