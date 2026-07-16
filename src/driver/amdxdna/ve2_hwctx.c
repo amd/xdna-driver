@@ -1477,6 +1477,19 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	mutex_init(&priv->privctx_lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
 
+	/* Pre-allocate DMA coherent buffer for handshake data.
+	 * Avoids per-init dmam_alloc_coherent/free for each column.
+	 */
+	priv->hs_dma_size = priv->num_col * sizeof(struct handshake);
+	if (priv->hs_dma_size && priv->aie_dev) {
+		priv->hs_dma_va = dma_alloc_coherent(priv->aie_dev,
+						      priv->hs_dma_size,
+						      &priv->hs_dma_pa,
+						      GFP_KERNEL);
+		if (!priv->hs_dma_va)
+			XDNA_WARN(xdna, "Failed to pre-alloc handshake DMA buf");
+	}
+
 	XDNA_DBG(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
 		 hwctx, priv->start_col, hwctx->client->pid);
 
@@ -1559,6 +1572,14 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_get_firmware_status(hwctx);
 
+	/* Free pre-allocated handshake DMA buffer before partition teardown
+	 * since aie_dev becomes invalid after aie_partition_release().
+	 */
+	if (nhwctx->hs_dma_va) {
+		dma_free_coherent(nhwctx->aie_dev, nhwctx->hs_dma_size,
+				  nhwctx->hs_dma_va, nhwctx->hs_dma_pa);
+		nhwctx->hs_dma_va = NULL;
+	}
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv->hwctx_config);

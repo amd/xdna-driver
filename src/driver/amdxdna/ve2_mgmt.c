@@ -74,47 +74,62 @@ static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols
 	if (!hs_data)
 		return;
 
-	for (u32 col = 0; col < max_cols; col++) {
-		kfree(hs_data[col].addr);
-		hs_data[col].addr = NULL;
-	}
+	/* hs_data and cert_hs structs are in a single allocation; just free hs_data */
 	kfree(hs_data);
-	hs_data = NULL;
 }
 
 static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdna,
 							 struct amdxdna_ctx_priv *nhwctx,
 							 bool init)
 {
+	size_t col_size = sizeof(struct handshake);
 	struct aie_op_handshake_data *hs_data;
 	u32 num_col = nhwctx->num_col;
 	struct aie_location aie_loc;
+	struct handshake *cert_hs;
 
-	hs_data = kmalloc_array(num_col, sizeof(*hs_data), GFP_KERNEL);
-	if (!hs_data) {
-		XDNA_ERR(xdna, "No memory for handshake data allocation\n");
-		return NULL;
-	}
-
-	for (u32 col = 0; col < num_col; col++) {
-		struct handshake *cert_hs;
-
-		aie_loc.col = col;
-		cert_hs = kmalloc(sizeof(*cert_hs), GFP_KERNEL);
-		if (!cert_hs) {
-			XDNA_ERR(xdna, "No memory for cert hs packet\n");
-			/* Free previously allocated handshakes */
-			ve2_free_hs_data(hs_data, col);
+	if (nhwctx->hs_dma_va) {
+		hs_data = kmalloc_array(num_col, sizeof(*hs_data), GFP_KERNEL);
+		if (!hs_data) {
+			XDNA_ERR(xdna, "No memory for handshake data allocation\n");
 			return NULL;
 		}
-		memset(cert_hs, 0, sizeof(*cert_hs));
-		if (init)
-			cert_setup_partition(xdna, nhwctx, col, cert_hs);
+		for (u32 col = 0; col < num_col; col++) {
+			aie_loc.col = col;
+			cert_hs = (struct handshake *)((u8 *)nhwctx->hs_dma_va +
+						       col * col_size);
+			if (init) {
+				memset(cert_hs, 0, col_size);
+				cert_setup_partition(xdna, nhwctx, col, cert_hs);
+			}
+			hs_data[col].addr     = (void *)cert_hs;
+			hs_data[col].dma_addr = nhwctx->hs_dma_pa + col * col_size;
+			hs_data[col].size     = col_size;
+			hs_data[col].offset   = 0x0;
+			hs_data[col].loc      = aie_loc;
+		}
+	} else {
+		/* Fallback: single allocation for descriptor array + cert_hs structs */
+		size_t total_size = num_col * sizeof(*hs_data) +
+				    num_col * col_size;
 
-		hs_data[col].addr = (void *)cert_hs;
-		hs_data[col].size = sizeof(struct handshake);
-		hs_data[col].offset = 0x0;
-		hs_data[col].loc = aie_loc;
+		hs_data = kzalloc(total_size, GFP_KERNEL);
+		if (!hs_data) {
+			XDNA_ERR(xdna, "No memory for handshake data allocation\n");
+			return NULL;
+		}
+		cert_hs = (struct handshake *)(hs_data + num_col);
+		for (u32 col = 0; col < num_col; col++) {
+			aie_loc.col = col;
+			if (init)
+				cert_setup_partition(xdna, nhwctx, col,
+						     &cert_hs[col]);
+			hs_data[col].addr     = (void *)&cert_hs[col];
+			hs_data[col].dma_addr = 0;
+			hs_data[col].size     = col_size;
+			hs_data[col].offset   = 0x0;
+			hs_data[col].loc      = aie_loc;
+		}
 	}
 
 	return hs_data;
@@ -353,6 +368,7 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 		XDNA_ERR(xdna, "preparing cert handshake data failed ");
 		return;
 	}
+
 	nhwctx->args->handshake_cols = num_col;
 	nhwctx->args->handshake = (struct aie_op_handshake_data *)hs_data;
 
@@ -361,9 +377,14 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 				AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
 
 	else 
-		nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_ERR_SHIM_INIT |
-                                  AIE_PART_INIT_OPT_HANDSHAKE | AIE_PART_INIT_OPT_DIS_TLAST_ERROR)
-                                  & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV & ~AIE_PART_INIT_ERROR_HANDLING;
+		nhwctx->args->init_opts = (AIE_PART_INIT_OPT_COLUMN_RST |
+                                                AIE_PART_INIT_OPT_SHIM_RST |
+                                                AIE_PART_INIT_OPT_ISOLATE |
+                                                AIE_PART_INIT_OPT_SET_L2_IRQ |
+                                                AIE_PART_INIT_OPT_NMU_CONFIG |
+                                                AIE_PART_INIT_OPT_DIS_TLAST_ERROR |
+                                                AIE_PART_INIT_OPT_ERR_SHIM_INIT |
+                                                AIE_PART_INIT_OPT_HANDSHAKE);
 
 	XDNA_DBG(xdna, "Handshake init hwctx : %p\n", hwctx);
 	XDNA_DBG(xdna,
@@ -388,8 +409,8 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 
 	XDNA_DBG(xdna, "handshake: ve2_partition_initialize ok hwctx=%p", hwctx);
 
-	for (int col = num_col - 1; col >= 0; col--)
-		ve2_partition_uc_wakeup(nhwctx->aie_dev, col);
+        /* Wake up lead UC only */
+	ve2_partition_uc_wakeup(nhwctx->aie_dev, 0);
 
 	XDNA_DBG(xdna, "partition uc_wakeup done cols=%u hwctx=%p", num_col, hwctx);
 
