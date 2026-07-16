@@ -219,6 +219,7 @@ static inline struct host_queue_packet *hsa_queue_get_pkt(struct hsa_queue *queu
 #define NUM_PDI_SAVE		2
 #define HSA_QUEUE_NOT_EMPTY	1
 #define CERT_IS_IDLE		4
+#define COMPLETION_STATUS_DONE	1
 
 struct handshake {
 	u32 mpaie_alive;
@@ -278,7 +279,10 @@ struct handshake {
 	} trace_save;
 	u32 doorbell_pending;
 	u32 runlist_read_idx;
-	u32 reserved1[7];
+	u32 completion_status;	/* 0x74: FW sets to COMPLETION_STATUS_DONE before completion IRQ */
+	u32 last_preemption_id;		/* 0x78 */
+	u32 save_dbg_buf_offset;	/* 0x7c: FW-updated debug-buffer DDR write offset */
+	u32 reserved1[4];		/* pad so vm starts at offset 0xa0 */
 	u32 last_ddr_dm2mm_addr_high;
 	u32 last_ddr_dm2mm_addr_low;
 	u32 last_ddr_mm2dm_addr_high;

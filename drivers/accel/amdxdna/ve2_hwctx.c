@@ -27,6 +27,10 @@ int enable_polling;
 module_param(enable_polling, int, 0644);
 MODULE_PARM_DESC(enable_polling, "Enables host-queue polling timer mode. Polling mode disabled by default.");
 
+static int pktdump;
+module_param(pktdump, int, 0644);
+MODULE_PARM_DESC(pktdump, "Dump host-queue packet contents on submit (debug). Disabled by default.");
+
 #define CTX_TIMER		(msecs_to_jiffies(1))	/* 1ms */
 #define VE2_RETRY_TIMEOUT_MS	5000	/* max wait for a free host-queue slot */
 
@@ -280,6 +284,94 @@ static int ve2_wait_for_retry_slot(struct amdxdna_hwctx *hwctx, u32 timeout_ms)
 	return 0;
 }
 
+/*
+ * Dump the contents of a host-queue packet (direct packet, indirect header and
+ * indirect UC packets) for the given slot. Debug aid; gated by the @pktdump
+ * module parameter. All output uses XDNA_DBG so it is further filtered by the
+ * kernel's dynamic-debug level.
+ */
+static void packet_dump(struct amdxdna_dev *xdna, struct hsa_queue *queue, u64 slot_id)
+{
+	struct host_queue_indirect_hdr *indirect_hdr;
+	struct host_queue_packet *pkt;
+	u64 pkt_paddr, indirect_hdr_paddr;
+	int total_entry;
+	int i;
+
+	if (slot_id >= HOST_QUEUE_ENTRY) {
+		XDNA_ERR(xdna, "Invalid slot_id: %llu\n", slot_id);
+		return;
+	}
+
+	XDNA_DBG(xdna, "hsa dma_addr data 0x%llx\n", queue->hq_header.data_address);
+
+	pkt = &queue->hq_entry[slot_id];
+	XDNA_DBG(xdna, "Packet Dump for slot_id %llu:\n", slot_id);
+	XDNA_DBG(xdna, "xrt_header.common_header.opcode: %u\n",
+		 pkt->xrt_header.common_header.opcode);
+	XDNA_DBG(xdna, "xrt_header.common_header.count: %u\n",
+		 pkt->xrt_header.common_header.count);
+	XDNA_DBG(xdna, "xrt_header.common_header.distribute: %u\n",
+		 pkt->xrt_header.common_header.distribute);
+	XDNA_DBG(xdna, "xrt_header.common_header.indirect: %u\n",
+		 pkt->xrt_header.common_header.indirect);
+	XDNA_DBG(xdna, "xrt_header.completion_signal: %llx\n",
+		 pkt->xrt_header.completion_signal);
+	for (i = 0; i < 12; i++)
+		XDNA_DBG(xdna, "\tdata[%d]: %x\n", i, (u32)pkt->data[i]);
+
+	pkt_paddr = queue->hq_header.data_address + ((u64)pkt - (u64)queue->hq_entry);
+	XDNA_DBG(xdna, "Physical address of host_queue_packet: 0x%llx\n", pkt_paddr);
+
+	indirect_hdr = &queue->hq_indirect_hdr[slot_id];
+	total_entry = indirect_hdr->header.count / sizeof(struct host_indirect_packet_entry);
+
+	XDNA_DBG(xdna, "indirect_hdr.header.opcode: %u\n", indirect_hdr->header.opcode);
+	XDNA_DBG(xdna, "indirect_hdr.header.count: %u\n", indirect_hdr->header.count);
+	XDNA_DBG(xdna, "indirect_hdr.header.distribute: %u\n", indirect_hdr->header.distribute);
+	XDNA_DBG(xdna, "indirect_hdr.header.indirect: %u\n", indirect_hdr->header.indirect);
+	XDNA_DBG(xdna, "Total packet Entry %d\n", total_entry);
+	for (i = 0; i < 2 * total_entry; i += 2) {
+		XDNA_DBG(xdna, "\tindirect_hdr.data[%d]: %x, indirect_hdr.data[%d]: %x\n",
+			 i, (u32)indirect_hdr->data[i], i + 1,
+			 (u32)(indirect_hdr->data[i + 1] & 0x1FFFFFF));
+		XDNA_DBG(xdna, "Retrieved dpu_uc_index: %u\n",
+			 (indirect_hdr->data[i + 1] >> 25) & 0x7F);
+	}
+
+	indirect_hdr_paddr = queue->hq_header.data_address +
+			     ((u64)indirect_hdr - (u64)queue->hq_entry);
+	XDNA_DBG(xdna, "Physical addr of host_queue_indirect_hdr: 0x%llx\n", indirect_hdr_paddr);
+
+	for (i = 0; i < total_entry; i++) {
+		struct host_queue_indirect_pkt *indirect_pkt =
+			&queue->hq_indirect_pkt[i][slot_id];
+		u64 indirect_pkt_paddr = queue->hq_header.data_address +
+			((u64)indirect_pkt - (u64)queue->hq_entry);
+
+		XDNA_DBG(xdna, "\nPhysical address of indirect_pkt[%d]: 0x%llx\n", i,
+			 indirect_pkt_paddr);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.opcode: %u\n",
+			 i, indirect_pkt->header.opcode);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.count: %u\n",
+			 i, indirect_pkt->header.count);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.distribute: %u\n",
+			 i, indirect_pkt->header.distribute);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].header.indirect: %u\n",
+			 i, indirect_pkt->header.indirect);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.dpu_control_code_host_addr_low: %x\n",
+			 i, (u32)indirect_pkt->payload.dpu_control_code_host_addr_low);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.dpu_control_code_host_addr_high: %x\n",
+			 i, (u32)indirect_pkt->payload.dpu_control_code_host_addr_high);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.args_len: %u\n",
+			 i, indirect_pkt->payload.args_len);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.args_host_addr_low: %x\n",
+			 i, (u32)indirect_pkt->payload.args_host_addr_low);
+		XDNA_DBG(xdna, "\t\tindirect_pkt[%d].payload.args_host_addr_high: %x\n",
+			 i, (u32)indirect_pkt->payload.args_host_addr_high);
+	}
+}
+
 static int submit_command(struct amdxdna_hwctx *hwctx, void *cmd_data, u64 *seq, bool last_cmd)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
@@ -417,6 +509,10 @@ static int submit_command_indirect(struct amdxdna_hwctx *hwctx, void *cmd_data, 
 
 	hsa_queue_sync_packet_for_write(&vp->hsa_queue, slot_idx);
 	hsa_queue_sync_indirect_hdr_for_write(&vp->hsa_queue, slot_idx);
+
+	if (pktdump)
+		packet_dump(xdna, queue, slot_idx);
+
 	hsa_queue_commit_slot(hwctx, *seq);
 
 	return 0;
