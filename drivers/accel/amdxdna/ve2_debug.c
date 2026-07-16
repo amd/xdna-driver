@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
+#include <linux/xlnx-ai-engine.h>
 
 #include "drm/amdxdna_accel.h"
 
@@ -404,6 +405,87 @@ static int ve2_get_aie_metadata(struct amdxdna_client *client, struct amdxdna_dr
 	return ret;
 }
 
+/*
+ * Resolve an AIE partition device for clock get/set. If a context is active,
+ * reuse its partition; otherwise request a temporary partition at column 0.
+ * Caller holds xdna->dev_lock, which serializes this against context creation,
+ * so a lack of active partition guarantees the columns are free to request.
+ *
+ * On success returns a valid aie_dev and sets *temp to true when a temporary
+ * partition was allocated (caller must release it via ve2_put_clock_aie_dev()).
+ * On failure returns an ERR_PTR.
+ */
+static struct device *ve2_get_clock_aie_dev(struct amdxdna_dev *xdna, bool *temp)
+{
+	struct amdxdna_dev_hdl *hdl = ve2_dev_hdl(xdna);
+	struct aie_partition_req req = { };
+	struct device *aie_dev;
+	u32 i;
+
+	*temp = false;
+
+	for (i = 0; hdl->ve2_mgmtctx && i < hdl->aie_dev_info.cols; i++) {
+		if (hdl->ve2_mgmtctx[i].aie_dev)
+			return hdl->ve2_mgmtctx[i].aie_dev;
+	}
+
+	req.partition_id = (0 << AIE_PART_ID_START_COL_SHIFT) |
+			   (VE2_MIN_COL_SUPPORT << AIE_PART_ID_NUM_COLS_SHIFT);
+	aie_dev = aie_partition_request(&req);
+	if (IS_ERR(aie_dev)) {
+		XDNA_ERR(xdna, "Failed to request temporary AIE partition: %ld",
+			 PTR_ERR(aie_dev));
+		return aie_dev;
+	}
+
+	*temp = true;
+	return aie_dev;
+}
+
+static void ve2_put_clock_aie_dev(struct device *aie_dev, bool temp)
+{
+	if (temp && !IS_ERR_OR_NULL(aie_dev))
+		aie_partition_release(aie_dev);
+}
+
+static int ve2_get_clock_metadata(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_clock_metadata clock_metadata = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct device *aie_dev;
+	u64 aie_freq = 0;
+	bool temp;
+	int ret;
+
+	if (args->buffer_size != sizeof(clock_metadata)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u, Expected: %zu",
+			 args->buffer_size, sizeof(clock_metadata));
+		return -EINVAL;
+	}
+
+	aie_dev = ve2_get_clock_aie_dev(xdna, &temp);
+	if (IS_ERR(aie_dev))
+		return PTR_ERR(aie_dev);
+
+	ret = aie_partition_get_freq(aie_dev, &aie_freq);
+	ve2_put_clock_aie_dev(aie_dev, temp);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to read AIE frequency: %d", ret);
+		return ret;
+	}
+
+	strscpy(clock_metadata.mp_npu_clock.name, "AIE Clock",
+		sizeof(clock_metadata.mp_npu_clock.name));
+	clock_metadata.mp_npu_clock.freq_mhz = (u16)(aie_freq / 1000000);
+
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &clock_metadata, sizeof(clock_metadata))) {
+		XDNA_ERR(xdna, "Failed to copy clock metadata to user");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -421,6 +503,8 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		return ve2_get_firmware_version(client, args);
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		return ve2_get_aie_metadata(client, args);
+	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
+		return ve2_get_clock_metadata(client, args);
 	default:
 		XDNA_ERR(xdna, "Not supported GET_INFO param %u", args->param);
 		return -EOPNOTSUPP;
@@ -739,6 +823,43 @@ static int ve2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_
 	return ret;
 }
 
+static int ve2_set_clock_freq(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_query_clock set_freq;
+	struct amdxdna_dev *xdna = client->xdna;
+	struct device *aie_dev;
+	u64 freq_hz;
+	bool temp;
+	int ret;
+
+	if (args->buffer_size != sizeof(set_freq)) {
+		XDNA_ERR(xdna, "Invalid buffer size. Given: %u, Expected: %zu",
+			 args->buffer_size, sizeof(set_freq));
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&set_freq, u64_to_user_ptr(args->buffer), sizeof(set_freq))) {
+		XDNA_ERR(xdna, "Failed to copy set_clock_freq from user");
+		return -EFAULT;
+	}
+
+	freq_hz = (u64)set_freq.freq_mhz * 1000000;
+	XDNA_DBG(xdna, "Set AIE clock freq: %llu Hz (%u MHz)", freq_hz, set_freq.freq_mhz);
+
+	aie_dev = ve2_get_clock_aie_dev(xdna, &temp);
+	if (IS_ERR(aie_dev))
+		return PTR_ERR(aie_dev);
+
+	ret = aie_partition_set_freq_req(aie_dev, freq_hz);
+	ve2_put_clock_aie_dev(aie_dev, temp);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to set AIE frequency to %llu Hz: %d", freq_hz, ret);
+	else
+		XDNA_DBG(xdna, "Set AIE frequency to %llu Hz (%u MHz)", freq_hz, set_freq.freq_mhz);
+
+	return ret;
+}
+
 int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -755,6 +876,8 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 	switch (args->param) {
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		return ve2_aie_tile_write(client, args);
+	case DRM_AMDXDNA_SET_CLOCK_FREQ:
+		return ve2_set_clock_freq(client, args);
 	default:
 		XDNA_ERR(xdna, "Unsupported set_state param %u", args->param);
 		return -EOPNOTSUPP;
