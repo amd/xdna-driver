@@ -32,7 +32,7 @@ amdxdna_cmabuf_map(struct dma_buf_attachment *attach,
 	struct sg_table *sgt;
 	int ret;
 
-	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
+	sgt = kzalloc_obj(*sgt);
 	if (!sgt)
 		return ERR_PTR(-ENOMEM);
 
@@ -120,7 +120,7 @@ struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev, size_t size)
 	void *cpu_addr;
 	int ret;
 
-	cmabuf = kzalloc(sizeof(*cmabuf), GFP_KERNEL);
+	cmabuf = kzalloc_obj(*cmabuf);
 	if (!cmabuf)
 		return ERR_PTR(-ENOMEM);
 
