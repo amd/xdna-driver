@@ -1,27 +1,44 @@
 #! /bin/bash --
 #
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2025, Advanced Micro Devices, Inc.
+# Copyright (C) 2025-2026, Advanced Micro Devices, Inc.
 #
 
 # Copy this file to .git/hooks/ in your repository.
 # This will be called in every 'git commit', unless you use '--no-verify' option to disable it.
+#
+# The coding-style check is delegated to tools/codingsty_check.sh, which pulls
+# the latest mainline checkpatch.pl so the hook never depends on the checkpatch
+# version installed on the build host.
 
-CHECKPATCH=/lib/modules/$(uname -r)/build/scripts/checkpatch.pl
+repo_root=$(git rev-parse --show-toplevel) || exit 2
+CODINGSTY="${repo_root}/tools/codingsty_check.sh"
 
-if [ -f ${CHECKPATCH} ]; then
-    echo "run check patch: ${CHECKPATCH}"
-else
-    echo "checkpatch script not found: ${CHECKPATCH}"
+if [ ! -x "${CODINGSTY}" ]; then
+    echo "coding style script not found: ${CODINGSTY}"
     exit 2
 fi
 
-#IGNORE_DEFAULT="FILE_PATH_CHANGES,"
-IGNORE_DEFAULT="FILE_PATH_CHANGES,LINUX_VERSION_CODE,"
-IGNORE_CMD="--ignore ${IGNORE_DEFAULT}"
+# Run from the repository root so the staged paths below (reported relative to
+# the top level by git) resolve regardless of the caller's working directory
+# (e.g. `git -C <subdir> commit`).
+cd "${repo_root}" || exit 2
 
-if ! git diff --cached src/include src/driver | $CHECKPATCH ${IGNORE_CMD} --no-tree --strict -q -
-then
-	echo "Please follow Linux coding style and fix checkpatch reports"
-	exit 1
+# Collect the staged (added/copied/modified) driver source and header files.
+# Use a read loop rather than mapfile so the hook also works with the older
+# Bash 3.2 that ships as /bin/bash on macOS.
+staged_files=()
+while IFS= read -r f; do
+    [ -n "${f}" ] && staged_files+=("${f}")
+done < <(git diff --cached --name-only --diff-filter=ACM -- \
+    'src/include/**/*.h' 'src/driver/**/*.c' 'src/driver/**/*.h' \
+    'include/**/*.h' 'drivers/accel/amdxdna/*.c' 'drivers/accel/amdxdna/*.h')
+
+if [ "${#staged_files[@]}" -eq 0 ]; then
+    exit 0
+fi
+
+if ! "${CODINGSTY}" "${staged_files[@]}"; then
+    echo "Please follow Linux coding style and fix checkpatch reports"
+    exit 1
 fi
