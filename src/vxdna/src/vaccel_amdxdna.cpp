@@ -495,6 +495,7 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
     auto num_iovs = res->get_iovecs(&iovecs);
 
     bool created_here = false;
+    bool use_raw_iovs = false;
     if (m_opaque_handle == AMDXDNA_INVALID_BO_HANDLE) {
         const bool heap_chunk = (m_bo_type == AMDXDNA_BO_DEV_HEAP);
         void *coalesce = nullptr;
@@ -558,21 +559,63 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
                     m_coalesce_va = nullptr;
                     m_coalesce_len = 0;
                 }
-                throw;
+                /*
+                 * Coalescing needs shareable guest memory: mremap(old_size=0)
+                 * only duplicates MAP_SHARED slices. When QEMU is started
+                 * without share=on the slices are private-anon and mremap fails.
+                 * Do not fail here -- for heap chunks too: fall back to handing
+                 * the driver the raw scattered iovecs as a multi-entry va_tbl
+                 * and let CREATE_BO be the arbiter. With an IOMMU (force_iova)
+                 * the driver coalesces the pages into one device address -- for
+                 * a heap into its reserved heap IOVA region; without one
+                 * (SVA/PA) CREATE_BO fails and so does BO creation.
+                 */
+                use_raw_iovs = true;
+                vxdna_dbg("coalesce failed (guest mem not shareable); falling "
+                          "back to %u raw iovecs for BO create", num_iovs);
             }
         }
         m_iov_bytes = total;
-        m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
 
-        size_t buf_size = sizeof(amdxdna_drm_va_tbl) + sizeof(amdxdna_drm_va_entry);
-        std::vector<uint8_t> buf_vec(buf_size);
+        uint32_t n_entries = 1;
+        if (use_raw_iovs) {
+            /* Count entries needed to cover pin_len (truncate the last). */
+            m_vaddr = AMDXDNA_INVALID_ADDR;
+            size_t remaining = pin_len;
+            n_entries = 0;
+            for (uint32_t i = 0; i < num_iovs && remaining; i++) {
+                size_t l = iovecs[i].iov_len < remaining ? iovecs[i].iov_len : remaining;
+                remaining -= l;
+                n_entries++;
+            }
+        } else {
+            m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
+        }
+
+        size_t buf_size = sizeof(amdxdna_drm_va_tbl) +
+                          static_cast<size_t>(n_entries) * sizeof(amdxdna_drm_va_entry);
+        // Back the va_tbl with uint64_t so the storage is 8-byte aligned for its
+        // u64 fields; a uint8_t vector only guarantees byte alignment, and
+        // reinterpreting it as amdxdna_drm_va_tbl would be UB on strict-align archs.
+        std::vector<uint64_t> buf_vec((buf_size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
         auto tbl = reinterpret_cast<amdxdna_drm_va_tbl *>(buf_vec.data());
 
         tbl->udma_fd = -1;
-        tbl->num_entries = 1;
-        tbl->va_entries[0].vaddr =
-            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
-        tbl->va_entries[0].len = static_cast<uint64_t>(pin_len);
+        tbl->num_entries = n_entries;
+        if (use_raw_iovs) {
+            size_t remaining = pin_len;
+            for (uint32_t i = 0; i < n_entries; i++) {
+                size_t l = iovecs[i].iov_len < remaining ? iovecs[i].iov_len : remaining;
+                tbl->va_entries[i].vaddr =
+                    static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iovecs[i].iov_base));
+                tbl->va_entries[i].len = static_cast<uint64_t>(l);
+                remaining -= l;
+            }
+        } else {
+            tbl->va_entries[0].vaddr =
+                static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
+            tbl->va_entries[0].len = static_cast<uint64_t>(pin_len);
+        }
 
         struct amdxdna_drm_create_bo args = {};
         args.vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(buf_vec.data()));
