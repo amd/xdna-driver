@@ -149,6 +149,7 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 	u32 npages, start = 0;
 	struct dma_buf *dbuf;
 	bool readonly = true;
+	bool need_contig;
 	int i, ret = 0;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
@@ -174,11 +175,29 @@ struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
 		goto free_ent;
 	}
 
+	/*
+	 * With an IOMMU domain the scattered pages are mapped to a single
+	 * contiguous device IOVA (iommu_map_sgtable), so the entries need not be
+	 * contiguous in user VA. Without one (PASID/SVA or PA mode) the device
+	 * addresses the BO at its user VA and the BO records only the first
+	 * entry's VA, so require the entries to describe one contiguous VA range.
+	 */
+	need_contig = !amdxdna_iova_on(xdna);
+
 	for (i = 0, exp_info.size = 0; i < num_entries; i++) {
 		if (!IS_ALIGNED(va_ent[i].vaddr, PAGE_SIZE) ||
 		    !IS_ALIGNED(va_ent[i].len, PAGE_SIZE)) {
 			XDNA_ERR(xdna, "Invalid address or len %llx, %llx",
 				 va_ent[i].vaddr, va_ent[i].len);
+			ret = -EINVAL;
+			goto free_ent;
+		}
+
+		if (need_contig && i &&
+		    va_ent[i].vaddr != va_ent[i - 1].vaddr + va_ent[i - 1].len) {
+			XDNA_ERR(xdna, "Non-contiguous va entry %d, %llx after %llx+%llx",
+				 i, va_ent[i].vaddr, va_ent[i - 1].vaddr,
+				 va_ent[i - 1].len);
 			ret = -EINVAL;
 			goto free_ent;
 		}
