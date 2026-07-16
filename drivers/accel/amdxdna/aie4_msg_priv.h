@@ -19,6 +19,9 @@ enum aie4_msg_opcode {
 	AIE4_MSG_OP_ASYNC_EVENT_MSG                  = 0x10004,
 	AIE4_MSG_OP_GET_TELEMETRY                    = 0x10006,
 	AIE4_MSG_OP_SET_RUNTIME_CONFIG               = 0x10007,
+	AIE4_MSG_OP_START_FW_TRACE                   = 0x1000A,
+	AIE4_MSG_OP_STOP_FW_TRACE                    = 0x1000B,
+	AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES          = 0x1000C,
 	AIE4_MSG_OP_QUERY_CERT_FIRMWARE_VERSION      = 0x1000F,
 
 	/* PF only */
@@ -39,6 +42,8 @@ enum aie4_msg_opcode {
 
 	/* System control */
 	AIE4_MSG_OP_ATTACH_WORK_BUFFER               = 0x40001,
+	AIE4_MSG_OP_START_FW_LOG                     = 0x40003,
+	AIE4_MSG_OP_STOP_FW_LOG                      = 0x40004,
 	AIE4_MSG_OP_CALIBRATE_CLOCK                  = 0x40006,
 };
 
@@ -436,5 +441,90 @@ struct aie4_async_ctx_error {
 		struct aie4_msg_app_health_report app_health_report;
 	};
 };
+
+/* Dynamic firmware log levels. */
+enum aie4_fw_log_level {
+	AIE4_FW_LOG_LEVEL_OFF,
+	AIE4_FW_LOG_LEVEL_ERR,
+	AIE4_FW_LOG_LEVEL_WRN,
+	AIE4_FW_LOG_LEVEL_INF,
+	AIE4_FW_LOG_LEVEL_DBG,
+	AIE4_FW_LOG_LEVEL_MAX,
+};
+
+/* Index of NPU_RUNTIME_CONFIG_DYNAMIC_LOGGING_LEVEL in the firmware ABI enum
+ * npu_msg_runtime_config_type (mpnpu-api/aie4/npu_msg_priv.h).
+ */
+#define AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL 0x5
+
+struct aie4_msg_start_fw_log_req {
+	__u64	buff_addr;
+	__u32	buff_size;
+	__u32	log_level;
+	__u32	reserved;
+} __packed;
+
+struct aie4_msg_start_fw_log_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_stop_fw_log_req {
+	__u32	resv;
+} __packed;
+
+struct aie4_msg_stop_fw_log_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+/* Maximum trailing per-type payload (struct npu_msg_runtime_config_*) in the
+ * firmware ABI; today the largest is npu_msg_runtime_config_event_trace_status
+ * at 12 bytes. Rounded up to leave headroom for future configs.
+ */
+#define AIE4_RUNTIME_CFG_MAX_DATA_SIZE 16
+
+struct aie4_msg_runtime_config_fw_log_level {
+	__u32 log_level;
+} __packed;
+
+enum aie4_fw_trace_destination {
+	AIE4_FW_TRACE_DESTINATION_DRAM,
+};
+
+enum aie4_fw_trace_timestamp {
+	AIE4_FW_TRACE_TIMESTAMP_NONE,
+	AIE4_FW_TRACE_TIMESTAMP_NS_OFFSET,
+};
+
+struct aie4_msg_start_fw_trace_req {
+	__u64	categories;
+	__u32	destination;
+	__u32	timestamp;
+	__u64	buff_addr;
+	__u32	buff_size;
+	__u32	reserved;
+} __packed;
+
+struct aie4_msg_start_fw_trace_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_stop_fw_trace_req {
+	__u32	reserved;
+} __packed;
+
+struct aie4_msg_stop_fw_trace_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+struct aie4_msg_set_fw_trace_categories_req {
+	__u64	categories;
+} __packed;
+
+struct aie4_msg_set_fw_trace_categories_resp {
+	enum aie4_msg_status status;
+} __packed;
+
+/* MSI address mask used for the AIE4 DPT (FW log / FW trace) IRQ. */
+#define AIE4_DPT_MSI_ADDR_MASK		GENMASK(23, 0)
 
 #endif /* _AIE4_MSG_PRIV_H_ */

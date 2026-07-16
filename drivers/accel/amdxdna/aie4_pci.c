@@ -9,6 +9,7 @@
 #include <drm/drm_print.h>
 #include <linux/debugfs.h>
 #include <linux/firmware.h>
+#include <linux/rcupdate.h>
 #include <linux/sizes.h>
 #include <linux/pm_runtime.h>
 
@@ -16,6 +17,7 @@
 #include "aie4_pci.h"
 #include "aie4_msg_priv.h"
 #include "amdxdna_ctx.h"
+#include "amdxdna_dpt.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
@@ -956,16 +958,35 @@ static int aie4_get_array(struct amdxdna_client *client,
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
 	struct amdxdna_dev *xdna = client->xdna;
+	bool needs_dev_lock;
 	int ret, idx;
 
 	if (!drm_dev_enter(&xdna->ddev, &idx))
 		return -ENODEV;
 
+	/* FW_LOG / FW_TRACE paths use SRCU instead of dev_lock so multiple
+	 * xrt-smi watchers can sleep in wait_event_interruptible concurrently
+	 * while an admin can still disable logging / tracing via the
+	 * corresponding SET state ioctl.
+	 */
+	switch (args->param) {
+	case DRM_AMDXDNA_FW_LOG:
+	case DRM_AMDXDNA_FW_LOG_CONFIG:
+	case DRM_AMDXDNA_FW_TRACE:
+	case DRM_AMDXDNA_FW_TRACE_CONFIG:
+		needs_dev_lock = false;
+		break;
+	default:
+		needs_dev_lock = true;
+		break;
+	}
+
 	ret = amdxdna_pm_resume_get(xdna);
 	if (ret)
 		goto dev_exit;
 
-	mutex_lock(&xdna->dev_lock);
+	if (needs_dev_lock)
+		mutex_lock(&xdna->dev_lock);
 
 	switch (args->param) {
 	case DRM_AMDXDNA_HW_CONTEXT_ALL:
@@ -983,12 +1004,25 @@ static int aie4_get_array(struct amdxdna_client *client,
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = aie4_get_array_async_error(ndev, args);
 		break;
+	case DRM_AMDXDNA_FW_LOG:
+		ret = amdxdna_get_fw_log(&ndev->aie, args);
+		break;
+	case DRM_AMDXDNA_FW_LOG_CONFIG:
+		ret = amdxdna_get_fw_log_configs(&ndev->aie, args);
+		break;
+	case DRM_AMDXDNA_FW_TRACE:
+		ret = amdxdna_get_fw_trace(&ndev->aie, args);
+		break;
+	case DRM_AMDXDNA_FW_TRACE_CONFIG:
+		ret = amdxdna_get_fw_trace_configs(&ndev->aie, args);
+		break;
 	default:
 		ret = -EOPNOTSUPP;
 		break;
 	}
 
-	mutex_unlock(&xdna->dev_lock);
+	if (needs_dev_lock)
+		mutex_unlock(&xdna->dev_lock);
 
 	amdxdna_pm_suspend_put(xdna);
 
@@ -1282,6 +1316,7 @@ static int aie4_pf_init(struct amdxdna_dev *xdna)
 		goto free_work_buf;
 
 	aie4_msg_init(xdna->dev_handle);
+	amdxdna_dpt_init(&xdna->dev_handle->aie);
 	return 0;
 
 free_work_buf:
@@ -1302,6 +1337,7 @@ static int aie4_vf_init(struct amdxdna_dev *xdna)
 		return ret;
 
 	aie4_msg_init(xdna->dev_handle);
+	amdxdna_dpt_init(&xdna->dev_handle->aie);
 	return 0;
 }
 
@@ -1322,6 +1358,7 @@ static int aie4_classic_init(struct amdxdna_dev *xdna)
 		goto free_work_buf;
 
 	aie4_msg_init(xdna->dev_handle);
+	amdxdna_dpt_init(&xdna->dev_handle->aie);
 	return 0;
 
 free_work_buf:
@@ -1332,6 +1369,8 @@ free_work_buf:
 static void aie4_pf_fini(struct amdxdna_dev *xdna)
 {
 	int ret;
+
+	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 
 	ret = aie4_sriov_stop(xdna->dev_handle);
 	if (ret == -EPERM)
@@ -1345,13 +1384,133 @@ static void aie4_pf_fini(struct amdxdna_dev *xdna)
 
 static void aie4_vf_fini(struct amdxdna_dev *xdna)
 {
+	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 	aie4_vf_hw_stop(xdna->dev_handle);
 }
 
 static void aie4_classic_fini(struct amdxdna_dev *xdna)
 {
+	amdxdna_dpt_fini(&xdna->dev_handle->aie);
 	aie4_classic_hw_stop(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
+}
+
+int aie4_fw_log_init(struct amdxdna_dev *xdna, size_t size, u32 level)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	struct amdxdna_dpt *dpt;
+	u32 msi_idx = 0, msi_address = 0;
+	int ret;
+
+	if (level >= AIE4_FW_LOG_LEVEL_MAX) {
+		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
+		return -EINVAL;
+	}
+
+	dpt = rcu_dereference_protected(xdna->fw_log,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt) {
+		XDNA_ERR(xdna, "FW log handle not allocated");
+		return -ENXIO;
+	}
+
+	ret = aie4_start_fw_log(ndev, dpt->buf, level, size, &msi_idx, &msi_address);
+	if (ret) {
+		if (ret != -EOPNOTSUPP)
+			XDNA_ERR(xdna, "Failed to start FW log: %d", ret);
+		return ret;
+	}
+
+	dpt->io_base = ndev->mbox_base;
+	dpt->msi_address = msi_address & AIE4_DPT_MSI_ADDR_MASK;
+	dpt->msi_idx = msi_idx;
+
+	return 0;
+}
+
+int aie4_fw_log_config(struct amdxdna_dev *xdna, u32 level)
+{
+	struct aie4_msg_runtime_config_fw_log_level cfg = { .log_level = level };
+
+	if (level == AIE4_FW_LOG_LEVEL_OFF || level >= AIE4_FW_LOG_LEVEL_MAX) {
+		XDNA_ERR(xdna, "Invalid firmware log level: %d", level);
+		return -EINVAL;
+	}
+
+	return aie4_set_runtime_cfg(xdna->dev_handle, AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL,
+				    &cfg, sizeof(cfg));
+}
+
+int aie4_fw_log_fini(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	DECLARE_AIE_MSG(aie4_msg_stop_fw_log, AIE4_MSG_OP_STOP_FW_LOG);
+	int ret;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to stop FW log: %d", ret);
+
+	return ret;
+}
+
+int aie4_fw_trace_init(struct amdxdna_dev *xdna, size_t size, u32 categories)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	u32 msi_idx = 0, msi_address = 0;
+	struct amdxdna_dpt *dpt;
+	int ret;
+
+	dpt = rcu_dereference_protected(xdna->fw_trace,
+					lockdep_is_held(&xdna->dev_lock));
+	if (!dpt) {
+		XDNA_ERR(xdna, "FW trace handle not allocated");
+		return -ENXIO;
+	}
+
+	ret = aie4_start_fw_trace(ndev, dpt->buf, size, categories, &msi_idx,
+				  &msi_address);
+	if (ret) {
+		if (ret != -EOPNOTSUPP)
+			XDNA_ERR(xdna, "Failed to start FW trace: %d", ret);
+		return ret;
+	}
+
+	dpt->io_base = ndev->mbox_base;
+	dpt->msi_address = msi_address & AIE4_DPT_MSI_ADDR_MASK;
+	dpt->msi_idx = msi_idx;
+
+	return 0;
+}
+
+int aie4_fw_trace_config(struct amdxdna_dev *xdna, u32 categories)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	DECLARE_AIE_MSG(aie4_msg_set_fw_trace_categories,
+			AIE4_MSG_OP_SET_FW_TRACE_CATEGORIES);
+	int ret;
+
+	req.categories = categories;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna,
+			 "Set FW trace categories failed, ret %d status 0x%x",
+			 ret, resp.status);
+	return ret;
+}
+
+int aie4_fw_trace_fini(struct amdxdna_dev *xdna)
+{
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
+	DECLARE_AIE_MSG(aie4_msg_stop_fw_trace, AIE4_MSG_OP_STOP_FW_TRACE);
+	int ret;
+
+	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
+	if (ret)
+		XDNA_ERR(xdna, "Failed to stop FW trace: %d", ret);
+
+	return ret;
 }
 
 static int aie4_set_state(struct amdxdna_client *client,
@@ -1377,6 +1536,12 @@ static int aie4_set_state(struct amdxdna_client *client,
 		break;
 	case DRM_AMDXDNA_AIE_TILE_WRITE:
 		ret = amdxdna_aie_tile_write(&ndev->aie, client, args);
+		break;
+	case DRM_AMDXDNA_SET_FW_LOG_STATE:
+		ret = amdxdna_set_fw_log_state(&ndev->aie, args);
+		break;
+	case DRM_AMDXDNA_SET_FW_TRACE_STATE:
+		ret = amdxdna_set_fw_trace_state(&ndev->aie, args);
 		break;
 	default:
 		XDNA_ERR(xdna, "Not supported request parameter %u", args->param);
