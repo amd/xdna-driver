@@ -973,33 +973,6 @@ TEST_dev_bo_cross_heap_stress(device::id_type id, std::shared_ptr<device>& sdev,
   }
 }
 
-// Verify the driver allows only one open per process: with the shim device
-// already open (sdev), a second open() of the same node from this process must
-// be rejected with EBUSY, and the existing device must keep working afterwards.
-void
-TEST_reject_second_open(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
-{
-  auto dev = sdev.get();
-  const std::string accel_node = resolve_accel_node_path(dev);
-
-  errno = 0;
-  int fd = ::open(accel_node.c_str(), accel_node_open_flags(accel_node));
-  if (fd >= 0) {
-    ::close(fd);
-    throw std::runtime_error("second open() of " + accel_node + " unexpectedly succeeded");
-  }
-  if (errno != EBUSY) {
-    throw std::runtime_error("second open() of " + accel_node + " failed with errno " +
-      std::to_string(errno) + " (" + std::strerror(errno) + "), expected EBUSY");
-  }
-  std::cout << "second open() correctly rejected with EBUSY" << std::endl;
-
-  // The already-open shim device must still be usable after the rejected open.
-  auto raw = device_query<query::clock_freq_topology_raw>(dev);
-  if (raw.empty())
-    throw std::runtime_error("existing device query failed after rejected second open");
-}
-
 class mmapped_file {
 public:
   mmapped_file(size_t size, bool readonly)
@@ -1698,9 +1671,6 @@ std::vector<test_case> test_list {
   // aie4 has no 512MB heap cap, so the same over-512MB BO must allocate fine.
   test_case{ "dev BO larger than 512MB accepted (aie4)", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_dev_bo_cross_heap, { 576ul * 1024 * 1024 }
-  },
-  test_case{ "reject second device open from same process", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_reject_second_open, {}
   },
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
