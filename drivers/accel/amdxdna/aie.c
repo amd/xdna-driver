@@ -749,9 +749,9 @@ int amdxdna_get_coredump(struct aie_device *aie,
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_coredump_walk_arg wa;
 	struct amdxdna_client *tmp_client;
+	int ret = -ENOENT;
 	size_t buf_size;
 	u8 __user *buf;
-	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -911,9 +911,9 @@ int amdxdna_aie_tile_read(struct aie_device *aie,
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_tile_rw_walk_arg wa;
 	struct amdxdna_client *tmp_client;
+	int ret = -ENOENT;
 	size_t buf_size;
 	u8 __user *buf;
-	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
@@ -1091,8 +1091,8 @@ int amdxdna_aie_tile_write(struct aie_device *aie,
 	struct amdxdna_dev *xdna = client->xdna;
 	struct amdxdna_tile_rw_walk_arg wa;
 	struct amdxdna_client *tmp_client;
+	int ret = -ENOENT;
 	u8 __user *buf;
-	int ret;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
