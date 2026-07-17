@@ -1132,6 +1132,41 @@ error:
 	return ret;
 }
 
+/*
+ * AIE4 Suspend/Resume steps per device type.
+ * -> SUSPEND
+ * <- RESUME
+ *
+ * PF     = PF S3/S4      PF-RTM = PF Runtime PM
+ * VF     = VF S3/S4      VF-RTM = VF Runtime PM
+ *
+ *                              | PF  | PF-RTM | VF  | VF-RTM | Classic
+ * -----------------------------|-----|--------|-----|--------|--------
+ * -> vfs_alive                 |  -  |   Y    |  -  |   -    |   -
+ * -> hwctx_suspend_all         |  -  |   -    |  Y  |   Y    |   Y
+ * -> partition_fini            |  -  |   -    | (1) |   Y    |   Y
+ * -> suspend_fw                |  Y  |   Y    |  -  |   -    |   Y
+ * -> mailbox_fini              |  Y  |   Y    |  Y  |   Y    |   Y
+ * -> free_async_buffer         |  -  |   -    |  Y  |   Y    |   Y
+ * -> stop_psp/smu              |  Y  |   Y    |  -  |   -    |   Y
+ *    ---- power boundary ----
+ * <- pci_enable + set_master   |  Y  |   Y    |  Y  |   Y    |   Y
+ * <- start_smu/psp             |  Y  |   Y    | (2) |  (2)   |   Y
+ * <- mailbox_init              |  Y  |   Y    |  Y  |   Y    |   Y
+ * <- calibrate_clock           |  Y  |   Y    |  -  |   -    |   Y
+ * <- attach_work_buffer        |  Y  |   Y    |  -  |   -    |   Y
+ * <- query_fw                  |  Y  |   Y    |  -  |   -    |   Y
+ * <- query_aie                 |  -  |   -    |  Y  |   Y    |   Y
+ * <- partition_init            |  -  |   -    |  Y  |   Y    |   Y
+ * <- alloc_async_event         |  -  |   -    |  Y  |   Y    |   Y
+ * <- hwctx_resume_all          |  -  |   -    |  Y  |   Y    |   Y
+ * <- restore VFs               |  Y  |   Y    |  -  |   -    |   -
+ *
+ * (1) VF S3/S4 skips partition_fini: PF tears down stateless FW.
+ *     VF RTM must send partition_fini to firmware explicitly.
+ * (2) VF skips start_smu/psp: PF boots firmware on behalf of all VFs.
+ */
+
 static int aie4_pf_suspend(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
