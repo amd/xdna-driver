@@ -388,9 +388,9 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 
 	XDNA_DBG(xdna, "handshake: ve2_partition_initialize ok hwctx=%p", hwctx);
 
-	for (int col = num_col - 1; col >= 0; col--)
-		ve2_partition_uc_wakeup(nhwctx->aie_dev, col);
-
+	//for (int col = num_col - 1; col >= 0; col--)
+		//ve2_partition_uc_wakeup(nhwctx->aie_dev, col);
+		ve2_partition_uc_wakeup(nhwctx->aie_dev, 0);
 	XDNA_DBG(xdna, "partition uc_wakeup done cols=%u hwctx=%p", num_col, hwctx);
 
 release_hs_data:
@@ -435,7 +435,7 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 
 	/* Top need to be scheduled */
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
-		if (mgmtctx->is_idle_due_to_context == 1) {
+		if (mgmtctx->is_idle_due_to_context == 1 || mgmtctx->is_partition_idle == 1) {
 			hwctx = c_ctx->ctx;
 			XDNA_DBG(xdna, "NEW context to be schedule next: %p\n", hwctx);
 			mgmtctx->is_partition_idle = 0;
@@ -445,8 +445,11 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 			break;
 		}
 
-		if (c_ctx->ctx != mgmtctx->active_ctx)
+		if (c_ctx->ctx != mgmtctx->active_ctx) {
 			ve2_request_context_switch(mgmtctx->xdna, mgmtctx);
+                        XDNA_DBG(xdna, "request context to be schedule next: %p active: %p\n", c_ctx->ctx, mgmtctx->active_ctx);
+                        notify_fw_cmd_ready(mgmtctx->active_ctx); mgmtctx->is_partition_idle = 0;
+                }
 
 		break;
 	}
@@ -487,7 +490,7 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 		mgmtctx->active_ctx = hwctx;
 	} else if (mgmtctx->active_ctx != hwctx) {
 		if (mgmtctx->is_partition_idle == 1) {
-			mgmtctx->is_partition_idle = 0;
+			//mgmtctx->is_partition_idle = 0;
 			XDNA_DBG(xdna, "Context switch: active=%p -> new=%p (partition idle)",
 				 mgmtctx->active_ctx, hwctx);
 			ve2_response_ctx_switch_req(mgmtctx);
@@ -501,11 +504,13 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 			mgmtctx->is_partition_idle = 0;
 			ve2_mgmt_handshake_init(xdna, hwctx);
 			mgmtctx->active_ctx = hwctx;
+		} else {
+			notify_fw_cmd_ready(mgmtctx->active_ctx);
 		}
 	}
 
 	mutex_unlock(&mgmtctx->ctx_lock);
-	notify_fw_cmd_ready(mgmtctx->active_ctx);
+	//notify_fw_cmd_ready(mgmtctx->active_ctx);
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
 				  hwctx->client->pid, mgmtctx->start_col,
 				  hwctx->priv->id, (int)command_index);
