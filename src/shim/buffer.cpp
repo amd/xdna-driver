@@ -149,10 +149,18 @@ clflush_data(const void *base, size_t offset, size_t len)
   const char *cur = (const char *)base;
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
+#if defined(__x86_64__) || defined(_M_X64)
+  // x86 CLFLUSH is not ordered vs younger loads; fence so the flush is globally
+  // observed before the host reads the line back (cf. kernel clflush_cache_range).
+  _mm_mfence();
+#endif
   do {
     flush_cache_line(cur);
     cur += cacheline_size;
   } while (cur <= (const char *)lastline);
+#if defined(__x86_64__) || defined(_M_X64)
+  _mm_mfence();
+#endif
 }
 
 bool
