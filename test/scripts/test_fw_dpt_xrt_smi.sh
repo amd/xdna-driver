@@ -888,6 +888,34 @@ test_fw_log_examine_watch() {
                  "$(tail -n 3 "${out}" 2>/dev/null || true)" 3
 }
 
+# Compare three watcher captures for total-set equality with a bounded
+# convergence retry. A killed `xrt-smi ... --watch` child flushes its final
+# poll batch to stdout asynchronously, so `wait` returning does not
+# guarantee the redirected file is complete: a single-shot snapshot can
+# catch one capture a few entries short and report a spurious mismatch even
+# though every watcher receives the identical ring content. Recompute the
+# sort -u sets until all three match or a ~5s timeout elapses. A genuine
+# divergence never converges, so this preserves the assertion's teeth.
+#
+# Usage: watchers_converge REGEX SORTED_A SORTED_B SORTED_C OUT_A OUT_B OUT_C
+# Writes the final sorted sets to SORTED_* and returns 0 iff equal.
+watchers_converge() {
+    local re="$1" sA="$2" sB="$3" sC="$4" oA="$5" oB="$6" oC="$7" i
+    for (( i = 0; i < 25; i++ )); do
+        grep -E "${re}" "${oA}" 2>/dev/null | sort -u >"${sA}" || true
+        grep -E "${re}" "${oB}" 2>/dev/null | sort -u >"${sB}" || true
+        grep -E "${re}" "${oC}" 2>/dev/null | sort -u >"${sC}" || true
+        # Require a non-empty set: three empty captures are equal but must not
+        # be reported as a passing "total-set equality" (the per-watcher
+        # non-empty checks would already have failed in that case).
+        if [ -s "${sA}" ] && cmp -s "${sA}" "${sB}" && cmp -s "${sA}" "${sC}"; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    return 1
+}
+
 # Multi-watcher catch-up: launch three --watch consumers at staggered
 # times with a configure-driven workload batch between each launch. The
 # driver contract is that every watcher -- whenever it joined -- ends up
@@ -987,13 +1015,12 @@ test_fw_log_multi_watcher() {
     local sorted_A="${TMPDIR_}/log_multi_A.sorted"
     local sorted_B="${TMPDIR_}/log_multi_B.sorted"
     local sorted_C="${TMPDIR_}/log_multi_C.sorted"
-    grep -E "${FW_LOG_XRTSMI_RE}" "${out_A}" | sort -u >"${sorted_A}"
-    grep -E "${FW_LOG_XRTSMI_RE}" "${out_B}" | sort -u >"${sorted_B}"
-    grep -E "${FW_LOG_XRTSMI_RE}" "${out_C}" | sort -u >"${sorted_C}"
 
     local uniq_A
-    uniq_A=$(wc -l <"${sorted_A}")
-    if cmp -s "${sorted_A}" "${sorted_B}" && cmp -s "${sorted_A}" "${sorted_C}"; then
+    if watchers_converge "${FW_LOG_XRTSMI_RE}" \
+            "${sorted_A}" "${sorted_B}" "${sorted_C}" \
+            "${out_A}" "${out_B}" "${out_C}"; then
+        uniq_A=$(wc -l <"${sorted_A}")
         pass "total-set equality: all 3 watchers captured identical FW-log sets"
         info "all 3 watchers captured ${uniq_A} unique FW-log entries (after dedupe)"
     else
@@ -1563,13 +1590,12 @@ test_fw_trace_multi_watcher() {
     local sorted_A="${TMPDIR_}/trace_multi_A.sorted"
     local sorted_B="${TMPDIR_}/trace_multi_B.sorted"
     local sorted_C="${TMPDIR_}/trace_multi_C.sorted"
-    grep -E "${FW_TRACE_XRTSMI_RE}" "${out_A}" 2>/dev/null | sort -u >"${sorted_A}" || true
-    grep -E "${FW_TRACE_XRTSMI_RE}" "${out_B}" 2>/dev/null | sort -u >"${sorted_B}" || true
-    grep -E "${FW_TRACE_XRTSMI_RE}" "${out_C}" 2>/dev/null | sort -u >"${sorted_C}" || true
 
     local uA
-    uA=$(wc -l <"${sorted_A}")
-    if cmp -s "${sorted_A}" "${sorted_B}" && cmp -s "${sorted_A}" "${sorted_C}"; then
+    if watchers_converge "${FW_TRACE_XRTSMI_RE}" \
+            "${sorted_A}" "${sorted_B}" "${sorted_C}" \
+            "${out_A}" "${out_B}" "${out_C}"; then
+        uA=$(wc -l <"${sorted_A}")
         pass "total-set equality: all 3 trace watchers captured identical sets of ${uA} unique entries"
     else
         fail "total-set equality violated for trace watchers"
