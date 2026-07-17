@@ -62,6 +62,8 @@ enum amdxdna_drm_ioctl_id {
  * @latency: Frame response latency.
  * @frame_exec_time: Frame execution time.
  * @priority: Request priority.
+ * @user_start_col: User-requested AIE partition start column (VE2).
+ * @reserved: MBZ; ensures 64-bit alignment.
  *
  * User program can provide QoS hints to driver.
  */
@@ -72,6 +74,8 @@ struct amdxdna_qos_info {
 	__u32 latency;
 	__u32 frame_exec_time;
 	__u32 priority;
+	__u32 user_start_col;
+	__u32 reserved; /* ensure 64-bit alignment */
 };
 
 /**
@@ -140,6 +144,7 @@ enum amdxdna_drm_config_hwctx_param {
 	DRM_AMDXDNA_HWCTX_CONFIG_CU,
 	DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF,
 	DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF,
+	DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT,
 };
 
 /**
@@ -811,6 +816,9 @@ struct amdxdna_drm_get_dpt_state {
 #define DRM_AMDXDNA_FW_LOG_CONFIG	7
 #define DRM_AMDXDNA_FW_TRACE_CONFIG	8
 #define DRM_AMDXDNA_AIE_TILE_READ	9
+/* VE2 (aux) backend get_array types. */
+#define DRM_AMDXDNA_HWCTX_AIE_PART_FD	10
+#define DRM_AMDXDNA_HWCTX_MEM_BITMAP	11
 
 /**
  * struct amdxdna_drm_get_array - Get information array.
@@ -956,6 +964,7 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_SET_FW_LOG_STATE,
 	DRM_AMDXDNA_SET_FW_TRACE_STATE,
 	DRM_AMDXDNA_AIE_TILE_WRITE,
+	DRM_AMDXDNA_SET_CLOCK_FREQ,
 };
 
 /**

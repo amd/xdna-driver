@@ -17,7 +17,7 @@
 #include <linux/vmalloc.h>
 
 #include "amdxdna_cbuf.h"
-#ifdef AMDXDNA_NPU3A
+#if defined(AMDXDNA_NPU3A) || defined(AMDXDNA_AUX)
 #include "amdxdna_cma_buf.h"
 #endif
 #include "amdxdna_ctx.h"
@@ -815,7 +815,7 @@ amdxdna_gem_create_shmem_object_cb(struct drm_device *dev, size_t size)
 	return to_gobj(abo);
 }
 
-#ifndef AMDXDNA_NPU3A
+#if !defined(AMDXDNA_NPU3A) && !defined(AMDXDNA_AUX)
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_shmem_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
@@ -912,7 +912,7 @@ amdxdna_gem_create_cbuf_object(struct drm_device *dev, struct amdxdna_drm_create
 	return ret;
 }
 
-#ifdef AMDXDNA_NPU3A
+#if defined(AMDXDNA_NPU3A) || defined(AMDXDNA_AUX)
 static struct amdxdna_gem_obj *
 amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
 {
@@ -945,7 +945,7 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 	dma_buf_put(dma_buf);
 	return ret;
 }
-#endif /* AMDXDNA_NPU3A */
+#endif /* AMDXDNA_NPU3A || AMDXDNA_AUX */
 
 struct drm_gem_object *
 amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
@@ -982,6 +982,17 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf)
 	abo->type = AMDXDNA_BO_SHARE;
 	gobj->resv = dma_buf->resv;
 
+#if defined(AMDXDNA_NPU3A) || defined(AMDXDNA_AUX)
+	/*
+	 * CMA platforms (VE2/aux, NPU3A) have no PASID/IOMMU, so the device
+	 * accesses the BO by physical address. The CMA allocation is physically
+	 * contiguous, so capture the DMA address of the first (only) sg entry;
+	 * amdxdna_gem_dev_addr() returns this for SHARE BOs when PASID is off.
+	 */
+	if (sgt->sgl)
+		abo->mem.dma_addr = sg_dma_address(sgt->sgl);
+#endif
+
 	return gobj;
 
 fail_unmap:
@@ -1005,7 +1016,11 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 	else if (amdxdna_use_carveout(to_xdna_dev(dev)))
 		abo = amdxdna_gem_create_cbuf_object(dev, args);
 	else
-#ifdef AMDXDNA_NPU3A
+#if defined(AMDXDNA_NPU3A) || defined(AMDXDNA_AUX)
+		/*
+		 * VE2 (aux) has no IOMMU, so device buffers must be physically
+		 * contiguous; use the CMA allocator rather than shmem.
+		 */
 		abo = amdxdna_gem_create_cma_object(dev, args);
 #else
 		abo = amdxdna_gem_create_shmem_object(dev, args);
@@ -1134,8 +1149,16 @@ int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_f
 	struct amdxdna_gem_obj *abo;
 	int ret = 0;
 
+	/*
+	 * The XRT shim passes full xcl_bo_flags.all (bank, slot, boflags, use,
+	 * ...) on VE2 (aux). The CMA path only consumes the low 8 bits
+	 * (mem_bitmap) and bit 24 (cacheable); the rest are ignored. PCI/NPU
+	 * requires flags to be zero.
+	 */
+#ifndef AMDXDNA_AUX
 	if (args->flags)
 		return -EINVAL;
+#endif
 
 	XDNA_DBG(xdna, "BO arg type %d vaddr 0x%llx size 0x%llx flags 0x%llx",
 		 args->type, args->vaddr, args->size, args->flags);
@@ -1359,6 +1382,44 @@ int amdxdna_drm_sync_bo_ioctl(struct drm_device *dev,
 		return -ENOENT;
 	}
 	abo = to_xdna_obj(gobj);
+
+#ifdef AMDXDNA_AUX
+	/*
+	 * VE2 (aux) BOs are backed by physically-contiguous CMA memory and the
+	 * device has no IOMMU, so the CPU/device caches are kept in sync via the
+	 * streaming DMA API against the BO's DMA address (the x86 drm_clflush_*
+	 * helpers are not available on arm64). Debug-BO sync is not supported on
+	 * this backend.
+	 */
+	ret = amdxdna_gem_pin(abo);
+	if (ret) {
+		XDNA_ERR(xdna, "Pin BO %d failed, ret %d", args->handle, ret);
+		goto put_obj;
+	}
+
+	if (abo->mem.dma_addr == AMDXDNA_INVALID_ADDR) {
+		XDNA_ERR(xdna, "Sync bo %d has no DMA address", args->handle);
+		amdxdna_gem_unpin(abo);
+		ret = -EINVAL;
+		goto put_obj;
+	}
+
+	if (args->direction == SYNC_DIRECT_TO_DEVICE)
+		dma_sync_single_for_device(dev->dev, abo->mem.dma_addr + args->offset,
+					   args->size, DMA_TO_DEVICE);
+	else if (args->direction == SYNC_DIRECT_FROM_DEVICE)
+		dma_sync_single_for_cpu(dev->dev, abo->mem.dma_addr + args->offset,
+					args->size, DMA_FROM_DEVICE);
+	else
+		ret = -EINVAL;
+
+	amdxdna_gem_unpin(abo);
+
+	XDNA_DBG(xdna, "Sync bo %d offset 0x%llx size 0x%llx dir %u (CMA)",
+		 args->handle, args->offset, args->size, args->direction);
+	drm_gem_object_put(gobj);
+	return ret;
+#endif
 
 	if (abo->type == AMDXDNA_BO_DEV) {
 		struct amdxdna_gem_obj *heap;

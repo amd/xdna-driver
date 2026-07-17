@@ -28,12 +28,14 @@ int amdxdna_pm_suspend(struct device *dev)
 	 * device suspend result (logging/tracing is auxiliary), but surface
 	 * it so it is visible rather than silently swallowed.
 	 */
+#ifndef AMDXDNA_AUX
 	if (!ret) {
 		int dpt_ret = amdxdna_dpt_suspend(xdna);
 
 		if (dpt_ret)
 			XDNA_WARN(xdna, "DPT drain/pause on suspend failed: %d", dpt_ret);
 	}
+#endif
 
 	XDNA_DBG(xdna, "Suspend done ret %d", ret);
 	return ret;
@@ -54,12 +56,14 @@ int amdxdna_pm_resume(struct device *dev)
 	 * auxiliary), but surface it so it is visible in the resume logs
 	 * rather than silently leaving DPT paused.
 	 */
+#ifndef AMDXDNA_AUX
 	if (!ret) {
 		int dpt_ret = amdxdna_dpt_resume(xdna);
 
 		if (dpt_ret)
 			XDNA_WARN(xdna, "DPT re-arm on resume failed: %d", dpt_ret);
 	}
+#endif
 
 	XDNA_DBG(xdna, "Resume done ret %d", ret);
 	return ret;

@@ -103,11 +103,18 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 		/* No need to fail open since user may use pa + carveout later. */
 		if (amdxdna_sva_init(client)) {
 			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
+#ifndef AMDXDNA_AUX
+			/*
+			 * PCI/NPU requires either PASID or a pre-configured
+			 * carveout. VE2 (aux) uses PA mode and may configure
+			 * carveout later, so open must not fail here.
+			 */
 			if (!amdxdna_use_carveout(xdna)) {
 				XDNA_ERR(xdna, "PASID unavailable and carveout not configured");
 				ret = -EINVAL;
 				goto cleanup_srcu;
 			}
+#endif
 		}
 	}
 #endif
@@ -153,7 +160,7 @@ fail:
 	mutex_destroy(&client->mm_lock);
 	mmdrop(client->mm);
 	amdxdna_sva_fini(client);
-#ifndef AMDXDNA_NPU3A
+#if !defined(AMDXDNA_NPU3A) && !defined(AMDXDNA_AUX)
 cleanup_srcu:
 #endif
 	cleanup_srcu_struct(&client->hwctx_srcu);
@@ -294,6 +301,45 @@ static const struct drm_ioctl_desc amdxdna_drm_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(AMDXDNA_GET_ARRAY, amdxdna_drm_get_array_ioctl, 0),
 	DRM_IOCTL_DEF_DRV(AMDXDNA_SET_STATE, amdxdna_drm_set_state_ioctl, DRM_ROOT_ONLY),
 };
+
+void amdxdna_io_stats_job_start(struct amdxdna_client *client)
+{
+	int depth;
+
+	guard(spinlock)(&client->io_stats.lock);
+
+	depth = client->io_stats.job_depth++;
+	if (!depth)
+		client->io_stats.start_time = ktime_get_ns();
+}
+
+void amdxdna_io_stats_job_done(struct amdxdna_client *client)
+{
+	u64 busy_ns;
+	int depth;
+
+	guard(spinlock)(&client->io_stats.lock);
+
+	depth = --client->io_stats.job_depth;
+	if (!depth) {
+		busy_ns = ktime_get_ns() - client->io_stats.start_time;
+		client->io_stats.start_time = 0;
+		client->io_stats.busy_time += busy_ns;
+	}
+}
+
+u64 amdxdna_io_stats_busy_time_ns(struct amdxdna_client *client)
+{
+	u64 busy_ns;
+
+	guard(spinlock)(&client->io_stats.lock);
+
+	busy_ns = client->io_stats.busy_time;
+	if (client->io_stats.job_depth)
+		busy_ns += ktime_get_ns() - client->io_stats.start_time;
+
+	return busy_ns;
+}
 
 static void amdxdna_show_fdinfo(struct drm_printer *p, struct drm_file *filp)
 {
