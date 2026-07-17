@@ -362,8 +362,15 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	int ret;
 	u64 val;
 
+#ifndef AMDXDNA_AUX
+	/*
+	 * VE2 (aux) user space (XRT) does not zero @pad on this ioctl, so the
+	 * MBZ enforcement is limited to the PCI/NPU path where user space
+	 * complies with the ABI.
+	 */
 	if (XDNA_MBZ_DBG(xdna, &args->pad, sizeof(args->pad)))
 		return -EINVAL;
+#endif
 
 	if (!xdna->dev_info->ops->hwctx_config)
 		return -EOPNOTSUPP;
@@ -392,6 +399,7 @@ int amdxdna_drm_config_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 		break;
 	case DRM_AMDXDNA_HWCTX_ASSIGN_DBG_BUF:
 	case DRM_AMDXDNA_HWCTX_REMOVE_DBG_BUF:
+	case DRM_AMDXDNA_HWCTX_CONFIG_OPCODE_TIMEOUT:
 		/* For those types that param_val is a value */
 		buf = NULL;
 		buf_size = 0;
