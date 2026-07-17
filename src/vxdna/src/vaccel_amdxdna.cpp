@@ -169,6 +169,16 @@ hwctx_ring_idx(uint32_t ctx_handle)
  * resources are shared by design.  On mismatch we throw -EACCES; the ccmd
  * error wrapper (or the C-API boundary for INIT) turns that into a logged
  * error response.
+ *
+ * Exception: device-owned resources (is_device_owned(), i.e. AMDXDNA_BO_SHARE)
+ * are legitimately shared across contexts via dma-buf export/import. Their GEM
+ * handle lives on the long-lived device fd; each context opens its own DRM fd
+ * and imports the resource's dma-buf into it (see the host-backed branch of
+ * vxdna_bo). export_resource_fd() restricts export to these resources. Gate on
+ * is_device_owned() rather than get_opaque_handle() > 0: host-backed but
+ * context-scoped BOs (e.g. AMDXDNA_BO_DEV_HEAP, which also have opaque_handle
+ * > 0) are NOT cross-context -- their handle lives on the creating context's
+ * fd, so they must stay protected like guest iovec-backed buffers.
  */
 std::shared_ptr<vaccel_resource>
 lookup_resource_for_ctx(vxdna &device, uint32_t res_id, uint32_t caller_ctx_id,
@@ -180,8 +190,18 @@ lookup_resource_for_ctx(vxdna &device, uint32_t res_id, uint32_t caller_ctx_id,
                          purpose, res_id, caller_ctx_id);
 
     const uint32_t owner_ctx_id = res->get_ctx_id();
+    /*
+     * Reject a cross-context lookup unless:
+     *   - the caller owns the resource, or
+     *   - it is a platform (ctx 0) resource, shared by design, or
+     *   - it is device-owned (AMDXDNA_BO_SHARE), which is legitimately shared
+     *     across contexts via dma-buf export/import (see block comment).
+     * Everything else -- guest iovec-backed buffers AND host-backed but
+     * context-scoped BOs like DEV_HEAP -- stays protected.
+     */
     if (owner_ctx_id != caller_ctx_id &&
-        owner_ctx_id != k_platform_ctx_id)
+        owner_ctx_id != k_platform_ctx_id &&
+        !res->is_device_owned())   /* only SHARE is cross-context; keep the rest protected */
         VACCEL_THROW_MSG(-EACCES,
                          "%s: resource %u not owned by ctx %u (owner ctx %u)",
                          purpose, res_id, caller_ctx_id, owner_ctx_id);
@@ -424,6 +444,20 @@ close_gem_handle(int fd, uint32_t handle)
     }
 }
 
+/* PRIME-export a GEM handle on @fd to a new dma-buf fd (caller closes it). */
+int
+export_gem_fd(int fd, uint32_t handle)
+{
+    struct drm_prime_handle args = {};
+    args.handle = handle;
+    args.flags = DRM_RDWR | DRM_CLOEXEC;
+    args.fd = -1;
+    if (ioctl(fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args))
+        VACCEL_THROW_MSG(-errno, "Export gem handle %u failed, errno %d, %s",
+                         handle, errno, strerror(errno));
+    return args.fd;
+}
+
 } // namespace
 
 vxdna_bo::
@@ -523,6 +557,7 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
     auto num_iovs = res->get_iovecs(&iovecs);
 
     bool created_here = false;
+    bool imported_here = false;
     bool use_raw_iovs = false;
     if (m_opaque_handle == AMDXDNA_INVALID_BO_HANDLE) {
         const bool heap_chunk = (m_bo_type == AMDXDNA_BO_DEV_HEAP);
@@ -660,20 +695,47 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
         }
         m_bo_handle = args.handle;
         created_here = true;
-    } else {
+    } else if (!res->is_device_owned()) {
+        /*
+         * Context-scoped host BO (e.g. DEV_HEAP): its GEM handle lives on this
+         * (the creating) context's own fd, so use it directly.
+         */
         m_bo_handle = static_cast<uint32_t>(m_opaque_handle);
+    } else {
+        /*
+         * Device-owned SHARE BO: its GEM lives on the device-wide fd, not in any
+         * context's fd (GEM handles are per-fd -- each context opens its own node
+         * via accel_get_drm_fd()). Export the resource's dma-buf from the device
+         * fd and import it into *this* context's fd to obtain a handle valid
+         * here, with its own GEM/dma_buf reference. This holds for the creating
+         * context too, and lets the backing outlive any single context: each
+         * ~vxdna_bo closes only its own handle, and the device-fd handle is
+         * released in destroy_resource.
+         */
+        int dbuf_fd = ctx.get_device().export_resource_fd(res->get_res_id());
+
+        struct drm_prime_handle prime = {};
+        prime.fd = dbuf_fd;
+        ret = ioctl(m_ctx_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime);
+        int saved_errno = errno;
+        close(dbuf_fd);
+        if (ret)
+            VACCEL_THROW_MSG(-saved_errno,
+                             "import host BO res %u into ctx %u fd %d failed",
+                             res->get_res_id(), ctx.get_id(), m_ctx_fd);
+        m_bo_handle = prime.handle;
+        imported_here = true;
     }
 
     bo_info.handle = m_bo_handle;
     ret = ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &bo_info);
     if (ret) {
-        if (created_here) {
+        if (created_here || imported_here)
             close_gem_handle(m_ctx_fd, m_bo_handle);
-            if (m_coalesce_va && m_coalesce_len) {
-                munmap(m_coalesce_va, m_coalesce_len);
-                m_coalesce_va = nullptr;
-                m_coalesce_len = 0;
-            }
+        if (created_here && m_coalesce_va && m_coalesce_len) {
+            munmap(m_coalesce_va, m_coalesce_len);
+            m_coalesce_va = nullptr;
+            m_coalesce_len = 0;
         }
         VACCEL_THROW_MSG(-errno, "Get bo info failed ret %d", ret);
     }
@@ -681,18 +743,108 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
     m_map_offset = bo_info.map_offset;
     m_xdna_addr = bo_info.xdna_addr;
 
-    /* Opaque import: CPU UVA from GET_BO_INFO. Created userptr BOs keep coalesce UVA. */
+    /*
+     * Host-memory BO not created on this CCMD (its GEM already existed: a
+     * context-scoped handle for DEV_HEAP, or a device-fd handle imported into
+     * this context's fd for SHARE). Either way m_bo_handle is now valid in
+     * m_ctx_fd. The amdxdna driver backs host BOs with a user pointer, so mmap
+     * via map_offset to obtain the host CPU VA. This also registers mem.uva in
+     * the driver, which is the device address in SVA/PASID mode. Mirrors the
+     * native shim's mmap_drm_bo().
+     *
+     * A valid map_offset is a DRM VMA fake offset established at create time
+     * (drm_gem_shmem_create). The driver reports AMDXDNA_INVALID_ADDR only for
+     * AMDXDNA_BO_DEV, which is rejected earlier, so a missing offset is an error.
+     */
     if (!created_here) {
-        m_vaddr = bo_info.vaddr;
-        if (m_vaddr == AMDXDNA_INVALID_ADDR || m_vaddr == 0)
-            VACCEL_THROW_MSG(-EINVAL,
-                             "Pre-imported BO without CPU UVA from GET_BO_INFO: handle=%u, type=%u",
-                             m_bo_handle, m_bo_type);
+        /*
+         * The destructor does not run when a constructor throws, so any handle
+         * we imported here must be closed explicitly before rethrowing (the
+         * GET_BO_INFO failure path above does the same). Only imported_here can
+         * be set in this block; a context-scoped handle (DEV_HEAP) is owned
+         * elsewhere and must not be closed.
+         */
+        try {
+            if (m_map_offset == AMDXDNA_INVALID_ADDR || m_map_offset == 0)
+                VACCEL_THROW_MSG(-EINVAL,
+                                 "Host BO without valid map_offset: handle=%u, type=%u, "
+                                 "map_offset=0x%lx",
+                                 m_bo_handle, m_bo_type,
+                                 static_cast<unsigned long>(m_map_offset));
+
+            if (m_bo_type == AMDXDNA_BO_DEV_HEAP)
+                map_dev_heap_chunk(ctx);
+            else
+                map_host_shared();
+        } catch (...) {
+            if (imported_here)
+                close_gem_handle(m_ctx_fd, m_bo_handle);
+            throw;
+        }
     }
 
     vxdna_dbg("Resource BO: res_id=%u, handle=%u, vaddr=0x%lx, xdna_addr=0x%lx, iov_bytes=%lu (coalesced UVA)",
               res->get_res_id(), m_bo_handle, m_vaddr, m_xdna_addr,
               static_cast<unsigned long>(m_iov_bytes));
+}
+
+void
+vxdna_bo::
+map_host_shared()
+{
+    size_t map_len = page_roundup(m_size);
+    void *p = mmap(nullptr, map_len, PROT_READ | PROT_WRITE,
+                   MAP_SHARED | MAP_LOCKED, m_ctx_fd,
+                   static_cast<off_t>(m_map_offset));
+    if (p == MAP_FAILED)
+        VACCEL_THROW_MSG(-errno,
+                         "mmap host BO via map_offset failed: handle=%u, type=%u, "
+                         "map_offset=0x%lx, size=0x%lx",
+                         m_bo_handle, m_bo_type,
+                         static_cast<unsigned long>(m_map_offset),
+                         static_cast<unsigned long>(m_size));
+    m_host_map_va = p;
+    m_host_map_len = map_len;
+    m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p));
+}
+
+void
+vxdna_bo::
+map_dev_heap_chunk(vxdna_context &ctx)
+{
+    /*
+     * Dev-heap chunks must be contiguous in host VA: a DEV BO may span chunks,
+     * and the driver requires the heap's uva to be contiguous across them (else
+     * "Heap N uva is not contiguous"). Place each chunk at its committed offset
+     * in the context's 64 MiB-aligned heap arena with MAP_FIXED, mirroring the
+     * guest-iovec heap path. m_heap_committed is advanced by create_bo() after
+     * construction.
+     *
+     * The arena owns the unmapping (release_heap_arena() at context teardown),
+     * so do not record m_host_map_va -- unmapping a chunk's slice individually
+     * would leave a hole another mmap could reuse, which the wholesale arena
+     * munmap would then tear down.
+     */
+    size_t map_len = page_roundup(m_size);
+    void *arena = ctx.ensure_heap_arena();
+    uint64_t off = ctx.m_heap_committed;
+    if (off + map_len > vxdna_context::HEAP_MAX_SIZE)
+        VACCEL_THROW_MSG(-ENOSPC,
+                         "heap chunk at 0x%llx + 0x%zx exceeds arena 0x%llx",
+                         static_cast<unsigned long long>(off), map_len,
+                         static_cast<unsigned long long>(vxdna_context::HEAP_MAX_SIZE));
+    void *hint = static_cast<char *>(arena) + off;
+    void *p = mmap(hint, map_len, PROT_READ | PROT_WRITE,
+                   MAP_SHARED | MAP_LOCKED | MAP_FIXED, m_ctx_fd,
+                   static_cast<off_t>(m_map_offset));
+    if (p == MAP_FAILED)
+        VACCEL_THROW_MSG(-errno,
+                         "mmap dev-heap chunk into arena failed: handle=%u, "
+                         "off=0x%llx, map_offset=0x%lx, size=0x%lx",
+                         m_bo_handle, static_cast<unsigned long long>(off),
+                         static_cast<unsigned long>(m_map_offset),
+                         static_cast<unsigned long>(m_size));
+    m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p));
 }
 
 vxdna_bo::
@@ -713,6 +865,12 @@ vxdna_bo::
             vxdna_err("munmap coalesce va failed errno %d", errno);
         m_coalesce_va = nullptr;
         m_coalesce_len = 0;
+    }
+    if (m_host_map_va && m_host_map_len > 0) {
+        if (munmap(m_host_map_va, m_host_map_len) != 0)
+            vxdna_err("munmap host map va failed errno %d", errno);
+        m_host_map_va = nullptr;
+        m_host_map_len = 0;
     }
 }
 
@@ -1174,9 +1332,9 @@ void
 vxdna_context::
 sync_bo(const struct amdxdna_ccmd_sync_bo_req *req)
 {
-    // The guest BO handle is the host GEM handle, but all guest contexts share
-    // the native client's GEM namespace (single client per QEMU). Validate the
-    // BO is owned by this context before issuing the driver ioctl.
+    // The guest BO handle is this context's own host GEM handle (each context
+    // has its own DRM fd / GEM namespace). Validate the BO belongs to this
+    // context before issuing the driver ioctl on this context's fd.
     auto bo = m_bo_table.lookup(req->handle);
     if (!bo)
         VACCEL_THROW_MSG(-EINVAL, "sync_bo: BO %u not found in ctx %u",
@@ -1378,11 +1536,23 @@ int
 vxdna_context::
 get_blob_impl(const struct vaccel_create_resource_blob_args *args)
 {
-    vxdna_dbg("Getting blob: ctx_id=%u, ctx_fd=%d, blob_id=%ld, blob_size=%zu", get_id(), get_fd(), args->blob_id, args->size);
+    /*
+     * SHARE BOs are context-independent host memory that may be shared across
+     * contexts via dma-buf import. Create them on the device-wide fd so their
+     * backing outlives the creating context (mirroring bare metal, where an
+     * exported BO survives the producer via its dma-buf reference). Other host
+     * blob types (e.g. DEV_HEAP) are context-scoped in the driver
+     * (client->dev_heap) and must stay on the creating context's fd.
+     */
+    bool device_owned = (args->blob_id == AMDXDNA_BO_SHARE);
+    int fd = device_owned ? get_device().get_owned_drm_fd() : get_fd();
+
+    vxdna_dbg("Getting blob: ctx_id=%u, fd=%d, device_owned=%d, blob_id=%ld, blob_size=%zu",
+              get_id(), fd, device_owned, args->blob_id, args->size);
     struct amdxdna_drm_create_bo blob_args = {};
     blob_args.type = args->blob_id;//AMDXDNA_BO_SHMEM;
     blob_args.size = args->size;
-    auto ret = ioctl(get_fd(), DRM_IOCTL_AMDXDNA_CREATE_BO, &blob_args);
+    auto ret = ioctl(fd, DRM_IOCTL_AMDXDNA_CREATE_BO, &blob_args);
     if (ret) {
         VACCEL_THROW_MSG(-errno, "Create blob failed ret %d, %d, %s, type %d, size %lld\n",
                          ret, -errno, strerror(errno), static_cast<uint32_t>(blob_args.type),
@@ -1468,19 +1638,39 @@ create_resource_from_blob(const struct vaccel_create_resource_blob_args *args)
     int opaque_handle = ctx->get_blob(args);
     auto res = std::make_shared<vaccel_resource>(args->res_handle, args->size,
                                                  opaque_handle, args->ctx_id);
+    /*
+     * SHARE blobs were created on the device-wide fd (see get_blob_impl), so the
+     * resource -- not the creating context -- owns the GEM handle. Mark it so
+     * export/import/destroy operate on the device fd instead of a context fd.
+     */
+    res->set_device_owned(args->blob_id == AMDXDNA_BO_SHARE);
     add_resource(args->res_handle, std::move(res));
-    vxdna_dbg("Created resource from blob: res_id=%u, opaque_handle=%d",
-              args->res_handle, opaque_handle);
+    vxdna_dbg("Created resource from blob: res_id=%u, opaque_handle=%d, device_owned=%d",
+              args->res_handle, opaque_handle, args->blob_id == AMDXDNA_BO_SHARE);
+}
+
+int
+vxdna::
+export_gem_on_device_fd(uint32_t handle)
+{
+    return export_gem_fd(get_owned_drm_fd(), handle);
 }
 
 void
 vxdna::
-destroy_resource([[maybe_unused]] const std::shared_ptr<vaccel_resource> &res)
+destroy_resource(const std::shared_ptr<vaccel_resource> &res)
 {
-    // Required by vaccel<T>::destroy_resource
-    // TODO: it is not required for now as guest xdna shim virtio
-    // driver already ensures the sequence by first creating the resource blob
-    // and then creating the BO, and it destroys them in reverse order.
+    /*
+     * Device-owned (SHARE) host blobs own their GEM handle on the device-wide
+     * fd; close it here, when the resource is destroyed. Contexts that imported
+     * it hold their own handles (with dma_buf references), so the backing is
+     * freed only once every importer has also closed its handle. Context-scoped
+     * blobs (e.g. DEV_HEAP) have their handle on a context fd and are cleaned up
+     * with that context, so nothing to do here.
+     */
+    if (res->is_device_owned())
+        close_gem_handle(get_owned_drm_fd(),
+                         static_cast<uint32_t>(res->get_opaque_handle()));
 }
 
 // Forward declarations of handler functions (to be implemented elsewhere)
