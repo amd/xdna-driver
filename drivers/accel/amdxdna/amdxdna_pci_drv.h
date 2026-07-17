@@ -233,6 +233,10 @@ extern const struct amdxdna_dev_info dev_npu11_vf_info;
 int amdxdna_sysfs_init(struct amdxdna_dev *xdna);
 void amdxdna_sysfs_fini(struct amdxdna_dev *xdna);
 
+/* Bus-agnostic client helpers (amdxdna_drv.c) shared by PCI/aux attachment. */
+void amdxdna_sva_fini(struct amdxdna_client *client);
+void amdxdna_client_cleanup(struct amdxdna_client *client);
+
 int amdxdna_iommu_init(struct amdxdna_dev *xdna);
 void amdxdna_iommu_fini(struct amdxdna_dev *xdna);
 void *amdxdna_iommu_alloc(struct amdxdna_dev *xdna, size_t size, dma_addr_t *dma_addr);

@@ -21,14 +21,14 @@ ccflags-y += -g -Werror
 ccflags-${UMQ_HELLO_TEST} += -DUMQ_HELLO_TEST
 
 obj-m	+= amdxdna.o
-# Only objects that have corresponding .c sources in this directory
+# Bus-agnostic core objects (always built for both PCI and AUX attachment).
 amdxdna-y := \
+	amdxdna_drv.o \
 	amdxdna_ctx.o \
 	amdxdna_gem.o \
 	amdxdna_iommu.o \
 	amdxdna_mailbox.o \
 	amdxdna_mailbox_helper.o \
-	amdxdna_pci_drv.o \
 	amdxdna_pm.o \
 	amdxdna_sysfs.o \
 	amdxdna_ubuf.o \
@@ -37,7 +37,9 @@ amdxdna-y := \
 	amdxdna_xen.o \
 	amdxdna_sensors.o
 
+# PCI attachment (NPU) - selected by XDNA_BUS_TYPE=pci
 amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
+	amdxdna_pci_drv.o \
 	aie.o \
 	aie_psp.o \
 	aie_smu.o \
@@ -62,6 +64,14 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 
 amdxdna-$(CONFIG_PCI_IOV) += \
 	aie4_sriov.o
+
+# Auxiliary-bus attachment (VE2/Versal SoC) - selected by XDNA_BUS_TYPE=aux
+amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
+	amdxdna_aux_drv.o \
+	ve2_mgmt.o \
+	ve2_aux.o \
+	ve2_hwctx.o \
+	ve2_debug.o
 
 amdxdna-$(CONFIG_DEBUG_FS) += \
 	amdxdna_debugfs.o
