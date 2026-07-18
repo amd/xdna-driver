@@ -62,6 +62,54 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
+# Resolve the drm-firmware WHENCE ref and commit that the firmware tree will be
+# synced from, using a lightweight, download-free method so version.json records
+# them at configure time without fetching any firmware. Firmware downloads are a
+# packaging step (see build/build.sh), not part of the compile.
+#
+#   * A committed tools/WHENCE snapshot (release branches) pins the commit in a
+#     "# whence-commit:" line, so read it directly.
+#   * Otherwise (main/link) resolve the amd-ipu-staging tip via git ls-remote,
+#     which is metadata only and downloads no firmware.
+#
+# Resolution is best-effort: an offline or unresolvable remote leaves the hash
+# empty and never fails the configure.
+set(XDNA_FW_WHENCE_REF "amd-ipu-staging")
+set(XDNA_FW_WHENCE_COMMIT "")
+set(XDNA_WHENCE_SNAPSHOT ${CMAKE_SOURCE_DIR}/tools/WHENCE)
+if(EXISTS ${XDNA_WHENCE_SNAPSHOT})
+  file(STRINGS ${XDNA_WHENCE_SNAPSHOT} XDNA_FW_WHENCE_REF_LINES
+       REGEX "^# whence-ref:")
+  if(XDNA_FW_WHENCE_REF_LINES)
+    list(GET XDNA_FW_WHENCE_REF_LINES 0 XDNA_FW_WHENCE_REF_LINE)
+    string(REGEX REPLACE "^# whence-ref:[ \t]*" "" XDNA_FW_WHENCE_REF
+           "${XDNA_FW_WHENCE_REF_LINE}")
+    string(STRIP "${XDNA_FW_WHENCE_REF}" XDNA_FW_WHENCE_REF)
+  endif()
+  file(STRINGS ${XDNA_WHENCE_SNAPSHOT} XDNA_FW_WHENCE_PIN_LINES
+       REGEX "^# whence-commit:")
+  if(XDNA_FW_WHENCE_PIN_LINES)
+    list(GET XDNA_FW_WHENCE_PIN_LINES 0 XDNA_FW_WHENCE_PIN)
+    string(REGEX REPLACE "^# whence-commit:[ \t]*" "" XDNA_FW_WHENCE_COMMIT
+           "${XDNA_FW_WHENCE_PIN}")
+    string(STRIP "${XDNA_FW_WHENCE_COMMIT}" XDNA_FW_WHENCE_COMMIT)
+  endif()
+endif()
+if(XDNA_FW_WHENCE_COMMIT STREQUAL "")
+  execute_process(
+    COMMAND git ls-remote https://gitlab.com/kernel-firmware/drm-firmware.git ${XDNA_FW_WHENCE_REF}
+    OUTPUT_VARIABLE XDNA_FW_LS_REMOTE
+    RESULT_VARIABLE XDNA_FW_LS_RESULT
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    TIMEOUT 60
+  )
+  if(XDNA_FW_LS_RESULT EQUAL 0 AND NOT XDNA_FW_LS_REMOTE STREQUAL "")
+    string(REGEX MATCH "^[0-9a-fA-F]+" XDNA_FW_WHENCE_COMMIT
+           "${XDNA_FW_LS_REMOTE}")
+  endif()
+endif()
+
 set(XDNA_VERSION_JSON_FILE ${CMAKE_CURRENT_BINARY_DIR}/version.json)
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/version.json.in

@@ -92,32 +92,25 @@ download_url()
   fi
 }
 
-download_npufws()
+sync_npufws()
 {
   local firmware_dir=${DOWNLOAD_BINS_DIR}/firmware
+  local whence_snapshot=${BUILD_DIR}/../tools/WHENCE
+  local sync_script=${BUILD_DIR}/../tools/sync_from_whence.py
+  local commit_file=${firmware_dir}/.whence_commit
 
-  jq -c '.firmwares[]' "$INFO_JSON" |
-    while IFS= read -r line; do
-      local device=$(echo $line | jq -r '.device')
-      local pci_dev_id=$(echo $line | jq -r '.pci_device_id')
-      local version=$(echo $line | jq -r '.version')
-      local fw_name=$(echo $line | jq -r '.fw_name')
-      local url=$(echo $line | jq -r '.url')
-      local pci_rev_id=$(echo $line | jq -r '.pci_revision_id')
-
-      if [[ -z "$url" ]]; then
-        echo "Empty URL for $device NPUFW, SKIP."
-        continue
-      fi
-
-      echo "Download $device NPUFW version $version:"
-      if [ -f "${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name" ]; then
-        rm -r ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
-      fi
-      mkdir -p ${firmware_dir}/${pci_dev_id}_${pci_rev_id}
-      download_url "${firmware_dir}/${pci_dev_id}_${pci_rev_id}/$fw_name" "$url"
-
-    done
+  mkdir -p "${firmware_dir}"
+  # Release branches pin firmware with a committed tools/WHENCE snapshot; main
+  # has no snapshot and always fetches the latest amd-ipu-staging manifest.
+  if [ -f "${whence_snapshot}" ]; then
+    echo "Sync NPUFW from pinned snapshot ${whence_snapshot}"
+    python3 "${sync_script}" firmware --whence "${whence_snapshot}" \
+      --out "${firmware_dir}" --commit-file "${commit_file}"
+  else
+    echo "Sync NPUFW from latest amd-ipu-staging WHENCE"
+    python3 "${sync_script}" firmware --ref amd-ipu-staging \
+      --out "${firmware_dir}" --commit-file "${commit_file}"
+  fi
 }
 
 download_vtd_archives()
@@ -197,15 +190,18 @@ do_build()
   BUILD_TYPE=$1
   build_targets $BUILD_TYPE
   if [[ $nocmake == 0 ]]; then
-    # No need to download firmware if driver build is skipped
+    # Firmware and VTD archives are packaging inputs, not compile inputs, so
+    # they are fetched here on the packaging path only, after the compile. A
+    # plain compile never downloads. No need to sync firmware if the driver
+    # build is skipped.
     if [[ $skip_kmod == 0 ]]; then
-      download_npufws
+      sync_npufws
     fi
     # Download VTD archives
     download_vtd_archives
     # Prepare xbutil validate related files for packaging
     mkdir -p $XBUTIL_VALIDATE_BINS_DIR
-    cp -r ../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
+    cp -r ${BUILD_DIR}/../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
     package_targets $BUILD_TYPE
   fi
 
