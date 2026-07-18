@@ -107,8 +107,39 @@ struct pcie_id
     std::ifstream rev_f(base + "/revision");
     unsigned int dev_val = 0, rev_val = 0;
     if (!(dev_f >> std::hex >> dev_val) || !(rev_f >> std::hex >> rev_val))
-      throw xrt_core::query::sysfs_error("Failed to read device/revision from " + base);
+      throw xrt_core::query::sysfs_error("Failed to read device/revision from " + base + "/{device,revision}");
     return { static_cast<uint16_t>(dev_val), static_cast<uint8_t>(rev_val) };
+  }
+};
+
+// New query to get the device id
+struct pcie_device_id
+{
+  using result_type = query::pcie_device::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    return pcie_id::get(device, key).device_id;
+  }
+};
+
+// Query to get the PCIe vendor id from sysfs
+struct pcie_vendor
+{
+  using result_type = query::pcie_vendor::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    auto [domain, bus, dev, func] = bdf::get(device, key);
+    std::string bdf_str = boost::str(boost::format("%04x:%02x:%02x.%x") % domain % bus % dev % func);
+    const std::string base = "/sys/bus/pci/devices/" + bdf_str;
+    std::ifstream vendor_f(base + "/vendor");
+    unsigned int vendor_val = 0;
+    if (!(vendor_f >> std::hex >> vendor_val))
+      throw xrt_core::query::sysfs_error("Failed to read vendor from " + base + "/vendor");
+    return static_cast<result_type>(vendor_val);
   }
 };
 
@@ -1064,6 +1095,8 @@ initialize_query_table()
   emplace_func0_request<query::xclbin_slots,            xclbin_slots>();
   emplace_func0_request<query::pcie_bdf,                bdf>();
   emplace_func0_request<query::pcie_id,                 pcie_id>();
+  emplace_func0_request<query::pcie_device,             pcie_device_id>();
+  emplace_func0_request<query::pcie_vendor,             pcie_vendor>();
   emplace_func0_request<query::rom_vbnv,                dev_info>();
   emplace_func0_request<query::device_class,            dev_info>();
   emplace_func0_request<query::total_cols,              total_cols>();

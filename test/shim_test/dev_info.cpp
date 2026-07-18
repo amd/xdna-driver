@@ -162,6 +162,39 @@ binary_info binary_infos[] = {
     .path = "local_shim_test_data/npu3a/resnet50/resnet50.elf",
     .flow = PREEMPT_FULL_ELF,
   },
+  // npu_ve2 (aie2ps / VE2): own FULL_ELF binaries for "good" (vadd), "nop" and
+  // "bad_timeout".
+  {
+    .tag = "good",
+    .device = npu_ve2_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu_ve2/vadd/vadd.elf",
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "bad_timeout",
+    .device = npu_ve2_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu_ve2/bad/bad_timeout.elf",
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
+    .flow = FULL_ELF,
+  },
+  {
+    .tag = "nop",
+    .device = npu_ve2_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:dpu", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu_ve2/nop/nop.elf",
+    .flow = FULL_ELF,
+  },
   {
     .tag = "good",
     .device = npu4_device_id,
