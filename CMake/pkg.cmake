@@ -78,11 +78,15 @@ install(DIRECTORY ${VTD_ARCHIVES_DIR}/
 
 if(NOT SKIP_KMOD)
 
+# Install both the versioned firmware files (e.g. 1.8_npu.sbin.2.5.0.172) and
+# the stable npu.dev.sbin / cert.dev.sbin symlinks that point at them, so the
+# installed file name still reveals the firmware version. The tree is built
+# from the drm-firmware WHENCE manifest by tools/sync_from_whence.py firmware.
 install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
   DESTINATION ${XDNA_PKG_FW_DIR}
   COMPONENT ${XDNA_COMPONENT}
   FILES_MATCHING
-  PATTERN "*.sbin"
+  PATTERN "*.sbin*"
   PATTERN "download_raw" EXCLUDE
   )
 
