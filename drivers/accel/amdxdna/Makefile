@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Copyright (C) 2022-2024, Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2026, Advanced Micro Devices, Inc.
 #
 
 KERNEL_VER ?= $(shell uname -r)
@@ -77,6 +77,7 @@ $(BUILD_ROOT_DIR): $(SRC_DIR)
 	@mkdir -p $(TMP_DIR)/drivers/accel
 	@cp -rs $(SRC_DIR) $(TMP_DIR)/drivers/accel
 	@cp -rs $(SRC_DIR)/../../../include $(TMP_DIR)
+	@cp -rs $(SRC_DIR)/../tools $(TMP_DIR)/drivers/accel
 	@mv $(TMP_DIR) $(BUILD_ROOT_DIR)
 
 copy_ko:
