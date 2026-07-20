@@ -82,6 +82,9 @@ private:
   get_info_array(amdxdna_drm_get_array& arg) const override;
 
   void
+  set_state(amdxdna_drm_set_state& arg) const override;
+
+  void
   get_sysfs(get_sysfs_arg& arg) const override;
 
   void
