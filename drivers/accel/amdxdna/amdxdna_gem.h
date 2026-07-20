@@ -127,6 +127,12 @@ int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);
 void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *filp);
 void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp);
+int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
+			 struct mm_struct *mm,
+			 unsigned long addr, unsigned long len);
+void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
+			    struct mm_struct *mm,
+			    unsigned long addr, unsigned long len);
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

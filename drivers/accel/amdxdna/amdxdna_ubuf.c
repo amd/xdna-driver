@@ -33,6 +33,9 @@ static void amdxdna_gem_ubuf_obj_free(struct drm_gem_object *gobj)
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
+	amdxdna_hmm_unregister(abo, NULL, 0, 0);
+	flush_workqueue(xdna->notifier_wq);
+
 	amdxdna_dma_unmap_bo(xdna, abo);
 	amdxdna_ubuf_unmap_dma(abo);
 	if (abo->mem.nr_pages)
@@ -81,6 +84,37 @@ static const struct drm_gem_object_funcs amdxdna_gem_ubuf_obj_funcs = {
 	.vmap = amdxdna_gem_ubuf_obj_vmap,
 	.vunmap = amdxdna_gem_ubuf_obj_vunmap,
 };
+
+static struct vm_area_struct *amdxdna_ubuf_find_vma(struct amdxdna_drm_va_entry *va_ent)
+{
+	struct vm_area_struct *vma;
+
+	vma = find_vma(current->mm, va_ent->vaddr);
+	if (!vma || vma->vm_start > va_ent->vaddr ||
+	    vma->vm_end - va_ent->vaddr < va_ent->len)
+		return NULL;
+
+	return vma;
+}
+
+static int amdxdna_ubuf_hmm_register(struct amdxdna_gem_obj *abo,
+				     struct amdxdna_drm_va_entry *va_ent,
+				     u32 num_entries)
+{
+	int i, ret = 0;
+
+	mmap_write_lock(current->mm);
+
+	for (i = 0; i < num_entries; i++) {
+		ret = amdxdna_hmm_register(abo, current->mm, va_ent[i].vaddr, va_ent[i].len);
+		if (ret)
+			break;
+	}
+
+	mmap_write_unlock(current->mm);
+
+	return ret;
+}
 
 struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 					      u32 num_entries, void __user *va_entries)
@@ -182,16 +216,22 @@ struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 			if (ret != npages) {
 				XDNA_ERR(xdna, "Partially pinned pages %ld/%ld", ret, npages);
 				ret = -ENOMEM;
-				goto put_obj;
+				break;
 			}
 		} else {
 			XDNA_ERR(xdna, "Failed to pin pages ret %ld", ret);
-			goto put_obj;
+			break;
 		}
 	}
 
-	kvfree(va_ent);
+	if (ret < 0)
+		goto put_obj;
 
+	ret = amdxdna_ubuf_hmm_register(abo, va_ent, num_entries);
+	if (ret)
+		goto put_obj;
+
+	kvfree(va_ent);
 	return abo;
 
 put_obj:
