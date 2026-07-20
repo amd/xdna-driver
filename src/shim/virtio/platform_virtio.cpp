@@ -546,11 +546,11 @@ platform_drv_virtio::
 get_info(amdxdna_drm_get_info& arg) const
 {
   if (arg.param == DRM_AMDXDNA_QUERY_AIE_STATUS)
-    shim_not_supported_err("get_info: DRM_AMDXDNA_QUERY_AIE_METADATA");
+    shim_err(EACCES, "get_info: DRM_AMDXDNA_QUERY_AIE_STATUS");
   if (arg.param == DRM_AMDXDNA_READ_AIE_MEM)
-    shim_not_supported_err("get_info: DRM_AMDXDNA_READ_AIE_MEM");
+    shim_err(EACCES, "get_info: DRM_AMDXDNA_READ_AIE_MEM");
   if (arg.param == DRM_AMDXDNA_READ_AIE_REG)
-    shim_not_supported_err("get_info: DRM_AMDXDNA_READ_AIE_MEM");
+    shim_err(EACCES, "get_info: DRM_AMDXDNA_READ_AIE_REG");
 
   auto resp_buf = std::make_unique<response_buffer>(dev_fd(), arg.buffer_size);
   std::memcpy(resp_buf->get(), reinterpret_cast<char*>(arg.buffer), arg.buffer_size);
@@ -589,6 +589,13 @@ get_info_array(amdxdna_drm_get_array& arg) const
   std::memcpy(reinterpret_cast<char*>(arg.buffer), resp_buf->get(), total_buf_size);
   arg.element_size = rsp.size;
   arg.num_element = rsp.num_element;
+}
+
+void
+platform_drv_virtio::
+set_state(amdxdna_drm_set_state&) const
+{
+  shim_err(EACCES, "set_state is not permitted from a virtio guest");
 }
 
 void
