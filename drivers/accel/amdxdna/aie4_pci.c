@@ -18,6 +18,7 @@
 #include "aie4_msg_priv.h"
 #include "amdxdna_ctx.h"
 #include "amdxdna_dpt.h"
+#include "amdxdna_gem.h"
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
@@ -1001,6 +1002,9 @@ static int aie4_get_array(struct amdxdna_client *client,
 		break;
 	case DRM_AMDXDNA_HW_LAST_ASYNC_ERR:
 		ret = aie4_get_array_async_error(ndev, args);
+		break;
+	case DRM_AMDXDNA_BO_USAGE:
+		ret = amdxdna_drm_get_bo_usage(&xdna->ddev, args);
 		break;
 	case DRM_AMDXDNA_FW_LOG:
 		ret = amdxdna_get_fw_log(&ndev->aie, args);
