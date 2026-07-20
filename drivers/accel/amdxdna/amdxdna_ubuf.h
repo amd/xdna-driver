@@ -5,10 +5,10 @@
 #ifndef _AMDXDNA_UBUF_H_
 #define _AMDXDNA_UBUF_H_
 
-#include <drm/drm_device.h>
-#include <linux/dma-buf.h>
+#include "amdxdna_gem.h"
+#include "amdxdna_pci_drv.h"
 
-struct dma_buf *amdxdna_get_ubuf(struct drm_device *dev,
-				 u32 num_entries, void __user *va_entries);
+struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
+					      u32 num_entries, void __user *va_entries);
 
 #endif /* _AMDXDNA_UBUF_H_ */

@@ -62,7 +62,7 @@ int amdxdna_dma_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 	if (abo->mem.dma_addr != AMDXDNA_INVALID_ADDR)
 		return 0;
 
-	sgt = drm_gem_shmem_get_pages_sgt(&abo->base);
+	sgt = amdxdna_gem_get_sgt(abo);
 	if (IS_ERR(sgt)) {
 		XDNA_ERR(xdna, "Get sgt failed, ret %ld", PTR_ERR(sgt));
 		return PTR_ERR(sgt);
