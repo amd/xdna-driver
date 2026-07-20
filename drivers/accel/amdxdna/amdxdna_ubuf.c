@@ -97,6 +97,27 @@ static struct vm_area_struct *amdxdna_ubuf_find_vma(struct amdxdna_drm_va_entry 
 	return vma;
 }
 
+static void amdxdna_ubuf_check_readonly(struct amdxdna_gem_obj *abo,
+					struct amdxdna_drm_va_entry *va_ent,
+					u32 num_entries)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct vm_area_struct *vma;
+	int i;
+
+	for (i = 0; i < num_entries; i++) {
+		vma = amdxdna_ubuf_find_vma(&va_ent[i]);
+		if (!vma) {
+			XDNA_DBG(xdna, "Invalid entry vaddr %llx, len %llx",
+				 va_ent[i].vaddr, va_ent[i].len);
+			return;
+		}
+		if (vma->vm_flags & (VM_WRITE | VM_MAYWRITE))
+			return;
+	}
+	abo->readonly = true;
+}
+
 static int amdxdna_ubuf_hmm_register(struct amdxdna_gem_obj *abo,
 				     struct amdxdna_drm_va_entry *va_ent,
 				     u32 num_entries)
@@ -205,11 +226,14 @@ struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 		goto put_obj;
 	}
 
+	mmap_read_lock(current->mm);
+	amdxdna_ubuf_check_readonly(abo, va_ent, num_entries);
+
 	for (i = 0; i < num_entries; i++) {
 		npages = va_ent[i].len >> PAGE_SHIFT;
 
 		ret = pin_user_pages(va_ent[i].vaddr, npages,
-				     FOLL_WRITE | FOLL_LONGTERM,
+				     (abo->readonly ? 0 : FOLL_WRITE) | FOLL_LONGTERM,
 				     &abo->mem.pages[abo->mem.nr_pages]);
 		if (ret >= 0) {
 			abo->mem.nr_pages += ret;
@@ -223,6 +247,7 @@ struct amdxdna_gem_obj *amdxdna_alloc_ubuf_bo(struct amdxdna_client *client,
 			break;
 		}
 	}
+	mmap_read_unlock(current->mm);
 
 	if (ret < 0)
 		goto put_obj;

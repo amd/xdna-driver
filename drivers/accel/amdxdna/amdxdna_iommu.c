@@ -87,7 +87,7 @@ int amdxdna_dma_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 		}
 
 		size = iommu_map_sgtable(xdna->domain, dma_addr, sgt,
-					 IOMMU_READ | IOMMU_WRITE);
+					 IOMMU_READ | (abo->readonly ? 0 : IOMMU_WRITE));
 		if (size < 0) {
 			XDNA_ERR(xdna, "iommu_map_sgtable failed: %zd", size);
 			__free_iova(&xdna->iovad, iova);
