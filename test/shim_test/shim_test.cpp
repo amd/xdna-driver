@@ -1371,6 +1371,80 @@ TEST_hw_context_all(device::id_type id, std::shared_ptr<device>& sdev, arg_type&
     throw std::runtime_error("HW_CONTEXT_ALL did not report the created context");
 }
 
+// Fetch per-context and total memory usage through the query keys
+// (query::aie_partition_info and query::total_mem_usage) instead of issuing the
+// raw DRM_AMDXDNA_BO_USAGE ioctl. These keys go through the shim's already-open
+// device fd, so no forked helper is needed. A partition entry (and thus a
+// non-zero memory_usage / a process_name) only exists while a hw context is
+// live, so create one and allocate a known amount of BO memory to bound the
+// reported usage from below. Exact total/internal/heap accounting is covered
+// separately by TEST_create_free_internal_bo.
+void
+TEST_query_memory_usage(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+
+  // A live context is required for this process to appear in aie_partition_info.
+  hw_ctx hwctx{dev};
+
+  // Allocate application (SHARE) and internal (CMD) BOs so this process has a
+  // known, non-zero BO footprint counted in total_usage.
+  auto boflags = XRT_BO_FLAGS_HOST_ONLY;
+  auto ext_boflags = XRT_BO_USE_CTRLPKT << 4;
+  size_t size = 0x4000;
+  auto ext_bo = std::make_unique<bo>(dev, size * 5, boflags, 0);
+  auto int_bo = std::make_unique<bo>(dev, size * 3, boflags, ext_boflags);
+  const uint64_t bo_bytes = ext_bo->size() + int_bo->size();
+
+  const int self_pid = static_cast<int>(getpid());
+
+  // Per-context memory_usage and process_name via aie_partition_info.
+  const auto partitions = device_query<query::aie_partition_info>(dev);
+  uint64_t self_mem = 0;
+  bool found_self = false;
+  for (const auto& p : partitions) {
+    if (p.pid != self_pid)
+      continue;
+    found_self = true;
+    self_mem = p.memory_usage;
+
+    // process_name is copied from the driver-provided hwctx entry name. A new
+    // shim on an older staging driver reads it back empty (-> "N/A"), so only
+    // validate it when populated. current->comm is capped at 15 chars, matching
+    // the value the kernel stores, so /proc/self/comm is an exact reference.
+    if (!p.process_name.empty()) {
+      std::string comm;
+      std::ifstream comm_file("/proc/self/comm");
+      if (!std::getline(comm_file, comm))
+        throw std::runtime_error("failed to read /proc/self/comm to verify process_name");
+      if (p.process_name != comm)
+        throw std::runtime_error("process_name mismatch: got '" + p.process_name +
+                                 "', expected '" + comm + "'");
+    }
+    break;
+  }
+
+  if (!found_self)
+    throw std::runtime_error("aie_partition_info did not report this process's context");
+
+  // memory_usage is the owning process's total BO footprint (S + C + H); it must
+  // at least cover the BOs allocated above.
+  if (self_mem < bo_bytes) {
+    std::cout << "memory_usage " << self_mem << " < allocated BO bytes " << bo_bytes
+              << std::endl;
+    throw std::runtime_error("aie_partition_info memory_usage too small");
+  }
+
+  // total_mem_usage aggregates unique PIDs, so the device-wide total must be at
+  // least this process's own usage.
+  const uint64_t total = device_query<query::total_mem_usage>(dev);
+  if (total < self_mem) {
+    std::cout << "total_mem_usage " << total << " < this process memory_usage "
+              << self_mem << std::endl;
+    throw std::runtime_error("total_mem_usage smaller than per-process usage");
+  }
+}
+
 constexpr uint32_t TELEMETRY_DATA_SIZE = 256 * 1024;
 constexpr uint32_t TELEMETRY_MAP_CAPACITY = 256;
 // aie4 selects a telemetry category via the type field; older NPUs require 0.
@@ -1656,6 +1730,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "hw_context_all (get_array)", {},
     TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_hw_context_all, {}
+  },
+  test_case{ "query memory usage (total_mem_usage/aie_partition_info)", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_memory_usage, {}
   },
   test_case{ "query telemetry", {},
     TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_telemetry, {}
