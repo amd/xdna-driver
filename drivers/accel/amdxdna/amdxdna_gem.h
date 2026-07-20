@@ -33,6 +33,10 @@ struct amdxdna_mem {
 	 * without taking notifier_lock.
 	 */
 	u64				uva;
+	struct sg_table			*sgt;
+	struct page			**pages;
+	unsigned long			nr_pages;
+	struct mm_struct		*mm;
 };
 
 struct amdxdna_gem_obj {
@@ -55,12 +59,13 @@ struct amdxdna_gem_obj {
 
 	/* True, if BO is managed by XRT, not application */
 	bool				internal;
-	/* True, if BO is not exportable */
-	bool				pri;
+	/* True, if BO is not shmem bo */
+	bool				private_buffer;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)
 #define is_import_bo(obj) ((obj)->attach)
+#define is_private_bo(obj) ((obj)->private_buffer)
 
 static inline struct amdxdna_gem_obj *to_xdna_obj(struct drm_gem_object *gobj)
 {
@@ -112,10 +117,16 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf);
 struct amdxdna_gem_obj *
 amdxdna_drm_create_dev_bo(struct drm_device *dev,
 			  struct amdxdna_drm_create_bo *args, struct drm_file *filp);
+struct amdxdna_gem_obj *
+amdxdna_gem_create_obj(struct drm_device *dev, size_t size);
+void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo);
+struct sg_table *amdxdna_gem_get_sgt(struct amdxdna_gem_obj *abo);
 
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);
 void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo);
+int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *filp);
+void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp);
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
