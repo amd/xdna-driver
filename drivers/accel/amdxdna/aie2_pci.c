@@ -714,37 +714,6 @@ static void aie2_fini(struct amdxdna_dev *xdna)
 	aie2_hw_stop(xdna);
 }
 
-static int aie2_get_aie_status(struct amdxdna_client *client,
-			       struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_drm_query_aie_status status = {};
-	struct amdxdna_dev *xdna = client->xdna;
-	struct amdxdna_dev_hdl *ndev;
-	u32 buf_sz;
-	int ret;
-
-	ndev = xdna->dev_handle;
-	buf_sz = min(args->buffer_size, sizeof(status));
-	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), buf_sz)) {
-		XDNA_ERR(xdna, "Failed to copy AIE request into kernel");
-		return -EFAULT;
-	}
-
-	ret = aie2_query_status(ndev, u64_to_user_ptr(status.buffer),
-				status.buffer_size, &status.cols_filled);
-	if (ret) {
-		XDNA_ERR(xdna, "Failed to get AIE status info. Ret: %d", ret);
-		return ret;
-	}
-
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &status, buf_sz)) {
-		XDNA_ERR(xdna, "Failed to copy AIE request info to user space");
-		return -EFAULT;
-	}
-
-	return 0;
-}
-
 static int aie2_get_power_mode(struct amdxdna_client *client,
 			       struct amdxdna_drm_get_info *args)
 {
@@ -888,7 +857,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 
 	switch (args->param) {
 	case DRM_AMDXDNA_QUERY_AIE_STATUS:
-		ret = aie2_get_aie_status(client, args);
+		ret = amdxdna_get_aie_status(&ndev->aie, client, args);
 		break;
 	case DRM_AMDXDNA_QUERY_AIE_METADATA:
 		ret = amdxdna_get_metadata(&ndev->aie, client, args);
