@@ -180,6 +180,20 @@ int ve2_xrs_col_list(struct amdxdna_dev *xdna, struct alloc_requests *xrs_req,
 
 int ve2_create_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 			void *buffer, u32 size);
+void ve2_coredump_cache_invalidate(struct amdxdna_ctx *hwctx);
+/**
+ * ve2_cache_coredump - Auto-capture an AIE coredump into the device cache.
+ * @xdna: Pointer to the device structure.
+ * @hwctx: Pointer to the hardware context that timed out.
+ * @seq: Sequence number of the failing command.
+ *
+ * Always-on: captures on every command timeout. Keep-latest: overwrites any
+ * previously cached dump (device-scoped). Must be called while @hwctx is still
+ * the active context on its partition (i.e. from the timeout path).
+ *
+ * Returns 0 on success or a negative errno.
+ */
+int ve2_cache_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq);
 /**
  * ve2_mgmt_destroy_partition - Destroy a VE2 hardware partition for a context.
  * @hwctx: Pointer to the hardware context.

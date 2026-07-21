@@ -83,6 +83,26 @@ struct amdxdna_ctx_command_fifo {
 	struct list_head                list;
 };
 
+/*
+ * ve2_coredump_cache - Last AIE coredump auto-captured on command timeout.
+ *
+ * This cache is per-hardware-context (lives in struct amdxdna_ctx_priv). Auto-
+ * capture is always on: the driver snapshots the AIE partition into @buf when a
+ * command on this context times out. Keep-latest: a newer timeout overwrites
+ * the previous snapshot.
+ * If the cache is empty the driver performs a live capture instead.
+ */
+struct ve2_coredump_cache {
+	void		*buf;		/* vmalloc'd snapshot, or NULL */
+	u32		size;		/* valid bytes in @buf */
+	u64		seq;		/* failing command sequence number */
+	u32		start_col;	/* partition start column */
+	u32		num_col;	/* partition column count */
+	ktime_t		timestamp;	/* capture time */
+	bool		valid;		/* @buf holds a captured dump */
+	struct mutex	lock;		/* protects all fields above */
+};
+
 struct amdxdna_ctx_priv {
 	u64				id; /* Unique incrementing hwctx ID */
 	u32				start_col;
@@ -98,6 +118,7 @@ struct amdxdna_ctx_priv {
 	struct timer_list		event_timer;
 	bool			misc_intrpt_flag; /* Hardware sync required */
 	struct mutex			privctx_lock; /* protect private ctx */
+	struct ve2_coredump_cache	coredump_cache; /* last timeout coredump (per hwctx) */
 };
 
 struct amdxdna_dev_priv {

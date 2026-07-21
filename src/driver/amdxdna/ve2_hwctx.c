@@ -7,6 +7,7 @@
 #include <linux/dma-buf.h>
 #include <linux/timer.h>
 #include <linux/version.h>
+#include <linux/vmalloc.h>
 
 #include "amdxdna_ctx.h"
 #include "amdxdna_gem.h"
@@ -1304,6 +1305,13 @@ static void ve2_handle_timeout(struct amdxdna_dev *xdna,
 		ve2_fill_health_data(xdna, hwctx, cmd_data, data_total);
 	}
 
+	/*
+	 * Snapshot the AIE partition while this hwctx is still the active
+	 * context on its partition. Auto-capture is always on. Best-effort:
+	 * failures are logged, not fatal.
+	 */
+	ve2_cache_coredump(xdna, hwctx, seq);
+
 	hwctx->health_reported = true;
 	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 }
@@ -1478,6 +1486,7 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 		ve2_clear_firmware_status(xdna, hwctx);
 
 	mutex_init(&priv->privctx_lock);
+	mutex_init(&priv->coredump_cache.lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
 
 	XDNA_DBG(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
@@ -1565,6 +1574,8 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv->hwctx_config);
+	vfree(hwctx->priv->coredump_cache.buf);
+	mutex_destroy(&hwctx->priv->coredump_cache.lock);
 	mutex_destroy(&hwctx->priv->privctx_lock);
 
 	XDNA_DBG(xdna,

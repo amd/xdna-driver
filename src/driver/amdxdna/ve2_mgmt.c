@@ -7,6 +7,7 @@
 #include <linux/completion.h>
 #include <linux/atomic.h>
 #include <linux/delay.h>
+#include <linux/vmalloc.h>
 
 #include "amdxdna_ctx.h"
 #include "ve2_of.h"
@@ -1312,6 +1313,97 @@ int ve2_create_coredump(struct amdxdna_dev *xdna,
 	XDNA_DBG(xdna, "Reading coredump ret:%d\n", rel_size);
 
 	return rel_size;
+}
+
+int ve2_cache_coredump(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx, u64 seq)
+{
+	struct amdxdna_dev_hdl *dev_hdl = xdna->dev_handle;
+	struct amdxdna_ctx_priv *priv = hwctx->priv;
+	struct ve2_coredump_cache *cache = &priv->coredump_cache;
+	void *buf, *old_buf;
+	u32 size;
+	int ret;
+
+	size = priv->num_col * dev_hdl->aie_dev_info.rows * TILE_ADDRESS_SPACE;
+	if (!size) {
+		XDNA_WARN(xdna, "Auto coredump: zero size for hwctx %u", hwctx->id);
+		return -EINVAL;
+	}
+
+	XDNA_INFO(xdna,
+		  "Auto coredump: capture start hwctx %u pid %u seq %llu start_col %u num_col %u size %u",
+		  hwctx->id, hwctx->client->pid, seq, priv->start_col, priv->num_col, size);
+
+	buf = vmalloc(size);
+	if (!buf)
+		return -ENOMEM;
+
+	/* hwctx is the active ctx on this partition during the timeout path. */
+	ret = ve2_create_coredump(xdna, hwctx, buf, size);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "Auto coredump capture failed for hwctx %u, err:%d",
+			 hwctx->id, ret);
+		vfree(buf);
+		return ret;
+	}
+
+	/*
+	 * Keep-latest: swap in the new snapshot, then free the previous one.
+	 * The cache is per-hwctx and is consumed (cleared) on the next coredump
+	 * request for this context.
+	 */
+	mutex_lock(&cache->lock);
+	old_buf = cache->buf;
+	cache->buf = buf;
+	cache->size = ret;
+	cache->seq = seq;
+	cache->start_col = priv->start_col;
+	cache->num_col = priv->num_col;
+	cache->timestamp = ktime_get();
+	cache->valid = true;
+
+	/* Dump the full coredump cache structure for debugging. */
+	XDNA_DBG(xdna,
+		 "ve2_coredump_cache: hwctx=%u pid=%u buf=%p size=%u seq=%llu start_col=%u num_col=%u timestamp=%lld valid=%d",
+		 hwctx->id, hwctx->client->pid, cache->buf, cache->size,
+		 cache->seq, cache->start_col, cache->num_col,
+		 ktime_to_ns(cache->timestamp), cache->valid);
+
+	mutex_unlock(&cache->lock);
+
+	XDNA_INFO(xdna,
+		  "Auto coredump cached OK: hwctx %u pid %u seq %llu size %d%s (head: %08x %08x %08x %08x)",
+		  hwctx->id, hwctx->client->pid, seq, ret,
+		  old_buf ? " [overwrote previous dump]" : "",
+		  ((u32 *)buf)[0], ((u32 *)buf)[1], ((u32 *)buf)[2], ((u32 *)buf)[3]);
+
+	/* Dump the first bytes so a zero/garbage capture is easy to spot. */
+	print_hex_dump_debug("ve2 auto-coredump head: ", DUMP_PREFIX_OFFSET, 16, 4, buf,
+			     min_t(u32, ret, 64u), false);
+
+	vfree(old_buf);
+
+	return 0;
+}
+
+/*
+ * Drop any auto-captured coredump held for this context. The dump is kept after
+ * a timeout so it can be read back; it is released here once the context makes
+ * forward progress again (a new command is submitted), since a stale snapshot
+ * no longer reflects the live partition state.
+ */
+void ve2_coredump_cache_invalidate(struct amdxdna_ctx *hwctx)
+{
+	struct ve2_coredump_cache *cache = &hwctx->priv->coredump_cache;
+
+	mutex_lock(&cache->lock);
+	if (cache->valid || cache->buf) {
+		vfree(cache->buf);
+		cache->buf = NULL;
+		cache->size = 0;
+		cache->valid = false;
+	}
+	mutex_unlock(&cache->lock);
 }
 
 static int ve2_xrs_release(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,

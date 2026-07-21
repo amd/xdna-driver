@@ -109,10 +109,13 @@ static int ve2_get_array_hwctx(struct amdxdna_client *client,
 		list_for_each_entry(tmp_client, &xdna->client_list, node) {
 			unsigned long id;
 			struct amdxdna_ctx *ctx;
+			int srcu_idx;
 
+			srcu_idx = srcu_read_lock(&tmp_client->ctx_srcu);
 			xa_for_each(&tmp_client->ctx_xa, id, ctx)
 				if (ctx->priv)
 					ctx_cnt++;
+			srcu_read_unlock(&tmp_client->ctx_srcu, srcu_idx);
 		}
 
 		if (args->num_element < ctx_cnt) {
@@ -377,6 +380,46 @@ static int ve2_aie_read(struct amdxdna_client *client, struct amdxdna_drm_get_ar
 	return 0;
 }
 
+/*
+ * Serve the last auto-captured coredump from this context's cache. The dump is
+ * retained after being read so it can be fetched again; it is dropped when the
+ * context is re-initialized or is torn down.
+ * Returns -ENODATA when there is no cached dump, so the caller can fall back to a live capture.
+ */
+static int ve2_coredump_read_cached(struct amdxdna_dev *xdna, struct amdxdna_drm_get_array *args,
+				    u32 buf_size, struct amdxdna_ctx *hwctx)
+{
+	struct ve2_coredump_cache *cache = &hwctx->priv->coredump_cache;
+	int ret = 0;
+
+	mutex_lock(&cache->lock);
+	if (!cache->valid || !cache->buf) {
+		XDNA_DBG(xdna, "No cached coredump for hwctx %u pid %d", hwctx->id,
+			 hwctx->client->pid);
+		ret = -ENODATA;
+		goto out;
+	}
+	if (cache->size > buf_size) {
+		XDNA_DBG(xdna, "Cached coredump too big: buf %u, need %u", buf_size, cache->size);
+		args->element_size = cache->size;
+		ret = -ENOBUFS;
+		goto out;
+	}
+	if (copy_to_user(u64_to_user_ptr(args->buffer), cache->buf, cache->size)) {
+		XDNA_ERR(xdna, "Failed to copy cached coredump to user");
+		ret = -EFAULT;
+		goto out;
+	}
+	XDNA_DBG(xdna, "Served cached coredump: hwctx %u pid %d seq %llu size %u", hwctx->id,
+		 hwctx->client->pid, cache->seq, cache->size);
+
+	ve2_coredump_cache_invalidate(hwctx);
+
+out:
+	mutex_unlock(&cache->lock);
+	return ret;
+}
+
 static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -421,6 +464,14 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	XDNA_DBG(xdna, "cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n",
 		 hwctx->client->pid, hwctx->id, hwctx->start_col,
 		 hwctx->num_col);
+
+	/*
+	 * Prefer auto-captured timeout coredump. It is served once and then cleared;
+	 * If cache is empty then go for a fresh live capture using ve2_create_coredump().
+	 */
+	ret = ve2_coredump_read_cached(xdna, args, buf_size, hwctx);
+	if (ret != -ENODATA)
+		return ret;
 
 	rel_size = hwctx->priv->num_col * xdna->dev_handle->aie_dev_info.rows * TILE_ADDRESS_SPACE;
 	if (rel_size > buf_size) {
