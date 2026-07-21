@@ -188,6 +188,33 @@ int ve2_get_firmware_status(struct amdxdna_hwctx *hwctx)
 	return ret;
 }
 
+/*
+ * ve2_clear_firmware_status - Reset the cached per-column CERT firmware status
+ * for @hwctx's partition. Called at context init so a fresh context does not
+ * report status left behind by a previous context that used the same columns.
+ */
+void ve2_clear_firmware_status(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *hdl = ve2_dev_hdl(xdna);
+
+	if (!hdl || !hdl->fw_slots)
+		return;
+
+	for (u32 col = 0; col < hwctx->num_col; col++) {
+		struct ve2_firmware_status *cs = hdl->fw_slots[hwctx->start_col + col];
+
+		if (!cs)
+			continue;
+
+		cs->state = 0;
+		cs->abs_page_index = 0;
+		cs->ppc = 0;
+		cs->idle_status = 0;
+		cs->misc_status = 0;
+	}
+}
+
 void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);

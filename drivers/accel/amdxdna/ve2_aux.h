@@ -76,4 +76,7 @@ void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *
 /* Capture the per-column CERT firmware status for @hwctx's partition. */
 int ve2_get_firmware_status(struct amdxdna_hwctx *hwctx);
 
+/* Reset the cached per-column CERT firmware status for @hwctx's partition. */
+void ve2_clear_firmware_status(struct amdxdna_hwctx *hwctx);
+
 #endif /* _VE2_AUX_H_ */

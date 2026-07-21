@@ -740,6 +740,9 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	ve2_auto_select_mem_bitmap(xdna, hwctx);
 
+	/* Start from a clean per-column firmware status snapshot for this partition. */
+	ve2_clear_firmware_status(hwctx);
+
 	/* Allocate per-column config array (zero-initialised = no buffers attached). */
 	vp->hwctx_config = kcalloc(hwctx->num_col, sizeof(*vp->hwctx_config), GFP_KERNEL);
 	if (!vp->hwctx_config) {
