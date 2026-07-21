@@ -226,6 +226,68 @@ int amdxdna_get_metadata(struct aie_device *aie,
 	return ret;
 }
 
+int amdxdna_get_aie_status(struct aie_device *aie,
+			   struct amdxdna_client *client,
+			   struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_query_aie_status status = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_msg_buf_hdl *buf_hdl;
+	u32 cols_filled = 0;
+	u32 resp_size = 0;
+	u32 alloc_sz;
+	u32 buf_sz;
+	int ret;
+
+	if (!aie->msg_ops.query_status)
+		return -EOPNOTSUPP;
+
+	buf_sz = min(args->buffer_size, sizeof(status));
+	if (copy_from_user(&status, u64_to_user_ptr(args->buffer), buf_sz)) {
+		XDNA_ERR(xdna, "Failed to copy AIE request into kernel");
+		return -EFAULT;
+	}
+
+	alloc_sz = aie->metadata.cols * aie->metadata.col_size;
+	if (!alloc_sz)
+		return -EINVAL;
+
+	buf_hdl = amdxdna_alloc_msg_buff(xdna, alloc_sz);
+	if (IS_ERR(buf_hdl))
+		return PTR_ERR(buf_hdl);
+
+	drm_clflush_virt_range(to_cpu_addr(buf_hdl, 0), to_buf_size(buf_hdl));
+
+	ret = aie->msg_ops.query_status(aie, buf_hdl, &cols_filled, &resp_size);
+	if (ret) {
+		XDNA_ERR(xdna, "Failed to get AIE status info, ret %d", ret);
+		goto out_free;
+	}
+
+	if (to_buf_size(buf_hdl) < resp_size) {
+		XDNA_ERR(xdna, "Bad buffer size. Available: %u. Needs: %u",
+			 to_buf_size(buf_hdl), resp_size);
+		ret = -EINVAL;
+		goto out_free;
+	}
+
+	resp_size = min(status.buffer_size, resp_size);
+	if (copy_to_user(u64_to_user_ptr(status.buffer),
+			 to_cpu_addr(buf_hdl, 0), resp_size)) {
+		XDNA_ERR(xdna, "Failed to copy AIE status to user space");
+		ret = -EFAULT;
+		goto out_free;
+	}
+
+	status.cols_filled = cols_filled;
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &status, buf_sz))
+		ret = -EFAULT;
+
+out_free:
+	amdxdna_free_msg_buff(buf_hdl);
+	return ret;
+}
+
 int amdxdna_get_telemetry(struct aie_device *aie,
 			  struct amdxdna_client *client,
 			  struct amdxdna_drm_get_info *args)
