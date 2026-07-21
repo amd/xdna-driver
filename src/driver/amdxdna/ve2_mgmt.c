@@ -466,12 +466,12 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 			break;
 		}
 
-                if (c_ctx->ctx != mgmtctx->active_ctx) {
-                        ve2_request_context_switch(mgmtctx->xdna, mgmtctx);
-                        XDNA_DBG(xdna, "request context to be schedule next: %p active: %p\n", c_ctx->ctx, mgmtctx->active_ctx); 
-                        notify_fw_cmd_ready(mgmtctx->active_ctx);
-                        mgmtctx->is_partition_idle = 0;
-                }
+        if (c_ctx->ctx != mgmtctx->active_ctx) {
+        	ve2_request_context_switch(mgmtctx->xdna, mgmtctx);
+            XDNA_DBG(xdna, "request context to be schedule next: %p active: %p\n", c_ctx->ctx, mgmtctx->active_ctx); 
+            notify_fw_cmd_ready(mgmtctx->active_ctx);
+            mgmtctx->is_partition_idle = 0;
+        }
 
 		break;
 	}
@@ -520,15 +520,15 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 				 mgmtctx->active_ctx, hwctx);
 		}
 	} else {
-                if (mgmtctx->is_idle_due_to_context == 1) {
-                        mgmtctx->is_idle_due_to_context = 0;
-                        mgmtctx->is_partition_idle = 0;
-                        ve2_mgmt_handshake_init(xdna, hwctx);
-                        mgmtctx->active_ctx = hwctx;
-                } else {
-                        notify_fw_cmd_ready(mgmtctx->active_ctx);
-                }
+    	if (mgmtctx->is_idle_due_to_context == 1) {
+        	mgmtctx->is_idle_due_to_context = 0;
+            mgmtctx->is_partition_idle = 0;
+            ve2_mgmt_handshake_init(xdna, hwctx);
+            mgmtctx->active_ctx = hwctx;
+        } else {
+        	notify_fw_cmd_ready(mgmtctx->active_ctx);
         }
+    }
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
