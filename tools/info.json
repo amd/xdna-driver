@@ -7,7 +7,7 @@
 	"firmwares": [
 		{
 			"device": "npu1",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/npu.sbin.1.5.5.391",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/1502_00/1.5_npu.sbin.1.5.5.391",
 			"pci_device_id": "1502",
 			"pci_revision_id": "00",
 			"version": "1.5.5.391",
@@ -31,7 +31,7 @@
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/1.8_npu.sbin.2.5.0.172",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/1.8_npu.sbin.2.5.0.172",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "10",
 			"version": "2.5.0.172",
@@ -39,7 +39,7 @@
 		},
 		{
 			"device": "npu3",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_10/1.8_cert.sbin.1.5.0.39",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/1.8_cert.sbin.1.5.0.39",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "10",
 			"version": "1.5.0.39",
@@ -71,7 +71,7 @@
 		},
 		{
 			"device": "npu9",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_13/1.8_cert.sbin.1.5.0.39",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/1.8_cert.sbin.1.5.0.39",
 			"pci_device_id": "17f1",
 			"pci_revision_id": "13",
 			"version": "1.5.0.39",
@@ -79,7 +79,7 @@
 		},
 		{
 			"device": "npu9",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_13/1.8_npu.sbin.2.5.0.172",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_13/1.8_npu.sbin.2.5.0.172",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "13",
 			"version": "2.5.0.172",
@@ -87,7 +87,7 @@
 		},
 		{
 			"device": "npu9",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_13/1.8_cert.sbin.1.5.0.39",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/1.8_cert.sbin.1.5.0.39",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "13",
 			"version": "1.5.0.39",
@@ -95,7 +95,7 @@
 		},
 		{
 			"device": "npu11",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_15/1.8_npu.sbin.2.5.0.172",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_13/1.8_npu.sbin.2.5.0.172",
 			"pci_device_id": "17f1",
 			"pci_revision_id": "15",
 			"version": "2.5.0.172",
@@ -103,7 +103,7 @@
 		},
 		{
 			"device": "npu11",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_15/1.8_cert.sbin.1.5.0.39",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/1.8_cert.sbin.1.5.0.39",
 			"pci_device_id": "17f1",
 			"pci_revision_id": "15",
 			"version": "1.5.0.39",
@@ -111,7 +111,7 @@
 		},
 		{
 			"device": "npu11",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_15/1.8_npu.sbin.2.5.0.172",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_13/1.8_npu.sbin.2.5.0.172",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "15",
 			"version": "2.5.0.172",
@@ -119,16 +119,13 @@
 		},
 		{
 			"device": "npu11",
-			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f2_15/1.8_cert.sbin.1.5.0.39",
+			"url": "https://gitlab.com/kernel-firmware/drm-firmware/-/raw/amd-ipu-staging/amdnpu/17f1_10/1.8_cert.sbin.1.5.0.39",
 			"pci_device_id": "17f2",
 			"pci_revision_id": "15",
 			"version": "1.5.0.39",
 			"fw_name": "cert.dev.sbin"
 		}
 	],
-	"aie4_firmwares" : {
-		"umq_version": "20260605-6f68be4"
-	},
 	"vtd_archives": [
 		{
 			"device": "strx",
