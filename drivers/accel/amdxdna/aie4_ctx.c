@@ -308,11 +308,11 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
  * struct amdxdna_ctx_health_data (version 1) so user space can read it after
  * the command is marked timed out. If no report was cached for this context,
  * the per-generation fields are zeroed. The cached report is not consumed here:
- * every job completed by a single context reset must observe the same report,
- * so the reset cleanup (aie4_hwctx_cleanup_running_jobs) clears it exactly once
- * after all parked jobs have been served. Caller must hold io_lock, which
- * serializes this multi-word read against the async error worker overwriting
- * the cache concurrently.
+ * the errored abort path (aie4_hwctx_cleanup_running_jobs) attaches it to the faulting
+ * head job and clears it exactly once after all parked jobs have been served, so
+ * a later unrelated reset cannot observe a stale report. Caller must hold
+ * io_lock, which serializes this multi-word read against the async error worker
+ * overwriting the cache concurrently.
  */
 static void aie4_fill_health_data_locked(struct amdxdna_gem_obj *cmd_abo,
 					 struct amdxdna_hwctx *hwctx)
@@ -1117,37 +1117,46 @@ static void job_worker(struct work_struct *work)
 }
 
 /*
- * Reap the in-flight jobs parked by the worker on disconnect. On a plain
- * teardown (@errored false) they are aborted. On the critical-error reset path
- * (@errored true) they are completed as TIMEOUT with the cached firmware health
- * report attached, so waiters observe the timeout (and its per-command health
- * data) instead of a bare abort.
+ * Abort every in-flight job on this kernel-mode context's queue. On a plain
+ * teardown (@errored false) all jobs are ABORTed. On the critical-error path
+ * (@errored true) only the head job - the oldest in-flight job, i.e. the one
+ * that actually faulted - is reported as TIMEOUT with the cached firmware health
+ * report attached; the jobs queued behind it never ran, so they are ABORTed too.
+ * next_running_job() pops the head first, so the first job drained here is the
+ * faulting one.
+ *
+ * The caller must have already disconnected the context (aie4_hwctx_destroy()):
+ * that keeps the running list stable and makes the pending submitters self-abort
+ * via the doorbell_addr==NULL gate, so only the parked running list is drained
+ * here. destroy() also quiesces the worker, so the cancel_work_sync() below is a
+ * defensive no-op in that expected ordering.
  */
 void aie4_hwctx_cleanup_running_jobs(struct amdxdna_hwctx *hwctx, bool errored)
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_sched_job *job;
+	bool timeout = errored;
 
-	/*
-	 * The worker parks (preserves) in-flight jobs on disconnect instead of
-	 * reaping them, so on teardown/reset stop it and complete the preserved
-	 * jobs here.  cancel_work_sync() ensures the worker is not touching the
-	 * list.
+	/* The worker parks in-flight jobs on disconnect; make sure it is not
+	 * touching the running list before we drain it.
 	 */
 	cancel_work_sync(&priv->job_work);
 	while ((job = next_running_job(hwctx))) {
-		if (errored)
+		if (timeout) {
 			job_timeout(job);
-		else
+			/* Only the faulting head job carries the report. */
+			timeout = false;
+		} else {
 			job_abort(job);
+		}
 	}
 
 	if (errored) {
 		/*
-		 * Every job above was filled from the same cached health report;
-		 * consume it exactly once now that all parked jobs for this reset
-		 * have been served, so a later unrelated reset cannot observe a
-		 * stale report.
+		 * The head job was filled from the cached health report; consume
+		 * it exactly once now that all parked jobs for this reset have
+		 * been served, so a later unrelated reset cannot observe a stale
+		 * report.
 		 */
 		mutex_lock(&priv->io_lock);
 		priv->cached_ctx_error_valid = false;
