@@ -190,6 +190,12 @@ static void aie4_async_ctx_error_cache(struct aie_device *aie,
 		if (priv->kernel_submit) {
 			mutex_lock(&priv->io_lock);
 			memcpy(&priv->cached_ctx_error, ctx_err, sizeof(*ctx_err));
+			/*
+			 * Mark a ctx error cached: this flags the ensuing teardown as a
+			 * TDR reset (not a suspend), which aie4_unlink_cert_comp() uses to
+			 * bump ctx_error_gen at the disconnect so a broken submit wait
+			 * returns -EAGAIN instead of continuing as if suspended.
+			 */
 			priv->cached_ctx_error_valid = true;
 			mutex_unlock(&priv->io_lock);
 		}
