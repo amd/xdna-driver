@@ -110,6 +110,41 @@ if(XDNA_FW_WHENCE_COMMIT STREQUAL "")
   endif()
 endif()
 
+# Resolve the Xilinx/VTD commit that the VTD archives will be fetched from,
+# using the same lightweight, download-free approach as the firmware above so
+# version.json records it at configure time without downloading any archive.
+#
+#   * A committed tools/WHENCE snapshot pins the commit in a "# vtd-commit:"
+#     line (release branches), so read it directly.
+#   * Otherwise (main/link) resolve the Xilinx/VTD HEAD via git ls-remote, which
+#     is metadata only and downloads no archive.
+#
+# Resolution is best-effort and never fails the configure when offline.
+set(XDNA_VTD_COMMIT "")
+if(EXISTS ${XDNA_WHENCE_SNAPSHOT})
+  file(STRINGS ${XDNA_WHENCE_SNAPSHOT} XDNA_VTD_PIN_LINES
+       REGEX "^# vtd-commit:")
+  if(XDNA_VTD_PIN_LINES)
+    list(GET XDNA_VTD_PIN_LINES 0 XDNA_VTD_PIN)
+    string(REGEX REPLACE "^# vtd-commit:[ \t]*" "" XDNA_VTD_COMMIT
+           "${XDNA_VTD_PIN}")
+    string(STRIP "${XDNA_VTD_COMMIT}" XDNA_VTD_COMMIT)
+  endif()
+endif()
+if(XDNA_VTD_COMMIT STREQUAL "")
+  execute_process(
+    COMMAND git ls-remote https://github.com/Xilinx/VTD.git HEAD
+    OUTPUT_VARIABLE XDNA_VTD_LS_REMOTE
+    RESULT_VARIABLE XDNA_VTD_LS_RESULT
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    TIMEOUT 60
+  )
+  if(XDNA_VTD_LS_RESULT EQUAL 0 AND NOT XDNA_VTD_LS_REMOTE STREQUAL "")
+    string(REGEX MATCH "^[0-9a-fA-F]+" XDNA_VTD_COMMIT "${XDNA_VTD_LS_REMOTE}")
+  endif()
+endif()
+
 set(XDNA_VERSION_JSON_FILE ${CMAKE_CURRENT_BINARY_DIR}/version.json)
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/CMake/config/version.json.in

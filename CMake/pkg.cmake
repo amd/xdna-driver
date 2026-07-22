@@ -65,7 +65,8 @@ math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
 set(XDNA_CPACK_XRT_BASE_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR})
 set(XDNA_CPACK_XRT_BASE_NEXT_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})
 
-# VTD archives are downloaded by build script based on info.json configuration
+# VTD archives are fetched by build/build.sh from the "Repo: VTD" section of
+# tools/WHENCE (see tools/sync_from_whence.py vtd).
 set(VTD_ARCHIVES_DIR "${CMAKE_CURRENT_BINARY_DIR}/../amdxdna_bins/vtd_archives")
 message(STATUS "Using VTD archives from ${VTD_ARCHIVES_DIR}")
 

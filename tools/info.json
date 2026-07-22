@@ -3,25 +3,5 @@
 	"xrt" : {
 		"version": "202620.2.26.60",
 		"os_rel": ["22.04", "24.04"]
-	},
-	"aie4_firmwares" : {
-		"umq_version": "20260605-6f68be4"
-	},
-	"vtd_archives": [
-		{
-			"device": "strx",
-			"url": "https://github.com/Xilinx/VTD/raw/406bbbc0f72920567d417f3cf5e25284c12d9176/archive/strx/xrt_smi_strx.a",
-			"filename": "xrt_smi_strx.a"
-		},
-		{
-			"device": "phx",
-			"url": "https://github.com/Xilinx/VTD/raw/406bbbc0f72920567d417f3cf5e25284c12d9176/archive/phx/xrt_smi_phx.a",
-			"filename": "xrt_smi_phx.a"
-		},
-		{
-			"device": "npu3",
-			"url": "https://github.com/Xilinx/VTD/raw/406bbbc0f72920567d417f3cf5e25284c12d9176/archive/npu3/xrt_smi_npu3.a",
-			"filename": "xrt_smi_npu3.a"
-		}
-	]
+	}
 }
