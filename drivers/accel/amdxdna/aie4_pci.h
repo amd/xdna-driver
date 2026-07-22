@@ -64,9 +64,24 @@ struct amdxdna_hwctx_priv {
 	 * Both the flag and the multi-word report body are protected by io_lock
 	 * (cached only for kernel-mode contexts); the flag alone is insufficient
 	 * because the worker can overwrite the body while a reader consumes it.
+	 * aie4_unlink_cert_comp() also reads the flag to gate the ctx_error_gen
+	 * bump; that read is serialized against the io_lock writers by dev_lock
+	 * (cache, reset and destroy all run under dev_lock).
 	 */
 	bool                            cached_ctx_error_valid;
 	struct aie4_async_ctx_error     cached_ctx_error;
+	/*
+	 * Monotonic count of critical ctx errors recorded for this ctx (bumped in
+	 * aie4_unlink_cert_comp() when cached_ctx_error_valid is set, i.e. on a TDR
+	 * disconnect). A submitter parked in the HSA-full wait snapshots it before
+	 * sleeping; if it advances while the wait is broken by a context recreate,
+	 * the recreate was a TDR reset and the submit unwinds. If it is unchanged,
+	 * the recreate was a benign suspend/resume, so the wait re-acquires the
+	 * fresh cert_comp and continues. Written under cert_comp_lock, read
+	 * locklessly with READ_ONCE (safe: the wait's schedule() commits the
+	 * snapshot before any teardown wake, and the count is monotonic).
+	 */
+	u32                             ctx_error_gen;
 
 	/* Kernel-mode submission: driver fills the user HSA queue and rings
 	 * the doorbell.  umq_pkts/umq_indirect_pkts alias the user umq_bo;
