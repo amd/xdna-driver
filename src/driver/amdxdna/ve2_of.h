@@ -33,6 +33,7 @@
 	 ((num_col) << AIE_PART_ID_NUM_COLS_SHIFT))
 
 extern int enable_polling;
+extern int ve2_perf_optimization;
 extern int verbosity;
 extern int start_col;
 extern int partition_size;
@@ -98,6 +99,11 @@ struct amdxdna_ctx_priv {
 	struct timer_list		event_timer;
 	bool			misc_intrpt_flag; /* Hardware sync required */
 	struct mutex			privctx_lock; /* protect private ctx */
+
+	/* Pre-allocated DMA coherent buffer for handshake data. */
+	void				*hs_dma_va;
+	dma_addr_t			hs_dma_pa;
+	size_t				hs_dma_size;
 };
 
 struct amdxdna_dev_priv {
