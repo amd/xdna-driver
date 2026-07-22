@@ -38,6 +38,10 @@ int max_col;
 module_param(max_col, int, 0644);
 MODULE_PARM_DESC(max_col, "Max column supported by this driver");
 
+int ve2_perf_optimization;;
+module_param(ve2_perf_optimization, int, 0644);
+MODULE_PARM_DESC(ve2_perf_optimization, "Enable perf mode. disabled by default.");
+
 #define CTX_TIMER	(nsecs_to_jiffies(1))
 
 /*
@@ -394,11 +398,10 @@ static inline void hsa_queue_pkt_set_invalid(struct host_queue_packet *pkt)
 static void ve2_free_hsa_queue(struct amdxdna_dev *xdna, struct ve2_hsa_queue *queue)
 {
 	if (queue->hsa_queue_p) {
-		dma_free_noncoherent(queue->alloc_dev,
-				     sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
-				     queue->hsa_queue_p,
-				     queue->hsa_queue_mem.dma_addr,
-				     DMA_BIDIRECTIONAL);
+		dma_free_coherent(queue->alloc_dev,
+				  sizeof(struct hsa_queue) + sizeof(u64) * HOST_QUEUE_ENTRY,
+				  queue->hsa_queue_p,
+				  queue->hsa_queue_mem.dma_addr);
 		queue->hsa_queue_p = NULL;
 		queue->hsa_queue_mem.dma_addr = 0;
 		queue->alloc_dev = NULL;
@@ -509,9 +512,8 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 	for (r = 0; r < MAX_MEM_REGIONS; r++) {
 		alloc_dev = xdna->cma_region_devs[r];
 		if ((hwctx->priv->mem_bitmap & (1U << r)) && alloc_dev) {
-			queue->hsa_queue_p = dma_alloc_noncoherent(alloc_dev, alloc_size,
-								   &dma_handle, DMA_BIDIRECTIONAL,
-								   GFP_KERNEL);
+			queue->hsa_queue_p = dma_alloc_coherent(alloc_dev, alloc_size,
+								&dma_handle, GFP_KERNEL);
 			if (!queue->hsa_queue_p)
 				continue;
 			queue->alloc_dev = alloc_dev;
@@ -521,11 +523,10 @@ static int ve2_create_host_queue(struct amdxdna_dev *xdna, struct amdxdna_ctx *h
 
 	/* If no allocation succeeded, use the default device */
 	if (!queue->hsa_queue_p) {
-		queue->hsa_queue_p = dma_alloc_noncoherent(xdna->ddev.dev,
-							   alloc_size,
-							   &dma_handle,
-							   DMA_BIDIRECTIONAL,
-							   GFP_KERNEL);
+		queue->hsa_queue_p = dma_alloc_coherent(xdna->ddev.dev,
+							alloc_size,
+							&dma_handle,
+							GFP_KERNEL);
 		if (!queue->hsa_queue_p) {
 			XDNA_ERR(xdna, "Failed to allocate host queue memory, size=%zu",
 				 alloc_size);
@@ -1480,6 +1481,19 @@ int ve2_hwctx_init(struct amdxdna_ctx *hwctx)
 	mutex_init(&priv->privctx_lock);
 	priv->state = AMDXDNA_HWCTX_STATE_IDLE;
 
+	/* Pre-allocate DMA coherent buffer for handshake data.
+	 * Avoids per-init dmam_alloc_coherent/free for each column.
+	 */
+	priv->hs_dma_size = priv->num_col * sizeof(struct handshake);
+	if (priv->hs_dma_size && priv->aie_dev) {
+		priv->hs_dma_va = dma_alloc_coherent(priv->aie_dev,
+						      priv->hs_dma_size,
+						      &priv->hs_dma_pa,
+						      GFP_KERNEL);
+		if (!priv->hs_dma_va)
+			XDNA_WARN(xdna, "Failed to pre-alloc handshake DMA buf");
+	}
+
 	XDNA_DBG(xdna, "hwctx init: ready hwctx=%p start_col=%u pid=%d",
 		 hwctx, priv->start_col, hwctx->client->pid);
 
@@ -1562,6 +1576,14 @@ void ve2_hwctx_fini(struct amdxdna_ctx *hwctx)
 	if (verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_get_firmware_status(hwctx);
 
+	/* Free pre-allocated handshake DMA buffer before partition teardown
+	 * since aie_dev becomes invalid after aie_partition_release().
+	 */
+	if (nhwctx->hs_dma_va) {
+		dma_free_coherent(nhwctx->aie_dev, nhwctx->hs_dma_size,
+				  nhwctx->hs_dma_va, nhwctx->hs_dma_pa);
+		nhwctx->hs_dma_va = NULL;
+	}
 	ve2_mgmt_destroy_partition(hwctx);
 	ve2_free_hsa_queue(xdna, &hwctx->priv->hwctx_hsa_queue);
 	kfree(hwctx->priv->hwctx_config);
