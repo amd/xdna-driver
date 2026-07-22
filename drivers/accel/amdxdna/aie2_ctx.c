@@ -1083,12 +1083,10 @@ static int aie2_populate_range(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	struct amdxdna_umap *mapp;
-	unsigned long timeout;
 	struct mm_struct *mm;
 	bool found;
 	int ret;
 
-	timeout = jiffies + msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
 again:
 	found = false;
 	down_write(&xdna->notifier_lock);
@@ -1118,11 +1116,6 @@ again:
 	ret = hmm_range_fault(&mapp->range);
 	mmap_read_unlock(mm);
 	if (ret) {
-		if (time_after(jiffies, timeout)) {
-			ret = -ETIME;
-			goto put_mm;
-		}
-
 		if (ret == -EBUSY) {
 			amdxdna_umap_put(mapp);
 			mmput(mm);
@@ -1157,7 +1150,6 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	struct ww_acquire_ctx acquire_ctx;
 	struct dma_fence_chain *chain;
 	struct amdxdna_gem_obj *abo;
-	unsigned long timeout = 0;
 	int ret, i;
 
 	ret = down_interruptible(&hwctx->priv->job_sem);
@@ -1206,14 +1198,6 @@ retry:
 		if (abo->mem.map_invalid) {
 			up_read(&xdna->notifier_lock);
 			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
-			if (!timeout) {
-				timeout = jiffies +
-					msecs_to_jiffies(HMM_RANGE_DEFAULT_TIMEOUT);
-			} else if (time_after(jiffies, timeout)) {
-				ret = -ETIME;
-				goto cleanup_job;
-			}
-
 			ret = aie2_populate_range(abo);
 			if (ret)
 				goto cleanup_job;
