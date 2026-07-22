@@ -113,29 +113,48 @@ sync_npufws()
   fi
 }
 
-download_vtd_archives()
+sync_vtd_archives()
 {
   local vtd_dir=${DOWNLOAD_BINS_DIR}/vtd_archives
+  local whence_manifest=${BUILD_DIR}/../tools/WHENCE
+  local sync_script=${BUILD_DIR}/../tools/sync_from_whence.py
+  # Record the resolved VTD commit next to the firmware .whence_commit so the
+  # build caches both hashes together for the packaging step.
+  local commit_file=${DOWNLOAD_BINS_DIR}/firmware/.vtd_commit
 
-  jq -c '.vtd_archives[]' "$INFO_JSON" |
-    while IFS= read -r line; do
-      local device=$(echo $line | jq -r '.device')
-      local filename=$(echo $line | jq -r '.filename')
-      local url=$(echo $line | jq -r '.url')
+  mkdir -p "${vtd_dir}" "$(dirname "${commit_file}")"
 
-      if [[ -z "$url" ]]; then
-        echo "Empty URL for $device VTD archive, SKIP."
-        continue
-      fi
+  # Release branches pin the VTD archives with a "# vtd-commit:" line in the
+  # committed tools/WHENCE. main has no snapshot, so synthesize a minimal
+  # manifest holding the default "Repo: VTD" File: list (and no pin), which
+  # makes the sync resolve and fetch the latest Xilinx/VTD commit.
+  local vtd_whence="${whence_manifest}"
+  local tmp_whence=""
+  if [ ! -f "${whence_manifest}" ]; then
+    tmp_whence=$(mktemp)
+    # Remove the temporary manifest even if the sync below fails under "set -e"
+    # before the explicit cleanup at the end of the function runs.
+    trap 'rm -f "${tmp_whence}"' EXIT
+    cat > "${tmp_whence}" <<'EOF'
+Repo: VTD - xrt-smi validation archives fetched from github.com/Xilinx/VTD
 
-      echo "Download $device VTD archive:"
-      if [ -f "${vtd_dir}/$filename" ]; then
-        rm ${vtd_dir}/$filename
-      fi
-      mkdir -p ${vtd_dir}
-      download_url "${vtd_dir}/$filename" "$url"
+File: archive/strx/xrt_smi_strx.a
+File: archive/phx/xrt_smi_phx.a
+File: archive/npu3/xrt_smi_npu3.a
+EOF
+    vtd_whence="${tmp_whence}"
+    echo "Sync VTD archives from latest Xilinx/VTD (no committed WHENCE snapshot)"
+  else
+    echo "Sync VTD archives from ${whence_manifest}"
+  fi
 
-    done
+  python3 "${sync_script}" vtd --whence "${vtd_whence}" \
+    --out "${vtd_dir}" --commit-file "${commit_file}"
+
+  if [ -n "${tmp_whence}" ]; then
+    rm -f "${tmp_whence}"
+    trap - EXIT
+  fi
 }
 
 run_vxdna_tests_func()
@@ -197,10 +216,10 @@ do_build()
     if [[ $skip_kmod == 0 ]]; then
       sync_npufws
     fi
-    # Download VTD archives
-    download_vtd_archives
+    # Sync VTD archives
+    sync_vtd_archives
     # Prepare xbutil validate related files for packaging
-    mkdir -p $XBUTIL_VALIDATE_BINS_DIR
+    mkdir -p "$XBUTIL_VALIDATE_BINS_DIR"
     cp -r ${BUILD_DIR}/../tools/bins/* $XBUTIL_VALIDATE_BINS_DIR
     package_targets $BUILD_TYPE
   fi
@@ -306,7 +325,6 @@ RELEASE_BUILD_TYPE=Release
 CMAKE=cmake
 CMAKE_MAJOR_VERSION=`cmake --version | head -n 1 | awk '{print $3}' |awk -F. '{print $1}'`
 cmake_extra_flags=""
-INFO_JSON=${BUILD_DIR}/../tools/info.json
 DOWNLOAD_BINS_DIR=./amdxdna_bins
 XBUTIL_VALIDATE_BINS_DIR=$DOWNLOAD_BINS_DIR/download_raw/xbutil_validate/bins
 
