@@ -214,6 +214,7 @@ extern const struct aie_error_lut_set aie4_error_luts;
 int aie4_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
 			      void *handle, int (*cb)(void *, void __iomem *, size_t));
 bool aie4_handle_dev_event(struct aie_device *aie, u32 type, void *vaddr);
+int aie4_mgmt_async_event_handler(void *handle, u32 opcode, void __iomem *data, size_t size);
 int aie4_get_array_async_error(struct amdxdna_dev_hdl *ndev,
 			       struct amdxdna_drm_get_array *args);
 
