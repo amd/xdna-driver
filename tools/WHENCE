@@ -1,0 +1,58 @@
+# Pinned firmware manifest snapshot for the 1.8 released firmware.
+# Every device that has a released "1.8_"-prefixed firmware file is pinned to
+# that frozen file; devices with no 1.8 counterpart (npu10, 17f1_14 / 17f2_14)
+# keep the firmware currently referenced by tools/info.json on main.
+# The pin below points at an immutable drm-firmware commit so release builds are
+# reproducible; tools/sync_from_whence.py reads "# whence-commit:" and downloads
+# every versioned file from that commit.
+# whence-ref: amd-ipu-staging
+# whence-commit: 0314d8a1b6c833046b81826328d893adc7a8d27b
+
+Driver: amdxdna - AMD Inference processor
+
+File: amdnpu/1502_00/1.5_npu.sbin.1.5.5.391
+File: amdnpu/17f0_10/1.7_npu.sbin.1.1.2.64
+File: amdnpu/17f0_11/1.7_npu.sbin.1.1.2.65
+File: amdnpu/17f1_10/1.8_npu.sbin.2.5.0.172
+File: amdnpu/17f1_10/1.8_cert.sbin.1.5.0.39
+File: amdnpu/17f1_13/1.8_npu.sbin.2.5.0.172
+File: amdnpu/17f1_14/npu.sbin.2.9.0.1
+File: amdnpu/17f1_14/cert.sbin.1.5.0.39
+Link: amdnpu/1502_00/npu.dev.sbin -> 1.5_npu.sbin.1.5.5.391
+Link: amdnpu/17f0_10/npu.dev.sbin -> 1.7_npu.sbin.1.1.2.64
+Link: amdnpu/17f0_11/npu.dev.sbin -> 1.7_npu.sbin.1.1.2.65
+Link: amdnpu/17f1_10/npu.dev.sbin -> 1.8_npu.sbin.2.5.0.172
+Link: amdnpu/17f1_10/cert.dev.sbin -> 1.8_cert.sbin.1.5.0.39
+Link: amdnpu/17f1_13/npu.dev.sbin -> 1.8_npu.sbin.2.5.0.172
+Link: amdnpu/17f1_13/cert.dev.sbin -> ../17f1_10/1.8_cert.sbin.1.5.0.39
+Link: amdnpu/17f1_14/npu.dev.sbin -> npu.sbin.2.9.0.1
+Link: amdnpu/17f1_14/cert.dev.sbin -> cert.sbin.1.5.0.39
+Link: amdnpu/17f1_15/npu.dev.sbin -> ../17f1_13/1.8_npu.sbin.2.5.0.172
+Link: amdnpu/17f1_15/cert.dev.sbin -> ../17f1_10/1.8_cert.sbin.1.5.0.39
+Link: amdnpu/17f2_10/npu.dev.sbin -> ../17f1_10/1.8_npu.sbin.2.5.0.172
+Link: amdnpu/17f2_10/cert.dev.sbin -> ../17f1_10/1.8_cert.sbin.1.5.0.39
+Link: amdnpu/17f2_13/npu.dev.sbin -> ../17f1_13/1.8_npu.sbin.2.5.0.172
+Link: amdnpu/17f2_13/cert.dev.sbin -> ../17f1_10/1.8_cert.sbin.1.5.0.39
+Link: amdnpu/17f2_14/npu.dev.sbin -> ../17f1_14/npu.sbin.2.9.0.1
+Link: amdnpu/17f2_14/cert.dev.sbin -> ../17f1_14/cert.sbin.1.5.0.39
+Link: amdnpu/17f2_15/npu.dev.sbin -> ../17f1_13/1.8_npu.sbin.2.5.0.172
+Link: amdnpu/17f2_15/cert.dev.sbin -> ../17f1_10/1.8_cert.sbin.1.5.0.39
+
+Licence: Redistributable. See LICENSE.amdnpu for details.
+
+-------------------------------------------------------------------------------
+
+# VTD (validation test data) archive manifest, fetched from Xilinx/VTD.
+# The archives are packaged into the plugin as the xrt-smi validation binaries.
+# A committed "# vtd-commit:" pin marks a release branch and makes the download
+# reproducible; when the pin is absent (main) the fetch resolves the latest
+# Xilinx/VTD commit and records the resolved hash for the build.
+# vtd-commit: 406bbbc0f72920567d417f3cf5e25284c12d9176
+
+Repo: VTD - xrt-smi validation archives fetched from github.com/Xilinx/VTD
+
+File: archive/strx/xrt_smi_strx.a
+File: archive/phx/xrt_smi_phx.a
+File: archive/npu3/xrt_smi_npu3.a
+
+Licence: Redistributable.
