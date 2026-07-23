@@ -78,7 +78,10 @@ binary_info binary_infos[] = {
       { "DPU:dpu", {0xffffffff} },
     },
     .path = "local_shim_test_data/npu3/bad/bad_timeout.elf",
-    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"} },
+    // The ELF maskpolls forever without faulting, so CERT hits its context
+    // timeout and reports UC_CRITICAL_ERROR (5) with an app health report.
+    .extra = { {"exp_status", exp_status_timeout}, {"exp_val", "5"},
+               {"exp_ctx_error_type", "5"} },
     .flow = FULL_ELF,
   },
   {
