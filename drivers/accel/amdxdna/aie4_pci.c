@@ -386,6 +386,18 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
+	/*
+	 * Context switch hysteresis is a best-effort tuning knob; warn but do
+	 * not fail hw start (or a later runtime resume) if the firmware does not
+	 * support the runtime config. ret is overwritten by the next mandatory
+	 * step below, so a failure here never affects hw start.
+	 */
+	ret = aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set ctx switch hysteresis to %u us (%d), using fw default",
+			  ndev->ctx_switch_hysteresis_us, ret);
+
 #ifdef AMDXDNA_NPU3A
 	ret = aie4_iommu_bypass_echo(ndev);
 	if (ret)
@@ -493,6 +505,18 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 				      to_buf_size(ndev->work_buf_hdl));
 	if (ret)
 		goto mbox_fini;
+
+	/*
+	 * Context switch hysteresis is a best-effort tuning knob; warn but do
+	 * not fail hw start (or a later runtime resume) if the firmware does not
+	 * support the runtime config. ret is overwritten by the next mandatory
+	 * step below, so a failure here never affects hw start.
+	 */
+	ret = aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set ctx switch hysteresis to %u us (%d), using fw default",
+			  ndev->ctx_switch_hysteresis_us, ret);
 
 #ifdef AMDXDNA_NPU3A
 	ret = aie4_iommu_bypass_echo(ndev);
@@ -659,6 +683,7 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 	ndev->priv = xdna->dev_info->dev_priv;
 	ndev->aie.xdna = xdna;
 	ndev->kernel_submit = true;
+	ndev->ctx_switch_hysteresis_us = AIE4_CTX_HYSTERESIS_US;
 	xdna->dev_handle = ndev;
 
 	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
@@ -1622,18 +1647,82 @@ dev_exit:
 	return ret;
 }
 
+static int aie4_ctx_hysteresis_get(void *data, u64 *val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+
+	guard(mutex)(&xdna->dev_lock);
+	*val = ndev->ctx_switch_hysteresis_us;
+
+	return 0;
+}
+
+static int aie4_ctx_hysteresis_set(void *data, u64 val)
+{
+	struct amdxdna_dev_hdl *ndev = data;
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret, idx;
+
+	if (val > U32_MAX)
+		return -EINVAL;
+
+	if (!drm_dev_enter(&xdna->ddev, &idx))
+		return -ENODEV;
+
+	mutex_lock(&xdna->dev_lock);
+
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto unlock;
+
+	ret = aie4_set_ctx_hysteresis(ndev, (u32)val);
+	if (!ret)
+		ndev->ctx_switch_hysteresis_us = (u32)val;
+
+	amdxdna_pm_suspend_put(xdna);
+
+unlock:
+	mutex_unlock(&xdna->dev_lock);
+	drm_dev_exit(idx);
+
+	return ret;
+}
+
+/* Context switch hysteresis timeout in microseconds; 0 disables hysteresis. */
+DEFINE_DEBUGFS_ATTRIBUTE(aie4_ctx_hysteresis_fops, aie4_ctx_hysteresis_get,
+			 aie4_ctx_hysteresis_set, "%llu\n");
+
 static void aie4_debugfs_init(struct amdxdna_dev *xdna)
 {
 	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 
-	/* 0 - submit by user space, 1 - submit by driver (default). */
-	debugfs_create_bool("kernel_mode_submission", 0600,
-			    xdna->ddev.accel->debugfs_root, &ndev->kernel_submit);
+	/*
+	 * Submission mode only applies where the driver runs hw contexts (the
+	 * VF and classic paths); the SR-IOV PF has no submission path, so do
+	 * not expose the knob there.
+	 * 0 - submit by user space, 1 - submit by driver (default).
+	 */
+	if (xdna->dev_info->ops != &aie4_pf_ops)
+		debugfs_create_bool("kernel_mode_submission", 0600,
+				    xdna->ddev.accel->debugfs_root,
+				    &ndev->kernel_submit);
+
+	/*
+	 * Context switch hysteresis is a system-control runtime config that is
+	 * only programmed on the PF/classic hw start paths, never on a VF.
+	 * Only expose the knob where the driver actually applies it.
+	 */
+	if (!to_pci_dev(xdna->ddev.dev)->is_virtfn)
+		debugfs_create_file_unsafe("ctx_switch_hysteresis_us", 0600,
+					   xdna->ddev.accel->debugfs_root, ndev,
+					   &aie4_ctx_hysteresis_fops);
 }
 
 const struct amdxdna_dev_ops aie4_pf_ops = {
 	.init			= aie4_pf_init,
 	.fini			= aie4_pf_fini,
+	.debugfs_init		= aie4_debugfs_init,
 	.sriov_configure        = aie4_sriov_configure,
 	.resume			= aie4_pf_resume,
 	.suspend		= aie4_pf_suspend,

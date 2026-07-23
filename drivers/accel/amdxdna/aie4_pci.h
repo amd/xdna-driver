@@ -22,6 +22,9 @@ struct host_queue_packet;
 struct host_indirect_packet_data;
 struct amdxdna_hwctx;
 
+/* Default context switch hysteresis timeout in microseconds. */
+#define AIE4_CTX_HYSTERESIS_US	1000
+
 struct cert_comp {
 	struct amdxdna_dev_hdl          *ndev;
 	u32                             msix_idx;
@@ -128,6 +131,12 @@ struct amdxdna_dev_hdl {
 	/* aie4 kernel-mode submission default; tunable via debugfs. */
 	bool				kernel_submit;
 
+	/*
+	 * Context switch hysteresis timeout in microseconds; pushed to the
+	 * firmware at hw start and tunable at runtime via debugfs.
+	 */
+	u32				ctx_switch_hysteresis_us;
+
 	struct amdxdna_drm_query_firmware_version cert_version;
 };
 
@@ -175,6 +184,7 @@ int aie4_suspend_fw(struct amdxdna_dev_hdl *ndev);
 int aie4_attach_work_buffer(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size);
 int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode);
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev);
+int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us);
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
 				       u32 hw_context_id, u32 property,
 				       const struct aie4_msg_context_config_cert_logging *cl);
