@@ -189,9 +189,16 @@ public:
   verify_result() override;
 
 private:
+  // No aie4 context error type expected, so the app health report is not checked.
+  static const uint32_t no_ctx_error_type = ~0u;
+
   bool m_is_full_elf = false;
+  bool m_is_aie4 = false;
   uint32_t m_expect_cmd_status;
   uint32_t m_expect_ctx_health_val;
+  uint32_t m_expect_ctx_error_type = no_ctx_error_type;
+  uint64_t m_expect_err_code = 0;
+  uint64_t m_last_err_timestamp = 0;
 };
 
 class async_error_io_test_bo_set : public io_test_bo_set_base
