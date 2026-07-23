@@ -93,8 +93,15 @@ struct aie4_msg_runtime_config_force_preemption {
 	__u8 padding[3];
 } __packed;
 
+/*
+ * Type selector for AIE4_MSG_OP_SET_RUNTIME_CONFIG. Values match the firmware
+ * ABI enum npu_msg_runtime_config_type; only the configs the driver programs
+ * are enumerated here.
+ */
 enum aie4_msg_runtime_config_type {
-	AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION = 1,
+	AIE4_RUNTIME_CONFIG_FORCE_PREEMPTION		= 0x1,
+	AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL		= 0x5,
+	AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS	= 0xD,
 	AIE4_MAX_RUNTIME_CONFIG
 };
 
@@ -483,11 +490,6 @@ enum aie4_fw_log_level {
 	AIE4_FW_LOG_LEVEL_MAX,
 };
 
-/* Index of NPU_RUNTIME_CONFIG_DYNAMIC_LOGGING_LEVEL in the firmware ABI enum
- * npu_msg_runtime_config_type (mpnpu-api/aie4/npu_msg_priv.h).
- */
-#define AIE4_RUNTIME_CONFIG_FW_LOG_LEVEL 0x5
-
 struct aie4_msg_start_fw_log_req {
 	__u64	buff_addr;
 	__u32	buff_size;
@@ -515,6 +517,16 @@ struct aie4_msg_stop_fw_log_resp {
 
 struct aie4_msg_runtime_config_fw_log_level {
 	__u32 log_level;
+} __packed;
+
+/*
+ * Context switch hysteresis configuration.
+ *
+ * @timeout_us: Hysteresis time in microseconds for keeping a context loaded
+ *              in the AIE after it becomes idle, or 0 to disable hysteresis.
+ */
+struct aie4_msg_runtime_config_ctx_switch_hysteresis {
+	__u32 timeout_us;
 } __packed;
 
 enum aie4_fw_trace_destination {
