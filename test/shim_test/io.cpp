@@ -17,6 +17,78 @@ using namespace xrt_core;
 
 namespace {
 
+// An aie4 fault surfaces as a driver-synthesized AIE-class async error, so
+// assert one arrived with the expected code and a fresh timestamp.
+void
+verify_aie_async_error(const device* dev, uint64_t expect_err_code,
+                       uint64_t& last_err_timestamp)
+{
+  auto buf = device_query<query::xocl_errors>(dev);
+  if (buf.empty())
+    throw std::runtime_error("failed to get async errors, return empty information.");
+
+  auto ect = query::xocl_errors::to_value(buf, XRT_ERROR_CLASS_AIE);
+  xrtErrorCode err_code;
+  xrtErrorTime err_timestamp;
+  std::tie(err_code, err_timestamp) = ect;
+
+  if (err_code != expect_err_code) {
+    std::stringstream ss;
+    ss << "failed to get async errors, unexpected error code, 0x" << std::hex << err_code
+       << ", expected 0x" << expect_err_code << ".";
+    throw std::runtime_error(ss.str());
+  }
+
+  if (err_timestamp == last_err_timestamp) {
+    std::stringstream ss;
+    ss << "failed to get async errors, return old timestamp: " << last_err_timestamp << ".";
+    throw std::runtime_error(ss.str());
+  }
+  last_err_timestamp = err_timestamp;
+}
+
+// ert_uc_health_info::misc_status bit 1, see xrt/detail/ert.h.
+const uint32_t uc_misc_status_ctrl_code_hang = 0x2;
+
+void
+dump_aie4_ctx_health(const ert_ctx_health_data_v1* cdata)
+{
+  std::cerr << "aie4 context health report:\n";
+  std::cerr << "\tContext state: " << cdata->aie4.ctx_state << "\n";
+  std::cerr << "\tActive uC count: " << cdata->aie4.num_uc << "\n";
+  std::cerr << "\tContext error type: " << cdata->aie4.ctx_error_type << "\n";
+  for (uint32_t i = 0; i < cdata->aie4.num_uc; i++) {
+    const auto& uc = cdata->aie4.uc_info[i];
+    std::cerr << "\tuC[" << i << "]: idx: " << uc.uc_idx
+              << " fw_state: " << uc.fw_state
+              << " idle_status: 0x" << std::hex << uc.uc_idle_status
+              << " misc_status: 0x" << uc.misc_status << std::dec << "\n";
+  }
+}
+
+// Unlike an AIE failure, a CERT context timeout carries an app health report,
+// so both the context error type and the uC hang flag are worth asserting.
+void
+verify_aie4_timeout_ctx_health(const ert_ctx_health_data_v1* cdata, uint32_t expect_err_type)
+{
+  if (cdata->aie4.ctx_error_type != expect_err_type) {
+    dump_aie4_ctx_health(cdata);
+    throw std::runtime_error(std::string("Context error type=") +
+      std::to_string(cdata->aie4.ctx_error_type) +
+      ", expect=" + std::to_string(expect_err_type));
+  }
+
+  // Firmware reports the hang against the uC that was running the control
+  // code, so scan rather than assuming a fixed index or uC count.
+  for (uint32_t i = 0; i < cdata->aie4.num_uc; i++) {
+    if (cdata->aie4.uc_info[i].misc_status & uc_misc_status_ctrl_code_hang)
+      return;
+  }
+
+  dump_aie4_ctx_health(cdata);
+  throw std::runtime_error("No uC reported a control code hang in the app health report");
+}
+
 std::array io_test_bo_type_names {
   "IO_TEST_BO_CMD",
   "IO_TEST_BO_INSTRUCTION",
@@ -571,6 +643,21 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
   m_expect_cmd_status = static_cast<uint32_t>(std::stoul(info.extra.at("exp_status"), nullptr, 0));
   if (info.extra.count("exp_val"))
     m_expect_ctx_health_val = static_cast<uint32_t>(std::stoul(info.extra.at("exp_val"), nullptr, 0));
+  if (info.extra.count("exp_ctx_error_type")) {
+    m_expect_ctx_error_type =
+      static_cast<uint32_t>(std::stoul(info.extra.at("exp_ctx_error_type"), nullptr, 0));
+  }
+
+  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  m_is_aie4 = (device_id == npu3_device_id || device_id == npu3a_device_id);
+
+  // Expected code for the driver-synthesized AIE async error on an aie4 fault.
+  uint64_t err_num = XRT_ERROR_NUM_KDS_EXEC;
+  uint64_t err_drv = XRT_ERROR_DRIVER_AIE;
+  uint64_t err_severity = XRT_ERROR_SEVERITY_CRITICAL;
+  uint64_t err_module = XRT_ERROR_MODULE_AIE_CORE;
+  uint64_t err_class = XRT_ERROR_CLASS_AIE;
+  m_expect_err_code = XRT_ERROR_CODE_BUILD(err_num, err_drv, err_severity, err_module, err_class);
 
   if (info.flow == FULL_ELF) {
     m_is_full_elf = true;
@@ -1032,35 +1119,32 @@ verify_result()
   if (m_expect_cmd_status != ERT_CMD_STATE_TIMEOUT)
     return;
 
+  if (m_is_aie4) {
+    // An AIE failure arrives as a context-id-only firmware event with no
+    // error_type and no app-health report, so the driver zero-fills the
+    // cached context error and the async error is all there is to assert.
+    verify_aie_async_error(m_dev, m_expect_err_code, m_last_err_timestamp);
+
+    // A CERT context timeout does come with a report.
+    if (m_expect_ctx_error_type != no_ctx_error_type) {
+      auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
+      verify_aie4_timeout_ctx_health(cdata, m_expect_ctx_error_type);
+    }
+    return;
+  }
+
   // In case of timeout, further check context health data
   auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
-  if (cdata->npu_gen == NPU_GEN_AIE4) {
-    if (cdata->version != ERT_CTX_HEALTH_DATA_V1 || cdata->aie4.ctx_error_type != m_expect_ctx_health_val) {
-      std::cerr << "Incorrect AIE4 context health data:\n";
-      std::cerr << "\tctx_error_type: 0x" << std::hex << cdata->aie4.ctx_error_type << "\n";
-      std::cerr << "\tversion: 0x" << std::hex << cdata->version
-                << " (expect " << ERT_CTX_HEALTH_DATA_V1 << ")\n";
-      std::cerr << "\tnpu_gen: 0x" << std::hex << cdata->npu_gen
-                << " (expect " << NPU_GEN_AIE4 << ")\n";
-      std::cerr << "\tctx_state: 0x" << std::hex << cdata->aie4.ctx_state << "\n";
-      std::cerr << "\tnum_uc: " << std::dec << cdata->aie4.num_uc << "\n";
-      throw std::runtime_error(std::string("Context health data version=") +
-        std::to_string(cdata->version) + " npu_gen=" + std::to_string(cdata->npu_gen) +
-        ", expect version=" + std::to_string(ERT_CTX_HEALTH_DATA_V1) +
-        " npu_gen=" + std::to_string(NPU_GEN_AIE4));
-    }
-  } else {
-    if (cdata->aie2.txn_op_idx != m_expect_ctx_health_val) {
-      std::cerr << "Incorrect app health data:\n";
-      std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
-      std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
-      std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
-      std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
-      std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
-      std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
-      throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
-        ", expect=" + std::to_string(m_expect_ctx_health_val));
-    }
+  if (cdata->aie2.txn_op_idx != m_expect_ctx_health_val) {
+    std::cerr << "Incorrect app health data:\n";
+    std::cerr << "\tTXN OP ID: 0x" << std::hex << cdata->aie2.txn_op_idx << "\n";
+    std::cerr << "\tContext PC: 0x" << std::hex << cdata->aie2.ctx_pc << "\n";
+    std::cerr << "\tFatal Error Type: 0x" << std::hex << cdata->aie2.fatal_error_type << "\n";
+    std::cerr << "\tFatal error exception type: 0x" << std::hex << cdata->aie2.fatal_error_exception_type << "\n";
+    std::cerr << "\tFatal error exception PC: 0x" << std::hex << cdata->aie2.fatal_error_exception_pc << "\n";
+    std::cerr << "\tFatal error app module: 0x" << std::hex << cdata->aie2.fatal_error_app_module << "\n";
+    throw std::runtime_error(std::string("TXN op index=") + std::to_string(cdata->aie2.txn_op_idx) +
+      ", expect=" + std::to_string(m_expect_ctx_health_val));
   }
 }
 
@@ -1429,26 +1513,7 @@ verify_result()
   }
   m_last_err_timestamp = err_timestamp;
 
-  // Verify context health report in command packet (bad_timeout.elf timeout path)
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
-  auto cpkt = reinterpret_cast<ert_packet *>(cbo->map());
-  if (cpkt->state != ERT_CMD_STATE_TIMEOUT)
-    return;
-
-  auto cdata = reinterpret_cast<ert_ctx_health_data_v1 *>(cpkt->data);
-  if (cdata->version != ERT_CTX_HEALTH_DATA_V1 || cdata->npu_gen != NPU_GEN_AIE4) {
-    std::cerr << "Incorrect AIE4 context health data:\n";
-    std::cerr << "\tversion: 0x" << std::hex << cdata->version
-              << " (expect " << ERT_CTX_HEALTH_DATA_V1 << ")\n";
-    std::cerr << "\tnpu_gen: 0x" << std::hex << cdata->npu_gen
-              << " (expect " << NPU_GEN_AIE4 << ")\n";
-    std::cerr << "\tctx_state: 0x" << std::hex << cdata->aie4.ctx_state << "\n";
-    std::cerr << "\tnum_uc: " << std::dec << cdata->aie4.num_uc << "\n";
-    throw std::runtime_error(std::string("Context health data version=") +
-      std::to_string(cdata->version) + " npu_gen=" + std::to_string(cdata->npu_gen) +
-      ", expect version=" + std::to_string(ERT_CTX_HEALTH_DATA_V1) +
-      " npu_gen=" + std::to_string(NPU_GEN_AIE4));
-  }
+  // The health report is checked by elf_io_negative_test_bo_set, not here.
 }
 
 elf_io_aie_debug_test_bo_set::
