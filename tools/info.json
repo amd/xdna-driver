@@ -1,7 +1,7 @@
 {
 	"copyright": "Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.",
 	"xrt" : {
-		"version": "202620.2.26.60",
+		"version": "202620.2.26.67",
 		"os_rel": ["22.04", "24.04"]
 	},
 	"firmwares": [
