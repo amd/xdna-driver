@@ -532,6 +532,7 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_RESOURCE_INFO,
 	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
 	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION = 14,
+	DRM_AMDXDNA_GET_AUTO_COREDUMP,
 };
 
 /**
@@ -961,6 +962,7 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_SET_FW_LOG_STATE,
 	DRM_AMDXDNA_SET_FW_TRACE_STATE,
 	DRM_AMDXDNA_AIE_TILE_WRITE,
+	DRM_AMDXDNA_SET_AUTO_COREDUMP = 9,
 };
 
 /**
@@ -1026,6 +1028,11 @@ struct amdxdna_drm_set_state {
 	 *
 	 * Access: requires CAP_SYS_ADMIN (the SET_STATE ioctl is
 	 * DRM_ROOT_ONLY).
+	 *
+	 * %DRM_AMDXDNA_SET_AUTO_COREDUMP:
+	 * Controls automatic AIE tile core dump capture on timeout.
+	 * 0 - disable auto core dump capture.
+	 * 1 - capture a core dump into the hardware context on timeout.
 	 */
 	__u32 param;
 	/**

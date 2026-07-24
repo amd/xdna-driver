@@ -1514,8 +1514,7 @@ put_meta_bo:
 	return ret;
 }
 
-int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value,
-		      void *buf, u32 size)
+int aie4_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf, u32 size)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 
