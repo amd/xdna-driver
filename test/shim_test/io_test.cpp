@@ -352,6 +352,23 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   if (io_test_parameters.type == IO_TEST_FORCE_PREEMPTION)
     preemption_enabled = !force_fine_preemption(dev, true);
 
+  // Force preemption is a device-global, sticky setting. If anything between
+  // here and the explicit disable below throws (e.g. hw context creation), the
+  // flag would stay enabled and break context creation for every subsequent
+  // test. This guard turns it back off on any early/exception exit; the success
+  // path disarms it so the disable is not issued twice.
+  struct preempt_guard {
+    device* dev;
+    bool armed;
+    ~preempt_guard() {
+      if (!armed)
+        return;
+      // Runs on the exception path too, possibly during stack unwinding, so a
+      // throw here would call std::terminate. Best-effort disable, swallow all.
+      try { force_fine_preemption(dev, false); } catch (...) {}
+    }
+  } preempt_off{dev, preemption_enabled};
+
   // Creating HW context for cmd submission
   hw_ctx hwctx{dev, tag, flow};
   auto hwq = hwctx.get()->get_hw_queue();
@@ -409,6 +426,7 @@ io_test(device::id_type id, device* dev, int total_hwq_submit, int num_cmdlist,
   // Verify preemption counters
   if (preemption_enabled) {
     force_fine_preemption(dev, false);
+    preempt_off.armed = false;
     auto delta = get_fine_preemption_counter_delta(dev, hwctx, pre_cntrs);
     auto total_cmds = total_hwq_submit * num_cmdlist * cmds_per_list;
     auto expected_preemption_count = total_cmds * bo_set[0]->get_preemption_checkpoints();
