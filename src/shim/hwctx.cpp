@@ -132,7 +132,8 @@ get_cu_pdi(int idx) const
 hwctx::
 hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
   std::unique_ptr<hwq> queue)
-  : m_device(dev)
+  : m_ctx(dev)
+  , m_device(dev)
   , m_q(std::move(queue))
 {
   xclbin_parser xp(xclbin);
@@ -143,29 +144,29 @@ hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
   for (int i = 0; i < n_cu; i++)
     m_cu_names.push_back(xp.get_cu_name(i));
 
-  init_qos_info(qos);
-
-  create_ctx_on_device();
+  create_ctx_on_device(qos);
 }
 
 hwctx::
-hwctx(const device& dev, uint32_t partition_size, std::unique_ptr<hwq> queue)
-  : m_device(dev)
+hwctx(const device& dev, const qos_type& qos, uint32_t partition_size,
+  std::unique_ptr<hwq> queue)
+  : m_ctx(dev)
+  , m_device(dev)
   , m_q(std::move(queue))
 {
   m_col_cnt = partition_size;
   m_ops_per_cycle = 0;
 
-  create_ctx_on_device();
+  create_ctx_on_device(qos);
 }
 
 hwctx::
 ~hwctx()
 {
   try {
-    delete_ctx_on_device();
+    m_q->unbind_hwctx();
   } catch (const xrt_core::system_error& e) {
-    shim_debug("Failed to delete context on device: %s", e.what());
+    shim_debug("Failed to unbind context: %s", e.what());
   }
 }
 
@@ -261,36 +262,55 @@ init_qos_info(const qos_type& qos)
 
 void
 hwctx::
-create_ctx_on_device()
+create_ctx_on_device(const qos_type& qos)
 {
-  create_ctx_arg arg = {
-    .qos = m_qos,
-    .umq_bo = m_q->get_queue_bo(),
-    .log_buf_bo = { AMDXDNA_INVALID_BO_HANDLE, AMDXDNA_INVALID_BO_HANDLE },
-    .max_opc = m_ops_per_cycle,
-    .num_tiles = m_col_cnt * xrt_core::device_query<xrt_core::query::aie_tiles_stats>(&m_device).core_rows,
-  };
-  m_device.get_pdev().drv_ioctl(drv_ioctl_cmd::create_ctx, &arg);
+  init_qos_info(qos);
 
-  m_handle = arg.ctx_handle;
-  m_doorbell = arg.umq_doorbell;
-  m_syncobj = arg.syncobj_handle;
+  auto [hdl, sobj, db] = m_ctx.create(m_qos, m_q->get_queue_bo(), m_ops_per_cycle, m_col_cnt);
+  m_handle = hdl;
+  m_syncobj = sobj;
+  m_doorbell = db;
+
   m_q->bind_hwctx(*this);
 }
 
-void
-hwctx::
-delete_ctx_on_device()
+std::tuple<hwctx::slot_id, uint32_t, uint32_t>
+hwctx::ctx::
+create(const amdxdna_qos_info& qos, const bo_id& q_bo, uint32_t max_opc, uint32_t n_cols)
+{
+  create_ctx_arg arg = {
+    .qos = qos,
+    .umq_bo = q_bo,
+    .log_buf_bo = { AMDXDNA_INVALID_BO_HANDLE, AMDXDNA_INVALID_BO_HANDLE },
+    .max_opc = max_opc,
+    .num_tiles = n_cols * m_device.get_core_rows()
+  };
+  m_device.get_pdev().drv_ioctl(drv_ioctl_cmd::create_ctx, &arg);
+  m_handle = arg.ctx_handle;
+  m_syncobj = arg.syncobj_handle;
+  return { m_handle, m_syncobj, arg.umq_doorbell};
+}
+
+hwctx::ctx::
+ctx(const device& device) : m_device(device)
+{
+}
+
+hwctx::ctx::
+~ctx()
 {
   if (m_handle == AMDXDNA_INVALID_CTX_HANDLE)
     return;
 
-  m_q->unbind_hwctx();
-  struct destroy_ctx_arg arg = {
+  destroy_ctx_arg arg = {
     .ctx_handle = m_handle,
     .syncobj_handle = m_syncobj,
   };
-  m_device.get_pdev().drv_ioctl(drv_ioctl_cmd::destroy_ctx, &arg);
+  try {
+    m_device.get_pdev().drv_ioctl(drv_ioctl_cmd::destroy_ctx, &arg);
+  } catch (const xrt_core::system_error& e) {
+    shim_debug("Failed to destroy context: %s", e.what());
+  }
 }
 
 uint32_t

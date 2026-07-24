@@ -58,7 +58,8 @@ class hwctx : public xrt_core::hwctx_handle
 public:
   hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
     std::unique_ptr<hwq> queue);
-  hwctx(const device& dev, uint32_t partition_size, std::unique_ptr<hwq> queue);
+  hwctx(const device& dev, const qos_type& qos, uint32_t partition_size,
+    std::unique_ptr<hwq> queue);
   ~hwctx();
 
   slot_id
@@ -97,6 +98,21 @@ public:
   get_syncobj() const;
 
 private:
+
+  class ctx {
+  public:
+    ctx(const device& device);
+    ~ctx();
+
+    std::tuple<slot_id, uint32_t, uint32_t>
+    create(const amdxdna_qos_info& qos, const bo_id& q_bo, uint32_t max_opc, uint32_t n_cols);
+
+  private:
+    const device& m_device;
+    slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
+    uint32_t m_syncobj = AMDXDNA_INVALID_FENCE_HANDLE;
+  } m_ctx;
+
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
   std::vector<std::string> m_cu_names;
@@ -108,10 +124,7 @@ private:
   amdxdna_qos_info m_qos = {};
 
   void
-  create_ctx_on_device();
-
-  void
-  delete_ctx_on_device();
+  create_ctx_on_device(const qos_type& qos);
 
   void
   init_qos_info(const qos_type& qos);

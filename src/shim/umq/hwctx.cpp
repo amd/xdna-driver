@@ -20,8 +20,8 @@ hwctx_umq(const device& device, const xrt::xclbin& xclbin, const qos_type& qos)
 }
 
 hwctx_umq::
-hwctx_umq(const device& device, uint32_t partition_size)
-  : hwctx(device, partition_size, std::make_unique<hwq_umq>(device, total_queue_slots))
+hwctx_umq(const device& device, uint32_t partition_size, const qos_type& qos)
+  : hwctx(device, qos, partition_size, std::make_unique<hwq_umq>(device, total_queue_slots))
   , m_pdev(device.get_pdev())
 {
   m_col_cnt = partition_size;
