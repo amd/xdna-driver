@@ -77,17 +77,29 @@ static bool aie2_legacy_tdr_detect(struct amdxdna_dev *xdna)
 static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_dev_hdl *ndev = xdna->dev_handle;
 	struct app_health_report *report = NULL;
+	struct aie_device *aie = &ndev->aie;
 	struct drm_gpu_scheduler *sched;
 	struct drm_sched_job *s_job;
 	int ret;
 
 	report = kzalloc_obj(*report);
 	if (report) {
-		ret = aie2_query_app_health(xdna->dev_handle, hwctx->fw_ctx_id, report);
+		ret = aie2_query_app_health(ndev, hwctx->fw_ctx_id, report);
 		if (ret) {
 			kfree(report);
 			report = NULL;
+		}
+	}
+
+	if (xdna->auto_coredump) {
+		kvfree(hwctx->coredump);
+		hwctx->coredump = amdxdna_get_hwctx_coredump(aie, hwctx);
+		if (IS_ERR(hwctx->coredump)) {
+			XDNA_ERR(xdna, "Failed to get core dump on hwctx timing out: %ld",
+				 PTR_ERR(hwctx->coredump));
+			hwctx->coredump = NULL;
 		}
 	}
 
@@ -113,7 +125,7 @@ static int aie2_tdr_stop_hwctx(struct amdxdna_hwctx *hwctx, void *arg)
 
 	kfree(report);
 
-	aie2_destroy_context(xdna->dev_handle, hwctx);
+	aie2_destroy_context(ndev, hwctx);
 #ifdef HAVE_6_13_drm_sched_start_errno
 	drm_sched_start(sched, 0);
 #elif defined(HAVE_6_10_drm_sched_start_full_recovery)

@@ -90,6 +90,7 @@ static void amdxdna_hwctx_destroy_rcu(struct amdxdna_hwctx *hwctx,
 		xdna->dev_info->ops->hwctx_fini(hwctx);
 
 	amdxdna_hwctx_release_expanded_heap(hwctx);
+	kvfree(hwctx->coredump);
 	kfree(hwctx->name);
 	kfree(hwctx);
 }
@@ -113,7 +114,10 @@ int amdxdna_hwctx_walk(struct amdxdna_client *client, void *arg,
 	amdxdna_for_each_hwctx(client, hwctx_id, hwctx) {
 		if (filter && !filter(hwctx, arg))
 			continue;
-		ret = walk(hwctx, arg);
+		if (walk)
+			ret = walk(hwctx, arg);
+		else
+			ret = 0;
 		if (ret)
 			break;
 	}
