@@ -85,6 +85,39 @@ is_aie4(uint16_t device_id)
   return false;
 }
 
+uint8_t
+get_amdxdna_attr_state(const xrt_core::device* device, uint32_t param)
+{
+  amdxdna_drm_attribute_state st = {};
+
+  amdxdna_drm_get_info arg = {
+    .param = param,
+    .buffer_size = sizeof(st),
+    .buffer = reinterpret_cast<uintptr_t>(&st)
+  };
+
+  auto& pci_dev_impl = get_pcidev_impl(device);
+  pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
+
+  return st.state;
+}
+
+void
+set_amdxdna_attr_state(const xrt_core::device* device, uint32_t param, uint8_t state)
+{
+  amdxdna_drm_attribute_state st = {};
+
+  st.state = state;
+  amdxdna_drm_set_state arg = {
+    .param = param,
+    .buffer_size = sizeof(st),
+    .buffer = reinterpret_cast<uintptr_t>(&st)
+  };
+
+  auto& pci_dev_impl = get_pcidev_impl(device);
+  pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+}
+
 template <typename ValueType>
 struct sysfs_fcn
 {
@@ -828,38 +861,18 @@ struct performance_mode
 struct preemption
 {
   using result_type = query::preemption::result_type;
+  using value_type = query::preemption::value_type;
 
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state force = {};
-
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
-      .buffer_size = sizeof(force),
-      .buffer = reinterpret_cast<uintptr_t>(&force)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
-
-    return force.state;
+    return static_cast<result_type>(get_amdxdna_attr_state(device, DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE));
   }
 
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state force = {};
-    force.state = std::any_cast<uint32_t>(any);
-
-    amdxdna_drm_set_state arg = {
-      .param = DRM_AMDXDNA_SET_FORCE_PREEMPT,
-      .buffer_size = sizeof(force),
-      .buffer = reinterpret_cast<uintptr_t>(&force)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+    set_amdxdna_attr_state(device, DRM_AMDXDNA_SET_FORCE_PREEMPT, std::any_cast<value_type>(any));
   }
 };
 
@@ -1163,38 +1176,18 @@ struct archive_path
 struct frame_boundary_preemption
 {
   using result_type = query::frame_boundary_preemption::result_type;
+  using value_type = query::frame_boundary_preemption::value_type;
 
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state preempt = {};
-
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
-      .buffer_size = sizeof(preempt),
-      .buffer = reinterpret_cast<uintptr_t>(&preempt)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
-
-    return preempt.state;
+    return static_cast<result_type>(get_amdxdna_attr_state(device, DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE));
   }
 
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state preempt = {};
-    preempt.state = std::any_cast<uint32_t>(any);
-
-    amdxdna_drm_set_state arg = {
-      .param = DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
-      .buffer_size = sizeof(preempt),
-      .buffer = reinterpret_cast<uintptr_t>(&preempt)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+    set_amdxdna_attr_state(device, DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT, std::any_cast<value_type>(any));
   }
 };
 
@@ -2122,6 +2115,24 @@ struct sub_device_path
   }
 };
 
+struct auto_coredump
+{
+  using value_type = query::auto_coredump::value_type;
+  using result_type = query::auto_coredump::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    return static_cast<result_type>(get_amdxdna_attr_state(device, DRM_AMDXDNA_GET_AUTO_COREDUMP));
+  }
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    set_amdxdna_attr_state(device, DRM_AMDXDNA_SET_AUTO_COREDUMP, std::any_cast<value_type>(any));
+  }
+};
+
 template <typename QueryRequestType>
 struct sysfs_get : virtual QueryRequestType
 {
@@ -2286,6 +2297,7 @@ initialize_query_table()
   emplace_func1_request<query::aie_coredump,                   aie_coredump>();
   emplace_func1_request<query::aie_read,                       aie_read>();
   emplace_func1_request<query::aie_write,                      aie_write>();
+  emplace_func0_getput<query::auto_coredump,                   auto_coredump>();
 }
 
 struct X { X() { initialize_query_table(); }};
@@ -2350,12 +2362,23 @@ device::
   m_pdev.close();
 }
 
-
 const pdev&
 device::
 get_pdev() const
 {
   return m_pdev;
+}
+
+uint32_t
+device::
+get_core_rows() const
+{
+  std::call_once(m_core_rows_once, [this]() {
+    m_core_rows = xrt_core::device_query<
+      xrt_core::query::aie_tiles_stats>(this).core_rows;
+  });
+
+  return m_core_rows;
 }
 
 void
@@ -2406,9 +2429,9 @@ create_hw_context(uint32_t partition_size, const xrt::hw_context::qos_type& qos,
                   xrt::hw_context::access_mode mode) const
 {
   if (m_pdev.is_umq())
-    return std::make_unique<hwctx_umq>(*this, partition_size);
+    return std::make_unique<hwctx_umq>(*this, partition_size, qos);
   else
-    return std::make_unique<hwctx_kmq>(*this, partition_size);
+    return std::make_unique<hwctx_kmq>(*this, partition_size, qos);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>
