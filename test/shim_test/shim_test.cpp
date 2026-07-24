@@ -1720,7 +1720,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
   },
   test_case{ "io test timeout run for context health report", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_timeout, {}
   },
   test_case{ "app health query multi-context with and without ctx-id filter", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_app_health_query_multi_ctx, {}
