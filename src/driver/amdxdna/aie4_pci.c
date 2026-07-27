@@ -438,9 +438,12 @@ static int aie4_mgmt_fw_query(struct amdxdna_dev_hdl *ndev)
 	/*
 	 * Diagnostic: some rpu-fw builds populate AIE_TILE_INFO::cols with
 	 * total tile count (rows*cols) rather than column count, which
-	 * cannot be fed back into AIE4_MSG_OP_CREATE_PARTITION. The
-	 * authoritative per-device value is xdna->dev_info->num_col; log both so
-	 * any future fw mismatch is obvious.
+	 * cannot be fed back into AIE4_MSG_OP_CREATE_PARTITION. dev_info->num_col
+	 * is only an arch default and does not reflect real per-partition
+	 * geometry; the authoritative per-context column count is ctx->num_col,
+	 * derived from num_tiles / core.row_count in aie4_partition_create().
+	 * Log both the fw-reported cols and the arch default so any future fw
+	 * mismatch is obvious.
 	 */
 	XDNA_DBG(ndev->xdna,
 		 "AIE metadata: cols=%u rows=%u (fw); partition num_col=%u (dev_info)",

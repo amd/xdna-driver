@@ -139,10 +139,12 @@ struct amdxdna_dev_info {
 	 * expose this in AIE4_MSG_OP_AIE_TILE_INFO either, so it is an
 	 * architecture-defined constant per device variant (e.g. 2 for the
 	 * legacy npu3/aie4 family, 1 for npu3_aie2ps/Versal AIE2). The
-	 * runtime CERT count for a full-NPU context is
-	 *     dev_info->num_col * dev_info->uc_per_col
-	 * and is bounded by the firmware ABI array size in
-	 * struct aie4_msg_context_config_cert_logging::info[].
+	 * runtime CERT count for a context is
+	 *     ctx->num_col * dev_info->uc_per_col
+	 * (ctx->num_col is the firmware-assigned partition column count; see
+	 * aie4_partition_create()), bounded by the firmware ABI array size in
+	 * struct aie4_msg_context_config_cert_logging::info[]. dev_info->num_col
+	 * is only an arch default and must not be used for that computation.
 	 */
 	u8				uc_per_col;
 	char				*default_vbnv;

@@ -74,7 +74,9 @@ aie4_health_runlist_read_idx(struct aie4_msg_app_health_report *h)
  * The number of CERT microcontrollers per hardware context is computed
  * at runtime as:
  *
- *	xdna->dev_info->num_col		(arch constant per npuX_regs.c)
+ *	ctx->num_col			(firmware-assigned partition columns,
+ *					 derived from num_tiles / core.row_count
+ *					 in aie4_partition_create())
  *		*
  *	xdna->dev_info->uc_per_col	(arch constant per npuX_regs.c)
  *
@@ -82,9 +84,12 @@ aie4_health_runlist_read_idx(struct aie4_msg_app_health_report *h)
  * struct aie4_msg_context_config_cert_logging::info[]. See callers in
  * aie4_hwctx.c.
  *
- * NOTE: firmware-reported metadata.cols / ndev->total_col are NOT
- * suitable for this purpose - some rpu-fw builds put total tile count
- * (rows*cols) in that field.
+ * NOTE: use ctx->num_col, NOT dev_info->num_col (an arch default that
+ * undercounts real partitions - e.g. 4 on 24-column silicon), and NOT
+ * firmware-reported metadata.cols / ndev->total_col (some rpu-fw builds
+ * put total tile count (rows*cols) in that field). ctx->num_col is
+ * derived from the user-supplied num_tiles and core.row_count, so it
+ * avoids both pitfalls.
  */
 
 #define CERTFW_MAX_SIZE		(SZ_32K + SZ_256)
