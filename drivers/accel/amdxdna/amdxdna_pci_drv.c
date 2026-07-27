@@ -458,7 +458,18 @@ static int amdxdna_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret)
 		return ret;
 
-	drmm_mutex_init(ddev, &xdna->dev_lock);
+	ret = drmm_mutex_init(ddev, &xdna->dev_lock);
+	if (ret)
+		return ret;
+
+	/*
+	 * A VF's dev_lock is acquired in probe() while the PF still holds its
+	 * own dev_lock across pci_enable_sriov(). They are distinct instances
+	 * sharing one lock class, so nest the VF at a deeper subclass to keep
+	 * lockdep from misreporting the hierarchical PF -> VF order.
+	 */
+	lockdep_set_subclass(&xdna->dev_lock,
+			     pdev->is_virtfn ? SINGLE_DEPTH_NESTING : 0);
 	init_rwsem(&xdna->notifier_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
 	ida_init(&xdna->hwctx_ida);
