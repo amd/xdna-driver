@@ -62,7 +62,7 @@ int amdxdna_dma_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 	if (abo->mem.dma_addr != AMDXDNA_INVALID_ADDR)
 		return 0;
 
-	sgt = drm_gem_shmem_get_pages_sgt(&abo->base);
+	sgt = amdxdna_gem_get_sgt(abo);
 	if (IS_ERR(sgt)) {
 		XDNA_ERR(xdna, "Get sgt failed, ret %ld", PTR_ERR(sgt));
 		return PTR_ERR(sgt);
@@ -87,7 +87,7 @@ int amdxdna_dma_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo)
 		}
 
 		size = iommu_map_sgtable(xdna->domain, dma_addr, sgt,
-					 IOMMU_READ | IOMMU_WRITE);
+					 IOMMU_READ | (abo->readonly ? 0 : IOMMU_WRITE));
 		if (size < 0) {
 			XDNA_ERR(xdna, "iommu_map_sgtable failed: %zd", size);
 			__free_iova(&xdna->iovad, iova);

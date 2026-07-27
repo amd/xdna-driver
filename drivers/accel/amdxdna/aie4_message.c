@@ -491,6 +491,23 @@ int aie4_set_runtime_cfg(struct amdxdna_dev_hdl *ndev, u32 type,
 	return ret;
 }
 
+int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
+{
+	struct aie4_msg_runtime_config_ctx_switch_hysteresis cfg = {
+		.timeout_us = timeout_us,
+	};
+	int ret;
+
+	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS,
+				   &cfg, sizeof(cfg));
+	if (ret)
+		return ret;
+
+	XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
+
+	return 0;
+}
+
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,
 		      struct amdxdna_msg_buf_hdl *buf_hdl, u8 level,
 		      size_t size, u32 *msi_idx, u32 *msi_address)

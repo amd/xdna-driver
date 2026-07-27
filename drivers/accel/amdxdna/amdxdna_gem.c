@@ -181,7 +181,7 @@ amdxdna_gem_heap_free(struct amdxdna_gem_obj *abo)
 	mutex_unlock(&client->mm_lock);
 }
 
-static struct amdxdna_gem_obj *
+struct amdxdna_gem_obj *
 amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 {
 	struct amdxdna_gem_obj *abo;
@@ -204,8 +204,7 @@ amdxdna_gem_create_obj(struct drm_device *dev, size_t size)
 	return abo;
 }
 
-static void
-amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
+void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
 {
 	mutex_destroy(&abo->lock);
 	kfree(abo);
@@ -274,8 +273,9 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 	struct amdxdna_dev *xdna;
 
 	xdna = to_xdna_dev(to_gobj(abo)->dev);
-	XDNA_DBG(xdna, "Invalidating range 0x%lx, 0x%lx, type %d",
-		 mapp->range.start, mapp->range.end, abo->type);
+	XDNA_DBG(xdna, "Invalidating range 0x%lx, 0x%lx, type %d, evt %d, pending fences %d",
+		 mapp->range.start, mapp->range.end, abo->type, range->event,
+		 !dma_resv_test_signaled(to_gobj(abo)->resv, DMA_RESV_USAGE_BOOKKEEP));
 
 	if (!mmu_notifier_range_blockable(range))
 		return false;
@@ -313,20 +313,21 @@ static inline bool compare_range(struct amdxdna_umap *mapp,
 		mapp->range.start == start && mapp->range.end == end);
 }
 
-static void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
-				   struct vm_area_struct *vma)
+void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
+			    struct mm_struct *mm,
+			    unsigned long addr, unsigned long len)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	struct amdxdna_umap *mapp;
 
 	down_write(&xdna->notifier_lock);
 	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
-		if (!vma || compare_range(mapp, vma->vm_mm, vma->vm_start, vma->vm_end)) {
+		if (!mm || compare_range(mapp, mm, addr, addr + len)) {
 			if (!mapp->unmapped) {
 				queue_work(xdna->notifier_wq, &mapp->hmm_unreg_work);
 				mapp->unmapped = true;
 			}
-			if (vma)
+			if (mm)
 				break;
 		}
 	}
@@ -365,14 +366,13 @@ static void amdxdna_hmm_unreg_work(struct work_struct *work)
 	amdxdna_umap_put(mapp);
 }
 
-static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
-				struct vm_area_struct *vma)
+int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
+			 struct mm_struct *mm,
+			 unsigned long addr, unsigned long len)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
-	unsigned long len = vma->vm_end - vma->vm_start;
-	unsigned long addr = vma->vm_start;
 	struct amdxdna_umap *mapp;
-	u32 nr_pages;
+	unsigned long nr_pages;
 	int ret;
 
 	/*
@@ -386,7 +386,7 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 
 	down_read(&xdna->notifier_lock);
 	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
-		if (compare_range(mapp, current->mm, addr, addr + len)) {
+		if (compare_range(mapp, mm, addr, addr + len)) {
 			up_read(&xdna->notifier_lock);
 			return 0;
 		}
@@ -405,9 +405,7 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	}
 
 	ret = mmu_interval_notifier_insert_locked(&mapp->notifier,
-						  current->mm,
-						  addr,
-						  len,
+						  mm, addr, len,
 						  &amdxdna_hmm_ops);
 	if (ret) {
 		XDNA_ERR(xdna, "Insert mmu notifier failed, ret %d", ret);
@@ -415,8 +413,8 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	}
 
 	mapp->range.notifier = &mapp->notifier;
-	mapp->range.start = vma->vm_start;
-	mapp->range.end = vma->vm_end;
+	mapp->range.start = addr;
+	mapp->range.end = addr + len;
 	mapp->range.default_flags = HMM_PFN_REQ_FAULT;
 	mapp->abo = abo;
 	kref_init(&mapp->refcnt);
@@ -517,7 +515,7 @@ static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 	int ret;
 
-	ret = amdxdna_hmm_register(abo, vma);
+	ret = amdxdna_hmm_register(abo, vma->vm_mm, vma->vm_start, vma->vm_end - vma->vm_start);
 	if (ret)
 		return ret;
 
@@ -533,7 +531,7 @@ static int amdxdna_gem_obj_mmap(struct drm_gem_object *gobj,
 	return 0;
 
 hmm_unreg:
-	amdxdna_hmm_unregister(abo, vma);
+	amdxdna_hmm_unregister(abo, vma->vm_mm, vma->vm_start, vma->vm_end - vma->vm_start);
 	return ret;
 }
 
@@ -587,9 +585,6 @@ static struct dma_buf *amdxdna_gem_prime_export(struct drm_gem_object *gobj, int
 {
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
-
-	if (abo->pri)
-		return ERR_PTR(-EOPNOTSUPP);
 
 	if (abo->dma_buf) {
 		get_dma_buf(abo->dma_buf);
@@ -659,7 +654,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
-	amdxdna_hmm_unregister(abo, NULL);
+	amdxdna_hmm_unregister(abo, NULL, 0, 0);
 	flush_workqueue(xdna->notifier_wq);
 
 	if (abo->pinned)
@@ -677,7 +672,7 @@ static void amdxdna_gem_obj_free(struct drm_gem_object *gobj)
 		drm_gem_shmem_free(&abo->base);
 }
 
-static int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *filp)
+int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *filp)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(gobj->dev);
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
@@ -705,7 +700,7 @@ static int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *fi
 	return 0;
 }
 
-static void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp)
+void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp)
 {
 	struct amdxdna_gem_obj *abo = to_xdna_obj(gobj);
 
@@ -838,8 +833,11 @@ amdxdna_gem_create_shmem_object(struct drm_device *dev, struct amdxdna_drm_creat
 #endif
 
 static struct amdxdna_gem_obj *
-amdxdna_gem_create_ubuf_object(struct drm_device *dev, struct amdxdna_drm_create_bo *args)
+amdxdna_gem_create_ubuf_object(struct drm_device *dev,
+			       struct amdxdna_drm_create_bo *args,
+			       struct drm_file *filp)
 {
+	struct amdxdna_client *client = filp->driver_priv;
 	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	struct amdxdna_drm_va_tbl va_tbl;
 	struct amdxdna_gem_obj *abo;
@@ -852,12 +850,15 @@ amdxdna_gem_create_ubuf_object(struct drm_device *dev, struct amdxdna_drm_create
 	}
 
 	if (va_tbl.num_entries) {
-		dma_buf = amdxdna_get_ubuf(dev, va_tbl.num_entries,
-					   u64_to_user_ptr(args->vaddr + sizeof(va_tbl)));
-	} else {
-		dma_buf = dma_buf_get(va_tbl.dmabuf_fd);
+		abo = amdxdna_alloc_ubuf_bo(client, va_tbl.num_entries,
+					    u64_to_user_ptr(args->vaddr + sizeof(va_tbl)));
+		if (!IS_ERR(abo))
+			abo->private_buffer = true;
+
+		return abo;
 	}
 
+	dma_buf = dma_buf_get(va_tbl.dmabuf_fd);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
@@ -869,24 +870,7 @@ amdxdna_gem_create_ubuf_object(struct drm_device *dev, struct amdxdna_drm_create
 
 	dma_buf_put(dma_buf);
 
-	abo = to_xdna_obj(gobj);
-	abo->pri = true;
-
-	/*
-	 * Userptr imports do not use drm_gem_mmap(); record the first va_tbl
-	 * entry so GET_BO_INFO and PASID dev-heap checks see the CPU UVA
-	 * (e.g. vxdna guest coalesce path).
-	 */
-	if (va_tbl.num_entries) {
-		struct amdxdna_drm_va_entry ent;
-
-		if (!copy_from_user(&ent,
-				    u64_to_user_ptr(args->vaddr + sizeof(va_tbl)),
-				    sizeof(ent)) && ent.vaddr)
-			abo->mem.uva = ent.vaddr;
-	}
-
-	return abo;
+	return to_xdna_obj(gobj);
 }
 
 static struct amdxdna_gem_obj *
@@ -1008,7 +992,7 @@ amdxdna_drm_create_share_bo(struct drm_device *dev,
 	struct amdxdna_gem_obj *abo;
 
 	if (args->vaddr)
-		abo = amdxdna_gem_create_ubuf_object(dev, args);
+		abo = amdxdna_gem_create_ubuf_object(dev, args, filp);
 	else if (amdxdna_use_carveout(to_xdna_dev(dev)))
 		abo = amdxdna_gem_create_cbuf_object(dev, args);
 	else
@@ -1191,7 +1175,7 @@ static int amdxdna_bo_pin(struct amdxdna_gem_obj *abo)
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	int ret;
 
-	if (is_import_bo(abo))
+	if (is_import_bo(abo) || is_private_bo(abo))
 		return 0;
 
 	ret = drm_gem_shmem_pin(&abo->base);
@@ -1204,7 +1188,7 @@ static void amdxdna_bo_unpin(struct amdxdna_gem_obj *abo)
 {
 	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 
-	if (is_import_bo(abo))
+	if (is_import_bo(abo) || is_private_bo(abo))
 		return;
 
 	drm_gem_shmem_unpin(&abo->base);
@@ -1287,6 +1271,44 @@ struct amdxdna_gem_obj *amdxdna_gem_get_obj(struct amdxdna_client *client,
 	return NULL;
 }
 
+struct sg_table *amdxdna_gem_get_sgt(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct sg_table *sg;
+	int ret;
+
+	if (!is_private_bo(abo))
+		return drm_gem_shmem_get_pages_sgt(&abo->base);
+
+	if (abo->mem.sgt)
+		return abo->mem.sgt;
+
+	if (!abo->mem.nr_pages || abo->mem.nr_pages > UINT_MAX)
+		return ERR_PTR(-EINVAL);
+
+	sg = kzalloc_obj(*sg);
+	if (!sg)
+		return ERR_PTR(-ENOMEM);
+
+	ret = sg_alloc_table_from_pages(sg, abo->mem.pages, abo->mem.nr_pages,
+					0, abo->mem.size, GFP_KERNEL);
+	if (ret)
+		goto free_sg;
+
+	ret = dma_map_sgtable(xdna->ddev.dev, sg, DMA_BIDIRECTIONAL, 0);
+	if (ret)
+		goto free_sgt;
+
+	abo->mem.sgt = sg;
+	return sg;
+
+free_sgt:
+	sg_free_table(sg);
+free_sg:
+	kfree(sg);
+	return ERR_PTR(ret);
+}
+
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct amdxdna_drm_get_bo_info *args = data;
@@ -1337,6 +1359,8 @@ static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + offset, size);
 	else if (abo->base.pages)
 		drm_clflush_pages(abo->base.pages, abo->mem.size >> PAGE_SHIFT);
+	else if (abo->mem.pages)
+		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
 	else
 		return -EINVAL;
 
