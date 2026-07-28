@@ -35,6 +35,7 @@ private:
   void *m_umq_bo_buf;
   volatile struct host_queue_header *m_umq_hdr = nullptr;
   volatile struct host_queue_packet *m_umq_pkt = nullptr;
+  volatile struct host_queue_indirect_hdr *m_umq_indirect_hdr = nullptr;
   volatile struct host_indirect_data *m_umq_indirect_buf = nullptr;
   uint64_t m_indirect_paddr;
   volatile uint32_t *m_mapped_doorbell = nullptr;

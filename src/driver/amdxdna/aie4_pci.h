@@ -139,6 +139,8 @@ struct amdxdna_ctx_priv {
 	u64				*umq_write_index;
 	u64				write_index;
 	struct host_queue_packet	*umq_pkts;
+	struct host_queue_indirect_hdr	*umq_indirect_hdrs;
+	u64				umq_indirect_hdrs_dev_addr;
 	struct host_indirect_packet_data *umq_indirect_pkts;
 	u64				umq_indirect_pkts_dev_addr;
 

@@ -36,10 +36,18 @@ static inline u64 umq_pkt_offset(u32 slot_idx)
 	       slot_idx * sizeof(struct host_queue_packet);
 }
 
+static inline u64 umq_indirect_hdr_offset(u32 slot_idx)
+{
+	return sizeof(struct host_queue_header) +
+	       CTX_MAX_CMDS * sizeof(struct host_queue_packet) +
+	       slot_idx * sizeof(struct host_queue_indirect_hdr);
+}
+
 static inline u64 umq_indirect_pkt_offset(u32 idx)
 {
 	return sizeof(struct host_queue_header) +
 	       CTX_MAX_CMDS * sizeof(struct host_queue_packet) +
+	       CTX_MAX_CMDS * sizeof(struct host_queue_indirect_hdr) +
 	       idx * sizeof(struct host_indirect_packet_data);
 }
 
@@ -92,9 +100,20 @@ static inline void aie4_umq_sync_indirect_pkt_for_device(struct amdxdna_ctx_priv
 				 sizeof(struct host_indirect_packet_data));
 }
 
+static inline void aie4_umq_sync_indirect_hdr_for_device(struct amdxdna_ctx_priv *priv,
+							 u32 slot_idx)
+{
+	aie4_umq_sync_for_device(priv, umq_indirect_hdr_offset(slot_idx),
+				 sizeof(struct host_queue_indirect_hdr));
+}
+
 int kernel_mode_submission = 1;
 module_param(kernel_mode_submission, int, 0600);
 MODULE_PARM_DESC(kernel_mode_submission, "I/O submission, 0 - by user, 1 by driver (default)");
+
+int aie4_dump_indirect = 1;
+module_param(aie4_dump_indirect, int, 0600);
+MODULE_PARM_DESC(aie4_dump_indirect, "Dump level-2 indirect (distribute) packet build for debug (default on)");
 
 static int aie4_alloc_resource(struct amdxdna_ctx *ctx)
 {
@@ -158,20 +177,22 @@ static int aie4_ctx_col_list_init(struct amdxdna_ctx *ctx)
 
 static inline void aie4_ctx_umq_dump(struct amdxdna_ctx *ctx)
 {
-	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
+	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL2_INDIRECT_ENTRIES *
 		sizeof(struct host_indirect_packet_data);
+	const size_t indir_hdrs_sz = CTX_MAX_CMDS * sizeof(struct host_queue_indirect_hdr);
 	const size_t pkts_sz = CTX_MAX_CMDS * sizeof(struct host_queue_packet);
 	const size_t hdr_sz = sizeof(struct host_queue_header);
 	void *umq_va = amdxdna_gem_vmap(ctx->priv->umq_bo);
 
 	print_hex_dump_debug("raw_umq: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     umq_va, hdr_sz + pkts_sz + indir_pkts_sz, false);
+			     umq_va, hdr_sz + pkts_sz + indir_hdrs_sz + indir_pkts_sz, false);
 }
 
 static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 {
-	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES *
+	const size_t indir_pkts_sz = CTX_MAX_CMDS * HSA_MAX_LEVEL2_INDIRECT_ENTRIES *
 		sizeof(struct host_indirect_packet_data);
+	const size_t indir_hdrs_sz = CTX_MAX_CMDS * sizeof(struct host_queue_indirect_hdr);
 	const size_t pkts_sz = CTX_MAX_CMDS * sizeof(struct host_queue_packet);
 	struct amdxdna_dev *xdna = ctx->client->xdna;
 	struct amdxdna_ctx_priv *priv = ctx->priv;
@@ -206,12 +227,15 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 	 *   - read index: to tell if a command has been completed or not.
 	 */
 	priv->umq_pkts = umq_va + sizeof(*qhdr);
-	priv->umq_indirect_pkts = umq_va + sizeof(*qhdr) + pkts_sz;
-	priv->umq_indirect_pkts_dev_addr =
+	priv->umq_indirect_hdrs = umq_va + sizeof(*qhdr) + pkts_sz;
+	priv->umq_indirect_hdrs_dev_addr =
 		amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr) + pkts_sz;
+	priv->umq_indirect_pkts = umq_va + sizeof(*qhdr) + pkts_sz + indir_hdrs_sz;
+	priv->umq_indirect_pkts_dev_addr =
+		amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr) + pkts_sz + indir_hdrs_sz;
 
 	umq_sz = umq_bo->mem.size;
-	if (umq_sz < sizeof(*qhdr) + pkts_sz + indir_pkts_sz) {
+	if (umq_sz < sizeof(*qhdr) + pkts_sz + indir_hdrs_sz + indir_pkts_sz) {
 		XDNA_ERR(xdna, "umq BO size %ldB is too small", umq_sz);
 		drm_gem_object_put(to_gobj(umq_bo));
 		priv->umq_bo = NULL;
@@ -230,7 +254,14 @@ static int aie4_ctx_umq_init(struct amdxdna_ctx *ctx)
 	qhdr->data_address = amdxdna_gem_dev_addr(umq_bo) + sizeof(*qhdr);
 	for (i = 0; i < CTX_MAX_CMDS; i++)
 		priv->umq_pkts[i].pkt_header.common_header.opcode = OPCODE_EXEC_BUF;
-	for (i = 0; i < CTX_MAX_CMDS * HSA_MAX_LEVEL1_INDIRECT_ENTRIES; i++) {
+	/* Level-2 headers: one per slot, marked as indirect distribute headers. */
+	for (i = 0; i < CTX_MAX_CMDS; i++) {
+		priv->umq_indirect_hdrs[i].header.opcode = OPCODE_EXEC_BUF;
+		priv->umq_indirect_hdrs[i].header.distribute = 1;
+		priv->umq_indirect_hdrs[i].header.indirect = 1;
+	}
+	/* Leaf packets: direct exec_buf, sized for the deeper level-2 pool. */
+	for (i = 0; i < CTX_MAX_CMDS * HSA_MAX_LEVEL2_INDIRECT_ENTRIES; i++) {
 		priv->umq_indirect_pkts[i].header.opcode = OPCODE_EXEC_BUF;
 		priv->umq_indirect_pkts[i].header.count = sizeof(struct exec_buf);
 		priv->umq_indirect_pkts[i].header.distribute = 1;
@@ -847,51 +878,103 @@ static inline bool is_first_pending_job(struct amdxdna_sched_job *job)
 	return is_first;
 }
 
+/*
+ * Build a distribute command using two-level indirection (matches the CERT
+ * host-queue contract, case 4, and the VE2 driver).  The inline 64-byte packet
+ * can only hold HSA_MAX_LEVEL1_INDIRECT_ENTRIES (6) entries, so instead of
+ * fanning out inline (capped at 6 columns), we place ONE level-1 entry that
+ * points at an out-of-line level-2 header.  The header then carries one entry
+ * per distributed column (up to HSA_MAX_LEVEL2_INDIRECT_ENTRIES), each pointing
+ * at a leaf packet holding that column's exec_buf.  This lifts the fan-out
+ * limit from 6 to a full 24-column array.
+ */
 static inline void
-fill_indirect_pkt(struct amdxdna_ctx_priv *priv, u64 slot_idx, u32 total_slots,
+fill_indirect_pkt(struct amdxdna_ctx_priv *priv, u64 slot_idx,
 		  struct amdxdna_cmd_start_dpu *dpu, u16 entries)
 {
 	struct host_queue_packet *pkt = &priv->umq_pkts[slot_idx];
-	struct host_indirect_packet_entry *hipe =
+	struct host_queue_indirect_hdr *hdr = &priv->umq_indirect_hdrs[slot_idx];
+	struct host_indirect_packet_entry *l1 =
 		(struct host_indirect_packet_entry *)(pkt->data);
+	struct host_indirect_packet_entry *l2 =
+		(struct host_indirect_packet_entry *)(hdr->data);
+	struct amdxdna_dev *xdna = priv->ctx->client->xdna;
+	u64 hdr_dev_addr;
 	u16 i;
 
-	for (i = 0; i < entries; i++, dpu++, hipe++) {
-		struct host_indirect_packet_data *hipd;
-		u64 indirect_pkt_dev_addr;
+	/* Level-1: a single inline entry pointing at this slot's level-2 header. */
+	hdr_dev_addr = priv->umq_indirect_hdrs_dev_addr +
+		slot_idx * sizeof(struct host_queue_indirect_hdr);
+
+	if (aie4_dump_indirect)
+		XDNA_INFO(xdna,
+			  "[L2-DUMP] slot=%llu entries=%u inline_count=%zu hdr_dev=0x%llx hdr_count=%zu",
+			  slot_idx, entries, sizeof(*l1), hdr_dev_addr,
+			  entries * sizeof(*l2));
+	l1->host_addr_low = lower_32_bits(hdr_dev_addr);
+	hipe_set_host_addr_high(&l1->host_addr_high_uc_index,
+				upper_32_bits(hdr_dev_addr));
+	hipe_set_uc_index(&l1->host_addr_high_uc_index, 0); /* lead uc */
+
+	/* Level-2 header: one entry per distributed column. */
+	hdr->header.count = entries * sizeof(*l2);
+	hdr->header.distribute = 1;
+	hdr->header.indirect = 1;
+
+	for (i = 0; i < entries; i++, dpu++, l2++) {
+		struct host_indirect_packet_data *leaf;
+		u64 leaf_dev_addr;
 		u32 uci = dpu->uc_index;
 		u32 idx;
 
-		if (uci >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
-			XDNA_ERR(priv->ctx->client->xdna, "Invalid uc index %d", uci);
+		if (uci >= HSA_MAX_LEVEL2_INDIRECT_ENTRIES) {
+			XDNA_ERR(xdna, "Invalid uc index %d", uci);
 			continue;
 		}
-		idx = uci * total_slots + slot_idx;
-		hipd = &priv->umq_indirect_pkts[idx];
-		indirect_pkt_dev_addr = priv->umq_indirect_pkts_dev_addr +
+		/*
+		 * Leaf pool is indexed by dense entry ordinal, NOT uc_index: the
+		 * real column travels in the level-2 entry's uc_index field (what
+		 * CERT reads), and CERT reaches the leaf via the explicit pointer
+		 * below, so the pool slot is host-private bookkeeping.
+		 */
+		idx = slot_idx * HSA_MAX_LEVEL2_INDIRECT_ENTRIES + i;
+		leaf = &priv->umq_indirect_pkts[idx];
+		leaf_dev_addr = priv->umq_indirect_pkts_dev_addr +
 			sizeof(struct host_indirect_packet_data) * idx;
 
-		/* Fill in indirect entry to point to indirect pkt. */
-		hipe->host_addr_low = lower_32_bits(indirect_pkt_dev_addr);
-		hipe_set_host_addr_high(&hipe->host_addr_high_uc_index,
-					upper_32_bits(indirect_pkt_dev_addr));
-		hipe_set_uc_index(&hipe->host_addr_high_uc_index, uci);
+		/* Level-2 entry -> leaf, tagged with the real column. */
+		l2->host_addr_low = lower_32_bits(leaf_dev_addr);
+		hipe_set_host_addr_high(&l2->host_addr_high_uc_index,
+					upper_32_bits(leaf_dev_addr));
+		hipe_set_uc_index(&l2->host_addr_high_uc_index, uci);
 
-		/* Fill in indirect pkt. */
-		hipd->payload.dpu_control_code_host_addr_low =
+		/* Leaf: the direct exec_buf for this column. */
+		leaf->payload.dpu_control_code_host_addr_low =
 			lower_32_bits(dpu->instruction_buffer);
-		hipd->payload.dpu_control_code_host_addr_high =
+		leaf->payload.dpu_control_code_host_addr_high =
 			upper_32_bits(dpu->instruction_buffer);
-		hipd->payload.dtrace_buf_host_addr_low =
+		leaf->payload.dtrace_buf_host_addr_low =
 			lower_32_bits(dpu->dtrace_buffer);
-		hipd->payload.dtrace_buf_host_addr_high =
+		leaf->payload.dtrace_buf_host_addr_high =
 			lower_16_bits(upper_32_bits(dpu->dtrace_buffer));
-		/* Publish this indirect pkt slot before CERT can chase it. */
+		/* Publish this leaf before CERT can chase it. */
 		aie4_umq_sync_indirect_pkt_for_device(priv, idx);
+
+		if (aie4_dump_indirect)
+			XDNA_INFO(xdna,
+				  "[L2-DUMP]   ent[%u] uc_index=%u leaf_dev=0x%llx ctrl=0x%llx dtrace=0x%llx",
+				  i, uci, leaf_dev_addr,
+				  (u64)dpu->instruction_buffer,
+				  (u64)dpu->dtrace_buffer);
 	}
+
+	/* Publish the level-2 header after its entries are populated. */
+	aie4_umq_sync_indirect_hdr_for_device(priv, slot_idx);
+
+	/* Inline packet carries exactly one level-1 entry (the level-2 header). */
 	pkt->pkt_header.common_header.distribute = 1;
 	pkt->pkt_header.common_header.indirect = 1;
-	pkt->pkt_header.common_header.count = entries * sizeof(*hipe);
+	pkt->pkt_header.common_header.count = sizeof(*l1);
 }
 
 static inline void
@@ -954,8 +1037,14 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 
 	dpu = amdxdna_cmd_get_payload(cmd_abo, NULL);
 	chained = dpu->chained;
-	if (chained >= HSA_MAX_LEVEL1_INDIRECT_ENTRIES) {
-		XDNA_ERR(xdna, "Invalid DPU data");
+	/*
+	 * chained+1 distribute targets are carried in the out-of-line level-2
+	 * header, bounded by the level-2 pool depth (not the 6-entry inline
+	 * packet limit).  Reject anything the pool can't hold.
+	 */
+	if (chained >= HSA_MAX_LEVEL2_INDIRECT_ENTRIES) {
+		XDNA_ERR(xdna, "Invalid DPU data: chained %u exceeds max %u",
+			 chained, HSA_MAX_LEVEL2_INDIRECT_ENTRIES);
 		return -EINVAL;
 	}
 
@@ -967,7 +1056,7 @@ static int submit_one_cmd(struct amdxdna_ctx *ctx,
 
 	slot_idx = ctx->priv->write_index & (CTX_MAX_CMDS - 1);
 	if (chained)
-		fill_indirect_pkt(priv, slot_idx, CTX_MAX_CMDS, dpu, chained + 1);
+		fill_indirect_pkt(priv, slot_idx, dpu, chained + 1);
 	else
 		fill_direct_pkt(priv, slot_idx, dpu);
 
@@ -1227,6 +1316,7 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 	struct fw_buffer_metadata *meta_buffer;
 	u32 config_property;
 	u32 prev_size;
+	bool trunc_warned = false;
 	int ret;
 
 	meta_bo = amdxdna_gem_get_obj(client, bo_hdl, AMDXDNA_BO_SHARE);
@@ -1313,15 +1403,23 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 		u32 index = entry->index;
 		u64 off_addr;
 
+		/*
+		 * CERT logging is an out-of-band observability feature bounded by
+		 * a fixed wire array (req.cert_logging.info[], protocol-defined).
+		 * A full-array context legitimately spans more CERTs than that
+		 * array can carry, so degrade gracefully: program the CERTs that
+		 * fit and skip the rest with a single warning, rather than failing
+		 * context configuration.
+		 */
 		if (index >= max_certs) {
-			XDNA_ERR(xdna,
-				 "invalid CERT index %u for buf_type %u (num_ucs=%u, num_col=%u, uc_per_col=%u, max=%u)",
-				 index, meta_buffer->buf_type,
-				 meta_buffer->num_ucs,
-				 ctx->num_col,
-				 xdna->dev_info->uc_per_col, max_certs);
-			ret = -EINVAL;
-			goto put_log_bo;
+			if (!trunc_warned) {
+				XDNA_WARN(xdna,
+					  "CERT logging truncated: index %u >= max %u (buf_type %u, num_ucs=%u, num_col=%u); logging only the first %u CERT(s)",
+					  index, max_certs, meta_buffer->buf_type,
+					  meta_buffer->num_ucs, ctx->num_col, max_certs);
+				trunc_warned = true;
+			}
+			continue;
 		}
 
 		if (!attach) {
@@ -1345,7 +1443,9 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 			 index, off_addr, entry->size);
 	}
 
-	req.cert_logging.num = attach ? meta_buffer->num_ucs : 0;
+	/* Cap at max_certs: the FW rejects num > the wire array size, and we
+	 * only programmed entries with index < max_certs above. */
+	req.cert_logging.num = attach ? min_t(u32, meta_buffer->num_ucs, max_certs) : 0;
 
 	req.hw_context_id = ctx->priv->hw_ctx_id;
 	req.property = config_property;
@@ -1356,7 +1456,6 @@ static int aie4_ctx_config_debug_bo(struct amdxdna_ctx *ctx, u32 bo_hdl, int att
 
 	XDNA_DBG(xdna, "Attach debug BO %d to %s, ret: %d", bo_hdl, ctx->name, ret);
 
-put_log_bo:
 	amdxdna_gem_put_obj(log_bo);
 put_meta_bo:
 	amdxdna_gem_put_obj(meta_bo);

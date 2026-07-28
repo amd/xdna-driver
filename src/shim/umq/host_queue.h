@@ -36,6 +36,12 @@ enum hsa_cmd_state
 #define HSA_INVALID_PAGE          HSA_ERR(self_id * 100 + 5)
 #define HSA_PKT_TIMEOUT           HSA_ERR(self_id * 100 + 6)
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES (6)
+/*
+ * Level-2 indirect fan-out depth (out-of-line, one header per queue slot).
+ * Covers a full 24-column AIE array plus headroom; must match the driver's
+ * HSA_MAX_LEVEL2_INDIRECT_ENTRIES so the UMQ BO layout/size stay in lockstep.
+ */
+#define HSA_MAX_LEVEL2_INDIRECT_ENTRIES (36)
 
 #define LAST_CMD (0)
 #define NOT_LAST_CMD (1)
@@ -254,6 +260,15 @@ struct host_queue_packet
 struct host_indirect_data {
   struct common_header header;
   struct exec_buf  payload;
+};
+
+/*
+ * Level-2 indirect header: out-of-line, one per queue slot.  Mirrors the
+ * driver's struct host_queue_indirect_hdr so the UMQ BO layout matches.
+ */
+struct host_queue_indirect_hdr {
+  struct common_header header;
+  uint32_t data[HSA_MAX_LEVEL2_INDIRECT_ENTRIES * sizeof(struct host_indirect_packet_entry)];
 };
 
 /*

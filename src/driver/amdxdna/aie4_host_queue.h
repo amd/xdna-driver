@@ -8,7 +8,15 @@
 
 /* Allow at least one runlist cmd and a few single cmds. Must be power of 2. */
 #define CTX_MAX_CMDS			32
+/*
+ * Level-1 indirect entries are inline in the 64-byte host_queue_packet's
+ * data[12] (48B / 8B = 6): this is a wire constant fixed by the packet size.
+ * Level-2 entries live out-of-line in host_queue_indirect_hdr, so their count
+ * is bounded only by the pool depth we choose here (36 covers a full 24-column
+ * AIE array plus headroom, matching the VE2 path's HOST_INDIRECT_PKT_NUM).
+ */
 #define HSA_MAX_LEVEL1_INDIRECT_ENTRIES	6
+#define HSA_MAX_LEVEL2_INDIRECT_ENTRIES	36
 #define QUEUE_INDEX_START		0
 
 /*
@@ -95,6 +103,17 @@ static inline void hipe_set_uc_index(u32 *val, u32 uc_idx)
 struct host_indirect_packet_data {
 	struct common_header header;
 	struct exec_buf payload;
+};
+
+/*
+ * Level-2 indirect header: lives out-of-line (one per queue slot).  A level-1
+ * entry in the inline packet points here; this header's common_header.count
+ * declares how many host_indirect_packet_entry records follow in data[], one
+ * per distributed column.  Mirrors VE2's struct host_queue_indirect_hdr.
+ */
+struct host_queue_indirect_hdr {
+	struct common_header header;
+	u32 data[HSA_MAX_LEVEL2_INDIRECT_ENTRIES * sizeof(struct host_indirect_packet_entry)];
 };
 
 #endif /* _AIE4_HOST_QUEUE_H_ */

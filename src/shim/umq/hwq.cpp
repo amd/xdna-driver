@@ -39,18 +39,20 @@ namespace shim_xdna {
 hwq_umq::
 hwq_umq(const device& dev, size_t nslots) : hwq(dev)
 {
-  // host queue layout:
-  //   host_queue_header_t
-  //   host_queue_packet_t [nslots]
-  //   indirect [HSA_MAX_LEVEL1_INDIRECT_ENTRIES * indirect_buffer * nslots]
+  // host queue layout (must stay byte-identical to the driver's aie4_ctx_umq_init):
+  //   host_queue_header
+  //   host_queue_packet        [nslots]
+  //   host_queue_indirect_hdr  [nslots]                                  (level-2 headers)
+  //   host_indirect_data       [HSA_MAX_LEVEL2_INDIRECT_ENTRIES * nslots] (leaf pool)
   const size_t header_sz = sizeof(struct host_queue_header);
   const size_t queue_sz = sizeof(struct host_queue_packet) * nslots;
-  const size_t indirect_sz = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL1_INDIRECT_ENTRIES * nslots;
+  const size_t hdrs_sz = sizeof(struct host_queue_indirect_hdr) * nslots;
+  const size_t indirect_sz = sizeof(struct host_indirect_data) * HSA_MAX_LEVEL2_INDIRECT_ENTRIES * nslots;
 
 #ifdef UMQ_HELLO_TEST
   const size_t umq_sz = 0x200000;
 #else
-  const size_t umq_sz = header_sz + queue_sz + indirect_sz;
+  const size_t umq_sz = header_sz + queue_sz + hdrs_sz + indirect_sz;
 #endif
   shim_debug("Creating UMQ HW queue of size %ld", umq_sz);
 
@@ -61,18 +63,30 @@ hwq_umq(const device& dev, size_t nslots) : hwq(dev)
   m_umq_hdr = reinterpret_cast<volatile struct host_queue_header *>(m_umq_bo_buf);
   m_umq_pkt = reinterpret_cast<volatile struct host_queue_packet *>
     (reinterpret_cast<uintptr_t>(m_umq_bo_buf) + header_sz);
-  m_umq_indirect_buf = reinterpret_cast<volatile struct host_indirect_data *>
+  m_umq_indirect_hdr = reinterpret_cast<volatile struct host_queue_indirect_hdr *>
     (reinterpret_cast<uintptr_t>(m_umq_bo_buf) + header_sz + queue_sz);
+  m_umq_indirect_buf = reinterpret_cast<volatile struct host_indirect_data *>
+    (reinterpret_cast<uintptr_t>(m_umq_bo_buf) + header_sz + queue_sz + hdrs_sz);
 
-  // init slots and indirect buf
+  // init slots and indirect buf.  The user-mode build path (fill_indirect_exec_buf)
+  // remains level-1 and uses only the first HSA_MAX_LEVEL1_INDIRECT_ENTRIES leaves
+  // per slot; the deeper pool + level-2 header region exist so the BO is large
+  // enough for the driver's kernel-mode level-2 layout (validated in the driver).
   for (size_t i = 0; i < nslots; i++)
     init_indirect_buf(&m_umq_indirect_buf[i * HSA_MAX_LEVEL1_INDIRECT_ENTRIES], HSA_MAX_LEVEL1_INDIRECT_ENTRIES);
+
+  for (size_t i = 0; i < nslots; i++) {
+    m_umq_indirect_hdr[i].header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
+    m_umq_indirect_hdr[i].header.opcode = HOST_QUEUE_PACKET_EXEC_BUF;
+    m_umq_indirect_hdr[i].header.distribute = 1;
+    m_umq_indirect_hdr[i].header.indirect = 1;
+  }
 
   m_umq_hdr->capacity = nslots;
   // data_address starts after header
   m_umq_hdr->data_address = m_umq_bo->get_properties().paddr + header_sz;
-  // indirect buf starts after queue
-  m_indirect_paddr = m_umq_hdr->data_address + queue_sz;
+  // leaf indirect buf starts after the queue + level-2 header regions
+  m_indirect_paddr = m_umq_hdr->data_address + queue_sz + hdrs_sz;
 
   shim_debug("Created UMQ HW queue, size: %d", umq_sz);
 }
