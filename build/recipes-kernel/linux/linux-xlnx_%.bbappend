@@ -9,3 +9,5 @@ SRC_URI:append = " file://0004-driver-xilinx-ai-engine-Added-support-to-disable-
 SRC_URI:append = " file://0005-xilinx-ai-engine-fix-UC-AXIMM-transaction-timeout-on.patch"
 SRC_URI:append = " file://0006-xilinx-ai-engine-Fix-aie_part_pm_ops-function-argume.patch"
 SRC_URI:append = " file://0007-xilinx-ai-engine-Granularize-error-handling-init-options.patch"
+SRC_URI:append = " file://0001-xilinx-ai-engine-part-init-optimizations.patch"
+SRC_URI:append = " file://0002-aie-handshake-avoid-dmam_alloc_coherent-per-column-via-dma_addr.patch"
