@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Saif <saifuddin.kaijar@amd.com>
+Date: Tue, 22 Jul 2025 00:00:00 +0000
+Subject: [PATCH] aie: handshake: avoid dmam_alloc_coherent per column via dma_addr
+
+Add dma_addr field to aie_op_handshake_data so callers can supply a
+pre-mapped DMA coherent address, skipping per-column dmam_alloc_coherent.
+
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-reset.c | 14 +++++++++-----
+ include/uapi/linux/xlnx-ai-engine.h             |  4 ++++
+ 2 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index a867f71a41f4..9fc5ad6c0564 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -782,7 +782,10 @@ int aie2ps_part_write_handshake(struct aie_partition *apart,
+ 		range.start.col = hs_data->loc.col + apart->range.start.col;
+ 		range.size.col = 1U;
+
+-		if (virt_addr_valid(hs_data->addr)) {
++		if (hs_data->dma_addr) {
++			hs_addr[i].hs_va  = hs_data->addr;
++			hs_addr[i].hs_dma = (dma_addr_t)hs_data->dma_addr;
++		} else if (virt_addr_valid(hs_data->addr)) {
+ 			hs_addr[i].hs_va = dmam_alloc_coherent(&apart->dev,
+ 							       hs_data->size,
+ 							       &hs_addr[i].hs_dma,
+@@ -831,7 +834,10 @@ clear:
+ 	for (u32 i = 0; i < handshake_cols; i++) {
+ 		hs_data = &data[i];
+
+-		if (hs_addr[i].hs_va)	{
++		if (hs_data->dma_addr)
++			continue;
++
++		if (hs_addr[i].hs_va) {
+ 			if (virt_addr_valid(hs_data->addr))
+ 				dmam_free_coherent(&apart->dev, hs_data->size,
+ 						   hs_addr[i].hs_va, hs_addr[i].hs_dma);
+diff --git a/include/uapi/linux/xlnx-ai-engine.h b/include/uapi/linux/xlnx-ai-engine.h
+index 0017e066a0fc..e971705680de 100644
+--- a/include/uapi/linux/xlnx-ai-engine.h
++++ b/include/uapi/linux/xlnx-ai-engine.h
+@@ -272,11 +272,15 @@ struct aie_partition_req {
+ /**
+  * struct aie_op_handshake_data - AI engine uc handshake region information
+  * @addr: handshake data address from where the data needs to be copied.
++ * @dma_addr: pre-known DMA address of @addr. When non-zero, the buffer is
++ *            already a DMA coherent allocation; neither dmam_alloc_coherent
++ *            nor dma_map_single is needed.
+  * @size: handshake data size.
+  * @offset: offset for handshake region update.
+  */
+ struct aie_op_handshake_data {
+ 	void *addr;
++	__u64 dma_addr;
+ 	__kernel_size_t size;
+ 	__kernel_size_t offset;
+ 	struct aie_location loc;
+--
+2.34.1
