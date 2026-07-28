@@ -23,6 +23,7 @@
 #include "amdxdna_mailbox.h"
 #include "amdxdna_mailbox_helper.h"
 #include "amdxdna_pci_drv.h"
+#include "amdxdna_pm.h"
 #include "trace/events/amdxdna.h"
 
 #define CTX_INVALID_ID			(~0U)
@@ -535,7 +536,17 @@ int aie4_hwctx_init(struct amdxdna_hwctx *hwctx)
 	if (ret)
 		goto destroy_wq;
 
+	/*
+	 * Resume the device so aie4_hwctx_create() can reach firmware; the create
+	 * ioctl holds dev_lock, so use the _locked variant. Drop the ref right
+	 * after: the context does not need the device resumed for its lifetime.
+	 */
+	ret = amdxdna_pm_resume_get_locked(xdna);
+	if (ret)
+		goto umq_fini;
+
 	ret = aie4_hwctx_create(hwctx);
+	amdxdna_pm_suspend_put(xdna);
 	if (ret)
 		goto umq_fini;
 
