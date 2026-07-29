@@ -1491,9 +1491,12 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 {
 	struct amdxdna_hwctx_priv *priv = hwctx->priv;
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct ww_acquire_ctx acquire_ctx;
+	struct amdxdna_gem_obj *abo;
 	u32 err_gen;
 	u32 op;
 	int ret;
+	int i;
 
 	XDNA_DBG(xdna, "ctx %s job 0x%llx received", hwctx->name, (u64)job);
 
@@ -1527,6 +1530,42 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		return -ESRCH;
 	}
 
+retry:
+	ret = drm_gem_lock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+	if (ret) {
+		XDNA_WARN(xdna, "Failed to lock BOs, ret %d", ret);
+		goto put_mm;
+	}
+
+	for (i = 0; i < job->bo_cnt; i++) {
+		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
+		if (ret) {
+			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
+			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			goto put_mm;
+		}
+	}
+
+	down_read(&xdna->notifier_lock);
+	for (i = 0; i < job->bo_cnt; i++) {
+		abo = to_xdna_obj(job->bos[i]);
+		if (abo->mem.map_invalid) {
+			up_read(&xdna->notifier_lock);
+			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			ret = amdxdna_populate_range(abo);
+			if (ret)
+				goto put_mm;
+			goto retry;
+		}
+	}
+
+	job->out_fence = dma_fence_get(job->fence);
+	for (i = 0; i < job->bo_cnt; i++)
+		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
+
+	up_read(&xdna->notifier_lock);
+	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+
 	/*
 	 * Wait until this job is at the head of the pending list before touching
 	 * the queue (see enqueue_pending_job).  Freezable so the freezer can
@@ -1543,8 +1582,7 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 				   READ_ONCE(priv->pending_head) == job);
 	if (ret) {
 		cancel_pending_job(hwctx, job);
-		mmput(job->mm);
-		return ret;
+		goto signal_fence;
 	}
 
 	mutex_lock(&priv->io_lock);
@@ -1569,8 +1607,7 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		mutex_unlock(&priv->io_lock);
 		/* Release the next pending submitter. */
 		wake_up_all(&priv->job_list_wq);
-		mmput(job->mm);
-		return ret;
+		goto signal_fence;
 	}
 
 	if (job->aie4_job_state == AIE4_JOB_STATE_SUBMITTING &&
@@ -1617,6 +1654,14 @@ int aie4_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 	atomic64_inc(&hwctx->job_submit_cnt);
 	queue_work(priv->job_work_q, &priv->job_work);
 	return 0;
+
+signal_fence:
+	dma_fence_signal(job->fence);
+	dma_fence_put(job->out_fence);
+	job->out_fence = NULL;
+put_mm:
+	mmput(job->mm);
+	return ret;
 }
 
 static int aie4_hwctx_cfg_debug_bo(struct amdxdna_hwctx *hwctx, u32 meta_bo_hdl,

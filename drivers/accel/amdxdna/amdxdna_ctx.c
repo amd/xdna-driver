@@ -33,7 +33,7 @@
 struct amdxdna_fence {
 	struct dma_fence	base;
 	spinlock_t		lock; /* for base */
-	struct amdxdna_hwctx	*hwctx;
+	struct device		*dev;
 };
 
 static const char *amdxdna_fence_get_driver_name(struct dma_fence *fence)
@@ -47,7 +47,13 @@ static const char *amdxdna_fence_get_timeline_name(struct dma_fence *fence)
 
 	xdna_fence = container_of(fence, struct amdxdna_fence, base);
 
-	return xdna_fence->hwctx->name;
+	/* Use device name rather than hwctx name: the fence is published into
+	 * BO reservation objects via dma_resv_add_fence() and can outlive the
+	 * hwctx (e.g. when a BO is exported as a dma-buf and imported by
+	 * another process). The device outlives any individual context, so
+	 * dev_name() is safe to call at any point during the fence's lifetime.
+	 */
+	return dev_name(xdna_fence->dev);
 }
 
 static const struct dma_fence_ops fence_ops = {
@@ -63,9 +69,13 @@ static struct dma_fence *amdxdna_fence_create(struct amdxdna_hwctx *hwctx)
 	if (!fence)
 		return NULL;
 
-	fence->hwctx = hwctx;
+	fence->dev = hwctx->client->xdna->ddev.dev;
 	spin_lock_init(&fence->lock);
-	dma_fence_init(&fence->base, &fence_ops, &fence->lock, hwctx->id, 0);
+	/* Each job fence needs a unique context so dma_resv_add_fence() does not
+	 * evict a prior job's fence from a shared BO's reservation object when
+	 * two in-flight jobs touch the same BO.
+	 */
+	dma_fence_init(&fence->base, &fence_ops, &fence->lock, dma_fence_context_alloc(1), 0);
 	return &fence->base;
 }
 
