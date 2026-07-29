@@ -181,8 +181,6 @@ int amdxdna_query_ctx_status_by_id(struct aie_device *aie, struct amdxdna_client
 int amdxdna_get_force_preempt_state(struct aie_device *aie, struct amdxdna_drm_get_info *args);
 int amdxdna_set_force_preempt_state(struct aie_device *aie, struct amdxdna_client *client,
 				    struct amdxdna_drm_set_state *args);
-void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
-
 struct amdxdna_msg_buf_hdl {
 	struct amdxdna_dev	*xdna;
 	void			*vaddr;
