@@ -61,7 +61,7 @@ int amdxdna_query_sensors(struct amdxdna_drm_get_info *args, u32 total_col)
 	sensor.input = npu_metrics.npu_power;
 	sensor.unitm = -3;
 	scnprintf(sensor.label, sizeof(sensor.label), "Total Power");
-	scnprintf(sensor.units, sizeof(sensor.units), "mW");
+	scnprintf(sensor.units, sizeof(sensor.units), "W");
 
 	if (args->buffer_size < sizeof(sensor))
 		goto out;
