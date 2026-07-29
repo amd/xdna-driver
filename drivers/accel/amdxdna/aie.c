@@ -9,6 +9,7 @@
 #include <drm/drm_print.h>
 #include <drm/gpu_scheduler.h>
 #include <linux/errno.h>
+#include <linux/hmm.h>
 #include <linux/limits.h>
 #include <linux/sched.h>
 #include <linux/sizes.h>
@@ -1236,4 +1237,69 @@ amdxdna_get_auto_coredump_mode(struct amdxdna_client *client,
 		return -EFAULT;
 
 	return 0;
+}
+
+int amdxdna_populate_range(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	struct amdxdna_umap *mapp;
+	struct mm_struct *mm;
+	bool found;
+	int ret;
+
+again:
+	found = false;
+	down_write(&xdna->notifier_lock);
+	list_for_each_entry(mapp, &abo->mem.umap_list, node) {
+		if (mapp->invalid && kref_get_unless_zero(&mapp->refcnt)) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		abo->mem.map_invalid = false;
+		up_write(&xdna->notifier_lock);
+		return 0;
+	}
+
+	up_write(&xdna->notifier_lock);
+
+	mm = mapp->notifier.mm;
+	if (!mmget_not_zero(mm)) {
+		amdxdna_umap_put(mapp);
+		return -EFAULT;
+	}
+
+	mapp->range.notifier_seq = mmu_interval_read_begin(&mapp->notifier);
+	mmap_read_lock(mm);
+	ret = hmm_range_fault(&mapp->range);
+	mmap_read_unlock(mm);
+	if (ret) {
+		if (ret == -EBUSY) {
+			amdxdna_umap_put(mapp);
+			mmput(mm);
+			goto again;
+		}
+
+		goto put_mm;
+	}
+
+	down_write(&xdna->notifier_lock);
+	if (mmu_interval_read_retry(&mapp->notifier, mapp->range.notifier_seq)) {
+		up_write(&xdna->notifier_lock);
+		amdxdna_umap_put(mapp);
+		mmput(mm);
+		goto again;
+	}
+	mapp->invalid = false;
+	up_write(&xdna->notifier_lock);
+	amdxdna_umap_put(mapp);
+	mmput(mm);
+	goto again;
+
+put_mm:
+	amdxdna_umap_put(mapp);
+	mmput(mm);
+	return ret;
 }
