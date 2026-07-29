@@ -1290,55 +1290,115 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
 
   auto dev = sdev.get();
   static const char* tag = "aie_debug";
-  elf_io_aie_debug_test_bo_set boset{dev, tag};
-  hw_ctx hwctx{dev, tag};
 
-  boset.init_cmd(hwctx, false);
-  boset.sync_before_run();
-  auto hwq = hwctx.get()->get_hw_queue();
-  auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
-  hwq->submit_command(cbo->get());
-  hwq->wait_command(cbo->get(), 0);
-  boset.sync_after_run();
-  boset.verify_result();
-
-  xrt_core::query::aie_coredump::args coredump_args{};
-  coredump_args.pid = static_cast<uint64_t>(getpid());
-  coredump_args.context_id = static_cast<uint32_t>(hwctx.get()->get_slotidx());
-  std::vector<char> payload = xrt_core::device_query<xrt_core::query::aie_coredump>(dev, coredump_args);
-  if (payload.empty() || (payload.size() % TILE_ADDRESS_SPACE) != 0)
-    throw std::runtime_error("Unexpected AIE coredump payload size");
-
-  auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(dev);
-  if (aie_stats.cols == 0)
-    throw std::runtime_error("AIE tiles stats reports zero columns");
-
-  size_t num_tiles = payload.size() / TILE_ADDRESS_SPACE;
-  uint32_t num_rows = (num_tiles % aie_stats.cols == 0)
-      ? static_cast<uint32_t>(num_tiles / aie_stats.cols)
-      : (aie_stats.shim_rows + aie_stats.mem_rows + aie_stats.core_rows);
-
-  const uint8_t* base = reinterpret_cast<const uint8_t*>(payload.data());
-  auto load_u32 = [](const uint8_t* p) {
-    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-        (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+  // Best-effort disable of auto coredump. This must never throw so it can be
+  // safely called from the exception cleanup path without masking the original
+  // failure or skipping the rethrow.
+  auto disable_auto_coredump = [dev]() noexcept {
+    try {
+      device_update<query::auto_coredump>(dev, static_cast<uint32_t>(0));
+      std::cout << "[coredump] auto coredump state after disable = "
+        << device_query<query::auto_coredump>(dev) << std::endl;
+    } catch (const std::exception& e) {
+      std::cout << "[coredump] failed to disable auto coredump: " << e.what() << std::endl;
+    } catch (...) {
+      std::cout << "[coredump] failed to disable auto coredump: unknown error" << std::endl;
+    }
   };
 
-  uint32_t st = load_u32(base + (0 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
-  uint32_t id_status = load_u32(base + (2 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
+  // Enable the auto coredump feature via the new shim query before running the
+  // workload. With an ELF that times out, the driver is expected to capture an
+  // AIE coredump automatically on the timeout. If the enable itself throws,
+  // nothing was toggled on and no cleanup is needed.
+  std::cout << "[coredump] enabling auto coredump via query::auto_coredump" << std::endl;
+  device_update<query::auto_coredump>(dev, static_cast<uint32_t>(1));
 
-  const size_t memtile0_offset = (0 * num_rows + 1) * TILE_ADDRESS_SPACE;
-  for (size_t i = 1; i < 256; ++i) {
-    uint32_t val = load_u32(base + memtile0_offset + i * sizeof(uint32_t));
-    if (val != 0xdeadface)
-      throw std::runtime_error("Memtile data expected 0xdeadface");
+  try {
+    std::cout << "[coredump] auto coredump state after enable = "
+      << device_query<query::auto_coredump>(dev) << std::endl;
+
+    std::cout << "[coredump] loading aie_debug ELF workload and creating hw context" << std::endl;
+    elf_io_aie_debug_test_bo_set boset{dev, tag};
+    hw_ctx hwctx{dev, tag};
+
+    boset.init_cmd(hwctx, false);
+    boset.sync_before_run();
+    auto hwq = hwctx.get()->get_hw_queue();
+    auto cbo = boset.get_bos()[IO_TEST_BO_CMD].tbo.get();
+    std::cout << "[coredump] submitting command (context slot "
+      << hwctx.get()->get_slotidx() << ")" << std::endl;
+    hwq->submit_command(cbo->get());
+    std::cout << "[coredump] waiting for command (expected to time out with the new ELF)" << std::endl;
+    hwq->wait_command(cbo->get(), 0);
+    std::cout << "[coredump] wait_command returned, checking command state" << std::endl;
+
+    // With the timing-out ELF the command is expected to end in the TIMEOUT
+    // state (not COMPLETED). Treat any other state as a real failure.
+    auto cpkt = reinterpret_cast<ert_start_kernel_cmd*>(cbo->map());
+    std::cout << "[coredump] command state after wait = " << cpkt->state
+      << " (expecting ERT_CMD_STATE_TIMEOUT=" << ERT_CMD_STATE_TIMEOUT << ")" << std::endl;
+    if (cpkt->state != ERT_CMD_STATE_TIMEOUT)
+      throw std::runtime_error(std::string("Expected command to time out, got state=")
+        + std::to_string(cpkt->state));
+    boset.sync_after_run();
+
+    // On timeout the driver should have auto-captured an AIE coredump. The main
+    // pass criteria is that a well-formed coredump payload is now available.
+    std::cout << "[coredump] querying auto-captured AIE coredump payload" << std::endl;
+    xrt_core::query::aie_coredump::args coredump_args{};
+    coredump_args.pid = static_cast<uint64_t>(getpid());
+    coredump_args.context_id = static_cast<uint32_t>(hwctx.get()->get_slotidx());
+    std::vector<char> payload = xrt_core::device_query<xrt_core::query::aie_coredump>(dev, coredump_args);
+    std::cout << "[coredump] coredump payload size = " << payload.size() << " bytes" << std::endl;
+    if (payload.empty() || (payload.size() % TILE_ADDRESS_SPACE) != 0)
+      throw std::runtime_error("Unexpected AIE coredump payload size");
+
+    auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(dev);
+    if (aie_stats.cols == 0)
+      throw std::runtime_error("AIE tiles stats reports zero columns");
+
+    size_t num_tiles = payload.size() / TILE_ADDRESS_SPACE;
+    uint32_t num_rows = (num_tiles % aie_stats.cols == 0)
+        ? static_cast<uint32_t>(num_tiles / aie_stats.cols)
+        : (aie_stats.shim_rows + aie_stats.mem_rows + aie_stats.core_rows);
+    std::cout << "[coredump] num_tiles = " << num_tiles << ", cols = " << aie_stats.cols
+      << ", num_rows = " << num_rows << std::endl;
+
+    const uint8_t* base = reinterpret_cast<const uint8_t*>(payload.data());
+    auto load_u32 = [](const uint8_t* p) {
+      return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+          (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    };
+
+    // The specific core/memtile register values below are workload dependent.
+    // With the timing-out ELF they will differ from the original stall test, so
+    // print them for inspection rather than asserting on them.
+    uint32_t st = load_u32(base + (0 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
+    uint32_t id_status = load_u32(base + (2 * num_rows + 2) * TILE_ADDRESS_SPACE + CORE_STATUS_REG_OFFSET);
+    std::cout << "[coredump] core (0,2) status = 0x" << std::hex << st
+      << ", core (2,2) status = 0x" << id_status << std::dec << std::endl;
+    std::cout << "[coredump] core (0,2) enabled=" << ((st & CORE_ENABLE) ? 1 : 0)
+      << " stalled=" << ((st & CORE_IS_STALL_MASK) ? 1 : 0)
+      << ", core (2,2) enabled=" << ((id_status & CORE_ENABLE) ? 1 : 0) << std::endl;
+
+    const size_t memtile0_offset = (0 * num_rows + 1) * TILE_ADDRESS_SPACE;
+    uint32_t memtile0_word1 = load_u32(base + memtile0_offset + 1 * sizeof(uint32_t));
+    std::cout << "[coredump] memtile (0,1) word[1] = 0x" << std::hex << memtile0_word1
+      << std::dec << std::endl;
+
+    std::cout << "[coredump] auto coredump captured successfully on timeout" << std::endl;
+  }
+  catch (...) {
+    // Always disable auto coredump on the way out, even when the workload
+    // times out or a verification check throws. Cleanup is best-effort and
+    // never throws, so the original exception is preserved and rethrown.
+    std::cout << "[coredump] exception raised, disabling auto coredump before rethrow" << std::endl;
+    disable_auto_coredump();
+    throw;
   }
 
-  if ((st & CORE_ENABLE) == 0 || (st & CORE_IS_STALL_MASK) == 0)
-    throw std::runtime_error("Core (0,2) expected STALL");
-
-  if ((id_status & CORE_ENABLE) != 0)
-    throw std::runtime_error("Core (2,2) expected IDLE");
+  std::cout << "[coredump] disabling auto coredump via query::auto_coredump" << std::endl;
+  disable_auto_coredump();
 }
 
 void
