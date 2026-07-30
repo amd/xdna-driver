@@ -1539,6 +1539,39 @@ TEST_query_telemetry_short_buf(device::id_type id, std::shared_ptr<device>& sdev
       + std::to_string(err));
 }
 
+struct attribute_state_probe {
+  int ret;
+  int err;
+  uint8_t state;
+};
+
+void
+TEST_query_frame_boundary_preempt(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto probe = fork_query<attribute_state_probe>(sdev.get(), [](int fd) {
+    amdxdna_drm_attribute_state state{};
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
+      .buffer_size = sizeof(state),
+      .buffer = reinterpret_cast<uintptr_t>(&state),
+    };
+
+    attribute_state_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+    r.err = errno;
+    r.state = state.state;
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(GET_FRAME_BOUNDARY_PREEMPT_STATE) failed: " + std::string(std::strerror(probe.err)));
+  if (probe.state > 1)
+    throw std::runtime_error("GET_FRAME_BOUNDARY_PREEMPT_STATE returned non-boolean state");
+  if (dev_filter_is_aie4(id, sdev.get()) && probe.state != 1)
+    throw std::runtime_error("aie4 GET_FRAME_BOUNDARY_PREEMPT_STATE expected enabled");
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1774,6 +1807,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "query telemetry header-only buffer fails", {},
     TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_telemetry_short_buf, {}
+  },
+  test_case{ "query frame boundary preempt state (get_info)", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_frame_boundary_preempt, {}
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
