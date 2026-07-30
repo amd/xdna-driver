@@ -809,22 +809,6 @@ int aie2_fill_hwctx_map(struct aie_device *aie, u32 *map)
 	return 0;
 }
 
-static int aie2_get_frame_boundary_preempt_state(struct amdxdna_client *client,
-						 struct amdxdna_drm_get_info *args)
-{
-	struct amdxdna_drm_attribute_state state = {};
-	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
-	u32 buf_sz;
-
-	state.state = ndev->frame_boundary_preempt;
-
-	buf_sz = min(args->buffer_size, sizeof(state));
-	if (copy_to_user(u64_to_user_ptr(args->buffer), &state, buf_sz))
-		return -EFAULT;
-
-	return 0;
-}
-
 static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -873,7 +857,7 @@ static int aie2_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		ret = amdxdna_get_force_preempt_state(&ndev->aie, args);
 		break;
 	case DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE:
-		ret = aie2_get_frame_boundary_preempt_state(client, args);
+		ret = amdxdna_get_frame_boundary_preempt_state(&ndev->aie, args);
 		break;
 	case DRM_AMDXDNA_GET_AUTO_COREDUMP:
 		ret = amdxdna_get_auto_coredump_mode(client, args);
@@ -1020,7 +1004,7 @@ static int aie2_set_frame_boundary_preempt(struct amdxdna_client *client,
 	if (ret)
 		return ret;
 
-	ndev->frame_boundary_preempt = state.state;
+	ndev->aie.frame_boundary_preempt_enabled = state.state;
 
 	return 0;
 }
