@@ -441,7 +441,8 @@ enum amdxdna_sensor_type {
  * @average: The average value of the sensor.
  * @highest: The highest recorded sensor value for this driver load for the sensor.
  * @status: The sensor status.
- * @units: The sensor units.
+ * @units: The unit of the scaled value (pow(10, unitm) * value), not of the raw
+ *         @input, @max, @average and @highest members.
  * @unitm: Translates value member variables into the correct unit via (pow(10, unitm) * value).
  * @type: The sensor type from enum amdxdna_sensor_type.
  * @pad: Structure padding.
