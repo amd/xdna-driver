@@ -1289,7 +1289,9 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
   constexpr uint32_t CORE_IS_STALL_MASK = 0x1E; // Reset | MemStall_S | MemStall_W | MemStall_N
 
   auto dev = sdev.get();
-  static const char* tag = "aie_debug";
+  // Use a dedicated timing-out ELF so the AIE MEM/REG read-write tests can keep
+  // using the original (completing) aie_debug ELF.
+  static const char* tag = "aie_debug_coredump";
 
   // Best-effort disable of auto coredump. This must never throw so it can be
   // safely called from the exception cleanup path without masking the original
@@ -1317,7 +1319,7 @@ TEST_io_coredump(device::id_type id, std::shared_ptr<device>& sdev, arg_type& ar
     std::cout << "[coredump] auto coredump state after enable = "
       << device_query<query::auto_coredump>(dev) << std::endl;
 
-    std::cout << "[coredump] loading aie_debug ELF workload and creating hw context" << std::endl;
+    std::cout << "[coredump] loading timing-out aie_debug ELF workload and creating hw context" << std::endl;
     elf_io_aie_debug_test_bo_set boset{dev, tag};
     hw_ctx hwctx{dev, tag};
 
