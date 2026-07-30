@@ -1134,34 +1134,17 @@ struct archive_path
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
-    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-    xrt_core::smi::smi_hardware_config smi_hrdw;
-    auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
-
     switch (key) {
     case key_type::archive_path:
     {
-      switch (hardware_type)
-      {
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxA0:
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
-      case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
-        return std::string("amdxdna/bins/xrt_smi_strx.a");
-      case xrt_core::smi::smi_hardware_config::hardware_type::phx:
+      const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+      xrt_core::smi::smi_hardware_config smi_hrdw;
+      switch (smi_hrdw.get_family(pcie_id)) {
+      case xrt_core::smi::smi_hardware_config::hardware_family::phoenix:
         return std::string("amdxdna/bins/xrt_smi_phx.a");
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f0:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f1:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f2:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f3:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f4:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f5:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f6:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f7:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f10:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B01:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
+      case xrt_core::smi::smi_hardware_config::hardware_family::strix:
+        return std::string("amdxdna/bins/xrt_smi_strx.a");
+      case xrt_core::smi::smi_hardware_config::hardware_family::npu3:
         return std::string("amdxdna/bins/xrt_smi_npu3.a");
       default:
         throw xrt_core::generic_error(ENOTSUP, "Unsupported hardware type");
