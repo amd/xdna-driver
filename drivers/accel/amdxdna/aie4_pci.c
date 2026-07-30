@@ -357,6 +357,7 @@ static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
 	 * override is re-applied to firmware by aie4_restore_power_mode().
 	 */
 	ndev->total_col = min(AIE4_TOTAL_COLUMN, ndev->aie.metadata.cols);
+	ndev->aie.frame_boundary_preempt_enabled = 1;
 
 	ret = aie4_init_dpm_freq_table(ndev);
 	if (ret)
@@ -976,6 +977,9 @@ static int aie4_get_info(struct amdxdna_client *client, struct amdxdna_drm_get_i
 		break;
 	case DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE:
 		ret = amdxdna_get_force_preempt_state(&ndev->aie, args);
+		break;
+	case DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE:
+		ret = amdxdna_get_frame_boundary_preempt_state(&ndev->aie, args);
 		break;
 	case DRM_AMDXDNA_GET_AUTO_COREDUMP:
 		ret = amdxdna_get_auto_coredump_mode(client, args);
