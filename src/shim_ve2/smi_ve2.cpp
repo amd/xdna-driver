@@ -45,7 +45,8 @@ create_examine_subcommand()
       {"host", "Host information", "common"},
       {"clocks", "Clock frequency information", "hidden"},
       {"platform", "Platforms flashed on the device", "common"},
-      {"thermal", "Thermal sensors present on the device", "common"}
+      {"thermal", "Thermal sensors present on the device", "common"},
+      {"debug", "Debug configuration settings for the device", "hidden"}
     };
     
     std::map<std::string, std::shared_ptr<xrt_core::smi::option>> examine_suboptions;
@@ -60,6 +61,18 @@ create_examine_subcommand()
 
   return {"examine", "This command will 'examine' the state of the system/device and will generate a report of interest in a text or JSON format.", "common", std::move(examine_suboptions)};
 }
+
+xrt_core::smi::subcommand
+create_configure_subcommand()
+{
+  std::map<std::string, std::shared_ptr<xrt_core::smi::option>> configure_suboptions;
+  configure_suboptions.emplace("device", std::make_shared<xrt_core::smi::option>("device", "d", "The Bus:Device.Function (e.g., 0000:d8:00.0) device of interest", "common", "", "string"));
+  configure_suboptions.emplace("help", std::make_shared<xrt_core::smi::option>("help", "h", "Help to use this sub-command", "common", "", "none"));
+  configure_suboptions.emplace("auto-coredump", std::make_shared<xrt_core::smi::option>("auto-coredump", "", "Enable|disable automatic coredump on error", "hidden", "", "string", true));
+
+  return {"configure", "Device and host configuration", "common", std::move(configure_suboptions)};
+}
+
 std::string
 get_smi_config()
 {
@@ -69,6 +82,7 @@ get_smi_config()
   // Add subcommands
   smi_instance->add_subcommand("validate", create_validate_subcommand());
   smi_instance->add_subcommand("examine", create_examine_subcommand());
+  smi_instance->add_subcommand("configure", create_configure_subcommand());
 
   return smi_instance->build_json();
 }

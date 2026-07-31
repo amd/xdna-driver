@@ -28,6 +28,10 @@ namespace {
 namespace query = xrt_core::query;
 using key_type = query::key_type;
 
+// Address space of a single AIE tile (must match the driver's TILE_ADDRESS_SPACE).
+// The coredump size is num_cols * rows_per_col * this value.
+constexpr size_t VE2_TILE_ADDRESS_SPACE = 0x100000; // 1 MB
+
 std::string
 get_shim_lib_path()
 {
@@ -263,6 +267,8 @@ struct xrt_smi_lists
       return xrt_core::smi::get_list("validate", "run");
     case xrt_core::query::xrt_smi_lists::type::examine_reports:
       return xrt_core::smi::get_list("examine", "report");
+    case xrt_core::query::xrt_smi_lists::type::configure_option_options:
+      return xrt_core::smi::get_option_options("configure");
     default:
       throw xrt_core::query::no_such_key(key, "Not implemented");
     }
@@ -523,10 +529,50 @@ struct aie_coredump
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     const auto& aie_coredump_args = std::any_cast<const query::aie_coredump::args&>(args_any);
-    std::vector<char> payload(sizeof(amdxdna_drm_aie_coredump));
-    amdxdna_drm_aie_coredump *dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data());
-    dump->context_id = aie_coredump_args.context_id;
-    dump->pid = aie_coredump_args.pid;
+    auto edev = get_edgedev(device);
+
+    // Pre-size the coredump buffer from the whole-device AIE geometry so that a
+    // single ioctl is normally enough. This mirrors the aie2/aie4 shim, which
+    // sizes the buffer as (core_rows + mem_rows + shim_rows) * cols * 1MB using
+    // the cached aie_tiles_stats query. It is an over-estimate of the driver's
+    // per-partition dump (num_cols * rows * TILE_ADDRESS_SPACE) that always
+    // fits, so the ENOBUFS size-probe path below is only a safety fallback.
+    //
+    // Unlike aie2/aie4 (config struct at the start of the buffer), the ve2
+    // driver reads the config as a footer at the end of the buffer and reports
+    // the required footer-less size via ENOBUFS, so keep the struct at the end
+    // and retry on ENOBUFS.
+    size_t dump_size = 0;
+    try {
+      auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(device);
+      auto total_rows = aie_stats.core_rows + aie_stats.mem_rows + aie_stats.shim_rows;
+      dump_size = static_cast<size_t>(total_rows) * aie_stats.cols * VE2_TILE_ADDRESS_SPACE;
+    } catch (const std::exception&) {
+      dump_size = 0; // fall back to the ENOBUFS size probe below
+    }
+
+    // The driver expects the amdxdna_drm_aie_coredump config as a footer at the
+    // end of the payload (buffer + payload_size - sizeof(footer)).
+    auto set_footer = [&](std::vector<char>& buf, size_t footer_off) {
+      auto* dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(buf.data() + footer_off);
+      dump->context_id = aie_coredump_args.context_id;
+      dump->pid = aie_coredump_args.pid;
+    };
+
+    // Map a driver errno to a user-facing message; shared by both attempts.
+    auto coredump_error = [&](int code) -> std::runtime_error {
+      if (code == EPERM)
+        return std::runtime_error(
+          "Cannot get coredump: Either no context has been scheduled or the requested context "
+          "is not the last scheduled. Check dmesg for details.");
+      return std::runtime_error(
+        "Cannot get coredump: Invalid hardware context (context_id=" +
+        std::to_string(aie_coredump_args.context_id) + ", pid=" +
+        std::to_string(aie_coredump_args.pid) + "). Check dmesg for details.");
+    };
+
+    std::vector<char> payload(dump_size + sizeof(amdxdna_drm_aie_coredump));
+    set_footer(payload, dump_size);
 
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_AIE_COREDUMP,
@@ -535,49 +581,70 @@ struct aie_coredump
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
-    auto edev = get_edgedev(device);
     try {
       edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
     } catch (const xrt_core::system_error& e) {
       if (e.code().value() == ENOBUFS) {
-        payload.resize(arg.element_size + sizeof(amdxdna_drm_aie_coredump));
-        dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(payload.data()+arg.element_size);
-        dump->context_id = aie_coredump_args.context_id;
-        dump->pid = aie_coredump_args.pid;
+        // Driver reported the required footer-less dump size in element_size.
+        u32 need = arg.element_size;
+        payload.resize(need + sizeof(amdxdna_drm_aie_coredump));
+        set_footer(payload, need);
         arg.buffer = reinterpret_cast<uintptr_t>(payload.data());
         arg.element_size = static_cast<u32>(payload.size());
 
-        // Retry ioctl with resized buffer
         try {
           edev->ioctl(DRM_IOCTL_AMDXDNA_GET_ARRAY, &arg);
         } catch (const xrt_core::system_error& retry_err) {
-          if (retry_err.code().value() == EPERM) {
-            throw std::runtime_error(
-              "Cannot get coredump: Either no context has been scheduled or the requested context "
-              "is not the last scheduled. Check dmesg for details.");
-          } else if (retry_err.code().value() == EINVAL) {
-            throw std::runtime_error(
-              "Cannot get coredump: Invalid hardware context (context_id=" +
-              std::to_string(aie_coredump_args.context_id) + ", pid=" +
-              std::to_string(aie_coredump_args.pid) + "). Check dmesg for details.");
-          }
+          int code = retry_err.code().value();
+          if (code == EPERM || code == EINVAL)
+            throw coredump_error(code);
           throw;
         }
-      } else if (e.code().value() == EPERM) {
-        throw std::runtime_error(
-          "Cannot get coredump: Either no context has been scheduled or the requested context "
-          "is not the last scheduled. Check dmesg for details.");
-      } else if (e.code().value() == EINVAL) {
-        throw std::runtime_error(
-          "Cannot get coredump: Invalid hardware context (context_id=" +
-          std::to_string(aie_coredump_args.context_id) + ", pid=" +
-          std::to_string(aie_coredump_args.pid) + "). Check dmesg for details.");
+      } else if (e.code().value() == EPERM || e.code().value() == EINVAL) {
+        throw coredump_error(e.code().value());
       } else {
         throw;
       }
     }
 
     return payload;
+  }
+};
+
+// Implement auto_coredump query (device-wide auto coredump on command timeout).
+// GET reads the current mode via DRM_AMDXDNA_GET_AUTO_COREDUMP; PUT enables or
+// disables it via DRM_AMDXDNA_SET_AUTO_COREDUMP. Both use the shared
+// amdxdna_drm_attribute_state buffer, mirroring the aie2/aie4 preemption query.
+struct auto_coredump
+{
+  using result_type = query::auto_coredump::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    amdxdna_drm_attribute_state state = {};
+    amdxdna_drm_get_info arg = {
+      .param = DRM_AMDXDNA_GET_AUTO_COREDUMP,
+      .buffer_size = sizeof(state),
+      .buffer = reinterpret_cast<uintptr_t>(&state)
+    };
+
+    get_edgedev(device)->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
+    return state.state;
+  }
+
+  static void
+  put(const xrt_core::device* device, key_type, const std::any& any)
+  {
+    amdxdna_drm_attribute_state state = {};
+    state.state = static_cast<decltype(state.state)>(std::any_cast<uint32_t>(any));
+    amdxdna_drm_set_state arg = {
+      .param = DRM_AMDXDNA_SET_AUTO_COREDUMP,
+      .buffer_size = sizeof(state),
+      .buffer = reinterpret_cast<uintptr_t>(&state)
+    };
+
+    get_edgedev(device)->ioctl(DRM_IOCTL_AMDXDNA_SET_STATE, &arg);
   }
 };
 
@@ -1008,6 +1075,27 @@ struct function4_get : virtual QueryRequestType
   }
 };
 
+// Query handler that supports both get() and put() (e.g. attribute-state
+// toggles like auto_coredump). GetPut must expose static get(device, key) and
+// put(device, key, any).
+template <typename QueryRequestType, typename GetPut>
+struct function0_getput : QueryRequestType
+{
+  std::any
+  get(const xrt_core::device* device) const
+  {
+    auto k = QueryRequestType::key;
+    return GetPut::get(device, k);
+  }
+
+  void
+  put(const xrt_core::device* device, const std::any& any) const
+  {
+    auto k = QueryRequestType::key;
+    GetPut::put(device, k, any);
+  }
+};
+
 template <typename QueryRequestType>
 static void
 emplace_sysfs_get(const char* entry)
@@ -1056,6 +1144,14 @@ emplace_func4_request()
   query_tbl.emplace(k, std::make_unique<function4_get<QueryRequestType, Getter>>());
 }
 
+template <typename QueryRequestType, typename GetPut>
+static void
+emplace_func0_getput()
+{
+  auto k = QueryRequestType::key;
+  query_tbl.emplace(k, std::make_unique<function0_getput<QueryRequestType, GetPut>>());
+}
+
 static void
 initialize_query_table()
 {
@@ -1077,6 +1173,7 @@ initialize_query_table()
   emplace_func1_request<query::aie_get_freq,            aie_get_freq>();
   emplace_func2_request<query::aie_set_freq,            aie_set_freq>();
   emplace_func1_request<query::aie_coredump,            aie_coredump>();
+  emplace_func0_getput<query::auto_coredump,            auto_coredump>();
   emplace_func4_request<query::xrt_smi_config,          xrt_smi_config>();
   emplace_func4_request<query::xrt_smi_lists,           xrt_smi_lists>();
   emplace_func1_request<query::sdm_sensor_info,         sensor_info>();
