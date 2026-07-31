@@ -1300,11 +1300,11 @@ amdxdna_drm_clflush(struct amdxdna_gem_obj *abo, u32 start, u32 size)
 	if (start_page_off)
 		drm_clflush_virt_range(addr, PAGE_SIZE - start_page_off);
 	else
-		drm_clflush_pages(&pages[0], 1);
+		drm_clflush_pages(&pages[start_page], 1);
 
 	pages_in_middle = end_page - start_page - 1;
 	if (pages_in_middle)
-		drm_clflush_pages(&pages[1], pages_in_middle);
+		drm_clflush_pages(&pages[start_page + 1], pages_in_middle);
 
 	addr = page_to_virt(pages[end_page]);
 	if (end_page_size < PAGE_SIZE)
