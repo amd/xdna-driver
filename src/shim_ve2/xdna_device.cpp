@@ -28,10 +28,6 @@ namespace {
 namespace query = xrt_core::query;
 using key_type = query::key_type;
 
-// Address space of a single AIE tile (must match the driver's TILE_ADDRESS_SPACE).
-// The coredump size is num_cols * rows_per_col * this value.
-constexpr size_t VE2_TILE_ADDRESS_SPACE = 0x100000; // 1 MB
-
 std::string
 get_shim_lib_path()
 {
@@ -531,28 +527,10 @@ struct aie_coredump
     const auto& aie_coredump_args = std::any_cast<const query::aie_coredump::args&>(args_any);
     auto edev = get_edgedev(device);
 
-    // Pre-size the coredump buffer from the whole-device AIE geometry so that a
-    // single ioctl is normally enough. This mirrors the aie2/aie4 shim, which
-    // sizes the buffer as (core_rows + mem_rows + shim_rows) * cols * 1MB using
-    // the cached aie_tiles_stats query. It is an over-estimate of the driver's
-    // per-partition dump (num_cols * rows * TILE_ADDRESS_SPACE) that always
-    // fits, so the ENOBUFS size-probe path below is only a safety fallback.
-    //
-    // Unlike aie2/aie4 (config struct at the start of the buffer), the ve2
-    // driver reads the config as a footer at the end of the buffer and reports
-    // the required footer-less size via ENOBUFS, so keep the struct at the end
-    // and retry on ENOBUFS.
-    size_t dump_size = 0;
-    try {
-      auto aie_stats = xrt_core::device_query<xrt_core::query::aie_tiles_stats>(device);
-      auto total_rows = aie_stats.core_rows + aie_stats.mem_rows + aie_stats.shim_rows;
-      dump_size = static_cast<size_t>(total_rows) * aie_stats.cols * VE2_TILE_ADDRESS_SPACE;
-    } catch (const std::exception&) {
-      dump_size = 0; // fall back to the ENOBUFS size probe below
-    }
-
     // The driver expects the amdxdna_drm_aie_coredump config as a footer at the
-    // end of the payload (buffer + payload_size - sizeof(footer)).
+    // end of the payload (buffer + payload_size - sizeof(footer)). It reports the
+    // required footer-less dump size via ENOBUFS, so start with a footer-only
+    // payload and retry once the driver tells us how big the dump is.
     auto set_footer = [&](std::vector<char>& buf, size_t footer_off) {
       auto* dump = reinterpret_cast<amdxdna_drm_aie_coredump *>(buf.data() + footer_off);
       dump->context_id = aie_coredump_args.context_id;
@@ -571,8 +549,8 @@ struct aie_coredump
         std::to_string(aie_coredump_args.pid) + "). Check dmesg for details.");
     };
 
-    std::vector<char> payload(dump_size + sizeof(amdxdna_drm_aie_coredump));
-    set_footer(payload, dump_size);
+    std::vector<char> payload(sizeof(amdxdna_drm_aie_coredump));
+    set_footer(payload, 0);
 
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_AIE_COREDUMP,
@@ -1281,7 +1259,7 @@ create_hw_context(uint32_t partition_size,
     else
       mutable_qos["priority"] = AMDXDNA_QOS_NORMAL_PRIORITY;
   }
-  
+
   if (mutable_qos.find("start_col") == mutable_qos.end())
     mutable_qos["start_col"] = USER_START_COL_NOT_REQUESTED;
 
@@ -1333,7 +1311,7 @@ import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
 {
   if (pid == 0 || getpid() == pid)
      return std::make_unique<xdna_bo>(*this, ehdl);
-  
+
 #if defined(SYS_pidfd_open) && defined(SYS_pidfd_getfd)
   auto pidfd = syscall(SYS_pidfd_open, pid, 0);
   if (pidfd < 0) {
