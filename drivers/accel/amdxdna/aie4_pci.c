@@ -350,7 +350,12 @@ static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		return ret;
 
-	ndev->pw_mode = POWER_MODE_DEFAULT;
+	/*
+	 * Do not reset ndev->pw_mode here: this runs on every resume, and
+	 * clobbering the cache would drop the user's power override. The
+	 * probe-time default is set in aie4m_pcidev_init(), and the cached
+	 * override is re-applied to firmware by aie4_restore_power_mode().
+	 */
 	ndev->total_col = min(AIE4_TOTAL_COLUMN, ndev->aie.metadata.cols);
 
 	ret = aie4_init_dpm_freq_table(ndev);
@@ -359,6 +364,36 @@ static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
 		(void)ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
 
 	return 0;
+}
+
+/*
+ * Firmware always boots in POWER_MODE_DEFAULT after a (re)load, so re-send the
+ * cached user override whenever the hardware starts. This keeps the driver
+ * cache (ndev->pw_mode) and the firmware power state consistent across
+ * suspend/resume and runtime PM cycles. On a fresh probe pw_mode is
+ * POWER_MODE_DEFAULT and this is a no-op. The override is a best-effort tuning
+ * knob, so a failure warns but does not fail hw start (mirrors ctx hysteresis).
+ *
+ * Power override is a per-VF property in firmware: each supervisor (VF) stores
+ * its own requested mode and the hypervisor arbitrates globally by taking the
+ * highest mode across all supervisors. A full firmware reload on suspend clears
+ * every supervisor override back to default, so each device type (PF, VF and
+ * classic) must re-send its own cached override on resume.
+ */
+static void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	if (ndev->pw_mode == POWER_MODE_DEFAULT)
+		return;
+
+	ret = aie4_msg_set_power_mode(ndev, ndev->pw_mode);
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to restore power mode %d (%d), using fw default",
+			  ndev->pw_mode, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Restored power mode %d", ndev->pw_mode);
 }
 
 static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
@@ -408,6 +443,8 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto mbox_fini;
 
+	aie4_restore_power_mode(ndev);
+
 	return 0;
 
 mbox_fini:
@@ -454,6 +491,8 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
 		goto partition_fini;
 	}
+
+	aie4_restore_power_mode(ndev);
 
 	return 0;
 
@@ -541,6 +580,8 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
 		goto partition_fini;
 	}
+
+	aie4_restore_power_mode(ndev);
 
 	return 0;
 
@@ -684,6 +725,7 @@ static int aie4m_pcidev_init(struct amdxdna_dev *xdna)
 	ndev->aie.xdna = xdna;
 	ndev->kernel_submit = true;
 	ndev->ctx_switch_hysteresis_us = AIE4_CTX_HYSTERESIS_US;
+	ndev->pw_mode = POWER_MODE_DEFAULT;
 	xdna->dev_handle = ndev;
 
 	xa_init_flags(&ndev->cert_comp_xa, XA_FLAGS_ALLOC);
@@ -1061,6 +1103,24 @@ dev_exit:
 	return ret;
 }
 
+/*
+ * Power override is a per-VF request but a single physical outcome. Firmware
+ * keeps a separate override per supervisor (one supervisor per VF mailbox under
+ * SR-IOV) and arbitrates them globally with a highest-wins policy: the applied
+ * DPM level is derived from max(override) across all supervisors, ordered
+ * DEFAULT < LOW < MEDIUM < HIGH < TURBO. Consequences when VFs disagree:
+ *
+ *   - The device runs at the highest mode any VF has requested. Example: VF A
+ *     requests TURBO and VF B requests LOW, the whole device runs at TURBO.
+ *   - A VF cannot pull the device below a peer's request. Lowering (or
+ *     resetting to DEFAULT) one VF only drops the physical DPM level once no
+ *     other VF still holds a higher override.
+ *   - Every VF's request is honored; there is no PF-only restriction on this
+ *     opcode (unlike force preemption, which firmware rejects under SR-IOV).
+ *
+ * The driver therefore just records this VF's own request in ndev->pw_mode and
+ * forwards it; the cross-VF arbitration lives entirely in firmware.
+ */
 static int aie4_set_power_mode(struct amdxdna_client *client, struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_drm_set_power_mode power_state;
@@ -1191,6 +1251,7 @@ error:
  * <- query_aie                 |  -  |   -    |  Y  |   Y    |   Y
  * <- partition_init            |  -  |   -    |  Y  |   Y    |   Y
  * <- alloc_async_event         |  -  |   -    |  Y  |   Y    |   Y
+ * <- restore_power_mode        |  Y  |   Y    |  Y  |   Y    |   Y
  * <- hwctx_resume_all          |  -  |   -    |  Y  |   Y    |   Y
  * <- restore VFs               |  Y  |   Y    |  -  |   -    |   -
  *
