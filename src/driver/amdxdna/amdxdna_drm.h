@@ -158,6 +158,9 @@ struct amdxdna_dev {
 	struct amdxdna_cert_ver		cert_ver;
 	struct amdxdna_dpt		*fw_log;
 	struct amdxdna_dpt		*fw_trace;
+
+	/* Allow auto core dump capture on command timeout, if true. */
+	bool				auto_coredump;
 #ifdef AMDXDNA_DEVEL
 	struct ida			pdi_ida;
 #endif
