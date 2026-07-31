@@ -441,7 +441,8 @@ enum amdxdna_sensor_type {
  * @average: The average value of the sensor.
  * @highest: The highest recorded sensor value for this driver load for the sensor.
  * @status: The sensor status.
- * @units: The sensor units.
+ * @units: The unit of the scaled value (pow(10, unitm) * value), not of the raw
+ *         @input, @max, @average and @highest members.
  * @unitm: Translates value member variables into the correct unit via (pow(10, unitm) * value).
  * @type: The sensor type from enum amdxdna_sensor_type.
  * @pad: Structure padding.
@@ -532,6 +533,7 @@ enum amdxdna_drm_get_param {
 	DRM_AMDXDNA_QUERY_RESOURCE_INFO,
 	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
 	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION = 14,
+	DRM_AMDXDNA_GET_AUTO_COREDUMP,
 };
 
 /**
@@ -590,6 +592,9 @@ struct amdxdna_drm_get_info {
 
 #define AMDXDNA_HWCTX_STATE_IDLE	0
 #define AMDXDNA_HWCTX_STATE_ACTIVE	1
+
+/* Length of the process name reported per hardware context (matches TASK_COMM_LEN). */
+#define AMDXDNA_HWCTX_PROC_NAME_LEN	16
 
 /**
  * struct amdxdna_drm_hwctx_entry - The hardware context array entry
@@ -653,6 +658,8 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 fatal_error_app_module;
 	/** @pad: Structure pad. */
 	__u32 pad;
+	/** @name: Name of the process which created this context. */
+	char name[AMDXDNA_HWCTX_PROC_NAME_LEN];
 };
 
 /**
@@ -956,6 +963,7 @@ enum amdxdna_drm_set_param {
 	DRM_AMDXDNA_SET_FW_LOG_STATE,
 	DRM_AMDXDNA_SET_FW_TRACE_STATE,
 	DRM_AMDXDNA_AIE_TILE_WRITE,
+	DRM_AMDXDNA_SET_AUTO_COREDUMP = 9,
 };
 
 /**
@@ -1021,6 +1029,11 @@ struct amdxdna_drm_set_state {
 	 *
 	 * Access: requires CAP_SYS_ADMIN (the SET_STATE ioctl is
 	 * DRM_ROOT_ONLY).
+	 *
+	 * %DRM_AMDXDNA_SET_AUTO_COREDUMP:
+	 * Controls automatic AIE tile core dump capture on timeout.
+	 * 0 - disable auto core dump capture.
+	 * 1 - capture a core dump into the hardware context on timeout.
 	 */
 	__u32 param;
 	/**

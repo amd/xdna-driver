@@ -8,6 +8,12 @@
 #include "xdna_bo.h"
 
 namespace shim_xdna_edge {
+
+// Minimum size (8K) for BO allocations. Small buffers can fail to be allocated
+// on the requested CMA region on custom VE2 platforms where the AIE has
+// restricted DDR access, so round small sizes up to this.
+static constexpr size_t MIN_BO_SIZE = 8 * 1024;
+
 static void
 init_metadata_buffer(xdna_bo& mdata_base_bo,
 		     uint32_t boh,
@@ -136,6 +142,14 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
     attach_to_ctx(xflags.use);
 
+  // Freshly allocated pages may carry stale dirty cache lines. If this BO is
+  // used as an output, those lines could later write back over the device's
+  // DMA results and corrupt them. Flush once right after allocation so the
+  // BO starts clean; subsequent coherency is the app's responsibility via
+  // explicit sync().
+  if (m_type == AMDXDNA_BO_SHARE)
+    sync(direction::host2device, m_aligned_size, 0);
+
   shim_debug("Allocated DRM BO (userptr=0x%lx, size=%ld, flags=0x%llx, type=%d, drm_bo=%d)",
 	     m_ptr, m_aligned_size, m_flags, m_type, get_drm_bo_handle());
 }
@@ -262,6 +276,15 @@ alloc_bo(uint32_t mem_bitmap)
      if (bank_index < 32)
        xflags.bank = (1U << bank_index);
    }
+ 
+  // On some custom VE2 platforms the AIE does not have access to all DDR
+  // regions. Very small buffers (< 8K) can fail to be allocated on the
+  // requested (default or specified) CMA region because the size is too
+  // small to back from that region. Round the BO size up to a minimum of
+  // 8K so the allocation lands on the requested CMA region.
+  // This intentionally trades some wasted memory for correctness.
+  if (m_aligned_size < MIN_BO_SIZE)
+    m_aligned_size = MIN_BO_SIZE;
 
   amdxdna_drm_create_bo cbo = {
     .flags = xflags.all,

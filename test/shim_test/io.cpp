@@ -485,8 +485,8 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
   , m_total_fine_preemption_checkpoints(0)
 {
   const char* tag_c = tag.empty() ? nullptr : tag.c_str();
-  const auto& info = get_binary_info(dev, tag_c, m_flow);
-  m_is_aie4 = (info.device == npu3_device_id || info.device == npu3_device_id1);
+  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  m_is_aie4 = (device_id == npu3_device_id || device_id == npu3a_device_id);
 
   if (m_is_full_elf) {
     m_elf = xrt::elf(get_binary_path(dev, tag_c, m_flow));

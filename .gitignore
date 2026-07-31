@@ -2,3 +2,13 @@
 build/
 version.h
 .gradle/
+
+# cscope database/index files
+cscope.files
+cscope.out
+cscope.in.out
+cscope.po.out
+
+# python bytecode cache
+__pycache__/
+*.pyc

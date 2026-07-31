@@ -16,6 +16,8 @@
 #include <stddef.h>
 #include <stdexcept>
 #include <memory>
+#include <array>
+#include <mutex>
 #include <sys/mman.h>
 
 #include "drm_hw.h" // from xdna shim virtio
@@ -159,6 +161,9 @@ class vxdna_context : public vaccel_context<vxdna_context, vxdna> {
 
 public:
     static constexpr uint64_t HEAP_MAX_SIZE = 512ULL << 20;
+
+    /** Max concurrent hw contexts allowed per context (see amdxdna_proto.h). */
+    static constexpr uint32_t MAX_HWCTX_PER_CTX = AMDXDNA_MAX_HWCTX_PER_CTX;
 
     using base_type = vaccel_context<vxdna_context, vxdna>;
 
@@ -349,6 +354,18 @@ public:
      */
     void read_sysfs(const struct amdxdna_ccmd_read_sysfs_req *req);
 
+    /**
+     * @brief Sync a BO's cache/DMA state via the driver (DRM_IOCTL_AMDXDNA_SYNC_BO)
+     *
+     * Validates the BO belongs to this context, then forwards to the host
+     * driver. Needed for BOs whose sync can't be done by a guest CPU cache
+     * flush (e.g. firmware-written debug/uc_debug BOs read back device->host).
+     *
+     * @param req Sync request (BO handle, direction, offset, size)
+     * @throws vaccel_error if the BO isn't owned by this ctx or the ioctl fails
+     */
+    void sync_bo(const struct amdxdna_ccmd_sync_bo_req *req);
+
     /** @} */
 
     /**
@@ -532,10 +549,37 @@ private:
         /** @} */
     };
 
+    /**
+     * @brief Look up a hw context by its virtio ring index.
+     * @param ring_idx Index in [1, MAX_HWCTX_PER_CTX]; 0/out-of-range -> nullptr.
+     * @return shared_ptr copy (kept alive for the caller), or nullptr if empty.
+     */
+    std::shared_ptr<vxdna_hwctx> find_hwctx(uint32_t ring_idx) const;
+
+    /**
+     * @brief Look up a hw context named by a guest ctx handle.
+     * @param ctx_handle Driver ctx handle from a guest request.
+     * @return shared_ptr copy, or nullptr if no live context has this handle.
+     *
+     * hwctx_ring_idx() is a modulo mapping, so this also verifies the stored
+     * context's handle matches @ctx_handle to reject a stale or forged handle
+     * that is congruent to a live one under the modulus.
+     */
+    std::shared_ptr<vxdna_hwctx> find_hwctx_by_handle(uint32_t ctx_handle) const;
+
     // Context-owned resources (cookie/callbacks accessed via base_type::get_device())
     std::shared_ptr<vaccel_resource> m_resp_res;
     vaccel_map<uint32_t, std::shared_ptr<vxdna_bo>> m_bo_table;
-    vaccel_map<uint32_t, std::shared_ptr<vxdna_hwctx>> m_hwctx_table;
+
+    /*
+     * Hw contexts indexed directly by their virtio ring index (hwctx_ring_idx()
+     * of the driver ctx id), which lies in [1, MAX_HWCTX_PER_CTX]. A null slot
+     * is free, so this array is both allocator and storage: create claims the
+     * slot (rejecting a taken one), and lookup is a direct O(1) index. Slot 0 is
+     * unused (reserved platform ring / AMDXDNA_INVALID_CTX_HANDLE).
+     */
+    mutable std::mutex m_hwctx_lock;
+    std::array<std::shared_ptr<vxdna_hwctx>, MAX_HWCTX_PER_CTX + 1> m_hwctx_slots;
 
     /** Cumulative DEV_HEAP size committed on this context (bytes). */
     uint64_t m_heap_committed = 0;

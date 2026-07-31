@@ -92,6 +92,8 @@ hcall_cmd2name(unsigned long cmd)
     return "AMDXDNA_CCMD_GET_INFO";
   case AMDXDNA_CCMD_READ_SYSFS:
     return "AMDXDNA_CCMD_READ_SYSFS";
+  case AMDXDNA_CCMD_SYNC_BO:
+    return "AMDXDNA_CCMD_SYNC_BO";
   }
 
   return "UNKNOWN(" + std::to_string(cmd) + ")";
@@ -173,10 +175,16 @@ hcall_wait(int dev_fd, void *buf, size_t size)
 
   XRT_TRACE_POINT_SCOPE1(hcall, req->cmd);
 
-  // For now, only AMDXDNA_CCMD_WAIT_CMD requires non-zero ring index
+  // For now, only AMDXDNA_CCMD_WAIT_CMD requires non-zero ring index.
+  // The ctx handle is the driver ctx id (up to MAX_CTX_ID), but virtio-gpu only
+  // accepts ring indices in [0, num_rings). Fold it into [1, AMDXDNA_MAX_HWCTX_PER_CTX]
+  // (ring 0 stays reserved); the host keys its hwctx table by the same function.
+  // A handle of AMDXDNA_INVALID_CTX_HANDLE (0) is not a hwctx: leave ring_idx 0
+  // (the reserved platform ring) instead of letting (ctx_handle - 1) underflow.
   if (req->cmd == AMDXDNA_CCMD_WAIT_CMD) {
     auto wcmd = reinterpret_cast<amdxdna_ccmd_wait_cmd_req*>(req);
-    ring_idx = wcmd->ctx_handle;
+    if (wcmd->ctx_handle != AMDXDNA_INVALID_CTX_HANDLE)
+      ring_idx = ((wcmd->ctx_handle - 1) % AMDXDNA_MAX_HWCTX_PER_CTX) + 1;
   }
 
   drm_virtgpu_execbuffer exec = {
@@ -601,7 +609,8 @@ get_sysfs(get_sysfs_arg& arg) const
   std::strcpy(req->node_name, arg.sysfs_node.c_str());
   hcall(req, rsp, response_size);
 
-  if (rsp->val_len < 0 || static_cast<size_t>(rsp->val_len) > arg.data.size())
+  const size_t max_val_len = response_size - offsetof(amdxdna_ccmd_read_sysfs_rsp, val);
+  if (rsp->val_len < 0 || static_cast<size_t>(rsp->val_len) > std::min(max_val_len, arg.data.size()))
     shim_err(EINVAL, "bad sysfs content len or content is too long: %dB", rsp->val_len);
   std::memcpy(arg.data.data(), rsp->val, rsp->val_len);
   arg.real_size = rsp->val_len;
@@ -742,6 +751,22 @@ import_bo(import_bo_arg& bo_arg) const
   bo_arg.boinfo.size = size;
 
   save_bo_info(gboh, bo_arg.boinfo);
+}
+
+void
+platform_drv_virtio::
+sync_bo(sync_bo_arg& arg) const
+{
+  amdxdna_ccmd_sync_bo_req req = {
+    .hdr = { AMDXDNA_CCMD_SYNC_BO, sizeof(req) },
+    .handle = arg.bo.handle,
+    .direction = arg.direction == xrt_core::buffer_handle::direction::host2device ?
+      SYNC_DIRECT_TO_DEVICE : SYNC_DIRECT_FROM_DEVICE,
+    .offset = arg.offset,
+    .size = arg.size,
+  };
+  amdxdna_ccmd_sync_bo_rsp rsp = {};
+  hcall(&req, &rsp, sizeof(rsp));
 }
 
 }

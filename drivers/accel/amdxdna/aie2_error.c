@@ -1,416 +1,116 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2023-2024, Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026, Advanced Micro Devices, Inc.
  */
 
-#include <drm/drm_cache.h>
 #include <drm/drm_device.h>
 #include <drm/drm_print.h>
-#include <drm/gpu_scheduler.h>
-#include <linux/dma-mapping.h>
-#include <linux/kthread.h>
 #include <linux/kernel.h>
+#include <linux/mutex.h>
 
 #include "aie.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "amdxdna_error.h"
-#include "amdxdna_mailbox.h"
 #include "amdxdna_pci_drv.h"
 
-struct async_event {
-	struct amdxdna_dev_hdl		*ndev;
-	struct async_event_msg_resp	resp;
-	struct workqueue_struct		*wq;
-	struct work_struct		work;
-	u8				*buf;
-	dma_addr_t			addr;
-	u32				size;
-};
-
-struct async_events {
-	struct workqueue_struct		*wq;
-	struct amdxdna_msg_buf_hdl	*hdl;
-	u32				event_cnt;
-	struct async_event		event[] __counted_by(event_cnt);
-};
-
 /*
- * Below enum, struct and lookup tables are porting from XAIE util header file.
+ * The async event scaffolding, worker, mailbox callback, GET_ARRAY query and
+ * the generic category / module to driver-error mapping and stringify are
+ * shared with aie4 and live in amdxdna_error.c. This file provides the aie2
+ * specific pieces: the mailbox register call and the aie2 event_id to category
+ * tables. The async status sentinel value (MAX_AIE2_STATUS_CODE) is wired into
+ * dev_info.async_max_status_code by the npu*_regs.c device tables.
  *
- * Below data is defined by AIE device and it is used for decode error message
- * from the device.
+ * Map an AIE tile error event id to an error category for the aie2
+ * generation. These are the enabled fatal error events per module;
+ * correctable and non-fatal events are omitted. The category assignment is
+ * the driver's choice.
  */
-
-enum aie_module_type {
-	AIE_MEM_MOD = 0,
-	AIE_CORE_MOD,
-	AIE_PL_MOD,
-	AIE_UNKNOWN_MOD,
+static const struct aie_error_event aie2_mem_error_events[] = {
+	AIE_ERROR_EVENT(88U,  AIE_ERROR_ECC, "DM ECC error scrub 2bit"),
+	AIE_ERROR_EVENT(90U,  AIE_ERROR_ECC, "DM ECC error 2bit"),
+	AIE_ERROR_EVENT(91U,  AIE_ERROR_MEM_PARITY, "DM parity error bank 2"),
+	AIE_ERROR_EVENT(92U,  AIE_ERROR_MEM_PARITY, "DM parity error bank 3"),
+	AIE_ERROR_EVENT(93U,  AIE_ERROR_MEM_PARITY, "DM parity error bank 4"),
+	AIE_ERROR_EVENT(94U,  AIE_ERROR_MEM_PARITY, "DM parity error bank 5"),
+	AIE_ERROR_EVENT(95U,  AIE_ERROR_MEM_PARITY, "DM parity error bank 6"),
+	AIE_ERROR_EVENT(96U,  AIE_ERROR_MEM_PARITY, "DM parity error bank 7"),
+	AIE_ERROR_EVENT(97U,  AIE_ERROR_DMA, "DMA S2MM 0 error"),
+	AIE_ERROR_EVENT(98U,  AIE_ERROR_DMA, "DMA S2MM 1 error"),
+	AIE_ERROR_EVENT(99U,  AIE_ERROR_DMA, "DMA MM2S 0 error"),
+	AIE_ERROR_EVENT(100U, AIE_ERROR_DMA, "DMA MM2S 1 error"),
+	AIE_ERROR_EVENT(101U, AIE_ERROR_LOCK, "Lock error"),
+	{ }
 };
 
-enum aie_error_category {
-	AIE_ERROR_SATURATION = 0,
-	AIE_ERROR_FP,
-	AIE_ERROR_STREAM,
-	AIE_ERROR_ACCESS,
-	AIE_ERROR_BUS,
-	AIE_ERROR_INSTRUCTION,
-	AIE_ERROR_ECC,
-	AIE_ERROR_LOCK,
-	AIE_ERROR_DMA,
-	AIE_ERROR_MEM_PARITY,
-	/* Unknown is not from XAIE, added for better category */
-	AIE_ERROR_UNKNOWN,
+static const struct aie_error_event aie2_core_error_events[] = {
+	AIE_ERROR_EVENT(55U, AIE_ERROR_ACCESS, "PM reg access failure"),
+	AIE_ERROR_EVENT(56U, AIE_ERROR_STREAM, "Stream packet parity error"),
+	AIE_ERROR_EVENT(57U, AIE_ERROR_STREAM, "Control packet error"),
+	AIE_ERROR_EVENT(58U, AIE_ERROR_BUS, "AXI-MM slave error"),
+	AIE_ERROR_EVENT(59U, AIE_ERROR_INSTRUCTION, "Instruction decompression error"),
+	AIE_ERROR_EVENT(60U, AIE_ERROR_ACCESS, "DM address out of range"),
+	AIE_ERROR_EVENT(62U, AIE_ERROR_ECC, "PM ECC error scrub 2bit"),
+	AIE_ERROR_EVENT(64U, AIE_ERROR_ECC, "PM ECC error 2bit"),
+	AIE_ERROR_EVENT(65U, AIE_ERROR_ACCESS, "PM address out of range"),
+	AIE_ERROR_EVENT(66U, AIE_ERROR_ACCESS, "DM access to unavailable"),
+	AIE_ERROR_EVENT(67U, AIE_ERROR_LOCK, "Lock access to unavailable"),
+	AIE_ERROR_EVENT(70U, AIE_ERROR_INSTRUCTION, "Sparsity overflow"),
+	AIE_ERROR_EVENT(71U, AIE_ERROR_STREAM, "Stream switch port parity error"),
+	AIE_ERROR_EVENT(72U, AIE_ERROR_BUS, "Processor bus error"),
+	{ }
 };
 
-/* Don't pack, unless XAIE side changed */
-struct aie_error {
-	__u8			row;
-	__u8			col;
-	__u32			mod_type;
-	__u8			event_id;
+static const struct aie_error_event aie2_mem_tile_error_events[] = {
+	AIE_ERROR_EVENT(130U, AIE_ERROR_ECC, "DM ECC error scrub 2bit"),
+	AIE_ERROR_EVENT(132U, AIE_ERROR_ECC, "DM ECC error 2bit"),
+	AIE_ERROR_EVENT(133U, AIE_ERROR_DMA, "DMA S2MM error"),
+	AIE_ERROR_EVENT(134U, AIE_ERROR_DMA, "DMA MM2S error"),
+	AIE_ERROR_EVENT(135U, AIE_ERROR_STREAM, "Stream switch port parity error"),
+	AIE_ERROR_EVENT(136U, AIE_ERROR_STREAM, "Stream packet parity error"),
+	AIE_ERROR_EVENT(137U, AIE_ERROR_STREAM, "Control packet error"),
+	AIE_ERROR_EVENT(138U, AIE_ERROR_BUS, "AXI-MM slave error"),
+	AIE_ERROR_EVENT(139U, AIE_ERROR_LOCK, "Lock error"),
+	{ }
 };
 
-struct aie_err_info {
-	u32			err_cnt;
-	u32			ret_code;
-	u32			rsvd;
-	struct aie_error	payload[] __counted_by(err_cnt);
+static const struct aie_error_event aie2_shim_tile_error_events[] = {
+	AIE_ERROR_EVENT(64U, AIE_ERROR_BUS, "AXI-MM slave tile error"),
+	AIE_ERROR_EVENT(65U, AIE_ERROR_STREAM, "Control packet error"),
+	AIE_ERROR_EVENT(66U, AIE_ERROR_STREAM, "Stream switch port parity error"),
+	AIE_ERROR_EVENT(67U, AIE_ERROR_BUS, "AXI-MM decode NSU error"),
+	AIE_ERROR_EVENT(68U, AIE_ERROR_BUS, "AXI-MM slave NSU error"),
+	AIE_ERROR_EVENT(69U, AIE_ERROR_BUS, "AXI-MM unsupported traffic"),
+	AIE_ERROR_EVENT(70U, AIE_ERROR_BUS, "AXI-MM unsecure access in secure mode"),
+	AIE_ERROR_EVENT(71U, AIE_ERROR_BUS, "AXI-MM byte strobe error"),
+	AIE_ERROR_EVENT(72U, AIE_ERROR_DMA, "DMA S2MM error"),
+	AIE_ERROR_EVENT(73U, AIE_ERROR_DMA, "DMA MM2S error"),
+	AIE_ERROR_EVENT(74U, AIE_ERROR_LOCK, "Lock error"),
+	{ }
 };
 
-struct aie_event_category {
-	u8			event_id;
-	enum aie_error_category category;
+const struct aie_error_lut_set aie2_error_luts = {
+	.shim		= aie2_shim_tile_error_events,
+	.core		= aie2_core_error_events,
+	.mem_tile	= aie2_mem_tile_error_events,
+	.mem		= aie2_mem_error_events,
 };
 
-#define EVENT_CATEGORY(id, cat) { id, cat }
-static const struct aie_event_category aie_ml_mem_event_cat[] = {
-	EVENT_CATEGORY(88U,  AIE_ERROR_ECC),
-	EVENT_CATEGORY(90U,  AIE_ERROR_ECC),
-	EVENT_CATEGORY(91U,  AIE_ERROR_MEM_PARITY),
-	EVENT_CATEGORY(92U,  AIE_ERROR_MEM_PARITY),
-	EVENT_CATEGORY(93U,  AIE_ERROR_MEM_PARITY),
-	EVENT_CATEGORY(94U,  AIE_ERROR_MEM_PARITY),
-	EVENT_CATEGORY(95U,  AIE_ERROR_MEM_PARITY),
-	EVENT_CATEGORY(96U,  AIE_ERROR_MEM_PARITY),
-	EVENT_CATEGORY(97U,  AIE_ERROR_DMA),
-	EVENT_CATEGORY(98U,  AIE_ERROR_DMA),
-	EVENT_CATEGORY(99U,  AIE_ERROR_DMA),
-	EVENT_CATEGORY(100U, AIE_ERROR_DMA),
-	EVENT_CATEGORY(101U, AIE_ERROR_LOCK),
-};
-
-static const struct aie_event_category aie_ml_core_event_cat[] = {
-	EVENT_CATEGORY(55U, AIE_ERROR_ACCESS),
-	EVENT_CATEGORY(56U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(57U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(58U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(59U, AIE_ERROR_INSTRUCTION),
-	EVENT_CATEGORY(60U, AIE_ERROR_ACCESS),
-	EVENT_CATEGORY(62U, AIE_ERROR_ECC),
-	EVENT_CATEGORY(64U, AIE_ERROR_ECC),
-	EVENT_CATEGORY(65U, AIE_ERROR_ACCESS),
-	EVENT_CATEGORY(66U, AIE_ERROR_ACCESS),
-	EVENT_CATEGORY(67U, AIE_ERROR_LOCK),
-	EVENT_CATEGORY(70U, AIE_ERROR_INSTRUCTION),
-	EVENT_CATEGORY(71U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(72U, AIE_ERROR_BUS),
-};
-
-static const struct aie_event_category aie_ml_mem_tile_event_cat[] = {
-	EVENT_CATEGORY(130U, AIE_ERROR_ECC),
-	EVENT_CATEGORY(132U, AIE_ERROR_ECC),
-	EVENT_CATEGORY(133U, AIE_ERROR_DMA),
-	EVENT_CATEGORY(134U, AIE_ERROR_DMA),
-	EVENT_CATEGORY(135U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(136U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(137U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(138U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(139U, AIE_ERROR_LOCK),
-};
-
-static const struct aie_event_category aie_ml_shim_tile_event_cat[] = {
-	EVENT_CATEGORY(64U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(65U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(66U, AIE_ERROR_STREAM),
-	EVENT_CATEGORY(67U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(68U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(69U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(70U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(71U, AIE_ERROR_BUS),
-	EVENT_CATEGORY(72U, AIE_ERROR_DMA),
-	EVENT_CATEGORY(73U, AIE_ERROR_DMA),
-	EVENT_CATEGORY(74U, AIE_ERROR_LOCK),
-};
-
-static const enum amdxdna_error_num aie_cat_err_num_map[] = {
-	[AIE_ERROR_SATURATION] = AMDXDNA_ERROR_NUM_AIE_SATURATION,
-	[AIE_ERROR_FP] = AMDXDNA_ERROR_NUM_AIE_FP,
-	[AIE_ERROR_STREAM] = AMDXDNA_ERROR_NUM_AIE_STREAM,
-	[AIE_ERROR_ACCESS] = AMDXDNA_ERROR_NUM_AIE_ACCESS,
-	[AIE_ERROR_BUS] = AMDXDNA_ERROR_NUM_AIE_BUS,
-	[AIE_ERROR_INSTRUCTION] = AMDXDNA_ERROR_NUM_AIE_INSTRUCTION,
-	[AIE_ERROR_ECC] = AMDXDNA_ERROR_NUM_AIE_ECC,
-	[AIE_ERROR_LOCK] = AMDXDNA_ERROR_NUM_AIE_LOCK,
-	[AIE_ERROR_DMA] = AMDXDNA_ERROR_NUM_AIE_DMA,
-	[AIE_ERROR_MEM_PARITY] = AMDXDNA_ERROR_NUM_AIE_MEM_PARITY,
-	[AIE_ERROR_UNKNOWN] = AMDXDNA_ERROR_NUM_UNKNOWN,
-};
-
-static_assert(ARRAY_SIZE(aie_cat_err_num_map) == AIE_ERROR_UNKNOWN + 1);
-
-static const enum amdxdna_error_module aie_err_mod_map[] = {
-	[AIE_MEM_MOD] = AMDXDNA_ERROR_MODULE_AIE_MEMORY,
-	[AIE_CORE_MOD] = AMDXDNA_ERROR_MODULE_AIE_CORE,
-	[AIE_PL_MOD] = AMDXDNA_ERROR_MODULE_AIE_PL,
-	[AIE_UNKNOWN_MOD] = AMDXDNA_ERROR_MODULE_UNKNOWN,
-};
-
-static_assert(ARRAY_SIZE(aie_err_mod_map) == AIE_UNKNOWN_MOD + 1);
-
-static enum aie_error_category
-aie_get_error_category(u8 row, u8 event_id, enum aie_module_type mod_type)
+int aie2_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
+			      void *handle, int (*cb)(void *, void __iomem *, size_t))
 {
-	const struct aie_event_category *lut;
-	int num_entry;
-	int i;
+	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
 
-	switch (mod_type) {
-	case AIE_PL_MOD:
-		lut = aie_ml_shim_tile_event_cat;
-		num_entry = ARRAY_SIZE(aie_ml_shim_tile_event_cat);
-		break;
-	case AIE_CORE_MOD:
-		lut = aie_ml_core_event_cat;
-		num_entry = ARRAY_SIZE(aie_ml_core_event_cat);
-		break;
-	case AIE_MEM_MOD:
-		if (row == 1) {
-			lut = aie_ml_mem_tile_event_cat;
-			num_entry = ARRAY_SIZE(aie_ml_mem_tile_event_cat);
-		} else {
-			lut = aie_ml_mem_event_cat;
-			num_entry = ARRAY_SIZE(aie_ml_mem_event_cat);
-		}
-		break;
-	default:
-		return AIE_ERROR_UNKNOWN;
-	}
-
-	for (i = 0; i < num_entry; i++) {
-		if (event_id != lut[i].event_id)
-			continue;
-
-		if (lut[i].category > AIE_ERROR_UNKNOWN)
-			return AIE_ERROR_UNKNOWN;
-
-		return lut[i].category;
-	}
-
-	return AIE_ERROR_UNKNOWN;
+	return aie2_register_asyn_event_msg(ndev, addr, size, handle, cb);
 }
 
-static void aie2_update_last_async_error(struct amdxdna_dev_hdl *ndev, void *err_info, u32 num_err)
-{
-	struct aie_error *errs = err_info;
-	enum amdxdna_error_module err_mod;
-	enum aie_error_category aie_err;
-	enum amdxdna_error_num err_num;
-	struct aie_error *last_err;
-
-	last_err = &errs[num_err - 1];
-	if (last_err->mod_type >= AIE_UNKNOWN_MOD) {
-		err_num = aie_cat_err_num_map[AIE_ERROR_UNKNOWN];
-		err_mod = aie_err_mod_map[AIE_UNKNOWN_MOD];
-	} else {
-		aie_err = aie_get_error_category(last_err->row,
-						 last_err->event_id,
-						 last_err->mod_type);
-		err_num = aie_cat_err_num_map[aie_err];
-		err_mod = aie_err_mod_map[last_err->mod_type];
-	}
-
-	ndev->last_async_err.err_code = AMDXDNA_ERROR_ENCODE(err_num, err_mod);
-	ndev->last_async_err.ts_us = ktime_to_us(ktime_get_real());
-	ndev->last_async_err.ex_err_code = AMDXDNA_EXTRA_ERR_ENCODE(last_err->row, last_err->col);
-}
-
-static u32 aie2_error_backtrack(struct amdxdna_dev_hdl *ndev, void *err_info, u32 num_err)
-{
-	struct aie_error *errs = err_info;
-	u32 err_col = 0; /* assume that AIE has less than 32 columns */
-	int i;
-
-	/* Get err column bitmap */
-	for (i = 0; i < num_err; i++) {
-		struct aie_error *err = &errs[i];
-		enum aie_error_category cat;
-
-		cat = aie_get_error_category(err->row, err->event_id, err->mod_type);
-		XDNA_ERR(ndev->aie.xdna, "Row: %d, Col: %d, module %d, event ID %d, category %d",
-			 err->row, err->col, err->mod_type,
-			 err->event_id, cat);
-
-		if (err->col >= 32) {
-			XDNA_WARN(ndev->aie.xdna, "Invalid column number");
-			break;
-		}
-
-		err_col |= (1 << err->col);
-	}
-
-	return err_col;
-}
-
-static int aie2_error_async_cb(void *handle, void __iomem *data, size_t size)
-{
-	struct async_event *e = handle;
-
-	if (data) {
-		e->resp.type = readl(data + offsetof(struct async_event_msg_resp, type));
-		wmb(); /* Update status in the end, so that no lock for here */
-		e->resp.status = readl(data + offsetof(struct async_event_msg_resp, status));
-	}
-	queue_work(e->wq, &e->work);
-	return 0;
-}
-
-static int aie2_error_event_send(struct async_event *e)
-{
-	drm_clflush_virt_range(e->buf, e->size); /* device can access */
-	return aie2_register_asyn_event_msg(e->ndev, e->addr, e->size, e,
-					    aie2_error_async_cb);
-}
-
-static void aie2_error_worker(struct work_struct *err_work)
-{
-	struct aie_err_info *info;
-	struct amdxdna_dev *xdna;
-	struct async_event *e;
-	u32 max_err;
-	u32 err_col;
-
-	e = container_of(err_work, struct async_event, work);
-
-	xdna = e->ndev->aie.xdna;
-
-	if (e->resp.status == MAX_AIE2_STATUS_CODE)
-		return;
-
-	e->resp.status = MAX_AIE2_STATUS_CODE;
-
-	print_hex_dump_debug("AIE error: ", DUMP_PREFIX_OFFSET, 16, 4,
-			     e->buf, 0x100, false);
-
-	info = (struct aie_err_info *)e->buf;
-	XDNA_DBG(xdna, "Error count %d return code %d", info->err_cnt, info->ret_code);
-
-	max_err = (e->size - sizeof(*info)) / sizeof(struct aie_error);
-	if (unlikely(info->err_cnt > max_err)) {
-		WARN_ONCE(1, "Error count too large %d\n", info->err_cnt);
-		return;
-	}
-	err_col = aie2_error_backtrack(e->ndev, info->payload, info->err_cnt);
-	if (!err_col) {
-		XDNA_WARN(xdna, "Did not get error column");
-		return;
-	}
-
-	mutex_lock(&xdna->dev_lock);
-	aie2_update_last_async_error(e->ndev, info->payload, info->err_cnt);
-
-	/* Re-sent this event to firmware */
-	if (aie2_error_event_send(e))
-		XDNA_WARN(xdna, "Unable to register async event");
-	mutex_unlock(&xdna->dev_lock);
-}
-
-void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	struct async_events *events;
-
-	events = ndev->async_events;
-
-	mutex_unlock(&xdna->dev_lock);
-	destroy_workqueue(events->wq);
-	mutex_lock(&xdna->dev_lock);
-
-	amdxdna_free_msg_buff(events->hdl);
-	kfree(events);
-}
-
-int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	u32 total_col = ndev->total_col;
-	struct async_events *events;
-	int i, ret;
-
-	events = kzalloc_flex(*events, event, total_col);
-	if (!events)
-		return -ENOMEM;
-
-	events->hdl = amdxdna_alloc_msg_buff(xdna, ASYNC_BUF_SIZE * total_col);
-	if (IS_ERR(events->hdl)) {
-		ret = PTR_ERR(events->hdl);
-		goto free_events;
-	}
-	events->event_cnt = total_col;
-
-	events->wq = alloc_ordered_workqueue("async_wq", 0);
-	if (!events->wq) {
-		ret = -ENOMEM;
-		goto free_buf;
-	}
-
-	for (i = 0; i < events->event_cnt; i++) {
-		struct async_event *e = &events->event[i];
-		u32 offset = i * ASYNC_BUF_SIZE;
-
-		e->ndev = ndev;
-		e->wq = events->wq;
-		e->buf = to_cpu_addr(events->hdl, offset);
-		e->addr = to_dma_addr(events->hdl, offset);
-		e->size = ASYNC_BUF_SIZE;
-		e->resp.status = MAX_AIE2_STATUS_CODE;
-		INIT_WORK(&e->work, aie2_error_worker);
-
-		ret = aie2_error_event_send(e);
-		if (ret)
-			goto free_wq;
-	}
-
-	ndev->async_events = events;
-
-	XDNA_DBG(xdna, "Async event count %d, buf total size 0x%x",
-		 events->event_cnt, to_buf_size(events->hdl));
-	return 0;
-
-free_wq:
-	destroy_workqueue(events->wq);
-free_buf:
-	amdxdna_free_msg_buff(events->hdl);
-free_events:
-	kfree(events);
-	return ret;
-}
-
-int aie2_get_array_async_error(struct amdxdna_dev_hdl *ndev, struct amdxdna_drm_get_array *args)
+int aie2_get_array_async_error(struct amdxdna_dev_hdl *ndev,
+			       struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
-	if (!args->num_element)
-		return -EINVAL;
-
-	args->num_element = 1;
-	args->element_size = min(args->element_size, sizeof(ndev->last_async_err));
-	if (copy_to_user(u64_to_user_ptr(args->buffer),
-			 &ndev->last_async_err, args->element_size))
-		return -EFAULT;
-
-	return 0;
+	return amdxdna_get_array_last_async_error(&ndev->aie, args);
 }

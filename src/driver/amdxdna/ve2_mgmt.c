@@ -54,6 +54,7 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,
 	cert_hs->dbg_buf.dbg_buf_addr_high = upper_32_bits(hwctx_cfg->debug_buf_addr);
 	cert_hs->dbg_buf.dbg_buf_addr_low = lower_32_bits(hwctx_cfg->debug_buf_addr);
 	cert_hs->dbg_buf.size = hwctx_cfg->debug_buf_size;
+	cert_hs->save_dbg_buf_offset = hwctx_cfg->dbg_buf_ddr_offset;
 
 	/* Dtrace Buffer */
 	cert_hs->trace.dtrace_addr_high = upper_32_bits(hwctx_cfg->dtrace_addr);
@@ -69,52 +70,63 @@ static void cert_setup_partition(struct amdxdna_dev *xdna,
 	cert_hs->mpaie_alive = ALIVE_MAGIC;
 }
 
-static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols)
+static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data)
 {
-	if (!hs_data)
-		return;
-
-	for (u32 col = 0; col < max_cols; col++) {
-		kfree(hs_data[col].addr);
-		hs_data[col].addr = NULL;
-	}
 	kfree(hs_data);
-	hs_data = NULL;
 }
 
 static struct aie_op_handshake_data *ve2_prepare_hs_data(struct amdxdna_dev *xdna,
 							 struct amdxdna_ctx_priv *nhwctx,
 							 bool init)
 {
+	size_t col_size = sizeof(struct handshake);
 	struct aie_op_handshake_data *hs_data;
 	u32 num_col = nhwctx->num_col;
-	struct aie_location aie_loc;
+	struct aie_location aie_loc = { 0 };
+	struct handshake *cert_hs;
 
-	hs_data = kmalloc_array(num_col, sizeof(*hs_data), GFP_KERNEL);
-	if (!hs_data) {
-		XDNA_ERR(xdna, "No memory for handshake data allocation\n");
-		return NULL;
-	}
-
-	for (u32 col = 0; col < num_col; col++) {
-		struct handshake *cert_hs;
-
-		aie_loc.col = col;
-		cert_hs = kmalloc(sizeof(*cert_hs), GFP_KERNEL);
-		if (!cert_hs) {
-			XDNA_ERR(xdna, "No memory for cert hs packet\n");
-			/* Free previously allocated handshakes */
-			ve2_free_hs_data(hs_data, col);
+	if (nhwctx->hs_dma_va) {
+		hs_data = kmalloc_array(num_col, sizeof(*hs_data), GFP_KERNEL);
+		if (!hs_data) {
+			XDNA_ERR(xdna, "No memory for handshake data allocation\n");
 			return NULL;
 		}
-		memset(cert_hs, 0, sizeof(*cert_hs));
-		if (init)
-			cert_setup_partition(xdna, nhwctx, col, cert_hs);
+		for (u32 col = 0; col < num_col; col++) {
+			aie_loc.col = col;
+			cert_hs = (struct handshake *)((u8 *)nhwctx->hs_dma_va +
+						       col * col_size);
+			if (init) {
+				memset(cert_hs, 0, col_size);
+				cert_setup_partition(xdna, nhwctx, col, cert_hs);
+			}
+			hs_data[col].addr     = (void *)cert_hs;
+			hs_data[col].dma_addr = nhwctx->hs_dma_pa + col * col_size;
+			hs_data[col].size     = col_size;
+			hs_data[col].offset   = 0x0;
+			hs_data[col].loc      = aie_loc;
+		}
+	} else {
+		/* Fallback: single allocation for descriptor array + cert_hs structs */
+		size_t total_size = num_col * sizeof(*hs_data) +
+				    num_col * col_size;
 
-		hs_data[col].addr = (void *)cert_hs;
-		hs_data[col].size = sizeof(struct handshake);
-		hs_data[col].offset = 0x0;
-		hs_data[col].loc = aie_loc;
+		hs_data = kzalloc(total_size, GFP_KERNEL);
+		if (!hs_data) {
+			XDNA_ERR(xdna, "No memory for handshake data allocation\n");
+			return NULL;
+		}
+		cert_hs = (struct handshake *)(hs_data + num_col);
+		for (u32 col = 0; col < num_col; col++) {
+			aie_loc.col = col;
+			if (init)
+				cert_setup_partition(xdna, nhwctx, col,
+						     &cert_hs[col]);
+			hs_data[col].addr     = (void *)&cert_hs[col];
+			hs_data[col].dma_addr = 0;
+			hs_data[col].size     = col_size;
+			hs_data[col].offset   = 0x0;
+			hs_data[col].loc      = aie_loc;
+		}
 	}
 
 	return hs_data;
@@ -348,15 +360,55 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 	start_col = nhwctx->start_col;
 	num_col = nhwctx->num_col;
 
+	struct amdxdna_mgmtctx *mgmtctx = &xdna->dev_handle->ve2_mgmtctx[start_col];
+
+	if (mgmtctx->active_ctx && mgmtctx->active_ctx != hwctx &&
+	    mgmtctx->active_ctx->priv && mgmtctx->active_ctx->priv->hwctx_config) {
+		struct amdxdna_ctx_priv *active_priv = mgmtctx->active_ctx->priv;
+
+		/* Save active context's per-column dbg_buf_ddr_offset */
+		for (u32 col = 0; col < active_priv->num_col; col++) {
+			u32 dbg_buf_offset = 0;
+
+			ret = ve2_partition_read_privileged_mem(active_priv->aie_dev, col,
+								offsetof(struct handshake,
+									 save_dbg_buf_offset),
+								sizeof(u32), &dbg_buf_offset);
+
+			if (ret >= 0) {
+				active_priv->hwctx_config[col].dbg_buf_ddr_offset = dbg_buf_offset;
+			} else {
+				XDNA_ERR(xdna, "Col%u: FAIL to read offset, ret=%d for ctx=%p",
+					 col, ret, mgmtctx->active_ctx);
+			}
+		}
+	}
+
 	hs_data = ve2_prepare_hs_data(xdna, nhwctx, true);
 	if (!hs_data) {
 		XDNA_ERR(xdna, "preparing cert handshake data failed ");
 		return;
 	}
+
 	nhwctx->args->handshake_cols = num_col;
 	nhwctx->args->handshake = (struct aie_op_handshake_data *)hs_data;
-	nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT | AIE_PART_INIT_OPT_HANDSHAKE |
-		AIE_PART_INIT_OPT_DIS_TLAST_ERROR) & ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+
+	if (!ve2_perf_optimization) {
+		nhwctx->args->init_opts = (AIE_PART_INIT_OPT_DEFAULT |
+					   AIE_PART_INIT_OPT_HANDSHAKE |
+					   AIE_PART_INIT_OPT_DIS_TLAST_ERROR) &
+					  ~AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+	} else {
+		nhwctx->args->init_opts = (AIE_PART_INIT_OPT_COLUMN_RST |
+					   AIE_PART_INIT_OPT_SHIM_RST |
+					   AIE_PART_INIT_OPT_ISOLATE |
+					   AIE_PART_INIT_OPT_SET_L2_IRQ |
+					   AIE_PART_INIT_OPT_NMU_CONFIG |
+					   AIE_PART_INIT_OPT_DIS_TLAST_ERROR |
+					   AIE_PART_INIT_OPT_ERR_SHIM_INIT |
+					   AIE_PART_INIT_OPT_HANDSHAKE);
+	}
+
 	XDNA_DBG(xdna, "Handshake init hwctx : %p\n", hwctx);
 	XDNA_DBG(xdna,
 		 "partition init: start_col=%u num_col=%u hwctx=%p pid=%d",
@@ -380,13 +432,13 @@ void ve2_mgmt_handshake_init(struct amdxdna_dev *xdna,
 
 	XDNA_DBG(xdna, "handshake: ve2_partition_initialize ok hwctx=%p", hwctx);
 
-	for (int col = num_col - 1; col >= 0; col--)
-		ve2_partition_uc_wakeup(nhwctx->aie_dev, col);
+        /* Wake up lead UC only */
+	ve2_partition_uc_wakeup(nhwctx->aie_dev, 0);
 
 	XDNA_DBG(xdna, "partition uc_wakeup done cols=%u hwctx=%p", num_col, hwctx);
 
 release_hs_data:
-	ve2_free_hs_data(hs_data, num_col);
+	ve2_free_hs_data(hs_data);
 }
 
 #define RR_SHARING BIT(0)
@@ -427,19 +479,23 @@ ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 
 	/* Top need to be scheduled */
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
-		if (mgmtctx->is_idle_due_to_context == 1) {
+		if (mgmtctx->is_idle_due_to_context == 1 || mgmtctx->is_partition_idle == 1) {
 			hwctx = c_ctx->ctx;
 			XDNA_DBG(xdna, "NEW context to be schedule next: %p\n", hwctx);
 			mgmtctx->is_partition_idle = 0;
+			mgmtctx->is_idle_due_to_context = 0;
 			ve2_mgmt_handshake_init(mgmtctx->xdna, hwctx);
-			if (mgmtctx->active_ctx == hwctx)
-				break;
-
 			mgmtctx->active_ctx = hwctx;
+			break;
 		}
 
-		if (t_ctx && c_ctx->ctx != t_ctx->ctx)
+		if (c_ctx->ctx != mgmtctx->active_ctx) {
 			ve2_request_context_switch(mgmtctx->xdna, mgmtctx);
+			XDNA_DBG(xdna, "request context to be schedule next: %p active: %p\n",
+				 c_ctx->ctx, mgmtctx->active_ctx);
+			notify_fw_cmd_ready(mgmtctx->active_ctx);
+			mgmtctx->is_partition_idle = 0;
+		}
 
 		break;
 	}
@@ -480,7 +536,6 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 		mgmtctx->active_ctx = hwctx;
 	} else if (mgmtctx->active_ctx != hwctx) {
 		if (mgmtctx->is_partition_idle == 1) {
-			mgmtctx->is_partition_idle = 0;
 			XDNA_DBG(xdna, "Context switch: active=%p -> new=%p (partition idle)",
 				 mgmtctx->active_ctx, hwctx);
 			ve2_response_ctx_switch_req(mgmtctx);
@@ -489,16 +544,17 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_ctx *hwctx,
 				 mgmtctx->active_ctx, hwctx);
 		}
 	} else {
-		if (mgmtctx->is_idle_due_to_context == 1) {
-			mgmtctx->is_idle_due_to_context = 0;
-			mgmtctx->is_partition_idle = 0;
-			ve2_mgmt_handshake_init(xdna, hwctx);
-			mgmtctx->active_ctx = hwctx;
-		}
-	}
+    	if (mgmtctx->is_idle_due_to_context == 1) {
+        	mgmtctx->is_idle_due_to_context = 0;
+            mgmtctx->is_partition_idle = 0;
+            ve2_mgmt_handshake_init(xdna, hwctx);
+            mgmtctx->active_ctx = hwctx;
+        } else {
+        	notify_fw_cmd_ready(mgmtctx->active_ctx);
+        }
+    }
 
 	mutex_unlock(&mgmtctx->ctx_lock);
-	notify_fw_cmd_ready(mgmtctx->active_ctx);
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
 				  hwctx->client->pid, mgmtctx->start_col,
 				  hwctx->priv->id, (int)command_index);
@@ -514,8 +570,17 @@ static bool ve2_check_context_req(struct amdxdna_mgmtctx  *mgmtctx)
 {
 	if (mgmtctx->is_context_req == 1) {
 		mgmtctx->is_context_req = 0;
-		mgmtctx->is_idle_due_to_context = 1;
-		return true;
+		/*
+		 * Only promote to is_idle_due_to_context if the FIFO head is
+		 * actually a different context.
+		 */
+		struct amdxdna_ctx_command_fifo *head =
+			list_first_entry_or_null(&mgmtctx->ctx_command_fifo_head,
+						 struct amdxdna_ctx_command_fifo, list);
+		if (head && head->ctx != mgmtctx->active_ctx) {
+			mgmtctx->is_idle_due_to_context = 1;
+			return true;
+		}
 	}
 
 	return false;
@@ -1311,7 +1376,7 @@ static void cert_clear_partition(struct amdxdna_dev *xdna, struct amdxdna_ctx_pr
 	ret = aie_partition_handshake_update(aie_dev, hs_data, num_col);
 	if (ret < 0)
 		XDNA_ERR(xdna, "aie partition handshake update failed, ret: %d\n", ret);
-	ve2_free_hs_data(hs_data, num_col);
+	ve2_free_hs_data(hs_data);
 }
 
 /**

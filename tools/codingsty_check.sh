@@ -13,10 +13,21 @@
 # On every run we print the blob SHA of the downloaded file and the
 # most recent mainline commit that touched scripts/checkpatch.pl, so
 # it is always clear exactly which version was used.
+#
+# Usage:
+#   codingsty_check.sh <PATH> [PATH ...]
+#
+# Each PATH may be a directory (scanned recursively for *.c and *.h) or an
+# individual *.c/*.h file (other file types are skipped). The script exits
+# non-zero if checkpatch reports any error or warning on any scanned file, so
+# it can gate a CI job or pre-commit hook.
 
 set -u
 
-target_dir=$1
+if [ "$#" -lt 1 ]; then
+    echo "usage: $0 <PATH> [PATH ...]   (each PATH may be a file or a directory)" >&2
+    exit 2
+fi
 
 KERNEL_RAW_BASE="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/scripts"
 KERNEL_LOG_BASE="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/log/scripts"
@@ -84,4 +95,40 @@ echo
 IGNORE_DEFAULT="FILE_PATH_CHANGES,LINUX_VERSION_CODE,SPLIT_STRING"
 IGNORE_CMD="--ignore ${IGNORE_DEFAULT}"
 
-find ${target_dir} \( -name *.c -o -name *.h \) -exec ${CHECKPATCH} ${IGNORE_CMD} --no-tree --strict -q -f {} \;
+# Expand the given paths into a flat list of C source and header files. A
+# non-existent path is a caller error (misconfigured CI job or hook), not a
+# reason to silently skip checks, so it fails the run rather than warning.
+files=()
+missing=0
+for path in "$@"; do
+    if [ -d "${path}" ]; then
+        while IFS= read -r f; do
+            files+=("${f}")
+        done < <(find "${path}" \( -name '*.c' -o -name '*.h' \) -type f)
+    elif [ -f "${path}" ]; then
+        case "${path}" in
+            *.c|*.h) files+=("${path}") ;;
+            *) echo "warning: skipping '${path}' (not a .c or .h file)" >&2 ;;
+        esac
+    else
+        echo "error: path does not exist: '${path}'" >&2
+        missing=1
+    fi
+done
+
+if [ "${missing}" -ne 0 ]; then
+    echo "error: one or more input paths did not exist; refusing to skip checks" >&2
+    exit 2
+fi
+
+if [ "${#files[@]}" -eq 0 ]; then
+    echo "no C source or header files to check"
+    exit 0
+fi
+
+fail=0
+for f in "${files[@]}"; do
+    "${CHECKPATCH}" ${IGNORE_CMD} --no-tree --strict -q -f "${f}" || fail=1
+done
+
+exit ${fail}

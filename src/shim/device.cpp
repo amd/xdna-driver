@@ -20,8 +20,14 @@
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <cstring>
+#include <map>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 namespace {
 
@@ -77,6 +83,39 @@ is_aie4(uint16_t device_id)
     if (device_id == id)
       return true;
   return false;
+}
+
+uint8_t
+get_amdxdna_attr_state(const xrt_core::device* device, uint32_t param)
+{
+  amdxdna_drm_attribute_state st = {};
+
+  amdxdna_drm_get_info arg = {
+    .param = param,
+    .buffer_size = sizeof(st),
+    .buffer = reinterpret_cast<uintptr_t>(&st)
+  };
+
+  auto& pci_dev_impl = get_pcidev_impl(device);
+  pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
+
+  return st.state;
+}
+
+void
+set_amdxdna_attr_state(const xrt_core::device* device, uint32_t param, uint8_t state)
+{
+  amdxdna_drm_attribute_state st = {};
+
+  st.state = state;
+  amdxdna_drm_set_state arg = {
+    .param = param,
+    .buffer_size = sizeof(st),
+    .buffer = reinterpret_cast<uintptr_t>(&st)
+  };
+
+  auto& pci_dev_impl = get_pcidev_impl(device);
+  pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
 }
 
 template <typename ValueType>
@@ -270,6 +309,88 @@ struct aie_info
   }
 };
 
+// Preemption frame and layer boundary event counters for a single
+// hardware context, extracted from RTOS telemetry.
+struct preemption_events
+{
+  uint64_t frame_events = 0;  // Preemptions taken at a frame boundary.
+  uint64_t layer_events = 0;  // Preemptions taken at a layer checkpoint.
+};
+
+// Build a map of hardware context id to its preemption frame and layer
+// boundary event counters.
+//
+// The counters live in the RTOS telemetry payload (already parsed by the
+// rtos_telemetry query handler) and are keyed there by slot_index. On AIE2
+// the driver populates slot_index with the hardware context id from the
+// amdxdna ctx_map, which matches amdxdna_drm_hwctx_entry::context_id. On AIE4
+// there is no such mapping and slot_index is the firmware micro-controller
+// slot, which lines up with amdxdna_drm_hwctx_entry::hwctx_id instead. Callers
+// therefore select the lookup key by device generation (hwctx_id on AIE4,
+// context_id otherwise); probing context_id unconditionally could false-match
+// an unrelated AIE4 telemetry slot since context_id is allocated cyclically
+// from a small value.
+//
+// Reusing the rtos_telemetry query keeps the telemetry parsing in a single
+// place so both the aie-partitions report and the preemption report share the
+// same source of frame and layer event data.
+//
+// @param device Device to query.
+// @return Map of hardware context id to its preemption event counters. Empty
+//         when RTOS telemetry is not supported on the device.
+static std::map<uint32_t, preemption_events>
+get_preemption_events(const xrt_core::device* device)
+{
+  std::map<uint32_t, preemption_events> events;
+  try {
+    const auto telemetry = xrt_core::device_query<xrt_core::query::rtos_telemetry>(device);
+    for (const auto& task : telemetry) {
+      const auto& preempt = task.preemption_data;
+      events[static_cast<uint32_t>(preempt.slot_index)] =
+        preemption_events{preempt.preemption_frame_boundary_events,
+                          preempt.preemption_checkpoint_event};
+    }
+  }
+  catch (const std::exception& e) {
+    // RTOS telemetry is optional. It may be unsupported on this device or the
+    // query may fail; enriching with preemption events is best effort, so
+    // report zero events rather than failing the aie_partition_info query.
+    // Log at debug level to aid diagnosis without spamming the normal path.
+    shim_debug("preemption event enrichment skipped: %s", e.what());
+  }
+  return events;
+}
+
+// Query the device BO memory footprint for a given process via
+// DRM_AMDXDNA_BO_USAGE. Best-effort: returns 0 both for a genuine
+// zero-footprint process and when the query is unsupported or fails - the two
+// cannot be distinguished here. Callers use 0 as a numeric value (a per-context
+// memory_usage of 0 renders as "N/A"; total_mem_usage sums it in), so a failed
+// lookup degrades to 0 rather than failing the whole query.
+static uint64_t
+get_bo_total_usage(const shim_xdna::pdev& pdev, int64_t pid)
+{
+  if (pid < 0)
+    return 0;
+
+  amdxdna_drm_bo_usage usage = {};
+  usage.pid = pid;
+  amdxdna_drm_get_array arg = {
+    .param = DRM_AMDXDNA_BO_USAGE,
+    .element_size = sizeof(usage),
+    .num_element = 1,
+    .buffer = reinterpret_cast<uintptr_t>(&usage)
+  };
+
+  try {
+    pdev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
+  }
+  catch (const xrt_core::system_error&) {
+    return 0;
+  }
+  return usage.total_usage;
+}
+
 struct partition_info
 {
   using result_type = std::any;
@@ -280,15 +401,37 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    amdxdna_drm_hwctx_entry* data;
-    const uint32_t output_size = 32 * sizeof(*data);
+    // The RTOS telemetry preemption counters are keyed differently per
+    // device generation: on AIE4 by the firmware micro-controller slot
+    // (amdxdna_drm_hwctx_entry::hwctx_id) and on AIE2 by the hardware context
+    // id (amdxdna_drm_hwctx_entry::context_id). Select the join key by
+    // generation rather than probing both, because context_id is allocated
+    // cyclically from a small value and could otherwise false-match an
+    // unrelated telemetry slot on AIE4.
+    //
+    // Reading the PCI device id can throw. Preemption enrichment is best
+    // effort, so if the generation cannot be determined leave the optional
+    // unset and skip enrichment (counters stay zero) rather than guessing a
+    // key that could attach wrong counts, or failing the whole query.
+    std::optional<bool> is_aie4_dev;
+    try {
+      is_aie4_dev = is_aie4(xrt_core::device_query<query::pcie_id>(device).device_id);
+    }
+    catch (const std::exception& e) {
+      shim_debug("preemption enrichment skipped, device generation unknown: %s", e.what());
+    }
+
+    const uint32_t output_entries = 1024;
+    const uint32_t output_size = output_entries * sizeof(amdxdna_drm_hwctx_entry);
+    const char* raw = nullptr;  // base of the returned entry array
+    size_t buf_bytes = 0;       // size of the buffer 'raw' points into
 
     std::vector<char> payload(output_size);
-    std::vector<char> updated_payload;  // outer scope for ENOSPC retry; data may point here
+    std::vector<char> updated_payload;  // outer scope for ENOSPC retry; raw may point here
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
-      .element_size = sizeof(*data),
-      .num_element = 32,
+      .element_size = sizeof(amdxdna_drm_hwctx_entry),
+      .num_element = output_entries,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
@@ -296,8 +439,8 @@ struct partition_info
     uint32_t data_size = 0;
     try {
       pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-      data_size = arg.num_element;
-      data = reinterpret_cast<decltype(data)>(payload.data());
+      raw = payload.data();
+      buf_bytes = output_size;
     } catch (const xrt_core::system_error& e) {
       if (e.get_code() == EINVAL) {
         // If ioctl not supported, use legacy ioctl.
@@ -320,7 +463,12 @@ struct partition_info
         data_size = legacy_arg.buffer_size / sizeof(*legacy_data);
         legacy_data = reinterpret_cast<decltype(legacy_data)>(legacy_payload.data());
 
+        const auto legacy_preemption_event_map = get_preemption_events(device);
+
         query::aie_partition_info::result_type output;
+        // The legacy hwctx struct carries no process name; leave it empty so
+        // the report shows "N/A". Memory usage is still resolved per process.
+        std::unordered_map<int64_t, uint64_t> mem_usage_cache;
         for (uint32_t i = 0; i < data_size; i++) {
           const auto& entry = legacy_data[i];
 
@@ -334,35 +482,79 @@ struct partition_info
           new_entry.command_completions = entry.command_completions;
           new_entry.migrations = entry.migrations;
           new_entry.preemptions = entry.preemptions;
+          // The legacy amdxdna_drm_query_hwctx struct only exposes context_id,
+          // not hwctx_id, so the generation-based key selection used on the
+          // modern path is not possible here. This legacy ioctl is the AIE2-era
+          // path where the telemetry slot_index is the hardware context id, so
+          // the join by context_id is correct; AIE4 (keyed by hwctx_id) always
+          // supports the modern DRM_AMDXDNA_HW_CONTEXT_ALL ioctl below, so it
+          // never reaches this path. Only enrich when the device is known to be
+          // non-AIE4 so an unknown generation does not attach a context_id keyed
+          // count that could be wrong; otherwise the counters stay at zero.
+          if (is_aie4_dev && !*is_aie4_dev) {
+            const auto preempt_it = legacy_preemption_event_map.find(entry.context_id);
+            if (preempt_it != legacy_preemption_event_map.end()) {
+              new_entry.preemption_frame_event = preempt_it->second.frame_events;
+              new_entry.preemption_layer_event = preempt_it->second.layer_events;
+            }
+          }
           new_entry.errors = entry.errors;
+
+          auto mit = mem_usage_cache.find(entry.pid);
+          if (mit == mem_usage_cache.end())
+            mit = mem_usage_cache.emplace(entry.pid, get_bo_total_usage(pci_dev_impl, entry.pid)).first;
+          new_entry.memory_usage = mit->second;
+
           output.push_back(std::move(new_entry));
         }
         return output;
       }
       if (e.get_code() == ENOSPC) {
-        // Retry ioctl with driver-returned number of elements.
-        const uint32_t updated_output_size = arg.num_element * sizeof(*data);
+        // Retry ioctl with driver-returned number of elements. element_size and
+        // num_element are each __u32, so their product can exceed UINT32_MAX;
+        // compute all byte counts in size_t so a large driver-reported
+        // num_element cannot overflow and yield an undersized allocation.
+        const size_t updated_output_size =
+          static_cast<size_t>(arg.num_element) * sizeof(amdxdna_drm_hwctx_entry);
 
         updated_payload.resize(updated_output_size);
         arg.buffer = reinterpret_cast<uintptr_t>(updated_payload.data());
 
         pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
 
-        if (updated_output_size < arg.element_size * arg.num_element) {
+        const size_t required_bytes =
+          static_cast<size_t>(arg.element_size) * arg.num_element;
+        if (updated_output_size < required_bytes) {
           throw xrt_core::query::exception(
-            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ALL - Insufficient buffer size. Need: %u") % arg.element_size));
+            boost::str(boost::format("DRM_AMDXDNA_HW_CONTEXT_ALL - Insufficient buffer size. Need: %zu bytes") % required_bytes));
         }
 
-        data_size = arg.num_element;
-        data = reinterpret_cast<decltype(data)>(updated_payload.data());
+        raw = updated_payload.data();
+        buf_bytes = updated_payload.size();
       } else {
         throw;
       }
     }
 
+    const auto preemption_event_map = get_preemption_events(device);
+
+    // The driver negotiates the element size (the min of what the shim asked for
+    // and the struct the running driver knows about) and packs entries at that
+    // stride. Copy each element into a zero-initialized struct so that fields a
+    // newer shim knows about but an older driver did not fill (e.g. name) read
+    // as empty. This keeps a new shim working with an old staging driver.
+    const uint32_t elem_sz = arg.element_size ? arg.element_size
+      : static_cast<uint32_t>(sizeof(amdxdna_drm_hwctx_entry));
+    data_size = std::min(arg.num_element, static_cast<uint32_t>(buf_bytes / elem_sz));
+
     query::aie_partition_info::result_type output;
+    // Cache per-process BO usage so multiple contexts owned by the same process
+    // only issue a single DRM_AMDXDNA_BO_USAGE ioctl.
+    std::unordered_map<int64_t, uint64_t> mem_usage_cache;
     for (uint32_t i = 0; i < data_size; i++) {
-      const auto& entry = data[i];
+      amdxdna_drm_hwctx_entry entry{};
+      std::memcpy(&entry, raw + static_cast<size_t>(i) * elem_sz,
+                  std::min<size_t>(elem_sz, sizeof(entry)));
 
       xrt_core::query::aie_partition_info::data new_entry{};
       new_entry.metadata.id = std::to_string(entry.context_id);
@@ -374,6 +566,16 @@ struct partition_info
       new_entry.command_completions = entry.command_completions;
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
+      // Only enrich when the device generation is known; guessing a key could
+      // attach wrong counters (see is_aie4_dev above).
+      if (is_aie4_dev) {
+        const auto preempt_key = *is_aie4_dev ? entry.hwctx_id : entry.context_id;
+        const auto preempt_it = preemption_event_map.find(preempt_key);
+        if (preempt_it != preemption_event_map.end()) {
+          new_entry.preemption_frame_event = preempt_it->second.frame_events;
+          new_entry.preemption_layer_event = preempt_it->second.layer_events;
+        }
+      }
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
       new_entry.qos.gops = entry.gops;
@@ -385,9 +587,43 @@ struct partition_info
       new_entry.pasid = entry.pasid;
       new_entry.suspensions = entry.suspensions;
       new_entry.is_suspended = entry.state == AMDXDNA_HWCTX_STATE_IDLE;
+      new_entry.process_name = std::string(entry.name, ::strnlen(entry.name, sizeof(entry.name)));
+
+      auto mit = mem_usage_cache.find(entry.pid);
+      if (mit == mem_usage_cache.end())
+        mit = mem_usage_cache.emplace(entry.pid, get_bo_total_usage(pci_dev_impl, entry.pid)).first;
+      new_entry.memory_usage = mit->second;
+
       output.push_back(std::move(new_entry));
     }
     return output;
+  }
+};
+
+struct total_mem_usage
+{
+  using result_type = std::any;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    if (key != key_type::total_mem_usage)
+      throw xrt_core::query::no_such_key(key, "Not implemented");
+
+    // Reuse the aie_partition_info query, which already resolves per-process
+    // memory usage, and aggregate over the set of unique PIDs so a process
+    // owning several contexts is only counted once.
+    auto data = xrt_core::device_query<query::aie_partition_info>(device);
+
+    std::unordered_set<int64_t> seen_pids;
+    uint64_t total = 0;
+    for (const auto& entry : data) {
+      if (entry.pid < 0)
+        continue;
+      if (seen_pids.insert(entry.pid).second)
+        total += entry.memory_usage;
+    }
+    return static_cast<query::total_mem_usage::result_type>(total);
   }
 };
 
@@ -420,25 +656,36 @@ struct context_health_info {
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
     // Query all contexts
-    amdxdna_drm_hwctx_entry* data;
-    const uint32_t output_size = 32 * sizeof(*data);
+    const uint32_t output_entries = 1024;
+    const uint32_t output_size = output_entries * sizeof(amdxdna_drm_hwctx_entry);
     std::vector<char> payload(output_size);
     amdxdna_drm_get_array arg = {
       .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
-      .element_size = sizeof(*data),
-      .num_element = 32,
+      .element_size = sizeof(amdxdna_drm_hwctx_entry),
+      .num_element = output_entries,
       .buffer = reinterpret_cast<uintptr_t>(payload.data())
     };
 
     auto& pci_dev_impl = get_pcidev_impl(device);
-    uint32_t data_size = 0;
     pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info_array, &arg);
-    data_size = arg.num_element;
-    data = reinterpret_cast<decltype(data)>(payload.data());
+
+    // The driver negotiates element_size down to the struct the running driver
+    // knows about and packs entries at that stride. Stride by the negotiated
+    // size and copy each entry into a zero-initialized struct (matching the
+    // aie_partition_info walk) so a newer shim still parses an older driver's
+    // packed entries correctly instead of assuming a fixed sizeof() stride.
+    const uint32_t elem_sz = arg.element_size ? arg.element_size
+      : static_cast<uint32_t>(sizeof(amdxdna_drm_hwctx_entry));
+    const uint32_t data_size = std::min(arg.num_element,
+                                        static_cast<uint32_t>(output_size / elem_sz));
+    const char* raw = payload.data();
 
     query::context_health_info::result_type output;
     for (uint32_t i = 0; i < data_size; i++) {
-      output.push_back(fill_health_entry(data[i]));
+      amdxdna_drm_hwctx_entry entry{};
+      std::memcpy(&entry, raw + static_cast<size_t>(i) * elem_sz,
+                  std::min<size_t>(elem_sz, sizeof(entry)));
+      output.push_back(fill_health_entry(entry));
     }
     return output;
   }
@@ -614,38 +861,18 @@ struct performance_mode
 struct preemption
 {
   using result_type = query::preemption::result_type;
+  using value_type = query::preemption::value_type;
 
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state force = {};
-
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE,
-      .buffer_size = sizeof(force),
-      .buffer = reinterpret_cast<uintptr_t>(&force)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
-
-    return force.state;
+    return static_cast<result_type>(get_amdxdna_attr_state(device, DRM_AMDXDNA_GET_FORCE_PREEMPT_STATE));
   }
 
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state force = {};
-    force.state = std::any_cast<uint32_t>(any);
-
-    amdxdna_drm_set_state arg = {
-      .param = DRM_AMDXDNA_SET_FORCE_PREEMPT,
-      .buffer_size = sizeof(force),
-      .buffer = reinterpret_cast<uintptr_t>(&force)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+    set_amdxdna_attr_state(device, DRM_AMDXDNA_SET_FORCE_PREEMPT, std::any_cast<value_type>(any));
   }
 };
 
@@ -790,8 +1017,14 @@ struct firmware_log
       .buffer = reinterpret_cast<uintptr_t>(&fw_log)
     };
 
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+    try {
+      auto& pci_dev_impl = get_pcidev_impl(device);
+      pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+    } catch (const xrt_core::system_error& e) {
+      if (e.get_code() == EINVAL)
+        throw xrt_core::system_error(EINVAL, "Invalid firmware log level");
+      throw;
+    }
   }
 
   static result_type
@@ -901,28 +1134,17 @@ struct archive_path
   static result_type
   get(const xrt_core::device* device, key_type key)
   {
-    const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
-    xrt_core::smi::smi_hardware_config smi_hrdw;
-    auto hardware_type = smi_hrdw.get_hardware_type(pcie_id);
-
     switch (key) {
     case key_type::archive_path:
     {
-      switch (hardware_type)
-      {
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxA0:
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxB0:
-      case xrt_core::smi::smi_hardware_config::hardware_type::stxH:
-      case xrt_core::smi::smi_hardware_config::hardware_type::krk1:
-        return std::string("amdxdna/bins/xrt_smi_strx.a");
-      case xrt_core::smi::smi_hardware_config::hardware_type::phx:
+      const auto& pcie_id = xrt_core::device_query<xrt_core::query::pcie_id>(device);
+      xrt_core::smi::smi_hardware_config smi_hrdw;
+      switch (smi_hrdw.get_family(pcie_id)) {
+      case xrt_core::smi::smi_hardware_config::hardware_family::phoenix:
         return std::string("amdxdna/bins/xrt_smi_phx.a");
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f1:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f2:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_f3:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B01:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B02:
-      case xrt_core::smi::smi_hardware_config::hardware_type::npu3_B03:
+      case xrt_core::smi::smi_hardware_config::hardware_family::strix:
+        return std::string("amdxdna/bins/xrt_smi_strx.a");
+      case xrt_core::smi::smi_hardware_config::hardware_family::npu3:
         return std::string("amdxdna/bins/xrt_smi_npu3.a");
       default:
         throw xrt_core::generic_error(ENOTSUP, "Unsupported hardware type");
@@ -937,38 +1159,18 @@ struct archive_path
 struct frame_boundary_preemption
 {
   using result_type = query::frame_boundary_preemption::result_type;
+  using value_type = query::frame_boundary_preemption::value_type;
 
   static result_type
   get(const xrt_core::device* device, key_type)
   {
-    amdxdna_drm_attribute_state preempt = {};
-
-    amdxdna_drm_get_info arg = {
-      .param = DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
-      .buffer_size = sizeof(preempt),
-      .buffer = reinterpret_cast<uintptr_t>(&preempt)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &arg);
-
-    return preempt.state;
+    return static_cast<result_type>(get_amdxdna_attr_state(device, DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE));
   }
 
   static void
   put(const xrt_core::device* device, key_type key, const std::any& any)
   {
-    amdxdna_drm_attribute_state preempt = {};
-    preempt.state = std::any_cast<uint32_t>(any);
-
-    amdxdna_drm_set_state arg = {
-      .param = DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT,
-      .buffer_size = sizeof(preempt),
-      .buffer = reinterpret_cast<uintptr_t>(&preempt)
-    };
-
-    auto& pci_dev_impl = get_pcidev_impl(device);
-    pci_dev_impl.drv_ioctl(shim_xdna::drv_ioctl_cmd::set_state, &arg);
+    set_amdxdna_attr_state(device, DRM_AMDXDNA_SET_FRAME_BOUNDARY_PREEMPT, std::any_cast<value_type>(any));
   }
 };
 
@@ -1121,7 +1323,7 @@ struct telemetry
 
       pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
 
-      for (uint32_t i = 0; i < telemetry.ctx_map_num_elements; i++) {
+      for (uint32_t i = 0; i < std::min(telemetry.ctx_map_num_elements, NPU_RTOS_MAX_USER_ID_COUNT); i++) {
         xrt_core::query::rtos_telemetry::data task;
 
         task.context_starts = telemetry.context_started_count[i];
@@ -1389,17 +1591,15 @@ struct clock_topology
 
     std::vector<clock_freq> clocks;
     clock_freq mp_npu_clock;
-    strlcpy(mp_npu_clock.m_name,
-      reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name),
-      sizeof(mp_npu_clock.m_name));
+    std::snprintf(mp_npu_clock.m_name, sizeof(mp_npu_clock.m_name), "%s",
+      reinterpret_cast<const char*>(clock_metadata.mp_npu_clock.name));
     mp_npu_clock.m_type = CT_SYSTEM;
     mp_npu_clock.m_freq_Mhz = clock_metadata.mp_npu_clock.freq_mhz;
     clocks.push_back(mp_npu_clock);
 
     clock_freq h_clock;
-    strlcpy(h_clock.m_name,
-      reinterpret_cast<const char*>(clock_metadata.h_clock.name),
-      sizeof(h_clock.m_name));
+    std::snprintf(h_clock.m_name, sizeof(h_clock.m_name), "%s",
+      reinterpret_cast<const char*>(clock_metadata.h_clock.name));
     h_clock.m_type = CT_SYSTEM;
     h_clock.m_freq_Mhz = clock_metadata.h_clock.freq_mhz;
     clocks.push_back(h_clock);
@@ -1898,6 +2098,24 @@ struct sub_device_path
   }
 };
 
+struct auto_coredump
+{
+  using value_type = query::auto_coredump::value_type;
+  using result_type = query::auto_coredump::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type key)
+  {
+    return static_cast<result_type>(get_amdxdna_attr_state(device, DRM_AMDXDNA_GET_AUTO_COREDUMP));
+  }
+
+  static void
+  put(const xrt_core::device* device, key_type key, const std::any& any)
+  {
+    set_amdxdna_attr_state(device, DRM_AMDXDNA_SET_AUTO_COREDUMP, std::any_cast<value_type>(any));
+  }
+};
+
 template <typename QueryRequestType>
 struct sysfs_get : virtual QueryRequestType
 {
@@ -2006,6 +2224,7 @@ static void
 initialize_query_table()
 {
   emplace_func0_request<query::aie_partition_info,             partition_info>();
+  emplace_func0_request<query::total_mem_usage,               total_mem_usage>();
   emplace_func0_request<query::xocl_errors,                    xocl_errors>();
   emplace_func1_request<query::context_health_info,            context_health_info>();
   emplace_func0_request<query::aie_status_version,             aie_info>();
@@ -2061,6 +2280,7 @@ initialize_query_table()
   emplace_func1_request<query::aie_coredump,                   aie_coredump>();
   emplace_func1_request<query::aie_read,                       aie_read>();
   emplace_func1_request<query::aie_write,                      aie_write>();
+  emplace_func0_getput<query::auto_coredump,                   auto_coredump>();
 }
 
 struct X { X() { initialize_query_table(); }};
@@ -2125,12 +2345,23 @@ device::
   m_pdev.close();
 }
 
-
 const pdev&
 device::
 get_pdev() const
 {
   return m_pdev;
+}
+
+uint32_t
+device::
+get_core_rows() const
+{
+  std::call_once(m_core_rows_once, [this]() {
+    m_core_rows = xrt_core::device_query<
+      xrt_core::query::aie_tiles_stats>(this).core_rows;
+  });
+
+  return m_core_rows;
 }
 
 void
@@ -2181,9 +2412,9 @@ create_hw_context(uint32_t partition_size, const xrt::hw_context::qos_type& qos,
                   xrt::hw_context::access_mode mode) const
 {
   if (m_pdev.is_umq())
-    return std::make_unique<hwctx_umq>(*this, partition_size);
+    return std::make_unique<hwctx_umq>(*this, partition_size, qos);
   else
-    return std::make_unique<hwctx_kmq>(*this, partition_size);
+    return std::make_unique<hwctx_kmq>(*this, partition_size, qos);
 }
 
 std::unique_ptr<xrt_core::buffer_handle>

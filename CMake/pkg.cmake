@@ -65,7 +65,8 @@ math(EXPR next_minor "${CPACK_PACKAGE_VERSION_MINOR} + 1")
 set(XDNA_CPACK_XRT_BASE_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR})
 set(XDNA_CPACK_XRT_BASE_NEXT_VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${next_minor})
 
-# VTD archives are downloaded by build script based on info.json configuration
+# VTD archives are fetched by build/build.sh from the "Repo: VTD" section of
+# tools/WHENCE (see tools/sync_from_whence.py vtd).
 set(VTD_ARCHIVES_DIR "${CMAKE_CURRENT_BINARY_DIR}/../amdxdna_bins/vtd_archives")
 message(STATUS "Using VTD archives from ${VTD_ARCHIVES_DIR}")
 
@@ -78,11 +79,15 @@ install(DIRECTORY ${VTD_ARCHIVES_DIR}/
 
 if(NOT SKIP_KMOD)
 
+# Install both the versioned firmware files (e.g. 1.8_npu.sbin.2.5.0.172) and
+# the stable npu.dev.sbin / cert.dev.sbin symlinks that point at them, so the
+# installed file name still reveals the firmware version. The tree is built
+# from the drm-firmware WHENCE manifest by tools/sync_from_whence.py firmware.
 install(DIRECTORY ${AMDXDNA_BINS_DIR}/firmware/
   DESTINATION ${XDNA_PKG_FW_DIR}
   COMPONENT ${XDNA_COMPONENT}
   FILES_MATCHING
-  PATTERN "*.sbin"
+  PATTERN "*.sbin*"
   PATTERN "download_raw" EXCLUDE
   )
 
@@ -121,13 +126,14 @@ elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "fedora")
     set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
     set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/package/prerm")
   endif()
-elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch")
+elseif("${XDNA_CPACK_LINUX_PKG_FLAVOR}" MATCHES "arch|void")
   set(CPACK_GENERATOR "TGZ")
-  # For Arch Linux, we generate a tarball that can be repackaged into a proper
-  # Arch package using the provided PKGBUILD. When using the PKGBUILD, install
-  # hooks handle post-install/pre-remove automatically via pacman.
+  # Arch and Void are binary distros, but this packaging flow has no native
+  # deb/rpm generator for them, so we emit a tarball that can be repackaged into
+  # a native package (e.g. the provided Arch PKGBUILD, whose install hooks handle
+  # post-install/pre-remove).
   set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-  message(STATUS "Arch Linux detected - generating TGZ package")
+  message(STATUS "Arch/Void Linux detected - generating TGZ package")
   if(NOT SKIP_KMOD)
     message(STATUS "Post-install script: ${CMAKE_CURRENT_BINARY_DIR}/package/postinst")
     message(STATUS "Pre-remove script: ${CMAKE_CURRENT_BINARY_DIR}/package/prerm")

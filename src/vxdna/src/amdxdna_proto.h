@@ -8,6 +8,21 @@
 
 #define AMDXDNA_MAX_RING_NUM 64
 
+/*
+ * Max hw contexts per guest context, and the modulus that maps a driver ctx
+ * handle (1..MAX_CTX_ID) to a virtio ring index. The guest and host must agree
+ * on this value: the guest routes a WAIT on ring ((ctx_handle - 1) % N) + 1,
+ * and the host keys its hwctx table by the same function. Range is [1, N], so
+ * ring 0 (AMDXDNA_INVALID_CTX_HANDLE / platform ring) is never used.
+ *
+ * Note the ring index is only a routing key: create_ctx_rsp.handle still
+ * carries the raw driver ctx handle (not the ring index), so guest-side
+ * correlation (telemetry ctx_map, coredump, HW_CONTEXT_BY_ID) is unchanged.
+ * handle != ring_idx; the ring index is derived from the handle by the modulo
+ * above.
+ */
+#define AMDXDNA_MAX_HWCTX_PER_CTX 32
+
 enum amdxdna_ccmd {
     AMDXDNA_CCMD_NOP = 1,
     AMDXDNA_CCMD_INIT,
@@ -20,6 +35,7 @@ enum amdxdna_ccmd {
     AMDXDNA_CCMD_WAIT_CMD,
     AMDXDNA_CCMD_GET_INFO,
     AMDXDNA_CCMD_READ_SYSFS,
+    AMDXDNA_CCMD_SYNC_BO,
 };
 
 #ifdef __cplusplus
@@ -186,6 +202,25 @@ struct amdxdna_ccmd_get_info_rsp {
 struct amdxdna_ccmd_read_sysfs_req {
     struct vdrm_ccmd_req hdr;
     char node_name[];
+};
+
+/*
+ * AMDXDNA_CCMD_SYNC_BO
+ *
+ * direction carries the driver SYNC_DIRECT_TO_DEVICE / SYNC_DIRECT_FROM_DEVICE
+ * value; handle is the guest BO handle (== host GEM handle).
+ */
+struct amdxdna_ccmd_sync_bo_req {
+    struct vdrm_ccmd_req hdr;
+    uint32_t handle;
+    uint32_t direction;
+    uint64_t offset;
+    uint64_t size;
+};
+DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_sync_bo_req)
+
+struct amdxdna_ccmd_sync_bo_rsp {
+    struct amdxdna_ccmd_rsp hdr;
 };
 DEFINE_CAST(vdrm_ccmd_req, amdxdna_ccmd_read_sysfs_req)
 

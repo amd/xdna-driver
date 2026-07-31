@@ -68,6 +68,9 @@ void TEST_io_timeout(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_gemm(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_async_error_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_async_error_aie4_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_tdr_timeout_and_abort(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_tdr_partial_chain_abort(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
+void TEST_tdr_single_submit_eagain(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_async_error_multi(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg);
 void TEST_io_latency(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -88,6 +91,10 @@ void TEST_cmd_fence_host(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_cmd_fence_device(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_preempt_full_elf_io(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_app_health_query_multi_ctx(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_hw_contexts(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_hw_context_all(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_telemetry(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_query_telemetry_short_buf(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_coredump(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_mem(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -206,8 +213,8 @@ dev_filter_is_aie4(device::id_type id, device* dev)
 {
   if (!is_xdna_dev(dev))
     return false;
-  auto device_id = device_query<query::pcie_device>(dev);
-  return device_id == npu3_device_id || device_id == npu3_device_id1;
+  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  return device_id == npu3_device_id || device_id == npu3a_device_id;
 }
 
 bool
@@ -264,6 +271,33 @@ bool
 dev_filter_is_npu4_and_amdxdna_drv(device::id_type id, device* dev)
 {
   if (!dev_filter_is_npu4(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
+// Tests that bypass the shim and issue DRM_IOCTL_AMDXDNA_* directly on the accel
+// fd only work against the native amdxdna driver. On the virtio-gpu guest that fd
+// is virtio-gpu and does not implement those ioctls, so require the native driver.
+bool
+dev_filter_is_aie_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_aie(id, dev))
+    return false;
+  if (!is_amdxdna_drv(dev))
+    return false;
+  return true;
+}
+
+// set_state()-based tests (force preemption, DPM/power mode) mutate device-wide
+// firmware state via DRM_AMDXDNA_SET_STATE, which the virtio-gpu guest shim does
+// not forward. Require the native amdxdna driver so these tests are skipped on
+// the QEMU guest.
+bool
+dev_filter_is_aie4_or_npu4_and_amdxdna_drv(device::id_type id, device* dev)
+{
+  if (!dev_filter_is_aie4_or_npu4(id, dev))
     return false;
   if (!is_amdxdna_drv(dev))
     return false;
@@ -650,14 +684,14 @@ void
 TEST_create_destroy_max_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
-  auto device_id = device_query<query::pcie_device>(dev);
+  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
   int is_negative = static_cast<unsigned int>(arg[0]);
   int num_ctx;
 
   // XDNA driver by default supports maximum 6 contexts on npu1, 128 on npu3, and 16 on npu4
   if (device_id == npu1_device_id)
     num_ctx = 6;
-  else if (device_id == npu3_device_id || device_id == npu3_device_id1)
+  else if (device_id == npu3_device_id || device_id == npu3a_device_id)
     num_ctx = 128;
   else
     num_ctx = 16;
@@ -677,13 +711,13 @@ void
 TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
-  auto device_id = device_query<query::pcie_device>(dev);
+  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
   int num_ctx;
 
   const std::array<int, 3> ctx = [&]() {
     if (device_id == npu1_device_id)
       return std::array<int, 3>{2, 4, 6};
-    if (device_id == npu3_device_id || device_id == npu3_device_id1)
+    if (device_id == npu3_device_id || device_id == npu3a_device_id)
       return std::array<int, 3>{4, 16, 64};
     return std::array<int, 3>{4, 8, 16};
   }();
@@ -807,31 +841,166 @@ TEST_create_free_internal_bo(device::id_type id, std::shared_ptr<device>& sdev, 
   }
 }
 
-// Verify the driver allows only one open per process: with the shim device
-// already open (sdev), a second open() of the same node from this process must
-// be rejected with EBUSY, and the existing device must keep working afterwards.
+// Dev heap chunk granularity (see get_heap_num_pages()/heap_page_size in the
+// shim). A dev BO larger than one chunk necessarily spans multiple heap chunks.
+// npu4 additionally caps the total heap at dev_heap_max_size, so a BO larger
+// than that can never be allocated there; aie4 has no such cap, and npu1 has a
+// single fixed chunk so no cross-chunk BO can be allocated at all.
+constexpr size_t dev_heap_chunk_size = 64ul * 1024 * 1024;
+constexpr size_t dev_heap_max_size = 512ul * 1024 * 1024;
+
+// Fill the whole dev BO with an index-derived pattern, round-trip it through
+// sync (which drives the kernel's per-chunk pin/vmap walk), then verify every
+// qword. Any error in the cross-chunk contiguous mapping shows up as a
+// mismatch or SIGBUS.
+static void
+dev_bo_fill_and_verify(bo& b, size_t size)
+{
+  auto p = reinterpret_cast<volatile uint64_t *>(b.map());
+  size_t n = size / sizeof(uint64_t);
+  const uint64_t seed = 0x5a5a5a5a5a5a5a5aull;
+
+  for (size_t i = 0; i < n; i++)
+    p[i] = i ^ seed;
+  b.get()->sync(buffer_handle::direction::host2device, size, 0);
+  b.get()->sync(buffer_handle::direction::device2host, size, 0);
+  for (size_t i = 0; i < n; i++) {
+    if (p[i] != (i ^ seed))
+      throw std::runtime_error("dev BO content mismatch at qword " + std::to_string(i));
+  }
+}
+
+// Cheaper verification for the stress loop: only touch the qwords straddling
+// every chunk boundary (last qword of a chunk and first qword of the next)
+// plus the last qword of the BO. This is where a broken cross-chunk mapping
+// would surface without paying to write the whole BO on every iteration.
+static void
+dev_bo_verify_boundaries(bo& b, size_t size)
+{
+  auto base = reinterpret_cast<volatile uint8_t *>(b.map());
+  std::vector<size_t> offs;
+
+  for (size_t o = dev_heap_chunk_size; o < size; o += dev_heap_chunk_size) {
+    offs.push_back(o - sizeof(uint64_t));
+    offs.push_back(o);
+  }
+  offs.push_back(size - sizeof(uint64_t));
+
+  for (auto o : offs)
+    *reinterpret_cast<volatile uint64_t *>(base + o) = o ^ 0xdeadbeefull;
+  b.get()->sync(buffer_handle::direction::host2device, size, 0);
+  b.get()->sync(buffer_handle::direction::device2host, size, 0);
+  for (auto o : offs) {
+    auto v = *reinterpret_cast<volatile uint64_t *>(base + o);
+    if (v != (o ^ 0xdeadbeefull))
+      throw std::runtime_error("dev BO boundary mismatch at offset " + std::to_string(o));
+  }
+}
+
+// npu1 (birman) has a single fixed dev heap chunk and cannot back a dev BO
+// that spans more than one chunk. It has no cross-chunk dev heap support.
+static bool
+dev_heap_supports_cross_chunk(device::id_type id, device* dev)
+{
+  return !dev_filter_is_npu1(id, dev);
+}
+
+// On platforms without cross-chunk support (npu1), allocating a cross-chunk
+// dev BO must fail. Treat that failure as the expected, passing outcome and
+// flag an unexpected success. Only the allocation is attempted here -- the
+// BO's contents are never touched, so there is no SIGBUS risk on a partially
+// backed heap.
+static void
+dev_bo_expect_cross_chunk_rejected(device* dev, size_t size)
+{
+  try {
+    bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+  } catch (const std::exception& ex) {
+    std::cout << "cross-chunk dev BO rejected as expected: " << ex.what() << std::endl;
+    return;
+  }
+  throw std::runtime_error("cross-chunk dev BO unexpectedly allocated");
+}
+
+// Allocate a single dev BO larger than one heap chunk so it spans multiple
+// chunks, then verify its contents end to end. arg[0] is the BO size; use
+// size > dev_heap_chunk_size (e.g. 128MB to cross two chunks, 512MB to span the
+// whole npu4 heap, >512MB to exceed the npu4 cap on aie4). On npu1 the same
+// allocation is expected to be rejected.
 void
-TEST_reject_second_open(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+TEST_dev_bo_cross_heap(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
-  const std::string accel_node = resolve_accel_node_path(dev);
+  auto size = static_cast<size_t>(arg[0]);
 
-  errno = 0;
-  int fd = ::open(accel_node.c_str(), accel_node_open_flags(accel_node));
-  if (fd >= 0) {
-    ::close(fd);
-    throw std::runtime_error("second open() of " + accel_node + " unexpectedly succeeded");
-  }
-  if (errno != EBUSY) {
-    throw std::runtime_error("second open() of " + accel_node + " failed with errno " +
-      std::to_string(errno) + " (" + std::strerror(errno) + "), expected EBUSY");
-  }
-  std::cout << "second open() correctly rejected with EBUSY" << std::endl;
+  if (size <= dev_heap_chunk_size)
+    throw std::runtime_error("cross-heap dev BO size must exceed one chunk");
 
-  // The already-open shim device must still be usable after the rejected open.
-  auto raw = device_query<query::clock_freq_topology_raw>(dev);
-  if (raw.empty())
-    throw std::runtime_error("existing device query failed after rejected second open");
+  if (!dev_heap_supports_cross_chunk(id, dev)) {
+    dev_bo_expect_cross_chunk_rejected(dev, size);
+    return;
+  }
+
+  bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+
+  // dev_mem_base is chunk aligned, so the number of chunk boundaries the BO's
+  // device address range crosses is a direct division. A size larger than one
+  // chunk guarantees at least one crossing.
+  auto start = dev_bo.paddr();
+  auto crossed = (start + size - 1) / dev_heap_chunk_size - start / dev_heap_chunk_size;
+  std::cout << "dev BO size 0x" << std::hex << size << " at 0x" << start << std::dec
+            << " spans " << (crossed + 1) << " heap chunks" << std::endl;
+  if (crossed < 1)
+    throw std::runtime_error("dev BO did not cross a heap chunk boundary");
+
+  dev_bo_fill_and_verify(dev_bo, size);
+}
+
+// Negative test (npu4): a dev BO larger than npu4's max heap size can never be
+// backed and must fail to allocate. arg[0] is the (too large) size.
+void
+TEST_dev_bo_over_max(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto size = static_cast<size_t>(arg[0]);
+
+  bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+}
+
+// Stress: repeatedly allocate and free cross-heap dev BOs, verifying the
+// chunk boundaries each time. Exercises heap expansion, drm_mm reuse after
+// free, and the kernel's find-heap-chunk walk under churn. arg[0] is the BO
+// size, arg[1] the iteration count.
+void
+TEST_dev_bo_cross_heap_stress(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+  auto size = static_cast<size_t>(arg[0]);
+  auto iters = static_cast<size_t>(arg[1]);
+
+  if (size <= dev_heap_chunk_size)
+    throw std::runtime_error("cross-heap dev BO size must exceed one chunk");
+
+  if (!dev_heap_supports_cross_chunk(id, dev)) {
+    dev_bo_expect_cross_chunk_rejected(dev, size);
+    return;
+  }
+
+  for (size_t i = 0; i < iters; i++) {
+    bo dev_bo{dev, size, XCL_BO_FLAGS_CACHEABLE, 0};
+    dev_bo_verify_boundaries(dev_bo, size);
+  }
+
+  // Also hold several cross-heap dev BOs live at once, then verify each, to
+  // exercise multiple large BOs coexisting in the expanded heap.
+  size_t live = dev_heap_max_size / size;
+  if (live > 1) {
+    std::vector<std::unique_ptr<bo>> bos;
+    for (size_t i = 0; i < live; i++)
+      bos.push_back(std::make_unique<bo>(dev, size, XCL_BO_FLAGS_CACHEABLE, 0));
+    for (auto& b : bos)
+      dev_bo_verify_boundaries(*b, size);
+  }
 }
 
 class mmapped_file {
@@ -1101,6 +1270,252 @@ TEST_create_destroy_hw_queue(device::id_type id, std::shared_ptr<device>& sdev, 
   auto hwq2 = hwctx.get()->get_hw_queue();
 }
 
+constexpr uint32_t HWCTX_QUERY_CAPACITY = 64;
+
+struct hwctx_info_probe {
+  int ret;
+  int err;
+  uint32_t bytes_written;
+  bool found_self;
+};
+
+struct hwctx_array_probe {
+  int ret;
+  int err;
+  uint32_t num_element;
+  uint32_t element_size;
+  bool found_self;
+};
+
+void
+TEST_query_hw_contexts(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Create a context so the query returns an entry to validate.
+  hw_ctx hwctx{sdev.get()};
+
+  auto probe = fork_query<hwctx_info_probe>(sdev.get(), [](int fd) {
+    std::array<amdxdna_drm_query_hwctx, HWCTX_QUERY_CAPACITY> entries{};
+    const uint32_t in_size = entries.size() * sizeof(entries[0]);
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_HW_CONTEXTS,
+      .buffer_size = in_size,
+      .buffer = reinterpret_cast<uintptr_t>(entries.data()),
+    };
+
+    hwctx_info_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+    r.err = errno;
+    if (r.ret == 0) {
+      // QUERY_HW_CONTEXTS reports the leftover capacity in buffer_size.
+      r.bytes_written = in_size - info.buffer_size;
+      const uint32_t n = r.bytes_written / sizeof(entries[0]);
+      const __s64 self_pid = getppid();
+      for (uint32_t i = 0; i < n && i < entries.size(); i++) {
+        if (entries[i].pid == self_pid) {
+          r.found_self = true;
+          break;
+        }
+      }
+    }
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(QUERY_HW_CONTEXTS) failed: " + std::string(std::strerror(probe.err)));
+  if (probe.bytes_written > HWCTX_QUERY_CAPACITY * sizeof(amdxdna_drm_query_hwctx))
+    throw std::runtime_error("QUERY_HW_CONTEXTS wrote more than the input buffer");
+  if (probe.bytes_written % sizeof(amdxdna_drm_query_hwctx))
+    throw std::runtime_error("QUERY_HW_CONTEXTS byte count not element-aligned");
+  if (!probe.found_self)
+    throw std::runtime_error("QUERY_HW_CONTEXTS did not report the created context");
+}
+
+void
+TEST_hw_context_all(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Create a context so the query returns an entry to validate.
+  hw_ctx hwctx{sdev.get()};
+
+  auto probe = fork_query<hwctx_array_probe>(sdev.get(), [](int fd) {
+    std::array<amdxdna_drm_hwctx_entry, HWCTX_QUERY_CAPACITY> entries{};
+    amdxdna_drm_get_array array = {
+      .param = DRM_AMDXDNA_HW_CONTEXT_ALL,
+      .element_size = sizeof(entries[0]),
+      .num_element = static_cast<uint32_t>(entries.size()),
+      .buffer = reinterpret_cast<uintptr_t>(entries.data()),
+    };
+
+    hwctx_array_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_ARRAY, &array);
+    r.err = errno;
+    if (r.ret == 0) {
+      r.num_element = array.num_element;
+      r.element_size = array.element_size;
+      const __s64 self_pid = getppid();
+      for (uint32_t i = 0; i < array.num_element && i < entries.size(); i++) {
+        if (entries[i].pid == self_pid) {
+          r.found_self = true;
+          break;
+        }
+      }
+    }
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(HW_CONTEXT_ALL) failed: " + std::string(std::strerror(probe.err)));
+  if (probe.num_element > HWCTX_QUERY_CAPACITY)
+    throw std::runtime_error("HW_CONTEXT_ALL num_element exceeds input");
+  if (probe.element_size == 0 || probe.element_size > sizeof(amdxdna_drm_hwctx_entry))
+    throw std::runtime_error("HW_CONTEXT_ALL element_size out of range");
+  if (!probe.found_self)
+    throw std::runtime_error("HW_CONTEXT_ALL did not report the created context");
+}
+
+// Fetch per-context and total memory usage through the query keys
+// (query::aie_partition_info and query::total_mem_usage) instead of issuing the
+// raw DRM_AMDXDNA_BO_USAGE ioctl. These keys go through the shim's already-open
+// device fd, so no forked helper is needed. A partition entry (and thus a
+// non-zero memory_usage / a process_name) only exists while a hw context is
+// live, so create one and allocate a known amount of BO memory to bound the
+// reported usage from below. Exact total/internal/heap accounting is covered
+// separately by TEST_create_free_internal_bo.
+void
+TEST_query_memory_usage(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto dev = sdev.get();
+
+  // A live context is required for this process to appear in aie_partition_info.
+  hw_ctx hwctx{dev};
+
+  // Allocate application (SHARE) and internal (CMD) BOs so this process has a
+  // known, non-zero BO footprint counted in total_usage.
+  auto boflags = XRT_BO_FLAGS_HOST_ONLY;
+  auto ext_boflags = XRT_BO_USE_CTRLPKT << 4;
+  size_t size = 0x4000;
+  auto ext_bo = std::make_unique<bo>(dev, size * 5, boflags, 0);
+  auto int_bo = std::make_unique<bo>(dev, size * 3, boflags, ext_boflags);
+  const uint64_t bo_bytes = ext_bo->size() + int_bo->size();
+
+  const int self_pid = static_cast<int>(getpid());
+
+  // Per-context memory_usage and process_name via aie_partition_info.
+  const auto partitions = device_query<query::aie_partition_info>(dev);
+  uint64_t self_mem = 0;
+  bool found_self = false;
+  for (const auto& p : partitions) {
+    if (p.pid != self_pid)
+      continue;
+    found_self = true;
+    self_mem = p.memory_usage;
+
+    // process_name is copied from the driver-provided hwctx entry name. A new
+    // shim on an older staging driver reads it back empty (-> "N/A"), so only
+    // validate it when populated. current->comm is capped at 15 chars, matching
+    // the value the kernel stores, so /proc/self/comm is an exact reference.
+    if (!p.process_name.empty()) {
+      std::string comm;
+      std::ifstream comm_file("/proc/self/comm");
+      if (!std::getline(comm_file, comm))
+        throw std::runtime_error("failed to read /proc/self/comm to verify process_name");
+      if (p.process_name != comm)
+        throw std::runtime_error("process_name mismatch: got '" + p.process_name +
+                                 "', expected '" + comm + "'");
+    }
+    break;
+  }
+
+  if (!found_self)
+    throw std::runtime_error("aie_partition_info did not report this process's context");
+
+  // memory_usage is the owning process's total BO footprint (S + C + H); it must
+  // at least cover the BOs allocated above.
+  if (self_mem < bo_bytes) {
+    std::cout << "memory_usage " << self_mem << " < allocated BO bytes " << bo_bytes
+              << std::endl;
+    throw std::runtime_error("aie_partition_info memory_usage too small");
+  }
+
+  // total_mem_usage aggregates unique PIDs, so the device-wide total must be at
+  // least this process's own usage.
+  const uint64_t total = device_query<query::total_mem_usage>(dev);
+  if (total < self_mem) {
+    std::cout << "total_mem_usage " << total << " < this process memory_usage "
+              << self_mem << std::endl;
+    throw std::runtime_error("total_mem_usage smaller than per-process usage");
+  }
+}
+
+constexpr uint32_t TELEMETRY_DATA_SIZE = 256 * 1024;
+constexpr uint32_t TELEMETRY_MAP_CAPACITY = 256;
+// aie4 selects a telemetry category via the type field; older NPUs require 0.
+constexpr uint32_t AIE4_TELEMETRY_PERF_COUNTER = 1;
+
+struct telemetry_probe {
+  int ret;
+  int err;
+  uint32_t map_num_elements;
+};
+
+void
+TEST_query_telemetry(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  uint32_t type = dev_filter_is_aie4(id, sdev.get()) ? AIE4_TELEMETRY_PERF_COUNTER : 0;
+
+  auto probe = fork_query<telemetry_probe>(sdev.get(), [type](int fd) {
+    const uint32_t buf_sz = sizeof(amdxdna_drm_query_telemetry_header) +
+                            TELEMETRY_MAP_CAPACITY * sizeof(uint32_t) +
+                            TELEMETRY_DATA_SIZE;
+    // uint32_t storage guarantees alignment for the telemetry header.
+    std::vector<uint32_t> buf(buf_sz / sizeof(uint32_t), 0);
+    auto *hdr = reinterpret_cast<amdxdna_drm_query_telemetry_header *>(buf.data());
+    hdr->type = type;
+
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+      .buffer_size = buf_sz,
+      .buffer = reinterpret_cast<uintptr_t>(buf.data()),
+    };
+
+    telemetry_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+    r.err = errno;
+    r.map_num_elements = hdr->map_num_elements;
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(QUERY_TELEMETRY) failed: " + std::string(std::strerror(probe.err)));
+
+  if (probe.map_num_elements > TELEMETRY_MAP_CAPACITY)
+    throw std::runtime_error("QUERY_TELEMETRY: map_num_elements > capacity");
+}
+
+void
+TEST_query_telemetry_short_buf(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  // Negative case: a header-only buffer must fail EINVAL.
+  int err = fork_query<int>(sdev.get(), [](int fd) {
+    amdxdna_drm_query_telemetry_header hdr{};
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_QUERY_TELEMETRY,
+      .buffer_size = sizeof(hdr),
+      .buffer = reinterpret_cast<uintptr_t>(&hdr),
+    };
+    if (::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info) == -1)
+      return errno;
+    return 0;
+  });
+
+  if (err != EINVAL)
+    throw std::runtime_error(
+      "QUERY_TELEMETRY with header-only buffer should fail EINVAL, got "
+      + std::to_string(err));
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1139,7 +1554,7 @@ std::vector<test_case> test_list {
   // get async error in multi thread before running any other tests
   // there may or may not be async error.
   test_case{ "get async error in multithread - INITIAL", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_async_error_multi, {false}
+    TEST_POSITIVE, dev_filter_is_aie, TEST_async_error_multi, {false}
   },
   //test_case{ "non_xdna_userpf: query(rom_vbnv)", {},
   //  TEST_POSITIVE, dev_filter_not_xdna, TEST_query_userpf<query::rom_vbnv>, {}
@@ -1197,7 +1612,16 @@ std::vector<test_case> test_list {
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_io_any, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_io_any, {}
+  },
+  test_case{ "io test TDR: faulting head times out, queued jobs abort", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_tdr_timeout_and_abort, {}
+  },
+  test_case{ "io test TDR: partial chain interrupted mid-publish is aborted", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_tdr_partial_chain_abort, {}
+  },
+  test_case{ "io test TDR: not-yet-published submit returns -EAGAIN", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_tdr_single_submit_eagain, {}
   },
   test_case{ "io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
@@ -1302,23 +1726,38 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
    test_case{ "multi-command preempt full ELF io test real kernel good run", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
   },
   test_case{ "io test timeout run for context health report", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_timeout, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_timeout, {}
   },
   test_case{ "app health query multi-context with and without ctx-id filter", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_app_health_query_multi_ctx, {}
+  },
+  test_case{ "query hw_contexts (get_info)", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_hw_contexts, {}
+  },
+  test_case{ "hw_context_all (get_array)", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_hw_context_all, {}
+  },
+  test_case{ "query memory usage (total_mem_usage/aie_partition_info)", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_memory_usage, {}
+  },
+  test_case{ "query telemetry", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_telemetry, {}
+  },
+  test_case{ "query telemetry header-only buffer fails", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_telemetry_short_buf, {}
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_async_error_multi, {true}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
@@ -1326,20 +1765,40 @@ std::vector<test_case> test_list {
   test_case{ "create and free internal bo", {},
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_internal_bo, {}
   },
-  test_case{ "reject second device open from same process", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_reject_second_open, {}
+  // npu4 and aie4 back the dev heap with multiple, expandable chunks, so
+  // cross-chunk dev BOs work. npu1 has a single fixed chunk, so the same
+  // allocation is expected to be rejected -- the test handles that internally
+  // and still passes. Filter on device type only (not the amdxdna driver) so
+  // these also run on the QEMU guest where the NPU is a virtio-gpu device.
+  test_case{ "dev BO crossing two heap chunks (128MB)", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_dev_bo_cross_heap, { 128ul * 1024 * 1024 }
+  },
+  test_case{ "dev BO spanning the whole heap (512MB)", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_dev_bo_cross_heap, { 512ul * 1024 * 1024 }
+  },
+  test_case{ "dev BO cross-heap alloc/free stress", {},
+    TEST_POSITIVE, dev_filter_is_aie, TEST_dev_bo_cross_heap_stress,
+    { 128ul * 1024 * 1024, 100 }
+  },
+  // npu4 caps the dev heap at 512MB, so a larger BO must be rejected.
+  test_case{ "dev BO larger than max heap rejected (npu4)", {},
+    TEST_NEGATIVE, dev_filter_is_npu4, TEST_dev_bo_over_max, { 576ul * 1024 * 1024 }
+  },
+  // aie4 has no 512MB heap cap, so the same over-512MB BO must allocate fine.
+  test_case{ "dev BO larger than 512MB accepted (aie4)", {},
+    TEST_POSITIVE, dev_filter_is_aie4, TEST_dev_bo_cross_heap, { 576ul * 1024 * 1024 }
   },
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
   },
   test_case{ "get AIE coredump and check registers", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_coredump, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_io_coredump, {}
   },
   test_case{ "AIE MEM read/write", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_mem, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_io_aie_mem, {}
   },
   test_case{ "AIE REG read/write", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_aie_reg, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {false}
@@ -1351,13 +1810,13 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_mmaped_uptr_bo, {}
   },
   test_case{ "DPM noop (no QoS)", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_noop_no_qos, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_noop_no_qos, {}
   },
   test_case{ "DPM refcount scaling", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_refcount_scaling, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_refcount_scaling, {}
   },
   test_case{ "DPM power modes", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_dpm_power_modes, {}
+    TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_power_modes, {}
   },
   test_case{ "CERT log: attach/detach", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_attach_detach, {}

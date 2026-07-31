@@ -15,6 +15,7 @@
 
 #include "aie.h"
 #include "aie2_msg_priv.h"
+#include "amdxdna_error.h"
 #include "amdxdna_mailbox.h"
 
 /* Firmware determines device memory base address and size */
@@ -124,6 +125,9 @@ struct aie2_tdr {
 	enum aie2_tdr_status progress;
 #ifndef HAVE_6_17_drm_gpu_sched_stat_no_hang
 	struct delayed_work work;
+#else
+	/* jiffies of the last progress signal (job completion or submission) */
+	unsigned long last_signal;
 #endif
 };
 
@@ -141,17 +145,14 @@ struct amdxdna_dev_hdl {
 	u32				dpm_level;
 	u32				dft_dpm_level;
 	u32				max_dpm_level;
-	u32				force_preempt_enabled;
 	u32				frame_boundary_preempt;
 
 	/* Mailbox and the management channel */
 	struct mailbox			*mbox;
-	struct async_events		*async_events;
 
 	enum aie2_dev_status		dev_status;
 	u32				hwctx_num;
 
-	struct amdxdna_async_error	last_async_err;
 	enum aie2_tdr_status		tdr_status;
 	struct aie2_tdr			tdr; /* TDR for device recovery */
 };
@@ -194,6 +195,7 @@ struct amdxdna_dev_priv {
 	struct aie_bar_off_pair		sram_offs[SRAM_MAX_INDEX];
 	struct aie_bar_off_pair		psp_regs_off[PSP_MAX_REGS];
 	struct aie_bar_off_pair		smu_regs_off[SMU_MAX_REGS];
+	bool				smu_intr_enabled;
 	const struct aie_hw_ops		*hw_ops;
 };
 
@@ -213,13 +215,14 @@ extern const struct aie_hw_ops npu4_hw_ops;
 
 /* aie2_pm.c */
 int aie2_pm_start(struct amdxdna_dev_hdl *ndev);
-int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target);
+int aie2_pm_set_mode(struct amdxdna_dev_hdl *ndev, enum amdxdna_power_mode_type target,
+		     u32 *settle_ms);
 int aie2_pm_set_dpm(struct amdxdna_dev_hdl *ndev, u32 dpm_level);
 
 /* aie2_error.c */
-int aie2_error_async_events_alloc(struct amdxdna_dev_hdl *ndev);
-void aie2_error_async_events_free(struct amdxdna_dev_hdl *ndev);
-int aie2_error_async_msg_thread(void *data);
+extern const struct aie_error_lut_set aie2_error_luts;
+int aie2_async_event_register(struct aie_device *aie, dma_addr_t addr, u32 size,
+			      void *handle, int (*cb)(void *, void __iomem *, size_t));
 int aie2_get_array_async_error(struct amdxdna_dev_hdl *ndev,
 			       struct amdxdna_drm_get_array *args);
 
@@ -277,6 +280,9 @@ int aie2_query_status(struct amdxdna_dev_hdl *ndev, char __user *buf, u32 size, 
 int aie2_query_telemetry(struct amdxdna_dev_hdl *ndev,
 			 char __user *buf, u32 size,
 			 struct amdxdna_drm_query_telemetry_header *header);
+int aie2_fill_hwctx_health(struct aie_device *aie, struct amdxdna_hwctx *hwctx,
+			   struct amdxdna_drm_hwctx_entry *entry);
+int aie2_fill_hwctx_map(struct aie_device *aie, u32 *map);
 int aie2_register_asyn_event_msg(struct amdxdna_dev_hdl *ndev, dma_addr_t addr, u32 size,
 				 void *handle, int (*cb)(void*, void __iomem *, size_t));
 int aie2_config_cu(struct amdxdna_hwctx *hwctx,

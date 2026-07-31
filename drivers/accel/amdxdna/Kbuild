@@ -33,6 +33,7 @@ amdxdna-y := \
 	amdxdna_sysfs.o \
 	amdxdna_ubuf.o \
 	amdxdna_cbuf.o \
+	amdxdna_cma_buf.o \
 	amdxdna_xen.o \
 	amdxdna_sensors.o
 
@@ -48,9 +49,11 @@ amdxdna-$(OFT_CONFIG_AMDXDNA_PCI) += \
 	aie2_solver.o \
 	aie2_tdr.o \
 	aie4_ctx.o \
+	aie4_error.o \
 	aie4_message.o \
 	aie4_pci.o \
 	amdxdna_dpt.o \
+	amdxdna_error.o \
 	npu1_regs.o \
 	npu3_regs.o \
 	npu4_regs.o \

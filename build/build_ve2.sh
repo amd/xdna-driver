@@ -7,7 +7,7 @@ MACHINE="amd-cortexa78-mali-common"
 RPM_ARCH_DIR="amd_cortexa78_mali_common"
 
 YOCTO_REPO_URL="${YOCTO_REPO_URL:-https://github.com/Xilinx/yocto-manifests.git}"
-YOCTO_BRANCH="${YOCTO_BRANCH:-refs/tags/amd-edf-rel-v25.11}"
+YOCTO_BRANCH="${YOCTO_BRANCH:-refs/tags/amd-edf-rel-v26.06}"
 MANIFEST_FILE="${MANIFEST_FILE:-default-edf.xml}"
 set -e
 

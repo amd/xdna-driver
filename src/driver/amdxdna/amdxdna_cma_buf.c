@@ -5,6 +5,8 @@
 
 #include <linux/kernel.h>
 #include <linux/dma-buf.h>
+#include <linux/dma-mapping.h>
+#include <linux/mm.h>
 #include "amdxdna_cma_buf.h"
 
 struct amdxdna_cmabuf_priv {
@@ -75,7 +77,8 @@ static void amdxdna_cmabuf_free(struct device *dev, void *cpu_addr,
 				bool cacheable)
 {
 	if (cacheable)
-		dma_free_wc(dev, size, cpu_addr, dma_addr);
+		dma_free_noncoherent(dev, size, cpu_addr, dma_addr,
+				     DMA_BIDIRECTIONAL);
 	else
 		dma_free_coherent(dev, size, cpu_addr, dma_addr);
 }
@@ -108,16 +111,17 @@ static int amdxdna_cmabuf_mmap(struct dma_buf *dbuf, struct vm_area_struct *vma)
 
 	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
 
-	if (cmabuf->cacheable)
-		ret = dma_mmap_wc(cmabuf->dev, vma,
-				  cmabuf->cpu_addr,
-				  cmabuf->dma_addr,
-				  cmabuf->size);
-	else
+	if (cmabuf->cacheable) {
+		unsigned long pfn = page_to_pfn(virt_to_page(cmabuf->cpu_addr));
+
+		ret = remap_pfn_range(vma, vma->vm_start, pfn,
+				      size, vma->vm_page_prot);
+	} else {
 		ret = dma_mmap_coherent(cmabuf->dev, vma,
 					cmabuf->cpu_addr,
 					cmabuf->dma_addr,
 					cmabuf->size);
+	}
 
 	vma->vm_pgoff = vm_pgoff;
 
@@ -158,7 +162,8 @@ static struct dma_buf *amdxdna_get_cma_buf(struct device *dev,
 	size = PAGE_ALIGN(size);
 
 	if (cacheable)
-		cpu_addr = dma_alloc_wc(dev, size, &dma_addr, GFP_KERNEL);
+		cpu_addr = dma_alloc_noncoherent(dev, size, &dma_addr,
+						 DMA_BIDIRECTIONAL, GFP_KERNEL);
 	else
 		cpu_addr = dma_alloc_coherent(dev, size, &dma_addr, GFP_KERNEL);
 	if (!cpu_addr) {

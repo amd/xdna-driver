@@ -25,12 +25,19 @@ private:
   const xrt_core::query::request&
   lookup_query(xrt_core::query::key_type query_key) const override;
 
+  // Save core rows to avoid repeatedly retrieving from driver, query only once.
+  mutable std::once_flag m_core_rows_once;
+  mutable uint32_t m_core_rows = 0;
+
 public:
   device(const pdev& pdev, handle_type shim_handle, id_type device_id);
   ~device();
 
   const pdev&
   get_pdev() const;
+
+  uint32_t
+  get_core_rows() const;
 
 // ISHIM APIs supported are listed below
 public:

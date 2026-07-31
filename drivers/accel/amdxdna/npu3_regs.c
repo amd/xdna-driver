@@ -6,9 +6,9 @@
 #include "drm/amdxdna_accel.h"
 #include <drm/drm_device.h>
 
+#include "aie4_msg_priv.h"
 #include "aie4_pci.h"
 #include "amdxdna_pci_drv.h"
-#include "amdxdna_sensors.h"
 
 #define NPU3_MBOX_BAR		0
 
@@ -44,6 +44,8 @@ static const struct amdxdna_fw_feature_tbl npu3_fw_feature_table[] = {
 	{ .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_GET_COREDUMP), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_RW_ACCESS), .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_FW_LOG), .major = 6, .min_minor = 0 },
+	{ .features = BIT_U64(AIE4_FW_TRACE), .major = 6, .min_minor = 0 },
 	{ .features = BIT_U64(AIE4_CALIBRATE_CLOCK), .major = 6, .min_minor = 0 },
 	{ 0 }
 };
@@ -73,7 +75,7 @@ static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
 
 	while (ndev->priv->dpm_clk_tbl[max_dpm_level].hclk)
 		max_dpm_level++;
-	max_dpm_level--;
+	max_dpm_level--; /* last element is 0 */
 
 	if (max_dpm_level < 0 || dpm_level > max_dpm_level) {
 		XDNA_ERR(aie->xdna, "Invalid dpm level, max:%d, request:%d",
@@ -96,15 +98,20 @@ static int npu3_set_dpm(struct aie_device *aie, u32 dpm_level)
 static int npu3_update_counters(struct aie_device *aie)
 {
 	struct amdxdna_dev_hdl *ndev = aie->xdna->dev_handle;
-	struct amdxdna_sensors npu_metrics = {};
+	u32 aieclk_level, npuhclk_level;
 	int ret;
 
-	ret = amdxdna_get_sensors(&npu_metrics);
-	if (ret)
-		return ret;
+	ret = aie4_query_dpm_level(ndev, &aieclk_level, &npuhclk_level);
+	if (!ret) {
+		aie->npuclk_freq = ndev->dpm_clk_tbl[aieclk_level].npuclk;
+		aie->hclk_freq = ndev->dpm_clk_tbl[npuhclk_level].hclk;
+		aie->max_tops = NPU3_DPM_TOPS(ndev, ndev->dpm_clk_tbl[ndev->max_dpm_level].hclk);
+		if (!aie->hclk_freq)
+			XDNA_WARN(aie->xdna, "dpm freq table not populated, clk is 0");
+	} else {
+		XDNA_WARN(aie->xdna, "cannot get dpm level from fw, using default");
+	}
 
-	aie->npuclk_freq = npu_metrics.mpnpuclk_freq;
-	aie->hclk_freq = npu_metrics.npuclk_freq;
 	aie->curr_tops = NPU3_DPM_TOPS(ndev, aie->hclk_freq);
 
 	return 0;
@@ -164,6 +171,8 @@ const struct amdxdna_dev_info dev_npu3_pf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu3_vf_info = {
@@ -176,6 +185,8 @@ const struct amdxdna_dev_info dev_npu3_vf_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu3_classic_info = {
@@ -190,6 +201,8 @@ const struct amdxdna_dev_info dev_npu3_classic_info = {
 	.fw_feature_tbl		= npu3_fw_feature_table,
 	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu9_pf_info = {
@@ -201,7 +214,10 @@ const struct amdxdna_dev_info dev_npu9_pf_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_PF,
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu9_vf_info = {
@@ -212,7 +228,10 @@ const struct amdxdna_dev_info dev_npu9_vf_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.dev_priv		= &npu3_dev_vf_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu9_classic_info = {
@@ -225,7 +244,55 @@ const struct amdxdna_dev_info dev_npu9_classic_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+};
+
+const struct amdxdna_dev_info dev_npu10_pf_info = {
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
+	.psp_bar		= NPU3_PSP_BAR_INDEX,
+	.smu_bar		= NPU3_SMU_BAR_INDEX,
+	.default_vbnv		= "RyzenAI-npu10-pf",
+	.device_type		= AMDXDNA_DEV_TYPE_PF,
+	.dev_priv		= &npu3_dev_priv,
+	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
+	.ops			= &aie4_pf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+};
+
+const struct amdxdna_dev_info dev_npu10_vf_info = {
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
+	.doorbell_bar		= NPU3_DOORBELL_BAR,
+	.default_vbnv		= "RyzenAI-npu10-vf",
+	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
+	.dev_priv		= &npu3_dev_vf_priv,
+	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
+	.ops			= &aie4_vf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
+};
+
+const struct amdxdna_dev_info dev_npu10_classic_info = {
+	.mbox_bar		= NPU3_MBOX_BAR,
+	.sram_bar		= NPU3_MBOX_BUFFER_BAR,
+	.psp_bar		= NPU3_PSP_BAR_INDEX,
+	.smu_bar		= NPU3_SMU_BAR_INDEX,
+	.doorbell_bar		= NPU3_DOORBELL_BAR,
+	.default_vbnv		= "RyzenAI-npu10",
+	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
+	.dev_priv		= &npu3_dev_priv,
+	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
+	.ops			= &aie4_classic_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu11_pf_info = {
@@ -237,7 +304,10 @@ const struct amdxdna_dev_info dev_npu11_pf_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_PF,
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_pf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu11_vf_info = {
@@ -248,7 +318,10 @@ const struct amdxdna_dev_info dev_npu11_vf_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.dev_priv		= &npu3_dev_vf_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_vf_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };
 
 const struct amdxdna_dev_info dev_npu11_classic_info = {
@@ -261,5 +334,8 @@ const struct amdxdna_dev_info dev_npu11_classic_info = {
 	.device_type		= AMDXDNA_DEV_TYPE_UMQ,
 	.dev_priv		= &npu3_dev_priv,
 	.fw_feature_tbl		= npu3_fw_feature_table,
+	.cert_feature_tbl	= npu3_cert_feature_table,
 	.ops			= &aie4_classic_ops,
+	.luts			= &aie4_error_luts,
+	.async_max_status_code	= MAX_AIE4_MSG_STATUS_CODE,
 };

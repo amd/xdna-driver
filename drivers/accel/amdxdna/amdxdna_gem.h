@@ -12,7 +12,6 @@
 #include "amdxdna_pci_drv.h"
 
 struct amdxdna_umap {
-	struct vm_area_struct		*vma;
 	struct mmu_interval_notifier	notifier;
 	struct hmm_range		range;
 	struct work_struct		hmm_unreg_work;
@@ -34,6 +33,10 @@ struct amdxdna_mem {
 	 * without taking notifier_lock.
 	 */
 	u64				uva;
+	struct sg_table			*sgt;
+	struct page			**pages;
+	unsigned long			nr_pages;
+	struct mm_struct		*mm;
 };
 
 struct amdxdna_gem_obj {
@@ -56,12 +59,14 @@ struct amdxdna_gem_obj {
 
 	/* True, if BO is managed by XRT, not application */
 	bool				internal;
-	/* True, if BO is not exportable */
-	bool				pri;
+	/* True, if BO is not shmem bo */
+	bool				private_buffer;
+	bool				readonly;
 };
 
 #define to_gobj(obj)    (&(obj)->base.base)
 #define is_import_bo(obj) ((obj)->attach)
+#define is_private_bo(obj) ((obj)->private_buffer)
 
 static inline struct amdxdna_gem_obj *to_xdna_obj(struct drm_gem_object *gobj)
 {
@@ -89,12 +94,19 @@ u64 amdxdna_gem_dev_addr(struct amdxdna_gem_obj *abo);
 
 static inline u64 amdxdna_dev_bo_offset(struct amdxdna_gem_obj *abo)
 {
-	return amdxdna_gem_dev_addr(abo) - abo->client->xdna->dev_info->dev_mem_base;
+	return amdxdna_gem_dev_addr(abo) - to_xdna_dev(to_gobj(abo)->dev)->dev_info->dev_mem_base;
 }
 
 static inline u64 amdxdna_obj_dma_addr(struct amdxdna_gem_obj *abo)
 {
-	return amdxdna_pasid_on(abo->client) ? amdxdna_gem_uva(abo) : abo->mem.dma_addr;
+	/*
+	 * amdxdna_gem_obj_open() calls amdxdna_dma_map_bo() only when PASID is
+	 * off, leaving mem.dma_addr at AMDXDNA_INVALID_ADDR when PASID is on.
+	 * Avoid dereferencing abo->client, which is cleared to NULL by
+	 * amdxdna_gem_obj_close() while internal kernel references remain.
+	 */
+	return (abo->mem.dma_addr != AMDXDNA_INVALID_ADDR) ?
+		abo->mem.dma_addr : amdxdna_gem_uva(abo);
 }
 
 void amdxdna_umap_put(struct amdxdna_umap *mapp);
@@ -106,10 +118,22 @@ amdxdna_gem_prime_import(struct drm_device *dev, struct dma_buf *dma_buf);
 struct amdxdna_gem_obj *
 amdxdna_drm_create_dev_bo(struct drm_device *dev,
 			  struct amdxdna_drm_create_bo *args, struct drm_file *filp);
+struct amdxdna_gem_obj *
+amdxdna_gem_create_obj(struct drm_device *dev, size_t size);
+void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo);
+struct sg_table *amdxdna_gem_get_sgt(struct amdxdna_gem_obj *abo);
 
 int amdxdna_gem_pin_nolock(struct amdxdna_gem_obj *abo);
 int amdxdna_gem_pin(struct amdxdna_gem_obj *abo);
 void amdxdna_gem_unpin(struct amdxdna_gem_obj *abo);
+int amdxdna_gem_obj_open(struct drm_gem_object *gobj, struct drm_file *filp);
+void amdxdna_gem_obj_close(struct drm_gem_object *gobj, struct drm_file *filp);
+int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
+			 struct mm_struct *mm,
+			 unsigned long addr, unsigned long len);
+void amdxdna_hmm_unregister(struct amdxdna_gem_obj *abo,
+			    struct mm_struct *mm,
+			    unsigned long addr, unsigned long len);
 
 int amdxdna_drm_create_bo_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);
 int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp);

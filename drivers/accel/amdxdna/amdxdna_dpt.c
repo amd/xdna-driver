@@ -652,10 +652,9 @@ static int amdxdna_dpt_fini_kind(struct aie_device *aie, enum amdxdna_dpt_kind k
 	return 0;
 }
 
-static int amdxdna_dpt_suspend_kind(struct aie_device *aie,
+static int amdxdna_dpt_suspend_kind(struct amdxdna_dev *xdna,
 				    enum amdxdna_dpt_kind kind)
 {
-	struct amdxdna_dev *xdna = aie->xdna;
 	struct amdxdna_dpt __rcu **slot;
 	struct amdxdna_dpt *dpt;
 
@@ -714,10 +713,9 @@ static int amdxdna_dpt_suspend_kind(struct aie_device *aie,
 	return 0;
 }
 
-static int amdxdna_dpt_resume_kind(struct aie_device *aie,
+static int amdxdna_dpt_resume_kind(struct amdxdna_dev *xdna,
 				   enum amdxdna_dpt_kind kind)
 {
-	struct amdxdna_dev *xdna = aie->xdna;
 	struct amdxdna_dpt __rcu **slot;
 	struct amdxdna_dpt *dpt;
 	int ret;
@@ -863,26 +861,34 @@ int amdxdna_dpt_fini(struct aie_device *aie)
 	return amdxdna_dpt_fini_kind(aie, AMDXDNA_DPT_FW_TRACE);
 }
 
-int amdxdna_dpt_suspend(struct aie_device *aie)
+int amdxdna_dpt_suspend(struct amdxdna_dev *xdna)
 {
-	int ret;
+	int ret, ret2;
 
-	ret = amdxdna_dpt_suspend_kind(aie, AMDXDNA_DPT_FW_LOG);
-	if (ret)
-		return ret;
+	/*
+	 * FW_LOG and FW_TRACE are independent DPT kinds. Suspend every kind
+	 * and aggregate the result so a failure on one does not skip the
+	 * other; each kind is a safe no-op when it is not active.
+	 */
+	ret = amdxdna_dpt_suspend_kind(xdna, AMDXDNA_DPT_FW_LOG);
+	ret2 = amdxdna_dpt_suspend_kind(xdna, AMDXDNA_DPT_FW_TRACE);
 
-	return amdxdna_dpt_suspend_kind(aie, AMDXDNA_DPT_FW_TRACE);
+	return ret ? ret : ret2;
 }
 
-int amdxdna_dpt_resume(struct aie_device *aie)
+int amdxdna_dpt_resume(struct amdxdna_dev *xdna)
 {
-	int ret;
+	int ret, ret2;
 
-	ret = amdxdna_dpt_resume_kind(aie, AMDXDNA_DPT_FW_LOG);
-	if (ret)
-		return ret;
+	/*
+	 * FW_LOG and FW_TRACE are independent DPT kinds. Resume every kind
+	 * and aggregate the result so a failure on one does not skip the
+	 * other; each kind is a safe no-op when it is not active.
+	 */
+	ret = amdxdna_dpt_resume_kind(xdna, AMDXDNA_DPT_FW_LOG);
+	ret2 = amdxdna_dpt_resume_kind(xdna, AMDXDNA_DPT_FW_TRACE);
 
-	return amdxdna_dpt_resume_kind(aie, AMDXDNA_DPT_FW_TRACE);
+	return ret ? ret : ret2;
 }
 
 int amdxdna_get_fw_log(struct aie_device *aie,

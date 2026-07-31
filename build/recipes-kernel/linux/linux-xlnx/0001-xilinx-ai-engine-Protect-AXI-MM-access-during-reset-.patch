@@ -1,0 +1,1656 @@
+From 083e46a3d59f837d9eb989b056ff0742c8735cfe Mon Sep 17 00:00:00 2001
+From: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+Date: Thu, 16 Oct 2025 17:33:37 -0700
+Subject: [LINUX PATCH 1/6] xilinx-ai-engine: Protect AXI-MM access during
+ reset of partition
+
+When the reset of partition is in progress, this temporarily disables
+NSU on a column. Read/Write AXI-MM access during this will cause system
+hang. Add rwlock to protect against axi access and reset.
+
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+(cherry picked from commit 05d12f821cbee0afca3d4c13637e4bfa88230659)
+Signed-off-by: Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-aie.c | 24 ++---
+ .../misc/xilinx-ai-engine/ai-engine-aie2ps.c  | 54 +++++------
+ .../misc/xilinx-ai-engine/ai-engine-aieml.c   | 26 +++---
+ .../xilinx-ai-engine/ai-engine-aperture.c     |  1 +
+ .../misc/xilinx-ai-engine/ai-engine-clock.c   |  6 +-
+ drivers/misc/xilinx-ai-engine/ai-engine-dma.c | 24 ++---
+ .../xilinx-ai-engine/ai-engine-internal.h     | 51 ++++++++++-
+ .../xilinx-ai-engine/ai-engine-interrupt.c    | 69 +++++++-------
+ .../misc/xilinx-ai-engine/ai-engine-part.c    | 26 +++---
+ drivers/misc/xilinx-ai-engine/ai-engine-pm.c  | 58 ++++++------
+ .../misc/xilinx-ai-engine/ai-engine-reset.c   | 89 ++++++++++++-------
+ .../xilinx-ai-engine/ai-engine-sysfs-core.c   |  6 +-
+ 12 files changed, 261 insertions(+), 173 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aie.c b/drivers/misc/xilinx-ai-engine/ai-engine-aie.c
+index 110552ec07ac..45ac9b54bc80 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aie.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aie.c
+@@ -1340,7 +1340,7 @@ static int aie_scan_part_clocks(struct aie_partition *apart)
+ 				va = aperture->base +
+ 				     aie_cal_regoff(adev, loc,
+ 						    AIE_SHIMPL_CLKCNTR_REGOFF);
+-				val = ioread32(va);
++				val = aie_part_ioread32(apart, va);
+ 
+ 				/*
+ 				 * check if the clock buffer and the next clock
+@@ -1361,7 +1361,7 @@ static int aie_scan_part_clocks(struct aie_partition *apart)
+ 			va = aperture->base +
+ 			     aie_cal_regoff(adev, loc,
+ 					    AIE_TILE_CORE_CLKCNTR_REGOFF);
+-			val = ioread32(va);
++			val = aie_part_ioread32(apart, va);
+ 
+ 			/*
+ 			 * If the next tile is gated, skip the rest of the
+@@ -1425,7 +1425,7 @@ static int aie_set_col_clocks(struct aie_partition *apart,
+ 			va = aperture->base +
+ 			     aie_cal_regoff(adev, ploc,
+ 					    AIE_SHIMPL_CLKCNTR_REGOFF);
+-			iowrite32(val, va);
++			aie_part_iowrite32(apart, val, va);
+ 		} else {
+ 			void __iomem *va;
+ 			u32 val = 0;
+@@ -1440,7 +1440,7 @@ static int aie_set_col_clocks(struct aie_partition *apart,
+ 			va = aperture->base +
+ 			     aie_cal_regoff(adev, ploc,
+ 					    AIE_TILE_CORE_CLKCNTR_REGOFF);
+-			iowrite32(val, va);
++			aie_part_iowrite32(apart, val, va);
+ 		}
+ 
+ 		/* If the tile clock is not on, jump to next column */
+@@ -1517,13 +1517,13 @@ static u32 aie_get_core_status(struct aie_partition *apart,
+ 	u32 regoff, regvalue, eventval;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie_core_sts.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	/* Apply core done workaround */
+ 	if (!FIELD_GET(aie_core_done.mask, regvalue)) {
+ 		regoff = aie_cal_regoff(apart->adev, *loc,
+ 					aie_core_disable_event_sts.regoff);
+-		eventval = ioread32(apart->aperture->base + regoff);
++		eventval = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 		if (FIELD_GET(aie_core_disable_event_sts.mask, eventval))
+ 			regvalue |= aie_core_done.mask;
+@@ -1584,7 +1584,7 @@ static int aie_set_tile_isolation(struct aie_partition *apart,
+ 		va = aperture->base +
+ 		     aie_cal_regoff(adev, *loc, AIE_SHIMPL_TILECTRL_REGOFF);
+ 	}
+-	iowrite32(val, va);
++	aie_part_iowrite32(apart, val, va);
+ 
+ 	return 0;
+ }
+@@ -1608,7 +1608,7 @@ static u32 aie_get_lock_status(struct aie_partition *apart,
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -1772,7 +1772,7 @@ static u32 aie_get_dma_s2mm_status(struct aie_partition *apart,
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -1794,7 +1794,7 @@ static u32 aie_get_dma_mm2s_status(struct aie_partition *apart,
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -1943,7 +1943,7 @@ static u32 aie_get_fifo_status(struct aie_partition *apart,
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, fifo_off);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -2239,7 +2239,7 @@ static ssize_t aie_get_tile_sysfs_bd_metadata(struct aie_partition *apart,
+ 
+ 			regoff = aie_cal_regoff(apart->adev, *loc,
+ 						base_bdoff + (i * 4U));
+-			bd_data[i] = ioread32(apart->aperture->base + regoff);
++			bd_data[i] = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 		}
+ 
+ 		/* address and length */
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+index d480c7a27a61..748a327c2728 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aie2ps.c
+@@ -2738,7 +2738,7 @@ static u32 aie2ps_get_uc_core_status(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_uc_core_sts.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_uc_core_sts, regvalue);
+ }
+@@ -2755,7 +2755,7 @@ static u32 aie2ps_get_uc_core_intr(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_uc_core_intr.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_uc_core_intr, regvalue);
+ }
+@@ -2772,7 +2772,7 @@ static u32 aie2ps_get_uc_mdm_dbg_sts(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_uc_mdm_dbg_sts.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_uc_mdm_dbg_sts, regvalue);
+ }
+@@ -2789,7 +2789,7 @@ static u32 aie2ps_get_uc_dma_dm2mm_sts(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_uc_dma_dm2mm_sts.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_uc_dma_dm2mm_sts, regvalue);
+ }
+@@ -2806,7 +2806,7 @@ static u32 aie2ps_get_uc_dma_mm2dm_sts(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_uc_dma_mm2dm_sts.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_uc_dma_mm2dm_sts, regvalue);
+ }
+@@ -2823,7 +2823,7 @@ static u32 aie2ps_get_uc_mod_aximm(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_uc_mod_aximm.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_uc_mod_aximm, regvalue);
+ }
+@@ -2841,7 +2841,7 @@ static u32 aie2ps_get_uc_mod_aximm_out_trans(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_uc_mod_aximm_out_trans.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_uc_mod_aximm_out_trans, regvalue);
+ }
+@@ -3127,7 +3127,7 @@ static u32 aie2ps_get_core_status(struct aie_partition *apart, struct aie_locati
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aie2ps_core_sts.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aie2ps_core_sts, regvalue);
+ }
+@@ -3148,7 +3148,7 @@ static u32 aie2ps_get_lock_status(struct aie_partition *apart,
+ 
+ 	stsoff = attr->sts.regoff * lock + attr->sts_regoff;
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-	value = ioread32(apart->aperture->base + regoff);
++	value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&attr->sts, value);
+ }
+@@ -3204,16 +3204,16 @@ static u64 aie2ps_get_lock_overflow_status(struct aie_partition *apart,
+ 	if (ttype != AIE_TILE_TYPE_MEMORY) {
+ 		stsoff = attr->overflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 		value = aie_get_reg_field(&attr->overflow, value);
+ 	} else {
+ 		stsoff = attr->overflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 		stsoff = attr->overflow.regoff * 1U + attr->overflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value |= ((u64)ioread32(apart->aperture->base + regoff)) << 32;
++		value |= ((u64)aie_part_ioread32(apart, apart->aperture->base + regoff)) << 32;
+ 	}
+ 	return value;
+ }
+@@ -3236,16 +3236,16 @@ static u64 aie2ps_get_lock_underflow_status(struct aie_partition *apart,
+ 	if (ttype != AIE_TILE_TYPE_MEMORY) {
+ 		stsoff = attr->underflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 		value = aie_get_reg_field(&attr->underflow, value);
+ 	} else {
+ 		stsoff = attr->underflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 		stsoff = attr->underflow.regoff * 1U + attr->underflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value |= ((u64)ioread32(apart->aperture->base + regoff)) << 32;
++		value |= ((u64)aie_part_ioread32(apart, apart->aperture->base + regoff)) << 32;
+ 	}
+ 	return value;
+ }
+@@ -3338,7 +3338,7 @@ static u32 aie2ps_get_dma_mm2s_status(struct aie_partition *apart,
+ 	stsoff = attr->mm2s_sts_regoff + chanid * attr->chansts.regoff;
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -3376,7 +3376,7 @@ static u32 aie2ps_get_dma_s2mm_status(struct aie_partition *apart,
+ 	stsoff = attr->s2mm_sts_regoff + chanid * attr->chansts.regoff;
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -3722,7 +3722,7 @@ static ssize_t aie2ps_get_tile_sysfs_bd_metadata(struct aie_partition *apart,
+ 
+ 			regoff = aie_cal_regoff(apart->adev, *loc,
+ 						base_bdoff + (i * 4U));
+-			bd_data[i] = ioread32(apart->aperture->base + regoff);
++			bd_data[i] = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 		}
+ 
+ 		/* address and length */
+@@ -3962,7 +3962,8 @@ static int aie2ps_set_part_clocks(struct aie_partition *apart)
+ 				prev_range.size.col += op_range.size.col;
+ 				continue;
+ 			}
+-			ret = aie_part_pm_ops(apart, NULL, prev_ops, prev_range, 0);
++			ret = aie_part_pm_ops(apart, NULL, prev_ops, prev_range, 0,
++					      AIE_READ_RESET_LOCK);
+ 			if (ret)
+ 				return ret;
+ 			prev_ops = AIE_PART_INIT_OPT_ENB_COLCLK_BUFF;
+@@ -3991,7 +3992,8 @@ static int aie2ps_set_part_clocks(struct aie_partition *apart)
+ 				prev_range.size.col += op_range.size.col;
+ 				continue;
+ 			}
+-			ret = aie_part_pm_ops(apart, NULL, prev_ops, prev_range, 0);
++			ret = aie_part_pm_ops(apart, NULL, prev_ops, prev_range, 0,
++					      AIE_READ_RESET_LOCK);
+ 			if (ret)
+ 				return ret;
+ 			prev_ops = AIE_PART_INIT_OPT_DIS_COLCLK_BUFF;
+@@ -3999,10 +4001,10 @@ static int aie2ps_set_part_clocks(struct aie_partition *apart)
+ 		}
+ 	}
+ 	if (prev_ops)
+-		ret = aie_part_pm_ops(apart, NULL, prev_ops, prev_range, 0);
++		ret = aie_part_pm_ops(apart, NULL, prev_ops, prev_range, 0, AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+-	return aie_part_pm_ops_flush(apart);
++	return aie_part_pm_ops_flush(apart, AIE_READ_RESET_LOCK);
+ }
+ 
+ static int aie2ps_scan_part_clocks(struct aie_partition *apart)
+@@ -4033,7 +4035,7 @@ static int aie2ps_scan_part_clocks(struct aie_partition *apart)
+ 		va = aperture->base +
+ 		     aie_cal_regoff(adev, loc,
+ 				    AIE2PS_SHIMPL_COLCLOCK_CTRL_REGOFF);
+-		val = ioread32(va);
++		val = aie_part_ioread32(apart, va);
+ 
+ 		if (!(val & AIE2PS_SHIMPL_COLCLOCK_CTRL_MASK))
+ 			continue;
+@@ -4089,7 +4091,7 @@ static int aie2ps_set_tile_isolation(struct aie_partition *apart,
+ 		va = aperture->base +
+ 		     aie_cal_regoff(adev, *loc, AIE2PS_SHIMPL_TILECTRL_REGOFF);
+ 	}
+-	iowrite32(val, va);
++	aie_part_iowrite32(apart, val, va);
+ 	return 0;
+ }
+ 
+@@ -4099,7 +4101,7 @@ static int aie2ps_part_clear_mems(struct aie_partition *apart)
+ 	u16 data = 0x6;
+ 	int ret;
+ 
+-	ret = aie_part_pm_ops(apart, &data, opts, apart->range, 1);
++	ret = aie_part_pm_ops(apart, &data, opts, apart->range, 1, AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		dev_err(&apart->dev, "failed to clear memory for partition\n");
+ 
+@@ -4140,7 +4142,7 @@ static int aie2ps_wake_tile_uc_core_up(struct aie_partition *apart,
+ 	va = aperture->base +
+ 	     aie_aperture_cal_regoff(aperture, loc_adjust, AIE2PS_SHIMNOC_UCMOD_CORE_CTRL_REGOFF);
+ 	val = aie_get_field_val(&adev->shimnoc_uc_corectrl->wakeup, 0x1);
+-	iowrite32(val, va);
++	aie_aperture_iowrite32(aperture, val, va);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aieml.c b/drivers/misc/xilinx-ai-engine/ai-engine-aieml.c
+index c2076fdc9548..c0f9f4062196 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aieml.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aieml.c
+@@ -1744,7 +1744,7 @@ static u32 aieml_get_lock_status(struct aie_partition *apart,
+ 
+ 	stsoff = attr->sts.regoff * lock + attr->sts_regoff;
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-	value = ioread32(apart->aperture->base + regoff);
++	value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&attr->sts, value);
+ }
+@@ -1767,16 +1767,16 @@ static u64 aieml_get_lock_overflow_status(struct aie_partition *apart,
+ 	if (ttype != AIE_TILE_TYPE_MEMORY) {
+ 		stsoff = attr->overflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 		value = aie_get_reg_field(&attr->overflow, value);
+ 	} else {
+ 		stsoff = attr->overflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 		stsoff = attr->overflow.regoff * 1U + attr->overflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value |= ((u64)ioread32(apart->aperture->base + regoff)) << 32;
++		value |= ((u64)aie_part_ioread32(apart, apart->aperture->base + regoff)) << 32;
+ 	}
+ 	return value;
+ }
+@@ -1799,16 +1799,16 @@ static u64 aieml_get_lock_underflow_status(struct aie_partition *apart,
+ 	if (ttype != AIE_TILE_TYPE_MEMORY) {
+ 		stsoff = attr->underflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 		value = aie_get_reg_field(&attr->underflow, value);
+ 	} else {
+ 		stsoff = attr->underflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value = ioread32(apart->aperture->base + regoff);
++		value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 		stsoff = attr->underflow.regoff * 1U + attr->underflow_regoff;
+ 		regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+-		value |= ((u64)ioread32(apart->aperture->base + regoff)) << 32;
++		value |= ((u64)aie_part_ioread32(apart, apart->aperture->base + regoff)) << 32;
+ 	}
+ 	return value;
+ }
+@@ -1955,7 +1955,7 @@ static u32 aieml_get_dma_s2mm_status(struct aie_partition *apart,
+ 	stsoff = attr->s2mm_sts_regoff + chanid * attr->chansts.regoff;
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -1976,7 +1976,7 @@ static u32 aieml_get_dma_mm2s_status(struct aie_partition *apart,
+ 	stsoff = attr->mm2s_sts_regoff + chanid * attr->chansts.regoff;
+ 	regoff = aie_cal_regoff(apart->adev, *loc, stsoff);
+ 
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -2318,7 +2318,7 @@ static ssize_t aieml_get_tile_sysfs_bd_metadata(struct aie_partition *apart,
+ 
+ 			regoff = aie_cal_regoff(apart->adev, *loc,
+ 						base_bdoff + (i * 4U));
+-			bd_data[i] = ioread32(apart->aperture->base + regoff);
++			bd_data[i] = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 		}
+ 
+ 		/* address and length */
+@@ -2494,7 +2494,7 @@ static u32 aieml_get_core_status(struct aie_partition *apart,
+ 	u32 regoff, regvalue;
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc, aieml_core_sts.regoff);
+-	regvalue = ioread32(apart->aperture->base + regoff);
++	regvalue = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return aie_get_reg_field(&aieml_core_sts, regvalue);
+ }
+@@ -2594,7 +2594,7 @@ static int aieml_scan_part_clocks(struct aie_partition *apart)
+ 		va = aperture->base +
+ 		     aie_cal_regoff(adev, loc,
+ 				    AIEML_SHIMPL_COLCLOCK_CTRL_REGOFF);
+-		val = ioread32(va);
++		val = aie_part_ioread32(apart, va);
+ 
+ 		if (!(val & AIEML_SHIMPL_COLCLOCK_CTRL_MASK))
+ 			continue;
+@@ -2726,7 +2726,7 @@ static int aieml_set_tile_isolation(struct aie_partition *apart,
+ 		va = aperture->base +
+ 		     aie_cal_regoff(adev, *loc, AIEML_SHIMPL_TILECTRL_REGOFF);
+ 	}
+-	iowrite32(val, va);
++	aie_aperture_iowrite32(aperture, val, va);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c b/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c
+index 24851f2d888d..b924d7eb0fc6 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-aperture.c
+@@ -408,6 +408,7 @@ of_aie_aperture_probe(struct aie_device *adev, struct device_node *nc)
+ 	aperture->adev = adev;
+ 	INIT_LIST_HEAD(&aperture->partitions);
+ 	mutex_init(&aperture->mlock);
++	rwlock_init(&aperture->reset_lock);
+ 
+ 	range = &aperture->range;
+ 	ret = of_property_read_u32_array(nc, "xlnx,columns", regs,
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-clock.c b/drivers/misc/xilinx-ai-engine/ai-engine-clock.c
+index bf59b7de02fb..05ed85d7186b 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-clock.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-clock.c
+@@ -416,7 +416,8 @@ int aie2ps_part_set_column_clock_from_user(struct aie_partition *apart,
+ 	range.size.col = args->num_cols;
+ 
+ 	if (args->enable) {
+-		ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_COLCLK_BUFF, range, 1);
++		ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_COLCLK_BUFF, range, 1,
++				      AIE_READ_RESET_LOCK);
+ 		if (ret < 0) {
+ 			dev_err(&apart->dev, "failed to enable clocks for partition\n");
+ 			goto exit;
+@@ -438,7 +439,8 @@ int aie2ps_part_set_column_clock_from_user(struct aie_partition *apart,
+ 			}
+ 		}
+ 	} else {
+-		ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, range, 1);
++		ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, range, 1,
++				      AIE_READ_RESET_LOCK);
+ 		if (ret < 0) {
+ 			dev_err(&apart->dev, "failed to disable clocks for partition\n");
+ 			goto exit;
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-dma.c b/drivers/misc/xilinx-ai-engine/ai-engine-dma.c
+index 99fc13257004..2b4ac2a694f8 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-dma.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-dma.c
+@@ -165,7 +165,7 @@ static int aie_part_set_shimdma_bd(struct aie_partition *apart,
+ 	regoff = aie_aperture_cal_regoff(aperture, loc_adjust, intile_regoff);
+ 
+ 	for (i = 0; i < shim_dma->num_bd_regs; i++, regoff += sizeof(*bd)) {
+-		iowrite32(bd[i], aperture->base + regoff);
++		aie_aperture_iowrite32(aperture, bd[i], aperture->base + regoff);
+ 		trace_aie_part_set_shimdma_bd(apart, loc, bd_id, bd[i], i);
+ 	}
+ 	return 0;
+@@ -622,7 +622,7 @@ int aie_part_set_dmabuf_bd_cmd(struct io_uring_cmd *cmd, unsigned int issue_flag
+ 			regval = laddr_regval;
+ 		else if (i == shim_dma->haddr.regoff / sizeof(u32))
+ 			regval = haddr_regval;
+-		iowrite32(regval, aperture->base + regoff);
++		aie_aperture_iowrite32(aperture, regval, aperture->base + regoff);
+ 		trace_aie_part_set_shimdma_bd(apart, loc, bd_id, regval, i);
+ 	}
+ 
+@@ -775,7 +775,7 @@ int aie_part_update_dmabuf_bd_cmd(struct io_uring_cmd *cmd, unsigned int issue_f
+ 	va = aperture->base +
+ 	     aie_aperture_cal_regoff(aperture, adjust_loc,
+ 				     intile_regoff + shim_dma->buflen.regoff);
+-	regval = ioread32(va);
++	regval = aie_aperture_ioread32(aperture, va);
+ 	len = aie_get_reg_field(&shim_dma->buflen, regval);
+ 
+ 	addr = aie_part_get_dmabuf_da_from_off(apart, buf_fd, off, len);
+@@ -790,20 +790,20 @@ int aie_part_update_dmabuf_bd_cmd(struct io_uring_cmd *cmd, unsigned int issue_f
+ 	va = aperture->base +
+ 	     aie_aperture_cal_regoff(aperture, adjust_loc,
+ 				     intile_regoff + shim_dma->laddr.regoff);
+-	regval = ioread32(va);
++	regval = aie_aperture_ioread32(aperture, va);
+ 	regval &= ~shim_dma->laddr.mask;
+ 	regval |= aie_get_field_val(&shim_dma->laddr, laddr);
+-	iowrite32(regval, va);
++	aie_aperture_iowrite32(aperture, regval, va);
+ 
+ 	/* Update high 32bit address */
+ 	haddr = upper_32_bits(addr);
+ 	va = aperture->base +
+ 	     aie_aperture_cal_regoff(aperture, adjust_loc,
+ 				     intile_regoff + shim_dma->haddr.regoff);
+-	regval = ioread32(va);
++	regval = aie_aperture_ioread32(aperture, va);
+ 	regval &= ~shim_dma->haddr.mask;
+ 	regval |= aie_get_field_val(&shim_dma->haddr, haddr);
+-	iowrite32(regval, va);
++	aie_aperture_iowrite32(aperture, regval, va);
+ 
+ 	mutex_unlock(&apart->mlock);
+ 	return 0;
+@@ -856,7 +856,7 @@ long aie_part_update_dmabuf_bd_from_user(struct aie_partition *apart,
+ 	     aie_cal_regoff(adev, args.loc, shim_dma->bd_regoff) +
+ 	     shim_dma->bd_len * args.bd_id +
+ 	     shim_dma->buflen.regoff;
+-	regval = ioread32(va);
++	regval = aie_aperture_ioread32(aperture, va);
+ 	len = aie_get_reg_field(&shim_dma->buflen, regval);
+ 
+ 	addr = aie_part_get_dmabuf_da_from_off(apart, args.buf_fd, *off, len);
+@@ -873,20 +873,20 @@ long aie_part_update_dmabuf_bd_from_user(struct aie_partition *apart,
+ 	va = aperture->base +
+ 	     aie_cal_regoff(adev, args.loc, shim_dma->bd_regoff) +
+ 	     shim_dma->bd_len * args.bd_id + shim_dma->laddr.regoff;
+-	regval = ioread32(va);
++	regval = aie_aperture_ioread32(aperture, va);
+ 	regval &= ~shim_dma->laddr.mask;
+ 	laddr |= aie_get_field_val(&shim_dma->laddr, laddr);
+-	iowrite32(laddr, va);
++	aie_aperture_iowrite32(aperture, laddr, va);
+ 
+ 	/* Set high 32bit address */
+ 	haddr = upper_32_bits(addr);
+ 	va = aperture->base +
+ 	     aie_cal_regoff(adev, args.loc, shim_dma->bd_regoff) +
+ 	     shim_dma->bd_len * args.bd_id + shim_dma->haddr.regoff;
+-	regval = ioread32(va);
++	regval = aie_aperture_ioread32(aperture, va);
+ 	regval &= ~shim_dma->haddr.mask;
+ 	haddr |= aie_get_field_val(&shim_dma->haddr, haddr);
+-	iowrite32(haddr, va);
++	aie_aperture_iowrite32(aperture, haddr, va);
+ 	kfree(off);
+ 
+ exit:
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+index 80f0d566c537..be5d18710716 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-internal.h
+@@ -27,6 +27,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ #include <linux/xarray.h>
++#include <linux/spinlock_types.h>
+ #include <uapi/linux/xlnx-ai-engine.h>
+ 
+ #define AIE_DEVICE_GEN_AIE	1U
+@@ -257,6 +258,11 @@ enum aie_memory_type {
+ 	AIE_MEM_MAX
+ };
+ 
++enum aie_reset_lock {
++	AIE_READ_RESET_LOCK,
++	AIE_WRITE_RESET_LOCK
++};
++
+ /*
+  * enum aie_shim_switch_type - identifies different switches in shim tile.
+  */
+@@ -1323,6 +1329,7 @@ struct aie_aperture {
+ 	struct work_struct backtrack;
+ 	struct aie_l2_mask l2_mask;
+ 	struct attribute_group *attr_grp;
++	rwlock_t reset_lock;
+ };
+ 
+ struct aie_op_start_num_col {
+@@ -1536,6 +1543,46 @@ extern const struct file_operations aie_part_fops;
+ #define aie_cal_tile_reg(adev, regoff) ( \
+ 	aie_tile_reg_field_get(aie_tile_reg_mask(adev), 0, regoff))
+ 
++static inline unsigned int aie_aperture_ioread32(struct aie_aperture *aperture, const void __iomem *addr)
++{
++	unsigned int val;
++
++	read_lock(&aperture->reset_lock);
++	val = ioread32(addr);
++	read_unlock(&aperture->reset_lock);
++	return val;
++}
++
++static inline unsigned int aie_part_ioread32(struct aie_partition *apart, const void __iomem *addr)
++{
++	return aie_aperture_ioread32(apart->aperture, addr);
++}
++
++static inline void aie_aperture_iowrite64(struct aie_aperture *aperture, u64 val, void __iomem *addr)
++{
++	read_lock(&aperture->reset_lock);
++	iowrite64(val, addr);
++	read_unlock(&aperture->reset_lock);
++}
++
++static inline void aie_part_iowrite64(struct aie_partition *apart, u64 val, void __iomem *addr)
++{
++	aie_aperture_iowrite64(apart->aperture, val, addr);
++}
++
++static inline void aie_aperture_iowrite32(struct aie_aperture *aperture, u32 val, void __iomem *addr)
++{
++	read_lock(&aperture->reset_lock);
++	iowrite32(val, addr);
++	read_unlock(&aperture->reset_lock);
++}
++
++static inline void aie_part_iowrite32(struct aie_partition *apart, u32 val, void __iomem *addr)
++{
++	aie_aperture_iowrite32(apart->aperture, val, addr);
++}
++
++
+ /**
+  * aie_get_field_val() - calculate value of an AI engine register field
+  * @field: a field in a register
+@@ -1916,8 +1963,8 @@ int aie_dma_end_cpu_access_xa(struct dma_buf *dmabuf, enum dma_data_direction di
+ int aie_part_pm_ops_create(struct aie_partition *apart);
+ 
+ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct aie_range range,
+-		    bool flush);
+-int aie_part_pm_ops_flush(struct aie_partition *apart);
++		    bool flush, enum aie_reset_lock reset_lock);
++int aie_part_pm_ops_flush(struct aie_partition *apart, enum aie_reset_lock reset_lock);
+ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_init_args *args);
+ int aie2ps_part_teardown(struct aie_partition *apart);
+ int aie2ps_part_clear_context(struct aie_partition *apart);
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+index 6a30b399ac07..f6855dde61b6 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-interrupt.c
+@@ -61,7 +61,7 @@ static u8 aie_get_broadcast_event(struct aie_partition *apart,
+ 
+ 	bcoff = event_mod->bc_regoff + event_mod->bc_event.regoff + bc_id * 4U;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc, bcoff);
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -97,7 +97,7 @@ void aie_read_event_status(struct aie_partition *apart,
+ 		u32 regoff = aie_aperture_cal_regoff(apart->aperture, *loc,
+ 						     status_off);
+ 
+-		reg[offset] = ioread32(apart->aperture->base + regoff);
++		reg[offset] = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 	}
+ }
+ 
+@@ -134,7 +134,7 @@ static void aie_clear_event_status(struct aie_partition *apart,
+ 
+ 	status_off = event_mod->status_regoff + (event / 32) * 4U;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc, status_off);
+-	iowrite32(BIT(event % 32), apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, BIT(event % 32), apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -167,7 +167,7 @@ static u32 aie_check_group_errors_enabled(struct aie_partition *apart,
+ 
+ 	groff = event_mod->group_regoff + event_mod->group_error.regoff;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc, groff);
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -200,7 +200,7 @@ static void aie_set_error_event(struct aie_partition *apart,
+ 
+ 	groff = event_mod->group_regoff + event_mod->group_error.regoff;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc, groff);
+-	iowrite32(bitmap, apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, bitmap, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -289,7 +289,7 @@ static u8 aie_get_l1_event(struct aie_partition *apart,
+ 	}
+ 
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc, l1off);
+-	reg_value = ioread32(apart->aperture->base + regoff);
++	reg_value = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 	reg_value &= l1mask << (irq_id * intr_ctrl->event_lsb);
+ 	reg_value >>= (irq_id * intr_ctrl->event_lsb);
+ 	return reg_value;
+@@ -315,7 +315,7 @@ static void aie_clear_l1_intr(struct aie_partition *apart,
+ 		l1off = intr_ctrl->regoff + intr_ctrl->swb_status.regoff;
+ 
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc, l1off);
+-	iowrite32(BIT(irq_id), apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, BIT(irq_id), apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -338,7 +338,7 @@ static u32 aie_get_l1_status(struct aie_partition *apart,
+ 		l1off = intr_ctrl->regoff + intr_ctrl->swb_status.regoff;
+ 
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc, l1off);
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -355,7 +355,7 @@ static void aie_aperture_clear_l2_intr(struct aie_aperture *aperture,
+ 	u32 l2off = intr_ctrl->regoff + intr_ctrl->status.regoff;
+ 	u32 regoff = aie_aperture_cal_regoff(aperture, *loc, l2off);
+ 
+-	iowrite32(bitmap_irq, aperture->base + regoff);
++	aie_aperture_iowrite32(aperture, bitmap_irq, aperture->base + regoff);
+ }
+ 
+ /**
+@@ -371,7 +371,7 @@ static u32 aie_aperture_get_l2_status(struct aie_aperture *aperture,
+ 	u32 l2off = intr_ctrl->regoff + intr_ctrl->status.regoff;
+ 	u32 regoff = aie_aperture_cal_regoff(aperture, *loc, l2off);
+ 
+-	return ioread32(aperture->base + regoff);
++	return aie_aperture_ioread32(aperture, aperture->base + regoff);
+ }
+ 
+ /**
+@@ -387,7 +387,7 @@ static u32 aie_aperture_get_l2_mask(struct aie_aperture *aperture,
+ 	u32 l2off = intr_ctrl->regoff + intr_ctrl->mask.regoff;
+ 	u32 regoff = aie_aperture_cal_regoff(aperture, *loc, l2off);
+ 
+-	return ioread32(aperture->base + regoff);
++	return aie_aperture_ioread32(aperture, aperture->base + regoff);
+ }
+ 
+ /**
+@@ -405,7 +405,7 @@ static void aie_aperture_enable_l2_ctrl(struct aie_aperture *aperture,
+ 	u32 regoff = aie_aperture_cal_regoff(aperture, *loc, l2off);
+ 
+ 	bit_map &= intr_ctrl->enable.mask;
+-	iowrite32(bit_map, aperture->base + regoff);
++	aie_aperture_iowrite32(aperture, bit_map, aperture->base + regoff);
+ }
+ 
+ /**
+@@ -423,7 +423,7 @@ static void aie_aperture_disable_l2_ctrl(struct aie_aperture *aperture,
+ 	u32 regoff = aie_aperture_cal_regoff(aperture, *loc, l2off);
+ 
+ 	bit_map &= intr_ctrl->disable.mask;
+-	iowrite32(bit_map, aperture->base + regoff);
++	aie_aperture_iowrite32(aperture, bit_map, aperture->base + regoff);
+ }
+ 
+ /**
+@@ -1119,9 +1119,11 @@ static int aie_aperture_clr_hw_err(struct aie_aperture *aperture, struct aie_loc
+ 	hw_err->val = status;
+ 
+ 	trace_aie_pm_ops(aperture->node_id, pkt_va, size, pkt_dma);
++	read_lock(&aperture->reset_lock);
+ 	ret = versal2_pm_aie2ps_operation(aperture->node_id, size,
+ 					  upper_32_bits(pkt_dma),
+ 					  lower_32_bits(pkt_dma));
++	read_unlock(&aperture->reset_lock);
+ 
+ 	dmam_free_coherent(&aperture->dev, size, pkt_va, pkt_dma);
+ 
+@@ -1146,7 +1148,7 @@ static u32 aie_aperture_get_hw_err_status(struct aie_aperture *aperture,
+ 	hw_err_status_off = aperture->adev->hw_err_status->regoff;
+ 	regoff = aie_aperture_cal_regoff(aperture, *loc, hw_err_status_off);
+ 
+-	return ioread32(aperture->base + regoff);
++	return aie_aperture_ioread32(aperture, aperture->base + regoff);
+ }
+ 
+ static irqreturn_t aie2ps_hw_err(struct aie_aperture *aperture)
+@@ -2029,7 +2031,7 @@ static int aie_intr_ctrl_l1_broadcast_block(struct aie_partition *apart,
+ 	regoff += l1_ctrl->regoff;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+ 
+-	iowrite32(bcast_bitmap, apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, bcast_bitmap, apart->aperture->base + regoff);
+ 	return 0;
+ }
+ 
+@@ -2063,7 +2065,7 @@ static int aie_enable_l1_intr(struct aie_partition *apart,
+ 	regoff += l1_ctrl->regoff;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+ 
+-	iowrite32(BIT(irq_id), apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, BIT(irq_id), apart->aperture->base + regoff);
+ 	return 0;
+ }
+ 
+@@ -2098,7 +2100,7 @@ static int aie_set_l1_ctrl_irq_id(struct aie_partition *apart,
+ 	regoff += l1_ctrl->regoff;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+ 
+-	iowrite32(irq_id, apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, irq_id, apart->aperture->base + regoff);
+ 	return 0;
+ }
+ 
+@@ -2124,10 +2126,10 @@ static int aie_set_l1_ctrl_irq_event(struct aie_partition *apart, struct aie_loc
+ 	}
+ 	regoff += intr_ctrl->regoff;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+-	irq_event = ioread32(apart->aperture->base + regoff);
++	irq_event = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 	irq_event &= ~(0xFF << (BITS_PER_BYTE * irq_id));
+ 	regval |= irq_event;
+-	iowrite32(regval, apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, regval, apart->aperture->base + regoff);
+ 
+ 	return 0;
+ }
+@@ -2241,22 +2243,22 @@ static int aie_event_bc_block(struct aie_partition *apart, struct aie_location l
+ 	if (dir & AIE_EVENT_BROADCAST_SOUTH) {
+ 		regoff = (u64)&block->south_set;
+ 		regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+-		iowrite32(bcast_mask, apart->aperture->base + regoff);
++		aie_part_iowrite32(apart, bcast_mask, apart->aperture->base + regoff);
+ 	}
+ 	if (dir & AIE_EVENT_BROADCAST_WEST) {
+ 		regoff = (u64)&block->west_set;
+ 		regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+-		iowrite32(bcast_mask, apart->aperture->base + regoff);
++		aie_part_iowrite32(apart, bcast_mask, apart->aperture->base + regoff);
+ 	}
+ 	if (dir & AIE_EVENT_BROADCAST_NORTH) {
+ 		regoff = (u64)&block->north_set;
+ 		regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+-		iowrite32(bcast_mask, apart->aperture->base + regoff);
++		aie_part_iowrite32(apart, bcast_mask, apart->aperture->base + regoff);
+ 	}
+ 	if (dir & AIE_EVENT_BROADCAST_EAST) {
+ 		regoff = (u64)&block->east_set;
+ 		regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+-		iowrite32(bcast_mask, apart->aperture->base + regoff);
++		aie_part_iowrite32(apart, bcast_mask, apart->aperture->base + regoff);
+ 	}
+ 
+ 	return 0;
+@@ -2468,7 +2470,7 @@ static int aie_config_error_halt_event(struct aie_partition *apart)
+ 				continue;
+ 			regoff = aie_aperture_cal_regoff(apart->aperture, loc,
+ 							 event_regoff);
+-			iowrite32(val, apart->aperture->base + regoff);
++			aie_part_iowrite32(apart, val, apart->aperture->base + regoff);
+ 		}
+ 	}
+ 	return 0;
+@@ -2489,21 +2491,24 @@ static int aie2ps_priv_error_handling_init(struct aie_partition *apart)
+ 	range.start.col = apart->range.start.col;
+ 	range.size.col = 1;
+ 	data = 1;
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+ 	range.start.col = apart->range.start.col + 1;
+ 	range.size.col = 1;
+ 	data = (apart->partition_id % AIE_USER_EVENT1_NUM_IRQ) + 2;
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+ 	range.start.col = apart->range.start.col + 2;
+ 	range.size.col = apart->range.size.col - 2;
+ 	data = 1;
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -2512,7 +2517,8 @@ static int aie2ps_priv_error_handling_init(struct aie_partition *apart)
+ 	 * Use npi interrupt 1 for all hw errors.
+ 	 */
+ 	data = 1;
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_INT, apart->range, 0);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_INT, apart->range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 	/*
+@@ -2520,7 +2526,8 @@ static int aie2ps_priv_error_handling_init(struct aie_partition *apart)
+ 	 * Mask Hw_Correctable_Errors - BIT(1)
+ 	 */
+ 	data = BIT(1);
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_MASK, apart->range, 1);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_MASK, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 
+ 	return ret;
+ }
+@@ -2545,7 +2552,7 @@ static int aie_set_broadcast_event(struct aie_partition *apart,
+ 
+ 	regoff = attr->bc_regoff + attr->bc_event.regoff + bc_id * 4U;
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+-	iowrite32(error_group, apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, error_group, apart->aperture->base + regoff);
+ 	return 0;
+ }
+ 
+@@ -2570,7 +2577,7 @@ static int aie_event_group_error0_enable(struct aie_partition *apart,
+ 	}
+ 
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, loc, regoff);
+-	iowrite32(val, apart->aperture->base + regoff);
++	aie_part_iowrite32(apart, val, apart->aperture->base + regoff);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-part.c b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+index c0789359245e..0069ccccb5fc 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-part.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-part.c
+@@ -202,13 +202,13 @@ int aie_part_maskpoll_register(struct aie_partition *apart, u32 offset, u32 data
+ 	u32 i;
+ 
+ 	for (i = 0; i < timeout; i += usleep_time) {
+-		value = ioread32(apart->aperture->base + offset);
++		value = aie_part_ioread32(apart, apart->aperture->base + offset);
+ 		if ((value & mask) == data)
+ 			return 0;
+ 		usleep_range(usleep_time, usleep_time + 10);
+ 	}
+ 
+-	value = ioread32(apart->aperture->base + offset);
++	value = aie_part_ioread32(apart, apart->aperture->base + offset);
+ 	if ((value & mask) == data)
+ 		return 0;
+ 
+@@ -257,7 +257,7 @@ static int aie_part_block_write64(struct aie_partition *apart, size_t offset,
+ 	for (i = 0; i < len; i++) {
+ 		trace_aie_part_write_register_data(apart, i, READ_ONCE(data[i]),
+ 						   offset + i * sizeof(u32));
+-		iowrite32(READ_ONCE(data[i]), &va[i]);
++		aie_aperture_iowrite32(aperture, READ_ONCE(data[i]), &va[i]);
+ 	}
+ 	return 0;
+ }
+@@ -311,15 +311,15 @@ static int aie_part_write_register(struct aie_partition *apart, size_t offset,
+ 			u32 val = *((u32 *)(data + i));
+ 
+ 			trace_aie_part_write_register_data(apart, i, val, offset + i);
+-			iowrite32(val, va + i);
++			aie_aperture_iowrite32(aperture, val, va + i);
+ 		}
+ 	} else {
+-		u32 val = ioread32(va);
++		u32 val = aie_aperture_ioread32(aperture, va);
+ 
+ 		val &= ~mask;
+ 		val |= *((u32 *)data) & mask;
+ 		trace_aie_part_write_register_data(apart, 0, val, offset);
+-		iowrite32(val, va);
++		aie_aperture_iowrite32(aperture, val, va);
+ 	}
+ 
+ 	return (int)len;
+@@ -397,7 +397,7 @@ static int aie_part_read_register(struct aie_partition *apart, size_t offset,
+ 	va = aperture->base + offset;
+ 
+ 	for (bytes_read = 0; bytes_read < len; bytes_read += sizeof(u32))
+-		*((u32 *)(data + bytes_read)) = ioread32(va + bytes_read);
++		*((u32 *)(data + bytes_read)) = aie_aperture_ioread32(aperture, va + bytes_read);
+ 
+ 	return (int)len;
+ }
+@@ -1657,7 +1657,7 @@ bool aie_partition_check_noc_aximm(struct device *dev, struct aie_location *loc)
+ 
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc,
+ 					 adev->noc_outstanding_aximm->regoff);
+-	regval = ioread32(apart->aperture->base + regoff);
++	regval = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	if (regval & adev->noc_outstanding_aximm->mask)
+ 		return true;
+@@ -1686,7 +1686,7 @@ int aie_partition_check_uc_aximm(struct device *dev, struct aie_location *loc)
+ 
+ 	regoff = aie_aperture_cal_regoff(apart->aperture, *loc,
+ 					 adev->uc_outstanding_aximm->regoff);
+-	regval = ioread32(apart->aperture->base + regoff);
++	regval = aie_part_ioread32(apart, apart->aperture->base + regoff);
+ 
+ 	return regval & adev->uc_outstanding_aximm->mask;
+ }
+@@ -1727,7 +1727,8 @@ int aie_partition_uc_zeroize_mem(struct device *dev, struct aie_location *loc, u
+ 	    apart->adev->dev_gen == AIE_DEVICE_GEN_AIEML)
+ 		return -EINVAL;
+ 
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_UC_ZEROIZATION, range, 1);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_UC_ZEROIZATION, range, 1,
++			      AIE_READ_RESET_LOCK);
+ 
+ 	return ret;
+ }
+@@ -1788,7 +1789,8 @@ int aie_load_cert(struct device *dev, unsigned char *elf_addr)
+ 	if (!adev->ops->map_uc_mem)
+ 		return -EINVAL;
+ 
+-	ret = aie_part_pm_ops(apart, &data_ops, AIE_PART_INIT_OPT_UC_ZEROIZATION, apart->range, 1);
++	ret = aie_part_pm_ops(apart, &data_ops, AIE_PART_INIT_OPT_UC_ZEROIZATION, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -2109,7 +2111,7 @@ int aie_load_cert_broadcast(struct device *dev, void *elf_addr)
+ 
+ 	/* clear uC memory */
+ 	ret = aie_part_pm_ops(apart, &data_ops, AIE_PART_INIT_OPT_UC_ZEROIZATION,
+-			      apart->range, 1);
++			      apart->range, 1, AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-pm.c b/drivers/misc/xilinx-ai-engine/ai-engine-pm.c
+index cfa419899641..04ec96d6f940 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-pm.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-pm.c
+@@ -33,7 +33,7 @@ int aie_part_pm_ops_create(struct aie_partition *apart)
+ 	return 0;
+ }
+ 
+-int aie_part_pm_ops_flush(struct aie_partition *apart)
++int aie_part_pm_ops_flush(struct aie_partition *apart, enum aie_reset_lock reset_type)
+ {
+ 	struct aie_pm_ops *pm_ops = &apart->pm_ops;
+ 	int ret;
+@@ -45,11 +45,15 @@ int aie_part_pm_ops_flush(struct aie_partition *apart)
+ 	if ((pm_ops->pkt_va + pm_ops->offset) == (pm_ops->op_range + sizeof(*pm_ops->op_range)))
+ 		pm_ops->offset -= sizeof(*pm_ops->op_range);
+ 
++	reset_type == AIE_READ_RESET_LOCK ? read_lock(&apart->aperture->reset_lock) :
++					    write_lock(&apart->aperture->reset_lock);
+ 	trace_aie_pm_ops(apart->aperture->node_id, pm_ops->pkt_va, pm_ops->offset, pm_ops->pkt_dma);
+ 
+ 	ret = versal2_pm_aie2ps_operation(apart->aperture->node_id, pm_ops->offset,
+ 					  upper_32_bits(pm_ops->pkt_dma),
+ 					  lower_32_bits(pm_ops->pkt_dma));
++	reset_type == AIE_READ_RESET_LOCK ? read_unlock(&apart->aperture->reset_lock) :
++					    write_unlock(&apart->aperture->reset_lock);
+ 
+ 	pm_ops->offset = 0;
+ 	pm_ops->op_range = NULL;
+@@ -59,7 +63,7 @@ int aie_part_pm_ops_flush(struct aie_partition *apart)
+ }
+ 
+ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct aie_range range,
+-		    bool flush)
++		    bool flush, enum aie_reset_lock reset_type)
+ {
+ 	struct aie_pm_ops *pm_ops = &apart->pm_ops;
+ 	struct aie_op_start_num_col *op_range;
+@@ -73,7 +77,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 	    op_range->start_col != range.start.col) {
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op_range), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 		}
+@@ -91,7 +95,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -107,7 +111,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -123,7 +127,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -139,7 +143,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -155,7 +159,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -171,7 +175,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -187,7 +191,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -203,7 +207,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -219,7 +223,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -235,7 +239,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -251,7 +255,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -267,7 +271,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -284,7 +288,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -301,7 +305,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -318,7 +322,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -336,7 +340,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -353,7 +357,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -370,7 +374,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -387,7 +391,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -398,7 +402,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 		op->type = XILINX_AIE_OPS_CLR_HW_ERR_STS;
+ 		op->len = sizeof(*op);
+ 		op->val = *((u16 *)data);
+-		ret = aie_part_pm_ops_flush(apart);
++		ret = aie_part_pm_ops_flush(apart, reset_type);
+ 		if (ret)
+ 			return ret;
+ 		*((u16 *)data) = op->val;
+@@ -409,7 +413,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -428,7 +432,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 
+ 		if (check_add_overflow(pm_ops->offset, sizeof(*op), &end) ||
+ 		    end >= pm_ops->size) {
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 			if (ret)
+ 				return ret;
+ 			goto again;
+@@ -443,7 +447,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 		op->low_addr = hs_addr->hs_dma & 0xFFFFFFFFULL;
+ 		op->high_addr = hs_addr->hs_dma >> 32;
+ 		if (flush)
+-			ret = aie_part_pm_ops_flush(apart);
++			ret = aie_part_pm_ops_flush(apart, reset_type);
+ 
+ 		if (ret)
+ 			return ret;
+@@ -454,7 +458,7 @@ int aie_part_pm_ops(struct aie_partition *apart, void *data, u32 type, struct ai
+ 		dev_warn(&apart->dev, "Unknown ops type: 0x%x", type);
+ 
+ 	if (flush)
+-		ret = aie_part_pm_ops_flush(apart);
++		ret = aie_part_pm_ops_flush(apart, reset_type);
+ 
+ 	return ret;
+ }
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index 0335c2444902..a2e0aa08d768 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -53,10 +53,10 @@ static void aie_part_core_regs_clr_iowrite(struct aie_partition *apart,
+ 				case 1:	/* 8 bits */
+ 				case 2: /* 16 bits */
+ 				case 4: /* 32 bits */
+-					writel_relaxed(0, io_addr);
++					aie_part_iowrite32(apart, 0, io_addr);
+ 					break;
+ 				case 8: /* 64 bits */
+-					writeq_relaxed(0, io_addr);
++					aie_part_iowrite64(apart, 0, io_addr);
+ 					break;
+ 				default:
+ 					dev_warn(&apart->dev, "[%d, %d]: Unknown width: %d",
+@@ -94,7 +94,9 @@ static void aie_part_core_regs_clr_memset_io(struct aie_partition *apart,
+ 			ttype = get_tile_type(apart->adev, &loc);
+ 			if (ttype == AIE_TILE_TYPE_TILE &&
+ 			    aie_part_check_clk_enable_loc(apart, &loc)) {
++				read_lock(&apart->aperture->reset_lock);
+ 				memset_io(base + (addr_col | addr_row), 0, size);
++				read_unlock(&apart->aperture->reset_lock);
+ 			}
+ 		}
+ 	}
+@@ -158,7 +160,9 @@ static int aie_part_clear_data_mem(struct aie_partition *apart)
+ 			loc.col = c;
+ 			loc.row = r;
+ 			memoff = aie_cal_regoff(adev, loc, mem->offset);
++			read_lock(&apart->aperture->reset_lock);
+ 			memset_io(apart->aperture->base + memoff, 0, mem->size);
++			read_unlock(&apart->aperture->reset_lock);
+ 		}
+ 	}
+ 
+@@ -193,15 +197,16 @@ int aie2ps_part_clear_context(struct aie_partition *apart)
+ 	       AIE_PART_INIT_OPT_SHIM_RST |
+ 	       AIE_PART_INIT_OPT_BLOCK_NOCAXIMMERR |
+ 	       AIE_PART_INIT_OPT_ZEROIZEMEM;
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_WRITE_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+ 	data = 0x6;
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_UC_ZEROIZATION, apart->range, 1);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_UC_ZEROIZATION, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+-	ret = aie_part_pm_ops_flush(apart);
++	ret = aie_part_pm_ops_flush(apart, AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+@@ -308,23 +313,26 @@ int aie2ps_part_clean(struct aie_partition *apart)
+ 		return 0;
+ 
+ 	trace_aie_part_clean(apart);
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+ 	opts = AIE_PART_INIT_OPT_COLUMN_RST | AIE_PART_INIT_OPT_SHIM_RST;
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_WRITE_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_COLCLK_BUFF, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_COLCLK_BUFF, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+ 	apart->adev->ops->mem_clear(apart);
+ 	aie_part_core_regs_clr(apart);
+ 
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+@@ -435,23 +443,28 @@ int aie2ps_part_reset(struct aie_partition *apart)
+ 	aie_resource_clear_all(&apart->tiles_inuse);
+ 	aie_resource_clear_all(&apart->cores_clk_state);
+ 
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret < 0)
+ 		goto exit;
+ 
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_COLUMN_RST, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_COLUMN_RST, apart->range, 1,
++			      AIE_WRITE_RESET_LOCK);
+ 	if (ret < 0)
+ 		goto exit;
+ 
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_COLCLK_BUFF, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_COLCLK_BUFF, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret < 0)
+ 		goto exit;
+ 
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_SHIM_RST, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_SHIM_RST, apart->range, 1,
++			      AIE_WRITE_RESET_LOCK);
+ 	if (ret < 0)
+ 		goto exit;
+ 
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret < 0)
+ 		goto exit;
+ 
+@@ -692,21 +705,24 @@ static int aie2ps_part_set_l2_irq(struct aie_partition *apart)
+ 	range.start.col = apart->range.start.col;
+ 	range.size.col = 1;
+ 	irq = 1;
+-	ret = aie_part_pm_ops(apart, &irq, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0);
++	ret = aie_part_pm_ops(apart, &irq, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+ 	range.start.col = apart->range.start.col + 1;
+ 	range.size.col = 1;
+ 	irq = (apart->partition_id % AIE_USER_EVENT1_NUM_IRQ) + 2;
+-	ret = aie_part_pm_ops(apart, &irq, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0);
++	ret = aie_part_pm_ops(apart, &irq, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+ 	range.start.col = apart->range.start.col + 2;
+ 	range.size.col = apart->range.size.col - 2;
+ 	irq = 1;
+-	ret = aie_part_pm_ops(apart, &irq, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0);
++	ret = aie_part_pm_ops(apart, &irq, AIE_PART_INIT_OPT_SET_L2_IRQ, range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -788,7 +804,7 @@ int aie2ps_part_write_handshake(struct aie_partition *apart,
+ 		flush = ((i + 1) == handshake_cols) ? true : false;
+ 		ret = aie_part_pm_ops(apart, &hs_addr[i],
+ 				      AIE_PART_INIT_OPT_HANDSHAKE, range,
+-				      flush);
++				      flush, AIE_READ_RESET_LOCK);
+ 		if (ret) {
+ 			dev_err(&apart->dev,
+ 				"handshake region write failed in col %d",
+@@ -836,7 +852,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 	trace_aie_part_initialize(apart, args->init_opts, args->num_tiles);
+ 
+ 	opts = AIE_PART_INIT_OPT_ENB_UC_DMA_PAUSE | AIE_PART_INIT_OPT_ENB_NOC_DMA_PAUSE;
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+@@ -862,7 +878,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 	opts |= (args->init_opts & AIE_PART_INIT_OPT_BLOCK_NOCAXIMMERR);
+ 	opts |= (args->init_opts & AIE_PART_INIT_OPT_ENB_COLCLK_BUFF);
+ 	/* push opts to pm and flush, these ops needs to complete before we perform next ones*/
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_WRITE_RESET_LOCK);
+ 	if (ret) {
+ 		dev_err(&apart->dev, "pm ops: 0x%x failed: %d", opts, ret);
+ 		goto out;
+@@ -877,7 +893,8 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 
+ 	if (args->init_opts & AIE_PART_INIT_OPT_ZEROIZEMEM) {
+ 		opts |= AIE_PART_INIT_OPT_ZEROIZEMEM;
+-		ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ZEROIZEMEM, apart->range, 1);
++		ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ZEROIZEMEM, apart->range, 1,
++				      AIE_READ_RESET_LOCK);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -887,7 +904,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 
+ 		opts |= AIE_PART_INIT_OPT_UC_ZEROIZATION;
+ 		ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_UC_ZEROIZATION,
+-				      apart->range, 1);
++				      apart->range, 1, AIE_READ_RESET_LOCK);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -906,7 +923,8 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		opts |= AIE_PART_INIT_OPT_NMU_CONFIG;
+ 		if (apart->range.start.col == 0) {
+ 			range.size.col = 2;
+-			ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_NMU_CONFIG, range, 0);
++			ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_NMU_CONFIG, range, 0,
++					      AIE_READ_RESET_LOCK);
+ 			if (ret)
+ 				goto out;
+ 		}
+@@ -916,7 +934,8 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		u16 data = 0;
+ 
+ 		opts |= AIE_PART_INIT_OPT_HW_ERR_INT;
+-		ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_INT, apart->range, 0);
++		ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_INT, apart->range, 0,
++				      AIE_READ_RESET_LOCK);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -925,7 +944,8 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		u16 data = 0x2;
+ 
+ 		opts |= AIE_PART_INIT_OPT_HW_ERR_MASK;
+-		ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_MASK, apart->range, 0);
++		ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HW_ERR_MASK, apart->range, 0,
++				      AIE_READ_RESET_LOCK);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -934,7 +954,8 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		opts |= AIE_PART_INIT_OPT_SET_ECC_SCRUB_PERIOD;
+ 
+ 		ret = aie_part_pm_ops(apart, &args->ecc_scrub,
+-				      AIE_PART_INIT_OPT_SET_ECC_SCRUB_PERIOD, apart->range, 0);
++				      AIE_PART_INIT_OPT_SET_ECC_SCRUB_PERIOD, apart->range, 0,
++				      AIE_READ_RESET_LOCK);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -943,7 +964,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		opts |= AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV;
+ 
+ 		ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_UC_ENB_MEM_PRIV, apart->range,
+-				      0);
++				      0, AIE_READ_RESET_LOCK);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -985,7 +1006,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
+ 		opts |= AIE_PART_INIT_OPT_DIS_TLAST_ERROR;
+ 		ret = aie_part_pm_ops(apart, &data,
+ 				      AIE_PART_INIT_OPT_DIS_TLAST_ERROR,
+-				      apart->range, 1);
++				      apart->range, 1, AIE_READ_RESET_LOCK);
+ 		if (ret)
+ 			goto out;
+ 	}
+@@ -1166,7 +1187,7 @@ int aie2ps_part_teardown(struct aie_partition *apart)
+ 	mutex_lock(&apart->mlock);
+ 
+ 	opts = AIE_PART_INIT_OPT_ENB_UC_DMA_PAUSE | AIE_PART_INIT_OPT_ENB_NOC_DMA_PAUSE;
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1, AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+@@ -1181,19 +1202,21 @@ int aie2ps_part_teardown(struct aie_partition *apart)
+ 	opts = AIE_PART_INIT_OPT_COLUMN_RST |
+ 	      AIE_PART_INIT_OPT_SHIM_RST |
+ 	      AIE_PART_INIT_OPT_ZEROIZEMEM;
+-	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 0);
++	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 0, AIE_WRITE_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+ 	/* Zeroizes the uc-DM and uc shared DM */
+ 	data = 0x6;
+-	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_UC_ZEROIZATION, apart->range, 1);
++	ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_UC_ZEROIZATION, apart->range, 1,
++			      AIE_WRITE_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 0);
++	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 0,
++			      AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+-	ret = aie_part_pm_ops_flush(apart);
++	ret = aie_part_pm_ops_flush(apart, AIE_READ_RESET_LOCK);
+ 	if (ret)
+ 		goto out;
+ 
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-sysfs-core.c b/drivers/misc/xilinx-ai-engine/ai-engine-sysfs-core.c
+index 471f03998993..d5610fd595b0 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-sysfs-core.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-sysfs-core.c
+@@ -21,7 +21,7 @@ u32 aie_get_core_pc(struct aie_partition *apart,
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc,
+ 				apart->adev->core_pc->regoff);
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -37,7 +37,7 @@ u32 aie_get_core_lr(struct aie_partition *apart,
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc,
+ 				apart->adev->core_lr->regoff);
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+@@ -53,7 +53,7 @@ u32 aie_get_core_sp(struct aie_partition *apart,
+ 
+ 	regoff = aie_cal_regoff(apart->adev, *loc,
+ 				apart->adev->core_sp->regoff);
+-	return ioread32(apart->aperture->base + regoff);
++	return aie_part_ioread32(apart, apart->aperture->base + regoff);
+ }
+ 
+ /**
+-- 
+2.54.0
+

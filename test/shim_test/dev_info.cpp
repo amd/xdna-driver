@@ -113,7 +113,7 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "good",
-    .device = npu3_device_id1,
+    .device = npu3a_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -123,7 +123,7 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "bad_timeout",
-    .device = npu3_device_id1,
+    .device = npu3a_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -134,7 +134,7 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "nop",
-    .device = npu3_device_id1,
+    .device = npu3a_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -144,7 +144,7 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "gemm",
-    .device = npu3_device_id1,
+    .device = npu3a_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -154,7 +154,7 @@ binary_info binary_infos[] = {
   },
   {
     .tag = "good",
-    .device = npu3_device_id1,
+    .device = npu3a_device_id,
     .revision_id = npu_any_revision_id,
     .ip_name2idx = {
       { "DPU:dpu", {0xffffffff} },
@@ -348,6 +348,16 @@ binary_info binary_infos[] = {
     .path = "local_shim_test_data/npu4/aie_debug/verify_4x4.xclbin",
     .flow = PARTIAL_ELF,
   },
+  {
+    .tag = "aie_debug_coredump",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {0} },
+    },
+    .path = "local_shim_test_data/npu4/aie_debug/verify_4x4_timeout.xclbin",
+    .flow = PARTIAL_ELF,
+  },
 };
 
 }
@@ -355,7 +365,7 @@ binary_info binary_infos[] = {
 const binary_info&
 get_binary_info(device* dev, const char* tag, const flow_type* flow)
 {
-  auto pci_dev_id = device_query<query::pcie_device>(dev);
+  auto pci_dev_id = canonical_device_id(device_query<query::pcie_device>(dev));
   auto revision_id = device_query<query::pcie_id>(dev).revision_id;
   bool match_tag = (tag == nullptr || tag[0] == '\0');
   bool match_flow = (flow == nullptr);

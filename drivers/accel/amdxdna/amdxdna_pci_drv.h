@@ -13,8 +13,10 @@
 #include <drm/drm_print.h>
 #include <linux/capability.h>
 #include <linux/cred.h>
+#include <linux/idr.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
+#include <linux/sched.h>
 #include <linux/srcu.h>
 #include <linux/workqueue.h>
 #include <linux/xarray.h>
@@ -53,6 +55,8 @@ struct amdxdna_gem_obj;
 struct amdxdna_hwctx;
 struct amdxdna_sched_job;
 struct amdxdna_msg_buf_hdl;
+struct aie_device;
+struct aie_error_lut_set;
 
 /*
  * struct amdxdna_dev_ops - Device hardware operation callbacks
@@ -60,8 +64,11 @@ struct amdxdna_msg_buf_hdl;
 struct amdxdna_dev_ops {
 	int (*init)(struct amdxdna_dev *xdna);
 	void (*fini)(struct amdxdna_dev *xdna);
+	void (*debugfs_init)(struct amdxdna_dev *xdna);
 	int (*resume)(struct amdxdna_dev *xdna);
 	int (*suspend)(struct amdxdna_dev *xdna);
+	int (*runtime_resume)(struct amdxdna_dev *xdna);
+	int (*runtime_suspend)(struct amdxdna_dev *xdna);
 	int (*sriov_configure)(struct amdxdna_dev *xdna, int num_vfs);
 	int (*mmap)(struct amdxdna_client *client, struct vm_area_struct *vma);
 	int (*hwctx_init)(struct amdxdna_hwctx *hwctx);
@@ -73,9 +80,21 @@ struct amdxdna_dev_ops {
 	int (*cmd_submit)(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 	int (*cmd_wait)(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout);
 	int (*get_aie_info)(struct amdxdna_client *client, struct amdxdna_drm_get_info *args);
-	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args);
+	int (*set_aie_state)(struct amdxdna_client *client, struct amdxdna_drm_set_state *args,
+			     u32 *settle_ms);
 	int (*get_array)(struct amdxdna_client *client, struct amdxdna_drm_get_array *args);
 	int (*get_dev_revision)(struct amdxdna_dev *xdna, u32 *rev);
+
+	/* Asynchronous error reporting callbacks. */
+	int (*register_async_event)(struct aie_device *aie, dma_addr_t addr, u32 size,
+				    void *handle, int (*cb)(void *, void __iomem *, size_t));
+	/*
+	 * Handle a device/architecture-specific async event type (beyond the
+	 * generic AIE tile error). Returns true when it consumed the event, so
+	 * the shared AIE tile error decode is skipped; false to let the caller
+	 * run the shared tile decode.
+	 */
+	bool (*handle_dev_async_event)(struct aie_device *aie, u32 type, void *vaddr);
 };
 
 struct amdxdna_fw_feature_tbl {
@@ -108,6 +127,10 @@ struct amdxdna_dev_info {
 	const struct amdxdna_fw_feature_tbl *fw_feature_tbl;
 	const struct amdxdna_fw_feature_tbl *cert_feature_tbl;
 	const struct amdxdna_dev_ops	*ops;
+
+	/* Asynchronous error reporting data (per AIE generation). */
+	const struct aie_error_lut_set	*luts;
+	u32				async_max_status_code;
 };
 
 struct amdxdna_carveout;
@@ -121,6 +144,15 @@ struct amdxdna_dev {
 
 	struct mutex			dev_lock; /* per device lock */
 	struct list_head		client_list;
+	struct mutex			client_lock; /* client_list */
+	/*
+	 * Device-wide cyclic allocator for hwctx IDs. Only the ID space is shared
+	 * so a context ID is unique across the whole device; the id->hwctx map and
+	 * its lifetime srcu live per-client (see struct amdxdna_client). next_hwctxid
+	 * is the cyclic cursor. Both are serialized by dev_lock.
+	 */
+	struct ida			hwctx_ida;
+	u32				next_hwctxid;
 	struct amdxdna_drm_query_firmware_version fw_ver;
 	struct rw_semaphore		notifier_lock; /* for mmu notifier*/
 	struct workqueue_struct		*notifier_wq;
@@ -141,6 +173,9 @@ struct amdxdna_dev {
 	struct srcu_struct		dpt_srcu;
 	struct amdxdna_dpt __rcu	*fw_log;
 	struct amdxdna_dpt __rcu	*fw_trace;
+
+	/* Allow auto core dump for hardware contexts, if true. */
+	bool				auto_coredump;
 };
 
 /*
@@ -166,9 +201,16 @@ struct amdxdna_io_stats {
 struct amdxdna_client {
 	struct list_head		node;
 	pid_t				pid;
+	char				name[TASK_COMM_LEN];
+	/*
+	 * Guards hwctx lifetime against this client's own blocking submit/wait.
+	 * A lookup only ever returns this client's own hwctx (per-client xa), so a
+	 * single per-client srcu is sufficient and a parked waiter can only stall
+	 * its own client's teardown.
+	 */
 	struct srcu_struct		hwctx_srcu;
+	/* id->hwctx map for this client; IDs come from xdna->hwctx_ida. */
 	struct xarray			hwctx_xa;
-	u32				next_hwctxid;
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
 
@@ -206,6 +248,9 @@ extern const struct amdxdna_dev_info dev_npu6_info;
 extern const struct amdxdna_dev_info dev_npu9_classic_info;
 extern const struct amdxdna_dev_info dev_npu9_pf_info;
 extern const struct amdxdna_dev_info dev_npu9_vf_info;
+extern const struct amdxdna_dev_info dev_npu10_classic_info;
+extern const struct amdxdna_dev_info dev_npu10_pf_info;
+extern const struct amdxdna_dev_info dev_npu10_vf_info;
 extern const struct amdxdna_dev_info dev_npu11_classic_info;
 extern const struct amdxdna_dev_info dev_npu11_pf_info;
 extern const struct amdxdna_dev_info dev_npu11_vf_info;

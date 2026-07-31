@@ -8,6 +8,9 @@
 #define HOST_QUEUE_ENTRY        32
 #define HOST_INDIRECT_PKT_NUM   36
 
+#define HOST_QUEUE_MAJOR_VERSION 1
+#define HOST_QUEUE_MINOR_VERSION 0
+
 #define LAST_CMD (0)
 #define NOT_LAST_CMD (1)
 
@@ -22,16 +25,18 @@ struct exec_buf {
 };
 
 struct host_queue_header {
-	u64	read_index;
+	u64	read_index;		/* 0x00 — device updates this */
 	struct {
 		u16 major;
 		u16 minor;
 	}
-	version;
-	u32	capacity;
-	u64	write_index;
-	u64	data_address;
-};
+	version;			/* 0x08 */
+	u32	capacity;		/* 0x0c — must be a power of two */
+	u64	padding0[6];		/* 0x10 — pad to 64-byte boundary */
+	u64	write_index;		/* 0x40 — host updates this */
+	u64	padding1[6];		/* 0x48 — pad to next 64-byte boundary */
+	u64	data_address;		/* 0x78 — DMA address of packet ring */
+} __aligned(64);
 
 struct host_indirect_packet_entry {
 	u32	host_addr_low;
@@ -51,15 +56,8 @@ enum host_queue_packet_opcode {
 };
 
 struct common_header {
-	union {
-		struct {
-			u16 type: 8;
-			u16 barrier: 1;
-			u16 acquire_fence_scope: 2;
-			u16 release_fence_scope: 2;
-		};
-		u16	header;
-	};
+	u8	type;
+	u8	reserved;
 	u8	opcode;
 	u8	chain_flag;
 	u16	count;
@@ -123,6 +121,8 @@ struct ve2_hsa_queue {
 	u64				reserved_write_index;
 	/* Device used for host queue allocation */
 	struct device			*alloc_dev;
+	/* Driver-local slot readiness tracking; avoids writing to hqc_mem (cert-owned) */
+	DECLARE_BITMAP(slot_ready, HOST_QUEUE_ENTRY);
 };
 
 /*
@@ -232,6 +232,7 @@ static inline void hsa_queue_sync_completion_for_write(struct ve2_hsa_queue *que
 
 /* handshake */
 #define ALIVE_MAGIC 0x404C5645
+#define COMPLETION_STATUS_DONE 1
 #define NUM_PDI_SAVE 2 //we can save one ss and one elf
 struct handshake {
 	u32 mpaie_alive; //0
@@ -302,7 +303,10 @@ struct handshake {
 	u32 doorbell_pending; // 6c  this is to solve the race condition.
 			      //MPNPU will set it to 1 when it receives doorbell from host.
 	u32 runlist_read_idx; // 70 relative read index in the runlist
-	u32 reserved1[7]; //make sure vm (below) starts at offset 0xa0
+	u32 completion_status; // 74 set to 1 by FW before firing completion IRQ; cleared by driver
+	u32 last_preemption_id; // 78
+	u32 save_dbg_buf_offset; // 7c
+	u32 reserved1[4]; //make sure vm (below) starts at offset 0xa0
 	u32 last_ddr_dm2mm_addr_high; // 90
 	u32 last_ddr_dm2mm_addr_low; // 94
 	u32 last_ddr_mm2dm_addr_high; // 98

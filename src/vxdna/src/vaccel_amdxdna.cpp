@@ -132,6 +132,34 @@ validate_exec_cmd_inline_payload(const struct amdxdna_ccmd_exec_cmd_req *req)
 static constexpr uint32_t k_platform_ctx_id = 0;
 
 /*
+ * Map a driver ctx handle (ctx->id, 1..MAX_CTX_ID) to the virtio ring index
+ * used for its completion fences. virtio-gpu only accepts ring indices in
+ * [0, num_rings), and ring 0 is reserved (platform ring /
+ * AMDXDNA_INVALID_CTX_HANDLE), so fold the handle into [1, AMDXDNA_MAX_HWCTX_PER_CTX].
+ * The guest computes the same function when it sets ring_idx on a WAIT, so the
+ * hwctx table is keyed by this value and fences are signalled on it.
+ *
+ * NOTE: this is not injective over the full handle range; two live handles that
+ * are congruent under the modulus map to the same ring. That is enforced at
+ * runtime -- create_hwctx rejects a create whose ring slot is already taken
+ * with -EBUSY -- so at most one context per ring (AMDXDNA_MAX_HWCTX_PER_CTX
+ * live contexts) exists and a lookup never resolves to the wrong context. This
+ * holds regardless of how the driver allocates ids; with cyclic allocation a
+ * colliding create is transiently rejected until the occupying context is freed.
+ *
+ * A handle of AMDXDNA_INVALID_CTX_HANDLE (0) is not a valid hwctx. Return the
+ * reserved ring 0 for it -- which find_hwctx() rejects -- rather than let the
+ * unsigned (ctx_handle - 1) underflow fold a guest-supplied 0 onto a live ring.
+ */
+static uint32_t
+hwctx_ring_idx(uint32_t ctx_handle)
+{
+    if (ctx_handle == AMDXDNA_INVALID_CTX_HANDLE)
+        return 0;
+    return ((ctx_handle - 1) % AMDXDNA_MAX_HWCTX_PER_CTX) + 1;
+}
+
+/*
  * Resources live in a single per-device table addressable by any context that
  * shares the cookie (e.g. multiple guest user processes inside the same VM).
  * Each resource records its registering ctx_id on creation; guest-controlled
@@ -195,7 +223,7 @@ validate_read_sysfs_inline_payload(const struct amdxdna_ccmd_read_sysfs_req *req
 bool
 uintptr_range_end(uintptr_t base, size_t len, uintptr_t *end_out)
 {
-    if (len > std::numeric_limits<uintptr_t>::max() || base > std::numeric_limits<uintptr_t>::max() - len)
+    if (base > std::numeric_limits<uintptr_t>::max() - len)
         return false;
     *end_out = base + len;
     return true;
@@ -361,6 +389,8 @@ reserve_coalesce_backing(const struct iovec *iov, uint32_t n)
             VACCEL_THROW_MSG(-EINVAL,
                              "iovec %u must be page-aligned for userptr BO (base=0x%lx len=%zu)",
                              i, static_cast<unsigned long>(base), len);
+        if (total + len < total)
+            VACCEL_THROW_MSG(-EINVAL, "iovec total size overflows size_t");
         total += len;
     }
 
@@ -493,13 +523,17 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
     auto num_iovs = res->get_iovecs(&iovecs);
 
     bool created_here = false;
+    bool use_raw_iovs = false;
     if (m_opaque_handle == AMDXDNA_INVALID_BO_HANDLE) {
         const bool heap_chunk = (m_bo_type == AMDXDNA_BO_DEV_HEAP);
         void *coalesce = nullptr;
         size_t total = 0;
 
-        for (uint32_t i = 0; i < num_iovs; i++)
+        for (uint32_t i = 0; i < num_iovs; i++) {
+            if (total + iovecs[i].iov_len < total)
+                VACCEL_THROW_MSG(-EINVAL, "iovec total size overflows size_t");
             total += iovecs[i].iov_len;
+        }
 
         if (heap_chunk) {
             if (m_size != static_cast<uint64_t>(total))
@@ -553,21 +587,63 @@ vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
                     m_coalesce_va = nullptr;
                     m_coalesce_len = 0;
                 }
-                throw;
+                /*
+                 * Coalescing needs shareable guest memory: mremap(old_size=0)
+                 * only duplicates MAP_SHARED slices. When QEMU is started
+                 * without share=on the slices are private-anon and mremap fails.
+                 * Do not fail here -- for heap chunks too: fall back to handing
+                 * the driver the raw scattered iovecs as a multi-entry va_tbl
+                 * and let CREATE_BO be the arbiter. With an IOMMU (force_iova)
+                 * the driver coalesces the pages into one device address -- for
+                 * a heap into its reserved heap IOVA region; without one
+                 * (SVA/PA) CREATE_BO fails and so does BO creation.
+                 */
+                use_raw_iovs = true;
+                vxdna_dbg("coalesce failed (guest mem not shareable); falling "
+                          "back to %u raw iovecs for BO create", num_iovs);
             }
         }
         m_iov_bytes = total;
-        m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
 
-        size_t buf_size = sizeof(amdxdna_drm_va_tbl) + sizeof(amdxdna_drm_va_entry);
-        std::vector<uint8_t> buf_vec(buf_size);
+        uint32_t n_entries = 1;
+        if (use_raw_iovs) {
+            /* Count entries needed to cover pin_len (truncate the last). */
+            m_vaddr = AMDXDNA_INVALID_ADDR;
+            size_t remaining = pin_len;
+            n_entries = 0;
+            for (uint32_t i = 0; i < num_iovs && remaining; i++) {
+                size_t l = iovecs[i].iov_len < remaining ? iovecs[i].iov_len : remaining;
+                remaining -= l;
+                n_entries++;
+            }
+        } else {
+            m_vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
+        }
+
+        size_t buf_size = sizeof(amdxdna_drm_va_tbl) +
+                          static_cast<size_t>(n_entries) * sizeof(amdxdna_drm_va_entry);
+        // Back the va_tbl with uint64_t so the storage is 8-byte aligned for its
+        // u64 fields; a uint8_t vector only guarantees byte alignment, and
+        // reinterpreting it as amdxdna_drm_va_tbl would be UB on strict-align archs.
+        std::vector<uint64_t> buf_vec((buf_size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
         auto tbl = reinterpret_cast<amdxdna_drm_va_tbl *>(buf_vec.data());
 
         tbl->udma_fd = -1;
-        tbl->num_entries = 1;
-        tbl->va_entries[0].vaddr =
-            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
-        tbl->va_entries[0].len = static_cast<uint64_t>(pin_len);
+        tbl->num_entries = n_entries;
+        if (use_raw_iovs) {
+            size_t remaining = pin_len;
+            for (uint32_t i = 0; i < n_entries; i++) {
+                size_t l = iovecs[i].iov_len < remaining ? iovecs[i].iov_len : remaining;
+                tbl->va_entries[i].vaddr =
+                    static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iovecs[i].iov_base));
+                tbl->va_entries[i].len = static_cast<uint64_t>(l);
+                remaining -= l;
+            }
+        } else {
+            tbl->va_entries[0].vaddr =
+                static_cast<uint64_t>(reinterpret_cast<uintptr_t>(coalesce));
+            tbl->va_entries[0].len = static_cast<uint64_t>(pin_len);
+        }
 
         struct amdxdna_drm_create_bo args = {};
         args.vaddr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(buf_vec.data()));
@@ -661,8 +737,9 @@ poll_and_retire_pending(std::vector<std::shared_ptr<vaccel_fence>> &&copy_pendin
         if (ret)
             vxdna_err("vxdna_hwctx::poll_and_retire_pending: Wait for fence failed ret %d, errno %d, %s, expect timeout: %ld",
                       ret, errno, strerror(errno), fence->get_timeout_nsec());
-        // Fence is retired, write fence callback
-        m_write_fence_callback(m_cookie, m_ctx_id, m_hwctx_handle, fence->get_id());
+        // Fence is retired, write fence callback (signal on the guest ring).
+        m_write_fence_callback(m_cookie, m_ctx_id, hwctx_ring_idx(m_hwctx_handle),
+                               fence->get_id());
     }
 }
 
@@ -869,7 +946,7 @@ submit_fence(uint64_t fence_id)
                                  MAX_PENDING_FENCES,
                                  static_cast<unsigned long>(fence_id));
 
-            auto fence = std::make_shared<vaccel_fence>(fence_id, m_sync_point, m_syncobj_handle, m_hwctx_handle, m_timeout_nsec);
+            auto fence = std::make_shared<vaccel_fence>(fence_id, m_sync_point, m_syncobj_handle, hwctx_ring_idx(m_hwctx_handle), m_timeout_nsec);
             m_pending_fences.push_back(std::move(fence));
             m_has_sync_point = false;
             m_cv.notify_one();
@@ -877,7 +954,8 @@ submit_fence(uint64_t fence_id)
     }
     // Invoke callback outside lock to avoid deadlock
     if (immediate_callback) {
-        m_write_fence_callback(m_cookie, m_ctx_id, m_hwctx_handle, fence_id);
+        m_write_fence_callback(m_cookie, m_ctx_id, hwctx_ring_idx(m_hwctx_handle),
+                               fence_id);
     }
 }
 
@@ -962,30 +1040,89 @@ export_resource_fd(const std::shared_ptr<vaccel_resource> &res)
     return args.fd;
 }
 
+std::shared_ptr<vxdna_context::vxdna_hwctx>
+vxdna_context::
+find_hwctx(uint32_t ring_idx) const
+{
+    if (ring_idx == 0 || ring_idx > MAX_HWCTX_PER_CTX)
+        return nullptr;
+    std::lock_guard<std::mutex> lock(m_hwctx_lock);
+    return m_hwctx_slots[ring_idx];
+}
+
+std::shared_ptr<vxdna_context::vxdna_hwctx>
+vxdna_context::
+find_hwctx_by_handle(uint32_t ctx_handle) const
+{
+    // hwctx_ring_idx() is not injective, so a stale or forged handle can be
+    // congruent to a live one under the modulus (or be AMDXDNA_INVALID_CTX_HANDLE
+    // -> reserved ring 0). Verify the stored handle matches so a guest can only
+    // reach the context it actually named. get_handle() is immutable, so it is
+    // safe to compare on the returned keep-alive copy.
+    auto hwctx = find_hwctx(hwctx_ring_idx(ctx_handle));
+    if (hwctx && hwctx->get_handle() == ctx_handle)
+        return hwctx;
+    return nullptr;
+}
+
 void
 vxdna_context::
 create_hwctx(const struct amdxdna_ccmd_create_ctx_req *req)
 {
-    struct amdxdna_ccmd_create_ctx_rsp rsp = {};
+    // Construct outside the lock (CREATE_HWCTX ioctl and polling-thread start
+    // can block). The slot index is the virtio ring index derived from the
+    // driver ctx id and doubles as the allocator: a taken slot means either the
+    // cap is reached or two ctx ids collide under hwctx_ring_idx().
     auto hwctx = std::make_shared<vxdna_hwctx>(*this, req);
+    uint32_t ring_idx = hwctx_ring_idx(hwctx->get_handle());
+    {
+        std::lock_guard<std::mutex> lock(m_hwctx_lock);
+        if (m_hwctx_slots[ring_idx])
+            VACCEL_THROW_MSG(-EBUSY,
+                             "virtio ring index %u unavailable (ctx id %u, max %u hw contexts)",
+                             ring_idx, hwctx->get_handle(), MAX_HWCTX_PER_CTX);
+        m_hwctx_slots[ring_idx] = hwctx;
+    }
+
+    // rsp.handle stays the driver ctx id so guest-side correlation (telemetry
+    // ctx_map, coredump, HW_CONTEXT_BY_ID) is unchanged.
+    struct amdxdna_ccmd_create_ctx_rsp rsp = {};
     rsp.hdr.base.len = sizeof(rsp);
     rsp.handle = hwctx->get_handle();
-    m_hwctx_table.insert(hwctx->get_handle(), std::move(hwctx));
-    write_rsp(&rsp, sizeof(rsp), req->hdr.rsp_off);
+    try {
+        write_rsp(&rsp, sizeof(rsp), req->hdr.rsp_off);
+    } catch (...) {
+        std::lock_guard<std::mutex> lock(m_hwctx_lock);
+        m_hwctx_slots[ring_idx].reset();
+        throw;
+    }
 }
 
 void
 vxdna_context::
 remove_hwctx(uint32_t handle)
 {
-    m_hwctx_table.erase(handle);
+    uint32_t ring_idx = hwctx_ring_idx(handle);
+    // Move the entry out under the lock, then let it destruct outside the lock
+    // (~vxdna_hwctx joins the polling thread).
+    std::shared_ptr<vxdna_hwctx> old;
+    {
+        std::lock_guard<std::mutex> lock(m_hwctx_lock);
+        auto &slot = m_hwctx_slots[ring_idx];
+        // Only evict when the slot actually holds this handle. hwctx_ring_idx()
+        // is not injective, so a stale or invalid handle can be congruent to a
+        // live one (or be AMDXDNA_INVALID_CTX_HANDLE -> reserved ring 0); such a
+        // handle must not tear down the context occupying that ring.
+        if (slot && slot->get_handle() == handle)
+            old = std::move(slot);
+    }
 }
 
 void
 vxdna_context::
 config_hwctx(const struct amdxdna_ccmd_config_ctx_req *req)
 {
-    auto hwctx = m_hwctx_table.lookup(req->handle);
+    auto hwctx = find_hwctx_by_handle(req->handle);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found handle %u", req->handle);
     hwctx->config(req);
@@ -1003,7 +1140,7 @@ submit_fence(uint32_t ring_idx, uint64_t fence_id)
         get_callbacks()->write_context_fence(get_cookie(), get_id(), ring_idx, fence_id);
         return;
     }
-    auto hwctx = m_hwctx_table.lookup(ring_idx);
+    auto hwctx = find_hwctx(ring_idx);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found ring_idx %u", ring_idx);
     hwctx->submit_fence(fence_id);
@@ -1013,7 +1150,7 @@ void
 vxdna_context::
 exec_cmd(const struct amdxdna_ccmd_exec_cmd_req *req)
 {
-    auto hwctx = m_hwctx_table.lookup(req->ctx_handle);
+    auto hwctx = find_hwctx_by_handle(req->ctx_handle);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found handle %u", req->ctx_handle);
     struct amdxdna_ccmd_exec_cmd_rsp rsp = {};
@@ -1026,10 +1163,34 @@ void
 vxdna_context::
 wait_cmd(const struct amdxdna_ccmd_wait_cmd_req *req)
 {
-    auto hwctx = m_hwctx_table.lookup(req->ctx_handle);
+    auto hwctx = find_hwctx_by_handle(req->ctx_handle);
     if (!hwctx)
         VACCEL_THROW_MSG(-EINVAL, "HW context not found handle %u", req->ctx_handle);
     hwctx->set_sync_point(req->seq, req->timeout_nsec);
+    write_err_rsp(0); // Success
+}
+
+void
+vxdna_context::
+sync_bo(const struct amdxdna_ccmd_sync_bo_req *req)
+{
+    // The guest BO handle is the host GEM handle, but all guest contexts share
+    // the native client's GEM namespace (single client per QEMU). Validate the
+    // BO is owned by this context before issuing the driver ioctl.
+    auto bo = m_bo_table.lookup(req->handle);
+    if (!bo)
+        VACCEL_THROW_MSG(-EINVAL, "sync_bo: BO %u not found in ctx %u",
+                         req->handle, get_id());
+
+    struct amdxdna_drm_sync_bo arg = {};
+    arg.handle = req->handle;
+    arg.direction = req->direction;
+    arg.offset = req->offset;
+    arg.size = req->size;
+    if (ioctl(get_fd(), DRM_IOCTL_AMDXDNA_SYNC_BO, &arg))
+        VACCEL_THROW_MSG(-errno, "sync_bo ioctl failed for BO %u, errno %d",
+                         req->handle, errno);
+
     write_err_rsp(0); // Success
 }
 
@@ -1437,6 +1598,16 @@ vxdna_ccmd_read_sysfs([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdn
     });
 }
 
+static void
+vxdna_ccmd_sync_bo([[maybe_unused]] vxdna &device, const std::shared_ptr<vxdna_context>& ctx,
+                   const void *hdr)
+{
+    auto *req = static_cast<const struct amdxdna_ccmd_sync_bo_req *>(hdr);
+    vxdna_ccmd_error_wrap(ctx, [&]() {
+        ctx->sync_bo(req);
+    });
+}
+
 // Definition of the CCMD handler type for AMDXDNA
 using amdxdna_ccmd_handler_t = void(*)(vxdna &device,
     const std::shared_ptr<vxdna_context>& ctx,
@@ -1455,7 +1626,7 @@ struct amdxdna_ccmd_dispatch_entry {
 #define AMD_CCMD_DISPATCH_ENTRY(name) \
     { #name, vxdna_ccmd_##name, sizeof(struct amdxdna_ccmd_##name##_req) }
 
-constexpr size_t AMDXDNA_CCMD_COUNT = 11;
+constexpr size_t AMDXDNA_CCMD_COUNT = 12;
 constexpr std::array<amdxdna_ccmd_dispatch_entry, AMDXDNA_CCMD_COUNT> amdxdna_ccmd_dispatch_table = {{
     AMD_CCMD_DISPATCH_ENTRY(nop),
     AMD_CCMD_DISPATCH_ENTRY(init),
@@ -1468,6 +1639,7 @@ constexpr std::array<amdxdna_ccmd_dispatch_entry, AMDXDNA_CCMD_COUNT> amdxdna_cc
     AMD_CCMD_DISPATCH_ENTRY(wait_cmd),
     AMD_CCMD_DISPATCH_ENTRY(get_info),
     AMD_CCMD_DISPATCH_ENTRY(read_sysfs),
+    AMD_CCMD_DISPATCH_ENTRY(sync_bo),
 }};
 
 void

@@ -16,6 +16,7 @@ struct psp_device;
 struct smu_device;
 struct amdxdna_hwctx;
 struct amdxdna_msg_buf_hdl;
+struct amdxdna_async_events;
 
 struct aie_msg_ops {
 	int (*get_coredump)(struct amdxdna_hwctx *hwctx,
@@ -26,6 +27,14 @@ struct aie_msg_ops {
 	int (*rw_mem)(struct amdxdna_hwctx *hwctx, bool is_read,
 		      u8 row, u8 col, u32 aie_addr,
 		      dma_addr_t dram_addr, u32 size);
+
+	int (*query_telemetry)(struct aie_device *aie, char __user *buf, u32 size,
+			       struct amdxdna_drm_query_telemetry_header *header);
+	/* Optional per-arch FW health/map hooks; leave NULL when unsupported. */
+	int (*fill_hwctx_health)(struct aie_device *aie,
+				 struct amdxdna_hwctx *hwctx,
+				 struct amdxdna_drm_hwctx_entry *entry);
+	int (*fill_hwctx_map)(struct aie_device *aie, u32 *map);
 
 	int  (*fw_log_init)(struct amdxdna_dev *xdna, size_t size, u32 level);
 	int  (*fw_log_config)(struct amdxdna_dev *xdna, u32 level);
@@ -52,12 +61,20 @@ struct aie_device {
 	struct amdxdna_drm_query_aie_version version;
 	struct amdxdna_drm_query_aie_metadata metadata;
 	struct aie_msg_ops msg_ops;
+	u32	force_preempt_enabled;
+
+	/* FW hwctx slot count for the telemetry map; 0 if arch has no map. */
+	u32 hwctx_limit;
 
 	u32 clk_gating;
 	u32 npuclk_freq;
 	u32 hclk_freq;
 	u32 max_tops;
 	u32 curr_tops;
+
+	/* Async error reporting state, shared by aie2 and aie4. */
+	struct amdxdna_async_events	*async_events;
+	struct amdxdna_async_error	last_async_err;
 };
 
 struct aie_hw_ops {
@@ -119,6 +136,7 @@ struct aie_bar_off_pair {
 
 struct smu_config {
 	void __iomem    *smu_regs[SMU_MAX_REGS];
+	bool		intr_enabled;
 };
 
 struct psp_config {
@@ -152,6 +170,17 @@ int amdxdna_get_aie_version(struct amdxdna_client *client,
 int amdxdna_get_firmware_version(struct amdxdna_client *client,
 				 struct amdxdna_drm_get_info *args,
 				 struct amdxdna_drm_query_firmware_version *version);
+int amdxdna_get_telemetry(struct aie_device *aie, struct amdxdna_client *client,
+			  struct amdxdna_drm_get_info *args);
+int amdxdna_get_hwctx_status(struct aie_device *aie, struct amdxdna_client *client,
+			     struct amdxdna_drm_get_info *args);
+int amdxdna_query_ctx_status_array(struct aie_device *aie, struct amdxdna_client *client,
+				   struct amdxdna_drm_get_array *args);
+int amdxdna_query_ctx_status_by_id(struct aie_device *aie, struct amdxdna_client *client,
+				   struct amdxdna_drm_get_array *args);
+int amdxdna_get_force_preempt_state(struct aie_device *aie, struct amdxdna_drm_get_info *args);
+int amdxdna_set_force_preempt_state(struct aie_device *aie, struct amdxdna_client *client,
+				    struct amdxdna_drm_set_state *args);
 void amdxdna_hmm_invalidate(struct amdxdna_gem_obj *abo, unsigned long cur_seq);
 
 struct amdxdna_msg_buf_hdl {
@@ -180,6 +209,7 @@ struct amdxdna_coredump_buf_entry {
 int amdxdna_get_coredump(struct aie_device *aie,
 			 struct amdxdna_client *client,
 			 struct amdxdna_drm_get_array *args);
+char *amdxdna_get_hwctx_coredump(struct aie_device *aie, struct amdxdna_hwctx *hwctx);
 int amdxdna_aie_tile_read(struct aie_device *aie,
 			  struct amdxdna_client *client,
 			  struct amdxdna_drm_get_array *args);
@@ -203,5 +233,13 @@ int aie_smu_set_dpm(struct smu_device *smu, u32 dpm_level);
 void amdxdna_io_stats_job_start(struct amdxdna_client *client);
 void amdxdna_io_stats_job_done(struct amdxdna_client *client);
 u64 amdxdna_io_stats_busy_time_ns(struct amdxdna_client *client);
+
+/*
+ * Set or get the global auto core dump mode on device.
+ */
+int amdxdna_get_auto_coredump_mode(struct amdxdna_client *client,
+				   struct amdxdna_drm_get_info *args);
+int amdxdna_set_auto_coredump_mode(struct amdxdna_client *client,
+				   struct amdxdna_drm_set_state *args);
 
 #endif /* _AIE_H_ */

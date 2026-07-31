@@ -626,6 +626,7 @@ struct amdxdna_drm_get_info {
 #define	DRM_AMDXDNA_QUERY_RESOURCE_INFO			12
 #define	DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE	13
 #define	DRM_AMDXDNA_QUERY_CERT_FIRMWARE_VERSION		14
+#define	DRM_AMDXDNA_GET_AUTO_COREDUMP			15
 	__u32 param; /* in */
 	__u32 buffer_size; /* in/out */
 	__u64 buffer; /* in/out */
@@ -660,6 +661,8 @@ struct amdxdna_drm_get_info {
  * @fatal_error_exception_type: LX7 exception type
  * @fatal_error_exception_pc: LX7 program counter at the time of the exception
  * @fatal_error_app_module: module name where the exception occurred
+ * @pad: Structure padding.
+ * @name: name of the process which created this context
  */
 struct amdxdna_drm_hwctx_entry {
 	__u32 context_id;
@@ -690,6 +693,9 @@ struct amdxdna_drm_hwctx_entry {
 	__u32 fatal_error_exception_type;
 	__u32 fatal_error_exception_pc;
 	__u32 fatal_error_app_module;
+	__u32 pad;
+#define AMDXDNA_HWCTX_PROC_NAME_LEN	16
+	char name[AMDXDNA_HWCTX_PROC_NAME_LEN];
 };
 
 /**
@@ -878,6 +884,7 @@ struct amdxdna_drm_set_state {
 #define	DRM_AMDXDNA_SET_FW_TRACE_STATE		6
 #define	DRM_AMDXDNA_AIE_TILE_WRITE		7
 #define	DRM_AMDXDNA_SET_CLOCK_FREQ		8
+#define	DRM_AMDXDNA_SET_AUTO_COREDUMP		9
 	__u32 param; /* in */
 	__u32 buffer_size; /* in */
 	__u64 buffer; /* in */
