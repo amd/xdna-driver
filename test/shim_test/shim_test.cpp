@@ -304,6 +304,24 @@ dev_filter_is_aie4_or_npu4_and_amdxdna_drv(device::id_type id, device* dev)
   return true;
 }
 
+// VE2 edge (npu_ve2 / aie2ps). Phase 1 uses this positive filter to opt tests
+// in on VE2 without changing desktop aie/aie2/aie4 filters.
+bool
+dev_filter_npu_ve2(device::id_type id, device* dev)
+{
+  if (!is_xdna_dev(dev))
+    return false;
+  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  return device_id == npu_ve2_device_id;
+}
+
+// xdna tests that must not run on VE2 edge (unsupported BO types / fencing).
+bool
+dev_filter_xdna_not_npu_ve2(device::id_type id, device* dev)
+{
+  return dev_filter_xdna(id, dev) && !dev_filter_npu_ve2(id, dev);
+}
+
 static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   if (dev_filter_is_npu4(id, sdev.get()))
@@ -633,9 +651,14 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>&
     auto bdf = bdf_info2str(info);
     std::cout << "device[" << i << "]: " << bdf << std::endl;
     auto dev = get_userpf_device(i);
-    auto devid = device_query<query::pcie_device>(dev);
-    std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
-
+    try {
+      auto devid = device_query<query::pcie_device>(dev);
+      std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
+    }
+    catch (const query::no_such_key&) {
+      // VE2 zocl edge device — not a shim_test xdna target.
+      continue;
+    }
   }
 }
 
@@ -1599,7 +1622,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_xdna, TEST_map_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 361264}
   },
   test_case{ "map bo for read only", {},
-    TEST_NEGATIVE, dev_filter_xdna, TEST_map_read_bo, {0x1000}
+    TEST_NEGATIVE, dev_filter_xdna_not_npu_ve2, TEST_map_read_bo, {0x1000}
   },
   test_case{ "map exec_buf_bo and test perf", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 0x1000}
@@ -1636,10 +1659,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "create and free debug bo", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x1000 }
+    TEST_POSITIVE, dev_filter_xdna_not_npu_ve2, TEST_create_free_debug_bo, { 0x1000 }
   },
   test_case{ "create and free large debug bo", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_create_free_debug_bo, { 0x100000 }
+    TEST_POSITIVE, dev_filter_xdna_not_npu_ve2, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "create and free uc_log bo", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_create_free_uc_log_bo, { 0x10000 }
@@ -1660,7 +1683,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie2, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_host, {}
+    TEST_POSITIVE, dev_filter_xdna_not_npu_ve2, TEST_cmd_fence_host, {}
   },
   test_case{ "io test no op with duplicated BOs", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_noop_io_with_dup_bo, {}
@@ -1684,7 +1707,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "Cmd fencing (driver side)", {},
-    TEST_POSITIVE, dev_filter_xdna, TEST_cmd_fence_device, {}
+    TEST_POSITIVE, dev_filter_xdna_not_npu_ve2, TEST_cmd_fence_device, {}
   },
   test_case{ "sync_bo for input_output 1MiB BO", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000}
@@ -1791,6 +1814,72 @@ std::vector<test_case> test_list {
   test_case{ "export BO then close device", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_export_bo_then_close_device, {}
   },
+  // --- VE2: board-verified tests (dev_filter_npu_ve2 opt-in) ---
+  // Phase 1: hw_context, 3GB huge BO, noop latency/throughput, multi-ctx x3, suspend/resume
+  // Phase 2: async initial, real kernel latency, uc_log x2, runlist latency, max ctx x2, dev heap x4
+  test_case{ "create_destroy_hw_context (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_create_destroy_hw_context, {}
+  },
+  test_case{ "create_and_free_input_output_bo huge pages (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_create_free_bo,
+    {XCL_BO_FLAGS_HOST_ONLY, 0, 0xC0000000}
+  },
+  test_case{ "measure no-op kernel latency (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_io_latency,
+    { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+  },
+  test_case{ "measure no-op kernel throughput command (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_io_throughput,
+    { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+  },
+  test_case{ "Multi context IO test 1 (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_multi_context_io_test, { 0 }
+  },
+  test_case{ "Multi context IO test 2 (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_multi_context_io_test, { 1 }
+  },
+  test_case{ "Multi context IO test 3 (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_multi_context_io_test, { 2 }
+  },
+  test_case{ "Real kernel delay run for auto-suspend/resume (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_io_suspend_resume, {}
+  },
+  test_case{ "get async error in multithread - INITIAL (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_async_error_multi, {false}
+  },
+  test_case{ "measure real kernel latency (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_io_latency,
+    { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+  },
+  test_case{ "create and free uc_log bo (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_create_free_uc_log_bo, { 0x10000 }
+  },
+  test_case{ "create and free large uc_log bo (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_create_free_uc_log_bo, { 0x100000 }
+  },
+  test_case{ "measure no-op kernel latency chained command (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_io_runlist_latency,
+    { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+  },
+  test_case{ "max context test (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_create_destroy_max_context, { 0 }
+  },
+  test_case{ "max context bad test (npu_ve2)", {},
+    TEST_NEGATIVE, dev_filter_npu_ve2, TEST_create_destroy_max_context, { 1 }
+  },
+  test_case{ "dev BO crossing two heap chunks 128MB (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_dev_bo_cross_heap, { 128ul * 1024 * 1024 }
+  },
+  test_case{ "dev BO spanning the whole heap 512MB (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_dev_bo_cross_heap, { 512ul * 1024 * 1024 }
+  },
+  test_case{ "dev BO cross-heap alloc/free stress (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_dev_bo_cross_heap_stress,
+    { 128ul * 1024 * 1024, 100 }
+  },
+  test_case{ "dev BO larger than 512MB accepted (npu_ve2)", {},
+    TEST_POSITIVE, dev_filter_npu_ve2, TEST_dev_bo_cross_heap, { 576ul * 1024 * 1024 }
+  },
   test_case{ "get AIE coredump and check registers", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_io_coredump, {}
   },
@@ -1876,6 +1965,13 @@ run_test(int id, const test_case& test, bool force, const device::id_type& num_o
     } else { // per user device test
       for (device::id_type i = 0; i < num_of_devices; i++) {
         auto dev = get_userpf_device(i);
+        // Skip userpf devices without pcie_device (e.g. VE2 zocl edge device).
+        try {
+          device_query<query::pcie_device>(dev.get());
+        }
+        catch (const query::no_such_key&) {
+          continue;
+        }
         if (!force && !test.dev_filter(i, dev.get()))
           continue;
         skipped = false;
