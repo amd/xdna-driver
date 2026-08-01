@@ -12,6 +12,7 @@
 #include <linux/overflow.h>
 #include <linux/slab.h>
 #include <linux/timer.h>
+#include <linux/vmalloc.h>
 #include <linux/wait.h>
 
 #include "drm/amdxdna_accel.h"
@@ -727,6 +728,7 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 
 	init_waitqueue_head(&priv->job_free_wq);
 	mutex_init(&vp->privctx_lock);
+	mutex_init(&vp->coredump_cache.lock);
 	init_waitqueue_head(&vp->waitq);
 
 	/* VE2: num_tiles is the number of AIE columns (not a 2D tile count). */
@@ -801,6 +803,7 @@ destroy_partition:
 	ve2_mgmt_destroy_partition(hwctx);
 free_priv:
 	kfree(vp->hs_buf_va);
+	mutex_destroy(&vp->coredump_cache.lock);
 	mutex_destroy(&vp->privctx_lock);
 	kfree(vp);
 	kfree(priv);
@@ -840,6 +843,8 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 			timer_delete_sync(&vp->event_timer);
 		kfree(vp->hwctx_config);
 		vp->hwctx_config = NULL;
+		vfree(vp->coredump_cache.buf);
+		mutex_destroy(&vp->coredump_cache.lock);
 		mutex_destroy(&vp->privctx_lock);
 		kfree(vp);
 		priv->hw_priv = NULL;
@@ -1204,6 +1209,14 @@ static void ve2_handle_timeout(struct amdxdna_hwctx *hwctx, struct amdxdna_sched
 		cmd_data = amdxdna_cmd_get_data(job->cmd_bo, &data_total);
 		ve2_fill_health_data(hwctx, cmd_data, data_total);
 	}
+
+	/*
+	 * Snapshot the AIE partition while this hwctx is still the active
+	 * context on its partition. Only capture when the device-wide auto
+	 * coredump mode is enabled. Best-effort: failures are logged, not fatal.
+	 */
+	if (xdna->auto_coredump)
+		ve2_cache_coredump(xdna, hwctx, seq);
 
 	amdxdna_cmd_set_state(job->cmd_bo, ERT_CMD_STATE_TIMEOUT);
 }

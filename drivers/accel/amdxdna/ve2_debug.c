@@ -249,6 +249,58 @@ static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_g
 	return 0;
 }
 
+/*
+ * Serve the last auto-captured coredump from this context's cache. The dump is
+ * consumed on read (one-shot): on a successful copy the cached buffer is freed
+ * and the cache is marked empty so the next request performs a fresh live
+ * capture. Returns -ENODATA when there is no cached dump, so the caller can
+ * fall back to a live capture.
+ */
+static int ve2_coredump_read_cached(struct amdxdna_dev *xdna,
+				    struct amdxdna_drm_get_array *args, u32 buf_size,
+				    struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_coredump_cache *cache;
+	int ret = 0;
+
+	if (!vp)
+		return -ENODATA;
+
+	cache = &vp->coredump_cache;
+
+	mutex_lock(&cache->lock);
+	if (!cache->valid || !cache->buf) {
+		XDNA_DBG(xdna, "No cached coredump for hwctx %u pid %d",
+			 hwctx->id, hwctx->client->pid);
+		ret = -ENODATA;
+		goto out;
+	}
+	if (cache->size > buf_size) {
+		XDNA_DBG(xdna, "Cached coredump too big: buf %u, need %u",
+			 buf_size, cache->size);
+		args->element_size = cache->size;
+		ret = -ENOBUFS;
+		goto out;
+	}
+	if (copy_to_user(u64_to_user_ptr(args->buffer), cache->buf, cache->size)) {
+		XDNA_ERR(xdna, "Failed to copy cached coredump to user");
+		ret = -EFAULT;
+		goto out;
+	}
+	XDNA_DBG(xdna, "Served cached coredump: hwctx %u pid %d seq %llu size %u (consumed)",
+		 hwctx->id, hwctx->client->pid, cache->seq, cache->size);
+
+	/* One-shot: consume the cached dump so the next request is a live capture. */
+	vfree(cache->buf);
+	cache->buf = NULL;
+	cache->size = 0;
+	cache->valid = false;
+out:
+	mutex_unlock(&cache->lock);
+	return ret;
+}
+
 static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_drm_aie_coredump footer = {};
@@ -303,6 +355,15 @@ static int ve2_coredump_read(struct amdxdna_client *client, struct amdxdna_drm_g
 
 	XDNA_DBG(xdna, "cl_pid: %u, hwctx_id: %u, start_col %u, ncol %u\n", hwctx->client->pid,
 		 hwctx->id, hwctx->start_col, hwctx->num_col);
+
+	/*
+	 * Prefer the auto-captured timeout dump for this context. It is served
+	 * once and then cleared; if the cache is empty (-ENODATA) then read live
+	 * data below.
+	 */
+	ret = ve2_coredump_read_cached(xdna, args, buf_size, hwctx);
+	if (ret != -ENODATA)
+		return ret;
 
 	vp = ve2_hw_priv(hwctx);
 	if (!vp || !vp->mgmtctx) {
@@ -486,6 +547,23 @@ static int ve2_get_clock_metadata(struct amdxdna_client *client, struct amdxdna_
 	return 0;
 }
 
+/* Query the device-wide auto coredump mode. */
+static int ve2_get_auto_coredump_mode(struct amdxdna_client *client,
+				      struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_attribute_state state = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	u32 buf_sz;
+
+	state.state = xdna->auto_coredump ? 1 : 0;
+
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &state, buf_sz))
+		return -EFAULT;
+
+	return 0;
+}
+
 int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info *args)
 {
 	struct amdxdna_dev *xdna = client->xdna;
@@ -505,6 +583,8 @@ int ve2_get_aie_info(struct amdxdna_client *client, struct amdxdna_drm_get_info 
 		return ve2_get_aie_metadata(client, args);
 	case DRM_AMDXDNA_QUERY_CLOCK_METADATA:
 		return ve2_get_clock_metadata(client, args);
+	case DRM_AMDXDNA_GET_AUTO_COREDUMP:
+		return ve2_get_auto_coredump_mode(client, args);
 	default:
 		XDNA_ERR(xdna, "Not supported GET_INFO param %u", args->param);
 		return -EOPNOTSUPP;
@@ -863,6 +943,65 @@ static int ve2_set_clock_freq(struct amdxdna_client *client, struct amdxdna_drm_
 	return ret;
 }
 
+/* Drop this context's cached auto-coredump, if any. */
+static void ve2_drop_cached_coredump(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_coredump_cache *cache;
+
+	if (!vp)
+		return;
+
+	cache = &vp->coredump_cache;
+	mutex_lock(&cache->lock);
+	vfree(cache->buf);
+	cache->buf = NULL;
+	cache->size = 0;
+	cache->valid = false;
+	mutex_unlock(&cache->lock);
+}
+
+/*
+ * Enable or disable the device-wide auto coredump mode. When disabled, any
+ * previously cached per-context dumps are dropped.
+ */
+static int ve2_set_auto_coredump_mode(struct amdxdna_client *client,
+				      struct amdxdna_drm_set_state *args)
+{
+	struct amdxdna_drm_attribute_state state = {};
+	struct amdxdna_dev *xdna = client->xdna;
+	struct amdxdna_client *tmp_client;
+	u32 buf_sz;
+
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), buf_sz))
+		return -EFAULT;
+
+	if (state.state > 1) {
+		XDNA_ERR(xdna, "Invalid state: %d", state.state);
+		return -EINVAL;
+	}
+
+	XDNA_DBG(xdna, "Setting auto coredump to %d", state.state);
+	xdna->auto_coredump = state.state;
+
+	/* Auto coredump disabled: drop all cached dumps across all contexts. */
+	if (!state.state) {
+		list_for_each_entry(tmp_client, &xdna->client_list, node) {
+			struct amdxdna_hwctx *hwctx;
+			unsigned long hx_id;
+			int idx;
+
+			idx = srcu_read_lock(&tmp_client->hwctx_srcu);
+			xa_for_each(&tmp_client->hwctx_xa, hx_id, hwctx)
+				ve2_drop_cached_coredump(hwctx);
+			srcu_read_unlock(&tmp_client->hwctx_srcu, idx);
+		}
+	}
+
+	return 0;
+}
+
 int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_state *args,
 		      u32 *settle_ms)
 {
@@ -882,6 +1021,8 @@ int ve2_set_aie_state(struct amdxdna_client *client, struct amdxdna_drm_set_stat
 		return ve2_aie_tile_write(client, args);
 	case DRM_AMDXDNA_SET_CLOCK_FREQ:
 		return ve2_set_clock_freq(client, args);
+	case DRM_AMDXDNA_SET_AUTO_COREDUMP:
+		return ve2_set_auto_coredump_mode(client, args);
 	default:
 		XDNA_ERR(xdna, "Unsupported set_state param %u", args->param);
 		return -EOPNOTSUPP;
