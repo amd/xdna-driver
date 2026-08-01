@@ -10,6 +10,7 @@
 #ifndef _VE2_HWCTX_H_
 #define _VE2_HWCTX_H_
 
+#include <linux/ktime.h>
 #include <linux/mutex.h>
 #include <linux/timer.h>
 #include <linux/types.h>
@@ -42,6 +43,29 @@ struct ve2_config_hwctx {
 	u64	dtrace_addr;
 	u32	opcode_timeout_config;
 	u32	dbg_buf_ddr_offset;
+};
+
+/*
+ * ve2_coredump_cache - Last AIE coredump auto-captured on command timeout.
+ *
+ * This cache is per-hardware-context (lives in struct amdxdna_ctx_priv). Auto-
+ * capture is gated by the device-wide auto coredump mode (amdxdna_dev.
+ * auto_coredump): when enabled, the driver snapshots the AIE partition into
+ * @buf when a command on this context times out. Keep-latest: a newer timeout
+ * overwrites the previous snapshot. A coredump request is served from this
+ * cache and the cache is then cleared (one-shot); the cached dump is also
+ * dropped when auto coredump is disabled or when the context is destroyed. If
+ * the cache is empty the driver performs a live capture instead.
+ */
+struct ve2_coredump_cache {
+	void		*buf;		/* vmalloc'd snapshot, or NULL */
+	u32		size;		/* valid bytes in @buf */
+	u64		seq;		/* failing command sequence number */
+	u32		start_col;	/* partition start column */
+	u32		num_col;	/* partition column count */
+	ktime_t		timestamp;	/* capture time */
+	bool		valid;		/* @buf holds a captured dump */
+	struct mutex	lock;		/* protects all fields above */
 };
 
 /* VE2-specific per-hwctx state. Lives at hwctx->priv->hw_priv. */
@@ -80,6 +104,9 @@ struct amdxdna_ctx_priv {
 	 */
 	void				*hs_buf_va;
 	size_t				hs_buf_size;
+
+	/* Last AIE coredump auto-captured on command timeout (per hwctx). */
+	struct ve2_coredump_cache	coredump_cache;
 };
 
 static inline struct amdxdna_ctx_priv *ve2_hw_priv(struct amdxdna_hwctx *hwctx)
