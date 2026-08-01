@@ -1353,6 +1353,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 
 static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 {
+	unsigned long first, nr_pages;
 	u64 end;
 
 	if (offset >= abo->mem.size)
@@ -1362,14 +1363,17 @@ static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 		return -EINVAL;
 
 	size = min(abo->mem.size, end) - offset;
-	if (is_import_bo(abo))
-		drm_clflush_sg(abo->base.sgt);
-	else if (amdxdna_gem_vmap(abo))
+	first = offset >> PAGE_SHIFT;
+	nr_pages = (PAGE_ALIGN(offset + size) >> PAGE_SHIFT) - first;
+
+	if (amdxdna_gem_vmap(abo))
 		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + offset, size);
+	else if (is_import_bo(abo))
+		drm_clflush_sg(abo->base.sgt);
 	else if (abo->base.pages)
-		drm_clflush_pages(abo->base.pages, abo->mem.size >> PAGE_SHIFT);
+		drm_clflush_pages(&abo->base.pages[first], nr_pages);
 	else if (abo->mem.pages)
-		drm_clflush_pages(abo->mem.pages, abo->mem.nr_pages);
+		drm_clflush_pages(&abo->mem.pages[first], nr_pages);
 	else
 		return -EINVAL;
 
