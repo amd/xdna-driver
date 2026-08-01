@@ -68,6 +68,7 @@ amdxdna-$(CONFIG_PCI_IOV) += \
 # Auxiliary-bus attachment (VE2/Versal SoC) - selected by XDNA_BUS_TYPE=aux
 amdxdna-$(OFT_CONFIG_AMDXDNA_AUX) += \
 	amdxdna_aux_drv.o \
+	amdxdna_solver.o \
 	ve2_mgmt.o \
 	ve2_aux.o \
 	ve2_hwctx.o \
