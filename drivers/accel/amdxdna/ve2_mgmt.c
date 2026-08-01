@@ -12,6 +12,7 @@
 #include <linux/ktime.h>
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/xlnx-ai-engine.h>
@@ -1217,5 +1218,72 @@ int notify_fw_cmd_ready(struct amdxdna_mgmtctx *mgmtctx)
 		return ret;
 
 	/* aie_partition_write returns bytes written on success (typically 4). */
+	return 0;
+}
+
+int ve2_cache_coredump(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx, u64 seq)
+{
+	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_coredump_cache *cache;
+	struct amdxdna_mgmtctx *mgmtctx;
+	void *buf, *old_buf;
+	u32 size;
+	int ret;
+
+	if (!vp || !vp->mgmtctx) {
+		XDNA_WARN(xdna, "Auto coredump: hwctx %u has no partition", hwctx->id);
+		return -EINVAL;
+	}
+
+	cache = &vp->coredump_cache;
+	mgmtctx = vp->mgmtctx;
+
+	size = hwctx->num_col * mgmtctx->num_rows * TILE_ADDRESS_SPACE;
+	if (!size) {
+		XDNA_WARN(xdna, "Auto coredump: zero size for hwctx %u", hwctx->id);
+		return -EINVAL;
+	}
+
+	XDNA_INFO(xdna,
+		  "Auto coredump: capture start hwctx %u pid %u seq %llu start_col %u num_col %u size %u",
+		  hwctx->id, hwctx->client->pid, seq, hwctx->start_col, hwctx->num_col, size);
+
+	buf = vmalloc(size);
+	if (!buf)
+		return -ENOMEM;
+
+	/* hwctx is the active ctx on this partition during the timeout path. */
+	ret = aie_partition_coredump(mgmtctx->aie_dev, size, buf);
+	if (ret < 0) {
+		XDNA_ERR(xdna, "Auto coredump capture failed for hwctx %u, err:%d",
+			 hwctx->id, ret);
+		vfree(buf);
+		return ret;
+	}
+
+	/*
+	 * Keep-latest: swap in the new snapshot, then free the previous one.
+	 * The cache is per-hwctx and is consumed (cleared) on the next coredump
+	 * read; it is also dropped when auto coredump is disabled or when the
+	 * context is destroyed.
+	 */
+	mutex_lock(&cache->lock);
+	old_buf = cache->buf;
+	cache->buf = buf;
+	cache->size = ret;
+	cache->seq = seq;
+	cache->start_col = hwctx->start_col;
+	cache->num_col = hwctx->num_col;
+	cache->timestamp = ktime_get();
+	cache->valid = true;
+	mutex_unlock(&cache->lock);
+
+	XDNA_INFO(xdna,
+		  "Auto coredump cached OK: hwctx %u pid %u seq %llu size %d%s",
+		  hwctx->id, hwctx->client->pid, seq, ret,
+		  old_buf ? " [overwrote previous dump]" : "");
+
+	vfree(old_buf);
+
 	return 0;
 }
