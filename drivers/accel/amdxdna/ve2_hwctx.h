@@ -96,13 +96,14 @@ struct amdxdna_ctx_priv {
 	 * every partition (re)initialisation. NULL falls back to a per-init
 	 * allocation.
 	 *
-	 * This is plain kernel memory (not dma_alloc_coherent): the handshake
-	 * contents are consumed by aie_partition_initialize(), only the CPU
-	 * virtual address is ever used, and allocating from the AIE device's
-	 * limited coherent pool here starves aie_partition_initialize()'s own
-	 * coherent allocation (observed as -ENOMEM from EXEC_CMD).
+	 * DMA-coherent memory allocated from the AIE partition device. Its
+	 * per-column dma_addr is handed to aie_partition_initialize() via
+	 * aie_op_handshake_data.dma_addr so the AIE driver uses this buffer
+	 * directly instead of doing its own per-column dmam_alloc_coherent()
+	 * (the latter path is not viable here and fails EXEC_CMD).
 	 */
 	void				*hs_buf_va;
+	dma_addr_t			hs_buf_dma;
 	size_t				hs_buf_size;
 
 	/* Last AIE coredump auto-captured on command timeout (per hwctx). */
@@ -120,7 +121,15 @@ int ve2_hwctx_config(struct amdxdna_hwctx *hwctx, u32 type, u64 value, void *buf
 int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq);
 int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms);
 
+/* verbosity >= this level enables extra VE2 debug dumps (packets, FW state). */
+#define VERBOSITY_LEVEL_DBG	2
+
 extern int enable_polling;
 extern int ve2_perf_optimization;
+extern int verbosity;
+extern int partition_size;
+extern int start_col;
+extern int max_col;
+extern unsigned int ve2_hwctx_limit;
 
 #endif /* _VE2_HWCTX_H_ */

@@ -115,6 +115,12 @@ struct ve2_hsa_queue {
 	struct mutex			hq_lock;/* protect host queue submit and wait */
 	u64				reserved_write_index;
 	struct device			*alloc_dev;
+	/*
+	 * Driver-local slot readiness tracking for ordered write_index advance.
+	 * hqc_mem is owned by CERT (firmware writes the completion state there),
+	 * so the host must not write NEW/SUBMITTED into it for commit gating.
+	 */
+	DECLARE_BITMAP(slot_ready, HOST_QUEUE_ENTRY);
 };
 
 static inline void hsa_queue_sync_read_index_for_read(struct ve2_hsa_queue *queue)

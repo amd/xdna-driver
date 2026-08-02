@@ -6,6 +6,7 @@
  * (ERT_START_DPU).
  */
 
+#include <linux/bitmap.h>
 #include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/module.h>
@@ -35,6 +36,26 @@ MODULE_PARM_DESC(ve2_perf_optimization, "Enable performance-mode partition init 
 static int pktdump;
 module_param(pktdump, int, 0644);
 MODULE_PARM_DESC(pktdump, "Dump host-queue packet contents on submit (debug). Disabled by default.");
+
+int verbosity;
+module_param(verbosity, int, 0644);
+MODULE_PARM_DESC(verbosity, "[Debug] Enabling verbosity. default is 0");
+
+int partition_size = 4;
+module_param(partition_size, int, 0644);
+MODULE_PARM_DESC(partition_size, "Test only option: default partition size");
+
+unsigned int ve2_hwctx_limit;
+module_param(ve2_hwctx_limit, uint, 0400);
+MODULE_PARM_DESC(ve2_hwctx_limit, "[Debug] Maximum number of hwctx. 0 = Use default");
+
+int start_col;
+module_param(start_col, int, 0644);
+MODULE_PARM_DESC(start_col, "Test only option: lead column set to start_col");
+
+int max_col;
+module_param(max_col, int, 0644);
+MODULE_PARM_DESC(max_col, "Max column supported by this driver");
 
 #define CTX_TIMER		(msecs_to_jiffies(1))	/* 1ms */
 #define VE2_RETRY_TIMEOUT_MS	5000	/* max wait for a free host-queue slot */
@@ -177,8 +198,11 @@ hsa_queue_reserve_slot(struct amdxdna_dev *xdna, struct amdxdna_ctx_priv *vp, u6
 	mutex_unlock(&vp->privctx_lock);
 
 	*slot = queue->reserved_write_index++;
-	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_NEW;
-	hsa_queue_sync_completion_for_write(queue, slot_idx);
+	/*
+	 * CERT owns hqc_mem (it writes the completion state there); track slot
+	 * readiness in a driver-local bitmap instead of writing to hqc_mem.
+	 */
+	clear_bit(slot_idx, queue->slot_ready);
 	mutex_unlock(&queue->hq_lock);
 
 	return &queue->hsa_queue_p->hq_entry[slot_idx];
@@ -203,14 +227,14 @@ static void hsa_queue_commit_slot(struct amdxdna_hwctx *hwctx, u64 seq)
 	pkt->xrt_header.common_header.type = HOST_QUEUE_PACKET_TYPE_VENDOR_SPECIFIC;
 	hsa_queue_sync_packet_for_write(queue, slot_idx);
 
-	queue->hq_complete.hqc_mem[slot_idx] = ERT_CMD_STATE_SUBMITTED;
-	hsa_queue_sync_completion_for_write(queue, slot_idx);
+	/* Mark slot ready in driver-local tracking (cert owns hqc_mem) */
+	set_bit(slot_idx, queue->slot_ready);
 
+	/* Advance write_index as far as possible through all ready slots. */
 	while (header->write_index < queue->reserved_write_index) {
 		u32 next_idx = header->write_index % capacity;
 
-		hsa_queue_sync_completion_for_read(queue, next_idx);
-		if (queue->hq_complete.hqc_mem[next_idx] != ERT_CMD_STATE_SUBMITTED)
+		if (!test_bit(next_idx, queue->slot_ready))
 			break;
 		header->write_index++;
 	}
@@ -515,7 +539,7 @@ static int submit_command_indirect(struct amdxdna_hwctx *hwctx, void *cmd_data, 
 	hsa_queue_sync_packet_for_write(&vp->hsa_queue, slot_idx);
 	hsa_queue_sync_indirect_hdr_for_write(&vp->hsa_queue, slot_idx);
 
-	if (pktdump)
+	if (pktdump || verbosity >= VERBOSITY_LEVEL_DBG)
 		packet_dump(xdna, queue, slot_idx);
 
 	hsa_queue_commit_slot(hwctx, *seq);
@@ -599,10 +623,13 @@ static int ve2_create_host_queue(struct amdxdna_hwctx *hwctx)
 
 	mutex_init(&queue->hq_lock);
 	queue->reserved_write_index = 0;
+	bitmap_zero(queue->slot_ready, HOST_QUEUE_ENTRY);
 	queue->hsa_queue_dma_addr = dma_handle;
 	queue->hq_complete.hqc_mem =
 		(u64 *)((char *)queue->hsa_queue_p + sizeof(struct hsa_queue));
 	queue->hq_complete.hqc_dma_addr = dma_handle + sizeof(struct hsa_queue);
+	/* Zero hqc_mem so it starts clean for cert's completion writes. */
+	memset(queue->hq_complete.hqc_mem, 0, sizeof(u64) * HOST_QUEUE_ENTRY);
 	queue->hsa_queue_p->hq_header.data_address =
 		dma_handle + sizeof(struct host_queue_header);
 	queue->hsa_queue_p->hq_header.capacity = HOST_QUEUE_ENTRY;
@@ -635,7 +662,7 @@ static int ve2_create_host_queue(struct amdxdna_hwctx *hwctx)
 		}
 	}
 
-	dma_sync_single_for_device(queue->alloc_dev, dma_handle, sizeof(struct hsa_queue),
+	dma_sync_single_for_device(queue->alloc_dev, dma_handle, alloc_size,
 				   DMA_TO_DEVICE);
 
 	XDNA_DBG(xdna, "Host queue alloc dma=0x%llx capacity=%u", (u64)dma_handle,
@@ -756,17 +783,20 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	 * (re)initialisation. Sized with mgmtctx->num_col to match the range
 	 * ve2_prepare_hs_data() iterates over.
 	 *
-	 * Use plain kernel memory: the handshake is consumed by
-	 * aie_partition_initialize() and only its CPU virtual address is used.
-	 * Allocating from the AIE device coherent pool here would starve
-	 * aie_partition_initialize()'s own coherent allocation and fail command
-	 * submission with -ENOMEM.
+	 * Allocate DMA-coherent memory from the AIE partition device and hand
+	 * its per-column dma_addr to aie_partition_initialize() via
+	 * aie_op_handshake_data.dma_addr. The AIE driver then uses this buffer
+	 * directly (its "pre-known dma_addr" fast path) instead of doing its
+	 * own per-column dmam_alloc_coherent(), which is not viable here.
 	 */
-	if (vp->mgmtctx && vp->mgmtctx->num_col) {
+	if (vp->mgmtctx && vp->mgmtctx->num_col && vp->mgmtctx->aie_dev) {
 		vp->hs_buf_size = vp->mgmtctx->num_col * sizeof(struct handshake);
-		vp->hs_buf_va = kzalloc(vp->hs_buf_size, GFP_KERNEL);
+		vp->hs_buf_va = dma_alloc_coherent(vp->mgmtctx->aie_dev,
+						   vp->hs_buf_size,
+						   &vp->hs_buf_dma, GFP_KERNEL);
 		if (!vp->hs_buf_va) {
 			vp->hs_buf_size = 0;
+			vp->hs_buf_dma = 0;
 			XDNA_WARN(xdna, "handshake pre-alloc failed; using per-init alloc");
 		}
 	}
@@ -800,9 +830,15 @@ free_hwctx_config:
 	kfree(vp->hwctx_config);
 	vp->hwctx_config = NULL;
 destroy_partition:
+	/* Free the coherent handshake buffer while aie_dev is still valid. */
+	if (vp->hs_buf_va && vp->mgmtctx && vp->mgmtctx->aie_dev) {
+		dma_free_coherent(vp->mgmtctx->aie_dev, vp->hs_buf_size,
+				  vp->hs_buf_va, vp->hs_buf_dma);
+		vp->hs_buf_va = NULL;
+		vp->hs_buf_size = 0;
+	}
 	ve2_mgmt_destroy_partition(hwctx);
 free_priv:
-	kfree(vp->hs_buf_va);
 	mutex_destroy(&vp->coredump_cache.lock);
 	mutex_destroy(&vp->privctx_lock);
 	kfree(vp);
@@ -828,9 +864,13 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	if (vp && vp->mgmtctx)
 		ve2_get_firmware_status(hwctx);
 
-	/* Free the pre-allocated handshake buffer before tearing down. */
-	if (vp && vp->hs_buf_va) {
-		kfree(vp->hs_buf_va);
+	/*
+	 * Free the coherent handshake buffer before tearing the partition
+	 * down: aie_dev becomes invalid after aie_partition_release().
+	 */
+	if (vp && vp->hs_buf_va && vp->mgmtctx && vp->mgmtctx->aie_dev) {
+		dma_free_coherent(vp->mgmtctx->aie_dev, vp->hs_buf_size,
+				  vp->hs_buf_va, vp->hs_buf_dma);
 		vp->hs_buf_va = NULL;
 		vp->hs_buf_size = 0;
 	}

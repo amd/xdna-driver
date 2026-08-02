@@ -19,7 +19,15 @@
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_pm.h"
 
-#define MAX_HWCTX_ID		1024
+/*
+ * Upper bound of the device-wide hwctx ID space. Kept at U32_MAX (matching the
+ * legacy VE2 driver's XA_LIMIT(1, U32_MAX)) so the cyclic allocator does not
+ * wrap back onto still-live IDs after only a small number of create/destroy
+ * cycles. A smaller ceiling (e.g. 1024) makes ida_alloc_range() return -ENOSPC
+ * once that many IDs have been consumed cyclically, spuriously failing hwctx
+ * creation.
+ */
+#define MAX_HWCTX_ID		U32_MAX
 #define MAX_ARG_COUNT		4095
 
 struct amdxdna_fence {

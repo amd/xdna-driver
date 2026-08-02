@@ -61,6 +61,7 @@ struct amdxdna_dev_hdl {
 	struct ve2_firmware_version	fw_version;
 	struct amdxdna_mgmtctx		*ve2_mgmtctx;
 	struct ve2_firmware_status	**fw_slots;	/* [cols] per-column FW status */
+	u32				hwctx_limit;	/* effective max hw contexts */
 };
 
 extern const struct amdxdna_dev_ops ve2_ops;
