@@ -1103,6 +1103,7 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 
 	abo->type = AMDXDNA_BO_DEV;
 	abo->client = client;
+	kref_get(&client->refcnt);
 
 	ret = amdxdna_gem_heap_alloc(abo);
 	if (ret) {
@@ -1111,7 +1112,6 @@ amdxdna_drm_create_dev_bo(struct drm_device *dev, struct amdxdna_drm_create_bo *
 		return ERR_PTR(ret);
 	}
 	drm_gem_private_object_init(dev, gobj, aligned_sz);
-
 	abo->acct_total = false;
 	abo->acct_int = false;
 	return abo;

@@ -223,9 +223,9 @@ struct amdxdna_client {
 	u32				next_ctxid;
 	struct amdxdna_dev		*xdna;
 	struct drm_file			*filp;
-
-	struct mutex			mm_lock; /* protect memory related */
-	struct amdxdna_gem_obj		*dev_heap;
+void amdxdna_stats_start(struct amdxdna_client *client);
+void amdxdna_stats_account(struct amdxdna_client *client);
+void amdxdna_client_put(struct amdxdna_client *client);
 	u32				heap_usage;
 	size_t				total_bo_usage;
 	size_t				total_int_bo_usage;
