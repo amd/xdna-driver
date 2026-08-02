@@ -246,8 +246,31 @@ int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl)
 	XDNA_INFO(xdna, "AIE device: %u columns, %u rows",
 		  hdl->aie_dev_info.cols, hdl->aie_dev_info.rows);
 
+	/*
+	 * Determine the maximum number of hardware contexts. The ve2_hwctx_limit
+	 * test module parameter overrides the per-device default when non-zero.
+	 */
+	if (ve2_hwctx_limit)
+		hdl->hwctx_limit = ve2_hwctx_limit;
+	else
+		hdl->hwctx_limit = hdl->priv->hwctx_limit;
+	XDNA_INFO(xdna, "Maximum limit %u hardware context(s)", hdl->hwctx_limit);
+
 	xrs_cfg.ddev = &xdna->ddev;
 	xrs_cfg.total_col = hdl->aie_dev_info.cols;
+
+	/*
+	 * Test-only override: restrict the resource-solver column window to
+	 * @max_col columns (optionally offset by @start_col) instead of the full
+	 * device column count. Mirrors the legacy driver's module-parameter path.
+	 */
+	if (max_col > 0 && start_col >= 0 &&
+	    (u32)(max_col + start_col) <= hdl->aie_dev_info.cols) {
+		xrs_cfg.total_col = max_col;
+		XDNA_INFO(xdna, "Using module parameter: max_col=%d start_col=%d",
+			  max_col, start_col);
+	}
+
 	xdna->xrs_hdl = xrsm_init(&xrs_cfg);
 	if (!xdna->xrs_hdl) {
 		XDNA_WARN(xdna, "Initialization of Resource resolver failed");

@@ -29,6 +29,7 @@ static void amdxdna_aux_release(struct drm_device *drm, void *res)
 
 	amdxdna_carveout_fini(xdna);
 	cleanup_srcu_struct(&xdna->dpt_srcu);
+	ida_destroy(&xdna->hwctx_ida);
 }
 
 /**
@@ -54,6 +55,17 @@ int amdxdna_dev_init(struct amdxdna_dev *xdna)
 	drmm_mutex_init(ddev, &xdna->dev_lock);
 	init_rwsem(&xdna->notifier_lock);
 	INIT_LIST_HEAD(&xdna->client_list);
+	/*
+	 * Unlike the PCI path (amdxdna_probe()), nothing else initializes
+	 * hwctx_ida for the auxiliary-bus path. Without ida_init(), the
+	 * backing xarray's xa_flags lack XA_FLAGS_ALLOC, so the free-mark
+	 * bookkeeping ida_alloc_range() relies on is never set up: instead of
+	 * returning the next free ID, allocations return bogus, rapidly
+	 * growing values (observed jumping by 64x per call) until the ID
+	 * space is exhausted and hwctx creation spuriously fails with
+	 * -ENOSPC after only a handful of contexts.
+	 */
+	ida_init(&xdna->hwctx_ida);
 
 	ret = init_srcu_struct(&xdna->dpt_srcu);
 	if (ret)
