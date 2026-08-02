@@ -171,6 +171,13 @@ ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx
 				cert_setup_partition(mgmtctx, hwctx, col, cert_hs);
 			}
 			hs_data[col].addr = cert_hs;
+			/*
+			 * hs_buf_va is DMA-coherent memory; hand the AIE driver
+			 * the matching per-column dma_addr so it uses this
+			 * buffer directly instead of doing its own per-column
+			 * dmam_alloc_coherent().
+			 */
+			hs_data[col].dma_addr = vp->hs_buf_dma + col * col_size;
 			hs_data[col].size = col_size;
 			hs_data[col].offset = 0x0;
 			hs_data[col].loc = aie_loc;
@@ -201,11 +208,25 @@ ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx
 	return hs_data;
 }
 
+/*
+ * Effective partition width (columns) for a context. The @partition_size test
+ * module parameter can widen the request: the partition uses the larger of the
+ * user-requested @num_tiles and @partition_size (default 4), matching the
+ * legacy driver's behaviour.
+ */
+static u32 ve2_effective_num_col(u32 num_tiles)
+{
+	if (partition_size > 0 && (u32)partition_size > num_tiles)
+		return (u32)partition_size;
+
+	return num_tiles;
+}
+
 static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 {
 	struct amdxdna_dev *xdna = hwctx->client->xdna;
 	u32 user_col = hwctx->qos.user_start_col;
-	u32 num_col = hwctx->num_tiles;
+	u32 num_col = hwctx->num_col;
 	u32 first_col = 0;
 	u32 entries = 0;
 	u32 s, i;
@@ -227,6 +248,17 @@ static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 			return -ERANGE;
 		}
 		first_col = user_col;
+	} else if (start_col > 0) {
+		/*
+		 * Test-only override: force the lead column to @start_col (and
+		 * only offer candidate start columns from there onwards).
+		 */
+		if ((u32)start_col + num_col > total_col) {
+			XDNA_ERR(xdna, "start_col %d + num_col %u exceeds total_col %u",
+				 start_col, num_col, total_col);
+			return -ERANGE;
+		}
+		first_col = (u32)start_col;
 	}
 
 	for (s = first_col; s + num_col <= total_col; s += VE2_MIN_COL_SUPPORT)
@@ -262,12 +294,17 @@ int ve2_xrs_request(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 	if (!vp || !hdl || !xrs)
 		return -EINVAL;
 
-	/* Build the candidate start-column list, then let XRS place the partition. */
+	/*
+	 * Determine the partition width (honouring the partition_size test
+	 * override) before building the candidate start-column list, then let
+	 * XRS place the partition.
+	 */
+	hwctx->num_col = ve2_effective_num_col(hwctx->num_tiles);
+
 	ret = ve2_xrs_col_list(hwctx, hdl->aie_dev_info.cols);
 	if (ret)
 		return ret;
 
-	hwctx->num_col = hwctx->num_tiles;
 	mutex_lock(&xrs->xrs_lock);
 	ret = amdxdna_alloc_resource(hwctx, &create_aie_part);
 	mutex_unlock(&xrs->xrs_lock);
@@ -1003,7 +1040,7 @@ static void ve2_aie_error_cb(void *arg)
 	aie_free_errors(aie_errs);
 
 	/* Optional deep dump of HSA queue + firmware handshake state. */
-	if (dbg_dump_on_error)
+	if (dbg_dump_on_error || verbosity >= VERBOSITY_LEVEL_DBG)
 		ve2_dump_debug_state(xdna, mgmtctx);
 
 	/*
