@@ -127,59 +127,60 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	mutex_init(&ctx->io_lock);
 	fs_reclaim_acquire(GFP_KERNEL);
 	might_lock(&ctx->io_lock);
-	fs_reclaim_release(GFP_KERNEL);
-	atomic64_set(&ctx->job_free_cnt, 0);
-
-	ret = xa_alloc_cyclic(&client->ctx_xa, &ctx->id, ctx,
-			      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_CTX_ID),
-			      &client->next_ctxid, GFP_KERNEL);
-	if (ret < 0) {
-		XDNA_ERR(xdna, "Allocate ctx ID failed, ret %d", ret);
-		goto destroy_io_lock;
-	}
-
-	ctx->name = kasprintf(GFP_KERNEL, "ctx.%d.%d", client->pid, ctx->id);
-	if (!ctx->name) {
-		ret = -ENOMEM;
-		goto rm_id;
-	}
-
-	ret = xdna->dev_info->ops->ctx_init(ctx);
-	if (ret) {
-		XDNA_ERR(xdna, "Init ctx failed, ret %d", ret);
-		goto free_name;
-	}
-
-	args->handle = ctx->id;
-	args->syncobj_handle = ctx->syncobj_hdl;
-	args->umq_doorbell = ctx->doorbell_offset;
-
-	XDNA_DBG(xdna, "PID %d create context %d, ret %d", client->pid, args->handle, ret);
-	drm_dev_exit(idx);
-
-	return 0;
-
-free_name:
-	kfree(ctx->name);
-rm_id:
-	xa_erase(&client->ctx_xa, ctx->id);
-destroy_io_lock:
-	mutex_destroy(&ctx->io_lock);
-free_ctx:
-	kfree(ctx);
-exit:
-	drm_dev_exit(idx);
-	return ret;
+fs_reclaim_release(GFP_KERNEL);
+atomic64_set(&ctx->job_free_cnt, 0);
+132
+/*
+ * Reserve a slot with XA_ZERO_ENTRY so the ctx ID is allocated but
+ * the entry is not yet visible to SRCU readers as a live context.
+ * Publish the real pointer only after ctx_init() has fully initialised
+ * ctx->priv, preventing a race where a concurrent ioctl dereferences
+ * ctx->priv before it is set.
+ */
+ret = xa_alloc_cyclic(&client->ctx_xa, &ctx->id, XA_ZERO_ENTRY,
+		      XA_LIMIT(AMDXDNA_INVALID_CTX_HANDLE + 1, MAX_CTX_ID),
+		      &client->next_ctxid, GFP_KERNEL);
+if (ret < 0) {
+	XDNA_ERR(xdna, "Allocate ctx ID failed, ret %d", ret);
+	goto destroy_io_lock;
 }
-
-int amdxdna_drm_destroy_hwctx_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
-{
-	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_drm_destroy_hwctx *args = data;
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
-	struct amdxdna_ctx *ctx;
-	int ret = 0, idx;
-
+147
+ctx->name = kasprintf(GFP_KERNEL, "ctx.%d.%d", client->pid, ctx->id);
+if (!ctx->name) {
+	ret = -ENOMEM;
+	goto rm_id;
+}
+153
+ret = xdna->dev_info->ops->ctx_init(ctx);
+if (ret) {
+	XDNA_ERR(xdna, "Init ctx failed, ret %d", ret);
+	goto free_name;
+}
+159
+/* Publish the fully-initialised ctx; replaces XA_ZERO_ENTRY. */
+xa_store(&client->ctx_xa, ctx->id, ctx, GFP_KERNEL);
+162
+args->handle = ctx->id;
+args->syncobj_handle = ctx->syncobj_hdl;
+args->umq_doorbell = ctx->doorbell_offset;
+166
+XDNA_DBG(xdna, "PID %d create context %d, ret %d", client->pid, args->handle, ret);
+drm_dev_exit(idx);
+169
+return 0;
+171
+172free_name:
+kfree(ctx->name);
+174rm_id:
+xa_erase(&client->ctx_xa, ctx->id);
+176destroy_io_lock:
+mutex_destroy(&ctx->io_lock);
+178free_ctx:
+kfree(ctx);
+180exit:
+drm_dev_exit(idx);
+return ret;
+183}
 	trace_amdxdna_debug_point(current->comm, client->pid, "destroy hwctx");
 
 	if (!drm_dev_enter(dev, &idx))
