@@ -220,17 +220,34 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	unsigned long len = vma->vm_end - vma->vm_start;
 	unsigned long addr = vma->vm_start;
 	struct amdxdna_umap *mapp;
+	unsigned long aligned_size;
 	u32 nr_pages;
 	int ret;
 
 	if (!xdna->notifier_wq)
 		return 0;
 
+	if (check_add_overflow(addr, len, &aligned_size)) {
+		XDNA_ERR(xdna, "VMA addr+len overflow");
+		return -EINVAL;
+	}
+
+	aligned_size = amdxdna_page_align(aligned_size);
+	if (!aligned_size) {
+		XDNA_ERR(xdna, "VMA size overflow after page align");
+		return -EINVAL;
+	}
+
 	mapp = kzalloc(sizeof(*mapp), GFP_KERNEL);
 	if (!mapp)
 		return -ENOMEM;
 
-	nr_pages = (PAGE_ALIGN(addr + len) - (addr & PAGE_MASK)) >> PAGE_SHIFT;
+	nr_pages = (aligned_size - (addr & PAGE_MASK)) >> PAGE_SHIFT;
+	if (!nr_pages) {
+		ret = -EINVAL;
+		goto free_map;
+	}
+
 	mapp->range.hmm_pfns = kvcalloc(nr_pages, sizeof(*mapp->range.hmm_pfns),
 					GFP_KERNEL);
 	if (!mapp->range.hmm_pfns) {
@@ -239,31 +256,14 @@ static int amdxdna_hmm_register(struct amdxdna_gem_obj *abo,
 	}
 
 	ret = mmu_interval_notifier_insert_locked(&mapp->notifier,
-						  current->mm,
-						  addr,
-						  len,
-						  &amdxdna_hmm_ops);
+					  current->mm,
+					  addr,
+					  len,
+					  &amdxdna_hmm_ops);
 	if (ret) {
 		XDNA_ERR(xdna, "Insert mmu notifier failed, ret %d", ret);
 		goto free_pfns;
 	}
-
-	mapp->range.notifier = &mapp->notifier;
-	mapp->range.start = vma->vm_start;
-	mapp->range.end = vma->vm_end;
-	mapp->range.default_flags = HMM_PFN_REQ_FAULT;
-	mapp->vma = vma;
-	mapp->abo = abo;
-	kref_init(&mapp->refcnt);
-
-	INIT_WORK(&mapp->hmm_unreg_work, amdxdna_hmm_unreg_work);
-	if (is_import_bo(abo) && vma->vm_file && vma->vm_file->f_mapping)
-		mapping_set_unevictable(vma->vm_file->f_mapping);
-
-	down_write(&xdna->notifier_lock);
-	if (list_empty(&abo->mem.umap_list))
-		abo->uva = vma->vm_start;
-	list_add_tail(&mapp->node, &abo->mem.umap_list);
 	up_write(&xdna->notifier_lock);
 
 	return 0;
