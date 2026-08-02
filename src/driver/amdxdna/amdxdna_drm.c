@@ -30,6 +30,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	client->pid = pid_nr(filp->pid);
 	client->uid = current_euid();
 	client->xdna = xdna;
+	kref_init(&client->refcnt);
 
 #ifdef AMDXDNA_DEVEL
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
@@ -81,6 +82,19 @@ failed:
 	return ret;
 }
 
+static void amdxdna_client_release(struct kref *ref)
+{
+	struct amdxdna_client *client =
+		container_of(ref, struct amdxdna_client, refcnt);
+
+	kfree(client);
+}
+
+void amdxdna_client_put(struct amdxdna_client *client)
+{
+	kref_put(&client->refcnt, amdxdna_client_release);
+}
+
 static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 {
 	struct amdxdna_client *client = filp->driver_priv;
@@ -107,22 +121,8 @@ skip_sva_unbind:
 #endif
 
 	XDNA_DBG(xdna, "PID %d closed", client->pid);
-	kfree(client);
+	amdxdna_client_put(client);
 }
-
-static int amdxdna_flush(struct file *f, fl_owner_t id)
-{
-	struct drm_file *filp = f->private_data;
-	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_dev *xdna = client->xdna;
-	pid_t pid = task_tgid_nr(current);
-	int idx;
-
-	/* When current PID not equals to Client PID, this is a flush()
-	 * triggered by closing a child process. If this is the case, flush() is
-	 * just a no-op. The process which open() device should finally flush()
-	 * and close() device.
-	 */
 	if (pid != client->pid)
 		return 0;
 

@@ -194,11 +194,29 @@ struct amdxdna_stats {
  * @sva: iommu SVA handle
  * @pasid: PASID
  * @stats: record npu usage stats
+/*
+ * struct amdxdna_client - amdxdna client
+ * A per fd data structure for managing context and other user process stuffs.
+ *
+ * @node: entry node in clients list
+ * @pid: PID of current client
+ * @refcnt: reference count; released by fd close and outstanding BOs
+ * @ctx_srcu: Per client SRCU for synchronizing ctx destroy with other ioctls.
+ * @ctx_xa: context xarray
+ * @xdna: XDNA device pointer
+ * @filp: DRM file pointer
+ * @mm_lock: lock for client wide memory related
+ * @dev_heap: Shared device heap memory
+ * @heap_usage: Total number of bytes allocated in heap memory
+ * @sva: iommu SVA handle
+ * @pasid: PASID
+ * @stats: record npu usage stats
  */
 struct amdxdna_client {
-	struct list_head		node;
+	struct list_head			node;
 	pid_t				pid;
 	kuid_t				uid;
+	struct kref				refcnt;
 	/* To avoid deadlock, do NOT wait this srcu when dev_lock is hold */
 	struct srcu_struct		ctx_srcu;
 	struct xarray			ctx_xa;
@@ -218,24 +236,6 @@ struct amdxdna_client {
 
 	struct amdxdna_stats		stats;
 };
-
-#define amdxdna_for_each_ctx(client, ctx_id, entry)		\
-	xa_for_each(&(client)->ctx_xa, ctx_id, entry)
-#define amdxdna_no_ctx(client)				\
-	xa_empty(&(client)->ctx_xa)
-
-void amdxdna_stats_start(struct amdxdna_client *client);
-void amdxdna_stats_account(struct amdxdna_client *client);
-int amdxdna_drm_copy_array_to_user(struct amdxdna_drm_get_array *tgt,
-				   void *array, size_t element_size, size_t num_element);
-int amdxdna_drm_copy_array_from_user(struct amdxdna_drm_get_array *src,
-				     void *array, size_t element_size, size_t num_element);
-bool amdxdna_admin_access_allowed(struct amdxdna_dev *xdna);
-bool amdxdna_ctx_access_allowed(struct amdxdna_ctx *ctx, bool root_only);
-
-int amdxdna_iommu_init(struct amdxdna_dev *xdna);
-void amdxdna_iommu_fini(struct amdxdna_dev *xdna);
-int amdxdna_iommu_map_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
 void amdxdna_iommu_unmap_bo(struct amdxdna_dev *xdna, struct amdxdna_gem_obj *abo);
 void *amdxdna_iommu_alloc(struct amdxdna_dev *xdna, size_t size, dma_addr_t *dma_addr);
 void amdxdna_iommu_free(struct amdxdna_dev *xdna, size_t size,
