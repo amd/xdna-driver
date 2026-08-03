@@ -27,7 +27,32 @@ public:
   std::string
   sysfs_dev_node_dir() const override;
 
-private:  
+private:
+  std::shared_ptr<xrt_core::pci::dev>
+  create_pcidev(const std::string& sysfs) const override;
+};
+
+class drv_amdxdna_mgmt : public drv
+{
+public:
+  using drv::drv;
+
+  bool
+  is_user() const override;
+
+  std::string
+  name() const override;
+
+  std::string
+  dev_node_prefix() const override;
+
+  std::string
+  dev_node_dir() const override;
+
+  std::string
+  sysfs_dev_node_dir() const override;
+
+private:
   std::shared_ptr<xrt_core::pci::dev>
   create_pcidev(const std::string& sysfs) const override;
 };
