@@ -37,6 +37,19 @@ private:
   on_last_close() const override;
 };
 
+class pdev_pf : public pdev_umq
+{
+public:
+  pdev_pf(std::shared_ptr<const platform_drv>& driver,
+          const std::string& sysfs_name);
+
+  bool
+  is_umq() const override;
+
+  void
+  create_drm_bo(bo_info *arg) const override;
+};
+
 }
 
 #endif
