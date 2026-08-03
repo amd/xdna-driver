@@ -7,6 +7,13 @@
 #include "core/common/shim/buffer_handle.h"
 #include "core/common/device.h"
 
+#include <cstdio>
+#include <fcntl.h>
+#include <stdexcept>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 namespace {
 
 using namespace xrt_core;
@@ -22,6 +29,73 @@ get_bo_flags(uint32_t flags, uint32_t ext_flags)
 }
 
 }
+
+class mmapped_file {
+public:
+  mmapped_file(size_t size, bool readonly)
+  {
+    char tmpl[] = "/tmp/xrt_bo_mmap_XXXXXX";
+    auto fd = ::mkstemp(tmpl);
+    if (fd < 0)
+      throw std::runtime_error("mkstemp failed");
+
+    if (::fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
+      ::close(fd);
+      ::unlink(tmpl);
+      throw std::runtime_error("fchmod failed");
+    }
+    ::unlink(tmpl);
+
+    if (::ftruncate(fd, static_cast<off_t>(size)) != 0) {
+      ::close(fd);
+      throw std::runtime_error("ftruncate failed");
+    }
+
+    char path[64];
+    std::snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+    int mmap_fd = ::open(path, (readonly ? O_RDONLY : O_RDWR) | O_CLOEXEC);
+    if (mmap_fd < 0) {
+      ::close(fd);
+      throw std::runtime_error("open mmap fd failed");
+    }
+
+    auto mapped = ::mmap(nullptr, size,
+      readonly ? PROT_READ : PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0);
+    if (mapped == MAP_FAILED) {
+      ::close(mmap_fd);
+      ::close(fd);
+      throw std::runtime_error("mmap failed");
+    }
+
+    m_fd = fd;
+    m_mmap_fd = mmap_fd;
+    m_ptr = mapped;
+    m_size = size;
+  }
+
+  mmapped_file(const mmapped_file&) = delete;
+  mmapped_file& operator=(const mmapped_file&) = delete;
+  mmapped_file(mmapped_file&&) = delete;
+  mmapped_file& operator=(mmapped_file&&) = delete;
+
+  ~mmapped_file()
+  {
+    ::munmap(m_ptr, m_size);
+    ::close(m_mmap_fd);
+    ::close(m_fd);
+  }
+
+  void *get()
+  {
+    return m_ptr;
+  }
+
+private:
+  int m_fd = -1;
+  int m_mmap_fd = -1;
+  size_t m_size = 0;
+  void *m_ptr = nullptr;
+};
 
 class bo {
 public:
