@@ -738,6 +738,34 @@ TEST_io_with_ubuf_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type
 }
 
 void
+TEST_write_to_readonly_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto boset = create_bo_set_for_device(sdev.get());
+  auto& ofm_bo = boset->get_bos()[IO_TEST_BO_OUTPUT];
+  auto saved_tbo = ofm_bo.tbo;
+  size_t ofm_size = saved_tbo->size();
+
+  // Back the output BO with a file-backed read-only MAP_SHARED mmap. The
+  // kernel will mark the resulting ubuf BO as read-only (no VM_WRITE on the
+  // VMA) and map it to the device with IOMMU_READ only. Any NPU write into
+  // this BO will fault; the command must fail rather than silently corrupting
+  // memory it has no write permission for.
+  //
+  // saved_tbo is restored on both the normal and exception paths so that the
+  // ubuf-backed BO (which holds a pointer into f's mmap) is always dropped
+  // before f goes out of scope, regardless of declaration order.
+  mmapped_file f(ofm_size, true);
+  ofm_bo.tbo = std::make_shared<bo>(sdev.get(), f.get(), ofm_size, XCL_BO_FLAGS_HOST_ONLY, 0);
+  try {
+    boset->run();
+  } catch (...) {
+    ofm_bo.tbo = saved_tbo;
+    throw;
+  }
+  ofm_bo.tbo = saved_tbo;
+}
+
+void
 TEST_io_suspend_resume(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   /*
