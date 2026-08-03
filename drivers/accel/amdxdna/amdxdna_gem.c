@@ -211,13 +211,11 @@ void amdxdna_gem_destroy_obj(struct amdxdna_gem_obj *abo)
 }
 
 /*
- * Obtains a kernel virtual address on the BO (usually of small size).
- * The mapping is established on the first call and stays valid until
- * amdxdna_gem_vunmap() is called.
+ * Returns the error rather than logging it, for a caller that has a fallback:
+ * an imported BO whose exporter implements no vmap op fails on every call.
  */
-void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
+static void *amdxdna_gem_vmap_try(struct amdxdna_gem_obj *abo)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
 	struct iosys_map map = IOSYS_MAP_INIT_VADDR(NULL);
 	int ret;
 
@@ -230,11 +228,27 @@ void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
 	if (!abo->mem.kva) {
 		ret = drm_gem_vmap(to_gobj(abo), &map);
 		if (ret)
-			XDNA_ERR(xdna, "Vmap bo failed, ret %d", ret);
-		else
-			abo->mem.kva = map.vaddr;
+			return ERR_PTR(ret);
+		abo->mem.kva = map.vaddr;
 	}
 	return abo->mem.kva;
+}
+
+/*
+ * Obtains a kernel virtual address on the BO (usually of small size).
+ * The mapping is established on the first call and stays valid until
+ * amdxdna_gem_vunmap() is called.
+ */
+void *amdxdna_gem_vmap(struct amdxdna_gem_obj *abo)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(to_gobj(abo)->dev);
+	void *kva = amdxdna_gem_vmap_try(abo);
+
+	if (IS_ERR(kva)) {
+		XDNA_ERR(xdna, "Vmap bo failed, ret %ld", PTR_ERR(kva));
+		return NULL;
+	}
+	return kva;
 }
 
 /*
@@ -1354,6 +1368,7 @@ int amdxdna_drm_get_bo_info_ioctl(struct drm_device *dev, void *data, struct drm
 static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 {
 	unsigned long first, nr_pages;
+	void *kva;
 	u64 end;
 
 	if (offset >= abo->mem.size)
@@ -1366,8 +1381,9 @@ static int amdxdna_flush_bo(struct amdxdna_gem_obj *abo, u64 offset, u64 size)
 	first = offset >> PAGE_SHIFT;
 	nr_pages = (PAGE_ALIGN(offset + size) >> PAGE_SHIFT) - first;
 
-	if (amdxdna_gem_vmap(abo))
-		drm_clflush_virt_range(amdxdna_gem_vmap(abo) + offset, size);
+	kva = amdxdna_gem_vmap_try(abo);
+	if (!IS_ERR(kva))
+		drm_clflush_virt_range(kva + offset, size);
 	else if (is_import_bo(abo))
 		drm_clflush_sg(abo->base.sgt);
 	else if (abo->base.pages)
