@@ -488,11 +488,15 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 		return ret;
 	}
 
+	if (!vma->vm_ops)
+		goto put_obj;
+
 	do {
 		vm_fault_t fault_ret;
+		unsigned int flags = (vma->vm_flags & VM_WRITE) ? FAULT_FLAG_WRITE : 0;
 
 		fault_ret = handle_mm_fault(vma, vma->vm_start + offset,
-					    FAULT_FLAG_WRITE, NULL);
+					    flags, NULL);
 		if (fault_ret & VM_FAULT_ERROR) {
 			vma->vm_ops->close(vma);
 			XDNA_ERR(xdna, "Fault in page failed");
@@ -502,6 +506,7 @@ static int amdxdna_insert_pages(struct amdxdna_gem_obj *abo,
 		offset += PAGE_SIZE;
 	} while (--num_pages);
 
+put_obj:
 	/* Drop the reference drm_gem_mmap_obj() acquired.*/
 	drm_gem_object_put(to_gobj(abo));
 

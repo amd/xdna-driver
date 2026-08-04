@@ -35,6 +35,7 @@ const uint16_t npu3_device_id = 0x17f1;
 const uint16_t npu3_device_id1 = 0x17f3;
 const uint16_t npu3a_device_id = 0x1b0a;
 const uint16_t npu3a_device_id1 = 0x1b0c;
+const uint16_t npu_ve2_device_id = 0xb052;
 const uint16_t npu4_device_id = 0x17f0;
 const uint16_t npu_any_revision_id = 0xffff;
 const uint16_t npu1_revision_id = 0x0;

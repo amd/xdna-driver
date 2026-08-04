@@ -218,5 +218,5 @@ module_auxiliary_driver(amdxdna_aux_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("XRT Team <runtimeca39d@amd.com>");
-MODULE_VERSION("0.1");
+MODULE_VERSION(MODULE_VER_STR);
 MODULE_DESCRIPTION("amdxdna driver");
