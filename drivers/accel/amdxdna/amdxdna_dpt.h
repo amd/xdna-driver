@@ -62,7 +62,6 @@ enum amdxdna_dpt_kind {
 };
 
 const char *amdxdna_dpt_kind_str(enum amdxdna_dpt_kind kind);
-extern const char * const amdxdna_dpt_irq_name[AMDXDNA_DPT_KIND_MAX];
 
 #define XDNA_DPT_PRINTK(level, dpt, fmt, args...) do {				\
 	const struct amdxdna_dpt *__d = (dpt);					\
@@ -153,6 +152,7 @@ int amdxdna_dpt_dump_to_dmesg(struct amdxdna_dpt *dpt, bool enable);
 int amdxdna_fw_log_set_state(struct amdxdna_dev *xdna, u32 level);
 struct amdxdna_dpt *amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna,
 					   enum amdxdna_dpt_kind kind, int *idx);
+void amdxdna_dpt_exit_kind(struct amdxdna_dev *xdna, int idx);
 
 int amdxdna_get_fw_log(struct aie_device *aie,
 		       struct amdxdna_drm_get_array *args);
