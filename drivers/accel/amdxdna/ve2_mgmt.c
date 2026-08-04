@@ -211,8 +211,7 @@ ve2_prepare_hs_data(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_hwctx *hwctx
 /*
  * Effective partition width (columns) for a context. The @partition_size test
  * module parameter can widen the request: the partition uses the larger of the
- * user-requested @num_tiles and @partition_size (default 4), matching the
- * legacy driver's behaviour.
+ * user-requested @num_tiles and @partition_size (default 4).
  */
 static u32 ve2_effective_num_col(u32 num_tiles)
 {
@@ -354,7 +353,8 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 	struct aie_partition_init_args args = { };
 	struct aie_op_handshake_data *hs_data;
 	u32 num_col = mgmtctx->num_col;
-	int col, ret;
+	struct aie_location lead_loc = { .col = 0, .row = 0 };
+	int ret;
 
 	if (!vp)
 		return -EINVAL;
@@ -408,13 +408,10 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 		goto release_hs_data;
 	}
 
-	for (col = num_col - 1; col >= 0; col--) {
-		struct aie_location loc = { .col = col, .row = 0 };
-
-		ret = aie_partition_uc_wakeup(mgmtctx->aie_dev, &loc);
-		if (ret)
-			goto release_hs_data;
-	}
+	/* Wake up the lead UC only */
+	ret = aie_partition_uc_wakeup(mgmtctx->aie_dev, &lead_loc);
+	if (ret)
+		goto release_hs_data;
 
 	vp->handshake_initialized = true;
 	ret = 0;
@@ -462,6 +459,15 @@ static struct amdxdna_hwctx *ve2_response_ctx_switch_req(struct amdxdna_mgmtctx 
 		if (mgmtctx->is_idle_due_to_context) {
 			hwctx = c_ctx->ctx;
 			mgmtctx->is_partition_idle = 0;
+			/*
+			 * Clear this now that it has been consumed. Otherwise
+			 * every later call to this function (e.g. from the
+			 * async IRQ-driven scheduler_work, which runs once per
+			 * command completion) sees the stale flag still set and
+			 * redundantly re-runs handshake_init() on the current
+			 * FIFO head even when no real context switch occurred.
+			 */
+			mgmtctx->is_idle_due_to_context = 0;
 			ve2_mgmt_handshake_init(mgmtctx, hwctx);
 			if (mgmtctx->active_ctx == hwctx)
 				break;
@@ -523,12 +529,13 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 		mgmtctx->is_partition_idle = 0;
 		ve2_mgmt_handshake_init(mgmtctx, hwctx);
 		mgmtctx->active_ctx = hwctx;
+	} else {
+		notify_fw_cmd_ready(mgmtctx);
 	}
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 
-	/* Ring the doorbell on the (now) active context's partition. */
-	return notify_fw_cmd_ready(mgmtctx);
+	return 0;
 }
 
 static bool ve2_check_idle(struct amdxdna_mgmtctx *mgmtctx)
@@ -1116,7 +1123,21 @@ static int ve2_create_mgmt_partition(struct amdxdna_dev *xdna, struct amdxdna_hw
 		memset(&mgmtctx->async_errs_cache.err, 0,
 		       sizeof(mgmtctx->async_errs_cache.err));
 
-		mgmtctx->work_queue = create_singlethread_workqueue("ve2_aie_sched");
+		/*
+		 * CPU-bound (not WQ_UNBOUND) with WQ_HIGHPRI: this work item is
+		 * on the completion/context-switch critical path (queued from
+		 * the AIE partition IRQ handler on every completion), so it
+		 * should run on the CPU that queued it -- avoiding the extra
+		 * cross-CPU wakeup/migration latency of an unbound ordered
+		 * workqueue (as create_singlethread_workqueue()/
+		 * alloc_ordered_workqueue() would give us) -- and be scheduled
+		 * ahead of normal-priority work. max_active=1 keeps per-CPU
+		 * ordering equivalent to the single-threaded queue this
+		 * replaces; each partition still has its own workqueue so
+		 * mgmtctx instances never contend with each other.
+		 */
+		mgmtctx->work_queue = alloc_workqueue("ve2_aie_sched",
+						      WQ_MEM_RECLAIM | WQ_HIGHPRI, 1);
 		if (!mgmtctx->work_queue)
 			return -ENOMEM;
 
