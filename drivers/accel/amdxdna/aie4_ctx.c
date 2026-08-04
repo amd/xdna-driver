@@ -273,6 +273,19 @@ int aie4_hwctx_create(struct amdxdna_hwctx *hwctx)
 
 	priv->hw_ctx_id = resp.hw_context_id;
 
+	/*
+	 * Mirror the firmware hardware context id onto the common hwctx so the
+	 * shared status/telemetry paths can key on it. Unlike AIE2, firmware
+	 * does not hand back a per-context column range; every context runs in
+	 * the single device-wide partition (aie4_partition_init: col_start 0,
+	 * AIE4_TOTAL_COLUMN wide) which the firmware time-shares, so report that
+	 * partition span. This gives amdxdna_drm_hwctx_entry a real hwctx_id and
+	 * a non-empty column list for the aie-partitions view.
+	 */
+	hwctx->fw_ctx_id = resp.hw_context_id;
+	hwctx->start_col = 0;
+	hwctx->num_col = ndev->total_col;
+
 	if (priv->kernel_submit) {
 		/*
 		 * Kernel-mode submission: point at this context's doorbell within

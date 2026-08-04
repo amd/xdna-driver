@@ -13,6 +13,9 @@
 
 struct amdxdna_hwctx_priv;
 
+/* Driver-wide maximum hardware context id / count. */
+#define MAX_HWCTX_ID		1024
+
 enum ert_cmd_opcode {
 	ERT_START_CU = 0,
 	ERT_START_DPU = 18,

@@ -440,6 +440,7 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 	tmp->pid = hwctx->client->pid;
 	strscpy(tmp->name, hwctx->client->name, sizeof(tmp->name));
 	tmp->context_id = hwctx->id;
+	tmp->hwctx_id = hwctx->fw_ctx_id;
 	tmp->start_col = hwctx->start_col;
 	tmp->num_col = hwctx->num_col;
 	tmp->command_submissions = atomic64_read(&hwctx->job_submit_cnt);
