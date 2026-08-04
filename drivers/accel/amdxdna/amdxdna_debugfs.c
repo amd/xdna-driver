@@ -154,7 +154,7 @@ static int fw_log_level_show(struct seq_file *m, void *unused)
 	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_LOG, &idx);
 	if (dpt) {
 		level = READ_ONCE(dpt->config);
-		srcu_read_unlock(&xdna->dpt_srcu, idx);
+		amdxdna_dpt_exit_kind(xdna, idx);
 	}
 
 	seq_printf(m, "%u\n", level);
@@ -220,7 +220,7 @@ static int fw_log_dump_to_dmesg_show(struct seq_file *m, void *unused)
 	dpt = amdxdna_dpt_enter_kind(xdna, AMDXDNA_DPT_FW_LOG, &idx);
 	if (dpt) {
 		dump = READ_ONCE(dpt->dump_to_dmesg);
-		srcu_read_unlock(&xdna->dpt_srcu, idx);
+		amdxdna_dpt_exit_kind(xdna, idx);
 	}
 
 	seq_printf(m, "%d\n", dump ? 1 : 0);

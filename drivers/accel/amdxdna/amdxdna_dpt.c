@@ -23,7 +23,7 @@
 #include "amdxdna_dpt.h"
 #include "amdxdna_pci_drv.h"
 
-const char * const amdxdna_dpt_irq_name[AMDXDNA_DPT_KIND_MAX] = {
+static const char * const amdxdna_dpt_irq_name[AMDXDNA_DPT_KIND_MAX] = {
 	[AMDXDNA_DPT_FW_LOG]   = "xdna_fw_log",
 	[AMDXDNA_DPT_FW_TRACE] = "xdna_fw_trace",
 };
@@ -66,10 +66,15 @@ amdxdna_dpt_enter_kind(struct amdxdna_dev *xdna, enum amdxdna_dpt_kind kind,
 	*idx = srcu_read_lock(&xdna->dpt_srcu);
 	dpt = srcu_dereference(*slot, &xdna->dpt_srcu);
 	if (!dpt || READ_ONCE(dpt->status) != AMDXDNA_DPT_ACTIVE) {
-		srcu_read_unlock(&xdna->dpt_srcu, *idx);
+		amdxdna_dpt_exit_kind(xdna, *idx);
 		return NULL;
 	}
 	return dpt;
+}
+
+void amdxdna_dpt_exit_kind(struct amdxdna_dev *xdna, int idx)
+{
+	srcu_read_unlock(&xdna->dpt_srcu, idx);
 }
 
 /*
@@ -1121,7 +1126,7 @@ int amdxdna_get_fw_log(struct aie_device *aie,
 		return -ESHUTDOWN;
 
 	ret = amdxdna_dpt_get_data(dpt, args);
-	srcu_read_unlock(&xdna->dpt_srcu, idx);
+	amdxdna_dpt_exit_kind(xdna, idx);
 	return ret;
 }
 
@@ -1169,7 +1174,7 @@ int amdxdna_get_fw_log_configs(struct aie_device *aie,
 		config.version = dpt->payload_version;
 		config.status = 1;
 		config.config = READ_ONCE(dpt->config);
-		srcu_read_unlock(&xdna->dpt_srcu, idx);
+		amdxdna_dpt_exit_kind(xdna, idx);
 	}
 
 	if (copy_to_user(buf, &config, sizeof(config)))
@@ -1227,7 +1232,7 @@ int amdxdna_get_fw_trace(struct aie_device *aie,
 		return -ESHUTDOWN;
 
 	ret = amdxdna_dpt_get_data(dpt, args);
-	srcu_read_unlock(&xdna->dpt_srcu, idx);
+	amdxdna_dpt_exit_kind(xdna, idx);
 	return ret;
 }
 
@@ -1275,7 +1280,7 @@ int amdxdna_get_fw_trace_configs(struct aie_device *aie,
 		config.version = dpt->payload_version;
 		config.status = 1;
 		config.config = READ_ONCE(dpt->config);
-		srcu_read_unlock(&xdna->dpt_srcu, idx);
+		amdxdna_dpt_exit_kind(xdna, idx);
 	}
 
 	if (copy_to_user(buf, &config, sizeof(config)))
