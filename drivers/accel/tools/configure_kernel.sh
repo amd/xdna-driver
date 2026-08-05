@@ -181,7 +181,7 @@ int main(void)
 		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
 	};
 
-	return 0;
+	return b.num_rqs;
 }
 EOF
 
@@ -274,11 +274,11 @@ try_compile HAVE_cache_sgt_mapping << 'EOF'
 #include <linux/dma-buf.h>
 int main(void)
 {
-	const struct dma_buf_ops amdxdna_dmabuf_ops = {
+	const struct dma_buf_ops ops = {
 		.cache_sgt_mapping = true,
 	};
 
-	return 0;
+	return ops.cache_sgt_mapping;
 }
 EOF
 
@@ -288,6 +288,7 @@ try_compile HAVE_iommu_paging_domain_alloc_flags << 'EOF'
 #include <linux/iommu.h>
 int main(void)
 {
+
 	struct device *a = NULL;
 	unsigned long b = 0;
 	(void)iommu_paging_domain_alloc_flags(a, b);
@@ -313,8 +314,7 @@ try_compile HAVE_xen_phy_dma_ops << 'EOF'
 #include <xen/phy-dma-ops.h>
 int main(void)
 {
-	const struct dma_map_ops *a = &xen_phy_dma_ops;
-	return 0;
+	return sizeof(xen_phy_dma_ops) != 0;
 }
 EOF
 
@@ -358,8 +358,7 @@ try_compile HAVE_drm_gpu_sched_stat_reset << 'EOF'
 #include <drm/gpu_scheduler.h>
 int main(void)
 {
-	int a = DRM_GPU_SCHED_STAT_RESET;
-	return 0;
+	return DRM_GPU_SCHED_STAT_RESET;
 }
 EOF
 
@@ -369,8 +368,7 @@ try_compile HAVE_6_17_drm_gpu_sched_stat_no_hang << 'EOF'
 #include <drm/gpu_scheduler.h>
 int main(void)
 {
-	int a = DRM_GPU_SCHED_STAT_NO_HANG;
-	return 0;
+	return DRM_GPU_SCHED_STAT_NO_HANG;
 }
 EOF
 
@@ -401,8 +399,7 @@ try_compile HAVE_6_16_bit_u64 << 'EOF'
 #include <linux/bits.h>
 int main(void)
 {
-	uint64_t a = BIT_U64(1);
-	return 0;
+	return BIT_U64(1) ? 0 : 0;
 }
 EOF
 cat >> "$OUT" <<'EOF'
@@ -421,8 +418,8 @@ int main(void)
 	MODULE_IMPORT_NS("AMD_PMF");
 
 	struct amd_pmf_npu_metrics info;
-	int ret = amd_pmf_get_npu_data(&info);
-	return 0;
+
+	return amd_pmf_get_npu_data(&info);
 }
 EOF
 
@@ -432,11 +429,11 @@ try_compile HAVE_7_2_amd_pmf_npu_metrics_npu_temp << 'EOF'
 #include <linux/amd-pmf-io.h>
 int main(void)
 {
-	MODULE_IMPORT_NS("AMD_PMF");
+	struct amd_pmf_npu_metrics info = {
+		.npu_temp = 0,
+	};
 
-	struct amd_pmf_npu_metrics info;
-	info.npu_temp = 0;
-	return 0;
+	return info.npu_temp;
 }
 EOF
 
