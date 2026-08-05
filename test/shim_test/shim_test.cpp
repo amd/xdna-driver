@@ -742,7 +742,7 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
     if (device_id == npu1_device_id)
       return std::array<int, 3>{2, 4, 6};
     if (device_id == npu3_device_id || device_id == npu3a_device_id)
-      return std::array<int, 3>{4, 16, 64};
+      return std::array<int, 3>{4, 8, 32};
     return std::array<int, 3>{4, 8, 16};
   }();
 
@@ -1695,13 +1695,13 @@ std::vector<test_case> test_list {
     TEST_NEGATIVE, dev_filter_is_aie, TEST_create_destroy_max_context, { 1 }
   },
   test_case{ "Multi context IO test 1", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 0 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 0 }
   },
   test_case{ "Multi context IO test 2", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 1 }
   },
   test_case{ "Multi context IO test 3", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 2 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 2 }
   },
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
@@ -1710,16 +1710,16 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "io test with user pointer BOs", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
    test_case{ "multi-command preempt full ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_suspend_resume, {}
   },
   test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_timeout, {}
@@ -1753,10 +1753,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_gemm, {}
   },
   test_case{ "create and free internal bo", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_internal_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_create_free_internal_bo, {}
   },
   // npu4 and aie4 back the dev heap with multiple, expandable chunks, so
   // cross-chunk dev BOs work. npu1 has a single fixed chunk, so the same
@@ -1866,7 +1866,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
   },
   test_case{ "create and free user ptr BO with mmapped ptr", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_mmaped_uptr_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_create_free_mmaped_uptr_bo, {}
   },
   test_case{ "DPM noop (no QoS)", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_noop_no_qos, {}
@@ -1893,7 +1893,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_payload_overflow, {}
   },
   test_case{ "NPU write to read-only user pointer BO is rejected", {},
-    TEST_NEGATIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_write_to_readonly_uptr_bo, {}
+    TEST_NEGATIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_write_to_readonly_uptr_bo, {}
   },
 };
 
