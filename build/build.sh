@@ -330,7 +330,7 @@ XBUTIL_VALIDATE_BINS_DIR=$DOWNLOAD_BINS_DIR/download_raw/xbutil_validate/bins
 
 # Sanity check
 if [[ $CMAKE_MAJOR_VERSION != 3 ]]; then
-    if [[ $OSDIST == "centos" ]] || [[ $OSDIST == "amzn" ]] || [[ $OSDIST == "rhel" ]] || [[ $OSDIST == "fedora" ]]; then
+    if [[ $OSDIST == "centos" ]] || [[ $OSDIST == "amzn" ]] || [[ $OSDIST == "rhel" ]]; then
         CMAKE=cmake3
         if [[ ! -x "$(command -v $CMAKE)" ]]; then
             echo "$CMAKE is not installed"
