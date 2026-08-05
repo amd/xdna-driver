@@ -1202,8 +1202,17 @@ TEST_instr_invalid_addr_io(device::id_type id, std::shared_ptr<device>& sdev, ar
   bo_set.run();
 
   std::vector<uint64_t> params = {IO_TEST_NORMAL_RUN, 1};
-  static const flow_type flow = PARTIAL_ELF;
-  elf_io(id, sdev, params, "good", &flow);
+  /* NPU4-class (AIE2): prefer partial-ELF, NPU3 (AIE4): FULL_ELF */
+  static const flow_type flow_partial = PARTIAL_ELF;
+  static const flow_type flow_full = FULL_ELF;
+  const flow_type good_flow = [&]() -> flow_type {
+    try {
+      return get_binary_info(sdev.get(), "good", &flow_partial).flow;
+    } catch (const std::runtime_error&) {
+      return get_binary_info(sdev.get(), "good", &flow_full).flow;
+    }
+  }();
+  elf_io(id, sdev, params, "good", &good_flow);
 }
 
 void
