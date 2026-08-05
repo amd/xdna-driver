@@ -73,6 +73,9 @@ private:
   create_bo(bo_info& arg) const override;
 
   void
+  create_uptr_bo(bo_info& arg) const override;
+
+  void
   destroy_bo(destroy_bo_arg& arg) const override;
 
   void
