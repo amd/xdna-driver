@@ -986,10 +986,12 @@ verify_result()
   auto [ valid_per_sec, sec_size, total_size ] = get_ofm_format(m_local_data_path + "ofm_format.ini");
   if (total_size == 0)
     valid_per_sec = sec_size = total_size = sz;
+  if (sec_size == 0)
+    throw std::runtime_error("ofm_format.ini: section_size cannot be zero");
   size_t count = 0;
   for (size_t i = 0; i < total_size; i += sec_size) {
-    for (size_t j = i; j < i + valid_per_sec; j++) {
-      if (ofm_p[i] != ofm_golden_p[i])
+    for (size_t j = i; j < i + valid_per_sec && j < total_size; j++) {
+      if (ofm_p[j] != ofm_golden_p[j])
         count++;
     }
   }
