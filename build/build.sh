@@ -329,14 +329,22 @@ DOWNLOAD_BINS_DIR=./amdxdna_bins
 XBUTIL_VALIDATE_BINS_DIR=$DOWNLOAD_BINS_DIR/download_raw/xbutil_validate/bins
 
 # Sanity check
-if [[ $CMAKE_MAJOR_VERSION != 3 ]]; then
-    if [[ $OSDIST == "centos" ]] || [[ $OSDIST == "amzn" ]] || [[ $OSDIST == "rhel" ]] || [[ $OSDIST == "fedora" ]]; then
-        CMAKE=cmake3
-        if [[ ! -x "$(command -v $CMAKE)" ]]; then
-            echo "$CMAKE is not installed"
+if command -v cmake >/dev/null 2>&1; then
+    CMAKE_MAJOR_VERSION=$(cmake --version | head -n1 | awk '{print $3}' | cut -d. -f1)
+
+    if [[ "$CMAKE_MAJOR_VERSION" -lt 3 ]]; then
+        if command -v cmake3 >/dev/null 2>&1; then
+            CMAKE=cmake3
+        else
+            echo "CMake >= 3 is required"
             exit 1
         fi
     fi
+elif command -v cmake3 >/dev/null 2>&1; then
+    CMAKE=cmake3
+else
+    echo "CMake is not installed"
+    exit 1
 fi
 # Sanity check end
 
