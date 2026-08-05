@@ -23,6 +23,7 @@ To run AI applications, your system needs
 * Operating System:
   - Ubuntu >= 22.04
   - Arch Linux
+  - Fedora >= 44
 * Linux Kernel: v6.10 or above. (See [Linux compilation and installation](#linux-compilation-and-installation))
   - Due to Linux API change, XDNA driver doesn't always keep supporting old version.
 * Installed XRT base package (or you can install it along the
@@ -111,16 +112,15 @@ cd <root-of-source-tree>/build
 # If you do not have XRT installed yet:
 cd xrt/build
 ./build.sh -npu -opt
-# To adapt according to your OS & version
-sudo apt reinstall ./Release/xrt_202510.2.19.0_22.04-amd64-base.deb
+# Then follow the installation guide in test
+
+# Then build the xdna driver 
 cd ../../build
 
 # Start XDNA driver release build and create release DEB package
 ./build.sh -release
-
-# To adapt according to your OS & version
-sudo apt reinstall ./Release/xrt_plugin.2.19.0_ubuntu22.04-x86_64-amdxdna.deb
 ```
+Follow the installation guide in the [Test](#test)  to install and test.
 
 ### Steps to create release build packages (Arch Linux):
 
@@ -137,40 +137,25 @@ git submodule update --init --recursive
 cd xrt/build
 ./build.sh -npu -opt
 
-# Build and install XRT packages using pacman
+# Build XRT packages using pacman
 # PKGBUILDs are in xrt/build/arch/
 cd arch
 makepkg -p PKGBUILD-xrt-base
-sudo pacman -U xrt-base-*.pkg.tar.zst
-
 makepkg -p PKGBUILD-xrt-npu
-sudo pacman -U xrt-npu-*.pkg.tar.zst
 
 # Build XDNA driver
 cd ../../../build
 ./build.sh -release
 
-# Build and install the AMDXDNA driver first (separate package for the
-# DKMS-based kernel module). The plugin depends on this package, so it
-# must be installed before the plugin.
+# Build the AMDXDNA driver first (separate package for the
+# DKMS-based kernel module). The plugin depends on this package.
 cd arch
 makepkg -p PKGBUILD-amdxdna-driver
-sudo pacman -U amdxdna-driver-*.pkg.tar.zst
 
-# Build and install the XDNA plugin package
+# Build the XDNA plugin package
 makepkg -p PKGBUILD-xrt-plugin-amdxdna
-sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
-
-# Configure memory limits (required for NPU access)
-# Using limits.d drop-in file (survives package upgrades)
-sudo mkdir -p /etc/security/limits.d
-sudo tee /etc/security/limits.d/99-amdxdna.conf > /dev/null << 'EOF'
-* soft memlock unlimited
-* hard memlock unlimited
-EOF
-
-# Log out and log back in (or reboot) for memory limit changes to take effect
 ```
+Follow the installation guide in the [Test](#test) to install and test. Arch users are also advised to configure [memory limits](#test) required for NPU access.
 
 **Note for Arch Linux users**: The build system generates `.tar.gz` packages which are repackaged into proper Arch packages (`.pkg.tar.zst`) using the provided PKGBUILDs:
 - XRT packages: `xrt/build/arch/` (PKGBUILD-xrt-base, PKGBUILD-xrt-npu)
@@ -210,13 +195,85 @@ You will find `xrt_plugin.<version>_<distro-version>-<arch>-amdxdna.deb` (Ubuntu
   for how to swap them).
 * The firmware binary files, which will be installed to `/usr/lib/firmware/amdnpu` folder
 
-## Test
 
-If you haven't read [System Requirements](#system-requirements), double check it.
+
+### Steps to create release build packages (Fedora)
 
 ``` bash
+cd <root-of-source-tree>
+
+# Install dependencies (requires sudo)
+sudo ./tools/amdxdna_deps.sh
+
+# Get submodules
+git submodule update --init --recursive
+
+# Build XRT
+cd xrt/build
+./build.sh -npu -opt
+
+# Build XDNA driver
+cd ../../build
+./build.sh -release
+```
+Follow the installation guide in the [Test](#test) to install and test.
+
+## Test
+
+If you haven't read [System Requirements](#system-requirements), double check it. Install the driver (if not already) and the plugin package generated during Build for your platform, then validate.
+
+**Ubuntu/Debian:**
+
+```bash
+sudo apt reinstall ./Release/xrt_plugin.2.19.0_ubuntu22.04-x86_64-amdxdna.deb
+```
+
+**Arch Linux:**
+
+```bash
+# 1. Install XRT packages first
+sudo pacman -U xrt-base-*.pkg.tar.zst
+sudo pacman -U xrt-npu-*.pkg.tar.zst
+
+# 2. Install the driver
+sudo pacman -U amdxdna-driver-*.pkg.tar.zst
+
+# 3. Then install the plugin
+sudo pacman -U xrt-plugin-amdxdna-*.pkg.tar.zst
+
+# Configure memory limits (required for NPU access)
+# Using limits.d drop-in file (survives package upgrades)
+sudo mkdir -p /etc/security/limits.d
+sudo tee /etc/security/limits.d/99-amdxdna.conf > /dev/null << 'EOF'
+* soft memlock unlimited
+* hard memlock unlimited
+EOF
+
+# Log out and log back in (or reboot) for memory limit changes to take effect 
+```
+
+**Fedora:**
+
+```bash
+# Install XRT packages first (build-time dependency)
+sudo dnf install ./Release/xrt-*.rpm
+
+# Then install the plugin
+sudo dnf install ./Release/xrt_plugin-*.rpm
+```
+
+If `xrt-smi validate` below fails with a memlock-related error (e.g. `failed to allocate BO` or `Lock limit exceeded`), see [How to allocate huge size BO?](#q-how-to-allocate-huge-size-bo) — Fedora usually needs an extra `systemd --user` limit on top of `limits.d`.
+
+**All platforms:**
+
+```bash
 source /opt/xilinx/xrt/setup.sh
+
+# Validate installation
 xrt-smi validate
+
+# Examine installation and your NPU
+xrt-smi examine
 ```
 
 ## Q&A
@@ -257,6 +314,25 @@ EOF
 # Log out and log back in (or reboot), then check if the limit changed
 ulimit -l
 ```
+**Note (Fedora)**: if `ulimit -l` still reports a low value (e.g. `8192`) after setting the
+drop-in file above, Fedora's `systemd --user` may also need a higher memlock limit:
+
+``` bash
+sudo systemctl edit user@.service
+```
+
+Add:
+```ini
+[Service]
+LimitMEMLOCK=infinity
+```
+
+Log out and log back in (or reboot), then verify:
+``` bash
+ulimit -l
+xrt-smi examine
+```
+
 
 ### Q: `xrt-smi` enumerates the NPU, but commands abort (`ERT_CMD_STATE_ABORT`) or the mailbox times out right after load. What's wrong?
 
@@ -294,3 +370,4 @@ cp tools/pre-commit .git/hooks/
 cd <workspace of this repo>/
 ./tools/codingsty_check.sh <DIR>
 ```
+
