@@ -603,7 +603,6 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 	u32 shift = xdna->dev_info->dev_mem_buf_shift;
 	struct config_cu_req req = { 0 };
 	struct xdna_mailbox_msg msg;
-	struct drm_gem_object *gobj;
 	struct amdxdna_gem_obj *abo;
 	int i;
 
@@ -618,31 +617,29 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 		return -EINVAL;
 	}
 
+	if (hwctx->cus->num_cus != hwctx->priv->num_cu_bos) {
+		XDNA_ERR(xdna, "CU BOs not held for this context");
+		return -EINVAL;
+	}
+
 	for (i = 0; i < hwctx->cus->num_cus; i++) {
 		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
 
 		if (XDNA_MBZ_DBG(xdna, cu->pad, sizeof(cu->pad)))
 			return -EINVAL;
 
-		gobj = drm_gem_object_lookup(hwctx->client->filp, cu->cu_bo);
-		if (!gobj) {
-			XDNA_ERR(xdna, "Lookup GEM object failed");
-			return -EINVAL;
-		}
-		abo = to_xdna_obj(gobj);
-
-		if (abo->type != AMDXDNA_BO_DEV) {
-			drm_gem_object_put(gobj);
-			XDNA_ERR(xdna, "Invalid BO type");
-			return -EINVAL;
-		}
+		/*
+		 * Resolved and referenced once at config time. Looking the
+		 * handle up here instead would fail on resume, once the client
+		 * has dropped it, and take the whole device resume down with it.
+		 */
+		abo = hwctx->priv->cu_bos[i];
 
 		req.cfgs[i] = FIELD_PREP(AIE2_MSG_CFG_CU_PDI_ADDR,
 					 amdxdna_gem_dev_addr(abo) >> shift);
 		req.cfgs[i] |= FIELD_PREP(AIE2_MSG_CFG_CU_FUNC, cu->cu_func);
 		XDNA_DBG(xdna, "CU %d full addr 0x%llx, cfg 0x%x", i,
 			 amdxdna_gem_dev_addr(abo), req.cfgs[i]);
-		drm_gem_object_put(gobj);
 	}
 	req.num_cus = hwctx->cus->num_cus;
 
