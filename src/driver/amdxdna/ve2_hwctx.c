@@ -613,6 +613,28 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	dpu = (struct ve2_dpu_data *)cmd_data;
 
+	/* Validate all user-controlled fields before reserving a slot.
+	 * Any -EINVAL return after hsa_queue_reserve_slot() leaks the slot
+	 * (slot_ready stays cleared, write_index stalls).
+	 */
+	if (dpu->chained >= HOST_INDIRECT_PKT_NUM) {
+		XDNA_ERR(xdna, "Invalid chained value %u, max %u",
+			 dpu->chained, HOST_INDIRECT_PKT_NUM - 1);
+		return -EINVAL;
+	}
+
+	u32 total_cmds = dpu->chained + 1;
+
+	for (int i = 0; i < total_cmds; i++) {
+		struct ve2_dpu_data *d = (struct ve2_dpu_data *)cmd_data + i;
+
+		if (d->uc_index >= HOST_INDIRECT_PKT_NUM) {
+			XDNA_ERR(xdna, "Invalid uc_index %u at entry %d, max %u",
+				 d->uc_index, i, HOST_INDIRECT_PKT_NUM - 1);
+			return -EINVAL;
+		}
+	}
+
 	pkt = hsa_queue_reserve_slot(xdna, ve2_ctx, &slot_id);
 	if (IS_ERR(pkt)) {
 		XDNA_DBG(xdna, "No slot available in Host queue");
@@ -636,12 +658,6 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	struct host_queue_indirect_hdr *indirect_hdr =
 		(struct host_queue_indirect_hdr *)&queue->hq_indirect_hdr[slot_id];
-	if (dpu->chained >= HOST_INDIRECT_PKT_NUM) {
-		XDNA_ERR(xdna, "Invalid chained value %u, max %u",
-			 dpu->chained, HOST_INDIRECT_PKT_NUM - 1);
-		return -EINVAL;
-	}
-	u32 total_cmds = dpu->chained + 1;
 
 	indirect_hdr->header.count = total_cmds * sizeof(struct host_indirect_packet_entry);
 	indirect_hdr->header.indirect = 1;
@@ -660,11 +676,6 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	for (int i = 0; dpu && (i < total_cmds); i++, hp_hdr++, dpu = get_ve2_dpu_data_next(dpu)) {
 		u16 uc = dpu->uc_index;
-		if (uc >= HOST_INDIRECT_PKT_NUM) {
-			XDNA_ERR(xdna, "Invalid uc_index %u, max %u",
-				 uc, HOST_INDIRECT_PKT_NUM - 1);
-			return -EINVAL;
-		}
 		struct host_queue_indirect_pkt *indirect_data =
 			(struct host_queue_indirect_pkt *)&queue->hq_indirect_pkt[uc][slot_id];
 		u64 m_indirect_data_paddr = (u64)(queue->hq_header.data_address +
@@ -709,17 +720,6 @@ static int submit_command_indirect(struct amdxdna_ctx *hwctx, void *cmd_data, u6
 
 	return 0;
 }
-
-static int submit_command(struct amdxdna_ctx *hwctx, void *cmd_data, u64 *seq, bool last_cmd)
-{
-	struct amdxdna_ctx_priv *ve2_ctx = hwctx->priv;
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct ve2_hsa_queue *hq_queue = &ve2_ctx->hwctx_hsa_queue;
-	struct ve2_dpu_data *dpu_cmd;
-	struct xrt_packet_header *hdr;
-	struct host_queue_packet *pkt;
-	struct exec_buf *ebp;
-	u64 slot_id = 0;
 	int err;
 
 	if (!cmd_data) {
