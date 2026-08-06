@@ -57,11 +57,11 @@ skip_sva_bind:
 	init_srcu_struct(&client->ctx_srcu);
 	xa_init_flags(&client->ctx_xa, XA_FLAGS_ALLOC);
 	mutex_init(&client->mm_lock);
+	kref_init(&client->refcnt);
 
 	mutex_lock(&xdna->dev_lock);
 	list_add_tail(&client->node, &xdna->client_list);
 	mutex_unlock(&xdna->dev_lock);
-
 	seqlock_init(&client->stats.lock);
 
 	client->stats.busy_time = ns_to_ktime(0);
@@ -107,7 +107,7 @@ skip_sva_unbind:
 #endif
 
 	XDNA_DBG(xdna, "PID %d closed", client->pid);
-	kfree(client);
+	kref_put(&client->refcnt, amdxdna_client_release);
 }
 
 static int amdxdna_flush(struct file *f, fl_owner_t id)
