@@ -128,6 +128,41 @@ DEFINE_EVENT(xdna_mbox_name_id, mbox_poll_handle,
 	     TP_ARGS(name, irq)
 );
 
+/*
+ * Generic profiling tracepoint consumed by the xrt_profile userspace tool/test
+ * (xrt_profiling) to build per hardware-context / per-command timing
+ * breakdowns. Each call site passes a fixed message string (e.g.
+ * XRT_PROFILING_TRACE_ENTER/EXIT) plus up to three numeric arguments whose
+ * meaning depends on the calling function; see trace_amdxdna_trace_point()
+ * call sites in ve2_hwctx.c / ve2_mgmt.c for the argument layout of each.
+ */
+TRACE_EVENT(__amdxdna_trace_point,
+	    TP_PROTO(const char *msg, const char *func, u64 pid, u64 arg1, u64 arg2, u64 arg3),
+
+	    TP_ARGS(msg, func, pid, arg1, arg2, arg3),
+
+	    TP_STRUCT__entry(__string(msg, msg)
+			     __string(func, func)
+			     __field(u64, pid)
+			     __field(u64, arg1)
+			     __field(u64, arg2)
+			     __field(u64, arg3)),
+
+	    TP_fast_assign(__assign_str(msg);
+			   __assign_str(func);
+			   __entry->pid = pid;
+			   __entry->arg1 = arg1;
+			   __entry->arg2 = arg2;
+			   __entry->arg3 = arg3;),
+
+	    TP_printk("%s: %s() pid=%llu [%llu,%llu,%llu]", __get_str(msg), __get_str(func),
+		      __entry->pid, __entry->arg1, __entry->arg2, __entry->arg3)
+);
+
+/* Macro wrapper that automatically captures the function name */
+#define trace_amdxdna_trace_point(msg, pid, arg1, arg2, arg3) \
+	trace___amdxdna_trace_point(msg, __func__, pid, arg1, arg2, arg3)
+
 #endif /* !defined(_AMDXDNA_TRACE_EVENTS_H_) || defined(TRACE_HEADER_MULTI_READ) */
 
 /* This part must be outside protection */
