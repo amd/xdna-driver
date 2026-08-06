@@ -107,6 +107,40 @@ EOF
     rm -rf "$tmpdir"
 }
 
+# ---- Sanity-check the build toolchain ----------------------------------
+# A trivial module must always compile. If this fails, objtool or the
+# compiler is broken and all try_compile results would be false negatives.
+_canary_dir=$(mktemp -d /tmp/conftest-XXXXXX)
+cat > "$_canary_dir/Makefile" <<EOF
+obj-m := conftest.o
+EOF
+cat > "$_canary_dir/conftest.c" <<EOF
+#include <linux/module.h>
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("amdxdna conftest");
+static int __init conftest_init(void) { return 0; }
+static void __exit conftest_exit(void) {}
+module_init(conftest_init);
+module_exit(conftest_exit);
+EOF
+if ! _canary_err=$(make -s -C "$KERNEL_SRC" M="$_canary_dir" modules 2>&1); then
+    echo "ERROR: Kernel module build sanity check failed." >&2
+    echo "ERROR: Build output:" >&2
+    echo "$_canary_err" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "ERROR: Diagnosis steps:" >&2
+    echo "  1. Check objtool:  ldd $KERNEL_SRC/tools/objtool/objtool" >&2
+    echo "     If a .so is missing, symlink the installed version, e.g.:" >&2
+    echo "     sudo ln -s /usr/lib/x86_64-linux-gnu/libopcodes-<ver>-system.so \\" >&2
+    echo "                /usr/lib/x86_64-linux-gnu/libopcodes-<required-ver>-system.so" >&2
+    echo "  2. Check kernel headers exist: ls $KERNEL_SRC/include/linux/module.h" >&2
+    echo "  3. Reproduce manually: make -C $KERNEL_SRC M=$_canary_dir modules" >&2
+    rm -rf "$_canary_dir"
+    exit 1
+fi
+rm -rf "$_canary_dir"
+echo ">>> Toolchain sanity check passed." >&2
+
 # ---- Write header preamble ---------------------------------------------
 
 cat > "$OUT" <<EOF
