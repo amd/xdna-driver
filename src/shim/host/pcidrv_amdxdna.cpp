@@ -11,11 +11,6 @@
 
 namespace {
 
-struct X
-{
-  X() { xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv_amdxdna>()); }
-} x;
-
 int
 get_dev_type(const std::string& sysfs)
 {
@@ -30,6 +25,14 @@ get_dev_type(const std::string& sysfs)
   std::getline(ifs, line);
   return static_cast<int>(std::stoi(line));
 }
+
+struct X
+{
+  X() {
+    xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv_amdxdna>());
+    xrt_core::pci::register_driver(std::make_shared<shim_xdna::drv_amdxdna_mgmt>());
+  }
+} x;
 
 }
 
@@ -77,9 +80,56 @@ create_pcidev(const std::string& sysfs) const
   if (device_type == AMDXDNA_DEV_TYPE_UMQ)
     return std::make_shared<pdev_umq>(platform_driver, sysfs);
   if (device_type == AMDXDNA_DEV_TYPE_PF)
-    return nullptr;
+    return nullptr; // handled by drv_amdxdna_mgmt
 
   shim_err(EINVAL, "Unknown device type: %d", device_type);
+}
+
+bool
+drv_amdxdna_mgmt::
+is_user() const
+{
+  return false;
+}
+
+std::string
+drv_amdxdna_mgmt::
+name() const
+{
+  return "amdxdna";
+}
+
+std::string
+drv_amdxdna_mgmt::
+dev_node_prefix() const
+{
+  return "accel";
+}
+
+std::string
+drv_amdxdna_mgmt::
+dev_node_dir() const
+{
+  return "accel";
+}
+
+std::string
+drv_amdxdna_mgmt::
+sysfs_dev_node_dir() const
+{
+  return "accel";
+}
+
+std::shared_ptr<xrt_core::pci::dev>
+drv_amdxdna_mgmt::
+create_pcidev(const std::string& sysfs) const
+{
+  if (get_dev_type(sysfs) != AMDXDNA_DEV_TYPE_PF)
+    return nullptr;
+  auto driver = std::dynamic_pointer_cast<const drv>(shared_from_this());
+  auto platform_driver = std::dynamic_pointer_cast<const platform_drv>(
+    std::make_shared<const platform_drv_host>(driver));
+  return std::make_shared<pdev_pf>(platform_driver, sysfs);
 }
 
 }

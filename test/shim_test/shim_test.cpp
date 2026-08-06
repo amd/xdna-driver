@@ -80,6 +80,7 @@ void TEST_io_runlist_throughput(device::id_type, std::shared_ptr<device>&, arg_t
 void TEST_io_runlist_bad_cmd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_noop_io_with_dup_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_with_ubuf_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_write_to_readonly_uptr_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_io_suspend_resume(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_vadd(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_shim_umq_memtiles(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -647,10 +648,10 @@ TEST_get_bdf_info_and_get_device_id(device::id_type id, std::shared_ptr<device>&
   auto is_user = arg[0];
   auto devinfo = get_total_devices(is_user);
   for (device::id_type i = 0; i < devinfo.first; i++) {
-    auto info = get_bdf_info(i);
+    auto info = get_bdf_info(i, is_user);
     auto bdf = bdf_info2str(info);
     std::cout << "device[" << i << "]: " << bdf << std::endl;
-    auto dev = get_userpf_device(i);
+    auto dev = is_user ? get_userpf_device(i) : get_mgmtpf_device(i);
     try {
       auto devid = device_query<query::pcie_device>(dev);
       std::cout << "device[" << bdf << "]: 0x" << std::hex << devid << std::dec << std::endl;
@@ -741,7 +742,7 @@ TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, ar
     if (device_id == npu1_device_id)
       return std::array<int, 3>{2, 4, 6};
     if (device_id == npu3_device_id || device_id == npu3a_device_id)
-      return std::array<int, 3>{4, 16, 64};
+      return std::array<int, 3>{4, 8, 32};
     return std::array<int, 3>{4, 8, 16};
   }();
 
@@ -1025,73 +1026,6 @@ TEST_dev_bo_cross_heap_stress(device::id_type id, std::shared_ptr<device>& sdev,
       dev_bo_verify_boundaries(*b, size);
   }
 }
-
-class mmapped_file {
-public:
-  mmapped_file(size_t size, bool readonly)
-  {
-    char tmpl[] = "/tmp/xrt_bo_mmap_XXXXXX";
-    auto fd = ::mkstemp(tmpl);
-    if (fd < 0)
-      throw std::runtime_error("mkstemp failed");
-
-    // Ensure only the owner can access the file, without changing process umask
-    if (::fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
-      ::close(fd);
-      ::unlink(tmpl);
-      throw std::runtime_error("fchmod failed");
-    }
-    ::unlink(tmpl);
-
-    if (::ftruncate(fd, static_cast<off_t>(size)) != 0) {
-      ::close(fd);
-      throw std::runtime_error("ftruncate failed");
-    }
-
-    // Create fd for mmap
-    // Open it again as readonly if needed
-    int mmap_fd;
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
-
-    mmap_fd = ::open(path, (readonly ? O_RDONLY : O_RDWR) | O_CLOEXEC);
-    if (mmap_fd < 0) {
-      ::close(fd);
-      throw std::runtime_error("open mmap fd failed");
-    }
-
-    auto mapped = ::mmap(nullptr, size,
-      readonly ? PROT_READ : PROT_READ | PROT_WRITE, MAP_SHARED, mmap_fd, 0);
-    if (mapped == MAP_FAILED) {
-      ::close(mmap_fd);
-      ::close(fd);
-      throw std::runtime_error("mmap failed");
-    }
-
-    m_fd = fd;
-    m_mmap_fd = mmap_fd;
-    m_ptr = mapped;
-    m_size = size;
-  }
-
-  ~mmapped_file()
-  {
-    ::munmap(m_ptr, m_size);
-    ::close(m_mmap_fd);
-    ::close(m_fd);
-  }
-
-  void *get()
-  {
-    return m_ptr;
-  }
-
-private:
-  int m_fd = -1;
-  int m_mmap_fd = -1;
-  size_t m_size = 0;
-  void *m_ptr = nullptr;
-};
 
 void
 TEST_create_free_mmaped_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
@@ -1539,6 +1473,39 @@ TEST_query_telemetry_short_buf(device::id_type id, std::shared_ptr<device>& sdev
       + std::to_string(err));
 }
 
+struct attribute_state_probe {
+  int ret;
+  int err;
+  uint8_t state;
+};
+
+void
+TEST_query_frame_boundary_preempt(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  auto probe = fork_query<attribute_state_probe>(sdev.get(), [](int fd) {
+    amdxdna_drm_attribute_state state{};
+    amdxdna_drm_get_info info = {
+      .param = DRM_AMDXDNA_GET_FRAME_BOUNDARY_PREEMPT_STATE,
+      .buffer_size = sizeof(state),
+      .buffer = reinterpret_cast<uintptr_t>(&state),
+    };
+
+    attribute_state_probe r{};
+    r.ret = ::ioctl(fd, DRM_IOCTL_AMDXDNA_GET_INFO, &info);
+    r.err = errno;
+    r.state = state.state;
+    return r;
+  });
+
+  if (probe.ret == -1)
+    throw std::runtime_error(
+      "ioctl(GET_FRAME_BOUNDARY_PREEMPT_STATE) failed: " + std::string(std::strerror(probe.err)));
+  if (probe.state > 1)
+    throw std::runtime_error("GET_FRAME_BOUNDARY_PREEMPT_STATE returned non-boolean state");
+  if (dev_filter_is_aie4(id, sdev.get()) && probe.state != 1)
+    throw std::runtime_error("aie4 GET_FRAME_BOUNDARY_PREEMPT_STATE expected enabled");
+}
+
 // List of all test cases
 std::vector<test_case> test_list {
   test_case{ "get_xrt_info", {},
@@ -1550,18 +1517,18 @@ std::vector<test_case> test_list {
   test_case{ "get_total_devices", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {true}
   },
-  //test_case{ "get_total_devices(mgmtpf)", {},
-  //  TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {false}
-  //},
+  test_case{ "get_total_devices(mgmtpf)", {},
+    TEST_POSITIVE, no_dev_filter, TEST_get_total_devices, {false}
+  },
   test_case{ "get_bdf_info_and_get_device_id", {},
     TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {true}
   },
-  //test_case{ "get_bdf_info_and_get_device_id(mgmtpf)", {},
-  //  TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {false}
-  //},
-  //test_case{ "get_mgmtpf_device", {},
-  //  TEST_POSITIVE, no_dev_filter, TEST_get_mgmtpf_device, {}
-  //},
+  test_case{ "get_bdf_info_and_get_device_id(mgmtpf)", {},
+    TEST_POSITIVE, no_dev_filter, TEST_get_bdf_info_and_get_device_id, {false}
+  },
+  test_case{ "get_mgmtpf_device", {},
+    TEST_POSITIVE, no_dev_filter, TEST_get_mgmtpf_device, {}
+  },
   test_case{ "query(pcie_vendor)", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_query_userpf<query::pcie_vendor>, {}
   },
@@ -1728,13 +1695,13 @@ std::vector<test_case> test_list {
     TEST_NEGATIVE, dev_filter_is_aie, TEST_create_destroy_max_context, { 1 }
   },
   test_case{ "Multi context IO test 1", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 0 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 0 }
   },
   test_case{ "Multi context IO test 2", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 1 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 1 }
   },
   test_case{ "Multi context IO test 3", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 2 }
+    TEST_POSITIVE, dev_filter_is_aie, TEST_multi_context_io_test, { 2 }
   },
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
@@ -1743,16 +1710,16 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "io test with user pointer BOs", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_io_with_ubuf_bo, {}
   },
    test_case{ "multi-command preempt full ELF io test real kernel good run", {},
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4_and_amdxdna_drv, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
-    TEST_POSITIVE, dev_filter_is_aie2, TEST_io_suspend_resume, {}
+    TEST_POSITIVE, dev_filter_is_aie, TEST_io_suspend_resume, {}
   },
   test_case{ "io test timeout run for context health report", {},
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_timeout, {}
@@ -1775,6 +1742,9 @@ std::vector<test_case> test_list {
   test_case{ "query telemetry header-only buffer fails", {},
     TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_telemetry_short_buf, {}
   },
+  test_case{ "query frame boundary preempt state (get_info)", {},
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_query_frame_boundary_preempt, {}
+  },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, dev_filter_is_aie2, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
@@ -1783,10 +1753,10 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
-    TEST_POSITIVE, dev_filter_is_npu4, TEST_io_gemm, {}
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_io_gemm, {}
   },
   test_case{ "create and free internal bo", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_internal_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_create_free_internal_bo, {}
   },
   // npu4 and aie4 back the dev heap with multiple, expandable chunks, so
   // cross-chunk dev BOs work. npu1 has a single fixed chunk, so the same
@@ -1896,7 +1866,7 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, dev_filter_is_npu4, TEST_io_runlist_bad_cmd, {true}
   },
   test_case{ "create and free user ptr BO with mmapped ptr", {},
-    TEST_POSITIVE, dev_filter_is_aie2_and_amdxdna_drv, TEST_create_free_mmaped_uptr_bo, {}
+    TEST_POSITIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_create_free_mmaped_uptr_bo, {}
   },
   test_case{ "DPM noop (no QoS)", {},
     TEST_POSITIVE, dev_filter_is_npu4_and_amdxdna_drv, TEST_dpm_noop_no_qos, {}
@@ -1921,6 +1891,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "CERT log: payload overflow rejected", {},
     TEST_POSITIVE, dev_filter_is_aie4, TEST_certlog_payload_overflow, {}
+  },
+  test_case{ "NPU write to read-only user pointer BO is rejected", {},
+    TEST_NEGATIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_write_to_readonly_uptr_bo, {}
   },
 };
 

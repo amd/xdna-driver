@@ -586,6 +586,21 @@ int amdxdna_set_force_preempt_state(struct aie_device *aie, struct amdxdna_clien
 	return 0;
 }
 
+int amdxdna_get_frame_boundary_preempt_state(struct aie_device *aie,
+					     struct amdxdna_drm_get_info *args)
+{
+	struct amdxdna_drm_attribute_state state = {};
+	u32 buf_sz;
+
+	state.state = aie->frame_boundary_preempt_enabled;
+
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_to_user(u64_to_user_ptr(args->buffer), &state, buf_sz))
+		return -EFAULT;
+
+	return 0;
+}
+
 struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size)
 {
 	struct amdxdna_msg_buf_hdl *hdl;
