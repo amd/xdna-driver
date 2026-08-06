@@ -617,11 +617,6 @@ int aie2_config_cu(struct amdxdna_hwctx *hwctx,
 		return -EINVAL;
 	}
 
-	if (hwctx->cus->num_cus != hwctx->priv->num_cu_bos) {
-		XDNA_ERR(xdna, "CU BOs not held for this context");
-		return -EINVAL;
-	}
-
 	for (i = 0; i < hwctx->cus->num_cus; i++) {
 		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
 
