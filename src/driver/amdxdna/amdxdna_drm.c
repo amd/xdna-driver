@@ -81,20 +81,20 @@ failed:
 	return ret;
 }
 
-static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
+static void amdxdna_client_release(struct kref *ref)
 {
-	struct amdxdna_client *client = filp->driver_priv;
-	struct amdxdna_dev *xdna = to_xdna_dev(ddev);
+	struct amdxdna_client *client =
+		container_of(ref, struct amdxdna_client, refcnt);
 
-	XDNA_DBG(xdna, "Closing PID %d", client->pid);
+	kfree(client);
+}
 
-	xa_destroy(&client->ctx_xa);
-	cleanup_srcu_struct(&client->ctx_srcu);
-	if (client->dev_heap)
-		drm_gem_object_put(to_gobj(client->dev_heap));
-	mutex_destroy(&client->mm_lock);
+void amdxdna_client_put(struct amdxdna_client *client)
+{
+	kref_put(&client->refcnt, amdxdna_client_release);
+}
 
-#ifdef AMDXDNA_DEVEL
+static void amdxdna_drm_close(struct drm_device *ddev, struct drm_file *filp)
 	if (iommu_mode != AMDXDNA_IOMMU_PASID)
 		goto skip_sva_unbind;
 #endif
