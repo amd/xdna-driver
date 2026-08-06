@@ -20,6 +20,7 @@
 #include "amdxdna_ctx.h"
 #include "amdxdna_pci_drv.h"
 #include "amdxdna_solver.h"
+#include "trace/events/amdxdna.h"
 #include "ve2_aux.h"
 #include "ve2_hwctx.h"
 #include "ve2_host_queue.h"
@@ -402,11 +403,15 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 				  AIE_PART_INIT_OPT_NMU_CONFIG | AIE_PART_INIT_OPT_DIS_TLAST_ERROR |
 				  AIE_PART_INIT_OPT_ERR_SHIM_INIT | AIE_PART_INIT_OPT_HANDSHAKE);
 
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_PARTITION_INIT",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, num_col);
 	ret = aie_partition_initialize(mgmtctx->aie_dev, &args);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release_hs_data;
 	}
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_PARTITION_DONE",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, num_col);
 
 	/* Wake up the lead UC only */
 	ret = aie_partition_uc_wakeup(mgmtctx->aie_dev, &lead_loc);
@@ -496,11 +501,18 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 
 	mgmtctx = vp->mgmtctx;
 
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->id,
+				  command_index);
+
 	mutex_lock(&mgmtctx->ctx_lock);
 
 	ret = ve2_fifo_enqueue(mgmtctx, hwctx, command_index);
 	if (ret) {
 		mutex_unlock(&mgmtctx->ctx_lock);
+		trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+					  hwctx->client->pid, mgmtctx->start_col, hwctx->id,
+					  command_index);
 		return ret;
 	}
 
@@ -510,6 +522,9 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 		ret = ve2_mgmt_handshake_init(mgmtctx, hwctx);
 		if (ret) {
 			mutex_unlock(&mgmtctx->ctx_lock);
+			trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+						  hwctx->client->pid, mgmtctx->start_col,
+						  hwctx->id, command_index);
 			return ret;
 		}
 		mgmtctx->active_ctx = hwctx;
@@ -535,6 +550,9 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->id,
+				  command_index);
 	return 0;
 }
 
@@ -641,16 +659,21 @@ static void ve2_scheduler_work(struct work_struct *work)
 {
 	struct amdxdna_mgmtctx *mgmtctx = container_of(work, struct amdxdna_mgmtctx,
 						       scheduler_work);
+	struct amdxdna_hwctx *hwctx;
 	struct amdxdna_ctx_priv *vp;
 
 	guard(mutex)(&mgmtctx->ctx_lock);
 
-	if (!mgmtctx->active_ctx)
+	hwctx = mgmtctx->active_ctx;
+	if (!hwctx)
 		return;
 
-	vp = ve2_hw_priv(mgmtctx->active_ctx);
+	vp = ve2_hw_priv(hwctx);
 	if (!vp)
 		return;
+
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, 0);
 
 	/* If a switch was requested, mark the firmware ready to be reprogrammed. */
 	ve2_check_context_req(mgmtctx);
@@ -672,6 +695,9 @@ static void ve2_scheduler_work(struct work_struct *work)
 		XDNA_DBG(mgmtctx->xdna, "Scheduler: no action needed, active_ctx=%p",
 			 mgmtctx->active_ctx);
 	}
+
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, 0);
 }
 
 static void pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx,
@@ -703,6 +729,7 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	struct amdxdna_mgmtctx *mgmtctx = priv;
 	struct amdxdna_hwctx *active_ctx;
 	struct amdxdna_ctx_priv *vp;
+	u64 write_index = 0;
 	u64 read_index;
 
 	guard(mutex)(&mgmtctx->ctx_lock);
@@ -710,6 +737,9 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 
 	if (!active_ctx)
 		return;
+
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
+				  active_ctx->client->pid, mgmtctx->start_col, active_ctx->id, 0);
 
 	if (get_ctx_read_index(active_ctx, &read_index)) {
 		XDNA_ERR(mgmtctx->xdna, "IRQ: failed to get read index");
@@ -720,6 +750,11 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	vp = ve2_hw_priv(active_ctx);
 	if (vp)
 		wake_up_interruptible_all(&vp->waitq);
+
+	get_ctx_write_index(active_ctx, &write_index);
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
+				  active_ctx->client->pid, active_ctx->id,
+				  write_index, read_index);
 
 	if (mgmtctx->work_queue &&
 	    (ve2_check_idle_or_queue_not_empty(mgmtctx) || ve2_check_misc_interrupt(mgmtctx))) {
