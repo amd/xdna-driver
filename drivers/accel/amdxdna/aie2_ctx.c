@@ -858,12 +858,18 @@ static void aie2_hwctx_put_cu_bos(struct amdxdna_hwctx *hwctx)
 {
 	u32 i;
 
-	for (i = 0; i < hwctx->priv->num_cu_bos; i++)
+	if (!hwctx->priv->cu_bos)
+		return;
+
+	/* A partially filled array is left zeroed past the failed lookup. */
+	for (i = 0; i < hwctx->cus->num_cus; i++) {
+		if (!hwctx->priv->cu_bos[i])
+			break;
 		drm_gem_object_put(to_gobj(hwctx->priv->cu_bos[i]));
+	}
 
 	kfree(hwctx->priv->cu_bos);
 	hwctx->priv->cu_bos = NULL;
-	hwctx->priv->num_cu_bos = 0;
 }
 
 void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
@@ -922,9 +928,9 @@ static int aie2_config_cu_resp_handler(void *handle, void __iomem *data, size_t 
 /*
  * Resolve each configured CU BO once and keep a reference for the life of the
  * context. hwctx->cus holds userspace GEM handles, which stop resolving as soon
- * as the client drops them -- but aie2_config_cu() runs again on every resume,
- * so a dropped handle turned into a failed hwctx restart and left the device
- * unable to resume at all.
+ * as the client drops them, while aie2_config_cu() runs again on every resume.
+ * A dropped handle would fail the hwctx restart and leave the device unable to
+ * resume at all.
  */
 static int aie2_hwctx_hold_cu_bos(struct amdxdna_hwctx *hwctx)
 {
@@ -944,8 +950,7 @@ static int aie2_hwctx_hold_cu_bos(struct amdxdna_hwctx *hwctx)
 		return -EINVAL;
 	}
 
-	hwctx->priv->cu_bos = kcalloc(num_cus, sizeof(*hwctx->priv->cu_bos),
-				      GFP_KERNEL);
+	hwctx->priv->cu_bos = kzalloc_objs(*hwctx->priv->cu_bos, num_cus);
 	if (!hwctx->priv->cu_bos)
 		return -ENOMEM;
 
@@ -967,7 +972,6 @@ static int aie2_hwctx_hold_cu_bos(struct amdxdna_hwctx *hwctx)
 
 		/* Reference retained; released by aie2_hwctx_put_cu_bos(). */
 		hwctx->priv->cu_bos[i] = abo;
-		hwctx->priv->num_cu_bos = i + 1;
 	}
 
 	return 0;
