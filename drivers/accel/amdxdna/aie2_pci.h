@@ -94,6 +94,15 @@ struct amdxdna_hwctx_priv {
 
 	struct amdxdna_gem_obj		*cmd_buf[HWCTX_MAX_CMDS];
 	struct drm_syncobj		*syncobj;
+
+	/*
+	 * CU BOs resolved once at config time and held for the life of the
+	 * context. hwctx->cus stores userspace GEM *handles*, which are only
+	 * meaningful while the client still holds them; aie2_config_cu() also
+	 * runs on resume, long after the config ioctl returned.
+	 */
+	struct amdxdna_gem_obj		**cu_bos;
+	u32				num_cu_bos;
 };
 
 enum aie2_dev_status {
