@@ -54,7 +54,7 @@ static int amdxdna_sva_init(struct amdxdna_client *client)
 
 	client->sva = iommu_sva_bind_device(xdna->ddev.dev, client->mm);
 	if (IS_ERR(client->sva)) {
-		XDNA_ERR(xdna, "SVA bind device failed, ret %ld", PTR_ERR(client->sva));
+		XDNA_DBG(xdna, "SVA bind device failed, ret %ld", PTR_ERR(client->sva));
 		return PTR_ERR(client->sva);
 	}
 
@@ -106,7 +106,7 @@ static int amdxdna_drm_open(struct drm_device *ddev, struct drm_file *filp)
 	if (!amdxdna_iova_on(xdna)) {
 		/* No need to fail open since user may use pa + carveout later. */
 		if (amdxdna_sva_init(client)) {
-			XDNA_WARN(xdna, "PASID not available for pid %d", client->pid);
+			XDNA_DBG(xdna, "PASID not available for pid %d", client->pid);
 #ifndef AMDXDNA_AUX
 			/*
 			 * PCI/NPU requires either PASID or a pre-configured

@@ -117,6 +117,27 @@ static inline int get_ctx_read_index(struct amdxdna_hwctx *hwctx, u64 *read_inde
 	return 0;
 }
 
+/*
+ * write_index is host-owned (the driver is the only writer), so unlike
+ * get_ctx_read_index() no dma_sync_single_for_cpu() is needed before reading
+ * it back here.
+ */
+static inline int get_ctx_write_index(struct amdxdna_hwctx *hwctx, u64 *write_index)
+{
+	struct amdxdna_ctx_priv *vp;
+
+	if (!hwctx || !write_index)
+		return -EINVAL;
+
+	vp = ve2_hw_priv(hwctx);
+	if (!vp || !vp->hsa_queue.hsa_queue_p)
+		return -EINVAL;
+
+	*write_index = vp->hsa_queue.hsa_queue_p->hq_header.write_index;
+
+	return 0;
+}
+
 /* Allocate and initialise the per-partition mgmtctx registry (one per column). */
 int ve2_mgmtctx_registry_init(struct amdxdna_dev_hdl *hdl);
 
