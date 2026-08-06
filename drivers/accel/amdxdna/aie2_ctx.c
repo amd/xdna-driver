@@ -854,6 +854,18 @@ free_priv:
 	return ret;
 }
 
+static void aie2_hwctx_put_cu_bos(struct amdxdna_hwctx *hwctx)
+{
+	u32 i;
+
+	for (i = 0; i < hwctx->priv->num_cu_bos; i++)
+		drm_gem_object_put(to_gobj(hwctx->priv->cu_bos[i]));
+
+	kfree(hwctx->priv->cu_bos);
+	hwctx->priv->cu_bos = NULL;
+	hwctx->priv->num_cu_bos = 0;
+}
+
 void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_dev *xdna;
@@ -893,6 +905,7 @@ void aie2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 	drm_gem_object_put(to_gobj(hwctx->priv->heap));
 
 	mutex_destroy(&hwctx->priv->io_lock);
+	aie2_hwctx_put_cu_bos(hwctx);
 	kfree(hwctx->col_list);
 	kfree(hwctx->priv);
 	kfree(hwctx->cus);
@@ -904,6 +917,64 @@ static int aie2_config_cu_resp_handler(void *handle, void __iomem *data, size_t 
 
 	amdxdna_pm_suspend_put(hwctx->client->xdna);
 	return 0;
+}
+
+/*
+ * Resolve each configured CU BO once and keep a reference for the life of the
+ * context. hwctx->cus holds userspace GEM handles, which stop resolving as soon
+ * as the client drops them -- but aie2_config_cu() runs again on every resume,
+ * so a dropped handle turned into a failed hwctx restart and left the device
+ * unable to resume at all.
+ */
+static int aie2_hwctx_hold_cu_bos(struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	u32 num_cus = hwctx->cus->num_cus;
+	struct drm_gem_object *gobj;
+	struct amdxdna_gem_obj *abo;
+	u32 i;
+
+	/* Bound before the lookup loop, not in aie2_config_cu() afterwards:
+	 * num_cus is only limited by the page-sized config buffer, so an
+	 * over-limit request would otherwise take a reference per CU before
+	 * anything rejected it.
+	 */
+	if (num_cus > MAX_NUM_CUS) {
+		XDNA_DBG(xdna, "Exceed maximum CU %d", MAX_NUM_CUS);
+		return -EINVAL;
+	}
+
+	hwctx->priv->cu_bos = kcalloc(num_cus, sizeof(*hwctx->priv->cu_bos),
+				      GFP_KERNEL);
+	if (!hwctx->priv->cu_bos)
+		return -ENOMEM;
+
+	for (i = 0; i < num_cus; i++) {
+		struct amdxdna_cu_config *cu = &hwctx->cus->cu_configs[i];
+
+		gobj = drm_gem_object_lookup(hwctx->client->filp, cu->cu_bo);
+		if (!gobj) {
+			XDNA_ERR(xdna, "Lookup GEM object failed");
+			goto put_bos;
+		}
+
+		abo = to_xdna_obj(gobj);
+		if (abo->type != AMDXDNA_BO_DEV) {
+			drm_gem_object_put(gobj);
+			XDNA_ERR(xdna, "Invalid BO type");
+			goto put_bos;
+		}
+
+		/* Reference retained; released by aie2_hwctx_put_cu_bos(). */
+		hwctx->priv->cu_bos[i] = abo;
+		hwctx->priv->num_cu_bos = i + 1;
+	}
+
+	return 0;
+
+put_bos:
+	aie2_hwctx_put_cu_bos(hwctx);
+	return -EINVAL;
 }
 
 static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size)
@@ -937,9 +1008,13 @@ static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 	if (!hwctx->cus)
 		return -ENOMEM;
 
-	ret = amdxdna_pm_resume_get(xdna);
+	ret = aie2_hwctx_hold_cu_bos(hwctx);
 	if (ret)
 		goto free_cus;
+
+	ret = amdxdna_pm_resume_get(xdna);
+	if (ret)
+		goto put_cu_bos;
 
 	ret = aie2_config_cu(hwctx, aie2_config_cu_resp_handler);
 	if (ret) {
@@ -953,6 +1028,8 @@ static int aie2_hwctx_cu_config(struct amdxdna_hwctx *hwctx, void *buf, u32 size
 
 pm_suspend_put:
 	amdxdna_pm_suspend_put(xdna);
+put_cu_bos:
+	aie2_hwctx_put_cu_bos(hwctx);
 free_cus:
 	kfree(hwctx->cus);
 	hwctx->cus = NULL;
