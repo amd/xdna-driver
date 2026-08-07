@@ -1003,16 +1003,43 @@ vxdna_context::vxdna_hwctx::
 ~vxdna_hwctx() noexcept
 {
     vxdna_dbg("HW context finishing: ctx_id=%u, hwctx_handle=%u", m_ctx_id, m_hwctx_handle);
-    // Signal polling thread to stop
-    m_stop_polling.store(true, std::memory_order_relaxed);
+    // Signal polling thread to stop (wakes it if parked in m_cv.wait()).
+    // Set the flag under m_fences_lock so the store cannot land in the window
+    // between the waiter's predicate check and its sleep, which would otherwise
+    // lose the wakeup and hang the join() below.
+    {
+        std::lock_guard<std::mutex> lock(m_fences_lock);
+        m_stop_polling.store(true, std::memory_order_relaxed);
+    }
     m_cv.notify_all();
 
-    // Wait for polling thread to finish
+    /*
+     * Destroy the hardware context BEFORE joining the polling thread.
+     *
+     * The polling thread can be parked in a blocking
+     * DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT on a job that will never complete on its
+     * own (e.g. the guest OOM'd before its command finished). The stop flag is
+     * not observed inside that ioctl, so joining first would deadlock: the wait
+     * only returns once the fence signals, but the fence is only signalled when
+     * the kernel tears down this hwctx. DESTROY_HWCTX aborts/completes the
+     * in-flight jobs and signals their fences, which lets the wait return so the
+     * loop can observe the stop flag and exit.
+     */
+    if (m_hwctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
+        struct amdxdna_drm_destroy_hwctx arg = {};
+        arg.handle = m_hwctx_handle;
+        auto ret = ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
+        if (ret)
+            vxdna_err("Close hw context failed ret %d", ret);
+    }
+
+    // Now the syncobj wait can return; wait for the polling thread to finish.
     if (m_polling_thread.joinable()) {
         m_polling_thread.join();
     }
+    m_hwctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
 
-    // Destroy sync object and hardware context
+    // Safe to destroy the syncobj once the polling thread is no longer waiting.
     if (m_syncobj_handle != AMDXDNA_INVALID_FENCE_HANDLE) {
         struct drm_syncobj_destroy arg = {};
         arg.handle = m_syncobj_handle;
@@ -1020,15 +1047,6 @@ vxdna_context::vxdna_hwctx::
         if (ret)
             vxdna_err("Destroy sync object failed ret %d", ret);
         m_syncobj_handle = AMDXDNA_INVALID_FENCE_HANDLE;
-    }
-    // Destroy hardware context
-    if (m_hwctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
-        struct amdxdna_drm_destroy_hwctx arg = {};
-        arg.handle = m_hwctx_handle;
-        auto ret = ioctl(m_ctx_fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
-        if (ret)
-            vxdna_err("Close hw context failed ret %d", ret);
-        m_hwctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
     }
 }
 
