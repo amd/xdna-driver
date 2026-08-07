@@ -759,10 +759,10 @@ TEST_write_to_readonly_uptr_bo(device::id_type id, std::shared_ptr<device>& sdev
   try {
     boset->run();
   } catch (...) {
-    ofm_bo.tbo = saved_tbo;
+    ofm_bo.tbo = std::move(saved_tbo);
     throw;
   }
-  ofm_bo.tbo = saved_tbo;
+  ofm_bo.tbo = std::move(saved_tbo);
 }
 
 void
