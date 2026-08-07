@@ -536,7 +536,13 @@ amdxdna_dpt_publish(struct aie_device *aie, enum amdxdna_dpt_kind kind,
 	dpt->status = AMDXDNA_DPT_INACTIVE;
 	dpt->config = config;
 
-	hdl = amdxdna_alloc_msg_buff(xdna, buf_size);
+	/*
+	 * A ring shorter than asked for holds less history but still works --
+	 * everything below reads the size back via to_buf_size() -- so accept a
+	 * smaller buffer rather than leave logging off entirely. The floor keeps
+	 * the footer a rounding error rather than half the allocation.
+	 */
+	hdl = amdxdna_alloc_msg_buff_atmost(xdna, buf_size, AMDXDNA_DPT_MIN_SIZE);
 	if (IS_ERR(hdl)) {
 		ret = PTR_ERR(hdl);
 		XDNA_DPT_ERR(dpt, "Failed to allocate buffer: %d", ret);

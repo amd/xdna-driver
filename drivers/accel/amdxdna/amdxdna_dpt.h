@@ -32,6 +32,17 @@
 #define AMDXDNA_DPT_FW_LOG_SIZE		SZ_4M
 #define AMDXDNA_DPT_FW_TRACE_SIZE	SZ_4M
 
+/*
+ * Smallest ring worth publishing when the requested size cannot be allocated.
+ * The order-8 block this needs stays available well past the point where the
+ * order-10 block for a 4M ring cannot be formed, and it keeps the footer at a
+ * fraction of a percent -- at the allocator's own SZ_8K minimum the footer
+ * would be half the buffer, and the "reader fell a ring behind" path would
+ * become the steady state rather than the exception.
+ */
+#define AMDXDNA_DPT_MIN_SIZE		SZ_1M
+static_assert(AMDXDNA_DPT_MIN_SIZE > AMDXDNA_DPT_FOOTER_SIZE);
+
 /* Common firmware log level scale used by user space (ioctl).
  * AIE2 and AIE4 firmwares both follow this numeric mapping internally.
  */

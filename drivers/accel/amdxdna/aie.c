@@ -601,39 +601,75 @@ int amdxdna_get_frame_boundary_preempt_state(struct aie_device *aie,
 	return 0;
 }
 
-struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size)
+/*
+ * Allocate a device message buffer of at most @size, and never less than
+ * @min_size. Pass min_size == size for an exact-or-fail allocation.
+ *
+ * A shrinking allocation is only correct for callers that read the size back
+ * from the handle; most callers instead keep using the size they asked for, so
+ * the default is exact and shrinking is opt-in per call site.
+ */
+struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff_atmost(struct amdxdna_dev *xdna,
+							  u32 size, u32 min_size)
 {
 	struct amdxdna_msg_buf_hdl *hdl;
-	int order;
+	int order, min_order;
+
+	if (drm_WARN_ON(&xdna->ddev, min_size > size))
+		return ERR_PTR(-EINVAL);
 
 	hdl = kzalloc_obj(*hdl);
 	if (!hdl)
 		return ERR_PTR(-ENOMEM);
 
 	hdl->xdna = xdna;
-	hdl->size = max_t(u32, size, SZ_8K);
-	order = get_order(hdl->size);
+	order = get_order(max_t(u32, size, SZ_8K));
 	if (order > MAX_PAGE_ORDER)
 		goto free_hdl;
-	hdl->size = PAGE_SIZE << order;
+	min_order = get_order(max_t(u32, min_size, SZ_8K));
 
-	if (amdxdna_iova_on(xdna)) {
-		hdl->vaddr = amdxdna_iommu_alloc(xdna, hdl->size, &hdl->dma_addr);
-		if (IS_ERR(hdl->vaddr))
-			goto free_hdl;
-	} else {
-		hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, hdl->size,
-						   &hdl->dma_addr,
-						   DMA_FROM_DEVICE, GFP_KERNEL);
-		if (!hdl->vaddr)
-			goto free_hdl;
+	/*
+	 * At 4M this is an order-10 allocation, which the page allocator can
+	 * fail to form once memory is fragmented -- and the DPT rings ask for
+	 * it from probe, so the feature would then stay off for the lifetime of
+	 * the module. __GFP_NOWARN because an attempt we go on to retry is not
+	 * worth a page-allocation-failure splat.
+	 */
+	for (; order >= min_order; order--) {
+		hdl->size = PAGE_SIZE << order;
+
+		if (amdxdna_iova_on(xdna)) {
+			hdl->vaddr = amdxdna_iommu_alloc(xdna, hdl->size,
+							 &hdl->dma_addr);
+			if (!IS_ERR(hdl->vaddr))
+				break;
+		} else {
+			hdl->vaddr = dma_alloc_noncoherent(xdna->ddev.dev, hdl->size,
+							   &hdl->dma_addr,
+							   DMA_FROM_DEVICE,
+							   GFP_KERNEL | __GFP_NOWARN);
+			if (hdl->vaddr)
+				break;
+		}
 	}
+
+	if (order < min_order)
+		goto free_hdl;
+
+	if (hdl->size < size)
+		XDNA_WARN(xdna, "Message buffer shrunk to %u bytes, %u requested",
+			  hdl->size, size);
 
 	return hdl;
 
 free_hdl:
 	kfree(hdl);
 	return ERR_PTR(-ENOMEM);
+}
+
+struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size)
+{
+	return amdxdna_alloc_msg_buff_atmost(xdna, size, size);
 }
 
 void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl)

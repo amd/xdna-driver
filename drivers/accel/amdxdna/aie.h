@@ -198,6 +198,8 @@ struct amdxdna_msg_buf_hdl {
 #define to_buf_size(hdl)          ((hdl)->size)
 
 struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff(struct amdxdna_dev *xdna, u32 size);
+struct amdxdna_msg_buf_hdl *amdxdna_alloc_msg_buff_atmost(struct amdxdna_dev *xdna,
+							  u32 size, u32 min_size);
 void amdxdna_free_msg_buff(struct amdxdna_msg_buf_hdl *hdl);
 
 /*
