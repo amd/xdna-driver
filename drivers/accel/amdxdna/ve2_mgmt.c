@@ -92,7 +92,6 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct ve2_config_hwctx *cfg = NULL;
 	u64 hsa_addr = U64_MAX;
-	u64 host_time;
 
 	if (col == 0 && vp && vp->hsa_queue.hsa_queue_dma_addr)
 		hsa_addr = vp->hsa_queue.hsa_queue_dma_addr;
@@ -104,11 +103,6 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	cert_hs->aie_info.partition_size = mgmtctx->num_col;
 	cert_hs->hsa_addr_high = upper_32_bits(hsa_addr);
 	cert_hs->hsa_addr_low = lower_32_bits(hsa_addr);
-
-	/* Provide the host wall-clock time so firmware can correlate/telemetry. */
-	host_time = ktime_get_ns();
-	cert_hs->host_time_high = upper_32_bits(host_time);
-	cert_hs->host_time_low = lower_32_bits(host_time);
 
 	/* No debug HSA queue: mark the debug HSA address explicitly invalid. */
 	cert_hs->dbg.hsa_addr_high = 0xFFFFFFFF;
@@ -131,6 +125,24 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	cert_hs->ctx_switch_req = 0;
 	cert_hs->hsa_location = 0;
 	cert_hs->mpaie_alive = ALIVE_MAGIC;
+}
+
+static void ve2_cert_update_host_time(struct amdxdna_mgmtctx *mgmtctx, u32 num_col)
+{
+	u64 host_time = ktime_get_ns();
+	u32 hi = upper_32_bits(host_time);
+	u32 lo = lower_32_bits(host_time);
+	u32 col;
+
+	for (col = 0; col < num_col; col++) {
+		u32 addr = CERT_HANDSHAKE_OFF(col) +
+			   offsetof(struct handshake, host_time_high);
+
+		aie_partition_write_privileged_mem(mgmtctx->aie_dev, addr, sizeof(hi), &hi);
+
+		addr = CERT_HANDSHAKE_OFF(col) + offsetof(struct handshake, host_time_low);
+		aie_partition_write_privileged_mem(mgmtctx->aie_dev, addr, sizeof(lo), &lo);
+	}
 }
 
 static void ve2_free_hs_data(struct aie_op_handshake_data *hs_data, u32 max_cols)
@@ -411,6 +423,14 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 		goto release_hs_data;
 	}
 	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_PARTITION_DONE",
+				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, num_col);
+
+	/*
+	 * Refresh host_time_high/low now that the (slow) partition init has
+	 * completed, so CERT reads an up-to-date value as soon as it wakes up.
+	 */
+	ve2_cert_update_host_time(mgmtctx, num_col);
+	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_HOST_TIME_SETUP",
 				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, num_col);
 
 	/* Wake up the lead UC only */
