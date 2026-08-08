@@ -500,8 +500,12 @@ int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
 
 	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS,
 				   &cfg, sizeof(cfg));
-	if (ret)
+	if (ret) {
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set ctx switch hysteresis to %u us (%d), using fw default",
+			  timeout_us, ret);
 		return ret;
+	}
 
 	XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
 

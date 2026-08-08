@@ -322,51 +322,6 @@ static void aie4_partition_fini(struct amdxdna_dev_hdl *ndev)
 		XDNA_ERR(xdna, "partition fini failed: %d", ret);
 }
 
-static int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
-{
-	struct amdxdna_dev *xdna = ndev->aie.xdna;
-	int ret;
-
-	ret = aie4_query_npu_firmware_version(ndev, &xdna->fw_ver);
-	if (ret)
-		return ret;
-
-	ret = aie4_query_cert_firmware_version(ndev, &ndev->cert_version);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
-static int aie4_query_aie(struct amdxdna_dev_hdl *ndev)
-{
-	int ret;
-
-	ret = aie4_query_aie_version(ndev, &ndev->aie.version);
-	if (ret)
-		return ret;
-
-	ret = aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
-	if (ret)
-		return ret;
-
-	/*
-	 * Do not reset ndev->pw_mode here: this runs on every resume, and
-	 * clobbering the cache would drop the user's power override. The
-	 * probe-time default is set in aie4m_pcidev_init(), and the cached
-	 * override is re-applied to firmware by aie4_restore_power_mode().
-	 */
-	ndev->total_col = min(AIE4_TOTAL_COLUMN, ndev->aie.metadata.cols);
-	ndev->aie.frame_boundary_preempt_enabled = 1;
-
-	ret = aie4_init_dpm_freq_table(ndev);
-	if (ret)
-		/* if query dpm from fw failed, using default value */
-		(void)ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
-
-	return 0;
-}
-
 /*
  * Firmware always boots in POWER_MODE_DEFAULT after a (re)load, so re-send the
  * cached user override whenever the hardware starts. This keeps the driver
@@ -397,6 +352,93 @@ static void aie4_restore_power_mode(struct amdxdna_dev_hdl *ndev)
 		XDNA_DBG(ndev->aie.xdna, "Restored power mode %d", ndev->pw_mode);
 }
 
+static int aie4_query_fw(struct amdxdna_dev_hdl *ndev)
+{
+	struct amdxdna_dev *xdna = ndev->aie.xdna;
+	int ret;
+
+	ret = aie4_query_npu_firmware_version(ndev, &xdna->fw_ver);
+	if (ret)
+		return ret;
+
+	ret = aie4_query_cert_firmware_version(ndev, &ndev->cert_version);
+	if (ret)
+		return ret;
+
+	aie4_restore_power_mode(ndev);
+	return 0;
+}
+
+static int aie4_config_fw(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_calibrate_clock(ndev);
+	if (ret)
+		return ret;
+
+	/* Firmware releases the DRAM work buffer internally during suspend_fw */
+	ret = aie4_attach_work_buffer(ndev,
+				      to_dma_addr(ndev->work_buf_hdl, 0),
+				      to_buf_size(ndev->work_buf_hdl));
+	if (ret)
+		return ret;
+
+	/* Best-effort tuning knob; failure is warned inside and does not fail hw start */
+	aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
+
+#ifdef AMDXDNA_NPU3A
+	ret = aie4_iommu_bypass_echo(ndev);
+	if (ret)
+		return ret;
+#endif
+
+	return 0;
+}
+
+static int aie4_setup_aie(struct amdxdna_dev_hdl *ndev)
+{
+	int ret;
+
+	ret = aie4_query_aie_version(ndev, &ndev->aie.version);
+	if (ret)
+		return ret;
+
+	ret = aie4_query_aie_metadata(ndev, &ndev->aie.metadata);
+	if (ret)
+		return ret;
+
+	/*
+	 * Do not reset ndev->pw_mode here: this runs on every resume, and
+	 * clobbering the cache would drop the user's power override. The
+	 * probe-time default is set in aie4m_pcidev_init(), and the cached
+	 * override is re-applied to firmware by aie4_restore_power_mode().
+	 */
+	ndev->total_col = min(AIE4_TOTAL_COLUMN, ndev->aie.metadata.cols);
+	ndev->aie.frame_boundary_preempt_enabled = 1;
+
+	ret = aie4_init_dpm_freq_table(ndev);
+	if (ret)
+		/* if query dpm from fw failed, using default value */
+		(void)ndev->priv->hw_ops->set_dpm(&ndev->aie, 0);
+
+	ret = aie4_partition_init(ndev);
+	if (ret)
+		return ret;
+
+	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
+	if (ret) {
+		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
+		goto partition_fini;
+	}
+
+	return 0;
+
+partition_fini:
+	aie4_partition_fini(ndev);
+	return ret;
+}
+
 static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 {
 	int ret;
@@ -409,42 +451,13 @@ static int aie4_pf_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto fw_unload;
 
-	ret = aie4_calibrate_clock(ndev);
-	if (ret) {
-		XDNA_ERR(ndev->aie.xdna, "Calibrate system clock failed");
-		goto mbox_fini;
-	}
-
-	/* Firmware releases the DRAM work buffer internally during suspend_fw */
-	ret = aie4_attach_work_buffer(ndev,
-				      to_dma_addr(ndev->work_buf_hdl, 0),
-				      to_buf_size(ndev->work_buf_hdl));
-	if (ret)
-		goto mbox_fini;
-
-	/*
-	 * Context switch hysteresis is a best-effort tuning knob; warn but do
-	 * not fail hw start (or a later runtime resume) if the firmware does not
-	 * support the runtime config. ret is overwritten by the next mandatory
-	 * step below, so a failure here never affects hw start.
-	 */
-	ret = aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
-	if (ret)
-		XDNA_WARN(ndev->aie.xdna,
-			  "Failed to set ctx switch hysteresis to %u us (%d), using fw default",
-			  ndev->ctx_switch_hysteresis_us, ret);
-
-#ifdef AMDXDNA_NPU3A
-	ret = aie4_iommu_bypass_echo(ndev);
-	if (ret)
-		goto mbox_fini;
-#endif
-
 	ret = aie4_query_fw(ndev);
 	if (ret)
 		goto mbox_fini;
 
-	aie4_restore_power_mode(ndev);
+	ret = aie4_config_fw(ndev);
+	if (ret)
+		goto mbox_fini;
 
 	return 0;
 
@@ -452,8 +465,14 @@ mbox_fini:
 	aie4_mailbox_fini(ndev);
 fw_unload:
 	aie4_fw_unload(ndev);
-
 	return ret;
+}
+
+static void aie4_teardown_fw(struct amdxdna_dev_hdl *ndev)
+{
+	aie4_suspend_fw(ndev);
+	aie4_mailbox_fini(ndev);
+	aie4_fw_unload(ndev);
 }
 
 static void aie4_pf_hw_stop(struct amdxdna_dev_hdl *ndev)
@@ -461,10 +480,7 @@ static void aie4_pf_hw_stop(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-
-	aie4_suspend_fw(ndev);
-	aie4_mailbox_fini(ndev);
-	aie4_fw_unload(ndev);
+	aie4_teardown_fw(ndev);
 }
 
 static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
@@ -477,32 +493,16 @@ static int aie4_vf_hw_start(struct amdxdna_dev_hdl *ndev)
 
 	ret = aie4_query_fw(ndev);
 	if (ret)
-		goto mailbox_fini;
+		goto mbox_fini;
 
-	ret = aie4_query_aie(ndev);
+	ret = aie4_setup_aie(ndev);
 	if (ret)
-		goto mailbox_fini;
-
-	ret = aie4_partition_init(ndev);
-	if (ret)
-		goto mailbox_fini;
-
-	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
-	if (ret) {
-		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
-		goto partition_fini;
-	}
-
-	aie4_restore_power_mode(ndev);
+		goto mbox_fini;
 
 	return 0;
 
-partition_fini:
-	aie4_partition_fini(ndev);
-mailbox_fini:
+mbox_fini:
 	aie4_mailbox_fini(ndev);
-	/* Reclaim a partially-armed async pool after the mailbox is stopped. */
-	amdxdna_async_events_free(&ndev->aie);
 	return ret;
 }
 
@@ -533,68 +533,24 @@ static int aie4_classic_hw_start(struct amdxdna_dev_hdl *ndev)
 	if (ret)
 		goto fw_unload;
 
-	ret = aie4_calibrate_clock(ndev);
-	if (ret) {
-		XDNA_ERR(ndev->aie.xdna, "Calibrate system clock failed");
-		goto mbox_fini;
-	}
-
-	/* Firmware releases the DRAM work buffer internally during suspend_fw */
-	ret = aie4_attach_work_buffer(ndev,
-				      to_dma_addr(ndev->work_buf_hdl, 0),
-				      to_buf_size(ndev->work_buf_hdl));
-	if (ret)
-		goto mbox_fini;
-
-	/*
-	 * Context switch hysteresis is a best-effort tuning knob; warn but do
-	 * not fail hw start (or a later runtime resume) if the firmware does not
-	 * support the runtime config. ret is overwritten by the next mandatory
-	 * step below, so a failure here never affects hw start.
-	 */
-	ret = aie4_set_ctx_hysteresis(ndev, ndev->ctx_switch_hysteresis_us);
-	if (ret)
-		XDNA_WARN(ndev->aie.xdna,
-			  "Failed to set ctx switch hysteresis to %u us (%d), using fw default",
-			  ndev->ctx_switch_hysteresis_us, ret);
-
-#ifdef AMDXDNA_NPU3A
-	ret = aie4_iommu_bypass_echo(ndev);
-	if (ret)
-		goto mbox_fini;
-#endif
-
 	ret = aie4_query_fw(ndev);
 	if (ret)
 		goto mbox_fini;
 
-	ret = aie4_query_aie(ndev);
+	ret = aie4_config_fw(ndev);
 	if (ret)
 		goto mbox_fini;
 
-	ret = aie4_partition_init(ndev);
+	ret = aie4_setup_aie(ndev);
 	if (ret)
 		goto mbox_fini;
-
-	ret = amdxdna_async_events_alloc(&ndev->aie, ndev->total_col);
-	if (ret) {
-		XDNA_ERR(ndev->aie.xdna, "Allocate async events failed, ret %d", ret);
-		goto partition_fini;
-	}
-
-	aie4_restore_power_mode(ndev);
 
 	return 0;
 
-partition_fini:
-	aie4_partition_fini(ndev);
 mbox_fini:
 	aie4_mailbox_fini(ndev);
-	/* Reclaim a partially-armed async pool after the mailbox is stopped. */
-	amdxdna_async_events_free(&ndev->aie);
 fw_unload:
 	aie4_fw_unload(ndev);
-
 	return ret;
 }
 
@@ -603,16 +559,13 @@ static void aie4_classic_hw_stop(struct amdxdna_dev_hdl *ndev)
 	struct amdxdna_dev *xdna = ndev->aie.xdna;
 
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
-
 	aie4_partition_fini(ndev);
-	aie4_suspend_fw(ndev);
-	aie4_mailbox_fini(ndev);
+	aie4_teardown_fw(ndev);
 	/*
 	 * Free the async pool after the mailbox is torn down so channel teardown
 	 * cannot fire the async callback on freed event slots.
 	 */
 	amdxdna_async_events_free(&ndev->aie);
-	aie4_fw_unload(ndev);
 }
 
 static int aie4_request_firmware(struct amdxdna_dev_hdl *ndev,
@@ -1241,27 +1194,28 @@ error:
  * -> vfs_alive                 |  -  |   Y    |  -  |   -    |   -
  * -> hwctx_suspend_all         |  -  |   -    |  Y  |   Y    |   Y
  * -> partition_fini            |  -  |   -    | (1) |   Y    |   Y
- * -> suspend_fw                |  Y  |   Y    |  -  |   -    |   Y
- * -> mailbox_fini              |  Y  |   Y    |  Y  |   Y    |   Y
- * -> free_async_buffer         |  -  |   -    |  Y  |   Y    |   Y
- * -> stop_psp/smu              |  Y  |   Y    |  -  |   -    |   Y
+ * -> teardown_fw               |  Y  |   Y    |  -  |   -    |   Y
+ *      -> suspend_fw           |  Y  |   Y    |  -  |   -    |   Y
+ * -> mailbox_fini              |  -  |   -    |  Y  |   Y    |   -
+ * -> async_events_free         |  -  |   -    |  Y  |   Y    |   Y
  *    ---- power boundary ----
  * <- pci_enable + set_master   |  Y  |   Y    |  Y  |   Y    |   Y
- * <- start_smu/psp             |  Y  |   Y    | (2) |  (2)   |   Y
+ * <- fw_load                   |  Y  |   Y    | (2) |  (2)   |   Y
  * <- mailbox_init              |  Y  |   Y    |  Y  |   Y    |   Y
- * <- calibrate_clock           |  Y  |   Y    |  -  |   -    |   Y
- * <- attach_work_buffer        |  Y  |   Y    |  -  |   -    |   Y
- * <- query_fw                  |  Y  |   Y    |  -  |   -    |   Y
- * <- query_aie                 |  -  |   -    |  Y  |   Y    |   Y
- * <- partition_init            |  -  |   -    |  Y  |   Y    |   Y
- * <- alloc_async_event         |  -  |   -    |  Y  |   Y    |   Y
- * <- restore_power_mode        |  Y  |   Y    |  Y  |   Y    |   Y
+ * <- query_fw                  |  Y  |   Y    |  Y  |   Y    |   Y
+ *      <- restore_power_mode   |  Y  |   Y    |  Y  |   Y    |   Y
+ * <- config_fw                 |  Y  |   Y    |  -  |   -    |   Y
+ *      <- calibrate_clock      |  Y  |   Y    |  -  |   -    |   Y
+ *      <- attach_work_buffer   |  Y  |   Y    |  -  |   -    |   Y
+ * <- setup_aie                 |  -  |   -    |  Y  |   Y    |   Y
+ *      <- partition_init       |  -  |   -    |  Y  |   Y    |   Y
+ *      <- async_events_alloc   |  -  |   -    |  Y  |   Y    |   Y
  * <- hwctx_resume_all          |  -  |   -    |  Y  |   Y    |   Y
  * <- restore VFs               |  Y  |   Y    |  -  |   -    |   -
  *
  * (1) VF S3/S4 skips partition_fini: PF tears down stateless FW.
  *     VF RTM must send partition_fini to firmware explicitly.
- * (2) VF skips start_smu/psp: PF boots firmware on behalf of all VFs.
+ * (2) VF skips fw_load: PF boots firmware on behalf of all VFs.
  */
 
 static int aie4_pf_suspend(struct amdxdna_dev *xdna)
@@ -1452,6 +1406,19 @@ pci_disable:
 	return ret;
 }
 
+static void aie4_xdna_init(struct amdxdna_dev *xdna)
+{
+	aie4_msg_init(xdna->dev_handle);
+	amdxdna_dpt_init(&xdna->dev_handle->aie);
+	amdxdna_pm_init(xdna);
+}
+
+static void aie4_xdna_fini(struct amdxdna_dev *xdna)
+{
+	amdxdna_pm_fini(xdna);
+	amdxdna_dpt_fini(&xdna->dev_handle->aie);
+}
+
 static int aie4_pf_init(struct amdxdna_dev *xdna)
 {
 	int ret;
@@ -1468,9 +1435,7 @@ static int aie4_pf_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto free_work_buf;
 
-	aie4_msg_init(xdna->dev_handle);
-	amdxdna_dpt_init(&xdna->dev_handle->aie);
-	amdxdna_pm_init(xdna);
+	aie4_xdna_init(xdna);
 	return 0;
 
 free_work_buf:
@@ -1490,9 +1455,7 @@ static int aie4_vf_init(struct amdxdna_dev *xdna)
 	if (ret)
 		return ret;
 
-	aie4_msg_init(xdna->dev_handle);
-	amdxdna_dpt_init(&xdna->dev_handle->aie);
-	amdxdna_pm_init(xdna);
+	aie4_xdna_init(xdna);
 	return 0;
 }
 
@@ -1512,9 +1475,7 @@ static int aie4_classic_init(struct amdxdna_dev *xdna)
 	if (ret)
 		goto free_work_buf;
 
-	aie4_msg_init(xdna->dev_handle);
-	amdxdna_dpt_init(&xdna->dev_handle->aie);
-	amdxdna_pm_init(xdna);
+	aie4_xdna_init(xdna);
 	return 0;
 
 free_work_buf:
@@ -1526,8 +1487,7 @@ static void aie4_pf_fini(struct amdxdna_dev *xdna)
 {
 	int ret;
 
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&xdna->dev_handle->aie);
+	aie4_xdna_fini(xdna);
 
 	ret = aie4_sriov_stop(xdna->dev_handle);
 	if (ret == -EPERM)
@@ -1541,15 +1501,13 @@ static void aie4_pf_fini(struct amdxdna_dev *xdna)
 
 static void aie4_vf_fini(struct amdxdna_dev *xdna)
 {
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&xdna->dev_handle->aie);
+	aie4_xdna_fini(xdna);
 	aie4_vf_hw_stop(xdna->dev_handle);
 }
 
 static void aie4_classic_fini(struct amdxdna_dev *xdna)
 {
-	amdxdna_pm_fini(xdna);
-	amdxdna_dpt_fini(&xdna->dev_handle->aie);
+	aie4_xdna_fini(xdna);
 	aie4_classic_hw_stop(xdna->dev_handle);
 	aie4_free_work_buffer(xdna->dev_handle);
 }
