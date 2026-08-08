@@ -106,6 +106,13 @@ static int amdxdna_carveout_show(struct seq_file *m, void *unused)
 AMDXDNA_DBGFS_FOPS(carveout, amdxdna_carveout_show, amdxdna_carveout_write);
 
 /*
+ * The DPT (fw_log/fw_trace) framework lives in amdxdna_dpt.o, which is only
+ * built for the PCI (aie2/aie4) backends; VE2 (AUX) does not implement it
+ * yet. Keep these nodes out of the AUX build rather than pulling amdxdna_dpt.o
+ * (and its aie.o dependency, which is not AUX-safe) into it.
+ */
+#ifndef AMDXDNA_AUX
+/*
  * fw_log_level: enable/disable firmware logging or change verbosity.
  * Write 0 to disable; 1..AMDXDNA_DPT_FW_LOG_LEVEL_MAX-1 to enable/relevel.
  * Read prints the current level (0 if inactive).
@@ -229,6 +236,7 @@ static int fw_log_dump_to_dmesg_show(struct seq_file *m, void *unused)
 
 AMDXDNA_DBGFS_FOPS(fw_log_dump_to_dmesg, fw_log_dump_to_dmesg_show,
 		   fw_log_dump_to_dmesg_write);
+#endif /* !AMDXDNA_AUX */
 
 static const struct {
 	const char *name;
@@ -236,8 +244,10 @@ static const struct {
 	umode_t mode;
 } amdxdna_dbgfs_files[] = {
 	AMDXDNA_DBGFS_FILE(carveout, 0600),
+#ifndef AMDXDNA_AUX
 	AMDXDNA_DBGFS_FILE(fw_log_level, 0600),
 	AMDXDNA_DBGFS_FILE(fw_log_dump_to_dmesg, 0600),
+#endif
 };
 
 void amdxdna_debugfs_init(struct amdxdna_dev *xdna)
