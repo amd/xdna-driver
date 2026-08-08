@@ -56,7 +56,8 @@ public:
      * req->size must not exceed the summed iovec length.
      * Host blob
      * resources may supply a pre-created GEM handle (opaque).  CPU access
-     * uses GET_BO_INFO vaddr; this path does not mmap the DRM device node.
+     * uses GET_BO_INFO vaddr; host-allocated BOs that report no vaddr are
+     * mapped on demand through their GET_BO_INFO map_offset.
      */
     vxdna_bo(const std::shared_ptr<vaccel_resource> &res, vxdna_context &ctx,
              const struct amdxdna_ccmd_create_bo_req *req);
@@ -74,7 +75,7 @@ public:
     vxdna_bo(int ctx_fd_in, const struct amdxdna_ccmd_create_bo_req *req);
 
     /**
-     * @brief Destructor - closes GEM handle (no DRM mmap in this module)
+     * @brief Destructor - closes GEM handle and unmaps any coalesce/host mappings
      */
     ~vxdna_bo() noexcept;
 
@@ -119,9 +120,14 @@ public:
     }
 
 private:
+    // Map a pre-existing host-backed BO into m_ctx_fd via m_map_offset. Splits
+    // the two cases used by the resource constructor to keep it readable.
+    void map_host_shared();                       // SHARE (or other) at any VA
+    void map_dev_heap_chunk(vxdna_context &ctx);  // DEV_HEAP, contiguous in arena
+
     uint64_t m_size = 0;          /**< Buffer size in bytes */
     uint64_t m_vaddr = 0;         /**< CPU VA: coalesce mapping or GET_BO_INFO (opaque import) */
-    uint64_t m_map_offset = 0;    /**< From GET_BO_INFO (DRM mmap offset; not used for mmap here) */
+    uint64_t m_map_offset = 0;    /**< From GET_BO_INFO (DRM mmap offset used for host BO mmap) */
     uint64_t m_xdna_addr = 0;     /**< NPU device address */
     uint64_t m_iov_bytes = 0;     /**< Sum of iovec lengths (guest backing size) */
     uint32_t m_bo_handle = 0;     /**< DRM GEM handle */
@@ -130,6 +136,8 @@ private:
     int m_ctx_fd = -1;            /**< Context file descriptor */
     void *m_coalesce_va = nullptr; /**< Contiguous VA for userptr CREATE_BO; munmap in dtor */
     size_t m_coalesce_len = 0;
+    void *m_host_map_va = nullptr; /**< CPU mapping of host-allocated BO via map_offset; munmap in dtor */
+    size_t m_host_map_len = 0;
 };
 
 
@@ -706,6 +714,18 @@ public:
      * @param res Resource to destroy
      */
     void destroy_resource(const std::shared_ptr<vaccel_resource> &res);
+
+    /**
+     * @brief PRIME-export a GEM handle that lives on the device-wide fd.
+     *
+     * Called by the base export_resource_fd() for device-owned (SHARE) host
+     * BOs, whose GEM is on get_owned_drm_fd(). Returns a new dma-buf fd.
+     *
+     * @param handle GEM handle in the device fd's namespace
+     * @return dma-buf fd on success
+     * @throws vaccel_error on failure
+     */
+    [[nodiscard]] int export_gem_on_device_fd(uint32_t handle);
 
     /** @} */
 

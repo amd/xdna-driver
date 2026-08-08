@@ -30,12 +30,64 @@ roundup_64bit(size_t size)
 #define VIRTGPU_DRM_CAPSET_DRM 6
 #endif
 
+// The build-time <drm/virtgpu_drm.h> may predate userptr blob support. Define
+// the flag and the extended RESOURCE_CREATE_BLOB request layout locally so the
+// guest can pin a userptr range and hand it to the host regardless of the UAPI
+// header version. These are defined unconditionally (under our own names) so the
+// wire ABI is fixed by this source, independent of whichever header the build
+// host happens to provide -- the same binary then talks to the guest kernel the
+// same way whether or not the header knew about userptr. Only the flag value
+// defers to the header when it already defines it.
+//
+// Compile safety: the flag is #ifndef-guarded; the struct and ioctl macro use
+// project-local names that never collide with the UAPI header. Runtime safety:
+// on a kernel/VMM without userptr support the ioctl() wrapper below throws
+// (ENOTTY), so drm_bo_alloc_userptr fails cleanly instead of returning a bogus
+// zeroed handle.
+#ifndef VIRTGPU_BLOB_FLAG_USE_USERPTR
+#define VIRTGPU_BLOB_FLAG_USE_USERPTR 0x0008
+#endif
+
+struct virtgpu_resource_create_blob_userptr {
+  uint32_t blob_mem;
+  uint32_t blob_flags;
+  uint32_t bo_handle;
+  uint32_t res_handle;
+  uint64_t size;
+  uint32_t pad;
+  uint32_t cmd_size;
+  uint64_t cmd;
+  uint64_t blob_id;
+  uint64_t userptr;
+  uint64_t blob_svm;
+  uint64_t offset;
+};
+
+// The DRM_IOWR command number encodes sizeof(struct), so it must match the size
+// the guest kernel expects byte-for-byte. Pin the size (guards add/remove of a
+// field) and the offsets of the two fields that define this request (guards a
+// reorder that happens to preserve the total size). If the layout above is ever
+// edited, the build fails loudly rather than silently shifting the ioctl number
+// or field positions (which would surface only at runtime as ENOTTY or garbage).
+static_assert(sizeof(virtgpu_resource_create_blob_userptr) == 72,
+              "virtgpu userptr blob request size must match the guest kernel UAPI");
+static_assert(offsetof(virtgpu_resource_create_blob_userptr, size) == 16,
+              "virtgpu userptr blob 'size' offset must match the guest kernel UAPI");
+static_assert(offsetof(virtgpu_resource_create_blob_userptr, userptr) == 48,
+              "virtgpu userptr blob 'userptr' offset must match the guest kernel UAPI");
+
+#define DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR \
+  DRM_IOWR(DRM_COMMAND_BASE + DRM_VIRTGPU_RESOURCE_CREATE_BLOB, \
+           struct virtgpu_resource_create_blob_userptr)
+
 std::string
 ioctl_cmd2name(unsigned long cmd)
 {
   switch(cmd) {
   case DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB:
     return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB";
+  case DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR:
+    return "DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB(USERPTR)";
   case DRM_IOCTL_VIRTGPU_MAP:
     return "DRM_IOCTL_VIRTGPU_MAP";
   case DRM_IOCTL_VIRTGPU_EXECBUFFER:
@@ -264,6 +316,21 @@ drm_bo_alloc(int fd, size_t size, uint32_t type, bool use_host_mem = false)
     .blob_id    = blob_id,
   };
   ioctl(fd, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &args);
+  return {args.res_handle, args.bo_handle};
+}
+
+// Pin a guest userptr range and expose its pages to the host as a virtio-gpu
+// guest resource. The host reads the resource's iovecs to back the BO.
+shim_xdna::bo_id
+drm_bo_alloc_userptr(int fd, void *uptr, size_t size)
+{
+  virtgpu_resource_create_blob_userptr args = {
+    .blob_mem   = VIRTGPU_BLOB_MEM_GUEST,
+    .blob_flags = VIRTGPU_BLOB_FLAG_USE_USERPTR,
+    .size       = size,
+    .userptr    = reinterpret_cast<uintptr_t>(uptr),
+  };
+  ioctl(fd, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB_USERPTR, &args);
   return {args.res_handle, args.bo_handle};
 }
 
@@ -530,6 +597,31 @@ create_bo(bo_info& arg) const
 
 void
 platform_drv_virtio::
+create_uptr_bo(bo_info& arg) const
+{
+  auto fd = dev_fd();
+
+  // Create a virtio-gpu userptr resource blob over the guest user pages, then
+  // let the host allocate a shared BO backed by that resource's iovecs.
+  auto id = drm_bo_alloc_userptr(fd, arg.vaddr, arg.size);
+  arg.bo.res_id = id.handle;
+  // Userptr BOs are accessed through the caller's own mapping, not mmap'ed.
+  arg.map_offset = AMDXDNA_INVALID_ADDR;
+  arg.type = AMDXDNA_BO_SHARE;
+
+  try {
+    std::tie(arg.bo.handle, arg.xdna_addr) =
+      host_bo_alloc(AMDXDNA_BO_SHARE, arg.size, id.res_id, arg.xdna_addr_align);
+  } catch (...) {
+    drm_bo_free(fd, arg.bo.res_id);
+    throw;
+  }
+
+  save_bo_info(arg.bo.res_id, arg);
+}
+
+void
+platform_drv_virtio::
 destroy_bo(destroy_bo_arg& arg) const
 {
   auto id = arg.bo.res_id;
@@ -546,11 +638,11 @@ platform_drv_virtio::
 get_info(amdxdna_drm_get_info& arg) const
 {
   if (arg.param == DRM_AMDXDNA_QUERY_AIE_STATUS)
-    shim_not_supported_err("get_info: DRM_AMDXDNA_QUERY_AIE_METADATA");
+    shim_err(EACCES, "get_info: DRM_AMDXDNA_QUERY_AIE_STATUS");
   if (arg.param == DRM_AMDXDNA_READ_AIE_MEM)
-    shim_not_supported_err("get_info: DRM_AMDXDNA_READ_AIE_MEM");
+    shim_err(EACCES, "get_info: DRM_AMDXDNA_READ_AIE_MEM");
   if (arg.param == DRM_AMDXDNA_READ_AIE_REG)
-    shim_not_supported_err("get_info: DRM_AMDXDNA_READ_AIE_MEM");
+    shim_err(EACCES, "get_info: DRM_AMDXDNA_READ_AIE_REG");
 
   auto resp_buf = std::make_unique<response_buffer>(dev_fd(), arg.buffer_size);
   std::memcpy(resp_buf->get(), reinterpret_cast<char*>(arg.buffer), arg.buffer_size);
@@ -589,6 +681,13 @@ get_info_array(amdxdna_drm_get_array& arg) const
   std::memcpy(reinterpret_cast<char*>(arg.buffer), resp_buf->get(), total_buf_size);
   arg.element_size = rsp.size;
   arg.num_element = rsp.num_element;
+}
+
+void
+platform_drv_virtio::
+set_state(amdxdna_drm_set_state&) const
+{
+  shim_err(EACCES, "set_state is not permitted from a virtio guest");
 }
 
 void

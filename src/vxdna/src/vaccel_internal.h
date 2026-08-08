@@ -259,6 +259,20 @@ public:
     /** @brief Get opaque handle (DRM GEM handle for host memory) */
     int get_opaque_handle() const noexcept { return m_opaque_handle; }
 
+    /**
+     * @brief Whether the opaque GEM handle lives on the device-wide fd.
+     *
+     * True for host-backed resources whose GEM is owned by the long-lived
+     * device fd (AMDXDNA_BO_SHARE), so the backing survives the creating
+     * context and any context imports it via dma-buf. False for context-scoped
+     * host BOs (e.g. AMDXDNA_BO_DEV_HEAP), whose handle lives on the creating
+     * context's fd.
+     */
+    bool is_device_owned() const noexcept { return m_device_owned; }
+
+    /** @brief Mark that the opaque GEM handle is owned by the device fd. */
+    void set_device_owned(bool v) noexcept { m_device_owned = v; }
+
     /** @brief Get map info for virtio-gpu driver */
     uint32_t get_map_info() const noexcept { return m_map_info; }
 
@@ -402,6 +416,7 @@ private:
     uint32_t m_num_iovecs;        /**< Number of IO vectors */
     uint32_t m_ctx_id;            /**< Owning context ID */
     int m_opaque_handle;          /**< DRM GEM handle for host memory */
+    bool m_device_owned = false;  /**< true: opaque GEM handle lives on the device fd (SHARE), not a context fd */
 };
 
 /**
@@ -819,6 +834,19 @@ public:
             VACCEL_THROW_MSG(-ENOENT, "Resource not found: res_id=%u", res_id);
         if (res->get_opaque_handle() <= 0)
             VACCEL_THROW_MSG(-EINVAL, "Resource is not opaque");
+        /*
+         * Device-owned host BOs (SHARE) live on the long-lived device fd, so we
+         * export from there directly -- independent of the creating context,
+         * which may already be gone while the resource is still shared. The
+         * derived device does the PRIME export on its owned fd.
+         */
+        if (res->is_device_owned())
+            return static_cast<T*>(this)->export_gem_on_device_fd(
+                static_cast<uint32_t>(res->get_opaque_handle()));
+        /*
+         * Context-scoped host BOs (e.g. DEV_HEAP) keep their handle on the
+         * creating context's fd; export through that context.
+         */
         auto ctx_id = res->get_ctx_id();
         auto ctx = get_ctx(ctx_id);
         if (!ctx)
@@ -843,6 +871,18 @@ public:
     {
         return m_callbacks->get_device_fd(get_cookie());
     }
+
+    /**
+     * @brief Get the device-wide DRM fd owned for the device's lifetime.
+     *
+     * Unlike get_drm_fd() (which opens a fresh per-context fd on each call),
+     * this returns the single fd opened at device creation and closed at
+     * device destroy. Host-backed SHARE BOs are created on this fd so their
+     * backing outlives any individual context.
+     *
+     * @return The owned device DRM fd.
+     */
+    int get_owned_drm_fd() const noexcept { return m_drm_fd; }
 
     /**
      * @brief Set owned DRM file descriptor
