@@ -97,9 +97,9 @@ static void aie4_ctx_reset(struct aie_device *aie, u32 hw_ctx_id)
 		 * and the waiter can never observe completion, hanging the
 		 * submitter.
 		 */
-		aie4_hwctx_destroy(hwctx);
-		if (hwctx->priv->kernel_submit)
-			aie4_hwctx_cleanup_running_jobs(hwctx, true);
+		aie4_hwctx_destroy(hwctx, AIE4_HWCTX_NORMAL);
+		aie4_hwctx_cleanup_running_jobs(hwctx, true);
+
 		ret = aie4_hwctx_create(hwctx);
 		if (ret)
 			XDNA_ERR(xdna, "Reset hw_ctx_id=%u ctx failed, ret %d",
