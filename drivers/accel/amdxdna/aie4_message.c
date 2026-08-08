@@ -257,9 +257,13 @@ int aie4_msg_set_power_mode(struct amdxdna_dev_hdl *ndev, u8 power_mode)
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
 	if (ret)
-		return ret;
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to restore power mode %d (%d), using fw default",
+			  ndev->pw_mode, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Restored power mode %d", ndev->pw_mode);
 
-	return 0;
+	return ret;
 }
 
 int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
@@ -276,12 +280,13 @@ int aie4_force_preemption(struct amdxdna_dev_hdl *ndev, bool enable)
 	msg.send_size = sizeof(req);
 
 	ret = aie_send_mgmt_msg_wait(&ndev->aie, &msg);
-	if (ret) {
-		XDNA_ERR(ndev->aie.xdna, "Failed to set runtime config, ret %d", ret);
-		return ret;
-	}
+	if (ret)
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to restore force preemption (%d), using fw default", ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Restored force preemption");
 
-	return 0;
+	return ret;
 }
 
 int aie4_configure_hw_context_cert_log(struct amdxdna_dev_hdl *ndev,
@@ -501,11 +506,13 @@ int aie4_set_ctx_hysteresis(struct amdxdna_dev_hdl *ndev, u32 timeout_us)
 	ret = aie4_set_runtime_cfg(ndev, AIE4_RUNTIME_CONFIG_CTX_SWITCH_HYSTERESIS,
 				   &cfg, sizeof(cfg));
 	if (ret)
-		return ret;
+		XDNA_WARN(ndev->aie.xdna,
+			  "Failed to set ctx switch hysteresis to %u us (%d), using fw default",
+			  timeout_us, ret);
+	else
+		XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
 
-	XDNA_DBG(ndev->aie.xdna, "Context switch hysteresis set to %u us", timeout_us);
-
-	return 0;
+	return ret;
 }
 
 int aie4_start_fw_log(struct amdxdna_dev_hdl *ndev,

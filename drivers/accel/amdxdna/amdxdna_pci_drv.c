@@ -563,6 +563,31 @@ static const struct dev_pm_ops amdxdna_pm_ops = {
 	RUNTIME_PM_OPS(amdxdna_pm_runtime_suspend, amdxdna_pm_runtime_resume, NULL)
 };
 
+static void amdxdna_reset_prepare(struct pci_dev *pdev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+
+	guard(mutex)(&xdna->dev_lock);
+
+	if (xdna->dev_info->ops->reset_prepare)
+		xdna->dev_info->ops->reset_prepare(xdna);
+}
+
+static void amdxdna_reset_done(struct pci_dev *pdev)
+{
+	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
+
+	guard(mutex)(&xdna->dev_lock);
+
+	if (xdna->dev_info->ops->reset_done)
+		xdna->dev_info->ops->reset_done(xdna);
+}
+
+static const struct pci_error_handlers amdxdna_err_handler = {
+	.reset_prepare = amdxdna_reset_prepare,
+	.reset_done = amdxdna_reset_done,
+};
+
 static int amdxdna_sriov_configure(struct pci_dev *pdev, int num_vfs)
 {
 	struct amdxdna_dev *xdna = pci_get_drvdata(pdev);
@@ -589,6 +614,7 @@ static struct pci_driver amdxdna_pci_driver = {
 	.probe = amdxdna_probe,
 	.remove = amdxdna_remove,
 	.driver.pm = &amdxdna_pm_ops,
+	.err_handler = &amdxdna_err_handler,
 	.sriov_configure = amdxdna_sriov_configure,
 };
 
