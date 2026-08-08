@@ -44,6 +44,7 @@ static irqreturn_t cert_comp_isr(int irq, void *p)
 {
 	struct cert_comp *cert_comp = p;
 
+	trace_uc_irq_handle("cert", cert_comp->msix_idx);
 	wake_up_all(&cert_comp->waitq);
 	return IRQ_HANDLED;
 }
@@ -1037,6 +1038,7 @@ static int submit_one_cmd(struct amdxdna_hwctx *hwctx,
 					    offsetof(struct amdxdna_cmd, header);
 	*seq = publish_cmd(hwctx);
 	ring_doorbell(hwctx);
+	trace_amdxdna_debug_point(hwctx->name, *seq, "job submitted");
 	XDNA_DBG(xdna, "Submitted one cmd, %s seq %lld", hwctx->name, *seq);
 	return 0;
 }
