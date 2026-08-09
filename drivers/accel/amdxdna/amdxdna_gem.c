@@ -950,7 +950,9 @@ amdxdna_gem_create_cma_object(struct drm_device *dev, struct amdxdna_drm_create_
 		return ERR_PTR(-EINVAL);
 	}
 
-	dma_buf = amdxdna_get_cma_buf(dev, size);
+	dma_buf = amdxdna_get_cma_buf_with_fallback(xdna->cma_region_devs,
+						    MAX_MEM_REGIONS,
+						    dev, size, args->flags);
 	if (IS_ERR(dma_buf))
 		return ERR_CAST(dma_buf);
 
