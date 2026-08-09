@@ -29,6 +29,7 @@ target_compile_definitions(${XDNA_TARGET} PRIVATE
   XRT_ENABLE_AIE
   XRT_AIE_BUILD
   XRT_BUILD
+  XRT_ENABLE_USDT
   $<$<CONFIG:Debug>:XDNA_SHIM_DEBUG>
   )
 
