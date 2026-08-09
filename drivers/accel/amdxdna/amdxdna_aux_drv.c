@@ -14,6 +14,8 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
+#include <linux/of.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/sched/mm.h>
 #include <linux/workqueue.h>
 
@@ -189,6 +191,46 @@ static int amdxdna_aux_probe(struct auxiliary_device *auxdev,
 			return ret;
 		}
 		XDNA_WARN(xdna, "DMA configuration downgraded to 32bit mask");
+	}
+
+	/* Trace memory-region DT node parsing for CMA init debugging.
+	 * The aux device has no of_node of its own; check the parent (xilinx_aie).
+	 */
+	{
+		struct device_node *parent_of_node = dev->parent ? dev->parent->of_node : NULL;
+		struct device_node *mem_node;
+		int idx = 0;
+
+		XDNA_INFO(xdna, "aux dev of_node: %pOF, parent (%s) of_node: %pOF",
+			  dev->of_node,
+			  dev->parent ? dev_name(dev->parent) : "none",
+			  parent_of_node);
+
+		if (parent_of_node) {
+			while ((mem_node = of_parse_phandle(parent_of_node, "memory-region", idx))) {
+				const char *status;
+
+				XDNA_INFO(xdna, "memory-region[%d]: %pOF", idx, mem_node);
+				if (of_property_read_string(mem_node, "status", &status))
+					status = "okay";
+				XDNA_INFO(xdna, "  status: %s", status);
+				if (of_property_present(mem_node, "compatible")) {
+					const char *compat;
+
+					of_property_read_string(mem_node, "compatible", &compat);
+					XDNA_INFO(xdna, "  compatible: %s", compat);
+				}
+				of_node_put(mem_node);
+				idx++;
+			}
+			if (idx == 0)
+				XDNA_WARN(xdna, "No memory-region phandles in parent DT node %pOF — CMA nodes will not be initialized",
+					  parent_of_node);
+			else
+				XDNA_INFO(xdna, "Found %d memory-region node(s) in parent DT node", idx);
+		} else {
+			XDNA_WARN(xdna, "Parent device has no DT of_node — cannot parse memory-region for CMA init");
+		}
 	}
 
 	ret = amdxdna_dev_init(xdna);

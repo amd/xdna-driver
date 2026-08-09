@@ -5,9 +5,12 @@
  */
 
 #include <linux/device.h>
+#include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
 #include <linux/module.h>
+#include <linux/of.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/xlnx-ai-engine.h>
@@ -215,17 +218,223 @@ void ve2_clear_firmware_status(struct amdxdna_hwctx *hwctx)
 	}
 }
 
+static void ve2_cma_device_release(struct device *dev)
+{
+	kfree(dev);
+}
+
+static void ve2_cma_mem_region_remove(struct amdxdna_dev *xdna)
+{
+	int i;
+
+	for (i = 0; i < MAX_MEM_REGIONS; i++) {
+		struct device *dev = xdna->cma_region_devs[i];
+
+		if (dev) {
+			of_reserved_mem_device_release(dev);
+			put_device(dev);
+			xdna->cma_region_devs[i] = NULL;
+		}
+	}
+}
+
+static int ve2_cma_mem_region_init(struct amdxdna_dev *xdna, struct device_node *aie_np)
+{
+	struct device *parent_dev = xdna->ddev.dev;
+	struct device *child_dev;
+	int num_regions;
+	int ret;
+	int i;
+
+	num_regions = of_count_phandle_with_args(aie_np, "memory-region", NULL);
+	if (num_regions <= 0 || num_regions > MAX_MEM_REGIONS) {
+		XDNA_INFO(xdna, "memory-region count=%d (expected 1..%d), skip CMA init",
+			  num_regions, MAX_MEM_REGIONS);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < num_regions; i++) {
+		child_dev = kzalloc(sizeof(*child_dev), GFP_KERNEL);
+		if (!child_dev) {
+			ret = -ENOMEM;
+			goto cleanup;
+		}
+
+		device_initialize(child_dev);
+		child_dev->parent = parent_dev;
+		child_dev->of_node = aie_np;
+		child_dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		child_dev->dma_mask = &child_dev->coherent_dma_mask;
+		child_dev->release = ve2_cma_device_release;
+
+		ret = dev_set_name(child_dev, "amdxdna-mem%d", i);
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to set name for cma region %d", i);
+			goto put_dev;
+		}
+
+		ret = of_reserved_mem_device_init_by_idx(child_dev, aie_np, i);
+		if (ret) {
+			XDNA_ERR(xdna, "Failed to init reserved cma region %d, ret %d", i, ret);
+			goto put_dev;
+		}
+
+		xdna->cma_region_devs[i] = child_dev;
+		XDNA_INFO(xdna, "CMA region %d initialized", i);
+	}
+
+	return 0;
+
+put_dev:
+	put_device(child_dev);
+cleanup:
+	ve2_cma_mem_region_remove(xdna);
+	return ret;
+}
+
+static struct device_node *ve2_find_mem_topology_node(struct device_node *aie_np)
+{
+	struct device_node *node;
+
+	if (!aie_np || !aie_np->parent)
+		return NULL;
+
+	for_each_child_of_node(aie_np->parent, node) {
+		if (of_device_is_compatible(node, "xlnx,aie-mem-topology"))
+			return node;
+	}
+
+	return NULL;
+}
+
+static int ve2_parse_mem_topology(struct amdxdna_dev *xdna, struct device_node *aie_np)
+{
+	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
+	struct device_node *aie_mem_nodes[MAX_MEM_REGIONS];
+	struct device_node *mem_region_np;
+	struct device_node *region_np;
+	struct device_node *topo_np;
+	u32 cma_region_bitmap;
+	u32 cma_region_idx;
+	u32 col_range[2];
+	int num_phandles;
+	int region_idx;
+	int phandle_idx;
+	int ret;
+
+	topo_np = ve2_find_mem_topology_node(aie_np);
+	if (!topo_np) {
+		XDNA_INFO(xdna, "No aie-mem-topology node found, using default CMA");
+		xdna_hdl->mem_topology.num_regions = 0;
+		return -ENOENT;
+	}
+
+	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++)
+		aie_mem_nodes[cma_region_idx] = of_parse_phandle(aie_np, "memory-region",
+								 cma_region_idx);
+
+	xdna_hdl->mem_topology.num_regions = 0;
+
+	for_each_child_of_node(topo_np, region_np) {
+		if (xdna_hdl->mem_topology.num_regions >= MAX_MEM_REGIONS) {
+			XDNA_DBG(xdna, "Too many topology entries, max %d", MAX_MEM_REGIONS);
+			break;
+		}
+
+		ret = of_property_read_u32_array(region_np, "columns", col_range, 2);
+		if (ret) {
+			XDNA_DBG(xdna, "Failed to read columns property: %d", ret);
+			continue;
+		}
+
+		if (col_range[0] > col_range[1] ||
+		    col_range[1] >= xdna_hdl->aie_dev_info.cols) {
+			XDNA_DBG(xdna, "Columns range %u-%u out of bounds (valid 0..%u)",
+				 col_range[0], col_range[1], xdna_hdl->aie_dev_info.cols - 1);
+			continue;
+		}
+
+		num_phandles = of_count_phandle_with_args(region_np, "memory-region", NULL);
+		if (num_phandles <= 0) {
+			XDNA_DBG(xdna, "No memory-region phandles in region node");
+			continue;
+		}
+
+		cma_region_bitmap = 0;
+		for (phandle_idx = 0;
+		     phandle_idx < num_phandles && phandle_idx < MAX_MEM_REGIONS;
+		     phandle_idx++) {
+			mem_region_np = of_parse_phandle(region_np, "memory-region", phandle_idx);
+			if (!mem_region_np)
+				continue;
+			for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS;
+			     cma_region_idx++) {
+				if (!aie_mem_nodes[cma_region_idx])
+					break;
+				if (aie_mem_nodes[cma_region_idx] == mem_region_np) {
+					cma_region_bitmap |= (1U << cma_region_idx);
+					break;
+				}
+			}
+			of_node_put(mem_region_np);
+		}
+
+		if (!cma_region_bitmap) {
+			XDNA_DBG(xdna, "No valid CMA phandles for cols %u-%u",
+				 col_range[0], col_range[1]);
+			continue;
+		}
+
+		region_idx = xdna_hdl->mem_topology.num_regions;
+		xdna_hdl->mem_topology.regions[region_idx].start_col = col_range[0];
+		xdna_hdl->mem_topology.regions[region_idx].end_col = col_range[1];
+		xdna_hdl->mem_topology.regions[region_idx].mem_bitmap = cma_region_bitmap;
+		xdna_hdl->mem_topology.num_regions++;
+
+		XDNA_INFO(xdna, "Mem topology entry %u: cols %u-%u bitmap=0x%x",
+			  region_idx, col_range[0], col_range[1], cma_region_bitmap);
+	}
+
+	for (cma_region_idx = 0; cma_region_idx < MAX_MEM_REGIONS; cma_region_idx++) {
+		if (aie_mem_nodes[cma_region_idx])
+			of_node_put(aie_mem_nodes[cma_region_idx]);
+	}
+	of_node_put(topo_np);
+	return 0;
+}
+
 void ve2_auto_select_mem_bitmap(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx)
 {
+	struct amdxdna_dev_hdl *xdna_hdl = xdna->dev_handle;
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
+	struct ve2_mem_topology *topo;
+	u32 start_col;
+	u32 i;
 
-	/*
-	 * XRT passes a memory-bank bitmap in CREATE_BO flags (low 8 bits).
-	 * Without DT memory-region / aie-mem-topology, use bank 0 only.
-	 */
-	if (vp)
-		vp->mem_bitmap = 0x1;
-	(void)xdna;
+	if (!vp)
+		return;
+
+	start_col = hwctx->start_col;
+
+	if (!xdna_hdl || !xdna_hdl->mem_topology.num_regions) {
+		XDNA_DBG(xdna, "No mem topology, using default CMA (mem_bitmap=0)");
+		vp->mem_bitmap = 0;
+		return;
+	}
+
+	topo = &xdna_hdl->mem_topology;
+	for (i = 0; i < topo->num_regions; i++) {
+		if (start_col >= topo->regions[i].start_col &&
+		    start_col <= topo->regions[i].end_col) {
+			vp->mem_bitmap = topo->regions[i].mem_bitmap;
+			XDNA_INFO(xdna, "Auto-selected mem_bitmap=0x%x for start_col=%u",
+				  vp->mem_bitmap, start_col);
+			return;
+		}
+	}
+
+	XDNA_DBG(xdna, "No topology match for start_col=%u, using default CMA", start_col);
+	vp->mem_bitmap = 0;
 }
 
 int ve2_probe(struct amdxdna_dev *xdna, struct amdxdna_dev_hdl *hdl)
@@ -328,6 +537,7 @@ static int ve2_aux_init(struct amdxdna_dev *xdna)
 	struct device *dev = xdna->ddev.dev;
 	struct amdxdna_dev_hdl *xdna_hdl;
 	const struct amdxdna_dev_priv *priv;
+	struct device_node *aie_np;
 	int ret;
 
 	priv = xdna->dev_info->dev_priv;
@@ -348,6 +558,22 @@ static int ve2_aux_init(struct amdxdna_dev *xdna)
 	if (ret)
 		return ret;
 
+	/* Initialize per-bank CMA region devices and parse memory topology from DT. */
+	aie_np = dev->parent ? dev->parent->of_node : NULL;
+	if (aie_np) {
+		ret = ve2_cma_mem_region_init(xdna, aie_np);
+		if (ret)
+			XDNA_INFO(xdna, "CMA mem region init failed (%d), using default CMA", ret);
+
+		ret = ve2_parse_mem_topology(xdna, aie_np);
+		if (ret == -ENOENT)
+			XDNA_INFO(xdna, "No aie-mem-topology in DT, using default CMA");
+		else if (ret)
+			XDNA_INFO(xdna, "mem topology parse failed (%d), using default CMA", ret);
+	} else {
+		XDNA_WARN(xdna, "No parent DT node, skipping CMA region and topology init");
+	}
+
 	XDNA_INFO(xdna, "VE2 device ready (host-queue=%s)",
 		  enable_polling ? "polling" : "interrupt");
 
@@ -361,6 +587,7 @@ static void ve2_aux_fini(struct amdxdna_dev *xdna)
 	if (!hdl)
 		return;
 
+	ve2_cma_mem_region_remove(xdna);
 	XDNA_DBG(xdna, "VE2 device cleanup");
 }
 
