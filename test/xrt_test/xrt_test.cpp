@@ -298,6 +298,7 @@ execute_batches(xrt::hw_context& hwctx, std::vector<xrt::run>& runs, unsigned r_
     uint64_t submitted = 0;
     uint64_t completed = 0;
     const auto runs_size = runs.size();
+    auto start = std::chrono::high_resolution_clock::now();
     while (submitted < runs_size && submitted < c_rounds) {
       runs[static_cast<size_t>(submitted)].start();
       submitted++;
@@ -315,6 +316,12 @@ execute_batches(xrt::hw_context& hwctx, std::vector<xrt::run>& runs, unsigned r_
         submitted++;
       }
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    std::cout << "Executed total " << c_rounds << " commands in " << duration_us
+              << "us with max " << o_cmds << " outstanding commands"
+              << ", average latency: " << duration_us * 1.0 / c_rounds << "us"
+              << ", throughput: " << c_rounds * 1000000.0 / duration_us << " OPS\n";
     return;
   }
   std::vector<xrt::runlist> runlists;
@@ -352,7 +359,9 @@ execute_batches(xrt::hw_context& hwctx, std::vector<xrt::run>& runs, unsigned r_
   std::cout << "Executed total " << c_rounds << " runlists in " << duration_us
 	    << "us with max " << o_cmds << " outstanding runlist (" << r_cmds
 	    << " commands per runlist), average latency: "
-	    << duration_us * 1.0 / (static_cast<uint64_t>(r_cmds) * c_rounds) << "us\n";
+	    << duration_us * 1.0 / (static_cast<uint64_t>(r_cmds) * c_rounds) << "us"
+	    << ", throughput: " << c_rounds * 1000000.0 / duration_us << " runlist/s"
+	    << ", " << static_cast<uint64_t>(r_cmds) * c_rounds * 1000000.0 / duration_us << " OPS\n";
 }
 
 void
