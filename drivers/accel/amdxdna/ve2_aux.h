@@ -54,6 +54,17 @@ struct ve2_firmware_status {
 struct amdxdna_mgmtctx;
 struct amdxdna_hwctx;
 
+struct ve2_mem_region {
+	u32	start_col;
+	u32	end_col;
+	u32	mem_bitmap;
+};
+
+struct ve2_mem_topology {
+	u32			num_regions;
+	struct ve2_mem_region	regions[MAX_MEM_REGIONS];
+};
+
 struct amdxdna_dev_hdl {
 	struct amdxdna_dev		*xdna;
 	const struct amdxdna_dev_priv	*priv;
@@ -62,6 +73,7 @@ struct amdxdna_dev_hdl {
 	struct amdxdna_mgmtctx		*ve2_mgmtctx;
 	struct ve2_firmware_status	**fw_slots;	/* [cols] per-column FW status */
 	u32				hwctx_limit;	/* effective max hw contexts */
+	struct ve2_mem_topology		mem_topology;	/* parsed from DT aie-mem-topology */
 };
 
 extern const struct amdxdna_dev_ops ve2_ops;

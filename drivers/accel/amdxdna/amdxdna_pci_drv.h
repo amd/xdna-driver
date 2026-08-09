@@ -21,6 +21,8 @@
 #include <linux/workqueue.h>
 #include <linux/xarray.h>
 
+#define MAX_MEM_REGIONS		8
+
 #define XDNA_INFO(xdna, fmt, args...)	drm_info(&(xdna)->ddev, fmt, ##args)
 #define XDNA_WARN(xdna, fmt, args...)	drm_warn(&(xdna)->ddev, "%s: "fmt, __func__, ##args)
 #define XDNA_ERR(xdna, fmt, args...)	drm_err(&(xdna)->ddev, "%s: "fmt, __func__, ##args)
@@ -182,6 +184,9 @@ struct amdxdna_dev {
 	 * generation-specific struct amdxdna_dev_hdl layout.
 	 */
 	struct aie_device		*dpt_aie;
+
+	/* Per-bank CMA region devices, initialized from DT memory-region nodes. */
+	struct device			*cma_region_devs[MAX_MEM_REGIONS];
 };
 
 /*

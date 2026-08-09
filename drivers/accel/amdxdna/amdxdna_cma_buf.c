@@ -109,12 +109,10 @@ static const struct dma_buf_ops amdxdna_cmabuf_dmabuf_ops = {
 	.vmap		= amdxdna_cmabuf_vmap,
 };
 
-struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev, size_t size)
+static struct dma_buf *amdxdna_alloc_cma_buf_from_dev(struct device *ddev, size_t size)
 {
-	struct amdxdna_dev *xdna = to_xdna_dev(dev);
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 	struct amdxdna_cmabuf_priv *cmabuf;
-	struct device *ddev = dev->dev;
 	struct dma_buf *dbuf;
 	dma_addr_t dma_addr;
 	void *cpu_addr;
@@ -127,7 +125,6 @@ struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev, size_t size)
 	size = PAGE_ALIGN(size);
 	cpu_addr = dma_alloc_coherent(ddev, size, &dma_addr, GFP_KERNEL);
 	if (!cpu_addr) {
-		XDNA_ERR(xdna, "Failed to alloc 0x%zx CMA bytes", size);
 		ret = -ENOMEM;
 		goto free_cmabuf;
 	}
@@ -155,4 +152,48 @@ free_dma:
 free_cmabuf:
 	kfree(cmabuf);
 	return ERR_PTR(ret);
+}
+
+struct dma_buf *amdxdna_get_cma_buf(struct drm_device *dev, size_t size)
+{
+	struct amdxdna_dev *xdna = to_xdna_dev(dev);
+	struct dma_buf *dbuf;
+
+	dbuf = amdxdna_alloc_cma_buf_from_dev(dev->dev, size);
+	if (IS_ERR(dbuf))
+		XDNA_ERR(xdna, "Failed to alloc 0x%zx CMA bytes", size);
+	return dbuf;
+}
+
+/**
+ * amdxdna_get_cma_buf_with_fallback - Allocate CMA buffer from a specific bank
+ * with fallback to default CMA.
+ *
+ * @region_devs: Array of per-bank child devices (NULL entries = not initialized)
+ * @max_regions: Size of region_devs array
+ * @fallback_dev: DRM device to fall back to if no bank device matched
+ * @size: Allocation size in bytes
+ * @flags: Low 8 bits are the mem_bitmap (one bit per bank)
+ *
+ * Tries each set bit in the bitmap in order; on first success returns the buf.
+ * Falls back to the default DRM device CMA if no bank device is available.
+ */
+struct dma_buf *amdxdna_get_cma_buf_with_fallback(struct device *const *region_devs,
+						  int max_regions,
+						  struct drm_device *fallback_dev,
+						  size_t size, u64 flags)
+{
+	u32 mem_bitmap = (u32)(flags & 0xFFULL);
+	struct dma_buf *dbuf;
+	int i;
+
+	for (i = 0; i < max_regions; i++) {
+		if ((mem_bitmap & (1U << i)) && region_devs[i]) {
+			dbuf = amdxdna_alloc_cma_buf_from_dev(region_devs[i], size);
+			if (!IS_ERR(dbuf))
+				return dbuf;
+		}
+	}
+
+	return amdxdna_alloc_cma_buf_from_dev(fallback_dev->dev, size);
 }
