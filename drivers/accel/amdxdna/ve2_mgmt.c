@@ -467,12 +467,24 @@ static int ve2_request_context_switch(struct amdxdna_mgmtctx *mgmtctx)
 }
 
 /*
- * Bring in the context at the head of the command FIFO once the firmware has
- * acknowledged a switch request (is_idle_due_to_context). Reprograms the
- * handshake to point at the incoming context's host queue and, if the entry
- * after the head belongs to yet another context, arms the next switch.
+ * Try to switch the partition over to whichever context is at the head of
+ * the command FIFO.
+ *
+ * Case 1: the partition is idle (either the firmware acked our switch
+ * request, or the active context ran out of work on its own). Reprogram the
+ * handshake for the head context, make it active, and if the entry behind it
+ * belongs to yet another context, get a head start by arming that switch too.
+ *
+ * Case 2: the partition is not (yet) known to be idle, but the head belongs
+ * to some other context. Ask the firmware to yield (arm ctx_switch_req) and
+ * explicitly interrupt it via notify_fw_cmd_ready(), so it is guaranteed to
+ * notice and ack even if it already happens to be sitting idle right now
+ * with nothing else going on to prompt it to check. This mirrors what the
+ * legacy driver does.
+ *
  * Returns the newly scheduled context, or NULL if the FIFO is empty.
  */
+
 static struct amdxdna_hwctx *ve2_response_ctx_switch_req(struct amdxdna_mgmtctx *mgmtctx)
 {
 	struct ve2_ctx_fifo_entry *c_ctx, *t_ctx;
@@ -481,22 +493,28 @@ static struct amdxdna_hwctx *ve2_response_ctx_switch_req(struct amdxdna_mgmtctx 
 	lockdep_assert_held(&mgmtctx->ctx_lock);
 
 	list_for_each_entry_safe(c_ctx, t_ctx, &mgmtctx->ctx_command_fifo_head, list) {
-		if (mgmtctx->is_idle_due_to_context) {
+		if (mgmtctx->is_idle_due_to_context || mgmtctx->is_partition_idle) {
 			hwctx = c_ctx->ctx;
-			mgmtctx->is_partition_idle = 0;
 			/*
-			 * Clear this now that it has been consumed. Otherwise
-			 * every later call to this function (e.g. from the
-			 * async IRQ-driven scheduler_work, which runs once per
-			 * command completion) sees the stale flag still set and
+			 * Clear these now that they have been consumed, from
+			 * here rather than the caller, so a flag set just
+			 * before this function runs is not lost before it can
+			 * be acted upon. Otherwise every later call to this
+			 * function (e.g. from the async IRQ-driven
+			 * scheduler_work, which runs once per command
+			 * completion) sees a stale flag still set and
 			 * redundantly re-runs handshake_init() on the current
 			 * FIFO head even when no real context switch occurred.
 			 */
+			mgmtctx->is_partition_idle = 0;
 			mgmtctx->is_idle_due_to_context = 0;
 			ve2_mgmt_handshake_init(mgmtctx, hwctx);
 			if (mgmtctx->active_ctx == hwctx)
 				break;
 			mgmtctx->active_ctx = hwctx;
+		} else if (c_ctx->ctx != mgmtctx->active_ctx) {
+			ve2_request_context_switch(mgmtctx);
+			notify_fw_cmd_ready(mgmtctx);
 		}
 
 		if (!list_is_last(&c_ctx->list, &mgmtctx->ctx_command_fifo_head) &&
@@ -553,10 +571,23 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 		 * Another context owns the partition. Switch immediately if it
 		 * is idle; otherwise leave the command queued and let the
 		 * IRQ/scheduler switch us in once the active context yields.
+		 *
+		 * @is_partition_idle is set when the active context finished
+		 * all of its own work with nothing yet queued behind it (so
+		 * no switch request was ever armed against it). Leave the
+		 * flag set and let ve2_response_ctx_switch_req() itself check
+		 * and consume it -- clearing it here first, before the flag
+		 * has actually been acted on, would prevent that function
+		 * from ever seeing it set.
 		 */
 		if (mgmtctx->is_partition_idle) {
-			mgmtctx->is_partition_idle = 0;
+			XDNA_DBG(mgmtctx->xdna,
+				 "Context switch: active=%p -> new=%p (partition idle)",
+				 mgmtctx->active_ctx, hwctx);
 			ve2_response_ctx_switch_req(mgmtctx);
+		} else {
+			XDNA_DBG(mgmtctx->xdna, "Command queued: active=%p, pending=%p",
+				 mgmtctx->active_ctx, hwctx);
 		}
 	} else if (mgmtctx->is_idle_due_to_context) {
 		/* We are active again after a firmware-side save; reprogram. */

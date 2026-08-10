@@ -285,7 +285,9 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 	struct amdxdna_umap *mapp = container_of(mni, struct amdxdna_umap, notifier);
 	struct amdxdna_gem_obj *abo = mapp->abo;
 	struct amdxdna_dev *xdna;
+#ifndef AMDXDNA_AUX
 	long ret;
+#endif
 
 	xdna = to_xdna_dev(to_gobj(abo)->dev);
 	XDNA_DBG(xdna, "Invalidating range 0x%lx, 0x%lx, type %d, evt %d, pending fences %d",
@@ -301,12 +303,22 @@ static bool amdxdna_hmm_invalidate(struct mmu_interval_notifier *mni,
 	mmu_interval_set_seq(&mapp->notifier, cur_seq);
 	up_write(&xdna->notifier_lock);
 
+#ifndef AMDXDNA_AUX
+	/*
+	 * VE2/AUX has no cmd_submit-side BO lockdown that attaches job fences
+	 * to the reservation object (unlike aie2/aie4, see aie4_cmd_submit()),
+	 * so there is nothing queued on abo->resv for this to wait on here.
+	 * Skip it to keep this a fast, non-blocking notifier on AUX, matching
+	 * behavior prior to commit cdd9d5cee72d ("remove hmm_invalidate ops
+	 * callback"), where ve2_ops never installed a .hmm_invalidate hook.
+	 */
 	ret = dma_resv_wait_timeout(to_gobj(abo)->resv, DMA_RESV_USAGE_BOOKKEEP,
 				    true, MAX_SCHEDULE_TIMEOUT);
 	if (!ret)
 		XDNA_ERR(xdna, "Failed to wait for bo, ret %ld", ret);
 	else if (ret == -ERESTARTSYS)
 		XDNA_DBG(xdna, "Wait for bo interrupted by signal");
+#endif /* !AMDXDNA_AUX */
 
 	if (range->event == MMU_NOTIFY_UNMAP) {
 		down_write(&xdna->notifier_lock);
