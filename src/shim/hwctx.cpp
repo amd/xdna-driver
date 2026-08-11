@@ -132,9 +132,9 @@ get_cu_pdi(int idx) const
 hwctx::
 hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
   std::unique_ptr<hwq> queue)
-  : m_ctx(dev)
-  , m_device(dev)
+  : m_device(dev)
   , m_q(std::move(queue))
+  , m_ctx(dev)
 {
   xclbin_parser xp(xclbin);
 
@@ -150,9 +150,9 @@ hwctx(const device& dev, const qos_type& qos, const xrt::xclbin& xclbin,
 hwctx::
 hwctx(const device& dev, const qos_type& qos, uint32_t partition_size,
   std::unique_ptr<hwq> queue)
-  : m_ctx(dev)
-  , m_device(dev)
+  : m_device(dev)
   , m_q(std::move(queue))
+  , m_ctx(dev)
 {
   m_col_cnt = partition_size;
   m_ops_per_cycle = 0;

@@ -111,7 +111,7 @@ private:
     const device& m_device;
     slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
     uint32_t m_syncobj = AMDXDNA_INVALID_FENCE_HANDLE;
-  } m_ctx;
+  };
 
   const device& m_device;
   slot_id m_handle = AMDXDNA_INVALID_CTX_HANDLE;
@@ -122,6 +122,9 @@ private:
   uint32_t m_ops_per_cycle = 0;
   std::unique_ptr<hwq> m_q;
   amdxdna_qos_info m_qos = {};
+  // Must be the last member: destroyed first, ensuring destroy_ctx ioctl fires
+  // before any other member (e.g. the UMQ BO owned by m_q) is freed.
+  ctx m_ctx;
 
   void
   create_ctx_on_device(const qos_type& qos);
