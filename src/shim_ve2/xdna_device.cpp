@@ -655,16 +655,21 @@ struct auto_coredump
   }
 };
 
-struct archive_path
+static std::string
+get_ve2_archive_subdir(uint32_t cols)
 {
-  using result_type = query::archive_path::result_type;
-
-  static result_type
-  get(const xrt_core::device* device, key_type key)
-  {
-        return std::string(get_shim_data_dir() + "bins/xrt_smi_ve2.a");
+  switch (cols) {
+  case 36:
+    return "t50";
+  case 24:
+    return "t20";
+  case 8:
+    return "t10";
+  default:
+    throw xrt_core::error(-ENOTSUP,
+      boost::str(boost::format("Unsupported column count for VE2 archive: %d") % cols));
   }
-};
+}
 
 struct total_cols
 {
@@ -685,6 +690,19 @@ struct total_cols
     edev->ioctl(DRM_IOCTL_AMDXDNA_GET_INFO, &arg);
 
     return aie_metadata.cols;
+  }
+};
+
+struct archive_path
+{
+  using result_type = query::archive_path::result_type;
+
+  static result_type
+  get(const xrt_core::device* device, key_type)
+  {
+    auto cols = total_cols::get(device, query::total_cols::key);
+    auto subdir = get_ve2_archive_subdir(cols);
+    return get_shim_data_dir() + "bins/" + subdir + "/xrt_smi_ve2.a";
   }
 };
 
