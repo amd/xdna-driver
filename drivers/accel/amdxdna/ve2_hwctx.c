@@ -241,8 +241,7 @@ static void hsa_queue_commit_slot(struct amdxdna_hwctx *hwctx, u64 seq)
 	}
 	hsa_queue_sync_write_index_for_write(queue);
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_UPDATE_WRITE_INDEX",
-				  hwctx->client->pid, hwctx->id, seq, header->write_index);
+	trace_xdna_queue_write_index(hwctx->name, hwctx->id, seq, header->write_index);
 	mutex_unlock(&queue->hq_lock);
 }
 
@@ -740,7 +739,12 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 	struct amdxdna_ctx_priv *vp;
 	int ret;
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER", client->pid, 0, hwctx->id, 0);
+	/*
+	 * hwctx->name is not assigned until after this function returns
+	 * successfully (amdxdna_drm_create_hwctx_ioctl()), so key on
+	 * hwctx->id alone rather than the __string(name, ...) used elsewhere.
+	 */
+	trace_xdna_hwctx_init_start(hwctx->id, hwctx->num_tiles);
 
 	hdl = ve2_dev_hdl(xdna);
 	if (!hdl)
@@ -831,8 +835,7 @@ int ve2_hwctx_init(struct amdxdna_hwctx *hwctx)
 		XDNA_DBG(xdna, "hwctx %p: interrupt mode", hwctx);
 	}
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT", client->pid, hwctx->start_col,
-				  hwctx->id, 0);
+	trace_xdna_hwctx_init_done(hwctx->id, hwctx->start_col, 0);
 	return 0;
 
 free_hwctx_config:
@@ -869,8 +872,12 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 
 	vp = priv->hw_priv;
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
-				  hwctx->client->pid, hwctx->start_col, hwctx->id, 0);
+	/*
+	 * Key on hwctx->id alone: on some hwctx_init() failure cleanup paths
+	 * hwctx_fini() is reached before hwctx->name is assigned, or just
+	 * after it has been freed (amdxdna_drm_create_hwctx_ioctl()).
+	 */
+	trace_xdna_hwctx_fini_start(hwctx->id, hwctx->start_col);
 
 	/* Snapshot per-column CERT firmware status before tearing the partition down. */
 	if (vp && vp->mgmtctx)
@@ -904,8 +911,7 @@ void ve2_hwctx_fini(struct amdxdna_hwctx *hwctx)
 		kfree(vp);
 		priv->hw_priv = NULL;
 
-		trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-					  hwctx->client->pid, hwctx->id, submitted, completed);
+		trace_xdna_hwctx_fini_done(hwctx->id, submitted, completed);
 	}
 
 	kfree(priv);
@@ -997,8 +1003,7 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 		return -EINVAL;
 	}
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
-				  hwctx->client->pid, hwctx->start_col, hwctx->id, 0);
+	trace_xdna_cmd_submit_start(hwctx->name, hwctx->id, hwctx->start_col);
 
 	if (op == ERT_CMD_CHAIN)
 		ret = ve2_submit_cmd_chain(hwctx, job, seq);
@@ -1009,6 +1014,13 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 			return -ERESTARTSYS;
 		return ret;
 	}
+
+	/*
+	 * Command(s) are now committed into the host queue (write_index
+	 * advanced); *seq is the last sub-command's slot, i.e. the one
+	 * ve2_cmd_wait()/xdna_cmd_complete will report completion for.
+	 */
+	trace_xdna_cmd_submit(hwctx->name, hwctx->id, *seq, op);
 
 	if (!vp->mgmtctx) {
 		struct amdxdna_sched_job *pjob;
@@ -1040,8 +1052,6 @@ int ve2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u
 		return ret;
 	}
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-				  hwctx->client->pid, hwctx->start_col, hwctx->id, *seq);
 	return 0;
 }
 
@@ -1060,8 +1070,7 @@ static bool check_read_index(struct amdxdna_hwctx *hwctx, u64 seq)
 	read_index = *(u64 *)((char *)vp->hsa_queue.hsa_queue_p + HSA_QUEUE_READ_INDEX_OFFSET);
 
 	if (read_index > seq) {
-		trace_amdxdna_trace_point("XRT_PROFILING_TRACE_UPDATE_READ_INDEX",
-					  hwctx->client->pid, hwctx->id, seq, read_index);
+		trace_xdna_queue_read_index(hwctx->name, hwctx->id, seq, read_index);
 		return true;
 	}
 
@@ -1299,8 +1308,7 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	bool timed_out;
 	long ret = 0;
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
-				  hwctx->client->pid, hwctx->start_col, hwctx->id, seq);
+	trace_xdna_cmd_wait_start(hwctx->name, hwctx->id, seq);
 
 	if (wait_jifs)
 		ret = wait_event_interruptible_timeout(vp->waitq,
@@ -1312,8 +1320,7 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 
 	/* Interrupted by a signal; the command stays in flight for retry. */
 	if (ret < 0) {
-		trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-					  hwctx->client->pid, hwctx->start_col, hwctx->id, seq);
+		trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq, ret);
 		return ret;
 	}
 
@@ -1331,8 +1338,7 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	/* Already completed and released by another waiter. */
 	if (!job) {
 		mutex_unlock(&vp->hsa_queue.hq_lock);
-		trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-					  hwctx->client->pid, hwctx->start_col, hwctx->id, seq);
+		trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq, 0);
 		return 0;
 	}
 
@@ -1346,13 +1352,21 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms)
 	else
 		ve2_process_hqc_completion(hwctx, job, seq);
 
+	/*
+	 * Mirrors aie4_ctx.c's job_worker() trace_amdxdna_debug_point(...,
+	 * "job complete") at the point the final command state is known, plus
+	 * a structured event carrying that state for latency/outcome analysis
+	 * (pairs with xdna_cmd_submit on the same hwctx_id+seq).
+	 */
+	trace_amdxdna_debug_point(hwctx->name, seq, "job complete");
+	trace_xdna_cmd_complete(hwctx->name, hwctx->id, seq, amdxdna_cmd_get_state(job->cmd_bo));
+
 	ve2_hwctx_job_release(hwctx, job);
 	ve2_job_put(job);
 
 	mutex_unlock(&vp->hsa_queue.hq_lock);
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-				  hwctx->client->pid, hwctx->start_col, hwctx->id, seq);
+	trace_xdna_cmd_wait_done(hwctx->name, hwctx->id, seq, 0);
 	return 0;
 }
 

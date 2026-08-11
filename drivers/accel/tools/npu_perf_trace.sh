@@ -30,6 +30,37 @@ trace_error()
 	exit 1
 }
 
+usage()
+{
+	cat << USAGE_END
+Usage: sudo $0 [options] <command to run and trace> [args...]
+
+Captures a perf trace of the amdxdna driver's tracepoints (TRACE_SYSTEM
+"amdxdna", shared by aie2/aie4/ve2) together with XRT's sdt_xrt:* USDT
+probes while <command> runs, then converts the result into
+perf.converted.out (in the current directory) for use with
+npu_perf_analyze.sh.
+
+Options:
+  -help/-h: Show this help and exit
+  -libdir/-l <path>: Path to XRT's lib directory containing
+                      libxrt_coreutil.so and libxrt_driver_xdna.so
+                      (default: /opt/xilinx/xrt/lib)
+
+Must be run as root (needed for "perf record"/"perf probe" and to access
+/sys/kernel/debug/accel and /sys/kernel/debug/tracing).
+
+Examples:
+  sudo $0 ./host.exe
+  sudo $0 -libdir /opt/xilinx/xrt/lib ./host.exe --iters 100
+USAGE_END
+}
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+	usage
+	exit 0
+fi
+
 add_sdt_xrt()
 {
 	perf list | grep sdt_xrt > /dev/null && sdt_pre_enabled=1
@@ -71,6 +102,10 @@ sdt_pre_enabled=0
 xrt_lib_prefix="/opt/xilinx/xrt/lib"
 while [ $# -gt 0 ]; do
 	case "$1" in
+		-h | --help)
+			usage
+			exit 0
+			;;
 		-libdir | -l)
 			xrt_lib_prefix=$2
 			shift
@@ -83,7 +118,7 @@ while [ $# -gt 0 ]; do
 done
 accel_debugfs="/sys/kernel/debug/accel"
 xrt_libs="${xrt_lib_prefix}/libxrt_coreutil.so,${xrt_lib_prefix}/libxrt_driver_xdna.so"
-perf_record_args="-e amdxdna_trace:* "
+perf_record_args="-e amdxdna:* "
 perf_record_args+="-e sdt_xrt:* "
 exec_cmd=""
 
