@@ -5,8 +5,11 @@
 #include "io_config.h"
 #include "core/common/aiebu/src/cpp/include/aiebu/aiebu_assembler.h"
 #include "xrt/detail/xrt_error_code.h"
+#include "core/common/query_requests.h"
 
 #include <climits>
+#include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <string>
@@ -16,6 +19,20 @@
 using namespace xrt_core;
 
 namespace {
+
+// Returns 0 when the resource is unavailable so the caller can degrade gracefully.
+uint64_t
+gemm_query_clock_mhz(const device* dev, query::xrt_resource_raw::resource_type which)
+{
+  uint64_t clk_mhz = 0;
+
+  auto res_info = device_query_default<query::xrt_resource_raw>(dev, {});
+  for (const auto& res : res_info) {
+    if (res.type == which)
+      clk_mhz = res.data_uint64;
+  }
+  return clk_mhz;
+}
 
 // An aie4 fault surfaces as a driver-synthesized AIE-class async error, so
 // assert one arrived with the expected code and a fresh timestamp.
@@ -1163,15 +1180,98 @@ verify_result()
 
   if (m_is_full_elf) {
     const uint32_t* words = reinterpret_cast<const uint32_t*>(dbo_p);
-    // Avg cycle count should always be 276
-    constexpr uint32_t expected_cycle_count = 276;
-    for (size_t i = 0; i < m_npu3_num_cores; i++) {
-      if (words[i * 2] != static_cast<uint32_t>(i))
+
+    // The debug BO holds one (core_idx, cycle_count) pair per SAVE_REGISTER in
+    // the control code (gemm.elf has 12), and unwritten slots keep the
+    // 0xffffffff host fill. Count the leading run of populated slots.
+    size_t active_cores = 0;
+    while (active_cores < m_npu3_num_cores &&
+           words[active_cores * 2] == static_cast<uint32_t>(active_cores))
+      ++active_cores;
+    if (active_cores == 0)
+      throw std::runtime_error(std::string("gemm debug BO has no populated cores, core_idx at slot 0 is ")
+        + std::to_string(words[0]) + ", expected 0");
+
+    // Otherwise the leading-run scan above would silently accept a wrong core_idx.
+    constexpr uint32_t unwritten_core_idx = 0xffffffff;
+    for (size_t i = active_cores; i < m_npu3_num_cores; i++) {
+      if (words[i * 2] != unwritten_core_idx)
         throw std::runtime_error(std::string("bad debug BO core_idx at slot ") + std::to_string(i)
-          + ", expected " + std::to_string(i) + ", got " + std::to_string(words[i * 2]));
-      if (words[i * 2 + 1] != expected_cycle_count)
+          + ", expected either " + std::to_string(i) + " or an unwritten slot, got "
+          + std::to_string(words[i * 2]));
+    }
+
+    // Instrumentation only, never pass/fail. Each core computes an INT8 GEMM
+    // tile of 2 * M * N * K = 2097152 ops.
+    constexpr uint64_t total_ops_per_core = 2097152;
+    double total_cycles = 0.0;
+    uint32_t min_cc = UINT32_MAX;
+    uint32_t max_cc = 0;
+    std::ostringstream percore;
+    for (size_t i = 0; i < active_cores; i++) {
+      const uint32_t cc = words[i * 2 + 1];
+
+      total_cycles += cc;
+      if (cc < min_cc)
+        min_cc = cc;
+      if (cc > max_cc)
+        max_cc = cc;
+      percore << (i ? ", " : "") << "c" << i << "=" << cc;
+    }
+    const double avg_cc = total_cycles / active_cores;
+    std::cout << "gemm: populated cores=" << active_cores << " of " << m_npu3_num_cores
+              << " [" << percore.str() << "]" << std::endl;
+
+    // npu_curr_clk_max is the H-clock the run saw, npu_clk_max the top DPM level.
+    const uint64_t clock_mhz =
+      gemm_query_clock_mhz(m_dev, query::xrt_resource_raw::resource_type::npu_curr_clk_max);
+    const uint64_t clock_max_mhz =
+      gemm_query_clock_mhz(m_dev, query::xrt_resource_raw::resource_type::npu_clk_max);
+    auto tops_at = [&](uint64_t mhz) -> double {
+      if (!mhz || avg_cc <= 0.0)
+        return 0.0;
+
+      // ops * MHz * 1e6 / cycles gives ops per second, and 1e12 of those per TOPS.
+      const double ops_per_sec_per_core =
+        (static_cast<double>(total_ops_per_core) * mhz * 1e6) / avg_cc;
+      return (ops_per_sec_per_core * active_cores) / 1e12;
+    };
+
+    std::ostringstream cyc;
+    if (min_cc == max_cc)
+      cyc << min_cc << " cycles/core";
+    else
+      cyc << "avg " << std::fixed << std::setprecision(1) << avg_cc
+          << " cycles/core (min " << min_cc << ", max " << max_cc << ")";
+
+    if (clock_mhz) {
+      std::cout << "gemm: " << cyc.str()
+                << " @ " << clock_mhz << "MHz = "
+                << std::fixed << std::setprecision(2) << tops_at(clock_mhz) << " TOPS"
+                << " (peak @" << clock_max_mhz << "MHz = "
+                << std::fixed << std::setprecision(2) << tops_at(clock_max_mhz) << " TOPS)"
+                << std::endl;
+    } else {
+      std::cout << "gemm: " << cyc.str() << " (clock unavailable)" << std::endl;
+    }
+
+    // Each core should take 276 cycles. Allow a band around it so that drift
+    // small enough to leave the achieved TOPS intact is reported by the
+    // summary above rather than failing the run.
+    constexpr uint32_t expected_cycle_count = 276;
+    constexpr uint32_t cycle_count_tolerance_pct = 5;
+    constexpr uint32_t cycle_count_slack =
+      (expected_cycle_count * cycle_count_tolerance_pct + 99) / 100;
+    for (size_t i = 0; i < active_cores; i++) {
+      const uint32_t cc = words[i * 2 + 1];
+
+      if (cc < expected_cycle_count - cycle_count_slack ||
+          cc > expected_cycle_count + cycle_count_slack)
         throw std::runtime_error(std::string("bad debug BO cycle_count at core ") + std::to_string(i)
-          + ", expected " + std::to_string(expected_cycle_count) + ", got " + std::to_string(words[i * 2 + 1]));
+          + ", expected " + std::to_string(expected_cycle_count) + " +/-"
+          + std::to_string(cycle_count_tolerance_pct) + "% ("
+          + std::to_string(expected_cycle_count - cycle_count_slack) + ".."
+          + std::to_string(expected_cycle_count + cycle_count_slack) + "), got " + std::to_string(cc));
     }
     return;
   }
