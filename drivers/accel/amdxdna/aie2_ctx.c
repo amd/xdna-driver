@@ -513,13 +513,12 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 				fw_dead = true;
 			kfree(report);
 		} else {
-			/* fatal_type is set by the firmware when it reports an
-			 * unrecoverable error. Note: dpu_pc == UINT_MAX is the
-			 * documented idle value (see struct app_health_report,
-			 * aie2_msg_priv.h) and is deliberately NOT used as a
-			 * wedge signal to avoid false positives. */
-			if (report->fatal_info.fatal_type)
-				fw_dead = true;
+			/* A fatal_type report is NOT a wedge signal by itself: the
+			 * firmware answered the query, so it is alive. dpu_pc ==
+			 * UINT_MAX is the documented idle value (see struct
+			 * app_health_report, aie2_msg_priv.h) and is likewise
+			 * deliberately not used as a wedge signal to avoid false
+			 * positives. */
 			job->aie2_job_health = report;
 		}
 	}
@@ -541,13 +540,13 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	if (ret || fw_dead) {
 		/*
 		 * Per-context recovery goes through the mailbox; it cannot fix a
-		 * dead firmware (unresponsive health query, firmware-reported
-		 * fatal error, or a restart the firmware rejects). Power-cycle
-		 * the NPU via SMU to reload the firmware. aie2_hw_reset()
-		 * rate-limits itself to one reset per AIE2_HW_RESET_MIN_INTERVAL_MS.
+		 * dead firmware (an unresponsive health query or a restart the
+		 * firmware rejects). Power-cycle the NPU via SMU to reload the
+		 * firmware. aie2_hw_reset() rate-limits itself to one reset per
+		 * AIE2_HW_RESET_MIN_INTERVAL_MS.
 		 */
 		XDNA_WARN(xdna, "NPU firmware unhealthy (ctx restart ret %d, health %s) - power-cycling NPU",
-			  ret, fw_dead ? "fatal/absent" : "ok");
+			  ret, fw_dead ? "unresponsive" : "ok");
 		aie2_hw_reset(xdna);
 	}
 

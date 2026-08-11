@@ -520,6 +520,10 @@ int aie2_hw_reset(struct amdxdna_dev *xdna)
 			  jiffies_to_msecs(jiffies - ndev->last_reset_jiffies));
 		return -EAGAIN;
 	}
+
+	/* Stamp before resetting: if the power-cycle itself fails (NPU stays
+	 * wedged), retries stay bounded to one per window instead of storming
+	 * the SMU on every job timeout. */
 	ndev->last_reset_jiffies = jiffies;
 
 	XDNA_WARN(xdna, "NPU firmware unhealthy: power-cycling NPU");
