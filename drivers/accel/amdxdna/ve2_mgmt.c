@@ -415,23 +415,19 @@ static int ve2_mgmt_handshake_init(struct amdxdna_mgmtctx *mgmtctx,
 				  AIE_PART_INIT_OPT_NMU_CONFIG | AIE_PART_INIT_OPT_DIS_TLAST_ERROR |
 				  AIE_PART_INIT_OPT_ERR_SHIM_INIT | AIE_PART_INIT_OPT_HANDSHAKE);
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_PARTITION_INIT",
-				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, num_col);
+	trace_xdna_partition_init_start(hwctx->name, hwctx->id, mgmtctx->start_col, num_col);
 	ret = aie_partition_initialize(mgmtctx->aie_dev, &args);
+	trace_xdna_partition_init_done(hwctx->name, hwctx->id, mgmtctx->start_col, num_col, ret);
 	if (ret < 0) {
 		XDNA_ERR(xdna, "aie partition init failed: %d", ret);
 		goto release_hs_data;
 	}
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_PARTITION_DONE",
-				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, num_col);
 
 	/*
 	 * Refresh host_time_high/low now that the (slow) partition init has
 	 * completed, so CERT reads an up-to-date value as soon as it wakes up.
 	 */
 	ve2_cert_update_host_time(mgmtctx, num_col);
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_HOST_TIME_SETUP",
-				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, num_col);
 
 	/* Wake up the lead UC only */
 	ret = aie_partition_uc_wakeup(mgmtctx->aie_dev, &lead_loc);
@@ -539,18 +535,16 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 
 	mgmtctx = vp->mgmtctx;
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
-				  hwctx->client->pid, mgmtctx->start_col, hwctx->id,
-				  command_index);
+	trace_xdna_mgmt_schedule_cmd_start(hwctx->name, hwctx->id, mgmtctx->start_col,
+					   command_index);
 
 	mutex_lock(&mgmtctx->ctx_lock);
 
 	ret = ve2_fifo_enqueue(mgmtctx, hwctx, command_index);
 	if (ret) {
 		mutex_unlock(&mgmtctx->ctx_lock);
-		trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-					  hwctx->client->pid, mgmtctx->start_col, hwctx->id,
-					  command_index);
+		trace_xdna_mgmt_schedule_cmd_done(hwctx->name, hwctx->id, mgmtctx->start_col,
+						  command_index, ret);
 		return ret;
 	}
 
@@ -560,9 +554,8 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 		ret = ve2_mgmt_handshake_init(mgmtctx, hwctx);
 		if (ret) {
 			mutex_unlock(&mgmtctx->ctx_lock);
-			trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-						  hwctx->client->pid, mgmtctx->start_col,
-						  hwctx->id, command_index);
+			trace_xdna_mgmt_schedule_cmd_done(hwctx->name, hwctx->id,
+							  mgmtctx->start_col, command_index, ret);
 			return ret;
 		}
 		mgmtctx->active_ctx = hwctx;
@@ -601,9 +594,8 @@ int ve2_mgmt_schedule_cmd(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
 
 	mutex_unlock(&mgmtctx->ctx_lock);
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-				  hwctx->client->pid, mgmtctx->start_col, hwctx->id,
-				  command_index);
+	trace_xdna_mgmt_schedule_cmd_done(hwctx->name, hwctx->id, mgmtctx->start_col,
+					  command_index, 0);
 	return 0;
 }
 
@@ -723,8 +715,7 @@ static void ve2_scheduler_work(struct work_struct *work)
 	if (!vp)
 		return;
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
-				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, 0);
+	trace_xdna_sched_work_start(hwctx->name, hwctx->id, mgmtctx->start_col);
 
 	/* If a switch was requested, mark the firmware ready to be reprogrammed. */
 	ve2_check_context_req(mgmtctx);
@@ -747,8 +738,7 @@ static void ve2_scheduler_work(struct work_struct *work)
 			 mgmtctx->active_ctx);
 	}
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-				  hwctx->client->pid, mgmtctx->start_col, hwctx->id, 0);
+	trace_xdna_sched_work_done(hwctx->name, hwctx->id, mgmtctx->start_col);
 }
 
 static void pop_from_ctx_command_fifo_till(struct amdxdna_mgmtctx *mgmtctx,
@@ -789,8 +779,7 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 	if (!active_ctx)
 		return;
 
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_ENTER",
-				  active_ctx->client->pid, mgmtctx->start_col, active_ctx->id, 0);
+	trace_xdna_irq_enter(active_ctx->name, mgmtctx->partition_id, active_ctx->id);
 
 	if (get_ctx_read_index(active_ctx, &read_index)) {
 		XDNA_ERR(mgmtctx->xdna, "IRQ: failed to get read index");
@@ -803,9 +792,8 @@ static void ve2_irq_handler(u32 partition_id, void *priv)
 		wake_up_interruptible_all(&vp->waitq);
 
 	get_ctx_write_index(active_ctx, &write_index);
-	trace_amdxdna_trace_point("XRT_PROFILING_TRACE_EXIT",
-				  active_ctx->client->pid, active_ctx->id,
-				  write_index, read_index);
+	trace_xdna_irq_exit(active_ctx->name, mgmtctx->partition_id, active_ctx->id,
+			    read_index, write_index);
 
 	if (mgmtctx->work_queue &&
 	    (ve2_check_idle_or_queue_not_empty(mgmtctx) || ve2_check_misc_interrupt(mgmtctx))) {
