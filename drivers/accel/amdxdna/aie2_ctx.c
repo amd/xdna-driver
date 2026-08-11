@@ -489,6 +489,7 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	struct amdxdna_dev *xdna;
 	struct aie_device *aie;
 	bool fw_dead = false;
+	bool fw_fatal = false;
 	int ret;
 
 	xdna = hwctx->client->xdna;
@@ -511,12 +512,11 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 				fw_dead = true;
 			kfree(report);
 		} else {
-			/* A fatal_type report is NOT a wedge signal by itself: the
-			 * firmware answered the query, so it is alive. dpu_pc ==
-			 * UINT_MAX is the documented idle value (see struct
-			 * app_health_report, aie2_msg_priv.h) and is likewise
-			 * deliberately not used as a wedge signal to avoid false
-			 * positives. */
+			/* fatal_type means the ERT hit a fatal exception. The firmware
+			 * still answers queries, so it is NOT a wedge signal by itself:
+			 * it only escalates when the per-context restart also fails. */
+			if (report->fatal_info.fatal_type)
+				fw_fatal = true;
 			job->aie2_job_health = report;
 		}
 	}
@@ -535,17 +535,22 @@ aie2_sched_job_timedout(struct drm_sched_job *sched_job)
 	aie2_hwctx_stop(xdna, hwctx, sched_job);
 
 	ret = aie2_hwctx_restart(xdna, hwctx);
-	if (ret || fw_dead) {
+	if (fw_dead || (fw_fatal && ret)) {
 		/*
 		 * Per-context recovery goes through the mailbox; it cannot fix a
-		 * dead firmware (an unresponsive health query or a restart the
-		 * firmware rejects). Power-cycle the NPU via SMU to reload the
-		 * firmware. aie2_hw_reset() rate-limits itself to one reset per
-		 * AIE2_HW_RESET_MIN_INTERVAL_MS.
+		 * dead firmware (an unresponsive health query, or a restart the
+		 * firmware rejects after reporting a fatal error). Power-cycle the
+		 * NPU via SMU to reload the firmware. aie2_hw_reset() rate-limits
+		 * itself to one reset per AIE2_HW_RESET_MIN_INTERVAL_MS.
 		 */
 		XDNA_WARN(xdna, "NPU firmware unhealthy (ctx restart ret %d, health %s) - power-cycling NPU",
-			  ret, fw_dead ? "unresponsive" : "ok");
+			  ret, fw_dead ? "unresponsive" : "fatal+rejected");
 		aie2_hw_reset(xdna);
+	} else if (ret) {
+		/* Restart rejected but no fatal report: the firmware is responsive,
+		 * so do not escalate to a device-wide power-cycle; log and let the
+		 * next timeout retry. */
+		XDNA_WARN(xdna, "NPU context restart rejected (ret %d) without fatal report - not power-cycling", ret);
 	}
 
 #ifdef HAVE_drm_gpu_sched_stat_reset
