@@ -7,6 +7,7 @@
 #include <atomic>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 #include "drm_local/amdxdna_accel.h"
 #include "core/common/shim/buffer_handle.h"
@@ -162,10 +163,10 @@ public:
   xrt_core::hwctx_handle::slot_id m_owner_ctx_id = AMDXDNA_INVALID_CTX_HANDLE;
 
   // Only for AMDXDNA_BO_CMD type
-  uint32_t
-  get_arg_bo_handles(uint32_t *handles, size_t num) const;
+  std::vector<uint32_t>
+  get_arg_bo_handles() const;
 
-  std::map<size_t, uint32_t> m_args_map;
+  std::map<size_t, std::vector<uint32_t>> m_args_map;
   mutable std::mutex m_args_map_lock;
 
 };
