@@ -49,9 +49,6 @@ void
 xdna_hwq::
 submit_command(xrt_core::buffer_handle *cmd_bo)
 {
-  const size_t max_arg_bos = 1024;
-  uint32_t arg_bo_hdls[max_arg_bos];
-
   if (!cmd_bo)
     shim_err(EINVAL, "submit_command: cmd_bo is NULL");
 
@@ -62,7 +59,8 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
     shim_err(EINVAL, "submit_command: No hwctx bound to HW queue");
 
   auto hwctx_id = m_hwctx->get_slotidx();
-  auto arg_count = static_cast<uint32_t>(boh->get_arg_bo_handles(arg_bo_hdls, max_arg_bos));
+  auto arg_bo_hdls = boh->get_arg_bo_handles();
+  auto arg_count = static_cast<uint32_t>(arg_bo_hdls.size());
 
   shim_debug("Submitting command: hwctx=%u, cmd_bo_hdl=%u, arg_count=%u",
              hwctx_id, cmd_bo_hdl, arg_count);
@@ -70,7 +68,7 @@ submit_command(xrt_core::buffer_handle *cmd_bo)
   amdxdna_drm_exec_cmd ecmd = {
     .hwctx = hwctx_id,
     .cmd_handles = cmd_bo_hdl,
-    .args = reinterpret_cast<uintptr_t>(arg_bo_hdls),
+    .args = reinterpret_cast<uintptr_t>(arg_bo_hdls.data()),
     .cmd_count = 1,
     .arg_count = arg_count,
   };

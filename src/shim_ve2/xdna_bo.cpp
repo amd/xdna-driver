@@ -410,37 +410,31 @@ bind_at(size_t pos, const xrt_core::buffer_handle* bh, size_t offset, size_t siz
 
   if (boh->get_type() != AMDXDNA_BO_CMD) {
     auto h = boh->get_drm_bo_handle();
-    m_args_map[pos] = h;
+    m_args_map[pos] = { h };
     shim_debug("Added arg BO %d to cmd BO %d", h, get_drm_bo_handle());
   } else {
-    const size_t max_args_order = 6;
-    const size_t max_args = 1 << max_args_order;
-    size_t key = pos << max_args_order;
-    uint32_t hs[max_args];
-    auto arg_cnt = boh->get_arg_bo_handles(hs, max_args);
+    // For a nested CMD BO, collect all its arg handles and store them under pos.
+    std::vector<uint32_t> hs;
+    for (const auto& [k, v] : boh->m_args_map)
+      hs.insert(hs.end(), v.begin(), v.end());
     std::string bohs;
-    for (int i = 0; i < arg_cnt; i++) {
-	m_args_map[key + i] = hs[i];
-	bohs += std::to_string(hs[i]) + " ";
-    }
+    for (auto h : hs)
+      bohs += std::to_string(h) + " ";
+    m_args_map[pos] = std::move(hs);
     shim_debug("Added arg BO %s to cmd BO %d", bohs.c_str(), get_drm_bo_handle());
   }
 }
 
-uint32_t
+std::vector<uint32_t>
 xdna_bo::
-get_arg_bo_handles(uint32_t *handles, size_t num) const
+get_arg_bo_handles() const
 {
   std::lock_guard<std::mutex> lg(m_args_map_lock);
 
-  auto sz = m_args_map.size();
-  if (sz > num)
-    shim_err(E2BIG, "There are %ld BO args, provided buffer can hold only %ld", sz, num);
-
-  for (auto m : m_args_map)
-    *(handles++) = m.second;
-
-  return sz;
+  std::vector<uint32_t> handles;
+  for (const auto& [k, v] : m_args_map)
+    handles.insert(handles.end(), v.begin(), v.end());
+  return handles;
 }
 
 uint32_t
