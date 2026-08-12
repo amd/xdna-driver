@@ -473,6 +473,22 @@ int vaccel_submit_ccmd(void *cookie, uint32_t ctx_id, const void *ccmd, uint32_t
 }
 
 int
+vaccel_get_version(struct vaccel_version *version, uint32_t size)
+{
+    if (!version)
+        return -EINVAL;
+
+    if (size != sizeof(struct vaccel_version))
+        return -EINVAL;
+
+    version->major = VXDNA_MAJOR_VERSION;
+    version->minor = VXDNA_MINOR_VERSION;
+
+    vxdna_info("vxdna version %u.%u", VXDNA_MAJOR_VERSION, VXDNA_MINOR_VERSION);
+    return 0;
+}
+
+int
 vaccel_get_capset_info(void *cookie,
                        uint32_t *max_version, uint32_t *max_size)
 {
