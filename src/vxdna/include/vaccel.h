@@ -20,6 +20,33 @@
 extern "C" {
 #endif
 
+/*
+ * vxdna host backend version, queried by QEMU via vaccel_get_version().
+ *
+ * In every release, we bump up the major number if the interface (the
+ * guest<->host ccmd protocol or the vaccel API/ABI) is not compatible with
+ * the previous version, else the minor number is bumped up.
+ *
+ * version history
+ * v1.0
+ *   start to track version
+ */
+
+#define VXDNA_MAJOR_VERSION 1
+#define VXDNA_MINOR_VERSION 0
+
+/**
+ * @brief vxdna version information
+ *
+ * Passed by the caller to vaccel_get_version(). The struct may gain new
+ * fields at the end in future versions; callers pass sizeof(this struct)
+ * so the backend can tell which fields the caller understands.
+ */
+struct vaccel_version {
+    uint32_t major; /**< Major version */
+    uint32_t minor; /**< Minor version */
+};
+
 struct iovec; // from Linux, iovec is defined in <linux/fs.h>
 
 struct vaccel_create_resource_blob_args
@@ -135,6 +162,23 @@ int vaccel_create(void *cookie, uint32_t capset_id, const struct vaccel_callback
  * @param cookie Device cookie
  */
 void vaccel_destroy(void *cookie);
+
+/**
+ * @brief Get the vxdna host backend version
+ *
+ * Fills the caller-provided vaccel_version struct with the major and minor
+ * version of the vxdna host backend. This allows QEMU to enquire the vxdna
+ * version at runtime for compatibility checks. Does not require a device to
+ * have been created.
+ *
+ * The caller passes the size of its vaccel_version struct. Today the size
+ * must match sizeof(struct vaccel_version) exactly.
+ *
+ * @param[out] version Version struct to fill
+ * @param size Size of the version struct, in bytes
+ * @return 0 on success, negative errno on failure
+ */
+int vaccel_get_version(struct vaccel_version *version, uint32_t size);
 
 /**
  * @brief Get virtio vaccel capset information
