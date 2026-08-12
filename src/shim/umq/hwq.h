@@ -30,6 +30,9 @@ public:
   int
   poll_command(xrt_core::buffer_handle *) const override;
 
+  void
+  dump() const override;
+
 private:
   std::unique_ptr<buffer> m_umq_bo;
   void *m_umq_bo_buf;
@@ -41,9 +44,6 @@ private:
 
   uint64_t
   issue_command(const cmd_buffer *cmd_bo) override;
-
-  void
-  dump() const;
 
   void
   dump_raw() const;

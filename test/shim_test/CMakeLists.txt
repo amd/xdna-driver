@@ -17,6 +17,8 @@ target_compile_definitions(${XDNA_SHIM_TEST} PRIVATE
 
 target_link_libraries(${XDNA_SHIM_TEST} PRIVATE
   xrt_coreutil # for xclbin parser and some other helpers
+  xrt_driver_xdna # HACK: linked directly to access shim internals for debug
+  xrt_core        # HACK: transitive dep of xrt_driver_xdna
   aiebu_static
   dl
   )
@@ -35,6 +37,9 @@ target_include_directories(${XDNA_SHIM_TEST} PRIVATE
   ${XRT_SUBMOD_SOURCE_DIR}/src/runtime_src/core/include
   ${XRT_SUBMOD_SOURCE_DIR}/src/runtime_src/core/common/elf
   ${XRT_SUBMOD_BINARY_DIR}/src/gen
+  # HACK: include shim headers directly for debug casts
+  ${CMAKE_SOURCE_DIR}/src/shim
+  ${CMAKE_SOURCE_DIR}/src/include/uapi
   )
 
 target_compile_options(${XDNA_SHIM_TEST} PRIVATE -O3)
