@@ -214,6 +214,7 @@ static int allocate_partition(struct solver_state *xrs,
 			      struct solver_node *snode,
 			      struct alloc_requests *req)
 {
+	u32 user_col = req->rqos.user_start_col;
 	struct partition_node *pt_node, *rpt_node = NULL;
 	int idx, ret;
 
@@ -233,11 +234,26 @@ static int allocate_partition(struct solver_state *xrs,
 		if (rpt_node && pt_node->nshared >= rpt_node->nshared)
 			continue;
 
-		for (idx = 0; idx < snode->cols_len; idx++) {
-			if (snode->start_cols[idx] != pt_node->start_col)
+		if (req->cdo.ncols != pt_node->ncols)
+			continue;
+
+		/*
+		 * A caller that pinned a specific start column must only ever
+		 * reuse a partition at that exact column -- never silently
+		 * redirect it to share a different one. Fail with -ENODEV
+		 * below if no such partition exists, matching the strict
+		 * behaviour of get_free_partition() above.
+		 */
+		if (user_col != USER_START_COL_NOT_REQUESTED) {
+			if (pt_node->start_col != user_col)
 				continue;
 
-			if (req->cdo.ncols != pt_node->ncols)
+			rpt_node = pt_node;
+			continue;
+		}
+
+		for (idx = 0; idx < snode->cols_len; idx++) {
+			if (snode->start_cols[idx] != pt_node->start_col)
 				continue;
 
 			rpt_node = pt_node;
