@@ -451,7 +451,7 @@ void
 TEST_xrt_umq_nop(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
+  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "multi_nop/multi_nop.elf") : elfpath);
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
   unsigned n = o_cmds * (r_cmds > 1 ? r_cmds : 1);
@@ -537,7 +537,7 @@ void
 TEST_xrt_stress_hwctx(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
+  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "multi_nop/multi_nop.elf") : elfpath);
 
   using hwctx_runs_t = std::pair<xrt::hw_context, std::vector<xrt::run>>;
   std::vector<hwctx_runs_t> contexts;
@@ -567,7 +567,7 @@ void
 TEST_xrt_umq_runlist(int device_index, arg_type& arg)
 {
   auto device = xrt::device{device_index};
-  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "nop/nop.elf") : elfpath);
+  auto elf = xrt::elf(elfpath.empty() ? local_path(path + "multi_nop/multi_nop.elf") : elfpath);
   xrt::hw_context hwctx{device, elf};
   xrt::kernel kernel = xrt::ext::kernel{hwctx, "DPU:dpu"};
   unsigned n = o_cmds * MAX_RUNLIST_CMDS;
