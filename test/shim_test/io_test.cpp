@@ -13,6 +13,7 @@
 #include "core/common/query_requests.h"
 #include "core/include/ert.h"
 #include "xrt/detail/xclbin.h"
+#include "hwq.h"
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -30,7 +31,7 @@
 #include <sys/types.h>
 
 // FIXME
-#include "../../src/include/uapi/drm_local/amdxdna_accel.h"
+#include "drm_local/amdxdna_accel.h"
 // end of FIXME
 
 using namespace xrt_core;
@@ -129,7 +130,19 @@ io_test_init_runlist_cmd(bo* cmd_bo, std::vector<bo*>& cmd_bos)
 void io_test_cmd_wait(hwqueue_handle *hwq, std::shared_ptr<bo> bo)
 {
     if (io_test_parameters.wait == IO_TEST_POLL_WAIT) {
-      while(!hwq->poll_command(bo->get()));
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+      bool printed = false;
+      while (!hwq->poll_command(bo->get())) {
+        if (!printed && std::chrono::steady_clock::now() > deadline) {
+          printed = true;
+          auto seq = static_cast<shim_xdna::cmd_buffer *>(bo->get())->wait_for_submitted();
+          std::cout << "poll_command stuck for more than 2 seconds, seq=" << seq << std::endl;
+          static_cast<shim_xdna::hwq *>(hwq)->dump();
+          auto ret = hwq->wait_command(bo->get(), 1000 /* ms */);
+          std::cout << "driver wait_command returned: " << ret
+                    << (ret > 0 ? " (completed)" : " (timed out)") << std::endl;
+        }
+      }
     } else {
       hwq->wait_command(bo->get(), 0);
     }

@@ -90,28 +90,28 @@ hwq_umq::
 dump() const
 {
   auto h = m_umq_hdr;
-  shim_debug("Dumping UMQ queue header @%p:", h);
-  shim_debug("\tRead Index:\t0x%lx", h->read_index);
-  shim_debug("\tWrite Index:\t0x%lx", h->write_index);
-  shim_debug("\tCapacity:\t%d", h->capacity);
-  shim_debug("\tData Addr:\t%p", h->data_address);
+  shim_info("Dumping UMQ queue header @%p:", h);
+  shim_info("\tRead Index:\t0x%lx", h->read_index);
+  shim_info("\tWrite Index:\t0x%lx", h->write_index);
+  shim_info("\tCapacity:\t%d", h->capacity);
+  shim_info("\tData Addr:\t0x%lx", h->data_address);
 
-  shim_debug("Dumping UMQ queue slot @%p:", m_umq_pkt);
+  shim_info("Dumping UMQ queue slot @%p:", m_umq_pkt);
   for (uint32_t i = 0; i < h->capacity; i++) {
     auto pkt = &m_umq_pkt[i];
-    shim_debug("==========slot %u==========", i);
-    shim_debug("\ttype:\t\t%u", static_cast<uint8_t>(pkt->xrt_header.common_header.type));
-    shim_debug("\topcode:\t\t%u", pkt->xrt_header.common_header.opcode);
-    shim_debug("\tchain_flag:\t\t%u", pkt->xrt_header.common_header.chain_flag);
-    shim_debug("\tcount:\t\t%u", pkt->xrt_header.common_header.count);
-    shim_debug("\tdistribute:\t%u", pkt->xrt_header.common_header.distribute);
-    shim_debug("\tindirect:\t%u", pkt->xrt_header.common_header.indirect);
-    shim_debug("\tcomplete addr:\t%p", pkt->xrt_header.completion_signal);
+    shim_info("==========slot %u==========", i);
+    shim_info("\ttype:\t\t%u", static_cast<uint8_t>(pkt->xrt_header.common_header.type));
+    shim_info("\topcode:\t\t%u", pkt->xrt_header.common_header.opcode);
+    shim_info("\tchain_flag:\t%u", pkt->xrt_header.common_header.chain_flag);
+    shim_info("\tcount:\t\t%u", pkt->xrt_header.common_header.count);
+    shim_info("\tdistribute:\t%u", pkt->xrt_header.common_header.distribute);
+    shim_info("\tindirect:\t%u", pkt->xrt_header.common_header.indirect);
+    shim_info("\tcomplete addr:\t0x%lx", pkt->xrt_header.completion_signal);
     if (pkt->xrt_header.common_header.indirect == 0) {
       volatile struct exec_buf *ebp =
         reinterpret_cast<volatile struct exec_buf *>(pkt->data);
 
-      shim_debug("\tdpu: [0x%x 0x%x]",
+      shim_info("\tdpu:\t\t[0x%x 0x%x]",
         ebp->dpu_control_code_host_addr_high,
         ebp->dpu_control_code_host_addr_low);
     } else {
@@ -121,19 +121,19 @@ dump() const
       for (int i = 0; i < HSA_MAX_LEVEL1_INDIRECT_ENTRIES; i++, hp++) {
         uint32_t hi = hp->host_addr_high;
         uint32_t lo = hp->host_addr_low;
-        shim_debug("\thost addr: [0x%x 0x%x]", hi, lo);
+        shim_info("\thost addr: [0x%x 0x%x]", hi, lo);
 
         volatile struct host_indirect_data *data =
         reinterpret_cast<volatile struct host_indirect_data *>(m_umq_indirect_buf);
-        shim_debug("\t\th:distribute:\t%d", data[i].header.distribute);
-        shim_debug("\t\th:indirect:\t%d", data[i].header.indirect);
-        shim_debug("\t\tp:dpu: [0x%x 0x%x]",
+        shim_info("\t\th:distribute:\t%d", data[i].header.distribute);
+        shim_info("\t\th:indirect:\t%d", data[i].header.indirect);
+        shim_info("\t\tp:dpu: [0x%x 0x%x]",
           data[i].payload.dpu_control_code_host_addr_high,
           data[i].payload.dpu_control_code_host_addr_low);
       }
     }
   }
-  shim_debug("Finished dumping UMQ\r\n");
+  shim_info("Finished dumping UMQ\r\n");
 }
 
 void
