@@ -259,7 +259,24 @@ static int ve2_xrs_col_list(struct amdxdna_hwctx *hwctx, u32 total_col)
 				 user_col, num_col, total_col);
 			return -ERANGE;
 		}
-		first_col = user_col;
+
+		/*
+		 * A pinned start column is a hard requirement, not merely a
+		 * preferred starting point: the resource solver must place
+		 * (or share) the partition at exactly this column, or fail.
+		 * Offer only this single candidate so it can never end up
+		 * silently placed/shared elsewhere.
+		 */
+		hwctx->col_list = kmalloc(sizeof(*hwctx->col_list), GFP_KERNEL);
+		if (!hwctx->col_list)
+			return -ENOMEM;
+
+		hwctx->col_list_len = 1;
+		hwctx->col_list[0] = user_col;
+
+		print_hex_dump_debug("col_list: ", DUMP_PREFIX_OFFSET, 16, 4, hwctx->col_list,
+				     sizeof(*hwctx->col_list), false);
+		return 0;
 	} else if (start_col > 0) {
 		/*
 		 * Test-only override: force the lead column to @start_col (and
@@ -1267,6 +1284,34 @@ static void ve2_fifo_remove_ctx(struct amdxdna_mgmtctx *mgmtctx, struct amdxdna_
 	}
 }
 
+/*
+ * Zero out the CERT handshake memory for every column of a partition that is
+ * about to be torn down (last sharer releasing it). Mirrors the legacy
+ * driver's cert_clear_partition(): without this, stale handshake state
+ * (ctx_switch_req, hsa addr, debug/trace buffer pointers, etc. from the
+ * previous occupant) can persist in AIE memory across a partition
+ * teardown/re-request cycle on the same columns.
+ */
+static void ve2_clear_partition_handshake(struct amdxdna_mgmtctx *mgmtctx,
+					  struct amdxdna_hwctx *hwctx)
+{
+	struct amdxdna_dev *xdna = mgmtctx->xdna;
+	struct aie_op_handshake_data *hs_data;
+	int ret;
+
+	hs_data = ve2_prepare_hs_data(mgmtctx, hwctx, false);
+	if (!hs_data) {
+		XDNA_ERR(xdna, "No memory for hs_data while clearing partition handshake");
+		return;
+	}
+
+	ret = aie_partition_handshake_update(mgmtctx->aie_dev, hs_data, mgmtctx->num_col);
+	if (ret < 0)
+		XDNA_ERR(xdna, "aie partition handshake update failed, ret: %d", ret);
+
+	ve2_free_hs_data(hs_data, mgmtctx->num_col);
+}
+
 int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 {
 	struct amdxdna_ctx_priv *vp = hwctx ? ve2_hw_priv(hwctx) : NULL;
@@ -1311,6 +1356,8 @@ int ve2_mgmt_destroy_partition(struct amdxdna_hwctx *hwctx)
 
 	if (release_aie_part) {
 		struct workqueue_struct *wq;
+
+		ve2_clear_partition_handshake(mgmtctx, hwctx);
 
 		aie_unregister_error_notification(mgmtctx->aie_dev);
 
