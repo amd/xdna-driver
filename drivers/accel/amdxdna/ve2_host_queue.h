@@ -288,7 +288,8 @@ struct handshake {
 	u32 completion_status;	/* 0x74: FW sets to COMPLETION_STATUS_DONE before completion IRQ */
 	u32 last_preemption_id;		/* 0x78 */
 	u32 save_dbg_buf_offset;	/* 0x7c: FW-updated debug-buffer DDR write offset */
-	u32 reserved1[4];		/* pad so vm starts at offset 0xa0 */
+	u32 npi_interrupt_status;
+	u32 reserved1[3];		/* pad so vm starts at offset 0xa0 */
 	u32 last_ddr_dm2mm_addr_high;
 	u32 last_ddr_dm2mm_addr_low;
 	u32 last_ddr_mm2dm_addr_high;
