@@ -53,10 +53,13 @@ committed pin.
 """
 
 import argparse
+import http.client
 import os
 import posixpath
 import shutil
 import subprocess
+import time
+import urllib.error
 import urllib.request
 
 FW_REPO = "kernel-firmware/drm-firmware"
@@ -66,6 +69,13 @@ AMDNPU_PREFIX = "amdnpu/"
 
 VTD_REPO = "https://github.com/Xilinx/VTD.git"
 VTD_RAW_URL = "https://github.com/Xilinx/VTD/raw/{ref}/{path}"
+
+# Total attempts per download and the base delay between them. The hosts we
+# fetch from (gitlab.com, github.com) intermittently drop a connection or rate
+# limit a CI machine that fetches several blobs back to back, which used to fail
+# the whole build on a single hiccup.
+FETCH_ATTEMPTS = 4
+FETCH_RETRY_DELAY = 3.0
 
 
 # --------------------------------------------------------------------------- #
@@ -97,23 +107,71 @@ def read_pin(text, key):
     return ""
 
 
-def fetch_to(url, dest, timeout=60):
+def is_transient(exc):
+    """Report whether a failed download is worth retrying.
+
+    A dropped connection, a socket timeout, a DNS blip or a server-side 5xx/429
+    say nothing about the request itself, so the same URL may well succeed a
+    moment later. A 404 or 403 is a manifest or permission problem that no
+    number of retries will fix, so those fail immediately.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code == 429 or 500 <= exc.code < 600
+    # URLError and TimeoutError are both OSError subclasses; HTTPException
+    # covers RemoteDisconnected and IncompleteRead.
+    return isinstance(exc, (OSError, http.client.HTTPException))
+
+
+def retry_after(exc, attempt, attempts):
+    """Wait before retrying a download; return False when giving up.
+
+    Backing off linearly rather than hammering the remote gives a rate limited
+    or briefly unreachable host time to recover.
+    """
+    if attempt >= attempts or not is_transient(exc):
+        return False
+    delay = FETCH_RETRY_DELAY * attempt
+    print("  retry %d/%d in %.0fs after %s: %s"
+          % (attempt, attempts - 1, delay, type(exc).__name__, exc))
+    time.sleep(delay)
+    return True
+
+
+def fetch_to(url, dest, timeout=60, attempts=FETCH_ATTEMPTS):
     """Download url to dest atomically via a ".part" temp file.
 
     The response is streamed in chunks so a large firmware blob is never held
     in memory in full, and a socket timeout keeps a stalled connection from
-    hanging the build indefinitely.
+    hanging the build indefinitely. A transient network failure is retried so
+    one dropped connection does not fail the build.
     """
     tmp = dest + ".part"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp, \
-                open(tmp, "wb") as out:
-            shutil.copyfileobj(resp, out)
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp, \
+                    open(tmp, "wb") as out:
+                shutil.copyfileobj(resp, out)
+        except BaseException as exc:
+            # A partial ".part" from the failed attempt must go before the next
+            # one reopens it, and must not survive a give-up either.
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            if not retry_after(exc, attempt, attempts):
+                raise
+            continue
         os.replace(tmp, dest)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        raise
+        return
+
+
+def fetch_text(url, timeout=60, attempts=FETCH_ATTEMPTS):
+    """Download url and return its decoded body, retrying transient errors."""
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except BaseException as exc:
+            if not retry_after(exc, attempt, attempts):
+                raise
 
 
 def write_commit_file(path, first, second, makedirs=False):
@@ -123,6 +181,24 @@ def write_commit_file(path, first, second, makedirs=False):
     with open(path, "w") as handle:
         handle.write(first + "\n")
         handle.write(second + "\n")
+
+
+def read_cached_commit(commit_file):
+    """Return the commit a prior sync recorded, or "" if unknown.
+
+    build.sh points --commit-file at ".whence_commit" (firmware) or
+    ".vtd_commit" (VTD), into which write_commit_file() records
+    "<ref>\\n<commit>". Reading the commit back lets a reused amdxdna_bins cache
+    tell which upstream commit its downloaded files were fetched from.
+    """
+    if not commit_file or not os.path.exists(commit_file):
+        return ""
+    try:
+        with open(commit_file, "r") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return ""
+    return lines[1].strip() if len(lines) > 1 else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -153,10 +229,9 @@ def read_firmware_whence(args):
     commit = resolve_commit(args.ref)
     url = FW_RAW_URL.format(repo=FW_REPO, ref=commit, path="WHENCE")
     # A socket timeout keeps a stalled connection from hanging packaging
-    # indefinitely, matching the timeout fetch_to() uses for the blobs.
-    with urllib.request.urlopen(url, timeout=60) as resp:
-        text = resp.read().decode("utf-8", "replace")
-    return text, commit, commit
+    # indefinitely, matching the timeout and retries fetch_to() uses for the
+    # blobs.
+    return fetch_text(url), commit, commit
 
 
 def extract_amdxdna_section(text):
@@ -231,24 +306,6 @@ def strip_prefix(path):
         raise SystemExit(
             "error: WHENCE path %r escapes %s" % (path, AMDNPU_PREFIX))
     return rel
-
-
-def read_cached_commit(commit_file):
-    """Return the drm-firmware commit a prior sync recorded, or "" if unknown.
-
-    build.sh points --commit-file at ".whence_commit", into which
-    write_commit_file() records "<ref>\\n<commit>". Reading the commit back lets
-    a reused amdxdna_bins cache tell which drm-firmware commit its versioned
-    firmware blobs were fetched from.
-    """
-    if not commit_file or not os.path.exists(commit_file):
-        return ""
-    try:
-        with open(commit_file, "r") as handle:
-            lines = handle.read().splitlines()
-    except OSError:
-        return ""
-    return lines[1].strip() if len(lines) > 1 else ""
 
 
 def download_firmware(ref, remote_path, dest, refresh=False):
@@ -504,10 +561,20 @@ def sync_vtd(args):
 
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)
+
+    # An archive comes from an immutable commit, so a cached copy still matches
+    # the source only while it was fetched from the commit now being synced.
+    # Skipping those re-downloads keeps a warm amdxdna_bins cache (reused across
+    # CI runs) from depending on the network at all, and matches how the
+    # firmware sync treats its own cache. Any other recorded commit, or none,
+    # may leave stale bytes under an unchanged file name, so re-download.
+    cached = read_cached_commit(args.commit_file) == commit
     for remote_path in files:
         # The download always uses the resolved commit; the archive is stored
         # flat under its file name so packaging (pkg.cmake) stays unchanged.
         dest = os.path.join(out_dir, posixpath.basename(remote_path))
+        if cached and os.path.exists(dest):
+            continue
         # fetch_to() streams into a ".part" file and atomically os.replace()s it
         # over any existing archive, so no non-atomic pre-delete is needed and a
         # mid-run download failure leaves the previous archive intact.
