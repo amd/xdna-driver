@@ -131,7 +131,6 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_aligned_size(size)
   , m_flags(flags)
   , m_type(type)
-  , m_import(-1)
   , m_owner_ctx_id(ctx_id)
   , m_map_offset(0)
 {
@@ -161,7 +160,6 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_edev(device.get_edev())
   , m_aligned_size(size)
   , m_type(AMDXDNA_BO_SHARE)
-  , m_import(-1)
   , m_owner_ctx_id(ctx_id)
   , m_map_offset(0)
   , m_uptr(uptr)
@@ -184,11 +182,10 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
 xdna_bo::
 xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   : m_edev(device.get_edev())
-  , m_import(ehdl)
 {
-  uint32_t boh = shim_xdna_edge::xdna_bo::import_drm_bo(m_import, &m_type, &m_aligned_size);
+  uint32_t boh = import_drm_bo(ehdl, &m_type, &m_aligned_size);
   m_edev->bo_handle_ref_inc(boh);
-  shim_xdna_edge::xdna_bo::get_drm_bo_info(boh);
+  get_drm_bo_info(boh);
 }
 
 xdna_bo::
@@ -584,9 +581,8 @@ export_drm_bo(uint32_t boh) const
 
 uint32_t
 xdna_bo::
-import_drm_bo(const shim_xdna_edge::shared& share,uint32_t *type, size_t *size) const
+import_drm_bo(xrt_core::shared_handle::export_handle fd, uint32_t *type, size_t *size) const
 {
-  xrt_core::shared_handle::export_handle fd = share.get_export_handle();
   drm_prime_handle imp_bo = {AMDXDNA_INVALID_BO_HANDLE, 0, fd};
   m_edev->ioctl(DRM_IOCTL_PRIME_FD_TO_HANDLE, &imp_bo);
   *type = AMDXDNA_BO_SHARE;

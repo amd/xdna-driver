@@ -68,7 +68,7 @@ public:
   export_drm_bo(uint32_t boh) const;
   
   uint32_t
-  import_drm_bo(const shim_xdna_edge::shared&, uint32_t*, size_t*) const;
+  import_drm_bo(xrt_core::shared_handle::export_handle fd, uint32_t*, size_t*) const;
 public:
   xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
      size_t size, uint64_t flags, uint32_t type, uint32_t mem_bitmap=0);
@@ -94,10 +94,6 @@ public:
   // Sync the BO
   void
   sync_bo(direction dir, size_t size, size_t offset);
-
-  // Import DRM BO from m_import shared object
-  void
-  import_bo();
 
   void
   bind_at(size_t pos, const xrt_core::buffer_handle* bh, size_t offset, size_t size) override;
@@ -155,8 +151,6 @@ public:
   uint64_t m_xdna_addr = AMDXDNA_INVALID_ADDR;
   uint64_t m_vaddr = AMDXDNA_INVALID_ADDR;
   void *m_uptr = nullptr;
-
-  const shared m_import;
 
   // Command ID in the queue after command submission.
   // Only valid for cmd BO.
