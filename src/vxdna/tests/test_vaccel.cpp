@@ -8,6 +8,7 @@
  * Tests all public APIs exposed in vaccel.h including:
  * - vaccel_create()
  * - vaccel_destroy()
+ * - vaccel_get_version()
  * - vaccel_get_capset_info()
  * - vaccel_fill_capset()
  */
@@ -279,6 +280,38 @@ TEST_F(VaccelRendererTest, GetCapsetInfoPartialOutputs) {
     ret = vaccel_get_capset_info(cookie_, nullptr, &max_size);
     EXPECT_EQ(ret, 0);
     EXPECT_GT(max_size, 0);
+}
+
+// =============================================================================
+// vaccel_get_version() Tests
+// =============================================================================
+
+TEST(VaccelVersionTest, GetVersionSuccess) {
+    struct vaccel_version version = {};
+
+    int ret = vaccel_get_version(&version, sizeof(version));
+    EXPECT_EQ(ret, 0) << "vaccel_get_version() should succeed with matching size";
+    EXPECT_EQ(version.major, VXDNA_MAJOR_VERSION);
+    EXPECT_EQ(version.minor, VXDNA_MINOR_VERSION);
+}
+
+TEST(VaccelVersionTest, GetVersionNullVersion) {
+    int ret = vaccel_get_version(nullptr, sizeof(struct vaccel_version));
+    EXPECT_EQ(ret, -EINVAL) << "vaccel_get_version() should fail with NULL version";
+}
+
+TEST(VaccelVersionTest, GetVersionSizeTooSmall) {
+    struct vaccel_version version = {};
+
+    int ret = vaccel_get_version(&version, sizeof(version) - 1);
+    EXPECT_EQ(ret, -EINVAL) << "vaccel_get_version() should fail with too-small size";
+}
+
+TEST(VaccelVersionTest, GetVersionSizeTooLarge) {
+    struct vaccel_version version = {};
+
+    int ret = vaccel_get_version(&version, sizeof(version) + 1);
+    EXPECT_EQ(ret, -EINVAL) << "vaccel_get_version() should fail with mismatched size";
 }
 
 // =============================================================================
