@@ -413,15 +413,15 @@ bind_at(size_t pos, const xrt_core::buffer_handle* bh, size_t offset, size_t siz
     m_args_map[pos] = { h };
     shim_debug("Added arg BO %d to cmd BO %d", h, get_drm_bo_handle());
   } else {
-    // For a nested CMD BO, collect all its arg handles and store them under pos.
-    std::vector<uint32_t> hs;
-    for (const auto& [k, v] : boh->m_args_map)
-      hs.insert(hs.end(), v.begin(), v.end());
+    // For a nested CMD BO, use get_arg_bo_handles() to get a thread-safe snapshot.
+    auto hs = boh->get_arg_bo_handles();
+#ifdef XDNA_SHIM_DEBUG
     std::string bohs;
     for (auto h : hs)
       bohs += std::to_string(h) + " ";
-    m_args_map[pos] = std::move(hs);
     shim_debug("Added arg BO %s to cmd BO %d", bohs.c_str(), get_drm_bo_handle());
+#endif
+    m_args_map[pos] = std::move(hs);
   }
 }
 
