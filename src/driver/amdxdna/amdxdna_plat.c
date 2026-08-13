@@ -395,11 +395,25 @@ static int amdxdna_plat_probe(struct platform_device *pdev)
 	 * check inside dma_buf_map_attachment().  amdxdna_cmabuf_map()
 	 * works around that by mapping against cbuf->dev (the producer
 	 * device the BO was allocated on) instead of attach->dev.
+	 *
+	 * Some platforms have no 32-bit-addressable DDR at all (e.g. a Xen
+	 * dom0less DomU guest whose entire static-mem RAM bank sits above
+	 * 4 GB), so ZONE_DMA32 is empty and dma_direct_supported() rejects
+	 * a 32-bit mask with -EIO.  Fall back to a 64-bit mask in that case
+	 * so probe still succeeds; this is inert on platforms where the
+	 * 32-bit mask succeeds (native boot with 32-bit-addressable DDR).
+	 * The NPU still reaches its carveouts (rpu-cma / mgmt) by their
+	 * fixed physical addresses, not via this device's DMA mask, so
+	 * widening the mask is safe.
 	 */
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (ret) {
-		dev_err(dev, "Failed to set 32-bit DMA mask: %d\n", ret);
-		return ret;
+		dev_warn(dev, "32-bit DMA mask unavailable (%d); falling back to 64-bit\n", ret);
+		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+		if (ret) {
+			dev_err(dev, "Failed to set DMA mask (32 and 64 bit): %d\n", ret);
+			return ret;
+		}
 	}
 
 	/* Bind named CMA regions ("rpu-cma" + "app-bank<N>"). */
