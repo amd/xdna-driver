@@ -1,0 +1,77 @@
+From 396d75d7f29b913c143f3d62af9a1975d4260e27 Mon Sep 17 00:00:00 2001
+From: Saif <saifuddin.kaijar@amd.com>
+Date: Fri, 17 Jul 2026 14:59:35 +0530
+Subject: [PATCH] aie: handshake: avoid dmam_alloc_coherent per column via
+ dma_addr
+
+Add dma_addr field to aie_op_handshake_data. When non-zero it carries
+the pre-known DMA address of a caller-preallocated coherent buffer,
+allowing aie2ps_part_write_handshake() to skip the per-column
+dmam_alloc_coherent + memcpy + dmam_free sequence and use the buffer
+directly.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ drivers/misc/xilinx-ai-engine/ai-engine-reset.c | 15 ++++++++-------
+ include/uapi/linux/xlnx-ai-engine.h             |  4 ++++
+ 2 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+index b0597a655d58..6f3b0facad1d 100644
+--- a/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
++++ b/drivers/misc/xilinx-ai-engine/ai-engine-reset.c
+@@ -761,7 +761,10 @@ int aie2ps_part_write_handshake(struct aie_partition *apart,
+ 		range.start.col = hs_data->loc.col + apart->range.start.col;
+ 		range.size.col = 1U;
+ 
+-		if (virt_addr_valid(hs_data->addr)) {
++		if (hs_data->dma_addr) {
++			hs_addr[i].hs_va  = hs_data->addr;
++			hs_addr[i].hs_dma = (dma_addr_t)hs_data->dma_addr;
++		} else if (virt_addr_valid(hs_data->addr)) {
+ 			hs_addr[i].hs_va = dmam_alloc_coherent(&apart->dev,
+ 							       hs_data->size,
+ 							       &hs_addr[i].hs_dma,
+@@ -802,15 +805,13 @@ int aie2ps_part_write_handshake(struct aie_partition *apart,
+ 	}
+ 
+ clear:
+-	/*
+-	 * The dma buffer is either unmapped/freed depending on the input
+-	 * address after the handshake data is copied using DMA
+-	 * to the handshake region.
+-	 */
+ 	for (u32 i = 0; i < handshake_cols; i++) {
+ 		hs_data = &data[i];
+ 
+-		if (hs_addr[i].hs_va)	{
++		if (hs_data->dma_addr)
++			continue;
++
++		if (hs_addr[i].hs_va) {
+ 			if (virt_addr_valid(hs_data->addr))
+ 				dmam_free_coherent(&apart->dev, hs_data->size,
+ 						   hs_addr[i].hs_va, hs_addr[i].hs_dma);
+diff --git a/include/uapi/linux/xlnx-ai-engine.h b/include/uapi/linux/xlnx-ai-engine.h
+index dd0d4a417252..5856981d2f17 100644
+--- a/include/uapi/linux/xlnx-ai-engine.h
++++ b/include/uapi/linux/xlnx-ai-engine.h
+@@ -258,11 +258,15 @@ struct aie_partition_req {
+ /**
+  * struct aie_op_handshake_data - AI engine uc handshake region information
+  * @addr: handshake data address from where the data needs to be copied.
++ * @dma_addr: pre-known DMA address of @addr. When non-zero, the buffer is
++ *            already a DMA coherent allocation; neither dmam_alloc_coherent
++ *            nor dma_map_single is needed.
+  * @size: handshake data size.
+  * @offset: offset for handshake region update.
+  */
+ struct aie_op_handshake_data {
+ 	void *addr;
++	__u64 dma_addr;
+ 	size_t size;
+ 	size_t offset;
+ 	struct aie_location loc;
+-- 
+2.43.0
+
