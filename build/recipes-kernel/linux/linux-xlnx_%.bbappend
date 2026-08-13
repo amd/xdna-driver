@@ -17,3 +17,5 @@ SRC_URI:append = " file://0001-xilinx-ai-engine-Protect-AXI-MM-access-during-res
 SRC_URI:append = " file://0001-xilinx-ai-engine-Protect-AXI-MM-access-during-reset-coredump-fix.patch"
 SRC_URI:append = " file://0004-xilinx-ai-engine-Replace-udelay-with-usleep_range-in.patch"
 SRC_URI:append = " file://0001-xilinx-ai-engine-Granularize-error-handling-init-options.patch"
+SRC_URI:append = " file://0001-xilinx-ai-engine-part-init-optimizations.patch"
+SRC_URI:append = " file://0002-aie-handshake-avoid-dmam_alloc_coherent-per-column-via-dma_addr.patch"
