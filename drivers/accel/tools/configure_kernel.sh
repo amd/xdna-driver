@@ -260,6 +260,11 @@ int main(void)
 	return 0;
 }
 EOF
+cat >> "$OUT" <<'EOF'
+#ifndef HAVE_system_percpu_wq
+#define system_percpu_wq	system_wq
+#endif
+EOF
 
 # Test MODULE_IMPORT_NS signature in 6.13+:
 # #define MODULE_IMPORT_NS(ns)
