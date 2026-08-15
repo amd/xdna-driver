@@ -26,6 +26,8 @@
 #define XDNA_ERR(xdna, fmt, args...)	drm_err(&(xdna)->ddev, "%s: "fmt, __func__, ##args)
 #define XDNA_DBG(xdna, fmt, args...)	drm_dbg(&(xdna)->ddev, fmt, ##args)
 #define XDNA_INFO_ONCE(xdna, fmt, args...) drm_info_once(&(xdna)->ddev, fmt, ##args)
+#define XDNA_ERR_RATELIMITED(xdna, fmt, args...) \
+	drm_err_ratelimited(&(xdna)->ddev, "%s: "fmt, __func__, ##args)
 
 #define XDNA_MBZ_DBG(xdna, ptr, sz)					\
 	({								\
