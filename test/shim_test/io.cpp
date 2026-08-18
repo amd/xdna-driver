@@ -1143,10 +1143,9 @@ run(const std::vector<fence_handle*>& wait_fences,
   init_cmd(hwctx, false);
   sync_before_run();
 
-  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   reset_cmd_header();
-  cache_cmd_header();
 
+  auto cbo = m_bo_array[IO_TEST_BO_CMD].tbo.get();
   for (const auto& fence : wait_fences)
     hwq->submit_wait(fence);
   hwq->submit_command(cbo->get());
