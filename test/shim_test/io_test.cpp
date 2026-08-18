@@ -35,7 +35,6 @@
 // end of FIXME
 
 using namespace xrt_core;
-using arg_type = const std::vector<uint64_t>;
 
 extern int open_accel_fd(device* dev);
 
