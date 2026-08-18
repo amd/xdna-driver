@@ -92,6 +92,13 @@ void TEST_io_aie_reg(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_noop_no_qos(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_power_modes(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_dpm_refcount_scaling(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_partition_full_at_col0(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_partition_full_at_nonzero_col(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_partition_overlap_conflict(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_partition_identical_ok(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_partition_adjacent_ok(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_partition_width6_flexible(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_partition_width6_start_scan(device::id_type, std::shared_ptr<device>&, arg_type&);
 
 inline void
 set_xrt_path()
@@ -226,6 +233,15 @@ dev_filter_is_npu4(device::id_type id, device* dev)
     return false;
   auto device_id = device_query<query::pcie_device>(dev);
   return device_id == npu4_device_id;
+}
+
+bool
+dev_filter_is_npu3b(device::id_type id, device* dev)
+{
+  if (!is_xdna_dev(dev))
+    return false;
+  auto device_id = device_query<query::pcie_device>(dev);
+  return device_id == npu3b_device_id;
 }
 
 bool
@@ -1340,6 +1356,27 @@ std::vector<test_case> test_list {
   },
   test_case{ "Multi context IO test 3", {},
     TEST_POSITIVE, dev_filter_is_aie2, TEST_multi_context_io_test, { 2 }
+  },
+  test_case{ "partition: full-array pinned at start_col 0", {},
+    TEST_POSITIVE, dev_filter_is_npu3b, TEST_partition_full_at_col0, {}
+  },
+  test_case{ "partition: full-array pinned at non-zero start_col", {},
+    TEST_NEGATIVE, dev_filter_is_npu3b, TEST_partition_full_at_nonzero_col, {}
+  },
+  test_case{ "partition: overlapping partitions conflict", {},
+    TEST_POSITIVE, dev_filter_is_npu3b, TEST_partition_overlap_conflict, {}
+  },
+  test_case{ "partition: identical partitions share", {},
+    TEST_POSITIVE, dev_filter_is_npu3b, TEST_partition_identical_ok, {}
+  },
+  test_case{ "partition: non-overlapping partitions", {},
+    TEST_POSITIVE, dev_filter_is_npu3b, TEST_partition_adjacent_ok, {}
+  },
+  test_case{ "partition: width-6 no start column", {},
+    TEST_POSITIVE, dev_filter_is_npu3b, TEST_partition_width6_flexible, {}
+  },
+  test_case{ "partition: width-6 start column scan", {},
+    TEST_POSITIVE, dev_filter_is_npu3b, TEST_partition_width6_start_scan, {}
   },
   test_case{ "Create and destroy devices", {},
     TEST_POSITIVE, dev_filter_xdna, TEST_create_destroy_device, {}
