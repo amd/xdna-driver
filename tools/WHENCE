@@ -1,0 +1,13 @@
+# VTD-only manifest for main. Firmware still tracks amd-ipu-staging live
+# (no "# whence-commit:" pin). Release branches replace this with a full
+# snapshot from tools/update_whence_snapshot.sh (firmware + VTD).
+#
+# VTD (validation test data) archive manifest, fetched from Xilinx/VTD.
+# The archives are packaged into the plugin as the xrt-smi validation binaries.
+# vtd-commit: 8ed67e05d2be88aa9841d9758c770a1127b75314
+
+Repo: VTD - xrt-smi validation archives fetched from github.com/Xilinx/VTD
+
+File: archive/strx/xrt_smi_strx.a
+File: archive/phx/xrt_smi_phx.a
+File: archive/npu3/xrt_smi_npu3.a
