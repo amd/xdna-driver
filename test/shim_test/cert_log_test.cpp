@@ -2,6 +2,7 @@
 // Copyright (C) 2026, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "bo.h"
+#include "dev_info.h"
 #include "hwctx.h"
 
 #include "core/include/xrt/detail/xrt_mem.h"
@@ -13,7 +14,6 @@
 #include <stdexcept>
 #include <string>
 
-using arg_type = const std::vector<uint64_t>;
 
 namespace {
 

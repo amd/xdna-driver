@@ -59,7 +59,6 @@ std::string xclbin_path;
 int base_write_speed;
 int base_read_speed;
 
-using arg_type = const std::vector<uint64_t>;
 void TEST_export_import_bo(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_export_import_bo_single_proc(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_export_bo_then_close_device(device::id_type, std::shared_ptr<device>&, arg_type&);
@@ -107,6 +106,7 @@ void TEST_certlog_multi_uc(device::id_type, std::shared_ptr<device>&, arg_type&)
 void TEST_certlog_num_ucs_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_invalid_uc_index(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_payload_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_df_bw(device::id_type, std::shared_ptr<device>&, arg_type&);
 
 inline void
 set_xrt_path()
@@ -1840,6 +1840,9 @@ std::vector<test_case> test_list {
   },
   test_case{ "NPU write to read-only user pointer BO is rejected", {},
     TEST_NEGATIVE, dev_filter_is_aie_and_amdxdna_drv, TEST_write_to_readonly_uptr_bo, {}
+  },
+  test_case{ "df_bw 1GB shim DMA loopback", {},
+    TEST_POSITIVE, dev_filter_is_aie4_or_npu4, TEST_df_bw, {}
   },
 };
 
