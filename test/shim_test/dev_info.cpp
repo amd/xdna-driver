@@ -127,6 +127,16 @@ binary_info binary_infos[] = {
     .flow = FULL_ELF,
   },
   {
+    .tag = "df_bw",
+    .device = npu3_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:aie4_ubm", {0xffffffff} },
+    },
+    .path = "local_shim_test_data/npu3/df_bw/df_bw.elf",
+    .flow = FULL_ELF,
+  },
+  {
     .tag = "good",
     .device = npu3_device_id,
     .revision_id = npu_any_revision_id,
@@ -301,6 +311,16 @@ binary_info binary_infos[] = {
     .path = "local_shim_test_data/npu6/1x4/1x4.xclbin",
     .data = "data",
     .flow = LEGACY,
+  },
+  {
+    .tag = "df_bw",
+    .device = npu4_device_id,
+    .revision_id = npu_any_revision_id,
+    .ip_name2idx = {
+      { "DPU:IPUV1CNN", {1} },
+    },
+    .path = "local_shim_test_data/npu4/df_bw/df_bw.xclbin",
+    .flow = PARTIAL_ELF,
   },
   {
     .tag = "good",

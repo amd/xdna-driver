@@ -4,11 +4,15 @@
 #ifndef _SHIMTEST_DEV_INFO_H_
 #define _SHIMTEST_DEV_INFO_H_
 
+#include <cstdint>
 #include <map>
+#include <vector>
 #include "core/common/device.h"
 #include "core/common/query_requests.h"
 
 using namespace xrt_core;
+
+using arg_type = const std::vector<uint64_t>;
 
 enum flow_type {
   LEGACY = 0,
