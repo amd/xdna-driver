@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
-# Generate tools/WHENCE, the pinned firmware manifest snapshot used by release
-# branches. main does not carry tools/WHENCE and always fetches the latest
-# manifest live from the drm-firmware amd-ipu-staging branch.
+# Generate tools/WHENCE, the pinned firmware+VTD manifest snapshot used by
+# release branches. main may carry a VTD-only WHENCE; run this script when
+# cutting a release to replace it with a full pinned snapshot.
 #
 # The snapshot records, for every device directory, the versioned real file and
 # the stable "npu.dev.sbin" / "cert.dev.sbin" symlink that points at it, e.g.

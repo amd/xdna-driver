@@ -100,9 +100,10 @@ sync_npufws()
   local commit_file=${firmware_dir}/.whence_commit
 
   mkdir -p "${firmware_dir}"
-  # Release branches pin firmware with a committed tools/WHENCE snapshot; main
-  # has no snapshot and always fetches the latest amd-ipu-staging manifest.
-  if [ -f "${whence_snapshot}" ]; then
+  # Release branches pin firmware with "# whence-commit:" in tools/WHENCE. main
+  # may carry a VTD-only WHENCE (no whence-commit), so always fetch firmware
+  # live from amd-ipu-staging unless that pin is present.
+  if [ -f "${whence_snapshot}" ] && grep -q '^# whence-commit:' "${whence_snapshot}"; then
     echo "Sync NPUFW from pinned snapshot ${whence_snapshot}"
     python3 "${sync_script}" firmware --whence "${whence_snapshot}" \
       --out "${firmware_dir}" --commit-file "${commit_file}"
@@ -124,10 +125,10 @@ sync_vtd_archives()
 
   mkdir -p "${vtd_dir}" "$(dirname "${commit_file}")"
 
-  # Release branches pin the VTD archives with a "# vtd-commit:" line in the
-  # committed tools/WHENCE. main has no snapshot, so synthesize a minimal
-  # manifest holding the default "Repo: VTD" File: list (and no pin), which
-  # makes the sync resolve and fetch the latest Xilinx/VTD commit.
+  # Release branches and main both use tools/WHENCE for VTD. When "# vtd-commit:"
+  # is absent the sync resolves the latest Xilinx/VTD commit; when present the
+  # fetch is pinned. main carries a VTD-only WHENCE; release snapshots add the
+  # firmware section and both pins.
   local vtd_whence="${whence_manifest}"
   local tmp_whence=""
   if [ ! -f "${whence_manifest}" ]; then
@@ -143,7 +144,7 @@ File: archive/phx/xrt_smi_phx.a
 File: archive/npu3/xrt_smi_npu3.a
 EOF
     vtd_whence="${tmp_whence}"
-    echo "Sync VTD archives from latest Xilinx/VTD (no committed WHENCE snapshot)"
+    echo "Sync VTD archives from latest Xilinx/VTD (no committed WHENCE)"
   else
     echo "Sync VTD archives from ${whence_manifest}"
   fi

@@ -115,9 +115,9 @@ endif()
 # version.json records it at configure time without downloading any archive.
 #
 #   * A committed tools/WHENCE snapshot pins the commit in a "# vtd-commit:"
-#     line (release branches), so read it directly.
-#   * Otherwise (main/link) resolve the Xilinx/VTD HEAD via git ls-remote, which
-#     is metadata only and downloads no archive.
+#     line (release branches and main's VTD-only manifest), so read it directly.
+#   * Otherwise resolve the Xilinx/VTD HEAD via git ls-remote, which is
+#     metadata only and downloads no archive.
 #
 # Resolution is best-effort and never fails the configure when offline.
 set(XDNA_VTD_COMMIT "")
