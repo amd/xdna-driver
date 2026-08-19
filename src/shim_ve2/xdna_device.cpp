@@ -1372,7 +1372,7 @@ import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
   auto bofd = syscall(SYS_pidfd_getfd, pidfd, ehdl, 0);
   if (bofd < 0) {
     int saved_errno = errno;
-    close(pidfd);
+    ::close(pidfd);
     throw xrt_core::system_error
       (saved_errno, std::string("pidfd_getfd failed (err=") + std::to_string(saved_errno) + ": " +
        errno_to_str(saved_errno) + "). Check that ptrace access mode "
@@ -1383,8 +1383,8 @@ import_bo(pid_t pid, xrt_core::shared_handle::export_handle ehdl)
   // bofd is a duplicated fd owned by this import path; xdna_bo uses it only
   // for PRIME_FD_TO_HANDLE in the constructor.
   auto bo = std::make_unique<xdna_bo>(*this, bofd);
-  close(bofd);
-  close(pidfd);
+  ::close(bofd);
+  ::close(pidfd);
   return bo;
 #else
   throw xrt_core::system_error
