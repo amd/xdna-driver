@@ -37,6 +37,7 @@
 using namespace xrt_core;
 
 extern int open_accel_fd(device* dev);
+extern void trigger_pci_flr(device* dev);
 
 namespace {
 
@@ -1170,6 +1171,127 @@ TEST_tdr_not_yet_published_retried(device::id_type id, std::shared_ptr<device>& 
     throw std::runtime_error(std::string("recovered submit state=") +
       std::to_string(state) + ", expected COMPLETED=" +
       std::to_string(ERT_CMD_STATE_COMPLETED));
+}
+
+/*
+ * Prepare / submit a burst of "good" vadds on one hwctx (up to CTX_MAX_CMDS).
+ * Submitting more than CTX_MAX_CMDS on one ctx blocks until slots free, which
+ * drains the queue — use multiple hwctx for more concurrent in-flight work.
+ */
+struct flr_workload {
+  std::shared_ptr<device> dev;
+  std::unique_ptr<hw_ctx> ctx;
+  std::vector<std::unique_ptr<io_test_bo_set_base>> cmds;
+};
+
+static flr_workload
+prepare_flr_workload(std::shared_ptr<device> vf, int num_cmds = 32)
+{
+  flr_workload w;
+  w.dev = std::move(vf);
+  w.ctx = std::make_unique<hw_ctx>(w.dev.get(), "good");
+  for (int i = 0; i < num_cmds; i++) {
+    w.cmds.push_back(create_bo_set_for_device(w.dev.get(), false, "good"));
+    w.cmds.back()->init_cmd(*w.ctx, false);
+    w.cmds.back()->sync_before_run();
+  }
+  return w;
+}
+
+static void
+submit_flr_workload(flr_workload& w)
+{
+  auto hwq = w.ctx->get()->get_hw_queue();
+  for (auto& g : w.cmds)
+    hwq->submit_command(g->get_bos()[IO_TEST_BO_CMD].tbo.get()->get());
+}
+
+/*
+ * Classic/VF FLR with many in-flight vadds. Use several hwctx, prepare all first, 
+ * then submit in a tight loop so FLR overlaps a deep in-flight set.
+ */
+void
+TEST_aie4_flr(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  constexpr int num_ctx = 8;
+  constexpr int cmds_per_ctx = 32; // CTX_MAX_CMDS
+
+  std::vector<flr_workload> loads;
+  loads.reserve(num_ctx);
+  for (int i = 0; i < num_ctx; i++)
+    loads.push_back(prepare_flr_workload(sdev, cmds_per_ctx));
+
+  for (auto& w : loads)
+    submit_flr_workload(w);
+
+  trigger_pci_flr(sdev.get());
+
+  int n_abort = 0;
+  int n_completed = 0;
+  for (auto& w : loads) {
+    auto hwq = w.ctx->get()->get_hw_queue();
+    for (auto& g : w.cmds) {
+      auto *cmd = g->get_bos()[IO_TEST_BO_CMD].tbo.get();
+      if (!hwq->wait_command(cmd->get(), 15000))
+        throw std::runtime_error("FLR: timed out waiting for in-flight command");
+      auto st = reinterpret_cast<ert_packet *>(cmd->map())->state;
+      if (st == ERT_CMD_STATE_ABORT)
+        n_abort++;
+      else if (st == ERT_CMD_STATE_COMPLETED)
+        n_completed++;
+      else
+        throw std::runtime_error("FLR: unexpected cmd state=" + std::to_string(st));
+    }
+  }
+  std::cout << "FLR: " << n_abort << " aborted, " << n_completed
+            << " completed (of " << (num_ctx * cmds_per_ctx) << ")" << std::endl;
+  if (!n_abort)
+    throw std::runtime_error("FLR: expected at least one in-flight command to abort");
+
+  // Re-sync inputs after FLR: device-side buffers may be invalid post-reset.
+  // run_on_ctx alone only resets the cmd header and does not host2device sync.
+  auto& recover = loads.front().cmds.front();
+  recover->sync_before_run();
+  recover->run_on_ctx(*loads.front().ctx);
+}
+
+// PF FLR does not restore hwctx. Start in-flight vadds on every AIE4 VF so
+// reset_prepare is not idle, then time the PF sysfs reset. Caller finds the PF
+// and checks sriov_numvfs.
+void
+TEST_aie4_pf_flr(device::id_type id, std::shared_ptr<device>& sdev,
+                 std::shared_ptr<device>& pf)
+{
+  std::vector<flr_workload> loads;
+  auto nuser = get_total_devices(true).first;
+  for (device::id_type i = 0; i < nuser; i++) {
+    std::shared_ptr<device> vf = (i == id) ? sdev : get_userpf_device(i);
+    try {
+      auto devid = device_query<query::pcie_device>(vf.get());
+      if (devid != npu3_device_id1 && devid != npu3a_device_id1)
+        continue;
+    } catch (const std::exception&) {
+      continue;
+    }
+    std::cout << "starting in-flight VF workload on userpf[" << i << "]" << std::endl;
+    loads.push_back(prepare_flr_workload(vf));
+  }
+  for (auto& w : loads)
+    submit_flr_workload(w);
+  if (loads.empty())
+    throw std::runtime_error("PF FLR: no AIE4 VF to run workload on");
+
+  auto t0 = std::chrono::steady_clock::now();
+  trigger_pci_flr(pf.get());
+  auto latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now() - t0).count();
+  std::cout << "PF FLR latency: " << latency_ms << " ms" << std::endl;
+
+  try {
+    loads.clear();
+  } catch (const std::exception& ex) {
+    std::cout << "VF workload teardown after PF FLR: " << ex.what() << std::endl;
+  }
 }
 
 /**
