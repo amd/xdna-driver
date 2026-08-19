@@ -347,6 +347,10 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	}
 	hwctx->id = ret;
 
+	atomic64_set(&hwctx->job_submit_cnt, 0);
+	atomic64_set(&hwctx->job_free_cnt, 0);
+	init_waitqueue_head(&hwctx->job_free_wq);
+
 	/* Publish into the per-client map; submit/wait/etc. look up here. */
 	ret = xa_err(xa_store(&client->hwctx_xa, hwctx->id, hwctx, GFP_KERNEL));
 	if (ret) {
@@ -357,9 +361,6 @@ int amdxdna_drm_create_hwctx_ioctl(struct drm_device *dev, void *data, struct dr
 	args->handle = hwctx->id;
 	args->syncobj_handle = hwctx->syncobj_hdl;
 	args->umq_doorbell = hwctx->doorbell_offset;
-
-	atomic64_set(&hwctx->job_submit_cnt, 0);
-	atomic64_set(&hwctx->job_free_cnt, 0);
 	XDNA_DBG(xdna, "PID %d create HW context %d, ret %d", client->pid, args->handle, ret);
 	drm_dev_exit(idx);
 	return 0;
@@ -647,7 +648,7 @@ put_shmem_bo:
 	return ret;
 }
 
-void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
+void amdxdna_job_cleanup(struct amdxdna_sched_job *job)
 {
 	trace_amdxdna_debug_point(job->hwctx->name, job->seq, "job release");
 	amdxdna_pm_suspend_put(job->hwctx->client->xdna);
@@ -655,6 +656,8 @@ void amdxdna_sched_job_cleanup(struct amdxdna_sched_job *job)
 	amdxdna_gem_put_obj(job->cmd_bo);
 	dma_fence_put(job->fence);
 	mmdrop(job->mm);
+	atomic64_inc(&job->hwctx->job_free_cnt);
+	wake_up(&job->hwctx->job_free_wq);
 }
 
 int amdxdna_cmd_submit(struct amdxdna_client *client,
