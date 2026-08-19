@@ -539,7 +539,8 @@ amdxdna_dpt_publish(struct aie_device *aie, enum amdxdna_dpt_kind kind,
 	hdl = amdxdna_alloc_msg_buff(xdna, buf_size);
 	if (IS_ERR(hdl)) {
 		ret = PTR_ERR(hdl);
-		XDNA_DPT_ERR(dpt, "Failed to allocate buffer: %d", ret);
+		XDNA_DPT_ERR(dpt, "Failed to allocate %zu byte buffer: %d",
+			     buf_size, ret);
 		kfree(dpt);
 		return ERR_PTR(ret);
 	}
@@ -1058,7 +1059,9 @@ int amdxdna_dpt_init(struct aie_device *aie)
 
 	ret = amdxdna_fw_log_init(aie, AMDXDNA_DPT_FW_LOG_LEVEL_DEFAULT);
 	if (ret)
-		XDNA_WARN(aie->xdna, "Failed to enable FW logging: %d", ret);
+		XDNA_WARN(aie->xdna,
+			  "Failed to enable FW logging: %d. Retry through debugfs, lowering fw_log_size first if the ring could not be allocated",
+			  ret);
 
 	return 0;
 }
