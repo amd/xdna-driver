@@ -1002,7 +1002,6 @@ void aie2_msg_init(struct amdxdna_dev_hdl *ndev)
 	ndev->aie.hwctx_limit = ndev->priv->hwctx_limit;
 	ndev->aie.msg_ops.query_status = aie2_query_status;
 	ndev->aie.msg_ops.query_telemetry = aie2_query_telemetry_cb;
-	ndev->aie.msg_ops.fill_hwctx_map = aie2_fill_hwctx_map;
 	ndev->aie.msg_ops.fill_hwctx_health = aie2_fill_hwctx_health;
 
 	if (AIE_FEATURE_ON(&ndev->aie, AIE2_GET_COREDUMP))
