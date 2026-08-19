@@ -36,8 +36,10 @@ struct binary_info {
 const uint16_t npu1_device_id = 0x1502;
 const uint16_t npu1_device_id1 = 0x1050;
 const uint16_t npu3_device_id = 0x17f1;
+const uint16_t npu3_pf_device_id = 0x17f2;
 const uint16_t npu3_device_id1 = 0x17f3;
 const uint16_t npu3a_device_id = 0x1b0a;
+const uint16_t npu3a_pf_device_id = 0x1b0b;
 const uint16_t npu3a_device_id1 = 0x1b0c;
 const uint16_t npu_ve2_device_id = 0xb052;
 const uint16_t npu4_device_id = 0x17f0;
@@ -48,19 +50,17 @@ const uint16_t npu4_revision_id = 0x10;
 const uint16_t npu5_revision_id = 0x11;
 const uint16_t npu6_revision_id = 0x20;
 
-// Some NPUs expose more than one PCIe device id across silicon revisions.
-// Fold the alternate ids onto their canonical id so callers only need to
-// compare against a single value per NPU.
+// Test ELFs are keyed by classic AIE4 PCI ids; map VF ids for lookup only.
 inline uint16_t
-canonical_device_id(uint16_t device_id)
+aie4_binary_device_id(uint16_t device_id)
 {
   switch (device_id) {
-    case npu3_device_id1:
-      return npu3_device_id;
-    case npu3a_device_id1:
-      return npu3a_device_id;
-    default:
-      return device_id;
+  case npu3_device_id1:
+    return npu3_device_id;
+  case npu3a_device_id1:
+    return npu3a_device_id;
+  default:
+    return device_id;
   }
 }
 
