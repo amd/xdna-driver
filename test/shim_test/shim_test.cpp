@@ -107,6 +107,9 @@ void TEST_certlog_num_ucs_overflow(device::id_type, std::shared_ptr<device>&, ar
 void TEST_certlog_invalid_uc_index(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_payload_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_df_bw(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_aie4_flr(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_aie4_pf_flr(device::id_type, std::shared_ptr<device>&,
+                      std::shared_ptr<device>&);
 
 inline void
 set_xrt_path()
@@ -130,13 +133,15 @@ usage(const std::string& prog)
   std::cout << std::endl;
 }
 
-// Hardware platform and driver type enums for test case filtering
+// Hardware platform and driver type enums for test case filtering.
+// Any device can belong to only 1 hw_type, no overlap.
 enum hw_type {
   non_npu,  // non-xdna device
   npu1,     // AIE2, device_id 0x1502
   npu4,     // AIE2, device_id 0x17f0
-  npu3,     // AIE4, device_id 0x17f1 / 0x1b0a (canonical)
-  ve2,      // VE2 edge, device_id 0xb052 (canonical)
+  npu3,     // AIE4 classic, device_id 0x17f1 / 0x1b0a (classic only)
+  npu3vf,   // AIE4 VF, device_id 0x17f3 / 0x1b0c (SRIOV VF only)
+  ve2,      // VE2 edge, device_id 0xb052
 };
 
 enum drv_type {
@@ -190,14 +195,21 @@ dev_filter_is_npu4(device::id_type id, device* dev)
 bool
 dev_filter_is_npu3(device::id_type id, device* dev)
 {
-  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  auto device_id = device_query<query::pcie_device>(dev);
   return device_id == npu3_device_id || device_id == npu3a_device_id;
+}
+
+bool
+dev_filter_is_npu3vf(device::id_type id, device* dev)
+{
+  auto device_id = device_query<query::pcie_device>(dev);
+  return device_id == npu3_device_id1 || device_id == npu3a_device_id1;
 }
 
 bool
 dev_filter_is_ve2(device::id_type id, device* dev)
 {
-  return canonical_device_id(device_query<query::pcie_device>(dev)) == npu_ve2_device_id;
+  return device_query<query::pcie_device>(dev) == npu_ve2_device_id;
 }
 
 // hw_filter_table: non_npu is entry 0 with nullptr check (special case handled by
@@ -208,6 +220,7 @@ static const hw_filter_entry hw_filter_table[] = {
   { npu1,    dev_filter_is_npu1   },
   { npu4,    dev_filter_is_npu4   },
   { npu3,    dev_filter_is_npu3   },
+  { npu3vf,  dev_filter_is_npu3vf},
   { ve2,     dev_filter_is_ve2    },
 };
 
@@ -275,7 +288,7 @@ static void TEST_async_error_io_any(device::id_type id, std::shared_ptr<device>&
 {
   if (dev_filter_is_npu4(id, sdev.get()))
     TEST_async_error_io(id, sdev, arg);
-  else if (dev_filter_is_npu3(id, sdev.get()))
+  else if (dev_filter_is_npu3(id, sdev.get()) || dev_filter_is_npu3vf(id, sdev.get()))
     TEST_async_error_aie4_io(id, sdev, arg);
   else
     throw std::runtime_error("async error io test: device is neither NPU4 nor NPU3");
@@ -316,6 +329,8 @@ sysfs_dir_exists(const std::string& path)
  * Resolve .../sys/bus/<bus>/devices/<name> for the NPU device.
  * Prefer the path from sub_device_path when it exists; otherwise probe pci,
  * platform, and rpmsg buses using the same device name.
+ * Mgmt PF devices have no user handle, so sub_device_path throws; fall back
+ * to pcie_bdf (function0 query) to build the PCI sysfs path.
  */
 static std::optional<std::string>
 resolve_device_sysfs(device* dev)
@@ -326,18 +341,32 @@ resolve_device_sysfs(device* dev)
     "/sys/bus/rpmsg/devices/",
   };
 
-  const std::string from_query = get_device_sysfs(dev);
-  if (sysfs_dir_exists(from_query))
-    return from_query;
+  try {
+    const std::string from_query = get_device_sysfs(dev);
+    if (sysfs_dir_exists(from_query))
+      return from_query;
 
-  const std::string name = sysfs_device_basename(from_query);
-  if (name.empty())
-    return std::nullopt;
+    const std::string name = sysfs_device_basename(from_query);
+    if (!name.empty()) {
+      for (const char* root : bus_roots) {
+        const std::string candidate = std::string(root) + name;
+        if (sysfs_dir_exists(candidate))
+          return candidate;
+      }
+    }
+  } catch (const std::exception&) {
+    // e.g. mgmt PF: "No device handle"
+  }
 
-  for (const char* root : bus_roots) {
-    const std::string candidate = std::string(root) + name;
+  try {
+    auto bdf = device_query<query::pcie_bdf>(dev);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04x:%02x:%02x.%x",
+      std::get<0>(bdf), std::get<1>(bdf), std::get<2>(bdf), std::get<3>(bdf));
+    const std::string candidate = std::string("/sys/bus/pci/devices/") + buf;
     if (sysfs_dir_exists(candidate))
       return candidate;
+  } catch (const std::exception&) {
   }
   return std::nullopt;
 }
@@ -444,6 +473,49 @@ open_accel_fd(device* dev)
     throw std::runtime_error("open failed: " + accel_node + ": " + std::string(std::strerror(errno)));
   }
   return fd;
+}
+
+void
+trigger_pci_flr(device* dev)
+{
+  const auto device_sysfs = resolve_device_sysfs(dev);
+  if (!device_sysfs) {
+    throw std::runtime_error(
+      "Failed to resolve device sysfs for PCI FLR (tried sub_device_path and "
+      "/sys/bus/pci/devices/<name>)");
+  }
+  if (!is_pci_sysfs_device(*device_sysfs)) {
+    throw std::runtime_error("PCI FLR requires a PCI device, got " + *device_sysfs);
+  }
+
+  const std::string reset_path = *device_sysfs + "/reset";
+  std::ofstream ofs(reset_path);
+  if (!ofs) {
+    throw std::runtime_error(
+      "Cannot open " + reset_path + " for write (needs root?)");
+  }
+  ofs << "1";
+  ofs.flush();
+  if (!ofs)
+    throw std::runtime_error("Failed to write PCI FLR to " + reset_path);
+}
+
+unsigned int
+get_sriov_numvfs(device* dev)
+{
+  const auto device_sysfs = resolve_device_sysfs(dev);
+  if (!device_sysfs)
+    throw std::runtime_error("Failed to resolve device sysfs for sriov_numvfs");
+
+  const std::string path = *device_sysfs + "/sriov_numvfs";
+  std::ifstream ifs(path);
+  if (!ifs)
+    throw std::runtime_error("Cannot read " + path);
+  unsigned int n = 0;
+  ifs >> n;
+  if (!ifs)
+    throw std::runtime_error("Failed to parse " + path);
+  return n;
 }
 
 // Run op(fd) in a short-lived forked child and return its POD result.
@@ -619,6 +691,65 @@ TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
     auto dev = get_mgmtpf_device(i);
 }
 
+// PFs are mgmt devices (is_user=false), so run_test() never passes them in.
+// Walk get_mgmtpf_device() and return the first AIE4 PF (0x17f2 / 0x1b0b).
+// Match on pcie_device only: is_xdna_dev/is_amdxdna_drv are userpf-oriented and
+// can throw or fail on mgmt devices even when the PF is present.
+std::shared_ptr<device>
+find_aie4_pf()
+{
+  auto n = get_total_devices(false).first;
+  for (device::id_type i = 0; i < n; i++) {
+    auto pf = get_mgmtpf_device(i);
+    uint16_t devid = 0;
+    try {
+      devid = device_query<query::pcie_device>(pf.get());
+    } catch (const std::exception&) {
+      continue;
+    }
+    if (devid != npu3_pf_device_id && devid != npu3a_pf_device_id)
+      continue;
+    auto bdf = get_bdf_info(i, false);
+    std::cout << "found AIE4 PF[" << i << "]: " << bdf_info2str(bdf)
+              << " (0x" << std::hex << devid << std::dec << ")" << std::endl;
+    return pf;
+  }
+  throw std::runtime_error("No AIE4 PF device found (0x17f2/0x1b0b)");
+}
+
+// Resolve the AIE4 PF and check sriov_numvfs around FLR. Workload + timing live
+// in TEST_aie4_pf_flr (io_test.cpp); PF discovery helpers stay here.
+// run_test() invokes this once per matching AIE4 VF; skip after the first so we
+// only issue one PF FLR per test case.
+void
+TEST_aie4_pf_flr_entry(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  for (device::id_type i = 0; i < id; i++) {
+    try {
+      auto earlier = get_userpf_device(i);
+      if (dev_filter_is_npu3vf(i, earlier.get()))
+        return;
+    } catch (const std::exception&) {
+      continue;
+    }
+  }
+
+  auto pf = find_aie4_pf();
+  auto numvfs_before = get_sriov_numvfs(pf.get());
+  std::cout << "sriov_numvfs before PF FLR: " << numvfs_before << std::endl;
+  if (!numvfs_before)
+    throw std::runtime_error("PF FLR: expected at least one VF before reset");
+
+  TEST_aie4_pf_flr(id, sdev, pf);
+
+  auto numvfs_after = get_sriov_numvfs(pf.get());
+  std::cout << "sriov_numvfs after PF FLR: " << numvfs_after << std::endl;
+  if (numvfs_after != numvfs_before) {
+    throw std::runtime_error("PF FLR: sriov_numvfs changed from " +
+      std::to_string(numvfs_before) + " to " + std::to_string(numvfs_after));
+  }
+}
+
 template <typename QueryRequestType>
 void
 TEST_query_userpf(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
@@ -656,14 +787,13 @@ void
 TEST_create_destroy_max_context(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
-  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
   int is_negative = static_cast<unsigned int>(arg[0]);
   int num_ctx;
 
   // XDNA driver by default supports maximum 6 contexts on npu1, 128 on npu3, and 16 on npu4
-  if (device_id == npu1_device_id)
+  if (dev_filter_is_npu1(id, dev))
     num_ctx = 6;
-  else if (device_id == npu3_device_id || device_id == npu3a_device_id)
+  else if (dev_filter_is_npu3(id, dev) || dev_filter_is_npu3vf(id, dev))
     num_ctx = 128;
   else
     num_ctx = 16;
@@ -683,13 +813,12 @@ void
 TEST_multi_context_io_test(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
   auto dev = sdev.get();
-  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
   int num_ctx;
 
   const std::array<int, 3> ctx = [&]() {
-    if (device_id == npu1_device_id)
+    if (dev_filter_is_npu1(id, dev))
       return std::array<int, 3>{2, 4, 6};
-    if (device_id == npu3_device_id || device_id == npu3a_device_id)
+    if (dev_filter_is_npu3(id, dev) || dev_filter_is_npu3vf(id, dev))
       return std::array<int, 3>{4, 8, 32};
     return std::array<int, 3>{4, 8, 16};
   }();
@@ -705,7 +834,8 @@ TEST_create_free_debug_bo(device::id_type id, std::shared_ptr<device>& sdev, arg
 {
   auto dev = sdev.get();
   auto boflags = XRT_BO_FLAGS_CACHEABLE;
-  auto ext_boflags = dev_filter_is_npu3(id, dev) ? (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
+  auto ext_boflags = (dev_filter_is_npu3(id, dev) || dev_filter_is_npu3vf(id, dev)) ?
+    (XRT_BO_USE_UC_DEBUG << 4) : (XRT_BO_USE_DEBUG << 4);
   auto size = static_cast<size_t>(arg[0]);
 
   // Create ctx -> create bo -> destroy bo -> destroy ctx
@@ -1372,7 +1502,8 @@ struct telemetry_probe {
 void
 TEST_query_telemetry(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
 {
-  uint32_t type = dev_filter_is_npu3(id, sdev.get()) ? AIE4_TELEMETRY_PERF_COUNTER : 0;
+  uint32_t type = (dev_filter_is_npu3(id, sdev.get()) || dev_filter_is_npu3vf(id, sdev.get())) ?
+    AIE4_TELEMETRY_PERF_COUNTER : 0;
 
   auto probe = fork_query<telemetry_probe>(sdev.get(), [type](int fd) {
     const uint32_t buf_sz = sizeof(amdxdna_drm_query_telemetry_header) +
@@ -1455,7 +1586,8 @@ TEST_query_frame_boundary_preempt(device::id_type id, std::shared_ptr<device>& s
       "ioctl(GET_FRAME_BOUNDARY_PREEMPT_STATE) failed: " + std::string(std::strerror(probe.err)));
   if (probe.state > 1)
     throw std::runtime_error("GET_FRAME_BOUNDARY_PREEMPT_STATE returned non-boolean state");
-  if (dev_filter_is_npu3(id, sdev.get()) && probe.state != 1)
+  if ((dev_filter_is_npu3(id, sdev.get()) || dev_filter_is_npu3vf(id, sdev.get())) &&
+      probe.state != 1)
     throw std::runtime_error("aie4 GET_FRAME_BOUNDARY_PREEMPT_STATE expected enabled");
 }
 
@@ -1483,211 +1615,211 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, {}, {}, TEST_get_mgmtpf_device, {}
   },
   test_case{ "query(pcie_vendor)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_query_userpf<query::pcie_vendor>, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_query_userpf<query::pcie_vendor>, {}
   },
   //test_case{ "non_xdna_userpf: query(pcie_vendor)", {},
   //  TEST_POSITIVE, {non_npu}, {}, TEST_query_userpf<query::pcie_vendor>, {}
   //},
   test_case{ "query(rom_vbnv)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_query_userpf<query::rom_vbnv>, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_query_userpf<query::rom_vbnv>, {}
   },
   test_case{ "query(rom_fpga_name)", {},
-    TEST_NEGATIVE, {npu1, npu4, npu3, ve2}, {}, TEST_query_userpf<query::rom_fpga_name>, {}
+    TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_query_userpf<query::rom_fpga_name>, {}
   },
   // get async error in multi thread before running any other tests
   // there may or may not be async error.
   test_case{ "get async error in multithread - INITIAL", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_async_error_multi, {false}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_async_error_multi, {false}
   },
   //test_case{ "non_xdna_userpf: query(rom_vbnv)", {},
   //  TEST_POSITIVE, {non_npu}, {}, TEST_query_userpf<query::rom_vbnv>, {}
   //},
   test_case{ "create_destroy_hw_context", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_destroy_hw_context, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_destroy_hw_context, {}
   },
   test_case{ "create_invalid_bo", {},
-    TEST_NEGATIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_P2P, 0, 128}
+    TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_P2P, 0, 128}
   },
   test_case{ "create_and_free_exec_buf_bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 128}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 128}
   },
   test_case{ "create_and_free_dpu_sequence_bo 1 bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
   },
   test_case{ "create_and_free_dpu_sequence_bo multiple bos", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo,
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo,
     {XCL_BO_FLAGS_CACHEABLE, 0, 0x2000, 0x400, 0x3000, 0x100}
   },
   test_case{ "create_and_free_input_output_bo 1 page", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "create_and_free_input_output_bo multiple pages", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo,
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo,
     {XCL_BO_FLAGS_HOST_ONLY, 0, 0x10000, 0x23000, 0x2000}
   },
   test_case{ "create_and_free_input_output_bo huge pages", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo,
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo,
     {XCL_BO_FLAGS_HOST_ONLY, 0, 0x140000000}
   },
   test_case{ "sync_bo for dpu sequence bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_sync_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 128}
   },
   test_case{ "sync_bo for input_output", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "map dpu sequence bo and test perf", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_map_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 361264 /*0x10000*/}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_map_bo, {XCL_BO_FLAGS_CACHEABLE, 0, 361264 /*0x10000*/}
   },
   test_case{ "map input_output bo and test perf", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_map_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 361264}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_map_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 361264}
   },
   test_case{ "map bo for read only", {},
-    TEST_NEGATIVE, {npu1, npu4, npu3}, {}, TEST_map_read_bo, {0x1000}
+    TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_map_read_bo, {0x1000}
   },
   test_case{ "map exec_buf_bo and test perf", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 0x1000}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_free_bo, {XCL_BO_FLAGS_EXECBUF, 0, 0x1000}
   },
   test_case{ "open_close_cu_context", {},
     TEST_POSITIVE, {npu1, npu4}, {}, TEST_open_close_cu_context, {}
   },
   test_case{ "create_destroy_hw_queue", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_destroy_hw_queue, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_destroy_hw_queue, {}
   },
   // Keep bad run before normal run to test recovery of hw ctx
   test_case{ "io test async error", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_async_error_io_any, {}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_async_error_io_any, {}
   },
   test_case{ "io test TDR: faulting head times out, queued jobs abort", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_tdr_timeout_and_abort, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_tdr_timeout_and_abort, {}
   },
   test_case{ "io test TDR: partial chain interrupted mid-publish is aborted", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_tdr_partial_chain_abort, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_tdr_partial_chain_abort, {}
   },
   test_case{ "io test TDR: not-yet-published submit is retried across reset", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_tdr_not_yet_published_retried, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_tdr_not_yet_published_retried, {}
   },
   test_case{ "io test real kernel good run", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "io test with instruction code invalid address access", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_instr_invalid_addr_io, {}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_instr_invalid_addr_io, {}
   },
   test_case{ "measure no-op kernel latency", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "measure real kernel latency", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io_latency, { IO_TEST_NORMAL_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "create and free debug bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_create_free_debug_bo, { 0x1000 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_create_free_debug_bo, { 0x1000 }
   },
   test_case{ "create and free large debug bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_create_free_debug_bo, { 0x100000 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_create_free_debug_bo, { 0x100000 }
   },
   test_case{ "create and free uc_log bo", {},
-    TEST_POSITIVE, {npu3, ve2}, {}, TEST_create_free_uc_log_bo, { 0x10000 }
+    TEST_POSITIVE, {npu3, npu3vf, ve2}, {}, TEST_create_free_uc_log_bo, { 0x10000 }
   },
   test_case{ "create and free large uc_log bo", {},
-    TEST_POSITIVE, {npu3, ve2}, {}, TEST_create_free_uc_log_bo, { 0x100000 }
+    TEST_POSITIVE, {npu3, npu3vf, ve2}, {}, TEST_create_free_uc_log_bo, { 0x100000 }
   },
   test_case{ "multi-command io test real kernel good run", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "measure no-op kernel throughput command", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "export import BO", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_export_import_bo, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_export_import_bo, {}
   },
   test_case{ "ELF io test real kernel good run", {},
     TEST_POSITIVE, {npu1, npu4}, {}, TEST_elf_io, { IO_TEST_NORMAL_RUN, 1 }
   },
   test_case{ "Cmd fencing (user space side)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_cmd_fence_host, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_cmd_fence_host, {}
   },
   test_case{ "io test no op with duplicated BOs", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_noop_io_with_dup_bo, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_noop_io_with_dup_bo, {}
   },
   test_case{ "measure no-op kernel latency chained command", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "measure no-op kernel throughput chained command", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_IOCTL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "measure no-op kernel latency (polling)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_io_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "measure no-op kernel throughput (polling)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_io_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "measure no-op kernel latency chained command (polling)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_io_runlist_latency, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "measure no-op kernel throughput chained command (polling)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_io_runlist_throughput, { IO_TEST_NOOP_RUN, IO_TEST_POLL_WAIT, NUM_STRESS_IO }
   },
   test_case{ "Cmd fencing (driver side)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_cmd_fence_device, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_cmd_fence_device, {}
   },
   test_case{ "sync_bo for input_output 1MiB BO", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_sync_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000}
   },
   test_case{ "sync_bo for input_output 1MiB BO w/ offset and size", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_sync_bo_off_size, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000, 0x1004, 0x3c}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_sync_bo_off_size, {XCL_BO_FLAGS_HOST_ONLY, 0, 0x100000, 0x1004, 0x3c}
   },
   test_case{ "export import BO in single process", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_export_import_bo_single_proc, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_export_import_bo_single_proc, {}
   },
   test_case{ "multi-command ELF io test real kernel good run", {},
     TEST_POSITIVE, {npu1, npu4}, {}, TEST_elf_io, { IO_TEST_NORMAL_RUN, 3 }
   },
   test_case{ "max context test", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_destroy_max_context, { 0 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_destroy_max_context, { 0 }
   },
   test_case{ "max context bad test", {},
-    TEST_NEGATIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_destroy_max_context, { 1 }
+    TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_destroy_max_context, { 1 }
   },
   test_case{ "Multi context IO test 1", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_multi_context_io_test, { 0 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_multi_context_io_test, { 0 }
   },
   test_case{ "Multi context IO test 2", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_multi_context_io_test, { 1 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_multi_context_io_test, { 1 }
   },
   test_case{ "Multi context IO test 3", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_multi_context_io_test, { 2 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_multi_context_io_test, { 2 }
   },
   test_case{ "Create and destroy devices", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_create_destroy_device, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_create_destroy_device, {}
   },
   test_case{ "multi-command preempt ELF io test real kernel good run", {},
     TEST_POSITIVE, {npu4}, {amdxdna}, TEST_preempt_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "create and free user pointer bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_create_free_uptr_bo, {XCL_BO_FLAGS_HOST_ONLY, 0, 128}
   },
   test_case{ "io test with user pointer BOs", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_io_with_ubuf_bo, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_io_with_ubuf_bo, {}
   },
   test_case{ "multi-command preempt full ELF io test real kernel good run", {},
     TEST_POSITIVE, {npu4, npu3}, {amdxdna}, TEST_preempt_full_elf_io, { IO_TEST_FORCE_PREEMPTION, 8 }
   },
   test_case{ "Real kernel delay run for auto-suspend/resume", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_io_suspend_resume, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_io_suspend_resume, {}
   },
   test_case{ "io test timeout run for context health report", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_io_timeout, {}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_io_timeout, {}
   },
   test_case{ "app health query multi-context with and without ctx-id filter", {},
     TEST_POSITIVE, {npu4}, {amdxdna}, TEST_app_health_query_multi_ctx, {}
   },
   test_case{ "query hw_contexts (get_info)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_hw_contexts, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_query_hw_contexts, {}
   },
   test_case{ "hw_context_all (get_array)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_hw_context_all, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_hw_context_all, {}
   },
   test_case{ "query memory usage (total_mem_usage/aie_partition_info)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_memory_usage, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_query_memory_usage, {}
   },
   test_case{ "query telemetry", {},
     TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_telemetry, {}
@@ -1696,20 +1828,20 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_telemetry_short_buf, {}
   },
   test_case{ "query frame boundary preempt state (get_info)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_query_frame_boundary_preempt, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_query_frame_boundary_preempt, {}
   },
   //test_case{ "io test no-op kernel good run", {},
   //  TEST_POSITIVE, {npu1, npu4}, {}, TEST_io, { IO_TEST_NOOP_RUN, 1 }
   //},
   // get async error in multi thread after async error has raised.
   test_case{ "get async error in multithread - HAS ASYNC ERROR", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_async_error_multi, {true}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_async_error_multi, {true}
   },
   test_case{ "gemm and debug BO", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_io_gemm, {}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_io_gemm, {}
   },
   test_case{ "create and free internal bo", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_create_free_internal_bo, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_create_free_internal_bo, {}
   },
   // npu4 and npu3 back the dev heap with multiple, expandable chunks, so
   // cross-chunk dev BOs work. npu1 has a single fixed chunk, so the same
@@ -1717,13 +1849,13 @@ std::vector<test_case> test_list {
   // and still passes. Filter on device type only (not the amdxdna driver) so
   // these also run on the QEMU guest where the NPU is a virtio-gpu device.
   test_case{ "dev BO crossing two heap chunks (128MB)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_dev_bo_cross_heap, { 128ul * 1024 * 1024 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_dev_bo_cross_heap, { 128ul * 1024 * 1024 }
   },
   test_case{ "dev BO spanning the whole heap (512MB)", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_dev_bo_cross_heap, { 512ul * 1024 * 1024 }
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_dev_bo_cross_heap, { 512ul * 1024 * 1024 }
   },
   test_case{ "dev BO cross-heap alloc/free stress", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_dev_bo_cross_heap_stress,
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_dev_bo_cross_heap_stress,
     { 128ul * 1024 * 1024, 100 }
   },
   // npu4 caps the dev heap at 512MB, so a larger BO must be rejected.
@@ -1732,10 +1864,10 @@ std::vector<test_case> test_list {
   },
   // npu3 and ve2 have no 512MB heap cap, so the same over-512MB BO must allocate fine.
   test_case{ "dev BO larger than 512MB accepted (aie4)", {},
-    TEST_POSITIVE, {npu3, ve2}, {}, TEST_dev_bo_cross_heap, { 576ul * 1024 * 1024 }
+    TEST_POSITIVE, {npu3, npu3vf, ve2}, {}, TEST_dev_bo_cross_heap, { 576ul * 1024 * 1024 }
   },
   test_case{ "export BO then close device", {},
-    TEST_POSITIVE, {npu1, npu4, npu3, ve2}, {}, TEST_export_bo_then_close_device, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf, ve2}, {}, TEST_export_bo_then_close_device, {}
   },
   test_case{ "get AIE coredump and check registers", {},
     TEST_POSITIVE, {npu4}, {amdxdna}, TEST_io_coredump, {}
@@ -1747,13 +1879,13 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, {npu4}, {amdxdna}, TEST_io_aie_reg, {}
   },
   test_case{ "failed chained command", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_io_runlist_bad_cmd, {false}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_io_runlist_bad_cmd, {false}
   },
   test_case{ "timed out chained command", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_io_runlist_bad_cmd, {true}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_io_runlist_bad_cmd, {true}
   },
   test_case{ "create and free user ptr BO with mmapped ptr", {},
-    TEST_POSITIVE, {npu1, npu4, npu3}, {}, TEST_create_free_mmaped_uptr_bo, {}
+    TEST_POSITIVE, {npu1, npu4, npu3, npu3vf}, {}, TEST_create_free_mmaped_uptr_bo, {}
   },
   test_case{ "DPM noop (no QoS)", {},
     TEST_POSITIVE, {npu4}, {amdxdna}, TEST_dpm_noop_no_qos, {}
@@ -1765,26 +1897,34 @@ std::vector<test_case> test_list {
     TEST_POSITIVE, {npu4}, {amdxdna}, TEST_dpm_power_modes, {}
   },
   test_case{ "CERT log: attach/detach", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_certlog_attach_detach, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_certlog_attach_detach, {}
   },
   test_case{ "CERT log: max num_ucs", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_certlog_multi_uc, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_certlog_multi_uc, {}
   },
   test_case{ "CERT log: num_ucs > AIE4_MAX_NUM_CERTS rejected", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_certlog_num_ucs_overflow, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_certlog_num_ucs_overflow, {}
   },
   test_case{ "CERT log: out-of-range uc index rejected", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_certlog_invalid_uc_index, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_certlog_invalid_uc_index, {}
   },
   test_case{ "CERT log: payload overflow rejected", {},
-    TEST_POSITIVE, {npu3}, {}, TEST_certlog_payload_overflow, {}
+    TEST_POSITIVE, {npu3, npu3vf}, {}, TEST_certlog_payload_overflow, {}
   },
   test_case{ "NPU write to read-only user pointer BO is rejected", {},
-    TEST_NEGATIVE, {npu1, npu4, npu3}, {amdxdna}, TEST_write_to_readonly_uptr_bo, {}
+    TEST_NEGATIVE, {npu1, npu4, npu3, npu3vf}, {amdxdna}, TEST_write_to_readonly_uptr_bo, {}
   },
   test_case{ "df_bw 1GB shim DMA loopback", {},
-    TEST_POSITIVE, {npu4, npu3}, {}, TEST_df_bw, {}
+    TEST_POSITIVE, {npu4, npu3, npu3vf}, {}, TEST_df_bw, {}
   },
+  // Disable until fw FLR bug is fixed
+  // test_case{ "AIE4 Classic/VF FLR then recovers hwctx", {},
+    // TEST_POSITIVE, {npu3, npu3vf}, {amdxdna}, TEST_aie4_flr, {}
+  // },
+  // npu3vf only as for PF FLR device must be in SRIOV mode
+  // test_case{ "AIE4 PF FLR", {},
+    // TEST_POSITIVE, {npu3vf}, {amdxdna}, TEST_aie4_pf_flr_entry, {}
+  // },
 };
 
 void
