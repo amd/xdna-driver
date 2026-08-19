@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -1188,13 +1189,23 @@ struct telemetry
   static constexpr uint32_t AIE4_TRACE_COUNT = 16;
   static constexpr size_t AIE4_TELEMETRY_BUFFER_SIZE = 128 * 1024;  // 128KB minimum required by firmware
 
+  // The firmware header (mpnpu-api aie4/npu_msg_priv.h, mirrored in
+  // src/driver/amdxdna/aie4_msg_priv.h) wraps its whole message ABI in
+  // #pragma pack(push, 4), so every uint64_t below is only 4-byte aligned and
+  // the two pads a natural layout would insert - one before l1_interrupt and
+  // one before the frame counter array - do not exist. Declaring these structs
+  // without the pragma puts both counter arrays 8 bytes late, which reads every
+  // per-context counter one index high. The static_assert after
+  // aie4_fw_telemetry pins the resulting offset against the firmware layout.
+#pragma pack(push, 4)
   struct aie4_clk_deep_slp {
     uint8_t ipuaie;
     uint8_t ipuhclk;
     uint8_t nbif;
     uint8_t axi2sdp;
     uint8_t mpipu;
-    uint8_t reserved[3];
+    uint8_t sram;
+    uint8_t reserved[2];
   };
 
   struct aie4_telemetry_opcodes {
@@ -1222,6 +1233,17 @@ struct telemetry
     uint64_t preemption_frame_boundary_counter[AIE4_TOTAL_NUM_UC];
     uint64_t preemption_checkpoint_event_counter[AIE4_TOTAL_NUM_UC];
   };
+#pragma pack(pop)
+
+  // The firmware DMA telemetry buffer is reinterpret_cast onto this struct, so
+  // its byte layout is a hard ABI. Lock the offset of the first preemption
+  // counter array to the value the firmware npu_telemetry ABI dictates (472),
+  // which pins every field ahead of it and so the effect of the pack pragma
+  // above. If the layout drifts - a dropped pragma, a changed field - this
+  // fails to compile rather than silently reading the counters from the wrong
+  // offset.
+  static_assert(offsetof(aie4_fw_telemetry, preemption_frame_boundary_counter) == 472,
+                "AIE4 frame preemption counter offset must match firmware telemetry layout");
 
   struct amdxdna_drm_query_telemetry {
     uint32_t major;
@@ -1382,21 +1404,65 @@ struct telemetry
 
   // AIE4 telemetry handler
   class aie4_telemetry_handler : public telemetry_handler {
-  public:
-    xrt_core::query::aie_telemetry::result_type
-    query_aie_telemetry(const shim_xdna::pdev& pci_dev) const override {
-      xrt_core::query::aie_telemetry::result_type output;
-      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
+    // The driver (amdxdna_get_telemetry) lays the QUERY_TELEMETRY buffer out as:
+    //   [ header: major,minor,type,map_num_elements (4 x u32 = 16 bytes) ]
+    //   [ map: map_num_elements x u32 ]   -- map[fw_ctx_id] = driver ctx id
+    //   [ aie4_fw_telemetry ]             -- the firmware npu_telemetry payload
+    // The map (mirroring AIE2p) translates a firmware-assigned context id (the
+    // key the firmware uses to index its per-context preemption counters) to
+    // the driver-assigned context id shown to the user. Fixed header size is
+    // the four u32 fields that precede the flexible map[].
+    static constexpr size_t TELEMETRY_HEADER_FIXED = 4 * sizeof(uint32_t);
+    static constexpr size_t TELEMETRY_MAP_COUNT_OFFSET = 3 * sizeof(uint32_t);
 
+    // Run the QUERY_TELEMETRY ioctl and return the raw buffer. The buffer holds
+    // the header + map + firmware telemetry described above.
+    static std::vector<uint8_t>
+    query_buffer(const shim_xdna::pdev& pci_dev) {
+      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
       amdxdna_drm_get_info query_telemetry = {
         .param = DRM_AMDXDNA_QUERY_TELEMETRY,
         .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
         .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
       };
-
       pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
+      return telemetry_buffer;
+    }
 
-      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+    // map_count() below derives its clamp by subtracting the header and payload
+    // sizes from the buffer size, so the buffer must be large enough to hold
+    // both; a smaller buffer would wrap that unsigned subtraction and defeat
+    // the clamp instead of tightening it.
+    static_assert(AIE4_TELEMETRY_BUFFER_SIZE >
+                  TELEMETRY_HEADER_FIXED + sizeof(aie4_fw_telemetry),
+                  "AIE4 telemetry buffer must hold the header and the firmware payload");
+
+    // Number of entries in the firmware-context-id to driver-context-id map,
+    // clamped so the trailing firmware telemetry struct always fits in the
+    // buffer (defensive against a malformed header).
+    static uint32_t
+    map_count(const std::vector<uint8_t>& buf) {
+      uint32_t n = 0;
+      std::memcpy(&n, buf.data() + TELEMETRY_MAP_COUNT_OFFSET, sizeof(n));
+      const size_t max_n = (buf.size() - TELEMETRY_HEADER_FIXED -
+                            sizeof(aie4_fw_telemetry)) / sizeof(uint32_t);
+      return static_cast<uint32_t>(std::min<size_t>(n, max_n));
+    }
+
+    // Pointer to the firmware telemetry payload, past the header and the map.
+    static const aie4_fw_telemetry*
+    fw_data(const std::vector<uint8_t>& buf) {
+      const size_t off = TELEMETRY_HEADER_FIXED +
+                         static_cast<size_t>(map_count(buf)) * sizeof(uint32_t);
+      return reinterpret_cast<const aie4_fw_telemetry*>(buf.data() + off);
+    }
+
+  public:
+    xrt_core::query::aie_telemetry::result_type
+    query_aie_telemetry(const shim_xdna::pdev& pci_dev) const override {
+      xrt_core::query::aie_telemetry::result_type output;
+      const auto telemetry_buffer = query_buffer(pci_dev);
+      const auto* fw_telemetry = fw_data(telemetry_buffer);
 
       // AIE4: Map clock domain deep sleep modes (5 domains)
       const uint8_t* clock_domains[] = {
@@ -1418,17 +1484,8 @@ struct telemetry
     xrt_core::query::misc_telemetry::result_type
     query_misc_telemetry(const shim_xdna::pdev& pci_dev) const override {
       xrt_core::query::misc_telemetry::result_type output;
-      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
-
-      amdxdna_drm_get_info query_telemetry = {
-        .param = DRM_AMDXDNA_QUERY_TELEMETRY,
-        .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
-        .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
-      };
-
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
-
-      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+      const auto telemetry_buffer = query_buffer(pci_dev);
+      const auto* fw_telemetry = fw_data(telemetry_buffer);
       output.l1_interrupts = fw_telemetry->l1_interrupt;
       return output;
     }
@@ -1436,17 +1493,8 @@ struct telemetry
     xrt_core::query::opcode_telemetry::result_type
     query_opcode_telemetry(const shim_xdna::pdev& pci_dev) const override {
       xrt_core::query::opcode_telemetry::result_type output;
-      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
-
-      amdxdna_drm_get_info query_telemetry = {
-        .param = DRM_AMDXDNA_QUERY_TELEMETRY,
-        .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
-        .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
-      };
-
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
-
-      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+      const auto telemetry_buffer = query_buffer(pci_dev);
+      const auto* fw_telemetry = fw_data(telemetry_buffer);
 
       // Flatten hypervisor + supervisor opcode arrays
       for (uint32_t i = 0; i < AIE4_TRACE_COUNT; i++) {
@@ -1469,17 +1517,8 @@ struct telemetry
     xrt_core::query::rtos_telemetry::result_type
     query_rtos_telemetry(const shim_xdna::pdev& pci_dev) const override {
       xrt_core::query::rtos_telemetry::result_type output;
-      std::vector<uint8_t> telemetry_buffer(AIE4_TELEMETRY_BUFFER_SIZE, 0);
-
-      amdxdna_drm_get_info query_telemetry = {
-        .param = DRM_AMDXDNA_QUERY_TELEMETRY,
-        .buffer_size = AIE4_TELEMETRY_BUFFER_SIZE,
-        .buffer = reinterpret_cast<uintptr_t>(telemetry_buffer.data())
-      };
-
-      pci_dev.drv_ioctl(shim_xdna::drv_ioctl_cmd::get_info, &query_telemetry);
-
-      auto* fw_telemetry = reinterpret_cast<aie4_fw_telemetry*>(telemetry_buffer.data());
+      const auto telemetry_buffer = query_buffer(pci_dev);
+      const auto* fw_telemetry = fw_data(telemetry_buffer);
 
       // One full task per supervisor slot (hypervisor + supervisors)
       for (uint32_t i = 0; i < AIE4_MAX_NUM_SUPERVISORS + 1; i++) {
