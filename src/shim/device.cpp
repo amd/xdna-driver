@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -322,15 +323,13 @@ struct preemption_events
 // boundary event counters.
 //
 // The counters live in the RTOS telemetry payload (already parsed by the
-// rtos_telemetry query handler) and are keyed there by slot_index. On AIE2
-// the driver populates slot_index with the hardware context id from the
-// amdxdna ctx_map, which matches amdxdna_drm_hwctx_entry::context_id. On AIE4
-// there is no such mapping and slot_index is the firmware micro-controller
-// slot, which lines up with amdxdna_drm_hwctx_entry::hwctx_id instead. Callers
-// therefore select the lookup key by device generation (hwctx_id on AIE4,
-// context_id otherwise); probing context_id unconditionally could false-match
-// an unrelated AIE4 telemetry slot since context_id is allocated cyclically
-// from a small value.
+// rtos_telemetry query handler) and are keyed there by slot_index, which on
+// both AIE2p and AIE4 is the driver-assigned context id. On AIE2p the driver
+// populates slot_index from its ctx_map; on AIE4 the rtos_telemetry handler
+// resolves the firmware context id to the driver context id via the ctx_map
+// the driver now places at the head of the telemetry buffer. Either way
+// slot_index matches amdxdna_drm_hwctx_entry::context_id, so callers join on
+// context_id uniformly.
 //
 // Reusing the rtos_telemetry query keeps the telemetry parsing in a single
 // place so both the aie-partitions report and the preemption report share the
@@ -402,18 +401,17 @@ struct partition_info
     if (key != key_type::aie_partition_info)
       throw xrt_core::query::no_such_key(key, "Not implemented");
 
-    // The RTOS telemetry preemption counters are keyed differently per
-    // device generation: on AIE4 by the firmware micro-controller slot
-    // (amdxdna_drm_hwctx_entry::hwctx_id) and on AIE2 by the hardware context
-    // id (amdxdna_drm_hwctx_entry::context_id). Select the join key by
-    // generation rather than probing both, because context_id is allocated
-    // cyclically from a small value and could otherwise false-match an
-    // unrelated telemetry slot on AIE4.
+    // The RTOS telemetry preemption counters are keyed by the driver context
+    // id on every generation (see get_preemption_events above), so the modern
+    // DRM_AMDXDNA_HW_CONTEXT_ALL path below joins on
+    // amdxdna_drm_hwctx_entry::context_id unconditionally. Only the legacy
+    // DRM_AMDXDNA_QUERY_HW_CONTEXTS fallback needs the device generation,
+    // because that ioctl predates AIE4 and is only reached on AIE2.
     //
     // Reading the PCI device id can throw. Preemption enrichment is best
     // effort, so if the generation cannot be determined leave the optional
-    // unset and skip enrichment (counters stay zero) rather than guessing a
-    // key that could attach wrong counts, or failing the whole query.
+    // unset and skip enrichment on that legacy path (counters stay zero)
+    // rather than failing the whole query.
     std::optional<bool> is_aie4_dev;
     try {
       is_aie4_dev = is_aie4(xrt_core::device_query<query::pcie_id>(device).device_id);
@@ -483,15 +481,11 @@ struct partition_info
           new_entry.command_completions = entry.command_completions;
           new_entry.migrations = entry.migrations;
           new_entry.preemptions = entry.preemptions;
-          // The legacy amdxdna_drm_query_hwctx struct only exposes context_id,
-          // not hwctx_id, so the generation-based key selection used on the
-          // modern path is not possible here. This legacy ioctl is the AIE2-era
-          // path where the telemetry slot_index is the hardware context id, so
-          // the join by context_id is correct; AIE4 (keyed by hwctx_id) always
-          // supports the modern DRM_AMDXDNA_HW_CONTEXT_ALL ioctl below, so it
-          // never reaches this path. Only enrich when the device is known to be
-          // non-AIE4 so an unknown generation does not attach a context_id keyed
-          // count that could be wrong; otherwise the counters stay at zero.
+          // This legacy ioctl is the AIE2-era path; AIE4 always supports the
+          // modern DRM_AMDXDNA_HW_CONTEXT_ALL ioctl below and so never reaches
+          // it. Enrich only when the device is known to be non-AIE4, so an
+          // unknown generation leaves the counters at zero instead of joining
+          // telemetry that was never meant to reach this path.
           if (is_aie4_dev && !*is_aie4_dev) {
             const auto preempt_it = legacy_preemption_event_map.find(entry.context_id);
             if (preempt_it != legacy_preemption_event_map.end()) {
@@ -567,15 +561,15 @@ struct partition_info
       new_entry.command_completions = entry.command_completions;
       new_entry.migrations = entry.migrations;
       new_entry.preemptions = entry.preemptions;
-      // Only enrich when the device generation is known; guessing a key could
-      // attach wrong counters (see is_aie4_dev above).
-      if (is_aie4_dev) {
-        const auto preempt_key = *is_aie4_dev ? entry.hwctx_id : entry.context_id;
-        const auto preempt_it = preemption_event_map.find(preempt_key);
-        if (preempt_it != preemption_event_map.end()) {
-          new_entry.preemption_frame_event = preempt_it->second.frame_events;
-          new_entry.preemption_layer_event = preempt_it->second.layer_events;
-        }
+      // Preemption events are keyed by the driver context id on both AIE2p and
+      // AIE4: the rtos_telemetry handler resolves the firmware context id to the
+      // driver context id (via the telemetry ctx_map on AIE4, the ctx_map on
+      // AIE2p) and stores it in slot_index, which matches
+      // amdxdna_drm_hwctx_entry::context_id here.
+      const auto preempt_it = preemption_event_map.find(entry.context_id);
+      if (preempt_it != preemption_event_map.end()) {
+        new_entry.preemption_frame_event = preempt_it->second.frame_events;
+        new_entry.preemption_layer_event = preempt_it->second.layer_events;
       }
       new_entry.errors = entry.errors;
       new_entry.qos.priority = entry.priority;
@@ -1185,8 +1179,26 @@ struct telemetry
   static constexpr uint32_t NPU_MAX_DTLB_COUNT = 12;
   // AIE4 firmware telemetry constants and structs
   static constexpr uint32_t AIE4_MAX_NUM_SUPERVISORS = 4;
-  static constexpr uint32_t AIE4_TOTAL_NUM_UC = 6;
   static constexpr uint32_t AIE4_TRACE_COUNT = 16;
+  // Firmware records preemption counters per hardware context id, not per
+  // micro-controller. The raw firmware buffer is reinterpret_cast onto
+  // aie4_fw_telemetry, so this count must equal the firmware npu_telemetry ABI
+  // (MAX_NUM_HW_CTX_API) exactly: it sets the stride between the two counter
+  // arrays and the extent of the second, so any other value puts the checkpoint
+  // (layer) array at the wrong offset. It is also the hard ceiling on how many
+  // contexts can be reported at all, since the firmware carries no counters
+  // beyond it and truncates its copy-out at that size.
+  static constexpr uint32_t AIE4_MAX_NUM_HW_CTX = 1024;
+  // Smallest number of firmware context slots published through the
+  // rtos_telemetry query. The row count grows past this to cover any higher
+  // slot that carries information (see query_rtos_telemetry() in
+  // aie4_telemetry_handler); this is only the floor, which keeps idle and
+  // typical output a stable size, matches the AIE2p handler's fixed 16 ctx_map
+  // entries, and covers the micro-controller rows the rtos_tasks report
+  // expects.
+  static constexpr uint32_t AIE4_REPORT_MIN_SLOTS = 16;
+  static_assert(AIE4_REPORT_MIN_SLOTS <= AIE4_MAX_NUM_HW_CTX,
+                "AIE4 reported slot floor must stay within the firmware counter arrays");
   static constexpr size_t AIE4_TELEMETRY_BUFFER_SIZE = 128 * 1024;  // 128KB minimum required by firmware
 
   // The firmware header (mpnpu-api aie4/npu_msg_priv.h, mirrored in
@@ -1195,8 +1207,9 @@ struct telemetry
   // the two pads a natural layout would insert - one before l1_interrupt and
   // one before the frame counter array - do not exist. Declaring these structs
   // without the pragma puts both counter arrays 8 bytes late, which reads every
-  // per-context counter one index high. The static_assert after
-  // aie4_fw_telemetry pins the resulting offset against the firmware layout.
+  // per-context counter one index high. The static_asserts after
+  // aie4_fw_telemetry pin the offsets and the total size against the firmware
+  // layout.
 #pragma pack(push, 4)
   struct aie4_clk_deep_slp {
     uint8_t ipuaie;
@@ -1230,20 +1243,37 @@ struct telemetry
     uint64_t did_dma;
     uint64_t resource_acquired[AIE4_MAX_NUM_SUPERVISORS];
     struct aie4_telemetry_opcodes opcodes;
-    uint64_t preemption_frame_boundary_counter[AIE4_TOTAL_NUM_UC];
-    uint64_t preemption_checkpoint_event_counter[AIE4_TOTAL_NUM_UC];
+    uint64_t preemption_frame_boundary_counter[AIE4_MAX_NUM_HW_CTX];
+    uint64_t preemption_checkpoint_event_counter[AIE4_MAX_NUM_HW_CTX];
   };
 #pragma pack(pop)
 
   // The firmware DMA telemetry buffer is reinterpret_cast onto this struct, so
-  // its byte layout is a hard ABI. Lock the offset of the first preemption
-  // counter array to the value the firmware npu_telemetry ABI dictates (472),
-  // which pins every field ahead of it and so the effect of the pack pragma
-  // above. If the layout drifts - a dropped pragma, a changed field - this
-  // fails to compile rather than silently reading the counters from the wrong
-  // offset.
+  // its byte layout is a hard ABI. Lock the two preemption counter array
+  // offsets and the total size to the values the firmware npu_telemetry ABI
+  // dictates: frame at 472, checkpoint/layer at 472 + 1024*8 = 8664, and
+  // sizeof 8664 + 1024*8 = 16856. The size assertion matters on its own, since
+  // the offsets alone do not pin how far the trailing array extends. If the
+  // layout drifts - a dropped pack pragma, a changed field, a reduced
+  // AIE4_MAX_NUM_HW_CTX - this fails to compile rather than silently reading
+  // the counters from the wrong offset.
   static_assert(offsetof(aie4_fw_telemetry, preemption_frame_boundary_counter) == 472,
                 "AIE4 frame preemption counter offset must match firmware telemetry layout");
+  static_assert(offsetof(aie4_fw_telemetry, preemption_checkpoint_event_counter) == 8664,
+                "AIE4 layer preemption counter offset must match firmware telemetry layout");
+  static_assert(sizeof(aie4_fw_telemetry) == 16856,
+                "AIE4 telemetry struct size must match firmware telemetry layout");
+
+  // AIE4_MAX_NUM_HW_CTX is also the hard ceiling on the number of rows
+  // query_rtos_telemetry() can publish, so tie it to the actual extent of the
+  // counter arrays it indexes. The ceiling is exact rather than merely safe:
+  // the firmware API carries only this many counters and the firmware copy-out
+  // truncates at that size, so no slot beyond it can ever be surfaced.
+  static_assert(AIE4_MAX_NUM_HW_CTX ==
+                  sizeof(aie4_fw_telemetry::preemption_frame_boundary_counter) / sizeof(uint64_t) &&
+                AIE4_MAX_NUM_HW_CTX ==
+                  sizeof(aie4_fw_telemetry::preemption_checkpoint_event_counter) / sizeof(uint64_t),
+                "AIE4 context count must match the firmware preemption counter array extent");
 
   struct amdxdna_drm_query_telemetry {
     uint32_t major;
@@ -1348,6 +1378,9 @@ struct telemetry
       for (uint32_t i = 0; i < std::min(telemetry.ctx_map_num_elements, NPU_RTOS_MAX_USER_ID_COUNT); i++) {
         xrt_core::query::rtos_telemetry::data task;
 
+        // FW TID is the firmware-assigned context id, which for AIE2p is the
+        // ctx_map index i; Ctx ID (slot_index) is the driver context id.
+        task.user_task = i;
         task.context_starts = telemetry.context_started_count[i];
         task.schedules = telemetry.scheduled_count[i];
         task.syscalls = telemetry.syscall_count[i];
@@ -1457,6 +1490,19 @@ struct telemetry
       return reinterpret_cast<const aie4_fw_telemetry*>(buf.data() + off);
     }
 
+    // Look up the driver-assigned context id for a firmware context id, or 0
+    // when the slot has no live context. The map lives immediately after the
+    // fixed header.
+    static uint32_t
+    map_driver_ctx_id(const std::vector<uint8_t>& buf, uint32_t fw_ctx_id) {
+      if (fw_ctx_id >= map_count(buf))
+        return 0;
+      uint32_t v = 0;
+      std::memcpy(&v, buf.data() + TELEMETRY_HEADER_FIXED +
+                  static_cast<size_t>(fw_ctx_id) * sizeof(uint32_t), sizeof(v));
+      return v;
+    }
+
   public:
     xrt_core::query::aie_telemetry::result_type
     query_aie_telemetry(const shim_xdna::pdev& pci_dev) const override {
@@ -1520,46 +1566,113 @@ struct telemetry
       const auto telemetry_buffer = query_buffer(pci_dev);
       const auto* fw_telemetry = fw_data(telemetry_buffer);
 
-      // One full task per supervisor slot (hypervisor + supervisors)
-      for (uint32_t i = 0; i < AIE4_MAX_NUM_SUPERVISORS + 1; i++) {
+      // Sentinel Ctx ID for a firmware slot that no live context owns. The
+      // reports render it as "N/A" in the Ctx ID column.
+      constexpr uint64_t NO_CONTEXT = (std::numeric_limits<uint64_t>::max)();
+
+      // Both consumers of this collection identify a row by its position in the
+      // vector rather than by any id field set here: the preemption report
+      // prints FW TID as a running row counter (aie2_preemption_info) and the
+      // telemetry report prints RTOS Task the same way (ReportTelemetry
+      // generate_rtos_string). Neither one filters rows.
+      //
+      // The rows below are therefore one contiguous run of firmware context ids
+      // starting at zero, emitted unconditionally: row i describes firmware
+      // context id i, which is what makes the FW TID column read as the
+      // firmware context id. Skipping an empty slot, or prefixing rows that are
+      // not context slots, shifts every row after it and silently corrupts that
+      // column. The AIE2p handler above depends on the same property, walking
+      // its ctx_map indices unconditionally.
+      //
+      // What that requires is contiguity, not a constant row count. Row i must
+      // describe firmware context id i with no gaps; how many rows follow is
+      // free. So the window below varies in size while staying contiguous from
+      // zero - row i is still id i either way - and it is only a `continue`
+      // that would break the correspondence. Do not be tempted to pin the count
+      // to a fixed size to make it look more predictable: firmware may hand out
+      // any id below AIE4_MAX_NUM_HW_CTX, and a fixed window smaller than that
+      // silently drops a live context from both this report and the
+      // aie-partitions view, which is built from this same collection (see
+      // get_preemption_events above).
+      //
+      // Grow the window to the last slot carrying information, floored at
+      // AIE4_REPORT_MIN_SLOTS and ceilinged at AIE4_MAX_NUM_HW_CTX. A slot
+      // counts when a live context owns it, or when it still holds counters
+      // from a context that has since gone away - including the counters is
+      // what makes the preemption report a persistent view of the residue
+      // rather than a snapshot of live contexts only. Scanning from the floor
+      // suffices, since everything below it is published regardless. In
+      // practice this stays tiny: ctx_acquire() claims the lowest free slot and
+      // ctx_release() frees in place, so the ids in use are dense and the
+      // highest is (live count - 1).
+      uint32_t rows = AIE4_REPORT_MIN_SLOTS;
+      for (uint32_t id = AIE4_REPORT_MIN_SLOTS; id < AIE4_MAX_NUM_HW_CTX; id++) {
+        if (map_driver_ctx_id(telemetry_buffer, id) != AMDXDNA_INVALID_CTX_HANDLE ||
+            fw_telemetry->preemption_frame_boundary_counter[id] != 0 ||
+            fw_telemetry->preemption_checkpoint_event_counter[id] != 0)
+          rows = id + 1;
+      }
+
+      for (uint32_t id = 0; id < rows; id++) {
         xrt_core::query::rtos_telemetry::data task;
 
-        task.context_starts = fw_telemetry->context_starting[i];
-        task.schedules = fw_telemetry->scheduler_scheduled[i];
+        // AIE4 records the scheduler counters per micro-controller (index 0 is
+        // the hypervisor, 1..N the supervisors) but the preemption counters per
+        // hardware context id, so it has two index spaces where AIE2p has one.
+        // A single shared collection can only express one of them, so the low
+        // rows do double duty: the rtos_tasks report reads their scheduler
+        // fields and the preemption report reads their per-context fields. Rows
+        // past the micro-controllers have no scheduler data and must not index
+        // the micro-controller arrays, which hold AIE4_MAX_NUM_SUPERVISORS + 1
+        // entries at most.
+        const bool is_uc = id < AIE4_MAX_NUM_SUPERVISORS + 1;
+
+        task.context_starts = is_uc ? fw_telemetry->context_starting[id] : 0;
+        task.schedules = is_uc ? fw_telemetry->scheduler_scheduled[id] : 0;
         task.syscalls = 0;  // Not available in AIE4
 
         // DMA access only available for hypervisor (index 0)
-        task.dma_access = (i == 0) ? fw_telemetry->did_dma : 0;
+        task.dma_access = (id == 0) ? fw_telemetry->did_dma : 0;
 
         // Resource acquisition only for supervisors (not hypervisor)
-        task.resource_acquisition = (i > 0 && i <= AIE4_MAX_NUM_SUPERVISORS) ?
-                                     fw_telemetry->resource_acquired[i - 1] : 0;
+        task.resource_acquisition = (id > 0 && is_uc) ?
+                                     fw_telemetry->resource_acquired[id - 1] : 0;
 
         // DTLB data not available in AIE4
         task.dtlbs = std::vector<xrt_core::query::rtos_telemetry::dtlb_data>();
-        task.preemption_data.slot_index = i;
-        task.preemption_data.preemption_checkpoint_event =
-          fw_telemetry->preemption_checkpoint_event_counter[i];
-        task.preemption_data.preemption_frame_boundary_events =
-          fw_telemetry->preemption_frame_boundary_counter[i];
 
-        output.push_back(std::move(task));
-      }
+        // The reports display the row ordinal and ignore this field, and the
+        // ordinal equals id because the rows are contiguous from zero. Set it
+        // regardless to record what the column is meant to convey, so a
+        // consumer that does read the field arrives at the same answer.
+        task.user_task = id;
 
-      // Add preemption-only entries for remaining UCs
-      for (auto i = AIE4_MAX_NUM_SUPERVISORS + 1; i < AIE4_TOTAL_NUM_UC; i++) {
-        xrt_core::query::rtos_telemetry::data task;
-        task.context_starts = 0;
-        task.schedules = 0;
-        task.syscalls = 0;
-        task.dma_access = 0;
-        task.resource_acquisition = 0;
-        task.dtlbs = std::vector<xrt_core::query::rtos_telemetry::dtlb_data>();
-        task.preemption_data.slot_index = i;
+        // Preemption counters are indexed by the firmware-assigned hardware
+        // context id, confirmed against the firmware source: cert.c calls
+        // telemetry_preemption_{frame_boundary,checkpoint_event}(ctx_id) with
+        // ctx_id == hw_ctx_id (the id the firmware returns to the driver and
+        // the driver stores as hwctx->fw_ctx_id), and telemetry.c increments
+        // counter[ctx_id] directly - there is no reserved slot and no +1
+        // offset. The driver publishes a fw_ctx_id -> driver_ctx_id map at the
+        // head of the buffer (mirroring AIE2p) to name the owning context.
+        //
+        // The preemption report is the persistent view: the firmware counters
+        // outlive the context that generated them, within a single firmware
+        // lifetime, so a slot that has recorded events is still reported once
+        // no live context owns it. An unowned slot reads back as
+        // AMDXDNA_INVALID_CTX_HANDLE from the map and is reported as
+        // NO_CONTEXT, which is honest about there being no owner and keeps the
+        // slot out of the aie-partitions view, since that joins on the driver
+        // context id (see get_preemption_events above) and so only ever matches
+        // a live context.
+        const uint32_t driver_ctx_id = map_driver_ctx_id(telemetry_buffer, id);
+        task.preemption_data.slot_index =
+          (driver_ctx_id == AMDXDNA_INVALID_CTX_HANDLE) ? NO_CONTEXT : driver_ctx_id;
         task.preemption_data.preemption_checkpoint_event =
-          fw_telemetry->preemption_checkpoint_event_counter[i];
+          fw_telemetry->preemption_checkpoint_event_counter[id];
         task.preemption_data.preemption_frame_boundary_events =
-          fw_telemetry->preemption_frame_boundary_counter[i];
+          fw_telemetry->preemption_frame_boundary_counter[id];
+
         output.push_back(std::move(task));
       }
       return output;
