@@ -292,6 +292,59 @@ out_free:
 	return ret;
 }
 
+/*
+ * The telemetry map is indexed by firmware context id and sized by
+ * aie->hwctx_limit, so the walk has to carry both the map and that bound:
+ * the per-generation struct amdxdna_dev_hdl that holds the limit is not
+ * visible from here.
+ */
+struct amdxdna_hwctx_map_ctx {
+	u32	*map;
+	u32	limit;
+};
+
+static int amdxdna_fill_hwctx_map_cb(struct amdxdna_hwctx *hwctx, void *arg)
+{
+	struct amdxdna_dev *xdna = hwctx->client->xdna;
+	struct amdxdna_hwctx_map_ctx *ctx = arg;
+
+	if (hwctx->fw_ctx_id >= ctx->limit) {
+		XDNA_ERR(xdna, "Invalid fw ctx id %d/%d", hwctx->fw_ctx_id,
+			 ctx->limit);
+		return -EINVAL;
+	}
+
+	/* Map firmware allocated context id (key) to driver context id (value). */
+	ctx->map[hwctx->fw_ctx_id] = hwctx->id;
+	return 0;
+}
+
+/*
+ * Fill the firmware-context-id to driver-context-id translation for every
+ * context the caller may see. amdxdna_get_telemetry() places the result at
+ * the head of the telemetry buffer, so a consumer can resolve the firmware
+ * context id (the key the firmware indexes its per-context telemetry by) to
+ * the driver context id.
+ */
+static int amdxdna_fill_hwctx_map(struct aie_device *aie, u32 *map)
+{
+	struct amdxdna_hwctx_map_ctx ctx = { .map = map, .limit = aie->hwctx_limit };
+	struct amdxdna_dev *xdna = aie->xdna;
+	struct amdxdna_client *tmp_client;
+	int ret;
+
+	amdxdna_for_each_client(xdna, tmp_client) {
+		if (!amdxdna_client_visible(tmp_client))
+			continue;
+		ret = amdxdna_hwctx_walk(tmp_client, &ctx, NULL,
+					 amdxdna_fill_hwctx_map_cb);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 int amdxdna_get_telemetry(struct aie_device *aie,
 			  struct amdxdna_client *client,
 			  struct amdxdna_drm_get_info *args)
@@ -329,8 +382,8 @@ int amdxdna_get_telemetry(struct aie_device *aie,
 	}
 
 	header->map_num_elements = elem_num;
-	if (elem_num && aie->msg_ops.fill_hwctx_map) {
-		ret = aie->msg_ops.fill_hwctx_map(aie, header->map);
+	if (elem_num) {
+		ret = amdxdna_fill_hwctx_map(aie, header->map);
 		if (ret)
 			return ret;
 	}
