@@ -688,7 +688,7 @@ static int amdxdna_fw_log_init(struct aie_device *aie, u32 level)
 	drm_WARN_ON(&xdna->ddev, !mutex_is_locked(&xdna->dev_lock));
 
 	dpt = amdxdna_dpt_publish(aie, AMDXDNA_DPT_FW_LOG,
-				  AMDXDNA_DPT_FW_LOG_SIZE, level);
+				  xdna->fw_log_size, level);
 	if (IS_ERR(dpt)) {
 		ret = PTR_ERR(dpt);
 		return ret == -EOPNOTSUPP ? 0 : ret;
@@ -1054,6 +1054,7 @@ int amdxdna_dpt_init(struct aie_device *aie)
 	 * msg_ops without the generation-specific dev_handle layout.
 	 */
 	aie->xdna->dpt_aie = aie;
+	aie->xdna->fw_log_size = AMDXDNA_DPT_FW_LOG_SIZE;
 
 	ret = amdxdna_fw_log_init(aie, AMDXDNA_DPT_FW_LOG_LEVEL_DEFAULT);
 	if (ret)
