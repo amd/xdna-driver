@@ -453,7 +453,7 @@ binary_info binary_infos[] = {
 const binary_info&
 get_binary_info(device* dev, const char* tag, const flow_type* flow)
 {
-  auto pci_dev_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  auto pci_dev_id = aie4_binary_device_id(device_query<query::pcie_device>(dev));
   auto revision_id = device_query<query::pcie_id>(dev).revision_id;
   bool match_tag = (tag == nullptr || tag[0] == '\0');
   bool match_flow = (flow == nullptr);

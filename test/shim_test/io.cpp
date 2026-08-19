@@ -617,7 +617,7 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
   , m_total_fine_preemption_checkpoints(0)
 {
   const char* tag_c = tag.empty() ? nullptr : tag.c_str();
-  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  auto device_id = aie4_binary_device_id(device_query<query::pcie_device>(dev));
   m_is_aie4 = (device_id == npu3_device_id || device_id == npu3a_device_id);
 
   if (m_is_full_elf) {
@@ -714,7 +714,7 @@ elf_io_negative_test_bo_set(device* dev, const std::string& tag)
       static_cast<uint32_t>(std::stoul(info.extra.at("exp_ctx_error_type"), nullptr, 0));
   }
 
-  auto device_id = canonical_device_id(device_query<query::pcie_device>(dev));
+  auto device_id = aie4_binary_device_id(device_query<query::pcie_device>(dev));
   m_is_aie4 = (device_id == npu3_device_id || device_id == npu3a_device_id);
 
   // Expected code for the driver-synthesized AIE async error on an aie4 fault.
