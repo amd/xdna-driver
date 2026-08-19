@@ -36,8 +36,10 @@ struct binary_info {
 const uint16_t npu1_device_id = 0x1502;
 const uint16_t npu1_device_id1 = 0x1050;
 const uint16_t npu3_device_id = 0x17f1;
+const uint16_t npu3_pf_device_id = 0x17f2;
 const uint16_t npu3_device_id1 = 0x17f3;
 const uint16_t npu3a_device_id = 0x1b0a;
+const uint16_t npu3a_pf_device_id = 0x1b0b;
 const uint16_t npu3a_device_id1 = 0x1b0c;
 const uint16_t npu_ve2_device_id = 0xb052;
 const uint16_t npu4_device_id = 0x17f0;

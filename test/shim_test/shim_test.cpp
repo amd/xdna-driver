@@ -107,6 +107,9 @@ void TEST_certlog_num_ucs_overflow(device::id_type, std::shared_ptr<device>&, ar
 void TEST_certlog_invalid_uc_index(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_certlog_payload_overflow(device::id_type, std::shared_ptr<device>&, arg_type&);
 void TEST_df_bw(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_aie4_flr(device::id_type, std::shared_ptr<device>&, arg_type&);
+void TEST_aie4_pf_flr(device::id_type, std::shared_ptr<device>&,
+                      std::shared_ptr<device>&);
 
 inline void
 set_xrt_path()
@@ -136,6 +139,7 @@ enum hw_type {
   npu1,     // AIE2, device_id 0x1502
   npu4,     // AIE2, device_id 0x17f0
   npu3,     // AIE4, device_id 0x17f1 / 0x1b0a (canonical)
+  npu3vf,   // AIE4 VF, device_id 0x17f3 / 0x1b0c (SRIOV only)
   ve2,      // VE2 edge, device_id 0xb052 (canonical)
 };
 
@@ -195,6 +199,13 @@ dev_filter_is_npu3(device::id_type id, device* dev)
 }
 
 bool
+dev_filter_is_npu3_vf(device::id_type id, device* dev)
+{
+  auto device_id = device_query<query::pcie_device>(dev);
+  return device_id == npu3_device_id1 || device_id == npu3a_device_id1;
+}
+
+bool
 dev_filter_is_ve2(device::id_type id, device* dev)
 {
   return canonical_device_id(device_query<query::pcie_device>(dev)) == npu_ve2_device_id;
@@ -208,6 +219,7 @@ static const hw_filter_entry hw_filter_table[] = {
   { npu1,    dev_filter_is_npu1   },
   { npu4,    dev_filter_is_npu4   },
   { npu3,    dev_filter_is_npu3   },
+  { npu3vf,  dev_filter_is_npu3_vf},
   { ve2,     dev_filter_is_ve2    },
 };
 
@@ -316,6 +328,8 @@ sysfs_dir_exists(const std::string& path)
  * Resolve .../sys/bus/<bus>/devices/<name> for the NPU device.
  * Prefer the path from sub_device_path when it exists; otherwise probe pci,
  * platform, and rpmsg buses using the same device name.
+ * Mgmt PF devices have no user handle, so sub_device_path throws; fall back
+ * to pcie_bdf (function0 query) to build the PCI sysfs path.
  */
 static std::optional<std::string>
 resolve_device_sysfs(device* dev)
@@ -326,18 +340,32 @@ resolve_device_sysfs(device* dev)
     "/sys/bus/rpmsg/devices/",
   };
 
-  const std::string from_query = get_device_sysfs(dev);
-  if (sysfs_dir_exists(from_query))
-    return from_query;
+  try {
+    const std::string from_query = get_device_sysfs(dev);
+    if (sysfs_dir_exists(from_query))
+      return from_query;
 
-  const std::string name = sysfs_device_basename(from_query);
-  if (name.empty())
-    return std::nullopt;
+    const std::string name = sysfs_device_basename(from_query);
+    if (!name.empty()) {
+      for (const char* root : bus_roots) {
+        const std::string candidate = std::string(root) + name;
+        if (sysfs_dir_exists(candidate))
+          return candidate;
+      }
+    }
+  } catch (const std::exception&) {
+    // e.g. mgmt PF: "No device handle"
+  }
 
-  for (const char* root : bus_roots) {
-    const std::string candidate = std::string(root) + name;
+  try {
+    auto bdf = device_query<query::pcie_bdf>(dev);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04x:%02x:%02x.%x",
+      std::get<0>(bdf), std::get<1>(bdf), std::get<2>(bdf), std::get<3>(bdf));
+    const std::string candidate = std::string("/sys/bus/pci/devices/") + buf;
     if (sysfs_dir_exists(candidate))
       return candidate;
+  } catch (const std::exception&) {
   }
   return std::nullopt;
 }
@@ -444,6 +472,49 @@ open_accel_fd(device* dev)
     throw std::runtime_error("open failed: " + accel_node + ": " + std::string(std::strerror(errno)));
   }
   return fd;
+}
+
+void
+trigger_pci_flr(device* dev)
+{
+  const auto device_sysfs = resolve_device_sysfs(dev);
+  if (!device_sysfs) {
+    throw std::runtime_error(
+      "Failed to resolve device sysfs for PCI FLR (tried sub_device_path and "
+      "/sys/bus/pci/devices/<name>)");
+  }
+  if (!is_pci_sysfs_device(*device_sysfs)) {
+    throw std::runtime_error("PCI FLR requires a PCI device, got " + *device_sysfs);
+  }
+
+  const std::string reset_path = *device_sysfs + "/reset";
+  std::ofstream ofs(reset_path);
+  if (!ofs) {
+    throw std::runtime_error(
+      "Cannot open " + reset_path + " for write (needs root?)");
+  }
+  ofs << "1";
+  ofs.flush();
+  if (!ofs)
+    throw std::runtime_error("Failed to write PCI FLR to " + reset_path);
+}
+
+unsigned int
+get_sriov_numvfs(device* dev)
+{
+  const auto device_sysfs = resolve_device_sysfs(dev);
+  if (!device_sysfs)
+    throw std::runtime_error("Failed to resolve device sysfs for sriov_numvfs");
+
+  const std::string path = *device_sysfs + "/sriov_numvfs";
+  std::ifstream ifs(path);
+  if (!ifs)
+    throw std::runtime_error("Cannot read " + path);
+  unsigned int n = 0;
+  ifs >> n;
+  if (!ifs)
+    throw std::runtime_error("Failed to parse " + path);
+  return n;
 }
 
 // Run op(fd) in a short-lived forked child and return its POD result.
@@ -617,6 +688,65 @@ TEST_get_mgmtpf_device(device::id_type id, std::shared_ptr<device>& sdev, arg_ty
   auto devinfo = get_total_devices(false);
   for (device::id_type i = 0; i < devinfo.first; i++)
     auto dev = get_mgmtpf_device(i);
+}
+
+// PFs are mgmt devices (is_user=false), so run_test() never passes them in.
+// Walk get_mgmtpf_device() and return the first AIE4 PF (0x17f2 / 0x1b0b).
+// Match on pcie_device only: is_xdna_dev/is_amdxdna_drv are userpf-oriented and
+// can throw or fail on mgmt devices even when the PF is present.
+std::shared_ptr<device>
+find_aie4_pf()
+{
+  auto n = get_total_devices(false).first;
+  for (device::id_type i = 0; i < n; i++) {
+    auto pf = get_mgmtpf_device(i);
+    uint16_t devid = 0;
+    try {
+      devid = device_query<query::pcie_device>(pf.get());
+    } catch (const std::exception&) {
+      continue;
+    }
+    if (devid != npu3_pf_device_id && devid != npu3a_pf_device_id)
+      continue;
+    auto bdf = get_bdf_info(i, false);
+    std::cout << "found AIE4 PF[" << i << "]: " << bdf_info2str(bdf)
+              << " (0x" << std::hex << devid << std::dec << ")" << std::endl;
+    return pf;
+  }
+  throw std::runtime_error("No AIE4 PF device found (0x17f2/0x1b0b)");
+}
+
+// Resolve the AIE4 PF and check sriov_numvfs around FLR. Workload + timing live
+// in TEST_aie4_pf_flr (io_test.cpp); PF discovery helpers stay here.
+// run_test() invokes this once per matching AIE4 VF; skip after the first so we
+// only issue one PF FLR per test case.
+void
+TEST_aie4_pf_flr_entry(device::id_type id, std::shared_ptr<device>& sdev, arg_type& arg)
+{
+  for (device::id_type i = 0; i < id; i++) {
+    try {
+      auto earlier = get_userpf_device(i);
+      if (dev_filter_is_npu3_vf(i, earlier.get()))
+        return;
+    } catch (const std::exception&) {
+      continue;
+    }
+  }
+
+  auto pf = find_aie4_pf();
+  auto numvfs_before = get_sriov_numvfs(pf.get());
+  std::cout << "sriov_numvfs before PF FLR: " << numvfs_before << std::endl;
+  if (!numvfs_before)
+    throw std::runtime_error("PF FLR: expected at least one VF before reset");
+
+  TEST_aie4_pf_flr(id, sdev, pf);
+
+  auto numvfs_after = get_sriov_numvfs(pf.get());
+  std::cout << "sriov_numvfs after PF FLR: " << numvfs_after << std::endl;
+  if (numvfs_after != numvfs_before) {
+    throw std::runtime_error("PF FLR: sriov_numvfs changed from " +
+      std::to_string(numvfs_before) + " to " + std::to_string(numvfs_after));
+  }
 }
 
 template <typename QueryRequestType>
@@ -1784,6 +1914,13 @@ std::vector<test_case> test_list {
   },
   test_case{ "df_bw 1GB shim DMA loopback", {},
     TEST_POSITIVE, {npu4, npu3}, {}, TEST_df_bw, {}
+  },
+  test_case{ "AIE4 Classic/VF FLR then recovers hwctx", {},
+    TEST_POSITIVE, {npu3}, {amdxdna}, TEST_aie4_flr, {}
+  },
+  //npu3vf only as for PF FLR device must be in SRIOV mode
+  test_case{ "AIE4 PF FLR", {},
+    TEST_POSITIVE, {npu3vf}, {amdxdna}, TEST_aie4_pf_flr_entry, {}
   },
 };
 
