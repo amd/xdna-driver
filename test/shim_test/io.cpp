@@ -277,6 +277,49 @@ get_fine_preemption_checkpoints(const std::string& ml_txn)
   return count;
 }
 
+// Raw ISA opcode value, OPCODE_PREEMPT in the aiebu ISA specification
+// (specification/aie2ps/isa.h), which aie4 control code shares.
+const uint8_t aie4_opcode_preempt = 25;
+
+// The aie4 data set ships a full ELF and no transaction blob, so the checkpoint
+// count comes from the control code itself: one aie4 'preempt' instruction is
+// one fine preemption checkpoint. The assembler records every occurrence in the
+// ELF .dump debug section, grouped by kernel instance and AIE column.
+//
+// A checkpoint is a partition wide rendezvous and firmware acknowledges one
+// preemption per context, so the number of checkpoints is the count seen by a
+// single column, not the sum over columns. Every column and instance must
+// therefore agree; disagreement means this derivation no longer models the
+// control code and is worth failing on rather than papering over.
+unsigned long
+get_aie4_fine_preemption_checkpoints(const std::string& elf, const std::string& kernel_name)
+{
+  unsigned long count = 0;
+  bool seen = false;
+
+  // dev_info spells the kernel as "kernel:instance", the query takes the kernel.
+  auto kernel = kernel_name.substr(0, kernel_name.find(':'));
+
+  aiebu::aiebu_assembler asp(elf);
+  for (const auto& loc : asp.get_op_locations(aie4_opcode_preempt, kernel).get_line_info()) {
+    for (const auto& per_col : loc.line_info) {
+      auto checkpoints = static_cast<unsigned long>(per_col.entries.size());
+
+      if (seen && checkpoints != count) {
+        throw std::runtime_error("Preemption checkpoints are not uniform across the "
+          "control code of " + elf);
+      }
+      count = checkpoints;
+      seen = true;
+    }
+  }
+
+  if (!count)
+    throw std::runtime_error("Preemptible kernel must have atleast 1 preemption checkpoint");
+
+  return count;
+}
+
 uint32_t
 get_column_size(const xrt::xclbin& xclbin)
 {
@@ -589,8 +632,14 @@ elf_preempt_io_test_bo_set(device* dev, const std::string& tag, const flow_type*
     m_kernel_index = elf_int::no_ctrl_code_id;
   }
 
-  if (!m_is_aie4)
-    m_total_fine_preemption_checkpoints = get_fine_preemption_checkpoints(m_local_data_path + "ml_txn.bin");
+  if (m_is_aie4) {
+    m_total_fine_preemption_checkpoints =
+      get_aie4_fine_preemption_checkpoints(get_binary_path(dev, tag_c, m_flow),
+                                           get_kernel_name(dev, tag_c, m_flow));
+  } else {
+    m_total_fine_preemption_checkpoints =
+      get_fine_preemption_checkpoints(m_local_data_path + "ml_txn.bin");
+  }
 
   for (int i = 0; i < IO_TEST_BO_MAX_TYPES; i++) {
     auto& ibo = m_bo_array[i];
