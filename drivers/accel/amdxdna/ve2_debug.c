@@ -9,6 +9,7 @@
 #include <drm/drm_drv.h>
 #include <linux/cleanup.h>
 #include <linux/completion.h>
+#include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/fdtable.h>
 #include <linux/jiffies.h>
@@ -137,6 +138,53 @@ static int ve2_get_hwctx_mem_bitmap(struct amdxdna_client *client,
 	return 0;
 }
 
+static int ve2_dbg_queue_data_rw(struct amdxdna_dev *xdna, struct amdxdna_hwctx *hwctx,
+				 u32 col, u32 row, u32 addr, void *data, size_t size,
+				 int cmd_type)
+{
+	dma_addr_t dma_handle;
+	void *virt_ptr = NULL;
+	int ret = 0;
+
+	if (size % 4 != 0) {
+		XDNA_ERR(xdna, "Size (%zu) must be a multiple of 4 bytes", size);
+		return -EINVAL;
+	}
+
+	virt_ptr = dma_alloc_coherent(xdna->ddev.dev, size, &dma_handle, GFP_KERNEL);
+	if (!virt_ptr) {
+		XDNA_ERR(xdna, "Failed to allocate DMA buffer");
+		return -ENOMEM;
+	}
+
+	addr = addr + ((col << VE2_COL_SHIFT) + (row << VE2_ROW_SHIFT));
+
+	switch (cmd_type) {
+	case DBG_CMD_WRITE:
+		memcpy(virt_ptr, data, size);
+		ret = submit_command_to_dbg_queue(hwctx, DBG_CMD_WRITE, addr, (u64)dma_handle,
+						  size / 4);
+		break;
+	case DBG_CMD_READ:
+		ret = submit_command_to_dbg_queue(hwctx, DBG_CMD_READ, addr, (u64)dma_handle,
+						  size / 4);
+		if (ret == 0)
+			memcpy(data, virt_ptr, size);
+		break;
+	case DBG_CMD_EXIT:
+		ret = submit_command_to_dbg_queue(hwctx, DBG_CMD_EXIT, addr, (u64)dma_handle,
+						  size / 4);
+		break;
+	default:
+		XDNA_ERR(xdna, "CMD_TYPE is not supported");
+		ret = -EINVAL;
+		break;
+	}
+
+	dma_free_coherent(xdna->ddev.dev, size, virt_ptr, dma_handle);
+	return ret;
+}
+
 static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_get_array *args)
 {
 	struct amdxdna_drm_aie_tile_access footer = {};
@@ -228,7 +276,13 @@ static int ve2_aie_tile_read(struct amdxdna_client *client, struct amdxdna_drm_g
 
 	loc.col = footer.col;
 	loc.row = footer.row;
-	ret = aie_partition_read(mgmtctx->aie_dev, loc, footer.addr, footer.size, local_buf);
+	if (enable_debug_queue) {
+		ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
+					    footer.addr, local_buf, footer.size, DBG_CMD_READ);
+	} else {
+		ret = aie_partition_read(mgmtctx->aie_dev, loc, footer.addr,
+					 footer.size, local_buf);
+	}
 	mutex_unlock(&mgmtctx->ctx_lock);
 	mutex_lock(&xdna->dev_lock);
 
@@ -893,7 +947,21 @@ static int ve2_aie_tile_write(struct amdxdna_client *client, struct amdxdna_drm_
 
 	loc.col = footer.col;
 	loc.row = footer.row;
-	ret = aie_partition_write(mgmtctx->aie_dev, loc, footer.addr, footer.size, local_buf, 0);
+	if (enable_debug_queue) {
+		/* TODO: temporary fix to exit the debug queue. */
+		if (footer.col == 3) {
+			ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
+						    footer.addr, local_buf, footer.size,
+						    DBG_CMD_EXIT);
+		} else {
+			ret = ve2_dbg_queue_data_rw(xdna, hwctx, footer.col, footer.row,
+						    footer.addr, local_buf, footer.size,
+						    DBG_CMD_WRITE);
+		}
+	} else {
+		ret = aie_partition_write(mgmtctx->aie_dev, loc, footer.addr, footer.size,
+					  local_buf, 0);
+	}
 	mutex_unlock(&mgmtctx->ctx_lock);
 	mutex_lock(&xdna->dev_lock);
 

@@ -123,6 +123,65 @@ struct ve2_hsa_queue {
 	DECLARE_BITMAP(slot_ready, HOST_QUEUE_ENTRY);
 };
 
+enum dbg_cmd_type {
+	DBG_CMD_EXIT = 11,
+	DBG_CMD_READ = 12,
+	DBG_CMD_WRITE = 13,
+};
+
+struct rw_mem {
+	u32	aie_addr;
+	u32	length;
+	u32	host_addr_high;
+	u32	host_addr_low;
+};
+
+struct dbg_queue {
+	struct host_queue_header		hq_header;
+	struct host_queue_packet		hq_entry[HOST_QUEUE_ENTRY];
+};
+
+struct ve2_dbg_queue {
+	struct dbg_queue		*dbg_queue_p;
+	dma_addr_t			dbg_queue_dma_addr;
+	struct ve2_hq_complete		hq_complete;
+	struct mutex			hq_lock;/* protect dbg queue submit and wait */
+	u64				reserved_write_index;
+	struct device			*alloc_dev;
+};
+
+static inline void dbg_queue_sync_read_index_for_read(struct ve2_dbg_queue *queue)
+{
+	dma_addr_t read_idx_addr = queue->dbg_queue_dma_addr +
+		offsetof(struct dbg_queue, hq_header) +
+		offsetof(struct host_queue_header, read_index);
+
+	dma_sync_single_for_cpu(queue->alloc_dev, read_idx_addr,
+				sizeof(queue->dbg_queue_p->hq_header.read_index),
+				DMA_FROM_DEVICE);
+}
+
+static inline void dbg_queue_sync_write_index_for_write(struct ve2_dbg_queue *queue)
+{
+	dma_addr_t write_idx_addr = queue->dbg_queue_dma_addr +
+		offsetof(struct dbg_queue, hq_header) +
+		offsetof(struct host_queue_header, write_index);
+
+	dma_sync_single_for_device(queue->alloc_dev, write_idx_addr,
+				   sizeof(queue->dbg_queue_p->hq_header.write_index),
+				   DMA_TO_DEVICE);
+}
+
+static inline void dbg_queue_sync_packet_for_write(struct ve2_dbg_queue *queue, u32 slot_idx)
+{
+	dma_addr_t pkt_dma_addr = queue->dbg_queue_dma_addr +
+		offsetof(struct dbg_queue, hq_entry) +
+		slot_idx * sizeof(struct host_queue_packet);
+
+	dma_sync_single_for_device(queue->alloc_dev, pkt_dma_addr,
+				   sizeof(struct host_queue_packet), DMA_TO_DEVICE);
+}
+
 static inline void hsa_queue_sync_read_index_for_read(struct ve2_hsa_queue *queue)
 {
 	dma_addr_t read_idx_addr = queue->hsa_queue_dma_addr +

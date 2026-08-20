@@ -82,6 +82,9 @@ struct amdxdna_ctx_priv {
 
 	/* Host queue and completion wait. */
 	struct ve2_hsa_queue		hsa_queue;
+	struct ve2_dbg_queue		dbg_queue;
+	struct timer_list		dbg_q_timer;
+	wait_queue_head_t		dbg_q_waitq;
 	wait_queue_head_t		waitq;
 	struct timer_list		event_timer;
 
@@ -125,6 +128,7 @@ int ve2_cmd_wait(struct amdxdna_hwctx *hwctx, u64 seq, u32 timeout_ms);
 #define VERBOSITY_LEVEL_DBG	2
 
 extern int enable_polling;
+extern int enable_debug_queue;
 extern int ve2_perf_optimization;
 extern int verbosity;
 extern int partition_size;
