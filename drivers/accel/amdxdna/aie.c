@@ -423,7 +423,6 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 {
 	struct amdxdna_drm_hwctx_entry *tmp __free(kfree) = NULL;
 	struct amdxdna_drm_hwctx_entry __user *buf;
-	u64 submitted, completed;
 	u32 size;
 
 	/*
@@ -444,10 +443,8 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 	tmp->hwctx_id = hwctx->fw_ctx_id;
 	tmp->start_col = hwctx->start_col;
 	tmp->num_col = hwctx->num_col;
-	amdxdna_hwctx_snapshot_counts(hwctx, &submitted, &completed);
-	tmp->command_submissions = submitted;
-	tmp->command_completions = completed;
-	tmp->state = amdxdna_hwctx_report_state(hwctx, submitted, completed);
+	tmp->state = amdxdna_hwctx_report_state(hwctx, &tmp->command_submissions,
+						&tmp->command_completions);
 	tmp->pasid = hwctx->client->pasid;
 	tmp->heap_usage = hwctx->client->heap_usage;
 	tmp->priority = hwctx->qos.priority;
