@@ -114,6 +114,10 @@ static int sanity_check(struct solver_state *xrs, struct alloc_requests *req)
 	if (cdop->ncols > xrs->cfg.total_col)
 		return -EINVAL;
 
+	/* opc unset when no xclbin; skip GOPs capability check */
+	if (!cdop->qos_cap.opc)
+		return 0;
+
 	/*
 	 * We can find at least one CDOs groups that meet the
 	 * GOPs requirement.
