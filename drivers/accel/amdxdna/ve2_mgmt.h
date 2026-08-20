@@ -61,6 +61,11 @@ struct amdxdna_mgmtctx {
 	u32				is_idle_due_to_context;/* fw acked the switch req */
 };
 
+extern int enable_debug_queue;
+
+int submit_command_to_dbg_queue(struct amdxdna_hwctx *hwctx, u32 opcode,
+				u32 aie_addr, u64 paddr, u32 length);
+
 /* Helper functions for reading privileged memory. */
 static inline int ve2_partition_read_privileged_mem(struct amdxdna_mgmtctx *mgmtctx,
 						    size_t field_off, size_t size, void *buf)
