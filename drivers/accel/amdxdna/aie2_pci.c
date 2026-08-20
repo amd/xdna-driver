@@ -92,8 +92,12 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	 */
 	ret = readx_poll_timeout(readl, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF),
 				 addr, addr, AIE_INTERVAL, AIE_TIMEOUT);
-	if (ret || !addr)
+	if (ret || !addr) {
+		XDNA_ERR(ndev->aie.xdna,
+			 "Firmware from %s did not report alive within %d us",
+			 ndev->priv->fw_path, AIE_TIMEOUT);
 		return -ETIME;
+	}
 
 	off = AIE2_SRAM_OFF(ndev, addr);
 	reg = (u32 *)&info_regs;
