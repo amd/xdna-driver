@@ -92,9 +92,12 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	struct amdxdna_ctx_priv *vp = ve2_hw_priv(hwctx);
 	struct ve2_config_hwctx *cfg = NULL;
 	u64 hsa_addr = U64_MAX;
+	u64 dbg_addr = U64_MAX;
 
 	if (col == 0 && vp && vp->hsa_queue.hsa_queue_dma_addr)
 		hsa_addr = vp->hsa_queue.hsa_queue_dma_addr;
+	if (col == 0 && enable_debug_queue && vp && vp->dbg_queue.dbg_queue_dma_addr)
+		dbg_addr = vp->dbg_queue.dbg_queue_dma_addr;
 
 	if (vp && vp->hwctx_config && col < hwctx->num_col)
 		cfg = &vp->hwctx_config[col];
@@ -103,10 +106,14 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	cert_hs->aie_info.partition_size = mgmtctx->num_col;
 	cert_hs->hsa_addr_high = upper_32_bits(hsa_addr);
 	cert_hs->hsa_addr_low = lower_32_bits(hsa_addr);
-
-	/* No debug HSA queue: mark the debug HSA address explicitly invalid. */
-	cert_hs->dbg.hsa_addr_high = 0xFFFFFFFF;
-	cert_hs->dbg.hsa_addr_low = 0xFFFFFFFF;
+	if (enable_debug_queue) {
+		cert_hs->dbg.hsa_addr_high = upper_32_bits(dbg_addr);
+		cert_hs->dbg.hsa_addr_low = lower_32_bits(dbg_addr);
+	} else {
+		/* No debug HSA queue: mark the debug HSA address explicitly invalid. */
+		cert_hs->dbg.hsa_addr_high = 0xFFFFFFFF;
+		cert_hs->dbg.hsa_addr_low = 0xFFFFFFFF;
+	}
 
 	if (cfg) {
 		cert_hs->log_addr_high = upper_32_bits(cfg->log_buf_addr);
@@ -125,6 +132,12 @@ static void cert_setup_partition(struct amdxdna_mgmtctx *mgmtctx,
 	cert_hs->ctx_switch_req = 0;
 	cert_hs->hsa_location = 0;
 	cert_hs->mpaie_alive = ALIVE_MAGIC;
+
+	XDNA_DBG(mgmtctx->xdna,
+		 "DBG queue handshake: hwctx=%u col=%u enable=%u dbg_dma=0x%llx hs_dbg=0x%x%08x",
+		 hwctx->id, col, enable_debug_queue,
+		 vp ? (u64)vp->dbg_queue.dbg_queue_dma_addr : 0ULL,
+		 cert_hs->dbg.hsa_addr_high, cert_hs->dbg.hsa_addr_low);
 }
 
 static void ve2_cert_update_host_time(struct amdxdna_mgmtctx *mgmtctx, u32 num_col)
