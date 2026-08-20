@@ -1208,11 +1208,10 @@ put_cmd:
 
 int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, u64 *seq)
 {
-	struct amdxdna_dev *xdna = hwctx->client->xdna;
-	struct ww_acquire_ctx acquire_ctx;
+	struct amdxdna_client *client = hwctx->client;
+	struct amdxdna_dev *xdna = client->xdna;
 	struct dma_fence_chain *chain;
-	struct amdxdna_gem_obj *abo;
-	int ret, i;
+	int ret;
 
 	ret = down_interruptible(&hwctx->priv->job_sem);
 	if (ret) {
@@ -1238,44 +1237,25 @@ int aie2_cmd_submit(struct amdxdna_hwctx *hwctx, struct amdxdna_sched_job *job, 
 		goto free_chain;
 	}
 
-retry:
-	ret = drm_gem_lock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
-	if (ret) {
-		XDNA_WARN(xdna, "Failed to lock BOs, ret %d", ret);
-		goto cleanup_job;
-	}
-
-	for (i = 0; i < job->bo_cnt; i++) {
-		ret = dma_resv_reserve_fences(job->bos[i]->resv, 1);
+	down_read(&xdna->notifier_lock);
+	while (!list_empty(&client->bo_invalid_list)) {
+		up_read(&xdna->notifier_lock);
+		ret = amdxdna_client_populate_ranges(client);
 		if (ret) {
-			XDNA_WARN(xdna, "Failed to reserve fences %d", ret);
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
+			XDNA_ERR(xdna, "Populate ranges failed, ret %d", ret);
 			goto cleanup_job;
 		}
-	}
-
-	down_read(&xdna->notifier_lock);
-	for (i = 0; i < job->bo_cnt; i++) {
-		abo = to_xdna_obj(job->bos[i]);
-		if (abo->mem.map_invalid) {
-			up_read(&xdna->notifier_lock);
-			drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
-			ret = amdxdna_populate_range(abo);
-			if (ret)
-				goto cleanup_job;
-			goto retry;
-		}
+		down_read(&xdna->notifier_lock);
 	}
 
 	mutex_lock(&hwctx->priv->io_lock);
 	drm_sched_job_arm(&job->base);
 	job->out_fence = dma_fence_get(&job->base.s_fence->finished);
-	for (i = 0; i < job->bo_cnt; i++)
-		dma_resv_add_fence(job->bos[i]->resv, job->out_fence, DMA_RESV_USAGE_WRITE);
 	job->seq = hwctx->priv->seq++;
 	kref_get(&job->refcnt);
 	if (job->drv_cmd)
 		kref_get(&job->drv_cmd->refcnt);
+	atomic64_inc(&hwctx->job_submit_cnt);
 	drm_sched_entity_push_job(&job->base);
 
 	*seq = job->seq;
@@ -1283,10 +1263,8 @@ retry:
 	mutex_unlock(&hwctx->priv->io_lock);
 
 	up_read(&xdna->notifier_lock);
-	drm_gem_unlock_reservations(job->bos, job->bo_cnt, &acquire_ctx);
 
 	aie2_job_put(job);
-	atomic64_inc(&hwctx->job_submit_cnt);
 
 	return 0;
 
