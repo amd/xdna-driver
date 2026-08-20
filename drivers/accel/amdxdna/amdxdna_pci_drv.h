@@ -225,6 +225,7 @@ struct amdxdna_client {
 	struct drm_file			*filp;
 
 	struct mutex			mm_lock; /* protect memory related */
+	struct list_head		bo_invalid_list; /* protected by xdna->notifier_lock */
 	struct xarray			dev_heap_xa;
 	struct drm_mm			dev_heap_mm;
 	u32				dev_heap_nid;
