@@ -2321,6 +2321,17 @@ struct function1_get : function0_get<QueryRequestType, Getter>
   }
 };
 
+template <typename QueryRequestType, typename Getter>
+struct function4_get : virtual QueryRequestType
+{
+  std::any
+  get(const xrt_core::device* device, const std::any& param) const
+  {
+    auto k = QueryRequestType::key;
+    return Getter::get(device, k, param);
+  }
+};
+
 template <typename QueryRequestType, typename Putter>
 struct function_putter : virtual QueryRequestType
 {
@@ -2362,6 +2373,14 @@ emplace_func1_request()
 {
   auto k = QueryRequestType::key;
   query_tbl.emplace(k, std::make_unique<function1_get<QueryRequestType, Getter>>());
+}
+
+template <typename QueryRequestType, typename Getter>
+static void
+emplace_func4_request()
+{
+  auto k = QueryRequestType::key;
+  query_tbl.emplace(k, std::make_unique<function4_get<QueryRequestType, Getter>>());
 }
 
 template <typename QueryRequestType, typename GetPut>
@@ -2424,8 +2443,8 @@ initialize_query_table()
   emplace_func0_request<query::rom_ddr_bank_size_gb,           default_value>();
   emplace_sysfs_get<query::rom_vbnv>                           ("", "vbnv");
   emplace_func1_request<query::sdm_sensor_info,                sensor_info>();
-  emplace_func1_request<query::xrt_smi_config,                 xrt_smi_config>();
-  emplace_func1_request<query::xrt_smi_lists,                  xrt_smi_lists>();
+  emplace_func4_request<query::xrt_smi_config,                 xrt_smi_config>();
+  emplace_func4_request<query::xrt_smi_lists,                  xrt_smi_lists>();
   emplace_func1_request<query::firmware_version,               firmware_version>();
   emplace_func0_request<query::cert_firmware_version,          cert_firmware_version>();
   emplace_func1_request<query::sub_device_path,                sub_device_path>();
