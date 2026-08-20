@@ -350,6 +350,7 @@ void aie4_hwctx_destroy(struct amdxdna_hwctx *hwctx)
 		XDNA_WARN(xdna, "destroy ctx id %d failed %d", priv->hw_ctx_id, ret);
 
 	priv->hw_ctx_id = CTX_INVALID_ID;
+	hwctx->fw_ctx_id = -1;
 	hwctx->doorbell_offset = CTX_INVALID_DOORBELL;
 	aie4_unlink_cert_comp(hwctx);
 

@@ -423,6 +423,7 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 {
 	struct amdxdna_drm_hwctx_entry *tmp __free(kfree) = NULL;
 	struct amdxdna_drm_hwctx_entry __user *buf;
+	u64 submitted, completed;
 	u32 size;
 
 	/*
@@ -443,8 +444,10 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 	tmp->hwctx_id = hwctx->fw_ctx_id;
 	tmp->start_col = hwctx->start_col;
 	tmp->num_col = hwctx->num_col;
-	tmp->command_submissions = atomic64_read(&hwctx->job_submit_cnt);
-	tmp->command_completions = atomic64_read(&hwctx->job_free_cnt);
+	amdxdna_hwctx_snapshot_counts(hwctx, &submitted, &completed);
+	tmp->command_submissions = submitted;
+	tmp->command_completions = completed;
+	tmp->state = amdxdna_hwctx_report_state(hwctx, submitted, completed);
 	tmp->pasid = hwctx->client->pasid;
 	tmp->heap_usage = hwctx->client->heap_usage;
 	tmp->priority = hwctx->qos.priority;
@@ -453,7 +456,6 @@ static int amdxdna_fill_hwctx_status_entry(struct aie_device *aie,
 	tmp->dma_bandwidth = hwctx->qos.dma_bandwidth;
 	tmp->latency = hwctx->qos.latency;
 	tmp->frame_exec_time = hwctx->qos.frame_exec_time;
-	tmp->state = AMDXDNA_HWCTX_STATE_ACTIVE;
 
 	/* Optional FW health is best-effort; ignore errors. */
 	if (aie->msg_ops.fill_hwctx_health)
