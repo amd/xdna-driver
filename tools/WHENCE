@@ -62,7 +62,7 @@ Licence: Redistributable. See LICENSE.amdnpu for details.
 # A committed "# vtd-commit:" pin marks a release branch and makes the download
 # reproducible; when the pin is absent (main) the fetch resolves the latest
 # Xilinx/VTD commit and records the resolved hash for the build.
-# vtd-commit: 8ed67e05d2be88aa9841d9758c770a1127b75314
+# vtd-commit: fa945e489497397269cbb912e3e7cce33d1935ff 
 
 Repo: VTD - xrt-smi validation archives fetched from github.com/Xilinx/VTD
 
